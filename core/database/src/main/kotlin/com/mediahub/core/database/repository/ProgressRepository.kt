@@ -1,0 +1,39 @@
+package com.mediahub.core.database.repository
+
+import com.mediahub.core.database.AppDatabase
+import com.mediahub.core.database.mapper.ServerEntityMappers.toDomain
+import com.mediahub.core.database.mapper.ServerEntityMappers.toEntity
+import com.mediahub.model.PlaybackProgress
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+/**
+ * 本地播放进度仓库。
+ * 数据源说明：本地快照用于"继续观看"展示；权威进度在服务端（Provider 负责同步）。
+ */
+@Singleton
+class ProgressRepository @Inject constructor(
+    private val db: AppDatabase,
+) {
+    private val dao = db.playbackProgressDao()
+
+    fun observeContinueWatching(limit: Int = 30): Flow<List<PlaybackProgress>> =
+        dao.observeRecent(limit).map { list -> list.map { it.toDomain() } }
+
+    suspend fun save(progress: PlaybackProgress) {
+        dao.upsert(progress.toEntity())
+    }
+
+    suspend fun getResume(serverId: String, itemId: String): Long? =
+        dao.get(serverId, itemId)?.positionMs
+
+    suspend fun clear(serverId: String, itemId: String) {
+        dao.delete(serverId, itemId)
+    }
+
+    suspend fun cleanupOlderThan(beforeEpochMs: Long) {
+        dao.deleteOlderThan(beforeEpochMs)
+    }
+}

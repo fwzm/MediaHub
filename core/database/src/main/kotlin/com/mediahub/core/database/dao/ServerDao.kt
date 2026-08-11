@@ -1,0 +1,38 @@
+package com.mediahub.core.database.dao
+
+import androidx.room.Dao
+import androidx.room.Query
+import androidx.room.Upsert
+import com.mediahub.core.database.entity.ServerEntity
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface ServerDao {
+
+    @Query("SELECT * FROM servers ORDER BY sortOrder ASC, createdAtEpochMs ASC")
+    fun observeAll(): Flow<List<ServerEntity>>
+
+    @Query("SELECT * FROM servers WHERE id = :id")
+    suspend fun getById(id: String): ServerEntity?
+
+    @Query("SELECT COUNT(*) FROM servers")
+    suspend fun count(): Int
+
+    @Upsert
+    suspend fun upsert(entity: ServerEntity)
+
+    @Query("DELETE FROM servers WHERE id = :id")
+    suspend fun deleteById(id: String)
+
+    @Query("UPDATE servers SET isDefault = 0")
+    suspend fun clearDefaultFlag()
+
+    @Query("UPDATE servers SET isDefault = 1 WHERE id = :id")
+    suspend fun setDefault(id: String)
+
+    @Query("UPDATE servers SET lastConnectedAtEpochMs = :timestamp, lastError = NULL WHERE id = :id")
+    suspend fun markConnected(id: String, timestamp: Long)
+
+    @Query("UPDATE servers SET lastError = :error WHERE id = :id")
+    suspend fun markError(id: String, error: String)
+}

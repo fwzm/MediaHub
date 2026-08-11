@@ -1,0 +1,44 @@
+package com.mediahub.provider.jellyfin
+
+import com.mediahub.core.logging.Logger
+import com.mediahub.core.network.ApiClient
+import com.mediahub.core.network.HttpClientFactory
+import com.mediahub.core.network.MediaHttpClient
+import com.mediahub.core.security.TokenStore
+import com.mediahub.model.MediaServer
+import com.mediahub.model.ServerType
+import com.mediahub.provider.api.MediaProvider
+import com.mediahub.provider.api.MediaProviderFactory
+import dagger.Binds
+import dagger.Module
+import dagger.hilt.InstallIn
+import dagger.hilt.components.SingletonComponent
+import dagger.multibindings.IntoSet
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class JellyfinProviderFactory @Inject constructor(
+    private val httpClientFactory: HttpClientFactory,
+    private val tokenStore: TokenStore,
+    private val logger: Logger,
+) : MediaProviderFactory {
+
+    override val serverType: ServerType = ServerType.JELLYFIN
+
+    override fun create(server: MediaServer): MediaProvider = JellyfinProvider(
+        server = server,
+        apiClient = ApiClient(httpClientFactory.apiClient(), logger = logger),
+        mediaHttpClient = MediaHttpClient(httpClientFactory.mediaClient(), logger),
+        tokenStore = tokenStore,
+        logger = logger,
+    )
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class JellyfinProviderModule {
+    @Binds
+    @IntoSet
+    abstract fun bindJellyfinProviderFactory(factory: JellyfinProviderFactory): MediaProviderFactory
+}
