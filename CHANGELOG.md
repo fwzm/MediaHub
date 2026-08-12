@@ -1,5 +1,14 @@
 # 变更记录（CHANGELOG）
 
+## [0.5.1-phase1a-final5] — 2026-08-12（FINAL PATCH 5：PR 吸收 main + forceRestore 竞态修复 + 测试）
+
+- 把 latest main（208d9a3）真正 merge 进 PR（main 成为祖先，behind 0）。
+- P1 forceRestore stale-server race：改 serverStore.getServer(serverId)（DB 最新，非 servers.first() 缓存），
+  复用 authenticationCoordinator.restore；HomeViewModel 依赖 ServerStore/ProgressStore 接口。
+- 新增 PR 版 HomeViewModelTest 5 例（读 DB 最新 / SessionExpired→Authenticated / SignedOut→Authenticated /
+  非认证不写 / 已有状态仍强制 restore）；全项目 88 用例。
+- 验证：assembleDebug / testDebugUnitTest(88) / lintDebug 通过。main 已冻结，只在此 PR 施工。
+
 ## [0.5.0-pr1-reconcile] — 2026-08-12（PR #1 Final Reconciliation：PR#1 为最终主线）
 
 ### 合流（评审 Final Reconciliation 规范）
