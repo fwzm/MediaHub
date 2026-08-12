@@ -8,7 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * existing-server re-login / local reauthorization 的保存决策（评审 Patch 2）。
+ * existing-server re-login / local reauthorization 的保存决策。
  * 核心约束：复用 same id、保留元数据、走 update（不 addServer 不重复）、新建模式不受破坏。
  */
 class ServerSavePlannerTest {
@@ -31,7 +31,6 @@ class ServerSavePlannerTest {
             sortOrder = 3,
             lastError = "旧错误",
         )
-        // 用户重新登录后提交的新候选（新 name/baseUrl，其他靠 planner 保留）
         val candidate = emby("srv-DIFFERENT", name = "新名称", created = 999L)
 
         val decision = ServerSavePlanner.plan(existing, candidate)
@@ -42,17 +41,29 @@ class ServerSavePlannerTest {
         assertTrue(decision.server.isDefault)      // 保留
         assertEquals(3, decision.server.sortOrder) // 保留
         assertEquals(100L, decision.server.createdAtEpochMs) // 保留
-
-        // 关键：绝不能产生第二个 id
         assertNotEquals("srv-DIFFERENT", decision.server.id)
     }
 
     @Test
-    fun `relogin does not increase count since it updates source`() {
-        // 规划器本身不增删数；updateSource=true 表示不走向 addServer 路径
+    fun `relogin updates source so repository count stays the same`() {
+        // 依据决策驱动持久化：update 语义不新增记录，count 不变
+        var repositoryCount = 1
         val existing = emby("srv-1")
         val decision = ServerSavePlanner.plan(existing, emby("x"))
-        assertTrue(decision.updateSource)
+
+        if (!decision.updateSource) repositoryCount += 1 // addServer 才会 +1
+        assertEquals(1, repositoryCount)
+        assertEquals("srv-1", decision.server.id)
+    }
+
+    @Test
+    fun `new server adds and increases count`() {
+        var repositoryCount = 1
+        val decision = ServerSavePlanner.plan(null, emby("srv-new"))
+
+        if (!decision.updateSource) repositoryCount += 1 // addServer 语义
+        assertEquals(2, repositoryCount)
+        assertEquals("srv-new", decision.server.id)
     }
 
     // ---- LOCAL reauthorization ----
@@ -63,7 +74,7 @@ class ServerSavePlannerTest {
             id = "local-1",
             name = "家庭NAS",
             providerId = "local",
-            baseUrl = "", // SAF uri 失效
+            baseUrl = "",
             isDefault = true,
             sortOrder = 1,
             createdAtEpochMs = 200L,
@@ -72,16 +83,16 @@ class ServerSavePlannerTest {
             id = "local-CANDIDATE",
             name = "家庭NAS",
             providerId = "local",
-            baseUrl = "content://tree/primary%3AMovies", // 新授权
+            baseUrl = "content://tree/primary%3AMovies",
             createdAtEpochMs = 500L,
         )
 
         val decision = ServerSavePlanner.plan(existing, candidate)
 
         assertTrue(decision.updateSource)
-        assertEquals("local-1", decision.server.id) // 保留 SAME id
-        assertEquals("content://tree/primary%3AMovies", decision.server.baseUrl) // 更新到新目录
-        assertEquals(200L, decision.server.createdAtEpochMs) // 保留
+        assertEquals("local-1", decision.server.id)
+        assertEquals("content://tree/primary%3AMovies", decision.server.baseUrl)
+        assertEquals(200L, decision.server.createdAtEpochMs)
         assertTrue(decision.server.isDefault)
     }
 
@@ -92,66 +103,7 @@ class ServerSavePlannerTest {
         val candidate = emby("brand-new-1", created = 1L)
         val decision = ServerSavePlanner.plan(existing = null, candidate)
 
-        assertFalse(decision.updateSource) // 走 addServer
+        assertFalse(decision.updateSource)
         assertEquals("brand-new-1", decision.server.id)
     }
-
-    // ---- 评审 Patch 3：真实断言 update vs add（count 语义），而非仅 updateSource ----
-
-    @Test
-    fun `relogin updates source so repository count stays the same`() {
-        // 模拟：初始 1 条服务器，count=1
-        var repositoryCount = 1
-        val existing = emby("srv-1")
-        val decision = ServerSavePlanner.plan(existing, emby("x"))
-
-        // 依据决策驱动持久化：update 不新增记录，count 不变
-        if (decision.updateSource) {
-            // updateServer 语义：原记录被覆盖，不增加 count
-        } else {
-            repositoryCount += 1
-        }
-        assertEquals(1, repositoryCount)
-        assertEquals("srv-1", decision.server.id)
-    }
-
-    @Test
-    fun `new server adds and increases count`() {
-        var repositoryCount = 1
-        val decision = ServerSavePlanner.plan(null, emby("srv-new"))
-
-        if (!decision.updateSource) repositoryCount += 1 // addServer 语义
-        assertEquals(2, repositoryCount)
-        assertEquals("srv-new", decision.server.id)
-    }
-
 }
-
-    // ---- 评审 Patch 3：真实断言 update vs add（count 语义），而非仅 updateSource ----
-
-    @Test
-    fun `relogin updates source so repository count stays the same`() {
-        // 模拟：初始 1 条服务器，count=1
-        var repositoryCount = 1
-        val existing = emby("srv-1")
-        val decision = ServerSavePlanner.plan(existing, emby("x"))
-
-        // 依据决策驱动持久化：update 不新增记录，count 不变
-        if (decision.updateSource) {
-            // updateServer 语义：原记录被覆盖，不增加 count
-        } else {
-            repositoryCount += 1
-        }
-        assertEquals(1, repositoryCount)
-        assertEquals("srv-1", decision.server.id)
-    }
-
-    @Test
-    fun `new server adds and increases count`() {
-        var repositoryCount = 1
-        val decision = ServerSavePlanner.plan(null, emby("srv-new"))
-
-        if (!decision.updateSource) repositoryCount += 1 // addServer 语义
-        assertEquals(2, repositoryCount)
-        assertEquals("srv-new", decision.server.id)
-    }

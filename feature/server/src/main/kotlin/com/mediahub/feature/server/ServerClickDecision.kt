@@ -9,7 +9,7 @@ import com.mediahub.provider.api.ProviderCategory
  * 纯函数：输入 服务器类别 / 是否需本地重授权 / 当前认证态 / 是否认证型 Provider，
  * 输出点击目标。便于 JVM 单测，且与 UI/ViewModel 解耦。
  */
-internal object ServerClickDecision {
+object ServerClickDecision {
 
     sealed interface Target {
         data object Open : Target

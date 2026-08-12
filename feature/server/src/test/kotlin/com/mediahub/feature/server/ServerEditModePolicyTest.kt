@@ -5,7 +5,6 @@ import com.mediahub.provider.api.ProviderCapability
 import com.mediahub.provider.api.ProviderCategory
 import com.mediahub.provider.api.ProviderDescriptor
 import com.mediahub.provider.api.ProviderStatus
-import com.mediahub.model.ServerType
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -13,13 +12,13 @@ import org.junit.Test
 class ServerEditModePolicyTest {
 
     private fun descriptor(id: String, category: ProviderCategory) = ProviderDescriptor(
-        id = id,
-        serverType = ServerType.EMBY,
+        providerId = id,
         displayName = id,
+        description = "",
         category = category,
-        declaredCapabilities = setOf(ProviderCapability.AUTH),
+        capabilities = setOf(ProviderCapability.AUTH),
         authMethod = AuthMethod.USERNAME_PASSWORD,
-        status = ProviderStatus.STABLE,
+        status = ProviderStatus.AVAILABLE,
     )
 
     @Test
