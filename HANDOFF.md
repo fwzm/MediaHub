@@ -4,7 +4,8 @@
 
 ## 1. 当前状态
 
-- Phase 0.5 代码与测试已完成，GitHub Actions 三项门禁正在实跑验证；结果以本分支 CI 为准。
+- Phase 0.5 已完成：GitHub Actions run 31554659794 的 `assembleDebug`、
+  `testDebugUnitTest`（37 个 `@Test`）与 `lintDebug` 全部通过。
 - 本阶段没有实现完整 Emby/Jellyfin/WebDAV 业务 API，也没有进入 V0.1。
 - LocalProvider 已从 app 私有目录迁移到 SAF 文档树；旧 `file://` 路径不再是长期方案。
 
@@ -63,6 +64,8 @@ CI 工作流：`.github/workflows/android-ci.yml`，必须全部通过：
 ./gradlew testDebugUnitTest
 ./gradlew lintDebug
 ```
+
+本次已验证结果：`BUILD SUCCESSFUL in 9m 31s`，1005 actionable tasks（838 executed / 167 from cache）。
 
 ## 7. 下一阶段唯一入口
 

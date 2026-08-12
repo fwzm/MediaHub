@@ -2,7 +2,8 @@
 
 > 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
 
-当前状态：**Phase 0.5 架构加固**。基础闭环已就绪，真实 Emby/Jellyfin/WebDAV 业务 API 仍属于 V0.1。
+当前状态：**Phase 0.5 架构加固已完成**。CI 的 assemble、37 个单测与 lint 已通过；
+真实 Emby/Jellyfin/WebDAV 业务 API 仍属于 V0.1。
 
 ## 当前架构
 

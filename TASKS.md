@@ -36,12 +36,12 @@
 - [x] DONE Provider 自行做协议级连接测试，移除 UI 通用 `<500` 判定
 - [x] DONE GitHub Actions：assembleDebug + testDebugUnitTest + lintDebug
 - [x] DONE Registry/能力/凭据/进度/Header/Mapper/协议探测测试
-- [ ] IN PROGRESS GitHub Actions 实际验证三项门禁
+- [x] DONE GitHub Actions 实际验证三项门禁（run 31554659794）
 - [x] DONE 更新 ARCHITECTURE / DECISIONS / TASKS / CHANGELOG / HANDOFF
 
-## V0.1 —— MVP（Phase 0.5 门禁通过后）
+## V0.1 —— MVP（下一步）
 
-### IN PROGRESS（无；本阶段禁止提前进入）
+### IN PROGRESS（无，等待开工）
 
 ### TODO
 - [ ] Emby Provider 完整实现（登录→媒体库→浏览→搜索→详情→播放源→进度上报）

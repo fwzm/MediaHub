@@ -17,6 +17,10 @@
 - 新增 Registry、能力组合、凭据生命周期、请求头隔离、进度节流、旧数据库映射和协议探测测试。
 - 保留完整 Provider API、云盘、Plex、FFmpeg/MPV 与大规模 UI 重做到后续阶段。
 
+### 验证
+- GitHub Actions run 31554659794：`assembleDebug`、`testDebugUnitTest`（37 个 `@Test`）、
+  `lintDebug` 全部通过；`BUILD SUCCESSFUL`，1005 actionable tasks。
+
 ## [0.1.0-skeleton] — 2026-08-12（Phase 0）
 
 ### 新增
