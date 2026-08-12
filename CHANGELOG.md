@@ -1,5 +1,24 @@
 # 变更记录（CHANGELOG）
 
+## [0.4.6-phase1a-final4] — 2026-08-12（Phase 1A FINAL PATCH 4：forceRestore 竞态修复 + 测试)
+
+### 修复（评审 FINAL PATCH 4）
+- **P1：forceRestore 读旧缓存竞态**：原用 `servers.first()`（observeServers StateFlow 缓存，re-login
+  修改 baseUrl 后可能落后于 updateServer 的 DB 写入）。改为 `serverRepository.getServer(serverId)`
+  直接读 DB 最新，复用 `restore(server)`（消除重复恢复逻辑）。
+- **P2：Local 等非认证 Provider 瞬间显示 Restoring**：forceRestore 复用 restore(server)（先判
+  handle.auth != null 才写 Restoring），Local reauthorization 返回 Home 不再闪现 Restoring/SignedOut。
+- 可测性：提取 `ServerStore`/`ProgressStore` 接口（ServerRepository/ProgressRepository 实现），
+  HomeViewModel 依赖接口；AppModule @Binds 绑定。
+
+### 测试
+- 新增 `HomeViewModelTest`（4 例）：forceRestore 读 DB 最新（非缓存）、SessionExpired→Authenticated、
+  SignedOut→Authenticated、非认证 Provider 不写 authStates。
+- 清理 AuthNavigationPolicyTest 未用 MediaType import。全项目 87 用例。
+
+### 验证
+- assembleDebug / testDebugUnitTest（87）/ lintDebug 通过
+
 ## [0.4.5-phase1a-final3] — 2026-08-12（Phase 1A FINAL PATCH 3：Home 状态闭环)
 
 ### 修复（评审 FINAL PATCH 3）

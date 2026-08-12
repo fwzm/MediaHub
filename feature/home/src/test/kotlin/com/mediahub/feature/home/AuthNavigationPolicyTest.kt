@@ -1,6 +1,5 @@
 package com.mediahub.feature.home
 
-import com.mediahub.model.MediaType
 import com.mediahub.provider.api.AuthSessionErrorKind
 import com.mediahub.provider.api.AuthSessionState
 import org.junit.Assert.assertFalse

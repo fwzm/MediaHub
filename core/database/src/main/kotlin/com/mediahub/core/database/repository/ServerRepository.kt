@@ -14,13 +14,13 @@ import kotlinx.coroutines.flow.map
 @Singleton
 class ServerRepository @Inject constructor(
     private val db: AppDatabase,
-) {
+) : ServerStore {
     private val dao = db.serverDao()
 
-    fun observeServers(): Flow<List<MediaServer>> =
+    override fun observeServers(): Flow<List<MediaServer>> =
         dao.observeAll().map { list -> list.map { it.toDomain() } }
 
-    suspend fun getServer(id: String): MediaServer? = dao.getById(id)?.toDomain()
+    override suspend fun getServer(id: String): MediaServer? = dao.getById(id)?.toDomain()
 
     /** 新增媒体源；首条自动设为默认。 */
     suspend fun addServer(server: MediaServer): MediaServer {

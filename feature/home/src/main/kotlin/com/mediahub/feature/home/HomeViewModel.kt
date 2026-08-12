@@ -2,8 +2,8 @@ package com.mediahub.feature.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.mediahub.core.database.repository.ProgressRepository
-import com.mediahub.core.database.repository.ServerRepository
+import com.mediahub.core.database.repository.ProgressStore
+import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaServer
@@ -23,13 +23,13 @@ import kotlinx.coroutines.launch
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val serverRepository: ServerRepository,
-    progressRepository: ProgressRepository,
+    private val serverStore: ServerStore,
+    progressRepository: ProgressStore,
     private val registry: MediaProviderRegistry,
     private val logger: Logger,
 ) : ViewModel() {
 
-    val servers: StateFlow<List<MediaServer>> = serverRepository.observeServers()
+    val servers: StateFlow<List<MediaServer>> = serverStore.observeServers()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val continueWatching: StateFlow<List<PlaybackProgress>> =
@@ -71,23 +71,17 @@ class HomeViewModel @Inject constructor(
      * 强制恢复某服务器的认证状态（评审 FINAL PATCH 3：re-login 成功后 Home 状态立即刷新）。
      * 不管 authStates 是否有该 id 记录，都重新 restoreSession。
      */
+    /**
+     * 强制恢复某服务器认证状态（评审 FINAL PATCH 4）。
+     *
+     * - 直接从 DB 读取最新服务器（re-login 可能改了 baseUrl/username/name，且 Navigation result
+     *   可能早于 observeServers StateFlow 更新缓存，不能用 servers.first() 的旧缓存）。
+     * - 复用 restore(server)：先确认 handle.auth != null 才写 Restoring（非认证 Provider 不闪现 Restoring）。
+     */
     fun forceRestore(serverId: String) {
         viewModelScope.launch {
-            val server = servers.first().firstOrNull { it.id == serverId } ?: return@launch
-            _authStates.update { it + (serverId to AuthSessionState.Restoring) }
-            val handle = registry.create(server)
-            val auth = handle?.auth
-            val result = if (auth == null) {
-                _authStates.update { it - serverId }
-                return@launch
-            } else {
-                runCatching { auth.restoreSession() }
-                    .getOrElse { e ->
-                        logger.w(LogTag.UI, "强制恢复失败 serverId=$serverId", e)
-                        AuthSessionState.SignedOut
-                    }
-            }
-            _authStates.update { it + (serverId to result) }
+            val server = serverStore.getServer(serverId) ?: return@launch
+            restore(server)
         }
     }
 

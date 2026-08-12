@@ -1,6 +1,14 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12（Phase 1A FINAL PATCH 3，Home 状态闭环）。本文件是协作第一手资料。
+> 最后更新：2026-08-12（Phase 1A FINAL PATCH 4，forceRestore 竞态修复 + 测试）。
+
+## 排头 FINAL PATCH 4 摘要（2026-08-12）
+
+- P1 修复：forceRestore 改 `serverRepository.getServer(serverId)`（读 DB 最新，非 servers.first() 缓存），
+  复用 restore(server)（消除重复恢复 + 非认证不写 Restoring）。
+- 可测性：ServerStore/ProgressStore 接口 + AppModule @Binds；HomeViewModelTest 4 例。
+- 全项目 87 用例；assembleDebug/test/lint 通过。
+- **待办**：确认 latest main（下个提交）GitHub Actions success 后 Phase 1A 封板；进入 Phase 1B。
 
 ## 排头 FINAL PATCH 3 摘要（2026-08-12）
 
