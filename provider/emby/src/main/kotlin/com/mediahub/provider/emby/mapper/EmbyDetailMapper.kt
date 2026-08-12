@@ -42,13 +42,29 @@ object EmbyDetailMapper {
         )
     }
 
-    /** Emby VideoRange → 统一 HdrType（详情与播放共用，如 HDR10/DOVI/HLG）。 */
-    fun mapHdrType(videoRange: String?): HdrType = when (videoRange?.lowercase()) {
-        "dovi" -> HdrType.DOLBY_VISION
-        "hdr10+" -> HdrType.HDR10_PLUS
-        "hdr10" -> HdrType.HDR10
-        "hlg" -> HdrType.HLG
-        else -> HdrType.NONE
+    /**
+     * Emby HDR 元数据 → 统一 HdrType（详情与播放共用）。
+     * 优先按 VideoRange；ExtendedVideoType/ExtendedVideoSubType 明确表示
+     * Dolby Vision（如 "DolbyVision"/"DOVI"）时补充 DOLBY_VISION 映射。
+     * 仅 metadata mapping，不扩展成 Dolby Vision 播放策略（Phase 1B-2.1）。
+     */
+    fun mapHdrType(
+        videoRange: String?,
+        extendedVideoType: String? = null,
+        extendedVideoSubType: String? = null,
+    ): HdrType {
+        val range = videoRange?.lowercase()
+        val evt = extendedVideoType.orEmpty().lowercase()
+        val evst = extendedVideoSubType.orEmpty().lowercase()
+        if (range == "dovi" || evt.contains("dolby") || evst.contains("dolby")) {
+            return HdrType.DOLBY_VISION
+        }
+        return when (range) {
+            "hdr10+" -> HdrType.HDR10_PLUS
+            "hdr10" -> HdrType.HDR10
+            "hlg" -> HdrType.HLG
+            else -> HdrType.NONE
+        }
     }
 
     private fun mapVersion(source: EmbyMediaSourceInfoDto): MediaVersion {
@@ -59,7 +75,7 @@ object EmbyDetailMapper {
             container = source.container,
             width = video?.width,
             height = video?.height,
-            hdrType = mapHdrType(video?.videoRange),
+            hdrType = mapHdrType(video?.videoRange, video?.extendedVideoType, video?.extendedVideoSubType),
             bitrate = source.bitrate,
             sizeBytes = source.size,
         )
@@ -81,7 +97,7 @@ object EmbyDetailMapper {
         title = stream.title,
         channels = stream.channels,
         sampleRate = stream.sampleRate,
-        hdrType = mapHdrType(stream.videoRange),
+        hdrType = mapHdrType(stream.videoRange, stream.extendedVideoType, stream.extendedVideoSubType),
         isDefault = stream.isDefault,
         isForced = stream.isForced,
         profile = stream.profile,

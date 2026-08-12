@@ -110,6 +110,8 @@ class HomeViewModelTest {
 
     private class FakeProgressStore : ProgressStore {
         override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> = flowOf(emptyList())
+        override suspend fun getResume(serverId: String, itemId: String): Long? = null
+        override suspend fun save(progress: PlaybackProgress) = Unit
     }
 
     private val noOpLogger = object : Logger {

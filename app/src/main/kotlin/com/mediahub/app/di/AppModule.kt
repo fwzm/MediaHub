@@ -124,7 +124,7 @@ object AppModule {
     fun providePlaybackEngineFactory(
         playerFactory: PlayerFactory,
         logger: Logger,
-    ): PlaybackEngineFactory = PlaybackEngineFactory(playerFactory, logger)
+    ): PlaybackEngineCreator = PlaybackEngineFactory(playerFactory, logger)
 
     @Provides
     @Singleton

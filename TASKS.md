@@ -91,6 +91,26 @@
 - [x] 文档同步（TASKS/HANDOFF/CHANGELOG）
 - [x] DONE GitHub Actions CI 通过：run#31630416127（assembleDebug 4m36s / testDebugUnitTest 1m9s / lintDebug 1m27s 全绿）
       （本机 aarch64 无 Android SDK，构建验证依赖远程 CI）
+## Phase 1B-2.1 —— FINAL HARDENING（Direct Stream 协议边界封板，审查 11 项）✅ 代码+测试完成
+- [x] 指令 1：PlaybackInfo 改官方 POST（/Items/{itemId}/PlaybackInfo），协商参数全部进 JSON body；
+      UserId 仅走 query；requestJson encodeDefaults=true / explicitNulls=false
+- [x] 指令 2：DTO 补齐（RequiredHttpHeaders/DirectStreamUrl/DisplayTitle/IsExternal/DeliveryUrl/
+      PixelFormat/ExtendedVideoType/ExtendedVideoSubType/ChapterIndex + 新增 PlaybackInfoRequest/DeviceProfile DTO）
+- [x] 指令 3：严格校验——MediaSources 空→Parse；MediaSourceId 空→Parse；PlaySessionId 空→Parse；
+      仅"源非空且全不支持 DirectStream"才 NotYetImplemented
+- [x] 指令 4：directStreamUrl 参数全必填（itemId/container/mediaSourceId/playSessionId 非 nullable），
+      始终输出 MediaSourceId/PlaySessionId/static=true
+- [x] 指令 5：RequiredHttpHeaders 并入 source.headers；鉴权头后合并获胜（源级不可覆盖 X-Emby-Token/Authorization）
+- [x] 指令 6：只视频型门禁——MOVIE/EPISODE/VIDEO 才进 DIRECT_STREAM_TYPES；AUDIO/LIVE_TV/OTHER→NotYetImplemented 且 0 HTTP
+- [x] 指令 7：mapHdrType 3 参（videoRange+extendedVideoType+extendedVideoSubType），Dolby Vision 识别
+- [x] 指令 8：EmbyPlaybackProviderTest 重写 18 用例（POST contract/Token 不进 URL+body/Headers 合并/
+      鉴权头保护/空 MediaSources/缺 MediaSourceId/缺 PlaySessionId/非空无 DS→NotYetImplemented/
+      403/404/500/AUDIO 0 HTTP/forceTranscode 0 HTTP/缺 session/401/多源选择/元数据/DV）
+- [x] 指令 9：feature:player 可测性——新增 PlaybackEnginePort/PlaybackEngineCreator；PlayerViewModel 改依赖
+      ServerStore/ProgressStore/PlaybackEngineCreator；ProgressStore 补 getResume/save；
+      AppModule @Provides 返回 PlaybackEngineCreator；PlayerViewModelTest 3 用例（A/B/C）；测试依赖补齐
+- [x] 附带修复：ProgressRepository 的 save/getResume 补 override（接口新成员）
+- [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；结果以交付报告记录 run id（不做 docs-only 二次提交）
 ## V0.1 —— MVP（下一步） 
 
 ### IN PROGRESS（无，等待开工）

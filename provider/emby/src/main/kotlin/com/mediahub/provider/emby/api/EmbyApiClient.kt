@@ -79,12 +79,13 @@ class EmbyApiClient(
             .build()
             .toString()
         return apiClient.get(url, authenticatedHeaders(token, userId))
-    }
     /**
-     * 播放信息：GET /emby/Items/{itemId}/PlaybackInfo（官方 MediaInfoService）。
+     * 播放信息：POST /emby/Items/{itemId}/PlaybackInfo?UserId=...（官方 MediaInfoService POST contract）。
      *
-     * 无转码红线（Phase 1B-2）：请求固定 EnableTranscoding=false / EnableDirectStream=true，
+     * 无转码红线（Phase 1B-2.1）：协商参数全部走 typed JSON body
+     * （EnableDirectPlay=false / EnableDirectStream=true / EnableTranscoding=false），
      * 只询问服务端能否 Direct Stream；绝不申请转码会话。
+     * Token 红线：Token 不进 URL query、不进 JSON body，只走请求头。
      */
     suspend fun getPlaybackInfo(
         token: String,
@@ -93,45 +94,42 @@ class EmbyApiClient(
         startTimeTicks: Long?,
         maxStreamingBitrate: Long?,
     ): EmbyPlaybackInfoDto {
-        val query = mutableMapOf(
-            "UserId" to userId,
-            "IsPlayback" to "true",
-            "EnableDirectPlay" to "false",
-            "EnableDirectStream" to "true",
-            "EnableTranscoding" to "false",
-            "DeviceProfile" to DEVICE_PROFILE,
+        val request = EmbyPlaybackInfoRequestDto(
+            userId = userId,
+            startTimeTicks = startTimeTicks?.takeIf { it > 0 },
+            maxStreamingBitrate = maxStreamingBitrate?.takeIf { it > 0 },
         )
-        if (startTimeTicks != null && startTimeTicks > 0) {
-            query["StartTimeTicks"] = startTimeTicks.toString()
-        }
-        if (maxStreamingBitrate != null && maxStreamingBitrate > 0) {
-            query["MaxStreamingBitrate"] = maxStreamingBitrate.toString()
-        }
         val url = buildUrlWithSegments(
             path = "/Items",
             segments = listOf(itemId, "PlaybackInfo"),
-            query = query,
+            query = mapOf("UserId" to userId),
         )
-        return apiClient.get(url, authenticatedHeaders(token, userId))
+        return apiClient.postJson(
+            url = url,
+            headers = authenticatedHeaders(token, userId),
+            jsonBody = requestJson.encodeToString(request),
+        )
     }
     /**
      * 无转码 Direct Stream 播放地址：
      * GET /emby/Videos/{itemId}/stream.{container}?MediaSourceId=...&PlaySessionId=...&static=true
      *
+     * MediaSourceId 与 PlaySessionId 是 stream 请求的必备参数（static=true 表示 Direct Stream），
+     * 二者必须始终存在——缺了只能说明上游响应损坏，调用方必须先校验，禁止生成残缺 URL。
      * 红线：鉴权只走 Header（X-Emby-Token），禁止任何 Token 进 URL（ADR-026）。
      */
     fun directStreamUrl(
         itemId: String,
         container: String,
-        mediaSourceId: String?,
-        playSessionId: String?,
+        mediaSourceId: String,
+        playSessionId: String,
     ): String {
         val builder = endpointResolver.endpoint("/Videos").toHttpUrl().newBuilder()
             .addPathSegment(itemId)
             .addPathSegment("stream.$container")
+            .addQueryParameter("MediaSourceId", mediaSourceId)
+            .addQueryParameter("PlaySessionId", playSessionId)
             .addQueryParameter("static", "true")
-        if (!mediaSourceId.isNullOrBlank()) builder.addQueryParameter("MediaSourceId", mediaSourceId)
-        if (!playSessionId.isNullOrBlank()) builder.addQueryParameter("PlaySessionId", playSessionId)
         return builder.build().toString()
     }
     /** 服务器公开信息（**无 Token**）：GET /emby/System/Info/Public。
@@ -179,11 +177,13 @@ class EmbyApiClient(
     private companion object {
         const val TOKEN_HEADER = "X-Emby-Token"
         /**
-         * PlaybackInfo 请求的最小 DeviceProfile（无转码）：告诉服务端只评估
-         * Direct Stream 能力，不评估转码组合（Phase 1B-2 红线）。
+         * 请求体序列化：encodeDefaults=true 保证 DeviceProfile 等默认值字段全部输出
+         * （官方 server 期望完整字段）；explicitNulls=false 省略未设置的 null 字段。
          */
-        private const val DEVICE_PROFILE =
-            "{\"EnablePlaybackRemuxing\":true,\"EnableTranscoding\":false," +
-                "\"EnableDirectPlay\":false,\"EnableDirectStream\":true}"
+        private val requestJson = Json {
+            encodeDefaults = true
+            explicitNulls = false
+            ignoreUnknownKeys = true
+        }
     }
 }

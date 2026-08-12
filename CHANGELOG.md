@@ -1,4 +1,38 @@
 # 变更记录（CHANGELOG）
+## [0.6.1-phase1b2.1] — 2026-08-13（Phase 1B-2.1：Direct Stream 协议边界 FINAL HARDENING）
+### 修正（审查 11 项收口，禁转码/Token 红线加固）
+- PlaybackInfo 改官方 POST contract：POST /Items/{itemId}/PlaybackInfo；协商参数进 JSON body
+  （EmbyPlaybackInfoRequestDto：UserId/IsPlayback/EnableDirectPlay=false/EnableDirectStream=true/
+  EnableTranscoding=false/StartTimeTicks/MaxStreamingBitrate/DeviceProfile）；UserId 仅走 query；
+  requestJson encodeDefaults=true / explicitNulls=false；Token 不进 URL 也不进 body（只走请求头）。
+- DTO 补齐：EmbyMediaSourceInfoDto 增 RequiredHttpHeaders/DirectStreamUrl；EmbyMediaStreamDto 增
+  DisplayTitle/IsExternal/DeliveryUrl/PixelFormat/ExtendedVideoType/ExtendedVideoSubType；
+  EmbyChapterInfoDto 增 ChapterIndex；新增 EmbyPlaybackInfoRequestDto/EmbyDeviceProfileDto。
+- 严格校验（响应损坏 ≠ 需要转码）：MediaSources 空→Parse；MediaSourceId/PlaySessionId 缺失→Parse；
+  仅"源非空但全不支持 DirectStream"→NotYetImplemented("需要转码")。
+- directStreamUrl 参数改非 nullable 必填（itemId/container/mediaSourceId/playSessionId），
+  始终输出 MediaSourceId/PlaySessionId/static=true；禁止生成残缺 URL。
+- RequiredHttpHeaders 并入 PlaybackSource.headers；鉴权头后合并且获胜（源级不可覆盖
+  X-Emby-Token / X-Emby-Authorization）。
+- 只视频型门禁：MOVIE/EPISODE/VIDEO 才进入播放协议；AUDIO（0 HTTP）、LIVE_TV/OTHER 明确拒绝。
+- mapHdrType 3 参（videoRange/extendedVideoType/extendedVideoSubType）识别 Dolby Vision。
+### 可测性（feature:player 从 0 测试到有测试）
+- 新增 PlaybackEnginePort（uiState/progress/events/exoPlayer/play/控制/stop/release）与
+  PlaybackEngineCreator（fun interface create(scope)）；PlaybackEngine/PlaybackEngineFactory 实现。
+- PlayerViewModel 依赖改为 ServerStore/ProgressStore/PlaybackEngineCreator（替代 Repository/Factory 具体类）；
+  ProgressStore 补 getResume/save（ProgressRepository 实现并补 override）。
+- AppModule providePlaybackEngineFactory 返回 PlaybackEngineCreator。
+### 测试（预计 114 + 3 = 117 用例）
+- EmbyPlaybackProviderTest 重写 18 用例：POST contract（query 仅 UserId、body 完整协商字段、
+  Token 不进 URL/body）、DirectStream URL 必备参数、元数据映射、Dolby Vision、
+  RequiredHttpHeaders 合并、鉴权头不可覆盖、空 MediaSources/缺 MediaSourceId/缺 PlaySessionId→Parse、
+  非空无 DS→NotYetImplemented、403/404/500 映射、AUDIO 0 HTTP、forceTranscode 0 HTTP、
+  缺 session 0 HTTP、401→AuthExpired、多源取第一个 DirectStream。
+- PlayerViewModelTest 新增 3 用例：A. detail 真实 MediaType 覆盖 fallback 并透传续播位置；
+  B. PlaybackSource 到达 engine.play；C. 失败→Failed 且不 play。
+- HomeViewModelTest 的 FakeProgressStore 补 getResume/save；feature/player 补测试依赖（junit/coroutines-test）。
+### 验证
+- 随本提交 push 后由 GitHub Actions 执行（本机 aarch64 无 Android SDK）；结果 run id 见交付报告。
 ## [0.6.0-phase1b2] — 2026-08-13（Phase 1B-2：Emby 条目详情 + 无转码 Direct Stream）
 ### 新增（Phase 1B 第二刀：详情 + 播放源，禁转码）
 - EmbyDetailDtos：UserItem/PlaybackInfo/MediaSource/MediaStream/Chapter（@SerialName，非关键字段缺失不整页失败）。

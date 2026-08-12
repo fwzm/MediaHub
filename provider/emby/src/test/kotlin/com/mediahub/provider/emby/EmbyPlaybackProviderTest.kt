@@ -32,7 +32,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/** Emby 无转码 Direct Stream 播放（Phase 1B-2）MockWebServer 测试。 */
+/**
+ * Emby 无转码 Direct Stream 播放（Phase 1B-2.1 FINAL HARDENING）MockWebServer 测试。
+ * 覆盖：官方 POST PlaybackInfo contract、Token 不进 URL/body、RequiredHttpHeaders 合并与
+ * 鉴权头保护、MediaSourceId/PlaySessionId/MediaSources 严格校验、错误映射、
+ * AUDIO 拒绝路径与 Direct Stream URL 必备参数。
+ */
 class EmbyPlaybackProviderTest {
     private lateinit var server: MockWebServer
     private lateinit var tokenStorage: FakeSecretStorage
@@ -59,6 +64,10 @@ class EmbyPlaybackProviderTest {
     private val movie = MediaItem(
         serverId = "srv-1", id = "m1", type = MediaType.MOVIE,
         title = "电影A", container = "mkv",
+    )
+    private val audioItem = MediaItem(
+        serverId = "srv-1", id = "a1", type = MediaType.AUDIO,
+        title = "歌曲A", container = "flac",
     )
 
     private fun provider(): EmbyPlaybackProvider {
@@ -89,13 +98,44 @@ class EmbyPlaybackProviderTest {
              {"Index":1,"Type":"Audio","Codec":"aac","Channels":6}]}]}
     """.trimIndent()
 
+    // ---- 1：官方 POST PlaybackInfo contract（Token 不进 URL/body） ----
     @Test
-    fun `resolvePlayback returns static direct stream url with no token in url`() = runBlocking {
+    fun `playback info uses official POST contract with params in body not query`() = runBlocking {
         seedSession()
         server.enqueue(MockResponse().setResponseCode(200).setBody(playbackInfoJson()))
+        provider().resolvePlayback(
+            movie,
+            PlaybackOptions(startPositionMs = 60_000, maxBitrate = 2_000_000),
+        )
+        val request = server.takeRequest()
+        val url = request.requestUrl!!
+        assertEquals("POST", request.method)
+        assertEquals("/emby/Items/m1/PlaybackInfo", url.encodedPath)
+        // query 只保留官方 GET/POST 共同参数 UserId
+        assertEquals("user-1", url.queryParameter("UserId"))
+        assertEquals(1, url.querySize)
+        // 协商参数全部在 JSON body
+        val body = request.body.readUtf8()
+        assertTrue(body.contains("\"EnableTranscoding\":false"))
+        assertTrue(body.contains("\"EnableDirectStream\":true"))
+        assertTrue(body.contains("\"EnableDirectPlay\":false"))
+        assertTrue(body.contains("\"IsPlayback\":true"))
+        assertTrue(body.contains("\"UserId\":\"user-1\""))
+        assertTrue(body.contains("\"DeviceProfile\""))
+        assertTrue(body.contains("\"StartTimeTicks\":600000000"))
+        assertTrue(body.contains("\"MaxStreamingBitrate\":2000000"))
+        // Token 不进 URL query / JSON body，只走请求头
+        assertFalse(url.toString().contains("tok-1"))
+        assertFalse(body.contains("tok-1"))
+        assertEquals("tok-1", request.getHeader("X-Emby-Token"))
+    }
 
+    // ---- 2：Direct Stream URL 必备参数 ----
+    @Test
+    fun `direct stream url always carries mediaSourceId playSessionId and static`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(playbackInfoJson()))
         val source = provider().resolvePlayback(movie, PlaybackOptions())
-
         val url = source.url.toHttpUrl()
         assertEquals("/emby/Videos/m1/stream.mkv", url.encodedPath)
         assertEquals("true", url.queryParameter("static"))
@@ -107,13 +147,12 @@ class EmbyPlaybackProviderTest {
         assertEquals(PlaybackMode.DIRECT_STREAM, source.mode)
     }
 
+    // ---- 3：元数据映射 ----
     @Test
     fun `resolvePlayback maps codecs bitrate dimensions hdr duration`() = runBlocking {
         seedSession()
         server.enqueue(MockResponse().setResponseCode(200).setBody(playbackInfoJson()))
-
         val source = provider().resolvePlayback(movie, PlaybackOptions())
-
         assertEquals("hevc", source.videoCodec)
         assertEquals("aac", source.audioCodec)
         assertEquals(1_000_000L, source.bitrate)
@@ -124,29 +163,102 @@ class EmbyPlaybackProviderTest {
         assertEquals("mkv", source.container)
     }
 
+    // ---- 4：ExtendedVideoType → Dolby Vision ----
     @Test
-    fun `playbackInfo request disables transcoding and carries resume params`() = runBlocking {
+    fun `dolby vision detected via extended video type`() = runBlocking {
         seedSession()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(playbackInfoJson()))
-
-        provider().resolvePlayback(
-            movie,
-            PlaybackOptions(startPositionMs = 60_000, maxBitrate = 2_000_000),
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"PlaySessionId":"ps-1","MediaSources":[
+                    {"Id":"src1","Container":"mkv","SupportsDirectStream":true,
+                     "MediaStreams":[{"Index":0,"Type":"Video","Codec":"hevc",
+                       "VideoRange":"HDR10","ExtendedVideoType":"DolbyVision"}]}]}"""
+            )
         )
-
-        val request = server.takeRequest()
-        val url = request.requestUrl!!
-        assertEquals("/emby/Items/m1/PlaybackInfo", url.encodedPath)
-        assertEquals("user-1", url.queryParameter("UserId"))
-        assertEquals("true", url.queryParameter("IsPlayback"))
-        assertEquals("false", url.queryParameter("EnableDirectPlay"))
-        assertEquals("true", url.queryParameter("EnableDirectStream"))
-        assertEquals("false", url.queryParameter("EnableTranscoding"))
-        assertEquals("600000000", url.queryParameter("StartTimeTicks"))
-        assertEquals("2000000", url.queryParameter("MaxStreamingBitrate"))
-        assertEquals("tok-1", request.getHeader("X-Emby-Token"))
+        val source = provider().resolvePlayback(movie, PlaybackOptions())
+        assertEquals(HdrType.DOLBY_VISION, source.hdrType)
     }
 
+    // ---- 5：RequiredHttpHeaders 合并 ----
+    @Test
+    fun `required http headers merged into playback source headers`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"PlaySessionId":"ps-1","MediaSources":[
+                    {"Id":"src1","Container":"mkv","SupportsDirectStream":true,
+                     "RequiredHttpHeaders":{"X-Forwarded-For":"1.2.3.4","X-Emby-ItemId":"m1"}}]}"""
+            )
+        )
+        val source = provider().resolvePlayback(movie, PlaybackOptions())
+        assertEquals("1.2.3.4", source.headers["X-Forwarded-For"])
+        assertEquals("m1", source.headers["X-Emby-ItemId"])
+    }
+
+    // ---- 6：RequiredHttpHeaders 不能覆盖鉴权头 ----
+    @Test
+    fun `required http headers cannot override emby auth headers`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"PlaySessionId":"ps-1","MediaSources":[
+                    {"Id":"src1","Container":"mkv","SupportsDirectStream":true,
+                     "RequiredHttpHeaders":{"X-Emby-Token":"evil-token",
+                       "X-Emby-Authorization":"evil-auth"}}]}"""
+            )
+        )
+        val source = provider().resolvePlayback(movie, PlaybackOptions())
+        assertEquals("tok-1", source.headers["X-Emby-Token"])
+        assertTrue(source.headers["X-Emby-Authorization"]!!.contains("UserId=\"user-1\""))
+        assertFalse(source.headers["X-Emby-Authorization"]!!.contains("evil"))
+    }
+
+    // ---- 7/8/9：严格校验（响应损坏 ≠ 需要转码） ----
+    @Test
+    fun `empty media sources throws parse not needs transcode`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"PlaySessionId":"ps-1","MediaSources":[]}"""
+            )
+        )
+        val thrown = runCatching {
+            provider().resolvePlayback(movie, PlaybackOptions())
+        }.exceptionOrNull()
+        assertTrue("expected Parse, got $thrown", thrown is ProviderException.Parse)
+    }
+
+    @Test
+    fun `missing media source id throws parse`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"PlaySessionId":"ps-1","MediaSources":[
+                    {"Container":"mkv","SupportsDirectStream":true}]}"""
+            )
+        )
+        val thrown = runCatching {
+            provider().resolvePlayback(movie, PlaybackOptions())
+        }.exceptionOrNull()
+        assertTrue("expected Parse, got $thrown", thrown is ProviderException.Parse)
+    }
+
+    @Test
+    fun `missing play session id throws parse`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"MediaSources":[
+                    {"Id":"src1","Container":"mkv","SupportsDirectStream":true}]}"""
+            )
+        )
+        val thrown = runCatching {
+            provider().resolvePlayback(movie, PlaybackOptions())
+        }.exceptionOrNull()
+        assertTrue("expected Parse, got $thrown", thrown is ProviderException.Parse)
+    }
+
+    // ---- 10：有源但全都不支持 Direct Stream → 需要转码 ----
     @Test
     fun `no direct stream source throws NotYetImplemented needs transcode`() = runBlocking {
         seedSession()
@@ -157,28 +269,71 @@ class EmbyPlaybackProviderTest {
                      "SupportsTranscoding":true}]}"""
             )
         )
-
         val thrown = runCatching {
             provider().resolvePlayback(movie, PlaybackOptions())
         }.exceptionOrNull()
-
         assertTrue(thrown is ProviderException.NotYetImplemented)
         assertTrue(thrown!!.message!!.contains("需要转码"))
     }
 
+    // ---- 11/12/13：HTTP 错误映射 ----
+    @Test
+    fun `403 maps to http error`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(403))
+        val thrown = runCatching {
+            provider().resolvePlayback(movie, PlaybackOptions())
+        }.exceptionOrNull()
+        assertTrue(thrown is ProviderException.Http)
+        assertEquals(403, (thrown as ProviderException.Http).statusCode)
+    }
+
+    @Test
+    fun `404 maps to notFound`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(404))
+        val thrown = runCatching {
+            provider().resolvePlayback(movie, PlaybackOptions())
+        }.exceptionOrNull()
+        assertTrue(thrown is ProviderException.NotFound)
+    }
+
+    @Test
+    fun `500 maps to http error`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(500))
+        val thrown = runCatching {
+            provider().resolvePlayback(movie, PlaybackOptions())
+        }.exceptionOrNull()
+        assertTrue(thrown is ProviderException.Http)
+        assertEquals(500, (thrown as ProviderException.Http).statusCode)
+    }
+
+    // ---- 14：AUDIO 明确拒绝且不发 HTTP（绝不构造 /Videos/... 音频地址） ----
+    @Test
+    fun `audio item throws NotYetImplemented without http request`() = runBlocking {
+        seedSession()
+        val thrown = runCatching {
+            provider().resolvePlayback(audioItem, PlaybackOptions())
+        }.exceptionOrNull()
+        assertTrue(thrown is ProviderException.NotYetImplemented)
+        assertTrue(thrown!!.message!!.contains("音频播放尚未接入"))
+        assertEquals(0, server.requestCount)
+    }
+
+    // ---- 15：forceTranscode 不触网 ----
     @Test
     fun `forceTranscode throws NotYetImplemented without http request`() = runBlocking {
         seedSession()
-
         val thrown = runCatching {
             provider().resolvePlayback(movie, PlaybackOptions(forceTranscode = true))
         }.exceptionOrNull()
-
         assertTrue(thrown is ProviderException.NotYetImplemented)
         assertTrue(thrown!!.message!!.contains("需要转码"))
         assertEquals(0, server.requestCount)
     }
 
+    // ---- 16：缺 session 不触网 ----
     @Test
     fun `missing session throws AuthRequired without http request`() = runBlocking {
         val thrown = runCatching {
@@ -188,6 +343,7 @@ class EmbyPlaybackProviderTest {
         assertEquals(0, server.requestCount)
     }
 
+    // ---- 17：401 → AuthExpired ----
     @Test
     fun `401 maps to AuthExpired`() = runBlocking {
         seedSession()
@@ -198,6 +354,7 @@ class EmbyPlaybackProviderTest {
         assertTrue(thrown is ProviderException.AuthExpired)
     }
 
+    // ---- 18：多源选择取第一个 DirectStream ----
     @Test
     fun `picks first direct stream source among multiple and uses its id`() = runBlocking {
         seedSession()
@@ -209,9 +366,7 @@ class EmbyPlaybackProviderTest {
                     {"Id":"src2","Container":"mp4","SupportsDirectStream":true}]}"""
             )
         )
-
         val source = provider().resolvePlayback(movie, PlaybackOptions())
-
         assertEquals("src2", source.url.toHttpUrl().queryParameter("MediaSourceId"))
         assertEquals("mp4", source.container)
         assertEquals("/emby/Videos/m1/stream.mp4", source.url.toHttpUrl().encodedPath)

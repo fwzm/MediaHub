@@ -59,4 +59,6 @@ dependencies {
     implementation(libs.media3.common)
     implementation(libs.media3.exoplayer)
     implementation(libs.kotlinx.coroutines.android)
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

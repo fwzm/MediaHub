@@ -22,11 +22,10 @@ class ProgressRepository @Inject constructor(
     override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> =
         dao.observeRecent(limit).map { list -> list.map { it.toDomain() } }
 
-    suspend fun save(progress: PlaybackProgress) {
+    override suspend fun save(progress: PlaybackProgress) {
         dao.upsert(progress.toEntity())
     }
-
-    suspend fun getResume(serverId: String, itemId: String): Long? =
+    override suspend fun getResume(serverId: String, itemId: String): Long? =
         dao.get(serverId, itemId)?.positionMs
 
     suspend fun clear(serverId: String, itemId: String) {

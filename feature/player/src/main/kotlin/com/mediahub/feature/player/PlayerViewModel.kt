@@ -4,15 +4,15 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.NavArgCodec
-import com.mediahub.core.database.repository.ProgressRepository
-import com.mediahub.core.database.repository.ServerRepository
+import com.mediahub.core.database.repository.ProgressStore
+import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
-import com.mediahub.player.engine.PlaybackEngine
-import com.mediahub.player.engine.PlaybackEngineFactory
+import com.mediahub.player.engine.PlaybackEngineCreator
+import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.ProgressSyncCoordinator
 import com.mediahub.provider.api.MediaProviderRegistry
@@ -50,20 +50,18 @@ data class PlayerCombinedState(
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val serverRepository: ServerRepository,
-    private val progressRepository: ProgressRepository,
+    private val serverStore: ServerStore,
+    private val progressStore: ProgressStore,
     private val registry: MediaProviderRegistry,
-    engineFactory: PlaybackEngineFactory,
+    engineFactory: PlaybackEngineCreator,
     private val logger: Logger,
 ) : ViewModel() {
-
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
     // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（见 core:common）
     private val itemId: String = NavArgCodec.decode(checkNotNull(savedStateHandle["itemId"]))
     private val itemTitle: String = savedStateHandle["title"] ?: ""
-
     /** 引擎绑定到 ViewModel 作用域，onCleared 时释放；请求头上下文 per-engine（ADR-018）。 */
-    val engine: PlaybackEngine = engineFactory.create(viewModelScope)
+    val engine: PlaybackEnginePort = engineFactory.create(viewModelScope)
 
     private val _resolveState = MutableStateFlow<ResolveState>(ResolveState.Resolving)
     val resolveState: StateFlow<ResolveState> = _resolveState.asStateFlow()
@@ -78,7 +76,7 @@ class PlayerViewModel @Inject constructor(
      */
     private val syncCoordinator = ProgressSyncCoordinator(
         scope = viewModelScope,
-        localSave = { progressRepository.save(it) },
+        localSave = { progressStore.save(it) },
         remoteReport = { progress ->
             handle?.progress?.let { runCatching { it.reportProgress(progress) } }
         },
@@ -109,7 +107,7 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             _resolveState.value = ResolveState.Resolving
             try {
-                val server = serverRepository.getServer(serverId)
+                val server = serverStore.getServer(serverId)
                     ?: throw ProviderException.NotFound(serverId, "媒体源")
                 val providerHandle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
@@ -128,7 +126,7 @@ class PlayerViewModel @Inject constructor(
                     title = itemTitle.ifBlank { itemId.substringAfterLast('/') },
                     path = itemId,
                 )
-                val resume = progressRepository.getResume(serverId, itemId)
+                val resume = progressStore.getResume(serverId, itemId)
                 val source = playbackProvider.resolvePlayback(
                     item,
                     PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),

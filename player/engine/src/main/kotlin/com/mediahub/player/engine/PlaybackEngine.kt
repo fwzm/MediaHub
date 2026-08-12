@@ -51,25 +51,22 @@ class PlaybackEngine(
     private val headersHolder: PlaybackHeadersHolder,
     private val logger: Logger,
     private val scope: CoroutineScope,
-) {
-
+) : PlaybackEnginePort {
     private val _uiState = MutableStateFlow(PlaybackUiState())
-    val uiState: StateFlow<PlaybackUiState> = _uiState.asStateFlow()
-
+    override val uiState: StateFlow<PlaybackUiState> = _uiState.asStateFlow()
     private val _progress = MutableSharedFlow<PlaybackProgress>(
         extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
-
     /** 每秒进度流（低频消费方请自行 sample/节流）。 */
-    val progress: SharedFlow<PlaybackProgress> = _progress.asSharedFlow()
+    override val progress: SharedFlow<PlaybackProgress> = _progress.asSharedFlow()
 
     // 关键事件通道：改 Channel(UNLIMITED)（review P2-3），保证 Pause/Seek/Resume 快速
     // 连续发生时逐条保留、严格保序、不被 conflate/drop。周期性 position 仍由 StateFlow conflate。
     private val _events = Channel<PlaybackEvent>(Channel.UNLIMITED)
 
     /** 关键事件流（Pause/Seek/Ended/Stopped）。 */
-    val events: Flow<PlaybackEvent> = _events.receiveAsFlow()
+    override val events: Flow<PlaybackEvent> = _events.receiveAsFlow()
 
     private val trackSelector: DefaultTrackSelector =
         requireNotNull(player.trackSelector as? DefaultTrackSelector) {
@@ -81,7 +78,7 @@ class PlaybackEngine(
     private var released = false
 
     /** 供 PlayerView 绑定。 */
-    val exoPlayer: ExoPlayer get() = player
+    override val exoPlayer: ExoPlayer get() = player
 
     init {
         player.setAudioAttributes(
@@ -136,7 +133,7 @@ class PlaybackEngine(
         })
     }
 
-    fun play(session: PlaybackSession) {
+    override fun play(session: PlaybackSession) {
         this.session = session
         headersHolder.setHeaders(buildRequestHeaders(session.source))
         val mediaItem = session.source.toMedia3Item(session)
@@ -154,7 +151,7 @@ class PlaybackEngine(
 
     // ---- 控制 ----
 
-    fun togglePlayPause() {
+    override fun togglePlayPause() {
         if (player.isPlaying) pause() else resume()
     }
 
@@ -168,12 +165,12 @@ class PlaybackEngine(
         player.play()
     }
 
-    fun seekTo(positionMs: Long) {
+    override fun seekTo(positionMs: Long) {
         player.seekTo(positionMs.coerceAtLeast(0))
         _events.trySend(PlaybackEvent.Seeked)
     }
 
-    fun setSpeed(speed: Float) {
+    override fun setSpeed(speed: Float) {
         val clamped = speed.coerceIn(0.25f, 3f)
         player.setPlaybackSpeed(clamped)
         _uiState.update { it.copy(speed = clamped) }
@@ -184,11 +181,11 @@ class PlaybackEngine(
         _uiState.update { it.copy(volume = player.volume) }
     }
 
-    fun selectAudioTrack(selection: TrackSelection?) {
+    override fun selectAudioTrack(selection: TrackSelection?) {
         selectTrack(C.TRACK_TYPE_AUDIO, selection)
     }
 
-    fun selectSubtitleTrack(selection: TrackSelection?) {
+    override fun selectSubtitleTrack(selection: TrackSelection?) {
         selectTrack(C.TRACK_TYPE_TEXT, selection)
     }
 
@@ -269,7 +266,7 @@ class PlaybackEngine(
      * 2. 发出 Stopped 事件（进度协调器收到后立即 flush）；
      * 3. 返回最终进度（调用方用于显式 final flush）。
      */
-    fun stop(): PlaybackProgress? {
+    override fun stop(): PlaybackProgress? {
         progressJob?.cancel()
         val finalProgress = currentProgress()
         _events.trySend(PlaybackEvent.Stopped)
@@ -277,7 +274,7 @@ class PlaybackEngine(
         return finalProgress
     }
 
-    fun release() {
+    override fun release() {
         if (released) return
         released = true
         progressJob?.cancel()

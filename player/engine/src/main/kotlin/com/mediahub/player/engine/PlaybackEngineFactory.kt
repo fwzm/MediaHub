@@ -10,8 +10,8 @@ import kotlinx.coroutines.CoroutineScope
 class PlaybackEngineFactory(
     private val playerFactory: PlayerFactory,
     private val logger: Logger,
-) {
-    fun create(scope: CoroutineScope): PlaybackEngine {
+) : PlaybackEngineCreator {
+    override fun create(scope: CoroutineScope): PlaybackEnginePort {
         val headersHolder = PlaybackHeadersHolder()
         return PlaybackEngine(playerFactory.create(headersHolder), headersHolder, logger, scope)
     }

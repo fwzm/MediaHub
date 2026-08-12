@@ -41,7 +41,29 @@ data class EmbyPlaybackInfoDto(
     @SerialName("PlaySessionId") val playSessionId: String? = null,
     @SerialName("ErrorCode") val errorCode: String? = null,
 )
-
+/**
+ * PlaybackInfo 请求（官方 POST PlaybackInfo + PlaybackInfoRequest body）。
+ * Phase 1B-2.1：协议协商改用官方 POST 形式，GET 上未经 contract 保证的参数全部移入 body。
+ */
+@Serializable
+data class EmbyPlaybackInfoRequestDto(
+    @SerialName("UserId") val userId: String,
+    @SerialName("IsPlayback") val isPlayback: Boolean = true,
+    @SerialName("EnableDirectPlay") val enableDirectPlay: Boolean = false,
+    @SerialName("EnableDirectStream") val enableDirectStream: Boolean = true,
+    @SerialName("EnableTranscoding") val enableTranscoding: Boolean = false,
+    @SerialName("StartTimeTicks") val startTimeTicks: Long? = null,
+    @SerialName("MaxStreamingBitrate") val maxStreamingBitrate: Long? = null,
+    @SerialName("DeviceProfile") val deviceProfile: EmbyDeviceProfileDto = EmbyDeviceProfileDto(),
+)
+/** 最小 DeviceProfile：只评估 Direct Stream 能力，不评估转码组合（无转码红线）。 */
+@Serializable
+data class EmbyDeviceProfileDto(
+    @SerialName("EnablePlaybackRemuxing") val enablePlaybackRemuxing: Boolean = true,
+    @SerialName("EnableTranscoding") val enableTranscoding: Boolean = false,
+    @SerialName("EnableDirectPlay") val enableDirectPlay: Boolean = false,
+    @SerialName("EnableDirectStream") val enableDirectStream: Boolean = true,
+)
 /** 单个 MediaSource（同一媒体的多个版本/容器）。 */
 @Serializable
 data class EmbyMediaSourceInfoDto(
@@ -55,8 +77,11 @@ data class EmbyMediaSourceInfoDto(
     @SerialName("SupportsDirectStream") val supportsDirectStream: Boolean = false,
     @SerialName("SupportsTranscoding") val supportsTranscoding: Boolean = false,
     @SerialName("MediaStreams") val mediaStreams: List<EmbyMediaStreamDto> = emptyList(),
+    /** 播放源级请求头（官方 MediaSourceInfo.RequiredHttpHeaders），必须并入播放请求。 */
+    @SerialName("RequiredHttpHeaders") val requiredHttpHeaders: Map<String, String> = emptyMap(),
+    /** 服务端提供的 Direct Stream 地址（本实现自行拼 URL，此字段仅作参考保留）。 */
+    @SerialName("DirectStreamUrl") val directStreamUrl: String? = null,
 )
-
 /** 媒体流（视频/音频/字幕）。 */
 @Serializable
 data class EmbyMediaStreamDto(
@@ -70,16 +95,22 @@ data class EmbyMediaStreamDto(
     @SerialName("SampleRate") val sampleRate: Int? = null,
     @SerialName("Language") val language: String? = null,
     @SerialName("Title") val title: String? = null,
+    @SerialName("DisplayTitle") val displayTitle: String? = null,
     @SerialName("IsDefault") val isDefault: Boolean = false,
     @SerialName("IsForced") val isForced: Boolean = false,
+    @SerialName("IsExternal") val isExternal: Boolean = false,
+    @SerialName("DeliveryUrl") val deliveryUrl: String? = null,
     @SerialName("Profile") val profile: String? = null,
     @SerialName("Level") val level: String? = null,
+    @SerialName("PixelFormat") val pixelFormat: String? = null,
     @SerialName("VideoRange") val videoRange: String? = null,
+    @SerialName("ExtendedVideoType") val extendedVideoType: String? = null,
+    @SerialName("ExtendedVideoSubType") val extendedVideoSubType: String? = null,
 )
-
 /** 章节信息（章节跳转用）。 */
 @Serializable
 data class EmbyChapterInfoDto(
     @SerialName("StartPositionTicks") val startPositionTicks: Long? = null,
     @SerialName("Name") val name: String? = null,
+    @SerialName("ChapterIndex") val chapterIndex: Int? = null,
 )
