@@ -15,7 +15,8 @@ enum class MediaType {
     LIVE_TV,
     OTHER;
 
-    val isContainer: Boolean get() = this == FOLDER
+    /** 可继续进入子级浏览的容器类型（Phase 1B-1）：文件夹 / 剧集 / 季。 */
+    val isContainer: Boolean get() = this == FOLDER || this == SERIES || this == SEASON
     val isPlayable: Boolean
         get() = this == MOVIE || this == EPISODE || this == VIDEO || this == AUDIO || this == LIVE_TV
 }

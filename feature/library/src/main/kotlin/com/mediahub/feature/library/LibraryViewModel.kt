@@ -3,10 +3,11 @@ package com.mediahub.feature.library
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.mediahub.core.database.repository.ServerRepository
+import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaItem
+import com.mediahub.model.MediaLibrary
 import com.mediahub.model.PageRequest
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
@@ -20,6 +21,14 @@ import kotlinx.coroutines.launch
 
 sealed interface LibraryUiState {
     data object Loading : LibraryUiState
+
+    /** 顶层媒体库 Views（libraryId == "root"）。 */
+    data class Libraries(
+        val libraries: List<MediaLibrary>,
+        val libraryName: String,
+    ) : LibraryUiState
+
+    /** 某媒体库内的条目 / 子级浏览。 */
     data class Content(
         val items: List<MediaItem>,
         val libraryName: String,
@@ -33,7 +42,7 @@ sealed interface LibraryUiState {
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val serverRepository: ServerRepository,
+    private val serverStore: ServerStore,
     private val registry: MediaProviderRegistry,
     private val logger: Logger,
 ) : ViewModel() {
@@ -69,7 +78,7 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = LibraryUiState.Loading
             try {
-                val server = serverRepository.getServer(serverId)
+                val server = serverStore.getServer(serverId)
                     ?: throw ProviderException.NotFound(serverId, "媒体源")
                 val handle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
@@ -77,17 +86,39 @@ class LibraryViewModel @Inject constructor(
                 // 能力组合（ADR-014）：媒体库型走 library，文件树型走 browse，均无则提示未接入。
                 val library = handle.library
                 val browse = handle.browse
-                val result = when {
-                    library != null -> library.getItems(libraryId, page)
-                    browse != null -> browse.listFolder(currentFolder, page)
+                when {
+                    // 顶层：显示媒体库 Views（评审 #7，不把 View 伪造成 MediaItem）
+                    library != null && libraryId == "root" -> {
+                        val libraries = library.getLibraries()
+                        _uiState.value = LibraryUiState.Libraries(
+                            libraries = libraries,
+                            libraryName = libraryName.ifBlank { server.displayName },
+                        )
+                    }
+
+                    library != null -> {
+                        val parentId = currentFolder?.id ?: libraryId
+                        val result = library.getItems(parentId, page)
+                        _uiState.value = LibraryUiState.Content(
+                            items = result.items,
+                            libraryName = libraryName.ifBlank { server.displayName },
+                            currentFolder = currentFolder,
+                            canGoUp = folderStack.isNotEmpty(),
+                        )
+                    }
+
+                    browse != null -> {
+                        val result = browse.listFolder(currentFolder, page)
+                        _uiState.value = LibraryUiState.Content(
+                            items = result.items,
+                            libraryName = libraryName.ifBlank { server.displayName },
+                            currentFolder = currentFolder,
+                            canGoUp = folderStack.isNotEmpty(),
+                        )
+                    }
+
                     else -> throw ProviderException.NotYetImplemented(serverId, "该数据源的浏览能力尚未接入")
                 }
-                _uiState.value = LibraryUiState.Content(
-                    items = result.items,
-                    libraryName = libraryName.ifBlank { server.displayName },
-                    currentFolder = currentFolder,
-                    canGoUp = folderStack.isNotEmpty(),
-                )
             } catch (e: Exception) {
                 logger.w(LogTag.UI, "加载媒体库失败 serverId=$serverId", e)
                 _uiState.value = LibraryUiState.Error(userMessage(e))

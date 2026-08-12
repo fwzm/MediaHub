@@ -2,8 +2,10 @@ package com.mediahub.provider.emby.api
 
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.ApiClient
+import com.mediahub.model.PageRequest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrl
 
 /**
  * Emby HTTP 协议封装（Phase 1A：认证与会话）。
@@ -43,6 +45,33 @@ class EmbyApiClient(
             headers = authenticatedHeaders(token, userId),
         )
 
+    /** 顶层媒体库 Views：GET /emby/Users/{userId}/Views。 */
+    suspend fun getUserViews(token: String, userId: String): EmbyQueryResultDto<EmbyBaseItemDto> =
+        apiClient.get(
+            url = endpointResolver.endpoint("/Users/$userId/Views"),
+            headers = authenticatedHeaders(token, userId),
+        )
+
+    /** 浏览某容器下的 Items：GET /emby/Users/{userId}/Items?ParentId=...&StartIndex=...&Limit=... */
+    suspend fun getUserItems(
+        token: String,
+        userId: String,
+        parentId: String,
+        page: PageRequest,
+    ): EmbyQueryResultDto<EmbyBaseItemDto> {
+        val url = buildUrl(
+            path = "/Users/$userId/Items",
+            query = mapOf(
+                "ParentId" to parentId,
+                "StartIndex" to page.offset.toString(),
+                "Limit" to page.limit.toString(),
+                "Fields" to "PrimaryImageAspectRatio,SortName,Path",
+                "EnableUserData" to "true",
+            ),
+        )
+        return apiClient.get(url, authenticatedHeaders(token, userId))
+    }
+
     /** 服务器公开信息（**无 Token**）：GET /emby/System/Info/Public。
      *  用于会话恢复前校验 remoteServerId，避免把旧 Token 发给另一台服务器（review #2）。 */
     suspend fun getSystemInfoPublic(): SystemInfoPublic =
@@ -57,6 +86,13 @@ class EmbyApiClient(
             url = endpointResolver.endpoint("/Sessions/Logout"),
             headers = authenticatedHeaders(token, userId),
         )
+    }
+
+    /** 用 HttpUrl.Builder 安全拼 query（URL encoding），禁止手拼 query string。 */
+    private fun buildUrl(path: String, query: Map<String, String>): String {
+        val builder = endpointResolver.endpoint(path).toHttpUrl().newBuilder()
+        query.forEach { (k, v) -> builder.addQueryParameter(k, v) }
+        return builder.build().toString()
     }
 
     /** 客户端身份头；userId 存在时带上（官方要求登录后进行带）。 */

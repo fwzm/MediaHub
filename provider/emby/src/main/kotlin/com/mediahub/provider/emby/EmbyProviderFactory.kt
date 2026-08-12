@@ -15,6 +15,7 @@ import com.mediahub.provider.emby.api.EmbyApiClient
 import com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilder
 import com.mediahub.provider.emby.api.EmbyEndpointResolver
 import com.mediahub.provider.emby.auth.EmbyAuthProvider
+import com.mediahub.provider.emby.library.EmbyLibraryProvider
 import com.mediahub.provider.emby.session.EmbySessionStore
 import dagger.Binds
 import dagger.Module
@@ -51,17 +52,26 @@ class EmbyProviderFactory @Inject constructor(
             endpointResolver = endpointResolver,
         )
         val embyApi = EmbyApiClient(endpointResolver, apiClient, authHeaderBuilder, logger)
+        val sessionStore = EmbySessionStore(sessionStoreStorage)
         val authProvider = EmbyAuthProvider(
             server = server,
             api = embyApi,
             tokenStore = tokenStore,
-            sessionStore = EmbySessionStore(sessionStoreStorage),
+            sessionStore = sessionStore,
             logger = logger,
         )
-        // ADR-022/026：Handle 只暴露当前已实现能力——Phase 1A 仅 AUTH。
+        val libraryProvider = EmbyLibraryProvider(
+            server = server,
+            api = embyApi,
+            tokenStore = tokenStore,
+            sessionStore = sessionStore,
+            logger = logger,
+        )
+        // ADR-022/026：Handle 只暴露当前已实现能力——Phase 1B-1 开放 AUTH + LIBRARY。
         return ProviderHandle(
             provider = provider,
             auth = authProvider,
+            library = libraryProvider,
         )
     }
 }

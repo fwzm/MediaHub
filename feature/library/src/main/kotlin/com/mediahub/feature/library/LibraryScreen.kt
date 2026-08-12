@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.model.MediaItem
+import com.mediahub.model.MediaLibrary
 import com.mediahub.model.MediaType
 
 /** 媒体库浏览（本地文件树真实可用；服务端媒体库待 Provider 接入）。 */
@@ -44,6 +45,7 @@ fun LibraryRoute(
     libraryId: String,
     name: String,
     onBack: () -> Unit,
+    onOpenLibrary: (MediaLibrary) -> Unit,
     onOpenItem: (MediaItem) -> Unit,
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
@@ -81,6 +83,27 @@ fun LibraryRoute(
                 contentAlignment = Alignment.Center,
             ) {
                 CircularProgressIndicator()
+            }
+
+            is LibraryUiState.Libraries -> {
+                if (s.libraries.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(padding),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("没有可用媒体库", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize().padding(padding),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        items(s.libraries, key = { it.id }) { library ->
+                            LibraryRow(library = library, onClick = { onOpenLibrary(library) })
+                        }
+                    }
+                }
             }
 
             is LibraryUiState.Error -> Box(
@@ -133,10 +156,33 @@ private fun onItemClick(
     viewModel: LibraryViewModel,
     onOpenItem: (MediaItem) -> Unit,
 ) {
-    if (item.type == MediaType.FOLDER) {
+    // 容器类型（FOLDER/SERIES/SEASON）进入子级；其余（Movie/Episode/Video/Audio）交给播放/详情
+    if (item.type.isContainer) {
         viewModel.openFolder(item)
     } else {
         onOpenItem(item)
+    }
+}
+
+@Composable
+private fun LibraryRow(library: MediaLibrary, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        val icon = when (library.type) {
+            com.mediahub.model.LibraryType.MOVIES -> Icons.Default.Movie
+            com.mediahub.model.LibraryType.MUSIC -> Icons.Default.MusicNote
+            else -> Icons.Default.Folder
+        }
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(library.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 

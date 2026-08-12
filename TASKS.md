@@ -64,6 +64,17 @@
 - [x] DONE 测试 13 个（登录/401/malformed/关键字段缺失/恢复/超时/Header/登出/密码不落库/Handle）
 - [x] DONE assembleDebug / testDebugUnitTest（66）/ lintDebug 通过
 
+## Phase 1B-1 —— Emby 媒体库浏览（本次交付）✅ DONE
+
+- [x] EmbyLibraryProvider（getLibraries/getItems，getSeasons/getEpisodes 占位）
+- [x] EmbyApiClient getUserViews/getUserItems（HttpUrl 安全 query）
+- [x] EmbyLibraryDtos + EmbyLibraryMapper + EmbyMediaItemMapper
+- [x] MediaType.isContainer = FOLDER||SERIES||SEASON
+- [x] EmbyProviderFactory 暴露 library（AUTH+LIBRARY）
+- [x] LibraryViewModel root→getLibraries；LibraryScreen Views + MediaLibrary 导航
+- [x] 测试：EmbyLibraryProviderTest 5 + LibraryViewModelTest 4；全项目 96
+- [x] assembleDebug / testDebugUnitTest(96) / lintDebug 通过
+
 ## V0.1 —— MVP（下一步） 
 
 ### IN PROGRESS（无，等待开工）

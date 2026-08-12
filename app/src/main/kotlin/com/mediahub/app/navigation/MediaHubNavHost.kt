@@ -112,6 +112,12 @@ fun MediaHubNavHost() {
                 libraryId = entry.arguments?.getString("libraryId").orEmpty(),
                 name = entry.arguments?.getString("name").orEmpty(),
                 onBack = { navController.popBackStack() },
+                onOpenLibrary = { library ->
+                    // 进入具体媒体库：library/{serverId}/{library.id}
+                    navController.navigate(
+                        "library/$serverId/${Uri.encode(library.id)}?name=${Uri.encode(library.name)}"
+                    )
+                },
                 onOpenItem = { item ->
                     navController.navigate(
                         "player/$serverId/${NavArgCodec.encode(item.id)}?title=${Uri.encode(item.title)}"

@@ -1,6 +1,17 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12（Phase 1A FINAL PATCH 4.1，TEST-ONLY 收口）。
+> 最后更新：2026-08-12（Phase 1B-1 Emby 媒体库浏览）。本文件是协作第一手资料。
+
+## Phase 1B-1（本次）：Emby Library Browsing
+
+- 真实浏览竖切已实现：Views → Items(ParentId) → Series → Season → Folder。
+- EmbyLibraryProvider + Mapper + DTO；MediaType.isContainer=FOLDER/SERIES/SEASON；
+  LibraryViewModel root→getLibraries；LibraryScreen 顶层 Views + MediaLibrary 导航。
+- EmbyProviderFactory 现暴露 AUTH + LIBRARY（runtimeCapabilities）。
+- **尚未实现**（Phase 1B-2+）：PlaybackInfo、DirectPlay、Transcode、详情、搜索、字幕、进度上报。
+- 真机 smoke：登录→点 Emby→见 Views→点电影库→见电影→点剧集库→见 Series→Series→Season。
+  点 Movie/Episode 暂提示"播放能力尚未接入"（LibraryScreen onOpenItem 会导航 player，但 player 会解析失败）。
+- 下一刀：Phase 1B-2 Item Detail + Direct Play PlaybackSource。
 
 ## 排头 FINAL PATCH 4.1（2026-08-12）
 

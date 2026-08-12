@@ -1,5 +1,29 @@
 # 变更记录（CHANGELOG）
 
+## [0.5.0-phase1b1] — 2026-08-12（Phase 1B-1：Emby 媒体库浏览）
+
+### 新增（Phase 1B 第一刀，不碰播放）
+- Emby 媒体库真实浏览竖切：/Users/{userId}/Views（顶层库）→ /Users/{userId}/Items?ParentId=...
+  （View → Series → Season → Folder 通用进入子级）。
+- EmbyLibraryProvider（TokenStore + EmbySessionStore + EmbyApiClient；getLibraries/getItems；
+  getSeasons/getEpisodes 占位）。
+- EmbyApiClient 新增 getUserViews/getUserItems（HttpUrl.Builder 安全拼 query，禁止手拼）。
+- EmbyLibraryDtos（QueryResult/BaseItem/UserData，@SerialName，非关键字段缺失不整页失败）。
+- EmbyLibraryMapper / EmbyMediaItemMapper（CollectionType→LibraryType；Type→MediaType）。
+- MediaType.isContainer = FOLDER||SERIES||SEASON（Series/Season 可继续进入，不再误送播放器）。
+- EmbyProviderFactory 暴露 library 能力（runtimeCapabilities 含 LIBRARY）。
+- LibraryViewModel：root→getLibraries（LibraryUiState.Libraries）；非 root→getItems(parentId)。
+- LibraryScreen：顶层 Views 列表 + MediaLibrary 导航 + item.type.isContainer 点击。
+- 结构化错误映射：无 session→AuthRequired、401→AuthExpired、404→NotFound、5xx→Http、网络/解析分别表达。
+
+### 测试（96 用例）
+- EmbyLibraryProviderTest 5（Views/header/ParentId/StartIndex/Limit/类型映射/缺失 session 不发请求/401/403/5xx）。
+- LibraryViewModelTest 4（root→getLibraries、非 root→getItems、open container→item.id、goToParent 恢复）。
+- EmbyProviderFactoryTest 更新（AUTH+LIBRARY）。
+
+### 验证
+- assembleDebug / testDebugUnitTest（96）/ lintDebug 通过
+
 ## [0.4.6.1-phase1a-final4.1] — 2026-08-12（Phase 1A FINAL PATCH 4.1：TEST-ONLY 修正)
 
 ### 修正（纯测试，不改生产代码）
