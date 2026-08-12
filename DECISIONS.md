@@ -207,3 +207,13 @@
   - 密码输入框遮罩（PasswordVisualTransformation），文案"仅用于本次登录，不保存在设备中"。
 - 影响：EmbyAuthProvider 的 EmbyAuthState 由通用 AuthSessionState 取代（删除）；测试覆盖
   403/malformed preserve、SERVER_MISMATCH 不发 Token、logout 身份校验。
+
+## ADR-029 PR #1 × main 合流决策（2026-08-12）
+- 状态：已采纳（经用户确认）
+- 决策：**以 main 为主线**，不采用 PR #1 的 CredentialVault/AuthenticationCoordinator 作为
+  认证主线（保留 main 已绿灯的 TokenStore + EmbySessionStore + 通用 restoreSession）。
+  从 PR #1 汲取非破坏性的实质性 review 修复（Channel 事件、Back、MediaTypeGuesser、
+  SAF tree-backed 导航基础设施）。
+- 理由：PR #1 与 main 分叉（merge base 3a8d530，各自有独立提交），其认证基础设施是
+  与 main 并行的一套；以 main 为主线不回归已验收的 Phase 1A。SAF 完整落地留待 Phase 0.6。
+- 影响：PR #1 标记为 not-merge（架构分叉不再继续开发）；后续新功能base在 main。

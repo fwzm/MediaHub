@@ -20,13 +20,16 @@ import com.mediahub.model.PlaybackSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -61,13 +64,12 @@ class PlaybackEngine(
     /** 每秒进度流（低频消费方请自行 sample/节流）。 */
     val progress: SharedFlow<PlaybackProgress> = _progress.asSharedFlow()
 
-    private val _events = MutableSharedFlow<PlaybackEvent>(
-        extraBufferCapacity = 4,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
+    // 关键事件通道：改 Channel(UNLIMITED)（review P2-3），保证 Pause/Seek/Resume 快速
+    // 连续发生时逐条保留、严格保序、不被 conflate/drop。周期性 position 仍由 StateFlow conflate。
+    private val _events = Channel<PlaybackEvent>(Channel.UNLIMITED)
 
     /** 关键事件流（Pause/Seek/Ended/Stopped）。 */
-    val events: SharedFlow<PlaybackEvent> = _events.asSharedFlow()
+    val events: Flow<PlaybackEvent> = _events.receiveAsFlow()
 
     private val trackSelector: DefaultTrackSelector =
         requireNotNull(player.trackSelector as? DefaultTrackSelector) {
@@ -104,7 +106,7 @@ class PlaybackEngine(
                     )
                 }
                 if (playbackState == Player.STATE_ENDED) {
-                    _events.tryEmit(PlaybackEvent.Ended)
+                    _events.trySend(PlaybackEvent.Ended)
                 }
             }
 
@@ -158,17 +160,17 @@ class PlaybackEngine(
 
     fun pause() {
         player.pause()
-        _events.tryEmit(PlaybackEvent.Paused)
+        _events.trySend(PlaybackEvent.Paused)
     }
 
     fun resume() {
-        _events.tryEmit(PlaybackEvent.Resumed)
+        _events.trySend(PlaybackEvent.Resumed)
         player.play()
     }
 
     fun seekTo(positionMs: Long) {
         player.seekTo(positionMs.coerceAtLeast(0))
-        _events.tryEmit(PlaybackEvent.Seeked)
+        _events.trySend(PlaybackEvent.Seeked)
     }
 
     fun setSpeed(speed: Float) {
@@ -270,7 +272,7 @@ class PlaybackEngine(
     fun stop(): PlaybackProgress? {
         progressJob?.cancel()
         val finalProgress = currentProgress()
-        _events.tryEmit(PlaybackEvent.Stopped)
+        _events.trySend(PlaybackEvent.Stopped)
         logger.i(LogTag.PLAYER, "播放停止 serverId=${session?.serverId} itemId=${session?.itemId}")
         return finalProgress
     }

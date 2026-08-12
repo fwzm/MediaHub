@@ -8,6 +8,8 @@ import com.mediahub.core.database.repository.ProgressRepository
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
+import com.mediahub.model.MediaItem
+import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.player.engine.PlaybackEngine
 import com.mediahub.player.engine.PlaybackEngineFactory
@@ -114,24 +116,31 @@ class PlayerViewModel @Inject constructor(
                 handle = providerHandle
 
                 val detailProvider = providerHandle.detail
-                    ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的详情能力尚未接入")
                 val playbackProvider = providerHandle.playback
                     ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的播放能力尚未接入")
 
-                val detail = detailProvider.getItemDetail(itemId)
+                // review P2-5：browse-only 数据源（如本地文件树）无详情能力时，
+                // 按 itemId 重建条目并推断媒体类型（避免退化为 OTHER 污染"继续观看"元数据）。
+                val item = detailProvider?.getItemDetail(itemId)?.item ?: MediaItem(
+                    serverId = serverId,
+                    id = itemId,
+                    type = MediaTypeGuesser.forPath(itemId),
+                    title = itemTitle.ifBlank { itemId.substringAfterLast('/') },
+                    path = itemId,
+                )
                 val resume = progressRepository.getResume(serverId, itemId)
                 val source = playbackProvider.resolvePlayback(
-                    detail.item,
+                    item,
                     PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
                 )
                 engine.play(
                     PlaybackSession(
                         serverId = serverId,
                         itemId = itemId,
-                        itemTitle = detail.item.title.ifBlank { itemTitle },
+                        itemTitle = item.title.ifBlank { itemTitle },
                         source = source,
                         resumePositionMs = resume,
-                        itemType = detail.item.type,
+                        itemType = item.type,
                     )
                 )
 

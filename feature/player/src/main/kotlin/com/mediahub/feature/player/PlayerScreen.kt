@@ -23,6 +23,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -69,6 +70,11 @@ fun PlayerRoute(
             viewModel.stopAndFlush()
             onBack()
         }
+    }
+
+    // review P2-8：系统 Back / predictive back 也必须经过 awaited stopAndFlush（不能绕过 final flush）
+    BackHandler(enabled = true) {
+        exitPlayer()
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {

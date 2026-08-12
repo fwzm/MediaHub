@@ -1,5 +1,21 @@
 # 变更记录（CHANGELOG）
 
+## [0.4.2-reconcile] — 2026-08-12（PR #1 × main 合流，以 main 为主线")
+
+### 合流决策（经用户确认，ADR-029）
+- 以 **main 为主线**：不采用 PR #1 的 CredentialVault/AuthenticationCoordinator 双轨重构，
+  保留 main 已绿灯的 Phase 1A（TokenStore + EmbySessionStore）。
+- PR #1 中有价值的**实质性 review 修复**cherry-pick 到 main：
+  - SAF 嵌套浏览基础设施：`SafTreeNavigator` + `SafUri`（tree-backed，纯 Kotlin 可测，+5 测试）；
+    作为 Phase 0.6 SAF 演进基础（main 的 LocalProvider 仍为 File 型，无 PR#1 的 fromSingleUri bug）
+  - 播放关键事件 Channel：`_events` 改 `Channel(UNLIMITED)`（Pause/Seek/Resume 不 conflate/drop）
+  - 系统 Back：PlayerScreen 加 `BackHandler`（awaited stopAndFlush，不走 toolbar 绕过）
+  - browse-only MediaType：`MediaTypeGuesser`（core:model）+ PlayerViewModel browse-only fallback
+- WebDAV 骨架保留（其 PROPFIND 认证属 Phase 1 完整实现；main 的 testConnection 已含 401/403 AUTH_REQUIRED）
+
+### 验证
+- assembleDebug / testDebugUnitTest（74）/ lintDebug 全部通过
+
 ## [0.4.1-phase1a-finalization] — 2026-08-12（Phase 1A 端到端收尾，ADR-028）
 
 ### 功能补齐（评审 10 项）

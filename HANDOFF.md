@@ -1,6 +1,15 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12（Phase 1A finalization 端到端收尾，ADR-028）。本文件是协作第一手资料。
+> 最后更新：2026-08-12（PR #1 × main 合流，ADR-029）。本文件是协作第一手资料。
+
+## 0. 合流结论（最重要）
+
+- **以 main 为主线**（用户确认）。PR #1（agent/phase-0-5-architecture-hardening）标记为
+  not-merge，其 CredentialVault/AuthenticationCoordinator 双轨认证架构不再与 main 并行开发。
+- 从 PR #1 吸收了非破坏性 review 修复：播放关键事件 Channel(UNLIMITED)、系统 Back BackHandler、
+  browse-only MediaTypeGuesser、SAF tree-backed 导航基础设施（SafTreeNavigator/SafUri，供 Phase 0.6）。
+- main 的认证主线 = TokenStore + EmbySessionStore + 通用 restoreSession(AuthSessionState)。
+- **后续新功能一律 base 在 main，不再往 PR #1 分支开发。**
 
 ## 0. Phase 1A finalization（最新）
 
