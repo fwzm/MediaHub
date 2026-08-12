@@ -9,6 +9,7 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.provider.api.AuthenticationCoordinator
+import com.mediahub.feature.server.ServerClickDecision
 import com.mediahub.provider.api.AuthenticationState
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderCategory
@@ -63,23 +64,19 @@ class HomeViewModel @Inject constructor(
      */
     fun clickTarget(server: MediaServer, authState: AuthenticationState?): ServerClickTarget {
         val category = providerCategories[server.providerId]
-        // Local 且需要重新授权 → 本地目录重新授权
-        if (category == ProviderCategory.LOCAL_STORAGE && server.baseUrl.isBlank()) {
-            return ServerClickTarget.LocalReauthorize
-        }
-        // 认证型 Provider 且 未登录/失效/身份变更 → existing-server re-login
         val isAuthProvider = runCatching { registry.create(server)?.auth }.getOrNull() != null
-        if (isAuthProvider) {
-            val needsRelogin = when (authState) {
-                is AuthenticationState.Authenticated -> false
-                is AuthenticationState.SessionExpired -> true
-                is AuthenticationState.Unavailable -> false // 暂不可用不强制重登，按现状打开
-                AuthenticationState.SignedOut -> true
-                null -> false
-            }
-            if (needsRelogin) return ServerClickTarget.AuthRelogin
+        return when (
+            ServerClickDecision.decide(
+                category = category,
+                requiresLocalReauthorize = category == ProviderCategory.LOCAL_STORAGE && server.baseUrl.isBlank(),
+                authState = authState,
+                isAuthProvider = isAuthProvider,
+            )
+        ) {
+            ServerClickDecision.Target.LocalReauthorize -> ServerClickTarget.LocalReauthorize
+            ServerClickDecision.Target.AuthRelogin -> ServerClickTarget.AuthRelogin
+            ServerClickDecision.Target.Open -> ServerClickTarget.Open
         }
-        return ServerClickTarget.Open
     }
 
     val servers: StateFlow<List<MediaServer>> = serverRepository.observeServers()

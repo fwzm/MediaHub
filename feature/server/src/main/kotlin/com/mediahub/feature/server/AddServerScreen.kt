@@ -62,7 +62,15 @@ fun AddServerRoute(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (state.isReauthorizing) "重新授权本地媒体" else "添加媒体库") },
+                title = {
+                    Text(
+                        when (state.existingServerMode) {
+                            ExistingServerMode.AUTH_RELOGIN -> "重新登录"
+                            ExistingServerMode.LOCAL_REAUTHORIZE -> "重新授权本地媒体"
+                            ExistingServerMode.NONE -> "添加媒体库"
+                        }
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回")
@@ -80,11 +88,13 @@ fun AddServerRoute(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text("选择类型", style = MaterialTheme.typography.titleMedium)
-            ProviderGrid(
-                providers = state.providers,
-                selectedProviderId = state.selectedProviderId,
-                onSelect = viewModel::selectProvider,
-            )
+            if (state.existingServerMode == ExistingServerMode.NONE) {
+                ProviderGrid(
+                    providers = state.providers,
+                    selectedProviderId = state.selectedProviderId,
+                    onSelect = viewModel::selectProvider,
+                )
+            }
 
             descriptor?.let {
                 Text(
@@ -185,8 +195,9 @@ fun AddServerRoute(
                         when {
                             state.isLoggingIn -> "登录中…"
                             state.isSaving -> "保存中…"
+                            state.existingServerMode == ExistingServerMode.AUTH_RELOGIN -> "重新登录"
+                            state.existingServerMode == ExistingServerMode.LOCAL_REAUTHORIZE -> "保存授权"
                             descriptor?.authMethod != AuthMethod.NONE -> "登录并添加"
-                            state.isReauthorizing -> "保存授权"
                             else -> "保存"
                         }
                     )

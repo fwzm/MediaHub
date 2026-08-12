@@ -38,7 +38,7 @@ data class AddServerUiState(
     val isSaving: Boolean = false,
     val isLoggingIn: Boolean = false,
     val error: String? = null,
-    val isReauthorizing: Boolean = false,
+    val existingServerMode: ExistingServerMode = ExistingServerMode.NONE,
     val isLoadingExisting: Boolean = false,
 ) {
     val selectedDescriptor: ProviderDescriptor?
@@ -65,7 +65,7 @@ class AddServerViewModel @Inject constructor(
             providers = availableDescriptors,
             selectedProviderId = initialDescriptor?.providerId.orEmpty(),
             name = initialDescriptor?.displayName.orEmpty(),
-            isReauthorizing = reauthorizeServerId.isNotBlank(),
+            existingServerMode = ExistingServerMode.NONE,
             isLoadingExisting = reauthorizeServerId.isNotBlank(),
         )
     )
@@ -86,15 +86,18 @@ class AddServerViewModel @Inject constructor(
                         )
                     }
                 } else {
-                    // 保留 SAME id 与元数据（isDefault/sortOrder/createdAtEpochMs 由 buildServer 保留）
+                    // 保留 SAME id 与元数据（isDefault/sortOrder/createdAtEpochMs 由 buildServer 保留）。
+                    // 根据原 descriptor.category 区分 AUTH_RELOGIN / LOCAL_REAUTHORIZE（评审 Patch 3）。
                     existingServer = server
+                    val mode = ServerEditModePolicy.modeFor(descriptor)
                     _uiState.update {
                         it.copy(
-                            providers = listOf(descriptor),
+                            providers = listOf(descriptor), // 锁定只显原 Provider
                             selectedProviderId = descriptor.providerId,
                             name = server.name,
                             baseUrl = if (descriptor.category == ProviderCategory.LOCAL_STORAGE) "" else server.baseUrl,
                             username = server.username.orEmpty(),
+                            existingServerMode = mode,
                             isLoadingExisting = false,
                         )
                     }
@@ -104,6 +107,8 @@ class AddServerViewModel @Inject constructor(
     }
 
     fun selectProvider(providerId: String) {
+        // existing 模式锁定原 Provider：不允许 UI 切换导致 name/baseUrl/username 被清空（评审 Patch 3）
+        if (existingServer != null) return
         val descriptor = registry.descriptorFor(providerId) ?: return
         if (!descriptor.isSelectable) return
         _uiState.update {
