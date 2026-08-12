@@ -2,10 +2,16 @@ package com.mediahub.app.navigation
 
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.navArgument
 import com.mediahub.core.common.NavArgCodec
 import com.mediahub.feature.home.HomeRoute
@@ -23,6 +29,17 @@ fun MediaHubNavHost() {
     NavHost(navController = navController, startDestination = Routes.HOME) {
 
         composable(Routes.HOME) {
+            val homeEntry = navController.currentBackStackEntry
+            var forceRestoreId by remember { mutableStateOf<String?>(null) }
+            // re-login 成功后 Home 状态立即刷新（FINAL PATCH 4）
+            LaunchedEffect(homeEntry) {
+                homeEntry?.savedStateHandle?.getStateFlow<String?>("auth_changed_server_id", null)?.collect { id ->
+                    if (id != null) {
+                        forceRestoreId = id
+                        homeEntry.savedStateHandle["auth_changed_server_id"] = null
+                    }
+                }
+            }
             HomeRoute(
                 onOpenServer = { server ->
                     navController.navigate("library/${server.id}/root?name=${Uri.encode(server.name)}")
@@ -43,6 +60,8 @@ fun MediaHubNavHost() {
                             "&type=${progress.itemType?.name.orEmpty()}"
                     )
                 },
+                forceRestoreId = forceRestoreId,
+                onForceRestore = { forceRestoreId = null }, // 消费完成清空
             )
         }
 
@@ -53,7 +72,12 @@ fun MediaHubNavHost() {
             ),
         ) {
             AddServerRoute(
-                onDone = { navController.popBackStack() },
+                onDone = { saved ->
+                    // re-login / 新建成功后通知 Home 强制刷新该服务器认证状态（FINAL PATCH 4）
+                    navController.previousBackStackEntry?.savedStateHandle
+                        ?.set("auth_changed_server_id", saved.id)
+                    navController.popBackStack()
+                },
                 onBack = { navController.popBackStack() },
             )
         }

@@ -106,6 +106,26 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 强制恢复某服务器认证状态（FINAL PATCH 4：re-login 成功后 Home 状态立即刷新）。
+     * 不受 init 里 "containsKey(server.id) 跳过" 的去重逻辑影响；现有状态即使为
+     * SignedOut / SessionExpired / Unavailable 也强制覆盖。
+     */
+    fun forceRestore(serverId: String) {
+        viewModelScope.launch {
+            val server = servers.first().firstOrNull { it.id == serverId } ?: return@launch
+            val handle = registry.create(server)
+            val auth = handle?.auth
+            if (auth == null) {
+                _authStates.update { it - serverId }
+                return@launch
+            }
+            // 直接 restore；AuthenticationState 无 Restoring，恢复完成后立即覆盖结果
+            val state = authenticationCoordinator.restore(handle)
+            _authStates.update { it + (serverId to state) }
+        }
+    }
+
     /** 用户主动登出（review #8）：AuthenticationCoordinator.logout（服务端 best-effort + Vault 清理），随后回未登录。 */
     fun logout(serverId: String) {
         viewModelScope.launch {

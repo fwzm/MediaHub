@@ -22,6 +22,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,11 +44,22 @@ fun HomeRoute(
     onAddServer: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenItem: (PlaybackProgress) -> Unit,
+    forceRestoreId: String? = null,
+    onForceRestore: (String) -> Unit = { },
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val servers by viewModel.servers.collectAsStateWithLifecycle()
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
     val authStates by viewModel.authStates.collectAsStateWithLifecycle()
+
+    // re-login 成功后强制刷新该服务器认证状态（FINAL PATCH 4）；消费后清空
+    val currentForceRestore = forceRestoreId
+    if (currentForceRestore != null) {
+        LaunchedEffect(currentForceRestore) {
+            viewModel.forceRestore(currentForceRestore)
+            onForceRestore(currentForceRestore)
+        }
+    }
 
     Scaffold(
         topBar = {

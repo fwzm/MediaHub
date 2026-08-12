@@ -1,6 +1,16 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12，Final Reconciliation Patch 3 完成（合并 latest main + Existing Server UI 显式化 + 策略测试）。
+> 最后更新：2026-08-12，FINAL PATCH 4 完成（PR 分支 Home 状态闭环）。
+
+## Patch 4（最新）：re-login 后 Home auth-state 立即刷新（PR 架构）
+
+- `HomeViewModel.forceRestore(serverId)`：调 authenticationCoordinator.restore，覆盖现有状态，
+  不受 init containsKey 去重影响。
+- Navigation result（auth_changed_server_id）：AddServer 保存成功后通知 Home → forceRestore。
+- 效果：SessionExpired/SignedOut → 重新登录 → 返回 Home → Authenticated（不杀 App）。
+- 全项目 79 用例；assembleDebug/test/lint 通过。
+- **待办（需你在 GitHub）**：更新 PR description（删旧 41@Test/31556164299 写 latest）；确认 latest-head
+  CI success；重新 latest-head review；然后 merge PR #1 封板 Phase 1A。
 
 ## Patch 3（最新）
 
