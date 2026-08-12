@@ -1,5 +1,30 @@
 # 变更记录（CHANGELOG）
 
+## [0.3.0-phase1a] — 2026-08-12（Emby 认证与会话）
+
+### 新增
+- **Emby 认证闭环**（ADR-026）：登录（/Users/AuthenticateByName）→ 严格校验
+  AccessToken/ServerId/User.Id → TokenStore（localServerId 键）+ EmbySessionStore（会话元数据）。
+- **会话恢复验证**：Token+Session 双份齐全 + GET /Users/Me 真实验证；
+  401/403 清会话（SessionExpired），Timeout/DNS/5xx 保留会话（网络问题 ≠ token 失效）。
+- **Logout**：POST /Sessions/Logout best-effort + 本地清理权威。
+- **EmbyAuthState 状态机**（Unknown/SignedOut/Restoring/Authenticating/Authenticated/Error）。
+- **ClientIdentity**（core:common，ADR-025）：DeviceId 首次生成持久化；Emby/Jellyfin 共用。
+- **Emby 内部模块拆分**（ADR-027）：api/auth/session/mapper；EmbyProvider 瘦身为身份/探测。
+- **添加服务器 UI**：测试连接（协议嗅探）→ 登录并添加（事务语义：认证成功但保存失败 → 回滚会话）。
+- ApiClient.postNoContent（HTTP 200 + 空 body 正规处理）。
+
+### 修复
+- OkHttp "POST must have a request body"：buildBody 对 POST 兜底空 body。
+
+### 测试
+- EmbyAuthProviderTest 13 用例（MockWebServer：登录/401/malformed/关键字段缺失/恢复/
+  超时保留/500 保留/X-Emby-Token/登出成功/登出网络失败/密码不落库）；
+  EmbyProviderFactoryTest（Handle 只开放 AUTH）；全项目 66 用例。
+
+### 验证
+- assembleDebug / testDebugUnitTest（66）/ lintDebug 全部通过。
+
 ## [0.2.2-exit-flush-fix] — 2026-08-12（退出重复上报 patch）
 
 ### 修复

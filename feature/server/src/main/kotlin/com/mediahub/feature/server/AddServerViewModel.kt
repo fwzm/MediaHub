@@ -8,9 +8,12 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.model.MediaServer
 import com.mediahub.model.ServerType
+import com.mediahub.provider.api.AuthResult
 import com.mediahub.provider.api.ConnectionStatus
+import com.mediahub.provider.api.Credentials
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderDescriptor
+import com.mediahub.provider.api.ProviderException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +30,8 @@ data class AddServerUiState(
     val password: String = "",
     val isTesting: Boolean = false,
     val testResult: ConnectionStatus? = null,
+    val isLoggingIn: Boolean = false,
+    val loginError: String? = null,
     val isSaving: Boolean = false,
     val error: String? = null,
 )
@@ -61,6 +66,7 @@ class AddServerViewModel @Inject constructor(
                 selectedDescriptorId = descriptor.id,
                 name = it.name.ifBlank { descriptor.displayName },
                 testResult = null,
+                loginError = null,
                 error = null,
             )
         }
@@ -91,6 +97,72 @@ class AddServerViewModel @Inject constructor(
             }
             _uiState.update { it.copy(isTesting = false, testResult = result) }
         }
+    }
+
+    /**
+     * 登录并添加（Phase 1A，ADR-026）：
+     * 构建临时 MediaServer → Emby authenticate → 成功 → 保存服务器 + 会话/Token → 已登录。
+     * 事务语义：认证成功但服务器保存失败 → 清理刚保存的会话（不留孤儿凭据）。
+     * 密码仅存在于登录请求内存中，绝不落库、绝不进日志。
+     */
+    fun loginAndSave(onSaved: (MediaServer) -> Unit) {
+        val descriptor = selectedDescriptor() ?: return
+        val state = _uiState.value
+        if (descriptor.serverType != ServerType.LOCAL && state.baseUrl.isBlank()) {
+            _uiState.update { it.copy(loginError = "请填写服务器地址") }
+            return
+        }
+        if (state.username.isBlank() || state.password.isBlank()) {
+            _uiState.update { it.copy(loginError = "请输入用户名和密码") }
+            return
+        }
+        val server = buildServer()
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoggingIn = true, loginError = null) }
+            try {
+                val handle = registry.create(server)
+                    ?: throw ProviderException.NotYetImplemented(server.id, "该媒体源类型")
+                val auth = handle.auth
+                    ?: throw ProviderException.NotYetImplemented(server.id, "该数据源暂不支持登录")
+                when (val result = auth.authenticate(
+                    Credentials.UsernamePassword(state.username, state.password)
+                )) {
+                    is AuthResult.Success -> {
+                        try {
+                            serverRepository.addServer(server)
+                            _uiState.update { it.copy(isLoggingIn = false) }
+                            onSaved(server)
+                        } catch (e: Exception) {
+                            // 事务回滚：认证成功但保存失败 → 清理会话（best-effort）
+                            runCatching { auth.logout() }
+                            _uiState.update {
+                                it.copy(isLoggingIn = false, loginError = "保存失败：${e.message}")
+                            }
+                        }
+                    }
+
+                    is AuthResult.Failure -> _uiState.update {
+                        it.copy(isLoggingIn = false, loginError = loginErrorText(result.error))
+                    }
+                }
+            } catch (e: Exception) {
+                logger.w(LogTag.UI, "登录失败 serverId=${server.id}", e)
+                _uiState.update { it.copy(isLoggingIn = false, loginError = "登录失败：${e.message}") }
+            }
+        }
+    }
+
+    private fun loginErrorText(e: ProviderException): String = when (e) {
+        is ProviderException.AuthFailed -> "用户名或密码错误"
+        is ProviderException.AuthExpired -> "登录已失效，请重新登录"
+        is ProviderException.Network -> "网络错误，请检查服务器地址"
+        is ProviderException.Http -> if (e.statusCode in 500..599) {
+            "服务器错误（HTTP ${e.statusCode}）"
+        } else {
+            "HTTP ${e.statusCode}"
+        }
+        is ProviderException.Parse -> "服务器响应异常"
+        else -> e.message ?: "登录失败"
     }
 
     fun save(onSaved: (MediaServer) -> Unit) {

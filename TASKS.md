@@ -49,6 +49,21 @@
       MockWebServer 测试（正确/错误JSON/404/401/403/malformed）
 - [x] DONE assembleDebug / testDebugUnitTest（51 用例）/ lintDebug 通过
 
+## Phase 1A —— Emby 认证与会话（本次交付）✅ DONE
+
+- [x] DONE Emby 登录（POST /Users/AuthenticateByName，JSON Username/Pw + X-Emby-Authorization）
+- [x] DONE 会话安全持久化：Token 入 TokenStore（localServerId 键）、Session 元数据入 EmbySessionStore
+- [x] DONE localServerId / remoteServerId 明确区分（ADR-026）
+- [x] DONE 重启恢复：Token+Session 双份齐全 + 真实验证（GET /Users/Me）；401 清会话；网络问题保留
+- [x] DONE Logout：POST /Sessions/Logout best-effort + 本地清理权威
+- [x] DONE EmbyAuthState 状态机（Unknown/SignedOut/Restoring/Authenticating/Authenticated/Error）
+- [x] DONE ProviderHandle 只开放 AUTH（runtimeCapabilities={AUTH}，ADR-022/026）
+- [x] DONE ClientIdentity（core:common，跨协议复用，DeviceId 稳定持久化）
+- [x] DONE EmbyProvider 内部模块拆分（api/auth/session/mapper，防巨型类，ADR-027）
+- [x] DONE 添加服务器 UI：测试连接（协议）/ 登录并添加（事务语义，失败回滚会话）
+- [x] DONE 测试 13 个（登录/401/malformed/关键字段缺失/恢复/超时/Header/登出/密码不落库/Handle）
+- [x] DONE assembleDebug / testDebugUnitTest（66）/ lintDebug 通过
+
 ## V0.1 —— MVP（下一步） 
 
 ### IN PROGRESS（无，等待开工）

@@ -47,6 +47,13 @@ class ApiClient(
         jsonBody: String = "{}",
     ): T = execute("POST", url, headers, jsonBody, serializer<T>(), "application/json")
 
+    /** 发送请求但不解析响应体（如 Emby /Sessions/Logout 返回空 body）。 */
+    suspend fun postNoContent(
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+        body: String? = null,
+    ): Unit = executeNoContent("POST", url, headers, body, null)
+
     /** 通用执行：非 2xx 抛出 [ApiException]，返回体按 [deserializer] 解码。 */
     @PublishedApi
     internal suspend fun <T> execute(
@@ -57,7 +64,7 @@ class ApiClient(
         deserializer: DeserializationStrategy<T>,
         contentType: String?,
     ): T = withContext(Dispatchers.IO) {
-        val builder = Request.Builder().url(url).method(method, buildBody(body, contentType))
+        val builder = Request.Builder().url(url).method(method, buildBody(method, body, contentType))
         headers.forEach { (k, v) -> builder.header(k, v) }
         val request = builder.build()
         val requestId = request.header(HttpClientFactory.HEADER_REQUEST_ID) ?: "?"
@@ -85,8 +92,41 @@ class ApiClient(
         }
     }
 
-    private fun buildBody(body: String?, contentType: String?): RequestBody? {
-        if (body == null) return null
+    /** 与 [execute] 相同，但成功时不解码响应体。 */
+    @PublishedApi
+    internal suspend fun executeNoContent(
+        method: String,
+        url: String,
+        headers: Map<String, String>,
+        body: String?,
+        contentType: String?,
+    ): Unit = withContext(Dispatchers.IO) {
+        val builder = Request.Builder().url(url).method(method, buildBody(method, body, contentType))
+        headers.forEach { (k, v) -> builder.header(k, v) }
+        val request = builder.build()
+        val requestId = request.header(HttpClientFactory.HEADER_REQUEST_ID) ?: "?"
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                logger.w(
+                    LogTag.NETWORK,
+                    "API ${response.code} $method ${Redactor.redact(url)}"
+                )
+                throw ApiException(
+                    statusCode = response.code,
+                    url = url,
+                    method = method,
+                    requestId = requestId,
+                )
+            }
+        }
+    }
+
+    private fun buildBody(method: String, body: String?, contentType: String?): RequestBody? {
+        if (body == null) {
+            // OkHttp 要求 POST 必须带 body（可为空）；GET/HEAD 用 null。
+            return if (method == "POST") ByteArray(0).toRequestBody(null) else null
+        }
         val mediaType = (contentType ?: "text/plain").toMediaType()
         return body.toRequestBody(mediaType)
     }

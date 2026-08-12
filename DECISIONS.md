@@ -159,3 +159,33 @@
   仅 HTTP 200 + JSON 可解析不算。DTO 键名按真实协议（@SerialName("Id") 等）。
   分层语义：TCP reachable ≠ HTTP reachable ≠ Emby reachable ≠ Emby authenticated。
 - 验证：MockWebServer 覆盖 正确响应 / 200-错误JSON / 404 / 401 / 403 / malformed JSON。
+
+## ADR-025 客户端身份（ClientIdentity，跨协议复用）
+- 状态：已采纳（2026-08-12，Phase 1A）
+- 决策：`core:common` 提供 `ClientIdentity`（client/device/deviceId/version）与
+  `ClientIdentityProvider`（DeviceId 首次生成 UUID 持久化，后续启动一致，不用硬件序列号）。
+  Emby/Jellyfin 等协议共用，禁止在各 Provider 复制。
+- 影响：Emby authorization header 由 `EmbyAuthorizationHeaderBuilder` 统一构建。
+
+## ADR-026 Emby 认证与会话（Phase 1A）
+- 状态：已采纳（2026-08-12，Phase 1A）
+- 决策：
+  - 登录 POST /Users/AuthenticateByName（JSON Username/Pw + X-Emby-Authorization 客户端身份头）；
+    成功响应严格校验 AccessToken/ServerId/User.Id 非空，缺失不保存半成品。
+  - **ServerId 区分**：localServerId（MediaHub MediaServer.id，TokenStore 键）≠ remoteServerId
+    （Emby 返回），会话同时记录两者，恢复时校验服务器身份。
+  - 已认证请求统一由 EmbyApiClient 加 `X-Emby-Token`（禁 URL query、禁各端点手拼 Header）。
+  - 密码：仅存在于登录请求内存，绝不持久化/日志（沿用 ADR-016）。
+  - 会话恢复：本地 Token+Session 双份齐全才发真实验证（GET /Users/Me）；
+    401/403 → 清会话；Timeout/DNS/5xx → 保留会话（网络问题 ≠ token 失效）。
+  - Logout：POST /Sessions/Logout 为 best-effort，本地清理为权威。
+  - 状态机 EmbyAuthState（Unknown/SignedOut/Restoring/Authenticating/Authenticated/Error），
+    禁止 Boolean isLoggedIn 承载全部状态。
+- 影响：Emby Handle 只开放 AUTH（runtimeCapabilities={AUTH}，ADR-022）。
+
+## ADR-027 Emby Provider 内部模块拆分（防巨型类）
+- 状态：已采纳（2026-08-12，Phase 1A）
+- 决策：provider:emby 按能力拆分包：api（EmbyApiClient/DTO/HeaderBuilder）、
+  auth（EmbyAuthProvider/EmbyAuthState）、session（EmbySession/EmbySessionStore）、
+  mapper（EmbyUserMapper）。EmbyProvider 只承载身份/descriptor/testConnection。
+  后续 Library/Playback/Progress 各自独立类，Factory 每完成一项填一个 Handle 字段。

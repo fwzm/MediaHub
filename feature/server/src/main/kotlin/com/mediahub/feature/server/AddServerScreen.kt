@@ -119,6 +119,10 @@ fun AddServerRoute(
                 )
             }
 
+            state.loginError?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+            }
+
             state.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
@@ -126,17 +130,27 @@ fun AddServerRoute(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(
                     onClick = viewModel::testConnection,
-                    enabled = !state.isTesting,
+                    enabled = !state.isTesting && !state.isLoggingIn,
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(if (state.isTesting) "测试中…" else "测试连接")
                 }
-                Button(
-                    onClick = { viewModel.save(onSaved = onDone) },
-                    enabled = !state.isSaving,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(if (state.isSaving) "保存中…" else "保存")
+                if (selected != null && selected.authMethod != com.mediahub.provider.api.AuthMethod.NONE) {
+                    Button(
+                        onClick = { viewModel.loginAndSave(onSaved = onDone) },
+                        enabled = !state.isLoggingIn && !state.isTesting,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(if (state.isLoggingIn) "登录中…" else "登录并添加")
+                    }
+                } else {
+                    Button(
+                        onClick = { viewModel.save(onSaved = onDone) },
+                        enabled = !state.isSaving,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(if (state.isSaving) "保存中…" else "保存")
+                    }
                 }
             }
         }

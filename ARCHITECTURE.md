@@ -50,10 +50,14 @@ app（组合一切：DI、导航、Provider 工厂装配）
 
 - 媒体服务器类共享 `BaseMediaServerProvider`（异常映射、Token 会话、通用 HTTP 探测）。
 - 协议差异（endpoint、鉴权头、连接测试）由各子类独立实现，禁止塞进 if/else。
-- 连接测试为**协议级嗅探**（ADR-019）：Emby/Jellyfin 查 /System/Info/Public，
+- 连接测试为**协议级嗅探**（ADR-019/024）：Emby/Jellyfin 查 /System/Info/Public（Id/Version 必填），
   WebDAV 用 OPTIONS，Local 查目录；不再用 HTTP <500 判定。
-- 凭据生命周期（ADR-016）：`CredentialVault` 存长期凭据（密码/API Key/Refresh/Cookie），
-  `TokenStore` 存会话令牌，均 Keystore 加密。
+- 凭据生命周期（ADR-016/026）：`CredentialVault` 存长期凭据（密码/API Key/Refresh/Cookie），
+  `TokenStore` 存会话令牌（按 localServerId），`EmbySessionStore` 存会话元数据
+  （remoteServerId/userId/userName），均 Keystore/私有存储，禁止明文密码。
+- 认证会话（Phase 1A，ADR-026）：Emby 登录/恢复/验证/登出闭环；客户端身份
+  `ClientIdentity`（core:common）跨协议复用；`X-Emby-Token` 集中注入；
+  401=token 失效清会话，网络问题保留会话。
 
 ## 4. 领域模型（core:model）
 

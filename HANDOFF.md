@@ -1,13 +1,16 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12（Phase 0.5.1 边界修复交付）。本文件是协作第一手资料。
+> 最后更新：2026-08-12（Phase 1A Emby 认证与会话交付）。本文件是协作第一手资料。
 
 ## 1. 当前项目状态
 
-- **Phase 0 骨架 + Phase 0.5 加固 + Phase 0.5.1 边界修复已完成**：`assembleDebug`、
-  `testDebugUnitTest`（51 用例）、`lintDebug` 全部通过；CI（GitHub Actions）已就绪。
-- 能力语义（ADR-022）：**Handle 只暴露已实现能力**——当前 Emby/Jellyfin/WebDAV Handle 为空
-  （仅 provider），Local 有 BROWSE/DETAIL/PLAYBACK；Phase 1 每实现一项能力在 Factory 填对应字段。
+- **Phase 0（骨架）+ 0.5（加固）+ 0.5.1（边界）+ 1A（Emby 认证）已完成**：`assembleDebug`、
+  `testDebugUnitTest`（66 用例）、`lintDebug` 全部通过；CI（GitHub Actions）已就绪。
+- 能力语义（ADR-022/026）：Handle 只暴露已实现能力——**Emby 当前仅 AUTH**（runtimeCapabilities={AUTH}）；
+  Local 有 BROWSE/DETAIL/PLAYBACK；Jellyfin/WebDAV 为空。
+- **Emby 认证闭环已实现**（ADR-026）：登录/恢复/验证/登出；Token 入 TokenStore（localServerId 键）、
+  会话元数据入 EmbySessionStore；localServerId ≠ remoteServerId；X-Emby-Token 集中注入；
+  401=token 失效清会话，网络问题保留；密码绝不持久化。
 - 退出流程（ADR-023）：返回按钮走 `stopAndFlush()` 显式状态机；
   **Stopped 事件仅状态通知、不触发自动 flush**——退出上报唯一权威路径是
   `engine.stop() → flush(finalProgress) → coordinator.stop() → engine.release()`，
@@ -49,9 +52,11 @@ docs/* 与 7 份根文档
 
 ## 5. 遗留问题 / 下一步建议
 
-1. **V0.1 第一优先（建议 Phase 1A：仅 Emby 认证 + 会话）**：登录 → 媒体库 → 浏览 →
-   播放源解析 → 进度上报（endpoint 必须查官方文档，禁止凭记忆虚构；见 docs/providers/README.md）。
-   实现一项能力后，在 EmbyProviderFactory.create 的 Handle 对应填一个字段（ADR-022）。
+1. **V0.1 下一里程碑 Phase 1B：Emby 媒体库**（LibraryProvider）：/Users/{userId}/Views、
+   /Users/{userId}/Items（分页）、详情 /Items/{itemId}；实现后在 EmbyProviderFactory 填
+   library + detail 字段（ADR-022/027）。endpoint 必须查官方文档。
+2. 待接 UI：首页服务器卡片显示 Emby 登录态（EmbyAuthState 驱动），提供"登录/退出"入口。
+3. Jellyfin 复用 ClientIdentity/会话模式（独立 Connector）。
 2. 播放前把 `PlaybackCompatibilityEvaluator` 接入 `resolvePlayback` 决策流程。
 3. `usesCleartextTraffic=true` 是临时的，接入 provider 后换 networkSecurityConfig。
 4. AddServer 认证流接入 CredentialVault（密码按 Provider 策略加密保存/销毁，ADR-016）。
@@ -79,6 +84,8 @@ docs/* 与 7 份根文档
 - 播放请求头：禁止恢复全局 Singleton holder（ADR-018）。
 - 进度上报：禁止回到"每秒写库+上报"（ADR-017）。
 - ProviderHandle：禁止把未实现/占位能力塞进 Handle（ADR-022）——feature 层不得用异常发现"未实现"。
+- Emby 认证：禁止密码持久化/日志；禁止 AccessToken 放 URL query；禁止各端点手拼 X-Emby-Token
+  （统一 EmbyApiClient）；禁止把 localServerId 与 remoteServerId 混用（ADR-026）。
 - 退出流程：禁止"先 stop 协调器再 emit Stopped"（ADR-023）；必须走 stopAndFlush。
 - 连接测试：禁止仅凭 HTTP <500 或 200+可解析JSON 判定协议有效（ADR-024）。
 

@@ -1,8 +1,12 @@
 package com.mediahub.app.di
 
+import com.mediahub.app.BuildConfig
+
 import android.content.Context
 import androidx.room.Room
 import com.mediahub.core.common.AppDispatchers
+import com.mediahub.core.common.ClientIdentity
+import com.mediahub.core.common.ClientIdentityProvider
 import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.logging.CompositeLogger
 import com.mediahub.core.logging.LogBuffer
@@ -21,6 +25,7 @@ import com.mediahub.player.engine.PlaybackEngineFactory
 import com.mediahub.player.engine.PlayerFactory
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.base.DefaultProviderRegistry
+import com.mediahub.provider.emby.session.EmbySessionStore
 import com.mediahub.provider.local.LocalRootProvider
 import dagger.Binds
 import dagger.Module
@@ -61,6 +66,18 @@ object AppModule {
     @Provides
     @Singleton
     fun provideCredentialVault(storage: SecretStorage): CredentialVault = CredentialVault(storage)
+
+    @Provides
+    @Singleton
+    fun provideClientIdentity(
+        @ApplicationContext context: Context,
+    ): ClientIdentity = ClientIdentityProvider(context, version = BuildConfig.VERSION_NAME).get()
+
+    @Provides
+    @Singleton
+    fun provideEmbySessionStorage(
+        @ApplicationContext context: Context,
+    ): EmbySessionStore.Storage = EmbySessionStore.SharedPrefsStorage(context)
 
     @Provides
     @Singleton
