@@ -75,12 +75,14 @@ fun HomeRoute(
             }
             if (servers.isEmpty()) {
                 item {
-                    EmptyHint("还没有媒体源\n点击右下角 + 添加 Emby / Jellyfin / WebDAV / 本地存储")
+                    EmptyHint("还没有媒体源\n点击右下角 + 添加媒体库")
                 }
             } else {
                 items(servers, key = { it.id }) { server ->
                     ServerCard(
                         server = server,
+                        providerDisplayName = viewModel.providerDisplayName(server.providerId),
+                        locationLabel = viewModel.locationLabel(server),
                         onClick = { onOpenServer(server) },
                     )
                 }

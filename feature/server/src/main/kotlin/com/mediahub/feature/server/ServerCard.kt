@@ -21,6 +21,8 @@ import com.mediahub.model.MediaServer
 @Composable
 fun ServerCard(
     server: MediaServer,
+    providerDisplayName: String = server.providerId,
+    locationLabel: String = server.baseUrl,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -41,7 +43,7 @@ fun ServerCard(
                 color = MaterialTheme.colorScheme.primaryContainer,
             ) {
                 Text(
-                    text = server.type.label,
+                    text = providerDisplayName,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     style = MaterialTheme.typography.labelMedium,
                 )
@@ -54,7 +56,7 @@ fun ServerCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = server.baseUrl.ifBlank { "本地存储" },
+                    text = locationLabel,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

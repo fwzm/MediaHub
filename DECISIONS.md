@@ -26,16 +26,17 @@
 - 影响：评估器可单测（已覆盖 9 用例）；服务端转码只在必要时请求。
 
 ## ADR-005 Provider 注册采用 Hilt @IntoSet（非 @IntoMap）
-- 状态：已采纳（2026-08-12），**修订记录见下**
+- 状态：已采纳（2026-08-12），Phase 0.5 修订
 - 决策：各 Provider 模块 `@Binds @IntoSet` 自注册；`DefaultProviderRegistry` 内部
-  按 `ServerType` 建索引（`associateBy { it.serverType }`）。
+  按开放的 `ProviderDescriptor.providerId:String` 建索引，重复 ID 启动即失败。
 - 背景：Hilt 2.52 + KSP（2.0.21-1.0.25/1.0.28，KSP1/KSP2）下 `@IntoMap` + 自定义
   `@MapKey` 报 `error.NonExistentClass`（无法解析注解），改用 @IntoSet 后通过。
-- 影响：新增数据源 = 新增 Factory + @IntoSet 绑定；键类型仍为 ServerType（类型安全）。
+- 影响：新增数据源 = 新增 Factory + Descriptor + @IntoSet 绑定；不再修改封闭类型枚举或添加页。
 
 ## ADR-006 敏感信息走 Android Keystore，日志强制脱敏
-- 状态：已采纳（2026-08-12）
-- 决策：SecretStorage（AES/GCM, AndroidKeyStore）封装 Token/Cookie；Logger 实现统一 Redactor。
+- 状态：已采纳（2026-08-12），Phase 0.5 修订
+- 决策：SecretStorage（AES/GCM, AndroidKeyStore）封装加密字节；Provider 层的 `CredentialVault`
+  统一保存 pending credential 与 session credential；Logger 实现统一 Redactor。
 - 影响：任何业务不得绕过 SecretStorage 明文落盘；日志禁止出现 Token/Cookie/密码。
 
 ## ADR-007 Gradle 版本目录 + 多模块（core/player/provider/metadata/feature）
@@ -68,69 +69,53 @@
 - 影响：媒体播放不被 API 超时策略误伤；连接池复用。
 
 ## ADR-013 Media3 请求头注入采用 DataSource 包装层
-- 状态：已采纳（2026-08-12）
+- 状态：已采纳（2026-08-12），Phase 0.5 修订
 - 决策：Media3 1.5.1 的 MediaItem 无 headers 字段；使用
-  `HeaderAwareDataSource`（open() 时 `DataSpec.withAdditionalHeaders`）+ `PlaybackHeadersHolder`。
-- 影响：每次播放的鉴权头/Cookie 仅内存注入，不落库不进日志。
+  `HeaderAwareDataSource` 在 open() 时调用 `DataSpec.withAdditionalHeaders`。每个 MediaSource 捕获独立、
+  不可变的 `PlaybackRequestContext`；禁止 Singleton mutable holder。
+- 影响：鉴权头/Cookie 仅在对应播放资源的内存上下文中，多个播放器/预加载不会串线。
+
+## ADR-014 Provider 使用最小公共接口 + 可选能力组合
+- 状态：已采纳（2026-08-12）
+- 决策：`MediaProvider` 不再继承所有能力。Factory 返回 `ProviderHandle`，认证/Library/Browse/Playback/
+  Search/Subtitle/Progress 以可空、类型化字段组合，并校验 Descriptor 与实现一致。
+- 理由：Local/WebDAV/云盘不应伪造自己没有的能力；避免 empty list 与 NotYetImplemented 污染公共契约。
+- 影响：业务层按能力编程，不按 Provider 类型编程；新增能力需同时更新 Handle 校验与契约测试。
+
+## ADR-015 持久化稳定 providerId，移除 ServerType
+- 状态：已采纳（2026-08-12）
+- 决策：领域模型与 Registry 使用受格式约束的 `providerId:String`。Room v1 暂不改列结构，历史 `type`
+  列从此存 providerId；读取时 Mapper 将旧枚举名转换为稳定 ID。
+- 理由：封闭 enum 会迫使每个新数据源修改中央 model 与 UI，无法实现 Factory 自描述注册。
+- 迁移路径：未来首次必要的 Room schema 迁移时把列名正式改为 `provider_id`；在此之前兼容读取旧值。
+
+## ADR-016 CredentialVault 与认证协调器管理凭据生命周期
+- 状态：已采纳（2026-08-12）
+- 决策：短期输入使用 `Credentials`；登录结果使用 `SessionCredential`；`AuthenticationCoordinator`
+  负责调用 Provider、写入加密 Vault、删除原始 pending 凭据与回滚。Room/DataStore 不持有 Secret。
+- 影响：Emby/Jellyfin 登录应把密码换 Token 后删除；Basic/OAuth/Refresh/Cookie 可按协议保存长期凭据。
+  Phase 0.5 对尚未实现登录的 Provider 仅加密暂存，V0.1 成功登录后必须清除。
+
+## ADR-017 播放 HTTP 上下文按资源/会话隔离
+- 状态：已采纳（2026-08-12）
+- 决策：Header/Cookie/Referer/Authorization 从 `PlaybackSource` 复制进每个 MediaSource 的不可变
+  `PlaybackRequestContext`。播放器工厂可以是 Singleton，但工厂不保存播放请求状态。
+- 影响：支持未来双播放器、预加载、字幕和多 CDN，而不会跨源污染请求头。
+
+## ADR-018 播放位置与持久化/远端进度分流
+- 状态：已采纳（2026-08-12）
+- 决策：UI 位置 500ms 仅内存更新；本地快照默认 5s；远端周期由 Provider policy 决定；
+  Play/Pause/Seek/Stop/End 立即同步；release 做 final flush。流使用 conflate/backpressure。
+- 影响：消除每秒数据库写入、远端请求与 coroutine 创建；Provider 协议可独立选择节流策略。
+
+## ADR-019 本地媒体统一使用 Android SAF
+- 状态：已采纳（2026-08-12）
+- 决策：目录授权使用 `ACTION_OPEN_DOCUMENT_TREE` + persistable URI permission，浏览使用 DocumentFile/
+  ContentResolver，播放使用 `content://`。
+- 影响：不继续扩展 app 私有目录和 `file://`；支持 U 盘及系统 DocumentProvider。数据库只保存 tree URI。
 
 ## 技术备忘（非决策）
 - androidx lint `UnsafeOptInUsageError` 只识别"使用点"级 @OptIn，比编译器严格；
   player:engine 在类级 @OptIn（编译器强制）基础上于该模块 lint 配置中关闭此检查。
 - 沙箱（Linux aarch64）无 aapt2 arm64 二进制（AGP 官方不支持），用 qemu 包装器验证；
   gradle.properties 中该配置保持注释（见 HANDOFF.md）。
-
-## ADR-014 MediaProvider 能力组合（Interface Segregation）
-- 状态：已采纳（2026-08-12，Phase 0.5）
-- 决策：`MediaProvider` 只保留公共最小契约（serverId/type/displayName/descriptor/testConnection）；
-  认证/媒体库/详情/浏览/播放/搜索/字幕/进度拆为**可选能力接口**，通过 `ProviderHandle`
-  （可空字段，类型安全）组合暴露。Provider 只实现真实具备的能力。
-- 背景：原 Fat Interface 迫使 LocalProvider 伪造认证、返回空 Season/Episode、堆 NotYetImplemented。
-- 影响：LocalProvider 仅 BROWSE+DETAIL+PLAYBACK；UI 用 `handle.library != null` 等判断，禁止 `type == EMBY` 分支。
-
-## ADR-015 ProviderDescriptor 动态注册（保留 ServerType 的迁移路径）
-- 状态：已采纳（2026-08-12，Phase 0.5）
-- 决策：Factory 自报 `ProviderDescriptor(id, serverType, displayName, category, capabilities, authMethod, status)`；
-  "添加媒体库"页面从 `MediaProviderRegistry.descriptors()` 动态渲染，新增 Provider 无需改 UI。
-- 持久化：**暂保留 ServerType 枚举**（Room 列不变，避免 schema 迁移）。
-  迁移路径：未来引入自定义/第三方 Provider 时，`MediaServer` 增加 `providerId: String` 列
-  （Room migration 1→2），以 `descriptor.id` 为持久化键。
-- 语义约定：descriptor.capabilities = 类型规划能力（展示/路由）；ProviderHandle 字段 = 当前可用能力（运行时权威）。
-
-## ADR-016 CredentialVault 凭据生命周期
-- 状态：已采纳（2026-08-12，Phase 0.5，机制先行）
-- 决策：`CredentialVault`（core:security，Keystore 加密）按 (serverId, kind) 存取长期凭据
-  （密码/API Key/Refresh Token/Cookie/Client Secret）；`TokenStore` 只管会话令牌。
-  策略：Emby/Jellyfin 登录后不存密码（Token 足够）；WebDAV/SMB 长期密码入 Vault；
-  云盘 OAuth refresh/Cookie 入 Vault。禁止 Room/DataStore 明文、禁止日志。
-- 现状：机制与测试就绪；AddServer 表单密码暂不落盘（无认证流），Phase 1 认证时接入 Vault。
-
-## ADR-017 进度同步管线（三档节流）
-- 状态：已采纳（2026-08-12，Phase 0.5）
-- 决策：`PlaybackEngine` 每秒发 progress 流 + 关键事件流（Pause/Seek/Ended/Stopped）；
-  `ProgressSyncCoordinator` 分流：本地快照 sample(5s)、远端上报 sample(Provider 间隔，默认 10s)、
-  关键事件立即 flush、退出 final flush。Provider 可覆写 `MediaProgressProvider.remoteReportIntervalMs`。
-- 背景：原实现每秒写库+上报（1 小时 ≈ 3600 次 DB 写 + 3600 次请求）。
-
-## ADR-018 播放请求头 session-scoped（废弃 Singleton holder）
-- 状态：已采纳（2026-08-12，Phase 0.5）
-- 决策：`PlaybackHeadersHolder` 由 `PlaybackEngineFactory.create` 按引擎创建（每会话独立），
-  不再全局 Singleton。`PlayerFactory.create(holder)` 构建 HeaderAwareDataSource 链。
-- 背景：原 Singleton mutable holder 在多播放器/预加载/跨源切换时会串线（A 播 Emby、B 播夸克互相污染）。
-
-## ADR-019 协议级连接测试（Provider 负责）
-- 状态：已采纳（2026-08-12，Phase 0.5）
-- 决策：`testConnection()` 由具体 Provider 实现协议嗅探：
-  Emby/Jellyfin → `/System/Info/Public`（公开端点）；WebDAV → OPTIONS + DAV 头；Local → 目录检查。
-  UI（AddServerViewModel）只调 `provider.testConnection()`，不再通用 GET `<500` 判定。
-- 背景：原逻辑把 401/403/404 都算"连接成功"。
-
-## ADR-020 SAF 演进预留
-- 状态：已采纳（2026-08-12，Phase 0.5，接口预留）
-- 决策：`LocalRootProvider.contentRoots()` 预留 content:// 树根；Phase 0.6 接入
-  ACTION_OPEN_DOCUMENT_TREE + takePersistableUriPermission + DocumentFile 树导航，
-  长期本地媒体以 content:// 为准，不围绕 file:// 扩展。
-
-## ADR-021 保留 23 模块结构（不合并）
-- 状态：已采纳（2026-08-12，Phase 0.5）
-- 决策：维持现有模块划分。合并（如 feature:detail/search/metadata 归并）不带来可衡量的
-  编译/维护收益，且已有独立语义边界；后续若出现"无独立编译价值"的模块再评估合并。

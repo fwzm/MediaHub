@@ -2,77 +2,77 @@
 
 > 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
 
-当前状态：**Phase 0 骨架**（可编译、可运行、核心闭环已就绪，具体数据源 API 下一阶段接入）。
+当前状态：**Phase 0.5 架构加固**。基础闭环已就绪，真实 Emby/Jellyfin/WebDAV 业务 API 仍属于 V0.1。
 
-## 项目简介
+## 当前架构
 
-不同媒体服务器与云存储通过统一 `MediaProvider` 抽象接入，UI 只消费统一领域模型
-（`core:model`），不感知任何数据源协议。播放核心基于 AndroidX Media3 / ExoPlayer。
+- `MediaProvider` 只保留公共身份和协议探测；认证、媒体库、文件浏览、播放、搜索、字幕、进度是可选能力。
+- `ProviderHandle` 对 Descriptor 声明与实际能力做构造期校验，UI/ViewModel 不判断具体 Provider 类型。
+- `MediaProviderFactory` 自带开放的 `providerId` 与 `ProviderDescriptor`；添加页从 Registry 动态读取。
+- 凭据只经 `CredentialVault` 进入 Android Keystore 加密的 `SecretStorage`，不写 Room/DataStore/日志。
+- 每个播放 MediaSource 捕获独立的不可变请求上下文，不共享可变 Header/Cookie。
+- 播放进度分成 UI 刷新、本地快照、Provider 远端节流和关键事件即时同步。
+- 本地媒体使用 SAF 文档树和持久 URI 授权，播放 `content://`，不依赖 `file://`。
 
-详细设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，进度见 [ROADMAP.md](ROADMAP.md) / [TASKS.md](TASKS.md)，
-重要决策见 [DECISIONS.md](DECISIONS.md)，交接信息见 [HANDOFF.md](HANDOFF.md)。
+详细约束见 [ARCHITECTURE.md](ARCHITECTURE.md)，进度见 [ROADMAP.md](ROADMAP.md) / [TASKS.md](TASKS.md)，
+决策见 [DECISIONS.md](DECISIONS.md)，交接见 [HANDOFF.md](HANDOFF.md)。
 
 ## 模块结构
 
-```
-app/                 应用壳（Application / MainActivity / 导航 / DI）
-core/                核心层（无业务）
-  common/            通用工具（id、时间、调度器、Nav 编解码）
-  model/             统一领域模型（纯 Kotlin，无 Android 依赖）
-  network/           ApiClient（API）+ MediaHttpClient（媒体流）+ 结构化错误
-  database/          Room（服务器/账号/进度）+ DataStore（偏好）+ Repository
-  security/          Android Keystore 加密存储（SecretStorage / TokenStore）
-  logging/           统一日志（分类、脱敏、内存缓冲）
+```text
+app/                 应用壳、导航与依赖装配
+core/
+  common/            通用工具与调度器
+  model/             统一领域模型（纯 Kotlin）
+  network/           API 与媒体流网络客户端、结构化错误
+  database/          Room、DataStore、Repository
+  security/          Android Keystore 加密 SecretStorage
+  logging/           分类日志、脱敏、诊断缓冲
 player/
-  engine/            Media3/ExoPlayer 封装（PlaybackEngine、缓存、请求头注入）
-  compatibility/     设备能力 + 播放兼容性评估器（纯逻辑，可单测）
+  engine/            Media3 引擎、会话请求上下文、缓存
+  compatibility/     设备能力与播放兼容性评估
 provider/
-  api/               MediaProvider 统一接口 + 能力声明 + 异常（纯 Kotlin）
-  base/              BaseMediaServerProvider + Provider 注册表
-  emby/ jellyfin/ webdav/ local/   具体数据源（local 已实现；其余 Phase 1）
-  smb/ aliyun/ baidu/ quark/ china-mobile/ tianyi/   规划占位（README）
-metadata/            媒体元数据（刮削）抽象
-feature/
-  home/ server/ library/ detail/ search/ settings/ player/    UI 模块
-docs/                providers / player / api 设计文档
+  api/               最小 Provider 契约、可选能力、Descriptor/Handle
+  base/              Registry、认证协调器、加密 CredentialVault
+  emby/ jellyfin/    协议探测与 Phase 1 契约骨架
+  webdav/            OPTIONS 探测、Basic 凭据生命周期、业务骨架
+  local/             SAF 文件树浏览与 content:// 播放
+metadata/            元数据抽象
+feature/             home/server/library/detail/search/settings/player
 ```
 
-## 环境要求
+## 环境与验证
 
 - JDK 17+
-- Android SDK（compileSdk 35，minSdk 26，build-tools 35.0.0）
-- Gradle 8.9（仓库已带 wrapper）
-
-## 构建
+- Android SDK：compileSdk/targetSdk 35，minSdk 26
+- Gradle 8.9（仓库包含 Wrapper）
 
 ```bash
-# 需要 local.properties 或 ANDROID_HOME 指向 SDK
-./gradlew assembleDebug          # 编译 + 打包 APK
-./gradlew testDebugUnitTest      # 单元测试
-./gradlew lintDebug              # Lint 检查
+./gradlew assembleDebug
+./gradlew testDebugUnitTest
+./gradlew lintDebug
 ```
 
-产物：`app/build/outputs/apk/debug/app-debug.apk`
+同样的三项检查由 [Android CI](.github/workflows/android-ci.yml) 在 PR 与主分支推送时执行。
 
-## 当前可用的端到端路径（Phase 0）
+## 当前可用路径
 
-1. 首页 → 添加媒体库 → 选择类型（Emby / Jellyfin / WebDAV / 本地存储）→ 测试连接 → 保存。
-2. 点击"本地存储"卡片 → 浏览应用外部目录文件树（文件夹可进入/返回上级）。
-3. 点击视频文件 → 播放器（PlayerView + 播放/暂停/进度/倍速/音轨/字幕选择）。
-4. 播放进度自动写入本地快照 → 首页"继续观看"。
-5. 设置页可改默认倍速、字幕大小、硬解/直连偏好等（DataStore 持久化）。
+1. 首页 → 添加媒体库；可选类型由 Provider Registry 动态提供。
+2. 本地媒体 → 系统目录选择器 → 持久化文档树授权 → 浏览文件树。
+3. 点击媒体 → Media3 播放 `content://` 或 Provider 解析出的临时资源。
+4. UI 位置约每 500ms 刷新；本地进度约 5s 快照；远端按 Provider 策略上报；暂停/拖动/停止/结束即时同步。
 
-Emby / Jellyfin / WebDAV 的 API 业务（登录、媒体库、搜索、播放源解析、进度上报）为 Phase 1
-目标，当前会以明确的中文错误提示"尚未实现"（见 TASKS.md）。
+Emby/Jellyfin 目前只实现服务器身份探测，WebDAV 已实现协议探测与 Basic 凭据保存；媒体库、搜索、播放源、
+远端进度等完整业务在 V0.1 实现，当前通过结构化 `NotYetImplemented` 明确失败。
 
-## 安全约定（强制）
+## 安全约定
 
-- 禁止源码硬编码 Token / Cookie / 密码。
-- Token 走 `core:security`（Android Keystore AES/GCM 加密存储）。
-- 临时播放 URL 绝不落库（ADR-003），播放时由 Provider 动态解析。
-- 日志统一经 `Redactor` 脱敏（Authorization / Cookie / Token / 密码）。
+- 禁止硬编码或明文持久化 Token、Cookie、密码。
+- 临时播放 URL 绝不落库；只持久化稳定资源标识。
+- 所有日志经 `Redactor` 脱敏。
+- Provider 登录成功后只保留长期会话；必须长期使用密码的协议才保存加密密码。
 
 ## 多 AI 协作
 
-开始任务前先读：README / ARCHITECTURE / ROADMAP / TASKS / DECISIONS / HANDOFF。
-完成任务后更新：TASKS / CHANGELOG / HANDOFF（重要决策同步 DECISIONS）。
+开始前阅读 README / ARCHITECTURE / ROADMAP / TASKS / DECISIONS / HANDOFF。完成后更新 TASKS / CHANGELOG /
+HANDOFF；改变基础契约时同步 DECISIONS。CI 结果优先于文字声明。

@@ -1,47 +1,42 @@
-# 数据源（Provider）设计文档
+# Provider 设计
 
-## 统一接口
+## 契约与装配
 
-所有数据源实现 `com.mediahub.provider.api.MediaProvider`（组合认证/媒体库/浏览/播放/搜索/字幕/进度
-能力），通过 `MediaProviderFactory` 创建并经 Hilt `@IntoSet` 注册进 `MediaProviderRegistry`。
-UI 通过 `registry.create(server)` 获取实例，按 `ProviderCapability` 决定展示。
+所有数据源实现最小 `MediaProvider`，再按真实能力实现独立接口。Factory 暴露 `ProviderDescriptor` 并返回
+`ProviderHandle`，通过 Hilt `@IntoSet` 注册。Registry 按稳定 providerId 查找，添加页直接读取 Descriptor。
 
-数据流：`Remote Model → Mapper → Domain Model(core:model)`。
-禁止：UI 处理各源原始 JSON；Provider 特有 if/else 泄漏到 UI。
+| Provider | 组合能力 |
+|---|---|
+| Emby/Jellyfin | Auth + Library + Playback + Search + Subtitle + Progress |
+| WebDAV | Auth + Browse + Playback |
+| Local | Browse + Playback |
 
-## Emby（Phase 1 实现）
+Remote DTO 与协议细节只能存在于具体 Provider；输出统一 Domain Model。禁止 UI 按来源写 if/else。
 
-待确认 endpoint（**必须查官方文档，禁止凭记忆虚构**）：
+## 连接探测
 
-- 认证：`POST /Users/AuthenticateByName`（Body: Username/Pw；Header: X-Emby-Token 需客户端标识）
-- 媒体库：`GET /Users/{userId}/Views`
-- 浏览/详情：`GET /Users/{userId}/Items?...`、`GET /Users/{userId}/Items/{itemId}`
-- 搜索：`GET /Search/Hints?...`
-- 播放源：`POST /Items/{itemId}/PlaybackInfo`（MediaSources → DirectPlay/DirectStream/Transcode 三态）
-- 进度：`POST /Sessions/Playing` / `POST /Sessions/Playing/Stopped`
-- 图片：`/Items/{itemId}/Images/{type}`（需带鉴权头，Coil 集成时注意）
+- Emby：读取公开 System Info，要求 Id/Version，检测到 Jellyfin ProductName 时拒绝。
+- Jellyfin：读取公开 System Info，要求 Jellyfin ProductName、Id、Version。
+- WebDAV：发送 OPTIONS，要求 2xx 与非空 DAV Header；401/403/404 均失败。
+- Local：要求 `content://` 文档树、持久读权限和可读目录。
 
-要点：默认直连（Direct Play），客户端能解码绝不请求转码；会话 Token 加密存储（core:security）。
+## 凭据
 
-## Jellyfin（Phase 1 实现）
+- Emby/Jellyfin：V0.1 实现 UsernamePassword → Access Token；成功后删除密码。
+- WebDAV：Basic 验证后加密保存，因为后续每次访问依赖该凭据。
+- 云盘：优先官方 OAuth/Device Code/Refresh Token；Cookie Session 仅在协议允许时使用。
 
-API 与 Emby 同源但**独立 Connector**：共享 `BaseMediaServerProvider`，协议差异各自实现。
-鉴权头格式（X-Emby-Authorization 构造）需以 Jellyfin 官方文档为准。
+## Local（已实现）
 
-## WebDAV（Phase 1 实现）
+添加页用系统 `ACTION_OPEN_DOCUMENT_TREE` 获取目录，调用 `takePersistableUriPermission`。Provider 用 DocumentFile
+列目录、ContentResolver 校验/读取并返回 `content://` DIRECT_PLAY；不使用 app 私有外部目录与 `file://`。
 
-- 列目录：`PROPFIND`（Depth: 1），解析 multistatus XML。
-- 认证：Basic（用户名/密码走 Keystore 加密存储）。
-- 播放：直链 = baseUrl + 路径（支持 Range），无需临时 URL 概念。
+## V0.1 顺序
 
-## 本地存储（已实现 ✅）
+1. Emby 认证与 Token Vault；
+2. Libraries/Items/详情；
+3. PlaybackInfo 与兼容性决策；
+4. Progress reporter；
+5. 再将同一契约独立实现到 Jellyfin 与 WebDAV。
 
-- 目录 → MediaItem(FOLDER)；视频/音频按扩展名归类。
-- 播放：`file://` URI，DIRECT_PLAY。
-- 根目录：`LocalRootProvider`（当前为应用外部目录）；完整"本机存储"需 SAF 文档树（后续）。
-
-## SMB / 云盘（规划）
-
-见 `provider/{smb,aliyun,baidu,quark,china-mobile,tianyi}/README.md`。
-核心原则：官方 API/OAuth 优先；临时签名 URL 播放时动态解析（ADR-003）；
-独立 Connector + Experimental 标记；凭据加密存储；不做绕过风控/会员/DRM 的实现。
+所有 endpoint、Header、DTO 必须依据官方文档，并配 MockWebServer 契约测试。临时播放 URL 只在播放时解析，永不落库。

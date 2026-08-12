@@ -14,6 +14,9 @@ enum class ProviderCapability {
     /** 文件树浏览（云盘 / NAS） */
     BROWSE,
 
+    /** 将统一 MediaItem 解析为可播放资源 */
+    PLAYBACK,
+
     /** 搜索 */
     SEARCH,
 

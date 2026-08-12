@@ -31,10 +31,13 @@ dependencies {
     implementation(project(":provider:base"))
     implementation(project(":core:model"))
     implementation(project(":core:network"))
-    implementation(project(":core:security"))
     implementation(project(":core:logging"))
 
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver)
 }

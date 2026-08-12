@@ -8,7 +8,10 @@ import androidx.room.PrimaryKey
 data class ServerEntity(
     @PrimaryKey val id: String,
     val name: String,
-    /** [com.mediahub.model.ServerType].name */
+    /**
+     * 历史列名仍为 type，值语义已迁移为稳定 providerId。
+     * 旧版枚举值由 Mapper 读取时转换，避免 Phase 0.5 无必要重建 Room 表。
+     */
     val type: String,
     val baseUrl: String,
     val username: String? = null,

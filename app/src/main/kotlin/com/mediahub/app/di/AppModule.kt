@@ -14,13 +14,13 @@ import com.mediahub.core.network.HttpClientFactory
 import com.mediahub.core.network.MediaHttpClient
 import com.mediahub.core.security.KeystoreSecretStorage
 import com.mediahub.core.security.SecretStorage
-import com.mediahub.core.security.TokenStore
 import com.mediahub.player.engine.MediaCacheProvider
 import com.mediahub.player.engine.PlaybackEngineFactory
 import com.mediahub.player.engine.PlayerFactory
+import com.mediahub.provider.api.CredentialVault
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.base.DefaultProviderRegistry
-import com.mediahub.provider.local.LocalRootProvider
+import com.mediahub.provider.base.EncryptedCredentialVault
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -55,7 +55,8 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideTokenStore(storage: SecretStorage): TokenStore = TokenStore(storage)
+    fun provideCredentialVault(storage: SecretStorage): CredentialVault =
+        EncryptedCredentialVault(storage)
 
     @Provides
     @Singleton
@@ -99,11 +100,6 @@ object AppModule {
         playerFactory: PlayerFactory,
         logger: Logger,
     ): PlaybackEngineFactory = PlaybackEngineFactory(playerFactory, logger)
-
-    @Provides
-    @Singleton
-    fun provideLocalRootProvider(@ApplicationContext context: Context): LocalRootProvider =
-        AppLocalRootProvider(context)
 }
 
 @Module

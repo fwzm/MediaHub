@@ -1,36 +1,47 @@
-# 内部 API 契约文档
+# 内部 API 契约
 
-> 模块间接口约定（非公开网络 API）。
+## Provider
+
+- `MediaProvider`：公共身份、Descriptor、协议连接测试。
+- `ProviderHandle`：可选的 auth/library/browse/playback/search/subtitle/progress 能力。
+- `MediaProviderFactory.descriptor`：Factory 自描述；`create(server)` 返回 Handle。
+- `MediaProviderRegistry`：按开放 `providerId:String` 查找 Factory/Descriptor，拒绝重复 ID。
+
+调用方先读取 Handle 能力，不判断 Provider 的具体 class 或 providerId。Descriptor capability 与 Handle 字段必须一致。
 
 ## 分页
 
-- 请求：`PageRequest(offset, limit)`（默认 limit=50）。
+- 请求：`PageRequest(offset, limit)`，默认 50。
 - 响应：`PagedResult<T>(items, totalCount?, hasMore, nextOffset?)`。
-- 规则：列表页不得一次拉全量；滚动触发下一页。
+- 列表页不得一次拉取全量。
 
-## 错误契约
+## 凭据
+
+- `Credentials`：一次认证输入；所有 `toString()` 均脱敏。
+- `SessionCredential`：登录后可长期使用的 Token/Basic/OAuth/Cookie/API Key。
+- `AuthenticationCoordinator`：认证、保存 Session、清除 pending、失败回滚。
+- `CredentialVault`：敏感信息唯一持久化接口；实现必须落入 Keystore 加密 `SecretStorage`。
+
+Emby/Jellyfin 的 UsernamePassword 在登录成功后必须换成 Token 并删除；WebDAV Basic 因协议需要可加密保留。
+禁止把 Secret 写入 Room、DataStore 或日志。
+
+## 连接测试
+
+UI 只调用 `handle.provider.testConnection(request)`。具体 Provider 校验协议身份与状态；HTTP `<500` 不是成功条件。
+
+## 进度
+
+- UI：播放器内存 StateFlow。
+- 本地：`ProgressRepository` 快照，默认 5s。
+- 远端：`MediaProgressProvider.reportingPolicy` 独立控制周期。
+- 关键事件：`PlaybackProgressReason` 的 PLAY/PAUSE/SEEK/STOP/END，立即 flush。
+
+## 错误
 
 | 层 | 类型 | 用途 |
-|----|------|------|
-| 网络 | `ApiException` | HTTP 状态 + requestId + url（脱敏） |
-| Provider | `ProviderException`（含 ErrorCode） | 认证/网络/HTTP/解析/限流/未实现 |
-| 播放 | `PlaybackError.Code` | 结构化播放错误（重试/降级依据） |
+|---|---|---|
+| 网络 | `ApiException` | HTTP/requestId/url（日志脱敏） |
+| Provider | `ProviderException` | 认证、连接、HTTP、限流、未实现 |
+| 播放 | `PlaybackError` | 重试或降级依据 |
 
-UI 规则：只展示 `message`（用户可读）；诊断信息进日志（已脱敏），不展示堆栈。
-
-## 认证与凭据
-
-- `Credentials`（用户名密码/WebDAV/Token/APIKey）仅内存，绝不落库。
-- 会话 Token：`TokenStore`（Keystore 加密），按 serverId 存取，支持过期时间。
-- 日志：所有 Logger 实现强制 Redactor 脱敏（Authorization/Cookie/Token/密码）。
-
-## 进度同步
-
-- 本地快照：`ProgressRepository`（Room playback_progress，含标题/海报快照供"继续观看"）。
-- 服务端上报：Provider.reportProgress（尽力而为，失败仅记日志）。
-- 续播：`PlaybackOptions.startPositionMs` / `PlaybackSession.resumePositionMs`。
-
-## Provider 注册
-
-- `MediaProviderFactory.serverType` + Hilt `@IntoSet` 自注册；
-- `DefaultProviderRegistry` 按 ServerType 建索引；新增源 = 新 Factory + 绑定，无需改注册表。
+UI 展示用户文案，诊断详情只进入脱敏日志。

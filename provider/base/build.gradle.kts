@@ -29,12 +29,13 @@ dependencies {
     api(project(":provider:api"))
     implementation(project(":core:model"))
     implementation(project(":core:network"))
-    implementation(project(":core:security"))
     implementation(project(":core:logging"))
+    implementation(project(":core:security"))
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.kotlinx.coroutines.core)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

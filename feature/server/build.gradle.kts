@@ -33,6 +33,7 @@ kotlin {
 dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:model"))
+    implementation(project(":core:network"))
     implementation(project(":core:database"))
     implementation(project(":core:logging"))
     implementation(project(":provider:api"))
@@ -46,6 +47,7 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.hilt.android)

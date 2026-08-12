@@ -5,37 +5,25 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.ApiClient
 import com.mediahub.core.network.ApiException
 import com.mediahub.core.network.MediaHttpClient
-import com.mediahub.core.network.ServerProbeResult
-import com.mediahub.core.security.StoredToken
-import com.mediahub.core.security.TokenStore
 import com.mediahub.model.MediaServer
-import com.mediahub.model.ServerType
 import com.mediahub.provider.api.ConnectionStatus
+import com.mediahub.provider.api.CredentialVault
+import com.mediahub.provider.api.MediaProvider
 import com.mediahub.provider.api.ProviderException
+import com.mediahub.provider.api.SessionCredential
 import java.io.IOException
 
-/**
- * 媒体服务器型 Provider 的共享基类（Emby / Jellyfin / Plex 等）。
- *
- * 只提供公共设施，不实现 [com.mediahub.provider.api.MediaProvider] 的能力契约：
- * - 统一异常映射（[ApiException]/[IOException] → [ProviderException]）；
- * - Token 会话读取/清理；
- * - 通用 HTTP 探测（[probeBaseUrl]）与结果转换。
- *
- * 协议差异（endpoint、鉴权头、连接测试语义）由子类实现，禁止塞进 if/else。
- */
+/** 媒体服务器 Connector 的异常映射与加密会话基础设施。协议探测由子类实现。 */
 abstract class BaseMediaServerProvider(
     protected val server: MediaServer,
     protected val apiClient: ApiClient,
     protected val mediaHttpClient: MediaHttpClient,
-    protected val tokenStore: TokenStore,
+    protected val credentialVault: CredentialVault,
     protected val logger: Logger,
-) {
-    final val serverId: String get() = server.id
-    final val type: ServerType get() = server.type
-    val displayName: String get() = server.displayName
+) : MediaProvider {
 
-    /** 统一 API 调用包装：异常收敛为 [ProviderException]（日志脱敏）。 */
+    final override val serverId: String get() = server.id
+
     protected suspend fun <T> apiCall(block: suspend () -> T): T =
         try {
             block()
@@ -57,33 +45,31 @@ abstract class BaseMediaServerProvider(
             throw ProviderException.Unknown(server.id, e)
         }
 
-    /** 读取当前会话 Token；未登录抛 [ProviderException.AuthRequired]。 */
-    protected suspend fun requireTokens(): StoredToken =
-        tokenStore.readTokens(server.id) ?: throw ProviderException.AuthRequired(server.id)
+    protected suspend fun requireSession(): SessionCredential =
+        credentialVault.readSession(server.id) ?: throw ProviderException.AuthRequired(server.id)
 
-    /** 子类提供"当前会话"的鉴权头（如 X-Emby-Token / X-Emby-Authorization / Basic）。 */
-    protected abstract suspend fun authHeaders(): Map<String, String>
-
-    /** 通用 HTTP 探测（只证明"地址有 HTTP 响应"，协议判定由子类 testConnection 完成）。 */
-    protected suspend fun probeBaseUrl(): ServerProbeResult = apiClient.probe(server.baseUrl)
-
-    protected fun ServerProbeResult.toConnectionStatus(): ConnectionStatus = when (this) {
-        is ServerProbeResult.Success -> ConnectionStatus(
-            ok = httpCode < 500,
-            latencyMs = latencyMs,
-            message = "HTTP $httpCode · ${latencyMs}ms",
-        )
-
-        is ServerProbeResult.Failure -> ConnectionStatus(
-            ok = false,
-            message = userMessage,
-            errorCode = ProviderException.ErrorCode.CONNECTION,
-        )
+    protected suspend fun clearCredentials() {
+        credentialVault.clear(server.id)
+        logger.i(LogTag.AUTH, "已清理认证会话 serverId=${server.id}")
     }
 
-    /** 清理会话 Token（AuthProvider.logout 实现用）。 */
-    protected suspend fun clearSession() {
-        tokenStore.clear(server.id)
-        logger.i(LogTag.AUTH, "已登出 serverId=${server.id}")
+    /** 把具体协议探测统一映射为 UI 可消费状态，同时保留结构化错误。 */
+    protected suspend fun connectionCheck(block: suspend () -> String): ConnectionStatus {
+        val startedAt = System.nanoTime()
+        return try {
+            val message = apiCall(block)
+            ConnectionStatus(
+                ok = true,
+                latencyMs = (System.nanoTime() - startedAt) / 1_000_000,
+                message = message,
+            )
+        } catch (e: ProviderException) {
+            ConnectionStatus(
+                ok = false,
+                latencyMs = (System.nanoTime() - startedAt) / 1_000_000,
+                message = e.message,
+                errorCode = e.code,
+            )
+        }
     }
 }

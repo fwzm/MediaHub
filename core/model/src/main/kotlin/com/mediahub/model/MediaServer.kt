@@ -8,7 +8,8 @@ package com.mediahub.model
 data class MediaServer(
     val id: String,
     val name: String,
-    val type: ServerType,
+    /** 稳定、开放的 Provider 标识，例如 emby / jellyfin / webdav。 */
+    val providerId: String,
     val baseUrl: String,
     val username: String? = null,
     val isDefault: Boolean = false,
@@ -17,5 +18,5 @@ data class MediaServer(
     val lastConnectedAtEpochMs: Long? = null,
     val lastError: String? = null,
 ) {
-    val displayName: String get() = name.ifBlank { type.label }
+    val displayName: String get() = name.ifBlank { providerId }
 }

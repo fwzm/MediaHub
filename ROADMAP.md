@@ -13,6 +13,18 @@
 - [x] 文档体系（README/ARCHITECTURE/ROADMAP/TASKS/DECISIONS/CHANGELOG/HANDOFF）
 - [x] 可编译（assembleDebug）+ 单测 + lint 通过
 
+## Phase 0.5 —— 架构加固（当前）
+
+- [x] Provider 接口隔离与类型安全能力组合
+- [x] 开放 providerId、Factory 自描述与动态添加页
+- [x] 加密凭据/会话生命周期
+- [x] 播放请求上下文会话隔离
+- [x] 分层、节流的播放进度管线
+- [x] Android SAF 本地目录
+- [x] Provider 协议级连接测试
+- [x] CI 与核心边界单测
+- [ ] GitHub Actions 三项质量门禁实跑通过后关闭本阶段
+
 ## V0.1 —— MVP 闭环（Emby + Jellyfin + 本地 + WebDAV + 播放器）
 
 目标：14 项 MVP 清单（见任务要求第十八节）全部可用。

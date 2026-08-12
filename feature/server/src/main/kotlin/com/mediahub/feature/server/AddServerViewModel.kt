@@ -3,13 +3,17 @@ package com.mediahub.feature.server
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.IdGenerator
+import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
-import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.model.MediaServer
-import com.mediahub.model.ServerType
+import com.mediahub.provider.api.AuthMethod
+import com.mediahub.provider.api.AuthenticationCoordinator
 import com.mediahub.provider.api.ConnectionStatus
+import com.mediahub.provider.api.ConnectionTestRequest
+import com.mediahub.provider.api.Credentials
 import com.mediahub.provider.api.MediaProviderRegistry
+import com.mediahub.provider.api.ProviderCategory
 import com.mediahub.provider.api.ProviderDescriptor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -20,46 +24,54 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class AddServerUiState(
-    val selectedDescriptorId: String = "",
+    val providers: List<ProviderDescriptor> = emptyList(),
+    val selectedProviderId: String = "",
     val name: String = "",
     val baseUrl: String = "",
     val username: String = "",
     val password: String = "",
+    val localTreeUri: String? = null,
+    val localTreeName: String? = null,
     val isTesting: Boolean = false,
     val testResult: ConnectionStatus? = null,
     val isSaving: Boolean = false,
     val error: String? = null,
-)
+) {
+    val selectedDescriptor: ProviderDescriptor?
+        get() = providers.firstOrNull { it.providerId == selectedProviderId }
+}
 
 @HiltViewModel
 class AddServerViewModel @Inject constructor(
     private val serverRepository: ServerRepository,
     private val registry: MediaProviderRegistry,
+    private val authenticationCoordinator: AuthenticationCoordinator,
     private val logger: Logger,
 ) : ViewModel() {
-
-    /** 可用数据源类型：从 Registry 动态读取（ADR-015），新增 Provider 无需改 UI。 */
-    val availableProviders: List<ProviderDescriptor> = registry.descriptors()
-
-    /** 保存前先生成稳定 id（测试连接与保存使用同一实例）。 */
-    private val serverId = IdGenerator.newId("srv")
+    private val availableDescriptors = registry.descriptors
+    private val initialDescriptor = availableDescriptors.firstOrNull { it.isSelectable }
 
     private val _uiState = MutableStateFlow(
-        AddServerUiState(selectedDescriptorId = availableProviders.firstOrNull()?.id.orEmpty())
+        AddServerUiState(
+            providers = availableDescriptors,
+            selectedProviderId = initialDescriptor?.providerId.orEmpty(),
+            name = initialDescriptor?.displayName.orEmpty(),
+        )
     )
     val uiState: StateFlow<AddServerUiState> = _uiState.asStateFlow()
 
-    private fun descriptorOf(id: String): ProviderDescriptor? =
-        availableProviders.firstOrNull { it.id == id }
-
-    private fun selectedDescriptor(): ProviderDescriptor? =
-        descriptorOf(_uiState.value.selectedDescriptorId)
-
-    fun selectProvider(descriptor: ProviderDescriptor) {
+    fun selectProvider(providerId: String) {
+        val descriptor = registry.descriptorFor(providerId) ?: return
+        if (!descriptor.isSelectable) return
         _uiState.update {
             it.copy(
-                selectedDescriptorId = descriptor.id,
-                name = it.name.ifBlank { descriptor.displayName },
+                selectedProviderId = providerId,
+                name = descriptor.displayName,
+                baseUrl = "",
+                username = "",
+                password = "",
+                localTreeUri = null,
+                localTreeName = null,
                 testResult = null,
                 error = null,
             )
@@ -71,60 +83,104 @@ class AddServerViewModel @Inject constructor(
     fun updateUsername(username: String) = _uiState.update { it.copy(username = username) }
     fun updatePassword(password: String) = _uiState.update { it.copy(password = password) }
 
-    /** 协议级连接测试：交给具体 Provider 完成（ADR-019）。 */
+    fun updateLocalTree(uri: String, displayName: String) = _uiState.update {
+        it.copy(localTreeUri = uri, localTreeName = displayName, testResult = null, error = null)
+    }
+
+    fun reportDirectoryGrantError(message: String) = _uiState.update { it.copy(error = message) }
+
     fun testConnection() {
-        val descriptor = selectedDescriptor() ?: return
-        if (descriptor.serverType != ServerType.LOCAL && _uiState.value.baseUrl.isBlank()) {
-            _uiState.update {
-                it.copy(testResult = ConnectionStatus(ok = false, message = "请先填写服务器地址"))
+        val state = _uiState.value
+        val draft = runCatching { buildServer(state, id = "connection-probe") }
+            .getOrElse {
+                _uiState.update { current -> current.copy(testResult = ConnectionStatus(false, message = it.message)) }
+                return
             }
+        val handle = registry.create(draft)
+        if (handle == null) {
+            _uiState.update { it.copy(testResult = ConnectionStatus(false, message = "Provider 尚未注册")) }
             return
         }
-        val server = buildServer()
         viewModelScope.launch {
             _uiState.update { it.copy(isTesting = true, testResult = null, error = null) }
-            val handle = registry.create(server)
-            val result = if (handle != null) {
-                handle.provider.testConnection()
-            } else {
-                ConnectionStatus(ok = false, message = "不支持的媒体源类型")
-            }
+            val result = runCatching {
+                handle.provider.testConnection(ConnectionTestRequest(credentials = credentialsFor(state)))
+            }.getOrElse { ConnectionStatus(false, message = it.message ?: "连接测试失败") }
             _uiState.update { it.copy(isTesting = false, testResult = result) }
         }
     }
 
     fun save(onSaved: (MediaServer) -> Unit) {
-        val descriptor = selectedDescriptor() ?: return
-        val server = buildServer()
-        if (descriptor.serverType != ServerType.LOCAL && server.baseUrl.isBlank()) {
-            _uiState.update { it.copy(error = "请填写服务器地址") }
+        val state = _uiState.value
+        val server = runCatching { buildServer(state, id = IdGenerator.newId("srv")) }
+            .getOrElse {
+                _uiState.update { current -> current.copy(error = it.message) }
+                return
+            }
+        val handle = registry.create(server)
+        if (handle == null) {
+            _uiState.update { it.copy(error = "Provider 尚未注册") }
             return
         }
+
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, error = null) }
+            var persisted = false
             try {
-                serverRepository.addServer(server)
-                // 密码仅用于后续 Provider 认证（Phase 1，经 CredentialVault 加密存储），
-                // 此处不落库、不记日志（见 ADR-016）。
-                logger.i(LogTag.UI, "已添加媒体源 serverId=${server.id} type=${server.type.name}")
-                onSaved(server)
+                if (handle.descriptor.category == ProviderCategory.LOCAL_STORAGE) {
+                    val status = handle.provider.testConnection()
+                    if (!status.ok) error(status.message ?: "本地目录不可访问")
+                }
+                val saved = serverRepository.addServer(server)
+                persisted = true
+                credentialsFor(state)?.let { credentials ->
+                    if (handle.auth != null) {
+                        authenticationCoordinator.authenticateOrDefer(handle, credentials)
+                    }
+                }
+                logger.i(
+                    LogTag.UI,
+                    "已添加媒体源 serverId=${saved.id} providerId=${saved.providerId}",
+                )
+                _uiState.update { it.copy(isSaving = false) }
+                onSaved(saved)
             } catch (e: Exception) {
-                logger.e(LogTag.UI, "添加媒体源失败", e)
+                if (persisted) serverRepository.deleteServer(server.id)
+                runCatching { authenticationCoordinator.clear(server.id) }
+                    .onFailure { logger.w(LogTag.AUTH, "回滚凭据失败 serverId=${server.id}", it) }
+                logger.e(LogTag.UI, "添加媒体源失败 providerId=${server.providerId}", e)
                 _uiState.update { it.copy(isSaving = false, error = "保存失败：${e.message}") }
             }
         }
     }
 
-    private fun buildServer(): MediaServer {
-        val descriptor = selectedDescriptor()
-        val state = _uiState.value
+    private fun buildServer(state: AddServerUiState, id: String): MediaServer {
+        val descriptor = requireNotNull(state.selectedDescriptor) { "请选择媒体源类型" }
+        require(descriptor.isSelectable) { "${descriptor.displayName} 即将支持" }
+        val location = if (descriptor.category == ProviderCategory.LOCAL_STORAGE) {
+            requireNotNull(state.localTreeUri) { "请先选择本地媒体目录" }
+        } else {
+            state.baseUrl.trim().trimEnd('/').also { require(it.isNotBlank()) { "请填写服务器地址" } }
+        }
         return MediaServer(
-            id = serverId,
-            name = state.name.trim().ifBlank { descriptor?.displayName ?: "媒体源" },
-            type = descriptor?.serverType ?: ServerType.EMBY,
-            baseUrl = state.baseUrl.trim().trimEnd('/'),
+            id = id,
+            name = state.name.trim().ifBlank { descriptor.displayName },
+            providerId = descriptor.providerId,
+            baseUrl = location,
             username = state.username.trim().ifBlank { null },
             createdAtEpochMs = System.currentTimeMillis(),
         )
+    }
+
+    private fun credentialsFor(state: AddServerUiState): Credentials? {
+        val descriptor = state.selectedDescriptor ?: return null
+        val username = state.username.trim()
+        val password = state.password
+        if (username.isBlank() && password.isBlank()) return null
+        return when (descriptor.authMethod) {
+            AuthMethod.USERNAME_PASSWORD -> Credentials.UsernamePassword(username, password)
+            AuthMethod.BASIC -> Credentials.BasicAuth(username, password)
+            else -> null
+        }
     }
 }

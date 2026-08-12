@@ -1,37 +1,36 @@
 package com.mediahub.provider.base
 
 import com.mediahub.model.MediaServer
-import com.mediahub.model.ServerType
 import com.mediahub.provider.api.MediaProviderFactory
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderDescriptor
-import com.mediahub.provider.api.ProviderHandle
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * 默认 Provider 注册表：由 Hilt 多绑定（@IntoSet）注入所有 [MediaProviderFactory]，
- * 内部按键（[ServerType]）建立索引（见 ADR-005、ADR-015）。
- *
- * 新增数据源 = 新增 Factory + @IntoSet 绑定；UI 通过 [descriptors] 动态渲染，
- * 无需修改核心逻辑。
- */
+/** Hilt @IntoSet 注册的工厂索引；键为开放的稳定 providerId。 */
 @Singleton
 class DefaultProviderRegistry @Inject constructor(
     factories: Set<@JvmSuppressWildcards MediaProviderFactory>,
 ) : MediaProviderRegistry {
 
-    private val factoryMap: Map<ServerType, MediaProviderFactory> =
-        factories.associateBy { it.descriptor.serverType }
+    private val factoryMap: Map<String, MediaProviderFactory> = factories
+        .groupBy { it.descriptor.providerId }
+        .also { grouped ->
+            val duplicates = grouped.filterValues { it.size > 1 }.keys
+            require(duplicates.isEmpty()) { "ProviderFactory 重复注册：${duplicates.sorted()}" }
+        }
+        .mapValues { it.value.single() }
 
-    override fun factoryFor(type: ServerType): MediaProviderFactory? = factoryMap[type]
+    private val descriptorMap: Map<String, ProviderDescriptor> =
+        PlannedProviderCatalog.descriptors.associateBy { it.providerId } +
+            factoryMap.mapValues { it.value.descriptor }
 
-    override fun create(server: MediaServer): ProviderHandle? =
-        factoryMap[server.type]?.create(server)
+    override fun factoryFor(providerId: String): MediaProviderFactory? = factoryMap[providerId]
 
-    override val supportedTypes: Set<ServerType> get() = factoryMap.keys
+    override fun descriptorFor(providerId: String): ProviderDescriptor? = descriptorMap[providerId]
 
-    override fun descriptors(): List<ProviderDescriptor> =
-        factoryMap.values.map { it.descriptor }
-            .sortedBy { it.displayName }
+    override fun create(server: MediaServer) = factoryMap[server.providerId]?.create(server)
+
+    override val descriptors: List<ProviderDescriptor> = descriptorMap.values
+        .sortedWith(compareBy(ProviderDescriptor::sortOrder, ProviderDescriptor::displayName))
 }

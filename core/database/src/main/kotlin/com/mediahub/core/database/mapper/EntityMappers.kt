@@ -9,7 +9,6 @@ import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaType
 import com.mediahub.model.PlaybackMode
 import com.mediahub.model.PlaybackProgress
-import com.mediahub.model.ServerType
 
 /** Entity ↔ Domain 映射（数据库层与领域层解耦）。 */
 object ServerEntityMappers {
@@ -17,7 +16,7 @@ object ServerEntityMappers {
     fun ServerEntity.toDomain(): MediaServer = MediaServer(
         id = id,
         name = name,
-        type = runCatching { ServerType.valueOf(type) }.getOrElse { ServerType.LOCAL },
+        providerId = legacyTypeToProviderId(type),
         baseUrl = baseUrl,
         username = username,
         isDefault = isDefault,
@@ -30,7 +29,7 @@ object ServerEntityMappers {
     fun MediaServer.toEntity(): ServerEntity = ServerEntity(
         id = id,
         name = name,
-        type = type.name,
+        type = providerId,
         baseUrl = baseUrl,
         username = username,
         isDefault = isDefault,
@@ -83,4 +82,21 @@ object ServerEntityMappers {
         posterUrl = posterUrl,
         itemType = itemType?.name,
     )
+
+    /** Phase 0 枚举名 → Phase 0.5 稳定 providerId；未知字符串原样保留。 */
+    internal fun legacyTypeToProviderId(value: String): String = when (value) {
+        "EMBY" -> "emby"
+        "JELLYFIN" -> "jellyfin"
+        "PLEX" -> "plex"
+        "FN_NAS" -> "fnnas"
+        "WEBDAV" -> "webdav"
+        "SMB" -> "smb"
+        "LOCAL" -> "local"
+        "ALIYUN_DRIVE" -> "aliyundrive"
+        "BAIDU_DRIVE" -> "baidudrive"
+        "QUARK_DRIVE" -> "quarkdrive"
+        "CHINA_MOBILE_CLOUD" -> "chinamobilecloud"
+        "TIANYI_CLOUD" -> "tianyicloud"
+        else -> value.lowercase()
+    }
 }

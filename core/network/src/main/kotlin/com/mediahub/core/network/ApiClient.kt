@@ -4,6 +4,7 @@ import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.Redactor
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.DeserializationStrategy
@@ -95,23 +96,34 @@ class ApiClient(
      * 服务器连通性探测（添加媒体库时的"测试连接"）。
      * 仅做基础 HTTP 探测，不包含任何数据源鉴权逻辑。
      */
-    suspend fun probe(baseUrl: String, timeoutMs: Long = 10_000): ServerProbeResult {
+    suspend fun probe(
+        baseUrl: String,
+        method: String = "GET",
+        headers: Map<String, String> = emptyMap(),
+        timeoutMs: Long = 10_000,
+    ): ServerProbeResult {
         val normalized = baseUrl.trimEnd('/')
         val url = try {
             normalized.toHttpUrl()
         } catch (e: IllegalArgumentException) {
             return ServerProbeResult.Failure("URL 格式无效", e.message)
         }
-        val request = Request.Builder().url(url).method("GET", null).build()
+        val request = Request.Builder()
+            .url(url)
+            .method(method, null)
+            .apply { headers.forEach { (name, value) -> header(name, value) } }
+            .build()
+        val probeClient = client.newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS).build()
         return withContext(Dispatchers.IO) {
             val start = System.nanoTime()
             try {
-                client.newCall(request).execute().use { response ->
+                probeClient.newCall(request).execute().use { response ->
                     val latencyMs = (System.nanoTime() - start) / 1_000_000
                     ServerProbeResult.Success(
                         httpCode = response.code,
                         latencyMs = latencyMs,
                         contentType = response.header("Content-Type"),
+                        responseHeaders = response.headers.toMap(),
                     )
                 }
             } catch (e: IOException) {
@@ -130,6 +142,7 @@ sealed interface ServerProbeResult {
         val httpCode: Int,
         val latencyMs: Long,
         val contentType: String? = null,
+        val responseHeaders: Map<String, String> = emptyMap(),
     ) : ServerProbeResult
 
     data class Failure(

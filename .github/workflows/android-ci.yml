@@ -1,18 +1,22 @@
 name: Android CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    branches: [main]
+  push:
+    branches: [main, "codex/**"]
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: android-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,24 +25,13 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v3
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Verify wrapper permissions
+        run: chmod +x ./gradlew
 
-      - name: Install SDK components
-        run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" > /dev/null
-
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
-
-      - name: Unit tests
-        run: ./gradlew testDebugUnitTest --no-daemon
-
-      - name: Lint
-        run: ./gradlew lintDebug --no-daemon
+      - name: Assemble, test, and lint
+        run: ./gradlew --stacktrace assembleDebug testDebugUnitTest lintDebug

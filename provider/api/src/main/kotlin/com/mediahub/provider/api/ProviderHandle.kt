@@ -1,30 +1,39 @@
 package com.mediahub.provider.api
 
 /**
- * Provider 能力组合句柄（类型安全，见 ADR-014）。
- *
- * 上层（UI / UseCase / ViewModel）通过可空字段判断并使用能力，
- * 无需到处 `as?` 强转，也无需依赖 `type == EMBY` 之类分支。
- *
- * 一致性约束：字段非空 ⇔ descriptor.capabilities 声明该能力；
- * 由 [MediaProviderFactory.create] 负责保证。
+ * 一个 Provider 实例及其可选能力的类型安全组合。
+ * Descriptor 与实际能力在构造时校验，杜绝“声明不支持却被接口强迫实现”。
  */
 data class ProviderHandle(
     val provider: MediaProvider,
     val auth: MediaAuthProvider? = null,
     val library: MediaLibraryProvider? = null,
-    val detail: MediaDetailProvider? = null,
     val browse: MediaBrowseProvider? = null,
     val playback: MediaPlaybackProvider? = null,
     val search: MediaSearchProvider? = null,
     val subtitle: MediaSubtitleProvider? = null,
     val progress: MediaProgressProvider? = null,
 ) {
-    val serverId: String get() = provider.serverId
-    val type: com.mediahub.model.ServerType get() = provider.type
+    init {
+        val declared = provider.descriptor.capabilities
+        requireCapability(declared, ProviderCapability.AUTH, auth)
+        requireCapability(declared, ProviderCapability.LIBRARY, library)
+        requireCapability(declared, ProviderCapability.BROWSE, browse)
+        requireCapability(declared, ProviderCapability.PLAYBACK, playback)
+        requireCapability(declared, ProviderCapability.SEARCH, search)
+        requireCapability(declared, ProviderCapability.SUBTITLE, subtitle)
+        requireCapability(declared, ProviderCapability.PROGRESS, progress)
+    }
 
-    /** 是否有任何实际可用的能力（骨架阶段为 false 时 UI 显示"未接入"）。 */
-    val hasAnyCapability: Boolean
-        get() = auth != null || library != null || detail != null || browse != null ||
-            playback != null || search != null || subtitle != null || progress != null
+    val descriptor: ProviderDescriptor get() = provider.descriptor
+
+    private fun requireCapability(
+        declared: Set<ProviderCapability>,
+        capability: ProviderCapability,
+        implementation: Any?,
+    ) {
+        require((capability in declared) == (implementation != null)) {
+            "${descriptor.providerId} 的 $capability 声明与实现不一致"
+        }
+    }
 }

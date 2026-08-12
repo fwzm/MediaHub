@@ -74,13 +74,12 @@ class LibraryViewModel @Inject constructor(
                 val handle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 val page = PageRequest(limit = 200)
-                // 能力组合（ADR-014）：媒体库型走 library，文件树型走 browse，均无则提示未接入。
-                val library = handle.library
-                val browse = handle.browse
                 val result = when {
-                    library != null -> library.getItems(libraryId, page)
-                    browse != null -> browse.listFolder(currentFolder, page)
-                    else -> throw ProviderException.NotYetImplemented(serverId, "该数据源的浏览能力尚未接入")
+                    currentFolder != null && handle.browse != null ->
+                        handle.browse.listFolder(currentFolder, page)
+                    handle.library != null -> handle.library.getItems(libraryId, page)
+                    handle.browse != null -> handle.browse.listFolder(currentFolder, page)
+                    else -> throw ProviderException.NotYetImplemented(serverId, "该媒体源浏览能力")
                 }
                 _uiState.value = LibraryUiState.Content(
                     items = result.items,

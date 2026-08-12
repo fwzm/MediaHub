@@ -1,87 +1,72 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12（Phase 0.5 架构加固交付）。本文件是协作第一手资料。
+> 最后更新：2026-08-12，Phase 0.5 Architecture Hardening。
 
-## 1. 当前项目状态
+## 1. 当前状态
 
-- **Phase 0 骨架 + Phase 0.5 架构加固已完成**：`assembleDebug`、`testDebugUnitTest`（40 用例）、
-  `lintDebug` 全部通过；CI（GitHub Actions）已就绪。
-- APK：`app/build/outputs/apk/debug/app-debug.apk`。
-- 端到端可用路径：添加媒体库（本地存储）→ 文件树浏览 → 播放（本地文件）→ 继续观看。
-- Emby / Jellyfin / WebDAV 的 API 业务**未实现**（Phase 1 目标，见 TASKS.md），
-  能力组合已就绪，方法以 `ProviderException.NotYetImplemented` 占位；
-  连接测试已是协议级（System Info / OPTIONS 嗅探）。
+- Phase 0.5 代码与测试已完成，GitHub Actions 三项门禁正在实跑验证；结果以本分支 CI 为准。
+- 本阶段没有实现完整 Emby/Jellyfin/WebDAV 业务 API，也没有进入 V0.1。
+- LocalProvider 已从 app 私有目录迁移到 SAF 文档树；旧 `file://` 路径不再是长期方案。
 
-## 2. 本次完成了什么
+## 2. 关键契约
 
-- Phase 0：23 模块工程、领域模型、Provider 抽象、网络层、存储、Media3 引擎、
-  兼容性评估器、Server 管理 UI、首页/媒体库/播放器/设置页面、文档体系、git 初始提交。
-- Phase 0.5：MediaProvider 能力组合 + ProviderHandle；ProviderDescriptor 动态注册；
-  CredentialVault；进度三档节流（ProgressSyncCoordinator）；播放请求头 per-engine；
-  协议级连接测试；CI workflow；测试扩至 40 用例。
+- `MediaProvider` 只有 `serverId`、`descriptor`、`testConnection`。
+- Factory 返回 `ProviderHandle`；可选能力为 auth/library/browse/playback/search/subtitle/progress。
+- Factory 声明 `ProviderDescriptor`；Registry 使用开放 `providerId:String`，添加页动态渲染。
+- `CredentialVault` 是敏感凭据唯一持久化入口，具体实现位于 `provider:base`，底层使用
+  `core:security.SecretStorage`。Room/DataStore 不存 Secret。
+- 播放请求头属于 `PlaybackRequestContext`/MediaSource，不得恢复全局 mutable holder。
+- 高频 progress 只更新内存；本地/远端经过 `ProgressSyncGate`，关键事件即时 flush。
 
-## 3. 修改了哪些文件（关键）
+## 3. 兼容迁移
 
+`MediaServer.providerId` 已替代 `ServerType`。Room 表结构仍为 v1，历史列 `servers.type` 继续存在：
+
+- 读取：Mapper 把 `EMBY`、`ALIYUN_DRIVE` 等旧枚举名转成稳定小写 ID。
+- 写入：直接把 providerId 写进该列。
+- 后续首次确有必要的 Room migration 再把列名改为 `provider_id`，不能静默破坏用户数据。
+
+## 4. Provider 当前完成度
+
+| Provider | 已完成 | V0.1 仍需实现 |
+|---|---|---|
+| Local | SAF 授权、浏览、content:// 播放 | 媒体扫描/元数据体验 |
+| Emby | Descriptor、能力装配、System Info 身份探测 | 登录、Library、播放源、搜索、字幕、进度 |
+| Jellyfin | Descriptor、能力装配、System Info 身份探测 | 同上，保持独立 Connector |
+| WebDAV | Descriptor、OPTIONS/DAV 探测、Basic 加密会话 | PROPFIND、路径/转义、Range 播放 |
+
+Emby/Jellyfin 登录暂未实现时，`AuthenticationCoordinator` 会把用户输入加密暂存而不是丢弃。V0.1 登录成功后
+必须用 Token Session 原子替换 pending password 并删除原始密码。
+
+## 5. 播放与进度注意事项
+
+- `PlayerFactory` 可以是 Singleton，因为它只创建对象；任何具体播放 Header/Cookie 都不能保存为工厂字段。
+- UI 500ms 更新、本地默认 5s、Provider 默认 10s；Provider 可设 `periodicIntervalMs=null` 只接收关键事件。
+- Slider 只在拖动结束时触发一次 Seek；返回按钮先 STOP flush。异常销毁由 `onCleared` 兜底 final flush。
+- `PlaybackSource` 仍是单主 URL 模型；未来资源集合演进必须保持每资源独立 Header/过期时间。
+
+## 6. 测试与门禁
+
+本阶段新增测试覆盖：
+
+- Provider Registry 开放 ID/重复检测、Descriptor 与 Handle 能力一致性
+- 成功认证 session 保存、未实现认证的 pending 保存、Credential codec 不出现明文
+- 两个播放会话的 Authorization/Cookie 隔离与输入防御性复制
+- 本地/远端独立节流与关键事件重置
+- 旧 ServerType 数据映射与自定义 providerId round-trip
+- Emby/Jellyfin/WebDAV 协议身份探测（MockWebServer）
+
+CI 工作流：`.github/workflows/android-ci.yml`，必须全部通过：
+
+```bash
+./gradlew assembleDebug
+./gradlew testDebugUnitTest
+./gradlew lintDebug
 ```
-根：settings.gradle.kts / build.gradle.kts / gradle.properties / gradle/libs.versions.toml
-core/model/*（领域模型） core/network/*（网络） core/database/*（Room/DataStore）
-core/security/*（Keystore） core/logging/*（日志脱敏）
-player/engine/*（Media3 封装） player/compatibility/*（评估器）
-provider/api/* provider/base/* provider/local/* provider/{emby,jellyfin,webdav}/*
-feature/{home,server,library,detail,search,settings,player}/*
-app/*（DI/导航/主题/资源）
-docs/* 与 7 份根文档
-```
 
-## 4. 为什么这样设计（要点）
+## 7. 下一阶段唯一入口
 
-- 所有数据源实现 `MediaProvider`（provider:api），UI 不感知来源（ADR-002）。
-- 播放 URL 永不落库，播放时 resolve（ADR-003）。
-- Provider 自注册用 Hilt `@IntoSet`（@IntoMap 在该工具链有 KSP bug，ADR-005）。
-- 播放决策纯函数化（ADR-004），评估器已就绪但**尚未接入 resolve 流程**（下一步做）。
-- 缓存四类分离（ADR-009）；网络 API/媒体分离（ADR-012）。
+Phase 0.5 门禁全绿后进入 Emby：先实现 AuthenticateByName → Token Vault → current user，再做 Libraries/Items，
+然后 PlaybackInfo 与 progress reporter。端点、Header 和 DTO 必须逐项对照官方文档，并为网络契约加 MockWebServer 测试。
 
-## 5. 遗留问题 / 下一步建议
-
-1. **V0.1 第一优先**：Emby Provider 登录 → 媒体库 → 浏览 → 播放源解析 → 进度上报
-   （endpoint 必须查官方文档，禁止凭记忆虚构；见 docs/providers/README.md 的待确认清单）。
-2. 播放前把 `PlaybackCompatibilityEvaluator` 接入 `resolvePlayback` 决策流程。
-3. `usesCleartextTraffic=true` 是临时的，接入 provider 后换 networkSecurityConfig。
-4. AddServer 认证流接入 CredentialVault（密码按 Provider 策略加密保存/销毁，ADR-016）。
-5. SAF 目录选择器（Phase 0.6：ACTION_OPEN_DOCUMENT_TREE + DocumentFile 树导航）。
-6. 详情页/全局搜索/诊断页为占位（TASKS.md 有清单）；图片管线（Coil）待媒体库数据接入后引入。
-
-## 6. 已知 Bug / 注意事项
-
-- `LibraryViewModel.goToParent()` 与 `openFolder()` 的文件夹栈：当前实现正确；
-  若 Provider 支持非树形浏览（如 Emby 无 folder 概念），此逻辑需按 ProviderCapability 分支。
-- `PlaybackEngine` 进度循环 1s 间隔；服务端上报为尽力而为，失败只记日志（不打断播放）。
-- 播放器音轨/字幕选择基于"每组取第一轨"（TrackMapper 简化），多轨同组场景待完善。
-- 设置页"默认倍速"当前仅持久化，播放器起播未读取（V0.1 接入）。
-- Room schema 导出在 `core/database/schemas`（迁移用，勿删）。
-
-## 7. 禁止随意修改
-
-- `core:model` 领域模型：变更需先更新 ADR 并同步全部 Provider（禁止未经说明改 Schema/模型）。
-- `PlaybackCompatibilityEvaluator` 的决策语义（DIRECT_STREAM=视频不转码）。
-- `Redactor` 脱敏规则：只能加强，不能放松。
-- 网络分层（ApiClient/MediaHttpClient 分离）与缓存分离原则。
-- 播放引擎封装（player:engine）对外 API（PlaybackEngine/PlaybackSession/PlaybackUiState）。
-- Provider 能力组合：**禁止把新能力塞回 MediaProvider Fat Interface**；
-  新增能力 = 独立能力接口 + ProviderHandle 字段 + Factory 装配。
-- 播放请求头：禁止恢复全局 Singleton holder（ADR-018）。
-- 进度上报：禁止回到"每秒写库+上报"（ADR-017）。
-
-## 8. 沙箱专用说明（仅本环境）
-
-- 本沙箱为 Linux **aarch64**：AGP 无 arm64 版 aapt2，验证 APK 需启用 qemu 包装器：
-  `gradle.properties` 中 `android.aapt2FromMavenOverride=/opt/aapt2-bin/aapt2`（默认已注释）。
-  `/opt/aapt2-bin/aapt2` 是 aarch64 原生 ELF 包装器，内部 exec `qemu-x86_64-static -L /usr/x86_64-linux-gnu` 运行 x86_64 aapt2。
-  **正常开发机（x86_64）不需要也不应启用该配置。**
-- 构建命令（本沙箱）：`JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64 ./gradlew assembleDebug`
-- 单测命令：`./gradlew testDebugUnitTest`（Redactor/PlaybackErrorMapper/PlaybackCompatibilityEvaluator）。
-
-## 9. 环境信息
-
-- JDK 17（OpenJDK arm64）/ Gradle 8.9 / Android SDK 35（platform 35 + build-tools 35.0.0 + platform-tools）
-- SDK 路径：`/opt/android-sdk`（local.properties 已配置 sdk.dir，该文件不入库）
+禁止在下一阶段顺手实现 Jellyfin、云盘、Plex、FFmpeg、MPV 或大规模 UI 重构。

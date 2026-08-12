@@ -30,6 +30,9 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:logging"))
 
+    implementation(libs.androidx.documentfile)
+    implementation(libs.kotlinx.coroutines.android)
+
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
 }

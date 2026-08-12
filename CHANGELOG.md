@@ -1,29 +1,21 @@
 # 变更记录（CHANGELOG）
 
-## [0.2.0-hardening] — 2026-08-12（Phase 0.5 架构加固）
+## [Unreleased] — Phase 0.5 Architecture Hardening
 
-### 重构
-- **MediaProvider 能力组合**（ADR-014）：Fat Interface 拆为公共契约 + 7 个可选能力接口，
-  新增 `ProviderHandle`（类型安全组合）。LocalProvider 去除伪造认证/空 Season/NotYetImplemented 堆；
-  Emby/Jellyfin/WebDAV 按类型声明能力。
-- **ProviderDescriptor**（ADR-015）：Factory 自报描述；"添加媒体库"从 Registry 动态渲染，
-  删除 UI 硬编码 ServerTypeOptions。
-- **播放请求头 session-scoped**（ADR-018）：PlaybackHeadersHolder 改为 per-engine，
-  废弃全局 Singleton mutable holder。
-- **进度同步三档节流**（ADR-017）：新增 ProgressSyncCoordinator（本地 5s 采样 / 远端按
-  Provider 间隔 / 关键事件立即 flush / 退出 final flush）；PlaybackEngine 提供 progress/events 流。
-- **协议级连接测试**（ADR-019）：Emby/Jellyfin 嗅探 /System/Info/Public，WebDAV OPTIONS+DAV 头；
-  AddServerViewModel 不再用通用 HTTP probe。
-- **CredentialVault**（ADR-016，机制先行）：长期凭据加密存取；TokenStore 改 java.util.Base64（可 JVM 测试）。
-- SAF 预留（ADR-020）：LocalRootProvider.contentRoots() 接口（Phase 0.6 接入文档树）。
+### 架构
+- 将 Fat `MediaProvider` 重构为最小公共接口；新增 `ProviderHandle` 类型安全地组合可选能力。
+- 新增 `ProviderDescriptor`，Registry 改用开放的 `providerId:String`；添加媒体库页面动态读取 Factory 元数据。
+- 移除领域层 `ServerType`；Room v1 兼容读取旧枚举字符串并写入稳定 providerId。
+- 新增 `CredentialVault` / `AuthenticationCoordinator`，区分短期输入与长期会话并通过 Keystore 加密保存。
+- 移除 Singleton `PlaybackHeadersHolder`；每个 MediaSource 使用独立不可变 `PlaybackRequestContext`。
+- 把播放位置、5s 本地快照、Provider 远端策略和 Play/Pause/Seek/Stop/End 关键事件拆成独立进度路径。
 
-### 新增
-- GitHub Actions CI（.github/workflows/android-ci.yml）：assembleDebug + testDebugUnitTest + lintDebug。
-- 测试 40 个（新增 20）：Registry、能力组合、CredentialVault、TokenStore、进度节流、
-  Headers 隔离、ServerEntityMappers。
-
-### 验证
-- assembleDebug / testDebugUnitTest（40 用例）/ lintDebug 全部通过。
+### 功能与质量
+- LocalProvider 改用 SAF 文档树、持久 URI Permission、DocumentFile/ContentResolver 与 `content://` 播放。
+- Emby/Jellyfin 连接测试校验公开 System Info；WebDAV 使用 OPTIONS 并要求 DAV Header；Local 校验 URI 授权。
+- 新增 GitHub Actions Android CI，执行 assembleDebug、testDebugUnitTest、lintDebug。
+- 新增 Registry、能力组合、凭据生命周期、请求头隔离、进度节流、旧数据库映射和协议探测测试。
+- 保留完整 Provider API、云盘、Plex、FFmpeg/MPV 与大规模 UI 重做到后续阶段。
 
 ## [0.1.0-skeleton] — 2026-08-12（Phase 0）
 

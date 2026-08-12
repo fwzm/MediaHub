@@ -24,8 +24,9 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -52,13 +53,9 @@ fun PlayerRoute(
     val resolve by viewModel.resolveState.collectAsStateWithLifecycle()
     val engineState by viewModel.engine.uiState.collectAsStateWithLifecycle()
 
-    // 离开播放页时 final flush（进度快照 + 远端上报各一次，见 ADR-017）
-    DisposableEffect(Unit) {
-        onDispose { viewModel.flushProgress() }
-    }
-
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
+    val stopAndBack = { viewModel.stopAndExit(onBack) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // 视频画面
@@ -97,7 +94,7 @@ fun PlayerRoute(
                     )
                     Row(modifier = Modifier.padding(top = 16.dp)) {
                         TextButton(onClick = viewModel::resolve) { Text("重试", color = Color.White) }
-                        TextButton(onClick = onBack) { Text("返回", color = Color.White) }
+                        TextButton(onClick = stopAndBack) { Text("返回", color = Color.White) }
                     }
                 }
             }
@@ -105,7 +102,7 @@ fun PlayerRoute(
             ResolveState.Ready -> {
                 PlayerControls(
                     state = state,
-                    onBack = onBack,
+                    onBack = stopAndBack,
                     onTogglePlayPause = viewModel.engine::togglePlayPause,
                     onSeek = viewModel.engine::seekTo,
                     onCycleSpeed = {
@@ -155,6 +152,12 @@ private fun PlayerControls(
     onShowAudio: () -> Unit,
     onShowSubtitle: () -> Unit,
 ) {
+    var seekPosition by remember { mutableFloatStateOf(state.positionMs.toFloat()) }
+    var isSeeking by remember { mutableStateOf(false) }
+    LaunchedEffect(state.positionMs, isSeeking) {
+        if (!isSeeking) seekPosition = state.positionMs.toFloat()
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -187,8 +190,15 @@ private fun PlayerControls(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             Slider(
-                value = state.positionMs.toFloat().coerceIn(0f, state.durationMs.coerceAtLeast(1).toFloat()),
-                onValueChange = { onSeek(it.roundToLong()) },
+                value = seekPosition.coerceIn(0f, state.durationMs.coerceAtLeast(1).toFloat()),
+                onValueChange = {
+                    isSeeking = true
+                    seekPosition = it
+                },
+                onValueChangeFinished = {
+                    onSeek(seekPosition.roundToLong())
+                    isSeeking = false
+                },
                 valueRange = 0f..state.durationMs.coerceAtLeast(1).toFloat(),
             )
             Row(

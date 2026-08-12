@@ -12,3 +12,9 @@ data class ConnectionStatus(
         val Testing = ConnectionStatus(ok = false, message = "测试中…")
     }
 }
+
+/** 一次连接探测的临时上下文；敏感字段仅存活于内存。 */
+data class ConnectionTestRequest(
+    val credentials: Credentials? = null,
+    val parameters: Map<String, String> = emptyMap(),
+)
