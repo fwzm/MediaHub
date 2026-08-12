@@ -39,6 +39,7 @@ import com.mediahub.model.PlaybackProgress
 fun HomeRoute(
     onOpenServer: (MediaServer) -> Unit,
     onReauthorizeServer: (MediaServer) -> Unit,
+    onRelogin: (MediaServer) -> Unit,
     onAddServer: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenItem: (PlaybackProgress) -> Unit,
@@ -86,10 +87,10 @@ fun HomeRoute(
                         providerDisplayName = viewModel.providerDisplayName(server.providerId),
                         locationLabel = viewModel.locationLabel(server),
                         onClick = {
-                            if (viewModel.requiresReauthorization(server)) {
-                                onReauthorizeServer(server)
-                            } else {
-                                onOpenServer(server)
+                            when (viewModel.clickTarget(server, authStates[server.id])) {
+                                ServerClickTarget.LocalReauthorize -> onReauthorizeServer(server)
+                                ServerClickTarget.AuthRelogin -> onRelogin(server)
+                                ServerClickTarget.Open -> onOpenServer(server)
                             }
                         },
                         authState = authStates[server.id],

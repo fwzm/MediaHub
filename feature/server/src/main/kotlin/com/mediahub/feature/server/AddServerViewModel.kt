@@ -54,11 +54,9 @@ class AddServerViewModel @Inject constructor(
     private val logger: Logger,
 ) : ViewModel() {
     private val reauthorizeServerId: String = savedStateHandle["reauthorizeId"] ?: ""
-    private val availableDescriptors = if (reauthorizeServerId.isBlank()) {
-        registry.descriptors
-    } else {
-        registry.descriptors.filter { it.category == ProviderCategory.LOCAL_STORAGE }
-    }
+    // Patch 2：reauthorizeId 非空时不再强制 LOCAL_STORAGE；具体 provider 在 init 按原服务器加载，
+    // 支持 AUTH_RELOGIN（认证型）与 LOCAL_REAUTHORIZE（本地目录）两种修复模式。
+    private val availableDescriptors = registry.descriptors
     private val initialDescriptor = availableDescriptors.firstOrNull { it.isSelectable }
     private var existingServer: MediaServer? = null
 
@@ -78,22 +76,25 @@ class AddServerViewModel @Inject constructor(
             viewModelScope.launch {
                 val server = serverRepository.getServer(reauthorizeServerId)
                 val descriptor = server?.let { registry.descriptorFor(it.providerId) }
-                if (server == null || descriptor?.category != ProviderCategory.LOCAL_STORAGE) {
+                if (server == null || descriptor == null) {
                     _uiState.update {
                         it.copy(
                             providers = emptyList(),
                             selectedProviderId = "",
                             isLoadingExisting = false,
-                            error = "找不到需要重新授权的本地媒体源",
+                            error = "找不到需要重新登录的媒体源",
                         )
                     }
                 } else {
+                    // 保留 SAME id 与元数据（isDefault/sortOrder/createdAtEpochMs 由 buildServer 保留）
                     existingServer = server
                     _uiState.update {
                         it.copy(
                             providers = listOf(descriptor),
                             selectedProviderId = descriptor.providerId,
                             name = server.name,
+                            baseUrl = if (descriptor.category == ProviderCategory.LOCAL_STORAGE) "" else server.baseUrl,
+                            username = server.username.orEmpty(),
                             isLoadingExisting = false,
                         )
                     }
@@ -185,11 +186,12 @@ class AddServerViewModel @Inject constructor(
                     authenticationCoordinator.authenticateOrDefer(handle, credentials)
                     authenticated = true
                 }
-                val saved = if (existingServer != null) {
-                    serverRepository.updateServer(server)
-                    server
+                val decision = ServerSavePlanner.plan(existingServer, server)
+                val saved = if (decision.updateSource) {
+                    serverRepository.updateServer(decision.server)
+                    decision.server
                 } else {
-                    serverRepository.addServer(server)
+                    serverRepository.addServer(decision.server)
                 }
                 logger.i(
                     LogTag.UI,

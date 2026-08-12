@@ -24,6 +24,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** 卡片点击目标。 */
+sealed interface ServerClickTarget {
+    data object Open : ServerClickTarget
+    data object LocalReauthorize : ServerClickTarget
+    data object AuthRelogin : ServerClickTarget
+}
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val serverRepository: ServerRepository,
@@ -50,6 +57,30 @@ class HomeViewModel @Inject constructor(
 
     fun requiresReauthorization(server: MediaServer): Boolean =
         providerCategories[server.providerId] == ProviderCategory.LOCAL_STORAGE && server.baseUrl.isBlank()
+
+    /**
+     * 卡片点击目标（Patch 2）：区分 LOCAL reauthorization 与认证 Provider 的 existing-server re-login。
+     */
+    fun clickTarget(server: MediaServer, authState: AuthenticationState?): ServerClickTarget {
+        val category = providerCategories[server.providerId]
+        // Local 且需要重新授权 → 本地目录重新授权
+        if (category == ProviderCategory.LOCAL_STORAGE && server.baseUrl.isBlank()) {
+            return ServerClickTarget.LocalReauthorize
+        }
+        // 认证型 Provider 且 未登录/失效/身份变更 → existing-server re-login
+        val isAuthProvider = runCatching { registry.create(server)?.auth }.getOrNull() != null
+        if (isAuthProvider) {
+            val needsRelogin = when (authState) {
+                is AuthenticationState.Authenticated -> false
+                is AuthenticationState.SessionExpired -> true
+                is AuthenticationState.Unavailable -> false // 暂不可用不强制重登，按现状打开
+                AuthenticationState.SignedOut -> true
+                null -> false
+            }
+            if (needsRelogin) return ServerClickTarget.AuthRelogin
+        }
+        return ServerClickTarget.Open
+    }
 
     val servers: StateFlow<List<MediaServer>> = serverRepository.observeServers()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())

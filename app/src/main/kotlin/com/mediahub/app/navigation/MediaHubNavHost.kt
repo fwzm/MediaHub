@@ -30,6 +30,10 @@ fun MediaHubNavHost() {
                 onReauthorizeServer = { server ->
                     navController.navigate("server/add?reauthorizeId=${Uri.encode(server.id)}")
                 },
+                onRelogin = { server ->
+                    // Existing Server Re-login：复用原 serverId，进入 server/add?reauthorizeId 模式
+                    navController.navigate("server/add?reauthorizeId=${Uri.encode(server.id)}")
+                },
                 onAddServer = { navController.navigate("server/add") },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenItem = { progress ->
