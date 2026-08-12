@@ -21,6 +21,7 @@ import com.mediahub.core.security.CredentialVault
 import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.TokenStore
 import com.mediahub.player.engine.MediaCacheProvider
+import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackEngineFactory
 import com.mediahub.player.engine.PlayerFactory
 import com.mediahub.core.database.repository.ProgressRepository
