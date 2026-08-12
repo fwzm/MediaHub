@@ -1,5 +1,19 @@
 # 变更记录（CHANGELOG）
 
+## [0.5.0-pr1-reconcile] — 2026-08-12（PR #1 Final Reconciliation：PR#1 为最终主线）
+
+### 合流（评审 Final Reconciliation 规范）
+- 把 latest main（61e5aea）真正 merge 进 PR #1（祖先包含 main，非手工复制）。
+- 最终认证架构：CredentialVault + AuthenticationCoordinator + AuthSession 单一 source of truth。
+- 恢复 main 的 Auth UI：HomeScreen 登录态 + 退出；Existing-Server Re-login（复用 same id）；
+  Local reauthorization（reauthorizeId + ACTION_OPEN_DOCUMENT_TREE）。
+- 修 Emby 官方 API：/emby root（EmbyApiRoot.from 追加前缀）+ GET /Users/{userId}
+  （去未文档化 /Users/Me）+ Authorization 官方 `Emby UserId="..."` schema。
+- 防串服 + 失效策略：remoteServerId 校验不发错 Token；仅 401 清 Vault；403/malformed/5xx/网络保留。
+
+### 验证
+- assembleDebug / testDebugUnitTest（65）/ lintDebug 通过；等待 latest head CI + 重新 Codex/Copilot review。
+
 ## [Unreleased] — Phase 1A Reconciliation
 
 ### 认证架构
