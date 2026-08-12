@@ -79,6 +79,8 @@ class EmbyApiClient(
             .build()
             .toString()
         return apiClient.get(url, authenticatedHeaders(token, userId))
+    }
+
     /**
      * 播放信息：POST /emby/Items/{itemId}/PlaybackInfo?UserId=...（官方 MediaInfoService POST contract）。
      *
