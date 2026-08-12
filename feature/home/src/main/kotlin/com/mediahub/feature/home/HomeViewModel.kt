@@ -2,8 +2,8 @@ package com.mediahub.feature.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.mediahub.core.database.repository.ProgressRepository
-import com.mediahub.core.database.repository.ServerRepository
+import com.mediahub.core.database.repository.ProgressStore
+import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaServer
@@ -34,8 +34,8 @@ sealed interface ServerClickTarget {
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val serverRepository: ServerRepository,
-    progressRepository: ProgressRepository,
+    private val serverStore: ServerStore,
+    progressRepository: ProgressStore,
     private val registry: MediaProviderRegistry,
     private val authenticationCoordinator: AuthenticationCoordinator,
     private val logger: Logger,
@@ -59,9 +59,7 @@ class HomeViewModel @Inject constructor(
     fun requiresReauthorization(server: MediaServer): Boolean =
         providerCategories[server.providerId] == ProviderCategory.LOCAL_STORAGE && server.baseUrl.isBlank()
 
-    /**
-     * 卡片点击目标（Patch 2）：区分 LOCAL reauthorization 与认证 Provider 的 existing-server re-login。
-     */
+    /** 卡片点击目标（Patch 2）：区分 LOCAL reauthorization 与认证 Provider 的 existing-server re-login。 */
     fun clickTarget(server: MediaServer, authState: AuthenticationState?): ServerClickTarget {
         val category = providerCategories[server.providerId]
         val isAuthProvider = runCatching { registry.create(server)?.auth }.getOrNull() != null
@@ -79,7 +77,7 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    val servers: StateFlow<List<MediaServer>> = serverRepository.observeServers()
+    val servers: StateFlow<List<MediaServer>> = serverStore.observeServers()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val continueWatching: StateFlow<List<PlaybackProgress>> =
@@ -107,13 +105,15 @@ class HomeViewModel @Inject constructor(
     }
 
     /**
-     * 强制恢复某服务器认证状态（FINAL PATCH 4：re-login 成功后 Home 状态立即刷新）。
-     * 不受 init 里 "containsKey(server.id) 跳过" 的去重逻辑影响；现有状态即使为
-     * SignedOut / SessionExpired / Unavailable 也强制覆盖。
+     * 强制恢复某服务器认证状态（FINAL PATCH 5）。
+     *
+     * - 直接从 DB 读取最新服务器（re-login 可改 baseUrl/username/name，且 Navigation result 可能早于
+     *   observeServers StateFlow 更新缓存，不能用 servers.first() 的旧缓存）。
+     * - 复用 coordinator.restore（覆盖现有 SignedOut/SessionExpired/Unavailable，不受 init containsKey 去重影响）。
      */
     fun forceRestore(serverId: String) {
         viewModelScope.launch {
-            val server = servers.first().firstOrNull { it.id == serverId } ?: return@launch
+            val server = serverStore.getServer(serverId) ?: return@launch
             val handle = registry.create(server)
             val auth = handle?.auth
             if (auth == null) {

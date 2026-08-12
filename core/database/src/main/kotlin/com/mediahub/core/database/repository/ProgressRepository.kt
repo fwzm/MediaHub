@@ -16,10 +16,10 @@ import kotlinx.coroutines.flow.map
 @Singleton
 class ProgressRepository @Inject constructor(
     private val db: AppDatabase,
-) {
+) : ProgressStore {
     private val dao = db.playbackProgressDao()
 
-    fun observeContinueWatching(limit: Int = 30): Flow<List<PlaybackProgress>> =
+    override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> =
         dao.observeRecent(limit).map { list -> list.map { it.toDomain() } }
 
     suspend fun save(progress: PlaybackProgress) {
