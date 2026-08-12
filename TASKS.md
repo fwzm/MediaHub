@@ -36,7 +36,7 @@
 - [x] DONE Provider 自行做协议级连接测试，移除 UI 通用 `<500` 判定
 - [x] DONE GitHub Actions：assembleDebug + testDebugUnitTest + lintDebug
 - [x] DONE Registry/能力/凭据/进度/Header/Mapper/协议探测测试
-- [x] DONE GitHub Actions 实际验证三项门禁（run 31554659794）
+- [x] DONE GitHub Actions 实际验证三项门禁（PR #1 head check）
 - [x] DONE 更新 ARCHITECTURE / DECISIONS / TASKS / CHANGELOG / HANDOFF
 
 ## V0.1 —— MVP（下一步）

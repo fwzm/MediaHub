@@ -23,7 +23,7 @@
 - [x] Android SAF 本地目录
 - [x] Provider 协议级连接测试
 - [x] CI 与核心边界单测
-- [x] GitHub Actions 三项质量门禁实跑通过（run 31554659794），本阶段关闭
+- [x] GitHub Actions 三项质量门禁实跑通过（PR #1 head check），本阶段关闭
 
 ## V0.1 —— MVP 闭环（Emby + Jellyfin + 本地 + WebDAV + 播放器）
 

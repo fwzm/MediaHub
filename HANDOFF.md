@@ -4,8 +4,8 @@
 
 ## 1. 当前状态
 
-- Phase 0.5 已完成：GitHub Actions run 31554659794 的 `assembleDebug`、
-  `testDebugUnitTest`（37 个 `@Test`）与 `lintDebug` 全部通过。
+- Phase 0.5 已完成：GitHub Actions 的 `assembleDebug`、`testDebugUnitTest`（41 个 `@Test`）
+  与 `lintDebug` 全部通过；最终状态见 PR #1 的 head check。
 - 本阶段没有实现完整 Emby/Jellyfin/WebDAV 业务 API，也没有进入 V0.1。
 - LocalProvider 已从 app 私有目录迁移到 SAF 文档树；旧 `file://` 路径不再是长期方案。
 

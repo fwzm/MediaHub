@@ -22,6 +22,8 @@
 ### 验证
 - GitHub Actions run 31554659794：`assembleDebug`、`testDebugUnitTest`（37 个 `@Test`）、
   `lintDebug` 全部通过；`BUILD SUCCESSFUL`，1005 actionable tasks。
+- 合并最新 main 后新增计划/运行时能力、加密 pending 凭据及协议拒绝路径测试，总计 41 个 `@Test`；
+  PR #1 最终头继续执行同一套三项门禁。
 
 ## [0.1.0-skeleton] — 2026-08-12（Phase 0）
 
