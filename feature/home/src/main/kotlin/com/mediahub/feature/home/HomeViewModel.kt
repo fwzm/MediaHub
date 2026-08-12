@@ -8,6 +8,7 @@ import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
+import com.mediahub.provider.api.AuthSessionErrorKind
 import com.mediahub.provider.api.AuthSessionState
 import com.mediahub.provider.api.MediaProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -87,10 +88,26 @@ class HomeViewModel @Inject constructor(
     fun needsRelogin(server: MediaServer, authState: AuthSessionState?): Boolean {
         val authProvider = runCatching { registry.create(server)?.auth }.getOrNull()
         if (authProvider == null) return false
+        // 评审 FINAL PATCH 2 精确语义：仅 SignedOut / SESSION_EXPIRED / SERVER_MISMATCH 进入重登录；
+        // FORBIDDEN / NETWORK / 5xx / INVALID_RESPONSE / UNKNOWN 保留 session（不送重登录页）。
         return when (authState) {
             is AuthSessionState.Authenticated -> false
-            AuthSessionState.Unknown, AuthSessionState.Restoring -> false
-            else -> true
+            is AuthSessionState.Error -> when (authState.kind) {
+                AuthSessionErrorKind.SESSION_EXPIRED,
+                AuthSessionErrorKind.SERVER_MISMATCH,
+                -> true
+
+                AuthSessionErrorKind.FORBIDDEN,
+                AuthSessionErrorKind.NETWORK_TIMEOUT,
+                AuthSessionErrorKind.NETWORK_UNAVAILABLE,
+                AuthSessionErrorKind.SERVER_ERROR,
+                AuthSessionErrorKind.INVALID_RESPONSE,
+                AuthSessionErrorKind.UNKNOWN,
+                -> false
+            }
+
+            AuthSessionState.SignedOut -> true
+            else -> false // Unknown / Restoring
         }
     }
 }

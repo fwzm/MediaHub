@@ -74,16 +74,27 @@ class AddServerViewModel @Inject constructor(
                 if (server == null) {
                     _uiState.update { it.copy(isLoadingExisting = false, error = "找不到需要重新登录的媒体源") }
                 } else {
-                    // 复用 SAME id；预填 name/baseUrl/username，密码留空
-                    existingServer = server
-                    _uiState.update {
-                        it.copy(
-                            selectedDescriptorId = server.type.name,
-                            name = server.name,
-                            baseUrl = server.baseUrl,
-                            username = server.username.orEmpty(),
-                            isLoadingExisting = false,
-                        )
+                    // 复用 SAME id；预填 name/baseUrl/username，密码留空。
+                    // descriptor 按 serverType 匹配（禁止 "EMBY" != "emby" 之类把 enum.name 当 ProviderDescriptor.id）
+                    val descriptor = ExistingServerEditPolicy.descriptorFor(server, availableProviders)
+                    if (descriptor == null) {
+                        _uiState.update {
+                            it.copy(
+                                isLoadingExisting = false,
+                                error = "找不到媒体源类型对应的 Provider（type=${server.type}）",
+                            )
+                        }
+                    } else {
+                        existingServer = server
+                        _uiState.update {
+                            it.copy(
+                                selectedDescriptorId = descriptor.id,
+                                name = server.name,
+                                baseUrl = server.baseUrl,
+                                username = server.username.orEmpty(),
+                                isLoadingExisting = false,
+                            )
+                        }
                     }
                 }
             }
@@ -100,6 +111,8 @@ class AddServerViewModel @Inject constructor(
         descriptorOf(_uiState.value.selectedDescriptorId)
 
     fun selectProvider(descriptor: ProviderDescriptor) {
+        // existing 模式锁定原 Provider：不允许 UI 切到 Jellyfin/WebDAV 等别的类型
+        if (existingServer != null) return
         _uiState.update {
             it.copy(
                 selectedDescriptorId = descriptor.id,
@@ -232,16 +245,15 @@ class AddServerViewModel @Inject constructor(
     private fun buildServer(): MediaServer {
         val descriptor = selectedDescriptor()
         val state = _uiState.value
-        val existing = existingServer
-        return MediaServer(
-            // re-login 复用已有 id；新建才生成新 id
-            id = existing?.id ?: serverId,
-            name = state.name.trim().ifBlank { existing?.name ?: descriptor?.displayName.orEmpty() },
-            type = existing?.type ?: descriptor?.serverType ?: ServerType.EMBY,
+        val candidate = MediaServer(
+            id = serverId, // 实际 id 由 buildDraft 决定（existing 复用原 id）
+            name = state.name.trim().ifBlank { descriptor?.displayName.orEmpty() },
+            type = descriptor?.serverType ?: ServerType.EMBY,
             baseUrl = state.baseUrl.trim().trimEnd('/'),
             username = state.username.trim().ifBlank { null },
-            isDefault = existing?.isDefault ?: false,
-            createdAtEpochMs = existing?.createdAtEpochMs ?: System.currentTimeMillis(),
+            createdAtEpochMs = System.currentTimeMillis(),
         )
+        // existing 模式：复用 SAME id + 完整保留 isDefault/sortOrder/createdAtEpochMs/lastConnectedAtEpochMs/lastError
+        return ExistingServerEditPolicy.buildDraft(existingServer, candidate).server
     }
 }

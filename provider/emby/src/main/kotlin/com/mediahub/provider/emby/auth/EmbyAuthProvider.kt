@@ -32,7 +32,7 @@ import kotlinx.serialization.SerializationException
  *   关键字段缺失不保存半成品。
  * - 恢复（restoreSession）：Token + Session 双份齐全后，**先无 Token 校验服务器身份**
  *   （/System/Info/Public 的 ServerId 与 session.remoteServerId 对比，防 Token 串服），
- *   一致才发认证请求（GET /Users/Me）。401 → 清会话；403/5xx/网络/协议异常 → 保留会话。
+ *   一致才发认证请求（GET /Users/{userId}）。401 → 清会话；403/5xx/网络/协议异常 → 保留会话。
  * - 登出：服务端 POST /emby/Sessions/Logout 为 best-effort（且仅当服务器身份一致），
  *   本地清理为权威（ADR-026）。
  *
@@ -96,7 +96,7 @@ class EmbyAuthProvider(
      * 1. 本地 Token / Session 缺失 → SignedOut；
      * 2. **无 Token** GET /System/Info/Public → 当前服务器 remoteServerId；
      * 3. 与 session.remoteServerId 不一致 → SERVER_MISMATCH（绝不发送 Token）；
-     * 4. 一致 → GET /Users/Me（X-Emby-Token）验证。
+     * 4. 一致 → GET /Users/{userId}（X-Emby-Token）验证。
      *
      * 失效策略（review #4）：仅 401 清会话；403/5xx/网络/协议异常保留。
      */

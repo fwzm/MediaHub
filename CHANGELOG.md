@@ -1,5 +1,25 @@
 # 变更记录（CHANGELOG）
 
+## [0.4.4-phase1a-final2] — 2026-08-12（Phase 1A FINAL PATCH 2：Existing Server Re-login 修复)
+
+### 修复（评审 FINAL PATCH 2）
+- **descriptor id 映射 P1 bug**：existing-server 加载原本用 `ServerType.EMBY.name = "EMBY"`，
+  与 `ProviderDescriptor.id = "emby"` 不匹配 → 表单无 descriptor 选中、URL/name/username 不预填。
+  改为 `ExistingServerEditPolicy.descriptorFor`（按 `serverType` 匹配）；找不到 descriptor 显示错误而非静默。
+- **Re-login Provider 锁定**：existingServer != null 时 `selectProvider` 拒绝切换（UI 不能点 Jellyfin/WebDAV）。
+- **needsRelogin 精确语义**：仅 `SignedOut / SESSION_EXPIRED / SERVER_MISMATCH` 进入重登录；
+  FORBIDDEN / NETWORK / 5xx / INVALID_RESPONSE / UNKNOWN 保留 session（不送重登录页）。
+- **existing update 完整保留元数据**：`ExistingServerEditPolicy.buildDraft` 保留
+  id/type/isDefault/sortOrder/createdAtEpochMs/lastConnectedAtEpochMs/lastError（不再重置为 0/null）。
+- 修正 EmbyAuthProvider 注释中 `/Users/Me` → `/Users/{userId}`。
+
+### 新增测试
+- `ExistingServerEditPolicyTest`（8 例）：descriptor 按 serverType 匹配（禁 "EMBY"≠"emby"）、
+  same id + 全元数据保留、Provider 锁定、needsRelogin 精确分支、新建不受破坏。
+
+### 验证
+- assembleDebug / testDebugUnitTest（82）/ lintDebug 通过
+
 ## [0.4.3-phase1a-final] — 2026-08-12（Phase 1A FINAL PATCH）
 
 ### 修复（评审 Phase 1A FINAL PATCH）

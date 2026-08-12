@@ -1,6 +1,17 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12（Phase 1A FINAL PATCH）。本文件是协作第一手资料。
+> 最后更新：2026-08-12（Phase 1A FINAL PATCH 2）。本文件是协作第一手资料。
+
+## 排头 FINAL PATCH 2 摘要（2026-08-12）
+
+- 修复 existing-server re-login 最后一组确定 bug：
+  - descriptor 按 serverType 匹配（`ExistingServerEditPolicy.descriptorFor`，不再 "EMBY"≠"emby"）
+  - re-login Provider 锁定（existingServer 时 selectProvider 拒绝切换）
+  - needsRelogin 精确（仅 SignedOut/SESSION_EXPIRED/SERVER_MISMATCH；FORBIDDEN/网络/5xx 保留）
+  - buildDraft 完整保留元数据（id/type/isDefault/sortOrder/createdAt/lastConnectedAt/lastError）
+  - EmbyAuthProvider 注释 /Users/Me → /Users/{userId}
+- 新增 `feature/server` 测试：`ExistingServerEditPolicyTest` 8 例；全项目 82 用例。
+- **待办**：等在 GitHub 确认 latest main（下一提交）Actions 真正 success；不进入 Phase 1B。
 
 ## 0. 最终架构主线（main 为唯一主线）
 
