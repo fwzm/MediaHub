@@ -88,7 +88,7 @@ class PlayerViewModelTest {
 
     // ---- A：detail 真实类型覆盖 fallback ----
     @Test
-    fun `detail media type wins over MediaTypeGuesser fallback`() = runTest {
+    fun `detail media type wins over MediaTypeGuesser fallback`() = runTest(dispatcher) {
         val playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv"))
         val registry = FakeRegistry(
             detail = FakeDetail(
@@ -121,7 +121,7 @@ class PlayerViewModelTest {
 
     // ---- B：PlaybackSource 最终到达 engine.play ----
     @Test
-    fun `resolved playback source reaches engine play`() = runTest {
+    fun `resolved playback source reaches engine play`() = runTest(dispatcher) {
         val source = PlaybackSource(
             url = "http://media/stream.mkv",
             headers = mapOf("X-Emby-Token" to "tok-1"),
@@ -156,7 +156,7 @@ class PlayerViewModelTest {
 
     // ---- C：解析失败 → Failed，engine 不 play ----
     @Test
-    fun `playback failure surfaces as failed state without engine play`() = runTest {
+    fun `playback failure surfaces as failed state without engine play`() = runTest(dispatcher) {
         val registry = FakeRegistry(
             detail = FakeDetail(
                 MediaItem(
