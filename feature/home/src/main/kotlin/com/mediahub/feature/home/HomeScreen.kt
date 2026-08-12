@@ -38,6 +38,7 @@ import com.mediahub.model.PlaybackProgress
 @Composable
 fun HomeRoute(
     onOpenServer: (MediaServer) -> Unit,
+    onReauthorizeServer: (MediaServer) -> Unit,
     onAddServer: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenItem: (PlaybackProgress) -> Unit,
@@ -83,7 +84,13 @@ fun HomeRoute(
                         server = server,
                         providerDisplayName = viewModel.providerDisplayName(server.providerId),
                         locationLabel = viewModel.locationLabel(server),
-                        onClick = { onOpenServer(server) },
+                        onClick = {
+                            if (viewModel.requiresReauthorization(server)) {
+                                onReauthorizeServer(server)
+                            } else {
+                                onOpenServer(server)
+                            }
+                        },
                     )
                 }
             }

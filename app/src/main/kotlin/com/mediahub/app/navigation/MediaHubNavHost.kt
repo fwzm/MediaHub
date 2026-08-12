@@ -27,18 +27,27 @@ fun MediaHubNavHost() {
                 onOpenServer = { server ->
                     navController.navigate("library/${server.id}/root?name=${Uri.encode(server.name)}")
                 },
-                onAddServer = { navController.navigate(Routes.ADD_SERVER) },
+                onReauthorizeServer = { server ->
+                    navController.navigate("server/add?reauthorizeId=${Uri.encode(server.id)}")
+                },
+                onAddServer = { navController.navigate("server/add") },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenItem = { progress ->
                     navController.navigate(
                         "player/${progress.serverId}/${NavArgCodec.encode(progress.itemId)}" +
-                            "?title=${Uri.encode(progress.itemTitle ?: "")}"
+                            "?title=${Uri.encode(progress.itemTitle ?: "")}" +
+                            "&type=${progress.itemType?.name.orEmpty()}"
                     )
                 },
             )
         }
 
-        composable(Routes.ADD_SERVER) {
+        composable(
+            route = Routes.ADD_SERVER,
+            arguments = listOf(
+                navArgument("reauthorizeId") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) {
             AddServerRoute(
                 onDone = { navController.popBackStack() },
                 onBack = { navController.popBackStack() },
@@ -70,17 +79,19 @@ fun MediaHubNavHost() {
                 onOpenItem = { item ->
                     navController.navigate(
                         "player/$serverId/${NavArgCodec.encode(item.id)}?title=${Uri.encode(item.title)}"
+                            + "&type=${item.type.name}"
                     )
                 },
             )
         }
 
         composable(
-            route = "player/{serverId}/{itemId}?title={title}",
+            route = "player/{serverId}/{itemId}?title={title}&type={type}",
             arguments = listOf(
                 navArgument("serverId") { type = NavType.StringType },
                 navArgument("itemId") { type = NavType.StringType },
                 navArgument("title") { type = NavType.StringType; defaultValue = "" },
+                navArgument("type") { type = NavType.StringType; defaultValue = "" },
             ),
         ) {
             PlayerRoute(onBack = { navController.popBackStack() })
@@ -90,7 +101,7 @@ fun MediaHubNavHost() {
 
 private object Routes {
     const val HOME = "home"
-    const val ADD_SERVER = "server/add"
+    const val ADD_SERVER = "server/add?reauthorizeId={reauthorizeId}"
     const val SETTINGS = "settings"
     const val SEARCH = "search"
 }

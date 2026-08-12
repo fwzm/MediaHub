@@ -62,7 +62,7 @@ fun AddServerRoute(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("添加媒体库") },
+                title = { Text(if (state.isReauthorizing) "重新授权本地媒体" else "添加媒体库") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回")
@@ -136,14 +136,22 @@ fun AddServerRoute(
                     value = state.username,
                     onValueChange = viewModel::updateUsername,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("用户名（可选）") },
+                    label = { Text("用户名") },
                     singleLine = true,
                 )
                 OutlinedTextField(
                     value = state.password,
                     onValueChange = viewModel::updatePassword,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("密码（仅进入加密凭据库）") },
+                    label = {
+                        Text(
+                            if (descriptor.authMethod == AuthMethod.BASIC) {
+                                "密码（加密保存，用于长期访问）"
+                            } else {
+                                "密码（仅用于本次登录，不保存）"
+                            }
+                        )
+                    },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                 )
@@ -163,17 +171,25 @@ fun AddServerRoute(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(
                     onClick = viewModel::testConnection,
-                    enabled = !state.isTesting && descriptor?.isSelectable == true,
+                    enabled = !state.isTesting && !state.isSaving && !state.isLoadingExisting && descriptor?.isSelectable == true,
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(if (state.isTesting) "测试中…" else "测试连接")
                 }
                 Button(
                     onClick = { viewModel.save(onSaved = onDone) },
-                    enabled = !state.isSaving && descriptor?.isSelectable == true,
+                    enabled = !state.isSaving && !state.isLoadingExisting && descriptor?.isSelectable == true,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(if (state.isSaving) "保存中…" else "保存")
+                    Text(
+                        when {
+                            state.isLoggingIn -> "登录中…"
+                            state.isSaving -> "保存中…"
+                            descriptor?.authMethod != AuthMethod.NONE -> "登录并添加"
+                            state.isReauthorizing -> "保存授权"
+                            else -> "保存"
+                        }
+                    )
                 }
             }
         }

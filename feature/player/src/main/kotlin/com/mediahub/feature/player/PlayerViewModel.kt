@@ -11,7 +11,6 @@ import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
-import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackProgressReason
@@ -68,6 +67,10 @@ class PlayerViewModel @Inject constructor(
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
     private val itemId: String = NavArgCodec.decode(checkNotNull(savedStateHandle["itemId"]))
     private val itemTitle: String = savedStateHandle["title"] ?: ""
+    private val itemType: MediaType = (savedStateHandle.get<String>("type"))
+        ?.takeIf(String::isNotBlank)
+        ?.let { runCatching { MediaType.valueOf(it) }.getOrNull() }
+        ?: MediaType.OTHER
 
     val engine: PlaybackEngine = engineFactory.create(viewModelScope)
 
@@ -76,6 +79,7 @@ class PlayerViewModel @Inject constructor(
 
     private val progressGate = ProgressSyncGate()
     private var providerHandle: ProviderHandle? = null
+    private var isStopping = false
 
     val uiState: StateFlow<PlayerCombinedState> =
         combine(engine.uiState, _resolveState) { player, resolve ->
@@ -108,12 +112,10 @@ class PlayerViewModel @Inject constructor(
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源播放能力")
                 providerHandle = handle
 
-                // review P2-5：browse-only 数据源（如本地文件树）没有 library 详情，
-                // 重建条目时必须按扩展名推断媒体类型，避免退化为 OTHER 污染"继续观看"元数据。
                 val item = handle.library?.getItemDetail(itemId)?.item ?: MediaItem(
                     serverId = serverId,
                     id = itemId,
-                    type = MediaTypeGuesser.forPath(itemId),
+                    type = itemType,
                     title = itemTitle.ifBlank { itemId.substringAfterLast('/') },
                     path = itemId,
                 )
@@ -142,10 +144,18 @@ class PlayerViewModel @Inject constructor(
 
     /** 返回前先完成 final flush，再释放页面。 */
     fun stopAndExit(onStopped: () -> Unit) {
+        if (isStopping) return
+        isStopping = true
         viewModelScope.launch {
-            engine.currentProgress()?.let { syncCritical(it, PlaybackProgressReason.STOP) }
-            engine.stop(publishEvent = false)
-            onStopped()
+            try {
+                engine.currentProgress()?.let { syncCritical(it, PlaybackProgressReason.STOP) }
+            } catch (e: Exception) {
+                logger.w(LogTag.PLAYER, "退出播放页 final flush 失败", e)
+            } finally {
+                runCatching { engine.stop(publishEvent = false) }
+                    .onFailure { logger.w(LogTag.PLAYER, "停止播放引擎失败", it) }
+                onStopped()
+            }
         }
     }
 

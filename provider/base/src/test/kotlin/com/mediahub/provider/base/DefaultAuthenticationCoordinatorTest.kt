@@ -5,7 +5,9 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaUser
 import com.mediahub.provider.api.AuthMethod
 import com.mediahub.provider.api.AuthResult
+import com.mediahub.provider.api.AuthSession
 import com.mediahub.provider.api.AuthenticationDisposition
+import com.mediahub.provider.api.AuthenticationState
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.ConnectionTestRequest
 import com.mediahub.provider.api.CredentialVault
@@ -19,6 +21,7 @@ import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
 import com.mediahub.provider.api.ProviderStatus
 import com.mediahub.provider.api.SessionCredential
+import com.mediahub.provider.api.SessionRestoreResult
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -27,13 +30,13 @@ import org.junit.Test
 
 class DefaultAuthenticationCoordinatorTest {
     @Test
-    fun `successful authentication stores session and discards pending password`() = runTest {
+    fun `successful authentication atomically stores session and discards password`() = runTest {
         val vault = FakeVault()
         val coordinator = DefaultAuthenticationCoordinator(vault, NoOpLogger)
-        val session = SessionCredential.AccessToken("access-token")
+        val session = session()
 
         val disposition = coordinator.authenticateOrDefer(
-            handle(FakeAuthProvider(result = AuthResult.Success(user(), session))),
+            handle(FakeAuthProvider(authResult = AuthResult.Success(session))),
             Credentials.UsernamePassword("name", "password"),
         )
 
@@ -43,26 +46,10 @@ class DefaultAuthenticationCoordinatorTest {
     }
 
     @Test
-    fun `unimplemented provider stores encrypted-vault pending credential for phase one`() = runTest {
+    fun `unimplemented non-password flow may preserve pending credential`() = runTest {
         val vault = FakeVault()
         val coordinator = DefaultAuthenticationCoordinator(vault, NoOpLogger)
-        val credentials = Credentials.UsernamePassword("name", "password")
-
-        val disposition = coordinator.authenticateOrDefer(
-            handle(FakeAuthProvider(notImplemented = true)),
-            credentials,
-        )
-
-        assertEquals(AuthenticationDisposition.DeferredUntilProviderImplementation, disposition)
-        assertEquals(credentials, vault.pending)
-        assertNull(vault.session)
-    }
-
-    @Test
-    fun `planned auth without runtime implementation still preserves credentials`() = runTest {
-        val vault = FakeVault()
-        val coordinator = DefaultAuthenticationCoordinator(vault, NoOpLogger)
-        val credentials = Credentials.UsernamePassword("name", "password")
+        val credentials = Credentials.DeviceCode("device-code")
 
         val disposition = coordinator.authenticateOrDefer(handle(), credentials)
 
@@ -70,9 +57,62 @@ class DefaultAuthenticationCoordinatorTest {
         assertEquals(credentials, vault.pending)
     }
 
+    @Test
+    fun `unimplemented username password auth is never deferred to storage`() = runTest {
+        val vault = FakeVault()
+        val coordinator = DefaultAuthenticationCoordinator(vault, NoOpLogger)
+
+        runCatching {
+            coordinator.authenticateOrDefer(
+                handle(),
+                Credentials.UsernamePassword("name", "password"),
+            )
+        }
+
+        assertNull(vault.pending)
+        assertNull(vault.session)
+    }
+
+    @Test
+    fun `restore clears only a definitely invalidated session`() = runTest {
+        val vault = FakeVault(session = session())
+        val coordinator = DefaultAuthenticationCoordinator(vault, NoOpLogger)
+
+        val state = coordinator.restore(
+            handle(FakeAuthProvider(restoreResult = SessionRestoreResult.Invalidated(ProviderException.AuthExpired(SERVER_ID))))
+        )
+
+        assertTrue(state is AuthenticationState.SessionExpired)
+        assertNull(vault.session)
+    }
+
+    @Test
+    fun `restore keeps session when provider is temporarily unavailable`() = runTest {
+        val existing = session()
+        val vault = FakeVault(session = existing)
+        val coordinator = DefaultAuthenticationCoordinator(vault, NoOpLogger)
+
+        val state = coordinator.restore(
+            handle(FakeAuthProvider(restoreResult = SessionRestoreResult.Unavailable(ProviderException.Parse(SERVER_ID))))
+        )
+
+        assertTrue(state is AuthenticationState.Unavailable)
+        assertEquals(existing, vault.session)
+    }
+
+    @Test
+    fun `logout clears vault even when remote logout fails`() = runTest {
+        val vault = FakeVault(session = session())
+        val coordinator = DefaultAuthenticationCoordinator(vault, NoOpLogger)
+
+        coordinator.logout(handle(FakeAuthProvider(logoutFailure = ProviderException.Network(SERVER_ID))))
+
+        assertNull(vault.session)
+    }
+
     private fun handle(auth: MediaAuthProvider? = null): ProviderHandle {
         val provider = object : MediaProvider {
-            override val serverId = "server-1"
+            override val serverId = SERVER_ID
             override val descriptor = descriptor()
             override suspend fun testConnection(request: ConnectionTestRequest) = ConnectionStatus(ok = true)
         }
@@ -80,31 +120,33 @@ class DefaultAuthenticationCoordinatorTest {
     }
 
     private class FakeAuthProvider(
-        private val result: AuthResult? = null,
-        private val notImplemented: Boolean = false,
+        private val authResult: AuthResult = AuthResult.Failure(ProviderException.AuthFailed(SERVER_ID)),
+        private val restoreResult: SessionRestoreResult = SessionRestoreResult.Restored(session()),
+        private val logoutFailure: Exception? = null,
     ) : MediaAuthProvider {
-        override suspend fun authenticate(credentials: Credentials): AuthResult {
-            if (notImplemented) throw ProviderException.NotYetImplemented("server-1", "login")
-            return requireNotNull(result)
+        override suspend fun authenticate(credentials: Credentials): AuthResult = authResult
+        override suspend fun restoreSession(session: AuthSession): SessionRestoreResult = restoreResult
+        override suspend fun logout(session: AuthSession) {
+            logoutFailure?.let { throw it }
         }
-        override suspend fun refreshSession(): AuthResult = requireNotNull(result)
-        override suspend fun logout() = Unit
-        override suspend fun currentUser(): MediaUser? = user()
     }
 
-    private class FakeVault : CredentialVault {
-        var pending: Credentials? = null
-        var session: SessionCredential? = null
+    private class FakeVault(
+        var pending: Credentials? = null,
+        var session: AuthSession? = null,
+    ) : CredentialVault {
         override suspend fun savePending(serverId: String, credentials: Credentials) { pending = credentials }
         override suspend fun readPending(serverId: String): Credentials? = pending
-        override suspend fun saveSession(serverId: String, session: SessionCredential) { this.session = session }
-        override suspend fun readSession(serverId: String): SessionCredential? = session
+        override suspend fun saveSession(serverId: String, session: AuthSession) { this.session = session }
+        override suspend fun readSession(serverId: String): AuthSession? = session
         override suspend fun clearPending(serverId: String) { pending = null }
         override suspend fun clear(serverId: String) { pending = null; session = null }
     }
 
     private companion object {
-        fun user() = MediaUser("server-1", "user-1", "User")
+        const val SERVER_ID = "server-1"
+        fun user() = MediaUser(SERVER_ID, "user-1", "User")
+        fun session() = AuthSession(SessionCredential.AccessToken("token"), user(), "remote-1")
         fun descriptor() = ProviderDescriptor(
             providerId = "auth-test",
             displayName = "Auth Test",

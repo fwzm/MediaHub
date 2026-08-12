@@ -91,11 +91,11 @@
 - 迁移路径：未来首次必要的 Room schema 迁移时把列名正式改为 `provider_id`；在此之前兼容读取旧值。
 
 ## ADR-016 CredentialVault 与认证协调器管理凭据生命周期
-- 状态：已采纳（2026-08-12）
-- 决策：短期输入使用 `Credentials`；登录结果使用 `SessionCredential`；`AuthenticationCoordinator`
-  负责调用 Provider、写入加密 Vault、删除原始 pending 凭据与回滚。Room/DataStore 不持有 Secret。
-- 影响：Emby/Jellyfin 登录应把密码换 Token 后删除；Basic/OAuth/Refresh/Cookie 可按协议保存长期凭据。
-  Phase 0.5 对尚未实现登录的 Provider 仅加密暂存，V0.1 成功登录后必须清除。
+- 状态：已采纳（2026-08-12），Phase 1A reconciliation 修订
+- 决策：短期输入使用 `Credentials`；长期凭据、用户与远端服务器身份组成单个加密 `AuthSession`；
+  `AuthenticationCoordinator` 独占 Session 的保存、恢复、失效清理、登出与回滚。Room/DataStore 不持有 Secret。
+- 影响：删除 `TokenStore + EmbySessionStore` 双状态；Emby/Jellyfin 原始密码不得作为 pending 暂存；
+  Basic/OAuth/Refresh/Cookie 仅按协议需要保存。
 
 ## ADR-017 播放 HTTP 上下文按资源/会话隔离
 - 状态：已采纳（2026-08-12）
@@ -115,6 +115,21 @@
 - 决策：目录授权使用 `ACTION_OPEN_DOCUMENT_TREE` + persistable URI permission，浏览使用 DocumentFile/
   ContentResolver，播放使用 `content://`。
 - 影响：不继续扩展 app 私有目录和 `file://`；支持 U 盘及系统 DocumentProvider。数据库只保存 tree URI。
+
+## ADR-020 认证恢复是通用能力，失效清理由 Coordinator 判定
+- 状态：已采纳（2026-08-12）
+- 决策：`MediaAuthProvider` 提供 authenticate/restoreSession/logout；Provider 返回 `Restored`、`Invalidated` 或
+  `Unavailable`，只有 `Invalidated` 允许 Coordinator 删除 Vault。恢复已接入 App 首页生命周期。
+- 理由：离线、403、异常 JSON 与 Token 撤销不是同一状态；Provider 不应各自操作持久化造成分裂。
+- 影响：401 可失效；403/解析/网络/5xx 保留 Session。服务端 logout 为 best-effort，本地清理为权威。
+
+## ADR-021 Emby Token 绑定远端服务器身份后才能使用
+- 状态：已采纳（2026-08-12）
+- 决策：Emby 的 Token、用户与 `remoteServerId` 原子保存。恢复时先调用公开 System Info 且不带 Token，
+  ID 匹配后才请求 `/Users/Me`。所有 endpoint 通过 `EmbyApiRoot`，认证头集中由 Builder 生成。
+- 理由：用户修改 URL 或反代目标后，不能把服务器 A 的 Token 发送给服务器 B。
+- 影响：remoteServerId 缺失/变化要求重新登录；使用官方 `Authorization: Emby ...` 与 `X-Emby-Token`，
+  不把 Token 放 URL。
 
 ## 技术备忘（非决策）
 - androidx lint `UnsafeOptInUsageError` 只识别"使用点"级 @OptIn，比编译器严格；

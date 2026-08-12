@@ -2,7 +2,10 @@ package com.mediahub.app.di
 
 import android.content.Context
 import androidx.room.Room
+import com.mediahub.app.BuildConfig
 import com.mediahub.core.common.AppDispatchers
+import com.mediahub.core.common.ClientIdentity
+import com.mediahub.core.common.ClientIdentityProvider
 import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.logging.CompositeLogger
 import com.mediahub.core.logging.LogBuffer
@@ -57,6 +60,12 @@ object AppModule {
     @Singleton
     fun provideCredentialVault(storage: SecretStorage): CredentialVault =
         EncryptedCredentialVault(storage)
+
+    @Provides
+    @Singleton
+    fun provideClientIdentity(
+        @ApplicationContext context: Context,
+    ): ClientIdentity = ClientIdentityProvider(context, BuildConfig.VERSION_NAME).get()
 
     @Provides
     @Singleton

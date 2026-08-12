@@ -17,9 +17,8 @@ import com.mediahub.model.SubtitleTrack
 /** 认证能力。 */
 interface MediaAuthProvider {
     suspend fun authenticate(credentials: Credentials): AuthResult
-    suspend fun refreshSession(): AuthResult
-    suspend fun logout()
-    suspend fun currentUser(): MediaUser?
+    suspend fun restoreSession(session: AuthSession): SessionRestoreResult
+    suspend fun logout(session: AuthSession)
 }
 
 /** 媒体库浏览能力。 */

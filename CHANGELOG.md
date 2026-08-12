@@ -1,5 +1,24 @@
 # 变更记录（CHANGELOG）
 
+## [Unreleased] — Phase 1A Reconciliation
+
+### 认证架构
+- 将 main@499463c 的 Emby 登录/API/DTO/Header/Mapper/ClientIdentity/MockWebServer 资产迁入 PR #1 架构。
+- 新增原子 `AuthSession`；`CredentialVault + AuthenticationCoordinator` 成为唯一 Session source of truth，
+  不保留 TokenStore/EmbySessionStore。
+- 通用 restore 接入 App：首页恢复时先匿名校验 remoteServerId，再发送 Token；仅 401/身份变化清 Session，
+  403、malformed、网络与 5xx 保留。
+- Emby 使用统一 API root、官方 Authorization Header、X-Emby-Token；Phase 1A Handle 只开放 AUTH。
+- 添加页执行认证→保存事务，密码遮罩且明确“不保存”；保存失败撤销并清理会话。
+
+### 评审修复
+- SAF 任意层级目录改用 DocumentsContract 查询；旧空 LOCAL 记录支持原地重新授权。
+- 关键播放事件改为无丢弃队列，PLAY 状态依据 playWhenReady；系统返回等待 STOP flush；导航保留 MediaType。
+- WebDAV 认证改用受保护 PROPFIND，Basic 默认字符集并按 challenge 重试 UTF-8；401/403 探测显示认证提示。
+
+### 验证
+- 最新 PR head 的三项 GitHub Actions 门禁与 Codex/Copilot review 待本次 reconciliation commit 发布后执行。
+
 ## [Unreleased] — Phase 0.5 Architecture Hardening
 
 ### 架构

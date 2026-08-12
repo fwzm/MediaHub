@@ -13,7 +13,7 @@
 - [x] 文档体系（README/ARCHITECTURE/ROADMAP/TASKS/DECISIONS/CHANGELOG/HANDOFF）
 - [x] 可编译（assembleDebug）+ 单测 + lint 通过
 
-## Phase 0.5 —— 架构加固（当前）
+## Phase 0.5 —— 架构加固
 
 - [x] Provider 接口隔离与类型安全能力组合
 - [x] 开放 providerId、Factory 自描述与动态添加页
@@ -23,14 +23,24 @@
 - [x] Android SAF 本地目录
 - [x] Provider 协议级连接测试
 - [x] CI 与核心边界单测
-- [x] GitHub Actions 三项质量门禁实跑通过（PR #1 head check），本阶段关闭
+- [x] 原 Phase 0.5 head 通过三项质量门禁（该结果不代表后续 reconciliation）
+
+## Phase 1A —— Emby 认证 + 架构 reconciliation（当前）
+
+- [x] AuthenticateByName、官方 Header、DTO/Mapper、统一 API root
+- [x] 单一 CredentialVault/AuthSession；启动恢复、remoteServerId 安全边界、登出
+- [x] PR #1 与 main@499463c 语义合流并处理既有 review feedback
+- [ ] 最新组合 head 通过 assemble/test/lint
+- [ ] 最新组合 head 完成 Codex/Copilot review
+
+完成后停止，等待 PR 最终评审；不自动进入 Phase 1B，不自动合并。
 
 ## V0.1 —— MVP 闭环（Emby + Jellyfin + 本地 + WebDAV + 播放器）
 
 目标：14 项 MVP 清单（见任务要求第十八节）全部可用。
 
-1. Emby Provider：登录（/Users/AuthenticateByName）、媒体库（/Users/{userId}/Views）、
-   条目浏览/搜索/详情、播放源解析（/Items/{itemId}/PlaybackInfo，
+1. Emby Provider Phase 1B：媒体库（/Users/{userId}/Views）、条目浏览/搜索/详情、
+   播放源解析（/Items/{itemId}/PlaybackInfo，
    DirectPlay/DirectStream/Transcode 三态）、进度上报（/Sessions/Playing）、续播、收藏。
 2. Jellyfin Provider：同一套能力（独立 Connector，与 Emby 共享 base）。
 3. WebDAV Provider：PROPFIND 文件树、Basic 认证、直链播放（Range）。

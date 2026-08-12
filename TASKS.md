@@ -12,7 +12,7 @@
 - [x] DONE provider:local 本地文件浏览/播放（真实实现）
 - [x] DONE core:network ApiClient/MediaHttpClient/PlaybackError/脱敏拦截
 - [x] DONE core:database Room（servers/accounts/playback_progress）+ DataStore + Repository
-- [x] DONE core:security Keystore SecretStorage + TokenStore
+- [x] DONE core:security Keystore SecretStorage（Token 生命周期已统一迁入 CredentialVault）
 - [x] DONE core:logging Logger/Redactor/LogBuffer + 单测
 - [x] DONE player:engine Media3 封装（引擎/缓存/请求头注入/轨道选择/结构化错误）
 - [x] DONE player:compatibility 设备能力 + 评估器 + 单测
@@ -41,10 +41,21 @@
 
 ## V0.1 —— MVP（下一步）
 
-### IN PROGRESS（无，等待开工）
+### Phase 1A reconciliation（IN PROGRESS：等待最终 CI/Review）
+
+- [x] PR #1 合入 main@499463c 的 Emby Phase 1A DTO/API/Header/Mapper/ClientIdentity/MockWebServer 资产
+- [x] 删除 TokenStore + EmbySessionStore 并行状态，统一为 CredentialVault 中原子 AuthSession
+- [x] 通用 restore/logout 契约接入 App；remoteServerId 匹配后才发送 Token
+- [x] 仅 401 清会话；403/解析/网络/5xx 保留；统一 Emby API root
+- [x] Add Server 登录事务、密码遮罩与“不保存密码”文案
+- [x] 处理旧 PR review：SAF 子目录/旧 LOCAL 重授权/关键事件/PLAY 状态/MediaType/WebDAV/系统返回
+- [ ] 最新 reconciliation head：assembleDebug + testDebugUnitTest + lintDebug
+- [ ] 最新 reconciliation head：Codex + Copilot review
+
+> 完成以上两项后停止并等待最终评审；不得进入 Phase 1B，不得合并 PR #1。
 
 ### TODO
-- [ ] Emby Provider 完整实现（登录→媒体库→浏览→搜索→详情→播放源→进度上报）
+- [ ] Phase 1B：Emby 媒体库→浏览→搜索→详情→播放源→进度上报（当前禁止开始）
 - [ ] Jellyfin Provider 完整实现（同上，独立 Connector）
 - [ ] WebDAV Provider（PROPFIND 文件树 + Basic 认证 + 播放）
 - [ ] 播放前接入 PlaybackCompatibilityEvaluator（resolve 流程输出三态决策）

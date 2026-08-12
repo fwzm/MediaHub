@@ -5,10 +5,6 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.ApiClient
 import com.mediahub.core.network.MediaHttpClient
 import com.mediahub.model.MediaServer
-import com.mediahub.provider.api.ConnectionTestRequest
-import com.mediahub.provider.api.CredentialVault
-import com.mediahub.provider.api.Credentials
-import com.mediahub.provider.api.SessionCredential
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -31,8 +27,8 @@ class JellyfinConnectionTest {
             server.enqueue(MockResponse().setResponseCode(404))
             val provider = provider(server)
 
-            assertTrue(provider.testConnection(ConnectionTestRequest()).ok)
-            assertFalse(provider.testConnection(ConnectionTestRequest()).ok)
+            assertTrue(provider.testConnection().ok)
+            assertFalse(provider.testConnection().ok)
         } finally {
             server.shutdown()
         }
@@ -49,7 +45,7 @@ class JellyfinConnectionTest {
                 )
             )
 
-            assertFalse(provider(server).testConnection(ConnectionTestRequest()).ok)
+            assertFalse(provider(server).testConnection().ok)
         } finally {
             server.shutdown()
         }
@@ -67,18 +63,8 @@ class JellyfinConnectionTest {
             ),
             apiClient = ApiClient(client, logger = NoOpLogger),
             mediaHttpClient = MediaHttpClient(client, NoOpLogger),
-            credentialVault = EmptyVault,
             logger = NoOpLogger,
         )
-    }
-
-    private object EmptyVault : CredentialVault {
-        override suspend fun savePending(serverId: String, credentials: Credentials) = Unit
-        override suspend fun readPending(serverId: String): Credentials? = null
-        override suspend fun saveSession(serverId: String, session: SessionCredential) = Unit
-        override suspend fun readSession(serverId: String): SessionCredential? = null
-        override suspend fun clearPending(serverId: String) = Unit
-        override suspend fun clear(serverId: String) = Unit
     }
 
     private object NoOpLogger : Logger {

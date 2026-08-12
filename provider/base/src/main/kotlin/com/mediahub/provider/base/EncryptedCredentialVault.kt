@@ -1,6 +1,8 @@
 package com.mediahub.provider.base
 
 import com.mediahub.core.security.SecretStorage
+import com.mediahub.model.MediaUser
+import com.mediahub.provider.api.AuthSession
 import com.mediahub.provider.api.CredentialVault
 import com.mediahub.provider.api.Credentials
 import com.mediahub.provider.api.SessionCredential
@@ -19,12 +21,12 @@ class EncryptedCredentialVault(
     override suspend fun readPending(serverId: String): Credentials? =
         storage.get(pendingKey(serverId))?.let(CredentialCodec::decodePending)
 
-    override suspend fun saveSession(serverId: String, session: SessionCredential) {
+    override suspend fun saveSession(serverId: String, session: AuthSession) {
         storage.put(sessionKey(serverId), CredentialCodec.encode(session))
     }
 
-    override suspend fun readSession(serverId: String): SessionCredential? =
-        storage.get(sessionKey(serverId))?.let(CredentialCodec::decodeSession)
+    override suspend fun readSession(serverId: String): AuthSession? =
+        storage.get(sessionKey(serverId))?.let { CredentialCodec.decodeSession(it, serverId) }
 
     override suspend fun clearPending(serverId: String) {
         storage.remove(pendingKey(serverId))
@@ -84,6 +86,15 @@ internal object CredentialCodec {
         )
     }
 
+    fun encode(value: AuthSession): String = record(
+        "AUTH_SESSION",
+        encode(value.credential),
+        value.user.serverId,
+        value.user.userId,
+        value.user.displayName,
+        value.remoteServerId,
+    )
+
     fun decodePending(raw: String): Credentials? = decode(raw) { tag, fields ->
         when (tag) {
             "P_ANON" -> Credentials.Anonymous
@@ -100,7 +111,37 @@ internal object CredentialCodec {
         }
     }
 
-    fun decodeSession(raw: String): SessionCredential? = decode(raw) { tag, fields ->
+    fun decodeSession(raw: String, serverId: String): AuthSession? {
+        val current = decode(raw) { tag, fields ->
+            if (tag != "AUTH_SESSION") return@decode null
+            val credential = decodeCredential(fields.required(0)) ?: return@decode null
+            val userServerId = fields.getOrNull(1).takeUnless { it.isNullOrBlank() } ?: serverId
+            AuthSession(
+                credential = credential,
+                user = MediaUser(
+                    serverId = userServerId,
+                    userId = fields.required(2),
+                    displayName = fields.getOrNull(3).orEmpty(),
+                ),
+                remoteServerId = fields.getOrNull(4),
+            )
+        }
+        if (current != null) return current
+
+        // Phase 0.5 早期构建只保存了 SessionCredential。Basic 可无损迁移；
+        // AccessToken 缺少远端身份，恢复时会被 Provider 安全地判定为需重新登录。
+        val legacy = decodeCredential(raw) ?: return null
+        val legacyUser = when (legacy) {
+            is SessionCredential.BasicAuth -> legacy.username
+            else -> ""
+        }
+        return AuthSession(
+            credential = legacy,
+            user = MediaUser(serverId = serverId, userId = legacyUser, displayName = legacyUser),
+        )
+    }
+
+    private fun decodeCredential(raw: String): SessionCredential? = decode(raw) { tag, fields ->
         when (tag) {
             "S_ACCESS" -> SessionCredential.AccessToken(
                 accessToken = fields.required(0),

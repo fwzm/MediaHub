@@ -30,6 +30,7 @@ dependencies {
     implementation(project(":provider:api"))
     implementation(project(":provider:base"))
     implementation(project(":core:model"))
+    implementation(project(":core:common"))
     implementation(project(":core:network"))
     implementation(project(":core:logging"))
 

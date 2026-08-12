@@ -1,14 +1,13 @@
 package com.mediahub.provider.emby
 
+import com.mediahub.core.common.ClientIdentity
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.ApiClient
 import com.mediahub.core.network.MediaHttpClient
 import com.mediahub.model.MediaServer
-import com.mediahub.provider.api.ConnectionTestRequest
-import com.mediahub.provider.api.CredentialVault
-import com.mediahub.provider.api.Credentials
-import com.mediahub.provider.api.SessionCredential
+import com.mediahub.provider.emby.api.EmbyApiClient
+import com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilder
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -35,8 +34,8 @@ class EmbyConnectionTest {
             )
             val provider = provider(server)
 
-            assertTrue(provider.testConnection(ConnectionTestRequest()).ok)
-            assertFalse(provider.testConnection(ConnectionTestRequest()).ok)
+            assertTrue(provider.testConnection().ok)
+            assertFalse(provider.testConnection().ok)
             assertTrue(server.takeRequest().path!!.endsWith("/System/Info/Public"))
         } finally {
             server.shutdown()
@@ -54,7 +53,7 @@ class EmbyConnectionTest {
             server.enqueue(MockResponse().setResponseCode(403))
             val provider = provider(server)
 
-            repeat(4) { assertFalse(provider.testConnection(ConnectionTestRequest()).ok) }
+            repeat(4) { assertFalse(provider.testConnection().ok) }
         } finally {
             server.shutdown()
         }
@@ -69,22 +68,13 @@ class EmbyConnectionTest {
             baseUrl = mock.url("/emby").toString().trimEnd('/'),
             createdAtEpochMs = 1L,
         )
-        return EmbyProvider(
-            mediaServer,
-            ApiClient(client, logger = NoOpLogger),
-            MediaHttpClient(client, NoOpLogger),
-            EmptyVault,
-            NoOpLogger,
+        val apiClient = ApiClient(client, logger = NoOpLogger)
+        val embyApi = EmbyApiClient(
+            mediaServer.baseUrl,
+            apiClient,
+            EmbyAuthorizationHeaderBuilder(ClientIdentity("MediaHub", "Android", "device", "test")),
         )
-    }
-
-    private object EmptyVault : CredentialVault {
-        override suspend fun savePending(serverId: String, credentials: Credentials) = Unit
-        override suspend fun readPending(serverId: String): Credentials? = null
-        override suspend fun saveSession(serverId: String, session: SessionCredential) = Unit
-        override suspend fun readSession(serverId: String): SessionCredential? = null
-        override suspend fun clearPending(serverId: String) = Unit
-        override suspend fun clear(serverId: String) = Unit
+        return EmbyProvider(mediaServer, apiClient, MediaHttpClient(client, NoOpLogger), NoOpLogger, embyApi)
     }
 
     private object NoOpLogger : Logger {

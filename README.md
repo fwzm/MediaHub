@@ -2,15 +2,15 @@
 
 > 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
 
-当前状态：**Phase 0.5 架构加固已完成**。CI 的 assemble、41 个单测与 lint 已通过；
-真实 Emby/Jellyfin/WebDAV 业务 API 仍属于 V0.1。
+当前状态：**PR #1 正在执行 Phase 0.5 × Phase 1A reconciliation**。Emby 认证已迁入统一架构；
+Library/Items/PlaybackInfo（Phase 1B）尚未开始。最终结论以 reconciliation head 的新 CI/Review 为准。
 
 ## 当前架构
 
 - `MediaProvider` 只保留公共身份和协议探测；认证、媒体库、文件浏览、播放、搜索、字幕、进度是可选能力。
 - `ProviderHandle` 只暴露当前真实可用能力，并校验其属于 Descriptor 的计划能力；UI/ViewModel 不判断具体类型。
 - `MediaProviderFactory` 自带开放的 `providerId` 与 `ProviderDescriptor`；添加页从 Registry 动态读取。
-- 凭据只经 `CredentialVault` 进入 Android Keystore 加密的 `SecretStorage`，不写 Room/DataStore/日志。
+- 原子 `AuthSession` 只经 `CredentialVault` 进入 Android Keystore；`AuthenticationCoordinator` 是唯一 Session 生命周期入口。
 - 每个播放 MediaSource 捕获独立的不可变请求上下文，不共享可变 Header/Cookie。
 - 播放进度分成 UI 刷新、本地快照、Provider 远端节流和关键事件即时同步。
 - 本地媒体使用 SAF 文档树和持久 URI 授权，播放 `content://`，不依赖 `file://`。
@@ -35,8 +35,9 @@ player/
 provider/
   api/               最小 Provider 契约、可选能力、Descriptor/Handle
   base/              Registry、认证协调器、加密 CredentialVault
-  emby/ jellyfin/    协议探测与 Phase 1 契约骨架
-  webdav/            OPTIONS 探测、Basic 凭据生命周期、业务骨架
+  emby/              Phase 1A 认证（api/auth/session/mapper），Handle 仅 AUTH
+  jellyfin/          协议探测，业务能力尚未开放
+  webdav/            OPTIONS 探测、独立 Basic Auth，Browse/Playback 尚未开放
   local/             SAF 文件树浏览与 content:// 播放
 metadata/            元数据抽象
 feature/             home/server/library/detail/search/settings/player
@@ -63,15 +64,15 @@ feature/             home/server/library/detail/search/settings/player
 3. 点击媒体 → Media3 播放 `content://` 或 Provider 解析出的临时资源。
 4. UI 位置约每 500ms 刷新；本地进度约 5s 快照；远端按 Provider 策略上报；暂停/拖动/停止/结束即时同步。
 
-Emby/Jellyfin 目前只实现服务器身份探测，WebDAV 已实现协议探测与 Basic 凭据保存；媒体库、搜索、播放源、
-远端进度等完整业务在 V0.1 实现，当前通过结构化 `NotYetImplemented` 明确失败。
+Emby 已实现 AuthenticateByName、原子 Token Session、启动恢复、远端身份校验与登出，Handle 只开放 AUTH。
+Jellyfin 仅身份探测；WebDAV 已实现协议探测与 Basic 认证。媒体库、搜索、播放源、远端进度均未开放。
 
 ## 安全约定
 
 - 禁止硬编码或明文持久化 Token、Cookie、密码。
 - 临时播放 URL 绝不落库；只持久化稳定资源标识。
 - 所有日志经 `Redactor` 脱敏。
-- Provider 登录成功后只保留长期会话；必须长期使用密码的协议才保存加密密码。
+- Emby/Jellyfin 原始密码不持久化；只有 WebDAV 等协议本身长期依赖密码时才保存加密 Basic 会话。
 
 ## 多 AI 协作
 

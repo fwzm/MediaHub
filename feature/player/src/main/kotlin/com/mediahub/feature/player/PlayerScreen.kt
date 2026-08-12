@@ -1,6 +1,7 @@
 package com.mediahub.feature.player
 
 import android.view.ViewGroup
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -23,7 +24,6 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,11 +58,7 @@ fun PlayerRoute(
     var showSubtitleDialog by remember { mutableStateOf(false) }
     val stopAndBack = { viewModel.stopAndExit(onBack) }
 
-    // review P2-8：系统 Back / predictive back 也必须经过 awaited stopAndFlush，
-    // 不能只覆盖 toolbar 返回按钮（否则进度 final flush 可能被绕过）。
-    BackHandler(enabled = resolve == ResolveState.Ready) {
-        stopAndBack()
-    }
+    BackHandler(onBack = stopAndBack)
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // 视频画面

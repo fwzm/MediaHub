@@ -20,10 +20,12 @@
 
 - `Credentials`：一次认证输入；所有 `toString()` 均脱敏。
 - `SessionCredential`：登录后可长期使用的 Token/Basic/OAuth/Cookie/API Key。
-- `AuthenticationCoordinator`：认证、保存 Session、清除 pending、失败回滚。
+- `AuthSession`：Credential + User + remoteServerId 的单条原子加密记录。
+- `AuthenticationCoordinator`：认证、恢复、登出、保存/清理 Session、失败回滚；唯一 source of truth 入口。
 - `CredentialVault`：敏感信息唯一持久化接口；实现必须落入 Keystore 加密 `SecretStorage`。
 
-Emby/Jellyfin 的 UsernamePassword 在登录成功后必须换成 Token 并删除；WebDAV Basic 因协议需要可加密保留。
+`MediaAuthProvider.restoreSession` 返回 Restored/Invalidated/Unavailable；只有 Invalidated 清 Vault。
+Emby/Jellyfin 的 UsernamePassword 不持久化；WebDAV Basic 因协议需要可加密保留。
 禁止把 Secret 写入 Room、DataStore 或日志。
 
 ## 连接测试
@@ -35,7 +37,7 @@ UI 只调用 `handle.provider.testConnection(request)`。具体 Provider 校验�
 - UI：播放器内存 StateFlow。
 - 本地：`ProgressRepository` 快照，默认 5s。
 - 远端：`MediaProgressProvider.reportingPolicy` 独立控制周期。
-- 关键事件：`PlaybackProgressReason` 的 PLAY/PAUSE/SEEK/STOP/END，立即 flush。
+- 关键事件：`PlaybackProgressReason` 的 PLAY/PAUSE/SEEK/STOP/END，进入无丢弃队列并立即 flush。
 
 ## 错误
 

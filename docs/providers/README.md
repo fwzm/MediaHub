@@ -7,7 +7,8 @@
 
 | Provider | Descriptor 计划能力 | Phase 0.5 运行时能力 |
 |---|---|---|
-| Emby/Jellyfin | Auth + Library + Playback + Search + Subtitle + Progress | 仅协议探测 |
+| Emby | Auth + Library + Playback + Search + Subtitle + Progress | Auth（Phase 1A） |
+| Jellyfin | Auth + Library + Playback + Search + Subtitle + Progress | 仅协议探测 |
 | WebDAV | Auth + Browse + Playback | Auth（Basic 验证/加密会话） |
 | Local | Browse + Playback | Browse + Playback |
 
@@ -17,24 +18,25 @@ Remote DTO 与协议细节只能存在于具体 Provider；输出统一 Domain M
 
 - Emby：读取公开 System Info，要求 Id/Version，检测到 Jellyfin ProductName 时拒绝。
 - Jellyfin：读取公开 System Info，要求 Jellyfin ProductName、Id、Version。
-- WebDAV：发送 OPTIONS，要求 2xx 与非空 DAV Header；401/403/404 均失败。
+- WebDAV：OPTIONS 要求 2xx 与非空 DAV Header；401/403 映射为 AUTH_REQUIRED，不误报成非 WebDAV。
 - Local：要求 `content://` 文档树、持久读权限和可读目录。
 
 ## 凭据
 
-- Emby/Jellyfin：V0.1 实现 UsernamePassword → Access Token；成功后删除密码。
-- WebDAV：Basic 验证后加密保存，因为后续每次访问依赖该凭据。
+- Emby：UsernamePassword → Access Token + User + remoteServerId 原子 AuthSession；密码不保存。
+- Jellyfin：登录尚未实现，UsernamePassword 不允许 pending 持久化。
+- WebDAV：用受保护 PROPFIND 验证 Basic；默认标准字符集，服务器 challenge 声明 UTF-8 时重试；成功后加密保存。
 - 云盘：优先官方 OAuth/Device Code/Refresh Token；Cookie Session 仅在协议允许时使用。
 
 ## Local（已实现）
 
-添加页用系统 `ACTION_OPEN_DOCUMENT_TREE` 获取目录，调用 `takePersistableUriPermission`。Provider 用 DocumentFile
-列目录、ContentResolver 校验/读取并返回 `content://` DIRECT_PLAY；不使用 app 私有外部目录与 `file://`。
+添加页用系统 `ACTION_OPEN_DOCUMENT_TREE` 获取目录，调用 `takePersistableUriPermission`。Provider 用
+DocumentsContract/ContentResolver 列举子目录并返回 `content://` DIRECT_PLAY；旧空 LOCAL 记录原地重新授权。
 
 ## V0.1 顺序
 
-1. Emby 认证与 Token Vault；
-2. Libraries/Items/详情；
+1. 等待 Phase 1A reconciliation CI/Review；
+2. Phase 1B：Libraries/Items/详情；
 3. PlaybackInfo 与兼容性决策；
 4. Progress reporter；
 5. 再将同一契约独立实现到 Jellyfin 与 WebDAV。

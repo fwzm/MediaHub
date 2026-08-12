@@ -5,9 +5,9 @@ import com.mediahub.core.network.ApiClient
 import com.mediahub.core.network.HttpClientFactory
 import com.mediahub.core.network.MediaHttpClient
 import com.mediahub.model.MediaServer
-import com.mediahub.provider.api.CredentialVault
 import com.mediahub.provider.api.MediaProviderFactory
 import com.mediahub.provider.api.ProviderHandle
+import com.mediahub.provider.webdav.auth.WebDavAuthProvider
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -19,22 +19,21 @@ import javax.inject.Singleton
 @Singleton
 class WebDavProviderFactory @Inject constructor(
     private val httpClientFactory: HttpClientFactory,
-    private val credentialVault: CredentialVault,
     private val logger: Logger,
 ) : MediaProviderFactory {
     override val descriptor = WebDavProvider.DESCRIPTOR
 
     override fun create(server: MediaServer): ProviderHandle {
+        val apiClient = ApiClient(httpClientFactory.apiClient(), logger = logger)
         val provider = WebDavProvider(
             server = server,
-            apiClient = ApiClient(httpClientFactory.apiClient(), logger = logger),
+            apiClient = apiClient,
             mediaHttpClient = MediaHttpClient(httpClientFactory.mediaClient(), logger),
-            credentialVault = credentialVault,
             logger = logger,
         )
         return ProviderHandle(
             provider = provider,
-            auth = provider,
+            auth = WebDavAuthProvider(server, apiClient),
         )
     }
 }

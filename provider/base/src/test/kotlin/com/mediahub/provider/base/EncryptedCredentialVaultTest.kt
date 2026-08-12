@@ -1,6 +1,8 @@
 package com.mediahub.provider.base
 
 import com.mediahub.core.security.SecretStorage
+import com.mediahub.model.MediaUser
+import com.mediahub.provider.api.AuthSession
 import com.mediahub.provider.api.Credentials
 import com.mediahub.provider.api.SessionCredential
 import kotlinx.coroutines.test.runTest
@@ -28,7 +30,11 @@ class EncryptedCredentialVaultTest {
         val storage = MemorySecretStorage()
         val vault = EncryptedCredentialVault(storage)
         vault.savePending("server-1", Credentials.BasicAuth("name", "password"))
-        val session = SessionCredential.OAuth2("access", "refresh", 42L)
+        val session = AuthSession(
+            credential = SessionCredential.OAuth2("access", "refresh", 42L),
+            user = MediaUser("server-1", "user-1", "Alice"),
+            remoteServerId = "remote-1",
+        )
 
         vault.saveSession("server-1", session)
         vault.clearPending("server-1")

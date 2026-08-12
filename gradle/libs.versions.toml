@@ -18,7 +18,6 @@ okhttp = "4.12.0"
 kotlinxSerialization = "1.7.3"
 coil = "2.7.0"
 junit = "4.13.2"
-robolectric = "4.13"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -65,7 +64,6 @@ okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver",
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
-robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

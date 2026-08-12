@@ -1,5 +1,7 @@
 package com.mediahub.provider.api
 
+import com.mediahub.model.MediaUser
+
 /**
  * 一次认证请求使用的短生命周期凭据。所有实现都覆盖 [toString]，避免调试输出泄露密钥。
  */
@@ -81,12 +83,25 @@ sealed interface SessionCredential {
     }
 }
 
+/**
+ * 一条可恢复的认证会话。Token 与远端服务器/用户身份必须作为同一个加密记录保存，
+ * 避免出现“Token 已删但元数据仍在”或反向的双 Store 分裂状态。
+ */
+data class AuthSession(
+    val credential: SessionCredential,
+    val user: MediaUser,
+    val remoteServerId: String? = null,
+) {
+    override fun toString(): String =
+        "AuthSession(credential=REDACTED, userId=${user.userId}, remoteServerId=$remoteServerId)"
+}
+
 /** 唯一允许持久化认证凭据的抽象；实现必须使用加密存储。 */
 interface CredentialVault {
     suspend fun savePending(serverId: String, credentials: Credentials)
     suspend fun readPending(serverId: String): Credentials?
-    suspend fun saveSession(serverId: String, session: SessionCredential)
-    suspend fun readSession(serverId: String): SessionCredential?
+    suspend fun saveSession(serverId: String, session: AuthSession)
+    suspend fun readSession(serverId: String): AuthSession?
     suspend fun clearPending(serverId: String)
     suspend fun clear(serverId: String)
 }
@@ -102,6 +117,12 @@ interface AuthenticationCoordinator {
         handle: ProviderHandle,
         credentials: Credentials,
     ): AuthenticationDisposition
+
+    /** 从唯一的加密会话记录恢复，并由具体 Provider 做真实协议验证。 */
+    suspend fun restore(handle: ProviderHandle): AuthenticationState
+
+    /** 服务端撤销为 best-effort，本地 Vault 清理始终为权威结果。 */
+    suspend fun logout(handle: ProviderHandle)
 
     suspend fun clear(serverId: String)
 }

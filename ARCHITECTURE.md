@@ -1,6 +1,6 @@
 # 架构说明（ARCHITECTURE）
 
-> 本文描述 Phase 0.5 的当前真实实现；如文档与代码冲突，以代码为准并立即修正文档。
+> 本文描述 Phase 0.5 + Phase 1A reconciliation 的当前真实实现；如文档与代码冲突，以代码为准。
 
 ## 1. 依赖方向
 
@@ -27,7 +27,7 @@ feature:player → player:engine → Media3
 
 | 能力 | 接口 | 典型实现 |
 |---|---|---|
-| 认证 | `MediaAuthProvider` | Emby、Jellyfin、WebDAV |
+| 认证 | `MediaAuthProvider` | Emby、WebDAV；Jellyfin 尚未开放 |
 | 结构化媒体库 | `MediaLibraryProvider` | Emby、Jellyfin |
 | 文件树 | `MediaBrowseProvider` | Local、WebDAV、云盘 |
 | 播放解析 | `MediaPlaybackProvider` | 可播放的数据源 |
@@ -35,6 +35,8 @@ feature:player → player:engine → Media3
 
 Factory 返回 `ProviderHandle`。Descriptor 表示计划能力，Handle 字段推导 `runtimeCapabilities`，并校验
 “运行时能力 ⊆ 计划能力”。业务层只以 Handle 为准，未完成 API 不会因为列在路线图中就被伪装成可用。
+具体 Provider 类也不得实现未完成能力；当前 Emby/Jellyfin 都是最小 Provider，WebDAV 认证独立在
+`WebDavAuthProvider`，避免通过具体类型绕过 Handle。
 
 ## 3. Descriptor 与注册表
 
@@ -47,21 +49,29 @@ Factory 返回 `ProviderHandle`。Descriptor 表示计划能力，Handle 字段�
 ## 4. 凭据生命周期
 
 ```text
-用户输入短期 Credentials
+UsernamePassword（仅内存）
         ↓
-AuthenticationCoordinator → MediaAuthProvider.authenticate
-        ↓ 成功                         ↓ Phase 1 尚未实现
-SessionCredential                 加密暂存 pending credential
-        ↓                                  ↓
-CredentialVault → Keystore SecretStorage ← 后续登录成功后清除
+MediaAuthProvider.authenticate
+        ↓
+AuthSession(Token + User + remoteServerId)
+        ↓ 原子加密记录
+AuthenticationCoordinator → CredentialVault → Keystore SecretStorage
 ```
 
 - Room 只存非敏感服务器与账号元数据。
-- Emby/Jellyfin 的目标生命周期是“密码换 Access Token 后销毁密码”；Phase 0.5 未实现真实登录，因此加密暂存，
-  避免添加页面销毁后凭据直接丢失。V0.1 登录成功必须原子地写 Session 并删除 pending。
+- `CredentialVault` 是唯一会话 source of truth；不存在 `TokenStore + EmbySessionStore` 第二套状态。
+- Emby 已实现“密码换 Access Token”；密码只存在于登录请求内存，不进入 Vault。尚未实现的用户名密码登录也不暂存原始密码。
+- Token、远端服务器 ID 与用户身份作为一个 `AuthSession` 加密记录，避免双 Store 部分写入。
 - WebDAV 的长期访问依赖 Basic 密码，验证后以 `SessionCredential.BasicAuth` 加密保存。
 - Credential 模型已为 OAuth2、Refresh Token、Cookie Session、Device Code、API Key、二维码登录留出扩展点。
 - 所有 Credential/Session 类型覆盖 `toString()`，日志链路继续由 `Redactor` 兜底。
+
+恢复由通用 `AuthenticationCoordinator.restore(handle)` 驱动并已接入首页启动路径。Emby 恢复顺序固定为：
+
+1. 不带 Token 请求公开 System Info；
+2. `remoteServerId` 匹配后才发送 `X-Emby-Token`；
+3. 仅 401 或明确服务器/用户身份变化使会话失效；403、解析错误、超时、DNS、5xx 保留本地会话；
+4. 登出先 best-effort 撤销服务端 Token，最终始终由 Coordinator 清理 Vault。
 
 ## 5. 播放请求上下文
 
@@ -79,7 +89,7 @@ CredentialVault → Keystore SecretStorage ← 后续登录成功后清除
 | UI State | 500ms | 仅内存更新位置与时长 |
 | 本地续播快照 | 默认 5s | conflate + `ProgressRepository.save` |
 | 远端周期上报 | Provider 策略，默认 10s | 独立节流；单次上报最多等待 2s |
-| 关键事件 | Play/Pause/Seek/Stop/End | 不 conflate；立即本地保存与限时远端上报 |
+| 关键事件 | Play/Pause/Seek/Stop/End | 无丢弃队列；立即本地保存与限时远端上报 |
 | 页面销毁兜底 | release | final flush |
 
 高频位置 tick 不创建子 coroutine，也不直接触发数据库或网络。退出按钮先完成 STOP flush；生命周期异常销毁再以 IO scope
@@ -88,14 +98,17 @@ CredentialVault → Keystore SecretStorage ← 后续登录成功后清除
 ## 7. 本地媒体（SAF）
 
 添加本地媒体时启动 `ACTION_OPEN_DOCUMENT_TREE`，保存 `takePersistableUriPermission()` 的文档树 URI。
-`LocalProvider` 使用 `DocumentFile`/`ContentResolver` 浏览与校验授权，Media3 播放 `content://`。这覆盖普通本地目录、
+`LocalProvider` 使用 `DocumentsContract`/`ContentResolver` 列举任意层级子目录，`DocumentFile` 校验根授权，Media3 播放 `content://`。这覆盖普通本地目录、
 U 盘与系统可见的 DocumentProvider，不围绕 `java.io.File` 或 `file://` 扩展。
+旧版空 `LOCAL.baseUrl` 行在首页显示“需要重新授权”，并更新原服务器记录，不创建重复媒体源。
 
 ## 8. 网络、错误与缓存
 
 - `ApiClient` 负责普通 API；`MediaHttpClient` 负责 Range/302/Cookie/长连接媒体流。
 - 协议连接测试由具体 Provider 完成：Emby/Jellyfin 校验公开 System Info，WebDAV 校验 `OPTIONS` 与 `DAV` Header，
   Local 校验持久 URI 权限。401/403/404 不再因 `<500` 被视为成功。
+- Emby 的 API root、DTO、`Authorization: Emby ...` 与 `X-Emby-Token` 统一封装在 `provider:emby/api`；
+  Phase 1A 只开放 AUTH，Library/Playback/Search/Subtitle/Progress 均未开放。
 - 错误按 `ApiException` → `ProviderException` → `PlaybackError` 分层。
 - 缓存继续分离：Room（元数据/进度）、Coil（图片，待接入）、Media3 SimpleCache（播放）、DownloadManager（离线，后续）。
 
