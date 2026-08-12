@@ -1,6 +1,16 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12，PR #1 Final Reconciliation Patch 2 完成。
+> 最后更新：2026-08-12，Final Reconciliation Patch 3 完成（合并 latest main + Existing Server UI 显式化 + 策略测试）。
+
+## Patch 3（最新）
+
+- 已把 latest main（47db322/2916e84）真正 merge 进 PR 分支，main 成为祖先（ahead 0/behind 0）。
+- 冲突以 PR 架构为准（CredentialVault + AuthenticationCoordinator + providerId），未恢复 TokenStore/EmbySessionStore。
+- Existing-server UI 显式化：ExistingServerMode（AUTH_RELOGIN/LOCAL_REAUTHORIZE/NONE）+ 标题/按钮区分 +
+  existing 模式隐藏 ProviderGrid（锁定原 Provider）。
+- 策略测试：feature/server 的 ServerClickDecision(7)+ServerEditModePolicy(2)+ServerSavePlanner(5)；全项目 79。
+- 待办（需你在 GitHub 操作）：确认 latest head（b71f0a0）CI success + mergeable；更新 PR description；
+  重新请求 latest-head review；然后 merge PR #1。
 
 ## 0. Patch 2（最新）：Existing Server Re-login + feature:server 测试（评审 Patch 2 规范）
 
