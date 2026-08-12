@@ -53,7 +53,7 @@ class EmbyLibraryProvider(
         return try {
             val result = api.getUserItems(token, userId, parentId = libraryId, page = page)
             PagedResult(
-                items = result.items.map { EmbyMediaItemMapper.map(it, server.id) },
+                items = result.items.mapNotNull { EmbyMediaItemMapper.map(it, server.id) },
                 totalCount = result.totalRecordCount,
                 hasMore = (page.offset + result.items.size) < result.totalRecordCount,
                 nextOffset = if ((page.offset + result.items.size) < result.totalRecordCount) {

@@ -72,6 +72,68 @@ class EmbyApiClient(
         return apiClient.get(url, authenticatedHeaders(token, userId))
     }
 
+    /** 条目详情：GET /emby/Users/{userId}/Items/{itemId}（官方 UserService）。 */
+    suspend fun getUserItem(token: String, userId: String, itemId: String): EmbyUserItemDto {
+        val url = endpointResolver.endpoint("/Users/$userId/Items").toHttpUrl().newBuilder()
+            .addPathSegment(itemId)
+            .build()
+            .toString()
+        return apiClient.get(url, authenticatedHeaders(token, userId))
+    }
+    /**
+     * 播放信息：GET /emby/Items/{itemId}/PlaybackInfo（官方 MediaInfoService）。
+     *
+     * 无转码红线（Phase 1B-2）：请求固定 EnableTranscoding=false / EnableDirectStream=true，
+     * 只询问服务端能否 Direct Stream；绝不申请转码会话。
+     */
+    suspend fun getPlaybackInfo(
+        token: String,
+        userId: String,
+        itemId: String,
+        startTimeTicks: Long?,
+        maxStreamingBitrate: Long?,
+    ): EmbyPlaybackInfoDto {
+        val query = mutableMapOf(
+            "UserId" to userId,
+            "IsPlayback" to "true",
+            "EnableDirectPlay" to "false",
+            "EnableDirectStream" to "true",
+            "EnableTranscoding" to "false",
+            "DeviceProfile" to DEVICE_PROFILE,
+        )
+        if (startTimeTicks != null && startTimeTicks > 0) {
+            query["StartTimeTicks"] = startTimeTicks.toString()
+        }
+        if (maxStreamingBitrate != null && maxStreamingBitrate > 0) {
+            query["MaxStreamingBitrate"] = maxStreamingBitrate.toString()
+        }
+        val url = buildUrlWithSegments(
+            path = "/Items",
+            segments = listOf(itemId, "PlaybackInfo"),
+            query = query,
+        )
+        return apiClient.get(url, authenticatedHeaders(token, userId))
+    }
+    /**
+     * 无转码 Direct Stream 播放地址：
+     * GET /emby/Videos/{itemId}/stream.{container}?MediaSourceId=...&PlaySessionId=...&static=true
+     *
+     * 红线：鉴权只走 Header（X-Emby-Token），禁止任何 Token 进 URL（ADR-026）。
+     */
+    fun directStreamUrl(
+        itemId: String,
+        container: String,
+        mediaSourceId: String?,
+        playSessionId: String?,
+    ): String {
+        val builder = endpointResolver.endpoint("/Videos").toHttpUrl().newBuilder()
+            .addPathSegment(itemId)
+            .addPathSegment("stream.$container")
+            .addQueryParameter("static", "true")
+        if (!mediaSourceId.isNullOrBlank()) builder.addQueryParameter("MediaSourceId", mediaSourceId)
+        if (!playSessionId.isNullOrBlank()) builder.addQueryParameter("PlaySessionId", playSessionId)
+        return builder.build().toString()
+    }
     /** 服务器公开信息（**无 Token**）：GET /emby/System/Info/Public。
      *  用于会话恢复前校验 remoteServerId，避免把旧 Token 发给另一台服务器（review #2）。 */
     suspend fun getSystemInfoPublic(): SystemInfoPublic =
@@ -94,6 +156,17 @@ class EmbyApiClient(
         query.forEach { (k, v) -> builder.addQueryParameter(k, v) }
         return builder.build().toString()
     }
+    /** 带 path segments 的安全 URL 构建（segments 会被 URL 编码）。 */
+    private fun buildUrlWithSegments(
+        path: String,
+        segments: List<String>,
+        query: Map<String, String>,
+    ): String {
+        val builder = endpointResolver.endpoint(path).toHttpUrl().newBuilder()
+        segments.forEach { builder.addPathSegment(it) }
+        query.forEach { (k, v) -> builder.addQueryParameter(k, v) }
+        return builder.build().toString()
+    }
 
     /** 客户端身份头；userId 存在时带上（官方要求登录后进行带）。 */
     fun identityHeaders(userId: String? = null): Map<String, String> =
@@ -105,5 +178,12 @@ class EmbyApiClient(
 
     private companion object {
         const val TOKEN_HEADER = "X-Emby-Token"
+        /**
+         * PlaybackInfo 请求的最小 DeviceProfile（无转码）：告诉服务端只评估
+         * Direct Stream 能力，不评估转码组合（Phase 1B-2 红线）。
+         */
+        private const val DEVICE_PROFILE =
+            "{\"EnablePlaybackRemuxing\":true,\"EnableTranscoding\":false," +
+                "\"EnableDirectPlay\":false,\"EnableDirectStream\":true}"
     }
 }

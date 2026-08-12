@@ -1,9 +1,24 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-
-> 最后更新：2026-08-12（Phase 1B-1 Emby 媒体库浏览）。本文件是协作第一手资料。
-
-## Phase 1B-1（本次）：Emby Library Browsing
-
+> 最后更新：2026-08-13（Phase 1B-2 Emby 条目详情 + 无转码 Direct Stream，待 CI 验证）。
+## Phase 1B-2（本次）：Emby Item Detail + 无转码 Direct Stream
+- 详情竖切已实现：getItemDetail（GET /Users/{userId}/Items/{itemId}）→ MediaDetail
+  （versions/streams/audioTracks/subtitles/chapters/hdr 类型映射）。
+- 播放竖切已实现：resolvePlayback → getPlaybackInfo → MediaSourceSelector → directStreamUrl。
+- **无转码红线**：PlaybackInfo 固定 EnableDirectPlay=false/EnableDirectStream=true/EnableTranscoding=false；
+  Selector 只接受 SupportsDirectStream==true 的源；否则 NotYetImplemented("需要转码")。
+- **Token 红线**：Token 永不进 URL——directStreamUrl 参数只有 static/MediaSourceId/PlaySessionId，
+  Token 走 source.headers（X-Emby-Token + X-Emby-Authorization 含 UserId）。
+- EmbyProviderFactory 现暴露 AUTH+LIBRARY+DETAIL+PLAYBACK（runtimeCapabilities，ADR-022/026）。
+- 新增测试 18 条（Mapper 2/Selector 2/DetailProvider 6/PlaybackProvider 8）+ FactoryTest 断言更新，
+  全项目预计 114 用例。
+- 新增文件：EmbyDetailDtos / EmbyDetailMapper / EmbyDetailProvider / EmbyPlaybackProvider / MediaSourceSelector；
+  改造：EmbyApiClient / EmbyLibraryDtos（EmbyItemFields 统一映射）/ EmbyMediaItemMapper / EmbyLibraryProvider。
+- **尚未实现**（Phase 1B-3+）：转码（禁入红线，短期不做）、搜索、字幕、进度上报、
+  播放器 URL 过期自动重解析、外挂字幕。
+- **验证状态**：本机 aarch64 无 Android SDK/qemu，无法本地构建；已提交（或即将提交）到 main，
+  待 GitHub Actions CI（assembleDebug/testDebugUnitTest/lintDebug）结果，失败则按日志修复。
+- 下一刀：Phase 1B-3（候选：搜索 / 播放进度上报 / 真机 smoke Direct Stream）。
+## 排头 Phase 1B-1（2026-08-12）
 - 真实浏览竖切已实现：Views → Items(ParentId) → Series → Season → Folder。
 - EmbyLibraryProvider + Mapper + DTO；MediaType.isContainer=FOLDER/SERIES/SEASON；
   LibraryViewModel root→getLibraries；LibraryScreen 顶层 Views + MediaLibrary 导航。

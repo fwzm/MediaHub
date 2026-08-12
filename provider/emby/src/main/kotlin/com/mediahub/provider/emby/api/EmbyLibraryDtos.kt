@@ -18,28 +18,55 @@ data class EmbyQueryResultDto<T>(
 )
 
 /**
+ * Emby 条目 DTO 公共字段（Phase 1B-2 起 [EmbyBaseItemDto] 与 [EmbyUserItemDto] 共享），
+ * 让 EmbyMediaItemMapper 只写一份映射逻辑，禁止两份 DTO 各写一套映射。
+ */
+interface EmbyItemFields {
+    val id: String?
+    val name: String?
+    val type: String?
+    val mediaType: String?
+    val isFolder: Boolean
+    val parentId: String?
+    val seriesId: String?
+    val seasonId: String?
+    val indexNumber: Int?
+    val parentIndexNumber: Int?
+    val productionYear: Int?
+    val runTimeTicks: Long?
+    val overview: String?
+    val genres: List<String>
+    val container: String?
+    val communityRating: Double?
+    val userData: EmbyUserDataDto?
+}
+/**
  * Emby BaseItem（同时用于 Views 顶层库与 Items 条目）。
- * 只解析 Phase 1B-1 浏览所需字段，不复制完整 Swagger DTO。
+ * 只解析浏览所需字段，不复制完整 Swagger DTO。
  */
 @Serializable
 data class EmbyBaseItemDto(
-    @SerialName("Id") val id: String? = null,
-    @SerialName("Name") val name: String? = null,
-    @SerialName("Type") val type: String? = null,
-    @SerialName("MediaType") val mediaType: String? = null,
-    @SerialName("IsFolder") val isFolder: Boolean = false,
+    @SerialName("Id") override val id: String? = null,
+    @SerialName("Name") override val name: String? = null,
+    @SerialName("Type") override val type: String? = null,
+    @SerialName("MediaType") override val mediaType: String? = null,
+    @SerialName("IsFolder") override val isFolder: Boolean = false,
     @SerialName("CollectionType") val collectionType: String? = null,
-    @SerialName("ParentId") val parentId: String? = null,
-    @SerialName("SeriesId") val seriesId: String? = null,
-    @SerialName("SeasonId") val seasonId: String? = null,
-    @SerialName("IndexNumber") val indexNumber: Int? = null,
-    @SerialName("ParentIndexNumber") val parentIndexNumber: Int? = null,
-    @SerialName("ProductionYear") val productionYear: Int? = null,
-    @SerialName("RunTimeTicks") val runTimeTicks: Long? = null,
+    @SerialName("ParentId") override val parentId: String? = null,
+    @SerialName("SeriesId") override val seriesId: String? = null,
+    @SerialName("SeasonId") override val seasonId: String? = null,
+    @SerialName("IndexNumber") override val indexNumber: Int? = null,
+    @SerialName("ParentIndexNumber") override val parentIndexNumber: Int? = null,
+    @SerialName("ProductionYear") override val productionYear: Int? = null,
+    @SerialName("RunTimeTicks") override val runTimeTicks: Long? = null,
+    @SerialName("Overview") override val overview: String? = null,
+    @SerialName("Genres") override val genres: List<String> = emptyList(),
+    @SerialName("Container") override val container: String? = null,
+    @SerialName("CommunityRating") override val communityRating: Double? = null,
     @SerialName("ImageTags") val imageTags: Map<String, String>? = null,
     @SerialName("PrimaryImageAspectRatio") val primaryImageAspectRatio: Double? = null,
-    @SerialName("UserData") val userData: EmbyUserDataDto? = null,
-)
+    @SerialName("UserData") override val userData: EmbyUserDataDto? = null,
+) : EmbyItemFields
 
 /** 用户数据（仅保留浏览所需的最小字段，Phase 1B-1 不用播放进度）。 */
 @Serializable

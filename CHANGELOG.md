@@ -1,5 +1,29 @@
 # 变更记录（CHANGELOG）
-
+## [0.6.0-phase1b2] — 2026-08-13（Phase 1B-2：Emby 条目详情 + 无转码 Direct Stream）
+### 新增（Phase 1B 第二刀：详情 + 播放源，禁转码）
+- EmbyDetailDtos：UserItem/PlaybackInfo/MediaSource/MediaStream/Chapter（@SerialName，非关键字段缺失不整页失败）。
+- EmbyLibraryDtos 重构：EmbyItemFields 统一字段映射接口，MediaItem 与 Detail 共用，消除双份映射。
+- EmbyMediaItemMapper 加固：空白 Id 拒绝返回 null；补 overview/genres/container/communityRating。
+- EmbyApiClient 新增：getUserItem（GET /Users/{userId}/Items/{itemId}）、getPlaybackInfo（带最小
+  DeviceProfile，固定 EnableDirectPlay=false/EnableDirectStream=true/EnableTranscoding=false）、
+  directStreamUrl（/Videos/{itemId}/stream.{container}?static=true&MediaSourceId&PlaySessionId，
+  绝不包含 Token）、buildUrlWithSegments、DEVICE_PROFILE。
+- EmbyDetailMapper：MediaDetail 映射（versions/streams/audioTracks/subtitles/chapters/hdr 类型映射）。
+- EmbyDetailProvider：getItemDetail；缺 session 不触网；404→NotFound；401→AuthExpired。
+- MediaSourceSelector：纯函数，只接受 SupportsDirectStream==true 的源，否则返回 null。
+- EmbyPlaybackProvider：resolvePlayback→PlaybackSource（DIRECT_STREAM，headers 含 X-Emby-Token +
+  X-Emby-Authorization，PlaySessionId 注入 URL 参数）；无可直接流源/forceTranscode→NotYetImplemented。
+- EmbyProviderFactory 装配 DETAIL+PLAYBACK（runtimeCapabilities={AUTH,LIBRARY,DETAIL,PLAYBACK}）。
+- 结构化错误映射与现有 Emby 风格一致（无 session→AuthRequired、401→AuthExpired、404→NotFound 等）。
+### 测试（96 + 18 = 114 用例）
+- EmbyMediaItemMapperTest 2（空 Id/空白 Id → null）。
+- MediaSourceSelectorTest 2（无可直接流源→null、多源取第一个 SupportsDirectStream）。
+- EmbyDetailProviderTest 6（详情映射/路径与鉴权头/缺 session 不触网/404→NotFound/401→AuthExpired/无 Id→Parse）。
+- EmbyPlaybackProviderTest 8（DirectStream URL 无 Token/PlaybackInfo 请求参数/model 全字段/
+  无可直接流源→NotYetImplemented/forceTranscode→NotYetImplemented 不触网/缺 session 不触网/401→AuthExpired）。
+- EmbyProviderFactoryTest 断言更新（AUTH+LIBRARY+DETAIL+PLAYBACK）。
+### 验证
+- 本机 aarch64 无 Android SDK，无法本地构建；待 GitHub Actions CI（assembleDebug/testDebugUnitTest/lintDebug）。
 ## [0.5.0-phase1b1] — 2026-08-12（Phase 1B-1：Emby 媒体库浏览）
 
 ### 新增（Phase 1B 第一刀，不碰播放）

@@ -46,7 +46,10 @@ internal val EMBY_PROVIDER_DESCRIPTOR = ProviderDescriptor(
  *
  * 具体能力按内部模块拆分（避免巨型类，见 HANDOFF）：
  * - 认证：auth/EmbyAuthProvider（Phase 1A 已实现）
- * - 媒体库/详情/播放/搜索/字幕/进度：Phase 1B 起逐项实现，届时在 Factory 对应填 Handle 字段。
+ * - 媒体库：library/EmbyLibraryProvider（Phase 1B-1 已实现）
+ * - 详情：detail/EmbyDetailProvider（Phase 1B-2 已实现）
+ * - 播放：playback/EmbyPlaybackProvider（Phase 1B-2 已实现，无转码 Direct Stream）
+ * - 搜索/字幕/进度：后续 Phase 逐项实现，届时在 Factory 对应填 Handle 字段。
  */
 class EmbyProvider(
     server: com.mediahub.model.MediaServer,

@@ -74,7 +74,23 @@
 - [x] LibraryViewModel root→getLibraries；LibraryScreen Views + MediaLibrary 导航
 - [x] 测试：EmbyLibraryProviderTest 5 + LibraryViewModelTest 4；全项目 96
 - [x] assembleDebug / testDebugUnitTest(96) / lintDebug 通过
-
+## Phase 1B-2 —— Emby 条目详情 + 无转码 Direct Stream（本次交付）✅ DONE
+- [x] EmbyDetailDtos：UserItem/PlaybackInfo/MediaSource/MediaStream/Chapter（@SerialName，非关键字段缺失不整页失败）
+- [x] EmbyLibraryDtos 重构：EmbyItemFields 统一字段映射（MediaItem 与 Detail 共用，消除双份映射）
+- [x] EmbyMediaItemMapper 加固：空白 Id 拒绝；补 overview/genres/container/communityRating
+- [x] EmbyApiClient：getUserItem / getPlaybackInfo / directStreamUrl / buildUrlWithSegments / DEVICE_PROFILE
+- [x] 无转码红线：PlaybackInfo 固定 EnableDirectPlay=false/EnableDirectStream=true/EnableTranscoding=false；
+      MediaSourceSelector 只接受 SupportsDirectStream==true；否则 NotYetImplemented
+- [x] Token 红线：directStreamUrl 参数仅 static/MediaSourceId/PlaySessionId；Token 只进 source.headers
+- [x] EmbyDetailMapper：MediaDetail（versions/streams/audioTracks/subtitles/chapters/hdr）
+- [x] EmbyDetailProvider（getItemDetail；缺 session 不触网；404→NotFound；401→AuthExpired）
+- [x] EmbyPlaybackProvider（resolvePlayback→PlaybackSource DIRECT_STREAM，含 headers 与 PlaySessionId）
+- [x] EmbyProviderFactory 装配 DETAIL+PLAYBACK（runtimeCapabilities={AUTH,LIBRARY,DETAIL,PLAYBACK}，ADR-022/026）
+- [x] 测试 18 条：MapperTest 2 / SelectorTest 2 / DetailProviderTest 6 / PlaybackProviderTest 8 +
+      EmbyProviderFactoryTest 断言更新；全项目预计 114
+- [x] 文档同步（TASKS/HANDOFF/CHANGELOG）
+- [ ] TODO 确认 GitHub Actions CI（assembleDebug/testDebugUnitTest/lintDebug）通过
+      （本机 aarch64 无 Android SDK，构建验证依赖远程 CI）
 ## V0.1 —— MVP（下一步） 
 
 ### IN PROGRESS（无，等待开工）
@@ -85,7 +101,7 @@
 - [ ] Emby/Jellyfin/WebDAV 的 `remoteReportIntervalMs` 按官方协议确认节流值
 
 ### TODO
-- [ ] Emby Provider 完整实现（登录→媒体库→浏览→搜索→详情→播放源→进度上报）
+- [ ] Emby Provider 剩余能力（搜索→字幕→进度上报；登录/媒体库/详情/播放源已完成）
 - [ ] Jellyfin Provider 完整实现（同上，独立 Connector）
 - [ ] WebDAV Provider（PROPFIND 文件树 + Basic 认证 + 播放）
 - [ ] 播放前接入 PlaybackCompatibilityEvaluator（resolve 流程输出三态决策）

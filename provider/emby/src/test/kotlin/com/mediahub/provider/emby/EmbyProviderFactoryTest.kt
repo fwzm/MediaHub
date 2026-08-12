@@ -15,7 +15,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** ADR-022：Phase 1B-1 的 Emby Handle 开放 AUTH + LIBRARY，其余能力必须为 null。 */
+/** ADR-022/026：Phase 1B-2 的 Emby Handle 开放 AUTH + LIBRARY + DETAIL + PLAYBACK，其余能力必须为 null。 */
 class EmbyProviderFactoryTest {
 
     private val server = MediaServer(
@@ -36,19 +36,25 @@ class EmbyProviderFactoryTest {
     }
 
     @Test
-    fun `handle exposes auth and library capability only`() {
+    fun `handle exposes auth library detail playback capabilities`() {
         val handle = factory().create(server)
-
         assertNotNull(handle.auth)
         assertNotNull(handle.library)
-        assertNull(handle.detail)
+        assertNotNull(handle.detail)
         assertNull(handle.browse)
-        assertNull(handle.playback)
+        assertNotNull(handle.playback)
         assertNull(handle.search)
         assertNull(handle.subtitle)
         assertNull(handle.progress)
-
-        assertEquals(setOf(ProviderCapability.AUTH, ProviderCapability.LIBRARY), handle.runtimeCapabilities)
+        assertEquals(
+            setOf(
+                ProviderCapability.AUTH,
+                ProviderCapability.LIBRARY,
+                ProviderCapability.DETAIL,
+                ProviderCapability.PLAYBACK,
+            ),
+            handle.runtimeCapabilities,
+        )
         // 运行时 ⊆ 计划
         assertTrue(handle.runtimeCapabilities.all { it in handle.provider.descriptor.declaredCapabilities })
     }

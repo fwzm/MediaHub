@@ -15,7 +15,9 @@ import com.mediahub.provider.emby.api.EmbyApiClient
 import com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilder
 import com.mediahub.provider.emby.api.EmbyEndpointResolver
 import com.mediahub.provider.emby.auth.EmbyAuthProvider
+import com.mediahub.provider.emby.detail.EmbyDetailProvider
 import com.mediahub.provider.emby.library.EmbyLibraryProvider
+import com.mediahub.provider.emby.playback.EmbyPlaybackProvider
 import com.mediahub.provider.emby.session.EmbySessionStore
 import dagger.Binds
 import dagger.Module
@@ -67,11 +69,28 @@ class EmbyProviderFactory @Inject constructor(
             sessionStore = sessionStore,
             logger = logger,
         )
-        // ADR-022/026：Handle 只暴露当前已实现能力——Phase 1B-1 开放 AUTH + LIBRARY。
+        val detailProvider = EmbyDetailProvider(
+            server = server,
+            api = embyApi,
+            tokenStore = tokenStore,
+            sessionStore = sessionStore,
+            logger = logger,
+        )
+        val playbackProvider = EmbyPlaybackProvider(
+            server = server,
+            api = embyApi,
+            tokenStore = tokenStore,
+            sessionStore = sessionStore,
+            logger = logger,
+        )
+        // ADR-022/026：Handle 只暴露当前已实现能力——Phase 1B-2 开放
+        // AUTH + LIBRARY + DETAIL + PLAYBACK（无转码 Direct Stream）。
         return ProviderHandle(
             provider = provider,
             auth = authProvider,
             library = libraryProvider,
+            detail = detailProvider,
+            playback = playbackProvider,
         )
     }
 }
