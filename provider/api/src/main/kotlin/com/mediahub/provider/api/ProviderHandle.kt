@@ -2,7 +2,7 @@ package com.mediahub.provider.api
 
 /**
  * 一个 Provider 实例及其可选能力的类型安全组合。
- * Descriptor 与实际能力在构造时校验，杜绝“声明不支持却被接口强迫实现”。
+ * Descriptor 描述该 Provider 的计划能力；字段只暴露当前版本真正可用的运行时能力。
  */
 data class ProviderHandle(
     val provider: MediaProvider,
@@ -14,26 +14,24 @@ data class ProviderHandle(
     val subtitle: MediaSubtitleProvider? = null,
     val progress: MediaProgressProvider? = null,
 ) {
+    /** 由实际装配字段推导，业务层以此为准，不能把计划能力当作已经实现。 */
+    val runtimeCapabilities: Set<ProviderCapability> = buildSet {
+        if (auth != null) add(ProviderCapability.AUTH)
+        if (library != null) add(ProviderCapability.LIBRARY)
+        if (browse != null) add(ProviderCapability.BROWSE)
+        if (playback != null) add(ProviderCapability.PLAYBACK)
+        if (search != null) add(ProviderCapability.SEARCH)
+        if (subtitle != null) add(ProviderCapability.SUBTITLE)
+        if (progress != null) add(ProviderCapability.PROGRESS)
+    }
+
     init {
-        val declared = provider.descriptor.capabilities
-        requireCapability(declared, ProviderCapability.AUTH, auth)
-        requireCapability(declared, ProviderCapability.LIBRARY, library)
-        requireCapability(declared, ProviderCapability.BROWSE, browse)
-        requireCapability(declared, ProviderCapability.PLAYBACK, playback)
-        requireCapability(declared, ProviderCapability.SEARCH, search)
-        requireCapability(declared, ProviderCapability.SUBTITLE, subtitle)
-        requireCapability(declared, ProviderCapability.PROGRESS, progress)
+        require(provider.descriptor.capabilities.containsAll(runtimeCapabilities)) {
+            "${provider.descriptor.providerId} 的运行时能力必须先在 Descriptor 中声明：" +
+                (runtimeCapabilities - provider.descriptor.capabilities).joinToString()
+        }
     }
 
     val descriptor: ProviderDescriptor get() = provider.descriptor
-
-    private fun requireCapability(
-        declared: Set<ProviderCapability>,
-        capability: ProviderCapability,
-        implementation: Any?,
-    ) {
-        require((capability in declared) == (implementation != null)) {
-            "${descriptor.providerId} 的 $capability 声明与实现不一致"
-        }
-    }
+    val hasAnyCapability: Boolean get() = runtimeCapabilities.isNotEmpty()
 }

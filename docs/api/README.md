@@ -7,7 +7,8 @@
 - `MediaProviderFactory.descriptor`：Factory 自描述；`create(server)` 返回 Handle。
 - `MediaProviderRegistry`：按开放 `providerId:String` 查找 Factory/Descriptor，拒绝重复 ID。
 
-调用方先读取 Handle 能力，不判断 Provider 的具体 class 或 providerId。Descriptor capability 与 Handle 字段必须一致。
+调用方先读取 Handle，不判断 Provider 的具体 class 或 providerId。Descriptor 是计划能力；Handle 的
+`runtimeCapabilities` 是当前权威，且必须是计划能力的子集。
 
 ## 分页
 

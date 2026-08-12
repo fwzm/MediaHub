@@ -42,6 +42,23 @@ class EmbyConnectionTest {
         }
     }
 
+    @Test
+    fun `connection test rejects wrong malformed and unauthorized responses`() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"foo":"bar"}"""))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("not json"))
+            server.enqueue(MockResponse().setResponseCode(401))
+            server.enqueue(MockResponse().setResponseCode(403))
+            val provider = provider(server)
+
+            repeat(4) { assertFalse(provider.testConnection().ok) }
+        } finally {
+            server.shutdown()
+        }
+    }
+
     private fun provider(mock: MockWebServer): EmbyProvider {
         val client = OkHttpClient()
         val mediaServer = MediaServer(

@@ -5,6 +5,7 @@ import com.mediahub.model.PageRequest
 import com.mediahub.model.PagedResult
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackSource
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -19,22 +20,38 @@ class ProviderHandleTest {
         assertNull(handle.library)
         assertNotNull(handle.browse)
         assertNotNull(handle.playback)
+        assertEquals(
+            setOf(ProviderCapability.BROWSE, ProviderCapability.PLAYBACK),
+            handle.runtimeCapabilities,
+        )
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun `descriptor and concrete capability must agree`() {
-        val provider = BrowsePlaybackProvider()
-        ProviderHandle(provider = provider, browse = provider)
+    fun `runtime capability must be declared by descriptor`() {
+        val provider = BrowsePlaybackProvider(setOf(ProviderCapability.BROWSE))
+        ProviderHandle(provider = provider, browse = provider, playback = provider)
     }
 
-    private class BrowsePlaybackProvider : MediaProvider, MediaBrowseProvider, MediaPlaybackProvider {
+    @Test
+    fun `planned descriptor capability may remain unavailable at runtime`() {
+        val provider = BrowsePlaybackProvider()
+        val handle = ProviderHandle(provider = provider, browse = provider)
+
+        assertEquals(setOf(ProviderCapability.BROWSE), handle.runtimeCapabilities)
+        assertNull(handle.playback)
+    }
+
+    private class BrowsePlaybackProvider(
+        declaredCapabilities: Set<ProviderCapability> =
+            setOf(ProviderCapability.BROWSE, ProviderCapability.PLAYBACK),
+    ) : MediaProvider, MediaBrowseProvider, MediaPlaybackProvider {
         override val serverId = "local-test"
         override val descriptor = ProviderDescriptor(
             providerId = "local-test",
             displayName = "Local Test",
             description = "test",
             category = ProviderCategory.LOCAL_STORAGE,
-            capabilities = setOf(ProviderCapability.BROWSE, ProviderCapability.PLAYBACK),
+            capabilities = declaredCapabilities,
             authMethod = AuthMethod.NONE,
             status = ProviderStatus.AVAILABLE,
         )

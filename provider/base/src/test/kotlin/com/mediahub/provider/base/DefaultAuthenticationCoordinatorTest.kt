@@ -58,7 +58,19 @@ class DefaultAuthenticationCoordinatorTest {
         assertNull(vault.session)
     }
 
-    private fun handle(auth: MediaAuthProvider): ProviderHandle {
+    @Test
+    fun `planned auth without runtime implementation still preserves credentials`() = runTest {
+        val vault = FakeVault()
+        val coordinator = DefaultAuthenticationCoordinator(vault, NoOpLogger)
+        val credentials = Credentials.UsernamePassword("name", "password")
+
+        val disposition = coordinator.authenticateOrDefer(handle(), credentials)
+
+        assertEquals(AuthenticationDisposition.DeferredUntilProviderImplementation, disposition)
+        assertEquals(credentials, vault.pending)
+    }
+
+    private fun handle(auth: MediaAuthProvider? = null): ProviderHandle {
         val provider = object : MediaProvider {
             override val serverId = "server-1"
             override val descriptor = descriptor()

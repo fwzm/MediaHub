@@ -78,7 +78,8 @@
 ## ADR-014 Provider 使用最小公共接口 + 可选能力组合
 - 状态：已采纳（2026-08-12）
 - 决策：`MediaProvider` 不再继承所有能力。Factory 返回 `ProviderHandle`，认证/Library/Browse/Playback/
-  Search/Subtitle/Progress 以可空、类型化字段组合，并校验 Descriptor 与实现一致。
+  Search/Subtitle/Progress 以可空、类型化字段组合。Descriptor 是计划能力，Handle 从非空字段推导
+  `runtimeCapabilities` 并校验运行时集合是计划集合的子集；业务层只信运行时字段。
 - 理由：Local/WebDAV/云盘不应伪造自己没有的能力；避免 empty list 与 NotYetImplemented 污染公共契约。
 - 影响：业务层按能力编程，不按 Provider 类型编程；新增能力需同时更新 Handle 校验与契约测试。
 
@@ -105,7 +106,8 @@
 ## ADR-018 播放位置与持久化/远端进度分流
 - 状态：已采纳（2026-08-12）
 - 决策：UI 位置 500ms 仅内存更新；本地快照默认 5s；远端周期由 Provider policy 决定；
-  Play/Pause/Seek/Stop/End 立即同步；release 做 final flush。流使用 conflate/backpressure。
+  Play/Pause/Seek/Stop/End 不 conflate 并立即同步；远端调用限时 2s；release 做 final flush。
+  只有高频位置流使用 conflate/backpressure。
 - 影响：消除每秒数据库写入、远端请求与 coroutine 创建；Provider 协议可独立选择节流策略。
 
 ## ADR-019 本地媒体统一使用 Android SAF

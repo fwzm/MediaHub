@@ -8,7 +8,7 @@
 ## 当前架构
 
 - `MediaProvider` 只保留公共身份和协议探测；认证、媒体库、文件浏览、播放、搜索、字幕、进度是可选能力。
-- `ProviderHandle` 对 Descriptor 声明与实际能力做构造期校验，UI/ViewModel 不判断具体 Provider 类型。
+- `ProviderHandle` 只暴露当前真实可用能力，并校验其属于 Descriptor 的计划能力；UI/ViewModel 不判断具体类型。
 - `MediaProviderFactory` 自带开放的 `providerId` 与 `ProviderDescriptor`；添加页从 Registry 动态读取。
 - 凭据只经 `CredentialVault` 进入 Android Keystore 加密的 `SecretStorage`，不写 Room/DataStore/日志。
 - 每个播放 MediaSource 捕获独立的不可变请求上下文，不共享可变 Header/Cookie。

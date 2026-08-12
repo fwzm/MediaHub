@@ -32,15 +32,8 @@ class JellyfinProviderFactory @Inject constructor(
             credentialVault = credentialVault,
             logger = logger,
         )
-        return ProviderHandle(
-            provider = provider,
-            auth = provider,
-            library = provider,
-            playback = provider,
-            search = provider,
-            subtitle = provider,
-            progress = provider,
-        )
+        // Phase 0.5 只完成协议探测；计划能力在 Descriptor 中，未实现能力不向运行时暴露。
+        return ProviderHandle(provider = provider)
     }
 }
 

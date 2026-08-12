@@ -5,11 +5,11 @@
 所有数据源实现最小 `MediaProvider`，再按真实能力实现独立接口。Factory 暴露 `ProviderDescriptor` 并返回
 `ProviderHandle`，通过 Hilt `@IntoSet` 注册。Registry 按稳定 providerId 查找，添加页直接读取 Descriptor。
 
-| Provider | 组合能力 |
-|---|---|
-| Emby/Jellyfin | Auth + Library + Playback + Search + Subtitle + Progress |
-| WebDAV | Auth + Browse + Playback |
-| Local | Browse + Playback |
+| Provider | Descriptor 计划能力 | Phase 0.5 运行时能力 |
+|---|---|---|
+| Emby/Jellyfin | Auth + Library + Playback + Search + Subtitle + Progress | 仅协议探测 |
+| WebDAV | Auth + Browse + Playback | Auth（Basic 验证/加密会话） |
+| Local | Browse + Playback | Browse + Playback |
 
 Remote DTO 与协议细节只能存在于具体 Provider；输出统一 Domain Model。禁止 UI 按来源写 if/else。
 

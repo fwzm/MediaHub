@@ -4,11 +4,13 @@
 
 ### 架构
 - 将 Fat `MediaProvider` 重构为最小公共接口；新增 `ProviderHandle` 类型安全地组合可选能力。
+- Descriptor 与 Handle 分离计划/运行时语义；未实现的 Emby/Jellyfin/WebDAV API 不向业务层伪装可用。
 - 新增 `ProviderDescriptor`，Registry 改用开放的 `providerId:String`；添加媒体库页面动态读取 Factory 元数据。
 - 移除领域层 `ServerType`；Room v1 兼容读取旧枚举字符串并写入稳定 providerId。
 - 新增 `CredentialVault` / `AuthenticationCoordinator`，区分短期输入与长期会话并通过 Keystore 加密保存。
 - 移除 Singleton `PlaybackHeadersHolder`；每个 MediaSource 使用独立不可变 `PlaybackRequestContext`。
 - 把播放位置、5s 本地快照、Provider 远端策略和 Play/Pause/Seek/Stop/End 关键事件拆成独立进度路径。
+- 关键事件不 conflate，远端上报最多等待 2s，退出不会被无响应 Provider 长时间阻塞。
 
 ### 功能与质量
 - LocalProvider 改用 SAF 文档树、持久 URI Permission、DocumentFile/ContentResolver 与 `content://` 播放。

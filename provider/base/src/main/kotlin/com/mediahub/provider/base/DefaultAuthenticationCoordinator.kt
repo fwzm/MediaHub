@@ -27,7 +27,14 @@ class DefaultAuthenticationCoordinator @Inject constructor(
         credentials: Credentials,
     ): AuthenticationDisposition {
         val auth = handle.auth
-            ?: throw ProviderException.AuthFailed(handle.provider.serverId, "该 Provider 不支持认证")
+        if (auth == null) {
+            if (handle.descriptor.authMethod == com.mediahub.provider.api.AuthMethod.NONE) {
+                throw ProviderException.AuthFailed(handle.provider.serverId, "该 Provider 不支持认证")
+            }
+            credentialVault.savePending(handle.provider.serverId, credentials)
+            logger.i(LogTag.AUTH, "认证能力尚未接入，凭据已加密暂存 serverId=${handle.provider.serverId}")
+            return AuthenticationDisposition.DeferredUntilProviderImplementation
+        }
         return try {
             when (val result = auth.authenticate(credentials)) {
                 is AuthResult.Success -> {

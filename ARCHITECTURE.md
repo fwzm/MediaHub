@@ -33,8 +33,8 @@ feature:player → player:engine → Media3
 | 播放解析 | `MediaPlaybackProvider` | 可播放的数据源 |
 | 搜索/字幕/进度 | 对应独立接口 | 按协议选择 |
 
-Factory 返回 `ProviderHandle`。Handle 的可空能力字段与 `ProviderDescriptor.capabilities` 在构造时双向校验，避免
-“声明不支持却被接口强迫实现”，也避免声明了能力却忘记装配实现。
+Factory 返回 `ProviderHandle`。Descriptor 表示计划能力，Handle 字段推导 `runtimeCapabilities`，并校验
+“运行时能力 ⊆ 计划能力”。业务层只以 Handle 为准，未完成 API 不会因为列在路线图中就被伪装成可用。
 
 ## 3. Descriptor 与注册表
 
@@ -78,8 +78,8 @@ CredentialVault → Keystore SecretStorage ← 后续登录成功后清除
 |---|---|---|
 | UI State | 500ms | 仅内存更新位置与时长 |
 | 本地续播快照 | 默认 5s | conflate + `ProgressRepository.save` |
-| 远端周期上报 | Provider 策略，默认 10s | 独立节流；Provider 可设为仅关键事件 |
-| 关键事件 | Play/Pause/Seek/Stop/End | 立即本地保存与尽力远端上报 |
+| 远端周期上报 | Provider 策略，默认 10s | 独立节流；单次上报最多等待 2s |
+| 关键事件 | Play/Pause/Seek/Stop/End | 不 conflate；立即本地保存与限时远端上报 |
 | 页面销毁兜底 | release | final flush |
 
 高频位置 tick 不创建子 coroutine，也不直接触发数据库或网络。退出按钮先完成 STOP flush；生命周期异常销毁再以 IO scope

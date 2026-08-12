@@ -134,9 +134,7 @@ class AddServerViewModel @Inject constructor(
                 val saved = serverRepository.addServer(server)
                 persisted = true
                 credentialsFor(state)?.let { credentials ->
-                    if (handle.auth != null) {
-                        authenticationCoordinator.authenticateOrDefer(handle, credentials)
-                    }
+                    authenticationCoordinator.authenticateOrDefer(handle, credentials)
                 }
                 logger.i(
                     LogTag.UI,

@@ -13,7 +13,8 @@
 
 - `MediaProvider` 只有 `serverId`、`descriptor`、`testConnection`。
 - Factory 返回 `ProviderHandle`；可选能力为 auth/library/browse/playback/search/subtitle/progress。
-- Factory 声明 `ProviderDescriptor`；Registry 使用开放 `providerId:String`，添加页动态渲染。
+- Factory 声明计划能力 `ProviderDescriptor`；Handle 只暴露已实现的 `runtimeCapabilities`。
+  Registry 使用开放 `providerId:String`，添加页动态渲染。
 - `CredentialVault` 是敏感凭据唯一持久化入口，具体实现位于 `provider:base`，底层使用
   `core:security.SecretStorage`。Room/DataStore 不存 Secret。
 - 播放请求头属于 `PlaybackRequestContext`/MediaSource，不得恢复全局 mutable holder。
@@ -32,9 +33,9 @@
 | Provider | 已完成 | V0.1 仍需实现 |
 |---|---|---|
 | Local | SAF 授权、浏览、content:// 播放 | 媒体扫描/元数据体验 |
-| Emby | Descriptor、能力装配、System Info 身份探测 | 登录、Library、播放源、搜索、字幕、进度 |
-| Jellyfin | Descriptor、能力装配、System Info 身份探测 | 同上，保持独立 Connector |
-| WebDAV | Descriptor、OPTIONS/DAV 探测、Basic 加密会话 | PROPFIND、路径/转义、Range 播放 |
+| Emby | Descriptor、System Info 身份探测；运行时不暴露未完成能力 | 登录、Library、播放源、搜索、字幕、进度 |
+| Jellyfin | Descriptor、System Info 身份探测；运行时不暴露未完成能力 | 同上，保持独立 Connector |
+| WebDAV | Descriptor、OPTIONS/DAV 探测、Basic 加密会话；运行时仅 Auth | PROPFIND、路径/转义、Range 播放 |
 
 Emby/Jellyfin 登录暂未实现时，`AuthenticationCoordinator` 会把用户输入加密暂存而不是丢弃。V0.1 登录成功后
 必须用 Token Session 原子替换 pending password 并删除原始密码。
@@ -42,7 +43,8 @@ Emby/Jellyfin 登录暂未实现时，`AuthenticationCoordinator` 会把用户�
 ## 5. 播放与进度注意事项
 
 - `PlayerFactory` 可以是 Singleton，因为它只创建对象；任何具体播放 Header/Cookie 都不能保存为工厂字段。
-- UI 500ms 更新、本地默认 5s、Provider 默认 10s；Provider 可设 `periodicIntervalMs=null` 只接收关键事件。
+- UI 500ms 更新、本地默认 5s、Provider 默认 10s；远端调用最多等待 2s。Provider 可设
+  `periodicIntervalMs=null` 只接收关键事件；关键事件流不得 conflate。
 - Slider 只在拖动结束时触发一次 Seek；返回按钮先 STOP flush。异常销毁由 `onCleared` 兜底 final flush。
 - `PlaybackSource` 仍是单主 URL 模型；未来资源集合演进必须保持每资源独立 Header/过期时间。
 
@@ -50,7 +52,7 @@ Emby/Jellyfin 登录暂未实现时，`AuthenticationCoordinator` 会把用户�
 
 本阶段新增测试覆盖：
 
-- Provider Registry 开放 ID/重复检测、Descriptor 与 Handle 能力一致性
+- Provider Registry 开放 ID/重复检测、Descriptor 计划能力与 Handle 运行时子集
 - 成功认证 session 保存、未实现认证的 pending 保存、Credential codec 不出现明文
 - 两个播放会话的 Authorization/Cookie 隔离与输入防御性复制
 - 本地/远端独立节流与关键事件重置

@@ -37,6 +37,23 @@ class JellyfinConnectionTest {
         }
     }
 
+    @Test
+    fun `connection test rejects valid json without Jellyfin product signature`() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """{"Id":"other-id","ServerName":"Other","Version":"1.0","ProductName":"Other"}"""
+                )
+            )
+
+            assertFalse(provider(server).testConnection().ok)
+        } finally {
+            server.shutdown()
+        }
+    }
+
     private fun provider(mock: MockWebServer): JellyfinProvider {
         val client = OkHttpClient()
         return JellyfinProvider(

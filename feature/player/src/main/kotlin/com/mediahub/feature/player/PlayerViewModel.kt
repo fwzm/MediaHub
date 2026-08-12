@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 sealed interface ResolveState {
     data object Resolving : ResolveState
@@ -155,7 +156,7 @@ class PlayerViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            engine.progressEvents.conflate().collect(::syncCriticalEvent)
+            engine.progressEvents.collect(::syncCriticalEvent)
         }
     }
 
@@ -175,8 +176,12 @@ class PlayerViewModel @Inject constructor(
 
     private suspend fun reportRemote(progress: PlaybackProgress, reason: PlaybackProgressReason) {
         val reporter = providerHandle?.progress ?: return
-        runCatching { reporter.reportProgress(progress, reason) }
-            .onFailure { logger.w(LogTag.PLAYER, "进度上报失败 reason=$reason", it) }
+        val completed = withTimeoutOrNull(REMOTE_REPORT_TIMEOUT_MS) {
+            runCatching { reporter.reportProgress(progress, reason) }
+                .onFailure { logger.w(LogTag.PLAYER, "进度上报失败 reason=$reason", it) }
+            true
+        } ?: false
+        if (!completed) logger.w(LogTag.PLAYER, "进度上报超时 reason=$reason")
     }
 
     private fun userMessage(error: Exception): String = when (error) {
@@ -193,7 +198,11 @@ class PlayerViewModel @Inject constructor(
                 try {
                     runCatching { progressRepository.save(finalProgress) }
                     handle?.progress?.let { reporter ->
-                        runCatching { reporter.reportProgress(finalProgress, PlaybackProgressReason.STOP) }
+                        withTimeoutOrNull(REMOTE_REPORT_TIMEOUT_MS) {
+                            runCatching {
+                                reporter.reportProgress(finalProgress, PlaybackProgressReason.STOP)
+                            }
+                        }
                     }
                 } finally {
                     finalJob.cancel()
@@ -201,5 +210,9 @@ class PlayerViewModel @Inject constructor(
             }
         }
         super.onCleared()
+    }
+
+    private companion object {
+        const val REMOTE_REPORT_TIMEOUT_MS = 2_000L
     }
 }

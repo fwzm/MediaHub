@@ -35,8 +35,6 @@ class WebDavProviderFactory @Inject constructor(
         return ProviderHandle(
             provider = provider,
             auth = provider,
-            browse = provider,
-            playback = provider,
         )
     }
 }
