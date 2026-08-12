@@ -1,5 +1,17 @@
 # 变更记录（CHANGELOG）
 
+## [0.4.6.1-phase1a-final4.1] — 2026-08-12（Phase 1A FINAL PATCH 4.1：TEST-ONLY 修正)
+
+### 修正（纯测试，不改生产代码）
+- `HomeViewModelTest` 的 B/C/D 三个测试名与实际状态迁移不一致，已修正为真实制造前置状态：
+  - B：初始 restore = SESSION_EXPIRED → assert SessionExpired → 改 Authenticated → forceRestore → Authenticated
+  - C：初始 restore = SignedOut → assert SignedOut → 改 Authenticated → forceRestore → Authenticated
+  - D：先 auth-capable 产生 Authenticated → assert 包含 → 改 auth==null → forceRestore → 移除该 id
+- 生产代码 forceRestore（serverStore.getServer + restore）已在 0.4.6 通过评审，未改动。
+
+### 验证
+- assembleDebug / testDebugUnitTest（87）/ lintDebug 通过
+
 ## [0.4.6-phase1a-final4] — 2026-08-12（Phase 1A FINAL PATCH 4：forceRestore 竞态修复 + 测试)
 
 ### 修复（评审 FINAL PATCH 4）

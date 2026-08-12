@@ -1,6 +1,14 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12（Phase 1A FINAL PATCH 4，forceRestore 竞态修复 + 测试）。
+> 最后更新：2026-08-12（Phase 1A FINAL PATCH 4.1，TEST-ONLY 收口）。
+
+## 排头 FINAL PATCH 4.1（2026-08-12）
+
+- 纯测试修正：HomeViewModelTest B/C/D 改为真实制造前置状态（SessionExpired/SignedOut/已有 auth state），
+  不再"测试名比覆盖范围更强"。生产代码未改动。
+- **Phase 1A 生产实现封板**；PR #1 关闭（superseded by main），不再 merge。
+- logout 仍用 servers.first()（P2，留 Phase 1B 顺手统一，非 blocker）。
+- 待办：确认 latest main（下个提交）CI success 后进入 Phase 1B。
 
 ## 排头 FINAL PATCH 4 摘要（2026-08-12）
 

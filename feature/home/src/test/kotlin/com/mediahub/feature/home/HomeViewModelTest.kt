@@ -10,6 +10,7 @@ import com.mediahub.model.PageRequest
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.ServerType
 import com.mediahub.provider.api.AuthResult
+import com.mediahub.provider.api.AuthSessionErrorKind
 import com.mediahub.provider.api.AuthSessionState
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.Credentials
@@ -148,27 +149,38 @@ class HomeViewModelTest {
     fun `forceRestore overwrites SessionExpired to Authenticated`() = runTest {
         val server = emby("srv-1", "http://h")
         val store = FakeServerStore(listOf(server))
-        val auth = FakeAuth(AuthSessionState.Authenticated(fakeUser()))
+        // 初始 restore 结果 = SessionExpired（真实制造失效状态）
+        val auth = FakeAuth(AuthSessionState.Error(AuthSessionErrorKind.SESSION_EXPIRED, "登录已失效"))
         val registry = FakeRegistry(auth = auth)
         val vm = HomeViewModel(store, FakeProgressStore(), registry, noOpLogger)
         advanceUntilIdle()
-        // 预置 authStates = SessionExpired（模拟）
-        // 通过 forceRestore 覆盖
+
+        // 先断言确实进入 SessionExpired
+        val before = vm.authStates.value["srv-1"]
+        assertTrue("before=$before", before is AuthSessionState.Error)
+
+        // 重新登录成功 → restore 返回 Authenticated
+        auth.restoreResult = AuthSessionState.Authenticated(fakeUser())
         vm.forceRestore("srv-1")
         advanceUntilIdle()
 
-        val state = vm.authStates.value["srv-1"]
-        assertTrue("state=$state", state is AuthSessionState.Authenticated)
+        assertTrue("after=${vm.authStates.value["srv-1"]}", vm.authStates.value["srv-1"] is AuthSessionState.Authenticated)
     }
 
     @Test
     fun `forceRestore overwrites SignedOut to Authenticated`() = runTest {
         val server = emby("srv-1", "http://h")
         val store = FakeServerStore(listOf(server))
-        val registry = FakeRegistry(auth = FakeAuth(AuthSessionState.Authenticated(fakeUser())))
+        // 初始 restore 结果 = SignedOut（真实制造未登录状态）
+        val auth = FakeAuth(AuthSessionState.SignedOut)
+        val registry = FakeRegistry(auth = auth)
         val vm = HomeViewModel(store, FakeProgressStore(), registry, noOpLogger)
         advanceUntilIdle()
 
+        // 先断言确实 SignedOut
+        assertEquals(AuthSessionState.SignedOut, vm.authStates.value["srv-1"])
+
+        auth.restoreResult = AuthSessionState.Authenticated(fakeUser())
         vm.forceRestore("srv-1")
         advanceUntilIdle()
 
@@ -178,14 +190,20 @@ class HomeViewModelTest {
     // ---- D：非认证 Provider forceRestore 不写 authStates ----
 
     @Test
-    fun `forceRestore non-auth provider removes id from authStates`() = runTest {
+    fun `forceRestore removes existing auth state when provider becomes non-auth`() = runTest {
         val server = emby("srv-1", "http://h")
         val store = FakeServerStore(listOf(server))
-        // auth = null（非认证 Provider）
-        val registry = FakeRegistry(auth = null)
+        // 第一阶段：auth-capable Provider，restore → Authenticated
+        val auth = FakeAuth(AuthSessionState.Authenticated(fakeUser()))
+        val registry = FakeRegistry(auth = auth)
         val vm = HomeViewModel(store, FakeProgressStore(), registry, noOpLogger)
         advanceUntilIdle()
 
+        // 先断言 authStates 确实包含该 serverId
+        assertTrue(vm.authStates.value["srv-1"] is AuthSessionState.Authenticated)
+
+        // 第二阶段：Provider 现在 auth == null（非认证）
+        registry.auth = null
         vm.forceRestore("srv-1")
         advanceUntilIdle()
 
