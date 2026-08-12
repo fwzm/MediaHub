@@ -74,11 +74,12 @@ class LibraryViewModel @Inject constructor(
                 val handle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 val page = PageRequest(limit = 200)
+                val browse = handle.browse
+                val library = handle.library
                 val result = when {
-                    currentFolder != null && handle.browse != null ->
-                        handle.browse.listFolder(currentFolder, page)
-                    handle.library != null -> handle.library.getItems(libraryId, page)
-                    handle.browse != null -> handle.browse.listFolder(currentFolder, page)
+                    currentFolder != null && browse != null -> browse.listFolder(currentFolder, page)
+                    library != null -> library.getItems(libraryId, page)
+                    browse != null -> browse.listFolder(currentFolder, page)
                     else -> throw ProviderException.NotYetImplemented(serverId, "该媒体源浏览能力")
                 }
                 _uiState.value = LibraryUiState.Content(
