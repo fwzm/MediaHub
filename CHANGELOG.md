@@ -23,7 +23,8 @@
   无可直接流源→NotYetImplemented/forceTranscode→NotYetImplemented 不触网/缺 session 不触网/401→AuthExpired）。
 - EmbyProviderFactoryTest 断言更新（AUTH+LIBRARY+DETAIL+PLAYBACK）。
 ### 验证
-- 本机 aarch64 无 Android SDK，无法本地构建；待 GitHub Actions CI（assembleDebug/testDebugUnitTest/lintDebug）。
+- GitHub Actions CI 通过（run#31630416127）：assembleDebug（4m36s）/ testDebugUnitTest（1m9s）/ lintDebug（1m27s）全绿。
+  本机 aarch64 无 Android SDK，无法本地构建。
 ## [0.5.0-phase1b1] — 2026-08-12（Phase 1B-1：Emby 媒体库浏览）
 
 ### 新增（Phase 1B 第一刀，不碰播放）

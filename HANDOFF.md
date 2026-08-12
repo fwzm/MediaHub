@@ -15,8 +15,8 @@
   改造：EmbyApiClient / EmbyLibraryDtos（EmbyItemFields 统一映射）/ EmbyMediaItemMapper / EmbyLibraryProvider。
 - **尚未实现**（Phase 1B-3+）：转码（禁入红线，短期不做）、搜索、字幕、进度上报、
   播放器 URL 过期自动重解析、外挂字幕。
-- **验证状态**：本机 aarch64 无 Android SDK/qemu，无法本地构建；已提交（或即将提交）到 main，
-  待 GitHub Actions CI（assembleDebug/testDebugUnitTest/lintDebug）结果，失败则按日志修复。
+- **验证状态**：CI 已通过（run#31630416127，2026-08-13：assembleDebug/testDebugUnitTest/lintDebug 全绿）。
+  本机 aarch64 无 Android SDK/qemu，无法本地构建，构建验证由 GitHub Actions 完成。
 - 下一刀：Phase 1B-3（候选：搜索 / 播放进度上报 / 真机 smoke Direct Stream）。
 ## 排头 Phase 1B-1（2026-08-12）
 - 真实浏览竖切已实现：Views → Items(ParentId) → Series → Season → Folder。

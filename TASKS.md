@@ -89,7 +89,7 @@
 - [x] 测试 18 条：MapperTest 2 / SelectorTest 2 / DetailProviderTest 6 / PlaybackProviderTest 8 +
       EmbyProviderFactoryTest 断言更新；全项目预计 114
 - [x] 文档同步（TASKS/HANDOFF/CHANGELOG）
-- [ ] TODO 确认 GitHub Actions CI（assembleDebug/testDebugUnitTest/lintDebug）通过
+- [x] DONE GitHub Actions CI 通过：run#31630416127（assembleDebug 4m36s / testDebugUnitTest 1m9s / lintDebug 1m27s 全绿）
       （本机 aarch64 无 Android SDK，构建验证依赖远程 CI）
 ## V0.1 —— MVP（下一步） 
 
