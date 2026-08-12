@@ -1,5 +1,26 @@
 # 变更记录（CHANGELOG）
 
+## [0.4.5-phase1a-final3] — 2026-08-12（Phase 1A FINAL PATCH 3：Home 状态闭环)
+
+### 修复（评审 FINAL PATCH 3）
+- **P1：re-login 后 Home 登录状态不刷新**：新增 `HomeViewModel.forceRestore(serverId)`（强制恢复，
+  不管 authStates 是否已有记录）；导航用 Navigation result（`auth_changed_server_id`）在
+  AddServer re-login 成功后通知 Home 强制刷新 → SessionExpired/SignedOut 后重新登录，
+  返回 Home 立即变 Authenticated（不用杀 App）。
+- **P2：非认证 Provider 不显示"未登录"**：`restore()` 在 auth==null 时不写入 authStates
+  （移除该 id），Local/WebDAV 等不再显示 未登录/Restoring/Logout。
+- **needsRelogin 单一 source of truth**：新建 `AuthNavigationPolicy`（feature:home），
+  HomeViewModel 实际调用它；删除 ExistingServerEditPolicy 里仅被测试调用的重复 needsRelogin
+  + 无用 isProviderLocked/MediaItem import。
+
+### 测试
+- 新增 `AuthNavigationPolicyTest`（测生产实际调用的 policy）：SignedOut/SESSION_EXPIRED/
+  SERVER_MISMATCH → relogin；FORBIDDEN/网络/5xx/INVALID/UNKNOWN/Authenticated → 不 relogin；
+  非认证 Provider → 不 relogin。全项目 83 用例。
+
+### 验证
+- assembleDebug / testDebugUnitTest（83）/ lintDebug 通过
+
 ## [0.4.4-phase1a-final2] — 2026-08-12（Phase 1A FINAL PATCH 2：Existing Server Re-login 修复)
 
 ### 修复（评审 FINAL PATCH 2）

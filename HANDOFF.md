@@ -1,6 +1,16 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12（Phase 1A FINAL PATCH 2）。本文件是协作第一手资料。
+> 最后更新：2026-08-12（Phase 1A FINAL PATCH 3，Home 状态闭环）。本文件是协作第一手资料。
+
+## 排头 FINAL PATCH 3 摘要（2026-08-12）
+
+- P1 修复：re-login 成功后 Home 登录状态立即刷新（HomeViewModel.forceRestore + Navigation result
+  `auth_changed_server_id`，AddServer onDone 设置 result，Home 观察并 forceRestore）。
+- P2 修复：非认证 Provider（Local/WebDAV 无 auth）不再进入 authStates，不显示 未登录/Restoring/Logout。
+- needsRelogin 单一源：AuthNavigationPolicy（feature:home，HomeViewModel 实际调用）+ AuthNavigationPolicyTest；
+  清理 ExistingServerEditPolicy 的重复 needsRelogin/isProviderLocked/unused MediaItem import。
+- 全项目 83 用例；assembleDebug/test/lint 通过。
+- **待办**：确认 latest main（下个提交）GitHub Actions 真正 success 后 Phase 1A 封板，进入 Phase 1B。
 
 ## 排头 FINAL PATCH 2 摘要（2026-08-12）
 

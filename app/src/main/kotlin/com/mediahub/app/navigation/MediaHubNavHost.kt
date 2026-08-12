@@ -2,11 +2,17 @@ package com.mediahub.app.navigation
 
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.common.NavArgCodec
 import com.mediahub.feature.home.HomeRoute
 import com.mediahub.feature.library.LibraryRoute
@@ -23,7 +29,19 @@ fun MediaHubNavHost() {
     NavHost(navController = navController, startDestination = Routes.HOME) {
 
         composable(Routes.HOME) {
+            val homeEntry = navController.currentBackStackEntry
+            // re-login 成功后 Home 状态立即刷新：观察导航返回的 auth_changed_server_id（评审 FINAL PATCH 3）
+            var forceRestoreId by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(homeEntry) {
+                homeEntry?.savedStateHandle?.getStateFlow<String?>("auth_changed_server_id", null)?.collect { id ->
+                    if (id != null) {
+                        forceRestoreId = id
+                        homeEntry.savedStateHandle["auth_changed_server_id"] = null
+                    }
+                }
+            }
             HomeRoute(
+                onForceRestore = { forceRestoreId = null }, // 消费完成清空，避免重复 forceRestore
                 onOpenServer = { server ->
                     navController.navigate("library/${server.id}/root?name=${Uri.encode(server.name)}")
                 },
@@ -41,6 +59,7 @@ fun MediaHubNavHost() {
                             "?title=${Uri.encode(progress.itemTitle ?: "")}"
                     )
                 },
+                forceRestoreId = forceRestoreId,
             )
         }
 
@@ -54,7 +73,12 @@ fun MediaHubNavHost() {
             ),
         ) {
             AddServerRoute(
-                onDone = { navController.popBackStack() },
+                onDone = { saved ->
+                    // re-login 成功：通知 Home 强制刷新该服务器认证状态（评审 FINAL PATCH 3）
+                    navController.previousBackStackEntry?.savedStateHandle
+                        ?.set("auth_changed_server_id", saved.id)
+                    navController.popBackStack()
+                },
                 onBack = { navController.popBackStack() },
             )
         }

@@ -8,7 +8,6 @@ import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
-import com.mediahub.provider.api.AuthSessionErrorKind
 import com.mediahub.provider.api.AuthSessionState
 import com.mediahub.provider.api.MediaProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -52,19 +51,44 @@ class HomeViewModel @Inject constructor(
     }
 
     private suspend fun restore(server: MediaServer) {
-        _authStates.update { it + (server.id to AuthSessionState.Restoring) }
         val handle = registry.create(server)
+        // 非认证 Provider（Local/WebDAV 无 auth）不进入 authStates：不显示 未登录/Restoring/Logout
         val auth = handle?.auth
-        val result = if (auth == null) {
-            AuthSessionState.SignedOut
-        } else {
-            runCatching { auth.restoreSession() }
-                .getOrElse { e ->
-                    logger.w(LogTag.UI, "会话恢复失败 serverId=${server.id}", e)
-                    AuthSessionState.SignedOut
-                }
+        if (auth == null) {
+            _authStates.update { it - server.id }
+            return
         }
+        _authStates.update { it + (server.id to AuthSessionState.Restoring) }
+        val result = runCatching { auth.restoreSession() }
+            .getOrElse { e ->
+                logger.w(LogTag.UI, "会话恢复失败 serverId=${server.id}", e)
+                AuthSessionState.SignedOut
+            }
         _authStates.update { it + (server.id to result) }
+    }
+
+    /**
+     * 强制恢复某服务器的认证状态（评审 FINAL PATCH 3：re-login 成功后 Home 状态立即刷新）。
+     * 不管 authStates 是否有该 id 记录，都重新 restoreSession。
+     */
+    fun forceRestore(serverId: String) {
+        viewModelScope.launch {
+            val server = servers.first().firstOrNull { it.id == serverId } ?: return@launch
+            _authStates.update { it + (serverId to AuthSessionState.Restoring) }
+            val handle = registry.create(server)
+            val auth = handle?.auth
+            val result = if (auth == null) {
+                _authStates.update { it - serverId }
+                return@launch
+            } else {
+                runCatching { auth.restoreSession() }
+                    .getOrElse { e ->
+                        logger.w(LogTag.UI, "强制恢复失败 serverId=$serverId", e)
+                        AuthSessionState.SignedOut
+                    }
+            }
+            _authStates.update { it + (serverId to result) }
+        }
     }
 
     /** 用户主动登出：auth.logout()（本地清理为权威），随后状态回到未登录。 */
@@ -87,27 +111,7 @@ class HomeViewModel @Inject constructor(
      */
     fun needsRelogin(server: MediaServer, authState: AuthSessionState?): Boolean {
         val authProvider = runCatching { registry.create(server)?.auth }.getOrNull()
-        if (authProvider == null) return false
-        // 评审 FINAL PATCH 2 精确语义：仅 SignedOut / SESSION_EXPIRED / SERVER_MISMATCH 进入重登录；
-        // FORBIDDEN / NETWORK / 5xx / INVALID_RESPONSE / UNKNOWN 保留 session（不送重登录页）。
-        return when (authState) {
-            is AuthSessionState.Authenticated -> false
-            is AuthSessionState.Error -> when (authState.kind) {
-                AuthSessionErrorKind.SESSION_EXPIRED,
-                AuthSessionErrorKind.SERVER_MISMATCH,
-                -> true
-
-                AuthSessionErrorKind.FORBIDDEN,
-                AuthSessionErrorKind.NETWORK_TIMEOUT,
-                AuthSessionErrorKind.NETWORK_UNAVAILABLE,
-                AuthSessionErrorKind.SERVER_ERROR,
-                AuthSessionErrorKind.INVALID_RESPONSE,
-                AuthSessionErrorKind.UNKNOWN,
-                -> false
-            }
-
-            AuthSessionState.SignedOut -> true
-            else -> false // Unknown / Restoring
-        }
+        // 唯一源：AuthNavigationPolicy；生产代码实际调用（测试也测它，评审 #3）
+        return AuthNavigationPolicy.needsRelogin(authProvider != null, authState)
     }
 }

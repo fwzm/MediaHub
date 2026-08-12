@@ -3,8 +3,6 @@ package com.mediahub.feature.server
 import com.mediahub.model.MediaServer
 import com.mediahub.model.ServerType
 import com.mediahub.provider.api.AuthMethod
-import com.mediahub.provider.api.AuthSessionErrorKind
-import com.mediahub.provider.api.AuthSessionState
 import com.mediahub.provider.api.ProviderCapability
 import com.mediahub.provider.api.ProviderCategory
 import com.mediahub.provider.api.ProviderDescriptor
@@ -84,7 +82,6 @@ class ExistingServerEditPolicyTest {
         val draft = ExistingServerEditPolicy.buildDraft(existing = embyServer(), candidate)
 
         assertTrue(draft.updateSource)          // 走 updateServer
-        assertTrue(draft.providerLocked)        // Provider 锁定
         assertEquals("srv-1", draft.server.id)  // 复用 SAME id
         assertEquals("新名称", draft.server.name)
         assertEquals(ServerType.EMBY, draft.server.type)
@@ -115,42 +112,6 @@ class ExistingServerEditPolicyTest {
         )
         val draft = ExistingServerEditPolicy.buildDraft(existing = null, nb)
         assertFalse(draft.updateSource)          // 走 addServer
-        assertFalse(draft.providerLocked)
         assertEquals("srv-new", draft.server.id)
-    }
-
-    // ---- needsRelogin 精确语义 ----
-
-    @Test
-    fun `needsRelogin only for signed out or session expired or mismatch`() {
-        val server = embyServer()
-        val state = { kind: AuthSessionErrorKind ->
-            AuthSessionState.Error(kind, "x")
-        }
-        assertTrue(ExistingServerEditPolicy.needsRelogin(server, AuthSessionState.SignedOut, true))
-        assertTrue(ExistingServerEditPolicy.needsRelogin(server, state(AuthSessionErrorKind.SESSION_EXPIRED), true))
-        assertTrue(ExistingServerEditPolicy.needsRelogin(server, state(AuthSessionErrorKind.SERVER_MISMATCH), true))
-    }
-
-    @Test
-    fun `needsRelogin false for transient and authenticated`() {
-        val server = embyServer()
-        val state = { kind: AuthSessionErrorKind ->
-            AuthSessionState.Error(kind, "x")
-        }
-        assertFalse(ExistingServerEditPolicy.needsRelogin(server, AuthSessionState.Authenticated(com.mediahub.model.MediaUser("s1", "u1", "a")), true))
-        assertFalse(ExistingServerEditPolicy.needsRelogin(server, AuthSessionState.Unknown, true))
-        assertFalse(ExistingServerEditPolicy.needsRelogin(server, AuthSessionState.Restoring, true))
-        assertFalse(ExistingServerEditPolicy.needsRelogin(server, state(AuthSessionErrorKind.FORBIDDEN), true))
-        assertFalse(ExistingServerEditPolicy.needsRelogin(server, state(AuthSessionErrorKind.NETWORK_TIMEOUT), true))
-        assertFalse(ExistingServerEditPolicy.needsRelogin(server, state(AuthSessionErrorKind.NETWORK_UNAVAILABLE), true))
-        assertFalse(ExistingServerEditPolicy.needsRelogin(server, state(AuthSessionErrorKind.SERVER_ERROR), true))
-        assertFalse(ExistingServerEditPolicy.needsRelogin(server, state(AuthSessionErrorKind.INVALID_RESPONSE), true))
-        assertFalse(ExistingServerEditPolicy.needsRelogin(server, state(AuthSessionErrorKind.UNKNOWN), true))
-    }
-
-    @Test
-    fun `needsRelogin false for non-auth provider`() {
-        assertFalse(ExistingServerEditPolicy.needsRelogin(embyServer(), AuthSessionState.SignedOut, false))
     }
 }
