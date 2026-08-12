@@ -1,11 +1,14 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12（Phase 0.5 架构加固交付）。本文件是协作第一手资料。
+> 最后更新：2026-08-12（Phase 0.5.1 边界修复交付）。本文件是协作第一手资料。
 
 ## 1. 当前项目状态
 
-- **Phase 0 骨架 + Phase 0.5 架构加固已完成**：`assembleDebug`、`testDebugUnitTest`（40 用例）、
-  `lintDebug` 全部通过；CI（GitHub Actions）已就绪。
+- **Phase 0 骨架 + Phase 0.5 加固 + Phase 0.5.1 边界修复已完成**：`assembleDebug`、
+  `testDebugUnitTest`（51 用例）、`lintDebug` 全部通过；CI（GitHub Actions）已就绪。
+- 能力语义（ADR-022）：**Handle 只暴露已实现能力**——当前 Emby/Jellyfin/WebDAV Handle 为空
+  （仅 provider），Local 有 BROWSE/DETAIL/PLAYBACK；Phase 1 每实现一项能力在 Factory 填对应字段。
+- 退出流程（ADR-023）：返回按钮走 `stopAndFlush()` 显式状态机；不要改回"先 stop 再 emit Stopped"。
 - APK：`app/build/outputs/apk/debug/app-debug.apk`。
 - 端到端可用路径：添加媒体库（本地存储）→ 文件树浏览 → 播放（本地文件）→ 继续观看。
 - Emby / Jellyfin / WebDAV 的 API 业务**未实现**（Phase 1 目标，见 TASKS.md），
@@ -43,8 +46,9 @@ docs/* 与 7 份根文档
 
 ## 5. 遗留问题 / 下一步建议
 
-1. **V0.1 第一优先**：Emby Provider 登录 → 媒体库 → 浏览 → 播放源解析 → 进度上报
-   （endpoint 必须查官方文档，禁止凭记忆虚构；见 docs/providers/README.md 的待确认清单）。
+1. **V0.1 第一优先（建议 Phase 1A：仅 Emby 认证 + 会话）**：登录 → 媒体库 → 浏览 →
+   播放源解析 → 进度上报（endpoint 必须查官方文档，禁止凭记忆虚构；见 docs/providers/README.md）。
+   实现一项能力后，在 EmbyProviderFactory.create 的 Handle 对应填一个字段（ADR-022）。
 2. 播放前把 `PlaybackCompatibilityEvaluator` 接入 `resolvePlayback` 决策流程。
 3. `usesCleartextTraffic=true` 是临时的，接入 provider 后换 networkSecurityConfig。
 4. AddServer 认证流接入 CredentialVault（密码按 Provider 策略加密保存/销毁，ADR-016）。
@@ -71,6 +75,9 @@ docs/* 与 7 份根文档
   新增能力 = 独立能力接口 + ProviderHandle 字段 + Factory 装配。
 - 播放请求头：禁止恢复全局 Singleton holder（ADR-018）。
 - 进度上报：禁止回到"每秒写库+上报"（ADR-017）。
+- ProviderHandle：禁止把未实现/占位能力塞进 Handle（ADR-022）——feature 层不得用异常发现"未实现"。
+- 退出流程：禁止"先 stop 协调器再 emit Stopped"（ADR-023）；必须走 stopAndFlush。
+- 连接测试：禁止仅凭 HTTP <500 或 200+可解析JSON 判定协议有效（ADR-024）。
 
 ## 8. 沙箱专用说明（仅本环境）
 

@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -81,6 +82,58 @@ class ProgressSyncCoordinatorTest {
 
         assertTrue("local=$local", local.contains(1_000L))
         assertTrue("remote=$remote", remote.contains(1_000L))
+        coordinator.stop()
+    }
+
+    @Test
+    fun `stopped event flushes immediately`() = runTest {
+        val local = mutableListOf<Long>()
+        val remote = mutableListOf<Long>()
+        val coordinator = ProgressSyncCoordinator(
+            scope = this,
+            localSave = { local += it.positionMs },
+            remoteReport = { remote += it.positionMs },
+        )
+        val progress = MutableSharedFlow<PlaybackProgress>(extraBufferCapacity = 16)
+        val events = MutableSharedFlow<PlaybackEvent>(
+            extraBufferCapacity = 4,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+        coordinator.start(progress, events, remoteIntervalMs = 60_000)
+        runCurrent() // 让 collect 协程订阅就绪
+
+        progress.tryEmit(progress(5_000L))
+        runCurrent()
+        events.tryEmit(PlaybackEvent.Stopped)
+        runCurrent()
+
+        assertTrue("local=$local", local.contains(5_000L))
+        assertTrue("remote=$remote", remote.contains(5_000L))
+        coordinator.stop()
+    }
+
+    @Test
+    fun `flush with explicit final progress wins over latest`() = runTest {
+        val local = mutableListOf<Long>()
+        val remote = mutableListOf<Long>()
+        val coordinator = ProgressSyncCoordinator(
+            scope = this,
+            localSave = { local += it.positionMs },
+            remoteReport = { remote += it.positionMs },
+        )
+        val progress = MutableSharedFlow<PlaybackProgress>(extraBufferCapacity = 16)
+        val events = MutableSharedFlow<PlaybackEvent>()
+        coordinator.start(progress, events, remoteIntervalMs = 60_000)
+        runCurrent()
+
+        // 流中最新是 20s，退出瞬间实际是 25s —— flush 显式传入 25s
+        progress.tryEmit(progress(20_000L))
+        runCurrent()
+        coordinator.flush(progress(25_000L))
+
+        assertTrue(local.contains(25_000L))
+        assertTrue(remote.contains(25_000L))
+        assertFalse(local.contains(20_000L))
         coordinator.stop()
     }
 

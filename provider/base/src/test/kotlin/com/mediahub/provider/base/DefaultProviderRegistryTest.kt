@@ -26,7 +26,10 @@ class DefaultProviderRegistryTest {
         serverType = type,
         displayName = name,
         category = ProviderCategory.CLOUD_STORAGE,
-        capabilities = emptySet(),
+        declaredCapabilities = setOf(
+            com.mediahub.provider.api.ProviderCapability.BROWSE,
+            com.mediahub.provider.api.ProviderCapability.PLAYBACK,
+        ),
         authMethod = AuthMethod.NONE,
         status = ProviderStatus.STABLE,
     )
@@ -112,5 +115,11 @@ class DefaultProviderRegistryTest {
         assertNull(handle.auth)
         assertNull(handle.library)
         assertTrue(handle.hasAnyCapability)
+        // ADR-022：运行时能力 ⊆ 计划能力；字段与 runtimeCapabilities 一致
+        assertEquals(
+            setOf(com.mediahub.provider.api.ProviderCapability.BROWSE, com.mediahub.provider.api.ProviderCapability.PLAYBACK),
+            handle.runtimeCapabilities,
+        )
+        assertTrue(handle.runtimeCapabilities.all { it in handle.provider.descriptor.declaredCapabilities })
     }
 }

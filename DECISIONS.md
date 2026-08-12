@@ -134,3 +134,28 @@
 - 状态：已采纳（2026-08-12，Phase 0.5）
 - 决策：维持现有模块划分。合并（如 feature:detail/search/metadata 归并）不带来可衡量的
   编译/维护收益，且已有独立语义边界；后续若出现"无独立编译价值"的模块再评估合并。
+
+## ADR-022 ProviderHandle 运行时能力语义（0.5.1 修订）
+- 状态：已采纳（2026-08-12，Phase 0.5.1）
+- 决策：**Handle 只暴露"当前版本真正实现完成"的能力**；占位/未实现能力一律不放 Handle。
+  `ProviderDescriptor.declaredCapabilities`（计划能力，展示用）与
+  `ProviderHandle.runtimeCapabilities`（由字段推导，运行时权威）明确分开命名。
+  约束：runtimeCapabilities ⊆ declaredCapabilities；feature 层永远不用通过异常发现"其实还没实现"。
+- 影响：Phase 0.5 的 Emby/Jellyfin/WebDAV Handle 为空（仅 provider）；
+  Local 保留 BROWSE/DETAIL/PLAYBACK。Phase 1 每实现一项能力，在 Factory 对应填一个字段。
+
+## ADR-023 播放退出 final flush 显式状态机（0.5.1 修订）
+- 状态：已采纳（2026-08-12，Phase 0.5.1）
+- 决策：退出流程为显式状态机 `stopAndFlush()`（幂等）：
+  停止 position 读取（engine.stop，emit Stopped）→ 生成最终进度 →
+  local save + remote report（远端带 2s 短超时，不阻塞退出）→ stop 协调器 → release 播放器。
+  ProgressSyncCoordinator 同时监听 Stopped 事件触发 flush；onCleared 为兜底路径。
+- 背景：原实现先 stop 协调器再 emit Stopped（无人接收），且 DisposableEffect +
+  viewModelScope cancellation 可能丢最后一次进度（Emby 会显示"已看到 93%"）。
+
+## ADR-024 连接测试协议签名校验（0.5.1 修订）
+- 状态：已采纳（2026-08-12，Phase 0.5.1）
+- 决策：Emby/Jellyfin 的 /System/Info/Public 必须满足特征字段（Id/Version 非空）才算协议有效；
+  仅 HTTP 200 + JSON 可解析不算。DTO 键名按真实协议（@SerialName("Id") 等）。
+  分层语义：TCP reachable ≠ HTTP reachable ≠ Emby reachable ≠ Emby authenticated。
+- 验证：MockWebServer 覆盖 正确响应 / 200-错误JSON / 404 / 401 / 403 / malformed JSON。

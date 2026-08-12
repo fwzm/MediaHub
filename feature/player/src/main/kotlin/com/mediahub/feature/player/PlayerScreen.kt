@@ -28,6 +28,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +37,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import androidx.media3.ui.PlayerView
 import com.mediahub.player.engine.TrackSelection
 import kotlin.math.roundToLong
@@ -52,13 +54,22 @@ fun PlayerRoute(
     val resolve by viewModel.resolveState.collectAsStateWithLifecycle()
     val engineState by viewModel.engine.uiState.collectAsStateWithLifecycle()
 
-    // 离开播放页时 final flush（进度快照 + 远端上报各一次，见 ADR-017）
+    // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-022）。
     DisposableEffect(Unit) {
-        onDispose { viewModel.flushProgress() }
+        onDispose { viewModel.stopAndFlushAsync() }
     }
 
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // 返回按钮：先完成进度 final flush（含远端短超时），再返回（ADR-022）
+    val exitPlayer: () -> Unit = {
+        scope.launch {
+            viewModel.stopAndFlush()
+            onBack()
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // 视频画面
@@ -97,7 +108,7 @@ fun PlayerRoute(
                     )
                     Row(modifier = Modifier.padding(top = 16.dp)) {
                         TextButton(onClick = viewModel::resolve) { Text("重试", color = Color.White) }
-                        TextButton(onClick = onBack) { Text("返回", color = Color.White) }
+                        TextButton(onClick = exitPlayer) { Text("返回", color = Color.White) }
                     }
                 }
             }
@@ -105,7 +116,7 @@ fun PlayerRoute(
             ResolveState.Ready -> {
                 PlayerControls(
                     state = state,
-                    onBack = onBack,
+                    onBack = exitPlayer,
                     onTogglePlayPause = viewModel.engine::togglePlayPause,
                     onSeek = viewModel.engine::seekTo,
                     onCycleSpeed = {

@@ -35,16 +35,8 @@ class JellyfinProviderFactory @Inject constructor(
             tokenStore = tokenStore,
             logger = logger,
         )
-        return ProviderHandle(
-            provider = provider,
-            auth = provider,
-            library = provider,
-            detail = provider,
-            playback = provider,
-            search = provider,
-            subtitle = provider,
-            progress = provider,
-        )
+        // ADR-022：Handle 只暴露"当前版本真正实现完成"的能力（Phase 1 逐项填充）。
+        return ProviderHandle(provider = provider)
     }
 }
 

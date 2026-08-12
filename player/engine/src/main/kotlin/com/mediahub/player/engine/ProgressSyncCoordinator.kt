@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * 进度同步协调器（ADR-017）：把"每秒一次"的进度流拆成三档，避免写放大与请求放大。
@@ -17,8 +18,9 @@ import kotlinx.coroutines.launch
  * - UI 进度：由 PlaybackEngine.uiState 驱动（内存，无 IO）。
  * - 本地快照：progress.sample([localIntervalMs])，默认 5s（conflate 语义）。
  * - 远端上报：progress.sample([remoteIntervalMs])，由 Provider 策略决定（默认 10s）。
- * - 关键事件（Pause / Seek / Ended）：立即 flush 一次（latest）。
- * - [flush]：播放器退出时 final flush。
+ * - 关键事件（Pause / Seek / Ended / Stopped）：立即 flush 一次（latest）。
+ * - [flush]：播放器退出时 final flush；[flush] 内远端上报带短超时，
+ *   保证退出不被慢网络阻塞（ADR-022）。
  *
  * 纯 Kotlin，可单测（kotlinx-coroutines-test virtual time）。
  */
@@ -50,7 +52,9 @@ class ProgressSyncCoordinator(
             launch(start = CoroutineStart.UNDISPATCHED) { progress.collect { latest.set(it) } }
             launch(start = CoroutineStart.UNDISPATCHED) {
                 events.collect { event ->
-                    if (event == PlaybackEvent.Paused || event == PlaybackEvent.Seeked || event == PlaybackEvent.Ended) {
+                    if (event == PlaybackEvent.Paused || event == PlaybackEvent.Seeked ||
+                        event == PlaybackEvent.Ended || event == PlaybackEvent.Stopped
+                    ) {
                         flush()
                     }
                 }
@@ -58,11 +62,16 @@ class ProgressSyncCoordinator(
         }
     }
 
-    /** final flush：播放器退出 / 页面离开时调用一次。 */
-    suspend fun flush() {
-        val p = latest.get() ?: return
+    /**
+     * final flush：播放器退出 / 页面离开时调用一次。
+     *
+     * - [progress]：可显式传入最终进度（退出瞬间取值），缺省用 latest（流中最近值）。
+     * - localSave 与 remoteReport 均防崩溃；远端上报带短超时，避免阻塞退出。
+     */
+    suspend fun flush(progress: PlaybackProgress? = null) {
+        val p = progress ?: latest.get() ?: return
         runCatching { localSave(p) }
-        runCatching { remoteReport(p) }
+        runCatching { withTimeoutOrNull(REMOTE_FLUSH_TIMEOUT_MS) { remoteReport(p) } }
     }
 
     fun stop() {
@@ -73,5 +82,8 @@ class ProgressSyncCoordinator(
     private companion object {
         const val DEFAULT_LOCAL_INTERVAL_MS = 5_000L
         const val DEFAULT_REMOTE_INTERVAL_MS = 10_000L
+
+        /** 退出时远端 final report 的短超时（不阻塞退出/返回）。 */
+        const val REMOTE_FLUSH_TIMEOUT_MS = 2_000L
     }
 }

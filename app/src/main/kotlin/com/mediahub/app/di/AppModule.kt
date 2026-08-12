@@ -13,6 +13,7 @@ import com.mediahub.core.network.ApiClient
 import com.mediahub.core.network.HttpClientFactory
 import com.mediahub.core.network.MediaHttpClient
 import com.mediahub.core.security.KeystoreSecretStorage
+import com.mediahub.core.security.CredentialVault
 import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.TokenStore
 import com.mediahub.player.engine.MediaCacheProvider
@@ -56,6 +57,10 @@ object AppModule {
     @Provides
     @Singleton
     fun provideTokenStore(storage: SecretStorage): TokenStore = TokenStore(storage)
+
+    @Provides
+    @Singleton
+    fun provideCredentialVault(storage: SecretStorage): CredentialVault = CredentialVault(storage)
 
     @Provides
     @Singleton

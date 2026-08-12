@@ -37,6 +37,18 @@
 - [x] DONE 测试补充（Registry/能力组合/Credential/进度节流/Headers 隔离/Mapper，共 40 用例）
 - [x] DONE assembleDebug / testDebugUnitTest / lintDebug 通过
 
+## Phase 0.5.1 —— 边界修复（本次交付）✅ DONE
+
+- [x] DONE ProviderHandle 运行时语义（ADR-022）：Handle 只暴露已实现能力；
+      Emby/Jellyfin/WebDAV Handle 置空；declaredCapabilities/runtimeCapabilities 命名区分；
+      ProviderCapability 补 PLAYBACK/DETAIL；一致性测试
+- [x] DONE 退出 final flush 状态机（ADR-023）：stopAndFlush 显式流程 + Stopped 触发 flush +
+      远端 2s 短超时 + onCleared 兜底；单元测试（Stopped/flush override）
+- [x] DONE CredentialVault 接入 Hilt DI（AppModule @Provides）
+- [x] DONE 连接测试协议签名校验（ADR-024）：Emby/Jellyfin SystemInfo Id/Version 必填；
+      MockWebServer 测试（正确/错误JSON/404/401/403/malformed）
+- [x] DONE assembleDebug / testDebugUnitTest（51 用例）/ lintDebug 通过
+
 ## V0.1 —— MVP（下一步） 
 
 ### IN PROGRESS（无，等待开工）

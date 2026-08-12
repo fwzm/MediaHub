@@ -36,6 +36,7 @@ import com.mediahub.provider.api.ProviderDescriptor
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderStatus
 import com.mediahub.provider.base.BaseMediaServerProvider
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /** 该 Provider 类型描述（Factory 与 Provider 共用，见 ADR-015）。 */
@@ -44,9 +45,11 @@ internal val EMBY_PROVIDER_DESCRIPTOR = ProviderDescriptor(
     serverType = ServerType.EMBY,
     displayName = "Emby",
     category = ProviderCategory.MEDIA_SERVER,
-    capabilities = setOf(
+    declaredCapabilities = setOf(
         ProviderCapability.AUTH,
         ProviderCapability.LIBRARY,
+        ProviderCapability.DETAIL,
+        ProviderCapability.PLAYBACK,
         ProviderCapability.SEARCH,
         ProviderCapability.SUBTITLE,
         ProviderCapability.PROGRESS,
@@ -58,12 +61,12 @@ internal val EMBY_PROVIDER_DESCRIPTOR = ProviderDescriptor(
     description = "媒体服务器（Emby）",
 )
 
-/** /System/Info/Public 响应（连接测试用，公开端点）。 */
+/** /System/Info/Public 响应（连接测试用，公开端点）。键名按真实 Emby 协议（Id/ServerName/Version）。 */
 @Serializable
 data class SystemInfoPublic(
-    val id: String? = null,
-    val serverName: String? = null,
-    val version: String? = null,
+    @SerialName("Id") val id: String? = null,
+    @SerialName("ServerName") val serverName: String? = null,
+    @SerialName("Version") val version: String? = null,
 )
 
 /**
@@ -92,28 +95,34 @@ class EmbyProvider(
 
     // ---- 连接测试：协议嗅探（ADR-019） ----
 
-    override suspend fun testConnection(): ConnectionStatus = try {
-        val start = System.nanoTime()
-        val info = apiClient.get<SystemInfoPublic>("${server.baseUrl}/System/Info/Public")
-        val latencyMs = (System.nanoTime() - start) / 1_000_000
-        ConnectionStatus(
-            ok = true,
-            latencyMs = latencyMs,
-            message = "Emby ${info.version ?: "?"} · ${info.serverName ?: server.displayName}",
-        )
-    } catch (e: ApiException) {
-        ConnectionStatus(
-            ok = false,
-            message = when (e.statusCode) {
-                401, 403 -> "服务器需要登录（HTTP ${e.statusCode}）"
-                404 -> "该地址不是 Emby 服务（404）"
-                else -> "HTTP ${e.statusCode}"
-            },
-        )
-    } catch (e: ProviderException) {
-        ConnectionStatus(ok = false, message = e.message ?: "连接失败")
-    } catch (e: Exception) {
-        ConnectionStatus(ok = false, message = "连接失败：${e.message}")
+    override suspend fun testConnection(): ConnectionStatus {
+        return try {
+            val start = System.nanoTime()
+            val info = apiClient.get<SystemInfoPublic>("${server.baseUrl}/System/Info/Public")
+            val latencyMs = (System.nanoTime() - start) / 1_000_000
+            // 协议特征校验（ADR-019）：HTTP 200 + JSON 可解析 ≠ 有效 Emby。
+            if (info.id.isNullOrBlank() || info.version.isNullOrBlank()) {
+                return ConnectionStatus(ok = false, message = "服务器响应不是有效的 Emby SystemInfo")
+            }
+            ConnectionStatus(
+                ok = true,
+                latencyMs = latencyMs,
+                message = "Emby ${info.version} · ${info.serverName ?: server.displayName}",
+            )
+        } catch (e: ApiException) {
+            ConnectionStatus(
+                ok = false,
+                message = when (e.statusCode) {
+                    401, 403 -> "服务器需要登录（HTTP ${e.statusCode}）"
+                    404 -> "该地址不是 Emby 服务（404）"
+                    else -> "HTTP ${e.statusCode}"
+                },
+            )
+        } catch (e: ProviderException) {
+            ConnectionStatus(ok = false, message = e.message ?: "连接失败")
+        } catch (e: Exception) {
+            ConnectionStatus(ok = false, message = "连接失败：${e.message}")
+        }
     }
 
     // ---- Auth（占位，Phase 1） ----

@@ -1,18 +1,28 @@
 package com.mediahub.provider.api
 
 /**
- * Provider 能力声明。UI 通过 capability 决定是否展示入口，
- * 禁止通过 "if type == EMBY" 之类的判断。
+ * Provider 能力声明。
+ *
+ * 两个语义（见 ADR-014 / ADR-022）：
+ * - `ProviderDescriptor.declaredCapabilities`：该类型**最终计划**支持的能力（展示/路由）。
+ * - `ProviderHandle.runtimeCapabilities`：**当前版本真正实现完成**、运行时可用的能力
+ *   （由 Handle 可空字段推导，是 feature 层判断的唯一权威）。
  */
 enum class ProviderCapability {
     /** 用户名密码 / Token 认证 */
     AUTH,
 
-    /** 媒体库浏览（库/文件夹/详情） */
+    /** 媒体库浏览（库/条目/季/集） */
     LIBRARY,
 
-    /** 文件树浏览（云盘 / NAS） */
+    /** 条目详情 */
+    DETAIL,
+
+    /** 文件树浏览（云盘 / NAS / 本地） */
     BROWSE,
+
+    /** 播放（resolvePlayback） */
+    PLAYBACK,
 
     /** 搜索 */
     SEARCH,

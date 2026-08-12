@@ -76,6 +76,7 @@ class PlaybackEngine(
 
     private var session: PlaybackSession? = null
     private var progressJob: Job? = null
+    private var released = false
 
     /** 供 PlayerView 绑定。 */
     val exoPlayer: ExoPlayer get() = player
@@ -243,10 +244,42 @@ class PlaybackEngine(
         }
     }
 
+    /**
+     * 立即读取当前进度（不依赖每秒循环，退出瞬间取值用）。
+     */
+    fun currentProgress(): PlaybackProgress? = session?.let { s ->
+        PlaybackProgress(
+            serverId = s.serverId,
+            itemId = s.itemId,
+            positionMs = player.currentPosition,
+            durationMs = player.duration.takeIf { it > 0 } ?: 0L,
+            isPaused = !player.isPlaying,
+            updatedAtEpochMs = System.currentTimeMillis(),
+            mode = s.source.mode,
+            itemTitle = s.itemTitle,
+            itemType = s.itemType,
+        )
+    }
+
+    /**
+     * 停止播放（显式退出状态机第一步，见 ADR-022）：
+     * 1. 停止每秒进度循环（不再产生新 tick）；
+     * 2. 发出 Stopped 事件（进度协调器收到后立即 flush）；
+     * 3. 返回最终进度（调用方用于显式 final flush）。
+     */
+    fun stop(): PlaybackProgress? {
+        progressJob?.cancel()
+        val finalProgress = currentProgress()
+        _events.tryEmit(PlaybackEvent.Stopped)
+        logger.i(LogTag.PLAYER, "播放停止 serverId=${session?.serverId} itemId=${session?.itemId}")
+        return finalProgress
+    }
+
     fun release() {
+        if (released) return
+        released = true
         progressJob?.cancel()
         headersHolder.setHeaders(emptyMap())
-        _events.tryEmit(PlaybackEvent.Stopped)
         player.release()
         logger.i(LogTag.PLAYER, "播放引擎已释放")
     }

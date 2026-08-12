@@ -82,6 +82,7 @@ class PlayerViewModel @Inject constructor(
         },
     )
     private var syncStarted = false
+    private var stopped = false
 
     val uiState: StateFlow<PlayerCombinedState> =
         combine(engine.uiState, _resolveState) { player, resolve ->
@@ -151,9 +152,25 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    /** 播放页离开时的 final flush（由 PlayerScreen onDispose 调用）。 */
-    fun flushProgress() {
-        viewModelScope.launch { syncCoordinator.flush() }
+    /**
+     * 显式退出状态机（ADR-022）：保证退出时本地快照与远端上报不丢。
+     *
+     * 顺序：暂停读取 position（engine.stop，发出 Stopped）→ 生成最终进度 →
+     * local save + remote report（远端短超时，不阻塞退出）→ 停止协调器 → 释放播放器。
+     * 幂等：可被返回按钮与 onDispose 兜底重复调用。
+     */
+    suspend fun stopAndFlush() {
+        if (stopped) return
+        stopped = true
+        val finalProgress = engine.stop()
+        syncCoordinator.flush(finalProgress)
+        syncCoordinator.stop()
+        engine.release()
+    }
+
+    /** 异步兜底入口（PlayerScreen onDispose 使用；返回按钮走 [stopAndFlush] 同步流程）。 */
+    fun stopAndFlushAsync() {
+        viewModelScope.launch { stopAndFlush() }
     }
 
     private fun userMessage(e: Exception): String = when (e) {
@@ -162,8 +179,12 @@ class PlayerViewModel @Inject constructor(
     }
 
     override fun onCleared() {
-        syncCoordinator.stop()
-        engine.release()
+        // 兜底：若未走 stopAndFlush（如进程销毁/异常路径），确保停止采样并释放资源。
+        if (!stopped) {
+            engine.stop()
+            syncCoordinator.stop()
+            engine.release()
+        }
         super.onCleared()
     }
 }

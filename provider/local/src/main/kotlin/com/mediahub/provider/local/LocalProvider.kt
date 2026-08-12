@@ -29,7 +29,12 @@ internal val LOCAL_PROVIDER_DESCRIPTOR = ProviderDescriptor(
     serverType = ServerType.LOCAL,
     displayName = "本地存储",
     category = ProviderCategory.CLOUD_STORAGE,
-    capabilities = setOf(ProviderCapability.BROWSE, ProviderCapability.MULTI_VERSION),
+    declaredCapabilities = setOf(
+        ProviderCapability.BROWSE,
+        ProviderCapability.DETAIL,
+        ProviderCapability.PLAYBACK,
+        ProviderCapability.MULTI_VERSION,
+    ),
     authMethod = AuthMethod.NONE,
     status = ProviderStatus.STABLE,
     description = "本机存储（应用外部目录；SAF 文档树见 Phase 0.6）",

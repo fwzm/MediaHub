@@ -32,9 +32,10 @@ internal val WEBDAV_PROVIDER_DESCRIPTOR = ProviderDescriptor(
     serverType = ServerType.WEBDAV,
     displayName = "WebDAV",
     category = ProviderCategory.CLOUD_STORAGE,
-    capabilities = setOf(
+    declaredCapabilities = setOf(
         ProviderCapability.AUTH,
         ProviderCapability.BROWSE,
+        ProviderCapability.PLAYBACK,
         ProviderCapability.SEARCH,
     ),
     authMethod = AuthMethod.BASIC,

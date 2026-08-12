@@ -35,16 +35,10 @@ class EmbyProviderFactory @Inject constructor(
             tokenStore = tokenStore,
             logger = logger,
         )
-        return ProviderHandle(
-            provider = provider,
-            auth = provider,
-            library = provider,
-            detail = provider,
-            playback = provider,
-            search = provider,
-            subtitle = provider,
-            progress = provider,
-        )
+        // ADR-022：Handle 只暴露"当前版本真正实现完成"的能力。
+        // Emby 能力（登录/媒体库/播放/进度…）为 Phase 1 占位，当前不放 Handle；
+        // 每实现一项，在 Phase 1 把对应字段填上。
+        return ProviderHandle(provider = provider)
     }
 }
 

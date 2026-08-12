@@ -25,15 +25,15 @@ enum class ProviderStatus { STABLE, BETA, EXPERIMENTAL }
  * 数据源类型描述（由 Factory 自己声明，见 ADR-015）。
  *
  * - [id]：稳定标识（"emby"、"webdav"…），未来持久化迁移的键（见 ADR-015 迁移路径）。
- * - [capabilities]：该类型**最终支持**的能力集合（供展示/路由）；
- *   当前实例是否可用，以 [ProviderHandle] 的可空字段为准（运行时权威）。
+ * - [declaredCapabilities]：该类型**最终计划支持**的能力集合（展示/路由用）；
+ *   **当前实例实际可用**的能力以 [ProviderHandle] 的字段（runtimeCapabilities）为准（ADR-022）。
  */
 data class ProviderDescriptor(
     val id: String,
     val serverType: ServerType,
     val displayName: String,
     val category: ProviderCategory,
-    val capabilities: Set<ProviderCapability>,
+    val declaredCapabilities: Set<ProviderCapability>,
     val authMethod: AuthMethod,
     val status: ProviderStatus,
     val description: String = "",

@@ -1,5 +1,25 @@
 # 变更记录（CHANGELOG）
 
+## [0.2.1-hardening-fix] — 2026-08-12（Phase 0.5.1 边界修复）
+
+### 修复
+- **ProviderHandle 运行时语义**（ADR-022）：Handle 只暴露已实现能力；Emby/Jellyfin/WebDAV
+  Handle 置空（Phase 1 逐项填充）；`declaredCapabilities`（计划）/`runtimeCapabilities`（运行时）
+  命名分离；ProviderCapability 补 PLAYBACK/DETAIL。
+- **退出 final flush 状态机**（ADR-023）：`PlayerViewModel.stopAndFlush()` 显式流程
+  （stop → 最终进度 → local save + remote report(2s 超时) → release）；Stopped 事件触发 flush；
+  onCleared 兜底；返回按钮同步走 stopAndFlush，DisposableEffect 仅兜底。
+- **CredentialVault 接入 Hilt DI**（AppModule @Provides；不保存 Emby/Jellyfin 原始密码）。
+- **连接测试协议签名校验**（ADR-024）：Emby/Jellyfin SystemInfo 必须 Id/Version 非空；
+  DTO 键名 @SerialName("Id"…) 对齐真实协议。
+
+### 测试
+- 新增 11 用例（共 51）：ProviderHandle 一致性、Emby 连接（6）、Jellyfin 连接（3）、
+  Stopped/flush override（2）；MockWebServer 覆盖正确/错误JSON/404/401/403/malformed。
+
+### 验证
+- assembleDebug / testDebugUnitTest（51 用例）/ lintDebug 全部通过。
+
 ## [0.2.0-hardening] — 2026-08-12（Phase 0.5 架构加固）
 
 ### 重构
