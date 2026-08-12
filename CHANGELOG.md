@@ -1,5 +1,22 @@
 # 变更记录（CHANGELOG）
 
+## [0.4.3-phase1a-final] — 2026-08-12（Phase 1A FINAL PATCH）
+
+### 修复（评审 Phase 1A FINAL PATCH）
+- **Emby 官方 API**：会话验证改用 `GET /emby/Users/{userId}`（废弃未文档化 /Users/Me）；
+  authenticated request 的 `X-Emby-Authorization` 必带 `UserId="..."`
+  （EmbyApiClient.authenticatedHeaders(token, userId) / getCurrentUser(token, userId)；
+  logout(token, userId) 同样带 UserId）。
+- **Existing Server Re-login**：ServerCard 点击在 已失效/身份变更/未登录（且为认证 Provider）时
+  进入 `server/add?reauthorizeId={serverId}`；复用 SAME localServerId、预填 URL/name/username
+  （密码留空）、成功后 `updateServer`（不 addServer，不产生重复卡片）。
+  导航 HomeRoute 新增 `onRelogin`；AddServerViewModel 新增 reauthorizeId/existingServer 模式。
+- **Playback progress**：`isPaused` 改为 `!player.playWhenReady`（播放意图），
+  buffering 不再误报 paused（playWhenReady=true 但 isPlaying=false 时）。
+
+### 验证
+- assembleDebug / testDebugUnitTest（74）/ lintDebug 通过
+
 ## [0.4.2-reconcile] — 2026-08-12（PR #1 × main 合流，以 main 为主线")
 
 ### 合流决策（经用户确认，ADR-029）

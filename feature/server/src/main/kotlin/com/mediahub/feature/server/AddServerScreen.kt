@@ -47,7 +47,15 @@ fun AddServerRoute(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("添加媒体库") },
+                title = {
+                    Text(
+                        if (viewModel.isReauthorizing()) {
+                            if (viewModel.isLoadingExisting()) "加载中…" else "重新登录"
+                        } else {
+                            "添加媒体库"
+                        }
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回")
@@ -148,7 +156,11 @@ fun AddServerRoute(
                         enabled = !state.isLoggingIn && !state.isTesting,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text(if (state.isLoggingIn) "登录中…" else "登录并添加")
+                        Text(
+                            if (state.isLoggingIn) "登录中…"
+                            else if (viewModel.isReauthorizing()) "重新登录"
+                            else "登录并添加"
+                        )
                     }
                 } else {
                     Button(

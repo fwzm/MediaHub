@@ -27,6 +27,12 @@ fun MediaHubNavHost() {
                 onOpenServer = { server ->
                     navController.navigate("library/${server.id}/root?name=${Uri.encode(server.name)}")
                 },
+                onRelogin = { server ->
+                    // Existing Server Re-login：复用原 serverId，进入添加页（reauthorizeId 模式）
+                    navController.navigate(
+                        "server/add?reauthorizeId=${Uri.encode(server.id)}"
+                    )
+                },
                 onAddServer = { navController.navigate(Routes.ADD_SERVER) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenItem = { progress ->
@@ -35,6 +41,21 @@ fun MediaHubNavHost() {
                             "?title=${Uri.encode(progress.itemTitle ?: "")}"
                     )
                 },
+            )
+        }
+
+        composable(
+            route = "server/add?reauthorizeId={reauthorizeId}",
+            arguments = listOf(
+                navArgument("reauthorizeId") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                },
+            ),
+        ) {
+            AddServerRoute(
+                onDone = { navController.popBackStack() },
+                onBack = { navController.popBackStack() },
             )
         }
 

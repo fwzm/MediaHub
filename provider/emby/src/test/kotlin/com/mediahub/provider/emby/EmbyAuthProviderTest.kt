@@ -260,8 +260,10 @@ class EmbyAuthProviderTest {
         provider().restoreSession()
         server.takeRequest() // SystemInfo
         val me = server.takeRequest()
-        assertEquals("/emby/Users/Me", me.path)
+        assertEquals("/emby/Users/user-1", me.path)
         assertEquals("tok-abc", me.getHeader("X-Emby-Token"))
+        // review #1：认证头必须带 UserId（官方要求）
+        assertTrue(me.getHeader("X-Emby-Authorization")!!.contains("UserId=\"user-1\""))
     }
 
     // ---- 13. logout（先校验服务器身份） ----

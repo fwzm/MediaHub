@@ -1,5 +1,6 @@
 package com.mediahub.feature.server
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.IdGenerator
@@ -28,6 +29,8 @@ data class AddServerUiState(
     val baseUrl: String = "",
     val username: String = "",
     val password: String = "",
+    val isReauthorizing: Boolean = false,
+    val isLoadingExisting: Boolean = false,
     val isTesting: Boolean = false,
     val testResult: ConnectionStatus? = null,
     val isLoggingIn: Boolean = false,
@@ -38,6 +41,7 @@ data class AddServerUiState(
 
 @HiltViewModel
 class AddServerViewModel @Inject constructor(
+    savedStateHandle: SavedStateHandle,
     private val serverRepository: ServerRepository,
     private val registry: MediaProviderRegistry,
     private val logger: Logger,
@@ -46,13 +50,48 @@ class AddServerViewModel @Inject constructor(
     /** 可用数据源类型：从 Registry 动态读取（ADR-015），新增 Provider 无需改 UI。 */
     val availableProviders: List<ProviderDescriptor> = registry.descriptors()
 
+    /** 已有服务器重新登录时的原 serverId（review：Existing Server Re-login，复用 same id）。 */
+    private val reauthorizeServerId: String = savedStateHandle["reauthorizeId"] ?: ""
+
     /** 保存前先生成稳定 id（测试连接与保存使用同一实例）。 */
     private val serverId = IdGenerator.newId("srv")
 
+    private var existingServer: MediaServer? = null
+
     private val _uiState = MutableStateFlow(
-        AddServerUiState(selectedDescriptorId = availableProviders.firstOrNull()?.id.orEmpty())
+        AddServerUiState(
+            selectedDescriptorId = availableProviders.firstOrNull()?.id.orEmpty(),
+            isReauthorizing = reauthorizeServerId.isNotBlank(),
+            isLoadingExisting = reauthorizeServerId.isNotBlank(),
+        )
     )
     val uiState: StateFlow<AddServerUiState> = _uiState.asStateFlow()
+
+    init {
+        if (reauthorizeServerId.isNotBlank()) {
+            viewModelScope.launch {
+                val server = serverRepository.getServer(reauthorizeServerId)
+                if (server == null) {
+                    _uiState.update { it.copy(isLoadingExisting = false, error = "找不到需要重新登录的媒体源") }
+                } else {
+                    // 复用 SAME id；预填 name/baseUrl/username，密码留空
+                    existingServer = server
+                    _uiState.update {
+                        it.copy(
+                            selectedDescriptorId = server.type.name,
+                            name = server.name,
+                            baseUrl = server.baseUrl,
+                            username = server.username.orEmpty(),
+                            isLoadingExisting = false,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun isLoadingExisting(): Boolean = _uiState.value.isLoadingExisting
+    fun isReauthorizing(): Boolean = _uiState.value.isReauthorizing
 
     private fun descriptorOf(id: String): ProviderDescriptor? =
         availableProviders.firstOrNull { it.id == id }
@@ -129,7 +168,9 @@ class AddServerViewModel @Inject constructor(
                 )) {
                     is AuthResult.Success -> {
                         try {
-                            serverRepository.addServer(server)
+                            // review：re-login 更新原服务器（不 addServer，不产生重复卡片）
+                            if (existingServer != null) serverRepository.updateServer(server)
+                            else serverRepository.addServer(server)
                             _uiState.update { it.copy(isLoggingIn = false) }
                             onSaved(server)
                         } catch (e: Exception) {
@@ -175,7 +216,8 @@ class AddServerViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, error = null) }
             try {
-                serverRepository.addServer(server)
+                if (existingServer != null) serverRepository.updateServer(server)
+                else serverRepository.addServer(server)
                 // 密码仅用于后续 Provider 认证（Phase 1，经 CredentialVault 加密存储），
                 // 此处不落库、不记日志（见 ADR-016）。
                 logger.i(LogTag.UI, "已添加媒体源 serverId=${server.id} type=${server.type.name}")
@@ -190,13 +232,16 @@ class AddServerViewModel @Inject constructor(
     private fun buildServer(): MediaServer {
         val descriptor = selectedDescriptor()
         val state = _uiState.value
+        val existing = existingServer
         return MediaServer(
-            id = serverId,
-            name = state.name.trim().ifBlank { descriptor?.displayName ?: "媒体源" },
-            type = descriptor?.serverType ?: ServerType.EMBY,
+            // re-login 复用已有 id；新建才生成新 id
+            id = existing?.id ?: serverId,
+            name = state.name.trim().ifBlank { existing?.name ?: descriptor?.displayName.orEmpty() },
+            type = existing?.type ?: descriptor?.serverType ?: ServerType.EMBY,
             baseUrl = state.baseUrl.trim().trimEnd('/'),
             username = state.username.trim().ifBlank { null },
-            createdAtEpochMs = System.currentTimeMillis(),
+            isDefault = existing?.isDefault ?: false,
+            createdAtEpochMs = existing?.createdAtEpochMs ?: System.currentTimeMillis(),
         )
     }
 }

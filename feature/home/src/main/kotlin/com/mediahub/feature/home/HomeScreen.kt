@@ -38,6 +38,7 @@ import com.mediahub.model.PlaybackProgress
 @Composable
 fun HomeRoute(
     onOpenServer: (MediaServer) -> Unit,
+    onRelogin: (MediaServer) -> Unit,
     onAddServer: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenItem: (PlaybackProgress) -> Unit,
@@ -80,9 +81,12 @@ fun HomeRoute(
                 }
             } else {
                 items(servers, key = { it.id }) { server ->
+                    val needsRelogin = viewModel.needsRelogin(server, authStates[server.id])
                     ServerCard(
                         server = server,
-                        onClick = { onOpenServer(server) },
+                        onClick = {
+                            if (needsRelogin) onRelogin(server) else onOpenServer(server)
+                        },
                         authState = authStates[server.id],
                         onLogout = { viewModel.logout(server.id) },
                     )

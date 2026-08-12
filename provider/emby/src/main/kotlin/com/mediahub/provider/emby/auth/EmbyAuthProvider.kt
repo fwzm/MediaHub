@@ -135,7 +135,7 @@ class EmbyAuthProvider(
         }
 
         return try {
-            val user = api.getCurrentUser(tokens.accessToken)
+            val user = api.getCurrentUser(tokens.accessToken, session.userId)
             AuthSessionState.Authenticated(EmbyUserMapper.map(user, server.id))
         } catch (e: ApiException) {
             // 仅 401（Token 已撤销）才清会话；403/5xx 保留（review #4）
@@ -157,7 +157,7 @@ class EmbyAuthProvider(
             // 服务端撤销：best-effort，且仅当服务器身份一致（防把旧 Token 发给错误服务器，review #2）
             val serverIdMatches = runCatching { api.getSystemInfoPublic().id }.getOrNull() == session.remoteServerId
             if (serverIdMatches) {
-                runCatching { api.logout(tokens.accessToken) }
+                runCatching { api.logout(tokens.accessToken, session.userId) }
                     .onFailure { logger.w(LogTag.AUTH, "Emby 服务端登出失败（best-effort） serverId=${server.id}", it) }
             }
         }

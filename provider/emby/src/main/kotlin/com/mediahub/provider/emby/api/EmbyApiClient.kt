@@ -33,11 +33,14 @@ class EmbyApiClient(
         )
     }
 
-    /** 当前用户（会话验证用，轻量认证端点）：GET /emby/Users/Me。 */
-    suspend fun getCurrentUser(token: String): EmbyUserDto =
+    /**
+     * 当前用户（会话验证用）：GET /emby/Users/{userId}。
+     * 官方 UserService Reference 取单个用户接口为 GET /Users/{Id}，不使用未文档化 /Users/Me。
+     */
+    suspend fun getCurrentUser(token: String, userId: String): EmbyUserDto =
         apiClient.get(
-            url = endpointResolver.endpoint("/Users/Me"),
-            headers = authenticatedHeaders(token),
+            url = endpointResolver.endpoint("/Users/$userId"),
+            headers = authenticatedHeaders(token, userId),
         )
 
     /** 服务器公开信息（**无 Token**）：GET /emby/System/Info/Public。
@@ -49,20 +52,20 @@ class EmbyApiClient(
         )
 
     /** 主动登出：POST /emby/Sessions/Logout（撤销 token，best-effort）。 */
-    suspend fun logout(token: String) {
+    suspend fun logout(token: String, userId: String) {
         apiClient.postNoContent(
             url = endpointResolver.endpoint("/Sessions/Logout"),
-            headers = authenticatedHeaders(token),
+            headers = authenticatedHeaders(token, userId),
         )
     }
 
-    /** 未认证请求的客户端身份头。 */
-    fun identityHeaders(): Map<String, String> =
-        mapOf(authHeaderBuilder.headerName() to authHeaderBuilder.build())
+    /** 客户端身份头；userId 存在时带上（官方要求登录后进行带）。 */
+    fun identityHeaders(userId: String? = null): Map<String, String> =
+        mapOf(authHeaderBuilder.headerName() to authHeaderBuilder.build(userId))
 
-    /** 已认证请求：客户端身份头 + X-Emby-Token。 */
-    fun authenticatedHeaders(token: String): Map<String, String> =
-        identityHeaders() + mapOf(TOKEN_HEADER to token)
+    /** 已认证请求：客户端身份头（含 UserId，官方要求）+ X-Emby-Token。 */
+    fun authenticatedHeaders(token: String, userId: String): Map<String, String> =
+        identityHeaders(userId) + mapOf(TOKEN_HEADER to token)
 
     private companion object {
         const val TOKEN_HEADER = "X-Emby-Token"

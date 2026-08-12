@@ -78,4 +78,19 @@ class HomeViewModel @Inject constructor(
             _authStates.update { it + (serverId to AuthSessionState.SignedOut) }
         }
     }
+
+    /**
+     * 卡片点击是否进入"重新登录"（review：Existing Server Re-login）。
+     * 仅对"需要认证的 Provider"且状态为 已失效/服务器身份变更/未登录 时返回 true；
+     * Local 等无认证 Provider 走正常打开。
+     */
+    fun needsRelogin(server: MediaServer, authState: AuthSessionState?): Boolean {
+        val authProvider = runCatching { registry.create(server)?.auth }.getOrNull()
+        if (authProvider == null) return false
+        return when (authState) {
+            is AuthSessionState.Authenticated -> false
+            AuthSessionState.Unknown, AuthSessionState.Restoring -> false
+            else -> true
+        }
+    }
 }

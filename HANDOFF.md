@@ -1,15 +1,19 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12（PR #1 × main 合流，ADR-029）。本文件是协作第一手资料。
+> 最后更新：2026-08-12（Phase 1A FINAL PATCH）。本文件是协作第一手资料。
 
-## 0. 合流结论（最重要）
+## 0. 最终架构主线（main 为唯一主线）
 
-- **以 main 为主线**（用户确认）。PR #1（agent/phase-0-5-architecture-hardening）标记为
-  not-merge，其 CredentialVault/AuthenticationCoordinator 双轨认证架构不再与 main 并行开发。
-- 从 PR #1 吸收了非破坏性 review 修复：播放关键事件 Channel(UNLIMITED)、系统 Back BackHandler、
-  browse-only MediaTypeGuesser、SAF tree-backed 导航基础设施（SafTreeNavigator/SafUri，供 Phase 0.6）。
-- main 的认证主线 = TokenStore + EmbySessionStore + 通用 restoreSession(AuthSessionState)。
-- **后续新功能一律 base 在 main，不再往 PR #1 分支开发。**
+- **以 main 为唯一架构主线**（ADR-029，用户确认）。PR #1 不 merge（superseded by ADR-029/main）。
+- 认证架构：main 版本（TokenStore + EmbySessionStore + restoreSession: AuthSessionState）。
+- **Phase 1A FINAL PATCH（本提交）**：
+  1. Emby 会话验证改用 `GET /emby/Users/{userId}`（去未文档化 /Users/Me）；
+     getCurrentUser(token,userId) / logout(token,userId)；X-Emby-Authorization 带 UserId。
+  2. Existing Server Re-login：卡片点击 失效/未登录/身份变更（认证 Provider）→
+     `server/add?reauthorizeId={serverId}`，复用 same localServerId + updateServer（不重复）。
+  3. isPaused → `!player.playWhenReady`（buffering 不误报 paused）。
+- 防串服 + 失效策略：remoteServerId 校验不发错 Token；仅 401 清会话；403/malformed/网络保留。
+- **后续新功能一律 base 在 main**；SAF 完整落地留待 Phase 0.6（当前 LocalProvider 为 File 型）。
 
 ## 0. Phase 1A finalization（最新）
 
