@@ -1,6 +1,16 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12，Phase 0.5 Architecture Hardening。
+> 最后更新：2026-08-12，PR #1 review 修复完成（分支：agent/phase-0-5-architecture-hardening，未 merge）。
+> 上一条：Phase 0.5 Architecture Hardening。
+
+## 0. PR #1 review 修复（最新）
+
+- Copilot（10 项）+ Codex（P1×1 + P2×7）review 已全部处理，逐条说明见 `docs/REVIEW-PR1.md`。
+- 覆盖：SAF 嵌套目录（tree-backed）、LOCAL REAUTH_REQUIRED、关键事件 Channel 保序、
+  PLAY 语义（playWhenReady）、MediaTypeGuesser、WebDAV Basic charset（RFC 7617）、
+  WebDAV PROPFIND 受保护验证、系统 Back、testConnection 默认参数兼容、WebDAV 401/403 AUTH_REQUIRED。
+- 本地验证：assembleDebug / testDebugUnitTest（47）/ lintDebug 通过。
+- **待办：latest PR head 的 GitHub Actions 全绿后，人工 review diff 再决定 merge（本 AI 不 merge）。**
 
 ## 1. 当前状态
 

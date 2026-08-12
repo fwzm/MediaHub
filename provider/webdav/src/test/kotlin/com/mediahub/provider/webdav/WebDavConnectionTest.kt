@@ -5,6 +5,7 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.ApiClient
 import com.mediahub.core.network.MediaHttpClient
 import com.mediahub.model.MediaServer
+import com.mediahub.provider.api.ConnectionTestRequest
 import com.mediahub.provider.api.CredentialVault
 import com.mediahub.provider.api.Credentials
 import com.mediahub.provider.api.SessionCredential
@@ -27,9 +28,9 @@ class WebDavConnectionTest {
             server.enqueue(MockResponse().setResponseCode(401))
             val provider = provider(server)
 
-            assertTrue(provider.testConnection().ok)
+            assertTrue(provider.testConnection(ConnectionTestRequest()).ok)
             assertEquals("OPTIONS", server.takeRequest().method)
-            assertFalse(provider.testConnection().ok)
+            assertFalse(provider.testConnection(ConnectionTestRequest()).ok)
         } finally {
             server.shutdown()
         }

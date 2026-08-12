@@ -2,6 +2,7 @@ package com.mediahub.provider.local
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
@@ -24,7 +25,12 @@ import com.mediahub.provider.api.ProviderStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** SAF 文档树 Provider：持久化 content:// URI，兼容本机、U 盘及 DocumentProvider。 */
+/**
+ * SAF 文档树 Provider：持久化 content:// URI，兼容本机、U 盘及 DocumentProvider。
+ *
+ * 浏览全程 tree-backed（[SafTreeNavigator]），支持多层子目录；
+ * 旧数据（baseUrl 为空）明确返回 REAUTH_REQUIRED（review P2-2）。
+ */
 class LocalProvider(
     private val server: com.mediahub.model.MediaServer,
     private val context: Context,
@@ -33,21 +39,38 @@ class LocalProvider(
     override val serverId: String get() = server.id
     override val descriptor: ProviderDescriptor = DESCRIPTOR
 
-    private val treeUri: Uri? get() = server.baseUrl.takeIf { it.isNotBlank() }?.let(Uri::parse)
+    private val treeUri: String? get() = server.baseUrl.takeIf { it.isNotBlank() }
+
+    private fun navigator(): SafTreeNavigator {
+        val uri = treeUri ?: throw ProviderException.Connection(serverId, "本地目录未授权")
+        return SafTreeNavigator(uri, SafTreeNavigator.ContentResolverSource(context))
+    }
 
     override suspend fun testConnection(request: ConnectionTestRequest): ConnectionStatus = withContext(Dispatchers.IO) {
         val uri = treeUri
-            ?: return@withContext ConnectionStatus(ok = false, message = "请先选择媒体目录")
-        if (uri.scheme != "content") {
-            return@withContext ConnectionStatus(ok = false, message = "本地目录必须是 content:// 文档树")
+            ?: return@withContext ConnectionStatus(
+                ok = false,
+                message = "本地目录未授权，请重新选择媒体目录",
+                errorCode = ProviderException.ErrorCode.REAUTH_REQUIRED,
+            )
+        if (!uri.startsWith("content://")) {
+            return@withContext ConnectionStatus(
+                ok = false,
+                message = "本地目录必须是 content:// 文档树",
+                errorCode = ProviderException.ErrorCode.CONNECTION,
+            )
         }
         val hasReadGrant = context.contentResolver.persistedUriPermissions.any {
-            it.uri == uri && it.isReadPermission
+            it.uri.toString() == uri && it.isReadPermission
         }
         if (!hasReadGrant) {
-            return@withContext ConnectionStatus(ok = false, message = "目录授权未持久化，请重新选择")
+            return@withContext ConnectionStatus(
+                ok = false,
+                message = "目录授权未持久化，请重新选择",
+                errorCode = ProviderException.ErrorCode.REAUTH_REQUIRED,
+            )
         }
-        val root = DocumentFile.fromTreeUri(context, uri)
+        val root = DocumentFile.fromTreeUri(context, Uri.parse(uri))
         if (root == null || !root.exists() || !root.isDirectory || !root.canRead()) {
             ConnectionStatus(ok = false, message = "目录不可访问或授权已经失效")
         } else {
@@ -57,33 +80,30 @@ class LocalProvider(
 
     override suspend fun listFolder(folder: MediaItem?, page: PageRequest): PagedResult<MediaItem> =
         withContext(Dispatchers.IO) {
-            val directory = if (folder == null) {
-                treeUri?.let { DocumentFile.fromTreeUri(context, it) }
+            val nav = navigator()
+            val parentDocId = if (folder == null) {
+                nav.rootDocId()
             } else {
-                DocumentFile.fromSingleUri(context, Uri.parse(folder.path ?: folder.id))
-            } ?: throw ProviderException.NotFound(serverId, folder?.id ?: "本地目录")
-
-            if (!directory.isDirectory || !directory.canRead()) {
-                throw ProviderException.Connection(serverId, "目录不可读取")
+                // tree-backed document uri 字符串 → docId（绝不 fromSingleUri，见 SafTreeNavigator）
+                nav.docIdOf(folder.path ?: folder.id)
             }
-            val items = directory.listFiles()
-                .sortedWith(compareBy({ !it.isDirectory }, { it.name.orEmpty().lowercase() }))
-                .map { it.toMediaItem(parentId = folder?.id ?: requireNotNull(treeUri).toString()) }
-            val paged = items.drop(page.offset).take(page.limit)
+            val entries = nav.listChildren(parentDocId)
+                .sortedWith(compareBy({ it.mimeType == DocumentsContract.Document.MIME_TYPE_DIR },
+                    { it.name.lowercase() }))
+            val paged = entries.drop(page.offset).take(page.limit)
             PagedResult(
-                items = paged,
-                totalCount = items.size,
-                hasMore = page.offset + paged.size < items.size,
+                items = paged.map { it.toMediaItem(parentId = folder?.id) },
+                totalCount = entries.size,
+                hasMore = page.offset + paged.size < entries.size,
             )
         }
 
     override suspend fun resolvePlayback(item: MediaItem, options: PlaybackOptions): PlaybackSource =
         withContext(Dispatchers.IO) {
             val uri = Uri.parse(item.path ?: item.id)
-            val canOpen = runCatching {
-                context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
-            }.getOrDefault(false)
-            if (!canOpen) throw ProviderException.NotFound(serverId, uri.toString())
+            if (!SafTreeNavigator.ContentResolverSource(context).canOpen(uri.toString())) {
+                throw ProviderException.NotFound(serverId, uri.toString())
+            }
             PlaybackSource(
                 url = uri.toString(),
                 mimeType = context.contentResolver.getType(uri),
@@ -92,24 +112,25 @@ class LocalProvider(
             )
         }
 
-    private fun DocumentFile.toMediaItem(parentId: String?): MediaItem {
-        val fileName = name.orEmpty().ifBlank { uri.lastPathSegment ?: "未命名" }
+    private fun SafTreeNavigator.SafEntry.toMediaItem(parentId: String?): MediaItem {
+        val fileName = name.ifBlank { uri.substringAfterLast('/').substringAfterLast(':').ifBlank { "未命名" } }
         val extension = fileName.substringAfterLast('.', "").lowercase()
+        val isDir = mimeType == DocumentsContract.Document.MIME_TYPE_DIR
         val mediaType = when {
-            isDirectory -> MediaType.FOLDER
-            type?.startsWith("video/") == true || extension in VIDEO_EXTENSIONS -> MediaType.VIDEO
-            type?.startsWith("audio/") == true || extension in AUDIO_EXTENSIONS -> MediaType.AUDIO
+            isDir -> MediaType.FOLDER
+            mimeType?.startsWith("video/") == true || extension in VIDEO_EXTENSIONS -> MediaType.VIDEO
+            mimeType?.startsWith("audio/") == true || extension in AUDIO_EXTENSIONS -> MediaType.AUDIO
             else -> MediaType.OTHER
         }
         return MediaItem(
             serverId = serverId,
             id = uri.toString(),
             type = mediaType,
-            title = if (isDirectory) fileName else fileName.substringBeforeLast('.', fileName),
+            title = if (isDir) fileName else fileName.substringBeforeLast('.', fileName),
             path = uri.toString(),
             parentId = parentId,
-            sizeBytes = if (isDirectory) null else length().takeIf { it > 0 },
-            container = extension.takeIf { it.isNotBlank() && !isDirectory },
+            sizeBytes = sizeBytes,
+            container = extension.takeIf { it.isNotBlank() && !isDir },
             libraryId = "local",
         )
     }

@@ -18,13 +18,13 @@ import com.mediahub.model.PlaybackProgressReason
 import com.mediahub.model.PlaybackSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -44,11 +44,11 @@ class PlaybackEngine(
     private val _progress = MutableStateFlow<PlaybackProgress?>(null)
     val progress: StateFlow<PlaybackProgress?> = _progress.asStateFlow()
 
-    private val _progressEvents = MutableSharedFlow<PlaybackProgressEvent>(
-        extraBufferCapacity = 16,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
-    val progressEvents: SharedFlow<PlaybackProgressEvent> = _progressEvents.asSharedFlow()
+    // review P2-3：关键事件（PLAY/PAUSE/SEEK/STOP/END）必须逐个保留并按顺序处理，
+    // 禁止 conflate/drop（Pause→Seek→Resume 快速连续时任何事件都不能被吞）。
+    // Channel(UNLIMITED) 无背压，trySend 永不丢失；周期性 position 仍由 StateFlow 天然 conflate。
+    private val _progressEvents = Channel<PlaybackProgressEvent>(Channel.UNLIMITED)
+    val progressEvents: Flow<PlaybackProgressEvent> = _progressEvents.receiveAsFlow()
 
     private val trackSelector: DefaultTrackSelector =
         requireNotNull(player.trackSelector as? DefaultTrackSelector) {
@@ -231,7 +231,9 @@ class PlaybackEngine(
             itemId = active.itemId,
             positionMs = player.currentPosition.coerceAtLeast(0),
             durationMs = duration,
-            isPaused = !player.isPlaying,
+            // review P2-4：以播放意图（playWhenReady）为准——刚 play() 时 Media3 可能仍在
+            // buffering（isPlaying=false），此时不应生成 isPaused=true 的 PLAY 事件。
+            isPaused = !player.playWhenReady,
             updatedAtEpochMs = System.currentTimeMillis(),
             mode = active.source.mode,
             itemTitle = active.itemTitle,
@@ -242,7 +244,7 @@ class PlaybackEngine(
     private fun publishCritical(reason: PlaybackProgressReason) {
         val progress = currentProgress() ?: return
         _progress.value = progress
-        _progressEvents.tryEmit(PlaybackProgressEvent(progress, reason))
+        _progressEvents.trySend(PlaybackProgressEvent(progress, reason))
     }
 
     /** 返回释放前最后一份进度，供 ViewModel 做兜底 final flush。 */

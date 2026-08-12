@@ -15,6 +15,8 @@ sealed class ProviderException(
         AUTH_REQUIRED,
         AUTH_FAILED,
         AUTH_EXPIRED,
+        /** 本地目录/文档树授权缺失或已失效，需要用户重新授权（SAF，ADR-020）。 */
+        REAUTH_REQUIRED,
         NETWORK,
         HTTP,
         PARSE,

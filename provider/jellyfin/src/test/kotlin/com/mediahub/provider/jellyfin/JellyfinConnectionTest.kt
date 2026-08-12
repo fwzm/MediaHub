@@ -5,6 +5,7 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.ApiClient
 import com.mediahub.core.network.MediaHttpClient
 import com.mediahub.model.MediaServer
+import com.mediahub.provider.api.ConnectionTestRequest
 import com.mediahub.provider.api.CredentialVault
 import com.mediahub.provider.api.Credentials
 import com.mediahub.provider.api.SessionCredential
@@ -30,8 +31,8 @@ class JellyfinConnectionTest {
             server.enqueue(MockResponse().setResponseCode(404))
             val provider = provider(server)
 
-            assertTrue(provider.testConnection().ok)
-            assertFalse(provider.testConnection().ok)
+            assertTrue(provider.testConnection(ConnectionTestRequest()).ok)
+            assertFalse(provider.testConnection(ConnectionTestRequest()).ok)
         } finally {
             server.shutdown()
         }
@@ -48,7 +49,7 @@ class JellyfinConnectionTest {
                 )
             )
 
-            assertFalse(provider(server).testConnection().ok)
+            assertFalse(provider(server).testConnection(ConnectionTestRequest()).ok)
         } finally {
             server.shutdown()
         }

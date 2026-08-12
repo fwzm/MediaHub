@@ -5,6 +5,7 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.ApiClient
 import com.mediahub.core.network.MediaHttpClient
 import com.mediahub.model.MediaServer
+import com.mediahub.provider.api.ConnectionTestRequest
 import com.mediahub.provider.api.CredentialVault
 import com.mediahub.provider.api.Credentials
 import com.mediahub.provider.api.SessionCredential
@@ -34,8 +35,8 @@ class EmbyConnectionTest {
             )
             val provider = provider(server)
 
-            assertTrue(provider.testConnection().ok)
-            assertFalse(provider.testConnection().ok)
+            assertTrue(provider.testConnection(ConnectionTestRequest()).ok)
+            assertFalse(provider.testConnection(ConnectionTestRequest()).ok)
             assertTrue(server.takeRequest().path!!.endsWith("/System/Info/Public"))
         } finally {
             server.shutdown()
@@ -53,7 +54,7 @@ class EmbyConnectionTest {
             server.enqueue(MockResponse().setResponseCode(403))
             val provider = provider(server)
 
-            repeat(4) { assertFalse(provider.testConnection().ok) }
+            repeat(4) { assertFalse(provider.testConnection(ConnectionTestRequest()).ok) }
         } finally {
             server.shutdown()
         }
