@@ -21,6 +21,13 @@ import com.mediahub.model.SubtitleTrack
 interface MediaAuthProvider {
     suspend fun authenticate(credentials: Credentials): AuthResult
     suspend fun refreshSession(): AuthResult
+
+    /**
+     * 恢复会话（App 启动 / 页面进入时调用）：读取本地凭据并做真实服务器验证，
+     * 不无条件信任本地 Token。返回 [AuthSessionState] 驱动 UI 登录态。
+     */
+    suspend fun restoreSession(): AuthSessionState
+
     suspend fun logout()
     suspend fun currentUser(): MediaUser?
 }

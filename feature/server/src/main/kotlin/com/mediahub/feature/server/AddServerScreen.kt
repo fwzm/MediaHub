@@ -24,6 +24,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -105,8 +106,14 @@ fun AddServerRoute(
                         value = state.password,
                         onValueChange = viewModel::updatePassword,
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("密码（可选，加密存储）") },
+                        label = { Text("密码") },
                         singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                    Text(
+                        text = "密码仅用于本次登录，不会保存在设备中",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

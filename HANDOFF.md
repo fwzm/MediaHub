@@ -1,6 +1,15 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12（Phase 1A Emby 认证与会话交付）。本文件是协作第一手资料。
+> 最后更新：2026-08-12（Phase 1A finalization 端到端收尾，ADR-028）。本文件是协作第一手资料。
+
+## 0. Phase 1A finalization（最新）
+
+- 会话恢复已接入 App：Home 启动自动 restoreSession（通用 MediaAuthProvider 契约），
+  ServerCard 显示登录态 + 退出入口；密码框遮罩。
+- 防串服：恢复/登出前无 Token 校验 remoteServerId（SERVER_MISMATCH 不发 Token）。
+- 失效策略：仅 401 清会话；403/malformed/5xx/网络保留。
+- 官方协议：/emby API root（EmbyEndpointResolver）+ X-Emby-Authorization `Emby UserId=...` schema。
+- **待真机验收**：杀 App → 恢复 → 撤销 Token → 失效 → 重新登录 → Logout（步骤见交付报告）。
 
 ## 1. 当前项目状态
 

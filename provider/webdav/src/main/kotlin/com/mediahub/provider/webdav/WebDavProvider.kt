@@ -11,6 +11,7 @@ import com.mediahub.model.PagedResult
 import com.mediahub.model.ServerType
 import com.mediahub.provider.api.AuthMethod
 import com.mediahub.provider.api.AuthResult
+import com.mediahub.provider.api.AuthSessionState
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.Credentials
 import com.mediahub.provider.api.MediaAuthProvider
@@ -98,6 +99,8 @@ class WebDavProvider(
     override suspend fun authHeaders(): Map<String, String> = notYet("WebDAV Basic 认证头")
     override suspend fun authenticate(credentials: Credentials): AuthResult = notYet("WebDAV 认证")
     override suspend fun refreshSession(): AuthResult = notYet("WebDAV 认证刷新")
+    override suspend fun restoreSession(): AuthSessionState =
+        notYet("WebDAV 会话恢复")
     override suspend fun currentUser(): MediaUser? = null
 
     override suspend fun logout() {

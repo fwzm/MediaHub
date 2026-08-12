@@ -16,6 +16,7 @@ import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderStatus
 import com.mediahub.provider.base.BaseMediaServerProvider
 import com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilder
+import com.mediahub.provider.emby.api.EmbyEndpointResolver
 import com.mediahub.provider.emby.api.SystemInfoPublic
 
 /** 该 Provider 类型描述（declaredCapabilities = Emby 最终计划能力；运行时以 Handle 为准，ADR-022/026）。 */
@@ -54,6 +55,7 @@ class EmbyProvider(
     tokenStore: TokenStore,
     logger: Logger,
     private val authHeaderBuilder: EmbyAuthorizationHeaderBuilder,
+    private val endpointResolver: EmbyEndpointResolver,
 ) : BaseMediaServerProvider(server, apiClient, mediaHttpClient, tokenStore, logger),
     MediaProvider {
 
@@ -64,7 +66,7 @@ class EmbyProvider(
     override suspend fun testConnection(): ConnectionStatus {
         return try {
             val start = System.nanoTime()
-            val info = apiClient.get<SystemInfoPublic>("${server.baseUrl}/System/Info/Public")
+            val info = apiClient.get<SystemInfoPublic>(endpointResolver.endpoint("/System/Info/Public"))
             val latencyMs = (System.nanoTime() - start) / 1_000_000
             // 协议特征校验（ADR-024）：HTTP 200 + JSON 可解析 ≠ 有效 Emby。
             if (info.id.isNullOrBlank() || info.version.isNullOrBlank()) {

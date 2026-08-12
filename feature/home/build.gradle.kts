@@ -33,7 +33,9 @@ kotlin {
 dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:database"))
+    implementation(project(":core:logging"))
     implementation(project(":feature:server"))
+    implementation(project(":provider:api"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

@@ -9,6 +9,7 @@ import com.mediahub.core.security.TokenStore
 import com.mediahub.model.MediaServer
 import com.mediahub.model.ServerType
 import com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilder
+import com.mediahub.provider.emby.api.EmbyEndpointResolver
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -55,6 +56,7 @@ class EmbyProviderConnectionTest {
             authHeaderBuilder = EmbyAuthorizationHeaderBuilder(
                 com.mediahub.core.common.ClientIdentity("MediaHub", "Android", "test-device", "0.1")
             ),
+            endpointResolver = EmbyEndpointResolver(server.url("/").toString().trimEnd('/')),
         )
     }
 

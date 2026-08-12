@@ -189,3 +189,21 @@
   auth（EmbyAuthProvider/EmbyAuthState）、session（EmbySession/EmbySessionStore）、
   mapper（EmbyUserMapper）。EmbyProvider 只承载身份/descriptor/testConnection。
   后续 Library/Playback/Progress 各自独立类，Factory 每完成一项填一个 Handle 字段。
+
+## ADR-028 Phase 1A finalization（会话恢复契约 / 串服防护 / 官方协议对齐）
+- 状态：已采纳（2026-08-12）
+- 决策：
+  - `MediaAuthProvider` 新增通用 `restoreSession(): AuthSessionState` 契约（Unknown/Restoring/
+    SignedOut/Authenticated/Error），App 启动/服务器列表变化时由 Home 自动恢复登录；
+    UI 展示登录态并提供 Logout 入口（AuthSessionState 驱动）。
+  - **防 Token 串服**：恢复/登出前先**无 Token** GET /System/Info/Public，校验
+    session.remoteServerId 与当前服务器一致才发送 X-Emby-Token；不一致 → SERVER_MISMATCH
+    （绝不向错误服务器发 Token）。
+  - **失效策略**：仅 401 清会话（Token 已撤销）；403（FORBIDDEN）、5xx、超时/DNS、
+    malformed 响应（INVALID_RESPONSE）一律保留本地会话。
+  - **官方协议对齐**：API root 统一 `/emby` 前缀（EmbyEndpointResolver，用户已输 /emby 不重复）；
+    X-Emby-Authorization 改为官方 schema `Emby UserId="...", Client="...", Device="...", DeviceId="...", Version="..."`
+    （Token 始终走 X-Emby-Token）。
+  - 密码输入框遮罩（PasswordVisualTransformation），文案"仅用于本次登录，不保存在设备中"。
+- 影响：EmbyAuthProvider 的 EmbyAuthState 由通用 AuthSessionState 取代（删除）；测试覆盖
+  403/malformed preserve、SERVER_MISMATCH 不发 Token、logout 身份校验。

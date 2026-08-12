@@ -4,18 +4,29 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.database.repository.ProgressRepository
 import com.mediahub.core.database.repository.ServerRepository
+import com.mediahub.core.logging.LogTag
+import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
+import com.mediahub.provider.api.AuthSessionState
+import com.mediahub.provider.api.MediaProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    serverRepository: ServerRepository,
+    private val serverRepository: ServerRepository,
     progressRepository: ProgressRepository,
+    private val registry: MediaProviderRegistry,
+    private val logger: Logger,
 ) : ViewModel() {
 
     val servers: StateFlow<List<MediaServer>> = serverRepository.observeServers()
@@ -24,4 +35,47 @@ class HomeViewModel @Inject constructor(
     val continueWatching: StateFlow<List<PlaybackProgress>> =
         progressRepository.observeContinueWatching(limit = 20)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 各服务器登录态（restoreSession 驱动，review：App 启动真正恢复登录）。 */
+    private val _authStates = MutableStateFlow<Map<String, AuthSessionState>>(emptyMap())
+    val authStates: StateFlow<Map<String, AuthSessionState>> = _authStates.asStateFlow()
+
+    init {
+        // 服务器列表变化（含启动加载、添加新服务器）时，对未检查的服务器做会话恢复
+        viewModelScope.launch {
+            servers.collect { list ->
+                val known = _authStates.value.keys
+                list.filter { it.id !in known }.forEach { restore(it) }
+            }
+        }
+    }
+
+    private suspend fun restore(server: MediaServer) {
+        _authStates.update { it + (server.id to AuthSessionState.Restoring) }
+        val handle = registry.create(server)
+        val auth = handle?.auth
+        val result = if (auth == null) {
+            AuthSessionState.SignedOut
+        } else {
+            runCatching { auth.restoreSession() }
+                .getOrElse { e ->
+                    logger.w(LogTag.UI, "会话恢复失败 serverId=${server.id}", e)
+                    AuthSessionState.SignedOut
+                }
+        }
+        _authStates.update { it + (server.id to result) }
+    }
+
+    /** 用户主动登出：auth.logout()（本地清理为权威），随后状态回到未登录。 */
+    fun logout(serverId: String) {
+        viewModelScope.launch {
+            val server = servers.first().firstOrNull { it.id == serverId } ?: return@launch
+            val handle = registry.create(server)
+            handle?.auth?.let { auth ->
+                runCatching { auth.logout() }
+                    .onFailure { logger.w(LogTag.UI, "登出失败 serverId=$serverId", it) }
+            }
+            _authStates.update { it + (serverId to AuthSessionState.SignedOut) }
+        }
+    }
 }

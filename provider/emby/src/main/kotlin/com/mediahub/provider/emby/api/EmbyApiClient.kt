@@ -17,33 +17,41 @@ import kotlinx.serialization.json.Json
  * 网络错误抛 IOException——由上层（EmbyAuthProvider）映射为业务错误。
  */
 class EmbyApiClient(
-    private val baseUrl: String,
+    private val endpointResolver: EmbyEndpointResolver,
     private val apiClient: ApiClient,
     private val authHeaderBuilder: EmbyAuthorizationHeaderBuilder,
     private val logger: Logger,
 ) {
 
-    /** 登录：POST /Users/AuthenticateByName（官方用户名密码认证）。 */
+    /** 登录：POST /emby/Users/AuthenticateByName（官方用户名密码认证）。 */
     suspend fun authenticate(username: String, password: String): EmbyAuthenticationResultDto {
         val json = Json.encodeToString(EmbyLoginRequestDto(username = username, pw = password))
         return apiClient.postJson(
-            url = "$baseUrl/Users/AuthenticateByName",
+            url = endpointResolver.endpoint("/Users/AuthenticateByName"),
             headers = identityHeaders(),
             jsonBody = json,
         )
     }
 
-    /** 当前用户（会话验证用，轻量认证端点）：GET /Users/Me。 */
+    /** 当前用户（会话验证用，轻量认证端点）：GET /emby/Users/Me。 */
     suspend fun getCurrentUser(token: String): EmbyUserDto =
         apiClient.get(
-            url = "$baseUrl/Users/Me",
+            url = endpointResolver.endpoint("/Users/Me"),
             headers = authenticatedHeaders(token),
         )
 
-    /** 主动登出：POST /Sessions/Logout（撤销 token，best-effort）。 */
+    /** 服务器公开信息（**无 Token**）：GET /emby/System/Info/Public。
+     *  用于会话恢复前校验 remoteServerId，避免把旧 Token 发给另一台服务器（review #2）。 */
+    suspend fun getSystemInfoPublic(): SystemInfoPublic =
+        apiClient.get(
+            url = endpointResolver.endpoint("/System/Info/Public"),
+            headers = identityHeaders(),
+        )
+
+    /** 主动登出：POST /emby/Sessions/Logout（撤销 token，best-effort）。 */
     suspend fun logout(token: String) {
         apiClient.postNoContent(
-            url = "$baseUrl/Sessions/Logout",
+            url = endpointResolver.endpoint("/Sessions/Logout"),
             headers = authenticatedHeaders(token),
         )
     }

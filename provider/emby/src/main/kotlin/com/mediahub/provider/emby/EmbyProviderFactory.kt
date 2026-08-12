@@ -13,6 +13,7 @@ import com.mediahub.provider.api.ProviderDescriptor
 import com.mediahub.provider.api.ProviderHandle
 import com.mediahub.provider.emby.api.EmbyApiClient
 import com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilder
+import com.mediahub.provider.emby.api.EmbyEndpointResolver
 import com.mediahub.provider.emby.auth.EmbyAuthProvider
 import com.mediahub.provider.emby.session.EmbySessionStore
 import dagger.Binds
@@ -38,6 +39,7 @@ class EmbyProviderFactory @Inject constructor(
         val authHeaderBuilder = EmbyAuthorizationHeaderBuilder(clientIdentity)
         val apiClient = ApiClient(httpClientFactory.apiClient(), logger = logger)
         val mediaHttpClient = MediaHttpClient(httpClientFactory.mediaClient(), logger = logger)
+        val endpointResolver = EmbyEndpointResolver(server.baseUrl)
 
         val provider = EmbyProvider(
             server = server,
@@ -46,8 +48,9 @@ class EmbyProviderFactory @Inject constructor(
             tokenStore = tokenStore,
             logger = logger,
             authHeaderBuilder = authHeaderBuilder,
+            endpointResolver = endpointResolver,
         )
-        val embyApi = EmbyApiClient(server.baseUrl, apiClient, authHeaderBuilder, logger)
+        val embyApi = EmbyApiClient(endpointResolver, apiClient, authHeaderBuilder, logger)
         val authProvider = EmbyAuthProvider(
             server = server,
             api = embyApi,

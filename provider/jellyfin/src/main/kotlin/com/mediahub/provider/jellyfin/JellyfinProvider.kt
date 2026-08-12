@@ -20,6 +20,7 @@ import com.mediahub.model.ServerType
 import com.mediahub.model.SubtitleTrack
 import com.mediahub.provider.api.AuthMethod
 import com.mediahub.provider.api.AuthResult
+import com.mediahub.provider.api.AuthSessionState
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.Credentials
 import com.mediahub.provider.api.MediaAuthProvider
@@ -128,6 +129,8 @@ class JellyfinProvider(
     override suspend fun authenticate(credentials: Credentials): AuthResult =
         notYet("Jellyfin 登录（/Users/AuthenticateByName）")
     override suspend fun refreshSession(): AuthResult = notYet("Jellyfin 会话刷新")
+    override suspend fun restoreSession(): AuthSessionState =
+        notYet("Jellyfin 会话恢复")
     override suspend fun currentUser(): MediaUser? = notYet("Jellyfin 当前用户")
 
     override suspend fun logout() {

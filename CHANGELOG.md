@@ -1,5 +1,24 @@
 # 变更记录（CHANGELOG）
 
+## [0.4.1-phase1a-finalization] — 2026-08-12（Phase 1A 端到端收尾，ADR-028）
+
+### 功能补齐（评审 10 项）
+- MediaAuthProvider 通用 `restoreSession(): AuthSessionState` 契约（Jellyfin/WebDAV 占位）
+- Home 启动/服务器变化自动恢复登录（HomeViewModel.restore）；ServerCard 展示登录态 + 退出入口
+- **防 Token 串服**：恢复/登出前无 Token 校验 /System/Info/Public 的 remoteServerId，
+  不一致 → SERVER_MISMATCH 绝不发送 Token（含测试：SERVER_B 从未收到 X-Emby-Token）
+- **失效策略修正**：仅 401 清会话；403/malformed/5xx/网络保留（含测试）
+- **官方协议对齐**：EmbyEndpointResolver（/emby root）+ X-Emby-Authorization 官方 schema
+  `Emby UserId=..., Client=...`（不再 MediaBrowser 前缀）
+- 密码输入框遮罩 + 文案"仅用于本次登录，不会保存在设备中"
+
+### 测试
+- EmbyAuthProviderTest 扩至 16 用例（+403 preserve、malformed preserve、SERVER_MISMATCH、
+  logout mismatch）；全项目 69 用例
+
+### 验证
+- assembleDebug / testDebugUnitTest（69）/ lintDebug 全部通过
+
 ## [0.3.0-phase1a] — 2026-08-12（Emby 认证与会话）
 
 ### 新增

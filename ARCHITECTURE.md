@@ -55,9 +55,11 @@ app（组合一切：DI、导航、Provider 工厂装配）
 - 凭据生命周期（ADR-016/026）：`CredentialVault` 存长期凭据（密码/API Key/Refresh/Cookie），
   `TokenStore` 存会话令牌（按 localServerId），`EmbySessionStore` 存会话元数据
   （remoteServerId/userId/userName），均 Keystore/私有存储，禁止明文密码。
-- 认证会话（Phase 1A，ADR-026）：Emby 登录/恢复/验证/登出闭环；客户端身份
-  `ClientIdentity`（core:common）跨协议复用；`X-Emby-Token` 集中注入；
-  401=token 失效清会话，网络问题保留会话。
+- 认证会话（Phase 1A + finalization，ADR-026/028）：Emby 登录/恢复/验证/登出闭环；
+  通用 `restoreSession(): AuthSessionState` 契约，Home 启动自动恢复 + 登录态 UI + 退出入口；
+  客户端身份 `ClientIdentity`（core:common）跨协议复用；`X-Emby-Token` 集中注入；
+  **恢复/登出前校验 remoteServerId 防 Token 串服**；仅 401 清会话（403/5xx/网络/协议异常保留）；
+  API root 统一 `/emby`（EmbyEndpointResolver）；X-Emby-Authorization 官方 schema。
 
 ## 4. 领域模型（core:model）
 
