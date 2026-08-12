@@ -86,7 +86,13 @@ class ProgressSyncCoordinatorTest {
     }
 
     @Test
-    fun `stopped event flushes immediately`() = runTest {
+    fun `full exit chain flushes final progress exactly once`() = runTest {
+        // 模拟完整退出路径（ADR-023）：
+        // 1. 播放中流里最新进度 = 20s；
+        // 2. engine.stop() 返回退出瞬间 final = 25s（不经 SharedFlow，取真实 position）；
+        // 3. 显式 flush(final) → stop() → release()。
+        // 断言：25s 恰好一次本地 + 一次远端；20s 不得作为退出 final 再次上报；
+        //       Stopped 事件本身不触发自动 flush。
         val local = mutableListOf<Long>()
         val remote = mutableListOf<Long>()
         val coordinator = ProgressSyncCoordinator(
@@ -102,14 +108,26 @@ class ProgressSyncCoordinatorTest {
         coordinator.start(progress, events, remoteIntervalMs = 60_000)
         runCurrent() // 让 collect 协程订阅就绪
 
-        progress.tryEmit(progress(5_000L))
+        // 播放中的采样进度（20s，仅用于 latest，不应在退出时重复上报）
+        progress.tryEmit(progress(20_000L))
         runCurrent()
+
+        // 1) engine.stop()：发出 Stopped（仅状态通知），返回 final = 25s
+        val finalProgress = progress(25_000L)
         events.tryEmit(PlaybackEvent.Stopped)
         runCurrent()
 
-        assertTrue("local=$local", local.contains(5_000L))
-        assertTrue("remote=$remote", remote.contains(5_000L))
+        // Stopped 不得触发自动 flush
+        assertTrue("local=$local", local.isEmpty())
+        assertTrue("remote=$remote", remote.isEmpty())
+
+        // 2) 唯一权威退出路径：显式 flush(finalProgress) → stop
+        coordinator.flush(finalProgress)
         coordinator.stop()
+
+        // 3) 25s 恰好一次；20s 未被重复上报
+        assertEquals(listOf(25_000L), local)
+        assertEquals(listOf(25_000L), remote)
     }
 
     @Test

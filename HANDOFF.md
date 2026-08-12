@@ -8,7 +8,10 @@
   `testDebugUnitTest`（51 用例）、`lintDebug` 全部通过；CI（GitHub Actions）已就绪。
 - 能力语义（ADR-022）：**Handle 只暴露已实现能力**——当前 Emby/Jellyfin/WebDAV Handle 为空
   （仅 provider），Local 有 BROWSE/DETAIL/PLAYBACK；Phase 1 每实现一项能力在 Factory 填对应字段。
-- 退出流程（ADR-023）：返回按钮走 `stopAndFlush()` 显式状态机；不要改回"先 stop 再 emit Stopped"。
+- 退出流程（ADR-023）：返回按钮走 `stopAndFlush()` 显式状态机；
+  **Stopped 事件仅状态通知、不触发自动 flush**——退出上报唯一权威路径是
+  `engine.stop() → flush(finalProgress) → coordinator.stop() → engine.release()`，
+  禁止让 Coordinator 再对 Stopped 自动 flush（会造成两次本地写入 + 两次远端上报）。
 - APK：`app/build/outputs/apk/debug/app-debug.apk`。
 - 端到端可用路径：添加媒体库（本地存储）→ 文件树浏览 → 播放（本地文件）→ 继续观看。
 - Emby / Jellyfin / WebDAV 的 API 业务**未实现**（Phase 1 目标，见 TASKS.md），

@@ -54,7 +54,7 @@ fun PlayerRoute(
     val resolve by viewModel.resolveState.collectAsStateWithLifecycle()
     val engineState by viewModel.engine.uiState.collectAsStateWithLifecycle()
 
-    // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-022）。
+    // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
     DisposableEffect(Unit) {
         onDispose { viewModel.stopAndFlushAsync() }
     }
@@ -63,7 +63,7 @@ fun PlayerRoute(
     var showSubtitleDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    // 返回按钮：先完成进度 final flush（含远端短超时），再返回（ADR-022）
+    // 返回按钮：先完成进度 final flush（含远端短超时），再返回（ADR-023）
     val exitPlayer: () -> Unit = {
         scope.launch {
             viewModel.stopAndFlush()

@@ -153,7 +153,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
-     * 显式退出状态机（ADR-022）：保证退出时本地快照与远端上报不丢。
+     * 显式退出状态机（ADR-023）：保证退出时本地快照与远端上报不丢。
      *
      * 顺序：暂停读取 position（engine.stop，发出 Stopped）→ 生成最终进度 →
      * local save + remote report（远端短超时，不阻塞退出）→ 停止协调器 → 释放播放器。

@@ -18,9 +18,12 @@ import kotlinx.coroutines.withTimeoutOrNull
  * - UI 进度：由 PlaybackEngine.uiState 驱动（内存，无 IO）。
  * - 本地快照：progress.sample([localIntervalMs])，默认 5s（conflate 语义）。
  * - 远端上报：progress.sample([remoteIntervalMs])，由 Provider 策略决定（默认 10s）。
- * - 关键事件（Pause / Seek / Ended / Stopped）：立即 flush 一次（latest）。
- * - [flush]：播放器退出时 final flush；[flush] 内远端上报带短超时，
- *   保证退出不被慢网络阻塞（ADR-022）。
+ * - 关键事件（Pause / Seek / Ended）：立即 flush 一次（latest）。
+ * - [flush]：播放器退出时 final flush（ADR-023）；远端上报带短超时，
+ *   保证退出不被慢网络阻塞。
+ * - Stopped 事件：**仅状态通知，不触发自动 flush**——退出 final flush 的唯一权威
+ *   路径是调用方显式执行 engine.stop() → flush(finalProgress)（ADR-023），
+ *   避免一次退出产生两次本地写入与两次远端上报。
  *
  * 纯 Kotlin，可单测（kotlinx-coroutines-test virtual time）。
  */
@@ -52,9 +55,8 @@ class ProgressSyncCoordinator(
             launch(start = CoroutineStart.UNDISPATCHED) { progress.collect { latest.set(it) } }
             launch(start = CoroutineStart.UNDISPATCHED) {
                 events.collect { event ->
-                    if (event == PlaybackEvent.Paused || event == PlaybackEvent.Seeked ||
-                        event == PlaybackEvent.Ended || event == PlaybackEvent.Stopped
-                    ) {
+                    // Pause/Seek/Ended 立即同步；Stopped 仅状态通知（退出 flush 由 stopAndFlush 显式执行）
+                    if (event == PlaybackEvent.Paused || event == PlaybackEvent.Seeked || event == PlaybackEvent.Ended) {
                         flush()
                     }
                 }

@@ -1,5 +1,22 @@
 # 变更记录（CHANGELOG）
 
+## [0.2.2-exit-flush-fix] — 2026-08-12（退出重复上报 patch）
+
+### 修复
+- 退出 final flush 唯一权威路径（ADR-023）：`PlaybackEvent.Stopped` 仅作状态通知，
+  **不再由 ProgressSyncCoordinator 自动 flush**；退出上报只走
+  `engine.stop() → flush(finalProgress) → stop() → release()` 一条链，
+  消除"Stopped 自动 flush(latest) + 显式 flush(finalProgress)"导致的
+  本地两次写入 + 远端两次上报。
+- 修正代码注释与文档中 final flush 的 ADR 引用（ADR-022 → ADR-023）。
+
+### 测试
+- 完整退出链测试：流中 20s 不得作为退出 final 上报；25s 本地/远端各恰好一次；
+  Stopped 事件不触发自动 flush。
+
+### 验证
+- assembleDebug / testDebugUnitTest（51 用例）/ lintDebug 全部通过。
+
 ## [0.2.1-hardening-fix] — 2026-08-12（Phase 0.5.1 边界修复）
 
 ### 修复
