@@ -1,6 +1,15 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12，FINAL PATCH 4 完成（PR 分支 Home 状态闭环）。
+> 最后更新：2026-08-12，FINAL PATCH 5 完成（PR 吸收 main + forceRestore 竞态修复 + 测试）。
+
+## Patch 5（最新）
+
+- 已把 latest main（208d9a3）真正 merge 进 PR（main 成为祖先，behind 0）。
+- forceRestore 改用 serverStore.getServer(serverId)（读 DB 最新，非 servers.first() 缓存），
+  复用 authenticationCoordinator.restore。HomeViewModel 依赖 ServerStore/ProgressStore 接口。
+- 新增 PR 版 HomeViewModelTest 5 例；全项目 88 用例。
+- **纪律：main 已冻结，只在此 PR 分支施工**；直到 PR merge 前不再动 main。
+- 待办（需你在 GitHub）：确认 latest-head CI success + mergeable；更新 PR description；latest-head review；merge PR。
 
 ## Patch 4（最新）：re-login 后 Home auth-state 立即刷新（PR 架构）
 
