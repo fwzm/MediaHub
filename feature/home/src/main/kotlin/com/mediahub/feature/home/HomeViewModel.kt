@@ -14,21 +14,22 @@ import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderCategory
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.stateIn
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    serverRepository: ServerRepository,
+    private val serverRepository: ServerRepository,
     progressRepository: ProgressRepository,
-    registry: MediaProviderRegistry,
-    authenticationCoordinator: AuthenticationCoordinator,
+    private val registry: MediaProviderRegistry,
+    private val authenticationCoordinator: AuthenticationCoordinator,
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -74,6 +75,19 @@ class HomeViewModel @Inject constructor(
                     }
                 }
             }
+        }
+    }
+
+    /** 用户主动登出（review #8）：AuthenticationCoordinator.logout（服务端 best-effort + Vault 清理），随后回未登录。 */
+    fun logout(serverId: String) {
+        viewModelScope.launch {
+            val server = servers.first().firstOrNull { it.id == serverId } ?: return@launch
+            val handle = registry.create(server)
+            if (handle?.auth != null) {
+                runCatching { authenticationCoordinator.logout(handle) }
+                    .onFailure { logger.w(LogTag.UI, "登出失败 serverId=$serverId", it) }
+            }
+            _authStates.update { it + (serverId to AuthenticationState.SignedOut) }
         }
     }
 }

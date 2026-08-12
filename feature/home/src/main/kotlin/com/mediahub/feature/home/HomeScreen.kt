@@ -46,6 +46,7 @@ fun HomeRoute(
 ) {
     val servers by viewModel.servers.collectAsStateWithLifecycle()
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
+    val authStates by viewModel.authStates.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -91,6 +92,8 @@ fun HomeRoute(
                                 onOpenServer(server)
                             }
                         },
+                        authState = authStates[server.id],
+                        onLogout = { viewModel.logout(server.id) },
                     )
                 }
             }

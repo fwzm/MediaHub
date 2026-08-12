@@ -80,7 +80,7 @@ class LocalProvider(
                 val nameIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                 val mimeIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
                 val sizeIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE)
-                buildList {
+                buildList<MediaItem> {
                     while (cursor.moveToNext()) {
                         val childUri = DocumentsContract.buildDocumentUriUsingTree(
                             rootUri,

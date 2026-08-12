@@ -122,7 +122,7 @@ class EmbyAuthProviderTest {
         assertEquals("/emby/System/Info/Public", identityRequest.path)
         assertNull(identityRequest.getHeader("X-Emby-Token"))
         val userRequest = mock.takeRequest()
-        assertEquals("/emby/Users/Me", userRequest.path)
+        assertEquals("/emby/Users/user-1", userRequest.path)
         assertEquals("token-1", userRequest.getHeader("X-Emby-Token"))
         assertTrue(userRequest.getHeader("Authorization")!!.contains("UserId=\"user-1\""))
     }

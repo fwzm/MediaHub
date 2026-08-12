@@ -22,8 +22,10 @@ class EmbyApiClient(
             jsonBody = Json.encodeToString(EmbyLoginRequestDto(username, password)),
         )
 
+    // 官方 UserService Reference 取单个用户接口为 GET /Users/{Id}；
+    // 不使用未文档化的 /Users/Me（source-of-truth：官方文档）。
     suspend fun currentUser(token: String, userId: String): EmbyUserDto =
-        apiClient.get(root.endpoint("Users/Me"), authenticatedHeaders(token, userId))
+        apiClient.get(root.endpoint("Users/$userId"), authenticatedHeaders(token, userId))
 
     suspend fun logout(token: String, userId: String) {
         apiClient.postNoContent(

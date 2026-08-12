@@ -24,6 +24,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,6 +59,7 @@ fun PlayerRoute(
     var showSubtitleDialog by remember { mutableStateOf(false) }
     val stopAndBack = { viewModel.stopAndExit(onBack) }
 
+    // review P2-8：系统 Back / predictive back 也经过 stopAndBack（内部 await final flush）
     BackHandler(onBack = stopAndBack)
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {

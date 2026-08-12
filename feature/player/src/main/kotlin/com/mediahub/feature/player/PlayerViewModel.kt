@@ -11,6 +11,7 @@ import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
+import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackProgressReason
@@ -112,10 +113,12 @@ class PlayerViewModel @Inject constructor(
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源播放能力")
                 providerHandle = handle
 
+                // review P2-5：browse-only 数据源（如本地文件树）无详情能力时，
+                // 按 itemId 重建条目并推断媒体类型（避免退化为 OTHER 污染"继续观看"元数据）。
                 val item = handle.library?.getItemDetail(itemId)?.item ?: MediaItem(
                     serverId = serverId,
                     id = itemId,
-                    type = itemType,
+                    type = MediaTypeGuesser.forPath(itemId).takeIf { it != MediaType.OTHER } ?: itemType,
                     title = itemTitle.ifBlank { itemId.substringAfterLast('/') },
                     path = itemId,
                 )
