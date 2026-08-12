@@ -1,6 +1,19 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12，PR #1 × main@499463c Phase 1A reconciliation。
+> 最后更新：2026-08-12，PR #1 Final Reconciliation Patch 2 完成。
+
+## 0. Patch 2（最新）：Existing Server Re-login + feature:server 测试（评审 Patch 2 规范）
+
+- `AddServerViewModel`：`reauthorizeId` 非空时不再强制 filter LOCAL_STORAGE；按原
+  `providerId` 定位 descriptor，支持 **AUTH_RELOGIN**（认证型）与 **LOCAL_REAUTHORIZE**（本地目录）。
+- `HomeViewModel.clickTarget` 三路分发：LocalReauthorize / AuthRelogin / Open——认证型
+  Provider 在 SignedOut/SessionExpired 时进入 existing-server re-login（**不再直接进 library**）。
+- `ServerSavePlanner`（纯函数，可 JVM 单测）：复用 same id + 保留 isDefault/sortOrder/
+  createdAtEpochMs/lastXxx，`updateSource=true`（updateServer，绝不 addServer 重复）；新建走 add。
+- 测试：`feature/server` ServerSavePlannerTest 4 例。
+- **待办（需 GitHub 操作，沙箱无法执行）**：① 更新 PR description（删旧 41@Test/Actions run，
+  写 latest 真实状态）；② re-request latest-head Codex/Copilot review；③ 确认 latest head CI
+  success + mergeable 后 merge PR #1。
 
 ## 1. 当前状态
 
