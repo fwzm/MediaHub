@@ -8,7 +8,6 @@ import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaItem
 import com.mediahub.model.PageRequest
-import com.mediahub.model.ServerType
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -72,13 +71,16 @@ class LibraryViewModel @Inject constructor(
             try {
                 val server = serverRepository.getServer(serverId)
                     ?: throw ProviderException.NotFound(serverId, "媒体源")
-                val provider = registry.create(server)
+                val handle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 val page = PageRequest(limit = 200)
-                val result = if (server.type == ServerType.LOCAL) {
-                    provider.listFolder(currentFolder, page)
-                } else {
-                    provider.getItems(libraryId, page)
+                // 能力组合（ADR-014）：媒体库型走 library，文件树型走 browse，均无则提示未接入。
+                val library = handle.library
+                val browse = handle.browse
+                val result = when {
+                    library != null -> library.getItems(libraryId, page)
+                    browse != null -> browse.listFolder(currentFolder, page)
+                    else -> throw ProviderException.NotYetImplemented(serverId, "该数据源的浏览能力尚未接入")
                 }
                 _uiState.value = LibraryUiState.Content(
                     items = result.items,

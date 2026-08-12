@@ -1,5 +1,30 @@
 # 变更记录（CHANGELOG）
 
+## [0.2.0-hardening] — 2026-08-12（Phase 0.5 架构加固）
+
+### 重构
+- **MediaProvider 能力组合**（ADR-014）：Fat Interface 拆为公共契约 + 7 个可选能力接口，
+  新增 `ProviderHandle`（类型安全组合）。LocalProvider 去除伪造认证/空 Season/NotYetImplemented 堆；
+  Emby/Jellyfin/WebDAV 按类型声明能力。
+- **ProviderDescriptor**（ADR-015）：Factory 自报描述；"添加媒体库"从 Registry 动态渲染，
+  删除 UI 硬编码 ServerTypeOptions。
+- **播放请求头 session-scoped**（ADR-018）：PlaybackHeadersHolder 改为 per-engine，
+  废弃全局 Singleton mutable holder。
+- **进度同步三档节流**（ADR-017）：新增 ProgressSyncCoordinator（本地 5s 采样 / 远端按
+  Provider 间隔 / 关键事件立即 flush / 退出 final flush）；PlaybackEngine 提供 progress/events 流。
+- **协议级连接测试**（ADR-019）：Emby/Jellyfin 嗅探 /System/Info/Public，WebDAV OPTIONS+DAV 头；
+  AddServerViewModel 不再用通用 HTTP probe。
+- **CredentialVault**（ADR-016，机制先行）：长期凭据加密存取；TokenStore 改 java.util.Base64（可 JVM 测试）。
+- SAF 预留（ADR-020）：LocalRootProvider.contentRoots() 接口（Phase 0.6 接入文档树）。
+
+### 新增
+- GitHub Actions CI（.github/workflows/android-ci.yml）：assembleDebug + testDebugUnitTest + lintDebug。
+- 测试 40 个（新增 20）：Registry、能力组合、CredentialVault、TokenStore、进度节流、
+  Headers 隔离、ServerEntityMappers。
+
+### 验证
+- assembleDebug / testDebugUnitTest（40 用例）/ lintDebug 全部通过。
+
 ## [0.1.0-skeleton] — 2026-08-12（Phase 0）
 
 ### 新增

@@ -1,53 +1,56 @@
 package com.mediahub.provider.local
 
-import com.mediahub.core.logging.LogTag
-import com.mediahub.core.logging.Logger
-import com.mediahub.model.Episode
-import com.mediahub.model.LibraryType
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
-import com.mediahub.model.MediaLibrary
 import com.mediahub.model.MediaType
-import com.mediahub.model.MediaUser
 import com.mediahub.model.PageRequest
 import com.mediahub.model.PagedResult
 import com.mediahub.model.PlaybackMode
 import com.mediahub.model.PlaybackOptions
-import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
-import com.mediahub.model.Season
 import com.mediahub.model.ServerType
-import com.mediahub.model.SubtitleTrack
-import com.mediahub.provider.api.AuthResult
+import com.mediahub.provider.api.AuthMethod
 import com.mediahub.provider.api.ConnectionStatus
-import com.mediahub.provider.api.Credentials as ProviderCredentials
+import com.mediahub.provider.api.MediaBrowseProvider
+import com.mediahub.provider.api.MediaDetailProvider
+import com.mediahub.provider.api.MediaPlaybackProvider
 import com.mediahub.provider.api.MediaProvider
 import com.mediahub.provider.api.ProviderCapability
+import com.mediahub.provider.api.ProviderCategory
+import com.mediahub.provider.api.ProviderDescriptor
 import com.mediahub.provider.api.ProviderException
+import com.mediahub.provider.api.ProviderStatus
 import java.io.File
 import java.net.URI
 
+/** 该 Provider 类型描述（Factory 与 Provider 共用，见 ADR-015）。 */
+internal val LOCAL_PROVIDER_DESCRIPTOR = ProviderDescriptor(
+    id = "local",
+    serverType = ServerType.LOCAL,
+    displayName = "本地存储",
+    category = ProviderCategory.CLOUD_STORAGE,
+    capabilities = setOf(ProviderCapability.BROWSE, ProviderCapability.MULTI_VERSION),
+    authMethod = AuthMethod.NONE,
+    status = ProviderStatus.STABLE,
+    description = "本机存储（应用外部目录；SAF 文档树见 Phase 0.6）",
+)
+
 /**
- * 本地存储 Provider（真实实现）。
- *
- * - 目录 → MediaItem(FOLDER)，文件 → VIDEO / AUDIO / OTHER；
- * - 播放：解析为 file:// URI 的 [PlaybackSource]（DIRECT_PLAY）；
- * - 不包含媒体库刮削（与 metadata 模块解耦，见 ADR-011）。
+ * 本地存储 Provider（真实实现，仅声明真实能力：BROWSE + DETAIL + PLAYBACK）。
+ * 不再实现认证/媒体库/搜索/字幕/进度等"它不需要的能力"（Interface Segregation，ADR-014）。
  */
 class LocalProvider(
     private val server: com.mediahub.model.MediaServer,
     private val rootProvider: LocalRootProvider,
-    private val logger: Logger,
-) : MediaProvider {
+) : MediaProvider,
+    MediaBrowseProvider,
+    MediaDetailProvider,
+    MediaPlaybackProvider {
 
     override val serverId: String get() = server.id
     override val type: ServerType = ServerType.LOCAL
     override val displayName: String get() = server.displayName
-
-    private val libraryId = "local"
-
-    override fun capabilities(): Set<ProviderCapability> =
-        setOf(ProviderCapability.BROWSE)
+    override val descriptor: ProviderDescriptor = LOCAL_PROVIDER_DESCRIPTOR
 
     override suspend fun testConnection(): ConnectionStatus {
         val roots = rootProvider.rootDirectories()
@@ -56,39 +59,6 @@ class LocalProvider(
         } else {
             ConnectionStatus(ok = true, message = "本地目录可用（${roots.size} 个）")
         }
-    }
-
-    // ---- 认证：本地存储无需认证 ----
-
-    override suspend fun authenticate(credentials: ProviderCredentials): AuthResult =
-        AuthResult.Success(localUser())
-
-    override suspend fun refreshSession(): AuthResult = AuthResult.Success(localUser())
-
-    override suspend fun logout() = Unit
-
-    override suspend fun currentUser(): MediaUser? = localUser()
-
-    private fun localUser(): MediaUser =
-        MediaUser(serverId = serverId, userId = "local", displayName = "本机")
-
-    // ---- 媒体库 ----
-
-    override suspend fun getLibraries(): List<MediaLibrary> = listOf(
-        MediaLibrary(serverId = serverId, id = libraryId, name = "本地存储", type = LibraryType.FILES),
-    )
-
-    override suspend fun getItems(libraryId: String, page: PageRequest): PagedResult<MediaItem> =
-        listFolder(folder = null, page = page)
-
-    override suspend fun getSeasons(seriesId: String): List<Season> = emptyList()
-
-    override suspend fun getEpisodes(seasonId: String): List<Episode> = emptyList()
-
-    override suspend fun getItemDetail(itemId: String): MediaDetail {
-        val file = File(itemId)
-        if (!file.exists()) throw ProviderException.NotFound(serverId, itemId)
-        return MediaDetail(item = file.toMediaItem())
     }
 
     // ---- 文件树浏览 ----
@@ -112,6 +82,14 @@ class LocalProvider(
         )
     }
 
+    // ---- 详情 ----
+
+    override suspend fun getItemDetail(itemId: String): MediaDetail {
+        val file = File(itemId)
+        if (!file.exists()) throw ProviderException.NotFound(serverId, itemId)
+        return MediaDetail(item = file.toMediaItem())
+    }
+
     // ---- 播放 ----
 
     override suspend fun resolvePlayback(item: MediaItem, options: PlaybackOptions): PlaybackSource {
@@ -125,24 +103,6 @@ class LocalProvider(
             mode = PlaybackMode.DIRECT_PLAY,
         )
     }
-
-    override suspend fun reportProgress(progress: PlaybackProgress) {
-        // 本地文件无服务端进度；本地快照由上层（feature:player）负责。
-        logger.d(LogTag.PROVIDER, "local reportProgress ignored serverId=$serverId")
-    }
-
-    // ---- 搜索 / 字幕 / 继续观看：本地暂不支持，诚实抛出 ----
-
-    override suspend fun search(query: String, page: PageRequest): PagedResult<MediaItem> =
-        throw ProviderException.NotYetImplemented(serverId, "本地存储文件名搜索")
-
-    override suspend fun getSubtitles(itemId: String): List<SubtitleTrack> =
-        throw ProviderException.NotYetImplemented(serverId, "本地字幕列表")
-
-    override suspend fun getContinueWatching(limit: Int): List<MediaItem> =
-        throw ProviderException.NotYetImplemented(serverId, "本地继续观看")
-
-    override suspend fun getResumePosition(itemId: String): Long? = null
 
     // ---- 映射 ----
 
@@ -163,7 +123,7 @@ class LocalProvider(
             parentId = parentFile?.absolutePath,
             sizeBytes = if (isDir) null else length().takeIf { it > 0 },
             container = extension.lowercase().takeIf { it.isNotBlank() && !isDir },
-            libraryId = libraryId,
+            libraryId = LOCAL_LIBRARY_ID,
         )
     }
 
@@ -183,6 +143,7 @@ class LocalProvider(
     }
 
     private companion object {
+        const val LOCAL_LIBRARY_ID = "local"
         val VIDEO_EXTENSIONS = setOf(
             "mp4", "m4v", "mkv", "webm", "ts", "m2ts", "avi", "mov", "wmv", "flv", "3gp",
         )

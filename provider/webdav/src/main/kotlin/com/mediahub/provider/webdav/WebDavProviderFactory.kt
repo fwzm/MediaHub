@@ -7,8 +7,9 @@ import com.mediahub.core.network.MediaHttpClient
 import com.mediahub.core.security.TokenStore
 import com.mediahub.model.MediaServer
 import com.mediahub.model.ServerType
-import com.mediahub.provider.api.MediaProvider
 import com.mediahub.provider.api.MediaProviderFactory
+import com.mediahub.provider.api.ProviderDescriptor
+import com.mediahub.provider.api.ProviderHandle
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -24,15 +25,23 @@ class WebDavProviderFactory @Inject constructor(
     private val logger: Logger,
 ) : MediaProviderFactory {
 
-    override val serverType: ServerType = ServerType.WEBDAV
+    override val descriptor: ProviderDescriptor = WEBDAV_PROVIDER_DESCRIPTOR
 
-    override fun create(server: MediaServer): MediaProvider = WebDavProvider(
-        server = server,
-        apiClient = ApiClient(httpClientFactory.apiClient(), logger = logger),
-        mediaHttpClient = MediaHttpClient(httpClientFactory.mediaClient(), logger),
-        tokenStore = tokenStore,
-        logger = logger,
-    )
+    override fun create(server: MediaServer): ProviderHandle {
+        val provider = WebDavProvider(
+            server = server,
+            apiClient = ApiClient(httpClientFactory.apiClient(), logger = logger),
+            mediaHttpClient = MediaHttpClient(httpClientFactory.mediaClient(), logger = logger),
+            tokenStore = tokenStore,
+            logger = logger,
+        )
+        return ProviderHandle(
+            provider = provider,
+            auth = provider,
+            browse = provider,
+            search = provider,
+        )
+    }
 }
 
 @Module

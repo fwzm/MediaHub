@@ -78,3 +78,59 @@
   player:engine 在类级 @OptIn（编译器强制）基础上于该模块 lint 配置中关闭此检查。
 - 沙箱（Linux aarch64）无 aapt2 arm64 二进制（AGP 官方不支持），用 qemu 包装器验证；
   gradle.properties 中该配置保持注释（见 HANDOFF.md）。
+
+## ADR-014 MediaProvider 能力组合（Interface Segregation）
+- 状态：已采纳（2026-08-12，Phase 0.5）
+- 决策：`MediaProvider` 只保留公共最小契约（serverId/type/displayName/descriptor/testConnection）；
+  认证/媒体库/详情/浏览/播放/搜索/字幕/进度拆为**可选能力接口**，通过 `ProviderHandle`
+  （可空字段，类型安全）组合暴露。Provider 只实现真实具备的能力。
+- 背景：原 Fat Interface 迫使 LocalProvider 伪造认证、返回空 Season/Episode、堆 NotYetImplemented。
+- 影响：LocalProvider 仅 BROWSE+DETAIL+PLAYBACK；UI 用 `handle.library != null` 等判断，禁止 `type == EMBY` 分支。
+
+## ADR-015 ProviderDescriptor 动态注册（保留 ServerType 的迁移路径）
+- 状态：已采纳（2026-08-12，Phase 0.5）
+- 决策：Factory 自报 `ProviderDescriptor(id, serverType, displayName, category, capabilities, authMethod, status)`；
+  "添加媒体库"页面从 `MediaProviderRegistry.descriptors()` 动态渲染，新增 Provider 无需改 UI。
+- 持久化：**暂保留 ServerType 枚举**（Room 列不变，避免 schema 迁移）。
+  迁移路径：未来引入自定义/第三方 Provider 时，`MediaServer` 增加 `providerId: String` 列
+  （Room migration 1→2），以 `descriptor.id` 为持久化键。
+- 语义约定：descriptor.capabilities = 类型规划能力（展示/路由）；ProviderHandle 字段 = 当前可用能力（运行时权威）。
+
+## ADR-016 CredentialVault 凭据生命周期
+- 状态：已采纳（2026-08-12，Phase 0.5，机制先行）
+- 决策：`CredentialVault`（core:security，Keystore 加密）按 (serverId, kind) 存取长期凭据
+  （密码/API Key/Refresh Token/Cookie/Client Secret）；`TokenStore` 只管会话令牌。
+  策略：Emby/Jellyfin 登录后不存密码（Token 足够）；WebDAV/SMB 长期密码入 Vault；
+  云盘 OAuth refresh/Cookie 入 Vault。禁止 Room/DataStore 明文、禁止日志。
+- 现状：机制与测试就绪；AddServer 表单密码暂不落盘（无认证流），Phase 1 认证时接入 Vault。
+
+## ADR-017 进度同步管线（三档节流）
+- 状态：已采纳（2026-08-12，Phase 0.5）
+- 决策：`PlaybackEngine` 每秒发 progress 流 + 关键事件流（Pause/Seek/Ended/Stopped）；
+  `ProgressSyncCoordinator` 分流：本地快照 sample(5s)、远端上报 sample(Provider 间隔，默认 10s)、
+  关键事件立即 flush、退出 final flush。Provider 可覆写 `MediaProgressProvider.remoteReportIntervalMs`。
+- 背景：原实现每秒写库+上报（1 小时 ≈ 3600 次 DB 写 + 3600 次请求）。
+
+## ADR-018 播放请求头 session-scoped（废弃 Singleton holder）
+- 状态：已采纳（2026-08-12，Phase 0.5）
+- 决策：`PlaybackHeadersHolder` 由 `PlaybackEngineFactory.create` 按引擎创建（每会话独立），
+  不再全局 Singleton。`PlayerFactory.create(holder)` 构建 HeaderAwareDataSource 链。
+- 背景：原 Singleton mutable holder 在多播放器/预加载/跨源切换时会串线（A 播 Emby、B 播夸克互相污染）。
+
+## ADR-019 协议级连接测试（Provider 负责）
+- 状态：已采纳（2026-08-12，Phase 0.5）
+- 决策：`testConnection()` 由具体 Provider 实现协议嗅探：
+  Emby/Jellyfin → `/System/Info/Public`（公开端点）；WebDAV → OPTIONS + DAV 头；Local → 目录检查。
+  UI（AddServerViewModel）只调 `provider.testConnection()`，不再通用 GET `<500` 判定。
+- 背景：原逻辑把 401/403/404 都算"连接成功"。
+
+## ADR-020 SAF 演进预留
+- 状态：已采纳（2026-08-12，Phase 0.5，接口预留）
+- 决策：`LocalRootProvider.contentRoots()` 预留 content:// 树根；Phase 0.6 接入
+  ACTION_OPEN_DOCUMENT_TREE + takePersistableUriPermission + DocumentFile 树导航，
+  长期本地媒体以 content:// 为准，不围绕 file:// 扩展。
+
+## ADR-021 保留 23 模块结构（不合并）
+- 状态：已采纳（2026-08-12，Phase 0.5）
+- 决策：维持现有模块划分。合并（如 feature:detail/search/metadata 归并）不带来可衡量的
+  编译/维护收益，且已有独立语义边界；后续若出现"无独立编译价值"的模块再评估合并。

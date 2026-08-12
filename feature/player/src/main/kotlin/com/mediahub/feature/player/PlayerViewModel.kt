@@ -9,22 +9,21 @@ import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.PlaybackOptions
-import com.mediahub.model.PlaybackProgress
 import com.mediahub.player.engine.PlaybackEngine
 import com.mediahub.player.engine.PlaybackEngineFactory
 import com.mediahub.player.engine.PlaybackSession
-import com.mediahub.provider.api.MediaProvider
+import com.mediahub.player.engine.ProgressSyncCoordinator
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
+import com.mediahub.provider.api.ProviderHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** 播放源解析状态。 */
@@ -61,13 +60,28 @@ class PlayerViewModel @Inject constructor(
     private val itemId: String = NavArgCodec.decode(checkNotNull(savedStateHandle["itemId"]))
     private val itemTitle: String = savedStateHandle["title"] ?: ""
 
-    /** 引擎绑定到 ViewModel 作用域，onCleared 时释放。 */
+    /** 引擎绑定到 ViewModel 作用域，onCleared 时释放；请求头上下文 per-engine（ADR-018）。 */
     val engine: PlaybackEngine = engineFactory.create(viewModelScope)
 
     private val _resolveState = MutableStateFlow<ResolveState>(ResolveState.Resolving)
     val resolveState: StateFlow<ResolveState> = _resolveState.asStateFlow()
 
-    private var provider: MediaProvider? = null
+    /** 当前 Provider 句柄（能力组合，ADR-014）；resolve 成功后可用。 */
+    private var handle: ProviderHandle? = null
+
+    /**
+     * 进度同步管线（ADR-017）：本地快照 5s 采样、远端上报按 Provider 间隔、
+     * 关键事件（Pause/Seek/Ended）立即同步、退出时 final flush。
+     * 不再每秒写库 + 上报。
+     */
+    private val syncCoordinator = ProgressSyncCoordinator(
+        scope = viewModelScope,
+        localSave = { progressRepository.save(it) },
+        remoteReport = { progress ->
+            handle?.progress?.let { runCatching { it.reportProgress(progress) } }
+        },
+    )
+    private var syncStarted = false
 
     val uiState: StateFlow<PlayerCombinedState> =
         combine(engine.uiState, _resolveState) { player, resolve ->
@@ -84,36 +98,51 @@ class PlayerViewModel @Inject constructor(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerCombinedState())
 
     init {
-        engine.onProgressTick = ::handleProgress
         resolve()
     }
 
-    /** 解析播放源并起播：server → provider → getItemDetail → resolvePlayback。 */
+    /** 解析播放源并起播：server → handle → detail → resolvePlayback。 */
     fun resolve() {
         viewModelScope.launch {
             _resolveState.value = ResolveState.Resolving
             try {
                 val server = serverRepository.getServer(serverId)
                     ?: throw ProviderException.NotFound(serverId, "媒体源")
-                val providerInstance = registry.create(server)
+                val providerHandle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
-                provider = providerInstance
+                handle = providerHandle
 
-                val detail = providerInstance.getItemDetail(itemId)
+                val detailProvider = providerHandle.detail
+                    ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的详情能力尚未接入")
+                val playbackProvider = providerHandle.playback
+                    ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的播放能力尚未接入")
+
+                val detail = detailProvider.getItemDetail(itemId)
                 val resume = progressRepository.getResume(serverId, itemId)
-                val source = providerInstance.resolvePlayback(
+                val source = playbackProvider.resolvePlayback(
                     detail.item,
                     PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
                 )
-                val session = PlaybackSession(
-                    serverId = serverId,
-                    itemId = itemId,
-                    itemTitle = detail.item.title.ifBlank { itemTitle },
-                    source = source,
-                    resumePositionMs = resume,
-                    itemType = detail.item.type,
+                engine.play(
+                    PlaybackSession(
+                        serverId = serverId,
+                        itemId = itemId,
+                        itemTitle = detail.item.title.ifBlank { itemTitle },
+                        source = source,
+                        resumePositionMs = resume,
+                        itemType = detail.item.type,
+                    )
                 )
-                engine.play(session)
+
+                if (!syncStarted) {
+                    syncCoordinator.start(
+                        progress = engine.progress,
+                        events = engine.events,
+                        remoteIntervalMs = providerHandle.progress?.remoteReportIntervalMs
+                            ?: 10_000L,
+                    )
+                    syncStarted = true
+                }
                 _resolveState.value = ResolveState.Ready
             } catch (e: Exception) {
                 logger.w(LogTag.PLAYER, "播放解析失败 serverId=$serverId itemId=$itemId", e)
@@ -122,17 +151,9 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    private fun handleProgress(progress: PlaybackProgress) {
-        viewModelScope.launch {
-            // 本地快照（"继续观看"）
-            runCatching { progressRepository.save(progress) }
-                .onFailure { logger.w(LogTag.PLAYER, "进度快照保存失败", it) }
-            // 服务端进度上报（尽力而为，失败不打断播放）
-            provider?.let { p ->
-                runCatching { p.reportProgress(progress) }
-                    .onFailure { logger.w(LogTag.PLAYER, "进度上报失败", it) }
-            }
-        }
+    /** 播放页离开时的 final flush（由 PlayerScreen onDispose 调用）。 */
+    fun flushProgress() {
+        viewModelScope.launch { syncCoordinator.flush() }
     }
 
     private fun userMessage(e: Exception): String = when (e) {
@@ -141,6 +162,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        syncCoordinator.stop()
         engine.release()
         super.onCleared()
     }

@@ -24,6 +24,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +51,11 @@ fun PlayerRoute(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val resolve by viewModel.resolveState.collectAsStateWithLifecycle()
     val engineState by viewModel.engine.uiState.collectAsStateWithLifecycle()
+
+    // 离开播放页时 final flush（进度快照 + 远端上报各一次，见 ADR-017）
+    DisposableEffect(Unit) {
+        onDispose { viewModel.flushProgress() }
+    }
 
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }

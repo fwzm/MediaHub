@@ -17,7 +17,6 @@ import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.TokenStore
 import com.mediahub.player.engine.MediaCacheProvider
 import com.mediahub.player.engine.PlaybackEngineFactory
-import com.mediahub.player.engine.PlaybackHeadersHolder
 import com.mediahub.player.engine.PlayerFactory
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.base.DefaultProviderRegistry
@@ -89,23 +88,17 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun providePlaybackHeadersHolder(): PlaybackHeadersHolder = PlaybackHeadersHolder()
-
-    @Provides
-    @Singleton
     fun providePlayerFactory(
         @ApplicationContext context: Context,
         mediaCacheProvider: MediaCacheProvider,
-        headersHolder: PlaybackHeadersHolder,
-    ): PlayerFactory = PlayerFactory(context, mediaCacheProvider, headersHolder)
+    ): PlayerFactory = PlayerFactory(context, mediaCacheProvider)
 
     @Provides
     @Singleton
     fun providePlaybackEngineFactory(
         playerFactory: PlayerFactory,
-        headersHolder: PlaybackHeadersHolder,
         logger: Logger,
-    ): PlaybackEngineFactory = PlaybackEngineFactory(playerFactory, headersHolder, logger)
+    ): PlaybackEngineFactory = PlaybackEngineFactory(playerFactory, logger)
 
     @Provides
     @Singleton

@@ -1,21 +1,24 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
-> 最后更新：2026-08-12（Phase 0 骨架交付）。本文件是协作第一手资料。
+> 最后更新：2026-08-12（Phase 0.5 架构加固交付）。本文件是协作第一手资料。
 
 ## 1. 当前项目状态
 
-- **Phase 0 骨架已完成**：`assembleDebug`、`testDebugUnitTest`（20 用例）、`lintDebug` 全部通过。
-- APK：`app/build/outputs/apk/debug/app-debug.apk`（22MB）。
+- **Phase 0 骨架 + Phase 0.5 架构加固已完成**：`assembleDebug`、`testDebugUnitTest`（40 用例）、
+  `lintDebug` 全部通过；CI（GitHub Actions）已就绪。
+- APK：`app/build/outputs/apk/debug/app-debug.apk`。
 - 端到端可用路径：添加媒体库（本地存储）→ 文件树浏览 → 播放（本地文件）→ 继续观看。
 - Emby / Jellyfin / WebDAV 的 API 业务**未实现**（Phase 1 目标，见 TASKS.md），
-  调用时抛出 `ProviderException.NotYetImplemented`（唯一的"未实现"通道，带明确中文提示）。
+  能力组合已就绪，方法以 `ProviderException.NotYetImplemented` 占位；
+  连接测试已是协议级（System Info / OPTIONS 嗅探）。
 
 ## 2. 本次完成了什么
 
-- 23 模块工程 + 版本目录 + wrapper；依赖方向见 ARCHITECTURE.md。
-- 领域模型、Provider 抽象、网络层、Room/DataStore/Keystore、Media3 引擎、
-  兼容性评估器、Server 管理 UI、首页/媒体库/播放器/设置页面。
-- 文档体系 + git 初始提交。
+- Phase 0：23 模块工程、领域模型、Provider 抽象、网络层、存储、Media3 引擎、
+  兼容性评估器、Server 管理 UI、首页/媒体库/播放器/设置页面、文档体系、git 初始提交。
+- Phase 0.5：MediaProvider 能力组合 + ProviderHandle；ProviderDescriptor 动态注册；
+  CredentialVault；进度三档节流（ProgressSyncCoordinator）；播放请求头 per-engine；
+  协议级连接测试；CI workflow；测试扩至 40 用例。
 
 ## 3. 修改了哪些文件（关键）
 
@@ -44,8 +47,9 @@ docs/* 与 7 份根文档
    （endpoint 必须查官方文档，禁止凭记忆虚构；见 docs/providers/README.md 的待确认清单）。
 2. 播放前把 `PlaybackCompatibilityEvaluator` 接入 `resolvePlayback` 决策流程。
 3. `usesCleartextTraffic=true` 是临时的，接入 provider 后换 networkSecurityConfig。
-4. 详情页/全局搜索/诊断页为占位（TASKS.md 有清单）。
-5. 图片管线（Coil）待媒体库数据接入后引入。
+4. AddServer 认证流接入 CredentialVault（密码按 Provider 策略加密保存/销毁，ADR-016）。
+5. SAF 目录选择器（Phase 0.6：ACTION_OPEN_DOCUMENT_TREE + DocumentFile 树导航）。
+6. 详情页/全局搜索/诊断页为占位（TASKS.md 有清单）；图片管线（Coil）待媒体库数据接入后引入。
 
 ## 6. 已知 Bug / 注意事项
 
@@ -63,6 +67,10 @@ docs/* 与 7 份根文档
 - `Redactor` 脱敏规则：只能加强，不能放松。
 - 网络分层（ApiClient/MediaHttpClient 分离）与缓存分离原则。
 - 播放引擎封装（player:engine）对外 API（PlaybackEngine/PlaybackSession/PlaybackUiState）。
+- Provider 能力组合：**禁止把新能力塞回 MediaProvider Fat Interface**；
+  新增能力 = 独立能力接口 + ProviderHandle 字段 + Factory 装配。
+- 播放请求头：禁止恢复全局 Singleton holder（ADR-018）。
+- 进度上报：禁止回到"每秒写库+上报"（ADR-017）。
 
 ## 8. 沙箱专用说明（仅本环境）
 

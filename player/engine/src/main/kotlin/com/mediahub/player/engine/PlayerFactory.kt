@@ -19,10 +19,9 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 class PlayerFactory(
     private val context: Context,
     private val mediaCacheProvider: MediaCacheProvider,
-    private val headersHolder: PlaybackHeadersHolder,
 ) {
 
-    fun create(): ExoPlayer {
+    fun create(headersHolder: PlaybackHeadersHolder): ExoPlayer {
         val renderersFactory = DefaultRenderersFactory(context)
             .setEnableDecoderFallback(true)
 

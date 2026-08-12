@@ -39,14 +39,21 @@ app（组合一切：DI、导航、Provider 工厂装配）
 
 ## 3. 数据源统一抽象（MediaProvider）
 
-`provider:api` 定义能力接口：认证 / 媒体库 / 浏览 / 播放 / 搜索 / 字幕 / 进度，
-组合为 `MediaProvider`。每种数据源实现一个 `MediaProviderFactory` 并通过 Hilt `@IntoSet`
-自注册到 `DefaultProviderRegistry`；注册表按 `ServerType` 建索引，UI 通过
-`MediaProviderRegistry.create(server)` 拿到实例。
+`provider:api` 采用**能力组合**（ADR-014）：`MediaProvider` 只含公共最小契约
+（serverId/type/displayName/descriptor/testConnection）；认证、媒体库、详情、浏览、
+播放、搜索、字幕、进度为**可选能力接口**，由 `ProviderHandle` 组合暴露
+（可空字段 = 类型安全，UI 用 `handle.library != null` 判断，禁止 `type == EMBY` 分支）。
 
-- 媒体服务器类共享 `BaseMediaServerProvider`（异常映射、Token 会话、连通性探测）。
-- 协议差异（endpoint、鉴权头）由各子类独立实现，禁止塞进 if/else。
-- 云盘 / NAS 类实现 `MediaBrowseProvider`（文件树），与服务器类并存。
+每种数据源实现一个 `MediaProviderFactory`（自报 `ProviderDescriptor`，ADR-015），
+通过 Hilt `@IntoSet` 自注册到 `DefaultProviderRegistry`；注册表按 `ServerType` 建索引，
+"添加媒体库"页面从 `registry.descriptors()` 动态渲染——新增 Provider 无需改 UI。
+
+- 媒体服务器类共享 `BaseMediaServerProvider`（异常映射、Token 会话、通用 HTTP 探测）。
+- 协议差异（endpoint、鉴权头、连接测试）由各子类独立实现，禁止塞进 if/else。
+- 连接测试为**协议级嗅探**（ADR-019）：Emby/Jellyfin 查 /System/Info/Public，
+  WebDAV 用 OPTIONS，Local 查目录；不再用 HTTP <500 判定。
+- 凭据生命周期（ADR-016）：`CredentialVault` 存长期凭据（密码/API Key/Refresh/Cookie），
+  `TokenStore` 存会话令牌，均 Keystore 加密。
 
 ## 4. 领域模型（core:model）
 
@@ -72,6 +79,9 @@ MediaItem + PlaybackOptions
 - 网络分层：普通 API 用 `ApiClient`（短超时/重试）；媒体流用 `MediaHttpClient`
   （Range/206/302/Cookie、探测结构化 `PlaybackError`、连接池复用）。
 - 播放缓存：Media3 `SimpleCache`（LRU 512MB），与元数据缓存（Room）、图片缓存（Coil，后续）分离。
+- 请求头上下文：`PlaybackHeadersHolder` 按引擎（会话）创建（ADR-018），多播放器/预加载互不污染。
+- 进度同步：`ProgressSyncCoordinator` 三档节流（ADR-017）——本地快照 5s 采样、
+  远端上报按 Provider 间隔（默认 10s）、Pause/Seek/Ended 立即 flush、退出 final flush。
 
 ## 6. 安全与日志
 

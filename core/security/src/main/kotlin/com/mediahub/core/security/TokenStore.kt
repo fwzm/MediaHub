@@ -1,6 +1,6 @@
 package com.mediahub.core.security
 
-import android.util.Base64
+import java.util.Base64
 
 /** 某数据源服务器的会话 Token（仅内存使用，落库时加密）。 */
 data class StoredToken(
@@ -12,6 +12,9 @@ data class StoredToken(
 /**
  * 按 serverId 管理 Token 的加密存取。
  * 存储格式（不依赖 JSON 库）：base64(access) | base64(refresh) | expires
+ *
+ * 说明：使用 java.util.Base64（API 26+ 可用），保证 JVM 单测可运行；
+ * 输出格式与旧版（android.util.Base64 NO_WRAP）兼容。
  */
 class TokenStore(private val storage: SecretStorage) {
 
@@ -31,8 +34,9 @@ class TokenStore(private val storage: SecretStorage) {
     private fun keyFor(serverId: String) = "token:$serverId"
 
     private fun encode(tokens: StoredToken): String {
-        val access = Base64.encodeToString(tokens.accessToken.toByteArray(), Base64.NO_WRAP)
-        val refresh = Base64.encodeToString((tokens.refreshToken ?: "").toByteArray(), Base64.NO_WRAP)
+        val encoder = Base64.getEncoder()
+        val access = encoder.encodeToString(tokens.accessToken.toByteArray(Charsets.UTF_8))
+        val refresh = encoder.encodeToString((tokens.refreshToken ?: "").toByteArray(Charsets.UTF_8))
         val expires = tokens.expiresAtEpochMs ?: -1L
         return "$access|$refresh|$expires"
     }
@@ -41,8 +45,9 @@ class TokenStore(private val storage: SecretStorage) {
         val parts = raw.split('|')
         if (parts.size != 3) return null
         return try {
-            val access = String(Base64.decode(parts[0], Base64.NO_WRAP), Charsets.UTF_8)
-            val refreshRaw = Base64.decode(parts[1], Base64.NO_WRAP)
+            val decoder = Base64.getDecoder()
+            val access = String(decoder.decode(parts[0]), Charsets.UTF_8)
+            val refreshRaw = decoder.decode(parts[1])
             val refresh = if (refreshRaw.isEmpty()) null else String(refreshRaw, Charsets.UTF_8)
             val expires = parts[2].toLongOrNull()?.takeIf { it > 0 }
             StoredToken(accessToken = access, refreshToken = refresh, expiresAtEpochMs = expires)

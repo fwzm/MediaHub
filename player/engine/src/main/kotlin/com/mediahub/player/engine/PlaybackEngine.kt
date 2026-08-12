@@ -1,6 +1,7 @@
+@file:OptIn(UnstableApi::class)
+
 package com.mediahub.player.engine
 
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -8,6 +9,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.mediahub.core.logging.LogTag
@@ -17,9 +19,13 @@ import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -28,16 +34,15 @@ import kotlinx.coroutines.launch
 /**
  * 播放引擎（Media3 / ExoPlayer 封装）。
  *
- * 职责：
- * - 播放源 → Media3 MediaItem（URI + MIME；请求头经 [PlaybackHeadersHolder] 注入）；
+ * - 播放源 → Media3 MediaItem（URI + MIME；请求头经本引擎私有的
+ *   [PlaybackHeadersHolder] 注入，见 ADR-018：不同引擎互不污染）；
  * - UI 状态流（播放/缓冲/进度/轨道/错误）；
  * - 音轨/字幕选择（DefaultTrackSelector）；
- * - 结构化错误映射（PlaybackException → PlaybackError）；
- * - 周期性进度回调（上层接本地快照 + Provider 上报）。
+ * - [progress] 每秒进度流 + [events] 关键事件流（供进度同步管线，见 ADR-017）；
+ * - 结构化错误映射（PlaybackException → PlaybackError）。
  *
  * 不持有 Android 生命周期；由创建方（ViewModel）负责 release()。
  */
-@OptIn(UnstableApi::class)
 class PlaybackEngine(
     private val player: ExoPlayer,
     private val headersHolder: PlaybackHeadersHolder,
@@ -48,6 +53,22 @@ class PlaybackEngine(
     private val _uiState = MutableStateFlow(PlaybackUiState())
     val uiState: StateFlow<PlaybackUiState> = _uiState.asStateFlow()
 
+    private val _progress = MutableSharedFlow<PlaybackProgress>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** 每秒进度流（低频消费方请自行 sample/节流）。 */
+    val progress: SharedFlow<PlaybackProgress> = _progress.asSharedFlow()
+
+    private val _events = MutableSharedFlow<PlaybackEvent>(
+        extraBufferCapacity = 4,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** 关键事件流（Pause/Seek/Ended/Stopped）。 */
+    val events: SharedFlow<PlaybackEvent> = _events.asSharedFlow()
+
     private val trackSelector: DefaultTrackSelector =
         requireNotNull(player.trackSelector as? DefaultTrackSelector) {
             "ExoPlayer 必须配置 DefaultTrackSelector"
@@ -55,9 +76,6 @@ class PlaybackEngine(
 
     private var session: PlaybackSession? = null
     private var progressJob: Job? = null
-
-    /** 进度回调（间隔 1s），由上层负责进度持久化与上报。 */
-    var onProgressTick: ((PlaybackProgress) -> Unit)? = null
 
     /** 供 PlayerView 绑定。 */
     val exoPlayer: ExoPlayer get() = player
@@ -83,6 +101,9 @@ class PlaybackEngine(
                         positionMs = player.currentPosition,
                         durationMs = player.duration.takeIf { d -> d > 0 } ?: it.durationMs,
                     )
+                }
+                if (playbackState == Player.STATE_ENDED) {
+                    _events.tryEmit(PlaybackEvent.Ended)
                 }
             }
 
@@ -134,12 +155,19 @@ class PlaybackEngine(
         if (player.isPlaying) pause() else resume()
     }
 
-    fun pause() = player.pause()
+    fun pause() {
+        player.pause()
+        _events.tryEmit(PlaybackEvent.Paused)
+    }
 
-    fun resume() = player.play()
+    fun resume() {
+        _events.tryEmit(PlaybackEvent.Resumed)
+        player.play()
+    }
 
     fun seekTo(positionMs: Long) {
         player.seekTo(positionMs.coerceAtLeast(0))
+        _events.tryEmit(PlaybackEvent.Seeked)
     }
 
     fun setSpeed(speed: Float) {
@@ -196,7 +224,7 @@ class PlaybackEngine(
                     )
                 }
                 session?.let { s ->
-                    onProgressTick?.invoke(
+                    _progress.tryEmit(
                         PlaybackProgress(
                             serverId = s.serverId,
                             itemId = s.itemId,
@@ -218,6 +246,7 @@ class PlaybackEngine(
     fun release() {
         progressJob?.cancel()
         headersHolder.setHeaders(emptyMap())
+        _events.tryEmit(PlaybackEvent.Stopped)
         player.release()
         logger.i(LogTag.PLAYER, "播放引擎已释放")
     }

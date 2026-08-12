@@ -24,9 +24,27 @@
 - [x] DONE 文档体系 + git 初始提交
 - [x] DONE assembleDebug / testDebugUnitTest / lintDebug 通过
 
+## Phase 0.5 —— 架构加固（本次交付）✅ DONE
+
+- [x] DONE MediaProvider 能力组合（Interface Segregation + ProviderHandle，ADR-014）
+- [x] DONE ProviderDescriptor 动态注册（UI 从 Registry 读取，ADR-015）
+- [x] DONE LocalProvider 去除假实现（仅 BROWSE/DETAIL/PLAYBACK）
+- [x] DONE CredentialVault（core:security，ADR-016）
+- [x] DONE 进度同步三档节流（ProgressSyncCoordinator，ADR-017）
+- [x] DONE 播放请求头 session-scoped（per-engine holder，ADR-018）
+- [x] DONE 协议级连接测试（Emby/Jellyfin System Info、WebDAV OPTIONS，ADR-019）
+- [x] DONE CI（.github/workflows/android-ci.yml）
+- [x] DONE 测试补充（Registry/能力组合/Credential/进度节流/Headers 隔离/Mapper，共 40 用例）
+- [x] DONE assembleDebug / testDebugUnitTest / lintDebug 通过
+
 ## V0.1 —— MVP（下一步） 
 
 ### IN PROGRESS（无，等待开工）
+
+### TODO（新增于 Phase 0.5）
+- [ ] SAF 目录选择器（ACTION_OPEN_DOCUMENT_TREE + 持久化授权 + DocumentFile 树导航，Phase 0.6）
+- [ ] AddServer 认证流接入 CredentialVault（密码按 Provider 策略加密保存/销毁）
+- [ ] Emby/Jellyfin/WebDAV 的 `remoteReportIntervalMs` 按官方协议确认节流值
 
 ### TODO
 - [ ] Emby Provider 完整实现（登录→媒体库→浏览→搜索→详情→播放源→进度上报）

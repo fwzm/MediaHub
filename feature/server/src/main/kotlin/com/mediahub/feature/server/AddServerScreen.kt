@@ -1,8 +1,6 @@
 package com.mediahub.feature.server
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,11 +8,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -29,8 +29,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.model.MediaServer
 import com.mediahub.model.ServerType
+import com.mediahub.provider.api.ProviderDescriptor
 
-/** 添加媒体库。 */
+/** 添加媒体库：数据源类型从 Registry 动态读取（ADR-015）。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddServerRoute(
@@ -39,6 +40,8 @@ fun AddServerRoute(
     viewModel: AddServerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val providers = viewModel.availableProviders
+    val selected = providers.firstOrNull { it.id == state.selectedDescriptorId }
 
     Scaffold(
         topBar = {
@@ -61,46 +64,51 @@ fun AddServerRoute(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text("选择类型", style = MaterialTheme.typography.titleMedium)
-            ServerTypeGrid(
-                selected = state.selectedType,
-                onSelect = viewModel::selectType,
+            ProviderTypeGrid(
+                providers = providers,
+                selectedId = state.selectedDescriptorId,
+                onSelect = viewModel::selectProvider,
             )
 
-            if (state.selectedType != ServerType.LOCAL) {
-                OutlinedTextField(
-                    value = state.baseUrl,
-                    onValueChange = viewModel::updateBaseUrl,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("服务器地址") },
-                    placeholder = { Text("http://192.168.1.100:8096") },
-                    singleLine = true,
-                )
-            }
+            selected?.let { descriptor ->
+                if (descriptor.serverType != ServerType.LOCAL) {
+                    OutlinedTextField(
+                        value = state.baseUrl,
+                        onValueChange = viewModel::updateBaseUrl,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("服务器地址") },
+                        placeholder = { Text("http://192.168.1.100:8096") },
+                        singleLine = true,
+                    )
+                }
 
-            OutlinedTextField(
-                value = state.name,
-                onValueChange = viewModel::updateName,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("名称") },
-                placeholder = { Text(state.selectedType.label) },
-                singleLine = true,
-            )
+                OutlinedTextField(
+                    value = state.name,
+                    onValueChange = viewModel::updateName,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("名称") },
+                    placeholder = { Text(descriptor.displayName) },
+                    singleLine = true,
+                )
 
-            if (state.selectedType != ServerType.LOCAL) {
-                OutlinedTextField(
-                    value = state.username,
-                    onValueChange = viewModel::updateUsername,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("用户名（可选）") },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = state.password,
-                    onValueChange = viewModel::updatePassword,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("密码（可选，加密存储）") },
-                    singleLine = true,
-                )
+                if (descriptor.serverType != ServerType.LOCAL &&
+                    descriptor.authMethod != com.mediahub.provider.api.AuthMethod.NONE
+                ) {
+                    OutlinedTextField(
+                        value = state.username,
+                        onValueChange = viewModel::updateUsername,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("用户名（可选）") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = state.password,
+                        onValueChange = viewModel::updatePassword,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("密码（可选，加密存储）") },
+                        singleLine = true,
+                    )
+                }
             }
 
             state.testResult?.let { result ->
@@ -136,21 +144,19 @@ fun AddServerRoute(
 }
 
 @Composable
-private fun ServerTypeGrid(
-    selected: ServerType,
-    onSelect: (ServerType) -> Unit,
+private fun ProviderTypeGrid(
+    providers: List<ProviderDescriptor>,
+    selectedId: String,
+    onSelect: (ProviderDescriptor) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ServerTypeOptions.chunked(2).forEach { rowOptions ->
+        providers.chunked(2).forEach { rowOptions ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                rowOptions.forEach { option ->
+                rowOptions.forEach { descriptor ->
                     FilterChip(
-                        selected = selected == option.type,
-                        onClick = { if (option.enabled) onSelect(option.type) },
-                        enabled = option.enabled,
-                        label = {
-                            Text(if (option.enabled) option.type.label else "${option.type.label}（${option.description}）")
-                        },
+                        selected = selectedId == descriptor.id,
+                        onClick = { onSelect(descriptor) },
+                        label = { Text(descriptor.displayName) },
                         modifier = Modifier.weight(1f),
                     )
                 }
