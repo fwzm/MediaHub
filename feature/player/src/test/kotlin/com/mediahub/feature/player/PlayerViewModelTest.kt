@@ -41,8 +41,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -108,7 +108,7 @@ class PlayerViewModelTest {
             engineFactory = PlaybackEngineCreator { engine },
             logger = noOpLogger,
         )
-        advanceUntilIdle()
+        runCurrent()
 
         // playbackProvider 收到的是 detail 返回的 MOVIE，而不是 fallback 的 OTHER
         val received = playback.receivedItem
@@ -146,7 +146,7 @@ class PlayerViewModelTest {
             engineFactory = PlaybackEngineCreator { engine },
             logger = noOpLogger,
         )
-        advanceUntilIdle()
+        runCurrent()
 
         val session = engine.playedSession
         assertEquals(source, session?.source)
@@ -175,7 +175,7 @@ class PlayerViewModelTest {
             engineFactory = PlaybackEngineCreator { engine },
             logger = noOpLogger,
         )
-        advanceUntilIdle()
+        runCurrent()
 
         assertTrue(vm.resolveState.value is ResolveState.Failed)
         assertNull(engine.playedSession)
