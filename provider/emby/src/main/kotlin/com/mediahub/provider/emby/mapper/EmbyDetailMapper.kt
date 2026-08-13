@@ -56,7 +56,11 @@ object EmbyDetailMapper {
         val range = videoRange?.lowercase()
         val evt = extendedVideoType.orEmpty().lowercase()
         val evst = extendedVideoSubType.orEmpty().lowercase()
-        if (range == "dovi" || evt.contains("dolby") || evst.contains("dolby")) {
+        if (
+            range.isDolbyVisionSignal() ||
+            evt.isDolbyVisionSignal() ||
+            evst.isDolbyVisionSignal()
+        ) {
             return HdrType.DOLBY_VISION
         }
         return when (range) {
@@ -65,6 +69,15 @@ object EmbyDetailMapper {
             "hlg" -> HdrType.HLG
             else -> HdrType.NONE
         }
+    }
+
+    /**
+     * Emby 的 ExtendedVideoSubType 使用 DoviProfile81 等枚举值，未必包含 "Dolby"。
+     * HTTP/JSON 枚举按协议值判断，避免只覆盖 ExtendedVideoType=DolbyVision 的半套映射。
+     */
+    private fun String?.isDolbyVisionSignal(): Boolean {
+        val normalized = this?.trim()?.lowercase().orEmpty()
+        return normalized.contains("dolby") || normalized.startsWith("dovi")
     }
 
     private fun mapVersion(source: EmbyMediaSourceInfoDto): MediaVersion {

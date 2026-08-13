@@ -81,10 +81,17 @@ class EmbyPlaybackProvider(
             )
             val video = source.mediaStreams.firstOrNull { it.type?.lowercase() == "video" }
             val audio = source.mediaStreams.firstOrNull { it.type?.lowercase() == "audio" }
+            val authenticatedHeaders = api.authenticatedHeaders(token, userId)
+            val protectedSourceHeaders = source.requiredHttpHeaders.filterKeys { sourceHeader ->
+                authenticatedHeaders.keys.none { authHeader ->
+                    authHeader.equals(sourceHeader, ignoreCase = true)
+                }
+            }
             PlaybackSource(
                 url = url,
-                // RequiredHttpHeaders 在前、鉴权头在后：源级头不允许覆盖鉴权头。
-                headers = source.requiredHttpHeaders + api.authenticatedHeaders(token, userId),
+                // Header 名大小写不敏感：先剔除与鉴权头同名（含不同大小写）的源级键，
+                // 再写入权威鉴权值，避免 OkHttp/Media3 发送重复 Token/Authorization。
+                headers = protectedSourceHeaders + authenticatedHeaders,
                 container = container,
                 videoCodec = video?.codec,
                 audioCodec = audio?.codec,

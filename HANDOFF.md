@@ -2,22 +2,25 @@
 > 最后更新：2026-08-13（Phase 1B-2.1 FINAL HARDENING：Direct Stream 协议边界封板，代码+测试完成，CI 随本提交执行）。
 ## Phase 1B-2.1（本次）：Direct Stream 协议边界 FINAL HARDENING
 - PlaybackInfo 改官方 POST contract：POST /Items/{itemId}/PlaybackInfo；协商参数进 JSON body
-  （EmbyPlaybackInfoRequestDto + EmbyDeviceProfileDto），UserId 仅走 query；
+  （EmbyPlaybackInfoRequestDto + EmbyDeviceProfileDto），UserId 同时走 query 与 typed body；
   Token 不进 URL 不进 body（只走 X-Emby-Token 请求头）；requestJson encodeDefaults=true/explicitNulls=false。
+- DeviceProfile 保持最小官方形状：SupportedMediaTypes=Video + DirectPlayProfiles[{Type=Video}]；
+  EnableDirectPlay/EnableDirectStream/EnableTranscoding 只存在于 PlaybackInfoRequest 顶层。
 - 严格校验（响应损坏 ≠ 需要转码）：MediaSources 空 / MediaSourceId 缺 / PlaySessionId 缺 → Parse；
   仅"源非空但全不支持 DirectStream"才 NotYetImplemented("需要转码")。
 - directStreamUrl 参数非 nullable 必填，始终输出 MediaSourceId/PlaySessionId/static=true；禁止残缺 URL。
-- RequiredHttpHeaders 并入播放请求头；鉴权头（X-Emby-Token/X-Emby-Authorization）后合并获胜，
-  源级头不可覆盖鉴权头。
+- RequiredHttpHeaders 并入播放请求头；先按 Header 名大小写不敏感语义剔除冲突源级键，
+  再写入权威 X-Emby-Token/X-Emby-Authorization，避免重复鉴权头。
 - 只视频型门禁：MOVIE/EPISODE/VIDEO 才进播放协议（DIRECT_STREAM_TYPES）；AUDIO（0 HTTP）、
   LIVE_TV/OTHER 明确拒绝，绝不构造 /Videos/... 音频地址。
-- mapHdrType 3 参（videoRange/extendedVideoType/extendedVideoSubType）识别 Dolby Vision。
+- mapHdrType 3 参（videoRange/extendedVideoType/extendedVideoSubType）识别 Dolby Vision，
+  覆盖 ExtendedVideoSubType=DoviProfile81 等枚举值。
 - 可测性改造：新增 PlaybackEnginePort / PlaybackEngineCreator（fun interface）；
   PlayerViewModel 依赖 ServerStore/ProgressStore/PlaybackEngineCreator；
   ProgressStore 补 getResume/save（ProgressRepository 实现补 override）；
   AppModule @Provides 返回 PlaybackEngineCreator；feature:player 补测试依赖。
-- 测试：EmbyPlaybackProviderTest 重写 18 用例 + PlayerViewModelTest 新增 3 用例（A/B/C）；
-  HomeViewModelTest FakeProgressStore 补 2 方法；全项目预计 117 用例。
+- 测试：EmbyPlaybackProviderTest 19 用例 + PlayerViewModelTest 3 用例（A/B/C）；
+  HomeViewModelTest FakeProgressStore 补 2 方法；当前树共 133 个 `@Test`。
 - **验证状态**：随本提交 push 后等 GitHub Actions（本机 aarch64 无 Android SDK/qemu，无法本地构建）；
   结果 run id 以交付报告记录，**不做 docs-only 二次提交**（避免 code→CI→docs→CI 循环）。
 - 下一刀：Phase 1B-3（候选：搜索 / 播放进度上报 / 真机 smoke Direct Stream）。

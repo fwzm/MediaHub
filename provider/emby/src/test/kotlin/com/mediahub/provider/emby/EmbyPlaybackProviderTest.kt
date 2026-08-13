@@ -122,6 +122,12 @@ class EmbyPlaybackProviderTest {
         assertTrue(body.contains("\"IsPlayback\":true"))
         assertTrue(body.contains("\"UserId\":\"user-1\""))
         assertTrue(body.contains("\"DeviceProfile\""))
+        assertTrue(body.contains("\"SupportedMediaTypes\":\"Video\""))
+        assertTrue(body.contains("\"DirectPlayProfiles\":[{\"Type\":\"Video\"}]"))
+        // 三项协商开关只属于 PlaybackInfoRequest，不能在 DeviceProfile 内重复伪造。
+        assertEquals(1, Regex("\\\"EnableDirectPlay\\\"").findAll(body).count())
+        assertEquals(1, Regex("\\\"EnableDirectStream\\\"").findAll(body).count())
+        assertEquals(1, Regex("\\\"EnableTranscoding\\\"").findAll(body).count())
         assertTrue(body.contains("\"StartTimeTicks\":600000000"))
         assertTrue(body.contains("\"MaxStreamingBitrate\":2000000"))
         // Token 不进 URL query / JSON body，只走请求头
@@ -179,6 +185,21 @@ class EmbyPlaybackProviderTest {
         assertEquals(HdrType.DOLBY_VISION, source.hdrType)
     }
 
+    @Test
+    fun `dolby vision detected via dovi extended video subtype`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"PlaySessionId":"ps-1","MediaSources":[
+                    {"Id":"src1","Container":"mkv","SupportsDirectStream":true,
+                     "MediaStreams":[{"Index":0,"Type":"Video","Codec":"hevc",
+                       "VideoRange":"HDR10","ExtendedVideoSubType":"DoviProfile81"}]}]}"""
+            )
+        )
+        val source = provider().resolvePlayback(movie, PlaybackOptions())
+        assertEquals(HdrType.DOLBY_VISION, source.hdrType)
+    }
+
     // ---- 5：RequiredHttpHeaders 合并 ----
     @Test
     fun `required http headers merged into playback source headers`() = runBlocking {
@@ -203,14 +224,16 @@ class EmbyPlaybackProviderTest {
             MockResponse().setResponseCode(200).setBody(
                 """{"PlaySessionId":"ps-1","MediaSources":[
                     {"Id":"src1","Container":"mkv","SupportsDirectStream":true,
-                     "RequiredHttpHeaders":{"X-Emby-Token":"evil-token",
-                       "X-Emby-Authorization":"evil-auth"}}]}"""
+                     "RequiredHttpHeaders":{"x-emby-token":"evil-token",
+                       "x-emby-authorization":"evil-auth"}}]}"""
             )
         )
         val source = provider().resolvePlayback(movie, PlaybackOptions())
         assertEquals("tok-1", source.headers["X-Emby-Token"])
         assertTrue(source.headers["X-Emby-Authorization"]!!.contains("UserId=\"user-1\""))
         assertFalse(source.headers["X-Emby-Authorization"]!!.contains("evil"))
+        assertFalse(source.headers.keys.any { it == "x-emby-token" })
+        assertFalse(source.headers.keys.any { it == "x-emby-authorization" })
     }
 
     // ---- 7/8/9：严格校验（响应损坏 ≠ 需要转码） ----

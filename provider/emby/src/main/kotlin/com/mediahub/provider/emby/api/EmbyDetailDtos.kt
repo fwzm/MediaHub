@@ -34,7 +34,7 @@ data class EmbyUserItemDto(
     @SerialName("Chapters") val chapters: List<EmbyChapterInfoDto> = emptyList(),
 ) : EmbyItemFields
 
-/** 播放信息：GET /Items/{itemId}/PlaybackInfo 响应。 */
+/** 播放信息：POST /Items/{itemId}/PlaybackInfo 响应。 */
 @Serializable
 data class EmbyPlaybackInfoDto(
     @SerialName("MediaSources") val mediaSources: List<EmbyMediaSourceInfoDto> = emptyList(),
@@ -56,13 +56,22 @@ data class EmbyPlaybackInfoRequestDto(
     @SerialName("MaxStreamingBitrate") val maxStreamingBitrate: Long? = null,
     @SerialName("DeviceProfile") val deviceProfile: EmbyDeviceProfileDto = EmbyDeviceProfileDto(),
 )
-/** 最小 DeviceProfile：只评估 Direct Stream 能力，不评估转码组合（无转码红线）。 */
+/**
+ * 最小官方 DeviceProfile：声明当前客户端接受视频文件流，不复制完整 Swagger。
+ * Direct/Transcode 开关属于 PlaybackInfoRequest，禁止在 DeviceProfile 中重复伪造同名字段。
+ */
 @Serializable
 data class EmbyDeviceProfileDto(
-    @SerialName("EnablePlaybackRemuxing") val enablePlaybackRemuxing: Boolean = true,
-    @SerialName("EnableTranscoding") val enableTranscoding: Boolean = false,
-    @SerialName("EnableDirectPlay") val enableDirectPlay: Boolean = false,
-    @SerialName("EnableDirectStream") val enableDirectStream: Boolean = true,
+    @SerialName("Name") val name: String = "MediaHub",
+    @SerialName("SupportedMediaTypes") val supportedMediaTypes: String = "Video",
+    @SerialName("DirectPlayProfiles")
+    val directPlayProfiles: List<EmbyDirectPlayProfileDto> = listOf(EmbyDirectPlayProfileDto()),
+)
+
+/** 广泛的视频文件流能力；实际解码失败仍由 Media3 结构化上报，不回退服务器转码。 */
+@Serializable
+data class EmbyDirectPlayProfileDto(
+    @SerialName("Type") val type: String = "Video",
 )
 /** 单个 MediaSource（同一媒体的多个版本/容器）。 */
 @Serializable

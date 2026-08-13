@@ -3,29 +3,34 @@
 ### 修正（审查 11 项收口，禁转码/Token 红线加固）
 - PlaybackInfo 改官方 POST contract：POST /Items/{itemId}/PlaybackInfo；协商参数进 JSON body
   （EmbyPlaybackInfoRequestDto：UserId/IsPlayback/EnableDirectPlay=false/EnableDirectStream=true/
-  EnableTranscoding=false/StartTimeTicks/MaxStreamingBitrate/DeviceProfile）；UserId 仅走 query；
+  EnableTranscoding=false/StartTimeTicks/MaxStreamingBitrate/DeviceProfile）；UserId 同时走 query
+  与 typed body；
   requestJson encodeDefaults=true / explicitNulls=false；Token 不进 URL 也不进 body（只走请求头）。
 - DTO 补齐：EmbyMediaSourceInfoDto 增 RequiredHttpHeaders/DirectStreamUrl；EmbyMediaStreamDto 增
   DisplayTitle/IsExternal/DeliveryUrl/PixelFormat/ExtendedVideoType/ExtendedVideoSubType；
-  EmbyChapterInfoDto 增 ChapterIndex；新增 EmbyPlaybackInfoRequestDto/EmbyDeviceProfileDto。
+  EmbyChapterInfoDto 增 ChapterIndex；新增 EmbyPlaybackInfoRequestDto/EmbyDeviceProfileDto；
+  DeviceProfile 使用最小官方形状 SupportedMediaTypes=Video + DirectPlayProfiles[{Type=Video}]，
+  三项 Direct/Transcode 开关只保留在 PlaybackInfoRequest 顶层。
 - 严格校验（响应损坏 ≠ 需要转码）：MediaSources 空→Parse；MediaSourceId/PlaySessionId 缺失→Parse；
   仅"源非空但全不支持 DirectStream"→NotYetImplemented("需要转码")。
 - directStreamUrl 参数改非 nullable 必填（itemId/container/mediaSourceId/playSessionId），
   始终输出 MediaSourceId/PlaySessionId/static=true；禁止生成残缺 URL。
-- RequiredHttpHeaders 并入 PlaybackSource.headers；鉴权头后合并且获胜（源级不可覆盖
-  X-Emby-Token / X-Emby-Authorization）。
+- RequiredHttpHeaders 并入 PlaybackSource.headers；按 HTTP Header 大小写不敏感语义剔除
+  与鉴权头冲突的源级键，再写入权威 X-Emby-Token / X-Emby-Authorization。
 - 只视频型门禁：MOVIE/EPISODE/VIDEO 才进入播放协议；AUDIO（0 HTTP）、LIVE_TV/OTHER 明确拒绝。
-- mapHdrType 3 参（videoRange/extendedVideoType/extendedVideoSubType）识别 Dolby Vision。
+- mapHdrType 3 参（videoRange/extendedVideoType/extendedVideoSubType）识别 Dolby Vision，
+  包括 ExtendedVideoSubType=DoviProfile81 等官方枚举值。
 ### 可测性（feature:player 从 0 测试到有测试）
 - 新增 PlaybackEnginePort（uiState/progress/events/exoPlayer/play/控制/stop/release）与
   PlaybackEngineCreator（fun interface create(scope)）；PlaybackEngine/PlaybackEngineFactory 实现。
 - PlayerViewModel 依赖改为 ServerStore/ProgressStore/PlaybackEngineCreator（替代 Repository/Factory 具体类）；
   ProgressStore 补 getResume/save（ProgressRepository 实现并补 override）。
 - AppModule providePlaybackEngineFactory 返回 PlaybackEngineCreator。
-### 测试（预计 114 + 3 = 117 用例）
-- EmbyPlaybackProviderTest 重写 18 用例：POST contract（query 仅 UserId、body 完整协商字段、
+### 测试（当前树共 133 个 `@Test`）
+- EmbyPlaybackProviderTest 19 用例：POST contract（query 仅 UserId、body 完整协商字段、
   Token 不进 URL/body）、DirectStream URL 必备参数、元数据映射、Dolby Vision、
-  RequiredHttpHeaders 合并、鉴权头不可覆盖、空 MediaSources/缺 MediaSourceId/缺 PlaySessionId→Parse、
+  DoviProfile subtype、RequiredHttpHeaders 合并、鉴权头大小写不敏感保护、
+  空 MediaSources/缺 MediaSourceId/缺 PlaySessionId→Parse、
   非空无 DS→NotYetImplemented、403/404/500 映射、AUDIO 0 HTTP、forceTranscode 0 HTTP、
   缺 session 0 HTTP、401→AuthExpired、多源取第一个 DirectStream。
 - PlayerViewModelTest 新增 3 用例：A. detail 真实 MediaType 覆盖 fallback 并透传续播位置；
