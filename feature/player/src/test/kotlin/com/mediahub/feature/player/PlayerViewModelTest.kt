@@ -108,15 +108,21 @@ class PlayerViewModelTest {
             engineFactory = PlaybackEngineCreator { engine },
             logger = noOpLogger,
         )
-        runCurrent()
+        try {
+            runCurrent()
 
-        // playbackProvider 收到的是 detail 返回的 MOVIE，而不是 fallback 的 OTHER
-        val received = playback.receivedItem
-        assertEquals(MediaType.MOVIE, received?.type)
-        assertEquals("m1", received?.id)
-        // 续播位置透传
-        assertEquals(15_000L, playback.receivedStartMs)
-        assertEquals(ResolveState.Ready, vm.resolveState.value)
+            // playbackProvider 收到的是 detail 返回的 MOVIE，而不是 fallback 的 OTHER
+            val received = playback.receivedItem
+            assertEquals(MediaType.MOVIE, received?.type)
+            assertEquals("m1", received?.id)
+            // 续播位置透传
+            assertEquals(15_000L, playback.receivedStartMs)
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+        } finally {
+            // 终止 ProgressSyncCoordinator 的 sample 长任务，避免 Gradle test worker 泄漏。
+            vm.stopAndFlush()
+            runCurrent()
+        }
     }
 
     // ---- B：PlaybackSource 最终到达 engine.play ----
@@ -146,12 +152,17 @@ class PlayerViewModelTest {
             engineFactory = PlaybackEngineCreator { engine },
             logger = noOpLogger,
         )
-        runCurrent()
+        try {
+            runCurrent()
 
-        val session = engine.playedSession
-        assertEquals(source, session?.source)
-        assertEquals("m1", session?.itemId)
-        assertEquals(ResolveState.Ready, vm.resolveState.value)
+            val session = engine.playedSession
+            assertEquals(source, session?.source)
+            assertEquals("m1", session?.itemId)
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
     }
 
     // ---- C：解析失败 → Failed，engine 不 play ----
@@ -175,10 +186,15 @@ class PlayerViewModelTest {
             engineFactory = PlaybackEngineCreator { engine },
             logger = noOpLogger,
         )
-        runCurrent()
+        try {
+            runCurrent()
 
-        assertTrue(vm.resolveState.value is ResolveState.Failed)
-        assertNull(engine.playedSession)
+            assertTrue(vm.resolveState.value is ResolveState.Failed)
+            assertNull(engine.playedSession)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
     }
 
     // ---- fakes ----
