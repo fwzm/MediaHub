@@ -110,7 +110,7 @@ data class EmbyMediaStreamDto(
     @SerialName("IsExternal") val isExternal: Boolean = false,
     @SerialName("DeliveryUrl") val deliveryUrl: String? = null,
     @SerialName("Profile") val profile: String? = null,
-    @SerialName("Level") val level: String? = null,
+    @SerialName("Level") val level: Int? = null, // Emby 返回整数（如 153=HEVC 5.1）；旧版误声明 String 导致真实响应解析失败
     @SerialName("PixelFormat") val pixelFormat: String? = null,
     @SerialName("VideoRange") val videoRange: String? = null,
     @SerialName("ExtendedVideoType") val extendedVideoType: String? = null,

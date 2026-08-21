@@ -114,7 +114,7 @@ object EmbyDetailMapper {
         isDefault = stream.isDefault,
         isForced = stream.isForced,
         profile = stream.profile,
-        level = stream.level,
+        level = stream.level?.toString(),
     )
 
     private fun mapAudioTrack(stream: EmbyMediaStreamDto): AudioTrack = AudioTrack(

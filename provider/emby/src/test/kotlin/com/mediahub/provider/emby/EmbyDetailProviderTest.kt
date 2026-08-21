@@ -77,10 +77,10 @@ class EmbyDetailProviderTest {
          "MediaSources":[{"Id":"src1","Name":"4K HDR10","Container":"mkv","Size":123,
            "Bitrate":1000000,"RunTimeTicks":72000000000,"SupportsDirectStream":true,
            "MediaStreams":[{"Index":0,"Type":"Video","Codec":"hevc","Width":3840,
-             "Height":2160,"BitRate":8000000,"VideoRange":"HDR10","IsDefault":true}]}],
+             "Height":2160,"BitRate":8000000,"VideoRange":"HDR10","Level":153,"IsDefault":true}]}],
          "MediaStreams":[
            {"Index":0,"Type":"Video","Codec":"hevc","Width":3840,"Height":2160,
-            "BitRate":8000000,"VideoRange":"HDR10","IsDefault":true},
+            "BitRate":8000000,"VideoRange":"HDR10","Level":153,"IsDefault":true},
            {"Index":1,"Type":"Audio","Codec":"aac","Channels":6,"SampleRate":48000,
             "Language":"eng","IsDefault":true},
            {"Index":2,"Type":"Subtitle","Codec":"srt","Language":"chi"}],
