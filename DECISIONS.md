@@ -217,3 +217,26 @@
 - 理由：PR #1 与 main 分叉（merge base 3a8d530，各自有独立提交），其认证基础设施是
   与 main 并行的一套；以 main 为主线不回归已验收的 Phase 1A。SAF 完整落地留待 Phase 0.6。
 - 影响：PR #1 标记为 not-merge（架构分叉不再继续开发）；后续新功能base在 main。
+
+## ADR-030 播放重定向凭据隔离（跨 origin 剥离鉴权头）
+- 状态：已采纳（2026-08-22，Phase 1B-2.2）
+- 背景：Emby Direct Stream 真实链路为 `HTTPS(Emby) → 307 → HTTP 直链 IP → 对象存储`，
+  0.6.2 为跟随跨协议重定向启用了 DefaultHttpDataSource 的手动 redirect 循环。
+  审查发现（并用双 MockWebServer 回归测试确定性复现）：media3 1.5.1 会把
+  `DataSpec.httpRequestHeaders`（含 X-Emby-Token / X-Emby-Authorization）原样
+  重复发送给**每一跳** redirect 目标，无任何按 origin 的剥离——长期凭据跨 origin、
+  且经明文 HTTP 泄漏给直链/对象存储主机（P1）。
+- 决策：
+  - 播放 HTTP 栈从 DefaultHttpDataSource 切换为 media3 `OkHttpDataSource`（redirect 由
+    OkHttp 原生跟随，跨协议不受限，仍受平台 cleartext 策略约束，业务行为与 0.6.2 等价）；
+  - 新增 `OriginScopedCredentialInterceptor`（OkHttp **network** interceptor，每跳生效）：
+    请求 origin（scheme+host+port）与本次播放首个请求的 origin 不同时，剥离
+    X-Emby-Token / X-MediaBrowser-Token / X-Emby-Authorization / X-MediaBrowser-Authorization /
+    Authorization / Proxy-Authorization / Cookie；origin 基准取 `chain.call().request()`
+    （ExoPlayer 每次起播/seek 都以原始 Direct Stream URL 发起新 call）；
+  - Range / User-Agent 等安全媒体头继续透传；RequiredHttpHeaders 是服务端显式指定给
+    目标媒体源的请求头，按原样透传（更细的作用域设计留待有真实样本后处理）。
+- 红线不变：Token 不进 URL（ADR-026）；本 ADR 补齐"Token 也不出 Emby origin"。
+- 测试：RedirectCredentialIsolationTest（Robolectric + 双/三 MockWebServer）：
+  跨 origin 单跳剥离 + 安全头透传、多跳（307+302）每跳剥离、同 origin 重定向保留凭据、
+  无重定向直连携带凭据。

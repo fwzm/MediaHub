@@ -1,4 +1,20 @@
 # 变更记录（CHANGELOG）
+## [0.6.3-redirect-credential-hardening] — 2026-08-22（Phase 1B-2.2：重定向凭据隔离）
+### 安全（P1）
+- 跨 origin 重定向泄漏 Emby 凭据：0.6.2 的 DefaultHttpDataSource 手动 redirect 循环会把
+  DataSpec 请求头（X-Emby-Token / X-Emby-Authorization）原样发送给每一跳 redirect 目标
+  （media3 1.5.1 无剥离逻辑），真实链路 HTTPS(Emby)→307→HTTP 直链→对象存储 下等于把
+  长期凭据明文发给第三方主机。双 MockWebServer 回归测试确定性复现
+  （`X-Emby-Token: secret-token` 到达跨 origin 目标）。
+- 修复（ADR-030）：播放 HTTP 栈切换为 media3 OkHttpDataSource（redirect 由 OkHttp 原生
+  跟随，跨协议行为不变）+ OriginScopedCredentialInterceptor（network interceptor，每跳生效）：
+  跨 origin（scheme+host+port 变化）一律剥离鉴权/身份头，同 origin 保留；
+  Range / User-Agent 等安全媒体头继续透传。
+### 测试
+- RedirectCredentialIsolationTest（Robolectric + MockWebServer×3）：跨 origin 单跳剥离、
+  多跳（307+302）每跳剥离、同 origin 重定向保留凭据、无重定向直连携带凭据，4/4 绿。
+### 验证
+- 本地 testDebugUnitTest / lintDebug / assembleDebug 全绿；真机复验见 smoke 记录。
 ## [0.6.2-smoke-fixes] — 2026-08-21（真机 Direct Stream smoke 修复）
 ### 修复（真机 smoke 暴露）
 - MainActivity 缺 @AndroidEntryPoint：MediaHubApp 有 @HiltAndroidApp、5 个 @HiltViewModel 经

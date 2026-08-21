@@ -29,6 +29,11 @@ android {
         // androidx lint 的 UnsafeOptInUsageError 只识别"使用点"级注解，比编译器更严格，故关闭（见 DECISIONS.md）。
         disable += "UnsafeOptInUsageError"
     }
+
+    testOptions {
+        // Redirect 凭据隔离回归测试需要真实 android.net.Uri / DataSpec（Robolectric）。
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
@@ -43,9 +48,12 @@ dependencies {
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.media3.database)
 
+    implementation(libs.okhttp)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.robolectric)
 }
