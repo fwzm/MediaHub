@@ -18,6 +18,8 @@ data class PlaybackUiState(
     val audioTracks: List<AudioTrack> = emptyList(),
     val subtitleTracks: List<SubtitleTrack> = emptyList(),
     val selectedAudio: TrackSelection? = null,
+    /** 实际正在输出的音频格式（MIME）；null=无音频输出（无声判据，Phase 1B-2.4）。 */
+    val audioFormatMime: String? = null,
     val selectedSubtitle: TrackSelection? = null,
     val error: PlaybackError? = null,
     val mediaTitle: String? = null,

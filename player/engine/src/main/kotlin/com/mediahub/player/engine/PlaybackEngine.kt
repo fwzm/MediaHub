@@ -4,6 +4,7 @@ package com.mediahub.player.engine
 
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -11,6 +12,8 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DecoderReuseEvaluation
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
@@ -121,14 +124,27 @@ class PlaybackEngine(
                         subtitleTracks = mapped.subtitleTracks,
                         selectedAudio = mapped.selectedAudio,
                         selectedSubtitle = mapped.selectedSubtitle,
+                        audioFormatMime = player.audioFormat?.sampleMimeType,
                     )
                 }
             }
+
+
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 _uiState.update {
                     it.copy(videoWidth = videoSize.width, videoHeight = videoSize.height)
                 }
+            }
+        })
+        // 音频输出信号（无声判据，Phase 1B-2.4）：AnalyticsListener 才有 onAudioFormatChanged
+        player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onAudioInputFormatChanged(
+                eventTime: AnalyticsListener.EventTime,
+                format: Format,
+                decoderReuseEvaluation: DecoderReuseEvaluation?,
+            ) {
+                _uiState.update { it.copy(audioFormatMime = format.sampleMimeType) }
             }
         })
     }

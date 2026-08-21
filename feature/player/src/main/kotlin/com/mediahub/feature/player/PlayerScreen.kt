@@ -137,13 +137,28 @@ fun PlayerRoute(
                     onShowSubtitle = { showSubtitleDialog = true },
                 )
 
-                // 有画面但全部音轨不被支持 → 显式提示，不再"安静地没有声音"（Phase 1B-2.4）
+                // 有画面但无音频输出 → 显式提示，不再"安静地没有声音"（Phase 1B-2.4）。
+                // 判据用 Media3 audioFormat（真实输出信号），不用 isTrackSupported
+                // （DTS-HD 等轨道标不支持，但设备解码器（如 c2.qti.dts.decoder）实际可解）。
                 val audioUnsupported = engineState.audioTracks.isNotEmpty() &&
-                    engineState.audioTracks.all { !it.isSupported }
+                    engineState.audioFormatMime == null && !engineState.isBuffering
+                // 播放期错误（Source error 等）：resolve 已成功但引擎报错，显式展示（Phase 1B-2.4）
+                state.error?.let { e ->
+                    Text(
+                        "播放失败：" + (e.message ?: "未知错误"),
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .background(Color.Black.copy(alpha = 0.65f))
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+
                 if (audioUnsupported) {
                     val codec = engineState.audioTracks.firstNotNullOfOrNull { prettyCodecName(it.codec) }
                     Text(
-                        "当前设备 / Media3 不支持该音频格式" + (codec?.let { "（$it）" } ?: "") + "，可尝试其他音轨",
+                        "未检测到音频输出" + (codec?.let { "（音轨 $it）" } ?: "") + "，该格式可能不被当前设备支持，可尝试其他音轨",
                         color = Color.Yellow,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier
