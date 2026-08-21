@@ -8,6 +8,10 @@
   coerceInputValues 不把数字强转 String，导致 Detail/PlaybackInfo 解析失败
   （JsonDecodingException at $.MediaSources[0].MediaStreams[0].Level）、Direct Stream 被完全阻断。
   修复：DTO level String?→Int?，mapper level?.toString() 转回领域模型字符串（core:model 不动，免 ADR）。
+- DefaultDataSource 未开跨协议重定向：Emby 远端媒体的 Direct Stream URL 常经 HTTPS→HTTP(直链)→S3
+  三级重定向，Media3 默认 allowCrossProtocolRedirects=false 拒绝 HTTPS→HTTP 降级，播放报
+  Source error(2004)。修复：PlayerFactory 用 DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true)
+  作为上游 DataSource。真机验证：1080p H.264 MKV（007：海底城）Direct Stream 起播成功（0:49/2:05:40）。
 ### 测试
 - EmbyDetailProviderTest 的 mock 视频流补 "Level":153（整数），回归覆盖真实响应形态。
 ### 验证
