@@ -8,6 +8,7 @@ import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.model.MediaServer
+import com.mediahub.model.ServerEndpoint
 import com.mediahub.model.ServerType
 import com.mediahub.provider.api.AuthResult
 import com.mediahub.provider.api.ConnectionStatus
@@ -245,12 +246,29 @@ class AddServerViewModel @Inject constructor(
     private fun buildServer(): MediaServer {
         val descriptor = selectedDescriptor()
         val state = _uiState.value
+        val url = state.baseUrl.trim().trimEnd('/')
+        // Phase 1B-2.5：地址从单一 baseUrl 迁为线路列表；单线路时生成一条主线路。
+        val endpoints = if (descriptor?.serverType == ServerType.LOCAL || url.isBlank()) {
+            emptyList()
+        } else {
+            listOf(
+                ServerEndpoint(
+                    id = "",
+                    serverId = "",
+                    name = "默认线路",
+                    url = url,
+                    isPrimary = true,
+                    enabled = true,
+                    sortOrder = 0,
+                )
+            )
+        }
         val candidate = MediaServer(
             id = serverId, // 实际 id 由 buildDraft 决定（existing 复用原 id）
             name = state.name.trim().ifBlank { descriptor?.displayName.orEmpty() },
             type = descriptor?.serverType ?: ServerType.EMBY,
-            baseUrl = state.baseUrl.trim().trimEnd('/'),
             username = state.username.trim().ifBlank { null },
+            endpoints = endpoints,
             createdAtEpochMs = System.currentTimeMillis(),
         )
         // existing 模式：复用 SAME id + 完整保留 isDefault/sortOrder/createdAtEpochMs/lastConnectedAtEpochMs/lastError

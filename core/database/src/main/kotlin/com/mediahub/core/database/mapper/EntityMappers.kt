@@ -2,6 +2,7 @@ package com.mediahub.core.database.mapper
 
 import com.mediahub.core.database.entity.AccountEntity
 import com.mediahub.core.database.entity.PlaybackProgressEntity
+import com.mediahub.core.database.entity.ServerEndpointEntity
 import com.mediahub.core.database.entity.ServerEntity
 import com.mediahub.model.AuthState
 import com.mediahub.model.MediaAccount
@@ -9,17 +10,34 @@ import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaType
 import com.mediahub.model.PlaybackMode
 import com.mediahub.model.PlaybackProgress
+import com.mediahub.model.ServerEndpoint
 import com.mediahub.model.ServerType
 
 /** Entity ↔ Domain 映射（数据库层与领域层解耦）。 */
 object ServerEntityMappers {
 
-    fun ServerEntity.toDomain(): MediaServer = MediaServer(
+    fun ServerEntity.toDomain(endpoints: List<ServerEndpoint> = emptyList()): MediaServer = MediaServer(
         id = id,
         name = name,
         type = runCatching { ServerType.valueOf(type) }.getOrElse { ServerType.LOCAL },
-        baseUrl = baseUrl,
         username = username,
+        note = note,
+        icon = icon,
+        isDefault = isDefault,
+        sortOrder = sortOrder,
+        createdAtEpochMs = createdAtEpochMs,
+        lastConnectedAtEpochMs = lastConnectedAtEpochMs,
+        lastError = lastError,
+        endpoints = endpoints,
+    )
+
+    fun MediaServer.toEntity(): ServerEntity = ServerEntity(
+        id = id,
+        name = name,
+        type = type.name,
+        username = username,
+        note = note,
+        icon = icon,
         isDefault = isDefault,
         sortOrder = sortOrder,
         createdAtEpochMs = createdAtEpochMs,
@@ -27,17 +45,30 @@ object ServerEntityMappers {
         lastError = lastError,
     )
 
-    fun MediaServer.toEntity(): ServerEntity = ServerEntity(
+    fun ServerEndpointEntity.toDomain(): ServerEndpoint = ServerEndpoint(
         id = id,
+        serverId = serverId,
         name = name,
-        type = type.name,
-        baseUrl = baseUrl,
-        username = username,
-        isDefault = isDefault,
+        url = url,
+        isPrimary = isPrimary,
+        enabled = enabled,
         sortOrder = sortOrder,
-        createdAtEpochMs = createdAtEpochMs,
-        lastConnectedAtEpochMs = lastConnectedAtEpochMs,
+        lastLatencyMs = lastLatencyMs,
         lastError = lastError,
+        lastTestedAtEpochMs = lastTestedAtEpochMs,
+    )
+
+    fun ServerEndpoint.toEntity(): ServerEndpointEntity = ServerEndpointEntity(
+        id = id,
+        serverId = serverId,
+        name = name,
+        url = url,
+        isPrimary = isPrimary,
+        enabled = enabled,
+        sortOrder = sortOrder,
+        lastLatencyMs = lastLatencyMs,
+        lastError = lastError,
+        lastTestedAtEpochMs = lastTestedAtEpochMs,
     )
 
     fun AccountEntity.toDomain(): MediaAccount = MediaAccount(

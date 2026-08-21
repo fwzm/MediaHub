@@ -8,6 +8,7 @@ import com.mediahub.core.common.AppDispatchers
 import com.mediahub.core.common.ClientIdentity
 import com.mediahub.core.common.ClientIdentityProvider
 import com.mediahub.core.database.AppDatabase
+import com.mediahub.core.database.Migrations
 import com.mediahub.core.logging.CompositeLogger
 import com.mediahub.core.logging.LogBuffer
 import com.mediahub.core.logging.LogcatLogger
@@ -108,6 +109,7 @@ object AppModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, AppDatabase.NAME)
+            .addMigrations(Migrations.MIGRATION_1_2)
             .build()
 
     @Provides

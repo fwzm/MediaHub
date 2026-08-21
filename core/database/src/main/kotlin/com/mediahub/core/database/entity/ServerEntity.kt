@@ -10,8 +10,9 @@ data class ServerEntity(
     val name: String,
     /** [com.mediahub.model.ServerType].name */
     val type: String,
-    val baseUrl: String,
     val username: String? = null,
+    val note: String? = null,
+    val icon: String? = null,
     val isDefault: Boolean = false,
     val sortOrder: Int = 0,
     val createdAtEpochMs: Long,

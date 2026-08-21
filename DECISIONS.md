@@ -262,8 +262,9 @@
     selected TrackSelection 与引擎 MappedTrackInfo.getTrackGroups(type) 的 per-renderer 组序号
     一一对应；禁止任何层再使用 Tracks.groups 全局序号（存在视频组时错位）。
   - **音频诊断内置**：每音轨携带 isSupported（Tracks.Group.isTrackSupported）与
-    decoderName（MediaCodecUtil.getDecoderInfo，宽容 null）；全部音轨不支持时播放页
-    显式提示，不允许"有画面无声音"静默发生——为未来 mpv fallback 收集数据。
+    decoderName（MediaCodecUtil.getDecoderInfo，宽容 null）；无声提示基于当前 Audio Pipeline
+    观测状态（audioFormatMime 非空才视为有声信号），isSupported 仅用于轨道能力提示、
+    不作为是否有声音的唯一判据——为未来 mpv fallback 收集数据。
   - **字幕样式默认白字 + 全透明背景 + 黑描边**（彻底去 CC 黑底），样式持久化于
     UserPreferences.subtitleStyle（DataStore），由 PlayerScreen 应用到 SubtitleView
     （CaptionStyleCompat + setFractionalTextSize + setBottomPaddingFraction +

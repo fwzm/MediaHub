@@ -1,4 +1,14 @@
 # 变更记录（CHANGELOG）
+## [0.9.0-phase1b2.5] — 2026-08-22（Phase 1B-2.5：Server Management 地基）
+### 新增（数据模型地基）
+- ServerEndpoint 领域模型 + Room 实体（server_endpoints 表）：一条 MediaServer 多条线路（主/备）。
+- MediaServer：baseUrl 迁为计算属性（返回当前生效线路 URL，读取方零改动），新增 note/icon/endpoints；
+  保留旧签名向后兼容构造器（baseUrl → 单条主线路）。
+- Room migration 1→2：servers 去 baseUrl 加 note/icon，新增 server_endpoints，旧 baseUrl 迁为主线路。
+- ServerRepository 用 combine 加载 servers+endpoints；add/update/delete 同步线路。
+- mapper 补 ServerEndpoint 双向映射 + ServerEntityMappersTest 扩展（5 用例）。
+### 文档
+- 修正 ADR-032 漂移：无声提示基于当前 Audio Pipeline 观测状态，isSupported 仅作轨道能力提示。
 ## [0.8.0-player-ux-hardening] — 2026-08-22（Phase 1B-2.4：播放器 UX 硬化）
 ### 修复（真机级隐患）
 - **TrackSelection 三套 index 语义统一**：TrackMapper 原保存 Tracks.groups 全局序号，UI 用

@@ -149,6 +149,17 @@
 - [x] UserPreferencesRepository 抽象；README/CHANGELOG/DECISIONS 同步
 - [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；真机多音轨/字幕样式验证随后记录
 
+## Phase 1B-2.5 —— Server Management（本次开工）🔄 IN PROGRESS
+- [x] ServerEndpoint 数据模型 + Room migration 1→2（servers 去 baseUrl 加 note/icon；新增 server_endpoints 表）
+- [x] MediaServer 模型：baseUrl 迁为计算属性（活跃线路 URL）+ note/icon/endpoints + 向后兼容构造器
+- [x] ServerRepository 加载线路（combine servers+endpoints）；add/update/delete 处理线路
+- [x] mapper 补 ServerEndpoint 双向映射 + 测试（ServerEntityMappersTest 5 用例）
+- [ ] Server Editor（名称/备注/图标/URL/用户名/重新登录/设为默认/删除）
+- [ ] 线路测试（走 testConnection，记录 DNS/HTTP/耗时/身份/会话）
+- [ ] 手动线路切换（不做自动最快）
+- [ ] 媒体源独立一级页面（首页/媒体库/媒体源/设置 路由）
+- [ ] 单测 + exact-head CI + 真机验证
+
 ## V0.1 —— MVP（下一步） 
 
 ### IN PROGRESS（无，等待开工）
