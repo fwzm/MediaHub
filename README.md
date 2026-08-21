@@ -2,7 +2,7 @@
 
 > 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
 
-当前状态：**Phase 0 骨架**（可编译、可运行、核心闭环已就绪，具体数据源 API 下一阶段接入）。
+当前状态：**Phase 1B-2.1**（Emby 登录、媒体库浏览、条目详情、无转码 Direct Stream 已实现；真机 Direct Stream smoke 验证中）。
 
 ## 项目简介
 
@@ -29,7 +29,7 @@ player/
 provider/
   api/               MediaProvider 统一接口 + 能力声明 + 异常（纯 Kotlin）
   base/              BaseMediaServerProvider + Provider 注册表
-  emby/ jellyfin/ webdav/ local/   具体数据源（local 已实现；其余 Phase 1）
+  emby/ jellyfin/ webdav/ local/   具体数据源（emby、local 已实现；jellyfin/webdav 骨架）
   smb/ aliyun/ baidu/ quark/ china-mobile/ tianyi/   规划占位（README）
 metadata/            媒体元数据（刮削）抽象
 feature/
@@ -54,16 +54,21 @@ docs/                providers / player / api 设计文档
 
 产物：`app/build/outputs/apk/debug/app-debug.apk`
 
-## 当前可用的端到端路径（Phase 0）
+## 当前可用的端到端路径
 
-1. 首页 → 添加媒体库 → 选择类型（Emby / Jellyfin / WebDAV / 本地存储）→ 测试连接 → 保存。
-2. 点击"本地存储"卡片 → 浏览应用外部目录文件树（文件夹可进入/返回上级）。
-3. 点击视频文件 → 播放器（PlayerView + 播放/暂停/进度/倍速/音轨/字幕选择）。
+### Emby（Phase 1A–1B-2.1）
+1. 首页 → 添加媒体库 → Emby → 填服务器地址 / 用户名 / 密码 → 登录并添加。
+2. 点 Emby 服务器卡片 → 浏览 Views → 电影库 / 剧集库 → 条目列表。
+3. 点 Movie / Episode → 详情 → 播放（无转码 Direct Stream，Token 只走请求头不进 URL）。
 4. 播放进度自动写入本地快照 → 首页"继续观看"。
-5. 设置页可改默认倍速、字幕大小、硬解/直连偏好等（DataStore 持久化）。
 
-Emby / Jellyfin / WebDAV 的 API 业务（登录、媒体库、搜索、播放源解析、进度上报）为 Phase 1
-目标，当前会以明确的中文错误提示"尚未实现"（见 TASKS.md）。
+### 本地存储（Phase 0）
+1. 首页 → 添加媒体库 → 本地存储 → 保存。
+2. 点"本地存储"卡片 → 浏览文件树 → 点视频文件 → 播放。
+
+设置页可改默认倍速、字幕大小等（DataStore 持久化）。
+
+> Jellyfin / WebDAV / 搜索 / 字幕 / 播放进度上报为后续 Phase 候选，尚未实现（见 TASKS.md）。
 
 ## 安全约定（强制）
 

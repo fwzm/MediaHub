@@ -1,4 +1,17 @@
 # 变更记录（CHANGELOG）
+## [0.6.2-smoke-fixes] — 2026-08-21（真机 Direct Stream smoke 修复）
+### 修复（真机 smoke 暴露）
+- MainActivity 缺 @AndroidEntryPoint：MediaHubApp 有 @HiltAndroidApp、5 个 @HiltViewModel 经
+  hiltViewModel() 注入，但宿主 Activity 缺注解，首启确定性崩溃（GeneratedComponent/GeneratedComponentManager）。
+  修复：补 import dagger.hilt.android.AndroidEntryPoint + @AndroidEntryPoint（CI 只构建不启动，故未暴露）。
+- EmbyMediaStreamDto.Level 误声明 String?：真实 Emby 返回整数（如 153=HEVC 5.1），
+  coerceInputValues 不把数字强转 String，导致 Detail/PlaybackInfo 解析失败
+  （JsonDecodingException at $.MediaSources[0].MediaStreams[0].Level）、Direct Stream 被完全阻断。
+  修复：DTO level String?→Int?，mapper level?.toString() 转回领域模型字符串（core:model 不动，免 ADR）。
+### 测试
+- EmbyDetailProviderTest 的 mock 视频流补 "Level":153（整数），回归覆盖真实响应形态。
+### 验证
+- exact-head CI：Hilt 修复 run 32413689874、Level 修复 run 32504254869，均 success。
 ## [0.6.1-phase1b2.1] — 2026-08-13（Phase 1B-2.1：Direct Stream 协议边界 FINAL HARDENING）
 ### 修正（审查 11 项收口，禁转码/Token 红线加固）
 - PlaybackInfo 改官方 POST contract：POST /Items/{itemId}/PlaybackInfo；协商参数进 JSON body
