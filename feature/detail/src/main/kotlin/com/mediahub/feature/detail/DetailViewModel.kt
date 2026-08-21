@@ -3,6 +3,7 @@ package com.mediahub.feature.detail
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.mediahub.core.common.NavArgCodec
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.LogTag
@@ -29,7 +30,9 @@ class DetailViewModel @Inject constructor(
 ) : ViewModel() {
 
     val serverId: String = checkNotNull(savedStateHandle["serverId"])
-    val itemId: String = checkNotNull(savedStateHandle["itemId"])
+
+    // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（与 PlayerViewModel 一致）
+    val itemId: String = NavArgCodec.decode(checkNotNull(savedStateHandle["itemId"]))
 
     private val _uiState = MutableStateFlow<DetailUiState>(DetailUiState.Loading)
     val uiState: StateFlow<DetailUiState> = _uiState.asStateFlow()

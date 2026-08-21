@@ -136,7 +136,10 @@
 - [x] UI：库浏览媒体条目改 3 列海报墙（Episode 16:9）；继续观看改缩略图+进度条；
       极简详情页接线（backdrop+海报+元信息+简介+播放按钮，nav detail 路由）
 - [x] posterUrl 落盘：PlaybackSession→PlaybackProgress→Room（列已存在，零迁移）
-- [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；真机走查（海报墙/缩略图/详情页/无 Token 泄漏）随后记录
+- [x] 真机走查（Xiaomi 14 Ultra / Android 16）：海报墙 3 列真实海报、Episode 16:9 剧照、详情页 backdrop+
+      海报+元信息（2014·69分钟·★8.6）+播放按钮、继续观看缩略图+进度条（旧记录占位、重播自愈）、
+      播放/退出释放无回归；图片 URL 无 Token（EmbyImageMapperTest/EmbyImageAuthInterceptorTest 契约钉死）
+- [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；结果以交付报告记录 run id（不做 docs-only 二次提交）
 
 ## V0.1 —— MVP（下一步） 
 
