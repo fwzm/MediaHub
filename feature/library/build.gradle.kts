@@ -32,6 +32,7 @@ kotlin {
 
 dependencies {
     implementation(project(":core:model"))
+    implementation(project(":core:ui"))
     implementation(project(":core:logging"))
     implementation(project(":core:database"))
     implementation(project(":provider:api"))

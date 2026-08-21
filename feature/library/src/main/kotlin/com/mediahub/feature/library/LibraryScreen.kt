@@ -5,11 +5,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Folder
@@ -33,6 +37,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mediahub.core.ui.PosterImage
+import com.mediahub.core.ui.ThumbImage
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
 import com.mediahub.model.MediaType
@@ -129,20 +135,30 @@ fun LibraryRoute(
                         Text("空目录", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
-                    LazyColumn(
+                    // 海报墙（Phase 1B-2.3）：媒体条目 3 列网格；文件夹保持行，可与网格混排
+                    val folders = s.items.filter { it.type == MediaType.FOLDER }
+                    val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
                         modifier = Modifier.fillMaxSize().padding(padding),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         if (s.canGoUp) {
-                            item {
-                                TextButton(onClick = viewModel::goToParent) {
+                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
+                                TextButton(onClick = viewModel::goToParent, modifier = Modifier.fillMaxWidth()) {
                                     Text("⬆ 返回上级")
                                 }
                             }
                         }
-                        items(s.items, key = { "${it.id}:${it.title}" }) { item ->
-                            ItemRow(item = item, onClick = { onItemClick(item, viewModel, onOpenItem) })
+                        folders.forEach { folder ->
+                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
+                                FolderRow(item = folder, onClick = { viewModel.openFolder(folder) })
+                            }
+                        }
+                        gridItems(mediaItems, key = { "${it.id}:${it.title}" }) { item ->
+                            PosterCell(item = item, onClick = { onItemClick(item, viewModel, onOpenItem) })
                         }
                     }
                 }
@@ -186,8 +202,9 @@ private fun LibraryRow(library: MediaLibrary, onClick: () -> Unit) {
     }
 }
 
+/** 文件夹行（混排在海报墙网格中，占满整行）。 */
 @Composable
-private fun ItemRow(item: MediaItem, onClick: () -> Unit) {
+private fun FolderRow(item: MediaItem, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -196,24 +213,44 @@ private fun ItemRow(item: MediaItem, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        val icon = when (item.type) {
-            MediaType.FOLDER -> Icons.Default.Folder
-            MediaType.AUDIO -> Icons.Default.MusicNote
-            else -> Icons.Default.Movie
-        }
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Column(modifier = Modifier.weight(1f)) {
-            Text(item.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            item.sizeBytes?.let {
-                Text(formatSize(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+        Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(item.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
-private fun formatSize(bytes: Long): String = when {
-    bytes >= 1L shl 30 -> "%.1f GB".format(bytes.toDouble() / (1L shl 30))
-    bytes >= 1L shl 20 -> "%.1f MB".format(bytes.toDouble() / (1L shl 20))
-    bytes >= 1L shl 10 -> "%.1f KB".format(bytes.toDouble() / (1L shl 10))
-    else -> "$bytes B"
+/**
+ * 海报墙单元格（Phase 1B-2.3）：
+ * - 电影/剧集/季 → 2:3 竖版海报；
+ * - 单集/视频 → 16:9 缩略图（Episode 的 posterUrl 语义就是 Thumb）；
+ * - 无图（provider 未给 posterUrl）→ 灰底占位。
+ */
+@Composable
+private fun PosterCell(item: MediaItem, onClick: () -> Unit) {
+    val isThumbShape = item.type == MediaType.EPISODE || item.type == MediaType.VIDEO
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+    ) {
+        if (isThumbShape) {
+            ThumbImage(
+                url = item.posterUrl,
+                contentDescription = item.title,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            PosterImage(
+                url = item.posterUrl,
+                contentDescription = item.title,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Text(
+            item.title,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
 }

@@ -9,6 +9,7 @@ import com.mediahub.provider.api.MediaDetailProvider
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.emby.api.EmbyApiClient
 import com.mediahub.provider.emby.mapper.EmbyDetailMapper
+import com.mediahub.provider.emby.mapper.EmbyImageMapper
 import com.mediahub.provider.emby.session.EmbySessionStore
 import java.io.IOException
 import kotlinx.serialization.SerializationException
@@ -31,8 +32,12 @@ class EmbyDetailProvider(
         val (token, userId) = requireSession()
         return try {
             val dto = api.getUserItem(token, userId, itemId)
-            EmbyDetailMapper.mapDetail(dto, server.id)
+            val detail = EmbyDetailMapper.mapDetail(dto, server.id)
                 ?: throw ProviderException.Parse(server.id)
+            // 详情页图片：item 上 enrich（detail DTO 现含 ImageTags/BackdropImageTags）
+            detail.copy(
+                item = EmbyImageMapper.enrich(detail.item, api, dto.imageTags, dto.backdropImageTags),
+            )
         } catch (e: Exception) {
             throw mapError(e)
         }

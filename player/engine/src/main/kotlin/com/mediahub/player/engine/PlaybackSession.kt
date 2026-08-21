@@ -12,4 +12,6 @@ data class PlaybackSession(
     val startPositionMs: Long? = null,
     val resumePositionMs: Long? = null,
     val itemType: MediaType? = null,
+    /** 展示用快照：继续观看卡片的缩略图（Phase 1B-2.3，无图时 UI 走占位）。 */
+    val posterUrl: String? = null,
 )

@@ -14,6 +14,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.feature.detail.DetailRoute
 import com.mediahub.feature.home.HomeRoute
 import com.mediahub.feature.library.LibraryRoute
 import com.mediahub.feature.player.PlayerRoute
@@ -55,7 +56,7 @@ fun MediaHubNavHost() {
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenItem = { progress ->
                     navController.navigate(
-                        "player/${progress.serverId}/${NavArgCodec.encode(progress.itemId)}" +
+                        "detail/${progress.serverId}/${NavArgCodec.encode(progress.itemId)}" +
                             "?title=${Uri.encode(progress.itemTitle ?: "")}"
                     )
                 },
@@ -120,7 +121,26 @@ fun MediaHubNavHost() {
                 },
                 onOpenItem = { item ->
                     navController.navigate(
-                        "player/$serverId/${NavArgCodec.encode(item.id)}?title=${Uri.encode(item.title)}"
+                        "detail/$serverId/${NavArgCodec.encode(item.id)}?title=${Uri.encode(item.title)}"
+                    )
+                },
+            )
+        }
+
+        composable(
+            route = "detail/{serverId}/{itemId}?title={title}",
+            arguments = listOf(
+                navArgument("serverId") { type = NavType.StringType },
+                navArgument("itemId") { type = NavType.StringType },
+                navArgument("title") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) { entry ->
+            DetailRoute(
+                title = entry.arguments?.getString("title").orEmpty(),
+                onBack = { navController.popBackStack() },
+                onPlay = { serverId, itemId, itemTitle ->
+                    navController.navigate(
+                        "player/$serverId/${NavArgCodec.encode(itemId)}?title=${Uri.encode(itemTitle)}"
                     )
                 },
             )

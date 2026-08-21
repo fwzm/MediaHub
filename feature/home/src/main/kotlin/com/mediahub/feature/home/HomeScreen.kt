@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mediahub.core.ui.ThumbImageWithProgress
 import com.mediahub.feature.server.ServerCard
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
@@ -128,32 +129,37 @@ private fun ContinueWatchingRow(
     progress: PlaybackProgress,
     onClick: () -> Unit,
 ) {
-    Row(
+    // 16:9 缩略图 + 底部进度条（Phase 1B-2.3）；旧记录无 posterUrl 时显示占位图
+    val fraction = if (progress.durationMs > 0) {
+        (progress.positionMs.toFloat() / progress.durationMs).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val percent = (fraction * 100).toInt()
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 10.dp, horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(vertical = 6.dp),
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = progress.itemTitle ?: "未命名",
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            val percent = if (progress.durationMs > 0) {
-                (progress.positionMs * 100 / progress.durationMs).toInt()
-            } else {
-                0
-            }
-            Text(
-                text = "进度 $percent%",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        ThumbImageWithProgress(
+            url = progress.posterUrl,
+            contentDescription = progress.itemTitle,
+            progress = fraction,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = progress.itemTitle ?: "未命名",
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Text(
+            text = "进度 $percent%",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

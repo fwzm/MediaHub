@@ -1,4 +1,4 @@
-package com.mediahub.player.engine
+package com.mediahub.core.network
 
 import okhttp3.Interceptor
 import okhttp3.Response

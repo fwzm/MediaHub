@@ -13,6 +13,8 @@ import com.mediahub.model.Season
 import com.mediahub.provider.api.MediaLibraryProvider
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.emby.api.EmbyApiClient
+import com.mediahub.provider.emby.api.EmbyImageType
+import com.mediahub.provider.emby.mapper.EmbyImageMapper
 import com.mediahub.provider.emby.mapper.EmbyLibraryMapper
 import com.mediahub.provider.emby.mapper.EmbyMediaItemMapper
 import com.mediahub.provider.emby.session.EmbySessionStore
@@ -41,7 +43,15 @@ class EmbyLibraryProvider(
         val (token, userId) = requireSession()
         return try {
             val views = api.getUserViews(token, userId)
-            views.items.mapNotNull { EmbyLibraryMapper.mapLibrary(it, server.id) }
+            views.items.mapNotNull { dto ->
+                EmbyLibraryMapper.mapLibrary(dto, server.id)?.let { library ->
+                    // 库封面（Primary）：有 ImageTags 才生成 URL
+                    library.copy(
+                        imageUrl = dto.imageTags?.get(EmbyImageType.PRIMARY.wireName)
+                            ?.let { tag -> api.imageUrl(library.id, EmbyImageType.PRIMARY, tag, EmbyImageMapper.LIST_MAX_WIDTH) },
+                    )
+                }
+            }
         } catch (e: Exception) {
             throw mapError(e)
         }
@@ -53,7 +63,11 @@ class EmbyLibraryProvider(
         return try {
             val result = api.getUserItems(token, userId, parentId = libraryId, page = page)
             PagedResult(
-                items = result.items.mapNotNull { EmbyMediaItemMapper.map(it, server.id) },
+                items = result.items.mapNotNull { dto ->
+                    EmbyMediaItemMapper.map(dto, server.id)?.let { item ->
+                        EmbyImageMapper.enrich(item, api, dto.imageTags, dto.backdropImageTags)
+                    }
+                },
                 totalCount = result.totalRecordCount,
                 hasMore = (page.offset + result.items.size) < result.totalRecordCount,
                 nextOffset = if ((page.offset + result.items.size) < result.totalRecordCount) {

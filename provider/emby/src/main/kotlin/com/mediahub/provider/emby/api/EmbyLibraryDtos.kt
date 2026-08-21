@@ -64,6 +64,7 @@ data class EmbyBaseItemDto(
     @SerialName("Container") override val container: String? = null,
     @SerialName("CommunityRating") override val communityRating: Double? = null,
     @SerialName("ImageTags") val imageTags: Map<String, String>? = null,
+    @SerialName("BackdropImageTags") val backdropImageTags: List<String> = emptyList(),
     @SerialName("PrimaryImageAspectRatio") val primaryImageAspectRatio: Double? = null,
     @SerialName("UserData") override val userData: EmbyUserDataDto? = null,
 ) : EmbyItemFields

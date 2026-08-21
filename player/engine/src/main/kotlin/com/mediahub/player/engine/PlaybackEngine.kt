@@ -235,6 +235,7 @@ class PlaybackEngine(
                             mode = s.source.mode,
                             itemTitle = s.itemTitle,
                             itemType = s.itemType,
+                            posterUrl = s.posterUrl,
                         )
                     )
                 }
@@ -257,6 +258,7 @@ class PlaybackEngine(
             mode = s.source.mode,
             itemTitle = s.itemTitle,
             itemType = s.itemType,
+            posterUrl = s.posterUrl,
         )
     }
 

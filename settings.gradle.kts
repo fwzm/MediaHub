@@ -30,6 +30,7 @@ include(":core:network")
 include(":core:database")
 include(":core:security")
 include(":core:logging")
+include(":core:ui")
 
 include(":player:engine")
 include(":player:compatibility")

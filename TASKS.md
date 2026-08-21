@@ -113,7 +113,31 @@
       ServerStore/ProgressStore/PlaybackEngineCreator；ProgressStore 补 getResume/save；
       AppModule @Provides 返回 PlaybackEngineCreator；PlayerViewModelTest 3 用例（A/B/C）；测试依赖补齐
 - [x] 附带修复：ProgressRepository 的 save/getResume 补 override（接口新成员）
-- [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；结果以交付报告记录 run id（不做 docs-only 二次提交）
+- [x] CI 验证：smoke 修复链 run 32413689874 / 32504254869 / 32509040901 / 32511203757（ed073b5 exact-head）全绿
+- [x] 真机 Final Smoke：Movie（007：海底城 1080p AVC MKV）+ Episode（冰血暴 S01E01）Direct Stream 起播/seek/
+      退出释放/本地续播全 PASS；转码样本与 RequiredHttpHeaders 均无真实样本（NOT_AVAILABLE，不伪造）
+## Phase 1B-2.2 —— Redirect Credential Hardening（跨 origin 凭据隔离）✅ DONE
+- [x] 确定性复现：双 MockWebServer 在 ed073b5 上证明 X-Emby-Token/X-Emby-Authorization 被 DefaultHttpDataSource
+      手动 redirect 循环原样转发给跨 origin 第三方主机（media3 1.5.1 无剥离逻辑，P1）
+- [x] ADR-030：播放 HTTP 栈切 media3 OkHttpDataSource（OkHttp 原生跟随跨协议 redirect）+
+      OriginScopedCredentialInterceptor（network interceptor 每跳生效；跨 scheme+host+port 剥离鉴权/身份头）
+- [x] 回归测试 RedirectCredentialIsolationTest 4/4（跨 origin 剥离/多跳 307+302/同 origin 保留/直连携带）
+- [x] exact-head CI run 32521821629（1bc4351）全绿；真机 A/B（同设备同片源同时段 ed073b5 vs 1bc4351）
+      确认吞吐劣化为服务器侧、非栈切换回归
+## Phase 1B-2.3 —— Artwork Pipeline（海报与背景图）✅ 代码+测试完成
+- [x] EmbyImageUrl 契约：/emby/Items/{id}/Images/{Primary|Thumb|Backdrop}?tag&maxWidth&quality，
+      Token 永不进 URL（ADR-026 延续；EmbyImageMapperTest 契约测试）
+- [x] 类型策略：Movie/Series/Season=Primary(400)+Backdrop(1280)；Episode/Video=Thumb??Primary(400)；
+      Folder/Audio 不生成；detail DTO 补 ImageTags/BackdropImageTags/PrimaryImageAspectRatio
+- [x] 鉴权加载：MediaHubApp 实现 ImageLoaderFactory（OkHttp + EmbyImageAuthInterceptor 注入
+      X-Emby-Token/X-Emby-Authorization，origin=scheme+host+port 匹配；跨 origin 重定向由
+      OriginScopedCredentialInterceptor 剥离，ADR-030 红线覆盖图片）；磁盘缓存 image_cache 256MB LRU
+- [x] 新模块 core:ui：PosterImage(2:3)/ThumbImage(16:9)/BackdropImage + 占位/错误态（Compose 绘制）
+- [x] UI：库浏览媒体条目改 3 列海报墙（Episode 16:9）；继续观看改缩略图+进度条；
+      极简详情页接线（backdrop+海报+元信息+简介+播放按钮，nav detail 路由）
+- [x] posterUrl 落盘：PlaybackSession→PlaybackProgress→Room（列已存在，零迁移）
+- [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；真机走查（海报墙/缩略图/详情页/无 Token 泄漏）随后记录
+
 ## V0.1 —— MVP（下一步） 
 
 ### IN PROGRESS（无，等待开工）
@@ -129,11 +153,11 @@
 - [ ] WebDAV Provider（PROPFIND 文件树 + Basic 认证 + 播放）
 - [ ] 播放前接入 PlaybackCompatibilityEvaluator（resolve 流程输出三态决策）
 - [ ] 播放器：URL 过期自动重解析、外挂字幕、字幕/音频延迟、HDR/媒体信息显示
-- [ ] 详情页完整化（海报/简介/演职员/多版本）
+- [ ] 详情页完整化（演职员/多版本/季集直达；海报/简介/背景图已随 1B-2.3 完成）
 - [ ] 全局搜索（跨 Provider 聚合）
 - [ ] cleartext 改 networkSecurityConfig（按域名放行）
 - [ ] 诊断页 + 脱敏报告导出
-- [ ] Coil 图片管线接入（海报/背景图）
+- [x] Coil 图片管线接入（海报/背景图，Phase 1B-2.3）
 
 ### BLOCKED
 - （无）

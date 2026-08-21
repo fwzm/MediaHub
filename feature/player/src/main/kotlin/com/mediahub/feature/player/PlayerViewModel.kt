@@ -139,6 +139,7 @@ class PlayerViewModel @Inject constructor(
                         source = source,
                         resumePositionMs = resume,
                         itemType = item.type,
+                        posterUrl = item.posterUrl,
                     )
                 )
 

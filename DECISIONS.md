@@ -240,3 +240,17 @@
 - 测试：RedirectCredentialIsolationTest（Robolectric + 双/三 MockWebServer）：
   跨 origin 单跳剥离 + 安全头透传、多跳（307+302）每跳剥离、同 origin 重定向保留凭据、
   无重定向直连携带凭据。
+
+## ADR-031 Artwork Pipeline 图片鉴权与作用域（Phase 1B-2.3）
+- 状态：已采纳（2026-08-22）
+- 决策：
+  - 图片 URL 由 Provider 层生成（EmbyImageMapper → /emby/Items/{id}/Images/{type}?tag&maxWidth&quality），
+    **URL 永远不含 Token**（ADR-026 延续；tag 是内容哈希，仅缓存键用途）；
+  - 鉴权由全局 Coil ImageLoader 的 app 层 application interceptor（EmbyImageAuthInterceptor）注入：
+    origin（scheme+host+port）命中已知 Emby 服务器才加 X-Emby-Token/X-Emby-Authorization，
+    未命中原样放行；Token/UserId 按请求惰性读（re-login 立即生效，不缓存）；
+  - 跨 origin 重定向由 core/network 的 OriginScopedCredentialInterceptor（ADR-030）统一剥离，
+    播放与图片共用同一套红线实现（interceptor 因此从 player:engine 迁至 core:network）；
+  - 图片磁盘缓存独立于播放缓存（cacheDir/image_cache，256MB LRU，respectCacheHeaders(false)）。
+- 类型策略：Movie/Series/Season → Primary(400)+Backdrop(1280)；Episode/Video → Thumb??Primary(400)；
+  Folder/Audio 不生成 URL（UI 占位图标）；RequiredHttpHeaders 类的服务端指定图片头当前无真实样本，未引入。

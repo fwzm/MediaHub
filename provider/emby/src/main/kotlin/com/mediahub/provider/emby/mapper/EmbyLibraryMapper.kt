@@ -18,7 +18,7 @@ object EmbyLibraryMapper {
             id = id,
             name = name,
             type = mapLibraryType(dto.collectionType),
-            imageUrl = null, // 图片 URL 留 Phase 1B 后续
+            imageUrl = null, // URL 由 EmbyLibraryProvider enrich（mapper 保持纯函数，见 EmbyImageMapper）
         )
     }
 

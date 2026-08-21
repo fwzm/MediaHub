@@ -1,4 +1,22 @@
 # 变更记录（CHANGELOG）
+## [0.7.0-artwork-pipeline] — 2026-08-22（Phase 1B-2.3：海报与背景图）
+### 功能
+- Emby 图片 URL 契约（/emby/Items/{id}/Images/{Primary|Thumb|Backdrop}?tag&maxWidth&quality）：
+  Token 永不进 URL（ADR-026），类型策略 Movie/Series/Season=海报+背景图、Episode=Thumb??Primary 缩略图、
+  Folder/Audio 不生成（EmbyImageMapper，detail DTO 补 ImageTags/BackdropImageTags/AspectRatio）。
+- 全局 Coil ImageLoader（MediaHubApp ImageLoaderFactory）：命中已知 Emby origin（scheme+host+port）由
+  EmbyImageAuthInterceptor 注入鉴权头，跨 origin 重定向剥离凭据（ADR-030 红线覆盖图片）；
+  磁盘缓存 cacheDir/image_cache 256MB LRU，respectCacheHeaders(false)。
+- 新模块 core:ui（PosterImage 2:3 / ThumbImage 16:9 / BackdropImage + Compose 占位/错误态）。
+- 库浏览媒体条目改 3 列海报墙（Episode 16:9 缩略图，文件夹保持行）；继续观看改缩略图+底部进度条
+  （旧记录无 posterUrl 走占位，重播自愈）；接线极简详情页（backdrop 渐变+海报+元信息+简介折叠+播放按钮，
+  home/library 点击先进详情再播放）。
+- posterUrl 落盘：PlaybackSession→PlaybackProgress→Room（列已存在，零迁移）。
+### 重构
+- OriginScopedCredentialInterceptor 从 player:engine 迁至 core:network（播放器与图片加载共用，ADR-030）。
+### 测试
+- EmbyImageMapperTest（URL 契约/无凭据/Episode Thumb 优先/无图 null/Folder 不生成）；
+  EmbyImageAuthInterceptorTest（命中注入/未命中标放行/URL 无 Token）。
 ## [0.6.3-redirect-credential-hardening] — 2026-08-22（Phase 1B-2.2：重定向凭据隔离）
 ### 安全（P1）
 - 跨 origin 重定向泄漏 Emby 凭据：0.6.2 的 DefaultHttpDataSource 手动 redirect 循环会把

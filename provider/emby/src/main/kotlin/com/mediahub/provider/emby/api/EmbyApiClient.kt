@@ -134,6 +134,25 @@ class EmbyApiClient(
             .addQueryParameter("static", "true")
         return builder.build().toString()
     }
+
+    /**
+     * 图片（海报/缩略图/背景图）地址：GET /emby/Items/{itemId}/Images/{type}。
+     *
+     * 红线（ADR-026）：URL 永远不含 Token（鉴权由图片加载器注入 Header，见 app 层
+     * EmbyImageAuthInterceptor）；tag 是图片内容哈希（缓存键用途），不是凭据。
+     * maxWidth/quality 由服务端缩放，节省流量。
+     */
+    fun imageUrl(itemId: String, type: EmbyImageType, tag: String?, maxWidth: Int, quality: Int = 85): String =
+        buildUrlWithSegments(
+            path = "/Items",
+            segments = listOf(itemId, "Images", type.wireName),
+            query = buildMap {
+                tag?.takeIf(String::isNotBlank)?.let { put("tag", it) }
+                put("maxWidth", maxWidth.toString())
+                put("quality", quality.toString())
+            },
+        )
+
     /** 服务器公开信息（**无 Token**）：GET /emby/System/Info/Public。
      *  用于会话恢复前校验 remoteServerId，避免把旧 Token 发给另一台服务器（review #2）。 */
     suspend fun getSystemInfoPublic(): SystemInfoPublic =

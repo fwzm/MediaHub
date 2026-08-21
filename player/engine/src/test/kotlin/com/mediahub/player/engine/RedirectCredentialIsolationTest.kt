@@ -1,6 +1,7 @@
 package com.mediahub.player.engine
 
 import android.net.Uri
+import com.mediahub.core.network.OriginScopedCredentialInterceptor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DataSource
