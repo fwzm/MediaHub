@@ -2,7 +2,7 @@
 
 > 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
 
-当前状态：**Phase 1B-2.1**（Emby 登录、媒体库浏览、条目详情、无转码 Direct Stream 已实现；真机 Direct Stream smoke 验证中）。
+当前状态：**Phase 1B-2.4**（Emby 登录、媒体库浏览、海报墙与详情页、无转码 Direct Stream、重定向凭据隔离、播放器音轨/字幕硬化已实现；真机验证中）。
 
 ## 项目简介
 
@@ -56,11 +56,16 @@ docs/                providers / player / api 设计文档
 
 ## 当前可用的端到端路径
 
-### Emby（Phase 1A–1B-2.1）
+### Emby（Phase 1A–1B-2.4）
 1. 首页 → 添加媒体库 → Emby → 填服务器地址 / 用户名 / 密码 → 登录并添加。
-2. 点 Emby 服务器卡片 → 浏览 Views → 电影库 / 剧集库 → 条目列表。
-3. 点 Movie / Episode → 详情 → 播放（无转码 Direct Stream，Token 只走请求头不进 URL）。
-4. 播放进度自动写入本地快照 → 首页"继续观看"。
+2. 点 Emby 服务器卡片 → 浏览 Views → 电影库 / 剧集库 → 海报墙（电影/剧集 2:3 海报，单集 16:9 剧照）。
+3. 点 Movie / Episode → 详情页（backdrop + 海报 + 元信息 + 简介）→ 播放。
+4. 播放（无转码 Direct Stream）：Token 只走请求头不进 URL（ADR-026）；
+   跨 origin 重定向剥离凭据（ADR-030）；图片加载同源注入鉴权、跨 origin 剥离（ADR-031）。
+5. 播放器：音轨/字幕 Bottom Sheet（codec / 声道 / 采样率 / 解码器诊断），
+   字幕默认白字透明背景（黑底关闭），字号/颜色/描边/位置可调并持久化；
+   全部音轨不被设备支持时显式提示而非静默无声。
+6. 播放进度自动写入本地快照 → 首页"继续观看"（缩略图 + 进度条）。
 
 ### 本地存储（Phase 0）
 1. 首页 → 添加媒体库 → 本地存储 → 保存。
@@ -68,7 +73,7 @@ docs/                providers / player / api 设计文档
 
 设置页可改默认倍速、字幕大小等（DataStore 持久化）。
 
-> Jellyfin / WebDAV / 搜索 / 字幕 / 播放进度上报为后续 Phase 候选，尚未实现（见 TASKS.md）。
+> Jellyfin / WebDAV / 搜索 / 播放进度上报为后续 Phase 候选，尚未实现（见 TASKS.md）。
 
 ## 安全约定（强制）
 

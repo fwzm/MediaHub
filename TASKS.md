@@ -141,6 +141,14 @@
       播放/退出释放无回归；图片 URL 无 Token（EmbyImageMapperTest/EmbyImageAuthInterceptorTest 契约钉死）
 - [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；结果以交付报告记录 run id（不做 docs-only 二次提交）
 
+## Phase 1B-2.4 —— Player UX Hardening（音轨 index 统一 / 音频诊断 / 字幕样式）✅ 代码+测试完成
+- [x] TrackSelection 三套 index 语义统一（per-type ordinal；TrackMapperTest 3 用例钉死；isSelected/isDefault 分离）
+- [x] Audio 诊断：isSupported / decoderName / 默认轨标志；全部音轨不支持时播放页黄条提示（不再静默无声）
+- [x] 字幕默认白字+全透明背景+黑描边（ADR-032），字号/颜色/背景/描边/位置持久化（SubtitleStyle→DataStore）
+- [x] 音轨 Bottom Sheet（语言/codec/声道/采样率/解码器/支持状态）+ 字幕 Bottom Sheet（轨道+样式）
+- [x] UserPreferencesRepository 抽象；README/CHANGELOG/DECISIONS 同步
+- [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；真机多音轨/字幕样式验证随后记录
+
 ## V0.1 —— MVP（下一步） 
 
 ### IN PROGRESS（无，等待开工）

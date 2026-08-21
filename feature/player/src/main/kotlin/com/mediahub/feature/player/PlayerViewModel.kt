@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
@@ -11,6 +12,7 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
+import com.mediahub.model.SubtitleStyle
 import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackSession
@@ -54,6 +56,7 @@ class PlayerViewModel @Inject constructor(
     private val progressStore: ProgressStore,
     private val registry: MediaProviderRegistry,
     engineFactory: PlaybackEngineCreator,
+    private val userPreferencesRepository: UserPreferencesRepository,
     private val logger: Logger,
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
@@ -62,6 +65,16 @@ class PlayerViewModel @Inject constructor(
     private val itemTitle: String = savedStateHandle["title"] ?: ""
     /** 引擎绑定到 ViewModel 作用域，onCleared 时释放；请求头上下文 per-engine（ADR-018）。 */
     val engine: PlaybackEnginePort = engineFactory.create(viewModelScope)
+
+    /** 用户偏好（字幕样式等，播放器 Bottom Sheet 消费；Phase 1B-2.4）。 */
+    val preferences: StateFlow<com.mediahub.model.UserPreferences> =
+        userPreferencesRepository.flow.stateIn(viewModelScope, SharingStarted.Eagerly, com.mediahub.model.UserPreferences())
+
+    fun updateSubtitleStyle(transform: (SubtitleStyle) -> SubtitleStyle) {
+        viewModelScope.launch {
+            userPreferencesRepository.update { it.copy(subtitleStyle = transform(it.subtitleStyle)) }
+        }
+    }
 
     private val _resolveState = MutableStateFlow<ResolveState>(ResolveState.Resolving)
     val resolveState: StateFlow<ResolveState> = _resolveState.asStateFlow()

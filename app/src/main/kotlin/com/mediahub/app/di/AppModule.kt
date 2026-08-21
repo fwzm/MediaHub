@@ -27,6 +27,8 @@ import com.mediahub.player.engine.PlayerFactory
 import com.mediahub.core.database.repository.ProgressRepository
 import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerRepository
+import com.mediahub.core.database.prefs.UserPreferencesRepository
+import com.mediahub.core.database.prefs.UserPreferencesStore
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.base.DefaultProviderRegistry
@@ -148,4 +150,8 @@ abstract class RegistryModule {
     @Binds
     @Singleton
     abstract fun bindProgressStore(impl: ProgressRepository): ProgressStore
+
+    @Binds
+    @Singleton
+    abstract fun bindUserPreferences(impl: UserPreferencesStore): UserPreferencesRepository
 }

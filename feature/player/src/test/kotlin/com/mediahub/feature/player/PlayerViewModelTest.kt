@@ -2,6 +2,7 @@ package com.mediahub.feature.player
 
 import androidx.lifecycle.SavedStateHandle
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
@@ -14,6 +15,7 @@ import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.ServerType
+import com.mediahub.model.UserPreferences
 import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackEvent
@@ -106,6 +108,7 @@ class PlayerViewModelTest {
             progressStore = FakeProgressStore(resume = 15_000L),
             registry = registry,
             engineFactory = PlaybackEngineCreator { engine },
+            userPreferencesRepository = FakeUserPreferences(),
             logger = noOpLogger,
         )
         try {
@@ -150,6 +153,7 @@ class PlayerViewModelTest {
             progressStore = FakeProgressStore(resume = null),
             registry = registry,
             engineFactory = PlaybackEngineCreator { engine },
+            userPreferencesRepository = FakeUserPreferences(),
             logger = noOpLogger,
         )
         try {
@@ -184,6 +188,7 @@ class PlayerViewModelTest {
             progressStore = FakeProgressStore(resume = null),
             registry = registry,
             engineFactory = PlaybackEngineCreator { engine },
+            userPreferencesRepository = FakeUserPreferences(),
             logger = noOpLogger,
         )
         try {
@@ -198,6 +203,14 @@ class PlayerViewModelTest {
     }
 
     // ---- fakes ----
+    private class FakeUserPreferences : UserPreferencesRepository {
+        val state = MutableStateFlow(UserPreferences())
+        override val flow: Flow<UserPreferences> = state
+        override suspend fun update(transform: (UserPreferences) -> UserPreferences) {
+            state.value = transform(state.value)
+        }
+    }
+
     private class FakeServerStore(private val server: MediaServer) : ServerStore {
         override fun observeServers(): Flow<List<MediaServer>> = flowOf(listOf(server))
         override suspend fun getServer(id: String): MediaServer? = server.takeIf { it.id == id }

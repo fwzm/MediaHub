@@ -1,8 +1,8 @@
 package com.mediahub.feature.player
 
 import android.view.ViewGroup
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,16 +14,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -34,14 +31,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.launch
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import com.mediahub.model.AudioTrack
+import com.mediahub.model.SubtitleStyle
+import com.mediahub.model.UserPreferences
+import com.mediahub.model.SubtitleTrack
 import com.mediahub.player.engine.TrackSelection
 import kotlin.math.roundToLong
+import kotlinx.coroutines.launch
 
 private val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 
@@ -54,6 +56,7 @@ fun PlayerRoute(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val resolve by viewModel.resolveState.collectAsStateWithLifecycle()
     val engineState by viewModel.engine.uiState.collectAsStateWithLifecycle()
+    val preferences by viewModel.preferences.collectAsStateWithLifecycle()
 
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
     DisposableEffect(Unit) {
@@ -90,6 +93,7 @@ fun PlayerRoute(
                     )
                 }
             },
+            update = { view -> applySubtitleStyle(view.subtitleView, preferences) },
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -132,35 +136,81 @@ fun PlayerRoute(
                     onShowAudio = { showAudioDialog = true },
                     onShowSubtitle = { showSubtitleDialog = true },
                 )
+
+                // 有画面但全部音轨不被支持 → 显式提示，不再"安静地没有声音"（Phase 1B-2.4）
+                val audioUnsupported = engineState.audioTracks.isNotEmpty() &&
+                    engineState.audioTracks.all { !it.isSupported }
+                if (audioUnsupported) {
+                    val codec = engineState.audioTracks.firstNotNullOfOrNull { prettyCodecName(it.codec) }
+                    Text(
+                        "当前设备 / Media3 不支持该音频格式" + (codec?.let { "（$it）" } ?: "") + "，可尝试其他音轨",
+                        color = Color.Yellow,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 64.dp)
+                            .padding(horizontal = 24.dp)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
             }
         }
     }
 
     if (showAudioDialog) {
-        TrackSelectionDialog(
-            title = "音轨",
-            items = engineState.audioTracks.map { it.title ?: "音轨 ${it.index + 1}" },
-            selectedIndex = engineState.selectedAudio?.groupIndex,
-            onSelect = { index ->
-                viewModel.engine.selectAudioTrack(TrackSelection(index, 0))
+        AudioTrackSheet(
+            tracks = engineState.audioTracks,
+            onDismiss = { showAudioDialog = false },
+            onSelect = { track: AudioTrack ->
+                viewModel.engine.selectAudioTrack(TrackSelection(track.index, 0))
                 showAudioDialog = false
             },
-            onDismiss = { showAudioDialog = false },
         )
     }
     if (showSubtitleDialog) {
-        TrackSelectionDialog(
-            title = "字幕",
-            items = engineState.subtitleTracks.map { it.title ?: "字幕 ${it.index + 1}" },
-            selectedIndex = engineState.selectedSubtitle?.groupIndex,
-            onSelect = { index ->
-                viewModel.engine.selectSubtitleTrack(TrackSelection(index, 0))
-                showSubtitleDialog = false
-            },
+        SubtitleSheet(
+            tracks = engineState.subtitleTracks,
+            style = preferences.subtitleStyle,
             onDismiss = { showSubtitleDialog = false },
+            onSelect = { track: SubtitleTrack? ->
+                viewModel.engine.selectSubtitleTrack(track?.let { TrackSelection(it.index, 0) })
+            },
+            onStyleChange = { newStyle -> viewModel.updateSubtitleStyle { newStyle } },
         )
     }
 }
+
+/**
+ * 字幕样式应用到 Media3 SubtitleView（默认白字 + 全透明背景 + 黑描边，ADR-032）。
+ * 字号用视高比例：默认 18sp 档位 ≈ 0.0533 视高，textScale 相对该基准缩放。
+ */
+private fun applySubtitleStyle(subtitleView: androidx.media3.ui.SubtitleView?, prefs: UserPreferences) {
+    subtitleView ?: return
+    val style = prefs.subtitleStyle
+    val edgeType = when (style.edgeType) {
+        SubtitleStyle.EDGE_TYPE_OUTLINE -> CaptionStyleCompat.EDGE_TYPE_OUTLINE
+        SubtitleStyle.EDGE_TYPE_DROP_SHADOW -> CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
+        else -> CaptionStyleCompat.EDGE_TYPE_NONE
+    }
+    subtitleView.setStyle(
+        CaptionStyleCompat(
+            style.textColor,
+            style.backgroundColor,
+            android.graphics.Color.TRANSPARENT,
+            edgeType,
+            style.edgeColor,
+            null,
+        ),
+    )
+    // 字号 = 基础视高比例 ×（设置页 18sp 基准档位）×（播放器 Bottom Sheet 缩放）
+    val baseScale = (prefs.subtitleSizeSp / 18f).coerceIn(0.5f, 3f)
+    subtitleView.setFractionalTextSize(BASE_SUBTITLE_FRACTION * baseScale * style.textScale)
+    subtitleView.setBottomPaddingFraction(style.bottomPaddingFraction)
+    subtitleView.setApplyEmbeddedStyles(style.applyEmbeddedStyles)
+}
+
+private const val BASE_SUBTITLE_FRACTION = 0.0533f
 
 @Composable
 private fun PlayerControls(
@@ -240,39 +290,6 @@ private fun PlayerControls(
             }
         }
     }
-}
-
-@Composable
-private fun TrackSelectionDialog(
-    title: String,
-    items: List<String>,
-    selectedIndex: Int?,
-    onSelect: (Int) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column {
-                items.forEachIndexed { index, label ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(index) }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = index == selectedIndex, onClick = { onSelect(index) })
-                        Text(label)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        },
-    )
 }
 
 private fun formatTime(ms: Long): String {

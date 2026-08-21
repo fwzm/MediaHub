@@ -1,4 +1,25 @@
 # 变更记录（CHANGELOG）
+## [0.8.0-player-ux-hardening] — 2026-08-22（Phase 1B-2.4：播放器 UX 硬化）
+### 修复（真机级隐患）
+- **TrackSelection 三套 index 语义统一**：TrackMapper 原保存 Tracks.groups 全局序号，UI 用
+  音轨列表位置、引擎用 per-renderer 组序号，存在视频组时错位（全局 1 == 音频 0），
+  导致选错组/选择被静默拒绝/选中态错乱（无声隐患之一）。改为同类型内序号（per-type
+  ordinal），AudioTrack.index/SubtitleTrack.index/selected TrackSelection 与
+  MappedTrackInfo.getTrackGroups(type) 一一对应；TrackMapperTest 3 用例钉死。
+- isSelected 此前被错存进 isDefault；现 isDefault 取 SELECTION_FLAG_DEFAULT，isSelected 取 group.isSelected。
+- 字幕黑底：PlayerView 未应用任何样式（Media3 默认 caption）。现默认白字 + 全透明背景 +
+  黑描边（ADR-032），字号链接设置页 18sp 基准与播放器内缩放。
+### 功能
+- 音轨 Bottom Sheet：语言/codec（EAC3/TrueHD/DTS-HD…展示名）/声道/采样率/解码器/支持状态。
+- 字幕 Bottom Sheet：轨道（关闭/选择，SRT/ASS/PGS 格式显示）+ 样式（字号/文字颜色/背景
+  （默认透明）/描边（无/描边/阴影）/垂直位置/尊重内嵌 ASS 样式），DataStore 持久化。
+- Audio 诊断：全部音轨不被设备支持时，播放页显式黄条提示"当前设备/Media3 不支持该音频格式"，
+  不再静默无声（mpv 第二内核的数据基础）。
+- UserPreferencesRepository 抽象（可测性），UserPreferencesStore 实现 DataStore 新键。
+### 测试
+- TrackMapperTest（per-type ordinal/unsupported/默认轨标志/无音轨 null）；
+  PlayerViewModelTest 补 FakeUserPreferences；feature:player 关闭 UnsafeOptInUsageError
+  （与 player:engine 一致，见 DECISIONS.md）。
 ## [0.7.0-artwork-pipeline] — 2026-08-22（Phase 1B-2.3：海报与背景图）
 ### 功能
 - Emby 图片 URL 契约（/emby/Items/{id}/Images/{Primary|Thumb|Backdrop}?tag&maxWidth&quality）：

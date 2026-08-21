@@ -14,6 +14,11 @@ android {
         minSdk = 26
     }
 
+    lint {
+        // Media3 大量 API 标 @UnstableApi；与 player:engine 一致关闭（见 DECISIONS.md）。
+        disable += "UnsafeOptInUsageError"
+    }
+
     buildFeatures {
         compose = true
     }

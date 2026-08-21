@@ -254,3 +254,17 @@
   - 图片磁盘缓存独立于播放缓存（cacheDir/image_cache，256MB LRU，respectCacheHeaders(false)）。
 - 类型策略：Movie/Series/Season → Primary(400)+Backdrop(1280)；Episode/Video → Thumb??Primary(400)；
   Folder/Audio 不生成 URL（UI 占位图标）；RequiredHttpHeaders 类的服务端指定图片头当前无真实样本，未引入。
+
+## ADR-032 播放器轨道选择与字幕样式（Phase 1B-2.4）
+- 状态：已采纳（2026-08-22）
+- 决策：
+  - **轨道 index 语义统一为同类型内序号（per-type ordinal）**：AudioTrack/SubtitleTrack.index、
+    selected TrackSelection 与引擎 MappedTrackInfo.getTrackGroups(type) 的 per-renderer 组序号
+    一一对应；禁止任何层再使用 Tracks.groups 全局序号（存在视频组时错位）。
+  - **音频诊断内置**：每音轨携带 isSupported（Tracks.Group.isTrackSupported）与
+    decoderName（MediaCodecUtil.getDecoderInfo，宽容 null）；全部音轨不支持时播放页
+    显式提示，不允许"有画面无声音"静默发生——为未来 mpv fallback 收集数据。
+  - **字幕样式默认白字 + 全透明背景 + 黑描边**（彻底去 CC 黑底），样式持久化于
+    UserPreferences.subtitleStyle（DataStore），由 PlayerScreen 应用到 SubtitleView
+    （CaptionStyleCompat + setFractionalTextSize + setBottomPaddingFraction +
+    setApplyEmbeddedStyles）；设置页 18sp 档位与播放器内缩放叠加。

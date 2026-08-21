@@ -13,6 +13,10 @@ data class SubtitleTrack(
     val isExternal: Boolean = false,
     val url: String? = null,
     val mimeType: String? = null,
+    /** 当前实际被选中。 */
+    val isSelected: Boolean = false,
+    /** 设备/选择器当前是否支持该轨。 */
+    val isSupported: Boolean = true,
 )
 
 /** 字幕流内容（外挂字幕加载结果）。 */
