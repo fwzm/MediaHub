@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.mediahub.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.mediahub.app"

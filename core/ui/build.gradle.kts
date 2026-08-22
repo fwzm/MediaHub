@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.mediahub.core.ui"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 26

@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.mediahub.feature.player"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 26

@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.mediahub.provider.webdav"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 26
