@@ -79,6 +79,8 @@ class PlaybackEngine(
     private var session: PlaybackSession? = null
     private var progressJob: Job? = null
     private var released = false
+    /** 起播时间戳（elapsedRealtime），用于 TTFF（首帧）诊断。 */
+    private var playStartElapsedMs = 0L
 
     /** 供 PlayerView 绑定。 */
     override val exoPlayer: ExoPlayer get() = player
@@ -146,6 +148,11 @@ class PlaybackEngine(
             ) {
                 _uiState.update { it.copy(audioFormatMime = format.sampleMimeType) }
             }
+
+            override fun onRenderedFirstFrame(eventTime: AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
+                val ttff = System.currentTimeMillis() - playStartElapsedMs
+                logger.i(LogTag.PLAYER, "首帧渲染 ttff=" + ttff + "ms renderTimeMs=" + renderTimeMs)
+            }
         })
     }
 
@@ -160,7 +167,12 @@ class PlaybackEngine(
         if (startPosition != null && startPosition > 0) {
             player.seekTo(startPosition)
         }
-        _uiState.value = PlaybackUiState(mediaTitle = session.itemTitle)
+        playStartElapsedMs = System.currentTimeMillis()
+        // 临时时长：Media3 timeline READY 前先展示 source 时长（Emby runTimeTicks），避免 0:00/满条
+        _uiState.value = PlaybackUiState(
+            durationMs = session.source.durationMs ?: 0,
+            mediaTitle = session.itemTitle,
+        )
         startProgressLoop()
         logger.i(LogTag.PLAYER, "开始播放 serverId=${session.serverId} itemId=${session.itemId}")
     }
@@ -231,11 +243,11 @@ class PlaybackEngine(
         progressJob = scope.launch {
             while (isActive) {
                 val position = player.currentPosition
-                val duration = player.duration.takeIf { it > 0 } ?: 0L
-                _uiState.update {
-                    it.copy(
+                val actualDuration = player.duration.takeIf { it > 0 }
+                _uiState.update { current ->
+                    current.copy(
                         positionMs = position,
-                        durationMs = duration,
+                        durationMs = actualDuration ?: current.durationMs,
                         isSeekable = player.isCurrentMediaItemSeekable,
                     )
                 }
@@ -245,7 +257,7 @@ class PlaybackEngine(
                             serverId = s.serverId,
                             itemId = s.itemId,
                             positionMs = position,
-                            durationMs = duration,
+                            durationMs = actualDuration ?: 0L,
                             isPaused = !player.playWhenReady,
                             updatedAtEpochMs = System.currentTimeMillis(),
                             mode = s.source.mode,

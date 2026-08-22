@@ -119,12 +119,14 @@ class PlayerViewModel @Inject constructor(
     fun resolve() {
         viewModelScope.launch {
             _resolveState.value = ResolveState.Resolving
+            val t0 = System.currentTimeMillis()
             try {
                 val server = serverStore.getServer(serverId)
                     ?: throw ProviderException.NotFound(serverId, "媒体源")
                 val providerHandle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 handle = providerHandle
+                val t1 = System.currentTimeMillis()
 
                 val detailProvider = providerHandle.detail
                 val playbackProvider = providerHandle.playback
@@ -139,10 +141,18 @@ class PlayerViewModel @Inject constructor(
                     title = itemTitle.ifBlank { itemId.substringAfterLast('/') },
                     path = itemId,
                 )
+                val t2 = System.currentTimeMillis()
                 val resume = progressStore.getResume(serverId, itemId)
+                val t3 = System.currentTimeMillis()
                 val source = playbackProvider.resolvePlayback(
                     item,
                     PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
+                )
+                val t4 = System.currentTimeMillis()
+                logger.i(
+                    LogTag.PLAYER,
+                    "startup server=" + (t1 - t0) + "ms detail=" + (t2 - t1) +
+                        "ms resume=" + (t3 - t2) + "ms playbackInfo=" + (t4 - t3) + "ms",
                 )
                 engine.play(
                     PlaybackSession(

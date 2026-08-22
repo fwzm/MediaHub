@@ -268,18 +268,32 @@ private fun PlayerControls(
                 .background(Color.Black.copy(alpha = 0.45f))
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Slider(
-                value = state.positionMs.toFloat().coerceIn(0f, state.durationMs.coerceAtLeast(1).toFloat()),
-                onValueChange = { onSeek(it.roundToLong()) },
-                valueRange = 0f..state.durationMs.coerceAtLeast(1).toFloat(),
-            )
+            if (state.durationMs > 0) {
+                Slider(
+                    value = state.positionMs.toFloat().coerceIn(0f, state.durationMs.toFloat()),
+                    onValueChange = { onSeek(it.roundToLong()) },
+                    valueRange = 0f..state.durationMs.toFloat(),
+                )
+            } else {
+                // 时长未知（无临时时长且 Media3 timeline 未就绪）：禁用进度条，绝不拿 1ms 画满条
+                Slider(
+                    value = 0f,
+                    onValueChange = {},
+                    valueRange = 0f..1f,
+                    enabled = false,
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    "${formatTime(state.positionMs)} / ${formatTime(state.durationMs)}",
+                    if (state.durationMs > 0) {
+                        formatTime(state.positionMs) + " / " + formatTime(state.durationMs)
+                    } else {
+                        formatTime(state.positionMs) + " / --:--"
+                    },
                     color = Color.White,
                     style = MaterialTheme.typography.bodySmall,
                 )
