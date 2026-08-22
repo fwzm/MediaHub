@@ -12,6 +12,14 @@ import kotlinx.coroutines.flow.StateFlow
 enum class EngineKind { MEDIA3, MPV }
 
 /**
+ * Seek 语义（U3-B）：
+ * - [PREVIEW]：只移动播放位置，不发 [PlaybackEvent.Seeked]——手势拖动预览、
+ *   连续快退的节流 seek 不触发远端即时同步；
+ * - [COMMIT]：移动播放位置并发出 [PlaybackEvent.Seeked]，进度同步管线立即 flush。
+ */
+enum class SeekMode { PREVIEW, COMMIT }
+
+/**
  * 播放引擎能力面（可测性抽象，Phase 1B-2.1；U2 解耦 ExoPlayer）。
  *
  * UI / ViewModel 只依赖本接口，不感知底层是 ExoPlayer 还是 libmpv：
@@ -35,7 +43,7 @@ interface PlaybackEnginePort {
     fun attachSurface(surface: Surface?)
     fun play(session: PlaybackSession)
     fun togglePlayPause()
-    fun seekTo(positionMs: Long)
+    fun seekTo(positionMs: Long, mode: SeekMode = SeekMode.COMMIT)
     fun setSpeed(speed: Float)
     fun selectAudioTrack(selection: TrackSelection?)
     fun selectSubtitleTrack(selection: TrackSelection?)

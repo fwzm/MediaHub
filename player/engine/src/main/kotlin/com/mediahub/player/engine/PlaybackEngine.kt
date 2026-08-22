@@ -213,13 +213,15 @@ class PlaybackEngine(
         player.play()
     }
 
-    override fun seekTo(positionMs: Long) {
+    override fun seekTo(positionMs: Long, mode: SeekMode) {
         player.seekTo(positionMs.coerceAtLeast(0))
-        _events.trySend(PlaybackEvent.Seeked)
+        // PREVIEW（手势拖动/连续快退节流）不发 Seeked，避免远端即时同步风暴（U3-B）
+        if (mode == SeekMode.COMMIT) _events.trySend(PlaybackEvent.Seeked)
     }
 
     override fun setSpeed(speed: Float) {
-        val clamped = speed.coerceIn(0.25f, 3f)
+        // 上限 5.0 对齐长按倍速手势阶梯（U3-B）；下限 0.1 对齐 0.1× 档位
+        val clamped = speed.coerceIn(0.1f, 5f)
         player.setPlaybackSpeed(clamped)
         _uiState.update { it.copy(speed = clamped) }
     }

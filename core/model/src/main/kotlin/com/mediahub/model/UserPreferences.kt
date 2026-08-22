@@ -23,6 +23,41 @@ data class UserPreferences(
     /** 播放时隐藏状态栏/导航栏（沉浸式；边缘滑动可临时唤出）。 */
     val immersiveBars: Boolean = true,
     val subtitleStyle: SubtitleStyle = SubtitleStyle(),
+    /** 播放器手势（U3-B，独立于 defaultPlaybackSpeed，不复用）。 */
+    val gestures: PlayerGestures = PlayerGestures(),
+)
+
+/**
+ * 播放器手势偏好（U3-B，9 项）。
+ *
+ * - 水平滑动快进快退（scrub）：松手才 commit seek；
+ *   灵敏度 = clamp(总时长 × 10%, 60s, 10min)，目标位置 clamp 0..duration。
+ * - 双击矩阵：左/右半屏各自可启用快退/快进（默认关，5-60s 默认 10s）；
+ *   未启用 seek 的一侧双击 = 播放/暂停。
+ * - 双击左侧后按住不放 = 连续快退（每秒约 3 次 PREVIEW seek，松手 COMMIT），
+ *   随双击快退开关启用。
+ * - 长按临时倍速：方向/幅度锚点在按下瞬间锁定，水平拖动沿阶梯调倍率，
+ *   松开恢复长按前的永久倍速（而非 1.0×）；下限 0.5×/0.1×，上限固定 5.0×。
+ */
+data class PlayerGestures(
+    /** 水平滑动快进快退。 */
+    val scrubEnabled: Boolean = true,
+    /** 双击左半屏快退（默认关）。 */
+    val doubleTapSeekBackwardEnabled: Boolean = false,
+    /** 双击快退秒数（5-60，默认 10）。 */
+    val doubleTapSeekBackwardSeconds: Int = 10,
+    /** 双击右半屏快进（默认关）。 */
+    val doubleTapSeekForwardEnabled: Boolean = false,
+    /** 双击快进秒数（5-60，默认 10）。 */
+    val doubleTapSeekForwardSeconds: Int = 10,
+    /** 未启用双击 seek 的区域，双击 = 播放/暂停。 */
+    val doubleTapPlayPauseEnabled: Boolean = true,
+    /** 长按临时倍速。 */
+    val longPressSpeedEnabled: Boolean = true,
+    /** 长按倍速下限（0.5× 或 0.1×）。 */
+    val longPressSpeedMin: Float = 0.5f,
+    /** 长按倍速上限（规格固定 5.0×；保留字段便于校准）。 */
+    val longPressSpeedMax: Float = 5.0f,
 )
 
 /**

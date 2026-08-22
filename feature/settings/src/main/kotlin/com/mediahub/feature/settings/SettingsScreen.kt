@@ -131,6 +131,92 @@ fun SettingsRoute(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
+            // 播放器手势（U3-B）：独立于默认倍速的 9 项手势偏好
+            Text("播放器手势", style = MaterialTheme.typography.titleMedium)
+
+            SettingSwitch(
+                label = "水平拖动快进快退",
+                checked = prefs.gestures.scrubEnabled,
+                onCheckedChange = { viewModel.update { p -> p.copy(gestures = p.gestures.copy(scrubEnabled = it)) } },
+            )
+
+            SettingSwitch(
+                label = "双击左半屏快退",
+                checked = prefs.gestures.doubleTapSeekBackwardEnabled,
+                onCheckedChange = { viewModel.update { p -> p.copy(gestures = p.gestures.copy(doubleTapSeekBackwardEnabled = it)) } },
+            )
+            if (prefs.gestures.doubleTapSeekBackwardEnabled) {
+                SettingSlider(
+                    label = "双击快退秒数",
+                    value = prefs.gestures.doubleTapSeekBackwardSeconds.toFloat(),
+                    valueText = "${prefs.gestures.doubleTapSeekBackwardSeconds} 秒",
+                    range = 5f..60f,
+                    onValueChange = { newValue ->
+                        viewModel.update { p ->
+                            p.copy(gestures = p.gestures.copy(doubleTapSeekBackwardSeconds = newValue.roundToInt()))
+                        }
+                    },
+                )
+            }
+
+            SettingSwitch(
+                label = "双击右半屏快进",
+                checked = prefs.gestures.doubleTapSeekForwardEnabled,
+                onCheckedChange = { viewModel.update { p -> p.copy(gestures = p.gestures.copy(doubleTapSeekForwardEnabled = it)) } },
+            )
+            if (prefs.gestures.doubleTapSeekForwardEnabled) {
+                SettingSlider(
+                    label = "双击快进秒数",
+                    value = prefs.gestures.doubleTapSeekForwardSeconds.toFloat(),
+                    valueText = "${prefs.gestures.doubleTapSeekForwardSeconds} 秒",
+                    range = 5f..60f,
+                    onValueChange = { newValue ->
+                        viewModel.update { p ->
+                            p.copy(gestures = p.gestures.copy(doubleTapSeekForwardSeconds = newValue.roundToInt()))
+                        }
+                    },
+                )
+            }
+
+            SettingSwitch(
+                label = "未启用双击快进/快退时双击播放暂停",
+                checked = prefs.gestures.doubleTapPlayPauseEnabled,
+                onCheckedChange = { viewModel.update { p -> p.copy(gestures = p.gestures.copy(doubleTapPlayPauseEnabled = it)) } },
+            )
+
+            SettingSwitch(
+                label = "长按临时倍速",
+                checked = prefs.gestures.longPressSpeedEnabled,
+                onCheckedChange = { viewModel.update { p -> p.copy(gestures = p.gestures.copy(longPressSpeedEnabled = it)) } },
+            )
+            if (prefs.gestures.longPressSpeedEnabled) {
+                Text("长按倍速下限", style = MaterialTheme.typography.bodyLarge)
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    SpeedMinOption(
+                        label = "0.5×",
+                        description = "常规慢放",
+                        value = 0.5f,
+                        current = prefs.gestures.longPressSpeedMin,
+                        onSelect = { v ->
+                            viewModel.update { p -> p.copy(gestures = p.gestures.copy(longPressSpeedMin = v)) }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    SpeedMinOption(
+                        label = "0.1×",
+                        description = "逐帧级慢放",
+                        value = 0.1f,
+                        current = prefs.gestures.longPressSpeedMin,
+                        onSelect = { v ->
+                            viewModel.update { p -> p.copy(gestures = p.gestures.copy(longPressSpeedMin = v)) }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
             Text("关于", style = MaterialTheme.typography.titleMedium)
             Text(
                 "MediaHub · Phase 0 骨架版本",
@@ -160,6 +246,38 @@ private fun EngineModeOption(
     value: PlaybackEngineMode,
     current: PlaybackEngineMode,
     onSelect: (PlaybackEngineMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .selectable(
+                selected = value == current,
+                role = Role.RadioButton,
+                onClick = { onSelect(value) },
+            )
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(selected = value == current, onClick = null)
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+        }
+        Text(
+            description,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SpeedMinOption(
+    label: String,
+    description: String,
+    value: Float,
+    current: Float,
+    onSelect: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(

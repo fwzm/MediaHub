@@ -108,8 +108,8 @@ class SwitchablePlaybackEngine(
         current?.togglePlayPause()
     }
 
-    override fun seekTo(positionMs: Long) {
-        current?.seekTo(positionMs)
+    override fun seekTo(positionMs: Long, mode: SeekMode) {
+        current?.seekTo(positionMs, mode)
     }
 
     override fun setSpeed(speed: Float) {

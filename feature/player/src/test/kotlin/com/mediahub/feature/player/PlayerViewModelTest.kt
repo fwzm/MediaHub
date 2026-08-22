@@ -291,7 +291,7 @@ class PlayerViewModelTest {
         override fun attachSurface(surface: android.view.Surface?) = Unit
         override fun play(session: PlaybackSession) { playedSession = session }
         override fun togglePlayPause() = Unit
-        override fun seekTo(positionMs: Long) = Unit
+        override fun seekTo(positionMs: Long, mode: com.mediahub.player.engine.SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
         override fun selectAudioTrack(selection: TrackSelection?) = Unit
         override fun selectSubtitleTrack(selection: TrackSelection?) = Unit

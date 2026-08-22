@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.mediahub.model.PlaybackEngineMode
+import com.mediahub.model.PlayerGestures
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -45,6 +46,7 @@ class UserPreferencesStore @Inject constructor(
             prefs[Keys.AUTO_LANDSCAPE] = updated.autoLandscape
             prefs[Keys.IMMERSIVE_BARS] = updated.immersiveBars
             writeSubtitleStyle(prefs, updated.subtitleStyle)
+            writeGestures(prefs, updated.gestures)
         }
     }
 
@@ -63,6 +65,7 @@ class UserPreferencesStore @Inject constructor(
             autoLandscape = prefs[Keys.AUTO_LANDSCAPE] ?: true,
             immersiveBars = prefs[Keys.IMMERSIVE_BARS] ?: true,
             subtitleStyle = readSubtitleStyle(prefs),
+            gestures = readGestures(prefs),
         )
 
     private fun readSubtitleStyle(prefs: androidx.datastore.preferences.core.Preferences): SubtitleStyle =
@@ -89,6 +92,34 @@ class UserPreferencesStore @Inject constructor(
         prefs[Keys.SUB_APPLY_EMBEDDED] = style.applyEmbeddedStyles
     }
 
+    private fun readGestures(prefs: androidx.datastore.preferences.core.Preferences): PlayerGestures =
+        PlayerGestures(
+            scrubEnabled = prefs[Keys.GESTURE_SCRUB] ?: true,
+            doubleTapSeekBackwardEnabled = prefs[Keys.GESTURE_DT_BACKWARD] ?: false,
+            doubleTapSeekBackwardSeconds = (prefs[Keys.GESTURE_DT_BACKWARD_SECONDS] ?: 10).coerceIn(5, 60),
+            doubleTapSeekForwardEnabled = prefs[Keys.GESTURE_DT_FORWARD] ?: false,
+            doubleTapSeekForwardSeconds = (prefs[Keys.GESTURE_DT_FORWARD_SECONDS] ?: 10).coerceIn(5, 60),
+            doubleTapPlayPauseEnabled = prefs[Keys.GESTURE_DT_PLAY_PAUSE] ?: true,
+            longPressSpeedEnabled = prefs[Keys.GESTURE_LONG_PRESS_SPEED] ?: true,
+            longPressSpeedMin = (prefs[Keys.GESTURE_SPEED_MIN] ?: 0.5f).coerceIn(0.1f, 0.5f),
+            longPressSpeedMax = (prefs[Keys.GESTURE_SPEED_MAX] ?: 5.0f).coerceIn(2f, 8f),
+        )
+
+    private fun writeGestures(
+        prefs: androidx.datastore.preferences.core.MutablePreferences,
+        gestures: PlayerGestures,
+    ) {
+        prefs[Keys.GESTURE_SCRUB] = gestures.scrubEnabled
+        prefs[Keys.GESTURE_DT_BACKWARD] = gestures.doubleTapSeekBackwardEnabled
+        prefs[Keys.GESTURE_DT_BACKWARD_SECONDS] = gestures.doubleTapSeekBackwardSeconds.coerceIn(5, 60)
+        prefs[Keys.GESTURE_DT_FORWARD] = gestures.doubleTapSeekForwardEnabled
+        prefs[Keys.GESTURE_DT_FORWARD_SECONDS] = gestures.doubleTapSeekForwardSeconds.coerceIn(5, 60)
+        prefs[Keys.GESTURE_DT_PLAY_PAUSE] = gestures.doubleTapPlayPauseEnabled
+        prefs[Keys.GESTURE_LONG_PRESS_SPEED] = gestures.longPressSpeedEnabled
+        prefs[Keys.GESTURE_SPEED_MIN] = gestures.longPressSpeedMin.coerceIn(0.1f, 0.5f)
+        prefs[Keys.GESTURE_SPEED_MAX] = gestures.longPressSpeedMax.coerceIn(2f, 8f)
+    }
+
     private object Keys {
         val ENGINE_MODE = stringPreferencesKey("playback_engine_mode")
         val DEFAULT_SPEED = floatPreferencesKey("default_playback_speed")
@@ -107,5 +138,14 @@ class UserPreferencesStore @Inject constructor(
         val SUB_TEXT_SCALE = floatPreferencesKey("subtitle_text_scale")
         val SUB_BOTTOM_PADDING = floatPreferencesKey("subtitle_bottom_padding_fraction")
         val SUB_APPLY_EMBEDDED = booleanPreferencesKey("subtitle_apply_embedded_styles")
+        val GESTURE_SCRUB = booleanPreferencesKey("gesture_scrub_enabled")
+        val GESTURE_DT_BACKWARD = booleanPreferencesKey("gesture_double_tap_seek_backward")
+        val GESTURE_DT_BACKWARD_SECONDS = intPreferencesKey("gesture_double_tap_backward_seconds")
+        val GESTURE_DT_FORWARD = booleanPreferencesKey("gesture_double_tap_seek_forward")
+        val GESTURE_DT_FORWARD_SECONDS = intPreferencesKey("gesture_double_tap_forward_seconds")
+        val GESTURE_DT_PLAY_PAUSE = booleanPreferencesKey("gesture_double_tap_play_pause")
+        val GESTURE_LONG_PRESS_SPEED = booleanPreferencesKey("gesture_long_press_speed")
+        val GESTURE_SPEED_MIN = floatPreferencesKey("gesture_long_press_speed_min")
+        val GESTURE_SPEED_MAX = floatPreferencesKey("gesture_long_press_speed_max")
     }
 }

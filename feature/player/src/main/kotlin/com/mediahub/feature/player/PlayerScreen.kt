@@ -9,8 +9,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,6 +52,11 @@ import com.mediahub.model.AudioTrack
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
 import com.mediahub.model.SubtitleTrack
+import com.mediahub.feature.player.gesture.GestureSeekPreview
+import com.mediahub.feature.player.gesture.GestureSpeedPreview
+import com.mediahub.feature.player.gesture.PlayerGestureController
+import com.mediahub.feature.player.gesture.PlayerGestureLayer
+import com.mediahub.player.engine.SeekMode
 import com.mediahub.player.engine.TrackSelection
 import kotlin.math.roundToLong
 import kotlinx.coroutines.delay
@@ -102,13 +105,48 @@ fun PlayerRoute(
 
     // Overlay：点击切换显示 / 播放中 3s 自动隐藏（Item 6）
     var controlsVisible by remember { mutableStateOf(true) }
-    val clickInteractionSource = remember { MutableInteractionSource() }
     LaunchedEffect(controlsVisible, state.isPlaying) {
         if (controlsVisible && state.isPlaying) {
             delay(OVERLAY_AUTO_HIDE_MS)
             controlsVisible = false
         }
     }
+
+    // 手势层（U3-B）：统一手势状态机驱动 Overlay / 双击矩阵 / scrub / 连续快退 / 长按倍速。
+    // 闭包经属性代理读取最新 state/preferences（remember 不需要 keys）。
+    val gestureController = remember {
+        val engine = viewModel.engine
+        PlayerGestureController(
+            gestures = { preferences.gestures },
+            positionMs = { state.positionMs },
+            durationMs = { state.durationMs },
+            currentSpeed = { state.speed },
+            actions = object : PlayerGestureController.Actions {
+                override fun onOverlayToggle() {
+                    controlsVisible = !controlsVisible
+                }
+
+                override fun onPlayPauseToggle() {
+                    engine.togglePlayPause()
+                }
+
+                override fun onPreviewSeek(positionMs: Long) {
+                    engine.seekTo(positionMs, SeekMode.PREVIEW)
+                }
+
+                override fun onCommitSeek(positionMs: Long) {
+                    engine.seekTo(positionMs, SeekMode.COMMIT)
+                }
+
+                override fun onSpeedChange(speed: Float) {
+                    engine.setSpeed(speed)
+                }
+            },
+        )
+    }
+    val scrubPreview by gestureController.scrubPreview.collectAsStateWithLifecycle()
+    val rewindPreview by gestureController.rewindPreview.collectAsStateWithLifecycle()
+    val speedPreview by gestureController.speedPreview.collectAsStateWithLifecycle()
 
     // 设备电量（Item 10）：进入即读，每 60s 刷新
     var batteryLevel by remember { mutableStateOf(readBatteryLevel(context)) }
@@ -169,15 +207,16 @@ fun PlayerRoute(
             modifier = Modifier.fillMaxSize(),
         )
 
-        // 透明点击层：点击切换 Overlay 显示（Item 6）
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(
-                    interactionSource = clickInteractionSource,
-                    indication = null,
-                ) { controlsVisible = !controlsVisible },
+        // 手势层（U3-B）：单击 Overlay / 双击矩阵 / 水平 scrub / 双击按住快退 / 长按倍速
+        PlayerGestureLayer(
+            controller = gestureController,
+            modifier = Modifier.fillMaxSize(),
         )
+
+        // 手势预览指示（U3-B）：scrub / 连续快退 / 长按倍速
+        scrubPreview?.let { GestureSeekIndicator(it, Modifier.align(Alignment.Center)) }
+        rewindPreview?.let { GestureSeekIndicator(it, Modifier.align(Alignment.Center)) }
+        speedPreview?.let { GestureSpeedIndicator(it, Modifier.align(Alignment.Center)) }
 
         // 引擎自动降级提示（U3-A：Media3 失败 → mpv 同位置重播）
         if (engineSwitching) {
@@ -233,7 +272,7 @@ fun PlayerRoute(
                         batteryLevel = batteryLevel,
                         onBack = exitPlayer,
                         onTogglePlayPause = viewModel.engine::togglePlayPause,
-                        onSeek = viewModel.engine::seekTo,
+                        onSeek = { viewModel.engine.seekTo(it) },
                         onCycleSpeed = {
                             val next = SPEEDS[(SPEEDS.indexOf(state.speed) + 1).let { if (it >= SPEEDS.size) 0 else it }]
                             viewModel.engine.setSpeed(next)
@@ -418,9 +457,16 @@ private fun PlayerControls(
                 }
             }
             if (state.durationMs > 0) {
+                // 进度条 preview→commit（U3-B）：拖动只更新本地预览值，松手才真正 seek
+                var sliderScrubValue by remember { mutableStateOf<Float?>(null) }
                 Slider(
-                    value = state.positionMs.toFloat().coerceIn(0f, state.durationMs.toFloat()),
-                    onValueChange = { onSeek(it.roundToLong()) },
+                    value = sliderScrubValue
+                        ?: state.positionMs.toFloat().coerceIn(0f, state.durationMs.toFloat()),
+                    onValueChange = { sliderScrubValue = it },
+                    onValueChangeFinished = {
+                        sliderScrubValue?.let { onSeek(it.roundToLong()) }
+                        sliderScrubValue = null
+                    },
                     valueRange = 0f..state.durationMs.toFloat(),
                 )
             } else {
@@ -468,6 +514,38 @@ private fun PlayerControls(
             }
         }
     }
+}
+
+/**
+ * 手势 seek 预览指示（scrub / 连续快退共用，U3-B）：
+ * 居中显示 delta（带符号）与目标时间，松手后消失。
+ */
+@Composable
+private fun GestureSeekIndicator(preview: GestureSeekPreview, modifier: Modifier = Modifier) {
+    val sign = if (preview.deltaMs >= 0) "+" else "-"
+    val absSeconds = kotlin.math.abs(preview.deltaMs) / 1000
+    val deltaText = "$sign%d:%02d".format(absSeconds / 60, absSeconds % 60)
+    Text(
+        text = "$deltaText  →  ${formatTime(preview.targetPositionMs)}",
+        color = Color.White,
+        style = MaterialTheme.typography.titleMedium,
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.65f))
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+    )
+}
+
+/** 长按临时倍速指示（U3-B）：居中显示当前档位。 */
+@Composable
+private fun GestureSpeedIndicator(preview: GestureSpeedPreview, modifier: Modifier = Modifier) {
+    Text(
+        text = "%.2f× 倍速中".format(preview.speed),
+        color = Color.White,
+        style = MaterialTheme.typography.titleMedium,
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.65f))
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+    )
 }
 
 private fun formatTime(ms: Long): String {

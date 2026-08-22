@@ -16,6 +16,7 @@ import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackEvent
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.PlaybackUiState
+import com.mediahub.player.engine.SeekMode
 import com.mediahub.player.engine.TrackSelection
 import dev.jdtech.mpv.MPVLib
 import kotlinx.coroutines.CoroutineScope
@@ -163,15 +164,17 @@ class MpvPlaybackEngine(
         _events.trySend(if (playing) PlaybackEvent.Paused else PlaybackEvent.Resumed)
     }
 
-    override fun seekTo(positionMs: Long) {
+    override fun seekTo(positionMs: Long, mode: SeekMode) {
         val m = mpv ?: return
         m.command(arrayOf("seek", (positionMs / 1000.0).toString(), "absolute"))
-        _events.trySend(PlaybackEvent.Seeked)
+        // PREVIEW（手势拖动/连续快退节流）不发 Seeked，避免远端即时同步风暴（U3-B）
+        if (mode == SeekMode.COMMIT) _events.trySend(PlaybackEvent.Seeked)
     }
 
     override fun setSpeed(speed: Float) {
-        mpv?.setPropertyDouble("speed", speed.toDouble())
-        _uiState.update { it.copy(speed = speed) }
+        val clamped = speed.coerceIn(0.1f, 5f)
+        mpv?.setPropertyDouble("speed", clamped.toDouble())
+        _uiState.update { it.copy(speed = clamped) }
     }
 
     override fun selectAudioTrack(selection: TrackSelection?) = Unit
