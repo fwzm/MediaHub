@@ -6,7 +6,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -24,35 +26,14 @@ class UserPreferencesStore @Inject constructor(
 ) : UserPreferencesRepository {
 
     override val flow: Flow<UserPreferences> = context.userPrefsDataStore.data.map { prefs ->
-        UserPreferences(
-            defaultPlaybackSpeed = prefs[Keys.DEFAULT_SPEED] ?: 1f,
-            subtitleSizeSp = prefs[Keys.SUBTITLE_SIZE] ?: 18,
-            enableHardwareDecoding = prefs[Keys.HW_DECODING] ?: true,
-            preferDirectPlay = prefs[Keys.PREFER_DIRECT_PLAY] ?: true,
-            autoPlayNextEpisode = prefs[Keys.AUTO_NEXT] ?: true,
-            maxBitrateBps = prefs[Keys.MAX_BITRATE],
-            showPlayerInfoOverlay = prefs[Keys.SHOW_INFO] ?: false,
-            autoLandscape = prefs[Keys.AUTO_LANDSCAPE] ?: true,
-            immersiveBars = prefs[Keys.IMMERSIVE_BARS] ?: true,
-            subtitleStyle = readSubtitleStyle(prefs),
-        )
+        readPreferences(prefs)
     }
 
     override suspend fun update(transform: (UserPreferences) -> UserPreferences) {
         context.userPrefsDataStore.edit { prefs ->
-            val current = UserPreferences(
-                defaultPlaybackSpeed = prefs[Keys.DEFAULT_SPEED] ?: 1f,
-                subtitleSizeSp = prefs[Keys.SUBTITLE_SIZE] ?: 18,
-                enableHardwareDecoding = prefs[Keys.HW_DECODING] ?: true,
-                preferDirectPlay = prefs[Keys.PREFER_DIRECT_PLAY] ?: true,
-                autoPlayNextEpisode = prefs[Keys.AUTO_NEXT] ?: true,
-                maxBitrateBps = prefs[Keys.MAX_BITRATE],
-                showPlayerInfoOverlay = prefs[Keys.SHOW_INFO] ?: false,
-                autoLandscape = prefs[Keys.AUTO_LANDSCAPE] ?: true,
-                immersiveBars = prefs[Keys.IMMERSIVE_BARS] ?: true,
-                subtitleStyle = readSubtitleStyle(prefs),
-            )
+            val current = readPreferences(prefs)
             val updated = transform(current)
+            prefs[Keys.ENGINE_MODE] = updated.playbackEngineMode.name
             prefs[Keys.DEFAULT_SPEED] = updated.defaultPlaybackSpeed
             prefs[Keys.SUBTITLE_SIZE] = updated.subtitleSizeSp
             prefs[Keys.HW_DECODING] = updated.enableHardwareDecoding
@@ -66,6 +47,23 @@ class UserPreferencesStore @Inject constructor(
             writeSubtitleStyle(prefs, updated.subtitleStyle)
         }
     }
+
+    private fun readPreferences(prefs: androidx.datastore.preferences.core.Preferences): UserPreferences =
+        UserPreferences(
+            playbackEngineMode = prefs[Keys.ENGINE_MODE]?.let { mode ->
+                runCatching { PlaybackEngineMode.valueOf(mode) }.getOrNull()
+            } ?: PlaybackEngineMode.AUTO,
+            defaultPlaybackSpeed = prefs[Keys.DEFAULT_SPEED] ?: 1f,
+            subtitleSizeSp = prefs[Keys.SUBTITLE_SIZE] ?: 18,
+            enableHardwareDecoding = prefs[Keys.HW_DECODING] ?: true,
+            preferDirectPlay = prefs[Keys.PREFER_DIRECT_PLAY] ?: true,
+            autoPlayNextEpisode = prefs[Keys.AUTO_NEXT] ?: true,
+            maxBitrateBps = prefs[Keys.MAX_BITRATE],
+            showPlayerInfoOverlay = prefs[Keys.SHOW_INFO] ?: false,
+            autoLandscape = prefs[Keys.AUTO_LANDSCAPE] ?: true,
+            immersiveBars = prefs[Keys.IMMERSIVE_BARS] ?: true,
+            subtitleStyle = readSubtitleStyle(prefs),
+        )
 
     private fun readSubtitleStyle(prefs: androidx.datastore.preferences.core.Preferences): SubtitleStyle =
         SubtitleStyle(
@@ -92,6 +90,7 @@ class UserPreferencesStore @Inject constructor(
     }
 
     private object Keys {
+        val ENGINE_MODE = stringPreferencesKey("playback_engine_mode")
         val DEFAULT_SPEED = floatPreferencesKey("default_playback_speed")
         val SUBTITLE_SIZE = intPreferencesKey("subtitle_size_sp")
         val HW_DECODING = booleanPreferencesKey("enable_hardware_decoding")

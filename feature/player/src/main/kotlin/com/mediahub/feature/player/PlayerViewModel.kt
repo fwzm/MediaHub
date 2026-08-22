@@ -14,10 +14,14 @@ import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.SubtitleStyle
+import com.mediahub.player.engine.EnginePreferenceHistory
+import com.mediahub.player.engine.Media3EngineCreator
+import com.mediahub.player.engine.MpvEngineCreator
 import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.ProgressSyncCoordinator
+import com.mediahub.player.engine.SwitchablePlaybackEngine
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
@@ -63,7 +67,9 @@ class PlayerViewModel @Inject constructor(
     private val serverStore: ServerStore,
     private val progressStore: ProgressStore,
     private val registry: MediaProviderRegistry,
-    engineFactory: PlaybackEngineCreator,
+    @Media3EngineCreator media3EngineFactory: PlaybackEngineCreator,
+    @MpvEngineCreator mpvEngineFactory: PlaybackEngineCreator,
+    engineHistory: EnginePreferenceHistory,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val logger: Logger,
 ) : ViewModel() {
@@ -76,12 +82,36 @@ class PlayerViewModel @Inject constructor(
     private val launchRuntime: String = savedStateHandle["runtime"] ?: ""
     private val launchPoster: String = savedStateHandle["poster"] ?: ""
     private val launchContainer: String = savedStateHandle["container"] ?: ""
-    /** 引擎绑定到 ViewModel 作用域，onCleared 时释放；请求头上下文 per-engine（ADR-018）。 */
-    val engine: PlaybackEnginePort = engineFactory.create(viewModelScope)
+    /** 最新偏好缓存（modeProvider 同步读取，避免 play() 挂起读 DataStore）。 */
+    private var latestPreferences: com.mediahub.model.UserPreferences = com.mediahub.model.UserPreferences()
+
+    /**
+     * 引擎绑定到 ViewModel 作用域，onCleared 时释放；请求头上下文 per-engine（ADR-018）。
+     * U3-A：双内核门面（Media3 快速路径 / mpv 兜底），AUTO 模式下 Media3 失败自动降级。
+     */
+    private val switchableEngine = SwitchablePlaybackEngine(
+        scope = viewModelScope,
+        media3Factory = media3EngineFactory,
+        mpvFactory = mpvEngineFactory,
+        history = engineHistory,
+        modeProvider = { latestPreferences.playbackEngineMode },
+        logger = logger,
+    )
+    val engine: PlaybackEnginePort = switchableEngine
+
+    /** 正在切换兼容播放模式（UI 提示"正在切换兼容播放模式…"）。 */
+    val engineSwitching: StateFlow<Boolean> get() = switchableEngine.switching
+
+    /** 当前内核（UI 徽标/诊断）。 */
+    val engineKind: StateFlow<com.mediahub.player.engine.EngineKind> get() = switchableEngine.engineKind
 
     /** 用户偏好（字幕样式等，播放器 Bottom Sheet 消费；Phase 1B-2.4）。 */
     val preferences: StateFlow<com.mediahub.model.UserPreferences> =
         userPreferencesRepository.flow.stateIn(viewModelScope, SharingStarted.Eagerly, com.mediahub.model.UserPreferences())
+
+    init {
+        viewModelScope.launch { userPreferencesRepository.flow.collect { latestPreferences = it } }
+    }
 
     /**
      * 系统 UI 偏好（自动横屏/沉浸式），初始 null（未加载），DataStore 首读完成后发出非 null。

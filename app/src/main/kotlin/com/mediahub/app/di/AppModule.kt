@@ -21,6 +21,7 @@ import com.mediahub.core.security.KeystoreSecretStorage
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.TokenStore
+import com.mediahub.player.engine.EnginePreferenceHistory
 import com.mediahub.player.engine.MediaCacheProvider
 import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackEngineFactory
@@ -134,10 +135,20 @@ object AppModule {
         mediaCacheProvider: MediaCacheProvider,
     ): PlayerFactory = PlayerFactory(context, mediaCacheProvider)
 
-    // U2 spike：强制 EngineKind.MPV；U3 起由 AUTO selector 决定 Media3/mpv。
+    // U3-A：双内核工厂（Media3 快速路径 / mpv 兼容兜底），由 SwitchablePlaybackEngine
+    // 按PlaybackEngineSelector + 失败指纹决定实际使用哪个；用户可在设置页强制指定。
     @Provides
     @Singleton
-    fun providePlaybackEngineCreator(
+    @com.mediahub.player.engine.Media3EngineCreator
+    fun provideMedia3EngineCreator(
+        playerFactory: PlayerFactory,
+        logger: Logger,
+    ): PlaybackEngineCreator = PlaybackEngineFactory(playerFactory, logger)
+
+    @Provides
+    @Singleton
+    @com.mediahub.player.engine.MpvEngineCreator
+    fun provideMpvEngineCreator(
         @ApplicationContext context: Context,
         logger: Logger,
         httpClientFactory: HttpClientFactory,
@@ -168,4 +179,8 @@ abstract class RegistryModule {
     @Binds
     @Singleton
     abstract fun bindUserPreferences(impl: UserPreferencesStore): UserPreferencesRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindEnginePreferenceHistory(impl: DataStoreEnginePreferenceHistory): EnginePreferenceHistory
 }

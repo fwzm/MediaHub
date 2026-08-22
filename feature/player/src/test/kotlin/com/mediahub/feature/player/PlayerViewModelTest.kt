@@ -16,6 +16,7 @@ import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.ServerType
 import com.mediahub.model.UserPreferences
+import com.mediahub.player.engine.InMemoryEnginePreferenceHistory
 import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackEvent
@@ -108,7 +109,9 @@ class PlayerViewModelTest {
             serverStore = FakeServerStore(embyServer()),
             progressStore = FakeProgressStore(resume = 15_000L),
             registry = registry,
-            engineFactory = PlaybackEngineCreator { engine },
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
             userPreferencesRepository = FakeUserPreferences(),
             logger = noOpLogger,
         )
@@ -153,7 +156,9 @@ class PlayerViewModelTest {
             serverStore = FakeServerStore(embyServer()),
             progressStore = FakeProgressStore(resume = null),
             registry = registry,
-            engineFactory = PlaybackEngineCreator { engine },
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
             userPreferencesRepository = FakeUserPreferences(),
             logger = noOpLogger,
         )
@@ -188,7 +193,9 @@ class PlayerViewModelTest {
             serverStore = FakeServerStore(embyServer()),
             progressStore = FakeProgressStore(resume = null),
             registry = registry,
-            engineFactory = PlaybackEngineCreator { engine },
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
             userPreferencesRepository = FakeUserPreferences(),
             logger = noOpLogger,
         )

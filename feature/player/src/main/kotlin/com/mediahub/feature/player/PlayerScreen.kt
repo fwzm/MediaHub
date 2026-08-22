@@ -70,6 +70,7 @@ fun PlayerRoute(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val resolve by viewModel.resolveState.collectAsStateWithLifecycle()
     val engineState by viewModel.engine.uiState.collectAsStateWithLifecycle()
+    val engineSwitching by viewModel.engineSwitching.collectAsStateWithLifecycle()
     val preferences by viewModel.preferences.collectAsStateWithLifecycle()
     val serverDisplayName by viewModel.serverDisplayName.collectAsStateWithLifecycle()
     val serverIcon by viewModel.serverIcon.collectAsStateWithLifecycle()
@@ -177,6 +178,20 @@ fun PlayerRoute(
                     indication = null,
                 ) { controlsVisible = !controlsVisible },
         )
+
+        // 引擎自动降级提示（U3-A：Media3 失败 → mpv 同位置重播）
+        if (engineSwitching) {
+            Text(
+                "正在切换兼容播放模式…",
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 64.dp)
+                    .background(Color.Black.copy(alpha = 0.65f))
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
 
         when (resolve) {
             ResolveState.Resolving -> {

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -15,6 +16,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -24,10 +26,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.UserPreferences
 
 /** 设置：播放偏好（DataStore 持久化）。 */
@@ -60,6 +64,17 @@ fun SettingsRoute(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("播放", style = MaterialTheme.typography.titleMedium)
+
+            // 播放内核（U3-A）：默认 AUTO（Media3 快速路径，失败自动切 mpv 兼容内核）
+            Text("播放内核", style = MaterialTheme.typography.bodyLarge)
+            EngineModeSelector(
+                mode = prefs.playbackEngineMode,
+                onSelect = { mode ->
+                    viewModel.update { p -> p.copy(playbackEngineMode = mode) }
+                },
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             SettingSlider(
                 label = "默认倍速",
@@ -123,6 +138,50 @@ fun SettingsRoute(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+@Composable
+private fun EngineModeSelector(
+    mode: PlaybackEngineMode,
+    onSelect: (PlaybackEngineMode) -> Unit,
+) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        EngineModeOption("自动", "兼容性自动选择", PlaybackEngineMode.AUTO, mode, onSelect, Modifier.weight(1.2f))
+        EngineModeOption("Media3", "快速路径", PlaybackEngineMode.MEDIA3, mode, onSelect, Modifier.weight(1f))
+        EngineModeOption("mpv", "兼容内核", PlaybackEngineMode.MPV, mode, onSelect, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun EngineModeOption(
+    label: String,
+    description: String,
+    value: PlaybackEngineMode,
+    current: PlaybackEngineMode,
+    onSelect: (PlaybackEngineMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .selectable(
+                selected = value == current,
+                role = Role.RadioButton,
+                onClick = { onSelect(value) },
+            )
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(selected = value == current, onClick = null)
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+        }
+        Text(
+            description,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

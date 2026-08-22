@@ -41,6 +41,8 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:logging"))
 
+    implementation(libs.javax.inject)
+
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.hls)
     implementation(libs.media3.exoplayer.dash)

@@ -1,10 +1,16 @@
 package com.mediahub.model
 
 /**
+ * 播放内核选择（U3-A）：AUTO = 兼容性评估 + 失败指纹自动选 Media3/mpv。
+ */
+enum class PlaybackEngineMode { AUTO, MEDIA3, MPV }
+
+/**
  * 用户播放偏好（持久化于 DataStore，见 core:database）。
  * 播放兼容性评估器（player:compatibility）与播放器 UI 都消费该模型。
  */
 data class UserPreferences(
+    val playbackEngineMode: PlaybackEngineMode = PlaybackEngineMode.AUTO,
     val defaultPlaybackSpeed: Float = 1f,
     val subtitleSizeSp: Int = 18,
     val enableHardwareDecoding: Boolean = true,
