@@ -138,20 +138,29 @@ fun MediaHubNavHost() {
             DetailRoute(
                 title = entry.arguments?.getString("title").orEmpty(),
                 onBack = { navController.popBackStack() },
-                onPlay = { serverId, itemId, itemTitle ->
+                onPlay = { serverId, itemId, snapshot ->
                     navController.navigate(
-                        "player/$serverId/${NavArgCodec.encode(itemId)}?title=${Uri.encode(itemTitle)}"
+                        "player/" + serverId + "/" + NavArgCodec.encode(itemId) +
+                            "?title=" + Uri.encode(snapshot.title) +
+                            "&type=" + Uri.encode(snapshot.type?.name.orEmpty()) +
+                            "&runtime=" + (snapshot.runtimeMs?.toString().orEmpty()) +
+                            "&poster=" + Uri.encode(snapshot.posterUrl.orEmpty()) +
+                            "&container=" + Uri.encode(snapshot.container.orEmpty())
                     )
                 },
             )
         }
 
         composable(
-            route = "player/{serverId}/{itemId}?title={title}",
+            route = "player/{serverId}/{itemId}?title={title}&type={type}&runtime={runtime}&poster={poster}&container={container}",
             arguments = listOf(
                 navArgument("serverId") { type = NavType.StringType },
                 navArgument("itemId") { type = NavType.StringType },
                 navArgument("title") { type = NavType.StringType; defaultValue = "" },
+                navArgument("type") { type = NavType.StringType; defaultValue = "" },
+                navArgument("runtime") { type = NavType.StringType; defaultValue = "" },
+                navArgument("poster") { type = NavType.StringType; defaultValue = "" },
+                navArgument("container") { type = NavType.StringType; defaultValue = "" },
             ),
         ) {
             PlayerRoute(onBack = { navController.popBackStack() })

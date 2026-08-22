@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.BackdropImage
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.model.MediaDetail
+import com.mediahub.model.PlaybackLaunchSnapshot
 
 /**
  * 详情页（Phase 1B-2.3 极简版）：backdrop + 海报 + 元信息 + 简介 + 播放入口。
@@ -52,7 +53,7 @@ import com.mediahub.model.MediaDetail
 fun DetailRoute(
     title: String,
     onBack: () -> Unit,
-    onPlay: (serverId: String, itemId: String, itemTitle: String) -> Unit,
+    onPlay: (serverId: String, itemId: String, snapshot: PlaybackLaunchSnapshot) -> Unit,
     viewModel: DetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -92,7 +93,18 @@ fun DetailRoute(
                 detail = s.detail,
                 modifier = Modifier.fillMaxSize().padding(padding),
                 onPlay = { item ->
-                    onPlay(viewModel.serverId, viewModel.itemId, item.title)
+                    onPlay(
+                        viewModel.serverId,
+                        viewModel.itemId,
+                        PlaybackLaunchSnapshot(
+                            itemId = item.id,
+                            type = item.type,
+                            title = item.title,
+                            runtimeMs = item.runtimeMs,
+                            posterUrl = item.posterUrl,
+                            container = item.container,
+                        )
+                    )
                 },
             )
         }

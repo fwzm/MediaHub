@@ -10,6 +10,7 @@ import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaItem
+import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.SubtitleStyle
@@ -63,6 +64,11 @@ class PlayerViewModel @Inject constructor(
     // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（见 core:common）
     private val itemId: String = NavArgCodec.decode(checkNotNull(savedStateHandle["itemId"]))
     private val itemTitle: String = savedStateHandle["title"] ?: ""
+    // 播放启动快照（详情页直传，跳过重复 detail 拉取；type 非空 = 快照有效）
+    private val launchType: String = savedStateHandle["type"] ?: ""
+    private val launchRuntime: String = savedStateHandle["runtime"] ?: ""
+    private val launchPoster: String = savedStateHandle["poster"] ?: ""
+    private val launchContainer: String = savedStateHandle["container"] ?: ""
     /** 引擎绑定到 ViewModel 作用域，onCleared 时释放；请求头上下文 per-engine（ADR-018）。 */
     val engine: PlaybackEnginePort = engineFactory.create(viewModelScope)
 
@@ -134,13 +140,27 @@ class PlayerViewModel @Inject constructor(
 
                 // review P2-5：browse-only 数据源（如本地文件树）无详情能力时，
                 // 按 itemId 重建条目并推断媒体类型（避免退化为 OTHER 污染"继续观看"元数据）。
-                val item = detailProvider?.getItemDetail(itemId)?.item ?: MediaItem(
-                    serverId = serverId,
-                    id = itemId,
-                    type = MediaTypeGuesser.forPath(itemId),
-                    title = itemTitle.ifBlank { itemId.substringAfterLast('/') },
-                    path = itemId,
-                )
+                // Player Startup 优化：详情页已传快照（type 非空）时跳过 detail 拉取。
+                val item = if (launchType.isNotBlank()) {
+                    MediaItem(
+                        serverId = serverId,
+                        id = itemId,
+                        type = runCatching { MediaType.valueOf(launchType) }
+                            .getOrElse { MediaTypeGuesser.forPath(itemId) },
+                        title = itemTitle.ifBlank { itemId.substringAfterLast('/') },
+                        runtimeMs = launchRuntime.toLongOrNull(),
+                        posterUrl = launchPoster.ifBlank { null },
+                        container = launchContainer.ifBlank { null },
+                    )
+                } else {
+                    detailProvider?.getItemDetail(itemId)?.item ?: MediaItem(
+                        serverId = serverId,
+                        id = itemId,
+                        type = MediaTypeGuesser.forPath(itemId),
+                        title = itemTitle.ifBlank { itemId.substringAfterLast('/') },
+                        path = itemId,
+                    )
+                }
                 val t2 = System.currentTimeMillis()
                 val resume = progressStore.getResume(serverId, itemId)
                 val t3 = System.currentTimeMillis()
