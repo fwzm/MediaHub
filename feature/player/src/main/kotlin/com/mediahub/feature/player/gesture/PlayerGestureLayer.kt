@@ -28,18 +28,24 @@ import kotlinx.coroutines.withTimeoutOrNull
 fun PlayerGestureLayer(
     controller: PlayerGestureController,
     modifier: Modifier = Modifier,
+    onBrightness: () -> Float = { 0.5f },
+    onVolume: () -> Float = { 0.5f },
+    onLevelEnd: (PlayerLevelKind, Float) -> Unit = { _, _ -> },
 ) {
     Box(
-        modifier = modifier.pointerInput(controller) {
-            detectPlayerGestures(controller)
+        modifier = modifier.pointerInput(controller, onBrightness, onVolume, onLevelEnd) {
+            detectPlayerGestures(controller, onBrightness, onVolume, onLevelEnd)
         },
     )
 }
 
-private enum class GesturePhase { PENDING, TAP, SCRUB, LONG_PRESS, IGNORE }
+private enum class GesturePhase { PENDING, TAP, SCRUB, LONG_PRESS, VERTICAL, IGNORE }
 
 private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPlayerGestures(
     controller: PlayerGestureController,
+    onBrightness: () -> Float,
+    onVolume: () -> Float,
+    onLevelEnd: (PlayerLevelKind, Float) -> Unit,
 ) = awaitEachGesture {
     val down = awaitFirstDown(requireUnconsumed = false)
     if (down.isConsumed) return@awaitEachGesture
@@ -63,7 +69,8 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPl
             val dy = change.position.y - startY
             if (event.changes.none { it.pressed }) return@withTimeoutOrNull GesturePhase.TAP
             if (abs(dx) > touchSlop || abs(dy) > touchSlop) {
-                return@withTimeoutOrNull if (abs(dx) > abs(dy)) GesturePhase.SCRUB else GesturePhase.IGNORE
+                // 方向锁定：一旦识别为竖向，后续横移不会变成 scrub
+                return@withTimeoutOrNull if (abs(dx) > abs(dy)) GesturePhase.SCRUB else GesturePhase.VERTICAL
             }
         }
         @Suppress("UNREACHABLE_CODE")
@@ -95,6 +102,31 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPl
                 throw e
             }
             if (completed) controller.onScrubEnd()
+        }
+
+        GesturePhase.VERTICAL -> {
+            val screenHeight = size.height.toFloat().takeIf { it > 0f } ?: 1f
+            controller.onVerticalStart(startX / width, onBrightness(), onVolume())
+            var completed = false
+            try {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    event.changes.forEach { it.consume() }
+                    val change = event.changes.firstOrNull()
+                    if (change != null) {
+                        controller.onVerticalDelta((startY - change.position.y) / screenHeight)
+                    }
+                    if (event.changes.none { it.pressed }) {
+                        completed = true
+                        break
+                    }
+                }
+            } catch (e: CancellationException) {
+                controller.onVerticalCancel()
+                throw e
+            }
+            val result = controller.onVerticalEnd()
+            if (completed && result != null) onLevelEnd(result.kind, result.fraction)
         }
 
         GesturePhase.LONG_PRESS -> {

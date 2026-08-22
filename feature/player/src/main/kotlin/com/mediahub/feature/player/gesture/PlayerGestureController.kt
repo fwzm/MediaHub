@@ -19,6 +19,16 @@ data class GestureSpeedPreview(
     val isRewind: Boolean = false,
 )
 
+/** 竖向滑动手势目标（U3-C）。 */
+enum class PlayerLevelKind { BRIGHTNESS, VOLUME }
+
+/** 竖向滑动指示。 */
+data class GestureLevelPreview(
+    val kind: PlayerLevelKind,
+    /** 0f..1f（已 clamp）。 */
+    val fraction: Float,
+)
+
 /**
  * 播放器手势状态机（U3-B revision，纯逻辑、无 Android/Compose 依赖、可单测）。
  *
@@ -51,8 +61,14 @@ class PlayerGestureController(
     private val _speedPreview = MutableStateFlow<GestureSpeedPreview?>(null)
     val speedPreview: StateFlow<GestureSpeedPreview?> = _speedPreview.asStateFlow()
 
+    private val _levelPreview = MutableStateFlow<GestureLevelPreview?>(null)
+    /** 竖向亮度/音量指示（null = 未在竖滑）。 */
+    val levelPreview: StateFlow<GestureLevelPreview?> = _levelPreview.asStateFlow()
+
     private var scrubAnchorMs = 0L
     private var savedPermanentSpeed = 1f
+    private var brightnessAnchor = 0f
+    private var volumeAnchor = 0f
     /** 长按 rewind 累计目标位置（tick 递减，COMMIT 直接用，不再减 step）。 */
     private var rewindTargetMs = 0L
     /** 长按方向模式：true=rewind，false=正向倍速。 */
@@ -180,6 +196,41 @@ class PlayerGestureController(
         actions.onCommitSeek(rewindTargetMs)
     }
 
+    // ---- 竖向亮度/音量 ----
+
+    /**
+     * 竖向滑动开始：按 xFraction 决定 BRIGHTNESS（左半屏）或 VOLUME（右半屏）。
+     * [currentBrightness] / [currentVolume] 由播放页注入（0..1），锚定初始值。
+     */
+    fun onVerticalStart(xFraction: Float, currentBrightness: Float, currentVolume: Float) {
+        val kind = if (xFraction < LONG_PRESS_SPLIT) PlayerLevelKind.BRIGHTNESS else PlayerLevelKind.VOLUME
+        if (kind == PlayerLevelKind.BRIGHTNESS) brightnessAnchor = currentBrightness.coerceIn(0f, 1f)
+        else volumeAnchor = currentVolume.coerceIn(0f, 1f)
+        _levelPreview.value = GestureLevelPreview(kind, if (kind == PlayerLevelKind.BRIGHTNESS) brightnessAnchor else volumeAnchor)
+    }
+
+    /** [deltaFraction]：(startY - currentY) / screenHeight，上滑为正。 */
+    fun onVerticalDelta(deltaFraction: Float) {
+        val preview = _levelPreview.value ?: return
+        val newFraction = when (preview.kind) {
+            PlayerLevelKind.BRIGHTNESS -> (brightnessAnchor + deltaFraction).coerceIn(BRIGHTNESS_MIN, 1f)
+            PlayerLevelKind.VOLUME -> (volumeAnchor + deltaFraction).coerceIn(0f, 1f)
+        }
+        _levelPreview.value = GestureLevelPreview(preview.kind, newFraction)
+    }
+
+    /** 松手：返回最终值由播放页应用（brightness / volume）。 */
+    fun onVerticalEnd(): GestureLevelPreview? {
+        val result = _levelPreview.value
+        _levelPreview.value = null
+        return result
+    }
+
+    /** 取消：丢弃指示器。 */
+    fun onVerticalCancel() {
+        _levelPreview.value = null
+    }
+
     // ---- 计算 ----
 
     private fun scrubSensitivityMs(): Long {
@@ -218,6 +269,9 @@ class PlayerGestureController(
         const val REWIND_DRAG_SCALE = 1.0f
 
         const val SPEED_STEP_FRACTION = 0.1f
+
+        /** 亮度最低值（避免全黑）。 */
+        const val BRIGHTNESS_MIN = 0.05f
 
         val BASE_SPEED_LADDER = listOf(
             0.1f, 0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 2.5f, 3f, 3.5f, 4f, 4.5f, 5f,

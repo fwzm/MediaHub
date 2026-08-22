@@ -1,5 +1,6 @@
 package com.mediahub.feature.player.gesture
 
+import com.mediahub.feature.player.gesture.PlayerLevelKind
 import com.mediahub.model.PlayerGestures
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -286,6 +287,75 @@ class PlayerGestureControllerTest {
         c.onSpeedActivate(0.25f)
         c.onSpeedDrag(-10f)
         assertEquals(0.1f, c.speedPreview.value?.speed)
+    }
+
+    // ---- 竖向亮度/音量（U3-C） ----
+
+    @Test
+    fun `左半屏纵滑锁定亮度模式`() {
+        val actions = RecordingActions()
+        val c = controller(actions)
+        c.onVerticalStart(0.25f, currentBrightness = 0.5f, currentVolume = 0.8f)
+        assertEquals(PlayerLevelKind.BRIGHTNESS, c.levelPreview.value?.kind)
+        assertEquals(0.5f, c.levelPreview.value?.fraction)
+    }
+
+    @Test
+    fun `右半屏纵滑锁定音量模式`() {
+        val actions = RecordingActions()
+        val c = controller(actions)
+        c.onVerticalStart(0.75f, currentBrightness = 0.5f, currentVolume = 0.8f)
+        assertEquals(PlayerLevelKind.VOLUME, c.levelPreview.value?.kind)
+        assertEquals(0.8f, c.levelPreview.value?.fraction)
+    }
+
+    @Test
+    fun `上滑增加亮度下滑降低亮度`() {
+        val c = controller(RecordingActions())
+        c.onVerticalStart(0.25f, currentBrightness = 0.5f, currentVolume = 0.5f)
+        // 上滑 0.2 屏高 → +0.2
+        c.onVerticalDelta(0.2f)
+        assertEquals(0.7f, c.levelPreview.value?.fraction)
+        // 下滑 0.4 屏高 → 0.5 - 0.2 = 0.3
+        c.onVerticalDelta(-0.2f)
+        assertEquals(0.3f, c.levelPreview.value?.fraction)
+    }
+
+    @Test
+    fun `音量 clamp 到 0 到 1`() {
+        val c = controller(RecordingActions())
+        c.onVerticalStart(0.75f, currentBrightness = 0.5f, currentVolume = 0.9f)
+        c.onVerticalDelta(0.5f) // 上滑 → 1.4 → clamp 1.0
+        assertEquals(1f, c.levelPreview.value?.fraction)
+        c.onVerticalDelta(-3f) // 下滑 → -2.1 → clamp 0
+        assertEquals(0f, c.levelPreview.value?.fraction)
+    }
+
+    @Test
+    fun `亮度 clamp 到最低 5 percent`() {
+        val c = controller(RecordingActions())
+        c.onVerticalStart(0.25f, currentBrightness = 0.1f, currentVolume = 0.5f)
+        c.onVerticalDelta(-0.5f) // 大幅下滑 → 0.1-0.5=-0.4 → clamp 0.05
+        assertEquals(0.05f, c.levelPreview.value?.fraction)
+    }
+
+    @Test
+    fun `竖滑结束返回最终值并清空指示器`() {
+        val c = controller(RecordingActions())
+        c.onVerticalStart(0.75f, currentBrightness = 0.5f, currentVolume = 0.6f)
+        c.onVerticalDelta(0.1f)
+        val result = c.onVerticalEnd()
+        assertEquals(PlayerLevelKind.VOLUME, result?.kind)
+        assertEquals(0.7f, result?.fraction!!, 0.01f)
+        assertNull(c.levelPreview.value)
+    }
+
+    @Test
+    fun `竖滑取消清空指示器`() {
+        val c = controller(RecordingActions())
+        c.onVerticalStart(0.25f, currentBrightness = 0.5f, currentVolume = 0.5f)
+        c.onVerticalCancel()
+        assertNull(c.levelPreview.value)
     }
 
     @Test

@@ -1,7 +1,10 @@
 package com.mediahub.feature.player
 
+import android.app.Activity
 import android.content.Context
+import android.media.AudioManager
 import android.os.BatteryManager
+import android.view.WindowManager
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.ViewGroup
@@ -10,19 +13,25 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,6 +49,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -55,9 +65,12 @@ import com.mediahub.model.SubtitleTrack
 import com.mediahub.feature.player.gesture.GestureSeekPreview
 import com.mediahub.feature.player.gesture.GestureSpeedPreview
 import com.mediahub.feature.player.gesture.PlayerGestureController
+import com.mediahub.feature.player.gesture.GestureLevelPreview
 import com.mediahub.feature.player.gesture.PlayerGestureLayer
+import com.mediahub.feature.player.gesture.PlayerLevelKind
 import com.mediahub.player.engine.SeekMode
 import com.mediahub.player.engine.TrackSelection
+import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -146,6 +159,22 @@ fun PlayerRoute(
     }
     val scrubPreview by gestureController.scrubPreview.collectAsStateWithLifecycle()
     val speedPreview by gestureController.speedPreview.collectAsStateWithLifecycle()
+    val levelPreview by gestureController.levelPreview.collectAsStateWithLifecycle()
+
+    // 竖向亮度/音量状态（U3-C）
+    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    var currentVolumeFraction by remember { 
+        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        mutableStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max)
+    }
+    DisposableEffect(Unit) {
+        val originalBrightness = activity?.window?.attributes?.screenBrightness
+        onDispose {
+            activity?.window?.let { w ->
+                w.attributes = w.attributes.apply { screenBrightness = originalBrightness ?: WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE }
+            }
+        }
+    }
 
     // 设备电量（Item 10）：进入即读，每 60s 刷新
     var batteryLevel by remember { mutableStateOf(readBatteryLevel(context)) }
@@ -210,11 +239,29 @@ fun PlayerRoute(
         PlayerGestureLayer(
             controller = gestureController,
             modifier = Modifier.fillMaxSize(),
+            onBrightness = { activity?.window?.attributes?.screenBrightness?.takeIf { it >= 0f } ?: 0.5f },
+            onVolume = { currentVolumeFraction },
+            onLevelEnd = { kind, fraction ->
+                when (kind) {
+                    PlayerLevelKind.BRIGHTNESS -> {
+                        activity?.window?.attributes = activity?.window?.attributes?.apply { screenBrightness = fraction }
+                    }
+                    PlayerLevelKind.VOLUME -> {
+                        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, (fraction * max).roundToInt(), 0)
+                        currentVolumeFraction = fraction
+                    }
+                }
+            },
         )
 
         // 手势预览指示（U3-B）：scrub / 连续快退 / 长按倍速
         scrubPreview?.let { GestureSeekIndicator(it, Modifier.align(Alignment.Center)) }
         speedPreview?.let { GestureSpeedIndicator(it, Modifier.align(Alignment.Center)) }
+        levelPreview?.let { preview ->
+            val alignment = if (preview.kind == PlayerLevelKind.BRIGHTNESS) Alignment.CenterStart else Alignment.CenterEnd
+            GestureLevelIndicator(preview, Modifier.align(alignment))
+        }
 
         // 引擎自动降级提示（U3-A：Media3 失败 → mpv 同位置重播）
         if (engineSwitching) {
@@ -545,6 +592,39 @@ private fun GestureSpeedIndicator(preview: GestureSpeedPreview, modifier: Modifi
             .background(Color.Black.copy(alpha = 0.65f))
             .padding(horizontal = 20.dp, vertical = 10.dp),
     )
+}
+
+/** 竖向亮度/音量指示器（U3-C）：窄长圆角胶囊，半透明黑底。 */
+@Composable
+private fun GestureLevelIndicator(preview: GestureLevelPreview, modifier: Modifier = Modifier) {
+    val icon = if (preview.kind == PlayerLevelKind.BRIGHTNESS) Icons.Default.LightMode else Icons.Default.VolumeUp
+    Column(
+        modifier = modifier
+            .padding(horizontal = 32.dp)
+            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(28.dp))
+            .padding(horizontal = 14.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+        Box(
+            modifier = Modifier
+                .width(6.dp)
+                .height(140.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(Color.White.copy(alpha = 0.25f)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(preview.fraction.coerceIn(0.02f, 1f))
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color.White),
+            )
+        }
+        Text("${(preview.fraction * 100).roundToInt()}%", color = Color.White, style = MaterialTheme.typography.labelSmall)
+    }
 }
 
 private fun formatTime(ms: Long): String {
