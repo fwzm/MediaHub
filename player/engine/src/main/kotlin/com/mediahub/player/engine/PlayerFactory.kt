@@ -25,7 +25,7 @@ class PlayerFactory(
     private val mediaCacheProvider: MediaCacheProvider,
 ) {
 
-    fun create(headersHolder: PlaybackHeadersHolder): ExoPlayer {
+    fun create(headersHolder: PlaybackHeadersHolder, speedMonitor: PlaybackSpeedMonitor): ExoPlayer {
         val renderersFactory = DefaultRenderersFactory(context)
             .setEnableDecoderFallback(true)
 
@@ -42,6 +42,7 @@ class PlayerFactory(
             .build()
         val httpDataSourceFactory: DataSource.Factory = OkHttpDataSource.Factory(okHttpClient)
             .setUserAgent(USER_AGENT)
+            .setTransferListener(speedMonitor)
         val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
 
         val cacheDataSourceFactory = CacheDataSource.Factory()

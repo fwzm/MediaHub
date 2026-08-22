@@ -155,11 +155,11 @@
 - [x] Item 3：PlaybackLaunchSnapshot 直传（详情页快照跳过重复 Detail GET）
 - [x] Item 4：自动横屏（SENSOR_LANDSCAPE 进入；退出按进入前实际方向显式恢复 PORTRAIT/LANDSCAPE，MIUI 兼容）
 - [x] Item 5：沉浸式系统栏（隐藏 status/navigation bars + BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE 边缘滑动临时唤出）
-- [ ] Item 6：Overlay 两层 UI —— 点击唤出 / 3s 自动隐藏
-- [ ] Item 7：Overlay 左上角 × + 完整剧集/系列标题
-- [ ] Item 8：Overlay 服务器名 + 图标
-- [ ] Item 9：Overlay 真实媒体下载速度（Media3 TransferListener）
-- [ ] Item 10：Overlay 设备电量
+- [x] Item 6：Overlay 两层 UI —— 点击唤出 / 3s 自动隐藏
+- [x] Item 7：Overlay 左上角 × + 完整剧集/系列标题
+- [x] Item 8：Overlay 服务器名 + 图标（图标跟随 Server Editor，暂无则只显名）
+- [x] Item 9：Overlay 真实媒体下载速度（Media3 TransferListener）
+- [x] Item 10：Overlay 设备电量
 - [ ] Item 11：回归（seek / 字幕 / 音轨 Bottom Sheet / 退出 final flush 不回归）
 - [ ] Item 12：exact-head CI + 真机 smoke（items 4-5 已过真机，见交付报告）
 

@@ -280,6 +280,7 @@ class PlayerViewModelTest {
         var playedSession: PlaybackSession? = null
         override val exoPlayer: androidx.media3.exoplayer.ExoPlayer
             get() = error("fake engine：不提供真实 ExoPlayer")
+        override val downloadSpeedBps: StateFlow<Long> = MutableStateFlow(0L)
         override fun play(session: PlaybackSession) { playedSession = session }
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long) = Unit

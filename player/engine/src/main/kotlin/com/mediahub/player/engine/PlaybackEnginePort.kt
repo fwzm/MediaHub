@@ -20,6 +20,8 @@ interface PlaybackEnginePort {
     val events: Flow<PlaybackEvent>
     /** 底层 Media3 播放器（仅 UI 渲染 PlayerView 用）。 */
     val exoPlayer: androidx.media3.exoplayer.ExoPlayer
+    /** 真实媒体下载速度（B/s，TransferListener 统计；Overlay 展示）。 */
+    val downloadSpeedBps: StateFlow<Long>
 
     fun play(session: PlaybackSession)
     fun togglePlayPause()

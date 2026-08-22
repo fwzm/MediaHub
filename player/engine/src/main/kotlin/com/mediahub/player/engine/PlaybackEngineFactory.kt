@@ -13,6 +13,13 @@ class PlaybackEngineFactory(
 ) : PlaybackEngineCreator {
     override fun create(scope: CoroutineScope): PlaybackEnginePort {
         val headersHolder = PlaybackHeadersHolder()
-        return PlaybackEngine(playerFactory.create(headersHolder), headersHolder, logger, scope)
+        val speedMonitor = PlaybackSpeedMonitor()
+        return PlaybackEngine(
+            player = playerFactory.create(headersHolder, speedMonitor),
+            headersHolder = headersHolder,
+            logger = logger,
+            scope = scope,
+            speedMonitor = speedMonitor,
+        )
     }
 }

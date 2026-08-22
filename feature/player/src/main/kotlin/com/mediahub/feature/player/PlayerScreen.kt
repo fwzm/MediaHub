@@ -1,17 +1,26 @@
 package com.mediahub.feature.player
 
+import android.content.Context
+import android.os.BatteryManager
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
@@ -23,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +54,7 @@ import com.mediahub.model.UserPreferences
 import com.mediahub.model.SubtitleTrack
 import com.mediahub.player.engine.TrackSelection
 import kotlin.math.roundToLong
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
@@ -58,6 +69,9 @@ fun PlayerRoute(
     val resolve by viewModel.resolveState.collectAsStateWithLifecycle()
     val engineState by viewModel.engine.uiState.collectAsStateWithLifecycle()
     val preferences by viewModel.preferences.collectAsStateWithLifecycle()
+    val serverDisplayName by viewModel.serverDisplayName.collectAsStateWithLifecycle()
+    val serverIcon by viewModel.serverIcon.collectAsStateWithLifecycle()
+    val downloadSpeedBps by viewModel.engine.downloadSpeedBps.collectAsStateWithLifecycle()
 
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
     DisposableEffect(Unit) {
@@ -82,6 +96,25 @@ fun PlayerRoute(
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    // Overlay：点击切换显示 / 播放中 3s 自动隐藏（Item 6）
+    var controlsVisible by remember { mutableStateOf(true) }
+    val clickInteractionSource = remember { MutableInteractionSource() }
+    LaunchedEffect(controlsVisible, state.isPlaying) {
+        if (controlsVisible && state.isPlaying) {
+            delay(OVERLAY_AUTO_HIDE_MS)
+            controlsVisible = false
+        }
+    }
+
+    // 设备电量（Item 10）：进入即读，每 60s 刷新
+    var batteryLevel by remember { mutableStateOf(readBatteryLevel(context)) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            batteryLevel = readBatteryLevel(context)
+        }
+    }
 
     // 返回按钮：先完成进度 final flush（含远端短超时），再返回（ADR-023）
     val exitPlayer: () -> Unit = {
@@ -113,6 +146,16 @@ fun PlayerRoute(
             modifier = Modifier.fillMaxSize(),
         )
 
+        // 透明点击层：点击切换 Overlay 显示（Item 6）
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = clickInteractionSource,
+                    indication = null,
+                ) { controlsVisible = !controlsVisible },
+        )
+
         when (resolve) {
             ResolveState.Resolving -> {
                 CircularProgressIndicator(
@@ -140,18 +183,28 @@ fun PlayerRoute(
             }
 
             ResolveState.Ready -> {
-                PlayerControls(
-                    state = state,
-                    onBack = exitPlayer,
-                    onTogglePlayPause = viewModel.engine::togglePlayPause,
-                    onSeek = viewModel.engine::seekTo,
-                    onCycleSpeed = {
-                        val next = SPEEDS[(SPEEDS.indexOf(state.speed) + 1).let { if (it >= SPEEDS.size) 0 else it }]
-                        viewModel.engine.setSpeed(next)
-                    },
-                    onShowAudio = { showAudioDialog = true },
-                    onShowSubtitle = { showSubtitleDialog = true },
-                )
+                AnimatedVisibility(
+                    visible = controlsVisible,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                ) {
+                    PlayerControls(
+                        state = state,
+                        serverDisplayName = serverDisplayName,
+                        serverIcon = serverIcon,
+                        downloadSpeedBps = downloadSpeedBps,
+                        batteryLevel = batteryLevel,
+                        onBack = exitPlayer,
+                        onTogglePlayPause = viewModel.engine::togglePlayPause,
+                        onSeek = viewModel.engine::seekTo,
+                        onCycleSpeed = {
+                            val next = SPEEDS[(SPEEDS.indexOf(state.speed) + 1).let { if (it >= SPEEDS.size) 0 else it }]
+                            viewModel.engine.setSpeed(next)
+                        },
+                        onShowAudio = { showAudioDialog = true },
+                        onShowSubtitle = { showSubtitleDialog = true },
+                    )
+                }
 
                 // 有画面但无音频输出 → 显式提示，不再"安静地没有声音"（Phase 1B-2.4）。
                 // 判据用 Media3 audioFormat（真实输出信号），不用 isTrackSupported
@@ -246,6 +299,10 @@ private const val BASE_SUBTITLE_FRACTION = 0.0533f
 @Composable
 private fun PlayerControls(
     state: PlayerCombinedState,
+    serverDisplayName: String?,
+    serverIcon: String?,
+    downloadSpeedBps: Long,
+    batteryLevel: Int?,
     onBack: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
@@ -263,17 +320,38 @@ private fun PlayerControls(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = Color.White)
+                    Icon(Icons.Default.Close, contentDescription = "关闭", tint = Color.White)
                 }
                 Text(
                     text = state.mediaTitle ?: "",
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
+                    maxLines = 2,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = onShowAudio) { Text("音轨", color = Color.White) }
                 TextButton(onClick = onShowSubtitle) { Text("字幕", color = Color.White) }
+            }
+            if (serverDisplayName != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                ) {
+                    if (!serverIcon.isNullOrBlank()) {
+                        Text(
+                            text = serverIcon,
+                            color = Color.White.copy(alpha = 0.85f),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    Text(
+                        text = serverDisplayName,
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                    )
+                }
             }
         }
 
@@ -284,6 +362,24 @@ private fun PlayerControls(
                 .background(Color.Black.copy(alpha = 0.45f))
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = formatSpeed(downloadSpeedBps),
+                    color = Color.White.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                batteryLevel?.let {
+                    Text(
+                        text = "电量 $it%",
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
             if (state.durationMs > 0) {
                 Slider(
                     value = state.positionMs.toFloat().coerceIn(0f, state.durationMs.toFloat()),
@@ -344,3 +440,17 @@ private fun formatTime(ms: Long): String {
     val s = totalSeconds % 60
     return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
+
+private fun formatSpeed(bytesPerSecond: Long): String {
+    if (bytesPerSecond <= 0) return "--"
+    val kb = bytesPerSecond / 1024.0
+    return if (kb < 1024) "%.0f KB/s".format(kb) else "%.1f MB/s".format(kb / 1024.0)
+}
+
+private fun readBatteryLevel(context: Context): Int? {
+    val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return null
+    val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+    return level.takeIf { it in 0..100 }
+}
+
+private const val OVERLAY_AUTO_HIDE_MS = 3_000L

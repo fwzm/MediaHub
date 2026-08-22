@@ -55,6 +55,7 @@ class PlaybackEngine(
     private val headersHolder: PlaybackHeadersHolder,
     private val logger: Logger,
     private val scope: CoroutineScope,
+    private val speedMonitor: PlaybackSpeedMonitor,
 ) : PlaybackEnginePort {
     private val _uiState = MutableStateFlow(PlaybackUiState())
     override val uiState: StateFlow<PlaybackUiState> = _uiState.asStateFlow()
@@ -85,6 +86,9 @@ class PlaybackEngine(
 
     /** 供 PlayerView 绑定。 */
     override val exoPlayer: ExoPlayer get() = player
+
+    /** 真实媒体下载速度（B/s，TransferListener 统计）。 */
+    override val downloadSpeedBps: StateFlow<Long> = speedMonitor.bytesPerSecond
 
     init {
         player.setAudioAttributes(
@@ -171,6 +175,7 @@ class PlaybackEngine(
             player.seekTo(startPosition)
         }
         playStartElapsedMs = SystemClock.elapsedRealtime()
+        speedMonitor.reset()
         // 临时时长：Media3 timeline READY 前先展示 source 时长（Emby runTimeTicks），避免 0:00/满条
         _uiState.value = PlaybackUiState(
             durationMs = session.source.durationMs ?: 0,
@@ -245,6 +250,7 @@ class PlaybackEngine(
         progressJob?.cancel()
         progressJob = scope.launch {
             while (isActive) {
+                speedMonitor.tick()
                 val position = player.currentPosition
                 val actualDuration = player.duration.takeIf { it > 0 }
                 val effectiveDuration = actualDuration ?: _uiState.value.durationMs

@@ -1,4 +1,16 @@
 # 变更记录（CHANGELOG）
+## [0.9.2-player-overlay] — 2026-08-22（Player Startup & Immersive UX：Overlay 两层 UI）
+### 功能
+- Overlay 两层 UI：点击视频切换显示 / 播放中 3s 自动隐藏（fadeIn/fadeOut）。
+- 顶层：左上角 ×（关闭，经 awaited stopAndFlush 退出）+ 完整剧集/系列标题 + 服务器显示名/图标。
+- 底层：真实媒体下载速度 + 设备电量 + 进度条/时间/播放/倍速。
+- 下载速度走 Media3 TransferListener（PlaybackSpeedMonitor，1s 滑动窗口 + 空闲 1.5s 衰减归零），
+  DataSource 工厂 setTransferListener 注入，engine 暴露 downloadSpeedBps。
+- 设备电量走 BatteryManager（BATTERY_PROPERTY_CAPACITY，进入即读 + 每 60s 刷新）。
+### 测试
+- FakeEngine 补 downloadSpeedBps；feature:player + player:engine + core:database 单测通过。
+### 真机验证（Xiaomi 24031PN0DC / Android 14）
+- 下载速度 740 KB/s、电量 100%、服务器名 Emby、进度 14:37/32:11 均正常；× 关闭触发 stopAndFlush + 方向恢复。
 ## [0.9.1-player-ux-orientation] — 2026-08-22（Player Startup & Immersive UX：横屏/沉浸式加固）
 ### 修复（真机级隐患）
 - **MIUI 方向恢复不敏感**：SCREEN_ORIENTATION_UNSPECIFIED(-1) / SCREEN_ORIENTATION_SENSOR(4)

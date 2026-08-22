@@ -93,6 +93,12 @@ class PlayerViewModel @Inject constructor(
     private val _resolveState = MutableStateFlow<ResolveState>(ResolveState.Resolving)
     val resolveState: StateFlow<ResolveState> = _resolveState.asStateFlow()
 
+    /** 服务器显示名 + 图标（Overlay 展示，Item 8）。 */
+    private val _serverDisplayName = MutableStateFlow<String?>(null)
+    val serverDisplayName: StateFlow<String?> = _serverDisplayName.asStateFlow()
+    private val _serverIcon = MutableStateFlow<String?>(null)
+    val serverIcon: StateFlow<String?> = _serverIcon.asStateFlow()
+
     /** 当前 Provider 句柄（能力组合，ADR-014）；resolve 成功后可用。 */
     private var handle: ProviderHandle? = null
 
@@ -137,6 +143,8 @@ class PlayerViewModel @Inject constructor(
             try {
                 val server = serverStore.getServer(serverId)
                     ?: throw ProviderException.NotFound(serverId, "媒体源")
+                _serverDisplayName.value = server.displayName
+                _serverIcon.value = server.icon
                 val providerHandle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 handle = providerHandle
