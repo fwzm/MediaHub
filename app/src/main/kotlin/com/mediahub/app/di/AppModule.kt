@@ -34,6 +34,7 @@ import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.base.DefaultProviderRegistry
 import com.mediahub.provider.emby.session.EmbySessionStore
+import com.mediahub.provider.api.SessionStoreCleaner
 import com.mediahub.provider.local.LocalRootProvider
 import dagger.Binds
 import dagger.Module
@@ -86,6 +87,14 @@ object AppModule {
     fun provideEmbySessionStorage(
         @ApplicationContext context: Context,
     ): EmbySessionStore.Storage = EmbySessionStore.SharedPrefsStorage(context)
+
+    @Provides
+    @Singleton
+    fun provideSessionStoreCleaner(
+        storage: EmbySessionStore.Storage,
+    ): SessionStoreCleaner = SessionStoreCleaner { serverId ->
+        EmbySessionStore(storage).clear(serverId)
+    }
 
     @Provides
     @Singleton

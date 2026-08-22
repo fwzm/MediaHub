@@ -69,13 +69,18 @@ class ServerRepository @Inject constructor(
     }
 
     suspend fun deleteServer(id: String) {
+        val wasDefault = dao.getById(id)?.isDefault == true
         dao.deleteById(id)
         endpointDao.deleteByServer(id)
+        // 删除的是默认媒体源时，重选首条为默认（保持最多一个 default 不变式）
+        if (wasDefault) {
+            dao.getFirst()?.let { dao.setDefaultExclusive(it.id) }
+        }
     }
 
+    /** 设为默认：原子「清旧设新」（单条 SQL），保证最多一个 isDefault==true。 */
     suspend fun setDefault(id: String) {
-        dao.clearDefaultFlag()
-        dao.setDefault(id)
+        dao.setDefaultExclusive(id)
     }
 
     suspend fun markConnected(id: String, timestampEpochMs: Long = System.currentTimeMillis()) {

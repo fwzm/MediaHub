@@ -41,6 +41,7 @@ import com.mediahub.model.PlaybackProgress
 fun HomeRoute(
     onOpenServer: (MediaServer) -> Unit,
     onRelogin: (MediaServer) -> Unit,
+    onEditServer: (MediaServer) -> Unit,
     onAddServer: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenItem: (PlaybackProgress) -> Unit,
@@ -102,6 +103,7 @@ fun HomeRoute(
                         },
                         authState = authStates[server.id],
                         onLogout = { viewModel.logout(server.id) },
+                        onEdit = { onEditServer(server) },
                     )
                 }
             }

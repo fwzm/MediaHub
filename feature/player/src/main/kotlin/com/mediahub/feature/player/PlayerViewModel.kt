@@ -14,7 +14,6 @@ import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.SubtitleStyle
-import com.mediahub.model.UserPreferences
 import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackSession
@@ -29,9 +28,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 /** 播放源解析状态。 */
 sealed interface ResolveState {
@@ -39,6 +38,12 @@ sealed interface ResolveState {
     data object Ready : ResolveState
     data class Failed(val message: String) : ResolveState
 }
+
+/** 系统 UI 偏好（进入播放器时应用自动横屏/沉浸式，异步加载避免主线程读 DataStore）。 */
+data class PlayerSystemUiPrefs(
+    val autoLandscape: Boolean,
+    val immersiveBars: Boolean,
+)
 
 /** 播放页组合状态（解析状态 + 引擎状态）。 */
 data class PlayerCombinedState(
@@ -78,17 +83,20 @@ class PlayerViewModel @Inject constructor(
     val preferences: StateFlow<com.mediahub.model.UserPreferences> =
         userPreferencesRepository.flow.stateIn(viewModelScope, SharingStarted.Eagerly, com.mediahub.model.UserPreferences())
 
+    /**
+     * 系统 UI 偏好（自动横屏/沉浸式），初始 null（未加载），DataStore 首读完成后发出非 null。
+     * 避免在 composition 主线程 runBlocking 读 DataStore（冷启动首读阻塞 UI）。
+     */
+    val playerSystemUiPrefs: StateFlow<PlayerSystemUiPrefs?> =
+        userPreferencesRepository.flow
+            .map { it.let { p -> PlayerSystemUiPrefs(p.autoLandscape, p.immersiveBars) } }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     fun updateSubtitleStyle(transform: (SubtitleStyle) -> SubtitleStyle) {
         viewModelScope.launch {
             userPreferencesRepository.update { it.copy(subtitleStyle = transform(it.subtitleStyle)) }
         }
     }
-
-    /**
-     * 同步读取当前持久化偏好（进入播放器时用，避免 preferences StateFlow 默认值竞态）。
-     * DataStore 已缓存时即时返回；仅冷启动首读会触发一次磁盘读。
-     */
-    fun snapshotPreferences(): UserPreferences = runBlocking { userPreferencesRepository.snapshot() }
 
     private val _resolveState = MutableStateFlow<ResolveState>(ResolveState.Resolving)
     val resolveState: StateFlow<ResolveState> = _resolveState.asStateFlow()

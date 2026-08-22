@@ -20,6 +20,7 @@ import com.mediahub.feature.library.LibraryRoute
 import com.mediahub.feature.player.PlayerRoute
 import com.mediahub.feature.search.SearchRoute
 import com.mediahub.feature.server.AddServerRoute
+import com.mediahub.feature.server.ServerEditorRoute
 import com.mediahub.feature.settings.SettingsRoute
 
 /** 应用导航图（Phase 0 路由）。 */
@@ -51,6 +52,9 @@ fun MediaHubNavHost() {
                     navController.navigate(
                         "server/add?reauthorizeId=${Uri.encode(server.id)}"
                     )
+                },
+                onEditServer = { server ->
+                    navController.navigate("server/edit/" + Uri.encode(server.id))
                 },
                 onAddServer = { navController.navigate(Routes.ADD_SERVER) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
@@ -88,6 +92,21 @@ fun MediaHubNavHost() {
             AddServerRoute(
                 onDone = { navController.popBackStack() },
                 onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(
+            route = "server/edit/{serverId}",
+            arguments = listOf(
+                navArgument("serverId") { type = NavType.StringType },
+            ),
+        ) {
+            ServerEditorRoute(
+                onBack = { navController.popBackStack() },
+                onRelogin = { server ->
+                    navController.navigate("server/add?reauthorizeId=" + Uri.encode(server.id))
+                },
+                onDeleted = { navController.popBackStack() },
             )
         }
 

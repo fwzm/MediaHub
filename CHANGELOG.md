@@ -1,4 +1,18 @@
 # 变更记录（CHANGELOG）
+## [0.9.3-server-editor] — 2026-08-22（Phase 1B-2.5：Server Editor）
+### 功能
+- Server Editor 页面（feature:server）：编辑名称/备注/主线路 URL、测试连接、账号状态/重新登录、
+  设为默认、删除媒体源。URL 采用「草稿 → 测试（可选）→ 保存 → 一次 updateServer」，边输入不改变使用中地址。
+- 服务器自定义图标：Photo Picker → 缩放/中心裁剪方形 → WebP 复制到 files/server_icons/{serverId}.webp，
+  MediaServer.icon 保存 file:// 引用（不长期保存 SAF content:// URI）。内置图标 builtin://<type>，默认 null。
+- 统一 ServerIcon 组件（core:ui）：null/builtin 回退首字母徽标，file:// 走 Coil，首页卡片/编辑页/播放器 Overlay 共用。
+- 删除级联 RemoveServerUseCase：server(+endpoints) → account → token → credential → progress → 图标文件 → provider 会话。
+- 设为默认原子化：单条 SQL 清旧设新，保证最多一个 isDefault==true；删除默认媒体源重选首条。
+### 修复（P1）
+- 移除 PlayerViewModel.snapshotPreferences() 的 runBlocking 主线程读 DataStore：改 playerSystemUiPrefs
+  StateFlow<PlayerSystemUiPrefs?>（null=未加载，加载后 apply），composable 收到非 null 再 enterPlayback。
+### 测试
+- core:ui ServerIconTest（icon 引用 → Coil model 映射 4 用例）；feature:server / core:database / feature:player 单测通过。
 ## [0.9.2-player-overlay] — 2026-08-22（Player Startup & Immersive UX：Overlay 两层 UI）
 ### 功能
 - Overlay 两层 UI：点击视频切换显示 / 播放中 3s 自动隐藏（fadeIn/fadeOut）。

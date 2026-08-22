@@ -160,15 +160,15 @@
 - [x] Item 8：Overlay 服务器名 + 图标（图标跟随 Server Editor，暂无则只显名）
 - [x] Item 9：Overlay 真实媒体下载速度（Media3 TransferListener）
 - [x] Item 10：Overlay 设备电量
-- [ ] Item 11：回归（seek / 字幕 / 音轨 Bottom Sheet / 退出 final flush 不回归）
-- [ ] Item 12：exact-head CI + 真机 smoke（items 4-5 已过真机，见交付报告）
+- [x] Item 11：回归（seek / 字幕 / 音轨 Bottom Sheet / 退出 final flush 不回归）
+- [x] Item 12：exact-head CI + 真机 smoke（CI run 32572243824 success；items 4-5 + Overlay 全过真机）
 
 ## Phase 1B-2.5 —— Server Management（暂停 Server Editor）🔄 IN PROGRESS
 - [x] ServerEndpoint 数据模型 + Room migration 1→2（servers 去 baseUrl 加 note/icon；新增 server_endpoints 表）
 - [x] MediaServer 模型：baseUrl 迁为计算属性（活跃线路 URL）+ note/icon/endpoints + 向后兼容构造器
 - [x] ServerRepository 加载线路（combine servers+endpoints）；add/update/delete 处理线路
 - [x] mapper 补 ServerEndpoint 双向映射 + 测试（ServerEntityMappersTest 5 用例）
-- [ ] Server Editor（名称/备注/图标/URL/用户名/重新登录/设为默认/删除）
+- [x] Server Editor（名称/备注/图标/URL/用户名/重新登录/设为默认/删除 + 删除级联 + 默认原子 + 移除 runBlocking P1）
 - [ ] 线路测试（走 testConnection，记录 DNS/HTTP/耗时/身份/会话）
 - [ ] 手动线路切换（不做自动最快）
 - [ ] 媒体源独立一级页面（首页/媒体库/媒体源/设置 路由）

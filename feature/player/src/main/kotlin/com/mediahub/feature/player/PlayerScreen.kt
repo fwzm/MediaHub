@@ -79,18 +79,17 @@ fun PlayerRoute(
     }
 
     // 自动横屏 + 沉浸式系统栏（Phase Player UX）：进入保存原方向并应用，退出恢复。
-    // 生命周期兜底（DisposableEffect onDispose），不依赖"正常返回按钮"单一路径。
+    // 偏好异步加载（null=未加载），加载完成后 apply，避免主线程 runBlocking 读 DataStore。
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
-    // 同步读一次持久化偏好（避免 preferences StateFlow 默认值在 DataStore 加载前的竞态）
-    val sysUiPrefs = remember(viewModel) {
-        val p = viewModel.snapshotPreferences()
-        p.autoLandscape to p.immersiveBars
+    val sysUiPrefs by viewModel.playerSystemUiPrefs.collectAsStateWithLifecycle()
+    val sysUiController = remember(activity) { activity?.let { PlayerSystemUiController(it) } }
+    LaunchedEffect(sysUiController, sysUiPrefs) {
+        val prefs = sysUiPrefs ?: return@LaunchedEffect
+        sysUiController?.enterPlayback(prefs.autoLandscape, prefs.immersiveBars)
     }
-    DisposableEffect(Unit) {
-        val controller = activity?.let { PlayerSystemUiController(it) }
-        controller?.enterPlayback(sysUiPrefs.first, sysUiPrefs.second)
-        onDispose { controller?.exitPlayback() }
+    DisposableEffect(sysUiController) {
+        onDispose { sysUiController?.exitPlayback() }
     }
 
     var showAudioDialog by remember { mutableStateOf(false) }

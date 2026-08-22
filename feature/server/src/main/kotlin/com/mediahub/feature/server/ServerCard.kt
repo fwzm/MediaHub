@@ -31,6 +31,7 @@ fun ServerCard(
     modifier: Modifier = Modifier,
     authState: AuthSessionState? = null,
     onLogout: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
 ) {
     Card(
         onClick = onClick,
@@ -86,6 +87,9 @@ fun ServerCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
+                }
+                if (onEdit != null) {
+                    TextButton(onClick = onEdit) { Text("编辑", style = MaterialTheme.typography.labelMedium) }
                 }
                 if (onLogout != null && authState is AuthSessionState.Authenticated) {
                     TextButton(onClick = onLogout) { Text("退出", style = MaterialTheme.typography.labelMedium) }

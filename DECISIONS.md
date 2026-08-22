@@ -269,3 +269,16 @@
     UserPreferences.subtitleStyle（DataStore），由 PlayerScreen 应用到 SubtitleView
     （CaptionStyleCompat + setFractionalTextSize + setBottomPaddingFraction +
     setApplyEmbeddedStyles）；设置页 18sp 档位与播放器内缩放叠加。
+## ADR-033 Server Editor：图标语义 / 删除级联 / 默认媒体源原子不变式
+- 状态：已采纳（2026-08-22，Phase 1B-2.5）
+- 决策：
+  - **服务器图标语义**：MediaServer.icon 为 String?，约定 null = 默认（Provider 首字母徽标）、
+    builtin://&lt;type&gt; = 内置 Provider 图标、file://&lt;abs-path&gt; = 自定义图片（应用私有目录
+    files/server_icons/{serverId}.webp）。统一 core:ui ServerIcon 组件渲染，禁止各处混用 Text(icon)/AsyncImage(icon)。
+  - **图标落盘**：Photo Picker 选中 → 缩放/中心裁剪方形 → WebP 复制到应用私有目录，不长期保存
+    SAF content:// URI（权限过期/原图删除即失效）。
+  - **删除级联**：RemoveServerUseCase 按 server(+endpoints) → account → token → credential →
+    progress → 自定义图标文件 → provider 会话（SessionStoreCleaner）顺序清理，禁止 UI 直接 delete servers row。
+  - **默认媒体源不变式**：最多一个 isDefault==true。设为默认用单条 SQL（UPDATE servers SET
+    isDefault = CASE WHEN id=:id THEN 1 ELSE 0 END）原子清旧设新；删除默认媒体源时重选首条为默认。
+- 影响：ServerEditor 只编辑主线路 URL（草稿→测试→保存一次 updateServer）；多线路增删排序留待 Endpoint Management。

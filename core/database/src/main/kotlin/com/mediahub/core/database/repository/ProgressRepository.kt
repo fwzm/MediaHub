@@ -32,6 +32,11 @@ class ProgressRepository @Inject constructor(
         dao.delete(serverId, itemId)
     }
 
+    /** 删除某服务器的全部本地进度（Server Editor 删除媒体源级联）。 */
+    suspend fun deleteByServer(serverId: String) {
+        dao.deleteByServer(serverId)
+    }
+
     suspend fun cleanupOlderThan(beforeEpochMs: Long) {
         dao.deleteOlderThan(beforeEpochMs)
     }
