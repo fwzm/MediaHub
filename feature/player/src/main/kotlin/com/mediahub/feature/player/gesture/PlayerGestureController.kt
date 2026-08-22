@@ -53,6 +53,8 @@ class PlayerGestureController(
 
     private var scrubAnchorMs = 0L
     private var savedPermanentSpeed = 1f
+    /** 长按 rewind 累计目标位置（tick 递减，COMMIT 直接用，不再减 step）。 */
+    private var rewindTargetMs = 0L
     /** 长按方向模式：true=rewind，false=正向倍速。 */
     private var longPressIsRewind = false
 
@@ -78,6 +80,7 @@ class PlayerGestureController(
             val deltaMs = seconds * 1000L * if (backward) -1L else 1L
             actions.onCommitSeek(clampPosition(positionMs() + deltaMs))
         } else {
+            // 未启用 seek 的区域（含中间 20%）→ 播放/暂停（不再受已删除的总开关控制）
             actions.onPlayPauseToggle()
         }
     }
@@ -116,6 +119,7 @@ class PlayerGestureController(
         if (!g.longPressSpeedEnabled) return
         savedPermanentSpeed = currentSpeed()
         longPressIsRewind = g.longPressDirectionalEnabled && xFraction < LONG_PRESS_SPLIT
+        if (longPressIsRewind) rewindTargetMs = positionMs()
         val ladder = speedLadder(g)
         val entry = ladder.lastOrNull { it <= g.longPressDefaultSpeed } ?: ladder.first()
         _speedPreview.value = GestureSpeedPreview(entry, isRewind = longPressIsRewind)
@@ -136,10 +140,11 @@ class PlayerGestureController(
         val g = gestures()
         val ladder = speedLadder(g)
         if (longPressIsRewind) {
-            // rewind 速度系数：拖动偏移等比例缩放（0.25×..4.0×）
-            val raw = (g.longPressDefaultSpeed + cumulativeFraction * REWIND_DRAG_SCALE).coerceIn(0.25f, 4.0f)
-            val snapped = (raw * 4).roundToInt() / 4f // 0.25 步长
-            _speedPreview.value = GestureSpeedPreview(snapped, isRewind = true)
+            // rewind 与正向共用倍率阶梯（尊重 longPressSpeedMin 过滤）
+            val entryIndex = ladder.indexOfLast { it <= g.longPressDefaultSpeed }.coerceAtLeast(0)
+            val step = (cumulativeFraction / SPEED_STEP_FRACTION).roundToInt()
+            val index = (entryIndex + step).coerceIn(0, ladder.lastIndex)
+            _speedPreview.value = GestureSpeedPreview(ladder[index], isRewind = true)
         } else {
             val entryIndex = ladder.indexOfLast { it <= g.longPressDefaultSpeed }.coerceAtLeast(0)
             val step = (cumulativeFraction / SPEED_STEP_FRACTION).roundToInt()
@@ -164,14 +169,15 @@ class PlayerGestureController(
         if (_speedPreview.value?.isRewind != true) return
         val speed = _speedPreview.value!!.speed
         val stepMs = (REWIND_BASE_STEP_MS * speed).toLong()
-        actions.onPreviewSeek(clampPosition(positionMs() - stepMs))
+        // 累计递减：不依赖 Media3/mpv 的异步 position 刷新，避免多 tick 读到同一旧值
+        rewindTargetMs = clampPosition(rewindTargetMs - stepMs)
+        actions.onPreviewSeek(rewindTargetMs)
     }
 
+    /** 松手：直接 COMMIT 累计目标（不再减一步）。 */
     fun onRewindCommit() {
         if (_speedPreview.value?.isRewind != true) return
-        val speed = _speedPreview.value!!.speed
-        val stepMs = (REWIND_BASE_STEP_MS * speed).toLong()
-        actions.onCommitSeek(clampPosition(positionMs() - stepMs))
+        actions.onCommitSeek(rewindTargetMs)
     }
 
     // ---- 计算 ----

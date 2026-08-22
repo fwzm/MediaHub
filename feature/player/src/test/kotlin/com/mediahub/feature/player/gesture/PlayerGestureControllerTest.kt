@@ -76,7 +76,7 @@ class PlayerGestureControllerTest {
     @Test
     fun `双击左半屏未启用快退时回退到暂停继续`() {
         val actions = RecordingActions().apply {
-            gestures = PlayerGestures(doubleTapSeekBackwardEnabled = false, doubleTapPlayPauseEnabled = true)
+            gestures = PlayerGestures(doubleTapSeekBackwardEnabled = false)
         }
         controller(actions).onDoubleTap(0.25f)
         assertEquals(listOf("playPause"), actions.calls)
@@ -194,17 +194,17 @@ class PlayerGestureControllerTest {
     }
 
     @Test
-    fun `rewind 模式拖动调整速度系数`() {
+    fun `rewind 模式拖动沿阶梯调档`() {
         val actions = RecordingActions()
         val c = controller(actions)
         c.onSpeedActivate(0.25f)
         assertEquals(2.0f, c.speedPreview.value?.speed)
+        // +0.5 屏 = +5 档：阶梯(min=0.5)[0.5,0.75,1,1.25,1.5,2,2.5,3,3.5,4,4.5,5]，idx5→idx10 = 4.5
         c.onSpeedDrag(0.5f)
-        // 2.0 + 0.5 = 2.5，snap 到 0.25 步长
-        assertEquals(2.5f, c.speedPreview.value?.speed)
-        c.onSpeedDrag(-1.0f)
-        // 2.0 - 1.0 = 1.0
-        assertEquals(1.0f, c.speedPreview.value?.speed)
+        assertEquals(4.5f, c.speedPreview.value?.speed)
+        // 回到锚点（cumulative -0）→ idx5 = 2.0
+        c.onSpeedDrag(0f)
+        assertEquals(2.0f, c.speedPreview.value?.speed)
     }
 
     @Test
@@ -212,11 +212,9 @@ class PlayerGestureControllerTest {
         val actions = RecordingActions()
         val c = controller(actions)
         c.onSpeedActivate(0.25f)
-        c.onSpeedDrag(0.25f) // 2.0 + 0.25 = 2.25 → snap 2.25
-        // 2.25×, 基础步长 333ms: step = 333 * 2.25 ≈ 749ms
+        // 默认入口 2.0×，无拖动 → step = 333 * 2 = 666ms
         c.onRewindTick()
-        val expected = 600_000L - (333L * 2.25f).toLong()
-        assertEquals("previewSeek:$expected", actions.calls.first())
+        assertEquals("previewSeek:${600_000L - 666L}", actions.calls.first())
     }
 
     @Test
@@ -224,10 +222,70 @@ class PlayerGestureControllerTest {
         val actions = RecordingActions()
         val c = controller(actions)
         c.onSpeedActivate(0.25f)
+        c.onRewindTick() // 1 步: 600000 - 666 = 599334
+        c.onRewindCommit() // COMMIT(599334)，不再额外减步
+        assertEquals("commitSeek:599334", actions.calls.last())
+    }
+
+    // ---- rewind 累计与最低倍率（P1/P2 修复回归） ----
+
+    @Test
+    fun `连续多 tick 基于 rewindTargetMs 累计递减而非反复读同一旧位置`() {
+        val actions = RecordingActions().apply {
+            positionMs = 600_000L // 10:00.000
+        }
+        val c = controller(actions)
+        c.onSpeedActivate(0.25f) // 默认 2.0× → step = 333*2=666ms
+        // 连续 3 个 tick：600000→599334→598668→598002（每步 -666，不依赖异步 position 刷新）
+        c.onRewindTick()
+        c.onRewindTick()
+        c.onRewindTick()
+        assertEquals(
+            listOf(
+                "previewSeek:599334",
+                "previewSeek:598668",
+                "previewSeek:598002",
+            ),
+            actions.calls,
+        )
         c.onRewindCommit()
-        // 默认 2.0×, 基础步长 333ms: step = 333 * 2 = 666
-        val expected = 600_000L - (333L * 2.0f).toLong()
-        assertEquals("commitSeek:$expected", actions.calls.first())
+        // 松手 COMMIT 直接用累计目标，不多退一步
+        assertEquals("commitSeek:598002", actions.calls.last())
+    }
+
+    @Test
+    fun `松手后不再额外多退一步`() {
+        val actions = RecordingActions().apply { positionMs = 300_000L }
+        val c = controller(actions)
+        c.onSpeedActivate(0.25f) // 2.0×
+        c.onRewindTick() // 1 步: 300000 - 666 = 299334
+        // 手势层松手顺序：先 onRewindCommit 再 onSpeedEnd
+        c.onRewindCommit()
+        c.onSpeedEnd()
+        assertEquals(listOf("previewSeek:299334", "commitSeek:299334"), actions.calls)
+    }
+
+    @Test
+    fun `rewind 倍率尊重 longPressSpeedMin 下限`() {
+        val actions = RecordingActions().apply {
+            gestures = PlayerGestures(longPressSpeedMin = 0.5f)
+        }
+        val c = controller(actions)
+        c.onSpeedActivate(0.25f) // 默认入口 2.0×
+        // 大幅左拖：阶梯被 min=0.5 过滤后最低档是 0.5，不会到 0.25/0.1
+        c.onSpeedDrag(-10f)
+        assertEquals(0.5f, c.speedPreview.value?.speed)
+    }
+
+    @Test
+    fun `rewind 倍率选 0 dot 1 时可到 0 dot 1`() {
+        val actions = RecordingActions().apply {
+            gestures = PlayerGestures(longPressSpeedMin = 0.1f)
+        }
+        val c = controller(actions)
+        c.onSpeedActivate(0.25f)
+        c.onSpeedDrag(-10f)
+        assertEquals(0.1f, c.speedPreview.value?.speed)
     }
 
     @Test

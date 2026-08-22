@@ -179,12 +179,6 @@ fun SettingsRoute(
             }
 
             SettingSwitch(
-                label = "未启用双击快进/快退时双击播放暂停",
-                checked = prefs.gestures.doubleTapPlayPauseEnabled,
-                onCheckedChange = { viewModel.update { p -> p.copy(gestures = p.gestures.copy(doubleTapPlayPauseEnabled = it)) } },
-            )
-
-            SettingSwitch(
                 label = "长按临时倍速",
                 checked = prefs.gestures.longPressSpeedEnabled,
                 onCheckedChange = { viewModel.update { p -> p.copy(gestures = p.gestures.copy(longPressSpeedEnabled = it)) } },

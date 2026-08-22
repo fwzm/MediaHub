@@ -50,8 +50,6 @@ data class PlayerGestures(
     val doubleTapSeekForwardEnabled: Boolean = false,
     /** 双击快进秒数（5-60，默认 10）。 */
     val doubleTapSeekForwardSeconds: Int = 10,
-    /** 未启用双击 seek 的区域，双击 = 播放/暂停。 */
-    val doubleTapPlayPauseEnabled: Boolean = true,
     /** 长按临时倍速。 */
     val longPressSpeedEnabled: Boolean = true,
     /** 长按倍速下限（0.5× 或 0.1×）。 */
