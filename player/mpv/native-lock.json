@@ -1,0 +1,31 @@
+{
+  "artifact": "dev.jdtech.mpv:libmpv:1.0.0",
+  "artifactSha256": "DF146592480FC8418415A06B1F1A1D6318B0088E21F52254B0E9A82B61CA8FA2",
+  "artifactUrl": "https://repo1.maven.org/maven2/dev/jdtech/mpv/libmpv/1.0.0/libmpv-1.0.0.aar",
+  "upstream": "https://github.com/jarnedemeulemeester/libmpv-android",
+  "upstreamTag": "v1.0.0",
+  "abis": [
+    "arm64-v8a"
+  ],
+  "nativeComponents": {
+    "mpv": "0.41.0",
+    "ffmpeg": "8.1",
+    "libass": "0.17.4",
+    "libplacebo": "7.360.1"
+  },
+  "soFiles": [
+    "libmpv.so",
+    "libplayer.so",
+    "libavcodec.so",
+    "libavformat.so",
+    "libavutil.so",
+    "libswresample.so",
+    "libswscale.so",
+    "libavfilter.so",
+    "libavdevice.so",
+    "libc++_shared.so"
+  ],
+  "licenseNote": "LGPL/GPL（mpv/FFmpeg/libass/libplacebo）；发布前需确认 FFmpeg --enable-gpl 标志并输出完整 Third-party Notices",
+  "pageSizeNote": "CI check_elf_alignment.sh 校验 arm64 16KB page-size 对齐",
+  "spikeNote": "U2 spike 受控预编译依赖；出现需改 FFmpeg configure/libass/16KB 不合规等条件时切换方案 A（源码构建）"
+}

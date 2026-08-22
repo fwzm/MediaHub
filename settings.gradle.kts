@@ -33,6 +33,7 @@ include(":core:logging")
 include(":core:ui")
 
 include(":player:engine")
+include(":player:mpv")
 include(":player:compatibility")
 
 include(":provider:api")
