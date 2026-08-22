@@ -60,6 +60,7 @@ dependencies {
 
     implementation(project(":player:engine"))
     implementation(project(":player:compatibility"))
+    implementation(project(":player:mpv"))
 
     implementation(project(":provider:api"))
     implementation(project(":provider:base"))

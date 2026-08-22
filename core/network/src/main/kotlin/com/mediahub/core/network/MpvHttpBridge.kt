@@ -30,7 +30,8 @@ class MpvHttpBridge(
 
     /** 启动桥并返回 localhost 媒体 URL。upstreamUrl=Emby Direct Stream URL，upstreamHeaders=凭据/媒体头。 */
     fun start(upstreamUrl: String, upstreamHeaders: Map<String, String>): String {
-        val socket = ServerSocket(0, 50, InetAddress.getLoopbackAddress())
+        // 显式绑定 IPv4 loopback（getLoopbackAddress 在部分 Android 上返回 ::1，导致 127.0.0.1 连接被拒）
+        val socket = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
         serverSocket = socket
         running.set(true)
         Thread({ acceptLoop(socket, upstreamUrl, upstreamHeaders) }, "mpv-http-bridge").start()

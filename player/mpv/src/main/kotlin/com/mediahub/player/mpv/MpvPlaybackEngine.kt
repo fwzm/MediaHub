@@ -127,6 +127,12 @@ class MpvPlaybackEngine(
                 m.setOptionString("vo", "gpu")
                 m.setOptionString("ao", "audiotrack")
                 m.setOptionString("hwdec", "mediacodec")
+                // MPEG-TS 等 FFmpeg 无法从 application/octet-stream 自动探测的容器：按 container 强制 demuxer
+                val container = src.container?.lowercase()
+                if (container == "mpegts" || container == "ts" || container == "m2ts") {
+                    m.setOptionString("demuxer-lavf-format", "mpegts")
+                }
+                logger.i(LogTag.PLAYER, "mpv container=" + container + " video=" + src.videoCodec + " audio=" + src.audioCodec)
                 m.init()
                 attachedSurface?.let { m.attachSurface(it) }
                 m.observeProperty("time-pos", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)

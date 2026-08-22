@@ -24,6 +24,7 @@ import com.mediahub.core.security.TokenStore
 import com.mediahub.player.engine.MediaCacheProvider
 import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackEngineFactory
+import com.mediahub.player.mpv.MpvPlaybackEngineCreator
 import com.mediahub.player.engine.PlayerFactory
 import com.mediahub.core.database.repository.ProgressRepository
 import com.mediahub.core.database.repository.ProgressStore
@@ -133,12 +134,14 @@ object AppModule {
         mediaCacheProvider: MediaCacheProvider,
     ): PlayerFactory = PlayerFactory(context, mediaCacheProvider)
 
+    // U2 spike：强制 EngineKind.MPV；U3 起由 AUTO selector 决定 Media3/mpv。
     @Provides
     @Singleton
-    fun providePlaybackEngineFactory(
-        playerFactory: PlayerFactory,
+    fun providePlaybackEngineCreator(
+        @ApplicationContext context: Context,
         logger: Logger,
-    ): PlaybackEngineCreator = PlaybackEngineFactory(playerFactory, logger)
+        httpClientFactory: HttpClientFactory,
+    ): PlaybackEngineCreator = MpvPlaybackEngineCreator(context, logger, httpClientFactory)
 
     @Provides
     @Singleton
