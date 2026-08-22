@@ -2,6 +2,7 @@ package com.mediahub.player.engine
 
 import android.content.Context
 import com.mediahub.core.network.OriginScopedCredentialInterceptor
+import com.mediahub.core.network.StartupNetworkEventListener
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
@@ -39,6 +40,11 @@ class PlayerFactory(
         // Emby 长期凭据只发给原始 origin，跨 origin 跳一律剥离。
         val okHttpClient = OkHttpClient.Builder()
             .addNetworkInterceptor(OriginScopedCredentialInterceptor())
+            .eventListenerFactory(StartupNetworkEventListener.FACTORY)
+            .connectionPool(
+                okhttp3.ConnectionPool(5, 5, java.util.concurrent.TimeUnit.MINUTES)
+            )
+            .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
             .build()
         val httpDataSourceFactory: DataSource.Factory = OkHttpDataSource.Factory(okHttpClient)
             .setUserAgent(USER_AGENT)
