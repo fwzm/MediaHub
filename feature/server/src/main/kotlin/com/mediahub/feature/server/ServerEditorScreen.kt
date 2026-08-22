@@ -74,6 +74,12 @@ fun ServerEditorRoute(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
+                actions = {
+                    TextButton(onClick = { viewModel.save(onBack) }, enabled = !state.isSaving) {
+                        if (state.isSaving) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        else Text("保存")
+                    }
+                },
             )
         },
     ) { padding ->
