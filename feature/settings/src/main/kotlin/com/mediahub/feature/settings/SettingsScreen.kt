@@ -103,6 +103,16 @@ fun SettingsRoute(
                 checked = prefs.showPlayerInfoOverlay,
                 onCheckedChange = { viewModel.update { p -> p.copy(showPlayerInfoOverlay = it) } },
             )
+            SettingSwitch(
+                label = "播放视频时自动横屏",
+                checked = prefs.autoLandscape,
+                onCheckedChange = { viewModel.update { p -> p.copy(autoLandscape = it) } },
+            )
+            SettingSwitch(
+                label = "播放时隐藏状态栏和导航栏",
+                checked = prefs.immersiveBars,
+                onCheckedChange = { viewModel.update { p -> p.copy(immersiveBars = it) } },
+            )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 

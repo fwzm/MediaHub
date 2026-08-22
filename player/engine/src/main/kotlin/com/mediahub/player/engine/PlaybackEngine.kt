@@ -2,6 +2,7 @@
 
 package com.mediahub.player.engine
 
+import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Format
@@ -150,8 +151,10 @@ class PlaybackEngine(
             }
 
             override fun onRenderedFirstFrame(eventTime: AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
-                val ttff = System.currentTimeMillis() - playStartElapsedMs
-                logger.i(LogTag.PLAYER, "首帧渲染 ttff=" + ttff + "ms renderTimeMs=" + renderTimeMs)
+                if (playStartElapsedMs > 0) {
+                    val ttff = SystemClock.elapsedRealtime() - playStartElapsedMs
+                    logger.i(LogTag.PLAYER, "首帧渲染 ttff=" + ttff + "ms renderTimeMs=" + renderTimeMs)
+                }
             }
         })
     }
@@ -167,7 +170,7 @@ class PlaybackEngine(
         if (startPosition != null && startPosition > 0) {
             player.seekTo(startPosition)
         }
-        playStartElapsedMs = System.currentTimeMillis()
+        playStartElapsedMs = SystemClock.elapsedRealtime()
         // 临时时长：Media3 timeline READY 前先展示 source 时长（Emby runTimeTicks），避免 0:00/满条
         _uiState.value = PlaybackUiState(
             durationMs = session.source.durationMs ?: 0,
@@ -244,6 +247,7 @@ class PlaybackEngine(
             while (isActive) {
                 val position = player.currentPosition
                 val actualDuration = player.duration.takeIf { it > 0 }
+                val effectiveDuration = actualDuration ?: _uiState.value.durationMs
                 _uiState.update { current ->
                     current.copy(
                         positionMs = position,
@@ -257,7 +261,7 @@ class PlaybackEngine(
                             serverId = s.serverId,
                             itemId = s.itemId,
                             positionMs = position,
-                            durationMs = actualDuration ?: 0L,
+                            durationMs = effectiveDuration,
                             isPaused = !player.playWhenReady,
                             updatedAtEpochMs = System.currentTimeMillis(),
                             mode = s.source.mode,
@@ -280,7 +284,7 @@ class PlaybackEngine(
             serverId = s.serverId,
             itemId = s.itemId,
             positionMs = player.currentPosition,
-            durationMs = player.duration.takeIf { it > 0 } ?: 0L,
+            durationMs = player.duration.takeIf { it > 0 } ?: _uiState.value.durationMs,
             isPaused = !player.playWhenReady,
             updatedAtEpochMs = System.currentTimeMillis(),
             mode = s.source.mode,

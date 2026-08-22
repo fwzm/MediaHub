@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -61,6 +62,16 @@ fun PlayerRoute(
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
     DisposableEffect(Unit) {
         onDispose { viewModel.stopAndFlushAsync() }
+    }
+
+    // 自动横屏 + 沉浸式系统栏（Phase Player UX）：进入保存原方向并应用，退出恢复。
+    // 生命周期兜底（DisposableEffect onDispose），不依赖"正常返回按钮"单一路径。
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    DisposableEffect(activity, preferences.autoLandscape, preferences.immersiveBars) {
+        val controller = activity?.let { PlayerSystemUiController(it) }
+        controller?.enterPlayback(preferences.autoLandscape, preferences.immersiveBars)
+        onDispose { controller?.exitPlayback() }
     }
 
     var showAudioDialog by remember { mutableStateOf(false) }

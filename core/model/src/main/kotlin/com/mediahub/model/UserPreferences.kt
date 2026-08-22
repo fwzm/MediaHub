@@ -12,6 +12,10 @@ data class UserPreferences(
     val autoPlayNextEpisode: Boolean = true,
     val maxBitrateBps: Long? = null,
     val showPlayerInfoOverlay: Boolean = false,
+    /** 播放视频时自动横屏（进入播放器锁定 SENSOR_LANDSCAPE，退出恢复原方向）。 */
+    val autoLandscape: Boolean = true,
+    /** 播放时隐藏状态栏/导航栏（沉浸式；边缘滑动可临时唤出）。 */
+    val immersiveBars: Boolean = true,
     val subtitleStyle: SubtitleStyle = SubtitleStyle(),
 )
 
