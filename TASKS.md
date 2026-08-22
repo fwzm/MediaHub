@@ -174,7 +174,18 @@
 - [ ] 媒体源独立一级页面（首页/媒体库/媒体源/设置 路由）
 - [ ] 单测 + exact-head CI + 真机验证
 
-## V0.1 —— MVP（下一步） 
+## Universal Playback —— 双内核 + 播放器手势（2026-08-23）✅ DONE（待真机 smoke）
+- [x] U1 Media3 1.5.1 → 1.11.0 升级
+- [x] U2 PlaybackEnginePort 解耦 + MpvPlaybackEngine（pinned prebuilt libmpv）+ MpvHttpBridge
+- [x] U2 已知缺口记录：Blu-ray .iso resolve skip；MPEG-TS 原始流（留在矩阵，非回归）
+- [x] U3-A AUTO 引擎选择：签名决策链（显式 > 历史 > DTS/TrueHD > Media3）+ 运行时降级（ADR-034）
+- [x] U3-B 手势层：PlayerGestureLayer + PlayerGestureController 纯状态机 + SeekMode PREVIEW/COMMIT（ADR-035）
+- [x] U3-B scrub / 双击矩阵 / 连续快退 / 长按倍速 + 9 项手势偏好 + 设置区
+- [x] testDebugUnitTest / assembleDebug / lintDebug 全绿（cf9b9d2 U3-A、6eb01ac U3-B）
+- [ ] 双内核真机 smoke：Media3 fast-path 片源 + DTS-HD 片源各测手势一致性
+- [ ] exact-head CI（推送由用户执行）
+
+## V0.1 —— MVP（下一步）
 
 ### IN PROGRESS（无，等待开工）
 

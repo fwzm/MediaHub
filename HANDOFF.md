@@ -1,6 +1,27 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-13（Phase 1B-2.1 FINAL HARDENING：Direct Stream 协议边界封板，代码+测试完成，CI 随本提交执行）。
-## Phase 1B-2.1（本次）：Direct Stream 协议边界 FINAL HARDENING
+> 最后更新：2026-08-23（Universal Playback U1-U3：双内核 + AUTO 选择 + 手势层，代码+测试+文档完成，待真机 smoke 与推送 CI）。
+## Universal Playback U1-U3（本次）：双内核 + AUTO 引擎选择 + 播放器手势
+- **双内核**：PlaybackEnginePort 契约下 Media3（1.11.0）与 mpv（pinned prebuilt libmpv）并存；
+  mpv HTTP 流走 MpvHttpBridge（core:network，IPv4 loopback），ADR-030 凭据红线覆盖。
+  架构与决策链见 ADR-034；手势层与 SeekMode 语义见 ADR-035。
+- **AUTO 选择**：UserPreferences.playbackEngineMode 默认 AUTO；PlaybackEngineSelector 按
+  container|videoCodec|audioCodec 签名决策（显式 > EnginePreferenceHistory 失败指纹 >
+  DTS/TrueHD > Media3）；SwitchablePlaybackEngine 在 decoder/source 错误或静音时
+  保存位置切 mpv 同位置重播，网络错误不降级。
+- **手势层**：PlayerGestureLayer（Compose 自定义识别器）+ PlayerGestureController（纯状态机）；
+  scrub（灵敏度 clamp(时长×10%, 60s, 10min)，松手 COMMIT）、双击矩阵（快退/快进默认关，
+  未启用侧回退播放/暂停）、双击左侧按住连续快退（333ms tick PREVIEW seek）、长按倍速
+  （入口 2.0×，0.1-5.0× 阶梯，松开恢复永久倍速）。SeekMode.PREVIEW 不发 Seeked，
+  不触发远端进度 flush。
+- **测试经验（重要）**：kotlinx-coroutines-test 中 backgroundScope 协程不被
+  advanceUntilIdle() 驱动，需 runCurrent() / advanceTimeBy()+runCurrent()——
+  SwitchablePlaybackEngineTest 错误路径用例已据此修正。
+- **提交**：cf9b9d2（U3-A）、6eb01ac（U3-B），均未推送；全量
+  testDebugUnitTest / assembleDebug / lintDebug 本地全绿。
+- **已知缺口（留在矩阵，非回归）**：Blu-ray .iso resolve skip；MPEG-TS 原始流。
+- **下一步**：双内核真机 smoke（Media3 fast-path + DTS-HD 片源各测手势一致性）→
+  用户推送 → exact-head CI。
+## Phase 1B-2.1（前次）：Direct Stream 协议边界 FINAL HARDENING
 - PlaybackInfo 改官方 POST contract：POST /Items/{itemId}/PlaybackInfo；协商参数进 JSON body
   （EmbyPlaybackInfoRequestDto + EmbyDeviceProfileDto），UserId 同时走 query 与 typed body；
   Token 不进 URL 不进 body（只走 X-Emby-Token 请求头）；requestJson encodeDefaults=true/explicitNulls=false。

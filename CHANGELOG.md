@@ -1,4 +1,31 @@
 # 变更记录（CHANGELOG）
+## [0.10.0-universal-playback] — 2026-08-23（U：双内核 Universal Playback + 播放器手势）
+### 功能（双内核，U1/U2）
+- Media3 1.5.1 → 1.11.0（含 required toolchain 升级）。
+- PlaybackEnginePort 与 ExoPlayer 解耦（U2 foundation）：PlaybackEngine（Media3 封装）实现同一端口，
+  PlayerViewModel 依赖 fun interface PlaybackEngineCreator，可注入第二内核。
+- MpvPlaybackEngine（player:mpv）：pinned prebuilt libmpv，demuxer-by-container，与 Media3 同端口实现；
+  MpvHttpBridge（core:network，IPv4 绑定）代理 HTTP 流，沿用 ADR-030 跨 origin 凭据剥离。
+- 已知兼容性缺口（保留在矩阵中，非回归）：Blu-ray .iso 源在 resolve 阶段 skip 并提示；MPEG-TS 原始流。
+### 功能（AUTO 引擎选择，U3-A，ADR-034）
+- 设置项「播放内核」：AUTO（默认）/ Media3 / mpv。
+- PlaybackEngineSelector：按 container|videoCodec|audioCodec 签名决策——显式模式 > 历史失败指纹
+  （EnginePreferenceHistory，DataStore 持久化）> DTS/TrueHD 音频集 > 默认 Media3 fast path。
+- SwitchablePlaybackEngine 门面：AUTO 模式下 Media3 decoder/source 错误或静音（宽限期后）
+  自动切 mpv 同位置重播，UI 仅显示"正在切换兼容播放模式…"，签名写入历史。
+### 功能（播放器手势，U3-B，ADR-035）
+- PlayerGestureLayer 统一手势层替换全屏 clickable；PlayerGestureController 纯状态机（可单测）。
+- 水平拖动 scrub：灵敏度 clamp(时长×10%, 60s, 10min)，拖动只预览、松手 COMMIT。
+- 双击矩阵：左右双击快退/快进（默认关，5-60s 可调），未启用侧回退播放/暂停；双击不产生两次单击（Overlay 不闪烁）。
+- 双击左半屏按住：连续快退，节流 PREVIEW seek（约 3 次/秒，每步 1s），松手 COMMIT。
+- 长按临时倍速：入口 2.0×，水平拖动按阶梯调档（0.1-5.0×，屏宽 1/10 一档），松开恢复长按前永久倍速。
+- SeekMode.PREVIEW/COMMIT 贯穿 PlaybackEnginePort + 三个实现：PREVIEW 只移位置不发 Seeked
+  （不触发远端进度即时 flush），COMMIT 才发；进度条同样 preview→commit。
+- PlayerGestures 9 项偏好（模型 + DataStore）与设置页「播放器手势」区。
+### 测试
+- PlaybackEngineSelectorTest（7）、SwitchablePlaybackEngineTest（8，含 coroutines-test backgroundScope
+  需 runCurrent 驱动的经验）、PlayerGestureControllerTest（22）。
+- 全项目 testDebugUnitTest / assembleDebug / lintDebug 全绿。
 ## [0.9.3-server-editor] — 2026-08-22（Phase 1B-2.5：Server Editor）
 ### 功能
 - Server Editor 页面（feature:server）：编辑名称/备注/主线路 URL、测试连接、账号状态/重新登录、

@@ -282,3 +282,43 @@
   - **默认媒体源不变式**：最多一个 isDefault==true。设为默认用单条 SQL（UPDATE servers SET
     isDefault = CASE WHEN id=:id THEN 1 ELSE 0 END）原子清旧设新；删除默认媒体源时重选首条为默认。
 - 影响：ServerEditor 只编辑主线路 URL（草稿→测试→保存一次 updateServer）；多线路增删排序留待 Endpoint Management。
+
+## ADR-034 双内核架构与 AUTO 引擎选择（Universal Playback U1-U3）
+- 状态：已采纳（2026-08-23）
+- 背景：Media3 fast path 对主流格式体验最好，但 DTS-HD/TrueHD 静音、部分 container/codec 组合
+  source/decoder 失败需要 mpv 兜底；用户手动选内核负担高。
+- 决策：
+  - **PlaybackEnginePort 为唯一引擎契约**：Media3（PlaybackEngine）与 mpv（MpvPlaybackEngine）
+    同端口实现；PlayerViewModel 只见 fun interface PlaybackEngineCreator，双工厂经
+    @Media3EngineCreator/@MpvEngineCreator 注入。
+  - **SwitchablePlaybackEngine 门面**：对外转发活跃引擎的 uiState/progress/events/cues/speed；
+    模式为 AUTO/MEDIA3/MPV（UserPreferences.playbackEngineMode，默认 AUTO）。
+  - **AUTO 决策链（PlaybackEngineSelector）**：显式指定 > 历史失败指纹（签名粒度
+    container|videoCodec|audioCodec，EnginePreferenceHistory 接口在 player:engine、
+    DataStore 实现在 app）> DTS/TrueHD 音频集直接走 mpv > 默认 Media3。
+  - **运行时降级**：AUTO 下 Media3 报 decoder/source 错误或静音（audioFormatMime 为 null
+    且过宽限期）→ 保存当前位置 → mpv 同位置重播 → 签名写入历史；用户只看到
+    "正在切换兼容播放模式…"。网络类错误不降级（换内核无意义）。
+  - mpv 的 HTTP 流经 MpvHttpBridge（core:network，IPv4 loopback 绑定）本地代理，
+    沿用 ADR-030 跨 origin 凭据剥离红线。
+- 已知缺口（留在矩阵，非回归）：Blu-ray .iso 在 resolve 阶段 skip；MPEG-TS 原始流。
+
+## ADR-035 播放器手势层与 SeekMode 语义（U3-B）
+- 状态：已采纳（2026-08-23）
+- 决策：
+  - **三层分工**：PlayerGestureLayer（Compose awaitEachGesture 自定义识别器，判定
+    tap/double-tap/hold/drag/long-press 矩阵）→ PlayerGestureController（纯状态机，无
+    Android 依赖，位置/时长/倍速经注入 lambda 读取，动作走 Actions 接口）→ 播放页接
+    PlaybackEnginePort/Overlay。禁止 UI 直接解析指针事件做业务决策。
+  - **手势层位置**：渲染 Surface/字幕层之上、控制层之下；上层可点元素消费事件后不落入
+    手势层（down.isConsumed 早退）。
+  - **SeekMode.PREVIEW/COMMIT**：seekTo(positionMs, mode)——PREVIEW 只移位置不发
+    PlaybackEvent.Seeked（不触发 ProgressSyncCoordinator 远端即时 flush），COMMIT 才发。
+    scrub 与连续快退期间用 PREVIEW，松手 COMMIT；进度条拖动同语义。
+  - **连续快退用节流 seek 而非负倍速**：负倍速内核普遍不支持；每 tick（333ms）退 1s，
+    净退速约 3×。
+  - **长按倍速恢复永久倍速**：松开恢复长按前的永久倍速（而非固定 1.0×）；
+    setSpeed 统一 clamp 0.1-5.0。
+  - **双击消歧**：自实现 tap 等待（双击窗口内不出单击），Overlay 不闪烁。
+  - **手势偏好独立于 defaultPlaybackSpeed**：PlayerGestures 9 项（DataStore），
+    scrub 灵敏度 = clamp(时长×10%, 60s, 10min) 固定算法不做偏好。
