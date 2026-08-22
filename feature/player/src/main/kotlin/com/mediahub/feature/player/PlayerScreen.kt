@@ -1,6 +1,7 @@
 package com.mediahub.feature.player
 
 import android.app.Activity
+import android.provider.Settings
 import android.content.Context
 import android.media.AudioManager
 import android.os.BatteryManager
@@ -163,15 +164,33 @@ fun PlayerRoute(
 
     // 竖向亮度/音量状态（U3-C）
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
-    var currentVolumeFraction by remember { 
+    fun readVolumeFraction(): Float {
         val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-        mutableStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max)
+        return audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max
     }
     DisposableEffect(Unit) {
         val originalBrightness = activity?.window?.attributes?.screenBrightness
         onDispose {
             activity?.window?.let { w ->
-                w.attributes = w.attributes.apply { screenBrightness = originalBrightness ?: WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE }
+                w.attributes = w.attributes.apply { 
+                    screenBrightness = originalBrightness ?: WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE 
+                }
+            }
+        }
+    }
+
+    // 竖向亮度/音量实时应用（U3-C.1：拖动过程中即时生效，非松手才 apply）
+    LaunchedEffect(levelPreview) {
+        val preview = levelPreview ?: return@LaunchedEffect
+        when (preview.kind) {
+            PlayerLevelKind.BRIGHTNESS -> {
+                activity?.window?.attributes = activity?.window?.attributes?.apply { 
+                    screenBrightness = preview.fraction 
+                }
+            }
+            PlayerLevelKind.VOLUME -> {
+                val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, (preview.fraction * max).roundToInt(), 0)
             }
         }
     }
@@ -239,20 +258,11 @@ fun PlayerRoute(
         PlayerGestureLayer(
             controller = gestureController,
             modifier = Modifier.fillMaxSize(),
-            onBrightness = { activity?.window?.attributes?.screenBrightness?.takeIf { it >= 0f } ?: 0.5f },
-            onVolume = { currentVolumeFraction },
-            onLevelEnd = { kind, fraction ->
-                when (kind) {
-                    PlayerLevelKind.BRIGHTNESS -> {
-                        activity?.window?.attributes = activity?.window?.attributes?.apply { screenBrightness = fraction }
-                    }
-                    PlayerLevelKind.VOLUME -> {
-                        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, (fraction * max).roundToInt(), 0)
-                        currentVolumeFraction = fraction
-                    }
-                }
+            onBrightness = {
+                val b = activity?.window?.attributes?.screenBrightness ?: -1f
+                if (b >= 0f) b else readSystemBrightness(context)
             },
+            onVolume = { readVolumeFraction() },
         )
 
         // 手势预览指示（U3-B）：scrub / 连续快退 / 长按倍速
@@ -624,6 +634,15 @@ private fun GestureLevelIndicator(preview: GestureLevelPreview, modifier: Modifi
             )
         }
         Text("${(preview.fraction * 100).roundToInt()}%", color = Color.White, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+/** 读取系统亮度（Android 12+ 优先 display info，fallback Settings.System），返回 0..1。 */
+private fun readSystemBrightness(context: Context): Float {
+    return try {
+        Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f
+    } catch (_: Exception) {
+        0.5f
     }
 }
 

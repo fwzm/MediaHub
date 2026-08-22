@@ -4,6 +4,8 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -30,11 +32,13 @@ fun PlayerGestureLayer(
     modifier: Modifier = Modifier,
     onBrightness: () -> Float = { 0.5f },
     onVolume: () -> Float = { 0.5f },
-    onLevelEnd: (PlayerLevelKind, Float) -> Unit = { _, _ -> },
 ) {
+    // 稳定引用：pointerInput 只以 controller 为 key，避免 lambda 实例变化重启手势
+    val currentOnBrightness by rememberUpdatedState(onBrightness)
+    val currentOnVolume by rememberUpdatedState(onVolume)
     Box(
-        modifier = modifier.pointerInput(controller, onBrightness, onVolume, onLevelEnd) {
-            detectPlayerGestures(controller, onBrightness, onVolume, onLevelEnd)
+        modifier = modifier.pointerInput(controller) {
+            detectPlayerGestures(controller, { currentOnBrightness() }, { currentOnVolume() })
         },
     )
 }
@@ -45,7 +49,6 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPl
     controller: PlayerGestureController,
     onBrightness: () -> Float,
     onVolume: () -> Float,
-    onLevelEnd: (PlayerLevelKind, Float) -> Unit,
 ) = awaitEachGesture {
     val down = awaitFirstDown(requireUnconsumed = false)
     if (down.isConsumed) return@awaitEachGesture
@@ -125,8 +128,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPl
                 controller.onVerticalCancel()
                 throw e
             }
-            val result = controller.onVerticalEnd()
-            if (completed && result != null) onLevelEnd(result.kind, result.fraction)
+            controller.onVerticalEnd()
         }
 
         GesturePhase.LONG_PRESS -> {
