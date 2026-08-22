@@ -6,6 +6,7 @@ import com.mediahub.core.logging.Redactor
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import okhttp3.EventListener
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -36,6 +37,7 @@ class HttpClientFactory(private val logger: Logger) {
     private fun baseClient(): OkHttpClient.Builder = OkHttpClient.Builder()
         .addInterceptor(RequestIdInterceptor())
         .addInterceptor(RedactingLoggingInterceptor(logger))
+        .eventListenerFactory(StartupNetworkEventListener.FACTORY)
 
     private class RequestIdInterceptor : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {

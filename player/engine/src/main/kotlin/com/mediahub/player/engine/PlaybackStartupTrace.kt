@@ -125,6 +125,14 @@ class PlaybackStartupTrace(
         return sb.toString()
     }
 
+    /** 转发为 core/network 的 sink 接口（HTTP EventListener 回调 → milestone）。 */
+    fun asSink(): com.mediahub.core.network.PlaybackNetworkTraceSink = object : com.mediahub.core.network.PlaybackNetworkTraceSink {
+        override fun onPlaybackInfoStart() = record(PlaybackStartupTrace.Milestone.PLAYBACK_INFO_REQUEST_STARTED)
+        override fun onPlaybackInfoEnd() = record(PlaybackStartupTrace.Milestone.PLAYBACK_INFO_RESPONSE_RECEIVED)
+        override fun onMediaRequestStart() = record(PlaybackStartupTrace.Milestone.MEDIA_REQUEST_STARTED)
+        override fun onMediaFirstByte() = record(PlaybackStartupTrace.Milestone.MEDIA_FIRST_BYTE)
+    }
+
     companion object {
         private val counter = AtomicLong(0)
 

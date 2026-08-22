@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.NavArgCodec
 import com.mediahub.core.database.prefs.UserPreferencesRepository
+import com.mediahub.core.network.PlaybackNetworkTraceRegistry
 import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
@@ -186,6 +187,7 @@ class PlayerViewModel @Inject constructor(
                 requestedEngineMode = latestPreferences.playbackEngineMode.name,
             )
             currentTrace = trace
+            PlaybackNetworkTraceRegistry.set(trace.asSink())
             trace.record(PlaybackStartupTrace.Milestone.PLAY_REQUESTED)
             try {
                 val server = serverStore.getServer(serverId)
@@ -254,10 +256,12 @@ class PlayerViewModel @Inject constructor(
                     syncStarted = true
                 }
                 _resolveState.value = ResolveState.Ready
+                PlaybackNetworkTraceRegistry.set(null)
             } catch (e: Exception) {
                 trace.record(PlaybackStartupTrace.Milestone.FAILED)
                 trace.putMetadata("failedStage", "SOURCE_RESOLVED")
                 logger.w(LogTag.PLAYER, "StartupTrace " + trace.summary())
+                PlaybackNetworkTraceRegistry.set(null)
                 logger.w(LogTag.PLAYER, "播放解析失败 serverId=$serverId itemId=$itemId", e)
                 _resolveState.value = ResolveState.Failed(userMessage(e))
             }

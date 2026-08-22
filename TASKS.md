@@ -191,6 +191,9 @@
 - [x] Media3 milestones: prepare/ready/videoDecoderInit/audioDecoderInit/firstFrame/playing
 - [x] mpv milestones: bridge/create/init/loadfile/fileLoaded/videoReconfig(=firstFrame)/audioReconfig
 - [x] 结构化 summary() 输出（不含 token/Authorization/Cookie）
+- [x] U4-B Network Timing：OkHttp EventListener（StartupNetworkEventListener）+ PlaybackNetworkTraceSink
+      PlaybackInfo POST → piStart/piEnd; media stream GET → mediaStart/firstByte; 无 sink 时不崩溃
+- [x] StartupNetworkEventListenerTest 4 用例（URL 匹配/时序/无泄漏/无 sink 安全）
 - [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；真机 baseline 随后记录
 
 ## V0.1 —— MVP（下一步）## V0.1 —— MVP（下一步）
