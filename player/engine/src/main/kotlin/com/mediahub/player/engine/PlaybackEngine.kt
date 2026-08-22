@@ -3,6 +3,7 @@
 package com.mediahub.player.engine
 
 import android.os.SystemClock
+import android.view.Surface
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Format
@@ -11,6 +12,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DecoderReuseEvaluation
@@ -84,11 +86,17 @@ class PlaybackEngine(
     /** 起播时间戳（elapsedRealtime），用于 TTFF（首帧）诊断。 */
     private var playStartElapsedMs = 0L
 
-    /** 供 PlayerView 绑定。 */
-    override val exoPlayer: ExoPlayer get() = player
+    override val kind: EngineKind = EngineKind.MEDIA3
 
     /** 真实媒体下载速度（B/s，TransferListener 统计）。 */
     override val downloadSpeedBps: StateFlow<Long> = speedMonitor.bytesPerSecond
+
+    private val _subtitleCues = MutableStateFlow<CueGroup?>(null)
+    override val subtitleCues: StateFlow<CueGroup?> = _subtitleCues.asStateFlow()
+
+    override fun attachSurface(surface: Surface?) {
+        player.setVideoSurface(surface)
+    }
 
     init {
         player.setAudioAttributes(
@@ -142,6 +150,10 @@ class PlaybackEngine(
                 _uiState.update {
                     it.copy(videoWidth = videoSize.width, videoHeight = videoSize.height)
                 }
+            }
+
+            override fun onCues(cues: CueGroup) {
+                _subtitleCues.value = cues
             }
         })
         // 音频输出信号（无声判据，Phase 1B-2.4）：AnalyticsListener 才有 onAudioFormatChanged

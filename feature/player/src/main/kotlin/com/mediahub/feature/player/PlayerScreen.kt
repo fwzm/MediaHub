@@ -2,6 +2,8 @@ package com.mediahub.feature.player
 
 import android.content.Context
 import android.os.BatteryManager
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -47,7 +49,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.ui.CaptionStyleCompat
-import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import com.mediahub.model.AudioTrack
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
@@ -72,6 +74,7 @@ fun PlayerRoute(
     val serverDisplayName by viewModel.serverDisplayName.collectAsStateWithLifecycle()
     val serverIcon by viewModel.serverIcon.collectAsStateWithLifecycle()
     val downloadSpeedBps by viewModel.engine.downloadSpeedBps.collectAsStateWithLifecycle()
+    val subtitleCues by viewModel.engine.subtitleCues.collectAsStateWithLifecycle()
 
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
     DisposableEffect(Unit) {
@@ -129,19 +132,39 @@ fun PlayerRoute(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        // 视频画面
+        // 视频渲染 Surface（Media3/mpv 统一走 attachSurface）
         AndroidView(
             factory = { context ->
-                PlayerView(context).apply {
-                    player = viewModel.engine.exoPlayer
-                    useController = false
+                SurfaceView(context).apply {
+                    holder.addCallback(object : SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: SurfaceHolder) {
+                            viewModel.engine.attachSurface(holder.surface)
+                        }
+                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+                        override fun surfaceDestroyed(holder: SurfaceHolder) {
+                            viewModel.engine.attachSurface(null)
+                        }
+                    })
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
                 }
             },
-            update = { view -> applySubtitleStyle(view.subtitleView, preferences) },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // 字幕 overlay（Media3 独立 SubtitleView；mpv 内部 libass 渲染，subtitleCues=null 时不显示）
+        AndroidView(
+            factory = { context ->
+                SubtitleView(context).apply {
+                    applySubtitleStyle(this, preferences)
+                }
+            },
+            update = { view ->
+                applySubtitleStyle(view, preferences)
+                view.setCues(subtitleCues?.cues)
+            },
             modifier = Modifier.fillMaxSize(),
         )
 

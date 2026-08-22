@@ -1,28 +1,38 @@
 package com.mediahub.player.engine
 
+import android.view.Surface
+import androidx.media3.common.text.CueGroup
 import com.mediahub.model.PlaybackProgress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
+/** 播放内核种类（U2：Media3 快速路径 / mpv 兼容兜底）。 */
+enum class EngineKind { MEDIA3, MPV }
+
 /**
- * 播放引擎能力面（可测性抽象，Phase 1B-2.1）。
+ * 播放引擎能力面（可测性抽象，Phase 1B-2.1；U2 解耦 ExoPlayer）。
  *
- * 只包含 ViewModel / UI 实际使用的最小成员集合；[PlaybackEngine] 是唯一生产实现。
- * 测试可用内存 fake 验证\"PlaybackSource 最终到达 engine.play\"，不测试 Media3 内部。
+ * UI / ViewModel 只依赖本接口，不感知底层是 ExoPlayer 还是 libmpv：
+ * - 视频渲染统一走 [attachSurface]（Media3 setVideoSurface / mpv render context）；
+ * - 字幕走 [subtitleCues]（Media3 发出 cues；mpv 内部 libass 渲染，恒发 null）。
+ * 生产实现：[PlaybackEngine]（Media3）、MpvPlaybackEngine（libmpv）。
  */
 interface PlaybackEnginePort {
+    val kind: EngineKind
     val uiState: StateFlow<PlaybackUiState>
     /** 每秒进度流（进度同步管线消费，见 ADR-017）。 */
     val progress: SharedFlow<PlaybackProgress>
     /** 关键事件流（Pause/Seek/Ended/Stopped）。 */
     val events: Flow<PlaybackEvent>
-    /** 底层 Media3 播放器（仅 UI 渲染 PlayerView 用）。 */
-    val exoPlayer: androidx.media3.exoplayer.ExoPlayer
+    /** 字幕 cues（Media3 引擎发出；mpv 内部渲染，恒发 null）。 */
+    val subtitleCues: StateFlow<CueGroup?>
     /** 真实媒体下载速度（B/s，TransferListener 统计；Overlay 展示）。 */
     val downloadSpeedBps: StateFlow<Long>
 
+    /** 绑定/解绑视频渲染 Surface（null 解绑）。 */
+    fun attachSurface(surface: Surface?)
     fun play(session: PlaybackSession)
     fun togglePlayPause()
     fun seekTo(positionMs: Long)
@@ -36,7 +46,7 @@ interface PlaybackEnginePort {
 
 /**
  * 引擎工厂接口（可测性抽象，Phase 1B-2.1）。
- * [PlaybackEngineFactory] 是唯一生产实现；每次 create 创建独立请求头上下文（ADR-018）。
+ * [PlaybackEngineFactory] 是 Media3 生产实现；每次 create 创建独立请求头上下文（ADR-018）。
  */
 fun interface PlaybackEngineCreator {
     fun create(scope: CoroutineScope): PlaybackEnginePort

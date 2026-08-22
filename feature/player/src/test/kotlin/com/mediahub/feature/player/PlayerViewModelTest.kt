@@ -22,6 +22,7 @@ import com.mediahub.player.engine.PlaybackEvent
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.PlaybackUiState
 import com.mediahub.player.engine.TrackSelection
+import com.mediahub.player.engine.EngineKind
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.MediaDetailProvider
 import com.mediahub.provider.api.MediaPlaybackProvider
@@ -277,9 +278,10 @@ class PlayerViewModelTest {
         private val eventsFlow = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
         override val events: Flow<PlaybackEvent> get() = eventsFlow
         var playedSession: PlaybackSession? = null
-        override val exoPlayer: androidx.media3.exoplayer.ExoPlayer
-            get() = error("fake engine：不提供真实 ExoPlayer")
+        override val kind: EngineKind = EngineKind.MEDIA3
+        override val subtitleCues: StateFlow<androidx.media3.common.text.CueGroup?> = MutableStateFlow(null)
         override val downloadSpeedBps: StateFlow<Long> = MutableStateFlow(0L)
+        override fun attachSurface(surface: android.view.Surface?) = Unit
         override fun play(session: PlaybackSession) { playedSession = session }
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long) = Unit
