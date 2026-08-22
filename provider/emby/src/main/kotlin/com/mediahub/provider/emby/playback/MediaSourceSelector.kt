@@ -12,5 +12,9 @@ import com.mediahub.provider.emby.api.EmbyMediaSourceInfoDto
  */
 object MediaSourceSelector {
     fun selectDirectStream(sources: List<EmbyMediaSourceInfoDto>): EmbyMediaSourceInfoDto? =
-        sources.firstOrNull { it.supportsDirectStream }
+        sources.firstOrNull { it.supportsDirectStream && !it.path.isIsoPath() }
+
+    /** 蓝光 ISO 镜像（.iso）不是可直接流式播放的媒体，跳过（Emby 常把它误标为 mpegts）。 */
+    private fun String?.isIsoPath(): Boolean =
+        this?.substringBefore('?')?.substringBefore('#')?.trimEnd()?.endsWith(".iso", ignoreCase = true) == true
 }

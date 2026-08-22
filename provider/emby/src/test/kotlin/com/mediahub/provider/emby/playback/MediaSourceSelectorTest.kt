@@ -26,4 +26,35 @@ class MediaSourceSelectorTest {
         )
         assertEquals("src2", MediaSourceSelector.selectDirectStream(sources)!!.id)
     }
+
+    @Test
+    fun `skips blu-ray iso source even when it supports direct stream`() {
+        val sources = listOf(
+            EmbyMediaSourceInfoDto(
+                id = "iso",
+                container = "mpegts",
+                supportsDirectStream = true,
+                path = "http://cdn/movie/zootopia.iso",
+            ),
+            EmbyMediaSourceInfoDto(
+                id = "mkv",
+                container = "mkv",
+                supportsDirectStream = true,
+                path = "http://cdn/movie/zootopia.remux.mkv",
+            ),
+        )
+        assertEquals("mkv", MediaSourceSelector.selectDirectStream(sources)!!.id)
+    }
+
+    @Test
+    fun `iso detection ignores query string`() {
+        val sources = listOf(
+            EmbyMediaSourceInfoDto(
+                id = "iso",
+                supportsDirectStream = true,
+                path = "http://cdn/movie/foo.ISO?token=1",
+            ),
+        )
+        assertNull(MediaSourceSelector.selectDirectStream(sources))
+    }
 }

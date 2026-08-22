@@ -88,6 +88,8 @@ data class EmbyMediaSourceInfoDto(
     @SerialName("SupportsDirectPlay") val supportsDirectPlay: Boolean = false,
     @SerialName("SupportsDirectStream") val supportsDirectStream: Boolean = false,
     @SerialName("SupportsTranscoding") val supportsTranscoding: Boolean = false,
+    /** 服务端文件路径（用于识别 .iso 蓝光镜像等不可直接流式播放的源）。 */
+    @SerialName("Path") val path: String? = null,
     @SerialName("MediaStreams") val mediaStreams: List<EmbyMediaStreamDto> = emptyList(),
     /** 播放源级请求头（官方 MediaSourceInfo.RequiredHttpHeaders），必须并入播放请求。 */
     @SerialName("RequiredHttpHeaders") val requiredHttpHeaders: Map<String, String> = emptyMap(),

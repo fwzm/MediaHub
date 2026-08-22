@@ -132,7 +132,12 @@ class MpvPlaybackEngine(
                 if (container == "mpegts" || container == "ts" || container == "m2ts") {
                     m.setOptionString("demuxer-lavf-format", "mpegts")
                 }
-                logger.i(LogTag.PLAYER, "mpv container=" + container + " video=" + src.videoCodec + " audio=" + src.audioCodec)
+                // 断点续播：与 Media3 对齐（startPositionMs 优先，其次 resumePositionMs）
+                val startMs = session.startPositionMs ?: session.resumePositionMs
+                if (startMs != null && startMs > 0) {
+                    m.setOptionString("start", (startMs / 1000.0).toString())
+                }
+                logger.i(LogTag.PLAYER, "mpv container=" + container + " video=" + src.videoCodec + " audio=" + src.audioCodec + " startMs=" + startMs)
                 m.init()
                 attachedSurface?.let { m.attachSurface(it) }
                 m.observeProperty("time-pos", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
