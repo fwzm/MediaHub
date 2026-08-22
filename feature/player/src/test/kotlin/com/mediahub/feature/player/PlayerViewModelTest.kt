@@ -55,6 +55,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * PlayerViewModel 解析链路测试（Phase 1B-2.1）。
@@ -64,6 +67,8 @@ import org.junit.Test
  * PlaybackSource 最终到达 engine.play。不测试 Media3 内部。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class PlayerViewModelTest {
     private val dispatcher = StandardTestDispatcher()
 

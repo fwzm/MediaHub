@@ -94,6 +94,7 @@ class SwitchablePlaybackEngine(
 
     override fun play(session: PlaybackSession) {
         this.session = session
+        session.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_SELECTION_STARTED)
         val mode = modeProvider()
         val selection = PlaybackEngineSelector.select(
             source = session.source,
@@ -101,6 +102,12 @@ class SwitchablePlaybackEngine(
             mpvPreferredSignatures = history.mpvPreferredSignatures(),
         )
         logger.i(LogTag.PLAYER, "引擎选择 kind=${selection.kind} mode=$mode reason=${selection.reason}")
+        session.trace?.let { t ->
+            t.record(PlaybackStartupTrace.Milestone.ENGINE_SELECTED)
+            t.putMetadata("engine", selection.kind.name)
+            t.putMetadata("signature", CompatibilitySignature.from(session.source).key)
+            t.putMetadata("selectorReason", selection.reason)
+        }
         startEngine(selection.kind, session)
     }
 

@@ -185,7 +185,15 @@
 - [ ] 双内核真机 smoke：Media3 fast-path 片源 + DTS-HD 片源各测手势一致性
 - [ ] exact-head CI（推送由用户执行）
 
-## V0.1 —— MVP（下一步）
+## U4-A — Fast Start Instrumentation ✅ 代码+测试完成
+- [x] PlaybackStartupTrace 数据模型：线程安全、milestone 只记第一次、可注入时钟（JVM 可测）
+- [x] 生命周期：PlayerViewModel 创建 → PlaybackSession 传递 → 引擎/选择器记录
+- [x] Media3 milestones: prepare/ready/videoDecoderInit/audioDecoderInit/firstFrame/playing
+- [x] mpv milestones: bridge/create/init/loadfile/fileLoaded/videoReconfig(=firstFrame)/audioReconfig
+- [x] 结构化 summary() 输出（不含 token/Authorization/Cookie）
+- [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；真机 baseline 随后记录
+
+## V0.1 —— MVP（下一步）## V0.1 —— MVP（下一步）
 
 ### IN PROGRESS（无，等待开工）
 

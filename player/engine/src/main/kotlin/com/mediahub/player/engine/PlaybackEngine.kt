@@ -108,10 +108,16 @@ class PlaybackEngine(
         )
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) {
+                    session?.trace?.record(PlaybackStartupTrace.Milestone.PLAYING)
+                }
                 _uiState.update { it.copy(isPlaying = isPlaying) }
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) {
+                    session?.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_READY)
+                }
                 _uiState.update {
                     it.copy(
                         isBuffering = playbackState == Player.STATE_BUFFERING,
@@ -166,10 +172,32 @@ class PlaybackEngine(
                 _uiState.update { it.copy(audioFormatMime = format.sampleMimeType) }
             }
 
+            override fun onVideoDecoderInitialized(
+                eventTime: AnalyticsListener.EventTime,
+                decoderName: String,
+                initializedTimestampMs: Long,
+                initializationDurationMs: Long,
+            ) {
+                session?.trace?.record(PlaybackStartupTrace.Milestone.VIDEO_DECODER_INITIALIZED)
+            }
+
+            override fun onAudioDecoderInitialized(
+                eventTime: AnalyticsListener.EventTime,
+                decoderName: String,
+                initializedTimestampMs: Long,
+                initializationDurationMs: Long,
+            ) {
+                session?.trace?.record(PlaybackStartupTrace.Milestone.AUDIO_DECODER_INITIALIZED)
+            }
+
             override fun onRenderedFirstFrame(eventTime: AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
+                session?.trace?.record(PlaybackStartupTrace.Milestone.FIRST_FRAME_RENDERED)
                 if (playStartElapsedMs > 0) {
                     val ttff = SystemClock.elapsedRealtime() - playStartElapsedMs
                     logger.i(LogTag.PLAYER, "首帧渲染 ttff=" + ttff + "ms renderTimeMs=" + renderTimeMs)
+                    session?.trace?.let { t ->
+                        logger.i(LogTag.PLAYER, "StartupTrace " + t.summary())
+                    }
                 }
             }
         })
@@ -177,6 +205,8 @@ class PlaybackEngine(
 
     override fun play(session: PlaybackSession) {
         this.session = session
+        session.trace?.record(PlaybackStartupTrace.Milestone.MEDIA_REQUEST_STARTED)
+        session.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_PREPARE_STARTED)
         headersHolder.setHeaders(buildRequestHeaders(session.source))
         val mediaItem = session.source.toMedia3Item(session)
         player.setMediaItem(mediaItem)

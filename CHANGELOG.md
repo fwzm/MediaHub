@@ -1,4 +1,15 @@
 # 变更记录（CHANGELOG）
+## [0.9.0-startup-trace] — 2026-08-23（Phase U4-A：起播全链路埋点）
+### 功能
+- PlaybackStartupTrace：跨 Media3/mpv 统一起播时间线，milestone 只记第一次，
+  SystemClock.elapsedRealtime monotonic 时钟（可注入供 JVM 测试）。
+- PlayerViewModel 创建 trace → PlaybackSession 传递 → SwitchablePlaybackEngine/
+  Media3Engine/MpvEngine 各自记录 milestone。
+- 结构化 summary() 输出：playbackInfo/sourceResolve/engineSelect/mediaFirstByte/
+  enginePrepare/mpvBridge/mpvInit/mpvFileLoaded/firstFrame/totalTTFF。
+### 测试
+- PlaybackStartupTraceTest 9 用例（first-record-only/null-no-fabricate/duration/
+  totalTTFF/failure-summary/traceId-isolation/metadata/no-token-in-log）。
 ## [0.10.0-universal-playback] — 2026-08-23（U：双内核 Universal Playback + 播放器手势）
 ### 功能（双内核，U1/U2）
 - Media3 1.5.1 → 1.11.0（含 required toolchain 升级）。

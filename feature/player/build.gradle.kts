@@ -14,6 +14,10 @@ android {
         minSdk = 26
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     lint {
         // Media3 大量 API 标 @UnstableApi；与 player:engine 一致关闭（见 DECISIONS.md）。
         disable += "UnsafeOptInUsageError"
@@ -66,4 +70,6 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.robolectric)
 }

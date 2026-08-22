@@ -15,6 +15,7 @@ import com.mediahub.player.engine.EngineKind
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackEvent
 import com.mediahub.player.engine.PlaybackSession
+import com.mediahub.player.engine.PlaybackStartupTrace
 import com.mediahub.player.engine.PlaybackUiState
 import com.mediahub.player.engine.SeekMode
 import com.mediahub.player.engine.TrackSelection
@@ -93,12 +94,22 @@ class MpvPlaybackEngine(
         }
         override fun event(eventId: Int) {
             when (eventId) {
-                MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED ->
+                MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED -> {
+                    session?.trace?.record(PlaybackStartupTrace.Milestone.MPV_FILE_LOADED)
                     logger.i(LogTag.PLAYER, "mpv file-loaded ttff=" + (SystemClock.elapsedRealtime() - playRequestedAtMs) + "ms")
-                MPVLib.MpvEvent.MPV_EVENT_VIDEO_RECONFIG ->
+                }
+                MPVLib.MpvEvent.MPV_EVENT_VIDEO_RECONFIG -> {
+                    session?.trace?.record(PlaybackStartupTrace.Milestone.MPV_VIDEO_RECONFIG)
+                    session?.trace?.record(PlaybackStartupTrace.Milestone.FIRST_FRAME_RENDERED)
                     logger.i(LogTag.PLAYER, "mpv video-reconfig ttff=" + (SystemClock.elapsedRealtime() - playRequestedAtMs) + "ms")
-                MPVLib.MpvEvent.MPV_EVENT_AUDIO_RECONFIG ->
+                    session?.trace?.let { t ->
+                        logger.i(LogTag.PLAYER, "StartupTrace " + t.summary())
+                    }
+                }
+                MPVLib.MpvEvent.MPV_EVENT_AUDIO_RECONFIG -> {
+                    session?.trace?.record(PlaybackStartupTrace.Milestone.AUDIO_INPUT_FORMAT_SEEN)
                     logger.i(LogTag.PLAYER, "mpv audio-reconfig ttff=" + (SystemClock.elapsedRealtime() - playRequestedAtMs) + "ms")
+                }
                 MPVLib.MpvEvent.MPV_EVENT_END_FILE -> _events.trySend(PlaybackEvent.Ended)
             }
         }
@@ -118,11 +129,16 @@ class MpvPlaybackEngine(
         scope.launch {
             playRequestedAtMs = SystemClock.elapsedRealtime()
             try {
+                val tr = session.trace
+                tr?.record(PlaybackStartupTrace.Milestone.MPV_BRIDGE_START)
                 val b = MpvHttpBridge(httpClientFactory)
                 bridge = b
                 val bridgeUrl = b.start(src.url, buildHeaders(src))
+                tr?.record(PlaybackStartupTrace.Milestone.MPV_INSTANCE_CREATE_STARTED)
                 val m = MPVLib.create(context) ?: throw IllegalStateException("mpv create failed")
                 mpv = m
+                tr?.record(PlaybackStartupTrace.Milestone.MPV_INSTANCE_CREATED)
+                tr?.record(PlaybackStartupTrace.Milestone.MPV_INIT_STARTED)
                 m.addObserver(observer)
                 // 兼容优先：硬解失败回退软解；DTS-HD/TrueHD 解码为 PCM 走 AudioTrack
                 m.setOptionString("vo", "gpu")
@@ -140,6 +156,7 @@ class MpvPlaybackEngine(
                 }
                 logger.i(LogTag.PLAYER, "mpv container=" + container + " video=" + src.videoCodec + " audio=" + src.audioCodec + " startMs=" + startMs)
                 m.init()
+                tr?.record(PlaybackStartupTrace.Milestone.MPV_INIT_FINISHED)
                 attachedSurface?.let { m.attachSurface(it) }
                 m.observeProperty("time-pos", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
                 m.observeProperty("duration", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
@@ -147,6 +164,7 @@ class MpvPlaybackEngine(
                 m.observeProperty("speed", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
                 m.observeProperty("media-title", MPVLib.MpvFormat.MPV_FORMAT_STRING)
                 _uiState.value = PlaybackUiState(durationMs = src.durationMs ?: 0, mediaTitle = session.itemTitle)
+                tr?.record(PlaybackStartupTrace.Milestone.MPV_LOADFILE)
                 m.command(arrayOf("loadfile", bridgeUrl))
                 startProgressLoop()
                 logger.i(LogTag.PLAYER, "mpv 开始播放 serverId=" + session.serverId + " itemId=" + session.itemId)

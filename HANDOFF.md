@@ -16,7 +16,7 @@
 - **测试经验（重要）**：kotlinx-coroutines-test 中 backgroundScope 协程不被
   advanceUntilIdle() 驱动，需 runCurrent() / advanceTimeBy()+runCurrent()——
   SwitchablePlaybackEngineTest 错误路径用例已据此修正。
-- **提交**：cf9b9d2（U3-A）、6eb01ac（U3-B）、bbfcfaf（docs），均已推送；U3-B revision（手势规格修复）已推送
+- **提交**：cf9b9d2（U3-A）、6eb01ac（U3-B）、bbfcfaf（docs），均已推送；U3 已封板 @12447fb（含 U3-C 竖向手势 + U3-C.1 实时apply）；下一阶段 U4-A 起播埋点
   testDebugUnitTest / assembleDebug / lintDebug 本地全绿。
 - **已知缺口（留在矩阵，非回归）**：Blu-ray .iso resolve skip；MPEG-TS 原始流。
 - **下一步**：双内核真机 smoke（Media3 fast-path + DTS-HD 片源各测手势一致性）→

@@ -18,6 +18,7 @@ import com.mediahub.player.engine.EnginePreferenceHistory
 import com.mediahub.player.engine.Media3EngineCreator
 import com.mediahub.player.engine.MpvEngineCreator
 import com.mediahub.player.engine.PlaybackEngineCreator
+import com.mediahub.player.engine.PlaybackStartupTrace
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.ProgressSyncCoordinator
@@ -154,6 +155,7 @@ class PlayerViewModel @Inject constructor(
     )
     private var syncStarted = false
     private var stopped = false
+    private var currentTrace: PlaybackStartupTrace? = null
 
     val uiState: StateFlow<PlayerCombinedState> =
         combine(engine.uiState, _resolveState) { player, resolve ->
@@ -177,7 +179,14 @@ class PlayerViewModel @Inject constructor(
     fun resolve() {
         viewModelScope.launch {
             _resolveState.value = ResolveState.Resolving
-            val t0 = System.currentTimeMillis()
+            val trace = PlaybackStartupTrace(
+                traceId = PlaybackStartupTrace.newTraceId(),
+                serverId = serverId,
+                itemId = itemId,
+                requestedEngineMode = latestPreferences.playbackEngineMode.name,
+            )
+            currentTrace = trace
+            trace.record(PlaybackStartupTrace.Milestone.PLAY_REQUESTED)
             try {
                 val server = serverStore.getServer(serverId)
                     ?: throw ProviderException.NotFound(serverId, "媒体源")
@@ -186,7 +195,6 @@ class PlayerViewModel @Inject constructor(
                 val providerHandle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 handle = providerHandle
-                val t1 = System.currentTimeMillis()
 
                 val detailProvider = providerHandle.detail
                 val playbackProvider = providerHandle.playback
@@ -215,19 +223,14 @@ class PlayerViewModel @Inject constructor(
                         path = itemId,
                     )
                 }
-                val t2 = System.currentTimeMillis()
+                trace.record(PlaybackStartupTrace.Milestone.DETAIL_SNAPSHOT_READY)
                 val resume = progressStore.getResume(serverId, itemId)
-                val t3 = System.currentTimeMillis()
                 val source = playbackProvider.resolvePlayback(
                     item,
                     PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
                 )
-                val t4 = System.currentTimeMillis()
-                logger.i(
-                    LogTag.PLAYER,
-                    "startup server=" + (t1 - t0) + "ms detail=" + (t2 - t1) +
-                        "ms resume=" + (t3 - t2) + "ms playbackInfo=" + (t4 - t3) + "ms",
-                )
+                trace.record(PlaybackStartupTrace.Milestone.SOURCE_RESOLVED)
+                logger.i(LogTag.PLAYER, "StartupTrace " + trace.summary())
                 engine.play(
                     PlaybackSession(
                         serverId = serverId,
@@ -237,6 +240,7 @@ class PlayerViewModel @Inject constructor(
                         resumePositionMs = resume,
                         itemType = item.type,
                         posterUrl = item.posterUrl,
+                        trace = trace,
                     )
                 )
 
@@ -251,6 +255,9 @@ class PlayerViewModel @Inject constructor(
                 }
                 _resolveState.value = ResolveState.Ready
             } catch (e: Exception) {
+                trace.record(PlaybackStartupTrace.Milestone.FAILED)
+                trace.putMetadata("failedStage", "SOURCE_RESOLVED")
+                logger.w(LogTag.PLAYER, "StartupTrace " + trace.summary())
                 logger.w(LogTag.PLAYER, "播放解析失败 serverId=$serverId itemId=$itemId", e)
                 _resolveState.value = ResolveState.Failed(userMessage(e))
             }
