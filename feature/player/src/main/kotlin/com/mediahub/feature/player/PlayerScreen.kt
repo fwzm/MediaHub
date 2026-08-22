@@ -145,7 +145,6 @@ fun PlayerRoute(
         )
     }
     val scrubPreview by gestureController.scrubPreview.collectAsStateWithLifecycle()
-    val rewindPreview by gestureController.rewindPreview.collectAsStateWithLifecycle()
     val speedPreview by gestureController.speedPreview.collectAsStateWithLifecycle()
 
     // 设备电量（Item 10）：进入即读，每 60s 刷新
@@ -215,7 +214,6 @@ fun PlayerRoute(
 
         // 手势预览指示（U3-B）：scrub / 连续快退 / 长按倍速
         scrubPreview?.let { GestureSeekIndicator(it, Modifier.align(Alignment.Center)) }
-        rewindPreview?.let { GestureSeekIndicator(it, Modifier.align(Alignment.Center)) }
         speedPreview?.let { GestureSpeedIndicator(it, Modifier.align(Alignment.Center)) }
 
         // 引擎自动降级提示（U3-A：Media3 失败 → mpv 同位置重播）
@@ -535,11 +533,12 @@ private fun GestureSeekIndicator(preview: GestureSeekPreview, modifier: Modifier
     )
 }
 
-/** 长按临时倍速指示（U3-B）：居中显示当前档位。 */
+/** 长按临时倍速/rewind 指示（U3-B revision）：居中显示当前档位。 */
 @Composable
 private fun GestureSpeedIndicator(preview: GestureSpeedPreview, modifier: Modifier = Modifier) {
+    val text = if (preview.isRewind) "↺ %.2f× 快退中".format(preview.speed) else "%.2f× 倍速中".format(preview.speed)
     Text(
-        text = "%.2f× 倍速中".format(preview.speed),
+        text = text,
         color = Color.White,
         style = MaterialTheme.typography.titleMedium,
         modifier = modifier

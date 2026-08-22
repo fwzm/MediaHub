@@ -5,24 +5,24 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlin.math.abs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * 播放器统一手势层（U3-B）：替换播放区全屏 clickable。
- * 放在渲染 Surface / 字幕层之上、控制层之下——控制层自身的可点元素
- * 消费事件后不落到本层，空白区域落到本层。
+ * 播放器统一手势层（U3-B revision）：放在渲染 Surface / 字幕层之上、控制层之下。
+ *
  * 手势集（判定顺序：先到先得）：
  * 1. 快速单击 → [PlayerGestureController.onTap]（Overlay 显隐）；
- * 2. 快速双击（第二次快速抬起）→ [PlayerGestureController.onDoubleTap]；
- * 3. 双击左半屏后按住 → 连续快退（节流 PREVIEW tick，松手 COMMIT）；
- * 4. 水平拖动（越过 touch slop）→ scrub 预览，松手 COMMIT；
- * 5. 长按（无先前单击）→ 临时倍速，水平拖动调档，松开恢复。
- * 双击消歧：单击在双击窗口内不触发（自实现 tap 等待，等价
- * detectTapGestures 语义），Overlay 不闪烁。
+ * 2. 快速双击（第二次快速抬起）→ [PlayerGestureController.onDoubleTap]（40/20/40 三区）；
+ * 3. 水平拖动（越过 touch slop）→ scrub 预览，松手 COMMIT；
+ * 4. 长按 → 方向临时倍速（左半屏 rewind / 右半屏正向倍速），水平拖动调倍率，
+ *    rewind 模式每 333ms tick 一次 seek，松手 COMMIT。
+ * 双击消歧：单击在双击窗口内不触发，Overlay 不闪烁。
  */
 @Composable
 fun PlayerGestureLayer(
@@ -36,18 +36,12 @@ fun PlayerGestureLayer(
     )
 }
 
-/** 手势阶段。 */
 private enum class GesturePhase { PENDING, TAP, SCRUB, LONG_PRESS, IGNORE }
 
-/**
- * 自定义手势识别：awaitEachGesture 内自管 tap/double-tap/hold/drag/long-press
- * 判定（Compose 预制 detector 无法组合"双击后按住连续快退 + 长按倍速拖动"矩阵）。
- */
 private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPlayerGestures(
     controller: PlayerGestureController,
 ) = awaitEachGesture {
     val down = awaitFirstDown(requireUnconsumed = false)
-    // 事件已被上层控件（按钮/进度条）消费 → 本手势不参与
     if (down.isConsumed) return@awaitEachGesture
 
     val startX = down.position.x
@@ -58,7 +52,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPl
     val touchSlop = viewConfiguration.touchSlop
     var lastX = startX
 
-    // ---- 阶段 1：PENDING —— 抬起(tap) / 位移(slop) / 超时(long-press) 三选一 ----
+    // ---- 阶段 1：PENDING ----
     val phase1 = withTimeoutOrNull(longPressTimeout) {
         while (true) {
             val event = awaitPointerEvent(PointerEventPass.Main)
@@ -81,7 +75,6 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPl
         GesturePhase.TAP -> handleTap(controller, width, startX, doubleTapTimeout)
 
         GesturePhase.SCRUB -> {
-            // 水平拖动 scrub：锚点 = 手势起点；拖动期间消费事件
             controller.onScrubStart()
             var completed = false
             try {
@@ -105,22 +98,29 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPl
         }
 
         GesturePhase.LONG_PRESS -> {
-            // 长按临时倍速：锚点 = 长按生效时的位置（按下瞬间锁定）
-            controller.onSpeedActivate()
+            // 长按 → 按初始位置锁定方向模式（左=rewind，右=正向倍速）
+            controller.onSpeedActivate(startX / width)
             val anchorX = lastX
             try {
                 while (true) {
-                    val event = awaitPointerEvent()
-                    val change = event.changes.firstOrNull()
-                    if (change != null) {
-                        controller.onSpeedDrag((change.position.x - anchorX) / width)
+                    val event = withTimeoutOrNull(REWIND_TICK_MS) { awaitPointerEvent() }
+                    if (event != null) {
+                        val change = event.changes.firstOrNull()
+                        if (change != null) {
+                            controller.onSpeedDrag((change.position.x - anchorX) / width)
+                        }
+                        if (event.changes.none { it.pressed }) break
+                    } else {
+                        // 超时 → rewind tick（正向倍速模式下为 no-op）
+                        controller.onRewindTick()
                     }
-                    if (event.changes.none { it.pressed }) break
                 }
             } catch (e: CancellationException) {
+                if (controller.speedPreview.value?.isRewind == true) controller.onRewindCommit()
                 controller.onSpeedEnd()
                 throw e
             }
+            if (controller.speedPreview.value?.isRewind == true) controller.onRewindCommit()
             controller.onSpeedEnd()
         }
 
@@ -131,8 +131,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPl
 /**
  * 单击路径：双击窗口内等待第二根手指。
  * - 超时无第二次按下 → 单击（Overlay）；
- * - 第二次按下后快速抬起 → 双击（左/右矩阵）；
- * - 第二次按下后持续按住 → 双击按住（左半屏连续快退；controller 按偏好门控）。
+ * - 第二次按下后快速抬起 → 双击（40/20/40 三区矩阵）。
  */
 private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.handleTap(
     controller: PlayerGestureController,
@@ -152,12 +151,11 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.han
     }
 
     if (secondDownX == null) {
-        // 双击窗口内无第二次按下 → 单击
         controller.onTap()
         return
     }
 
-    // 第二次按下：等待快速抬起（双击）或持续按住（双击按住）
+    // 第二次按下：等待快速抬起 → 双击
     val quickUp = withTimeoutOrNull(doubleTapTimeout) {
         while (true) {
             val event = awaitPointerEvent()
@@ -169,23 +167,6 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.han
 
     if (quickUp == true) {
         controller.onDoubleTap(secondDownX / width)
-        return
-    }
-
-    // 双击后按住：连续快退 tick（controller 门控左半屏 + 偏好开关）
-    controller.onRewindHoldStart()
-    try {
-        while (true) {
-            val event = withTimeoutOrNull(REWIND_TICK_MS) { awaitPointerEvent() }
-            if (event != null) {
-                if (event.changes.none { it.pressed }) break
-                // 按住期间的移动事件：忽略，不加速 tick（节流保持约每秒 3 次）
-            } else {
-                controller.onRewindTick()
-            }
-        }
-    } finally {
-        controller.onRewindHoldEnd()
     }
 }
 

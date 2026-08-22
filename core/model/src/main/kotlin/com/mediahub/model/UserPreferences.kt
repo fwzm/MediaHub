@@ -58,6 +58,10 @@ data class PlayerGestures(
     val longPressSpeedMin: Float = 0.5f,
     /** 长按倍速上限（规格固定 5.0×；保留字段便于校准）。 */
     val longPressSpeedMax: Float = 5.0f,
+    /** 长按左侧快退/右侧快进方向模式（Phase 1B-2.4 U3-B revision）。关闭后两侧均正向倍速。 */
+    val longPressDirectionalEnabled: Boolean = true,
+    /** 长按默认倍率（1.0-4.0，默认 2.0×；启动时锁定此档开始）。 */
+    val longPressDefaultSpeed: Float = 2.0f,
 )
 
 /**

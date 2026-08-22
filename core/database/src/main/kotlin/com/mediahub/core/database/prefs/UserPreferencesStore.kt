@@ -103,6 +103,8 @@ class UserPreferencesStore @Inject constructor(
             longPressSpeedEnabled = prefs[Keys.GESTURE_LONG_PRESS_SPEED] ?: true,
             longPressSpeedMin = (prefs[Keys.GESTURE_SPEED_MIN] ?: 0.5f).coerceIn(0.1f, 0.5f),
             longPressSpeedMax = (prefs[Keys.GESTURE_SPEED_MAX] ?: 5.0f).coerceIn(2f, 8f),
+            longPressDirectionalEnabled = prefs[Keys.GESTURE_LONG_PRESS_DIR] ?: true,
+            longPressDefaultSpeed = (prefs[Keys.GESTURE_LONG_PRESS_DEFAULT_SPEED] ?: 2.0f).coerceIn(1f, 4f),
         )
 
     private fun writeGestures(
@@ -118,6 +120,8 @@ class UserPreferencesStore @Inject constructor(
         prefs[Keys.GESTURE_LONG_PRESS_SPEED] = gestures.longPressSpeedEnabled
         prefs[Keys.GESTURE_SPEED_MIN] = gestures.longPressSpeedMin.coerceIn(0.1f, 0.5f)
         prefs[Keys.GESTURE_SPEED_MAX] = gestures.longPressSpeedMax.coerceIn(2f, 8f)
+        prefs[Keys.GESTURE_LONG_PRESS_DIR] = gestures.longPressDirectionalEnabled
+        prefs[Keys.GESTURE_LONG_PRESS_DEFAULT_SPEED] = gestures.longPressDefaultSpeed.coerceIn(1f, 4f)
     }
 
     private object Keys {
@@ -147,5 +151,7 @@ class UserPreferencesStore @Inject constructor(
         val GESTURE_LONG_PRESS_SPEED = booleanPreferencesKey("gesture_long_press_speed")
         val GESTURE_SPEED_MIN = floatPreferencesKey("gesture_long_press_speed_min")
         val GESTURE_SPEED_MAX = floatPreferencesKey("gesture_long_press_speed_max")
+        val GESTURE_LONG_PRESS_DIR = booleanPreferencesKey("gesture_long_press_directional")
+        val GESTURE_LONG_PRESS_DEFAULT_SPEED = floatPreferencesKey("gesture_long_press_default_speed")
     }
 }

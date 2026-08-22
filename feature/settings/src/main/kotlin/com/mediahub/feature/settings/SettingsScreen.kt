@@ -190,6 +190,20 @@ fun SettingsRoute(
                 onCheckedChange = { viewModel.update { p -> p.copy(gestures = p.gestures.copy(longPressSpeedEnabled = it)) } },
             )
             if (prefs.gestures.longPressSpeedEnabled) {
+                SettingSwitch(
+                    label = "左侧快退 / 右侧快进",
+                    checked = prefs.gestures.longPressDirectionalEnabled,
+                    onCheckedChange = { viewModel.update { p -> p.copy(gestures = p.gestures.copy(longPressDirectionalEnabled = it)) } },
+                )
+                SettingSlider(
+                    label = "默认长按倍率",
+                    value = prefs.gestures.longPressDefaultSpeed,
+                    valueText = "%.1f×".format(prefs.gestures.longPressDefaultSpeed),
+                    range = 1f..4f,
+                    onValueChange = { newValue ->
+                        viewModel.update { p -> p.copy(gestures = p.gestures.copy(longPressDefaultSpeed = newValue)) }
+                    },
+                )
                 Text("长按倍速下限", style = MaterialTheme.typography.bodyLarge)
                 Row(modifier = Modifier.fillMaxWidth()) {
                     SpeedMinOption(
