@@ -1,4 +1,20 @@
 # 变更记录（CHANGELOG）
+## [0.9.1-player-ux-orientation] — 2026-08-22（Player Startup & Immersive UX：横屏/沉浸式加固）
+### 修复（真机级隐患）
+- **MIUI 方向恢复不敏感**：SCREEN_ORIENTATION_UNSPECIFIED(-1) / SCREEN_ORIENTATION_SENSOR(4)
+  退出播放器后无法回竖屏。改为按进入前实际方向（resources.configuration.orientation）显式恢复
+  PORTRAIT / SENSOR_LANDSCAPE（PlayerSystemUiController.resolveRestoreOrientation）。
+- **旋转触发 Activity 重建 → 双播放器**：MainActivity 未声明 configChanges，requestedOrientation
+  旋转时 Activity 重建，播放器被 onDispose 释放 + ViewModel 重建 + 重新 resolve 播放源。
+  补 configChanges=orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden，Compose 经
+  LocalConfiguration 自适应尺寸，无需重建。
+- **设置关闭后不生效**：自动横屏/沉浸式开关关闭后仍横屏——DisposableEffect(Unit) 在 DataStore
+  发射持久化值前读到 StateFlow 默认值（true）。新增 UserPreferencesRepository.snapshot() 同步读
+  持久化值（DataStore 已缓存时即时返回），PlayerScreen 进入播放器前一次性读取。
+### 测试
+- PlayerViewModelTest FakeUserPreferences 补 snapshot()；feature:player + core:database 单测通过。
+### 真机验证（Xiaomi 24031PN0DC / Android 14）
+- 横屏进入、Back 恢复竖屏+状态栏、re-enter 正常、设置关闭保持竖屏+系统栏、seek/播放正常、无重建死循环。
 ## [0.9.0-phase1b2.5] — 2026-08-22（Phase 1B-2.5：Server Management 地基）
 ### 新增（数据模型地基）
 - ServerEndpoint 领域模型 + Room 实体（server_endpoints 表）：一条 MediaServer 多条线路（主/备）。

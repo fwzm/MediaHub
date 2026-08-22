@@ -2,7 +2,7 @@
 
 > 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
 
-当前状态：**Phase 1B-2.4**（Emby 登录、媒体库浏览、海报墙与详情页、无转码 Direct Stream、重定向凭据隔离、播放器音轨/字幕硬化已实现；真机验证中）。
+当前状态：**Phase 1B-2.5a**（ServerEndpoint 多线路地基 + Player Startup & Immersive UX：TTFF 单调时钟、临时时长回退、快照直传、自动横屏、沉浸式系统栏已实现并过真机；Overlay 两层 UI 与 Server Editor 进行中）。
 
 ## 项目简介
 

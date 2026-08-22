@@ -209,6 +209,7 @@ class PlayerViewModelTest {
         override suspend fun update(transform: (UserPreferences) -> UserPreferences) {
             state.value = transform(state.value)
         }
+        override suspend fun snapshot(): UserPreferences = state.value
     }
 
     private class FakeServerStore(private val server: MediaServer) : ServerStore {

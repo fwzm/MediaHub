@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+import android.util.Log
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -20,6 +22,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 class PlayerSystemUiController(private val activity: Activity) {
 
     private var originalOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    private var originalConfigOrientation = Configuration.ORIENTATION_UNDEFINED
     private var entered = false
 
     fun enterPlayback(autoLandscape: Boolean, immersiveBars: Boolean) {
@@ -27,6 +30,8 @@ class PlayerSystemUiController(private val activity: Activity) {
         entered = true
         // 保存进入播放器前的方向（用户可能原本就是横屏/反向横屏，退出不能强制竖屏）
         originalOrientation = activity.requestedOrientation
+        originalConfigOrientation = activity.resources.configuration.orientation
+        Log.d("MediaHub/SYSUI", "enterPlayback originalOrientation=" + originalOrientation + " config=" + originalConfigOrientation)
         if (autoLandscape) {
             activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         }
@@ -50,7 +55,30 @@ class PlayerSystemUiController(private val activity: Activity) {
         entered = false
         controller().show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
         WindowCompat.setDecorFitsSystemWindows(activity.window, true)
-        activity.requestedOrientation = originalOrientation
+        val restoreOrientation = resolveRestoreOrientation()
+        Log.d("MediaHub/SYSUI", "exitPlayback restoring requestedOrientation=" + restoreOrientation)
+        activity.requestedOrientation = restoreOrientation
+    }
+
+    /**
+     * 计算退出时恢复的方向。MIUI 对动态方向（UNSPECIFIED/SENSOR/USER）恢复不敏感，
+     * 显式指定方向（SENSOR_LANDSCAPE/PORTRAIT）才可靠；故把「原本竖屏/横屏」映射成显式值。
+     */
+    private fun resolveRestoreOrientation(): Int = when (originalOrientation) {
+        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE,
+        ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE,
+        ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+
+        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+        ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT,
+        ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+
+        else -> if (originalConfigOrientation == Configuration.ORIENTATION_LANDSCAPE) {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
     }
 
     private fun controller(): WindowInsetsControllerCompat =

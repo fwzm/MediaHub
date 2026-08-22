@@ -13,6 +13,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.userPrefsDataStore by preferencesDataStore(name = "user_prefs")
@@ -37,6 +38,8 @@ class UserPreferencesStore @Inject constructor(
             subtitleStyle = readSubtitleStyle(prefs),
         )
     }
+
+    override suspend fun snapshot(): UserPreferences = flow.first()
 
     override suspend fun update(transform: (UserPreferences) -> UserPreferences) {
         context.userPrefsDataStore.edit { prefs ->

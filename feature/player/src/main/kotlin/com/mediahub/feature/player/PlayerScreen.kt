@@ -68,9 +68,14 @@ fun PlayerRoute(
     // 生命周期兜底（DisposableEffect onDispose），不依赖"正常返回按钮"单一路径。
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
-    DisposableEffect(activity, preferences.autoLandscape, preferences.immersiveBars) {
+    // 同步读一次持久化偏好（避免 preferences StateFlow 默认值在 DataStore 加载前的竞态）
+    val sysUiPrefs = remember(viewModel) {
+        val p = viewModel.snapshotPreferences()
+        p.autoLandscape to p.immersiveBars
+    }
+    DisposableEffect(Unit) {
         val controller = activity?.let { PlayerSystemUiController(it) }
-        controller?.enterPlayback(preferences.autoLandscape, preferences.immersiveBars)
+        controller?.enterPlayback(sysUiPrefs.first, sysUiPrefs.second)
         onDispose { controller?.exitPlayback() }
     }
 

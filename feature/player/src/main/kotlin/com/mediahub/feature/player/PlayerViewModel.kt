@@ -14,6 +14,7 @@ import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.SubtitleStyle
+import com.mediahub.model.UserPreferences
 import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackSession
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /** 播放源解析状态。 */
 sealed interface ResolveState {
@@ -81,6 +83,12 @@ class PlayerViewModel @Inject constructor(
             userPreferencesRepository.update { it.copy(subtitleStyle = transform(it.subtitleStyle)) }
         }
     }
+
+    /**
+     * 同步读取当前持久化偏好（进入播放器时用，避免 preferences StateFlow 默认值竞态）。
+     * DataStore 已缓存时即时返回；仅冷启动首读会触发一次磁盘读。
+     */
+    fun snapshotPreferences(): UserPreferences = runBlocking { userPreferencesRepository.snapshot() }
 
     private val _resolveState = MutableStateFlow<ResolveState>(ResolveState.Resolving)
     val resolveState: StateFlow<ResolveState> = _resolveState.asStateFlow()

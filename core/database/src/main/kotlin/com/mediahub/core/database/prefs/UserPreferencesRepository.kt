@@ -10,4 +10,7 @@ import kotlinx.coroutines.flow.Flow
 interface UserPreferencesRepository {
     val flow: Flow<UserPreferences>
     suspend fun update(transform: (UserPreferences) -> UserPreferences)
+
+    /** 一次性读取当前持久化偏好（DataStore 已缓存时即时返回，供进入播放器时同步取自动横屏/沉浸式开关）。 */
+    suspend fun snapshot(): UserPreferences
 }

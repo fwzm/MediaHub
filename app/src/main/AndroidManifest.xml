@@ -17,9 +17,15 @@
         android:theme="@style/Theme.MediaHub"
         android:usesCleartextTraffic="true">
 
+        <!--
+            configChanges：播放器经 requestedOrientation 控制横竖屏，旋转时避免 Activity 重建
+            （重建会导致播放器被 onDispose 释放、ViewModel 重建、重新 resolve 播放源的双播放器问题）。
+            Compose 经 LocalConfiguration 自适应尺寸，无需重建。
+        -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
