@@ -13,7 +13,6 @@ object EmbyMetadataMapper {
     fun mapPeople(api: EmbyApiClient, people: List<EmbyPersonDto>?): List<Person> =
         people.orEmpty().mapNotNull { p ->
             val name = p.name?.takeIf(String::isNotBlank) ?: return@mapNotNull null
-            val personId = p.id ?: return@mapNotNull null
             val roleType = when (p.type?.lowercase()) {
                 "director" -> Person.Role.DIRECTOR
                 "writer" -> Person.Role.WRITER
@@ -22,16 +21,21 @@ object EmbyMetadataMapper {
                 else -> Person.Role.OTHER
             }
             Person(
-                id = personId,
+                id = p.id,
                 name = name,
                 role = roleType,
                 type = p.type,
-                imageUrl = p.primaryImageTag?.let { tag ->
-                    EmbyImageMapper.personImageUrl(api, personId, tag)
+                characterName = p.role,
+                imageUrl = p.id?.let { pid ->
+                    p.primaryImageTag?.let { tag ->
+                        EmbyImageMapper.personImageUrl(api, pid, tag)
+                    }
                 },
             )
         }
 
     fun mapStudios(studios: List<com.mediahub.provider.emby.api.EmbyStudioDto>?): List<String> =
         studios.orEmpty().mapNotNull { it.name?.takeIf(String::isNotBlank) }
+
+    fun mapTags(tags: List<String>?): List<String> = tags.orEmpty().filter(String::isNotBlank)
 }

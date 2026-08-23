@@ -74,14 +74,15 @@ class EmbyMetadataMapperTest {
     }
 
     @Test
-    fun `无 id 的人员被跳过`() {
+    fun `无 id 的人员保留但无头像 URL`() {
         val people = listOf(
             EmbyPersonDto(id = null, name = "NoId"),
-            EmbyPersonDto(id = "789", name = "HasId"),
+            EmbyPersonDto(id = "789", name = "HasId", primaryImageTag = "tag1"),
         )
         val result = EmbyMetadataMapper.mapPeople(api, people)
-        assertEquals(1, result.size)
-        assertEquals("HasId", result[0].name)
+        assertEquals(2, result.size)
+        assertNull(result[0].imageUrl)
+        assertTrue(result[1].imageUrl!!.contains("/Items/789/"))
     }
 
     @Test

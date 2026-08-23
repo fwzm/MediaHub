@@ -200,8 +200,20 @@ private fun DetailBody(
             Text("播放")
         }
 
-        // 演员表（U4-D Metadata Pipeline）
-        if (item.people.isNotEmpty()) {
+        // 导演 / 编剧（U4-E Metadata hardening）
+        val directors = item.people.filter { it.role == com.mediahub.model.Person.Role.DIRECTOR }
+        if (directors.isNotEmpty()) {
+            Text(
+                "导演：${directors.joinToString("、") { it.name }}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+            )
+        }
+
+        // 演员表（只显示 ACTOR，U4-E Metadata hardening）
+        val cast = item.people.filter { it.role == com.mediahub.model.Person.Role.ACTOR }
+        if (cast.isNotEmpty()) {
             Text(
                 "演员",
                 style = MaterialTheme.typography.titleMedium,
@@ -211,7 +223,7 @@ private fun DetailBody(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(item.people, key = { it.name }) { person ->
+                items(cast, key = { it.id ?: "${it.role}:${it.name}" }) { person ->
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.width(72.dp),
@@ -228,6 +240,15 @@ private fun DetailBody(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(top = 4.dp),
                         )
+                        person.characterName?.let { cn ->
+                            Text(
+                                cn,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }

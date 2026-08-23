@@ -42,7 +42,7 @@ class EmbyDetailProvider(
                 item = enrichedItem.copy(
                     people = EmbyMetadataMapper.mapPeople(api, dto.people),
                     studios = EmbyMetadataMapper.mapStudios(dto.studios),
-                    tags = dto.tags.orEmpty(),
+                    tags = EmbyMetadataMapper.mapTags(dto.tags),
                 ),
             )
         } catch (e: Exception) {

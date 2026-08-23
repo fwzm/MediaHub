@@ -8,6 +8,8 @@ data class Person(
     val id: String? = null,
     /** 原始类型字符串（Actor/Director/Writer 等，保留 Provider 语义）。 */
     val type: String? = null,
+    /** 演员饰演的角色名（如 "Walter White"），非 Person.Role 分类。 */
+    val characterName: String? = null,
     val imageUrl: String? = null,
 ) {
     enum class Role { ACTOR, DIRECTOR, WRITER, PRODUCER, OTHER }
