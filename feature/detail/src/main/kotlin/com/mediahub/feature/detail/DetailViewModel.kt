@@ -8,18 +8,24 @@ import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.LogTag
 import com.mediahub.model.MediaDetail
+import com.mediahub.model.MediaItem
+import com.mediahub.model.MediaType
+import com.mediahub.model.PageRequest
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
+import com.mediahub.provider.api.ProviderHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * 详情页（Phase 1B-2.3 极简版）：server → handle.detail.getItemDetail。
- * 展示 backdrop/海报/元信息/简介 + 播放入口；季/集与演职人员不在本期范围。
+ * 详情页（Phase 1B-3.1）：server → handle.detail.getItemDetail。
+ * 对 SERIES 继续通过 browse 链加载季/集（复用 getItems(parentId)），
+ * 不实现专用 getSeasons/getEpisodes。
  */
 @HiltViewModel
 class DetailViewModel @Inject constructor(
@@ -30,16 +36,18 @@ class DetailViewModel @Inject constructor(
 ) : ViewModel() {
 
     val serverId: String = checkNotNull(savedStateHandle["serverId"])
-
-    // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（与 PlayerViewModel 一致）
     val itemId: String = NavArgCodec.decode(checkNotNull(savedStateHandle["itemId"]))
 
     private val _uiState = MutableStateFlow<DetailUiState>(DetailUiState.Loading)
     val uiState: StateFlow<DetailUiState> = _uiState.asStateFlow()
 
-    init {
-        load()
-    }
+    private val _seriesState = MutableStateFlow(SeriesBrowseState())
+    val seriesState: StateFlow<SeriesBrowseState> = _seriesState.asStateFlow()
+
+    private var handle: ProviderHandle? = null
+    private var episodeJob: Job? = null
+
+    init { load() }
 
     fun load() {
         _uiState.value = DetailUiState.Loading
@@ -47,15 +55,80 @@ class DetailViewModel @Inject constructor(
             try {
                 val server = serverStore.getServer(serverId)
                     ?: throw ProviderException.NotFound(serverId, "媒体源")
-                val handle = registry.create(server)
+                val h = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
-                val detailProvider = handle.detail
+                handle = h
+                val detailProvider = h.detail
                     ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的详情能力尚未接入")
                 val detail = detailProvider.getItemDetail(itemId)
                 _uiState.value = DetailUiState.Content(detail)
+
+                // 仅 SERIES 类型加载季列表（复用 browse 链）
+                if (detail.item.type == MediaType.SERIES && h.library != null) {
+                    loadSeasons(h.library!!, detail.item.id)
+                }
             } catch (e: Exception) {
                 logger.w(LogTag.UI, "详情加载失败 serverId=$serverId itemId=$itemId", e)
                 _uiState.value = DetailUiState.Error(userMessage(e))
+            }
+        }
+    }
+
+    private fun loadSeasons(library: com.mediahub.provider.api.MediaLibraryProvider, seriesId: String) {
+        _seriesState.value = _seriesState.value.copy(seasonsLoading = true)
+        viewModelScope.launch {
+            try {
+                val result = library.getItems(seriesId, PageRequest(limit = 50))
+                val seasons = sortSeasons(result.items.filter { it.type == MediaType.SEASON })
+                val defaultSeason = seasons.firstOrNull { (it.seasonNumber ?: 0) > 0 }
+                    ?: seasons.firstOrNull()
+                _seriesState.value = _seriesState.value.copy(
+                    seasons = seasons,
+                    seasonsLoading = false,
+                    selectedSeasonId = defaultSeason?.id,
+                )
+                defaultSeason?.let { loadEpisodesForSeason(it.id) }
+            } catch (e: Exception) {
+                _seriesState.value = _seriesState.value.copy(
+                    seasonsLoading = false,
+                    seasonsError = userMessage(e),
+                )
+            }
+        }
+    }
+
+    fun selectSeason(seasonId: String) {
+        if (_seriesState.value.selectedSeasonId == seasonId) return
+        _seriesState.value = _seriesState.value.copy(selectedSeasonId = seasonId)
+        loadEpisodesForSeason(seasonId)
+    }
+
+    fun retryEpisodes() {
+        _seriesState.value.selectedSeasonId?.let { loadEpisodesForSeason(it) }
+    }
+
+    private fun loadEpisodesForSeason(seasonId: String) {
+        episodeJob?.cancel()
+        val library = handle?.library ?: return
+        _seriesState.value = _seriesState.value.copy(episodesLoading = true, episodesError = null)
+        episodeJob = viewModelScope.launch {
+            val requestedSeasonId = seasonId
+            try {
+                val result = library.getItems(seasonId, PageRequest(limit = 50))
+                // 并发安全：只有当前仍选中的季才更新
+                if (_seriesState.value.selectedSeasonId == requestedSeasonId) {
+                    _seriesState.value = _seriesState.value.copy(
+                        episodes = result.items.filter { it.type == MediaType.EPISODE },
+                        episodesLoading = false,
+                    )
+                }
+            } catch (e: Exception) {
+                if (_seriesState.value.selectedSeasonId == requestedSeasonId) {
+                    _seriesState.value = _seriesState.value.copy(
+                        episodesLoading = false,
+                        episodesError = userMessage(e),
+                    )
+                }
             }
         }
     }
@@ -64,7 +137,28 @@ class DetailViewModel @Inject constructor(
         is ProviderException -> e.message ?: "加载失败"
         else -> "加载失败：${e.message}"
     }
+
+    companion object {
+        /** 季排序：普通季(1,2,3…)→Specials(seasonNumber=0)→未知(seasonNumber=null) */
+        fun sortSeasons(seasons: List<MediaItem>): List<MediaItem> {
+            val normal = seasons.filter { (it.seasonNumber ?: 0) > 0 }
+                .sortedBy { it.seasonNumber }
+            val specials = seasons.filter { (it.seasonNumber ?: -1) == 0 }
+            val unknown = seasons.filter { it.seasonNumber == null }
+            return normal + specials + unknown
+        }
+    }
 }
+
+data class SeriesBrowseState(
+    val seasons: List<MediaItem> = emptyList(),
+    val selectedSeasonId: String? = null,
+    val episodes: List<MediaItem> = emptyList(),
+    val seasonsLoading: Boolean = false,
+    val episodesLoading: Boolean = false,
+    val seasonsError: String? = null,
+    val episodesError: String? = null,
+)
 
 sealed interface DetailUiState {
     data object Loading : DetailUiState

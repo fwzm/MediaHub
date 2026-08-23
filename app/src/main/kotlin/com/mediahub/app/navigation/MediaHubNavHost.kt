@@ -167,6 +167,12 @@ fun MediaHubNavHost() {
                             "&container=" + Uri.encode(snapshot.container.orEmpty())
                     )
                 },
+                onOpenItem = { item ->
+                    val srvId = entry.arguments?.getString("serverId").orEmpty()
+                    navController.navigate(
+                        "detail/" + srvId + "/" + NavArgCodec.encode(item.id) + "?title=" + Uri.encode(item.title)
+                    )
+                },
             )
         }
 
