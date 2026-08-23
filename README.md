@@ -4,6 +4,18 @@
 
 当前状态：**Phase 1B-2.5a**（ServerEndpoint 多线路地基 + Player Startup & Immersive UX：TTFF 单调时钟、临时时长回退、快照直传、自动横屏、沉浸式系统栏已实现并过真机；Overlay 两层 UI 与 Server Editor 进行中）。
 
+[![GitHub release](https://img.shields.io/github/v/release/fwzm/MediaHub?include_prereleases)](https://github.com/fwzm/MediaHub/releases)
+[![License](https://img.shields.io/github/license/fwzm/MediaHub)](LICENSE)
+
+## 下载测试版
+
+前往 [GitHub Releases](https://github.com/fwzm/MediaHub/releases) 下载最新 APK。
+
+> 当前为 Alpha 阶段，仅提供 arm64-v8a 架构 APK。安装前请在系统设置中允许「安装未知应用」。
+> 每次更新使用相同签名，可直接覆盖安装，数据不丢失。
+
+**反馈问题：** [提交 Issue](https://github.com/fwzm/MediaHub/issues)
+
 ## 项目简介
 
 不同媒体服务器与云存储通过统一 `MediaProvider` 抽象接入，UI 只消费统一领域模型
