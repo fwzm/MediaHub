@@ -1,23 +1,16 @@
 package com.mediahub.feature.settings
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -31,13 +24,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -236,7 +225,12 @@ fun SettingsRoute(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-            AboutSection()
+            Text("关于", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "MediaHub · Phase 0 骨架版本",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -350,114 +344,5 @@ private fun SettingSwitch(
     ) {
         Text(label, style = MaterialTheme.typography.bodyLarge)
         Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
-
-private const val GITHUB_REPO = "https://github.com/fwzm/MediaHub"
-
-@Composable
-private fun AboutSection() {
-    val context = LocalContext.current
-    val uriHandler = LocalUriHandler.current
-
-    val versionName = remember {
-        try {
-            val pkgInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            pkgInfo.versionName ?: "0.0.0"
-        } catch (_: Exception) {
-            "0.0.0"
-        }
-    }
-
-    Text("关于", style = MaterialTheme.typography.titleMedium)
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                "MediaHub",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                "版本 $versionName",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                "多源统一媒体播放器 —— Emby / Jellyfin / NAS / 云盘 / 本地",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // GitHub 链接
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { uriHandler.openUri(GITHUB_REPO) }
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Info,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(end = 8.dp),
-                    )
-                    Column {
-                        Text(
-                            "GitHub",
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                        Text(
-                            GITHUB_REPO,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            textDecoration = TextDecoration.Underline,
-                        )
-                    }
-                }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-            // 反馈入口
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { uriHandler.openUri("$GITHUB_REPO/issues") }
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Star,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(end = 8.dp),
-                    )
-                    Column {
-                        Text(
-                            "反馈问题",
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                        Text(
-                            "提交 Issue 报告 Bug 或建议新功能",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
     }
 }
