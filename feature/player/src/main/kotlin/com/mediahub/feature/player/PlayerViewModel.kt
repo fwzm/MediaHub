@@ -51,6 +51,17 @@ data class PlayerSystemUiPrefs(
     val immersiveBars: Boolean,
 )
 
+/** 播放诊断信息（U4-E：Overlay 展示）。 */
+data class PlaybackDiagnosticsState(
+    val engine: String? = null,
+    val endpointName: String? = null,
+    val httpStatus: Int? = null,
+    val mediaProtocol: String? = null,
+    val mediaFirstByteMs: Long? = null,
+    val totalTTFFMs: Long? = null,
+    val bufferedMs: Long = 0,
+)
+
 /** 播放页组合状态（解析状态 + 引擎状态）。 */
 data class PlayerCombinedState(
     val resolve: ResolveState = ResolveState.Resolving,
@@ -107,6 +118,7 @@ class PlayerViewModel @Inject constructor(
     /** 当前内核（UI 徽标/诊断）。 */
     val engineKind: StateFlow<com.mediahub.player.engine.EngineKind> get() = switchableEngine.engineKind
 
+
     /** 用户偏好（字幕样式等，播放器 Bottom Sheet 消费；Phase 1B-2.4）。 */
     val preferences: StateFlow<com.mediahub.model.UserPreferences> =
         userPreferencesRepository.flow.stateIn(viewModelScope, SharingStarted.Eagerly, com.mediahub.model.UserPreferences())
@@ -138,6 +150,26 @@ class PlayerViewModel @Inject constructor(
     val serverDisplayName: StateFlow<String?> = _serverDisplayName.asStateFlow()
     private val _serverIcon = MutableStateFlow<String?>(null)
     val serverIcon: StateFlow<String?> = _serverIcon.asStateFlow()
+
+    /** 播放诊断信息（U4-E：Overlay 展示引擎/协议/首包/缓冲）。 */
+    val diagnostics: StateFlow<PlaybackDiagnosticsState?> = combine(
+        engineKind,
+        engine.uiState,
+        _serverDisplayName,
+    ) { kind, ui, serverName ->
+        val trace = currentTrace
+        PlaybackDiagnosticsState(
+            engine = kind.name,
+            endpointName = serverName,
+            httpStatus = trace?.metadata("mediaCode")?.toIntOrNull(),
+            mediaProtocol = trace?.metadata("mediaProtocol"),
+            mediaFirstByteMs = trace?.milestoneElapsedMs(PlaybackStartupTrace.Milestone.MEDIA_FIRST_BYTE),
+            totalTTFFMs = trace?.milestoneElapsedMs(PlaybackStartupTrace.Milestone.FIRST_FRAME_RENDERED),
+            bufferedMs = ui.durationMs.takeIf { it > 0 }?.let { dur ->
+                (ui.positionMs + 30_000L).coerceAtMost(dur) - ui.positionMs
+            } ?: 0L,
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** 当前 Provider 句柄（能力组合，ADR-014）；resolve 成功后可用。 */
     private var handle: ProviderHandle? = null

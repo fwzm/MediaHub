@@ -92,6 +92,7 @@ fun PlayerRoute(
     val serverDisplayName by viewModel.serverDisplayName.collectAsStateWithLifecycle()
     val serverIcon by viewModel.serverIcon.collectAsStateWithLifecycle()
     val downloadSpeedBps by viewModel.engine.downloadSpeedBps.collectAsStateWithLifecycle()
+    val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val subtitleCues by viewModel.engine.subtitleCues.collectAsStateWithLifecycle()
 
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
@@ -325,6 +326,7 @@ fun PlayerRoute(
                         serverIcon = serverIcon,
                         downloadSpeedBps = downloadSpeedBps,
                         batteryLevel = batteryLevel,
+                        diagnostics = diagnostics,
                         onBack = exitPlayer,
                         onTogglePlayPause = viewModel.engine::togglePlayPause,
                         onSeek = { viewModel.engine.seekTo(it) },
@@ -434,6 +436,7 @@ private fun PlayerControls(
     serverIcon: String?,
     downloadSpeedBps: Long,
     batteryLevel: Int?,
+    diagnostics: PlaybackDiagnosticsState?,
     onBack: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
@@ -481,6 +484,25 @@ private fun PlayerControls(
                         color = Color.White.copy(alpha = 0.7f),
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
+                    )
+                }
+            }
+            // 播放诊断（U4-E）：引擎/协议/首包/缓冲
+            if (diagnostics != null && diagnostics!!.engine != null) {
+                val d = diagnostics!!
+                val diagParts = buildList {
+                    d.engine?.let { add(it) }
+                    d.mediaProtocol?.let { add(it) }
+                    d.httpStatus?.let { add("HTTP $it") }
+                    d.mediaFirstByteMs?.let { add("首包 ${it}ms") }
+                    if (d.bufferedMs > 0) add("缓冲 ${d.bufferedMs / 1000}s")
+                }
+                if (diagParts.isNotEmpty()) {
+                    Text(
+                        text = diagParts.joinToString(" · "),
+                        color = Color.White.copy(alpha = 0.55f),
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(bottom = 4.dp),
                     )
                 }
             }
