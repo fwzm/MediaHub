@@ -31,8 +31,8 @@ object EmbyImageMapper {
         return api.imageUrl(itemId, EmbyImageType.PRIMARY, primaryTag, LIST_MAX_WIDTH)
     }
 
-    fun personImageUrl(api: EmbyApiClient, name: String, tag: String?): String? =
-        api.imageUrl("Persons/$name", EmbyImageType.PRIMARY, tag, LIST_MAX_WIDTH)
+    fun personImageUrl(api: EmbyApiClient, personId: String, tag: String?): String? =
+        api.imageUrl(personId, EmbyImageType.PRIMARY, tag, LIST_MAX_WIDTH)
 
     fun backdropUrl(api: EmbyApiClient, itemId: String, backdropTags: List<String>): String? =
         backdropTags.firstOrNull()

@@ -4,6 +4,10 @@ package com.mediahub.model
 data class Person(
     val name: String,
     val role: Role,
+    /** Provider 层人员 ID（用于图片 URL 等后续请求）。 */
+    val id: String? = null,
+    /** 原始类型字符串（Actor/Director/Writer 等，保留 Provider 语义）。 */
+    val type: String? = null,
     val imageUrl: String? = null,
 ) {
     enum class Role { ACTOR, DIRECTOR, WRITER, PRODUCER, OTHER }

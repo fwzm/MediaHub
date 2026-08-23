@@ -4,13 +4,13 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.ApiException
 import com.mediahub.core.security.TokenStore
 import com.mediahub.model.MediaDetail
-import com.mediahub.model.Person
 import com.mediahub.model.MediaServer
 import com.mediahub.provider.api.MediaDetailProvider
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.emby.api.EmbyApiClient
 import com.mediahub.provider.emby.mapper.EmbyDetailMapper
 import com.mediahub.provider.emby.mapper.EmbyImageMapper
+import com.mediahub.provider.emby.mapper.EmbyMetadataMapper
 import com.mediahub.provider.emby.session.EmbySessionStore
 import java.io.IOException
 import kotlinx.serialization.SerializationException
@@ -37,29 +37,12 @@ class EmbyDetailProvider(
                 ?: throw ProviderException.Parse(server.id)
             // 详情页图片：item 上 enrich（detail DTO 现含 ImageTags/BackdropImageTags）
             val enrichedItem = EmbyImageMapper.enrich(detail.item, api, dto.imageTags, dto.backdropImageTags)
-            // 演职人员映射（U4-D Metadata Pipeline）
-            val mappedPeople = dto.people.orEmpty().mapNotNull { p ->
-                val name = p.name ?: return@mapNotNull null
-                val roleType = when (p.type?.lowercase()) {
-                    "director" -> com.mediahub.model.Person.Role.DIRECTOR
-                    "writer" -> com.mediahub.model.Person.Role.WRITER
-                    "producer" -> com.mediahub.model.Person.Role.PRODUCER
-                    "actor" -> com.mediahub.model.Person.Role.ACTOR
-                    else -> com.mediahub.model.Person.Role.OTHER
-                }
-                com.mediahub.model.Person(
-                    name = name,
-                    role = roleType,
-                    imageUrl = p.primaryImageTag?.let { tag ->
-                        EmbyImageMapper.personImageUrl(api, name, tag)
-                    },
-                )
-            }
+            // 演职人员 / 制作公司 / 标签映射（Phase 1B-3 Metadata Pipeline）
             detail.copy(
                 item = enrichedItem.copy(
-                    people = mappedPeople,
-                    studios = dto.studios.orEmpty().mapNotNull { it.name },
-                    tags = dto.tags,
+                    people = EmbyMetadataMapper.mapPeople(api, dto.people),
+                    studios = EmbyMetadataMapper.mapStudios(dto.studios),
+                    tags = dto.tags.orEmpty(),
                 ),
             )
         } catch (e: Exception) {

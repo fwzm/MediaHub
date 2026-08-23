@@ -43,6 +43,7 @@ data class EmbyUserItemDto(
 /** 演职人员（Emby People 字段）。 */
 @Serializable
 data class EmbyPersonDto(
+    @SerialName("Id") val id: String? = null,
     @SerialName("Name") val name: String? = null,
     @SerialName("Role") val role: String? = null,
     @SerialName("Type") val type: String? = null,
