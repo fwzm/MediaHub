@@ -4,6 +4,7 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.ApiException
 import com.mediahub.core.security.TokenStore
 import com.mediahub.model.MediaDetail
+import com.mediahub.model.Person
 import com.mediahub.model.MediaServer
 import com.mediahub.provider.api.MediaDetailProvider
 import com.mediahub.provider.api.ProviderException
@@ -35,8 +36,31 @@ class EmbyDetailProvider(
             val detail = EmbyDetailMapper.mapDetail(dto, server.id)
                 ?: throw ProviderException.Parse(server.id)
             // 详情页图片：item 上 enrich（detail DTO 现含 ImageTags/BackdropImageTags）
+            val enrichedItem = EmbyImageMapper.enrich(detail.item, api, dto.imageTags, dto.backdropImageTags)
+            // 演职人员映射（U4-D Metadata Pipeline）
+            val mappedPeople = dto.people.orEmpty().mapNotNull { p ->
+                val name = p.name ?: return@mapNotNull null
+                val roleType = when (p.type?.lowercase()) {
+                    "director" -> com.mediahub.model.Person.Role.DIRECTOR
+                    "writer" -> com.mediahub.model.Person.Role.WRITER
+                    "producer" -> com.mediahub.model.Person.Role.PRODUCER
+                    "actor" -> com.mediahub.model.Person.Role.ACTOR
+                    else -> com.mediahub.model.Person.Role.OTHER
+                }
+                com.mediahub.model.Person(
+                    name = name,
+                    role = roleType,
+                    imageUrl = p.primaryImageTag?.let { tag ->
+                        EmbyImageMapper.personImageUrl(api, name, tag)
+                    },
+                )
+            }
             detail.copy(
-                item = EmbyImageMapper.enrich(detail.item, api, dto.imageTags, dto.backdropImageTags),
+                item = enrichedItem.copy(
+                    people = mappedPeople,
+                    studios = dto.studios.orEmpty().mapNotNull { it.name },
+                    tags = dto.tags,
+                ),
             )
         } catch (e: Exception) {
             throw mapError(e)

@@ -31,11 +31,29 @@ data class EmbyUserItemDto(
     @SerialName("ImageTags") val imageTags: Map<String, String>? = null,
     @SerialName("BackdropImageTags") val backdropImageTags: List<String> = emptyList(),
     @SerialName("PrimaryImageAspectRatio") val primaryImageAspectRatio: Double? = null,
+    @SerialName("People") val people: List<EmbyPersonDto>? = null,
+    @SerialName("Studios") val studios: List<EmbyStudioDto>? = null,
+    @SerialName("Tags") val tags: List<String> = emptyList(),
     @SerialName("UserData") override val userData: EmbyUserDataDto? = null,
     @SerialName("MediaSources") val mediaSources: List<EmbyMediaSourceInfoDto> = emptyList(),
     @SerialName("MediaStreams") val mediaStreams: List<EmbyMediaStreamDto> = emptyList(),
     @SerialName("Chapters") val chapters: List<EmbyChapterInfoDto> = emptyList(),
 ) : EmbyItemFields
+
+/** 演职人员（Emby People 字段）。 */
+@Serializable
+data class EmbyPersonDto(
+    @SerialName("Name") val name: String? = null,
+    @SerialName("Role") val role: String? = null,
+    @SerialName("Type") val type: String? = null,
+    @SerialName("PrimaryImageTag") val primaryImageTag: String? = null,
+)
+
+/** 制作公司（Emby Studios 字段）。 */
+@Serializable
+data class EmbyStudioDto(
+    @SerialName("Name") val name: String? = null,
+)
 
 /** 播放信息：POST /Items/{itemId}/PlaybackInfo 响应。 */
 @Serializable
