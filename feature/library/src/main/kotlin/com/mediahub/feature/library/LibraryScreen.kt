@@ -33,11 +33,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -146,16 +145,15 @@ fun LibraryRoute(
                     val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
                     val gridState = rememberLazyGridState()
 
-                    // 滚动到底部附近时自动触发 loadMore
-                    val shouldLoadMore by remember {
-                        derivedStateOf {
-                            val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
+                    // 滚动到底部附近时自动触发 loadMore（snapshotFlow 避免 stale s 捕获）
+                    LaunchedEffect(Unit) {
+                        snapshotFlow {
+                            val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@snapshotFlow false
                             val totalItems = gridState.layoutInfo.totalItemsCount
                             lastVisible >= totalItems - 3 && s.hasMore && !s.isLoadingMore && s.loadMoreError == null
+                        }.collect { shouldLoad ->
+                            if (shouldLoad) viewModel.loadMore()
                         }
-                    }
-                    LaunchedEffect(shouldLoadMore) {
-                        if (shouldLoadMore) viewModel.loadMore()
                     }
 
                     LazyVerticalGrid(

@@ -13,10 +13,11 @@ import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 sealed interface LibraryUiState {
@@ -68,11 +69,19 @@ class LibraryViewModel @Inject constructor(
     /** loadMore 并发锁。 */
     private var loadingMore = false
 
+    /** 导航代数：每次 openFolder/goToParent/load 递增，用于 race guard。 */
+    private var navigationGeneration = 0
+
+    /** loadMore 协程 job，用于取消在途旧请求。 */
+    private var loadMoreJob: Job? = null
+
     init {
         load()
     }
 
     fun openFolder(folder: MediaItem) {
+        loadMoreJob?.cancel()
+        navigationGeneration++
         folderStack.addLast(currentFolder)
         currentFolder = folder
         nextOffset = null
@@ -81,6 +90,8 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun goToParent() {
+        loadMoreJob?.cancel()
+        navigationGeneration++
         currentFolder = folderStack.removeLastOrNull()
         nextOffset = null
         loadingMore = false
@@ -89,25 +100,31 @@ class LibraryViewModel @Inject constructor(
 
     fun loadMore() {
         if (loadingMore || nextOffset == null) return
-        loadingMore = true
         val currentState = _uiState.value as? LibraryUiState.Content ?: return
+        loadingMore = true
+        val snapshotGen = navigationGeneration
+        val snapshotParent = currentFolder?.id ?: libraryId
+        val snapshotOffset = nextOffset!!
         _uiState.value = currentState.copy(isLoadingMore = true, loadMoreError = null)
-        viewModelScope.launch {
+        loadMoreJob = viewModelScope.launch {
             try {
                 val server = serverStore.getServer(serverId)
                     ?: throw ProviderException.NotFound(serverId, "媒体源")
                 val handle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
-                val page = PageRequest(offset = nextOffset ?: 0, limit = 200)
-                val parentId = currentFolder?.id ?: libraryId
-                val result = handle.library?.getItems(parentId, page)
+                val page = PageRequest(offset = snapshotOffset, limit = 200)
+                val result = handle.library?.getItems(snapshotParent, page)
                     ?: handle.browse?.listFolder(currentFolder, page)
                     ?: throw ProviderException.NotYetImplemented(serverId, "浏览能力")
-                nextOffset = result.nextOffset
+                // Race guard: 导航已变，丢弃
+                if (snapshotGen != navigationGeneration) return@launch
+                val currentParent = currentFolder?.id ?: libraryId
+                if (currentParent != snapshotParent) return@launch
                 // 追加并去重（按 id）
-                val existingIds = (currentState.items.map { it.id }).toSet()
-                val newItems = result.items.filter { it.id !in existingIds }
                 val state = _uiState.value as? LibraryUiState.Content ?: return@launch
+                val existingIds = (state.items.map { it.id }).toSet()
+                val newItems = result.items.filter { it.id !in existingIds }
+                nextOffset = result.nextOffset
                 _uiState.value = state.copy(
                     items = state.items + newItems,
                     hasMore = result.hasMore,
@@ -115,18 +132,22 @@ class LibraryViewModel @Inject constructor(
                     loadMoreError = null,
                 )
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                if (snapshotGen != navigationGeneration) return@launch
                 val state = _uiState.value as? LibraryUiState.Content ?: return@launch
                 _uiState.value = state.copy(
                     isLoadingMore = false,
                     loadMoreError = userMessage(e),
                 )
             } finally {
-                loadingMore = false
+                if (snapshotGen == navigationGeneration) loadingMore = false
             }
         }
     }
 
     fun load() {
+        loadMoreJob?.cancel()
+        navigationGeneration++
         viewModelScope.launch {
             _uiState.value = LibraryUiState.Loading
             try {
