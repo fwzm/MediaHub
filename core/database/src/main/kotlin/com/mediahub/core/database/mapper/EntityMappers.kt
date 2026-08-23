@@ -56,6 +56,12 @@ object ServerEntityMappers {
         lastLatencyMs = lastLatencyMs,
         lastError = lastError,
         lastTestedAtEpochMs = lastTestedAtEpochMs,
+        lastApiLatencyMs = lastApiLatencyMs,
+        lastMediaFirstByteMs = lastMediaFirstByteMs,
+        lastMediaThroughputMbps = lastMediaThroughputMbps,
+        lastProtocol = lastProtocol,
+        lastSupportsRange = lastSupportsRange,
+        lastHttpCode = lastHttpCode,
     )
 
     fun ServerEndpoint.toEntity(): ServerEndpointEntity = ServerEndpointEntity(
@@ -69,6 +75,12 @@ object ServerEntityMappers {
         lastLatencyMs = lastLatencyMs,
         lastError = lastError,
         lastTestedAtEpochMs = lastTestedAtEpochMs,
+        lastApiLatencyMs = lastApiLatencyMs,
+        lastMediaFirstByteMs = lastMediaFirstByteMs,
+        lastMediaThroughputMbps = lastMediaThroughputMbps,
+        lastProtocol = lastProtocol,
+        lastSupportsRange = lastSupportsRange,
+        lastHttpCode = lastHttpCode,
     )
 
     fun AccountEntity.toDomain(): MediaAccount = MediaAccount(

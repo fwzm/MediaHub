@@ -16,6 +16,13 @@ data class ServerEndpoint(
     val lastLatencyMs: Long? = null,
     val lastError: String? = null,
     val lastTestedAtEpochMs: Long? = null,
+    // ---- 媒体线路质量（U4-D）----
+    val lastApiLatencyMs: Long? = null,
+    val lastMediaFirstByteMs: Long? = null,
+    val lastMediaThroughputMbps: Double? = null,
+    val lastProtocol: String? = null,
+    val lastSupportsRange: Boolean? = null,
+    val lastHttpCode: Int? = null,
 )
 
 /** 当前生效线路：主线路优先，否则第一个 enabled 线路。 */

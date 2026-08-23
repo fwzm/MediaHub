@@ -6,7 +6,18 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 /** Room 迁移（Phase 1B-2.5：servers 去 baseUrl、加 note/icon；新增 server_endpoints 表）。 */
 object Migrations {
 
-    val MIGRATION_1_2 = object : Migration(1, 2) {
+    val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE server_endpoints ADD COLUMN lastApiLatencyMs INTEGER")
+            db.execSQL("ALTER TABLE server_endpoints ADD COLUMN lastMediaFirstByteMs INTEGER")
+            db.execSQL("ALTER TABLE server_endpoints ADD COLUMN lastMediaThroughputMbps REAL")
+            db.execSQL("ALTER TABLE server_endpoints ADD COLUMN lastProtocol TEXT")
+            db.execSQL("ALTER TABLE server_endpoints ADD COLUMN lastSupportsRange INTEGER")
+            db.execSQL("ALTER TABLE server_endpoints ADD COLUMN lastHttpCode INTEGER")
+        }
+    }
+
+       val MIGRATION_1_2 = object : Migration(1, 2) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS server_endpoints (" +

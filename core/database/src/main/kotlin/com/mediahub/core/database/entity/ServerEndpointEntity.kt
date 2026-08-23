@@ -16,4 +16,10 @@ data class ServerEndpointEntity(
     val lastLatencyMs: Long? = null,
     val lastError: String? = null,
     val lastTestedAtEpochMs: Long? = null,
+    val lastApiLatencyMs: Long? = null,
+    val lastMediaFirstByteMs: Long? = null,
+    val lastMediaThroughputMbps: Double? = null,
+    val lastProtocol: String? = null,
+    val lastSupportsRange: Boolean? = null,
+    val lastHttpCode: Int? = null,
 )
