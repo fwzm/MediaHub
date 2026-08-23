@@ -538,4 +538,121 @@ class LibraryViewModelTest {
         // loadMore should work after refresh
         assertTrue((vm.uiState.value as LibraryUiState.Content).items.size >= 5)
     }
+
+    // ---- Load race (1B-3.2.2) ----
+
+    @Test
+    fun loadInFlightDoesNotPolluteNewFolder() = runTest {
+        // load(A) in-flight → openFolder(B) → A's stale response must not pollute B
+        val lib = object : MediaLibraryProvider {
+            override suspend fun getLibraries() = emptyList<MediaLibrary>()
+            override suspend fun getItems(libraryId: String, page: PageRequest): PagedResult<MediaItem> {
+                return when (libraryId) {
+                    "view1" -> {
+                        delay(200)
+                        PagedResult(
+                            items = (1..5).map { MediaItem("srv-1", "slow$it", MediaType.MOVIE, "Slow $it") },
+                            totalCount = 5, hasMore = false, nextOffset = null,
+                        )
+                    }
+                    "sub" -> PagedResult(
+                        items = (1..3).map { MediaItem("srv-1", "sub$it", MediaType.MOVIE, "Sub $it") },
+                        totalCount = 3, hasMore = false, nextOffset = null,
+                    )
+                    else -> PagedResult(emptyList(), totalCount = 0)
+                }
+            }
+            override suspend fun getSeasons(seriesId: String) = emptyList<Season>()
+            override suspend fun getEpisodes(seasonId: String) = emptyList<Episode>()
+        }
+        val vm = LibraryViewModel(
+            SavedStateHandle(mapOf("serverId" to "srv-1", "libraryId" to "view1", "name" to "电影")),
+            FakeServerStore(server()), FakeRegistry(lib), noOpLogger,
+        )
+        // Initial load has delay(200) — let it start but not finish
+        runCurrent()
+        // Now open sub-folder while initial load is in-flight
+        vm.openFolder(MediaItem("srv-1", "sub", MediaType.FOLDER, "Sub"))
+        advanceUntilIdle()
+        val state = vm.uiState.value as LibraryUiState.Content
+        assertEquals(3, state.items.size)
+        assertTrue(state.items.all { it.id.startsWith("sub") })
+    }
+
+    @Test
+    fun loadInFlightDoesNotPolluteParent() = runTest {
+        // load(sub) in-flight → goToParent → stale must not pollute parent
+        val lib = object : MediaLibraryProvider {
+            override suspend fun getLibraries() = emptyList<MediaLibrary>()
+            override suspend fun getItems(libraryId: String, page: PageRequest): PagedResult<MediaItem> {
+                return when (libraryId) {
+                    "view1" -> PagedResult(
+                        items = (1..5).map { MediaItem("srv-1", "b$it", MediaType.MOVIE, "Base $it") },
+                        totalCount = 5, hasMore = false, nextOffset = null,
+                    )
+                    "sub" -> {
+                        delay(200)
+                        PagedResult(
+                            items = (1..3).map { MediaItem("srv-1", "slow$it", MediaType.MOVIE, "Slow $it") },
+                            totalCount = 3, hasMore = false, nextOffset = null,
+                        )
+                    }
+                    else -> PagedResult(emptyList(), totalCount = 0)
+                }
+            }
+            override suspend fun getSeasons(seriesId: String) = emptyList<Season>()
+            override suspend fun getEpisodes(seasonId: String) = emptyList<Episode>()
+        }
+        val vm = LibraryViewModel(
+            SavedStateHandle(mapOf("serverId" to "srv-1", "libraryId" to "view1", "name" to "电影")),
+            FakeServerStore(server()), FakeRegistry(lib), noOpLogger,
+        )
+        advanceUntilIdle()
+        vm.openFolder(MediaItem("srv-1", "sub", MediaType.FOLDER, "Sub"))
+        // sub load has delay(200) — let it start but not finish
+        runCurrent()
+        // Now goToParent while sub load is in-flight
+        vm.goToParent()
+        advanceUntilIdle()
+        val state = vm.uiState.value as LibraryUiState.Content
+        assertEquals(5, state.items.size)
+        assertTrue(state.items.all { it.id.startsWith("b") })
+    }
+
+    @Test
+    fun refreshLoadInFlightDoesNotPolluteNewFolder() = runTest {
+        // load(A) in-flight → refresh → old load must not overwrite refresh
+        val lib = object : MediaLibraryProvider {
+            var callCount = 0
+            override suspend fun getLibraries() = emptyList<MediaLibrary>()
+            override suspend fun getItems(libraryId: String, page: PageRequest): PagedResult<MediaItem> {
+                callCount++
+                return if (callCount == 1) {
+                    delay(200)
+                    PagedResult(
+                        items = (1..5).map { MediaItem("srv-1", "stale$it", MediaType.MOVIE, "Stale $it") },
+                        totalCount = 5, hasMore = false, nextOffset = null,
+                    )
+                } else {
+                    PagedResult(
+                        items = (1..3).map { MediaItem("srv-1", "fresh$it", MediaType.MOVIE, "Fresh $it") },
+                        totalCount = 3, hasMore = false, nextOffset = null,
+                    )
+                }
+            }
+            override suspend fun getSeasons(seriesId: String) = emptyList<Season>()
+            override suspend fun getEpisodes(seasonId: String) = emptyList<Episode>()
+        }
+        val vm = LibraryViewModel(
+            SavedStateHandle(mapOf("serverId" to "srv-1", "libraryId" to "view1", "name" to "电影")),
+            FakeServerStore(server()), FakeRegistry(lib), noOpLogger,
+        )
+        // Initial load has delay(200) — let it start but not finish
+        runCurrent()
+        // Refresh while load is in-flight
+        vm.load()
+        advanceUntilIdle()
+        val state = vm.uiState.value as LibraryUiState.Content
+        assertTrue(state.items.all { it.id.startsWith("fresh") })
+    }
 }

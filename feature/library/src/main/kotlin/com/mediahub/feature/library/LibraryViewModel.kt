@@ -75,11 +75,15 @@ class LibraryViewModel @Inject constructor(
     /** loadMore 协程 job，用于取消在途旧请求。 */
     private var loadMoreJob: Job? = null
 
+    /** 普通 load 协程 job，用于取消在途旧请求。 */
+    private var loadJob: Job? = null
+
     init {
         load()
     }
 
     fun openFolder(folder: MediaItem) {
+        loadJob?.cancel()
         loadMoreJob?.cancel()
         navigationGeneration++
         folderStack.addLast(currentFolder)
@@ -90,6 +94,7 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun goToParent() {
+        loadJob?.cancel()
         loadMoreJob?.cancel()
         navigationGeneration++
         currentFolder = folderStack.removeLastOrNull()
@@ -147,11 +152,15 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun load() {
+        loadJob?.cancel()
         loadMoreJob?.cancel()
         navigationGeneration++
         loadingMore = false
         nextOffset = null
-        viewModelScope.launch {
+        val snapshotGen = navigationGeneration
+        val snapshotParent = currentFolder?.id ?: libraryId
+        val snapshotFolder = currentFolder
+        loadJob = viewModelScope.launch {
             _uiState.value = LibraryUiState.Loading
             try {
                 val server = serverStore.getServer(serverId)
@@ -171,8 +180,11 @@ class LibraryViewModel @Inject constructor(
                     }
 
                     library != null -> {
-                        val parentId = currentFolder?.id ?: libraryId
-                        val result = library.getItems(parentId, page)
+                        val result = library.getItems(snapshotParent, page)
+                        // Race guard: 导航已变，丢弃
+                        if (snapshotGen != navigationGeneration) return@launch
+                        val currentParent = currentFolder?.id ?: libraryId
+                        if (currentParent != snapshotParent) return@launch
                         nextOffset = result.nextOffset
                         _uiState.value = LibraryUiState.Content(
                             items = result.items,
@@ -184,7 +196,10 @@ class LibraryViewModel @Inject constructor(
                     }
 
                     browse != null -> {
-                        val result = browse.listFolder(currentFolder, page)
+                        val result = browse.listFolder(snapshotFolder, page)
+                        if (snapshotGen != navigationGeneration) return@launch
+                        val currentParent = currentFolder?.id ?: libraryId
+                        if (currentParent != snapshotParent) return@launch
                         nextOffset = result.nextOffset
                         _uiState.value = LibraryUiState.Content(
                             items = result.items,
@@ -199,6 +214,7 @@ class LibraryViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
+                if (snapshotGen != navigationGeneration) return@launch
                 logger.w(LogTag.UI, "加载媒体库失败 serverId=$serverId", e)
                 _uiState.value = LibraryUiState.Error(userMessage(e))
             }
