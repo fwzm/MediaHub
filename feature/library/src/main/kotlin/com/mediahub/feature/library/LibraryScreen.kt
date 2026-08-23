@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Folder
@@ -30,7 +32,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -127,7 +133,7 @@ fun LibraryRoute(
             }
 
             is LibraryUiState.Content -> {
-                if (s.items.isEmpty()) {
+                if (s.items.isEmpty() && !s.isLoadingMore) {
                     Box(
                         modifier = Modifier.fillMaxSize().padding(padding),
                         contentAlignment = Alignment.Center,
@@ -138,7 +144,22 @@ fun LibraryRoute(
                     // 海报墙（Phase 1B-2.3）：媒体条目 3 列网格；文件夹保持行，可与网格混排
                     val folders = s.items.filter { it.type == MediaType.FOLDER }
                     val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
+                    val gridState = rememberLazyGridState()
+
+                    // 滚动到底部附近时自动触发 loadMore
+                    val shouldLoadMore by remember {
+                        derivedStateOf {
+                            val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
+                            val totalItems = gridState.layoutInfo.totalItemsCount
+                            lastVisible >= totalItems - 3 && s.hasMore && !s.isLoadingMore && s.loadMoreError == null
+                        }
+                    }
+                    LaunchedEffect(shouldLoadMore) {
+                        if (shouldLoadMore) viewModel.loadMore()
+                    }
+
                     LazyVerticalGrid(
+                        state = gridState,
                         columns = GridCells.Fixed(3),
                         modifier = Modifier.fillMaxSize().padding(padding),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
@@ -157,8 +178,25 @@ fun LibraryRoute(
                                 FolderRow(item = folder, onClick = { viewModel.openFolder(folder) })
                             }
                         }
-                        gridItems(mediaItems, key = { "${it.id}:${it.title}" }) { item ->
+                        gridItems(mediaItems, key = { it.id + ":" + it.title }) { item ->
                             PosterCell(item = item, onClick = { onItemClick(item, viewModel, onOpenItem) })
+                        }
+                        // 加载更多指示器
+                        if (s.isLoadingMore) {
+                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
+                                Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(strokeWidth = 2.dp)
+                                }
+                            }
+                        }
+                        // loadMore 错误 + 重试
+                        if (s.loadMoreError != null) {
+                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(s.loadMoreError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                                    TextButton(onClick = viewModel::loadMore) { Text("加载更多") }
+                                }
+                            }
                         }
                     }
                 }

@@ -34,6 +34,9 @@ sealed interface LibraryUiState {
         val libraryName: String,
         val currentFolder: MediaItem? = null,
         val canGoUp: Boolean = false,
+        val hasMore: Boolean = false,
+        val isLoadingMore: Boolean = false,
+        val loadMoreError: String? = null,
     ) : LibraryUiState
 
     data class Error(val message: String) : LibraryUiState
@@ -59,6 +62,12 @@ class LibraryViewModel @Inject constructor(
     /** 文件夹导航栈（上级回溯）。 */
     private val folderStack = ArrayDeque<MediaItem?>()
 
+    /** 分页：下一页 offset，null 表示没有更多页。 */
+    private var nextOffset: Int? = null
+
+    /** loadMore 并发锁。 */
+    private var loadingMore = false
+
     init {
         load()
     }
@@ -66,12 +75,55 @@ class LibraryViewModel @Inject constructor(
     fun openFolder(folder: MediaItem) {
         folderStack.addLast(currentFolder)
         currentFolder = folder
+        nextOffset = null
+        loadingMore = false
         load()
     }
 
     fun goToParent() {
         currentFolder = folderStack.removeLastOrNull()
+        nextOffset = null
+        loadingMore = false
         load()
+    }
+
+    fun loadMore() {
+        if (loadingMore || nextOffset == null) return
+        loadingMore = true
+        val currentState = _uiState.value as? LibraryUiState.Content ?: return
+        _uiState.value = currentState.copy(isLoadingMore = true, loadMoreError = null)
+        viewModelScope.launch {
+            try {
+                val server = serverStore.getServer(serverId)
+                    ?: throw ProviderException.NotFound(serverId, "媒体源")
+                val handle = registry.create(server)
+                    ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
+                val page = PageRequest(offset = nextOffset ?: 0, limit = 200)
+                val parentId = currentFolder?.id ?: libraryId
+                val result = handle.library?.getItems(parentId, page)
+                    ?: handle.browse?.listFolder(currentFolder, page)
+                    ?: throw ProviderException.NotYetImplemented(serverId, "浏览能力")
+                nextOffset = result.nextOffset
+                // 追加并去重（按 id）
+                val existingIds = (currentState.items.map { it.id }).toSet()
+                val newItems = result.items.filter { it.id !in existingIds }
+                val state = _uiState.value as? LibraryUiState.Content ?: return@launch
+                _uiState.value = state.copy(
+                    items = state.items + newItems,
+                    hasMore = result.hasMore,
+                    isLoadingMore = false,
+                    loadMoreError = null,
+                )
+            } catch (e: Exception) {
+                val state = _uiState.value as? LibraryUiState.Content ?: return@launch
+                _uiState.value = state.copy(
+                    isLoadingMore = false,
+                    loadMoreError = userMessage(e),
+                )
+            } finally {
+                loadingMore = false
+            }
+        }
     }
 
     fun load() {
@@ -99,21 +151,25 @@ class LibraryViewModel @Inject constructor(
                     library != null -> {
                         val parentId = currentFolder?.id ?: libraryId
                         val result = library.getItems(parentId, page)
+                        nextOffset = result.nextOffset
                         _uiState.value = LibraryUiState.Content(
                             items = result.items,
                             libraryName = libraryName.ifBlank { server.displayName },
                             currentFolder = currentFolder,
                             canGoUp = folderStack.isNotEmpty(),
+                            hasMore = result.hasMore,
                         )
                     }
 
                     browse != null -> {
                         val result = browse.listFolder(currentFolder, page)
+                        nextOffset = result.nextOffset
                         _uiState.value = LibraryUiState.Content(
                             items = result.items,
                             libraryName = libraryName.ifBlank { server.displayName },
                             currentFolder = currentFolder,
                             canGoUp = folderStack.isNotEmpty(),
+                            hasMore = result.hasMore,
                         )
                     }
 
