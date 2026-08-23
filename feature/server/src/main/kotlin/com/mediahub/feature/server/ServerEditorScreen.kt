@@ -178,6 +178,38 @@ fun ServerEditorRoute(
                     }
                 }
 
+                SectionHeader("线路质量测试")
+                Button(
+                    onClick = viewModel::testMediaQuality,
+                    enabled = !state.isMediaTesting,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                ) {
+                    if (state.isMediaTesting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    else Text("测试线路质量")
+                }
+                state.mediaQualityResult?.let { qr ->
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        if (qr.error != null) {
+                            Text("线路不可用", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleSmall)
+                            val err = qr.error; InfoRow("错误", err ?: "未知")
+                        } else {
+                            val score = qr.score()
+                            val stars = "★".repeat(score / 20) + "☆".repeat(5 - score / 20)
+                            Text("播放质量  $stars $score", style = MaterialTheme.typography.titleSmall)
+                            Spacer(Modifier.height(4.dp))
+                            qr.apiLatencyMs?.let { InfoRow("API 延迟", "${it}ms") }
+                            qr.mediaFirstByteMs?.let { InfoRow("媒体首包", "${it}ms") }
+                            qr.downloadSpeedBytesPerSec?.let {
+                                InfoRow("下载速度", "%.1f MB/s".format(it / (1024.0 * 1024.0)))
+                            }
+                            InfoRow("Range", if (qr.supportsRange) "✓ 支持" else "✗ 不支持")
+                            qr.httpStatus?.let { InfoRow("HTTP", "$it") }
+                            qr.protocol?.let { InfoRow("协议", it) }
+                        }
+                        InfoRow("最后测试", java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(qr.testedAt)))
+                    }
+                }
+
                 SectionHeader("账号")
                 InfoRow("用户名", server.username ?: "未设置")
                 InfoRow("状态", if (state.loggedIn) "已登录" else "未登录")

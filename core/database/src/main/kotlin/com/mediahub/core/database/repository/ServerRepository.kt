@@ -90,4 +90,27 @@ class ServerRepository @Inject constructor(
     suspend fun markError(id: String, error: String) {
         dao.markError(id, error)
     }
+
+    /** 线路质量测试结果落库（U4-D）。 */
+    suspend fun updateEndpointQuality(
+        serverId: String,
+        apiLatencyMs: Long?,
+        mediaFirstByteMs: Long?,
+        throughputMbps: Double?,
+        protocol: String?,
+        supportsRange: Boolean?,
+        httpCode: Int?,
+    ) {
+        val endpoints = endpointDao.getByServer(serverId)
+        val primary = endpoints.firstOrNull { it.isPrimary } ?: endpoints.firstOrNull() ?: return
+        endpointDao.upsert(primary.copy(
+            lastApiLatencyMs = apiLatencyMs,
+            lastMediaFirstByteMs = mediaFirstByteMs,
+            lastMediaThroughputMbps = throughputMbps,
+            lastProtocol = protocol,
+            lastSupportsRange = supportsRange,
+            lastHttpCode = httpCode,
+            lastTestedAtEpochMs = System.currentTimeMillis(),
+        ))
+    }
 }

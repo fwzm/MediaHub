@@ -8,6 +8,9 @@ import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.security.TokenStore
+import com.mediahub.core.network.EndpointTestService
+import com.mediahub.core.network.HttpClientFactory
+import com.mediahub.model.EndpointQualityResult
 import com.mediahub.model.MediaServer
 import com.mediahub.model.ServerEndpoint
 import com.mediahub.provider.api.ConnectionStatus
@@ -31,6 +34,8 @@ data class ServerEditorUiState(
     val loggedIn: Boolean = false,
     val isTesting: Boolean = false,
     val testResult: ConnectionStatus? = null,
+    val isMediaTesting: Boolean = false,
+    val mediaQualityResult: EndpointQualityResult? = null,
     val isSaving: Boolean = false,
     val isDeleting: Boolean = false,
     val message: String? = null,
@@ -49,6 +54,7 @@ class ServerEditorViewModel @Inject constructor(
     private val tokenStore: TokenStore,
     private val serverIconStore: ServerIconStore,
     private val removeServerUseCase: RemoveServerUseCase,
+    private val httpClientFactory: HttpClientFactory,
     private val logger: Logger,
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
@@ -98,6 +104,41 @@ class ServerEditorViewModel @Inject constructor(
                 ConnectionStatus(ok = false, message = "不支持的媒体源类型")
             }
             _uiState.update { it.copy(isTesting = false, testResult = result) }
+        }
+    }
+
+    /**
+     * 两层线路质量测试（U4-D）：API latency + Media Range 1MB。
+     * 结果经 ServerRepository.updateEndpointQuality() 持久化到 Room。
+     */
+    fun testMediaQuality() {
+        val state = _uiState.value
+        val url = state.baseUrl.trim().trimEnd('/')
+        if (url.isBlank()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isMediaTesting = true, mediaQualityResult = null) }
+            val service = EndpointTestService(httpClientFactory)
+            val raw = service.test(url)
+            val result = EndpointQualityResult(
+                endpointId = serverId,
+                apiLatencyMs = raw.apiLatencyMs.takeIf { it > 0 },
+                mediaFirstByteMs = raw.mediaFirstByteMs,
+                downloadSpeedBytesPerSec = raw.mediaThroughputMbps?.let { (it * 1024 * 1024).toLong() },
+                httpStatus = raw.httpCode.takeIf { it > 0 },
+                protocol = raw.protocol,
+                supportsRange = raw.supportsRange,
+                error = raw.error,
+            )
+            serverRepository.updateEndpointQuality(
+                serverId = serverId,
+                apiLatencyMs = result.apiLatencyMs,
+                mediaFirstByteMs = result.mediaFirstByteMs,
+                throughputMbps = raw.mediaThroughputMbps,
+                protocol = result.protocol,
+                supportsRange = result.supportsRange,
+                httpCode = result.httpStatus,
+            )
+            _uiState.update { it.copy(isMediaTesting = false, mediaQualityResult = result) }
         }
     }
 
