@@ -62,6 +62,7 @@ class EmbyMetadataMapperTest {
         assertEquals("Actor", person.type)
         assertTrue("imageUrl should contain /Items/123/Images/Primary", person.imageUrl!!.contains("/Items/123/Images/Primary"))
         assertTrue(person.imageUrl!!.contains("tag=abc"))
+        assertEquals("Walter White", person.characterName)
         // Token 不进 URL
         assertTrue(!person.imageUrl!!.contains("token", ignoreCase = true))
     }

@@ -240,7 +240,7 @@ private fun DetailBody(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                itemsIndexed(cast, key = { _, p -> p.id ?: "${p.role}:${p.name}:${p.characterName.orEmpty()}" }) { _, person ->
+                itemsIndexed(cast, key = { i, p -> p.id ?: "i" + i.toString() + ":" + p.role + ":" + p.name + ":" + (p.characterName ?: "") }) { _, person ->
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.width(72.dp),
@@ -290,7 +290,14 @@ private fun DetailBody(
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
-            if (seriesState.seasonsLoading) {
+            if (seriesState.libraryUnavailable) {
+                Text(
+                    "该数据源暂不支持剧集浏览",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            } else if (seriesState.seasonsLoading) {
                 CircularProgressIndicator(
                     modifier = Modifier.padding(horizontal = 16.dp).size(24.dp),
                     strokeWidth = 2.dp,
@@ -425,20 +432,14 @@ private fun EpisodeRow(
                     )
                 }
                 episode.userData?.playedPercentage?.let { pct ->
-                    if (pct > 0 && pct < 100) {
-                        Text(
-                            "进度 ${pct.roundToInt()}%",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    when {
+                        pct >= 95.0 || episode.playCount > 0 -> {
+                            Text("已看", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                        pct > 0 -> {
+                            Text("进度 " + pct.roundToInt().toString() + "%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
-                }
-                if (episode.playCount > 0) {
-                    Text(
-                        "已播",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
             episode.overview?.takeIf(String::isNotBlank)?.let {

@@ -64,8 +64,12 @@ class DetailViewModel @Inject constructor(
                 _uiState.value = DetailUiState.Content(detail)
 
                 // 仅 SERIES 类型加载季列表（复用 browse 链）
-                if (detail.item.type == MediaType.SERIES && h.library != null) {
-                    loadSeasons(h.library!!, detail.item.id)
+                if (detail.item.type == MediaType.SERIES) {
+                    if (h.library != null) {
+                        loadSeasons(h.library!!, detail.item.id)
+                    } else {
+                        _seriesState.value = SeriesBrowseState(libraryUnavailable = true)
+                    }
                 }
             } catch (e: Exception) {
                 logger.w(LogTag.UI, "详情加载失败 serverId=$serverId itemId=$itemId", e)
@@ -89,6 +93,7 @@ class DetailViewModel @Inject constructor(
                 )
                 defaultSeason?.let { loadEpisodesForSeason(it.id) }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 _seriesState.value = _seriesState.value.copy(
                     seasonsLoading = false,
                     seasonsError = userMessage(e),
@@ -123,6 +128,7 @@ class DetailViewModel @Inject constructor(
                     )
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 if (_seriesState.value.selectedSeasonId == requestedSeasonId) {
                     _seriesState.value = _seriesState.value.copy(
                         episodesLoading = false,
@@ -158,6 +164,7 @@ data class SeriesBrowseState(
     val episodesLoading: Boolean = false,
     val seasonsError: String? = null,
     val episodesError: String? = null,
+    val libraryUnavailable: Boolean = false,
 )
 
 sealed interface DetailUiState {
