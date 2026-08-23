@@ -119,7 +119,7 @@ class DetailViewModel @Inject constructor(
         episodeJob = viewModelScope.launch {
             val requestedSeasonId = seasonId
             try {
-                val result = library.getItems(seasonId, PageRequest(limit = 50))
+                val result = library.getItems(seasonId, PageRequest(limit = 200))
                 // 并发安全：只有当前仍选中的季才更新
                 if (_seriesState.value.selectedSeasonId == requestedSeasonId) {
                     _seriesState.value = _seriesState.value.copy(

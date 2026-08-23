@@ -431,15 +431,11 @@ private fun EpisodeRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                episode.userData?.playedPercentage?.let { pct ->
-                    when {
-                        pct >= 95.0 || episode.playCount > 0 -> {
-                            Text("已看", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                        }
-                        pct > 0 -> {
-                            Text("进度 " + pct.roundToInt().toString() + "%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
+                val pct = episode.userData?.playedPercentage
+                val isPlayed = episode.playCount > 0 || (pct != null && pct >= 95.0)
+                when {
+                    isPlayed -> Text("已看", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    pct != null && pct > 0 -> Text("进度 " + pct.roundToInt().toString() + "%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             episode.overview?.takeIf(String::isNotBlank)?.let {

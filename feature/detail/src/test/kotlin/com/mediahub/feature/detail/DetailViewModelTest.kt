@@ -260,17 +260,64 @@ class DetailViewModelTest {
             override suspend fun getEpisodes(seasonId: String) = error("legacy")
         }
         val vm = createViewModel(detail, libraryProvider = lib)
-        testDispatcher.scheduler.advanceUntilIdle()
+        // Run only current tasks (detail+seasons load, S1 episode fetch starts and hits delay(200))
+        testDispatcher.scheduler.runCurrent()
+        assertEquals("s1", vm.seriesState.value.selectedSeasonId)
+        // Switch to S2 BEFORE S1's delay(200) completes
+        vm.selectSeason("s2")
+        testDispatcher.scheduler.advanceTimeBy(50)
+        testDispatcher.scheduler.runCurrent()
+        // S2 should be selected with correct episodes
+        assertEquals("s2", vm.seriesState.value.selectedSeasonId)
+        assertEquals("e2", vm.seriesState.value.episodes[0].id)
+        // Advance past S1's delay - verify it doesn't overwrite
+        testDispatcher.scheduler.advanceTimeBy(300)
+        testDispatcher.scheduler.runCurrent()
+        assertEquals("s2", vm.seriesState.value.selectedSeasonId)
+        assertEquals("e2", vm.seriesState.value.episodes[0].id)
+        // CancellationException was rethrown, not stored as error
+        assertNull(vm.seriesState.value.episodesError)
+    }
+
+    @Test
+    fun raceNonCooperativeS1DoesNotOverwriteS2() = runTest(testDispatcher) {
+        // Non-cooperative fake: S1 ignores cancellation and still returns late
+        val seriesItem = makeItem("series-race-nc", MediaType.SERIES)
+        val detail = MediaDetail(item = seriesItem)
+        val seasons = listOf(makeItem("s1", MediaType.SEASON, seasonNumber = 1), makeItem("s2", MediaType.SEASON, seasonNumber = 2))
+        val lib = object : MediaLibraryProvider {
+            override suspend fun getLibraries() = emptyList<MediaLibrary>()
+            override suspend fun getItems(libraryId: String, page: PageRequest): PagedResult<MediaItem> {
+                when (libraryId) {
+                    "series-race-nc" -> return PagedResult(items = seasons, totalCount = seasons.size, hasMore = false, nextOffset = null)
+                    "s1" -> {
+                        try { delay(200) } catch (_: CancellationException) { /* ignore cancellation, still return */ }
+                        return PagedResult(items = listOf(makeItem("e1", MediaType.EPISODE, episodeNumber = 1)), totalCount = 1, hasMore = false, nextOffset = null)
+                    }
+                    "s2" -> {
+                        delay(10)
+                        return PagedResult(items = listOf(makeItem("e2", MediaType.EPISODE, episodeNumber = 2)), totalCount = 1, hasMore = false, nextOffset = null)
+                    }
+                    else -> return PagedResult(items = emptyList(), totalCount = 0, hasMore = false, nextOffset = null)
+                }
+            }
+            override suspend fun getSeasons(seriesId: String) = error("legacy")
+            override suspend fun getEpisodes(seasonId: String) = error("legacy")
+        }
+        val vm = createViewModel(detail, libraryProvider = lib)
+        testDispatcher.scheduler.runCurrent()
         assertEquals("s1", vm.seriesState.value.selectedSeasonId)
         vm.selectSeason("s2")
         testDispatcher.scheduler.advanceTimeBy(50)
         testDispatcher.scheduler.runCurrent()
         assertEquals("s2", vm.seriesState.value.selectedSeasonId)
         assertEquals("e2", vm.seriesState.value.episodes[0].id)
+        // S1's delay completes even after cancellation, but selectedSeasonId guard prevents overwrite
         testDispatcher.scheduler.advanceTimeBy(300)
         testDispatcher.scheduler.runCurrent()
         assertEquals("s2", vm.seriesState.value.selectedSeasonId)
         assertEquals("e2", vm.seriesState.value.episodes[0].id)
+        assertNull(vm.seriesState.value.episodesError)
     }
 
     @Test
