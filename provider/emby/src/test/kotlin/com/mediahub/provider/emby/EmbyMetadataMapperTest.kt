@@ -105,4 +105,19 @@ class EmbyMetadataMapperTest {
         val result = EmbyMetadataMapper.mapStudios(null)
         assertTrue(result.isEmpty())
     }
+
+    // ---- Tags ----
+
+    @Test
+    fun `tags 映射过滤空白`() {
+        val tags = listOf("悬疑", "", "惊悚", "  ")
+        val result = EmbyMetadataMapper.mapTags(tags)
+        assertEquals(listOf("悬疑", "惊悚"), result)
+    }
+
+    @Test
+    fun `null tags 返回空列表`() {
+        val result = EmbyMetadataMapper.mapTags(null)
+        assertTrue(result.isEmpty())
+    }
 }
