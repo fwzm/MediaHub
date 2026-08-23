@@ -99,11 +99,12 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun loadMore() {
-        if (loadingMore || nextOffset == null) return
         val currentState = _uiState.value as? LibraryUiState.Content ?: return
+        if (loadingMore || nextOffset == null) return
         loadingMore = true
         val snapshotGen = navigationGeneration
         val snapshotParent = currentFolder?.id ?: libraryId
+        val snapshotFolder = currentFolder
         val snapshotOffset = nextOffset!!
         _uiState.value = currentState.copy(isLoadingMore = true, loadMoreError = null)
         loadMoreJob = viewModelScope.launch {
@@ -114,7 +115,7 @@ class LibraryViewModel @Inject constructor(
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 val page = PageRequest(offset = snapshotOffset, limit = 200)
                 val result = handle.library?.getItems(snapshotParent, page)
-                    ?: handle.browse?.listFolder(currentFolder, page)
+                    ?: handle.browse?.listFolder(snapshotFolder, page)
                     ?: throw ProviderException.NotYetImplemented(serverId, "浏览能力")
                 // Race guard: 导航已变，丢弃
                 if (snapshotGen != navigationGeneration) return@launch
@@ -148,6 +149,8 @@ class LibraryViewModel @Inject constructor(
     fun load() {
         loadMoreJob?.cancel()
         navigationGeneration++
+        loadingMore = false
+        nextOffset = null
         viewModelScope.launch {
             _uiState.value = LibraryUiState.Loading
             try {
@@ -156,11 +159,9 @@ class LibraryViewModel @Inject constructor(
                 val handle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 val page = PageRequest(limit = 200)
-                // 能力组合（ADR-014）：媒体库型走 library，文件树型走 browse，均无则提示未接入。
                 val library = handle.library
                 val browse = handle.browse
                 when {
-                    // 顶层：显示媒体库 Views（评审 #7，不把 View 伪造成 MediaItem）
                     library != null && libraryId == "root" -> {
                         val libraries = library.getLibraries()
                         _uiState.value = LibraryUiState.Libraries(
@@ -197,6 +198,7 @@ class LibraryViewModel @Inject constructor(
                     else -> throw ProviderException.NotYetImplemented(serverId, "该数据源的浏览能力尚未接入")
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 logger.w(LogTag.UI, "加载媒体库失败 serverId=$serverId", e)
                 _uiState.value = LibraryUiState.Error(userMessage(e))
             }

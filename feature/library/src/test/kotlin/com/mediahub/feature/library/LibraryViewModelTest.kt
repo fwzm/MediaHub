@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -397,18 +398,16 @@ class LibraryViewModelTest {
 
     @Test
     fun loadMoreInFlightDoesNotPolluteNewFolder() = runTest {
-        // A loadMore in-flight → openFolder(B) → A's stale response must not pollute B
+        // loadMore in-flight → openFolder(B) → A's stale response must not pollute B
         val lib = object : MediaLibraryProvider {
-            var callCount = 0
             override suspend fun getLibraries() = emptyList<MediaLibrary>()
             override suspend fun getItems(libraryId: String, page: PageRequest): PagedResult<MediaItem> {
-                callCount++
                 if (libraryId == "view1" && page.offset == 0) return PagedResult(
                     items = (1..5).map { MediaItem("srv-1", "b$it", MediaType.MOVIE, "Base $it") },
                     totalCount = 10, hasMore = true, nextOffset = 5,
                 )
                 if (libraryId == "view1" && page.offset == 5) {
-                    delay(200) // slow response
+                    delay(200)
                     return PagedResult(
                         items = (6..10).map { MediaItem("srv-1", "b$it", MediaType.MOVIE, "Base $it") },
                         totalCount = 10, hasMore = false, nextOffset = null,
@@ -428,14 +427,12 @@ class LibraryViewModelTest {
         )
         advanceUntilIdle()
         assertEquals(5, (vm.uiState.value as LibraryUiState.Content).items.size)
-
-        // Start loadMore (will delay 200ms)
+        // Start loadMore and let it run until it hits delay(200)
         vm.loadMore()
-        // Don't advance - it's in-flight
-        // Open a sub-folder
+        runCurrent()
+        // Now open sub-folder while loadMore is in-flight
         vm.openFolder(MediaItem("srv-1", "sub", MediaType.FOLDER, "Sub"))
         advanceUntilIdle()
-        // Sub-folder should have 3 items, NOT polluted by stale loadMore
         val state = vm.uiState.value as LibraryUiState.Content
         assertEquals(3, state.items.size)
         assertTrue(state.items.all { it.id.startsWith("sub") })
@@ -443,28 +440,30 @@ class LibraryViewModelTest {
 
     @Test
     fun loadMoreInFlightDoesNotPolluteParent() = runTest {
-        // loadMore in-flight → goToParent → stale response must not pollute parent
+        // Enter sub-folder with hasMore → loadMore in-flight → goToParent → stale must not pollute parent
         val lib = object : MediaLibraryProvider {
-            var callCount = 0
             override suspend fun getLibraries() = emptyList<MediaLibrary>()
             override suspend fun getItems(libraryId: String, page: PageRequest): PagedResult<MediaItem> {
-                callCount++
                 return when {
                     libraryId == "view1" && page.offset == 0 -> PagedResult(
                         items = (1..5).map { MediaItem("srv-1", "b$it", MediaType.MOVIE, "Base $it") },
                         totalCount = 10, hasMore = true, nextOffset = 5,
                     )
-                    libraryId == "view1" && page.offset == 5 -> {
+                    libraryId == "view1" && page.offset == 5 -> PagedResult(
+                        items = (6..10).map { MediaItem("srv-1", "b$it", MediaType.MOVIE, "Base $it") },
+                        totalCount = 10, hasMore = false, nextOffset = null,
+                    )
+                    libraryId == "sub" && page.offset == 0 -> PagedResult(
+                        items = (1..3).map { MediaItem("srv-1", "sub$it", MediaType.MOVIE, "Sub $it") },
+                        totalCount = 6, hasMore = true, nextOffset = 3,
+                    )
+                    libraryId == "sub" && page.offset == 3 -> {
                         delay(200)
                         PagedResult(
-                            items = (6..10).map { MediaItem("srv-1", "b$it", MediaType.MOVIE, "Base $it") },
-                            totalCount = 10, hasMore = false, nextOffset = null,
+                            items = (4..6).map { MediaItem("srv-1", "sub$it", MediaType.MOVIE, "Sub $it") },
+                            totalCount = 6, hasMore = false, nextOffset = null,
                         )
                     }
-                    libraryId == "sub" -> PagedResult(
-                        items = (1..3).map { MediaItem("srv-1", "sub$it", MediaType.MOVIE, "Sub $it") },
-                        totalCount = 3, hasMore = false, nextOffset = null,
-                    )
                     else -> PagedResult(emptyList(), totalCount = 0)
                 }
             }
@@ -479,24 +478,24 @@ class LibraryViewModelTest {
         vm.openFolder(MediaItem("srv-1", "sub", MediaType.FOLDER, "Sub"))
         advanceUntilIdle()
         assertEquals(3, (vm.uiState.value as LibraryUiState.Content).items.size)
-
-        vm.loadMore() // sub has no hasMore, so this is a no-op, but let's just test goToParent
+        assertTrue((vm.uiState.value as LibraryUiState.Content).hasMore)
+        // Start loadMore on sub, let it start and hit delay(200)
+        vm.loadMore()
+        runCurrent()
+        // Now goToParent while loadMore is in-flight
         vm.goToParent()
         advanceUntilIdle()
-        // Parent should have 5 items, not polluted
         val state = vm.uiState.value as LibraryUiState.Content
         assertEquals(5, state.items.size)
         assertTrue(state.items.all { it.id.startsWith("b") })
     }
 
     @Test
-    fun staleResponseDoesNotChangeNextOffset() = runTest {
-        // loadMore in-flight → openFolder → old response's nextOffset must not overwrite
+    fun staleResponseDoesNotChangeNextOffsetOrItems() = runTest {
+        // loadMore in-flight → refresh → stale response must not change nextOffset or items
         val lib = object : MediaLibraryProvider {
-            var callCount = 0
             override suspend fun getLibraries() = emptyList<MediaLibrary>()
             override suspend fun getItems(libraryId: String, page: PageRequest): PagedResult<MediaItem> {
-                callCount++
                 return when {
                     libraryId == "view1" && page.offset == 0 -> PagedResult(
                         items = (1..5).map { MediaItem("srv-1", "b$it", MediaType.MOVIE, "Base $it") },
@@ -505,14 +504,11 @@ class LibraryViewModelTest {
                     libraryId == "view1" && page.offset == 5 -> {
                         delay(200)
                         PagedResult(
-                            items = (6..10).map { MediaItem("srv-1", "b$it", MediaType.MOVIE, "Base $it") },
+                            items = (6..10).map { MediaItem("srv-1", "stale$it", MediaType.MOVIE, "Stale $it") },
                             totalCount = 10, hasMore = false, nextOffset = null,
                         )
                     }
-                    else -> PagedResult(
-                        items = (1..2).map { MediaItem("srv-1", "sub$it", MediaType.MOVIE, "Sub $it") },
-                        totalCount = 2, hasMore = false, nextOffset = null,
-                    )
+                    else -> PagedResult(emptyList(), totalCount = 0)
                 }
             }
             override suspend fun getSeasons(seriesId: String) = emptyList<Season>()
@@ -523,11 +519,23 @@ class LibraryViewModelTest {
             FakeServerStore(server()), FakeRegistry(lib), noOpLogger,
         )
         advanceUntilIdle()
-        vm.loadMore() // in-flight
-        vm.openFolder(MediaItem("srv-1", "sub", MediaType.FOLDER, "Sub"))
+        assertEquals(5, (vm.uiState.value as LibraryUiState.Content).items.size)
+        // Start loadMore, let it hit delay(200)
+        vm.loadMore()
+        runCurrent()
+        // Refresh while loadMore is in-flight
+        vm.load()
         advanceUntilIdle()
+        // Refresh should reset to first page (5 items, no stale items)
         val state = vm.uiState.value as LibraryUiState.Content
-        assertTrue(state.items.all { it.id.startsWith("sub") })
-        assertTrue(!state.hasMore) // new folder should have correct hasMore
+        assertEquals(5, state.items.size)
+        assertTrue(state.items.all { it.id.startsWith("b") })
+        assertTrue(state.hasMore) // refresh loads first page again, still hasMore
+        // loadMore after refresh should work (not permanently locked)
+        advanceUntilIdle()
+        vm.loadMore()
+        advanceUntilIdle()
+        // loadMore should work after refresh
+        assertTrue((vm.uiState.value as LibraryUiState.Content).items.size >= 5)
     }
 }

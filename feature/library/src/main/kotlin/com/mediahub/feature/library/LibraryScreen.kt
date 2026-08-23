@@ -34,6 +34,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -145,13 +146,15 @@ fun LibraryRoute(
                     val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
                     val gridState = rememberLazyGridState()
 
-                    // 滚动到底部附近时自动触发 loadMore（snapshotFlow 避免 stale s 捕获）
+                    // 滚动到底部自动 loadMore（rememberUpdatedState 避免 stale s 捕获）
+                    val currentContent by rememberUpdatedState(s)
                     LaunchedEffect(Unit) {
                         snapshotFlow {
+                            val c = currentContent
                             val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@snapshotFlow false
                             val totalItems = gridState.layoutInfo.totalItemsCount
-                            lastVisible >= totalItems - 3 && s.hasMore && !s.isLoadingMore && s.loadMoreError == null
-                        }.collect { shouldLoad ->
+                            lastVisible >= totalItems - 3 && c.hasMore && !c.isLoadingMore && c.loadMoreError == null
+                        }.distinctUntilChanged().collect { shouldLoad ->
                             if (shouldLoad) viewModel.loadMore()
                         }
                     }
@@ -176,7 +179,7 @@ fun LibraryRoute(
                                 FolderRow(item = folder, onClick = { viewModel.openFolder(folder) })
                             }
                         }
-                        gridItems(mediaItems, key = { it.id + ":" + it.title }) { item ->
+                        gridItems(mediaItems, key = { it.id }) { item ->
                             PosterCell(item = item, onClick = { onItemClick(item, viewModel, onOpenItem) })
                         }
                         // 加载更多指示器
