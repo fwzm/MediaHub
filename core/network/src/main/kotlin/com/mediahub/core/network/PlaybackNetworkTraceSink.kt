@@ -1,7 +1,7 @@
 package com.mediahub.core.network
 
 /**
- * 网络层起播时间回调（U4-B）。由 player/engine 实现并转发到 [PlaybackStartupTrace]。
+ * 网络层起播时间回调（U4-B→U4-C）。由 player/engine 实现并转发到 [PlaybackStartupTrace]。
  * HttpClientFactory 的 OkHttp EventListener 按请求路径匹配后调用。
  */
 interface PlaybackNetworkTraceSink {
@@ -9,6 +9,18 @@ interface PlaybackNetworkTraceSink {
     fun onPlaybackInfoEnd()
     fun onMediaRequestStart()
     fun onMediaFirstByte()
+    /**
+     * 媒体响应元数据（U4-C.3）。
+     * [contentLengthBytes] 为 -1 表示未知（chunked）。
+     */
+    fun onMediaResponseMetadata(
+        code: Int,
+        protocol: String,
+        redirectCount: Int,
+        acceptsRanges: Boolean,
+        contentLengthBytes: Long,
+        contentRange: String?,
+    )
 }
 
 /**

@@ -28,6 +28,20 @@ class StartupNetworkEventListener : EventListener() {
         if (isPlaybackInfo(url.encodedPath, call.request().method)) {
             sink.onPlaybackInfoEnd()
         }
+        if (isMediaRequest(url.encodedPath, call.request().method)) {
+            val resp = response.priorResponse?.let { r -> var last = r; while (r.priorResponse != null) { last = r.priorResponse!! }; last } ?: response
+            var redirectCount = 0
+            var r = response
+            while (r.priorResponse != null) { redirectCount++; r = r.priorResponse!! }
+            sink.onMediaResponseMetadata(
+                code = resp.code,
+                protocol = resp.protocol.toString(),
+                redirectCount = redirectCount,
+                acceptsRanges = resp.header("Accept-Ranges") == "bytes",
+                contentLengthBytes = resp.header("Content-Length")?.toLongOrNull() ?: -1L,
+                contentRange = resp.header("Content-Range"),
+            )
+        }
     }
 
     override fun responseBodyStart(call: Call) {

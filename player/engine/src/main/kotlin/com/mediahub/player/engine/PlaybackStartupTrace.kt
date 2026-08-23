@@ -112,6 +112,12 @@ class PlaybackStartupTrace(
         at("audioInputSeen", Milestone.AUDIO_INPUT_FORMAT_SEEN)
         at("audioDecoderInit", Milestone.AUDIO_DECODER_INITIALIZED)
         at("playing", Milestone.PLAYING)
+        metadata("mediaFirstByteMs")?.let { sb.append(' ').append(it) } // legacy key
+        _milestones[Milestone.MEDIA_FIRST_BYTE]?.let { sb.append(" mediaFirstByte=").append(it - startedElapsedMs).append("ms") }
+        metadata("mediaProtocol")?.let { sb.append(" mediaProtocol=").append(it) }
+        metadata("mediaRedirects")?.let { sb.append(" redirects=").append(it) }
+        metadata("mediaCode")?.let { sb.append(" code=").append(it) }
+        metadata("mediaAcceptRanges")?.let { sb.append(" ranges=").append(it) }
 
         if (_milestones.containsKey(Milestone.FAILED)) {
             sb.append(" failedStage=").append(metadata("failedStage") ?: "unknown")
@@ -131,6 +137,21 @@ class PlaybackStartupTrace(
         override fun onPlaybackInfoEnd() = record(PlaybackStartupTrace.Milestone.PLAYBACK_INFO_RESPONSE_RECEIVED)
         override fun onMediaRequestStart() = record(PlaybackStartupTrace.Milestone.MEDIA_REQUEST_STARTED)
         override fun onMediaFirstByte() = record(PlaybackStartupTrace.Milestone.MEDIA_FIRST_BYTE)
+        override fun onMediaResponseMetadata(
+            code: Int,
+            protocol: String,
+            redirectCount: Int,
+            acceptsRanges: Boolean,
+            contentLengthBytes: Long,
+            contentRange: String?,
+        ) {
+            putMetadata("mediaCode", code.toString())
+            putMetadata("mediaProtocol", protocol)
+            putMetadata("mediaRedirects", redirectCount.toString())
+            putMetadata("mediaAcceptRanges", acceptsRanges.toString())
+            if (contentLengthBytes > 0) putMetadata("mediaContentLength", contentLengthBytes.toString())
+            contentRange?.let { putMetadata("mediaContentRange", it.substringBefore("/")) }
+        }
     }
 
     companion object {

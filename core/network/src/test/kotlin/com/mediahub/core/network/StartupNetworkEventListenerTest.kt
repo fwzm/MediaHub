@@ -27,6 +27,7 @@ class StartupNetworkEventListenerTest {
             override fun onPlaybackInfoEnd() { events += "piEnd" }
             override fun onMediaRequestStart() { events += "mediaStart" }
             override fun onMediaFirstByte() { events += "firstByte" }
+            override fun onMediaResponseMetadata(code: Int, protocol: String, redirectCount: Int, acceptsRanges: Boolean, contentLengthBytes: Long, contentRange: String?) { events += "meta:$code" }
         })
     }
 
@@ -61,7 +62,11 @@ class StartupNetworkEventListenerTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("data"))
         val url = server.url("/emby/Videos/123/stream.mkv").toString()
         fire(url)
-        assertEquals(listOf("mediaStart", "firstByte"), events)
+        // meta 事件（responseHeadersEnd）在 firstByte（responseBodyStart）之前触发
+        assertTrue(events.contains("mediaStart"))
+        assertTrue(events.contains("meta:200"))
+        assertTrue(events.lastIndexOf("firstByte") > events.indexOf("mediaStart"))
+
     }
 
     @Test
