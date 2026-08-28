@@ -36,11 +36,13 @@ object Redactor {
     private val KEY_VALUE_PATTERNS = listOf(
         // JSON / 表单（带引号的值）
         Regex(
-            """(?i)("?(?:access_token|refresh_token|id_token|token|api_key|apikey|api-key|password|passwd|pw|session_token|session_key|client_secret|secret)"?\s*[:=]\s*")([^",\s}]+)("?)"""
+            """(?i)("?(?:access_token|refresh_token|id_token|token|api_key|apikey|api-key|password|passwd|pw|session_token|session_key|client_secret|secret|searchterm)"?\s*[:=]\s*")([^",\s}]+)("?)"""
         ),
-        // URL 查询串 / 表单（无引号的值）
+        // URL 查询串 / 表单（无引号的值）。
+        // searchterm（Phase 1C-1）：用户搜索词属隐私，错误日志不得保留其值；
+        // 仅抹值本身，StartIndex/Limit/IncludeItemTypes 等诊断参数不受影响。
         Regex(
-            """(?i)([?&](?:access_token|refresh_token|id_token|token|api_key|apikey|api-key|password|passwd|pw|session_token|session_key|client_secret|secret)=)([^&\s"]+)"""
+            """(?i)([?&](?:access_token|refresh_token|id_token|token|api_key|apikey|api-key|password|passwd|pw|session_token|session_key|client_secret|secret|searchterm)=)([^&\s"]+)"""
         ),
         // 请求头（整行值）
         Regex("""(?i)(authorization\s*[:=]\s*)([^

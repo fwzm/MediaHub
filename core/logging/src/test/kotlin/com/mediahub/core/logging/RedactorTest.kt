@@ -61,4 +61,48 @@ class RedactorTest {
         assertEquals("", Redactor.redact(null))
         assertEquals("", Redactor.redact(""))
     }
+
+    // ---- Phase 1C-1：SearchTerm（用户搜索词）属隐私，日志只抹值不砍其它参数 ----
+
+    @Test
+    fun `redacts searchTerm value but keeps diagnostic query params`() {
+        val url = "https://aaa.example.com/emby/Users/u1/Items" +
+            "?SearchTerm=冰血暴&Recursive=true&StartIndex=0&Limit=30" +
+            "&IncludeItemTypes=Movie,Series&EnableUserData=true"
+        val out = Redactor.redact(url)
+        assertFalse("搜索词必须从日志消失", out.contains("冰血暴"))
+        assertTrue(out.contains(Redactor.REDACTED))
+        // 非敏感诊断参数必须保留（否则调试搜索分页很痛苦）
+        assertTrue(out.contains("Recursive=true"))
+        assertTrue(out.contains("StartIndex=0"))
+        assertTrue(out.contains("Limit=30"))
+        assertTrue(out.contains("IncludeItemTypes=Movie,Series"))
+        assertTrue(out.contains("EnableUserData=true"))
+    }
+
+    @Test
+    fun `searchterm matching is case insensitive`() {
+        val lower = Redactor.redact("https://e.com/Items?searchterm=secret-show&Limit=5")
+        val upper = Redactor.redact("https://e.com/Items?SEARCHTERM=secret-show&Limit=5")
+        val mixed = Redactor.redact("https://e.com/Items?SearchTerm=secret-show&Limit=5")
+        listOf(lower, upper, mixed).forEach {
+            assertFalse(it.contains("secret-show"))
+            assertTrue(it.contains(Redactor.REDACTED))
+            assertTrue(it.contains("Limit=5"))
+        }
+    }
+
+    @Test
+    fun `searchterm json body value is redacted`() {
+        val json = """{"SearchTerm":"冰血暴","Limit":30}"""
+        val out = Redactor.redact(json)
+        assertFalse(out.contains("冰血暴"))
+        assertTrue(out.contains("Limit"))
+    }
+
+    @Test
+    fun `plain text containing word search is not touched`() {
+        val text = "user searched over network: results=42"
+        assertEquals(text, Redactor.redact(text))
+    }
 }
