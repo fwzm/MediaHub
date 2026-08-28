@@ -41,6 +41,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -247,5 +248,15 @@ class LibrarySortViewModelTest {
         assertEquals(MediaSortField.entries.size, SORT_MENU_ORDER.size)
         assertEquals(MediaSortField.SERVER_DEFAULT, SORT_MENU_ORDER.first())
         assertEquals(SORT_MENU_ORDER.size, SORT_MENU_ORDER.distinct().size)
+    }
+
+    // ---- C2：用户排序激活后 Provider 顺序权威，SERVER_DEFAULT 保留目录优先 ----
+
+    @Test
+    fun `provider order preserved for user-selected sorts only`() {
+        assertFalse(shouldPreserveProviderOrder(MediaSort(MediaSortField.SERVER_DEFAULT)))
+        assertTrue(shouldPreserveProviderOrder(MediaSort(MediaSortField.TITLE)))
+        assertTrue(shouldPreserveProviderOrder(MediaSort(MediaSortField.DATE_ADDED, SortDirection.DESC)))
+        assertTrue(shouldPreserveProviderOrder(MediaSort(MediaSortField.RANDOM)))
     }
 }

@@ -162,8 +162,6 @@ fun LibraryRoute(
                     }
                 } else {
                     // 海报墙（Phase 1B-2.3）：媒体条目 3 列网格；文件夹保持行，可与网格混排
-                    val folders = s.items.filter { it.type == MediaType.FOLDER }
-                    val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
                     val gridState = rememberLazyGridState()
 
                     // 滚动到底部自动 loadMore（rememberUpdatedState 避免 stale s 捕获）
@@ -187,6 +185,7 @@ fun LibraryRoute(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
+                        // 返回上级：导航控件固定顶部，不参与排序（C2）
                         if (s.canGoUp) {
                             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
                                 TextButton(onClick = viewModel::goToParent, modifier = Modifier.fillMaxWidth()) {
@@ -194,13 +193,38 @@ fun LibraryRoute(
                                 }
                             }
                         }
-                        folders.forEach { folder ->
-                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                FolderRow(item = folder, onClick = { viewModel.openFolder(folder) })
+                        if (shouldPreserveProviderOrder(s.sort)) {
+                            // 用户主动选择排序后：Provider 返回顺序即权威顺序，
+                            // UI 不得再按目录/媒体拆分重排（那会覆盖服务端全局排序）
+                            gridItems(
+                                s.items,
+                                key = { it.id },
+                                span = { item ->
+                                    if (item.type == MediaType.FOLDER) {
+                                        androidx.compose.foundation.lazy.grid.GridItemSpan(3)
+                                    } else {
+                                        androidx.compose.foundation.lazy.grid.GridItemSpan(1)
+                                    }
+                                },
+                            ) { item ->
+                                if (item.type == MediaType.FOLDER) {
+                                    FolderRow(item = item, onClick = { viewModel.openFolder(item) })
+                                } else {
+                                    PosterCell(item = item, onClick = { onItemClick(item, viewModel, onOpenItem) })
+                                }
                             }
-                        }
-                        gridItems(mediaItems, key = { it.id }) { item ->
-                            PosterCell(item = item, onClick = { onItemClick(item, viewModel, onOpenItem) })
+                        } else {
+                            // SERVER_DEFAULT：保留既有"目录优先"展示策略
+                            val folders = s.items.filter { it.type == MediaType.FOLDER }
+                            val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
+                            folders.forEach { folder ->
+                                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
+                                    FolderRow(item = folder, onClick = { viewModel.openFolder(folder) })
+                                }
+                            }
+                            gridItems(mediaItems, key = { it.id }) { item ->
+                                PosterCell(item = item, onClick = { onItemClick(item, viewModel, onOpenItem) })
+                            }
                         }
                         // 加载更多指示器
                         if (s.isLoadingMore) {
@@ -238,9 +262,16 @@ fun LibraryRoute(
     }
 }
 
+/**
+ * C2 排序展示策略：用户主动选择排序（非 SERVER_DEFAULT）后，Provider 返回顺序即权威顺序，
+ * UI 不得按目录/媒体拆分重排（分组会覆盖服务端全局排序）；SERVER_DEFAULT 保留既有
+ * "目录优先"策略。返回上级等导航控件固定顶部，不参与两种策略。
+ */
+internal fun shouldPreserveProviderOrder(sort: MediaSort): Boolean =
+    sort.field != MediaSortField.SERVER_DEFAULT
+
 /** 排序选项中文标签（用户口径）。 */
-internal fun sortLabel(field: MediaSortField): String = when (field) {
-    MediaSortField.SERVER_DEFAULT -> "默认"
+internal fun sortLabel(field: MediaSortField): String = when (field) {    MediaSortField.SERVER_DEFAULT -> "默认"
     MediaSortField.DATE_ADDED -> "加入日期"
     MediaSortField.TITLE -> "标题"
     MediaSortField.COMMUNITY_RATING -> "公众评分"
