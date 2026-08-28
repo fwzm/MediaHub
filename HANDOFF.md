@@ -16,8 +16,10 @@
 - **评审加固**：LocalProvider nextOffset 累计推进（修死循环）；Redactor 脱敏 SearchTerm
   （含 percent-encoded）；TokenStoreTest 夹具合成化（secret-lint）。
 - **状态**：code complete / tests complete / **device verification pending**（真机 smoke 前不写 SEALED）。
-- **待真机验证**：Bitrate 排序真服是否接受（400 则从 CAPABILITIES 摘除）；RANDOM 快照；
-  搜索冰血暴双源 → Series Detail；日志无搜索词；Local 600 项分页走完。
+- **待真机验证**：排序菜单应只见九个已证实字段（OfficialRating/Bitrate/Size 已隐藏，
+  恢复需 per-server probe）；DateAdded/Title/CommunityRating/CriticRating/Year/Premiere/Runtime/Random
+  实测排序正确（RANDOM 快照）；搜索冰血暴双源 → Series Detail；单服超时保留他源结果；
+  日志无搜索词；Local 600 项分页走完。
 - **下一步**：Integration PR 独立审查 → 真机 smoke → 封板。
 ## Universal Playback U1-U3（本次）：双内核 + AUTO 引擎选择 + 播放器手势
 - **双内核**：PlaybackEnginePort 契约下 Media3（1.11.0）与 mpv（pinned prebuilt libmpv）并存；

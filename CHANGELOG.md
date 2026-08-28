@@ -27,7 +27,12 @@
 ### 测试
 - 新增 40+ 用例（MediaQuery 11/搜索 Provider 9/引擎 7/搜索 VM 5/排序 VM 6/排序映射 6/
   Local 分页 6/Redactor +5/Handle +2 等）；全模块 targeted + 全量 testDebugUnitTest/assembleDebug/lintDebug 绿。
-- Bitrate 排序 IMPLEMENTED / DEVICE UNVERIFIED（真服待验）。
+- **评审 final hardening（P1×3+P2×1）**：Emby capability 收缩为已证实 SortBy 字段
+  （OFFICIAL_RATING/BITRATE/SIZE 隐藏，恢复需 per-server probe）；
+  EmbyProviderSupport.mapError 原样传播 CancellationException（取消不再折叠成 Unknown，
+  附真实网络层边界测试）；GlobalSearchEngine 快照构建移入 mutex（真多线程一致性测试）；
+  LibraryViewModel.load() sort 快照化；percent-encoded SearchTerm 脱敏回归。
+  全部未证实排序字段真机 smoke 确认隐藏。
 ## [0.9.0-startup-trace] — 2026-08-23（Phase U4-A：起播全链路埋点）
 ### 功能
 - PlaybackStartupTrace：跨 Media3/mpv 统一起播时间线，milestone 只记第一次，

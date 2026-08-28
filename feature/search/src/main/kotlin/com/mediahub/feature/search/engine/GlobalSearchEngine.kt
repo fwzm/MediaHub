@@ -48,18 +48,25 @@ class GlobalSearchEngine(
         var errors: MutableMap<String, String> = mutableMapOf()
         var completed: MutableSet<String> = mutableSetOf()
 
+        /**
+         * 快照构建与可变状态读取必须在同一 mutex 内（评审 P1-3）：
+         * channelFlow 允许多生产者并发完成，锁外读 MutableMap/Set 可能撞上并发写。
+         * send() 线程安全，留在锁外避免持锁发送。
+         */
         suspend fun sendSnapshot() {
-            // 稳定顺序：按 targets 传入顺序展开已完成服务器的命中
-            val orderedHits = targets.flatMap { target -> hitsByServer[target.serverId].orEmpty() }
-            send(
+            val snapshot = mutex.withLock {
+                val done = completed.toSet()
+                // 稳定顺序：按 targets 传入顺序展开已完成服务器的命中
+                val orderedHits = targets.flatMap { target -> hitsByServer[target.serverId].orEmpty() }
                 GlobalSearchState(
                     query = query,
                     hits = orderedHits,
-                    searchingServers = searching - completed,
-                    completedServers = completed.toSet(),
+                    searchingServers = searching - done,
+                    completedServers = done,
                     errors = errors.toMap(),
                 )
-            )
+            }
+            send(snapshot)
         }
 
         send(GlobalSearchState(query = query, searchingServers = searching))

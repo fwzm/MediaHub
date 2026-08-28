@@ -209,6 +209,9 @@
 - [x] LocalProvider nextOffset 累计推进修复（600/401/空/越界/边界回归锁）
 - [x] Redactor 脱敏 SearchTerm（明文 + percent-encoded）
 - [x] TokenStoreTest 夹具合成化（secret-lint 合规）
+- [x] 评审 final hardening（P1×3+P2×1）：capability 收缩（OFFICIAL_RATING/BITRATE/SIZE 隐藏）/
+  mapError 取消传播（+真实边界测试）/ 引擎快照 mutex 化（+多线程一致性测试）/ load() sort 快照
+- [ ] 真机 smoke 确认排序菜单隐藏 OfficialRating/Bitrate/Size；恢复须 per-server probe
 - [x] 冲突语义合并：Factory query+search 并存 / LibraryProvider Support 重构+sort 并存 / capabilities 并集
 - [ ] 真机 smoke：搜索冰血暴双源→Series Detail / 排序切 RANDOM、Bitrate（真服 400 则摘 CAPABILITIES）/
       日志无搜索词 / Local 600 项分页走完 / 排序后 loadMore 沿用同 sort

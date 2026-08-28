@@ -205,6 +205,7 @@ class LibraryViewModel @Inject constructor(
         val snapshotGen = navigationGeneration
         val snapshotParent = currentFolder?.id ?: libraryId
         val snapshotFolder = currentFolder
+        val snapshotSort = currentSort
         loadJob = viewModelScope.launch {
             _uiState.value = LibraryUiState.Loading
             try {
@@ -230,7 +231,7 @@ class LibraryViewModel @Inject constructor(
                             // 排序下沉服务器（分页前执行）；无 Query 能力回退旧接口（服务器默认序）
                             queryProvider.getItems(
                                 snapshotParent,
-                                MediaListQuery(page = page, sort = currentSort),
+                                MediaListQuery(page = page, sort = snapshotSort),
                             )
                         } else {
                             library.getItems(snapshotParent, page)
@@ -248,7 +249,7 @@ class LibraryViewModel @Inject constructor(
                             currentFolder = currentFolder,
                             canGoUp = folderStack.isNotEmpty(),
                             hasMore = result.hasMore,
-                            sort = currentSort,
+                            sort = snapshotSort,
                             sortFields = caps?.filter(SORT_MENU_ORDER).orEmpty(),
                         )
                     }

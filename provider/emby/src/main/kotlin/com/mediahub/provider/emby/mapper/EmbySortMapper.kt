@@ -17,7 +17,14 @@ import com.mediahub.model.SortDirection
  */
 object EmbySortMapper {
 
-    /** Emby 支持的排序字段能力自述（UI capability-aware 的唯一来源）。 */
+    /**
+     * Emby 支持的排序字段能力自述（UI capability-aware 的唯一来源）。
+     *
+     * 只声明官方 GET /Users/{UserId}/Items 的 SortBy 枚举**明确包含**的字段。
+     * OFFICIAL_RATING / BITRATE / SIZE 未见于官方 SortBy 枚举（OfficialRatings 是
+     * 过滤参数；Size/Bitrate 只是响应属性）——"响应有此字段"≠"可作 SortBy"，
+     * 故 capability 隐藏。恢复须经 per-server probe 拿到协议证据，不得静态全局开放。
+     */
     val CAPABILITIES: MediaSortCapabilities = MediaSortCapabilities(
         setOf(
             MediaSortField.SERVER_DEFAULT,
@@ -27,10 +34,7 @@ object EmbySortMapper {
             MediaSortField.CRITIC_RATING,
             MediaSortField.PRODUCTION_YEAR,
             MediaSortField.PREMIERE_DATE,
-            MediaSortField.OFFICIAL_RATING,
             MediaSortField.RUNTIME,
-            MediaSortField.BITRATE,
-            MediaSortField.SIZE,
             MediaSortField.RANDOM,
         ),
     )
@@ -44,8 +48,10 @@ object EmbySortMapper {
         MediaSortField.CRITIC_RATING -> "CriticRating"
         MediaSortField.PRODUCTION_YEAR -> "ProductionYear"
         MediaSortField.PREMIERE_DATE -> "PremiereDate"
-        MediaSortField.OFFICIAL_RATING -> "OfficialRating"
         MediaSortField.RUNTIME -> "Runtime"
+        // 以下三者保留 wire 映射备用：capability 未声明（UI 不可达），
+        // 仅在未来 per-server probe 证实后恢复声明，届时不再改本表。
+        MediaSortField.OFFICIAL_RATING -> "OfficialRating"
         MediaSortField.BITRATE -> "Bitrate"
         MediaSortField.SIZE -> "Size"
         MediaSortField.RANDOM -> "Random"

@@ -6,6 +6,7 @@ import com.mediahub.model.MediaServer
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.emby.session.EmbySessionStore
 import java.io.IOException
+import java.util.concurrent.CancellationException
 import kotlinx.serialization.SerializationException
 
 /**
@@ -29,17 +30,27 @@ internal object EmbyProviderSupport {
         return token to session.userId
     }
 
-    /** 结构化错误映射：无 session、401、403、404、5xx、网络、解析分别表达（评审 #11）。 */
-    fun mapError(serverId: String, e: Exception): ProviderException = when (e) {
-        is ProviderException -> e
-        is ApiException -> when (e.statusCode) {
-            401 -> ProviderException.AuthExpired(serverId)
-            404 -> ProviderException.NotFound(serverId, "媒体库或条目")
-            else -> ProviderException.Http(serverId, e.statusCode, e.url, e.method, e.requestId)
-        }
+    /**
+     * 结构化错误映射：无 session、401、403、404、5xx、网络、解析分别表达（评审 #11）。
+     *
+     * 取消红线（Phase 1C-1 评审）：[CancellationException]（JVM 上即
+     * kotlinx.coroutines.CancellationException 的实际类型）必须原样向上抛出，
+     * 绝不能折叠成 ProviderException——旧 query 取消、flatMapLatest 切换、
+     * 引擎取消在途请求都依赖它穿透 Provider 的 catch 边界。
+     */
+    fun mapError(serverId: String, e: Exception): ProviderException {
+        if (e is CancellationException) throw e
+        return when (e) {
+            is ProviderException -> e
+            is ApiException -> when (e.statusCode) {
+                401 -> ProviderException.AuthExpired(serverId)
+                404 -> ProviderException.NotFound(serverId, "媒体库或条目")
+                else -> ProviderException.Http(serverId, e.statusCode, e.url, e.method, e.requestId)
+            }
 
-        is SerializationException -> ProviderException.Parse(serverId, e)
-        is IOException -> ProviderException.Network(serverId, e)
-        else -> ProviderException.Unknown(serverId, e)
+            is SerializationException -> ProviderException.Parse(serverId, e)
+            is IOException -> ProviderException.Network(serverId, e)
+            else -> ProviderException.Unknown(serverId, e)
+        }
     }
 }

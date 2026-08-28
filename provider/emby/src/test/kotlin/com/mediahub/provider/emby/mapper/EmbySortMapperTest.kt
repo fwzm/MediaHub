@@ -4,11 +4,12 @@ import com.mediahub.model.MediaSort
 import com.mediahub.model.MediaSortField
 import com.mediahub.model.SortDirection
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Emby SortBy/SortOrder 映射（Phase 1C-2）：全字段映射 / 方向 / 无方向语义 / 能力自述。 */
+/** Emby SortBy/SortOrder 映射（Phase 1C-2）：wire 表 / 方向 / 无方向语义 / 能力真实性。 */
 class EmbySortMapperTest {
 
     @Test
@@ -53,14 +54,26 @@ class EmbySortMapperTest {
     }
 
     @Test
-    fun `capabilities declare all supported fields`() {
+    fun `capabilities only declare confirmed emby sortBy fields`() {
         val caps = EmbySortMapper.CAPABILITIES
-        assertTrue(caps.supports(MediaSortField.SERVER_DEFAULT))
-        assertTrue(caps.supports(MediaSortField.CRITIC_RATING))
-        assertTrue(caps.supports(MediaSortField.BITRATE))
-        assertTrue(caps.supports(MediaSortField.RANDOM))
-        // 能力自述完整覆盖全部枚举（Emby 支持所有已定义字段）
-        assertEquals(MediaSortField.entries.size, caps.fields.size)
+        // 官方 GET /Users/{UserId}/Items 的 SortBy 枚举明确包含的九个
+        val confirmed = setOf(
+            MediaSortField.SERVER_DEFAULT,
+            MediaSortField.DATE_ADDED,
+            MediaSortField.TITLE,
+            MediaSortField.COMMUNITY_RATING,
+            MediaSortField.CRITIC_RATING,
+            MediaSortField.PRODUCTION_YEAR,
+            MediaSortField.PREMIERE_DATE,
+            MediaSortField.RUNTIME,
+            MediaSortField.RANDOM,
+        )
+        assertEquals(confirmed, caps.fields)
+        // 未见于官方 SortBy 枚举：capability 隐藏（"响应有字段"≠"可作 SortBy"），
+        // 恢复须经 per-server probe 拿到协议证据，不得静态全局开放
+        assertFalse(caps.supports(MediaSortField.OFFICIAL_RATING))
+        assertFalse(caps.supports(MediaSortField.BITRATE))
+        assertFalse(caps.supports(MediaSortField.SIZE))
     }
 
     @Test

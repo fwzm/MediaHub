@@ -5,12 +5,15 @@ import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
 import com.mediahub.model.PagedResult
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -183,4 +186,35 @@ class GlobalSearchEngineTest {
         assertEquals("墨云阁", final.hits.first { it.item.id == "b1" }.serverName)
         assertEquals("墨云阁", final.hits.first { it.item.id == "b2" }.serverName)
     }
+
+    // ---- 真多线程并发完成：快照一致性（评审 P1-3） ----
+
+    @Test
+    fun `concurrent completions on multithreaded dispatcher produce consistent snapshots`() =
+        runBlocking {
+            val engine = GlobalSearchEngine(maxConcurrency = 8)
+            val targets = (1..40).map { i ->
+                target("s$i", "服$i") { _, _ ->
+                    // 真实多线程下随机交错完成，制造快照读写并发
+                    delay((i % 7) * 5L)
+                    PagedResult(items = listOf(item("id$i")), totalCount = 1, hasMore = false)
+                }
+            }
+
+            // 收集器跑在 Dispatchers.Default → engine 的 channelFlow 子协程随之真并发
+            val states = withContext(Dispatchers.Default) {
+                engine.search(targets, "q").toList()
+            }
+
+            val final = states.last()
+            assertEquals(40, final.hits.size)
+            assertEquals(targets.map { it.serverId }.toSet(), final.completedServers)
+            assertTrue(final.searchingServers.isEmpty())
+            // 稳定顺序：最终 hits 与 targets 传入顺序一致
+            assertEquals((1..40).map { "id$it" }, final.hits.map { it.item.id })
+            // 每个中间态自洽：searching + completed 恒等于全集
+            states.forEach { s ->
+                assertEquals(targets.size, s.searchingServers.size + s.completedServers.size)
+            }
+        }
 }

@@ -338,6 +338,10 @@
   - **聚合搜索首版不做跨源语义合并**：不同服务器上的同名影片是两个真实播放源，
     全部保留并标注来源（UnifiedSearchHit.serverName）；UI identity 用 (serverId, itemId)；
     按 title/title+year 合并需等 externalIds/canonical identity，禁止草率同题合并。
+  - **Emby capability 只声明已证实的 SortBy 字段**：官方 SortBy 枚举包含的九类
+    （含 CRITIC/RATING 等）；OFFICIAL_RATING/BITRATE/SIZE 未见于该枚举
+    （OfficialRatings 是过滤参数，Size/Bitrate 只是响应属性），capability 隐藏，
+    wire 映射保留待 per-server probe；恢复须协议证据，不做客户端 fallback sort。
   - **用户主动排序后 Provider 顺序为权威**：sort != SERVER_DEFAULT 时 Library UI 按
     Provider 返回顺序渲染（folder 行与媒体格交错，允许全宽行造成视觉空位），
     不得隐式按目录优先重排；SERVER_DEFAULT 保留历史目录优先展示策略。

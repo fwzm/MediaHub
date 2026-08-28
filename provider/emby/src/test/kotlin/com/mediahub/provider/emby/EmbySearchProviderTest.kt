@@ -17,6 +17,7 @@ import com.mediahub.provider.emby.api.EmbyEndpointResolver
 import com.mediahub.provider.emby.search.EmbySearchProvider
 import com.mediahub.provider.emby.session.EmbySession
 import com.mediahub.provider.emby.session.EmbySessionStore
+import java.util.concurrent.CancellationException
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -59,12 +60,12 @@ class EmbySearchProviderTest {
         baseUrl = "http://localhost", createdAtEpochMs = 0,
     )
 
-    private fun provider(): EmbySearchProvider {
+    private fun provider(client: OkHttpClient = OkHttpClient()): EmbySearchProvider {
         val logger = StdoutLogger()
         val identity = ClientIdentity("MediaHub", "Android", "dev-1", "0.1.0")
         val api = EmbyApiClient(
             endpointResolver = EmbyEndpointResolver(server.url("/").toString().trimEnd('/')),
-            apiClient = ApiClient(OkHttpClient(), logger = logger),
+            apiClient = ApiClient(client, logger = logger),
             authHeaderBuilder = EmbyAuthorizationHeaderBuilder(identity),
             logger = logger,
         )
@@ -242,6 +243,46 @@ class EmbySearchProviderTest {
         }
         assertEquals(0, server.requestCount)
     }
+
+    // ---- 9（评审 P1）：真实取消边界 —— CancellationException 必须穿透 Provider ----
+
+    @Test
+    fun `mapError rethrows cancellation exception unchanged`() {
+        // kotlinx.coroutines.CancellationException 在 JVM 即本类型的 typealias
+        val cancelled = java.util.concurrent.CancellationException("job cancelled")
+        val thrown = try {
+            com.mediahub.provider.emby.EmbyProviderSupport.mapError("srv-1", cancelled)
+            null
+        } catch (e: java.util.concurrent.CancellationException) {
+            e
+        }
+        assertTrue("必须原样传播同一实例", thrown === cancelled)
+    }
+
+    @Test
+    fun `in-flight search cancellation propagates as CancellationException not ProviderException`() =
+        runBlocking {
+            // 确定性注入：拦截器在网络层直接抛 CancellationException（模拟 withContext
+            // 在 job 取消时恢复点抛出的同一类型），锁死 Provider 的 catch→mapError 边界：
+            // 取消必须穿透，不得折叠成 ProviderException.Unknown。
+            val cancellingClient = OkHttpClient.Builder()
+                .addInterceptor { throw java.util.concurrent.CancellationException("scope cancelled") }
+                .build()
+            seedSession()
+            val thrown = try {
+                provider(cancellingClient).search("冰血暴", PageRequest())
+                null
+            } catch (e: java.util.concurrent.CancellationException) {
+                e
+            } catch (e: Throwable) {
+                e
+            }
+            assertTrue(
+                "取消必须原样穿透（实际：$thrown）",
+                thrown is java.util.concurrent.CancellationException,
+            )
+            assertFalse("取消不得折叠成业务异常（实际：$thrown）", thrown is ProviderException)
+        }
 
     private class FakeSecretStorage : SecretStorage {
         private val map = mutableMapOf<String, String>()

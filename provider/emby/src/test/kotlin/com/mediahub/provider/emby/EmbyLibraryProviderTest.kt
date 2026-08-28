@@ -226,11 +226,15 @@ class EmbyLibraryProviderTest {
         }
 
     @Test
-    fun `sort capabilities declare emby supported fields`() {
+    fun `sort capabilities hide unconfirmed emby sortBy fields`() {
         val caps = provider().sortCapabilities
         assertTrue(caps.supports(MediaSortField.SERVER_DEFAULT))
         assertTrue(caps.supports(MediaSortField.CRITIC_RATING))
         assertTrue(caps.supports(MediaSortField.RANDOM))
+        // 官方 SortBy 枚举未包含：capability 隐藏，恢复需 per-server probe（评审 P1）
+        assertFalse(caps.supports(MediaSortField.OFFICIAL_RATING))
+        assertFalse(caps.supports(MediaSortField.BITRATE))
+        assertFalse(caps.supports(MediaSortField.SIZE))
     }
 
     // ---- Phase 1C-2：排序/发现字段映射 ----
