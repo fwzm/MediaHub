@@ -105,4 +105,19 @@ class RedactorTest {
         val text = "user searched over network: results=42"
         assertEquals(text, Redactor.redact(text))
     }
+
+    @Test
+    fun `percent encoded searchTerm value is redacted`() {
+        // 真实请求里中文是 percent-encoded：%E5%86%B0%E8%A1%80%E6%9A%B4 == 冰血暴
+        val url = "https://aaa.example.com/emby/Users/u1/Items" +
+            "?SearchTerm=%E5%86%B0%E8%A1%80%E6%9A%B4&Recursive=true&StartIndex=0&Limit=30"
+        val out = Redactor.redact(url)
+        // encoded value 与解码关键词都不允许出现在日志
+        assertFalse(out.contains("%E5%86%B0%E8%A1%80%E6%9A%B4"))
+        assertFalse(out.contains("冰血暴"))
+        assertTrue(out.contains(Redactor.REDACTED))
+        assertTrue(out.contains("Recursive=true"))
+        assertTrue(out.contains("StartIndex=0"))
+        assertTrue(out.contains("Limit=30"))
+    }
 }

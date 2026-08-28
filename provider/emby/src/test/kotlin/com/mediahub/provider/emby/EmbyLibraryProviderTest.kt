@@ -196,7 +196,9 @@ class EmbyLibraryProviderTest {
             seedSession()
             server.enqueue(
                 MockResponse().setResponseCode(200).setBody(
-                    """{"Items":[{"Id":"m1","Name":"A","Type":"Movie"}],"TotalRecordCount":1}"""
+                    // TotalRecordCount 故意给大值：RANDOM 即使服务器报告更多条，
+                    // 也必须单页终止（Integration 审计 §4.4 快照语义）
+                    """{"Items":[{"Id":"m1","Name":"A","Type":"Movie"}],"TotalRecordCount":67}"""
                 )
             )
 
@@ -205,6 +207,7 @@ class EmbyLibraryProviderTest {
                 MediaListQuery(page = PageRequest(offset = 0, limit = 50), sort = MediaSort(MediaSortField.RANDOM)),
             )
             assertEquals(1, page0.items.size)
+            assertEquals(67, page0.totalCount)
             assertFalse(page0.hasMore)
             assertNull(page0.nextOffset)
 

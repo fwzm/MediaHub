@@ -85,7 +85,8 @@ class EmbyLibraryProvider(
      * 调用方不得对 RANDOM 结果继续翻页。
      */
     override suspend fun getItems(libraryId: String, query: MediaListQuery): PagedResult<MediaItem> {
-        if (query.sort.field == MediaSortField.RANDOM && query.page.offset > 0) {
+        val isRandomSnapshot = query.sort.field == MediaSortField.RANDOM
+        if (isRandomSnapshot && query.page.offset > 0) {
             return PagedResult(items = emptyList(), totalCount = null, hasMore = false, nextOffset = null)
         }
         val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
@@ -98,7 +99,10 @@ class EmbyLibraryProvider(
                 sortBy = EmbySortMapper.sortBy(query.sort.field),
                 sortOrder = EmbySortMapper.sortOrder(query.sort),
             )
-            toPagedResult(result, query.page)
+            val page = toPagedResult(result, query.page)
+            // 快照语义（Integration 审计 §4.4）：即使服务器 TotalRecordCount 更大，
+            // RANDOM 也只承诺单页，hasMore/nextOffset 必须终止，禁止伪分页。
+            if (isRandomSnapshot) page.copy(hasMore = false, nextOffset = null) else page
         } catch (e: Exception) {
             throw EmbyProviderSupport.mapError(server.id, e)
         }
