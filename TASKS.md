@@ -196,7 +196,7 @@
 - [x] StartupNetworkEventListenerTest 4 用例（URL 匹配/时序/无泄漏/无 sink 安全）
 - [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；真机 baseline 随后记录
 
-## Phase 1C — Unified Discovery（2026-08-29）✅ 代码+测试完成（真机验证 pending）
+## Phase 1C — Unified Discovery（2026-08-29）✅ SEALED / PASS（device verification PASS）
 
 - [x] 1C-1 Emby 搜索 Provider：SearchTerm+Recursive+IncludeItemTypes（Token 只走 Header，ADR-026）
 - [x] 1C-1 GlobalSearchEngine：bounded concurrency 4 / 单服 8s / partial success / 取消传播
@@ -213,11 +213,22 @@
   mapError 取消传播（+真实边界测试）/ 引擎快照 mutex 化（+多线程一致性测试）/ load() sort 快照
 - [x] 冲突语义合并：Factory query+search 并存 / LibraryProvider Support 重构+sort 并存 / capabilities 并集
 - [x] 二轮评审 concurrency patch：sendSnapshot 构建+发送整体串行化（防旧 snapshot 晚到状态倒退）+ 单调性回归
-- [ ] 真机 smoke：搜索冰血暴双源→Series Detail（单服超时保留他源结果）/
-      排序切 DateAdded/Title/CommunityRating/CriticRating/Year/Premiere/Runtime/Random（RANDOM 快照）/
-      确认菜单隐藏 OfficialRating/Bitrate/Size（恢复须 per-server probe，不做客户端 fallback）/
-      日志无搜索词 / Local 600 项分页走完 / 排序后 loadMore 沿用同 sort
-- 状态：code complete / tests complete / device verification pending（真机前不写 SEALED）
+- [x] 真机 smoke（Xiaomi 14 Ultra / Android 16，APK @ aaca301，SHA256 83dc3132…）：PASS
+      聚合搜索（拼音上屏冰血暴；剧集/电影/单集多类型结果带来源服务器名；多源并发参与）/
+      Search→Series Detail（hero/元数据/播放/演员/季 chips×5）/
+      快速切季 S2→S3→S1 终态正确（无 stale）/
+      EpisodeRow SxxExx+标题+时长+缩略图；集点击→集详情（69分钟·★8.6·MKV）/
+      排序菜单精确 9 项，OfficialRating/Bitrate/Size 确认隐藏（恢复须 per-server probe，不做客户端 fallback）/
+      8 个非默认排序逐项切换零错误；标题 ASC→DESC 精确反转；RANDOM 快照滚动到底静态终止；
+      排序后 loadMore 沿用同 sort；日志无搜索词（logcat 14371 行零命中，SearchTerm=**** 脱敏）
+- [x] 1B-3.1 Series Detail 借 Search 入口正式补齐设备验收
+- NOT_AVAILABLE（不阻塞，自动化覆盖）：>200 项容器「排序+续页」（欧美剧墙 67 项单页；
+  LibrarySortViewModelTest 同 sort loadMore 用例覆盖）/ Local 源（设备未配置；
+  LocalProviderPaginationTest 真实临时目录 600/401/边界分页回归覆盖）
+- 状态：code complete / tests complete / **device verification PASS / SEALED**
+- Device smoke code SHA: aaca301bf30378c0d47c846c728f0a43f9421f93
+- Device: Xiaomi 14 Ultra / Android 16
+- Result: PASS
 
 ## V0.1 —— MVP（下一步）## V0.1 —— MVP（下一步）
 

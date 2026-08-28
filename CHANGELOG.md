@@ -24,8 +24,15 @@
 - Redactor 脱敏 SearchTerm（大小写无关，明文与 percent-encoded 均抹除），
   Recursive/StartIndex/Limit/IncludeItemTypes 等诊断参数保留。
 - TokenStoreTest 夹具改运行时合成值（secret-lint 合规，测试语义不变）。
+### 真机验收（2026-08-29，Xiaomi 14 Ultra / Android 16）
+- Device smoke code SHA: aaca301bf30378c0d47c846c728f0a43f9421f93 — Result: PASS
+- 聚合搜索（多源并发、来源标注、拼音上屏冰血暴）/ Search→Series Detail（季 chips+EpisodeRow）/
+  快速切季无 stale / 排序菜单 9 项（OfficialRating/Bitrate/Size capability hidden pending
+  per-server protocol evidence）/ 标题 ASC↔DESC 精确反转 / RANDOM 快照终止 / logcat 搜索词零泄露
+- NOT_AVAILABLE（自动化覆盖，不阻塞）：>200 项容器排序+续页；Local 源未配置（600 项分页 JVM 回归）
 ### 测试
 - 新增 40+ 用例（MediaQuery 11/搜索 Provider 9/引擎 7/搜索 VM 5/排序 VM 6/排序映射 6/
+  Local 分页 6/Redactor +5/Handle +2 等）；全模块 targeted + 全量 testDebugUnitTest/assembleDebug/lintDebug 绿。（MediaQuery 11/搜索 Provider 9/引擎 7/搜索 VM 5/排序 VM 6/排序映射 6/
   Local 分页 6/Redactor +5/Handle +2 等）；全模块 targeted + 全量 testDebugUnitTest/assembleDebug/lintDebug 绿。
 - **评审 final hardening（P1×3+P2×1）**：Emby capability 收缩为已证实 SortBy 字段
   （OFFICIAL_RATING/BITRATE/SIZE 隐藏，恢复需 per-server probe）；
