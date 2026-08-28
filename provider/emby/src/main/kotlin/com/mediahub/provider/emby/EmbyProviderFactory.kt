@@ -83,14 +83,16 @@ class EmbyProviderFactory @Inject constructor(
             sessionStore = sessionStore,
             logger = logger,
         )
-        // ADR-022/026：Handle 只暴露当前已实现能力——Phase 1B-2 开放
-        // AUTH + LIBRARY + DETAIL + PLAYBACK（无转码 Direct Stream）。
+        // ADR-022/026：Handle 只暴露当前已实现能力——Phase 1C-2 开放
+        // AUTH + LIBRARY + DETAIL + PLAYBACK + QUERY（服务端排序查询管道）。
+        // 同一 EmbyLibraryProvider 实例承载 LIBRARY 与 QUERY 两个能力接口。
         return ProviderHandle(
             provider = provider,
             auth = authProvider,
             library = libraryProvider,
             detail = detailProvider,
             playback = playbackProvider,
+            query = libraryProvider,
         )
     }
 }

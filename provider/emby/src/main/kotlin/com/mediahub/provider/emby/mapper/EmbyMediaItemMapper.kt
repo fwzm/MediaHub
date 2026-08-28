@@ -37,7 +37,13 @@ object EmbyMediaItemMapper {
             year = dto.productionYear,
             runtimeMs = dto.runTimeTicks?.div(TICKS_PER_MILLIS),
             communityRating = dto.communityRating,
+            criticRating = dto.criticRating,
+            officialRating = dto.officialRating,
+            premiereDateEpochMs = EmbyDateTimes.parseEpochMs(dto.premiereDate),
+            dateAddedEpochMs = EmbyDateTimes.parseEpochMs(dto.dateCreated),
             container = dto.container,
+            sizeBytes = dto.size,
+            bitrate = dto.bitrate,
             isFavorite = dto.userData?.isFavorite ?: false,
             playCount = dto.userData?.playCount ?: 0,
             userData = dto.userData?.let { u ->
@@ -48,6 +54,7 @@ object EmbyMediaItemMapper {
                     playbackPositionMs = u.playbackPositionTicks?.div(TICKS_PER_MILLIS),
                 )
             },
+            sortName = dto.sortName?.takeIf(String::isNotBlank) ?: title,
         )
     }
     fun mapType(dto: EmbyItemFields): MediaType = when (dto.type?.lowercase()) {

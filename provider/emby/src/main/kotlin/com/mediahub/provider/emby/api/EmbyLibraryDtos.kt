@@ -20,6 +20,9 @@ data class EmbyQueryResultDto<T>(
 /**
  * Emby 条目 DTO 公共字段（Phase 1B-2 起 [EmbyBaseItemDto] 与 [EmbyUserItemDto] 共享），
  * 让 EmbyMediaItemMapper 只写一份映射逻辑，禁止两份 DTO 各写一套映射。
+ *
+ * Phase 1C-2 起新增排序/发现字段（DateCreated/CriticRating/PremiereDate/
+ * OfficialRating/Size/Bitrate/SortName），由请求 Fields= 显式开启。
  */
 interface EmbyItemFields {
     val id: String?
@@ -39,6 +42,15 @@ interface EmbyItemFields {
     val container: String?
     val communityRating: Double?
     val userData: EmbyUserDataDto?
+
+    // ---- Phase 1C-2 排序/发现字段（服务器按 Fields= 返回，缺失可空） ----
+    val sortName: String?
+    val dateCreated: String?
+    val criticRating: Double?
+    val premiereDate: String?
+    val officialRating: String?
+    val size: Long?
+    val bitrate: Long?
 }
 /**
  * Emby BaseItem（同时用于 Views 顶层库与 Items 条目）。
@@ -67,6 +79,14 @@ data class EmbyBaseItemDto(
     @SerialName("BackdropImageTags") val backdropImageTags: List<String> = emptyList(),
     @SerialName("PrimaryImageAspectRatio") val primaryImageAspectRatio: Double? = null,
     @SerialName("UserData") override val userData: EmbyUserDataDto? = null,
+    // ---- Phase 1C-2 排序/发现字段 ----
+    @SerialName("SortName") override val sortName: String? = null,
+    @SerialName("DateCreated") override val dateCreated: String? = null,
+    @SerialName("CriticRating") override val criticRating: Double? = null,
+    @SerialName("PremiereDate") override val premiereDate: String? = null,
+    @SerialName("OfficialRating") override val officialRating: String? = null,
+    @SerialName("Size") override val size: Long? = null,
+    @SerialName("Bitrate") override val bitrate: Long? = null,
 ) : EmbyItemFields
 
 /** 用户数据（仅保留浏览所需的最小字段，Phase 1B-1 不用播放进度）。 */

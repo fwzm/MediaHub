@@ -52,22 +52,32 @@ class EmbyApiClient(
             headers = authenticatedHeaders(token, userId),
         )
 
-    /** 浏览某容器下的 Items：GET /emby/Users/{userId}/Items?ParentId=...&StartIndex=...&Limit=... */
+    /**
+     * 浏览某容器下的 Items：GET /emby/Users/{userId}/Items?ParentId=...&StartIndex=...&Limit=...
+     *
+     * Phase 1C-2：[sortBy]/[sortOrder] 把排序下沉到服务器（分页之前执行）；
+     * 均为 null 时不携带 SortBy/SortOrder（服务器默认排序）。
+     * [sortOrder] 只允许 Ascending/Descending（Emby wire 值，映射见 EmbySortMapper）。
+     */
     suspend fun getUserItems(
         token: String,
         userId: String,
         parentId: String,
         page: PageRequest,
+        sortBy: String? = null,
+        sortOrder: String? = null,
     ): EmbyQueryResultDto<EmbyBaseItemDto> {
         val url = buildUrl(
             path = "/Users/$userId/Items",
-            query = mapOf(
-                "ParentId" to parentId,
-                "StartIndex" to page.offset.toString(),
-                "Limit" to page.limit.toString(),
-                "Fields" to "PrimaryImageAspectRatio,SortName,Path",
-                "EnableUserData" to "true",
-            ),
+            query = buildMap {
+                put("ParentId", parentId)
+                put("StartIndex", page.offset.toString())
+                put("Limit", page.limit.toString())
+                put("Fields", LIBRARY_FIELDS)
+                put("EnableUserData", "true")
+                sortBy?.let { put("SortBy", it) }
+                sortOrder?.let { put("SortOrder", it) }
+            },
         )
         return apiClient.get(url, authenticatedHeaders(token, userId))
     }
@@ -197,6 +207,15 @@ class EmbyApiClient(
 
     private companion object {
         const val TOKEN_HEADER = "X-Emby-Token"
+
+        /**
+         * 浏览列表 Fields（官方 Fields 枚举值）。
+         * Phase 1C-2 扩展排序/发现字段：DateCreated/CriticRating/PremiereDate/
+         * OfficialRating/Size/Bitrate（服务器按需返回，DTO 缺失可空）。
+         */
+        const val LIBRARY_FIELDS =
+            "PrimaryImageAspectRatio,SortName,Path,DateCreated,CriticRating,PremiereDate,OfficialRating,Size,Bitrate"
+
         /**
          * 请求体序列化：encodeDefaults=true 保证 DeviceProfile 等默认值字段全部输出
          * （官方 server 期望完整字段）；explicitNulls=false 省略未设置的 null 字段。

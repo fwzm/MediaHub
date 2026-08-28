@@ -38,6 +38,14 @@ data class EmbyUserItemDto(
     @SerialName("MediaSources") val mediaSources: List<EmbyMediaSourceInfoDto> = emptyList(),
     @SerialName("MediaStreams") val mediaStreams: List<EmbyMediaStreamDto> = emptyList(),
     @SerialName("Chapters") val chapters: List<EmbyChapterInfoDto> = emptyList(),
+    // ---- Phase 1C-2 排序/发现字段（详情响应原生含 BaseItemDto 全字段） ----
+    @SerialName("SortName") override val sortName: String? = null,
+    @SerialName("DateCreated") override val dateCreated: String? = null,
+    @SerialName("CriticRating") override val criticRating: Double? = null,
+    @SerialName("PremiereDate") override val premiereDate: String? = null,
+    @SerialName("OfficialRating") override val officialRating: String? = null,
+    @SerialName("Size") override val size: Long? = null,
+    @SerialName("Bitrate") override val bitrate: Long? = null,
 ) : EmbyItemFields
 
 /** 演职人员（Emby People 字段）。 */
