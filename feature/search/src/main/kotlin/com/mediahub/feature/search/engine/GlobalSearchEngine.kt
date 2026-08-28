@@ -49,24 +49,33 @@ class GlobalSearchEngine(
         var completed: MutableSet<String> = mutableSetOf()
 
         /**
-         * 快照构建与可变状态读取必须在同一 mutex 内（评审 P1-3）：
-         * channelFlow 允许多生产者并发完成，锁外读 MutableMap/Set 可能撞上并发写。
-         * send() 线程安全，留在锁外避免持锁发送。
+         * 快照构建 + 发送整体串行化（评审 P1-3 二轮）。
+         *
+         * 一轮修复只把可变状态读取放进了锁内，但 unlock 与 send 之间仍有窗口：
+         * 多线程下旧 snapshot 可能晚于新 snapshot 到达（状态倒退——completedSets
+         * 收缩、终帧 isSearching 回真、hits 少于实际完成）。因此把 send 一并
+         * 留在锁内，保证 emission 顺序与状态版本严格一致。
+         *
+         * 持锁跨 suspension（send）通常不推荐，但此处成立：collector 不反向等待
+         * mutex（无死锁环）；每源至多一个 snapshot；并发上限 4；
+         * 正确性优先于微小吞吐差。若未来要无锁化，需 revision + emissionMutex
+         * + stale-drop，复杂度更高，首版不做。
          */
         suspend fun sendSnapshot() {
-            val snapshot = mutex.withLock {
+            mutex.withLock {
                 val done = completed.toSet()
                 // 稳定顺序：按 targets 传入顺序展开已完成服务器的命中
                 val orderedHits = targets.flatMap { target -> hitsByServer[target.serverId].orEmpty() }
-                GlobalSearchState(
-                    query = query,
-                    hits = orderedHits,
-                    searchingServers = searching - done,
-                    completedServers = done,
-                    errors = errors.toMap(),
+                send(
+                    GlobalSearchState(
+                        query = query,
+                        hits = orderedHits,
+                        searchingServers = searching - done,
+                        completedServers = done,
+                        errors = errors.toMap(),
+                    )
                 )
             }
-            send(snapshot)
         }
 
         send(GlobalSearchState(query = query, searchingServers = searching))

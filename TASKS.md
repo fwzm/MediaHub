@@ -211,9 +211,11 @@
 - [x] TokenStoreTest 夹具合成化（secret-lint 合规）
 - [x] 评审 final hardening（P1×3+P2×1）：capability 收缩（OFFICIAL_RATING/BITRATE/SIZE 隐藏）/
   mapError 取消传播（+真实边界测试）/ 引擎快照 mutex 化（+多线程一致性测试）/ load() sort 快照
-- [ ] 真机 smoke 确认排序菜单隐藏 OfficialRating/Bitrate/Size；恢复须 per-server probe
 - [x] 冲突语义合并：Factory query+search 并存 / LibraryProvider Support 重构+sort 并存 / capabilities 并集
-- [ ] 真机 smoke：搜索冰血暴双源→Series Detail / 排序切 RANDOM、Bitrate（真服 400 则摘 CAPABILITIES）/
+- [x] 二轮评审 concurrency patch：sendSnapshot 构建+发送整体串行化（防旧 snapshot 晚到状态倒退）+ 单调性回归
+- [ ] 真机 smoke：搜索冰血暴双源→Series Detail（单服超时保留他源结果）/
+      排序切 DateAdded/Title/CommunityRating/CriticRating/Year/Premiere/Runtime/Random（RANDOM 快照）/
+      确认菜单隐藏 OfficialRating/Bitrate/Size（恢复须 per-server probe，不做客户端 fallback）/
       日志无搜索词 / Local 600 项分页走完 / 排序后 loadMore 沿用同 sort
 - 状态：code complete / tests complete / device verification pending（真机前不写 SEALED）
 

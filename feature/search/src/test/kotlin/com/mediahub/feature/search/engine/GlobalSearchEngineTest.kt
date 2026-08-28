@@ -216,5 +216,17 @@ class GlobalSearchEngineTest {
             states.forEach { s ->
                 assertEquals(targets.size, s.searchingServers.size + s.completedServers.size)
             }
+            // 单调性（评审 P1-3 二轮）：snapshot emission 不得乱序回退——
+            // completedServers 与 hits 必须单调不减（本语义下无结果移除）
+            states.zipWithNext().forEach { (previous, next) ->
+                assertTrue(
+                    "状态倒退：${previous.completedServers} → ${next.completedServers}",
+                    next.completedServers.containsAll(previous.completedServers),
+                )
+                assertTrue(
+                    "hits 倒退：${previous.hits.size} → ${next.hits.size}",
+                    next.hits.size >= previous.hits.size,
+                )
+            }
         }
 }
