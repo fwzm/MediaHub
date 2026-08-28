@@ -27,6 +27,9 @@ enum class ProviderCapability {
     /** 搜索 */
     SEARCH,
 
+    /** 查询管道（服务端排序，Phase 1C-2；未来筛选在此演进） */
+    QUERY,
+
     /** 字幕 */
     SUBTITLE,
 
