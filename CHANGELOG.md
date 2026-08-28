@@ -1,4 +1,33 @@
 # 变更记录（CHANGELOG）
+## [0.12.0-unified-discovery] — 2026-08-29（Phase 1C：Unified Discovery）
+### 功能（1C-1 Global Multi-Server Search）
+- EmbySearchProvider：GET /Users/{userId}/Items?SearchTerm=&Recursive=true
+  &IncludeItemTypes=Movie,Series,Episode,Video；SearchTerm 走 HttpUrl builder 编码，
+  Token 只走 X-Emby-Token Header（ADR-026）；空白 query 短路不发请求。
+- GlobalSearchEngine：bounded concurrency 4 / 单服超时 8s / partial success
+  （单源失败只进 errors，不吞其它源结果）/ hits 按 targets 序稳定 / 旧 query 取消传播。
+- GlobalSearchViewModel：debounce 350ms + flatMapLatest；目标 = ServerStore ∩ handle.search 非空。
+- SearchScreen：结果卡（poster/title/year/类型/评分/来源服务器名）+ 逐源状态行；
+  首页 TopAppBar 搜索入口；命中统一进 DetailRoute —— Series 命中首次打通
+  Series Detail（季 chips + EpisodeRow）UI 入口（Library 的 SERIES 下钻语义保持不变）。
+### 功能（1C-2 Server-side Library Sorting / Query Pipeline）
+- MediaQueryLibraryProvider 能力接口 + ProviderHandle.query + QUERY capability（ADR-036）。
+- Emby SortBy/SortOrder 全字段映射（EmbySortMapper）；RANDOM 单页快照语义
+  （totalCount 再大也终止翻页）；无方向字段省略 SortOrder。
+- Fields 扩展 DateCreated/CriticRating/PremiereDate/OfficialRating/Size/Bitrate；
+  MediaItem 新增 dateAddedEpochMs/criticRating/premiereDateEpochMs/officialRating/bitrate/sortName 映射。
+- Library 排序入口 + 能力过滤 ModalBottomSheet（12 字段 + 升降序，无方向字段隐藏方向）；
+  改排序取消在途 → 重置分页 → offset=0 服务端重拉；用户排序激活后 Provider 顺序权威（C2）。
+### 修复（评审加固）
+- LocalProvider listFolder nextOffset 按累计位置推进（原默认值致第二页起死循环）；
+  600/401/空目录/越界/边界/混排 6 条回归测试。
+- Redactor 脱敏 SearchTerm（大小写无关，明文与 percent-encoded 均抹除），
+  Recursive/StartIndex/Limit/IncludeItemTypes 等诊断参数保留。
+- TokenStoreTest 夹具改运行时合成值（secret-lint 合规，测试语义不变）。
+### 测试
+- 新增 40+ 用例（MediaQuery 11/搜索 Provider 9/引擎 7/搜索 VM 5/排序 VM 6/排序映射 6/
+  Local 分页 6/Redactor +5/Handle +2 等）；全模块 targeted + 全量 testDebugUnitTest/assembleDebug/lintDebug 绿。
+- Bitrate 排序 IMPLEMENTED / DEVICE UNVERIFIED（真服待验）。
 ## [0.9.0-startup-trace] — 2026-08-23（Phase U4-A：起播全链路埋点）
 ### 功能
 - PlaybackStartupTrace：跨 Media3/mpv 统一起播时间线，milestone 只记第一次，

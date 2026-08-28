@@ -196,6 +196,24 @@
 - [x] StartupNetworkEventListenerTest 4 用例（URL 匹配/时序/无泄漏/无 sink 安全）
 - [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；真机 baseline 随后记录
 
+## Phase 1C — Unified Discovery（2026-08-29）✅ 代码+测试完成（真机验证 pending）
+
+- [x] 1C-1 Emby 搜索 Provider：SearchTerm+Recursive+IncludeItemTypes（Token 只走 Header，ADR-026）
+- [x] 1C-1 GlobalSearchEngine：bounded concurrency 4 / 单服 8s / partial success / 取消传播
+- [x] 1C-1 SearchViewModel（debounce 350ms+flatMapLatest）+ SearchScreen + 首页入口
+- [x] 1C-1 搜索命中统一进 DetailRoute → Series Detail 页 UI 入口打通（Library 下钻不变）
+- [x] 1C-2 MediaListQuery/MediaSort/MediaSortCapabilities + MediaQueryLibraryProvider（ADR-036）
+- [x] 1C-2 Emby SortBy/SortOrder 全字段映射 + RANDOM 单页快照 + Fields 扩 6 字段
+- [x] 1C-2 Library 排序入口 + 能力过滤 BottomSheet + 改排序全量重拉（沿用 race guard）
+- [x] C2 用户排序激活后 Provider 顺序权威（SERVER_DEFAULT 保留目录优先）
+- [x] LocalProvider nextOffset 累计推进修复（600/401/空/越界/边界回归锁）
+- [x] Redactor 脱敏 SearchTerm（明文 + percent-encoded）
+- [x] TokenStoreTest 夹具合成化（secret-lint 合规）
+- [x] 冲突语义合并：Factory query+search 并存 / LibraryProvider Support 重构+sort 并存 / capabilities 并集
+- [ ] 真机 smoke：搜索冰血暴双源→Series Detail / 排序切 RANDOM、Bitrate（真服 400 则摘 CAPABILITIES）/
+      日志无搜索词 / Local 600 项分页走完 / 排序后 loadMore 沿用同 sort
+- 状态：code complete / tests complete / device verification pending（真机前不写 SEALED）
+
 ## V0.1 —— MVP（下一步）## V0.1 —— MVP（下一步）
 
 ### IN PROGRESS（无，等待开工）
