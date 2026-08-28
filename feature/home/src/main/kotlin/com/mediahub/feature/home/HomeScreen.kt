@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -44,6 +45,7 @@ fun HomeRoute(
     onEditServer: (MediaServer) -> Unit,
     onAddServer: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenSearch: () -> Unit = {},
     onOpenItem: (PlaybackProgress) -> Unit,
     forceRestoreId: String? = null,
     onForceRestore: (String) -> Unit = { },
@@ -67,6 +69,9 @@ fun HomeRoute(
             TopAppBar(
                 title = { Text("媒体库") },
                 actions = {
+                    IconButton(onClick = onOpenSearch) {
+                        Icon(Icons.Default.Search, contentDescription = "搜索")
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }

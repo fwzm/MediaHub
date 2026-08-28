@@ -158,6 +158,12 @@ object AppModule {
     @Singleton
     fun provideLocalRootProvider(@ApplicationContext context: Context): LocalRootProvider =
         AppLocalRootProvider(context)
+
+    /** 聚合搜索引擎（Phase 1C-1）：并发 4 / 单服超时 8s。 */
+    @Provides
+    @Singleton
+    fun provideGlobalSearchEngine(): com.mediahub.feature.search.engine.GlobalSearchEngine =
+        com.mediahub.feature.search.engine.GlobalSearchEngine(perServerTimeoutMs = 8_000, maxConcurrency = 4)
 }
 
 @Module
