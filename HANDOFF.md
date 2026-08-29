@@ -18,19 +18,22 @@
 - **真机验收（2026-08-29）**：
   ```
   Device smoke code SHA: b9b6f72a991379524f7bbe6ea8297534ac7152f1
+  APK SHA256: 4d784d9c15dab7d02564bd57ed0c711732b021fb16270f6ee805385939e5b6ee
   Device: Xiaomi 14 Ultra / Android 16
   Result: PASS
   ```
   冻结链：类型=剧集→Fargo→季列表正常→返回筛选保持（container-scoped 实证）；
   Year=2014→冰血暴+血族；Played 双向互补（已看=英版同志亦凡人 1 部）；
   Favorite=true→空目录优雅占位/false→全量；Year+公众评分降序（冰血暴前）；
-  Year+随机快照滚动终止；active indicator；清除全部；年份 0000 实机 no-crash 零请求。
+  Year+随机快照滚动终止；active indicator；清除全部。
+  年份草稿 "0000"：field 接受草稿文本 / 应用存活 / 零 Years=0000 请求 / 未提交任何有效年份筛选。
 - **UX backlog（不阻塞）**：选排序/筛选后 Sheet 在 Loading 期消失、Content 回来后重现（闪烁）；
   筛选状态为 per-Route VM，离开 library 重进重置（导航栈内往返保留）。
 - **已真机验证（冻结规格 smoke 全 PASS）**：TV library 类型=剧集 → Fargo → 季列表正常 → 返回后类型=剧集保持；
   Year=2014 / Played/Unplayed / Favorite 双向 / Year+Rating sort / Filter+Random 快照 /
   Filter 后 loadMore 同 query / active indicator / 清除全部。
-- **下一步**：Integration PR 独立审查 → 真机 smoke → 封板。
+- **下一步**：Phase 1D 已封板。下一阶段从新 main（89171cf）单独开分支：
+  先 feature/ci-test-hardening（CI/Test Hygiene backlog），再同片多源聚合卡（externalIds，独立阶段）。
 
 ## Phase 1C Unified Discovery（本次）：1C-1 聚合搜索 + 1C-2 服务端排序
 - **Query Pipeline（ADR-036）**：MediaListQuery/MediaSort/MediaQueryCapabilities 独立于 PageRequest；

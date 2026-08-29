@@ -241,11 +241,13 @@
 - [x] C2 library-filter-ui：筛选入口（active indicator）+ Sheet（类型/年份草稿/已看/收藏）+ 清除全部
 - [x] 测试：filter 域 7 + capability 迁移断言 + wire contract 6（含 filter+sort+分页核心组合）+
       VM 状态 9（容器作用域往返/race/loadMore 快照/能力过滤）+ UI helper 8
-- [x] 真机 smoke（冻结规格，Xiaomi 14 Ultra / Android 16，APK @ b9b6f72，SHA256 4d784d9c…）：PASS
+- [x] 真机 smoke（冻结规格，Xiaomi 14 Ultra / Android 16，APK @ b9b6f72）：
+      APK SHA256 = 4d784d9c15dab7d02564bd57ed0c711732b021fb16270f6ee805385939e5b6ee：PASS
       剧集筛选→Fargo→季列表正常→返回筛选保持（container-scoped 实证：folder 行被 IncludeItemTypes 过滤、
       子容器未被打空）；Year=2014→冰血暴+血族；已看=true→1 部/未看=false→其余（互补）；收藏=true→空目录
       优雅占位/false→全量；Year=2014+公众评分降序（冰血暴前血族后）；Year+随机快照滚动终止；
-      active indicator（primary tint+筛选（已启用））；清除全部→默认恢复；年份 0000 实机 no-crash 零请求
+      active indicator（primary tint+筛选（已启用））；清除全部→默认恢复
+      年份草稿 "0000"：field 接受草稿文本 / 应用存活 / 零 Years=0000 请求 / 未提交任何有效年份筛选
 - [x] 1B-3.1 关联：Series Detail 借 Search 入口的设备验收已于 Phase 1C smoke 补齐
 - NOT_AVAILABLE（不阻塞，自动化覆盖）：>200 项容器「筛选+loadMore」（墙 67 项单页；
   LibraryFilterViewModelTest loadMore 同 filter 快照用例覆盖）
