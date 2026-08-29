@@ -1,5 +1,25 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-29（Phase 1E Canonical Media Identity：跨源身份 + 搜索聚合卡——真机 smoke PASS / SEALED @9fccb91）
+> 最后更新：2026-08-29（Phase 1F Canonical Detail / Source Selection：A1/B1/C1/C2 代码+测试完成，待 integration + 真机）
+
+## Phase 1F Canonical Detail / Source Selection（进行中）
+- **ADR-038 已冻结**（DECISIONS.md）：方案 A = detail-time canonical source resolution；
+  supersede ADR-037 的"聚合只发生在搜索层"阶段性 scope 限制（identity 规则全部不变）。
+- **核心语义**：CanonicalIdentityGraph（core/model）= connected-component 唯一实现
+  （SearchAggregator 与 CanonicalSourceResolver 共享，禁止第二套 union-find）；
+  resolver = 有界传递闭包（frontier 扩张，查询含当前服务器自身），
+  硬边界 concurrency≤4 / per-server timeout 8s / maxRounds 4 / maxKeys 32 / maxOccurrences 64 → truncated；
+  sourceState 独立于 DetailUiState（主内容绝不等待解析）；
+  来源语义单位 = occurrence（同服副本"·副本N"，禁用 MediaVersion 语义）；
+  切换 = route replacement（Back 不回 Detail A）；occurrences 不进 nav args。
+- **Provider**：MediaIdentityLookupProvider.findByCanonicalKeys + ProviderCapability.IDENTITY_LOOKUP
+  （ADR-022 nullable 组合）；Emby `AnyProviderIdEquals=tmdb.123,imdb.tt…`（非 SearchTerm），
+  IncludeItemTypes 锁 MediaType，SEARCH_FIELDS 共用（LIBRARY_FIELDS 不动）。
+- **Slice 链（feature/1f-canonical-detail）**：a11222f(A1 domain graph+ADR-038) →
+  8d4f052(B1 lookup capability/Emby) → a360eb2(C1 resolver+sourceState) → 770de17(C2 selector+route replacement)。
+  全仓库 ./gradlew test PASS @ 770de17。
+- **待办**：integration 分支 + PR + CI 绿 → STOP 等独立审查；真机 smoke
+  （需要两服务器共享 ProviderIds 的条目——1E 实测两源 Movie 无共享 ID，需先补测试数据）。
+
 ## Phase CI-H1（前次）：CI/Test Hardening
 - **测试治理规则（对所有后续 Agent 生效）**：
   - **coroutine-test**：被测对象拥有周期性 coroutine（polling/heartbeat/periodic delay）时，

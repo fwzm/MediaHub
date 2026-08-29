@@ -256,6 +256,32 @@
 - Device: Xiaomi 14 Ultra / Android 16
 - Result: PASS
 
+## Phase 1F — Canonical Detail / Source Selection（2026-08-29）🔨 代码+测试完成（待 integration + 真机）
+
+- [x] A1 domain-identity-graph：CanonicalIdentityGraph（core/model）成 connected-component
+      语义 single source of truth；SearchAggregator 改 adapter（纯算法搬迁，
+      1E SearchAggregatorTest 全量保持零改动）；ADR-038 冻结
+      （supersede ADR-037"聚合只发生在搜索层"scope 限制，identity 规则不变）
+- [x] B1 identity-lookup-capability：MediaIdentityLookupProvider.findByCanonicalKeys(keys, page) +
+      ProviderCapability.IDENTITY_LOOKUP + ProviderHandle.identityLookup（ADR-022 nullable 组合）；
+      Emby /Users/{userId}/Items AnyProviderIdEquals（Recursive=true + IncludeItemTypes 锁
+      MediaType + SEARCH_FIELDS 共用，LIBRARY_FIELDS 不动；Token 只走 Header）
+- [x] C1 source-resolver：CanonicalSourceResolver 有界传递闭包（seed keys → 各 identity-capable
+      server 查未查询过的新 keys → 本地 CanonicalKey 复核 → frontier 扩张 → 无新 key 止；
+      查询含当前服务器自身；终态 CanonicalIdentityGraph.components 重算 seed 分量）；
+      硬边界 concurrency≤4 / timeout 8s / rounds 4 / keys 32 / occurrences 64 → truncated；
+      TimeoutCancellationException 降级 partial、真取消穿透；DetailViewModel 独立 sourceState
+- [x] C2 selector-ui：SourceSelector（distinct serverId ≥ 2 出现；同服副本"·副本N"，
+      禁用 MediaVersion 语义；truncated 提示）+ route replacement（popUpTo current
+      inclusive，Back 不回 Detail A；active 行不可再点）
+- [x] 测试：CanonicalIdentityGraphTest 6 + SearchAggregatorTest（1E 全量保持）+
+      EmbyIdentityLookupProviderTest 8 + ProviderHandleTest IDENTITY_LOOKUP 推导 +
+      CanonicalSourceResolverTest 12（传递闭包/同服副本/partial/取消红线/虚拟时间超时/三类硬边界）+
+      SourceSelectorModelTest 3 + DetailViewModelTest sourceState；全仓库 ./gradlew test PASS
+- [ ] integration 分支 + PR + CI（绿后 STOP 等独立审查）
+- [ ] 真机 smoke（需两服务器共享 ProviderIds 的条目；1E 实测两源 Movie 无共享 ID，需先补数据）
+- 状态：**feature/1f-canonical-detail 四刀落链：a11222f(A1) → 8d4f052(B1) → a360eb2(C1) → 770de17(C2)**
+
 ## Phase 1D — Library Filtering / Query Pipeline Extension（2026-08-29）✅ SEALED / PASS（device verification PASS）
 
 - [x] A1 filter-contract：MediaFilter/MediaFilterField/MediaListQuery.filter +
