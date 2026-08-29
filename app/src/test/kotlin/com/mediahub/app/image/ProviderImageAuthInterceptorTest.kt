@@ -11,9 +11,10 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * 图片鉴权拦截器（Phase 1B-2.3）：命中 origin 注入头、未命中原样放行、不覆盖已有头。
+ * 图片鉴权拦截器（1B-2.3 引入；1G-A 泛化为 provider-agnostic）：
+ * 命中 origin 注入头、未命中原样放行、URL 永不携带 Token。
  */
-class EmbyImageAuthInterceptorTest {
+class ProviderImageAuthInterceptorTest {
 
     private lateinit var server: MockWebServer
 
@@ -28,8 +29,8 @@ class EmbyImageAuthInterceptorTest {
     private fun client(matching: Boolean): OkHttpClient =
         OkHttpClient.Builder()
             .addInterceptor(
-                EmbyImageAuthInterceptor { url ->
-                    if (!matching) return@EmbyImageAuthInterceptor null
+                ProviderImageAuthInterceptor { url ->
+                    if (!matching) return@ProviderImageAuthInterceptor null
                     val isEmbyImage = url.encodedPath.startsWith("/emby/Items/")
                     if (isEmbyImage) mapOf(
                         "X-Emby-Token" to "tok-1",

@@ -20,7 +20,9 @@ import com.mediahub.provider.emby.library.EmbyLibraryProvider
 import com.mediahub.provider.emby.playback.EmbyPlaybackProvider
 import com.mediahub.provider.emby.search.EmbySearchProvider
 import com.mediahub.provider.emby.identity.EmbyIdentityLookupProvider
+import com.mediahub.provider.emby.image.EmbyImageAuthContributor
 import com.mediahub.provider.emby.session.EmbySessionStore
+import com.mediahub.provider.api.ProviderImageAuthContributor
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -121,4 +123,8 @@ abstract class EmbyProviderModule {
     @Binds
     @IntoSet
     abstract fun bindEmbyProviderFactory(factory: EmbyProviderFactory): MediaProviderFactory
+
+    @Binds
+    @IntoSet
+    abstract fun bindEmbyImageAuthContributor(impl: EmbyImageAuthContributor): ProviderImageAuthContributor
 }

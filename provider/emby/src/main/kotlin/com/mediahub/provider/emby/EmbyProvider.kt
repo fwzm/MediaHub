@@ -41,6 +41,7 @@ internal val EMBY_PROVIDER_DESCRIPTOR = ProviderDescriptor(
     authMethod = AuthMethod.USERNAME_PASSWORD,
     status = ProviderStatus.EXPERIMENTAL,
     description = "媒体服务器（Emby）",
+    probePath = "/emby/System/Info/Public",
 )
 
 /**

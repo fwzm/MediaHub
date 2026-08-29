@@ -418,3 +418,65 @@
     参与；无 field fusion；无第三方 TMDb/IMDb 网络查询；无 nav blob/occurrence
     序列化（NavArgCodec 不扩展）；LIBRARY_FIELDS 不动；GlobalSearchEngine 与
     playback engine 零改动。
+
+## ADR-039 Phase 1G Jellyfin Provider Foundation & Core Parity
+- 状态：已采纳（2026-08-30，contract 冻结文本落盘；A-slice 实现）
+- 决策：
+  - **1G 目标 = core parity，不是 Emby 字段 1:1**：证明 ProviderHandle/capability
+    组合/MediaItem/GlobalSearchEngine/CanonicalIdentityGraph/PlaybackSource/现有 UI
+    能承载第二种真实媒体服务器协议。REQUIRED：connection/AUTH/LIBRARY/DETAIL/
+    SEARCH/Artwork/PLAYBACK/PROGRESS；OUT OF SCOPE：QUERY sort/filter、transcoding、
+    自动最佳源、Plex/WebDAV、Emby refactor。
+  - **现代标准 Authorization contract**：`Authorization: MediaBrowser Client=…,
+    Device=…, DeviceId=…, Version=…[, Token=…]`；登录 POST /Users/AuthenticateByName
+    （密码只在 body，绝不持久化）。**不以 X-Emby-*/X-MediaBrowser-* legacy header 为
+    主协议**（Jellyfin 已优先标准头并关闭 legacy authorization）。
+    恢复语义：token+session 齐全 → 无 Token 服务器身份校验（防串服）→ 认证请求；
+    **401/403 均清本地会话**（contract §2.3 冻结文本；对 Emby sealed 行为"仅 401 清"
+    是有意分歧——两个 provider 策略独立，不强行对齐）；network/timeout 保留本地会话。
+    Logout best-effort + 本地清理权威。
+  - **provider-specific session store**：JellyfinSessionStore/JellyfinSession 独立实现
+    （独立 prefs 文件），禁止复用 EmbySessionStore；删除服务器时的会话清理改为
+    **CompositeSessionStoreCleaner** 组合全部 Provider cleaner（新增 Provider 必须接入），
+    server/token/session/进度/图片鉴权状态不得残留。
+  - **generic image auth（基础设施，非 capability）**：新增 ProviderImageAuthContributor
+    （serverType + headersFor(serverId)），app 层只做 known-origin → server 解析与按类型
+    分发，**不 import 任何具体 provider 模块**；EmbyImageAuthStore 的 EMBY-only 过滤废除
+    （Emby 头生成逻辑逐字节等价下沉为 EmbyImageAuthContributor；Jellyfin 注入标准
+    Authorization 单头）；unknown origin → 无凭据原样放行；不新增
+    ProviderCapability.IMAGE_AUTH；Token 永不进图片 URL；ADR-030 跨源剥离原样继承。
+  - **协议路径知识移出 core:network**：ProviderDescriptor 新增 probePath（Provider 自述
+    探针位置：Emby=/emby/System/Info/Public，Jellyfin=/System/Info/Public，null=无
+    HTTP 探针）；EndpointTestService 只做 transport。未知 provider/未定义 probePath =
+    显式"不支持"，**禁止静默回退 Emby**（AddServer/ServerEditor 的两处 Emby fallback
+    literal 已删除）。
+  - **Jellyfin exact ProviderId lookup 协议缺口 → IDENTITY_LOOKUP = null（DEFER）**：
+    Jellyfin 10.9.0 ItemsController 仅提供 hasTmdbId/hasImdbId/hasTvdbId 布尔筛选，
+    无 Emby AnyProviderIdEquals 的按值等价查询。三种伪实现 REJECTED：
+    SearchTerm+post-filter / detail 全库遍历 / title-year 弱身份；持久 canonical index
+    不进 1G（候选 Phase 1H，不冻结）。ProviderHandle.identityLookup 必须保持 null。
+  - **one-way source-switching guard**：identityLookup 为 null 的 provider 不能只享受
+    别家的解析（Jellyfin Detail → Emby sibling 可见，反向不可达 = 单向切换）。
+    冻结 generic eligibility guard：`currentHandle.identityLookup == null →
+    sourceState = Idle，不启动 CanonicalSourceResolver`（在 DetailViewModel 调用
+    resolver 之前）。CanonicalSourceResolver/CanonicalIdentityGraph/1F identity 语义
+    零改动；Emby↔Emby exact switching 不受影响；Jellyfin 获得真实 exact lookup 后
+    guard 天然放行。
+  - **Playback（1G-D）**：DIRECT STREAM ONLY / NO TRANSCODING；MOVIE/EPISODE/VIDEO，
+    其他类型 NotYetImplemented 且 0 playback HTTP；Jellyfin 独立 PlaybackInfo DTO/
+    MediaSource selection/PlaybackProvider（不引用 Emby 实现）；Token 只在
+    Authorization header；server 返回 external URL 时凭据只发 configured server origin。
+  - **Progress（1G-E）**：Jellyfin 独立实现当前 main 已有的 MediaProgressProvider
+    （/Sessions/Playing[/Progress|/Stopped]，官方 controller 已确认）；节流仍归
+    ProgressSyncCoordinator，provider 不建 timer。**旧 Emby progress WIP
+    （feature/emby-progress-reporting @523bed9）保持 untouched**，不作为 1G
+    prerequisite，1B-3.3 后续单开 closeout/re-review。
+  - **工程红线**：不 fork Jellyfin 专用 UI；feature 层禁判 ServerType.JELLYFIN；
+    不复制 CanonicalIdentityGraph/SearchAggregator；不改 GlobalSearchEngine；
+    不改 1F resolver 语义；capability 真实完成才进 ProviderHandle（Jellyfin Handle
+    A-slice 仅 AUTH）。
+  - **封板链（16 场景）**：connection/login/restore/logout-stale/library browse/
+    artwork authenticated/Movie detail/Series→Season→Episode/global search/
+    Emby+Jellyfin 同 canonical ID 聚合卡/Jellyfin detail 无单向 selector/
+    direct stream/seek/exit flush/remote progress/privacy-logcat。无真实 Jellyfin
+    server → device verification = BLOCKED，Phase 1G != SEALED。

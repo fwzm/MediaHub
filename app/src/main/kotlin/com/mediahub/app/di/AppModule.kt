@@ -92,11 +92,25 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideJellyfinSessionStorage(
+        @ApplicationContext context: Context,
+    ): com.mediahub.provider.jellyfin.session.JellyfinSessionStore.Storage =
+        com.mediahub.provider.jellyfin.session.JellyfinSessionStore.SharedPrefsStorage(context)
+
+    /** ADR-039：删除媒体源 = 组合清理全部 Provider 会话元数据（新增 Provider 必须接入）。 */
+    @Provides
+    @Singleton
     fun provideSessionStoreCleaner(
-        storage: EmbySessionStore.Storage,
-    ): SessionStoreCleaner = SessionStoreCleaner { serverId ->
-        EmbySessionStore(storage).clear(serverId)
-    }
+        embyStorage: EmbySessionStore.Storage,
+        jellyfinStorage: com.mediahub.provider.jellyfin.session.JellyfinSessionStore.Storage,
+    ): SessionStoreCleaner = com.mediahub.provider.api.CompositeSessionStoreCleaner(
+        listOf(
+            SessionStoreCleaner { serverId -> EmbySessionStore(embyStorage).clear(serverId) },
+            SessionStoreCleaner { serverId ->
+                com.mediahub.provider.jellyfin.session.JellyfinSessionStore(jellyfinStorage).clear(serverId)
+            },
+        ),
+    )
 
     @Provides
     @Singleton

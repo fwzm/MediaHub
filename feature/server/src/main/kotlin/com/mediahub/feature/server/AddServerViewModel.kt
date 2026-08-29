@@ -139,7 +139,7 @@ class AddServerViewModel @Inject constructor(
             }
             return
         }
-        val server = buildServer()
+        val server = buildServer(descriptor)
         viewModelScope.launch {
             _uiState.update { it.copy(isTesting = true, testResult = null, error = null) }
             val handle = registry.create(server)
@@ -169,7 +169,7 @@ class AddServerViewModel @Inject constructor(
             _uiState.update { it.copy(loginError = "请输入用户名和密码") }
             return
         }
-        val server = buildServer()
+        val server = buildServer(descriptor)
         viewModelScope.launch {
             _uiState.update { it.copy(isLoggingIn = true, loginError = null) }
             try {
@@ -221,8 +221,12 @@ class AddServerViewModel @Inject constructor(
     }
 
     fun save(onSaved: (MediaServer) -> Unit) {
-        val descriptor = selectedDescriptor() ?: return
-        val server = buildServer()
+        val descriptor = selectedDescriptor() ?: run {
+            // ADR-039：未知/未选择类型显式报错，绝不静默回退 Emby
+            _uiState.update { it.copy(error = "请先选择媒体源类型") }
+            return
+        }
+        val server = buildServer(descriptor)
         if (descriptor.serverType != ServerType.LOCAL && server.baseUrl.isBlank()) {
             _uiState.update { it.copy(error = "请填写服务器地址") }
             return
@@ -243,12 +247,11 @@ class AddServerViewModel @Inject constructor(
         }
     }
 
-    private fun buildServer(): MediaServer {
-        val descriptor = selectedDescriptor()
+    private fun buildServer(descriptor: ProviderDescriptor): MediaServer {
         val state = _uiState.value
         val url = state.baseUrl.trim().trimEnd('/')
         // Phase 1B-2.5：地址从单一 baseUrl 迁为线路列表；单线路时生成一条主线路。
-        val endpoints = if (descriptor?.serverType == ServerType.LOCAL || url.isBlank()) {
+        val endpoints = if (descriptor.serverType == ServerType.LOCAL || url.isBlank()) {
             emptyList()
         } else {
             listOf(
@@ -265,8 +268,9 @@ class AddServerViewModel @Inject constructor(
         }
         val candidate = MediaServer(
             id = serverId, // 实际 id 由 buildDraft 决定（existing 复用原 id）
-            name = state.name.trim().ifBlank { descriptor?.displayName.orEmpty() },
-            type = descriptor?.serverType ?: ServerType.EMBY,
+            name = state.name.trim().ifBlank { descriptor.displayName },
+            // ADR-039：descriptor 缺失时 save() 已显式拦截，此处不再有 ServerType 静默回退
+            type = descriptor.serverType,
             username = state.username.trim().ifBlank { null },
             endpoints = endpoints,
             createdAtEpochMs = System.currentTimeMillis(),
