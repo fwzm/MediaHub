@@ -129,6 +129,21 @@ class JellyfinAuthProviderTest {
     }
 
     @Test
+    fun `login 403 is not reported as wrong password`() = runBlocking {
+        // ADR-039 review 修正：403 = 访问策略拒绝，保留 HTTP 语义，禁止谎报凭据错误
+        server.enqueue(MockResponse().setResponseCode(403))
+
+        val result = provider().authenticate(Credentials.UsernamePassword("alice", "pw"))
+
+        assertTrue(result is AuthResult.Failure)
+        val error = (result as AuthResult.Failure).error
+        assertTrue("403 不得映射为凭据错误（实际：$error）", error !is com.mediahub.provider.api.ProviderException.AuthFailed)
+        assertTrue(error is com.mediahub.provider.api.ProviderException.Http)
+        assertEquals(403, (error as com.mediahub.provider.api.ProviderException.Http).statusCode)
+        assertNull(tokenStore.readTokens("srv-1"))
+    }
+
+    @Test
     fun `login malformed response missing token maps to parse without persisting`() = runBlocking {
         server.enqueue(
             MockResponse().setResponseCode(200).setBody("""{"User":{"Id":"user-1"}}""")
@@ -197,7 +212,9 @@ class JellyfinAuthProviderTest {
     }
 
     @Test
-    fun `restore 403 also clears local token and session`() = runBlocking {
+    fun `restore 403 preserves token and session and returns forbidden`() = runBlocking {
+        // ADR-039 review 修正：403 可能是 remote access disabled 等访问策略拒绝，
+        // 不是 token 失效——清会话会误删仍有效的凭据
         seedSession()
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"Id":"remote-1","Version":"10.9.0"}"""))
         server.enqueue(MockResponse().setResponseCode(403))
@@ -206,8 +223,8 @@ class JellyfinAuthProviderTest {
 
         assertTrue(state is AuthSessionState.Error)
         assertEquals(AuthSessionErrorKind.FORBIDDEN, (state as AuthSessionState.Error).kind)
-        assertNull(tokenStore.readTokens("srv-1"))
-        assertNull(sessionStore.read("srv-1"))
+        assertEquals("tok-1", tokenStore.readTokens("srv-1")?.accessToken)
+        assertNotNull(sessionStore.read("srv-1"))
     }
 
     // ---- 6：网络失败保留本地会话（不误判凭据失效） ----
@@ -276,6 +293,60 @@ class JellyfinAuthProviderTest {
             "取消必须穿透，不得折叠为业务异常（实际：$thrown）",
             thrown is CancellationException,
         )
+    }
+
+    // ---- ADR-039 review 修正：AuthenticationResult 只接受顶层 ServerId（协议证据先行，无猜测 fallback） ----
+
+    @Test
+    fun `authentication result without top level server id is rejected`() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody("""{"AccessToken":"tok-1","ServerInfo":{"Id":"remote-1"},"User":{"Id":"user-1","Name":"Alice"}}""")
+        )
+
+        val result = provider().authenticate(Credentials.UsernamePassword("alice", "pw"))
+
+        assertTrue(result is AuthResult.Failure)
+        assertNull(tokenStore.readTokens("srv-1"))
+        assertNull(sessionStore.read("srv-1"))
+    }
+
+    // ---- 取消红线：restore 身份探针 / logout 均不得吞取消；logout 取消下凭据仍清 ----
+
+    private fun cancellingClient(): OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor { throw CancellationException("scope cancelled") }
+        .build()
+
+    @Test
+    fun `restore identity probe cancellation propagates and preserves session`() = runBlocking {
+        seedSession()
+        val thrown = try {
+            provider(cancellingClient()).restoreSession()
+            null
+        } catch (e: CancellationException) {
+            e
+        } catch (e: Throwable) {
+            e
+        }
+        assertTrue("取消必须穿透（实际：$thrown）", thrown is CancellationException)
+        assertEquals("探针取消 ≠ 凭据失效", "tok-1", tokenStore.readTokens("srv-1")?.accessToken)
+        assertNotNull(sessionStore.read("srv-1"))
+    }
+
+    @Test
+    fun `logout cancellation propagates but local credentials are still cleared`() = runBlocking {
+        seedSession()
+        val thrown = try {
+            provider(cancellingClient()).logout()
+            null
+        } catch (e: CancellationException) {
+            e
+        } catch (e: Throwable) {
+            e
+        }
+        assertTrue("取消必须穿透（实际：$thrown）", thrown is CancellationException)
+        assertNull("NonCancellable 保证取消下凭据仍被清理", tokenStore.readTokens("srv-1"))
+        assertNull(sessionStore.read("srv-1"))
     }
 
     private class FakeSecretStorage : SecretStorage {

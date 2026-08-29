@@ -432,9 +432,12 @@
     （密码只在 body，绝不持久化）。**不以 X-Emby-*/X-MediaBrowser-* legacy header 为
     主协议**（Jellyfin 已优先标准头并关闭 legacy authorization）。
     恢复语义：token+session 齐全 → 无 Token 服务器身份校验（防串服）→ 认证请求；
-    **401/403 均清本地会话**（contract §2.3 冻结文本；对 Emby sealed 行为"仅 401 清"
-    是有意分歧——两个 provider 策略独立，不强行对齐）；network/timeout 保留本地会话。
-    Logout best-effort + 本地清理权威。
+    **仅 401 清本地会话（SESSION_EXPIRED）；403 保留会话（FORBIDDEN）**——Jellyfin
+    服务端存在 remote access disabled 导致的 Forbidden，清 Token 会误删仍有效会话
+    （review 修正：推翻先前"401/403 均清"的过宽表述，与 Emby sealed 行为一致）；
+    5xx/网络/协议异常同样保留。登录失败映射：401 → AuthFailed；**403 →
+    Http(403)（禁止谎报用户名或密码错误）**。Logout best-effort + 本地清理权威；
+    **本地清理放 finally + NonCancellable**——cancellation 原样传播但凭据绝不残留。
   - **provider-specific session store**：JellyfinSessionStore/JellyfinSession 独立实现
     （独立 prefs 文件），禁止复用 EmbySessionStore；删除服务器时的会话清理改为
     **CompositeSessionStoreCleaner** 组合全部 Provider cleaner（新增 Provider 必须接入），

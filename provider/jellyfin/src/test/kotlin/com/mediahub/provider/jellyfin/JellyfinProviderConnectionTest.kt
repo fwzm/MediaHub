@@ -102,6 +102,48 @@ class JellyfinProviderConnectionTest {
         assertFalse(request.requestUrl!!.encodedPath.contains("/emby"))
     }
 
+    // ---- 取消红线：testConnection 不得把取消折叠成 ConnectionStatus(false)（ADR-039） ----
+
+    @Test
+    fun `test connection cancellation propagates unchanged`() = runBlocking {
+        val cancellingClient = okhttp3.OkHttpClient.Builder()
+            .addInterceptor { throw java.util.concurrent.CancellationException("scope cancelled") }
+            .build()
+        val logger = StdoutLogger()
+        val authHeaderBuilder = JellyfinAuthorizationHeaderBuilder(
+            ClientIdentity("MediaHub", "Android", "dev-1", "0.1.0")
+        )
+        val http = HttpClientFactory(logger)
+        val jellyfinApi = JellyfinApiClient(
+            endpointResolver = JellyfinEndpointResolver(server.url("/").toString().trimEnd('/')),
+            apiClient = ApiClient(cancellingClient, logger = logger),
+            authHeaderBuilder = authHeaderBuilder,
+            logger = logger,
+        )
+        val p = JellyfinProvider(
+            server = MediaServer(
+                id = "s1", name = "测试", type = ServerType.JELLYFIN,
+                baseUrl = server.url("/").toString().trimEnd('/'), createdAtEpochMs = 0,
+            ),
+            apiClient = ApiClient(http.apiClient(), logger = logger),
+            mediaHttpClient = MediaHttpClient(http.mediaClient(), logger = logger),
+            tokenStore = TokenStore(FakeSecretStorage()),
+            logger = logger,
+            jellyfinApi = jellyfinApi,
+            authHeaderBuilder = authHeaderBuilder,
+        )
+
+        val thrown = try {
+            p.testConnection()
+            null
+        } catch (e: java.util.concurrent.CancellationException) {
+            e
+        } catch (e: Throwable) {
+            e
+        }
+        assertTrue("取消必须穿透（实际：$thrown）", thrown is java.util.concurrent.CancellationException)
+    }
+
     private class FakeSecretStorage : SecretStorage {
         private val map = mutableMapOf<String, String>()
         override suspend fun put(key: String, value: String) { map[key] = value }

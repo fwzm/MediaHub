@@ -20,6 +20,9 @@ import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 
 /**
@@ -29,11 +32,18 @@ import kotlinx.serialization.SerializationException
  * - 登录：POST /Users/AuthenticateByName（密码只在 body，绝不持久化/日志）→ 严格校验
  *   AccessToken/ServerId/User.Id → Token 入 TokenStore（按 localServerId），
  *   Session 元数据入 JellyfinSessionStore；关键字段缺失不保存半成品。
+ *   登录失败映射：401 → AuthFailed（用户名或密码错误）；**403 → Http(403)**——403 可能是
+ *   服务器访问策略（如 remote access disabled），不是凭据错误，禁止谎报密码错误。
  * - 恢复（restoreSession）：Token + Session 双份齐全后，**先无 Token 校验服务器身份**
  *   （/System/Info/Public 与 session.remoteServerId 对比，防 Token 串服），一致才发认证请求。
- *   失效策略（contract §2.3 冻结文本）：**401/403 均清本地会话**；5xx/网络/协议异常保留
- *   ——注意这是对 Emby sealed 行为（仅 401 清）的有意分歧，ADR-039 已记录。
- * - 登出：POST /Sessions/Logout best-effort（且仅当服务器身份一致），本地清理为权威。
+ *   失效策略（ADR-039 review 修正版）：**仅 401 清本地会话（SESSION_EXPIRED）；
+ *   403 保留会话（FORBIDDEN）**——Jellyfin 服务端存在 remote access disabled 导致的
+ *   Forbidden，清 Token 会误删仍有效的会话；5xx/网络/协议异常同样保留。
+ * - 登出：远端（身份校验 + POST /Sessions/Logout）保持可取消，**本地 Token/Session
+ *   清理放 finally + NonCancellable**——cancellation 原样向上传播，但凭据绝不残留
+ *   （remote best-effort，local cleanup authoritative）。
+ *
+ * 取消红线：所有网络调用的 catch 链在 generic catch 之前原样透传 CancellationException。
  */
 class JellyfinAuthProvider(
     private val server: MediaServer,
@@ -51,7 +61,7 @@ class JellyfinAuthProvider(
         return try {
             val result = api.authenticate(userPassword.username, userPassword.password)
             val accessToken = result.accessToken
-            val remoteServerId = result.resolvedServerId
+            val remoteServerId = result.serverId
             val userId = result.user?.id
             val userName = result.user?.name
 
@@ -79,8 +89,8 @@ class JellyfinAuthProvider(
             AuthResult.Success(
                 MediaUser(serverId = server.id, userId = userId, displayName = userName.orEmpty())
             )
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            // 取消红线：绝不折叠成业务异常（ADR-039 §错误与取消语义）
+        } catch (e: CancellationException) {
+            // 取消红线：绝不折叠成业务异常
             throw e
         } catch (e: Exception) {
             mapLoginFailure(e)
@@ -107,6 +117,9 @@ class JellyfinAuthProvider(
         // 服务器身份校验：无 Token 请求，绝不对错误服务器发送旧 Token
         val currentRemoteServerId = try {
             api.getSystemInfoPublic().id
+        } catch (e: CancellationException) {
+            // 取消红线：必须先于 generic catch 原样透传
+            throw e
         } catch (e: ApiException) {
             return authErrorFromHttp(e, preserveSession = true)
         } catch (e: SerializationException) {
@@ -142,48 +155,56 @@ class JellyfinAuthProvider(
             AuthSessionState.Authenticated(
                 MediaUser(serverId = server.id, userId = session.userId, displayName = user.name.orEmpty())
             )
+        } catch (e: CancellationException) {
+            // 取消红线：绝不折叠成业务异常
+            throw e
         } catch (e: ApiException) {
-            // contract §2.3 冻结：401/403 均清本地会话（对 Emby 仅 401 清的有意分歧，ADR-039）
-            authErrorFromHttp(e, preserveSession = e.statusCode != 401 && e.statusCode != 403)
+            // 仅 401 清本地会话；403 = 访问策略拒绝（如 remote access disabled），保留会话
+            authErrorFromHttp(e, preserveSession = e.statusCode != 401)
         } catch (e: SerializationException) {
             // 协议异常 ≠ 认证失效：保留会话
             AuthSessionState.Error(AuthSessionErrorKind.INVALID_RESPONSE, "服务器响应异常，请稍后重试")
         } catch (e: IOException) {
             AuthSessionState.Error(networkKind(e), "无法连接服务器，请稍后重试")
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            // 取消红线：绝不折叠成业务异常
-            throw e
         } catch (e: Exception) {
             AuthSessionState.Error(AuthSessionErrorKind.UNKNOWN, "验证失败：${e.message}")
         }
     }
 
+    /**
+     * 登出：远端（身份校验 + /Sessions/Logout）保持可取消；本地 Token/Session 清理
+     * 在 finally + NonCancellable 中执行——cancellation 原样传播，但凭据绝不残留。
+     */
     override suspend fun logout() {
-        val tokens = tokenStore.readTokens(server.id)
-        val session = sessionStore.read(server.id)
-        if (tokens != null && session != null) {
-            // 服务端撤销：best-effort，且仅当服务器身份一致（防把旧 Token 发给错误服务器）
-            val serverIdMatches = try {
-                api.getSystemInfoPublic().id
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                null
-            } == session.remoteServerId
-            if (serverIdMatches) {
-                try {
-                    api.logout(tokens.accessToken)
-                } catch (e: kotlinx.coroutines.CancellationException) {
+        try {
+            val tokens = tokenStore.readTokens(server.id)
+            val session = sessionStore.read(server.id)
+            if (tokens != null && session != null) {
+                // 服务端撤销：best-effort，且仅当服务器身份一致（防把旧 Token 发给错误服务器）
+                val serverIdMatches = try {
+                    api.getSystemInfoPublic().id
+                } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    logger.w(LogTag.AUTH, "Jellyfin 服务端登出失败（best-effort） serverId=${server.id}", e)
+                    null
+                } == session.remoteServerId
+                if (serverIdMatches) {
+                    try {
+                        api.logout(tokens.accessToken)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logger.w(LogTag.AUTH, "Jellyfin 服务端登出失败（best-effort） serverId=${server.id}", e)
+                    }
                 }
             }
+        } finally {
+            withContext(NonCancellable) {
+                tokenStore.clear(server.id)
+                sessionStore.clear(server.id)
+            }
+            logger.i(LogTag.AUTH, "Jellyfin 已登出 serverId=${server.id}")
         }
-        // 本地清理：authoritative
-        tokenStore.clear(server.id)
-        sessionStore.clear(server.id)
-        logger.i(LogTag.AUTH, "Jellyfin 已登出 serverId=${server.id}")
     }
 
     override suspend fun currentUser(): MediaUser? {
@@ -195,12 +216,7 @@ class JellyfinAuthProvider(
         )
     }
 
-    private suspend fun clearLocalSession() {
-        tokenStore.clear(server.id)
-        sessionStore.clear(server.id)
-    }
-
-    /** HTTP 错误 → 会话状态；[preserveSession] 为 false 时清理本地会话。 */
+    /** HTTP 错误 → 会话状态；[preserveSession] 为 false 时（仅 401）清理本地会话。 */
     private suspend fun authErrorFromHttp(
         e: ApiException,
         preserveSession: Boolean,
@@ -214,6 +230,12 @@ class JellyfinAuthProvider(
         }
     }
 
+    /** 本地凭据清理：NonCancellable——取消期间也不得残留凭据。 */
+    private suspend fun clearLocalSession() = withContext(NonCancellable) {
+        tokenStore.clear(server.id)
+        sessionStore.clear(server.id)
+    }
+
     private fun networkKind(e: IOException): AuthSessionErrorKind = when (e) {
         is SocketTimeoutException -> AuthSessionErrorKind.NETWORK_TIMEOUT
         is UnknownHostException, is ConnectException -> AuthSessionErrorKind.NETWORK_UNAVAILABLE
@@ -222,7 +244,8 @@ class JellyfinAuthProvider(
 
     private fun mapLoginFailure(e: Exception): AuthResult.Failure = when (e) {
         is ApiException -> when {
-            e.statusCode == 401 || e.statusCode == 403 ->
+            // 仅 401 报凭据错误；403 = 访问策略拒绝，保留 HTTP 语义（ADR-039 review 修正）
+            e.statusCode == 401 ->
                 AuthResult.Failure(ProviderException.AuthFailed(server.id, "用户名或密码错误"))
             else ->
                 AuthResult.Failure(ProviderException.Http(server.id, e.statusCode, e.url, e.method, e.requestId))

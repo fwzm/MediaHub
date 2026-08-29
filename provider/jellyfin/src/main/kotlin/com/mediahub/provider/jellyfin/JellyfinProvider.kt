@@ -102,6 +102,9 @@ class JellyfinProvider(
                 latencyMs = latencyMs,
                 message = "Jellyfin ${info.version} · ${info.serverName ?: server.displayName}",
             )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // 取消红线：绝不把取消折叠成 ConnectionStatus(false)（ADR-039）
+            throw e
         } catch (e: ApiException) {
             ConnectionStatus(
                 ok = false,

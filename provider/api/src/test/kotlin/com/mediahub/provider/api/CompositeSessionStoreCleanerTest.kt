@@ -4,26 +4,37 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** 组合会话清理器（ADR-039）：全部 delegate 按序收到同一 serverId，删除媒体源零残留。 */
+/**
+ * 组合会话清理器（ADR-039 review hardening）：聚合 `@IntoSet` 贡献的
+ * ProviderSessionCleaner——app composition root 不枚举具体 Provider，
+ * 新 Provider 零 app 改动接入。
+ */
 class CompositeSessionStoreCleanerTest {
 
+    private class RecordingCleaner(private val name: String, private val calls: MutableList<Pair<String, String>>) :
+        ProviderSessionCleaner {
+        override suspend fun clear(serverId: String) {
+            calls += name to serverId
+        }
+    }
+
     @Test
-    fun `every delegated cleaner receives the same server id in order`() = runBlocking {
+    fun `every contributed cleaner receives the same server id`() = runBlocking {
         val calls = mutableListOf<Pair<String, String>>()
         val composite = CompositeSessionStoreCleaner(
-            listOf(
-                SessionStoreCleaner { calls += "emby" to it },
-                SessionStoreCleaner { calls += "jellyfin" to it },
+            setOf(
+                RecordingCleaner("emby", calls),
+                RecordingCleaner("jellyfin", calls),
             ),
         )
 
         composite.clear("srv-7")
 
-        assertEquals(listOf("emby" to "srv-7", "jellyfin" to "srv-7"), calls)
+        assertEquals(setOf("emby" to "srv-7", "jellyfin" to "srv-7"), calls.toSet())
     }
 
     @Test
-    fun `empty composite is a safe no-op`() = runBlocking {
-        CompositeSessionStoreCleaner(emptyList()).clear("srv-1")
+    fun `empty contributed set is a safe no-op`() = runBlocking {
+        CompositeSessionStoreCleaner(emptySet()).clear("srv-1")
     }
 }

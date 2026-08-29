@@ -12,11 +12,13 @@ import com.mediahub.provider.api.MediaProviderFactory
 import com.mediahub.provider.api.ProviderDescriptor
 import com.mediahub.provider.api.ProviderHandle
 import com.mediahub.provider.api.ProviderImageAuthContributor
+import com.mediahub.provider.api.ProviderSessionCleaner
 import com.mediahub.provider.jellyfin.api.JellyfinApiClient
 import com.mediahub.provider.jellyfin.api.JellyfinAuthorizationHeaderBuilder
 import com.mediahub.provider.jellyfin.api.JellyfinEndpointResolver
 import com.mediahub.provider.jellyfin.auth.JellyfinAuthProvider
 import com.mediahub.provider.jellyfin.image.JellyfinImageAuthContributor
+import com.mediahub.provider.jellyfin.session.JellyfinSessionCleaner
 import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
 import dagger.Binds
 import dagger.Module
@@ -77,4 +79,8 @@ abstract class JellyfinProviderModule {
     @Binds
     @IntoSet
     abstract fun bindJellyfinImageAuthContributor(impl: JellyfinImageAuthContributor): ProviderImageAuthContributor
+
+    @Binds
+    @IntoSet
+    abstract fun bindJellyfinSessionCleaner(impl: JellyfinSessionCleaner): ProviderSessionCleaner
 }
