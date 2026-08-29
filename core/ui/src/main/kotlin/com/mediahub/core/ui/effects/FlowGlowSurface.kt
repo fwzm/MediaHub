@@ -110,8 +110,9 @@ fun FlowGlowSurface(
 ) {
     clock.fps = config.fps
 
-    val useAgsl = Build.VERSION.SDK_INT >= 33
-    val shader = remember(useAgsl) { if (useAgsl) RuntimeShader(FlowGlowShader.SOURCE) else null }
+    val shader = remember {
+        if (Build.VERSION.SDK_INT >= 33) RuntimeShader(FlowGlowShader.SOURCE) else null
+    }
     val paint = remember { Paint() }
     val smoother = remember { SmoothedSpectrum() }
     val fallbackBrush = remember(palette) {
@@ -129,11 +130,11 @@ fun FlowGlowSurface(
             .clip(shape)
             .background(Color(palette.background))
             .drawBehind {
-                val agsl = shader
-                if (agsl == null) {
+                if (Build.VERSION.SDK_INT < 33) {
                     drawRect(fallbackBrush)
                     return@drawBehind
                 }
+                val agsl = shader ?: return@drawBehind
                 val cfg = currentConfig
                 val gain = cfg.audioGain.coerceIn(0f, 4f)
                 val raw = currentSpectrum.sample(clock.timeSec.toDouble())
