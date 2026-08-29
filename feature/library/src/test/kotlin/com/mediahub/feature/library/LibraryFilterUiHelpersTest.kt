@@ -47,6 +47,27 @@ class LibraryFilterUiHelpersTest {
     }
 
     @Test
+    fun `zero year draft is rejected without crashing`() {
+        // P1 回归："0000" 是四位数字草稿但违反 domain require(year>0)；
+        // helper 必须按 no-op 丢弃（返回 null），绝不能抛 IllegalArgumentException 炸 UI
+        val result = yearDraftToFilter(MediaFilter(), "0000")
+        assertNull(result)
+    }
+
+    @Test
+    fun `year draft violating domain invariant never throws`() {
+        // 逐位输入路径下的任何四位组合都不允许抛异常（UI 事件路径无 try-catch）
+        for (i in 0..9999) {
+            val draft = i.toString().padStart(4, '0')
+            try {
+                yearDraftToFilter(MediaFilter(), draft)
+            } catch (e: IllegalArgumentException) {
+                throw AssertionError("draft=$draft 抛出异常", e)
+            }
+        }
+    }
+
+    @Test
     fun `other filter fields survive year commit`() {
         val current = MediaFilter(mediaType = MediaType.MOVIE, played = false)
         val result = yearDraftToFilter(current, "1998")

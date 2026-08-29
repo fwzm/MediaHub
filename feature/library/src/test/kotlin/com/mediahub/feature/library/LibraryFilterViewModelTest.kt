@@ -116,7 +116,14 @@ class LibraryFilterViewModelTest {
 
         override suspend fun getItems(libraryId: String, query: MediaListQuery): PagedResult<MediaItem> {
             requests += query
-            if (query.page.offset == stallOffset && libraryId == stallLibraryId) delay(200)
+            if (query.page.offset == stallOffset && libraryId == stallLibraryId) {
+                // non-cooperative（评审 P2）：吞掉取消并照样返回旧数据——
+                // 模拟不响应取消的真实服务器；generation guard 必须丢弃这条晚到的 stale response
+                try {
+                    delay(200)
+                } catch (_: kotlinx.coroutines.CancellationException) {
+                }
+            }
             val tag = filterTag(query.filter)
             val items = if (query.page.offset == 0) {
                 (1..5).map { MediaItem("srv-1", "n$it", MediaType.MOVIE, "$tag:$it") }
@@ -269,10 +276,12 @@ class LibraryFilterViewModelTest {
     // ---- race：父容器 filter 请求在途，进子容器不得被污染 ----
 
     @Test
-    fun `in-flight parent filter request does not pollute child after openFolder`() = runTest {
+    fun `non-cooperative stale parent response does not pollute child after openFolder`() = runTest {
         val lib = FakeQueryLibrary(stallOffset = 0, stallLibraryId = "view1")
         val viewModel = vm(handleOf(lib))
-        // view1 的 load 卡在 delay（携带 SERIES filter）
+        // view1 的 load 卡住（携带 SERIES filter）；openFolder 取消后 fake 故意
+        // 吞掉 CancellationException 并照样返回旧数据（non-cooperative，评审 P2）——
+        // generation guard 必须把这条晚到的 stale response 丢弃
         viewModel.onFilterSelected(MediaFilter(mediaType = MediaType.SERIES))
         runCurrent()
 
@@ -281,10 +290,13 @@ class LibraryFilterViewModelTest {
         val state = viewModel.uiState.value as LibraryUiState.Content
         assertEquals(5, state.items.size)
         assertTrue(
-            "子容器不得被父容器在途响应污染，实际：${state.items.map { it.title }}",
+            "子容器不得被父容器晚到的 stale 响应污染，实际：${state.items.map { it.title }}",
             state.items.all { it.title.startsWith("NONE:") },
         )
         assertTrue(state.filter.isDefault)
+        // stale 响应确实发生过：fake 记录了 init + SERIES 两次 view1 请求（第二次被取消后仍返回），
+        // 其响应被 generation guard 丢弃——子容器状态只来自自己的 child load
+        assertEquals(2, lib.requests.count { it.page.offset == 0 })
     }
 
     // ---- loadMore 沿用同一 filter 快照 ----

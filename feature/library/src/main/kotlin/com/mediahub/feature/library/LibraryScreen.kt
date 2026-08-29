@@ -310,8 +310,10 @@ internal fun shouldPreserveProviderOrder(sort: MediaSort): Boolean =
 internal fun yearDraftToFilter(current: MediaFilter, draft: String): MediaFilter? = when {
     draft.isEmpty() -> if (current.year == null) null else current.copy(year = null)
     draft.length == 4 && draft.all(Char::isDigit) -> {
-        val y = draft.toInt()
-        if (y == current.year) null else current.copy(year = y)
+        // toIntOrNull：非法/越界四位数字（如 "0000" 违反 domain require(year>0)）不得炸 UI——
+        // domain invariant 不放宽，非法草稿一律按 no-op 丢弃
+        val year = draft.toIntOrNull()
+        if (year == null || year <= 0 || year == current.year) null else current.copy(year = year)
     }
     else -> null
 }
