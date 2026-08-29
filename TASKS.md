@@ -256,7 +256,7 @@
 - Device: Xiaomi 14 Ultra / Android 16
 - Result: PASS
 
-## Phase 1F — Canonical Detail / Source Selection（2026-08-29）🔨 代码+测试完成（待 integration + 真机）
+## Phase 1F — Canonical Detail / Source Selection（2026-08-29）✅ SEALED / PASS
 
 - [x] A1 domain-identity-graph：CanonicalIdentityGraph（core/model）成 connected-component
       语义 single source of truth；SearchAggregator 改 adapter（纯算法搬迁，
