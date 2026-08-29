@@ -28,6 +28,15 @@ class EmbyImageAuthContributor @Inject constructor(
     private val sessionStore = EmbySessionStore(sessionStorage)
     private val authHeaderBuilder = EmbyAuthorizationHeaderBuilder(identity)
 
+    /**
+     * Emby 认证 scope：baseUrl + `/emby`（与 EmbyEndpointResolver 同一幂等语义：
+     * 已以 /emby 结尾不重复追加）。app 以此区分同 origin 下的 Emby/Jellyfin 路径域。
+     */
+    override fun authScopeUrl(baseUrl: String): String = buildString {
+        append(baseUrl.trimEnd('/'))
+        if (!endsWith("/emby")) append("/emby")
+    }
+
     override suspend fun headersFor(serverId: String): Map<String, String>? {
         val token = tokenStore.readTokens(serverId)?.accessToken ?: return null
         val userId = sessionStore.read(serverId)?.userId

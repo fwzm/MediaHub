@@ -23,6 +23,9 @@ class JellyfinImageAuthContributor @Inject constructor(
 
     private val authHeaderBuilder = JellyfinAuthorizationHeaderBuilder(identity)
 
+    /** Jellyfin 认证 scope = baseUrl 原样（无协议前缀；反代子路径已含在用户 base 中，ADR-039）。 */
+    override fun authScopeUrl(baseUrl: String): String = baseUrl.trimEnd('/')
+
     override suspend fun headersFor(serverId: String): Map<String, String>? {
         val token = tokenStore.readTokens(serverId)?.accessToken ?: return null
         return mapOf(authHeaderBuilder.headerName() to authHeaderBuilder.build(token))

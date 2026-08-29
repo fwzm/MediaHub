@@ -71,8 +71,10 @@ class JellyfinAuthProvider(
                 return AuthResult.Failure(ProviderException.Parse(server.id, null))
             }
 
-            tokenStore.saveTokens(server.id, StoredToken(accessToken = accessToken))
+            // 凭据生命周期一致性：两次持久化事务式回滚——任一失败（含取消）都把
+            // Token + Session 一起清掉（clearLocalSession 为 NonCancellable），绝不留孤儿 Token
             try {
+                tokenStore.saveTokens(server.id, StoredToken(accessToken = accessToken))
                 sessionStore.save(
                     JellyfinSession(
                         localServerId = server.id,
@@ -81,8 +83,11 @@ class JellyfinAuthProvider(
                         userName = userName.orEmpty(),
                     )
                 )
+            } catch (e: CancellationException) {
+                clearLocalSession()
+                throw e
             } catch (e: Exception) {
-                tokenStore.clear(server.id)
+                clearLocalSession()
                 throw e
             }
             logger.i(LogTag.AUTH, "Jellyfin 登录成功 serverId=${server.id} remoteServerId=$remoteServerId")
@@ -121,7 +126,12 @@ class JellyfinAuthProvider(
             // 取消红线：必须先于 generic catch 原样透传
             throw e
         } catch (e: ApiException) {
-            return authErrorFromHttp(e, preserveSession = true)
+            // 匿名身份探针未携带存储 Token，其 401 不能证明 AccessToken 失效——
+            // 保留会话，且不得误报 SESSION_EXPIRED（v1 用 UNKNOWN + 明确文案）
+            return AuthSessionState.Error(
+                AuthSessionErrorKind.UNKNOWN,
+                "无法确认服务器身份（HTTP ${e.statusCode}），请稍后重试",
+            )
         } catch (e: SerializationException) {
             return AuthSessionState.Error(
                 AuthSessionErrorKind.INVALID_RESPONSE,

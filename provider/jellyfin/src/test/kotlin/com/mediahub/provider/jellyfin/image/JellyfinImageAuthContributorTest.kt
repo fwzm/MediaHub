@@ -57,6 +57,15 @@ class JellyfinImageAuthContributorTest {
         assertEquals(ServerType.JELLYFIN, contributor.serverType)
     }
 
+    // ---- auth scope（ADR-039）：Jellyfin scope = base 原样（保留反代子路径，无 /emby 前缀） ----
+
+    @Test
+    fun `auth scope is base url verbatim with subpath preserved`() {
+        val (contributor, _) = contributor(null)
+        assertEquals("https://host/jellyfin", contributor.authScopeUrl("https://host/jellyfin/"))
+        assertEquals("https://host", contributor.authScopeUrl("https://host"))
+    }
+
     @Test
     fun `token never leaks into any url-shaped value`() = runBlocking {
         val (contributor, _) = contributor("tok-1")

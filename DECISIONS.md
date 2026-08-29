@@ -443,11 +443,15 @@
     **CompositeSessionStoreCleaner** 组合全部 Provider cleaner（新增 Provider 必须接入），
     server/token/session/进度/图片鉴权状态不得残留。
   - **generic image auth（基础设施，非 capability）**：新增 ProviderImageAuthContributor
-    （serverType + headersFor(serverId)），app 层只做 known-origin → server 解析与按类型
-    分发，**不 import 任何具体 provider 模块**；EmbyImageAuthStore 的 EMBY-only 过滤废除
-    （Emby 头生成逻辑逐字节等价下沉为 EmbyImageAuthContributor；Jellyfin 注入标准
-    Authorization 单头）；unknown origin → 无凭据原样放行；不新增
-    ProviderCapability.IMAGE_AUTH；Token 永不进图片 URL；ADR-030 跨源剥离原样继承。
+    （serverType + **authScopeUrl(baseUrl)** + headersFor(serverId)），app 层只做
+    **auth-scope（origin + path 前缀）→ server** 归属：path-segment boundary 最长前缀
+    匹配，**不 import 任何具体 provider 模块**。同 origin 多服务器（反代共存
+    Emby `https://h/emby` + Jellyfin `https://h/jellyfin`）按 scope 归属不串凭据；
+    **同 scope 多 serverId → fail closed**（返回无凭据，绝不随机归属）；
+    unknown scope → 无凭据原样放行。Emby scope = base + /emby（与 EndpointResolver 同一
+    幂等语义），头生成逐字节等价下沉为 EmbyImageAuthContributor；Jellyfin scope = base
+    原样、注入标准 Authorization 单头。不新增 ProviderCapability.IMAGE_AUTH；
+    Token 永不进图片 URL；ADR-030 跨源剥离原样继承。
   - **协议路径知识移出 core:network**：ProviderDescriptor 新增 probePath（Provider 自述
     探针位置：Emby=/emby/System/Info/Public，Jellyfin=/System/Info/Public，null=无
     HTTP 探针）；EndpointTestService 只做 transport。未知 provider/未定义 probePath =

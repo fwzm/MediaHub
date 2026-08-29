@@ -76,4 +76,16 @@ class EmbyImageAuthContributorTest {
         val (contributor, _) = contributor()
         assertEquals(ServerType.EMBY, contributor.serverType)
     }
+
+    // ---- auth scope（ADR-039 review hardening）：与 EndpointResolver 同一幂等 /emby 语义 ----
+
+    @Test
+    fun `auth scope appends emby prefix idempotently`() {
+        val (contributor, _) = contributor()
+        assertEquals("https://host/emby", contributor.authScopeUrl("https://host"))
+        // 幂等：已以 /emby 结尾不重复追加
+        assertEquals("https://host/emby", contributor.authScopeUrl("https://host/emby"))
+        // 用户自定义反代子路径保留后再追加 /emby
+        assertEquals("https://host/jf/emby", contributor.authScopeUrl("https://host/jf"))
+    }
 }

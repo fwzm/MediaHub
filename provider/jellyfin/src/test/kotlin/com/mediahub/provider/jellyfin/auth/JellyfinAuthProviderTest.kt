@@ -35,8 +35,8 @@ import org.junit.Test
 
 /**
  * Jellyfin 认证（Phase 1G-A / ADR-039）MockWebServer 测试：
- * 标准 Authorization 头 / Token 不进 URL / 登录成功与失败映射 / 恢复（防串服 + 401/403 清、
- * 网络保留）/ 登出（身份一致才发远端）。
+ * 标准 Authorization 头 / Token 不进 URL / 登录成功与失败映射 / 恢复（防串服 + 仅 401 清、
+ * 网络保留）/ 登出（身份一致才发远端，取消下本地清理仍必达）。
  */
 class JellyfinAuthProviderTest {
 
@@ -295,6 +295,61 @@ class JellyfinAuthProviderTest {
         )
     }
 
+    // ---- 凭据生命周期一致性：登录持久化取消下不留半成品（ADR-039 review hardening） ----
+
+    @Test
+    fun `login cancellation during session save leaves no orphan token`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(loginBody()))
+        sessionStorage.failPutWithCancellation = true
+
+        val thrown = try {
+            provider().authenticate(Credentials.UsernamePassword("alice", "pw"))
+            null
+        } catch (e: CancellationException) {
+            e
+        } catch (e: Throwable) {
+            e
+        }
+
+        assertTrue("取消必须穿透（实际：$thrown）", thrown is CancellationException)
+        assertNull("Token 不得残留", tokenStore.readTokens("srv-1"))
+        assertNull(sessionStore.read("srv-1"))
+    }
+
+    @Test
+    fun `login cancellation at token save leaves no partial credentials`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(loginBody()))
+        tokenStorage.failPutWithCancellation = true
+
+        val thrown = try {
+            provider().authenticate(Credentials.UsernamePassword("alice", "pw"))
+            null
+        } catch (e: CancellationException) {
+            e
+        } catch (e: Throwable) {
+            e
+        }
+
+        assertTrue("取消必须穿透（实际：$thrown）", thrown is CancellationException)
+        assertNull(tokenStore.readTokens("srv-1"))
+        assertNull(sessionStore.read("srv-1"))
+    }
+
+    @Test
+    fun `anonymous identity probe 401 does not report session expired`() = runBlocking {
+        // 探针请求未携带存储 Token，其 401 不能证明 AccessToken 失效
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(401))
+
+        val state = provider().restoreSession()
+
+        assertTrue(state is AuthSessionState.Error)
+        val kind = (state as AuthSessionState.Error).kind
+        assertTrue("不得误报 SESSION_EXPIRED（实际：$kind）", kind != AuthSessionErrorKind.SESSION_EXPIRED)
+        assertEquals("tok-1", tokenStore.readTokens("srv-1")?.accessToken)
+        assertNotNull(sessionStore.read("srv-1"))
+    }
+
     // ---- ADR-039 review 修正：AuthenticationResult 只接受顶层 ServerId（协议证据先行，无猜测 fallback） ----
 
     @Test
@@ -350,17 +405,25 @@ class JellyfinAuthProviderTest {
     }
 
     private class FakeSecretStorage : SecretStorage {
+        var failPutWithCancellation = false
         private val map = mutableMapOf<String, String>()
-        override suspend fun put(key: String, value: String) { map[key] = value }
+        override suspend fun put(key: String, value: String) {
+            if (failPutWithCancellation) throw CancellationException("cancelled mid-write")
+            map[key] = value
+        }
         override suspend fun get(key: String): String? = map[key]
         override suspend fun remove(key: String) { map.remove(key) }
         override suspend fun contains(key: String): Boolean = map.containsKey(key)
     }
 
     private class FakeSessionStorage : JellyfinSessionStore.Storage {
+        var failPutWithCancellation = false
         private val map = mutableMapOf<String, String>()
         override fun get(key: String): String? = map[key]
-        override fun put(key: String, value: String) { map[key] = value }
+        override fun put(key: String, value: String) {
+            if (failPutWithCancellation) throw CancellationException("cancelled mid-write")
+            map[key] = value
+        }
         override fun remove(key: String) { map.remove(key) }
     }
 }
