@@ -20,6 +20,8 @@ import com.mediahub.provider.jellyfin.auth.JellyfinAuthProvider
 import com.mediahub.provider.jellyfin.detail.JellyfinDetailProvider
 import com.mediahub.provider.jellyfin.image.JellyfinImageAuthContributor
 import com.mediahub.provider.jellyfin.library.JellyfinLibraryProvider
+import com.mediahub.provider.jellyfin.playback.JellyfinPlaybackProvider
+import com.mediahub.provider.jellyfin.progress.JellyfinProgressProvider
 import com.mediahub.provider.jellyfin.search.JellyfinSearchProvider
 import com.mediahub.provider.jellyfin.session.JellyfinSessionCleaner
 import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
@@ -80,22 +82,39 @@ class JellyfinProviderFactory @Inject constructor(
             sessionStore = sessionStore,
             logger = logger,
         )
+        val search = JellyfinSearchProvider(
+            server = server,
+            api = jellyfinApi,
+            tokenStore = tokenStore,
+            sessionStore = sessionStore,
+            logger = logger,
+        )
+        val playbackProvider = JellyfinPlaybackProvider(
+            server = server,
+            api = jellyfinApi,
+            tokenStore = tokenStore,
+            sessionStore = sessionStore,
+            logger = logger,
+        )
+        val progressProvider = JellyfinProgressProvider(
+            server = server,
+            api = jellyfinApi,
+            tokenStore = tokenStore,
+            sessionStore = sessionStore,
+            logger = logger,
+        )
         // ADR-022/039：Handle 只暴露"当前版本真正实现完成"的能力——
-        // Phase 1G-B 开放 AUTH + LIBRARY + DETAIL + SEARCH；
-        // QUERY/PLAYBACK/PROGRESS 待后续 slice 逐项落地；
-        // IDENTITY_LOOKUP 因 Jellyfin 无按值 ProviderId 查询协议**保持 null**（DEFER）。
+        // Phase 1G-C 开放 AUTH + LIBRARY + DETAIL + SEARCH + PLAYBACK + PROGRESS；
+        // QUERY 待后续 slice；**IDENTITY_LOOKUP 因 Jellyfin 无按值 ProviderId 查询协议
+        // 保持 null（DEFER）**——DetailViewModel 的 eligibility guard 据此阻止单向切源。
         return ProviderHandle(
             provider = provider,
             auth = authProvider,
             library = libraryProvider,
             detail = detailProvider,
-            search = JellyfinSearchProvider(
-                server = server,
-                api = jellyfinApi,
-                tokenStore = tokenStore,
-                sessionStore = sessionStore,
-                logger = logger,
-            ),
+            search = search,
+            playback = playbackProvider,
+            progress = progressProvider,
         )
     }
 }

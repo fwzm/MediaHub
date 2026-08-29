@@ -55,6 +55,101 @@ class JellyfinApiClient(
         )
     }
 
+    // ---- Phase 1G-C：Playback（无转码 Direct Stream）+ Progress ----
+
+    /**
+     * 播放协商：POST /Items/{itemId}/PlaybackInfo?UserId=…（官方 MediaInfoService POST）。
+     * 协商参数全部走 typed JSON body（EnableDirectStream=true / EnableTranscoding=false），
+     * 只询问服务端能否 Direct Stream；绝不申请转码会话。Token 只在 Authorization 头。
+     */
+    suspend fun getPlaybackInfo(
+        token: String,
+        userId: String,
+        itemId: String,
+        startTimeTicks: Long?,
+        maxStreamingBitrate: Long?,
+    ): JellyfinPlaybackInfoResultDto {
+        val request = JellyfinPlaybackInfoRequestDto(
+            userId = userId,
+            startTimeTicks = startTimeTicks?.takeIf { it > 0 },
+            maxStreamingBitrate = maxStreamingBitrate,
+        )
+        return apiClient.postJson(
+            url = endpointResolver.endpoint("/Items").toHttpUrl().newBuilder()
+                .addPathSegment(itemId)
+                .addPathSegment("PlaybackInfo")
+                .addQueryParameter("UserId", userId)
+                .build()
+                .toString(),
+            headers = authenticatedHeaders(token),
+            jsonBody = requestJson.encodeToString(request),
+        )
+    }
+
+    /**
+     * Direct Stream 播放地址：GET /Videos/{itemId}/stream.{container}?MediaSourceId=…&Static=true。
+     * 走 configured server origin（无转码静态服务）；**URL 永不含 Token/api_key**——
+     * 鉴权由 PlaybackSource.headers 携带标准 Authorization（ADR-026/039）。
+     */
+    fun directStreamUrl(itemId: String, container: String, mediaSourceId: String): String =
+        endpointResolver.endpoint("/Videos").toHttpUrl().newBuilder()
+            .addPathSegment(itemId)
+            .addPathSegment("stream.$container")
+            .addQueryParameter("MediaSourceId", mediaSourceId)
+            .addQueryParameter("Static", "true")
+            .build()
+            .toString()
+
+    /**
+     * 播放开始：POST /Sessions/Playing（PlaybackStartInfo JSON body；响应体不解析）。
+     * Content-Type 必须 application/json（[FromBody]）。
+     */
+    suspend fun playbackStart(token: String, itemId: String, positionTicks: Long?) {
+        apiClient.postNoContent(
+            url = endpointResolver.endpoint("/Sessions/Playing"),
+            headers = authenticatedHeaders(token),
+            body = requestJson.encodeToString(JellyfinPlaybackStartInfoDto(itemId = itemId, positionTicks = positionTicks)),
+            contentType = "application/json",
+        )
+    }
+
+    /** 播放进度：POST /Sessions/Playing/Progress（PlaybackProgressInfo JSON body；响应体不解析）。 */
+    suspend fun playbackProgress(token: String, itemId: String, positionTicks: Long?, isPaused: Boolean?) {
+        apiClient.postNoContent(
+            url = endpointResolver.endpoint("/Sessions/Playing/Progress"),
+            headers = authenticatedHeaders(token),
+            body = requestJson.encodeToString(JellyfinPlaybackProgressInfoDto(itemId = itemId, positionTicks = positionTicks, isPaused = isPaused)),
+            contentType = "application/json",
+        )
+    }
+
+    /** 播放停止：POST /Sessions/Playing/Stopped（PlaybackStopInfo JSON body；响应体不解析）。 */
+    suspend fun playbackStopped(token: String, itemId: String, positionTicks: Long?) {
+        apiClient.postNoContent(
+            url = endpointResolver.endpoint("/Sessions/Playing/Stopped"),
+            headers = authenticatedHeaders(token),
+            body = requestJson.encodeToString(JellyfinPlaybackStopInfoDto(itemId = itemId, positionTicks = positionTicks)),
+            contentType = "application/json",
+        )
+    }
+
+    /** 继续观看（官方 IsResumable filter）：GET /Items?UserId=…&Filters=IsResumable&Recursive=true。 */
+    suspend fun getResumableItems(token: String, userId: String, limit: Int): JellyfinQueryResultDto<JellyfinItemDto> {
+        val url = endpointResolver.endpoint("/Items").toHttpUrl().newBuilder()
+            .addQueryParameter("UserId", userId)
+            .addQueryParameter("Filters", "IsResumable")
+            .addQueryParameter("Recursive", "true")
+            .addQueryParameter("MediaTypes", "Video")
+            .addQueryParameter("SortBy", "DatePlayed")
+            .addQueryParameter("SortOrder", "Descending")
+            .addQueryParameter("Limit", limit.toString())
+            .addQueryParameter("Fields", LIST_FIELDS)
+            .addQueryParameter("EnableUserData", "true")
+            .build()
+            .toString()
+        return apiClient.get(url, authenticatedHeaders(token))
+    }
+
     // ---- Phase 1G-B：Library / Detail / Search / Artwork ----
     // 现代 Jellyfin 端点（ADR-039 协议证据先行）：/UserViews、/Items、/Items/{id}。
     // /Users/{uid}/Views、/Users/{uid}/Items 系列为官方 [Obsolete] legacy route，不使用。
@@ -176,8 +271,14 @@ class JellyfinApiClient(
         const val LIST_FIELDS =
             "ParentId,SortName,PrimaryImageAspectRatio,Overview,Genres,ProviderIds"
 
-        /** 请求体序列化：explicitNulls=false 省略未设置字段；ignoreUnknownKeys 兼容版本差异。 */
+        /**
+         * 请求体序列化：**encodeDefaults=true** 保证协商开关（EnableDirectStream/
+         * EnableTranscoding 等）即使等于默认值也全部输出——官方 server 期望完整字段，
+         * 省略会让 Direct Stream 协商静默失效（Phase 1G-C 教训）；
+         * explicitNulls=false 省略未设置字段；ignoreUnknownKeys 兼容版本差异。
+         */
         private val requestJson = Json {
+            encodeDefaults = true
             ignoreUnknownKeys = true
             explicitNulls = false
         }
