@@ -13,7 +13,10 @@
 ### 测试
 - 新增 26 条（identity 域 9 / ProviderIds 映射 6 / 聚合器冻结场景 10 / 搜索 Fields 1）；
   全量三件套绿。
-- Device verification pending。ProviderIds 真服刮削质量挂真机观察（不判失败）。
+- 真机验收（Xiaomi 14 Ultra / Android 16，code SHA 9fccb91）：
+  APK SHA256 = 0d0971ad4697278a8611e17bc1bcf6b3a1e1f98e68f0b695fb4672e06558a26e — PASS / SEALED。
+  Series cross-source aggregation: PASS；Movie cross-source: NOT_AVAILABLE（ProviderIds 不匹配）；
+  Episode ProviderIds: NOT_AVAILABLE；ProviderIds 真服刮削质量挂真机观察（不判失败）。
 ## [0.13.0-library-filtering] — 2026-08-29（Phase 1D：Library Filtering / Query Pipeline Extension）
 ### 功能
 - MediaFilter tri-state 筛选（mediaType/year/played/favorite）进 MediaListQuery，

@@ -1,5 +1,5 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-29（Phase 1E Canonical Media Identity：跨源身份 + 搜索聚合卡，代码+测试+文档完成，真机验证 pending）
+> 最后更新：2026-08-29（Phase 1E Canonical Media Identity：跨源身份 + 搜索聚合卡——真机 smoke PASS / SEALED @9fccb91）
 ## Phase CI-H1（前次）：CI/Test Hardening
 - **测试治理规则（对所有后续 Agent 生效）**：
   - **coroutine-test**：被测对象拥有周期性 coroutine（polling/heartbeat/periodic delay）时，
@@ -33,7 +33,20 @@
   SEARCH_FIELDS += ProviderIds（LIBRARY_FIELDS 不动——聚合只在搜索层）。
 - **UI**：搜索结果 = Single（现有行）/ MultiSource（聚合卡：首 occurrence 元数据 +
   'N 个来源'，点击展开成员行，成员行走现有 Detail 导航）。
-- **状态**：code complete / tests complete / **device verification pending**。
+- **状态**：code complete / tests complete / **device verification PASS / SEALED**。
+- **真机验收（2026-08-29）**：
+  ```
+  Device smoke code SHA: 9fccb91b8a4f1c12d14fa6ac73bf0dfcdf41cd70
+  APK SHA256: 0d0971ad4697278a8611e17bc1bcf6b3a1e1f98e68f0b695fb4672e06558a26e
+  Device: Xiaomi 14 Ultra / Android 16
+  Result: PASS
+  ```
+  Series cross-source aggregation: PASS — Fargo 2014 Series → 2 个来源聚合卡，
+  展开予初/墨云阁成员行 serverName 正确，点成员 → Series Detail → 返回搜索页完整。
+  Movie cross-source aggregation: NOT_AVAILABLE — tested server items did not share
+  canonical ProviderIds; correctly remained separate。
+  Episode cross-source: NOT_AVAILABLE — 予初/墨云阁均未在 Episode 响应中返回 ProviderIds。
+  title/year 不参与（负向实证）：同名/同年 Movie 条目在 canonical IDs 不匹配时仍保持独立。
 - **待真机验证（冻结）**：予初/墨云阁搜索同一部有 TMDb+IMDb 的作品 → 聚合卡
   '2 个来源' → 展开 → 点成员走 Series Detail；电影 TMDb=123 vs 剧集 TMDb=123 不聚合；
   Episode 自身 ProviderIds 聚合；同 server 重复条目不算多来源。

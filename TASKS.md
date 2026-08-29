@@ -230,7 +230,7 @@
 - Device: Xiaomi 14 Ultra / Android 16
 - Result: PASS
 
-## Phase 1E — Canonical Media Identity / Multi-Source Aggregation（2026-08-29）✅ 代码+测试完成（真机验证 pending）
+## Phase 1E — Canonical Media Identity / Multi-Source Aggregation（2026-08-29）✅ SEALED / PASS（device verification PASS）
 
 - [x] A1 canonical-contract：ExternalIds/ExternalIdProvider/CanonicalKey(type,provider,value)/
       CanonicalKeyPolicy.keys 别名候选集合 + union-find 传递闭包分桶
@@ -240,12 +240,21 @@
 - [x] C1 search-aggregation-ui：SearchAggregator union-find 纯投影（engine 零改动）+
       SearchResultEntry(Single/MultiSource) + VM entries 投影 + 聚合卡/展开成员行 + LazyColumn key
 - [x] 测试：ExternalIdentityTest 9 + EmbyProviderIdsMappingTest 6 + 搜索 Fields 断言 +
-      SearchAggregatorTest 12（冻结场景全覆盖 + A/B/C 传递闭包桥接回归）
-- [ ] 真机 smoke（冻结）：予初/墨云阁同一 TMDb+IMDb 作品 → 聚合卡 '2 个来源' → 展开 →
-      成员行 Series Detail；电影/剧集 TMDb 空间隔离；Episode TVDb 聚合；
-      同 server 重复不算多来源；title/year 不参与
-- NOT_AVAILABLE 预判：真服 ProviderIds 刮削质量决定实际聚合量（挂 UI 观察项，不判失败）
-- 状态：code complete / tests complete / device verification pending（真机前不写 SEALED）
+      SearchAggregatorTest 11（冻结场景全覆盖 + A/B/C 传递闭包桥接回归）
+- [x] 真机 smoke（冻结，Xiaomi 14 Ultra / Android 16，APK @ 9fccb91）：
+      APK SHA256 = 0d0971ad4697278a8611e17bc1bcf6b3a1e1f98e68f0b695fb4672e06558a26e
+      Series cross-source aggregation: PASS — Fargo 2014 Series → 2 个来源聚合卡
+      聚合卡展开 → 予初/墨云阁成员行 serverName 正确；点成员 → Series Detail → 返回搜索页完整
+      Movie cross-source aggregation: NOT_AVAILABLE — tested server items did not share
+        canonical ProviderIds; correctly remained separate
+      title/year 不参与（负向实证）：同名/同年 Movie 条目在 canonical IDs 不匹配时
+        仍保持独立，证明 title/year 没有触发弱合并
+      Episode cross-source: NOT_AVAILABLE — 予初/墨云阁均未在 Episode 响应中返回
+        ProviderIds（JVM 回归已锁 Episode 自身 ID 聚合）
+- 状态：code complete / tests complete / **device verification PASS / SEALED**
+- Device smoke code SHA: 9fccb91b8a4f1c12d14fa6ac73bf0dfcdf41cd70
+- Device: Xiaomi 14 Ultra / Android 16
+- Result: PASS
 
 ## Phase 1D — Library Filtering / Query Pipeline Extension（2026-08-29）✅ SEALED / PASS（device verification PASS）
 
