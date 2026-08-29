@@ -54,31 +54,48 @@ object FlowGlowPresets {
             secondary = 0xFF6B4A2F.toInt(),
             accent = 0xFFFF9D45.toInt(),
         ),
-        config = VisualEffectConfig(iridescence = 0.9f, bloom = 1.1f, speed = 1f),
+        config = VisualEffectConfig(
+            speed = 0.9f,
+            iridescence = 0.5f,
+            bloom = 1.15f,
+            noiseScale = 1.4f,
+        ),
     )
 
     /** Light capsule, soft green/peach pastel wash — the reference video's MATCHA card. */
     val MatchaLight = FlowGlowPreset(
         name = "MATCHA.LIGHT",
         palette = VisualPalette(
-            background = 0xFFF7F5F0.toInt(),
-            primary = 0xFFDCE8C4.toInt(),
-            secondary = 0xFFF2E9D8.toInt(),
-            accent = 0xFFE8A87C.toInt(),
+            background = 0xFFF6F4EE.toInt(),
+            primary = 0xFFCFE0AC.toInt(),
+            secondary = 0xFFF4EDDC.toInt(),
+            accent = 0xFFE8A47E.toInt(),
         ),
-        config = VisualEffectConfig(iridescence = 0.12f, bloom = 0.15f, opacity = 0.85f, speed = 0.8f),
+        config = VisualEffectConfig(
+            speed = 0.8f,
+            iridescence = 0f,
+            bloom = 0.22f,
+            opacity = 0.9f,
+            noiseScale = 1.4f,
+        ),
     )
 
     /** Warm sand/cream wash — the reference video's SAND card. */
     val SandGlow = FlowGlowPreset(
         name = "SAND.SURF*",
         palette = VisualPalette(
-            background = 0xFFFBF8F4.toInt(),
-            primary = 0xFFEACBA4.toInt(),
-            secondary = 0xFFF5EADC.toInt(),
-            accent = 0xFFC89A6A.toInt(),
+            background = 0xFFFBF8F3.toInt(),
+            primary = 0xFFE3BD92.toInt(),
+            secondary = 0xFFF7EFE1.toInt(),
+            accent = 0xFFC8925E.toInt(),
         ),
-        config = VisualEffectConfig(iridescence = 0f, bloom = 0.2f, opacity = 0.9f, speed = 0.7f),
+        config = VisualEffectConfig(
+            speed = 0.7f,
+            iridescence = 0f,
+            bloom = 0.18f,
+            opacity = 0.9f,
+            noiseScale = 1.4f,
+        ),
     )
 
     /** Deep-space blue/violet; the default candidate for cinema playback chrome. */
@@ -90,7 +107,12 @@ object FlowGlowPresets {
             secondary = 0xFF2A2554.toInt(),
             accent = 0xFFC86BFF.toInt(),
         ),
-        config = VisualEffectConfig(iridescence = 0.5f, bloom = 0.9f, speed = 0.9f),
+        config = VisualEffectConfig(
+            speed = 0.9f,
+            iridescence = 0.35f,
+            bloom = 1.0f,
+            noiseScale = 1.4f,
+        ),
     )
 
     val All = listOf(AuroraDark, MatchaLight, SandGlow, NebulaCinema)

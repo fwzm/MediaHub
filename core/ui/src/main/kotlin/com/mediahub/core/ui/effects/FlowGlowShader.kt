@@ -69,48 +69,60 @@ internal object FlowGlowShader {
             float2 p0 = float2(uv.x * aspect, uv.y);
             float2 p = p0 * uNoiseScale;
 
-            float t = uTime * 0.14 * uSpeed + uProgress * 3.0;
-            float warp = uWarp * (1.0 + uMid * 0.9);
-            float2 flow = float2(t * 0.45, sin(t * 0.35) * 0.12);
+            float t = uTime * 0.10 * uSpeed + uProgress * 3.0;
+            float warp = uWarp * (1.0 + uMid * 0.7);
+            float2 flow = float2(t * 0.40, sin(t * 0.30) * 0.10);
 
-            float2 q = float2(fbm(p + flow), fbm(p + flow + float2(5.2, 1.3)));
+            float2 q = float2(fbm(p * 0.9 + flow), fbm(p * 0.9 + flow + float2(5.2, 1.3)));
             float2 r = float2(
-                fbm(p + warp * q + float2(1.7, 9.2) + flow * 0.6),
-                fbm(p + warp * q + float2(8.3, 2.8) - flow * 0.4)
+                fbm(p * 0.9 + warp * q + float2(1.7, 9.2) + flow * 0.6),
+                fbm(p * 0.9 + warp * q + float2(8.3, 2.8) - flow * 0.4)
             );
-            float f = fbm(p + warp * r * 1.4);
+            float f = fbm(p * 0.8 + warp * r * 1.3);
 
-            // drifting glow hotspots, swollen by bass energy; the main one is elongated
-            // along x so the highlight reads as a ridge instead of a bullseye
-            float reach = 0.07 * (1.0 + uBass * 1.8);
-            float2 c1 = float2(aspect * (0.60 + 0.26 * sin(t * 0.83)), 0.45 + 0.28 * sin(t * 0.57 + 1.7));
-            float2 c2 = float2(aspect * (0.30 + 0.20 * sin(t * 0.61 + 2.4)), 0.60 + 0.22 * sin(t * 0.91 + 4.1));
+            // soft elongated ridge hotspot, swollen by bass energy
+            float reach = 0.085 * (1.0 + uBass * 1.5);
+            float2 c1 = float2(aspect * (0.58 + 0.24 * sin(t * 0.7)), 0.48 + 0.24 * sin(t * 0.49 + 1.7));
+            float2 c2 = float2(aspect * (0.32 + 0.18 * sin(t * 0.53 + 2.4)), 0.58 + 0.20 * sin(t * 0.77 + 4.1));
             float2 d1 = p0 - c1;
-            d1.x *= 0.60;
-            float glow = exp(-dot(d1, d1) / reach) * 1.05
-                       + exp(-dot(p0 - c2, p0 - c2) / (reach * 1.7)) * 0.50;
-            glow *= 0.65 + uBass * 1.2;
+            d1.x *= 0.55;
+            float glow = exp(-dot(d1, d1) / reach) * 1.15
+                       + exp(-dot(p0 - c2, p0 - c2) / (reach * 1.9)) * 0.60;
+            glow *= (0.60 + uBass * 1.1) * (0.72 + 0.55 * f);
 
-            // structural color comes from the fbm clouds alone; the capsule background is
-            // the floor so dark palettes stay dark and light palettes stay airy
+            // tonal structure: background floor -> secondary -> primary. The brightness
+            // floor scales with background luminance so dark palettes stay near-black
+            // while light palettes stay airy.
             float clouds = f * 0.75;
-            float3 tone = mix(uSecondary.rgb, uPrimary.rgb, smoothstep(0.30, 0.95, clouds));
-            float3 base = mix(uBackground.rgb, tone, smoothstep(0.02, 0.70, clouds));
-            base *= 0.78 + 0.42 * smoothstep(0.0, 0.9, clouds);
+            float bgLum = dot(uBackground.rgb, float3(0.2126, 0.7152, 0.0722));
+            float floorK = mix(0.30, 0.78, smoothstep(0.1, 0.75, bgLum));
+            float3 tone = mix(uSecondary.rgb, uPrimary.rgb, smoothstep(0.35, 1.05, clouds));
+            float3 base = mix(uBackground.rgb, tone, smoothstep(0.02, 0.62, clouds));
+            base *= floorK + (0.85 - floorK) * smoothstep(0.0, 0.9, clouds);
 
-            float3 col = base;
-            // accent pooling in the dim clouds
-            col = mix(col, col * (uAccent.rgb * 1.35), (1.0 - smoothstep(0.0, 0.45, clouds)) * 0.25);
+            // subtle accent pooling in the dim clouds
+            base = mix(base, base * (uAccent.rgb * 1.3), (1.0 - smoothstep(0.0, 0.6, clouds)) * 0.26);
 
-            // iridescent fringe: a narrow band hugging the white-hot core; hue drifts
-            // smoothly with the (radially smooth) glow and warp noise, echoing the
-            // thin-film blue->cyan->yellow progression of the reference footage
-            float ring = smoothstep(0.30, 0.55, glow) * (1.0 - smoothstep(0.70, 0.95, glow));
-            float3 irid = 0.5 + 0.5 * cos(TAU * (glow * 1.35 + r.x * 1.2 + float3(0.0, 0.33, 0.67)));
-            col = mix(col, irid, ring * uIridescence * 0.8);
+            // white-hot core with spectral dispersion: three masks with staggered
+            // thresholds (blue turns on furthest out, then green, then red), so the fringe
+            // reads blue -> green -> yellow -> white like light dispersion. The core body
+            // is white only when uBloom is high; low-bloom light palettes get a soft
+            // primary-tinted watercolor highlight instead of a white spotlight.
+            float coreMid = smoothstep(0.28, 0.95, glow);
+            float3 core = float3(
+                smoothstep(0.28, 0.95, glow - 0.10),
+                coreMid,
+                smoothstep(0.28, 0.95, glow + 0.10)
+            );
+            float3 dispersion = core - float3(coreMid);
+            float coreWhiteness = clamp(uBloom * 1.1, 0.0, 1.0);
+            float3 coreColor = mix(uPrimary.rgb * 1.25, float3(1.0), coreWhiteness);
+            float3 col = base + coreMid * uBloom * coreColor + dispersion * uBloom;
 
-            // white-hot core
-            col += float3(1.0) * smoothstep(0.62, 1.0, glow) * uBloom;
+            // faint iridescent shimmer just outside the core edge (dark palettes only)
+            float edgeBand = smoothstep(0.10, 0.28, glow) * (1.0 - smoothstep(0.28, 0.55, glow));
+            float3 irid = 0.5 + 0.5 * cos(TAU * (glow * 1.1 + float3(0.0, 0.33, 0.67)));
+            col += irid * edgeBand * uIridescence * 0.22;
 
             float a = clamp(uOpacity, 0.0, 1.0);
             return half4(col * a, a);
