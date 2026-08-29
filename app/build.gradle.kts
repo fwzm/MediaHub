@@ -56,6 +56,7 @@ dependencies {
     implementation(project(":core:database"))
     implementation(project(":core:security"))
     implementation(project(":core:logging"))
+    implementation(project(":core:ui"))
     implementation(libs.room.runtime)
 
     implementation(project(":player:engine"))
