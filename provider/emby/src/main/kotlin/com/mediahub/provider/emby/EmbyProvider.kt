@@ -31,6 +31,7 @@ internal val EMBY_PROVIDER_DESCRIPTOR = ProviderDescriptor(
         ProviderCapability.DETAIL,
         ProviderCapability.PLAYBACK,
         ProviderCapability.SEARCH,
+        ProviderCapability.IDENTITY_LOOKUP,
         ProviderCapability.QUERY,
         ProviderCapability.SUBTITLE,
         ProviderCapability.PROGRESS,

@@ -106,4 +106,30 @@ class ProviderHandleTest {
         assertEquals(60, query.page.offset)
         assertEquals(30, query.page.limit)
     }
+
+    // ---- Phase 1F-B1：IDENTITY_LOOKUP 能力推导（ADR-038） ----
+
+    /** 实现 IdentityLookup 能力的最小 fake。 */
+    private fun identityLookupProvider() = object : MediaProvider, MediaIdentityLookupProvider {
+        override val serverId: String = "s1"
+        override val type: ServerType = ServerType.EMBY
+        override val displayName: String = "Emby"
+        override val descriptor: ProviderDescriptor = provider().descriptor
+        override suspend fun testConnection() = ConnectionStatus(ok = true, message = "ok")
+        override suspend fun findByCanonicalKeys(
+            keys: Set<com.mediahub.model.CanonicalKey>,
+            page: com.mediahub.model.PageRequest,
+        ) = com.mediahub.model.PagedResult<com.mediahub.model.MediaItem>(emptyList())
+    }
+
+    @Test
+    fun `identity lookup capability derived from field and absent when null`() {
+        val l = identityLookupProvider()
+        val withLookup = ProviderHandle(provider = l, identityLookup = l)
+        assertEquals(setOf(ProviderCapability.IDENTITY_LOOKUP), withLookup.runtimeCapabilities)
+        assertTrue(withLookup.hasAnyCapability)
+
+        val withoutLookup = ProviderHandle(provider = l)
+        assertTrue(ProviderCapability.IDENTITY_LOOKUP !in withoutLookup.runtimeCapabilities)
+    }
 }

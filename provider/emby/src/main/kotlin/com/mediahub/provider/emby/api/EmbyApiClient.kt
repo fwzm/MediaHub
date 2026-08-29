@@ -94,8 +94,9 @@ class EmbyApiClient(
         return apiClient.get(url, authenticatedHeaders(token, userId))
     }
 
-    /** Phase 1D：MediaType → IncludeItemTypes wire 值；首版标准语义外的类型不传参数。 */
-    private fun includeItemTypes(type: MediaType?): String? = when (type) {
+    /** Phase 1D：MediaType → IncludeItemTypes wire 值；首版标准语义外的类型不传参数。
+     *  Phase 1F：identity lookup（ADR-038）复用同一映射，禁止两份 MediaType→wire 表。 */
+    internal fun includeItemTypes(type: MediaType?): String? = when (type) {
         MediaType.MOVIE -> "Movie"
         MediaType.SERIES -> "Series"
         MediaType.EPISODE -> "Episode"
@@ -127,6 +128,37 @@ class EmbyApiClient(
                 "Fields" to SEARCH_FIELDS,
                 "EnableUserData" to "true",
             ),
+        )
+        return apiClient.get(url, authenticatedHeaders(token, userId))
+    }
+
+    /**
+     * Canonical identity 精确查找（Phase 1F B1，ADR-038）：
+     * GET /emby/Users/{userId}/Items?AnyProviderIdEquals=...&Recursive=true。
+     *
+     * - AnyProviderIdEquals（官方参数：匹配至少一个 provider ID；wire 形式
+     *   `imdb.tt…`，多值逗号分隔）——精确身份匹配，非 SearchTerm 文本搜索。
+     * - [includeItemTypes] 由调用方按 keys 的 MediaType 传入（null = 不限定类型）。
+     * - Token 红线（ADR-026）：只走 [authenticatedHeaders]，绝不进 URL。
+     */
+    suspend fun findItemsByProviderIds(
+        token: String,
+        userId: String,
+        anyProviderIdEquals: String,
+        includeItemTypes: String?,
+        page: PageRequest,
+    ): EmbyQueryResultDto<EmbyBaseItemDto> {
+        val url = buildUrl(
+            path = "/Users/$userId/Items",
+            query = buildMap {
+                put("AnyProviderIdEquals", anyProviderIdEquals)
+                put("Recursive", "true")
+                includeItemTypes?.let { put("IncludeItemTypes", it) }
+                put("StartIndex", page.offset.toString())
+                put("Limit", page.limit.toString())
+                put("Fields", SEARCH_FIELDS)
+                put("EnableUserData", "true")
+            },
         )
         return apiClient.get(url, authenticatedHeaders(token, userId))
     }
@@ -266,8 +298,9 @@ class EmbyApiClient(
             "PrimaryImageAspectRatio,SortName,Path,DateCreated,CriticRating,PremiereDate,OfficialRating,Size,Bitrate"
 
         /**
-         * 搜索结果列表所需字段（官方 Fields 枚举值；海报/年份/评分/简介供结果卡渲染）。
-         * Phase 1E：跨源身份 ProviderIds 仅进搜索 Fields——聚合只发生在搜索层，
+         * 搜索/身份查找所需字段（官方 Fields 枚举值；海报/年份/评分/简介供结果卡渲染）。
+         * Phase 1E：跨源身份 ProviderIds 进入本 Fields（搜索聚合）。
+         * Phase 1F ADR-038：identity lookup（AnyProviderIdEquals）共用本 Fields。
          * Library 浏览 payload 不扩大（LIBRARY_FIELDS 不动）。
          */
         const val SEARCH_FIELDS = "PrimaryImageAspectRatio,SortName,Path,ProductionYear,CommunityRating,Overview,ProviderIds"
