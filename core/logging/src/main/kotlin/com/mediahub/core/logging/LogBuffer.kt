@@ -30,8 +30,14 @@ class MemoryLogger(private val buffer: LogBuffer) : Logger {
     override fun d(tag: LogTag, message: String) = buffer.append(format('D', tag, message))
     override fun i(tag: LogTag, message: String) = buffer.append(format('I', tag, message))
     override fun w(tag: LogTag, message: String, throwable: Throwable?) =
-        buffer.append(format('W', tag, message) + throwable?.let { " | ${it.javaClass.simpleName}: ${it.message}" }.orEmpty())
+        buffer.append(
+            format('W', tag, message) +
+                throwable?.let { " | ${Redactor.redact("${it.javaClass.simpleName}: ${it.message}")}" }.orEmpty()
+        )
 
     override fun e(tag: LogTag, message: String, throwable: Throwable?) =
-        buffer.append(format('E', tag, message) + throwable?.let { " | ${it.javaClass.simpleName}: ${it.message}" }.orEmpty())
+        buffer.append(
+            format('E', tag, message) +
+                throwable?.let { " | ${Redactor.redact("${it.javaClass.simpleName}: ${it.message}")}" }.orEmpty()
+        )
 }

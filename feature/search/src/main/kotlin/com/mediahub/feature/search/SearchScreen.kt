@@ -26,9 +26,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,8 +54,7 @@ fun SearchRoute(
     onOpenItem: (MediaItem) -> Unit,
     viewModel: GlobalSearchViewModel = hiltViewModel(),
 ) {
-    // 输入框本地即时回显；去抖后的正式查询走 ViewModel
-    var input by rememberSaveable { mutableStateOf("") }
+    val input by viewModel.query.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -67,17 +63,13 @@ fun SearchRoute(
                 title = {
                     TextField(
                         value = input,
-                        onValueChange = {
-                            input = it
-                            viewModel.onQueryChange(it)
-                        },
+                        onValueChange = viewModel::onQueryChange,
                         placeholder = { Text("搜索电影 / 剧集 / 单集") },
                         singleLine = true,
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         trailingIcon = {
                             if (input.isNotEmpty()) {
                                 IconButton(onClick = {
-                                    input = ""
                                     viewModel.onQueryChange("")
                                 }) {
                                     Icon(Icons.Default.Close, contentDescription = "清空")

@@ -169,6 +169,17 @@ class MediaQueryTest {
     }
 
     @Test
+    fun `media filter rejects types outside its declared first version contract`() {
+        val supported = setOf(MediaType.MOVIE, MediaType.SERIES, MediaType.EPISODE)
+
+        supported.forEach { MediaFilter(mediaType = it) }
+        MediaType.entries.filterNot { it in supported }.forEach { unsupported ->
+            val thrown = runCatching { MediaFilter(mediaType = unsupported) }.exceptionOrNull()
+            assertTrue("必须拒绝会被 Provider 静默忽略的类型：$unsupported", thrown is IllegalArgumentException)
+        }
+    }
+
+    @Test
     fun `media list query carries filter with default`() {
         val query = MediaListQuery()
         assertTrue(query.filter.isDefault)

@@ -94,12 +94,13 @@ class EmbyApiClient(
         return apiClient.get(url, authenticatedHeaders(token, userId))
     }
 
-    /** Phase 1D：MediaType → IncludeItemTypes wire 值；首版标准语义外的类型不传参数。 */
+    /** Phase 1D：MediaType → IncludeItemTypes wire 值；非空越界值必须 fail-fast，禁止静默取消筛选。 */
     private fun includeItemTypes(type: MediaType?): String? = when (type) {
+        null -> null
         MediaType.MOVIE -> "Movie"
         MediaType.SERIES -> "Series"
         MediaType.EPISODE -> "Episode"
-        else -> null
+        else -> error("Unsupported MediaFilter mediaType: $type")
     }
 
     /**

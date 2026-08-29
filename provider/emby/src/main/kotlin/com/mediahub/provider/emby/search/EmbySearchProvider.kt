@@ -40,6 +40,10 @@ class EmbySearchProvider(
         val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
         return try {
             val result = api.searchItems(token, userId, searchTerm = searchTerm, page = page)
+            val candidateNextOffset = page.offset + result.items.size
+            val nextOffset = candidateNextOffset.takeIf {
+                result.items.isNotEmpty() && it > page.offset && it < result.totalRecordCount
+            }
             PagedResult(
                 items = result.items.mapNotNull { dto ->
                     EmbyMediaItemMapper.map(dto, server.id)?.let { item ->
@@ -47,12 +51,9 @@ class EmbySearchProvider(
                     }
                 },
                 totalCount = result.totalRecordCount,
-                hasMore = (page.offset + result.items.size) < result.totalRecordCount,
-                nextOffset = if ((page.offset + result.items.size) < result.totalRecordCount) {
-                    page.offset + result.items.size
-                } else {
-                    null
-                },
+                // 空页 + 正 total 必须终止，否则 nextOffset == offset 会无限重试同一页。
+                hasMore = nextOffset != null,
+                nextOffset = nextOffset,
             )
         } catch (e: Exception) {
             throw EmbyProviderSupport.mapError(server.id, e)

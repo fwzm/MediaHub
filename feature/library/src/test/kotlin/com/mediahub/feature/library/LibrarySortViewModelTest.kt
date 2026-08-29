@@ -28,8 +28,10 @@ import com.mediahub.provider.api.ProviderDescriptor
 import com.mediahub.provider.api.ProviderHandle
 import com.mediahub.provider.api.ProviderStatus
 import com.mediahub.model.SortDirection
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -39,6 +41,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -100,9 +103,13 @@ class LibrarySortViewModelTest {
         override val capabilities: MediaQueryCapabilities =
             MediaQueryCapabilities(sortFields = MediaSortField.entries.toSet()),
         private val stallOffset: Int? = null,
+        private val failSort: MediaSortField? = null,
+        private val failSortDelayMs: Long = 0,
+        private val failAfterCancellationSort: MediaSortField? = null,
     ) : MediaLibraryProvider, MediaQueryLibraryProvider {
         val sortRequests = mutableListOf<MediaSort>()
         val offsets = mutableListOf<Int>()
+        var staleFailureCount = 0
 
         override suspend fun getLibraries(): List<MediaLibrary> = emptyList()
         override suspend fun getSeasons(seriesId: String) = emptyList<Season>()
@@ -114,6 +121,20 @@ class LibrarySortViewModelTest {
         override suspend fun getItems(libraryId: String, query: MediaListQuery): PagedResult<MediaItem> {
             sortRequests += query.sort
             offsets += query.page.offset
+            if (query.sort.field == failAfterCancellationSort) {
+                try {
+                    delay(200)
+                } catch (_: CancellationException) {
+                    // 模拟不协作的旧请求：吞取消并在新请求成功后才失败。
+                    withContext(NonCancellable) { delay(100) }
+                    staleFailureCount++
+                    error("stale cancelled sort failed")
+                }
+            }
+            if (query.sort.field == failSort) {
+                if (failSortDelayMs > 0) delay(failSortDelayMs)
+                error("server rejected sort ${query.sort.field}")
+            }
             if (query.page.offset == stallOffset) delay(200)
             val items = if (query.page.offset == 0) {
                 (1..5).map { MediaItem("srv-1", "n$it", MediaType.MOVIE, "S:${query.sort.field}:$it") }
@@ -195,6 +216,92 @@ class LibrarySortViewModelTest {
             lib.sortRequests.map { it.field },
         )
         assertEquals(listOf(0, 5, 0), lib.offsets)
+    }
+
+    @Test
+    fun `failed sort change rolls back so retry uses previous working sort`() = runTest {
+        val lib = FakeQueryLibrary(failSort = MediaSortField.DATE_ADDED)
+        val viewModel = vm(handleOf(lib))
+        advanceUntilIdle()
+
+        viewModel.onSortSelected(MediaSort(MediaSortField.DATE_ADDED, SortDirection.DESC))
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value is LibraryUiState.Error)
+        assertEquals("加载失败", (viewModel.uiState.value as LibraryUiState.Error).message)
+
+        viewModel.load()
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(
+                MediaSortField.SERVER_DEFAULT,
+                MediaSortField.DATE_ADDED,
+                MediaSortField.SERVER_DEFAULT,
+            ),
+            lib.sortRequests.map { it.field },
+        )
+        val recovered = viewModel.uiState.value as LibraryUiState.Content
+        assertEquals(MediaSortField.SERVER_DEFAULT, recovered.sort.field)
+        assertTrue(recovered.items.all { it.title.startsWith("S:SERVER_DEFAULT") })
+    }
+
+    @Test
+    fun `refresh while failed sort is pending preserves rollback target`() = runTest {
+        val lib = FakeQueryLibrary(
+            failSort = MediaSortField.DATE_ADDED,
+            failSortDelayMs = 200,
+        )
+        val viewModel = vm(handleOf(lib))
+        advanceUntilIdle()
+
+        viewModel.onSortSelected(MediaSort(MediaSortField.DATE_ADDED))
+        runCurrent()
+        viewModel.load() // 取消第一次失败请求并重试；不能因此忘掉 SERVER_DEFAULT rollback
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value is LibraryUiState.Error)
+
+        viewModel.load()
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(
+                MediaSortField.SERVER_DEFAULT,
+                MediaSortField.DATE_ADDED,
+                MediaSortField.DATE_ADDED,
+                MediaSortField.SERVER_DEFAULT,
+            ),
+            lib.sortRequests.map { it.field },
+        )
+        assertEquals(
+            MediaSortField.SERVER_DEFAULT,
+            (viewModel.uiState.value as LibraryUiState.Content).sort.field,
+        )
+    }
+
+    @Test
+    fun `stale cancelled sort failure cannot rollback or overwrite newer success`() = runTest {
+        val lib = FakeQueryLibrary(failAfterCancellationSort = MediaSortField.DATE_ADDED)
+        val viewModel = vm(handleOf(lib))
+        advanceUntilIdle()
+
+        viewModel.onSortSelected(MediaSort(MediaSortField.DATE_ADDED))
+        runCurrent()
+        viewModel.onSortSelected(MediaSort(MediaSortField.TITLE))
+        advanceUntilIdle()
+
+        assertEquals(1, lib.staleFailureCount)
+        val state = viewModel.uiState.value as LibraryUiState.Content
+        assertEquals(MediaSortField.TITLE, state.sort.field)
+        assertTrue(state.items.all { it.title.startsWith("S:TITLE") })
+
+        // 再刷新一次，证明旧失败也没有暗中回滚内部 currentSort。
+        viewModel.load()
+        advanceUntilIdle()
+        assertEquals(MediaSortField.TITLE, lib.sortRequests.last().field)
+        assertEquals(
+            MediaSortField.TITLE,
+            (viewModel.uiState.value as LibraryUiState.Content).sort.field,
+        )
     }
 
     // ---- 能力过滤：菜单只含 Provider 声明的字段 ----

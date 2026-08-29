@@ -1,6 +1,7 @@
 package com.mediahub.feature.search.engine
 
 import com.mediahub.model.PageRequest
+import com.mediahub.provider.api.ProviderException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
@@ -107,8 +108,13 @@ class GlobalSearchEngine(
                             throw e
                         } catch (e: Exception) {
                             mutex.withLock {
-                                errors[target.serverId] = e.message?.takeIf(String::isNotBlank)
-                                    ?: e::class.java.simpleName
+                                // ProviderException 的 message 是 user-safe contract；任意异常文本
+                                // 可能含 URL/query/credential，不得直接回显到 SearchScreen。
+                                errors[target.serverId] = if (e is ProviderException) {
+                                    e.message?.takeIf(String::isNotBlank) ?: "搜索失败"
+                                } else {
+                                    "搜索失败"
+                                }
                                 completed += target.serverId
                             }
                             sendSnapshot()

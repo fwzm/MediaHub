@@ -28,6 +28,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -54,7 +55,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -115,7 +115,7 @@ fun LibraryRoute(
                             Icon(
                                 Icons.Default.FilterList,
                                 contentDescription = if (filterActive) "筛选（已启用）" else "筛选",
-                                tint = if (filterActive) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                                tint = if (filterActive) MaterialTheme.colorScheme.primary else LocalContentColor.current,
                             )
                         }
                     }
@@ -339,7 +339,8 @@ internal fun favoriteFilterLabel(value: Boolean?): String = when (value) {
 }
 
 /** 排序选项中文标签（用户口径）。 */
-internal fun sortLabel(field: MediaSortField): String = when (field) {    MediaSortField.SERVER_DEFAULT -> "默认"
+internal fun sortLabel(field: MediaSortField): String = when (field) {
+    MediaSortField.SERVER_DEFAULT -> "默认"
     MediaSortField.DATE_ADDED -> "加入日期"
     MediaSortField.TITLE -> "标题"
     MediaSortField.COMMUNITY_RATING -> "公众评分"
