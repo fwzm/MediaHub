@@ -7,6 +7,8 @@ import com.mediahub.core.common.NavArgCodec
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.LogTag
+import com.mediahub.feature.detail.source.CanonicalSourceResolver
+import com.mediahub.feature.detail.source.SourceResolution
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
@@ -32,6 +34,7 @@ class DetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val serverStore: ServerStore,
     private val registry: MediaProviderRegistry,
+    private val sourceResolver: CanonicalSourceResolver,
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -44,8 +47,12 @@ class DetailViewModel @Inject constructor(
     private val _seriesState = MutableStateFlow(SeriesBrowseState())
     val seriesState: StateFlow<SeriesBrowseState> = _seriesState.asStateFlow()
 
+    private val _sourceState = MutableStateFlow<SourceResolutionState>(SourceResolutionState.Idle)
+    val sourceState: StateFlow<SourceResolutionState> = _sourceState.asStateFlow()
+
     private var handle: ProviderHandle? = null
     private var episodeJob: Job? = null
+    private var sourceJob: Job? = null
 
     init { load() }
 
@@ -62,6 +69,7 @@ class DetailViewModel @Inject constructor(
                     ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的详情能力尚未接入")
                 val detail = detailProvider.getItemDetail(itemId)
                 _uiState.value = DetailUiState.Content(detail)
+                startSourceResolution(detail.item)
 
                 // 仅 SERIES 类型加载季列表（复用 browse 链）
                 if (detail.item.type == MediaType.SERIES) {
@@ -144,6 +152,26 @@ class DetailViewModel @Inject constructor(
         else -> "加载失败：${e.message}"
     }
 
+    /**
+     * 1F C1（ADR-038）：sibling source 解析为旁路异步状态——主内容绝不等待；
+     * 解析失败只在 sourceState 内表达（partial），绝不把已正常打开的 Detail
+     * 变成 Error。route 销毁/切换 = viewModelScope 取消传导，全部解析终止。
+     */
+    private fun startSourceResolution(item: MediaItem) {
+        sourceJob?.cancel()
+        if (item.type != MediaType.MOVIE && item.type != MediaType.SERIES) {
+            _sourceState.value = SourceResolutionState.Idle
+            return
+        }
+        sourceJob = viewModelScope.launch {
+            _sourceState.value = SourceResolutionState.Resolving
+            _sourceState.value = when (val resolution = sourceResolver.resolve(item, serverId)) {
+                is SourceResolution.Idle -> SourceResolutionState.Idle
+                is SourceResolution.Completed -> SourceResolutionState.Resolved(resolution)
+            }
+        }
+    }
+
     companion object {
         /** 季排序：普通季(1,2,3…)→Specials(seasonNumber=0)→未知(seasonNumber=null) */
         fun sortSeasons(seasons: List<MediaItem>): List<MediaItem> {
@@ -171,4 +199,15 @@ sealed interface DetailUiState {
     data object Loading : DetailUiState
     data class Content(val detail: MediaDetail) : DetailUiState
     data class Error(val message: String) : DetailUiState
+}
+
+/**
+ * 1F C1：sibling source 解析状态（独立于 [DetailUiState]，
+ * ADR-038：current detail load failure = fatal；sibling failure = partial only）。
+ */
+sealed interface SourceResolutionState {
+    data object Idle : SourceResolutionState
+    data object Resolving : SourceResolutionState
+    data class Resolved(val resolution: SourceResolution.Completed) :
+        SourceResolutionState
 }
