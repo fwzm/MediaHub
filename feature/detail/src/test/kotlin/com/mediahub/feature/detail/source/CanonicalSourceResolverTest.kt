@@ -73,6 +73,7 @@ class CanonicalSourceResolverTest {
         var respond: (Set<CanonicalKey>) -> List<MediaItem> = { emptyList() }
         var failure: Exception? = null
         var delayMs: Long = 0
+        var forceHasMore = false
         val queries = mutableListOf<Set<CanonicalKey>>()
         val pages = mutableListOf<PageRequest>()
 
@@ -84,7 +85,14 @@ class CanonicalSourceResolverTest {
             pages += page
             failure?.let { throw it }
             if (delayMs > 0) delay(delayMs)
-            return PagedResult(items = respond(keys))
+            val items = respond(keys)
+            // hasMore 必须显式：PagedResult 的默认值是 items.isNotEmpty()，
+            // 隐式构造会让所有非空页都声称"还有更多"（truncated 断言全部失真）
+            return PagedResult(
+                items = items,
+                hasMore = forceHasMore,
+                nextOffset = if (forceHasMore) items.size else null,
+            )
         }
     }
 
@@ -381,5 +389,27 @@ class CanonicalSourceResolverTest {
         assertEquals(1, flooding.queries.size)
         assertTrue(result.truncated)
         assertEquals(41, result.occurrences.size)
+    }
+
+    // ---- 13（评审 P2-1 回归）：items < limit 但 hasMore=true → truncated，不声称完整 ----
+
+    @Test
+    fun `server reported more pages marks resolution truncated`() = runTest {
+        // 真实分页场景：limit=64 只返回 1 条，但 TotalRecordCount 更大——
+        // 后续页可能含 alias bridge；v1 不续拉，但必须标 truncated
+        val partial = FakeIdentityLookup().apply {
+            respond = { listOf(item("srv-b", "b1", ExternalIds(tmdb = "1"))) }
+            forceHasMore = true
+        }
+        val result = resolver(
+            "srv-a" to handle("srv-a", FakeIdentityLookup()),
+            "srv-b" to handle("srv-b", partial),
+        ).resolve(
+            seed = item("srv-a", "a1", ExternalIds(tmdb = "1")),
+            activeServerId = "srv-a",
+        ) as SourceResolution.Completed
+
+        assertEquals(listOf("a1", "b1"), result.occurrences.map { it.item.id })
+        assertTrue("hasMore=true 必须以 truncated 透出", result.truncated)
     }
 }

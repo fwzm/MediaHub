@@ -64,6 +64,8 @@ sealed interface SourceResolution {
  * 硬边界 v1（ADR-038 冻结）：concurrency ≤ 4；per-server timeout = 8s；
  * maxRounds = 4；maxCanonicalKeys = 32（轮次边界检查，超出不再发起新查询轮）；
  * maxOccurrences = 64。达上限返回 truncated，不做 title/year fallback。
+ * 评审 P2-1：单页 lookup 返回 hasMore=true（服务器尚有后续页，可能含 alias bridge）
+ * 同样只标 truncated（v1 不续拉分页），绝不把 partial 当 complete 声称。
  *
  * 失败语义：单服务器 lookup 失败/超时 = 该服务器本轮贡献为空（partial），
  * 绝不影响解析整体完成；[CancellationException] 必须穿透（取消红线，
@@ -93,6 +95,7 @@ class CanonicalSourceResolver @Inject constructor(
         val knownKeys = seedKeys.toMutableSet()
         val queriedKeys = mutableSetOf<CanonicalKey>()
         var truncated = false
+        var incompletePagination = false
 
         var rounds = 0
         while (true) {
@@ -106,6 +109,9 @@ class CanonicalSourceResolver @Inject constructor(
             queriedKeys.addAll(newKeys)
 
             val perServer = lookupAll(targets, newKeys)
+            // 评审 P2-1：任一服务器报 hasMore=true = 发现不完整（后续页可能含 alias
+            // bridge）。只标记不中止——继续用已知 keys 在其余服务器上扩分量仍有价值。
+            if (perServer.any { it.hasMore }) incompletePagination = true
             var mutated = false
             outer@ for (server in perServer) {
                 for (item in server.items) {
@@ -141,7 +147,10 @@ class CanonicalSourceResolver @Inject constructor(
                 isActive = idx == 0,
             )
         }
-        return SourceResolution.Completed(occurrences = occurrences, truncated = truncated)
+        return SourceResolution.Completed(
+            occurrences = occurrences,
+            truncated = truncated || incompletePagination,
+        )
     }
 
     // ---- 内部结构 ----
@@ -165,6 +174,7 @@ class CanonicalSourceResolver @Inject constructor(
         val serverId: String,
         val serverName: String,
         val items: List<MediaItem>,
+        val hasMore: Boolean,
     )
 
     /**
@@ -198,7 +208,7 @@ class CanonicalSourceResolver @Inject constructor(
                                 keys,
                                 PageRequest(offset = 0, limit = LOOKUP_PAGE_LIMIT),
                             )
-                            ServerLookup(target.serverId, target.serverName, result.items)
+                            ServerLookup(target.serverId, target.serverName, result.items, result.hasMore)
                         }
                     } catch (e: TimeoutCancellationException) {
                         // per-server 超时 = 该服务器本轮空贡献（partial），不是整体取消
@@ -228,7 +238,8 @@ class CanonicalSourceResolver @Inject constructor(
         const val LOOKUP_CONCURRENCY = 4
         const val PER_SERVER_TIMEOUT_MS = 8_000L
 
-        /** 单页拉取上限与 maxOccurrences 对齐；续拉分页非 v1 范围。 */
+        /** 单页拉取上限与 maxOccurrences 对齐；续拉分页非 v1 范围，
+         *  服务器报 hasMore=true 时结果标 truncated（评审 P2-1）。 */
         const val LOOKUP_PAGE_LIMIT = 64
     }
 }

@@ -278,9 +278,14 @@
       EmbyIdentityLookupProviderTest 8 + ProviderHandleTest IDENTITY_LOOKUP 推导 +
       CanonicalSourceResolverTest 12（传递闭包/同服副本/partial/取消红线/虚拟时间超时/三类硬边界）+
       SourceSelectorModelTest 3 + DetailViewModelTest sourceState；全仓库 ./gradlew test PASS
-- [ ] integration 分支 + PR + CI（绿后 STOP 等独立审查）
+- [x] integration 分支 + **PR #8**（base=d128d09）+ exact-head CI 33262600151 @ 592182b success
+- [x] 独立 review（2026-08-30）裁定 PATCH REQUIRED → final hardening（本 commit）：
+      P2-1 lookup hasMore→truncated（回归：items<limit 但 hasMore=true）/
+      P2-2 truncation 提示与 selector gate 解耦（单 server truncated 也提示，
+      truncationMessage 纯函数）/ Emby unsupported MediaType（SEASON）guard 0 请求
+- [ ] 独立 review 短复核（新 exact-head build 绿后）→ 放行真机 smoke
 - [ ] 真机 smoke（需两服务器共享 ProviderIds 的条目；1E 实测两源 Movie 无共享 ID，需先补数据）
-- 状态：**feature/1f-canonical-detail 四刀落链：a11222f(A1) → 8d4f052(B1) → a360eb2(C1) → 770de17(C2)**
+- 状态：**dev 链 a11222f→…→770de17 + final hardening（本 commit）；PR #8 CI 绿 @592182b，hardening 后 CI 重跑中**
 
 ## Phase 1D — Library Filtering / Query Pipeline Extension（2026-08-29）✅ SEALED / PASS（device verification PASS）
 

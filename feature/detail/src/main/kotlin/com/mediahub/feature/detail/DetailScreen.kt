@@ -53,6 +53,7 @@ import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
 import com.mediahub.feature.detail.source.shouldShowSourceSelector
 import com.mediahub.feature.detail.source.sourceRows
+import com.mediahub.feature.detail.source.truncationMessage
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
@@ -470,6 +471,8 @@ private fun EpisodeRow(
  * 跨服务器来源选择（1F C2，ADR-038）：
  * 仅 resolved 且 distinct serverId ≥ 2 时出现；active 行不可再点（即当前 route）。
  * 点击不 mutate 本 ViewModel——由 NavHost 做 route replacement，Back 不回 Detail A。
+ * 评审 P2-2：truncation 提示与 selector 出现条件解耦——尚未发现第二个 server
+ * 时（恰是最可能漏源的场景）也必须提示。
  */
 @Composable
 private fun SourceSelector(
@@ -478,33 +481,34 @@ private fun SourceSelector(
 ) {
     if (onSwitchSource == null) return
     val resolved = (sourceState as? SourceResolutionState.Resolved)?.resolution ?: return
-    if (!shouldShowSourceSelector(resolved.occurrences)) return
 
-    Text(
-        "来源",
-        style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(horizontal = 16.dp),
-    )
-    Spacer(Modifier.height(8.dp))
-    LazyRow(
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items(
-            sourceRows(resolved.occurrences),
-            key = { "${it.serverId}/${it.itemId}" },
-        ) { row ->
-            FilterChip(
-                selected = row.isActive,
-                enabled = !row.isActive,
-                onClick = { onSwitchSource(row.serverId, row.itemId, row.title) },
-                label = { Text(row.label) },
-            )
+    if (shouldShowSourceSelector(resolved.occurrences)) {
+        Text(
+            "来源",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        Spacer(Modifier.height(8.dp))
+        LazyRow(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(
+                sourceRows(resolved.occurrences),
+                key = { "${it.serverId}/${it.itemId}" },
+            ) { row ->
+                FilterChip(
+                    selected = row.isActive,
+                    enabled = !row.isActive,
+                    onClick = { onSwitchSource(row.serverId, row.itemId, row.title) },
+                    label = { Text(row.label) },
+                )
+            }
         }
     }
-    if (resolved.truncated) {
+    truncationMessage(resolved)?.let {
         Text(
-            "来源发现达到上限，列表可能不完整",
+            it,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),

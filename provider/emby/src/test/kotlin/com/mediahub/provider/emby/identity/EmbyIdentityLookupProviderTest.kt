@@ -195,6 +195,19 @@ class EmbyIdentityLookupProviderTest {
         assertEquals(0, server.requestCount)
     }
 
+    // ---- 评审 hardening 回归：无 IncludeItemTypes wire 值的类型拒绝，不隐式放宽为全类型查询 ----
+
+    @Test
+    fun `unsupported media type season rejected without network`() {
+        val seasonKeys = setOf(CanonicalKey(MediaType.SEASON, ExternalIdProvider.TVDB, "42"))
+        try {
+            runBlocking { provider().findByCanonicalKeys(seasonKeys, PageRequest()) }
+            fail("必须抛 IllegalArgumentException")
+        } catch (_: IllegalArgumentException) {
+        }
+        assertEquals(0, server.requestCount)
+    }
+
     // ---- 6：401 → AuthExpired；无会话 → AuthRequired ----
 
     @Test

@@ -5,6 +5,7 @@ import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -72,5 +73,17 @@ class SourceSelectorModelTest {
         // 行携带各自 itemId/serverId，切换路由可直达目标 occurrence
         assertEquals(listOf("a1", "a1-dup", "b1"), rows.map { it.itemId })
         assertEquals(listOf("s1", "s1", "s2"), rows.map { it.serverId })
+    }
+
+    // ---- 评审 P2-2 回归：truncation 提示与 selector gate 解耦 ----
+
+    @Test
+    fun `truncation warning shows even when only one server discovered`() {
+        val single = listOf(occ("s1", "予初", "a1", active = true))
+        // gate：单 server 不显示 selector——但 truncated 时提示必须独立成立
+        assertFalse(shouldShowSourceSelector(single))
+        val truncated = SourceResolution.Completed(occurrences = single, truncated = true)
+        assertEquals("来源发现未完成，列表可能不完整", truncationMessage(truncated))
+        assertNull("未 truncated 不提示", truncationMessage(SourceResolution.Completed(single, truncated = false)))
     }
 }

@@ -31,6 +31,8 @@ private val ExternalIdProvider.wireName: String
  *   精确身份匹配，不依赖文本标题。
  * - 多 key 逗号连接（`tmdb.123,imdb.tt…`）；IncludeItemTypes 锁定 keys 的
  *   MediaType（keys 必须同类型，复用 [EmbyApiClient.includeItemTypes] 单一映射）。
+ *   评审 hardening：无 wire 值的类型（SEASON/VIDEO 等）直接拒绝——绝不隐式放宽为
+ *   全类型 AnyProviderIdEquals 查询（capability 公共 contract 不得静默扩大匹配面）。
  * - Fields 与搜索共用 SEARCH_FIELDS（含 ProviderIds）；LIBRARY_FIELDS 不动（ADR-037/038）。
  * - 会话/错误映射与浏览/搜索共用 [EmbyProviderSupport]（单一来源）。
  */
@@ -49,6 +51,11 @@ class EmbyIdentityLookupProvider(
         require(keys.isNotEmpty()) { "findByCanonicalKeys 需要非空 CanonicalKey 集合" }
         val type = keys.first().type
         require(keys.all { it.type == type }) { "findByCanonicalKeys 的 keys 必须同 MediaType" }
+        // 评审 hardening：SEASON/VIDEO 等无 IncludeItemTypes wire 值的类型拒绝——
+        // 否则会退化成全类型 AnyProviderIdEquals 查询（隐式扩大匹配面）
+        val includeItemTypes = requireNotNull(api.includeItemTypes(type)) {
+            "Emby identity lookup 不支持 MediaType=$type"
+        }
 
         val anyProviderIdEquals = keys.joinToString(",") { "${it.provider.wireName}.${it.value}" }
         val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
@@ -57,7 +64,7 @@ class EmbyIdentityLookupProvider(
                 token = token,
                 userId = userId,
                 anyProviderIdEquals = anyProviderIdEquals,
-                includeItemTypes = api.includeItemTypes(type),
+                includeItemTypes = includeItemTypes,
                 page = page,
             )
             PagedResult(
