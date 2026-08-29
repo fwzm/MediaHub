@@ -308,7 +308,8 @@
         detail resolver 仍补全墨云阁匹配——搜索层漏掉的跨源被 detail 层找回
       隐私：logcat 搜索词零命中（SearchTerm=**** ×36 脱敏正常；4 行原始词全为
       adbd 自身 `input text` 命令日志）；AnyProviderIdEquals 原始 ID 零命中
-- 状态：**device verification PASS / PR #8 @ 267c122 待合并封板**
+- 状态：**SEALED / PASS**（PR #8 merged @ `a7df978`，2026-08-29 裁定；
+  device verification PASS + code review PASS + hardening PASS + exact-head CI 全绿）
   （测试计数：resolver 13 / selector model 4 / Emby lookup 9 / graph 6 / SearchAggregator 11 保持）
 
 ## Phase 1D — Library Filtering / Query Pipeline Extension（2026-08-29）✅ SEALED / PASS（device verification PASS）

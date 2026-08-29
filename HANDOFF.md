@@ -1,5 +1,5 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-30（Phase 1F：真机 smoke PASS @267c122——8 场景 6 PASS + 2 NOT_AVAILABLE(automated PASS)，PR #8 待合并封板）
+> 最后更新：2026-08-30（Phase 1F **SEALED / PASS** @ `a7df978`——PR #8 merged，authoritative baseline 前移）
 
 ## Phase 1F Canonical Detail / Source Selection（进行中）
 - **ADR-038 已冻结**（DECISIONS.md）：方案 A = detail-time canonical source resolution；
@@ -35,7 +35,12 @@
   隐私：SearchTerm=**** 脱敏 ×36，原始词仅 adbd 命令日志，AnyProviderIdEquals 零命中。
   附加观察：予初同 canonical 双副本（occurrence 语义真实验证）；入口相关可达性
   （墨云阁入口仅见予初单条目）；幕府将军搜索 Single 但 resolver 补全跨源（增量价值实证）。
-- **待办**：PR #8 合并封板（等最终裁定）→ main 前移 `267c122` 后续。
+- **封板（2026-08-29 裁定 APPROVED TO MERGE）**：PR #8 merged，普通 merge 生成 merge
+  commit **`a7df978`** = 新 authoritative baseline（main 前移到 merge commit 本身，
+  非 PR branch 上的 267c122/68ac981——SHA 表述已校正）。下一阶段 =
+  **Phase 1G Jellyfin Provider Foundation & Parity**（从 `a7df978` 切分支，contract 待冻结：
+  A connection/auth → B library/detail → C search+identity lookup（1G-E 为架构验收点：
+  Emby↔Jellyfin 跨 Provider canonical source 零特殊分支）→ D playback/progress/smoke）。
 
 ## Phase CI-H1（前次）：CI/Test Hardening
 - **测试治理规则（对所有后续 Agent 生效）**：
