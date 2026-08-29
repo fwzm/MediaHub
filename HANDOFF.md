@@ -1,5 +1,5 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-30（Phase 1F：独立 review PATCH REQUIRED → final hardening 落地（本 commit）；PR #8 等新 exact-head build + 短复核，真机 pending）
+> 最后更新：2026-08-30（Phase 1F：真机 smoke PASS @267c122——8 场景 6 PASS + 2 NOT_AVAILABLE(automated PASS)，PR #8 待合并封板）
 
 ## Phase 1F Canonical Detail / Source Selection（进行中）
 - **ADR-038 已冻结**（DECISIONS.md）：方案 A = detail-time canonical source resolution；
@@ -27,8 +27,15 @@
   requireNotNull 拒绝，不隐式放宽为全类型 AnyProviderIdEquals 查询。
   对应回归：CanonicalSourceResolverTest 13（hasMore→truncated）/
   SourceSelectorModelTest（单 server truncated 也提示）/ EmbyIdentityLookupProviderTest（SEASON 拒绝 0 请求）。
-- **待办**：新 exact-head build 绿 → 独立 review 短复核放行 → 真机 smoke
-  （需两服务器共享 ProviderIds 条目——1E 实测两源 Movie 无共享 ID，需先补测试数据）。
+- **真机 smoke（2026-08-30 PASS）**：Xiaomi 14U @123e243f，APK @ 267c122
+  SHA256 9774684c…dc38b3（device pull == local build 三向一致）。
+  8 场景：1-6 全 PASS（含 route replacement Back 核心验收、播放 header 显示目标 server）；
+  7 单源无 selector = NOT_AVAILABLE（三样本 shogun/severance/zootopia 全真实跨源；
+  Episode Idle 路径真机确认 + 单测覆盖）；8 = NOT_AVAILABLE/automated PASS。
+  隐私：SearchTerm=**** 脱敏 ×36，原始词仅 adbd 命令日志，AnyProviderIdEquals 零命中。
+  附加观察：予初同 canonical 双副本（occurrence 语义真实验证）；入口相关可达性
+  （墨云阁入口仅见予初单条目）；幕府将军搜索 Single 但 resolver 补全跨源（增量价值实证）。
+- **待办**：PR #8 合并封板（等最终裁定）→ main 前移 `267c122` 后续。
 
 ## Phase CI-H1（前次）：CI/Test Hardening
 - **测试治理规则（对所有后续 Agent 生效）**：
