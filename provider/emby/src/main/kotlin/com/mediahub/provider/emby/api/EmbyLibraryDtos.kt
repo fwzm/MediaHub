@@ -51,6 +51,10 @@ interface EmbyItemFields {
     val officialRating: String?
     val size: Long?
     val bitrate: Long?
+
+    // ---- Phase 1E 跨源身份：ProviderIds 字典（wire 形如 {"Imdb":"tt...","Tmdb":"123"}；
+    //      键名大小写不敏感、冲突 provider 丢弃——归一化见 EmbyMediaItemMapper） ----
+    val providerIds: Map<String, String>?
 }
 /**
  * Emby BaseItem（同时用于 Views 顶层库与 Items 条目）。
@@ -87,6 +91,7 @@ data class EmbyBaseItemDto(
     @SerialName("OfficialRating") override val officialRating: String? = null,
     @SerialName("Size") override val size: Long? = null,
     @SerialName("Bitrate") override val bitrate: Long? = null,
+    @SerialName("ProviderIds") override val providerIds: Map<String, String>? = null,
 ) : EmbyItemFields
 
 /** 用户数据（仅保留浏览所需的最小字段，Phase 1B-1 不用播放进度）。 */

@@ -46,6 +46,7 @@ data class EmbyUserItemDto(
     @SerialName("OfficialRating") override val officialRating: String? = null,
     @SerialName("Size") override val size: Long? = null,
     @SerialName("Bitrate") override val bitrate: Long? = null,
+    @SerialName("ProviderIds") override val providerIds: Map<String, String>? = null,
 ) : EmbyItemFields
 
 /** 演职人员（Emby People 字段）。 */

@@ -346,3 +346,27 @@
     Provider 返回顺序渲染（folder 行与媒体格交错，允许全宽行造成视觉空位），
     不得隐式按目录优先重排；SERVER_DEFAULT 保留历史目录优先展示策略。
     导航控件（返回上级）固定顶部，不参与排序语义。
+
+## ADR-037 Phase 1E Canonical Media Identity（1E 聚合卡）
+- 状态：已采纳（2026-08-29）
+- 决策：
+  - **External identity = multi-alias 候选集合，经传递闭包形成等价组**：每个 item
+    产出其全部 (MediaType, provider, value) CanonicalKey 别名集合；同一 item 的
+    多别名互为 alias，共享任一相同 (provider, value) 的 item 之间建立 identity
+    edge；**最终聚合组 = alias graph 的 connected component（传递闭包）**，
+    非 direct-intersection 成对判定（交集不满足传递性，无法形成互斥分组）。
+    **禁止"按优先级选一个主键"**——跨服务器 ID 覆盖互不完整（例：A 有
+    TMDb+IMDb、B 只有 IMDb），单主键会让这类条目反而聚合失败。
+    MediaType 内嵌键内（MOVIE/TMDB/123 ≠ SERIES/TMDB/123）。
+  - **title/year 永不参与 identity 判定**；无任何共享外部 ID 的条目保持单例，
+    绝不聚合（禁止标题+年份弱合并）。
+  - **Episode v1 只用自身 ProviderIds**；series canonical + S/E 复合键 DEFER
+    （需要额外 per-hit IO 或持久 identity index，当前数据链不支持）。
+  - **聚合只发生在搜索结果层**（GlobalSearchState.hits 的纯函数投影
+    SearchAggregator.group()）；GlobalSearchEngine 并发/取消/partial success
+    语义零改动；Library 浏览墙保持单库语义。
+  - **MultiSource 卡成立条件**：canonical 匹配 AND distinct serverId ≥ 2
+    （同服务器重复条目不算"多来源"）；"N 个来源" = distinct serverId 数。
+  - **卡片元数据不做字段级融合**：取稳定结果序首个 occurrence。
+  - ProviderIds 归一化：key 小写/trim、value trim、空白丢弃；
+    同 provider 冲突值 → 整个 provider 丢弃（不做 first/last wins）。

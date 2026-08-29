@@ -46,6 +46,8 @@ data class MediaItem(
     val playCount: Int = 0,
     val userData: UserData? = null,
     val sortName: String = title,
+    /** 跨源外部身份（Phase 1E，Provider 映射层填充；null = 该源未提供任何外部 ID） */
+    val externalIds: ExternalIds? = null,
 )
 
 /** 服务端保存的用户数据（播放进度等）。 */

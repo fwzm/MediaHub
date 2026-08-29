@@ -99,6 +99,8 @@ class EmbySearchProviderTest {
         assertEquals("20", url.queryParameter("Limit"))
         assertEquals("true", url.queryParameter("EnableUserData"))
         assertTrue(url.queryParameter("Fields")!!.contains("PrimaryImageAspectRatio"))
+        // Phase 1E：跨源身份 ProviderIds 仅进搜索 Fields；Library 浏览 payload 不扩大
+        assertTrue(url.queryParameter("Fields")!!.contains("ProviderIds"))
     }
 
     // ---- 2：Token 只走 Header，绝不进 URL（ADR-026） ----
@@ -218,6 +220,47 @@ class EmbySearchProviderTest {
         } catch (e: ProviderException.AuthExpired) {
             assertEquals("srv-1", e.serverId)
         }
+    }
+
+    // ---- 9（Phase 1E end-to-end）：真实 JSON ProviderIds → MediaItem.externalIds ----
+
+    @Test
+    fun `search response provider ids populate item external ids end to end`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"Items":[
+                    {"Id":"m1","Name":"Fargo","Type":"Movie",
+                     "ProviderIds":{"Imdb":"tt0137523","Tmdb":"275"}}
+                ],"TotalRecordCount":1}"""
+            )
+        )
+
+        val result = provider().search("fargo", PageRequest())
+
+        val item = result.items.single()
+        assertEquals("tt0137523", item.externalIds?.imdb)
+        assertEquals("275", item.externalIds?.tmdb)
+        // wire 键大小写混合已归一化；MediaItem 携带后 CanonicalKeyPolicy 可直接消费
+    }
+
+    @Test
+    fun `search response with unknown only provider ids yields null external ids`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"Items":[
+                    {"Id":"m2","Name":"X","Type":"Movie",
+                     "ProviderIds":{"AniDb":"123"}}
+                ],"TotalRecordCount":1}"""
+            )
+        )
+
+        val result = provider().search("x", PageRequest())
+
+        val item = result.items.single()
+        // 不支持的 provider 等同无外部身份：ExternalIds 整体为 null（非空壳对象）
+        assertNull(item.externalIds)
     }
 
     // ---- 8：网络错误 → Network；无会话 → AuthRequired ----
