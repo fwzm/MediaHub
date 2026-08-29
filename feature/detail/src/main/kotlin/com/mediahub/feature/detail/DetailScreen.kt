@@ -51,6 +51,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.BackdropImage
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
+import com.mediahub.feature.detail.source.shouldShowSourceSelector
+import com.mediahub.feature.detail.source.sourceRows
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
@@ -68,10 +70,12 @@ fun DetailRoute(
     onBack: () -> Unit,
     onPlay: (serverId: String, itemId: String, snapshot: PlaybackLaunchSnapshot) -> Unit,
     onOpenItem: ((MediaItem) -> Unit)? = null,
+    onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
     viewModel: DetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val seriesState by viewModel.seriesState.collectAsStateWithLifecycle()
+    val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -125,6 +129,8 @@ fun DetailRoute(
                 onSelectSeason = viewModel::selectSeason,
                 onRetryEpisodes = viewModel::retryEpisodes,
                 onOpenItem = onOpenItem,
+                sourceState = sourceState,
+                onSwitchSource = onSwitchSource,
             )
         }
     }
@@ -139,6 +145,8 @@ private fun DetailBody(
     onSelectSeason: (String) -> Unit = {},
     onRetryEpisodes: () -> Unit = {},
     onOpenItem: ((MediaItem) -> Unit)? = null,
+    sourceState: SourceResolutionState = SourceResolutionState.Idle,
+    onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
 ) {
     val item = detail.item
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
@@ -216,6 +224,12 @@ private fun DetailBody(
             Spacer(Modifier.width(4.dp))
             Text("播放")
         }
+
+        // ---- 1F C2：跨服务器来源选择（ADR-038） ----
+        SourceSelector(
+            sourceState = sourceState,
+            onSwitchSource = onSwitchSource,
+        )
 
         // 导演
         val directors = item.people.filter { it.role == com.mediahub.model.Person.Role.DIRECTOR }
@@ -449,5 +463,51 @@ private fun EpisodeRow(
                 )
             }
         }
+    }
+}
+
+/**
+ * 跨服务器来源选择（1F C2，ADR-038）：
+ * 仅 resolved 且 distinct serverId ≥ 2 时出现；active 行不可再点（即当前 route）。
+ * 点击不 mutate 本 ViewModel——由 NavHost 做 route replacement，Back 不回 Detail A。
+ */
+@Composable
+private fun SourceSelector(
+    sourceState: SourceResolutionState,
+    onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)?,
+) {
+    if (onSwitchSource == null) return
+    val resolved = (sourceState as? SourceResolutionState.Resolved)?.resolution ?: return
+    if (!shouldShowSourceSelector(resolved.occurrences)) return
+
+    Text(
+        "来源",
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+    Spacer(Modifier.height(8.dp))
+    LazyRow(
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(
+            sourceRows(resolved.occurrences),
+            key = { "${it.serverId}/${it.itemId}" },
+        ) { row ->
+            FilterChip(
+                selected = row.isActive,
+                enabled = !row.isActive,
+                onClick = { onSwitchSource(row.serverId, row.itemId, row.title) },
+                label = { Text(row.label) },
+            )
+        }
+    }
+    if (resolved.truncated) {
+        Text(
+            "来源发现达到上限，列表可能不完整",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+        )
     }
 }
