@@ -350,10 +350,13 @@
 ## ADR-037 Phase 1E Canonical Media Identity（1E 聚合卡）
 - 状态：已采纳（2026-08-29）
 - 决策：
-  - **External identity = multi-alias 候选集合，交集匹配**：每个 item 产出其全部
-    (MediaType, provider, value) CanonicalKey 别名集合；两 item 可聚合当且仅当
-    同 MediaType 且集合交集非空。**禁止"按优先级选一个主键"**——跨服务器 ID 覆盖
-    互不完整（A 有 TMDb、B 只有 IMDb），单主键会让这类条目反而聚合失败。
+  - **External identity = multi-alias 候选集合，经传递闭包形成等价组**：每个 item
+    产出其全部 (MediaType, provider, value) CanonicalKey 别名集合；同一 item 的
+    多别名互为 alias，共享任一相同 (provider, value) 的 item 之间建立 identity
+    edge；**最终聚合组 = alias graph 的 connected component（传递闭包）**，
+    非 direct-intersection 成对判定（交集不满足传递性，无法形成互斥分组）。
+    **禁止"按优先级选一个主键"**——跨服务器 ID 覆盖互不完整（例：A 有
+    TMDb+IMDb、B 只有 IMDb），单主键会让这类条目反而聚合失败。
     MediaType 内嵌键内（MOVIE/TMDB/123 ≠ SERIES/TMDB/123）。
   - **title/year 永不参与 identity 判定**；无任何共享外部 ID 的条目保持单例，
     绝不聚合（禁止标题+年份弱合并）。

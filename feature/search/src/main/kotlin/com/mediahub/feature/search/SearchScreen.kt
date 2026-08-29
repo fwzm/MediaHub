@@ -27,6 +27,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -38,6 +39,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
 import com.mediahub.feature.search.engine.GlobalSearchState
+import com.mediahub.feature.search.engine.SearchAggregator
 import com.mediahub.feature.search.engine.SearchResultEntry
 import com.mediahub.feature.search.engine.UnifiedSearchHit
 import com.mediahub.model.MediaItem
@@ -97,7 +99,6 @@ fun SearchRoute(
     ) { padding ->
         SearchBody(
             state = state,
-            entries = viewModel.entries.collectAsStateWithLifecycle().value,
             onOpenItem = onOpenItem,
             modifier = Modifier
                 .fillMaxSize()
@@ -109,10 +110,11 @@ fun SearchRoute(
 @Composable
 private fun SearchBody(
     state: GlobalSearchState,
-    entries: List<SearchResultEntry>,
     onOpenItem: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 聚合为纯同步投影：与 state 来自同一 Compose snapshot，杜绝 stale entries 帧闪烁
+    val entries = remember(state.hits) { SearchAggregator.group(state.hits) }
     if (state.query.isBlank()) {
         Column(
             modifier = modifier.padding(24.dp),

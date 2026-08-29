@@ -156,6 +156,31 @@ class SearchAggregatorTest {
         entries.forEach { assertTrue(it is SearchResultEntry.Single) }
     }
 
+    @Test
+    fun `bridge items form one transitive connected component`() {
+        val entries = SearchAggregator.group(
+            listOf(
+                hit("srv-a", "A", "a1", MediaType.MOVIE, ExternalIds(tmdb = "1", imdb = "X")),
+                hit("srv-b", "B", "b1", MediaType.MOVIE, ExternalIds(imdb = "X", tvdb = "Y")),
+                hit("srv-c", "C", "c1", MediaType.MOVIE, ExternalIds(tvdb = "Y")),
+            ),
+        )
+
+        val multi = entries.filterIsInstance<SearchResultEntry.MultiSource>().single()
+        assertEquals(3, multi.occurrences.size)
+        // bridge 后组内别名并集包含全部三键（TMDB/1、IMDB/X、TVDB/Y）
+        assertTrue(
+            multi.identityKeys.containsAll(
+                setOf(
+                    com.mediahub.model.CanonicalKey(MediaType.MOVIE, ExternalIdProvider.TMDB, "1"),
+                    com.mediahub.model.CanonicalKey(MediaType.MOVIE, ExternalIdProvider.IMDB, "X"),
+                    com.mediahub.model.CanonicalKey(MediaType.MOVIE, ExternalIdProvider.TVDB, "Y"),
+                ),
+            ),
+        )
+        assertTrue(multi.occurrences.map { it.item.id }.containsAll(setOf("a1", "b1", "c1")))
+    }
+
     // ---- 冻结场景 8：跨 2 server 同 identity → MultiSource, sourceCount=2 ----
 
     @Test

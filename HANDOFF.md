@@ -1,6 +1,6 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 > 最后更新：2026-08-29（Phase 1E Canonical Media Identity：跨源身份 + 搜索聚合卡，代码+测试+文档完成，真机验证 pending）
-## Phase CI-H1（本次）：CI/Test Hardening
+## Phase CI-H1（前次）：CI/Test Hardening
 - **测试治理规则（对所有后续 Agent 生效）**：
   - **coroutine-test**：被测对象拥有周期性 coroutine（polling/heartbeat/periodic delay）时，
     测试禁止无界 `advanceUntilIdle()`（会永久自旋拖死测试）——改用 `runCurrent()`、

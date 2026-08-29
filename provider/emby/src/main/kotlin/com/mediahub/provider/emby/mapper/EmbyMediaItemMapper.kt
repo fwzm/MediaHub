@@ -35,12 +35,14 @@ object EmbyMediaItemMapper {
                 normalized[k] = v
             }
         }
-        if (normalized.isEmpty()) return null
-        return ExternalIds(
+        // 只认 tmdb/imdb/tvdb 三键：若 normalized 里只剩不支持的 provider
+        // （如 AniDb），对外等同"无外部身份"，返回 null 而非空 ExternalIds
+        val externalIds = ExternalIds(
             tmdb = normalized["tmdb"],
             imdb = normalized["imdb"],
             tvdb = normalized["tvdb"],
         )
+        return externalIds.takeUnless { it.isEmpty }
     }
 
     /**
