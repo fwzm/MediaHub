@@ -72,9 +72,9 @@ class EmbyLibraryProvider(
         }
     }
 
-    // ---- Phase 1C-2：排序下沉（Query Pipeline） ----
+    // ---- Phase 1C-2：排序下沉（Query Pipeline）；1D 起同 capability 覆盖筛选 ----
 
-    override val sortCapabilities = EmbySortMapper.CAPABILITIES
+    override val capabilities = EmbySortMapper.CAPABILITIES
 
     /**
      * 带 MediaListQuery 的浏览：SortBy/SortOrder 传给服务器，在分页之前执行；

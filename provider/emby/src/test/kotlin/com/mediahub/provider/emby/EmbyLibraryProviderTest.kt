@@ -227,14 +227,19 @@ class EmbyLibraryProviderTest {
 
     @Test
     fun `sort capabilities hide unconfirmed emby sortBy fields`() {
-        val caps = provider().sortCapabilities
-        assertTrue(caps.supports(MediaSortField.SERVER_DEFAULT))
-        assertTrue(caps.supports(MediaSortField.CRITIC_RATING))
-        assertTrue(caps.supports(MediaSortField.RANDOM))
+        val caps = provider().capabilities
+        assertTrue(caps.supportsSort(MediaSortField.SERVER_DEFAULT))
+        assertTrue(caps.supportsSort(MediaSortField.CRITIC_RATING))
+        assertTrue(caps.supportsSort(MediaSortField.RANDOM))
         // 官方 SortBy 枚举未包含：capability 隐藏，恢复需 per-server probe（评审 P1）
-        assertFalse(caps.supports(MediaSortField.OFFICIAL_RATING))
-        assertFalse(caps.supports(MediaSortField.BITRATE))
-        assertFalse(caps.supports(MediaSortField.SIZE))
+        assertFalse(caps.supportsSort(MediaSortField.OFFICIAL_RATING))
+        assertFalse(caps.supportsSort(MediaSortField.BITRATE))
+        assertFalse(caps.supportsSort(MediaSortField.SIZE))
+        // Phase 1D 筛选能力：四项全开（官方已文档化参数）
+        assertTrue(caps.supportsFilter(com.mediahub.model.MediaFilterField.MEDIA_TYPE))
+        assertTrue(caps.supportsFilter(com.mediahub.model.MediaFilterField.YEAR))
+        assertTrue(caps.supportsFilter(com.mediahub.model.MediaFilterField.PLAYED))
+        assertTrue(caps.supportsFilter(com.mediahub.model.MediaFilterField.FAVORITE))
     }
 
     // ---- Phase 1C-2：排序/发现字段映射 ----

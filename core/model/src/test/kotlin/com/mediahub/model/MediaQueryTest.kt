@@ -100,30 +100,82 @@ class MediaQueryTest {
 
     @Test
     fun `capabilities supports checks membership`() {
-        val caps = MediaSortCapabilities(
-            setOf(MediaSortField.SERVER_DEFAULT, MediaSortField.TITLE, MediaSortField.COMMUNITY_RATING),
+        val caps = MediaQueryCapabilities(
+            sortFields = setOf(MediaSortField.SERVER_DEFAULT, MediaSortField.TITLE, MediaSortField.COMMUNITY_RATING),
+            filterFields = setOf(MediaFilterField.MEDIA_TYPE),
         )
-        assertTrue(caps.supports(MediaSortField.TITLE))
-        assertFalse(caps.supports(MediaSortField.BITRATE))
+        assertTrue(caps.supportsSort(MediaSortField.TITLE))
+        assertFalse(caps.supportsSort(MediaSortField.BITRATE))
+        assertTrue(caps.supportsFilter(MediaFilterField.MEDIA_TYPE))
+        assertFalse(caps.supportsFilter(MediaFilterField.YEAR))
     }
 
     @Test
     fun `capabilities filter keeps caller order and drops unsupported`() {
-        val caps = MediaSortCapabilities(setOf(MediaSortField.SERVER_DEFAULT, MediaSortField.TITLE))
+        val caps = MediaQueryCapabilities(sortFields = setOf(MediaSortField.SERVER_DEFAULT, MediaSortField.TITLE))
         val requested = listOf(
             MediaSortField.SERVER_DEFAULT,
             MediaSortField.CRITIC_RATING,
             MediaSortField.TITLE,
             MediaSortField.BITRATE,
         )
-        assertEquals(listOf(MediaSortField.SERVER_DEFAULT, MediaSortField.TITLE), caps.filter(requested))
+        assertEquals(listOf(MediaSortField.SERVER_DEFAULT, MediaSortField.TITLE), caps.filterSortFields(requested))
     }
 
     @Test
     fun `server default only is minimal capability`() {
-        val caps = MediaSortCapabilities.SERVER_DEFAULT_ONLY
-        assertTrue(caps.supports(MediaSortField.SERVER_DEFAULT))
-        assertFalse(caps.supports(MediaSortField.RANDOM))
-        assertEquals(listOf(MediaSortField.SERVER_DEFAULT), caps.filter(MediaSortField.entries.toList()))
+        val caps = MediaQueryCapabilities.SERVER_DEFAULT_ONLY
+        assertTrue(caps.supportsSort(MediaSortField.SERVER_DEFAULT))
+        assertFalse(caps.supportsSort(MediaSortField.RANDOM))
+        assertFalse(caps.supportsFilter(MediaFilterField.MEDIA_TYPE))
+        assertEquals(listOf(MediaSortField.SERVER_DEFAULT), caps.filterSortFields(MediaSortField.entries.toList()))
+    }
+
+    // ---- MediaFilter（Phase 1D） ----
+
+    @Test
+    fun `media filter default is all-null and isDefault`() {
+        val filter = MediaFilter()
+        assertNull(filter.mediaType)
+        assertNull(filter.year)
+        assertNull(filter.played)
+        assertNull(filter.favorite)
+        assertTrue(filter.isDefault)
+    }
+
+    @Test
+    fun `media filter with any value is not default`() {
+        assertFalse(MediaFilter(mediaType = MediaType.SERIES).isDefault)
+        assertFalse(MediaFilter(year = 2024).isDefault)
+        assertFalse(MediaFilter(played = false).isDefault)
+        assertFalse(MediaFilter(favorite = true).isDefault)
+    }
+
+    @Test
+    fun `media filter tri-state values are preserved`() {
+        val filter = MediaFilter(played = false, favorite = false)
+        assertEquals(false, filter.played)
+        assertEquals(false, filter.favorite)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `media filter rejects non positive year`() {
+        MediaFilter(year = 0)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `media filter rejects negative year`() {
+        MediaFilter(year = -1)
+    }
+
+    @Test
+    fun `media list query carries filter with default`() {
+        val query = MediaListQuery()
+        assertTrue(query.filter.isDefault)
+        val filtered = query.copy(filter = MediaFilter(mediaType = MediaType.MOVIE, year = 2024))
+        assertEquals(MediaType.MOVIE, filtered.filter.mediaType)
+        assertEquals(2024, filtered.filter.year)
+        // 原 query 不变（immutable）
+        assertTrue(query.filter.isDefault)
     }
 }

@@ -74,8 +74,9 @@ class ProviderHandleTest {
         override val type: ServerType = ServerType.LOCAL
         override val displayName: String = "本地"
         override val descriptor: ProviderDescriptor = provider().descriptor
-        override val sortCapabilities = com.mediahub.model.MediaSortCapabilities(
-            setOf(com.mediahub.model.MediaSortField.SERVER_DEFAULT, com.mediahub.model.MediaSortField.TITLE),
+        override val capabilities = com.mediahub.model.MediaQueryCapabilities(
+            sortFields = setOf(com.mediahub.model.MediaSortField.SERVER_DEFAULT, com.mediahub.model.MediaSortField.TITLE),
+            filterFields = emptySet(),
         )
         override suspend fun testConnection() = ConnectionStatus(ok = true, message = "ok")
         override suspend fun getItems(

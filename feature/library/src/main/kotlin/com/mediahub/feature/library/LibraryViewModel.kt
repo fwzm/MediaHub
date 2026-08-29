@@ -10,7 +10,7 @@ import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
 import com.mediahub.model.MediaListQuery
 import com.mediahub.model.MediaSort
-import com.mediahub.model.MediaSortCapabilities
+import com.mediahub.model.MediaQueryCapabilities
 import com.mediahub.model.MediaSortField
 import com.mediahub.model.PageRequest
 import com.mediahub.provider.api.MediaProviderRegistry
@@ -242,7 +242,7 @@ class LibraryViewModel @Inject constructor(
                         if (currentParent != snapshotParent) return@launch
                         nextOffset = result.nextOffset
                         // 能力自述：支持排序的源给菜单（按能力过滤），否则隐藏入口
-                        val caps: MediaSortCapabilities? = queryProvider?.sortCapabilities
+                        val caps: MediaQueryCapabilities? = queryProvider?.capabilities
                         _uiState.value = LibraryUiState.Content(
                             items = result.items,
                             libraryName = libraryName.ifBlank { server.displayName },
@@ -250,7 +250,7 @@ class LibraryViewModel @Inject constructor(
                             canGoUp = folderStack.isNotEmpty(),
                             hasMore = result.hasMore,
                             sort = snapshotSort,
-                            sortFields = caps?.filter(SORT_MENU_ORDER).orEmpty(),
+                            sortFields = caps?.filterSortFields(SORT_MENU_ORDER).orEmpty(),
                         )
                     }
 

@@ -11,7 +11,7 @@ import com.mediahub.model.MediaLibrary
 import com.mediahub.model.MediaListQuery
 import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaSort
-import com.mediahub.model.MediaSortCapabilities
+import com.mediahub.model.MediaQueryCapabilities
 import com.mediahub.model.MediaSortField
 import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
@@ -97,14 +97,12 @@ class LibrarySortViewModelTest {
 
     /** 承载 LIBRARY + QUERY 两个能力的 fake；内容按 sort 打标以便区分新旧响应。 */
     private class FakeQueryLibrary(
-        private val capabilities: MediaSortCapabilities =
-            MediaSortCapabilities(MediaSortField.entries.toSet()),
+        override val capabilities: MediaQueryCapabilities =
+            MediaQueryCapabilities(sortFields = MediaSortField.entries.toSet()),
         private val stallOffset: Int? = null,
     ) : MediaLibraryProvider, MediaQueryLibraryProvider {
         val sortRequests = mutableListOf<MediaSort>()
         val offsets = mutableListOf<Int>()
-
-        override val sortCapabilities = capabilities
 
         override suspend fun getLibraries(): List<MediaLibrary> = emptyList()
         override suspend fun getSeasons(seriesId: String) = emptyList<Season>()
@@ -203,8 +201,8 @@ class LibrarySortViewModelTest {
 
     @Test
     fun `sort menu filtered by provider capabilities in menu order`() = runTest {
-        val caps = MediaSortCapabilities(
-            setOf(MediaSortField.SERVER_DEFAULT, MediaSortField.TITLE, MediaSortField.COMMUNITY_RATING),
+        val caps = MediaQueryCapabilities(
+            sortFields = setOf(MediaSortField.SERVER_DEFAULT, MediaSortField.TITLE, MediaSortField.COMMUNITY_RATING),
         )
         val lib = FakeQueryLibrary(capabilities = caps)
         val viewModel = vm(handleOf(lib))
