@@ -1,6 +1,28 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-29（Phase 1D Library Filtering：筛选器 + Query Pipeline 扩展——真机 smoke PASS / SEALED @b9b6f72）
-## Phase 1D Library Filtering（本次）：筛选器 + Query Pipeline 扩展
+> 最后更新：2026-08-29（Phase CI-H1：CI/Test Hardening——workflow 升级+测试超时+coroutine-test 治理规则，独立 PR 不夹带业务代码）
+## Phase CI-H1（本次）：CI/Test Hardening
+- **测试治理规则（对所有后续 Agent 生效）**：
+  - **coroutine-test**：被测对象拥有周期性 coroutine（polling/heartbeat/periodic delay）时，
+    测试禁止无界 `advanceUntilIdle()`（会永久自旋拖死测试）——改用 `runCurrent()`、
+    `advanceTimeBy(x)` 与显式 job shutdown/cancel。一次性异步到稳定态的 VM 测试
+    仍可 `advanceUntilIdle()`。已体现在 LibraryFilterViewModelTest（1D）。
+  - **race/stale fake 必须 non-cooperative**：吞 CancellationException 后照常返回旧数据，
+    才能真实走完 generation guard 丢弃路径（delay 版取消即消失，是假覆盖）。
+    已体现在 LibraryFilterViewModelTest（1D）。
+- **CI workflow（android-ci.yml）**：actions 升级 checkout@v5 / setup-java@v5 /
+  setup-gradle@v5 / setup-android@v4（全部 Node-24 运行时，消除 deprecation 警告）；
+  **Unit tests 与 Lint step 各自 timeout-minutes: 15**（测试挂死不再吃满 40 分钟 job
+  timeout）；Lint 条件用 !cancelled()（即 ${{ !cancelled() }}）——测试 FAIL/TIMEOUT 仍执行、
+  workflow 被 concurrency 取消时不执行（不用 always()，它与 cancel-in-progress
+  语义冲突：被 supersede 的旧 run 会照样进 Lint）；job 名保持 `build`——main
+  branch protection 按 context "build" 校验，拆分 jobs 前必须先同步修改 protection rule。
+- **setup-gradle 刻意停在 v5（评审裁定）**：v6 默认 cache-provider 切换为
+  proprietary 的 enhanced caching（非纯 OSS）——Node-24 迁移只需 v5；
+  未来显式接受 enhanced caching/Terms 再单独升级，不夹带在 runtime hardening 里。
+- **CI 状态口径（Agent 报告纪律）**：commit created / local gate PASS /
+  remote CI cancelled / exact-head CI PASS 四态严格区分；被 concurrency 自动取消的
+  SHA 不算 CI 验证过，禁止倒推。
+## Phase 1D Library Filtering（前次）：筛选器 + Query Pipeline 扩展
 - **域模型**：MediaFilter（tri-state aggregate：mediaType/year/played/favorite，全 null=默认）+
   MediaFilterField；MediaListQuery 增加 filter——筛选与排序同一查询管道下沉服务器，分页前执行。
 - **capability**：MediaSortCapabilities 演进为 MediaQueryCapabilities(sortFields, filterFields)
