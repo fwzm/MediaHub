@@ -26,7 +26,10 @@ jobs:
           java-version: '17'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        # Phase CI-H1 评审裁定：刻意停在 v5——v6 默认 cache-provider 切换为
+        # proprietary 的 enhanced caching（非纯 OSS）。Node-24 迁移只需 v5；
+        # 若未来显式接受 enhanced caching/Terms 再单独升级，不夹带在 runtime hardening 里
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -40,12 +43,13 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon
 
       # Phase CI-H1：测试挂死（无 failure 的 advanceUntilIdle 死锁等）不再吃满 job
-      # timeout——15 分钟强杀使本 step 失败；Lint 带 always() 继续执行不被吞掉
+      # timeout——15 分钟强杀使本 step 失败；Lint 用 !cancelled()——
+      # 测试 FAIL/TIMEOUT 时仍执行，workflow 被 concurrency 取消时不执行
       - name: Unit tests
         timeout-minutes: 15
         run: ./gradlew testDebugUnitTest --no-daemon
 
       - name: Lint
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 15
         run: ./gradlew lintDebug --no-daemon

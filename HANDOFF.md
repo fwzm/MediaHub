@@ -10,11 +10,15 @@
     才能真实走完 generation guard 丢弃路径（delay 版取消即消失，是假覆盖）。
     已体现在 LibraryFilterViewModelTest（1D）。
 - **CI workflow（android-ci.yml）**：actions 升级 checkout@v5 / setup-java@v5 /
-  setup-gradle@v6 / setup-android@v4（全部 Node-24 运行时，消除 deprecation 警告；
-  gradle/actions 用浮动 major tag v6）；**Unit tests 与 Lint step 各自 timeout-minutes: 15**
-  （测试挂死不再吃满 40 分钟 job timeout；Lint 带 always() 不被吞掉）；
-  job 名保持 `build`——main branch protection 按 context "build" 校验，
-  拆分 jobs 前必须先同步修改 protection rule。
+  setup-gradle@v5 / setup-android@v4（全部 Node-24 运行时，消除 deprecation 警告）；
+  **Unit tests 与 Lint step 各自 timeout-minutes: 15**（测试挂死不再吃满 40 分钟 job
+  timeout）；Lint 条件用 !cancelled()（即 ${{ !cancelled() }}）——测试 FAIL/TIMEOUT 仍执行、
+  workflow 被 concurrency 取消时不执行（不用 always()，它与 cancel-in-progress
+  语义冲突：被 supersede 的旧 run 会照样进 Lint）；job 名保持 `build`——main
+  branch protection 按 context "build" 校验，拆分 jobs 前必须先同步修改 protection rule。
+- **setup-gradle 刻意停在 v5（评审裁定）**：v6 默认 cache-provider 切换为
+  proprietary 的 enhanced caching（非纯 OSS）——Node-24 迁移只需 v5；
+  未来显式接受 enhanced caching/Terms 再单独升级，不夹带在 runtime hardening 里。
 - **CI 状态口径（Agent 报告纪律）**：commit created / local gate PASS /
   remote CI cancelled / exact-head CI PASS 四态严格区分；被 concurrency 自动取消的
   SHA 不算 CI 验证过，禁止倒推。
