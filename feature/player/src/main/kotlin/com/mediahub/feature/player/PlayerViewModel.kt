@@ -311,7 +311,7 @@ class PlayerViewModel @Inject constructor(
         if (stopped) return
         stopped = true
         val finalProgress = engine.stop()
-        syncCoordinator.flush(finalProgress)
+        syncCoordinator.flushFinal(finalProgress)
         syncCoordinator.stop()
         engine.release()
     }

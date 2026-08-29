@@ -14,6 +14,9 @@ import com.mediahub.provider.jellyfin.api.JellyfinApiClient
 import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 
 /**
@@ -22,15 +25,17 @@ import kotlinx.serialization.SerializationException
  * /Sessions/Playing/Stopped（官方 SessionsController 三入口）。
  *
  * - 节流/触发节奏完全由既有 ProgressSyncCoordinator 控制（UI fast / local snapshot /
- *   remote throttle / critical event flush / single final exit flush）；
+ *   remote throttle / critical event flush / final exit flush）；
  *   **本 provider 不建 timer**；final exit semantics unchanged（不改动共享层）。
- * - 会话语义（v1）：generic `reportProgress(progress)` 无 finality 信号，因此——
- *   同一条目的首次上报 → `Playing`（start）+ `Progress`；后续 → `Progress`；
- *   **条目切换时先为上一条目补发 `Stopped`（final stop reporting）再开新会话**。
- *   单次播放的最终退出以 final flush 的 `Progress` 收尾（Jellyfin 服务器按最后
- *   Progress 的 PositionTicks 记录续播位置，resume 语义完整）。若需严格
- *   "exit 必发 Stopped"，需给共享 MediaProgressProvider 增加可选 stop 钩子——
- *   属共享层变更，超出 C-slice（ADR-039 冻结：不改共享层 final exit 语义）。
+ * - **server session lifecycle 完整承载（ADR-039 review hardening）**：
+ *   generic reportProgress 无 finality 信号，因此——同一条目首次上报 →
+ *   `Playing`（start）+ `Progress`；后续 → `Progress`；**条目切换时先为上一条目
+ *   补发 `Stopped`（final stop reporting）再开新会话**；最终退出经 override 的
+ *   [reportFinalProgress]（shared finality hook）发送 `Stopped`（自带最终
+ *   PositionTicks）——退出会话完整闭环，不以 final Progress 冒充。
+ * - **并发纪律**：会话状态转移（Stopped → Playing → Progress → state update）
+ *   由 Mutex 串行为**一个原子序列**——coordinator 的周期 remote sample 与
+ *   critical-event flush 是不同 coroutine，禁止交错制造重复 Playing 或错序。
  * - 位置单位换算：ms → ticks（×10_000）。
  * - 取消红线与错误 taxonomy 与其余能力一致。
  */
@@ -42,29 +47,72 @@ class JellyfinProgressProvider(
     private val logger: Logger,
 ) : MediaProgressProvider {
 
-    /** 会话状态（provider 实例级；Factory 每 server 创建独立实例，无并发共享）。 */
+    /** 会话状态（provider 实例级；Factory 每 server 创建独立实例）；全部转移在 mutex 内。 */
+    private val sessionMutex = Mutex()
     private var lastItemId: String? = null
     private var lastPositionTicks: Long? = null
 
     override suspend fun reportProgress(progress: PlaybackProgress) {
         val (token, _) = JellyfinProviderSupport.requireSession(server, tokenStore, sessionStore)
         try {
-            val positionTicks = progress.positionMs.takeIf { it > 0 }?.times(TICKS_PER_MILLIS)
-            if (progress.itemId != lastItemId) {
-                // 条目切换：为上一条目补发 Stopped（final stop reporting），再开新会话
-                lastItemId?.let { previous ->
-                    runCatching { api.playbackStopped(token, previous, lastPositionTicks) }
-                        .onFailure {
-                            logger.w(LogTag.UI, "Jellyfin Stopped 补发失败（best-effort）", it)
+            sessionMutex.withLock {
+                val positionTicks = progress.positionMs.takeIf { it > 0 }?.times(TICKS_PER_MILLIS)
+                if (progress.itemId != lastItemId) {
+                    // 条目切换：为上一条目补发 Stopped（final stop reporting），再开新会话。
+                    // 显式 catch：cancellation 原样透传（不得吞进 best-effort 日志），
+                    // 且取消后不得继续新会话的任何请求。
+                    lastItemId?.let { previous ->
+                        try {
+                            api.playbackStopped(token, previous, lastPositionTicks)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            logger.w(LogTag.UI, "Jellyfin Stopped 补发失败（best-effort）", e)
                         }
+                    }
+                    api.playbackStart(token, progress.itemId, positionTicks)
+                    println("PROGRESS-DEBUG: start sent")
+                    lastItemId = progress.itemId
                 }
-                api.playbackStart(token, progress.itemId, positionTicks)
-                lastItemId = progress.itemId
+                println("PROGRESS-DEBUG: about to send progress")
+                api.playbackProgress(token, progress.itemId, positionTicks, progress.isPaused)
+                println("PROGRESS-DEBUG: progress sent")
+                lastPositionTicks = positionTicks
             }
-            api.playbackProgress(token, progress.itemId, positionTicks, progress.isPaused)
-            lastPositionTicks = positionTicks
         } catch (e: CancellationException) {
             // 取消红线：绝不折叠成业务异常（ADR-039 §10）
+            throw e
+        } catch (e: Exception) {
+            throw JellyfinProviderSupport.mapError(server.id, e)
+        }
+    }
+
+    /**
+     * 最终退出上报（shared finality hook override，ADR-039 review hardening）：
+     * 只发 `/Sessions/Playing/Stopped`（自带最终 PositionTicks），**不以 final
+     * Progress 冒充**；Mutex 内原子转移会话状态（关闭当前会话）。
+     * cancellation 原样传播；普通失败 best-effort（退出不被慢网络阻塞的语义由
+     * coordinator 的短超时保证）。
+     */
+    override suspend fun reportFinalProgress(progress: PlaybackProgress) {
+        val (token, _) = JellyfinProviderSupport.requireSession(server, tokenStore, sessionStore)
+        try {
+            sessionMutex.withLock {
+                try {
+                    api.playbackStopped(
+                        token,
+                        progress.itemId,
+                        progress.positionMs.takeIf { it > 0 }?.times(TICKS_PER_MILLIS),
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.w(LogTag.UI, "Jellyfin 最终 Stopped 上报失败（best-effort）", e)
+                }
+                lastItemId = null
+                lastPositionTicks = null
+            }
+        } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             throw JellyfinProviderSupport.mapError(server.id, e)

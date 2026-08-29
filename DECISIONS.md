@@ -476,17 +476,26 @@
     **PlaybackInfo 请求体序列化必须 encodeDefaults=true**——协商开关
     （EnableDirectStream/EnableTranscoding 等）等于默认值时 kotlinx 默认跳过，
     省略会让 Direct Stream 协商静默失效（C-slice 实证教训）。
+    PlaybackInfoRequest 精确 contract（v10.9.0 源模型）：无 IsPlayback 字段、
+    MaxStreamingBitrate 为 int?（调用方做正数过滤 + Int.MAX_VALUE 收缩）——
+    禁止猜测性复制 Emby DTO shape（review 修正）。
   - **Progress（1G-E）**：Jellyfin 独立实现当前 main 已有的 MediaProgressProvider
     （/Sessions/Playing[/Progress|/Stopped]，官方 controller 已确认）；节流仍归
     ProgressSyncCoordinator，provider 不建 timer。**旧 Emby progress WIP
     （feature/emby-progress-reporting @523bed9）保持 untouched**，不作为 1G
     prerequisite，1B-3.3 后续单开 closeout/re-review。
-    v1 会话语义（C-slice 落地）：generic reportProgress 无 finality 信号——同条目首报
-    → Playing + Progress；后续 → Progress；**条目切换时先为上一条目补发 Stopped**
-    （final stop reporting）；单次播放最终退出以 final flush 的 Progress 收尾
-    （服务器按最后 Progress 位置续播，resume 语义完整）。严格"exit 必发 Stopped"
-    需给共享 MediaProgressProvider 增加可选 stop 钩子——属共享层变更，超出 C-slice
-    （final exit 语义不变）。
+    **server session lifecycle 完整承载（review hardening 裁定为 C-slice 必要修复，
+    非 scope creep）**：MediaProgressProvider 新增默认兼容的
+    `reportFinalProgress(progress)`（默认实现 = reportProgress，其他 Provider 零变化）；
+    ProgressSyncCoordinator 增加独立 remoteFinalReport（默认 = remoteReport）与
+    flushFinal——普通 Pause/Seek/Ended 关键事件仍走 flush，只有 PlayerViewModel
+    stopAndFlush 的最终退出走 flushFinal（单次权威 final 操作语义不变）。
+    Jellyfin override reportFinalProgress 只发 `/Sessions/Playing/Stopped`
+    （自带最终 PositionTicks），**不以 final Progress 冒充 Stopped**；
+    条目切换时同样先补发上一条目的 Stopped。
+    并发纪律：会话状态转移（Stopped → Playing → Progress → state）由 Mutex 串行
+    原子化——周期 remote sample 与 critical-event flush 是不同 coroutine，
+    禁止交错制造重复 Playing 或错序。
     三个进度端点 body 为 JSON（POST /Sessions/Playing* 的 [FromBody] 需要
     application/json），响应体不解析——ApiClient.postNoContent 扩展可选 contentType
     参数（默认行为不变，Emby logout 零影响）。

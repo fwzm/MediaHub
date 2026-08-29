@@ -15,8 +15,9 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
  *   **Token 绝不进 URL/query**（ADR-026 同款红线）；X-Emby-* 与 X-MediaBrowser-* legacy 头不使用；
  * - 非 2xx 抛 ApiException；解析失败抛序列化异常；网络错误抛 IOException——由上层
  *   （JellyfinAuthProvider / JellyfinProviderSupport.mapError）映射为业务错误。
+ *   class/final 方法 open 化仅为测试 seam（取消注入），不含生产逻辑。
  */
-class JellyfinApiClient(
+open class JellyfinApiClient(
     private val endpointResolver: JellyfinEndpointResolver,
     private val apiClient: ApiClient,
     private val authHeaderBuilder: JellyfinAuthorizationHeaderBuilder,
@@ -67,7 +68,7 @@ class JellyfinApiClient(
         userId: String,
         itemId: String,
         startTimeTicks: Long?,
-        maxStreamingBitrate: Long?,
+        maxStreamingBitrate: Int?,
     ): JellyfinPlaybackInfoResultDto {
         val request = JellyfinPlaybackInfoRequestDto(
             userId = userId,
@@ -124,7 +125,8 @@ class JellyfinApiClient(
     }
 
     /** 播放停止：POST /Sessions/Playing/Stopped（PlaybackStopInfo JSON body；响应体不解析）。 */
-    suspend fun playbackStopped(token: String, itemId: String, positionTicks: Long?) {
+    /** open 仅为测试 seam（如 switch-Stopped 取消注入）。 */
+    open suspend fun playbackStopped(token: String, itemId: String, positionTicks: Long?) {
         apiClient.postNoContent(
             url = endpointResolver.endpoint("/Sessions/Playing/Stopped"),
             headers = authenticatedHeaders(token),

@@ -106,6 +106,19 @@ interface MediaSubtitleProvider {
  */
 interface MediaProgressProvider {
     suspend fun reportProgress(progress: PlaybackProgress)
+
+    /**
+     * 最终退出上报（Phase 1G-C，ADR-039）：播放器 final flush 的**唯一权威远端操作**。
+     *
+     * 默认实现 = [reportProgress]（对无 session-lifecycle 语义的 Provider 零变化）；
+     * 有 server session lifecycle 的协议（如 Jellyfin 的
+     * /Sessions/Playing/Stopped）override 本方法发送各自的 final 操作。
+     * 调用时机：PlayerViewModel.stopAndFlush 的单次退出 flush——每段播放恰好一次。
+     */
+    suspend fun reportFinalProgress(progress: PlaybackProgress) {
+        reportProgress(progress)
+    }
+
     suspend fun getContinueWatching(limit: Int): List<MediaItem>
     suspend fun getResumePosition(itemId: String): Long?
 

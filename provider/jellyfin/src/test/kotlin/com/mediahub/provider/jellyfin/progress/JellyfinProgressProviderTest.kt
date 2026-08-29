@@ -17,6 +17,7 @@ import com.mediahub.provider.jellyfin.api.JellyfinEndpointResolver
 import com.mediahub.provider.jellyfin.session.JellyfinSession
 import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
 import java.util.concurrent.CancellationException
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -88,8 +89,8 @@ class JellyfinProgressProviderTest {
     @Test
     fun `first report posts playing then progress`() = runBlocking {
         seedSession()
-        server.enqueue(MockResponse().setResponseCode(204))
-        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(200))
+        server.enqueue(MockResponse().setResponseCode(200))
         val p = provider()
 
         p.reportProgress(progress("m1", 90_000))
@@ -108,7 +109,7 @@ class JellyfinProgressProviderTest {
         assertTrue(updateBody.contains("\"IsPaused\":false"))
 
         // 同一条目第二次上报：仅 Progress
-        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(200))
         p.reportProgress(progress("m1", 120_000, paused = true))
         val second = server.takeRequest()
         assertEquals("/Sessions/Playing/Progress", second.requestUrl!!.encodedPath)
@@ -120,16 +121,16 @@ class JellyfinProgressProviderTest {
     @Test
     fun `item switch posts stopped for previous item before starting new session`() = runBlocking {
         seedSession()
-        server.enqueue(MockResponse().setResponseCode(204))
-        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(200))
+        server.enqueue(MockResponse().setResponseCode(200))
         val p = provider()
         p.reportProgress(progress("m1", 90_000))
         server.takeRequest()
         server.takeRequest()
 
-        server.enqueue(MockResponse().setResponseCode(204))
-        server.enqueue(MockResponse().setResponseCode(204))
-        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(200))
+        server.enqueue(MockResponse().setResponseCode(200))
+        server.enqueue(MockResponse().setResponseCode(200))
         p.reportProgress(progress("m2", 30_000))
 
         val stopped = server.takeRequest()
@@ -142,6 +143,100 @@ class JellyfinProgressProviderTest {
 
         val progressRequest = server.takeRequest()
         assertEquals("/Sessions/Playing/Progress", progressRequest.requestUrl!!.encodedPath)
+    }
+
+    // ---- 2b：最终退出上报（shared finality hook）——只发 Stopped，带最终 PositionTicks ----
+
+    @Test
+    fun `final report posts stopped only with final position`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(200))
+        server.enqueue(MockResponse().setResponseCode(200))
+        server.enqueue(MockResponse().setResponseCode(200))
+        val p = provider()
+        p.reportProgress(progress("m1", 90_000))
+        server.takeRequest()
+        server.takeRequest()
+
+        p.reportFinalProgress(progress("m1", 300_000))
+
+        val stopped = server.takeRequest()
+        assertEquals("/Sessions/Playing/Stopped", stopped.requestUrl!!.encodedPath)
+        val body = stopped.body.readUtf8()
+        assertTrue(body.contains("\"ItemId\":\"m1\""))
+        assertTrue(body.contains("\"PositionTicks\":3000000000"))
+        assertEquals("final 后无其他请求", 3, server.requestCount)
+    }
+
+    // ---- 2c：switch-Stopped 的取消必须穿透，且不得继续新会话任何请求 ----
+    // 注入方式：StoppedCancellingApi 在 playbackStopped 抛 CancellationException
+    // （wire 层 flake 无法确定性注入取消；open seam 为最小测试设施）。
+
+    private class StoppedCancellingApi(
+        endpointResolver: JellyfinEndpointResolver,
+        apiClient: ApiClient,
+        authHeaderBuilder: JellyfinAuthorizationHeaderBuilder,
+        logger: StdoutLogger,
+    ) : JellyfinApiClient(endpointResolver, apiClient, authHeaderBuilder, logger) {
+        override suspend fun playbackStopped(token: String, itemId: String, positionTicks: Long?) {
+            throw CancellationException("cancelled at switch")
+        }
+    }
+
+    @Test
+    fun `switch stopped cancellation propagates and blocks new session`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(200)) // m1 Playing
+        server.enqueue(MockResponse().setResponseCode(200)) // m1 Progress
+
+        val logger = StdoutLogger()
+        val identity = ClientIdentity("MediaHub", "Android", "dev-1", "0.1.0")
+        val apiClient = ApiClient(OkHttpClient(), logger = logger)
+        val api = StoppedCancellingApi(
+            JellyfinEndpointResolver(server.url("/").toString().trimEnd('/')),
+            apiClient,
+            JellyfinAuthorizationHeaderBuilder(identity),
+            logger,
+        )
+        val p = JellyfinProgressProvider(mediaServer, api, tokenStore, sessionStore, logger)
+
+        p.reportProgress(progress("m1", 90_000)) // Playing + Progress 正常落 wire
+        server.takeRequest()
+        server.takeRequest()
+
+        val thrown = try {
+            p.reportProgress(progress("m2", 30_000)) // Stopped → 取消
+            null
+        } catch (e: CancellationException) {
+            e
+        } catch (e: Throwable) {
+            e
+        }
+
+        assertTrue("取消必须穿透（实际：$thrown）", thrown is CancellationException)
+        assertEquals("取消后不得继续 m2 的 Playing/Progress", 2, server.requestCount)
+    }
+
+    // ---- 2d：并发 reportProgress 串行——1× Playing + 2× Progress，绝不重复 Playing ----
+
+    @Test
+    fun `concurrent reports of same item serialize into single playing session`() = runBlocking {
+        seedSession()
+        repeat(6) { server.enqueue(MockResponse().setResponseCode(200)) }
+        val p = provider()
+
+        val jobs = listOf(
+            launch { p.reportProgress(progress("m1", 90_000)) },
+            launch { p.reportProgress(progress("m1", 120_000)) },
+        )
+        jobs.forEach { it.join() }
+
+        val paths = mutableListOf<String>()
+        while (server.requestCount > paths.size) {
+            paths += server.takeRequest(1000, java.util.concurrent.TimeUnit.MILLISECONDS)!!.path!!
+        }
+        assertEquals(1, paths.count { it == "/Sessions/Playing" })
+        assertEquals(2, paths.count { it == "/Sessions/Playing/Progress" })
     }
 
     // ---- 3：续播位置（UserData ticks → ms；零值 null） ----

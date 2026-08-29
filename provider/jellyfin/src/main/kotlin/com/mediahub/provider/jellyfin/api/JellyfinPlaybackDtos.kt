@@ -13,16 +13,19 @@ import kotlinx.serialization.Serializable
  * 无转码红线（与 Emby 1B-2.1 同一策略）：EnableDirectStream=true / EnableTranscoding=false，
  * 只询问服务端能否 Direct Stream，绝不申请转码会话。
  */
+/**
+ * PlaybackInfoRequest 精确 contract（v10.9.0 源模型核对，ADR-039 review 修正）：
+ * 无 IsPlayback 字段（Emby DTO shape 猜测性复制已删除）；MaxStreamingBitrate = int?。
+ */
 @Serializable
 data class JellyfinPlaybackInfoRequestDto(
     @SerialName("UserId") val userId: String,
-    @SerialName("IsPlayback") val isPlayback: Boolean = true,
     @SerialName("AutoOpenLiveStream") val autoOpenLiveStream: Boolean = false,
     @SerialName("EnableDirectPlay") val enableDirectPlay: Boolean = false,
     @SerialName("EnableDirectStream") val enableDirectStream: Boolean = true,
     @SerialName("EnableTranscoding") val enableTranscoding: Boolean = false,
     @SerialName("StartTimeTicks") val startTimeTicks: Long? = null,
-    @SerialName("MaxStreamingBitrate") val maxStreamingBitrate: Long? = null,
+    @SerialName("MaxStreamingBitrate") val maxStreamingBitrate: Int? = null,
     @SerialName("DeviceProfile") val deviceProfile: JellyfinDeviceProfileDto = JellyfinDeviceProfileDto(),
 )
 

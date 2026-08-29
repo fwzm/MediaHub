@@ -58,7 +58,11 @@ class JellyfinPlaybackProvider(
                 userId = userId,
                 itemId = item.id,
                 startTimeTicks = options.startPositionMs?.times(TICKS_PER_MILLIS),
-                maxStreamingBitrate = options.maxBitrate,
+                // Jellyfin MaxStreamingBitrate 为 int?：正数过滤 + Int.MAX_VALUE 安全收缩
+                maxStreamingBitrate = options.maxBitrate
+                    ?.takeIf { it > 0 }
+                    ?.coerceAtMost(Int.MAX_VALUE.toLong())
+                    ?.toInt(),
             )
             val sources = info.mediaSources
             // 响应损坏（空 MediaSources）≠ 需要转码：明确报 Parse。
