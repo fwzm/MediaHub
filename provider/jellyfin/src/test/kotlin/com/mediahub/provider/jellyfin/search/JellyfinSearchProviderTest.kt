@@ -91,15 +91,20 @@ class JellyfinSearchProviderTest {
         provider().search("冰血暴 & dune=2", PageRequest(offset = 30, limit = 20))
 
         val url = server.takeRequest().requestUrl!!
-        assertEquals("/Users/user-1/Items", url.encodedPath)
+        assertEquals("/Items", url.encodedPath)
+        assertEquals("user-1", url.queryParameter("UserId"))
         assertEquals("冰血暴 & dune=2", url.queryParameter("SearchTerm"))
         assertEquals("true", url.queryParameter("Recursive"))
         assertEquals("Movie,Series,Episode,Video", url.queryParameter("IncludeItemTypes"))
-        assertNull("搜索走服务器 relevance，不传 SortBy", url.queryParameter("SortBy"))
+        assertNull("搜索走服务器 relevance（SearchScore DESC prepend），不传 SortBy", url.queryParameter("SortBy"))
         assertEquals("30", url.queryParameter("StartIndex"))
         assertEquals("20", url.queryParameter("Limit"))
         assertTrue(url.queryParameter("Fields")!!.contains("ProviderIds"))
-        assertTrue(url.queryParameter("Fields")!!.contains("UserData"))
+        assertFalse(url.queryParameter("Fields")!!.contains("UserData"))
+        assertFalse(url.queryParameter("Fields")!!.contains("ProductionYear"))
+        assertFalse(url.queryParameter("Fields")!!.contains("CommunityRating"))
+        assertEquals("true", url.queryParameter("EnableUserData"))
+        assertEquals("true", url.queryParameter("EnableTotalRecordCount"))
     }
 
     // ---- 2：空白 query 短路，不发请求 ----

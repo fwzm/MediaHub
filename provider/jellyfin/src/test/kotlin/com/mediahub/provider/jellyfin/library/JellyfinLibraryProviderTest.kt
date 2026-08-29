@@ -109,7 +109,8 @@ class JellyfinLibraryProviderTest {
         assertNull(libraries[1].imageUrl)
 
         val request = server.takeRequest()
-        assertEquals("/Users/user-1/Views", request.requestUrl!!.encodedPath)
+        assertEquals("/UserViews", request.requestUrl!!.encodedPath)
+        assertEquals("user-1", request.requestUrl!!.queryParameter("UserId"))
         // Jellyfin 标准 Authorization：Token 内嵌，绝不使用 X-Emby-Token legacy 头
         assertNull(request.getHeader("X-Emby-Token"))
         assertTrue(request.getHeader("Authorization")!!.contains("Token=\"tok-1\""))
@@ -137,7 +138,8 @@ class JellyfinLibraryProviderTest {
         assertTrue(result.items[0].posterUrl!!.contains("/Items/m1/Images/Primary"))
 
         val url = server.takeRequest().requestUrl!!
-        assertEquals("/Users/user-1/Items", url.encodedPath)
+        assertEquals("/Items", url.encodedPath)
+        assertEquals("user-1", url.queryParameter("UserId"))
         assertEquals("lib-1", url.queryParameter("ParentId"))
         assertEquals("20", url.queryParameter("StartIndex"))
         assertEquals("30", url.queryParameter("Limit"))
@@ -145,6 +147,11 @@ class JellyfinLibraryProviderTest {
         assertEquals("Ascending", url.queryParameter("SortOrder"))
         assertNull("浏览禁止 Recursive（ADR-039 红线）", url.queryParameter("Recursive"))
         assertTrue(url.queryParameter("Fields")!!.contains("ProviderIds"))
+        assertFalse(url.queryParameter("Fields")!!.contains("UserData"))
+        assertFalse(url.queryParameter("Fields")!!.contains("ProductionYear"))
+        assertFalse(url.queryParameter("Fields")!!.contains("CommunityRating"))
+        assertEquals("true", url.queryParameter("EnableUserData"))
+        assertEquals("true", url.queryParameter("EnableTotalRecordCount"))
         assertNull(url.queryParameter("api_key"))
     }
 
@@ -199,6 +206,8 @@ class JellyfinLibraryProviderTest {
         assertEquals("season-1", episodes[0].seasonId)
 
         val seasonsRequest = server.takeRequest()
+        assertEquals("/Items", seasonsRequest.requestUrl!!.encodedPath)
+        assertEquals("user-1", seasonsRequest.requestUrl!!.queryParameter("UserId"))
         assertEquals("series-1", seasonsRequest.requestUrl!!.queryParameter("ParentId"))
         assertEquals("Season", seasonsRequest.requestUrl!!.queryParameter("IncludeItemTypes"))
         assertEquals("IndexNumber", seasonsRequest.requestUrl!!.queryParameter("SortBy"))

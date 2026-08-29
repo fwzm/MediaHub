@@ -12,7 +12,7 @@ import com.mediahub.provider.jellyfin.mapper.JellyfinItemMapper
 import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
 
 /**
- * Jellyfin 条目详情（Phase 1G-B）：GET /Users/{userId}/Items/{itemId}（单条目全量端点）。
+ * Jellyfin 条目详情（Phase 1G-B）：GET /Items/{itemId}?UserId=…（现代端点，单条目全量）。
  *
  * - Movie/Series/Season/Episode 共用同一端点与映射；Series 的季/集继续走
  *   library 链（ParentId 浏览），MediaDetail 列表字段 v1 core parity 保持空。

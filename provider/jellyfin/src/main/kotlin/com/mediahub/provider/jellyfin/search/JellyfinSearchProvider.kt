@@ -15,7 +15,7 @@ import com.mediahub.provider.jellyfin.mapper.JellyfinItemMapper
 import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
 
 /**
- * Jellyfin 全局搜索（Phase 1G-B）：GET /Users/{userId}/Items?SearchTerm=…&Recursive=true。
+ * Jellyfin 全局搜索（Phase 1G-B）：GET /Items?UserId=…&SearchTerm=…&Recursive=true。
  *
  * - **Recursive=true 仅用于搜索**（ADR-039：浏览红线不适用于全库搜索语义）；
  *   IncludeItemTypes 锁定 Movie,Series,Episode,Video 四类；

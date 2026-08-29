@@ -21,8 +21,8 @@ import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
 /**
  * Jellyfin 媒体库浏览（Phase 1G-B）。
  *
- * - 顶层：/Users/{userId}/Views → MediaLibrary（CollectionType 协议差异止步于 mapper）。
- * - 浏览：/Users/{userId}/Items?ParentId=...（View → Series → Season → Folder 通用子级），
+ * - 顶层：/UserViews?UserId=… → MediaLibrary（现代 UserViewsController 端点，CollectionType 止步于 mapper）。
+ * - 浏览：/Items?UserId=…&ParentId=…（View → Series → Season → Folder 通用子级），
  *   **不携带 Recursive**（默认 false，只取直接子级——ADR-039 红线）；
  *   SortBy=SortName 保证跨页稳定顺序。
  * - 季/集：同 wire + IncludeItemTypes 锁类型（"Season"/"Episode"）+ SortBy=IndexNumber，

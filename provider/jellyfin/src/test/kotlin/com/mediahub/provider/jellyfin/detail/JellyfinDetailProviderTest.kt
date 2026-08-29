@@ -108,7 +108,8 @@ class JellyfinDetailProviderTest {
 
         // 单条目详情端点：路径精确；无 Fields 裁剪参数
         val request = server.takeRequest()
-        assertEquals("/Users/user-1/Items/m1", request.requestUrl!!.encodedPath)
+        assertEquals("/Items/m1", request.requestUrl!!.encodedPath)
+        assertEquals("user-1", request.requestUrl!!.queryParameter("UserId"))
         assertTrue(request.getHeader("Authorization")!!.endsWith("Token=\"tok-1\""))
         assertEquals(null, request.requestUrl!!.queryParameter("Fields"))
     }

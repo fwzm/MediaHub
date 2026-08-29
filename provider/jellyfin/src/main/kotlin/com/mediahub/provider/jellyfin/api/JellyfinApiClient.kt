@@ -56,25 +56,32 @@ class JellyfinApiClient(
     }
 
     // ---- Phase 1G-B：Library / Detail / Search / Artwork ----
+    // 现代 Jellyfin 端点（ADR-039 协议证据先行）：/UserViews、/Items、/Items/{id}。
+    // /Users/{uid}/Views、/Users/{uid}/Items 系列为官方 [Obsolete] legacy route，不使用。
 
-    /** 顶层媒体库 Views：GET /Users/{userId}/Views（Jellyfin 官方 UserViewsController）。 */
-    suspend fun getUserViews(token: String, userId: String): JellyfinQueryResultDto<JellyfinItemDto> =
-        apiClient.get(
-            url = endpointResolver.endpoint("/Users/$userId/Views"),
-            headers = authenticatedHeaders(token),
-        )
+    /** 顶层媒体库 Views：GET /UserViews?UserId=…（现代 UserViewsController 端点）。 */
+    suspend fun getUserViews(token: String, userId: String): JellyfinQueryResultDto<JellyfinItemDto> {
+        val url = endpointResolver.endpoint("/UserViews").toHttpUrl().newBuilder()
+            .addQueryParameter("UserId", userId)
+            .build()
+            .toString()
+        return apiClient.get(url, authenticatedHeaders(token))
+    }
 
     /**
      * 条目查询（浏览 / 季 / 集 / 搜索共用一份 wire，语义由参数表达）：
-     * GET /Users/{userId}/Items。
+     * GET /Items?UserId=…（现代 ItemsController 端点；legacy /Users/{uid}/Items 不使用）。
      *
      * - 浏览（[parentId] 非空、[searchTerm] 空）：**不携带 Recursive**（默认 false，
      *   只取直接子级，ADR-039 红线）；SortBy=SortName 保证跨页稳定顺序。
      * - 季/集：[includeItemTypes] 锁定类型（"Season"/"Episode"）+ SortBy=IndexNumber。
      * - 搜索（[searchTerm] 非空）：Recursive=true + IncludeItemTypes 四类 + relevance 排序
-     *   （不传 SortBy，与全局搜索语义一致）。
-     * - Fields 显式开启列表所需字段（Jellyfin 按 Fields 裁剪 DTO）；ProviderIds/UserData 为
-     *   跨源身份与进度语义的必备字段。
+     *   （服务端对含 SearchTerm 的查询主动 prepend SearchScore DESC，与全局搜索语义一致）。
+     * - Fields 只含官方 ItemFields 枚举值（ProviderIds/ParentId/SortName 等——
+     *   ProductionYear/CommunityRating 为默认渲染属性， UserData 走独立
+     *   EnableUserData 参数，**均不进 Fields**，ADR-039 review 修正）。
+     * - EnableUserData=true（进度/收藏语义必备）+ EnableTotalRecordCount=true
+     *   （PagedResult 分页数学依赖）显式发送，不依赖服务端默认值。
      * - Token 红线：只走 [authenticatedHeaders] 的 Authorization 头，绝不进 URL。
      */
     suspend fun getUserItems(
@@ -89,8 +96,9 @@ class JellyfinApiClient(
         fields: String = LIST_FIELDS,
     ): JellyfinQueryResultDto<JellyfinItemDto> {
         val url = buildUrl(
-            path = "/Users/$userId/Items",
+            path = "/Items",
             query = buildMap {
+                put("UserId", userId)
                 parentId?.let { put("ParentId", it) }
                 searchTerm?.let { put("SearchTerm", it) }
                 if (recursive) put("Recursive", "true")
@@ -102,15 +110,18 @@ class JellyfinApiClient(
                 put("StartIndex", page.offset.toString())
                 put("Limit", page.limit.toString())
                 put("Fields", fields)
+                put("EnableUserData", "true")
+                put("EnableTotalRecordCount", "true")
             },
         )
         return apiClient.get(url, authenticatedHeaders(token))
     }
 
-    /** 条目详情（单条目全量端点，无需 Fields 裁剪）：GET /Users/{userId}/Items/{itemId}。 */
+    /** 条目详情（全量端点）：GET /Items/{itemId}?UserId=…（现代端点，无需 Fields 裁剪）。 */
     suspend fun getItemDetail(token: String, userId: String, itemId: String): JellyfinItemDto {
-        val url = endpointResolver.endpoint("/Users/$userId/Items").toHttpUrl().newBuilder()
+        val url = endpointResolver.endpoint("/Items").toHttpUrl().newBuilder()
             .addPathSegment(itemId)
+            .addQueryParameter("UserId", userId)
             .build()
             .toString()
         return apiClient.get(url, authenticatedHeaders(token))
@@ -121,6 +132,7 @@ class JellyfinApiClient(
      *
      * 红线（ADR-026/039）：**URL 永不含 Token/api_key**——鉴权由 app 层
      * ProviderImageAuthContributor 以标准 Authorization Header 注入（Agent A）。
+     * 全程 HttpUrl builder（itemId/tag 经编码，禁手拼）。
      */
     fun imageUrl(
         itemId: String,
@@ -128,16 +140,15 @@ class JellyfinApiClient(
         tag: String?,
         maxWidth: Int,
         quality: Int = 85,
-    ): String = buildString {
-        append(endpointResolver.endpoint("/Items"))
-        append('/')
-        append(itemId)
-        append("/Images/")
-        append(imageType.wireName)
-        append('?')
-        tag?.takeIf(String::isNotBlank)?.let { append("tag=").append(it).append('&') }
-        append("maxWidth=").append(maxWidth)
-        append("&quality=").append(quality)
+    ): String {
+        val builder = endpointResolver.endpoint("/Items").toHttpUrl().newBuilder()
+            .addPathSegment(itemId)
+            .addPathSegment("Images")
+            .addPathSegment(imageType.wireName)
+        tag?.takeIf(String::isNotBlank)?.let { builder.addQueryParameter("tag", it) }
+        builder.addQueryParameter("maxWidth", maxWidth.toString())
+        builder.addQueryParameter("quality", quality.toString())
+        return builder.build().toString()
     }
 
     /** 匿名客户端身份（登录前 / 公共探针）：标准 Authorization，无 Token。 */
@@ -157,9 +168,13 @@ class JellyfinApiClient(
     private companion object {
         const val HEADER_NAME = "Authorization"
 
-        /** 列表查询 Fields（官方 Fields 枚举值；ProviderIds/UserData 为 1G 语义必备）。 */
+        /**
+         * 列表查询 Fields——**仅官方 ItemFields 枚举值**（ADR-039 review 修正）：
+         * ProductionYear/CommunityRating 为默认渲染属性、UserData 走独立 EnableUserData
+         * 参数，均不进 Fields（v10.9.0 ItemFields enum 核对）。
+         */
         const val LIST_FIELDS =
-            "PrimaryImageAspectRatio,ProductionYear,CommunityRating,Overview,Genres,ProviderIds,UserData"
+            "ParentId,SortName,PrimaryImageAspectRatio,Overview,Genres,ProviderIds"
 
         /** 请求体序列化：explicitNulls=false 省略未设置字段；ignoreUnknownKeys 兼容版本差异。 */
         private val requestJson = Json {
