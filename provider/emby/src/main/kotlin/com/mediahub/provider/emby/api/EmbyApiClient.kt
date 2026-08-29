@@ -265,8 +265,12 @@ class EmbyApiClient(
         const val LIBRARY_FIELDS =
             "PrimaryImageAspectRatio,SortName,Path,DateCreated,CriticRating,PremiereDate,OfficialRating,Size,Bitrate"
 
-        /** 搜索结果列表所需字段（官方 Fields 枚举值；海报/年份/评分/简介供结果卡渲染）。 */
-        const val SEARCH_FIELDS = "PrimaryImageAspectRatio,SortName,Path,ProductionYear,CommunityRating,Overview"
+        /**
+         * 搜索结果列表所需字段（官方 Fields 枚举值；海报/年份/评分/简介供结果卡渲染）。
+         * Phase 1E：跨源身份 ProviderIds 仅进搜索 Fields——聚合只发生在搜索层，
+         * Library 浏览 payload 不扩大（LIBRARY_FIELDS 不动）。
+         */
+        const val SEARCH_FIELDS = "PrimaryImageAspectRatio,SortName,Path,ProductionYear,CommunityRating,Overview,ProviderIds"
         /**
          * 请求体序列化：encodeDefaults=true 保证 DeviceProfile 等默认值字段全部输出
          * （官方 server 期望完整字段）；explicitNulls=false 省略未设置的 null 字段。

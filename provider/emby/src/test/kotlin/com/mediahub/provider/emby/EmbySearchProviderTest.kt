@@ -99,6 +99,8 @@ class EmbySearchProviderTest {
         assertEquals("20", url.queryParameter("Limit"))
         assertEquals("true", url.queryParameter("EnableUserData"))
         assertTrue(url.queryParameter("Fields")!!.contains("PrimaryImageAspectRatio"))
+        // Phase 1E：跨源身份 ProviderIds 仅进搜索 Fields；Library 浏览 payload 不扩大
+        assertTrue(url.queryParameter("Fields")!!.contains("ProviderIds"))
     }
 
     // ---- 2：Token 只走 Header，绝不进 URL（ADR-026） ----
