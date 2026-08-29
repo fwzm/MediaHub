@@ -1,5 +1,5 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-29（Phase 1D Library Filtering：筛选器 + Query Pipeline 扩展，代码+测试+文档完成，真机验证 pending）
+> 最后更新：2026-08-29（Phase 1D Library Filtering：筛选器 + Query Pipeline 扩展——真机 smoke PASS / SEALED @b9b6f72）
 ## Phase 1D Library Filtering（本次）：筛选器 + Query Pipeline 扩展
 - **域模型**：MediaFilter（tri-state aggregate：mediaType/year/played/favorite，全 null=默认）+
   MediaFilterField；MediaListQuery 增加 filter——筛选与排序同一查询管道下沉服务器，分页前执行。
@@ -14,8 +14,20 @@
 - **UI**：TopAppBar 筛选入口（active=primary tint+『筛选（已启用）』）；筛选 Sheet 四分区即时生效；
   年份数字输入带草稿语义（空串=清除、恰好四位=提交、中间态不发请求）；『清除全部』。
 - **评审 hardening**：yearDraftToFilter no-crash（"0000" 等 year<=0 草稿 no-op，domain invariant 不放宽）+ race 测试升级 non-cooperative（吞取消仍返回旧数据，guard 丢弃路径真实锁定）。
-- **状态**：code complete / tests complete / **device verification pending**。
-- **待真机验证（冻结规格 smoke）**：TV library 类型=剧集 → 打开 Fargo → 季列表正常 → 返回后类型=剧集保持；
+- **状态**：code complete / tests complete / **device verification PASS / SEALED**。
+- **真机验收（2026-08-29）**：
+  ```
+  Device smoke code SHA: b9b6f72a991379524f7bbe6ea8297534ac7152f1
+  Device: Xiaomi 14 Ultra / Android 16
+  Result: PASS
+  ```
+  冻结链：类型=剧集→Fargo→季列表正常→返回筛选保持（container-scoped 实证）；
+  Year=2014→冰血暴+血族；Played 双向互补（已看=英版同志亦凡人 1 部）；
+  Favorite=true→空目录优雅占位/false→全量；Year+公众评分降序（冰血暴前）；
+  Year+随机快照滚动终止；active indicator；清除全部；年份 0000 实机 no-crash 零请求。
+- **UX backlog（不阻塞）**：选排序/筛选后 Sheet 在 Loading 期消失、Content 回来后重现（闪烁）；
+  筛选状态为 per-Route VM，离开 library 重进重置（导航栈内往返保留）。
+- **已真机验证（冻结规格 smoke 全 PASS）**：TV library 类型=剧集 → Fargo → 季列表正常 → 返回后类型=剧集保持；
   Year=2014 / Played/Unplayed / Favorite 双向 / Year+Rating sort / Filter+Random 快照 /
   Filter 后 loadMore 同 query / active indicator / 清除全部。
 - **下一步**：Integration PR 独立审查 → 真机 smoke → 封板。

@@ -12,7 +12,9 @@
 - capability 未声明的筛选字段 UI 隐藏；无 Query 能力源回退旧接口且入口隐藏。
 ### 测试
 - 新增 30 条（filter 域 7 / wire contract 6 / VM 状态 9 / UI helper 8）；全量三件套绿。
-- Device verification pending。
+- 真机验收（Xiaomi 14 Ultra / Android 16，code SHA b9b6f72）：PASS / SEALED。
+  剧集筛选→Fargo→季列表正常→返回筛选保持；Year=2014/Played/Favorite 双向；
+  Year+评分降序；随机快照；active indicator；清除全部；年份 0000 no-crash 零请求。
 ## [0.12.0-unified-discovery] — 2026-08-29（Phase 1C：Unified Discovery）
 ### 功能（1C-1 Global Multi-Server Search）
 - EmbySearchProvider：GET /Users/{userId}/Items?SearchTerm=&Recursive=true
