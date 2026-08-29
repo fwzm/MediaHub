@@ -1,5 +1,23 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-29（Phase 1C Unified Discovery：聚合搜索 + 服务端排序——真机 smoke PASS / SEALED @aaca301）
+> 最后更新：2026-08-29（Phase 1D Library Filtering：筛选器 + Query Pipeline 扩展，代码+测试+文档完成，真机验证 pending）
+## Phase 1D Library Filtering（本次）：筛选器 + Query Pipeline 扩展
+- **域模型**：MediaFilter（tri-state aggregate：mediaType/year/played/favorite，全 null=默认）+
+  MediaFilterField；MediaListQuery 增加 filter——筛选与排序同一查询管道下沉服务器，分页前执行。
+- **capability**：MediaSortCapabilities 演进为 MediaQueryCapabilities(sortFields, filterFields)
+  （方案 a，一次性迁移，无 typealias 双术语）；MediaQueryLibraryProvider.sortCapabilities → capabilities。
+- **Emby wire**：IncludeItemTypes（Movie/Series/Episode 单值）/ Years（单年等值）/
+  IsPlayed=true|false（Boolean 1:1，不用 Filters=IsPlayed|IsUnplayed）/ IsFavorite=true|false（完整三态）；
+  默认 filter = 四参数全不传；**不加 Recursive**（筛选只作用于当前容器直接子级，不改浏览导航契约）。
+- **核心语义（冻结规格 B 修订）**：Filter 是 container-scoped 状态，不跨容器继承（与 Sort 刻意不同）——
+  NavigationFrame(folder, filter) 导航栈：openFolder push+重置子级、goToParent pop+恢复父级。
+  VM 层 filter 快照与 race guard 同 1C 模式。
+- **UI**：TopAppBar 筛选入口（active=primary tint+『筛选（已启用）』）；筛选 Sheet 四分区即时生效；
+  年份数字输入带草稿语义（空串=清除、恰好四位=提交、中间态不发请求）；『清除全部』。
+- **状态**：code complete / tests complete / **device verification pending**。
+- **待真机验证（冻结规格 smoke）**：TV library 类型=剧集 → 打开 Fargo → 季列表正常 → 返回后类型=剧集保持；
+  Year=2014 / Played/Unplayed / Favorite 双向 / Year+Rating sort / Filter+Random 快照 /
+  Filter 后 loadMore 同 query / active indicator / 清除全部。
+- **下一步**：Integration PR 独立审查 → 真机 smoke → 封板。
 
 ## Phase 1C Unified Discovery（本次）：1C-1 聚合搜索 + 1C-2 服务端排序
 - **Query Pipeline（ADR-036）**：MediaListQuery/MediaSort/MediaSortCapabilities 独立于 PageRequest；

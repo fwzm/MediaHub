@@ -1,4 +1,18 @@
 # 变更记录（CHANGELOG）
+## [0.13.0-library-filtering] — 2026-08-29（Phase 1D：Library Filtering / Query Pipeline Extension）
+### 功能
+- MediaFilter tri-state 筛选（mediaType/year/played/favorite）进 MediaListQuery，
+  与排序同管道下沉服务器、分页前执行；filter 为 container-scoped 状态
+  （NavigationFrame 导航栈：进子级重置、回父级恢复；Sort 跨容器不变）。
+- Emby wire：IncludeItemTypes/Years/IsPlayed（Boolean 1:1）/IsFavorite（完整三态）；
+  默认 filter = 参数全不传；不加 Recursive（不改浏览导航契约）。
+- MediaQueryCapabilities(sortFields, filterFields) 取代 MediaSortCapabilities（一次性迁移）。
+- Library 筛选入口：active indicator（tint+contentDescription）、筛选 Sheet（类型/年份/已看/收藏）、
+  清除全部；年份数字输入草稿语义（空=清除、四位=提交、中间态不发请求）。
+- capability 未声明的筛选字段 UI 隐藏；无 Query 能力源回退旧接口且入口隐藏。
+### 测试
+- 新增 30 条（filter 域 7 / wire contract 6 / VM 状态 9 / UI helper 8）；全量三件套绿。
+- Device verification pending。
 ## [0.12.0-unified-discovery] — 2026-08-29（Phase 1C：Unified Discovery）
 ### 功能（1C-1 Global Multi-Server Search）
 - EmbySearchProvider：GET /Users/{userId}/Items?SearchTerm=&Recursive=true

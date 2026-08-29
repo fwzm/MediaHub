@@ -230,6 +230,21 @@
 - Device: Xiaomi 14 Ultra / Android 16
 - Result: PASS
 
+## Phase 1D — Library Filtering / Query Pipeline Extension（2026-08-29）✅ 代码+测试完成（真机验证 pending）
+
+- [x] A1 filter-contract：MediaFilter/MediaFilterField/MediaListQuery.filter +
+      MediaQueryCapabilities 迁移（方案 a，MediaSortCapabilities 移除，无双术语）
+- [x] B1 emby-filter：IncludeItemTypes/Years/IsPlayed/IsFavorite wire（played 用 IsPlayed Boolean，
+      不用 Filters=；favorite 完整三态；不加 Recursive）；RANDOM+filter 快照
+- [x] C1 library-filter-state：NavigationFrame 容器作用域（push/重置/恢复）+ onFilterSelected +
+      loadMore 同 filter 快照 + race（generation guard）
+- [x] C2 library-filter-ui：筛选入口（active indicator）+ Sheet（类型/年份草稿/已看/收藏）+ 清除全部
+- [x] 测试：filter 域 7 + capability 迁移断言 + wire contract 6（含 filter+sort+分页核心组合）+
+      VM 状态 9（容器作用域往返/race/loadMore 快照/能力过滤）+ UI helper 8
+- [ ] 真机 smoke（冻结规格）：剧集筛选→Fargo→季列表正常→返回筛选保持；Year/Played/Favorite 双向；
+      Year+Rating 组合；Filter+Random 快照；Filter 后 loadMore 同 query；active indicator；清除全部
+- 状态：code complete / tests complete / device verification pending（真机前不写 SEALED）
+
 ## V0.1 —— MVP（下一步）## V0.1 —— MVP（下一步）
 
 ### IN PROGRESS（无，等待开工）
