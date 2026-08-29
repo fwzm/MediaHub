@@ -1,5 +1,6 @@
 package com.mediahub.provider.api
 
+import com.mediahub.model.CanonicalKey
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
@@ -58,6 +59,20 @@ interface MediaPlaybackProvider {
 /** 搜索能力。 */
 interface MediaSearchProvider {
     suspend fun search(query: String, page: PageRequest): PagedResult<MediaItem>
+}
+
+/**
+ * Canonical identity 精确查找能力（Phase 1F B1，ADR-038）：
+ * 按候选 [CanonicalKey] 集合在服务端做精确身份匹配（非文本搜索），
+ * 供 Detail 侧 CanonicalSourceResolver 发现同作品来源。
+ *
+ * - [keys] 必须非空且同 MediaType（CanonicalKey 内嵌类型维度）；
+ *   空集/混合类型属调用方契约错误，实现方抛 IllegalArgumentException。
+ * - 返回 MediaItem 必须携带 serverId 与归一化 externalIds（resolver 复用
+ *   CanonicalIdentityGraph 校验并扩张 frontier）；实现禁止本地 filter。
+ */
+interface MediaIdentityLookupProvider {
+    suspend fun findByCanonicalKeys(keys: Set<CanonicalKey>, page: PageRequest): PagedResult<MediaItem>
 }
 
 /**

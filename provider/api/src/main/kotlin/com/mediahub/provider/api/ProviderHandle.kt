@@ -20,6 +20,7 @@ data class ProviderHandle(
     val browse: MediaBrowseProvider? = null,
     val playback: MediaPlaybackProvider? = null,
     val search: MediaSearchProvider? = null,
+    val identityLookup: MediaIdentityLookupProvider? = null,
     val query: MediaQueryLibraryProvider? = null,
     val subtitle: MediaSubtitleProvider? = null,
     val progress: MediaProgressProvider? = null,
@@ -35,6 +36,7 @@ data class ProviderHandle(
         if (browse != null) add(ProviderCapability.BROWSE)
         if (playback != null) add(ProviderCapability.PLAYBACK)
         if (search != null) add(ProviderCapability.SEARCH)
+        if (identityLookup != null) add(ProviderCapability.IDENTITY_LOOKUP)
         if (query != null) add(ProviderCapability.QUERY)
         if (subtitle != null) add(ProviderCapability.SUBTITLE)
         if (progress != null) add(ProviderCapability.PROGRESS)
@@ -43,5 +45,6 @@ data class ProviderHandle(
     /** 是否有任何实际可用的能力（骨架阶段为 false 时 UI 显示"未接入"）。 */
     val hasAnyCapability: Boolean
         get() = auth != null || library != null || detail != null || browse != null ||
-            playback != null || search != null || query != null || subtitle != null || progress != null
+            playback != null || search != null || identityLookup != null || query != null ||
+            subtitle != null || progress != null
 }

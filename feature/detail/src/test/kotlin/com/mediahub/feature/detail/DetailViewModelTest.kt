@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
+import com.mediahub.feature.detail.source.CanonicalSourceResolver
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
@@ -123,7 +124,13 @@ class DetailViewModelTest {
                 return ProviderHandle(provider = fakeProvider(), detail = detailProvider, library = lib)
             }
         }
-        return DetailViewModel(savedStateHandle, fakeServerStore(), registry, FakeLogger())
+        return DetailViewModel(
+            savedStateHandle,
+            fakeServerStore(),
+            registry,
+            CanonicalSourceResolver(fakeServerStore(), registry, FakeLogger()),
+            FakeLogger(),
+        )
     }
 
     @Test
@@ -134,6 +141,15 @@ class DetailViewModelTest {
         testDispatcher.scheduler.advanceUntilIdle()
         assertTrue(vm.uiState.value is DetailUiState.Content)
         assertEquals(SeriesBrowseState(), vm.seriesState.value)
+    }
+
+    @Test
+    fun sourceStateStaysIdleForItemWithoutExternalIds() = runTest(testDispatcher) {
+        // 1F C1：无外部身份的 item 不发起 sibling 解析，sourceState 停在 Idle
+        val vm = createViewModel(MediaDetail(item = makeItem("m1", MediaType.MOVIE)))
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertTrue(vm.uiState.value is DetailUiState.Content)
+        assertEquals(SourceResolutionState.Idle, vm.sourceState.value)
     }
 
     @Test

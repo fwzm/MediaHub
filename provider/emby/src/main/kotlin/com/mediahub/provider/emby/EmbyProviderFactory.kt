@@ -19,6 +19,7 @@ import com.mediahub.provider.emby.detail.EmbyDetailProvider
 import com.mediahub.provider.emby.library.EmbyLibraryProvider
 import com.mediahub.provider.emby.playback.EmbyPlaybackProvider
 import com.mediahub.provider.emby.search.EmbySearchProvider
+import com.mediahub.provider.emby.identity.EmbyIdentityLookupProvider
 import com.mediahub.provider.emby.session.EmbySessionStore
 import dagger.Binds
 import dagger.Module
@@ -84,9 +85,10 @@ class EmbyProviderFactory @Inject constructor(
             sessionStore = sessionStore,
             logger = logger,
         )
-        // ADR-022/026：Handle 只暴露当前已实现能力——Phase 1C 开放
+        // ADR-022/026：Handle 只暴露当前已实现能力——Phase 1F 开放
         // AUTH + LIBRARY + DETAIL + PLAYBACK + QUERY（服务端排序查询管道，1C-2）
-        // + SEARCH（SearchTerm 全库搜索，1C-1）。
+        // + SEARCH（SearchTerm 全库搜索，1C-1）
+        // + IDENTITY_LOOKUP（AnyProviderIdEquals 精确身份查找，1F-B1/ADR-038）。
         // 同一 EmbyLibraryProvider 实例承载 LIBRARY 与 QUERY 两个能力接口。
         return ProviderHandle(
             provider = provider,
@@ -96,6 +98,13 @@ class EmbyProviderFactory @Inject constructor(
             playback = playbackProvider,
             query = libraryProvider,
             search = EmbySearchProvider(
+                server = server,
+                api = embyApi,
+                tokenStore = tokenStore,
+                sessionStore = sessionStore,
+                logger = logger,
+            ),
+            identityLookup = EmbyIdentityLookupProvider(
                 server = server,
                 api = embyApi,
                 tokenStore = tokenStore,

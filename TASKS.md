@@ -256,6 +256,61 @@
 - Device: Xiaomi 14 Ultra / Android 16
 - Result: PASS
 
+## Phase 1F — Canonical Detail / Source Selection（2026-08-29）🔨 代码+测试完成（待 integration + 真机）
+
+- [x] A1 domain-identity-graph：CanonicalIdentityGraph（core/model）成 connected-component
+      语义 single source of truth；SearchAggregator 改 adapter（纯算法搬迁，
+      1E SearchAggregatorTest 全量保持零改动）；ADR-038 冻结
+      （supersede ADR-037"聚合只发生在搜索层"scope 限制，identity 规则不变）
+- [x] B1 identity-lookup-capability：MediaIdentityLookupProvider.findByCanonicalKeys(keys, page) +
+      ProviderCapability.IDENTITY_LOOKUP + ProviderHandle.identityLookup（ADR-022 nullable 组合）；
+      Emby /Users/{userId}/Items AnyProviderIdEquals（Recursive=true + IncludeItemTypes 锁
+      MediaType + SEARCH_FIELDS 共用，LIBRARY_FIELDS 不动；Token 只走 Header）
+- [x] C1 source-resolver：CanonicalSourceResolver 有界传递闭包（seed keys → 各 identity-capable
+      server 查未查询过的新 keys → 本地 CanonicalKey 复核 → frontier 扩张 → 无新 key 止；
+      查询含当前服务器自身；终态 CanonicalIdentityGraph.components 重算 seed 分量）；
+      硬边界 concurrency≤4 / timeout 8s / rounds 4 / keys 32 / occurrences 64 → truncated；
+      TimeoutCancellationException 降级 partial、真取消穿透；DetailViewModel 独立 sourceState
+- [x] C2 selector-ui：SourceSelector（distinct serverId ≥ 2 出现；同服副本"·副本N"，
+      禁用 MediaVersion 语义；truncated 提示）+ route replacement（popUpTo current
+      inclusive，Back 不回 Detail A；active 行不可再点）
+- [x] 测试：CanonicalIdentityGraphTest 6 + SearchAggregatorTest（1E 全量保持）+
+      EmbyIdentityLookupProviderTest 8 + ProviderHandleTest IDENTITY_LOOKUP 推导 +
+      CanonicalSourceResolverTest 12（传递闭包/同服副本/partial/取消红线/虚拟时间超时/三类硬边界）+
+      SourceSelectorModelTest 3 + DetailViewModelTest sourceState；全仓库 ./gradlew test PASS
+- [x] integration 分支 + **PR #8**（base=d128d09）+ exact-head CI 33262600151 @ 592182b success
+- [x] 独立 review（2026-08-30）裁定 PATCH REQUIRED → final hardening @ d3965b2(feature)/267c122(integration)：
+      P2-1 lookup hasMore→truncated（回归：items<limit 但 hasMore=true）/
+      P2-2 truncation 提示与 selector gate 解耦（单 server truncated 也提示，
+      truncationMessage 纯函数）/ Emby unsupported MediaType（SEASON）guard 0 请求；
+      短复核 PASS，新 exact-head CI 33263551915 @ 267c122 success
+- [x] 真机 smoke（冻结 8 场景，Xiaomi 14 Ultra / Android 16 @123e243f，2026-08-30，
+      APK @ 267c122 SHA256 = 9774684cd354aaaa7eeaf5db5c5624d0b2cba59f08a11c0582c86eb20fdc38b3，
+      device pull == local build 三向校验一致）：
+      1. 主内容先渲染、「来源」selector 后出现 **PASS** — Fargo 2014 Series detail：
+         予初·副本1(active) / 予初·副本2 / 墨云阁 三 occurrence（予初真实存在同 canonical 双条目，
+         occurrence 语义 + 副本标注获真实数据验证）
+      2. active chip 不可点击 **PASS** — 点副本1 无导航
+      3. A→B 切源 **PASS** — 详情重载自墨云阁（backdrop/海报全换），active 切墨云阁
+      4. Back 直接回搜索页 **PASS** — route replacement 核心验收；搜索展开态完整保留
+      5. 反向 B→A **PASS** — 对称成立
+      6. 季/集/播放跟随目标 server **PASS** — 切回予初后 S03 集列表/S03E01 详情均来自予初；
+         播放器 header 显示「予初」Media3 起播 1:06:29，未回落旧 server
+      7. 单源条目无 selector：**NOT_AVAILABLE** — shogun/severance/zootopia 三样本全部
+         真实跨源匹配（三台服务器 ProviderIds 高度共享）；Episode detail 两次真机确认
+         无 selector（type-scope Idle 路径）；单源 gate 由单测覆盖（automated PASS）
+      8. truncated/分页 hasMore/unsupported MediaType：**NOT_AVAILABLE**（真机难稳定构造）/
+         automated PASS（hasMore→truncated / truncationMessage 解耦 / SEASON 拒绝 3 回归）
+      附加观察（均符合 ADR-037/038 语义）：
+      - 入口相关可达性：予初入口见副本1+副本2，墨云阁入口仅见予初单条目——
+        alias graph 可达性随 seed keys 变化，传递闭包语义的自然结果
+      - 增量价值实证：幕府将军在墨云阁恢复登录期间搜索为 Single 行，
+        detail resolver 仍补全墨云阁匹配——搜索层漏掉的跨源被 detail 层找回
+      隐私：logcat 搜索词零命中（SearchTerm=**** ×36 脱敏正常；4 行原始词全为
+      adbd 自身 `input text` 命令日志）；AnyProviderIdEquals 原始 ID 零命中
+- 状态：**device verification PASS / PR #8 @ 267c122 待合并封板**
+  （测试计数：resolver 13 / selector model 4 / Emby lookup 9 / graph 6 / SearchAggregator 11 保持）
+
 ## Phase 1D — Library Filtering / Query Pipeline Extension（2026-08-29）✅ SEALED / PASS（device verification PASS）
 
 - [x] A1 filter-contract：MediaFilter/MediaFilterField/MediaListQuery.filter +

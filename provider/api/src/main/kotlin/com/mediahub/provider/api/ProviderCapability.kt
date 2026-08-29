@@ -27,6 +27,9 @@ enum class ProviderCapability {
     /** 搜索 */
     SEARCH,
 
+    /** Canonical identity 精确查找（AnyProviderIdEquals 类；Phase 1F，ADR-038） */
+    IDENTITY_LOOKUP,
+
     /** 查询管道（服务端排序，Phase 1C-2；未来筛选在此演进） */
     QUERY,
 

@@ -183,6 +183,17 @@ fun MediaHubNavHost() {
                         "detail/" + srvId + "/" + NavArgCodec.encode(item.id) + "?title=" + Uri.encode(item.title)
                     )
                 },
+                onSwitchSource = { targetServerId, targetItemId, targetTitle ->
+                    // 1F C2 route replacement（ADR-038）：替换当前 Detail back-stack entry，
+                    // Back 不回 Detail A；serverId/itemId 始终是唯一 source of truth。
+                    val currentDestId = navController.currentDestination?.id
+                    navController.navigate(
+                        "detail/" + targetServerId + "/" + NavArgCodec.encode(targetItemId) +
+                            "?title=" + Uri.encode(targetTitle)
+                    ) {
+                        currentDestId?.let { popUpTo(it) { inclusive = true } }
+                    }
+                },
             )
         }
 

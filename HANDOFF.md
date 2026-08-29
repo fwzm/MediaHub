@@ -1,5 +1,42 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-29（Phase 1E Canonical Media Identity：跨源身份 + 搜索聚合卡——真机 smoke PASS / SEALED @9fccb91）
+> 最后更新：2026-08-30（Phase 1F：真机 smoke PASS @267c122——8 场景 6 PASS + 2 NOT_AVAILABLE(automated PASS)，PR #8 待合并封板）
+
+## Phase 1F Canonical Detail / Source Selection（进行中）
+- **ADR-038 已冻结**（DECISIONS.md）：方案 A = detail-time canonical source resolution；
+  supersede ADR-037 的"聚合只发生在搜索层"阶段性 scope 限制（identity 规则全部不变）。
+- **核心语义**：CanonicalIdentityGraph（core/model）= connected-component 唯一实现
+  （SearchAggregator 与 CanonicalSourceResolver 共享，禁止第二套 union-find）；
+  resolver = 有界传递闭包（frontier 扩张，查询含当前服务器自身），
+  硬边界 concurrency≤4 / per-server timeout 8s / maxRounds 4 / maxKeys 32 / maxOccurrences 64 → truncated；
+  sourceState 独立于 DetailUiState（主内容绝不等待解析）；
+  来源语义单位 = occurrence（同服副本"·副本N"，禁用 MediaVersion 语义）；
+  切换 = route replacement（Back 不回 Detail A）；occurrences 不进 nav args。
+- **Provider**：MediaIdentityLookupProvider.findByCanonicalKeys + ProviderCapability.IDENTITY_LOOKUP
+  （ADR-022 nullable 组合）；Emby `AnyProviderIdEquals=tmdb.123,imdb.tt…`（非 SearchTerm），
+  IncludeItemTypes 锁 MediaType，SEARCH_FIELDS 共用（LIBRARY_FIELDS 不动）。
+- **Slice 链**：dev feature/1f-canonical-detail a11222f(A1) → 8d4f052(B1) → a360eb2(C1) →
+  770de17(C2) → c76f38e(docs)；integration/1f-canonical-detail cherry-pick 911b835 → d572044 →
+  71d4a98 → 9281dab → 592182b（**PR #8**，base=d128d09），exact-head CI run 33262600151 @
+  592182b success。
+- **独立 review 裁定（PATCH REQUIRED → 本 commit 修复）**：
+  P2-1 lookup `PagedResult.hasMore` 被丢弃→任一 server hasMore=true 即标 truncated
+  （v1 仍不续拉分页，但绝不把 partial 当 complete；后续页可能含 alias bridge）；
+  P2-2 truncation 提示与 selector gate（distinct serverId ≥ 2）解耦——未发现第二 server
+  时（最可能漏源的场景）也必须提示（`truncationMessage` 纯函数）；
+  hardening：Emby lookup 对无 IncludeItemTypes wire 值的类型（SEASON/VIDEO 等）
+  requireNotNull 拒绝，不隐式放宽为全类型 AnyProviderIdEquals 查询。
+  对应回归：CanonicalSourceResolverTest 13（hasMore→truncated）/
+  SourceSelectorModelTest（单 server truncated 也提示）/ EmbyIdentityLookupProviderTest（SEASON 拒绝 0 请求）。
+- **真机 smoke（2026-08-30 PASS）**：Xiaomi 14U @123e243f，APK @ 267c122
+  SHA256 9774684c…dc38b3（device pull == local build 三向一致）。
+  8 场景：1-6 全 PASS（含 route replacement Back 核心验收、播放 header 显示目标 server）；
+  7 单源无 selector = NOT_AVAILABLE（三样本 shogun/severance/zootopia 全真实跨源；
+  Episode Idle 路径真机确认 + 单测覆盖）；8 = NOT_AVAILABLE/automated PASS。
+  隐私：SearchTerm=**** 脱敏 ×36，原始词仅 adbd 命令日志，AnyProviderIdEquals 零命中。
+  附加观察：予初同 canonical 双副本（occurrence 语义真实验证）；入口相关可达性
+  （墨云阁入口仅见予初单条目）；幕府将军搜索 Single 但 resolver 补全跨源（增量价值实证）。
+- **待办**：PR #8 合并封板（等最终裁定）→ main 前移 `267c122` 后续。
+
 ## Phase CI-H1（前次）：CI/Test Hardening
 - **测试治理规则（对所有后续 Agent 生效）**：
   - **coroutine-test**：被测对象拥有周期性 coroutine（polling/heartbeat/periodic delay）时，
