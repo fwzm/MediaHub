@@ -1,4 +1,33 @@
 # 变更记录（CHANGELOG）
+## [0.15.0-canonical-detail] — 2026-08-30（Phase 1F：Canonical Detail / Source Selection）
+### 功能
+- CanonicalIdentityGraph（core/model）：connected-component 语义 single source of truth；
+  SearchAggregator 改 adapter（1E 输出行为零变化）。ADR-038 冻结：
+  supersede ADR-037"聚合只发生在搜索层"阶段性 scope 限制（identity 规则不变）。
+- MediaIdentityLookupProvider.findByCanonicalKeys + ProviderCapability.IDENTITY_LOOKUP
+  （ADR-022 nullable 组合）；Emby `/Users/{userId}/Items?AnyProviderIdEquals=`
+  精确身份查找（Recursive=true、IncludeItemTypes 锁 MediaType、SEARCH_FIELDS 共用，
+  LIBRARY_FIELDS 不动、Token 只走 Header）；unsupported MediaType 拒绝。
+- CanonicalSourceResolver：Detail 进入后有界传递闭包解析同作品全部来源
+  （查询含当前服务器自身；终态 CanonicalIdentityGraph 重算 seed 分量）；
+  硬边界 concurrency≤4 / per-server timeout 8s / maxRounds 4 / maxKeys 32 /
+  maxOccurrences 64 → truncated；lookup hasMore=true 标 truncated（v1 不续拉）；
+  TimeoutCancellationException 降级 partial、真取消穿透。
+- DetailViewModel.sourceState 独立状态机——主内容绝不等待 sibling resolution；
+  Home/Library/Search 任一入口语义一致；occurrences 不进 navigation args。
+- SourceSelector：distinct serverId ≥ 2 出现；occurrence 语义（同服副本"·副本N"，
+  禁用 MediaVersion 语义）；truncation 提示与 selector gate 解耦；
+  切换 = route replacement（Back 不回 Detail A，Player route 零改动）。
+### 测试
+- 新增 CanonicalIdentityGraph 6 / EmbyIdentityLookupProvider 9 / CanonicalSourceResolver 13 /
+  SourceSelectorModel 4 / ProviderHandle IDENTITY_LOOKUP 推导 / DetailViewModel sourceState；
+  SearchAggregator 1E 全量保持；全仓库 ./gradlew test PASS。
+- 真机验收（Xiaomi 14 Ultra / Android 16，验收链见 PR #8 @ 68ac981）：
+  APK SHA256 = 9774684cd354aaaa7eeaf5db5c5624d0b2cba59f08a11c0582c86eb20fdc38b3 —
+  8 场景 6 PASS + 2 NOT_AVAILABLE（automated PASS）/ SEALED（merge commit a7df978）。
+  予初同 canonical 双副本 occurrence 验证；route replacement Back 核心验收 PASS；
+  播放链（Series→Episode→Player）全程目标 server；隐私零泄漏。
+
 ## [0.14.0-canonical-identity] — 2026-08-29（Phase 1E：Canonical Media Identity）
 ### 功能
 - ExternalIds（tmdb/imdb/tvdb）进 MediaItem；Emby ProviderIds 字典解析
