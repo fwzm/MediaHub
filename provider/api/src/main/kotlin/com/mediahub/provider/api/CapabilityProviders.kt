@@ -60,6 +60,23 @@ interface MediaSearchProvider {
     suspend fun search(query: String, page: PageRequest): PagedResult<MediaItem>
 }
 
+/**
+ * 查询能力（Phase 1C-2 Query Pipeline）：把排序下沉到 Provider / 服务器，在分页之前执行。
+ *
+ * - 迁移策略：与 [MediaLibraryProvider.getItems] 并存的兼容能力；未实现本能力的 Provider
+ *   由调用方回退 `library.getItems(libraryId, query.page)`（服务器默认排序）。
+ * - 红线：实现方禁止在拿到分页结果后再做本地 sortedBy——那只会排当前页，
+ *   评分/加入日期等全库排序语义会直接错误。
+ * - 能力自述：[sortCapabilities] 是 UI 隐藏/禁用不支持排序项的唯一来源，
+ *   禁止上层按 ServerType 硬编码判断。
+ */
+interface MediaQueryLibraryProvider {
+    /** 该数据源真实支持的排序字段（至少包含 [com.mediahub.model.MediaSortField.SERVER_DEFAULT]）。 */
+    val sortCapabilities: com.mediahub.model.MediaSortCapabilities
+
+    suspend fun getItems(libraryId: String, query: com.mediahub.model.MediaListQuery): PagedResult<MediaItem>
+}
+
 /** 字幕能力。 */
 interface MediaSubtitleProvider {
     suspend fun getSubtitles(itemId: String): List<SubtitleTrack>

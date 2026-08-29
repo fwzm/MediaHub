@@ -1,25 +1,29 @@
 package com.mediahub.provider.emby.library
 
 import com.mediahub.core.logging.Logger
-import com.mediahub.core.network.ApiException
 import com.mediahub.core.security.TokenStore
 import com.mediahub.model.Episode
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
+import com.mediahub.model.MediaListQuery
 import com.mediahub.model.MediaServer
+import com.mediahub.model.MediaSortField
 import com.mediahub.model.PageRequest
 import com.mediahub.model.PagedResult
 import com.mediahub.model.Season
 import com.mediahub.provider.api.MediaLibraryProvider
+import com.mediahub.provider.api.MediaQueryLibraryProvider
 import com.mediahub.provider.api.ProviderException
+import com.mediahub.provider.emby.EmbyProviderSupport
 import com.mediahub.provider.emby.api.EmbyApiClient
 import com.mediahub.provider.emby.api.EmbyImageType
+import com.mediahub.provider.emby.api.EmbyQueryResultDto
+import com.mediahub.provider.emby.api.EmbyBaseItemDto
 import com.mediahub.provider.emby.mapper.EmbyImageMapper
 import com.mediahub.provider.emby.mapper.EmbyLibraryMapper
 import com.mediahub.provider.emby.mapper.EmbyMediaItemMapper
+import com.mediahub.provider.emby.mapper.EmbySortMapper
 import com.mediahub.provider.emby.session.EmbySessionStore
-import java.io.IOException
-import kotlinx.serialization.SerializationException
 
 /**
  * Emby 媒体库浏览（Phase 1B-1）。
@@ -37,10 +41,10 @@ class EmbyLibraryProvider(
     private val tokenStore: TokenStore,
     private val sessionStore: EmbySessionStore,
     private val logger: Logger,
-) : MediaLibraryProvider {
+) : MediaLibraryProvider, MediaQueryLibraryProvider {
 
     override suspend fun getLibraries(): List<MediaLibrary> {
-        val (token, userId) = requireSession()
+        val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
         return try {
             val views = api.getUserViews(token, userId)
             views.items.mapNotNull { dto ->
@@ -53,54 +57,73 @@ class EmbyLibraryProvider(
                 }
             }
         } catch (e: Exception) {
-            throw mapError(e)
+            throw EmbyProviderSupport.mapError(server.id, e)
         }
     }
 
     override suspend fun getItems(libraryId: String, page: PageRequest): PagedResult<MediaItem> {
-        val (token, userId) = requireSession()
+        val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
         // libraryId 即当前容器 id（顶层 view id，或进入后的 series/season/folder id）
         return try {
             val result = api.getUserItems(token, userId, parentId = libraryId, page = page)
-            PagedResult(
-                items = result.items.mapNotNull { dto ->
-                    EmbyMediaItemMapper.map(dto, server.id)?.let { item ->
-                        EmbyImageMapper.enrich(item, api, dto.imageTags, dto.backdropImageTags)
-                    }
-                },
-                totalCount = result.totalRecordCount,
-                hasMore = (page.offset + result.items.size) < result.totalRecordCount,
-                nextOffset = if ((page.offset + result.items.size) < result.totalRecordCount) {
-                    page.offset + result.items.size
-                } else {
-                    null
-                },
-            )
+            toPagedResult(result, page)
         } catch (e: Exception) {
-            throw mapError(e)
+            throw EmbyProviderSupport.mapError(server.id, e)
         }
     }
 
-    /** 结构化错误映射（评审 #11）：无 session、401、403、404、5xx、网络、解析分别表达。 */
-    private fun mapError(e: Exception): ProviderException = when (e) {
-        is ProviderException -> e
-        is ApiException -> when (e.statusCode) {
-            401 -> ProviderException.AuthExpired(server.id)
-            404 -> ProviderException.NotFound(server.id, "媒体库或条目")
-            else -> ProviderException.Http(server.id, e.statusCode, e.url, e.method, e.requestId)
-        }
+    // ---- Phase 1C-2：排序下沉（Query Pipeline） ----
 
-        is SerializationException -> ProviderException.Parse(server.id, e)
-        is IOException -> ProviderException.Network(server.id, e)
-        else -> ProviderException.Unknown(server.id, e)
+    override val sortCapabilities = EmbySortMapper.CAPABILITIES
+
+    /**
+     * 带 MediaListQuery 的浏览：SortBy/SortOrder 传给服务器，在分页之前执行；
+     * 红线——禁止拿到分页结果后再本地 sortedBy（只会排当前页，全库排序语义错误）。
+     *
+     * RANDOM 快照语义：Emby 的 SortBy=Random 跨页各自随机（不重不漏无保证），
+     * 只承诺 offset=0 的单次随机快照；offset>0 返回空页（hasMore=false），
+     * 调用方不得对 RANDOM 结果继续翻页。
+     */
+    override suspend fun getItems(libraryId: String, query: MediaListQuery): PagedResult<MediaItem> {
+        val isRandomSnapshot = query.sort.field == MediaSortField.RANDOM
+        if (isRandomSnapshot && query.page.offset > 0) {
+            return PagedResult(items = emptyList(), totalCount = null, hasMore = false, nextOffset = null)
+        }
+        val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
+        return try {
+            val result = api.getUserItems(
+                token,
+                userId,
+                parentId = libraryId,
+                page = query.page,
+                sortBy = EmbySortMapper.sortBy(query.sort.field),
+                sortOrder = EmbySortMapper.sortOrder(query.sort),
+            )
+            val page = toPagedResult(result, query.page)
+            // 快照语义（Integration 审计 §4.4）：即使服务器 TotalRecordCount 更大，
+            // RANDOM 也只承诺单页，hasMore/nextOffset 必须终止，禁止伪分页。
+            if (isRandomSnapshot) page.copy(hasMore = false, nextOffset = null) else page
+        } catch (e: Exception) {
+            throw EmbyProviderSupport.mapError(server.id, e)
+        }
     }
 
-    private suspend fun requireSession(): Pair<String, String> {
-        val token = tokenStore.readTokens(server.id)?.accessToken
-            ?: throw ProviderException.AuthRequired(server.id)
-        val session = sessionStore.read(server.id)
-            ?: throw ProviderException.AuthRequired(server.id)
-        return token to session.userId
+    /** 条目映射 + 服务器分页数学（浏览与排序查询共用一份）。 */
+    private fun toPagedResult(
+        result: EmbyQueryResultDto<EmbyBaseItemDto>,
+        page: PageRequest,
+    ): PagedResult<MediaItem> {
+        val hasMore = (page.offset + result.items.size) < result.totalRecordCount
+        return PagedResult(
+            items = result.items.mapNotNull { dto ->
+                EmbyMediaItemMapper.map(dto, server.id)?.let { item ->
+                    EmbyImageMapper.enrich(item, api, dto.imageTags, dto.backdropImageTags)
+                }
+            },
+            totalCount = result.totalRecordCount,
+            hasMore = hasMore,
+            nextOffset = if (hasMore) page.offset + result.items.size else null,
+        )
     }
 
     // Phase 1B-1 不实现专用季/集接口（浏览统一走 getItems(ParentId)）

@@ -80,10 +80,15 @@ class LocalProvider(
             .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
             .map { it.toMediaItem() }
         val paged = items.drop(page.offset).take(page.limit)
+        // nextOffset 必须是累计位置 offset+paged.size，不能用 items.size（本页条数）：
+        // 否则第二页起 nextOffset 恒等于本页大小，同一页被反复抓取（去重掩盖下的死循环）。
+        val nextOffset = page.offset + paged.size
+        val hasMore = nextOffset < items.size
         return PagedResult(
             items = paged,
             totalCount = items.size,
-            hasMore = page.offset + paged.size < items.size,
+            hasMore = hasMore,
+            nextOffset = if (hasMore) nextOffset else null,
         )
     }
 

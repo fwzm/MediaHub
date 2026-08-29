@@ -58,6 +58,7 @@ fun MediaHubNavHost() {
                 },
                 onAddServer = { navController.navigate(Routes.ADD_SERVER) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onOpenSearch = { navController.navigate(Routes.SEARCH) },
                 onOpenItem = { progress ->
                     navController.navigate(
                         "detail/${progress.serverId}/${NavArgCodec.encode(progress.itemId)}" +
@@ -115,7 +116,16 @@ fun MediaHubNavHost() {
         }
 
         composable(Routes.SEARCH) {
-            SearchRoute(onBack = { navController.popBackStack() })
+            SearchRoute(
+                onBack = { navController.popBackStack() },
+                onOpenItem = { item ->
+                    // 搜索命中统一进 DetailRoute：Movie/Episode → 详情播放；
+                    // Series → Series Detail（季 chips + EpisodeRow，1B-3.1 页面的正式入口）
+                    navController.navigate(
+                        "detail/${item.serverId}/${NavArgCodec.encode(item.id)}?title=${Uri.encode(item.title)}"
+                    )
+                },
+            )
         }
 
         composable(

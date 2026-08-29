@@ -52,20 +52,59 @@ class EmbyApiClient(
             headers = authenticatedHeaders(token, userId),
         )
 
-    /** 浏览某容器下的 Items：GET /emby/Users/{userId}/Items?ParentId=...&StartIndex=...&Limit=... */
+    /**
+     * 浏览某容器下的 Items：GET /emby/Users/{userId}/Items?ParentId=...&StartIndex=...&Limit=...
+     *
+     * Phase 1C-2：[sortBy]/[sortOrder] 把排序下沉到服务器（分页之前执行）；
+     * 均为 null 时不携带 SortBy/SortOrder（服务器默认排序）。
+     * [sortOrder] 只允许 Ascending/Descending（Emby wire 值，映射见 EmbySortMapper）。
+     */
     suspend fun getUserItems(
         token: String,
         userId: String,
         parentId: String,
         page: PageRequest,
+        sortBy: String? = null,
+        sortOrder: String? = null,
+    ): EmbyQueryResultDto<EmbyBaseItemDto> {
+        val url = buildUrl(
+            path = "/Users/$userId/Items",
+            query = buildMap {
+                put("ParentId", parentId)
+                put("StartIndex", page.offset.toString())
+                put("Limit", page.limit.toString())
+                put("Fields", LIBRARY_FIELDS)
+                put("EnableUserData", "true")
+                sortBy?.let { put("SortBy", it) }
+                sortOrder?.let { put("SortOrder", it) }
+            },
+        )
+        return apiClient.get(url, authenticatedHeaders(token, userId))
+    }
+
+    /**
+     * 全库搜索（Phase 1C-1）：GET /Users/{userId}/Items?SearchTerm=...&Recursive=true。
+     *
+     * - SearchTerm 走 HttpUrl builder 自动 URL 编码（中文/空格/&/= 均安全），禁止手拼 query。
+     * - Recursive=true + 不带 ParentId：跨整个媒体库搜索。
+     * - IncludeItemTypes 限定可播放/可浏览的四种类型；排序不传 SortBy（服务器 relevance 即首版权威序）。
+     * - Token 红线（ADR-026）：只走 [authenticatedHeaders] 的 X-Emby-Token Header，绝不进 URL。
+     */
+    suspend fun searchItems(
+        token: String,
+        userId: String,
+        searchTerm: String,
+        page: PageRequest,
     ): EmbyQueryResultDto<EmbyBaseItemDto> {
         val url = buildUrl(
             path = "/Users/$userId/Items",
             query = mapOf(
-                "ParentId" to parentId,
+                "SearchTerm" to searchTerm,
+                "Recursive" to "true",
+                "IncludeItemTypes" to "Movie,Series,Episode,Video",
                 "StartIndex" to page.offset.toString(),
                 "Limit" to page.limit.toString(),
-                "Fields" to "PrimaryImageAspectRatio,SortName,Path",
+                "Fields" to SEARCH_FIELDS,
                 "EnableUserData" to "true",
             ),
         )
@@ -197,6 +236,17 @@ class EmbyApiClient(
 
     private companion object {
         const val TOKEN_HEADER = "X-Emby-Token"
+
+        /**
+         * 浏览列表 Fields（官方 Fields 枚举值）。
+         * Phase 1C-2 扩展排序/发现字段：DateCreated/CriticRating/PremiereDate/
+         * OfficialRating/Size/Bitrate（服务器按需返回，DTO 缺失可空）。
+         */
+        const val LIBRARY_FIELDS =
+            "PrimaryImageAspectRatio,SortName,Path,DateCreated,CriticRating,PremiereDate,OfficialRating,Size,Bitrate"
+
+        /** 搜索结果列表所需字段（官方 Fields 枚举值；海报/年份/评分/简介供结果卡渲染）。 */
+        const val SEARCH_FIELDS = "PrimaryImageAspectRatio,SortName,Path,ProductionYear,CommunityRating,Overview"
         /**
          * 请求体序列化：encodeDefaults=true 保证 DeviceProfile 等默认值字段全部输出
          * （官方 server 期望完整字段）；explicitNulls=false 省略未设置的 null 字段。

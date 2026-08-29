@@ -22,11 +22,14 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,8 +37,16 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Modifier
@@ -47,6 +58,8 @@ import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
+import com.mediahub.model.MediaSort
+import com.mediahub.model.MediaSortField
 import com.mediahub.model.MediaType
 
 /** 媒体库浏览（本地文件树真实可用；服务端媒体库待 Provider 接入）。 */
@@ -62,6 +75,8 @@ fun LibraryRoute(
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var showSortSheet by rememberSaveable { mutableStateOf(false) }
+    val sortEntryVisible = (state as? LibraryUiState.Content)?.sortFields?.isNotEmpty() == true
 
     Scaffold(
         topBar = {
@@ -82,6 +97,11 @@ fun LibraryRoute(
                     }
                 },
                 actions = {
+                    if (sortEntryVisible) {
+                        IconButton(onClick = { showSortSheet = true }) {
+                            Icon(Icons.Default.Sort, contentDescription = "排序")
+                        }
+                    }
                     IconButton(onClick = viewModel::load) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")
                     }
@@ -142,8 +162,6 @@ fun LibraryRoute(
                     }
                 } else {
                     // 海报墙（Phase 1B-2.3）：媒体条目 3 列网格；文件夹保持行，可与网格混排
-                    val folders = s.items.filter { it.type == MediaType.FOLDER }
-                    val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
                     val gridState = rememberLazyGridState()
 
                     // 滚动到底部自动 loadMore（rememberUpdatedState 避免 stale s 捕获）
@@ -167,6 +185,7 @@ fun LibraryRoute(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
+                        // 返回上级：导航控件固定顶部，不参与排序（C2）
                         if (s.canGoUp) {
                             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
                                 TextButton(onClick = viewModel::goToParent, modifier = Modifier.fillMaxWidth()) {
@@ -174,13 +193,38 @@ fun LibraryRoute(
                                 }
                             }
                         }
-                        folders.forEach { folder ->
-                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                FolderRow(item = folder, onClick = { viewModel.openFolder(folder) })
+                        if (shouldPreserveProviderOrder(s.sort)) {
+                            // 用户主动选择排序后：Provider 返回顺序即权威顺序，
+                            // UI 不得再按目录/媒体拆分重排（那会覆盖服务端全局排序）
+                            gridItems(
+                                s.items,
+                                key = { it.id },
+                                span = { item ->
+                                    if (item.type == MediaType.FOLDER) {
+                                        androidx.compose.foundation.lazy.grid.GridItemSpan(3)
+                                    } else {
+                                        androidx.compose.foundation.lazy.grid.GridItemSpan(1)
+                                    }
+                                },
+                            ) { item ->
+                                if (item.type == MediaType.FOLDER) {
+                                    FolderRow(item = item, onClick = { viewModel.openFolder(item) })
+                                } else {
+                                    PosterCell(item = item, onClick = { onItemClick(item, viewModel, onOpenItem) })
+                                }
                             }
-                        }
-                        gridItems(mediaItems, key = { it.id }) { item ->
-                            PosterCell(item = item, onClick = { onItemClick(item, viewModel, onOpenItem) })
+                        } else {
+                            // SERVER_DEFAULT：保留既有"目录优先"展示策略
+                            val folders = s.items.filter { it.type == MediaType.FOLDER }
+                            val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
+                            folders.forEach { folder ->
+                                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
+                                    FolderRow(item = folder, onClick = { viewModel.openFolder(folder) })
+                                }
+                            }
+                            gridItems(mediaItems, key = { it.id }) { item ->
+                                PosterCell(item = item, onClick = { onItemClick(item, viewModel, onOpenItem) })
+                            }
                         }
                         // 加载更多指示器
                         if (s.isLoadingMore) {
@@ -203,6 +247,118 @@ fun LibraryRoute(
                 }
             }
         }
+    }
+
+    // 排序面板（1C-2）：选项按 Provider 能力过滤；即时生效，不做本地排序
+    val sortContent = state as? LibraryUiState.Content
+    if (showSortSheet && sortContent != null) {
+        ModalBottomSheet(onDismissRequest = { showSortSheet = false }) {
+            SortSheetContent(
+                current = sortContent.sort,
+                fields = sortContent.sortFields,
+                onSelected = viewModel::onSortSelected,
+            )
+        }
+    }
+}
+
+/**
+ * C2 排序展示策略：用户主动选择排序（非 SERVER_DEFAULT）后，Provider 返回顺序即权威顺序，
+ * UI 不得按目录/媒体拆分重排（分组会覆盖服务端全局排序）；SERVER_DEFAULT 保留既有
+ * "目录优先"策略。返回上级等导航控件固定顶部，不参与两种策略。
+ */
+internal fun shouldPreserveProviderOrder(sort: MediaSort): Boolean =
+    sort.field != MediaSortField.SERVER_DEFAULT
+
+/** 排序选项中文标签（用户口径）。 */
+internal fun sortLabel(field: MediaSortField): String = when (field) {    MediaSortField.SERVER_DEFAULT -> "默认"
+    MediaSortField.DATE_ADDED -> "加入日期"
+    MediaSortField.TITLE -> "标题"
+    MediaSortField.COMMUNITY_RATING -> "公众评分"
+    MediaSortField.CRITIC_RATING -> "影评人评分"
+    MediaSortField.PRODUCTION_YEAR -> "出品年份"
+    MediaSortField.PREMIERE_DATE -> "首映日期"
+    MediaSortField.OFFICIAL_RATING -> "官方评级"
+    MediaSortField.RUNTIME -> "播放时长"
+    MediaSortField.BITRATE -> "比特率"
+    MediaSortField.SIZE -> "大小"
+    MediaSortField.RANDOM -> "随机"
+}
+
+@Composable
+private fun SortSheetContent(
+    current: MediaSort,
+    fields: List<MediaSortField>,
+    onSelected: (MediaSort) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp),
+    ) {
+        Text(
+            "排序方式",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        fields.forEach { field ->
+            // 无方向语义字段固定 ASC 方向值（引擎/Provider 会忽略 direction）
+            SortOptionRow(
+                label = sortLabel(field),
+                selected = current.field == field,
+                onClick = {
+                    onSelected(
+                        if (current.field == field && current.hasDirection) {
+                            current
+                        } else {
+                            MediaSort(field)
+                        }
+                    )
+                },
+            )
+        }
+
+        // 升序 / 降序：仅对有方向语义的字段展示
+        if (current.hasDirection) {
+            Text(
+                "方向",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            listOf(
+                MediaHubSortDirectionOption("升序", com.mediahub.model.SortDirection.ASC),
+                MediaHubSortDirectionOption("降序", com.mediahub.model.SortDirection.DESC),
+            ).forEach { option ->
+                SortOptionRow(
+                    label = option.label,
+                    selected = current.direction == option.direction,
+                    onClick = { onSelected(MediaSort(current.field, option.direction)) },
+                )
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+private data class MediaHubSortDirectionOption(val label: String, val direction: com.mediahub.model.SortDirection)
+
+@Composable
+private fun SortOptionRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

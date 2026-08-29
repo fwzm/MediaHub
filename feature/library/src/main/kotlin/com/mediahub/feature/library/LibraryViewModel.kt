@@ -8,6 +8,10 @@ import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
+import com.mediahub.model.MediaListQuery
+import com.mediahub.model.MediaSort
+import com.mediahub.model.MediaSortCapabilities
+import com.mediahub.model.MediaSortField
 import com.mediahub.model.PageRequest
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
@@ -19,6 +23,22 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
+/** 排序菜单展示顺序（用户口径）；VM 按 Provider 能力过滤后下发。 */
+internal val SORT_MENU_ORDER: List<MediaSortField> = listOf(
+    MediaSortField.SERVER_DEFAULT,
+    MediaSortField.DATE_ADDED,
+    MediaSortField.TITLE,
+    MediaSortField.COMMUNITY_RATING,
+    MediaSortField.CRITIC_RATING,
+    MediaSortField.PRODUCTION_YEAR,
+    MediaSortField.PREMIERE_DATE,
+    MediaSortField.OFFICIAL_RATING,
+    MediaSortField.RUNTIME,
+    MediaSortField.BITRATE,
+    MediaSortField.SIZE,
+    MediaSortField.RANDOM,
+)
 
 sealed interface LibraryUiState {
     data object Loading : LibraryUiState
@@ -38,6 +58,10 @@ sealed interface LibraryUiState {
         val hasMore: Boolean = false,
         val isLoadingMore: Boolean = false,
         val loadMoreError: String? = null,
+        /** 当前排序（1C-2）。 */
+        val sort: MediaSort = MediaSort(MediaSortField.SERVER_DEFAULT),
+        /** 数据源支持的排序选项（能力过滤后，菜单顺序）；空 = 该源不支持排序入口。 */
+        val sortFields: List<MediaSortField> = emptyList(),
     ) : LibraryUiState
 
     data class Error(val message: String) : LibraryUiState
@@ -68,6 +92,9 @@ class LibraryViewModel @Inject constructor(
 
     /** loadMore 并发锁。 */
     private var loadingMore = false
+
+    /** 当前排序（1C-2）：SERVER_DEFAULT 起步，用户选择后才变；不擅自改默认序。 */
+    private var currentSort: MediaSort = MediaSort(MediaSortField.SERVER_DEFAULT)
 
     /** 导航代数：每次 openFolder/goToParent/load 递增，用于 race guard。 */
     private var navigationGeneration = 0
@@ -111,6 +138,7 @@ class LibraryViewModel @Inject constructor(
         val snapshotParent = currentFolder?.id ?: libraryId
         val snapshotFolder = currentFolder
         val snapshotOffset = nextOffset!!
+        val snapshotSort = currentSort
         _uiState.value = currentState.copy(isLoadingMore = true, loadMoreError = null)
         loadMoreJob = viewModelScope.launch {
             try {
@@ -119,9 +147,15 @@ class LibraryViewModel @Inject constructor(
                 val handle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 val page = PageRequest(offset = snapshotOffset, limit = 200)
-                val result = handle.library?.getItems(snapshotParent, page)
-                    ?: handle.browse?.listFolder(snapshotFolder, page)
-                    ?: throw ProviderException.NotYetImplemented(serverId, "浏览能力")
+                val queryProvider = handle.query
+                val result = if (queryProvider != null) {
+                    // 排序在服务器分页前执行；续页沿用同一 sort（RANDOM 除外，见 Provider 快照语义）
+                    queryProvider.getItems(snapshotParent, MediaListQuery(page = page, sort = snapshotSort))
+                } else {
+                    handle.library?.getItems(snapshotParent, page)
+                        ?: handle.browse?.listFolder(snapshotFolder, page)
+                        ?: throw ProviderException.NotYetImplemented(serverId, "浏览能力")
+                }
                 // Race guard: 导航已变，丢弃
                 if (snapshotGen != navigationGeneration) return@launch
                 val currentParent = currentFolder?.id ?: libraryId
@@ -151,6 +185,17 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 用户改排序（1C-2）：取消在途 load/loadMore → 重置分页 → offset=0
+     * 用新 sort 重新请求服务器（load() 本身已含全部这些语义）。
+     * 禁止对已加载的当前页做本地 sortedBy——全库排序语义必须是服务端的。
+     */
+    fun onSortSelected(sort: MediaSort) {
+        if (sort.field == currentSort.field && sort.direction == currentSort.direction) return
+        currentSort = sort
+        load()
+    }
+
     fun load() {
         loadJob?.cancel()
         loadMoreJob?.cancel()
@@ -160,6 +205,7 @@ class LibraryViewModel @Inject constructor(
         val snapshotGen = navigationGeneration
         val snapshotParent = currentFolder?.id ?: libraryId
         val snapshotFolder = currentFolder
+        val snapshotSort = currentSort
         loadJob = viewModelScope.launch {
             _uiState.value = LibraryUiState.Loading
             try {
@@ -180,18 +226,31 @@ class LibraryViewModel @Inject constructor(
                     }
 
                     library != null -> {
-                        val result = library.getItems(snapshotParent, page)
+                        val queryProvider = handle.query
+                        val result = if (queryProvider != null) {
+                            // 排序下沉服务器（分页前执行）；无 Query 能力回退旧接口（服务器默认序）
+                            queryProvider.getItems(
+                                snapshotParent,
+                                MediaListQuery(page = page, sort = snapshotSort),
+                            )
+                        } else {
+                            library.getItems(snapshotParent, page)
+                        }
                         // Race guard: 导航已变，丢弃
                         if (snapshotGen != navigationGeneration) return@launch
                         val currentParent = currentFolder?.id ?: libraryId
                         if (currentParent != snapshotParent) return@launch
                         nextOffset = result.nextOffset
+                        // 能力自述：支持排序的源给菜单（按能力过滤），否则隐藏入口
+                        val caps: MediaSortCapabilities? = queryProvider?.sortCapabilities
                         _uiState.value = LibraryUiState.Content(
                             items = result.items,
                             libraryName = libraryName.ifBlank { server.displayName },
                             currentFolder = currentFolder,
                             canGoUp = folderStack.isNotEmpty(),
                             hasMore = result.hasMore,
+                            sort = snapshotSort,
+                            sortFields = caps?.filter(SORT_MENU_ORDER).orEmpty(),
                         )
                     }
 

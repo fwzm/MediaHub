@@ -322,3 +322,27 @@
   - **双击消歧**：自实现 tap 等待（双击窗口内不出单击），Overlay 不闪烁。
   - **手势偏好独立于 defaultPlaybackSpeed**：PlayerGestures 9 项（DataStore），
     scrub 灵敏度 = clamp(时长×10%, 60s, 10min) 固定算法不做偏好。
+
+## ADR-036 Phase 1C 查询管道与聚合搜索语义（1C-1/1C-2）
+- 状态：已采纳（2026-08-29）
+- 决策：
+  - **MediaListQuery 独立于 PageRequest**：PageRequest 只表达 offset/limit；
+    排序属于 MediaSort(field, direction) + MediaListQuery(page, sort)，
+    经 MediaQueryLibraryProvider.getItems(libraryId, query) 下沉服务器，
+    在分页之前执行；禁止 UI/ViewModel 对已加载页做本地 sortedBy。
+    Provider 经 sortCapabilities 自述可兑现的排序字段，UI 只渲染能力内选项，
+    禁止按 ServerType 硬编码；无 Query 能力的 Provider 回退 getItems(page) 且隐藏排序入口。
+  - **RANDOM 是单次快照而非分页**：Emby SortBy=Random 跨页各自随机、不重不漏无保证；
+    RANDOM 只承诺 offset=0 的单页（无论 TotalRecordCount 多大都终止 hasMore/nextOffset），
+    offset>0 直接空页；无方向语义（SortOrder 省略）。SERVER_DEFAULT 同样无方向语义。
+  - **聚合搜索首版不做跨源语义合并**：不同服务器上的同名影片是两个真实播放源，
+    全部保留并标注来源（UnifiedSearchHit.serverName）；UI identity 用 (serverId, itemId)；
+    按 title/title+year 合并需等 externalIds/canonical identity，禁止草率同题合并。
+  - **Emby capability 只声明已证实的 SortBy 字段**：官方 SortBy 枚举包含的九类
+    （含 CRITIC/RATING 等）；OFFICIAL_RATING/BITRATE/SIZE 未见于该枚举
+    （OfficialRatings 是过滤参数，Size/Bitrate 只是响应属性），capability 隐藏，
+    wire 映射保留待 per-server probe；恢复须协议证据，不做客户端 fallback sort。
+  - **用户主动排序后 Provider 顺序为权威**：sort != SERVER_DEFAULT 时 Library UI 按
+    Provider 返回顺序渲染（folder 行与媒体格交错，允许全宽行造成视觉空位），
+    不得隐式按目录优先重排；SERVER_DEFAULT 保留历史目录优先展示策略。
+    导航控件（返回上级）固定顶部，不参与排序语义。

@@ -7,10 +7,14 @@ import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.StoredToken
 import com.mediahub.core.security.TokenStore
 import com.mediahub.model.LibraryType
+import com.mediahub.model.MediaListQuery
 import com.mediahub.model.MediaServer
+import com.mediahub.model.MediaSort
+import com.mediahub.model.MediaSortField
 import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
 import com.mediahub.model.ServerType
+import com.mediahub.model.SortDirection
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.emby.api.EmbyApiClient
 import com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilder
@@ -24,6 +28,8 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -145,6 +151,135 @@ class EmbyLibraryProviderTest {
         val thrown = runCatching { provider().getLibraries() }.exceptionOrNull()
         assertTrue(thrown is ProviderException.AuthRequired)
         assertEquals(0, server.requestCount)
+    }
+
+    // ---- Phase 1C-2：排序下沉（MediaListQuery） ----
+
+    @Test
+    fun `query getItems passes sortBy sortOrder to server`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"Items":[{"Id":"m1","Name":"A","Type":"Movie"}],"TotalRecordCount":1}"""
+            )
+        )
+
+        val query = MediaListQuery(
+            page = PageRequest(offset = 0, limit = 50),
+            sort = MediaSort(MediaSortField.DATE_ADDED, SortDirection.DESC),
+        )
+        val result = provider().getItems("lib-1", query)
+
+        assertEquals(1, result.items.size)
+        val url = server.takeRequest().requestUrl!!
+        assertEquals("DateCreated", url.queryParameter("SortBy"))
+        assertEquals("Descending", url.queryParameter("SortOrder"))
+    }
+
+    @Test
+    fun `query server default carries no sortBy sortOrder`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":0}""")
+        )
+
+        provider().getItems("lib-1", MediaListQuery())
+
+        val url = server.takeRequest().requestUrl!!
+        assertNull(url.queryParameter("SortBy"))
+        assertNull(url.queryParameter("SortOrder"))
+    }
+
+    @Test
+    fun `random sort is snapshot only - page0 carries no sortOrder, page1 returns empty without request`() =
+        runBlocking {
+            seedSession()
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    // TotalRecordCount 故意给大值：RANDOM 即使服务器报告更多条，
+                    // 也必须单页终止（Integration 审计 §4.4 快照语义）
+                    """{"Items":[{"Id":"m1","Name":"A","Type":"Movie"}],"TotalRecordCount":67}"""
+                )
+            )
+
+            val page0 = provider().getItems(
+                "lib-1",
+                MediaListQuery(page = PageRequest(offset = 0, limit = 50), sort = MediaSort(MediaSortField.RANDOM)),
+            )
+            assertEquals(1, page0.items.size)
+            assertEquals(67, page0.totalCount)
+            assertFalse(page0.hasMore)
+            assertNull(page0.nextOffset)
+
+            val url = server.takeRequest().requestUrl!!
+            assertEquals("Random", url.queryParameter("SortBy"))
+            assertNull(url.queryParameter("SortOrder"))
+
+            // offset>0：不发请求，直接空快照页（随机跨页不重不漏无保证）
+            val page1 = provider().getItems(
+                "lib-1",
+                MediaListQuery(page = PageRequest(offset = 50, limit = 50), sort = MediaSort(MediaSortField.RANDOM)),
+            )
+            assertTrue(page1.items.isEmpty())
+            assertFalse(page1.hasMore)
+            assertEquals(1, server.requestCount)
+        }
+
+    @Test
+    fun `sort capabilities hide unconfirmed emby sortBy fields`() {
+        val caps = provider().sortCapabilities
+        assertTrue(caps.supports(MediaSortField.SERVER_DEFAULT))
+        assertTrue(caps.supports(MediaSortField.CRITIC_RATING))
+        assertTrue(caps.supports(MediaSortField.RANDOM))
+        // 官方 SortBy 枚举未包含：capability 隐藏，恢复需 per-server probe（评审 P1）
+        assertFalse(caps.supports(MediaSortField.OFFICIAL_RATING))
+        assertFalse(caps.supports(MediaSortField.BITRATE))
+        assertFalse(caps.supports(MediaSortField.SIZE))
+    }
+
+    // ---- Phase 1C-2：排序/发现字段映射 ----
+
+    @Test
+    fun `response discovery fields map to media item`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"Items":[{"Id":"m1","Name":"疤面人","Type":"Movie",
+                    "SortName":"疤面人",
+                    "DateCreated":"2024-01-02T03:04:05.0000000Z",
+                    "PremiereDate":"1932-05-01T00:00:00Z",
+                    "CriticRating":92.5,
+                    "OfficialRating":"PG-13",
+                    "Size":2147483648,
+                    "Bitrate":8192}],"TotalRecordCount":1}"""
+            )
+        )
+
+        val result = provider().getItems("lib-1", PageRequest())
+
+        val item = result.items.single()
+        assertEquals("疤面人", item.sortName)
+        assertEquals(1704164645000L, item.dateAddedEpochMs)
+        assertEquals(-1188777600000L, item.premiereDateEpochMs)
+        assertEquals(92.5, item.criticRating!!, 0.001)
+        assertEquals("PG-13", item.officialRating)
+        assertEquals(2147483648L, item.sizeBytes)
+        assertEquals(8192L, item.bitrate)
+    }
+
+    @Test
+    fun `request fields param includes discovery fields`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":0}""")
+        )
+
+        provider().getItems("lib-1", PageRequest())
+
+        val fields = server.takeRequest().requestUrl!!.queryParameter("Fields")!!
+        listOf("DateCreated", "CriticRating", "PremiereDate", "OfficialRating", "Size", "Bitrate").forEach {
+            assertTrue("Fields 缺少 $it", fields.contains(it))
+        }
     }
 
     // ---- 11：401/403/5xx 不被吞掉 ----

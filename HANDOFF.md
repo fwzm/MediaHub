@@ -1,5 +1,37 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-23（Universal Playback U1-U3：双内核 + AUTO 选择 + 手势层，代码+测试+文档完成，待真机 smoke 与推送 CI）。
+> 最后更新：2026-08-29（Phase 1C Unified Discovery：聚合搜索 + 服务端排序——真机 smoke PASS / SEALED @aaca301）
+
+## Phase 1C Unified Discovery（本次）：1C-1 聚合搜索 + 1C-2 服务端排序
+- **Query Pipeline（ADR-036）**：MediaListQuery/MediaSort/MediaSortCapabilities 独立于 PageRequest；
+  MediaQueryLibraryProvider.getItems(libraryId, query) 把排序下沉服务器（分页前执行）；
+  Provider 用 sortCapabilities 自述能力，UI 能力过滤渲染，无能力回退旧接口并隐藏入口。
+- **Emby 搜索/排序**：EmbySearchProvider（SearchTerm+Recursive，Token 只走 Header）；
+  EmbyLibraryProvider 同实例承载 LIBRARY+QUERY，SortBy/SortOrder 全字段映射，
+  RANDOM 单页快照（totalCount 再大也终止）；Fields 扩 6 个发现字段并映射进 MediaItem。
+- **聚合搜索**：GlobalSearchEngine（并发 4/单服 8s/partial success/hits 稳定序/取消传播）+
+  GlobalSearchViewModel（debounce 350ms+flatMapLatest）+ SearchScreen + 首页入口；
+  命中统一进 DetailRoute —— **Series Detail（季 chips+EpisodeRow）首次获得 UI 入口**，
+  Library 的 SERIES 下钻保持原行为（两条 UX 并存，见 ADR-036）。
+- **展示语义**：用户主动排序后 Provider 顺序权威（UI 不再目录优先重排）；SERVER_DEFAULT 保留旧策略。
+- **评审加固**：LocalProvider nextOffset 累计推进（修死循环）；Redactor 脱敏 SearchTerm
+  （含 percent-encoded）；TokenStoreTest 夹具合成化（secret-lint）。
+- **状态**：code complete / tests complete / **device verification PASS / SEALED**。
+- **真机验收（2026-08-29）**：
+  ```
+  Device smoke code SHA: aaca301bf30378c0d47c846c728f0a43f9421f93
+  Device: Xiaomi 14 Ultra / Android 16
+  Result: PASS
+  ```
+  1C-1 聚合搜索 / 1C-2 服务端排序 / 1B-3.1 Series Detail（借 Search 入口）全部 PASS；
+  排序菜单精确 9 项（OfficialRating/Bitrate/Size capability hidden pending per-server
+  protocol evidence）；RANDOM 快照终止；logcat 14371 行搜索词零泄露（SearchTerm=****）。
+- **NOT_AVAILABLE（不阻塞，自动化覆盖）**：>200 项容器「排序+续页」（墙 67 项单页；
+  JVM loadMore 回归覆盖）；Local 源设备未配置（LocalProviderPaginationTest 600/401/边界回归覆盖）。
+- **待真机验证**：排序菜单应只见九个已证实字段（OfficialRating/Bitrate/Size 已隐藏，
+  恢复需 per-server probe）；DateAdded/Title/CommunityRating/CriticRating/Year/Premiere/Runtime/Random
+  实测排序正确（RANDOM 快照）；搜索冰血暴双源 → Series Detail；单服超时保留他源结果；
+  日志无搜索词；Local 600 项分页走完。
+- **下一步**：merge PR #2（integration/1c-unified-discovery → main）→ Phase 1C 结束，下一阶段单独开 feature branch。
 ## Universal Playback U1-U3（本次）：双内核 + AUTO 引擎选择 + 播放器手势
 - **双内核**：PlaybackEnginePort 契约下 Media3（1.11.0）与 mpv（pinned prebuilt libmpv）并存；
   mpv HTTP 流走 MpvHttpBridge（core:network，IPv4 loopback），ADR-030 凭据红线覆盖。

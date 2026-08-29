@@ -36,14 +36,18 @@ class EmbyProviderFactoryTest {
     }
 
     @Test
-    fun `handle exposes auth library detail playback capabilities`() {
+    fun `handle exposes auth library detail playback query search capabilities`() {
         val handle = factory().create(server)
         assertNotNull(handle.auth)
         assertNotNull(handle.library)
         assertNotNull(handle.detail)
         assertNull(handle.browse)
         assertNotNull(handle.playback)
-        assertNull(handle.search)
+        // Phase 1C-2：QUERY（服务端排序查询管道）落地；同一 library 实例承载两能力
+        assertNotNull(handle.query)
+        assertTrue(handle.query === handle.library)
+        // Phase 1C-1：SEARCH（SearchTerm 全库搜索）落地
+        assertNotNull(handle.search)
         assertNull(handle.subtitle)
         assertNull(handle.progress)
         assertEquals(
@@ -52,6 +56,8 @@ class EmbyProviderFactoryTest {
                 ProviderCapability.LIBRARY,
                 ProviderCapability.DETAIL,
                 ProviderCapability.PLAYBACK,
+                ProviderCapability.QUERY,
+                ProviderCapability.SEARCH,
             ),
             handle.runtimeCapabilities,
         )

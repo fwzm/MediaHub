@@ -1,5 +1,6 @@
 package com.mediahub.core.security
 
+import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -18,26 +19,33 @@ class TokenStoreTest {
 
     private val store = TokenStore(FakeSecretStorage())
 
+    /**
+     * 合成测试夹具（Mimosa secret-lint）：Token 值一律运行时生成，
+     * 源码中不出现凭据形态的字面量；断言为存取对拍，测试语义不变。
+     */
+    private fun fixtureToken(prefix: String): String = "$prefix-${UUID.randomUUID()}"
+
     @Test
     fun `token round trip with refresh and expiry`() = runBlocking {
         val tokens = StoredToken(
-            accessToken = "access-abc",
-            refreshToken = "refresh-xyz",
+            accessToken = fixtureToken("access"),
+            refreshToken = fixtureToken("refresh"),
             expiresAtEpochMs = 1_700_000_000_000L,
         )
         store.saveTokens("srv1", tokens)
 
         val read = store.readTokens("srv1")!!
-        assertEquals("access-abc", read.accessToken)
-        assertEquals("refresh-xyz", read.refreshToken)
+        assertEquals(tokens.accessToken, read.accessToken)
+        assertEquals(tokens.refreshToken, read.refreshToken)
         assertEquals(1_700_000_000_000L, read.expiresAtEpochMs)
     }
 
     @Test
     fun `token without refresh and expiry`() = runBlocking {
-        store.saveTokens("srv2", StoredToken(accessToken = "only-access"))
+        val tokens = StoredToken(accessToken = fixtureToken("access"))
+        store.saveTokens("srv2", tokens)
         val read = store.readTokens("srv2")!!
-        assertEquals("only-access", read.accessToken)
+        assertEquals(tokens.accessToken, read.accessToken)
         assertNull(read.refreshToken)
         assertNull(read.expiresAtEpochMs)
     }
@@ -55,7 +63,7 @@ class TokenStoreTest {
 
     @Test
     fun `clear removes tokens`() = runBlocking {
-        store.saveTokens("srv4", StoredToken(accessToken = "a"))
+        store.saveTokens("srv4", StoredToken(accessToken = fixtureToken("access")))
         store.clear("srv4")
         assertNull(store.readTokens("srv4"))
     }
