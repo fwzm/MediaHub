@@ -2,6 +2,8 @@ package com.mediahub.provider.emby.api
 
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.ApiClient
+import com.mediahub.model.MediaFilter
+import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -58,6 +60,11 @@ class EmbyApiClient(
      * Phase 1C-2：[sortBy]/[sortOrder] 把排序下沉到服务器（分页之前执行）；
      * 均为 null 时不携带 SortBy/SortOrder（服务器默认排序）。
      * [sortOrder] 只允许 Ascending/Descending（Emby wire 值，映射见 EmbySortMapper）。
+     *
+     * Phase 1D：[filter] 把筛选下沉到服务器（分页之前执行，与排序同一请求）——
+     * tri-state 字段 null = 不传对应参数；mediaType 首版标准语义限定
+     * MOVIE / SERIES / EPISODE（[includeItemTypes]）。红线：禁止本地 filter。
+     * 注意：不加 Recursive——筛选只作用于当前容器直接子级，不改变浏览导航契约。
      */
     suspend fun getUserItems(
         token: String,
@@ -66,6 +73,7 @@ class EmbyApiClient(
         page: PageRequest,
         sortBy: String? = null,
         sortOrder: String? = null,
+        filter: MediaFilter = MediaFilter(),
     ): EmbyQueryResultDto<EmbyBaseItemDto> {
         val url = buildUrl(
             path = "/Users/$userId/Items",
@@ -77,9 +85,21 @@ class EmbyApiClient(
                 put("EnableUserData", "true")
                 sortBy?.let { put("SortBy", it) }
                 sortOrder?.let { put("SortOrder", it) }
+                includeItemTypes(filter.mediaType)?.let { put("IncludeItemTypes", it) }
+                filter.year?.let { put("Years", it.toString()) }
+                filter.played?.let { put("IsPlayed", it.toString()) }
+                filter.favorite?.let { put("IsFavorite", it.toString()) }
             },
         )
         return apiClient.get(url, authenticatedHeaders(token, userId))
+    }
+
+    /** Phase 1D：MediaType → IncludeItemTypes wire 值；首版标准语义外的类型不传参数。 */
+    private fun includeItemTypes(type: MediaType?): String? = when (type) {
+        MediaType.MOVIE -> "Movie"
+        MediaType.SERIES -> "Series"
+        MediaType.EPISODE -> "Episode"
+        else -> null
     }
 
     /**

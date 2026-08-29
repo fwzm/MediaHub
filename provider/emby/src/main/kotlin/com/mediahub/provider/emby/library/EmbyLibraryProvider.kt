@@ -98,6 +98,8 @@ class EmbyLibraryProvider(
                 page = query.page,
                 sortBy = EmbySortMapper.sortBy(query.sort.field),
                 sortOrder = EmbySortMapper.sortOrder(query.sort),
+                // Phase 1D：筛选与排序同一请求下沉服务器；container-scoped（导航栈负责 reset/restore）
+                filter = query.filter,
             )
             val page = toPagedResult(result, query.page)
             // 快照语义（Integration 审计 §4.4）：即使服务器 TotalRecordCount 更大，
