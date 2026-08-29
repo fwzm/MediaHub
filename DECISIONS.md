@@ -370,3 +370,51 @@
   - **卡片元数据不做字段级融合**：取稳定结果序首个 occurrence。
   - ProviderIds 归一化：key 小写/trim、value trim、空白丢弃；
     同 provider 冲突值 → 整个 provider 丢弃（不做 first/last wins）。
+
+## ADR-038 Phase 1F Canonical Detail / Source Selection（1F 来源解析）
+- 状态：已采纳（2026-08-29）
+- 决策：
+  - **Canonical identity 是跨 feature 的 domain contract**：SearchAggregator 负责
+    搜索结果的即时分组，CanonicalSourceResolver 负责 Detail 进入后的按需来源解析。
+    两者必须共享 ADR-037 的 multi-alias connected-component 语义（实现唯一承载于
+    core:model CanonicalIdentityGraph，禁止各自手写 union-find）；
+    Detail source resolution 不依赖 SearchTerm、title/year 或导航上下文。
+    本条 supersede ADR-037 中"聚合只发生在搜索结果层"的阶段性 scope 限制
+    （显示层聚合仍只在搜索；ADR-037 的 identity 规则全部不变）。
+  - **Detail-time canonical source resolution**：Detail 由 (serverId, itemId) 加载
+    主内容后，若 item 携带 externalIds，则以 CanonicalKeyPolicy.keys 为 seed 做
+    **有界传递闭包**解析同作品全部来源（frontier：knownKeys → 各 identity-capable
+    server 查尚未查询过的新 keys → 本地按 CanonicalKey 校验 → 新 item 带来新
+    aliases 扩 frontier → 无新 key 止）；**查询包含当前服务器自身**（同服务器另一
+    条目可为 alias bridge）。occurrences 不进 navigation args——Home/Library/Search
+    任一入口进入 Detail 语义一致。
+  - **Provider capability 独立新增，不复用文本 Search**：
+    MediaIdentityLookupProvider.findByCanonicalKeys(keys, page)；
+    ProviderHandle.identityLookup nullable + ProviderCapability.IDENTITY_LOOKUP
+    （ADR-022：字段非空才是真实 runtime capability，不做 ServerType 分支）。
+    Emby 用 /Users/{userId}/Items 的 AnyProviderIdEquals（wire 形式 imdb.tt…，
+    非 SearchTerm）+ Recursive=true + IncludeItemTypes=<当前 MediaType> +
+    Fields 含 ProviderIds + StartIndex/Limit；user-scoped、Token 只走 Header。
+  - **有界硬边界 v1**：concurrency ≤ 4；per-server timeout = 8s；maxRounds = 4；
+    maxCanonicalKeys = 32；maxOccurrences = 64。达上限返回 partial/truncated；
+    禁止 title/year fallback，禁止无限扩张。
+  - **Detail 主内容绝不等待 sibling resolution**：sourceState 独立于 DetailUiState，
+    不揉成一个状态机；current detail load failure = fatal detail error；
+    sibling resolution failure = partial source resolution only；
+    route destroyed/switched = cancel 全部解析。
+  - **来源语义单位 = occurrence 非 server**：CanonicalSourceOccurrence(serverId,
+    serverName, item, isActive)；"N 个来源"仍 = distinct serverId（继承 1E）；
+    多源 UI 仅 distinct serverId ≥ 2 时出现；同服务器多副本以"副本 N"区分，
+    禁止混用 MediaVersion 语义（现有 MediaVersion 完全独立）。
+  - **active source 完全 args-driven**：active = 当前 route 的 (serverId, itemId)；
+    不做自动最优源/测速/码率比较；持久偏好 DEFER。
+  - **切换 = route replacement**：selector 选中后导航 detail/{targetServerId}/{targetItemId}
+    并替换当前 Detail back-stack entry；Back 不回 Detail A；serverId/itemId
+    始终是唯一 source of truth；Player route contract 零改动。
+  - **Episode 范围**：v1 source selector 只开放 Movie + Series；Episode selector
+    不展示；series canonical + S/E fallback 维持 ADR-037 的 DEFER；
+    lookup provider API 保持 MediaType 通用，feature 层只调 Movie/Series。
+  - **不变量继承（1E）**：identity = external canonical IDs only；title/year 永不
+    参与；无 field fusion；无第三方 TMDb/IMDb 网络查询；无 nav blob/occurrence
+    序列化（NavArgCodec 不扩展）；LIBRARY_FIELDS 不动；GlobalSearchEngine 与
+    playback engine 零改动。
