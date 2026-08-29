@@ -38,6 +38,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
 import com.mediahub.feature.search.engine.GlobalSearchState
+import com.mediahub.feature.search.engine.SearchResultEntry
 import com.mediahub.feature.search.engine.UnifiedSearchHit
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
@@ -96,6 +97,7 @@ fun SearchRoute(
     ) { padding ->
         SearchBody(
             state = state,
+            entries = viewModel.entries.collectAsStateWithLifecycle().value,
             onOpenItem = onOpenItem,
             modifier = Modifier
                 .fillMaxSize()
@@ -107,6 +109,7 @@ fun SearchRoute(
 @Composable
 private fun SearchBody(
     state: GlobalSearchState,
+    entries: List<SearchResultEntry>,
     onOpenItem: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -125,6 +128,9 @@ private fun SearchBody(
         return
     }
 
+    // MultiSource 展开状态：手风琴式（同时最多展开一张聚合卡）
+    var expandedEntryKey by rememberSaveable { mutableStateOf<String?>(null) }
+
     LazyColumn(
         modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -132,8 +138,29 @@ private fun SearchBody(
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        items(state.hits, key = { "${it.item.serverId}/${it.item.id}" }) { hit ->
-            SearchHitRow(hit = hit, onClick = { onOpenItem(hit.item) })
+        items(entries, key = { searchEntryKey(it) }) { entry ->
+            when (entry) {
+                is SearchResultEntry.Single ->
+                    SearchHitRow(hit = entry.hit, onClick = { onOpenItem(entry.hit.item) })
+
+                is SearchResultEntry.MultiSource -> {
+                    val key = searchEntryKey(entry)
+                    if (expandedEntryKey == key) {
+                        // 展开态：成员行逐条渲染（保持 occurrences 原序），点击成员走现有导航
+                        entry.occurrences.forEach { hit ->
+                            SearchHitRow(
+                                hit = UnifiedSearchHit(item = hit.item, serverName = hit.serverName),
+                                onClick = { onOpenItem(hit.item) },
+                            )
+                        }
+                    } else {
+                        MultiSourceCard(
+                            entry = entry,
+                            onClick = { expandedEntryKey = key },
+                        )
+                    }
+                }
+            }
         }
 
         // 逐服务器状态行：进行中 / 失败（partial success 不打断结果流）
@@ -150,6 +177,67 @@ private fun SearchBody(
                     modifier = Modifier.padding(vertical = 24.dp),
                 )
             }
+        }
+    }
+}
+
+/** LazyColumn 稳定 key：Single 用 (serverId, id)；MultiSource 用 canonical 别名集。 */
+internal fun searchEntryKey(entry: SearchResultEntry): String = when (entry) {
+    is SearchResultEntry.Single -> "hit:${entry.hit.item.serverId}/${entry.hit.item.id}"
+    is SearchResultEntry.MultiSource ->
+        "agg:" + entry.identityKeys.sortedBy { "${it.type}/${it.provider}/${it.value}" }
+            .joinToString("|") { "${it.type}/${it.provider}/${it.value}" }
+}
+
+/** 多来源聚合卡（Phase 1E）：元数据取首个 occurrence；点击展开成员行。 */
+@Composable
+private fun MultiSourceCard(
+    entry: SearchResultEntry.MultiSource,
+    onClick: () -> Unit,
+) {
+    val first = entry.occurrences.first().item
+    val isThumbShape = first.type == MediaType.EPISODE || first.type == MediaType.VIDEO
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.Top,
+    ) {
+        if (isThumbShape) {
+            ThumbImage(
+                url = first.posterUrl,
+                contentDescription = first.title,
+                modifier = Modifier.width(120.dp),
+            )
+        } else {
+            PosterImage(
+                url = first.posterUrl,
+                contentDescription = first.title,
+                modifier = Modifier.width(96.dp),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.padding(top = 4.dp)) {
+            Text(
+                first.title,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val meta = buildList {
+                first.year?.let { add(it.toString()) }
+                add(typeLabel(first.type))
+            }
+            Text(
+                meta.joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "${entry.sourceCount} 个来源",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
     }
 }

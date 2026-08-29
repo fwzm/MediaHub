@@ -18,7 +18,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
+import com.mediahub.feature.search.engine.SearchAggregator
+import com.mediahub.feature.search.engine.SearchResultEntry
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,6 +66,19 @@ class GlobalSearchViewModel @Inject constructor(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
             initialValue = GlobalSearchState.idle(),
+        )
+
+    /**
+     * 聚合投影（Phase 1E）：hits → SearchResultEntry 的纯函数投影
+     * （[SearchAggregator.group]）；引擎并发/取消/partial success 语义零改动。
+     */
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
+    val entries: StateFlow<List<SearchResultEntry>> = state
+        .map { SearchAggregator.group(it.hits) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
+            initialValue = emptyList(),
         )
 
     /** 组装搜索目标；Handle 创建失败按无能力处理，不拖垮其它服务器。 */
