@@ -8,9 +8,11 @@ import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
+import com.mediahub.model.MediaFilter
+import com.mediahub.model.MediaFilterField
 import com.mediahub.model.MediaListQuery
 import com.mediahub.model.MediaSort
-import com.mediahub.model.MediaSortCapabilities
+import com.mediahub.model.MediaQueryCapabilities
 import com.mediahub.model.MediaSortField
 import com.mediahub.model.PageRequest
 import com.mediahub.provider.api.MediaProviderRegistry
@@ -40,6 +42,14 @@ internal val SORT_MENU_ORDER: List<MediaSortField> = listOf(
     MediaSortField.RANDOM,
 )
 
+/** 筛选菜单展示顺序（用户口径）；VM 按能力过滤后下发。 */
+internal val FILTER_MENU_ORDER: List<MediaFilterField> = listOf(
+    MediaFilterField.MEDIA_TYPE,
+    MediaFilterField.YEAR,
+    MediaFilterField.PLAYED,
+    MediaFilterField.FAVORITE,
+)
+
 sealed interface LibraryUiState {
     data object Loading : LibraryUiState
 
@@ -62,6 +72,10 @@ sealed interface LibraryUiState {
         val sort: MediaSort = MediaSort(MediaSortField.SERVER_DEFAULT),
         /** 数据源支持的排序选项（能力过滤后，菜单顺序）；空 = 该源不支持排序入口。 */
         val sortFields: List<MediaSortField> = emptyList(),
+        /** 当前筛选（1D，container-scoped：进子级重置、回父级恢复）。 */
+        val filter: MediaFilter = MediaFilter(),
+        /** 数据源支持的筛选选项（能力过滤后，菜单顺序）；空 = 该源不支持筛选入口。 */
+        val filterFields: List<MediaFilterField> = emptyList(),
     ) : LibraryUiState
 
     data class Error(val message: String) : LibraryUiState
@@ -84,8 +98,20 @@ class LibraryViewModel @Inject constructor(
 
     private var currentFolder: MediaItem? = null
 
-    /** 文件夹导航栈（上级回溯）。 */
-    private val folderStack = ArrayDeque<MediaItem?>()
+    /**
+     * 导航帧（Phase 1D）：容器 + 该容器的筛选状态。
+     *
+     * Filter 是「当前 container listing 的状态」，**不跨容器继承**（与 Sort 刻意不同）：
+     * 进入子容器 push 当前帧并重置子容器筛选；返回父容器 pop 并恢复父容器筛选。
+     * 栈式保存保证任意层级往返都能精确还原。
+     */
+    private data class NavigationFrame(
+        val folder: MediaItem?,
+        val filter: MediaFilter,
+    )
+
+    /** 文件夹导航栈（上级回溯 + 每层筛选恢复）。 */
+    private val folderStack = ArrayDeque<NavigationFrame>()
 
     /** 分页：下一页 offset，null 表示没有更多页。 */
     private var nextOffset: Int? = null
@@ -95,6 +121,9 @@ class LibraryViewModel @Inject constructor(
 
     /** 当前排序（1C-2）：SERVER_DEFAULT 起步，用户选择后才变；不擅自改默认序。 */
     private var currentSort: MediaSort = MediaSort(MediaSortField.SERVER_DEFAULT)
+
+    /** 当前筛选（1D）：默认不过滤；**容器作用域**——进子级重置、回父级恢复。 */
+    private var currentFilter: MediaFilter = MediaFilter()
 
     /** 导航代数：每次 openFolder/goToParent/load 递增，用于 race guard。 */
     private var navigationGeneration = 0
@@ -113,8 +142,10 @@ class LibraryViewModel @Inject constructor(
         loadJob?.cancel()
         loadMoreJob?.cancel()
         navigationGeneration++
-        folderStack.addLast(currentFolder)
+        // Filter 容器作用域：push 父帧（含父筛选），子容器筛选重置为不过滤
+        folderStack.addLast(NavigationFrame(currentFolder, currentFilter))
         currentFolder = folder
+        currentFilter = MediaFilter()
         nextOffset = null
         loadingMore = false
         load()
@@ -124,7 +155,10 @@ class LibraryViewModel @Inject constructor(
         loadJob?.cancel()
         loadMoreJob?.cancel()
         navigationGeneration++
-        currentFolder = folderStack.removeLastOrNull()
+        // Filter 容器作用域：pop 恢复父帧的筛选状态
+        val frame = folderStack.removeLastOrNull()
+        currentFolder = frame?.folder
+        currentFilter = frame?.filter ?: MediaFilter()
         nextOffset = null
         loadingMore = false
         load()
@@ -139,6 +173,7 @@ class LibraryViewModel @Inject constructor(
         val snapshotFolder = currentFolder
         val snapshotOffset = nextOffset!!
         val snapshotSort = currentSort
+        val snapshotFilter = currentFilter
         _uiState.value = currentState.copy(isLoadingMore = true, loadMoreError = null)
         loadMoreJob = viewModelScope.launch {
             try {
@@ -149,8 +184,11 @@ class LibraryViewModel @Inject constructor(
                 val page = PageRequest(offset = snapshotOffset, limit = 200)
                 val queryProvider = handle.query
                 val result = if (queryProvider != null) {
-                    // 排序在服务器分页前执行；续页沿用同一 sort（RANDOM 除外，见 Provider 快照语义）
-                    queryProvider.getItems(snapshotParent, MediaListQuery(page = page, sort = snapshotSort))
+                    // 排序与筛选都下沉服务器；续页沿用同一快照（RANDOM 除外，见 Provider 快照语义）
+                    queryProvider.getItems(
+                        snapshotParent,
+                        MediaListQuery(page = page, sort = snapshotSort, filter = snapshotFilter),
+                    )
                 } else {
                     handle.library?.getItems(snapshotParent, page)
                         ?: handle.browse?.listFolder(snapshotFolder, page)
@@ -196,6 +234,20 @@ class LibraryViewModel @Inject constructor(
         load()
     }
 
+    /**
+     * 用户改筛选（1D）：与 onSortSelected 同构。
+     *
+     * 语义（冻结规格 B 修订）：filter 是「当前 container listing 的状态」，
+     * **不跨容器继承**——openFolder 进入子容器时重置为默认、goToParent 返回时
+     * 从导航帧恢复父容器筛选；onFilterSelected 只作用于当前容器。
+     * 改筛选同样全量重拉（取消在途 → generation++ → offset=0）。
+     */
+    fun onFilterSelected(filter: MediaFilter) {
+        if (filter == currentFilter) return
+        currentFilter = filter
+        load()
+    }
+
     fun load() {
         loadJob?.cancel()
         loadMoreJob?.cancel()
@@ -206,6 +258,7 @@ class LibraryViewModel @Inject constructor(
         val snapshotParent = currentFolder?.id ?: libraryId
         val snapshotFolder = currentFolder
         val snapshotSort = currentSort
+        val snapshotFilter = currentFilter
         loadJob = viewModelScope.launch {
             _uiState.value = LibraryUiState.Loading
             try {
@@ -228,10 +281,10 @@ class LibraryViewModel @Inject constructor(
                     library != null -> {
                         val queryProvider = handle.query
                         val result = if (queryProvider != null) {
-                            // 排序下沉服务器（分页前执行）；无 Query 能力回退旧接口（服务器默认序）
+                            // 排序与筛选都下沉服务器（分页前执行）；无 Query 能力回退旧接口
                             queryProvider.getItems(
                                 snapshotParent,
-                                MediaListQuery(page = page, sort = snapshotSort),
+                                MediaListQuery(page = page, sort = snapshotSort, filter = snapshotFilter),
                             )
                         } else {
                             library.getItems(snapshotParent, page)
@@ -241,8 +294,8 @@ class LibraryViewModel @Inject constructor(
                         val currentParent = currentFolder?.id ?: libraryId
                         if (currentParent != snapshotParent) return@launch
                         nextOffset = result.nextOffset
-                        // 能力自述：支持排序的源给菜单（按能力过滤），否则隐藏入口
-                        val caps: MediaSortCapabilities? = queryProvider?.sortCapabilities
+                        // 能力自述：支持排序/筛选的源给菜单（按能力过滤），否则隐藏入口
+                        val caps: MediaQueryCapabilities? = queryProvider?.capabilities
                         _uiState.value = LibraryUiState.Content(
                             items = result.items,
                             libraryName = libraryName.ifBlank { server.displayName },
@@ -250,7 +303,9 @@ class LibraryViewModel @Inject constructor(
                             canGoUp = folderStack.isNotEmpty(),
                             hasMore = result.hasMore,
                             sort = snapshotSort,
-                            sortFields = caps?.filter(SORT_MENU_ORDER).orEmpty(),
+                            sortFields = caps?.filterSortFields(SORT_MENU_ORDER).orEmpty(),
+                            filter = snapshotFilter,
+                            filterFields = caps?.filterFilterFields(FILTER_MENU_ORDER).orEmpty(),
                         )
                     }
 

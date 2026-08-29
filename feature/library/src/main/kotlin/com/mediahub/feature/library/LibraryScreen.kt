@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
@@ -29,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -38,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -46,16 +49,22 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
+import com.mediahub.model.MediaFilter
+import com.mediahub.model.MediaFilterField
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
 import com.mediahub.model.MediaSort
@@ -76,7 +85,11 @@ fun LibraryRoute(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showSortSheet by rememberSaveable { mutableStateOf(false) }
-    val sortEntryVisible = (state as? LibraryUiState.Content)?.sortFields?.isNotEmpty() == true
+    var showFilterSheet by rememberSaveable { mutableStateOf(false) }
+    val filterContent = state as? LibraryUiState.Content
+    val sortEntryVisible = filterContent?.sortFields?.isNotEmpty() == true
+    val filterEntryVisible = filterContent?.filterFields?.isNotEmpty() == true
+    val filterActive = filterContent?.filter?.isDefault == false
 
     Scaffold(
         topBar = {
@@ -97,6 +110,15 @@ fun LibraryRoute(
                     }
                 },
                 actions = {
+                    if (filterEntryVisible) {
+                        IconButton(onClick = { showFilterSheet = true }) {
+                            Icon(
+                                Icons.Default.FilterList,
+                                contentDescription = if (filterActive) "筛选（已启用）" else "筛选",
+                                tint = if (filterActive) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                            )
+                        }
+                    }
                     if (sortEntryVisible) {
                         IconButton(onClick = { showSortSheet = true }) {
                             Icon(Icons.Default.Sort, contentDescription = "排序")
@@ -260,6 +282,17 @@ fun LibraryRoute(
             )
         }
     }
+
+    // 筛选面板（1D）：container-scoped、即时生效；选项按 Provider 能力过滤
+    if (showFilterSheet && filterContent != null) {
+        ModalBottomSheet(onDismissRequest = { showFilterSheet = false }) {
+            FilterSheetContent(
+                current = filterContent.filter,
+                fields = filterContent.filterFields,
+                onSelected = viewModel::onFilterSelected,
+            )
+        }
+    }
 }
 
 /**
@@ -269,6 +302,41 @@ fun LibraryRoute(
  */
 internal fun shouldPreserveProviderOrder(sort: MediaSort): Boolean =
     sort.field != MediaSortField.SERVER_DEFAULT
+
+/**
+ * 年份草稿 → 新 [MediaFilter]；返回 null = 草稿未构成可提交的合法年份
+ * （或与现值相同），不触发重载。空串 = 清除年份（恢复"全部"）。
+ */
+internal fun yearDraftToFilter(current: MediaFilter, draft: String): MediaFilter? = when {
+    draft.isEmpty() -> if (current.year == null) null else current.copy(year = null)
+    draft.length == 4 && draft.all(Char::isDigit) -> {
+        // toIntOrNull：非法/越界四位数字（如 "0000" 违反 domain require(year>0)）不得炸 UI——
+        // domain invariant 不放宽，非法草稿一律按 no-op 丢弃
+        val year = draft.toIntOrNull()
+        if (year == null || year <= 0 || year == current.year) null else current.copy(year = year)
+    }
+    else -> null
+}
+
+internal fun mediaTypeFilterLabel(value: MediaType?): String = when (value) {
+    null -> "全部"
+    MediaType.MOVIE -> "电影"
+    MediaType.SERIES -> "剧集"
+    MediaType.EPISODE -> "单集"
+    else -> "全部"
+}
+
+internal fun playedFilterLabel(value: Boolean?): String = when (value) {
+    null -> "全部"
+    true -> "已看"
+    false -> "未看"
+}
+
+internal fun favoriteFilterLabel(value: Boolean?): String = when (value) {
+    null -> "全部"
+    true -> "已收藏"
+    false -> "未收藏"
+}
 
 /** 排序选项中文标签（用户口径）。 */
 internal fun sortLabel(field: MediaSortField): String = when (field) {    MediaSortField.SERVER_DEFAULT -> "默认"
@@ -447,5 +515,112 @@ private fun PosterCell(item: MediaItem, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp),
         )
+    }
+}
+
+/** 筛选面板（1D）：类型/年份/已看/收藏；全部字段 tri-state 首项"全部"；年份数字输入带草稿语义。 */
+@Composable
+private fun FilterSheetContent(
+    current: MediaFilter,
+    fields: List<MediaFilterField>,
+    onSelected: (MediaFilter) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("筛选", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            if (!current.isDefault) {
+                TextButton(onClick = { onSelected(MediaFilter()) }) { Text("清除全部") }
+            }
+        }
+
+        if (MediaFilterField.MEDIA_TYPE in fields) {
+            SheetSectionLabel("类型")
+            listOf<MediaType?>(null, MediaType.MOVIE, MediaType.SERIES, MediaType.EPISODE).forEach { value ->
+                FilterOptionRow(
+                    label = mediaTypeFilterLabel(value),
+                    selected = current.mediaType == value,
+                    onClick = { onSelected(current.copy(mediaType = value)) },
+                )
+            }
+        }
+
+        if (MediaFilterField.YEAR in fields) {
+            SheetSectionLabel("年份")
+            // 外部变化（清除全部/导航重置）时草稿同步
+            var yearDraft by remember(current.year) { mutableStateOf(current.year?.toString() ?: "") }
+            OutlinedTextField(
+                value = yearDraft,
+                onValueChange = { raw ->
+                    val sanitized = raw.filter(Char::isDigit).take(4)
+                    yearDraft = sanitized
+                    // 只有空串（清除）或恰好四位合法年份才提交；中间态只留草稿不发请求
+                    yearDraftToFilter(current, sanitized)?.let(onSelected)
+                },
+                label = { Text("如 2024，留空 = 全部") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            )
+        }
+
+        if (MediaFilterField.PLAYED in fields) {
+            SheetSectionLabel("已看状态")
+            listOf<Boolean?>(null, true, false).forEach { value ->
+                FilterOptionRow(
+                    label = playedFilterLabel(value),
+                    selected = current.played == value,
+                    onClick = { onSelected(current.copy(played = value)) },
+                )
+            }
+        }
+
+        if (MediaFilterField.FAVORITE in fields) {
+            SheetSectionLabel("收藏")
+            listOf<Boolean?>(null, true, false).forEach { value ->
+                FilterOptionRow(
+                    label = favoriteFilterLabel(value),
+                    selected = current.favorite == value,
+                    onClick = { onSelected(current.copy(favorite = value)) },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun SheetSectionLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
+private fun FilterOptionRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }

@@ -68,12 +68,22 @@ class EmbySortMapperTest {
             MediaSortField.RUNTIME,
             MediaSortField.RANDOM,
         )
-        assertEquals(confirmed, caps.fields)
+        assertEquals(confirmed, caps.sortFields)
         // 未见于官方 SortBy 枚举：capability 隐藏（"响应有字段"≠"可作 SortBy"），
         // 恢复须经 per-server probe 拿到协议证据，不得静态全局开放
-        assertFalse(caps.supports(MediaSortField.OFFICIAL_RATING))
-        assertFalse(caps.supports(MediaSortField.BITRATE))
-        assertFalse(caps.supports(MediaSortField.SIZE))
+        assertFalse(caps.supportsSort(MediaSortField.OFFICIAL_RATING))
+        assertFalse(caps.supportsSort(MediaSortField.BITRATE))
+        assertFalse(caps.supportsSort(MediaSortField.SIZE))
+        // Phase 1D 筛选：四项均为官方已文档化参数，全部声明
+        assertEquals(
+            setOf(
+                com.mediahub.model.MediaFilterField.MEDIA_TYPE,
+                com.mediahub.model.MediaFilterField.YEAR,
+                com.mediahub.model.MediaFilterField.PLAYED,
+                com.mediahub.model.MediaFilterField.FAVORITE,
+            ),
+            caps.filterFields,
+        )
     }
 
     @Test

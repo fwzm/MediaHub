@@ -72,9 +72,9 @@ class EmbyLibraryProvider(
         }
     }
 
-    // ---- Phase 1C-2：排序下沉（Query Pipeline） ----
+    // ---- Phase 1C-2：排序下沉（Query Pipeline）；1D 起同 capability 覆盖筛选 ----
 
-    override val sortCapabilities = EmbySortMapper.CAPABILITIES
+    override val capabilities = EmbySortMapper.CAPABILITIES
 
     /**
      * 带 MediaListQuery 的浏览：SortBy/SortOrder 传给服务器，在分页之前执行；
@@ -98,6 +98,8 @@ class EmbyLibraryProvider(
                 page = query.page,
                 sortBy = EmbySortMapper.sortBy(query.sort.field),
                 sortOrder = EmbySortMapper.sortOrder(query.sort),
+                // Phase 1D：筛选与排序同一请求下沉服务器；container-scoped（导航栈负责 reset/restore）
+                filter = query.filter,
             )
             val page = toPagedResult(result, query.page)
             // 快照语义（Integration 审计 §4.4）：即使服务器 TotalRecordCount 更大，

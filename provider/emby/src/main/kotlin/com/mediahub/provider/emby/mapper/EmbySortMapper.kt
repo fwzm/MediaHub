@@ -1,7 +1,8 @@
 package com.mediahub.provider.emby.mapper
 
+import com.mediahub.model.MediaFilterField
+import com.mediahub.model.MediaQueryCapabilities
 import com.mediahub.model.MediaSort
-import com.mediahub.model.MediaSortCapabilities
 import com.mediahub.model.MediaSortField
 import com.mediahub.model.SortDirection
 
@@ -18,15 +19,18 @@ import com.mediahub.model.SortDirection
 object EmbySortMapper {
 
     /**
-     * Emby 支持的排序字段能力自述（UI capability-aware 的唯一来源）。
+     * Emby 查询能力自述（UI capability-aware 的唯一来源）。
      *
-     * 只声明官方 GET /Users/{UserId}/Items 的 SortBy 枚举**明确包含**的字段。
+     * 排序：只声明官方 GET /Users/{UserId}/Items 的 SortBy 枚举**明确包含**的字段。
      * OFFICIAL_RATING / BITRATE / SIZE 未见于官方 SortBy 枚举（OfficialRatings 是
      * 过滤参数；Size/Bitrate 只是响应属性）——"响应有此字段"≠"可作 SortBy"，
      * 故 capability 隐藏。恢复须经 per-server probe 拿到协议证据，不得静态全局开放。
+     *
+     * 筛选（Phase 1D）：IncludeItemTypes / Years / IsPlayed / IsFavorite 均为官方
+     * 已文档化参数，四项全部声明。
      */
-    val CAPABILITIES: MediaSortCapabilities = MediaSortCapabilities(
-        setOf(
+    val CAPABILITIES: MediaQueryCapabilities = MediaQueryCapabilities(
+        sortFields = setOf(
             MediaSortField.SERVER_DEFAULT,
             MediaSortField.DATE_ADDED,
             MediaSortField.TITLE,
@@ -36,6 +40,12 @@ object EmbySortMapper {
             MediaSortField.PREMIERE_DATE,
             MediaSortField.RUNTIME,
             MediaSortField.RANDOM,
+        ),
+        filterFields = setOf(
+            MediaFilterField.MEDIA_TYPE,
+            MediaFilterField.YEAR,
+            MediaFilterField.PLAYED,
+            MediaFilterField.FAVORITE,
         ),
     )
 

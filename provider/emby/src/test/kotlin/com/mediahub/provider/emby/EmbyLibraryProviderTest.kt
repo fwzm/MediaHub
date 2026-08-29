@@ -7,6 +7,7 @@ import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.StoredToken
 import com.mediahub.core.security.TokenStore
 import com.mediahub.model.LibraryType
+import com.mediahub.model.MediaFilter
 import com.mediahub.model.MediaListQuery
 import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaSort
@@ -227,14 +228,152 @@ class EmbyLibraryProviderTest {
 
     @Test
     fun `sort capabilities hide unconfirmed emby sortBy fields`() {
-        val caps = provider().sortCapabilities
-        assertTrue(caps.supports(MediaSortField.SERVER_DEFAULT))
-        assertTrue(caps.supports(MediaSortField.CRITIC_RATING))
-        assertTrue(caps.supports(MediaSortField.RANDOM))
+        val caps = provider().capabilities
+        assertTrue(caps.supportsSort(MediaSortField.SERVER_DEFAULT))
+        assertTrue(caps.supportsSort(MediaSortField.CRITIC_RATING))
+        assertTrue(caps.supportsSort(MediaSortField.RANDOM))
         // 官方 SortBy 枚举未包含：capability 隐藏，恢复需 per-server probe（评审 P1）
-        assertFalse(caps.supports(MediaSortField.OFFICIAL_RATING))
-        assertFalse(caps.supports(MediaSortField.BITRATE))
-        assertFalse(caps.supports(MediaSortField.SIZE))
+        assertFalse(caps.supportsSort(MediaSortField.OFFICIAL_RATING))
+        assertFalse(caps.supportsSort(MediaSortField.BITRATE))
+        assertFalse(caps.supportsSort(MediaSortField.SIZE))
+        // Phase 1D 筛选能力：四项全开（官方已文档化参数）
+        assertTrue(caps.supportsFilter(com.mediahub.model.MediaFilterField.MEDIA_TYPE))
+        assertTrue(caps.supportsFilter(com.mediahub.model.MediaFilterField.YEAR))
+        assertTrue(caps.supportsFilter(com.mediahub.model.MediaFilterField.PLAYED))
+        assertTrue(caps.supportsFilter(com.mediahub.model.MediaFilterField.FAVORITE))
+    }
+
+    // ---- Phase 1D：筛选 wire contract ----
+
+    @Test
+    fun `default filter sends no filter params`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":0}""")
+        )
+
+        provider().getItems("lib-1", MediaListQuery())
+
+        val url = server.takeRequest().requestUrl!!
+        assertNull(url.queryParameter("IncludeItemTypes"))
+        assertNull(url.queryParameter("Years"))
+        assertNull(url.queryParameter("IsPlayed"))
+        assertNull(url.queryParameter("IsFavorite"))
+        // 不加 Recursive：筛选只作用于当前容器直接子级，不改变浏览导航契约
+        assertNull(url.queryParameter("Recursive"))
+    }
+
+    @Test
+    fun `played tri state maps to IsPlayed boolean wire`() = runBlocking {
+        seedSession()
+        repeat(2) {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":0}""")
+            )
+        }
+
+        provider().getItems("lib-1", MediaListQuery(filter = MediaFilter(played = true)))
+        assertEquals("true", server.takeRequest().requestUrl!!.queryParameter("IsPlayed"))
+
+        provider().getItems("lib-1", MediaListQuery(filter = MediaFilter(played = false)))
+        assertEquals("false", server.takeRequest().requestUrl!!.queryParameter("IsPlayed"))
+    }
+
+    @Test
+    fun `favorite tri state maps to IsFavorite boolean wire`() = runBlocking {
+        seedSession()
+        repeat(2) {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":0}""")
+            )
+        }
+
+        provider().getItems("lib-1", MediaListQuery(filter = MediaFilter(favorite = true)))
+        assertEquals("true", server.takeRequest().requestUrl!!.queryParameter("IsFavorite"))
+
+        provider().getItems("lib-1", MediaListQuery(filter = MediaFilter(favorite = false)))
+        assertEquals("false", server.takeRequest().requestUrl!!.queryParameter("IsFavorite"))
+    }
+
+    @Test
+    fun `media type maps to IncludeItemTypes wire`() = runBlocking {
+        seedSession()
+        repeat(3) {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":0}""")
+            )
+        }
+
+        provider().getItems("lib-1", MediaListQuery(filter = MediaFilter(mediaType = MediaType.MOVIE)))
+        assertEquals("Movie", server.takeRequest().requestUrl!!.queryParameter("IncludeItemTypes"))
+        provider().getItems("lib-1", MediaListQuery(filter = MediaFilter(mediaType = MediaType.SERIES)))
+        assertEquals("Series", server.takeRequest().requestUrl!!.queryParameter("IncludeItemTypes"))
+        provider().getItems("lib-1", MediaListQuery(filter = MediaFilter(mediaType = MediaType.EPISODE)))
+        assertEquals("Episode", server.takeRequest().requestUrl!!.queryParameter("IncludeItemTypes"))
+    }
+
+    /** 1D 核心 contract：filter + sort + 分页可同时存在于同一请求。 */
+    @Test
+    fun `combined filter sort pagination contract`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":0}""")
+        )
+
+        val query = MediaListQuery(
+            page = PageRequest(offset = 200, limit = 200),
+            sort = MediaSort(MediaSortField.COMMUNITY_RATING, SortDirection.DESC),
+            filter = MediaFilter(mediaType = MediaType.MOVIE, year = 2024, played = false, favorite = true),
+        )
+        provider().getItems("lib-1", query)
+
+        val url = server.takeRequest().requestUrl!!
+        assertEquals("Movie", url.queryParameter("IncludeItemTypes"))
+        assertEquals("2024", url.queryParameter("Years"))
+        assertEquals("false", url.queryParameter("IsPlayed"))
+        assertEquals("true", url.queryParameter("IsFavorite"))
+        assertEquals("CommunityRating", url.queryParameter("SortBy"))
+        assertEquals("Descending", url.queryParameter("SortOrder"))
+        assertEquals("200", url.queryParameter("StartIndex"))
+        assertEquals("200", url.queryParameter("Limit"))
+    }
+
+    @Test
+    fun `random snapshot with filter carries filter and terminates`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"Items":[{"Id":"m1","Name":"A","Type":"Movie"}],"TotalRecordCount":88}"""
+            )
+        )
+
+        val page0 = provider().getItems(
+            "lib-1",
+            MediaListQuery(
+                page = PageRequest(offset = 0, limit = 50),
+                sort = MediaSort(MediaSortField.RANDOM),
+                filter = MediaFilter(mediaType = MediaType.MOVIE),
+            ),
+        )
+        assertEquals(1, page0.items.size)
+        assertFalse(page0.hasMore)
+        assertNull(page0.nextOffset)
+        val url = server.takeRequest().requestUrl!!
+        assertEquals("Movie", url.queryParameter("IncludeItemTypes"))
+        assertEquals("Random", url.queryParameter("SortBy"))
+        assertNull(url.queryParameter("SortOrder"))
+
+        // offset>0：不发请求，直接空快照页
+        val page1 = provider().getItems(
+            "lib-1",
+            MediaListQuery(
+                page = PageRequest(offset = 50, limit = 50),
+                sort = MediaSort(MediaSortField.RANDOM),
+                filter = MediaFilter(mediaType = MediaType.MOVIE),
+            ),
+        )
+        assertTrue(page1.items.isEmpty())
+        assertEquals(1, server.requestCount)
     }
 
     // ---- Phase 1C-2：排序/发现字段映射 ----

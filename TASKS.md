@@ -230,6 +230,30 @@
 - Device: Xiaomi 14 Ultra / Android 16
 - Result: PASS
 
+## Phase 1D — Library Filtering / Query Pipeline Extension（2026-08-29）✅ SEALED / PASS（device verification PASS）
+
+- [x] A1 filter-contract：MediaFilter/MediaFilterField/MediaListQuery.filter +
+      MediaQueryCapabilities 迁移（方案 a，MediaSortCapabilities 移除，无双术语）
+- [x] B1 emby-filter：IncludeItemTypes/Years/IsPlayed/IsFavorite wire（played 用 IsPlayed Boolean，
+      不用 Filters=；favorite 完整三态；不加 Recursive）；RANDOM+filter 快照
+- [x] C1 library-filter-state：NavigationFrame 容器作用域（push/重置/恢复）+ onFilterSelected +
+      loadMore 同 filter 快照 + race（generation guard）
+- [x] C2 library-filter-ui：筛选入口（active indicator）+ Sheet（类型/年份草稿/已看/收藏）+ 清除全部
+- [x] 测试：filter 域 7 + capability 迁移断言 + wire contract 6（含 filter+sort+分页核心组合）+
+      VM 状态 9（容器作用域往返/race/loadMore 快照/能力过滤）+ UI helper 8
+- [x] 真机 smoke（冻结规格，Xiaomi 14 Ultra / Android 16，APK @ b9b6f72，SHA256 4d784d9c…）：PASS
+      剧集筛选→Fargo→季列表正常→返回筛选保持（container-scoped 实证：folder 行被 IncludeItemTypes 过滤、
+      子容器未被打空）；Year=2014→冰血暴+血族；已看=true→1 部/未看=false→其余（互补）；收藏=true→空目录
+      优雅占位/false→全量；Year=2014+公众评分降序（冰血暴前血族后）；Year+随机快照滚动终止；
+      active indicator（primary tint+筛选（已启用））；清除全部→默认恢复；年份 0000 实机 no-crash 零请求
+- [x] 1B-3.1 关联：Series Detail 借 Search 入口的设备验收已于 Phase 1C smoke 补齐
+- NOT_AVAILABLE（不阻塞，自动化覆盖）：>200 项容器「筛选+loadMore」（墙 67 项单页；
+  LibraryFilterViewModelTest loadMore 同 filter 快照用例覆盖）
+- 状态：code complete / tests complete / **device verification PASS / SEALED**
+- Device smoke code SHA: b9b6f72a991379524f7bbe6ea8297534ac7152f1
+- Device: Xiaomi 14 Ultra / Android 16
+- Result: PASS
+
 ## V0.1 —— MVP（下一步）## V0.1 —— MVP（下一步）
 
 ### IN PROGRESS（无，等待开工）
