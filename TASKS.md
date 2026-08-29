@@ -230,6 +230,22 @@
 - Device: Xiaomi 14 Ultra / Android 16
 - Result: PASS
 
+## Phase 1E — Canonical Media Identity / Multi-Source Aggregation（2026-08-29）✅ 代码+测试完成（真机验证 pending）
+
+- [x] A1 canonical-contract：ExternalIds/ExternalIdProvider/CanonicalKey(type,provider,value)/
+      CanonicalKeyPolicy.keys 别名候选集合（core/model，仅 +2 文件 +MediaItem 一字段）
+- [x] B1 emby-provider-ids：DTO ProviderIds 解析 + mapper 归一化（key 小写/冲突 provider 丢弃）+
+      SEARCH_FIELDS += ProviderIds（LIBRARY_FIELDS 不动）+ 详情路径同步
+- [x] C1 search-aggregation-ui：SearchAggregator union-find 纯投影（engine 零改动）+
+      SearchResultEntry(Single/MultiSource) + VM entries 投影 + 聚合卡/展开成员行 + LazyColumn key
+- [x] 测试：ExternalIdentityTest 9 + EmbyProviderIdsMappingTest 6 + 搜索 Fields 断言 +
+      SearchAggregatorTest 10（冻结场景全覆盖）+ VM entries 投影 1
+- [ ] 真机 smoke（冻结）：予初/墨云阁同一 TMDb+IMDb 作品 → 聚合卡 '2 个来源' → 展开 →
+      成员行 Series Detail；电影/剧集 TMDb 空间隔离；Episode TVDb 聚合；
+      同 server 重复不算多来源；title/year 不参与
+- NOT_AVAILABLE 预判：真服 ProviderIds 刮削质量决定实际聚合量（挂 UI 观察项，不判失败）
+- 状态：code complete / tests complete / device verification pending（真机前不写 SEALED）
+
 ## Phase 1D — Library Filtering / Query Pipeline Extension（2026-08-29）✅ SEALED / PASS（device verification PASS）
 
 - [x] A1 filter-contract：MediaFilter/MediaFilterField/MediaListQuery.filter +

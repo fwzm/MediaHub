@@ -1,5 +1,5 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-29（Phase CI-H1：CI/Test Hardening——workflow 升级+测试超时+coroutine-test 治理规则，独立 PR 不夹带业务代码）
+> 最后更新：2026-08-29（Phase 1E Canonical Media Identity：跨源身份 + 搜索聚合卡，代码+测试+文档完成，真机验证 pending）
 ## Phase CI-H1（本次）：CI/Test Hardening
 - **测试治理规则（对所有后续 Agent 生效）**：
   - **coroutine-test**：被测对象拥有周期性 coroutine（polling/heartbeat/periodic delay）时，
@@ -22,6 +22,23 @@
 - **CI 状态口径（Agent 报告纪律）**：commit created / local gate PASS /
   remote CI cancelled / exact-head CI PASS 四态严格区分；被 concurrency 自动取消的
   SHA 不算 CI 验证过，禁止倒推。
+## Phase 1E Canonical Media Identity（本次）：跨源身份 + 搜索聚合卡
+- **身份模型（ADR-037）**：ExternalIds（tmdb/imdb/tvdb，multi-alias 无优先级）→
+  CanonicalKey(type, provider, value) 候选集合 → 集合交集判定聚合；
+  MediaType 内嵌键内；title/year 永不参与；无 ID = 单例不聚合。
+- **Episode**：v1 只用自身 ProviderIds；series+S/E 复合键 DEFER（数据链不支持）。
+- **聚合层**：SearchAggregator（feature/search 纯投影，union-find 分桶）；
+  GlobalSearchEngine/State 零改动；MultiSource 卡 = canonical 匹配 + distinct serverId ≥ 2。
+- **Emby**：EmbyItemFields/双 DTO 增 ProviderIds；mapper 归一化（key 小写、冲突丢弃）；
+  SEARCH_FIELDS += ProviderIds（LIBRARY_FIELDS 不动——聚合只在搜索层）。
+- **UI**：搜索结果 = Single（现有行）/ MultiSource（聚合卡：首 occurrence 元数据 +
+  'N 个来源'，点击展开成员行，成员行走现有 Detail 导航）。
+- **状态**：code complete / tests complete / **device verification pending**。
+- **待真机验证（冻结）**：予初/墨云阁搜索同一部有 TMDb+IMDb 的作品 → 聚合卡
+  '2 个来源' → 展开 → 点成员走 Series Detail；电影 TMDb=123 vs 剧集 TMDb=123 不聚合；
+  Episode 自身 ProviderIds 聚合；同 server 重复条目不算多来源。
+- **下一步**：Integration PR 独立审查 → 真机 smoke → 封板。
+
 ## Phase 1D Library Filtering（前次）：筛选器 + Query Pipeline 扩展
 - **域模型**：MediaFilter（tri-state aggregate：mediaType/year/played/favorite，全 null=默认）+
   MediaFilterField；MediaListQuery 增加 filter——筛选与排序同一查询管道下沉服务器，分页前执行。

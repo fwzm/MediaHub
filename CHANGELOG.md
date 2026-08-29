@@ -1,4 +1,19 @@
 # 变更记录（CHANGELOG）
+## [0.14.0-canonical-identity] — 2026-08-29（Phase 1E：Canonical Media Identity）
+### 功能
+- ExternalIds（tmdb/imdb/tvdb）进 MediaItem；Emby ProviderIds 字典解析
+  （key 归一化、冲突 provider 丢弃）；SEARCH_FIELDS += ProviderIds（浏览 payload 不扩大）。
+- CanonicalKey(type, provider, value) 候选集合 + 集合交集聚合（ADR-037）：
+  同 MediaType 且共享任一 (provider, value) = 同一作品多来源；
+  title/year 永不参与；无 ID 单例不聚合；Episode v1 只用自身 ProviderIds。
+- SearchAggregator：hits 纯投影分桶（union-find），输出按首命中位置稳定排序；
+  GlobalSearchEngine 并发/取消/部分成功语义零改动。
+- 搜索聚合卡：MultiSource（distinct serverId ≥ 2）显示 'N 个来源'，点击展开成员行；
+  成员行走现有 Detail 导航（Series → Series Detail 不变）。
+### 测试
+- 新增 26 条（identity 域 9 / ProviderIds 映射 6 / 聚合器冻结场景 10 / 搜索 Fields 1）；
+  全量三件套绿。
+- Device verification pending。ProviderIds 真服刮削质量挂真机观察（不判失败）。
 ## [0.13.0-library-filtering] — 2026-08-29（Phase 1D：Library Filtering / Query Pipeline Extension）
 ### 功能
 - MediaFilter tri-state 筛选（mediaType/year/played/favorite）进 MediaListQuery，
