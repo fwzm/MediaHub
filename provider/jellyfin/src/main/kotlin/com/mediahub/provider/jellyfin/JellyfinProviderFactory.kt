@@ -17,7 +17,10 @@ import com.mediahub.provider.jellyfin.api.JellyfinApiClient
 import com.mediahub.provider.jellyfin.api.JellyfinAuthorizationHeaderBuilder
 import com.mediahub.provider.jellyfin.api.JellyfinEndpointResolver
 import com.mediahub.provider.jellyfin.auth.JellyfinAuthProvider
+import com.mediahub.provider.jellyfin.detail.JellyfinDetailProvider
 import com.mediahub.provider.jellyfin.image.JellyfinImageAuthContributor
+import com.mediahub.provider.jellyfin.library.JellyfinLibraryProvider
+import com.mediahub.provider.jellyfin.search.JellyfinSearchProvider
 import com.mediahub.provider.jellyfin.session.JellyfinSessionCleaner
 import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
 import dagger.Binds
@@ -45,6 +48,7 @@ class JellyfinProviderFactory @Inject constructor(
         val mediaHttpClient = MediaHttpClient(httpClientFactory.mediaClient(), logger = logger)
         val endpointResolver = JellyfinEndpointResolver(server.baseUrl)
         val jellyfinApi = JellyfinApiClient(endpointResolver, apiClient, authHeaderBuilder, logger)
+        val sessionStore = JellyfinSessionStore(jellyfinSessionStorage)
 
         val provider = JellyfinProvider(
             server = server,
@@ -59,13 +63,40 @@ class JellyfinProviderFactory @Inject constructor(
             server = server,
             api = jellyfinApi,
             tokenStore = tokenStore,
-            sessionStore = JellyfinSessionStore(jellyfinSessionStorage),
+            sessionStore = sessionStore,
+            logger = logger,
+        )
+        val libraryProvider = JellyfinLibraryProvider(
+            server = server,
+            api = jellyfinApi,
+            tokenStore = tokenStore,
+            sessionStore = sessionStore,
+            logger = logger,
+        )
+        val detailProvider = JellyfinDetailProvider(
+            server = server,
+            api = jellyfinApi,
+            tokenStore = tokenStore,
+            sessionStore = sessionStore,
             logger = logger,
         )
         // ADR-022/039：Handle 只暴露"当前版本真正实现完成"的能力——
-        // Phase 1G-A 只开放 AUTH；LIBRARY/DETAIL/SEARCH/PLAYBACK/PROGRESS 待后续 slice
-        // 逐项落地；IDENTITY_LOOKUP 因 Jellyfin 无按值 ProviderId 查询协议**保持 null**（DEFER）。
-        return ProviderHandle(provider = provider, auth = authProvider)
+        // Phase 1G-B 开放 AUTH + LIBRARY + DETAIL + SEARCH；
+        // QUERY/PLAYBACK/PROGRESS 待后续 slice 逐项落地；
+        // IDENTITY_LOOKUP 因 Jellyfin 无按值 ProviderId 查询协议**保持 null**（DEFER）。
+        return ProviderHandle(
+            provider = provider,
+            auth = authProvider,
+            library = libraryProvider,
+            detail = detailProvider,
+            search = JellyfinSearchProvider(
+                server = server,
+                api = jellyfinApi,
+                tokenStore = tokenStore,
+                sessionStore = sessionStore,
+                logger = logger,
+            ),
+        )
     }
 }
 
