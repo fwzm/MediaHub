@@ -30,9 +30,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mediahub.app.R
+import com.mediahub.core.ui.effects.FlowGlowClock
 import com.mediahub.core.ui.effects.FlowGlowPresets
 import com.mediahub.core.ui.effects.FlowGlowPreset
 import com.mediahub.core.ui.effects.FlowGlowSurface
@@ -45,6 +48,9 @@ import com.mediahub.core.ui.effects.rememberFlowGlowClock
  * Debug-only playground for the FlowGlow engine: replicates the three reference capsules,
  * exposes fps/audio-sim/progress controls, and previews every built-in preset. Launch via:
  * `adb shell am start -n com.mediahub.app/com.mediahub.app.debug.EffectsDemoActivity`
+ *
+ * All copy is localized (default zh, values-en override) so the demo always speaks the
+ * user's interface language.
  */
 class EffectsDemoActivity : ComponentActivity() {
 
@@ -75,14 +81,31 @@ private fun EffectsDemoScreen() {
                 .padding(horizontal = 20.dp, vertical = 28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Text("FlowGlow engine", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A22))
+            Text(
+                text = stringResource(R.string.effects_demo_title),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF1A1A22),
+            )
             Text(
                 text = buildString {
-                    append(if (Build.VERSION.SDK_INT >= 33) "AGSL active" else "gradient fallback")
+                    append(
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            stringResource(R.string.effects_demo_agsl_active)
+                        } else {
+                            stringResource(R.string.effects_demo_gradient_fallback)
+                        }
+                    )
                     append(" · ")
                     append(fps)
-                    append(" fps · audio ")
-                    append(if (audioSim) "sim" else "off")
+                    append(" fps · ")
+                    append(
+                        if (audioSim) {
+                            stringResource(R.string.effects_demo_state_on)
+                        } else {
+                            stringResource(R.string.effects_demo_state_off)
+                        }
+                    )
                 },
                 fontSize = 12.sp,
                 color = Color(0xFF66666F),
@@ -112,7 +135,7 @@ private fun EffectsDemoScreen() {
                 ) {
                     Text(hero.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = textColor(hero))
                     Text(
-                        "HERO · position ${(progress * 100).toInt()}%",
+                        text = stringResource(R.string.effects_demo_hero_position, (progress * 100).toInt()),
                         fontSize = 11.sp,
                         color = textColor(hero).copy(alpha = 0.7f),
                     )
@@ -131,9 +154,13 @@ private fun EffectsDemoScreen() {
             // ---- controls -----------------------------------------------------------
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (audioSim) {
-                    Button(onClick = { audioSim = false }) { Text("AUDIO SIM: ON", fontSize = 11.sp) }
+                    Button(onClick = { audioSim = false }) {
+                        Text(stringResource(R.string.effects_demo_audio_sim_on), fontSize = 11.sp)
+                    }
                 } else {
-                    OutlinedButton(onClick = { audioSim = true }) { Text("AUDIO SIM: OFF", fontSize = 11.sp) }
+                    OutlinedButton(onClick = { audioSim = true }) {
+                        Text(stringResource(R.string.effects_demo_audio_sim_off), fontSize = 11.sp)
+                    }
                 }
                 listOf(15, 30, 60).forEach { candidate ->
                     if (fps == candidate) {
@@ -143,10 +170,18 @@ private fun EffectsDemoScreen() {
                     }
                 }
             }
-            Text("Playback position ${(progress * 100).toInt()}%", fontSize = 12.sp, color = Color(0xFF44444D))
+            Text(
+                text = stringResource(R.string.effects_demo_playback_position, (progress * 100).toInt()),
+                fontSize = 12.sp,
+                color = Color(0xFF44444D),
+            )
             Slider(value = progress, onValueChange = { progress = it })
 
-            Text("Spectrum (bass / mid / treble, EMA smoothed)", fontSize = 12.sp, color = Color(0xFF44444D))
+            Text(
+                text = stringResource(R.string.effects_demo_spectrum),
+                fontSize = 12.sp,
+                color = Color(0xFF44444D),
+            )
             SpectrumBars(
                 clock = clock,
                 provider = provider,
@@ -163,7 +198,7 @@ private fun EffectsDemoScreen() {
 private fun DemoCard(
     preset: FlowGlowPreset,
     provider: SpectrumProvider,
-    clock: com.mediahub.core.ui.effects.FlowGlowClock,
+    clock: FlowGlowClock,
     fps: Int,
     title: String,
     subtitle: String,

@@ -6,7 +6,7 @@
         <activity
             android:name="com.mediahub.app.debug.EffectsDemoActivity"
             android:exported="true"
-            android:label="FlowGlow Demo"
+            android:label="@string/effects_demo_label"
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     </application>
 </manifest>
