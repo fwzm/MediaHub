@@ -1,5 +1,6 @@
 package com.mediahub.feature.search
 
+import androidx.lifecycle.SavedStateHandle
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
@@ -120,7 +121,14 @@ class GlobalSearchViewModelTest {
         servers: List<MediaServer>,
         handles: Map<String, ProviderHandle?>,
         engine: GlobalSearchEngine = GlobalSearchEngine(perServerTimeoutMs = 2_000),
-    ) = GlobalSearchViewModel(FakeServerStore(servers), FakeRegistry(handles), engine, FakeLogger())
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
+    ) = GlobalSearchViewModel(
+        savedStateHandle,
+        FakeServerStore(servers),
+        FakeRegistry(handles),
+        engine,
+        FakeLogger(),
+    )
 
     private class FakeRegistry(
         private val handles: Map<String, ProviderHandle?>,
@@ -150,6 +158,26 @@ class GlobalSearchViewModelTest {
         runCurrent()
 
         assertEquals(listOf("冰血暴"), searchA.queries)
+        job.cancel()
+    }
+
+    @Test
+    fun `saved query restores both input source and active search after process recreation`() = runTest {
+        val searchA = FakeSearch()
+        val vm = viewModel(
+            servers = listOf(serverA),
+            handles = mapOf("srv-a" to handle(searchA)),
+            savedStateHandle = SavedStateHandle(mapOf(SEARCH_QUERY_KEY to "冰血暴")),
+        )
+
+        val job = launch { vm.state.collect {} }
+        runCurrent()
+        advanceTimeBy(400)
+        runCurrent()
+
+        assertEquals("冰血暴", vm.query.value)
+        assertEquals(listOf("冰血暴"), searchA.queries)
+        assertEquals("冰血暴", vm.state.value.query)
         job.cancel()
     }
 

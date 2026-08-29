@@ -327,11 +327,20 @@
 - 状态：已采纳（2026-08-29）
 - 决策：
   - **MediaListQuery 独立于 PageRequest**：PageRequest 只表达 offset/limit；
-    排序属于 MediaSort(field, direction) + MediaListQuery(page, sort)，
+    排序与筛选属于 MediaSort(field, direction) + MediaFilter +
+    MediaListQuery(page, sort, filter)，
     经 MediaQueryLibraryProvider.getItems(libraryId, query) 下沉服务器，
     在分页之前执行；禁止 UI/ViewModel 对已加载页做本地 sortedBy。
-    Provider 经 sortCapabilities 自述可兑现的排序字段，UI 只渲染能力内选项，
-    禁止按 ServerType 硬编码；无 Query 能力的 Provider 回退 getItems(page) 且隐藏排序入口。
+    Provider 经 capabilities: MediaQueryCapabilities(sortFields, filterFields) 自述可兑现字段，
+    UI 只渲染能力内选项，禁止按 ServerType 硬编码；无 Query 能力的 Provider 仅回退
+    server-default/no-filter 的 getItems(page)，并隐藏排序与筛选入口。
+  - **Filter 是 container-scoped，Sort 保持跨容器**：进入子容器时 filter 重置为默认，
+    返回父容器时从 NavigationFrame 恢复；sort 仍作为当前 library 浏览会话的统一选择。
+    query 变更必须取消旧 load/loadMore、重置 offset，并用 generation + immutable query snapshot
+    阻止 stale response 回灌。
+  - **Emby filter capability 仅声明官方 Items API 已文档化的参数**：首版映射
+    IncludeItemTypes / Years / IsPlayed / IsFavorite；默认值不发参数，不擅自加入 Recursive。
+    MockWebServer 只证明 wire contract，真实服务器组合筛选与分页行为仍需 server/device smoke。
   - **RANDOM 是单次快照而非分页**：Emby SortBy=Random 跨页各自随机、不重不漏无保证；
     RANDOM 只承诺 offset=0 的单页（无论 TotalRecordCount 多大都终止 hasMore/nextOffset），
     offset>0 直接空页；无方向语义（SortOrder 省略）。SERVER_DEFAULT 同样无方向语义。

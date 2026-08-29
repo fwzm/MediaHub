@@ -115,7 +115,11 @@ class EmbyLibraryProvider(
         result: EmbyQueryResultDto<EmbyBaseItemDto>,
         page: PageRequest,
     ): PagedResult<MediaItem> {
-        val hasMore = (page.offset + result.items.size) < result.totalRecordCount
+        val candidateNextOffset = page.offset + result.items.size
+        // 空页不能继续分页：否则 nextOffset == 当前 offset，自动加载会无限重复同一请求。
+        val nextOffset = candidateNextOffset.takeIf {
+            result.items.isNotEmpty() && it > page.offset && it < result.totalRecordCount
+        }
         return PagedResult(
             items = result.items.mapNotNull { dto ->
                 EmbyMediaItemMapper.map(dto, server.id)?.let { item ->
@@ -123,8 +127,8 @@ class EmbyLibraryProvider(
                 }
             },
             totalCount = result.totalRecordCount,
-            hasMore = hasMore,
-            nextOffset = if (hasMore) page.offset + result.items.size else null,
+            hasMore = nextOffset != null,
+            nextOffset = nextOffset,
         )
     }
 

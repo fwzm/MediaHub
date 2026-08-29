@@ -125,6 +125,10 @@ class LibraryViewModel @Inject constructor(
     /** 当前筛选（1D）：默认不过滤；**容器作用域**——进子级重置、回父级恢复。 */
     private var currentFilter: MediaFilter = MediaFilter()
 
+    /** 用户 query 变更尚未成功时保留上一份可用选择；刷新/重试取消旧 job 也不能丢失。 */
+    private var sortRollbackOnFailure: MediaSort? = null
+    private var filterRollbackOnFailure: MediaFilter? = null
+
     /** 导航代数：每次 openFolder/goToParent/load 递增，用于 race guard。 */
     private var navigationGeneration = 0
 
@@ -142,6 +146,8 @@ class LibraryViewModel @Inject constructor(
         loadJob?.cancel()
         loadMoreJob?.cancel()
         navigationGeneration++
+        sortRollbackOnFailure = null
+        filterRollbackOnFailure = null
         // Filter 容器作用域：push 父帧（含父筛选），子容器筛选重置为不过滤
         folderStack.addLast(NavigationFrame(currentFolder, currentFilter))
         currentFolder = folder
@@ -155,6 +161,8 @@ class LibraryViewModel @Inject constructor(
         loadJob?.cancel()
         loadMoreJob?.cancel()
         navigationGeneration++
+        sortRollbackOnFailure = null
+        filterRollbackOnFailure = null
         // Filter 容器作用域：pop 恢复父帧的筛选状态
         val frame = folderStack.removeLastOrNull()
         currentFolder = frame?.folder
@@ -230,6 +238,7 @@ class LibraryViewModel @Inject constructor(
      */
     fun onSortSelected(sort: MediaSort) {
         if (sort.field == currentSort.field && sort.direction == currentSort.direction) return
+        if (sortRollbackOnFailure == null) sortRollbackOnFailure = currentSort
         currentSort = sort
         load()
     }
@@ -244,6 +253,7 @@ class LibraryViewModel @Inject constructor(
      */
     fun onFilterSelected(filter: MediaFilter) {
         if (filter == currentFilter) return
+        if (filterRollbackOnFailure == null) filterRollbackOnFailure = currentFilter
         currentFilter = filter
         load()
     }
@@ -326,9 +336,17 @@ class LibraryViewModel @Inject constructor(
 
                     else -> throw ProviderException.NotYetImplemented(serverId, "该数据源的浏览能力尚未接入")
                 }
+                if (snapshotGen == navigationGeneration) {
+                    sortRollbackOnFailure = null
+                    filterRollbackOnFailure = null
+                }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 if (snapshotGen != navigationGeneration) return@launch
+                sortRollbackOnFailure?.let { currentSort = it }
+                filterRollbackOnFailure?.let { currentFilter = it }
+                sortRollbackOnFailure = null
+                filterRollbackOnFailure = null
                 logger.w(LogTag.UI, "加载媒体库失败 serverId=$serverId", e)
                 _uiState.value = LibraryUiState.Error(userMessage(e))
             }
@@ -337,6 +355,7 @@ class LibraryViewModel @Inject constructor(
 
     private fun userMessage(e: Exception): String = when (e) {
         is ProviderException -> e.message ?: "加载失败"
-        else -> "加载失败：${e.message}"
+        // Provider contract 之外的异常文本可能含 URL/query/credential，禁止直接回显。
+        else -> "加载失败"
     }
 }

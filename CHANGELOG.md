@@ -11,10 +11,15 @@
   清除全部；年份数字输入草稿语义（空=清除、四位=提交、中间态不发请求）。
 - capability 未声明的筛选字段 UI 隐藏；无 Query 能力源回退旧接口且入口隐藏。
 ### 测试
-- 新增 30 条（filter 域 7 / wire contract 6 / VM 状态 9 / UI helper 8）；全量三件套绿。
-- 真机验收（Xiaomi 14 Ultra / Android 16，code SHA b9b6f72）：PASS / SEALED。
+- 新增并加固 filter 域、wire contract、VM 状态、UI helper、非法年份、分页前进与失败恢复回归；
+  精确测试数以当前测试源/CI 为准，避免 hardening 追加用例后文档计数漂移。
+- 真机验收（Xiaomi 14 Ultra / Android 16，
+  code SHA b9b6f72a991379524f7bbe6ea8297534ac7152f1，
+  APK SHA256 4d784d9c15dab7d02564bd57ed0c711732b021fb16270f6ee805385939e5b6ee）：PASS / SEALED。
   剧集筛选→Fargo→季列表正常→返回筛选保持；Year=2014/Played/Favorite 双向；
-  Year+评分降序；随机快照；active indicator；清除全部；年份 0000 no-crash 零请求。
+  Year+评分降序；随机快照；active indicator；清除全部。
+  年份草稿 "0000"：field 接受草稿文本 / 应用存活 / 零 Years=0000 请求 /
+  未提交任何有效年份筛选。
 ## [0.12.0-unified-discovery] — 2026-08-29（Phase 1C：Unified Discovery）
 ### 功能（1C-1 Global Multi-Server Search）
 - EmbySearchProvider：GET /Users/{userId}/Items?SearchTerm=&Recursive=true

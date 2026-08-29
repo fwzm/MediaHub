@@ -239,8 +239,9 @@
 - [x] C1 library-filter-state：NavigationFrame 容器作用域（push/重置/恢复）+ onFilterSelected +
       loadMore 同 filter 快照 + race（generation guard）
 - [x] C2 library-filter-ui：筛选入口（active indicator）+ Sheet（类型/年份草稿/已看/收藏）+ 清除全部
-- [x] 测试：filter 域 7 + capability 迁移断言 + wire contract 6（含 filter+sort+分页核心组合）+
-      VM 状态 9（容器作用域往返/race/loadMore 快照/能力过滤）+ UI helper 8
+- [x] 测试：filter 域 + capability 迁移断言 + wire contract（含 filter+sort+分页核心组合）+
+      VM 状态（容器作用域往返/race/loadMore 快照/能力过滤/失败回滚）+ UI helper/非法年份；
+      精确数量以测试源与 exact-head CI 为准，避免 hardening 追加用例后计数漂移。
 - [x] 真机 smoke（冻结规格，Xiaomi 14 Ultra / Android 16，APK @ b9b6f72）：
       APK SHA256 = 4d784d9c15dab7d02564bd57ed0c711732b021fb16270f6ee805385939e5b6ee：PASS
       剧集筛选→Fargo→季列表正常→返回筛选保持（container-scoped 实证：folder 行被 IncludeItemTypes 过滤、

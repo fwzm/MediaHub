@@ -192,6 +192,22 @@ class EmbyLibraryProviderTest {
     }
 
     @Test
+    fun `empty raw page with larger total terminates instead of repeating the same offset`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":67}""")
+        )
+
+        val requestPage = PageRequest(offset = 60, limit = 20)
+        val result = provider().getItems("lib-1", MediaListQuery(page = requestPage))
+
+        assertTrue(result.items.isEmpty())
+        assertEquals(67, result.totalCount)
+        assertFalse("空页不得声称还有可推进的下一页", result.hasMore)
+        assertNull("nextOffset 不得等于当前 offset", result.nextOffset)
+    }
+
+    @Test
     fun `random sort is snapshot only - page0 carries no sortOrder, page1 returns empty without request`() =
         runBlocking {
             seedSession()

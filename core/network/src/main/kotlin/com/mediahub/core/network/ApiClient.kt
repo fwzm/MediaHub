@@ -5,17 +5,22 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.Redactor
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 
 /**
  * 普通 API 客户端（JSON）。
@@ -69,26 +74,25 @@ class ApiClient(
         val request = builder.build()
         val requestId = request.header(HttpClientFactory.HEADER_REQUEST_ID) ?: "?"
 
-        client.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                logger.w(
-                    LogTag.NETWORK,
-                    "API ${response.code} $method ${Redactor.redact(url)} body=${Redactor.redact(responseBody.take(500))}"
-                )
-                throw ApiException(
-                    statusCode = response.code,
-                    url = url,
-                    method = method,
-                    requestId = requestId,
-                )
-            }
-            try {
-                json.decodeFromString(deserializer, responseBody)
-            } catch (e: Exception) {
-                logger.e(LogTag.NETWORK, "JSON 解码失败 requestId=$requestId url=${Redactor.redact(url)}", e)
-                throw e
-            }
+        val response = executeCancellable(request, readBody = true)
+        if (!response.isSuccessful) {
+            logger.w(
+                LogTag.NETWORK,
+                "API ${response.code} $method ${Redactor.redact(url)} " +
+                    "body=${Redactor.redact(response.body).take(500)}"
+            )
+            throw ApiException(
+                statusCode = response.code,
+                url = url,
+                method = method,
+                requestId = requestId,
+            )
+        }
+        try {
+            json.decodeFromString(deserializer, response.body)
+        } catch (e: Exception) {
+            logger.e(LogTag.NETWORK, "JSON 解码失败 requestId=$requestId url=${Redactor.redact(url)}", e)
+            throw e
         }
     }
 
@@ -106,21 +110,62 @@ class ApiClient(
         val request = builder.build()
         val requestId = request.header(HttpClientFactory.HEADER_REQUEST_ID) ?: "?"
 
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                logger.w(
-                    LogTag.NETWORK,
-                    "API ${response.code} $method ${Redactor.redact(url)}"
-                )
-                throw ApiException(
-                    statusCode = response.code,
-                    url = url,
-                    method = method,
-                    requestId = requestId,
-                )
-            }
+        val response = executeCancellable(request, readBody = false)
+        if (!response.isSuccessful) {
+            logger.w(
+                LogTag.NETWORK,
+                "API ${response.code} $method ${Redactor.redact(url)}"
+            )
+            throw ApiException(
+                statusCode = response.code,
+                url = url,
+                method = method,
+                requestId = requestId,
+            )
         }
     }
+
+    /**
+     * OkHttp 异步调用的协程边界：取消协程时必须同时取消底层 Call。
+     *
+     * 不能在 Dispatchers.IO 中直接调用 Call.execute()：那只会取消协程的后续工作，
+     * 不会中断正在阻塞的 socket/read，也会让上层 withTimeout/flatMapLatest 失去真实 deadline。
+     */
+    private suspend fun executeCancellable(request: Request, readBody: Boolean): BufferedResponse =
+        suspendCancellableCoroutine { continuation ->
+            val call = client.newCall(request)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(
+                object : Callback {
+                    override fun onFailure(call: Call, e: IOException) {
+                        continuation.resumeWith(Result.failure(e))
+                    }
+
+                    override fun onResponse(call: Call, response: Response) {
+                        try {
+                            response.use {
+                                val buffered = BufferedResponse(
+                                    code = it.code,
+                                    isSuccessful = it.isSuccessful,
+                                    body = if (readBody) it.body?.string().orEmpty() else "",
+                                    contentType = it.header("Content-Type"),
+                                )
+                                continuation.resumeWith(Result.success(buffered))
+                            }
+                        } catch (e: Exception) {
+                            continuation.resumeWith(Result.failure(e))
+                        }
+                    }
+                }
+            )
+        }
+
+    private data class BufferedResponse(
+        val code: Int,
+        val isSuccessful: Boolean,
+        val body: String,
+        val contentType: String?,
+    )
 
     private fun buildBody(method: String, body: String?, contentType: String?): RequestBody? {
         if (body == null) {
@@ -143,23 +188,24 @@ class ApiClient(
             return ServerProbeResult.Failure("URL 格式无效", e.message)
         }
         val request = Request.Builder().url(url).method("GET", null).build()
-        return withContext(Dispatchers.IO) {
-            val start = System.nanoTime()
-            try {
-                client.newCall(request).execute().use { response ->
-                    val latencyMs = (System.nanoTime() - start) / 1_000_000
-                    ServerProbeResult.Success(
-                        httpCode = response.code,
-                        latencyMs = latencyMs,
-                        contentType = response.header("Content-Type"),
-                    )
-                }
-            } catch (e: IOException) {
-                ServerProbeResult.Failure(
-                    userMessage = "无法连接服务器",
-                    detail = PlaybackErrorMapper.fromIoException(e).code.name,
-                )
-            }
+        val start = System.nanoTime()
+        return try {
+            val response = withTimeoutOrNull(timeoutMs.coerceAtLeast(1L)) {
+                executeCancellable(request, readBody = false)
+            } ?: return ServerProbeResult.Failure(
+                userMessage = "连接服务器超时",
+                detail = PlaybackError.Code.NETWORK_TIMEOUT.name,
+            )
+            ServerProbeResult.Success(
+                httpCode = response.code,
+                latencyMs = (System.nanoTime() - start) / 1_000_000,
+                contentType = response.contentType,
+            )
+        } catch (e: IOException) {
+            ServerProbeResult.Failure(
+                userMessage = "无法连接服务器",
+                detail = PlaybackErrorMapper.fromIoException(e).code.name,
+            )
         }
     }
 }

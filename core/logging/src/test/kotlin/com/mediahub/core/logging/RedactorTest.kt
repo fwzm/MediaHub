@@ -31,10 +31,62 @@ class RedactorTest {
     }
 
     @Test
+    fun `redacts complete quoted secrets containing spaces commas and escaped quotes`() {
+        val json =
+            """{"password":"correct horse, battery \"staple\"","access_token":"alpha beta,gamma"}"""
+
+        val out = Redactor.redact(json)
+
+        listOf("correct", "horse", "battery", "staple", "alpha", "beta", "gamma").forEach {
+            assertFalse("quoted secret fragment must be removed: $it", out.contains(it))
+        }
+        assertTrue(out.contains("\"password\":\"****\""))
+        assertTrue(out.contains("\"access_token\":\"****\""))
+    }
+
+    @Test
+    fun `fails closed for unterminated quoted secrets including trailing backslash`() {
+        val truncated = "{\"password\":\"secret tail"
+        val truncatedAfterEscape = "{\"access_token\":\"secret tail\\"
+
+        listOf(truncated, truncatedAfterEscape).forEach { input ->
+            val out = Redactor.redact(input)
+            assertFalse(out.contains("secret"))
+            assertFalse(out.contains("tail"))
+            assertTrue(out.endsWith(Redactor.REDACTED))
+        }
+    }
+
+    @Test
     fun `redacts query parameter`() {
         val out = Redactor.redact("https://example.com/video?token=tok123&expires=999")
         assertFalse(out.contains("tok123"))
         assertTrue(out.contains("expires=999"))
+    }
+
+    @Test
+    fun `redacts plain and percent encoded url userinfo credentials`() {
+        val plain = Redactor.redact("https://alice:plain-secret@example.com/emby")
+        val encoded = Redactor.redact("https://alice:p%40ss%3Aword@example.com/emby")
+
+        listOf(plain, encoded).forEach { output ->
+            assertFalse(output.contains("alice"))
+            assertFalse(output.contains("plain-secret"))
+            assertFalse(output.contains("p%40ss", ignoreCase = true))
+            assertTrue(output.startsWith("https://****@example.com/"))
+        }
+    }
+
+    @Test
+    fun `redacts bare sensitive values separated by equals or colon ignoring case`() {
+        val out = Redactor.redact(
+            "api_key=plain-key PASSWORD: plain-password Token : mixed-case-token"
+        )
+
+        assertFalse(out.contains("plain-key"))
+        assertFalse(out.contains("plain-password"))
+        assertFalse(out.contains("mixed-case-token"))
+        assertEquals(3, Regex(Regex.escape(Redactor.REDACTED)).findAll(out).count())
     }
 
     @Test
@@ -119,5 +171,43 @@ class RedactorTest {
         assertTrue(out.contains("Recursive=true"))
         assertTrue(out.contains("StartIndex=0"))
         assertTrue(out.contains("Limit=30"))
+    }
+
+    @Test
+    fun `memory logger redacts sensitive query in throwable message`() {
+        val buffer = LogBuffer()
+        val logger = MemoryLogger(buffer)
+        val encoded = "%E5%86%B0%E8%A1%80%E6%9A%B4"
+
+        logger.w(
+            LogTag.NETWORK,
+            "request failed",
+            IllegalStateException("HTTP 500 GET https://e.com/Items?SearchTerm=$encoded&Limit=30"),
+        )
+
+        val line = buffer.snapshot().single()
+        assertFalse(line.contains(encoded, ignoreCase = true))
+        assertFalse(line.contains("冰血暴"))
+        assertTrue(line.contains("SearchTerm=****", ignoreCase = true))
+        assertTrue(line.contains("Limit=30"))
+    }
+
+    @Test
+    fun `memory logger redacts complete quoted secret in throwable message`() {
+        val buffer = LogBuffer()
+        val logger = MemoryLogger(buffer)
+        val secret = "correct horse, battery staple"
+
+        logger.e(
+            LogTag.NETWORK,
+            "response failed",
+            IllegalStateException("HTTP 500 body={\"password\":\"$secret\"}"),
+        )
+
+        val line = buffer.snapshot().single()
+        assertFalse(line.contains(secret))
+        assertFalse(line.contains("horse"))
+        assertFalse(line.contains("staple"))
+        assertTrue(line.contains("\"password\":\"****\""))
     }
 }

@@ -104,6 +104,7 @@ class LibraryFilterViewModelTest {
             ),
         private val stallOffset: Int? = null,
         private val stallLibraryId: String? = null,
+        private val failFilter: MediaFilter? = null,
     ) : MediaLibraryProvider, MediaQueryLibraryProvider {
         val requests = mutableListOf<MediaListQuery>()
 
@@ -116,6 +117,7 @@ class LibraryFilterViewModelTest {
 
         override suspend fun getItems(libraryId: String, query: MediaListQuery): PagedResult<MediaItem> {
             requests += query
+            if (query.filter == failFilter) error("server rejected filter ${query.filter}")
             if (query.page.offset == stallOffset && libraryId == stallLibraryId) {
                 // non-cooperative（评审 P2）：吞掉取消并照样返回旧数据——
                 // 模拟不响应取消的真实服务器；generation guard 必须丢弃这条晚到的 stale response
@@ -197,6 +199,26 @@ class LibraryFilterViewModelTest {
         advanceUntilIdle()
 
         assertEquals(1, lib.requests.size)
+    }
+
+    @Test
+    fun `failed filter change rolls back so retry uses previous working filter`() = runTest {
+        val rejected = MediaFilter(favorite = true)
+        val lib = FakeQueryLibrary(failFilter = rejected)
+        val viewModel = vm(handleOf(lib))
+        advanceUntilIdle()
+
+        viewModel.onFilterSelected(rejected)
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value is LibraryUiState.Error)
+
+        viewModel.load()
+        advanceUntilIdle()
+
+        assertEquals(listOf(MediaFilter(), rejected, MediaFilter()), lib.requests.map { it.filter })
+        val recovered = viewModel.uiState.value as LibraryUiState.Content
+        assertTrue(recovered.filter.isDefault)
+        assertTrue(recovered.items.all { it.title.startsWith("NONE:") })
     }
 
     // ---- 容器作用域核心：进子级重置 / 回父级恢复 ----

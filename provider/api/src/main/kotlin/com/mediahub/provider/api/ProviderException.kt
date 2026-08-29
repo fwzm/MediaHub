@@ -1,5 +1,14 @@
 package com.mediahub.provider.api
 
+/** 保留原异常类型名称和调用栈用于诊断，但禁止把底层 message/cause 链带入 UI 或 crash report。 */
+private class SanitizedProviderCause(original: Throwable) : Exception(original.javaClass.name) {
+    init {
+        stackTrace = original.stackTrace
+    }
+}
+
+private fun Throwable?.sanitizedForDiagnostics(): Throwable? = this?.let(::SanitizedProviderCause)
+
 /**
  * Provider 层统一异常。UI 层捕获后展示 [message]（用户可读），
  * 同时用 [code] 做结构化诊断；日志输出必须脱敏。
@@ -9,7 +18,7 @@ sealed class ProviderException(
     val code: ErrorCode,
     message: String,
     cause: Throwable? = null,
-) : Exception(message, cause) {
+) : Exception(message, cause.sanitizedForDiagnostics()) {
 
     enum class ErrorCode {
         AUTH_REQUIRED,
@@ -44,7 +53,7 @@ sealed class ProviderException(
 
     /** 网络错误。 */
     class Network(serverId: String, cause: Throwable? = null) :
-        ProviderException(serverId, ErrorCode.NETWORK, "网络错误：${cause?.message.orEmpty()}", cause)
+        ProviderException(serverId, ErrorCode.NETWORK, "网络错误，请检查网络连接", cause)
 
     /** HTTP 错误。 */
     class Http(
@@ -53,7 +62,7 @@ sealed class ProviderException(
         val url: String,
         val method: String = "GET",
         val requestId: String? = null,
-    ) : ProviderException(serverId, ErrorCode.HTTP, "服务器返回 $statusCode（$method $url）")
+    ) : ProviderException(serverId, ErrorCode.HTTP, "服务器返回 $statusCode（$method）")
 
     /** 解析错误。 */
     class Parse(serverId: String, cause: Throwable? = null) :
@@ -80,5 +89,5 @@ sealed class ProviderException(
 
     /** 未知错误。 */
     class Unknown(serverId: String, cause: Throwable? = null) :
-        ProviderException(serverId, ErrorCode.UNKNOWN, "未知错误：${cause?.message.orEmpty()}", cause)
+        ProviderException(serverId, ErrorCode.UNKNOWN, "发生未知错误", cause)
 }
