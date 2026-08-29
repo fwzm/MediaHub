@@ -13,6 +13,7 @@
   VM 层 filter 快照与 race guard 同 1C 模式。
 - **UI**：TopAppBar 筛选入口（active=primary tint+『筛选（已启用）』）；筛选 Sheet 四分区即时生效；
   年份数字输入带草稿语义（空串=清除、恰好四位=提交、中间态不发请求）；『清除全部』。
+- **评审 hardening**：yearDraftToFilter no-crash（"0000" 等 year<=0 草稿 no-op，domain invariant 不放宽）+ race 测试升级 non-cooperative（吞取消仍返回旧数据，guard 丢弃路径真实锁定）。
 - **状态**：code complete / tests complete / **device verification pending**。
 - **待真机验证（冻结规格 smoke）**：TV library 类型=剧集 → 打开 Fargo → 季列表正常 → 返回后类型=剧集保持；
   Year=2014 / Played/Unplayed / Favorite 双向 / Year+Rating sort / Filter+Random 快照 /
@@ -20,9 +21,10 @@
 - **下一步**：Integration PR 独立审查 → 真机 smoke → 封板。
 
 ## Phase 1C Unified Discovery（本次）：1C-1 聚合搜索 + 1C-2 服务端排序
-- **Query Pipeline（ADR-036）**：MediaListQuery/MediaSort/MediaSortCapabilities 独立于 PageRequest；
+- **Query Pipeline（ADR-036）**：MediaListQuery/MediaSort/MediaQueryCapabilities 独立于 PageRequest；
   MediaQueryLibraryProvider.getItems(libraryId, query) 把排序下沉服务器（分页前执行）；
-  Provider 用 sortCapabilities 自述能力，UI 能力过滤渲染，无能力回退旧接口并隐藏入口。
+  Provider 用 capabilities（1D 起 sortFields+filterFields）自述能力，UI 能力过滤渲染，
+  无能力回退旧接口并隐藏入口。（MediaSortCapabilities 已于 Phase 1D 迁移移除，勿再引用）
 - **Emby 搜索/排序**：EmbySearchProvider（SearchTerm+Recursive，Token 只走 Header）；
   EmbyLibraryProvider 同实例承载 LIBRARY+QUERY，SortBy/SortOrder 全字段映射，
   RANDOM 单页快照（totalCount 再大也终止）；Fields 扩 6 个发现字段并映射进 MediaItem。
