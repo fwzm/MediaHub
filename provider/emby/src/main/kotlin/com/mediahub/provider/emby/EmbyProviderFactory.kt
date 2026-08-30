@@ -22,6 +22,7 @@ import com.mediahub.provider.emby.library.EmbyLibraryProvider
 import com.mediahub.provider.emby.playback.EmbyPlaybackProvider
 import com.mediahub.provider.emby.search.EmbySearchProvider
 import com.mediahub.provider.emby.identity.EmbyIdentityLookupProvider
+import com.mediahub.provider.emby.progress.EmbyProgressProvider
 import com.mediahub.provider.emby.image.EmbyImageAuthContributor
 import com.mediahub.provider.emby.session.EmbySessionCleaner
 import com.mediahub.provider.emby.session.EmbySessionStore
@@ -109,6 +110,13 @@ class EmbyProviderFactory @Inject constructor(
                 logger = logger,
             ),
             identityLookup = EmbyIdentityLookupProvider(
+                server = server,
+                api = embyApi,
+                tokenStore = tokenStore,
+                sessionStore = sessionStore,
+                logger = logger,
+            ),
+            progress = EmbyProgressProvider(
                 server = server,
                 api = embyApi,
                 tokenStore = tokenStore,
