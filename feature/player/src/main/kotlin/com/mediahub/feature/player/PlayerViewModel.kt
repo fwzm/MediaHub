@@ -309,8 +309,9 @@ class PlayerViewModel @Inject constructor(
      * 显式退出状态机（ADR-023）：保证退出时本地快照与远端上报不丢。
      *
      * 顺序：暂停读取 position（engine.stop，发出 Stopped）→ 生成最终进度 →
-     * local save + remote report（远端短超时，不阻塞退出）→ 停止协调器 → 释放播放器。
-     * 幂等：可被返回按钮与 onDispose 兜底重复调用。
+     * 停止协调器（禁止 final 之后的新 remote work）→ final flush
+     * （远端 final 上报短超时，不阻塞退出；Jellyfin 走 /Sessions/Playing/Stopped）→
+     * 释放播放器。幂等：可被返回按钮与 onDispose 兜底重复调用。
      */
     suspend fun stopAndFlush() {
         if (stopped) return

@@ -19,11 +19,13 @@ import kotlinx.coroutines.withTimeoutOrNull
  * - 本地快照：progress.sample([localIntervalMs])，默认 5s（conflate 语义）。
  * - 远端上报：progress.sample([remoteIntervalMs])，由 Provider 策略决定（默认 10s）。
  * - 关键事件（Pause / Seek / Ended）：立即 flush 一次（latest）。
- * - [flush]：播放器退出时 final flush（ADR-023）；远端上报带短超时，
- *   保证退出不被慢网络阻塞。
+ * - [flush]：关键事件（Pause/Seek/Ended）的即时远端同步；远端上报带短超时。
+ * - [flushFinal]：播放器退出时**唯一的权威 final 路径**（ADR-023/039）；远端走
+ *   [remoteFinalReport]（Provider 可区分 final 操作，如 Jellyfin Stopped），
+ *   短超时保证退出不被慢网络阻塞。
  * - Stopped 事件：**仅状态通知，不触发自动 flush**——退出 final flush 的唯一权威
- *   路径是调用方显式执行 engine.stop() → flush(finalProgress)（ADR-023），
- *   避免一次退出产生两次本地写入与两次远端上报。
+ *   路径是调用方显式执行 engine.stop() → stop() → flushFinal(finalProgress)
+ *   （ADR-023/039），避免一次退出产生两次本地写入与两次远端上报。
  *
  * 纯 Kotlin，可单测（kotlinx-coroutines-test virtual time）。
  */

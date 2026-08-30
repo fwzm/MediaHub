@@ -16,7 +16,10 @@
 - **集成注意（device smoke 新增验证点）**：Jellyfin 10.9.x 服务端自述 direct-stream
   http streaming 有缺陷且非 force 时关内部 EnableDirectStream——真机必须验证真实
   PlaybackInfo 响应，不能只信手写 SupportsDirectStream fixture。
-- **待办**：integration PR merge（C base = authoritative）→ device smoke（16 场景链，
+- **Integration 状态**：PR #11 OPEN（integration/1g-jellyfin → main，base=`45a467b`，
+  GitHub ahead_by=10 commits 线性）；exact-head CI = 待本轮 docs/KDoc patch 后的新 run
+  （前一 run `33295225612` @ `6511bd0` success，但该 head 缺 KDoc 修正，不给新 SHA 背书）。
+- **待办**：新 exact-head CI 绿 → PR #11 merge → device smoke（16 场景链，
   需真实 Jellyfin server；无 server = device verification BLOCKED ≠ SEALED）。
   非阻塞遗留：in-flight cancellation robustness test（barrier/deferred 构造）；
   PlayerViewModel onCleared 兜底无 flushFinal（既有生命周期设计，非 1G 引入）。

@@ -273,7 +273,7 @@
       QUERY/IDENTITY_LOOKUP 缺席）
 - [x] ADR-039 落盘 + 协议证据（v10.9.0 PlaybackInfoDto 无 IsPlayback、MaxStreamingBitrate int?、
       SearchScore relevance、ServerId 顶层）
-- [ ] integration/1g-jellyfin PR merge（base=45a467b 线性 7 commits @ 9329bf3）
+- [ ] integration/1g-jellyfin PR merge（base=45a467b；GitHub ahead_by=10 commits 线性至本轮 hardening）
 - [ ] device smoke（16 场景链；需真实 Jellyfin server，无 server = BLOCKED ≠ SEALED）
 - 状态：**A/B/C 三 slice 全 ACCEPTED @ `9329bf3`**（每 slice 两轮 review，P1 全清）
 
