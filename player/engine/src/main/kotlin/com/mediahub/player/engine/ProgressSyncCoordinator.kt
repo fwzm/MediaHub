@@ -19,11 +19,13 @@ import kotlinx.coroutines.withTimeoutOrNull
  * - 本地快照：progress.sample([localIntervalMs])，默认 5s（conflate 语义）。
  * - 远端上报：progress.sample([remoteIntervalMs])，由 Provider 策略决定（默认 10s）。
  * - 关键事件（Pause / Seek / Ended）：立即 flush 一次（latest）。
- * - [flush]：播放器退出时 final flush（ADR-023）；远端上报带短超时，
- *   保证退出不被慢网络阻塞。
+ * - [flush]：关键事件（Pause/Seek/Ended）的即时远端同步；远端上报带短超时。
+ * - [flushFinal]：播放器退出时**唯一的权威 final 路径**（ADR-023/039）；远端走
+ *   [remoteFinalReport]（Provider 可区分 final 操作，如 Jellyfin Stopped），
+ *   短超时保证退出不被慢网络阻塞。
  * - Stopped 事件：**仅状态通知，不触发自动 flush**——退出 final flush 的唯一权威
- *   路径是调用方显式执行 engine.stop() → flush(finalProgress)（ADR-023），
- *   避免一次退出产生两次本地写入与两次远端上报。
+ *   路径是调用方显式执行 engine.stop() → stop() → flushFinal(finalProgress)
+ *   （ADR-023/039），避免一次退出产生两次本地写入与两次远端上报。
  *
  * 纯 Kotlin，可单测（kotlinx-coroutines-test virtual time）。
  */
@@ -33,6 +35,9 @@ class ProgressSyncCoordinator(
     private val localSave: suspend (PlaybackProgress) -> Unit,
     private val remoteReport: suspend (PlaybackProgress) -> Unit,
     private val localIntervalMs: Long = DEFAULT_LOCAL_INTERVAL_MS,
+    /** 最终退出上报（ADR-039 review hardening）：默认等于普通 remoteReport（零行为变化）；
+     *  有 server session-lifecycle 的 Provider（Jellyfin Stopped）由此区分最终操作。 */
+    private val remoteFinalReport: suspend (PlaybackProgress) -> Unit = remoteReport,
 ) {
     private val latest = AtomicReference<PlaybackProgress?>(null)
     private var job: Job? = null
@@ -74,6 +79,17 @@ class ProgressSyncCoordinator(
         val p = progress ?: latest.get() ?: return
         runCatching { localSave(p) }
         runCatching { withTimeoutOrNull(REMOTE_FLUSH_TIMEOUT_MS) { remoteReport(p) } }
+    }
+
+    /**
+     * final flush 的**final 版**（ADR-039 review hardening）：与 [flush] 同一时机与
+     * 单次权威语义，但远端走 [remoteFinalReport]——普通 Pause/Seek/Ended 关键事件
+     * 仍走 [flush]，只有播放器退出（stopAndFlush）走本方法。
+     */
+    suspend fun flushFinal(progress: PlaybackProgress? = null) {
+        val p = progress ?: latest.get() ?: return
+        runCatching { localSave(p) }
+        runCatching { withTimeoutOrNull(REMOTE_FLUSH_TIMEOUT_MS) { remoteFinalReport(p) } }
     }
 
     fun stop() {

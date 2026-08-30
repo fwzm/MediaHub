@@ -37,4 +37,10 @@ data class ProviderDescriptor(
     val authMethod: AuthMethod,
     val status: ProviderStatus,
     val description: String = "",
+    /**
+     * 线路质量测试探针路径（Phase 1G-A，ADR-039）：Provider 自述协议位置，
+     * core:network 不得内置任何 Emby/Jellyfin 路径知识。
+     * null = 该类型无 HTTP 探针 / 未定义（调用方显式报"不支持"，禁止静默回退其他协议）。
+     */
+    val probePath: String? = null,
 )

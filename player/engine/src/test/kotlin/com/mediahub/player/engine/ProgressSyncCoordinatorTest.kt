@@ -178,4 +178,62 @@ class ProgressSyncCoordinatorTest {
         assertTrue(remote.contains(20_000L))
         coordinator.stop()
     }
+    // ---- ADR-039 review hardening：flushFinal 普通/final callback 分流 ----
+
+    @Test
+    fun `flushFinal routes to final report not regular remote report`() = runTest {
+        val remote = mutableListOf<Long>()
+        val final = mutableListOf<Long>()
+        val coordinator = ProgressSyncCoordinator(
+            scope = backgroundScope,
+            localSave = { },
+            remoteReport = { remote += it.positionMs },
+            remoteFinalReport = { final += it.positionMs },
+        )
+        val progress = progress(1_000)
+
+        coordinator.flush(progress)
+        coordinator.flushFinal(progress)
+
+        assertTrue("普通 flush 不得走 final 回调", remote.size == 1)
+        assertTrue("flushFinal 必须走 final 回调", final.size == 1)
+    }
+
+    @Test
+    fun `stop before flushFinal prevents further periodic remote reports`() = runTest {
+        val remote = mutableListOf<Long>()
+        val final = mutableListOf<Long>()
+        val coordinator = ProgressSyncCoordinator(
+            scope = backgroundScope,
+            localSave = { },
+            remoteReport = { remote += it.positionMs },
+            remoteFinalReport = { final += it.positionMs },
+        )
+        val flow = MutableSharedFlow<PlaybackProgress>(
+            replay = 1,
+            extraBufferCapacity = 8,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+        val events = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
+        coordinator.start(flow, events)
+
+        // 周期 remote sample 先发生一次
+        flow.tryEmit(progress(1_000))
+        advanceTimeBy(10_000)
+        runCurrent()
+        val remoteAfterPeriodic = remote.size
+        assertTrue(remoteAfterPeriodic >= 1)
+
+        // 退出：先 stop（禁止后续 periodic/critical remote work）再 flushFinal
+        coordinator.stop()
+        val finalProgress = progress(9_000)
+        coordinator.flushFinal(finalProgress)
+
+        assertEquals(1, final.size)
+        assertEquals(9_000L, final[0])
+        // stop 后 periodic 采样不再产生新的 remote work
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertEquals(remoteAfterPeriodic, remote.size)
+    }
 }

@@ -1,5 +1,6 @@
 package com.mediahub.provider.jellyfin
 
+import com.mediahub.core.common.ClientIdentity
 import com.mediahub.core.logging.StdoutLogger
 import com.mediahub.core.network.ApiClient
 import com.mediahub.core.network.HttpClientFactory
@@ -8,16 +9,20 @@ import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.TokenStore
 import com.mediahub.model.MediaServer
 import com.mediahub.model.ServerType
+import com.mediahub.provider.jellyfin.api.JellyfinApiClient
+import com.mediahub.provider.jellyfin.api.JellyfinAuthorizationHeaderBuilder
+import com.mediahub.provider.jellyfin.api.JellyfinEndpointResolver
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/** 协议级连接测试（ADR-019）：Jellyfin SystemInfo 特征校验。 */
+/** 协议级连接测试（ADR-019）：Jellyfin SystemInfo 特征校验 + 反代子路径保留（ADR-039）。 */
 class JellyfinProviderConnectionTest {
 
     private lateinit var server: MockWebServer
@@ -28,18 +33,29 @@ class JellyfinProviderConnectionTest {
     @After
     fun tearDown() { server.shutdown() }
 
-    private fun provider(): JellyfinProvider {
+    private fun provider(baseUrl: String = server.url("/").toString().trimEnd('/')): JellyfinProvider {
         val logger = StdoutLogger()
         val http = HttpClientFactory(logger)
+        val authHeaderBuilder = JellyfinAuthorizationHeaderBuilder(
+            ClientIdentity("MediaHub", "Android", "dev-1", "0.1.0")
+        )
+        val jellyfinApi = JellyfinApiClient(
+            endpointResolver = JellyfinEndpointResolver(baseUrl),
+            apiClient = ApiClient(http.apiClient(), logger = logger),
+            authHeaderBuilder = authHeaderBuilder,
+            logger = logger,
+        )
         return JellyfinProvider(
             server = MediaServer(
                 id = "s1", name = "测试", type = ServerType.JELLYFIN,
-                baseUrl = server.url("/").toString().trimEnd('/'), createdAtEpochMs = 0,
+                baseUrl = baseUrl, createdAtEpochMs = 0,
             ),
             apiClient = ApiClient(http.apiClient(), logger = logger),
             mediaHttpClient = MediaHttpClient(http.mediaClient(), logger = logger),
             tokenStore = TokenStore(FakeSecretStorage()),
             logger = logger,
+            jellyfinApi = jellyfinApi,
+            authHeaderBuilder = authHeaderBuilder,
         )
     }
 
@@ -68,6 +84,64 @@ class JellyfinProviderConnectionTest {
         server.enqueue(MockResponse().setResponseCode(404))
         val result = provider().testConnection()
         assertFalse(result.ok)
+    }
+
+    // ---- ADR-039：反代子路径必须保留，禁止 /emby 前缀 ----
+
+    @Test
+    fun `reverse proxy subpath is preserved and no emby prefix is added`() = runBlocking {
+        // base = https://host/jellyfin → 探针必须打 /jellyfin/System/Info/Public
+        val subpathBase = server.url("/jellyfin").toString().trimEnd('/')
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"Id":"jf-1","Version":"10.9.0"}""")
+        )
+        val result = provider(subpathBase).testConnection()
+        assertTrue("ok=$result", result.ok)
+        val request = server.takeRequest()
+        assertEquals("/jellyfin/System/Info/Public", request.requestUrl!!.encodedPath)
+        assertFalse(request.requestUrl!!.encodedPath.contains("/emby"))
+    }
+
+    // ---- 取消红线：testConnection 不得把取消折叠成 ConnectionStatus(false)（ADR-039） ----
+
+    @Test
+    fun `test connection cancellation propagates unchanged`() = runBlocking {
+        val cancellingClient = okhttp3.OkHttpClient.Builder()
+            .addInterceptor { throw java.util.concurrent.CancellationException("scope cancelled") }
+            .build()
+        val logger = StdoutLogger()
+        val authHeaderBuilder = JellyfinAuthorizationHeaderBuilder(
+            ClientIdentity("MediaHub", "Android", "dev-1", "0.1.0")
+        )
+        val http = HttpClientFactory(logger)
+        val jellyfinApi = JellyfinApiClient(
+            endpointResolver = JellyfinEndpointResolver(server.url("/").toString().trimEnd('/')),
+            apiClient = ApiClient(cancellingClient, logger = logger),
+            authHeaderBuilder = authHeaderBuilder,
+            logger = logger,
+        )
+        val p = JellyfinProvider(
+            server = MediaServer(
+                id = "s1", name = "测试", type = ServerType.JELLYFIN,
+                baseUrl = server.url("/").toString().trimEnd('/'), createdAtEpochMs = 0,
+            ),
+            apiClient = ApiClient(http.apiClient(), logger = logger),
+            mediaHttpClient = MediaHttpClient(http.mediaClient(), logger = logger),
+            tokenStore = TokenStore(FakeSecretStorage()),
+            logger = logger,
+            jellyfinApi = jellyfinApi,
+            authHeaderBuilder = authHeaderBuilder,
+        )
+
+        val thrown = try {
+            p.testConnection()
+            null
+        } catch (e: java.util.concurrent.CancellationException) {
+            e
+        } catch (e: Throwable) {
+            e
+        }
+        assertTrue("取消必须穿透（实际：$thrown）", thrown is java.util.concurrent.CancellationException)
     }
 
     private class FakeSecretStorage : SecretStorage {

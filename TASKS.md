@@ -256,6 +256,27 @@
 - Device: Xiaomi 14 Ultra / Android 16
 - Result: PASS
 
+## Phase 1G — Jellyfin Provider Foundation & Parity（2026-08-30）🔨 A/B/C 全 ACCEPTED（integration 待 merge + device smoke）
+
+- [x] A auth+shared foundation：现代 Authorization contract（MediaBrowser …Token）/
+      JellyfinSession(Store) 独立 / 事务式回滚 / restore 防串服（401 清、403 保留）/
+      ProviderImageAuthContributor（auth-scope 归属 fail-closed，app 零 provider import）/
+      EndpointTestService 去协议路径 / CompositeSessionStoreCleaner / Emby fallback 消除
+- [x] B catalog+search：独立 DTO/mapper（ProviderIds 1E 策略同款）/ LIBRARY（ParentId browse
+      无 Recursive + Views）/ DETAIL（Movie/Series/Season/Episode 链 + People 图片回填）/
+      SEARCH（SearchTerm+Recursive+ProviderIds）/ 跨 Provider 聚合证明测试
+- [x] C playback+progress+identity gate：无转码 Direct Stream（PlaybackInfo 协商
+      encodeDefaults 教训 + Static=true 恒同源）/ Progress 三端点（Mutex 会话原子 +
+      reportFinalProgress shared hook + stop-before-final 顺序）/ 1F one-way guard
+      （identityLookup=null → Idle）
+- [x] ProviderFactory capability audit 测试（AUTH+LIBRARY+DETAIL+SEARCH+PLAYBACK+PROGRESS；
+      QUERY/IDENTITY_LOOKUP 缺席）
+- [x] ADR-039 落盘 + 协议证据（v10.9.0 PlaybackInfoDto 无 IsPlayback、MaxStreamingBitrate int?、
+      SearchScore relevance、ServerId 顶层）
+- [ ] integration/1g-jellyfin PR merge（base=45a467b；GitHub ahead_by=10 commits 线性至本轮 hardening）
+- [ ] device smoke（16 场景链；需真实 Jellyfin server，无 server = BLOCKED ≠ SEALED）
+- 状态：**A/B/C 三 slice 全 ACCEPTED @ `9329bf3`**（每 slice 两轮 review，P1 全清）
+
 ## Phase 1F — Canonical Detail / Source Selection（2026-08-29）✅ SEALED / PASS
 
 - [x] A1 domain-identity-graph：CanonicalIdentityGraph（core/model）成 connected-component

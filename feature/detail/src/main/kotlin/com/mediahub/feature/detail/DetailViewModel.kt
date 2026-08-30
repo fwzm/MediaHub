@@ -156,10 +156,19 @@ class DetailViewModel @Inject constructor(
      * 1F C1（ADR-038）：sibling source 解析为旁路异步状态——主内容绝不等待；
      * 解析失败只在 sourceState 内表达（partial），绝不把已正常打开的 Detail
      * 变成 Error。route 销毁/切换 = viewModelScope 取消传导，全部解析终止。
+     *
+     * 1G-C eligibility guard（ADR-039 review 冻结）：当前 provider 的 Handle 无
+     * IDENTITY_LOOKUP 能力（如 Jellyfin）时 sourceState 停在 Idle、不启动 resolver——
+     * 防止单向 source switching（Jellyfin Detail 能看见 Emby sibling、反向不可达）。
+     * Emby（identityLookup != null）行为不变。
      */
     private fun startSourceResolution(item: MediaItem) {
         sourceJob?.cancel()
         if (item.type != MediaType.MOVIE && item.type != MediaType.SERIES) {
+            _sourceState.value = SourceResolutionState.Idle
+            return
+        }
+        if (handle?.identityLookup == null) {
             _sourceState.value = SourceResolutionState.Idle
             return
         }
