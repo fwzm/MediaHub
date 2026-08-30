@@ -16,23 +16,17 @@ UI 通过 `registry.create(server)` 获取实例，按 `ProviderCapability` 决�
 - 认证：`POST /Users/AuthenticateByName`（Body: Username/Pw；Header: X-Emby-Token 需客户端标识）
 - 媒体库：`GET /Users/{userId}/Views`
 - 浏览/详情：`GET /Users/{userId}/Items?...`、`GET /Users/{userId}/Items/{itemId}`
-- 搜索（Phase 1C 已实现）：`GET /Users/{userId}/Items?SearchTerm=...&Recursive=true`
-  （+IncludeItemTypes 锁类型；非 /Search/Hints）
+- 搜索：`GET /Search/Hints?...`
 - 播放源：`POST /Items/{itemId}/PlaybackInfo`（MediaSources → DirectPlay/DirectStream/Transcode 三态）
-- 进度（Phase 1H 已实现，ADR-040）：`POST /Sessions/Playing`（首报）/
-  `POST /Sessions/Playing/Progress`（后续/关键事件）/ `POST /Sessions/Playing/Stopped`
-  （退出权威进度写入者）；PositionTicks 恒发（缺省会令服务端误判"播放完成"）
+- 进度：`POST /Sessions/Playing` / `POST /Sessions/Playing/Stopped`
 - 图片：`/Items/{itemId}/Images/{type}`（需带鉴权头，Coil 集成时注意）
 
 要点：默认直连（Direct Play），客户端能解码绝不请求转码；会话 Token 加密存储（core:security）。
 
 ## Jellyfin（Phase 1 实现）
 
-API 与 Emby 同源但**独立 Connector**：共享 `BaseMediaServerProvider`，协议差异各自实现
-（ADR-039：不 import provider:emby，JSON shape 相似也不建立依赖）。
-认证已实现（Phase 1G-A）：标准 `Authorization: MediaBrowser Client/Device/DeviceId/Version[,Token]` 单头
-（不使用 X-Emby-*/X-MediaBrowser-* legacy 头）；登录 `POST /Users/AuthenticateByName`；
-探活 `GET /System/Info/Public`（无 Token，防串服身份校验）；登出 `POST /Sessions/Logout`。
+API 与 Emby 同源但**独立 Connector**：共享 `BaseMediaServerProvider`，协议差异各自实现。
+鉴权头格式（X-Emby-Authorization 构造）需以 Jellyfin 官方文档为准。
 
 ## WebDAV（Phase 1 实现）
 

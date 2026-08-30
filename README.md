@@ -2,7 +2,7 @@
 
 > 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
 
-当前状态：**Phase 1F SEALED**（统一搜索 / 服务端排序与筛选 / 同作品跨源聚合与详情页来源切换已实现并过真机）；**Phase 1G**（Jellyfin Provider 接入）进行中：认证与会话已实现（ADR-039）。
+当前状态：**Phase 1B-2.5a**（ServerEndpoint 多线路地基 + Player Startup & Immersive UX：TTFF 单调时钟、临时时长回退、快照直传、自动横屏、沉浸式系统栏已实现并过真机；Overlay 两层 UI 与 Server Editor 进行中）。
 
 [![GitHub release](https://img.shields.io/github/v/release/fwzm/MediaHub?include_prereleases)](https://github.com/fwzm/MediaHub/releases)
 [![License](https://img.shields.io/github/license/fwzm/MediaHub)](LICENSE)
@@ -35,15 +35,13 @@ core/                核心层（无业务）
   database/          Room（服务器/账号/进度）+ DataStore（偏好）+ Repository
   security/          Android Keystore 加密存储（SecretStorage / TokenStore）
   logging/           统一日志（分类、脱敏、内存缓冲）
-  ui/                Compose 共用组件（海报/缩略图/背景图/服务器图标）
 player/
   engine/            Media3/ExoPlayer 封装（PlaybackEngine、缓存、请求头注入）
-  mpv/               libmpv 第二内核封装（与 Media3 同端口，AUTO 自动切换）
   compatibility/     设备能力 + 播放兼容性评估器（纯逻辑，可单测）
 provider/
   api/               MediaProvider 统一接口 + 能力声明 + 异常（纯 Kotlin）
   base/              BaseMediaServerProvider + Provider 注册表
-  emby/ jellyfin/ webdav/ local/   具体数据源（emby、local 已实现；jellyfin 认证已实现；webdav 骨架）
+  emby/ jellyfin/ webdav/ local/   具体数据源（emby、local 已实现；jellyfin/webdav 骨架）
   smb/ aliyun/ baidu/ quark/ china-mobile/ tianyi/   规划占位（README）
 metadata/            媒体元数据（刮削）抽象
 feature/
@@ -54,8 +52,8 @@ docs/                providers / player / api 设计文档
 ## 环境要求
 
 - JDK 17+
-- Android SDK（compileSdk 36，minSdk 26，build-tools 36.0.0）
-- Gradle 8.14（仓库已带 wrapper）
+- Android SDK（compileSdk 35，minSdk 26，build-tools 35.0.0）
+- Gradle 8.9（仓库已带 wrapper）
 
 ## 构建
 
@@ -70,7 +68,7 @@ docs/                providers / player / api 设计文档
 
 ## 当前可用的端到端路径
 
-### Emby（Phase 1A–1H）
+### Emby（Phase 1A–1B-2.4）
 1. 首页 → 添加媒体库 → Emby → 填服务器地址 / 用户名 / 密码 → 登录并添加。
 2. 点 Emby 服务器卡片 → 浏览 Views → 电影库 / 剧集库 → 海报墙（电影/剧集 2:3 海报，单集 16:9 剧照）。
 3. 点 Movie / Episode → 详情页（backdrop + 海报 + 元信息 + 简介）→ 播放。
@@ -79,11 +77,7 @@ docs/                providers / player / api 设计文档
 5. 播放器：音轨/字幕 Bottom Sheet（codec / 声道 / 采样率 / 解码器诊断），
    字幕默认白字透明背景（黑底关闭），字号/颜色/描边/位置可调并持久化；
    全部音轨不被设备支持时显式提示而非静默无声。
-6. 播放进度自动写入本地快照 → 首页"继续观看"（缩略图 + 进度条）；
-   并上报 Emby 服务端（Playing/Progress/Stopped，续播位置服务端闭环；真机验证待做）（Phase 1H）。
-7. 首页搜索入口：多服务器并发搜索（结果带来源服务器名），同作品多来源聚合卡可展开成员行（Phase 1C/1E）。
-8. 媒体库内排序 / 筛选：排序下沉服务端（SortBy/SortOrder），类型/年份/已看/收藏筛选（Phase 1C-2/1D）。
-9. 详情页「来源」：同作品跨服务器来源解析与切换，切换为路由替换（Back 不回旧详情）（Phase 1F）。
+6. 播放进度自动写入本地快照 → 首页"继续观看"（缩略图 + 进度条）。
 
 ### 本地存储（Phase 0）
 1. 首页 → 添加媒体库 → 本地存储 → 保存。
@@ -91,8 +85,7 @@ docs/                providers / player / api 设计文档
 
 设置页可改默认倍速、字幕大小等（DataStore 持久化）。
 
-> Emby/Jellyfin 远端进度上报已实现（Phase 1H/1G，Emby 真机验证待做）；
-> Jellyfin 媒体库·搜索·播放已实现（Phase 1G）；WebDAV 等为后续 Phase 候选（见 TASKS.md）。
+> Jellyfin / WebDAV / 搜索 / 播放进度上报为后续 Phase 候选，尚未实现（见 TASKS.md）。
 
 ## 安全约定（强制）
 
