@@ -54,12 +54,17 @@ app（组合一切：DI、导航、Provider 工厂装配）
   WebDAV 用 OPTIONS，Local 查目录；不再用 HTTP <500 判定。
 - 凭据生命周期（ADR-016/026）：`CredentialVault` 存长期凭据（密码/API Key/Refresh/Cookie），
   `TokenStore` 存会话令牌（按 localServerId），`EmbySessionStore` 存会话元数据
-  （remoteServerId/userId/userName），均 Keystore/私有存储，禁止明文密码。
+  （remoteServerId/userId/userName），均 Keystore/私有存储，禁止明文密码；
+  Jellyfin 会话元数据独立存 `JellyfinSessionStore`（ADR-039，独立 prefs 文件），
+  删除媒体源经 `CompositeSessionStoreCleaner` 组合清理全部 Provider 会话。
 - 认证会话（Phase 1A + finalization，ADR-026/028）：Emby 登录/恢复/验证/登出闭环；
   通用 `restoreSession(): AuthSessionState` 契约，Home 启动自动恢复 + 登录态 UI + 退出入口；
   客户端身份 `ClientIdentity`（core:common）跨协议复用；`X-Emby-Token` 集中注入；
   **恢复/登出前校验 remoteServerId 防 Token 串服**；仅 401 清会话（403/5xx/网络/协议异常保留）；
   API root 统一 `/emby`（EmbyEndpointResolver）；X-Emby-Authorization 官方 schema。
+- Jellyfin 认证（Phase 1G-A，ADR-039）：标准 `Authorization: MediaBrowser Client/Device/DeviceId/Version[,Token]`
+  单头（不用 X-Emby-*/X-MediaBrowser-* legacy 头），`POST /Users/AuthenticateByName` 登录；
+  恢复先无 Token 服务器身份校验（防 Token 串服）；仅 401 清本地会话（403/5xx/网络/协议异常保留）。
 
 ## 4. 领域模型（core:model）
 
@@ -77,7 +82,7 @@ app（组合一切：DI、导航、Provider 工厂装配）
 MediaItem + PlaybackOptions
   → Provider.resolvePlayback()          // 临时 URL（云盘签名链接等）
   → PlaybackCompatibilityEvaluator      // 设备能力 + 偏好 → DIRECT_PLAY/STREAM/TRANSCODE
-  → PlaybackEngine(Media3)              // MediaItem + 请求头注入 + SimpleCache
+  → PlaybackEngine（Media3 / mpv 双内核）  // MediaItem + 请求头注入 + SimpleCache
   → PlayerView + 自定义控制层（Compose）
   → 进度回调 → 本地快照 + Provider 上报（尽力而为）
 ```
@@ -88,6 +93,9 @@ MediaItem + PlaybackOptions
 - 请求头上下文：`PlaybackHeadersHolder` 按引擎（会话）创建（ADR-018），多播放器/预加载互不污染。
 - 进度同步：`ProgressSyncCoordinator` 三档节流（ADR-017）——本地快照 5s 采样、
   远端上报按 Provider 间隔（默认 10s）、Pause/Seek/Ended 立即 flush、退出 final flush。
+- 双内核（ADR-034/035）：PlaybackEnginePort 统一端口下 Media3 与 mpv 并存；AUTO 模式按
+  container|videoCodec|audioCodec 签名 + 历史失败指纹选择引擎，运行时错误/静音自动降级
+  mpv 同位置重播；手势层 scrub/双击/长按倍速，SeekMode.PREVIEW 只预览位置、COMMIT 才发 Seeked。
 
 ## 6. 安全与日志
 
@@ -106,7 +114,8 @@ MediaItem + PlaybackOptions
 
 ## 8. 未来扩展点（已预留、未实现）
 
-- 聚合媒体库 / 全局搜索（UnifiedLibrary + GlobalSearch，跨 Provider 并发合并）。
+- 聚合媒体库（UnifiedLibrary，多源合并浏览；全局搜索已随 Phase 1C 实现——GlobalSearchEngine
+  跨 Provider 并发聚合 + Phase 1E canonical 多来源聚合卡）。
 - 线路质量评估（RouteQualityEvaluator：DNS/TCP/TLS/TTFB/吞吐/缓冲健康）。
 - 元数据刮削（metadata 模块：TMDB/Bangumi/豆瓣）。
 - 播放决策接入播放前管线（PlaybackCompatibilityEvaluator 已就绪，尚未接入 resolve 流程）。
