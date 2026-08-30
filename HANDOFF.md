@@ -1,5 +1,25 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-30（Phase 1F **SEALED / PASS** @ `a7df978`——PR #8 merged，authoritative baseline 前移）
+# 交接文档（HANDOFF）—— 每个 AI 必读
+> 最后更新：2026-08-30（Phase 1G A/B/C 三 slice 全 ACCEPTED @ `9329bf3`，integration/1g-jellyfin 已建，PR/CI/device smoke 待走）
+
+## Phase 1G Jellyfin Provider Foundation & Parity（进行中——A/B/C 全 ACCEPTED，integration 待 merge）
+- **ADR-039 已冻结**（DECISIONS.md）：现代 Authorization contract / generic image auth
+  （auth-scope 归属 fail-closed）/ provider-specific session store / IDENTITY_LOOKUP
+  协议缺口 DEFER（capability 保持 null）/ one-way Detail source guard / 旧 Emby
+  progress WIP out-of-scope / encodeDefaults 教训。core parity ≠ Emby 字段 1:1。
+- **slice 链（全 ACCEPTED，线性 @ baseline 45a467b）**：
+  A auth+shared foundation @ `37f01a3`（review round2 后）→
+  B catalog+search @ `dd2288d`（review round2 后）→
+  C playback+progress+identity gate @ `9329bf3`（review round2 后）。
+- **runtime capability（audit 测试锁定）**：AUTH+LIBRARY+DETAIL+SEARCH+PLAYBACK+PROGRESS；
+  QUERY/IDENTITY_LOOKUP 缺席（null）。
+- **集成注意（device smoke 新增验证点）**：Jellyfin 10.9.x 服务端自述 direct-stream
+  http streaming 有缺陷且非 force 时关内部 EnableDirectStream——真机必须验证真实
+  PlaybackInfo 响应，不能只信手写 SupportsDirectStream fixture。
+- **待办**：integration PR merge（C base = authoritative）→ device smoke（16 场景链，
+  需真实 Jellyfin server；无 server = device verification BLOCKED ≠ SEALED）。
+  非阻塞遗留：in-flight cancellation robustness test（barrier/deferred 构造）；
+  PlayerViewModel onCleared 兜底无 flushFinal（既有生命周期设计，非 1G 引入）。
 
 ## Phase 1F Canonical Detail / Source Selection（2026-08-29）✅ SEALED / PASS
 - **ADR-038 已冻结**（DECISIONS.md）：方案 A = detail-time canonical source resolution；
