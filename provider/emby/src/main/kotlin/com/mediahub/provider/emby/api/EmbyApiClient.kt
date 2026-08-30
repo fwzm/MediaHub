@@ -290,11 +290,14 @@ open class EmbyApiClient(
      * Content-Type 必须 application/json（[FromBody]）。
      * Token 只走 X-Emby-Token 头（ADR-026）。
      * [positionTicks] 恒发（含 0）：服务端缺省/负值的危险语义见 [EmbyPlaybackStartInfoDto]。
+     * [playSessionId] 必须为 PlaybackInfo 返回真值（ADR-040 correction）：真实 Emby 4.x
+     * 缺失即 400 null-key，不得自行生成或用 ItemId/DeviceId 代替。
      */
     open suspend fun playbackStart(
         token: String,
         userId: String,
         itemId: String,
+        playSessionId: String,
         positionTicks: Long,
         playMethod: String?,
     ) {
@@ -304,6 +307,7 @@ open class EmbyApiClient(
             body = requestJson.encodeToString(
                 EmbyPlaybackStartInfoDto(
                     itemId = itemId,
+                    playSessionId = playSessionId,
                     positionTicks = positionTicks,
                     playMethod = playMethod,
                 )
@@ -312,11 +316,15 @@ open class EmbyApiClient(
         )
     }
 
-    /** 播放进度：POST /Sessions/Playing/Progress（PlaybackProgressInfo JSON body；响应体不解析）。 */
+    /**
+     * 播放进度：POST /Sessions/Playing/Progress（PlaybackProgressInfo JSON body；响应体不解析）。
+     * [playSessionId] 语义同 [playbackStart]（ADR-040 correction）。
+     */
     open suspend fun playbackProgress(
         token: String,
         userId: String,
         itemId: String,
+        playSessionId: String,
         positionTicks: Long,
         isPaused: Boolean?,
         playMethod: String?,
@@ -327,6 +335,7 @@ open class EmbyApiClient(
             body = requestJson.encodeToString(
                 EmbyPlaybackProgressInfoDto(
                     itemId = itemId,
+                    playSessionId = playSessionId,
                     positionTicks = positionTicks,
                     isPaused = isPaused,
                     playMethod = playMethod,
@@ -340,13 +349,24 @@ open class EmbyApiClient(
      * 播放停止：POST /Sessions/Playing/Stopped（PlaybackStopInfo JSON body；响应体不解析）。
      * 退出时权威进度写入者（Emby 按 Stopped 的 PositionTicks 更新 userdata 续播位置）。
      * [positionTicks] 恒发（含 0）——缺省会令服务端按"播放完成"处理（见 [EmbyPlaybackStopInfoDto]）。
+     * [playSessionId] 必须为该条目 active 会话的 PlaybackInfo 真值（ADR-040 correction）。
      */
-    open suspend fun playbackStopped(token: String, userId: String, itemId: String, positionTicks: Long) {
+    open suspend fun playbackStopped(
+        token: String,
+        userId: String,
+        itemId: String,
+        playSessionId: String,
+        positionTicks: Long,
+    ) {
         apiClient.postNoContent(
             url = endpointResolver.endpoint("/Sessions/Playing/Stopped"),
             headers = authenticatedHeaders(token, userId),
             body = requestJson.encodeToString(
-                EmbyPlaybackStopInfoDto(itemId = itemId, positionTicks = positionTicks)
+                EmbyPlaybackStopInfoDto(
+                    itemId = itemId,
+                    playSessionId = playSessionId,
+                    positionTicks = positionTicks,
+                )
             ),
             contentType = "application/json",
         )

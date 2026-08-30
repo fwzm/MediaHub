@@ -48,10 +48,12 @@ import org.junit.Test
  * POST 不会被 RetryOnceInterceptor 重试（仅 GET/HEAD/DELETE），但缺响应会
  * OkHttp read timeout；204 不 drain 请求体时连接复用可能分帧错位。
  *
- * 状态机（Mutex 原子转移）：同条目首报 → Playing + Progress；后续 → Progress；
- * 条目切换 → Stopped(上一条目，best-effort) + Playing(新) + Progress；
- * final 三态收口：无前导 → Playing + Stopped / 同条目 → Stopped /
- * 换条目 → Stopped(旧) + Playing + Stopped；final 后同条目再报 → 新 Playing。
+ * 状态机（Mutex 原子转移；active 身份 = (itemId, PlaySessionId)）：同会话首报 →
+ * Playing + Progress；后续 → Progress；条目/会话切换 → Stopped(上一会话，旧 PSID，
+ * best-effort) + Playing(新) + Progress；final 三态收口：无前导 → Playing + Stopped /
+ * 同会话 → Stopped / 换条目或换会话 → Stopped(旧, 旧 PSID) + Playing + Stopped(新)；
+ * final 后同条目再报 → 新 Playing。PlaySessionId 必须来自 PlaybackInfo（fail-closed，
+ * 缺失 0 HTTP，ADR-040 correction）。
  */
 class EmbyProgressProviderTest {
 
@@ -60,6 +62,7 @@ class EmbyProgressProviderTest {
     private data class WireCall(
         val kind: String, // Playing / Progress / Stopped
         val itemId: String,
+        val playSessionId: String,
         val positionTicks: Long,
         val isPaused: Boolean?,
         val playMethod: String?,
@@ -97,22 +100,24 @@ class EmbyProgressProviderTest {
             token: String,
             userId: String,
             itemId: String,
+            playSessionId: String,
             positionTicks: Long,
             playMethod: String?,
         ) {
-            calls += WireCall("Playing", itemId, positionTicks, null, playMethod, token, userId)
+            calls += WireCall("Playing", itemId, playSessionId, positionTicks, null, playMethod, token, userId)
         }
 
         override suspend fun playbackProgress(
             token: String,
             userId: String,
             itemId: String,
+            playSessionId: String,
             positionTicks: Long,
             isPaused: Boolean?,
             playMethod: String?,
         ) {
             progressError?.let { throw it }
-            calls += WireCall("Progress", itemId, positionTicks, isPaused, playMethod, token, userId)
+            calls += WireCall("Progress", itemId, playSessionId, positionTicks, isPaused, playMethod, token, userId)
             progressEntered.complete(Unit)
             blockProgress?.await()
         }
@@ -121,10 +126,11 @@ class EmbyProgressProviderTest {
             token: String,
             userId: String,
             itemId: String,
+            playSessionId: String,
             positionTicks: Long,
         ) {
             if (cancelSwitchStopped) throw CancellationException("cancelled at switch stopped")
-            calls += WireCall("Stopped", itemId, positionTicks, null, null, token, userId)
+            calls += WireCall("Stopped", itemId, playSessionId, positionTicks, null, null, token, userId)
             stoppedEntered.complete(Unit)
             blockStopped?.await()
         }
@@ -189,15 +195,17 @@ class EmbyProgressProviderTest {
         baseUrl = "http://localhost", createdAtEpochMs = 0,
     )
 
+    /** PlaybackProgress 构造：sessionId 默认来自 PlaybackInfo 真值（真机契约）。 */
     private fun progress(
         itemId: String = "m1",
         positionMs: Long = 90_000,
         paused: Boolean = false,
         mode: PlaybackMode? = PlaybackMode.DIRECT_STREAM,
         durationMs: Long = 600_000,
+        sessionId: String? = "psid-1",
     ) = PlaybackProgress(
         serverId = "srv-1", itemId = itemId, positionMs = positionMs, durationMs = durationMs,
-        isPaused = paused, updatedAtEpochMs = 0, mode = mode,
+        isPaused = paused, updatedAtEpochMs = 0, sessionId = sessionId, mode = mode,
     )
 
     /** Recording seam provider（无 HTTP）。 */
@@ -254,6 +262,7 @@ class EmbyProgressProviderTest {
         assertTrue(playing.getHeader("Content-Type")!!.startsWith("application/json"))
         val body = playing.body.readUtf8()
         assertTrue(body.contains("\"ItemId\":\"m1\""))
+        assertTrue("PlaySessionId 必须为 PlaybackInfo 真值", body.contains("\"PlaySessionId\":\"psid-1\""))
         assertTrue(body.contains("\"PositionTicks\":900000000"))
         assertTrue(body.contains("\"PlayMethod\":\"DirectStream\""))
         assertFalse("start body 不含 IsPaused", body.contains("IsPaused"))
@@ -267,6 +276,7 @@ class EmbyProgressProviderTest {
         assertEquals("tok-1", update.getHeader("X-Emby-Token"))
         val updateBody = update.body.readUtf8()
         assertTrue(updateBody.contains("\"ItemId\":\"m1\""))
+        assertTrue(updateBody.contains("\"PlaySessionId\":\"psid-1\""))
         assertTrue(updateBody.contains("\"PositionTicks\":900000000"))
         assertTrue(updateBody.contains("\"IsPaused\":false"))
     }
@@ -288,8 +298,9 @@ class EmbyProgressProviderTest {
         assertTrue(stopped.getHeader("Content-Type")!!.startsWith("application/json"))
         val body = stopped.body.readUtf8()
         assertTrue(body.contains("\"ItemId\":\"m1\""))
+        assertTrue("Stopped 必须带 active 会话的 PlaySessionId", body.contains("\"PlaySessionId\":\"psid-1\""))
         assertTrue(body.contains("\"PositionTicks\":3000000000"))
-        // DTO 契约收缩：Stopped 只带 ItemId + PositionTicks
+        // DTO 契约收缩：Stopped 只带 ItemId + PlaySessionId + PositionTicks
         assertFalse(body.contains("IsPaused"))
         assertFalse(body.contains("PlayMethod"))
         assertFalse(body.contains("tok-1"))
@@ -312,6 +323,7 @@ class EmbyProgressProviderTest {
         assertTrue(auth.contains("UserId=\"user-1\""))
         val playingBody = playing.body.readUtf8()
         assertTrue(playingBody.contains("\"ItemId\":\"m1\""))
+        assertTrue(playingBody.contains("\"PlaySessionId\":\"psid-1\""))
         assertTrue(playingBody.contains("\"PositionTicks\":80000000"))
         // Token 红线：不进 URL
         assertFalse(playing.requestUrl!!.toString().contains("tok-1"))
@@ -321,8 +333,9 @@ class EmbyProgressProviderTest {
         assertEquals("tok-1", stopped.getHeader("X-Emby-Token"))
         val stoppedBody = stopped.body.readUtf8()
         assertTrue(stoppedBody.contains("\"ItemId\":\"m1\""))
+        assertTrue(stoppedBody.contains("\"PlaySessionId\":\"psid-1\""))
         assertTrue(stoppedBody.contains("\"PositionTicks\":80000000"))
-        assertFalse("Stopped 只带 ItemId + PositionTicks", stoppedBody.contains("IsPaused") || stoppedBody.contains("PlayMethod"))
+        assertFalse("Stopped 只带 ItemId + PlaySessionId + PositionTicks", stoppedBody.contains("IsPaused") || stoppedBody.contains("PlayMethod"))
         assertFalse(stoppedBody.contains("tok-1"))
         assertEquals("短播放 final 恰两个请求", 2, server.requestCount)
     }
@@ -406,7 +419,7 @@ class EmbyProgressProviderTest {
     }
 
     // ==================================================================
-    // 生命周期（Recording seam）
+    // 生命周期（Recording seam；active 身份 = (itemId, PlaySessionId)）
     // ==================================================================
 
     @Test
@@ -420,6 +433,7 @@ class EmbyProgressProviderTest {
 
         assertEquals(listOf("Playing", "Progress", "Progress", "Progress"), kinds(api))
         assertTrue(api.calls.all { it.itemId == "m1" })
+        assertTrue("同会话全程同一 PlaySessionId", api.calls.all { it.playSessionId == "psid-1" })
     }
 
     @Test
@@ -434,6 +448,7 @@ class EmbyProgressProviderTest {
         val stopped = api.calls.last()
         assertEquals("m1", stopped.itemId)
         assertEquals(3_000_000_000L, stopped.positionTicks)
+        assertEquals("Stopped 用 active 会话的 PlaySessionId", "psid-1", stopped.playSessionId)
     }
 
     @Test
@@ -446,6 +461,8 @@ class EmbyProgressProviderTest {
         assertEquals("禁止裸 Stopped：必须先补 Playing", listOf("Playing", "Stopped"), kinds(api))
         assertEquals(80_000_000L, api.calls[0].positionTicks)
         assertEquals(80_000_000L, api.calls[1].positionTicks)
+        assertEquals("补发 Playing 用 progress.sessionId", "psid-1", api.calls[0].playSessionId)
+        assertEquals("补发 Stopped 用同一 PlaySessionId", "psid-1", api.calls[1].playSessionId)
     }
 
     @Test
@@ -467,14 +484,17 @@ class EmbyProgressProviderTest {
         val api = RecordingApi()
         val p = provider(api)
         p.reportProgress(progress(itemId = "m1", positionMs = 90_000))
-        p.reportProgress(progress(itemId = "m2", positionMs = 30_000))
+        p.reportProgress(progress(itemId = "m2", positionMs = 30_000, sessionId = "psid-2"))
 
         assertEquals(listOf("Playing", "Progress", "Stopped", "Playing", "Progress"), kinds(api))
         val stopped = api.calls[2]
         assertEquals("m1", stopped.itemId)
         assertEquals("上一条目最后位置补发", 900_000_000L, stopped.positionTicks)
+        assertEquals("关旧条目必须用旧条目自己的 PlaySessionId", "psid-1", stopped.playSessionId)
         assertEquals("m2", api.calls[3].itemId)
+        assertEquals("新条目 Playing 用新 PlaySessionId", "psid-2", api.calls[3].playSessionId)
         assertEquals("m2", api.calls[4].itemId)
+        assertEquals("psid-2", api.calls[4].playSessionId)
     }
 
     @Test
@@ -484,11 +504,28 @@ class EmbyProgressProviderTest {
         val p = provider(api)
         p.reportProgress(progress(itemId = "m1", positionMs = 90_000))
         p.reportProgress(progress(itemId = "m1", positionMs = 120_000))
-        p.reportProgress(progress(itemId = "m2", positionMs = 30_000))
+        p.reportProgress(progress(itemId = "m2", positionMs = 30_000, sessionId = "psid-2"))
 
         val stopped = api.calls.first { it.kind == "Stopped" }
         assertEquals("m1", stopped.itemId)
+        assertEquals("psid-1", stopped.playSessionId)
         assertEquals(1_200_000_000L, stopped.positionTicks)
+    }
+
+    @Test
+    fun `same item with new play session id reopens session with old closed`() = runBlocking {
+        seedSession()
+        val api = RecordingApi()
+        val p = provider(api)
+        p.reportProgress(progress(itemId = "m1", positionMs = 90_000, sessionId = "psid-1"))
+        // 同条目重新 resolve 出新 PlaySessionId（无 final 穿插）：按会话替换处理
+        p.reportProgress(progress(itemId = "m1", positionMs = 120_000, sessionId = "psid-2"))
+
+        assertEquals(listOf("Playing", "Progress", "Stopped", "Playing", "Progress"), kinds(api))
+        assertEquals("旧会话用旧 PSID 关闭", "psid-1", api.calls[2].playSessionId)
+        assertEquals("m1", api.calls[2].itemId)
+        assertEquals("新会话用新 PSID 开启", "psid-2", api.calls[3].playSessionId)
+        assertEquals("psid-2", api.calls[4].playSessionId)
     }
 
     @Test
@@ -499,7 +536,7 @@ class EmbyProgressProviderTest {
         p.reportProgress(progress(itemId = "m1", positionMs = 90_000))
         p.reportProgress(progress(itemId = "m1", positionMs = 120_000))
         // 切到 m2 后不足一个 sample 周期即退出：m2 从未 reportProgress，final 直接落在 m2
-        p.reportFinalProgress(progress(itemId = "m2", positionMs = 8_000))
+        p.reportFinalProgress(progress(itemId = "m2", positionMs = 8_000, sessionId = "psid-2"))
 
         assertEquals(
             "旧会话必须先关，再为 m2 补 Playing + Stopped（旧 server session 不得残留）",
@@ -508,11 +545,46 @@ class EmbyProgressProviderTest {
         )
         val stopPrevious = api.calls[3]
         assertEquals("m1", stopPrevious.itemId)
-        assertEquals("旧条目按 item-switch 规则用最后已知位置关闭", 1_200_000_000L, stopPrevious.positionTicks)
+        assertEquals("旧条目按 item-switch 规则用最后已知位置+旧 PSID 关闭", "psid-1", stopPrevious.playSessionId)
+        assertEquals(1_200_000_000L, stopPrevious.positionTicks)
         assertEquals("m2", api.calls[4].itemId)
         assertEquals("m2", api.calls[5].itemId)
+        assertEquals("final 条目补 Playing 用自己的 PSID", "psid-2", api.calls[4].playSessionId)
+        assertEquals("final Stopped 用自己的 PSID", "psid-2", api.calls[5].playSessionId)
         assertEquals(80_000_000L, api.calls[4].positionTicks)
         assertEquals(80_000_000L, api.calls[5].positionTicks)
+    }
+
+    // ==================================================================
+    // PlaySessionId fail-closed（ADR-040 correction：缺失 0 HTTP、无 fallback）
+    // ==================================================================
+
+    @Test
+    fun `missing session id fails closed without any http`() = runBlocking {
+        seedSession()
+        enqueueOk(2)
+        val thrown = try {
+            realProvider().reportProgress(progress(positionMs = 90_000, sessionId = null))
+            null
+        } catch (e: Throwable) {
+            e
+        }
+        assertTrue("必须抛 ProviderException（实际：$thrown）", thrown is ProviderException.Parse)
+        assertEquals("fail-closed：0 HTTP", 0, server.requestCount)
+    }
+
+    @Test
+    fun `blank session id fails closed without any http`() = runBlocking {
+        seedSession()
+        enqueueOk(2)
+        val thrown = try {
+            realProvider().reportFinalProgress(progress(positionMs = 90_000, sessionId = "   "))
+            null
+        } catch (e: Throwable) {
+            e
+        }
+        assertTrue("必须抛 ProviderException（实际：$thrown）", thrown is ProviderException.Parse)
+        assertEquals("fail-closed：0 HTTP", 0, server.requestCount)
     }
 
     // ==================================================================
@@ -601,7 +673,7 @@ class EmbyProgressProviderTest {
 
         api.cancelSwitchStopped = true
         val thrown = try {
-            p.reportProgress(progress(itemId = "m2", positionMs = 30_000))
+            p.reportProgress(progress(itemId = "m2", positionMs = 30_000, sessionId = "psid-2"))
             null
         } catch (e: Throwable) {
             e

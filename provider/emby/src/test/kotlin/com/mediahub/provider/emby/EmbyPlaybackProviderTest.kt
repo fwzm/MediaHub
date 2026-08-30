@@ -151,6 +151,8 @@ class EmbyPlaybackProviderTest {
         assertEquals("tok-1", source.headers["X-Emby-Token"])
         assertTrue(source.headers["X-Emby-Authorization"]!!.contains("UserId=\"user-1\""))
         assertEquals(PlaybackMode.DIRECT_STREAM, source.mode)
+        // PlaybackInfo 真值必须进入 PlaybackSource.sessionId（进度上报链的源头，ADR-040 correction）
+        assertEquals("ps-1", source.sessionId)
     }
 
     // ---- 3：元数据映射 ----

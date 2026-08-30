@@ -105,6 +105,9 @@ class EmbyPlaybackProvider(
                 ),
                 durationMs = source.runTimeTicks?.div(TICKS_PER_MILLIS),
                 mode = PlaybackMode.DIRECT_STREAM,
+                // PlaybackInfo 真值（非空已校验）：进度上报三端点必需，
+                // 缺失时真实 Emby 4.x 回 400 null-key（1H 真机 + curl 矩阵实证）
+                sessionId = playSessionId,
             )
         } catch (e: Exception) {
             throw mapError(e)

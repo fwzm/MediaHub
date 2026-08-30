@@ -578,3 +578,31 @@
 - 未决（不给背书）：真实 Emby server device smoke——userdata 续播位置闭环 /
   "无前导 Playing 的 final Stopped"服务端接受性 / 短播放与异常退出行为。
   DEVICE VERIFICATION PENDING ≠ SEALED。
+- **勘误（2026-08-30，1H repair slice——ADR-040 correction，append-only）**：
+  Device smoke @ main 9be3d28 proved that real Emby 4.x requires a non-null
+  PlaySessionId for playback check-ins. Prior assumption that PlaySessionId
+  could be omitted / normalized server-side is invalid. Authoritative source:
+  **PlaybackInfo.PlaySessionId**。
+  证据（两台独立服务器予初/墨云阁 + curl 对照矩阵 + 干净单会话 C9，全程不落
+  任何凭据入档）：
+  - `POST /Sessions/Playing` body 无 PlaySessionId → **400**
+    `Value cannot be null. (Parameter 'key')`（.NET 会话字典 null key）；
+    客户端按既有状态机每 10s 重发 Playing 全 400，Progress/Stopped 从未发出
+    （状态机行为与封板实现一致，缺陷在 wire 契约不在状态机）。
+  - body 补 PlaybackInfo 返回的 PlaySessionId → **204**；任意非空值亦 204
+    （服务端视作不透明键）——但生产只允许 PlaybackInfo 真值（官方文档将
+    PlaySessionId 列为视频流参数并要求使用 PlaybackInfo 返回值；官方客户端
+    把同一值回传至 /Sessions/Playing 上报）。
+  - 仅补 DeviceId（body）而无 PlaySessionId 仍 400 → DeviceId 假设排除。
+  - 干净单会话 C9：PlaybackInfo 取真值 PSID → Playing@0 → Progress@120s/150s →
+    Stopped@180s 全 204 → `UserData.PlaybackPositionTicks = 1_800_000_000`
+    （4.29%）精确回写，app 详情剧集行"进度 4%"读回一致。
+  本条 append-only，不修改上文原始记录；上文 Kodi 证据条目中"PlaySessionId 为
+  客户端自生成（可省）"与字段纪律中"禁伪造：PlaySessionId（缺省服务端自归一）"
+  两处自本勘误起**作废**，以本条为准（字段纪律修正为：PlaySessionId 必须来自
+  PlaybackInfo，MediaHub 不自行生成、不用 ItemId/DeviceId 代替；SessionId 由
+  认证上下文绑定，与 PlaySessionId 是两个概念）。修复落点：
+  `PlaybackSource.sessionId`（provider-neutral 新增）→ 引擎 propagation →
+  `PlaybackProgress.sessionId`（既有字段）→ 三 DTO `PlaySessionId`
+  （Emby production wire）；Jellyfin = CONFIRMED PROTOCOL RISK /
+  DEVICE PROOF PENDING / PRODUCTION FROZEN（本 slice 零 Jellyfin delta）。
