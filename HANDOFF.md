@@ -1,8 +1,37 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-# 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-30（Phase 1G A/B/C 三 slice 全 ACCEPTED @ `9329bf3`，integration/1g-jellyfin 已建，PR/CI/device smoke 待走）
+> 最后更新：2026-08-30（Phase 1H Emby PROGRESS closeout code+tests complete，feature/1h-emby-progress PR/CI 待走；Phase 1G 已 merge 入 main @ `1d105a1`）
 
-## Phase 1G Jellyfin Provider Foundation & Parity（进行中——A/B/C 全 ACCEPTED，integration 待 merge）
+## Phase 1H Emby PROGRESS closeout（进行中——code+tests complete，PR/CI 待 + DEVICE VERIFICATION PENDING）
+- **缺口**：消费侧（PlayerViewModel → ProgressSyncCoordinator → MediaProgressProvider）
+  自 1G-C 起已 live，但 Emby `PROGRESS` capability 缺失 = Emby 播放进度只落本地快照，
+  服务端"正在播放/续播位置"闭环断裂。定性 **P1-high / Emby parity release-blocker**
+  （无 crash/凭据泄漏/本地数据破坏证据）。
+- **协议证据（ADR-040 落盘）**：三端点 `POST /Sessions/Playing[/Progress|/Stopped]`
+  同源确认（Jellyfin openapi `required: []` + fork 血统 `Emby.Server.Implementations/
+  Session/SessionManager.cs`；官方 Kodi Emby 插件对现役 Emby 4.x 同 body 投递；
+  ms×10_000 ticks）。关键裁定：**PositionTicks 恒发（含 0）**——Stopped 缺省 →
+  服务端按"播放完成"处理（误标已看 = 服务端 userdata 损坏），有意偏离 Jellyfin
+  `takeIf{>0}` 约定。
+- **实现**：EmbyProgressProvider 独立实现（不 import Jellyfin provider），会话状态机
+  镜像 1G-C 封板纪律（首报 Playing+Progress / 切换补发上一条目 Stopped /
+  reportFinalProgress → Stopped 恰一次并关会话），Mutex 原子串行；
+  共享层（PlayerViewModel/ProgressSyncCoordinator/CapabilityProviders）**零改动**；
+  错误语义走 EmbyProviderSupport.mapError（401→AuthExpired 不清会话；
+  final Stopped best-effort；cancellation 穿透）。字段纪律：只发
+  ItemId/PositionTicks/IsPaused/PlayMethod，禁伪造 PlaySessionId/CanSeek 等。
+- **测试**：EmbyProgressProviderTest 26（wire 全量断言 / 位置语义含显式 0 / 负值 /
+  溢出钳制 / 生命周期 / **CompletableDeferred barrier 真并发**——在途 Progress
+  卡住后 final 仍最后、反向亦然 / 失败不毒化 / 401 不清会话 / final 失败不阻塞退出 /
+  跨服 token 隔离 / 日志零凭据）+ factory composition audit；stability 3/3；
+  全仓库 378 debug unit tests + assembleDebug + :provider:emby:lintDebug + diff --check 全绿。
+- **旧 WIP 处置**：1B-3.3 `feature/emby-progress-reporting` @ e0aa267 仅作设计参考，
+  未复用（早于 1G finality contract，DTO 含固定 CanSeek/IsMuted 假值）。
+- **待办**：PR（feature/1h-emby-progress → main，base=`1d105a1`）+ exact-head CI
+  （本地 PASS 不替代）→ Agent B 独立 review → 真实 Emby server device smoke
+  （userdata 续播闭环 + "无前导 Playing 的 Stopped"接受性）——
+  **DEVICE VERIFICATION PENDING ≠ SEALED**。
+
+## Phase 1G Jellyfin Provider Foundation & Parity（A/B/C 全 ACCEPTED，已随 PR #11/#12 merge @ `1d105a1`；device smoke 待做）
 - **ADR-039 已冻结**（DECISIONS.md）：现代 Authorization contract / generic image auth
   （auth-scope 归属 fail-closed）/ provider-specific session store / IDENTITY_LOOKUP
   协议缺口 DEFER（capability 保持 null）/ one-way Detail source guard / 旧 Emby
