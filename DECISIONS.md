@@ -508,3 +508,73 @@
     Emby+Jellyfin 同 canonical ID 聚合卡/Jellyfin detail 无单向 selector/
     direct stream/seek/exit flush/remote progress/privacy-logcat。无真实 Jellyfin
     server → device verification = BLOCKED，Phase 1G != SEALED。
+
+## ADR-040 Phase 1H Emby PROGRESS closeout（Emby 服务端进度闭环）
+- 状态：已采纳（2026-08-30，code+tests complete；DEVICE VERIFICATION PENDING）
+- 背景：消费侧（PlayerViewModel → ProgressSyncCoordinator → MediaProgressProvider →
+  远端上报）自 1G-C 起已 live，Jellyfin 已封板；Emby PROGRESS capability 缺失 =
+  Emby 播放进度只落本地快照、服务端"正在播放/续播位置"闭环断裂（P1-high /
+  Emby parity release-blocker；非 crash/凭据/数据破坏级）。旧 1B-3.3 WIP
+  （feature/emby-progress-reporting @ e0aa267）早于 1G 共享 finality contract，
+  仅作设计参考，不作实现基础（其 DTO 固定 CanSeek=true/IsMuted=false 违反
+  "不填假值"红线）。
+- 协议证据（1H 取证）：
+  - 三端点 `POST /Sessions/Playing` / `/Sessions/Playing/Progress` /
+    `/Sessions/Playing/Stopped`：Jellyfin 官方 openapi（api.jellyfin.org stable）
+    同源 schema——PlaybackStartInfo/PlaybackProgressInfo/PlaybackStopInfo
+    **`required: []`（全部字段可选）**，PositionTicks = nullable int64，
+    PlayMethod enum = Transcode/DirectStream/DirectPlay；Jellyfin fork 自 Emby 3.x，
+    其仓库至今保留 `Emby.Server.Implementations/Session/SessionManager.cs` 路径
+    （血统直接证据）。
+  - 官方 Kodi Emby 插件（MediaBrowser/plugin.video.emby，对接现役 Emby 4.x）：
+    同一 SessionInfo JSON 投递三端点；`PositionTicks = ms × 10_000`（1 tick=100ns
+    实证）；不发 SessionId（会话由认证上下文绑定）；PlaySessionId 为客户端自生成
+    （可省）。
+  - Jellyfin 同源 `SessionManager.OnPlaybackStopped`（lineage 源模型）：条目按
+    ItemId 直接解析（`GetNowPlayingItem` 回退 library 查询）——**无前导 Playing
+    的 Stopped 仍写入续播位置**；`PositionTicks` 缺省 → 服务端按"播放完成"处理
+    （PlayCount++ / Played=true / 位置清零）；负值 → 400；MediaSourceId 缺省
+    归一化为 ItemId。
+- 决策：
+  - **PositionTicks 恒发（含 0），契约收缩为非空 Long**：Stopped 缺省会令服务端
+    误判"播放完成"（退出刚打开的条目被标已看 = 服务端 userdata 数据损坏），
+    有意偏离 Jellyfin sealed 的 `takeIf { it > 0 }` 约定（Jellyfin 行为不变，
+    本 ADR 只约束 Emby）；负值钳 0（服务端 400 实证）；溢出钳 Long.MAX_VALUE；
+    无 Int 转换。
+  - **字段纪律**：只发真实数据来源字段——ItemId（PlaybackProgress.itemId）/
+    PositionTicks / IsPaused（仅 Progress）/ PlayMethod（PlaybackProgress.mode
+    映射，无则省略）。禁伪造：PlaySessionId / MediaSourceId（缺省服务端自归一）/
+    CanSeek / IsMuted / VolumeLevel（无数据来源）/ SessionId（认证绑定）。
+  - **会话状态机镜像 1G-C 封板纪律**（独立实现，不 import Jellyfin provider）：
+    同条目首报 → Playing（恰一次）+ Progress；后续 → Progress；条目切换先为
+    上一条目补发 Stopped（best-effort，取消穿透）再开新会话；
+    reportFinalProgress → Stopped（恰一次）并关会话；final 后同条目再报 → 新会话。
+    节流仍归 ProgressSyncCoordinator，provider 不建 timer。
+  - **共享层零改动**：复用 1G-C finality contract（MediaProgressProvider
+    reportFinalProgress override / ProgressSyncCoordinator remoteFinalReport /
+    flushFinal / PlayerViewModel stop-before-final 顺序）；禁止为 Emby 增加
+    特殊分支。
+  - **并发纪律**：会话状态转移（Stopped → Playing → Progress → state）Mutex
+    原子串行；并发回归必须用 CompletableDeferred barrier 卡真实在途请求证明
+    "final 不得被迟到 Progress 越过"与反向序（禁止 launch+advanceUntilIdle 伪并发）。
+  - **错误语义对齐既有 Emby 契约**（EmbyProviderSupport.mapError，与
+    library/search 同一来源）：reportProgress 映射后上抛（共享协调器
+    runCatching + 2s 短超时保证不打断播放/退出）；401→AuthExpired 且**进度
+    失败不清理 auth 会话**；切换补发 Stopped 与 final Stopped best-effort；
+    cancellation 原样透传。
+  - **安全**：Token 只走 X-Emby-Token 头（ADR-026）；URL/query/body/日志零凭据；
+    跨 server token 隔离回归（server A token 不出现在 server B 请求）。
+  - **capability**：ProviderHandle.progress 落地 → runtimeCapabilities += PROGRESS
+    （descriptor 原已声明，计划 ≥ 运行时不变式保持）；既有
+    AUTH/LIBRARY/DETAIL/PLAYBACK/QUERY/SEARCH/IDENTITY_LOOKUP/IMAGE auth 零退化。
+  - **getContinueWatching/getResumePosition v1 刻意空实现**：本地"继续观看/续播"
+    由 Room 快照驱动（1B-2.1 真机已证）；远端续播列表聚合另行决策（不扩本 slice）。
+- 验收：EmbyProgressProviderTest 26（wire/位置语义/生命周期/真并发/失败/安全）+
+  EmbyProviderFactoryTest composition audit（PROGRESS 进精确集合）；
+  全仓库 378 debug unit tests PASS + :app:assembleDebug PASS +
+  :provider:emby:lintDebug PASS（模块范围——1H 仅改 provider:emby，
+  全量 lintDebug 以 exact-head CI 为权威）+ git diff --check clean；
+  progress 测试 stability 3/3。
+- 未决（不给背书）：真实 Emby server device smoke——userdata 续播位置闭环 /
+  "无前导 Playing 的 final Stopped"服务端接受性 / 短播放与异常退出行为。
+  DEVICE VERIFICATION PENDING ≠ SEALED。

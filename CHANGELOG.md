@@ -1,4 +1,29 @@
 # 变更记录（CHANGELOG）
+## [0.16.0-emby-progress] — 2026-08-30（Phase 1H：Emby PROGRESS closeout；DEVICE VERIFICATION PENDING）
+### 功能
+- Emby 服务端进度闭环（ADR-040）：`EmbyProgressProvider` 独立实现
+  `MediaProgressProvider`——`POST /Sessions/Playing`（同条目首报）+
+  `/Sessions/Playing/Progress`（后续/关键事件）+ `/Sessions/Playing/Stopped`
+  （退出权威进度写入者）；共享 1G-C finality contract（reportFinalProgress /
+  flushFinal），PlayerViewModel 与 ProgressSyncCoordinator 零改动。
+- 会话状态机（镜像 1G-C 封板纪律，Mutex 原子串行）：Playing 恰一次 /
+  条目切换先补发上一条目 Stopped / final Stopped 恰一次并关会话 /
+  final 后同条目再报重开新会话；final 不得被迟到 Progress 越过（真并发回归）。
+- 协议证据裁定：PositionTicks 恒发（含 0，非空 Long）——Stopped 缺省会令服务端
+  按"播放完成"处理（误标已看）；负值钳 0、溢出钳 Long.MAX_VALUE、无 Int 转换。
+  字段纪律：只发 ItemId/PositionTicks/IsPaused/PlayMethod，禁伪造
+  PlaySessionId/MediaSourceId/CanSeek 等。
+- 错误语义对齐既有 Emby 契约（EmbyProviderSupport.mapError）：普通失败经协调器
+  runCatching 不打断播放；401→AuthExpired 且不清理 auth 会话；切换补发与 final
+  Stopped best-effort；cancellation 原样透传。
+- ProviderHandle.progress 落地：runtimeCapabilities += PROGRESS（既有 7 能力零退化）。
+### 测试
+- EmbyProgressProviderTest 26（wire / 位置语义 / 生命周期 / CompletableDeferred
+  barrier 真并发 / 失败语义 / 跨服 token 隔离 / 日志零凭据）+ factory
+  composition audit；stability 3/3；全仓库 378 debug unit tests + assembleDebug
+  + :provider:emby:lintDebug PASS。
+- 真实 Emby server device smoke 待做（**DEVICE VERIFICATION PENDING ≠ SEALED**）。
+
 ## [0.15.0-canonical-detail] — 2026-08-30（Phase 1F：Canonical Detail / Source Selection）
 ### 功能
 - CanonicalIdentityGraph（core/model）：connected-component 语义 single source of truth；

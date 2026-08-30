@@ -15,7 +15,11 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** ADR-022/026：Phase 1B-2 的 Emby Handle 开放 AUTH + LIBRARY + DETAIL + PLAYBACK，其余能力必须为 null。 */
+/**
+ * ADR-022/026：Emby Handle composition-root audit——当前实现能力精确为
+ * AUTH + LIBRARY + DETAIL + PLAYBACK + QUERY + SEARCH + IDENTITY_LOOKUP + PROGRESS
+ * （Phase 1H 起含进度上报），其余能力必须为 null；运行时 ⊆ 计划。
+ */
 class EmbyProviderFactoryTest {
 
     private val server = MediaServer(
@@ -36,7 +40,7 @@ class EmbyProviderFactoryTest {
     }
 
     @Test
-    fun `handle exposes auth library detail playback query search identityLookup capabilities`() {
+    fun `handle exposes auth library detail playback query search identityLookup progress capabilities`() {
         val handle = factory().create(server)
         assertNotNull(handle.auth)
         assertNotNull(handle.library)
@@ -50,8 +54,9 @@ class EmbyProviderFactoryTest {
         assertNotNull(handle.search)
         // Phase 1F-B1（ADR-038）：IDENTITY_LOOKUP（AnyProviderIdEquals 精确身份查找）落地
         assertNotNull(handle.identityLookup)
+        // Phase 1H（Emby PROGRESS closeout）：进度上报落地
+        assertNotNull(handle.progress)
         assertNull(handle.subtitle)
-        assertNull(handle.progress)
         assertEquals(
             setOf(
                 ProviderCapability.AUTH,
@@ -61,6 +66,7 @@ class EmbyProviderFactoryTest {
                 ProviderCapability.QUERY,
                 ProviderCapability.SEARCH,
                 ProviderCapability.IDENTITY_LOOKUP,
+                ProviderCapability.PROGRESS,
             ),
             handle.runtimeCapabilities,
         )
