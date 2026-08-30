@@ -97,11 +97,14 @@ class EmbyProgressProvider(
     }
 
     /**
-     * 最终退出上报（shared finality hook，ADR-039）：只发
-     * `/Sessions/Playing/Stopped`（自带最终 PositionTicks）——Emby 以 Stopped
-     * 更新 userdata 续播位置，**不以 final Progress 冒充**。
-     * 无前导 Playing（本实例生命周期内）时仍发送：服务端按 ItemId 直接解析条目并
-     * 写入位置（Jellyfin 同源 GetNowPlayingItem 回退 library 解析实证）。
+     * 最终退出上报（shared finality hook，ADR-039）。
+     * Emby 官方 Playback Check-ins lifecycle：Playing → Progress → Stopped 三方法
+     * 共同维护用户活动和当前位置——**禁止发送裸 Stopped**（无前导 Playing 的
+     * Stopped 在 Emby 协议上无 lifecycle 语义；不能以 Jellyfin 同源实现推断）。
+     *
+     * - 若本实例生命周期内已 Playing（lastItemId 匹配）→ Stopped 关会话；
+     * - 若无前导 Playing（如 <10s 短播放退出，coordinator sample 未触发）→
+     *   补发 Playing + Stopped（保证 server session lifecycle 完整）。
      * Mutex 保证与在途 Progress 的先后：final 不得被迟到的 Progress 越过。
      * 非 cancel 失败 best-effort（退出路径不抛网络异常；短超时由协调器保证）；
      * cancellation 原样传播。无论成败都关闭会话状态。
@@ -110,8 +113,16 @@ class EmbyProgressProvider(
         val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
         try {
             sessionMutex.withLock {
+                val ticks = toTicks(progress.positionMs)
+                val playMethod = playMethod(progress)
+                val hasActivePlaying = lastItemId == progress.itemId
+                if (!hasActivePlaying) {
+                    // 无前导 Playing（短播放退出 / 进程重启后 final）→ 补发 Playing
+                    // 保证 server session lifecycle 完整（Emby Playback Check-ins 契约）
+                    api.playbackStart(token, userId, progress.itemId, ticks, playMethod)
+                }
                 try {
-                    api.playbackStopped(token, userId, progress.itemId, toTicks(progress.positionMs))
+                    api.playbackStopped(token, userId, progress.itemId, ticks)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
