@@ -207,17 +207,27 @@ class AddServerViewModel @Inject constructor(
         }
     }
 
-    private fun loginErrorText(e: ProviderException): String = when (e) {
-        is ProviderException.AuthFailed -> "用户名或密码错误"
-        is ProviderException.AuthExpired -> "登录已失效，请重新登录"
-        is ProviderException.Network -> "网络错误，请检查服务器地址"
-        is ProviderException.Http -> if (e.statusCode in 500..599) {
-            "服务器错误（HTTP ${e.statusCode}）"
-        } else {
-            "HTTP ${e.statusCode}"
+    companion object {
+        /**
+         * 登录失败的用户可操作文案。HTTP 403（Jellyfin remote access /
+         * Known Proxies 策略拒绝）不显示裸状态码——给出可自查的指引
+         * （ADR-039 review hardening，1G device smoke 衍生 UX 修复）。
+         */
+        fun loginErrorText(e: ProviderException): String = when (e) {
+            is ProviderException.AuthFailed -> "用户名或密码错误"
+            is ProviderException.AuthExpired -> "登录已失效，请重新登录"
+            is ProviderException.Network -> "网络错误，请检查服务器地址"
+            is ProviderException.Http -> if (e.statusCode in 500..599) {
+                "服务器错误（HTTP ${e.statusCode}）"
+            } else if (e.statusCode == 403) {
+                "服务器拒绝登录（HTTP 403）。请检查该账号是否允许远程连接，" +
+                    "以及 Jellyfin 的反向代理 / Known Proxies 配置。"
+            } else {
+                "HTTP ${e.statusCode}"
+            }
+            is ProviderException.Parse -> "服务器响应异常"
+            else -> e.message ?: "登录失败"
         }
-        is ProviderException.Parse -> "服务器响应异常"
-        else -> e.message ?: "登录失败"
     }
 
     fun save(onSaved: (MediaServer) -> Unit) {
