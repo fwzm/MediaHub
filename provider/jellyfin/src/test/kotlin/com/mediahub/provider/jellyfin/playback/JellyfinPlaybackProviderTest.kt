@@ -135,7 +135,28 @@ class JellyfinPlaybackProviderTest {
         assertTrue("实际 body：$body", body.contains("\"StartTimeTicks\":900000000"))
         assertTrue(body.contains("\"EnableTranscoding\":false"))
         assertTrue(body.contains("\"EnableDirectStream\":true"))
+        // v10.9.0 PlaybackInfoRequest 精确 contract：MaxStreamingBitrate int?（请求值直传）
+        assertTrue(body.contains("\"MaxStreamingBitrate\":120000000"))
+        // 无 IsPlayback 字段（ADR-039 review 修正：禁猜 Emby shape）
+        assertFalse(body.contains("IsPlayback"))
         assertFalse(body.contains("tok-1"))
+    }
+
+    // ---- 1b：MaxStreamingBitrate int? 收缩（>Int.MAX_VALUE → 2147483647） ----
+
+    @Test
+    fun `max streaming bitrate clamps to int max`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(playbackInfoBody()))
+        provider().resolvePlayback(
+            movie(),
+            PlaybackOptions(maxBitrate = 50_000_000_000L), // > Int.MAX_VALUE
+        )
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(
+            "实际 body：$body",
+            body.contains("\"MaxStreamingBitrate\":2147483647"),
+        )
     }
 
     // ---- 2：无转码红线 + 类型门（0 HTTP） ----

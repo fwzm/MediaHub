@@ -16,8 +16,6 @@ import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.SerializationException
 
 /**
  * Jellyfin 进度上报（Phase 1G-C，ADR-039 §9）：独立实现当前 main 已有的
@@ -71,12 +69,9 @@ class JellyfinProgressProvider(
                         }
                     }
                     api.playbackStart(token, progress.itemId, positionTicks)
-                    println("PROGRESS-DEBUG: start sent")
                     lastItemId = progress.itemId
                 }
-                println("PROGRESS-DEBUG: about to send progress")
                 api.playbackProgress(token, progress.itemId, positionTicks, progress.isPaused)
-                println("PROGRESS-DEBUG: progress sent")
                 lastPositionTicks = positionTicks
             }
         } catch (e: CancellationException) {

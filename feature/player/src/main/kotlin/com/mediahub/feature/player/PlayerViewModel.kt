@@ -185,6 +185,11 @@ class PlayerViewModel @Inject constructor(
         remoteReport = { progress ->
             handle?.progress?.let { runCatching { it.reportProgress(progress) } }
         },
+        // 最终退出走 Provider 的 final 操作（如 Jellyfin /Sessions/Playing/Stopped），
+        // 与普通 remote throttle 分流（ADR-039 review hardening）
+        remoteFinalReport = { progress ->
+            handle?.progress?.let { runCatching { it.reportFinalProgress(progress) } }
+        },
     )
     private var syncStarted = false
     private var stopped = false
@@ -311,8 +316,11 @@ class PlayerViewModel @Inject constructor(
         if (stopped) return
         stopped = true
         val finalProgress = engine.stop()
-        syncCoordinator.flushFinal(finalProgress)
+        // 先停 periodic/critical 管线（禁止 final 之后的新 remote work——防
+        // Stopped 后被排队 sample 以 Playing/Progress 重开 Jellyfin 会话），
+        // 再执行单次权威 final 上报；flushFinal 不依赖 coordinator job。
         syncCoordinator.stop()
+        syncCoordinator.flushFinal(finalProgress)
         engine.release()
     }
 
