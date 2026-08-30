@@ -50,7 +50,8 @@ import org.junit.Test
  *
  * 状态机（Mutex 原子转移）：同条目首报 → Playing + Progress；后续 → Progress；
  * 条目切换 → Stopped(上一条目，best-effort) + Playing(新) + Progress；
- * final → Stopped + 关会话；final 后同条目再报 → 新 Playing。
+ * final 三态收口：无前导 → Playing + Stopped / 同条目 → Stopped /
+ * 换条目 → Stopped(旧) + Playing + Stopped；final 后同条目再报 → 新 Playing。
  */
 class EmbyProgressProviderTest {
 
@@ -296,6 +297,37 @@ class EmbyProgressProviderTest {
     }
 
     @Test
+    fun `real wire short playback final without prior report posts playing then stopped`() = runBlocking {
+        seedSession()
+        enqueueOk(2) // 补发 Playing + Stopped
+        // <10s 短播放：coordinator sample 未触发，从冷 provider 直接 final
+        realProvider().reportFinalProgress(progress(positionMs = 8_000))
+
+        val playing = server.takeRequest()
+        assertEquals("/emby/Sessions/Playing", playing.requestUrl!!.encodedPath)
+        assertEquals("POST", playing.method)
+        assertEquals("tok-1", playing.getHeader("X-Emby-Token"))
+        val auth = playing.getHeader("X-Emby-Authorization")!!
+        assertTrue(auth.startsWith("Emby "))
+        assertTrue(auth.contains("UserId=\"user-1\""))
+        val playingBody = playing.body.readUtf8()
+        assertTrue(playingBody.contains("\"ItemId\":\"m1\""))
+        assertTrue(playingBody.contains("\"PositionTicks\":80000000"))
+        // Token 红线：不进 URL
+        assertFalse(playing.requestUrl!!.toString().contains("tok-1"))
+
+        val stopped = server.takeRequest()
+        assertEquals("/emby/Sessions/Playing/Stopped", stopped.requestUrl!!.encodedPath)
+        assertEquals("tok-1", stopped.getHeader("X-Emby-Token"))
+        val stoppedBody = stopped.body.readUtf8()
+        assertTrue(stoppedBody.contains("\"ItemId\":\"m1\""))
+        assertTrue(stoppedBody.contains("\"PositionTicks\":80000000"))
+        assertFalse("Stopped 只带 ItemId + PositionTicks", stoppedBody.contains("IsPaused") || stoppedBody.contains("PlayMethod"))
+        assertFalse(stoppedBody.contains("tok-1"))
+        assertEquals("短播放 final 恰两个请求", 2, server.requestCount)
+    }
+
+    @Test
     fun `paused state maps on the wire`() = runBlocking {
         seedSession()
         enqueueOk(3) // Playing + Progress(paused=false) + Progress(paused=true)
@@ -405,6 +437,18 @@ class EmbyProgressProviderTest {
     }
 
     @Test
+    fun `final without prior report posts playing then stopped - never bare stopped`() = runBlocking {
+        seedSession()
+        val api = RecordingApi()
+        // <10s 短播放：coordinator sample 未触发，从冷 provider 直接 final
+        provider(api).reportFinalProgress(progress(positionMs = 8_000))
+
+        assertEquals("禁止裸 Stopped：必须先补 Playing", listOf("Playing", "Stopped"), kinds(api))
+        assertEquals(80_000_000L, api.calls[0].positionTicks)
+        assertEquals(80_000_000L, api.calls[1].positionTicks)
+    }
+
+    @Test
     fun `no bare progress after final - same item reopens with playing`() = runBlocking {
         seedSession()
         val api = RecordingApi()
@@ -445,6 +489,30 @@ class EmbyProgressProviderTest {
         val stopped = api.calls.first { it.kind == "Stopped" }
         assertEquals("m1", stopped.itemId)
         assertEquals(1_200_000_000L, stopped.positionTicks)
+    }
+
+    @Test
+    fun `final on new item closes previous session first then playing stopped for final`() = runBlocking {
+        seedSession()
+        val api = RecordingApi()
+        val p = provider(api)
+        p.reportProgress(progress(itemId = "m1", positionMs = 90_000))
+        p.reportProgress(progress(itemId = "m1", positionMs = 120_000))
+        // 切到 m2 后不足一个 sample 周期即退出：m2 从未 reportProgress，final 直接落在 m2
+        p.reportFinalProgress(progress(itemId = "m2", positionMs = 8_000))
+
+        assertEquals(
+            "旧会话必须先关，再为 m2 补 Playing + Stopped（旧 server session 不得残留）",
+            listOf("Playing", "Progress", "Progress", "Stopped", "Playing", "Stopped"),
+            kinds(api),
+        )
+        val stopPrevious = api.calls[3]
+        assertEquals("m1", stopPrevious.itemId)
+        assertEquals("旧条目按 item-switch 规则用最后已知位置关闭", 1_200_000_000L, stopPrevious.positionTicks)
+        assertEquals("m2", api.calls[4].itemId)
+        assertEquals("m2", api.calls[5].itemId)
+        assertEquals(80_000_000L, api.calls[4].positionTicks)
+        assertEquals(80_000_000L, api.calls[5].positionTicks)
     }
 
     // ==================================================================

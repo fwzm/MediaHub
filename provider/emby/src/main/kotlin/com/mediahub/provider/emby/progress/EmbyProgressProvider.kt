@@ -27,8 +27,10 @@ import kotlinx.coroutines.sync.withLock
  *
  * - **生命周期状态机**（Mutex 串行，原子转移）：同条目首次 reportProgress →
  *   Playing（恰一次）+ Progress；后续 → Progress；**条目切换先为上一条目补发
- *   Stopped（best-effort，取消原样穿透）再开新会话**；[reportFinalProgress] →
- *   Stopped（恰一次）并关闭会话；final 后同条目再次上报 → 新 Playing（新会话）。
+ *   Stopped（best-effort，取消原样穿透）再开新会话**；[reportFinalProgress] 三态收口：
+ *   无前导 Playing → 补 Playing + Stopped；同条目 active → 仅 Stopped；上一条目仍
+ *   active 但 final 的是新条目 → Stopped(上一条目) + Playing + Stopped（旧会话不残留）——
+ *   并关闭会话状态；final 后同条目再次上报 → 新 Playing（新会话）。
  *   禁止 Progress before Playing / 双重 Stopped / Stopped 后裸 Progress /
  *   上一条目状态泄漏到下一条目。
  * - 节流/触发节奏由 ProgressSyncCoordinator 控制（10s throttle + 关键事件 flush
@@ -99,15 +101,20 @@ class EmbyProgressProvider(
     /**
      * 最终退出上报（shared finality hook，ADR-039）。
      * Emby 官方 Playback Check-ins lifecycle：Playing → Progress → Stopped 三方法
-     * 共同维护用户活动和当前位置——**禁止发送裸 Stopped**（无前导 Playing 的
-     * Stopped 在 Emby 协议上无 lifecycle 语义；不能以 Jellyfin 同源实现推断）。
+     * 共同维护用户活动和播放位置——**禁止发送裸 Stopped**（无前导 Playing 的
+     * Stopped 在 Emby 协议上无 lifecycle 语义）。
      *
-     * - 若本实例生命周期内已 Playing（lastItemId 匹配）→ Stopped 关会话；
-     * - 若无前导 Playing（如 <10s 短播放退出，coordinator sample 未触发）→
-     *   补发 Playing + Stopped（保证 server session lifecycle 完整）。
+     * 三态收口（Mutex 内原子转移）：
+     * - 无前导 Playing（如 <10s 短播放退出，coordinator sample 未触发）→
+     *   补发 Playing + Stopped（保证 server session lifecycle 完整）；
+     * - 同条目 active（lastItemId == final 条目）→ 仅 Stopped；
+     * - 上一条目仍 active 但 final 的是新条目（切台后不足一个 sample 周期即退出）→
+     *   先按 item-switch 同款规则 Stopped(上一条目，lastPositionTicks)，
+     *   再 Playing + Stopped(final 条目)——旧 server session 不得残留。
      * Mutex 保证与在途 Progress 的先后：final 不得被迟到的 Progress 越过。
-     * 非 cancel 失败 best-effort（退出路径不抛网络异常；短超时由协调器保证）；
-     * cancellation 原样传播。无论成败都关闭会话状态。
+     * Stopped best-effort（退出路径不抛网络异常；短超时由协调器保证）；补发 Playing
+     * 失败即终止 final 并将状态归零（防后续 reportProgress 发裸 Progress）；
+     * cancellation 原样传播。非取消路径无论成败都关闭会话状态。
      */
     override suspend fun reportFinalProgress(progress: PlaybackProgress) {
         val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
@@ -115,11 +122,32 @@ class EmbyProgressProvider(
             sessionMutex.withLock {
                 val ticks = toTicks(progress.positionMs)
                 val playMethod = playMethod(progress)
-                val hasActivePlaying = lastItemId == progress.itemId
-                if (!hasActivePlaying) {
-                    // 无前导 Playing（短播放退出 / 进程重启后 final）→ 补发 Playing
-                    // 保证 server session lifecycle 完整（Emby Playback Check-ins 契约）
-                    api.playbackStart(token, userId, progress.itemId, ticks, playMethod)
+                val previousItemId = lastItemId
+                if (previousItemId != null && previousItemId != progress.itemId) {
+                    // 上一条目会话仍 active 但 final 的是新条目：先按 item-switch 同款
+                    // 规则关旧会话（best-effort，位置取 lastPositionTicks），
+                    // 否则旧 server session 残留。
+                    try {
+                        api.playbackStopped(token, userId, previousItemId, lastPositionTicks ?: 0L)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logger.w(LogTag.PROVIDER, "Emby final 前旧会话 Stopped 补发失败（best-effort） itemId=$previousItemId", e)
+                    }
+                }
+                if (previousItemId != progress.itemId) {
+                    // final 条目无前导 Playing → 补发（Playback Check-ins 禁止裸 Stopped）
+                    try {
+                        api.playbackStart(token, userId, progress.itemId, ticks, playMethod)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // 新会话未开出（旧会话已尽力关闭）：状态必须归零，
+                        // 防止后续 reportProgress 对该条目发裸 Progress
+                        lastItemId = null
+                        lastPositionTicks = null
+                        throw e
+                    }
                 }
                 try {
                     api.playbackStopped(token, userId, progress.itemId, ticks)
