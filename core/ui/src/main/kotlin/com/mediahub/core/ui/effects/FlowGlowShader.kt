@@ -25,6 +25,7 @@ internal object FlowGlowShader {
         uniform float uBass;
         uniform float uMid;
         uniform float uTreble;
+        uniform float uAmplitude;
         uniform float uSpeed;
         uniform float uWarp;
         uniform float uIridescence;
@@ -108,21 +109,29 @@ internal object FlowGlowShader {
             // reads blue -> green -> yellow -> white like light dispersion. The core body
             // is white only when uBloom is high; low-bloom light palettes get a soft
             // primary-tinted watercolor highlight instead of a white spotlight.
+            float trebleEnergy = clamp(uTreble, 0.0, 1.0);
+            float dispersionOffset = 0.08 + trebleEnergy * 0.04;
             float coreMid = smoothstep(0.28, 0.95, glow);
             float3 core = float3(
-                smoothstep(0.28, 0.95, glow - 0.10),
+                smoothstep(0.28, 0.95, glow - dispersionOffset),
                 coreMid,
-                smoothstep(0.28, 0.95, glow + 0.10)
+                smoothstep(0.28, 0.95, glow + dispersionOffset)
             );
             float3 dispersion = core - float3(coreMid);
             float coreWhiteness = clamp(uBloom * 1.1, 0.0, 1.0);
             float3 coreColor = mix(uPrimary.rgb * 1.25, float3(1.0), coreWhiteness);
-            float3 col = base + coreMid * uBloom * coreColor + dispersion * uBloom;
+            float dispersionGain = 0.85 + trebleEnergy * 0.30;
+            float3 col = base + coreMid * uBloom * coreColor + dispersion * uBloom * dispersionGain;
 
             // faint iridescent shimmer just outside the core edge (dark palettes only)
             float edgeBand = smoothstep(0.10, 0.28, glow) * (1.0 - smoothstep(0.28, 0.55, glow));
             float3 irid = 0.5 + 0.5 * cos(TAU * (glow * 1.1 + float3(0.0, 0.33, 0.67)));
-            col += irid * edgeBand * uIridescence * 0.22;
+            col += irid * edgeBand * uIridescence * (0.18 + trebleEnergy * 0.08);
+
+            // Amplitude is deliberately independent from band balance. Keep the global
+            // response restrained so loud passages breathe without flashing or clipping.
+            float amplitudeGain = mix(0.92, 1.08, clamp(uAmplitude, 0.0, 1.0));
+            col *= amplitudeGain;
 
             float a = clamp(uOpacity, 0.0, 1.0);
             return half4(col * a, a);
@@ -149,6 +158,7 @@ internal object FlowGlowShader {
         shader.setFloatUniform("uBass", spectrum.bass)
         shader.setFloatUniform("uMid", spectrum.mid)
         shader.setFloatUniform("uTreble", spectrum.treble)
+        shader.setFloatUniform("uAmplitude", spectrum.amplitude)
         shader.setFloatUniform("uSpeed", config.speed)
         shader.setFloatUniform("uWarp", config.warp)
         shader.setFloatUniform("uIridescence", config.iridescence)

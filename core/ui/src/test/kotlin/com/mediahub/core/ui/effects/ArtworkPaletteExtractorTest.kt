@@ -2,6 +2,7 @@ package com.mediahub.core.ui.effects
 
 import kotlin.math.abs
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -39,6 +40,60 @@ class ArtworkPaletteExtractorTest {
         assertTrue(palette.primary != 0)
         assertTrue(palette.secondary != 0)
         assertTrue(palette.accent != 0)
+        assertOpaque(palette)
+    }
+
+    @Test
+    fun `all extracted and derived colors are opaque`() {
+        val pixels = intArrayOf(
+            0xFFD32F2F.toInt(),
+            0xFF2962FF.toInt(),
+            0xFFFFD54F.toInt(),
+            0xFF101010.toInt(),
+        )
+
+        assertOpaque(ArtworkPaletteExtractor.extract(pixels))
+    }
+
+    @Test
+    fun `transparent padding cannot dominate visible artwork`() {
+        val invisibleGreen = 0x0000FF00
+        val visibleRed = 0xFFFF0000.toInt()
+        val pixels = IntArray(1_001) { if (it == 1_000) visibleRed else invisibleGreen }
+
+        val palette = ArtworkPaletteExtractor.extract(pixels)
+
+        assertTrue("primary=${hex(palette.primary)}", red(palette.primary) > green(palette.primary))
+        assertOpaque(palette)
+    }
+
+    @Test
+    fun `all transparent pixels return stable fallback`() {
+        val transparentGarbage = intArrayOf(0x0000FF00, 0x007F0000, 0x000000FF)
+
+        assertEquals(VisualPalette.Fallback, ArtworkPaletteExtractor.extract(transparentGarbage))
+    }
+
+    @Test
+    fun `sample dimensions cap longest side and retain a one pixel short side`() {
+        assertEquals(64 to 64, ArtworkPalette.sampleDimensions(127, 127))
+        assertEquals(1 to 64, ArtworkPalette.sampleDimensions(1, 8_192))
+        assertEquals(64 to 32, ArtworkPalette.sampleDimensions(128, 64))
+        assertEquals(64 to 63, ArtworkPalette.sampleDimensions(65, 64))
+        assertEquals(64 to 32, ArtworkPalette.sampleDimensions(64, 32))
+    }
+
+    @Test
+    fun `low alpha colors are ignored while threshold alpha is retained`() {
+        val belowThresholdBlue = 0x7F0000FF
+        val thresholdYellow = 0x80FFFF00.toInt()
+
+        val palette = ArtworkPaletteExtractor.extract(
+            IntArray(100) { if (it == 99) thresholdYellow else belowThresholdBlue },
+        )
+
+        assertTrue(red(palette.primary) > blue(palette.primary))
+        assertNotEquals(VisualPalette.Fallback, palette)
     }
 
     @Test
@@ -74,6 +129,12 @@ class ArtworkPaletteExtractorTest {
         ) / 255f
 
     private fun hex(color: Int) = "0x%08X".format(color)
+
+    private fun assertOpaque(palette: VisualPalette) {
+        listOf(palette.background, palette.primary, palette.secondary, palette.accent).forEach { color ->
+            assertEquals("alpha of ${hex(color)}", 0xFF, color ushr 24)
+        }
+    }
 
     private fun pseudoRandomColor(seed: Int): Int {
         var x = seed * 2654435761L

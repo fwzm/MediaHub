@@ -24,6 +24,19 @@ data class VisualEffectConfig(
     val fps: Int = 30,
 ) {
     init {
+        require(speed.isFinite() && speed in 0f..4f) { "speed must be finite and in 0..4, was $speed" }
+        require(warp.isFinite() && warp in 0f..4f) { "warp must be finite and in 0..4, was $warp" }
+        require(iridescence.isFinite() && iridescence in 0f..2f) {
+            "iridescence must be finite and in 0..2, was $iridescence"
+        }
+        require(bloom.isFinite() && bloom in 0f..4f) { "bloom must be finite and in 0..4, was $bloom" }
+        require(opacity.isFinite() && opacity in 0f..1f) { "opacity must be finite and in 0..1, was $opacity" }
+        require(noiseScale.isFinite() && noiseScale in 0.05f..8f) {
+            "noiseScale must be finite and in 0.05..8, was $noiseScale"
+        }
+        require(audioGain.isFinite() && audioGain in 0f..4f) {
+            "audioGain must be finite and in 0..4, was $audioGain"
+        }
         require(fps in 1..120) { "fps must be in 1..120, was $fps" }
     }
 

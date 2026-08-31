@@ -44,13 +44,49 @@ class EmaBandSmootherTest {
     }
 
     @Test
-    fun `smoothed spectrum smooths all bands`() {
+    fun `smoothed spectrum smooths all bands and amplitude`() {
         val smoothed = SmoothedSpectrum()
         var frame = SpectrumFrame.Zero
         repeat(120) { frame = smoothed.process(SpectrumFrame(1f, 1f, 1f), FRAME_SEC) }
         assertEquals(1f, frame.bass, 0.01f)
         assertEquals(1f, frame.mid, 0.01f)
         assertEquals(1f, frame.treble, 0.01f)
+        assertEquals(1f, frame.amplitude, 0.01f)
+    }
+
+    @Test
+    fun `explicit amplitude is smoothed independently from silent bands`() {
+        val smoothed = SmoothedSpectrum()
+        val frame = smoothed.process(
+            SpectrumFrame(bass = 0f, mid = 0f, treble = 0f, amplitude = 1f),
+            FRAME_SEC,
+        )
+
+        assertEquals(0f, frame.bass, 0f)
+        assertEquals(0f, frame.mid, 0f)
+        assertEquals(0f, frame.treble, 0f)
+        assertTrue(frame.amplitude > 0f)
+    }
+
+    @Test
+    fun `legacy construction derives amplitude while explicit amplitude wins`() {
+        assertEquals(0.5f, SpectrumFrame(1f, 0f, 0f).amplitude, 0f)
+        assertEquals(
+            0.9f,
+            SpectrumFrame(bass = 0f, mid = 0f, treble = 0f, amplitude = 0.9f).amplitude,
+            0f,
+        )
+    }
+
+    @Test
+    fun `reset clears independently smoothed amplitude`() {
+        val smoothed = SmoothedSpectrum()
+        repeat(60) {
+            smoothed.process(SpectrumFrame(0f, 0f, 0f, amplitude = 1f), FRAME_SEC)
+        }
+        smoothed.reset()
+
+        assertEquals(0f, smoothed.process(SpectrumFrame.Zero, FRAME_SEC).amplitude, 1e-6f)
     }
 
     private companion object {

@@ -11,9 +11,9 @@ data class SpectrumFrame(
     val bass: Float,
     val mid: Float,
     val treble: Float,
+    /** Overall signal energy, independent from the three frequency bands when supplied. */
+    val amplitude: Float = bass * 0.5f + mid * 0.35f + treble * 0.15f,
 ) {
-    val amplitude: Float get() = bass * 0.5f + mid * 0.35f + treble * 0.15f
-
     companion object {
         val Zero = SpectrumFrame(bass = 0f, mid = 0f, treble = 0f)
     }
@@ -29,9 +29,24 @@ data class SpectrumFrame(
 fun interface SpectrumProvider {
     fun sample(timeSec: Double): SpectrumFrame
 
+    /**
+     * True when the producer already applies its own attack/release smoothing. The UI still
+     * sanitizes, clamps, and applies gain, but must not add another EMA envelope.
+     */
+    val isSmoothed: Boolean
+        get() = false
+
     companion object {
         /** Always-zero source: time-driven visuals only. */
         val Noop = SpectrumProvider { SpectrumFrame.Zero }
+
+        /** Adapts a realtime engine sampler whose output is already temporally smoothed. */
+        fun alreadySmoothed(sampler: (Double) -> SpectrumFrame): SpectrumProvider =
+            object : SpectrumProvider {
+                override val isSmoothed: Boolean = true
+
+                override fun sample(timeSec: Double): SpectrumFrame = sampler(timeSec)
+            }
     }
 }
 
@@ -67,7 +82,7 @@ class EmaBandSmoother(
     }
 }
 
-/** Applies [EmaBandSmoother] to all three bands with shared time constants. */
+/** Applies [EmaBandSmoother] to the three bands and independent amplitude. */
 class SmoothedSpectrum(
     attackTimeSec: Float = EmaBandSmoother.ATTACK_SEC,
     releaseTimeSec: Float = EmaBandSmoother.RELEASE_SEC,
@@ -75,17 +90,57 @@ class SmoothedSpectrum(
     private val bass = EmaBandSmoother(attackTimeSec, releaseTimeSec)
     private val mid = EmaBandSmoother(attackTimeSec, releaseTimeSec)
     private val treble = EmaBandSmoother(attackTimeSec, releaseTimeSec)
+    private val amplitude = EmaBandSmoother(attackTimeSec, releaseTimeSec)
 
     fun process(frame: SpectrumFrame, dtSec: Float): SpectrumFrame = SpectrumFrame(
         bass = bass.process(frame.bass, dtSec),
         mid = mid.process(frame.mid, dtSec),
         treble = treble.process(frame.treble, dtSec),
+        amplitude = amplitude.process(frame.amplitude, dtSec),
     )
 
     fun reset() {
         bass.reset()
         mid.reset()
         treble.reset()
+        amplitude.reset()
+    }
+}
+
+/**
+ * Prepares one renderer sample while keeping smoothing ownership explicit. Demo and simple
+ * providers use the UI EMA by default; engine providers created with
+ * [SpectrumProvider.alreadySmoothed] bypass that second temporal filter.
+ */
+class RendererSpectrumProcessor(
+    private val smoother: SmoothedSpectrum = SmoothedSpectrum(),
+) {
+    fun process(
+        provider: SpectrumProvider,
+        timeSec: Double,
+        audioGain: Float,
+        dtSec: Float,
+    ): SpectrumFrame {
+        val gain = audioGain.takeIf(Float::isFinite)?.coerceIn(0f, MAX_AUDIO_GAIN) ?: 0f
+        val raw = provider.sample(timeSec)
+        val prepared = SpectrumFrame(
+            bass = raw.bass.prepare(gain),
+            mid = raw.mid.prepare(gain),
+            treble = raw.treble.prepare(gain),
+            amplitude = raw.amplitude.prepare(gain),
+        )
+        return if (provider.isSmoothed) prepared else smoother.process(prepared, dtSec)
+    }
+
+    fun reset() {
+        smoother.reset()
+    }
+
+    private fun Float.prepare(gain: Float): Float =
+        ((takeIf(Float::isFinite)?.coerceIn(0f, 1f) ?: 0f) * gain).coerceIn(0f, 1f)
+
+    private companion object {
+        const val MAX_AUDIO_GAIN = 4f
     }
 }
 

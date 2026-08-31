@@ -11,7 +11,17 @@ data class VisualPalette(
     val primary: Int,
     val secondary: Int,
     val accent: Int,
-)
+) {
+    companion object {
+        /** Stable cinema-safe palette used when artwork has no usable opaque pixels. */
+        val Fallback = VisualPalette(
+            background = 0xFF0C0F1E.toInt(),
+            primary = 0xFF9FB8FF.toInt(),
+            secondary = 0xFF2A2554.toInt(),
+            accent = 0xFFC86BFF.toInt(),
+        )
+    }
+}
 
 /** Internal scoring candidate: one 4-bit/channel histogram bucket. */
 private data class PaletteCandidate(
@@ -42,11 +52,13 @@ object ArtworkPaletteExtractor {
      */
     fun extract(pixels: IntArray): VisualPalette {
         require(pixels.isNotEmpty()) { "pixels must not be empty" }
-        val total = pixels.size
 
         // key = r4 shl 8 or g4 shl 4 or b4, value = [count, rSum, gSum, bSum]
         val sums = HashMap<Int, LongArray>(256)
         for (c in pixels) {
+            // Transparent artwork padding frequently contains arbitrary RGB values. It must
+            // not be allowed to dominate the visible palette.
+            if ((c ushr 24) < MIN_ARTWORK_ALPHA) continue
             val key = ((c ushr 20) and 0xF) shl 8 or (((c ushr 12) and 0xF) shl 4) or ((c ushr 4) and 0xF)
             val acc = sums.getOrPut(key) { LongArray(4) }
             acc[0]++
@@ -54,6 +66,8 @@ object ArtworkPaletteExtractor {
             acc[2] += ((c shr 8) and 0xFF).toLong()
             acc[3] += (c and 0xFF).toLong()
         }
+        if (sums.isEmpty()) return VisualPalette.Fallback
+        val total = sums.values.sumOf { it[0] }.coerceAtLeast(1L).toFloat()
 
         val candidates = sums.map { (key, acc) ->
             val n = acc[0].coerceAtLeast(1L).toFloat()
@@ -124,11 +138,17 @@ object ArtworkPaletteExtractor {
     }
 
     private fun packRgb(r: Float, g: Float, b: Float): Int =
-        (r.toInt().coerceIn(0, 255) shl 16) or (g.toInt().coerceIn(0, 255) shl 8) or b.toInt().coerceIn(0, 255)
+        OPAQUE_ALPHA or
+            (r.toInt().coerceIn(0, 255) shl 16) or
+            (g.toInt().coerceIn(0, 255) shl 8) or
+            b.toInt().coerceIn(0, 255)
 
     private fun scaleRgb(color: Int, factor: Float): Int {
         fun ch(v: Int) = (v * factor).toInt().coerceIn(0, 255)
-        return (ch((color shr 16) and 0xFF) shl 16) or (ch((color shr 8) and 0xFF) shl 8) or ch(color and 0xFF)
+        return OPAQUE_ALPHA or
+            (ch((color shr 16) and 0xFF) shl 16) or
+            (ch((color shr 8) and 0xFF) shl 8) or
+            ch(color and 0xFF)
     }
 
     private fun mixTowards(color: Int, target: Int, weight: Float): Int {
@@ -137,10 +157,12 @@ object ArtworkPaletteExtractor {
             val to = (target shr shift) and 0xFF
             return (from + ((to - from) * weight).toInt()).coerceIn(0, 255)
         }
-        return (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
+        return OPAQUE_ALPHA or (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
     }
 
     private const val HUE_SEP_DEG = 40f
     private const val LUM_SEP = 0.28f
     private const val LIGHT_LUM_THRESHOLD = 0.55f
+    private const val MIN_ARTWORK_ALPHA = 0x80
+    private const val OPAQUE_ALPHA = -0x1000000
 }

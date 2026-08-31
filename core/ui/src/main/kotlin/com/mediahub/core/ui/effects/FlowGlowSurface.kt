@@ -3,16 +3,18 @@ package com.mediahub.core.ui.effects
 import android.graphics.Paint
 import android.graphics.RuntimeShader
 import android.os.Build
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -39,7 +41,9 @@ import androidx.compose.runtime.withFrameNanos
  * advances [timeSec] once per interval, so a 30 fps clock simply skips every other vsync
  * while the UI keeps running at display rate. Multiple surfaces may share one clock.
  */
-class FlowGlowClock internal constructor() {
+class FlowGlowClock internal constructor(
+    private val awaitFrameNanos: suspend () -> Long = { withFrameNanos { it } },
+) {
 
     var fps: Int = 30
         set(value) {
@@ -51,18 +55,21 @@ class FlowGlowClock internal constructor() {
 
     private var job: Job? = null
 
+    /** Observable for tests/diagnostics; a stopped clock owns no coroutine job. */
+    val isRunning: Boolean
+        get() = job?.isActive == true
+
     fun start(scope: CoroutineScope) {
         if (job?.isActive == true) return
         job = scope.launch {
             var lastNanos = 0L
             while (isActive) {
-                withFrameNanos { now ->
-                    if (lastNanos != 0L && now - lastNanos >= 1_000_000_000L / fps) {
-                        timeSec += (now - lastNanos) / 1_000_000_000f
-                        lastNanos = now
-                    } else if (lastNanos == 0L) {
-                        lastNanos = now
-                    }
+                val now = awaitFrameNanos()
+                if (lastNanos != 0L && now - lastNanos >= 1_000_000_000L / fps) {
+                    timeSec += (now - lastNanos) / 1_000_000_000f
+                    lastNanos = now
+                } else if (lastNanos == 0L) {
+                    lastNanos = now
                 }
             }
         }
@@ -74,14 +81,21 @@ class FlowGlowClock internal constructor() {
     }
 }
 
-/** Creates and lifecycle-binds a [FlowGlowClock]: started on composition, stopped on dispose. */
+/**
+ * Creates and lifecycle-binds a [FlowGlowClock]. [running] is a hard gate: false cancels and
+ * clears the frame job. The default also avoids an empty clock on API levels with only a static
+ * fallback renderer.
+ */
 @Composable
-fun rememberFlowGlowClock(fps: Int = 30): FlowGlowClock {
+fun rememberFlowGlowClock(
+    fps: Int = 30,
+    running: Boolean = Build.VERSION.SDK_INT >= RendererBackendSelector.RUNTIME_SHADER_MIN_API,
+): FlowGlowClock {
     val clock = remember { FlowGlowClock() }
     val scope = rememberCoroutineScope()
     SideEffect { clock.fps = fps }
-    DisposableEffect(clock, scope) {
-        clock.start(scope)
+    DisposableEffect(clock, scope, running) {
+        if (running) clock.start(scope) else clock.stop()
         onDispose { clock.stop() }
     }
     return clock
@@ -104,17 +118,51 @@ fun FlowGlowSurface(
     config: VisualEffectConfig = VisualEffectConfig.Default,
     spectrum: SpectrumProvider = SpectrumProvider.Noop,
     progressProvider: () -> Float = { 0f },
-    clock: FlowGlowClock = rememberFlowGlowClock(fps = config.fps),
+    running: Boolean = true,
+    /** Optional clock shared by sibling edge/chrome renderers. */
+    clock: FlowGlowClock? = null,
+    /** Forces the static gradient backend without constructing a player-root layer. */
+    forceFallback: Boolean = false,
     shape: Shape = RoundedCornerShape(percent = 50),
+    containerColor: Color = Color(palette.background),
+    onBackendChanged: (RendererBackend) -> Unit = {},
     content: @Composable BoxScope.() -> Unit = {},
 ) {
-    clock.fps = config.fps
-
-    val shader = remember {
-        if (Build.VERSION.SDK_INT >= 33) RuntimeShader(FlowGlowShader.SOURCE) else null
+    val shaderCreation = remember {
+        if (Build.VERSION.SDK_INT >= RendererBackendSelector.RUNTIME_SHADER_MIN_API) {
+            runCatching { RuntimeShader(FlowGlowShader.SOURCE) }
+        } else {
+            Result.success(null)
+        }
     }
+    val shader = shaderCreation.getOrNull()
+    var runtimeShaderUsable by remember(shader) { mutableStateOf(shader != null) }
+    val ownedClock = rememberFlowGlowClock(
+        fps = config.fps,
+        running = clock == null && running && runtimeShaderUsable && !forceFallback,
+    )
+    val activeClock = clock ?: ownedClock
+    SideEffect { activeClock.fps = config.fps }
+
+    val currentBackendCallback by rememberUpdatedState(onBackendChanged)
+    val backend = RendererBackendSelector.select(
+        apiLevel = Build.VERSION.SDK_INT,
+        enabled = true,
+        runtimeShaderUsable = runtimeShaderUsable,
+        forceFallback = forceFallback,
+    )
+    LaunchedEffect(backend, activeClock) {
+        if (backend == RendererBackend.FALLBACK_GRADIENT) activeClock.stop()
+        currentBackendCallback(backend)
+    }
+    LaunchedEffect(shaderCreation.exceptionOrNull()) {
+        shaderCreation.exceptionOrNull()?.let { error ->
+            Log.w(TAG, "RuntimeShader construction failed; using gradient fallback", error)
+        }
+    }
+
     val paint = remember { Paint() }
-    val smoother = remember { SmoothedSpectrum() }
+    val spectrumProcessor = remember(spectrum) { RendererSpectrumProcessor() }
     val fallbackBrush = remember(palette) {
         Brush.linearGradient(
             colors = listOf(Color(palette.secondary), Color(palette.primary), Color(palette.accent)),
@@ -128,35 +176,49 @@ fun FlowGlowSurface(
     Box(
         modifier = modifier
             .clip(shape)
-            .background(Color(palette.background))
+            .background(containerColor)
             .drawBehind {
-                if (Build.VERSION.SDK_INT < 33) {
-                    drawRect(fallbackBrush)
+                val cfg = currentConfig
+                if (forceFallback ||
+                    !runtimeShaderUsable ||
+                    Build.VERSION.SDK_INT < RendererBackendSelector.RUNTIME_SHADER_MIN_API
+                ) {
+                    drawRect(fallbackBrush, alpha = cfg.opacity)
                     return@drawBehind
                 }
                 val agsl = shader ?: return@drawBehind
-                val cfg = currentConfig
-                val gain = cfg.audioGain.coerceIn(0f, 4f)
-                val raw = currentSpectrum.sample(clock.timeSec.toDouble())
-                val frame = SpectrumFrame(
-                    bass = (raw.bass * gain).coerceIn(0f, 1f),
-                    mid = (raw.mid * gain).coerceIn(0f, 1f),
-                    treble = (raw.treble * gain).coerceIn(0f, 1f),
-                )
-                val smoothed = smoother.process(frame, dtSec = 1f / clock.fps.coerceAtLeast(1))
-                FlowGlowShader.apply(
-                    shader = agsl,
-                    width = size.width,
-                    height = size.height,
-                    timeSec = clock.timeSec,
-                    progress = currentProgress(),
-                    palette = currentPalette,
-                    config = cfg,
-                    spectrum = smoothed,
-                )
-                paint.shader = agsl
-                drawIntoCanvas { canvas ->
-                    canvas.nativeCanvas.drawRect(0f, 0f, size.width, size.height, paint)
+                try {
+                    val preparedSpectrum = spectrumProcessor.process(
+                        provider = currentSpectrum,
+                        timeSec = activeClock.timeSec.toDouble(),
+                        audioGain = cfg.audioGain,
+                        dtSec = 1f / activeClock.fps.coerceAtLeast(1),
+                    )
+                    FlowGlowShader.apply(
+                        shader = agsl,
+                        width = size.width,
+                        height = size.height,
+                        timeSec = activeClock.timeSec,
+                        progress = currentProgress(),
+                        palette = currentPalette,
+                        config = cfg,
+                        spectrum = preparedSpectrum,
+                    )
+                    paint.shader = agsl
+                    drawIntoCanvas { canvas ->
+                        canvas.nativeCanvas.drawRect(0f, 0f, size.width, size.height, paint)
+                    }
+                } catch (error: RuntimeException) {
+                    // Vendor shader compilers/drivers may reject otherwise valid AGSL. Fall back
+                    // in the same frame and stop the owned animation clock on recomposition.
+                    if (runtimeShaderUsable) {
+                        runtimeShaderUsable = false
+                        activeClock.stop()
+                        Log.w(TAG, "RuntimeShader draw failed; using gradient fallback", error)
+                        currentBackendCallback(RendererBackend.FALLBACK_GRADIENT)
+                    }
+                    paint.shader = null
+                    drawRect(fallbackBrush, alpha = cfg.opacity)
                 }
             },
     ) { content() }
@@ -195,3 +257,5 @@ fun SpectrumBars(
         },
     )
 }
+
+private const val TAG = "FlowGlowSurface"
