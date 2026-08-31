@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -30,7 +31,7 @@ import kotlinx.coroutines.launch
  * 失败（Source/解码器错误、有轨无声）自动降级 mpv——保存当前位置后同位置重播。
  *
  * UI / ViewModel / ProgressSyncCoordinator 只订阅本门面的流，引擎切换对它们透明：
- * - uiState / progress / events / subtitleCues / downloadSpeedBps 均由当前内部引擎转发；
+ * - uiState / progress / events / subtitleCues / downloadSpeedBps / audioBands 均由当前内部引擎转发；
  * - 引擎切换后转发协程重启，订阅方无需重订。
  *
  * 降级触发条件（仅 AUTO + 当前 Media3 + 本会话未降级过）：
@@ -77,12 +78,22 @@ class SwitchablePlaybackEngine(
     private val _downloadSpeedBps = MutableStateFlow(0L)
     override val downloadSpeedBps: StateFlow<Long> = _downloadSpeedBps.asStateFlow()
 
+    private val _audioBands = MutableStateFlow<AudioBandLevels?>(null)
+    override val audioBands: StateFlow<AudioBandLevels?> = _audioBands.asStateFlow()
+
+    private val stateLock = Any()
     private var current: PlaybackEnginePort? = null
     private var forwardJob: Job? = null
+    private var audioForwardJob: Job? = null
+    private var media3WatchJob: Job? = null
+    private var fallbackJob: Job? = null
     private var session: PlaybackSession? = null
+    private var sessionGeneration = 0L
     private var attachedSurface: Surface? = null
     private var fellBackThisSession = false
     private var released = false
+    /** UI 的采样需求意图；引擎切换后必须原样重施给新引擎。 */
+    private var audioSpectrumEnabled = false
 
     override val kind: EngineKind
         get() = current?.kind ?: EngineKind.MEDIA3
@@ -93,7 +104,18 @@ class SwitchablePlaybackEngine(
     }
 
     override fun play(session: PlaybackSession) {
-        this.session = session
+        val generation = synchronized(stateLock) {
+            if (released) return
+            // A pending fallback belongs to the previous session. Cancel it and invalidate its
+            // generation before selecting/starting the new engine.
+            fallbackJob?.cancel()
+            fallbackJob = null
+            sessionGeneration += 1
+            this.session = session
+            fellBackThisSession = false
+            _switching.value = false
+            sessionGeneration
+        }
         session.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_SELECTION_STARTED)
         val mode = modeProvider()
         val selection = PlaybackEngineSelector.select(
@@ -108,7 +130,7 @@ class SwitchablePlaybackEngine(
             t.putMetadata("signature", CompatibilitySignature.from(session.source).key)
             t.putMetadata("selectorReason", selection.reason)
         }
-        startEngine(selection.kind, session)
+        startEngine(selection.kind, session, generation)
     }
 
     override fun togglePlayPause() {
@@ -131,63 +153,125 @@ class SwitchablePlaybackEngine(
         current?.selectSubtitleTrack(selection)
     }
 
-    override fun stop(): PlaybackProgress? = current?.stop()
+    override fun setAudioSpectrumEnabled(enabled: Boolean) {
+        if (released) return
+        audioSpectrumEnabled = enabled
+        val engine = current
+        if (!enabled) {
+            audioForwardJob?.cancel()
+            audioForwardJob = null
+            _audioBands.value = null
+            engine?.setAudioSpectrumEnabled(false)
+            return
+        }
+        engine?.let {
+            it.setAudioSpectrumEnabled(true)
+            startAudioBandForwarding(it)
+        }
+    }
+
+    override fun retryAudioSpectrumCapture() {
+        if (audioSpectrumEnabled) current?.retryAudioSpectrumCapture()
+    }
+
+    override fun stop(): PlaybackProgress? {
+        val engine = synchronized(stateLock) {
+            invalidatePendingFallbackLocked()
+            media3WatchJob?.cancel()
+            media3WatchJob = null
+            session = null
+            current
+        }
+        val finalProgress = engine?.stop()
+        synchronized(stateLock) {
+            audioForwardJob?.cancel()
+            audioForwardJob = null
+        }
+        _audioBands.value = null
+        return finalProgress
+    }
 
     override fun release() {
-        if (released) return
-        released = true
-        forwardJob?.cancel()
-        current?.release()
-        current = null
+        val engine = synchronized(stateLock) {
+            if (released) return
+            released = true
+            invalidatePendingFallbackLocked()
+            forwardJob?.cancel()
+            audioForwardJob?.cancel()
+            media3WatchJob?.cancel()
+            session = null
+            val old = current
+            current = null
+            old
+        }
+        engine?.release()
+        _audioBands.value = null
     }
 
     // ---- 内部 ----
 
-    private fun startEngine(kind: EngineKind, session: PlaybackSession) {
-        val engine = (if (kind == EngineKind.MPV) mpvFactory else media3Factory).create(scope)
-        current = engine
-        _engineKind.value = kind
-        // 切引擎后清空旧错误/轨道状态，避免 Media3 的错误残留显示在 mpv 上
-        _uiState.value = PlaybackUiState(durationMs = session.source.durationMs ?: 0, mediaTitle = session.itemTitle)
-        forwardJob?.cancel()
-        forwardJob = scope.launch {
-            launch { engine.uiState.collect { _uiState.value = it } }
-            launch { engine.progress.collect { _progress.tryEmit(it) } }
-            launch { engine.events.collect { _events.trySend(it) } }
-            launch { engine.subtitleCues.collect { _subtitleCues.value = it } }
-            launch { engine.downloadSpeedBps.collect { _downloadSpeedBps.value = it } }
+    private fun startEngine(
+        kind: EngineKind,
+        session: PlaybackSession,
+        expectedGeneration: Long,
+        expectedSession: PlaybackSession = session,
+    ) {
+        synchronized(stateLock) {
+            if (!isCurrentSessionLocked(expectedSession, expectedGeneration)) return
+
+            // 新媒体会话必须释放旧引擎（连同其 Visualizer/audio session），再建立新转发链。
+            current?.let { previous ->
+                forwardJob?.cancel()
+                audioForwardJob?.cancel()
+                media3WatchJob?.cancel()
+                current = null
+                previous.stop()
+                previous.release()
+            }
+            val engine = (if (kind == EngineKind.MPV) mpvFactory else media3Factory).create(scope)
+            current = engine
+            _engineKind.value = kind
+            // 切引擎后清空旧错误/轨道状态，避免 Media3 的错误残留显示在 mpv 上
+            _uiState.value = PlaybackUiState(durationMs = session.source.durationMs ?: 0, mediaTitle = session.itemTitle)
+            _audioBands.value = null
+            forwardJob?.cancel()
+            forwardJob = scope.launch {
+                launch { engine.uiState.collect { _uiState.value = it } }
+                launch { engine.progress.collect { _progress.tryEmit(it) } }
+                launch { engine.events.collect { _events.trySend(it) } }
+                launch { engine.subtitleCues.collect { _subtitleCues.value = it } }
+                launch { engine.downloadSpeedBps.collect { _downloadSpeedBps.value = it } }
+            }
+            audioForwardJob?.cancel()
+            audioForwardJob = null
+            engine.setAudioSpectrumEnabled(audioSpectrumEnabled)
+            if (audioSpectrumEnabled) startAudioBandForwarding(engine)
+            if (kind == EngineKind.MEDIA3) {
+                media3WatchJob = scope.launch { watchMedia3Failure(engine) }
+            } else {
+                media3WatchJob = null
+            }
+            attachedSurface?.let { engine.attachSurface(it) }
+            engine.play(session)
         }
-        if (kind == EngineKind.MEDIA3) {
-            scope.launch { watchMedia3Failure(engine) }
-        }
-        attachedSurface?.let { engine.attachSurface(it) }
-        engine.play(session)
     }
 
-    /** 仅监听"由本 engine 实例引发的"失败；引擎切换后旧实例的流不再触发降级。 */
-    private suspend fun watchMedia3Failure(engine: PlaybackEnginePort) {
-        // 错误路径：解码器 / 不支持编码 / 解析类未知错误 → 立即降级
-        launchErrorWatch(engine)
-        // 无声路径：有音轨但无音频输出信号，经宽限期（collectLatest 取消语义）确认后降级
-        val audioSilent = engine.uiState.map {
-            it.audioTracks.isNotEmpty() && it.audioFormatMime == null && it.isPlaying && !it.isBuffering
-        }
-        audioSilent.collectLatest { silent ->
-            if (!silent || released || fellBackThisSession || current !== engine) return@collectLatest
-            if (modeProvider() != PlaybackEngineMode.AUTO) return@collectLatest
-            delay(audioSilentGraceMs)
-            if (released || fellBackThisSession || current !== engine) return@collectLatest
-            val state = engine.uiState.value
-            val stillSilent = state.audioTracks.isNotEmpty() &&
-                state.audioFormatMime == null && state.isPlaying && !state.isBuffering
-            if (stillSilent) {
-                fallbackToMpv(engine, "有音轨但无音频输出（${state.audioTracks.firstOrNull()?.codec ?: "?"}）")
+    private fun startAudioBandForwarding(engine: PlaybackEnginePort) {
+        audioForwardJob?.cancel()
+        _audioBands.value = null
+        audioForwardJob = scope.launch {
+            engine.audioBands.collect { levels ->
+                if (current === engine && audioSpectrumEnabled && !released) {
+                    _audioBands.value = levels
+                }
             }
         }
     }
 
-    private fun launchErrorWatch(engine: PlaybackEnginePort) {
-        scope.launch {
+    /** 仅监听"由本 engine 实例引发的"失败；引擎切换后旧实例的流不再触发降级。 */
+    private suspend fun watchMedia3Failure(engine: PlaybackEnginePort) = coroutineScope {
+        // 错误与无声监听同属一个可取消 job；session 切换、stop、release 时一起退出。
+        launch {
             engine.uiState.collect { state ->
                 if (current !== engine || released || fellBackThisSession) return@collect
                 if (modeProvider() != PlaybackEngineMode.AUTO) return@collect
@@ -197,21 +281,62 @@ class SwitchablePlaybackEngine(
                 }
             }
         }
+        launch {
+            val audioSilent = engine.uiState.map {
+                it.audioTracks.isNotEmpty() && it.audioFormatMime == null && it.isPlaying && !it.isBuffering
+            }
+            audioSilent.collectLatest { silent ->
+                if (!silent || released || fellBackThisSession || current !== engine) return@collectLatest
+                if (modeProvider() != PlaybackEngineMode.AUTO) return@collectLatest
+                delay(audioSilentGraceMs)
+                if (released || fellBackThisSession || current !== engine) return@collectLatest
+                val state = engine.uiState.value
+                val stillSilent = state.audioTracks.isNotEmpty() &&
+                    state.audioFormatMime == null && state.isPlaying && !state.isBuffering
+                if (stillSilent) {
+                    fallbackToMpv(
+                        engine,
+                        "有音轨但无音频输出（${state.audioTracks.firstOrNull()?.codec ?: "?"}）",
+                    )
+                }
+            }
+        }
     }
 
     private fun fallbackToMpv(failedEngine: PlaybackEnginePort, reason: String) {
-        val s = session ?: return
-        synchronized(this) {
-            if (fellBackThisSession || released) return
+        val fallbackGeneration: Long
+        val s: PlaybackSession
+        synchronized(stateLock) {
+            if (fellBackThisSession || released || current !== failedEngine) return
+            s = session ?: return
+            fallbackGeneration = sessionGeneration
             fellBackThisSession = true
+            fallbackJob?.cancel()
         }
         _switching.value = true
-        scope.launch {
+        val launched = scope.launch {
             try {
+                if (!isCurrentSession(s, fallbackGeneration, failedEngine)) return@launch
                 history.recordMedia3Failure(CompatibilitySignature.from(s.source).key)
+                if (!isCurrentSession(s, fallbackGeneration, failedEngine)) return@launch
                 // 保存当前位置（先取 stop() 返回值，兜底 uiState）
                 val position = failedEngine.stop()?.positionMs
                     ?: _uiState.value.positionMs
+                if (!isCurrentSession(s, fallbackGeneration, failedEngine)) {
+                    failedEngine.release()
+                    return@launch
+                }
+                synchronized(stateLock) {
+                    if (!isCurrentSessionLocked(s, fallbackGeneration, failedEngine)) {
+                        failedEngine.release()
+                        return@launch
+                    }
+                    forwardJob?.cancel()
+                    audioForwardJob?.cancel()
+                    media3WatchJob?.cancel()
+                    current = null
+                }
+                _audioBands.value = null
                 failedEngine.release()
                 logger.i(
                     LogTag.PLAYER,
@@ -220,12 +345,53 @@ class SwitchablePlaybackEngine(
                 startEngine(
                     EngineKind.MPV,
                     s.copy(startPositionMs = position.takeIf { it > 0 }),
+                    fallbackGeneration,
+                    expectedSession = s,
                 )
             } finally {
-                _switching.value = false
+                synchronized(stateLock) {
+                    if (sessionGeneration == fallbackGeneration) {
+                        _switching.value = false
+                        if (fallbackJob === coroutineContext[Job]) fallbackJob = null
+                    }
+                }
+            }
+        }
+        synchronized(stateLock) {
+            // The generation may have been invalidated before launch was installed (e.g. a fast
+            // stop/replay on another dispatcher); cancel in that case instead of retaining it.
+            if (sessionGeneration == fallbackGeneration && !released) {
+                fallbackJob = launched
+            } else {
+                launched.cancel()
             }
         }
     }
+
+    private fun invalidatePendingFallbackLocked() {
+        fallbackJob?.cancel()
+        fallbackJob = null
+        sessionGeneration += 1
+        fellBackThisSession = false
+        _switching.value = false
+    }
+
+    private fun isCurrentSession(
+        expectedSession: PlaybackSession,
+        expectedGeneration: Long,
+        expectedEngine: PlaybackEnginePort? = null,
+    ): Boolean = synchronized(stateLock) {
+        isCurrentSessionLocked(expectedSession, expectedGeneration, expectedEngine)
+    }
+
+    private fun isCurrentSessionLocked(
+        expectedSession: PlaybackSession,
+        expectedGeneration: Long,
+        expectedEngine: PlaybackEnginePort? = null,
+    ): Boolean = !released &&
+        sessionGeneration == expectedGeneration &&
+        session === expectedSession &&
+        (expectedEngine == null || current === expectedEngine)
 
     private companion object {
         /** mpv 可能救回的错误类型；网络/鉴权/DRM 不降级（同一网络与凭据救不回）。 */

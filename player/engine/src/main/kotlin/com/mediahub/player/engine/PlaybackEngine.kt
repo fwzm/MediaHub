@@ -83,6 +83,10 @@ class PlaybackEngine(
     private var session: PlaybackSession? = null
     private var progressJob: Job? = null
     private var released = false
+    /** Visualizer 是按 UI/lifecycle 需求启用的重资源，默认不创建。 */
+    private var audioSpectrumEnabled = false
+    /** stop 后拒绝迟到的 audio-session 回调重新拉起采样。 */
+    private var audioSpectrumSessionActive = false
     /** 起播时间戳（elapsedRealtime），用于 TTFF（首帧）诊断。 */
     private var playStartElapsedMs = 0L
 
@@ -93,6 +97,14 @@ class PlaybackEngine(
 
     private val _subtitleCues = MutableStateFlow<CueGroup?>(null)
     override val subtitleCues: StateFlow<CueGroup?> = _subtitleCues.asStateFlow()
+
+    private val audioSpectrumController = AudioSpectrumSessionController(
+        captureFactory = AndroidVisualizerCaptureFactory,
+        onFailure = { failure ->
+            logger.w(LogTag.PLAYER, "音频频谱采样不可用，已降级为基础动画", failure)
+        },
+    )
+    override val audioBands: StateFlow<AudioBandLevels?> = audioSpectrumController.audioBands
 
     override fun attachSurface(surface: Surface?) {
         player.setVideoSurface(surface)
@@ -150,6 +162,14 @@ class PlaybackEngine(
                 }
             }
 
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                if (audioSpectrumEnabled && audioSpectrumSessionActive && audioSessionId > 0) {
+                    audioSpectrumController.bind(audioSessionId)
+                } else {
+                    audioSpectrumController.clear()
+                }
+            }
+
 
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -204,6 +224,9 @@ class PlaybackEngine(
     }
 
     override fun play(session: PlaybackSession) {
+        // 同一个 ExoPlayer 可复用 audio session；每次媒体会话仍先释放旧 capture，防止迟到回调串流。
+        audioSpectrumController.clear()
+        audioSpectrumSessionActive = true
         this.session = session
         session.trace?.record(PlaybackStartupTrace.Milestone.MEDIA_REQUEST_STARTED)
         session.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_PREPARE_STARTED)
@@ -211,6 +234,7 @@ class PlaybackEngine(
         val mediaItem = session.source.toMedia3Item(session)
         player.setMediaItem(mediaItem)
         player.prepare()
+        retryAudioSpectrumCapture()
         player.playWhenReady = true
         val startPosition = session.startPositionMs ?: session.resumePositionMs
         if (startPosition != null && startPosition > 0) {
@@ -267,6 +291,22 @@ class PlaybackEngine(
 
     override fun selectSubtitleTrack(selection: TrackSelection?) {
         selectTrack(C.TRACK_TYPE_TEXT, selection)
+    }
+
+    override fun setAudioSpectrumEnabled(enabled: Boolean) {
+        if (released) return
+        audioSpectrumEnabled = enabled
+        if (enabled && audioSpectrumSessionActive) {
+            audioSpectrumController.bind(player.audioSessionId)
+        } else {
+            audioSpectrumController.clear()
+        }
+    }
+
+    /** RECORD_AUDIO 授权可能晚于播放器创建；按需用当前有效 audio session 立即重试。 */
+    override fun retryAudioSpectrumCapture() {
+        if (released || !audioSpectrumEnabled || !audioSpectrumSessionActive) return
+        audioSpectrumController.bind(player.audioSessionId)
     }
 
     private fun selectTrack(rendererType: Int, selection: TrackSelection?) {
@@ -352,6 +392,8 @@ class PlaybackEngine(
      */
     override fun stop(): PlaybackProgress? {
         progressJob?.cancel()
+        audioSpectrumSessionActive = false
+        audioSpectrumController.clear()
         val finalProgress = currentProgress()
         _events.trySend(PlaybackEvent.Stopped)
         logger.i(LogTag.PLAYER, "播放停止 serverId=${session?.serverId} itemId=${session?.itemId}")
@@ -361,7 +403,9 @@ class PlaybackEngine(
     override fun release() {
         if (released) return
         released = true
+        audioSpectrumSessionActive = false
         progressJob?.cancel()
+        audioSpectrumController.release()
         headersHolder.setHeaders(emptyMap())
         player.release()
         logger.i(LogTag.PLAYER, "播放引擎已释放")
