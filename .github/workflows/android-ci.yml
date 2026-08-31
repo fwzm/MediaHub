@@ -146,10 +146,17 @@ jobs:
           --no-daemon --continue --max-workers=2
 
       - name: Enable KVM
+        timeout-minutes: 2
         run: |
+          set -euxo pipefail
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+          # trigger queues an asynchronous udev event. Do not race its permission update.
+          sudo udevadm settle --timeout=30
+          id
+          stat -c '%A %U %G %t:%T %n' /dev/kvm
+          test -c /dev/kvm
           test -r /dev/kvm && test -w /dev/kvm
 
       - name: Run production visual paths on emulator
