@@ -176,7 +176,9 @@ jobs:
           # not OEM GPU/audio acceptance. swiftshader_indirect is deprecated.
           emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none
           # One device: serialize module instrumentation so activities cannot steal focus.
-          script: ./gradlew :core:ui:connectedDebugAndroidTest :feature:player:connectedDebugAndroidTest :feature:settings:connectedDebugAndroidTest --no-daemon --continue --no-parallel --max-workers=2
+          script: |
+            bash .github/scripts/prepare-visual-emulator.sh
+            ./gradlew :core:ui:connectedDebugAndroidTest :feature:player:connectedDebugAndroidTest :feature:settings:connectedDebugAndroidTest --no-daemon --continue --no-parallel --max-workers=2
 
       - name: Require executed visual assertions
         if: ${{ !cancelled() }}
