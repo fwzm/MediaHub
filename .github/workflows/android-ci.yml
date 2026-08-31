@@ -5,22 +5,43 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+env:
+  # pull_request 默认签出合并 ref；产品验收必须测试真正的 PR head。
+  EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   # required check 名保持 "build"（main branch protection 按 context "build" 校验）。
-  # 拆分 jobs 前必须先同步修改 branch protection rule。
+  # 新增仪器测试通过 needs + 显式断言汇入 build，不改变 branch protection context。
   build:
+    needs: visual-instrumentation
+    # 即使仪器测试失败也保留原来的 build/unit/lint 诊断，最后再断言总门禁。
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          mkdir -p ci-evidence
+          printf 'head=%s\nbase=%s\nevent_sha=%s\n' "$EXPECTED_HEAD" "$PR_BASE" "$GITHUB_SHA" | tee ci-evidence/revision.txt
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '17'
@@ -29,10 +50,10 @@ jobs:
         # Phase CI-H1 评审裁定：刻意停在 v5——v6 默认 cache-provider 切换为
         # proprietary 的 enhanced caching（非纯 OSS）。Node-24 迁移只需 v5；
         # 若未来显式接受 enhanced caching/Terms 再单独升级，不夹带在 runtime hardening 里
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
 
       - name: Install SDK components
         run: |
@@ -47,9 +68,126 @@ jobs:
       # 测试 FAIL/TIMEOUT 时仍执行，workflow 被 concurrency 取消时不执行
       - name: Unit tests
         timeout-minutes: 15
-        run: ./gradlew testDebugUnitTest --no-daemon
+        # testDebugUnitTest 不会运行独立 Kotlin/JVM 模块的 test task。
+        run: ./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon --continue
 
       - name: Lint
         if: ${{ !cancelled() }}
         timeout-minutes: 15
         run: ./gradlew lintDebug --no-daemon
+
+      - name: Enforce visual instrumentation gate
+        if: ${{ !cancelled() }}
+        env:
+          VISUAL_RESULT: ${{ needs.visual-instrumentation.result }}
+        run: |
+          printf 'Visual instrumentation matrix: %s\n' "$VISUAL_RESULT"
+          test "$VISUAL_RESULT" = success
+
+      - name: Upload build and test evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0, Node 24
+        with:
+          name: build-evidence-${{ env.EXPECTED_HEAD }}
+          retention-days: 14
+          path: |
+            ci-evidence/
+            **/build/test-results/**/*.xml
+            **/build/reports/tests/
+            **/build/reports/lint-results-debug.*
+            app/build/outputs/apk/debug/*.apk
+
+  visual-instrumentation:
+    name: visual-instrumentation (API ${{ matrix.api-level }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # 32 验证无 RuntimeShader 的真实降级；36 验证 AGSL 编译、uniform 和绘制。
+        api-level: [32, 36]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          mkdir -p ci-evidence
+          printf 'head=%s\nbase=%s\nevent_sha=%s\n' "$EXPECTED_HEAD" "$PR_BASE" "$GITHUB_SHA" | tee ci-evidence/revision.txt
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        # 与 build 保持同一个 v5/basic-cache 边界，不引入 enhanced caching。
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+
+      - name: Install compile SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null
+
+      - name: Compile visual instrumentation APKs
+        timeout-minutes: 15
+        run: >-
+          ./gradlew :core:ui:assembleDebugAndroidTest
+          :feature:player:assembleDebugAndroidTest
+          :feature:settings:assembleDebugAndroidTest
+          --no-daemon --continue --max-workers=2
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm && test -w /dev/kvm
+
+      - name: Run production visual paths on emulator
+        timeout-minutes: 20
+        # v2.37.0 uses Node 24 + build-tools 36, matching this project's compile SDK.
+        uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 2048M
+          heap-size: 512M
+          disable-linux-hw-accel: false
+          disable-animations: false
+          # Android hardware-accelerated Canvas runs via the emulated GPU. This is
+          # not OEM GPU/audio acceptance. swiftshader_indirect is deprecated.
+          emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none
+          # One device: serialize module instrumentation so activities cannot steal focus.
+          script: ./gradlew :core:ui:connectedDebugAndroidTest :feature:player:connectedDebugAndroidTest :feature:settings:connectedDebugAndroidTest --no-daemon --continue --no-parallel --max-workers=2
+
+      - name: Require executed visual assertions
+        if: ${{ !cancelled() }}
+        env:
+          VISUAL_API: ${{ matrix.api-level }}
+        run: python3 .github/scripts/verify-visual-tests.py --api "$VISUAL_API"
+
+      - name: Upload emulator test evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0, Node 24
+        with:
+          name: visual-api-${{ matrix.api-level }}-${{ env.EXPECTED_HEAD }}
+          retention-days: 14
+          path: |
+            ci-evidence/
+            core/ui/build/outputs/androidTest-results/
+            core/ui/build/reports/androidTests/
+            feature/player/build/outputs/androidTest-results/
+            feature/player/build/reports/androidTests/
+            feature/settings/build/outputs/androidTest-results/
+            feature/settings/build/reports/androidTests/
