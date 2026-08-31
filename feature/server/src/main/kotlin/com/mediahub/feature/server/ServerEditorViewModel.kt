@@ -115,10 +115,26 @@ class ServerEditorViewModel @Inject constructor(
         val state = _uiState.value
         val url = state.baseUrl.trim().trimEnd('/')
         if (url.isBlank()) return
+        // ADR-039：探针路径来自 Provider 自述（descriptor.probePath）；
+        // 未知/未定义类型 = 显式不可用，绝不静默回退其他协议的路径。
+        val serverType = state.server?.type
+        val probePath = serverType?.let { registry.factoryFor(it)?.descriptor?.probePath }
+        if (serverType == null || probePath == null) {
+            _uiState.update {
+                it.copy(
+                    isMediaTesting = false,
+                    mediaQualityResult = EndpointQualityResult(
+                        endpointId = serverId,
+                        error = "该媒体源类型不支持线路质量测试",
+                    ),
+                )
+            }
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isMediaTesting = true, mediaQualityResult = null) }
             val service = EndpointTestService(httpClientFactory)
-            val raw = service.test(url)
+            val raw = service.test(url, probePath)
             val result = EndpointQualityResult(
                 endpointId = serverId,
                 apiLatencyMs = raw.apiLatencyMs.takeIf { it > 0 },
@@ -199,9 +215,9 @@ class ServerEditorViewModel @Inject constructor(
         }
     }
 
-    /** 使用内置 Provider 图标（builtin://<type>）。 */
+    /** 使用内置 Provider 图标（builtin://<type>）；未知类型显式不动，禁止静默回退 Emby（ADR-039）。 */
     fun useBuiltinIcon() {
-        val type = _uiState.value.server?.type?.name?.lowercase() ?: "emby"
+        val type = _uiState.value.server?.type?.name?.lowercase() ?: return
         _uiState.update { it.copy(icon = "builtin://" + type) }
     }
 

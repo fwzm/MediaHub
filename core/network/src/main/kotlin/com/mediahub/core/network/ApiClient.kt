@@ -47,12 +47,17 @@ class ApiClient(
         jsonBody: String = "{}",
     ): T = execute("POST", url, headers, jsonBody, serializer<T>(), "application/json")
 
-    /** 发送请求但不解析响应体（如 Emby /Sessions/Logout 返回空 body）。 */
+    /**
+     * 发送请求但不解析响应体（如 Emby /Sessions/Logout 返回空 body）。
+     * [contentType]：body 非 null 时的媒体类型（如 Jellyfin /Sessions/Playing 系列的
+     * "application/json"，[FromBody] 需要 JSON content type；Phase 1G-C，ADR-039）。
+     */
     suspend fun postNoContent(
         url: String,
         headers: Map<String, String> = emptyMap(),
         body: String? = null,
-    ): Unit = executeNoContent("POST", url, headers, body, null)
+        contentType: String? = null,
+    ): Unit = executeNoContent("POST", url, headers, body, contentType)
 
     /** 通用执行：非 2xx 抛出 [ApiException]，返回体按 [deserializer] 解码。 */
     @PublishedApi

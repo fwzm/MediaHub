@@ -11,6 +11,8 @@ import com.mediahub.model.ServerType
 import com.mediahub.provider.api.MediaProviderFactory
 import com.mediahub.provider.api.ProviderDescriptor
 import com.mediahub.provider.api.ProviderHandle
+import com.mediahub.provider.api.ProviderImageAuthContributor
+import com.mediahub.provider.api.ProviderSessionCleaner
 import com.mediahub.provider.emby.api.EmbyApiClient
 import com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilder
 import com.mediahub.provider.emby.api.EmbyEndpointResolver
@@ -20,6 +22,9 @@ import com.mediahub.provider.emby.library.EmbyLibraryProvider
 import com.mediahub.provider.emby.playback.EmbyPlaybackProvider
 import com.mediahub.provider.emby.search.EmbySearchProvider
 import com.mediahub.provider.emby.identity.EmbyIdentityLookupProvider
+import com.mediahub.provider.emby.progress.EmbyProgressProvider
+import com.mediahub.provider.emby.image.EmbyImageAuthContributor
+import com.mediahub.provider.emby.session.EmbySessionCleaner
 import com.mediahub.provider.emby.session.EmbySessionStore
 import dagger.Binds
 import dagger.Module
@@ -111,6 +116,13 @@ class EmbyProviderFactory @Inject constructor(
                 sessionStore = sessionStore,
                 logger = logger,
             ),
+            progress = EmbyProgressProvider(
+                server = server,
+                api = embyApi,
+                tokenStore = tokenStore,
+                sessionStore = sessionStore,
+                logger = logger,
+            ),
         )
     }
 }
@@ -121,4 +133,12 @@ abstract class EmbyProviderModule {
     @Binds
     @IntoSet
     abstract fun bindEmbyProviderFactory(factory: EmbyProviderFactory): MediaProviderFactory
+
+    @Binds
+    @IntoSet
+    abstract fun bindEmbyImageAuthContributor(impl: EmbyImageAuthContributor): ProviderImageAuthContributor
+
+    @Binds
+    @IntoSet
+    abstract fun bindEmbySessionCleaner(impl: EmbySessionCleaner): ProviderSessionCleaner
 }

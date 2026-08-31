@@ -28,6 +28,7 @@ import com.mediahub.player.engine.EngineKind
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.MediaDetailProvider
 import com.mediahub.provider.api.MediaPlaybackProvider
+import com.mediahub.provider.api.MediaProgressProvider
 import com.mediahub.provider.api.MediaProvider
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderCapability
@@ -46,7 +47,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -279,6 +282,91 @@ class PlayerViewModelTest {
             }
         }
 
+    @Test
+    fun `exit cancels periodic reports before final report and releases only after final completes`() =
+        runTest(dispatcher) {
+            val calls = mutableListOf<String>()
+            val periodicPositions = mutableListOf<Long>()
+            val finalEntered = CompletableDeferred<Unit>()
+            val finishFinal = CompletableDeferred<Unit>()
+            val finalProgress = PlaybackProgress(
+                serverId = "srv-1", itemId = "m1", positionMs = 12_000,
+                durationMs = 60_000, isPaused = true, updatedAtEpochMs = 1,
+                sessionId = "visual-integration-session",
+            )
+            val progressProvider = object : MediaProgressProvider {
+                override val remoteReportIntervalMs = 100L
+                override suspend fun reportProgress(progress: PlaybackProgress) {
+                    calls += "periodic"
+                    periodicPositions += progress.positionMs
+                }
+                override suspend fun reportFinalProgress(progress: PlaybackProgress) {
+                    assertEquals(finalProgress, progress)
+                    calls += "final"
+                    finalEntered.complete(Unit)
+                    finishFinal.await()
+                }
+                override suspend fun getContinueWatching(limit: Int) = emptyList<MediaItem>()
+                override suspend fun getResumePosition(itemId: String): Long? = null
+            }
+            val engine = FakeEngine(
+                finalProgress = finalProgress,
+                onStop = { calls += "stop" },
+                onRelease = { calls += "release" },
+            )
+            val vm = PlayerViewModel(
+                savedStateHandle = savedState("m1"),
+                serverStore = FakeServerStore(embyServer()),
+                progressStore = FakeProgressStore(resume = null) { calls += "local" },
+                registry = FakeRegistry(
+                    detail = FakeDetail(mediaItemWithPoster("https://image/one")),
+                    playback = FakePlayback(PlaybackSource(
+                        url = "http://media/stream.mkv", sessionId = finalProgress.sessionId,
+                    )),
+                    progress = progressProvider,
+                ),
+                media3EngineFactory = PlaybackEngineCreator { engine },
+                mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+                engineHistory = InMemoryEnginePreferenceHistory(),
+                userPreferencesRepository = FakeUserPreferences(),
+                artworkPaletteLoader = NoArtworkPalette,
+                logger = noOpLogger,
+            )
+            try {
+                runCurrent()
+                // Positive control: prove the production coordinator was subscribed and could
+                // report before asserting that exit cancels that previously live pipeline.
+                engine.emitProgress(finalProgress.copy(positionMs = 9_000))
+                runCurrent()
+                advanceTimeBy(100)
+                runCurrent()
+                assertEquals(listOf("periodic"), calls)
+                assertEquals(listOf(9_000L), periodicPositions)
+                calls.clear()
+                engine.emitProgress(finalProgress.copy(positionMs = 10_000))
+                runCurrent() // Queue a periodic sample before exit begins.
+                val exit = launch { vm.stopAndFlush() }
+                runCurrent()
+                assertTrue("final path must have started", finalEntered.isCompleted)
+                assertEquals(listOf("stop", "local", "final"), calls)
+
+                // While final reporting is suspended, neither an already queued sample nor a
+                // late engine emission may reopen the remote playing session.
+                engine.emitProgress(finalProgress.copy(positionMs = 13_000))
+                advanceTimeBy(1_000)
+                runCurrent()
+                assertEquals(listOf("stop", "local", "final"), calls)
+                finishFinal.complete(Unit)
+                exit.join()
+                vm.stopAndFlush() // Explicit Back and onDispose must remain idempotent.
+                assertEquals(listOf("stop", "local", "final", "release"), calls)
+            } finally {
+                finishFinal.complete(Unit)
+                vm.stopAndFlush()
+                runCurrent()
+            }
+        }
+
     // ---- fakes ----
     private val NoArtworkPalette = ArtworkPaletteLoader { _, _ -> null }
 
@@ -295,10 +383,13 @@ class PlayerViewModelTest {
         override suspend fun getServer(id: String): MediaServer? = server.takeIf { it.id == id }
     }
 
-    private class FakeProgressStore(private val resume: Long?) : ProgressStore {
+    private class FakeProgressStore(
+        private val resume: Long?,
+        private val onSave: (PlaybackProgress) -> Unit = {},
+    ) : ProgressStore {
         override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> = flowOf(emptyList())
         override suspend fun getResume(serverId: String, itemId: String): Long? = resume
-        override suspend fun save(progress: PlaybackProgress) = Unit
+        override suspend fun save(progress: PlaybackProgress) = onSave(progress)
     }
 
     private class FakeDetail(private val item: MediaItem) : MediaDetailProvider {
@@ -363,15 +454,20 @@ class PlayerViewModelTest {
     private class FakeRegistry(
         private val detail: MediaDetailProvider? = null,
         private val playback: MediaPlaybackProvider? = null,
+        private val progress: MediaProgressProvider? = null,
     ) : MediaProviderRegistry {
         override fun factoryFor(type: ServerType): com.mediahub.provider.api.MediaProviderFactory? = null
         override val supportedTypes: Set<ServerType> = emptySet()
         override fun create(server: MediaServer): ProviderHandle =
-            ProviderHandle(provider = FakeProvider(server.id), detail = detail, playback = playback)
+            ProviderHandle(provider = FakeProvider(server.id), detail = detail, playback = playback, progress = progress)
         override fun descriptors(): List<ProviderDescriptor> = emptyList()
     }
 
-    private class FakeEngine : PlaybackEnginePort {
+    private class FakeEngine(
+        private val finalProgress: PlaybackProgress? = null,
+        private val onStop: () -> Unit = {},
+        private val onRelease: () -> Unit = {},
+    ) : PlaybackEnginePort {
         private val ui = MutableStateFlow(PlaybackUiState())
         override val uiState: StateFlow<PlaybackUiState> get() = ui
         private val progressFlow = MutableSharedFlow<PlaybackProgress>(extraBufferCapacity = 1)
@@ -389,8 +485,12 @@ class PlayerViewModelTest {
         override fun setSpeed(speed: Float) = Unit
         override fun selectAudioTrack(selection: TrackSelection?) = Unit
         override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
-        override fun stop(): PlaybackProgress? = null
-        override fun release() = Unit
+        fun emitProgress(value: PlaybackProgress) { progressFlow.tryEmit(value) }
+        override fun stop(): PlaybackProgress? {
+            onStop()
+            return finalProgress
+        }
+        override fun release() = onRelease()
     }
 
     private val noOpLogger = object : Logger {

@@ -212,6 +212,11 @@ class PlayerViewModel @Inject constructor(
         remoteReport = { progress ->
             handle?.progress?.let { runCatching { it.reportProgress(progress) } }
         },
+        // 最终退出走 Provider 的 final 操作（如 Jellyfin /Sessions/Playing/Stopped），
+        // 与普通 remote throttle 分流（ADR-039 review hardening）
+        remoteFinalReport = { progress ->
+            handle?.progress?.let { runCatching { it.reportFinalProgress(progress) } }
+        },
     )
     private var syncStarted = false
     private var stopped = false
@@ -350,15 +355,19 @@ class PlayerViewModel @Inject constructor(
      * 显式退出状态机（ADR-023）：保证退出时本地快照与远端上报不丢。
      *
      * 顺序：暂停读取 position（engine.stop，发出 Stopped）→ 生成最终进度 →
-     * local save + remote report（远端短超时，不阻塞退出）→ 停止协调器 → 释放播放器。
-     * 幂等：可被返回按钮与 onDispose 兜底重复调用。
+     * 停止协调器（禁止 final 之后的新 remote work）→ final flush
+     * （远端 final 上报短超时，不阻塞退出；Jellyfin 走 /Sessions/Playing/Stopped）→
+     * 释放播放器。幂等：可被返回按钮与 onDispose 兜底重复调用。
      */
     suspend fun stopAndFlush() {
         if (stopped) return
         stopped = true
         val finalProgress = engine.stop()
-        syncCoordinator.flush(finalProgress)
+        // 先停 periodic/critical 管线（禁止 final 之后的新 remote work——防
+        // Stopped 后被排队 sample 以 Playing/Progress 重开 Jellyfin 会话），
+        // 再执行单次权威 final 上报；flushFinal 不依赖 coordinator job。
         syncCoordinator.stop()
+        syncCoordinator.flushFinal(finalProgress)
         engine.release()
     }
 

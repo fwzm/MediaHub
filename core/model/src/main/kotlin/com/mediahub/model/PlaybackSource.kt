@@ -24,6 +24,13 @@ data class PlaybackSource(
     val hdrType: HdrType = HdrType.NONE,
     val durationMs: Long? = null,
     val mode: PlaybackMode = PlaybackMode.DIRECT_PLAY,
+    /**
+     * Provider 签发的播放会话关联 id（如 Emby/Jellyfin PlaybackInfo 返回的
+     * PlaySessionId），仅用于当前播放生命周期的进度上报关联。
+     * 仅内存使用：不得落库、不得作为鉴权凭据（Token 红线不变）、
+     * 不参与媒体 URL 构造与引擎选择。Local/WebDAV 等无会话语义的 Provider 为 null。
+     */
+    val sessionId: String? = null,
     /** 链接过期时间（epoch ms），null 表示未知/不过期 */
     val expiresAtEpochMs: Long? = null,
     val supportsSeeking: Boolean = true,

@@ -5,6 +5,7 @@ import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.feature.detail.source.CanonicalSourceResolver
+import com.mediahub.model.ExternalIds
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
@@ -98,6 +99,7 @@ class DetailViewModelTest {
         libraryItems: Map<String, List<MediaItem>> = emptyMap(),
         libraryProvider: MediaLibraryProvider? = null,
         libraryNull: Boolean = false,
+        identityLookup: com.mediahub.provider.api.MediaIdentityLookupProvider? = null,
     ): DetailViewModel {
         val savedStateHandle = SavedStateHandle(mapOf("serverId" to "srv", "itemId" to "dGVzdA"))
         val lib = when {
@@ -121,7 +123,12 @@ class DetailViewModelTest {
             override val supportedTypes = emptySet<ServerType>()
             override fun descriptors() = emptyList<ProviderDescriptor>()
             override fun create(server: MediaServer): ProviderHandle {
-                return ProviderHandle(provider = fakeProvider(), detail = detailProvider, library = lib)
+                return ProviderHandle(
+                    provider = fakeProvider(),
+                    detail = detailProvider,
+                    library = lib,
+                    identityLookup = identityLookup,
+                )
             }
         }
         return DetailViewModel(
@@ -150,6 +157,43 @@ class DetailViewModelTest {
         testDispatcher.scheduler.advanceUntilIdle()
         assertTrue(vm.uiState.value is DetailUiState.Content)
         assertEquals(SourceResolutionState.Idle, vm.sourceState.value)
+    }
+
+    // ---- 1G-C identity gate（ADR-039）：防单向 source switching ----
+
+    /** 最小 IDENTITY_LOOKUP fake。 */
+    private class FakeIdentityLookup : com.mediahub.provider.api.MediaIdentityLookupProvider {
+        override suspend fun findByCanonicalKeys(
+            keys: Set<com.mediahub.model.CanonicalKey>,
+            page: PageRequest,
+        ): PagedResult<MediaItem> = PagedResult(items = emptyList())
+    }
+
+    @Test
+    fun `source resolution stays idle when active provider lacks identity lookup`() = runTest(testDispatcher) {
+        // 1G-C guard：Handle 无 IDENTITY_LOOKUP（如 Jellyfin）——即使 item 携带外部身份，
+        // 也不启动 resolver（防止 Jellyfin Detail → Emby 单向切源）
+        val item = makeItem("m1", MediaType.MOVIE).copy(externalIds = ExternalIds(tmdb = "550"))
+        val vm = createViewModel(MediaDetail(item = item), identityLookup = null)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(vm.uiState.value is DetailUiState.Content)
+        assertEquals(SourceResolutionState.Idle, vm.sourceState.value)
+    }
+
+    @Test
+    fun `provider with identity lookup still starts source resolution`() = runTest(testDispatcher) {
+        // Emby 路径回归：identityLookup != null → resolver 正常启动并完成（fakeServerStore
+        // 无其他服务器 → Completed([seed])），guard 不误伤
+        val item = makeItem("m1", MediaType.MOVIE).copy(externalIds = ExternalIds(tmdb = "550"))
+        val vm = createViewModel(MediaDetail(item = item), identityLookup = FakeIdentityLookup())
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(vm.uiState.value is DetailUiState.Content)
+        assertTrue(
+            "identityLookup 存在时必须进入 Resolved（实际：${vm.sourceState.value}）",
+            vm.sourceState.value is SourceResolutionState.Resolved,
+        )
     }
 
     @Test

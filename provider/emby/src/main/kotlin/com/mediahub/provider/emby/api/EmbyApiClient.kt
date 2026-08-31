@@ -19,8 +19,9 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
  *
  * 非 2xx 抛 [com.mediahub.core.network.ApiException]；JSON 解析失败抛序列化异常；
  * 网络错误抛 IOException——由上层（EmbyAuthProvider）映射为业务错误。
+ * 进度三方法 open 化仅为测试 seam（Recording 子类记录 wire 序列），不含生产逻辑。
  */
-class EmbyApiClient(
+open class EmbyApiClient(
     private val endpointResolver: EmbyEndpointResolver,
     private val apiClient: ApiClient,
     private val authHeaderBuilder: EmbyAuthorizationHeaderBuilder,
@@ -281,6 +282,95 @@ class EmbyApiClient(
     /** 客户端身份头；userId 存在时带上（官方要求登录后进行带）。 */
     fun identityHeaders(userId: String? = null): Map<String, String> =
         mapOf(authHeaderBuilder.headerName() to authHeaderBuilder.build(userId))
+
+    // ---- Phase 1H：进度上报（/Sessions/Playing[/Progress|/Stopped]，官方 SessionsController） ----
+
+    /**
+     * 播放开始：POST /Sessions/Playing（PlaybackStartInfo JSON body；响应 204/空体不解析）。
+     * Content-Type 必须 application/json（[FromBody]）。
+     * Token 只走 X-Emby-Token 头（ADR-026）。
+     * [positionTicks] 恒发（含 0）：服务端缺省/负值的危险语义见 [EmbyPlaybackStartInfoDto]。
+     * [playSessionId] 必须为 PlaybackInfo 返回真值（ADR-040 correction）：真实 Emby 4.x
+     * 缺失即 400 null-key，不得自行生成或用 ItemId/DeviceId 代替。
+     */
+    open suspend fun playbackStart(
+        token: String,
+        userId: String,
+        itemId: String,
+        playSessionId: String,
+        positionTicks: Long,
+        playMethod: String?,
+    ) {
+        apiClient.postNoContent(
+            url = endpointResolver.endpoint("/Sessions/Playing"),
+            headers = authenticatedHeaders(token, userId),
+            body = requestJson.encodeToString(
+                EmbyPlaybackStartInfoDto(
+                    itemId = itemId,
+                    playSessionId = playSessionId,
+                    positionTicks = positionTicks,
+                    playMethod = playMethod,
+                )
+            ),
+            contentType = "application/json",
+        )
+    }
+
+    /**
+     * 播放进度：POST /Sessions/Playing/Progress（PlaybackProgressInfo JSON body；响应体不解析）。
+     * [playSessionId] 语义同 [playbackStart]（ADR-040 correction）。
+     */
+    open suspend fun playbackProgress(
+        token: String,
+        userId: String,
+        itemId: String,
+        playSessionId: String,
+        positionTicks: Long,
+        isPaused: Boolean?,
+        playMethod: String?,
+    ) {
+        apiClient.postNoContent(
+            url = endpointResolver.endpoint("/Sessions/Playing/Progress"),
+            headers = authenticatedHeaders(token, userId),
+            body = requestJson.encodeToString(
+                EmbyPlaybackProgressInfoDto(
+                    itemId = itemId,
+                    playSessionId = playSessionId,
+                    positionTicks = positionTicks,
+                    isPaused = isPaused,
+                    playMethod = playMethod,
+                )
+            ),
+            contentType = "application/json",
+        )
+    }
+
+    /**
+     * 播放停止：POST /Sessions/Playing/Stopped（PlaybackStopInfo JSON body；响应体不解析）。
+     * 退出时权威进度写入者（Emby 按 Stopped 的 PositionTicks 更新 userdata 续播位置）。
+     * [positionTicks] 恒发（含 0）——缺省会令服务端按"播放完成"处理（见 [EmbyPlaybackStopInfoDto]）。
+     * [playSessionId] 必须为该条目 active 会话的 PlaybackInfo 真值（ADR-040 correction）。
+     */
+    open suspend fun playbackStopped(
+        token: String,
+        userId: String,
+        itemId: String,
+        playSessionId: String,
+        positionTicks: Long,
+    ) {
+        apiClient.postNoContent(
+            url = endpointResolver.endpoint("/Sessions/Playing/Stopped"),
+            headers = authenticatedHeaders(token, userId),
+            body = requestJson.encodeToString(
+                EmbyPlaybackStopInfoDto(
+                    itemId = itemId,
+                    playSessionId = playSessionId,
+                    positionTicks = positionTicks,
+                )
+            ),
+            contentType = "application/json",
+        )
+    }
 
     /** 已认证请求：客户端身份头（含 UserId，官方要求）+ X-Emby-Token。 */
     fun authenticatedHeaders(token: String, userId: String): Map<String, String> =

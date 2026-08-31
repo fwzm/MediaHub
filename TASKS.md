@@ -256,6 +256,68 @@
 - Device: Xiaomi 14 Ultra / Android 16
 - Result: PASS
 
+## Phase 1H — Emby PROGRESS closeout（2026-08-30）🔨 code+tests complete（PR/CI 待 + device verification PENDING）
+
+- [x] 协议证据先行：三端点（POST /Sessions/Playing[/Progress|/Stopped]）同源确认
+      （Jellyfin openapi `required: []` schema + 仓库保留 `Emby.Server.Implementations/
+      Session/SessionManager.cs` 路径的 fork 血统；官方 Kodi Emby 插件对现役 Emby 4.x
+      的同 body 三端点投递；ms×10_000 ticks 换算实证）
+- [x] 关键证据裁定：**PositionTicks 恒发（含 0）**——Stopped 缺 PositionTicks 时服务端
+      按"播放完成"处理（PlayCount++/Played=true/位置清零，Jellyfin 同源
+      OnPlaybackStopped 实证），退出刚打开的条目会被误标已看；负值触发 400。
+      有意偏离 Jellyfin `takeIf{>0}` 约定（DTO 契约收缩到非空 Long）
+- [x] EmbyProgressProvider（独立实现 MediaProgressProvider，不引用 Jellyfin 实现）：
+      会话状态机镜像 1G-C 封板纪律（同条目首报 Playing+Progress / 后续 Progress /
+      条目切换先补发上一条目 Stopped / reportFinalProgress → Stopped 恰一次并关会话）；
+      Mutex 原子串行（周期 sample 与 critical flush 是不同 coroutine）；
+      final 不得被迟到 Progress 越过；ms→ticks 负值钳 0 + 溢出钳 Long.MAX_VALUE、无 Int 转换
+- [x] 字段纪律：只发真实数据来源字段（ItemId/PositionTicks/IsPaused/PlayMethod）；
+      禁伪造——PlaySessionId / MediaSourceId（缺省服务端归一化为 ItemId）/ CanSeek /
+      IsMuted / SessionId（认证上下文绑定）一律不发
+- [x] 错误语义对齐既有 Emby 契约（EmbyProviderSupport.mapError）：reportProgress 映射后
+      上抛（共享协调器 runCatching 保证不打断播放）；401→AuthExpired 且不清理 auth 会话；
+      切换补发 Stopped / final Stopped best-effort；cancellation 原样透传；
+      复用 1G-C shared finality contract（reportFinalProgress / flushFinal），
+      PlayerViewModel / ProgressSyncCoordinator 零改动
+- [x] EmbyApiClient 进度三方法 + DTO（application/json [FromBody]；Token 只走 X-Emby-Token 头）
+- [x] Factory wiring：ProviderHandle.progress 落地；composition-root audit
+      （PROGRESS 进 runtimeCapabilities，既有 7 能力零退化，运行时 ⊆ 计划）
+- [x] 测试 26：wire 契约（首报 Playing 全量断言 / final Stopped 收缩 body / IsPaused /
+      Token 不进 URL·query·body·日志）+ PositionTicks 语义（显式 0 / 负值钳 0 /
+      溢出钳 Long.MAX_VALUE / position>duration 透传）+ 生命周期（Playing 恰一次 /
+      final Stopped 恰一次 / final 后重开 / 切换补发携带上一条目最后位置）+
+      真并发（CompletableDeferred barrier 卡真实在途：final 不得越过在途 Progress、
+      迟到 Progress 不得越过在途 final、双并发 1×Playing、切换补发取消穿透）+
+      失败语义（start/progress/network 失败不毒化、401→AuthExpired 不清会话、
+      final 失败 best-effort 不阻塞退出、缺会话 0 HTTP、取消穿透）+ 跨服 token 隔离；
+      stability 3/3
+- [ ] feature/1h-emby-progress → main PR + exact-head CI（本地门禁不以远端 CI 替代）
+- [ ] device verification PENDING：真实 Emby server 验证 Playing/Progress/Stopped userdata
+      续播位置闭环 + "无前导 Playing 的 final Stopped"服务端接受性（协议证据已给方向，
+      未获真机实证不给背书）
+- 状态：code complete / tests complete / **DEVICE VERIFICATION PENDING ≠ SEALED**
+
+## Phase 1G — Jellyfin Provider Foundation & Parity（2026-08-30）🔨 A/B/C 全 ACCEPTED（integration 待 merge + device smoke）
+
+- [x] A auth+shared foundation：现代 Authorization contract（MediaBrowser …Token）/
+      JellyfinSession(Store) 独立 / 事务式回滚 / restore 防串服（401 清、403 保留）/
+      ProviderImageAuthContributor（auth-scope 归属 fail-closed，app 零 provider import）/
+      EndpointTestService 去协议路径 / CompositeSessionStoreCleaner / Emby fallback 消除
+- [x] B catalog+search：独立 DTO/mapper（ProviderIds 1E 策略同款）/ LIBRARY（ParentId browse
+      无 Recursive + Views）/ DETAIL（Movie/Series/Season/Episode 链 + People 图片回填）/
+      SEARCH（SearchTerm+Recursive+ProviderIds）/ 跨 Provider 聚合证明测试
+- [x] C playback+progress+identity gate：无转码 Direct Stream（PlaybackInfo 协商
+      encodeDefaults 教训 + Static=true 恒同源）/ Progress 三端点（Mutex 会话原子 +
+      reportFinalProgress shared hook + stop-before-final 顺序）/ 1F one-way guard
+      （identityLookup=null → Idle）
+- [x] ProviderFactory capability audit 测试（AUTH+LIBRARY+DETAIL+SEARCH+PLAYBACK+PROGRESS；
+      QUERY/IDENTITY_LOOKUP 缺席）
+- [x] ADR-039 落盘 + 协议证据（v10.9.0 PlaybackInfoDto 无 IsPlayback、MaxStreamingBitrate int?、
+      SearchScore relevance、ServerId 顶层）
+- [ ] integration/1g-jellyfin PR merge（base=45a467b；GitHub ahead_by=10 commits 线性至本轮 hardening）
+- [ ] device smoke（16 场景链；需真实 Jellyfin server，无 server = BLOCKED ≠ SEALED）
+- 状态：**A/B/C 三 slice 全 ACCEPTED @ `9329bf3`**（每 slice 两轮 review，P1 全清）
+
 ## Phase 1F — Canonical Detail / Source Selection（2026-08-29）✅ SEALED / PASS
 
 - [x] A1 domain-identity-graph：CanonicalIdentityGraph（core/model）成 connected-component

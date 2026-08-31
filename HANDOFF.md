@@ -1,5 +1,93 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
-> 最后更新：2026-08-30（Phase 1F **SEALED / PASS** @ `a7df978`——PR #8 merged，authoritative baseline 前移）
+> 最后更新：2026-08-30（Phase 1H Emby PROGRESS closeout code+tests complete，feature/1h-emby-progress PR/CI 待走；Phase 1G 已 merge 入 main @ `1d105a1`）
+
+## Phase 1H Emby PROGRESS closeout（进行中——code+tests complete，PR/CI 待 + DEVICE VERIFICATION PENDING）
+- **缺口**：消费侧（PlayerViewModel → ProgressSyncCoordinator → MediaProgressProvider）
+  自 1G-C 起已 live，但 Emby `PROGRESS` capability 缺失 = Emby 播放进度只落本地快照，
+  服务端"正在播放/续播位置"闭环断裂。定性 **P1-high / Emby parity release-blocker**
+  （无 crash/凭据泄漏/本地数据破坏证据）。
+- **协议证据（ADR-040 落盘）**：三端点 `POST /Sessions/Playing[/Progress|/Stopped]`
+  同源确认（Jellyfin openapi `required: []` + fork 血统 `Emby.Server.Implementations/
+  Session/SessionManager.cs`；官方 Kodi Emby 插件对现役 Emby 4.x 同 body 投递；
+  ms×10_000 ticks）。关键裁定：**PositionTicks 恒发（含 0）**——Stopped 缺省 →
+  服务端按"播放完成"处理（误标已看 = 服务端 userdata 损坏），有意偏离 Jellyfin
+  `takeIf{>0}` 约定。
+- **实现**：EmbyProgressProvider 独立实现（不 import Jellyfin provider），会话状态机
+  镜像 1G-C 封板纪律（首报 Playing+Progress / 切换补发上一条目 Stopped /
+  reportFinalProgress → Stopped 恰一次并关会话），Mutex 原子串行；
+  共享层（PlayerViewModel/ProgressSyncCoordinator/CapabilityProviders）**零改动**；
+  错误语义走 EmbyProviderSupport.mapError（401→AuthExpired 不清会话；
+  final Stopped best-effort；cancellation 穿透）。字段纪律：只发
+  ItemId/PositionTicks/IsPaused/PlayMethod，禁伪造 PlaySessionId/CanSeek 等。
+- **测试**：EmbyProgressProviderTest 26（wire 全量断言 / 位置语义含显式 0 / 负值 /
+  溢出钳制 / 生命周期 / **CompletableDeferred barrier 真并发**——在途 Progress
+  卡住后 final 仍最后、反向亦然 / 失败不毒化 / 401 不清会话 / final 失败不阻塞退出 /
+  跨服 token 隔离 / 日志零凭据）+ factory composition audit；stability 3/3；
+  全仓库 378 debug unit tests + assembleDebug + :provider:emby:lintDebug + diff --check 全绿。
+- **旧 WIP 处置**：1B-3.3 `feature/emby-progress-reporting` @ e0aa267 仅作设计参考，
+  未复用（早于 1G finality contract，DTO 含固定 CanSeek/IsMuted 假值）。
+- **待办**：PR（feature/1h-emby-progress → main，base=`1d105a1`）+ exact-head CI
+  （本地 PASS 不替代）→ Agent B 独立 review → 真实 Emby server device smoke
+  （userdata 续播闭环 + "无前导 Playing 的 Stopped"接受性）——
+  **DEVICE VERIFICATION PENDING ≠ SEALED**。
+
+## Phase 1H repair（进行中——P1 wire 缺陷修复：PlaybackSessionId End-to-End Propagation + Emby Wire Fix）
+- **真机 smoke 发现 P1 缺陷（main @ `9be3d28` 实测）**：真实 Emby 4.x 对三进度端点
+  body 缺 `PlaySessionId` 一律 400 `Value cannot be null. (Parameter 'key')`
+  （.NET 会话字典 null key；两台独立服务器复现）→ 客户端 Playing 每 10s 重发全 400、
+  Progress/Stopped 从未发出、服务端零写入（本地快照正常）。状态机行为与封板实现
+  一致——缺陷在 wire 契约不在状态机。证据链与 curl 对照矩阵（含 C9 干净单会话
+  `UserData.PlaybackPositionTicks` 精确回写）见 **ADR-040 correction（append-only）**。
+- **修复裁定（用户）**：共享层打通 session-ID 传递链 + Emby production wire 修复；
+  **Jellyfin production 零改动**（1G freeze 不破）。数据链：
+  `PlaybackInfo.PlaySessionId → PlaybackSource.sessionId（新增，provider-neutral，
+  仅内存/不落库/非凭据）→ PlaybackSession.source.sessionId → Media3/mpv 全部
+  PlaybackProgress 构造点 → PlaybackProgress.sessionId（既有字段）→
+  EmbyProgressProvider → 三 DTO PlaySessionId`。不新增第二 session 字段到
+  PlaybackProgress；ProgressSyncCoordinator / PlayerViewModel finality 状态机
+  **不动**（非根因）。
+- **EmbyProgressProvider 会话语义升级**：active 身份 = `(itemId, sessionId)` 二元组；
+  关旧会话只用旧会话自己的 PlaySessionId（同条目换 PSID 亦按会话替换处理）；
+  `progress.sessionId` 缺失/空白 → fail-closed（ProviderException.Parse，0 HTTP，
+  无随机/ItemId/DeviceId fallback）。生产只用 PlaybackInfo 真值（C5"任意非空值
+  204"不作为生产方案）。
+- **Jellyfin boundary（本 slice 登记，不改代码）**：
+  `PlaySessionId propagation: PROTOCOL RISK CONFIRMED / DEVICE FAILURE NOT YET
+  PROVEN / NO PRODUCTION CHANGE IN THIS SLICE`——JellyfinPlaybackProvider 当前
+  丢弃 PlaybackInfoResponse.PlaySessionId、三 progress DTO 不带它（同源 schema
+  高风险）；等 Jellyfin server 恢复后由 device smoke 决定是否开
+  `fix/1g-jellyfin-play-session-id`。
+- **回归**：EmbyProgressProviderTest 26→32（原 29 含 round-1/2 全语义保留 +
+  同条目换 PSID 会话替换 + missing/blank sessionId fail-closed 0 HTTP +
+  PSID 全链断言）；EmbyPlaybackProviderTest 补 `PlaybackSource.sessionId ==
+  PlaybackInfo 真值`；新增 Media3 引擎传播测试（Robolectric：周期/currentProgress/
+  stop 三路径携带 source.sessionId；null 原样传播零行为变化）。mpv 同款四构造点
+  逐一注入（JVM 不可实例化 native 引擎——真机 device smoke 以 mpv 为主引擎实弹覆盖）。
+- **日志 follow-up（登记不并入）**：LogcatLogger 把整条消息再过一次 Redactor
+  （双重脱敏）会截断 header map 打印——诊断时的临时 base64 绕过已随诊断构建废弃，
+  独立 issue 处理。
+
+## Phase 1G Jellyfin Provider Foundation & Parity（A/B/C 全 ACCEPTED，已随 PR #11/#12 merge @ `1d105a1`；device smoke 待做）
+- **ADR-039 已冻结**（DECISIONS.md）：现代 Authorization contract / generic image auth
+  （auth-scope 归属 fail-closed）/ provider-specific session store / IDENTITY_LOOKUP
+  协议缺口 DEFER（capability 保持 null）/ one-way Detail source guard / 旧 Emby
+  progress WIP out-of-scope / encodeDefaults 教训。core parity ≠ Emby 字段 1:1。
+- **slice 链（全 ACCEPTED，线性 @ baseline 45a467b）**：
+  A auth+shared foundation @ `37f01a3`（review round2 后）→
+  B catalog+search @ `dd2288d`（review round2 后）→
+  C playback+progress+identity gate @ `9329bf3`（review round2 后）。
+- **runtime capability（audit 测试锁定）**：AUTH+LIBRARY+DETAIL+SEARCH+PLAYBACK+PROGRESS；
+  QUERY/IDENTITY_LOOKUP 缺席（null）。
+- **集成注意（device smoke 新增验证点）**：Jellyfin 10.9.x 服务端自述 direct-stream
+  http streaming 有缺陷且非 force 时关内部 EnableDirectStream——真机必须验证真实
+  PlaybackInfo 响应，不能只信手写 SupportsDirectStream fixture。
+- **Integration 状态**：PR #11 OPEN（integration/1g-jellyfin → main，base=`45a467b`，
+  GitHub ahead_by=10 commits 线性）；exact-head CI = 待本轮 docs/KDoc patch 后的新 run
+  （前一 run `33295225612` @ `6511bd0` success，但该 head 缺 KDoc 修正，不给新 SHA 背书）。
+- **待办**：新 exact-head CI 绿 → PR #11 merge → device smoke（16 场景链，
+  需真实 Jellyfin server；无 server = device verification BLOCKED ≠ SEALED）。
+  非阻塞遗留：in-flight cancellation robustness test（barrier/deferred 构造）；
+  PlayerViewModel onCleared 兜底无 flushFinal（既有生命周期设计，非 1G 引入）。
 
 ## Phase 1F Canonical Detail / Source Selection（2026-08-29）✅ SEALED / PASS
 - **ADR-038 已冻结**（DECISIONS.md）：方案 A = detail-time canonical source resolution；

@@ -418,3 +418,191 @@
     参与；无 field fusion；无第三方 TMDb/IMDb 网络查询；无 nav blob/occurrence
     序列化（NavArgCodec 不扩展）；LIBRARY_FIELDS 不动；GlobalSearchEngine 与
     playback engine 零改动。
+
+## ADR-039 Phase 1G Jellyfin Provider Foundation & Core Parity
+- 状态：已采纳（2026-08-30，contract 冻结文本落盘；A-slice 实现）
+- 决策：
+  - **1G 目标 = core parity，不是 Emby 字段 1:1**：证明 ProviderHandle/capability
+    组合/MediaItem/GlobalSearchEngine/CanonicalIdentityGraph/PlaybackSource/现有 UI
+    能承载第二种真实媒体服务器协议。REQUIRED：connection/AUTH/LIBRARY/DETAIL/
+    SEARCH/Artwork/PLAYBACK/PROGRESS；OUT OF SCOPE：QUERY sort/filter、transcoding、
+    自动最佳源、Plex/WebDAV、Emby refactor。
+  - **现代标准 Authorization contract**：`Authorization: MediaBrowser Client=…,
+    Device=…, DeviceId=…, Version=…[, Token=…]`；登录 POST /Users/AuthenticateByName
+    （密码只在 body，绝不持久化）。**不以 X-Emby-*/X-MediaBrowser-* legacy header 为
+    主协议**（Jellyfin 已优先标准头并关闭 legacy authorization）。
+    恢复语义：token+session 齐全 → 无 Token 服务器身份校验（防串服）→ 认证请求；
+    **仅 401 清本地会话（SESSION_EXPIRED）；403 保留会话（FORBIDDEN）**——Jellyfin
+    服务端存在 remote access disabled 导致的 Forbidden，清 Token 会误删仍有效会话
+    （review 修正：推翻先前"401/403 均清"的过宽表述，与 Emby sealed 行为一致）；
+    5xx/网络/协议异常同样保留。登录失败映射：401 → AuthFailed；**403 →
+    Http(403)（禁止谎报用户名或密码错误）**。Logout best-effort + 本地清理权威；
+    **本地清理放 finally + NonCancellable**——cancellation 原样传播但凭据绝不残留。
+  - **provider-specific session store**：JellyfinSessionStore/JellyfinSession 独立实现
+    （独立 prefs 文件），禁止复用 EmbySessionStore；删除服务器时的会话清理改为
+    **CompositeSessionStoreCleaner** 组合全部 Provider cleaner（新增 Provider 必须接入），
+    server/token/session/进度/图片鉴权状态不得残留。
+  - **generic image auth（基础设施，非 capability）**：新增 ProviderImageAuthContributor
+    （serverType + **authScopeUrl(baseUrl)** + headersFor(serverId)），app 层只做
+    **auth-scope（origin + path 前缀）→ server** 归属：path-segment boundary 最长前缀
+    匹配，**不 import 任何具体 provider 模块**。同 origin 多服务器（反代共存
+    Emby `https://h/emby` + Jellyfin `https://h/jellyfin`）按 scope 归属不串凭据；
+    **同 scope 多 serverId → fail closed**（返回无凭据，绝不随机归属）；
+    unknown scope → 无凭据原样放行。Emby scope = base + /emby（与 EndpointResolver 同一
+    幂等语义），头生成逐字节等价下沉为 EmbyImageAuthContributor；Jellyfin scope = base
+    原样、注入标准 Authorization 单头。不新增 ProviderCapability.IMAGE_AUTH；
+    Token 永不进图片 URL；ADR-030 跨源剥离原样继承。
+  - **协议路径知识移出 core:network**：ProviderDescriptor 新增 probePath（Provider 自述
+    探针位置：Emby=/emby/System/Info/Public，Jellyfin=/System/Info/Public，null=无
+    HTTP 探针）；EndpointTestService 只做 transport。未知 provider/未定义 probePath =
+    显式"不支持"，**禁止静默回退 Emby**（AddServer/ServerEditor 的两处 Emby fallback
+    literal 已删除）。
+  - **Jellyfin exact ProviderId lookup 协议缺口 → IDENTITY_LOOKUP = null（DEFER）**：
+    Jellyfin 10.9.0 ItemsController 仅提供 hasTmdbId/hasImdbId/hasTvdbId 布尔筛选，
+    无 Emby AnyProviderIdEquals 的按值等价查询。三种伪实现 REJECTED：
+    SearchTerm+post-filter / detail 全库遍历 / title-year 弱身份；持久 canonical index
+    不进 1G（候选 Phase 1H，不冻结）。ProviderHandle.identityLookup 必须保持 null。
+  - **one-way source-switching guard**：identityLookup 为 null 的 provider 不能只享受
+    别家的解析（Jellyfin Detail → Emby sibling 可见，反向不可达 = 单向切换）。
+    冻结 generic eligibility guard：`currentHandle.identityLookup == null →
+    sourceState = Idle，不启动 CanonicalSourceResolver`（在 DetailViewModel 调用
+    resolver 之前）。CanonicalSourceResolver/CanonicalIdentityGraph/1F identity 语义
+    零改动；Emby↔Emby exact switching 不受影响；Jellyfin 获得真实 exact lookup 后
+    guard 天然放行。
+  - **Playback（1G-D）**：DIRECT STREAM ONLY / NO TRANSCODING；MOVIE/EPISODE/VIDEO，
+    其他类型 NotYetImplemented 且 0 playback HTTP；Jellyfin 独立 PlaybackInfo DTO/
+    MediaSource selection/PlaybackProvider（不引用 Emby 实现）；Token 只在
+    Authorization header；server 返回 external URL 时凭据只发 configured server origin。
+    **PlaybackInfo 请求体序列化必须 encodeDefaults=true**——协商开关
+    （EnableDirectStream/EnableTranscoding 等）等于默认值时 kotlinx 默认跳过，
+    省略会让 Direct Stream 协商静默失效（C-slice 实证教训）。
+    PlaybackInfoRequest 精确 contract（v10.9.0 源模型）：无 IsPlayback 字段、
+    MaxStreamingBitrate 为 int?（调用方做正数过滤 + Int.MAX_VALUE 收缩）——
+    禁止猜测性复制 Emby DTO shape（review 修正）。
+  - **Progress（1G-E）**：Jellyfin 独立实现当前 main 已有的 MediaProgressProvider
+    （/Sessions/Playing[/Progress|/Stopped]，官方 controller 已确认）；节流仍归
+    ProgressSyncCoordinator，provider 不建 timer。**旧 Emby progress WIP
+    （feature/emby-progress-reporting @523bed9）保持 untouched**，不作为 1G
+    prerequisite，1B-3.3 后续单开 closeout/re-review。
+    **server session lifecycle 完整承载（review hardening 裁定为 C-slice 必要修复，
+    非 scope creep）**：MediaProgressProvider 新增默认兼容的
+    `reportFinalProgress(progress)`（默认实现 = reportProgress，其他 Provider 零变化）；
+    ProgressSyncCoordinator 增加独立 remoteFinalReport（默认 = remoteReport）与
+    flushFinal——普通 Pause/Seek/Ended 关键事件仍走 flush，只有 PlayerViewModel
+    stopAndFlush 的最终退出走 flushFinal（单次权威 final 操作语义不变）。
+    Jellyfin override reportFinalProgress 只发 `/Sessions/Playing/Stopped`
+    （自带最终 PositionTicks），**不以 final Progress 冒充 Stopped**；
+    条目切换时同样先补发上一条目的 Stopped。
+    并发纪律：会话状态转移（Stopped → Playing → Progress → state）由 Mutex 串行
+    原子化——周期 remote sample 与 critical-event flush 是不同 coroutine，
+    禁止交错制造重复 Playing 或错序。
+    三个进度端点 body 为 JSON（POST /Sessions/Playing* 的 [FromBody] 需要
+    application/json），响应体不解析——ApiClient.postNoContent 扩展可选 contentType
+    参数（默认行为不变，Emby logout 零影响）。
+  - **工程红线**：不 fork Jellyfin 专用 UI；feature 层禁判 ServerType.JELLYFIN；
+    不复制 CanonicalIdentityGraph/SearchAggregator；不改 GlobalSearchEngine；
+    不改 1F resolver 语义；capability 真实完成才进 ProviderHandle（Jellyfin Handle
+    A-slice 仅 AUTH）。
+  - **封板链（16 场景）**：connection/login/restore/logout-stale/library browse/
+    artwork authenticated/Movie detail/Series→Season→Episode/global search/
+    Emby+Jellyfin 同 canonical ID 聚合卡/Jellyfin detail 无单向 selector/
+    direct stream/seek/exit flush/remote progress/privacy-logcat。无真实 Jellyfin
+    server → device verification = BLOCKED，Phase 1G != SEALED。
+
+## ADR-040 Phase 1H Emby PROGRESS closeout（Emby 服务端进度闭环）
+- 状态：已采纳（2026-08-30，code+tests complete；DEVICE VERIFICATION PENDING）
+- 背景：消费侧（PlayerViewModel → ProgressSyncCoordinator → MediaProgressProvider →
+  远端上报）自 1G-C 起已 live，Jellyfin 已封板；Emby PROGRESS capability 缺失 =
+  Emby 播放进度只落本地快照、服务端"正在播放/续播位置"闭环断裂（P1-high /
+  Emby parity release-blocker；非 crash/凭据/数据破坏级）。旧 1B-3.3 WIP
+  （feature/emby-progress-reporting @ e0aa267）早于 1G 共享 finality contract，
+  仅作设计参考，不作实现基础（其 DTO 固定 CanSeek=true/IsMuted=false 违反
+  "不填假值"红线）。
+- 协议证据（1H 取证）：
+  - 三端点 `POST /Sessions/Playing` / `/Sessions/Playing/Progress` /
+    `/Sessions/Playing/Stopped`：Jellyfin 官方 openapi（api.jellyfin.org stable）
+    同源 schema——PlaybackStartInfo/PlaybackProgressInfo/PlaybackStopInfo
+    **`required: []`（全部字段可选）**，PositionTicks = nullable int64，
+    PlayMethod enum = Transcode/DirectStream/DirectPlay；Jellyfin fork 自 Emby 3.x，
+    其仓库至今保留 `Emby.Server.Implementations/Session/SessionManager.cs` 路径
+    （血统直接证据）。
+  - 官方 Kodi Emby 插件（MediaBrowser/plugin.video.emby，对接现役 Emby 4.x）：
+    同一 SessionInfo JSON 投递三端点；`PositionTicks = ms × 10_000`（1 tick=100ns
+    实证）；不发 SessionId（会话由认证上下文绑定）；PlaySessionId 为客户端自生成
+    （可省）。
+  - Jellyfin 同源 `SessionManager.OnPlaybackStopped`（lineage 源模型）：条目按
+    ItemId 直接解析（`GetNowPlayingItem` 回退 library 查询）——**无前导 Playing
+    的 Stopped 仍写入续播位置**；`PositionTicks` 缺省 → 服务端按"播放完成"处理
+    （PlayCount++ / Played=true / 位置清零）；负值 → 400；MediaSourceId 缺省
+    归一化为 ItemId。
+- 决策：
+  - **PositionTicks 恒发（含 0），契约收缩为非空 Long**：Stopped 缺省会令服务端
+    误判"播放完成"（退出刚打开的条目被标已看 = 服务端 userdata 数据损坏），
+    有意偏离 Jellyfin sealed 的 `takeIf { it > 0 }` 约定（Jellyfin 行为不变，
+    本 ADR 只约束 Emby）；负值钳 0（服务端 400 实证）；溢出钳 Long.MAX_VALUE；
+    无 Int 转换。
+  - **字段纪律**：只发真实数据来源字段——ItemId（PlaybackProgress.itemId）/
+    PositionTicks / IsPaused（仅 Progress）/ PlayMethod（PlaybackProgress.mode
+    映射，无则省略）。禁伪造：PlaySessionId / MediaSourceId（缺省服务端自归一）/
+    CanSeek / IsMuted / VolumeLevel（无数据来源）/ SessionId（认证绑定）。
+  - **会话状态机镜像 1G-C 封板纪律**（独立实现，不 import Jellyfin provider）：
+    同条目首报 → Playing（恰一次）+ Progress；后续 → Progress；条目切换先为
+    上一条目补发 Stopped（best-effort，取消穿透）再开新会话；
+    reportFinalProgress → Stopped（恰一次）并关会话；final 后同条目再报 → 新会话。
+    节流仍归 ProgressSyncCoordinator，provider 不建 timer。
+  - **共享层零改动**：复用 1G-C finality contract（MediaProgressProvider
+    reportFinalProgress override / ProgressSyncCoordinator remoteFinalReport /
+    flushFinal / PlayerViewModel stop-before-final 顺序）；禁止为 Emby 增加
+    特殊分支。
+  - **并发纪律**：会话状态转移（Stopped → Playing → Progress → state）Mutex
+    原子串行；并发回归必须用 CompletableDeferred barrier 卡真实在途请求证明
+    "final 不得被迟到 Progress 越过"与反向序（禁止 launch+advanceUntilIdle 伪并发）。
+  - **错误语义对齐既有 Emby 契约**（EmbyProviderSupport.mapError，与
+    library/search 同一来源）：reportProgress 映射后上抛（共享协调器
+    runCatching + 2s 短超时保证不打断播放/退出）；401→AuthExpired 且**进度
+    失败不清理 auth 会话**；切换补发 Stopped 与 final Stopped best-effort；
+    cancellation 原样透传。
+  - **安全**：Token 只走 X-Emby-Token 头（ADR-026）；URL/query/body/日志零凭据；
+    跨 server token 隔离回归（server A token 不出现在 server B 请求）。
+  - **capability**：ProviderHandle.progress 落地 → runtimeCapabilities += PROGRESS
+    （descriptor 原已声明，计划 ≥ 运行时不变式保持）；既有
+    AUTH/LIBRARY/DETAIL/PLAYBACK/QUERY/SEARCH/IDENTITY_LOOKUP/IMAGE auth 零退化。
+  - **getContinueWatching/getResumePosition v1 刻意空实现**：本地"继续观看/续播"
+    由 Room 快照驱动（1B-2.1 真机已证）；远端续播列表聚合另行决策（不扩本 slice）。
+- 验收：EmbyProgressProviderTest 26（wire/位置语义/生命周期/真并发/失败/安全）+
+  EmbyProviderFactoryTest composition audit（PROGRESS 进精确集合）；
+  全仓库 378 debug unit tests PASS + :app:assembleDebug PASS +
+  :provider:emby:lintDebug PASS（模块范围——1H 仅改 provider:emby，
+  全量 lintDebug 以 exact-head CI 为权威）+ git diff --check clean；
+  progress 测试 stability 3/3。
+- 未决（不给背书）：真实 Emby server device smoke——userdata 续播位置闭环 /
+  "无前导 Playing 的 final Stopped"服务端接受性 / 短播放与异常退出行为。
+  DEVICE VERIFICATION PENDING ≠ SEALED。
+- **勘误（2026-08-30，1H repair slice——ADR-040 correction，append-only）**：
+  Device smoke @ main 9be3d28 proved that real Emby 4.x requires a non-null
+  PlaySessionId for playback check-ins. Prior assumption that PlaySessionId
+  could be omitted / normalized server-side is invalid. Authoritative source:
+  **PlaybackInfo.PlaySessionId**。
+  证据（两台独立服务器予初/墨云阁 + curl 对照矩阵 + 干净单会话 C9，全程不落
+  任何凭据入档）：
+  - `POST /Sessions/Playing` body 无 PlaySessionId → **400**
+    `Value cannot be null. (Parameter 'key')`（.NET 会话字典 null key）；
+    客户端按既有状态机每 10s 重发 Playing 全 400，Progress/Stopped 从未发出
+    （状态机行为与封板实现一致，缺陷在 wire 契约不在状态机）。
+  - body 补 PlaybackInfo 返回的 PlaySessionId → **204**；任意非空值亦 204
+    （服务端视作不透明键）——但生产只允许 PlaybackInfo 真值（官方文档将
+    PlaySessionId 列为视频流参数并要求使用 PlaybackInfo 返回值；官方客户端
+    把同一值回传至 /Sessions/Playing 上报）。
+  - 仅补 DeviceId（body）而无 PlaySessionId 仍 400 → DeviceId 假设排除。
+  - 干净单会话 C9：PlaybackInfo 取真值 PSID → Playing@0 → Progress@120s/150s →
+    Stopped@180s 全 204 → `UserData.PlaybackPositionTicks = 1_800_000_000`
+    （4.29%）精确回写，app 详情剧集行"进度 4%"读回一致。
+  本条 append-only，不修改上文原始记录；上文 Kodi 证据条目中"PlaySessionId 为
+  客户端自生成（可省）"与字段纪律中"禁伪造：PlaySessionId（缺省服务端自归一）"
+  两处自本勘误起**作废**，以本条为准（字段纪律修正为：PlaySessionId 必须来自
+  PlaybackInfo，MediaHub 不自行生成、不用 ItemId/DeviceId 代替；SessionId 由
+  认证上下文绑定，与 PlaySessionId 是两个概念）。修复落点：
+  `PlaybackSource.sessionId`（provider-neutral 新增）→ 引擎 propagation →
+  `PlaybackProgress.sessionId`（既有字段）→ 三 DTO `PlaySessionId`
+  （Emby production wire）；Jellyfin = CONFIRMED PROTOCOL RISK /
+  DEVICE PROOF PENDING / PRODUCTION FROZEN（本 slice 零 Jellyfin delta）。

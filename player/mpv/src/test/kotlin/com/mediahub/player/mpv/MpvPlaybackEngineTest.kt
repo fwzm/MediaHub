@@ -247,6 +247,96 @@ class MpvPlaybackEngineTest {
     }
 
     @Test
+    fun `periodic and final snapshots preserve provider session ID`() = runTest {
+        val f = Fixture(backgroundScope)
+        val values = mutableListOf<PlaybackProgress>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.progress.collect { values += it } }
+        f.engine.play(session("item", "provider-session"))
+        runCurrent()
+        val native = f.instances.single()
+        native.position = 12.5
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(listOf("provider-session", "provider-session"), values.map { it.sessionId })
+        assertEquals(listOf(0L, 12_500L), values.map { it.positionMs })
+        assertTrue(values.all { it.updatedAtEpochMs == 200L })
+
+        native.position = 42.5
+        val final = f.engine.stop()
+        assertEquals("provider-session", final?.sessionId)
+        assertEquals(42_500L, final?.positionMs)
+        assertEquals(200L, final?.updatedAtEpochMs)
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertEquals(2, values.size)
+        assertEquals(1, native.destroys)
+        f.engine.release()
+    }
+
+    @Test
+    fun `queued stop retains provider session ID without allocating resources`() = runTest {
+        val f = Fixture(backgroundScope)
+        f.engine.play(session("item", "queued-session"))
+        val final = f.engine.stop()
+        assertEquals("queued-session", final?.sessionId)
+        assertEquals(0L, final?.positionMs)
+        assertEquals(60_000L, final?.durationMs)
+        assertEquals(true, final?.isPaused)
+        runCurrent()
+        assertTrue(f.bridges.isEmpty())
+        assertTrue(f.instances.isEmpty())
+        f.engine.release()
+    }
+
+    @Test
+    fun `replacement of same item isolates provider progress sessions`() = runTest {
+        val f = Fixture(backgroundScope)
+        val values = mutableListOf<PlaybackProgress>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.progress.collect { values += it } }
+        f.engine.play(session("same-item", "provider-A"))
+        runCurrent()
+        val old = f.instances.single()
+        f.engine.play(session("same-item", "provider-B"))
+        runCurrent()
+        val readsAfterReplacement = old.reads
+        val replacement = f.instances.last()
+        old.position = 99.0
+        old.observer.property("time-pos", 99.0)
+        replacement.position = 7.5
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(listOf("provider-A", "provider-B", "provider-B"), values.map { it.sessionId })
+        assertEquals(listOf(0L, 0L, 7_500L), values.map { it.positionMs })
+        assertTrue(values.all { it.itemId == "same-item" })
+        assertEquals(readsAfterReplacement, old.reads)
+        assertEquals(1, old.destroys)
+        val final = f.engine.stop()
+        assertEquals("provider-B", final?.sessionId)
+        assertEquals(7_500L, final?.positionMs)
+        f.engine.release()
+        assertEquals(1, old.destroys)
+        assertEquals(1, replacement.destroys)
+    }
+
+    @Test
+    fun `sources without provider session ID keep periodic and final session ID absent`() = runTest {
+        val f = Fixture(backgroundScope)
+        val values = mutableListOf<PlaybackProgress>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.progress.collect { values += it } }
+        f.engine.play(session("item", "previous-session"))
+        runCurrent()
+        f.engine.play(session("item"))
+        runCurrent()
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(listOf("previous-session", null, null), values.map { it.sessionId })
+        val final = f.engine.stop()
+        assertEquals("item", final?.itemId)
+        assertNull(final?.sessionId)
+        f.engine.release()
+    }
+
+    @Test
     fun `immediate Stopped collector restarts without native and state lock inversion`() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val f = Fixture(scope)
@@ -447,9 +537,9 @@ class MpvPlaybackEngineTest {
     }
 
     private companion object {
-        fun session(id: String) = PlaybackSession(
+        fun session(id: String, sourceSessionId: String? = null) = PlaybackSession(
             serverId = "server", itemId = id, itemTitle = id,
-            source = PlaybackSource(url = "https://media/$id", durationMs = 60_000),
+            source = PlaybackSource(url = "https://media/$id", durationMs = 60_000, sessionId = sourceSessionId),
         )
     }
 }

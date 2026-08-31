@@ -390,6 +390,7 @@ class MpvPlaybackEngine internal constructor(
             serverId = s.serverId, itemId = s.itemId, positionMs = pos,
             durationMs = if (dur > 0) dur else (s.source.durationMs ?: 0),
             isPaused = m?.getPropertyBoolean("pause") ?: !fallback.isPlaying, updatedAtEpochMs = currentTimeMillis(),
+            sessionId = s.source.sessionId,
             mode = s.source.mode, itemTitle = s.itemTitle, itemType = s.itemType, posterUrl = s.posterUrl,
         )
     }
