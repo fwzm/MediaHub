@@ -7,6 +7,7 @@ import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
+import com.mediahub.core.ui.effects.VisualPalette
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaServer
@@ -36,6 +37,7 @@ import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
 import com.mediahub.provider.api.ProviderStatus
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -118,6 +120,7 @@ class PlayerViewModelTest {
             mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
             engineHistory = InMemoryEnginePreferenceHistory(),
             userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
             logger = noOpLogger,
         )
         try {
@@ -165,6 +168,7 @@ class PlayerViewModelTest {
             mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
             engineHistory = InMemoryEnginePreferenceHistory(),
             userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
             logger = noOpLogger,
         )
         try {
@@ -202,6 +206,7 @@ class PlayerViewModelTest {
             mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
             engineHistory = InMemoryEnginePreferenceHistory(),
             userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
             logger = noOpLogger,
         )
         try {
@@ -215,7 +220,68 @@ class PlayerViewModelTest {
         }
     }
 
+    @Test
+    fun `artwork palette succeeds preserves prior value on failure and rejects late result`() =
+        runTest(dispatcher) {
+            val detail = SequencedDetail(
+                listOf(
+                    mediaItemWithPoster("https://image/one"),
+                    mediaItemWithPoster("https://image/fails"),
+                    mediaItemWithPoster("https://image/late"),
+                    mediaItemWithPoster("https://image/latest"),
+                ),
+            )
+            val registry = FakeRegistry(
+                detail = detail,
+                playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv")),
+            )
+            val loader = ControllableArtworkPaletteLoader()
+            val vm = PlayerViewModel(
+                savedStateHandle = savedState("m1"),
+                serverStore = FakeServerStore(embyServer()),
+                progressStore = FakeProgressStore(resume = null),
+                registry = registry,
+                media3EngineFactory = PlaybackEngineCreator { FakeEngine() },
+                mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+                engineHistory = InMemoryEnginePreferenceHistory(),
+                userPreferencesRepository = FakeUserPreferences(),
+                artworkPaletteLoader = loader,
+                logger = noOpLogger,
+            )
+            try {
+                runCurrent()
+                val first = palette(0xFF446688.toInt())
+                loader.complete("https://image/one", first)
+                runCurrent()
+                assertEquals(first, vm.artworkPalette.value)
+
+                vm.resolve()
+                runCurrent()
+                loader.complete("https://image/fails", null)
+                runCurrent()
+                assertEquals(first, vm.artworkPalette.value)
+
+                vm.resolve()
+                runCurrent()
+                vm.resolve()
+                runCurrent()
+                val latest = palette(0xFFAA7744.toInt())
+                loader.complete("https://image/latest", latest)
+                runCurrent()
+                assertEquals(latest, vm.artworkPalette.value)
+
+                loader.complete("https://image/late", palette(0xFF22AA66.toInt()))
+                runCurrent()
+                assertEquals(latest, vm.artworkPalette.value)
+            } finally {
+                vm.stopAndFlush()
+                runCurrent()
+            }
+        }
+
     // ---- fakes ----
+    private val NoArtworkPalette = ArtworkPaletteLoader { _, _ -> null }
+
     private class FakeUserPreferences : UserPreferencesRepository {
         val state = MutableStateFlow(UserPreferences())
         override val flow: Flow<UserPreferences> = state
@@ -237,6 +303,29 @@ class PlayerViewModelTest {
 
     private class FakeDetail(private val item: MediaItem) : MediaDetailProvider {
         override suspend fun getItemDetail(itemId: String): MediaDetail = MediaDetail(item = item)
+    }
+
+    private class SequencedDetail(items: List<MediaItem>) : MediaDetailProvider {
+        private val remaining = ArrayDeque(items)
+        private var last = items.last()
+
+        override suspend fun getItemDetail(itemId: String): MediaDetail {
+            if (remaining.isNotEmpty()) last = remaining.removeFirst()
+            return MediaDetail(item = last)
+        }
+    }
+
+    private class ControllableArtworkPaletteLoader : ArtworkPaletteLoader {
+        private val pending = mutableMapOf<String, CompletableDeferred<VisualPalette?>>()
+
+        override suspend fun load(artworkKey: String, url: String?): VisualPalette? {
+            val requiredUrl = checkNotNull(url)
+            return pending.getOrPut(requiredUrl) { CompletableDeferred() }.await()
+        }
+
+        fun complete(url: String, value: VisualPalette?) {
+            pending.getOrPut(url) { CompletableDeferred() }.complete(value)
+        }
     }
 
     private class FakePlayback(
@@ -310,4 +399,20 @@ class PlayerViewModelTest {
         override fun w(tag: LogTag, message: String, throwable: Throwable?) = Unit
         override fun e(tag: LogTag, message: String, throwable: Throwable?) = Unit
     }
+
+    private fun mediaItemWithPoster(url: String) = MediaItem(
+        serverId = "srv-1",
+        id = "m1",
+        type = MediaType.MOVIE,
+        title = "电影A",
+        posterUrl = url,
+        container = "mkv",
+    )
+
+    private fun palette(primary: Int) = VisualPalette(
+        background = 0xFF080A10.toInt(),
+        primary = primary,
+        secondary = 0xFF334455.toInt(),
+        accent = 0xFFCCDDEE.toInt(),
+    )
 }
