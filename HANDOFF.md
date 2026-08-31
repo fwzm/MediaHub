@@ -31,6 +31,42 @@
   （userdata 续播闭环 + "无前导 Playing 的 Stopped"接受性）——
   **DEVICE VERIFICATION PENDING ≠ SEALED**。
 
+## Phase 1H repair（进行中——P1 wire 缺陷修复：PlaybackSessionId End-to-End Propagation + Emby Wire Fix）
+- **真机 smoke 发现 P1 缺陷（main @ `9be3d28` 实测）**：真实 Emby 4.x 对三进度端点
+  body 缺 `PlaySessionId` 一律 400 `Value cannot be null. (Parameter 'key')`
+  （.NET 会话字典 null key；两台独立服务器复现）→ 客户端 Playing 每 10s 重发全 400、
+  Progress/Stopped 从未发出、服务端零写入（本地快照正常）。状态机行为与封板实现
+  一致——缺陷在 wire 契约不在状态机。证据链与 curl 对照矩阵（含 C9 干净单会话
+  `UserData.PlaybackPositionTicks` 精确回写）见 **ADR-040 correction（append-only）**。
+- **修复裁定（用户）**：共享层打通 session-ID 传递链 + Emby production wire 修复；
+  **Jellyfin production 零改动**（1G freeze 不破）。数据链：
+  `PlaybackInfo.PlaySessionId → PlaybackSource.sessionId（新增，provider-neutral，
+  仅内存/不落库/非凭据）→ PlaybackSession.source.sessionId → Media3/mpv 全部
+  PlaybackProgress 构造点 → PlaybackProgress.sessionId（既有字段）→
+  EmbyProgressProvider → 三 DTO PlaySessionId`。不新增第二 session 字段到
+  PlaybackProgress；ProgressSyncCoordinator / PlayerViewModel finality 状态机
+  **不动**（非根因）。
+- **EmbyProgressProvider 会话语义升级**：active 身份 = `(itemId, sessionId)` 二元组；
+  关旧会话只用旧会话自己的 PlaySessionId（同条目换 PSID 亦按会话替换处理）；
+  `progress.sessionId` 缺失/空白 → fail-closed（ProviderException.Parse，0 HTTP，
+  无随机/ItemId/DeviceId fallback）。生产只用 PlaybackInfo 真值（C5"任意非空值
+  204"不作为生产方案）。
+- **Jellyfin boundary（本 slice 登记，不改代码）**：
+  `PlaySessionId propagation: PROTOCOL RISK CONFIRMED / DEVICE FAILURE NOT YET
+  PROVEN / NO PRODUCTION CHANGE IN THIS SLICE`——JellyfinPlaybackProvider 当前
+  丢弃 PlaybackInfoResponse.PlaySessionId、三 progress DTO 不带它（同源 schema
+  高风险）；等 Jellyfin server 恢复后由 device smoke 决定是否开
+  `fix/1g-jellyfin-play-session-id`。
+- **回归**：EmbyProgressProviderTest 26→32（原 29 含 round-1/2 全语义保留 +
+  同条目换 PSID 会话替换 + missing/blank sessionId fail-closed 0 HTTP +
+  PSID 全链断言）；EmbyPlaybackProviderTest 补 `PlaybackSource.sessionId ==
+  PlaybackInfo 真值`；新增 Media3 引擎传播测试（Robolectric：周期/currentProgress/
+  stop 三路径携带 source.sessionId；null 原样传播零行为变化）。mpv 同款四构造点
+  逐一注入（JVM 不可实例化 native 引擎——真机 device smoke 以 mpv 为主引擎实弹覆盖）。
+- **日志 follow-up（登记不并入）**：LogcatLogger 把整条消息再过一次 Redactor
+  （双重脱敏）会截断 header map 打印——诊断时的临时 base64 绕过已随诊断构建废弃，
+  独立 issue 处理。
+
 ## Phase 1G Jellyfin Provider Foundation & Parity（A/B/C 全 ACCEPTED，已随 PR #11/#12 merge @ `1d105a1`；device smoke 待做）
 - **ADR-039 已冻结**（DECISIONS.md）：现代 Authorization contract / generic image auth
   （auth-scope 归属 fail-closed）/ provider-specific session store / IDENTITY_LOOKUP

@@ -8,6 +8,7 @@ import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackMode
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.provider.api.MediaProgressProvider
+import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.emby.EmbyProviderSupport
 import com.mediahub.provider.emby.api.EmbyApiClient
 import com.mediahub.provider.emby.session.EmbySessionStore
@@ -21,17 +22,24 @@ import kotlinx.coroutines.sync.withLock
  * （Mutex 原子状态机），wire 为 Emby SessionsController 三入口；
  * 错误映射走 [EmbyProviderSupport] 既有契约（与 library/search 同一来源）。
  *
- * - POST /Sessions/Playing（同条目首次上报，start）
+ * - POST /Sessions/Playing（同会话首次上报，start）
  * - POST /Sessions/Playing/Progress（后续 / 关键事件 flush）
  * - POST /Sessions/Playing/Stopped（[reportFinalProgress]，退出权威进度写入者）
  *
- * - **生命周期状态机**（Mutex 串行，原子转移）：同条目首次 reportProgress →
- *   Playing（恰一次）+ Progress；后续 → Progress；**条目切换先为上一条目补发
+ * - **PlaySessionId 绑定（ADR-040 correction，真机勘误）**：真实 Emby 4.x 以 body 的
+ *   PlaySessionId 作会话字典键，缺失即 400 null-key。值必须来自 PlaybackInfo 真值
+ *   （[PlaybackProgress.sessionId]，resolvePlayback 阶段非空校验），不自行生成、
+ *   不用 ItemId/DeviceId 代替；**active 会话身份 = (itemId, sessionId) 二元组**——
+ *   任一变化都按"旧会话 Stopped(best-effort) → 新会话 Playing"的 switch 纪律处理，
+ *   关旧会话只用旧会话自己的 PlaySessionId。[progress.sessionId] 缺失/空白即
+ *   fail-closed（[ProviderException.Parse]，0 HTTP，无任何 fallback）。
+ * - **生命周期状态机**（Mutex 串行，原子转移）：同会话首次 reportProgress →
+ *   Playing（恰一次）+ Progress；后续 → Progress；**条目/会话切换先为上一会话补发
  *   Stopped（best-effort，取消原样穿透）再开新会话**；[reportFinalProgress] 三态收口：
- *   无前导 Playing → 补 Playing + Stopped；同条目 active → 仅 Stopped；上一条目仍
- *   active 但 final 的是新条目 → Stopped(上一条目) + Playing + Stopped（旧会话不残留）——
- *   并关闭会话状态；final 后同条目再次上报 → 新 Playing（新会话）。
- *   禁止 Progress before Playing / 双重 Stopped / Stopped 后裸 Progress /
+ *   无前导 Playing → 补 Playing + Stopped；同会话 active → 仅 Stopped；上一会话仍
+ *   active 但 final 的是新条目/新会话 → Stopped(上一会话) + Playing + Stopped（旧
+ *   server session 不残留）——并关闭会话状态；final 后同条目再次上报 → 新 Playing
+ *   （新会话）。禁止 Progress before Playing / 双重 Stopped / Stopped 后裸 Progress /
  *   上一条目状态泄漏到下一条目。
  * - 节流/触发节奏由 ProgressSyncCoordinator 控制（10s throttle + 关键事件 flush
  *   + final flush），本 provider 不建 timer。
@@ -59,31 +67,43 @@ class EmbyProgressProvider(
     private var lastItemId: String? = null
     private var lastPositionTicks: Long? = null
 
+    /** 与 [lastItemId] 同置同清（不变量：非空性一致）；active 会话的 PlaybackInfo 真值。 */
+    private var lastPlaySessionId: String? = null
+
     override suspend fun reportProgress(progress: PlaybackProgress) {
+        // fail-closed（ADR-040 correction）：会话键缺失不发任何请求、不生成 fallback
+        val sessionId = requirePlaySessionId(progress)
         val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
         try {
             sessionMutex.withLock {
                 val positionTicks = toTicks(progress.positionMs)
-                if (progress.itemId != lastItemId) {
-                    // 条目切换：为上一条目补发 Stopped（final stop reporting），再开新会话。
+                val activeMatches =
+                    progress.itemId == lastItemId && sessionId == lastPlaySessionId
+                if (!activeMatches) {
+                    // 条目/会话切换：为上一会话补发 Stopped（final stop reporting），再开新会话。
+                    // 关旧会话只用旧会话自己的 PlaySessionId（不变量保证非空）。
                     // 显式 catch：cancellation 原样透传（不得吞进 best-effort 日志），
                     // 且取消后不得继续新会话的任何请求。
-                    lastItemId?.let { previous ->
+                    val previousItemId = lastItemId
+                    val previousPsid = lastPlaySessionId
+                    if (previousItemId != null && previousPsid != null) {
                         try {
-                            api.playbackStopped(token, userId, previous, lastPositionTicks ?: 0L)
+                            api.playbackStopped(token, userId, previousItemId, previousPsid, lastPositionTicks ?: 0L)
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            logger.w(LogTag.PROVIDER, "Emby Stopped 补发失败（best-effort） itemId=$previous", e)
+                            logger.w(LogTag.PROVIDER, "Emby Stopped 补发失败（best-effort） itemId=$previousItemId", e)
                         }
                     }
-                    api.playbackStart(token, userId, progress.itemId, positionTicks, playMethod(progress))
+                    api.playbackStart(token, userId, progress.itemId, sessionId, positionTicks, playMethod(progress))
                     lastItemId = progress.itemId
+                    lastPlaySessionId = sessionId
                 }
                 api.playbackProgress(
                     token,
                     userId,
                     progress.itemId,
+                    sessionId,
                     positionTicks,
                     progress.isPaused,
                     playMethod(progress),
@@ -104,41 +124,47 @@ class EmbyProgressProvider(
      * 共同维护用户活动和播放位置——**禁止发送裸 Stopped**（无前导 Playing 的
      * Stopped 在 Emby 协议上无 lifecycle 语义）。
      *
-     * 三态收口（Mutex 内原子转移）：
+     * 三态收口（Mutex 内原子转移；active 身份 = (itemId, sessionId)）：
      * - 无前导 Playing（如 <10s 短播放退出，coordinator sample 未触发）→
      *   补发 Playing + Stopped（保证 server session lifecycle 完整）；
-     * - 同条目 active（lastItemId == final 条目）→ 仅 Stopped；
-     * - 上一条目仍 active 但 final 的是新条目（切台后不足一个 sample 周期即退出）→
-     *   先按 item-switch 同款规则 Stopped(上一条目，lastPositionTicks)，
-     *   再 Playing + Stopped(final 条目)——旧 server session 不得残留。
+     * - 同会话 active（itemId 与 sessionId 都匹配）→ 仅 Stopped（用 active 会话的
+     *   PlaySessionId）；
+     * - 上一会话仍 active 但 final 的是新条目/新会话（切台或会话重解析后不足一个
+     *   sample 周期即退出）→ 先按 switch 同款规则 Stopped(上一会话，lastPositionTicks，
+     *   上一会话自己的 PlaySessionId)，再 Playing + Stopped(final 会话)——旧 server
+     *   session 不得残留。
      * Mutex 保证与在途 Progress 的先后：final 不得被迟到的 Progress 越过。
      * Stopped best-effort（退出路径不抛网络异常；短超时由协调器保证）；补发 Playing
      * 失败即终止 final 并将状态归零（防后续 reportProgress 发裸 Progress）；
      * cancellation 原样传播。非取消路径无论成败都关闭会话状态。
      */
     override suspend fun reportFinalProgress(progress: PlaybackProgress) {
+        // fail-closed（ADR-040 correction）：会话键缺失不发任何请求、不生成 fallback
+        val sessionId = requirePlaySessionId(progress)
         val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
         try {
             sessionMutex.withLock {
                 val ticks = toTicks(progress.positionMs)
                 val playMethod = playMethod(progress)
                 val previousItemId = lastItemId
-                if (previousItemId != null && previousItemId != progress.itemId) {
-                    // 上一条目会话仍 active 但 final 的是新条目：先按 item-switch 同款
-                    // 规则关旧会话（best-effort，位置取 lastPositionTicks），
-                    // 否则旧 server session 残留。
+                val previousPsid = lastPlaySessionId
+                val matchesActive = previousItemId == progress.itemId && previousPsid == sessionId
+                if (!matchesActive && previousItemId != null && previousPsid != null) {
+                    // 上一会话仍 active 但 final 的是新条目/新会话：先按 switch 同款
+                    // 规则关旧会话（best-effort，位置取 lastPositionTicks，PlaySessionId
+                    // 用旧会话自己的），否则旧 server session 残留。
                     try {
-                        api.playbackStopped(token, userId, previousItemId, lastPositionTicks ?: 0L)
+                        api.playbackStopped(token, userId, previousItemId, previousPsid, lastPositionTicks ?: 0L)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
                         logger.w(LogTag.PROVIDER, "Emby final 前旧会话 Stopped 补发失败（best-effort） itemId=$previousItemId", e)
                     }
                 }
-                if (previousItemId != progress.itemId) {
-                    // final 条目无前导 Playing → 补发（Playback Check-ins 禁止裸 Stopped）
+                if (!matchesActive) {
+                    // final 会话无前导 Playing → 补发（Playback Check-ins 禁止裸 Stopped）
                     try {
-                        api.playbackStart(token, userId, progress.itemId, ticks, playMethod)
+                        api.playbackStart(token, userId, progress.itemId, sessionId, ticks, playMethod)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -146,11 +172,12 @@ class EmbyProgressProvider(
                         // 防止后续 reportProgress 对该条目发裸 Progress
                         lastItemId = null
                         lastPositionTicks = null
+                        lastPlaySessionId = null
                         throw e
                     }
                 }
                 try {
-                    api.playbackStopped(token, userId, progress.itemId, ticks)
+                    api.playbackStopped(token, userId, progress.itemId, sessionId, ticks)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -158,6 +185,7 @@ class EmbyProgressProvider(
                 }
                 lastItemId = null
                 lastPositionTicks = null
+                lastPlaySessionId = null
             }
         } catch (e: CancellationException) {
             throw e
@@ -165,6 +193,20 @@ class EmbyProgressProvider(
             throw EmbyProviderSupport.mapError(server.id, e)
         }
     }
+
+    /**
+     * 真机勘误（ADR-040 correction）：真实 Emby 4.x 以 PlaySessionId 作会话字典键，
+     * 缺失/null 即 400 "Value cannot be null. (Parameter 'key')"。
+     * fail-closed：缺失/空白直接报协议错误，**0 HTTP、无任何 fallback 生成**。
+     */
+    private fun requirePlaySessionId(progress: PlaybackProgress): String =
+        progress.sessionId?.takeIf(String::isNotBlank)
+            ?: throw ProviderException.Parse(
+                server.id,
+                IllegalArgumentException(
+                    "PlaybackProgress.sessionId 缺失：PlaySessionId 必须来自 PlaybackInfo（fail-closed，0 HTTP）"
+                ),
+            )
 
     /** v1 刻意空实现：本地"继续观看"由 Room 快照驱动（1B-2.1 真机已证）。 */
     override suspend fun getContinueWatching(limit: Int): List<MediaItem> = emptyList()
