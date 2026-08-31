@@ -9,8 +9,8 @@ if [[ ! "${ANDROID_SERIAL:-}" =~ ^emulator-[0-9]+$ ]]; then
 fi
 
 mkdir -p ci-evidence
-timeout 60s adb -s "$ANDROID_SERIAL" shell am wait-for-broadcast-idle \
-  | tee ci-evidence/emulator-broadcast-idle.txt
+# Google APIs images may keep enqueueing unrelated background broadcasts indefinitely.
+# Wait only for the HOME launch that can cover our test Activity, not global system idleness.
 timeout 30s adb -s "$ANDROID_SERIAL" shell am start -W \
   -a android.intent.action.MAIN -c android.intent.category.HOME \
   | tee ci-evidence/emulator-home.txt
