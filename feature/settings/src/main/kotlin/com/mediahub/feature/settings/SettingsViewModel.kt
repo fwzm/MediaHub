@@ -2,7 +2,7 @@ package com.mediahub.feature.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.mediahub.core.database.prefs.UserPreferencesStore
+import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.model.UserPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -13,7 +13,7 @@ import kotlinx.coroutines.launch
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val preferencesStore: UserPreferencesStore,
+    private val preferencesStore: UserPreferencesRepository,
 ) : ViewModel() {
 
     val preferences: StateFlow<UserPreferences> = preferencesStore.flow
@@ -21,5 +21,9 @@ class SettingsViewModel @Inject constructor(
 
     fun update(transform: (UserPreferences) -> UserPreferences) {
         viewModelScope.launch { preferencesStore.update(transform) }
+    }
+
+    fun resetPlayerVisualEffects() {
+        viewModelScope.launch { preferencesStore.resetPlayerVisualEffects() }
     }
 }

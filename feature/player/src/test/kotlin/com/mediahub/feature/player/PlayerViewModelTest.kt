@@ -7,6 +7,7 @@ import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
+import com.mediahub.core.ui.effects.VisualPalette
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaServer
@@ -27,6 +28,7 @@ import com.mediahub.player.engine.EngineKind
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.MediaDetailProvider
 import com.mediahub.provider.api.MediaPlaybackProvider
+import com.mediahub.provider.api.MediaProgressProvider
 import com.mediahub.provider.api.MediaProvider
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderCapability
@@ -36,6 +38,7 @@ import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
 import com.mediahub.provider.api.ProviderStatus
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -44,7 +47,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -118,6 +123,7 @@ class PlayerViewModelTest {
             mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
             engineHistory = InMemoryEnginePreferenceHistory(),
             userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
             logger = noOpLogger,
         )
         try {
@@ -165,6 +171,7 @@ class PlayerViewModelTest {
             mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
             engineHistory = InMemoryEnginePreferenceHistory(),
             userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
             logger = noOpLogger,
         )
         try {
@@ -202,6 +209,7 @@ class PlayerViewModelTest {
             mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
             engineHistory = InMemoryEnginePreferenceHistory(),
             userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
             logger = noOpLogger,
         )
         try {
@@ -215,7 +223,153 @@ class PlayerViewModelTest {
         }
     }
 
+    @Test
+    fun `artwork palette succeeds preserves prior value on failure and rejects late result`() =
+        runTest(dispatcher) {
+            val detail = SequencedDetail(
+                listOf(
+                    mediaItemWithPoster("https://image/one"),
+                    mediaItemWithPoster("https://image/fails"),
+                    mediaItemWithPoster("https://image/late"),
+                    mediaItemWithPoster("https://image/latest"),
+                ),
+            )
+            val registry = FakeRegistry(
+                detail = detail,
+                playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv")),
+            )
+            val loader = ControllableArtworkPaletteLoader()
+            val vm = PlayerViewModel(
+                savedStateHandle = savedState("m1"),
+                serverStore = FakeServerStore(embyServer()),
+                progressStore = FakeProgressStore(resume = null),
+                registry = registry,
+                media3EngineFactory = PlaybackEngineCreator { FakeEngine() },
+                mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+                engineHistory = InMemoryEnginePreferenceHistory(),
+                userPreferencesRepository = FakeUserPreferences(),
+                artworkPaletteLoader = loader,
+                logger = noOpLogger,
+            )
+            try {
+                runCurrent()
+                val first = palette(0xFF446688.toInt())
+                loader.complete("https://image/one", first)
+                runCurrent()
+                assertEquals(first, vm.artworkPalette.value)
+
+                vm.resolve()
+                runCurrent()
+                loader.complete("https://image/fails", null)
+                runCurrent()
+                assertEquals(first, vm.artworkPalette.value)
+
+                vm.resolve()
+                runCurrent()
+                vm.resolve()
+                runCurrent()
+                val latest = palette(0xFFAA7744.toInt())
+                loader.complete("https://image/latest", latest)
+                runCurrent()
+                assertEquals(latest, vm.artworkPalette.value)
+
+                loader.complete("https://image/late", palette(0xFF22AA66.toInt()))
+                runCurrent()
+                assertEquals(latest, vm.artworkPalette.value)
+            } finally {
+                vm.stopAndFlush()
+                runCurrent()
+            }
+        }
+
+    @Test
+    fun `exit cancels periodic reports before final report and releases only after final completes`() =
+        runTest(dispatcher) {
+            val calls = mutableListOf<String>()
+            val periodicPositions = mutableListOf<Long>()
+            val finalEntered = CompletableDeferred<Unit>()
+            val finishFinal = CompletableDeferred<Unit>()
+            val finalProgress = PlaybackProgress(
+                serverId = "srv-1", itemId = "m1", positionMs = 12_000,
+                durationMs = 60_000, isPaused = true, updatedAtEpochMs = 1,
+                sessionId = "visual-integration-session",
+            )
+            val progressProvider = object : MediaProgressProvider {
+                override val remoteReportIntervalMs = 100L
+                override suspend fun reportProgress(progress: PlaybackProgress) {
+                    calls += "periodic"
+                    periodicPositions += progress.positionMs
+                }
+                override suspend fun reportFinalProgress(progress: PlaybackProgress) {
+                    assertEquals(finalProgress, progress)
+                    calls += "final"
+                    finalEntered.complete(Unit)
+                    finishFinal.await()
+                }
+                override suspend fun getContinueWatching(limit: Int) = emptyList<MediaItem>()
+                override suspend fun getResumePosition(itemId: String): Long? = null
+            }
+            val engine = FakeEngine(
+                finalProgress = finalProgress,
+                onStop = { calls += "stop" },
+                onRelease = { calls += "release" },
+            )
+            val vm = PlayerViewModel(
+                savedStateHandle = savedState("m1"),
+                serverStore = FakeServerStore(embyServer()),
+                progressStore = FakeProgressStore(resume = null) { calls += "local" },
+                registry = FakeRegistry(
+                    detail = FakeDetail(mediaItemWithPoster("https://image/one")),
+                    playback = FakePlayback(PlaybackSource(
+                        url = "http://media/stream.mkv", sessionId = finalProgress.sessionId,
+                    )),
+                    progress = progressProvider,
+                ),
+                media3EngineFactory = PlaybackEngineCreator { engine },
+                mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+                engineHistory = InMemoryEnginePreferenceHistory(),
+                userPreferencesRepository = FakeUserPreferences(),
+                artworkPaletteLoader = NoArtworkPalette,
+                logger = noOpLogger,
+            )
+            try {
+                runCurrent()
+                // Positive control: prove the production coordinator was subscribed and could
+                // report before asserting that exit cancels that previously live pipeline.
+                engine.emitProgress(finalProgress.copy(positionMs = 9_000))
+                runCurrent()
+                advanceTimeBy(100)
+                runCurrent()
+                assertEquals(listOf("periodic"), calls)
+                assertEquals(listOf(9_000L), periodicPositions)
+                calls.clear()
+                engine.emitProgress(finalProgress.copy(positionMs = 10_000))
+                runCurrent() // Queue a periodic sample before exit begins.
+                val exit = launch { vm.stopAndFlush() }
+                runCurrent()
+                assertTrue("final path must have started", finalEntered.isCompleted)
+                assertEquals(listOf("stop", "local", "final"), calls)
+
+                // While final reporting is suspended, neither an already queued sample nor a
+                // late engine emission may reopen the remote playing session.
+                engine.emitProgress(finalProgress.copy(positionMs = 13_000))
+                advanceTimeBy(1_000)
+                runCurrent()
+                assertEquals(listOf("stop", "local", "final"), calls)
+                finishFinal.complete(Unit)
+                exit.join()
+                vm.stopAndFlush() // Explicit Back and onDispose must remain idempotent.
+                assertEquals(listOf("stop", "local", "final", "release"), calls)
+            } finally {
+                finishFinal.complete(Unit)
+                vm.stopAndFlush()
+                runCurrent()
+            }
+        }
+
     // ---- fakes ----
+    private val NoArtworkPalette = ArtworkPaletteLoader { _, _ -> null }
+
     private class FakeUserPreferences : UserPreferencesRepository {
         val state = MutableStateFlow(UserPreferences())
         override val flow: Flow<UserPreferences> = state
@@ -229,14 +383,40 @@ class PlayerViewModelTest {
         override suspend fun getServer(id: String): MediaServer? = server.takeIf { it.id == id }
     }
 
-    private class FakeProgressStore(private val resume: Long?) : ProgressStore {
+    private class FakeProgressStore(
+        private val resume: Long?,
+        private val onSave: (PlaybackProgress) -> Unit = {},
+    ) : ProgressStore {
         override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> = flowOf(emptyList())
         override suspend fun getResume(serverId: String, itemId: String): Long? = resume
-        override suspend fun save(progress: PlaybackProgress) = Unit
+        override suspend fun save(progress: PlaybackProgress) = onSave(progress)
     }
 
     private class FakeDetail(private val item: MediaItem) : MediaDetailProvider {
         override suspend fun getItemDetail(itemId: String): MediaDetail = MediaDetail(item = item)
+    }
+
+    private class SequencedDetail(items: List<MediaItem>) : MediaDetailProvider {
+        private val remaining = ArrayDeque(items)
+        private var last = items.last()
+
+        override suspend fun getItemDetail(itemId: String): MediaDetail {
+            if (remaining.isNotEmpty()) last = remaining.removeFirst()
+            return MediaDetail(item = last)
+        }
+    }
+
+    private class ControllableArtworkPaletteLoader : ArtworkPaletteLoader {
+        private val pending = mutableMapOf<String, CompletableDeferred<VisualPalette?>>()
+
+        override suspend fun load(artworkKey: String, url: String?): VisualPalette? {
+            val requiredUrl = checkNotNull(url)
+            return pending.getOrPut(requiredUrl) { CompletableDeferred() }.await()
+        }
+
+        fun complete(url: String, value: VisualPalette?) {
+            pending.getOrPut(url) { CompletableDeferred() }.complete(value)
+        }
     }
 
     private class FakePlayback(
@@ -274,15 +454,20 @@ class PlayerViewModelTest {
     private class FakeRegistry(
         private val detail: MediaDetailProvider? = null,
         private val playback: MediaPlaybackProvider? = null,
+        private val progress: MediaProgressProvider? = null,
     ) : MediaProviderRegistry {
         override fun factoryFor(type: ServerType): com.mediahub.provider.api.MediaProviderFactory? = null
         override val supportedTypes: Set<ServerType> = emptySet()
         override fun create(server: MediaServer): ProviderHandle =
-            ProviderHandle(provider = FakeProvider(server.id), detail = detail, playback = playback)
+            ProviderHandle(provider = FakeProvider(server.id), detail = detail, playback = playback, progress = progress)
         override fun descriptors(): List<ProviderDescriptor> = emptyList()
     }
 
-    private class FakeEngine : PlaybackEnginePort {
+    private class FakeEngine(
+        private val finalProgress: PlaybackProgress? = null,
+        private val onStop: () -> Unit = {},
+        private val onRelease: () -> Unit = {},
+    ) : PlaybackEnginePort {
         private val ui = MutableStateFlow(PlaybackUiState())
         override val uiState: StateFlow<PlaybackUiState> get() = ui
         private val progressFlow = MutableSharedFlow<PlaybackProgress>(extraBufferCapacity = 1)
@@ -300,8 +485,12 @@ class PlayerViewModelTest {
         override fun setSpeed(speed: Float) = Unit
         override fun selectAudioTrack(selection: TrackSelection?) = Unit
         override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
-        override fun stop(): PlaybackProgress? = null
-        override fun release() = Unit
+        fun emitProgress(value: PlaybackProgress) { progressFlow.tryEmit(value) }
+        override fun stop(): PlaybackProgress? {
+            onStop()
+            return finalProgress
+        }
+        override fun release() = onRelease()
     }
 
     private val noOpLogger = object : Logger {
@@ -310,4 +499,20 @@ class PlayerViewModelTest {
         override fun w(tag: LogTag, message: String, throwable: Throwable?) = Unit
         override fun e(tag: LogTag, message: String, throwable: Throwable?) = Unit
     }
+
+    private fun mediaItemWithPoster(url: String) = MediaItem(
+        serverId = "srv-1",
+        id = "m1",
+        type = MediaType.MOVIE,
+        title = "电影A",
+        posterUrl = url,
+        container = "mkv",
+    )
+
+    private fun palette(primary: Int) = VisualPalette(
+        background = 0xFF080A10.toInt(),
+        primary = primary,
+        secondary = 0xFF334455.toInt(),
+        accent = 0xFFCCDDEE.toInt(),
+    )
 }

@@ -40,4 +40,7 @@ dependencies {
 
     // 受控预编译 libmpv（jarnedemeulemeester/libmpv-android v1.0.0，见 native-lock.json）
     implementation(libs.libmpv.android)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
