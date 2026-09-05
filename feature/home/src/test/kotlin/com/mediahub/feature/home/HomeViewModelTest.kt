@@ -110,6 +110,8 @@ class HomeViewModelTest {
         override suspend fun setDefault(id: String) { }
         override suspend fun updateEndpointQuality(
             serverId: String,
+            endpointId: String,
+            expectedUrl: String,
             apiLatencyMs: Long?,
             mediaFirstByteMs: Long?,
             throughputMbps: Double?,
