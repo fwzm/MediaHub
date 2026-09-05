@@ -84,11 +84,17 @@ class EmbyProgressProviderTest {
 
         /** 置位后 playbackProgress 派发后阻塞，直到 complete（模拟在途网络）。 */
         var blockProgress: CompletableDeferred<Unit>? = null
-        val progressEntered = CompletableDeferred<Unit>()
+
+        /**
+         * 本次 playbackProgress 派发信号。var + 每用例重置：同一 RecordingApi 的
+         * 早期上报会 complete 掉共享 deferred，陈旧信号会让 await() 提前返回、
+         * barrier 失去"在途"锁定语义（CI flake 根因）。
+         */
+        var progressEntered = CompletableDeferred<Unit>()
 
         /** 置位后 playbackStopped 派发后阻塞，直到 complete。 */
         var blockStopped: CompletableDeferred<Unit>? = null
-        val stoppedEntered = CompletableDeferred<Unit>()
+        var stoppedEntered = CompletableDeferred<Unit>()
 
         /** 非空时 playbackProgress 抛错（模拟 wire 失败，不经 HTTP）。 */
         var progressError: Exception? = null
@@ -599,6 +605,7 @@ class EmbyProgressProviderTest {
         p.reportProgress(progress(positionMs = 90_000)) // 正常首报
 
         api.blockProgress = CompletableDeferred()
+        api.progressEntered = CompletableDeferred() // 首报已 complete 共享信号：重置后才能锁定本次派发点
 
         // 普通 report：Progress 派发后卡住在途（持有 Mutex）
         val reportJob = launch { p.reportProgress(progress(positionMs = 120_000)) }
@@ -607,7 +614,7 @@ class EmbyProgressProviderTest {
 
         // final 请求：只能排队等 Mutex，不得越过在途 Progress
         val finalJob = launch { p.reportFinalProgress(progress(positionMs = 300_000)) }
-        yield() // 让 finalJob 到达 mutex 挂起点
+        repeat(4) { yield() } // 确保 finalJob 到达 mutex 挂起点（CI 慢调度下单次 yield 不足）
 
         api.blockProgress!!.complete(Unit)
         reportJob.join()
@@ -626,6 +633,7 @@ class EmbyProgressProviderTest {
         p.reportProgress(progress(positionMs = 90_000))
 
         api.blockStopped = CompletableDeferred()
+        api.stoppedEntered = CompletableDeferred()
 
         // final：Stopped 派发后卡住在途（持有 Mutex）
         val finalJob = launch { p.reportFinalProgress(progress(positionMs = 300_000)) }
@@ -634,7 +642,7 @@ class EmbyProgressProviderTest {
 
         // 迟到 report：只能排队等 Mutex，不得在 Stopped 前插入任何请求
         val lateJob = launch { p.reportProgress(progress(positionMs = 60_000)) }
-        yield()
+        repeat(4) { yield() }
 
         api.blockStopped!!.complete(Unit)
         finalJob.join()
