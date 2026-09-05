@@ -11,7 +11,8 @@ fi
 mkdir -p ci-evidence
 # Google APIs images may keep enqueueing unrelated background broadcasts indefinitely.
 # Wait only for the HOME launch that can cover our test Activity, not global system idleness.
-timeout 30s adb -s "$ANDROID_SERIAL" shell am start -W \
+# 60s (not 30s): cold runners' first boot can be slow to surface the HOME activity.
+timeout 60s adb -s "$ANDROID_SERIAL" shell am start -W \
   -a android.intent.action.MAIN -c android.intent.category.HOME \
   | tee ci-evidence/emulator-home.txt
 # `am start` can exit zero even when its output reports a launch error or timeout.
