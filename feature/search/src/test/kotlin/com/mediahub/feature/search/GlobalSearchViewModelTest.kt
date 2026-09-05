@@ -80,6 +80,17 @@ class GlobalSearchViewModelTest {
     private class FakeServerStore(private val servers: List<MediaServer>) : ServerStore {
         override fun observeServers(): Flow<List<MediaServer>> = flow { emit(servers) }
         override suspend fun getServer(id: String): MediaServer? = servers.firstOrNull { it.id == id }
+        override suspend fun updateServer(server: MediaServer) { }
+        override suspend fun setDefault(id: String) { }
+        override suspend fun updateEndpointQuality(
+            serverId: String,
+            apiLatencyMs: Long?,
+            mediaFirstByteMs: Long?,
+            throughputMbps: Double?,
+            protocol: String?,
+            supportsRange: Boolean?,
+            httpCode: Int?,
+        ) { }
     }
 
     /** 可编程 fake：记录 query、按 behavior 行事。 */

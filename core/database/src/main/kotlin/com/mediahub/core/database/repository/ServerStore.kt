@@ -4,10 +4,35 @@ import com.mediahub.model.MediaServer
 import kotlinx.coroutines.flow.Flow
 
 /**
- * 服务器读取接口（可测性抽象，FINAL PATCH 4）。
+ * 服务器存取接口（可测性抽象，FINAL PATCH 4；Phase 1I 扩展编辑/质量写路径）。
  * [ServerRepository] 是其唯一生产实现；测试可用内存 fake。
+ *
+ * 写路径成员带抛错默认实现：既有只读 fake（home/library/search/detail/player 等）
+ * 无需逐一修改即可编译；若某测试实际触达写路径而未重写，会在此大声失败而非静默吞掉。
  */
 interface ServerStore {
     fun observeServers(): Flow<List<MediaServer>>
     suspend fun getServer(id: String): MediaServer?
+
+    /** 编辑器保存（名称/备注/图标/主线路 URL）。 */
+    suspend fun updateServer(server: MediaServer): Unit =
+        throw UnsupportedOperationException("ServerStore fake 未实现 updateServer")
+
+    /** 设为默认媒体源（原子清旧设新，保证最多一个 isDefault）。 */
+    suspend fun setDefault(id: String): Unit =
+        throw UnsupportedOperationException("ServerStore fake 未实现 setDefault")
+
+    /**
+     * 线路质量结果持久化（U4-D）。调用方必须先完成草稿归属校验：
+     * 仅当被测 URL 是已保存线路的当前地址时才允许写入（Phase 1I review P2）。
+     */
+    suspend fun updateEndpointQuality(
+        serverId: String,
+        apiLatencyMs: Long?,
+        mediaFirstByteMs: Long?,
+        throughputMbps: Double?,
+        protocol: String?,
+        supportsRange: Boolean?,
+        httpCode: Int?,
+    ): Unit = throw UnsupportedOperationException("ServerStore fake 未实现 updateEndpointQuality")
 }

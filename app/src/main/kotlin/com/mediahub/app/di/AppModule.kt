@@ -114,6 +114,11 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideEndpointTestService(factory: HttpClientFactory): com.mediahub.core.network.EndpointTestService =
+        com.mediahub.core.network.EndpointTestService(factory)
+
+    @Provides
+    @Singleton
     fun provideApiClient(
         factory: HttpClientFactory,
         logger: Logger,
@@ -187,6 +192,10 @@ abstract class RegistryModule {
     @Binds
     @Singleton
     abstract fun bindServerStore(impl: ServerRepository): ServerStore
+
+    @Binds
+    @Singleton
+    abstract fun bindServerRemoveHandler(impl: com.mediahub.feature.server.RemoveServerUseCase): com.mediahub.feature.server.ServerRemoveHandler
 
     @Binds
     @Singleton

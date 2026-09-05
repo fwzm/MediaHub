@@ -23,13 +23,16 @@ data class EndpointTestResult(
  *
  * Phase 1G-A（ADR-039）：[probePath] 由调用方从 ProviderDescriptor.probePath 传入——
  * 本类**不含任何 Emby/Jellyfin 协议路径知识**（/emby 前缀属于 Emby provider 自述）。
+ *
+ * open：Phase 1I 线路质量测试的陈旧结果隔离需要可控延迟的测试替身
+ * （EmbyApiClient/EndpointTestService 同款 open-for-test 约定）。
  */
-class EndpointTestService(
+open class EndpointTestService(
     private val clientFactory: HttpClientFactory,
     private val clock: () -> Long = SystemClock::elapsedRealtime,
 ) {
 
-    suspend fun test(baseUrl: String, probePath: String): EndpointTestResult {
+    open suspend fun test(baseUrl: String, probePath: String): EndpointTestResult {
         val probeUrl = baseUrl.trimEnd('/') + probePath
         var apiLatency = -1L
         var mediaFirstByte: Long? = null

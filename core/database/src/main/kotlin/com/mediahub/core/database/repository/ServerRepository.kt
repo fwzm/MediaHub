@@ -56,7 +56,7 @@ class ServerRepository @Inject constructor(
     }
 
     /** 更新媒体源（整体替换线路）。 */
-    suspend fun updateServer(server: MediaServer) {
+    override suspend fun updateServer(server: MediaServer) {
         dao.upsert(server.toEntity())
         endpointDao.deleteByServer(server.id)
         val endpoints = server.endpoints.mapIndexed { index, ep ->
@@ -79,7 +79,7 @@ class ServerRepository @Inject constructor(
     }
 
     /** 设为默认：原子「清旧设新」（单条 SQL），保证最多一个 isDefault==true。 */
-    suspend fun setDefault(id: String) {
+    override suspend fun setDefault(id: String) {
         dao.setDefaultExclusive(id)
     }
 
@@ -92,7 +92,7 @@ class ServerRepository @Inject constructor(
     }
 
     /** 线路质量测试结果落库（U4-D）。 */
-    suspend fun updateEndpointQuality(
+    override suspend fun updateEndpointQuality(
         serverId: String,
         apiLatencyMs: Long?,
         mediaFirstByteMs: Long?,
