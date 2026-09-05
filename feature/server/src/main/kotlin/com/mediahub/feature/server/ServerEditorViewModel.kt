@@ -18,6 +18,7 @@ import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.MediaProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +40,8 @@ data class ServerEditorUiState(
     val addressError: String? = null,
     /** 地址草稿版本：地址/协议变化递增；异步测试结果按发起时版本绑定。 */
     val addressVersion: Long = 0,
+    /** 质量测试请求身份（发起/草稿变化递增）；与 VM 内计数器比对做返回后归属校验。 */
+    val qualityRequestId: Long = 0,
     val icon: String? = null,
     val loggedIn: Boolean = false,
     val isTesting: Boolean = false,
@@ -81,6 +84,12 @@ class ServerEditorViewModel @Inject constructor(
 
     /** 在途线路质量任务；地址/协议变化即取消（返回后的版本检查仍保留）。 */
     private var qualityJob: Job? = null
+
+    /**
+     * 质量测试请求身份：发起与草稿变化均递增。与 [ServerEditorUiState.qualityRequestId]
+     * 对比完成"返回后归属校验"与"取消收尾所有权校验"（review P2 round 2）。
+     */
+    private var qualityRequestId: Long = 0
 
     init { load() }
 
@@ -137,6 +146,7 @@ class ServerEditorViewModel @Inject constructor(
     /** 地址输入：重新规范化 + 草稿版本递增 + 清除旧测试/质量结果 + 取消在途质量任务。 */
     fun updateBaseUrl(raw: String) {
         qualityJob?.cancel()
+        qualityRequestId += 1 // 使在途请求的身份失效（其收尾不得关闭新状态）
         _uiState.update { st ->
             val detected = ServerAddressNormalizer.explicitHttpScheme(raw)
             val preferHttps = detected?.let { it == "https" } ?: st.preferHttps
@@ -147,6 +157,8 @@ class ServerEditorViewModel @Inject constructor(
                 resolvedUrl = (normalized as? ServerAddressNormalizer.Result.Ok)?.address?.url,
                 addressError = (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
                 addressVersion = st.addressVersion + 1,
+                qualityRequestId = qualityRequestId,
+                isMediaTesting = false, // 在途任务已被取消：loading 显式复位
                 testResult = null,
                 mediaQualityResult = null,
             )
@@ -156,6 +168,7 @@ class ServerEditorViewModel @Inject constructor(
     /** 手动切换 HTTPS 开关：只改 scheme（粘贴进来的完整 URL 同样重写文本协议），端口与子路径保留。 */
     fun toggleHttps(enabled: Boolean) {
         qualityJob?.cancel()
+        qualityRequestId += 1
         _uiState.update { st ->
             val target = if (enabled) "https" else "http"
             val newText = if (st.baseUrl.isBlank()) st.baseUrl else ServerAddressNormalizer.withScheme(st.baseUrl, target)
@@ -166,6 +179,8 @@ class ServerEditorViewModel @Inject constructor(
                 resolvedUrl = (normalized as? ServerAddressNormalizer.Result.Ok)?.address?.url,
                 addressError = (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
                 addressVersion = st.addressVersion + 1,
+                qualityRequestId = qualityRequestId,
+                isMediaTesting = false, // 在途任务已被取消：loading 显式复位
                 testResult = null,
                 mediaQualityResult = null,
             )
@@ -204,11 +219,16 @@ class ServerEditorViewModel @Inject constructor(
     /**
      * 两层线路质量测试（U4-D）：API latency + Media Range 1MB。
      *
-     * Phase 1I review P2——结果按**双闸**隔离：
-     * 1. 显示闸（[AddressTestResultPolicy]）：测试发起后地址/协议变化 → 在途任务已取消，
-     *    返回后版本仍不符则丢弃，不显示；
-     * 2. 持久化闸：仅当被测 URL == 已保存主线路当前地址时才写库。测试对象只是未保存
-     *    草稿时，结果可展示在草稿下，但不得覆盖已保存线路的质量数据。
+     * Phase 1I review P2（round 2）——**请求身份** + 双闸：
+     * 1. 请求身份（[qualityRequestId]）：每次发起递增；地址/协议变化递增并取消在途
+     *    任务。返回后身份不符（被更新的请求取代）→ 显示与写库同时禁止。
+     * 2. 草稿版本（[AddressTestResultPolicy]）：发起后地址/协议变化 → 显示与写库同时禁止。
+     * 3. 持久化归属：仅当被测 URL == 已保存主线路当前地址时才写库；未保存草稿 B 的
+     *    结果只展示在草稿下，不得覆盖已保存线路的质量数据。写库携带测试时的
+     *    `endpointId + expectedUrl`，由 Repository 在事务内做条件更新（防检查-写入竞态）。
+     *
+     * 收尾：try/finally + 所有权校验复位 [ServerEditorUiState.isMediaTesting]——
+     * 取消与异常路径同样复位；旧任务的收尾不得关闭新任务的 loading。
      */
     fun testMediaQuality() {
         val state = _uiState.value
@@ -231,45 +251,73 @@ class ServerEditorViewModel @Inject constructor(
             return
         }
         val versionAtRequest = state.addressVersion
-        val savedEndpointUrl = state.server?.endpoints
-            ?.firstOrNull { it.isPrimary }?.url
-            ?: state.server?.endpoints?.firstOrNull()?.url
+        val targetEndpoint = state.server?.endpoints
+            ?.firstOrNull { it.isPrimary }
+            ?: state.server?.endpoints?.firstOrNull()
+        val endpointIdAtRequest = targetEndpoint?.id
+        val expectedUrlAtRequest = targetEndpoint?.url
+        qualityRequestId += 1
+        val requestId = qualityRequestId
+        // 同步身份到状态：同一主调度器，launch 尚未启动，无竞态
+        _uiState.update { it.copy(qualityRequestId = requestId) }
         qualityJob?.cancel()
         qualityJob = viewModelScope.launch {
-            _uiState.update { it.copy(isMediaTesting = true, mediaQualityResult = null) }
-            val raw = endpointTestService.test(url, probePath)
-            val result = EndpointQualityResult(
-                endpointId = serverId,
-                apiLatencyMs = raw.apiLatencyMs.takeIf { it > 0 },
-                mediaFirstByteMs = raw.mediaFirstByteMs,
-                downloadSpeedBytesPerSec = raw.mediaThroughputMbps?.let { (it * 1024 * 1024).toLong() },
-                httpStatus = raw.httpCode.takeIf { it > 0 },
-                protocol = raw.protocol,
-                supportsRange = raw.supportsRange,
-                error = raw.error,
-            )
-            val current = _uiState.value
-            val matchesDraft = AddressTestResultPolicy.shouldApply(current.addressVersion, versionAtRequest)
-            val targetsSavedEndpoint = savedEndpointUrl == url
-            _uiState.update {
-                if (matchesDraft) it.copy(isMediaTesting = false, mediaQualityResult = result)
-                else it.copy(isMediaTesting = false)
-            }
-            if (targetsSavedEndpoint) {
-                serverStore.updateEndpointQuality(
-                    serverId = serverId,
-                    apiLatencyMs = result.apiLatencyMs,
-                    mediaFirstByteMs = result.mediaFirstByteMs,
-                    throughputMbps = raw.mediaThroughputMbps,
-                    protocol = result.protocol,
-                    supportsRange = result.supportsRange,
-                    httpCode = result.httpStatus,
+            try {
+                _uiState.update { st ->
+                    if (st.qualityRequestId == requestId) st.copy(isMediaTesting = true, mediaQualityResult = null)
+                    else st
+                }
+                val raw = try {
+                    endpointTestService.test(url, probePath)
+                } catch (e: CancellationException) {
+                    throw e
+                }
+                val result = EndpointQualityResult(
+                    endpointId = serverId,
+                    apiLatencyMs = raw.apiLatencyMs.takeIf { it > 0 },
+                    mediaFirstByteMs = raw.mediaFirstByteMs,
+                    downloadSpeedBytesPerSec = raw.mediaThroughputMbps?.let { (it * 1024 * 1024).toLong() },
+                    httpStatus = raw.httpCode.takeIf { it > 0 },
+                    protocol = raw.protocol,
+                    supportsRange = raw.supportsRange,
+                    error = raw.error,
                 )
-            } else {
-                logger.i(
-                    LogTag.UI,
-                    "线路质量测试对象为未保存草稿地址，结果仅展示不落库 serverId=$serverId",
-                )
+                val current = _uiState.value
+                // 闸 1+2：请求身份与草稿版本任一不符 → 显示与写库同时禁止
+                val accepted = current.qualityRequestId == requestId &&
+                    AddressTestResultPolicy.shouldApply(current.addressVersion, versionAtRequest)
+                val targetsSavedEndpoint = endpointIdAtRequest != null && expectedUrlAtRequest == url
+                _uiState.update { st ->
+                    if (st.qualityRequestId != requestId) st
+                    else st.copy(
+                        isMediaTesting = false,
+                        mediaQualityResult = if (accepted) result else st.mediaQualityResult,
+                    )
+                }
+                if (accepted && targetsSavedEndpoint && endpointIdAtRequest != null) {
+                    serverStore.updateEndpointQuality(
+                        serverId = serverId,
+                        endpointId = endpointIdAtRequest,
+                        expectedUrl = expectedUrlAtRequest,
+                        apiLatencyMs = result.apiLatencyMs,
+                        mediaFirstByteMs = result.mediaFirstByteMs,
+                        throughputMbps = raw.mediaThroughputMbps,
+                        protocol = result.protocol,
+                        supportsRange = result.supportsRange,
+                        httpCode = result.httpStatus,
+                    )
+                } else {
+                    logger.i(
+                        LogTag.UI,
+                        "线路质量测试结果未落库（草稿未保存或已被更新） serverId=$serverId",
+                    )
+                }
+            } finally {
+                // 取消/异常/正常收尾：仅当仍是本请求时复位 loading（防旧 finally 关新任务 loading）
+                _uiState.update { st ->
+                    if (st.qualityRequestId == requestId) st.copy(isMediaTesting = false)
+                    else st
+                }
             }
         }
     }

@@ -23,11 +23,15 @@ interface ServerStore {
         throw UnsupportedOperationException("ServerStore fake 未实现 setDefault")
 
     /**
-     * 线路质量结果持久化（U4-D）。调用方必须先完成草稿归属校验：
-     * 仅当被测 URL 是已保存线路的当前地址时才允许写入（Phase 1I review P2）。
+     * 线路质量结果持久化（U4-D）。Phase 1I review P2：
+     * 仅当 `[endpointId]` 对应线路的当前 URL 仍等于 `[expectedUrl]` 时写入
+     * （校验与写入在同一事务内，防检查-写入竞态）；身份或地址已变化则跳过，
+     * 不得重挑当前主线路承接旧测量。调用方须先完成请求身份与草稿版本校验。
      */
     suspend fun updateEndpointQuality(
         serverId: String,
+        endpointId: String,
+        expectedUrl: String,
         apiLatencyMs: Long?,
         mediaFirstByteMs: Long?,
         throughputMbps: Double?,

@@ -20,9 +20,11 @@ import com.mediahub.provider.emby.session.EmbySession
 import com.mediahub.provider.emby.session.EmbySessionStore
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.yield
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -598,7 +600,7 @@ class EmbyProgressProviderTest {
     // ==================================================================
 
     @Test
-    fun `in flight progress cannot be overtaken by final - stopped is last`() = runBlocking {
+    fun `in flight progress cannot be overtaken by final - stopped is last`() = runTest {
         seedSession()
         val api = RecordingApi()
         val p = provider(api)
@@ -607,26 +609,34 @@ class EmbyProgressProviderTest {
         api.blockProgress = CompletableDeferred()
         api.progressEntered = CompletableDeferred() // 首报已 complete 共享信号：重置后才能锁定本次派发点
 
-        // 普通 report：Progress 派发后卡住在途（持有 Mutex）
+        // 普通 report：Progress 派发后卡住在途（持有 Mutex）。
+        // runTest + StandardTestDispatcher：runCurrent 确定性推进到"挂起在 barrier"，
+        // 不用 yield 交叉（yield 交叉无法证明到达位置——review round 3）。
         val reportJob = launch { p.reportProgress(progress(positionMs = 120_000)) }
+        runCurrent()
         api.progressEntered.await()
         assertTrue("Progress 必须已派发在途", kinds(api).last() == "Progress")
 
-        // final 请求：只能排队等 Mutex，不得越过在途 Progress
+        // final 请求：launch 后 runCurrent——它应停在 Mutex 排队点，未发出任何请求
         val finalJob = launch { p.reportFinalProgress(progress(positionMs = 300_000)) }
-        repeat(4) { yield() } // 确保 finalJob 到达 mutex 挂起点（CI 慢调度下单次 yield 不足）
+        runCurrent()
+        assertEquals(
+            "释放 barrier 前 final 不得越过串行化边界（未发出 Stopped）",
+            listOf("Playing", "Progress", "Progress"),
+            kinds(api),
+        )
+        assertTrue("final 必须仍在排队", finalJob.isActive)
 
-        api.blockProgress!!.complete(Unit)
-        reportJob.join()
-        finalJob.join()
-
+        api.blockProgress!!.complete(Unit) // 失败清理：assertion 失败也会经 finally 释放 barrier
+        runCurrent()
+        joinAll(reportJob, finalJob)
         assertEquals(listOf("Playing", "Progress", "Progress", "Stopped"), kinds(api))
         assertEquals("Stopped 必须最后", "Stopped", api.calls.last().kind)
         assertEquals(3_000_000_000L, api.calls.last().positionTicks)
     }
 
     @Test
-    fun `in flight final cannot be overtaken by late progress`() = runBlocking {
+    fun `in flight final cannot be overtaken by late progress`() = runTest {
         seedSession()
         val api = RecordingApi()
         val p = provider(api)
@@ -637,16 +647,23 @@ class EmbyProgressProviderTest {
 
         // final：Stopped 派发后卡住在途（持有 Mutex）
         val finalJob = launch { p.reportFinalProgress(progress(positionMs = 300_000)) }
+        runCurrent()
         api.stoppedEntered.await()
         assertTrue("Stopped 必须已派发在途", kinds(api).last() == "Stopped")
 
-        // 迟到 report：只能排队等 Mutex，不得在 Stopped 前插入任何请求
+        // 迟到 report：launch 后 runCurrent——应停在 Mutex 排队点，未发出任何请求
         val lateJob = launch { p.reportProgress(progress(positionMs = 60_000)) }
-        repeat(4) { yield() }
+        runCurrent()
+        assertEquals(
+            "释放 barrier 前迟到 report 不得越过串行化边界（未发出 Playing）",
+            listOf("Playing", "Progress", "Stopped"),
+            kinds(api),
+        )
+        assertTrue(lateJob.isActive)
 
         api.blockStopped!!.complete(Unit)
-        finalJob.join()
-        lateJob.join()
+        runCurrent()
+        joinAll(finalJob, lateJob)
 
         assertEquals(listOf("Playing", "Progress", "Stopped", "Playing", "Progress"), kinds(api))
         val stoppedIndex = api.calls.indexOfFirst { it.kind == "Stopped" }

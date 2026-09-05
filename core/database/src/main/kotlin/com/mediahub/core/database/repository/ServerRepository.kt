@@ -5,6 +5,7 @@ import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.database.mapper.ServerEntityMappers.toDomain
 import com.mediahub.core.database.mapper.ServerEntityMappers.toEntity
 import com.mediahub.model.MediaServer
+import androidx.room.withTransaction
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
@@ -91,19 +92,26 @@ class ServerRepository @Inject constructor(
         dao.markError(id, error)
     }
 
-    /** 线路质量测试结果落库（U4-D）。 */
+    /**
+     * 线路质量测试结果落库（U4-D）。Phase 1I review P2：
+     * 校验与写入在同一事务内——[endpointId] 对应线路当前 URL 仍等于 [expectedUrl]
+     * 才写入（防"检查-写入"竞态）；线路已被改指其他地址或不存在则跳过，
+     * 绝不重挑主线路承接旧测量。
+     */
     override suspend fun updateEndpointQuality(
         serverId: String,
+        endpointId: String,
+        expectedUrl: String,
         apiLatencyMs: Long?,
         mediaFirstByteMs: Long?,
         throughputMbps: Double?,
         protocol: String?,
         supportsRange: Boolean?,
         httpCode: Int?,
-    ) {
-        val endpoints = endpointDao.getByServer(serverId)
-        val primary = endpoints.firstOrNull { it.isPrimary } ?: endpoints.firstOrNull() ?: return
-        endpointDao.upsert(primary.copy(
+    ) = db.withTransaction {
+        val target = endpointDao.getByServer(serverId).firstOrNull { it.id == endpointId } ?: return@withTransaction
+        if (target.url != expectedUrl) return@withTransaction
+        endpointDao.upsert(target.copy(
             lastApiLatencyMs = apiLatencyMs,
             lastMediaFirstByteMs = mediaFirstByteMs,
             lastMediaThroughputMbps = throughputMbps,

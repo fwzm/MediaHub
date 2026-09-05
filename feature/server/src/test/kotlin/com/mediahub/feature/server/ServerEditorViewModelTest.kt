@@ -30,6 +30,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -67,15 +68,45 @@ class ServerEditorViewModelTest {
     }
 
     class FakeEndpointTestService : EndpointTestService(HttpClientFactory(StdoutLogger())) {
-        val inFlight = CompletableDeferred<Unit>()
-        val release = CompletableDeferred<Unit>()
+        private class Pending {
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+        }
+
+        private val pendings = mutableListOf<Pending>()
         var calls: Int = 0
             private set
 
+        /** 模拟阻塞 IO：job 取消后 release.await() 不受影响（NonCancellable），返回时上层才以取消收场。 */
+        var ignoreCancellation = false
+
+        fun enqueueTest() { pendings += Pending() }
+
+        suspend fun awaitEntered() = pendings.last().entered.await()
+
+        fun releaseLast() { pendings.last().release.complete(Unit) }
+
         override suspend fun test(baseUrl: String, probePath: String): EndpointTestResult {
             calls += 1
-            inFlight.complete(Unit)
-            release.await()
+            val pending = pendings[calls - 1]
+            pending.entered.complete(Unit)
+            if (ignoreCancellation) {
+                // 模拟阻塞 IO 晚返回：取消无法中断阻塞调用，结果在非取消上下文算出，
+                // 返回点（外层 job 已取消）立即以 CancellationException 收场
+                val result = withContext(kotlinx.coroutines.NonCancellable) {
+                    pending.release.await()
+                    EndpointTestResult(
+                        apiLatencyMs = 42,
+                        mediaFirstByteMs = null,
+                        mediaThroughputMbps = null,
+                        httpCode = 200,
+                        protocol = baseUrl.substringBefore(":"),
+                        supportsRange = true,
+                    )
+                }
+                return result
+            }
+            pending.release.await()
             return EndpointTestResult(
                 apiLatencyMs = 42,
                 mediaFirstByteMs = null,
@@ -89,6 +120,8 @@ class ServerEditorViewModelTest {
 
     data class QualityUpdate(
         val serverId: String,
+        val endpointId: String,
+        val expectedUrl: String,
         val apiLatencyMs: Long?,
         val mediaFirstByteMs: Long?,
         val throughputMbps: Double?,
@@ -112,6 +145,8 @@ class ServerEditorViewModelTest {
 
         override suspend fun updateEndpointQuality(
             serverId: String,
+            endpointId: String,
+            expectedUrl: String,
             apiLatencyMs: Long?,
             mediaFirstByteMs: Long?,
             throughputMbps: Double?,
@@ -119,7 +154,10 @@ class ServerEditorViewModelTest {
             supportsRange: Boolean?,
             httpCode: Int?,
         ) {
-            qualityUpdates += QualityUpdate(serverId, apiLatencyMs, mediaFirstByteMs, throughputMbps, protocol, supportsRange, httpCode)
+            qualityUpdates += QualityUpdate(
+                serverId, endpointId, expectedUrl,
+                apiLatencyMs, mediaFirstByteMs, throughputMbps, protocol, supportsRange, httpCode,
+            )
         }
 
         override suspend fun setDefault(id: String) { servers.replaceAll { it.copy(isDefault = it.id == id) } }
@@ -236,18 +274,20 @@ class ServerEditorViewModelTest {
         val vm = viewModel("srv-net")
         advanceUntilIdle()
 
+        service.enqueueTest()
         vm.testMediaQuality()
         runCurrent()
-        service.inFlight.await()
+        service.awaitEntered()
         assertEquals(1, service.calls)
 
-        // 测试在途：地址 A 改为 B（草稿版本递增）
+        // 测试在途：地址 A 改为 B（草稿版本递增 + 取消在途任务）
         vm.updateBaseUrl("https://media-b.example")
-        service.release.complete(Unit)
+        service.releaseLast()
         advanceUntilIdle()
 
         assertNull("A 的在途结果不得显示在 B 草稿下", vm.uiState.value.mediaQualityResult)
         assertTrue("A 的在途结果不得写库", store.qualityUpdates.isEmpty())
+        assertTrue("取消后 loading 必须复位", !vm.uiState.value.isMediaTesting)
     }
 
     @Test
@@ -255,16 +295,18 @@ class ServerEditorViewModelTest {
         val vm = viewModel("srv-net")
         advanceUntilIdle()
 
+        service.enqueueTest()
         vm.testMediaQuality()
         runCurrent()
-        service.inFlight.await()
+        service.awaitEntered()
 
         vm.toggleHttps(false)
-        service.release.complete(Unit)
+        service.releaseLast()
         advanceUntilIdle()
 
         assertNull(vm.uiState.value.mediaQualityResult)
         assertTrue(store.qualityUpdates.isEmpty())
+        assertTrue("取消后 loading 必须复位", !vm.uiState.value.isMediaTesting)
     }
 
     @Test
@@ -273,11 +315,12 @@ class ServerEditorViewModelTest {
         advanceUntilIdle()
 
         // 输入未保存草稿 B（无后续编辑），测试 B
+        service.enqueueTest()
         vm.updateBaseUrl("https://media-b.example")
         vm.testMediaQuality()
         runCurrent()
-        service.inFlight.await()
-        service.release.complete(Unit)
+        service.awaitEntered()
+        service.releaseLast()
         advanceUntilIdle()
 
         assertEquals("结果可以展示在草稿下", "https://media-b.example", vm.uiState.value.resolvedUrl)
@@ -286,19 +329,71 @@ class ServerEditorViewModelTest {
     }
 
     @Test
-    fun `quality test on saved address persists result`() = runTest {
+    fun `quality test on saved address persists result with endpoint identity`() = runTest {
         val vm = viewModel("srv-net")
         advanceUntilIdle()
 
+        service.enqueueTest()
         vm.testMediaQuality()
         runCurrent()
-        service.inFlight.await()
-        service.release.complete(Unit)
+        service.awaitEntered()
+        service.releaseLast()
         advanceUntilIdle()
 
-        assertEquals("已保存地址的测试必须展示结果", 1, store.qualityUpdates.size)
+        val update = store.qualityUpdates.single()
+        assertEquals("srv-net", update.serverId)
+        assertEquals("ep-1", update.endpointId)
+        assertEquals(SAVED_URL, update.expectedUrl)
         assertNotNull(vm.uiState.value.mediaQualityResult)
-        assertEquals("srv-net", store.qualityUpdates.single().serverId)
+    }
+
+    @Test
+    fun `cancelling quality test resets loading and allows new test`() = runTest {
+        val vm = viewModel("srv-net")
+        advanceUntilIdle()
+
+        service.enqueueTest()
+        vm.testMediaQuality()
+        runCurrent()
+        service.awaitEntered()
+        assertTrue(vm.uiState.value.isMediaTesting)
+
+        // 取消在途任务（地址变化）
+        vm.updateBaseUrl("https://media-c.example")
+        runCurrent()
+        assertTrue("取消收尾必须复位 loading", !vm.uiState.value.isMediaTesting)
+
+        // 取消后必须能发起新测试并完成
+        service.enqueueTest()
+        vm.testMediaQuality()
+        runCurrent()
+        service.awaitEntered()
+        assertTrue(vm.uiState.value.isMediaTesting)
+        service.releaseLast()
+        advanceUntilIdle()
+
+        assertNotNull(vm.uiState.value.mediaQualityResult)
+        assertTrue(!vm.uiState.value.isMediaTesting)
+    }
+
+    @Test
+    fun `late result after cancellation is neither displayed nor persisted`() = runTest {
+        val vm = viewModel("srv-net")
+        advanceUntilIdle()
+
+        // 模拟阻塞 IO：取消不能中断，旧结果在取消后才"返回"
+        service.ignoreCancellation = true
+        service.enqueueTest()
+        vm.testMediaQuality()
+        runCurrent()
+        service.awaitEntered()
+        assertTrue(vm.uiState.value.isMediaTesting)
+
+        vm.updateBaseUrl("https://media-b.example") // 取消任务
+        runCurrent()
+
+        assertTrue(vm.uiState.value.mediaQualityResult == null)
+        assertTrue(store.qualityUpdates.isEmpty())
     }
 
     private companion object {
