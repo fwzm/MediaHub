@@ -153,12 +153,14 @@ fun ServerEditorRoute(
                 )
 
                 SectionHeader("连接")
-                OutlinedTextField(
+                ServerAddressField(
                     value = state.baseUrl,
                     onValueChange = viewModel::updateBaseUrl,
-                    label = { Text("服务器地址") },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    singleLine = true,
+                    preferHttps = state.preferHttps,
+                    onHttpsChange = viewModel::toggleHttps,
+                    resolvedUrl = state.resolvedUrl,
+                    errorMessage = state.addressError,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),

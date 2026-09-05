@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
+import com.mediahub.core.common.ServerAddressNormalizer
 import com.mediahub.core.security.TokenStore
 import com.mediahub.core.network.EndpointTestService
 import com.mediahub.core.network.HttpClientFactory
@@ -30,6 +31,13 @@ data class ServerEditorUiState(
     val name: String = "",
     val note: String = "",
     val baseUrl: String = "",
+    /** HTTPS 开关（从已存 URL scheme 派生；历史 HTTP 不自动升级）。 */
+    val preferHttps: Boolean = true,
+    /** 规范化后的完整地址（唯一权威）；非法时为 null，见 [addressError]。 */
+    val resolvedUrl: String? = null,
+    val addressError: String? = null,
+    /** 地址草稿版本：地址/协议变化递增；异步测试结果按发起时版本绑定。 */
+    val addressVersion: Long = 0,
     val icon: String? = null,
     val loggedIn: Boolean = false,
     val isTesting: Boolean = false,
@@ -71,6 +79,9 @@ class ServerEditorViewModel @Inject constructor(
                 _uiState.update { it.copy(isLoading = false, error = "找不到媒体源") }
             } else {
                 val loggedIn = tokenStore.readTokens(server.id) != null
+                // 历史 HTTP 地址不自动升级：开关从已存 URL 的 scheme 派生（Phase 1I）
+                val detected = ServerAddressNormalizer.explicitHttpScheme(server.baseUrl)
+                val normalized = ServerAddressNormalizer.normalize(server.baseUrl, preferHttps = true)
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -78,6 +89,10 @@ class ServerEditorViewModel @Inject constructor(
                         name = server.name,
                         note = server.note.orEmpty(),
                         baseUrl = server.baseUrl,
+                        preferHttps = detected?.let { s -> s == "https" } ?: true,
+                        resolvedUrl = (normalized as? ServerAddressNormalizer.Result.Ok)?.address?.url,
+                        addressError = (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
+                        addressVersion = 1,
                         icon = server.icon,
                         loggedIn = loggedIn,
                     )
@@ -88,11 +103,49 @@ class ServerEditorViewModel @Inject constructor(
 
     fun updateName(name: String) = _uiState.update { it.copy(name = name) }
     fun updateNote(note: String) = _uiState.update { it.copy(note = note) }
-    fun updateBaseUrl(url: String) = _uiState.update { it.copy(baseUrl = url, testResult = null) }
 
-    /** 协议级连接测试（草稿地址）。 */
+    /** 地址输入：重新规范化 + 草稿版本递增 + 清除旧测试结果（Phase 1I）。 */
+    fun updateBaseUrl(raw: String) = _uiState.update { st ->
+        val detected = ServerAddressNormalizer.explicitHttpScheme(raw)
+        val preferHttps = detected?.let { it == "https" } ?: st.preferHttps
+        val normalized = ServerAddressNormalizer.normalize(raw, preferHttps)
+        st.copy(
+            baseUrl = raw,
+            preferHttps = preferHttps,
+            resolvedUrl = (normalized as? ServerAddressNormalizer.Result.Ok)?.address?.url,
+            addressError = (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
+            addressVersion = st.addressVersion + 1,
+            testResult = null,
+            mediaQualityResult = null,
+        )
+    }
+
+    /** 手动切换 HTTPS 开关：只改 scheme（粘贴进来的完整 URL 同样重写文本协议），端口与子路径保留。 */
+    fun toggleHttps(enabled: Boolean) = _uiState.update { st ->
+        val target = if (enabled) "https" else "http"
+        val newText = if (st.baseUrl.isBlank()) st.baseUrl else ServerAddressNormalizer.withScheme(st.baseUrl, target)
+        val normalized = ServerAddressNormalizer.normalize(newText, enabled)
+        st.copy(
+            baseUrl = newText,
+            preferHttps = enabled,
+            resolvedUrl = (normalized as? ServerAddressNormalizer.Result.Ok)?.address?.url,
+            addressError = (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
+            addressVersion = st.addressVersion + 1,
+            testResult = null,
+            mediaQualityResult = null,
+        )
+    }
+
+    /** 协议级连接测试（草稿地址）：非法地址请求前拦截；结果按草稿版本绑定。 */
     fun testConnection() {
         val state = _uiState.value
+        if (state.resolvedUrl == null) {
+            _uiState.update {
+                it.copy(testResult = ConnectionStatus(ok = false, message = state.addressError ?: "服务器地址无效"))
+            }
+            return
+        }
+        val versionAtRequest = state.addressVersion
         val server = buildEditedServer(state) ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isTesting = true, testResult = null) }
@@ -103,7 +156,13 @@ class ServerEditorViewModel @Inject constructor(
             } else {
                 ConnectionStatus(ok = false, message = "不支持的媒体源类型")
             }
-            _uiState.update { it.copy(isTesting = false, testResult = result) }
+            _uiState.update { st ->
+                if (AddressTestResultPolicy.shouldApply(st.addressVersion, versionAtRequest)) {
+                    st.copy(isTesting = false, testResult = result)
+                } else {
+                    st.copy(isTesting = false)
+                }
+            }
         }
     }
 
@@ -113,8 +172,8 @@ class ServerEditorViewModel @Inject constructor(
      */
     fun testMediaQuality() {
         val state = _uiState.value
-        val url = state.baseUrl.trim().trimEnd('/')
-        if (url.isBlank()) return
+        val url = state.resolvedUrl
+        if (url == null || url.isBlank()) return
         // ADR-039：探针路径来自 Provider 自述（descriptor.probePath）；
         // 未知/未定义类型 = 显式不可用，绝不静默回退其他协议的路径。
         val serverType = state.server?.type
@@ -231,7 +290,7 @@ class ServerEditorViewModel @Inject constructor(
     /** 由草稿构建待保存 MediaServer：保留 id/type/元数据，只改 name/note/icon/主线路 URL。 */
     private fun buildEditedServer(state: ServerEditorUiState): MediaServer? {
         val original = state.server ?: return null
-        val url = state.baseUrl.trim().trimEnd('/')
+        val url = state.resolvedUrl ?: return null
         val endpoints = if (original.endpoints.isEmpty()) {
             if (url.isBlank()) emptyList() else listOf(
                 ServerEndpoint(
