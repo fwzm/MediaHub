@@ -46,6 +46,19 @@ class CanonicalSourceResolverTest {
         override fun observeServers(): Flow<List<MediaServer>> = MutableStateFlow(servers)
         override suspend fun getServer(id: String): MediaServer? =
             servers.firstOrNull { it.id == id }
+        override suspend fun updateServer(server: MediaServer) { }
+        override suspend fun setDefault(id: String) { }
+        override suspend fun updateEndpointQuality(
+            serverId: String,
+            endpointId: String,
+            expectedUrl: String,
+            apiLatencyMs: Long?,
+            mediaFirstByteMs: Long?,
+            throughputMbps: Double?,
+            protocol: String?,
+            supportsRange: Boolean?,
+            httpCode: Int?,
+        ) { }
     }
 
     private class FakeRegistry(private val handles: Map<String, ProviderHandle>) :

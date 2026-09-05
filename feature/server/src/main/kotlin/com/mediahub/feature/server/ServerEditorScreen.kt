@@ -47,6 +47,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.ServerIcon
 import com.mediahub.model.MediaServer
+import com.mediahub.model.ServerType
 
 /** Server Editor 页面：编辑已有媒体源。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -152,61 +153,66 @@ fun ServerEditorRoute(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 )
 
-                SectionHeader("连接")
-                OutlinedTextField(
-                    value = state.baseUrl,
-                    onValueChange = viewModel::updateBaseUrl,
-                    label = { Text("服务器地址") },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    singleLine = true,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    state.testResult?.let { r ->
-                        Text(
-                            if (r.ok) "连接成功" else (r.message ?: "连接失败"),
-                            color = if (r.ok) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    Button(onClick = viewModel::testConnection, enabled = !state.isTesting) {
-                        if (state.isTesting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                        else Text("测试连接")
-                    }
-                }
-
-                SectionHeader("线路质量测试")
-                Button(
-                    onClick = viewModel::testMediaQuality,
-                    enabled = !state.isMediaTesting,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                ) {
-                    if (state.isMediaTesting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    else Text("测试线路质量")
-                }
-                state.mediaQualityResult?.let { qr ->
-                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                        if (qr.error != null) {
-                            Text("线路不可用", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleSmall)
-                            val err = qr.error; InfoRow("错误", err ?: "未知")
-                        } else {
-                            val score = qr.score()
-                            val stars = "★".repeat(score / 20) + "☆".repeat(5 - score / 20)
-                            Text("播放质量  $stars $score", style = MaterialTheme.typography.titleSmall)
-                            Spacer(Modifier.height(4.dp))
-                            qr.apiLatencyMs?.let { InfoRow("API 延迟", "${it}ms") }
-                            qr.mediaFirstByteMs?.let { InfoRow("媒体首包", "${it}ms") }
-                            qr.downloadSpeedBytesPerSec?.let {
-                                InfoRow("下载速度", "%.1f MB/s".format(it / (1024.0 * 1024.0)))
-                            }
-                            InfoRow("Range", if (qr.supportsRange) "✓ 支持" else "✗ 不支持")
-                            qr.httpStatus?.let { InfoRow("HTTP", "$it") }
-                            qr.protocol?.let { InfoRow("协议", it) }
+                // LOCAL 媒体源无网络地址语义：隐藏连接/线路质量区（Phase 1I review P1）
+                if (state.server?.type != ServerType.LOCAL) {
+                    SectionHeader("连接")
+                    ServerAddressField(
+                        value = state.baseUrl,
+                        onValueChange = viewModel::updateBaseUrl,
+                        preferHttps = state.preferHttps,
+                        onHttpsChange = viewModel::toggleHttps,
+                        resolvedUrl = state.resolvedUrl,
+                        errorMessage = state.addressError,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        state.testResult?.let { r ->
+                            Text(
+                                if (r.ok) "连接成功" else (r.message ?: "连接失败"),
+                                color = if (r.ok) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         }
-                        InfoRow("最后测试", java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(qr.testedAt)))
+                        Button(onClick = viewModel::testConnection, enabled = !state.isTesting) {
+                            if (state.isTesting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                            else Text("测试连接")
+                        }
+                    }
+
+                    SectionHeader("线路质量测试")
+                    Button(
+                        onClick = viewModel::testMediaQuality,
+                        enabled = !state.isMediaTesting,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    ) {
+                        if (state.isMediaTesting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        else Text("测试线路质量")
+                    }
+                    state.mediaQualityResult?.let { qr ->
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            if (qr.error != null) {
+                                Text("线路不可用", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleSmall)
+                                val err = qr.error; InfoRow("错误", err ?: "未知")
+                            } else {
+                                val score = qr.score()
+                                val stars = "★".repeat(score / 20) + "☆".repeat(5 - score / 20)
+                                Text("播放质量  $stars $score", style = MaterialTheme.typography.titleSmall)
+                                Spacer(Modifier.height(4.dp))
+                                qr.apiLatencyMs?.let { InfoRow("API 延迟", "${it}ms") }
+                                qr.mediaFirstByteMs?.let { InfoRow("媒体首包", "${it}ms") }
+                                qr.downloadSpeedBytesPerSec?.let {
+                                    InfoRow("下载速度", "%.1f MB/s".format(it / (1024.0 * 1024.0)))
+                                }
+                                InfoRow("Range", if (qr.supportsRange) "✓ 支持" else "✗ 不支持")
+                                qr.httpStatus?.let { InfoRow("HTTP", "$it") }
+                                qr.protocol?.let { InfoRow("协议", it) }
+                            }
+                            InfoRow("最后测试", java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(qr.testedAt)))
+                        }
                     }
                 }
 

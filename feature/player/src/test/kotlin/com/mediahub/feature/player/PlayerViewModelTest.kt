@@ -227,6 +227,19 @@ class PlayerViewModelTest {
     private class FakeServerStore(private val server: MediaServer) : ServerStore {
         override fun observeServers(): Flow<List<MediaServer>> = flowOf(listOf(server))
         override suspend fun getServer(id: String): MediaServer? = server.takeIf { it.id == id }
+        override suspend fun updateServer(server: MediaServer) { }
+        override suspend fun setDefault(id: String) { }
+        override suspend fun updateEndpointQuality(
+            serverId: String,
+            endpointId: String,
+            expectedUrl: String,
+            apiLatencyMs: Long?,
+            mediaFirstByteMs: Long?,
+            throughputMbps: Double?,
+            protocol: String?,
+            supportsRange: Boolean?,
+            httpCode: Int?,
+        ) { }
     }
 
     private class FakeProgressStore(private val resume: Long?) : ProgressStore {

@@ -106,6 +106,19 @@ class HomeViewModelTest {
         var latest: MediaServer? = null
         override fun observeServers(): Flow<List<MediaServer>> = flowOf(servers)
         override suspend fun getServer(id: String): MediaServer? = latest ?: servers.firstOrNull { it.id == id }
+        override suspend fun updateServer(server: MediaServer) { latest = server }
+        override suspend fun setDefault(id: String) { }
+        override suspend fun updateEndpointQuality(
+            serverId: String,
+            endpointId: String,
+            expectedUrl: String,
+            apiLatencyMs: Long?,
+            mediaFirstByteMs: Long?,
+            throughputMbps: Double?,
+            protocol: String?,
+            supportsRange: Boolean?,
+            httpCode: Int?,
+        ) { }
     }
 
     private class FakeProgressStore : ProgressStore {
