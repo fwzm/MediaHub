@@ -23,6 +23,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
@@ -217,8 +218,8 @@ class EmbyProgressProviderTest {
     )
 
     /** Recording seam provider（无 HTTP）。 */
-    private fun provider(api: RecordingApi, logger: Logger = StdoutLogger()): EmbyProgressProvider =
-        EmbyProgressProvider(mediaServer, api, tokenStore, sessionStore, logger)
+    private fun provider(api: RecordingApi, logger: Logger = StdoutLogger(), sessionStoreOverride: EmbySessionStore = sessionStore): EmbyProgressProvider =
+        EmbyProgressProvider(mediaServer, api, tokenStore, sessionStoreOverride, logger)
 
     /** 真实 wire provider（MockWebServer + 真实 EmbyApiClient）。 */
     private fun realProvider(
@@ -236,9 +237,9 @@ class EmbyProgressProviderTest {
         return EmbyProgressProvider(mediaServer, api, tokenStore, sessionStore, logger)
     }
 
-    private suspend fun seedSession(serverId: String = "srv-1", token: String = "tok-1", userId: String = "user-1") {
+    private suspend fun seedSession(serverId: String = "srv-1", token: String = "tok-1", userId: String = "user-1", storeOverride: EmbySessionStore = sessionStore) {
         tokenStore.saveTokens(serverId, StoredToken(accessToken = token))
-        sessionStore.save(EmbySession(serverId, "remote-1", userId, "Alice"))
+        storeOverride.save(EmbySession(serverId, "remote-1", userId, "Alice"))
     }
 
     /** 每个预期请求恰好一个 204 + Connection: Close（确定性分帧，禁连接复用）。 */
@@ -601,17 +602,18 @@ class EmbyProgressProviderTest {
 
     @Test
     fun `in flight progress cannot be overtaken by final - stopped is last`() = runTest {
-        seedSession()
+        // 注入 test dispatcher 使 requireSession → mutex 全链路可被 runCurrent 确定性推进
+        val testSessionStore = EmbySessionStore(sessionStorage, ioDispatcher = StandardTestDispatcher(testScheduler))
+        seedSession(storeOverride = testSessionStore)
         val api = RecordingApi()
-        val p = provider(api)
+        val p = provider(api, sessionStoreOverride = testSessionStore)
         p.reportProgress(progress(positionMs = 90_000)) // 正常首报
 
         api.blockProgress = CompletableDeferred()
         api.progressEntered = CompletableDeferred() // 首报已 complete 共享信号：重置后才能锁定本次派发点
 
         // 普通 report：Progress 派发后卡住在途（持有 Mutex）。
-        // runTest + StandardTestDispatcher：runCurrent 确定性推进到"挂起在 barrier"，
-        // 不用 yield 交叉（yield 交叉无法证明到达位置——review round 3）。
+        // StandardTestDispatcher + runCurrent：确定性推进到"挂起在 barrier"。
         val reportJob = launch { p.reportProgress(progress(positionMs = 120_000)) }
         runCurrent()
         api.progressEntered.await()
@@ -627,19 +629,24 @@ class EmbyProgressProviderTest {
         )
         assertTrue("final 必须仍在排队", finalJob.isActive)
 
-        api.blockProgress!!.complete(Unit) // 失败清理：assertion 失败也会经 finally 释放 barrier
-        runCurrent()
-        joinAll(reportJob, finalJob)
-        assertEquals(listOf("Playing", "Progress", "Progress", "Stopped"), kinds(api))
-        assertEquals("Stopped 必须最后", "Stopped", api.calls.last().kind)
-        assertEquals(3_000_000_000L, api.calls.last().positionTicks)
+        try {
+            api.blockProgress!!.complete(Unit)
+            runCurrent()
+            joinAll(reportJob, finalJob)
+            assertEquals(listOf("Playing", "Progress", "Progress", "Stopped"), kinds(api))
+            assertEquals("Stopped 必须最后", "Stopped", api.calls.last().kind)
+            assertEquals(3_000_000_000L, api.calls.last().positionTicks)
+        } finally {
+            api.blockProgress?.complete(Unit) // assertion 失败也释放 barrier，不把阻塞留给下一条测试
+        }
     }
 
     @Test
     fun `in flight final cannot be overtaken by late progress`() = runTest {
-        seedSession()
+        val testSessionStore = EmbySessionStore(sessionStorage, ioDispatcher = StandardTestDispatcher(testScheduler))
+        seedSession(storeOverride = testSessionStore)
         val api = RecordingApi()
-        val p = provider(api)
+        val p = provider(api, sessionStoreOverride = testSessionStore)
         p.reportProgress(progress(positionMs = 90_000))
 
         api.blockStopped = CompletableDeferred()
@@ -661,14 +668,18 @@ class EmbyProgressProviderTest {
         )
         assertTrue(lateJob.isActive)
 
-        api.blockStopped!!.complete(Unit)
-        runCurrent()
-        joinAll(finalJob, lateJob)
+        try {
+            api.blockStopped!!.complete(Unit)
+            runCurrent()
+            joinAll(finalJob, lateJob)
 
-        assertEquals(listOf("Playing", "Progress", "Stopped", "Playing", "Progress"), kinds(api))
-        val stoppedIndex = api.calls.indexOfFirst { it.kind == "Stopped" }
-        val reopenedPlayingIndex = api.calls.indexOfLast { it.kind == "Playing" }
-        assertTrue("final 之后才允许新会话", stoppedIndex < reopenedPlayingIndex)
+            assertEquals(listOf("Playing", "Progress", "Stopped", "Playing", "Progress"), kinds(api))
+            val stoppedIndex = api.calls.indexOfFirst { it.kind == "Stopped" }
+            val reopenedPlayingIndex = api.calls.indexOfLast { it.kind == "Playing" }
+            assertTrue("final 之后才允许新会话", stoppedIndex < reopenedPlayingIndex)
+        } finally {
+            api.blockStopped?.complete(Unit)
+        }
     }
 
     @Test
