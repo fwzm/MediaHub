@@ -108,17 +108,7 @@ class HomeViewModelTest {
         override suspend fun getServer(id: String): MediaServer? = latest ?: servers.firstOrNull { it.id == id }
         override suspend fun updateServer(server: MediaServer) { latest = server }
         override suspend fun setDefault(id: String) { }
-        override suspend fun updateEndpointQuality(
-            serverId: String,
-            endpointId: String,
-            expectedUrl: String,
-            apiLatencyMs: Long?,
-            mediaFirstByteMs: Long?,
-            throughputMbps: Double?,
-            protocol: String?,
-            supportsRange: Boolean?,
-            httpCode: Int?,
-        ) { }
+        // updateEndpointQuality：继承接口抛错默认（只读 fake，本测试不触达质量写路径）
     }
 
     private class FakeProgressStore : ProgressStore {
