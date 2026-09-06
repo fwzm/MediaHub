@@ -55,11 +55,11 @@ class BackupSerializerTest {
     }
 
     @Test
-    fun `wrong password returns InvalidPassword`() {
+    fun `wrong password returns AuthenticationFailed`() {
         val bytes = BackupSerializer.export(samplePayload(), password())
         val wrongPw = "different-${System.identityHashCode(this)}".toCharArray()
         val result = BackupSerializer.import(bytes, wrongPw)
-        assertTrue(result is BackupSerializer.ImportResult.InvalidPassword)
+        assertTrue(result is BackupSerializer.ImportResult.AuthenticationFailed)
     }
 
     @Test
@@ -78,7 +78,7 @@ class BackupSerializerTest {
         )
         val tamperedBytes = BackupFileFormat.encodeEnvelope(tampered).toByteArray()
         val result = BackupSerializer.import(tamperedBytes, password())
-        assertTrue(result is BackupSerializer.ImportResult.InvalidPassword)
+        assertTrue(result is BackupSerializer.ImportResult.AuthenticationFailed)
     }
 
     @Test

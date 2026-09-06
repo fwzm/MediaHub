@@ -55,11 +55,36 @@ object BackupDtos {
         @SerialName("isPaused") val isPaused: Boolean,
         @SerialName("updatedAtEpochMs") val updatedAtEpochMs: Long,
         @SerialName("itemTitle") val itemTitle: String? = null,
-        @SerialName("posterUrl") val posterUrl: String? = null,
         @SerialName("itemType") val itemType: String? = null,
+        // posterUrl 排除：临时/带签名 URL 不导出，恢复后重新获取
     )
 
-    // ---- 用户偏好 ----
+    // ---- 偏好（显式嵌套 DTO，逐字段白名单；不用任意 JSON 字符串绕过） ----
+
+    @Serializable
+    data class SubtitleStyleDto(
+        @SerialName("textColor") val textColor: Int,
+        @SerialName("backgroundColor") val backgroundColor: Int,
+        @SerialName("edgeType") val edgeType: Int,
+        @SerialName("edgeColor") val edgeColor: Int,
+        @SerialName("textScale") val textScale: Float,
+        @SerialName("bottomPaddingFraction") val bottomPaddingFraction: Float,
+        @SerialName("applyEmbeddedStyles") val applyEmbeddedStyles: Boolean,
+    )
+
+    @Serializable
+    data class PlayerGesturesDto(
+        @SerialName("scrubEnabled") val scrubEnabled: Boolean,
+        @SerialName("doubleTapSeekBackwardEnabled") val doubleTapSeekBackwardEnabled: Boolean,
+        @SerialName("doubleTapSeekBackwardSeconds") val doubleTapSeekBackwardSeconds: Int,
+        @SerialName("doubleTapSeekForwardEnabled") val doubleTapSeekForwardEnabled: Boolean,
+        @SerialName("doubleTapSeekForwardSeconds") val doubleTapSeekForwardSeconds: Int,
+        @SerialName("longPressSpeedEnabled") val longPressSpeedEnabled: Boolean,
+        @SerialName("longPressSpeedMin") val longPressSpeedMin: Float,
+        @SerialName("longPressSpeedMax") val longPressSpeedMax: Float,
+        @SerialName("longPressDirectionalEnabled") val longPressDirectionalEnabled: Boolean,
+        @SerialName("longPressDefaultSpeed") val longPressDefaultSpeed: Float,
+    )
 
     @Serializable
     data class PreferencesDto(
@@ -73,8 +98,8 @@ object BackupDtos {
         @SerialName("showPlayerInfoOverlay") val showPlayerInfoOverlay: Boolean = false,
         @SerialName("autoLandscape") val autoLandscape: Boolean = true,
         @SerialName("immersiveBars") val immersiveBars: Boolean = true,
-        @SerialName("subtitleStyleJson") val subtitleStyleJson: String = "{}",
-        @SerialName("gesturesJson") val gesturesJson: String = "{}",
+        @SerialName("subtitleStyle") val subtitleStyle: SubtitleStyleDto = SubtitleStyleDto(0xFFFFFFFF.toInt(), 0x00000000, 1, 0xFF000000.toInt(), 1f, 0.08f, true),
+        @SerialName("gestures") val gestures: PlayerGesturesDto = PlayerGesturesDto(true, false, 10, false, 10, true, 0.5f, 5.0f, true, 2.0f),
     )
 
     // ---- 内层完整载荷 ----
