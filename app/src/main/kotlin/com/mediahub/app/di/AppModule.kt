@@ -208,4 +208,8 @@ abstract class RegistryModule {
     @Binds
     @Singleton
     abstract fun bindEnginePreferenceHistory(impl: DataStoreEnginePreferenceHistory): EnginePreferenceHistory
+
+    @Binds
+    @Singleton
+    abstract fun bindBackupDataSource(impl: com.mediahub.feature.settings.backup.ProductionBackupDataSource): com.mediahub.feature.settings.backup.BackupDataSource
 }

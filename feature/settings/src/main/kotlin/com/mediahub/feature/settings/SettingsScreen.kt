@@ -50,6 +50,7 @@ import com.mediahub.model.UserPreferences
 @Composable
 fun SettingsRoute(
     onBack: () -> Unit,
+    onOpenBackup: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
@@ -74,6 +75,15 @@ fun SettingsRoute(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            Text("同步与备份", style = MaterialTheme.typography.titleMedium)
+            androidx.compose.material3.OutlinedButton(
+                onClick = onOpenBackup,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("同步与备份")
+            }
+
+            Spacer(Modifier.height(8.dp))
             Text("播放", style = MaterialTheme.typography.titleMedium)
 
             // 播放内核（U3-A）：默认 AUTO（Media3 快速路径，失败自动切 mpv 兼容内核）

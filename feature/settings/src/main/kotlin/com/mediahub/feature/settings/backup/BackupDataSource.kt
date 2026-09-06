@@ -42,10 +42,12 @@ data class RestorePlan(
 
 /** 生产实现（组合 Room DAO）。 */
 class ProductionBackupDataSource @Inject constructor(
-    private val serverDao: ServerDao,
-    private val endpointDao: ServerEndpointDao,
-    private val progressDao: PlaybackProgressDao,
+    private val db: com.mediahub.core.database.AppDatabase,
 ) : BackupDataSource {
+
+    private val serverDao get() = db.serverDao()
+    private val endpointDao get() = db.serverEndpointDao()
+    private val progressDao get() = db.playbackProgressDao()
 
     override suspend fun readSnapshot(): BackupSnapshot {
         val serverEntities = serverDao.observeAll().first()
