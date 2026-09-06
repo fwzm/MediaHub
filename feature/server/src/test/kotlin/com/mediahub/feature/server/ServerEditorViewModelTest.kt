@@ -67,32 +67,39 @@ class ServerEditorViewModelTest {
         override suspend fun contains(key: String): Boolean = map.containsKey(key)
     }
 
-    class FakeEndpointTestService : EndpointTestService(HttpClientFactory(StdoutLogger())) {
-        private class Pending {
-            val entered = CompletableDeferred<Unit>()
-            val release = CompletableDeferred<Unit>()
-        }
+    /** 每请求独立控制句柄：可分别 release 以模拟交错返回。 */
+    class PendingRequest {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+    }
 
-        private val pendings = mutableListOf<Pending>()
+    class FakeEndpointTestService : EndpointTestService(HttpClientFactory(StdoutLogger())) {
+        private val pendings = mutableListOf<PendingRequest>()
         var calls: Int = 0
             private set
 
-        /** 模拟阻塞 IO：job 取消后 release.await() 不受影响（NonCancellable），返回时上层才以取消收场。 */
+        /**
+         * 模拟阻塞 IO：job 取消后 release.await() 不受影响（NonCancellable 保护块内
+         * 正常返回结果），上层迟到返回正是需要防御的场景。
+         */
         var ignoreCancellation = false
 
-        fun enqueueTest() { pendings += Pending() }
+        fun enqueueTest(): PendingRequest { pendings += PendingRequest(); return pendings.last() }
 
         suspend fun awaitEntered() = pendings.last().entered.await()
 
         fun releaseLast() { pendings.last().release.complete(Unit) }
+
+        /** 测试结束前释放全部等待任务（防断言失败后 barrier 泄漏到下一条测试）。 */
+        fun releaseAll() { pendings.forEach { it.release.complete(Unit) } }
 
         override suspend fun test(baseUrl: String, probePath: String): EndpointTestResult {
             calls += 1
             val pending = pendings[calls - 1]
             pending.entered.complete(Unit)
             if (ignoreCancellation) {
-                // 模拟阻塞 IO 晚返回：取消无法中断阻塞调用，结果在非取消上下文算出，
-                // 返回点（外层 job 已取消）立即以 CancellationException 收场
+                // 模拟阻塞 IO 晚返回：取消无法中断阻塞调用；替换 Job 未切换 dispatcher
+                // 时 withContext(NonCancellable) 内正常返回结果——正是迟到返回场景
                 val result = withContext(kotlinx.coroutines.NonCancellable) {
                     pending.release.await()
                     EndpointTestResult(
@@ -234,6 +241,7 @@ class ServerEditorViewModelTest {
 
     @After
     fun tearDown() {
+        service.releaseAll() // 断言失败后也不把未释放的 barrier 留给下一条测试
         Dispatchers.resetMain()
     }
 
@@ -383,17 +391,60 @@ class ServerEditorViewModelTest {
 
         // 模拟阻塞 IO：取消不能中断，旧结果在取消后才"返回"
         service.ignoreCancellation = true
-        service.enqueueTest()
+        val reqA = service.enqueueTest()
         vm.testMediaQuality()
         runCurrent()
-        service.awaitEntered()
+        reqA.entered.await()
         assertTrue(vm.uiState.value.isMediaTesting)
 
-        vm.updateBaseUrl("https://media-b.example") // 取消任务
+        vm.updateBaseUrl("https://media-b.example") // 取消 A（身份递增）
         runCurrent()
+        assertTrue("取消后 loading 已由 updateBaseUrl 复位", !vm.uiState.value.isMediaTesting)
 
-        assertTrue(vm.uiState.value.mediaQualityResult == null)
-        assertTrue(store.qualityUpdates.isEmpty())
+        // 释放 A → 迟到结果经 NonCancellable 返回 → VM 后续处理
+        reqA.release.complete(Unit)
+        advanceUntilIdle()
+
+        assertNull("A 的迟到结果不得显示", vm.uiState.value.mediaQualityResult)
+        assertTrue("A 的迟到结果不得写库", store.qualityUpdates.isEmpty())
+        assertTrue("loading 已复位", !vm.uiState.value.isMediaTesting)
+        assertEquals("fake 确认已返回", 1, service.calls)
+    }
+
+    @Test
+    fun `stale task cleanup does not affect new task - A cancelled then B started`() = runTest {
+        val vm = viewModel("srv-net")
+        advanceUntilIdle()
+
+        // A 在途
+        service.ignoreCancellation = true
+        val reqA = service.enqueueTest()
+        vm.testMediaQuality()
+        runCurrent()
+        reqA.entered.await()
+        assertTrue(vm.uiState.value.isMediaTesting)
+
+        // 取消 A、启动 B
+        vm.updateBaseUrl("https://media-b.example")
+        val reqB = service.enqueueTest()
+        vm.testMediaQuality()
+        runCurrent()
+        reqB.entered.await()
+        assertTrue("B 在途 loading = true", vm.uiState.value.isMediaTesting)
+
+        // 释放 A → A 完成收尾（身份不符，不显示不写库），B 不受影响
+        reqA.release.complete(Unit)
+        advanceUntilIdle()
+        assertNull("A 迟到结果不显示", vm.uiState.value.mediaQualityResult)
+        assertTrue("A 不写库", store.qualityUpdates.isEmpty())
+        assertTrue("B 的 loading 不受 A 收尾影响", vm.uiState.value.isMediaTesting)
+
+        // 释放 B → B 正常完成（未保存草稿 B：展示但不落库，同正向测试语义）
+        reqB.release.complete(Unit)
+        advanceUntilIdle()
+        assertNotNull("B 正常展示", vm.uiState.value.mediaQualityResult)
+        assertTrue("B 是未保存草稿，不落库（同正向测试）", store.qualityUpdates.isEmpty())
+        assertTrue(!vm.uiState.value.isMediaTesting)
     }
 
     private companion object {
