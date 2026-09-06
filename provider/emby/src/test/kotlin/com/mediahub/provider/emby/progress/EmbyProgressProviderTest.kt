@@ -20,9 +20,13 @@ import com.mediahub.provider.emby.session.EmbySession
 import com.mediahub.provider.emby.session.EmbySessionStore
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.yield
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -215,8 +219,8 @@ class EmbyProgressProviderTest {
     )
 
     /** Recording seam provider（无 HTTP）。 */
-    private fun provider(api: RecordingApi, logger: Logger = StdoutLogger()): EmbyProgressProvider =
-        EmbyProgressProvider(mediaServer, api, tokenStore, sessionStore, logger)
+    private fun provider(api: RecordingApi, logger: Logger = StdoutLogger(), sessionStoreOverride: EmbySessionStore = sessionStore): EmbyProgressProvider =
+        EmbyProgressProvider(mediaServer, api, tokenStore, sessionStoreOverride, logger)
 
     /** 真实 wire provider（MockWebServer + 真实 EmbyApiClient）。 */
     private fun realProvider(
@@ -234,9 +238,9 @@ class EmbyProgressProviderTest {
         return EmbyProgressProvider(mediaServer, api, tokenStore, sessionStore, logger)
     }
 
-    private suspend fun seedSession(serverId: String = "srv-1", token: String = "tok-1", userId: String = "user-1") {
+    private suspend fun seedSession(serverId: String = "srv-1", token: String = "tok-1", userId: String = "user-1", storeOverride: EmbySessionStore = sessionStore) {
         tokenStore.saveTokens(serverId, StoredToken(accessToken = token))
-        sessionStore.save(EmbySession(serverId, "remote-1", userId, "Alice"))
+        storeOverride.save(EmbySession(serverId, "remote-1", userId, "Alice"))
     }
 
     /** 每个预期请求恰好一个 204 + Connection: Close（确定性分帧，禁连接复用）。 */
@@ -598,60 +602,93 @@ class EmbyProgressProviderTest {
     // ==================================================================
 
     @Test
-    fun `in flight progress cannot be overtaken by final - stopped is last`() = runBlocking {
-        seedSession()
+    fun `in flight progress cannot be overtaken by final - stopped is last`() = runTest {
+        // 注入 test dispatcher 使 requireSession → mutex 全链路可被 runCurrent 确定性推进
+        val testSessionStore = EmbySessionStore(sessionStorage, ioDispatcher = StandardTestDispatcher(testScheduler))
+        seedSession(storeOverride = testSessionStore)
         val api = RecordingApi()
-        val p = provider(api)
+        val p = provider(api, sessionStoreOverride = testSessionStore)
         p.reportProgress(progress(positionMs = 90_000)) // 正常首报
 
         api.blockProgress = CompletableDeferred()
         api.progressEntered = CompletableDeferred() // 首报已 complete 共享信号：重置后才能锁定本次派发点
 
-        // 普通 report：Progress 派发后卡住在途（持有 Mutex）
-        val reportJob = launch { p.reportProgress(progress(positionMs = 120_000)) }
-        api.progressEntered.await()
-        assertTrue("Progress 必须已派发在途", kinds(api).last() == "Progress")
+        // try 覆盖整个受控生命周期（启动/在途/释放前断言/释放/最终断言）——
+        // assertion 失败也经 finally 释放 barrier，不把阻塞留给下一条测试
+        var reportJob: Job? = null
+        var finalJob: Job? = null
+        try {
+            // 普通 report：Progress 派发后卡住在途（持有 Mutex）。
+            // StandardTestDispatcher + runCurrent：确定性推进到"挂起在 barrier"。
+            reportJob = launch { p.reportProgress(progress(positionMs = 120_000)) }
+            runCurrent()
+            api.progressEntered.await()
+            assertTrue("Progress 必须已派发在途", kinds(api).last() == "Progress")
 
-        // final 请求：只能排队等 Mutex，不得越过在途 Progress
-        val finalJob = launch { p.reportFinalProgress(progress(positionMs = 300_000)) }
-        repeat(4) { yield() } // 确保 finalJob 到达 mutex 挂起点（CI 慢调度下单次 yield 不足）
+            // final 请求：launch 后 runCurrent——它应停在 Mutex 排队点，未发出任何请求
+            finalJob = launch { p.reportFinalProgress(progress(positionMs = 300_000)) }
+            runCurrent()
+            assertEquals(
+                "释放 barrier 前 final 不得越过串行化边界（未发出 Stopped）",
+                listOf("Playing", "Progress", "Progress"),
+                kinds(api),
+            )
+            assertTrue("final 必须仍在排队", finalJob.isActive)
 
-        api.blockProgress!!.complete(Unit)
-        reportJob.join()
-        finalJob.join()
-
-        assertEquals(listOf("Playing", "Progress", "Progress", "Stopped"), kinds(api))
-        assertEquals("Stopped 必须最后", "Stopped", api.calls.last().kind)
-        assertEquals(3_000_000_000L, api.calls.last().positionTicks)
+            api.blockProgress!!.complete(Unit)
+            runCurrent()
+            joinAll(reportJob, finalJob)
+            assertEquals(listOf("Playing", "Progress", "Progress", "Stopped"), kinds(api))
+            assertEquals("Stopped 必须最后", "Stopped", api.calls.last().kind)
+            assertEquals(3_000_000_000L, api.calls.last().positionTicks)
+        } finally {
+            api.blockProgress?.complete(Unit) // assertion 失败也释放 barrier，不把阻塞留给下一条测试
+            runCurrent() // 释放后推进排队任务至自然结束
+        }
     }
 
     @Test
-    fun `in flight final cannot be overtaken by late progress`() = runBlocking {
-        seedSession()
+    fun `in flight final cannot be overtaken by late progress`() = runTest {
+        val testSessionStore = EmbySessionStore(sessionStorage, ioDispatcher = StandardTestDispatcher(testScheduler))
+        seedSession(storeOverride = testSessionStore)
         val api = RecordingApi()
-        val p = provider(api)
+        val p = provider(api, sessionStoreOverride = testSessionStore)
         p.reportProgress(progress(positionMs = 90_000))
 
         api.blockStopped = CompletableDeferred()
         api.stoppedEntered = CompletableDeferred()
 
-        // final：Stopped 派发后卡住在途（持有 Mutex）
-        val finalJob = launch { p.reportFinalProgress(progress(positionMs = 300_000)) }
-        api.stoppedEntered.await()
-        assertTrue("Stopped 必须已派发在途", kinds(api).last() == "Stopped")
+        var finalJob: Job? = null
+        var lateJob: Job? = null
+        try {
+            // final：Stopped 派发后卡住在途（持有 Mutex）
+            finalJob = launch { p.reportFinalProgress(progress(positionMs = 300_000)) }
+            runCurrent()
+            api.stoppedEntered.await()
+            assertTrue("Stopped 必须已派发在途", kinds(api).last() == "Stopped")
 
-        // 迟到 report：只能排队等 Mutex，不得在 Stopped 前插入任何请求
-        val lateJob = launch { p.reportProgress(progress(positionMs = 60_000)) }
-        repeat(4) { yield() }
+            // 迟到 report：launch 后 runCurrent——应停在 Mutex 排队点，未发出任何请求
+            lateJob = launch { p.reportProgress(progress(positionMs = 60_000)) }
+            runCurrent()
+            assertEquals(
+                "释放 barrier 前迟到 report 不得越过串行化边界（未发出 Playing）",
+                listOf("Playing", "Progress", "Stopped"),
+                kinds(api),
+            )
+            assertTrue(lateJob.isActive)
 
-        api.blockStopped!!.complete(Unit)
-        finalJob.join()
-        lateJob.join()
+            api.blockStopped!!.complete(Unit)
+            runCurrent()
+            joinAll(finalJob, lateJob)
 
-        assertEquals(listOf("Playing", "Progress", "Stopped", "Playing", "Progress"), kinds(api))
-        val stoppedIndex = api.calls.indexOfFirst { it.kind == "Stopped" }
-        val reopenedPlayingIndex = api.calls.indexOfLast { it.kind == "Playing" }
-        assertTrue("final 之后才允许新会话", stoppedIndex < reopenedPlayingIndex)
+            assertEquals(listOf("Playing", "Progress", "Stopped", "Playing", "Progress"), kinds(api))
+            val stoppedIndex = api.calls.indexOfFirst { it.kind == "Stopped" }
+            val reopenedPlayingIndex = api.calls.indexOfLast { it.kind == "Playing" }
+            assertTrue("final 之后才允许新会话", stoppedIndex < reopenedPlayingIndex)
+        } finally {
+            api.blockStopped?.complete(Unit) // assertion 失败也释放 barrier
+            runCurrent() // 释放后推进排队任务至自然结束
+        }
     }
 
     @Test

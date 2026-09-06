@@ -5,6 +5,7 @@ import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.database.mapper.ServerEntityMappers.toDomain
 import com.mediahub.core.database.mapper.ServerEntityMappers.toEntity
 import com.mediahub.model.MediaServer
+import androidx.room.withTransaction
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
@@ -56,7 +57,7 @@ class ServerRepository @Inject constructor(
     }
 
     /** 更新媒体源（整体替换线路）。 */
-    suspend fun updateServer(server: MediaServer) {
+    override suspend fun updateServer(server: MediaServer) {
         dao.upsert(server.toEntity())
         endpointDao.deleteByServer(server.id)
         val endpoints = server.endpoints.mapIndexed { index, ep ->
@@ -79,7 +80,7 @@ class ServerRepository @Inject constructor(
     }
 
     /** 设为默认：原子「清旧设新」（单条 SQL），保证最多一个 isDefault==true。 */
-    suspend fun setDefault(id: String) {
+    override suspend fun setDefault(id: String) {
         dao.setDefaultExclusive(id)
     }
 
@@ -91,19 +92,26 @@ class ServerRepository @Inject constructor(
         dao.markError(id, error)
     }
 
-    /** 线路质量测试结果落库（U4-D）。 */
-    suspend fun updateEndpointQuality(
+    /**
+     * 线路质量测试结果落库（U4-D）。Phase 1I review P2：
+     * 校验与写入在同一事务内——[endpointId] 对应线路当前 URL 仍等于 [expectedUrl]
+     * 才写入（防"检查-写入"竞态）；线路已被改指其他地址或不存在则跳过，
+     * 绝不重挑主线路承接旧测量。
+     */
+    override suspend fun updateEndpointQuality(
         serverId: String,
+        endpointId: String,
+        expectedUrl: String,
         apiLatencyMs: Long?,
         mediaFirstByteMs: Long?,
         throughputMbps: Double?,
         protocol: String?,
         supportsRange: Boolean?,
         httpCode: Int?,
-    ) {
-        val endpoints = endpointDao.getByServer(serverId)
-        val primary = endpoints.firstOrNull { it.isPrimary } ?: endpoints.firstOrNull() ?: return
-        endpointDao.upsert(primary.copy(
+    ) = db.withTransaction {
+        val target = endpointDao.getByServer(serverId).firstOrNull { it.id == endpointId } ?: return@withTransaction
+        if (target.url != expectedUrl) return@withTransaction
+        endpointDao.upsert(target.copy(
             lastApiLatencyMs = apiLatencyMs,
             lastMediaFirstByteMs = mediaFirstByteMs,
             lastMediaThroughputMbps = throughputMbps,

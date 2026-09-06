@@ -46,6 +46,9 @@ class CanonicalSourceResolverTest {
         override fun observeServers(): Flow<List<MediaServer>> = MutableStateFlow(servers)
         override suspend fun getServer(id: String): MediaServer? =
             servers.firstOrNull { it.id == id }
+        override suspend fun updateServer(server: MediaServer) { }
+        override suspend fun setDefault(id: String) { }
+        // updateEndpointQuality：继承接口抛错默认（只读 fake，本测试不触达质量写路径）
     }
 
     private class FakeRegistry(private val handles: Map<String, ProviderHandle>) :
