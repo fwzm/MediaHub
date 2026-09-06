@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English overrides; shown only when the user's interface language is English. -->
+<resources>
+    <string name="effects_demo_label">FlowGlow Demo</string>
+    <string name="effects_demo_title">FlowGlow engine</string>
+    <string name="effects_demo_agsl_active">AGSL active</string>
+    <string name="effects_demo_gradient_fallback">gradient fallback (API &lt; 33)</string>
+    <string name="effects_demo_audio_sim_on">AUDIO SIM: ON</string>
+    <string name="effects_demo_audio_sim_off">AUDIO SIM: OFF</string>
+    <string name="effects_demo_state_on">audio sim on</string>
+    <string name="effects_demo_state_off">audio sim off</string>
+    <string name="effects_demo_hero_position">HERO · position %1$d%%</string>
+    <string name="effects_demo_playback_position">Playback position %1$d%%</string>
+    <string name="effects_demo_spectrum">Spectrum (bass / mid / treble, EMA smoothed)</string>
+</resources>

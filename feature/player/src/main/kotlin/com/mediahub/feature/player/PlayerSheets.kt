@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -25,7 +26,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.annotation.StringRes
 import com.mediahub.model.AudioTrack
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.SubtitleTrack
@@ -61,14 +65,18 @@ fun prettyCodecName(mime: String?): String? = when (mime) {
     else -> mime.removePrefix("audio/").removePrefix("application/").removePrefix("text/").uppercase()
 }
 
+@Composable
 fun formatChannels(channels: Int?): String? = when (channels) {
     null, 0 -> null
-    1 -> "单声道"
-    2 -> "立体声"
-    else -> "${channels}ch"
+    1 -> stringResource(R.string.player_audio_mono)
+    2 -> stringResource(R.string.player_audio_stereo)
+    else -> stringResource(R.string.player_audio_channels, channels)
 }
 
-fun formatSampleRate(hz: Int?): String? = hz?.takeIf { it > 0 }?.let { "${it / 1000} kHz" }
+@Composable
+fun formatSampleRate(hz: Int?): String? = hz?.takeIf { it > 0 }?.let {
+    stringResource(R.string.player_audio_sample_rate, it / 1000)
+}
 
 // ---- 音轨 Bottom Sheet ----
 
@@ -79,7 +87,12 @@ fun AudioTrackSheet(
     onDismiss: () -> Unit,
     onSelect: (AudioTrack) -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.onSurfaceVariant) },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -87,9 +100,9 @@ fun AudioTrackSheet(
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 32.dp),
         ) {
-            Text("音轨", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+            Text(stringResource(R.string.player_audio_tracks), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
             if (tracks.isEmpty()) {
-                Text("未发现音轨", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.player_audio_tracks_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             tracks.forEach { track ->
                 Row(
@@ -103,7 +116,8 @@ fun AudioTrackSheet(
                     RadioButton(selected = track.isSelected, onClick = { onSelect(track) })
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            track.title ?: track.language?.let { langName(it) } ?: "音轨 ${track.index + 1}",
+                            track.title ?: track.language?.let { langName(it) }
+                                ?: stringResource(R.string.player_audio_track_number, track.index + 1),
                             style = MaterialTheme.typography.bodyLarge,
                         )
                         val details = buildList {
@@ -111,7 +125,7 @@ fun AudioTrackSheet(
                             prettyCodecName(track.codec)?.let { add(it) }
                             formatChannels(track.channels)?.let { add(it) }
                             formatSampleRate(track.sampleRate)?.let { add(it) }
-                            track.decoderName?.let { add("解码器 $it") }
+                            track.decoderName?.let { add(stringResource(R.string.player_audio_decoder, it)) }
                         }
                         if (details.isNotEmpty()) {
                             Text(
@@ -122,7 +136,7 @@ fun AudioTrackSheet(
                         }
                     }
                     if (!track.isSupported) {
-                        AssistChip(onClick = {}, label = { Text("不支持") })
+                        AssistChip(onClick = {}, label = { Text(stringResource(R.string.player_track_unsupported)) })
                     }
                 }
             }
@@ -130,33 +144,34 @@ fun AudioTrackSheet(
     }
 }
 
+@Composable
 private fun langName(code: String): String = when (code.lowercase().substringBefore('-')) {
-    "zh" -> "中文"
-    "en" -> "英语"
-    "ja" -> "日语"
-    "ko" -> "韩语"
-    "yue" -> "粤语"
+    "zh" -> stringResource(R.string.player_language_chinese)
+    "en" -> stringResource(R.string.player_language_english)
+    "ja" -> stringResource(R.string.player_language_japanese)
+    "ko" -> stringResource(R.string.player_language_korean)
+    "yue" -> stringResource(R.string.player_language_cantonese)
     else -> code.uppercase()
 }
 
 // ---- 字幕 Bottom Sheet ----
 
-private data class ColorOption(val label: String, val color: Int)
+private data class ColorOption(@StringRes val label: Int, val color: Int)
 
 private val TEXT_COLORS = listOf(
-    ColorOption("白", 0xFFFFFFFF.toInt()),
-    ColorOption("黄", 0xFFFFFF00.toInt()),
-    ColorOption("青", 0xFF00FFFF.toInt()),
-    ColorOption("绿", 0xFF00FF00.toInt()),
-    ColorOption("粉", 0xFFFF69B4.toInt()),
-    ColorOption("黑", 0xFF000000.toInt()),
+    ColorOption(R.string.player_color_white, 0xFFFFFFFF.toInt()),
+    ColorOption(R.string.player_color_yellow, 0xFFFFFF00.toInt()),
+    ColorOption(R.string.player_color_cyan, 0xFF00FFFF.toInt()),
+    ColorOption(R.string.player_color_green, 0xFF00FF00.toInt()),
+    ColorOption(R.string.player_color_pink, 0xFFFF69B4.toInt()),
+    ColorOption(R.string.player_color_black, 0xFF000000.toInt()),
 )
 
 private val BG_COLORS = listOf(
-    ColorOption("透明", 0x00000000),
-    ColorOption("黑50%", 0x80000000.toInt()),
-    ColorOption("黑", 0xFF000000.toInt()),
-    ColorOption("白", 0xFFFFFFFF.toInt()),
+    ColorOption(R.string.player_color_transparent, 0x00000000),
+    ColorOption(R.string.player_color_black_half, 0x80000000.toInt()),
+    ColorOption(R.string.player_color_black, 0xFF000000.toInt()),
+    ColorOption(R.string.player_color_white, 0xFFFFFFFF.toInt()),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -168,7 +183,12 @@ fun SubtitleSheet(
     onSelect: (SubtitleTrack?) -> Unit,
     onStyleChange: (SubtitleStyle) -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.onSurfaceVariant) },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -177,14 +197,15 @@ fun SubtitleSheet(
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text("字幕", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.player_subtitles), style = MaterialTheme.typography.titleMedium)
 
-            Text("轨道", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
-            SubtitleRow(label = "关闭字幕", selected = tracks.none { it.isSelected }, onClick = { onSelect(null) })
+            Text(stringResource(R.string.player_subtitle_tracks), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+            SubtitleRow(label = stringResource(R.string.player_subtitles_off), selected = tracks.none { it.isSelected }, onClick = { onSelect(null) })
             tracks.forEach { track ->
                 SubtitleRow(
                     label = buildString {
-                        append(track.title ?: track.language?.let { langName(it) } ?: "字幕 ${track.index + 1}")
+                        append(track.title ?: track.language?.let { langName(it) }
+                            ?: stringResource(R.string.player_subtitle_track_number, track.index + 1))
                         prettyCodecName(track.format)?.let { append(" · $it") }
                     },
                     selected = track.isSelected,
@@ -192,9 +213,9 @@ fun SubtitleSheet(
                 )
             }
 
-            Text("样式", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
+            Text(stringResource(R.string.player_subtitle_style), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
 
-            Text("字号  ${"%.0f%%".format(style.textScale * 100)}", style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.player_subtitle_scale, style.textScale * 100), style = MaterialTheme.typography.bodyMedium)
             Slider(
                 value = style.textScale,
                 onValueChange = { onStyleChange(style.copy(textScale = it)) },
@@ -202,33 +223,35 @@ fun SubtitleSheet(
             )
 
             ColorRow(
-                label = "文字颜色",
+                label = stringResource(R.string.player_subtitle_text_color),
                 options = TEXT_COLORS,
                 selected = style.textColor,
                 onSelect = { onStyleChange(style.copy(textColor = it)) },
             )
             ColorRow(
-                label = "背景（默认透明）",
+                label = stringResource(R.string.player_subtitle_background),
                 options = BG_COLORS,
                 selected = style.backgroundColor,
                 onSelect = { onStyleChange(style.copy(backgroundColor = it)) },
             )
 
-            Text("描边", style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.player_subtitle_edge), style = MaterialTheme.typography.bodyMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(
-                    "无" to SubtitleStyle.EDGE_TYPE_NONE,
-                    "描边" to SubtitleStyle.EDGE_TYPE_OUTLINE,
-                    "阴影" to SubtitleStyle.EDGE_TYPE_DROP_SHADOW,
+                    stringResource(R.string.player_subtitle_edge_none) to SubtitleStyle.EDGE_TYPE_NONE,
+                    stringResource(R.string.player_subtitle_edge_outline) to SubtitleStyle.EDGE_TYPE_OUTLINE,
+                    stringResource(R.string.player_subtitle_edge_shadow) to SubtitleStyle.EDGE_TYPE_DROP_SHADOW,
                 ).forEach { (label, type) ->
                     AssistChip(
                         onClick = { onStyleChange(style.copy(edgeType = type)) },
-                        label = { Text(if (style.edgeType == type) "● $label" else label) },
+                        label = {
+                            Text(if (style.edgeType == type) stringResource(R.string.player_selected_option, label) else label)
+                        },
                     )
                 }
             }
 
-            Text("垂直位置  底部 ${"%.0f%%".format(style.bottomPaddingFraction * 100)}", style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.player_subtitle_position, style.bottomPaddingFraction * 100), style = MaterialTheme.typography.bodyMedium)
             Slider(
                 value = style.bottomPaddingFraction,
                 onValueChange = { onStyleChange(style.copy(bottomPaddingFraction = it)) },
@@ -240,7 +263,7 @@ fun SubtitleSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("尊重内嵌 ASS/PGS 样式", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.player_subtitle_embedded_style), style = MaterialTheme.typography.bodyMedium)
                 Switch(
                     checked = style.applyEmbeddedStyles,
                     onCheckedChange = { onStyleChange(style.copy(applyEmbeddedStyles = it)) },
@@ -290,10 +313,17 @@ private fun ColorRow(
                         contentAlignment = Alignment.Center,
                     ) {
                         if (option.color == selected) {
-                            Text("✓", color = if (option.color ushr 24 == 0) Color.Black else Color.White)
+                            Text(
+                                "✓",
+                                color = when {
+                                    option.color ushr 24 == 0 -> MaterialTheme.colorScheme.onSurface
+                                    Color(option.color).luminance() > 0.5f -> Color.Black
+                                    else -> Color.White
+                                },
+                            )
                         }
                     }
-                    Text(option.label, style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(option.label), style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
