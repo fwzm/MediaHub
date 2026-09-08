@@ -215,6 +215,10 @@ abstract class RegistryModule {
 
     @Binds
     @Singleton
+    abstract fun bindRestoreSnapshotStorage(impl: com.mediahub.feature.settings.backup.RestoreSnapshotStore): com.mediahub.feature.settings.backup.RestoreSnapshotStorage
+
+    @Binds
+    @Singleton
     abstract fun bindRestoreJournal(impl: com.mediahub.feature.settings.backup.SharedPrefsRestoreJournal): com.mediahub.feature.settings.backup.RestoreJournal
 
     @Binds

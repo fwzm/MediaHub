@@ -47,7 +47,7 @@ jobs:
       # 测试 FAIL/TIMEOUT 时仍执行，workflow 被 concurrency 取消时不执行
       - name: Unit tests
         timeout-minutes: 15
-        run: ./gradlew testDebugUnitTest --no-daemon
+        run: ./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon
 
       - name: Lint
         if: ${{ !cancelled() }}

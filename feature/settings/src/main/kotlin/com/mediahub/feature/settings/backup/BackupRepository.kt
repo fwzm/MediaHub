@@ -22,6 +22,8 @@ import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** 恢复策略。 */
 enum class RestoreStrategy { MERGE, REPLACE_SELECTED }
@@ -90,6 +92,15 @@ data class RestorePreview(
     val appVersion: String,
     val createdAtEpochMs: Long,
     val baselineFormatVersion: Int,
+    val strategy: RestoreStrategy = RestoreStrategy.MERGE,
+    val frozenPlan: PreparedRestorePlan? = null,
+)
+
+/** Bound to the validated input and exact local data shown in the preview. */
+class PreparedRestorePlan internal constructor(
+    internal val validated: ValidatedRestore,
+    internal val plan: RestorePlan,
+    internal val images: RestoreImages,
 )
 
 /** 恢复结果。 */
@@ -130,13 +141,13 @@ class RestoreFailedException(
     val phase: RestoreJournal.Phase?,
     val rolledBack: Boolean,
     cause: Throwable?,
-) : Exception(cause?.message ?: "恢复失败", cause)
+) : Exception(if (rolledBack) "恢复失败，已还原本机数据；已清除的登录态需重新登录" else "恢复未完成，请先处理中断恢复", cause)
 
 /** 载荷深度验证失败（枚举/字段范围零写入路径）。 */
 private class ValidationRejectedException(message: String) : Exception(message)
 
 /**
- * 本地备份与还原（Phase 1I review 重写）。
+ * 本地备份与还原：冻结预览、身份隔离与跨存储中断恢复。
  *
  * 职责链：导出（值级守卫 + 上限）→ 导入（统一结构验证）→ 深度验证（枚举/引用，
  * 零写入）→ 预览（身份裁决 + 所选范围 + 冲突披露）→ 恢复（登录态隔离 → 单事务写库 →
@@ -156,7 +167,10 @@ class BackupRepository @Inject constructor(
     private val restoreJournal: RestoreJournal,
     private val loginInvalidator: RestoreLoginInvalidator,
     private val dispatchers: AppDispatchers,
+    private val snapshotStorage: RestoreSnapshotStorage,
 ) {
+
+    private companion object { val restoreMutex = Mutex() }
 
     // ---- 导出 ----
 
@@ -166,12 +180,10 @@ class BackupRepository @Inject constructor(
         val preferences = preferencesRepository.flow.first()
         val payload = buildPayload(snapshot, preferences, appVersion)
 
-        val urlMap = linkedMapOf<String, String>()
         for (server in payload.servers) {
-            for (ep in server.endpoints) urlMap["${server.name}/${ep.name}"] = ep.url
-        }
-        BackupUrlGuard.inspectAll(urlMap)?.let { violation ->
-            throw ExportRejectedException("存在携带疑似凭据的线路 URL（${describe(violation)}），已拒绝导出；请先修正该线路地址。")
+            for (ep in server.endpoints) BackupUrlGuard.inspect(ep.url)?.let { violation ->
+                throw ExportRejectedException("存在携带疑似凭据的线路 URL（${describe(violation)}），已拒绝导出；请先修正该线路地址。")
+            }
         }
 
         BackupSerializer.export(payload, password)
@@ -209,7 +221,7 @@ class BackupRepository @Inject constructor(
             val type = try {
                 ServerType.valueOf(dto.type)
             } catch (e: IllegalArgumentException) {
-                throw ValidationRejectedException("未知媒体源类型「${dto.type}」（服务器 ${dto.backupId}）")
+                throw ValidationRejectedException("未知媒体源类型")
             }
             val endpoints = dto.endpoints.map { ep ->
                 ValidatedEndpoint(ep.name, ep.url, ep.isPrimary, ep.enabled, ep.sortOrder)
@@ -222,7 +234,7 @@ class BackupRepository @Inject constructor(
                 identity = BackupIdentity(
                     type = type,
                     normalizedPrimaryUrl = BackupUrlGuard.normalizeForIdentity(
-                        (endpoints.firstOrNull { it.isPrimary && it.enabled } ?: endpoints.first()).url,
+                        (endpoints.firstOrNull { it.isPrimary && it.enabled } ?: endpoints.firstOrNull { it.enabled })?.url.orEmpty(),
                     ),
                     username = dto.username,
                 ),
@@ -240,7 +252,7 @@ class BackupRepository @Inject constructor(
                     try {
                         MediaType.valueOf(type)
                     } catch (e: IllegalArgumentException) {
-                        throw ValidationRejectedException("未知媒体类型「$type」（播放记录 ${dto.serverBackupId}/${dto.itemId}）")
+                        throw ValidationRejectedException("未知媒体类型")
                     }
                 },
             )
@@ -251,7 +263,7 @@ class BackupRepository @Inject constructor(
             val mode = try {
                 PlaybackEngineMode.valueOf(dto.playbackEngineMode)
             } catch (e: IllegalArgumentException) {
-                throw ValidationRejectedException("未知播放内核模式「${dto.playbackEngineMode}」")
+                throw ValidationRejectedException("未知播放内核模式")
             }
             UserPreferences(
                 playbackEngineMode = mode,
@@ -300,189 +312,242 @@ class BackupRepository @Inject constructor(
         )
     }
 
-    // ---- 预览 ----
+    // ---- Frozen preview and recoverable application ----
 
-    /** 恢复预览（dry-run，零写入）。冲突、范围、进度写入数与基线版本在此披露。 */
     suspend fun buildPreview(validated: ValidatedRestore, strategy: RestoreStrategy): RestorePreview =
         withContext(dispatchers.io) {
-            val snapshot = backupDataSource.readSnapshot()
-            val localIds = snapshot.servers.map { it.id }.toSet()
-            val record = buildPlanRecord(validated, snapshot, strategy)
-            val progressToWrite = resolveProgress(validated, record, snapshot)
+            val before = backupDataSource.readSnapshot()
+            val prefs = preferencesRepository.flow.first()
+            val draftRecord = buildPlanRecord(validated, before, strategy)
+            val progress = resolveProgress(validated, draftRecord, before)
+            val record = draftRecord.copy(restoredProgressCount = progress.size)
+            val plan = RestorePlan(
+                "restore-${UUID.randomUUID()}", record,
+                validated.servers.filter { it.backupId in record.overwriteServerIds }.map { toMediaServer(it) },
+                progress, if (record.includePreferences) validated.preferences else null, before,
+            )
+            val images = RestoreImages(before, materializeRestorePlan(before, plan), prefs, plan.preferences ?: prefs, record)
+            val localIds = before.servers.map { it.id }.toSet()
             RestorePreview(
                 newServers = record.overwriteServerIds.count { it !in localIds },
                 identicalServers = record.skipExistingServerIds.size,
                 conflictingServers = record.conflictSkippedServerIds.size,
-                conflictServerNames = validated.servers
-                    .filter { it.backupId in record.conflictSkippedServerIds }
-                    .map { it.name },
-                progressToWrite = progressToWrite.size,
+                conflictServerNames = validated.servers.filter { it.backupId in record.conflictSkippedServerIds }.map { it.name },
+                progressToWrite = progress.size,
                 orphanProgressRecords = validated.orphanProgressRecords,
                 preferencesContained = validated.preferences != null,
                 preferencesWillRestore = record.includePreferences,
                 appVersion = validated.baselineAppVersion,
                 createdAtEpochMs = validated.createdAtEpochMs,
                 baselineFormatVersion = validated.baselineFormatVersion,
+                strategy = strategy,
+                frozenPlan = PreparedRestorePlan(validated, plan, images),
             )
         }
 
-    // ---- 恢复 ----
-
-    /**
-     * 应用用户确认过的恢复计划。
-     * @param replaceConfirmed 替换确认（ViewModel 与 UI 之外的第二道防线）。
-     */
     suspend fun restore(
         validated: ValidatedRestore,
         strategy: RestoreStrategy,
         replaceConfirmed: Boolean,
-    ): RestoreResult = withContext(dispatchers.io) {
-        if (strategy == RestoreStrategy.REPLACE_SELECTED && !replaceConfirmed) {
-            throw RestoreConfirmationRequiredException()
+        preview: RestorePreview,
+    ): RestoreResult = withContext(dispatchers.io) { restoreMutex.withLock {
+        if (strategy == RestoreStrategy.REPLACE_SELECTED && !replaceConfirmed) throw RestoreConfirmationRequiredException()
+        val prepared = preview.frozenPlan
+            ?: throw RestoreBaselineChangedException()
+        if (prepared.validated !== validated || preview.strategy != strategy || prepared.plan.record.strategy != strategy.name) {
+            throw RestoreBaselineChangedException()
         }
-        // 叠加恢复前必须先处理历史中断（前向完成或回滚），否则拒绝本次操作
-        when (val recovery = recoverInterruptedRestore()) {
-            is RecoveryOutcome.NeedsAttention ->
-                throw RestoreFailedException(null, rolledBack = false, cause = IllegalStateException(recovery.reason))
-            else -> {}
+        // Never stack operations, including one whose recovery is blocked or whose journal is corrupt.
+        when (recoverLocked()) {
+            is RecoveryOutcome.NeedsAttention -> throw RestoreFailedException(null, false, null)
+            else -> Unit
         }
+        val images = prepared.images
+        if (!images.before.sameData(backupDataSource.readSnapshot()) || preferencesRepository.flow.first() != images.beforePreferences) {
+            throw RestoreBaselineChangedException()
+        }
+        val plan = prepared.plan
+        // Full encrypted image must be durably written before the journal permits any mutation.
+        snapshotStorage.save(plan.planId, images)
+        restoreJournal.begin(RestoreJournal.ActiveEntry(
+            planId = plan.planId, phase = RestoreJournal.Phase.PREPARING,
+            payloadJson = BackupDtos.encodePayload(validated.payload),
+            planRecordJson = BackupDtos.encodePlanRecord(plan.record),
+            protectiveSnapshotJson = "", includePreferences = plan.record.includePreferences,
+            startedAtEpochMs = System.currentTimeMillis(), protectiveSnapshotRef = plan.planId,
+        ))
+        loginInvalidator.withIdentityChange(identityChangeTargets(images)) {
+            var completed = false
+            var databaseWritten = false
+            try {
+                val invalidated = invalidateChangedIdentities(images)
+                backupDataSource.applyRestorePlan(plan)
+                databaseWritten = true
+                restoreJournal.markPhase(plan.planId, RestoreJournal.Phase.DB_WRITTEN)
+                applyPreferences(images, plan.record.includePreferences)
+                if (plan.record.includePreferences) restoreJournal.markPhase(plan.planId, RestoreJournal.Phase.PREFERENCES_APPLIED)
+                restoreJournal.markPhase(plan.planId, RestoreJournal.Phase.COMPLETED)
+                completed = true
+                restoreJournal.clear(plan.planId)
+                runCatching { snapshotStorage.delete(plan.planId) }
+                resultFor(plan, images, invalidated)
+            } catch (e: CancellationException) {
+                // The persisted phase determines restart behavior; cancellation is never reported as success.
+                throw e
+            } catch (e: Exception) {
+                if (completed) throw RestoreFailedException(RestoreJournal.Phase.COMPLETED, false, e)
+                if (e is RestoreBaselineChangedException && !databaseWritten) {
+                    // The transaction rejected before its first write; keep concurrent local work and re-preview.
+                    restoreJournal.clear(plan.planId)
+                    runCatching { snapshotStorage.delete(plan.planId) }
+                    throw e
+                }
+                val phase = runCatching { restoreJournal.read()?.phase }.getOrNull()
+                val rolledBack = try {
+                    restoreJournal.markPhase(plan.planId, RestoreJournal.Phase.ROLLING_BACK)
+                    rollback(images)
+                    restoreJournal.clear(plan.planId)
+                    runCatching { snapshotStorage.delete(plan.planId) }
+                    true
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) { false }
+                throw RestoreFailedException(phase, rolledBack, e)
+            }
+        }
+    } }
 
-        val snapshot = backupDataSource.readSnapshot()
-        val record = buildPlanRecord(validated, snapshot, strategy)
-        val progress = resolveProgress(validated, record, snapshot)
-        val planServers = validated.servers
-            .filter { it.backupId in record.overwriteServerIds }
-            .map { toMediaServer(it) }
-        val planId = "restore-${UUID.randomUUID()}"
-        val plan = RestorePlan(
-            planId = planId,
-            record = record,
-            servers = planServers,
-            progress = progress,
-            preferences = if (record.includePreferences) validated.preferences else null,
-        )
-        val protectiveJson = BackupDtos.encodePayload(
-            buildPayload(snapshot, preferencesRepository.flow.first(), appVersion = "protective"),
-        )
+    suspend fun recoverInterruptedRestore(): RecoveryOutcome = withContext(dispatchers.io) {
+        restoreMutex.withLock { recoverLocked() }
+    }
 
-        restoreJournal.begin(
-            RestoreJournal.ActiveEntry(
-                planId = planId,
-                phase = RestoreJournal.Phase.PREPARING,
-                payloadJson = BackupDtos.encodePayload(validated.payload),
-                planRecordJson = BackupDtos.encodePlanRecord(record),
-                protectiveSnapshotJson = protectiveJson,
-                includePreferences = record.includePreferences,
-                startedAtEpochMs = System.currentTimeMillis(),
-            )
-        )
-
-        try {
-            // 先阻断将被覆盖且身份已变的服务器旧登录态（安全优先：即使后续步骤失败也已失效）
-            var invalidated = 0
-            val localById = snapshot.servers.associateBy { it.id }
-            for (id in record.overwriteServerIds) {
-                val local = localById[id] ?: continue
-                val incoming = validated.servers.first { it.backupId == id }
-                if (compareIdentity(local, incoming) == IdentityVerdict.CONFLICTING) {
-                    runCatching { loginInvalidator.invalidate(id) }
-                        .onSuccess { invalidated++ }
-                        .onFailure { restoreJournal.markFailed(planId, "登录态清除失败：${it.message}") }
+    private suspend fun recoverLocked(): RecoveryOutcome {
+        val entry = try { restoreJournal.read() } catch (e: CancellationException) { throw e } catch (_: Exception) {
+            return RecoveryOutcome.NeedsAttention("恢复日志损坏或不可读，已阻止新的恢复")
+        } ?: return RecoveryOutcome.NothingToRecover
+        if (entry.phase == RestoreJournal.Phase.COMPLETED) {
+            return try {
+                restoreJournal.clear(entry.planId)
+                entry.protectiveSnapshotRef?.let { runCatching { snapshotStorage.delete(it) } }
+                RecoveryOutcome.CompletedEarlier
+            } catch (e: CancellationException) { throw e } catch (_: Exception) {
+                RecoveryOutcome.NeedsAttention("恢复已完成，但完成日志尚未成功清理")
+            }
+        }
+        // Historical entries did not contain an exact before image. Do not invent one from export data.
+        val ref = entry.protectiveSnapshotRef
+            ?: return RecoveryOutcome.NeedsAttention("旧恢复日志缺少完整保护快照，需人工处理后再恢复")
+        if (ref != entry.planId) return RecoveryOutcome.NeedsAttention("恢复日志与保护快照引用不匹配")
+        val images = try { snapshotStorage.read(ref) } catch (e: CancellationException) { throw e } catch (_: Exception) {
+            return RecoveryOutcome.NeedsAttention("保护快照损坏或不可读取，日志已保留")
+        }
+        if (entry.phase == RestoreJournal.Phase.ROLLING_BACK) {
+            return loginInvalidator.withIdentityChange(identityChangeTargets(images)) {
+                try {
+                    rollback(images)
+                    restoreJournal.clear(entry.planId)
+                    runCatching { snapshotStorage.delete(ref) }
+                    RecoveryOutcome.RolledBack
+                } catch (e: CancellationException) { throw e } catch (_: Exception) {
+                    RecoveryOutcome.NeedsAttention("回滚尚未完成，日志已保留")
                 }
             }
-
-            backupDataSource.applyRestorePlan(plan)
-            restoreJournal.markPhase(planId, RestoreJournal.Phase.DB_WRITTEN)
-
-            var prefsRestored = false
-            if (record.includePreferences && plan.preferences != null) {
-                preferencesRepository.update { plan.preferences }
-                restoreJournal.markPhase(planId, RestoreJournal.Phase.PREFERENCES_APPLIED)
-                prefsRestored = true
+        }
+        val current = backupDataSource.readSnapshot()
+        if (!current.sameData(images.before) && !current.sameData(images.after)) {
+            return RecoveryOutcome.NeedsAttention("中断后本机数据已变化，已阻止自动覆盖")
+        }
+        if (entry.includePreferences && preferencesRepository.flow.first().let {
+                it != images.beforePreferences && it != images.afterPreferences
+            }) return RecoveryOutcome.NeedsAttention("中断后本机偏好已变化，已阻止自动覆盖")
+        return loginInvalidator.withIdentityChange(identityChangeTargets(images)) {
+            var completed = false
+            try {
+                val record = BackupDtos.decodePlanRecord(entry.planRecordJson)
+                require(record.strategy in setOf("MERGE", "REPLACE_SELECTED"))
+                require(record == images.record && record.includePreferences == entry.includePreferences)
+                val invalidated = invalidateChangedIdentities(images)
+                // The encrypted after image contains frozen timestamps, IDs and merge winners.
+                if (!current.sameData(images.after)) {
+                    backupDataSource.applyRestorePlan(fullImagePlan(entry.planId, images.after, current))
+                }
+                restoreJournal.markPhase(entry.planId, RestoreJournal.Phase.DB_WRITTEN)
+                applyPreferences(images, entry.includePreferences)
+                if (entry.includePreferences) restoreJournal.markPhase(entry.planId, RestoreJournal.Phase.PREFERENCES_APPLIED)
+                restoreJournal.markPhase(entry.planId, RestoreJournal.Phase.COMPLETED)
+                completed = true
+                restoreJournal.clear(entry.planId)
+                runCatching { snapshotStorage.delete(ref) }
+                RecoveryOutcome.Continued(resultFor(
+                    RestorePlan(entry.planId, record, images.after.servers.filter { it.id in record.overwriteServerIds },
+                        images.after.progress, if (entry.includePreferences) images.afterPreferences else null), images, invalidated,
+                ))
+            } catch (e: CancellationException) { throw e } catch (_: Exception) {
+                if (completed) return@withIdentityChange RecoveryOutcome.NeedsAttention("恢复已完成，但完成日志尚未成功清理")
+                try {
+                    restoreJournal.markPhase(entry.planId, RestoreJournal.Phase.ROLLING_BACK)
+                    rollback(images)
+                    restoreJournal.clear(entry.planId)
+                    runCatching { snapshotStorage.delete(ref) }
+                    RecoveryOutcome.RolledBack
+                } catch (e: CancellationException) { throw e } catch (_: Exception) {
+                    RecoveryOutcome.NeedsAttention("恢复续作及回滚未完成，日志已保留")
+                }
             }
-
-            restoreJournal.markPhase(planId, RestoreJournal.Phase.COMPLETED)
-            restoreJournal.clear(planId)
-
-            RestoreResult(
-                addedServers = planServers.count { it.id !in localById },
-                overwrittenServers = planServers.count { it.id in localById },
-                skippedExistingServers = record.skipExistingServerIds.size,
-                conflictSkippedServers = record.conflictSkippedServerIds.size,
-                restoredProgress = progress.size,
-                loginsInvalidated = invalidated,
-                preferencesRestored = prefsRestored,
-            )
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            // 用户取消/中途失败：日志保留在当前阶段，立即尽力回滚到保护快照
-            restoreJournal.markFailed(planId, e.message ?: "恢复失败")
-            val rollback = runCatching { rollbackFromSnapshot(protectiveJson) }
-            if (rollback.isSuccess) {
-                restoreJournal.clear(planId)
-                throw RestoreFailedException(restoreJournal.read()?.phase, rolledBack = true, cause = e)
-            }
-            // 回滚也失败：日志保留，下次进入备份页走恢复协议
-            throw RestoreFailedException(restoreJournal.read()?.phase, rolledBack = false, cause = e)
         }
     }
 
-    /**
-     * 中断恢复协议：前向继续（幂等重放冻结决策）为主，失败则回滚到保护快照。
-     * 在进入备份页与每次新恢复前调用。
-     */
-    suspend fun recoverInterruptedRestore(): RecoveryOutcome = withContext(dispatchers.io) {
-        val entry = restoreJournal.read() ?: return@withContext RecoveryOutcome.NothingToRecover
-        if (entry.phase == RestoreJournal.Phase.COMPLETED) {
-            restoreJournal.clear(entry.planId)
-            return@withContext RecoveryOutcome.CompletedEarlier
+    private suspend fun applyPreferences(images: RestoreImages, include: Boolean) {
+        if (!include) return
+        preferencesRepository.update { current ->
+            if (current != images.beforePreferences && current != images.afterPreferences) throw RestoreBaselineChangedException()
+            images.afterPreferences
         }
-        try {
-            val payload = BackupDtos.decodePayload(entry.payloadJson)
-            val validated = validate(payload) // 重放前复验：验证不过 → 回滚路径
-            val record = BackupDtos.decodePlanRecord(entry.planRecordJson)
-            val snapshot = backupDataSource.readSnapshot()
-            val progress = resolveProgress(validated, record, snapshot)
-            val planServers = validated.servers
-                .filter { it.backupId in record.overwriteServerIds }
-                .map { toMediaServer(it) }
-            backupDataSource.applyRestorePlan(
-                RestorePlan(
-                    planId = entry.planId,
-                    record = record,
-                    servers = planServers,
-                    progress = progress,
-                    preferences = if (record.includePreferences) validated.preferences else null,
-                )
-            )
-            if (record.includePreferences && validated.preferences != null) {
-                preferencesRepository.update { validated.preferences }
-            }
-            restoreJournal.markPhase(entry.planId, RestoreJournal.Phase.COMPLETED)
-            restoreJournal.clear(entry.planId)
-            RecoveryOutcome.Continued(
-                RestoreResult(
-                    addedServers = planServers.count { it.id !in snapshot.servers.map { s -> s.id }.toSet() },
-                    overwrittenServers = planServers.count { it.id in snapshot.servers.map { s -> s.id }.toSet() },
-                    skippedExistingServers = record.skipExistingServerIds.size,
-                    conflictSkippedServers = record.conflictSkippedServerIds.size,
-                    restoredProgress = progress.size,
-                    loginsInvalidated = 0,
-                    preferencesRestored = record.includePreferences,
-                )
-            )
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            try {
-                rollbackFromSnapshot(entry.protectiveSnapshotJson)
-                restoreJournal.clear(entry.planId)
-                RecoveryOutcome.RolledBack
-            } catch (rollbackError: Exception) {
-                RecoveryOutcome.NeedsAttention(
-                    "恢复中断自动续作失败（${e.message}），回滚也失败（${rollbackError.message}），日志已保留。"
-                )
-            }
+    }
+
+    private suspend fun rollback(images: RestoreImages) {
+        val current = backupDataSource.readSnapshot()
+        if (!current.sameData(images.before) && !current.sameData(images.after)) throw RestoreBaselineChangedException()
+        if (!current.sameData(images.before)) {
+            // A resumed rollback may encounter a login created against the restored address.
+            // Revoke it before the inverse identity change, while the outer auth block is held.
+            invalidateChangedIdentities(images)
+            backupDataSource.applyRestorePlan(fullImagePlan("rollback", images.before, current))
         }
+        if (images.beforePreferences != images.afterPreferences) preferencesRepository.update { currentPrefs ->
+            if (currentPrefs != images.beforePreferences && currentPrefs != images.afterPreferences) throw RestoreBaselineChangedException()
+            images.beforePreferences
+        }
+    }
+
+    private fun fullImagePlan(id: String, image: BackupSnapshot, expected: BackupSnapshot) = RestorePlan(
+        id, BackupDtos.RestorePlanRecord("ROLLBACK", overwriteServerIds = image.servers.map { it.id }),
+        image.servers, image.progress, null, expected,
+    )
+
+    private fun identityChangeTargets(images: RestoreImages): Set<String> {
+        val before = images.before.servers.associateBy { it.id }
+        return images.after.servers.filter { incoming ->
+            val local = before[incoming.id]
+            local == null || identity(local) != identity(incoming)
+        }.map { it.id }.toSet()
+    }
+
+    private suspend fun invalidateChangedIdentities(images: RestoreImages): Int {
+        val targets = identityChangeTargets(images)
+        for (id in targets) loginInvalidator.invalidate(id)
+        return targets.size
+    }
+
+    private fun identity(server: MediaServer) = BackupIdentity(server.type,
+        BackupUrlGuard.normalizeForIdentity(server.endpoints.activeEndpoint()?.url.orEmpty()), server.username)
+
+    private fun resultFor(plan: RestorePlan, images: RestoreImages, invalidated: Int): RestoreResult {
+        val beforeIds = images.before.servers.map { it.id }.toSet()
+        return RestoreResult(plan.record.overwriteServerIds.count { it !in beforeIds },
+            plan.record.overwriteServerIds.count { it in beforeIds }, plan.record.skipExistingServerIds.size,
+            plan.record.conflictSkippedServerIds.size, plan.record.restoredProgressCount ?: plan.progress.size,
+            invalidated, plan.record.includePreferences)
     }
 
     // ---- 计划构建（冻结决策，恢复与中断重放共用同一路径） ----
@@ -540,14 +605,14 @@ class BackupRepository @Inject constructor(
         record: BackupDtos.RestorePlanRecord,
         snapshot: BackupSnapshot,
     ): List<PlaybackProgress> {
-        val localByKey = snapshot.progress.associateBy { "${it.serverId}/${it.itemId}" }
+        val localByKey = snapshot.progress.associateBy { it.serverId to it.itemId }
         val byBackupId = validated.servers.associateBy { it.backupId }
         return validated.progress.mapNotNull { vp ->
             val targetId = record.idRemapping[vp.serverBackupId] ?: return@mapNotNull null // 孤立引用：预览已披露
             val source = byBackupId[vp.serverBackupId]
             if (source != null && source.backupId in record.conflictSkippedServerIds) return@mapNotNull null
             if (source != null && source.backupId in record.skipExistingServerIds) {
-                val existing = localByKey["$targetId/${vp.itemId}"]
+                val existing = localByKey[targetId to vp.itemId]
                 // 本机记录已存在且不旧于备份 → 保留本机（newer-wins）
                 if (existing != null && existing.updatedAtEpochMs >= vp.updatedAtEpochMs) return@mapNotNull null
             }
@@ -567,60 +632,16 @@ class BackupRepository @Inject constructor(
         createdAtEpochMs = System.currentTimeMillis(),
         endpoints = vs.endpoints.map { ep ->
             ServerEndpoint(
-                id = "", serverId = vs.backupId,
+                // Export has no endpoint IDs. Freeze fresh global IDs in the preview; another local
+                // source may already own a predictable backupId-derived endpoint primary key.
+                id = UUID.randomUUID().toString(), serverId = vs.backupId,
                 name = ep.name, url = ep.url,
                 isPrimary = ep.isPrimary, enabled = ep.enabled, sortOrder = ep.sortOrder,
             )
         },
     )
 
-    /** 回滚：按保护快照重建本机状态（信任本地数据，不走验证）。 */
-    private suspend fun rollbackFromSnapshot(protectiveJson: String) {
-        val protective = BackupDtos.decodePayload(protectiveJson)
-        val servers = protective.servers.map { dto ->
-            MediaServer(
-                id = dto.backupId, name = dto.name,
-                type = ServerType.valueOf(dto.type),
-                username = dto.username, note = dto.note,
-                isDefault = dto.isDefault, sortOrder = dto.sortOrder,
-                createdAtEpochMs = System.currentTimeMillis(),
-                endpoints = dto.endpoints.map { ep ->
-                    ServerEndpoint(
-                        id = "", serverId = dto.backupId,
-                        name = ep.name, url = ep.url,
-                        isPrimary = ep.isPrimary, enabled = ep.enabled, sortOrder = ep.sortOrder,
-                    )
-                },
-            )
-        }
-        val progress = protective.progress.map { dto ->
-            PlaybackProgress(
-                serverId = dto.serverBackupId, itemId = dto.itemId,
-                positionMs = dto.positionMs, durationMs = dto.durationMs,
-                isPaused = dto.isPaused, updatedAtEpochMs = dto.updatedAtEpochMs,
-                itemTitle = dto.itemTitle,
-                itemType = dto.itemType?.let { runCatching { MediaType.valueOf(it) }.getOrNull() },
-            )
-        }
-        backupDataSource.applyRestorePlan(
-            RestorePlan(
-                planId = "rollback-${UUID.randomUUID()}",
-                record = BackupDtos.RestorePlanRecord(
-                    strategy = "ROLLBACK",
-                    skipExistingServerIds = emptyList(),
-                    overwriteServerIds = servers.map { it.id },
-                    conflictSkippedServerIds = emptyList(),
-                    idRemapping = servers.associate { it.id to it.id },
-                    includePreferences = false,
-                ),
-                servers = servers,
-                progress = progress,
-                preferences = null,
-            )
-        )
-    }
-
-    // ---- 载荷构建（导出与保护快照共用） ----
+    // ---- 对外导出载荷（保护快照使用独立的加密完整 image） ----
 
     private suspend fun buildPayload(
         snapshot: BackupSnapshot,
@@ -632,7 +653,8 @@ class BackupRepository @Inject constructor(
                 backupId = s.id, name = s.name, type = s.type.name,
                 username = s.username, note = s.note,
                 isDefault = s.isDefault, sortOrder = s.sortOrder,
-                endpoints = s.endpoints.map { ep ->
+                // SAF grants and local device paths are device-bound, never portable backup addresses.
+                endpoints = (if (s.type == ServerType.LOCAL) emptyList() else s.endpoints).map { ep ->
                     BackupDtos.EndpointDto(
                         name = ep.name, url = ep.url,
                         isPrimary = ep.isPrimary, enabled = ep.enabled, sortOrder = ep.sortOrder,
@@ -669,8 +691,8 @@ class BackupRepository @Inject constructor(
     }
 
     private fun describe(v: BackupUrlGuard.Violation): String = when (v) {
-        is BackupUrlGuard.Violation.UserInfo -> "URL user-info 段（${v.rawUrl}）"
-        is BackupUrlGuard.Violation.SensitiveQuery -> "query 参数 ${v.key}（${v.rawUrl}）"
+        is BackupUrlGuard.Violation.UserInfo -> "URL user-info 段"
+        is BackupUrlGuard.Violation.SensitiveQuery -> "敏感 query 参数"
     }
 
     private fun toPreferencesDto(prefs: UserPreferences): BackupDtos.PreferencesDto = BackupDtos.PreferencesDto(

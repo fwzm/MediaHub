@@ -1,5 +1,6 @@
 package com.mediahub.feature.settings.backup
 
+import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -56,13 +58,15 @@ fun BackupRoute(
     viewModel: BackupViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val appVersion = remember(context) { backupAppVersion(context) }
+    val previewState = state as? BackupUiState.Preview
 
     var exportPassword by remember { mutableStateOf("") }
     var exportPasswordConfirm by remember { mutableStateOf("") }
     var restorePassword by remember { mutableStateOf("") }
-    var restoreStrategy by remember { mutableStateOf(RestoreStrategy.MERGE) }
-    var replaceConfirmed by remember { mutableStateOf(false) }
-    var lastExportFileName by remember { mutableStateOf<String?>(null) }
+    val restoreStrategy = previewState?.preview?.strategy ?: RestoreStrategy.MERGE
+    var replaceConfirmed by remember(previewState) { mutableStateOf(false) }
 
     // 密码输入不跨阶段残留：离开对应阶段即清空页面输入
     LaunchedEffect(state) {
@@ -70,6 +74,7 @@ fun BackupRoute(
             restorePassword = ""
         }
         if (state is BackupUiState.RestoreSuccess || state is BackupUiState.ExportSuccess || state is BackupUiState.Idle) {
+            restorePassword = ""
             exportPassword = ""
             exportPasswordConfirm = ""
             replaceConfirmed = false
@@ -97,15 +102,22 @@ fun BackupRoute(
 
     // 导出生成就绪 → 自动拉起保存位置选择器（每次进入 ExportReady 仅一次）
     LaunchedEffect(state) {
-        val ready = state as? BackupUiState.ExportReady ?: return@LaunchedEffect
-        lastExportFileName = ready.fileName
-        createDocLauncher.launch(ready.fileName)
+        if (state !is BackupUiState.ExportReady) return@LaunchedEffect
+        val fileName = viewModel.takeExportFileNameForPicker() ?: return@LaunchedEffect
+        try {
+            createDocLauncher.launch(fileName)
+        } catch (_: Exception) {
+            viewModel.onExportPickerFailed()
+        }
     }
 
     val busy = state is BackupUiState.Exporting ||
         state is BackupUiState.WritingExport ||
         state is BackupUiState.Decrypting ||
-        state is BackupUiState.Restoring
+        state is BackupUiState.Restoring ||
+        state is BackupUiState.Recovering ||
+        state is BackupUiState.BuildingPreview ||
+        state is BackupUiState.AwaitingExportTarget
 
     Scaffold(
         topBar = {
@@ -158,10 +170,14 @@ fun BackupRoute(
             )
             Button(
                 onClick = {
+                    val password = exportPassword.toCharArray()
+                    val confirmation = exportPasswordConfirm.toCharArray()
+                    exportPassword = ""
+                    exportPasswordConfirm = ""
                     viewModel.startExport(
-                        exportPassword.toCharArray(),
-                        exportPasswordConfirm.toCharArray(),
-                        "0.1.0-alpha.1",
+                        password,
+                        confirmation,
+                        appVersion,
                     )
                 },
                 // Error 态同样可重新发起导出（错误不应锁死导出入口）
@@ -211,7 +227,11 @@ fun BackupRoute(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     )
                     Button(
-                        onClick = { viewModel.onPasswordEntered(restorePassword.toCharArray()) },
+                        onClick = {
+                            val password = restorePassword.toCharArray()
+                            restorePassword = ""
+                            viewModel.onPasswordEntered(password)
+                        },
                         enabled = restorePassword.isNotBlank(),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -229,7 +249,13 @@ fun BackupRoute(
             }
 
             // ---- 恢复预览 ----
-            val previewState = state as? BackupUiState.Preview
+            if (state is BackupUiState.Recovering || state is BackupUiState.BuildingPreview) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.size(8.dp))
+                    Text(if (state is BackupUiState.Recovering) "正在检查上次恢复状态…" else "正在更新恢复预览…")
+                }
+            }
             if (previewState != null) {
                 SectionHeader("恢复预览")
                 Text("备份应用版本：${previewState.preview.appVersion}")
@@ -239,7 +265,7 @@ fun BackupRoute(
                     ).format(java.util.Date(previewState.preview.createdAtEpochMs))
                 )
                 Text("新增媒体源：${previewState.preview.newServers}")
-                Text("已有同源媒体源（保留本机）：${previewState.preview.identicalServers}")
+                Text("已有同源媒体源${if (restoreStrategy == RestoreStrategy.MERGE) "（保留本机）" else ""}：${previewState.preview.identicalServers}")
                 if (previewState.preview.conflictingServers > 0) {
                     Text(
                         "同 ID 不同来源冲突：${previewState.preview.conflictingServers} 个" +
@@ -249,7 +275,7 @@ fun BackupRoute(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                Text("播放记录：${previewState.preview.progressToWrite} 条（合并口径）")
+                Text("播放记录：${previewState.preview.progressToWrite} 条（${if (restoreStrategy == RestoreStrategy.MERGE) "合并" else "替换"}口径）")
                 if (previewState.preview.orphanProgressRecords > 0) {
                     Text(
                         "无法关联到备份内媒体源的播放记录：${previewState.preview.orphanProgressRecords} 条（将跳过）",
@@ -271,12 +297,12 @@ fun BackupRoute(
                 RestoreStrategyRadio(
                     label = "合并（保留本机已有数据）",
                     selected = restoreStrategy == RestoreStrategy.MERGE,
-                    onSelect = { restoreStrategy = RestoreStrategy.MERGE; replaceConfirmed = false },
+                    onSelect = { viewModel.changeRestoreStrategy(RestoreStrategy.MERGE) },
                 )
                 RestoreStrategyRadio(
                     label = "替换所选数据（覆盖已有）",
                     selected = restoreStrategy == RestoreStrategy.REPLACE_SELECTED,
-                    onSelect = { restoreStrategy = RestoreStrategy.REPLACE_SELECTED; replaceConfirmed = false },
+                    onSelect = { viewModel.changeRestoreStrategy(RestoreStrategy.REPLACE_SELECTED) },
                 )
                 if (restoreStrategy == RestoreStrategy.REPLACE_SELECTED) {
                     Text(
@@ -296,8 +322,7 @@ fun BackupRoute(
                 // 替换策略必须显式确认；执行中（Restoring 替换 Preview）自动禁用
                 Button(
                     onClick = { viewModel.restore(restoreStrategy, replaceConfirmed) },
-                    enabled = previewState != null &&
-                        (restoreStrategy == RestoreStrategy.MERGE || replaceConfirmed),
+                    enabled = restoreStrategy == RestoreStrategy.MERGE || replaceConfirmed,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(if (restoreStrategy == RestoreStrategy.MERGE) "合并恢复" else "替换恢复")
@@ -326,7 +351,7 @@ fun BackupRoute(
                     Text("保留本机同源媒体源：${s.result.skippedExistingServers}")
                     Text("冲突跳过：${s.result.conflictSkippedServers}")
                     Text("恢复播放记录：${s.result.restoredProgress}")
-                    Text("清除旧登录态：${s.result.loginsInvalidated} 个")
+                    Text("已清理登录信息的媒体源：${s.result.loginsInvalidated} 个")
                     Text("应用设置：${if (s.result.preferencesRestored) "已恢复" else "未包含/未恢复"}")
                     Text(
                         "被覆盖且地址或账号变化的服务器需重新登录。",
@@ -350,11 +375,12 @@ fun BackupRoute(
                 }
                 is BackupUiState.Error -> {
                     Text(s.message, color = MaterialTheme.colorScheme.error)
+                    if (s.canRetryRestorePassword) {
+                        Button(onClick = { viewModel.retryRestorePassword() }) { Text("重新输入备份密码") }
+                    }
                     if (s.canRetryExportSave) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = {
-                                createDocLauncher.launch(viewModel.retryExportFileName ?: "MediaHub-backup.mhb")
-                            }) {
+                            Button(onClick = { viewModel.retryExportSave() }) {
                                 Text("重新选择保存位置")
                             }
                             OutlinedButton(onClick = { viewModel.discardExport() }) {
@@ -365,8 +391,20 @@ fun BackupRoute(
                 }
                 else -> {}
             }
+            if (state is BackupUiState.RestoreSuccess || state is BackupUiState.Recovered) {
+                Button(onClick = { viewModel.reset() }, modifier = Modifier.fillMaxWidth()) { Text("完成") }
+            }
+            if (state is BackupUiState.AwaitingPassword || state is BackupUiState.Preview) {
+                OutlinedButton(onClick = { viewModel.cancelRestore() }, modifier = Modifier.fillMaxWidth()) { Text("取消恢复") }
+            }
         }
     }
+}
+
+/** 读取安装包元数据，版本更新后备份自动携带实际构建版本。 */
+internal fun backupAppVersion(context: Context): String {
+    val info = context.packageManager.getPackageInfo(context.packageName, 0)
+    return info.versionName ?: info.versionCode.toString()
 }
 
 @Composable

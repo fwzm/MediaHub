@@ -129,6 +129,8 @@ object BackupDtos {
         @SerialName("idRemapping") val idRemapping: Map<String, String> = emptyMap(),
         @SerialName("includePreferences") val includePreferences: Boolean = false,
         @SerialName("baselineFormatVersion") val baselineFormatVersion: Int = 1,
+        /** 冻结本次实际进度写入数，重启续作不拿全库记录数冒充恢复数。 */
+        @SerialName("restoredProgressCount") val restoredProgressCount: Int? = null,
     )
 
     fun encodePayload(payload: BackupPayload): String = json.encodeToString(BackupPayload.serializer(), payload)

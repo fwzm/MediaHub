@@ -5,6 +5,9 @@ import android.net.Uri
 import com.mediahub.core.common.AppDispatchers
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /**
@@ -51,23 +54,24 @@ class ProductionBackupFileStore @Inject constructor(
 
     override suspend fun readBounded(uriString: String, maxBytes: Int): BackupFileStore.ReadResult =
         withContext(dispatchers.io) {
-            val uri = Uri.parse(uriString)
-            val input = try {
-                context.contentResolver.openInputStream(uri)
-            } catch (e: Exception) {
-                return@withContext BackupFileStore.ReadResult.ReadFailed("无法打开所选文件：${e.message}")
-            } ?: return@withContext BackupFileStore.ReadResult.ReadFailed("目标文件不可读（内容提供方拒绝访问）")
-
-            input.use { stream ->
-                val buffer = ByteArray(BUFFER_BYTES)
-                var out = ByteArray(BUFFER_BYTES)
-                var total = 0
-                try {
+            require(maxBytes >= 0)
+            try {
+                currentCoroutineContext().ensureActive()
+                val uri = Uri.parse(uriString)
+                val input = context.contentResolver.openInputStream(uri)
+                    ?: return@withContext BackupFileStore.ReadResult.ReadFailed("目标文件不可读（内容提供方拒绝访问）")
+                input.use { stream ->
+                    val buffer = ByteArray(BUFFER_BYTES)
+                    var out = ByteArray(BUFFER_BYTES)
+                    var total = 0
                     while (true) {
-                        val n = stream.read(buffer)
+                        currentCoroutineContext().ensureActive()
+                        // 一个额外字节足以确认超限；不向提供方多读取整个缓冲区。
+                        val requested = minOf(buffer.size.toLong(), maxBytes.toLong() - total + 1).toInt()
+                        val n = stream.read(buffer, 0, requested)
                         if (n < 0) break
                         if (n == 0) continue
-                        if (total + n > maxBytes) {
+                        if (n > maxBytes - total) {
                             // 超限立即终止：不再继续读入，避免为超大文件分配内存
                             return@use BackupFileStore.ReadResult.TooLarge
                         }
@@ -77,39 +81,41 @@ class ProductionBackupFileStore @Inject constructor(
                         System.arraycopy(buffer, 0, out, total, n)
                         total += n
                     }
-                } catch (e: Exception) {
-                    return@use BackupFileStore.ReadResult.ReadFailed("读取文件失败：${e.message}")
+                    if (total == 0) {
+                        BackupFileStore.ReadResult.Empty
+                    } else {
+                        BackupFileStore.ReadResult.Read(
+                            bytes = out.copyOf(total),
+                            fileName = resolveDisplayName(uri),
+                        )
+                    }
                 }
-                if (total == 0) {
-                    BackupFileStore.ReadResult.Empty
-                } else {
-                    BackupFileStore.ReadResult.Read(
-                        bytes = out.copyOf(total),
-                        fileName = resolveDisplayName(uri),
-                    )
-                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // ContentProvider 的异常可能包含完整 URI、路径或凭据，禁止展示原文。
+                BackupFileStore.ReadResult.ReadFailed("无法读取所选备份文件，请重新选择文件后重试")
             }
         }
 
     override suspend fun write(uriString: String, bytes: ByteArray): BackupFileStore.WriteResult =
         withContext(dispatchers.io) {
-            val uri = Uri.parse(uriString)
-            val output = try {
-                context.contentResolver.openOutputStream(uri)
-            } catch (e: Exception) {
-                return@withContext BackupFileStore.WriteResult.WriteFailed("无法打开保存位置：${e.message}")
-            }
-            // openOutputStream 允许返回 null：此时没有写入任何数据，必须报告失败
-                ?: return@withContext BackupFileStore.WriteResult.StreamUnavailable
-
             try {
+                currentCoroutineContext().ensureActive()
+                val uri = Uri.parse(uriString)
+                // 空流表示没有写入任何数据，不得返回成功。
+                val output = context.contentResolver.openOutputStream(uri)
+                    ?: return@withContext BackupFileStore.WriteResult.StreamUnavailable
                 output.use { stream ->
+                    currentCoroutineContext().ensureActive()
                     stream.write(bytes)
                     stream.flush()
                 }
                 BackupFileStore.WriteResult.Written
-            } catch (e: Exception) {
-                BackupFileStore.WriteResult.WriteFailed("写入备份失败：${e.message}")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                BackupFileStore.WriteResult.WriteFailed("无法写入备份文件，请重新选择保存位置后重试")
             }
         }
 

@@ -3,133 +3,109 @@ package com.mediahub.feature.settings.backup
 import androidx.room.withTransaction
 import com.mediahub.core.common.backup.BackupDtos
 import com.mediahub.core.database.AppDatabase
-import com.mediahub.core.database.dao.PlaybackProgressDao
-import com.mediahub.core.database.dao.ServerDao
-import com.mediahub.core.database.dao.ServerEndpointDao
 import com.mediahub.core.database.entity.PlaybackProgressEntity
-import com.mediahub.core.database.entity.ServerEndpointEntity
-import com.mediahub.core.database.entity.ServerEntity
-import com.mediahub.core.database.prefs.UserPreferencesRepository
+import com.mediahub.core.database.mapper.ServerEntityMappers.toDomain
+import com.mediahub.core.database.mapper.ServerEntityMappers.toEntity
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
-import com.mediahub.model.ServerEndpoint
-import com.mediahub.model.ServerType
 import com.mediahub.model.UserPreferences
 import javax.inject.Inject
 import kotlinx.coroutines.flow.first
 
-/**
- * 完整数据库快照（备份专用，与播放器消费的 Store 接口解耦）。
- */
-data class BackupSnapshot(
-    val servers: List<MediaServer>,
-    val progress: List<PlaybackProgress>,
-)
+/** Full local persistent rows; read together in a Room transaction. Auth material is separate. */
+data class BackupSnapshot(val servers: List<MediaServer>, val progress: List<PlaybackProgress>) {
+    fun sameData(other: BackupSnapshot): Boolean =
+        servers.map { it.copy(endpoints = it.endpoints.sortedBy { ep -> ep.id }) }.associateBy { it.id } ==
+            other.servers.map { it.copy(endpoints = it.endpoints.sortedBy { ep -> ep.id }) }.associateBy { it.id } &&
+            progress.associateBy { it.serverId to it.itemId } == other.progress.associateBy { it.serverId to it.itemId }
+}
 
-/**
- * 备份专用数据适配接口（Phase 1I-A review：不扩大播放器 Store 接口）。
- * 生产实现组合 DAO + 偏好；测试用独立 fake。
- */
 interface BackupDataSource {
-
-    /**
-     * 读取全量持久化快照（不限 continue watching 限量）。
-     * 生产实现于单个 Room 事务内读取，保证服务器/线路/进度关联一致。
-     */
     suspend fun readSnapshot(): BackupSnapshot
-
-    /**
-     * 应用恢复计划。生产实现把全部写入包在单个 Room 事务里：
-     * 服务器/线路/进度要么全部生效，要么全部不生效（接口注释与实现一致）。
-     */
+    /** Baseline validation and all Room changes share one transaction. */
     suspend fun applyRestorePlan(plan: RestorePlan)
 }
 
-/**
- * 恢复计划 = 载荷解析出的领域对象 + 冻结的决策记录（[BackupDtos.RestorePlanRecord]）。
- * 决策在生成时确定；中断恢复按同一记录重放，不凭内存重推。
- */
 data class RestorePlan(
     val planId: String,
     val record: BackupDtos.RestorePlanRecord,
     val servers: List<MediaServer>,
     val progress: List<PlaybackProgress>,
     val preferences: UserPreferences?,
+    val expectedBaseline: BackupSnapshot? = null,
 )
 
-/** 生产实现（组合 Room DAO）。 */
-class ProductionBackupDataSource @Inject constructor(
-    private val db: AppDatabase,
-) : BackupDataSource {
+class RestoreBaselineChangedException : Exception("本机数据已在预览后变化，请重新预览")
 
-    private val serverDao: ServerDao get() = db.serverDao()
-    private val endpointDao: ServerEndpointDao get() = db.serverEndpointDao()
-    private val progressDao: PlaybackProgressDao get() = db.playbackProgressDao()
+/** Pure materialization shared by the frozen plan and Room adapter. */
+internal fun materializeRestorePlan(before: BackupSnapshot, plan: RestorePlan): BackupSnapshot {
+    if (plan.record.strategy == "ROLLBACK") return BackupSnapshot(plan.servers, plan.progress)
+    val writing = plan.servers.filter { it.id in plan.record.overwriteServerIds && it.id !in plan.record.skipExistingServerIds }
+    val merged = before.servers.associateBy { it.id }.toMutableMap().apply { writing.forEach { put(it.id, it) } }
+    val defaultId = when (plan.record.strategy) {
+        "MERGE" -> before.servers.firstOrNull { it.isDefault }?.id ?: writing.firstOrNull { it.isDefault }?.id
+        else -> writing.firstOrNull { it.isDefault }?.id ?: merged.values.firstOrNull { it.isDefault }?.id
+    }
+    val servers = merged.values.map { it.copy(isDefault = it.id == defaultId) }
+    val progress = before.progress.filterNot {
+        plan.record.strategy == "REPLACE_SELECTED" && it.serverId in plan.record.overwriteServerIds
+    }.associateBy { it.serverId to it.itemId }.toMutableMap().apply {
+        plan.progress.forEach { incoming ->
+            val key = incoming.serverId to incoming.itemId
+            val local = get(key)
+            if (plan.record.strategy != "MERGE" || local == null || local.updatedAtEpochMs < incoming.updatedAtEpochMs) put(key, incoming)
+        }
+    }.values.toList()
+    return BackupSnapshot(servers, progress)
+}
 
-    override suspend fun readSnapshot(): BackupSnapshot = db.withTransaction {
-        val serverEntities = serverDao.observeAll().first()
-        val endpoints = endpointDao.observeAll().first().groupBy { it.serverId }
-        val servers = serverEntities.map { entity ->
-            MediaServer(
-                id = entity.id, name = entity.name,
-                type = runCatching { ServerType.valueOf(entity.type) }.getOrDefault(ServerType.LOCAL),
-                username = entity.username, note = entity.note,
-                isDefault = entity.isDefault, sortOrder = entity.sortOrder,
-                createdAtEpochMs = entity.createdAtEpochMs,
-                endpoints = endpoints[entity.id].orEmpty().map { ep ->
-                    ServerEndpoint(
-                        id = ep.id, serverId = ep.serverId,
-                        name = ep.name, url = ep.url,
-                        isPrimary = ep.isPrimary, enabled = ep.enabled, sortOrder = ep.sortOrder,
-                    )
-                },
-            )
-        }
-        val progress = progressDao.getAll().map { entity ->
-            PlaybackProgress(
-                serverId = entity.serverId, itemId = entity.itemId,
-                positionMs = entity.positionMs, durationMs = entity.durationMs,
-                isPaused = entity.isPaused, updatedAtEpochMs = entity.updatedAtEpochMs,
-                mode = entity.mode?.let { runCatching { com.mediahub.model.PlaybackMode.valueOf(it) }.getOrNull() },
-                itemTitle = entity.itemTitle, posterUrl = entity.posterUrl,
-                itemType = entity.itemType?.let { runCatching { com.mediahub.model.MediaType.valueOf(it) }.getOrNull() },
-            )
-        }
-        BackupSnapshot(servers = servers, progress = progress)
+class ProductionBackupDataSource @Inject constructor(private val db: AppDatabase) : BackupDataSource {
+    override suspend fun readSnapshot(): BackupSnapshot = db.withTransaction { readRows() }
+
+    private suspend fun readRows(): BackupSnapshot {
+        val endpoints = db.serverEndpointDao().observeAll().first().groupBy { it.serverId }
+        return BackupSnapshot(
+            db.serverDao().observeAll().first().map { it.toDomain(endpoints[it.id].orEmpty().map { ep -> ep.toDomain() }) },
+            db.playbackProgressDao().getAll().map { p -> PlaybackProgress(
+                serverId = p.serverId, itemId = p.itemId, positionMs = p.positionMs, durationMs = p.durationMs,
+                isPaused = p.isPaused, updatedAtEpochMs = p.updatedAtEpochMs,
+                mode = p.mode?.let(com.mediahub.model.PlaybackMode::valueOf), itemTitle = p.itemTitle, posterUrl = p.posterUrl,
+                itemType = p.itemType?.let(com.mediahub.model.MediaType::valueOf),
+            ) },
+        )
     }
 
     override suspend fun applyRestorePlan(plan: RestorePlan) = db.withTransaction {
-        for (server in plan.servers) {
-            if (server.id in plan.record.skipExistingServerIds) continue
-            if (server.id !in plan.record.overwriteServerIds) continue
-            val serverEntity = ServerEntity(
-                id = server.id, name = server.name,
-                type = server.type.name,
-                username = server.username, note = server.note,
-                isDefault = server.isDefault, sortOrder = server.sortOrder,
-                createdAtEpochMs = server.createdAtEpochMs,
-            )
-            serverDao.upsert(serverEntity)
-            endpointDao.deleteByServer(server.id)
-            server.endpoints.forEachIndexed { index, ep ->
-                endpointDao.upsert(
-                    ServerEndpointEntity(
-                        id = if (ep.id.isBlank()) "${server.id}_ep$index" else ep.id,
-                        serverId = server.id,
-                        name = ep.name, url = ep.url,
-                        isPrimary = ep.isPrimary, enabled = ep.enabled, sortOrder = ep.sortOrder,
-                    )
-                )
+        val before = readRows()
+        if (plan.expectedBaseline?.sameData(before) == false) throw RestoreBaselineChangedException()
+        val canonicalPlan = plan.copy(servers = plan.servers.map { s -> s.copy(endpoints = s.endpoints.mapIndexed { index, ep ->
+            if (ep.id.isBlank()) ep.copy(id = "${s.id}_ep$index") else ep
+        }) })
+        val after = materializeRestorePlan(before, canonicalPlan)
+        val afterById = after.servers.associateBy { it.id }
+        before.servers.filter { it.id !in afterById }.forEach {
+            db.serverEndpointDao().deleteByServer(it.id)
+            db.serverDao().deleteById(it.id)
+        }
+        val beforeById = before.servers.associateBy { it.id }
+        after.servers.forEach { server ->
+            val previous = beforeById[server.id]
+            if (previous != server) {
+                db.serverDao().upsert(server.toEntity())
+                if (previous?.endpoints != server.endpoints) {
+                    db.serverEndpointDao().deleteByServer(server.id)
+                    db.serverEndpointDao().upsertAll(server.endpoints.map { it.toEntity() })
+                }
             }
         }
-        progressDao.upsertAll(plan.progress.map { p ->
-            PlaybackProgressEntity(
-                serverId = p.serverId, itemId = p.itemId,
-                positionMs = p.positionMs, durationMs = p.durationMs,
-                isPaused = p.isPaused, updatedAtEpochMs = p.updatedAtEpochMs,
-                mode = p.mode?.name, itemTitle = p.itemTitle,
-                posterUrl = p.posterUrl, itemType = p.itemType?.name,
-            )
+        val progressByKey = after.progress.associateBy { it.serverId to it.itemId }
+        before.progress.filter { (it.serverId to it.itemId) !in progressByKey }.forEach {
+            db.playbackProgressDao().delete(it.serverId, it.itemId)
+        }
+        val oldProgress = before.progress.associateBy { it.serverId to it.itemId }
+        db.playbackProgressDao().upsertAll(after.progress.filter { oldProgress[it.serverId to it.itemId] != it }.map { p ->
+            PlaybackProgressEntity(p.serverId, p.itemId, p.positionMs, p.durationMs, p.isPaused, p.updatedAtEpochMs,
+                p.mode?.name, p.itemTitle, p.posterUrl, p.itemType?.name)
         })
     }
 }

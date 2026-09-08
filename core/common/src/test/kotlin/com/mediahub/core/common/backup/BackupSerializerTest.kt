@@ -16,7 +16,7 @@ class BackupSerializerTest {
             appVersion = "0.1.0-alpha.1",
             createdAtEpochMs = 1_700_000_000_000,
             includedSections = listOf("servers", "progress", "preferences"),
-            recordCounts = mapOf("servers" to 1, "progress" to 1),
+            recordCounts = mapOf("servers" to 1, "progress" to 1, "preferences" to 1),
         ),
         servers = listOf(
             BackupDtos.ServerDto(
@@ -130,7 +130,7 @@ class BackupSerializerTest {
 
     /** 低成本 KDF 迭代（仅测试）：export/import 两侧一致即可解密。 */
     private fun fastExport(payload: BackupDtos.BackupPayload, pw: CharArray = password()): ByteArray =
-        BackupSerializer.export(payload, pw, testIterations = 10_000)
+        uncheckedBackup(payload, pw)
 
     private fun fastImport(bytes: ByteArray, pw: CharArray = password()) =
         BackupSerializer.import(bytes, pw, testIterations = 10_000)
@@ -208,7 +208,7 @@ class BackupSerializerTest {
         val base = samplePayload()
         val duplicated = base.copy(servers = base.servers + base.servers.first())
         val payload = withManifest(duplicated) {
-            it.copy(recordCounts = mapOf("servers" to duplicated.servers.size, "progress" to duplicated.progress.size))
+            it.copy(recordCounts = mapOf("servers" to duplicated.servers.size, "progress" to duplicated.progress.size, "preferences" to 1))
         }
         val result = fastImport(fastExport(payload))
         assertTrue("重复服务器 ID 应拒绝", result is BackupSerializer.ImportResult.Corrupted)
@@ -219,7 +219,7 @@ class BackupSerializerTest {
         val base = samplePayload()
         val duplicated = base.copy(progress = base.progress + base.progress.first())
         val payload = withManifest(duplicated) {
-            it.copy(recordCounts = mapOf("servers" to duplicated.servers.size, "progress" to duplicated.progress.size))
+            it.copy(recordCounts = mapOf("servers" to duplicated.servers.size, "progress" to duplicated.progress.size, "preferences" to 1))
         }
         val result = fastImport(fastExport(payload))
         assertTrue("重复播放记录应拒绝", result is BackupSerializer.ImportResult.Corrupted)
@@ -264,7 +264,7 @@ class BackupSerializerTest {
             progress = base.progress + base.progress.first().copy(serverBackupId = "srv-missing", itemId = "item-orphan"),
         )
         val payload = withManifest(orphaned) {
-            it.copy(recordCounts = mapOf("servers" to orphaned.servers.size, "progress" to orphaned.progress.size))
+            it.copy(recordCounts = mapOf("servers" to orphaned.servers.size, "progress" to orphaned.progress.size, "preferences" to 1))
         }
         val result = fastImport(fastExport(payload))
         assertTrue("孤立引用属冲突披露，不是格式错误", result is BackupSerializer.ImportResult.Ok)

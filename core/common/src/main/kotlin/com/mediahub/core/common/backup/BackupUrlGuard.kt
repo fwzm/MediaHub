@@ -1,5 +1,10 @@
 package com.mediahub.core.common.backup
 
+import java.net.URI
+import java.net.URLDecoder
+import java.util.Locale
+import com.mediahub.core.common.ServerAddressIdentity
+
 /**
  * 备份 URL 值级守卫（Phase 1I review：DTO 无 Token 字段不代表字段值中不夹带凭据）。
  *
@@ -15,13 +20,15 @@ object BackupUrlGuard {
         "token", "access_token", "api_key", "apikey", "api-key",
         "auth", "authorization", "password", "passwd", "pwd",
         "secret", "signature", "sign", "sessionid", "session_id",
-        "x-emby-token", "x-emby-authorization", "apikeyheader",
+        "x-emby-token", "x-emby-authorization", "apikeyheader", "cookie", "cookies",
+        "accesstoken", "refresh_token", "refreshtoken", "playsessionid", "deviceid",
+        "x-amz-credential", "x-amz-signature", "x-amz-security-token", "x-goog-credential", "x-goog-signature",
     )
 
     /** 校验失败原因。 */
     sealed interface Violation {
-        data class UserInfo(val rawUrl: String) : Violation
-        data class SensitiveQuery(val rawUrl: String, val key: String) : Violation
+        data object UserInfo : Violation
+        data class SensitiveQuery(val key: String) : Violation
     }
 
     /**
@@ -29,22 +36,18 @@ object BackupUrlGuard {
      * 结构不合法（无 scheme/host）同样拒绝——备份内只应存在 http/https 服务器地址。
      */
     fun inspect(url: String): Violation? {
-        val trimmed = url.trim()
-        val schemeEnd = trimmed.indexOf("://")
-        if (schemeEnd <= 0) return Violation.SensitiveQuery(trimmed, "(scheme)") // 无法解析 → 拒绝
-        val scheme = trimmed.substring(0, schemeEnd).lowercase()
-        if (scheme != "http" && scheme != "https") return Violation.SensitiveQuery(trimmed, "(scheme)")
-
-        val authorityAndRest = trimmed.substring(schemeEnd + 3)
-        val authority = authorityAndRest.substringBefore('/', authorityAndRest).substringBefore('?')
-
-        if (authority.contains('@')) return Violation.UserInfo(trimmed)
-
-        val query = authorityAndRest.substringAfter('?', "")
-        if (query.isNotEmpty()) {
-            for (pair in query.split('&')) {
-                val key = pair.substringBefore('=').lowercase()
-                if (key in SENSITIVE_QUERY_KEYS) return Violation.SensitiveQuery(trimmed, key)
+        val uri = runCatching { URI(url.trim()) }.getOrNull()
+            ?: return Violation.SensitiveQuery("(URL 格式)")
+        if (uri.rawUserInfo != null) return Violation.UserInfo
+        if (uri.scheme?.lowercase(Locale.ROOT) !in setOf("http", "https") ||
+            uri.host.isNullOrBlank() || uri.port !in -1..65535) {
+            return Violation.SensitiveQuery("(URL 格式)")
+        }
+        for (query in listOfNotNull(uri.rawQuery, uri.rawFragment)) {
+            for (pair in query.split('&', ';')) {
+                val key = runCatching { URLDecoder.decode(pair.substringBefore('='), "UTF-8").lowercase(Locale.ROOT) }
+                    .getOrElse { return Violation.SensitiveQuery("(URL 编码)") }
+                if (key in SENSITIVE_QUERY_KEYS) return Violation.SensitiveQuery(key)
             }
         }
         return null
@@ -52,7 +55,7 @@ object BackupUrlGuard {
 
     /** 批量校验：返回首个违规（含上下文标签便于用户定位是哪条线路）。 */
     fun inspectAll(urls: Map<String, String>): Violation? {
-        for ((label, url) in urls) {
+        for (url in urls.values) {
             inspect(url)?.let { return it }
         }
         return null
@@ -62,14 +65,5 @@ object BackupUrlGuard {
      * 身份比较用的 URL 规范化：小写 scheme/host、去尾部 `/`、去 fragment 与空 query。
      * 保留端口与路径——同一服务器换端口视为不同来源。
      */
-    fun normalizeForIdentity(url: String): String {
-        val trimmed = url.trim().trimEnd('/')
-        val schemeEnd = trimmed.indexOf("://")
-        if (schemeEnd <= 0) return trimmed.lowercase()
-        val scheme = trimmed.substring(0, schemeEnd).lowercase()
-        val rest = trimmed.substring(schemeEnd + 3).substringBefore('#')
-        val hostPart = rest.substringBefore('/').lowercase()
-        val pathPart = rest.substringAfter('/', "")
-        return if (pathPart.isEmpty()) "$scheme://$hostPart" else "$scheme://$hostPart/$pathPart"
-    }
+    fun normalizeForIdentity(url: String): String = ServerAddressIdentity.normalize(url)
 }

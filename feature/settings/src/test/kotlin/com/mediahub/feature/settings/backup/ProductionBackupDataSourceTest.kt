@@ -161,4 +161,26 @@ class ProductionBackupDataSourceTest {
         assertEquals(com.mediahub.model.MediaType.EPISODE, progress.itemType)
         assertEquals(500, progress.positionMs)
     }
+
+    @Test
+    fun `SQLite abort after first server write rolls back servers endpoints and progress`() = runBlocking {
+        val initial = RestorePlan("seed", BackupDtos.RestorePlanRecord("MERGE", overwriteServerIds = listOf("srv-a")),
+            listOf(server("srv-a", "Original")), listOf(PlaybackProgress("srv-a", "old", 1, 100, true, 2)), null)
+        dataSource.applyRestorePlan(initial)
+        val before = dataSource.readSnapshot()
+        db.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER fail_restore_server BEFORE INSERT ON servers WHEN NEW.id = 'srv-b' BEGIN SELECT RAISE(ABORT, 'injected restore failure'); END",
+        )
+        try {
+            val plan = RestorePlan("failed", BackupDtos.RestorePlanRecord("REPLACE_SELECTED", overwriteServerIds = listOf("srv-a", "srv-b")),
+                listOf(server("srv-a", "Replacement"), server("srv-b", "New")),
+                listOf(PlaybackProgress("srv-a", "incoming", 4, 100, true, 5)), null, before)
+            assertTrue(runCatching { dataSource.applyRestorePlan(plan) }.isFailure)
+            assertTrue("the real Room transaction restores the complete starting state", before.sameData(dataSource.readSnapshot()))
+            assertTrue(dataSource.readSnapshot().servers.none { it.id == "srv-b" })
+            assertTrue(dataSource.readSnapshot().progress.none { it.itemId == "incoming" })
+        } finally {
+            db.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_restore_server")
+        }
+    }
 }

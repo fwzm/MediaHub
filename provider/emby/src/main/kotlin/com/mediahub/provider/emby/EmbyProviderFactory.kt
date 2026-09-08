@@ -33,6 +33,7 @@ import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.IntoSet
 import javax.inject.Inject
 import javax.inject.Singleton
+import okhttp3.Interceptor
 
 @Singleton
 class EmbyProviderFactory @Inject constructor(
@@ -47,8 +48,18 @@ class EmbyProviderFactory @Inject constructor(
 
     override fun create(server: MediaServer): ProviderHandle {
         val authHeaderBuilder = EmbyAuthorizationHeaderBuilder(clientIdentity)
-        val apiClient = ApiClient(httpClientFactory.apiClient(), logger = logger)
-        val mediaHttpClient = MediaHttpClient(httpClientFactory.mediaClient(), logger = logger)
+        val identityLease = tokenStore.authenticationLease(server.id)
+        val identityGuard = Interceptor { chain ->
+            check(tokenStore.isAuthenticationLeaseCurrent(identityLease)) { "媒体源身份已变化，请重新打开媒体源" }
+            chain.proceed(chain.request())
+        }
+        // Per-handle clients reject retained old addresses before logging, retry or network IO.
+        val apiClient = ApiClient(httpClientFactory.apiClient().newBuilder().apply {
+            interceptors().add(0, identityGuard)
+        }.build(), logger = logger)
+        val mediaHttpClient = MediaHttpClient(httpClientFactory.mediaClient().newBuilder().apply {
+            interceptors().add(0, identityGuard)
+        }.build(), logger = logger)
         val endpointResolver = EmbyEndpointResolver(server.baseUrl)
 
         val provider = EmbyProvider(

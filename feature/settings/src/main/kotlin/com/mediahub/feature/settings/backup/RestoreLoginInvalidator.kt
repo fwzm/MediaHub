@@ -10,4 +10,7 @@ package com.mediahub.feature.settings.backup
 fun interface RestoreLoginInvalidator {
     /** 清除指定媒体源的全部登录态；失败可重试（幂等）。 */
     suspend fun invalidate(serverId: String)
+
+    /** Keep affected authentication blocked through durable data writes and any rollback. */
+    suspend fun <T> withIdentityChange(serverIds: Set<String>, block: suspend () -> T): T = block()
 }

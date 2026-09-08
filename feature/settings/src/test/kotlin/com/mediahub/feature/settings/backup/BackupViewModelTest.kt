@@ -61,16 +61,11 @@ class BackupViewModelTest {
         override suspend fun applyRestorePlan(plan: RestorePlan) {
             applyCalls++
             applyGate?.await()
-            for (server in plan.servers) {
-                if (server.id in plan.record.skipExistingServerIds) continue
-                if (server.id !in plan.record.overwriteServerIds) continue
-                val index = servers.indexOfFirst { it.id == server.id }
-                if (index >= 0) servers[index] = server else servers.add(server)
-            }
-            for (p in plan.progress) {
-                val index = progress.indexOfFirst { it.serverId == p.serverId && it.itemId == p.itemId }
-                if (index >= 0) progress[index] = p else progress.add(p)
-            }
+            val after = materializeRestorePlan(readSnapshot(), plan)
+            servers.clear()
+            servers.addAll(after.servers)
+            progress.clear()
+            progress.addAll(after.progress)
         }
     }
 
@@ -126,20 +121,23 @@ class BackupViewModelTest {
         val ds: FakeBackupDataSource,
         val journal: FakeRestoreJournal,
         val invalidator: FakeLoginInvalidator,
+        val snapshots: MemoryRestoreSnapshotStorage,
     )
 
     private fun env(servers: List<MediaServer> = emptyList()): Env {
         val ds = FakeBackupDataSource(servers)
         val journal = FakeRestoreJournal()
         val invalidator = FakeLoginInvalidator()
+        val snapshots = MemoryRestoreSnapshotStorage()
         val repo = BackupRepository(
             ds,
             FakePreferencesRepository(UserPreferences()),
             journal,
             invalidator,
             AppDispatchers(io = dispatcher),
+            snapshots,
         )
-        return Env(repo, ds, journal, invalidator)
+        return Env(repo, ds, journal, invalidator, snapshots)
     }
 
     private fun server(id: String, url: String = "https://$id.example.com") = MediaServer(
@@ -170,6 +168,104 @@ class BackupViewModelTest {
     }
 
     // ---- 导出链路 ----
+
+    @Test
+    fun `rejected export while busy wipes both supplied passwords`() = runTest(dispatcher) {
+        val e = env()
+        val viewModel = BackupViewModel(e.repo, FakeFileStore())
+        // 初始化恢复检查仍在队列中，本次导出必须被拒绝。
+        val supplied = "busy-secret".toCharArray()
+        val confirmation = supplied.copyOf()
+
+        viewModel.startExport(supplied, confirmation, "1.0")
+        advanceUntilIdle()
+
+        assertTrue("拒绝的输入密码也应擦除", supplied.all { it == '\u0000' })
+        assertTrue("拒绝的确认密码也应擦除", confirmation.all { it == '\u0000' })
+        assertEquals(BackupUiState.Idle, viewModel.uiState.value)
+        assertEquals("无业务写入", 0, e.ds.applyCalls)
+    }
+
+    @Test
+    fun `export cancelled before coroutine starts still wipes passwords`() = runTest(dispatcher) {
+        val e = env()
+        val viewModel = BackupViewModel(e.repo, FakeFileStore())
+        advanceUntilIdle()
+        val supplied = "cancel-secret".toCharArray()
+        val confirmation = supplied.copyOf()
+
+        viewModel.startExport(supplied, confirmation, "1.0")
+        viewModel.reset()
+        advanceUntilIdle()
+
+        assertTrue("协程启动前取消也应擦除密码", supplied.all { it == '\u0000' })
+        assertTrue(confirmation.all { it == '\u0000' })
+        assertEquals(BackupUiState.Idle, viewModel.uiState.value)
+        assertEquals(0, e.ds.applyCalls)
+    }
+
+    @Test
+    fun `duplicate export target result does not erase confirmed success`() = runTest(dispatcher) {
+        val e = env()
+        val fileStore = FakeFileStore()
+        val viewModel = BackupViewModel(e.repo, fileStore)
+        advanceUntilIdle()
+        viewModel.startExport(password, password.copyOf(), "1.0")
+        advanceUntilIdle()
+        viewModel.onExportTargetPicked("content://target/first")
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value is BackupUiState.ExportSuccess)
+
+        viewModel.onExportTargetPicked("content://target/duplicate")
+        advanceUntilIdle()
+
+        assertTrue("无待写数据的重复回调应忽略", viewModel.uiState.value is BackupUiState.ExportSuccess)
+        assertEquals("不得重复写入", 1, fileStore.writeCalls)
+    }
+
+    @Test
+    fun `export picker event is consumed once across route recreation and retry`() = runTest(dispatcher) {
+        val e = env()
+        val fileStore = FakeFileStore(writeResult = BackupFileStore.WriteResult.StreamUnavailable)
+        val viewModel = BackupViewModel(e.repo, fileStore)
+        advanceUntilIdle()
+        viewModel.startExport(password, password.copyOf(), "1.0")
+        advanceUntilIdle()
+
+        val fileName = viewModel.takeExportFileNameForPicker()
+        assertNotNull(fileName)
+        assertEquals("重新组合不能重复消费事件", null, viewModel.takeExportFileNameForPicker())
+        assertEquals(BackupUiState.AwaitingExportTarget, viewModel.uiState.value)
+        viewModel.onExportTargetPicked("content://target/unavailable")
+        advanceUntilIdle()
+
+        viewModel.retryExportSave()
+        assertEquals("显式重试生成一次新的选择事件", fileName, viewModel.takeExportFileNameForPicker())
+        assertEquals(null, viewModel.takeExportFileNameForPicker())
+        viewModel.onExportCancelled()
+        assertEquals(BackupUiState.Idle, viewModel.uiState.value)
+        assertEquals(null, viewModel.retryExportFileName)
+        assertEquals("取消重试没有写文件", 1, fileStore.writeCalls)
+    }
+
+    @Test
+    fun `failure to launch export picker remains retryable without reporting success`() = runTest(dispatcher) {
+        val e = env()
+        val fileStore = FakeFileStore()
+        val viewModel = BackupViewModel(e.repo, fileStore)
+        advanceUntilIdle()
+        viewModel.startExport(password, password.copyOf(), "1.0")
+        advanceUntilIdle()
+        viewModel.takeExportFileNameForPicker()
+
+        viewModel.onExportPickerFailed()
+
+        val state = viewModel.uiState.value as BackupUiState.Error
+        assertTrue(state.canRetryExportSave)
+        assertEquals("启动失败不得写入或误报成功", 0, fileStore.writeCalls)
+        viewModel.retryExportSave()
+        assertNotNull(viewModel.takeExportFileNameForPicker())
+    }
 
     @Test
     fun `export ready leads to picker and successful write`() = runTest(dispatcher) {
@@ -272,6 +368,11 @@ class BackupViewModelTest {
         viewModel.onPasswordEntered("wrong-pw".toCharArray())
         advanceUntilIdle()
         assertTrue("错误密码 → 类型化错误", viewModel.uiState.value is BackupUiState.Error)
+        assertTrue((viewModel.uiState.value as BackupUiState.Error).canRetryRestorePassword)
+
+        viewModel.retryRestorePassword()
+        assertTrue("UI重试入口重新显示密码输入", viewModel.uiState.value is BackupUiState.AwaitingPassword)
+        assertEquals("失败与重试仍零写入", 0, e.ds.applyCalls)
 
         viewModel.onPasswordEntered(password)
         advanceUntilIdle()
@@ -295,6 +396,35 @@ class BackupViewModelTest {
     }
 
     // ---- 恢复确认与取消协议 ----
+
+    @Test
+    fun `strategy change rebuilds preview before confirmation can execute restore`() = runTest(dispatcher) {
+        val e = env(listOf(server("srv-B", "https://local.example.com")))
+        val fileStore = FakeFileStore(readResult = BackupFileStore.ReadResult.Read(backupBytes(e), "b.mhb"))
+        val viewModel = BackupViewModel(e.repo, fileStore)
+        advanceUntilIdle()
+        viewModel.onRestoreFilePicked("content://b")
+        advanceUntilIdle()
+        viewModel.onPasswordEntered(password)
+        advanceUntilIdle()
+        assertEquals(RestoreStrategy.MERGE, (viewModel.uiState.value as BackupUiState.Preview).preview.strategy)
+
+        viewModel.changeRestoreStrategy(RestoreStrategy.REPLACE_SELECTED)
+        assertEquals(BackupUiState.BuildingPreview, viewModel.uiState.value)
+        viewModel.restore(RestoreStrategy.REPLACE_SELECTED, replaceConfirmed = true)
+        assertEquals("新预览完成前确认不得写入", 0, e.ds.applyCalls)
+        advanceUntilIdle()
+        val state = viewModel.uiState.value as BackupUiState.Preview
+        assertEquals(RestoreStrategy.REPLACE_SELECTED, state.preview.strategy)
+        assertEquals("重新预览本身仍零写入", 0, e.ds.applyCalls)
+
+        viewModel.restore(RestoreStrategy.REPLACE_SELECTED, replaceConfirmed = true)
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value is BackupUiState.RestoreSuccess)
+        assertEquals(1, e.ds.applyCalls)
+        assertEquals("https://srv-b.example.com", e.ds.servers.single().endpoints.single().url)
+        assertEquals("只有变化身份失效", listOf("srv-B"), e.invalidator.invalidated)
+    }
 
     @Test
     fun `replace without confirmation blocked at viewmodel level`() = runTest(dispatcher) {
@@ -330,18 +460,24 @@ class BackupViewModelTest {
 
         val gate = CompletableDeferred<Unit>()
         e.ds.applyGate = gate
-        viewModel.restore(RestoreStrategy.MERGE, replaceConfirmed = false)
-        advanceUntilIdle()
-        assertTrue("恢复进行中", viewModel.uiState.value is BackupUiState.Restoring)
+        try {
+            viewModel.restore(RestoreStrategy.MERGE, replaceConfirmed = false)
+            advanceUntilIdle()
+            assertTrue("恢复进行中", viewModel.uiState.value is BackupUiState.Restoring)
 
-        viewModel.cancelRestore()
-        val state = viewModel.uiState.value
-        assertTrue("取消不得静默回 Idle，须告知恢复协议接管", state is BackupUiState.Error)
+            viewModel.cancelRestore()
+            val state = viewModel.uiState.value
+            assertTrue("取消不得静默回 Idle，须告知恢复协议接管", state is BackupUiState.Error)
 
-        gate.complete(Unit) // 迟到的完成
-        advanceUntilIdle()
-        assertTrue("迟到成功结果被丢弃", viewModel.uiState.value is BackupUiState.Error)
-        assertNotNull("恢复日志保留（协议将在下次进入时接管）", e.journal.entry)
+            gate.complete(Unit)
+            advanceUntilIdle()
+            assertTrue("取消后不得显示成功结果", viewModel.uiState.value is BackupUiState.Error)
+            assertNotNull("恢复日志保留（协议将在下次进入时接管）", e.journal.entry)
+        } finally {
+            gate.complete(Unit)
+            viewModel.cancelRestore()
+            advanceUntilIdle()
+        }
     }
 
     @Test
@@ -363,21 +499,19 @@ class BackupViewModelTest {
                 ),
             ),
         )
-        val record = BackupDtos.RestorePlanRecord(
-            strategy = "REPLACE_SELECTED",
-            overwriteServerIds = listOf("srv-X"),
-            idRemapping = mapOf("srv-X" to "srv-X"),
-            includePreferences = false,
-        )
+        val validated = (e.repo.prepareRestore(
+            com.mediahub.core.common.backup.BackupSerializer.export(payload, password, testIterations = 10_000), password,
+        ) as PrepareResult.Prepared).validated
+        val frozen = e.repo.buildPreview(validated, RestoreStrategy.REPLACE_SELECTED).frozenPlan!!
+        e.snapshots.save(frozen.plan.planId, frozen.images)
         e.journal.begin(
             RestoreJournal.ActiveEntry(
-                planId = "restore-interrupted",
+                planId = frozen.plan.planId,
                 phase = RestoreJournal.Phase.PREPARING,
                 payloadJson = BackupDtos.encodePayload(payload),
-                planRecordJson = BackupDtos.encodePlanRecord(record),
-                protectiveSnapshotJson = BackupDtos.encodePayload(
-                    payload.copy(servers = emptyList(), manifest = payload.manifest.copy(recordCounts = mapOf("servers" to 0, "progress" to 0, "preferences" to 0))),
-                ),
+                planRecordJson = BackupDtos.encodePlanRecord(frozen.plan.record),
+                protectiveSnapshotJson = "",
+                protectiveSnapshotRef = frozen.plan.planId,
                 includePreferences = false,
                 startedAtEpochMs = 0,
             )

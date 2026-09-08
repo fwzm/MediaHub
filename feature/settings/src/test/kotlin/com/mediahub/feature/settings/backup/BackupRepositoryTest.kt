@@ -15,6 +15,7 @@ import com.mediahub.model.UserPreferences
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -47,20 +48,10 @@ class BackupRepositoryTest {
 
         override suspend fun applyRestorePlan(plan: RestorePlan) {
             applyCalls++
-            val failAfterFirst = applyCalls == failAfterFirstServerOnCall
-            var first = true
-            for (server in plan.servers) {
-                if (server.id in plan.record.skipExistingServerIds) continue
-                if (server.id !in plan.record.overwriteServerIds) continue
-                if (failAfterFirst && !first) error("注入的数据库中途失败")
-                first = false
-                val index = servers.indexOfFirst { it.id == server.id }
-                if (index >= 0) servers[index] = server else servers.add(server)
-            }
-            for (p in plan.progress) {
-                val index = progress.indexOfFirst { it.serverId == p.serverId && it.itemId == p.itemId }
-                if (index >= 0) progress[index] = p else progress.add(p)
-            }
+            if (applyCalls == failAfterFirstServerOnCall) error("注入的数据库事务失败")
+            val after = materializeRestorePlan(readSnapshot(), plan)
+            servers.clear(); servers.addAll(after.servers)
+            progress.clear(); progress.addAll(after.progress)
         }
     }
 
@@ -132,13 +123,13 @@ class BackupRepositoryTest {
         val prefsRepo = FakePreferencesRepository(prefs)
         val journal = FakeRestoreJournal()
         val invalidator = FakeLoginInvalidator()
-        val repo = BackupRepository(ds, prefsRepo, journal, invalidator, AppDispatchers(io = dispatcher))
+        val repo = BackupRepository(ds, prefsRepo, journal, invalidator, AppDispatchers(io = dispatcher), MemoryRestoreSnapshotStorage())
         return Env(repo, ds, prefsRepo, journal, invalidator)
     }
 
     /** 低成本加密：直接构造载荷字节（10k 迭代），供 prepareRestore 消费。 */
     private fun bytesOf(payload: BackupDtos.BackupPayload, pw: CharArray = "pw-pw".toCharArray()): ByteArray =
-        BackupSerializer.export(payload, pw, testIterations = 10_000)
+        authenticatedTestBytes(payload, pw)
 
     private fun payloadOf(
         servers: List<MediaServer>,
@@ -196,7 +187,7 @@ class BackupRepositoryTest {
             e.repo.exportBackup("pw".toCharArray(), "1.0")
             throw AssertionError("导出应拒绝敏感 query")
         } catch (expected: ExportRejectedException) {
-            assertTrue("错误应指向 api_key", expected.message!!.contains("api_key"))
+            assertTrue("错误应指向 api_key", expected.message!!.contains("query"))
         }
     }
 
@@ -281,10 +272,10 @@ class BackupRepositoryTest {
         val e = env(prefs = localPrefs)
         val payload = payloadOf(
             servers = listOf(server("srv-New")),
-            preferences = BackupDtos.PreferencesDto(subtitleSizeSp = 99),
+            preferences = BackupDtos.PreferencesDto(subtitleSizeSp = 40),
         )
         val validated = (e.repo.prepareRestore(bytesOf(payload), "pw-pw".toCharArray()) as PrepareResult.Prepared).validated
-        e.repo.restore(validated, RestoreStrategy.MERGE, replaceConfirmed = false)
+        e.repo.restoreWithFreshPreview(validated, RestoreStrategy.MERGE, replaceConfirmed = false)
         assertEquals("合并模式不覆盖本机偏好", 33, e.prefs.current.subtitleSizeSp)
     }
 
@@ -307,7 +298,7 @@ class BackupRepositoryTest {
             ),
         )
         val validated = (e.repo.prepareRestore(bytesOf(payload), "pw-pw".toCharArray()) as PrepareResult.Prepared).validated
-        val result = e.repo.restore(validated, RestoreStrategy.MERGE, replaceConfirmed = false)
+        val result = e.repo.restoreWithFreshPreview(validated, RestoreStrategy.MERGE, replaceConfirmed = false)
 
         assertEquals("跳过同源服务器 1", 1, result.skippedExistingServers)
         val epLocal = e.ds.progress.first { it.itemId == "ep-local-newer" }
@@ -326,7 +317,7 @@ class BackupRepositoryTest {
             progress = listOf(progress("srv-C", "ep-1", 4_000)),
         )
         val validated = (e.repo.prepareRestore(bytesOf(payload), "pw-pw".toCharArray()) as PrepareResult.Prepared).validated
-        val result = e.repo.restore(validated, RestoreStrategy.MERGE, replaceConfirmed = false)
+        val result = e.repo.restoreWithFreshPreview(validated, RestoreStrategy.MERGE, replaceConfirmed = false)
 
         assertEquals("冲突跳过 1", 1, result.conflictSkippedServers)
         val kept = e.ds.servers.single()
@@ -341,7 +332,7 @@ class BackupRepositoryTest {
         val incoming = server("srv-A", name = "Account B", url = "https://same.example.com", username = "user-B")
         val payload = payloadOf(listOf(incoming))
         val validated = (e.repo.prepareRestore(bytesOf(payload), "pw-pw".toCharArray()) as PrepareResult.Prepared).validated
-        e.repo.restore(validated, RestoreStrategy.MERGE, replaceConfirmed = false)
+        e.repo.restoreWithFreshPreview(validated, RestoreStrategy.MERGE, replaceConfirmed = false)
         assertEquals("同址不同账号 = 冲突，不覆盖", "Account A", e.ds.servers.single().name)
     }
 
@@ -353,7 +344,7 @@ class BackupRepositoryTest {
         val payload = payloadOf(listOf(server("srv-A", name = "Backup A", url = "https://else.example.com")))
         val validated = (e.repo.prepareRestore(bytesOf(payload), "pw-pw".toCharArray()) as PrepareResult.Prepared).validated
         try {
-            e.repo.restore(validated, RestoreStrategy.REPLACE_SELECTED, replaceConfirmed = false)
+            e.repo.restoreWithFreshPreview(validated, RestoreStrategy.REPLACE_SELECTED, replaceConfirmed = false)
             throw AssertionError("未确认的替换必须被 repository 侧防线拦截")
         } catch (expected: RestoreConfirmationRequiredException) {
             assertEquals("零写入", 0, e.ds.applyCalls)
@@ -373,7 +364,7 @@ class BackupRepositoryTest {
             preferences = BackupDtos.PreferencesDto(subtitleSizeSp = 42),
         )
         val validated = (e.repo.prepareRestore(bytesOf(payload), "pw-pw".toCharArray()) as PrepareResult.Prepared).validated
-        val result = e.repo.restore(validated, RestoreStrategy.REPLACE_SELECTED, replaceConfirmed = true)
+        val result = e.repo.restoreWithFreshPreview(validated, RestoreStrategy.REPLACE_SELECTED, replaceConfirmed = true)
 
         assertEquals("仅身份变化的同 ID 服务器清除旧登录态", listOf("srv-Moved"), e.invalidator.invalidated)
         assertEquals("覆盖 2", 2, result.overwrittenServers)
@@ -397,7 +388,7 @@ class BackupRepositoryTest {
         val validated = (e.repo.prepareRestore(bytesOf(payload), "pw-pw".toCharArray()) as PrepareResult.Prepared).validated
 
         try {
-            e.repo.restore(validated, RestoreStrategy.REPLACE_SELECTED, replaceConfirmed = true)
+            e.repo.restoreWithFreshPreview(validated, RestoreStrategy.REPLACE_SELECTED, replaceConfirmed = true)
             throw AssertionError("中途失败应抛 RestoreFailedException")
         } catch (expected: RestoreFailedException) {
             assertTrue("回滚应已执行", expected.rolledBack)
@@ -410,7 +401,7 @@ class BackupRepositoryTest {
     }
 
     @Test
-    fun `interrupted restore continues forward on recovery`() = runTest(dispatcher) {
+    fun `legacy interruption without full image requires attention and writes nothing`() = runTest(dispatcher) {
         val e = env()
         val payload = payloadOf(listOf(server("srv-X", name = "From Backup")))
         val record = BackupDtos.RestorePlanRecord(
@@ -419,7 +410,7 @@ class BackupRepositoryTest {
             idRemapping = mapOf("srv-X" to "srv-X"),
             includePreferences = false,
         )
-        // 模拟上次中断：日志停在 DB_WRITTEN（数据库事务未能提交或标记丢失）
+        // 历史日志只有导出 DTO，无法证明完整本机 before-image；保留供人工处理。
         e.journal.begin(
             RestoreJournal.ActiveEntry(
                 planId = "restore-interrupted",
@@ -434,13 +425,13 @@ class BackupRepositoryTest {
 
         val outcome = e.repo.recoverInterruptedRestore()
 
-        assertTrue(outcome is RecoveryOutcome.Continued)
-        assertEquals("中断的恢复前向完成", "From Backup", e.ds.servers.single().name)
-        assertNull("完成后日志清除", e.journal.entry)
+        assertTrue(outcome is RecoveryOutcome.NeedsAttention)
+        assertTrue(e.ds.servers.isEmpty())
+        assertNotNull("旧日志缺全量保护快照，保留供处理", e.journal.entry)
     }
 
     @Test
-    fun `recovery falls back to rollback when payload is corrupt`() = runTest(dispatcher) {
+    fun `legacy corrupt payload does not invent rollback evidence`() = runTest(dispatcher) {
         val local = server("srv-A", name = "Original")
         val e = env(servers = listOf(local))
         e.journal.begin(
@@ -457,9 +448,9 @@ class BackupRepositoryTest {
 
         val outcome = e.repo.recoverInterruptedRestore()
 
-        assertEquals("载荷损坏 → 回滚", RecoveryOutcome.RolledBack, outcome)
+        assertTrue("旧日志缺完整保护快照，不猜测回滚", outcome is RecoveryOutcome.NeedsAttention)
         assertEquals("本机状态由保护快照恢复", "Original", e.ds.servers.single().name)
-        assertNull(e.journal.entry)
+        assertNotNull(e.journal.entry)
     }
 
     @Test
@@ -479,7 +470,7 @@ class BackupRepositoryTest {
         val payload = payloadOf(listOf(server("srv-N")))
         val validated = (e.repo.prepareRestore(bytesOf(payload), "pw-pw".toCharArray()) as PrepareResult.Prepared).validated
         try {
-            e.repo.restore(validated, RestoreStrategy.MERGE, replaceConfirmed = false)
+            e.repo.restoreWithFreshPreview(validated, RestoreStrategy.MERGE, replaceConfirmed = false)
             throw AssertionError("未处理的中断必须阻止新的恢复")
         } catch (expected: RestoreFailedException) {
             assertEquals("拒绝叠加恢复：零写入", 0, e.ds.applyCalls)
@@ -513,7 +504,7 @@ class BackupRepositoryTest {
         )
         val bytes = bytesOf(payload)
         val validated = (e.repo.prepareRestore(bytes, "pw-pw".toCharArray()) as PrepareResult.Prepared).validated
-        val result = e.repo.restore(validated, RestoreStrategy.REPLACE_SELECTED, replaceConfirmed = true)
+        val result = e.repo.restoreWithFreshPreview(validated, RestoreStrategy.REPLACE_SELECTED, replaceConfirmed = true)
 
         assertEquals("35 条播放记录完整恢复", 35, result.restoredProgress)
         assertEquals(35, e.ds.progress.size)
@@ -545,5 +536,15 @@ class BackupRepositoryTest {
         val bytes = e.repo.exportBackup("pw".toCharArray(), "1.0")
         val validated = (e.repo.prepareRestore(bytes, "pw".toCharArray()) as PrepareResult.Prepared).validated
         assertEquals("播放内核偏好类型化保真", PlaybackEngineMode.MPV, validated.preferences?.playbackEngineMode)
+    }
+
+    @Test
+    fun `local source roundtrip excludes device permission uri and accepts no endpoints`() = runTest(dispatcher) {
+        val e = env(servers = listOf(server("local", type = ServerType.LOCAL, url = "content://private/tree/FAKE-GRANT")))
+        val bytes = e.repo.exportBackup("pw".toCharArray(), "1.0")
+        val prepared = e.repo.prepareRestore(bytes, "pw".toCharArray()) as PrepareResult.Prepared
+        assertEquals(ServerType.LOCAL, prepared.validated.servers.single().type)
+        assertTrue(prepared.validated.servers.single().endpoints.isEmpty())
+        assertFalse(BackupDtos.encodePayload(prepared.validated.payload).contains("FAKE-GRANT"))
     }
 }

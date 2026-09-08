@@ -2,7 +2,6 @@ package com.mediahub.feature.settings.backup
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.mediahub.core.common.backup.BackupDtos
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -25,12 +24,15 @@ import kotlinx.coroutines.launch
  */
 sealed interface BackupUiState {
     data object Idle : BackupUiState
+    data object Recovering : BackupUiState
     data object Exporting : BackupUiState
     data class ExportReady(val bytes: ByteArray, val fileName: String) : BackupUiState
+    data object AwaitingExportTarget : BackupUiState
     data object WritingExport : BackupUiState
     data class ExportSuccess(val message: String) : BackupUiState
     data class AwaitingPassword(val fileName: String) : BackupUiState
     data class Decrypting(val fileName: String) : BackupUiState
+    data object BuildingPreview : BackupUiState
     data class Preview(
         val validated: ValidatedRestore,
         val preview: RestorePreview,
@@ -44,6 +46,7 @@ sealed interface BackupUiState {
         val message: String,
         /** true = 导出字节仍持有，可重新选择保存位置重试。 */
         val canRetryExportSave: Boolean = false,
+        val canRetryRestorePassword: Boolean = false,
     ) : BackupUiState
 }
 
@@ -53,7 +56,7 @@ class BackupViewModel @Inject constructor(
     private val backupFileStore: BackupFileStore,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow<BackupUiState>(BackupUiState.Idle)
+    private val _uiState = MutableStateFlow<BackupUiState>(BackupUiState.Recovering)
     val uiState: StateFlow<BackupUiState> = _uiState.asStateFlow()
 
     /** 递增操作代号：取消/新操作后，旧协程的迟到结果一律丢弃。 */
@@ -69,21 +72,26 @@ class BackupViewModel @Inject constructor(
     init {
         // 进入页面即执行恢复协议：上次中断的恢复前向继续或回滚
         currentJob = viewModelScope.launch {
-            val outcome = backupRepository.recoverInterruptedRestore()
-            when (outcome) {
-                is RecoveryOutcome.Continued -> _uiState.value =
-                    BackupUiState.Recovered(
-                        "检测到上次恢复中断，已自动续作完成：" +
-                            "媒体源 ${outcome.result.addedServers + outcome.result.overwrittenServers} 个、" +
-                            "播放记录 ${outcome.result.restoredProgress} 条"
-                    )
-                RecoveryOutcome.RolledBack ->
-                    _uiState.value = BackupUiState.Recovered("检测到上次恢复中断，已回滚到恢复前状态")
-                RecoveryOutcome.CompletedEarlier ->
-                    _uiState.value = BackupUiState.Recovered("上次恢复已完成（完成标记此前未落盘）")
-                is RecoveryOutcome.NeedsAttention ->
-                    _uiState.value = BackupUiState.Error("上次恢复中断未能自动处理：${outcome.reason}")
-                RecoveryOutcome.NothingToRecover -> {}
+            try {
+                when (val outcome = backupRepository.recoverInterruptedRestore()) {
+                    is RecoveryOutcome.Continued -> _uiState.value =
+                        BackupUiState.Recovered(
+                            "检测到上次恢复中断，已自动续作完成：" +
+                                "媒体源 ${outcome.result.addedServers + outcome.result.overwrittenServers} 个、" +
+                                "播放记录 ${outcome.result.restoredProgress} 条"
+                        )
+                    RecoveryOutcome.RolledBack ->
+                        _uiState.value = BackupUiState.Recovered("检测到上次恢复中断，已回滚到恢复前状态")
+                    RecoveryOutcome.CompletedEarlier ->
+                        _uiState.value = BackupUiState.Recovered("上次恢复已完成（完成标记此前未落盘）")
+                    is RecoveryOutcome.NeedsAttention ->
+                        _uiState.value = BackupUiState.Error("上次恢复中断未能自动处理：${outcome.reason}")
+                    RecoveryOutcome.NothingToRecover -> _uiState.value = BackupUiState.Idle
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _uiState.value = BackupUiState.Error("无法检查上次恢复状态，请重新进入本页重试")
             }
         }
     }
@@ -105,6 +113,32 @@ class BackupViewModel @Inject constructor(
     /** 返回待重试的导出文件名（供 UI 重新拉起文件创建器）。 */
     val retryExportFileName: String? get() = pendingExportFileName
 
+    /** 在启动 SAF 前消费一次事件；配置重建时仍为等待结果，不会重复拉起创建器。 */
+    fun takeExportFileNameForPicker(): String? {
+        val ready = _uiState.value as? BackupUiState.ExportReady ?: return null
+        _uiState.value = BackupUiState.AwaitingExportTarget
+        return ready.fileName
+    }
+
+    fun retryExportSave() {
+        if (isBusy() || (_uiState.value as? BackupUiState.Error)?.canRetryExportSave != true) return
+        val bytes = pendingExportBytes ?: return
+        val fileName = pendingExportFileName ?: return
+        _uiState.value = BackupUiState.ExportReady(bytes, fileName)
+    }
+
+    fun onExportPickerFailed() {
+        if (_uiState.value is BackupUiState.AwaitingExportTarget) {
+            _uiState.value = BackupUiState.Error("无法打开文件保存器，请重试", canRetryExportSave = true)
+        }
+    }
+
+    fun retryRestorePassword() {
+        if (isBusy() || (_uiState.value as? BackupUiState.Error)?.canRetryRestorePassword != true) return
+        if (pendingRestoreBytes == null) return
+        _uiState.value = BackupUiState.AwaitingPassword(pendingRestoreFileName ?: "backup.mhb")
+    }
+
     fun reset() {
         cancelRestore()
         discardExport()
@@ -113,7 +147,11 @@ class BackupViewModel @Inject constructor(
     // ---- 导出 ----
 
     fun startExport(password: CharArray, passwordConfirm: CharArray, appVersion: String) {
-        if (isBusy()) return
+        if (isBusy() || (_uiState.value !is BackupUiState.Idle && _uiState.value !is BackupUiState.Error)) {
+            password.wipe()
+            passwordConfirm.wipe()
+            return
+        }
         if (password.isEmpty()) {
             _uiState.value = BackupUiState.Error("请设置备份密码")
             password.wipe(); passwordConfirm.wipe()
@@ -125,10 +163,13 @@ class BackupViewModel @Inject constructor(
             return
         }
         val epoch = beginOperation()
+        pendingRestoreBytes = null
+        pendingRestoreFileName = null
         _uiState.value = BackupUiState.Exporting
         currentJob = viewModelScope.launch {
             try {
                 val bytes = backupRepository.exportBackup(password, appVersion)
+                if (epoch != opEpoch) return@launch
                 val ts = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.getDefault())
                     .format(java.util.Date())
                 val fileName = "MediaHub-backup-$ts.mhb"
@@ -139,44 +180,52 @@ class BackupViewModel @Inject constructor(
                 setStateIfCurrent(epoch, BackupUiState.Error(e.message ?: "导出被拒绝"))
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
-                setStateIfCurrent(epoch, BackupUiState.Error("导出失败：${e.message}"))
+            } catch (_: Exception) {
+                setStateIfCurrent(epoch, BackupUiState.Error("导出失败，请重试"))
             } finally {
                 password.wipe()
                 passwordConfirm.wipe()
             }
         }
+        // launch 尚未开始就被取消时，协程体内 finally 不会执行。
+        currentJob?.invokeOnCompletion { password.wipe(); passwordConfirm.wipe() }
     }
 
     /** 用户在文件创建器中选定了保存位置。空流、写入异常都报告失败，绝不误报成功。 */
     fun onExportTargetPicked(uriString: String) {
-        val bytes = pendingExportBytes ?: run {
-            _uiState.value = BackupUiState.Idle
-            return
-        }
+        val bytes = pendingExportBytes ?: return
         if (isBusy()) return
         val epoch = beginOperation()
         _uiState.value = BackupUiState.WritingExport
         currentJob = viewModelScope.launch {
-            when (val result = backupFileStore.write(uriString, bytes)) {
-                is BackupFileStore.WriteResult.Written -> {
-                    pendingExportBytes = null
-                    pendingExportFileName = null
-                    setStateIfCurrent(epoch, BackupUiState.ExportSuccess("备份已导出"))
+            try {
+                when (val result = backupFileStore.write(uriString, bytes)) {
+                    is BackupFileStore.WriteResult.Written -> {
+                        if (epoch != opEpoch) return@launch
+                        pendingExportBytes = null
+                        pendingExportFileName = null
+                        setStateIfCurrent(epoch, BackupUiState.ExportSuccess("备份已导出"))
+                    }
+                    is BackupFileStore.WriteResult.StreamUnavailable ->
+                        setStateIfCurrent(
+                            epoch,
+                            BackupUiState.Error("保存位置不可写（未能建立输出流），备份未写入", canRetryExportSave = true),
+                        )
+                    is BackupFileStore.WriteResult.WriteFailed ->
+                        setStateIfCurrent(epoch, BackupUiState.Error(result.cause, canRetryExportSave = true))
                 }
-                is BackupFileStore.WriteResult.StreamUnavailable ->
-                    setStateIfCurrent(
-                        epoch,
-                        BackupUiState.Error("保存位置不可写（未能建立输出流），备份未写入", canRetryExportSave = true),
-                    )
-                is BackupFileStore.WriteResult.WriteFailed ->
-                    setStateIfCurrent(epoch, BackupUiState.Error(result.cause, canRetryExportSave = true))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                setStateIfCurrent(epoch, BackupUiState.Error("保存备份失败，请重新选择保存位置后重试", canRetryExportSave = true))
             }
         }
     }
 
     /** 用户取消保存位置选择。 */
-    fun onExportCancelled() = discardExport()
+    fun onExportCancelled() {
+        if (_uiState.value is BackupUiState.AwaitingExportTarget || _uiState.value is BackupUiState.ExportReady) discardExport()
+    }
 
     fun discardExport() {
         pendingExportBytes = null
@@ -190,20 +239,31 @@ class BackupViewModel @Inject constructor(
     fun onRestoreFilePicked(uriString: String) {
         if (isBusy()) return
         val epoch = beginOperation()
+        pendingRestoreBytes = null
+        pendingRestoreFileName = null
+        pendingExportBytes = null
+        pendingExportFileName = null
         _uiState.value = BackupUiState.Decrypting("") // 占位：读取中（文件名未知）
         currentJob = viewModelScope.launch {
-            when (val result = backupFileStore.readBounded(uriString)) {
-                is BackupFileStore.ReadResult.Read -> {
-                    pendingRestoreBytes = result.bytes
-                    pendingRestoreFileName = result.fileName
-                    setStateIfCurrent(epoch, BackupUiState.AwaitingPassword(result.fileName))
+            try {
+                when (val result = backupFileStore.readBounded(uriString)) {
+                    is BackupFileStore.ReadResult.Read -> {
+                        if (epoch != opEpoch) return@launch
+                        pendingRestoreBytes = result.bytes
+                        pendingRestoreFileName = result.fileName
+                        setStateIfCurrent(epoch, BackupUiState.AwaitingPassword(result.fileName))
+                    }
+                    BackupFileStore.ReadResult.TooLarge ->
+                        setStateIfCurrent(epoch, BackupUiState.Error("文件超过 ${BackupSerializerLimits.MAX_FILE_BYTES / 1024 / 1024}MB 上限，已停止读取"))
+                    BackupFileStore.ReadResult.Empty ->
+                        setStateIfCurrent(epoch, BackupUiState.Error("所选文件为空"))
+                    is BackupFileStore.ReadResult.ReadFailed ->
+                        setStateIfCurrent(epoch, BackupUiState.Error(result.cause))
                 }
-                BackupFileStore.ReadResult.TooLarge ->
-                    setStateIfCurrent(epoch, BackupUiState.Error("文件超过 ${BackupSerializerLimits.MAX_FILE_BYTES / 1024 / 1024}MB 上限，已停止读取"))
-                BackupFileStore.ReadResult.Empty ->
-                    setStateIfCurrent(epoch, BackupUiState.Error("所选文件为空"))
-                is BackupFileStore.ReadResult.ReadFailed ->
-                    setStateIfCurrent(epoch, BackupUiState.Error(result.cause))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                setStateIfCurrent(epoch, BackupUiState.Error("读取备份失败，请重新选择文件后重试"))
             }
         }
     }
@@ -230,15 +290,34 @@ class BackupViewModel @Inject constructor(
                         val preview = backupRepository.buildPreview(prepared.validated, RestoreStrategy.MERGE)
                         BackupUiState.Preview(prepared.validated, preview, fileName)
                     }
-                    is PrepareResult.Rejected -> BackupUiState.Error(prepared.reason)
+                    is PrepareResult.Rejected -> BackupUiState.Error(prepared.reason, canRetryRestorePassword = true)
                 }
                 setStateIfCurrent(epoch, newState)
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
-                setStateIfCurrent(epoch, BackupUiState.Error("解密失败：${e.message}"))
+            } catch (_: Exception) {
+                setStateIfCurrent(epoch, BackupUiState.Error("解密或预览失败，请重试", canRetryRestorePassword = true))
             } finally {
                 password.wipe()
+            }
+        }
+        currentJob?.invokeOnCompletion { password.wipe() }
+    }
+
+    /** 策略变化生成新预览；UI 以新预览为键丢弃旧确认。 */
+    fun changeRestoreStrategy(strategy: RestoreStrategy) {
+        val state = _uiState.value as? BackupUiState.Preview ?: return
+        if (isBusy() || state.preview.strategy == strategy) return
+        val epoch = beginOperation()
+        _uiState.value = BackupUiState.BuildingPreview
+        currentJob = viewModelScope.launch {
+            try {
+                val preview = backupRepository.buildPreview(state.validated, strategy)
+                setStateIfCurrent(epoch, state.copy(preview = preview))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                setStateIfCurrent(epoch, BackupUiState.Error("无法生成恢复预览，请重新选择文件后重试"))
             }
         }
     }
@@ -259,7 +338,8 @@ class BackupViewModel @Inject constructor(
         _uiState.value = BackupUiState.Restoring(strategy)
         currentJob = viewModelScope.launch {
             try {
-                val result = backupRepository.restore(state.validated, strategy, replaceConfirmed)
+                val result = backupRepository.restore(state.validated, strategy, replaceConfirmed, state.preview)
+                if (epoch != opEpoch) return@launch
                 pendingRestoreBytes = null
                 pendingRestoreFileName = null
                 setStateIfCurrent(epoch, BackupUiState.RestoreSuccess(result))
@@ -268,8 +348,8 @@ class BackupViewModel @Inject constructor(
                 setStateIfCurrent(epoch, BackupUiState.Error("恢复失败：${e.message}（$rollbackNote）"))
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
-                setStateIfCurrent(epoch, BackupUiState.Error("恢复失败：${e.message}"))
+            } catch (_: Exception) {
+                setStateIfCurrent(epoch, BackupUiState.Error("恢复未完成，请重新选择文件并核对预览后重试"))
             }
         }
     }
