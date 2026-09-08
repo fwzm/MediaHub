@@ -1,15 +1,20 @@
 package com.mediahub.feature.settings.backup
 
+import androidx.room.withTransaction
 import com.mediahub.core.common.backup.BackupDtos
+import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.database.dao.PlaybackProgressDao
 import com.mediahub.core.database.dao.ServerDao
 import com.mediahub.core.database.dao.ServerEndpointDao
+import com.mediahub.core.database.entity.PlaybackProgressEntity
+import com.mediahub.core.database.entity.ServerEndpointEntity
+import com.mediahub.core.database.entity.ServerEntity
 import com.mediahub.core.database.prefs.UserPreferencesRepository
-import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.ServerEndpoint
 import com.mediahub.model.ServerType
+import com.mediahub.model.UserPreferences
 import javax.inject.Inject
 import kotlinx.coroutines.flow.first
 
@@ -26,36 +31,48 @@ data class BackupSnapshot(
  * 生产实现组合 DAO + 偏好；测试用独立 fake。
  */
 interface BackupDataSource {
-    /** 读取全量持久化快照（不限 continue watching 限量）。 */
+
+    /**
+     * 读取全量持久化快照（不限 continue watching 限量）。
+     * 生产实现于单个 Room 事务内读取，保证服务器/线路/进度关联一致。
+     */
     suspend fun readSnapshot(): BackupSnapshot
 
-    /** 应用恢复计划（事务内批量 upsert）。 */
+    /**
+     * 应用恢复计划。生产实现把全部写入包在单个 Room 事务里：
+     * 服务器/线路/进度要么全部生效，要么全部不生效（接口注释与实现一致）。
+     */
     suspend fun applyRestorePlan(plan: RestorePlan)
 }
 
-/** 恢复计划（预览→确认→应用的三阶段中，此对象绑定确认时的数据版本）。 */
+/**
+ * 恢复计划 = 载荷解析出的领域对象 + 冻结的决策记录（[BackupDtos.RestorePlanRecord]）。
+ * 决策在生成时确定；中断恢复按同一记录重放，不凭内存重推。
+ */
 data class RestorePlan(
+    val planId: String,
+    val record: BackupDtos.RestorePlanRecord,
     val servers: List<MediaServer>,
     val progress: List<PlaybackProgress>,
-    val skipExistingServerIds: Set<String>,
+    val preferences: UserPreferences?,
 )
 
 /** 生产实现（组合 Room DAO）。 */
 class ProductionBackupDataSource @Inject constructor(
-    private val db: com.mediahub.core.database.AppDatabase,
+    private val db: AppDatabase,
 ) : BackupDataSource {
 
-    private val serverDao get() = db.serverDao()
-    private val endpointDao get() = db.serverEndpointDao()
-    private val progressDao get() = db.playbackProgressDao()
+    private val serverDao: ServerDao get() = db.serverDao()
+    private val endpointDao: ServerEndpointDao get() = db.serverEndpointDao()
+    private val progressDao: PlaybackProgressDao get() = db.playbackProgressDao()
 
-    override suspend fun readSnapshot(): BackupSnapshot {
+    override suspend fun readSnapshot(): BackupSnapshot = db.withTransaction {
         val serverEntities = serverDao.observeAll().first()
         val endpoints = endpointDao.observeAll().first().groupBy { it.serverId }
         val servers = serverEntities.map { entity ->
             MediaServer(
                 id = entity.id, name = entity.name,
-                type = ServerType.valueOf(entity.type),
+                type = runCatching { ServerType.valueOf(entity.type) }.getOrDefault(ServerType.LOCAL),
                 username = entity.username, note = entity.note,
                 isDefault = entity.isDefault, sortOrder = entity.sortOrder,
                 createdAtEpochMs = entity.createdAtEpochMs,
@@ -78,13 +95,14 @@ class ProductionBackupDataSource @Inject constructor(
                 itemType = entity.itemType?.let { runCatching { com.mediahub.model.MediaType.valueOf(it) }.getOrNull() },
             )
         }
-        return BackupSnapshot(servers = servers, progress = progress)
+        BackupSnapshot(servers = servers, progress = progress)
     }
 
-    override suspend fun applyRestorePlan(plan: RestorePlan) {
+    override suspend fun applyRestorePlan(plan: RestorePlan) = db.withTransaction {
         for (server in plan.servers) {
-            if (server.id in plan.skipExistingServerIds) continue
-            val serverEntity = com.mediahub.core.database.entity.ServerEntity(
+            if (server.id in plan.record.skipExistingServerIds) continue
+            if (server.id !in plan.record.overwriteServerIds) continue
+            val serverEntity = ServerEntity(
                 id = server.id, name = server.name,
                 type = server.type.name,
                 username = server.username, note = server.note,
@@ -95,7 +113,7 @@ class ProductionBackupDataSource @Inject constructor(
             endpointDao.deleteByServer(server.id)
             server.endpoints.forEachIndexed { index, ep ->
                 endpointDao.upsert(
-                    com.mediahub.core.database.entity.ServerEndpointEntity(
+                    ServerEndpointEntity(
                         id = if (ep.id.isBlank()) "${server.id}_ep$index" else ep.id,
                         serverId = server.id,
                         name = ep.name, url = ep.url,
@@ -105,7 +123,7 @@ class ProductionBackupDataSource @Inject constructor(
             }
         }
         progressDao.upsertAll(plan.progress.map { p ->
-            com.mediahub.core.database.entity.PlaybackProgressEntity(
+            PlaybackProgressEntity(
                 serverId = p.serverId, itemId = p.itemId,
                 positionMs = p.positionMs, durationMs = p.durationMs,
                 isPaused = p.isPaused, updatedAtEpochMs = p.updatedAtEpochMs,
