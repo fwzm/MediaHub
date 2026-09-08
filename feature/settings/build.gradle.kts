@@ -34,7 +34,10 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:database"))
     implementation(project(":core:common"))
+    implementation(project(":core:security"))
+    implementation(project(":provider:api"))
     implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

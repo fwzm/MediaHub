@@ -23,25 +23,32 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
-/** 同步与备份页（Phase 1I-A：本地备份与还原）。 */
+/**
+ * 同步与备份页（Phase 1I review 重写）：
+ * - 导出链路闭合：生成 → 自动拉起文件创建器 → 后台写入（空流=失败）→ 结果/重试；
+ * - 替换恢复必须显式勾选确认；执行中按钮全部禁用；
+ * - 页面不做任何 ContentResolver IO，全部经 ViewModel + BackupFileStore。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackupRoute(
@@ -49,28 +56,32 @@ fun BackupRoute(
     viewModel: BackupViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
 
     var exportPassword by remember { mutableStateOf("") }
     var exportPasswordConfirm by remember { mutableStateOf("") }
     var restorePassword by remember { mutableStateOf("") }
     var restoreStrategy by remember { mutableStateOf(RestoreStrategy.MERGE) }
     var replaceConfirmed by remember { mutableStateOf(false) }
+    var lastExportFileName by remember { mutableStateOf<String?>(null) }
+
+    // 密码输入不跨阶段残留：离开对应阶段即清空页面输入
+    LaunchedEffect(state) {
+        if (state !is BackupUiState.AwaitingPassword && state !is BackupUiState.Idle && state !is BackupUiState.Error) {
+            restorePassword = ""
+        }
+        if (state is BackupUiState.RestoreSuccess || state is BackupUiState.ExportSuccess || state is BackupUiState.Idle) {
+            exportPassword = ""
+            exportPasswordConfirm = ""
+            replaceConfirmed = false
+        }
+    }
 
     val createDocLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
-        if (uri != null && state is BackupUiState.ExportReady) {
-            val exportState = state as BackupUiState.ExportReady
-            try {
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    output.write(exportState.bytes)
-                }
-                viewModel.onExportWritten(success = true)
-            } catch (e: Exception) {
-                viewModel.onExportWritten(success = false)
-            }
-        } else if (uri == null) {
+        if (uri != null) {
+            viewModel.onExportTargetPicked(uri.toString())
+        } else {
             viewModel.onExportCancelled()
         }
     }
@@ -79,24 +90,22 @@ fun BackupRoute(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            try {
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    val bytes = input.readBytes()
-                    if (bytes.size > BackupSerializerLimits.MAX_FILE_BYTES) {
-                        viewModel.onFileSelected(
-                            ByteArray(0), // 触发 oversize 错误
-                            fileName = uri.lastPathSegment ?: "backup.mhb",
-                        )
-                    } else {
-                        viewModel.onFileSelected(bytes, uri.lastPathSegment ?: "backup.mhb")
-                    }
-                }
-            } catch (e: Exception) {
-                viewModel.onFileSelected(ByteArray(0), "read-error")
-            }
+            viewModel.onRestoreFilePicked(uri.toString())
         }
-        // uri == null → 用户取消 → 不做任何事，回 Idle
+        // uri == null → 用户取消，不做任何事
     }
+
+    // 导出生成就绪 → 自动拉起保存位置选择器（每次进入 ExportReady 仅一次）
+    LaunchedEffect(state) {
+        val ready = state as? BackupUiState.ExportReady ?: return@LaunchedEffect
+        lastExportFileName = ready.fileName
+        createDocLauncher.launch(ready.fileName)
+    }
+
+    val busy = state is BackupUiState.Exporting ||
+        state is BackupUiState.WritingExport ||
+        state is BackupUiState.Decrypting ||
+        state is BackupUiState.Restoring
 
     Scaffold(
         topBar = {
@@ -129,6 +138,8 @@ fun BackupRoute(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                enabled = !busy,
             )
             OutlinedTextField(
                 value = exportPasswordConfirm,
@@ -137,6 +148,8 @@ fun BackupRoute(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                enabled = !busy,
             )
             Text(
                 "备份不含密码、Token 等登录凭据；忘记备份密码将无法恢复数据。",
@@ -144,14 +157,30 @@ fun BackupRoute(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Button(
-                onClick = { viewModel.startExport(exportPassword.toCharArray(), exportPasswordConfirm.toCharArray(), "0.1.0-alpha.1") },
-                enabled = state == BackupUiState.Idle && exportPassword.isNotBlank(),
+                onClick = {
+                    viewModel.startExport(
+                        exportPassword.toCharArray(),
+                        exportPasswordConfirm.toCharArray(),
+                        "0.1.0-alpha.1",
+                    )
+                },
+                // Error 态同样可重新发起导出（错误不应锁死导出入口）
+                enabled = (state == BackupUiState.Idle || state is BackupUiState.Error) && exportPassword.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                if (state == BackupUiState.Exporting) {
+                if (state is BackupUiState.Exporting) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.size(8.dp))
+                    Text("正在生成备份…")
                 } else {
                     Text("导出备份")
+                }
+            }
+            if (state is BackupUiState.WritingExport) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.size(8.dp))
+                    Text("正在写入备份文件…")
                 }
             }
 
@@ -159,34 +188,44 @@ fun BackupRoute(
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
 
+            // ---- 从文件恢复 ----
             Text("从文件恢复", style = MaterialTheme.typography.titleSmall)
             Button(
-                onClick = {
-                    openDocLauncher.launch(arrayOf("application/octet-stream", "*/*"))
-                },
+                onClick = { openDocLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
                 enabled = state == BackupUiState.Idle || state is BackupUiState.Error,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("选择备份文件")
             }
 
-            // ---- 恢复密码输入 ----
-            if (state is BackupUiState.Decrypting) {
-                OutlinedTextField(
-                    value = restorePassword,
-                    onValueChange = { restorePassword = it },
-                    label = { Text("备份密码") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                )
-                Button(
-                    onClick = { viewModel.onPasswordEntered(restorePassword.toCharArray()) },
-                    enabled = restorePassword.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("解密")
+            // ---- 恢复密码输入（与执行中状态严格区分） ----
+            when (val s = state) {
+                is BackupUiState.AwaitingPassword -> {
+                    OutlinedTextField(
+                        value = restorePassword,
+                        onValueChange = { restorePassword = it },
+                        label = { Text("备份密码（${s.fileName}）") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    )
+                    Button(
+                        onClick = { viewModel.onPasswordEntered(restorePassword.toCharArray()) },
+                        enabled = restorePassword.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("解密并预览")
+                    }
                 }
+                is BackupUiState.Decrypting -> if (s.fileName.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.size(8.dp))
+                        Text("正在解密并验证…")
+                    }
+                }
+                else -> {}
             }
 
             // ---- 恢复预览 ----
@@ -194,11 +233,37 @@ fun BackupRoute(
             if (previewState != null) {
                 SectionHeader("恢复预览")
                 Text("备份应用版本：${previewState.preview.appVersion}")
-                Text("备份创建时间：${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(previewState.preview.createdAtEpochMs))}")
+                Text(
+                    "备份创建时间：" + java.text.SimpleDateFormat(
+                        "yyyy-MM-dd HH:mm", java.util.Locale.getDefault(),
+                    ).format(java.util.Date(previewState.preview.createdAtEpochMs))
+                )
                 Text("新增媒体源：${previewState.preview.newServers}")
-                Text("已有媒体源：${previewState.preview.existingServers}")
-                Text("播放记录：${previewState.preview.progressRecords} 条")
-                Text("应用设置：${if (previewState.preview.preferencesRestore) "将恢复" else "不包含"}")
+                Text("已有同源媒体源（保留本机）：${previewState.preview.identicalServers}")
+                if (previewState.preview.conflictingServers > 0) {
+                    Text(
+                        "同 ID 不同来源冲突：${previewState.preview.conflictingServers} 个" +
+                            "（${previewState.preview.conflictServerNames.joinToString("、")}）" +
+                            "——本机版本保留，其播放记录不导入",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text("播放记录：${previewState.preview.progressToWrite} 条（合并口径）")
+                if (previewState.preview.orphanProgressRecords > 0) {
+                    Text(
+                        "无法关联到备份内媒体源的播放记录：${previewState.preview.orphanProgressRecords} 条（将跳过）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val prefsLabel = when {
+                    previewState.preview.preferencesContained && restoreStrategy == RestoreStrategy.REPLACE_SELECTED -> "将恢复（仅替换模式恢复设置）"
+                    previewState.preview.preferencesContained -> "备份包含设置，但合并模式保留本机设置"
+                    else -> "备份不包含设置"
+                }
+                Text("应用设置：$prefsLabel")
+                Text("备份格式版本：v${previewState.preview.baselineFormatVersion}")
 
                 Spacer(Modifier.height(8.dp))
                 Text("恢复策略", style = MaterialTheme.typography.titleSmall)
@@ -215,7 +280,7 @@ fun BackupRoute(
                 )
                 if (restoreStrategy == RestoreStrategy.REPLACE_SELECTED) {
                     Text(
-                        "替换将覆盖本机同 ID 媒体源和偏好，此操作不可撤销。",
+                        "替换将按 ID 覆盖本机媒体源及其播放记录；地址或账号变化的服务器将清除旧登录态（需重新登录）。此操作不可撤销。",
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -228,16 +293,27 @@ fun BackupRoute(
                     }
                 }
 
+                // 替换策略必须显式确认；执行中（Restoring 替换 Preview）自动禁用
                 Button(
-                    onClick = { viewModel.restore(restoreStrategy) },
-                    enabled = !replaceConfirmed || (restoreStrategy == RestoreStrategy.MERGE) || replaceConfirmed,
+                    onClick = { viewModel.restore(restoreStrategy, replaceConfirmed) },
+                    enabled = previewState != null &&
+                        (restoreStrategy == RestoreStrategy.MERGE || replaceConfirmed),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    if (state is BackupUiState.Restoring) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    } else {
-                        Text(if (restoreStrategy == RestoreStrategy.MERGE) "合并恢复" else "替换恢复")
-                    }
+                    Text(if (restoreStrategy == RestoreStrategy.MERGE) "合并恢复" else "替换恢复")
+                }
+            }
+            if (state is BackupUiState.Restoring) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.size(8.dp))
+                    Text("正在恢复…")
+                }
+                OutlinedButton(
+                    onClick = { viewModel.cancelRestore() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("取消")
                 }
             }
 
@@ -246,13 +322,47 @@ fun BackupRoute(
                 is BackupUiState.RestoreSuccess -> {
                     Text("恢复完成", style = MaterialTheme.typography.titleSmall)
                     Text("新增媒体源：${s.result.addedServers}")
-                    Text("跳过已有媒体源：${s.result.skippedExistingServers}")
+                    Text("覆盖媒体源：${s.result.overwrittenServers}")
+                    Text("保留本机同源媒体源：${s.result.skippedExistingServers}")
+                    Text("冲突跳过：${s.result.conflictSkippedServers}")
                     Text("恢复播放记录：${s.result.restoredProgress}")
-                    Text("应用设置：${if (s.result.preferencesRestored) "已恢复" else "未包含"}")
-                    Text("恢复的媒体源需重新登录。")
+                    Text("清除旧登录态：${s.result.loginsInvalidated} 个")
+                    Text("应用设置：${if (s.result.preferencesRestored) "已恢复" else "未包含/未恢复"}")
+                    Text(
+                        "被覆盖且地址或账号变化的服务器需重新登录。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                is BackupUiState.ExportSuccess -> Text(s.message, color = MaterialTheme.colorScheme.primary)
-                is BackupUiState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error)
+                is BackupUiState.Recovered -> Text(
+                    s.message,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                is BackupUiState.ExportSuccess -> {
+                    Text(s.message, color = MaterialTheme.colorScheme.primary)
+                    Button(
+                        onClick = { viewModel.discardExport() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("完成")
+                    }
+                }
+                is BackupUiState.Error -> {
+                    Text(s.message, color = MaterialTheme.colorScheme.error)
+                    if (s.canRetryExportSave) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                createDocLauncher.launch(viewModel.retryExportFileName ?: "MediaHub-backup.mhb")
+                            }) {
+                                Text("重新选择保存位置")
+                            }
+                            OutlinedButton(onClick = { viewModel.discardExport() }) {
+                                Text("放弃导出")
+                            }
+                        }
+                    }
+                }
                 else -> {}
             }
         }
@@ -278,9 +388,4 @@ private fun RestoreStrategyRadio(
         RadioButton(selected = selected, onClick = onSelect)
         Text(label)
     }
-}
-
-/** SAF 读取大小限制（与 BackupSerializer.MAX_FILE_BYTES 一致）。 */
-object BackupSerializerLimits {
-    const val MAX_FILE_BYTES = 10 * 1024 * 1024
 }
