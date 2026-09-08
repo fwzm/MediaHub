@@ -1,4 +1,14 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
+> 2026-09-09 Agent B 补充：下列旧阶段段落保留为历史记录，当前入口与队列以本段及 [PR #18 独立复审记录](docs/reviews/pr18-agent-b-2026-09-09.md) 为准。不得按尾部历史 TODO 重做 1C—1F 或 Jellyfin 1G A/B/C。
+
+## Phase 1I-A 本地备份还原：独立补丁待 Agent A 接回与复审
+
+- 本轮获取的 main：`8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1`；PR #18 原审查 head：`8798b1381f033533ed2b50b144468b7049789c4e`，OPEN、未合并。
+- Agent B 在独立 `codex/pr18-backup-review-fixes` 分支修复实际仍存在的校验、SAF、恢复身份/凭据、默认源、冻结计划、日志和完整回滚缺陷。不是接管 `feature/backup-restore`，不得自审自合并。
+- 详细逐条评论处置、红灯复现、实际 XML、最终 SHA、模拟器和进程终止证据见复审记录；代码完成、独立审查、CI、设备与阶段封板分别报告。真机保持 `DEVICE UNVERIFIED`。
+- 备份范围和恢复契约见 [本地备份说明](docs/backup/README.md) 与追加 ADR-041；不扩展 WebDAV 云备份。
+- 后续顺序：Media3 选轨独立修复 → 1H SLOW-FINAL → EndpointTestService 取消边界 → PR #10 集成验收 → Jellyfin 真实实例/协议验收 → 全量文档历史核对。PR #16 继续作为证据归档，SLOW-FINAL 仍 OPEN；新核出的日志索引错误留独立文档修复。
+
 > 最后更新：2026-08-30（Phase 1H Emby PROGRESS closeout code+tests complete，feature/1h-emby-progress PR/CI 待走；Phase 1G 已 merge 入 main @ `1d105a1`）
 
 ## Phase 1H Emby PROGRESS closeout（进行中——code+tests complete，PR/CI 待 + DEVICE VERIFICATION PENDING）

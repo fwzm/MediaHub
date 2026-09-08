@@ -2,6 +2,17 @@
 
 > 状态：TODO / IN PROGRESS / DONE / BLOCKED。由完成任务的 AI 更新。
 
+## 2026-09-09 当前队列：PR #18 独立复审与限定补丁
+
+- [x] Task 0：重新 fetch；读取 PR #18/#10/#16 全分页评论、审查、提交、threads 和真实 CI checkout，保留历史描述与实际 head 的区别。
+- [x] Task 1：在 `8798b13` 上独立复现备份还原真实缺陷，隔离分支补丁及约束回归；逐项状态与实际执行结果见 [复审记录](docs/reviews/pr18-agent-b-2026-09-09.md)。
+- [ ] Agent A 接回提交后，由其他 Agent 对最终 head 独立复审，再运行新 head CI；本补丁未自动合并，PR #18 未封板。
+- [ ] 真机端到端复验（`DEVICE UNVERIFIED`）；模拟器与进程终止测试的实际范围单独记录。
+- [ ] 后续按用户顺序推进 2A 选轨、2B SLOW-FINAL、2C endpoint 取消、PR #10、Jellyfin 1G 验收。此轮不实现这些项目。
+- [ ] WebDAV 云备份依赖本地格式/恢复稳定；WebDAV 媒体 Provider 为独立 backlog。其余播放器/Provider backlog 保持原范围。
+
+> 下方阶段正文是历史进度记录。1C—1F 和 Jellyfin 1G A/B/C 已有实现；尾部旧 TODO 不作为重开发授权。跨阶段文档的逐文件历史更正留后续任务 5。
+
 ## Phase 0 —— 骨架（本次交付）✅ DONE
 
 - [x] DONE 工程骨架：settings/build/version catalog/wrapper

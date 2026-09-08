@@ -1,4 +1,15 @@
 # 变更记录（CHANGELOG）
+
+## [Unreleased — PR #18 Agent B review patch] — 2026-09-09
+
+- 本地备份导入/导出共用结构校验，补 LOCAL 描述符、完整 section/count、字段和记录上限、编码凭据参数拒绝、错误文案脱敏。
+- SAF 操作身份、实际版本来源、错误密码重试、输入关闭失败、严格有界读取和密码取消清理。
+- 恢复确认绑定冻结计划与本机基线，Room 内再次核对；保留 MERGE 本机偏好/newer-wins/同 ID 来源冲突，维护默认源唯一，REPLACE 清除所选源的旧进度。
+- 完整 before/after image 采用设备私有 Android Keystore 加密文件，与导出白名单分离；恢复日志持久化失败与损坏时阻断，回滚意图可重启续作。
+- 身份恢复要求凭据/全部 Provider 会话可靠清理，认证提交和旧 401/登出结果受代际约束，旧 Factory API/media handle 后续请求被阻断；首页身份变化和读取期间变化均重新核验。导入线路 ID 在预览时唯一生成并冻结，防止覆盖另一来源的线路主键。
+- 新增生产边界回归、正式 SAF 仪器链及显式进程终止探针。实际命令、XML 数量和验收边界见 [独立复审记录](docs/reviews/pr18-agent-b-2026-09-09.md)，不继承旧 head 的绿色 CI。
+- 状态：独立补丁交 Agent A 接回，待其他 Agent 复审；未自动合并，未阶段封板。
+
 ## [0.16.0-emby-progress] — 2026-08-30（Phase 1H：Emby PROGRESS closeout；DEVICE VERIFICATION PENDING）
 ### 功能
 - Emby 服务端进度闭环（ADR-040）：`EmbyProgressProvider` 独立实现
