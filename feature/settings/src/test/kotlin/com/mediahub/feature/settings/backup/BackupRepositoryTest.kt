@@ -267,7 +267,10 @@ class BackupRepositoryTest {
         assertEquals(listOf("备份侧同ID"), preview.conflictServerNames)
         assertEquals("孤立 1", 1, preview.orphanProgressRecords)
         assertTrue("MERGE 不恢复偏好", !preview.preferencesWillRestore)
-        assertEquals("预览零写入", 0, e.ds.applyCalls)
+        assertEquals("预览零写入：无 apply 调用", 0, e.ds.applyCalls)
+        assertEquals("预览零写入：服务器未动", 2, e.ds.servers.size)
+        assertEquals("预览零写入：本机进度未动（载荷中的进度未写入）", 0, e.ds.progress.size)
+        assertEquals("预览零写入：偏好未动", defaultPrefs.subtitleSizeSp, e.prefs.current.subtitleSizeSp)
     }
 
     // ---- MERGE 语义 ----

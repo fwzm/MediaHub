@@ -117,7 +117,7 @@ class ProductionBackupFileStore @Inject constructor(
         const val BUFFER_BYTES = 64 * 1024
     }
 
-    /** SAF 文件显示名：优先 OpenableColumns.DISPLAY_NAME（downloads uri 的 lastPathSegment 是数字 id）。 */
+    /** SAF 文件显示名：优先 OpenableColumns.DISPLAY_NAME（downloads uri 的 lastPathSegment 是数字 id）；file:// 回退取路径末段。 */
     private fun resolveDisplayName(uri: Uri): String {
         val queried = runCatching {
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -125,6 +125,10 @@ class ProductionBackupFileStore @Inject constructor(
                 if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
             }
         }.getOrNull()
-        return queried ?: uri.lastPathSegment ?: "backup.mhb"
+        // Windows file:// URI 的路径分隔符是 '\'，两种都取末段
+        val fallback = uri.lastPathSegment
+            ?.substringAfterLast('/')
+            ?.substringAfterLast('\\')
+        return queried ?: fallback ?: "backup.mhb"
     }
 }
