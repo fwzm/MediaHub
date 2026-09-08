@@ -106,6 +106,7 @@ class BackupUserFlowTest {
             assertTrue(device.wait(Until.hasObject(By.pkg(appPackage)), TIMEOUT))
             enterRestorePassword("incorrect-task-only-password")
             clickText("解密并预览")
+            waitForDecryption()
             scrollTo(By.text("重新输入备份密码"))
             assertEquals("认证失败零业务写入", changedSource, db.serverDao().getById(sourceId))
             assertEquals(progress, db.playbackProgressDao().get(sourceId, progress.itemId))
@@ -113,6 +114,7 @@ class BackupUserFlowTest {
             clickText("重新输入备份密码")
             enterRestorePassword(password)
             clickText("解密并预览")
+            waitForDecryption()
             scrollTo(By.text("恢复预览"))
             assertEquals("预览零业务写入", changedSource, db.serverDao().getById(sourceId))
             assertEquals(progress, db.playbackProgressDao().get(sourceId, progress.itemId))
@@ -123,13 +125,18 @@ class BackupUserFlowTest {
             val radios = device.findObjects(By.clazz("android.widget.RadioButton"))
             assertTrue("替换策略radio可见", radios.isNotEmpty())
             radios.last().click()
-            val replaceButton = scrollTo(By.text("替换恢复"))
+            val replaceButton = actionForText("替换恢复")
             assertFalse("未确认替换按钮必须禁用", replaceButton.isEnabled)
+            replaceButton.click()
+            assertFalse("点击禁用按钮不能替用户确认", requireNode(By.clazz("android.widget.CheckBox")).isChecked)
             assertEquals(changedSource, db.serverDao().getById(sourceId))
+            assertEquals(progress, db.playbackProgressDao().get(sourceId, progress.itemId))
             assertEquals(beforePreviewPreferences, preferences.flow.first())
             scrollTo(By.text("我确认要替换所选数据"))
             requireNode(By.clazz("android.widget.CheckBox")).click()
-            requireNode(By.text("替换恢复").enabled(true)).click()
+            val confirmedAction = actionForText("替换恢复")
+            assertTrue("明确确认后替换按钮启用", confirmedAction.isEnabled)
+            confirmedAction.click()
             scrollTo(By.text("恢复完成"))
             val restored = db.serverDao().getById(sourceId)!!
             assertEquals(source.name, restored.name)
@@ -162,6 +169,17 @@ class BackupUserFlowTest {
     private fun clickText(text: String) {
         scrollTo(By.text(text))
         device.findObjects(By.text(text)).last().click()
+    }
+
+    private fun actionForText(text: String): UiObject2 {
+        // Compose 的 TextView/装饰 Button 子节点可 enabled=true，真正点击语义在祖先 View。
+        // 以具备点击语义的实际 action 检查禁用门控，不能只看文案节点。
+        var node = scrollTo(By.text(text))
+        repeat(8) {
+            if (node.isClickable) return node
+            node = checkNotNull(node.parent) { "没有点击语义的按钮：$text" }
+        }
+        error("未找到受限深度内的按钮：$text")
     }
 
     private fun scrollTo(selector: BySelector): UiObject2 {
@@ -200,7 +218,36 @@ class BackupUserFlowTest {
     }
 
     private fun waitForDocumentsUi() {
-        assertTrue("必须实际启动系统SAF", device.wait(Until.hasObject(By.pkg(documentPackages)), TIMEOUT))
+        val started = android.os.SystemClock.elapsedRealtime()
+        var appeared = device.wait(Until.hasObject(By.pkg(documentPackages)), TIMEOUT)
+        if (!appeared) {
+            val stacks = Thread.getAllStackTraces().entries.joinToString("\n\n") { (thread, frames) ->
+                "${thread.name} ${thread.state}\n${frames.joinToString("\n") { "  at $it" }}"
+            }
+            File(context.getExternalFilesDir(null), "backup-timing-stacks.txt").writeText(stacks)
+            val pulse = java.util.concurrent.CountDownLatch(1)
+            android.os.Handler(android.os.Looper.getMainLooper()).post { pulse.countDown() }
+            val responsive = pulse.await(1, java.util.concurrent.TimeUnit.SECONDS)
+            instrumentation.sendStatus(2, android.os.Bundle().apply {
+                putString("stream", "\nKDF observation at 15000ms; mainResponsive=$responsive\n")
+            })
+            assertTrue("后台加密期间主线程必须仍可响应", responsive)
+            appeared = device.wait(Until.hasObject(By.pkg(documentPackages)),
+                (CRYPTO_TIMEOUT - (android.os.SystemClock.elapsedRealtime() - started)).coerceAtLeast(1))
+        }
+        instrumentation.sendStatus(2, android.os.Bundle().apply {
+            putString("stream", "\nSAF appeared=$appeared elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}\n")
+        })
+        assertTrue("必须实际启动系统SAF", appeared)
+    }
+
+    private fun waitForDecryption() {
+        // API 36 的实际失败栈确认生产 600k PBKDF2 在 IO worker 运行约 19s。
+        // 普通 UI 仍限 15s；只给真实密码计算独立的有限观察窗口，不重试操作。
+        val working = By.text("正在解密并验证…")
+        if (device.wait(Until.hasObject(working), 1000)) {
+            assertTrue("解密必须在有限观察窗口完成", device.wait(Until.gone(working), CRYPTO_TIMEOUT))
+        }
     }
 
     private fun chooseDownloads() {
@@ -238,5 +285,6 @@ class BackupUserFlowTest {
 
     private companion object {
         const val TIMEOUT = 15_000L
+        const val CRYPTO_TIMEOUT = 60_000L
     }
 }
