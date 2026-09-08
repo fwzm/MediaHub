@@ -1,6 +1,7 @@
 package com.mediahub.core.common.backup
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -70,12 +71,26 @@ class BackupCryptoTest {
     }
 
     @Test
-    fun `kdf iterations within safe bounds`() {
-        // 下界
-        runCatching { BackupCrypto.deriveKey(testPassword, BackupCrypto.randomSalt(), 5_000, 256) }
-            .onFailure { assertTrue("低于下界应拒绝", it is IllegalArgumentException) }
-        // 上界
-        runCatching { BackupCrypto.deriveKey(testPassword, BackupCrypto.randomSalt(), 3_000_000, 256) }
-            .onFailure { assertTrue("超过上界应拒绝", it is IllegalArgumentException) }
+    fun `kdf iterations below lower bound is rejected`() {
+        // 显式异常断言：被测调用意外成功时必须失败，不允许 onFailure 静默通过
+        val below = assertThrows(IllegalArgumentException::class.java) {
+            BackupCrypto.deriveKey(testPassword, BackupCrypto.randomSalt(), 5_000, 256)
+        }
+        assertTrue("错误信息应指向迭代范围", below.message!!.contains("iterations") || below.message!!.contains("迭代"))
+    }
+
+    @Test
+    fun `kdf iterations above upper bound is rejected`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupCrypto.deriveKey(testPassword, BackupCrypto.randomSalt(), 3_000_000, 256)
+        }
+    }
+
+    @Test
+    fun `short salt is rejected`() {
+        val ex = assertThrows(IllegalArgumentException::class.java) {
+            BackupCrypto.deriveKey(testPassword, ByteArray(8), 10_000, 256)
+        }
+        assertTrue("错误信息应说明 salt 长度", ex.message!!.contains("salt"))
     }
 }

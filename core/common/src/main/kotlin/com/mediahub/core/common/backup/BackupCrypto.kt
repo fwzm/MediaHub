@@ -56,7 +56,7 @@ object BackupCrypto {
         keyLengthBits: Int,
         testIterations: Int? = null,
     ): DerivedKey {
-        require(salt.size >= PBKDF2_SALT_BYTES) { "salt 太短" }
+        require(salt.size >= PBKDF2_SALT_BYTES) { "salt 太短（${salt.size} < $PBKDF2_SALT_BYTES）" }
         val effectiveMin = testIterations ?: MIN_ITERATIONS
         require(iterations in effectiveMin..MAX_ITERATIONS) { "iterations 超出安全范围 [$effectiveMin..$MAX_ITERATIONS]" }
         require(keyLengthBits == 256) { "仅支持 256 位密钥" }

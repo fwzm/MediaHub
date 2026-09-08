@@ -1,6 +1,7 @@
 package com.mediahub.core.common.backup
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -123,5 +124,164 @@ class BackupSerializerTest {
         assertTrue("URL 不应明文暴露", !text.contains("media.example"))
         assertTrue("用户名不应明文暴露", !text.contains("user-A"))
         assertTrue("服务器名不应明文暴露", !text.contains("Test Emby"))
+    }
+
+    // ---- 反向用例矩阵（Phase 1I review：非法载荷零写入、错误类型化、不允许异常逃出 import） ----
+
+    /** 低成本 KDF 迭代（仅测试）：export/import 两侧一致即可解密。 */
+    private fun fastExport(payload: BackupDtos.BackupPayload, pw: CharArray = password()): ByteArray =
+        BackupSerializer.export(payload, pw, testIterations = 10_000)
+
+    private fun fastImport(bytes: ByteArray, pw: CharArray = password()) =
+        BackupSerializer.import(bytes, pw, testIterations = 10_000)
+
+    private fun withManifest(
+        base: BackupDtos.BackupPayload = samplePayload(),
+        transform: (BackupFileFormat.Manifest) -> BackupFileFormat.Manifest,
+    ) = base.copy(manifest = transform(base.manifest))
+
+    @Test
+    fun `short salt envelope returns Corrupted - not a crash`() {
+        val bytes = fastExport(samplePayload())
+        val envelope = BackupFileFormat.decodeEnvelope(bytes.decodeToString())
+        val tampered = envelope.copy(kdfSaltB64 = BackupFileFormat.encodeB64(ByteArray(8)))
+        val result = fastImport(BackupFileFormat.encodeEnvelope(tampered).toByteArray())
+        assertTrue("salt 过短应报 Corrupted", result is BackupSerializer.ImportResult.Corrupted)
+        assertTrue("错误应说明 salt", (result as BackupSerializer.ImportResult.Corrupted).reason.contains("salt"))
+    }
+
+    @Test
+    fun `invalid base64 salt returns Corrupted`() {
+        val bytes = fastExport(samplePayload())
+        val envelope = BackupFileFormat.decodeEnvelope(bytes.decodeToString())
+        val tampered = envelope.copy(kdfSaltB64 = "not-base64!!!")
+        val result = fastImport(BackupFileFormat.encodeEnvelope(tampered).toByteArray())
+        assertTrue(result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `wrong nonce length returns Corrupted`() {
+        val bytes = fastExport(samplePayload())
+        val envelope = BackupFileFormat.decodeEnvelope(bytes.decodeToString())
+        val tampered = envelope.copy(nonceB64 = BackupFileFormat.encodeB64(ByteArray(8)))
+        val result = fastImport(BackupFileFormat.encodeEnvelope(tampered).toByteArray())
+        assertTrue("nonce 长度非法应报 Corrupted", result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `minimumReaderVersion above reader returns VersionTooNew`() {
+        val payload = withManifest {
+            it.copy(formatVersion = 1, minimumReaderVersion = BackupCrypto.FORMAT_VERSION + 1)
+        }
+        val result = fastImport(fastExport(payload))
+        assertTrue("读不了的时代应报版本过新", result is BackupSerializer.ImportResult.VersionTooNew)
+        assertEquals(
+            "报告的文件版本 = minimumReaderVersion",
+            BackupCrypto.FORMAT_VERSION + 1,
+            (result as BackupSerializer.ImportResult.VersionTooNew).fileVersion,
+        )
+    }
+
+    @Test
+    fun `minimumReaderVersion below 1 returns Corrupted`() {
+        val payload = withManifest { it.copy(minimumReaderVersion = 0) }
+        val result = fastImport(fastExport(payload))
+        assertTrue(result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `unknown section returns Corrupted`() {
+        val payload = withManifest { it.copy(includedSections = listOf("servers", "secret_section")) }
+        val result = fastImport(fastExport(payload))
+        assertTrue(result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `record count mismatch returns Corrupted`() {
+        val payload = withManifest { it.copy(recordCounts = mapOf("servers" to 5, "progress" to 1)) }
+        val result = fastImport(fastExport(payload))
+        assertTrue("计数与实际不符应拒绝", result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `duplicate server ids return Corrupted`() {
+        val base = samplePayload()
+        val duplicated = base.copy(servers = base.servers + base.servers.first())
+        val payload = withManifest(duplicated) {
+            it.copy(recordCounts = mapOf("servers" to duplicated.servers.size, "progress" to duplicated.progress.size))
+        }
+        val result = fastImport(fastExport(payload))
+        assertTrue("重复服务器 ID 应拒绝", result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `duplicate progress keys return Corrupted`() {
+        val base = samplePayload()
+        val duplicated = base.copy(progress = base.progress + base.progress.first())
+        val payload = withManifest(duplicated) {
+            it.copy(recordCounts = mapOf("servers" to duplicated.servers.size, "progress" to duplicated.progress.size))
+        }
+        val result = fastImport(fastExport(payload))
+        assertTrue("重复播放记录应拒绝", result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `negative position returns Corrupted`() {
+        val base = samplePayload()
+        val bad = base.copy(progress = base.progress.map { it.copy(positionMs = -1) })
+        val result = fastImport(fastExport(bad))
+        assertTrue("负时长字段应拒绝", result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `url with user-info credentials rejected on import`() {
+        val base = samplePayload()
+        val dirty = base.copy(
+            servers = base.servers.map {
+                it.copy(endpoints = it.endpoints.map { ep -> ep.copy(url = "https://user:fake-credential@example.com") })
+            },
+        )
+        val result = fastImport(fastExport(dirty))
+        assertTrue("user-info 夹带凭据应拒绝导入", result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `url with sensitive query rejected on import`() {
+        val base = samplePayload()
+        val dirty = base.copy(
+            servers = base.servers.map {
+                it.copy(endpoints = it.endpoints.map { ep -> ep.copy(url = "https://example.com?api_key=FAKE-KEY-123") })
+            },
+        )
+        val result = fastImport(fastExport(dirty))
+        assertTrue("敏感 query 参数应拒绝导入", result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `orphan progress is not a format error - surfaced for preview`() {
+        val base = samplePayload()
+        val orphaned = base.copy(
+            progress = base.progress + base.progress.first().copy(serverBackupId = "srv-missing", itemId = "item-orphan"),
+        )
+        val payload = withManifest(orphaned) {
+            it.copy(recordCounts = mapOf("servers" to orphaned.servers.size, "progress" to orphaned.progress.size))
+        }
+        val result = fastImport(fastExport(payload))
+        assertTrue("孤立引用属冲突披露，不是格式错误", result is BackupSerializer.ImportResult.Ok)
+        assertEquals(2, (result as BackupSerializer.ImportResult.Ok).payload.progress.size)
+    }
+
+    @Test
+    fun `oversize input returns Corrupted before parsing`() {
+        val oversized = ByteArray(BackupSerializer.MAX_FILE_BYTES + 1)
+        val result = fastImport(oversized)
+        assertTrue("超限文件应提前拒绝", result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `export enforces max bytes so files satisfy own import limit`() {
+        assertThrows(IllegalStateException::class.java) {
+            BackupSerializer.export(samplePayload(), password(), maxBytes = 64, testIterations = 10_000)
+        }
     }
 }

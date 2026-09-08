@@ -112,7 +112,30 @@ object BackupDtos {
         @SerialName("preferences") val preferences: PreferencesDto? = null,
     )
 
+    /**
+     * 恢复计划决策记录（可持久化，Phase 1I review：中断恢复按此重放，不凭内存重推）。
+     * 身份裁决在生成时确定并冻结：重放必须复用同一份决策，保证幂等。
+     */
+    @Serializable
+    data class RestorePlanRecord(
+        @SerialName("strategy") val strategy: String, // MERGE | REPLACE_SELECTED
+        /** 同身份已有服务器：MERGE 保留本机行（newer-wins 进度）。 */
+        @SerialName("skipExistingServerIds") val skipExistingServerIds: List<String> = emptyList(),
+        /** 计划写入/覆盖的服务器（REPLACE 全部；MERGE 仅新增）。 */
+        @SerialName("overwriteServerIds") val overwriteServerIds: List<String> = emptyList(),
+        /** 同 ID 不同来源冲突：本机保留，其播放记录不导入（MERGE）。 */
+        @SerialName("conflictSkippedServerIds") val conflictSkippedServerIds: List<String> = emptyList(),
+        /** 备份服务器 ID → 本机写入 ID（同源同 ID 恒等映射；冲突时 MERGE 仍映射本机 ID 但进度不导入）。 */
+        @SerialName("idRemapping") val idRemapping: Map<String, String> = emptyMap(),
+        @SerialName("includePreferences") val includePreferences: Boolean = false,
+        @SerialName("baselineFormatVersion") val baselineFormatVersion: Int = 1,
+    )
+
     fun encodePayload(payload: BackupPayload): String = json.encodeToString(BackupPayload.serializer(), payload)
 
     fun decodePayload(data: String): BackupPayload = json.decodeFromString(BackupPayload.serializer(), data)
+
+    fun encodePlanRecord(record: RestorePlanRecord): String = json.encodeToString(RestorePlanRecord.serializer(), record)
+
+    fun decodePlanRecord(data: String): RestorePlanRecord = json.decodeFromString(RestorePlanRecord.serializer(), data)
 }
