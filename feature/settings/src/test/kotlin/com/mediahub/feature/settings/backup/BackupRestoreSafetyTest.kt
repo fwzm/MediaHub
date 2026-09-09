@@ -293,4 +293,93 @@ class BackupRestoreSafetyTest {
         assertEquals("https://a.example", data.readSnapshot().servers.single().endpoints.single().url)
         assertNull("rollback changes identity too", afterAuth["a"])
     }
+
+    private fun reorderedSource(primary: Boolean, tied: Boolean = false) = server("a").copy(endpoints = listOf(
+        ServerEndpoint("ignored-old", "a", "Old address first in file", "https://a.example", primary, true, if (tied) 0 else 9),
+        ServerEndpoint("ignored-new", "a", "New address first in Room", "https://changed.example", primary, true, 0),
+    ))
+
+    @Test fun `durable endpoint ordering determines preview merge conflict before any imported progress`() = runBlocking {
+        seed(listOf(server("a")), listOf(progress("a", "local")))
+        val before = data.readSnapshot()
+        val repo = repository()
+        val validated = prepare(repo, payload(listOf(reorderedSource(primary = false)), listOf(progress("a", "incoming"))))
+        val preview = repo.buildPreview(validated, RestoreStrategy.MERGE)
+        assertEquals("Room sorts endpoints by sortOrder; the file's first address must not mask a conflict", 1, preview.conflictingServers)
+        assertEquals(0, preview.progressToWrite)
+        repo.restore(validated, RestoreStrategy.MERGE, false, preview)
+        assertTrue(before.sameData(data.readSnapshot()))
+        assertFalse(data.readSnapshot().progress.any { it.itemId == "incoming" })
+        assertTrue(cleared.isEmpty())
+    }
+
+    @Test fun `durable endpoint ordering invalidates the identity actually selected after Room restore`() = runBlocking {
+        seed(listOf(server("a")), listOf(progress("a", "local")))
+        val repo = repository()
+        val validated = prepare(repo, payload(listOf(reorderedSource(primary = true))))
+        val preview = repo.buildPreview(validated, RestoreStrategy.REPLACE_SELECTED)
+        val frozenAddress = preview.frozenPlan!!.images.after.servers.single().baseUrl
+        repo.restore(validated, RestoreStrategy.REPLACE_SELECTED, true, preview)
+        val actualAddress = data.readSnapshot().servers.single().baseUrl
+        assertEquals("https://changed.example", actualAddress)
+        assertEquals("Old credentials must be invalidated before the effective endpoint changes", listOf("a"), cleared)
+        assertEquals("The frozen identity must match the address consumers read from Room", actualAddress, frozenAddress)
+    }
+
+    @Test fun `ambiguous durable endpoint priorities are rejected without writes while a unique primary stays valid`() = runBlocking {
+        seed(listOf(server("a")), listOf(progress("a", "local")))
+        val before = data.readSnapshot()
+        val beforePrefs = prefs.flow.value
+        val repo = repository()
+        for (primary in listOf(false, true)) {
+            val bad = payload(listOf(reorderedSource(primary, tied = true)))
+            val result = repo.prepareRestore(authenticatedTestBytes(bad, "test".toCharArray()), "test".toCharArray())
+            assertTrue("Equal-priority active candidates cannot freeze an unambiguous identity", result is PrepareResult.Rejected)
+            assertThrows(IllegalArgumentException::class.java) {
+                BackupSerializer.export(bad, "test".toCharArray(), testIterations = 10_000)
+            }
+            assertTrue(before.sameData(data.readSnapshot()))
+            assertEquals(beforePrefs, prefs.flow.value)
+            assertNull(journal.entry)
+            assertTrue(cleared.isEmpty())
+        }
+        val unique = reorderedSource(primary = false, tied = true).let { s ->
+            s.copy(endpoints = s.endpoints.mapIndexed { index, ep -> ep.copy(isPrimary = index == 1) })
+        }
+        val sameAddress = reorderedSource(primary = true, tied = true).let { s ->
+            s.copy(endpoints = s.endpoints.mapIndexed { index, ep ->
+                ep.copy(url = if (index == 0) "HTTPS://A.EXAMPLE/" else "https://a.example")
+            })
+        }
+        for (valid in listOf(unique, sameAddress).map { payload(listOf(it)) }) {
+            val bytes = BackupSerializer.export(valid, "test".toCharArray(), testIterations = 10_000)
+            assertTrue(repo.prepareRestore(bytes, "test".toCharArray()) is PrepareResult.Prepared)
+        }
+        assertTrue(before.sameData(data.readSnapshot()))
+        assertTrue(cleared.isEmpty())
+    }
+
+    @Test fun `legacy frozen image with unstable durable endpoint identity is retained without replay`() = runBlocking {
+        seed(listOf(server("a")), listOf(progress("a", "local")))
+        val before = data.readSnapshot()
+        val beforePrefs = prefs.flow.value
+        val repo = repository()
+        val validated = prepare(repo, payload(listOf(server("a", "https://changed.example"))))
+        val frozen = repo.buildPreview(validated, RestoreStrategy.REPLACE_SELECTED).frozenPlan!!
+        // An earlier writer used file order for the frozen identity, although Room changes that order.
+        val unstable = frozen.images.copy(after = BackupSnapshot(listOf(reorderedSource(primary = true)), emptyList()))
+        snapshots.save(frozen.plan.planId, unstable)
+        val entry = RestoreJournal.ActiveEntry(frozen.plan.planId, RestoreJournal.Phase.PREPARING,
+            BackupDtos.encodePayload(validated.payload), BackupDtos.encodePlanRecord(frozen.plan.record), "", false, 0,
+            protectiveSnapshotRef = frozen.plan.planId)
+        for (phase in listOf(RestoreJournal.Phase.PREPARING, RestoreJournal.Phase.ROLLING_BACK)) {
+            val active = entry.copy(phase = phase)
+            journal.entry = active
+            assertTrue(repo.recoverInterruptedRestore() is RecoveryOutcome.NeedsAttention)
+            assertTrue(before.sameData(data.readSnapshot()))
+            assertEquals(beforePrefs, prefs.flow.value)
+            assertEquals("Do not discard an inconsistent frozen decision", active, journal.entry)
+            assertTrue(cleared.isEmpty())
+        }
+    }
 }

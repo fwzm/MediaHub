@@ -171,6 +171,9 @@ object BackupSerializer {
                     return ImportResult.Corrupted("线路 URL 不合法或携带疑似凭据（${describe(v)}），拒绝导入")
                 }
             }
+            if (!hasUnambiguousEndpointIdentity(dto.endpoints)) {
+                return ImportResult.Corrupted("有效线路优先级相同且地址不同，无法确定来源身份")
+            }
         }
 
         // 进度：重复键、字段范围
@@ -195,6 +198,15 @@ object BackupSerializer {
             }
         }
         return null
+    }
+
+    /** Room reads endpoints by sortOrder; equal-priority active candidates must identify one source. */
+    fun hasUnambiguousEndpointIdentity(endpoints: List<BackupDtos.EndpointDto>): Boolean {
+        val enabled = endpoints.filter { it.enabled }
+        val candidates = enabled.filter { it.isPrimary }.ifEmpty { enabled }
+        val firstOrder = candidates.minOfOrNull { it.sortOrder } ?: return true
+        return candidates.filter { it.sortOrder == firstOrder }
+            .map { BackupUrlGuard.normalizeForIdentity(it.url) }.distinct().size <= 1
     }
 
     private fun describe(v: BackupUrlGuard.Violation): String = when (v) {

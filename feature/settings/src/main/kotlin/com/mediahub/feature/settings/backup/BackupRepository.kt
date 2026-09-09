@@ -223,7 +223,8 @@ class BackupRepository @Inject constructor(
             } catch (e: IllegalArgumentException) {
                 throw ValidationRejectedException("未知媒体源类型")
             }
-            val endpoints = dto.endpoints.map { ep ->
+            // Freeze the identity in the same order used by ServerEndpointDao after persistence.
+            val endpoints = dto.endpoints.sortedBy { it.sortOrder }.map { ep ->
                 ValidatedEndpoint(ep.name, ep.url, ep.isPrimary, ep.enabled, ep.sortOrder)
             }
             ValidatedServer(
@@ -327,6 +328,7 @@ class BackupRepository @Inject constructor(
                 progress, if (record.includePreferences) validated.preferences else null, before,
             )
             val images = RestoreImages(before, materializeRestorePlan(before, plan), prefs, plan.preferences ?: prefs, record)
+            require(hasStableEndpointIdentities(images)) { "线路优先级无法确定稳定身份，已阻止恢复" }
             val localIds = before.servers.map { it.id }.toSet()
             RestorePreview(
                 newServers = record.overwriteServerIds.count { it !in localIds },
@@ -441,6 +443,11 @@ class BackupRepository @Inject constructor(
         val images = try { snapshotStorage.read(ref) } catch (e: CancellationException) { throw e } catch (_: Exception) {
             return RecoveryOutcome.NeedsAttention("保护快照损坏或不可读取，日志已保留")
         }
+        // Old writers could freeze array order while Room later selected a different address.
+        // Retain such plans for manual attention; never silently recompute a confirmed identity.
+        if (!hasStableEndpointIdentities(images)) {
+            return RecoveryOutcome.NeedsAttention("保护快照的线路身份与持久化顺序不一致，日志已保留")
+        }
         if (entry.phase == RestoreJournal.Phase.ROLLING_BACK) {
             return loginInvalidator.withIdentityChange(identityChangeTargets(images)) {
                 try {
@@ -541,6 +548,15 @@ class BackupRepository @Inject constructor(
 
     private fun identity(server: MediaServer) = BackupIdentity(server.type,
         BackupUrlGuard.normalizeForIdentity(server.endpoints.activeEndpoint()?.url.orEmpty()), server.username)
+
+    private fun hasStableEndpointIdentities(images: RestoreImages): Boolean =
+        (images.before.servers + images.after.servers).all { server ->
+            val endpoints = server.endpoints.map {
+                BackupDtos.EndpointDto(it.name, it.url, it.isPrimary, it.enabled, it.sortOrder)
+            }
+            BackupSerializer.hasUnambiguousEndpointIdentity(endpoints) &&
+                identity(server) == identity(server.copy(endpoints = server.endpoints.sortedBy { it.sortOrder }))
+        }
 
     private fun resultFor(plan: RestorePlan, images: RestoreImages, invalidated: Int): RestoreResult {
         val beforeIds = images.before.servers.map { it.id }.toSet()
