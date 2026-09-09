@@ -1,0 +1,1503 @@
+{
+  "schemaVersion": 1,
+  "role": "Agent A / Implementation Owner",
+  "repository": "fwzm/MediaHub",
+  "pullRequest": 18,
+  "originalPrHead": "8798b1381f033533ed2b50b144468b7049789c4e",
+  "base": "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1",
+  "originalBCommits": [
+    "7e314c64cd209fdccb7ce211b8864bea767881e4",
+    "337c626331dcd7552d13d85e76c0c9773883af4d",
+    "307b8f2623ee563227d2502d85e938706ac23373"
+  ],
+  "integrationMethod": "Fast-forward; original B commit SHAs preserved, no cherry-pick or conflict resolution",
+  "agentACiCommit": "68d502f15cbcf5d01499550622adcc8d763735bd",
+  "validationCodeSha": "9a8c309ebd5b537c9fd6e6561022b55e49ad200e",
+  "finalPrHeadBinding": "PR description and external Agent-C-readonly-task.md / final-validation.json are bound after this documentation commit; CI revision.json records actual checkout/head/base.",
+  "reviewStatus": "C REVIEW PENDING",
+  "pullRequestState": "OPEN / Draft",
+  "physicalDevice": "DEVICE UNVERIFIED",
+  "merged": false,
+  "productionDelta": {
+    "files": 2,
+    "addedRegressionTests": 4,
+    "sameSourceReplacementKeepsLogin": true,
+    "commit": "9a8c309ebd5b537c9fd6e6561022b55e49ad200e",
+    "finding": "A-P1-ENDPOINT-ORDER"
+  },
+  "fullCommand": "gradlew.bat testDebugUnitTest :core:model:test :provider:api:test :metadata:test assembleDebug lintDebug :app:assembleDebugAndroidTest --rerun-tasks --continue --no-parallel --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8' '-Pkotlin.compiler.execution.strategy=in-process' --no-build-cache --no-daemon --console=plain",
+  "runtime": {
+    "java": "Android Studio JBR 21.0.9",
+    "gradle": "8.14",
+    "buildCache": "disabled",
+    "jvmTarget": 17,
+    "workers": 1,
+    "androidApi": 36,
+    "os": "Windows"
+  },
+  "fullBuild": {
+    "sha256": "9D4FAD9DBCD33EF0F839814B0E4E074C413C03EABF8126BD465C6F3912988286",
+    "exitCode": 0,
+    "log": "full-checks-final.log",
+    "actionableTasks": 1197,
+    "elapsedSeconds": 2165,
+    "executedTasks": 1197
+  },
+  "unit": {
+    "tasks": [
+      "> Task :app:testDebugUnitTest",
+      "> Task :core:common:testDebugUnitTest",
+      "> Task :core:database:testDebugUnitTest",
+      "> Task :core:logging:testDebugUnitTest",
+      "> Task :core:network:testDebugUnitTest",
+      "> Task :core:security:testDebugUnitTest",
+      "> Task :core:ui:testDebugUnitTest",
+      "> Task :feature:detail:testDebugUnitTest",
+      "> Task :feature:home:testDebugUnitTest",
+      "> Task :feature:library:testDebugUnitTest",
+      "> Task :feature:player:testDebugUnitTest",
+      "> Task :feature:search:testDebugUnitTest",
+      "> Task :feature:server:testDebugUnitTest",
+      "> Task :feature:settings:testDebugUnitTest",
+      "> Task :player:compatibility:testDebugUnitTest",
+      "> Task :player:engine:testDebugUnitTest",
+      "> Task :player:mpv:testDebugUnitTest NO-SOURCE",
+      "> Task :provider:base:testDebugUnitTest",
+      "> Task :provider:emby:testDebugUnitTest",
+      "> Task :provider:jellyfin:testDebugUnitTest",
+      "> Task :provider:local:testDebugUnitTest",
+      "> Task :provider:webdav:testDebugUnitTest NO-SOURCE",
+      "> Task :core:model:test",
+      "> Task :provider:api:test",
+      "> Task :metadata:test NO-SOURCE"
+    ],
+    "errors": 0,
+    "backupTests": 144,
+    "modules": [
+      {
+        "module": "app",
+        "tests": 8.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/common",
+        "tests": 67.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/database",
+        "tests": 9.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/logging",
+        "tests": 12.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/model",
+        "tests": 35.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/network",
+        "tests": 14.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/security",
+        "tests": 17.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/ui",
+        "tests": 4.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/detail",
+        "tests": 37.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/home",
+        "tests": 15.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/library",
+        "tests": 44.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/player",
+        "tests": 33.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/search",
+        "tests": 27.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/server",
+        "tests": 21.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/settings",
+        "tests": 104.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "player/compatibility",
+        "tests": 9.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "player/engine",
+        "tests": 41.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "provider/api",
+        "tests": 8.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "provider/base",
+        "tests": 4.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "provider/emby",
+        "tests": 164.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "provider/jellyfin",
+        "tests": 88.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "provider/local",
+        "tests": 11.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      }
+    ],
+    "tests": 772,
+    "failures": 0,
+    "xml": [
+      {
+        "module": "feature/detail",
+        "file": "feature/detail/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.detail.source.SourceSelectorModelTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "533A6439C9D6F7CED42F5E12915AA73D2090F08864C3B39BAE616F7819B6DB87"
+      },
+      {
+        "module": "feature/detail",
+        "file": "feature/detail/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.detail.source.CanonicalSourceResolverTest.xml",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "C973A9F30058C5322AFF4882D92C47AEED4D5E679AAE5E5F2F389FFBB33CE426"
+      },
+      {
+        "module": "feature/detail",
+        "file": "feature/detail/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.detail.DetailViewModelTest.xml",
+        "tests": 20,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "4D72BAB4183E0C6016DAC6A4C029B2B19CC3F18FC7F4FCF9E035BC7F737AC23B"
+      },
+      {
+        "module": "feature/library",
+        "file": "feature/library/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.library.LibraryViewModelTest.xml",
+        "tests": 19,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "46FFE6D58072F281A604C0A59EE48450D4877733DC150DC7AE3663C9FCAFA0E1"
+      },
+      {
+        "module": "feature/library",
+        "file": "feature/library/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.library.LibrarySortViewModelTest.xml",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "652CBF2A1E5480622DC418FEA97FF319BC83ADBF2FBD5F10E743D530F1D32A10"
+      },
+      {
+        "module": "feature/library",
+        "file": "feature/library/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.library.LibraryFilterViewModelTest.xml",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "FBD9192174743D2372AF08361265AEA5D85844372096F93F70DAECF59F2E7C19"
+      },
+      {
+        "module": "feature/library",
+        "file": "feature/library/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.library.LibraryFilterUiHelpersTest.xml",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "3696FC5530E63F7FC7887574630B74912E830E22BC831F000667B4FD40844C2D"
+      },
+      {
+        "module": "core/model",
+        "file": "core/model/build/test-results/test/TEST-com.mediahub.model.MediaTypeGuesserTest.xml",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "5FA44F0A4E5BC15F11945011637B8245A7E65353E6DE995D3BB9F7C58608047D"
+      },
+      {
+        "module": "core/model",
+        "file": "core/model/build/test-results/test/TEST-com.mediahub.model.MediaQueryTest.xml",
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "1D2D32DFDC2BD6A413A3BBFAEF0BCFB8D3295275705B9BC6C19BA864095B4D6A"
+      },
+      {
+        "module": "core/model",
+        "file": "core/model/build/test-results/test/TEST-com.mediahub.model.ExternalIdentityTest.xml",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "5A4716A3BC9B2B9D14E39EBB5A8F3824948789C0C794CD4ECC866EA6B3CCFA50"
+      },
+      {
+        "module": "core/model",
+        "file": "core/model/build/test-results/test/TEST-com.mediahub.model.CanonicalIdentityGraphTest.xml",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "A413DC641D5CEC8FA1308EBB630CB1BB76C045A2718584134833B3941AB8A9B3"
+      },
+      {
+        "module": "core/ui",
+        "file": "core/ui/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.ui.ServerIconTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "BEE12198E4629DE2AB4C6A642722CFC7623A7EBD37B3CD37CE55B1CA06445064"
+      },
+      {
+        "module": "feature/player",
+        "file": "feature/player/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.player.PlayerViewModelTest.xml",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "7EF56822F9BB45D5F1BD420DA799A30FD12F0823721D627F75170164B4AADF3E"
+      },
+      {
+        "module": "feature/player",
+        "file": "feature/player/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.player.gesture.PlayerGestureControllerTest.xml",
+        "tests": 30,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "314FB6816C89E35DE693C37A5566963205D36E4816F7D288FF00DCCF27DAD129"
+      },
+      {
+        "module": "feature/settings",
+        "file": "feature/settings/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.settings.backup.SharedPrefsRestoreJournalTest.xml",
+        "tests": 19,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "CF7A69E276A9A86F0A9D16D45F941602A0B37EC3465D696D8BECA995D6511CAD"
+      },
+      {
+        "module": "feature/settings",
+        "file": "feature/settings/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest.xml",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "3DDB54AB6DE97D53EBBCCF5ED1E9E385C339DDD72E12C668CF1379D35F4A89A4"
+      },
+      {
+        "module": "feature/settings",
+        "file": "feature/settings/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.settings.backup.ProductionCredentialRemovalTest.xml",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "1537C2A994185BF5BBEB85625FD8EE012126794306C4C8E639F91C74E0024067"
+      },
+      {
+        "module": "feature/settings",
+        "file": "feature/settings/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.settings.backup.ProductionBackupFileStoreTest.xml",
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "E0DB2E365D50BFB4FD45D82ACAA1E118D540DB3B384A97C6349E5F06EA55BE0F"
+      },
+      {
+        "module": "feature/settings",
+        "file": "feature/settings/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.settings.backup.ProductionBackupDataSourceTest.xml",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "4E4104DA06AFC903F20833FD2DEDA6E2C709912C7F5C17C26C4246F3C473CDDE"
+      },
+      {
+        "module": "feature/settings",
+        "file": "feature/settings/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.settings.backup.BackupViewModelTest.xml",
+        "tests": 16,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "86B1AD618BF24D3FF1A0B811DBC1C22DE323B48CBC1EC4974ED4F184DD5FA5A6"
+      },
+      {
+        "module": "feature/settings",
+        "file": "feature/settings/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.settings.backup.BackupRestoreSafetyTest.xml",
+        "tests": 19,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "5F65320F4352ABABAFD3C4E90AC839DDDE320F0042F57ED16F5489A671D9B432"
+      },
+      {
+        "module": "feature/settings",
+        "file": "feature/settings/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.settings.backup.BackupRepositoryTest.xml",
+        "tests": 20,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "42315E036AF13651D6B8D535E285F293E1A552B089FE631EF31EE363414DF83C"
+      },
+      {
+        "module": "core/logging",
+        "file": "core/logging/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.logging.RedactorTest.xml",
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "CC2EC4AB0B8A664645AD7F3A4FC524429552607A4D6787C07008C0DFE697ABAB"
+      },
+      {
+        "module": "app",
+        "file": "app/build/test-results/testDebugUnitTest/TEST-com.mediahub.app.image.ProviderImageAuthStoreTest.xml",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "0E860AC8C433EE9D9C926B6A2249785DF3FF8F322E4ABBEF4D78C7F5EE7B1942"
+      },
+      {
+        "module": "app",
+        "file": "app/build/test-results/testDebugUnitTest/TEST-com.mediahub.app.image.ProviderImageAuthInterceptorTest.xml",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "7E2EBA5B750CB410002ECB9739806130AFF5107E1FC8ABFA30D2F652A3E2F2E0"
+      },
+      {
+        "module": "player/engine",
+        "file": "player/engine/build/test-results/testDebugUnitTest/TEST-com.mediahub.player.engine.TrackMapperTest.xml",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "7F8FAFF29971045965D51F15CE8F60AEA32109B5DFA097FEF03EC982C52BAB5B"
+      },
+      {
+        "module": "player/engine",
+        "file": "player/engine/build/test-results/testDebugUnitTest/TEST-com.mediahub.player.engine.SwitchablePlaybackEngineTest.xml",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "9BC0074EE8076CE53EC3E6746181B16D520B53F170CF59484F14E157A8A66E12"
+      },
+      {
+        "module": "player/engine",
+        "file": "player/engine/build/test-results/testDebugUnitTest/TEST-com.mediahub.player.engine.RedirectCredentialIsolationTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "583AB9FDBFBD53EAC1142D8250103F193B858E779AF2998AD7234312A3BB322D"
+      },
+      {
+        "module": "player/engine",
+        "file": "player/engine/build/test-results/testDebugUnitTest/TEST-com.mediahub.player.engine.ProgressSyncCoordinatorTest.xml",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "2ECADEBE71A0416F8908B11466D73D7683B12C3B38F1E4F3EA19B0F48CFD2A08"
+      },
+      {
+        "module": "player/engine",
+        "file": "player/engine/build/test-results/testDebugUnitTest/TEST-com.mediahub.player.engine.PlaybackStartupTraceTest.xml",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "689C920EFBA8CA824753AE95057200172EEC4408AE5270EC75E0E71C348F27D4"
+      },
+      {
+        "module": "player/engine",
+        "file": "player/engine/build/test-results/testDebugUnitTest/TEST-com.mediahub.player.engine.PlaybackHeadersHolderTest.xml",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "77BF5B62FE0019E4938FA543360F2C1DCFB8544C1BC754F86F2D986902FC9980"
+      },
+      {
+        "module": "player/engine",
+        "file": "player/engine/build/test-results/testDebugUnitTest/TEST-com.mediahub.player.engine.PlaybackEngineSessionPropagationTest.xml",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "54AF4EA63DED7650BD01D7ED2EAB0C7331E35A4B3EE9B6CCA8DA34D034EB1343"
+      },
+      {
+        "module": "player/engine",
+        "file": "player/engine/build/test-results/testDebugUnitTest/TEST-com.mediahub.player.engine.PlaybackEngineSelectorTest.xml",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "D9B45BEF233DA9721F044167F789BD6FDBC2336E539B9D347F61B6A75BD15B0D"
+      },
+      {
+        "module": "player/compatibility",
+        "file": "player/compatibility/build/test-results/testDebugUnitTest/TEST-com.mediahub.player.compatibility.PlaybackCompatibilityEvaluatorTest.xml",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "7EBB57ECE49C6BB69069F289FD30B9CB04996E50CFB9AA481E655AD42EF4A4A2"
+      },
+      {
+        "module": "core/security",
+        "file": "core/security/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.security.TokenStoreTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "54C187BE060201AD3E9958A95916A12BC0D6D451212C2FA4DC62A4629D5AC9DF"
+      },
+      {
+        "module": "core/security",
+        "file": "core/security/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.security.TokenStoreAuthenticationTest.xml",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "390A746D1624702F04638E2E3B35BCA9EAFEF11640C2BE3B50D82539C5D20B64"
+      },
+      {
+        "module": "core/security",
+        "file": "core/security/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.security.CredentialVaultTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "0BD53CECD4E7C739A158D8AF8C0F2572E0534308C1E3DDB534EA94E5651E8AEB"
+      },
+      {
+        "module": "provider/local",
+        "file": "provider/local/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.local.SafTreeNavigatorTest.xml",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "D30AE0A2772AA60E1B75C7E157344636E5BFB083E5AE8B13C22F69B4B84793C2"
+      },
+      {
+        "module": "provider/local",
+        "file": "provider/local/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.local.LocalProviderPaginationTest.xml",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "14371ED54D47C26C894A6CFA50623C886480E07C8ADAEEDEE1BA321469834296"
+      },
+      {
+        "module": "core/database",
+        "file": "core/database/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.database.repository.ServerRepositoryUpdateEndpointQualityTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "1B2EF1FA9560BA859615EEEAF69DCDB365EE8C995C46BE973FB23F9A19BDF1EC"
+      },
+      {
+        "module": "core/database",
+        "file": "core/database/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.database.mapper.ServerEntityMappersTest.xml",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "5831B61DDE6843D3A59FF239648700A7F0709DDB8C40D35F0F3384BB6962B720"
+      },
+      {
+        "module": "feature/home",
+        "file": "feature/home/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.home.HomeViewModelTest.xml",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "F65A31E0690272B963D5854780962C6F35B8CA65C4E672814DA00A283F424CCF"
+      },
+      {
+        "module": "feature/home",
+        "file": "feature/home/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.home.AuthNavigationPolicyTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "6DC16D9ADA1ECDC264817DEDAC5171612F759D0C68257CAADBE8B5D636D3CB47"
+      },
+      {
+        "module": "feature/server",
+        "file": "feature/server/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.server.ServerEditorViewModelTest.xml",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "52372C26BE6A8858EA0B9283A237F62926CFC34D328C34ED58335E92336D0415"
+      },
+      {
+        "module": "feature/server",
+        "file": "feature/server/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.server.ExistingServerEditPolicyTest.xml",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "6E7DA6C5768AE11CD9A7E7888EA6BDE7B547DE41B6BA599F85D500375CDC4FB4"
+      },
+      {
+        "module": "feature/server",
+        "file": "feature/server/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.server.AddServerLoginErrorTextTest.xml",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "3BCD590A0DD8C81A59CDE381F162A9208FD1C4CE9F3FEFCD109F0A56B86C5211"
+      },
+      {
+        "module": "feature/server",
+        "file": "feature/server/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.server.AddressTestResultPolicyTest.xml",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "1AB88F478216027CCA4B7755C57A3298F0AA19EB148902F616784F39F293E1A6"
+      },
+      {
+        "module": "feature/search",
+        "file": "feature/search/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.search.GlobalSearchViewModelTest.xml",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "D3F90FFA3E308660632D551756FF3CBBF144F8EDBC18A2AD10E1BF2EB203288A"
+      },
+      {
+        "module": "feature/search",
+        "file": "feature/search/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.search.engine.SearchAggregatorTest.xml",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "833527A8D15A3BB9193B8C30EE4537CEFFA7F0050784C473F244A6D2B0DC4C32"
+      },
+      {
+        "module": "feature/search",
+        "file": "feature/search/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.search.engine.JellyfinEmbyCanonicalAggregationTest.xml",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "068A972AF8D2055CE5AE36CE2DCE932C47213CFBA24E58676243A6E47366ED08"
+      },
+      {
+        "module": "feature/search",
+        "file": "feature/search/build/test-results/testDebugUnitTest/TEST-com.mediahub.feature.search.engine.GlobalSearchEngineTest.xml",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "05E5CE9906C4B8740EF094CFF257A5684CEC48DD3A7CB2C7861641524512D162"
+      },
+      {
+        "module": "core/network",
+        "file": "core/network/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.network.StartupNetworkEventListenerTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "ED180907ECC7641DE01E89A2559BF5CDDC05E2B9FF9F9C7F1E0ACC12A26EA90B"
+      },
+      {
+        "module": "core/network",
+        "file": "core/network/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.network.PlaybackErrorMapperTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "48BEA498EC0E1691E7AD32E2C79AE6FFE3945928B266CDB736D98A622FA72B2F"
+      },
+      {
+        "module": "core/network",
+        "file": "core/network/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.network.MpvHttpBridgeTest.xml",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "D076911B597D768798CFC52C942526850E1793D841E54573229F75B4D0E5253C"
+      },
+      {
+        "module": "core/network",
+        "file": "core/network/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.network.EndpointTestServiceTest.xml",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "2AB9FF86290AFFB7A7CDEBB220EE3085742A729622C0AB4A2088D1436CB90DBB"
+      },
+      {
+        "module": "core/network",
+        "file": "core/network/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.network.ApiClientNoContentTest.xml",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "1D1480CBAD53B8687845502DFFAFAD7F6E9EDA04E5955D8F49EF4339E590AECC"
+      },
+      {
+        "module": "provider/base",
+        "file": "provider/base/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.base.DefaultProviderRegistryTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "D84A7947ED74A16DC3127AB03D093DAB822D631D8FF58E13DDF4284FC7E4B3CC"
+      },
+      {
+        "module": "provider/jellyfin",
+        "file": "provider/jellyfin/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.jellyfin.search.JellyfinSearchProviderTest.xml",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "E9636C6A3FCCA4933B1A572DE892C8A33B3111328A48670F9C999C109A45C1E5"
+      },
+      {
+        "module": "provider/jellyfin",
+        "file": "provider/jellyfin/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.jellyfin.progress.JellyfinProgressProviderTest.xml",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "410BF8F74D81FD4B97C95EE9F2E959440A5F4AFB5AACEDF838143599C3E37834"
+      },
+      {
+        "module": "provider/jellyfin",
+        "file": "provider/jellyfin/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.jellyfin.playback.JellyfinPlaybackProviderTest.xml",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "359D7349E817F4A2CC4B020F678B4904F07A5ABAAFF52838AAD2121FCADFADDD"
+      },
+      {
+        "module": "provider/jellyfin",
+        "file": "provider/jellyfin/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.jellyfin.mapper.JellyfinItemMapperTest.xml",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "E3C0A822EF4BD8BF8947A9B85767202B31A70B59700C714095489581455B5185"
+      },
+      {
+        "module": "provider/jellyfin",
+        "file": "provider/jellyfin/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.jellyfin.library.JellyfinLibraryProviderTest.xml",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "60FCEEBE0B415DA19059873F28F56DB4D587AD09161EC0BF43D53DDD2261FD4A"
+      },
+      {
+        "module": "provider/jellyfin",
+        "file": "provider/jellyfin/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.jellyfin.JellyfinProviderConnectionTest.xml",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "4134297F9344E04FC651E702FCC7E918D404B6904EC05A7FEA4AA0B5EC53ADE0"
+      },
+      {
+        "module": "provider/jellyfin",
+        "file": "provider/jellyfin/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.jellyfin.JellyfinProviderCapabilityAuditTest.xml",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "9CFD6CF75A703907B5BAA109FECCD2D407E682551C2DA84D48412C0505F379D8"
+      },
+      {
+        "module": "provider/jellyfin",
+        "file": "provider/jellyfin/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.jellyfin.JellyfinFactoryRestoreIsolationTest.xml",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "BA45EB47E38040362DF3F4DDCEEF7EC56F7A5D9C50CEC1379E24F39095C5D766"
+      },
+      {
+        "module": "provider/jellyfin",
+        "file": "provider/jellyfin/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.jellyfin.image.JellyfinImageAuthContributorTest.xml",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "23F370813FDBF0DAFB1691C0FCB34F845F58941CDE02866635BECE1FA3213F53"
+      },
+      {
+        "module": "provider/jellyfin",
+        "file": "provider/jellyfin/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.jellyfin.detail.JellyfinDetailProviderTest.xml",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "90A35CF9355B2857D62728817A37BECB951DC7503507B1F60267BB17C4EED0E4"
+      },
+      {
+        "module": "provider/jellyfin",
+        "file": "provider/jellyfin/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.jellyfin.auth.JellyfinAuthProviderTest.xml",
+        "tests": 24,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "F6F6F5B8EA66E71181E86C56EABBFC54CDC39E6565C99C8EC216168F9A90DF2F"
+      },
+      {
+        "module": "provider/jellyfin",
+        "file": "provider/jellyfin/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.jellyfin.api.JellyfinAuthorizationHeaderBuilderTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "54EDA87DAD8174182CEBBEA69F758B3F81B63B5C5DC57969F5E0AA1385A1F711"
+      },
+      {
+        "module": "provider/api",
+        "file": "provider/api/build/test-results/test/TEST-com.mediahub.provider.api.ProviderHandleTest.xml",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "0ACE7B9051D15523FED5CEF2529B5D4E7CC78B44EDEF7ACCD6BCE32C701E8423"
+      },
+      {
+        "module": "provider/api",
+        "file": "provider/api/build/test-results/test/TEST-com.mediahub.provider.api.CompositeSessionStoreCleanerTest.xml",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "B7A78128DFB80B48662DA5465DF34A5BE6E64D668C2C024870849719CFBCCABB"
+      },
+      {
+        "module": "core/common",
+        "file": "core/common/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.common.ServerAddressNormalizerTest.xml",
+        "tests": 27,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "0FD7D6D3CBE8AA734A0D3388E494F7BF0A5632D89DC4BA97828B8E6A117E4774"
+      },
+      {
+        "module": "core/common",
+        "file": "core/common/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.common.backup.BackupValidationSafetyTest.xml",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "A3260B326D8EC9ACCA7D625D4D5268C0FABD91B8A4FA0DC88E0A0DBB1F5184E9"
+      },
+      {
+        "module": "core/common",
+        "file": "core/common/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.common.backup.BackupSerializerTest.xml",
+        "tests": 22,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "E9EECB6C374B7E9F165564BE85D5407CEB7FE6774BC78BE88B513E6B4CF54237"
+      },
+      {
+        "module": "core/common",
+        "file": "core/common/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.common.backup.BackupCryptoTest.xml",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "72D5752E6C76E3F7FF47C46303DB5603C3FCAB99D06A04619FBDAE3F87778D63"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.progress.EmbyProgressProviderTest.xml",
+        "tests": 32,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "6322B8E63C2EFFF257A801F65C134A0F13DEC3F25265B44079590C63B38B5CC0"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.playback.MediaSourceSelectorTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "A20FA306693E174B1245B18603EB3AA9B907C6433C2FDCB47BDE23930524006C"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.mapper.EmbySortMapperTest.xml",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "8B23E36229E51401B79302E73CDD32C2315C56306014A7FD03AD06193F143B22"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.mapper.EmbyProviderIdsMappingTest.xml",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "1E671654812C24AB259671A4625CF1B715D934D92DC5AFE55FE4885198DCD8EB"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.mapper.EmbyMediaItemMapperTest.xml",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "0E18E973824013C80ED630F642C8379C5F784A19D218D456934F1A2F3F25354B"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.image.EmbyImageAuthContributorTest.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "477980EA471083985EE524F96BC0E5CFC13D8DA22342A87152CB543181EEE22D"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.identity.EmbyIdentityLookupProviderTest.xml",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "1CE1D93541869FED5B72C8F76D421BE901BF178862CEF161E4001D39408BA8B7"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.EmbySearchProviderTest.xml",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "15DFD8E202C6BFC7FDAFB46B852DB13AEDFEEE46FAF18ACFD56B48E16F9B604A"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.EmbyProviderFactoryTest.xml",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "3B393F15A7E3105B2B81B1A64357967ECB48E8A1B5D496B75810CE9A3CD4A350"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.EmbyProviderConnectionTest.xml",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "812BC9D9D5A6B18AE1EFC248B5EC272136F8BB9CC4686CA28D55B2B5ED2351D6"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.EmbyPlaybackProviderTest.xml",
+        "tests": 19,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "B575BC41D9B29E5D5065C4185B56771AA78AB50EA34D67C40A6AB177244F6ACF"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.EmbyMetadataMapperTest.xml",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "FC2A8E63D47A91CB68A6528DC8680415719374CFC5CAA52AB06069B5DD24924C"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.EmbyLibraryProviderTest.xml",
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "FE223FFF247288A382728D095A64BD22D0436C9EED28486A1E9CE52BB010FBD4"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.EmbyImageMapperTest.xml",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "9B4568FEE80FF1C0F971977E64F92ED111B139323CD8CA546F84E7F3170A6BC2"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.EmbyFactoryRestoreIsolationTest.xml",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "9F68C6F3C8FF109E76DCCC2D019ED23535AE094459AC6054698B53F35DA7E01B"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.EmbyDetailProviderTest.xml",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "C89550B0C6CB92D559EA77C8A1F8D06EF5A7AEAEF0E702ADC27D1670A27E6412"
+      },
+      {
+        "module": "provider/emby",
+        "file": "provider/emby/build/test-results/testDebugUnitTest/TEST-com.mediahub.provider.emby.EmbyAuthProviderTest.xml",
+        "tests": 22,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "0596875AA3ED7130D60D8F3E8E9A7747E7C7141E385F66F5F18FBD275065126C"
+      }
+    ],
+    "skipped": 0,
+    "xmlFiles": 92,
+    "noSourceTasks": [
+      ":player:mpv:testDebugUnitTest",
+      ":provider:webdav:testDebugUnitTest",
+      ":metadata:test"
+    ],
+    "executedTasks": 22
+  },
+  "testCaseDelta": {
+    "historicalBXmlCount": 92,
+    "historicalBSelectedPrefix": "evidence/final-unit-xml/",
+    "historicalBTests": 768,
+    "agentATests": 772.0,
+    "agentACodeSha": "9a8c309ebd5b537c9fd6e6561022b55e49ad200e",
+    "addedCases": [
+      "com.mediahub.feature.settings.backup.BackupRestoreSafetyTest::ambiguous durable endpoint priorities are rejected without writes while a unique primary stays valid",
+      "com.mediahub.feature.settings.backup.BackupRestoreSafetyTest::durable endpoint ordering determines preview merge conflict before any imported progress",
+      "com.mediahub.feature.settings.backup.BackupRestoreSafetyTest::durable endpoint ordering invalidates the identity actually selected after Room restore",
+      "com.mediahub.feature.settings.backup.BackupRestoreSafetyTest::legacy frozen image with unstable durable endpoint identity is retained without replay"
+    ],
+    "removedCases": [],
+    "caseIdentifier": "classname::name",
+    "note": "Historical counts do not substitute for Agent A execution; no assumption of a fixed target count."
+  },
+  "targeted": {
+    "initial": {
+      "failures": 0,
+      "tests": 451,
+      "note": "B source at 307b8f2; only CI file committed during this run",
+      "executedTestTasks": 6
+    },
+    "afterRepair": {
+      "failures": 0,
+      "tests": 171,
+      "log": "targeted-final.log",
+      "source": "Same code/test files committed as 9a8c309 during run",
+      "executedTestTasks": 2
+    }
+  },
+  "redRegression": {
+    "xml": "red-endpoint-order-2.xml",
+    "failures": 4,
+    "finalExtendedCasesIncludedInFullRun": true,
+    "tests": 4,
+    "skipped": 0,
+    "errors": 0,
+    "greenBeforeBoundaryExtensions": {
+      "failures": 0,
+      "tests": 4,
+      "xml": "green-endpoint-order.xml"
+    }
+  },
+  "lint": {
+    "errorsAndFatals": 0,
+    "duplicatesMayBePresent": true,
+    "reports": [
+      {
+        "file": "provider/webdav/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "player/mpv/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 1,
+        "sha256": "61CE6874439990B6A5994C840A82D040202A582B4F2551C28895CD46C6C820A2"
+      },
+      {
+        "file": "player/engine/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "provider/base/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "core/ui/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "provider/emby/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 2,
+        "sha256": "B38EDFF841997DF7DF83603C1AFCCDBCC8F082C41F9C014D7D2346FFC388711B"
+      },
+      {
+        "file": "feature/server/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 1,
+        "sha256": "3DA2A50C7896EA4E0C0D7A896F10342848E7276E67AFE6458AAB3FD84F1F9CA2"
+      },
+      {
+        "file": "feature/settings/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 3,
+        "sha256": "C3B9CFCB9D8E5FA8E81E5CC17300DB7B6EEA1547933D7B0C1CEEB9F45D4B7228"
+      },
+      {
+        "file": "feature/player/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "feature/home/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "app/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 50,
+        "sha256": "26EC08905CF48956E1ADAA86CCDF90F0708675A20D8F51924E8D7A9EE57BAF21"
+      },
+      {
+        "file": "provider/local/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 2,
+        "sha256": "34FDDC6135F02241C7801544983830723DF4A3B466CE5E24712A42F49972ABD6"
+      },
+      {
+        "file": "core/security/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "feature/search/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "feature/detail/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "player/compatibility/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "provider/jellyfin/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 2,
+        "sha256": "B3AD2408B77A855197182E20B20D65B9B58472FCB7A7195B7A0A4A70DA0F829C"
+      },
+      {
+        "file": "core/network/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "feature/library/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "core/database/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "core/logging/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      },
+      {
+        "file": "core/common/build/reports/lint-results-debug.xml",
+        "errors": 0,
+        "warnings": 0,
+        "sha256": "6C51366EEB7CD464BB6E894EB41283EE97391FF4E7395D7FB222072FDFEF89CE"
+      }
+    ],
+    "warningEntries": 61,
+    "historicalComparison": "lint-delta.json; B 19 verified from separately available historical XML; A additional 36 GradleDependency and 6 AndroidGradlePluginVersion records",
+    "xmlReports": 22
+  },
+  "emulator": {
+    "serial": "emulator-5558",
+    "avd": "Codex_PR18_Integration_36",
+    "api": 36,
+    "actualPassedInvocations": 10,
+    "expectedSeedDeathsNotPassed": 9,
+    "results": [
+      {
+        "name": "Settings / SAF user chain",
+        "tests": 1,
+        "log": "ui-saf.log",
+        "seconds": 227.202
+      },
+      {
+        "name": "SNAPSHOT",
+        "tests": 1,
+        "log": "SNAPSHOT-recover.log",
+        "seconds": 1.347,
+        "terminatedPid": 7569,
+        "recoveryPid": 7622,
+        "seed": "EXPECTED PROCESS DEATH; NOT A PASS"
+      },
+      {
+        "name": "PREPARING",
+        "tests": 1,
+        "log": "PREPARING-recover.log",
+        "seconds": 1.957,
+        "terminatedPid": 7663,
+        "recoveryPid": 7712,
+        "seed": "EXPECTED PROCESS DEATH; NOT A PASS"
+      },
+      {
+        "name": "INVALIDATED",
+        "tests": 1,
+        "log": "INVALIDATED-recover.log",
+        "seconds": 2.287,
+        "terminatedPid": 7756,
+        "recoveryPid": 7816,
+        "seed": "EXPECTED PROCESS DEATH; NOT A PASS"
+      },
+      {
+        "name": "DB_BEFORE_MARK",
+        "tests": 1,
+        "log": "DB_BEFORE_MARK-recover.log",
+        "seconds": 2.371,
+        "terminatedPid": 7860,
+        "recoveryPid": 7911,
+        "seed": "EXPECTED PROCESS DEATH; NOT A PASS"
+      },
+      {
+        "name": "DB_WRITTEN",
+        "tests": 1,
+        "log": "DB_WRITTEN-recover.log",
+        "seconds": 2.155,
+        "terminatedPid": 7954,
+        "recoveryPid": 8003,
+        "seed": "EXPECTED PROCESS DEATH; NOT A PASS"
+      },
+      {
+        "name": "PREFERENCES_APPLIED",
+        "tests": 1,
+        "log": "PREFERENCES_APPLIED-recover.log",
+        "seconds": 1.883,
+        "terminatedPid": 8046,
+        "recoveryPid": 8097,
+        "seed": "EXPECTED PROCESS DEATH; NOT A PASS"
+      },
+      {
+        "name": "ROLLING_BACK",
+        "tests": 1,
+        "log": "ROLLING_BACK-recover.log",
+        "seconds": 1.99,
+        "terminatedPid": 8146,
+        "recoveryPid": 8203,
+        "seed": "EXPECTED PROCESS DEATH; NOT A PASS"
+      },
+      {
+        "name": "COMPLETED",
+        "tests": 1,
+        "log": "COMPLETED-recover.log",
+        "seconds": 1.598,
+        "terminatedPid": 8249,
+        "recoveryPid": 8299,
+        "seed": "EXPECTED PROCESS DEATH; NOT A PASS"
+      },
+      {
+        "name": "Physical corrupt journal",
+        "tests": 1,
+        "log": "corrupt-journal-verify.log",
+        "seconds": 25.242,
+        "terminatedPid": 8341,
+        "recoveryPid": 8393,
+        "seed": "EXPECTED PROCESS DEATH; NOT A PASS",
+        "pidEvidence": "corrupt-marker.xml + runner-logcat.txt"
+      }
+    ],
+    "files": [
+      {
+        "file": "COMPLETED-recover.log",
+        "sha256": "612379A12F3ED3BD4EA92476EE5C2900A2D9E4B4B5D056079462D3AC0B74EF0F"
+      },
+      {
+        "file": "COMPLETED-seed.log",
+        "sha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1"
+      },
+      {
+        "file": "corrupt-journal-seed.log",
+        "sha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1"
+      },
+      {
+        "file": "corrupt-journal-verify.log",
+        "sha256": "7D65F1C2051B0072357D86A72D4F48F3E2EB942311A2C5EA2C6EFE42C3D23C8A"
+      },
+      {
+        "file": "corrupt-journal.fixture",
+        "sha256": "688AECD5B83209769CA8B74B8200B1ACEE8AE456C003AA4D236BD41FCA51A104"
+      },
+      {
+        "file": "corrupt-marker.xml",
+        "sha256": "43D4E2E6B9D4E726E181BF6146388B8E3CB3343969CFBA65BD330B6F8294CF4C"
+      },
+      {
+        "file": "DB_BEFORE_MARK-recover.log",
+        "sha256": "32588A8FEFCB3E4EDBBF2597E430754F2F6A19C89ECE64A617C80A51FD0977A8"
+      },
+      {
+        "file": "DB_BEFORE_MARK-seed.log",
+        "sha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1"
+      },
+      {
+        "file": "DB_WRITTEN-recover.log",
+        "sha256": "636C09470DF0467013D06F394892092CC1FB1D8A84B4A7D6D06D71D1F2BC16CE"
+      },
+      {
+        "file": "DB_WRITTEN-seed.log",
+        "sha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1"
+      },
+      {
+        "file": "INVALIDATED-recover.log",
+        "sha256": "42026776754FB46F8C6DD754B6ED646D6E6327915A692FC65567C2B447F314DA"
+      },
+      {
+        "file": "INVALIDATED-seed.log",
+        "sha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1"
+      },
+      {
+        "file": "PREFERENCES_APPLIED-recover.log",
+        "sha256": "447EF3F290108B81BF1A539006A4887E31D0A789547793B860973E01CDC640D8"
+      },
+      {
+        "file": "PREFERENCES_APPLIED-seed.log",
+        "sha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1"
+      },
+      {
+        "file": "PREPARING-recover.log",
+        "sha256": "F16074A6C37CB069B58EFCE0863FB40612AA0BF00DB38A3A06A35FE350197EE9"
+      },
+      {
+        "file": "PREPARING-seed.log",
+        "sha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1"
+      },
+      {
+        "file": "ROLLING_BACK-recover.log",
+        "sha256": "51D9C43E4D48FBBAFF0D4D44CE8F848C9AF8E5FB03BE858D4ECF4F7F00B96BB2"
+      },
+      {
+        "file": "ROLLING_BACK-seed.log",
+        "sha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1"
+      },
+      {
+        "file": "runner-logcat.txt",
+        "sha256": "883866EE04F72AECCD5D3500D045A899956778055571942B8BB8E9224D0890D7"
+      },
+      {
+        "file": "SNAPSHOT-recover.log",
+        "sha256": "06FD82E978A913E63D97928A0D67123FA938F9565C39BEF89E5642CD1C8D8B45"
+      },
+      {
+        "file": "SNAPSHOT-seed.log",
+        "sha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1"
+      },
+      {
+        "file": "ui-saf.log",
+        "sha256": "014A5CB4ED648F9D333A2BDD32B97F20DAB36A44E4E44AE9C221B17E8DCCF33B"
+      }
+    ],
+    "boundary": "Dedicated emulator OS process termination only. DEVICE UNVERIFIED; not power-loss durability."
+  },
+  "installedApks": [
+    {
+      "codeSha": "9a8c309ebd5b537c9fd6e6561022b55e49ad200e",
+      "serial": "emulator-5558",
+      "package": "com.mediahub.app",
+      "localPath": "D:\\deepseek_test\\MediaHub-pr18-agent-a\\app\\build\\outputs\\apk\\debug\\app-debug.apk",
+      "localSha256": "54CFDDEE6AEB385D572605A4A9BC15A54115E91EBF2D9D7720D61F7EE64DFDEB",
+      "installedPath": "/data/app/~~FIDoTbbUZ0cBQqmcux4xFw==/com.mediahub.app-vKDnOhK-uyYWRO8JDPS8fQ==/base.apk",
+      "installedSha256": "54CFDDEE6AEB385D572605A4A9BC15A54115E91EBF2D9D7720D61F7EE64DFDEB",
+      "matched": true
+    },
+    {
+      "codeSha": "9a8c309ebd5b537c9fd6e6561022b55e49ad200e",
+      "serial": "emulator-5558",
+      "package": "com.mediahub.app.test",
+      "localPath": "D:\\deepseek_test\\MediaHub-pr18-agent-a\\app\\build\\outputs\\apk\\androidTest\\debug\\app-debug-androidTest.apk",
+      "localSha256": "2D41557B16CBD91981085FBA2D857880DE2F4D0A950E2F8ABADF1E1436F61DA1",
+      "installedPath": "/data/app/~~EgODKGmJjWVBW26JALLN0Q==/com.mediahub.app.test-f2s4oJ8YPG9Fj5oCHgEWEQ==/base.apk",
+      "installedSha256": "2D41557B16CBD91981085FBA2D857880DE2F4D0A950E2F8ABADF1E1436F61DA1",
+      "matched": true
+    }
+  ],
+  "kdf": {
+    "rawTiming": "kdf-timing.txt",
+    "mainPulses": true,
+    "threadCpuSeconds": [
+      11.323275187,
+      11.115099705
+    ],
+    "iterations": 600000,
+    "tests": 1,
+    "failures": 0,
+    "elapsedSeconds": 24.564,
+    "wallSeconds": [
+      12.0530601,
+      12.391308
+    ],
+    "log": "kdf-diagnostic.log",
+    "pid": 8455,
+    "boundary": "Diagnostic only; no performance SLA or prompt JCA cancellation proof"
+  },
+  "retainedFailures": [
+    "full-checks.log: Agent A deliberately interrupted first full run before adding failing regressions",
+    "red-endpoint-order.log: first 3 failing regressions",
+    "red-endpoint-order-2.xml: 4 failing regressions before production fix",
+    "device/ui-saf.log: 1 failed UI invocation; saved hierarchy showed Messages ANR overlay; preserved, not erased by final success"
+  ],
+  "evidenceDirectory": "D:\\deepseek_test\\pr18-agent-a-evidence",
+  "boundaries": [
+    "No independent Agent C verdict yet",
+    "No merge or phase seal",
+    "Emulator process death is not power-loss durability",
+    "Corrupt journals and device-key failure require manual attention",
+    "Credential invalidation is irreversible",
+    "Orphan encrypted snapshot GC is not implemented",
+    "No cloud backup, new restore strategy, playback or provider feature expansion"
+  ]
+}

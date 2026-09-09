@@ -1,5 +1,12 @@
 # 变更记录（CHANGELOG）
 
+## [Unreleased — PR #18 Agent A integration] — 2026-09-09
+
+- 按原 SHA 接回 B 的三提交补丁，保留完整历史和审查边界。
+- 修复有效线路身份与 Room 持久化排序不一致的问题：先按 sortOrder 冻结身份，导入/导出拒绝歧义候选，旧不稳定保护计划保留日志并阻止自动重放。MERGE 异源进度隔离与替换凭据失效由四条新增回归约束，同源替换仍保留登录。
+- CI 追加 head/base/实际 checkout 清单及 XML/lint 产物归档，保留原门禁与 standalone JVM 测试，不增加重试或跳过。
+- A 实际全量为 772 tests、零失败/错误/跳过；原始产物、lint 差异、正式 SAF/进程终止的实际执行及早期失败见 [集成记录](docs/reviews/pr18-agent-a-integration-2026-09-09.md)。仍为 C REVIEW PENDING / DEVICE UNVERIFIED，未合并或阶段封板。
+
 ## [Unreleased — PR #18 Agent B review patch] — 2026-09-09
 
 - 本地备份导入/导出共用结构校验，补 LOCAL 描述符、完整 section/count、字段和记录上限、编码凭据参数拒绝、错误文案脱敏。
