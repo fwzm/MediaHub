@@ -19,6 +19,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Record validation revision
+        run: |
+          mkdir -p ci-validation
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          event = json.loads(pathlib.Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+          pr = event.get('pull_request', {})
+          revision = {
+              'checkoutSha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'eventSha': os.environ['GITHUB_SHA'],
+              'headSha': pr.get('head', {}).get('sha'),
+              'baseSha': pr.get('base', {}).get('sha'),
+              'runId': os.environ['GITHUB_RUN_ID'],
+              'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'],
+          }
+          pathlib.Path('ci-validation/revision.json').write_text(json.dumps(revision, indent=2) + '\n')
+          PY
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
@@ -47,9 +65,23 @@ jobs:
       # 测试 FAIL/TIMEOUT 时仍执行，workflow 被 concurrency 取消时不执行
       - name: Unit tests
         timeout-minutes: 15
-        run: ./gradlew testDebugUnitTest --no-daemon
+        run: ./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon
 
       - name: Lint
         if: ${{ !cancelled() }}
         timeout-minutes: 15
         run: ./gradlew lintDebug --no-daemon
+
+      # Preserve failures as well as passes; this does not retry or change any gate.
+      - name: Upload validation reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-validation-${{ github.sha }}
+          path: |
+            ci-validation/revision.json
+            **/build/test-results/**/TEST-*.xml
+            **/build/reports/lint-results-debug.xml
+            **/build/reports/lint-results-debug.html
+          if-no-files-found: error
+          retention-days: 30

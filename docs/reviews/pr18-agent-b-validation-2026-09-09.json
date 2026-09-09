@@ -1,0 +1,337 @@
+{
+  "date": "2026-09-09",
+  "scope": "PR18 local backup and restore",
+  "originalHead": "8798b1381f033533ed2b50b144468b7049789c4e",
+  "base": "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1",
+  "productionCommit": "7e314c64cd209fdccb7ce211b8864bea767881e4",
+  "instrumentationCommit": "337c626331dcd7552d13d85e76c0c9773883af4d",
+  "originalHeadVerdict": "PATCH REQUIRED",
+  "patchExternalReview": "PENDING",
+  "patchIntegratedIntoPr18": false,
+  "newHeadCi": "PENDING",
+  "physicalDevice": "DEVICE UNVERIFIED",
+  "fullCommand": "gradlew.bat testDebugUnitTest :core:model:test :provider:api:test :metadata:test assembleDebug lintDebug :app:assembleDebugAndroidTest --rerun-tasks --continue --no-parallel --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8' '-Pkotlin.compiler.execution.strategy=in-process' --no-build-cache --no-daemon --console=plain",
+  "fullBuild": {
+    "exitCode": 0,
+    "elapsedSeconds": 952,
+    "actionable": 1197,
+    "executed": 1197,
+    "log": "final-full-checks-2.log",
+    "logSha256": "C68B6A548534D43A6BCBBBF48547F26B0E9610E50FBFADE5134930558D21A283"
+  },
+  "unit": {
+    "tests": 768.0,
+    "failures": 0.0,
+    "errors": 0.0,
+    "skipped": 0.0,
+    "backupTests": 140,
+    "executedTasks": 22,
+    "noSourceTasks": [
+      ":player:mpv:testDebugUnitTest",
+      ":provider:webdav:testDebugUnitTest",
+      ":metadata:test"
+    ],
+    "xmlFiles": 92,
+    "modules": [
+      {
+        "module": "app",
+        "tests": 8.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/common",
+        "tests": 67.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/database",
+        "tests": 9.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/logging",
+        "tests": 12.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/model",
+        "tests": 35.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/network",
+        "tests": 14.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/security",
+        "tests": 17.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "core/ui",
+        "tests": 4.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/detail",
+        "tests": 37.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/home",
+        "tests": 15.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/library",
+        "tests": 44.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/player",
+        "tests": 33.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/search",
+        "tests": 27.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/server",
+        "tests": 21.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "feature/settings",
+        "tests": 100.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "player/compatibility",
+        "tests": 9.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "player/engine",
+        "tests": 41.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "provider/api",
+        "tests": 8.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "provider/base",
+        "tests": 4.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "provider/emby",
+        "tests": 164.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "provider/jellyfin",
+        "tests": 88.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      },
+      {
+        "module": "provider/local",
+        "tests": 11.0,
+        "failures": 0.0,
+        "errors": 0.0,
+        "skipped": 0.0
+      }
+    ],
+    "sourceSummarySha256": "8CB829A9F41C08AF8F31039B2C8C5D39811643270B20A580A085DEE97AAE4377"
+  },
+  "lint": {
+    "xmlReports": 22,
+    "errorsAndFatals": 0,
+    "warningEntries": 19,
+    "warningEntriesMayIncludeDuplicates": true
+  },
+  "installedApks": [
+    {
+      "package": "com.mediahub.app",
+      "deviceSha256": "f0217a87ee583e4bdb29351acaff2ef38ec68d0569a62d44c42e4df4cc29ca33"
+    },
+    {
+      "package": "com.mediahub.app.test",
+      "deviceSha256": "0a68f7b22dd09fd1eb588606d1be2aa79208470b47e49649421c35e771edcfa4"
+    }
+  ],
+  "emulator": {
+    "name": "Codex_PR18_Review_36",
+    "serial": "emulator-5556",
+    "api": 36,
+    "isolated": true,
+    "physicalDeviceUsed": false,
+    "script": "scripts/verify-backup-restore.ps1",
+    "scriptExitCode": 0,
+    "uiTests": 1,
+    "uiFailures": 0,
+    "uiSeconds": 137.893,
+    "checkpoints": [
+      {
+        "checkpoint": "SNAPSHOT",
+        "terminatedPid": 8522,
+        "recoveryPid": 8565,
+        "tests": 1,
+        "failures": 0,
+        "seedLog": "final-device-3/SNAPSHOT-seed.log",
+        "recoveryLog": "final-device-3/SNAPSHOT-recover.log",
+        "seedSha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1",
+        "recoverySha256": "A0F729E3112866FDCA775EAA11C8F09ECE9556FC1158CF897E25267BEA37C8E5"
+      },
+      {
+        "checkpoint": "PREPARING",
+        "terminatedPid": 8607,
+        "recoveryPid": 8654,
+        "tests": 1,
+        "failures": 0,
+        "seedLog": "final-device-3/PREPARING-seed.log",
+        "recoveryLog": "final-device-3/PREPARING-recover.log",
+        "seedSha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1",
+        "recoverySha256": "79C900974A948F75CD86FFD53072F29C8EE97C4CE8C88068D4CF728B932C68A9"
+      },
+      {
+        "checkpoint": "INVALIDATED",
+        "terminatedPid": 8696,
+        "recoveryPid": 8740,
+        "tests": 1,
+        "failures": 0,
+        "seedLog": "final-device-3/INVALIDATED-seed.log",
+        "recoveryLog": "final-device-3/INVALIDATED-recover.log",
+        "seedSha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1",
+        "recoverySha256": "53620A686E758C8E129C6297BF979A5A73A1DA981A37B0E3C249A409388E1163"
+      },
+      {
+        "checkpoint": "DB_BEFORE_MARK",
+        "terminatedPid": 8781,
+        "recoveryPid": 8827,
+        "tests": 1,
+        "failures": 0,
+        "seedLog": "final-device-3/DB_BEFORE_MARK-seed.log",
+        "recoveryLog": "final-device-3/DB_BEFORE_MARK-recover.log",
+        "seedSha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1",
+        "recoverySha256": "6C1A74EF824C369E973783E0A11A8D97538640BDD818828DE0AEB1D4493A732D"
+      },
+      {
+        "checkpoint": "DB_WRITTEN",
+        "terminatedPid": 8868,
+        "recoveryPid": 8912,
+        "tests": 1,
+        "failures": 0,
+        "seedLog": "final-device-3/DB_WRITTEN-seed.log",
+        "recoveryLog": "final-device-3/DB_WRITTEN-recover.log",
+        "seedSha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1",
+        "recoverySha256": "DB4647F65118C2A1140C80993168C38419B561C457F14E96246513C73EC18127"
+      },
+      {
+        "checkpoint": "PREFERENCES_APPLIED",
+        "terminatedPid": 8952,
+        "recoveryPid": 8998,
+        "tests": 1,
+        "failures": 0,
+        "seedLog": "final-device-3/PREFERENCES_APPLIED-seed.log",
+        "recoveryLog": "final-device-3/PREFERENCES_APPLIED-recover.log",
+        "seedSha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1",
+        "recoverySha256": "D8966750168E9B780BB5DA5152EF58596212EDC7D781ADD48B3FFB191D63D92F"
+      },
+      {
+        "checkpoint": "ROLLING_BACK",
+        "terminatedPid": 9040,
+        "recoveryPid": 9084,
+        "tests": 1,
+        "failures": 0,
+        "seedLog": "final-device-3/ROLLING_BACK-seed.log",
+        "recoveryLog": "final-device-3/ROLLING_BACK-recover.log",
+        "seedSha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1",
+        "recoverySha256": "9B0EF8BB50CEAB5271ADE65C7FBF1AE377CA403F8E6AE469358BDE12B4B512D4"
+      },
+      {
+        "checkpoint": "COMPLETED",
+        "terminatedPid": 9124,
+        "recoveryPid": 9188,
+        "tests": 1,
+        "failures": 0,
+        "seedLog": "final-device-3/COMPLETED-seed.log",
+        "recoveryLog": "final-device-3/COMPLETED-recover.log",
+        "seedSha256": "86F389299EE170E87215A9FBEA139561E3909D1A4658514E4BD4D16F8526F9E1",
+        "recoverySha256": "0E9579B8B2B8C78C2F6FE0A4811BF75225079EFDC674A61EC56DFE30CDDFFDE3"
+      }
+    ],
+    "corruptJournal": {
+      "tests": 1,
+      "failures": 0,
+      "terminatedPid": 9228,
+      "recoveryPid": 9277,
+      "identityEvidence": "final-instrument-runner-logcat.txt plus persisted task marker",
+      "log": "final-device-3/corrupt-journal-verify.log",
+      "logSha256": "492CB20AB0AE9D2201338434B03EAB3D1A313D86C351BD0E1298F6423C16EF60"
+    },
+    "expectedSeedProcessCrashes": 9,
+    "successfulAcceptanceInvocations": 10
+  },
+  "cryptoDiagnostic": {
+    "tests": 1,
+    "failures": 0,
+    "pid": 9358,
+    "provider": "BC",
+    "iterations": 600000,
+    "firstWallSeconds": 5.839489296,
+    "firstThreadCpuSeconds": 4.285236311,
+    "secondWallSeconds": 5.109766904,
+    "secondThreadCpuSeconds": 3.749824353,
+    "mainPulseDuringAndAfter": true,
+    "performanceSlaClaim": false,
+    "log": "backup-crypto-timing-final.txt",
+    "logSha256": "F5A72412E1B5C3C4647E8FD57E0DAB6D8BC7B5ED8F04905A48AAF43C7CCB4CF6"
+  }
+}

@@ -33,6 +33,11 @@ kotlin {
 dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:database"))
+    implementation(project(":core:common"))
+    implementation(project(":core:security"))
+    implementation(project(":provider:api"))
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
@@ -48,4 +53,11 @@ dependencies {
     ksp(libs.hilt.compiler)
 
     implementation(libs.kotlinx.coroutines.android)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(project(":core:logging"))
+    testImplementation(project(":provider:emby"))
+    testImplementation(project(":provider:jellyfin"))
 }

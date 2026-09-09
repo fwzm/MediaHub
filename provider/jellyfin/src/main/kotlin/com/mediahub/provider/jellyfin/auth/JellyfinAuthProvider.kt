@@ -21,8 +21,6 @@ import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 
 /**
@@ -53,11 +51,15 @@ class JellyfinAuthProvider(
     private val logger: Logger,
 ) : MediaAuthProvider {
 
+    private val authenticationLease = tokenStore.authenticationLease(server.id)
+
     override suspend fun authenticate(credentials: Credentials): AuthResult {
         val userPassword = credentials as? Credentials.UsernamePassword
             ?: return AuthResult.Failure(
                 ProviderException.AuthFailed(server.id, "不支持的凭据类型")
             )
+        val attempt = tokenStore.beginAuthentication(authenticationLease)
+            ?: return AuthResult.Failure(ProviderException.AuthFailed(server.id, "媒体源已更新，请重新打开登录"))
         return try {
             val result = api.authenticate(userPassword.username, userPassword.password)
             val accessToken = result.accessToken
@@ -71,10 +73,9 @@ class JellyfinAuthProvider(
                 return AuthResult.Failure(ProviderException.Parse(server.id, null))
             }
 
-            // 凭据生命周期一致性：两次持久化事务式回滚——任一失败（含取消）都把
-            // Token + Session 一起清掉（clearLocalSession 为 NonCancellable），绝不留孤儿 Token
-            try {
-                tokenStore.saveTokens(server.id, StoredToken(accessToken = accessToken))
+            // The epoch check, both writes and cancellation cleanup share the invalidation mutex.
+            val committed = tokenStore.commitAuthentication(
+                attempt, StoredToken(accessToken = accessToken), saveSession = {
                 sessionStore.save(
                     JellyfinSession(
                         localServerId = server.id,
@@ -83,13 +84,9 @@ class JellyfinAuthProvider(
                         userName = userName.orEmpty(),
                     )
                 )
-            } catch (e: CancellationException) {
-                clearLocalSession()
-                throw e
-            } catch (e: Exception) {
-                clearLocalSession()
-                throw e
-            }
+                }, clearSession = { sessionStore.clear(server.id) },
+            )
+            if (!committed) return AuthResult.Failure(ProviderException.AuthFailed(server.id, "登录已失效，请重新登录"))
             logger.i(LogTag.AUTH, "Jellyfin 登录成功 serverId=${server.id} remoteServerId=$remoteServerId")
             AuthResult.Success(
                 MediaUser(serverId = server.id, userId = userId, displayName = userName.orEmpty())
@@ -116,8 +113,10 @@ class JellyfinAuthProvider(
      * 4. 一致 → GET /Users/{userId}（Authorization 内嵌 Token）验证。
      */
     override suspend fun restoreSession(): AuthSessionState {
+        val attempt = tokenStore.beginAuthentication(authenticationLease) ?: return AuthSessionState.SignedOut
         val tokens = tokenStore.readTokens(server.id) ?: return AuthSessionState.SignedOut
         val session = sessionStore.read(server.id) ?: return AuthSessionState.SignedOut
+        if (!tokenStore.isAuthenticationCurrent(attempt)) return AuthSessionState.SignedOut
 
         // 服务器身份校验：无 Token 请求，绝不对错误服务器发送旧 Token
         val currentRemoteServerId = try {
@@ -143,6 +142,7 @@ class JellyfinAuthProvider(
             return AuthSessionState.Error(AuthSessionErrorKind.UNKNOWN, "验证失败：${e.message}")
         }
 
+        if (!tokenStore.isAuthenticationCurrent(attempt)) return AuthSessionState.SignedOut
         if (currentRemoteServerId.isNullOrBlank()) {
             return AuthSessionState.Error(
                 AuthSessionErrorKind.INVALID_RESPONSE,
@@ -162,6 +162,7 @@ class JellyfinAuthProvider(
 
         return try {
             val user = api.getCurrentUser(tokens.accessToken, session.userId)
+            if (!tokenStore.isAuthenticationCurrent(attempt)) return AuthSessionState.SignedOut
             AuthSessionState.Authenticated(
                 MediaUser(serverId = server.id, userId = session.userId, displayName = user.name.orEmpty())
             )
@@ -170,7 +171,7 @@ class JellyfinAuthProvider(
             throw e
         } catch (e: ApiException) {
             // 仅 401 清本地会话；403 = 访问策略拒绝（如 remote access disabled），保留会话
-            authErrorFromHttp(e, preserveSession = e.statusCode != 401)
+            authErrorFromHttp(e, preserveSession = e.statusCode != 401, attempt)
         } catch (e: SerializationException) {
             // 协议异常 ≠ 认证失效：保留会话
             AuthSessionState.Error(AuthSessionErrorKind.INVALID_RESPONSE, "服务器响应异常，请稍后重试")
@@ -186,9 +187,12 @@ class JellyfinAuthProvider(
      * 在 finally + NonCancellable 中执行——cancellation 原样传播，但凭据绝不残留。
      */
     override suspend fun logout() {
+        val attempt = tokenStore.beginAuthentication(authenticationLease) ?: return
+        var cancellation: CancellationException? = null
         try {
             val tokens = tokenStore.readTokens(server.id)
             val session = sessionStore.read(server.id)
+            if (!tokenStore.isAuthenticationCurrent(attempt)) return
             if (tokens != null && session != null) {
                 // 服务端撤销：best-effort，且仅当服务器身份一致（防把旧 Token 发给错误服务器）
                 val serverIdMatches = try {
@@ -198,7 +202,7 @@ class JellyfinAuthProvider(
                 } catch (e: Exception) {
                     null
                 } == session.remoteServerId
-                if (serverIdMatches) {
+                if (serverIdMatches && tokenStore.isAuthenticationCurrent(attempt)) {
                     try {
                         api.logout(tokens.accessToken)
                     } catch (e: CancellationException) {
@@ -208,17 +212,19 @@ class JellyfinAuthProvider(
                     }
                 }
             }
+        } catch (e: CancellationException) {
+            cancellation = e
+            throw e
         } finally {
-            withContext(NonCancellable) {
-                tokenStore.clear(server.id)
-                sessionStore.clear(server.id)
-            }
-            logger.i(LogTag.AUTH, "Jellyfin 已登出 serverId=${server.id}")
+            try { tokenStore.clearAuthenticationIfCurrent(attempt) { sessionStore.clear(server.id) } }
+            catch (cleanup: Exception) { cancellation?.addSuppressed(cleanup) ?: throw cleanup }
         }
     }
 
     override suspend fun currentUser(): MediaUser? {
+        val attempt = tokenStore.beginAuthentication(authenticationLease) ?: return null
         val session = sessionStore.read(server.id) ?: return null
+        if (!tokenStore.isAuthenticationCurrent(attempt)) return null
         return MediaUser(
             serverId = server.id,
             userId = session.userId,
@@ -230,20 +236,18 @@ class JellyfinAuthProvider(
     private suspend fun authErrorFromHttp(
         e: ApiException,
         preserveSession: Boolean,
+        attempt: TokenStore.AuthenticationAttempt,
     ): AuthSessionState {
-        if (!preserveSession) clearLocalSession()
+        if (!tokenStore.isAuthenticationCurrent(attempt)) return AuthSessionState.SignedOut
+        if (!preserveSession && !tokenStore.clearAuthenticationIfCurrent(attempt) { sessionStore.clear(server.id) }) {
+            return AuthSessionState.SignedOut
+        }
         return when {
             e.statusCode == 401 -> AuthSessionState.Error(AuthSessionErrorKind.SESSION_EXPIRED, "登录已失效，请重新登录")
             e.statusCode == 403 -> AuthSessionState.Error(AuthSessionErrorKind.FORBIDDEN, "没有访问权限（403）")
             e.statusCode in 500..599 -> AuthSessionState.Error(AuthSessionErrorKind.SERVER_ERROR, "服务器错误（HTTP ${e.statusCode}）")
             else -> AuthSessionState.Error(AuthSessionErrorKind.UNKNOWN, "验证失败（HTTP ${e.statusCode}）")
         }
-    }
-
-    /** 本地凭据清理：NonCancellable——取消期间也不得残留凭据。 */
-    private suspend fun clearLocalSession() = withContext(NonCancellable) {
-        tokenStore.clear(server.id)
-        sessionStore.clear(server.id)
     }
 
     private fun networkKind(e: IOException): AuthSessionErrorKind = when (e) {

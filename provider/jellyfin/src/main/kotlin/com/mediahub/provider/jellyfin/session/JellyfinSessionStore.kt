@@ -23,7 +23,10 @@ class JellyfinSessionStore(private val storage: Storage) {
         private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         override fun get(key: String): String? = prefs.getString(key, null)
         override fun put(key: String, value: String) = prefs.edit().putString(key, value).apply()
-        override fun remove(key: String) = prefs.edit().remove(key).apply()
+        /** Returning confirms durable invalidation; persistence failure must stop identity replacement. */
+        override fun remove(key: String) {
+            check(prefs.edit().remove(key).commit()) { "Jellyfin 会话清理未能持久化" }
+        }
 
         private companion object {
             const val PREFS_NAME = "mediahub_jellyfin_sessions"
