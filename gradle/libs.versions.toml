@@ -19,6 +19,9 @@ kotlinxSerialization = "1.7.3"
 coil = "2.7.0"
 junit = "4.13.2"
 robolectric = "4.14.1"
+androidxTestRunner = "1.6.2"
+androidxTestJunit = "1.2.1"
+uiAutomator = "2.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -67,6 +70,9 @@ coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coi
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestJunit" }
+androidx-test-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiAutomator" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
