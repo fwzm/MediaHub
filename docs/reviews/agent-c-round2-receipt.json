@@ -1,0 +1,97 @@
+{
+  "schema": "agent-c-receipt/1",
+  "agent": "C",
+  "branch": "agent-c/batch-2026-09-13",
+  "deliveredCommit": "6b1f1dea8a45ecb39a29e760519007a2ea61799c",
+  "deliveredCommitSubject": "test(round2): R1 layered F-C1-1 regression (red), R3 seeded interleaving, R5 redaction red, R2 hardened fixture",
+  "remote": "origin",
+  "pushed": "c75ecd0..6b1f1de",
+  "reviewedHead": "82a38abce4e761c002dde6d8c9420176e977f57c",
+  "pr16CorrectionBranch": {
+    "name": "agent-c/pr16-verify-2026-09-13",
+    "tip": "45afb870415103e4070d3d90188c07885b60fa4d",
+    "changedThisRound": false
+  },
+  "deletions": [
+    "app/src/androidTest/kotlin/com/mediahub/app/backup/BackupUserFlowHarmlessTest.kt (superseded by the non-overwriting fixture; its name did not match its behaviour)"
+  ],
+  "files": [
+    {
+      "path": "app/src/androidTest/kotlin/com/mediahub/app/backup/BackupUserFlowNonOverwritingDeviceTest.kt",
+      "bytes": 20492,
+      "sha256": "2d5a9b359f96f1a5d87bc246305135cf28bf0faeee80aa87d7dd50295428eec3"
+    },
+    {
+      "path": "core/network/src/test/kotlin/com/mediahub/core/network/EndpointTestServiceRedactionTest.kt",
+      "bytes": 2405,
+      "sha256": "2ea4df1a415927e86c29ba6d19f229dda8ca0389ea54acabf11ccc2089d4fcd4"
+    },
+    {
+      "path": "provider/emby/src/test/kotlin/com/mediahub/provider/emby/EmbyIdentityGuardFailureLayerTest.kt",
+      "bytes": 9950,
+      "sha256": "818a027ae7bf37f117c5b3867862eede7806e67431a6c4f50e16ccd509e13650"
+    },
+    {
+      "path": "provider/emby/src/test/kotlin/com/mediahub/provider/emby/EmbyAuthenticationInterleavingStressTest.kt",
+      "bytes": 8512,
+      "sha256": "69a66392d51eb80d8ed9b1cdb4516a0a9c13b75cd6966b6e01f63c1ca51c1710"
+    },
+    {
+      "path": "provider/jellyfin/src/test/kotlin/com/mediahub/provider/jellyfin/JellyfinIdentityGuardFailureLayerTest.kt",
+      "bytes": 9997,
+      "sha256": "0dc396103ac15c45679889dab6bce90f84ba705baed847701c134014c7a7d199"
+    },
+    {
+      "path": "docs/reviews/agent-c-round2-2026-09-13.md",
+      "bytes": 15828,
+      "sha256": "40f94073e36d975305a315abf2ae86b844ab99a0576e9328c51a0af5c431982c"
+    },
+    {
+      "path": "docs/reviews/agent-c-round2-2026-09-13.json",
+      "bytes": 10878,
+      "sha256": "e05d4fbcc51857ac0bf5134f923bc3f6b8ed939ec9067fa2822e460468c0a4c0"
+    },
+    {
+      "path": "docs/reviews/agent-c-fix-taskpack-f-c1-1-2026-09-13.md",
+      "bytes": 2867,
+      "sha256": "2893801c3684aa8e74388dd8ecf9045cad96dc4c73cdc0342107933ccd0535f9"
+    },
+    {
+      "path": "docs/reviews/agent-c-batch-2026-09-13.md",
+      "bytes": 37362,
+      "sha256": "4c7d31551f846e9f6068f08ddfc57241b7a0dc2db3c8eab1a53b1ef7e38b27d0"
+    },
+    {
+      "path": "docs/reviews/agent-c-batch-2026-09-13.json",
+      "bytes": 21285,
+      "sha256": "c854b16cb5f029a13d1419f501f0af20e1b7c3318852e926878d31ad5695009c"
+    },
+    {
+      "path": "docs/reviews/agent-c-findings-2026-09-13.md",
+      "bytes": 14666,
+      "sha256": "97c0b95ce4bd8853300dde2f611c7afd8102f794dfabeae8142c6c30015220f8"
+    },
+    {
+      "path": "scripts/agent-c/verify-backup-restore-c.ps1",
+      "bytes": 4633,
+      "sha256": "8aba65a65ceb6f25d8e5dc7c5160cd792cc2b609c2b2fd5d382f94e3b7b766e8"
+    }
+  ],
+  "evidenceDir": "D:\\deepseek_test\\agent-c-evidence",
+  "evidenceXml": [
+    "r1-r3-r5/r1-emby-layer.xml",
+    "r1-r3-r5/r1-jellyfin-layer.xml",
+    "r1-r3-r5/r3-emby-stress.xml",
+    "r1-r3-r5/r5-redaction.xml",
+    "c2-ci-artifact/ (772 tests, 92 xml)",
+    "r7-pr10/api32/, r7-pr10/api36/"
+  ],
+  "note": "Generated AFTER the delivery commit and records that commit SHA. The receipt own commit is separate and is deliberately not referenced inside this file, so no self-referential SHA claim exists.",
+  "notRun": {
+    "R4": "NOT_STARTED",
+    "R5b C7": "NOT_STARTED",
+    "R6": "fixtures NOT_STARTED (B delivery absent)",
+    "R8": "NOT_STARTED",
+    "destructiveDevice": "NOT_RUN_POLICY"
+  }
+}
