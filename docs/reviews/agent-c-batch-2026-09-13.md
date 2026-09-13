@@ -205,7 +205,7 @@ C 逐模块比对（B 在 `7e314c64` 的本机结果 vs C 在 CI 产物 `5acd9ba
 
 ## 4. C3 — 正式 SAF / 真实进程终止与恢复断言补强
 
-**状态：NOT EXECUTED THIS SESSION（环境探测完成，脚本就绪，未运行破坏性用例）。**
+**状态：PARTIALLY EXECUTED ON THE PHYSICAL DEVICE（用户明确授权真机；仅执行无害子集；破坏性套件未运行）。**
 
 环境探测（实测）：
 - 可用系统镜像：`android-36/google_apis_playstore/x86_64`、`android-32/google_apis/x86_64`；platform `android-36` 已安装。
@@ -214,9 +214,42 @@ C 逐模块比对（B 在 `7e314c64` 的本机结果 vs C 在 CI 产物 `5acd9ba
   即 PR #16 证据所用的真机）。任何缺少 `-s` 的 adb 命令都可能操作该真机。
   因此 C 交付的脚本**强制要求显式 `-Serial`**，并拒绝在没有该参数时运行。
 
-本轮未执行的原因（如实记录）：未创建 C 专属 API 36 AVD，也未运行 `BackupUserFlowTest` 与 8 个真实终止点。
-工具与恢复点已备好：`scripts/agent-c/verify-backup-restore-c.ps1`（参数校验、显式 serial、失败退出码、清理）。
-C3 计划补强的四项证据缺口（forward 路径逐字段比较、损坏日志全凭据存储比对、线路排序/歧义/旧保护计划、
+**用户本轮指令**："有 usb 链接手机，可以通过 adb 操作，不必开虚拟安卓机"。据此在**真机**（serial 123e243f，Xiaomi 14 Ultra，
+24031PN0DC，Android 16 / SDK 36，ro.hardware=qcom）上执行；用户明确选择"**只跑无害子集**"，
+因此**未运行** 8 个真实终止点、未注入损坏日志、未执行确认后的 REPLACE_SELECTED 恢复。
+
+安装安全前提（C 实测，非假设）：
+- 真机已装 com.mediahub.app（versionName 0.1.0-alpha.1）**且含真实数据**（databases/mediahub.db、shared_prefs）。
+- 安装前用 apksigner 比对签名：已装 base.apk 与本轮构建 app-debug.apk 的签名证书 **SHA-256 完全一致**
+  （ca92e12753d1e55868c8fb5a9e942d67a407032ad8d1ce949aa94ad53c953a87，CN=Android Debug），
+  故用 adb install -r **保留数据**替换，**全程未 uninstall**。
+- 安装后复核：databases、shared_prefs 仍在；测试结束后 /sdcard/Download 无任何 MediaHub-agent-* 残留；
+  用户数据未被本测试改写。
+
+C 新增的无害子集测试（C 自有 delta，位于 app/src/androidTest）：
+BackupUserFlowHarmlessTest —— 覆盖"取消不产生文件 / 实际保存 / 自解密与真实 appVersion / 错误密码零写入 /
+预览零写入 / 未确认替换禁用且零写入"，并在 **确认替换之前显式停止**；偏好只读，不做写入。
+
+实际执行结果（3 轮，均在真机，日志见 agent-c-evidence/c3/）：
+
+| 轮次 | 结果 | 结论 |
+| --- | --- | --- |
+| run 1 | 失败于首个选择器 DESC=设置 | 真机 logcat 实证 **OEM 拒绝后台启动 Activity**：E/ActivityTaskManager: "Abort background activity starts from 10563"。属**设备/OEM 限制**，不是产品缺陷 |
+| run 2 | 失败于"MainActivity 必须在前台" | 实证 am instrument 会重启目标进程，预置的 Activity 不存活（环境/夹具问题） |
+| run 3 | **通过应用侧全链**，失败于系统文件选择器导航 | 见下 |
+
+**run 3 的正面结果（真实产品行为）**：
+- 应用经 UiAutomation shell 启动后进入正式页面；设置 → 同步与备份 → 输入导出密码 → 触发导出全部成功；
+- **SAF appeared=true elapsedMs=4949** —— 生产导出路径在真机上**真实拉起了系统 SAF**（约 4.9 s）。
+- 随后失败于 chooseDownloads()：在 HyperOS 的文件选择器里找不到 roots_list 内的"下载/Downloads"根节点
+  （TEXT=(?i)^(downloads|下载)$）。这是**系统 UI 布局差异**，与 AOSP 模拟器不同，属环境/夹具问题，非产品缺陷。
+- 因此"取消不产生文件 / 实际保存 / 自解密 / 错误密码零写入 / 预览零写入 / 未确认替换零写入"
+  这六项**仍未取得真机通过证据**。
+
+**未执行**：8 个真实终止点、物理 XML 损坏分支、确认后的数据与偏好还原（按用户选择）。
+**工具**：scripts/agent-c/verify-backup-restore-c.ps1（强制显式 -Serial；拒绝非模拟器与 A/B 的 AVD；
+smoke 实测：缺失参数失败、未知 serial 拒绝、物理序列号在模拟器检查处拒绝）。
+**C3 四项证据缺口**（forward 路径逐字段比较、损坏日志全凭据存储比对、线路排序/歧义/旧保护计划、
 重复 callback/页面重建/策略变更/失败后重试）**尚未落地为测试**，见 C11 的下一批任务。
 
 ## 5. C4 — 共享认证、旧请求与首页身份的并发回归

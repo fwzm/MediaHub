@@ -184,8 +184,12 @@
       "javaHome": "C:\\Program Files\\Java\\jdk-21 (per-process only)",
       "log": "D:\\deepseek_test\\agent-c-evidence\\c2-pr18\\pr18-gate-console.log",
       "meta": "D:\\deepseek_test\\agent-c-evidence\\c2-pr18\\pr18-gate-meta.json",
-      "status": "IN PROGRESS / NOT COMPLETED WITHIN THIS SESSION - see pr18-gate-meta.json for the final exit code",
-      "authoritativeSubstitute": "CI artifact audit above (same frozen tree)"
+      "status": "COMPLETED - exit code 0, BUILD SUCCESSFUL in 49m 7s (2947.7s), 1197 actionable tasks all executed",
+      "endUtc": "2026-09-13T10:58:20.8296884Z",
+      "sourceDirtyAfter": false,
+      "result": { "tests": 772, "failures": 0, "errors": 0, "skipped": 0, "testXml": 92, "byTask": { "testDebugUnitTest": 729, "test": 43 }, "localUniqueCaseIds": 772, "ciUniqueCaseIds": 772, "caseIdSetDifferences": 0, "caseIdSetStrictlyEqualToCI": true },
+      "apkSha256": { "app-debug.apk": "54CFDDEE6AEB385D572605A4A9BC15A54115E91EBF2D9D7720D61F7EE64DFDEB", "app-debug-androidTest.apk": "2D41557B16CBD91981085FBA2D857880DE2F4D0A950E2F8ABADF1E1436F61DA1" },
+      "note": "Independent local re-run on the frozen head reproduces the CI artifact exactly: same per-task counts AND a strictly identical sorted unique test-id set (0 differences). APK hashes above are for the ORIGINAL head, before the C test file was added (delta recorded separately)."
     },
     "buildWarningsFoundByC": [
       {
@@ -205,7 +209,19 @@
     ]
   },
   "c3": {
-    "status": "NOT_EXECUTED_THIS_SESSION",
+    "status": "PARTIALLY_EXECUTED_ON_PHYSICAL_DEVICE_ONLY_HARMLESS_SUBSET",
+    "authorization": "user explicitly instructed to use the USB-connected phone via adb instead of an emulator, and explicitly chose the harmless subset",
+    "device": { "serial": "123e243f", "model": "24031PN0DC", "android": "16", "sdk": 36, "hardware": "qcom", "physical": true },
+    "installSafety": { "installedPackage": "com.mediahub.app", "installedVersionName": "0.1.0-alpha.1", "installedHadRealData": true, "signatureMatch": "ca92e12753d1e55868c8fb5a9e942d67a407032ad8d1ce949aa94ad53c953a87 (identical installed vs C-built)", "installedWith": "adb install -r (data preserved)", "uninstallUsed": false, "dataIntactAfter": true, "leftoverTestFiles": 0 },
+    "cTestAdded": "app/src/androidTest/kotlin/com/mediahub/app/backup/BackupUserFlowHarmlessTest.kt (stops before the confirmed replace; preferences read-only)",
+    "runs": [
+      { "run": 1, "outcome": "FAILED", "at": "first selector DESC=设置", "cause": "OEM restriction: E/ActivityTaskManager: Abort background activity starts from 10563", "classification": "device/OEM environment issue, not a product defect" },
+      { "run": 2, "outcome": "FAILED", "at": "MainActivity foreground assertion", "cause": "am instrument restarts the target process, so a pre-launched activity does not survive; the intent also cannot be started from the app uid", "classification": "test-harness/environment issue" },
+      { "run": 3, "outcome": "PARTIAL (app-side chain passed, system picker navigation failed)", "passed": ["app reached the real Settings screen via the UiAutomation shell launch", "设置 -> 同步与备份 -> export password -> export trigger", "SAF appeared=true elapsedMs=4949 (the production export path really launched the system SAF on a physical device)"], "failedAt": "chooseDownloads(): the 下载/Downloads root inside roots_list is absent in the HyperOS document picker", "classification": "system UI layout difference (environment/fixture), not a product defect" }
+    ],
+    "scenariosWithDeviceEvidence": [],
+    "scenariosStillUnprovenOnDevice": ["cancel leaves no file", "real save produces a file", "self-decrypt with real appVersion", "wrong password zero writes", "preview zero writes", "unconfirmed replace disabled and zero writes"],
+    "notExecuted": ["8 real termination points", "physical XML corruption branch", "confirmed replace data/preference restoration"],
     "environmentProbe": {
       "systemImages": [
         "android-36/google_apis_playstore/x86_64",
@@ -226,11 +242,11 @@
     "toolDelivered": "scripts/agent-c/verify-backup-restore-c.ps1 (reuses A helper; requires explicit -Serial; refuses non-emulator and A/B AVDs)",
     "toolSmokeTest": "PARSE OK; unknown serial refused; physical serial 123e243f refused at the emulator check (exit 94)",
     "notDone": [
-      "C-owned API 36 AVD",
-      "BackupUserFlowTest SAF chain",
+      "harmless-subset scenarios still lack device pass evidence (blocked by HyperOS document-picker navigation)",
       "8 real termination points",
       "physical journal corruption branch",
-      "four assertion-hardening gaps A-D"
+      "four assertion-hardening gaps A-D",
+      "destructive suite stays NOT_EXECUTED by explicit user choice"
     ]
   },
   "c4": {
