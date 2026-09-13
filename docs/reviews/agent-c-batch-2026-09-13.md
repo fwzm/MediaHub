@@ -103,7 +103,7 @@
   身份随之计算（`:235-241`），与 DAO 顺序一致。
 - **并列优先级**：`BackupSerializer.hasUnambiguousEndpointIdentity` 取候选集（有 primary 则 primary，否则全部 enabled）中
   `sortOrder` 最小者，要求其规范化地址 `distinct().size <= 1`（`BackupSerializer.kt:203-210`）。
-  C 独立推导：DAO 只保证按 sortOrder 排序、并列顺序未定义，因此"身份确定"的充要条件正是"最小 sortOrder 组的规范化地址唯一"。
+  C 独立推导：**在下列前提下**——候选集 = enabled 中 isPrimary 者，若一个都没有则取全部 enabled；判定组 = 候选集内 sortOrder 最小者；等价关系 = `normalizeForIdentity`（scheme/host 小写、去尾部 `/`、**保留 rawPath 与 rawQuery**）；DAO 为 `ORDER BY serverId ASC, sortOrder ASC` 故并列顺序未定义——"身份确定"的充要条件正是"判定组的规范化地址唯一"。**任一前提变化（候选筛选规则、等价关系或 DAO 排序）该推导即失效。**（R0 更正：补明前提集。）
   **实现与推导一致，未发现漏判或误判。**
 - **规范化等价**：`ServerAddressIdentity.normalize` 只小写 scheme/host、去尾部 `/`、**保留 rawPath 与 rawQuery**（`ServerAddressIdentity.kt:8-16`），
   因此不会把路径不同的两个地址误判为同一身份。
@@ -261,7 +261,7 @@ Emby 与 Jellyfin `AuthProvider`、两个 `Factory` 的首个 interceptor、同�
 `EmbySessionStore.Storage.remove` 改 `commit()`）、`HomeViewModel` 代际。
 
 **锁序（C 独立读取，非复述）**：`withRestoreIdentityChange` **不跨 server 持锁**——每个 serverId 的 `withLock` 在循环体内
-  结束即释放，靠 `restoreStatus.blocked` 标志（`@Volatile`）拒绝旧 lease，因此不存在多锁嵌套与死锁路径；
+  结束即释放，靠 `restoreStatus.blocked` 标志（`@Volatile`）拒绝旧 lease。**本次审查未识别到死锁路径（证据级别：SOURCE_READ，仅代码阅读与交叉核对）**——这**不等于**已证明任何交错下都无死锁：该性质依赖后续所有调用方按同一顺序获取每个 serverId 的互斥锁，要作更强结论需要有界多线程或模型化检查。（R0 更正：原措辞"不存在死锁路径"过强。）
   `commitAuthentication` 在锁内做 `storage.put` + `saveSession`，`clearAuthenticationIfCurrent` 在 `NonCancellable` + 锁内
   做 `storage.remove` + `clearSession`；两者互斥且顺序一致，无反向获取。
   `invalidateChangedIdentities` 逐 serverId 调用 `tokenStore.clear()`，每次独立取锁，不嵌套。
@@ -361,7 +361,7 @@ C 未准备合成多轨夹具（未开始），未并发修改 B 的生产代码
 | PR #18 真机 | **DEVICE_UNVERIFIED** |
 | PR #16 归档准确性 | **REVIEWED**（C，见 §6）+ 补丁待接回 |
 | PR #16 SLOW-FINAL COMPLETION | **OPEN**（未改变） |
-| PR #10 | **未验证（NOT STARTED）** |
+| PR #10 | **NOT_STARTED** |
 | 2A 选轨 | **BLOCKED / WAITING_FOR_B** |
 | Jellyfin 真服 | **BLOCKED_BY_SERVER** |
 
@@ -369,7 +369,7 @@ C 未准备合成多轨夹具（未开始），未并发修改 B 的生产代码
 
 | 栏目 | 结论 |
 | --- | --- |
-| `code_review` | **C 通过（源码级）** @ `82a38ab…`；附 1 中危 + 2 低危 findings，无阻断项 |
+| `code_review` | **PATCH REQUIRED / C DYNAMIC VERIFICATION PARTIAL** @ `82a38ab…`：四组不变量分项结论为 SOURCE_REVIEWED 通过，但 F-C1-1（中危）未闭环，故整体放行记为 PATCH REQUIRED；F-C1-1 修复后更新本项。分项与整体的关系见 JSON `c1.blockingFindingsSemantics` |
 | `unit_tests` | **CI_VERIFIED** 772/0/0/0（C 独立解析 CI 产物）；C 本机重跑见 JSON |
 | `ci_identity` | **VERIFIED**：run 34348756064 / attempt 1 / checkout `5acd9ba…` / tree 与 head 相同 |
 | `emulator` | **NOT EXECUTED THIS SESSION** |
@@ -436,3 +436,28 @@ PR #10 的全部视觉路径、FPS/功耗/HDR 兼容性；Jellyfin 真服与协�
 未直接写 main；未 force-push；未 reset/clean 他人工作区；未自动合并；未改变 Draft/保护规则；
 未批量 resolve 审查线程；未替他人批准；未操作物理真机或 A/B 的 AVD；未写入其他 Agent 工作区。
 本报告是 Agent C 的独立结论，**不是阶段封板或发布授权**；合并授权由用户保留。
+
+---
+
+## 附录 D — R0（第二轮）状态口径更正
+
+**包级状态词表（本轮统一使用）**：`SOURCE_REVIEWED` / `EXECUTED_PASS` / `PARTIAL` / `WAITING_FOR_OWNER` /
+`BLOCKED_ENV` / `NOT_RUN_POLICY` / `NOT_STARTED`。
+
+| 包 | 上轮写法 | R0 更正后 |
+| --- | --- | --- |
+| C1 四组不变量 | 「通过」 | `SOURCE_REVIEWED`（证据级别 SOURCE_READ） |
+| PR #18 整体放行 | 「零阻断 / 代码通过」 | **`PATCH REQUIRED`**（F-C1-1 未闭环）；已核验的四组不变量保留分项结论 |
+| C2 本机门禁 | 「IN PROGRESS」 | `EXECUTED_PASS`（exit 0 / 772-0-0-0-92，见 `c2.localGate`） |
+| C3 真机子集 | 「PARTIALLY EXECUTED」 | `PARTIAL`；破坏性套件 `NOT_RUN_POLICY` |
+| C4 | 「源码级核验完成」 | `SOURCE_REVIEWED`（未执行交错测试） |
+| C5 | 「完成」 | `EXECUTED_PASS`（证据核对）+ 补丁 `WAITING_FOR_OWNER` |
+| C6 慢 final | 「未执行」 | **`NOT_STARTED`** |
+| C7 取消/脱敏 | 「源码级核验完成」 | `SOURCE_REVIEWED`；执行部分 `NOT_STARTED` |
+| C8 / 2A 选轨 | 「WAITING_FOR_B」 | `WAITING_FOR_OWNER`（B 分支 `codex/fix-media3-track-selection` 本地存在但 **0 个超越 main 的提交**、未推送、无 PR） |
+| C9 PR #10 | 「未验证」 | **`NOT_STARTED`** |
+| C10 Jellyfin | 「BLOCKED_BY_SERVER」 | 真服子项 `BLOCKED_ENV`；**协议与 MockWebServer 子项单独排队**（非阻塞） |
+
+**证据级别**：源码结论一律标 `SOURCE_READ`，不得写 `SYSTEM_PROVEN`。「本次未识别到死锁路径」不等于「已证明无死锁」；
+线路身份推导已补明候选筛选 / 等价关系 / DAO 排序三项前提。
+

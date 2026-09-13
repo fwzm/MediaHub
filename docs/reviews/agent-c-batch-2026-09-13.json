@@ -1,13 +1,16 @@
 {
   "schema": "agent-c-batch/1",
   "generatedUtc": "2026-09-13T10:30:27.694Z",
-  "agent": "C",
+  "generatedUtcSemantics": "Creation timestamp of THIS file, written when the file was first produced. Later edits added results of events that completed after it (the local gate finished at 10:58:20Z, see c2.localGate.endUtc), so generatedUtc is deliberately NOT the last content-edit time. Per-event timestamps inside each section are authoritative for when each event happened; content was finalised by the commit recorded in evidenceSourceCommit. Round-2 correction (R0) keeps this field for compatibility and adds the two fields below rather than back-dating it.",
+  "contentFinalisedBy": { "commit": "c75ecd085d7f175f78aad7525f7bba774715a5ed", "committedUtc": "2026-09-13T19:07:26+08:00", "note": "the commit whose tree contains exactly this file; the final delivery SHA of the round-2 work is recorded in an EXTERNAL receipt (agent-c-round2-receipt.json) and deliberately never embedded in this file, to avoid self-referential SHA claims." },
+  "reviewedHead": "82a38abce4e761c002dde6d8c9420176e977f57c",
   "reviewedAtFrozenHead": "82a38abce4e761c002dde6d8c9420176e977f57c",
   "remoteAdvanceDuringReview": false,
   "cBranches": {
     "batch": {
       "name": "agent-c/batch-2026-09-13",
-      "head": "6f222db",
+      "head": "c75ecd085d7f175f78aad7525f7bba774715a5ed",
+      "headCorrection": "R0: this field previously read the short SHA 6f222db (the first of three round-1 commits); the delivered tip at review time is c75ecd0. Local and remote refs were both re-checked at R0 and match.",
       "basedOn": "82a38abce4e761c002dde6d8c9420176e977f57c"
     },
     "pr16Correction": {
@@ -101,10 +104,19 @@
         ]
       }
     ],
-    "blockingFindings": 0
+    "blockingFindings": 0,
+    "blockingFindingsSemantics": "R0 separation: blockingFindings counts findings that block the four reviewed INVARIANT GROUPS, all of which hold. It must NOT be read as an integration verdict. The open medium finding F-C1-1 is a PATCH-REQUIRED item for the PR as a whole.",
+    "pr18IntegrationVerdict": "PATCH REQUIRED",
+    "pr18IntegrationVerdictReason": "F-C1-1 (identity guard throws IllegalStateException across an IOException-only boundary) is open and un-fixed at the reviewed head; the repository own isolation tests mask the exception type with runCatching.isFailure.",
+    "deviceVerification": "DEVICE_UNVERIFIED",
+    "perItemStatusVocabulary": ["SOURCE_REVIEWED", "EXECUTED_PASS", "PARTIAL", "WAITING_FOR_OWNER", "BLOCKED_ENV", "NOT_RUN_POLICY", "NOT_STARTED"],
+    "groupStatus": { "frozenPlanAndData": "SOURCE_REVIEWED", "persistenceAndInterruption": "SOURCE_REVIEWED", "identityAndAuthentication": "SOURCE_REVIEWED", "productionUi": "SOURCE_REVIEWED", "aEndpointOrderingFix": "SOURCE_REVIEWED" },
+    "evidenceLevelPolicy": "R0: source-level conclusions carry the level SOURCE_READ (code read and cross-checked here), never SYSTEM_PROVEN. Wording must not claim a property was proven for all interleavings.",
+    "deadlockWording": "CORRECTED at R0: the round-1 phrasing must read EXACTLY as: during this review no deadlock path was IDENTIFIED (SOURCE_READ) - it does NOT claim the absence of deadlock for any interleaving. The property depends on every future caller acquiring the per-server mutex in the same order; a bounded multithreaded or model-based check would be required to claim more.",
+    "endpointIdentityPremise": "CORRECTED at R0: the ambiguity derivation holds ONLY under the stated premise set - candidates = enabled endpoints that are primary, or, if none is primary, all enabled endpoints; the deciding set is the minimum sortOrder within that candidate set; equivalence is BackupUrlGuard.normalizeForIdentity (scheme/host lower-cased, trailing slash removed, rawPath and rawQuery retained); and ServerEndpointDao uses ORDER BY serverId ASC, sortOrder ASC so ties are unordered. Changing any of those premises invalidates the derivation."
   },
   "c2": {
-    "status": "CI audit DONE; local re-run IN PROGRESS at time of report",
+    "status": "CI audit DONE; local re-run COMPLETED - see localGate (exit 0, 772/0/0/0/92, case-id set identical to CI)",
     "ciIdentity": {
       "runId": 34348756064,
       "attempt": 1,
