@@ -77,6 +77,8 @@
 
 全部 204。紧接查询：`UserData.PlaybackPositionTicks = 996,830,000`（**99.683 秒**），**与最终 Stopped.PositionTicks delta = 0**；PlayedPercentage = 3.23%（与该条目时长自洽）。
 
+> **证据完整性限制（C 复核登记）**：六份归档原始文件中**没有任何 `UserData` / `PlaybackPositionTicks` 响应原文**（检索 `UserData`、`PlaybackPositionTicks`、`996830000` 均无命中），也没有独立 BACK 时刻时间戳。上句服务端回写 `delta = 0` 属 Agent A reported，**本轮归档无法独立复现**；可用机器复核的部分仅为 §3.3 表中 13 条 `REQ_BODY` 的 `PositionTicks`（C 已逐条比对，13/13 与表中数值一致，换算为 `÷ 10,000` ms）。
+
 ## 4. Cold final：退出前无普通上报 → final 补发 Playing → Stopped — HAPPY PATH PASS（reported）
 
 判定标准（review 裁定）：点击播放前清空 logcat；同一 PSID 首次普通上报之前退出；退出后仅出现补发 `Playing → Stopped`，两者均 204。
@@ -97,11 +99,15 @@
 ### #2 予初 S01E01（clean #1 包，09-05 19:01，7s 窗口，原始摘录）
 
 ```text
+19:01:00.230  -> GET  …/Videos/374078/stream.mkv?MediaSourceId=…&PlaySessionId=…&static=true
 19:01:01.508  -> POST https://aaa.yusen6.ccwu.cc/emby/Sessions/Playing
 19:01:01.997  <- 204（488ms）
 19:01:02.002  -> POST …/Sessions/Playing/Stopped
+19:01:02.528  <- 502 …/Videos/374078/stream.mkv（2296ms）
 19:01:02.667  <- 204（665ms）
 ```
+
+**取证范围限定（C 复核更正）**：同一原始文件 `coldfinal3_full.txt` 中，媒体流 GET 在 19:01:02.528 返回 **502**。因此本行只证明 **三个进度端点上报成功（204）**，不证明媒体实际可播放、也不证明服务端已按该位置续播。源文件另含 19:00:54.639→19:01:00.188 的 `PlaybackInfo`（5549ms，200）。**"cold final happy path" 的判定范围应限定为"退出前无普通上报 → 退出后补发 Playing→Stopped 均 204"，与媒体流是否可播无关。**
 
 ### 原始证据索引（执行工作区 `.smoke/`，文件未入 repo）
 
@@ -111,8 +117,8 @@
 | `sceneA3_wire.txt` | `dca8f0c835614960` | 6,183B | §3.1 同轮完整 NETWORK 行 |
 | `diag_wire.txt` | `5e32492ea06b23f1` | 7,251B | §3.3 精确对 REQ_BODY 序列（diag 包） |
 | `coldfinal_wire.txt` | `bb020cde193e7861` | 578B | cold final #1（墨云阁） |
-| `coldfinal2_wire.txt` | `9a4d1cd9fe0c5e2f` | 278B | cold final #2（予初）wire 摘录 |
-| `coldfinal3_full.txt` | `746b8d26edd70445` | 1,946B | cold final #2 全 NETWORK/PLAYER/UI 行 |
+| `coldfinal2_wire.txt` | `9a4d1cd9fe0c5e2f` | 278B | **§5 慢请求失败样本（予初 S01E01，09-05 18:59）**：Playing 204 / 3787ms、无 Stopped。**不是 §4 #2 的成功样本**（原索引标注有误，C 复核更正） |
+| `coldfinal3_full.txt` | `746b8d26edd70445` | 1,946B | **§4 #2 成功样本的实际来源**（09-05 19:00:54–19:01:02 全 NETWORK/PLAYER/UI 行；其中含媒体 GET 502，见 §4 #2 更正） |
 
 ## 5. SLOW-FINAL COMPLETION — OPEN（失败样本，未结案）
 
@@ -146,7 +152,9 @@
 ```text
 正常播放 lifecycle（予初/墨云阁）        PASS — wire + 服务端回写 + app 反射（予初）
 服务端位置写入精度                       PASS — 同 PSID Stopped 996,830,000 == UserData（delta 0，diag 包）
-cold final happy path                    PASS — 两台服务器各一次（§4 #1/#2）
+cold final happy path                    PASS（限定范围）— 两台服务器各一次（§4 #1/#2）；
+                                         判定仅覆盖"退出前无普通上报 → 退出后补发 Playing→Stopped 均 204"，
+                                         不含媒体流可播性（§4 #2 同文件存在媒体 GET 502）
 SLOW-FINAL COMPLETION                    OPEN — §5（源码已有 2000ms 预算路径；精确取消来源待复现）
 Scene C 短会话三端点请求                 PASS — reported（Progress 归因已更正为采样周期边界，见 §8）
 Scene B（真机切条目 final）              NOT AVAILABLE ON DEVICE / UNIT CONTRACT COVERED
