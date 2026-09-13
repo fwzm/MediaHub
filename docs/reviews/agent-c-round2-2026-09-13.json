@@ -1,0 +1,192 @@
+{
+  "schema": "agent-c-round2/1",
+  "agent": "C",
+  "reviewedHead": "82a38abce4e761c002dde6d8c9420176e977f57c",
+  "baseHead": "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1",
+  "executedUtc": "2026-09-13T14:46:09.906Z",
+  "evidenceSourceCommit": "c75ecd085d7f175f78aad7525f7bba774715a5ed",
+  "finalDeliveryShaLocation": "external receipt (agent-c-round2-receipt.json), generated after the delivery commit; deliberately not embedded here",
+  "driftCheck": {
+    "main": "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1",
+    "pr18head": "82a38abce4e761c002dde6d8c9420176e977f57c",
+    "pr16head": "f40363ce5199e05a4cd197b456a851c2b984492b",
+    "pr10head": "3febdf8b77a6a1d63d54b9d0c409de708ed978bf",
+    "cBranchesLocalEqualsRemote": true,
+    "result": "no drift"
+  },
+  "statusVocabulary": [
+    "SOURCE_REVIEWED",
+    "EXECUTED_PASS",
+    "PARTIAL",
+    "WAITING_FOR_OWNER",
+    "BLOCKED_ENV",
+    "NOT_RUN_POLICY",
+    "NOT_STARTED"
+  ],
+  "evidenceLevelPolicy": "source-only conclusions are SOURCE_READ; never SYSTEM_PROVEN",
+  "packages": {
+    "R0": {
+      "status": "EXECUTED_PASS",
+      "corrections": [
+        "cBranches.batch.head 6f222db -> c75ecd085d7f175f78aad7525f7bba774715a5ed (added headCorrection)",
+        "c2.status IN PROGRESS -> COMPLETED (localGate already recorded completion)",
+        "generatedUtc semantics made explicit + contentFinalisedBy added",
+        "blockingFindings separated from integration verdict: pr18IntegrationVerdict = PATCH REQUIRED"
+      ],
+      "extra": [
+        "deadlock wording corrected to \"no deadlock path identified (SOURCE_READ)\"",
+        "endpoint identity derivation now states candidate-set / equivalence / DAO-ordering premises"
+      ]
+    },
+    "R1": {
+      "status": "EXECUTED_PASS",
+      "testsAdded": [
+        "provider/emby/.../EmbyIdentityGuardFailureLayerTest.kt",
+        "provider/jellyfin/.../JellyfinIdentityGuardFailureLayerTest.kt"
+      ],
+      "layers": [
+        "L1 raw OkHttp boundary must fail with IOException or a compatible subclass",
+        "L2 MediaHttpClient.probe must RETURN MediaProbeResult.Failure",
+        "L3 ApiClient.probe must RETURN ServerProbeResult.Failure",
+        "all layers: zero requests to the previous address"
+      ],
+      "redResults": {
+        "emby": {
+          "tests": 4,
+          "failures": 3,
+          "passed": [
+            "positive control"
+          ]
+        },
+        "jellyfin": {
+          "tests": 4,
+          "failures": 3,
+          "passed": [
+            "positive control"
+          ]
+        }
+      },
+      "actualException": "java.lang.IllegalStateException: 媒体源身份已变化，请重新打开媒体源",
+      "maskedBy": "runCatching { ... }.isFailure in *FactoryRestoreIsolationTest accepts any Throwable and cannot constrain the failure type",
+      "wordingCorrection": "the public probes must NOT be asserted to throw IOException; they own the exception-to-result conversion",
+      "positiveControl": "fresh handle works and an unrelated source keeps working after revoking one source",
+      "fixTaskPack": "docs/reviews/agent-c-fix-taskpack-f-c1-1-2026-09-13.md",
+      "evidenceXml": [
+        "agent-c-evidence/r1-r3-r5/r1-emby-layer.xml",
+        "agent-c-evidence/r1-r3-r5/r1-jellyfin-layer.xml"
+      ]
+    },
+    "R2": {
+      "status": "PARTIAL",
+      "fixtureSuperseded": "BackupUserFlowHarmlessTest.kt deleted (its name did not match its behaviour)",
+      "fixtureAdded": "app/src/androidTest/.../BackupUserFlowNonOverwritingDeviceTest.kt",
+      "dataContract": "registers every write: one owned-id server row, its progress row, at most one task-named file; never overwrites an existing row; writes no preferences and no credentials",
+      "label": "PRODUCTION_FLOW_WITH_TEST_DATA",
+      "preflight": "read-only check of the journal SharedPreferences, the physical XML and .bak, and the snapshot directory; never calls recoverInterruptedRestore; stops before any page operation and reports BLOCKED if unsatisfied; never clears journal or snapshots",
+      "passwordPolicy": "per-run SecureRandom 32-char password held only in a char[] and wiped in finally; the fixed repository test password is no longer used",
+      "zeroWriteCheck": "compares ALL servers, ALL progress, the full UserPreferences, the credential shared_prefs KEY SETS and token presence; credential values never reach a report",
+      "concurrency": "a difference in user-owned state is reported INCONCLUSIVE and is never papered over by writing an old snapshot back",
+      "cleanup": "only rows and exact file names created by this run; no wildcard deletion",
+      "hyperosAdapter": "data-driven from the real picker dump: package com.google.android.documentsui, already inside Downloads (header/breadcrumb), containers dir_list/item_root/header_title/breadcrumb_text and NO roots_list; adapter checks the header first, only opens the roots drawer when needed, matches by text inside roots_list OR dir_list, never blind-taps coordinates",
+      "deviceReRun": "NOT DONE - the rewritten adapter has not been re-executed on the device",
+      "leftoverInvestigation": "the string MediaHub-backup-20260913-190621.mhb seen in the run-3 picker dump is the pre-filled filename EditText content, not a file; /sdcard/Download currently contains no MediaHub* file; no cleanup gap",
+      "destructiveParts": "NOT_RUN_POLICY"
+    },
+    "R3": {
+      "status": "EXECUTED_PASS",
+      "testAdded": "provider/emby/.../EmbyAuthenticationInterleavingStressTest.kt",
+      "design": "fixed seed 20260913, 16 bounded rounds, real EmbyAuthProvider + MockWebServer gated dispatcher; the request must reach the server before the seeded revoke decision is applied; assertions separate NETWORK (requestCount), BACKGROUND (coroutine completed) and STATE COMMIT (token/session persistence)",
+      "result": "1 test, 0 failures (16/16 rounds)",
+      "allFailuresReported": true,
+      "evidenceXml": "agent-c-evidence/r1-r3-r5/r3-emby-stress.xml",
+      "note": "no production seam was required; no production code changed"
+    },
+    "R4": {
+      "status": "NOT_STARTED",
+      "recoveryPoint": "player/engine or core/network JVM test: MockWebServer gated slow Playing/Progress/Stopped through the production ApiClient/Provider/Coordinator; monotonic-clock timeline of engine.stop / coordinator.stop / flushFinal / endpoint request+response / cancel source / release; assert local final save, periodic reporting stop, old session not reopened, resource release and the existing exit budget"
+    },
+    "R5": {
+      "a": {
+        "status": "EXECUTED_PASS (red)",
+        "testAdded": "core/network/.../EndpointTestServiceRedactionTest.kt",
+        "redMessage": "用户可见错误不得回显主机名；实际=API test failed: secret-host.example",
+        "finding": "F-C1-2 EndpointTestService leaks the raw exception text (and therefore the URL) into the user-visible error",
+        "suggestedFix": "fixed message and/or typed result; keep CancellationException as cancellation; owner = current production owner, not PR #18",
+        "evidenceXml": "agent-c-evidence/r1-r3-r5/r5-redaction.xml"
+      },
+      "b": {
+        "status": "NOT_STARTED",
+        "note": "C7 cancellation tests not executed; therefore no claim about underlying Call cancellation or network resource release"
+      }
+    },
+    "R6": {
+      "status": "WAITING_FOR_OWNER",
+      "bDelivery": "branch codex/fix-media3-track-selection exists LOCALLY ONLY with 0 commits beyond main, is not pushed, and no PR references track selection",
+      "tooling": "ffmpeg 8.1.1 available",
+      "notDone": [
+        "synthetic multi-track/multi-subtitle fixtures",
+        "baseline failing tests"
+      ],
+      "note": "a local branch with zero commits is not a delivery"
+    },
+    "R7": {
+      "status": "EXECUTED_PASS",
+      "scope": "CI ARTIFACT AUDIT ONLY - C did not personally run any API 32/36 device this round",
+      "run": 33971603657,
+      "head": "3febdf8b77a6a1d63d54b9d0c409de708ed978bf",
+      "base": "0e08fadbb398d0d35ab960f0e73ad8ee6ae2bba7",
+      "eventSha": "fb7998a8d8d725d8e2a661a3e9ec39f78ffafe18",
+      "api36": {
+        "tests": 6,
+        "passed": 5,
+        "skipped": "FlowGlowRuntimeShaderTest#pre33FallbackProducesPixelsWithoutRuntimeShader"
+      },
+      "api32": {
+        "tests": 6,
+        "passed": 5,
+        "skipped": "FlowGlowRuntimeShaderTest#runtimeShaderCompilesAcceptsEveryUniformAndProducesPixels"
+      },
+      "skipVerdict": "complementary and correct: API 36 skips the pre-33 fallback (covered on API 32); API 32 skips RuntimeShader (needs API 33+, covered on API 36). Skipped must never be counted as passed.",
+      "coveredPaths": [
+        "disabled/hidden/stopped/disposed compositions own no frame loop",
+        "forced fallback produces pixels without sampling audio",
+        "pre-33 fallback",
+        "RuntimeShader compiles with every uniform and produces pixels",
+        "tall landscape controls keep ambient outside the subtitle safe band",
+        "palette transition does not leak outside the player"
+      ],
+      "stillUnverified": [
+        "preference persistence and restore-default end to end",
+        "settings screen entry wiring",
+        "cross-integration between PR #10 visual preferences and the PR #18 backup/protective-snapshot/rollback model"
+      ],
+      "notClaimed": [
+        "FPS",
+        "power",
+        "HDR/DRM",
+        "real FFT"
+      ]
+    },
+    "R8": {
+      "status": "NOT_STARTED",
+      "realServerSubItem": "BLOCKED_ENV",
+      "protocolSubItem": "queued, not blocking",
+      "recoveryPoint": "verify PlaybackInfo.PlaySessionId -> playback source -> both engine progress -> the three report DTOs for the pinned version; fixtures traceable to a protocol version and retrieval date; do not infer Jellyfin failure from Emby failure"
+    },
+    "R9": {
+      "status": "EXECUTED_PASS",
+      "pr16Handoff": "45afb870415103e4070d3d90188c07885b60fa4d unchanged this round, minimal handoff pack for A",
+      "fC1_3": "design observation retained; no failing persistent write was added just to clear it",
+      "fC1_4": "accepted limitation retained; no automatic snapshot deletion and no journal-recovery bypass",
+      "fullGateRepeated": false,
+      "fullGateReason": "the 772-test gate already ran on this head; this round is test/fixture-only, so repeating a full build would add no evidence"
+    }
+  },
+  "pr18Verdict": {
+    "code_review": "PATCH REQUIRED",
+    "dynamicVerification": "PARTIAL",
+    "device": "DEVICE_UNVERIFIED",
+    "merge_authorization": "reserved by the user"
+  },
+  "boundaryDeclaration": "C did not modify main, force-push, auto-merge, change Draft/protection rules, bulk-resolve threads, or write production code for PR #18 / 2A. Destructive device tests remain NOT_RUN_POLICY. This is not a phase seal or release authorization."
+}
