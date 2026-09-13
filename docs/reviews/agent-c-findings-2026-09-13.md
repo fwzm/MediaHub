@@ -29,7 +29,7 @@
      **接受任意 Throwable**，因此不会断言失败类型：
      `provider/emby/src/test/kotlin/com/mediahub/provider/emby/EmbyFactoryRestoreIsolationTest.kt:90-95`、
      `provider/jellyfin/src/test/kotlin/com/mediahub/provider/jellyfin/JellyfinFactoryRestoreIsolationTest.kt:91-95`。
-  3. C 已在本批次新增一条**断言异常类型**的回归（见 findings 附注"C 测试 delta"），在原始 head 上应失败。
+  3. C 本轮**未新增**该回归测试（受本轮执行预算限制）；需要的断言在下方"回归要求"中给出，属下一批任务。
 - **建议修法（最小）**：把守卫改为抛出 `IOException`（例如 `throw IOException("媒体源身份已变化，请重新打开媒体源")`）。
   OkHttp 允许 interceptor 抛 `IOException`，它会被现有 `catch (IOException)` 边界统一转换为结构化失败，
   且不放宽任何安全约束（仍然在发请求前失败）。**不需要**动 TokenStore 或网络层。
@@ -160,8 +160,9 @@
 
 - 原始 head `82a38ab…` 的测试结果**单独记录**（C2 本地门禁在工作树干净时启动，日志记录 `source-dirty-before: no`；
   以及 CI 产物 `5acd9ba` 的 772/0/0/0/92）。
-- 报告 §2.4 中提到的"断言异常类型的回归"是 C 的**新增测试**，只应记录为 **C 对新版本的 delta**，
-  不得计入原始 head 的通过结论；未落地为提交的部分在批次报告中已明确标为未完成。
+- **本轮 C 未新增任何测试文件**，因此不存在测试 delta 需要区分；
+  `F-C1-1` 与 C3/C4/C6/C7 的补强测试均列为下一批任务（见批次报告 §11.6），**不计入本轮已完成的验证**。
+- C 对本分支的改动仅为文档与一个 C 自有验证脚本，未触碰生产源码与既有测试。
 
 ---
 

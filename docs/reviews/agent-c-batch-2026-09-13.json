@@ -1,0 +1,346 @@
+{
+  "schema": "agent-c-batch/1",
+  "generatedUtc": "2026-09-13T10:30:27.694Z",
+  "agent": "C",
+  "reviewedAtFrozenHead": "82a38abce4e761c002dde6d8c9420176e977f57c",
+  "remoteAdvanceDuringReview": false,
+  "cBranches": {
+    "batch": {
+      "name": "agent-c/batch-2026-09-13",
+      "head": "6f222db",
+      "basedOn": "82a38abce4e761c002dde6d8c9420176e977f57c"
+    },
+    "pr16Correction": {
+      "name": "agent-c/pr16-verify-2026-09-13",
+      "head": "45afb870415103e4070d3d90188c07885b60fa4d"
+    }
+  },
+  "c0": {
+    "status": "DONE",
+    "snapshotMatch": "all task-snapshot SHAs re-queried live and matched; no drift",
+    "agentsMd": "none present in repository",
+    "documentsRead": [
+      "docs/reviews/pr18-agent-b-2026-09-09.md",
+      "docs/reviews/pr18-agent-b-validation-2026-09-09.json",
+      "docs/reviews/pr18-agent-a-integration-2026-09-09.md",
+      "docs/reviews/pr18-agent-a-validation-2026-09-09.json",
+      "docs/reviews/task0-pr10-pr16-review-queue-2026-09-09.md",
+      "HANDOFF.md",
+      "TASKS.md",
+      "DECISIONS.md",
+      "CHANGELOG.md",
+      "ROADMAP.md",
+      "ARCHITECTURE.md"
+    ],
+    "worktrees": 4,
+    "output": "baseline.json"
+  },
+  "c1": {
+    "status": "DONE (source-level)",
+    "diffScope": {
+      "files": 66,
+      "insertions": 10534,
+      "deletions": 103
+    },
+    "contractGroups": {
+      "frozenPlanAndData": "PASS",
+      "persistenceAndInterruption": "PASS",
+      "identityAndAuthentication": "PASS",
+      "productionUi": "PASS",
+      "aEndpointOrderingFix": "PASS (C independently derived the necessary and sufficient condition; implementation matches)"
+    },
+    "productionProbeBoundary": "PASS - all checkpoint/killProcess code confined to app/src/androidTest and gated on the backupAcceptance=isolated instrumentation argument; no production seam",
+    "findings": [
+      {
+        "id": "F-C1-1",
+        "severity": "medium",
+        "class": "confirmed-defect",
+        "owner": "A",
+        "summary": "identity guard throws IllegalStateException (check) inside an OkHttp interceptor; MediaHttpClient.probe and ApiClient.probe only catch IOException",
+        "files": [
+          "provider/emby/src/main/kotlin/com/mediahub/provider/emby/EmbyProviderFactory.kt:52",
+          "provider/jellyfin/src/main/kotlin/com/mediahub/provider/jellyfin/JellyfinProviderFactory.kt:52",
+          "core/network/src/main/kotlin/com/mediahub/core/network/MediaHttpClient.kt:59",
+          "core/network/src/main/kotlin/com/mediahub/core/network/ApiClient.kt:162"
+        ],
+        "maskedBy": [
+          "provider/emby/src/test/kotlin/com/mediahub/provider/emby/EmbyFactoryRestoreIsolationTest.kt:90-95",
+          "provider/jellyfin/src/test/kotlin/com/mediahub/provider/jellyfin/JellyfinFactoryRestoreIsolationTest.kt:91-95"
+        ],
+        "fix": "throw IOException so existing catch(IOException) boundaries convert it to MediaProbeResult.Failure"
+      },
+      {
+        "id": "F-C1-2",
+        "severity": "low",
+        "class": "confirmed-defect-pre-existing-out-of-pr18-scope",
+        "owner": "current owner (main)",
+        "summary": "EndpointTestService surfaces raw e.message into the user-visible result, bypassing Redactor convention",
+        "files": [
+          "core/network/src/main/kotlin/com/mediahub/core/network/EndpointTestService.kt:63"
+        ]
+      },
+      {
+        "id": "F-C1-3",
+        "severity": "low",
+        "class": "design-observation",
+        "owner": "A",
+        "summary": "RestoreJournal.markFailed has no production caller; lastError is never written outside tests",
+        "files": [
+          "feature/settings/src/main/kotlin/com/mediahub/feature/settings/backup/RestoreJournal.kt:63",
+          "feature/settings/src/main/kotlin/com/mediahub/feature/settings/backup/RestoreJournal.kt:94"
+        ]
+      },
+      {
+        "id": "F-C1-4",
+        "severity": "low",
+        "class": "accepted-limitation",
+        "owner": "A",
+        "summary": "encrypted orphan snapshot possible when begin() fails after save(); no automatic GC (already registered by B; code path confirmed at BackupRepository.kt:373-374)",
+        "files": [
+          "feature/settings/src/main/kotlin/com/mediahub/feature/settings/backup/BackupRepository.kt:373-374"
+        ]
+      }
+    ],
+    "blockingFindings": 0
+  },
+  "c2": {
+    "status": "CI audit DONE; local re-run IN PROGRESS at time of report",
+    "ciIdentity": {
+      "runId": 34348756064,
+      "attempt": 1,
+      "workflow": "Android CI",
+      "event": "pull_request",
+      "conclusion": "success",
+      "headShaOnRun": "82a38abce4e761c002dde6d8c9420176e977f57c",
+      "checkoutSha": "5acd9bae209c9f532811ba6fb48d42ad6e50f6df",
+      "parents": [
+        "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1",
+        "82a38abce4e761c002dde6d8c9420176e977f57c"
+      ],
+      "checkoutTree": "48151ef7259592243daa46b48cc39ad9cb68769d",
+      "headTree": "48151ef7259592243daa46b48cc39ad9cb68769d",
+      "treeEqualsHead": true,
+      "method": "git fetch origin refs/pull/18/merge; git rev-parse <sha>^{tree}",
+      "revisionJsonMatches": true
+    },
+    "ciArtifactAudit": {
+      "artifact": "android-validation-5acd9bae209c9f532811ba6fb48d42ad6e50f6df",
+      "bytes": 256827,
+      "expired": false,
+      "downloadedBy": "C",
+      "testXml": 92,
+      "tests": 772,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "byTask": {
+        "testDebugUnitTest": {
+          "tests": 729,
+          "xml": 86
+        },
+        "test": {
+          "tests": 43,
+          "xml": 6
+        }
+      },
+      "lint": {
+        "xml": 22,
+        "errors": 0,
+        "warnings": 58,
+        "rules": {
+          "GradleDependency": 36,
+          "UseKtx": 9,
+          "AndroidGradlePluginVersion": 6,
+          "ChromeOsAbiSupport": 1,
+          "UnusedResources": 1,
+          "ObsoleteSdkInt": 1,
+          "MonochromeLauncherIcon": 1,
+          "DataExtractionRules": 1,
+          "ApplySharedPref": 1,
+          "OldTargetApi": 1
+        }
+      },
+      "applySharedPrefVerdict": "intentional false positive at RestoreJournal.test persist() commit(); must NOT be \"fixed\" to apply() because commit is the durability precondition"
+    },
+    "reconciliation": {
+      "agentA": {
+        "tests": 772,
+        "backupSpecialty": 144,
+        "xml": 92
+      },
+      "agentB": {
+        "tests": 768,
+        "backupSpecialty": 140,
+        "lintWarnings": 19
+      },
+      "cConclusion": "772 = 768 + 4; all four are Agent A line-order regressions; BackupRestoreSafetyTest 15 -> 19; feature/settings 100 -> 104; all other 21 modules identical",
+      "verified": true
+    },
+    "localGate": {
+      "command": ".\\gradlew.bat testDebugUnitTest :core:model:test :provider:api:test :metadata:test assembleDebug lintDebug :app:assembleDebugAndroidTest --rerun-tasks --continue --no-parallel --max-workers=1 \"-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\" \"-Pkotlin.compiler.execution.strategy=in-process\" --no-build-cache --no-daemon --console=plain",
+      "worktree": "D:\\deepseek_test\\MediaHub-agent-c-pr18",
+      "head": "82a38abce4e761c002dde6d8c9420176e977f57c",
+      "sourceDirtyBefore": false,
+      "javaHome": "C:\\Program Files\\Java\\jdk-21 (per-process only)",
+      "log": "D:\\deepseek_test\\agent-c-evidence\\c2-pr18\\pr18-gate-console.log",
+      "meta": "D:\\deepseek_test\\agent-c-evidence\\c2-pr18\\pr18-gate-meta.json",
+      "status": "IN PROGRESS / NOT COMPLETED WITHIN THIS SESSION - see pr18-gate-meta.json for the final exit code",
+      "authoritativeSubstitute": "CI artifact audit above (same frozen tree)"
+    },
+    "buildWarningsFoundByC": [
+      {
+        "file": "feature/settings/src/main/kotlin/com/mediahub/feature/settings/backup/BackupRepository.kt",
+        "line": 700,
+        "col": 42,
+        "kind": "kotlinc",
+        "message": "Condition is always 'true'",
+        "note": "toPreferencesDto returns a non-nullable type, so `if (prefsDto != null) 1 else 0` is dead; recordCounts.preferences is always 1 and includedSections always lists preferences, so the manifest stays self-consistent. Benign dead condition, not a defect."
+      },
+      {
+        "file": "feature/settings/src/main/kotlin/com/mediahub/feature/settings/backup/BackupScreen.kt",
+        "line": 407,
+        "kind": "kotlinc",
+        "message": "'field versionCode: Int' is deprecated"
+      }
+    ]
+  },
+  "c3": {
+    "status": "NOT_EXECUTED_THIS_SESSION",
+    "environmentProbe": {
+      "systemImages": [
+        "android-36/google_apis_playstore/x86_64",
+        "android-32/google_apis/x86_64"
+      ],
+      "platformsInclude": "android-36",
+      "existingAvds": [
+        "Codex_PR18_Integration_36",
+        "Codex_PR18_Review_36"
+      ],
+      "existingAvdsOwner": "Agent A/B - not reused by C",
+      "physicalDeviceConnected": {
+        "serial": "123e243f",
+        "model": "24031PN0DC",
+        "note": "Xiaomi 14 Ultra; hazard: any adb command without -s could target it"
+      }
+    },
+    "toolDelivered": "scripts/agent-c/verify-backup-restore-c.ps1 (reuses A helper; requires explicit -Serial; refuses non-emulator and A/B AVDs)",
+    "toolSmokeTest": "PARSE OK; unknown serial refused; physical serial 123e243f refused at the emulator check (exit 94)",
+    "notDone": [
+      "C-owned API 36 AVD",
+      "BackupUserFlowTest SAF chain",
+      "8 real termination points",
+      "physical journal corruption branch",
+      "four assertion-hardening gaps A-D"
+    ]
+  },
+  "c4": {
+    "status": "SOURCE_VERIFIED_NO_NEW_TESTS",
+    "lockOrder": "withRestoreIdentityChange does not hold locks across serverIds (each withLock released per iteration) and relies on the volatile restoreStatus.blocked flag; commitAuthentication and clearAuthenticationIfCurrent both take the per-server mutex and are not nested; no deadlock path found",
+    "existingCoverage": [
+      "TokenStoreAuthenticationTest 9",
+      "TokenStoreTest 4",
+      "EmbyAuthProviderTest (module 164)",
+      "JellyfinAuthProviderTest",
+      "EmbyFactoryRestoreIsolationTest",
+      "JellyfinFactoryRestoreIsolationTest",
+      "HomeViewModelTest 11"
+    ],
+    "notVerified": [
+      "C barrier/deferred interleavings",
+      "bounded real multithreaded cases",
+      "network-resource release; delivered packets cannot be revoked (only result commit is guarded)"
+    ]
+  },
+  "c5": {
+    "status": "DONE (evidence verified + correction patch)",
+    "originalsDir": "D:\\deepseek_test\\MediaHub\\.smoke",
+    "files": [
+      {
+        "name": "sceneA_wire.txt",
+        "bytes": 2341,
+        "sha256_16": "b65b29a3971a0770",
+        "archivedBytes": 2341,
+        "archivedSha": "b65b29a3971a0770",
+        "match": true
+      },
+      {
+        "name": "sceneA3_wire.txt",
+        "bytes": 6183,
+        "sha256_16": "dca8f0c835614960",
+        "match": true
+      },
+      {
+        "name": "diag_wire.txt",
+        "bytes": 7251,
+        "sha256_16": "5e32492ea06b23f1",
+        "match": true
+      },
+      {
+        "name": "coldfinal_wire.txt",
+        "bytes": 578,
+        "sha256_16": "bb020cde193e7861",
+        "match": true
+      },
+      {
+        "name": "coldfinal2_wire.txt",
+        "bytes": 278,
+        "sha256_16": "9a4d1cd9fe0c5e2f",
+        "match": true,
+        "actualContent": "18:59:38.474 -> POST Playing; 18:59:42.262 <- 204 (3787ms); NO Stopped = the SLOW-FINAL failure sample"
+      },
+      {
+        "name": "coldfinal3_full.txt",
+        "bytes": 1946,
+        "sha256_16": "746b8d26edd70445",
+        "match": true,
+        "note": "contains media GET 502 at 19:01:02.528 (2296ms)"
+      }
+    ],
+    "ticks": {
+      "entries": 13,
+      "matched": 13,
+      "conversion": "ticks / 10000 = ms",
+      "playSessionIdConstant": "6cd3207d"
+    },
+    "userDataEvidence": "ABSENT from all six originals (queries for UserData / PlaybackPositionTicks / 996830000 returned no hits) - the delta=0 write-back claim is not reproducible from the archive",
+    "backTimestamp": "no independent BACK timestamp; already disclosed by the archive",
+    "sanitization": "Authorization headers already redacted as **** in originals; UserId/PlaySessionId appear in URL queries but the raw files are NOT committed (controlled directory)",
+    "slowFinalCompletion": "OPEN (unchanged by C)",
+    "patch": "c5-pr16-doc-correction.patch (4916 B) on agent-c/pr16-verify-2026-09-13 @ 45afb87"
+  },
+  "c6": {
+    "status": "NOT_EXECUTED",
+    "note": "source facts of the archive section 5 re-confirmed (flushFinal 2000ms budget, shared by playbackStart/playbackStopped, Call.execute not interruptible); no single root cause asserted; no timeouts raised, no retries added, finality state machine untouched"
+  },
+  "c7": {
+    "status": "SOURCE_VERIFIED_NO_NEW_TESTS",
+    "threadRisk": "EndpointTestService.test() uses synchronous Call.execute() without switching dispatcher, on viewModelScope; already registered in its own KDoc lines 30-33",
+    "cancellation": "coroutine cancellation cannot interrupt the blocked Call; test() has no suspension point and returns normally",
+    "resultOwnership": "ServerEditorViewModel gates on qualityRequestId + AddressTestResultPolicy.shouldApply + endpointId/expectedUrl match before writing; finally resets loading only if still current",
+    "notProven": "underlying Call cancellation / network resource release"
+  },
+  "c8": {
+    "status": "WAITING_FOR_B",
+    "evidence": "no branch matching track/media3/select; no PR referencing 2A track selection"
+  },
+  "c9": {
+    "status": "NOT_STARTED",
+    "worktreeReady": "D:\\deepseek_test\\MediaHub-agent-c-pr10 @ 3febdf8b77a6a1d63d54b9d0c409de708ed978bf"
+  },
+  "c10": {
+    "status": "BLOCKED_BY_SERVER (real server); protocol-level not done this session"
+  },
+  "c11": {
+    "status": "DONE (matrix + next-batch contract)",
+    "pr18": {
+      "code_review": "PASS (source-level, C)",
+      "unit_tests": "CI_VERIFIED 772/0/0/0",
+      "ci_identity": "VERIFIED",
+      "emulator": "NOT EXECUTED THIS SESSION",
+      "physical_device": "DEVICE_UNVERIFIED",
+      "merge_authorization": "reserved by the user"
+    },
+    "percentages": "not given (no acceptance denominator specified)"
+  },
+  "boundaryDeclaration": "C did not: write to main, force-push, reset/clean other workspaces, auto-merge, change Draft/protection rules, bulk-resolve review threads, approve on behalf of others, operate the physical device or A/B AVDs, or write into other agents workspaces. This report is not a phase seal or release authorization."
+}
