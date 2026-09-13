@@ -9,9 +9,11 @@ import com.mediahub.core.network.MediaProbeResult
 import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.StoredToken
 import com.mediahub.core.security.TokenStore
+import java.io.IOException
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.ServerType
+import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
 import com.mediahub.provider.base.BaseMediaServerProvider
 import com.mediahub.provider.emby.session.EmbySession
@@ -61,7 +63,14 @@ class EmbyFactoryRestoreIsolationTest {
         newEndpoint.enqueue(emptyLibrary())
         val staleResult = runCatching { old.library!!.getLibraries() }
         assertEquals("A retained old handle must never reach its previous address", 0, oldEndpoint.requestCount)
-        assertTrue(staleResult.isFailure)
+        // F-C1-1：底层必须以 IOException 失败（而非 IllegalStateException）；
+        // library 契约把它映射为 ProviderException.Network 且保留 cause。
+        val staleEx = staleResult.exceptionOrNull()
+        assertTrue(
+            "stale handle 底层必须为 IOException cause，实际为 " +
+                (staleEx?.cause?.let { it::class.java.name } ?: staleEx?.let { it::class.java.name }),
+            staleEx is ProviderException.Network && staleEx.cause is IOException,
+        )
         val fresh = factory.create(server(newEndpoint))
         assertEquals(emptyList<Any>(), fresh.library!!.getLibraries())
         assertEquals(1, newEndpoint.requestCount)
@@ -77,7 +86,13 @@ class EmbyFactoryRestoreIsolationTest {
         oldEndpoint.enqueue(emptyLibrary())
         val result = runCatching { transient.library!!.getLibraries() }
         assertEquals("A handle created against an intermediate address cannot become usable", 0, oldEndpoint.requestCount)
-        assertTrue(result.isFailure)
+        // F-C1-1：底层必须以 IOException 失败；library 契约映射为 ProviderException.Network 且保留 cause
+        val transientEx = result.exceptionOrNull()
+        assertTrue(
+            "transient handle 底层必须为 IOException cause，实际为 " +
+                (transientEx?.cause?.let { it::class.java.name } ?: transientEx?.let { it::class.java.name }),
+            transientEx is ProviderException.Network && transientEx.cause is IOException,
+        )
         assertEquals("FAKE-NEW-IDENTITY-TOKEN", tokens.readTokens("source")?.accessToken)
     }
 
@@ -92,7 +107,12 @@ class EmbyFactoryRestoreIsolationTest {
                 headers = mapOf("X-Emby-Token" to "FAKE-NEW-IDENTITY-TOKEN")))
         }
         assertEquals(0, oldEndpoint.requestCount)
-        assertTrue(oldResult.isFailure)
+        // F-C1-1：probe 拥有异常→结果映射，修复后返回 Failure 而不是抛 IOException
+        assertNull("probe 不得向调用者抛出未映射异常", oldResult.exceptionOrNull())
+        assertTrue(
+            "probe 必须返回 MediaProbeResult.Failure，实际为 " + oldResult.getOrNull(),
+            oldResult.getOrNull() is MediaProbeResult.Failure,
+        )
         val fresh = factory.create(server(newEndpoint))
         val result = mediaClient(fresh).probe(PlaybackSource(newEndpoint.url("/media").toString()))
         assertTrue(result is MediaProbeResult.Success)

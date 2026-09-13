@@ -4,6 +4,7 @@ import com.mediahub.core.common.ClientIdentity
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.ApiClient
 import com.mediahub.core.network.HttpClientFactory
+import java.io.IOException
 import com.mediahub.core.network.MediaHttpClient
 import com.mediahub.core.security.TokenStore
 import com.mediahub.model.MediaServer
@@ -50,7 +51,11 @@ class EmbyProviderFactory @Inject constructor(
         val authHeaderBuilder = EmbyAuthorizationHeaderBuilder(clientIdentity)
         val identityLease = tokenStore.authenticationLease(server.id)
         val identityGuard = Interceptor { chain ->
-            check(tokenStore.isAuthenticationLeaseCurrent(identityLease)) { "媒体源身份已变化，请重新打开媒体源" }
+            if (!tokenStore.isAuthenticationLeaseCurrent(identityLease)) {
+                // OkHttp 调用方（含 Media3 data source）以 IOException 为失败契约；
+                // probe 层负责把本异常映射为 MediaProbeResult/ServerProbeResult.Failure。
+                throw IOException("媒体源身份已变化，请重新打开媒体源")
+            }
             chain.proceed(chain.request())
         }
         // Per-handle clients reject retained old addresses before logging, retry or network IO.

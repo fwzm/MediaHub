@@ -47,7 +47,8 @@ class BackupUserFlowTest {
         val sourceId = "agent-b-ui-$suffix"
         val fileName = "MediaHub-agent-b-ui-$suffix.mhb"
         val cancelledName = "MediaHub-agent-b-ui-$suffix-cancelled.mhb"
-        val password = "AgentB-acceptance-password"
+        // 运行时生成（Mimosa 凭据字面量规则）；单用例内自洽，非真实凭据
+        val password = "ap-${System.nanoTime()}"
         val db = AppModule.provideAppDatabase(context)
         val preferences = UserPreferencesStore(context)
         val originalPreferences = preferences.flow.first()

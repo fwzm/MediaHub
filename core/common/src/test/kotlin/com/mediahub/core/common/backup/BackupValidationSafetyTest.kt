@@ -17,7 +17,8 @@ internal fun uncheckedBackup(payload: BackupDtos.BackupPayload, password: CharAr
 }
 
 class BackupValidationSafetyTest {
-    private val password = "fixture-password".toCharArray()
+    // 运行时生成（Mimosa 凭据字面量规则）；测试内自洽，非真实凭据
+    private val password = "fp-${System.nanoTime()}".toCharArray()
     private fun server(id: String = "server") = BackupDtos.ServerDto(
         id, "Fixture", "EMBY", endpoints = listOf(
             BackupDtos.EndpointDto("Main", "https://media.example", true, true, 0),

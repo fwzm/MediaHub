@@ -41,7 +41,8 @@ class BackupCryptoTimingTest {
         val evidence = File(instrumentation.targetContext.getExternalFilesDir(null), "backup-crypto-timing.txt")
         evidence.writeText("pid=${Process.myPid()} hardware=${Build.HARDWARE} api=${Build.VERSION.SDK_INT} " +
             "iterations=600000 bits=256 first-and-second-in-this-process diagnostic-limit-ms=60000 not-performance-SLA\n")
-        val password = "AgentB-synthetic-crypto-timing-password".toCharArray()
+        // 运行时生成（Mimosa 凭据字面量规则）；本进程内自洽，非真实凭据
+        val password = "ct-${System.nanoTime()}".toCharArray()
         val salt = ByteArray(BackupCrypto.PBKDF2_SALT_BYTES) { it.toByte() }
         val ioExecutor = Executors.newSingleThreadExecutor { task ->
             Thread(task, "backup-crypto-timing-io").apply { isDaemon = true }
