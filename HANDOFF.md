@@ -1,4 +1,21 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
+
+## 2026-09-20 闭环任务 T0001：EndpointTestService 取消边界（code+tests complete；DEVICE NOT RUN）
+
+- 基线：`8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1`（`origin/main`）。分支 `loop/t0001-endpoint-cancellation`。
+- 起因：`EndpointTestService` 在 `suspend` 函数里用阻塞 `Call.execute()`、未切换调度器、
+  未与协程取消联动、`catch (Exception)` 吞取消、`body.bytes()` 无上限。
+  编辑页「线路质量测试」是该路径的正式用户入口（地址变化 / HTTPS 切换会取消在途任务）。
+- 修复：IO 调度器执行 + `Call.enqueue` 可取消桥接（响应头与响应体两个取消窗口分别绑定）
+  + 统一响应释放 + 1 MiB 有界采样 + 取消经 `ensureActive()` 透传。
+  未改 `ServerEditorViewModel`、`ServerEditorScreen`、`HttpClientFactory` 策略与数据库。
+- 回归：`EndpointTestServiceCancellationTest`（7）、`EndpointTestServiceTest`（+4）、
+  `ServerEditorViewModelTest`（+2，真实服务 + 本机 MockWebServer，断言取消穿透到底层 Call）。
+- 边界：`probeUrl` 仍为占位，真实媒体测速未实现；**未做设备验证**；
+  本任务不触碰 2A / 2B / PR #10 / PR #18。
+- 权威证据：闭环控制目录 `D:/deepseek_test/mh-loop` 的状态库、`evidence/T0001/` 与验证产物。
+
+
 > 最后更新：2026-08-30（Phase 1H Emby PROGRESS closeout code+tests complete，feature/1h-emby-progress PR/CI 待走；Phase 1G 已 merge 入 main @ `1d105a1`）
 
 ## Phase 1H Emby PROGRESS closeout（进行中——code+tests complete，PR/CI 待 + DEVICE VERIFICATION PENDING）

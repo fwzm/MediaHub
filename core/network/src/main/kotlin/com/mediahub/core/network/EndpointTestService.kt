@@ -1,8 +1,29 @@
 package com.mediahub.core.network
 
 import android.os.SystemClock
+import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody
+import okio.Buffer
+import kotlin.coroutines.coroutineContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /** 线路测试结果（U4-D）。 */
 data class EndpointTestResult(
@@ -24,80 +45,171 @@ data class EndpointTestResult(
  * Phase 1G-A（ADR-039）：[probePath] 由调用方从 ProviderDescriptor.probePath 传入——
  * 本类**不含任何 Emby/Jellyfin 协议路径知识**（/emby 前缀属于 Emby provider 自述）。
  *
+ * Phase 1I 2C（取消契约，本次修复）：两层的网络等待与响应消费全部在 [ioDispatcher] 上执行，
+ * 不再占用调用方（编辑页主调度器）线程；请求通过可取消桥接绑定当前协程，
+ * 取消会实际终止对应 [Call] 并以 [CancellationException] 向上传播；
+ * 响应所有权由桥接统一持有，成功、失败、取消竞态与迟到响应都会关闭。
+ * 媒体响应按 [maxMediaBytes] 上限消费，落实注释中既有的 Range 1MB 承诺。
+ *
  * open：Phase 1I 线路质量测试的陈旧结果隔离需要可控延迟的测试替身
  * （EmbyApiClient/EndpointTestService 同款 open-for-test 约定）。
- *
- * **已知风险（Phase 1I review 登记项，单独处理）**：[test] 内部使用同步 `Call.execute()`
- * 且本类未切换 IO dispatcher——suspend 声明不会自动把阻塞调用移出调用方调度器
- * （当前调用方在 viewModelScope 主调度器上）。测试暂以 fake-service 通过，不外推为
- * 真实线路测试的线程安全已验证；线程化改造另行处理。
  */
 open class EndpointTestService(
     private val clientFactory: HttpClientFactory,
     private val clock: () -> Long = SystemClock::elapsedRealtime,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val maxMediaBytes: Long = MAX_MEDIA_BYTES,
 ) {
 
-    open suspend fun test(baseUrl: String, probePath: String): EndpointTestResult {
-        val probeUrl = baseUrl.trimEnd('/') + probePath
-        var apiLatency = -1L
-        var mediaFirstByte: Long? = null
-        var throughput: Double? = null
-        var code = 0
-        var protocol: String? = null
-        var rangeOk = false
-        var errorMsg: String? = null
+    /**
+     * 测试接缝：仅供测试替换底层客户端以观察 Call 级取消与资源事件。
+     * 生产路径固定走 [HttpClientFactory]，不改变其超时与重试策略。
+     */
+    protected open fun createApiClient(): OkHttpClient = clientFactory.apiClient()
 
-        val client = clientFactory.apiClient()
+    protected open fun createMediaClient(): OkHttpClient = clientFactory.mediaClient()
 
-        // ---- Layer 1: API latency ----
-        try {
-            val start = clock()
-            val resp = client.newCall(
-                Request.Builder().url(probeUrl).build()
-            ).execute()
-            apiLatency = clock() - start
-            code = resp.code
-            protocol = resp.protocol?.toString()
-            resp.close()
-        } catch (e: Exception) {
-            errorMsg = "API test failed: ${e.message}"
+    /**
+     * 测试接缝：允许测试注入受控 [Call]，用于观察取消传播与响应释放竞态。
+     * 生产路径等价于 `client.newCall(request)`。
+     */
+    protected open fun newCall(client: OkHttpClient, request: Request): Call =
+        client.newCall(request)
+
+    open suspend fun test(baseUrl: String, probePath: String): EndpointTestResult =
+        withContext(ioDispatcher) {
+            // 开始前已取消：不发出任何请求
+            coroutineContext.ensureActive()
+
+            val probeUrl = baseUrl.trimEnd('/') + probePath
+            var apiLatency = -1L
+            var mediaFirstByte: Long? = null
+            var throughput: Double? = null
+            var code = 0
+            var protocol: String? = null
+            var rangeOk = false
+            var errorMsg: String? = null
+
+            // ---- Layer 1: API latency ----
+            val apiCall = newCall(createApiClient(), Request.Builder().url(probeUrl).build())
+            try {
+                val start = clock()
+                apiCall.awaitCancellable { resp ->
+                    apiLatency = clock() - start
+                    code = resp.code
+                    protocol = resp.protocol?.toString()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IOException) {
+                // 取消引起的 IOException 不得被当成普通失败吞掉
+                coroutineContext.ensureActive()
+                errorMsg = "API test failed: ${e.message}"
+            } catch (e: Exception) {
+                errorMsg = "API test failed: ${e.message}"
+            }
+
+            // ---- Layer 2: Media Range（受控交接窗口：API 完成、Media 尚未开始）----
+            if (errorMsg == null) {
+                coroutineContext.ensureActive()
+                val mediaCall = newCall(
+                    createMediaClient(),
+                    Request.Builder()
+                        .url(probeUrl) // placeholder, real impl uses a known item ID
+                        .header("Range", "bytes=0-${MAX_MEDIA_BYTES - 1}")
+                        .build()
+                )
+                try {
+                    val start = clock()
+                    mediaCall.awaitCancellable { resp ->
+                        mediaFirstByte = clock() - start
+                        rangeOk = resp.code == 206 || resp.header("Accept-Ranges") == "bytes"
+                        code = resp.code
+                        val bytes = resp.body?.readAtMost(maxMediaBytes) ?: 0L
+                        val elapsedSec = (clock() - start) / 1000.0
+                        if (elapsedSec > 0 && bytes > 0) {
+                            throughput = (bytes / (1024.0 * 1024.0)) / elapsedSec
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: IOException) {
+                    coroutineContext.ensureActive()
+                    // media test failure doesn't invalidate API result
+                } catch (e: Exception) {
+                    // media test failure doesn't invalidate API result
+                }
+            }
+
+            coroutineContext.ensureActive()
+
+            EndpointTestResult(
+                apiLatencyMs = apiLatency,
+                mediaFirstByteMs = mediaFirstByte,
+                mediaThroughputMbps = throughput,
+                httpCode = code,
+                protocol = protocol,
+                supportsRange = rangeOk,
+                error = errorMsg,
+            )
         }
 
-        // ---- Layer 2: Media Range 1MB ----
-        if (errorMsg == null) {
-            try {
-                val mediaClient = clientFactory.mediaClient()
-                val start = clock()
-                val request = Request.Builder()
-                    .url(probeUrl) // placeholder, real impl uses a known item ID
-                    .header("Range", "bytes=0-1048575")
-                    .build()
-                val resp = mediaClient.newCall(request).execute()
-                mediaFirstByte = clock() - start
-                rangeOk = resp.code == 206 || resp.header("Accept-Ranges") == "bytes"
-                val body = resp.body
-                if (body != null) {
-                    val bytes = body.bytes().size.toLong()
-                    val elapsedSec = (clock() - start) / 1000.0
-                    if (elapsedSec > 0 && bytes > 0) {
-                        throughput = (bytes / (1024.0 * 1024.0)) / elapsedSec
-                    }
+    /**
+     * 可取消桥接：以 [Call.enqueue] 代替阻塞的 [Call.execute]，
+     * 并在响应头到达后继续维持取消绑定，直到 [block] 消费完成为止。
+     */
+    private suspend fun <T> Call.awaitCancellable(block: (Response) -> T): T {
+        val response = suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation { cancel() }
+            enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (cont.isActive) cont.resumeWithException(e)
                 }
-                code = resp.code
-                resp.close()
-            } catch (e: Exception) {
-                // media test failure doesn't invalidate API result
+
+                override fun onResponse(call: Call, response: Response) {
+                    if (cont.isActive) cont.resume(response) else response.close()
+                }
+            })
+        }
+        // 响应头已到：另起一个独立协程监视取消，覆盖整个「响应消费窗口」。
+        // 不能用 Job.invokeOnCompletion：本协程此刻可能正阻塞在响应体读取上，
+        // 完成回调要等阻塞返回后才触发，无法中断停滞的读取。
+        val watcher = CoroutineScope(coroutineContext + ioDispatcher)
+            .launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    if (!currentCoroutineContext().isActive) cancel()
+                }
+            }
+        return try {
+            block(response)
+        } finally {
+            watcher.cancel()
+            response.close()
+        }
+    }
+
+    /** 按上限消费响应体；返回实际消费字节数。不读取超出 [limit] 的字节。 */
+    private fun ResponseBody.readAtMost(limit: Long): Long {
+        if (limit <= 0L) return 0L
+        var total = 0L
+        val buffer = Buffer()
+        source().use { source ->
+            while (total < limit) {
+                val want = minOf(READ_CHUNK_BYTES, limit - total)
+                val read = source.read(buffer, want)
+                if (read == -1L) break
+                total += read
+                buffer.clear()
             }
         }
+        return total
+    }
 
-        return EndpointTestResult(
-            apiLatencyMs = apiLatency,
-            mediaFirstByteMs = mediaFirstByte,
-            mediaThroughputMbps = throughput,
-            httpCode = code,
-            protocol = protocol,
-            supportsRange = rangeOk,
-            error = errorMsg,
-        )
+    companion object {
+        /** 媒体采样上限：与 Range 请求头一致（1 MiB）。 */
+        const val MAX_MEDIA_BYTES: Long = 1024L * 1024L
+        private const val READ_CHUNK_BYTES = 8L * 1024L
     }
 }

@@ -209,7 +209,7 @@ class ServerEditorViewModelTest {
         createdAtEpochMs = 0,
     )
 
-    private fun embyServer() = MediaServer(
+    private fun embyServer(url: String = SAVED_URL) = MediaServer(
         id = "srv-net",
         name = "Emby",
         type = ServerType.EMBY,
@@ -218,7 +218,7 @@ class ServerEditorViewModelTest {
                 id = "ep-1",
                 serverId = "srv-net",
                 name = "默认线路",
-                url = SAVED_URL,
+                url = url,
                 isPrimary = true,
                 enabled = true,
                 sortOrder = 0,
@@ -447,7 +447,143 @@ class ServerEditorViewModelTest {
         assertTrue(!vm.uiState.value.isMediaTesting)
     }
 
+    // ---- 2C：真实 EndpointTestService 的取消穿透（本机 MockWebServer，不使用替身）----
+
+    /**
+     * 记录 OkHttp 取消事件：证明「编辑页取消 → 协程取消 → Call.cancel」整条链路贯通。
+     * 这是 fake-service 无法证明的一环（替身只能证明调用方不再展示结果）。
+     */
+    private class CancelCountingListener : okhttp3.EventListener() {
+        val canceled = java.util.concurrent.atomic.AtomicInteger(0)
+        override fun canceled(call: okhttp3.Call) {
+            canceled.incrementAndGet()
+        }
+    }
+
+    private fun realService(
+        factory: HttpClientFactory,
+        listener: CancelCountingListener,
+    ): EndpointTestService {
+        val f = factory
+        return object : EndpointTestService(f) {
+            override fun createApiClient() = f.apiClient().newBuilder().eventListener(listener).build()
+            override fun createMediaClient() = f.mediaClient().newBuilder().eventListener(listener).build()
+        }
+    }
+
+    private fun viewModelWithService(
+        serverId: String,
+        endpointTestService: EndpointTestService,
+        savedUrl: String,
+    ): ServerEditorViewModel {
+        store = FakeServerStore(listOf(localServer(), embyServer(savedUrl)))
+        return ServerEditorViewModel(
+            savedStateHandle = SavedStateHandle(mapOf("serverId" to serverId)),
+            serverStore = store,
+            registry = registry,
+            tokenStore = TokenStore(FakeSecretStorage()),
+            serverIconStore = ServerIconStore(RuntimeEnvironment.getApplication()),
+            removeHandler = removeHandler,
+            endpointTestService = endpointTestService,
+            logger = StdoutLogger(),
+        )
+    }
+
+    private suspend fun awaitCondition(what: String, timeoutMs: Long = 20_000, cond: () -> Boolean) {
+        withContext(Dispatchers.Default) {
+            try {
+                kotlinx.coroutines.withTimeout(timeoutMs) {
+                    while (!cond()) kotlinx.coroutines.delay(20)
+                }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                throw AssertionError("等待超时：$what", e)
+            }
+        }
+    }
+
+    @Test
+    fun `address change cancels in-flight real endpoint test down to the socket`() = runTest {
+        val mock = okhttp3.mockwebserver.MockWebServer()
+        mock.start()
+        try {
+            mock.enqueue(
+                okhttp3.mockwebserver.MockResponse().setResponseCode(200).setBody("{}")
+                    .setHeadersDelay(REAL_DELAY_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            )
+            val listener = CancelCountingListener()
+            val service = realService(HttpClientFactory(StdoutLogger()), listener)
+            val savedUrl = mock.url("/").toString().trimEnd('/')
+            val vm = viewModelWithService("srv-net", service, savedUrl)
+            advanceUntilIdle()
+
+            vm.testMediaQuality()
+            advanceUntilIdle()
+            awaitCondition("真实 API 请求已到达本机 MockWebServer") { mock.requestCount == 1 }
+            assertTrue("在途时必须处于 testing", vm.uiState.value.isMediaTesting)
+
+            // 地址变化：取消在途任务
+            vm.updateBaseUrl("https://media-b.example")
+            advanceUntilIdle()
+
+            awaitCondition("底层 Call 必须被取消") { listener.canceled.get() >= 1 }
+            assertTrue("取消必须穿透到底层 Call", listener.canceled.get() >= 1)
+            assertTrue("取消后 loading 必须复位", !vm.uiState.value.isMediaTesting)
+            assertNull("旧结果不得显示", vm.uiState.value.mediaQualityResult)
+            assertTrue("旧结果不得写库", store.qualityUpdates.isEmpty())
+        } finally {
+            runCatching { mock.shutdown() }
+        }
+    }
+
+    @Test
+    fun `real endpoint test still completes and persists after a cancelled attempt`() = runTest {
+        val mock = okhttp3.mockwebserver.MockWebServer()
+        mock.start()
+        try {
+            // 第一次：停滞，用于取消
+            mock.enqueue(
+                okhttp3.mockwebserver.MockResponse().setResponseCode(200).setBody("{}")
+                    .setHeadersDelay(REAL_DELAY_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            )
+            // 第二次：正常两层应答
+            mock.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(200).setBody("{}"))
+            mock.enqueue(
+                okhttp3.mockwebserver.MockResponse().setResponseCode(206).setBody("abcdef")
+                    .addHeader("Accept-Ranges", "bytes")
+            )
+            val listener = CancelCountingListener()
+            val service = realService(HttpClientFactory(StdoutLogger()), listener)
+            val savedUrl = mock.url("/").toString().trimEnd('/')
+            val vm = viewModelWithService("srv-net", service, savedUrl)
+            advanceUntilIdle()
+
+            vm.testMediaQuality()
+            advanceUntilIdle()
+            awaitCondition("首次请求已到达") { mock.requestCount == 1 }
+            vm.updateBaseUrl(savedUrl) // 取消第一次（地址文本变化即递增版本 + 取消在途）
+            advanceUntilIdle()
+            awaitCondition("首次 Call 已取消") { listener.canceled.get() >= 1 }
+
+            // 取消后必须仍能发起并完成新测试
+            vm.testMediaQuality()
+            advanceUntilIdle()
+            awaitCondition("第二次测试已结束") { !vm.uiState.value.isMediaTesting }
+            awaitCondition("结果已展示") { vm.uiState.value.mediaQualityResult != null }
+
+            val update = store.qualityUpdates.single()
+            assertEquals("srv-net", update.serverId)
+            assertEquals("ep-1", update.endpointId)
+            assertEquals(savedUrl, update.expectedUrl)
+            assertEquals(true, update.supportsRange)
+        } finally {
+            runCatching { mock.shutdown() }
+        }
+    }
+
     private companion object {
         const val SAVED_URL = "https://media.example"
+
+        /** 服务端延迟：够长以构造在途窗口，够短以便回收 MockWebServer。 */
+        const val REAL_DELAY_MS = 2_000L
     }
 }

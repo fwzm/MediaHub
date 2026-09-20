@@ -2,6 +2,16 @@
 
 > 状态：TODO / IN PROGRESS / DONE / BLOCKED。由完成任务的 AI 更新。
 
+## Phase 1I 2C —— EndpointTestService 取消边界（闭环任务 T0001，2026-09-20）🔨 code+tests complete
+
+- [x] DONE 生产修复：`EndpointTestService` 双层探测移出调用方调度器；`Call.enqueue` 可取消桥接；
+      响应所有权统一释放；1 MiB 有界采样；取消引起的 IOException 不再被吞。
+- [x] DONE 回归：`EndpointTestServiceCancellationTest` 7 例 + `EndpointTestServiceTest` 新增 4 例
+      + `ServerEditorViewModelTest` 新增 2 例真实服务集成（取消穿透到 OkHttp `canceled`）。
+- [ ] TODO 设备验证与真实媒体测速：`probeUrl` 仍为占位；本任务不覆盖真机与真实服务器。
+- 来源：闭环控制目录 `D:/deepseek_test/mh-loop`，任务 `T0001`，任务书见该目录 `evidence/T0001/`。
+- 本任务不领取 2A（Agent B 持有）、2B（缺真实服务器证据）、PR #10 / PR #18 相关工作。
+
 ## Phase 0 —— 骨架（本次交付）✅ DONE
 
 - [x] DONE 工程骨架：settings/build/version catalog/wrapper
