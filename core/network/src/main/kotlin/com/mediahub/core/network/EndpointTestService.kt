@@ -85,8 +85,8 @@ open class EndpointTestService(
             var errorMsg: String? = null
 
             // ---- Layer 1: API latency ----
-            val apiCall = newCall(createApiClient(), Request.Builder().url(probeUrl).build())
             try {
+                val apiCall = newCall(createApiClient(), Request.Builder().url(probeUrl).build())
                 val start = clock()
                 apiCall.awaitCancellable { resp ->
                     apiLatency = clock() - start
@@ -106,14 +106,14 @@ open class EndpointTestService(
             // ---- Layer 2: Media Range（受控交接窗口：API 完成、Media 尚未开始）----
             if (errorMsg == null) {
                 coroutineContext.ensureActive()
-                val mediaCall = newCall(
-                    createMediaClient(),
-                    Request.Builder()
-                        .url(probeUrl) // placeholder, real impl uses a known item ID
-                        .header("Range", "bytes=0-${MAX_MEDIA_BYTES - 1}")
-                        .build()
-                )
                 try {
+                    val mediaCall = newCall(
+                        createMediaClient(),
+                        Request.Builder()
+                            .url(probeUrl) // placeholder, real impl uses a known item ID
+                            .header("Range", "bytes=0-${MAX_MEDIA_BYTES - 1}")
+                            .build()
+                    )
                     val start = clock()
                     mediaCall.awaitCancellable { resp ->
                         mediaFirstByte = clock() - start
