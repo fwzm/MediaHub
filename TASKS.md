@@ -141,13 +141,26 @@
       播放/退出释放无回归；图片 URL 无 Token（EmbyImageMapperTest/EmbyImageAuthInterceptorTest 契约钉死）
 - [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；结果以交付报告记录 run id（不做 docs-only 二次提交）
 
-## Phase 1B-2.4 —— Player UX Hardening（音轨 index 统一 / 音频诊断 / 字幕样式）✅ 代码+测试完成
+## Phase 1B-2.4 —— Player UX Hardening（音轨 index 统一 / 音频诊断 / 字幕样式）✅ 代码+测试完成，选轨部分由 T0002 纠正
 - [x] TrackSelection 三套 index 语义统一（per-type ordinal；TrackMapperTest 3 用例钉死；isSelected/isDefault 分离）
+      ⚠️ 该 3 用例只覆盖**映射序号**，不等于引擎选轨验证——引擎侧当时仍按 renderer 索引选择，见 T0002/ADR-041
 - [x] Audio 诊断：isSupported / decoderName / 默认轨标志；全部音轨不支持时播放页黄条提示（不再静默无声）
 - [x] 字幕默认白字+全透明背景+黑描边（ADR-032），字号/颜色/背景/描边/位置持久化（SubtitleStyle→DataStore）
 - [x] 音轨 Bottom Sheet（语言/codec/声道/采样率/解码器/支持状态）+ 字幕 Bottom Sheet（轨道+样式）
 - [x] UserPreferencesRepository 抽象；README/CHANGELOG/DECISIONS 同步
 - [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；真机多音轨/字幕样式验证随后记录
+
+## T0002 —— Media3 选轨 renderer 索引混用修复（闭环任务）✅ 代码+测试完成（自动化验证）
+- [x] `PlaybackEngine.selectTrack` 改为类型级 API：按真实 TrackGroup 走 `setOverrideForType`，
+      关闭走 `clearOverridesOfType` + `setTrackTypeDisabled`（ADR-041 纠正 ADR-032）
+- [x] groupIndex 契约显式化为"当前 Tracks 中仅按目标类型过滤后的组序号"（保留 unsupported 组），
+      与 TrackMapper 同源；`resolveTrackGroup` 单一解析点
+- [x] 新增 `tracksProvider: () -> Tracks` 接缝（默认 `player.currentTracks`），生产路径零变化
+- [x] 非法索引/无目标类型零副作用且不抛异常；null 关闭在无轨道时也可安全下发类型禁用
+- [x] 新增 PlaybackEngineTrackSelectionTest（6 用例，真实引擎入口 + 真实 DefaultTrackSelector 参数）
+- [x] TrackMapperTest 扩充 unsupported 占位组序号用例（4 用例）
+- [ ] 真机多音轨/字幕选择走查（**DEVICE VERIFICATION PENDING**，本轮不做）
+- [ ] 组内多轨展开、外挂字幕、轨道偏好持久化、mpv 选轨（仍为待办，本次范围外）
 
 ## Phase 1B-2.5a —— Player Startup & Immersive UX（插入，暂停 Server Editor）🔄 IN PROGRESS
 - [x] Item 1：TTFF 单调时钟（SystemClock.elapsedRealtime）+ 首帧渲染日志（renderTimeMs）
