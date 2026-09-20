@@ -1,6 +1,0 @@
-warning: in the working copy of 'CHANGELOG.md', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'HANDOFF.md', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'TASKS.md', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'core/network/src/main/kotlin/com/mediahub/core/network/EndpointTestService.kt', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'core/network/src/test/kotlin/com/mediahub/core/network/EndpointTestServiceCancellationTest.kt', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'feature/server/src/test/kotlin/com/mediahub/feature/server/ServerEditorViewModelTest.kt', LF will be replaced by CRLF the next time Git touches it
