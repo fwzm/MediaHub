@@ -1,0 +1,82 @@
+JUnit version 4.13.2
+..[D][NETWORK] -> GET http://127.0.0.1:4342/probe headers={X-Request-Id=816ec7d4}
+[W][NETWORK] ����ʧ�ܣ����� 2/2: GET http://127.0.0.1:4342/probe
+E.[D][NETWORK] -> GET http://127.0.0.1:7681/probe headers={X-Request-Id=fae859be}
+[D][NETWORK] <- 200 http://127.0.0.1:7681/probe 46ms requestId=fae859be
+[D][NETWORK] -> GET http://127.0.0.1:7681/probe headers={Range=bytes=0-1048575, X-Request-Id=f7e03c5f}
+9�� 20, 2026 1:07:10 ���� okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+����: MockWebServer[7681] connection from /127.0.0.1 didn't make a request
+E...[D][NETWORK] -> GET http://127.0.0.1:7701/probe headers={X-Request-Id=b4ab17f2}
+[W][NETWORK] ����ʧ�ܣ����� 2/2: GET http://127.0.0.1:7701/probe
+9�� 20, 2026 1:07:10 ���� okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+����: MockWebServer[7701] connection from /127.0.0.1 didn't make a request
+E.E.
+Time: 19.445
+There were 4 failures:
+1) api layer does not block the caller dispatcher(com.mediahub.core.network.EndpointTestServiceCancellationTest)
+java.lang.AssertionError: �ȴ���ʱ��API �����ѷ���
+	at com.mediahub.core.network.EndpointTestServiceCancellationTest$awaitTrue$2.invokeSuspend(EndpointTestServiceCancellationTest.kt:394)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.internal.ScopeCoroutine.afterResume(Scopes.kt:28)
+	at kotlinx.coroutines.AbstractCoroutine.resumeWith(AbstractCoroutine.kt:100)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:46)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:99)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:832)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+Caused by: kotlinx.coroutines.TimeoutCancellationException: Timed out waiting for 5000 ms
+	at kotlinx.coroutines.TimeoutKt.TimeoutCancellationException(Timeout.kt:188)
+	at kotlinx.coroutines.TimeoutCoroutine.run(Timeout.kt:156)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedRunnableTask.run(EventLoop.common.kt:505)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.DefaultExecutor.run(DefaultExecutor.kt:105)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2) cancel while awaiting media headers aborts the media call(com.mediahub.core.network.EndpointTestServiceCancellationTest)
+java.lang.AssertionError: �ȴ���ʱ��Ŀ�� Media Call �ĵײ�ȴ�����ֹ
+	at com.mediahub.core.network.EndpointTestServiceCancellationTest$awaitTrue$2.invokeSuspend(EndpointTestServiceCancellationTest.kt:394)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.internal.ScopeCoroutine.afterResume(Scopes.kt:28)
+	at kotlinx.coroutines.AbstractCoroutine.resumeWith(AbstractCoroutine.kt:100)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:46)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:220)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:832)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+Caused by: kotlinx.coroutines.TimeoutCancellationException: Timed out waiting for 5000 ms
+	at kotlinx.coroutines.TimeoutKt.TimeoutCancellationException(Timeout.kt:188)
+	at kotlinx.coroutines.TimeoutCoroutine.run(Timeout.kt:156)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedRunnableTask.run(EventLoop.common.kt:505)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.DefaultExecutor.run(DefaultExecutor.kt:105)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+3) cancel while awaiting api headers aborts the call and skips media(com.mediahub.core.network.EndpointTestServiceCancellationTest)
+java.lang.AssertionError: �ײ� Call ���뱻����ȡ��
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.mediahub.core.network.EndpointTestServiceCancellationTest$cancel while awaiting api headers aborts the call and skips media$1.invokeSuspend(EndpointTestServiceCancellationTest.kt:193)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at com.mediahub.core.network.EndpointTestServiceCancellationTest.cancel while awaiting api headers aborts the call and skips media(EndpointTestServiceCancellationTest.kt:180)
+4) cancel during stalled media body read aborts the call(com.mediahub.core.network.EndpointTestServiceCancellationTest)
+java.lang.AssertionError: �ȴ���ʱ��ȡ��ʹĿ�� Media �� source.read �˳�
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.mediahub.core.network.EndpointTestServiceCancellationTest$awaitLatch$2.invokeSuspend(EndpointTestServiceCancellationTest.kt:410)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:832)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+
+FAILURES!!!
+Tests run: 8,  Failures: 4
+

@@ -1,0 +1,72 @@
+JUnit version 4.13.2
+....[D][NETWORK] -> GET http://127.0.0.1:3117/probe headers={X-Request-Id=ff7f1f45}
+[W][NETWORK] ����ʧ�ܣ����� 2/2: GET http://127.0.0.1:3117/probe
+Exception in thread "OkHttp Dispatcher" java.lang.InterruptedException: sleep interrupted
+	at java.base/java.lang.Thread.sleep0(Native Method)
+	at java.base/java.lang.Thread.sleep(Thread.java:509)
+	at com.mediahub.core.network.HttpClientFactory$RetryOnceInterceptor.intercept(HttpClientFactory.kt:71)
+	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:109)
+	at com.mediahub.core.network.HttpClientFactory$RedactingLoggingInterceptor.intercept(HttpClientFactory.kt:92)
+	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:109)
+	at com.mediahub.core.network.HttpClientFactory$RequestIdInterceptor.intercept(HttpClientFactory.kt:50)
+	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:109)
+	at okhttp3.internal.connection.RealCall.getResponseWithInterceptorChain$okhttp(RealCall.kt:201)
+	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:517)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+9�� 20, 2026 1:02:58 ���� okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+����: MockWebServer[3117] connection from /127.0.0.1 didn't make a request
+.[D][NETWORK] -> GET http://127.0.0.1:3119/probe headers={X-Request-Id=02a6bf67}
+[D][NETWORK] <- 200 http://127.0.0.1:3119/probe 31ms requestId=02a6bf67
+[D][NETWORK] -> GET http://127.0.0.1:3119/probe headers={Range=bytes=0-1048575, X-Request-Id=b4cb44c9}
+9�� 20, 2026 1:02:58 ���� okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+����: MockWebServer[3119] connection from /127.0.0.1 didn't make a request
+...[D][NETWORK] -> GET http://127.0.0.1:3124/probe headers={X-Request-Id=eef39c8f}
+[W][NETWORK] ����ʧ�ܣ����� 2/2: GET http://127.0.0.1:3124/probe
+9�� 20, 2026 1:02:58 ���� okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+����: MockWebServer[3124] connection from /127.0.0.1 didn't make a request
+Exception in thread "OkHttp Dispatcher" java.lang.InterruptedException: sleep interrupted
+	at java.base/java.lang.Thread.sleep0(Native Method)
+	at java.base/java.lang.Thread.sleep(Thread.java:509)
+	at com.mediahub.core.network.HttpClientFactory$RetryOnceInterceptor.intercept(HttpClientFactory.kt:71)
+	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:109)
+	at com.mediahub.core.network.HttpClientFactory$RedactingLoggingInterceptor.intercept(HttpClientFactory.kt:92)
+	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:109)
+	at com.mediahub.core.network.HttpClientFactory$RequestIdInterceptor.intercept(HttpClientFactory.kt:50)
+	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:109)
+	at okhttp3.internal.connection.RealCall.getResponseWithInterceptorChain$okhttp(RealCall.kt:201)
+	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:517)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+...[D][NETWORK] -> GET http://127.0.0.1:3128/System/Info/Public headers={X-Request-Id=a8637758}
+[D][NETWORK] <- 200 http://127.0.0.1:3128/System/Info/Public 5ms requestId=a8637758
+[D][NETWORK] -> GET http://127.0.0.1:3128/System/Info/Public headers={Range=bytes=0-1048575, X-Request-Id=0419b153}
+[D][NETWORK] <- 200 http://127.0.0.1:3128/System/Info/Public 4ms requestId=0419b153
+.[D][NETWORK] -> GET http://127.0.0.1:3131/emby/System/Info/Public headers={X-Request-Id=869c6f21}
+[D][NETWORK] <- 200 http://127.0.0.1:3131/emby/System/Info/Public 4ms requestId=869c6f21
+[D][NETWORK] -> GET http://127.0.0.1:3131/emby/System/Info/Public headers={Range=bytes=0-1048575, X-Request-Id=ab5b346d}
+[D][NETWORK] <- 200 http://127.0.0.1:3131/emby/System/Info/Public 4ms requestId=ab5b346d
+.[D][NETWORK] -> GET http://127.0.0.1:3134/System/Info/Public headers={X-Request-Id=bc517692}
+[D][NETWORK] <- 200 http://127.0.0.1:3134/System/Info/Public 4ms requestId=bc517692
+[D][NETWORK] -> GET http://127.0.0.1:3134/System/Info/Public headers={Range=bytes=0-1048575, X-Request-Id=1781a03b}
+[D][NETWORK] <- 206 http://127.0.0.1:3134/System/Info/Public 4ms requestId=1781a03b
+.[D][NETWORK] -> GET http://127.0.0.1:3137/System/Info/Public headers={X-Request-Id=c4eb2064}
+[D][NETWORK] <- 200 http://127.0.0.1:3137/System/Info/Public 4ms requestId=c4eb2064
+[D][NETWORK] -> GET http://127.0.0.1:3137/System/Info/Public headers={Range=bytes=0-1048575, X-Request-Id=ebe90e46}
+.[D][NETWORK] -> GET http://127.0.0.1:3140/System/Info/Public headers={X-Request-Id=540345e9}
+[D][NETWORK] <- 200 http://127.0.0.1:3140/System/Info/Public 4ms requestId=540345e9
+[D][NETWORK] -> GET http://127.0.0.1:3140/System/Info/Public headers={Range=bytes=0-1048575, X-Request-Id=d2eb4175}
+[D][NETWORK] <- 204 http://127.0.0.1:3140/System/Info/Public 4ms requestId=d2eb4175
+.[D][NETWORK] -> GET http://127.0.0.1:3143/jellyfin/System/Info/Public headers={X-Request-Id=e2c84969}
+[D][NETWORK] <- 200 http://127.0.0.1:3143/jellyfin/System/Info/Public 5ms requestId=e2c84969
+[D][NETWORK] -> GET http://127.0.0.1:3143/jellyfin/System/Info/Public headers={Range=bytes=0-1048575, X-Request-Id=68453eea}
+[D][NETWORK] <- 200 http://127.0.0.1:3143/jellyfin/System/Info/Public 5ms requestId=68453eea
+.[D][NETWORK] -> GET http://127.0.0.1:3146/System/Info/Public headers={X-Request-Id=95ecc8b3}
+[W][NETWORK] ����ʧ�ܣ����� 2/2: GET http://127.0.0.1:3146/System/Info/Public
+
+Time: 9.577
+
+OK (17 tests)
+

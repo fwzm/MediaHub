@@ -2,7 +2,16 @@
 
 > 状态：TODO / IN PROGRESS / DONE / BLOCKED。由完成任务的 AI 更新。
 
-## Phase 1I 2C —— EndpointTestService 取消边界（闭环任务 T0001，2026-09-20）🔨 code+tests complete
+## Phase 1I 2C —— EndpointTestService 取消边界（T0001，2026-09-20）BLOCKED：完整验证待补
+
+- [x] F01/F02：未修复源码两条回归先红；响应在回调内消费关闭，Media 读体失败保留 API 状态码。
+- [x] F03/F05：明确 Media 等头/读体屏障、Call 身份、取消异常、关闭责任、独立 watchdog 和失败清理；
+      当前网络源码直接 JUnit 17 例通过，移除取消绑定的负对照按预期失败。
+- [x] F04 测试代码：八条 fake 保留，真实 HTTPS 切换及 ViewModelStore 生命周期清理测试已补齐并编译。
+- [ ] BLOCKED F04 运行与 F06 完整门禁：Robolectric Android JAR 读取被拒；Gradle 配置阶段权限失败，
+      两个模块单测、两个 lint 与应用 debug 构建均未取得通过证据。见 `.repair-evidence/README.md`。
+
+初次实现范围记录（不代表本次验证通过）：
 
 - [x] DONE 生产修复：`EndpointTestService` 双层探测移出调用方调度器；`Call.enqueue` 可取消桥接；
       响应所有权统一释放；1 MiB 有界采样；取消引起的 IOException 不再被吞。

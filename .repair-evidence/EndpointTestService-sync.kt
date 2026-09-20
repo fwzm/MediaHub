@@ -153,28 +153,7 @@ open class EndpointTestService(
      * 回调持有响应直至 [block] 消费并关闭；跨 continuation 只交付不持有响应的结果。
      * 取消钩子在消费期间仍有效，可中止停滞读取，也不会留下恢复前取消的所有权空隙。
      */
-    private suspend fun <T> Call.awaitCancellable(block: (Response) -> T): T =
-        suspendCancellableCoroutine { cont ->
-            cont.invokeOnCancellation { cancel() }
-            enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (cont.isActive) cont.resumeWithException(e)
-                }
-
-                override fun onResponse(call: Call, response: Response) {
-                    val result = try {
-                        response.use {
-                            if (!cont.isActive) return
-                            block(it)
-                        }
-                    } catch (e: Exception) {
-                        if (cont.isActive) cont.resumeWithException(e)
-                        return
-                    }
-                    if (cont.isActive) cont.resume(result)
-                }
-            })
-        }
+    private suspend fun <T> Call.awaitCancellable(block: (Response) -> T): T = execute().use(block)
 
     /** 按上限消费响应体；返回实际消费字节数。不读取超出 [limit] 的字节。 */
     private fun ResponseBody.readAtMost(limit: Long): Long {

@@ -155,7 +155,7 @@ open class EndpointTestService(
      */
     private suspend fun <T> Call.awaitCancellable(block: (Response) -> T): T =
         suspendCancellableCoroutine { cont ->
-            cont.invokeOnCancellation { cancel() }
+            cont.invokeOnCancellation { /* negative control: Call.cancel removed */ }
             enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
                     if (cont.isActive) cont.resumeWithException(e)

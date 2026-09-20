@@ -1,6 +1,8 @@
 package com.mediahub.feature.server
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.viewModelScope
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.StdoutLogger
@@ -23,6 +25,8 @@ import org.robolectric.RuntimeEnvironment
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -41,6 +45,30 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.IOException
+import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.cancellation.CancellationException
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Connection
+import okhttp3.EventListener
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
+import okio.Buffer
+import okio.ForwardingSource
+import okio.buffer
 
 /**
  * ServerEditorViewModel 回归（Phase 1I review P1/P2，调用端真实 VM 测试）：
@@ -447,143 +475,362 @@ class ServerEditorViewModelTest {
         assertTrue(!vm.uiState.value.isMediaTesting)
     }
 
-    // ---- 2C：真实 EndpointTestService 的取消穿透（本机 MockWebServer，不使用替身）----
+    // ---- 2C：真实 EndpointTestService + 本机 socket 的取消与资源所有权 ----
+
+    private class CallTrace(val call: Call, private val onReadEntered: () -> Unit) {
+        val canceled = CountDownLatch(1)
+        val terminal = CountDownLatch(1)
+        val connectionReleased = CountDownLatch(1)
+        val headers = CountDownLatch(1)
+        val readEntered = CountDownLatch(1)
+        val readExited = CountDownLatch(1)
+        val responseClosed = CountDownLatch(1)
+        private val ownedResponse = AtomicReference<Response?>()
+
+        fun track(response: Response): Response {
+            headers.countDown()
+            val body = requireNotNull(response.body)
+            val trackedSource = object : ForwardingSource(body.source()) {
+                override fun read(sink: Buffer, byteCount: Long): Long {
+                    readEntered.countDown()
+                    onReadEntered()
+                    return try {
+                        super.read(sink, byteCount)
+                    } finally {
+                        readExited.countDown()
+                    }
+                }
+            }.buffer()
+            return response.newBuilder().body(object : ResponseBody() {
+                override fun contentType() = body.contentType()
+                override fun contentLength() = body.contentLength()
+                override fun source() = trackedSource
+                override fun close() {
+                    try {
+                        trackedSource.close()
+                    } finally {
+                        responseClosed.countDown()
+                    }
+                }
+            }).build().also { ownedResponse.set(it) }
+        }
+
+        fun closeResponseForCleanup() { ownedResponse.get()?.close() }
+    }
+
+    private class ServiceAttempt {
+        val completed = CountDownLatch(1)
+        val result = AtomicReference<EndpointTestResult?>()
+        val failure = AtomicReference<Throwable?>()
+    }
 
     /**
-     * 记录 OkHttp 取消事件：证明「编辑页取消 → 协程取消 → Call.cancel」整条链路贯通。
-     * 这是 fake-service 无法证明的一环（替身只能证明调用方不再展示结果）。
+     * 主调度器和 watchdog 各有独立线程，均在首次调用 VM 前就绪。
+     * 等头由服务端 barrier 控制；读体响应只声明一个字节却不发送字节，真实 socket
+     * 一直等待，必须由取消或 finally 的强制清理结束，不能靠短延迟自然完成。
      */
-    private class CancelCountingListener : okhttp3.EventListener() {
-        val canceled = java.util.concurrent.atomic.AtomicInteger(0)
-        override fun canceled(call: okhttp3.Call) {
-            canceled.incrementAndGet()
+    private inner class RealEndpointHarness(private val stallMediaBody: Boolean = false) : AutoCloseable {
+        private val mainExecutor = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "endpoint-vm-main").apply { isDaemon = true }
         }
-    }
-
-    private fun realService(
-        factory: HttpClientFactory,
-        listener: CancelCountingListener,
-    ): EndpointTestService {
-        val f = factory
-        return object : EndpointTestService(f) {
-            override fun createApiClient() = f.apiClient().newBuilder().eventListener(listener).build()
-            override fun createMediaClient() = f.mediaClient().newBuilder().eventListener(listener).build()
+        private val mainDispatcher = mainExecutor.asCoroutineDispatcher()
+        private val watchdog = Executors.newSingleThreadScheduledExecutor { task ->
+            Thread(task, "endpoint-vm-watchdog").apply { isDaemon = true }
         }
-    }
+        private val watchdogFired = AtomicBoolean(false)
+        private val scopeJob = AtomicReference<Job?>()
+        private val viewModelStore = ViewModelStore()
+        private val scopeCompleted = CountDownLatch(1)
+        private val firstHeaders = AtomicBoolean(!stallMediaBody)
+        private val firstMedia = AtomicBoolean(stallMediaBody)
+        private val releaseHeaders = CountDownLatch(1)
+        private val mediaReadEntered = CountDownLatch(1)
+        val headersWaiting = CountDownLatch(1)
+        val traces = CopyOnWriteArrayList<CallTrace>()
+        private val tracesByCall = ConcurrentHashMap<Call, CallTrace>()
+        private val attempts = CopyOnWriteArrayList<ServiceAttempt>()
+        private val mock = MockWebServer()
+        private val listener = object : EventListener() {
+            override fun canceled(call: Call) { tracesByCall[call]?.canceled?.countDown() }
+            override fun callEnd(call: Call) { tracesByCall[call]?.terminal?.countDown() }
+            override fun callFailed(call: Call, ioe: IOException) { tracesByCall[call]?.terminal?.countDown() }
+            override fun connectionReleased(call: Call, connection: Connection) {
+                tracesByCall[call]?.connectionReleased?.countDown()
+            }
+        }
+        private val factory = HttpClientFactory(StdoutLogger())
+        private val apiClient = factory.apiClient().newBuilder().eventListener(listener).build()
+        private val mediaClient = factory.mediaClient().newBuilder().eventListener(listener).build()
+        private val clients = listOf(apiClient, mediaClient)
+        private val realService = object : EndpointTestService(factory) {
+            override fun createApiClient() = apiClient
+            override fun createMediaClient() = mediaClient
 
-    private fun viewModelWithService(
-        serverId: String,
-        endpointTestService: EndpointTestService,
-        savedUrl: String,
-    ): ServerEditorViewModel {
-        store = FakeServerStore(listOf(localServer(), embyServer(savedUrl)))
-        return ServerEditorViewModel(
-            savedStateHandle = SavedStateHandle(mapOf("serverId" to serverId)),
-            serverStore = store,
-            registry = registry,
-            tokenStore = TokenStore(FakeSecretStorage()),
-            serverIconStore = ServerIconStore(RuntimeEnvironment.getApplication()),
-            removeHandler = removeHandler,
-            endpointTestService = endpointTestService,
-            logger = StdoutLogger(),
-        )
-    }
-
-    private suspend fun awaitCondition(what: String, timeoutMs: Long = 20_000, cond: () -> Boolean) {
-        withContext(Dispatchers.Default) {
-            try {
-                kotlinx.coroutines.withTimeout(timeoutMs) {
-                    while (!cond()) kotlinx.coroutines.delay(20)
+            override fun newCall(client: OkHttpClient, request: Request): Call {
+                val delegate = client.newCall(request)
+                val trace = CallTrace(delegate) {
+                    if (request.header("Range") != null) mediaReadEntered.countDown()
                 }
-            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                throw AssertionError("等待超时：$what", e)
+                tracesByCall[delegate] = trace
+                traces += trace
+                return object : Call by delegate {
+                    override fun execute() = trace.track(delegate.execute())
+                    override fun enqueue(responseCallback: Callback) {
+                        delegate.enqueue(object : Callback {
+                            override fun onFailure(call: Call, e: IOException) = responseCallback.onFailure(call, e)
+                            override fun onResponse(call: Call, response: Response) =
+                                responseCallback.onResponse(call, trace.track(response))
+                        })
+                    }
+                }
+            }
+
+            override suspend fun test(baseUrl: String, probePath: String): EndpointTestResult {
+                val attempt = ServiceAttempt()
+                attempts += attempt
+                return try {
+                    super.test(baseUrl, probePath).also { attempt.result.set(it) }
+                } catch (failure: Throwable) {
+                    attempt.failure.set(failure)
+                    throw failure
+                } finally {
+                    attempt.completed.countDown()
+                }
+            }
+        }
+        // 必须在 VM 构造、testMediaQuality 及主调度器执行之前建立，防同步 execute 负对照挂死。
+        private val watchdogTask = watchdog.schedule({
+            watchdogFired.set(true)
+            abortInFlight()
+        }, WATCHDOG_SECONDS, TimeUnit.SECONDS)
+        lateinit var vm: ServerEditorViewModel
+            private set
+        lateinit var savedUrl: String
+            private set
+        private lateinit var requestCompleted: CountDownLatch
+
+        init {
+            try {
+                mock.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+                    override fun dispatch(request: RecordedRequest): MockResponse {
+                        if (firstHeaders.compareAndSet(true, false)) {
+                            headersWaiting.countDown()
+                            check(releaseHeaders.await(WATCHDOG_SECONDS * 2, TimeUnit.SECONDS)) {
+                                "服务端等头 barrier 未释放"
+                            }
+                        }
+                        if (request.getHeader("Range") != null) {
+                            if (firstMedia.compareAndSet(true, false)) {
+                                return MockResponse().setResponseCode(206).setHeader("Content-Length", "1")
+                            }
+                            return MockResponse().setResponseCode(206).setBody("abcdef")
+                                .addHeader("Accept-Ranges", "bytes")
+                        }
+                        return MockResponse().setResponseCode(200).setBody("{}")
+                    }
+                }
+                mock.start()
+                savedUrl = mock.url("/").toString().trimEnd('/')
+                Dispatchers.setMain(mainDispatcher)
+                onMain {
+                    store = FakeServerStore(listOf(localServer(), embyServer(savedUrl)))
+                    vm = ServerEditorViewModel(
+                        savedStateHandle = SavedStateHandle(mapOf("serverId" to "srv-net")),
+                        serverStore = store,
+                        registry = registry,
+                        tokenStore = TokenStore(FakeSecretStorage()),
+                        serverIconStore = ServerIconStore(RuntimeEnvironment.getApplication()),
+                        removeHandler = removeHandler,
+                        endpointTestService = realService,
+                        logger = StdoutLogger(),
+                    )
+                    viewModelStore.put("editor", vm)
+                    scopeJob.set(requireNotNull(vm.viewModelScope.coroutineContext[Job]).also { job ->
+                        job.invokeOnCompletion { scopeCompleted.countDown() }
+                    })
+                }
+                onMain { assertTrue("编辑器已完成加载", !vm.uiState.value.isLoading) }
+            } catch (failure: Throwable) {
+                try { close() } catch (cleanupFailure: Throwable) { failure.addSuppressed(cleanupFailure) }
+                throw failure
+            }
+        }
+
+        fun <T> onMain(block: () -> T): T =
+            mainExecutor.submit(Callable { block() }).get(WAIT_SECONDS, TimeUnit.SECONDS)
+
+        fun start(): CallTrace {
+            requestCompleted = CountDownLatch(1)
+            onMain {
+                vm.testMediaQuality()
+                requireNotNull(scopeJob.get()).children.single().invokeOnCompletion { requestCompleted.countDown() }
+            }
+            if (stallMediaBody) {
+                awaitMediaRead()
+            } else {
+                await(headersWaiting, "首个 API 请求已进入服务端等头 barrier")
+            }
+            onMain { assertTrue("目标请求在途", vm.uiState.value.isMediaTesting) }
+            return if (stallMediaBody) {
+                traces.single { it.call.request().header("Range") != null }.also { target ->
+                    assertEquals("Media 已收到响应头", 0L, target.headers.count)
+                    assertEquals("取消前读取仍停滞", 1L, target.readExited.count)
+                    assertEquals("取消前 Response 仍由真实服务持有", 1L, target.responseClosed.count)
+                }
+            } else traces.first()
+        }
+
+        private fun awaitMediaRead() {
+            // 不轮询线程调度：由目标 Call 的 response/read 事件直接完成等待。
+            await(mediaReadEntered, "Media 已进入停滞读体")
+        }
+
+        fun clearViewModel() = onMain { viewModelStore.clear() }
+
+        fun assertCanceled(target: CallTrace) {
+            await(target.canceled, "对应底层 Call 收到 cancel")
+            assertTrue("确切目标 Call 已取消", target.call.isCanceled())
+            await(target.terminal, "对应底层 Call 已终止")
+            await(target.connectionReleased, "对应连接已释放")
+            if (target.headers.count == 0L) {
+                await(target.readExited, "停滞读取已退出")
+                await(target.responseClosed, "已取得的 Response 已关闭")
+            } else {
+                assertEquals("等头取消时尚未取得 Response", 1L, target.headers.count)
+            }
+            await(requestCompleted, "调用方质量任务已结束")
+            val attempt = attempts.single()
+            await(attempt.completed, "真实服务调用已退出")
+            assertTrue("调用方必须收到 CancellationException", attempt.failure.get() is CancellationException)
+            assertNull("取消不得成为普通结果", attempt.result.get())
+            releaseHeaders.countDown()
+            onMain {
+                assertTrue("取消后 loading 复位", !vm.uiState.value.isMediaTesting)
+                assertNull("旧结果不得显示", vm.uiState.value.mediaQualityResult)
+                assertTrue("旧结果不得落库", store.qualityUpdates.isEmpty())
+            }
+        }
+
+        fun retryAndAssertPersisted() {
+            requestCompleted = CountDownLatch(1)
+            onMain {
+                vm.testMediaQuality()
+                requireNotNull(scopeJob.get()).children.single().invokeOnCompletion { requestCompleted.countDown() }
+            }
+            await(requestCompleted, "取消后的新测试正常完成")
+            onMain {
+                assertNotNull("新结果可显示", vm.uiState.value.mediaQualityResult)
+                assertTrue(!vm.uiState.value.isMediaTesting)
+                val update = store.qualityUpdates.single()
+                assertEquals("srv-net", update.serverId)
+                assertEquals("ep-1", update.endpointId)
+                assertEquals(savedUrl, update.expectedUrl)
+                assertEquals(true, update.supportsRange)
+            }
+            traces.filter { it.headers.count == 0L }.forEach {
+                await(it.responseClosed, "新测试 Response 已关闭")
+                await(it.terminal, "新测试 Call 已结束")
+            }
+        }
+
+        private fun abortInFlight() {
+            scopeJob.get()?.cancel()
+            releaseHeaders.countDown()
+            clients.forEach { it.dispatcher.cancelAll() }
+        }
+
+        override fun close() {
+            val failures = mutableListOf<Throwable>()
+            fun clean(label: String, action: () -> Unit) {
+                try { action() } catch (failure: Throwable) { failures += AssertionError(label, failure) }
+            }
+            watchdogTask.cancel(false)
+            clean("取消在途请求并释放 barrier") { abortInFlight() }
+            clean("ViewModelStore 生命周期清理") {
+                onMain { viewModelStore.clear() }
+                if (scopeJob.get() != null) await(scopeCompleted, "ViewModel scope 结束")
+            }
+            clean("服务调用全部结束") { attempts.forEach { await(it.completed, "服务调用清理") } }
+            // 主路径已先检查 responseClosed；这里仅回收断言失败/故意删 close 的负对照资源。
+            traces.forEach { trace -> clean("强制释放已取得的 Response") { trace.closeResponseForCleanup() } }
+            clean("所有底层请求均终止") { traces.forEach { await(it.terminal, "Call 清理") } }
+            clients.forEach { client ->
+                clean("释放连接与 OkHttp executor") {
+                    client.connectionPool.evictAll()
+                    val executor = client.dispatcher.executorService
+                    executor.shutdown()
+                    if (!executor.awaitTermination(WAIT_SECONDS, TimeUnit.SECONDS)) {
+                        executor.shutdownNow()
+                        val stopped = executor.awaitTermination(WAIT_SECONDS, TimeUnit.SECONDS)
+                        error("OkHttp executor 未能正常结束，已强制中断；已终止=$stopped")
+                    }
+                }
+            }
+            clean("关闭 MockWebServer") { mock.shutdown() }
+            clean("关闭主调度器") {
+                mainDispatcher.close()
+                check(mainExecutor.awaitTermination(WAIT_SECONDS, TimeUnit.SECONDS))
+            }
+            clean("关闭 watchdog") {
+                watchdog.shutdownNow()
+                check(watchdog.awaitTermination(WAIT_SECONDS, TimeUnit.SECONDS))
+            }
+            if (watchdogFired.get()) failures += AssertionError("独立 watchdog 触发：取消实现未在期限内退出")
+            if (failures.isNotEmpty()) throw failures.first().also { first ->
+                failures.drop(1).forEach(first::addSuppressed)
             }
         }
     }
 
+    private fun await(latch: CountDownLatch, what: String) {
+        assertTrue("等待超时：$what", latch.await(WAIT_SECONDS, TimeUnit.SECONDS))
+    }
+
     @Test
-    fun `address change cancels in-flight real endpoint test down to the socket`() = runTest {
-        val mock = okhttp3.mockwebserver.MockWebServer()
-        mock.start()
-        try {
-            mock.enqueue(
-                okhttp3.mockwebserver.MockResponse().setResponseCode(200).setBody("{}")
-                    .setHeadersDelay(REAL_DELAY_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
-            )
-            val listener = CancelCountingListener()
-            val service = realService(HttpClientFactory(StdoutLogger()), listener)
-            val savedUrl = mock.url("/").toString().trimEnd('/')
-            val vm = viewModelWithService("srv-net", service, savedUrl)
-            advanceUntilIdle()
-
-            vm.testMediaQuality()
-            advanceUntilIdle()
-            awaitCondition("真实 API 请求已到达本机 MockWebServer") { mock.requestCount == 1 }
-            assertTrue("在途时必须处于 testing", vm.uiState.value.isMediaTesting)
-
-            // 地址变化：取消在途任务
-            vm.updateBaseUrl("https://media-b.example")
-            advanceUntilIdle()
-
-            awaitCondition("底层 Call 必须被取消") { listener.canceled.get() >= 1 }
-            assertTrue("取消必须穿透到底层 Call", listener.canceled.get() >= 1)
-            assertTrue("取消后 loading 必须复位", !vm.uiState.value.isMediaTesting)
-            assertNull("旧结果不得显示", vm.uiState.value.mediaQualityResult)
-            assertTrue("旧结果不得写库", store.qualityUpdates.isEmpty())
-        } finally {
-            runCatching { mock.shutdown() }
+    fun `address change cancels in-flight real endpoint test down to the socket`() {
+        RealEndpointHarness().use { harness ->
+            val target = harness.start()
+            harness.onMain { harness.vm.updateBaseUrl("https://media-b.example") }
+            harness.assertCanceled(target)
         }
     }
 
     @Test
-    fun `real endpoint test still completes and persists after a cancelled attempt`() = runTest {
-        val mock = okhttp3.mockwebserver.MockWebServer()
-        mock.start()
-        try {
-            // 第一次：停滞，用于取消
-            mock.enqueue(
-                okhttp3.mockwebserver.MockResponse().setResponseCode(200).setBody("{}")
-                    .setHeadersDelay(REAL_DELAY_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
-            )
-            // 第二次：正常两层应答
-            mock.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(200).setBody("{}"))
-            mock.enqueue(
-                okhttp3.mockwebserver.MockResponse().setResponseCode(206).setBody("abcdef")
-                    .addHeader("Accept-Ranges", "bytes")
-            )
-            val listener = CancelCountingListener()
-            val service = realService(HttpClientFactory(StdoutLogger()), listener)
-            val savedUrl = mock.url("/").toString().trimEnd('/')
-            val vm = viewModelWithService("srv-net", service, savedUrl)
-            advanceUntilIdle()
+    fun `real endpoint test still completes and persists after a cancelled attempt`() {
+        RealEndpointHarness().use { harness ->
+            val target = harness.start()
+            harness.onMain { harness.vm.updateBaseUrl(harness.savedUrl) }
+            harness.assertCanceled(target)
+            harness.retryAndAssertPersisted()
+        }
+    }
 
-            vm.testMediaQuality()
-            advanceUntilIdle()
-            awaitCondition("首次请求已到达") { mock.requestCount == 1 }
-            vm.updateBaseUrl(savedUrl) // 取消第一次（地址文本变化即递增版本 + 取消在途）
-            advanceUntilIdle()
-            awaitCondition("首次 Call 已取消") { listener.canceled.get() >= 1 }
+    @Test
+    fun `https toggle cancels real request and editor can test again`() {
+        RealEndpointHarness().use { harness ->
+            val target = harness.start()
+            harness.onMain {
+                harness.vm.toggleHttps(true)
+                assertTrue(requireNotNull(harness.vm.uiState.value.resolvedUrl).startsWith("https://"))
+            }
+            harness.assertCanceled(target)
+            harness.onMain { harness.vm.toggleHttps(false) }
+            harness.retryAndAssertPersisted()
+        }
+    }
 
-            // 取消后必须仍能发起并完成新测试
-            vm.testMediaQuality()
-            advanceUntilIdle()
-            awaitCondition("第二次测试已结束") { !vm.uiState.value.isMediaTesting }
-            awaitCondition("结果已展示") { vm.uiState.value.mediaQualityResult != null }
-
-            val update = store.qualityUpdates.single()
-            assertEquals("srv-net", update.serverId)
-            assertEquals("ep-1", update.endpointId)
-            assertEquals(savedUrl, update.expectedUrl)
-            assertEquals(true, update.supportsRange)
-        } finally {
-            runCatching { mock.shutdown() }
+    @Test
+    fun `clearing ViewModelStore cancels real media read and releases response`() {
+        RealEndpointHarness(stallMediaBody = true).use { harness ->
+            val target = harness.start()
+            harness.clearViewModel()
+            harness.assertCanceled(target)
         }
     }
 
     private companion object {
         const val SAVED_URL = "https://media.example"
-
-        /** 服务端延迟：够长以构造在途窗口，够短以便回收 MockWebServer。 */
-        const val REAL_DELAY_MS = 2_000L
+        const val WAIT_SECONDS = 8L
+        const val WATCHDOG_SECONDS = 20L
     }
 }

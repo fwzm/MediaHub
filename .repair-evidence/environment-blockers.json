@@ -1,0 +1,12 @@
+[
+  {
+    "path": "C:/Users/55160/.m2/repository/org/robolectric/android-all-instrumented/14-robolectric-10818077-i7/android-all-instrumented-14-robolectric-10818077-i7.jar",
+    "readable": false,
+    "error": "调用“OpenRead”并传入“1”个参数时发生异常：“Access to the path 'C:\\Users\\55160\\.m2\\repository\\org\\robolectric\\android-all-instrumented\\14-robolectric-10818077-i7\\android-all-instrumented-14-robolectric-10818077-i7.jar' is denied.”"
+  },
+  {
+    "path": "C:/Users/55160/AppData/Local/Android/Sdk/platforms/android-36/android.jar",
+    "readable": false,
+    "error": "调用“OpenRead”并传入“1”个参数时发生异常：“Access to the path 'C:\\Users\\55160\\AppData\\Local\\Android\\Sdk\\platforms\\android-36\\android.jar' is denied.”"
+  }
+]

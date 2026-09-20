@@ -1,0 +1,19 @@
+JUnit version 4.13.2
+.E.E
+Time: 8.383
+There were 2 failures:
+1) media read failure after headers preserves api status and closes response(com.mediahub.core.network.EndpointTestServiceOwnershipTest)
+java.lang.AssertionError: failed media consumption must retain API status expected:<200> but was:<206>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at com.mediahub.core.network.EndpointTestServiceOwnershipTest.media read failure after headers preserves api status and closes response(EndpointTestServiceOwnershipTest.kt:79)
+2) response queued for resumption is closed when caller is cancelled(com.mediahub.core.network.EndpointTestServiceOwnershipTest)
+java.lang.AssertionError: queued response must be closed on prompt cancellation
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.mediahub.core.network.EndpointTestServiceOwnershipTest.response queued for resumption is closed when caller is cancelled(EndpointTestServiceOwnershipTest.kt:49)
+
+FAILURES!!!
+Tests run: 2,  Failures: 2
+

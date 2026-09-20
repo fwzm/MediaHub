@@ -1,0 +1,48 @@
+Selected: com.mediahub.core.network.EndpointTestServiceCancellationTest#cancel while awaiting media headers aborts the media call
+.[D][NETWORK] -> GET http://127.0.0.1:10874/probe headers={X-Request-Id=fa5d4d04}
+[W][NETWORK] ����ʧ�ܣ����� 2/2: GET http://127.0.0.1:10874/probe
+E
+Time: 8.711
+There was 1 failure:
+1) cancel while awaiting media headers aborts the media call(com.mediahub.core.network.EndpointTestServiceCancellationTest)
+java.lang.AssertionError: �ȴ���ʱ��Ŀ�� Media �����ѵ������˲�������Ӧͷ
+	at com.mediahub.core.network.EndpointTestServiceCancellationTest$awaitTrue$2.invokeSuspend(EndpointTestServiceCancellationTest.kt:394)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.internal.ScopeCoroutine.afterResume(Scopes.kt:28)
+	at kotlinx.coroutines.AbstractCoroutine.resumeWith(AbstractCoroutine.kt:100)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:46)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:99)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:832)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+Caused by: kotlinx.coroutines.TimeoutCancellationException: Timed out waiting for 5000 ms
+	at kotlinx.coroutines.TimeoutKt.TimeoutCancellationException(Timeout.kt:188)
+	at kotlinx.coroutines.TimeoutCoroutine.run(Timeout.kt:156)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedRunnableTask.run(EventLoop.common.kt:505)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.DefaultExecutor.run(DefaultExecutor.kt:105)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+
+FAILURES!!!
+Tests run: 1,  Failures: 1
+
+Selected: com.mediahub.core.network.EndpointTestServiceCancellationTest#cancel during stalled media body read aborts the call
+.E
+Time: 5.1
+There was 1 failure:
+1) cancel during stalled media body read aborts the call(com.mediahub.core.network.EndpointTestServiceCancellationTest)
+java.lang.AssertionError: �ȴ���ʱ��ȡ��ʹĿ�� Media �� source.read �˳�
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.mediahub.core.network.EndpointTestServiceCancellationTest$awaitLatch$2.invokeSuspend(EndpointTestServiceCancellationTest.kt:410)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:832)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+
+FAILURES!!!
+Tests run: 1,  Failures: 1
+
