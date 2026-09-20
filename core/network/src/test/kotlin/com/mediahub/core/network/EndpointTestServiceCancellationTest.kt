@@ -309,18 +309,28 @@ class EndpointTestServiceCancellationTest {
 
     @Test
     fun `media sampling is capped at one mebibyte when server ignores range`() = runBlocking {
+        assertMediaSamplingCapped(reportedContentLength = 4L * 1024 * 1024)
+    }
+
+    @Test
+    fun `unknown length media sampling is capped at one mebibyte when server ignores range`() = runBlocking {
+        assertMediaSamplingCapped(reportedContentLength = -1L)
+    }
+
+    private suspend fun assertMediaSamplingCapped(reportedContentLength: Long) {
         val apiCall = ControlledCall(requestFor())
         val mediaCall = ControlledCall(requestFor())
         calls += listOf(apiCall, mediaCall)
-        val oversized = RecordingBody(ByteArray(4 * 1024 * 1024))
+        val oversized = RecordingBody(ByteArray(4 * 1024 * 1024), reportedContentLength)
+        val samplingClient = client
 
         var tick = 0L
         val subject = object : EndpointTestService(
             HttpClientFactory(StdoutLogger()), clock = { tick += 1_000L; tick },
         ) {
             private val queue = java.util.ArrayDeque<Call>(listOf(apiCall, mediaCall))
-            override fun createApiClient(): OkHttpClient = client
-            override fun createMediaClient(): OkHttpClient = client
+            override fun createApiClient(): OkHttpClient = samplingClient
+            override fun createMediaClient(): OkHttpClient = samplingClient
             override fun newCall(client: OkHttpClient, request: Request): Call = queue.removeFirst()
         }
 
@@ -340,6 +350,10 @@ class EndpointTestServiceCancellationTest {
         )
         assertTrue("响应必须被关闭", oversized.closed)
         assertNotNull("有实际消费即应给出吞吐", result!!.mediaThroughputMbps)
+        assertEquals(
+            "吞吐必须按实际消费的 1 MiB 和确定性 2 秒计算，不得使用完整响应长度",
+            0.5, result!!.mediaThroughputMbps!!, 0.0,
+        )
         assertEquals(200, result!!.httpCode)
         assertTrue("无 206 也无 Accept-Ranges 时不得声明支持 Range", !result!!.supportsRange)
     }
@@ -552,7 +566,10 @@ class EndpointTestServiceCancellationTest {
     }
 
     /** 可观测响应体：记录应用层实际消费字节数与关闭状态。 */
-    private class RecordingBody(private val payload: ByteArray) : ResponseBody() {
+    private class RecordingBody(
+        private val payload: ByteArray,
+        private val reportedContentLength: Long = payload.size.toLong(),
+    ) : ResponseBody() {
         private val backing = Buffer().write(payload)
 
         @Volatile
@@ -565,7 +582,7 @@ class EndpointTestServiceCancellationTest {
 
         override fun contentType(): MediaType? = null
 
-        override fun contentLength(): Long = payload.size.toLong()
+        override fun contentLength(): Long = reportedContentLength
 
         override fun source(): BufferedSource =
             object : ForwardingSource(backing) {
