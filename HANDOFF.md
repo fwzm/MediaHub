@@ -449,6 +449,12 @@ docs/* 与 7 份根文档
   若 Provider 支持非树形浏览（如 Emby 无 folder 概念），此逻辑需按 ProviderCapability 分支。
 - `PlaybackEngine` 进度循环 1s 间隔；服务端上报为尽力而为，失败只记日志（不打断播放）。
 - 播放器音轨/字幕选择基于"每组取第一轨"（TrackMapper 简化），多轨同组场景待完善。
+  选轨的**索引契约**已于 T0002/ADR-041 修正：`TrackSelection.groupIndex` = 当前 Tracks 中
+  仅按目标类型过滤后的组序号，引擎按真实 TrackGroup 走类型级 override/禁用 API
+  （旧实现把 `C.TRACK_TYPE_*` 当 rendererIndex 传给 getTrackGroups/setRendererDisabled，
+  字幕恒错）。新增验证范围：PlaybackEngineTrackSelectionTest 断言真实 DefaultTrackSelector
+  的 overrides / disabledTrackTypes；TrackMapperTest 扩到 4 用例。真机仍待走查。
+  注意：`PlaybackEngine(tracksProvider=...)` 是为可测性新增的接缝，默认 `player.currentTracks`。
 - 设置页"默认倍速"当前仅持久化，播放器起播未读取（V0.1 接入）。
 - Room schema 导出在 `core/database/schemas`（迁移用，勿删）。
 

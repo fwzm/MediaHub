@@ -1,4 +1,39 @@
 # 变更记录（CHANGELOG）
+## [0.16.1-player-track-selection] — 2026-09-20（T0002：Media3 选轨 renderer 索引混用纠正；DEVICE VERIFICATION PENDING）
+### 修复
+- **音轨/字幕选择把轨道类型当 renderer 索引使用**（既有产品路径，字幕恒错）：
+  `PlaybackEngine.selectTrack` 原以 `currentMappedTrackInfo.getTrackGroups(rendererType)` 取组、
+  以 `setRendererDisabled(rendererType, ...)` / `setSelectionOverride(rendererType, groups, ...)`
+  写参数，实际传入的是 `C.TRACK_TYPE_AUDIO(1)` / `C.TRACK_TYPE_TEXT(3)`。三个 API 的参数语义
+  都是 rendererIndex：音频在常见 video+audio+text 布局下数值巧合成立，字幕 3 ≠ 字幕 renderer
+  索引 2 → 选择落到其他 renderer 或被静默拒绝（关不掉、选不中）；组来源依赖
+  `currentMappedTrackInfo`，无轨道时为 null 即直接 return，不写任何选择参数。
+  现改为**类型级 API**：按真实 TrackGroup 构造 `TrackSelectionOverride` 走
+  `setOverrideForType`，关闭走 `clearOverridesOfType` + `setTrackTypeDisabled`（两者均与
+  renderer 数量/顺序/同类型唯一性无关）。ADR-041 纠正 ADR-032 的相关表述。
+- `TrackSelection.groupIndex` 契约显式化：等于当前 `Tracks` 中**仅按目标类型过滤**后的组序号
+  （保留 unsupported 组、不按支持状态过滤），与 TrackMapper 同源同序，UI 回传序号必然命中同一组。
+- 新增 `tracksProvider: () -> Tracks` 接缝（默认 `player.currentTracks`）：生产行为零变化，
+  测试可注入合成 Tracks 驱动真实 `DefaultTrackSelector`，无需真实媒体。
+- 无效选择（负/越界 groupIndex、负/越界 trackIndex、`Tracks.EMPTY`、无目标类型组）保持全部
+  选择参数原样且不抛异常；`null` 关闭命令与无效选择分离处理，即使暂无轨道/对应 renderer
+  也能安全下发类型禁用策略。非目标类型的 override 与禁用集合零污染。
+### 测试
+- 新增 `PlaybackEngineTrackSelectionTest`（6 用例，Robolectric + 真实 ExoPlayer/DefaultTrackSelector）：
+  混排 video/audioA/textA/audioB/textB 序号命中、unsupported 组占位不丢序、字幕关闭→重开→再切换、
+  音频与字幕互不污染、非零 trackIndex 原样写入、非法索引零副作用、`Tracks.EMPTY` 与缺失类型安全。
+- 基线回归证据：仅加入接缝、保留旧 `selectTrack` 时实测 6 用例中 **5 例失败**，
+  失败断言均为"override 未写入（`overrides` 为空）/ `disabledTrackTypes` 为空"；
+  应用修复后 `:player:engine:testDebugUnitTest` **48 用例 0 失败**（含新增 6 例）。
+- `TrackMapperTest` 扩充至 4 用例（新增 unsupported 占位组占用序号、不被过滤），并注明
+  mapper 测试只证明映射序号，**不等于引擎选轨验证**（ADR-032 曾据旧 3 用例宣称选轨正确）。
+### 文档
+- DECISIONS.md 追加 ADR-041（纠正 ADR-032）并在 ADR-032 原位标注；TrackMapper / AudioTrack KDoc、
+  TrackMapperTest 注释同步纠正 `MappedTrackInfo.getTrackGroups(type)` 的错误表述；
+  TASKS.md 与 HANDOFF.md 更新索引契约与新增验证范围。
+- 范围与口径：仅修复既有 Media3 UI 路径（每组首轨）。**未做真机验收、未启用 mpv 选轨**；
+  组内多轨展示、外挂字幕、字幕/音频延迟、轨道偏好持久化仍为待办（DEVICE VERIFICATION PENDING）。
+
 ## [0.16.0-emby-progress] — 2026-08-30（Phase 1H：Emby PROGRESS closeout；DEVICE VERIFICATION PENDING）
 ### 功能
 - Emby 服务端进度闭环（ADR-040）：`EmbyProgressProvider` 独立实现

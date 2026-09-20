@@ -10,6 +10,8 @@ import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackGroup
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.text.CueGroup
@@ -46,7 +48,7 @@ import kotlinx.coroutines.launch
  * - 播放源 → Media3 MediaItem（URI + MIME；请求头经本引擎私有的
  *   [PlaybackHeadersHolder] 注入，见 ADR-018：不同引擎互不污染）；
  * - UI 状态流（播放/缓冲/进度/轨道/错误）；
- * - 音轨/字幕选择（DefaultTrackSelector）；
+ * - 音轨/字幕选择（DefaultTrackSelector，**按轨道类型**写入 override/禁用，见 ADR-041）；
  * - [progress] 每秒进度流 + [events] 关键事件流（供进度同步管线，见 ADR-017）；
  * - 结构化错误映射（PlaybackException → PlaybackError）。
  *
@@ -58,6 +60,13 @@ class PlaybackEngine(
     private val logger: Logger,
     private val scope: CoroutineScope,
     private val speedMonitor: PlaybackSpeedMonitor,
+    /**
+     * 当前轨道快照来源（轨道选择的唯一输入）。
+     *
+     * 生产默认取播放器实时 [Tracks]，与 UI 侧 [TrackMapper] 使用同一份数据；
+     * 测试可注入合成 [Tracks] 校验真实选择参数，无需真实媒体。
+     */
+    private val tracksProvider: () -> Tracks = { player.currentTracks },
 ) : PlaybackEnginePort {
     private val _uiState = MutableStateFlow(PlaybackUiState())
     override val uiState: StateFlow<PlaybackUiState> = _uiState.asStateFlow()
@@ -269,23 +278,46 @@ class PlaybackEngine(
         selectTrack(C.TRACK_TYPE_TEXT, selection)
     }
 
-    private fun selectTrack(rendererType: Int, selection: TrackSelection?) {
-        val mapped = trackSelector.currentMappedTrackInfo ?: return
-        val groups = mapped.getTrackGroups(rendererType)
+    /**
+     * 按**轨道类型**（而非 renderer 索引）写入选择参数。
+     *
+     * Media3 的 `TrackSelectionParameters` 以轨道类型为键保存 override 与禁用集合
+     * （[DefaultTrackSelector.Parameters.Builder.setOverrideForType] /
+     * `clearOverridesOfType` / `setTrackTypeDisabled`），语义与 renderer 的数量、顺序、
+     * 同类型 renderer 是否唯一**完全无关**。旧实现把 `C.TRACK_TYPE_*` 当 rendererIndex
+     * 传给 `getTrackGroups` / `setRendererDisabled` / `setSelectionOverride`：
+     * AUDIO=1 在常见 video+audio+text 布局下数值恰好巧合成立，TEXT=3 与字幕 renderer
+     * 索引 2 恒不相等，字幕选择必然落到其他 renderer 或被静默拒绝。
+     *
+     * [TrackSelection.groupIndex] 的语义与 [TrackMapper] 同源：当前 [Tracks] 中
+     * **仅按目标类型过滤**后的组序号（保留 unsupported 组，不按支持状态过滤）。
+     */
+    private fun selectTrack(trackType: Int, selection: TrackSelection?) {
         val builder = trackSelector.buildUponParameters()
-
         if (selection == null) {
-            builder.setRendererDisabled(rendererType, true)
-        } else {
-            if (selection.groupIndex !in 0 until groups.length) return
-            builder.setRendererDisabled(rendererType, false)
-            builder.setSelectionOverride(
-                rendererType,
-                groups,
-                DefaultTrackSelector.SelectionOverride(selection.groupIndex, selection.trackIndex),
-            )
+            // 关闭：清除该类型的显式 override 并禁用该类型；其他类型参数原样保留。
+            // 不依赖 MappedTrackInfo / renderer 是否存在，暂无轨道时也可安全下发。
+            builder.clearOverridesOfType(trackType)
+            builder.setTrackTypeDisabled(trackType, true)
+            trackSelector.setParameters(builder)
+            return
         }
+        // 无效请求（越界 groupIndex / 越界 trackIndex / 无目标类型组）：不改动任何
+        // 选择参数，也不抛异常。
+        val trackGroup = resolveTrackGroup(trackType, selection.groupIndex) ?: return
+        if (selection.trackIndex !in 0 until trackGroup.length) return
+        builder.setTrackTypeDisabled(trackType, false)
+        builder.setOverrideForType(TrackSelectionOverride(trackGroup, selection.trackIndex))
         trackSelector.setParameters(builder)
+    }
+
+    /** 目标类型下第 [groupIndex] 个真实组；与 [TrackMapper] 共用同一 Tracks 快照与同一序号契约。 */
+    private fun resolveTrackGroup(trackType: Int, groupIndex: Int): TrackGroup? {
+        if (groupIndex < 0) return null
+        return tracksProvider().groups
+            .filter { it.type == trackType }
+            .getOrNull(groupIndex)
+            ?.mediaTrackGroup
     }
 
     // ---- 进度 ----
