@@ -1,4 +1,36 @@
 # 变更记录（CHANGELOG）
+## T0001 阻断项修复 — 2026-09-20（验证未完成）
+- 先红后绿复现恢复已排队时取消的响应泄漏，以及 Media 读体失败提前覆盖 API 状态码。
+- 响应由 OkHttp 回调内 `use` 持有至消费和关闭完成，取消绑定覆盖整个消费期；仅恢复无资源结果。
+- Media 状态码恢复为消费成功后提交；首包、Range、吞吐字段的原有解释保持不变。
+- 补强 Media 等头/读体确定性测试、失败清理与独立 watchdog；补真实 HTTPS 切换及生命周期取消测试。
+- 当前网络源码直接 JUnit 17 例通过，ViewModel 测试源码编译通过；受文件权限限制，
+  规定的 Gradle 单测/lint/assemble 门禁及 Robolectric 运行尚未完成。完整证据与限制见 `.repair-evidence/README.md`。
+
+## [0.16.1-2c-endpoint-cancellation] — 2026-09-20（闭环任务 T0001：EndpointTestService 取消契约；未设备验证）
+### 修复
+- `core:network` `EndpointTestService`：两层探测改为在可注入 IO 调度器上执行，不再占用调用方
+  （编辑页主调度器）线程；同步阻塞的 `Call.execute()` 换成 `Call.enqueue` + 可取消桥接，
+  取消会真正终止对应 `Call` 并以 `CancellationException` 透传。
+- 响应所有权统一由桥接持有：成功、普通异常、读体异常、取消竞态与「取消后迟到响应」
+  都会关闭；迟到响应不被消费也不交付结果。
+- 媒体层按 `MAX_MEDIA_BYTES`（1 MiB，与既有 Range 请求头一致）有界读取，
+  服务端忽略 Range 返回 200 时不再全量读取。
+- 取消引起的 `IOException` 先经 `ensureActive()` 判定，不再被 `catch (Exception)` 吞成普通失败。
+- 取消绑定覆盖「响应头等待」与「响应体消费」两个窗口：后者用独立监视协程而非
+  `Job.invokeOnCompletion`（协程阻塞在读体时完成回调不会触发，无法中断停滞读取）。
+### 测试
+- 新增 `EndpointTestServiceCancellationTest` 7 例：调用方调度器不被阻塞、开始前取消不发请求、
+  等待响应头时取消、读体停滞时取消、取消引起的底层失败不被降级、迟到响应被关闭、
+  1 MiB 采样上限。
+- `EndpointTestServiceTest` 追加 4 例正常/分层失败语义回归（两层成功字段、
+  Media 失败保留 API 结果、API 失败跳过 Media、空体不伪造吞吐）。
+- `ServerEditorViewModelTest` 新增 2 例真实服务集成回归：地址变化取消在途测试穿透到底层
+  `Call`（OkHttp `canceled` 事件断言）、取消后仍可重新测试并正常展示与落库。
+### 边界
+- 本变更不涉及真实服务器、凭据与设备；`probeUrl` 仍为占位、真实媒体测速未实现。
+  未设备验证。
+
 ## [0.16.0-emby-progress] — 2026-08-30（Phase 1H：Emby PROGRESS closeout；DEVICE VERIFICATION PENDING）
 ### 功能
 - Emby 服务端进度闭环（ADR-040）：`EmbyProgressProvider` 独立实现
