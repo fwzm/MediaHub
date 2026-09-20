@@ -1,22 +1,25 @@
 # WorkBuddy 执行线 — 恢复现场（resume）
 
-> 更新于 2026-09-20（第二轮）。下一轮接手先读本文件，再核对实际 Git 与远端，避免重复计划、重复跑测试。
+> 更新于 2026-09-20（第三轮）。下一轮接手先读本文件，再核对实际 Git 与远端，避免重复计划、重复跑测试。
 > 配套：`docs/workbuddy/current-state.md`（状态快照）、`docs/workbuddy/task-state.json`（机器可读）。
 
 ## 1. 一句话现状
 
-W0 状态核对、W4 只读核查、W8 只读 WebDAV 功能包**已完成并推送**（Draft PR #19 / #20）。
-W1 的 PR #18 代码级复验**本会话未跑**（工作树已就绪）；设备/模拟器验收在本会话不可执行。
+W0 状态核对、W4 只读核查、W8 只读 WebDAV 功能包、W1 PR #18 代码级复验**均已完成并推送**
+（Draft PR #19 / #20，远端 CI 均 success）。
+W1 的**设备/模拟器验收层**在本会话不可执行（`adb` 不在 PATH）
+→ PR #18 保持 `C REVIEW PENDING` / `DEVICE UNVERIFIED`，本线未改变其状态。
 
 ## 2. 已交付
 
 | 包 | 分支 | commit | Draft PR | 验证 |
 | --- | --- | --- | --- | --- |
-| W0 状态 + W4 核查（文档） | `workbuddy/w0-state` | `f565107` | #20 | 文档，无代码门禁 |
-| W8 只读 WebDAV（代码） | `workbuddy/feat-webdav-readonly` | `01c825e` | #19 | `:provider:webdav:testDebugUnitTest` BUILD SUCCESSFUL，55 tests / 0 failures / 0 errors / 0 skipped（5 份 XML） |
+| W0 状态 + W4 核查（文档） | `workbuddy/w0-state` | 见远端 head | #20 | 远端 CI `build` **success**（run 35487447042） |
+| W8 只读 WebDAV（代码） | `workbuddy/feat-webdav-readonly` | `01c825e` | #19 | 本地 `:provider:webdav:testDebugUnitTest` 55 tests / 0 fail（5 XML）；远端 CI `build` **success**（run 35487390680，覆盖 assembleDebug + 全仓 testDebugUnitTest + lintDebug） |
+| W1 PR #18 复验（证据） | `workbuddy/w0-state` | 见远端 head | #20 | 6 模块 **48 XML / 926 tests / 0 failures / 0 errors / 0 skipped**；emby/jellyfin/common 以 `--rerun-tasks --no-build-cache` 取得 EXECUTED（104/104 tasks executed） |
 
-W8 未执行：全量 `assembleDebug` / `lintDebug`、真实 WebDAV 服务验收、真机验收。
-W8 证据等级：**受控 HTTP fixture（MockWebServer）**，不等于真实服务端通过。
+W8 未执行：真实 WebDAV 服务验收、真机验收。证据等级 = 受控 HTTP fixture（MockWebServer）。
+W1 未执行：模拟器 SAF 路径、八个进程终止点、损坏 journal、Room/DataStore/凭据/文件边界分项验证。
 
 ## 3. 工作区与分支
 
@@ -60,17 +63,15 @@ $env:ANDROID_HOME="C:\Users\55160\AppData\Local\Android\Sdk"
 
 ## 5. 下一条具体动作（按优先级）
 
-1. **W1**：在 `mh-wb-pr18` 跑分层回归复验 F-C1-1：
-   ```
-   :core:common:testDebugUnitTest :core:security:testDebugUnitTest
-   :feature:settings:testDebugUnitTest :feature:home:testDebugUnitTest
-   :provider:emby:testDebugUnitTest :provider:jellyfin:testDebugUnitTest
-   ```
-   并核对 Emby/Jellyfin `ProviderFactory` 的守卫确为 `IOException`、隔离测试断言的是**异常类型**而非 `isFailure`。
-2. **W4 实现**：按 `w4-endpointtestservice-findings.md` 的 W4-a/b/c 三个补丁独立交付
-   （取消穿透 / 结果脱敏 / IO dispatcher + `Call.cancel()`）。
-3. **W9**：修正 README/TASKS 中已过时的阶段与能力描述（如"WebDAV 待实现""Jellyfin 完整实现"）。
-4. **W8 跟进**：PR #18 合并后，评估是否为 WebDAV 补身份守卫（复用 lease API）。
+1. **W1 设备层收尾**（唯一剩下的 W1 缺口）：`adb` 入 PATH + 专用 AVD，然后跑
+   `scripts/verify-backup-restore.ps1 -Serial <专用模拟器> -OutputPath ... -IsolatedEmulator`，
+   覆盖正式 SAF / 八个进程终止点 / 损坏 journal。在此之前 PR #18 不得宣布 SEALED。
+2. **W4 实现**：按 `w4-endpointtestservice-findings.md` 的 W4-a/b/c 三个补丁**分别**交付
+   （取消穿透 / 结果脱敏 / IO dispatcher + `Call.cancel()`），每项配回归。
+3. **W9**：修正 README/TASKS 中已过时的阶段与能力描述（如"WebDAV 待实现""Jellyfin 完整实现"），
+   并按 wrapper / version catalog / 构建脚本 / 实际 SDK 读取版本号。
+4. **W8 跟进**：PR #18 合并后评估是否为 WebDAV 补身份守卫（复用 PR #18 的 lease API）；
+   在本地真实 WebDAV 服务上补目录 / Range / seek 验收。
 5. **W6 / W3 / W5 / W7**：见 `task-state.json`；W7 需真实 Jellyfin 实例，W2 归 Agent B。
 
 ## 6. 外部队列（不得在本线宣布通过）

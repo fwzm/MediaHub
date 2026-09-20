@@ -93,9 +93,24 @@
       "id": "W1",
       "title": "PR #18 新 head 复验",
       "owner": "workbuddy (verify only; impl owned by Agent A)",
-      "status": "BLOCKED_PARTIAL",
-      "evidence": "CI run 34769586851 verified to have run on head 21231ee; code-level re-run NOT executed this session",
-      "blocked": "emulator/device acceptance blocked (adb not on PATH)"
+      "status": "CODE_LEVEL_VERIFIED_DEVICE_BLOCKED",
+      "artifacts": ["docs/workbuddy/w1-pr18-verification-2026-09-20.md"],
+      "evidence": {
+        "ciRun": 34769586851,
+        "ciHeadSha": "21231eefcb847f84b8d1092d9c2146438f472ddc",
+        "ciConclusion": "success",
+        "fc11SourceCheck": "EmbyProviderFactory.kt:57 and JellyfinProviderFactory.kt:56 both throw IOException; guard added at interceptor index 0",
+        "fc11AssertionQuality": "IdentityGuardFailureLayerTest L1 asserts exception TYPE (IOException) plus 0 requests; L2/L3 assert structured Failure with no leaked runtime exception; positive control present",
+        "localModules": ["core:common", "core:security", "feature:home", "feature:settings", "provider:emby", "provider:jellyfin"],
+        "xmlFiles": 48,
+        "tests": 926,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "executedEvidence": "batch 2 (--rerun-tasks --no-build-cache) ran 104/104 tasks executed for core:common, provider:emby, provider:jellyfin",
+        "fromCacheDisclosure": "batch 1 returned 3 test tasks FROM-CACHE; re-executed in batch 2"
+      },
+      "blocked": "emulator/device acceptance blocked (adb not on PATH): SAF path, 8 process-kill points, corrupted journal NOT executed -> PR #18 remains C REVIEW PENDING / DEVICE UNVERIFIED"
     },
     {
       "id": "W2",
@@ -165,7 +180,13 @@
           "WebDavProviderFactoryTest": 7
         }
       },
-      "notExecuted": ["assembleDebug", "lintDebug", "real WebDAV server acceptance", "device acceptance"]
+      "remoteCi": {
+        "run": 35487390680,
+        "job": "build",
+        "conclusion": "success",
+        "covers": ["assembleDebug", "testDebugUnitTest (whole repo)", "lintDebug"]
+      },
+      "notExecuted": ["real WebDAV server acceptance", "device acceptance"]
     },
     {
       "id": "W9",
@@ -200,10 +221,10 @@
   ],
   "notAuthorized": ["merge", "auto-merge", "release", "release signing", "personal device install"],
   "unverified": [
-    "PR #18 emulator SAF / 8 process-kill points / corrupted journal",
+    "PR #18 emulator SAF / 8 process-kill points / corrupted journal (W1 device layer)",
     "PR #10 visual gates on API 32/36",
     "any real Emby/Jellyfin server acceptance",
     "any real WebDAV server acceptance",
-    "full assemble / lint gates"
+    "full local assemble / lint gates (covered by remote CI on PR #19 only)"
   ]
 }
