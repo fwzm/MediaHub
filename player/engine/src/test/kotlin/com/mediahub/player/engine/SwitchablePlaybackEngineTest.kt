@@ -215,6 +215,55 @@ class SwitchablePlaybackEngineTest {
         assertEquals(5_000L, mpv.playedSession?.startPositionMs)
     }
 
+    // ---- 轨道选择转发 ----
+
+    @Test
+    fun `track selection forwards to the active engine`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.play(session(source()))
+        runCurrent()
+
+        engine.selectAudioTrack(TrackSelection(1, 1, 5L))
+        assertEquals(TrackSelection(1, 1, 5L), media3.lastAudioSelection)
+        assertEquals(1, media3.audioSelectionCalls)
+
+        engine.selectSubtitleTrack(TrackSelection(0, 1, 5L))
+        assertEquals(TrackSelection(0, 1, 5L), media3.lastSubtitleSelection)
+
+        // null == 关闭字幕，原样转发（不得被替换成"选第 0 轨"）
+        engine.selectSubtitleTrack(null)
+        assertNull(media3.lastSubtitleSelection)
+        assertEquals(2, media3.subtitleSelectionCalls)
+
+        assertEquals("mpv 未激活，不得收到选择", 0, mpv.audioSelectionCalls)
+        assertEquals(0, mpv.subtitleSelectionCalls)
+    }
+
+    @Test
+    fun `selection follows the engine after fallback and leaves no residue on old engine`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.play(session(source()))
+        runCurrent()
+
+        engine.selectAudioTrack(TrackSelection(0, 1, 1L))
+        assertEquals(1, media3.audioSelectionCalls)
+
+        // 触发降级到 mpv
+        media3.updateState { it.copy(positionMs = 3_000, error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }
+        runCurrent()
+        assertEquals(EngineKind.MPV, engine.kind)
+
+        val media3CallsBefore = media3.audioSelectionCalls
+        engine.selectAudioTrack(TrackSelection(0, 0, 2L))
+        // 切换后选择只到 mpv，旧引擎不再收到
+        assertEquals("旧引擎切换后不得再收到选择", media3CallsBefore, media3.audioSelectionCalls)
+        assertEquals(TrackSelection(0, 0, 2L), mpv.lastAudioSelection)
+    }
+
     // ---- 控制委托与 Surface ----
 
     @Test
@@ -255,6 +304,10 @@ class SwitchablePlaybackEngineTest {
         var stopped = false
         var released = false
         var finalProgressOnStop: PlaybackProgress? = null
+        var lastAudioSelection: TrackSelection? = null
+        var lastSubtitleSelection: TrackSelection? = null
+        var audioSelectionCalls = 0
+        var subtitleSelectionCalls = 0
 
         fun updateState(transform: (PlaybackUiState) -> PlaybackUiState) {
             ui.value = transform(ui.value)
@@ -269,8 +322,14 @@ class SwitchablePlaybackEngineTest {
         override fun togglePlayPause() { toggled = true }
         override fun seekTo(positionMs: Long, mode: SeekMode) { seekedTo = positionMs }
         override fun setSpeed(speed: Float) { speedSet = speed }
-        override fun selectAudioTrack(selection: TrackSelection?) = Unit
-        override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
+        override fun selectAudioTrack(selection: TrackSelection?) {
+            audioSelectionCalls += 1
+            lastAudioSelection = selection
+        }
+        override fun selectSubtitleTrack(selection: TrackSelection?) {
+            subtitleSelectionCalls += 1
+            lastSubtitleSelection = selection
+        }
         override fun stop(): PlaybackProgress? {
             stopped = true
             finalProgressOnStop = PlaybackProgress(

@@ -85,6 +85,8 @@ class PlaybackEngine(
     private var released = false
     /** 起播时间戳（elapsedRealtime），用于 TTFF（首帧）诊断。 */
     private var playStartElapsedMs = 0L
+    /** 当前轨道快照令牌：与 [TrackMapper] 生成的一致；选择前校验，旧快照地址直接丢弃。 */
+    private var trackSnapshotToken = 0L
 
     override val kind: EngineKind = EngineKind.MEDIA3
 
@@ -139,12 +141,14 @@ class PlaybackEngine(
 
             override fun onTracksChanged(tracks: Tracks) {
                 val mapped = TrackMapper.mapTracks(tracks)
+                trackSnapshotToken = mapped.snapshotToken
                 _uiState.update {
                     it.copy(
                         audioTracks = mapped.audioTracks,
                         subtitleTracks = mapped.subtitleTracks,
                         selectedAudio = mapped.selectedAudio,
                         selectedSubtitle = mapped.selectedSubtitle,
+                        trackRowMap = mapped.rowMap,
                         audioFormatMime = player.audioFormat?.sampleMimeType,
                     )
                 }
@@ -218,6 +222,8 @@ class PlaybackEngine(
         }
         playStartElapsedMs = SystemClock.elapsedRealtime()
         speedMonitor.reset()
+        // 新播放会话：旧轨道快照作废，旧行回调不得再命中新快照（等下一次 onTracksChanged 重建）
+        trackSnapshotToken = 0L
         // 临时时长：Media3 timeline READY 前先展示 source 时长（Emby runTimeTicks），避免 0:00/满条
         _uiState.value = PlaybackUiState(
             durationMs = session.source.durationMs ?: 0,
@@ -269,23 +275,28 @@ class PlaybackEngine(
         selectTrack(C.TRACK_TYPE_TEXT, selection)
     }
 
-    private fun selectTrack(rendererType: Int, selection: TrackSelection?) {
+    /**
+     * 应用轨道选择。
+     *
+     * [trackType] 是 `C.TRACK_TYPE_*` 类型常量，**不是** rendererIndex：
+     * 1. 先用 [MappedTrackInfo.getRendererType] 找到承载该类型的真实 renderer 下标；
+     * 2. 再取 `getTrackGroups(rendererIndex)` 得到组序列，用 [TrackSelection.groupIndex] 定位组；
+     * 3. [TrackSelection.trackIndex] 指定组内轨。
+     *
+     * 决策（含越界 / 快照校验）由纯函数 [TrackSelectionPlanner.plan] 产出，本方法只负责把
+     * 计划交给 `DefaultTrackSelector`，使该路径可在无真实媒体时被断言（见
+     * PlaybackEngineTrackSelectionTest）。
+     */
+    private fun selectTrack(trackType: Int, selection: TrackSelection?) {
         val mapped = trackSelector.currentMappedTrackInfo ?: return
-        val groups = mapped.getTrackGroups(rendererType)
-        val builder = trackSelector.buildUponParameters()
-
-        if (selection == null) {
-            builder.setRendererDisabled(rendererType, true)
-        } else {
-            if (selection.groupIndex !in 0 until groups.length) return
-            builder.setRendererDisabled(rendererType, false)
-            builder.setSelectionOverride(
-                rendererType,
-                groups,
-                DefaultTrackSelector.SelectionOverride(selection.groupIndex, selection.trackIndex),
-            )
-        }
-        trackSelector.setParameters(builder)
+        val rendererIndex = TrackSelectionPlanner.rendererIndexFor(mapped, trackType) ?: return
+        val plan = TrackSelectionPlanner.plan(
+            rendererIndex = rendererIndex,
+            groups = mapped.getTrackGroups(rendererIndex),
+            selection = selection,
+            currentSnapshotToken = trackSnapshotToken,
+        ) ?: return
+        trackSelector.setParameters(TrackSelectionPlanner.apply(trackSelector.buildUponParameters(), plan))
     }
 
     // ---- 进度 ----

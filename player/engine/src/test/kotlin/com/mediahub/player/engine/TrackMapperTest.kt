@@ -6,6 +6,8 @@ import androidx.media3.common.TrackGroup
 import androidx.media3.common.Tracks
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -13,20 +15,24 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * 轨道映射回归测试（Phase 1B-2.4）：
- * 钉死"三套 index 语义统一"——AudioTrack/SubtitleTrack.index 与 selected TrackSelection
- * 都是同类型内序号（per-type ordinal），不再使用 Tracks.groups 全局序号。
- * 旧实现（全局序号）在存在视频组时音轨序号错位（全局 1 == 音频 0）。
+ * 轨道映射回归测试（T0003）。
+ *
+ * 钉死三层序号语义（ADR-032 勘误）：
+ * - [AudioTrack.index] / [SubtitleTrack.index]：列表行序号（0..N-1）；
+ * - [TrackSelection.groupIndex]：同类型内组序号；
+ * - [TrackSelection.trackIndex]：组内轨序号。
+ *
+ * 行序号与组 / 轨地址的对应由 `TrackRowMap` 给出，不再假设"行序号 == 组号"。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class TrackMapperTest {
 
+    /** 单轨组。 */
     private fun group(
-        type: Int,
         mime: String,
-        supported: Boolean,
-        selected: Boolean,
+        supported: Boolean = true,
+        selected: Boolean = false,
         language: String? = null,
         selectionFlags: Int = 0,
     ): Tracks.Group {
@@ -43,39 +49,91 @@ class TrackMapperTest {
         )
     }
 
+    /** 同组多轨。 */
+    private fun multiGroup(
+        mimes: List<String>,
+        selectedTrackIndex: Int,
+        languages: List<String?> = List(mimes.size) { null },
+    ): Tracks.Group {
+        val formats = mimes.mapIndexed { i, mime ->
+            Format.Builder().setSampleMimeType(mime).setLanguage(languages.getOrNull(i)).build()
+        }
+        return Tracks.Group(
+            TrackGroup(*formats.toTypedArray()),
+            false,
+            IntArray(formats.size) { C.FORMAT_HANDLED },
+            BooleanArray(formats.size) { it == selectedTrackIndex },
+        )
+    }
+
     @Test
-    fun `indices and selections are per-type ordinals not global group indices`() {
+    fun `row indices are per-type ordinals and addresses carry group plus track`() {
         val tracks = Tracks(
             listOf(
-                group(C.TRACK_TYPE_VIDEO, "video/avc", supported = true, selected = false),
-                group(C.TRACK_TYPE_AUDIO, "audio/mp4a-latm", supported = true, selected = false, language = "chi"),
-                group(C.TRACK_TYPE_AUDIO, "audio/eac3", supported = true, selected = true, language = "eng"),
-                group(C.TRACK_TYPE_TEXT, "application/x-subrip", supported = true, selected = true, language = "chi"),
+                group("video/avc", selected = false),
+                group("audio/mp4a-latm", selected = false, language = "chi"),
+                group("audio/eac3", selected = true, language = "eng"),
+                group("application/x-subrip", selected = true, language = "chi"),
             ),
         )
         val mapped = TrackMapper.mapTracks(tracks)
 
-        // 音轨序号是 0..N-1（不是全局 1..2）
+        // 行序号是 0..N-1（不是全局 1..2）
         assertEquals(listOf(0, 1), mapped.audioTracks.map { it.index })
         assertEquals(listOf(0), mapped.subtitleTracks.map { it.index })
-        // 选中态用 per-type 序号表达，UI 可直接回传给引擎（MappedTrackInfo.getTrackGroups(type) 同序）
-        assertEquals(TrackSelection(1, 0), mapped.selectedAudio)
-        assertEquals(TrackSelection(0, 0), mapped.selectedSubtitle)
+        // 地址：groupIndex 为同类型内组序号，trackIndex 为组内轨号
+        assertEquals(TrackSelection(1, 0, mapped.snapshotToken), mapped.selectedAudio)
+        assertEquals(TrackSelection(0, 0, mapped.snapshotToken), mapped.selectedSubtitle)
+        // 行映射与选中地址一致
+        assertEquals(TrackSelection(1, 0, mapped.snapshotToken), mapped.rowMap.audioFor(1))
+        assertEquals(TrackSelection(0, 0, mapped.snapshotToken), mapped.rowMap.subtitleFor(0))
         assertTrue(mapped.audioTracks[1].isSelected)
         assertFalse(mapped.audioTracks[0].isSelected)
         assertTrue(mapped.subtitleTracks.single().isSelected)
     }
 
     @Test
-    fun `unsupported flag and default selection flag are carried through`() {
+    fun `multi-track group expands every track and selects the actual track index`() {
         val tracks = Tracks(
             listOf(
-                group(
-                    C.TRACK_TYPE_AUDIO, "audio/vnd.dts.hd",
-                    supported = false, selected = false,
-                    selectionFlags = C.SELECTION_FLAG_DEFAULT,
+                group("video/avc", selected = true),
+                multiGroup(
+                    mimes = listOf("audio/mp4a-latm", "audio/eac3"),
+                    selectedTrackIndex = 1,
+                    languages = listOf("eng", "chi"),
                 ),
-                group(C.TRACK_TYPE_AUDIO, "audio/mp4a-latm", supported = true, selected = true),
+                multiGroup(
+                    mimes = listOf("application/x-subrip", "text/vtt"),
+                    selectedTrackIndex = 1,
+                    languages = listOf("eng", "chi"),
+                ),
+            ),
+        )
+        val mapped = TrackMapper.mapTracks(tracks)
+
+        // 逐轨展开：同组两轨都进入列表
+        assertEquals(2, mapped.audioTracks.size)
+        assertEquals(2, mapped.subtitleTracks.size)
+        // 行序号 0/1 → 同一组（groupIndex=0）的第 0/1 轨
+        assertEquals(TrackSelection(0, 0, mapped.snapshotToken), mapped.rowMap.audioFor(0))
+        assertEquals(TrackSelection(0, 1, mapped.snapshotToken), mapped.rowMap.audioFor(1))
+        assertEquals(TrackSelection(0, 0, mapped.snapshotToken), mapped.rowMap.subtitleFor(0))
+        assertEquals(TrackSelection(0, 1, mapped.snapshotToken), mapped.rowMap.subtitleFor(1))
+        // 选中态落在实际第 2 轨
+        assertEquals(TrackSelection(0, 1, mapped.snapshotToken), mapped.selectedAudio)
+        assertEquals(TrackSelection(0, 1, mapped.snapshotToken), mapped.selectedSubtitle)
+        assertFalse(mapped.audioTracks[0].isSelected)
+        assertTrue(mapped.audioTracks[1].isSelected)
+        assertFalse(mapped.subtitleTracks[0].isSelected)
+        assertTrue(mapped.subtitleTracks[1].isSelected)
+    }
+
+    @Test
+    fun `unsupported flag and default selection flag are carried through per track`() {
+        val tracks = Tracks(
+            listOf(
+                group("audio/vnd.dts.hd", supported = false, selected = false, selectionFlags = C.SELECTION_FLAG_DEFAULT),
+                group("audio/mp4a-latm", supported = true, selected = true),
             ),
         )
         val mapped = TrackMapper.mapTracks(tracks)
@@ -89,15 +147,37 @@ class TrackMapperTest {
     }
 
     @Test
-    fun `no audio tracks yields null selection`() {
+    fun `no audio tracks yields null selection and empty row map`() {
         val tracks = Tracks(
             listOf(
-                group(C.TRACK_TYPE_VIDEO, "video/avc", supported = true, selected = true),
-                group(C.TRACK_TYPE_TEXT, "application/x-subrip", supported = true, selected = false),
+                group("video/avc", selected = true),
+                group("application/x-subrip", selected = false),
             ),
         )
         val mapped = TrackMapper.mapTracks(tracks)
         assertTrue(mapped.audioTracks.isEmpty())
         assertEquals(null, mapped.selectedAudio)
+        assertNull(mapped.rowMap.audioFor(0))
+        assertNotNull(mapped.rowMap.subtitleFor(0))
+    }
+
+    @Test
+    fun `snapshot token is shared by rows and selections of one snapshot`() {
+        val mapped = TrackMapper.mapTracks(
+            Tracks(
+                listOf(
+                    group("audio/mp4a-latm", selected = true),
+                    group("application/x-subrip", selected = true),
+                ),
+            ),
+        )
+        val rowAudio = mapped.rowMap.audioFor(0)
+        val rowSubtitle = mapped.rowMap.subtitleFor(0)
+        assertNotNull(rowAudio)
+        assertNotNull(rowSubtitle)
+        assertEquals(mapped.snapshotToken, rowAudio!!.snapshotToken)
+        assertEquals(mapped.snapshotToken, rowSubtitle!!.snapshotToken)
+        assertEquals(mapped.snapshotToken, mapped.selectedAudio?.snapshotToken)
+        assertEquals(mapped.snapshotToken, mapped.selectedSubtitle?.snapshotToken)
     }
 }

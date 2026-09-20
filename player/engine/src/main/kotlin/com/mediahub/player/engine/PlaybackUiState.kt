@@ -21,6 +21,8 @@ data class PlaybackUiState(
     /** 实际正在输出的音频格式（MIME）；null=无音频输出（无声判据，Phase 1B-2.4）。 */
     val audioFormatMime: String? = null,
     val selectedSubtitle: TrackSelection? = null,
+    /** 轨道行序号 → 引擎选择地址（同组多轨展开后的精确映射；见 ADR-032 勘误）。 */
+    val trackRowMap: TrackRowMap = TrackRowMap.EMPTY,
     val error: PlaybackError? = null,
     val mediaTitle: String? = null,
     val isSeekable: Boolean = true,

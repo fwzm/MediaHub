@@ -448,7 +448,11 @@ docs/* 与 7 份根文档
 - `LibraryViewModel.goToParent()` 与 `openFolder()` 的文件夹栈：当前实现正确；
   若 Provider 支持非树形浏览（如 Emby 无 folder 概念），此逻辑需按 ProviderCapability 分支。
 - `PlaybackEngine` 进度循环 1s 间隔；服务端上报为尽力而为，失败只记日志（不打断播放）。
-- 播放器音轨/字幕选择基于"每组取第一轨"（TrackMapper 简化），多轨同组场景待完善。
+- 播放器音轨/字幕选择**已逐轨展开**（T0003）：`TrackMapper` 遍历组内全部轨，`TrackRowMap` 提供
+  行序号→(groupIndex, trackIndex) 地址，选择经 `TrackSelectionPlanner` 落到真实 renderer；
+  旧"每组取第一轨"缺口已关闭（ADR-041 勘误 ADR-032）。真实设备音视频输出仍 **DEVICE UNVERIFIED**。
+- mpv 原生 aid/sid 选择仍未实现（`MpvPlaybackEngine.selectAudioTrack/selectSubtitleTrack` 为 Unit）；
+  `SwitchablePlaybackEngine` 只做参数转发，mpv 选轨属独立缺口。
 - 设置页"默认倍速"当前仅持久化，播放器起播未读取（V0.1 接入）。
 - Room schema 导出在 `core/database/schemas`（迁移用，勿删）。
 

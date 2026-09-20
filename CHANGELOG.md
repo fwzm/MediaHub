@@ -1,4 +1,31 @@
 # 变更记录（CHANGELOG）
+## [未发布] — T0003 播放器轨道选择闭环（自动化通过；真机 DEVICE UNVERIFIED）
+### 修复
+- **同组多轨丢失与错选**：`TrackMapper` 原先每组只读 `getTrackFormat(0)` / `isTrackSupported(0)`，
+  同组第 2 轨起既不出现在列表，也会把整组 `isSelected` 错标到第 0 行；现逐轨遍历组内全部轨道，
+  逐轨读 format / 支持 / 默认 / 选中，并同步产出 `TrackRowMap`（行序号 → 组 / 轨地址）。
+- **类型常量当作 rendererIndex**：`PlaybackEngine.selectTrack` 原先把 `C.TRACK_TYPE_AUDIO` /
+  `C.TRACK_TYPE_TEXT` 直接传给 `getTrackGroups` / `setRendererDisabled` / `setSelectionOverride` 的
+  rendererIndex 参数，类型常量不等于 renderer 排列位置；现先由 `getRendererType` 求真实
+  renderer 下标再定位组，选择不再依赖 renderer 数值布局。
+- **UI 行序号当组号且固定第 0 轨**：`PlayerScreen` 原先 `TrackSelection(track.index, 0)`；现经
+  `PlayerTrackSelection` 按行序号查 `PlaybackUiState.trackRowMap` 得到精确 `(groupIndex, trackIndex)`。
+- **关闭字幕残留 override**：null 选择现先清掉该 renderer 的显式 override 再禁用，随后重新选择
+  字幕可正常恢复。
+### 变更
+- `TrackSelection` 扩展 `snapshotToken`；旧轨道快照的行回调不再命中新快照同号轨。
+- 轨道选择决策抽为纯函数 `TrackSelectionPlanner`（renderer 解析 / 越界与快照校验 / 参数应用）。
+- ADR-032 勘误落盘为 **ADR-041**，明确 type / rendererIndex / groupIndex / trackIndex 四层语义；
+  `AudioTrack.index` / `SubtitleTrack.index` 语义改述为列表行序号。
+### 测试
+- `PlaybackEngineTrackSelectionTest`（7 用例）：同组多轨展开、真实 override、关闭 / 恢复、
+  越界 / 负值 / 陈旧快照拒绝、快照令牌递增。
+- `TrackMapperTest` 扩到 5 用例；新增 `PlayerTrackSelectionTest`（5 用例）；
+  `SwitchablePlaybackEngineTest` 增选择转发与切换后旧引擎无残留 2 用例。
+### 说明
+- 以上为自动化（Gradle 单测 + Lint + assemble）结论；真实设备音视频输出与字幕绘制保持
+  **DEVICE UNVERIFIED**。mpv 原生 aid/sid 选择仍为独立缺口。
+
 ## [0.16.0-emby-progress] — 2026-08-30（Phase 1H：Emby PROGRESS closeout；DEVICE VERIFICATION PENDING）
 ### 功能
 - Emby 服务端进度闭环（ADR-040）：`EmbyProgressProvider` 独立实现

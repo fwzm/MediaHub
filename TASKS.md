@@ -149,6 +149,20 @@
 - [x] UserPreferencesRepository 抽象；README/CHANGELOG/DECISIONS 同步
 - [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；真机多音轨/字幕样式验证随后记录
 
+## T0003 —— Media3 音轨/字幕选择闭环（轨道映射 / 精确选择 / 关闭后恢复）✅ 代码+测试完成
+- [x] ADR-032 勘误落盘为 ADR-041：区分 type / rendererIndex / groupIndex / trackIndex 四层语义；
+      `AudioTrack.index` / `SubtitleTrack.index` 改述为**列表行序号**（core:model 只改说明文字）
+- [x] `TrackMapper` 逐轨遍历每个音频 / 文本组的**全部**轨道（不再每组取第 0 轨），
+      逐轨读 format / isTrackSupported / isDefault / isTrackSelected；同步产出 `TrackRowMap` 与快照令牌
+- [x] `TrackSelection` 扩展 `(groupIndex, trackIndex, snapshotToken)`；旧快照地址按令牌拒绝
+- [x] `PlaybackEngine.selectTrack` 由 `getRendererType` 求真实 renderer 下标（类型常量不再当 rendererIndex）；
+      决策抽为纯函数 `TrackSelectionPlanner`；关闭字幕先清 override 再禁用 renderer
+- [x] `feature/player` 新增 `PlayerTrackSelection` 行→地址转换入口；PlayerScreen 两处选择改走它
+- [x] 回归：`PlaybackEngineTrackSelectionTest`（7 用例）、`TrackMapperTest`（5 用例）、
+      `PlayerTrackSelectionTest`（5 用例）、`SwitchablePlaybackEngineTest`（+选择转发与切换无残留 2 用例）
+- [ ] CI 验证：随本提交 push 后由 GitHub Actions 执行；真机音视频输出保持 **DEVICE UNVERIFIED**
+- [ ] mpv 原生 aid/sid 选择为独立缺口（`MpvPlaybackEngine` 两个选择方法为 Unit），不在本任务范围
+
 ## Phase 1B-2.5a —— Player Startup & Immersive UX（插入，暂停 Server Editor）🔄 IN PROGRESS
 - [x] Item 1：TTFF 单调时钟（SystemClock.elapsedRealtime）+ 首帧渲染日志（renderTimeMs）
 - [x] Item 2：provisional duration progress fallback（起播用 source.durationMs 临时时长，进度管线/UI/currentProgress 全链路回退）

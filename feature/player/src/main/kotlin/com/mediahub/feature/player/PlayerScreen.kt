@@ -70,7 +70,6 @@ import com.mediahub.feature.player.gesture.GestureLevelPreview
 import com.mediahub.feature.player.gesture.PlayerGestureLayer
 import com.mediahub.feature.player.gesture.PlayerLevelKind
 import com.mediahub.player.engine.SeekMode
-import com.mediahub.player.engine.TrackSelection
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlinx.coroutines.delay
@@ -380,7 +379,9 @@ fun PlayerRoute(
             tracks = engineState.audioTracks,
             onDismiss = { showAudioDialog = false },
             onSelect = { track: AudioTrack ->
-                viewModel.engine.selectAudioTrack(TrackSelection(track.index, 0))
+                // 行序号 → 引擎组/轨地址（同组多轨展开后两者不同；见 PlayerTrackSelection）
+                PlayerTrackSelection.addressOf(engineState, track)
+                    ?.let { viewModel.engine.selectAudioTrack(it) }
                 showAudioDialog = false
             },
         )
@@ -391,7 +392,12 @@ fun PlayerRoute(
             style = preferences.subtitleStyle,
             onDismiss = { showSubtitleDialog = false },
             onSelect = { track: SubtitleTrack? ->
-                viewModel.engine.selectSubtitleTrack(track?.let { TrackSelection(it.index, 0) })
+                when (track) {
+                    // null == 关闭字幕：端口语义保持 null
+                    null -> viewModel.engine.selectSubtitleTrack(null)
+                    else -> PlayerTrackSelection.addressOf(engineState, track)
+                        ?.let { viewModel.engine.selectSubtitleTrack(it) }
+                }
             },
             onStyleChange = { newStyle -> viewModel.updateSubtitleStyle { newStyle } },
         )

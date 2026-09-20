@@ -606,3 +606,35 @@
   `PlaybackProgress.sessionId`（既有字段）→ 三 DTO `PlaySessionId`
   （Emby production wire）；Jellyfin = CONFIRMED PROTOCOL RISK /
   DEVICE PROOF PENDING / PRODUCTION FROZEN（本 slice 零 Jellyfin delta）。
+
+## ADR-041 ADR-032 勘误：轨道三层地址与逐轨映射（T0003）
+- 状态：已采纳（2026-09-20）
+- 背景：ADR-032 原表述"index 语义统一为同类型内序号，与 MappedTrackInfo.getTrackGroups(type)
+  的 per-renderer 组序号一一对应"存在两处错误：
+  1. 把 `MappedTrackInfo.getTrackGroups(rendererIndex)` 的参数写成 track type。该 API 接收的是
+     **rendererIndex**（renderer 物理排列位置），不是 `C.TRACK_TYPE_*`。类型常量与 renderer
+     摆放顺序无关，两者不可互换。
+  2. 忽略"同组多轨"。一个 `Tracks.Group` 可含多条轨（`group.length > 1`），原先"每组取第一轨"
+     会把同组其余轨整条丢掉，并把整组 `isSelected` 写进第 0 行的选中态。
+- 决策（本勘误生效，ADR-032 中上述两处表述**作废**）：
+  - 明确四层概念：**type**（`C.TRACK_TYPE_*`，仅类型编码）/ **rendererIndex**（renderer 排列
+    位置）/ **groupIndex**（`getTrackGroups(rendererIndex)` 的同类型内组序号）/ **trackIndex**
+    （`TrackGroup` 内轨序号）。四者互不替代。
+  - `AudioTrack.index` / `SubtitleTrack.index` 的语义修正为**列表行序号**（0..N-1，仅表示 UI
+    列表位置），不再是组号；`core:model` 只保留说明文字，运行时选择地址放进 `player:engine`。
+  - `TrackSelection` 扩展为 `(groupIndex, trackIndex, snapshotToken)`；`snapshotToken` 标识
+    生成该地址的轨道快照，引擎应用前比对当前 token，旧快照的行回调不得命中新快照同号轨。
+  - `TrackMapper` 逐轨遍历每个音频 / 文本组的**全部**轨道，逐轨读 format / 支持 / 默认 / 选中，
+    并同步产出 `TrackRowMap`（行序号 → 组 / 轨地址）与 `MappedTracks.snapshotToken`。
+  - `PlaybackEngine.selectTrack(trackType, selection)` 先用 `getRendererType` 求真实 renderer
+    下标，再取组序列定位；决策抽到纯函数 `TrackSelectionPlanner.plan/apply`，使该路径可无真实
+    媒体断言。关闭字幕（null）清掉该 renderer 的显式 override 后再禁用，避免残留 override 复活。
+  - UI 行 → 地址的唯一转换入口为 `feature/player` 的 `PlayerTrackSelection`，按行序号查
+    `PlaybackUiState.trackRowMap`；查不到时放弃本次选择，不误选。
+- 影响：修正后选择依赖 `TrackSelectionOverride`（组级）+ renderer 禁用，不再依赖 renderer 数值
+  布局恰好等于类型常量。mpv 原生 aid/sid 选择仍为独立缺口（`MpvPlaybackEngine` 两个选择方法为
+  Unit），不在本探测范围。
+- 验证：`PlaybackEngineTrackSelectionTest`（同组多轨展开、真实 override、关闭 / 恢复、越界 /
+  陈旧快照拒绝）、`TrackMapperTest`（5 用例）、`PlayerTrackSelectionTest`、
+  `SwitchablePlaybackEngineTest`（选择转发与切换后无残留）。真实设备音视频输出保持
+  **DEVICE UNVERIFIED**。
