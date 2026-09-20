@@ -1,80 +1,86 @@
 # WorkBuddy 执行线 — 恢复现场（resume）
 
-> 更新于 2026-09-20。下一轮接手先读本文件，再核对实际 Git 与远端，避免重复计划。
+> 更新于 2026-09-20（第二轮）。下一轮接手先读本文件，再核对实际 Git 与远端，避免重复计划、重复跑测试。
 > 配套：`docs/workbuddy/current-state.md`（状态快照）、`docs/workbuddy/task-state.json`（机器可读）。
 
 ## 1. 一句话现状
 
-W0 状态核对完成；W8 只读 WebDAV 功能包已实现并进入本地验证；W1 的 PR #18 代码级复验可做，
-但**任何设备/模拟器验收在本会话不可执行**（adb 与 Android SDK 环境变量缺失）。
+W0 状态核对、W4 只读核查、W8 只读 WebDAV 功能包**已完成并推送**（Draft PR #19 / #20）。
+W1 的 PR #18 代码级复验**本会话未跑**（工作树已就绪）；设备/模拟器验收在本会话不可执行。
 
-## 2. 我创建的工作区与分支
+## 2. 已交付
+
+| 包 | 分支 | commit | Draft PR | 验证 |
+| --- | --- | --- | --- | --- |
+| W0 状态 + W4 核查（文档） | `workbuddy/w0-state` | `f565107` | #20 | 文档，无代码门禁 |
+| W8 只读 WebDAV（代码） | `workbuddy/feat-webdav-readonly` | `01c825e` | #19 | `:provider:webdav:testDebugUnitTest` BUILD SUCCESSFUL，55 tests / 0 failures / 0 errors / 0 skipped（5 份 XML） |
+
+W8 未执行：全量 `assembleDebug` / `lintDebug`、真实 WebDAV 服务验收、真机验收。
+W8 证据等级：**受控 HTTP fixture（MockWebServer）**，不等于真实服务端通过。
+
+## 3. 工作区与分支
 
 | 路径 | 模式 | 基线 SHA | 用途 |
 | --- | --- | --- | --- |
-| `D:/deepseek_test/mh-wb-state` | detached HEAD | `8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1` | W0 状态产物 + W9 文档 |
-| `D:/deepseek_test/mh-wb-webdav` | detached HEAD | `8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1` | W8 只读 WebDAV 代码 |
+| `D:/deepseek_test/mh-wb-state` | detached（已推送） | `8e516e4` | W0/W4/W9 文档 |
+| `D:/deepseek_test/mh-wb-webdav` | detached（已推送） | `8e516e4` | W8 代码 |
+| `D:/deepseek_test/mh-wb-pr18` | detached | `21231ee` | W1 复验（已备好 `local.properties`，未跑） |
 
-远端分支命名（推送时显式指定）：
-- `workbuddy/w0-state`
-- `workbuddy/feat-webdav-readonly`
+两个 worktree 均已写入 `local.properties`（`sdk.dir=C:/Users/55160/AppData/Local/Android/Sdk`，已被 `.gitignore:7` 忽略，不入库）。
 
-**工具链缺陷（必读）**：本机 git 为 `2.55.0.windows.5`，`git worktree add -b` 与 `git switch -c`
-会创建出**不可解析的分支 ref**（`rev-parse HEAD` 报 ambiguous，`git status` 把全部文件显示为 `A`）。
-规避：一律 `git worktree add --detach <path> <sha>`，提交后 `git push origin HEAD:refs/heads/<name>`。
-已确认 `main` 与既有 13 个 worktree 未受影响。
+### 工具链缺陷（必读，已复现两次）
 
-## 3. W8 已完成的改动（`mh-wb-webdav` 工作树）
+本机 git `2.55.0.windows.5`：`git worktree add -b` 与 `git switch -c` 会创建**不可解析的分支 ref**
+（`rev-parse HEAD` 报 ambiguous；新 worktree 内 `git status` 把全部文件显示为 `A`）。
+规避：`git worktree add --detach <path> <sha>`，提交后 `git push origin HEAD:refs/heads/<name>`。
+`main` 与既有 13 个 worktree 未受影响。
 
-生产（`provider/webdav/src/main/kotlin/.../webdav/`）：
+### 构建命令（本机可用模板）
 
-| 文件 | 职责 |
-| --- | --- |
-| `WebDavModel.kt`（新） | `WebDavResource` 模型 + `WebDavUrls`：base 归一化、同 origin href 解析、仅解码 `%XX`（不把 `+` 当空格）、类型/容器推断 |
-| `WebDavMultistatusParser.kt`（新） | SAX 解析 207 multistatus：命名空间感知（前缀无关）、`propstat` 2xx 过滤、属性顺序无关、禁用 DTD/外部实体 |
-| `WebDavApi.kt`（新） | `PROPFIND` 客户端：Basic 头、`Depth`、**不跟随重定向**、响应体 8 MiB 有界读取、取消穿透 |
-| `WebDavCredentials.kt`（新） | `WebDavAuth`（Basic 头构造）、`WebDavCredentialStore`（密码进 `CredentialVault`）、`WebDavSession`（凭据缺失 fail-closed） |
-| `WebDavAuthProvider.kt`（新） | 认证 / 会话恢复 / 登出；401 才清凭据；403/404/5xx/网络分别映射为 `AuthSessionErrorKind` |
-| `WebDavBrowseProvider.kt`（新） | `PROPFIND Depth: 1` 列目录；剔除目录自身条目；跨 origin 条目丢弃；**本地切片**并如实标注无服务端分页 |
-| `WebDavPlaybackProvider.kt`（新） | 直链播放：header-only Basic；拒绝 URL user-info 与跨 origin 目标；无伪造 `sessionId` |
-| `WebDavProvider.kt`（重写） | `MediaProvider` + `OPTIONS` 协议探测；取消不折叠为 `ConnectionStatus(false)` |
-| `WebDavProviderFactory.kt`（重写） | 装配 AUTH+BROWSE+PLAYBACK；身份世代守卫抛 `IOException`（F-C1-1 同款） |
-| `build.gradle.kts` | 增加 `junit` / `mockwebserver` / `kotlinx-coroutines-test` 测试依赖 |
+```powershell
+$env:JAVA_HOME="C:\Program Files\Java\jdk-21"
+$env:ANDROID_HOME="C:\Users\55160\AppData\Local\Android\Sdk"
+& .\gradlew.bat :provider:webdav:testDebugUnitTest --no-daemon --console=plain *> D:\log.txt
+```
 
-关键行为变更（相对骨架）：
-1. `declaredCapabilities` 移除 **SEARCH**（无实现，ADR-022 禁止声明空能力）。
-2. `ProviderHandle` 从"全 null"变为 `auth + browse + playback`。
-3. `testConnection` 不再吞掉 `CancellationException`。
+注意：ambient `JAVA_HOME` 指向失效的 `jdk1.8.0_381`，必须在当前进程覆盖。
+单模块测试实测约 40s（配置阶段 ~40-60s）；`--no-daemon` 下配置阶段偏慢，勿误判为卡死。
 
-测试（`provider/webdav/src/test/kotlin/.../webdav/`）：`WebDavTestSupport.kt`（夹具/假件）、
-`WebDavMultistatusParserTest.kt`（解析 + URL 契约，含 XXE 与畸形 XML）、`WebDavBrowseProviderTest.kt`
-（PROPFIND 线级契约 / 自条目剔除 / 编码 / 本地切片 / 401·404·302 / 无凭据零请求 / 播放守卫）、
-`WebDavAuthProviderTest.kt`（认证与会话恢复状态机）、`WebDavProviderFactoryTest.kt`
-（能力审计 + 失效身份零出网 + 取消穿透）。
+## 4. 关键代码事实（避免重复踩坑）
 
-## 4. 下一条具体动作
+1. **`TokenStore` 的 identity lease API 只在 PR #18，不在 `main`**。main 上只有
+   `saveTokens` / `readTokens` / `clear`。基于 main 的代码不得使用 lease API；
+   评审 F-C1-1 时按分支区分（main 上"无守卫"是预期状态）。
+2. `main` 上 WebDAV 曾是骨架：`ProviderHandle` 全 null，除 `OPTIONS` 探测外全部 `NotYetImplemented`。
+   W8 已将其推进为 AUTH + BROWSE + PLAYBACK，并**移除** `declaredCapabilities` 里的 SEARCH。
+3. `AddServerViewModel` 登录固定传 `Credentials.UsernamePassword`（`Credentials.WebDav` 全仓零引用），
+   因此 WebDAV 的 `authenticate` 必须同时接受 `UsernamePassword` 与 `WebDav` 两种形态。
+4. 播放栈的跨 origin 剥离由 ADR-030 的 `OriginScopedCredentialInterceptor` 负责（`PlayerFactory` / `MpvHttpBridge`）；
+   WebDAV 自身的 PROPFIND 客户端**不跟随重定向**，凭据不发第二跳。
 
-1. 读取 `D:/deepseek_test/build_webdav.log`，确认 `:provider:webdav:testDebugUnitTest` 结果。
-2. 失败则按编译/断言错误修复；通过则记录 XML 计数（`provider/webdav/build/test-results/`）。
-3. 在 `mh-wb-webdav` 提交并推送 `workbuddy/feat-webdav-readonly`，开 Draft PR。
-4. 在 `mh-wb-state` 提交并推送 `workbuddy/w0-state`。
-5. W1：在独立 worktree 检出 `21231ee`，跑 `:provider:emby:testDebugUnitTest`、
-   `:provider:jellyfin:testDebugUnitTest`、`:core:common:testDebugUnitTest`、
-   `:feature:settings:testDebugUnitTest` 复验 F-C1-1 分层回归；设备验收登记为阻塞。
+## 5. 下一条具体动作（按优先级）
 
-## 5. 仍需外部条件（不得在本线宣布通过）
+1. **W1**：在 `mh-wb-pr18` 跑分层回归复验 F-C1-1：
+   ```
+   :core:common:testDebugUnitTest :core:security:testDebugUnitTest
+   :feature:settings:testDebugUnitTest :feature:home:testDebugUnitTest
+   :provider:emby:testDebugUnitTest :provider:jellyfin:testDebugUnitTest
+   ```
+   并核对 Emby/Jellyfin `ProviderFactory` 的守卫确为 `IOException`、隔离测试断言的是**异常类型**而非 `isFailure`。
+2. **W4 实现**：按 `w4-endpointtestservice-findings.md` 的 W4-a/b/c 三个补丁独立交付
+   （取消穿透 / 结果脱敏 / IO dispatcher + `Call.cancel()`）。
+3. **W9**：修正 README/TASKS 中已过时的阶段与能力描述（如"WebDAV 待实现""Jellyfin 完整实现"）。
+4. **W8 跟进**：PR #18 合并后，评估是否为 WebDAV 补身份守卫（复用 lease API）。
+5. **W6 / W3 / W5 / W7**：见 `task-state.json`；W7 需真实 Jellyfin 实例，W2 归 Agent B。
 
-- **设备/模拟器验收（W1 的 SAF / 八终止点 / 损坏 journal；W5 的 API 32/36 视觉门禁）**：
-  需要 `adb` 可用 + 专用模拟器。当前 `adb` 不在 PATH，`ANDROID_HOME`/`ANDROID_SDK_ROOT` 未设置。
-  最小条件：安装 platform-tools，或显式提供 SDK 路径并创建专用 AVD。
-- **W7 Jellyfin 真实验收**：需要明确授权的测试实例（`BLOCKED_BY_SERVER`）。
-- **W2 Media3 选轨**：`codex/fix-media3-track-selection` 分支仍在 `8e516e4`（= main，零提交），
-  归 Agent B；未经转交不得修改其生产实现。
+## 6. 外部队列（不得在本线宣布通过）
 
-## 6. 边界与红线（本轮遵守）
+- **设备/模拟器验收**（W1 SAF/八终止点/损坏 journal；W5 API 32/36 视觉门禁；W6 截图）：
+  `adb` 不在 PATH。最小条件 = platform-tools 入 PATH + 专用 AVD。
+- **W7 Jellyfin 真实验收**：需明确授权的测试实例（`BLOCKED_BY_SERVER`）。
+- **W2 Media3 选轨**：`codex/fix-media3-track-selection` 仍在 `8e516e4`（零提交），归 Agent B。
 
-- 未改动 `main`；未触碰 `feature/backup-restore`、`feature/playback-visual-effects`、
-  `docs/1h-device-evidence` 及其他 Agent 的 worktree。
-- 未做 merge / auto-merge / Release / 发行签名 / 个人设备安装。
-- 未放宽 TLS、未吞异常、未删除安全检查。
-- `local.properties` 为本机 SDK 路径，**不入库**。
+## 7. 红线（本轮遵守）
+
+未改 `main`；未触碰其他 Agent 的 worktree 与分支；未 merge / auto-merge / Release / 发行签名 / 个人设备安装；
+未放宽 TLS、未吞异常、未删除安全检查；`local.properties` 未入库。

@@ -62,7 +62,12 @@ WebDAV 现状（逐方法）：`testConnection()` = 真实 OPTIONS 探测；`log
 
 - `JAVA_HOME` = `C:\Program Files\Java\jdk1.8.0_381`（**失效**）；可用 JDK 为 `C:\Program Files\Java\jdk-21`（项目记忆）或 Android Studio `jbr`。
 - `java -version`（PATH 中）= 21.0.7 LTS。
-- `ANDROID_HOME` / `ANDROID_SDK_ROOT` **均未设置**；`adb` 不在 PATH；`local.properties` 为空 → 本会话**不能**跑模拟器/仪器测试。
+- `ANDROID_HOME` / `ANDROID_SDK_ROOT` 环境变量**均未设置**，但 SDK **实际存在**于
+  `C:\Users\55160\AppData\Local\Android\Sdk`（含 android-32/33/34/35/36、build-tools）。
+  原始 `local.properties` 为空 → 必须先写入 `sdk.dir` 或显式设置 `ANDROID_HOME` 才能构建。
+- `adb` 不在 PATH（platform-tools 未加入 PATH）→ 本会话**不能**跑模拟器/仪器测试。
+- 已实测可执行：`JAVA_HOME=C:\Program Files\Java\jdk-21` + `local.properties: sdk.dir` 下
+  `:provider:webdav:testDebugUnitTest` 成功运行（55 tests / 0 failures，见第 8 节）。
 - Gradle wrapper 存在；`gradle/libs.versions.toml`：AGP 8.9.3 / Kotlin 2.2.10 / KSP 2.2.10-2.0.2 / Hilt 2.57.1 / Media3 1.11.0 / Room 2.8.4 / compileSdk 36 / minSdk 26。
   - **注意**：项目记忆记录的 Kotlin 2.0.21 / Gradle 8.14 与当前目录不符，以 `libs.versions.toml` 为准。
 - 全量门禁实测约 49 分钟（1197 tasks），本线优先做**目标模块**测试。
@@ -89,4 +94,37 @@ git switch -c <name>   → 报成功，但新分支 HEAD 不可解析（rev-pars
 - PR #18 的模拟器 SAF / 八个进程终止点 / 损坏 journal：本轮**未执行**（无 adb）。
 - PR #10 视觉效果的 API 32/36 门禁与真实解码进度：本轮**未执行**。
 - Emby / Jellyfin 真实服务器验收：本轮**未执行**。
-- 任何 lint / assemble / 仪器门禁：本轮**未执行**（环境无 Android SDK）。
+- 全量 `assembleDebug` / `lintDebug`：本轮**未执行**（只跑了单模块 unit test）。
+- 模拟器 / 仪器门禁：本轮**未执行**（`adb` 不在 PATH）。
+
+## 8. 跨分支依赖陷阱（本轮实测发现，必须记录）
+
+`TokenStore` 的**身份世代 lease API 只存在于 PR #18 分支，不在 `main` 上**。
+
+| 位置 | `main`（`8e516e4`） | PR #18（`21231ee`） |
+| --- | --- | --- |
+| `TokenStore` 成员 | `saveTokens` / `readTokens` / `clear` | 另有 `authenticationLease` / `beginAuthentication` / `isAuthenticationCurrent` / `isAuthenticationLeaseCurrent` / `clearAuthenticationIfCurrent` / `withRestoreIdentityChange` |
+| Emby/Jellyfin Factory | **无**身份守卫 | 有 `identityGuard`（lease 失效抛 `IOException`，F-C1-1） |
+
+推论：
+1. 任何**基于 `main`** 的新代码不得依赖 lease API（会编译失败，且形成对未合并分支的隐式依赖）。
+   本轮 W8 初版就因此编译失败（8 处 `Unresolved reference`），已改为不装配身份守卫。
+2. 评审 F-C1-1 时必须区分分支：在 `main` 上"守卫缺失"是预期状态，不是缺陷；
+   缺陷判定只对 PR #18 的 head 生效。
+3. PR #18 合并后，任何需要身份守卫的 Provider 才可复用该 API；届时 W8 可跟进对齐。
+
+## 9. W8 交付（本线完成）
+
+- 分支/PR：`workbuddy/feat-webdav-readonly` @ `01c825e`，Draft PR **#19**（head 与 base 见 PR 正文）。
+- 范围：只读认证（Basic）+ `PROPFIND` 目录浏览 + 直链播放；不含备份、视觉、证据归档。
+- 骨架 → 实现的能力变化：`ProviderHandle` 由全 null 变为 `auth + browse + playback`；
+  `declaredCapabilities` **移除 SEARCH**（无实现，ADR-022）。
+- 验证（EXECUTED）：`:provider:webdav:testDebugUnitTest` **BUILD SUCCESSFUL**，
+  5 份 XML / **55 tests / 0 failures / 0 errors / 0 skipped**
+  （Auth 15、Browse 14、Urls 11、Parser 8、Factory 7）。
+- 未执行：全量 assemble/lint、真实 WebDAV 服务验收、真机验收。
+
+## 10. 文档交付（本线完成）
+
+- 分支/PR：`workbuddy/w0-state` @ `f565107`，Draft PR **#20**。
+- 内容：本文件 + `task-state.json` + `resume.md` + `w4-endpointtestservice-findings.md`。
