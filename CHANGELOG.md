@@ -1,4 +1,12 @@
 # 变更记录（CHANGELOG）
+## T0001 阻断项修复 — 2026-09-20（验证未完成）
+- 先红后绿复现恢复已排队时取消的响应泄漏，以及 Media 读体失败提前覆盖 API 状态码。
+- 响应由 OkHttp 回调内 `use` 持有至消费和关闭完成，取消绑定覆盖整个消费期；仅恢复无资源结果。
+- Media 状态码恢复为消费成功后提交；首包、Range、吞吐字段的原有解释保持不变。
+- 补强 Media 等头/读体确定性测试、失败清理与独立 watchdog；补真实 HTTPS 切换及生命周期取消测试。
+- 当前网络源码直接 JUnit 17 例通过，ViewModel 测试源码编译通过；受文件权限限制，
+  规定的 Gradle 单测/lint/assemble 门禁及 Robolectric 运行尚未完成。完整证据与限制见 `.repair-evidence/README.md`。
+
 ## [0.16.1-2c-endpoint-cancellation] — 2026-09-20（闭环任务 T0001：EndpointTestService 取消契约；未设备验证）
 ### 修复
 - `core:network` `EndpointTestService`：两层探测改为在可注入 IO 调度器上执行，不再占用调用方

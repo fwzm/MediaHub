@@ -4,14 +4,8 @@ import android.os.SystemClock
 import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
@@ -45,8 +39,8 @@ data class EndpointTestResult(
  * Phase 1G-A（ADR-039）：[probePath] 由调用方从 ProviderDescriptor.probePath 传入——
  * 本类**不含任何 Emby/Jellyfin 协议路径知识**（/emby 前缀属于 Emby provider 自述）。
  *
- * Phase 1I 2C（取消契约，本次修复）：两层的网络等待与响应消费全部在 [ioDispatcher] 上执行，
- * 不再占用调用方（编辑页主调度器）线程；请求通过可取消桥接绑定当前协程，
+ * Phase 1I 2C（取消契约）：两层探测通过 [ioDispatcher] 发起异步请求，
+ * 响应在 OkHttp 回调线程内消费，不占用调用方（编辑页主调度器）线程；请求绑定当前协程，
  * 取消会实际终止对应 [Call] 并以 [CancellationException] 向上传播；
  * 响应所有权由桥接统一持有，成功、失败、取消竞态与迟到响应都会关闭。
  * 媒体响应按 [maxMediaBytes] 上限消费，落实注释中既有的 Range 1MB 承诺。
@@ -124,12 +118,12 @@ open class EndpointTestService(
                     mediaCall.awaitCancellable { resp ->
                         mediaFirstByte = clock() - start
                         rangeOk = resp.code == 206 || resp.header("Accept-Ranges") == "bytes"
-                        code = resp.code
                         val bytes = resp.body?.readAtMost(maxMediaBytes) ?: 0L
                         val elapsedSec = (clock() - start) / 1000.0
                         if (elapsedSec > 0 && bytes > 0) {
                             throughput = (bytes / (1024.0 * 1024.0)) / elapsedSec
                         }
+                        code = resp.code
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -156,10 +150,11 @@ open class EndpointTestService(
 
     /**
      * 可取消桥接：以 [Call.enqueue] 代替阻塞的 [Call.execute]，
-     * 并在响应头到达后继续维持取消绑定，直到 [block] 消费完成为止。
+     * 回调持有响应直至 [block] 消费并关闭；跨 continuation 只交付不持有响应的结果。
+     * 取消钩子在消费期间仍有效，可中止停滞读取，也不会留下恢复前取消的所有权空隙。
      */
-    private suspend fun <T> Call.awaitCancellable(block: (Response) -> T): T {
-        val response = suspendCancellableCoroutine { cont ->
+    private suspend fun <T> Call.awaitCancellable(block: (Response) -> T): T =
+        suspendCancellableCoroutine { cont ->
             cont.invokeOnCancellation { cancel() }
             enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
@@ -167,28 +162,19 @@ open class EndpointTestService(
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    if (cont.isActive) cont.resume(response) else response.close()
+                    val result = try {
+                        response.use {
+                            if (!cont.isActive) return
+                            block(it)
+                        }
+                    } catch (e: Exception) {
+                        if (cont.isActive) cont.resumeWithException(e)
+                        return
+                    }
+                    if (cont.isActive) cont.resume(result)
                 }
             })
         }
-        // 响应头已到：另起一个独立协程监视取消，覆盖整个「响应消费窗口」。
-        // 不能用 Job.invokeOnCompletion：本协程此刻可能正阻塞在响应体读取上，
-        // 完成回调要等阻塞返回后才触发，无法中断停滞的读取。
-        val watcher = CoroutineScope(coroutineContext + ioDispatcher)
-            .launch(start = CoroutineStart.UNDISPATCHED) {
-                try {
-                    awaitCancellation()
-                } finally {
-                    if (!currentCoroutineContext().isActive) cancel()
-                }
-            }
-        return try {
-            block(response)
-        } finally {
-            watcher.cancel()
-            response.close()
-        }
-    }
 
     /** 按上限消费响应体；返回实际消费字节数。不读取超出 [limit] 的字节。 */
     private fun ResponseBody.readAtMost(limit: Long): Long {
