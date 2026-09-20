@@ -1,0 +1,97 @@
+{
+  "line": "workbuddy",
+  "agent": "WorkBuddy execution line",
+  "snapshotAt": "2026-09-20T11:06:36+08:00",
+  "repo": "fwzm/MediaHub",
+  "localWorktree": "D:/deepseek_test/MediaHub",
+  "toolchain": {
+    "git": "2.55.0.windows.5 (PortableGit)",
+    "gitKnownDefect": "cannot create new branch refs (worktree add -b / switch -c produce unresolvable HEAD); use `git worktree add --detach <path> <sha>` + `git push origin HEAD:refs/heads/<name>`",
+    "javaHome": "C:/Program Files/Java/jdk1.8.0_381 (BROKEN)",
+    "usableJdk": "C:/Program Files/Java/jdk-21",
+    "androidHome": null,
+    "adb": false,
+    "localProperties": "empty",
+    "deviceAcceptancePossible": false
+  },
+  "baseline": {
+    "originMain": "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1",
+    "pr18": {
+      "branch": "feature/backup-restore",
+      "head": "21231eefcb847f84b8d1092d9c2146438f472ddc",
+      "base": "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1",
+      "state": "OPEN",
+      "draft": true,
+      "mergeable": "MERGEABLE",
+      "ciRun": 34769586851,
+      "ciHeadSha": "21231eefcb847f84b8d1092d9c2146438f472ddc",
+      "ciConclusion": "success"
+    },
+    "pr10": {
+      "branch": "feature/playback-visual-effects",
+      "head": "3febdf8b77a6a1d63d54b9d0c409de708ed978bf",
+      "state": "OPEN",
+      "draft": false,
+      "mergeable": "MERGEABLE"
+    },
+    "pr16": {
+      "branch": "docs/1h-device-evidence",
+      "head": "f40363ce5199e05a4cd197b456a851c2b984492b",
+      "state": "OPEN",
+      "draft": false,
+      "mergeable": "MERGEABLE"
+    },
+    "pr6ExtraFound": {
+      "branch": "codex/post-1d-review-hardening",
+      "head": "7809facab2316f1c43f1e30deb2efeacd8c2ca78",
+      "state": "OPEN",
+      "draft": false,
+      "mergeable": "CONFLICTING",
+      "note": "not present in the task snapshot"
+    },
+    "agentsMdPresent": false
+  },
+  "providerCapabilitiesOnMain": {
+    "emby": ["AUTH", "LIBRARY", "DETAIL", "PLAYBACK", "QUERY", "SEARCH", "IDENTITY_LOOKUP", "PROGRESS"],
+    "jellyfin": ["AUTH", "LIBRARY", "DETAIL", "SEARCH", "PLAYBACK", "PROGRESS"],
+    "webdav": [],
+    "local": ["BROWSE", "DETAIL", "PLAYBACK"]
+  },
+  "webdavSkeleton": {
+    "files": [
+      "provider/webdav/src/main/kotlin/com/mediahub/provider/webdav/WebDavProvider.kt",
+      "provider/webdav/src/main/kotlin/com/mediahub/provider/webdav/WebDavProviderFactory.kt"
+    ],
+    "implemented": ["testConnection (OPTIONS)", "logout (clearSession)"],
+    "notImplemented": ["authenticate", "refreshSession", "restoreSession", "authHeaders", "listFolder", "search"],
+    "descriptorDeclaresButUnimplemented": ["AUTH", "BROWSE", "PLAYBACK", "SEARCH"],
+    "handleExposes": []
+  },
+  "taskPackages": [
+    { "id": "W0", "title": "核对真实进度与任务归属", "owner": "workbuddy", "status": "DONE", "artifacts": ["docs/workbuddy/current-state.md", "docs/workbuddy/task-state.json", "docs/workbuddy/resume.md"] },
+    { "id": "W1", "title": "PR #18 新 head 复验", "owner": "workbuddy (verify only; impl owned by Agent A)", "status": "IN_PROGRESS", "blocked": "device/emulator acceptance blocked (no adb / no Android SDK)" },
+    { "id": "W2", "title": "Media3 音轨字幕闭环", "owner": "Agent B", "status": "BLOCKED_BY_OWNER", "evidence": "branch codex/fix-media3-track-selection is at 8e516e4 (= main) with zero commits" },
+    { "id": "W3", "title": "SLOW-FINAL 定位与修复", "owner": "unassigned", "status": "NOT_STARTED", "note": "PR #16 must stay docs-only" },
+    { "id": "W4", "title": "EndpointTestService 脱敏与取消", "owner": "unassigned", "status": "NOT_STARTED" },
+    { "id": "W5", "title": "PR #10 接回与正式视觉验收", "owner": "Agent A (original branch)", "status": "NOT_STARTED" },
+    { "id": "W6", "title": "全应用界面和入口完整化", "owner": "workbuddy (parallel line)", "status": "NOT_STARTED" },
+    { "id": "W7", "title": "Jellyfin 真实验收", "owner": "unassigned", "status": "BLOCKED_BY_SERVER" },
+    { "id": "W8", "title": "只读 WebDAV 功能包", "owner": "workbuddy", "status": "IN_PROGRESS" },
+    { "id": "W9", "title": "文档、候选 APK 与交接", "owner": "workbuddy", "status": "NOT_STARTED" }
+  ],
+  "worktreesCreated": [
+    { "path": "D:/deepseek_test/mh-wb-state", "mode": "detached", "sha": "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1", "purpose": "W0 state artifacts + W9 docs" },
+    { "path": "D:/deepseek_test/mh-wb-webdav", "mode": "detached", "sha": "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1", "purpose": "W8 read-only WebDAV package" }
+  ],
+  "remoteBranches": [
+    { "name": "workbuddy/w0-state", "pushed": true, "content": "W0 state artifacts + W9 docs (no production code)" },
+    { "name": "workbuddy/feat-webdav-readonly", "pushed": false, "content": "W8 read-only WebDAV provider package" }
+  ],
+  "notAuthorized": ["merge", "auto-merge", "release", "release signing", "personal device install"],
+  "unverified": [
+    "PR #18 emulator SAF / 8 process-kill points / corrupted journal",
+    "PR #10 visual gates on API 32/36",
+    "any real Emby/Jellyfin server acceptance",
+    "any assemble / lint / instrumented gate (no Android SDK in session)"
+  ]
+}
