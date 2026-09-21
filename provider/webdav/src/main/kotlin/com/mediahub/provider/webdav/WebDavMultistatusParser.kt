@@ -9,13 +9,21 @@ import org.xml.sax.helpers.DefaultHandler
 /**
  * `multistatus` (RFC 4918) 解析器。
  *
- * 安全约束：
- * - **禁用外部实体与 DTD**（XXE）。Android/JVM 上部分特性不受支持，逐个 try-catch
- *   后仍会通过 [javax.xml.parsers.SAXParserFactory] 的 `setFeature` 尽力收紧；
- *   无法收紧时解析仍受响应大小上限约束（见 [WebDavApi]）。
+ * 安全约束（A2-2 收紧）：
+ * - **fail-closed 的 XXE 防线**：禁用 DTD 与外部实体是解析的前置条件——
+ *   [SECURE_FEATURES] 任一设置失败即拒绝解析（[IllegalStateException]，
+ *   由调用方包装为 `Parse`），绝不静默降级继续。响应大小上限（WebDavApi 8 MiB）
+ *   只是纵深防御，**不能替代** DTD/外部实体阻断。
  * - **命名空间感知**：只认 `DAV:` 命名空间，不依赖服务器使用的前缀（`D:` / `d:` / `lp1:`）。
- * - 只采纳处于 `2xx` `propstat` 中的属性；`404 Not Found` propstat 的属性全部丢弃。
- * - 属性顺序无关：`prop` 与 `status` 在 `propstat` 内的先后顺序都不影响结果。
+ *
+ * 正确性契约（A2-2）：
+ * - propstat 成败按**状态行解析**取状态码（`HTTP/1.1 207 Multi-Status` 是合法
+ *   成功状态）；无法解析的状态行按失败处理（fail-closed）。
+ * - `resourcetype/collection` 与其他属性一样**只接受所属成功 propstat 的值**；
+ *   失败 propstat 里的 collection 不得把资源标成目录。
+ * - **response 级** `<D:status>`（§9.1.2 的非 propstat 形态）非 2xx 时整条丢弃。
+ * - 只有一个 propstat 的 response 其 href 仍然有效（条目存在，属性不可信）；
+ *   属性顺序无关；多个 propstat 按 2xx 与否逐个合并。
  */
 internal object WebDavMultistatusParser {
 
@@ -28,15 +36,34 @@ internal object WebDavMultistatusParser {
         "http://apache.org/xml/features/nonvalidating/load-external-dtd" to false,
     )
 
+    /** `HTTP/1.1 207 Multi-Status` → 207。 */
+    private val STATUS_LINE = Regex("""(?i)^HTTP/\S+\s+(\d{3})""")
+
+    private fun statusCodeOf(status: String?): Int? =
+        status?.trim()?.let { STATUS_LINE.find(it)?.groupValues?.get(1)?.toIntOrNull() }
+
+    private fun isSuccess(status: String?): Boolean {
+        val code = statusCodeOf(status) ?: return false
+        return code in 200..299
+    }
+
+    /** 测试接缝：允许测试注入会 setFeature 失败的 factory（open-for-test 约定）。 */
+    internal var saxFactoryProvider: () -> SAXParserFactory = { SAXParserFactory.newInstance() }
+
     fun parse(xml: String): List<WebDavResource> {
-        val factory = SAXParserFactory.newInstance()
+        val factory = saxFactoryProvider()
         factory.isNamespaceAware = true
+        val unsupported = mutableListOf<String>()
         SECURE_FEATURES.forEach { (feature, value) ->
             try {
                 factory.setFeature(feature, value)
             } catch (ignored: Exception) {
-                // 该实现不支持此特性：继续（响应大小上限仍是兜底防线）。
+                unsupported += feature
             }
+        }
+        if (unsupported.isNotEmpty()) {
+            // fail-closed：无法建立 DTD/外部实体阻断边界时拒绝解析。
+            throw IllegalStateException("XML 安全特性不可用，拒绝解析: $unsupported")
         }
         val handler = Handler()
         val parser = factory.newSAXParser()
@@ -55,6 +82,11 @@ internal object WebDavMultistatusParser {
         private var isCollection = false
         private var inPropstat = false
         private var propstatOk = false
+        private var pendingCollection = false
+
+        /** response 级 status（非 propstat）：出现即按其成败决定整条 response 去留。 */
+        private var responseLevelStatusSeen = false
+        private var responseLevelOk = false
 
         private val okProps = mutableMapOf<String, String>()
         private val pendingProps = mutableMapOf<String, String>()
@@ -68,9 +100,13 @@ internal object WebDavMultistatusParser {
                     inPropstat = true
                     propstatOk = false
                     pendingProps.clear()
+                    pendingCollection = false
                 }
                 "status" -> text = StringBuilder()
-                "collection" -> isCollection = true
+                "collection" -> {
+                    // collection 归属当前 propstat；只有成功 propstat 的才会计入
+                    if (inPropstat) pendingCollection = true
+                }
                 "href",
                 "displayname",
                 "getcontentlength",
@@ -91,13 +127,23 @@ internal object WebDavMultistatusParser {
             val value = text?.toString()?.trim()
             when (localName) {
                 "status" -> {
-                    // 只有 2xx 的 propstat 才是有效属性来源。
-                    propstatOk = value?.contains("200") == true
+                    if (inPropstat) {
+                        // 只有 2xx 的 propstat 才是有效属性来源（按状态行解析取码）
+                        propstatOk = isSuccess(value)
+                    } else {
+                        // response 级 status：非 2xx → 整条丢弃；未出现 → 不影响
+                        responseLevelStatusSeen = true
+                        responseLevelOk = isSuccess(value)
+                    }
                     text = null
                 }
                 "propstat" -> {
-                    if (propstatOk) okProps.putAll(pendingProps)
+                    if (propstatOk) {
+                        okProps.putAll(pendingProps)
+                        isCollection = isCollection || pendingCollection
+                    }
                     pendingProps.clear()
+                    pendingCollection = false
                     inPropstat = false
                     propstatOk = false
                 }
@@ -121,6 +167,7 @@ internal object WebDavMultistatusParser {
         }
 
         private fun emit() {
+            if (responseLevelStatusSeen && !responseLevelOk) return
             val h = href ?: return
             if (h.isBlank()) return
             val length = okProps["getcontentlength"]?.toLongOrNull()
@@ -140,6 +187,9 @@ internal object WebDavMultistatusParser {
             isCollection = false
             inPropstat = false
             propstatOk = false
+            pendingCollection = false
+            responseLevelStatusSeen = false
+            responseLevelOk = false
             okProps.clear()
             pendingProps.clear()
             text = null

@@ -55,7 +55,7 @@ class WebDavProviderFactoryTest {
         webServer.shutdown()
     }
 
-    private fun factory() = WebDavProviderFactory(http, tokenStore, vault, logger)
+    private fun factory() = WebDavProviderFactory(http, tokenStore, vault, WebDavCredentialCoordinator(), logger)
 
     private fun server(baseUrl: String = webServer.url("/dav/").toString()) = MediaServer(
         id = "s1",
@@ -160,6 +160,7 @@ class WebDavProviderFactoryTest {
             tokenStore = tokenStore,
             logger = logger,
             credentialVault = vault,
+            credentialCoordinator = WebDavCredentialCoordinator(),
         )
 
         val thrown = runCatching { provider.testConnection() }.exceptionOrNull()

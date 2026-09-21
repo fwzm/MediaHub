@@ -73,10 +73,13 @@ class WebDavProvider(
     tokenStore: TokenStore,
     logger: Logger,
     credentialVault: CredentialVault,
+    credentialCoordinator: WebDavCredentialCoordinator,
 ) : BaseMediaServerProvider(server, apiClient, mediaHttpClient, tokenStore, logger),
     MediaProvider {
 
-    private val session = WebDavSession(server, WebDavCredentialStore(credentialVault))
+    // 与 Factory 装配的 auth/browse 等能力共用同一协调器：同一 handle 内的
+    // 会话头取密码与认证清理看到同一世代（A2-1：全部写入/清理入口必须参与）。
+    private val session = WebDavSession(server, WebDavCredentialStore(credentialVault, credentialCoordinator))
 
     override val descriptor: ProviderDescriptor = WEBDAV_PROVIDER_DESCRIPTOR
 
@@ -109,46 +112,51 @@ class WebDavProvider(
 
         coroutineContext.ensureActive()
         val start = System.nanoTime()
+        val call = client.newCall(request)
         try {
-            client.newCall(request).execute().use { response ->
-                val latencyMs = (System.nanoTime() - start) / 1_000_000
-                val dav = response.header("DAV")
-                when {
-                    response.code in 200..299 -> ConnectionStatus(
-                        ok = true,
-                        latencyMs = latencyMs,
-                        message = buildString {
-                            append("WebDAV 可用（HTTP ${response.code}")
-                            if (!dav.isNullOrBlank()) append(" · DAV $dav")
-                            append("）")
-                        },
-                    )
+            // A2-2：取消经 awaitCancellable 绑定到真实 Call.cancel（ADR-039 红线）
+            call.awaitCancellable { response ->
+                response.use {
+                    val latencyMs = (System.nanoTime() - start) / 1_000_000
+                    val dav = it.header("DAV")
+                    when {
+                        it.code in 200..299 -> ConnectionStatus(
+                            ok = true,
+                            latencyMs = latencyMs,
+                            message = buildString {
+                                append("WebDAV 可用（HTTP ${it.code}")
+                                if (!dav.isNullOrBlank()) append(" · DAV $dav")
+                                append("）")
+                            },
+                        )
 
-                    response.code == 401 -> ConnectionStatus(
-                        ok = false,
-                        latencyMs = latencyMs,
-                        message = "需要认证（HTTP 401）",
-                        errorCode = ProviderException.ErrorCode.AUTH_REQUIRED,
-                    )
+                        it.code == 401 -> ConnectionStatus(
+                            ok = false,
+                            latencyMs = latencyMs,
+                            message = "需要认证（HTTP 401）",
+                            errorCode = ProviderException.ErrorCode.AUTH_REQUIRED,
+                        )
 
-                    response.code == 403 -> ConnectionStatus(
-                        ok = false,
-                        latencyMs = latencyMs,
-                        message = "没有访问权限（HTTP 403）",
-                        errorCode = ProviderException.ErrorCode.HTTP,
-                    )
+                        it.code == 403 -> ConnectionStatus(
+                            ok = false,
+                            latencyMs = latencyMs,
+                            message = "没有访问权限（HTTP 403）",
+                            errorCode = ProviderException.ErrorCode.HTTP,
+                        )
 
-                    else -> ConnectionStatus(
-                        ok = false,
-                        latencyMs = latencyMs,
-                        message = "HTTP ${response.code}",
-                        errorCode = ProviderException.ErrorCode.HTTP,
-                    )
+                        else -> ConnectionStatus(
+                            ok = false,
+                            latencyMs = latencyMs,
+                            message = "HTTP ${it.code}",
+                            errorCode = ProviderException.ErrorCode.HTTP,
+                        )
+                    }
                 }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: IOException) {
+            coroutineContext.ensureActive()
             logger.w(LogTag.NETWORK, "WebDAV OPTIONS 失败 serverId=${server.id}", e)
             ConnectionStatus(
                 ok = false,

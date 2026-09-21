@@ -34,6 +34,7 @@ class WebDavProviderFactory @Inject constructor(
     private val httpClientFactory: HttpClientFactory,
     private val tokenStore: TokenStore,
     private val credentialVault: CredentialVault,
+    private val credentialCoordinator: WebDavCredentialCoordinator,
     private val logger: Logger,
 ) : MediaProviderFactory {
 
@@ -43,7 +44,9 @@ class WebDavProviderFactory @Inject constructor(
         val apiClient = ApiClient(httpClientFactory.apiClient(), logger = logger)
         val mediaHttpClient = MediaHttpClient(httpClientFactory.mediaClient(), logger = logger)
 
-        val credentialStore = WebDavCredentialStore(credentialVault)
+        // 协调器是单例：每次 create 新建的 store 共享同一张按 server 隔离的世代表
+        // （A2-1：跨 handle 的迟到失败保护依赖这一点）。
+        val credentialStore = WebDavCredentialStore(credentialVault, credentialCoordinator)
         val session = WebDavSession(server, credentialStore)
         val api = WebDavApi(server.id, mediaHttpClient, logger)
 
@@ -54,6 +57,7 @@ class WebDavProviderFactory @Inject constructor(
             tokenStore = tokenStore,
             logger = logger,
             credentialVault = credentialVault,
+            credentialCoordinator = credentialCoordinator,
         )
         return ProviderHandle(
             provider = provider,
