@@ -58,14 +58,11 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.kotlinx.coroutines.test)
-<<<<<<< HEAD
     testImplementation(libs.okhttp.mockwebserver)
-=======
     // ServerRepository 是具体类（依赖 AppDatabase）：AddServer 表单链路测试用
     // Room in-memory 真实仓库（项目既有模式），需要 Room 运行时在测试类路径上。
     testImplementation(libs.room.runtime)
     testImplementation(libs.room.ktx)
->>>>>>> origin/a/webdav-detail-loop
 
     implementation(libs.kotlinx.coroutines.android)
 }
