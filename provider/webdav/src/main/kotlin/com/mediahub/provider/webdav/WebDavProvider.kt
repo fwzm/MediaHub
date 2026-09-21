@@ -73,10 +73,13 @@ class WebDavProvider(
     tokenStore: TokenStore,
     logger: Logger,
     credentialVault: CredentialVault,
+    credentialCoordinator: WebDavCredentialCoordinator,
 ) : BaseMediaServerProvider(server, apiClient, mediaHttpClient, tokenStore, logger),
     MediaProvider {
 
-    private val session = WebDavSession(server, WebDavCredentialStore(credentialVault))
+    // 与 Factory 装配的 auth/browse 等能力共用同一协调器：同一 handle 内的
+    // 会话头取密码与认证清理看到同一世代（A2-1：全部写入/清理入口必须参与）。
+    private val session = WebDavSession(server, WebDavCredentialStore(credentialVault, credentialCoordinator))
 
     override val descriptor: ProviderDescriptor = WEBDAV_PROVIDER_DESCRIPTOR
 

@@ -100,8 +100,14 @@ internal class WebDavAuthProvider(
         } catch (e: CancellationException) {
             throw e
         } catch (e: ProviderException.AuthExpired) {
-            // 明确认证失效且身份未变（世代一致）才销毁凭据。
-            withContext(NonCancellable) { credentialStore.clearIfStill(server.id, credential) }
+            // 明确认证失效且身份未变（世代一致）才销毁凭据；清理失败不冒充成功，
+            // 也不掩盖会话失效结论（密码残留时后续 401 会再次尝试清理）。
+            val cleanup = runCatching {
+                withContext(NonCancellable) { credentialStore.clearIfStill(server.id, credential) }
+            }
+            cleanup.exceptionOrNull()?.let {
+                logger.w(LogTag.AUTH, "WebDAV 凭据条件清理失败 serverId=${server.id}")
+            }
             logger.i(LogTag.AUTH, "WebDAV 会话失效（401），已按世代清理凭据 serverId=${server.id}")
             AuthSessionState.Error(AuthSessionErrorKind.SESSION_EXPIRED, "登录状态已过期，请重新登录")
         } catch (e: ProviderException.NotFound) {

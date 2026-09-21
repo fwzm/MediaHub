@@ -25,47 +25,59 @@ internal object WebDavAuth {
  * WebDAV 长期凭据存取（ADR-016）：密码进 [CredentialVault]（Keystore 加密），
  * 用户名复用 [MediaServer.username]（非敏感身份，已在 Room 中）。
  *
- * 明确不保存凭据到 Room / DataStore 明文；登出时连同 [com.mediahub.core.security.TokenStore] 一起清理。
+ * **A2-1 线性化契约**：世代状态在 [WebDavCredentialCoordinator]（应用级共享，
+ * per-server 单锁）。本类所有操作的"世代判定/推进 + vault 读/写/删"都在同一次
+ * 持锁内完成，锁内不做任何网络等待。失败序（如实声明）：
+ * - [savePassword] **先增代后写库**：写库失败时世代已领先——方向安全（在途旧
+ *   handle 的条件清理被阻止），且不会留下"半新半旧"的密码；读侧只会看到旧值或 null。
+ * - [clear]（显式登出）**先删后增代**：删除失败时世代未动，登出可重试。
+ * - [clearIfStill] 检查与删除原子：期间发生过 save/clear/invalidate 则直接返回 false。
  *
- * **迟到失败防误清**：进程内维护每服务器的凭据**世代**——[savePassword] 先增代再写库，
- * [readPassword] 在读库前捕获当前代；401 清理必须凭捕获代调用 [clearIfStill]。
- * 这样在途请求读旧密码期间发生了重新认证（savePassword 增代），其迟到的 401
- * 会因世代不符而跳过清理，**不会清掉较新身份的密码**。
- * （这是进程内守卫；跨进程一致性由 PR #18 的 lease 机制负责，本分支不引入该依赖。）
+ * 不宣称跨进程一致性（见协调器 KDoc）。
  */
-internal class WebDavCredentialStore(private val vault: CredentialVault) {
+internal class WebDavCredentialStore(
+    private val vault: CredentialVault,
+    private val coordinator: WebDavCredentialCoordinator,
+) {
 
     /** 密码值 + 读取时所属的凭据世代。 */
     data class PasswordHandle(val password: String, val generation: Long)
 
-    private val generations = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>()
-
-    private fun generationOf(serverId: String): java.util.concurrent.atomic.AtomicLong =
-        generations.computeIfAbsent(serverId) { java.util.concurrent.atomic.AtomicLong() }
-
     suspend fun savePassword(serverId: String, password: String) {
-        generationOf(serverId).incrementAndGet()
-        vault.save(serverId, CredentialVault.CredentialKind.PASSWORD, password)
+        coordinator.withServerLock(serverId) { state ->
+            state.generation++
+            vault.save(serverId, CredentialVault.CredentialKind.PASSWORD, password)
+        }
     }
 
-    /** 读取密码并捕获其世代；401 清理必须凭该代调用 [clearIfStill]。 */
-    suspend fun readPassword(serverId: String): PasswordHandle? {
-        val generation = generationOf(serverId).get()
-        val password = vault.read(serverId, CredentialVault.CredentialKind.PASSWORD) ?: return null
-        return PasswordHandle(password, generation)
-    }
+    /** 读取密码并捕获其世代；401 条件清理必须凭该代调用 [clearIfStill]。 */
+    suspend fun readPassword(serverId: String): PasswordHandle? =
+        coordinator.withServerLock(serverId) { state ->
+            vault.read(serverId, CredentialVault.CredentialKind.PASSWORD)?.let {
+                PasswordHandle(it, state.generation)
+            }
+        }
 
     /** 只取密码值（播放/详情等不关心世代的调用点）。 */
     suspend fun readPasswordValue(serverId: String): String? =
         readPassword(serverId)?.password
 
-    /** 仅当凭据世代仍与 [handle] 一致才清除；期间发生过重新认证则跳过。 */
-    suspend fun clearIfStill(serverId: String, handle: PasswordHandle) {
-        if (generationOf(serverId).get() == handle.generation) clear(serverId)
-    }
+    /**
+     * 仅当凭据世代仍与 [handle] 一致才清除，返回是否执行了删除。
+     * vault.remove 失败时异常向上抛出（世代未变，调用方可重试）。
+     */
+    suspend fun clearIfStill(serverId: String, handle: PasswordHandle): Boolean =
+        coordinator.withServerLock(serverId) { state ->
+            if (state.generation != handle.generation) return@withServerLock false
+            vault.remove(serverId, CredentialVault.CredentialKind.PASSWORD)
+            true
+        }
 
     suspend fun clear(serverId: String) {
-        vault.remove(serverId, CredentialVault.CredentialKind.PASSWORD)
+        coordinator.withServerLock(serverId) { state ->
+            vault.remove(serverId, CredentialVault.CredentialKind.PASSWORD)
+            state.generation++
+        }
     }
 }
 
