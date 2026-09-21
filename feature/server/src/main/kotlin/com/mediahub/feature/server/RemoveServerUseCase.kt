@@ -11,6 +11,14 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
+ * 删除媒体源的窄接口（Phase 1I 可测性）：ServerEditorViewModel 只依赖本接口，
+ * 测试用一行 fake 替代（真实用例级联清理链不需要进入 VM 测试）。
+ */
+interface ServerRemoveHandler {
+    suspend fun remove(server: MediaServer)
+}
+
+/**
  * 删除媒体源（级联清理，Server Editor 危险区）。
  *
  * 清理：server(+endpoints) → account → token → credential → progress → 自定义图标文件 → provider 会话。
@@ -25,8 +33,8 @@ class RemoveServerUseCase @Inject constructor(
     private val credentialVault: CredentialVault,
     private val serverIconStore: ServerIconStore,
     private val sessionStoreCleaner: SessionStoreCleaner,
-) {
-    suspend operator fun invoke(server: MediaServer) {
+) : ServerRemoveHandler {
+    override suspend fun remove(server: MediaServer) {
         serverRepository.deleteServer(server.id)
         accountRepository.deleteForServer(server.id)
         tokenStore.clear(server.id)

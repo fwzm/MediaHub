@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.IdGenerator
+import com.mediahub.core.common.ServerAddressNormalizer
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.database.repository.ServerRepository
@@ -30,6 +31,14 @@ data class AddServerUiState(
     val baseUrl: String = "",
     val username: String = "",
     val password: String = "",
+    /** HTTPS 补全开关（新网络媒体源默认开启；编辑/重登从已存 URL 的 scheme 派生，不自动升级）。 */
+    val preferHttps: Boolean = true,
+    /** 规范化后的完整地址（唯一权威）；非法输入时为 null，见 [addressError]。 */
+    val resolvedUrl: String? = null,
+    /** 地址字段级错误（请求前拦截，不抛异常）。 */
+    val addressError: String? = null,
+    /** 地址草稿版本：任何地址/协议变化递增；异步测试结果按发起时版本绑定。 */
+    val addressVersion: Long = 0,
     val isReauthorizing: Boolean = false,
     val isLoadingExisting: Boolean = false,
     val isTesting: Boolean = false,
@@ -87,12 +96,19 @@ class AddServerViewModel @Inject constructor(
                         }
                     } else {
                         existingServer = server
+                        // 编辑/重登：从已存 URL 的 scheme 派生开关初始态——历史 HTTP 不自动升级 HTTPS（Phase 1I）
+                        val detected = ServerAddressNormalizer.explicitHttpScheme(server.baseUrl)
+                        val normalized = ServerAddressNormalizer.normalize(server.baseUrl, preferHttps = true)
                         _uiState.update {
                             it.copy(
                                 selectedDescriptorId = descriptor.id,
                                 name = server.name,
                                 baseUrl = server.baseUrl,
                                 username = server.username.orEmpty(),
+                                preferHttps = detected?.let { s -> s == "https" } ?: true,
+                                resolvedUrl = (normalized as? ServerAddressNormalizer.Result.Ok)?.address?.url,
+                                addressError = (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
+                                addressVersion = 1,
                                 isLoadingExisting = false,
                             )
                         }
@@ -126,20 +142,69 @@ class AddServerViewModel @Inject constructor(
     }
 
     fun updateName(name: String) = _uiState.update { it.copy(name = name) }
-    fun updateBaseUrl(url: String) = _uiState.update { it.copy(baseUrl = url, testResult = null) }
+
+    /**
+     * 地址输入（Phase 1I）：每次变化重新规范化；粘贴完整 URL 时以粘贴内容的
+     * scheme 同步 HTTPS 开关；地址变化即递增草稿版本并清除旧测试结果。
+     */
+    fun updateBaseUrl(raw: String) = _uiState.update { st ->
+        val detected = ServerAddressNormalizer.explicitHttpScheme(raw)
+        val preferHttps = detected?.let { it == "https" } ?: st.preferHttps
+        val normalized = ServerAddressNormalizer.normalize(raw, preferHttps)
+        st.copy(
+            baseUrl = raw,
+            preferHttps = preferHttps,
+            resolvedUrl = (normalized as? ServerAddressNormalizer.Result.Ok)?.address?.url,
+            addressError = (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
+            addressVersion = st.addressVersion + 1,
+            testResult = null,
+        )
+    }
+
+    /**
+     * 手动切换 HTTPS 开关（Phase 1I）：只改变 scheme——粘贴进来的完整 URL 也随开关
+     * 重写文本协议（"粘贴内容为准"仅作用于粘贴同步那一刻）；显式端口与反代子路径保留。
+     */
+    fun toggleHttps(enabled: Boolean) = _uiState.update { st ->
+        val target = if (enabled) "https" else "http"
+        val newText = if (st.baseUrl.isBlank()) st.baseUrl else ServerAddressNormalizer.withScheme(st.baseUrl, target)
+        val normalized = ServerAddressNormalizer.normalize(newText, enabled)
+        st.copy(
+            baseUrl = newText,
+            preferHttps = enabled,
+            resolvedUrl = (normalized as? ServerAddressNormalizer.Result.Ok)?.address?.url,
+            addressError = (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
+            addressVersion = st.addressVersion + 1,
+            testResult = null,
+        )
+    }
+
     fun updateUsername(username: String) = _uiState.update { it.copy(username = username) }
     fun updatePassword(password: String) = _uiState.update { it.copy(password = password) }
 
-    /** 协议级连接测试：交给具体 Provider 完成（ADR-019）。 */
+    /** 协议级连接测试：交给具体 Provider 完成（ADR-019）。非法地址请求前拦截；结果按草稿版本绑定。 */
     fun testConnection() {
         val descriptor = selectedDescriptor() ?: return
-        if (descriptor.serverType != ServerType.LOCAL && _uiState.value.baseUrl.isBlank()) {
-            _uiState.update {
-                it.copy(testResult = ConnectionStatus(ok = false, message = "请先填写服务器地址"))
+        val state = _uiState.value
+        if (descriptor.serverType != ServerType.LOCAL) {
+            if (state.baseUrl.isBlank()) {
+                _uiState.update {
+                    it.copy(testResult = ConnectionStatus(ok = false, message = "请先填写服务器地址"))
+                }
+                return
             }
-            return
+            if (state.resolvedUrl == null) {
+                // 字段错误已在地址框下展示；测试按钮同步给出结论，不发请求
+                _uiState.update {
+                    it.copy(
+                        testResult = ConnectionStatus(ok = false, message = state.addressError ?: "服务器地址无效"),
+                    )
+                }
+                return
+            }
         }
-        val server = buildServer(descriptor)
+        val versionAtRequest = state.addressVersion
+        val server = buildServer(descriptor) ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isTesting = true, testResult = null, error = null) }
             val handle = registry.create(server)
@@ -148,7 +213,14 @@ class AddServerViewModel @Inject constructor(
             } else {
                 ConnectionStatus(ok = false, message = "不支持的媒体源类型")
             }
-            _uiState.update { it.copy(isTesting = false, testResult = result) }
+            _uiState.update { st ->
+                // 陈旧结果不覆盖：地址在请求期间变化过 → 丢弃结果，仅复位 loading
+                if (AddressTestResultPolicy.shouldApply(st.addressVersion, versionAtRequest)) {
+                    st.copy(isTesting = false, testResult = result)
+                } else {
+                    st.copy(isTesting = false)
+                }
+            }
         }
     }
 
@@ -161,15 +233,24 @@ class AddServerViewModel @Inject constructor(
     fun loginAndSave(onSaved: (MediaServer) -> Unit) {
         val descriptor = selectedDescriptor() ?: return
         val state = _uiState.value
-        if (descriptor.serverType != ServerType.LOCAL && state.baseUrl.isBlank()) {
-            _uiState.update { it.copy(loginError = "请填写服务器地址") }
-            return
+        if (descriptor.serverType != ServerType.LOCAL) {
+            if (state.baseUrl.isBlank()) {
+                _uiState.update { it.copy(loginError = "请填写服务器地址") }
+                return
+            }
+            if (state.resolvedUrl == null) {
+                _uiState.update { it.copy(loginError = state.addressError ?: "服务器地址无效") }
+                return
+            }
         }
         if (state.username.isBlank() || state.password.isBlank()) {
             _uiState.update { it.copy(loginError = "请输入用户名和密码") }
             return
         }
-        val server = buildServer(descriptor)
+        val server = buildServer(descriptor) ?: run {
+            _uiState.update { it.copy(loginError = state.addressError ?: "服务器地址无效") }
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoggingIn = true, loginError = null) }
             try {
@@ -236,9 +317,19 @@ class AddServerViewModel @Inject constructor(
             _uiState.update { it.copy(error = "请先选择媒体源类型") }
             return
         }
-        val server = buildServer(descriptor)
-        if (descriptor.serverType != ServerType.LOCAL && server.baseUrl.isBlank()) {
-            _uiState.update { it.copy(error = "请填写服务器地址") }
+        val state = _uiState.value
+        if (descriptor.serverType != ServerType.LOCAL) {
+            if (state.baseUrl.isBlank()) {
+                _uiState.update { it.copy(error = "请填写服务器地址") }
+                return
+            }
+            if (state.resolvedUrl == null) {
+                _uiState.update { it.copy(error = state.addressError ?: "服务器地址无效") }
+                return
+            }
+        }
+        val server = buildServer(descriptor) ?: run {
+            _uiState.update { it.copy(error = state.addressError ?: "服务器地址无效") }
             return
         }
         viewModelScope.launch {
@@ -257,9 +348,10 @@ class AddServerViewModel @Inject constructor(
         }
     }
 
-    private fun buildServer(descriptor: ProviderDescriptor): MediaServer {
+    /** 网络类型地址非法时返回 null（调用方负责把 [AddServerUiState.addressError] 呈现给用户）。 */
+    private fun buildServer(descriptor: ProviderDescriptor): MediaServer? {
         val state = _uiState.value
-        val url = state.baseUrl.trim().trimEnd('/')
+        val url = if (descriptor.serverType == ServerType.LOCAL) "" else state.resolvedUrl ?: return null
         // Phase 1B-2.5：地址从单一 baseUrl 迁为线路列表；单线路时生成一条主线路。
         val endpoints = if (descriptor.serverType == ServerType.LOCAL || url.isBlank()) {
             emptyList()

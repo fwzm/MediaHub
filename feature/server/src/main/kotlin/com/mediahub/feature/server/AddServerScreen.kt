@@ -81,13 +81,13 @@ fun AddServerRoute(
 
             selected?.let { descriptor ->
                 if (descriptor.serverType != ServerType.LOCAL) {
-                    OutlinedTextField(
+                    ServerAddressField(
                         value = state.baseUrl,
                         onValueChange = viewModel::updateBaseUrl,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("服务器地址") },
-                        placeholder = { Text("http://192.168.1.100:8096") },
-                        singleLine = true,
+                        preferHttps = state.preferHttps,
+                        onHttpsChange = viewModel::toggleHttps,
+                        resolvedUrl = state.resolvedUrl,
+                        errorMessage = state.addressError,
                     )
                 }
 
@@ -109,6 +109,7 @@ fun AddServerRoute(
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("用户名（可选）") },
                         singleLine = true,
+                        keyboardOptions = ServerTextInputOptions,
                     )
                     OutlinedTextField(
                         value = state.password,

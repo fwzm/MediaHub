@@ -80,6 +80,9 @@ class GlobalSearchViewModelTest {
     private class FakeServerStore(private val servers: List<MediaServer>) : ServerStore {
         override fun observeServers(): Flow<List<MediaServer>> = flow { emit(servers) }
         override suspend fun getServer(id: String): MediaServer? = servers.firstOrNull { it.id == id }
+        override suspend fun updateServer(server: MediaServer) { }
+        override suspend fun setDefault(id: String) { }
+        // updateEndpointQuality：继承接口抛错默认（只读 fake，本测试不触达质量写路径）
     }
 
     /** 可编程 fake：记录 query、按 behavior 行事。 */
