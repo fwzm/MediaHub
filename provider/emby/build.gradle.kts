@@ -42,4 +42,8 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    // SLOW-FINAL 回归（1H）：真实生产退出链 ProgressSyncCoordinator.flushFinal →
+    // EmbyProgressProvider.reportFinalProgress → MockWebServer。仅测试依赖，不影响生产图。
+    testImplementation(project(":player:engine"))
 }
