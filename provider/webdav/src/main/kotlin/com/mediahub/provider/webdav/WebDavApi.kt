@@ -50,6 +50,9 @@ internal class WebDavApi(
      *
      * @param depth 0 = 仅资源自身；1 = 资源自身 + 直接子级。
      * @param authorization 完整的 `Authorization` 头值（`Basic ...`）；null 表示匿名。
+     *
+     * 取消（A2-2）：协程取消经 [awaitCancellable] 绑定到真实 `Call.cancel`；
+     * 响应在回调线程内有界消费并关闭，只有解析结果跨 continuation。
      */
     suspend fun propfind(url: String, depth: Int, authorization: String?): List<WebDavResource> =
         withContext(Dispatchers.IO) {
@@ -61,28 +64,34 @@ internal class WebDavApi(
             val request = builder.build()
 
             coroutineContext.ensureActive()
-            val response = try {
-                client.newCall(request).execute()
+            val call = client.newCall(request)
+            try {
+                call.awaitCancellable { response ->
+                    response.use { resp ->
+                        coroutineContext.ensureActive()
+                        if (resp.code !in 200..299) throw mapStatus(resp.code, url)
+                        val body = resp.body ?: throw ProviderException.Parse(serverId)
+                        val xml = readBounded(body)
+                        coroutineContext.ensureActive()
+                        try {
+                            WebDavMultistatusParser.parse(xml)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            logger.w(LogTag.NETWORK, "WebDAV multistatus 解析失败 url=$url", e)
+                            throw ProviderException.Parse(serverId, e)
+                        }
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: ProviderException) {
+                throw e
             } catch (e: IOException) {
+                // 取消引起的底层失败必须还原为取消，不得降级为普通网络错误
+                coroutineContext.ensureActive()
                 logger.w(LogTag.NETWORK, "WebDAV PROPFIND 失败 depth=$depth", e)
                 throw ProviderException.Network(serverId, e)
-            }
-
-            response.use { resp ->
-                coroutineContext.ensureActive()
-                if (resp.code !in 200..299) throw mapStatus(resp.code, url)
-                val body = resp.body ?: throw ProviderException.Parse(serverId)
-                val xml = readBounded(body)
-                try {
-                    WebDavMultistatusParser.parse(xml)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    logger.w(LogTag.NETWORK, "WebDAV multistatus 解析失败 url=$url", e)
-                    throw ProviderException.Parse(serverId, e)
-                }
             }
         }
 
