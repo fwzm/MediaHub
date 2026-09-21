@@ -30,7 +30,7 @@ import okhttp3.Request
  * 该 Provider 类型描述（Factory 与 Provider 共用，见 ADR-015）。
  *
  * `declaredCapabilities` 只声明本版本**真实实现**的能力：
- * AUTH（Basic）+ BROWSE（PROPFIND）+ PLAYBACK（直链）。
+ * AUTH（Basic）+ BROWSE（PROPFIND）+ DETAIL（PROPFIND Depth:0）+ PLAYBACK（直链）。
  * **不含 SEARCH**：只读包不实现远端搜索（无 `SEARCH` 方法、也无本地伪搜索）。
  * 声明一个没有可调用实现的 capability 违反 ADR-022（禁止"声明有能力但无可调用实现"）。
  */
@@ -42,11 +42,12 @@ internal val WEBDAV_PROVIDER_DESCRIPTOR = ProviderDescriptor(
     declaredCapabilities = setOf(
         ProviderCapability.AUTH,
         ProviderCapability.BROWSE,
+        ProviderCapability.DETAIL,
         ProviderCapability.PLAYBACK,
     ),
     authMethod = AuthMethod.BASIC,
     status = ProviderStatus.EXPERIMENTAL,
-    description = "WebDAV / NAS 通用协议（只读：认证、目录浏览、直链播放）",
+    description = "WebDAV / NAS 通用协议（只读：认证、目录浏览、文件详情、直链播放）",
     // 无 GET 探针路径：WebDAV 的协议探针是 OPTIONS，且集合上的 GET 常被 405 拒绝，
     // 不虚构一条 GET 路径给线路质量测试（ADR-039：无探针须显式报不支持）。
     probePath = null,

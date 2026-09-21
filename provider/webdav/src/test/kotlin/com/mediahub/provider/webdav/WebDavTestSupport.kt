@@ -47,7 +47,8 @@ internal class WebDavTestStack(val baseUrl: String, val username: String? = "ali
     val session = WebDavSession(server, credentialStore)
 
     suspend fun storePassword(password: String = PASSWORD) {
-        vault.save(SERVER_ID, CredentialVault.CredentialKind.PASSWORD, password)
+        // 必须走 credentialStore（而非直写 vault）：世代守卫是生产路径的一部分
+        credentialStore.savePassword(SERVER_ID, password)
     }
 
     suspend fun storedPassword(): String? =

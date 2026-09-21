@@ -81,23 +81,28 @@ internal class WebDavAuthProvider(
     override suspend fun restoreSession(): AuthSessionState {
         val username = server.username?.takeIf { it.isNotBlank() }
             ?: return AuthSessionState.SignedOut
-        val password = credentialStore.readPassword(server.id)
+        // 捕获密码与其凭据世代：401 清理凭世代判定，迟到失败不得清掉较新身份
+        val credential = credentialStore.readPassword(server.id)
             ?: return AuthSessionState.SignedOut
         val rootUrl = WebDavUrls.normalizeBase(server.baseUrl)
         if (rootUrl.isBlank()) {
             return AuthSessionState.Error(AuthSessionErrorKind.INVALID_RESPONSE, "服务器地址为空")
         }
         return try {
-            api.propfind(rootUrl, depth = 0, authorization = WebDavAuth.basicHeader(username, password))
+            api.propfind(
+                rootUrl,
+                depth = 0,
+                authorization = WebDavAuth.basicHeader(username, credential.password),
+            )
             AuthSessionState.Authenticated(
                 MediaUser(serverId = server.id, userId = username, displayName = username)
             )
         } catch (e: CancellationException) {
             throw e
         } catch (e: ProviderException.AuthExpired) {
-            // 明确认证失效：销毁凭据（契约：只有 401 才清）。
-            withContext(NonCancellable) { credentialStore.clear(server.id) }
-            logger.i(LogTag.AUTH, "WebDAV 会话失效（401），已清理凭据 serverId=${server.id}")
+            // 明确认证失效且身份未变（世代一致）才销毁凭据。
+            withContext(NonCancellable) { credentialStore.clearIfStill(server.id, credential) }
+            logger.i(LogTag.AUTH, "WebDAV 会话失效（401），已按世代清理凭据 serverId=${server.id}")
             AuthSessionState.Error(AuthSessionErrorKind.SESSION_EXPIRED, "登录状态已过期，请重新登录")
         } catch (e: ProviderException.NotFound) {
             // 404/410：地址不是有效的 WebDAV 目录（凭据仍有效，保留）。
@@ -129,7 +134,7 @@ internal class WebDavAuthProvider(
 
     override suspend fun currentUser(): MediaUser? {
         val username = server.username?.takeIf { it.isNotBlank() } ?: return null
-        val password = credentialStore.readPassword(server.id) ?: return null
+        val password = credentialStore.readPasswordValue(server.id) ?: return null
         return if (password.isNotEmpty()) {
             MediaUser(serverId = server.id, userId = username, displayName = username)
         } else {

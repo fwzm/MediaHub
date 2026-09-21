@@ -19,6 +19,7 @@ import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -82,11 +83,11 @@ class WebDavProviderFactoryTest {
         val handle = factory().create(server())
 
         assertEquals(
-            setOf(ProviderCapability.AUTH, ProviderCapability.BROWSE, ProviderCapability.PLAYBACK),
+            setOf(ProviderCapability.AUTH, ProviderCapability.BROWSE, ProviderCapability.DETAIL, ProviderCapability.PLAYBACK),
             handle.runtimeCapabilities,
         )
+        assertNotNull("详情能力已装配（PROPFIND Depth:0）", handle.detail)
         assertNull(handle.search)
-        assertNull(handle.detail)
         assertNull(handle.library)
         assertNull(handle.query)
         assertNull(handle.identityLookup)

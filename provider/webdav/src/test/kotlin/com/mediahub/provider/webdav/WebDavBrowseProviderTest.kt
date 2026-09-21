@@ -252,4 +252,24 @@ class WebDavBrowseProviderTest {
         }.exceptionOrNull()
         assertTrue("实际：$failure", failure is ProviderException.NotYetImplemented)
     }
+
+    @Test
+    fun `playback falls back to item id when snapshot item has no path`() = runBlocking {
+        // PlayerViewModel 快照重建的 MediaItem 不带 path（详情→播放快照契约），
+        // 播放目标必须兜底用 id，不得 NPE 或解析为相对路径。
+        stack.storePassword()
+        val target = webServer.url("/dav/movie.mkv").toString()
+        val snapshotItem = MediaItem(
+            serverId = WebDavTestStack.SERVER_ID,
+            id = target,
+            type = MediaType.VIDEO,
+            title = "movie.mkv",
+            path = null,
+            container = "mkv",
+        )
+        val source = stack.playbackProvider().resolvePlayback(snapshotItem, PlaybackOptions())
+        assertEquals(target, source.url)
+        assertEquals(stack.expectedBasicHeader, source.headers["Authorization"])
+        assertTrue(source.isDirectPlay)
+    }
 }

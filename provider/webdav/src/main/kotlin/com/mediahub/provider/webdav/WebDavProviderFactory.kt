@@ -22,7 +22,7 @@ import javax.inject.Singleton
  * WebDAV Provider 工厂（只读能力包）。
  *
  * 装配的能力（ADR-022：Handle 只放**真正实现完成**的能力）：
- * AUTH + BROWSE + PLAYBACK。不含 SEARCH / DETAIL / LIBRARY / PROGRESS。
+ * AUTH + BROWSE + DETAIL + PLAYBACK。不含 SEARCH / LIBRARY / PROGRESS。
  *
  * 与 Emby/Jellyfin 工厂的差异说明：main 上的 [TokenStore] 只有令牌存取，
  * 没有 PR #18 分支引入的身份世代 lease API；本工厂因此不装配身份守卫
@@ -65,6 +65,11 @@ class WebDavProviderFactory @Inject constructor(
                 logger = logger,
             ),
             browse = WebDavBrowseProvider(
+                server = server,
+                api = api,
+                session = session,
+            ),
+            detail = WebDavDetailProvider(
                 server = server,
                 api = api,
                 session = session,
