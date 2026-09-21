@@ -72,6 +72,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        # 2026-09 runner SDK 仓库已无 'tools' 包；action 默认 packages 含 'tools' 会
+        # 以 warning 失败（run 35622300389 证据：Failed to find package 'tools'）。
+        # 显式只装 platform-tools；平台/构建工具由下方 sdkmanager 步骤安装。
+        with:
+          packages: platform-tools
 
       - name: Install SDK components
         run: |
@@ -165,6 +170,9 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        # 同 build job：'tools' 包已不存在，显式只装 platform-tools。
+        with:
+          packages: platform-tools
 
       - name: Install compile SDK
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null
