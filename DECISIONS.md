@@ -256,11 +256,13 @@
   Folder/Audio 不生成 URL（UI 占位图标）；RequiredHttpHeaders 类的服务端指定图片头当前无真实样本，未引入。
 
 ## ADR-032 播放器轨道选择与字幕样式（Phase 1B-2.4）
-- 状态：已采纳（2026-08-22）
+- 状态：已采纳（2026-08-22）；**2026-09-20 索引契约部分被 ADR-041 纠正**（下文原文保留，勿删）
 - 决策：
   - **轨道 index 语义统一为同类型内序号（per-type ordinal）**：AudioTrack/SubtitleTrack.index、
     selected TrackSelection 与引擎 MappedTrackInfo.getTrackGroups(type) 的 per-renderer 组序号
     一一对应；禁止任何层再使用 Tracks.groups 全局序号（存在视频组时错位）。
+    - 纠正（ADR-041）："getTrackGroups(type)"表述有误——该 API 的参数是 **renderer 索引**；
+      正确契约是"当前 Tracks 中仅按目标类型过滤后的组序号"，引擎侧改按真实 TrackGroup 选择。
   - **音频诊断内置**：每音轨携带 isSupported（Tracks.Group.isTrackSupported）与
     decoderName（MediaCodecUtil.getDecoderInfo，宽容 null）；无声提示基于当前 Audio Pipeline
     观测状态（audioFormatMime 非空才视为有声信号），isSupported 仅用于轨道能力提示、
@@ -606,3 +608,36 @@
   `PlaybackProgress.sessionId`（既有字段）→ 三 DTO `PlaySessionId`
   （Emby production wire）；Jellyfin = CONFIRMED PROTOCOL RISK /
   DEVICE PROOF PENDING / PRODUCTION FROZEN（本 slice 零 Jellyfin delta）。
+
+## ADR-041 引擎选轨改为按轨道类型的真实 TrackGroup（T0002，纠正 ADR-032）
+- 状态：已采纳（2026-09-20）
+- 背景（既有缺陷）：Phase 1B-2.4 只统一了 TrackMapper 的序号口径，`PlaybackEngine.selectTrack`
+  仍把**轨道类型当 renderer 索引**使用：`currentMappedTrackInfo.getTrackGroups(rendererType)`、
+  `setRendererDisabled(rendererType, ...)`、`setSelectionOverride(rendererType, groups, ...)`
+  三个 API 的参数语义都是 rendererIndex，传入的却是 C.TRACK_TYPE_AUDIO(1) / C.TRACK_TYPE_TEXT(3)。
+  常见 video+audio+text renderer 布局下音频数值巧合成立，字幕 3 ≠ 字幕 renderer 索引 2，
+  因此字幕选择会落到其他 renderer 或被静默拒绝（关不掉、选不中）；组来源还依赖
+  currentMappedTrackInfo，无轨道时为 null 直接 return，不写任何参数。
+- 决策：
+  - **类型级 API 是唯一选轨路径**：override 与禁用一律按轨道类型写入
+    （`setOverrideForType(TrackSelectionOverride(trackGroup, trackIndex))`、
+    `clearOverridesOfType(trackType)`、`setTrackTypeDisabled(trackType, disabled)`）；
+    不再向任何要求 rendererIndex 的 API 传轨道类型。override 以**真实 TrackGroup** 为键，
+    与 renderer 的数量、顺序、同类型 renderer 是否唯一无关。
+  - **groupIndex 契约**：等于当前 `Tracks` 快照中**仅按目标类型过滤**后的组序号，
+    保留 unsupported 组、不按支持状态过滤，与 TrackMapper 同源同序；
+    UI 回传的序号因此必然命中同一组。
+  - **轨道输入接缝**：`PlaybackEngine` 新增 `tracksProvider: () -> Tracks`（默认
+    `player.currentTracks`）。生产路径行为不变；测试以合成 Tracks 驱动真实
+    `DefaultTrackSelector`，无需真实媒体即可断言 overrides / disabledTrackTypes。
+  - **关闭与无效分离**：null 关闭 → 清除该类型 override 并禁用该类型（不依赖
+    MappedTrackInfo 与 renderer 是否存在，暂无轨道也可安全下发）；非 null 但
+    groupIndex 或 trackIndex 越界、无目标类型组 → 全部选择参数原样保留且不抛异常。
+  - **非目标类型零污染**：任一类型的选择/关闭都不得改动其他类型的 override 与禁用集合。
+- 影响：
+  - 本次只修既有 Media3 UI 路径（每组首轨）。mpv 选轨仍为 no-op，组内多轨展示、
+    外挂字幕、字幕/音频延迟、轨道偏好持久化均未涉及。
+  - 旧的三个 TrackMapper 用例不构成引擎选轨验证（DECISIONS/CHANGELOG 曾据此宣称选轨正确）；
+    新增 PlaybackEngineTrackSelectionTest 通过真实 selectAudioTrack/selectSubtitleTrack
+    断言真实选择器参数，与扩充后的 TrackMapperTest 共同锁定 UI↔引擎序号一致。
+  - 本轮结果为自动化验证结论：**未经真机验收、未启用 mpv 选轨**（DEVICE VERIFICATION PENDING）。
