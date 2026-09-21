@@ -8,6 +8,7 @@ import com.mediahub.model.PageRequest
 import com.mediahub.model.PagedResult
 import com.mediahub.provider.api.MediaSearchProvider
 import com.mediahub.provider.api.ProviderException
+import com.mediahub.provider.api.pageWindow
 import com.mediahub.provider.emby.EmbyProviderSupport
 import com.mediahub.provider.emby.api.EmbyApiClient
 import com.mediahub.provider.emby.mapper.EmbyImageMapper
@@ -40,6 +41,8 @@ class EmbySearchProvider(
         val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
         return try {
             val result = api.searchItems(token, userId, searchTerm = searchTerm, page = page)
+            // 空页守卫走 pageWindow（A2-4 第 5 项）：本页 0 条时终止分页，防 nextOffset==offset 死循环
+            val window = pageWindow(page.offset, result.items.size, result.totalRecordCount)
             PagedResult(
                 items = result.items.mapNotNull { dto ->
                     EmbyMediaItemMapper.map(dto, server.id)?.let { item ->
@@ -47,12 +50,8 @@ class EmbySearchProvider(
                     }
                 },
                 totalCount = result.totalRecordCount,
-                hasMore = (page.offset + result.items.size) < result.totalRecordCount,
-                nextOffset = if ((page.offset + result.items.size) < result.totalRecordCount) {
-                    page.offset + result.items.size
-                } else {
-                    null
-                },
+                hasMore = window.hasMore,
+                nextOffset = window.nextOffset,
             )
         } catch (e: Exception) {
             throw EmbyProviderSupport.mapError(server.id, e)

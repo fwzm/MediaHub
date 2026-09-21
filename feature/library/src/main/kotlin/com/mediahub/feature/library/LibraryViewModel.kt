@@ -336,7 +336,8 @@ class LibraryViewModel @Inject constructor(
     }
 
     private fun userMessage(e: Exception): String = when (e) {
+        // A2-4 第 4 项：非 ProviderException 的 message 可能含 URL/Token 等敏感文本，一律不透传
         is ProviderException -> e.message ?: "加载失败"
-        else -> "加载失败：${e.message}"
+        else -> "加载失败"
     }
 }
