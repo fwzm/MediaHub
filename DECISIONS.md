@@ -606,3 +606,20 @@
   `PlaybackProgress.sessionId`（既有字段）→ 三 DTO `PlaySessionId`
   （Emby production wire）；Jellyfin = CONFIRMED PROTOCOL RISK /
   DEVICE PROOF PENDING / PRODUCTION FROZEN（本 slice 零 Jellyfin delta）。
+
+## ADR-041 本地备份还原：冻结计划、凭据隔离与可恢复持久化
+- 状态：PR #18 Agent B 修复提案（2026-09-09），待 Agent A 接回及独立复审，尚未合并/封板。
+- 本条追加现有约束，不改写 ADR-003/016/028/033/039 历史：导出不携带凭据或临时 URL，最多一个默认源，身份变更不得复用旧鉴权；同源替换不改为无条件登出。
+- 导出与导入共用结构/范围/URL 守卫；LOCAL 描述符允许无网络线路，设备目录授权不跨设备恢复。字节、记录和字段限制见 docs/backup/README.md。
+- 用户确认的是绑定类型/规范化地址/原始账号、策略和本机数据基线的冻结计划。MERGE 保留本机源/偏好、进度 newer-wins；同 ID 异来源冲突不导入其进度。REPLACE_SELECTED 只覆盖备份列出的源及其关联进度，UI 和 repository 均要求确认。
+- Room 事务不等于跨 Room、DataStore、凭据和日志的整体原子事务。完整 before/after image 与冻结记录先经设备私有 Keystore 加密持久化，发布读回成功后才登记日志并开始变更。保护 image 与对外备份 DTO 分离，不恢复已失效凭据。
+- 恢复阶段 PREPARING → DB_WRITTEN → PREFERENCES_APPLIED → COMPLETED；回滚前必须持久化 ROLLING_BACK。完成后的日志清理失败不得触发反向恢复。日志 commit 失败、损坏或缺完整旧版保护材料时 fail closed。
+- 自动续作要求本机与冻结 before/after 一致；并发普通写入造成分歧则保留现场，拒绝自动覆盖或叠加新恢复。进程终止验证必须使用实际新进程和持久化材料，内存 fake、重建对象不代替 OS kill 证据。
+- 验证、独立审批与合并状态分别见 docs/reviews/pr18-agent-b-2026-09-09.md；本修复提案不对自身签发独立批准。
+
+### ADR-041 追加更正：线路排序与冻结身份（2026-09-09，Agent A）
+
+- 接回审查确认：备份数组顺序可以不同于 Room 的 `sortOrder` 读取顺序。直接按数组首条线路冻结身份，会导致 MERGE 误认同源、替换后实际地址变化却未失效旧凭据。四条失败回归和本轮修复见 Agent A 集成报告；本条不改写前述历史结果。
+- 导入身份与冻结线路列表必须使用持久化排序，再按现有 enabled/primary 规则选择有效地址。同优先级的有效候选若指向不同规范化地址，导入及导出均拒绝；唯一有效主线路或同一规范化地址不因排序并列而拒绝。
+- 预览及未完成保护计划必须验证身份在持久化排序下稳定。旧计划若不稳定或存在歧义，保留现场、阻止自动续作/回滚和新恢复，不静默重算已确认决策。COMPLETED 仍只清理日志，不因此倒退恢复。
+- 本更正不改变同源替换保留登录的既有语义，不新增全局登出、线路管理策略或日志人工清理入口。状态仍为 C REVIEW PENDING，尚未合并。

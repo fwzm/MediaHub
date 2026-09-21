@@ -62,8 +62,9 @@ class KeystoreSecretStorage(
         }
     }
 
+    /** Identity replacement may proceed only after the credential removal is durably committed. */
     override suspend fun remove(key: String) = withContext(Dispatchers.IO) {
-        prefs.edit().remove(key).apply()
+        check(prefs.edit().remove(key).commit()) { "凭据清理未能持久化" }
     }
 
     override suspend fun contains(key: String): Boolean = prefs.contains(key)
