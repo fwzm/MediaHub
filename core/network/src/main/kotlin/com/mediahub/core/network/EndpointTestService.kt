@@ -98,9 +98,10 @@ open class EndpointTestService(
             } catch (e: IOException) {
                 // 取消引起的 IOException 不得被当成普通失败吞掉
                 coroutineContext.ensureActive()
-                errorMsg = "API test failed: ${e.message}"
+                // 安全映射：e.message 可能内嵌 URL user-info/凭据/query，不进入结果
+                errorMsg = EndpointProbeErrorMapper.describe(e)
             } catch (e: Exception) {
-                errorMsg = "API test failed: ${e.message}"
+                errorMsg = EndpointProbeErrorMapper.describe(e)
             }
 
             // ---- Layer 2: Media Range（受控交接窗口：API 完成、Media 尚未开始）----

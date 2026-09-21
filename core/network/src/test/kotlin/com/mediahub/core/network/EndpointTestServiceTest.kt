@@ -57,7 +57,9 @@ class EndpointTestServiceTest {
         // The editor's current normalizer accepts this host, but OkHttp rejects it.
         val result = subject.test("http://%20", "/emby/System/Info/Public")
 
-        assertTrue(result.error!!.startsWith("API test failed: Invalid URL host:"))
+        // 安全契约：错误文案只含分类，不携带 OkHttp 原始消息（可能内嵌 URL 片段）
+        assertEquals("API test failed: 请求无法发起（地址可能无效）", result.error)
+        assertFalse("原始异常消息不得进入结果", result.error!!.contains("Invalid URL host"))
         assertEquals(-1L, result.apiLatencyMs)
         assertEquals(0, result.httpCode)
         assertNull(result.protocol)
@@ -83,7 +85,9 @@ class EndpointTestServiceTest {
 
         val result = subject.test(server.url("/").toString(), "/probe")
 
-        assertEquals("API test failed: API call setup failed", result.error)
+        // 安全契约：注入的消息（哪怕看似无害）不进入结果，只输出分类
+        assertEquals("API test failed: 请求无法发起（地址可能无效）", result.error)
+        assertFalse(result.error!!.contains("API call setup failed"))
         assertEquals(-1L, result.apiLatencyMs)
         assertEquals(0, result.httpCode)
         assertNull(result.mediaFirstByteMs)

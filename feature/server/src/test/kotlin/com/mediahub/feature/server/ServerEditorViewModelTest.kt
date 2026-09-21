@@ -29,6 +29,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -37,6 +38,7 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -825,6 +827,54 @@ class ServerEditorViewModelTest {
             val target = harness.start()
             harness.clearViewModel()
             harness.assertCanceled(target)
+        }
+    }
+
+    // ---- 2C REDACTION：运行时合成秘密标记不得沿 error 链进入 UI 输出 ----
+
+    @Test
+    fun `hostile transport exception reaches UI as safe category without secrets`() = runTest {
+        // 真实 EndpointTestService + 虚拟 IO：newCall 阶段抛出携带合成秘密的传输异常，
+        // 验证 服务层安全映射 → ViewModel 透传 → uiState（UI 输出）全链无泄漏。
+        // 不落库（updateEndpointQuality 不含 error 字段）、不进日志（VM 日志仅含 serverId）
+        // 已由源码审查确认，此处锁定 UI 输出边界。
+        val markerUrl = "http://admin:Sup3rS3cret@10.0.0.9:8096/emby?token=abc123xyz"
+        val markerAuth = "Authorization: Bearer sk-Sup3rS3cret"
+        val hostileService = object : EndpointTestService(
+            HttpClientFactory(StdoutLogger()),
+            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        ) {
+            override fun newCall(client: OkHttpClient, request: Request): Call =
+                throw IOException("Failed to connect to $markerUrl via $markerAuth")
+        }
+        val hostileVm = ServerEditorViewModel(
+            savedStateHandle = SavedStateHandle(mapOf("serverId" to "srv-net")),
+            serverStore = store,
+            registry = registry,
+            tokenStore = TokenStore(FakeSecretStorage()),
+            serverIconStore = ServerIconStore(RuntimeEnvironment.getApplication()),
+            removeHandler = removeHandler,
+            endpointTestService = hostileService,
+            logger = StdoutLogger(),
+        )
+        advanceUntilIdle()
+
+        hostileVm.testMediaQuality()
+        advanceUntilIdle()
+
+        val shown = hostileVm.uiState.value.mediaQualityResult
+        val errorText = requireNotNull(shown?.error) { "失败必须以分类文案呈现" }
+        assertEquals("API test failed: 网络错误", errorText)
+        assertFalse("URL user-info 不得进入 UI", errorText.contains("Sup3rS3cret"))
+        assertFalse("Token query 不得进入 UI", errorText.contains("abc123xyz"))
+        assertFalse("Authorization 不得进入 UI", errorText.contains("Bearer"))
+        assertFalse("原始异常消息不得进入 UI", errorText.contains("Failed to connect"))
+        assertTrue("loading 已复位", !hostileVm.uiState.value.isMediaTesting)
+        // 语义登记（B/C 裁决项，不在本测试锁定）：当前实现允许失败探测把全 null 质量
+        // 数据落库覆盖历史值（ServerRepository.updateEndpointQuality 无条件覆写）。
+        // 本测试只锁定脱敏边界：落库的 update 不含 error 字段（persistence 契约即如此）。
+        store.qualityUpdates.forEach { update ->
+            assertFalse("落库数据不得携带错误文本", update.toString().contains("Sup3rS3cret"))
         }
     }
 
