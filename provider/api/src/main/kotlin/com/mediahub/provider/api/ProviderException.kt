@@ -8,13 +8,20 @@ package com.mediahub.provider.api
  * 原始异常的 message / cause 链可能携带 URL、Token、密码等敏感文本，
  * 不允许原样进入 crash report 与日志。各子类的结构化字段（statusCode/url 等）
  * 保持原样，供代码做结构化诊断（字段不再拼进 message）。
+ *
+ * **透传例外（联合候选裁决，A2-4×F-C1-1 冲突消解）**：[java.io.IOException]
+ * 与取消异常**保持原实例透传，不消毒**——它们是传输层契约信号：
+ * F-C1-1 分层回归要求 `ProviderException.Network` 的 cause 必须是
+ * IOException 本体（OkHttp/Media3 失败契约），取消异常更是全项目的
+ * 不可吞红线。其文本敏感性由日志层脱敏（Redactor + safeLogText）覆盖，
+ * 而不是在这里破坏类型契约。
  */
 sealed class ProviderException(
     val serverId: String,
     val code: ErrorCode,
     message: String,
     cause: Throwable? = null,
-) : Exception(message, cause?.let(::SanitizedProviderCause)) {
+) : Exception(message, cause?.let(::sanitizeCause)) {
 
     enum class ErrorCode {
         AUTH_REQUIRED,
@@ -89,6 +96,16 @@ sealed class ProviderException(
 }
 
 /**
+ * cause 消毒入口：IOException 与 CancellationException 是传输/取消契约信号，
+ * 原实例透传（见类 KDoc 的裁决说明）；其余 cause 包装为 [SanitizedProviderCause]。
+ */
+private fun sanitizeCause(cause: Throwable): Throwable = when (cause) {
+    is java.io.IOException -> cause
+    is kotlin.coroutines.cancellation.CancellationException -> cause
+    else -> SanitizedProviderCause(cause)
+}
+
+/**
  * 内部 cause 包装（A2-4 第 1 项，private：不出模块、不进公共 API）。
  *
  * - message 为固定占位 + 原始异常类名（类名不含用户数据，定位必需）；
@@ -96,7 +113,7 @@ sealed class ProviderException(
  * - stackTrace 转发原 cause 的帧（定位需要帧信息，不需要文本）。
  */
 private class SanitizedProviderCause(original: Throwable) : Throwable(
-    original.cause?.let(::SanitizedProviderCause),
+    original.cause?.let(::sanitizeCause),
 ) {
     override val message: String = "sanitized: ${original.javaClass.name}"
 
