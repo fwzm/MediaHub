@@ -1,6 +1,7 @@
 package com.mediahub.feature.search.engine
 
 import com.mediahub.model.PageRequest
+import com.mediahub.provider.api.ProviderException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
@@ -107,8 +108,13 @@ class GlobalSearchEngine(
                             throw e
                         } catch (e: Exception) {
                             mutex.withLock {
-                                errors[target.serverId] = e.message?.takeIf(String::isNotBlank)
-                                    ?: e::class.java.simpleName
+                                // A2-4 第 4 项：错误文案收口。只有 ProviderException 透传其
+                                // message（已由 ProviderException 层消毒为固定文案）；
+                                // 其余异常一律 "搜索失败"，原始 message 可能含敏感文本。
+                                errors[target.serverId] = when (e) {
+                                    is ProviderException -> e.message?.takeIf(String::isNotBlank) ?: "搜索失败"
+                                    else -> "搜索失败"
+                                }
                                 completed += target.serverId
                             }
                             sendSnapshot()
