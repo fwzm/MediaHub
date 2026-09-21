@@ -89,4 +89,10 @@ abstract class WebDavProviderModule {
     @Binds
     @IntoSet
     abstract fun bindWebDavProviderFactory(factory: WebDavProviderFactory): MediaProviderFactory
+
+    @Binds
+    @IntoSet
+    abstract fun bindWebDavCredentialGenerationInvalidator(
+        invalidator: WebDavCredentialGenerationInvalidator,
+    ): com.mediahub.provider.api.CredentialGenerationInvalidator
 }
