@@ -39,6 +39,7 @@ class WebDavProviderFactoryTest {
     private lateinit var tokenStore: TokenStore
     private lateinit var vault: CredentialVault
     private lateinit var http: HttpClientFactory
+    private lateinit var coordinator: WebDavCredentialCoordinator
     private val logger = StdoutLogger()
 
     @Before
@@ -48,6 +49,7 @@ class WebDavProviderFactoryTest {
         tokenStore = TokenStore(storage)
         vault = CredentialVault(storage)
         http = HttpClientFactory(logger)
+        coordinator = WebDavCredentialCoordinator()
     }
 
     @After
@@ -55,7 +57,7 @@ class WebDavProviderFactoryTest {
         webServer.shutdown()
     }
 
-    private fun factory() = WebDavProviderFactory(http, tokenStore, vault, WebDavCredentialCoordinator(), logger)
+    private fun factory() = WebDavProviderFactory(http, tokenStore, vault, coordinator, logger)
 
     private fun server(baseUrl: String = webServer.url("/dav/").toString()) = MediaServer(
         id = "s1",
@@ -112,7 +114,8 @@ class WebDavProviderFactoryTest {
     @Test
     fun `authenticated handle browses end to end`() = runBlocking {
         val handle = factory().create(server())
-        vault.save("s1", CredentialVault.CredentialKind.PASSWORD, "pw")
+        // A3-2 身份契约：裸 vault 写入不再构成已授权身份，必须经 store 绑定身份
+        WebDavCredentialStore(vault, coordinator).savePassword(server(), "pw")
         enqueueBrowse()
 
         val result = handle.browse!!.listFolder(null, PageRequest())

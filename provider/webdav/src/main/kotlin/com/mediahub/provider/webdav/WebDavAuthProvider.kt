@@ -53,6 +53,11 @@ internal class WebDavAuthProvider(
             return AuthResult.Failure(ProviderException.AuthFailed(server.id, "服务器地址为空"))
         }
 
+        // 认证 attempt（A3-2）：网络探测前捕获世代；迟到 2xx 只能条件提交，
+        // 不得覆盖较新身份（新登录/登出/删除/restore 失效都会推进世代）。
+        val attemptGeneration = credentialStore.beginAuthenticationAttempt(server.id)
+        val attemptIdentity = credentialStore.identityOf(server)
+
         try {
             api.propfind(rootUrl, depth = 0, authorization = header)
         } catch (e: CancellationException) {
@@ -65,8 +70,19 @@ internal class WebDavAuthProvider(
             return AuthResult.Failure(e)
         }
 
-        // 只有真实 2xx 验证通过后才落盘凭据（fail-closed）。
-        credentialStore.savePassword(server.id, password)
+        // 只有真实 2xx 验证通过且身份未被取代才落盘凭据（fail-closed）。
+        val committed = credentialStore.commitAuthentication(
+            serverId = server.id,
+            attemptGeneration = attemptGeneration,
+            password = password,
+            identity = attemptIdentity,
+        )
+        if (!committed) {
+            logger.i(LogTag.AUTH, "WebDAV 登录已被较新身份操作取代，不落盘 serverId=${server.id}")
+            return AuthResult.Failure(
+                ProviderException.AuthFailed(server.id, "登录已被更新的身份操作取代，请重试")
+            )
+        }
         logger.i(LogTag.AUTH, "WebDAV 认证成功 serverId=${server.id}")
         return AuthResult.Success(MediaUser(serverId = server.id, userId = username, displayName = username))
     }
@@ -81,8 +97,10 @@ internal class WebDavAuthProvider(
     override suspend fun restoreSession(): AuthSessionState {
         val username = server.username?.takeIf { it.isNotBlank() }
             ?: return AuthSessionState.SignedOut
-        // 捕获密码与其凭据世代：401 清理凭世代判定，迟到失败不得清掉较新身份
-        val credential = credentialStore.readPassword(server.id)
+        // 同身份读取密码 + 捕获世代（A3-2）：身份指纹不符（地址/用户名已替换）
+        // 直接视为无凭据，不发出任何网络请求；401 清理凭世代判定，
+        // 迟到失败不得清掉较新身份。
+        val credential = credentialStore.readPasswordFor(server)
             ?: return AuthSessionState.SignedOut
         val rootUrl = WebDavUrls.normalizeBase(server.baseUrl)
         if (rootUrl.isBlank()) {
@@ -94,6 +112,13 @@ internal class WebDavAuthProvider(
                 depth = 0,
                 authorization = WebDavAuth.basicHeader(username, credential.password),
             )
+            // 迟到 2xx（A3-2）：响应到达时身份/世代已变 → 不得复活旧用户状态。
+            // 世代推进覆盖：较新登录（含同身份重登，旧密码已失效）、登出/删除、
+            // restore 失效——一律回 SignedOut 交由上层重新认证。
+            if (!credentialStore.isStillCurrent(server, credential)) {
+                logger.i(LogTag.AUTH, "WebDAV 恢复结果过期（身份已变化），不发布旧会话 serverId=${server.id}")
+                return AuthSessionState.SignedOut
+            }
             AuthSessionState.Authenticated(
                 MediaUser(serverId = server.id, userId = username, displayName = username)
             )
@@ -140,7 +165,7 @@ internal class WebDavAuthProvider(
 
     override suspend fun currentUser(): MediaUser? {
         val username = server.username?.takeIf { it.isNotBlank() } ?: return null
-        val password = credentialStore.readPasswordValue(server.id) ?: return null
+        val password = credentialStore.readPasswordValue(server) ?: return null
         return if (password.isNotEmpty()) {
             MediaUser(serverId = server.id, userId = username, displayName = username)
         } else {

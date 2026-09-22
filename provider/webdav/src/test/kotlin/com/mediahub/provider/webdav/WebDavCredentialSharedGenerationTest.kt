@@ -37,6 +37,7 @@ class WebDavCredentialSharedGenerationTest {
 
     private lateinit var webServer: MockWebServer
     private lateinit var vault: CredentialVault
+    private lateinit var sharedCoordinator: WebDavCredentialCoordinator
     private lateinit var factoryA: WebDavProviderFactory
     private lateinit var factoryB: WebDavProviderFactory
     private lateinit var server: MediaServer
@@ -50,7 +51,7 @@ class WebDavCredentialSharedGenerationTest {
         val tokenStore = TokenStore(storage)
         val http = HttpClientFactory(logger)
         // 两个真实 Factory 实例 + 同一个共享协调器（生产中由 Hilt @Singleton 保证）
-        val sharedCoordinator = WebDavCredentialCoordinator()
+        sharedCoordinator = WebDavCredentialCoordinator()
         factoryA = WebDavProviderFactory(http, tokenStore, vault, sharedCoordinator, logger)
         factoryB = WebDavProviderFactory(http, tokenStore, vault, sharedCoordinator, logger)
         server = MediaServer(
@@ -74,9 +75,10 @@ class WebDavCredentialSharedGenerationTest {
 
     @Test
     fun `late 401 from handle A does not erase password saved via handle B`() {
-        // 历史登录留下的旧密码：A 的 restoreSession 必须有凭据可读才会发出探测
+        // 历史登录留下的旧密码：A 的 restoreSession 必须有凭据可读才会发出探测。
+        // 走 store 直写（与生产同 coordinerator/身份绑定），不绕过身份表。
         kotlinx.coroutines.runBlocking {
-            vault.save("s1", CredentialVault.CredentialKind.PASSWORD, "stale-password")
+            WebDavCredentialStore(vault, sharedCoordinator).savePassword(server, "stale-password")
         }
         val requestEntered = kotlinx.coroutines.CompletableDeferred<Unit>()
         val release = CountDownLatch(1)

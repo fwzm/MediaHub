@@ -46,7 +46,7 @@ class WebDavCredentialGenerationTest {
 
         // 迟到失败按旧世代清理：必须被世代守卫拒绝
         stack.credentialStore.clearIfStill(stack.server.id, staleCredential)
-        assertEquals("较新身份的密码不得被迟到失败清除", "new-password", stack.credentialStore.readPasswordValue(stack.server.id))
+        assertEquals("较新身份的密码不得被迟到失败清除", "new-password", stack.credentialStore.readPasswordValue(stack.server))
     }
 
     @Test
@@ -55,7 +55,7 @@ class WebDavCredentialGenerationTest {
         val credential = stack.credentialStore.readPassword(stack.server.id)!!
 
         stack.credentialStore.clearIfStill(stack.server.id, credential)
-        assertEquals("同代 401 清理语义保持不变", null, stack.credentialStore.readPasswordValue(stack.server.id))
+        assertEquals("同代 401 清理语义保持不变", null, stack.credentialStore.readPasswordValue(stack.server))
     }
 
     @Test
@@ -82,6 +82,6 @@ class WebDavCredentialGenerationTest {
 
         val state = restore.await()
         assertEquals(false, state is com.mediahub.provider.api.AuthSessionState.Authenticated)
-        assertEquals("较新身份的密码不得被迟到 401 清除", "fresh-password", stack.credentialStore.readPasswordValue(stack.server.id))
+        assertEquals("较新身份的密码不得被迟到 401 清除", "fresh-password", stack.credentialStore.readPasswordValue(stack.server))
     }
 }

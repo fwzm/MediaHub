@@ -10,26 +10,31 @@ import kotlinx.coroutines.sync.withLock
  * WebDAV 凭据协调器（A2-1 返修）：**应用级共享、按 serverId 隔离**的状态机。
  *
  * 为什么必须存在：[WebDavProviderFactory.create] 每次 new 一个
- * [WebDavCredentialStore]；世代表若挂在 store 实例上，重建 handle / 双 handle
- * 并存时各数各的，迟到失败的条件清理会误删较新身份的密码。
- * 协调器由 Hilt 装配为单例，所有 store 实例共享同一张世代表。
+ * [WebDavCredentialStore]；世代与身份状态若挂在 store 实例上，重建 handle /
+ * 双 handle 并存时各数各的，迟到失败的条件清理会误删较新身份的密码。
+ * 协调器由 Hilt 装配为单例，所有 store 实例共享同一张状态表。
  *
- * 线性化点：每个 serverId 一把 [Mutex]，世代的读取/推进与 vault 的读/写/删
- * **在同一次持锁内完成**——条件校验（世代比较）与 vault.remove 之间不存在窗口，
- * savePassword 的增代与写库之间不存在窗口。网络 IO 一律不持锁（锁只覆盖
- * 本地凭据操作）。
+ * 线性化点：每个 serverId 一把 [Mutex]，世代与身份指纹的读取/推进和 vault
+ * 的读/写/删**在同一次持锁内完成**——条件校验（世代/身份比较）与 vault
+ * 操作之间不存在窗口。网络 IO 一律不持锁（锁只覆盖本地凭据操作）。
  *
- * 边界（如实声明）：这是**进程内**协调，不宣称跨进程事务；跨进程/跨设备的
- * 身份一致性由 PR #18 的 TokenStore restore lease 负责（联合候选中显式对齐，
- * 见 [invalidate]）。
+ * 边界（如实声明）：这是**进程内**协调（单 app 进程内的 Mutex/世代/身份
+ * 指纹），不提供跨进程一致性，也**不是跨设备同步**——任何跨进程或跨设备的
+ * 凭据状态一致都不在本层承诺范围。备份恢复的身份变更经
+ * [WebDavCredentialGenerationInvalidator]（进程内接口）调用 [invalidate]
+ * 与 TokenStore restore lease 在同一事件上一起推进。
  */
 @Singleton
 class WebDavCredentialCoordinator @Inject constructor() {
 
-    /** 单个服务器的凭据状态：世代与其锁绑定，杜绝"检查与执行分离"。 */
+    /**
+     * 单个服务器的凭据状态：世代、身份指纹与其锁绑定，杜绝"检查与执行分离"。
+     * [credentialIdentity] 描述 vault 当前密码所属的身份指纹（null = 未知/无）。
+     */
     class ServerState {
         val mutex = Mutex()
         var generation: Long = 0L
+        var credentialIdentity: String? = null
     }
 
     private val states = ConcurrentHashMap<String, ServerState>()

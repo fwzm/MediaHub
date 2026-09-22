@@ -23,12 +23,12 @@ class WebDavCredentialGenerationInvalidatorTest {
 
         val cleared = stack.credentialStore.clearIfStill(stack.server.id, preRestoreHandle)
         assertFalse("恢复前句柄不得执行条件清理", cleared)
-        assertEquals("密码保持不变", "kept-password", stack.credentialStore.readPasswordValue(stack.server.id))
+        assertEquals("密码保持不变", "kept-password", stack.credentialStore.readPasswordValue(stack.server))
 
         // 新身份（恢复后重新认证）正常增代并可用
         stack.storePassword("post-restore-password")
         val freshHandle = stack.credentialStore.readPassword(stack.server.id)!!
         assertTrue("同代清理语义保持", stack.credentialStore.clearIfStill(stack.server.id, freshHandle))
-        assertEquals("清理后为空", null, stack.credentialStore.readPasswordValue(stack.server.id))
+        assertEquals("清理后为空", null, stack.credentialStore.readPasswordValue(stack.server))
     }
 }
