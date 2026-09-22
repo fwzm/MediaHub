@@ -183,6 +183,7 @@ jobs:
           ./gradlew :core:ui:assembleDebugAndroidTest
           :feature:player:assembleDebugAndroidTest
           :feature:settings:assembleDebugAndroidTest
+          :provider:webdav:assembleDebugAndroidTest
           --no-daemon --continue --max-workers=2
 
       - name: Enable KVM
@@ -218,7 +219,7 @@ jobs:
           # One device: serialize module instrumentation so activities cannot steal focus.
           script: |
             bash .github/scripts/prepare-visual-emulator.sh
-            ./gradlew :core:ui:connectedDebugAndroidTest :feature:player:connectedDebugAndroidTest :feature:settings:connectedDebugAndroidTest --no-daemon --continue --no-parallel --max-workers=2
+            ./gradlew :core:ui:connectedDebugAndroidTest :feature:player:connectedDebugAndroidTest :feature:settings:connectedDebugAndroidTest :provider:webdav:connectedDebugAndroidTest --no-daemon --continue --no-parallel --max-workers=2
 
       - name: Require executed visual assertions
         if: ${{ !cancelled() }}
@@ -240,3 +241,5 @@ jobs:
             feature/player/build/reports/androidTests/
             feature/settings/build/outputs/androidTest-results/
             feature/settings/build/reports/androidTests/
+            provider/webdav/build/outputs/androidTest-results/
+            provider/webdav/build/reports/androidTests/
