@@ -2,7 +2,9 @@ package com.mediahub.provider.webdav
 
 import java.io.IOException
 import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -23,18 +25,30 @@ import okhttp3.Response
  * - 调用链内抛出的任何异常（含拦截器的 CancellationException）原样传播，
  *   不折叠为普通失败。
  *
- * 线程取舍（如实声明）：阻塞 execute 占用一个守护线程直至响应/取消，
- * 不同于 enqueue 的异步模型；WebDAV 探测/浏览流量小且有 callTimeout 兜底，
- * 换取与既有异常分类完全一致的行为。
+ * 线程取舍（如实声明，A3-5 有界化）：阻塞 execute 占用一个桥接守护线程直至
+ * 响应/取消，不同于 enqueue 的异步模型；WebDAV 探测/浏览流量小且有 callTimeout
+ * 兜底。线程池**有界**（核心 0、上限 [MAX_BRIDGE_THREADS]、60s 空闲回收、
+ * SynchronousQueue 直递）——满载时新任务由提交线程就地执行（CallerRuns），
+ * 不静默丢弃、不无界堆积；被取消但尚未开始 execute 的任务在真正运行时
+ * 首查 `cont.isActive` 立即让出，不发起网络。
  */
-private val BRIDGE_EXECUTOR: ExecutorService = Executors.newCachedThreadPool { task ->
-    Thread(task, "webdav-call-bridge").apply { isDaemon = true }
-}
+private const val MAX_BRIDGE_THREADS = 16
+
+private val BRIDGE_EXECUTOR: ExecutorService = ThreadPoolExecutor(
+    0,
+    MAX_BRIDGE_THREADS,
+    60L, TimeUnit.SECONDS,
+    SynchronousQueue(),
+    { task -> Thread(task, "webdav-call-bridge").apply { isDaemon = true } },
+    ThreadPoolExecutor.CallerRunsPolicy(),
+)
 
 internal suspend fun <T> Call.awaitCancellable(block: (Response) -> T): T =
     suspendCancellableCoroutine { cont ->
         cont.invokeOnCancellation { cancel() }
         BRIDGE_EXECUTOR.execute {
+            // 排队后被取消（CallerRuns 就地执行路径）：不发起网络，直接让出。
+            if (!cont.isActive) return@execute
             try {
                 val response = execute()
                 var result: T? = null
