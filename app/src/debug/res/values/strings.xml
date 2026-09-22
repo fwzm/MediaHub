@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 默认中文（与 app 主资源约定一致）；英文覆盖在 values-en。 -->
+<resources>
+    <string name="effects_demo_label">FlowGlow 演示</string>
+    <string name="effects_demo_title">FlowGlow 视觉引擎</string>
+    <string name="effects_demo_agsl_active">AGSL 已启用</string>
+    <string name="effects_demo_gradient_fallback">渐变降级（API &lt; 33）</string>
+    <string name="effects_demo_audio_sim_on">音频模拟：开</string>
+    <string name="effects_demo_audio_sim_off">音频模拟：关</string>
+    <string name="effects_demo_state_on">音频模拟开</string>
+    <string name="effects_demo_state_off">音频模拟关</string>
+    <string name="effects_demo_hero_position">HERO · 进度 %1$d%%</string>
+    <string name="effects_demo_playback_position">播放进度 %1$d%%</string>
+    <string name="effects_demo_spectrum">频谱（低频 / 中频 / 高频，EMA 平滑）</string>
+</resources>

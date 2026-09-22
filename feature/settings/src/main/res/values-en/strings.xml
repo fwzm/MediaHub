@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_title">Settings</string>
+    <string name="settings_back">Back</string>
+    <string name="settings_playback">Playback</string>
+    <string name="settings_playback_engine">Playback engine</string>
+    <string name="settings_default_speed">Default playback speed</string>
+    <string name="settings_speed_two_decimals">%1$.2f×</string>
+    <string name="settings_speed_one_decimal">%1$.1f×</string>
+    <string name="settings_subtitle_size">Subtitle size</string>
+    <string name="settings_subtitle_size_value">%1$d sp</string>
+    <string name="settings_prefer_hardware_decoding">Prefer hardware decoding</string>
+    <string name="settings_prefer_direct_play">Prefer Direct Play</string>
+    <string name="settings_auto_play_next_episode">Auto-play the next episode</string>
+    <string name="settings_show_media_info">Show media information in player</string>
+    <string name="settings_auto_landscape">Auto-rotate to landscape for video</string>
+    <string name="settings_immersive_bars">Hide system bars during playback</string>
+    <string name="settings_player_gestures">Player gestures</string>
+    <string name="settings_gesture_scrub">Swipe horizontally to seek</string>
+    <string name="settings_gesture_double_tap_rewind">Double-tap left to rewind</string>
+    <string name="settings_gesture_rewind_seconds">Double-tap rewind interval</string>
+    <string name="settings_seconds_value">%1$d s</string>
+    <string name="settings_gesture_double_tap_forward">Double-tap right to seek forward</string>
+    <string name="settings_gesture_forward_seconds">Double-tap forward interval</string>
+    <string name="settings_gesture_long_press_speed">Long-press for temporary speed</string>
+    <string name="settings_gesture_long_press_directional">Rewind on left / forward on right</string>
+    <string name="settings_gesture_default_long_press_speed">Default long-press speed</string>
+    <string name="settings_gesture_min_speed">Minimum long-press speed</string>
+    <string name="settings_gesture_regular_slow_motion">Regular slow motion</string>
+    <string name="settings_gesture_frame_level_slow_motion">Frame-level slow motion</string>
+    <string name="settings_engine_auto">Auto</string>
+    <string name="settings_engine_auto_description">Choose for compatibility</string>
+    <string name="settings_engine_media3_description">Fast playback</string>
+    <string name="settings_engine_mpv_description">Compatibility engine</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version %1$s</string>
+    <string name="settings_product_description">A unified media player for Emby / Jellyfin / NAS / cloud drives / local files</string>
+    <string name="settings_feedback">Send feedback</string>
+    <string name="settings_feedback_description">Open an issue to report a bug or request a feature</string>
+</resources>

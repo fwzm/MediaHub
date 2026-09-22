@@ -1,6 +1,9 @@
 package com.mediahub.core.database.prefs
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -10,8 +13,11 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlayerGestures
+import com.mediahub.model.PlayerVisualEffectsPreferences
+import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
+import com.mediahub.model.VisualPerformanceMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -22,16 +28,21 @@ private val Context.userPrefsDataStore by preferencesDataStore(name = "user_pref
 
 /** 用户偏好持久化（DataStore）。 */
 @Singleton
-class UserPreferencesStore @Inject constructor(
-    @ApplicationContext private val context: Context,
+class UserPreferencesStore internal constructor(
+    private val dataStore: DataStore<Preferences>,
 ) : UserPreferencesRepository {
 
-    override val flow: Flow<UserPreferences> = context.userPrefsDataStore.data.map { prefs ->
+    @Inject
+    constructor(
+        @ApplicationContext context: Context,
+    ) : this(context.userPrefsDataStore)
+
+    override val flow: Flow<UserPreferences> = dataStore.data.map { prefs ->
         readPreferences(prefs)
     }
 
     override suspend fun update(transform: (UserPreferences) -> UserPreferences) {
-        context.userPrefsDataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val current = readPreferences(prefs)
             val updated = transform(current)
             prefs[Keys.ENGINE_MODE] = updated.playbackEngineMode.name
@@ -47,10 +58,25 @@ class UserPreferencesStore @Inject constructor(
             prefs[Keys.IMMERSIVE_BARS] = updated.immersiveBars
             writeSubtitleStyle(prefs, updated.subtitleStyle)
             writeGestures(prefs, updated.gestures)
+            writePlayerVisualEffects(prefs, updated.playerVisualEffects)
         }
     }
 
-    private fun readPreferences(prefs: androidx.datastore.preferences.core.Preferences): UserPreferences =
+    /**
+     * 只移除视觉效果键；DataStore edit 保证与其他并发偏好更新串行且不丢字段。
+     */
+    override suspend fun resetPlayerVisualEffects() {
+        dataStore.edit { prefs ->
+            prefs.remove(Keys.VISUAL_ENABLED)
+            prefs.remove(Keys.VISUAL_PRESET)
+            prefs.remove(Keys.VISUAL_INTENSITY)
+            prefs.remove(Keys.VISUAL_FOLLOW_ARTWORK)
+            prefs.remove(Keys.VISUAL_AUDIO_REACTIVE)
+            prefs.remove(Keys.VISUAL_PERFORMANCE_MODE)
+        }
+    }
+
+    private fun readPreferences(prefs: Preferences): UserPreferences =
         UserPreferences(
             playbackEngineMode = prefs[Keys.ENGINE_MODE]?.let { mode ->
                 runCatching { PlaybackEngineMode.valueOf(mode) }.getOrNull()
@@ -66,9 +92,10 @@ class UserPreferencesStore @Inject constructor(
             immersiveBars = prefs[Keys.IMMERSIVE_BARS] ?: true,
             subtitleStyle = readSubtitleStyle(prefs),
             gestures = readGestures(prefs),
+            playerVisualEffects = readPlayerVisualEffects(prefs),
         )
 
-    private fun readSubtitleStyle(prefs: androidx.datastore.preferences.core.Preferences): SubtitleStyle =
+    private fun readSubtitleStyle(prefs: Preferences): SubtitleStyle =
         SubtitleStyle(
             textColor = prefs[Keys.SUB_TEXT_COLOR] ?: 0xFFFFFFFF.toInt(),
             backgroundColor = prefs[Keys.SUB_BG_COLOR] ?: 0x00000000,
@@ -80,7 +107,7 @@ class UserPreferencesStore @Inject constructor(
         )
 
     private fun writeSubtitleStyle(
-        prefs: androidx.datastore.preferences.core.MutablePreferences,
+        prefs: MutablePreferences,
         style: SubtitleStyle,
     ) {
         prefs[Keys.SUB_TEXT_COLOR] = style.textColor
@@ -92,7 +119,7 @@ class UserPreferencesStore @Inject constructor(
         prefs[Keys.SUB_APPLY_EMBEDDED] = style.applyEmbeddedStyles
     }
 
-    private fun readGestures(prefs: androidx.datastore.preferences.core.Preferences): PlayerGestures =
+    private fun readGestures(prefs: Preferences): PlayerGestures =
         PlayerGestures(
             scrubEnabled = prefs[Keys.GESTURE_SCRUB] ?: true,
             doubleTapSeekBackwardEnabled = prefs[Keys.GESTURE_DT_BACKWARD] ?: false,
@@ -107,7 +134,7 @@ class UserPreferencesStore @Inject constructor(
         )
 
     private fun writeGestures(
-        prefs: androidx.datastore.preferences.core.MutablePreferences,
+        prefs: MutablePreferences,
         gestures: PlayerGestures,
     ) {
         prefs[Keys.GESTURE_SCRUB] = gestures.scrubEnabled
@@ -122,7 +149,38 @@ class UserPreferencesStore @Inject constructor(
         prefs[Keys.GESTURE_LONG_PRESS_DEFAULT_SPEED] = gestures.longPressDefaultSpeed.coerceIn(1f, 4f)
     }
 
-    private object Keys {
+    private fun readPlayerVisualEffects(prefs: Preferences): PlayerVisualEffectsPreferences =
+        PlayerVisualEffectsPreferences(
+            enabled = prefs[Keys.VISUAL_ENABLED] ?: true,
+            preset = prefs[Keys.VISUAL_PRESET]
+                ?.let { stored -> enumValueOrNull<PlayerVisualPreset>(stored) }
+                ?: PlayerVisualPreset.AURORA,
+            intensity = prefs[Keys.VISUAL_INTENSITY]
+                ?: PlayerVisualEffectsPreferences.DEFAULT_INTENSITY,
+            followArtworkColors = prefs[Keys.VISUAL_FOLLOW_ARTWORK] ?: true,
+            audioReactive = prefs[Keys.VISUAL_AUDIO_REACTIVE] ?: true,
+            performanceMode = prefs[Keys.VISUAL_PERFORMANCE_MODE]
+                ?.let { stored -> enumValueOrNull<VisualPerformanceMode>(stored) }
+                ?: VisualPerformanceMode.AUTO,
+        ).normalized()
+
+    private fun writePlayerVisualEffects(
+        prefs: MutablePreferences,
+        visualEffects: PlayerVisualEffectsPreferences,
+    ) {
+        val normalized = visualEffects.normalized()
+        prefs[Keys.VISUAL_ENABLED] = normalized.enabled
+        prefs[Keys.VISUAL_PRESET] = normalized.preset.name
+        prefs[Keys.VISUAL_INTENSITY] = normalized.intensity
+        prefs[Keys.VISUAL_FOLLOW_ARTWORK] = normalized.followArtworkColors
+        prefs[Keys.VISUAL_AUDIO_REACTIVE] = normalized.audioReactive
+        prefs[Keys.VISUAL_PERFORMANCE_MODE] = normalized.performanceMode.name
+    }
+
+    private inline fun <reified T : Enum<T>> enumValueOrNull(stored: String): T? =
+        enumValues<T>().firstOrNull { value -> value.name == stored }
+
+    internal object Keys {
         val ENGINE_MODE = stringPreferencesKey("playback_engine_mode")
         val DEFAULT_SPEED = floatPreferencesKey("default_playback_speed")
         val SUBTITLE_SIZE = intPreferencesKey("subtitle_size_sp")
@@ -150,5 +208,11 @@ class UserPreferencesStore @Inject constructor(
         val GESTURE_SPEED_MAX = floatPreferencesKey("gesture_long_press_speed_max")
         val GESTURE_LONG_PRESS_DIR = booleanPreferencesKey("gesture_long_press_directional")
         val GESTURE_LONG_PRESS_DEFAULT_SPEED = floatPreferencesKey("gesture_long_press_default_speed")
+        val VISUAL_ENABLED = booleanPreferencesKey("player_visual_effects_enabled")
+        val VISUAL_PRESET = stringPreferencesKey("player_visual_effects_preset")
+        val VISUAL_INTENSITY = floatPreferencesKey("player_visual_effects_intensity")
+        val VISUAL_FOLLOW_ARTWORK = booleanPreferencesKey("player_visual_effects_follow_artwork_colors")
+        val VISUAL_AUDIO_REACTIVE = booleanPreferencesKey("player_visual_effects_audio_reactive")
+        val VISUAL_PERFORMANCE_MODE = stringPreferencesKey("player_visual_effects_performance_mode")
     }
 }

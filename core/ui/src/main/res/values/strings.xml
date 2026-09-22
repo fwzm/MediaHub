@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_visual_effects_title">视觉效果</string>
+    <string name="player_visual_effects_summary_off">已关闭</string>
+    <string name="player_visual_effects_summary_format">%1$s · %2$s</string>
+    <string name="player_visual_preview">实时预览</string>
+    <string name="player_visual_enabled">开启视觉效果</string>
+    <string name="player_visual_preset">效果</string>
+    <string name="player_visual_preset_off">关闭</string>
+    <string name="player_visual_preset_off_description">停止所有视觉动画</string>
+    <string name="player_visual_preset_aurora">极光</string>
+    <string name="player_visual_preset_aurora_description">柔和、缓慢的大尺度流光</string>
+    <string name="player_visual_preset_liquid">液态</string>
+    <string name="player_visual_preset_liquid_description">更明显的流体形变与层次</string>
+    <string name="player_visual_preset_spectrum">频谱</string>
+    <string name="player_visual_preset_spectrum_description">随低、中、高频变化</string>
+    <string name="player_visual_intensity">强度</string>
+    <string name="player_visual_intensity_value">%1$d%%</string>
+    <string name="player_visual_follow_artwork">跟随媒体色彩</string>
+    <string name="player_visual_audio_reactive">音频响应</string>
+    <string name="player_visual_audio_unavailable">当前无法获取音频频谱，频谱效果已使用基础动画。</string>
+    <string name="player_visual_audio_starting">正在检测当前播放器的音频频谱；不可用时会继续使用基础动画。</string>
+    <string name="player_visual_audio_privacy">仅分析当前播放器的低保真频谱；不使用麦克风录音，不保存或上传音频。</string>
+    <string name="player_visual_audio_enable_access">启用音频频谱访问</string>
+    <string name="player_visual_audio_retry">重新检测音频频谱</string>
+    <string name="player_visual_audio_checked_during_playback">频谱可用性会在播放时自动检测；不可用时会安全降级为基础动画。</string>
+    <string name="player_visual_performance">性能模式</string>
+    <string name="player_visual_performance_auto">自动</string>
+    <string name="player_visual_performance_battery">省电</string>
+    <string name="player_visual_performance_balanced">均衡</string>
+    <string name="player_visual_performance_high">高画质</string>
+    <string name="player_visual_restore_defaults">恢复默认</string>
+    <string name="player_visual_backend_shader">RuntimeShader</string>
+    <string name="player_visual_backend_fallback">兼容渐变</string>
+    <string name="player_visual_backend_stopped">已停止渲染</string>
+    <string name="player_visual_backend_format">渲染：%1$s</string>
+</resources>

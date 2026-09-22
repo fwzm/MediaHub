@@ -1,22 +1,27 @@
 package com.mediahub.feature.player
 
+import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.provider.Settings
 import android.content.Context
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.media.AudioManager
 import android.os.BatteryManager
+import android.os.Build
 import android.view.WindowManager
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +29,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -38,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,6 +54,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,13 +62,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.core.content.ContextCompat
+import androidx.core.content.edit
+import androidx.core.app.ActivityCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.currentStateAsState
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 import com.mediahub.model.AudioTrack
+import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
 import com.mediahub.model.SubtitleTrack
@@ -69,12 +87,31 @@ import com.mediahub.feature.player.gesture.PlayerGestureController
 import com.mediahub.feature.player.gesture.GestureLevelPreview
 import com.mediahub.feature.player.gesture.PlayerGestureLayer
 import com.mediahub.feature.player.gesture.PlayerLevelKind
+import com.mediahub.core.ui.effects.PlayerVisualOverlay
+import com.mediahub.core.ui.effects.PlayerVisualMaskConfig
+import com.mediahub.core.ui.effects.PlayerVisualTestTags
+import com.mediahub.core.ui.effects.PlayerVisualChromeBackground
+import com.mediahub.core.ui.effects.PlayerVisualRenderRequest
+import com.mediahub.core.ui.effects.PlayerVisualRuntimePolicy
+import com.mediahub.core.ui.effects.PlayerVisualTheme
+import com.mediahub.core.ui.effects.RendererBackend
+import com.mediahub.core.ui.effects.RendererBackendSelector
+import com.mediahub.core.ui.effects.SpectrumFrame
+import com.mediahub.core.ui.effects.SpectrumProvider
+import com.mediahub.core.ui.effects.FlowGlowClock
+import com.mediahub.core.ui.effects.rememberFlowGlowClock
+import com.mediahub.core.ui.effects.rememberPowerSaveMode
+import com.mediahub.core.ui.effects.rememberReduceMotion
+import com.mediahub.player.engine.AudioBandLevels
+import com.mediahub.player.engine.EngineKind
 import com.mediahub.player.engine.SeekMode
 import com.mediahub.player.engine.TrackSelection
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicReference
 
 private val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 
@@ -88,12 +125,16 @@ fun PlayerRoute(
     val resolve by viewModel.resolveState.collectAsStateWithLifecycle()
     val engineState by viewModel.engine.uiState.collectAsStateWithLifecycle()
     val engineSwitching by viewModel.engineSwitching.collectAsStateWithLifecycle()
-    val preferences by viewModel.preferences.collectAsStateWithLifecycle()
+    val storedPreferences by viewModel.preferences.collectAsStateWithLifecycle()
+    val preferences = storedPreferences ?: UserPreferences()
     val serverDisplayName by viewModel.serverDisplayName.collectAsStateWithLifecycle()
     val serverIcon by viewModel.serverIcon.collectAsStateWithLifecycle()
     val downloadSpeedBps by viewModel.engine.downloadSpeedBps.collectAsStateWithLifecycle()
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val subtitleCues by viewModel.engine.subtitleCues.collectAsStateWithLifecycle()
+    val artworkPalette by viewModel.artworkPalette.collectAsStateWithLifecycle()
+    val engineKind by viewModel.engineKind.collectAsStateWithLifecycle()
+    val audioSpectrumBridge = rememberAudioSpectrumBridge(viewModel.engine.audioBands)
 
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
     DisposableEffect(Unit) {
@@ -103,7 +144,39 @@ fun PlayerRoute(
     // 自动横屏 + 沉浸式系统栏（Phase Player UX）：进入保存原方向并应用，退出恢复。
     // 偏好异步加载（null=未加载），加载完成后 apply，避免主线程 runBlocking 读 DataStore。
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
+    val lifecycleStarted = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+    val powerSaveMode = rememberPowerSaveMode(context)
+    val reduceMotion = rememberReduceMotion(context)
+    var recordAudioPermissionGranted by remember(context) {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    var recordAudioPermissionRequested by rememberSaveable { mutableStateOf(false) }
+    var recordAudioPermissionRequestArmed by rememberSaveable { mutableStateOf(false) }
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        recordAudioPermissionGranted = granted
+    }
+    LaunchedEffect(lifecycleState) {
+        recordAudioPermissionGranted =
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+    }
     val activity = remember(context) { context.findActivity() }
+    val requestRecordAudioAccess: () -> Unit = {
+        when {
+            recordAudioPermissionGranted -> viewModel.engine.retryAudioSpectrumCapture()
+            recordAudioPermissionRequested || context.isRecordAudioPermanentlyDenied(activity) -> {
+                context.openApplicationPermissionSettings()
+            }
+            else -> recordAudioPermissionRequestArmed = true
+        }
+    }
     val sysUiPrefs by viewModel.playerSystemUiPrefs.collectAsStateWithLifecycle()
     val sysUiController = remember(activity) { activity?.let { PlayerSystemUiController(it) } }
     LaunchedEffect(sysUiController, sysUiPrefs) {
@@ -116,6 +189,7 @@ fun PlayerRoute(
 
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
+    var showVisualEffectsSettings by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // Overlay：点击切换显示 / 播放中 3s 自动隐藏（Item 6）
@@ -162,6 +236,48 @@ fun PlayerRoute(
     val scrubPreview by gestureController.scrubPreview.collectAsStateWithLifecycle()
     val speedPreview by gestureController.speedPreview.collectAsStateWithLifecycle()
     val levelPreview by gestureController.levelPreview.collectAsStateWithLifecycle()
+    var forceVisualFallback by remember(viewModel) {
+        mutableStateOf(Build.VERSION.SDK_INT < RendererBackendSelector.RUNTIME_SHADER_MIN_API)
+    }
+    var rendererBackend by remember(viewModel) {
+        mutableStateOf(
+            if (forceVisualFallback) RendererBackend.FALLBACK_GRADIENT else RendererBackend.NONE,
+        )
+    }
+    val rendererPreferences = PlaybackVisualStateResolver.preferencesForRenderer(storedPreferences)
+    val audioSpectrum = if (audioSpectrumBridge.available) SpectrumFrame.Zero else null
+    val visualState = PlaybackVisualStateResolver.resolve(
+        preferences = rendererPreferences,
+        artworkPalette = artworkPalette,
+        audioSpectrum = audioSpectrum,
+        lifecycleStarted = lifecycleStarted,
+        controlsVisible = controlsVisible || showVisualEffectsSettings,
+        userInteracting = showVisualEffectsSettings ||
+            scrubPreview != null || speedPreview != null || levelPreview != null,
+        powerSave = powerSaveMode,
+        reduceMotion = reduceMotion,
+        rendererBackend = rendererBackend,
+    )
+    val spectrumProvider = audioSpectrumBridge.provider
+    val sharedVisualClock = rememberFlowGlowClock(
+        fps = visualState.renderRequest.frameDecision.targetFps.coerceAtLeast(1),
+        running = PlayerVisualRuntimePolicy.shouldRunSharedClock(
+            requestedRunning = visualState.renderRequest.frameDecision.running,
+            forceFallback = forceVisualFallback,
+        ),
+    )
+    val reportVisualBackend: (RendererBackend) -> Unit = { backend ->
+        val nextForceFallback = PlayerVisualRuntimePolicy.latchForceFallback(
+            currentForceFallback = forceVisualFallback,
+            reportedBackend = backend,
+        )
+        forceVisualFallback = nextForceFallback
+        rendererBackend = when {
+            !visualState.renderRequest.frameDecision.running -> RendererBackend.NONE
+            nextForceFallback -> RendererBackend.FALLBACK_GRADIENT
+            else -> backend
+        }
+    }
 
     // 竖向亮度/音量状态（U3-C）
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -218,7 +334,8 @@ fun PlayerRoute(
         exitPlayer()
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    PlayerVisualTheme(palette = visualState.chromePalette) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // 视频渲染 Surface（Media3/mpv 统一走 attachSurface）
         AndroidView(
             factory = { context ->
@@ -239,6 +356,24 @@ fun PlayerRoute(
                 }
             },
             modifier = Modifier.fillMaxSize(),
+        )
+
+        // 只画左右窄边与底部 controls chrome；中心视频和字幕安全区没有 shader 像素。
+        PlayerVisualOverlay(
+            request = visualState.renderRequest,
+            modifier = Modifier.fillMaxSize(),
+            spectrum = spectrumProvider,
+            progressProvider = {
+                if (state.durationMs > 0L) {
+                    (state.positionMs.toFloat() / state.durationMs.toFloat()).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+            },
+            includeBottomChrome = false,
+            clock = sharedVisualClock,
+            forceFallback = forceVisualFallback,
+            onBackendChanged = reportVisualBackend,
         )
 
         // 字幕 overlay（Media3 独立 SubtitleView；mpv 内部 libass 渲染，subtitleCues=null 时不显示）
@@ -277,7 +412,7 @@ fun PlayerRoute(
         // 引擎自动降级提示（U3-A：Media3 失败 → mpv 同位置重播）
         if (engineSwitching) {
             Text(
-                "正在切换兼容播放模式…",
+                stringResource(R.string.player_switching_engine),
                 color = Color.White,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier
@@ -308,25 +443,32 @@ fun PlayerRoute(
                         modifier = Modifier.padding(horizontal = 32.dp),
                     )
                     Row(modifier = Modifier.padding(top = 16.dp)) {
-                        TextButton(onClick = viewModel::resolve) { Text("重试", color = Color.White) }
-                        TextButton(onClick = exitPlayer) { Text("返回", color = Color.White) }
+                        TextButton(onClick = viewModel::resolve) {
+                            Text(stringResource(R.string.player_retry), color = Color.White)
+                        }
+                        TextButton(onClick = exitPlayer) {
+                            Text(stringResource(R.string.player_back), color = Color.White)
+                        }
                     }
                 }
             }
 
             ResolveState.Ready -> {
-                AnimatedVisibility(
-                    visible = controlsVisible,
-                    enter = fadeIn(),
-                    exit = fadeOut(),
-                ) {
+                if (controlsVisible) {
                     PlayerControls(
+                        modifier = Modifier.matchParentSize(),
                         state = state,
                         serverDisplayName = serverDisplayName,
                         serverIcon = serverIcon,
                         downloadSpeedBps = downloadSpeedBps,
                         batteryLevel = batteryLevel,
                         diagnostics = diagnostics,
+                        visualRequest = visualState.renderRequest,
+                        visualSpectrum = spectrumProvider,
+                        visualClock = sharedVisualClock,
+                        forceVisualFallback = forceVisualFallback,
+                        onVisualBackendChanged = reportVisualBackend,
+                        subtitleSelected = engineState.selectedSubtitle != null,
                         onBack = exitPlayer,
                         onTogglePlayPause = viewModel.engine::togglePlayPause,
                         onSeek = { viewModel.engine.seekTo(it) },
@@ -334,6 +476,7 @@ fun PlayerRoute(
                             val next = SPEEDS[(SPEEDS.indexOf(state.speed) + 1).let { if (it >= SPEEDS.size) 0 else it }]
                             viewModel.engine.setSpeed(next)
                         },
+                        onShowVisualEffects = { showVisualEffectsSettings = true },
                         onShowAudio = { showAudioDialog = true },
                         onShowSubtitle = { showSubtitleDialog = true },
                     )
@@ -347,7 +490,10 @@ fun PlayerRoute(
                 // 播放期错误（Source error 等）：resolve 已成功但引擎报错，显式展示（Phase 1B-2.4）
                 state.error?.let { e ->
                     Text(
-                        "播放失败：" + (e.message ?: "未知错误"),
+                        stringResource(
+                            R.string.player_playback_failed,
+                            e.message ?: stringResource(R.string.player_unknown_error),
+                        ),
                         color = Color.White,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier
@@ -360,7 +506,11 @@ fun PlayerRoute(
                 if (audioUnsupported) {
                     val codec = engineState.audioTracks.firstNotNullOfOrNull { prettyCodecName(it.codec) }
                     Text(
-                        "未检测到音频输出" + (codec?.let { "（音轨 $it）" } ?: "") + "，该格式可能不被当前设备支持，可尝试其他音轨",
+                        if (codec != null) {
+                            stringResource(R.string.player_audio_unsupported_codec, codec)
+                        } else {
+                            stringResource(R.string.player_audio_unsupported)
+                        },
                         color = Color.Yellow,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier
@@ -373,30 +523,133 @@ fun PlayerRoute(
                 }
             }
         }
+        }
+    }
+    val audioPermissionDecision = AudioSpectrumPermissionPolicy.resolve(
+        AudioSpectrumPermissionInputs(
+            preferences = storedPreferences?.playerVisualEffects,
+            resolveReady = resolve is ResolveState.Ready,
+            engineKind = engineKind,
+            rendererBackend = rendererBackend,
+            lifecycleStarted = lifecycleStarted,
+            consumerVisible = controlsVisible || showVisualEffectsSettings,
+            permissionGranted = recordAudioPermissionGranted,
+            explicitRequestArmed = recordAudioPermissionRequestArmed,
+            requestAttemptedThisRoute = recordAudioPermissionRequested,
+        ),
+    )
+    val audioPreferenceWantsSpectrum = storedPreferences?.playerVisualEffects?.normalized()?.let { visual ->
+        visual.enabled &&
+            visual.preset == PlayerVisualPreset.SPECTRUM &&
+            visual.audioReactive &&
+            visual.intensity > 0f
+    } == true
+    LaunchedEffect(audioPreferenceWantsSpectrum) {
+        if (!audioPreferenceWantsSpectrum) recordAudioPermissionRequestArmed = false
+    }
+    LaunchedEffect(audioPermissionDecision) {
+        when {
+            audioPermissionDecision.requestPermission -> {
+                recordAudioPermissionRequested = true
+                recordAudioPermissionRequestArmed = false
+                context.markRecordAudioPermissionRequested()
+                viewModel.engine.setAudioSpectrumEnabled(false)
+                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+            else -> viewModel.engine.setAudioSpectrumEnabled(audioPermissionDecision.captureEnabled)
+        }
+    }
+    DisposableEffect(viewModel.engine) {
+        onDispose { viewModel.engine.setAudioSpectrumEnabled(false) }
+    }
+
+    var audioSpectrumStartupTimedOut by remember { mutableStateOf(false) }
+    LaunchedEffect(audioPermissionDecision.captureEnabled, audioSpectrumBridge.available) {
+        audioSpectrumStartupTimedOut = false
+        if (audioPermissionDecision.captureEnabled && !audioSpectrumBridge.available) {
+            delay(AUDIO_SPECTRUM_START_TIMEOUT_MS)
+            if (audioPermissionDecision.captureEnabled && !audioSpectrumBridge.available) {
+                audioSpectrumStartupTimedOut = true
+            }
+        }
+    }
+    val audioReactiveAvailable: Boolean? = when {
+        !audioPreferenceWantsSpectrum -> null
+        audioSpectrumBridge.available -> true
+        !recordAudioPermissionGranted -> false
+        engineKind == EngineKind.MPV -> false
+        rendererBackend == RendererBackend.FALLBACK_GRADIENT -> false
+        audioSpectrumStartupTimedOut -> false
+        else -> null
+    }
+    val showAudioAccessAction = audioPreferenceWantsSpectrum &&
+        resolve is ResolveState.Ready &&
+        engineKind == EngineKind.MEDIA3 &&
+        rendererBackend == RendererBackend.RUNTIME_SHADER &&
+        lifecycleStarted &&
+        (controlsVisible || showVisualEffectsSettings) &&
+        (!recordAudioPermissionGranted || audioSpectrumStartupTimedOut)
+
+    if (showVisualEffectsSettings) {
+        PlayerVisualEffectsSheet(
+            preferences = preferences.playerVisualEffects,
+            previewPalette = visualState.sourcePalette,
+            spectrum = spectrumProvider,
+            audioReactiveAvailable = audioReactiveAvailable,
+            showAudioAccessAction = showAudioAccessAction,
+            audioAccessActionIsRetry = recordAudioPermissionGranted,
+            lifecycleStarted = lifecycleStarted,
+            onPreferencesChanged = { next ->
+                val previous = preferences.playerVisualEffects.normalized()
+                val normalizedNext = next.normalized()
+                val explicitlyEnabledSpectrum = normalizedNext.enabled &&
+                    normalizedNext.preset == PlayerVisualPreset.SPECTRUM &&
+                    normalizedNext.audioReactive &&
+                    (!previous.enabled ||
+                        previous.preset != PlayerVisualPreset.SPECTRUM ||
+                        !previous.audioReactive)
+                if (explicitlyEnabledSpectrum) requestRecordAudioAccess()
+                viewModel.updatePlayerVisualEffects { next }
+            },
+            onRequestAudioAccess = requestRecordAudioAccess,
+            onRestoreDefaults = viewModel::resetPlayerVisualEffects,
+            onDismiss = { showVisualEffectsSettings = false },
+        )
     }
 
     if (showAudioDialog) {
-        AudioTrackSheet(
-            tracks = engineState.audioTracks,
-            onDismiss = { showAudioDialog = false },
-            onSelect = { track: AudioTrack ->
-                viewModel.engine.selectAudioTrack(TrackSelection(track.index, 0))
-                showAudioDialog = false
-            },
-        )
+        PlayerVisualTheme(palette = visualState.chromePalette) {
+            AudioTrackSheet(
+                tracks = engineState.audioTracks,
+                onDismiss = { showAudioDialog = false },
+                onSelect = { track: AudioTrack ->
+                    viewModel.engine.selectAudioTrack(TrackSelection(track.index, 0))
+                    showAudioDialog = false
+                },
+            )
+        }
     }
     if (showSubtitleDialog) {
-        SubtitleSheet(
-            tracks = engineState.subtitleTracks,
-            style = preferences.subtitleStyle,
-            onDismiss = { showSubtitleDialog = false },
-            onSelect = { track: SubtitleTrack? ->
-                viewModel.engine.selectSubtitleTrack(track?.let { TrackSelection(it.index, 0) })
-            },
-            onStyleChange = { newStyle -> viewModel.updateSubtitleStyle { newStyle } },
-        )
+        PlayerVisualTheme(palette = visualState.chromePalette) {
+            SubtitleSheet(
+                tracks = engineState.subtitleTracks,
+                style = preferences.subtitleStyle,
+                onDismiss = { showSubtitleDialog = false },
+                onSelect = { track: SubtitleTrack? ->
+                    viewModel.engine.selectSubtitleTrack(track?.let { TrackSelection(it.index, 0) })
+                },
+                onStyleChange = { newStyle -> viewModel.updateSubtitleStyle { newStyle } },
+            )
+        }
     }
 }
+
+private fun AudioBandLevels.toSpectrumFrame(): SpectrumFrame = SpectrumFrame(
+    bass = bass,
+    mid = mid,
+    treble = treble,
+    amplitude = amplitude,
+)
 
 /**
  * 字幕样式应用到 Media3 SubtitleView（默认白字 + 全透明背景 + 黑描边，ADR-032）。
@@ -431,40 +684,72 @@ private const val BASE_SUBTITLE_FRACTION = 0.0533f
 
 @Composable
 private fun PlayerControls(
+    modifier: Modifier = Modifier,
     state: PlayerCombinedState,
     serverDisplayName: String?,
     serverIcon: String?,
     downloadSpeedBps: Long,
     batteryLevel: Int?,
     diagnostics: PlaybackDiagnosticsState?,
+    visualRequest: PlayerVisualRenderRequest,
+    visualSpectrum: SpectrumProvider,
+    visualClock: FlowGlowClock,
+    forceVisualFallback: Boolean,
+    onVisualBackendChanged: (RendererBackend) -> Unit,
+    subtitleSelected: Boolean,
     onBack: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
     onCycleSpeed: () -> Unit,
+    onShowVisualEffects: () -> Unit,
     onShowAudio: () -> Unit,
     onShowSubtitle: () -> Unit,
 ) {
-    Box(modifier = Modifier.fillMaxSize()) {
+    val seekBarColors = SliderDefaults.colors(
+        thumbColor = MaterialTheme.colorScheme.primary,
+        activeTrackColor = MaterialTheme.colorScheme.primary,
+        activeTickColor = MaterialTheme.colorScheme.onPrimary,
+        inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+        inactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledThumbColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+        disabledActiveTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f),
+        disabledActiveTickColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.38f),
+        disabledInactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+        disabledInactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+    )
+    BoxWithConstraints(modifier = modifier.testTag(PlayerVisualTestTags.PLAYER_CONTROLS)) {
+        // Use the full player height, not the tall controls content, to protect subtitle pixels.
+        val maxAmbientHeight = maxHeight * (1f - PlayerVisualMaskConfig().bottomStart)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
-                .background(Color.Black.copy(alpha = 0.35f))
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
+                .statusBarsPadding()
                 .padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.Close, contentDescription = "关闭", tint = Color.White)
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = stringResource(R.string.player_close),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
                 }
                 Text(
                     text = state.mediaTitle ?: "",
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 2,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onShowAudio) { Text("音轨", color = Color.White) }
-                TextButton(onClick = onShowSubtitle) { Text("字幕", color = Color.White) }
+                PlayerVisualEffectsEntry(onClick = onShowVisualEffects)
+                TextButton(onClick = onShowAudio) {
+                    Text(stringResource(R.string.player_audio_tracks), color = MaterialTheme.colorScheme.primary)
+                }
+                TextButton(onClick = onShowSubtitle) {
+                    Text(stringResource(R.string.player_subtitles), color = MaterialTheme.colorScheme.primary)
+                }
             }
             if (serverDisplayName != null) {
                 Row(
@@ -474,14 +759,14 @@ private fun PlayerControls(
                     if (!serverIcon.isNullOrBlank()) {
                         Text(
                             text = serverIcon,
-                            color = Color.White.copy(alpha = 0.85f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                     }
                     Text(
                         text = serverDisplayName,
-                        color = Color.White.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                     )
@@ -493,14 +778,16 @@ private fun PlayerControls(
                 val diagParts = buildList {
                     d.engine?.let { add(it) }
                     d.mediaProtocol?.let { add(it) }
-                    d.httpStatus?.let { add("HTTP $it") }
-                    d.mediaFirstByteMs?.let { add("首包 ${it}ms") }
-                    if (d.bufferedMs > 0) add("缓冲 ${d.bufferedMs / 1000}s")
+                    d.httpStatus?.let { add(stringResource(R.string.player_diagnostic_http, it)) }
+                    d.mediaFirstByteMs?.let { add(stringResource(R.string.player_diagnostic_first_byte, it)) }
+                    if (d.bufferedMs > 0) {
+                        add(stringResource(R.string.player_diagnostic_buffered, d.bufferedMs / 1000))
+                    }
                 }
                 if (diagParts.isNotEmpty()) {
                     Text(
                         text = diagParts.joinToString(" · "),
-                        color = Color.White.copy(alpha = 0.55f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.padding(bottom = 4.dp),
                     )
@@ -508,84 +795,131 @@ private fun PlayerControls(
             }
         }
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(Color.Black.copy(alpha = 0.45f))
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .align(Alignment.BottomCenter),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = formatSpeed(downloadSpeedBps),
-                    color = Color.White.copy(alpha = 0.7f),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                batteryLevel?.let {
-                    Text(
-                        text = "电量 $it%",
-                        color = Color.White.copy(alpha = 0.7f),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-            if (state.durationMs > 0) {
-                // 进度条 preview→commit（U3-B）：拖动只更新本地预览值，松手才真正 seek
-                var sliderScrubValue by remember { mutableStateOf<Float?>(null) }
-                Slider(
-                    value = sliderScrubValue
-                        ?: state.positionMs.toFloat().coerceIn(0f, state.durationMs.toFloat()),
-                    onValueChange = { sliderScrubValue = it },
-                    onValueChangeFinished = {
-                        sliderScrubValue?.let { onSeek(it.roundToLong()) }
-                        sliderScrubValue = null
-                    },
-                    valueRange = 0f..state.durationMs.toFloat(),
-                )
-            } else {
-                // 时长未知（无临时时长且 Media3 timeline 未就绪）：禁用进度条，绝不拿 1ms 画满条
-                Slider(
-                    value = 0f,
-                    onValueChange = {},
-                    valueRange = 0f..1f,
-                    enabled = false,
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    if (state.durationMs > 0) {
-                        formatTime(state.positionMs) + " / " + formatTime(state.durationMs)
+            PlayerVisualChromeBackground(
+                request = visualRequest,
+                maxAmbientHeight = maxAmbientHeight,
+                spectrum = visualSpectrum,
+                clock = visualClock,
+                forceFallback = forceVisualFallback,
+                onBackendChanged = onVisualBackendChanged,
+                progressProvider = {
+                    if (state.durationMs > 0L) {
+                        (state.positionMs.toFloat() / state.durationMs.toFloat()).coerceIn(0f, 1f)
                     } else {
-                        formatTime(state.positionMs) + " / --:--"
-                    },
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (state.isBuffering) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.padding(end = 12.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp,
+                        0f
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                scrimColor = MaterialTheme.colorScheme.surface,
+                scrimTopAlpha = when {
+                    !visualRequest.frameDecision.running -> 0.72f
+                    subtitleSelected -> 0.48f
+                    else -> 0.30f
+                },
+                scrimBottomAlpha = when {
+                    !visualRequest.frameDecision.running -> 0.84f
+                    subtitleSelected -> 0.78f
+                    else -> 0.66f
+                },
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = formatSpeed(downloadSpeedBps),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        batteryLevel?.let {
+                            Text(
+                                text = stringResource(R.string.player_battery, it),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                    if (state.durationMs > 0) {
+                        // 进度条 preview→commit（U3-B）：拖动只更新本地预览值，松手才真正 seek
+                        var sliderScrubValue by remember { mutableStateOf<Float?>(null) }
+                        Slider(
+                            value = sliderScrubValue
+                                ?: state.positionMs.toFloat().coerceIn(0f, state.durationMs.toFloat()),
+                            onValueChange = { sliderScrubValue = it },
+                            onValueChangeFinished = {
+                                sliderScrubValue?.let { onSeek(it.roundToLong()) }
+                                sliderScrubValue = null
+                            },
+                            valueRange = 0f..state.durationMs.toFloat(),
+                            colors = seekBarColors,
+                        )
+                    } else {
+                        // 时长未知（无临时时长且 Media3 timeline 未就绪）：禁用进度条，绝不拿 1ms 画满条
+                        Slider(
+                            value = 0f,
+                            onValueChange = {},
+                            valueRange = 0f..1f,
+                            enabled = false,
+                            colors = seekBarColors,
                         )
                     }
-                    IconButton(onClick = onTogglePlayPause) {
-                        Icon(
-                            if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (state.isPlaying) "暂停" else "播放",
-                            tint = Color.White,
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            if (state.durationMs > 0) {
+                                stringResource(
+                                    R.string.player_time_progress,
+                                    formatTime(state.positionMs),
+                                    formatTime(state.durationMs),
+                                )
+                            } else {
+                                stringResource(
+                                    R.string.player_time_progress_unknown,
+                                    formatTime(state.positionMs),
+                                )
+                            },
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodySmall,
                         )
-                    }
-                    TextButton(onClick = onCycleSpeed) {
-                        Text("%.2fx".format(state.speed), color = Color.White)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (state.isBuffering) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.padding(end = 12.dp),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    strokeWidth = 2.dp,
+                                )
+                            }
+                            IconButton(onClick = onTogglePlayPause) {
+                                Icon(
+                                    if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = stringResource(
+                                        if (state.isPlaying) R.string.player_pause else R.string.player_play,
+                                    ),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            TextButton(onClick = onCycleSpeed) {
+                                Text(
+                                    stringResource(R.string.player_playback_speed, state.speed),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -603,7 +937,7 @@ private fun GestureSeekIndicator(preview: GestureSeekPreview, modifier: Modifier
     val absSeconds = kotlin.math.abs(preview.deltaMs) / 1000
     val deltaText = "$sign%d:%02d".format(absSeconds / 60, absSeconds % 60)
     Text(
-        text = "$deltaText  →  ${formatTime(preview.targetPositionMs)}",
+        text = stringResource(R.string.player_gesture_seek, deltaText, formatTime(preview.targetPositionMs)),
         color = Color.White,
         style = MaterialTheme.typography.titleMedium,
         modifier = modifier
@@ -615,7 +949,10 @@ private fun GestureSeekIndicator(preview: GestureSeekPreview, modifier: Modifier
 /** 长按临时倍速/rewind 指示（U3-B revision）：居中显示当前档位。 */
 @Composable
 private fun GestureSpeedIndicator(preview: GestureSpeedPreview, modifier: Modifier = Modifier) {
-    val text = if (preview.isRewind) "↺ %.2f× 快退中".format(preview.speed) else "%.2f× 倍速中".format(preview.speed)
+    val text = stringResource(
+        if (preview.isRewind) R.string.player_gesture_rewinding else R.string.player_gesture_speed,
+        preview.speed,
+    )
     Text(
         text = text,
         color = Color.White,
@@ -638,7 +975,14 @@ private fun GestureLevelIndicator(preview: GestureLevelPreview, modifier: Modifi
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+        Icon(
+            icon,
+            contentDescription = stringResource(
+                if (preview.kind == PlayerLevelKind.BRIGHTNESS) R.string.player_brightness else R.string.player_volume,
+            ),
+            tint = Color.White,
+            modifier = Modifier.size(24.dp),
+        )
         Box(
             modifier = Modifier
                 .width(6.dp)
@@ -655,7 +999,11 @@ private fun GestureLevelIndicator(preview: GestureLevelPreview, modifier: Modifi
                     .background(Color.White),
             )
         }
-        Text("${(preview.fraction * 100).roundToInt()}%", color = Color.White, style = MaterialTheme.typography.labelSmall)
+        Text(
+            stringResource(R.string.player_level_percent, (preview.fraction * 100).roundToInt()),
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+        )
     }
 }
 
@@ -676,10 +1024,15 @@ private fun formatTime(ms: Long): String {
     return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
+@Composable
 private fun formatSpeed(bytesPerSecond: Long): String {
-    if (bytesPerSecond <= 0) return "--"
+    if (bytesPerSecond <= 0) return stringResource(R.string.player_download_speed_unknown)
     val kb = bytesPerSecond / 1024.0
-    return if (kb < 1024) "%.0f KB/s".format(kb) else "%.1f MB/s".format(kb / 1024.0)
+    return if (kb < 1024) {
+        stringResource(R.string.player_download_speed_kb, kb)
+    } else {
+        stringResource(R.string.player_download_speed_mb, kb / 1024.0)
+    }
 }
 
 private fun readBatteryLevel(context: Context): Int? {
@@ -688,4 +1041,65 @@ private fun readBatteryLevel(context: Context): Int? {
     return level.takeIf { it in 0..100 }
 }
 
+private data class PlayerAudioSpectrumBridge(
+    val provider: SpectrumProvider,
+    val available: Boolean,
+)
+
+/**
+ * Keeps high-rate FFT updates out of PlayerRoute's Compose state. The renderer samples the stable
+ * provider from its draw pass; composition only observes the low-frequency null/non-null boundary.
+ */
+@Composable
+private fun rememberAudioSpectrumBridge(
+    audioBands: StateFlow<AudioBandLevels?>,
+): PlayerAudioSpectrumBridge {
+    val latestFrame = remember(audioBands) {
+        AtomicReference(audioBands.value?.toSpectrumFrame())
+    }
+    var available by remember(audioBands) { mutableStateOf(audioBands.value != null) }
+    LaunchedEffect(audioBands) {
+        audioBands.collect { levels ->
+            latestFrame.set(levels?.toSpectrumFrame())
+            val nextAvailable = levels != null
+            if (available != nextAvailable) available = nextAvailable
+        }
+    }
+    val provider = remember(audioBands) {
+        SpectrumProvider.alreadySmoothed { latestFrame.get() ?: SpectrumFrame.Zero }
+    }
+    return PlayerAudioSpectrumBridge(provider = provider, available = available)
+}
+
+private fun Context.isRecordAudioPermanentlyDenied(activity: Activity?): Boolean {
+    if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+        PackageManager.PERMISSION_GRANTED
+    ) {
+        return false
+    }
+    val wasRequested = getSharedPreferences(PERMISSION_HISTORY_PREFERENCES, Context.MODE_PRIVATE)
+        .getBoolean(RECORD_AUDIO_REQUESTED_KEY, false)
+    return wasRequested && activity != null &&
+        !ActivityCompat.shouldShowRequestPermissionRationale(
+            activity,
+            Manifest.permission.RECORD_AUDIO,
+        )
+}
+
+private fun Context.markRecordAudioPermissionRequested() {
+    getSharedPreferences(PERMISSION_HISTORY_PREFERENCES, Context.MODE_PRIVATE)
+        .edit { putBoolean(RECORD_AUDIO_REQUESTED_KEY, true) }
+}
+
+private fun Context.openApplicationPermissionSettings() {
+    val intent = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.fromParts("package", packageName, null),
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { startActivity(intent) }
+}
+
 private const val OVERLAY_AUTO_HIDE_MS = 3_000L
+private const val AUDIO_SPECTRUM_START_TIMEOUT_MS = 1_500L
+private const val PERMISSION_HISTORY_PREFERENCES = "player_visual_permission_history"
+private const val RECORD_AUDIO_REQUESTED_KEY = "record_audio_requested"
