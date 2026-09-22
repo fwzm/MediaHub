@@ -69,6 +69,30 @@ interface PlaybackEnginePort {
      * 不支持采样的引擎（包括 mpv）保持默认 no-op。
      */
     fun retryAudioSpectrumCapture() = Unit
+
+    /**
+     * 外挂字幕能力（引擎如实自述；UI 据此显示/禁用"外挂字幕/偏移"控件）。
+     * 默认 = 双双不支持（不伪造能力）。
+     */
+    val subtitleCapabilities: SubtitleCapabilities
+        get() = SubtitleCapabilities(externalLoad = false, offsetAdjust = false)
+
+    /**
+     * 播放中加载外挂字幕（P2 字幕中心切片一）。成功返回 true；
+     * 不支持、URI 无法访问或 mime 不支持的引擎返回 false（调用方如实提示，不得伪造成功）。
+     * 注意：Media3 实现走媒体项重建（可能瞬断，位置/暂停/倍速保留）。
+     */
+    suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean = false
+
+    /**
+     * 字幕时间轴偏移（ms，正值 = 字幕延后显示）。仅 mpv（`sub-delay`）支持；
+     * 不支持的引擎返回 false 且**不改变任何状态**（UI 须按 [subtitleCapabilities] 隐藏）。
+     */
+    fun setSubtitleOffset(offsetMs: Long): Boolean = false
+
+    /** 当前字幕偏移（ms）；不支持的引擎恒为 0。 */
+    val subtitleOffsetMs: Long get() = 0L
+
     /** 停止并返回最终进度（ADR-023 退出 flush 用）。 */
     fun stop(): PlaybackProgress?
     fun release()

@@ -65,4 +65,13 @@
     <string name="player_selected_option">● %1$s</string>
     <string name="player_subtitle_position">Position: %1$.0f%% from bottom</string>
     <string name="player_subtitle_embedded_style">Use embedded ASS/PGS styles</string>
+    <string name="player_subtitle_external">External subtitles</string>
+    <string name="player_subtitle_discovering">Scanning folder for subtitles…</string>
+    <string name="player_subtitle_external_none">No subtitles found in the same folder (SRT/ASS/SSA/VTT)</string>
+    <string name="player_subtitle_import">Import local subtitle…</string>
+    <string name="player_subtitle_offset">Subtitle offset %1$s</string>
+    <string name="player_subtitle_offset_reset">Reset</string>
+    <string name="player_subtitle_offset_mpv_only">Offset is only supported by the mpv engine</string>
+    <string name="player_subtitle_offset_seconds" formatted="false">%+.1f s</string>
+    <string name="player_subtitle_external_active">Active</string>
 </resources>

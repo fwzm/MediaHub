@@ -228,6 +228,9 @@ class PlaybackEngine(
         audioSpectrumController.clear()
         audioSpectrumSessionActive = true
         this.session = session
+        // 新媒体会话：外挂字幕与手动字幕轨选择不跨会话携带（匹配记忆由 ViewModel 层重放）。
+        externalSubtitles.clear()
+        lastSelectedSubtitle = null
         session.trace?.record(PlaybackStartupTrace.Milestone.MEDIA_REQUEST_STARTED)
         session.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_PREPARE_STARTED)
         headersHolder.setHeaders(buildRequestHeaders(session.source))
@@ -293,6 +296,79 @@ class PlaybackEngine(
         selectTrack(C.TRACK_TYPE_TEXT, selection)
     }
 
+    // ---- 外挂字幕（P2 字幕中心切片一） ----
+
+    /**
+     * Media3 能力矩阵（如实自述）：
+     * - 外挂字幕 = 支持（[MediaItem.SubtitleConfiguration] 侧挂 + 媒体项重建，可能瞬断）；
+     * - 偏移 = **不支持**（Media3 无公开字幕偏移 API；偏移仅 mpv `sub-delay`，UI 已标注）。
+     */
+    override val subtitleCapabilities: SubtitleCapabilities =
+        SubtitleCapabilities(externalLoad = true, offsetAdjust = false)
+
+    override val subtitleOffsetMs: Long get() = 0L
+
+    /** 已侧挂的外挂字幕（重建媒体项时全部重挂）。 */
+    private val externalSubtitles = mutableListOf<MediaItem.SubtitleConfiguration>()
+
+    /** 用户最近一次手动选择的内嵌字幕轨（媒体项重建后重放；null=关闭/未选）。 */
+    private var lastSelectedSubtitle: TrackSelection? = null
+
+    override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
+        if (released || session == null) return false
+        val configuration = subtitle.toSubtitleConfiguration() ?: return false
+        externalSubtitles += configuration
+        rebuildMediaItemWithExternalSubtitles()
+        logger.i(
+            LogTag.PLAYER,
+            "Media3 外挂字幕重建 mime=${subtitle.mimeType} name=${subtitle.name} count=${externalSubtitles.size}",
+        )
+        return true
+    }
+
+    private fun ExternalSubtitle.toSubtitleConfiguration(): MediaItem.SubtitleConfiguration? {
+        val uri = try {
+            android.net.Uri.parse(uri)
+        } catch (e: Exception) {
+            return null
+        }
+        if (mimeType !in SUPPORTED_SUBTITLE_MIMES) return null
+        return MediaItem.SubtitleConfiguration.Builder(uri)
+            .setMimeType(mimeType)
+            .setLabel(name)
+            .setLanguage(language)
+            .setId(id)
+            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+            .build()
+    }
+
+    /**
+     * 媒体项重建纪律（沿用引擎切换的"保存位置同位重播"语义）：
+     * 捕获 位置/暂停/倍速 → setMediaItem(item, position) → prepare() → 恢复 暂停态与倍速。
+     * `setMediaItem(item, positionMs)` 在同一调用内完成换源与 seek，避免双跳帧；
+     * 倍速/playWhenReady 在 Media3 中跨 setMediaItem 保留，此处仍显式重施（防御版本差异）。
+     */
+    private fun rebuildMediaItemWithExternalSubtitles() {
+        val s = session ?: return
+        val snapshot = PlaybackRestoreSnapshot(
+            positionMs = player.currentPosition.coerceAtLeast(0),
+            playWhenReady = player.playWhenReady,
+            speed = player.playbackParameters.speed,
+        )
+        val mediaItem = s.source.toMedia3Item(s)
+            .buildUpon()
+            .setSubtitleConfigurations(externalSubtitles.toList())
+            .build()
+        player.setMediaItem(mediaItem, snapshot.positionMs)
+        player.prepare()
+        player.playWhenReady = snapshot.playWhenReady
+        player.setPlaybackSpeed(snapshot.speed)
+        // 轨道选择状态被重建重置：若用户此前选中了内嵌字幕轨，重建后须如实重选
+        // （按索引重放；轨道表变化导致索引失效时静默接受，不伪造选中）。
+        lastSelectedSubtitle?.let { selectSubtitleTrack(it) }
+    }
+
+
     override fun setAudioSpectrumEnabled(enabled: Boolean) {
         if (released) return
         audioSpectrumEnabled = enabled
@@ -316,6 +392,7 @@ class PlaybackEngine(
 
         if (selection == null) {
             builder.setRendererDisabled(rendererType, true)
+            if (rendererType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = null
         } else {
             if (selection.groupIndex !in 0 until groups.length) return
             builder.setRendererDisabled(rendererType, false)
@@ -324,6 +401,7 @@ class PlaybackEngine(
                 groups,
                 DefaultTrackSelector.SelectionOverride(selection.groupIndex, selection.trackIndex),
             )
+            if (rendererType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = selection
         }
         trackSelector.setParameters(builder)
     }
@@ -458,5 +536,22 @@ class PlaybackEngine(
 
     private companion object {
         const val PROGRESS_INTERVAL_MS = 1_000L
+
+        /** 本引擎可侧挂的字幕 MIME（与 SubtitleFormats 覆盖面一致）。 */
+        val SUPPORTED_SUBTITLE_MIMES = setOf(
+            "application/x-subrip",
+            "text/x-ssa",
+            "text/vtt",
+        )
     }
 }
+
+/**
+ * Media3 媒体项重建的保留快照（位置/暂停/倍速）。
+ * 独立 data class 便于对"重建保留纪律"做引擎层 fake 验证。
+ */
+data class PlaybackRestoreSnapshot(
+    val positionMs: Long,
+    val playWhenReady: Boolean,
+    val speed: Float,
+)

@@ -134,6 +134,7 @@ fun PlayerRoute(
     val subtitleCues by viewModel.engine.subtitleCues.collectAsStateWithLifecycle()
     val artworkPalette by viewModel.artworkPalette.collectAsStateWithLifecycle()
     val engineKind by viewModel.engineKind.collectAsStateWithLifecycle()
+    val subtitleCenter by viewModel.subtitleCenter.collectAsStateWithLifecycle()
     val audioSpectrumBridge = rememberAudioSpectrumBridge(viewModel.engine.audioBands)
 
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
@@ -191,6 +192,27 @@ fun PlayerRoute(
     var showSubtitleDialog by remember { mutableStateOf(false) }
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    // 字幕中心（P2 切片一）：SAF 导入入口（真实 ACTION_OPEN_DOCUMENT）。
+    // 回传即 persist uri（读权限），显示名经 contentResolver 查询后交给 ViewModel 入候选。
+    val subtitleImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        val displayName = runCatching {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+            }
+        }.getOrNull()
+        viewModel.importSubtitle(displayName ?: uri.lastPathSegment ?: "subtitle", uri.toString())
+    }
 
     // Overlay：点击切换显示 / 播放中 3s 自动隐藏（Item 6）
     var controlsVisible by remember { mutableStateOf(true) }
@@ -634,11 +656,17 @@ fun PlayerRoute(
             SubtitleSheet(
                 tracks = engineState.subtitleTracks,
                 style = preferences.subtitleStyle,
+                subtitleCenter = subtitleCenter,
+                externalLoadSupported = viewModel.engine.subtitleCapabilities.externalLoad,
+                offsetSupported = viewModel.engine.subtitleCapabilities.offsetAdjust,
                 onDismiss = { showSubtitleDialog = false },
                 onSelect = { track: SubtitleTrack? ->
-                    viewModel.engine.selectSubtitleTrack(track?.let { TrackSelection(it.index, 0) })
+                    viewModel.onEmbeddedSubtitleSelected(track?.let { TrackSelection(it.index, 0) })
                 },
                 onStyleChange = { newStyle -> viewModel.updateSubtitleStyle { newStyle } },
+                onSelectExternal = viewModel::selectExternalSubtitle,
+                onImportClick = { subtitleImportLauncher.launch(arrayOf("text/*", "application/x-subrip")) },
+                onOffsetChange = viewModel::setSubtitleOffset,
             )
         }
     }

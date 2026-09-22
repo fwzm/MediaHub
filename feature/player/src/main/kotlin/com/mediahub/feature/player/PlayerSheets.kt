@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.annotation.StringRes
+import androidx.compose.material3.TextButton
 import com.mediahub.model.AudioTrack
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.SubtitleTrack
@@ -37,8 +38,11 @@ import com.mediahub.model.SubtitleTrack
 /**
  * 播放器 Bottom Sheets（Phase 1B-2.4）：
  * - 音轨：带 codec / 声道 / 采样率 / 解码器 / 支持状态诊断；
- * - 字幕：轨道 + 样式（默认透明背景，见 ADR-032）。
+ * - 字幕：轨道 + 样式（默认透明背景，见 ADR-032）+ 外挂字幕（P2 字幕中心切片一）。
  */
+
+/** 偏移步进（ms）。 */
+private const val OFFSET_STEP_MS = 500L
 
 // ---- 格式化助手 ----
 
@@ -179,9 +183,15 @@ private val BG_COLORS = listOf(
 fun SubtitleSheet(
     tracks: List<SubtitleTrack>,
     style: SubtitleStyle,
+    subtitleCenter: SubtitleCenterState,
+    externalLoadSupported: Boolean,
+    offsetSupported: Boolean,
     onDismiss: () -> Unit,
     onSelect: (SubtitleTrack?) -> Unit,
     onStyleChange: (SubtitleStyle) -> Unit,
+    onSelectExternal: (com.mediahub.provider.api.DiscoveredSubtitle) -> Unit,
+    onImportClick: () -> Unit,
+    onOffsetChange: (Long) -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -211,6 +221,108 @@ fun SubtitleSheet(
                     selected = track.isSelected,
                     onClick = { onSelect(track) },
                 )
+            }
+
+            // ---- 外挂字幕（P2 字幕中心切片一：同目录发现 + SAF 导入入口） ----
+            Text(stringResource(R.string.player_subtitle_external), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
+            if (subtitleCenter.discovering) {
+                Text(
+                    stringResource(R.string.player_subtitle_discovering),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!externalLoadSupported) {
+                Text(
+                    stringResource(R.string.player_subtitle_offset_mpv_only),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (subtitleCenter.notice != null) {
+                Text(
+                    subtitleCenter.notice,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            val externals = subtitleCenter.allExternal
+            if (externals.isEmpty() && !subtitleCenter.discovering) {
+                Text(
+                    stringResource(R.string.player_subtitle_external_none),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            externals.forEach { candidate ->
+                val selected = subtitleCenter.selectedExternalId == candidate.id
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectExternal(candidate) }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    RadioButton(selected = selected, onClick = { onSelectExternal(candidate) })
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(candidate.name, style = MaterialTheme.typography.bodyLarge)
+                        val details = buildList {
+                            add(candidate.extension.uppercase())
+                            candidate.language?.let { add(langName(it)) }
+                        }
+                        Text(
+                            details.joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (selected) {
+                        Text(
+                            stringResource(R.string.player_subtitle_external_active),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+            TextButton(onClick = onImportClick) {
+                Text(stringResource(R.string.player_subtitle_import))
+            }
+
+            // ---- 偏移（仅 mpv 内核真实生效；Media3 无公开偏移 API，如实禁用） ----
+            Text(
+                if (offsetSupported) {
+                    stringResource(
+                        R.string.player_subtitle_offset,
+                        stringResource(
+                            R.string.player_subtitle_offset_seconds,
+                            subtitleCenter.offsetMs / 1000f,
+                        ),
+                    )
+                } else {
+                    stringResource(R.string.player_subtitle_offset_mpv_only)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            if (offsetSupported) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    AssistChip(
+                        onClick = { onOffsetChange(subtitleCenter.offsetMs - OFFSET_STEP_MS) },
+                        label = { Text("-${OFFSET_STEP_MS / 1000f}s") },
+                    )
+                    AssistChip(
+                        onClick = { onOffsetChange(subtitleCenter.offsetMs + OFFSET_STEP_MS) },
+                        label = { Text("+${OFFSET_STEP_MS / 1000f}s") },
+                    )
+                    if (subtitleCenter.offsetMs != 0L) {
+                        AssistChip(
+                            onClick = { onOffsetChange(0L) },
+                            label = { Text(stringResource(R.string.player_subtitle_offset_reset)) },
+                        )
+                    }
+                }
             }
 
             Text(stringResource(R.string.player_subtitle_style), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))

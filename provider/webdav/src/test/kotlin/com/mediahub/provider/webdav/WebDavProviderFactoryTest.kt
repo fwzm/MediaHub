@@ -85,7 +85,7 @@ class WebDavProviderFactoryTest {
         val handle = factory().create(server())
 
         assertEquals(
-            setOf(ProviderCapability.AUTH, ProviderCapability.BROWSE, ProviderCapability.DETAIL, ProviderCapability.PLAYBACK),
+            setOf(ProviderCapability.AUTH, ProviderCapability.BROWSE, ProviderCapability.DETAIL, ProviderCapability.PLAYBACK, ProviderCapability.SUBTITLE_DISCOVERY),
             handle.runtimeCapabilities,
         )
         assertNotNull("详情能力已装配（PROPFIND Depth:0）", handle.detail)

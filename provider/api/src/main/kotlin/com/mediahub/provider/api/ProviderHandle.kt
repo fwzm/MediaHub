@@ -23,6 +23,7 @@ data class ProviderHandle(
     val identityLookup: MediaIdentityLookupProvider? = null,
     val query: MediaQueryLibraryProvider? = null,
     val subtitle: MediaSubtitleProvider? = null,
+    val subtitleDiscovery: MediaSubtitleDiscoveryProvider? = null,
     val progress: MediaProgressProvider? = null,
 ) {
     val serverId: String get() = provider.serverId
@@ -39,6 +40,7 @@ data class ProviderHandle(
         if (identityLookup != null) add(ProviderCapability.IDENTITY_LOOKUP)
         if (query != null) add(ProviderCapability.QUERY)
         if (subtitle != null) add(ProviderCapability.SUBTITLE)
+        if (subtitleDiscovery != null) add(ProviderCapability.SUBTITLE_DISCOVERY)
         if (progress != null) add(ProviderCapability.PROGRESS)
     }
 
@@ -46,5 +48,5 @@ data class ProviderHandle(
     val hasAnyCapability: Boolean
         get() = auth != null || library != null || detail != null || browse != null ||
             playback != null || search != null || identityLookup != null || query != null ||
-            subtitle != null || progress != null
+            subtitle != null || subtitleDiscovery != null || progress != null
 }

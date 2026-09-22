@@ -30,7 +30,8 @@ import okhttp3.Request
  * 该 Provider 类型描述（Factory 与 Provider 共用，见 ADR-015）。
  *
  * `declaredCapabilities` 只声明本版本**真实实现**的能力：
- * AUTH（Basic）+ BROWSE（PROPFIND）+ DETAIL（PROPFIND Depth:0）+ PLAYBACK（直链）。
+ * AUTH（Basic）+ BROWSE（PROPFIND）+ DETAIL（PROPFIND Depth:0）+ PLAYBACK（直链）+
+ * SUBTITLE_DISCOVERY（同目录 PROPFIND 过滤字幕扩展名）。
  * **不含 SEARCH**：只读包不实现远端搜索（无 `SEARCH` 方法、也无本地伪搜索）。
  * 声明一个没有可调用实现的 capability 违反 ADR-022（禁止"声明有能力但无可调用实现"）。
  */
@@ -44,6 +45,7 @@ internal val WEBDAV_PROVIDER_DESCRIPTOR = ProviderDescriptor(
         ProviderCapability.BROWSE,
         ProviderCapability.DETAIL,
         ProviderCapability.PLAYBACK,
+        ProviderCapability.SUBTITLE_DISCOVERY,
     ),
     authMethod = AuthMethod.BASIC,
     status = ProviderStatus.EXPERIMENTAL,

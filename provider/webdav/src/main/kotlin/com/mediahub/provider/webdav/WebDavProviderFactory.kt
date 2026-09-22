@@ -83,6 +83,11 @@ class WebDavProviderFactory @Inject constructor(
                 session = session,
                 logger = logger,
             ),
+            subtitleDiscovery = WebDavSubtitleDiscoveryProvider(
+                server = server,
+                api = api,
+                session = session,
+            ),
         )
     }
 }

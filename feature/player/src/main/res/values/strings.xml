@@ -54,6 +54,15 @@
     <string name="player_subtitle_tracks">轨道</string>
     <string name="player_subtitles_off">关闭字幕</string>
     <string name="player_subtitle_track_number">字幕 %1$d</string>
+    <string name="player_subtitle_external">外挂字幕</string>
+    <string name="player_subtitle_discovering">正在查找同目录字幕…</string>
+    <string name="player_subtitle_external_none">同目录未发现字幕（SRT/ASS/SSA/VTT）</string>
+    <string name="player_subtitle_import">导入本地字幕…</string>
+    <string name="player_subtitle_offset">字幕偏移 %1$s</string>
+    <string name="player_subtitle_offset_reset">归零</string>
+    <string name="player_subtitle_offset_mpv_only">偏移仅 mpv 内核支持</string>
+    <string name="player_subtitle_offset_seconds" formatted="false">%+.1f 秒</string>
+    <string name="player_subtitle_external_active">当前</string>
     <string name="player_subtitle_style">样式</string>
     <string name="player_subtitle_scale">字号 %1$.0f%%</string>
     <string name="player_subtitle_text_color">文字颜色</string>

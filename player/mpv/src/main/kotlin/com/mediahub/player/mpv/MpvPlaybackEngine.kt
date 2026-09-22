@@ -7,16 +7,19 @@ import androidx.media3.common.text.CueGroup
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.HttpClientFactory
+import com.mediahub.core.network.OriginScopedCredentialInterceptor
 import com.mediahub.core.network.PlaybackError
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
 import com.mediahub.player.engine.EngineKind
+import com.mediahub.player.engine.ExternalSubtitle
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackEvent
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.PlaybackStartupTrace
 import com.mediahub.player.engine.PlaybackUiState
 import com.mediahub.player.engine.SeekMode
+import com.mediahub.player.engine.SubtitleCapabilities
 import com.mediahub.player.engine.TrackSelection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -53,14 +56,45 @@ class MpvPlaybackEngine internal constructor(
     private val currentTimeMillis: () -> Long,
     // Always dispatch, independent of the playback scope: queued teardown must survive its cancellation.
     private val deferNative: (() -> Unit) -> Unit = nativeDeferrer(),
+    // 外挂字幕落地缓存（P2）：lazy，首个字幕请求才创建；未配置时 loadExternalSubtitle 如实失败。
+    private val subtitleCacheFactory: () -> SubtitleCache = {
+        error("subtitle cache not configured")
+    },
 ) : PlaybackEnginePort {
     constructor(
         context: Context,
         logger: Logger,
         scope: CoroutineScope,
         httpClientFactory: HttpClientFactory,
-    ) : this(logger, scope, { createMpvBridge(httpClientFactory) }, { createMpvInstance(context) },
-        SystemClock::elapsedRealtime, System::currentTimeMillis)
+    ) : this(
+        logger,
+        scope,
+        { createMpvBridge(httpClientFactory) },
+        { createMpvInstance(context) },
+        SystemClock::elapsedRealtime,
+        System::currentTimeMillis,
+        nativeDeferrer(),
+        {
+            SubtitleCache(
+                cacheDir = context.cacheDir,
+                client = httpClientFactory.mediaClient().newBuilder()
+                    .addNetworkInterceptor(OriginScopedCredentialInterceptor())
+                    .build(),
+                contentResolver = { uri, target ->
+                    try {
+                        context.contentResolver.openInputStream(uri)?.use { input ->
+                            target.outputStream().use { output -> input.copyTo(output) }
+                        } != null
+                    } catch (e: Exception) {
+                        false
+                    }
+                },
+                logger = logger,
+            )
+        },
+    )
+
+    private val subtitleCache: SubtitleCache by lazy { subtitleCacheFactory() }
 
     override val kind: EngineKind = EngineKind.MPV
     private val _uiState = MutableStateFlow(PlaybackUiState())
@@ -292,6 +326,53 @@ class MpvPlaybackEngine internal constructor(
 
     override fun selectAudioTrack(selection: TrackSelection?) = Unit
     override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
+
+    // ---- 外挂字幕 / 偏移（P2 字幕中心切片一） ----
+
+    /**
+     * mpv 能力矩阵（如实自述）：
+     * - 外挂字幕 = 支持（`sub-add <本地路径> select`；http/content 先落地 cache）；
+     * - 偏移 = 支持（`sub-delay` 属性，秒）。
+     */
+    override val subtitleCapabilities: SubtitleCapabilities =
+        SubtitleCapabilities(externalLoad = true, offsetAdjust = true)
+
+    override fun setSubtitleOffset(offsetMs: Long): Boolean {
+        // ±60s 合理边界，防止误触把字幕推到整片之外
+        val clamped = offsetMs.coerceIn(-60_000L, 60_000L)
+        var accepted = false
+        withNative { _, m ->
+            m.setPropertyDouble("sub-delay", clamped / 1000.0)
+            accepted = true
+        }
+        if (accepted) {
+            synchronized(stateLock) { subtitleOffsetMsValue = clamped }
+        }
+        return accepted
+    }
+
+    @Volatile private var subtitleOffsetMsValue = 0L
+    override val subtitleOffsetMs: Long get() = subtitleOffsetMsValue
+
+    override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
+        // 落地缓存：本地路径原样；http(s)/content:// 先下载/拷贝到 cache（同 origin 才带凭据头）。
+        val source = synchronized(stateLock) { current?.session?.source }
+        val localPath = subtitleCache.localPathFor(
+            uri = subtitle.uri,
+            mediaUrl = source?.url ?: "",
+            sessionHeaders = source?.let { buildHeaders(it) } ?: emptyMap(),
+        ) ?: run {
+            logger.w(LogTag.PLAYER, "mpv 外挂字幕落地失败 name=${subtitle.name}")
+            return false
+        }
+        var accepted = false
+        withNative { _, m ->
+            m.command(arrayOf("sub-add", localPath, "select"))
+            accepted = true
+        }
+        if (accepted) logger.i(LogTag.PLAYER, "mpv 外挂字幕 sub-add path=$localPath")
+        return accepted
+    }
 
     override fun stop(): PlaybackProgress? {
         val snapshot: PlaybackUiState

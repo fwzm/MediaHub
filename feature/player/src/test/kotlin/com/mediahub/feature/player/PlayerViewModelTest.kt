@@ -118,6 +118,7 @@ class PlayerViewModelTest {
             savedStateHandle = savedState("m1"), // 无文件扩展名：Guesser fallback 会是 OTHER
             serverStore = FakeServerStore(embyServer()),
             progressStore = FakeProgressStore(resume = 15_000L),
+            subtitleMemoryStore = FakeSubtitleMemoryStore(),
             registry = registry,
             media3EngineFactory = PlaybackEngineCreator { engine },
             mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
@@ -165,7 +166,9 @@ class PlayerViewModelTest {
         val vm = PlayerViewModel(
             savedStateHandle = savedState("m1"),
             serverStore = FakeServerStore(embyServer()),
+            
             progressStore = FakeProgressStore(resume = null),
+            subtitleMemoryStore = FakeSubtitleMemoryStore(),
             registry = registry,
             media3EngineFactory = PlaybackEngineCreator { engine },
             mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
@@ -203,7 +206,9 @@ class PlayerViewModelTest {
         val vm = PlayerViewModel(
             savedStateHandle = savedState("m1"),
             serverStore = FakeServerStore(embyServer()),
+            
             progressStore = FakeProgressStore(resume = null),
+            subtitleMemoryStore = FakeSubtitleMemoryStore(),
             registry = registry,
             media3EngineFactory = PlaybackEngineCreator { engine },
             mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
@@ -243,6 +248,7 @@ class PlayerViewModelTest {
                 savedStateHandle = savedState("m1"),
                 serverStore = FakeServerStore(embyServer()),
                 progressStore = FakeProgressStore(resume = null),
+                subtitleMemoryStore = FakeSubtitleMemoryStore(),
                 registry = registry,
                 media3EngineFactory = PlaybackEngineCreator { FakeEngine() },
                 mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
@@ -318,6 +324,7 @@ class PlayerViewModelTest {
                 savedStateHandle = savedState("m1"),
                 serverStore = FakeServerStore(embyServer()),
                 progressStore = FakeProgressStore(resume = null) { calls += "local" },
+                subtitleMemoryStore = FakeSubtitleMemoryStore(),
                 registry = FakeRegistry(
                     detail = FakeDetail(mediaItemWithPoster("https://image/one")),
                     playback = FakePlayback(PlaybackSource(
@@ -494,6 +501,17 @@ class PlayerViewModelTest {
             return finalProgress
         }
         override fun release() = onRelease()
+    }
+
+    private class FakeSubtitleMemoryStore : com.mediahub.core.database.repository.SubtitleMemoryStore {
+        val entries = mutableMapOf<String, com.mediahub.core.database.repository.SubtitleMemoryEntry>()
+        override suspend fun recall(
+            versionKey: String,
+        ): com.mediahub.core.database.repository.SubtitleMemoryEntry? = entries[versionKey]
+        override suspend fun remember(entry: com.mediahub.core.database.repository.SubtitleMemoryEntry) {
+            entries[entry.versionKey] = entry.copy(updatedAtEpochMs = 1L)
+        }
+        override suspend fun forget(versionKey: String) { entries.remove(versionKey) }
     }
 
     private val noOpLogger = object : Logger {

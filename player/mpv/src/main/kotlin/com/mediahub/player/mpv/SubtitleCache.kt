@@ -1,0 +1,129 @@
+package com.mediahub.player.mpv
+
+import android.net.Uri
+import com.mediahub.core.logging.LogTag
+import com.mediahub.core.logging.Logger
+import com.mediahub.core.network.OriginScopedCredentialInterceptor
+import java.io.File
+import java.io.IOException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+
+/**
+ * mpv 外挂字幕落地缓存（P2 字幕中心切片一）。
+ *
+ * 能力边界（如实实现，不过度声明）：
+ * - 本地路径（file:// 或绝对路径）：原样返回（mpv 可直挂）；
+ * - http(s)：下载到 cacheDir/subtitles/ 后 `sub-add` 本地文件。
+ *   鉴权头（如 WebDAV Basic）**仅当字幕 URI 与当前媒体同 origin 时**随请求发出
+ *   （与 [OriginScopedCredentialInterceptor] 同一红线：凭据绝不发往第三方主机）；
+ * - content:（SAF 导入）：经 ContentResolver 拷贝到 cache 后直挂。
+ * 任何失败返回 null（调用方如实报"加载失败"，不伪造成功）。
+ */
+internal open class SubtitleCache(
+    private val cacheDir: File,
+    private val client: OkHttpClient,
+    private val contentResolver: ContentCopy,
+    private val logger: Logger,
+) {
+    /** SAF content: 拷贝边界（可测注入）。 */
+    fun interface ContentCopy {
+        fun copy(uri: Uri, target: File): Boolean
+    }
+
+    /** 返回 mpv 可直挂的本地路径；无法落地返回 null。 */
+    open suspend fun localPathFor(
+        uri: String,
+        mediaUrl: String,
+        sessionHeaders: Map<String, String>,
+    ): String? = withContext(Dispatchers.IO) {
+        runCatching { resolve(uri, mediaUrl, sessionHeaders) }
+            .onFailure { logger.w(LogTag.PLAYER, "mpv 外挂字幕落地失败 uri=$uri", it) }
+            .getOrNull()
+    }
+
+    private fun resolve(
+        uri: String,
+        mediaUrl: String,
+        sessionHeaders: Map<String, String>,
+    ): String? {
+        val dir = File(cacheDir, DIR).apply { mkdirs() }
+        return when {
+            uri.startsWith("http://") || uri.startsWith("https://") -> {
+                val target = File(dir, stableFileName(uri))
+                if (!target.exists() || target.length() == 0L) {
+                    download(uri, mediaUrl, sessionHeaders, target)
+                }
+                target.takeIf { it.length() > 0L }?.absolutePath
+            }
+
+            uri.startsWith("content://") -> {
+                val target = File(dir, stableFileName(uri))
+                if (!target.exists() || target.length() == 0L) {
+                    if (!contentResolver.copy(Uri.parse(uri), target)) return null
+                }
+                target.takeIf { it.length() > 0L }?.absolutePath
+            }
+
+            uri.startsWith("file://") -> Uri.parse(uri).path
+
+            // 本地绝对路径（Local Provider；isAbsolute 兼容 POSIX/Windows 语义）
+            else -> uri.takeIf { it.startsWith("/") || java.io.File(it).isAbsolute }
+        }
+    }
+
+    private fun download(
+        uri: String,
+        mediaUrl: String,
+        sessionHeaders: Map<String, String>,
+        target: File,
+    ) {
+        // 凭据作用域：仅同 origin 媒体允许携带会话头（WebDAV Basic 场景）。
+        val attachHeaders = if (sameOrigin(mediaUrl, uri)) sessionHeaders else emptyMap()
+        val builder = Request.Builder().url(uri)
+        attachHeaders.forEach { (k, v) -> builder.header(k, v) }
+        client.newCall(builder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("subtitle download HTTP ${response.code}")
+            }
+            val body = response.body ?: throw IOException("subtitle download empty body")
+            val tmp = File(target.parentFile, target.name + ".part")
+            tmp.outputStream().use { out -> body.byteStream().copyTo(out) }
+            if (!tmp.renameTo(target)) {
+                tmp.delete()
+                throw IOException("subtitle cache rename failed")
+            }
+        }
+    }
+
+    private fun stableFileName(uri: String): String {
+        val raw = uri.substringAfterLast('/')
+            .substringBefore('?')
+            .substringBefore('#')
+        val decoded = runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
+        val name = decoded.ifBlank { "subtitle" }
+        // 文件名碰撞即复用同名字幕（同一视频同名字幕内容一致的场景占绝对多数）；
+        // 无法保证时由 extension 白名单兜底，绝不写目录逃逸路径。
+        return name.substringAfterLast('/').substringAfterLast('\\').take(128)
+    }
+
+    private fun sameOrigin(a: String, b: String): Boolean {
+        val originA = originOf(a) ?: return false
+        val originB = originOf(b) ?: return false
+        return originA.equals(originB, ignoreCase = true)
+    }
+
+    private fun originOf(url: String): String? = try {
+        val parsed = java.net.URI(url)
+        if (parsed.host.isNullOrBlank()) null
+        else "${parsed.scheme?.lowercase()}://${parsed.host.lowercase()}:${parsed.port}"
+    } catch (e: Exception) {
+        null
+    }
+
+    private companion object {
+        const val DIR = "subtitles"
+    }
+}
