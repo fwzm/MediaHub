@@ -338,6 +338,11 @@ class WebDavJointChainTest {
             ),
             serverStore = serverRepository,
             progressStore = ProgressRepository(db),
+            subtitleMemoryStore = object : com.mediahub.core.database.repository.SubtitleMemoryStore {
+                override suspend fun recall(versionKey: String) = null
+                override suspend fun remember(entry: com.mediahub.core.database.repository.SubtitleMemoryEntry) = Unit
+                override suspend fun forget(versionKey: String) = Unit
+            },
             registry = registry,
             media3EngineFactory = engineCreator,
             mpvEngineFactory = engineCreator,
@@ -389,21 +394,29 @@ class WebDavJointChainTest {
             val request = mock.takeRequest(2, TimeUnit.SECONDS) ?: break
             requests += request
         }
-        assertEquals("XML 响应与请求一一对应（5 份 207 multistatus）", 5, requests.size)
+        // P2 字幕中心接入后：resolve 成功自动触发同目录字幕发现（+1 次 Depth:1
+        // PROPFIND），总请求 5→6（auth 0 / browse 1 / detail 0 / player detail 0 /
+        // replay-detail 0 / subtitle-discovery 1）
+        assertEquals("XML 响应与请求一一对应（6 份 207 multistatus）", 6, requests.size)
         val depths = requests.map { it.getHeader("Depth") }
-        assertEquals(listOf("0", "1", "0", "0", "0"), depths)
+        assertEquals(listOf("0", "1", "0", "0", "0", "1"), depths)
         requests.forEach { request ->
             assertEquals("PROPFIND", request.method)
             assertEquals("每次请求都携带同一条 Basic 凭据", expectedBasic(), request.getHeader("Authorization"))
         }
         assertEquals("认证与浏览都打在根目录", listOf("/", "/"), requests.take(2).map { it.path })
-        requests.drop(2).forEach { request ->
+        requests.drop(2).take(3).forEach { request ->
             assertEquals(
                 "详情/播放链路真实命中中文+空格文件（percent 编码保真）",
                 FILE_PATH_DECODED,
                 URLDecoder.decode(requireNotNull(request.path), Charsets.UTF_8),
             )
         }
+        assertEquals(
+            "字幕发现打在视频所在目录（Depth:1 同目录枚举）",
+            "/电影/",
+            URLDecoder.decode(requireNotNull(requests.last().path), Charsets.UTF_8),
+        )
     }
 
     private companion object {
