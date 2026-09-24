@@ -209,6 +209,18 @@ class PlayerViewModel @Inject constructor(
     private var subtitleCenterJob: kotlinx.coroutines.Job? = null
 
     /**
+     * 播放会话代（A4 字幕操作归属）：每次 [startSubtitleCenter]（即每次 resolve
+     * 成功进入新播放会话）推进。字幕中心全部异步步骤（记忆读取、资源准备、
+     * 引擎提交、UI 更新、持久化）绑定发起时的代——**旧会话的迟到任务不得
+     * 修改新会话状态或覆盖更新的用户选择**（B 审查竞争 finding 的整链修复：
+     * 不止单点 manualSelection 二次检查）。
+     */
+    private val subtitleSessionGeneration = java.util.concurrent.atomic.AtomicLong(0)
+
+    private fun isSubtitleSessionCurrent(generation: Long): Boolean =
+        subtitleSessionGeneration.get() == generation
+
+    /**
      * resolve 成功后启动：同目录发现 →（未手动选择时）回放匹配记忆。
      * 记忆键 = serverId+itemId+sizeBytes（或路径指纹）——不同视频/版本互不共享。
      */
@@ -217,6 +229,7 @@ class PlayerViewModel @Inject constructor(
         _subtitleCenter.value = SubtitleCenterState()
         val key = SubtitleMemoryKeys.forItem(item)
         versionKey = key
+        val generation = subtitleSessionGeneration.incrementAndGet()
         subtitleCenterJob = viewModelScope.launch {
             val discovery = handle?.subtitleDiscovery
             if (discovery == null) {
@@ -228,24 +241,32 @@ class PlayerViewModel @Inject constructor(
                 .onFailure { logger.w(LogTag.PLAYER, "字幕发现失败 itemId=${item.id}", it) }
                 .getOrDefault(emptyList())
             _subtitleCenter.update { it.copy(discovering = false, discovered = found) }
-            // 迟到发现保护：等待期间用户已手动选择则不覆盖（手动优先）。
+            // 迟到发现保护（双重）：会话代已变 → 整个回放链作废；
+            // 用户已手动选择 → 不覆盖（手动优先）。
+            if (!isSubtitleSessionCurrent(generation)) return@launch
             if (_subtitleCenter.value.manualSelection) return@launch
             val memory = subtitleMemoryStore.recall(key) ?: return@launch
-            if (memory.offsetMs != 0L && engine.setSubtitleOffset(memory.offsetMs)) {
+            // recall 挂起窗口（记忆读取是迟到竞争的主要交错点）：恢复后必须再校验
+            if (!isSubtitleSessionCurrent(generation)) return@launch
+            if (_subtitleCenter.value.manualSelection) return@launch
+            if (memory.offsetMs != 0L && engine.setSubtitleOffset(memory.offsetMs) &&
+                isSubtitleSessionCurrent(generation)
+            ) {
                 _subtitleCenter.update { it.copy(offsetMs = memory.offsetMs) }
             }
             val target = memory.subtitleId
                 ?.let { id -> found.find { it.id == id } }
                 ?: return@launch
-            applyExternalSubtitle(target, remember = false)
+            applyExternalSubtitle(target, remember = false, generation = generation)
         }
     }
 
     /** 外挂字幕候选点击：真实加载到当前内核；成功才记忆（手动选择标记 + 匹配记忆写入）。 */
     fun selectExternalSubtitle(subtitle: DiscoveredSubtitle) {
+        val generation = subtitleSessionGeneration.get()
         viewModelScope.launch {
-            val ok = applyExternalSubtitle(subtitle, remember = true)
-            if (ok) {
+            val ok = applyExternalSubtitle(subtitle, remember = true, generation = generation)
+            if (ok && isSubtitleSessionCurrent(generation)) {
                 _subtitleCenter.update { it.copy(manualSelection = true) }
             }
         }
@@ -314,6 +335,7 @@ class PlayerViewModel @Inject constructor(
     private suspend fun applyExternalSubtitle(
         subtitle: DiscoveredSubtitle,
         remember: Boolean,
+        generation: Long = subtitleSessionGeneration.get(),
     ): Boolean {
         if (!engine.subtitleCapabilities.externalLoad) {
             _subtitleCenter.update { it.copy(notice = "当前内核不支持外挂字幕") }
@@ -333,17 +355,23 @@ class PlayerViewModel @Inject constructor(
                 language = subtitle.language,
             ),
         )
+        // 引擎提交完成即可被新会话的 rebuild/stop 重置；此后每一步（UI 更新、
+        // 记忆持久化）都必须仍属于发起会话——旧会话迟到结果不得改动新状态。
+        if (!isSubtitleSessionCurrent(generation)) return false
         if (!accepted) {
             _subtitleCenter.update { it.copy(notice = "字幕加载失败：${subtitle.fileName}") }
             return false
         }
         _subtitleCenter.update { it.copy(selectedExternalId = subtitle.id) }
-        if (remember) persistMemory(subtitle.id)
+        if (remember) persistMemory(subtitle.id, generation)
         return true
     }
 
     /** 写入匹配记忆：字幕标识 + 偏移。无任何可记内容时删除记忆。 */
-    private fun persistMemory(subtitleId: String? = _subtitleCenter.value.selectedExternalId) {
+    private fun persistMemory(
+        subtitleId: String? = _subtitleCenter.value.selectedExternalId,
+        generation: Long = subtitleSessionGeneration.get(),
+    ) {
         val key = versionKey ?: return
         val offset = _subtitleCenter.value.offsetMs
         if (subtitleId == null && offset == 0L) {
@@ -351,6 +379,8 @@ class PlayerViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
+            // 持久化前再校验会话代：旧会话的记忆写不得落到新视频的键上
+            if (!isSubtitleSessionCurrent(generation)) return@launch
             subtitleMemoryStore.remember(
                 SubtitleMemoryEntry(
                     versionKey = key,

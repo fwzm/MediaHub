@@ -519,4 +519,72 @@ class PlayerViewModelSubtitleCenterTest {
             runCurrent()
         }
     }
+
+    // ---- A4：字幕操作归属（会话代贯穿；B 竞争 finding 的正确归因动态复现） ----
+
+    /** 记忆读取屏障版 store：recall 进入后挂起至放行，返回预置记忆。 */
+    private class BarrierMemoryStore(private val entry: SubtitleMemoryEntry?) : SubtitleMemoryStore {
+        val recallEntered = CompletableDeferred<Unit>()
+        val releaseRecall = CompletableDeferred<Unit>()
+        val written = mutableListOf<SubtitleMemoryEntry>()
+        override suspend fun recall(versionKey: String): SubtitleMemoryEntry? {
+            recallEntered.complete(Unit)
+            releaseRecall.await()
+            return entry
+        }
+        override suspend fun remember(entry: SubtitleMemoryEntry) { written.add(entry) }
+        override suspend fun forget(versionKey: String) = Unit
+    }
+
+    @Test
+    fun `late memory replay does not override user manual selection`() = runTest(dispatcher) {
+        val key = SubtitleMemoryKeys.forItem(videoItem)
+        // 记忆携带 zh（DEFAULT_SUBS[0]）；窗口内用户手动选择 eng（DEFAULT_SUBS[1]）
+        val memory = BarrierMemoryStore(
+            SubtitleMemoryEntry(
+                versionKey = key, serverId = "srv-1",
+                subtitleId = "https://nas/movie.zh.srt", offsetMs = 0L, updatedAtEpochMs = 0L,
+            ),
+        )
+        val engine = RecordingEngine()
+        val vm = buildVm(engine, Discovery(), memory)
+        try {
+            // 前置：流程进入目标路径（resolve Ready + 回放到达 recall 挂起点）
+            runCurrent()
+            runCurrent()
+            assertTrue(
+                "前置：resolve 必须 Ready，实际=${vm.resolveState.value}",
+                vm.resolveState.value is ResolveState.Ready,
+            )
+            repeat(200) {
+                if (memory.recallEntered.isCompleted) return@repeat
+                testScheduler.advanceTimeBy(50)
+                runCurrent()
+            }
+            check(memory.recallEntered.isCompleted) { "回放未到达 recall 挂起点" }
+            assertEquals("回放挂起前不应有任何加载", 0, engine.loaded.size)
+
+            // 窗口内：用户手动选择 eng（manualSelection=true + 引擎加载 eng + 记忆写 eng）
+            vm.selectExternalSubtitle(Discovery.DEFAULT_SUBS[1])
+            runCurrent()
+            runCurrent()
+            assertEquals(listOf("https://nas/movie.eng.ass"), engine.loaded.map { it.id })
+            assertEquals("https://nas/movie.eng.ass", vm.subtitleCenter.value.selectedExternalId)
+
+            // 放行携带 zh 的迟到回放：不得覆盖用户选择（引擎/状态/记忆三面）
+            memory.releaseRecall.complete(Unit)
+            runCurrent()
+            runCurrent()
+
+            assertEquals(
+                "迟到回放不得覆盖手动选择（引擎终态仍 eng）",
+                listOf("https://nas/movie.eng.ass"),
+                engine.loaded.map { it.id },
+            )
+            assertEquals("https://nas/movie.eng.ass", vm.subtitleCenter.value.selectedExternalId)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
 }

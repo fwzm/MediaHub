@@ -391,6 +391,7 @@ class PlayerViewModelTest {
             savedStateHandle = savedState("m1"),
             serverStore = FakeServerStore(embyServer()),
             progressStore = FakeProgressStore(resume = null),
+            subtitleMemoryStore = NoSubtitleMemory,
             registry = FakeRegistry(
                 detail = FakeDetail(
                     MediaItem(
@@ -431,6 +432,13 @@ class PlayerViewModelTest {
 
     // ---- fakes ----
     private val NoArtworkPalette = ArtworkPaletteLoader { _, _ -> null }
+
+    /** P2 字幕记忆默认空实现（P1 面板测试不触达字幕中心）。 */
+    private val NoSubtitleMemory = object : com.mediahub.core.database.repository.SubtitleMemoryStore {
+        override suspend fun recall(versionKey: String) = null
+        override suspend fun remember(entry: com.mediahub.core.database.repository.SubtitleMemoryEntry) = Unit
+        override suspend fun forget(versionKey: String) = Unit
+    }
 
     private class FakeUserPreferences : UserPreferencesRepository {
         val state = MutableStateFlow(UserPreferences())
