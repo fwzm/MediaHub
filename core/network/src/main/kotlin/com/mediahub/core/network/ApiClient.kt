@@ -5,9 +5,8 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.Redactor
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -196,6 +195,17 @@ class ApiClient(
     /**
      * 服务器连通性探测（添加媒体库时的"测试连接"）。
      * 仅做基础 HTTP 探测，不包含任何数据源鉴权逻辑。
+     *
+     * 超时语义（A4，取代 A3-5 登记的缺陷语义）：[timeoutMs] 是**真实 deadline**——
+     * 经 [withTimeoutOrNull] 包裹 enqueue 桥（[awaitCancellable]）实现：
+     * - deadline 命中：返回 [ServerProbeResult.Failure]（userMessage="连接超时"，
+     *   detail 对齐 [PlaybackError.Code.NETWORK_TIMEOUT]），并经
+     *   `invokeOnCancellation → Call.cancel` **真实打断**在途请求，不等
+     *   OkHttp 的 readTimeout/callTimeout。
+     * - 外层协程取消：同样经真实 `Call.cancel` 立即打断（取消透传，不折叠为
+     *   Failure）；IO 失败（连接拒绝/DNS 等）仍按旧契约映射
+     *   "无法连接服务器" + [PlaybackErrorMapper] 对应码。
+     * - 全程 enqueue 异步回调，不占用任何调用方线程阻塞等待。
      */
     suspend fun probe(baseUrl: String, timeoutMs: Long = 10_000): ServerProbeResult {
         val normalized = baseUrl.trimEnd('/')
@@ -205,24 +215,30 @@ class ApiClient(
             return ServerProbeResult.Failure("URL 格式无效", e.message)
         }
         val request = Request.Builder().url(url).method("GET", null).build()
-        return withContext(Dispatchers.IO) {
-            val start = System.nanoTime()
-            try {
-                client.newCall(request).execute().use { response ->
-                    val latencyMs = (System.nanoTime() - start) / 1_000_000
-                    ServerProbeResult.Success(
-                        httpCode = response.code,
-                        latencyMs = latencyMs,
-                        contentType = response.header("Content-Type"),
-                    )
+        val start = System.nanoTime()
+        val outcome = try {
+            withTimeoutOrNull(timeoutMs) {
+                client.newCall(request).awaitCancellable { response ->
+                    response.use {
+                        ServerProbeResult.Success(
+                            httpCode = it.code,
+                            latencyMs = (System.nanoTime() - start) / 1_000_000,
+                            contentType = it.header("Content-Type"),
+                        )
+                    }
                 }
-            } catch (e: IOException) {
-                ServerProbeResult.Failure(
-                    userMessage = "无法连接服务器",
-                    detail = PlaybackErrorMapper.fromIoException(e).code.name,
-                )
             }
+        } catch (e: IOException) {
+            return ServerProbeResult.Failure(
+                userMessage = "无法连接服务器",
+                detail = PlaybackErrorMapper.fromIoException(e).code.name,
+            )
         }
+        // deadline 命中（底层 Call 已被 withTimeoutOrNull 的取消真实打断）
+        return outcome ?: ServerProbeResult.Failure(
+            userMessage = "连接超时",
+            detail = PlaybackError.Code.NETWORK_TIMEOUT.name,
+        )
     }
 }
 
