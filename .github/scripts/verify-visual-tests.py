@@ -6,7 +6,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 
-MODULES = ("core/ui", "feature/player", "feature/settings")
+MODULES = ("core/ui", "feature/player", "feature/settings", "provider/webdav")
 COMMON_TESTS = {
     (
         "com.mediahub.feature.player.PlayerVisualEffectsPathTest",
@@ -35,6 +35,40 @@ COMMON_TESTS = {
     (
         "com.mediahub.core.ui.effects.PlayerVisualChromeBoundsTest",
         "tallLandscapeControlsKeepAmbientOutsideSubtitleSafeBand",
+    ),
+    # A4：Android runtime 生产 parser 双验收门禁（缺失/跳过=失败，
+    # 防回归"job success 但 webdav 测试缺失/被跳过"）
+    (
+        "com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest",
+        "standard207WithI18nEncodingAndMixedPropstatOrdersParses",
+    ),
+    (
+        "com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest",
+        "externalEntityCausesZeroNetworkHops",
+    ),
+    (
+        "com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest",
+        "doctypeDeclarationIsRejected",
+    ),
+    (
+        "com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest",
+        "billionLaughsInternalEntitiesRejected",
+    ),
+    (
+        "com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest",
+        "failedPropstatCollectionDoesNotPollute",
+    ),
+    (
+        "com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest",
+        "responseLevel404DiscardsWholeEntry",
+    ),
+    (
+        "com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest",
+        "malformedStatusLineTreatedAsFailure",
+    ),
+    (
+        "com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest",
+        "platformSaxFeatureCapabilityDeterminesParserPath",
     ),
 }
 
