@@ -135,6 +135,7 @@ fun PlayerRoute(
     val artworkPalette by viewModel.artworkPalette.collectAsStateWithLifecycle()
     val engineKind by viewModel.engineKind.collectAsStateWithLifecycle()
     val subtitleCenter by viewModel.subtitleCenter.collectAsStateWithLifecycle()
+    val playbackSource by viewModel.playbackSource.collectAsStateWithLifecycle()
     val audioSpectrumBridge = rememberAudioSpectrumBridge(viewModel.engine.audioBands)
 
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
@@ -191,6 +192,7 @@ fun PlayerRoute(
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
+    var showInfoPanel by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // 字幕中心（P2 切片一）：SAF 导入入口（真实 ACTION_OPEN_DOCUMENT）。
@@ -273,8 +275,8 @@ fun PlayerRoute(
         artworkPalette = artworkPalette,
         audioSpectrum = audioSpectrum,
         lifecycleStarted = lifecycleStarted,
-        controlsVisible = controlsVisible || showVisualEffectsSettings,
-        userInteracting = showVisualEffectsSettings ||
+        controlsVisible = controlsVisible || showVisualEffectsSettings || showInfoPanel,
+        userInteracting = showVisualEffectsSettings || showInfoPanel ||
             scrubPreview != null || speedPreview != null || levelPreview != null,
         powerSave = powerSaveMode,
         reduceMotion = reduceMotion,
@@ -499,6 +501,7 @@ fun PlayerRoute(
                             viewModel.engine.setSpeed(next)
                         },
                         onShowVisualEffects = { showVisualEffectsSettings = true },
+                        onShowInfo = { showInfoPanel = true },
                         onShowAudio = { showAudioDialog = true },
                         onShowSubtitle = { showSubtitleDialog = true },
                     )
@@ -554,7 +557,7 @@ fun PlayerRoute(
             engineKind = engineKind,
             rendererBackend = rendererBackend,
             lifecycleStarted = lifecycleStarted,
-            consumerVisible = controlsVisible || showVisualEffectsSettings,
+            consumerVisible = controlsVisible || showVisualEffectsSettings || showInfoPanel,
             permissionGranted = recordAudioPermissionGranted,
             explicitRequestArmed = recordAudioPermissionRequestArmed,
             requestAttemptedThisRoute = recordAudioPermissionRequested,
@@ -609,7 +612,7 @@ fun PlayerRoute(
         engineKind == EngineKind.MEDIA3 &&
         rendererBackend == RendererBackend.RUNTIME_SHADER &&
         lifecycleStarted &&
-        (controlsVisible || showVisualEffectsSettings) &&
+        (controlsVisible || showVisualEffectsSettings || showInfoPanel) &&
         (!recordAudioPermissionGranted || audioSpectrumStartupTimedOut)
 
     if (showVisualEffectsSettings) {
@@ -637,6 +640,24 @@ fun PlayerRoute(
             onRestoreDefaults = viewModel::resetPlayerVisualEffects,
             onDismiss = { showVisualEffectsSettings = false },
         )
+    }
+
+    if (showInfoPanel) {
+        PlayerVisualTheme(palette = visualState.chromePalette) {
+            PlayerInfoPanelSheet(
+                inputs = PlayerInfoPanelInputs(
+                    source = playbackSource,
+                    launchContainer = viewModel.launchContainerOrNull,
+                    preferences = preferences,
+                    engineKind = engineKind,
+                    uiState = engineState,
+                ),
+                onExpertModeChange = { expertMode ->
+                    viewModel.updateProfessionalInfo { it.copy(expertMode = expertMode) }
+                },
+                onDismiss = { showInfoPanel = false },
+            )
+        }
     }
 
     if (showAudioDialog) {
@@ -730,6 +751,7 @@ private fun PlayerControls(
     onSeek: (Long) -> Unit,
     onCycleSpeed: () -> Unit,
     onShowVisualEffects: () -> Unit,
+    onShowInfo: () -> Unit,
     onShowAudio: () -> Unit,
     onShowSubtitle: () -> Unit,
 ) {
@@ -772,6 +794,9 @@ private fun PlayerControls(
                     modifier = Modifier.weight(1f),
                 )
                 PlayerVisualEffectsEntry(onClick = onShowVisualEffects)
+                TextButton(onClick = onShowInfo) {
+                    Text(stringResource(R.string.player_info_entry), color = MaterialTheme.colorScheme.primary)
+                }
                 TextButton(onClick = onShowAudio) {
                     Text(stringResource(R.string.player_audio_tracks), color = MaterialTheme.colorScheme.primary)
                 }

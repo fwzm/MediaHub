@@ -74,4 +74,42 @@
     <string name="player_selected_option">● %1$s</string>
     <string name="player_subtitle_position">垂直位置：距底部 %1$.0f%%</string>
     <string name="player_subtitle_embedded_style">尊重内嵌 ASS/PGS 样式</string>
+    <string name="player_info_entry">信息</string>
+    <string name="player_info_expert_toggle">专业信息</string>
+    <string name="player_info_unknown">—</string>
+    <string name="player_info_source">源参数</string>
+    <string name="player_info_config">配置</string>
+    <string name="player_info_runtime">运行观测</string>
+    <string name="player_info_container">封装</string>
+    <string name="player_info_video_codec">视频编码</string>
+    <string name="player_info_audio_codec">音频编码</string>
+    <string name="player_info_bitrate">码率</string>
+    <string name="player_info_resolution">分辨率</string>
+    <string name="player_info_frame_rate">帧率</string>
+    <string name="player_info_hdr">HDR</string>
+    <string name="player_info_playback_mode">播放方式</string>
+    <string name="player_info_engine_mode">内核选择</string>
+    <string name="player_info_hardware_decoding">解码设置（硬解偏好）</string>
+    <string name="player_info_prefer_direct_play">优先直连</string>
+    <string name="player_info_bitrate_cap">码率上限</string>
+    <string name="player_info_actual_engine">实际内核</string>
+    <string name="player_info_actual_decoder">实际解码器</string>
+    <string name="player_info_actual_resolution">实际分辨率</string>
+    <string name="player_info_audio_output">音频输出</string>
+    <string name="player_info_audio_track_count">音轨</string>
+    <string name="player_info_subtitle_track_count">字幕</string>
+    <string name="player_info_on">开</string>
+    <string name="player_info_off">关</string>
+    <string name="player_info_unlimited">不限</string>
+    <string name="player_info_mode_direct_play">直连播放</string>
+    <string name="player_info_mode_direct_stream">直流转码</string>
+    <string name="player_info_mode_transcode">服务端转码</string>
+    <string name="player_info_mode_unsupported">无法播放</string>
+    <string name="player_info_engine_auto">自动（Media3→mpv）</string>
+    <string name="player_info_engine_media3" translatable="false">Media3</string>
+    <string name="player_info_engine_mpv" translatable="false">mpv</string>
+    <string name="player_info_hdr10" translatable="false">HDR10</string>
+    <string name="player_info_hdr10_plus" translatable="false">HDR10+</string>
+    <string name="player_info_hlg" translatable="false">HLG</string>
+    <string name="player_info_dolby_vision" translatable="false">Dolby Vision</string>
 </resources>

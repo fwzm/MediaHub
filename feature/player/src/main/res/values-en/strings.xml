@@ -74,4 +74,36 @@
     <string name="player_subtitle_offset_mpv_only">Offset is only supported by the mpv engine</string>
     <string name="player_subtitle_offset_seconds" formatted="false">%+.1f s</string>
     <string name="player_subtitle_external_active">Active</string>
+    <string name="player_info_entry">Info</string>
+    <string name="player_info_expert_toggle">Professional info</string>
+    <string name="player_info_unknown">—</string>
+    <string name="player_info_source">Source</string>
+    <string name="player_info_config">Configuration</string>
+    <string name="player_info_runtime">Runtime</string>
+    <string name="player_info_container">Container</string>
+    <string name="player_info_video_codec">Video codec</string>
+    <string name="player_info_audio_codec">Audio codec</string>
+    <string name="player_info_bitrate">Bitrate</string>
+    <string name="player_info_resolution">Resolution</string>
+    <string name="player_info_frame_rate">Frame rate</string>
+    <string name="player_info_hdr">HDR</string>
+    <string name="player_info_playback_mode">Playback mode</string>
+    <string name="player_info_engine_mode">Engine preference</string>
+    <string name="player_info_hardware_decoding">Decoding preference (hardware)</string>
+    <string name="player_info_prefer_direct_play">Prefer Direct Play</string>
+    <string name="player_info_bitrate_cap">Bitrate cap</string>
+    <string name="player_info_actual_engine">Actual engine</string>
+    <string name="player_info_actual_decoder">Actual decoder</string>
+    <string name="player_info_actual_resolution">Actual resolution</string>
+    <string name="player_info_audio_output">Audio output</string>
+    <string name="player_info_audio_track_count">Audio tracks</string>
+    <string name="player_info_subtitle_track_count">Subtitles</string>
+    <string name="player_info_on">On</string>
+    <string name="player_info_off">Off</string>
+    <string name="player_info_unlimited">Unlimited</string>
+    <string name="player_info_mode_direct_play">Direct play</string>
+    <string name="player_info_mode_direct_stream">Direct stream</string>
+    <string name="player_info_mode_transcode">Server transcode</string>
+    <string name="player_info_mode_unsupported">Unsupported</string>
+    <string name="player_info_engine_auto">Auto (Media3→mpv)</string>
 </resources>

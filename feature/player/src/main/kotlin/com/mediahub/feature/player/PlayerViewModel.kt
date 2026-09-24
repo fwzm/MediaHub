@@ -18,7 +18,9 @@ import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
+import com.mediahub.model.PlaybackSource
 import com.mediahub.model.PlayerVisualEffectsPreferences
+import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.SubtitleFormats
 import com.mediahub.player.engine.EnginePreferenceHistory
@@ -126,6 +128,10 @@ class PlayerViewModel @Inject constructor(
     private val launchRuntime: String = savedStateHandle["runtime"] ?: ""
     private val launchPoster: String = savedStateHandle["poster"] ?: ""
     private val launchContainer: String = savedStateHandle["container"] ?: ""
+
+    /** 启动快照携带的容器（详情页直传；可能为空串=未提供）。 */
+    val launchContainerOrNull: String?
+        get() = launchContainer.takeIf { it.isNotBlank() }
     /** 最新偏好缓存（modeProvider 同步读取，避免 play() 挂起读 DataStore）。 */
     private var latestPreferences: com.mediahub.model.UserPreferences = com.mediahub.model.UserPreferences()
 
@@ -245,6 +251,20 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 专业/精简切换（设置页或播放面板内快速切换）：只改信息面板密度，
+     * 不重建播放、不切换内核、不改画质。
+     */
+    fun updateProfessionalInfo(
+        transform: (ProfessionalInfoPreferences) -> ProfessionalInfoPreferences,
+    ) {
+        viewModelScope.launch {
+            userPreferencesRepository.update {
+                it.copy(professionalInfo = transform(it.professionalInfo))
+            }
+        }
+    }
+
     /** 内嵌字幕轨手动选择：标记本会话手动优先，迟到的发现/记忆不再覆盖。 */
     fun onEmbeddedSubtitleSelected(selection: TrackSelection?) {
         engine.selectSubtitleTrack(selection)
@@ -346,6 +366,13 @@ class PlayerViewModel @Inject constructor(
     private val _resolveState = MutableStateFlow<ResolveState>(ResolveState.Resolving)
     val resolveState: StateFlow<ResolveState> = _resolveState.asStateFlow()
 
+    /**
+     * 本次 resolve 到的播放源（源参数面板数据源，PlaybackInfo 语义）。
+     * null=尚未解析成功；重试解析时先清空，面板相应字段回落为"未知"。
+     */
+    private val _playbackSource = MutableStateFlow<PlaybackSource?>(null)
+    val playbackSource: StateFlow<PlaybackSource?> = _playbackSource.asStateFlow()
+
     /** 服务器显示名 + 图标（Overlay 展示，Item 8）。 */
     private val _serverDisplayName = MutableStateFlow<String?>(null)
     val serverDisplayName: StateFlow<String?> = _serverDisplayName.asStateFlow()
@@ -422,6 +449,7 @@ class PlayerViewModel @Inject constructor(
     fun resolve() {
         viewModelScope.launch {
             _resolveState.value = ResolveState.Resolving
+            _playbackSource.value = null
             val trace = PlaybackStartupTrace(
                 traceId = PlaybackStartupTrace.newTraceId(),
                 serverId = serverId,
@@ -475,6 +503,7 @@ class PlayerViewModel @Inject constructor(
                     PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
                 )
                 trace.record(PlaybackStartupTrace.Milestone.SOURCE_RESOLVED)
+                _playbackSource.value = source
                 logger.i(LogTag.PLAYER, "StartupTrace " + trace.summary())
                 engine.play(
                     PlaybackSession(

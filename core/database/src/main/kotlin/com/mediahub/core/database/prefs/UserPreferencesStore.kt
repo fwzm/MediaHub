@@ -15,6 +15,7 @@ import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlayerGestures
 import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.PlayerVisualPreset
+import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
 import com.mediahub.model.VisualPerformanceMode
@@ -59,6 +60,7 @@ class UserPreferencesStore internal constructor(
             writeSubtitleStyle(prefs, updated.subtitleStyle)
             writeGestures(prefs, updated.gestures)
             writePlayerVisualEffects(prefs, updated.playerVisualEffects)
+            writeProfessionalInfo(prefs, updated.professionalInfo)
         }
     }
 
@@ -93,6 +95,7 @@ class UserPreferencesStore internal constructor(
             subtitleStyle = readSubtitleStyle(prefs),
             gestures = readGestures(prefs),
             playerVisualEffects = readPlayerVisualEffects(prefs),
+            professionalInfo = readProfessionalInfo(prefs),
         )
 
     private fun readSubtitleStyle(prefs: Preferences): SubtitleStyle =
@@ -177,6 +180,19 @@ class UserPreferencesStore internal constructor(
         prefs[Keys.VISUAL_PERFORMANCE_MODE] = normalized.performanceMode.name
     }
 
+    private fun readProfessionalInfo(prefs: Preferences): ProfessionalInfoPreferences =
+        ProfessionalInfoPreferences(
+            expertMode = prefs[Keys.PROFESSIONAL_INFO_EXPERT_MODE]
+                ?: ProfessionalInfoPreferences.Default.expertMode,
+        )
+
+    private fun writeProfessionalInfo(
+        prefs: MutablePreferences,
+        professionalInfo: ProfessionalInfoPreferences,
+    ) {
+        prefs[Keys.PROFESSIONAL_INFO_EXPERT_MODE] = professionalInfo.expertMode
+    }
+
     private inline fun <reified T : Enum<T>> enumValueOrNull(stored: String): T? =
         enumValues<T>().firstOrNull { value -> value.name == stored }
 
@@ -214,5 +230,6 @@ class UserPreferencesStore internal constructor(
         val VISUAL_FOLLOW_ARTWORK = booleanPreferencesKey("player_visual_effects_follow_artwork_colors")
         val VISUAL_AUDIO_REACTIVE = booleanPreferencesKey("player_visual_effects_audio_reactive")
         val VISUAL_PERFORMANCE_MODE = stringPreferencesKey("player_visual_effects_performance_mode")
+        val PROFESSIONAL_INFO_EXPERT_MODE = booleanPreferencesKey("player_professional_info_expert_mode")
     }
 }

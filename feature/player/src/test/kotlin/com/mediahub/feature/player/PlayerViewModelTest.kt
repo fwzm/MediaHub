@@ -374,6 +374,61 @@ class PlayerViewModelTest {
             }
         }
 
+    // ---- D：播放源暴露给专业信息面板 + 专业/精简开关持久化 ----
+    @Test
+    fun `resolved source is exposed for info panel and professional toggle persists`() = runTest(dispatcher) {
+        val source = PlaybackSource(
+            url = "http://media/stream.mkv",
+            container = "mkv",
+            videoCodec = "h264",
+            bitrate = 8_000_000L,
+            width = 1920,
+            height = 1080,
+        )
+        val prefs = FakeUserPreferences()
+        val engine = FakeEngine()
+        val vm = PlayerViewModel(
+            savedStateHandle = savedState("m1"),
+            serverStore = FakeServerStore(embyServer()),
+            progressStore = FakeProgressStore(resume = null),
+            registry = FakeRegistry(
+                detail = FakeDetail(
+                    MediaItem(
+                        serverId = "srv-1", id = "m1", type = MediaType.MOVIE,
+                        title = "电影A", container = "mkv",
+                    )
+                ),
+                playback = FakePlayback(source),
+            ),
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
+            userPreferencesRepository = prefs,
+            artworkPaletteLoader = NoArtworkPalette,
+            logger = noOpLogger,
+        )
+        try {
+            runCurrent()
+
+            // 面板"源参数"段数据源：resolve 成功后 playbackSource 发出本次实际源
+            assertEquals(source, vm.playbackSource.value)
+            // 产品默认专业模式
+            assertEquals(true, vm.preferences.value?.professionalInfo?.expertMode)
+
+            // 面板内快速切换：只改偏好密度字段，不影响播放状态
+            vm.updateProfessionalInfo { it.copy(expertMode = false) }
+            runCurrent()
+
+            assertEquals(false, vm.preferences.value?.professionalInfo?.expertMode)
+            assertEquals(false, prefs.state.value.professionalInfo.expertMode)
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+            assertEquals(source, vm.playbackSource.value)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
     // ---- fakes ----
     private val NoArtworkPalette = ArtworkPaletteLoader { _, _ -> null }
 
