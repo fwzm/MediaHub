@@ -62,3 +62,20 @@
 - B 证据包（接收核验 10/10）：`D:\deepseek_test\mh-a-round\a4-evidence\`（原 zip 32f88421… 保留在 mh-b-review）
 - A4 各分支测试 XML：各 worktree build/test-results（a4sub/a4net/a4joint）
 - 新 CI：PR #24 runs（以 head aa633dba 的 run 为唯一有效）
+
+## 7. 勘误（2026-09-25 补记，B 复审必读）
+
+1. **工作区遗留提交事故**：本文档初版所列 head aa633dba **不含**字幕归属世代修复
+   （PlayerViewModel 会话代 +44 行）与其回归测试、P1 测试适配——它们停留在工作区
+   未提交（历次 commit 只 add 了其他文件），导致本地门禁绿（Gradle 编译工作区）
+   而 run 35997370601 三 job 编译失败。更正提交：**26df88e**（归属世代+回归+P1 适配）
+   + **77215db**（androidTest 参数适配）。本包 finding 对照表中归属世代一行的
+   修复 SHA 以 26df88e 为准。
+2. **审查对象更正**：冻结 head = **77215dbd1ed39a98ff26b3f1c59e82ff807e309a**
+   （生产代码面 = 26df88e；77215db 仅 androidTest 参数 + 本文档）。
+   PR #24 初版的 aa633dba 表述作废。
+3. **CI**：run **36065571593** @ 77215db **三 job SUCCESS**（API32/36 视觉含
+   parser 8 条 mandatory 门禁 + build 全步）。35997370601 失败为上述事故，留档不删除。
+4. **APK 可重现性**：`a87b4eb7…630f`（129,660,832 字节）在 77215db 树上
+   --rerun-tasks --no-build-cache 强制重跑 SHA 一致（4b7dc85 时构建亦含工作区
+   归属世代代码，故一致）。
