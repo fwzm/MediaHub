@@ -529,6 +529,7 @@ class MpvPlaybackEngineTest {
         override fun setPropertyDouble(name: String, value: Double) = Unit
         override fun getPropertyBoolean(name: String): Boolean { reads++; return false }
         override fun getPropertyDouble(name: String): Double { reads++; return if (name == "time-pos") position else 60.0 }
+        override fun getPropertyString(name: String): String? { reads++; return null }
         override fun destroy() {
             destroys++
             if (::observer.isInitialized) observer.event(MpvInstance.Event.END_FILE)

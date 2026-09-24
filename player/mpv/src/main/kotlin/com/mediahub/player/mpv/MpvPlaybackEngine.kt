@@ -343,7 +343,11 @@ class MpvPlaybackEngine internal constructor(
         var accepted = false
         withNative { _, m ->
             m.setPropertyDouble("sub-delay", clamped / 1000.0)
-            accepted = true
+            // A4 成功状态确认：命令调用完成 ≠ 生效——回读属性对值（上游
+            // native 层业务错误码不回传，见 docs B 交接；读回值才可写状态）。
+            accepted = m.getPropertyDouble("sub-delay")?.let {
+                kotlin.math.abs(it - clamped / 1000.0) < 0.001
+            } == true
         }
         if (accepted) {
             synchronized(stateLock) { subtitleOffsetMsValue = clamped }
@@ -356,21 +360,37 @@ class MpvPlaybackEngine internal constructor(
 
     override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
         // 落地缓存：本地路径原样；http(s)/content:// 先下载/拷贝到 cache（同 origin 才带凭据头）。
-        val source = synchronized(stateLock) { current?.session?.source }
+        val session = synchronized(stateLock) { current?.session }
         val localPath = subtitleCache.localPathFor(
             uri = subtitle.uri,
-            mediaUrl = source?.url ?: "",
-            sessionHeaders = source?.let { buildHeaders(it) } ?: emptyMap(),
+            mediaUrl = session?.source?.url ?: "",
+            // scopeKey：媒体版本指纹（缓存隔离键）。serverId/itemId 组合为 A4 编译占位，
+            // 主代理接线时替换为真实媒体版本指纹；无会话时用固定串保持非空契约。
+            scopeKey = session?.let { "${it.serverId}/${it.itemId}" } ?: "no-session",
+            sessionHeaders = session?.let { buildHeaders(it.source) } ?: emptyMap(),
         ) ?: run {
             logger.w(LogTag.PLAYER, "mpv 外挂字幕落地失败 name=${subtitle.name}")
             return false
         }
+        // A4 成功状态确认：sub-add 命令完成 ≠ 加载成功（上游 native 层 mpv_command
+        // 业务错误码不回传——B 审查 upstream 证据）。以轨道表回读确认：
+        // 新轨道出现且类型为 sub 才算成功，未确认成功不得向上层报成功
+        // （上层据此写匹配记忆）。
         var accepted = false
         withNative { _, m ->
+            val before = m.getPropertyDouble("track-list/count") ?: -1.0
             m.command(arrayOf("sub-add", localPath, "select"))
-            accepted = true
+            val after = m.getPropertyDouble("track-list/count")
+            if (after != null && after > before) {
+                val lastType = m.getPropertyString("track-list/${after.toInt() - 1}/type")
+                accepted = lastType == "sub"
+            }
         }
-        if (accepted) logger.i(LogTag.PLAYER, "mpv 外挂字幕 sub-add path=$localPath")
+        if (accepted) {
+            logger.i(LogTag.PLAYER, "mpv 外挂字幕 sub-add 已确认（track-list 新 sub 轨）path=$localPath")
+        } else {
+            logger.w(LogTag.PLAYER, "mpv 外挂字幕 sub-add 未确认成功（轨道表无新 sub 轨）path=$localPath")
+        }
         return accepted
     }
 

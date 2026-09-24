@@ -57,13 +57,14 @@ class MpvSubtitleTest {
         contentResolver = { _, _ -> false },
         logger = NoLogger,
     ) {
-        val calls = mutableListOf<Triple<String, String, Map<String, String>>>()
+        val calls = mutableListOf<Array<String>>()
         override suspend fun localPathFor(
             uri: String,
             mediaUrl: String,
+            scopeKey: String,
             sessionHeaders: Map<String, String>,
         ): String? {
-            calls.add(Triple(uri, mediaUrl, sessionHeaders))
+            calls.add(arrayOf(uri, mediaUrl, scopeKey))
             return result
         }
     }
@@ -93,17 +94,35 @@ class MpvSubtitleTest {
         lateinit var observer: MpvInstance.Observer
         val commands = mutableListOf<Array<String>>()
         val doubles = mutableListOf<Pair<String, Double>>()
+        /** A4 成功确认回读状态：轨道数与新轨类型可编程（默认模拟成功加载）。 */
+        var trackCount = 0
+        var newTrackType: String? = "sub"
+        var subDelayValue: Double? = null
+        /** 模拟 mpv 拒绝 sub-delay 写入：set 不生效（回读保持旧值）。 */
+        var rejectSubDelay = false
         override fun addObserver(observer: MpvInstance.Observer) { this.observer = observer }
         override fun setOptionString(name: String, value: String) = Unit
         override fun init() = Unit
         override fun attachSurface(surface: android.view.Surface) = Unit
         override fun detachSurface() = Unit
         override fun observeProperty(name: String, format: MpvInstance.Format) = Unit
-        override fun command(args: Array<String>) { commands.add(args) }
+        override fun command(args: Array<String>) {
+            commands.add(args)
+            if (args.first() == "sub-add") trackCount++
+        }
         override fun setPropertyBoolean(name: String, value: Boolean) = Unit
-        override fun setPropertyDouble(name: String, value: Double) { doubles.add(name to value) }
+        override fun setPropertyDouble(name: String, value: Double) {
+            doubles.add(name to value)
+            if (name == "sub-delay" && !rejectSubDelay) subDelayValue = value
+        }
         override fun getPropertyBoolean(name: String): Boolean = false
-        override fun getPropertyDouble(name: String): Double = 0.0
+        override fun getPropertyDouble(name: String): Double = when (name) {
+            "track-list/count" -> trackCount.toDouble()
+            "sub-delay" -> subDelayValue ?: 0.0
+            else -> 0.0
+        }
+        override fun getPropertyString(name: String): String? =
+            if (name.startsWith("track-list/") && name.endsWith("/type")) newTrackType else null
         override fun destroy() = Unit
     }
 
@@ -142,7 +161,8 @@ class MpvSubtitleTest {
 
     @Test
     fun `local path goes straight to sub-add select`() = runTest {
-        val f = SubtitleFixture(backgroundScope, RecordingCache("/data/subs/movie.zh.srt"))
+        val recording = RecordingCache("/data/subs/movie.zh.srt")
+        val f = SubtitleFixture(backgroundScope, recording)
         f.engine.play(session("https://media.example/movie.mkv"))
         runCurrent()
 
@@ -151,6 +171,8 @@ class MpvSubtitleTest {
         assertTrue(ok)
         val subAdd = f.instances.single().commands.first { it.first() == "sub-add" }
         assertEquals(listOf("sub-add", "/data/subs/movie.zh.srt", "select"), subAdd.toList())
+        // A4 契约：引擎传给缓存的 scopeKey（媒体版本指纹）必须非空
+        assertTrue("引擎必须传入非空 scopeKey", recording.calls.all { it[2].isNotBlank() })
     }
 
     @Test
@@ -163,6 +185,34 @@ class MpvSubtitleTest {
 
         assertFalse(ok)
         assertFalse(f.instances.single().commands.any { it.first() == "sub-add" })
+    }
+
+    // ---- A4：成功状态确认（命令完成 ≠ 加载成功） ----
+
+    @Test
+    fun `sub-add without new sub track in track-list reports failure`() = runTest {
+        val f = SubtitleFixture(backgroundScope, RecordingCache("/data/subs/movie.zh.srt"))
+        f.engine.play(session("https://media.example/movie.mkv"))
+        runCurrent()
+        // 模拟 mpv 拒绝加载：轨道数不增长（或新轨非 sub）
+        f.instances.single().newTrackType = "audio"
+
+        val ok = f.engine.loadExternalSubtitle(localSub())
+
+        assertFalse("轨道表无新 sub 轨时不得报成功（上游错误码不回传，以回读为准）", ok)
+    }
+
+    @Test
+    fun `offset value mismatch on readback reports failure`() = runTest {
+        val f = SubtitleFixture(backgroundScope, RecordingCache("/x"))
+        f.engine.play(session("https://media.example/movie.mkv"))
+        runCurrent()
+        // 模拟 mpv 拒绝 sub-delay 写入：set 不生效，回读保持 0（与请求 1.2s 不符）
+        f.instances.single().rejectSubDelay = true
+
+        val ok = f.engine.setSubtitleOffset(1_200)
+
+        assertFalse("偏移回读不符时不得报成功", ok)
     }
 
     @Test
@@ -204,6 +254,7 @@ class MpvSubtitleTest {
         val path = cache.localPathFor(
             uri = subtitleUrl,
             mediaUrl = webServer.url("/dav/movie.mkv").toString(),
+            scopeKey = "test-scope",
             sessionHeaders = mapOf("Authorization" to "Basic dXNlcjpwYXNz"),
         )
 
@@ -213,7 +264,12 @@ class MpvSubtitleTest {
         assertTrue(File(path).length() > 0)
         // 二次落地命中缓存，不再产生新请求
         webServer.enqueue(MockResponse().setResponseCode(500))
-        val again = cache.localPathFor(subtitleUrl, webServer.url("/dav/movie.mkv").toString(), emptyMap())
+        val again = cache.localPathFor(
+            subtitleUrl,
+            webServer.url("/dav/movie.mkv").toString(),
+            "test-scope",
+            emptyMap(),
+        )
         assertEquals(path, again)
     }
 
@@ -230,6 +286,7 @@ class MpvSubtitleTest {
         val path = cache.localPathFor(
             uri = webServer.url("/dav/movie.srt").toString(),
             mediaUrl = "https://other-server.example/movie.mkv",
+            scopeKey = "test-scope",
             sessionHeaders = mapOf("Authorization" to "Basic dXNlcjpwYXNz"),
         )
 
@@ -247,9 +304,9 @@ class MpvSubtitleTest {
             logger = NoLogger,
         )
         // file:// 与 POSIX 绝对路径：纯字符串解析，不触碰文件系统
-        assertEquals("/data/subs/a.srt", cache.localPathFor("/data/subs/a.srt", "https://m/x.mkv", emptyMap()))
-        assertEquals("/data/subs/a.srt", cache.localPathFor("file:///data/subs/a.srt", "https://m/x.mkv", emptyMap()))
+        assertEquals("/data/subs/a.srt", cache.localPathFor("/data/subs/a.srt", "https://m/x.mkv", "test-scope", emptyMap()))
+        assertEquals("/data/subs/a.srt", cache.localPathFor("file:///data/subs/a.srt", "https://m/x.mkv", "test-scope", emptyMap()))
         // 相对路径不可直挂（mpv 无法解析），如实返回 null
-        assertNull(cache.localPathFor("subs/a.srt", "https://m/x.mkv", emptyMap()))
+        assertNull(cache.localPathFor("subs/a.srt", "https://m/x.mkv", "test-scope", emptyMap()))
     }
 }
