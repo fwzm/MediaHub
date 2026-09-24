@@ -94,17 +94,35 @@ class MpvSubtitleTest {
         lateinit var observer: MpvInstance.Observer
         val commands = mutableListOf<Array<String>>()
         val doubles = mutableListOf<Pair<String, Double>>()
+        /** A4 成功确认回读状态：轨道数与新轨类型可编程（默认模拟成功加载）。 */
+        var trackCount = 0
+        var newTrackType: String? = "sub"
+        var subDelayValue: Double? = null
+        /** 模拟 mpv 拒绝 sub-delay 写入：set 不生效（回读保持旧值）。 */
+        var rejectSubDelay = false
         override fun addObserver(observer: MpvInstance.Observer) { this.observer = observer }
         override fun setOptionString(name: String, value: String) = Unit
         override fun init() = Unit
         override fun attachSurface(surface: android.view.Surface) = Unit
         override fun detachSurface() = Unit
         override fun observeProperty(name: String, format: MpvInstance.Format) = Unit
-        override fun command(args: Array<String>) { commands.add(args) }
+        override fun command(args: Array<String>) {
+            commands.add(args)
+            if (args.first() == "sub-add") trackCount++
+        }
         override fun setPropertyBoolean(name: String, value: Boolean) = Unit
-        override fun setPropertyDouble(name: String, value: Double) { doubles.add(name to value) }
+        override fun setPropertyDouble(name: String, value: Double) {
+            doubles.add(name to value)
+            if (name == "sub-delay" && !rejectSubDelay) subDelayValue = value
+        }
         override fun getPropertyBoolean(name: String): Boolean = false
-        override fun getPropertyDouble(name: String): Double = 0.0
+        override fun getPropertyDouble(name: String): Double = when (name) {
+            "track-list/count" -> trackCount.toDouble()
+            "sub-delay" -> subDelayValue ?: 0.0
+            else -> 0.0
+        }
+        override fun getPropertyString(name: String): String? =
+            if (name.startsWith("track-list/") && name.endsWith("/type")) newTrackType else null
         override fun destroy() = Unit
     }
 
@@ -167,6 +185,34 @@ class MpvSubtitleTest {
 
         assertFalse(ok)
         assertFalse(f.instances.single().commands.any { it.first() == "sub-add" })
+    }
+
+    // ---- A4：成功状态确认（命令完成 ≠ 加载成功） ----
+
+    @Test
+    fun `sub-add without new sub track in track-list reports failure`() = runTest {
+        val f = SubtitleFixture(backgroundScope, RecordingCache("/data/subs/movie.zh.srt"))
+        f.engine.play(session("https://media.example/movie.mkv"))
+        runCurrent()
+        // 模拟 mpv 拒绝加载：轨道数不增长（或新轨非 sub）
+        f.instances.single().newTrackType = "audio"
+
+        val ok = f.engine.loadExternalSubtitle(localSub())
+
+        assertFalse("轨道表无新 sub 轨时不得报成功（上游错误码不回传，以回读为准）", ok)
+    }
+
+    @Test
+    fun `offset value mismatch on readback reports failure`() = runTest {
+        val f = SubtitleFixture(backgroundScope, RecordingCache("/x"))
+        f.engine.play(session("https://media.example/movie.mkv"))
+        runCurrent()
+        // 模拟 mpv 拒绝 sub-delay 写入：set 不生效，回读保持 0（与请求 1.2s 不符）
+        f.instances.single().rejectSubDelay = true
+
+        val ok = f.engine.setSubtitleOffset(1_200)
+
+        assertFalse("偏移回读不符时不得报成功", ok)
     }
 
     @Test

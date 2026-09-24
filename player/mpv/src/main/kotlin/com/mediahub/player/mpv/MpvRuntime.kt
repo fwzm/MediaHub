@@ -32,6 +32,7 @@ internal interface MpvInstance {
     fun setPropertyDouble(name: String, value: Double)
     fun getPropertyBoolean(name: String): Boolean?
     fun getPropertyDouble(name: String): Double?
+    fun getPropertyString(name: String): String?
     fun destroy()
 }
 
@@ -79,6 +80,7 @@ internal fun createMpvInstance(context: Context): MpvInstance {
         override fun setPropertyDouble(name: String, value: Double) { delegate.setPropertyDouble(name, value) }
         override fun getPropertyBoolean(name: String) = delegate.getPropertyBoolean(name)
         override fun getPropertyDouble(name: String) = delegate.getPropertyDouble(name)
+        override fun getPropertyString(name: String) = delegate.getPropertyString(name)
         override fun destroy() = delegate.destroy()
     }
 }
