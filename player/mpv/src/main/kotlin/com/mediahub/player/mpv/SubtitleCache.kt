@@ -72,7 +72,18 @@ internal open class SubtitleCache(
             uri.startsWith("content://") -> {
                 val target = File(dir, scopedFileName(uri, scopeKey))
                 if (!target.exists() || target.length() == 0L) {
-                    if (!contentResolver.copy(Uri.parse(uri), target)) return null
+                    // A4-C3：先写 .part 再 rename（对齐 http 路径）——SAF 流中途失败时
+                    // 半成品不再以正式文件名残留，下次请求不会被 exists&&len>0 误复用。
+                    val part = File(dir, target.name + ".part")
+                    val copied = runCatching {
+                        part.delete()
+                        contentResolver.copy(Uri.parse(uri), part)
+                    }.getOrDefault(false)
+                    if (!copied || !part.renameTo(target) || target.length() == 0L) {
+                        part.delete()
+                        target.delete()
+                        return null
+                    }
                 }
                 target.takeIf { it.length() > 0L }?.absolutePath
             }
