@@ -89,4 +89,34 @@ class A4SubtitleCacheAtomicTest {
         assertEquals("两次都执行了真实拷贝（无半成品复用）", 2, calls)
         assertTrue("落地后无 .part 残留", subtitlesDir().listFiles().orEmpty().none { it.name.endsWith(".part") })
     }
+
+    // ---- http 读取上限（A4-C4） ----
+
+    @Test
+    fun `oversized http body beyond 4 MiB fails with no residue`() = runBlocking {
+        cacheRoot = tmp.newFolder()
+        server.enqueue(
+            MockResponse().setBody(okio.Buffer().write(ByteArray(5 * 1024 * 1024) { 0x78 })) // 5 MiB > 4 MiB 上限
+        )
+        val subject = SubtitleCache(
+            cacheDir = requireNotNull(cacheRoot),
+            client = OkHttpClient(),
+            contentResolver = { _, _ -> false },
+            logger = StdoutLogger(),
+        )
+
+        val path = subject.localPathFor(
+            uri = server.url("/dav/huge.vtt").toString(),
+            mediaUrl = server.url("/dav/movie.mkv").toString(),
+            scopeKey = "a4-cap",
+            sessionHeaders = emptyMap(),
+        )
+
+        assertNull("超 4 MiB 上限必须失败返回 null", path)
+        val files = subtitlesDir().listFiles().orEmpty()
+        assertTrue(
+            "超限失败后无任何残留（正式或 .part）：${files.map { it.name to it.length() }}",
+            files.none { it.length() > 0L },
+        )
+    }
 }

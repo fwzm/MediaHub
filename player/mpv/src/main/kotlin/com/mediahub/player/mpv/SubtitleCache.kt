@@ -109,14 +109,33 @@ internal open class SubtitleCache(
             if (!response.isSuccessful) {
                 throw IOException("subtitle download HTTP ${response.code}")
             }
-            val body = response.body ?: throw IOException("subtitle download empty body")
-            val tmp = File(target.parentFile, target.name + ".part")
-            tmp.outputStream().use { out -> body.byteStream().copyTo(out) }
+        val body = response.body ?: throw IOException("subtitle download empty body")
+        val tmp = File(target.parentFile, target.name + ".part")
+        try {
+            tmp.outputStream().use { out ->
+                // A4-C4：下载复制循环上限 4 MiB——字幕不可能超过该量级，超限视为
+                // 服务端异常/攻击面，立即失败；任何复制中途异常也统一清理 .part。
+                val input = body.byteStream()
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                var total = 0L
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    out.write(buffer, 0, read)
+                    total += read
+                    if (total > MAX_SUBTITLE_BYTES) {
+                        throw IOException("subtitle exceeds ${MAX_SUBTITLE_BYTES / (1024 * 1024)} MiB cap ($total bytes)")
+                    }
+                }
+            }
             if (!tmp.renameTo(target)) {
-                tmp.delete()
                 throw IOException("subtitle cache rename failed")
             }
+        } catch (t: Throwable) {
+            tmp.delete()
+            throw t
         }
+    }
     }
 
     /**
@@ -179,5 +198,8 @@ internal open class SubtitleCache(
 
     private companion object {
         const val DIR = "subtitles"
+
+        /** 单个字幕缓存文件上限（4 MiB）：字幕文体量远小于此，超限按异常处理。 */
+        const val MAX_SUBTITLE_BYTES = 4L * 1024 * 1024
     }
 }
