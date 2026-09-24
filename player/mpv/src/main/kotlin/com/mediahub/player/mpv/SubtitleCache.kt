@@ -6,10 +6,16 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.OriginScopedCredentialInterceptor
 import java.io.File
 import java.io.IOException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 
 /**
  * mpv 外挂字幕落地缓存（P2 字幕中心切片一）。
@@ -53,14 +59,14 @@ internal open class SubtitleCache(
         }
     }
 
-    private fun resolve(
+    private suspend fun resolve(
         uri: String,
         mediaUrl: String,
         scopeKey: String,
         sessionHeaders: Map<String, String>,
     ): String? {
         val dir = File(cacheDir, DIR).apply { mkdirs() }
-        return when {
+        val result = when {
             uri.startsWith("http://") || uri.startsWith("https://") -> {
                 val target = File(dir, scopedFileName(uri, scopeKey))
                 if (!target.exists() || target.length() == 0L) {
@@ -93,49 +99,94 @@ internal open class SubtitleCache(
             // 本地绝对路径（Local Provider；isAbsolute 兼容 POSIX/Windows 语义）
             else -> uri.takeIf { it.startsWith("/") || java.io.File(it).isAbsolute }
         }
+        // 成功落地（非 null 且非本地直挂场景变化）后执行失效策略
+        if (result != null && (uri.startsWith("http://") || uri.startsWith("https://") || uri.startsWith("content://"))) {
+            enforceCacheBounds(dir)
+        }
+        return result
     }
 
-    private fun download(
+    /**
+     * 下载（A4-C5 协程取消可中断）：阻塞 execute 在专用桥接守护线程执行
+     * （对齐 provider/webdav WebDavCallBridge 模式的本地实现）；协程取消 →
+     * `invokeOnCancellation { call.cancel() }` → 真实打断等头/读体，socket
+     * 不再等超时。响应所有权在桥接线程内 use{} 关闭；.part 在任何退出路径清理。
+     */
+    private suspend fun download(
         uri: String,
         mediaUrl: String,
         sessionHeaders: Map<String, String>,
         target: File,
-    ) {
+    ) = suspendCancellableCoroutine { cont ->
         // 凭据作用域：仅同 origin 媒体允许携带会话头（WebDAV Basic 场景）。
         val attachHeaders = if (sameOrigin(mediaUrl, uri)) sessionHeaders else emptyMap()
         val builder = Request.Builder().url(uri)
         attachHeaders.forEach { (k, v) -> builder.header(k, v) }
-        client.newCall(builder.build()).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("subtitle download HTTP ${response.code}")
-            }
-        val body = response.body ?: throw IOException("subtitle download empty body")
         val tmp = File(target.parentFile, target.name + ".part")
-        try {
-            tmp.outputStream().use { out ->
-                // A4-C4：下载复制循环上限 4 MiB——字幕不可能超过该量级，超限视为
-                // 服务端异常/攻击面，立即失败；任何复制中途异常也统一清理 .part。
-                val input = body.byteStream()
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                var total = 0L
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    out.write(buffer, 0, read)
-                    total += read
-                    if (total > MAX_SUBTITLE_BYTES) {
-                        throw IOException("subtitle exceeds ${MAX_SUBTITLE_BYTES / (1024 * 1024)} MiB cap ($total bytes)")
+        val call = client.newCall(builder.build())
+        cont.invokeOnCancellation { call.cancel() }
+        BRIDGE_EXECUTOR.execute {
+            // 排队后被取消（CallerRuns 防御路径）：不发起网络，直接让出
+            if (!cont.isActive) return@execute
+            try {
+                call.execute().use { response ->
+                    if (!response.isSuccessful) {
+                        throw IOException("subtitle download HTTP ${response.code}")
+                    }
+                    val body = response.body ?: throw IOException("subtitle download empty body")
+                    tmp.outputStream().use { out ->
+                        // A4-C4：下载复制循环上限 4 MiB——字幕不可能超过该量级，
+                        // 超限视为服务端异常/攻击面，立即失败。
+                        val input = body.byteStream()
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var total = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            out.write(buffer, 0, read)
+                            total += read
+                            if (total > MAX_SUBTITLE_BYTES) {
+                                throw IOException("subtitle exceeds ${MAX_SUBTITLE_BYTES / (1024 * 1024)} MiB cap ($total bytes)")
+                            }
+                        }
+                    }
+                    if (!tmp.renameTo(target)) {
+                        throw IOException("subtitle cache rename failed")
                     }
                 }
+                if (cont.isActive) cont.resume(Unit)
+            } catch (t: Throwable) {
+                tmp.delete()
+                if (cont.isActive) cont.resumeWithException(t)
             }
-            if (!tmp.renameTo(target)) {
-                throw IOException("subtitle cache rename failed")
-            }
-        } catch (t: Throwable) {
-            tmp.delete()
-            throw t
         }
     }
+
+    /**
+     * 失效策略（A4-C6）：每次成功落地后执行——文件数上限 [MAX_CACHE_FILES]、
+     * 总字节上限 [MAX_CACHE_TOTAL_BYTES]，超限按 lastModified 淘汰最旧；
+     * 孤儿 .part（失败/取消残留）一并清理。
+     */
+    private fun enforceCacheBounds(dir: File) {
+        val files = dir.listFiles { f -> f.isFile && !f.name.endsWith(".part") }
+            ?.sortedBy { it.lastModified() } ?: return
+        dir.listFiles { f -> f.isFile && f.name.endsWith(".part") }?.forEach { it.delete() }
+        var total = files.sumOf { it.length() }
+        var index = 0
+        while ((files.size - index > MAX_CACHE_FILES || total > MAX_CACHE_TOTAL_BYTES) && index < files.size) {
+            val oldest = files[index]
+            val size = oldest.length()
+            if (oldest.delete()) {
+                total -= size
+            }
+            index++
+        }
+    }
+
+    /** 会话清理（A4-C6）：引擎 stop 时调用，清空全部字幕缓存。 */
+    fun clearSession() {
+        val dir = File(cacheDir, DIR)
+        dir.listFiles()?.forEach { it.delete() }
     }
 
     /**
@@ -201,5 +252,21 @@ internal open class SubtitleCache(
 
         /** 单个字幕缓存文件上限（4 MiB）：字幕文体量远小于此，超限按异常处理。 */
         const val MAX_SUBTITLE_BYTES = 4L * 1024 * 1024
+
+        /** 缓存文件数上限（LRU 淘汰最旧）。 */
+        const val MAX_CACHE_FILES = 64
+
+        /** 缓存总字节上限（32 MiB，LRU 淘汰最旧）。 */
+        const val MAX_CACHE_TOTAL_BYTES = 32L * 1024 * 1024
+
+        /** 下载桥接线程池：守护线程、有界（字幕下载为低频小流量）。 */
+        private val BRIDGE_EXECUTOR = java.util.concurrent.ThreadPoolExecutor(
+            0,
+            4,
+            60L, java.util.concurrent.TimeUnit.SECONDS,
+            java.util.concurrent.SynchronousQueue(),
+            { task -> Thread(task, "mpv-subtitle-bridge").apply { isDaemon = true } },
+            java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy(),
+        )
     }
 }
