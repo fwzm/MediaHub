@@ -33,26 +33,36 @@ internal open class SubtitleCache(
         fun copy(uri: Uri, target: File): Boolean
     }
 
-    /** 返回 mpv 可直挂的本地路径；无法落地返回 null。 */
+    /**
+     * 返回 mpv 可直挂的本地路径；无法落地返回 null。
+     *
+     * @param scopeKey 媒体版本指纹（缓存隔离键，调用方传入，**非空**）：
+     *   同名字幕在不同 scope 下互不复用缓存文件。
+     */
     open suspend fun localPathFor(
         uri: String,
         mediaUrl: String,
+        scopeKey: String,
         sessionHeaders: Map<String, String>,
-    ): String? = withContext(Dispatchers.IO) {
-        runCatching { resolve(uri, mediaUrl, sessionHeaders) }
-            .onFailure { logger.w(LogTag.PLAYER, "mpv 外挂字幕落地失败 uri=$uri", it) }
-            .getOrNull()
+    ): String? {
+        require(scopeKey.isNotBlank()) { "scopeKey must not be blank (media version fingerprint)" }
+        return withContext(Dispatchers.IO) {
+            runCatching { resolve(uri, mediaUrl, scopeKey, sessionHeaders) }
+                .onFailure { logger.w(LogTag.PLAYER, "mpv 外挂字幕落地失败 uri=$uri", it) }
+                .getOrNull()
+        }
     }
 
     private fun resolve(
         uri: String,
         mediaUrl: String,
+        scopeKey: String,
         sessionHeaders: Map<String, String>,
     ): String? {
         val dir = File(cacheDir, DIR).apply { mkdirs() }
         return when {
             uri.startsWith("http://") || uri.startsWith("https://") -> {
-                val target = File(dir, stableFileName(uri))
+                val target = File(dir, scopedFileName(uri, scopeKey))
                 if (!target.exists() || target.length() == 0L) {
                     download(uri, mediaUrl, sessionHeaders, target)
                 }
@@ -60,7 +70,7 @@ internal open class SubtitleCache(
             }
 
             uri.startsWith("content://") -> {
-                val target = File(dir, stableFileName(uri))
+                val target = File(dir, scopedFileName(uri, scopeKey))
                 if (!target.exists() || target.length() == 0L) {
                     if (!contentResolver.copy(Uri.parse(uri), target)) return null
                 }
@@ -96,6 +106,20 @@ internal open class SubtitleCache(
                 throw IOException("subtitle cache rename failed")
             }
         }
+    }
+
+    /**
+     * 缓存键 = sha256(scopeKey) 前 16 hex + "_" + 原始文件名（A4-C2）。
+     * scopeKey 是媒体版本指纹：同名字幕在不同 scope（不同目录/服务器/媒体版本）
+     * 下互不复用——原实现仅按文件名碰撞复用，A 服务器同名字幕内容会错误挂到
+     * B 服务器播放；同 scope 重复请求仍命中同一文件（缓存语义保留）。
+     */
+    private fun scopedFileName(uri: String, scopeKey: String): String {
+        val scopeHash = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(scopeKey.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+            .take(16)
+        return "${scopeHash}_${stableFileName(uri)}"
     }
 
     private fun stableFileName(uri: String): String {

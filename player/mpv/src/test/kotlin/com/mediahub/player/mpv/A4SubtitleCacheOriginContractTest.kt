@@ -136,6 +136,7 @@ class A4SubtitleCacheOriginContractTest {
         val path = subject.localPathFor(
             uri = subtitleUrl,
             mediaUrl = mediaUrl,
+            scopeKey = "a4-origin-test",
             sessionHeaders = mapOf("Authorization" to "Basic dXNlcjpwYXNz"),
         )
 
@@ -164,6 +165,7 @@ class A4SubtitleCacheOriginContractTest {
         val path = subject.localPathFor(
             uri = subtitleUrl,
             mediaUrl = mediaUrl,
+            scopeKey = "a4-origin-test",
             sessionHeaders = mapOf("Authorization" to "Basic dXNlcjpwYXNz"),
         )
 

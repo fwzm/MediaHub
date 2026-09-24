@@ -57,13 +57,14 @@ class MpvSubtitleTest {
         contentResolver = { _, _ -> false },
         logger = NoLogger,
     ) {
-        val calls = mutableListOf<Triple<String, String, Map<String, String>>>()
+        val calls = mutableListOf<Array<String>>()
         override suspend fun localPathFor(
             uri: String,
             mediaUrl: String,
+            scopeKey: String,
             sessionHeaders: Map<String, String>,
         ): String? {
-            calls.add(Triple(uri, mediaUrl, sessionHeaders))
+            calls.add(arrayOf(uri, mediaUrl, scopeKey))
             return result
         }
     }
@@ -142,7 +143,8 @@ class MpvSubtitleTest {
 
     @Test
     fun `local path goes straight to sub-add select`() = runTest {
-        val f = SubtitleFixture(backgroundScope, RecordingCache("/data/subs/movie.zh.srt"))
+        val recording = RecordingCache("/data/subs/movie.zh.srt")
+        val f = SubtitleFixture(backgroundScope, recording)
         f.engine.play(session("https://media.example/movie.mkv"))
         runCurrent()
 
@@ -151,6 +153,8 @@ class MpvSubtitleTest {
         assertTrue(ok)
         val subAdd = f.instances.single().commands.first { it.first() == "sub-add" }
         assertEquals(listOf("sub-add", "/data/subs/movie.zh.srt", "select"), subAdd.toList())
+        // A4 契约：引擎传给缓存的 scopeKey（媒体版本指纹）必须非空
+        assertTrue("引擎必须传入非空 scopeKey", recording.calls.all { it[2].isNotBlank() })
     }
 
     @Test
@@ -204,6 +208,7 @@ class MpvSubtitleTest {
         val path = cache.localPathFor(
             uri = subtitleUrl,
             mediaUrl = webServer.url("/dav/movie.mkv").toString(),
+            scopeKey = "test-scope",
             sessionHeaders = mapOf("Authorization" to "Basic dXNlcjpwYXNz"),
         )
 
@@ -213,7 +218,12 @@ class MpvSubtitleTest {
         assertTrue(File(path).length() > 0)
         // 二次落地命中缓存，不再产生新请求
         webServer.enqueue(MockResponse().setResponseCode(500))
-        val again = cache.localPathFor(subtitleUrl, webServer.url("/dav/movie.mkv").toString(), emptyMap())
+        val again = cache.localPathFor(
+            subtitleUrl,
+            webServer.url("/dav/movie.mkv").toString(),
+            "test-scope",
+            emptyMap(),
+        )
         assertEquals(path, again)
     }
 
@@ -230,6 +240,7 @@ class MpvSubtitleTest {
         val path = cache.localPathFor(
             uri = webServer.url("/dav/movie.srt").toString(),
             mediaUrl = "https://other-server.example/movie.mkv",
+            scopeKey = "test-scope",
             sessionHeaders = mapOf("Authorization" to "Basic dXNlcjpwYXNz"),
         )
 
@@ -247,9 +258,9 @@ class MpvSubtitleTest {
             logger = NoLogger,
         )
         // file:// 与 POSIX 绝对路径：纯字符串解析，不触碰文件系统
-        assertEquals("/data/subs/a.srt", cache.localPathFor("/data/subs/a.srt", "https://m/x.mkv", emptyMap()))
-        assertEquals("/data/subs/a.srt", cache.localPathFor("file:///data/subs/a.srt", "https://m/x.mkv", emptyMap()))
+        assertEquals("/data/subs/a.srt", cache.localPathFor("/data/subs/a.srt", "https://m/x.mkv", "test-scope", emptyMap()))
+        assertEquals("/data/subs/a.srt", cache.localPathFor("file:///data/subs/a.srt", "https://m/x.mkv", "test-scope", emptyMap()))
         // 相对路径不可直挂（mpv 无法解析），如实返回 null
-        assertNull(cache.localPathFor("subs/a.srt", "https://m/x.mkv", emptyMap()))
+        assertNull(cache.localPathFor("subs/a.srt", "https://m/x.mkv", "test-scope", emptyMap()))
     }
 }

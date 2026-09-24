@@ -356,11 +356,14 @@ class MpvPlaybackEngine internal constructor(
 
     override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
         // 落地缓存：本地路径原样；http(s)/content:// 先下载/拷贝到 cache（同 origin 才带凭据头）。
-        val source = synchronized(stateLock) { current?.session?.source }
+        val session = synchronized(stateLock) { current?.session }
         val localPath = subtitleCache.localPathFor(
             uri = subtitle.uri,
-            mediaUrl = source?.url ?: "",
-            sessionHeaders = source?.let { buildHeaders(it) } ?: emptyMap(),
+            mediaUrl = session?.source?.url ?: "",
+            // scopeKey：媒体版本指纹（缓存隔离键）。serverId/itemId 组合为 A4 编译占位，
+            // 主代理接线时替换为真实媒体版本指纹；无会话时用固定串保持非空契约。
+            scopeKey = session?.let { "${it.serverId}/${it.itemId}" } ?: "no-session",
+            sessionHeaders = session?.let { buildHeaders(it.source) } ?: emptyMap(),
         ) ?: run {
             logger.w(LogTag.PLAYER, "mpv 外挂字幕落地失败 name=${subtitle.name}")
             return false
