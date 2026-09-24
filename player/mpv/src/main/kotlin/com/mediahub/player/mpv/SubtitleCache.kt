@@ -115,10 +115,29 @@ internal open class SubtitleCache(
         return originA.equals(originB, ignoreCase = true)
     }
 
+    /**
+     * origin（scheme://host:port），端口按 scheme 默认值归一（A4-C1）：
+     * 隐式端口（[java.net.URI.getPort] 返回 -1）归一到默认（http→80、https→443），
+     * 显式默认端口保持等值——语义对齐 provider/webdav WebDavModel.origin 的 effectivePort。
+     * 未显式端口的 -1 直接拼接曾导致"隐式 ↔ 显式 :80/:443"误判异源、同源凭据被丢弃。
+     */
     private fun originOf(url: String): String? = try {
         val parsed = java.net.URI(url)
         if (parsed.host.isNullOrBlank()) null
-        else "${parsed.scheme?.lowercase()}://${parsed.host.lowercase()}:${parsed.port}"
+        else {
+            val scheme = parsed.scheme?.lowercase()
+            if (scheme.isNullOrBlank()) {
+                null
+            } else {
+                val declared = parsed.port
+                val effectivePort = when {
+                    declared > 0 -> declared
+                    scheme == "https" -> 443
+                    else -> 80
+                }
+                "$scheme://${parsed.host.lowercase()}:$effectivePort"
+            }
+        }
     } catch (e: Exception) {
         null
     }
