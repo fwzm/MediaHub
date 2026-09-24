@@ -309,6 +309,7 @@ class PlayerRouteVisualEffectsTest {
             ),
             serverStore = FakeServerStore(server),
             progressStore = FakeProgressStore,
+            subtitleMemoryStore = NoSubtitleMemory,
             registry = FakeRegistry(item),
             media3EngineFactory = PlaybackEngineCreator { FakeEngine(fixtureTitle) },
             mpvEngineFactory = PlaybackEngineCreator { FakeEngine(fixtureTitle) },
@@ -393,5 +394,12 @@ class PlayerRouteVisualEffectsTest {
         override fun i(tag: LogTag, message: String) = Unit
         override fun w(tag: LogTag, message: String, throwable: Throwable?) = Unit
         override fun e(tag: LogTag, message: String, throwable: Throwable?) = Unit
+    }
+
+    /** 视觉路径测试不触达字幕中心：空记忆实现。 */
+    private val NoSubtitleMemory = object : com.mediahub.core.database.repository.SubtitleMemoryStore {
+        override suspend fun recall(versionKey: String) = null
+        override suspend fun remember(entry: com.mediahub.core.database.repository.SubtitleMemoryEntry) = Unit
+        override suspend fun forget(versionKey: String) = Unit
     }
 }
