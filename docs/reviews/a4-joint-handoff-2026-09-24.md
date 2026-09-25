@@ -79,3 +79,31 @@
 4. **APK 可重现性**：`a87b4eb7…630f`（129,660,832 字节）在 77215db 树上
    --rerun-tasks --no-build-cache 强制重跑 SHA 一致（4b7dc85 时构建亦含工作区
    归属世代代码，故一致）。
+
+## 8. 终审交接增补（2026-09-26，B 终审对象）
+
+**终审 head = 67af94540806be060e61846b2228492d8dd91e0e**（475a9bb → 8dc7c33 → 67af945）。
+B 上轮 4 项收尾 finding 的修复与回归（详见 PR #24 正文对照表）：
+
+| B finding | 修复提交 | 永久回归 |
+| --- | --- | --- |
+| 链路测试响应数量/异步顺序 | 8dc7c33 | WebDavJointChainTest（语义分派；本地 no-daemon 5/5 + CI 云端通过；稳定性全记录：daemon 1 绿+4 文件锁不挑绿） |
+| 引擎副作用归属窗口 | 67af945（论证+回归） | MpvSubtitleTest stop 交错：下载挂起+stop → 无 sub-add、false、缓存目录清空；串行边界论证（withNative isCurrent 与 play/stop 共享 stateLock；Main 串行）写入 loadExternalSubtitle KDoc——**交 B 裁定** |
+| mpv 确认强度 | 67af945 | MpvSubtitleTest 4 条：目标 filename+selected 命中（含并发无关轨/非末轨）；错误 filename、未选中 → false；未确认不写记忆 |
+| clearSession 无生产调用点 | 67af945 | 引擎 play→beginSession / stop→endSession 接线 + stop 交错回归断言缓存目录清空；落地前二次资格检查（迟到下载不重新落地） |
+
+**对账**（唯一用例数，跨 API/重复运行分列）：
+- A4 新增永久回归唯一用例：链路 1、SubtitleCenter 12（含归属交错 1）、
+  MpvSubtitle 新增 4（目标身份 2 + stop 交错 1 + 原确认 1 改造）、
+  Origin 8 / Scope 4 / Atomic 2 / Cancellation 2 / Eviction 2 / BridgeTotal 3 /
+  ProbeTimeout 3 / Migration 1。
+- 跨 API 执行：parser 设备用例 8 × 2（API32、API36 各一次，CI run 36195276304）。
+- 重复运行：链路测试本地 5 次（no-daemon）+ CI 1 次，全部记录非挑绿。
+- **不把 NEEDS_REPRO 计为 finding 数**：引擎副作用窗口原 NEEDS_REPRO 状态已由
+  串行边界论证 + stop 交错回归取代（交 B 裁定后更新台账）。
+
+**CI**：run 36195276304 @ 67af945 三 job SUCCESS（API32/36 视觉+parser 门禁+build 全步）。
+**APK**：`8f2ad2929b04d0d1eb0a5842c7827bcfd3bc7bafdabfcd2f5558b177f64a2e0b`
+（129,660,832 字节，干净检出 67af945 构建；旧 a87b4eb2 作废）。
+**边界**：physical_device / real_server / old_database_upgrade（真实旧库升级）
+NOT_RUN；backup_C 保持 C REVIEW PENDING / DEVICE UNVERIFIED。
