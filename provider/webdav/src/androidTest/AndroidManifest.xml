@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 零第二跳验证需在测试进程内绑定本地 ServerSocket（Android 上任何 socket
+         创建都要求 INTERNET 权限，否则 ServerSocket 构造直接 EPERM）。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_visual_effects_entry">视觉效果</string>
+    <string name="player_visual_effects_entry_description">打开视觉效果设置</string>
+    <string name="player_switching_engine">正在切换兼容播放模式…</string>
+    <string name="player_retry">重试</string>
+    <string name="player_back">返回</string>
+    <string name="player_close">关闭</string>
+    <string name="player_playback_failed">播放失败：%1$s</string>
+    <string name="player_unknown_error">未知错误</string>
+    <string name="player_audio_unsupported">未检测到音频输出，该格式可能不被当前设备支持，可尝试其他音轨</string>
+    <string name="player_audio_unsupported_codec">未检测到音频输出（音轨 %1$s），该格式可能不被当前设备支持，可尝试其他音轨</string>
+    <string name="player_audio_tracks">音轨</string>
+    <string name="player_subtitles">字幕</string>
+    <string name="player_diagnostic_http">HTTP %1$d</string>
+    <string name="player_diagnostic_first_byte">首包 %1$d 毫秒</string>
+    <string name="player_diagnostic_buffered">缓冲 %1$d 秒</string>
+    <string name="player_battery">电量 %1$d%%</string>
+    <string name="player_time_progress">%1$s / %2$s</string>
+    <string name="player_time_progress_unknown">%1$s / --:--</string>
+    <string name="player_pause">暂停</string>
+    <string name="player_play">播放</string>
+    <string name="player_playback_speed">%1$.2f×</string>
+    <string name="player_gesture_seek">%1$s → %2$s</string>
+    <string name="player_gesture_rewinding">↺ %1$.2f× 快退中</string>
+    <string name="player_gesture_speed">%1$.2f× 倍速中</string>
+    <string name="player_brightness">亮度</string>
+    <string name="player_volume">音量</string>
+    <string name="player_level_percent">%1$d%%</string>
+    <string name="player_download_speed_unknown">--</string>
+    <string name="player_download_speed_kb">%1$.0f KB/s</string>
+    <string name="player_download_speed_mb">%1$.1f MB/s</string>
+    <string name="player_audio_mono">单声道</string>
+    <string name="player_audio_stereo">立体声</string>
+    <string name="player_audio_channels">%1$d 声道</string>
+    <string name="player_audio_sample_rate">%1$d kHz</string>
+    <string name="player_audio_tracks_empty">未发现音轨</string>
+    <string name="player_audio_track_number">音轨 %1$d</string>
+    <string name="player_audio_decoder">解码器 %1$s</string>
+    <string name="player_track_unsupported">不支持</string>
+    <string name="player_language_chinese">中文</string>
+    <string name="player_language_english">英语</string>
+    <string name="player_language_japanese">日语</string>
+    <string name="player_language_korean">韩语</string>
+    <string name="player_language_cantonese">粤语</string>
+    <string name="player_color_white">白</string>
+    <string name="player_color_yellow">黄</string>
+    <string name="player_color_cyan">青</string>
+    <string name="player_color_green">绿</string>
+    <string name="player_color_pink">粉</string>
+    <string name="player_color_black">黑</string>
+    <string name="player_color_transparent">透明</string>
+    <string name="player_color_black_half" formatted="false">黑 50%</string>
+    <string name="player_subtitle_tracks">轨道</string>
+    <string name="player_subtitles_off">关闭字幕</string>
+    <string name="player_subtitle_track_number">字幕 %1$d</string>
+    <string name="player_subtitle_external">外挂字幕</string>
+    <string name="player_subtitle_discovering">正在查找同目录字幕…</string>
+    <string name="player_subtitle_external_none">同目录未发现字幕（SRT/ASS/SSA/VTT）</string>
+    <string name="player_subtitle_import">导入本地字幕…</string>
+    <string name="player_subtitle_offset">字幕偏移 %1$s</string>
+    <string name="player_subtitle_offset_reset">归零</string>
+    <string name="player_subtitle_offset_mpv_only">偏移仅 mpv 内核支持</string>
+    <string name="player_subtitle_offset_seconds" formatted="false">%+.1f 秒</string>
+    <string name="player_subtitle_external_active">当前</string>
+    <string name="player_subtitle_style">样式</string>
+    <string name="player_subtitle_scale">字号 %1$.0f%%</string>
+    <string name="player_subtitle_text_color">文字颜色</string>
+    <string name="player_subtitle_background">背景（默认透明）</string>
+    <string name="player_subtitle_edge">描边</string>
+    <string name="player_subtitle_edge_none">无</string>
+    <string name="player_subtitle_edge_outline">描边</string>
+    <string name="player_subtitle_edge_shadow">阴影</string>
+    <string name="player_selected_option">● %1$s</string>
+    <string name="player_subtitle_position">垂直位置：距底部 %1$.0f%%</string>
+    <string name="player_subtitle_embedded_style">尊重内嵌 ASS/PGS 样式</string>
+    <string name="player_info_entry">信息</string>
+    <string name="player_info_expert_toggle">专业信息</string>
+    <string name="player_info_unknown">—</string>
+    <string name="player_info_source">源参数</string>
+    <string name="player_info_config">配置</string>
+    <string name="player_info_runtime">运行观测</string>
+    <string name="player_info_container">封装</string>
+    <string name="player_info_video_codec">视频编码</string>
+    <string name="player_info_audio_codec">音频编码</string>
+    <string name="player_info_bitrate">码率</string>
+    <string name="player_info_resolution">分辨率</string>
+    <string name="player_info_frame_rate">帧率</string>
+    <string name="player_info_hdr">HDR</string>
+    <string name="player_info_playback_mode">播放方式</string>
+    <string name="player_info_engine_mode">内核选择</string>
+    <string name="player_info_hardware_decoding">解码设置（硬解偏好）</string>
+    <string name="player_info_prefer_direct_play">优先直连</string>
+    <string name="player_info_bitrate_cap">码率上限</string>
+    <string name="player_info_actual_engine">实际内核</string>
+    <string name="player_info_actual_decoder">实际解码器</string>
+    <string name="player_info_actual_resolution">实际分辨率</string>
+    <string name="player_info_audio_output">音频输出</string>
+    <string name="player_info_audio_track_count">音轨</string>
+    <string name="player_info_subtitle_track_count">字幕</string>
+    <string name="player_info_on">开</string>
+    <string name="player_info_off">关</string>
+    <string name="player_info_unlimited">不限</string>
+    <string name="player_info_mode_direct_play">直连播放</string>
+    <string name="player_info_mode_direct_stream">直流转码</string>
+    <string name="player_info_mode_transcode">服务端转码</string>
+    <string name="player_info_mode_unsupported">无法播放</string>
+    <string name="player_info_engine_auto">自动（Media3→mpv）</string>
+    <string name="player_info_engine_media3" translatable="false">Media3</string>
+    <string name="player_info_engine_mpv" translatable="false">mpv</string>
+    <string name="player_info_hdr10" translatable="false">HDR10</string>
+    <string name="player_info_hdr10_plus" translatable="false">HDR10+</string>
+    <string name="player_info_hlg" translatable="false">HLG</string>
+    <string name="player_info_dolby_vision" translatable="false">Dolby Vision</string>
+</resources>

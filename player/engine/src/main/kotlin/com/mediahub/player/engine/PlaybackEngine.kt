@@ -83,6 +83,10 @@ class PlaybackEngine(
     private var session: PlaybackSession? = null
     private var progressJob: Job? = null
     private var released = false
+    /** Visualizer 是按 UI/lifecycle 需求启用的重资源，默认不创建。 */
+    private var audioSpectrumEnabled = false
+    /** stop 后拒绝迟到的 audio-session 回调重新拉起采样。 */
+    private var audioSpectrumSessionActive = false
     /** 起播时间戳（elapsedRealtime），用于 TTFF（首帧）诊断。 */
     private var playStartElapsedMs = 0L
 
@@ -93,6 +97,14 @@ class PlaybackEngine(
 
     private val _subtitleCues = MutableStateFlow<CueGroup?>(null)
     override val subtitleCues: StateFlow<CueGroup?> = _subtitleCues.asStateFlow()
+
+    private val audioSpectrumController = AudioSpectrumSessionController(
+        captureFactory = AndroidVisualizerCaptureFactory,
+        onFailure = { failure ->
+            logger.w(LogTag.PLAYER, "音频频谱采样不可用，已降级为基础动画", failure)
+        },
+    )
+    override val audioBands: StateFlow<AudioBandLevels?> = audioSpectrumController.audioBands
 
     override fun attachSurface(surface: Surface?) {
         player.setVideoSurface(surface)
@@ -150,6 +162,14 @@ class PlaybackEngine(
                 }
             }
 
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                if (audioSpectrumEnabled && audioSpectrumSessionActive && audioSessionId > 0) {
+                    audioSpectrumController.bind(audioSessionId)
+                } else {
+                    audioSpectrumController.clear()
+                }
+            }
+
 
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -204,13 +224,20 @@ class PlaybackEngine(
     }
 
     override fun play(session: PlaybackSession) {
+        // 同一个 ExoPlayer 可复用 audio session；每次媒体会话仍先释放旧 capture，防止迟到回调串流。
+        audioSpectrumController.clear()
+        audioSpectrumSessionActive = true
         this.session = session
+        // 新媒体会话：外挂字幕与手动字幕轨选择不跨会话携带（匹配记忆由 ViewModel 层重放）。
+        externalSubtitles.clear()
+        lastSelectedSubtitle = null
         session.trace?.record(PlaybackStartupTrace.Milestone.MEDIA_REQUEST_STARTED)
         session.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_PREPARE_STARTED)
         headersHolder.setHeaders(buildRequestHeaders(session.source))
         val mediaItem = session.source.toMedia3Item(session)
         player.setMediaItem(mediaItem)
         player.prepare()
+        retryAudioSpectrumCapture()
         player.playWhenReady = true
         val startPosition = session.startPositionMs ?: session.resumePositionMs
         if (startPosition != null && startPosition > 0) {
@@ -269,6 +296,95 @@ class PlaybackEngine(
         selectTrack(C.TRACK_TYPE_TEXT, selection)
     }
 
+    // ---- 外挂字幕（P2 字幕中心切片一） ----
+
+    /**
+     * Media3 能力矩阵（如实自述）：
+     * - 外挂字幕 = 支持（[MediaItem.SubtitleConfiguration] 侧挂 + 媒体项重建，可能瞬断）；
+     * - 偏移 = **不支持**（Media3 无公开字幕偏移 API；偏移仅 mpv `sub-delay`，UI 已标注）。
+     */
+    override val subtitleCapabilities: SubtitleCapabilities =
+        SubtitleCapabilities(externalLoad = true, offsetAdjust = false)
+
+    override val subtitleOffsetMs: Long get() = 0L
+
+    /** 已侧挂的外挂字幕（重建媒体项时全部重挂）。 */
+    private val externalSubtitles = mutableListOf<MediaItem.SubtitleConfiguration>()
+
+    /** 用户最近一次手动选择的内嵌字幕轨（媒体项重建后重放；null=关闭/未选）。 */
+    private var lastSelectedSubtitle: TrackSelection? = null
+
+    override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
+        if (released || session == null) return false
+        val configuration = subtitle.toSubtitleConfiguration() ?: return false
+        externalSubtitles += configuration
+        rebuildMediaItemWithExternalSubtitles()
+        logger.i(
+            LogTag.PLAYER,
+            "Media3 外挂字幕重建 mime=${subtitle.mimeType} name=${subtitle.name} count=${externalSubtitles.size}",
+        )
+        return true
+    }
+
+    private fun ExternalSubtitle.toSubtitleConfiguration(): MediaItem.SubtitleConfiguration? {
+        val uri = try {
+            android.net.Uri.parse(uri)
+        } catch (e: Exception) {
+            return null
+        }
+        if (mimeType !in SUPPORTED_SUBTITLE_MIMES) return null
+        return MediaItem.SubtitleConfiguration.Builder(uri)
+            .setMimeType(mimeType)
+            .setLabel(name)
+            .setLanguage(language)
+            .setId(id)
+            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+            .build()
+    }
+
+    /**
+     * 媒体项重建纪律（沿用引擎切换的"保存位置同位重播"语义）：
+     * 捕获 位置/暂停/倍速 → setMediaItem(item, position) → prepare() → 恢复 暂停态与倍速。
+     * `setMediaItem(item, positionMs)` 在同一调用内完成换源与 seek，避免双跳帧；
+     * 倍速/playWhenReady 在 Media3 中跨 setMediaItem 保留，此处仍显式重施（防御版本差异）。
+     */
+    private fun rebuildMediaItemWithExternalSubtitles() {
+        val s = session ?: return
+        val snapshot = PlaybackRestoreSnapshot(
+            positionMs = player.currentPosition.coerceAtLeast(0),
+            playWhenReady = player.playWhenReady,
+            speed = player.playbackParameters.speed,
+        )
+        val mediaItem = s.source.toMedia3Item(s)
+            .buildUpon()
+            .setSubtitleConfigurations(externalSubtitles.toList())
+            .build()
+        player.setMediaItem(mediaItem, snapshot.positionMs)
+        player.prepare()
+        player.playWhenReady = snapshot.playWhenReady
+        player.setPlaybackSpeed(snapshot.speed)
+        // 轨道选择状态被重建重置：若用户此前选中了内嵌字幕轨，重建后须如实重选
+        // （按索引重放；轨道表变化导致索引失效时静默接受，不伪造选中）。
+        lastSelectedSubtitle?.let { selectSubtitleTrack(it) }
+    }
+
+
+    override fun setAudioSpectrumEnabled(enabled: Boolean) {
+        if (released) return
+        audioSpectrumEnabled = enabled
+        if (enabled && audioSpectrumSessionActive) {
+            audioSpectrumController.bind(player.audioSessionId)
+        } else {
+            audioSpectrumController.clear()
+        }
+    }
+
+    /** RECORD_AUDIO 授权可能晚于播放器创建；按需用当前有效 audio session 立即重试。 */
+    override fun retryAudioSpectrumCapture() {
+        if (released || !audioSpectrumEnabled || !audioSpectrumSessionActive) return
+        audioSpectrumController.bind(player.audioSessionId)
+    }
+
     private fun selectTrack(rendererType: Int, selection: TrackSelection?) {
         val mapped = trackSelector.currentMappedTrackInfo ?: return
         val groups = mapped.getTrackGroups(rendererType)
@@ -276,6 +392,7 @@ class PlaybackEngine(
 
         if (selection == null) {
             builder.setRendererDisabled(rendererType, true)
+            if (rendererType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = null
         } else {
             if (selection.groupIndex !in 0 until groups.length) return
             builder.setRendererDisabled(rendererType, false)
@@ -284,6 +401,7 @@ class PlaybackEngine(
                 groups,
                 DefaultTrackSelector.SelectionOverride(selection.groupIndex, selection.trackIndex),
             )
+            if (rendererType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = selection
         }
         trackSelector.setParameters(builder)
     }
@@ -354,6 +472,8 @@ class PlaybackEngine(
      */
     override fun stop(): PlaybackProgress? {
         progressJob?.cancel()
+        audioSpectrumSessionActive = false
+        audioSpectrumController.clear()
         val finalProgress = currentProgress()
         _events.trySend(PlaybackEvent.Stopped)
         logger.i(LogTag.PLAYER, "播放停止 serverId=${session?.serverId} itemId=${session?.itemId}")
@@ -363,7 +483,9 @@ class PlaybackEngine(
     override fun release() {
         if (released) return
         released = true
+        audioSpectrumSessionActive = false
         progressJob?.cancel()
+        audioSpectrumController.release()
         headersHolder.setHeaders(emptyMap())
         player.release()
         logger.i(LogTag.PLAYER, "播放引擎已释放")
@@ -414,5 +536,22 @@ class PlaybackEngine(
 
     private companion object {
         const val PROGRESS_INTERVAL_MS = 1_000L
+
+        /** 本引擎可侧挂的字幕 MIME（与 SubtitleFormats 覆盖面一致）。 */
+        val SUPPORTED_SUBTITLE_MIMES = setOf(
+            "application/x-subrip",
+            "text/x-ssa",
+            "text/vtt",
+        )
     }
 }
+
+/**
+ * Media3 媒体项重建的保留快照（位置/暂停/倍速）。
+ * 独立 data class 便于对"重建保留纪律"做引擎层 fake 验证。
+ */
+data class PlaybackRestoreSnapshot(
+    val positionMs: Long,
+    val playWhenReady: Boolean,
+    val speed: Float,
+)

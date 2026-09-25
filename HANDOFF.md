@@ -1,4 +1,57 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
+
+## 2026-09-09 Agent A 接回：本地备份集成，C REVIEW PENDING
+
+- B 的三提交链 `7e314c6 → 337c626 → 307b8f2` 按原 SHA fast-forward 接回。A 在独立 worktree 核验完整 57 文件差异，新增 `68d502f` 归档 CI 验证身份及产物，`9a8c309` 修复线路数组顺序与 Room 持久化排序不一致导致的来源/凭据裁决错误。
+- 本轮完整强制重跑：92 份 XML、772 tests、零失败/错误/跳过；22 个实际执行测试 task，mpv/WebDAV/metadata 三个 NO-SOURCE 单列；assembleDebug、lintDebug、androidTest APK 构建及 diff 检查通过。lint 为 0 error/fatal、61 条 warning 记录，差异说明见 [Agent A 集成记录](docs/reviews/pr18-agent-a-integration-2026-09-09.md)。
+- 生产修复与新增四条回归属于 Agent C 必审范围。最终 PR head、实际 CI checkout、原始产物及模拟器验证绑定见 PR #18 正文与 A 交接包；不得使用下方 B 历史状态替代本轮验证。
+- A 独立 API 36 模拟器完整验收为正式 SAF 1/1、八个新进程恢复 8/8、损坏日志阻断 1/1；九次 seed 死亡不计通过。首次 UI 被系统 Messages ANR 对话框遮挡的失败单独保留，验证首页前提后相同代码复跑通过。
+- PR 保持 OPEN / Draft，**C REVIEW PENDING / DEVICE UNVERIFIED**。未合并、未封板；损坏日志人工处置、失效设备密钥、不可逆凭据清理和 orphan snapshot GC 仍保留边界，不扩展云备份。
+
+> 2026-09-09 Agent B 补充：下列旧阶段段落保留为历史记录，当前入口与队列以本段及 [PR #18 独立复审记录](docs/reviews/pr18-agent-b-2026-09-09.md) 为准。不得按尾部历史 TODO 重做 1C—1F 或 Jellyfin 1G A/B/C。
+
+## Phase 1I-A 本地备份还原：Agent B 历史交接记录（已由上方 A 接回状态补充）
+
+- 本轮获取的 main：`8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1`；PR #18 原审查 head：`8798b1381f033533ed2b50b144468b7049789c4e`，OPEN、未合并。
+- Agent B 在独立 `codex/pr18-backup-review-fixes` 分支修复实际仍存在的校验、SAF、恢复身份/凭据、默认源、冻结计划、日志和完整回滚缺陷。不是接管 `feature/backup-restore`，不得自审自合并。
+- 详细逐条评论处置、红灯复现、实际 XML、最终 SHA、模拟器和进程终止证据见复审记录；代码完成、独立审查、CI、设备与阶段封板分别报告。真机保持 `DEVICE UNVERIFIED`。
+- 备份范围和恢复契约见 [本地备份说明](docs/backup/README.md) 与追加 ADR-041；不扩展 WebDAV 云备份。
+- 后续顺序：Media3 选轨独立修复 → 1H SLOW-FINAL → EndpointTestService 取消边界 → PR #10 集成验收 → Jellyfin 真实实例/协议验收 → 全量文档历史核对。PR #16 继续作为证据归档，SLOW-FINAL 仍 OPEN；新核出的日志索引错误留独立文档修复。
+## 2026-09-20 T0001 阻断项修复复核（完整验证 BLOCKED；不可标记验收完成）
+
+- 本次受审提交：`bcc3d21547ace5e0819d743de2140c67b0058b15`，独立 repair worktree、detached HEAD。
+- F01/F02：先对未改动生产代码运行两条确定性回归，分别在“响应未关闭”及“期望 200、实际 206”处失败，
+  再改为回调内 `response.use` 消费并关闭后恢复无资源结果，Media 状态码仅在读体成功后提交。
+- F03/F05：Media 等头与读体分别锁定具体 Call；读体有进入/退出/取消释放屏障，断言关闭及取消异常。
+  watchdog 在执行被测代码前启动；失败路径统一取消、释放、等待终止并关闭执行器，保留清理错误。
+- F04/F05：保留八条 fake 回归；真实服务测试覆盖改地址、取消后重试、HTTPS 切换与 `ViewModelStore.clear()`。
+  当前 ViewModel 和新增测试源码已编译通过，**Robolectric 测试未运行**：所需 Android runtime JAR 读取被拒绝。
+- 实际行为验证：直接 Kotlin 2.2.10 + JUnit 4.13.2 对当前网络源码运行 **17 tests / 0 failures**；
+  移除 `Call.cancel()` 的负对照使 Media 等头、停滞读体测试失败且有限退出。直接 JUnit 不等于 Gradle 模块门禁。
+- F06 **未完成**：两个模块单测、两个 lint 和 `:app:assembleDebug` 已以 `--no-daemon` 尝试，
+  但在 Gradle 配置阶段因 `AccessDeniedException` 失败，目标任务未执行；无本次测试 XML、lint 报告或 APK。
+- 本次证据见 [repair evidence](.repair-evidence/README.md)：包含源码 SHA-256、完整命令、退出码、红绿及负对照日志。
+  控制目录历史记录不作为本次通过证据；控制状态库不在可写范围，未更新。
+- 普通提交受阻：`git add` 无法创建 worktree 的 `index.lock`（Permission denied，exit 128）；
+  当前仍为原受审 HEAD，修改保留在工作区，尚无修复提交。
+- 设备、凭据、真实服务器均未操作；`probeUrl` 占位及原字段单位保持原有边界。
+
+## T0001 初次实现记录（以下为历史记录，验证状态以上述修复复核为准）
+
+- 基线：`8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1`（`origin/main`）。分支 `loop/t0001-endpoint-cancellation`。
+- 起因：`EndpointTestService` 在 `suspend` 函数里用阻塞 `Call.execute()`、未切换调度器、
+  未与协程取消联动、`catch (Exception)` 吞取消、`body.bytes()` 无上限。
+  编辑页「线路质量测试」是该路径的正式用户入口（地址变化 / HTTPS 切换会取消在途任务）。
+- 修复：IO 调度器执行 + `Call.enqueue` 可取消桥接（响应头与响应体两个取消窗口分别绑定）
+  + 统一响应释放 + 1 MiB 有界采样 + 取消经 `ensureActive()` 透传。
+  未改 `ServerEditorViewModel`、`ServerEditorScreen`、`HttpClientFactory` 策略与数据库。
+- 回归：`EndpointTestServiceCancellationTest`（7）、`EndpointTestServiceTest`（+4）、
+  `ServerEditorViewModelTest`（+2，真实服务 + 本机 MockWebServer，断言取消穿透到底层 Call）。
+- 边界：`probeUrl` 仍为占位，真实媒体测速未实现；**未做设备验证**；
+  本任务不触碰 2A / 2B / PR #10 / PR #18。
+- 历史材料位置：闭环控制目录 `D:/deepseek_test/mh-loop` 的状态库与 `evidence/T0001/`；不能据此推定本次最终源码已通过门禁。
+
+
 > 最后更新：2026-08-30（Phase 1H Emby PROGRESS closeout code+tests complete，feature/1h-emby-progress PR/CI 待走；Phase 1G 已 merge 入 main @ `1d105a1`）
 
 ## Phase 1H Emby PROGRESS closeout（进行中——code+tests complete，PR/CI 待 + DEVICE VERIFICATION PENDING）

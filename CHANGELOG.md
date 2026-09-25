@@ -1,4 +1,53 @@
 # 变更记录（CHANGELOG）
+
+## [Unreleased — PR #18 Agent A integration] — 2026-09-09
+
+- 按原 SHA 接回 B 的三提交补丁，保留完整历史和审查边界。
+- 修复有效线路身份与 Room 持久化排序不一致的问题：先按 sortOrder 冻结身份，导入/导出拒绝歧义候选，旧不稳定保护计划保留日志并阻止自动重放。MERGE 异源进度隔离与替换凭据失效由四条新增回归约束，同源替换仍保留登录。
+- CI 追加 head/base/实际 checkout 清单及 XML/lint 产物归档，保留原门禁与 standalone JVM 测试，不增加重试或跳过。
+- A 实际全量为 772 tests、零失败/错误/跳过；原始产物、lint 差异、正式 SAF/进程终止的实际执行及早期失败见 [集成记录](docs/reviews/pr18-agent-a-integration-2026-09-09.md)。仍为 C REVIEW PENDING / DEVICE UNVERIFIED，未合并或阶段封板。
+
+## [Unreleased — PR #18 Agent B review patch] — 2026-09-09
+
+- 本地备份导入/导出共用结构校验，补 LOCAL 描述符、完整 section/count、字段和记录上限、编码凭据参数拒绝、错误文案脱敏。
+- SAF 操作身份、实际版本来源、错误密码重试、输入关闭失败、严格有界读取和密码取消清理。
+- 恢复确认绑定冻结计划与本机基线，Room 内再次核对；保留 MERGE 本机偏好/newer-wins/同 ID 来源冲突，维护默认源唯一，REPLACE 清除所选源的旧进度。
+- 完整 before/after image 采用设备私有 Android Keystore 加密文件，与导出白名单分离；恢复日志持久化失败与损坏时阻断，回滚意图可重启续作。
+- 身份恢复要求凭据/全部 Provider 会话可靠清理，认证提交和旧 401/登出结果受代际约束，旧 Factory API/media handle 后续请求被阻断；首页身份变化和读取期间变化均重新核验。导入线路 ID 在预览时唯一生成并冻结，防止覆盖另一来源的线路主键。
+- 新增生产边界回归、正式 SAF 仪器链及显式进程终止探针。实际命令、XML 数量和验收边界见 [独立复审记录](docs/reviews/pr18-agent-b-2026-09-09.md)，不继承旧 head 的绿色 CI。
+- 状态：独立补丁交 Agent A 接回，待其他 Agent 复审；未自动合并，未阶段封板。
+## T0001 阻断项修复 — 2026-09-20（验证未完成）
+- 先红后绿复现恢复已排队时取消的响应泄漏，以及 Media 读体失败提前覆盖 API 状态码。
+- 响应由 OkHttp 回调内 `use` 持有至消费和关闭完成，取消绑定覆盖整个消费期；仅恢复无资源结果。
+- Media 状态码恢复为消费成功后提交；首包、Range、吞吐字段的原有解释保持不变。
+- 补强 Media 等头/读体确定性测试、失败清理与独立 watchdog；补真实 HTTPS 切换及生命周期取消测试。
+- 当前网络源码直接 JUnit 17 例通过，ViewModel 测试源码编译通过；受文件权限限制，
+  规定的 Gradle 单测/lint/assemble 门禁及 Robolectric 运行尚未完成。完整证据与限制见 `.repair-evidence/README.md`。
+
+## [0.16.1-2c-endpoint-cancellation] — 2026-09-20（闭环任务 T0001：EndpointTestService 取消契约；未设备验证）
+### 修复
+- `core:network` `EndpointTestService`：两层探测改为在可注入 IO 调度器上执行，不再占用调用方
+  （编辑页主调度器）线程；同步阻塞的 `Call.execute()` 换成 `Call.enqueue` + 可取消桥接，
+  取消会真正终止对应 `Call` 并以 `CancellationException` 透传。
+- 响应所有权统一由桥接持有：成功、普通异常、读体异常、取消竞态与「取消后迟到响应」
+  都会关闭；迟到响应不被消费也不交付结果。
+- 媒体层按 `MAX_MEDIA_BYTES`（1 MiB，与既有 Range 请求头一致）有界读取，
+  服务端忽略 Range 返回 200 时不再全量读取。
+- 取消引起的 `IOException` 先经 `ensureActive()` 判定，不再被 `catch (Exception)` 吞成普通失败。
+- 取消绑定覆盖「响应头等待」与「响应体消费」两个窗口：后者用独立监视协程而非
+  `Job.invokeOnCompletion`（协程阻塞在读体时完成回调不会触发，无法中断停滞读取）。
+### 测试
+- 新增 `EndpointTestServiceCancellationTest` 7 例：调用方调度器不被阻塞、开始前取消不发请求、
+  等待响应头时取消、读体停滞时取消、取消引起的底层失败不被降级、迟到响应被关闭、
+  1 MiB 采样上限。
+- `EndpointTestServiceTest` 追加 4 例正常/分层失败语义回归（两层成功字段、
+  Media 失败保留 API 结果、API 失败跳过 Media、空体不伪造吞吐）。
+- `ServerEditorViewModelTest` 新增 2 例真实服务集成回归：地址变化取消在途测试穿透到底层
+  `Call`（OkHttp `canceled` 事件断言）、取消后仍可重新测试并正常展示与落库。
+### 边界
+- 本变更不涉及真实服务器、凭据与设备；`probeUrl` 仍为占位、真实媒体测速未实现。
+  未设备验证。
+
 ## [0.16.0-emby-progress] — 2026-08-30（Phase 1H：Emby PROGRESS closeout；DEVICE VERIFICATION PENDING）
 ### 功能
 - Emby 服务端进度闭环（ADR-040）：`EmbyProgressProvider` 独立实现

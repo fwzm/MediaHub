@@ -2,6 +2,38 @@
 
 > 状态：TODO / IN PROGRESS / DONE / BLOCKED。由完成任务的 AI 更新。
 
+## 2026-09-09 当前队列：PR #18 独立复审与限定补丁
+
+- [x] Task 0：重新 fetch；读取 PR #18/#10/#16 全分页评论、审查、提交、threads 和真实 CI checkout，保留历史描述与实际 head 的区别。
+- [x] Task 1：在 `8798b13` 上独立复现备份还原真实缺陷，隔离分支补丁及约束回归；逐项状态与实际执行结果见 [复审记录](docs/reviews/pr18-agent-b-2026-09-09.md)。
+- [x] Agent A 在独立 worktree 审查并 fast-forward 接回 B 三提交；追加持久化线路排序身份修复及四条先红后绿回归，保留同源替换语义。
+- [x] Agent A 本轮强制全量 772 tests、构建、lint 及 androidTest APK 构建通过；实际 XML、61 条 lint warning 的差异及早期失败见 [A 集成记录](docs/reviews/pr18-agent-a-integration-2026-09-09.md)。最终 head / CI checkout 与独立模拟器产物绑定在 PR 正文和交接包。
+- [x] Agent A 使用新建专用 API 36 模拟器复跑正式 SAF、八个进程终止恢复点和损坏磁盘日志阻断（最终 10 项通过，九次预期 seed 死亡另列，首轮 UI 环境失败保留）。
+- [ ] Agent C 对最终 PR head 及 A 新生产修复独立复审（C REVIEW PENDING），随后等待用户合并授权。PR 保持 OPEN / Draft，未自动合并、未封板。
+- [ ] 真机端到端复验（`DEVICE UNVERIFIED`）；模拟器与进程终止测试的实际范围单独记录。
+- [ ] 后续按用户顺序推进 2A 选轨、2B SLOW-FINAL、2C endpoint 取消、PR #10、Jellyfin 1G 验收。此轮不实现这些项目。
+- [ ] WebDAV 云备份依赖本地格式/恢复稳定；WebDAV 媒体 Provider 为独立 backlog。其余播放器/Provider backlog 保持原范围。
+
+> 下方阶段正文是历史进度记录。1C—1F 和 Jellyfin 1G A/B/C 已有实现；尾部旧 TODO 不作为重开发授权。跨阶段文档的逐文件历史更正留后续任务 5。
+## Phase 1I 2C —— EndpointTestService 取消边界（T0001，2026-09-20）BLOCKED：完整验证待补
+
+- [x] F01/F02：未修复源码两条回归先红；响应在回调内消费关闭，Media 读体失败保留 API 状态码。
+- [x] F03/F05：明确 Media 等头/读体屏障、Call 身份、取消异常、关闭责任、独立 watchdog 和失败清理；
+      当前网络源码直接 JUnit 17 例通过，移除取消绑定的负对照按预期失败。
+- [x] F04 测试代码：八条 fake 保留，真实 HTTPS 切换及 ViewModelStore 生命周期清理测试已补齐并编译。
+- [ ] BLOCKED F04 运行与 F06 完整门禁：Robolectric Android JAR 读取被拒；Gradle 配置阶段权限失败，
+      两个模块单测、两个 lint 与应用 debug 构建均未取得通过证据。见 `.repair-evidence/README.md`。
+
+初次实现范围记录（不代表本次验证通过）：
+
+- [x] DONE 生产修复：`EndpointTestService` 双层探测移出调用方调度器；`Call.enqueue` 可取消桥接；
+      响应所有权统一释放；1 MiB 有界采样；取消引起的 IOException 不再被吞。
+- [x] DONE 回归：`EndpointTestServiceCancellationTest` 7 例 + `EndpointTestServiceTest` 新增 4 例
+      + `ServerEditorViewModelTest` 新增 2 例真实服务集成（取消穿透到 OkHttp `canceled`）。
+- [ ] TODO 设备验证与真实媒体测速：`probeUrl` 仍为占位；本任务不覆盖真机与真实服务器。
+- 来源：闭环控制目录 `D:/deepseek_test/mh-loop`，任务 `T0001`，任务书见该目录 `evidence/T0001/`。
+- 本任务不领取 2A（Agent B 持有）、2B（缺真实服务器证据）、PR #10 / PR #18 相关工作。
+
 ## Phase 0 —— 骨架（本次交付）✅ DONE
 
 - [x] DONE 工程骨架：settings/build/version catalog/wrapper

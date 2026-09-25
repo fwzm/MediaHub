@@ -20,3 +20,4 @@ captures/
 # OS
 .DS_Store
 .zcode/
+__pycache__/

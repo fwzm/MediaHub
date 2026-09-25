@@ -135,7 +135,7 @@ object AppModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, AppDatabase.NAME)
-            .addMigrations(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3)
+            .addMigrations(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3, Migrations.MIGRATION_3_4)
             .build()
 
     @Provides
@@ -203,9 +203,33 @@ abstract class RegistryModule {
 
     @Binds
     @Singleton
+    abstract fun bindSubtitleMemoryStore(impl: com.mediahub.core.database.repository.SubtitleMemoryRepository): com.mediahub.core.database.repository.SubtitleMemoryStore
+
+    @Binds
+    @Singleton
     abstract fun bindUserPreferences(impl: UserPreferencesStore): UserPreferencesRepository
 
     @Binds
     @Singleton
     abstract fun bindEnginePreferenceHistory(impl: DataStoreEnginePreferenceHistory): EnginePreferenceHistory
+
+    @Binds
+    @Singleton
+    abstract fun bindBackupDataSource(impl: com.mediahub.feature.settings.backup.ProductionBackupDataSource): com.mediahub.feature.settings.backup.BackupDataSource
+
+    @Binds
+    @Singleton
+    abstract fun bindRestoreSnapshotStorage(impl: com.mediahub.feature.settings.backup.RestoreSnapshotStore): com.mediahub.feature.settings.backup.RestoreSnapshotStorage
+
+    @Binds
+    @Singleton
+    abstract fun bindRestoreJournal(impl: com.mediahub.feature.settings.backup.SharedPrefsRestoreJournal): com.mediahub.feature.settings.backup.RestoreJournal
+
+    @Binds
+    @Singleton
+    abstract fun bindRestoreLoginInvalidator(impl: com.mediahub.feature.settings.backup.TokenSessionLoginInvalidator): com.mediahub.feature.settings.backup.RestoreLoginInvalidator
+
+    @Binds
+    @Singleton
+    abstract fun bindBackupFileStore(impl: com.mediahub.feature.settings.backup.ProductionBackupFileStore): com.mediahub.feature.settings.backup.BackupFileStore
 }
