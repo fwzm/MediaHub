@@ -40,6 +40,33 @@ internal open class SubtitleCache(
     }
 
     /**
+     * 会话生命周期（A4 终审）：缓存资源归属**当前播放会话**——
+     * - [beginSession]：新会话开始（引擎 play 成功路径调用），清空上一会话残留
+     *   并打开本会话的落地资格（防旧会话迟到下载把文件重新写回共享目录）；
+     * - [endSession]：会话终止（引擎 stop/release 调用），清空本会话缓存并关闭
+     *   落地资格——迟到下载完成时因资格关闭而丢弃（fail-closed），不会被后续
+     *   sub-add 复用（sub-add 本身已被引擎 isCurrent 闸门丢弃）。
+     * 未 begin（引擎从未 play）时本地落地一律 fail-closed 返回 null。
+     */
+    @Volatile
+    private var sessionActive = true
+
+    fun beginSession() {
+        sessionActive = true
+        File(cacheDir, DIR).apply {
+            listFiles()?.forEach { it.delete() }
+            mkdirs()
+        }
+    }
+
+    fun endSession() {
+        sessionActive = false
+        File(cacheDir, DIR).apply {
+            listFiles()?.forEach { it.delete() }
+        }
+    }
+
+    /**
      * 返回 mpv 可直挂的本地路径；无法落地返回 null。
      *
      * @param scopeKey 媒体版本指纹（缓存隔离键，调用方传入，**非空**）：
@@ -52,6 +79,7 @@ internal open class SubtitleCache(
         sessionHeaders: Map<String, String>,
     ): String? {
         require(scopeKey.isNotBlank()) { "scopeKey must not be blank (media version fingerprint)" }
+        if (!sessionActive) return null // 会话终止后迟到的字幕请求 fail-closed
         return withContext(Dispatchers.IO) {
             runCatching { resolve(uri, mediaUrl, scopeKey, sessionHeaders) }
                 .onFailure { logger.w(LogTag.PLAYER, "mpv 外挂字幕落地失败 uri=$uri", it) }
@@ -150,7 +178,10 @@ internal open class SubtitleCache(
                             }
                         }
                     }
-                    if (!tmp.renameTo(target)) {
+                    if (!sessionActive) {
+                        // A4：落地前再查会话资格——stop 与下载交错时，迟到的下载不重新落地
+                        tmp.delete()
+                    } else if (!tmp.renameTo(target)) {
                         throw IOException("subtitle cache rename failed")
                     }
                 }

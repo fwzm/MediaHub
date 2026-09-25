@@ -94,7 +94,16 @@ class MpvPlaybackEngine internal constructor(
         },
     )
 
-    private val subtitleCache: SubtitleCache by lazy { subtitleCacheFactory() }
+    // A4：字幕缓存延迟创建（字幕能力未使用的引擎实例不触发工厂——默认工厂会抛
+    // "not configured"）；play/stop 的生命周期钩子经 subtitleCacheIfCreated 安全
+    // 访问，不强制初始化。工厂本身幂等无共享状态，竞争下多建一个实例无害。
+    @Volatile
+    private var subtitleCacheInstance: SubtitleCache? = null
+
+    private fun subtitleCache(): SubtitleCache =
+        subtitleCacheInstance ?: subtitleCacheFactory().also { subtitleCacheInstance = it }
+
+    private fun subtitleCacheIfCreated(): SubtitleCache? = subtitleCacheInstance
 
     override val kind: EngineKind = EngineKind.MPV
     private val _uiState = MutableStateFlow(PlaybackUiState())
@@ -145,6 +154,10 @@ class MpvPlaybackEngine internal constructor(
             next.playJob = scope.launch(start = CoroutineStart.LAZY) { initialize(next) }
             old
         }
+        // A4 缓存生命周期：新播放会话开始——上一会话的字幕缓存残留清空，落地资格
+        // 重新打开（迟到的旧会话下载被会话闸门 fail-closed，不会重新落地）。
+        // 仅当缓存实例已创建才清残留（字幕未用过的实例无需初始化）
+        subtitleCacheIfCreated()?.beginSession()
         closePublished(previous)
         nativeOutsideStateLock { next.playJob?.start() }
     }
@@ -361,7 +374,7 @@ class MpvPlaybackEngine internal constructor(
     override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
         // 落地缓存：本地路径原样；http(s)/content:// 先下载/拷贝到 cache（同 origin 才带凭据头）。
         val session = synchronized(stateLock) { current?.session }
-        val localPath = subtitleCache.localPathFor(
+        val localPath = subtitleCache().localPathFor(
             uri = subtitle.uri,
             mediaUrl = session?.source?.url ?: "",
             // scopeKey：媒体版本指纹（缓存隔离键）。serverId/itemId 组合为 A4 编译占位，
@@ -378,18 +391,26 @@ class MpvPlaybackEngine internal constructor(
         // （上层据此写匹配记忆）。
         var accepted = false
         withNative { _, m ->
-            val before = m.getPropertyDouble("track-list/count") ?: -1.0
+            val before = (m.getPropertyDouble("track-list/count") ?: -1.0).toInt()
             m.command(arrayOf("sub-add", localPath, "select"))
-            val after = m.getPropertyDouble("track-list/count")
-            if (after != null && after > before) {
-                val lastType = m.getPropertyString("track-list/${after.toInt() - 1}/type")
-                accepted = lastType == "sub"
+            val after = (m.getPropertyDouble("track-list/count") ?: -1.0).toInt()
+            // A4 终审：**逐轨扫描新增轨道**，仅当出现 type=sub 且 external-filename
+            // 与本次目标一致且已被选中的轨道才算确认（count+1/末轨 sub 不足以
+            // 证明目标加载——并发无关轨道、目标非末轨、次字幕形态均会误判）。
+            for (i in before until after) {
+                val type = m.getPropertyString("track-list/$i/type")
+                val filename = m.getPropertyString("track-list/$i/external-filename")
+                val selected = m.getPropertyBoolean("track-list/$i/selected")
+                if (type == "sub" && filename == localPath && selected == true) {
+                    accepted = true
+                    break
+                }
             }
         }
         if (accepted) {
-            logger.i(LogTag.PLAYER, "mpv 外挂字幕 sub-add 已确认（track-list 新 sub 轨）path=$localPath")
+            logger.i(LogTag.PLAYER, "mpv 外挂字幕 sub-add 已确认（目标轨存在且已选中）path=$localPath")
         } else {
-            logger.w(LogTag.PLAYER, "mpv 外挂字幕 sub-add 未确认成功（轨道表无新 sub 轨）path=$localPath")
+            logger.w(LogTag.PLAYER, "mpv 外挂字幕 sub-add 未确认成功（无匹配目标轨或未选中）path=$localPath")
         }
         return accepted
     }
@@ -412,6 +433,10 @@ class MpvPlaybackEngine internal constructor(
                 .getOrElse { progressSnapshot(run, null, snapshot) }
         }
         closePublished(run)
+        // A4 缓存生命周期：会话终止——清空本会话字幕缓存并关闭落地资格
+        // （迟到的旧会话下载 fail-closed 丢弃；同一 SubtitleCache 实例随引擎，
+        // 新会话 play 时 beginSession 重开，不删除用户原文件，仅清应用缓存目录）。
+        subtitleCacheIfCreated()?.endSession()
         return final
     }
 
