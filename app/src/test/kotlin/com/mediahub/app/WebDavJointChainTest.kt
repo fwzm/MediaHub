@@ -174,6 +174,42 @@ class WebDavJointChainTest {
         ).allowMainThreadQueries().build()
         serverRepository = ServerRepository(db)
         mock = MockWebServer()
+        // A4 收尾：**按请求语义分派**（路径+Depth 决定响应），不再依赖 enqueue 队列
+        // 顺序——P2 字幕发现是 resolve 成功后的异步请求，与链路请求的到达顺序在
+        // 真实调度下不确定，固定队列会把"文件详情"响应错发给字幕发现请求。
+        // 未知请求（路径/方法/Depth 组合不匹配）→ 500 + 计数，绝不被泛化成功掩盖。
+        val unknownCount = java.util.concurrent.atomic.AtomicInteger()
+        mock.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val decodedPath = runCatching {
+                    URLDecoder.decode(requireNotNull(request.path), Charsets.UTF_8)
+                }.getOrNull()
+                val depth = request.getHeader("Depth")
+                return when {
+                    request.method != "PROPFIND" -> unknownResponse(unknownCount)
+                    decodedPath == "/" && depth == "0" -> xml(multistatus(collection("/")))
+                    decodedPath == "/" && depth == "1" ->
+                        xml(multistatus(collection(FOLDER_HREF), file(FILE_HREF, FILE_SIZE)))
+                    decodedPath == FILE_PATH_DECODED && depth == "0" ->
+                        xml(multistatus(file(FILE_HREF, FILE_SIZE)))
+                    decodedPath == "/电影/" && depth == "1" ->
+                        // 字幕发现：同目录含 1 个字幕候选（WebDavSubtitleDiscoveryProvider 过滤）
+                        xml(
+                            multistatus(
+                                file(FILE_HREF, FILE_SIZE),
+                                file("/电影/流浪 地球 2.srt", 1_024L),
+                            ),
+                        )
+                    else -> unknownResponse(unknownCount)
+                }
+            }
+
+            private fun xml(body: String) =
+                MockResponse().setResponseCode(207).setHeader("Content-Type", "application/xml").setBody(body)
+
+            private fun unknownResponse(counter: java.util.concurrent.atomic.AtomicInteger) =
+                MockResponse().setResponseCode(500).also { counter.incrementAndGet() }
+        }
         mock.start()
         base = mock.url("/").toString().trimEnd('/')
         val logger = StdoutLogger()
@@ -242,8 +278,6 @@ class WebDavJointChainTest {
         val resolvedUrl = requireNotNull(addVm.uiState.value.resolvedUrl)
         assertEquals("规范化不改动 MockWebServer 地址", base, resolvedUrl)
 
-        // authenticate 的 PROPFIND Depth:0（第 1 个 207）
-        mock.enqueue(MockResponse().setResponseCode(207).setBody(multistatus(collection("/"))))
 
         var saved: com.mediahub.model.MediaServer? = null
         val savedLatch = CountDownLatch(1)
@@ -270,12 +304,6 @@ class WebDavJointChainTest {
         val handle = requireNotNull(registry.create(persisted))
         val browse = requireNotNull(handle.browse)
 
-        // PROPFIND Depth:1（第 2 个 207）：1 子目录（标准编码 href）+ 1 视频文件（未编码中文/空格 href）
-        mock.enqueue(
-            MockResponse().setResponseCode(207).setBody(
-                multistatus(collection(FOLDER_HREF), file(FILE_HREF, FILE_SIZE)),
-            ),
-        )
         val page = runBlocking { browse.listFolder(null, PageRequest()) }
 
         assertEquals(2, page.totalCount)
@@ -294,10 +322,7 @@ class WebDavJointChainTest {
         // 3. 详情：handle.detail.getItemDetail(browse 产出的 itemId)
         // ============================================================
         val detail = requireNotNull(handle.detail)
-        // PROPFIND Depth:0 打在文件上（第 3 个 207）
-        mock.enqueue(
-            MockResponse().setResponseCode(207).setBody(multistatus(file(FILE_HREF, FILE_SIZE))),
-        )
+
         val mediaDetail = runBlocking { detail.getItemDetail(video.id) }
         assertEquals(FILE_TITLE, mediaDetail.item.title)
         assertEquals(MediaType.VIDEO, mediaDetail.item.type)
@@ -325,10 +350,7 @@ class WebDavJointChainTest {
         val engineSessions = CopyOnWriteArrayList<PlaybackSession>()
         val engineCreator = PlaybackEngineCreator { RecordingEngine(engineSessions) }
         val appContext = RuntimeEnvironment.getApplication()
-        // PROPFIND Depth:0 打在文件上（第 4 个 207）——必须在 VM 构造前入队（init 自动 resolve）
-        mock.enqueue(
-            MockResponse().setResponseCode(207).setBody(multistatus(file(FILE_HREF, FILE_SIZE))),
-        )
+
         val playerVm = PlayerViewModel(
             savedStateHandle = SavedStateHandle(
                 mapOf(
@@ -377,46 +399,61 @@ class WebDavJointChainTest {
         val decoded = NavArgCodec.decode(encoded)
         assertEquals("路由参数无损往返", video.id, decoded)
         assertFalse(encoded.contains('/'))
-        // PROPFIND Depth:0（第 5 个 207）
-        mock.enqueue(
-            MockResponse().setResponseCode(207).setBody(multistatus(file(FILE_HREF, FILE_SIZE))),
-        )
+
         val roundtrip = runBlocking { detail.getItemDetail(decoded) }
         assertEquals(video.id, roundtrip.item.id)
         assertEquals(FILE_TITLE, roundtrip.item.title)
         assertEquals(FILE_SIZE, roundtrip.item.sizeBytes)
 
         // ============================================================
-        // 协议审计：5 个请求全部是带 Basic 凭据的 PROPFIND，Depth/路径逐一核对
+        // 字幕发现真实完成：resolve 成功触发的异步发现必须已经返回
+        // （有界条件等待，不靠固定 sleep；discovered 含同目录 .srt 候选）
+        // ============================================================
+        val discoveryDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
+        while (System.nanoTime() < discoveryDeadline) {
+            val center = playerVm.subtitleCenter.value
+            if (!center.discovering && center.discovered.isNotEmpty()) break
+            Thread.sleep(25)
+        }
+        val center = playerVm.subtitleCenter.value
+        assertFalse("字幕发现必须已结束", center.discovering)
+        assertTrue(
+            "同目录字幕发现必须真实完成并返回候选（实际 ${center.discovered}）",
+            center.discovered.any { it.extension == "srt" },
+        )
+
+        // ============================================================
+        // 协议审计（语义分派版）：总数=6；按 (path, Depth) 语义分类计数——
+        // 字幕发现与链路请求的到达顺序不固定，两种交错均通过；
+        // 未知请求必须为 0（分派器对未知组合返回 500 并计数）
         // ============================================================
         val requests = mutableListOf<RecordedRequest>()
         while (true) {
             val request = mock.takeRequest(2, TimeUnit.SECONDS) ?: break
             requests += request
         }
-        // P2 字幕中心接入后：resolve 成功自动触发同目录字幕发现（+1 次 Depth:1
-        // PROPFIND），总请求 5→6（auth 0 / browse 1 / detail 0 / player detail 0 /
-        // replay-detail 0 / subtitle-discovery 1）
         assertEquals("XML 响应与请求一一对应（6 份 207 multistatus）", 6, requests.size)
-        val depths = requests.map { it.getHeader("Depth") }
-        assertEquals(listOf("0", "1", "0", "0", "0", "1"), depths)
         requests.forEach { request ->
             assertEquals("PROPFIND", request.method)
             assertEquals("每次请求都携带同一条 Basic 凭据", expectedBasic(), request.getHeader("Authorization"))
         }
-        assertEquals("认证与浏览都打在根目录", listOf("/", "/"), requests.take(2).map { it.path })
-        requests.drop(2).take(3).forEach { request ->
+        fun decoded(request: RecordedRequest) =
+            URLDecoder.decode(requireNotNull(request.path), Charsets.UTF_8)
+        val rootDepth0 = requests.count { decoded(it) == "/" && it.getHeader("Depth") == "0" }
+        val rootDepth1 = requests.count { decoded(it) == "/" && it.getHeader("Depth") == "1" }
+        val fileDepth0 = requests.count { decoded(it) == FILE_PATH_DECODED && it.getHeader("Depth") == "0" }
+        val folderDepth1 = requests.count { decoded(it) == "/电影/" && it.getHeader("Depth") == "1" }
+        assertEquals("认证探测 Depth:0 打根 ×1", 1, rootDepth0)
+        assertEquals("浏览 Depth:1 打根 ×1", 1, rootDepth1)
+        assertEquals("详情/播放/往返 Depth:0 打文件 ×3", 3, fileDepth0)
+        assertEquals("字幕发现 Depth:1 打视频目录 ×1", 1, folderDepth1)
+        requests.filter { decoded(it) == FILE_PATH_DECODED }.forEach { request ->
             assertEquals(
                 "详情/播放链路真实命中中文+空格文件（percent 编码保真）",
                 FILE_PATH_DECODED,
-                URLDecoder.decode(requireNotNull(request.path), Charsets.UTF_8),
+                decoded(request),
             )
         }
-        assertEquals(
-            "字幕发现打在视频所在目录（Depth:1 同目录枚举）",
-            "/电影/",
-            URLDecoder.decode(requireNotNull(requests.last().path), Charsets.UTF_8),
-        )
     }
 
     private companion object {
