@@ -44,6 +44,7 @@ import com.mediahub.provider.api.ProviderHandle
 import com.mediahub.provider.api.ProviderStatus
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -133,8 +134,10 @@ class PlayerViewModelSubtitleCenterTest {
             if (offsetResult) subtitleOffsetMs = offsetMs.coerceIn(-60_000L, 60_000L)
             return offsetResult
         }
-        override fun stop(): PlaybackProgress? = null
-        override fun release() = Unit
+        var stopCount = 0
+        var releaseCount = 0
+        override fun stop(): PlaybackProgress? { stopCount++; return null }
+        override fun release() { releaseCount++ }
     }
 
     private class MemoryStore : SubtitleMemoryStore {
@@ -248,6 +251,7 @@ class PlayerViewModelSubtitleCenterTest {
         memory: SubtitleMemoryStore,
         preferences: FakeUserPreferences = FakeUserPreferences(),
         playback: MediaPlaybackProvider = Playback(),
+        importedResolver: ImportedSubtitleResolver? = null,
     ): PlayerViewModel {
         val saved = SavedStateHandle(
             mapOf(
@@ -262,6 +266,7 @@ class PlayerViewModelSubtitleCenterTest {
             progressStore = EmptyProgress(),
             subtitleMemoryStore = memory,
             registry = Registry(discovery, playback),
+            importedSubtitleResolver = importedResolver,
             media3EngineFactory = PlaybackEngineCreator { engine },
             mpvEngineFactory = PlaybackEngineCreator { RecordingEngine() },
             engineHistory = InMemoryEnginePreferenceHistory(),
@@ -781,7 +786,8 @@ class PlayerViewModelSubtitleCenterTest {
     fun `accepted Off finishes storage when the navigation scope is cleared`() = runTest(dispatcher) {
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
-        var stored: SubtitleMemoryEntry? = null
+        var stored: SubtitleMemoryEntry? = SubtitleMemoryEntry(SubtitleMemoryKeys.forItem(videoItem),
+            "srv-1", Discovery.DEFAULT_SUBS[0].id, 0L, 0L)
         val memory = object : SubtitleMemoryStore {
             override suspend fun recall(versionKey: String) = stored
             override suspend fun remember(entry: SubtitleMemoryEntry) {
@@ -790,17 +796,119 @@ class PlayerViewModelSubtitleCenterTest {
             }
             override suspend fun forget(versionKey: String) { stored = null }
         }
-        val vm = buildVm(RecordingEngine(), Discovery(), memory)
+        val closingEngine = RecordingEngine()
+        val vm = buildVm(closingEngine, Discovery(), memory)
         val store = androidx.lifecycle.ViewModelStore().apply { put("player", vm) }
+        var next: PlayerViewModel? = null
+        try {
         runCurrent(); vm.selectExternalSubtitle(Discovery.DEFAULT_SUBS[0]); runCurrent()
         assertTrue(entered.isCompleted)
         vm.onEmbeddedSubtitleSelected(null); runCurrent()
-        store.clear(); release.complete(Unit); runCurrent()
-        assertNull("accepted Off must not be cancelled behind late old write", stored)
+        vm.stopAndFlushAsync(); runCurrent()
+        assertEquals("actual engine stops before waiting for storage", 1, closingEngine.stopCount)
+        assertEquals(0, closingEngine.releaseCount)
+        store.clear()
         val nextEngine = RecordingEngine()
-        val next = buildVm(nextEngine, Discovery(), memory)
-        try { runCurrent(); assertTrue(nextEngine.loaded.isEmpty()) }
-        finally { next.stopAndFlush(); runCurrent() }
+        next = buildVm(nextEngine, Discovery(), memory)
+        runCurrent()
+        assertTrue("new VM recall must wait for the old accepted Off", nextEngine.loaded.isEmpty())
+        release.complete(Unit); runCurrent()
+        assertEquals("cancelled navigation still releases once", 1, closingEngine.releaseCount)
+        assertNull("accepted Off must not be cancelled behind late old write", stored)
+        runCurrent(); assertTrue(nextEngine.loaded.isEmpty())
+        } finally { release.complete(Unit); store.clear(); runCurrent(); next?.stopAndFlush(); runCurrent() }
+    }
+
+    @Test
+    fun `remembered granted SAF subtitle is reconstructed and replayed after reentry`() = runTest(dispatcher) {
+        val candidate = DiscoveredSubtitle(id = "content://fixture/document/7", name = "imported.zh", fileName = "imported.zh.srt",
+            extension = "srt", language = "zh", uri = "content://fixture/document/7")
+        val memory = MemoryStore()
+        memory.entries[SubtitleMemoryKeys.forItem(videoItem)] = SubtitleMemoryEntry(
+            SubtitleMemoryKeys.forItem(videoItem), "srv-1", candidate.id, 500L, 0L)
+        val resolver = object : ImportedSubtitleResolver(org.robolectric.RuntimeEnvironment.getApplication()) {
+            override suspend fun resolve(id: String): DiscoveredSubtitle? = candidate.takeIf { it.id == id }
+        }
+        val engine = RecordingEngine()
+        val vm = buildVm(engine, null, memory, importedResolver = resolver)
+        try {
+            runCurrent()
+            assertEquals(candidate.id, vm.subtitleCenter.value.selectedExternalId)
+            assertEquals(listOf(candidate), vm.subtitleCenter.value.imported)
+            assertEquals(listOf(candidate.id), engine.loaded.map { it.id })
+            assertEquals(500L, vm.subtitleCenter.value.offsetMs)
+        } finally { vm.stopAndFlush(); runCurrent() }
+    }
+
+    @Test
+    fun `remembered SAF permission loss shows unavailable without loading or success`() = runTest(dispatcher) {
+        val memory = MemoryStore()
+        memory.entries[SubtitleMemoryKeys.forItem(videoItem)] = SubtitleMemoryEntry(
+            SubtitleMemoryKeys.forItem(videoItem), "srv-1", "content://fixture/document/7", 0L, 0L)
+        val resolver = object : ImportedSubtitleResolver(org.robolectric.RuntimeEnvironment.getApplication()) {
+            override suspend fun resolve(id: String): DiscoveredSubtitle? = null
+        }
+        val engine = RecordingEngine()
+        val vm = buildVm(engine, Discovery(CompletableDeferred(emptyList())), memory, importedResolver = resolver)
+        try {
+            runCurrent()
+            assertTrue(engine.loaded.isEmpty())
+            assertNull(vm.subtitleCenter.value.selectedExternalId)
+            assertTrue(vm.subtitleCenter.value.imported.isEmpty())
+            assertEquals("已记忆字幕不可读取，请重新导入", vm.subtitleCenter.value.notice)
+        } finally { vm.stopAndFlush(); runCurrent() }
+    }
+
+    @Test
+    fun `late imported metadata cannot replace a manual Off`() = runTest(dispatcher) {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val candidate = DiscoveredSubtitle(id = "content://fixture/document/8", name = "late", fileName = "late.srt",
+            extension = "srt", language = null, uri = "content://fixture/document/8")
+        val memory = MemoryStore()
+        memory.entries[SubtitleMemoryKeys.forItem(videoItem)] = SubtitleMemoryEntry(
+            SubtitleMemoryKeys.forItem(videoItem), "srv-1", candidate.id, 0L, 0L)
+        val resolver = object : ImportedSubtitleResolver(org.robolectric.RuntimeEnvironment.getApplication()) {
+            override suspend fun resolve(id: String): DiscoveredSubtitle? {
+                entered.complete(Unit)
+                return kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { release.await(); candidate }
+            }
+        }
+        val engine = RecordingEngine()
+        val vm = buildVm(engine, null, memory, importedResolver = resolver)
+        try {
+            runCurrent(); assertTrue(entered.isCompleted)
+            vm.onEmbeddedSubtitleSelected(null); runCurrent()
+            release.complete(Unit); runCurrent()
+            assertTrue(vm.subtitleCenter.value.imported.isEmpty())
+            assertNull(vm.subtitleCenter.value.selectedExternalId)
+            assertTrue(engine.loaded.isEmpty())
+        } finally { release.complete(Unit); vm.stopAndFlush(); runCurrent() }
+    }
+
+    @Test
+    fun `duplicate exit waits for accepted storage and native release`() = runTest(dispatcher) {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val memory = object : SubtitleMemoryStore {
+            override suspend fun recall(versionKey: String): SubtitleMemoryEntry? = null
+            override suspend fun remember(entry: SubtitleMemoryEntry) { entered.complete(Unit); release.await() }
+            override suspend fun forget(versionKey: String) = Unit
+        }
+        val engine = RecordingEngine()
+        val vm = buildVm(engine, Discovery(), memory)
+        try {
+        runCurrent(); vm.selectExternalSubtitle(Discovery.DEFAULT_SUBS[0]); runCurrent()
+        assertTrue(entered.isCompleted)
+        val first = backgroundScope.async { vm.stopAndFlush() }
+        runCurrent()
+        val second = backgroundScope.async { vm.stopAndFlush() }
+        runCurrent()
+        assertFalse("second Back must not navigate before cleanup", second.isCompleted)
+        release.complete(Unit); runCurrent()
+        assertTrue(first.isCompleted); assertTrue(second.isCompleted)
+        assertEquals(1, engine.stopCount); assertEquals(1, engine.releaseCount)
+        } finally { release.complete(Unit); runCurrent(); vm.stopAndFlush(); runCurrent() }
     }
 
     // ---- A4：字幕操作归属（会话代贯穿；B 竞争 finding 的正确归因动态复现） ----

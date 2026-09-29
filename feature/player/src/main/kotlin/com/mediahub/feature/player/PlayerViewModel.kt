@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
@@ -114,6 +115,11 @@ data class PlayerCombinedState(
     val error: com.mediahub.core.network.PlaybackError? = null,
 )
 
+private object SubtitleMemoryOwnership {
+    private val owners = java.util.WeakHashMap<SubtitleMemoryStore, Mutex>()
+    @Synchronized fun mutex(store: SubtitleMemoryStore): Mutex = owners.getOrPut(store) { Mutex() }
+}
+
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -127,6 +133,7 @@ class PlayerViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val artworkPaletteLoader: ArtworkPaletteLoader,
     private val logger: Logger,
+    private val importedSubtitleResolver: ImportedSubtitleResolver? = null,
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
     // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（见 core:common）
@@ -218,7 +225,8 @@ class PlayerViewModel @Inject constructor(
     private var subtitleCenterJob: kotlinx.coroutines.Job? = null
     private var subtitleOperationJob: Job? = null
     private val subtitleOperationGeneration = java.util.concurrent.atomic.AtomicLong(0)
-    private val subtitleMemoryMutex = Mutex()
+    // Different navigation VMs sharing one repository must observe the same accepted writes.
+    private val subtitleMemoryMutex = SubtitleMemoryOwnership.mutex(subtitleMemoryStore)
     private val subtitleMemoryWrites = mutableSetOf<Job>()
 
     /**
@@ -266,12 +274,8 @@ class PlayerViewModel @Inject constructor(
         val generation = subtitleSessionGeneration.incrementAndGet()
         subtitleCenterJob = viewModelScope.launch {
             val discovery = handle?.subtitleDiscovery
-            if (discovery == null) {
-                _subtitleCenter.update { it.copy(discovering = false) }
-                return@launch
-            }
-            _subtitleCenter.update { it.copy(discovering = true) }
-            val found = runCatching { discovery.discoverSubtitles(item) }
+            _subtitleCenter.update { it.copy(discovering = discovery != null) }
+            val found = runCatching { discovery?.discoverSubtitles(item) ?: emptyList() }
                 .onFailure { if (it is CancellationException) throw it }
                 .onFailure { logger.w(LogTag.PLAYER, "字幕发现失败 itemId=${item.id}", it) }
                 .getOrDefault(emptyList())
@@ -287,14 +291,20 @@ class PlayerViewModel @Inject constructor(
             // recall 挂起窗口（记忆读取是迟到竞争的主要交错点）：恢复后必须再校验
             if (!isSubtitleOperationCurrent(generation, operation)) return@launch
             if (_subtitleCenter.value.manualSelection) return@launch
+            if (memory.serverId != serverId) return@launch
             if (memory.offsetMs != 0L && engine.setSubtitleOffset(memory.offsetMs) &&
                 isSubtitleSessionCurrent(generation)
             ) {
                 _subtitleCenter.update { it.copy(offsetMs = engine.subtitleOffsetMs) }
             }
-            val target = memory.subtitleId
-                ?.let { id -> found.find { it.id == id } }
-                ?: return@launch
+            val id = memory.subtitleId ?: return@launch
+            val target = found.find { it.id == id } ?: importedSubtitleResolver?.resolve(id)
+            if (!isSubtitleOperationCurrent(generation, operation)) return@launch
+            if (target == null) {
+                if (id.startsWith("content://")) _subtitleCenter.update { it.copy(notice = "已记忆字幕不可读取，请重新导入") }
+                return@launch
+            }
+            if (target !in found) _subtitleCenter.update { it.copy(imported = it.imported + target) }
             applyExternalSubtitle(target, remember = false, generation = generation, operation = operation)
         }
     }
@@ -515,6 +525,7 @@ class PlayerViewModel @Inject constructor(
     )
     private var syncStarted = false
     private var stopped = false
+    private val stopCompleted = CompletableDeferred<Unit>()
     private var currentTrace: PlaybackStartupTrace? = null
     private var resolveJob: Job? = null
     private val resolveGeneration = java.util.concurrent.atomic.AtomicLong(0)
@@ -677,19 +688,24 @@ class PlayerViewModel @Inject constructor(
      * 释放播放器。幂等：可被返回按钮与 onDispose 兜底重复调用。
      */
     suspend fun stopAndFlush() {
-        if (stopped) return
+        if (stopped) { stopCompleted.await(); return }
         stopped = true
         resolveGeneration.incrementAndGet()
         resolveJob?.cancel()
         invalidateSubtitleSession()
-        subtitleMemoryWrites.toList().forEach { it.join() }
-        val finalProgress = engine.stop()
-        // 先停 periodic/critical 管线（禁止 final 之后的新 remote work——防
-        // Stopped 后被排队 sample 以 Playing/Progress 重开 Jellyfin 会话），
-        // 再执行单次权威 final 上报；flushFinal 不依赖 coordinator job。
-        syncCoordinator.stop()
-        syncCoordinator.flushFinal(finalProgress)
-        engine.release()
+        withContext(NonCancellable) {
+            try {
+                val finalProgress = engine.stop()
+                // Stop periodic work before draining accepted local writes and the bounded
+                // final report. Navigation cancellation must not strand the native engine.
+                syncCoordinator.stop()
+                subtitleMemoryWrites.toList().forEach { it.join() }
+                syncCoordinator.flushFinal(finalProgress)
+            } finally {
+                syncCoordinator.stop()
+                try { engine.release() } finally { stopCompleted.complete(Unit) }
+            }
+        }
     }
 
     /** 异步兜底入口（PlayerScreen onDispose 使用；返回按钮走 [stopAndFlush] 同步流程）。 */
@@ -708,9 +724,9 @@ class PlayerViewModel @Inject constructor(
         invalidateSubtitleSession()
         // 兜底：若未走 stopAndFlush（如进程销毁/异常路径），确保停止采样并释放资源。
         if (!stopped) {
-            engine.stop()
-            syncCoordinator.stop()
-            engine.release()
+            stopped = true
+            try { engine.stop(); syncCoordinator.stop() }
+            finally { try { engine.release() } finally { stopCompleted.complete(Unit) } }
         }
         super.onCleared()
     }
