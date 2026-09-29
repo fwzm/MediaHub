@@ -322,7 +322,7 @@ class PlaybackEngine(
     /** 已侧挂的外挂字幕（重建媒体项时全部重挂）。 */
     private val externalSubtitles = mutableListOf<MediaItem.SubtitleConfiguration>()
 
-    /** 用户最近一次手动选择的内嵌字幕轨（媒体项重建后重放；null=关闭/未选）。 */
+    /** 最近的手选内嵌字幕轨（外挂尝试失败时与原 selector 参数一起恢复；null=关闭/未选）。 */
     private var lastSelectedSubtitle: TrackSelection? = null
 
     override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
@@ -390,6 +390,8 @@ class PlaybackEngine(
                 // Remove a late pending subtitle from the actual media item too. Do not roll back
                 // over an Off/new request/new media session that already superseded this request.
                 lastSelectedSubtitle = previousSelection
+                // Preserve the original source's group identities. Replaying indices against
+                // the pending merged mapping would replace them with stale namespaced groups.
                 trackSelector.setParameters(previousParameters)
                 runCatching { rebuildMediaItemWithExternalSubtitles() }
                     .onFailure { logger.w(LogTag.PLAYER, "Media3 subtitle rollback failed") }
@@ -449,9 +451,6 @@ class PlaybackEngine(
         player.prepare()
         player.playWhenReady = snapshot.playWhenReady
         player.setPlaybackSpeed(snapshot.speed)
-        // 轨道选择状态被重建重置：若用户此前选中了内嵌字幕轨，重建后须如实重选
-        // （按索引重放；轨道表变化导致索引失效时静默接受，不伪造选中）。
-        lastSelectedSubtitle?.let { selectSubtitleTrack(it) }
     }
 
 

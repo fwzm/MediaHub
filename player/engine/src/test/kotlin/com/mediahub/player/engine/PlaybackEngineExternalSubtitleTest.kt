@@ -365,6 +365,27 @@ class PlaybackEngineExternalSubtitleTest {
     }
 
     @Test
+    fun `failed external rollback preserves actual embedded selection after returning to unmerged source`() = runTest {
+        engine.play(session())
+        fake.currentTracks()
+        engine.selectSubtitleTrack(TrackSelection(0, 0))
+        assertTrue("manual embedded must actually be selected before the failing load",
+            fake.currentTracks().groups.any { group -> (0 until group.length).any {
+                group.getTrackFormat(it).id == "embedded" && group.isTrackSelected(it)
+            } })
+        fake.state.rejectExternalSupport = true
+        assertFalse(engine.loadExternalSubtitle(subtitle()))
+        assertTrue("rollback must remove the pending sidecar", fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.isEmpty())
+        val restored = fake.currentTracks()
+        assertTrue("actual unmerged source must expose the original native ID",
+            restored.groups.any { group -> (0 until group.length).any { group.getTrackFormat(it).id == "embedded" } })
+        assertTrue("original embedded must remain actually selected after failed-load rollback",
+            restored.groups.any { group -> (0 until group.length).any {
+                group.getTrackFormat(it).id == "embedded" && group.isTrackSelected(it)
+            } })
+    }
+
+    @Test
     fun `same unique suffix from a wrong merged child slot cannot confirm`() = runTest {
         engine.play(session())
         fake.state.wrongExternalChildSlot = true
