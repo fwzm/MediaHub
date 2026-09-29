@@ -5,6 +5,7 @@ import com.mediahub.core.common.AppDispatchers
 import com.mediahub.core.common.backup.BackupDtos
 import com.mediahub.core.common.backup.BackupFileFormat
 import com.mediahub.core.database.AppDatabase
+import com.mediahub.core.database.entity.SubtitleMemoryEntity
 import com.mediahub.core.database.prefs.UserPreferencesStore
 import com.mediahub.model.*
 import java.io.File
@@ -28,6 +29,9 @@ import org.robolectric.annotation.Config
 class RestoreSnapshotStoreTest {
     @get:Rule val temporary = TemporaryFolder()
     private fun key() = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+    private fun legacyV1Images() = RestoreImageCodec.decode(java.util.Base64.getDecoder().decode(
+        "AAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAEQVVUTz+AAAAAAAASAQEB/////wABAf////8AAAAAAAAAAf8AAAA/gAAAPaPXCgEBAAAAAAoAAAAACgE/AAAAQKAAAAFAAAAAAAAABEFVVE8/gAAAAAAAEgEBAf////8AAQH/////AAAAAAAAAAH/AAAAP4AAAD2j1woBAQAAAAAKAAAAAAoBPwAAAECgAAABQAAAAP////8=",
+    ))
     private fun server(id: String, address: String = "https://$id.example") = MediaServer(id, id, ServerType.EMBY,
         createdAtEpochMs = 123, endpoints = listOf(ServerEndpoint("$id-endpoint", id, "primary", address, true)))
     private fun images() = RestoreImages(
@@ -68,9 +72,12 @@ class RestoreSnapshotStoreTest {
             itemTitle = "title", posterUrl = "https://image.example?token=FAKE", itemType = MediaType.EPISODE)
         val prefs = UserPreferences(PlaybackEngineMode.MPV, 1.5f, 24, false, false, false, 14,
             true, false, false, SubtitleStyle(1, 2, 2, 3, 1.2f, 0.2f, false),
-            PlayerGestures(false, true, 15, true, 20, false, 0.1f, 6f, false, 3f))
+            PlayerGestures(false, true, 15, true, 20, false, 0.1f, 6f, false, 3f),
+            PlayerVisualEffectsPreferences(false, PlayerVisualPreset.SPECTRUM, 0.8f, false, false, VisualPerformanceMode.HIGH),
+            ProfessionalInfoPreferences(expertMode = false))
         val images = RestoreImages(BackupSnapshot(listOf(server), listOf(progress)),
-            BackupSnapshot(listOf(this.server("empty")), listOf(PlaybackProgress("empty", "nulls", 0, 0, true, 0))),
+            BackupSnapshot(listOf(this.server("empty")), listOf(PlaybackProgress("empty", "nulls", 0, 0, true, 0)),
+                listOf(SubtitleMemoryEntity("empty|movie|s:12", "empty", "content://private.fixture/sub", -1200, 15))),
             prefs, UserPreferences(), BackupDtos.RestorePlanRecord("MERGE", restoredProgressCount = 1))
         assertEquals(images, RestoreImageCodec.decode(RestoreImageCodec.encode(images)))
         assertNull(RestoreImageCodec.decode(RestoreImageCodec.encode(images)).after.progress.single().posterUrl)
@@ -81,6 +88,56 @@ class RestoreSnapshotStoreTest {
         val store = RestoreSnapshotStore(temporary.root, key())
         assertTrue(runCatching { store.save("../escaped", images()) }.isFailure)
         assertFalse(File(temporary.root.parentFile, "escaped.bin").exists())
+    }
+
+    @Test fun `encrypted snapshot publishes with nondefault visuals and info density`() {
+        val id = "restore-${UUID.randomUUID()}"
+        val secret = key()
+        val prefs = UserPreferences(
+            playerVisualEffects = PlayerVisualEffectsPreferences(false, PlayerVisualPreset.LIQUID, 0.9f,
+                false, false, VisualPerformanceMode.BATTERY),
+            professionalInfo = ProfessionalInfoPreferences(false),
+        )
+        val expected = images().copy(beforePreferences = prefs, afterPreferences = prefs.copy(subtitleSizeSp = 24))
+        RestoreSnapshotStore(temporary.root, secret).save(id, expected)
+        assertEquals(expected, RestoreSnapshotStore(temporary.root, secret).read(id))
+    }
+
+    @Test fun `legacy v1 private snapshot remains readable with omitted preferences defaults`() {
+        // Fixed bytes of the historical v1 codec: two empty snapshots, default preferences, no record.
+        assertEquals(RestoreImages(BackupSnapshot(emptyList(), emptyList()), BackupSnapshot(emptyList(), emptyList()),
+            UserPreferences(), UserPreferences()), legacyV1Images())
+    }
+
+    @Test fun `legacy v1 interrupted image fails closed when current subtitle memory was not captured`() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("mediahub_restore_journal", 0).edit().clear().commit()
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()
+        val dispatchers = AppDispatchers(io = Dispatchers.IO)
+        val journal = SharedPrefsRestoreJournal(context, dispatchers)
+        val memory = SubtitleMemoryEntity("orphan|movie|s:1", "orphan", "fixture-sub", 700, 1)
+        var invalidations = 0
+        val legacyStore = object : RestoreSnapshotStorage {
+            override fun read(id: String) = legacyV1Images()
+            override fun save(id: String, images: RestoreImages) = error("must not rewrite a legacy image")
+            override fun delete(id: String) = error("must retain the legacy image")
+        }
+        val id = "restore-${UUID.randomUUID()}"
+        try {
+            db.subtitleMemoryDao().upsert(memory)
+            journal.begin(RestoreJournal.ActiveEntry(id, RestoreJournal.Phase.PREPARING, "", "", "", false, 0,
+                protectiveSnapshotRef = id))
+            val repo = BackupRepository(ProductionBackupDataSource(db), UserPreferencesStore(context), journal,
+                RestoreLoginInvalidator { invalidations++ }, dispatchers, legacyStore)
+            val result = repo.recoverInterruptedRestore()
+            assertTrue("legacy missing memory cannot authorize a rewrite: $result", result is RecoveryOutcome.NeedsAttention)
+            assertEquals(memory, db.subtitleMemoryDao().get(memory.versionKey))
+            assertEquals(0, invalidations)
+            assertEquals(id, journal.read()!!.planId)
+        } finally {
+            db.close()
+            journal.clear(id)
+        }
     }
 
     @Test fun `new repository resumes every durable forward phase using real persisted stores`() = runBlocking {
@@ -106,7 +163,10 @@ class RestoreSnapshotStoreTest {
         val secret = key()
         val dispatchers = AppDispatchers(io = Dispatchers.IO)
         val prefs = UserPreferencesStore(context)
-        prefs.update { UserPreferences(maxBitrateBps = null) }
+        val localPrefs = UserPreferences(maxBitrateBps = null,
+            playerVisualEffects = PlayerVisualEffectsPreferences(enabled = false, preset = PlayerVisualPreset.SPECTRUM),
+            professionalInfo = ProfessionalInfoPreferences(false))
+        prefs.update { localPrefs }
         val store = RestoreSnapshotStore(directory, secret)
         val firstJournal = SharedPrefsRestoreJournal(context, dispatchers)
         val invalidated = mutableListOf<String>()
@@ -116,6 +176,8 @@ class RestoreSnapshotStoreTest {
             val local = server("local").copy(icon = "icon", lastConnectedAtEpochMs = 789)
             source.applyRestorePlan(RestorePlan("seed", BackupDtos.RestorePlanRecord("MERGE", overwriteServerIds = listOf("local")),
                 listOf(local), listOf(PlaybackProgress("local", "old", 2, 3, true, 4, posterUrl = "https://image.example?token=FAKE-SENTINEL")), null))
+            val oldMemory = SubtitleMemoryEntity("local|old|s:12", "local", "content://private.fixture/sub", 700, 111)
+            db.subtitleMemoryDao().upsert(oldMemory)
             val repo = BackupRepository(source, prefs, firstJournal, invalidator, dispatchers, store)
             val payload = BackupDtos.BackupPayload(
                 BackupFileFormat.Manifest(1, 1, "test", 0, listOf("servers", "progress", "preferences"), mapOf("servers" to 2, "progress" to 0, "preferences" to 1)),
@@ -124,6 +186,8 @@ class RestoreSnapshotStoreTest {
             )
             val validated = (repo.prepareRestore(authenticatedTestBytes(payload, "test".toCharArray()), "test".toCharArray()) as PrepareResult.Prepared).validated
             val frozen = repo.buildPreview(validated, RestoreStrategy.REPLACE_SELECTED).frozenPlan!!
+            assertEquals(localPrefs.playerVisualEffects, frozen.images.afterPreferences.playerVisualEffects)
+            assertEquals(localPrefs.professionalInfo, frozen.images.afterPreferences.professionalInfo)
             store.save(frozen.plan.planId, frozen.images)
             firstJournal.begin(RestoreJournal.ActiveEntry(frozen.plan.planId, RestoreJournal.Phase.PREPARING,
                 BackupDtos.encodePayload(validated.payload), BackupDtos.encodePlanRecord(frozen.plan.record), "", true, 0,
@@ -144,6 +208,7 @@ class RestoreSnapshotStoreTest {
             assertTrue("phase=$phase outcome=$outcome", if (rollback) outcome is RecoveryOutcome.RolledBack else outcome is RecoveryOutcome.Continued)
             val expected = if (rollback) frozen.images.before else frozen.images.after
             assertTrue(expected.sameData(reopenedSource.readSnapshot()))
+            assertEquals(if (rollback) oldMemory else null, db.subtitleMemoryDao().get(oldMemory.versionKey))
             assertEquals(if (rollback) frozen.images.beforePreferences else frozen.images.afterPreferences, prefs.flow.first())
             assertNull(reopenedJournal.read())
             assertEquals(RecoveryOutcome.NothingToRecover, reopened.recoverInterruptedRestore())

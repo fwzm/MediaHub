@@ -5,6 +5,8 @@ import com.mediahub.core.common.backup.BackupDtos
 import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.database.entity.PlaybackProgressEntity
 import com.mediahub.core.database.entity.ServerEntity
+import com.mediahub.core.database.entity.SubtitleMemoryEntity
+import org.junit.Assert.assertNull
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.ServerEndpoint
@@ -54,6 +56,67 @@ class ProductionBackupDataSourceTest {
             ServerEndpoint(id = "", serverId = id, name = "备", url = "https://$id-alt.example", isPrimary = false),
         ),
     )
+
+    @Test
+    fun `identity changing replacement clears only that source subtitle memory`() = runBlocking {
+        val initial = RestorePlan("seed", BackupDtos.RestorePlanRecord("REPLACE_SELECTED",
+            overwriteServerIds = listOf("srv-a", "srv-b")), listOf(server("srv-a", "A"), server("srv-b", "B")), emptyList(), null)
+        dataSource.applyRestorePlan(initial)
+        db.subtitleMemoryDao().upsert(SubtitleMemoryEntity("srv-a|item|s:1", "srv-a", "https://old.invalid/sub.srt", 700, 1))
+        db.subtitleMemoryDao().upsert(SubtitleMemoryEntity("srv-b|item|s:1", "srv-b", "other", 900, 1))
+        val before = dataSource.readSnapshot()
+        val incoming = server("srv-a", "A").copy(username = "different-account")
+        dataSource.applyRestorePlan(RestorePlan("replace", BackupDtos.RestorePlanRecord("REPLACE_SELECTED",
+            overwriteServerIds = listOf("srv-a")), listOf(incoming), emptyList(), null, before))
+        assertNull("old source memory must not replay on a restored account", db.subtitleMemoryDao().get("srv-a|item|s:1"))
+        assertEquals("unselected source survives", 900L, db.subtitleMemoryDao().get("srv-b|item|s:1")!!.offsetMs)
+    }
+
+    @Test
+    fun `same source replacement retains subtitle memory`() = runBlocking {
+        val initial = RestorePlan("seed", BackupDtos.RestorePlanRecord("REPLACE_SELECTED",
+            overwriteServerIds = listOf("srv-a")), listOf(server("srv-a", "A")), emptyList(), null)
+        dataSource.applyRestorePlan(initial)
+        val memory = SubtitleMemoryEntity("srv-a|item|s:1", "srv-a", "fixture-sub", 700, 1)
+        db.subtitleMemoryDao().upsert(memory)
+        val before = dataSource.readSnapshot()
+        dataSource.applyRestorePlan(initial.copy(planId = "same-source", expectedBaseline = before))
+        assertEquals(memory, db.subtitleMemoryDao().get(memory.versionKey))
+    }
+
+    @Test
+    fun `rollback restores original memory and deletes newly restored source memory`() = runBlocking {
+        val initial = RestorePlan("seed", BackupDtos.RestorePlanRecord("REPLACE_SELECTED",
+            overwriteServerIds = listOf("srv-a")), listOf(server("srv-a", "A")), emptyList(), null)
+        dataSource.applyRestorePlan(initial)
+        val original = SubtitleMemoryEntity("srv-a|item|s:1", "srv-a", "fixture-sub", 700, 1)
+        db.subtitleMemoryDao().upsert(original)
+        val before = dataSource.readSnapshot()
+        dataSource.applyRestorePlan(initial.copy(servers = listOf(server("srv-a", "A").copy(username = "new-user"),
+            server("srv-b", "B")), record = BackupDtos.RestorePlanRecord("REPLACE_SELECTED", overwriteServerIds = listOf("srv-a", "srv-b"))))
+        db.subtitleMemoryDao().upsert(SubtitleMemoryEntity("srv-b|item|s:1", "srv-b", "new-sub", 900, 2))
+        val after = dataSource.readSnapshot()
+        dataSource.applyRestorePlan(RestorePlan("rollback", BackupDtos.RestorePlanRecord("ROLLBACK"), before.servers,
+            before.progress, null, after, before.subtitleMemory))
+        assertEquals(original, db.subtitleMemoryDao().get(original.versionKey))
+        assertNull(db.subtitleMemoryDao().get("srv-b|item|s:1"))
+        assertTrue(before.sameData(dataSource.readSnapshot()))
+    }
+
+    @Test
+    fun `subtitle memory update after preview rejects stale plan before writes`() = runBlocking {
+        val initial = RestorePlan("seed", BackupDtos.RestorePlanRecord("REPLACE_SELECTED",
+            overwriteServerIds = listOf("srv-a")), listOf(server("srv-a", "A")), emptyList(), null)
+        dataSource.applyRestorePlan(initial)
+        val before = dataSource.readSnapshot()
+        val newMemory = SubtitleMemoryEntity("srv-a|item|s:1", "srv-a", "manual-new", 700, 1)
+        db.subtitleMemoryDao().upsert(newMemory)
+        val failure = runCatching { dataSource.applyRestorePlan(initial.copy(
+            servers = listOf(server("srv-a", "A").copy(username = "new-user")), expectedBaseline = before)) }.exceptionOrNull()
+        assertTrue(failure is RestoreBaselineChangedException)
+        assertEquals(newMemory, db.subtitleMemoryDao().get(newMemory.versionKey))
+        assertNull(dataSource.readSnapshot().servers.single().username)
+    }
 
     @Test
     fun `applyRestorePlan writes servers endpoints and progress atomically`() = runBlocking {
