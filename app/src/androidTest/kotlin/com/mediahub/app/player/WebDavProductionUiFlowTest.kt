@@ -109,13 +109,20 @@ class WebDavProductionUiFlowTest {
             waitNode(hasText(name)).performClick()
             waitNode(hasText("电影 a+b%.mp4")).performClick()
             waitNode(hasText("播放", substring = false)).performClick()
-            waitNode(hasContentDescription("信息")).performClick()
-            waitNode(hasText("实际内核"))
+            fun playerEntry(resource: Int) {
+                val label = context.getString(resource)
+                if (compose.onAllNodesWithText(label).fetchSemanticsNodes().isEmpty()) {
+                    compose.onRoot().performTouchInput { click(center) }
+                }
+                waitNode(hasText(label)).performClick()
+            }
+            playerEntry(com.mediahub.feature.player.R.string.player_info_entry)
+            waitNode(hasText(context.getString(com.mediahub.feature.player.R.string.player_info_actual_engine)))
             compose.onAllNodesWithText("Media3", useUnmergedTree = true).onFirst().assertExists()
             waitNode(hasText("320×180", substring = true))
             assertTrue(device.takeScreenshot(java.io.File(context.filesDir, "a4-webdav-player-info.png")))
             device.pressBack()
-            waitNode(hasContentDescription("字幕")).performClick()
+            playerEntry(com.mediahub.feature.player.R.string.player_subtitles)
             waitNode(hasText("电影 a+b%.zh", substring = true))
             assertTrue(device.takeScreenshot(java.io.File(context.filesDir, "a4-webdav-subtitle-discovery.png")))
             // Discovery is reached by the actual player, not a test-only screen.
