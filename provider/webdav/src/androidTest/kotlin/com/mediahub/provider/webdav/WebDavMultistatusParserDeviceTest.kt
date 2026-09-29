@@ -15,25 +15,8 @@ import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/**
- * A3-3：生产 [WebDavMultistatusParser] 在 **Android runtime** 上的正向 + 安全双验收。
- *
- * JVM 单测（WebDavMultistatusParserA2Test）证明不了平台差异：生产 parser 的
- * fail-closed 前置条件里有 4 个 SAX 安全 feature，其中两个是 Apache
- * Harmony/Xerces 特有 feature 名——Android 的 SAXParserFactory 是 Harmony 派生实现，
- * **预期**支持，但从未在真机 runtime 上验证过。本类直接调用生产 `parse`
- * （internal 可见性，androidTest 与 main 同模块），在 API 32 / 36 模拟器上取证：
- *
- * 1. **能力探测**（不设门禁、只记录事实）：`SAXParserFactory.newInstance()` 对 4 个
- *    feature 逐个 `setFeature` 的真实结果写入 Log.i（tag [TAG]），供 CI 日志取证。
- *    - 全部成功 → 正常解析路径必须工作；
- *    - 任一失败 → `parse` 必须抛 [IllegalStateException]（fail-closed 生效，不静默）。
- *    两种平台形态都让测试通过（条件断言），但绝不允许"feature 失败 + parse 仍成功"。
- * 2. **安全拒绝**：DOCTYPE / 外部实体 SYSTEM（真实 ServerSocket 计数，零第二跳）/
- *    billion-laughs 内部实体，全部必须解析失败。
- * 3. **正向语义**：非 D 前缀 namespace、中文 displayName、percent-encoded href、
- *    status 在 prop 前/后两种属性顺序、两个 propstat 一成一败合并、
- *    失败 propstat 的 collection 不污染、response 级 404 整条丢弃、畸形状态行按失败处理。
+/** Android runtime must accept ordinary DAV XML and reject DTD/entities with zero I/O.
+ * Apache-only feature probes are diagnostic, never an excuse to skip happy-path assertions.
  */
 @RunWith(AndroidJUnit4::class)
 class WebDavMultistatusParserDeviceTest {
@@ -42,7 +25,7 @@ class WebDavMultistatusParserDeviceTest {
     // 平台能力探测
     // ---------------------------------------------------------------------
 
-    /** 与生产 WebDavMultistatusParser.SECURE_FEATURES 完全一致（探测对象必须同步）。 */
+    /** Diagnostic legacy feature availability; positive parse assertions never depend on this. */
     private data class FeatureProbe(val feature: String, val supported: Boolean)
 
     @Test
@@ -65,20 +48,11 @@ class WebDavMultistatusParserDeviceTest {
                  </lp1:propstat>
                </lp1:response>""",
         )
-        if (probes.all { it.supported }) {
-            val parsed = WebDavMultistatusParser.parse(minimal)
-            assertEquals("4 个 feature 全部可用时，正常解析路径必须工作", 1, parsed.size)
-            assertEquals("/dav/ok/", parsed[0].href)
-            assertTrue("collection 语义必须照常解析", parsed[0].isCollection)
-            Log.i(TAG, "API $api: all secure features supported, happy path verified on device")
-        } else {
-            try {
-                WebDavMultistatusParser.parse(minimal)
-                fail("平台 feature 缺失时 parse 必须 fail-closed 抛 IllegalStateException，不得静默降级")
-            } catch (expected: IllegalStateException) {
-                Log.i(TAG, "API $api: fail-closed engaged on missing features: ${expected.message}")
-            }
-        }
+        val parsed = WebDavMultistatusParser.parse(minimal)
+        assertEquals("正常 XML 必须在 Android 平台可解析，不能以 feature 缺失替代验收", 1, parsed.size)
+        assertEquals("/dav/ok/", parsed[0].href)
+        assertTrue("collection 语义必须照常解析", parsed[0].isCollection)
+        Log.i(TAG, "API $api: mandatory portable guards installed, happy path verified")
     }
 
     // ---------------------------------------------------------------------
@@ -274,49 +248,21 @@ class WebDavMultistatusParserDeviceTest {
     // 平台条件断言辅助
     // ---------------------------------------------------------------------
 
-    /**
-     * 平台 4 项安全 feature 全部可设置时按正常路径断言；任一缺失时改验 fail-closed：
-     * 同一份输入必须抛 [IllegalStateException]（解析器拒绝工作，绝不静默降级）。
-     */
     private inline fun parseOnDevice(
         xml: String,
         label: String,
         assertions: (List<WebDavResource>) -> Unit,
     ) {
-        if (platformProbes().all { it.supported }) {
-            assertions(WebDavMultistatusParser.parse(xml))
-        } else {
-            try {
-                WebDavMultistatusParser.parse(xml)
-                fail("$label: 平台 feature 缺失时 parse 必须 fail-closed（IllegalStateException），不得成功")
-            } catch (expected: IllegalStateException) {
-                Log.i(TAG, "$label: 平台 feature 缺失，fail-closed 生效 → ${expected.message}")
-            }
-        }
+        assertions(WebDavMultistatusParser.parse(xml))
+        Log.i(TAG, "$label: positive semantics verified on API ${Build.VERSION.SDK_INT}")
     }
 
-    /**
-     * 安全输入必须被拒绝：feature 全可用时期待 SAX 层拒绝（DOCTYPE/实体错误等任意
-     * 异常形态）；feature 缺失时期待 fail-closed 的 [IllegalStateException]。
-     */
     private fun assertParseRejected(xml: String, label: String) {
-        if (platformProbes().all { it.supported }) {
-            try {
-                WebDavMultistatusParser.parse(xml)
-                fail("$label 必须被 Android 平台 SAX 拒绝")
-            } catch (rejected: Exception) {
-                Log.i(
-                    TAG,
-                    "$label rejected by platform SAX: ${rejected.javaClass.simpleName}: ${rejected.message}",
-                )
-            }
-        } else {
-            try {
-                WebDavMultistatusParser.parse(xml)
-                fail("$label: fail-closed 未生效（feature 缺失却解析成功）")
-            } catch (expected: IllegalStateException) {
-                Log.i(TAG, "$label: fail-closed engaged → ${expected.message}")
-            }
+        try {
+            WebDavMultistatusParser.parse(xml)
+            fail("$label 必须被拒绝")
+        } catch (rejected: Exception) {
+            Log.i(TAG, "$label rejected: ${rejected.javaClass.simpleName}: ${rejected.message}")
         }
     }
 
@@ -330,7 +276,7 @@ class WebDavMultistatusParserDeviceTest {
         private const val TAG = "WebDavParserDeviceTest"
         private const val ZERO_HOP_TIMEOUT_MS = 2_000
 
-        /** 必须与生产 WebDavMultistatusParser.SECURE_FEATURES 的 4 项逐一对应。 */
+        /** Legacy capability probes are retained to explain Android/JVM differences. */
         private val SECURE_FEATURE_PROBES = listOf(
             "http://apache.org/xml/features/disallow-doctype-decl" to true,
             "http://xml.org/sax/features/external-general-entities" to false,

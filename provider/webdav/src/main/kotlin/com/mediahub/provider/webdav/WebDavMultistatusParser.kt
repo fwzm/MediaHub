@@ -4,16 +4,19 @@ import java.io.ByteArrayInputStream
 import javax.xml.parsers.SAXParserFactory
 import org.xml.sax.Attributes
 import org.xml.sax.InputSource
+import org.xml.sax.SAXException
+import org.xml.sax.ext.DefaultHandler2
 import org.xml.sax.helpers.DefaultHandler
 
 /**
  * `multistatus` (RFC 4918) 解析器。
  *
  * 安全约束（A2-2 收紧）：
- * - **fail-closed 的 XXE 防线**：禁用 DTD 与外部实体是解析的前置条件——
- *   [SECURE_FEATURES] 任一设置失败即拒绝解析（[IllegalStateException]，
- *   由调用方包装为 `Parse`），绝不静默降级继续。响应大小上限（WebDavApi 8 MiB）
- *   只是纵深防御，**不能替代** DTD/外部实体阻断。
+ * - **fail-closed 的 XXE 防线**：实际 XMLReader 必须关闭两种外部实体并回读确认，
+ *   安装且按引用回读确认 DTD lexical handler 与拒绝型 resolver。startDTD 在处理
+ *   内/外部 subset 前抛异常；任何强制防线无法建立时拒绝解析。Android 不支持的
+ *   Apache 专有 feature 仅是额外防护，不能代替这些可移植强制防线。
+ *   响应大小上限（WebDavApi 8 MiB）只是纵深防御。
  * - **命名空间感知**：只认 `DAV:` 命名空间，不依赖服务器使用的前缀（`D:` / `d:` / `lp1:`）。
  *
  * 正确性契约（A2-2）：
@@ -35,6 +38,12 @@ internal object WebDavMultistatusParser {
         "http://xml.org/sax/features/external-parameter-entities" to false,
         "http://apache.org/xml/features/nonvalidating/load-external-dtd" to false,
     )
+    private const val LEXICAL_HANDLER = "http://xml.org/sax/properties/lexical-handler"
+    private val REQUIRED_READER_FEATURES = mapOf(
+        "http://xml.org/sax/features/namespaces" to true,
+        "http://xml.org/sax/features/external-general-entities" to false,
+        "http://xml.org/sax/features/external-parameter-entities" to false,
+    )
 
     /** `HTTP/1.1 207 Multi-Status` → 207。 */
     private val STATUS_LINE = Regex("""(?i)^HTTP/\S+\s+(\d{3})""")
@@ -53,24 +62,41 @@ internal object WebDavMultistatusParser {
     fun parse(xml: String): List<WebDavResource> {
         val factory = saxFactoryProvider()
         factory.isNamespaceAware = true
-        val unsupported = mutableListOf<String>()
         SECURE_FEATURES.forEach { (feature, value) ->
-            try {
-                factory.setFeature(feature, value)
-            } catch (ignored: Exception) {
-                unsupported += feature
-            }
-        }
-        if (unsupported.isNotEmpty()) {
-            // fail-closed：无法建立 DTD/外部实体阻断边界时拒绝解析。
-            throw IllegalStateException("XML 安全特性不可用，拒绝解析: $unsupported")
+            // Android Expat lacks Apache-only features. Mandatory reader guards below
+            // are installed regardless of these additional factory-level features.
+            runCatching { factory.setFeature(feature, value) }
         }
         val handler = Handler()
-        val parser = factory.newSAXParser()
-        parser.parse(
-            InputSource(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8))),
-            handler,
-        )
+        val reader = factory.newSAXParser().xmlReader
+        val guard = object : DefaultHandler2() {
+            override fun startDTD(name: String?, publicId: String?, systemId: String?) {
+                throw SAXException("DOCTYPE is forbidden")
+            }
+            override fun resolveEntity(publicId: String?, systemId: String?): InputSource =
+                throw SAXException("External XML resolution is forbidden")
+            override fun resolveEntity(name: String?, publicId: String?, baseURI: String?, systemId: String?): InputSource =
+                throw SAXException("External XML resolution is forbidden")
+            override fun getExternalSubset(name: String?, baseURI: String?): InputSource =
+                throw SAXException("External XML subset is forbidden")
+        }
+        try {
+            REQUIRED_READER_FEATURES.forEach { (feature, value) ->
+                reader.setFeature(feature, value)
+                check(reader.getFeature(feature) == value) { "XML reader feature readback failed: $feature" }
+            }
+            reader.setProperty(LEXICAL_HANDLER, guard)
+            check(reader.getProperty(LEXICAL_HANDLER) === guard) { "XML DTD guard readback failed" }
+            reader.entityResolver = guard
+            check(reader.entityResolver === guard) { "XML resolver readback failed" }
+        } catch (failure: Exception) {
+            throw IllegalStateException("XML 强制安全防线不可用，拒绝解析", failure)
+        }
+        // XMLReader.parse preserves the guard; SAXParser.parse(DefaultHandler) would
+        // overwrite entityResolver with the content handler.
+        reader.contentHandler = handler
+        reader.errorHandler = handler
+        reader.parse(InputSource(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8))))
         return handler.result
     }
 
