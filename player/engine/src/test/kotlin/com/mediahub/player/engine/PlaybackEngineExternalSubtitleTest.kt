@@ -11,6 +11,8 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.RendererCapabilities
 import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.source.MediaPeriod
+import androidx.media3.exoplayer.source.DefaultCompositeSequenceableLoaderFactory
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.trackselection.TrackSelector
@@ -23,7 +25,6 @@ import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.runCurrent
@@ -102,14 +103,14 @@ class PlaybackEngineExternalSubtitleTest {
     }
 
     @Test
-    fun `offset request is rejected without any state change`() = runBlocking {
+    fun `offset request is rejected without any state change`() = runTest {
         engine.play(session())
         assertFalse(engine.setSubtitleOffset(500L))
         assertEquals(0L, engine.subtitleOffsetMs)
     }
 
     @Test
-    fun `load before a session exists is rejected`() = runBlocking {
+    fun `load before a session exists is rejected`() = runTest {
         assertFalse(engine.loadExternalSubtitle(subtitle()))
         assertEquals(0, fake.state.mediaItemCount)
     }
@@ -117,7 +118,7 @@ class PlaybackEngineExternalSubtitleTest {
     // ---- 重建保留纪律 ----
 
     @Test
-    fun `rebuild preserves position pause and speed`() = runBlocking {
+    fun `rebuild preserves position pause and speed`() = runTest {
         engine.play(session())
         // 模拟播放推进 + 用户暂停 + 1.5 倍速
         fake.state.positionMs = 42_000L
@@ -137,7 +138,7 @@ class PlaybackEngineExternalSubtitleTest {
     }
 
     @Test
-    fun `subtitle configuration carries mime uri and id and loads accumulate`() = runBlocking {
+    fun `subtitle configuration carries mime uri and id and loads accumulate`() = runTest {
         engine.play(session())
 
         assertTrue(engine.loadExternalSubtitle(subtitle()))
@@ -157,7 +158,7 @@ class PlaybackEngineExternalSubtitleTest {
     }
 
     @Test
-    fun `unsupported mime and new sessions behave honestly`() = runBlocking {
+    fun `unsupported mime and new sessions behave honestly`() = runTest {
         engine.play(session())
         val prepares = fake.state.prepareCount
 
@@ -238,7 +239,7 @@ class PlaybackEngineExternalSubtitleTest {
         assertTrue(engine.loadExternalSubtitle(subtitle()))
         assertFalse(selector.parameters.getRendererDisabled(0))
         val id = fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.single().id
-        assertTrue(fake.currentTracks().groups.any { group -> (0 until group.length).any { group.getTrackFormat(it).id == id && group.isTrackSelected(it) } })
+        assertTrue(fake.currentTracks().groups.any { group -> (0 until group.length).any { group.getTrackFormat(it).id == "1:$id" && group.isTrackSelected(it) } })
     }
 
     @Test
@@ -250,7 +251,7 @@ class PlaybackEngineExternalSubtitleTest {
         assertTrue(engine.loadExternalSubtitle(subtitle()))
         assertFalse(selector.parameters.hasSelectionOverride(0, embedded))
         val id = fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.single().id
-        assertTrue(fake.currentTracks().groups.any { group -> (0 until group.length).any { group.getTrackFormat(it).id == id && group.isTrackSelected(it) } })
+        assertTrue(fake.currentTracks().groups.any { group -> (0 until group.length).any { group.getTrackFormat(it).id == "1:$id" && group.isTrackSelected(it) } })
     }
 
     @Test
@@ -305,10 +306,10 @@ class PlaybackEngineExternalSubtitleTest {
         assertFalse(pending.await())
         val tracks = fake.currentTracks()
         assertTrue(tracks.groups.any { group -> (0 until group.length).any {
-            group.getTrackFormat(it).id == "embedded" && group.isTrackSelected(it)
+            group.getTrackFormat(it).id == "0:embedded" && group.isTrackSelected(it)
         } })
         assertTrue(tracks.groups.none { group -> (0 until group.length).any {
-            group.getTrackFormat(it).id != "embedded" && group.isTrackSelected(it)
+            group.getTrackFormat(it).id != "0:embedded" && group.isTrackSelected(it)
         } })
     }
 
@@ -352,6 +353,35 @@ class PlaybackEngineExternalSubtitleTest {
         assertEquals(listOf(new.uri), configs.map { it.uri.toString() })
     }
 
+    @Test
+    fun `actual Media3 merging period prefixes both format and group IDs by child source slot`() {
+        val main = TrackGroupArray(TrackGroup("main", Format.Builder().setId("embedded").setSampleMimeType("application/x-subrip").build()))
+        val sidecar = TrackGroupArray(TrackGroup("0", Format.Builder().setId("external-7-9").setSampleMimeType("application/x-subrip").build()))
+        val merged = actualMergedGroups(listOf(main, sidecar))
+        assertEquals("0:main", merged[0].id)
+        assertEquals("0:embedded", merged[0].getFormat(0).id)
+        assertEquals("1:0", merged[1].id)
+        assertEquals("1:external-7-9", merged[1].getFormat(0).id)
+    }
+
+    @Test
+    fun `same unique suffix from a wrong merged child slot cannot confirm`() = runTest {
+        engine.play(session())
+        fake.state.wrongExternalChildSlot = true
+        assertFalse(engine.loadExternalSubtitle(subtitle()))
+        assertEquals(2000L, testScheduler.currentTime)
+        assertTrue(fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.isEmpty())
+    }
+
+    @Test
+    fun `prepared track without exact current media item configuration cannot confirm`() = runTest {
+        engine.play(session())
+        fake.state.mismatchedCurrentMediaItem = true
+        assertFalse(engine.loadExternalSubtitle(subtitle()))
+        assertEquals(2000L, testScheduler.currentTime)
+        assertTrue(fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.isEmpty())
+    }
+
     // ---- fake：反射 Proxy 实现 ExoPlayer，仅覆盖引擎真实触碰的成员 ----
 
     private class FakeExoPlayerState {
@@ -367,6 +397,8 @@ class PlaybackEngineExternalSubtitleTest {
         var emptyTrackReads = 0
         var rejectExternalSupport = false
         var wrongExternalFormatId = false
+        var wrongExternalChildSlot = false
+        var mismatchedCurrentMediaItem = false
     }
 
     private class FakeExoPlayerHandler(private val trackSelector: DefaultTrackSelector) : InvocationHandler {
@@ -378,7 +410,7 @@ class PlaybackEngineExternalSubtitleTest {
             override fun getTrackType() = C.TRACK_TYPE_TEXT
             override fun supportsMixedMimeTypeAdaptation() = RendererCapabilities.ADAPTIVE_NOT_SUPPORTED
             override fun supportsFormat(format: Format): Int = RendererCapabilities.create(
-                if (state.rejectExternalSupport && format.id != "embedded") C.FORMAT_UNSUPPORTED_TYPE else C.FORMAT_HANDLED)
+                if (state.rejectExternalSupport && format.id !in setOf("embedded", "0:embedded")) C.FORMAT_UNSUPPORTED_TYPE else C.FORMAT_HANDLED)
         }
         fun currentTracks(): Tracks {
             if (state.emptyTrackReads-- > 0) return Tracks.EMPTY
@@ -390,7 +422,15 @@ class PlaybackEngineExternalSubtitleTest {
             // Real ExoPlayer activates application parameters on its playback thread before
             // selecting tracks (Media3 1.11 separates applicationParameters/playerParameters).
             trackSelector.onParametersActivated(trackSelector.parameters)
-            val result = trackSelector.selectTracks(arrayOf(textRenderer), TrackGroupArray(*((listOf(embedded) + external).toTypedArray())),
+            val groups = if (configurations.isEmpty()) TrackGroupArray(embedded) else {
+                val children = mutableListOf(TrackGroupArray(embedded))
+                if (state.wrongExternalChildSlot) children += TrackGroupArray.EMPTY
+                // Invoke the actual AAR's MergingMediaPeriod prepare/onPrepared lifecycle.
+                // It namespaces both TrackGroup.id and Format.id, exactly like the default factory.
+                children += external.map { TrackGroupArray(it) }
+                actualMergedGroups(children)
+            }
+            val result = trackSelector.selectTracks(arrayOf(textRenderer), groups,
                 MediaSource.MediaPeriodId("fixture-period"), Timeline.EMPTY)
             trackSelector.onSelectionActivated(result.info)
             return result.tracks
@@ -400,6 +440,9 @@ class PlaybackEngineExternalSubtitleTest {
             when (method.name) {
                 "getTrackSelector" -> return trackSelector
                 "getCurrentTracks" -> return currentTracks()
+                "getCurrentMediaItem" -> return state.lastMediaItem?.let {
+                    if (state.mismatchedCurrentMediaItem) it.buildUpon().setSubtitleConfigurations(emptyList()).build() else it
+                }
                 "setVideoSurface", "setAudioAttributes", "addListener", "removeListener",
                 "addAnalyticsListener", "removeAnalyticsListener", "setVolume",
                 -> return null
@@ -459,4 +502,36 @@ class PlaybackEngineExternalSubtitleTest {
         override fun w(tag: LogTag, message: String, throwable: Throwable?) = Unit
         override fun e(tag: LogTag, message: String, throwable: Throwable?) = Unit
     }
+}
+
+/** Actual package-private production MergingMediaPeriod; only child preparation is deterministic. */
+private fun actualMergedGroups(childGroups: List<TrackGroupArray>): TrackGroupArray {
+    val periods = childGroups.map { groups ->
+        Proxy.newProxyInstance(MediaPeriod::class.java.classLoader, arrayOf(MediaPeriod::class.java)) { proxy, method, args ->
+            when (method.name) {
+                "getTrackGroups" -> groups
+                "prepare" -> { (args!![0] as MediaPeriod.Callback).onPrepared(proxy as MediaPeriod); null }
+                "equals" -> proxy === args!![0]
+                "hashCode" -> System.identityHashCode(proxy)
+                "toString" -> "deterministic-child-period"
+                else -> when (method.returnType) {
+                    Boolean::class.java -> false
+                    Long::class.java -> 0L
+                    Int::class.java -> 0
+                    else -> null
+                }
+            }
+        } as MediaPeriod
+    }.toTypedArray()
+    val constructor = Class.forName("androidx.media3.exoplayer.source.MergingMediaPeriod").declaredConstructors.single()
+    constructor.isAccessible = true
+    val merged = constructor.newInstance(DefaultCompositeSequenceableLoaderFactory(), LongArray(periods.size), periods) as MediaPeriod
+    var prepared = false
+    val callback = Proxy.newProxyInstance(MediaPeriod.Callback::class.java.classLoader, arrayOf(MediaPeriod.Callback::class.java)) { _, method, _ ->
+        if (method.name == "onPrepared") prepared = true
+        null
+    } as MediaPeriod.Callback
+    merged.prepare(callback, 0L)
+    check(prepared) { "Actual merged period must finish preparation before observing IDs" }
+    return merged.trackGroups
 }

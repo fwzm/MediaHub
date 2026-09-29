@@ -349,9 +349,16 @@ class PlaybackEngine(
                 context.ensureActive()
                 if (!currentRequest()) return false
                 val tracks = player.currentTracks
-                val target = tracks.groups.firstNotNullOfOrNull { group ->
-                    if (group.type != C.TRACK_TYPE_TEXT) null
-                    else (0 until group.length).firstOrNull { group.getTrackFormat(it).id == configuration.id }
+                // DefaultMediaSourceFactory merges the main source at slot 0 and sidecars at
+                // configuration index + 1. Actual MergingMediaPeriod namespaces Format.id too.
+                // Bind the full expected ID to the exact current configuration, never a suffix.
+                val configurationIndex = player.currentMediaItem?.localConfiguration?.subtitleConfigurations
+                    ?.indexOf(configuration) ?: -1
+                val childNamespace = "${configurationIndex + 1}:"
+                val mergedFormatId = childNamespace + configuration.id
+                val target = if (configurationIndex < 0) null else tracks.groups.firstNotNullOfOrNull { group ->
+                    if (group.type != C.TRACK_TYPE_TEXT || !group.mediaTrackGroup.id.startsWith(childNamespace)) null
+                    else (0 until group.length).firstOrNull { group.getTrackFormat(it).id == mergedFormatId }
                         ?.let { index -> group to index }
                 }
                 if (target != null) {
