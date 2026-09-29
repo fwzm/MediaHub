@@ -122,6 +122,7 @@ class WebDavProductionUiFlowTest {
             compose.onNodeWithText("测试连接").performScrollTo().performClick()
             waitNode(hasText("WebDAV 可用", substring = true))
             compose.onNodeWithText("登录并添加").performScrollTo().performClick()
+            waitNode(hasContentDescription("添加媒体库")) // wait for real Home, not the still-visible name EditText
             waitNode(hasText(name)).performClick()
             waitNode(hasText("电影 a+b%.mp4")).performClick()
             waitNode(hasText("播放", substring = false)).performClick()
@@ -196,6 +197,10 @@ class WebDavProductionUiFlowTest {
             assertTrue("actual engine must request real MP4", mediaGets.get() > 0)
             assertTrue("auth/browse/detail/discovery must reach wire", propfinds.get() >= 4)
             assertTrue("actual OPTIONS probe must execute", options.get() > 0)
+        } catch (failure: Throwable) {
+            device.takeScreenshot(java.io.File(context.filesDir, "a4-webdav-ui-failure.png"))
+            device.dumpWindowHierarchy(java.io.File(context.filesDir, "a4-webdav-ui-failure.xml"))
+            throw failure
         } finally {
             scenario?.close()
             compose.waitForIdle()
