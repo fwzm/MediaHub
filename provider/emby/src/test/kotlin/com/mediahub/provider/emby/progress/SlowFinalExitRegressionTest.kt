@@ -96,6 +96,8 @@ class SlowFinalExitRegressionTest {
         /** Stopped 请求已到达服务端（屏障置位前），确定性锚点。每用例重置。 */
         @Volatile var finalArrived = CompletableDeferred<Unit>()
 
+        val finalResponded = CompletableDeferred<Unit>()
+
         override fun dispatch(request: RecordedRequest): MockResponse {
             val path = request.path.orEmpty()
             received += path
@@ -103,7 +105,7 @@ class SlowFinalExitRegressionTest {
                 path.endsWith("/Sessions/Playing/Stopped") -> {
                     bodies[path] = request.body.readUtf8()
                     finalArrived.complete(Unit)
-                    respondStopped()
+                    respondStopped().also { finalResponded.complete(Unit) }
                 }
                 else -> {
                     bodies[path] = request.body.readUtf8()
@@ -129,27 +131,32 @@ class SlowFinalExitRegressionTest {
 
     // ---- OkHttp Call 生命周期观测（确定性"响应释放/Call 终止"证据） ----
 
-    private class CallTracker : EventListener() {
-        val ended = AtomicInteger(0)
-        val failed = AtomicInteger(0)
-
-        /** 任一 Call 首次到达终态（成功结束或失败）的信号。 */
-        var terminal = CompletableDeferred<Unit>()
-
-        fun reset() {
-            ended.set(0)
-            failed.set(0)
-            terminal = CompletableDeferred()
+    /** Factory registers the record before callStart, never after the request reaches the server. */
+    private class CallTracker : EventListener.Factory {
+        class Record(val call: Call) : EventListener() {
+            val ended = AtomicInteger()
+            val failed = AtomicInteger()
+            val canceled = CompletableDeferred<Unit>()
+            val terminal = CompletableDeferred<Unit>()
+            override fun canceled(call: Call) {
+                check(call === this.call)
+                canceled.complete(Unit)
+            }
+            override fun callEnd(call: Call) {
+                check(call === this.call)
+                ended.incrementAndGet()
+                terminal.complete(Unit)
+            }
+            override fun callFailed(call: Call, ioe: IOException) {
+                check(call === this.call)
+                failed.incrementAndGet()
+                terminal.complete(Unit)
+            }
         }
-
-        override fun callEnd(call: Call) {
-            ended.incrementAndGet()
-            terminal.complete(Unit)
-        }
-
-        override fun callFailed(call: Call, ioe: IOException) {
-            failed.incrementAndGet()
-            terminal.complete(Unit)
+        val records = CopyOnWriteArrayList<Record>()
+        override fun create(call: Call): EventListener = Record(call).also { records += it }
+        fun finalCall(): Record = records.single {
+            it.call.request().url.encodedPath.endsWith("/Sessions/Playing/Stopped")
         }
     }
 
@@ -214,7 +221,7 @@ class SlowFinalExitRegressionTest {
     private fun productionClient(): OkHttpClient =
         HttpClientFactory(StdoutLogger()).apiClient()
             .newBuilder()
-            .eventListenerFactory(EventListener.Factory { tracker })
+            .eventListenerFactory(tracker)
             .build()
 
     /** 真实 EmbyProgressProvider（无任何测试 seam 替身）。 */
@@ -286,8 +293,9 @@ class SlowFinalExitRegressionTest {
                     "本地进度必须在远端 final 完成之前已落库（ADR-023）",
                     local.map { it.positionMs } == listOf(300_000L),
                 )
-                val warmEnded = tracker.ended.get()
-                val warmFailed = tracker.failed.get()
+                val target = tracker.finalCall()
+                assertTrue("warmup must already be terminal", tracker.records.filter { it !== target }.all { it.terminal.isCompleted })
+                assertTrue("final must still be in flight behind the barrier", !target.terminal.isCompleted)
 
                 // 预算语义：flushFinal 必须在 2000ms 退出预算内返回
                 val joinedInBudget = runCatching {
@@ -308,13 +316,24 @@ class SlowFinalExitRegressionTest {
                 // 恰一次远端尝试：POST 不重试
                 assertEquals("final 恰一次 Stopped 请求", listOf(playingPath, progressPath, stoppedPath), paths())
 
-                // 取消必须真正终止在途 Call（不再泄漏到 readTimeout）
-                withTimeout(JOIN_SLACK_MS * 2) { tracker.terminal.await() }
-                assertTrue(
-                    "超时后取消必须终止在途 Call（callFailed 未触发：Call 泄漏）",
-                    tracker.failed.get() > warmFailed,
-                )
-                assertEquals("在途 Call 取消后不得伪完成", warmEnded, tracker.ended.get())
+                // Cancellation is a request; terminal + dispatcher idle prove I/O has actually left.
+                // OkHttp 4.12 may report cancellation as failure or an already-consumed call end.
+                withTimeout(JOIN_SLACK_MS * 2) {
+                    target.canceled.await()
+                    target.terminal.await()
+                    awaitClientIdle(client)
+                }
+                assertTrue("must cancel this final Call", target.call.isCanceled())
+                assertEquals("exactly one final terminal event", 1, target.failed.get() + target.ended.get())
+                assertEquals("no successful response before server gate opens", 0, target.ended.get())
+                dispatcher.stopSpec = StopSpec.Fast
+                provider.reportProgress(progress(60_000, sessionId = "psid-2"))
+                assertEquals("new playback session serializes old best-effort stop before fresh start",
+                    listOf(playingPath, progressPath, stoppedPath, stoppedPath, playingPath, progressPath), paths())
+                assertTrue(dispatcher.bodies[playingPath].orEmpty().contains("\"PlaySessionId\":\"psid-2\""))
+                assertTrue(dispatcher.bodies[progressPath].orEmpty().contains("\"PlaySessionId\":\"psid-2\""))
+                assertEquals("new-session calls never contaminate the canceled target record", 1,
+                    target.failed.get() + target.ended.get())
             } finally {
                 // 释放屏障 + 排空残余在途协程，不把阻塞留给下一条测试
                 gate.complete(Unit)
@@ -339,7 +358,6 @@ class SlowFinalExitRegressionTest {
         runBlocking {
             seedSession()
             provider.reportProgress(progress(90_000))
-            tracker.reset()
             coordinator.stop()
 
             val start = System.nanoTime()
@@ -357,9 +375,10 @@ class SlowFinalExitRegressionTest {
             assertTrue("final 位置必须以 PositionTicks 上报（300s → 3e9）", stoppedBody.contains("\"PositionTicks\":3000000000"))
             assertEquals("本地恰好落库一次（仅 flushFinal，无重复写）", listOf(300_000L), local.map { it.positionMs })
             // 响应释放证据：final Call 正常终态（callEnd），无失败
-            withTimeout(5_000) { tracker.terminal.await() }
-            assertEquals("无网络层失败", 0, tracker.failed.get())
-            assertEquals("final 响应已消费并释放", 1, tracker.ended.get())
+            val target = tracker.finalCall()
+            withTimeout(5_000) { target.terminal.await(); awaitClientIdle(client) }
+            assertEquals("无网络层失败", 0, target.failed.get())
+            assertEquals("final 响应已消费并释放", 1, target.ended.get())
         }
     }
 
@@ -417,8 +436,9 @@ class SlowFinalExitRegressionTest {
             assertEquals("恰一次 Stopped 尝试", listOf(playingPath, progressPath, stoppedPath), paths())
             assertEquals("网络错误不得吞掉本地落库", listOf(300_000L), local.map { it.positionMs })
             // 网络层以失败终态收口（不悬挂）
-            withTimeout(5_000) { tracker.terminal.await() }
-            assertEquals("在途 Call 必须以失败终态收口", 1, tracker.failed.get())
+            val target = tracker.finalCall()
+            withTimeout(5_000) { target.terminal.await(); awaitClientIdle(client) }
+            assertEquals("在途 Call 必须以失败终态收口", 1, target.failed.get())
         }
     }
 
@@ -452,26 +472,35 @@ class SlowFinalExitRegressionTest {
                 // 退出瞬间的世界状态
                 val localAtExit = local.toList()
                 val requestsAtExit = paths()
-                val endedAtExit = tracker.ended.get()
-                val failedAtExit = tracker.failed.get()
+                val target = tracker.finalCall()
+                withTimeout(5_000) { target.canceled.await(); target.terminal.await(); awaitClientIdle(client) }
+                assertTrue(target.call.isCanceled())
+                val endedAtExit = target.ended.get()
+                val failedAtExit = target.failed.get()
 
                 // 迟到响应：屏障释放，服务端此时才回复 204
                 gate.complete(Unit)
-                withTimeoutOrNull(5_000) { tracker.terminal.await() }
+                withTimeout(5_000) { dispatcher.finalResponded.await(); awaitClientIdle(client) }
 
                 assertEquals("迟到响应不得触发二次本地写（伪报成功）", localAtExit, local.toList())
                 assertEquals("迟到响应不得触发二次远端请求", requestsAtExit, paths())
                 assertEquals(
                     "迟到的 204 不得把已取消的 Call 翻转为成功终态",
                     endedAtExit,
-                    tracker.ended.get(),
+                    target.ended.get(),
                 )
-                assertEquals("取消失败计数不得因迟到响应增长", failedAtExit, tracker.failed.get())
+                assertEquals("取消失败计数不得因迟到响应增长", failedAtExit, target.failed.get())
             } finally {
                 gate.complete(Unit)
                 exitJob.cancel()
                 withTimeoutOrNull(5_000) { runCatching { exitJob.join() } }
             }
+        }
+    }
+
+    private suspend fun awaitClientIdle(client: OkHttpClient) {
+        while (client.dispatcher.runningCallsCount() != 0 || client.dispatcher.queuedCallsCount() != 0) {
+            kotlinx.coroutines.yield()
         }
     }
 
