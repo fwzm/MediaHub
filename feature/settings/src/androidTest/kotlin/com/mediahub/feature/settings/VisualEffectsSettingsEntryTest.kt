@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -11,7 +12,6 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
-import androidx.compose.ui.test.hasAnySibling
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
@@ -64,8 +64,18 @@ class VisualEffectsSettingsEntryTest {
         }
         composeRule.waitUntil(10_000) { viewModel.preferences.value == initial }
         val label = context.getString(R.string.settings_professional_info)
-        val toggle = hasAnySibling(hasText(label)) and isToggleable()
-        composeRule.onNode(toggle).performScrollToWithClock(composeRule).assertIsOn().performClick()
+        fun infoToggle(): SemanticsNodeInteraction {
+            // Non-semantic layout Rows are flattened in the semantics tree. Sibling
+            // matching selects every switch in the Column, so first expose the real
+            // label then require the unique toggle on that label's visual row.
+            val labelNode = composeRule.onNode(hasText(label))
+                .performScrollToWithClock(composeRule).assertIsDisplayed()
+            val labelBounds = labelNode.fetchSemanticsNode().boundsInRoot
+            return composeRule.onNode(isToggleable() and SemanticsMatcher("toggle on professional-info row") {
+                it.boundsInRoot.center.y in labelBounds.top..labelBounds.bottom
+            }).assertIsDisplayed()
+        }
+        infoToggle().assertIsOn().performClick()
         composeRule.waitUntil(10_000) { !viewModel.preferences.value.professionalInfo.expertMode }
         val stored = runBlocking { repository.flow.first() }
         assertEquals(initial.copy(professionalInfo = initial.professionalInfo.copy(expertMode = false)), stored)
@@ -74,7 +84,7 @@ class VisualEffectsSettingsEntryTest {
         val reopened = newViewModel(UserPreferencesStore(context))
         composeRule.runOnUiThread { current.value = reopened; screenVisible.value = true }
         composeRule.waitUntil(10_000) { reopened.preferences.value == stored }
-        composeRule.onNode(toggle).performScrollToWithClock(composeRule).assertIsOff()
+        infoToggle().assertIsOff()
         captureVisualEvidence(composeRule, "settings-professional-info-off")
         composeRule.onNode(hasText("同步与备份") and hasClickAction())
             .performScrollToWithClock(composeRule).assertIsDisplayed().performClick()

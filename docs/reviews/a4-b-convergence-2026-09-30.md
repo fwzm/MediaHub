@@ -63,6 +63,8 @@ All changes on this B branch are **PATCH_READY / PENDING_INDEPENDENT_REVIEW**. S
 
 Known unsuccessful attempts are retained externally: fixture OPTIONS mismatch, invalid screenshot name, missing test language compile failure, failed UTF-8 red setup and initial Media3 lifecycle proxy activation. Compile/preflight failures and stale copied XML are not counted as executed red tests. Corrected fixtures do not lower production assertions.
 
+The first frozen-head API32/36 CI and local API36 gate also exposed a settings fixture error: non-semantic Rows are flattened, so sibling-label matching selected all twelve switches. The fixture now scrolls the actual label into view and requires the unique toggle on that row; on/off, full persisted preference equality, reopened ViewModel and backup callback assertions remain. Targeted API36 regression passed; a new source freeze/full gate is required, with the original failed manifests retained.
+
 The unit CLI also uses `--require-complete-suites` for eight explicitly required ordinary Kotlin/JUnit suites, comparing all source-declared test methods with actual XML. Negative fixtures prove that one executed method cannot certify a complete suite, and that missing/ambiguous fully qualified source is rejected. This intentionally bounded source syntax check does not claim support for arbitrary parameterized test declarations.
 
 Agent A: verify PR24 still points to the stated baseline, then review and apply the B branch commit range in order in an isolated candidate. Use `git log --reverse --oneline 2f9032732fc8365d19b5badac90f66b10310f500..codex/a4-b-convergence-20260930`. Any changed head requires new manifests and full validation; this branch's green evidence does not certify PR24.
