@@ -9,6 +9,18 @@ if [[ ! "${ANDROID_SERIAL:-}" =~ ^emulator-[0-9]+$ ]]; then
 fi
 
 mkdir -p ci-evidence
+# Google APIs API32 can report sdksetup/DefaultActivity as a successful HOME.
+# Complete provisioning on this explicitly disposable CI emulator and prevent that
+# setup component from handing focus to Launcher during the first pixel test.
+timeout 30s adb -s "$ANDROID_SERIAL" shell settings put global device_provisioned 1
+timeout 30s adb -s "$ANDROID_SERIAL" shell settings put secure user_setup_complete 1
+test "$(timeout 30s adb -s "$ANDROID_SERIAL" shell settings get global device_provisioned | tr -d '\r')" = 1
+test "$(timeout 30s adb -s "$ANDROID_SERIAL" shell settings get secure user_setup_complete | tr -d '\r')" = 1
+if timeout 30s adb -s "$ANDROID_SERIAL" shell pm path com.google.android.sdksetup | tr -d '\r' | grep -q '^package:'; then
+  timeout 30s adb -s "$ANDROID_SERIAL" shell pm disable-user --user 0 com.google.android.sdksetup \
+    | tee ci-evidence/emulator-sdksetup.txt
+  grep -q 'new state: disabled-user' ci-evidence/emulator-sdksetup.txt
+fi
 # Google APIs images may keep enqueueing unrelated background broadcasts indefinitely.
 # Wait only for the HOME launch that can cover our test Activity, not global system idleness.
 # 60s (not 30s): cold runners' first boot can be slow to surface the HOME activity.
@@ -24,6 +36,12 @@ timeout 30s adb -s "$ANDROID_SERIAL" shell dumpsys window windows \
   > ci-evidence/emulator-windows-before-tests.txt
 home_component=$(sed -n 's/^Activity: //p' ci-evidence/emulator-home.txt | tr -d '\r')
 test -n "$home_component"
+case "$home_component" in
+  *setup*|*Setup*|*wizard*|*Wizard*)
+    echo "Setup component is not a ready HOME: $home_component" >&2
+    exit 1
+    ;;
+esac
 # Fail before tests if setup is still covering HOME. Never bring a failed test back to the
 # foreground or retry it: all original pixel, lifecycle and product-path assertions still run.
 grep -E '(topResumedActivity|mResumedActivity)[:=]' ci-evidence/emulator-activities-before-tests.txt \
