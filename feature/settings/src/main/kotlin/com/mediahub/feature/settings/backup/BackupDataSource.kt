@@ -69,9 +69,9 @@ internal fun materializeRestorePlan(before: BackupSnapshot, plan: RestorePlan): 
     fun identity(server: MediaServer) = BackupIdentity(server.type,
         BackupUrlGuard.normalizeForIdentity(server.endpoints.activeEndpoint()?.url.orEmpty()), server.username)
     val oldServers = before.servers.associateBy { it.id }
-    val retainedSources = servers.filter { server -> oldServers[server.id]?.let { identity(it) == identity(server) } == true }
+    val changedSources = writing.filter { server -> oldServers[server.id]?.let { identity(it) == identity(server) } != true }
         .map { it.id }.toSet()
-    return BackupSnapshot(servers, progress, before.subtitleMemory.filter { it.serverId in retainedSources })
+    return BackupSnapshot(servers, progress, before.subtitleMemory.filter { it.serverId !in changedSources })
 }
 
 class ProductionBackupDataSource @Inject constructor(private val db: AppDatabase) : BackupDataSource {

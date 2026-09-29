@@ -85,6 +85,18 @@ class ProductionBackupDataSourceTest {
     }
 
     @Test
+    fun `restoring a new source clears its orphan memory and preserves unrelated orphan memory`() = runBlocking {
+        val selected = SubtitleMemoryEntity("srv-a|item|s:1", "srv-a", "obsolete", 700, 1)
+        val unrelated = SubtitleMemoryEntity("orphan-other|item|s:1", "orphan-other", "keep", 900, 1)
+        db.subtitleMemoryDao().upsert(selected)
+        db.subtitleMemoryDao().upsert(unrelated)
+        dataSource.applyRestorePlan(RestorePlan("new-source", BackupDtos.RestorePlanRecord("REPLACE_SELECTED",
+            overwriteServerIds = listOf("srv-a")), listOf(server("srv-a", "A")), emptyList(), null))
+        assertNull(db.subtitleMemoryDao().get(selected.versionKey))
+        assertEquals(unrelated, db.subtitleMemoryDao().get(unrelated.versionKey))
+    }
+
+    @Test
     fun `rollback restores original memory and deletes newly restored source memory`() = runBlocking {
         val initial = RestorePlan("seed", BackupDtos.RestorePlanRecord("REPLACE_SELECTED",
             overwriteServerIds = listOf("srv-a")), listOf(server("srv-a", "A")), emptyList(), null)
