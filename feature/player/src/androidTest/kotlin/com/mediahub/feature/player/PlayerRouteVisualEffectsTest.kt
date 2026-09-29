@@ -115,7 +115,7 @@ class PlayerRouteVisualEffectsTest {
         val initialSource = vm.playbackSource.value
         composeRule.onNodeWithText(context.getString(R.string.player_info_entry)).performClick()
         composeRule.onNodeWithText(context.getString(R.string.player_info_expert_toggle)).assertIsDisplayed()
-        captureVisualEvidence(composeRule, "a4-player-information")
+        captureVisualEvidence(composeRule, "a-four-player-information")
         composeRule.onNode(isToggleable()).performClick()
         composeRule.waitUntil(10_000) { vm.preferences.value?.professionalInfo?.expertMode == false }
         assertFalse(runBlocking { preferences.flow.first() }.professionalInfo.expertMode)
@@ -128,7 +128,7 @@ class PlayerRouteVisualEffectsTest {
         assertEquals(candidate.id, memory.entry!!.subtitleId)
         composeRule.onNodeWithText("+0.5s").performScrollToWithClock(composeRule).performClick()
         composeRule.waitUntil(10_000) { memory.entry?.offsetMs == 500L }
-        captureVisualEvidence(composeRule, "a4-player-subtitle-selected")
+        captureVisualEvidence(composeRule, "a-four-player-subtitle-selected")
         composeRule.onNodeWithText(context.getString(R.string.player_subtitles_off)).performScrollToWithClock(composeRule).performClick()
         composeRule.waitUntil(10_000) { vm.subtitleCenter.value.selectedExternalId == null && memory.entry?.subtitleId == null }
         assertTrue(engine.subtitleOff)
