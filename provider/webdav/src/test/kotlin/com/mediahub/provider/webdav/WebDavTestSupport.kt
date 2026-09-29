@@ -53,7 +53,7 @@ internal class WebDavTestStack(val baseUrl: String, val username: String? = "ali
     }
 
     suspend fun storedPassword(): String? =
-        vault.read(SERVER_ID, CredentialVault.CredentialKind.PASSWORD)
+        credentialStore.readPasswordValue(server)
 
     fun browseProvider() = WebDavBrowseProvider(server, api, session)
 

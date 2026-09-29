@@ -3,6 +3,10 @@ package com.mediahub.provider.webdav
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.model.MediaServer
 import com.mediahub.provider.api.ProviderException
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 
 /**
  * Basic 凭据构造。
@@ -38,7 +42,11 @@ internal object WebDavAuth {
  * 失败序：commit 先增代再写库——写库失败世代已推进（在途旧 attempt 全部
  * 作废，方向安全），vault 保持权威内容，身份指纹仅在写库成功后更新。
  *
- * **边界（如实声明）**：全部为**进程内**协调（单 app 进程内的 Mutex/世代/
+ * 身份与密码以单个加密 WEBDAV_CREDENTIAL 记录持久化；新进程仅从完整、版本
+ * 受支持且匹配当前地址/用户名的绑定恢复。旧 PASSWORD 记录缺乏身份凭据，不自动
+ * 迁移，不向任意当前地址发送历史密码；需重新登录建立绑定。
+ *
+ * **边界（如实声明）**：世代与 attempt 为**进程内**协调（单 app 进程内的 Mutex/世代/
  * attempt），不提供跨进程一致性，也不是跨设备同步；本层不承诺任何跨进程
  * 或跨设备的凭据状态同步。与备份恢复身份变更的对齐点：恢复失效器经
  * [WebDavCredentialGenerationInvalidator]（provider:api 集合注入）调用
@@ -49,6 +57,19 @@ internal class WebDavCredentialStore(
     private val vault: CredentialVault,
     private val coordinator: WebDavCredentialCoordinator,
 ) {
+
+    @Serializable
+    private data class BoundCredential(val version: Int = 1, val identity: String, val password: String)
+
+    /** One encrypted write binds identity and password; no independently persisted half-pair. */
+    private suspend fun boundCredential(serverId: String, state: WebDavCredentialCoordinator.ServerState): BoundCredential? {
+        val raw = vault.read(serverId, CredentialVault.CredentialKind.WEBDAV_CREDENTIAL) ?: return null
+        val bound = runCatching { Json.decodeFromString<BoundCredential>(raw) }.getOrNull() ?: return null
+        if (bound.version != 1 || bound.identity.isBlank()) return null
+        if (state.credentialIdentity != null && state.credentialIdentity != bound.identity) return null
+        state.credentialIdentity = bound.identity
+        return bound
+    }
 
     /** 密码值 + 读取时所属的凭据世代。 */
     data class PasswordHandle(val password: String, val generation: Long)
@@ -75,7 +96,8 @@ internal class WebDavCredentialStore(
     ): Boolean = coordinator.withServerLock(serverId) { state ->
         if (state.generation != attemptGeneration) return@withServerLock false
         state.generation++
-        vault.save(serverId, CredentialVault.CredentialKind.PASSWORD, password)
+        vault.save(serverId, CredentialVault.CredentialKind.WEBDAV_CREDENTIAL,
+            Json.encodeToString(BoundCredential(identity = identity, password = password)))
         state.credentialIdentity = identity
         true
     }
@@ -87,12 +109,10 @@ internal class WebDavCredentialStore(
      */
     suspend fun authorizationFor(server: MediaServer): String =
         coordinator.withServerLock(server.id) { state ->
-            if (state.credentialIdentity != identityOf(server)) {
-                throw ProviderException.AuthRequired(server.id)
-            }
-            val password = vault.read(server.id, CredentialVault.CredentialKind.PASSWORD)
+            val bound = boundCredential(server.id, state)
+                ?.takeIf { it.identity == identityOf(server) }
                 ?: throw ProviderException.AuthRequired(server.id)
-            WebDavAuth.basicHeader(server.username.orEmpty(), password)
+            WebDavAuth.basicHeader(server.username.orEmpty(), bound.password)
         }
 
     /**
@@ -101,22 +121,20 @@ internal class WebDavCredentialStore(
      */
     suspend fun readPasswordFor(server: MediaServer): PasswordHandle? =
         coordinator.withServerLock(server.id) { state ->
-            if (state.credentialIdentity != identityOf(server)) return@withServerLock null
-            vault.read(server.id, CredentialVault.CredentialKind.PASSWORD)
-                ?.let { PasswordHandle(it, state.generation) }
+            boundCredential(server.id, state)?.takeIf { it.identity == identityOf(server) }
+                ?.let { PasswordHandle(it.password, state.generation) }
         }
 
     /** 迟到成功返回前的再校验：世代与身份指纹均未变才允许发布 Authenticated。 */
     suspend fun isStillCurrent(server: MediaServer, handle: PasswordHandle): Boolean =
         coordinator.withServerLock(server.id) { state ->
-            state.generation == handle.generation && state.credentialIdentity == identityOf(server)
+            state.generation == handle.generation && boundCredential(server.id, state)?.identity == identityOf(server)
         }
 
     /** 无身份判定的原始读取（世代语义测试/内部诊断用；生产路径勿用）。 */
     suspend fun readPassword(serverId: String): PasswordHandle? =
         coordinator.withServerLock(serverId) { state ->
-            vault.read(serverId, CredentialVault.CredentialKind.PASSWORD)
-                ?.let { PasswordHandle(it, state.generation) }
+            boundCredential(serverId, state)?.let { PasswordHandle(it.password, state.generation) }
         }
 
     /** 只取密码值（同身份约束下的轻量读取）。 */
@@ -130,6 +148,7 @@ internal class WebDavCredentialStore(
     suspend fun clearIfStill(serverId: String, handle: PasswordHandle): Boolean =
         coordinator.withServerLock(serverId) { state ->
             if (state.generation != handle.generation) return@withServerLock false
+            vault.remove(serverId, CredentialVault.CredentialKind.WEBDAV_CREDENTIAL)
             vault.remove(serverId, CredentialVault.CredentialKind.PASSWORD)
             state.credentialIdentity = null
             true
@@ -138,6 +157,7 @@ internal class WebDavCredentialStore(
     /** 显式登出/删除：先删后推进世代；失败时世代未动，可重试。 */
     suspend fun clear(serverId: String) {
         coordinator.withServerLock(serverId) { state ->
+            vault.remove(serverId, CredentialVault.CredentialKind.WEBDAV_CREDENTIAL)
             vault.remove(serverId, CredentialVault.CredentialKind.PASSWORD)
             state.generation++
             state.credentialIdentity = null
@@ -151,8 +171,10 @@ internal class WebDavCredentialStore(
     suspend fun savePassword(server: MediaServer, password: String) {
         coordinator.withServerLock(server.id) { state ->
             state.generation++
-            vault.save(server.id, CredentialVault.CredentialKind.PASSWORD, password)
-            state.credentialIdentity = identityOf(server)
+            val identity = identityOf(server)
+            vault.save(server.id, CredentialVault.CredentialKind.WEBDAV_CREDENTIAL,
+                Json.encodeToString(BoundCredential(identity = identity, password = password)))
+            state.credentialIdentity = identity
         }
     }
 }

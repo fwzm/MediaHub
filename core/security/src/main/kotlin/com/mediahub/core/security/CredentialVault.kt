@@ -17,6 +17,8 @@ class CredentialVault(private val storage: SecretStorage) {
 
     enum class CredentialKind {
         PASSWORD,
+        /** WebDAV versioned identity+password envelope; one encrypted write binds both. */
+        WEBDAV_CREDENTIAL,
         API_KEY,
         REFRESH_TOKEN,
         COOKIE,
