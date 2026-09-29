@@ -1,6 +1,7 @@
 package com.mediahub.core.database.repository
 
 import com.mediahub.core.common.IdGenerator
+import com.mediahub.core.common.ServerAddressIdentity
 import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.database.mapper.ServerEntityMappers.toDomain
 import com.mediahub.core.database.mapper.ServerEntityMappers.toEntity
@@ -56,8 +57,12 @@ class ServerRepository @Inject constructor(
         })
     }
 
-    /** 更新媒体源（整体替换线路）。 */
-    override suspend fun updateServer(server: MediaServer) {
+    /** 更新媒体源；身份替换与旧字幕记忆失效必须和线路写入一起提交。 */
+    override suspend fun updateServer(server: MediaServer) = db.withTransaction {
+        val previous = getServer(server.id)
+        if (previous == null || subtitleSourceIdentity(previous) != subtitleSourceIdentity(server)) {
+            db.subtitleMemoryDao().deleteByServer(server.id)
+        }
         dao.upsert(server.toEntity())
         endpointDao.deleteByServer(server.id)
         val endpoints = server.endpoints.mapIndexed { index, ep ->
@@ -68,6 +73,12 @@ class ServerRepository @Inject constructor(
         }
         if (endpoints.isNotEmpty()) endpointDao.upsertAll(endpoints)
     }
+
+    private fun subtitleSourceIdentity(server: MediaServer) = Triple(
+        server.type,
+        ServerAddressIdentity.normalize(server.baseUrl),
+        server.username?.trim().orEmpty(),
+    )
 
     suspend fun deleteServer(id: String) {
         val wasDefault = dao.getById(id)?.isDefault == true
