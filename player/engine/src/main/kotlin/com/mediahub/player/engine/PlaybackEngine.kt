@@ -385,23 +385,37 @@ class PlaybackEngine(
         audioSpectrumController.bind(player.audioSessionId)
     }
 
-    private fun selectTrack(rendererType: Int, selection: TrackSelection?) {
+    private fun selectTrack(trackType: Int, selection: TrackSelection?) {
         val mapped = trackSelector.currentMappedTrackInfo ?: return
-        val groups = mapped.getTrackGroups(rendererType)
+        // Media3 renderer indices depend on the installed renderer order; C.TRACK_TYPE_* are types.
+        val rendererIndices = (0 until mapped.rendererCount).filter { mapped.getRendererType(it) == trackType }
+        if (rendererIndices.isEmpty()) return
         val builder = trackSelector.buildUponParameters()
-
         if (selection == null) {
-            builder.setRendererDisabled(rendererType, true)
-            if (rendererType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = null
+            rendererIndices.forEach { renderer ->
+                builder.clearSelectionOverrides(renderer)
+                builder.setRendererDisabled(renderer, true)
+            }
+            if (trackType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = null
         } else {
-            if (selection.groupIndex !in 0 until groups.length) return
-            builder.setRendererDisabled(rendererType, false)
-            builder.setSelectionOverride(
-                rendererType,
-                groups,
-                DefaultTrackSelector.SelectionOverride(selection.groupIndex, selection.trackIndex),
-            )
-            if (rendererType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = selection
+            // UI uses a group ordinal within a type. Walk matching renderers' groups in order.
+            var ordinal = selection.groupIndex
+            var renderer = -1
+            var groupIndex = -1
+            for (index in rendererIndices) {
+                val groups = mapped.getTrackGroups(index)
+                if (ordinal in 0 until groups.length) { renderer = index; groupIndex = ordinal; break }
+                ordinal -= groups.length
+            }
+            if (renderer < 0) return
+            val groups = mapped.getTrackGroups(renderer)
+            if (selection.trackIndex !in 0 until groups[groupIndex].length) return
+            rendererIndices.forEach { index ->
+                builder.clearSelectionOverrides(index)
+                builder.setRendererDisabled(index, index != renderer)
+            }
+            builder.setSelectionOverride(renderer, groups, DefaultTrackSelector.SelectionOverride(groupIndex, selection.trackIndex))
+            if (trackType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = selection
         }
         trackSelector.setParameters(builder)
     }

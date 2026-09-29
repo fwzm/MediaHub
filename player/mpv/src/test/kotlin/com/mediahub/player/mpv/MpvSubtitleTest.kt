@@ -7,6 +7,7 @@ import com.mediahub.player.engine.ExternalSubtitle
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.SubtitleCapabilities
 import java.io.File
+import kotlinx.coroutines.async
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -65,6 +66,7 @@ class MpvSubtitleTest {
             mediaUrl: String,
             scopeKey: String,
             sessionHeaders: Map<String, String>,
+            token: SubtitleCache.Session?,
         ): String? {
             calls.add(arrayOf(uri, mediaUrl, scopeKey))
             return result
@@ -109,7 +111,12 @@ class MpvSubtitleTest {
         /** 模拟 mpv 拒绝 sub-delay 写入：set 不生效（回读保持旧值）。 */
         var rejectSubDelay = false
 
-        private val tracks = mutableListOf<Track>()
+        val tracks = mutableListOf<Track>()
+        var primarySid: String? = null
+        var suppressPrimary = false
+        var sidReadsUntilReady = 0
+        var propertyFailure = false
+        var onSidRead: (() -> Unit)? = null
 
         override fun addObserver(observer: MpvInstance.Observer) { this.observer = observer }
         override fun setOptionString(name: String, value: String) = Unit
@@ -119,6 +126,7 @@ class MpvSubtitleTest {
         override fun observeProperty(name: String, format: MpvInstance.Format) = Unit
         override fun command(args: Array<String>) {
             commands.add(args)
+            if (args.toList() == listOf("set", "sid", "no")) primarySid = "no"
             if (args.first() == "sub-add") {
                 tracks += extraTracksBefore
                 val targetFilename = args.getOrNull(1)
@@ -126,6 +134,7 @@ class MpvSubtitleTest {
                     tracks += Track(it.type, it.externalFilename ?: targetFilename, it.selected)
                 }
                 tracks += extraTracksAfter
+                if (!suppressPrimary) primarySid = tracks.indexOfLast { it.type == "sub" && it.externalFilename == targetFilename && it.selected }.takeIf { it >= 0 }?.let { (it + 1).toString() }
             }
         }
         override fun setPropertyBoolean(name: String, value: Boolean) = Unit
@@ -148,9 +157,16 @@ class MpvSubtitleTest {
             else -> 0.0
         }
         override fun getPropertyString(name: String): String? {
+            if (propertyFailure) throw IllegalStateException("property read failed")
+            if (name == "sid") {
+                onSidRead?.invoke()
+                if (sidReadsUntilReady-- > 0) return "no"
+                return primarySid
+            }
             val (index, field) = trackIndexed(name) ?: return null
             val track = tracks.getOrNull(index) ?: return null
             return when (field) {
+                "id" -> (index + 1).toString()
                 "type" -> track.type
                 "external-filename" -> track.externalFilename
                 else -> null
@@ -295,6 +311,7 @@ class MpvSubtitleTest {
             override suspend fun localPathFor(
                 uri: String, mediaUrl: String, scopeKey: String,
                 sessionHeaders: Map<String, String>,
+                token: SubtitleCache.Session?,
             ): String? {
                 entered.complete(Unit)
                 release.await()
@@ -361,6 +378,131 @@ class MpvSubtitleTest {
         assertFalse(f.engine.setSubtitleOffset(500L))
         assertEquals(0L, f.engine.subtitleOffsetMs)
     }
+
+    @Test
+    fun `secondary selected target is not primary success`() = runTest {
+        val f = SubtitleFixture(backgroundScope, RecordingCache("/data/subs/movie.zh.srt"))
+        f.engine.play(session("https://media.example/movie.mkv")); runCurrent()
+        val m = f.instances.single()
+        m.suppressPrimary = true
+        m.primarySid = "99"
+        assertFalse(f.engine.loadExternalSubtitle(localSub()))
+    }
+
+    @Test
+    fun `already loaded primary target succeeds without duplicate command`() = runTest {
+        val f = SubtitleFixture(backgroundScope, RecordingCache("/data/subs/movie.zh.srt"))
+        f.engine.play(session("https://media.example/movie.mkv")); runCurrent()
+        val m = f.instances.single()
+        m.tracks += FakeInstance.Track("sub", localSub().uri, true)
+        m.primarySid = "1"
+        assertTrue(f.engine.loadExternalSubtitle(localSub()))
+        assertFalse(m.commands.any { it.first() == "sub-add" })
+    }
+
+    @Test
+    fun `asynchronous primary selection is confirmed with bounded retry`() = runTest {
+        val f = SubtitleFixture(backgroundScope, RecordingCache("/data/subs/movie.zh.srt"))
+        f.engine.play(session("https://media.example/movie.mkv")); runCurrent()
+        f.instances.single().sidReadsUntilReady = 3
+        assertTrue(f.engine.loadExternalSubtitle(localSub()))
+        assertTrue(testScheduler.currentTime in 50L..1000L)
+    }
+
+    @Test
+    fun `primary disabled and failed property reads never report success`() = runTest {
+        val f = SubtitleFixture(backgroundScope, RecordingCache("/data/subs/movie.zh.srt"))
+        f.engine.play(session("https://media.example/movie.mkv")); runCurrent()
+        val m = f.instances.single()
+        m.suppressPrimary = true; m.primarySid = "no"
+        assertFalse(f.engine.loadExternalSubtitle(localSub()))
+        assertEquals(1000L, testScheduler.currentTime)
+        m.propertyFailure = true
+        assertFalse(f.engine.loadExternalSubtitle(localSub()))
+    }
+
+    @Test
+    fun `same filename different full path never matches primary target`() = runTest {
+        val f = SubtitleFixture(backgroundScope, RecordingCache("/data/subs/movie.zh.srt"))
+        f.engine.play(session("https://media.example/movie.mkv")); runCurrent()
+        f.instances.single().tracksToAppendOnSubAdd = mutableListOf(FakeInstance.Track("sub", "/other/movie.zh.srt", true))
+        assertFalse(f.engine.loadExternalSubtitle(localSub()))
+    }
+
+    @Test
+    fun `session switch during confirmation never reports old success`() = runTest {
+        val f = SubtitleFixture(backgroundScope, RecordingCache("/data/subs/movie.zh.srt"))
+        f.engine.play(session("https://media.example/one.mkv")); runCurrent()
+        val m = f.instances.single()
+        m.sidReadsUntilReady = 2
+        val job = launch { assertFalse(f.engine.loadExternalSubtitle(localSub())) }
+        runCurrent()
+        assertTrue(m.commands.any { it.first() == "sub-add" })
+        f.engine.play(session("https://media.example/two.mkv")); runCurrent()
+        job.join()
+        assertFalse(f.instances.last().commands.any { it.first() == "sub-add" })
+    }
+
+    @Test
+    fun `manual off invalidates delayed primary confirmation and sets sid no`() = runTest {
+        val f = SubtitleFixture(backgroundScope, RecordingCache("/data/subs/movie.zh.srt"))
+        f.engine.play(session("https://media.example/movie.mkv")); runCurrent()
+        val m = f.instances.single(); m.sidReadsUntilReady = 2
+        val job = launch { assertFalse(f.engine.loadExternalSubtitle(localSub())) }
+        runCurrent(); f.engine.selectSubtitleTrack(null); job.join()
+        assertTrue(m.commands.any { it.toList() == listOf("set", "sid", "no") })
+    }
+
+    @Test
+    fun `release of unused engine does not create cache`() = runTest {
+        var creations = 0
+        val engine = MpvPlaybackEngine(NoLogger, backgroundScope, { FakeBridge }, { FakeInstance() }, { 0L }, { 0L }, subtitleCacheFactory = { creations++; RecordingCache(null) })
+        engine.play(session("https://media.example/movie.mkv")); runCurrent()
+        engine.release()
+        assertEquals(0, creations)
+    }
+
+    private fun realLandingEngineInterleave(http: Boolean) = runTest {
+        val root = tmp.newFolder()
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val proceed = java.util.concurrent.CountDownLatch(1)
+        val cache = SubtitleCache(root, okhttp3.OkHttpClient(), { uri, target ->
+            target.writeText(if (uri.toString().contains("old")) "old payload" else "new payload")
+            true
+        }, NoLogger, { part ->
+            if (part.readText() == "old payload") {
+                assertTrue(part.exists()); assertTrue(part.name.endsWith(".part"))
+                entered.countDown()
+                check(proceed.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            }
+        })
+        val f = SubtitleFixture(backgroundScope, cache)
+        f.engine.play(session("https://media.example/old.mkv")); runCurrent()
+        if (http) webServer.enqueue(MockResponse().setBody("old payload"))
+        val oldUri = if (http) webServer.url("/old.srt").toString() else "content://import/old.srt"
+        val old = async(kotlinx.coroutines.Dispatchers.IO) {
+            f.engine.loadExternalSubtitle(localSub().copy(uri = oldUri))
+        }
+        try {
+            assertTrue("actual import publication barrier reached", entered.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            f.engine.stop()
+            f.engine.play(session("https://media.example/new.mkv")); runCurrent()
+            if (http) webServer.enqueue(MockResponse().setBody("new payload"))
+            val newUri = if (http) webServer.url("/new.srt").toString() else "content://import/new.srt"
+            assertTrue(f.engine.loadExternalSubtitle(localSub().copy(uri = newUri)))
+            proceed.countDown()
+            assertFalse(old.await())
+            assertFalse(f.instances.first().commands.any { it.first() == "sub-add" })
+            val command = f.instances.last().commands.single { it.first() == "sub-add" }
+            assertEquals("new payload", File(command[1]).readText())
+            assertEquals(1, File(root, "subtitles").listFiles().orEmpty().size)
+            f.engine.release()
+            assertTrue(File(root, "subtitles").listFiles().orEmpty().isEmpty())
+        } finally { proceed.countDown(); old.cancel(); old.join(); f.engine.release() }
+    }
+
+    @Test fun `real HTTP landing stop replay preserves native command ownership and release cleanup`() = realLandingEngineInterleave(true)
+    @Test fun `real SAF landing stop replay preserves native command ownership and release cleanup`() = realLandingEngineInterleave(false)
 
     // ---- SubtitleCache 真实落地（http 下载 + 凭据作用域 + content 拷贝） ----
 

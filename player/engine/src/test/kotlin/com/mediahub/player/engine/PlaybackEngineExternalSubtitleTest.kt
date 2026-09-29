@@ -1,11 +1,16 @@
 package com.mediahub.player.engine
 
 import android.content.Context
+import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.TrackGroup
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.trackselection.TrackSelector
+import androidx.media3.exoplayer.trackselection.MappingTrackSelector
+import androidx.media3.exoplayer.source.TrackGroupArray
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.PlaybackSource
@@ -35,6 +40,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class PlaybackEngineExternalSubtitleTest {
 
+    private lateinit var selector: DefaultTrackSelector
     private lateinit var fake: FakeExoPlayerHandler
     private lateinit var engine: PlaybackEngine
     private lateinit var scope: CoroutineScope
@@ -42,7 +48,7 @@ class PlaybackEngineExternalSubtitleTest {
     @Before
     fun setUp() {
         val context = RuntimeEnvironment.getApplication()
-        val trackSelector = DefaultTrackSelector(context)
+        val trackSelector = DefaultTrackSelector(context).also { selector = it }
         fake = FakeExoPlayerHandler(trackSelector)
         val proxy = Proxy.newProxyInstance(
             ExoPlayer::class.java.classLoader,
@@ -147,6 +153,64 @@ class PlaybackEngineExternalSubtitleTest {
         assertEquals(1, fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.size)
         engine.play(session(url = "https://media.example/other.mkv"))
         assertEquals(0, fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.size)
+    }
+
+    private fun installMapping(types: IntArray, groups: Array<TrackGroupArray>) {
+        val constructor = MappingTrackSelector.MappedTrackInfo::class.java.declaredConstructors.single()
+        constructor.isAccessible = true
+        val supports = Array(groups.size) { r -> Array(groups[r].length) { g -> IntArray(groups[r][g].length) { C.FORMAT_HANDLED } } }
+        val info = constructor.newInstance(Array(types.size) { "renderer$it" }, types, groups, IntArray(types.size), supports, TrackGroupArray.EMPTY)
+        selector.onSelectionActivated(info)
+    }
+
+    @Test
+    fun `subtitle selection and off use actual renderer index after renderer reorder`() {
+        val text = TrackGroupArray(TrackGroup(
+            Format.Builder().setSampleMimeType("application/x-subrip").setLanguage("zh").build(),
+            Format.Builder().setSampleMimeType("application/x-subrip").setLanguage("en").build(),
+        ))
+        val video = TrackGroupArray(TrackGroup(Format.Builder().setSampleMimeType("video/avc").build()))
+        val audio = TrackGroupArray(TrackGroup(Format.Builder().setSampleMimeType("audio/mp4a-latm").build()))
+        installMapping(intArrayOf(C.TRACK_TYPE_TEXT, C.TRACK_TYPE_VIDEO, C.TRACK_TYPE_AUDIO), arrayOf(text, video, audio))
+        engine.selectSubtitleTrack(TrackSelection(0, 1))
+        val override = selector.parameters.getSelectionOverride(0, text)!!
+        assertEquals(0, override.groupIndex)
+        assertTrue(override.tracks.contentEquals(intArrayOf(1)))
+        assertFalse(selector.parameters.getRendererDisabled(0))
+        assertFalse(selector.parameters.getRendererDisabled(1))
+        engine.selectSubtitleTrack(null)
+        assertTrue(selector.parameters.getRendererDisabled(0))
+        assertFalse(selector.parameters.getRendererDisabled(1))
+        engine.selectSubtitleTrack(TrackSelection(0, 0))
+        assertFalse(selector.parameters.getRendererDisabled(0))
+    }
+
+    @Test
+    fun `audio selection validates group and track bounds before selector mutation`() {
+        val audio = TrackGroupArray(TrackGroup(Format.Builder().setSampleMimeType("audio/mp4a-latm").build()))
+        installMapping(intArrayOf(C.TRACK_TYPE_AUDIO), arrayOf(audio))
+        engine.selectAudioTrack(TrackSelection(0, 0))
+        val before = selector.parameters
+        engine.selectAudioTrack(TrackSelection(-1, 0))
+        engine.selectAudioTrack(TrackSelection(0, -1))
+        engine.selectAudioTrack(TrackSelection(0, 1))
+        engine.selectAudioTrack(TrackSelection(1, 0))
+        assertEquals(before, selector.parameters)
+    }
+
+    @Test
+    fun `missing renderer fails closed and multiple matching renderers resolve type ordinal`() {
+        installMapping(intArrayOf(C.TRACK_TYPE_VIDEO), arrayOf(TrackGroupArray.EMPTY))
+        val before = selector.parameters
+        engine.selectSubtitleTrack(null)
+        assertEquals(before, selector.parameters)
+        val a = TrackGroupArray(TrackGroup(Format.Builder().setSampleMimeType("application/x-subrip").setLanguage("zh").build()))
+        val b = TrackGroupArray(TrackGroup(Format.Builder().setSampleMimeType("application/x-subrip").setLanguage("en").build()))
+        installMapping(intArrayOf(C.TRACK_TYPE_TEXT, C.TRACK_TYPE_TEXT), arrayOf(a, b))
+        engine.selectSubtitleTrack(TrackSelection(1, 0))
+        assertTrue(selector.parameters.getRendererDisabled(0))
+        assertFalse(selector.parameters.getRendererDisabled(1))
+        assertEquals(0, selector.parameters.getSelectionOverride(1, b)!!.groupIndex)
     }
 
     // ---- fake：反射 Proxy 实现 ExoPlayer，仅覆盖引擎真实触碰的成员 ----
