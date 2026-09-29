@@ -98,6 +98,13 @@ internal object WebDavUrls {
         val out = StringBuilder(value.length + 16)
         var i = 0
         while (i < value.length) {
+            // Preserve existing valid escapes when the same href also has raw spaces/CJK.
+            if (value[i] == '%' && i + 2 < value.length &&
+                value.substring(i + 1, i + 3).toIntOrNull(16) != null) {
+                out.append(value, i, i + 3)
+                i += 3
+                continue
+            }
             val codePoint = value.codePointAt(i)
             val charCount = Character.charCount(codePoint)
             val legal = codePoint in 0x21..0x7E && codePoint != 0x25
