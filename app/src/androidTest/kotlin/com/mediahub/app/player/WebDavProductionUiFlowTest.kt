@@ -133,6 +133,19 @@ class WebDavProductionUiFlowTest {
                 }
                 waitNode(hasText(label)).performClick()
             }
+            fun leaveSubtitleAndPlayer() {
+                device.pressBack()
+                compose.waitUntil(10_000) {
+                    compose.onAllNodesWithText(context.getString(com.mediahub.feature.player.R.string.player_subtitle_tracks))
+                        .fetchSemanticsNodes().isEmpty()
+                }
+                val close = context.getString(com.mediahub.feature.player.R.string.player_close)
+                if (compose.onAllNodes(hasContentDescription(close)).fetchSemanticsNodes().isEmpty()) {
+                    compose.onRoot().performTouchInput { click(center) }
+                }
+                waitNode(hasContentDescription(close)).performClick()
+                waitNode(hasText("播放", substring = false))
+            }
             playerEntry(com.mediahub.feature.player.R.string.player_info_entry)
             waitNode(hasText(context.getString(com.mediahub.feature.player.R.string.player_info_actual_engine)))
             compose.onAllNodesWithText("Media3", useUnmergedTree = true).onFirst().assertExists()
@@ -161,7 +174,7 @@ class WebDavProductionUiFlowTest {
             } }
             waitNode(hasText(context.getString(com.mediahub.feature.player.R.string.player_subtitle_external_active)))
             assertTrue("real OPEN_DOCUMENT must persist an actual read grant", context.contentResolver.persistedUriPermissions.any { it.uri !in originalGrants && it.isReadPermission })
-            device.pressBack(); device.pressBack()
+            leaveSubtitleAndPlayer()
             waitNode(hasText("播放", substring = false)).performClick()
             playerEntry(com.mediahub.feature.player.R.string.player_subtitles)
             waitNode(hasText(importName.substringBeforeLast('.')))
@@ -170,7 +183,7 @@ class WebDavProductionUiFlowTest {
             context.contentResolver.persistedUriPermissions.filter { it.uri !in originalGrants }.forEach {
                 context.contentResolver.releasePersistableUriPermission(it.uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            device.pressBack(); device.pressBack()
+            leaveSubtitleAndPlayer()
             waitNode(hasText("播放", substring = false)).performClick()
             playerEntry(com.mediahub.feature.player.R.string.player_subtitles)
             waitNode(hasText("已记忆字幕不可读取，请重新导入"))
@@ -181,14 +194,13 @@ class WebDavProductionUiFlowTest {
             waitNode(hasText("电影 a+b%.zh", substring = true)).performScrollTo().performClick()
             compose.waitUntil(15_000) { runBlocking { db.subtitleMemoryDao().getAll().any { it.serverId == sourceId && it.subtitleId?.endsWith(".zh.srt") == true } } }
             // Discovery is reached by the actual player, not a test-only screen.
-            device.pressBack()
-            device.pressBack()
+            leaveSubtitleAndPlayer()
             waitNode(hasText("播放", substring = false))
             compose.onNodeWithText("播放").performClick()
             playerEntry(com.mediahub.feature.player.R.string.player_subtitles)
             waitNode(hasText(context.getString(com.mediahub.feature.player.R.string.player_subtitle_external_active)))
             assertTrue(device.takeScreenshot(java.io.File(context.filesDir, "a4-webdav-subtitle-reentry.png")))
-            device.pressBack(); device.pressBack()
+            leaveSubtitleAndPlayer()
             waitNode(hasText("播放", substring = false))
             device.pressBack()
             waitNode(hasText("电影 a+b%.mp4"))

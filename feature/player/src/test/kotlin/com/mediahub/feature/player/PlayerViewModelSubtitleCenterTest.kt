@@ -45,12 +45,14 @@ import com.mediahub.provider.api.ProviderStatus
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -136,8 +138,10 @@ class PlayerViewModelSubtitleCenterTest {
         }
         var stopCount = 0
         var releaseCount = 0
-        override fun stop(): PlaybackProgress? { stopCount++; return null }
-        override fun release() { releaseCount++ }
+        var stopThread: String? = null
+        var releaseThread: String? = null
+        override fun stop(): PlaybackProgress? { stopThread = Thread.currentThread().name; stopCount++; return null }
+        override fun release() { releaseThread = Thread.currentThread().name; releaseCount++ }
     }
 
     private class MemoryStore : SubtitleMemoryStore {
@@ -283,6 +287,32 @@ class PlayerViewModelSubtitleCenterTest {
     )
 
     // ---- 发现 ----
+
+    @Test
+    fun `exit marshals engine stop and release onto main regardless of caller`() = runTest(dispatcher) {
+        val mainExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { task -> Thread(task, "a-four-player-main") }
+        val main = mainExecutor.asCoroutineDispatcher()
+        Dispatchers.setMain(main)
+        val engine = RecordingEngine()
+        val vm = buildVm(engine, null, MemoryStore())
+        val store = androidx.lifecycle.ViewModelStore().apply { put("player", vm) }
+        try {
+            kotlinx.coroutines.withContext(Dispatchers.Default) {
+                kotlinx.coroutines.withTimeout(5_000) {
+                    vm.resolveState.first { it is ResolveState.Ready }
+                }
+                vm.stopAndFlush()
+            }
+            assertEquals("a-four-player-main", engine.stopThread)
+            assertEquals("a-four-player-main", engine.releaseThread)
+            assertEquals(1, engine.stopCount)
+            assertEquals(1, engine.releaseCount)
+        } finally {
+            kotlinx.coroutines.withContext(main) { store.clear() }
+            Dispatchers.setMain(dispatcher)
+            main.close()
+        }
+    }
 
     @Test
     fun `discovery results reach subtitle center state`() = runTest(dispatcher) {

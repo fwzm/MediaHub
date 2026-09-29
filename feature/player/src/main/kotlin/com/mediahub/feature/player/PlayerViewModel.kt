@@ -54,6 +54,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -693,7 +694,7 @@ class PlayerViewModel @Inject constructor(
         resolveGeneration.incrementAndGet()
         resolveJob?.cancel()
         invalidateSubtitleSession()
-        withContext(NonCancellable) {
+        withContext(NonCancellable + Dispatchers.Main.immediate) {
             try {
                 val finalProgress = engine.stop()
                 // Stop periodic work before draining accepted local writes and the bounded
