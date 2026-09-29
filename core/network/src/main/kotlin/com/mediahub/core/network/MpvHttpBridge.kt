@@ -1,112 +1,166 @@
 package com.mediahub.core.network
 
+import java.io.InputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.util.concurrent.atomic.AtomicBoolean
+import java.security.SecureRandom
+import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-/**
- * mpv 安全媒体桥（U2 / ADR-030）。
- *
- * libmpv 不直接访问 Emby 直链 URL，而是访问本桥暴露的 localhost 地址：
- * mpv -> http://127.0.0.1:<port>/media -> MpvHttpBridge -> OkHttp + Emby 凭据 -> Emby ->307-> CDN/S3
- * 这样 mpv 从始至终只访问 localhost、永远不知道 Emby Token；凭据仍由已验证的
- * OkHttp 栈管理，跨 origin redirect 剥离复用 OriginScopedCredentialInterceptor（ADR-030）。
- *
- * 最小流式 HTTP 代理：GET/HEAD + Range 透传 + 206 响应体流式转发（不落盘），
- * seek 后 mpv 断开旧连接发起新 Range 请求（socket 关闭即取消旧转发）。
- */
-class MpvHttpBridge(
-    httpClientFactory: HttpClientFactory,
-) {
-    private val client: OkHttpClient = httpClientFactory.mediaClient().newBuilder()
-        .addNetworkInterceptor(OriginScopedCredentialInterceptor())
-        .build()
+/** Session-owned loopback media proxy; credentials remain on the origin-scoped OkHttp stack. */
+class MpvHttpBridge internal constructor(private val client: OkHttpClient) {
+    constructor(httpClientFactory: HttpClientFactory) : this(httpClientFactory.mediaClient().newBuilder()
+        .addNetworkInterceptor(OriginScopedCredentialInterceptor()).build())
+    private val workers = ThreadPoolExecutor(0, MAX_CONNECTIONS, 60, TimeUnit.SECONDS,
+        SynchronousQueue(), { work -> Thread(work, "mpv-http-conn").apply { isDaemon = true } },
+        ThreadPoolExecutor.AbortPolicy())
+    private class Session(val listener: ServerSocket, val path: String,
+        val url: String, val headers: Map<String, String>) {
+        var running = true // guarded by this Session's monitor
+        val sockets: MutableSet<Socket> = ConcurrentHashMap.newKeySet()
+        val calls: MutableSet<Call> = ConcurrentHashMap.newKeySet()
+    }
+    private var current: Session? = null
 
-    private val running = AtomicBoolean(false)
-    @Volatile private var serverSocket: ServerSocket? = null
-
-    /** 启动桥并返回 localhost 媒体 URL。upstreamUrl=Emby Direct Stream URL，upstreamHeaders=凭据/媒体头。 */
+    @Synchronized
     fun start(upstreamUrl: String, upstreamHeaders: Map<String, String>): String {
-        // 显式绑定 IPv4 loopback（getLoopbackAddress 在部分 Android 上返回 ::1，导致 127.0.0.1 连接被拒）
-        val socket = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
-        serverSocket = socket
-        running.set(true)
-        Thread({ acceptLoop(socket, upstreamUrl, upstreamHeaders) }, "mpv-http-bridge").start()
-        return "http://127.0.0.1:" + socket.localPort + "/media"
+        stop()
+        val listener = ServerSocket(0, MAX_CONNECTIONS, InetAddress.getByName("127.0.0.1"))
+        val random = ByteArray(24).also { SecureRandom().nextBytes(it) }
+        val path = "/media/" + Base64.getUrlEncoder().withoutPadding().encodeToString(random)
+        val session = Session(listener, path, upstreamUrl, upstreamHeaders.toMap())
+        current = session
+        Thread({ acceptLoop(session) }, "mpv-http-bridge").apply { isDaemon = true }.start()
+        return "http://127.0.0.1:${listener.localPort}$path"
     }
 
+    @Synchronized
     fun stop() {
-        running.set(false)
-        serverSocket?.close()
-        serverSocket = null
+        val session = current ?: return
+        current = null
+        synchronized(session) { session.running = false }
+        runCatching { session.listener.close() }
+        // All registrations check running under the same monitor; after invalidation no
+        // accepted socket or newly created Call can escape this cleanup snapshot.
+        session.calls.forEach { it.cancel() }
+        session.sockets.forEach { runCatching { it.close() } }
     }
 
-    private fun acceptLoop(socket: ServerSocket, url: String, headers: Map<String, String>) {
-        while (running.get()) {
+    private fun acceptLoop(session: Session) {
+        while (true) {
+            val conn = try { session.listener.accept() } catch (_: Exception) { return }
+            val admitted = synchronized(session) {
+                if (!session.running || session.sockets.size >= MAX_CONNECTIONS) false
+                else { session.sockets += conn; true }
+            }
+            if (!admitted) { runCatching { conn.close() }; continue }
             try {
-                val conn = socket.accept()
-                Thread({ handleConnection(conn, url, headers) }, "mpv-http-conn").start()
-            } catch (e: Exception) {
-                if (!running.get()) return
+                workers.execute { handleConnection(session, conn) }
+            } catch (_: Exception) {
+                session.sockets -= conn
+                runCatching { conn.close() }
             }
         }
     }
 
-    private fun handleConnection(socket: Socket, upstreamUrl: String, upstreamHeaders: Map<String, String>) {
+    private fun handleConnection(session: Session, socket: Socket) {
+        var call: Call? = null
+        var responseStarted = false
+        var upstreamFinished = false
         try {
-            socket.use { conn ->
+            val conn = socket
+            run {
+                conn.soTimeout = HEADER_TIMEOUT_MS
                 val input = conn.getInputStream()
                 val output = conn.getOutputStream()
-                val reader = input.bufferedReader()
-                val requestLine = reader.readLine() ?: return
-                val parts = requestLine.split(' ')
-                if (parts.size < 2) return
+                var remaining = MAX_HEADER_BYTES
+                fun line(): String? {
+                    val value = readLine(input, minOf(MAX_LINE_BYTES, remaining)) ?: return null
+                    remaining -= value.length + 2
+                    check(remaining > 0) { "header limit" }
+                    return value
+                }
+                fun reject(code: Int) {
+                    output.write("HTTP/1.1 $code Rejected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+                    output.flush()
+                }
+                val parts = line()?.split(' ') ?: return
+                if (parts.size != 3 || parts[2] !in setOf("HTTP/1.0", "HTTP/1.1")) { reject(400); return }
                 val method = parts[0]
-                val headers = HashMap<String, String>()
-                var line = reader.readLine()
-                while (!line.isNullOrEmpty()) {
-                    val idx = line.indexOf(':')
-                    if (idx > 0) headers[line.substring(0, idx).trim()] = line.substring(idx + 1).trim()
-                    line = reader.readLine()
+                if (method != "GET" && method != "HEAD") { reject(405); return }
+                if (parts[1] != session.path) { reject(404); return }
+                val forwarded = HashMap<String, String>()
+                var count = 0
+                while (true) {
+                    val header = line() ?: return
+                    if (header.isEmpty()) break
+                    if (++count > MAX_HEADERS) { reject(431); return }
+                    val colon = header.indexOf(':')
+                    if (colon <= 0) { reject(400); return }
+                    val name = header.substring(0, colon).lowercase()
+                    if (name in FORWARDED_HEADERS) forwarded[name] = header.substring(colon + 1).trim()
                 }
-                val builder = Request.Builder().url(upstreamUrl).method(method, null)
-                upstreamHeaders.forEach { (k, v) -> builder.header(k, v) }
-                headers["Range"]?.let { builder.header("Range", it) }
-                headers["If-Range"]?.let { builder.header("If-Range", it) }
-                headers["If-None-Match"]?.let { builder.header("If-None-Match", it) }
-
-                try {
-                    client.newCall(builder.build()).execute().use { resp ->
-                        val body = resp.body
-                        output.write(("HTTP/1.1 " + resp.code + " " + resp.message + "\r\n").toByteArray())
-                        resp.headers.forEach { (name, value) ->
-                            output.write((name + ": " + value + "\r\n").toByteArray())
-                        }
-                        output.write("\r\n".toByteArray())
-                        if (method != "HEAD" && body != null) {
-                            val buf = ByteArray(32 * 1024)
-                            body.byteStream().use { bodyIn ->
-                                var n = bodyIn.read(buf)
-                                while (n >= 0) {
-                                    output.write(buf, 0, n)
-                                    n = bodyIn.read(buf)
-                                }
-                            }
-                        }
-                        output.flush()
-                    }
-                } catch (e: Exception) {
-                    runCatching {
-                        output.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n".toByteArray())
-                        output.flush()
-                    }
+                val builder = Request.Builder().url(session.url).method(method, null)
+                session.headers.forEach { (name, value) -> builder.header(name, value) }
+                forwarded.forEach { (name, value) -> builder.header(name, value) }
+                val target = client.newCall(builder.build())
+                call = target
+                val registered = synchronized(session) {
+                    if (!session.running) false else { session.calls += target; true }
                 }
+                if (!registered) { target.cancel(); return }
+                target.execute().use { response ->
+                    responseStarted = true
+                    output.write("HTTP/1.1 ${response.code} ${response.message}\r\n".toByteArray())
+                    response.headers.forEach { (name, value) ->
+                        // OkHttp exposes a decoded body; hop framing must not be forwarded.
+                        if (name.lowercase() !in HOP_HEADERS) output.write("$name: $value\r\n".toByteArray())
+                    }
+                    output.write("Connection: close\r\n\r\n".toByteArray())
+                    if (method != "HEAD") response.body?.byteStream()?.use { it.copyTo(output, 32 * 1024) }
+                    output.flush()
+                }
+                upstreamFinished = true
             }
-        } catch (e: Exception) {
-            // 连接已断开（mpv seek/取消），忽略
+        } catch (_: Exception) {
+            if (!responseStarted && call != null && !socket.isClosed) runCatching {
+                socket.getOutputStream().write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+                socket.getOutputStream().flush()
+            }
+        } finally {
+            call?.let { session.calls -= it; if (!upstreamFinished) it.cancel() }
+            session.sockets -= socket
+            runCatching { socket.close() }
         }
+    }
+
+    /** Reads at most limit bytes and rejects unterminated or overlong lines before allocation grows. */
+    private fun readLine(input: InputStream, limit: Int): String? {
+        val text = StringBuilder()
+        for (index in 0 until limit) {
+            val byte = input.read()
+            if (byte == -1) return null
+            if (byte == 10) return text.toString().removeSuffix("\r")
+            text.append(byte.toChar())
+        }
+        throw IllegalArgumentException("HTTP line too long")
+    }
+
+    private companion object {
+        const val MAX_CONNECTIONS = 16
+        const val HEADER_TIMEOUT_MS = 10_000
+        const val MAX_LINE_BYTES = 8_192
+        const val MAX_HEADER_BYTES = 32_768
+        const val MAX_HEADERS = 100
+        val FORWARDED_HEADERS = setOf("range", "if-range", "if-none-match")
+        val HOP_HEADERS = setOf("connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+            "te", "trailer", "transfer-encoding", "upgrade")
     }
 }
