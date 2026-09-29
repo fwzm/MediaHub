@@ -206,6 +206,9 @@ fun PlayerRoute(
                 uri,
                 android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
             )
+        }.onFailure {
+            viewModel.onSubtitleImportPermissionFailed()
+            return@rememberLauncherForActivityResult
         }
         val displayName = runCatching {
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->

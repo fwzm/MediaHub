@@ -95,7 +95,7 @@
     <string name="player_info_actual_engine">Actual engine</string>
     <string name="player_info_actual_decoder">Actual decoder</string>
     <string name="player_info_actual_resolution">Actual resolution</string>
-    <string name="player_info_audio_output">Audio output</string>
+    <string name="player_info_audio_output">Current audio track format</string>
     <string name="player_info_audio_track_count">Audio tracks</string>
     <string name="player_info_subtitle_track_count">Subtitles</string>
     <string name="player_info_on">On</string>
