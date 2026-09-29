@@ -85,6 +85,7 @@ def main():
     parser.add_argument("--run-id")
     parser.add_argument("--attempt")
     parser.add_argument("--required-suite", action="append", default=[])
+    parser.add_argument("--report-timezone")
     args = parser.parse_args()
     if args.clean:
         # Only generated result directories of configured modules in the explicit checkout.
@@ -101,10 +102,11 @@ def main():
         parser.error("--sha, --run-id and --attempt are required for recording/verifying")
     if args.begin:
         configure(args.root)
-        actual = subprocess.check_output(["git", "-C", str(args.root), "rev-parse", "HEAD"], text=True).strip()
-        gate.begin(args.root, "unit", args.sha, args.run_id, args.attempt, actual)
+        actual = gate.clean_checkout(args.root, args.sha)
+        gate.begin(args.root, "unit", args.sha, args.run_id, args.attempt, actual, args.report_timezone)
         return 0
     if args.record:
+        gate.clean_checkout(args.root, args.sha)
         record(args.root, args.sha, args.run_id, args.attempt)
         return 0
     problems, totals, no_source = verify(args.root, args.sha, args.run_id, args.attempt, args.required_suite)

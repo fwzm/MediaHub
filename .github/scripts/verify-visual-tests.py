@@ -2,11 +2,12 @@
 
 import argparse
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import subprocess
 import time
+import re
 from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
@@ -111,7 +112,35 @@ def start_path(root):
     return root / MANIFEST.replace("manifest.json", "execution-start.json")
 
 
-def begin(root, api, sha, run_id, attempt, checkout_sha):
+def clean_checkout(root, sha):
+    actual = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+    if actual != sha:
+        raise ValueError("actual Git checkout differs from expected SHA")
+    tracked = subprocess.check_output(["git", "-C", str(root), "diff", "--name-only", "-z", "HEAD", "--"])
+    untracked = subprocess.check_output(["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "-z"])
+    # These two reserved directories hold generated CI ledgers/reports, never compile inputs.
+    generated = ("ci-evidence/", "ci-validation/")
+    source_untracked = [p for p in untracked.decode("utf-8").split("\0") if p and not p.startswith(generated)]
+    if tracked or source_untracked:
+        raise ValueError("checkout has modified/staged or nonignored untracked source files")
+    return actual
+
+
+def timezone_offset(value=None):
+    if value is None:
+        return int(datetime.now().astimezone().utcoffset().total_seconds())
+    if value == "UTC":
+        return 0
+    match = re.fullmatch(r"([+-])(\d{2}):(\d{2})", value)
+    if not match:
+        raise ValueError("report timezone must be UTC or an explicit offset such as +08:00")
+    hours, minutes = int(match[2]), int(match[3])
+    if minutes > 59 or hours > 14 or hours == 14 and minutes:
+        raise ValueError("report timezone is outside supported UTC offsets")
+    return (1 if match[1] == "+" else -1) * (hours * 3600 + minutes * 60)
+
+
+def begin(root, api, sha, run_id, attempt, checkout_sha, report_timezone=None):
     if checkout_sha != sha:
         raise ValueError("execution start: actual Git checkout differs from expected SHA")
     if report_paths(root):
@@ -119,7 +148,15 @@ def begin(root, api, sha, run_id, attempt, checkout_sha):
     output = start_path(root)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({"checkoutSha": sha, "api": api, "runId": run_id,
-                                 "runAttempt": attempt, "startedNs": time.time_ns()}) + "\n", encoding="utf-8")
+                                 "runAttempt": attempt, "startedNs": time.time_ns(),
+                                 "reportUtcOffsetSeconds": timezone_offset(report_timezone)}) + "\n", encoding="utf-8")
+
+
+def report_offset(root):
+    value = json.loads(start_path(root).read_text(encoding="utf-8")).get("reportUtcOffsetSeconds")
+    if not isinstance(value, int) or abs(value) > 14 * 3600:
+        raise ValueError("execution start: missing/invalid report timezone offset")
+    return value
 
 
 def execution_start(root, api, sha, run_id, attempt):
@@ -133,7 +170,8 @@ def execution_start(root, api, sha, run_id, attempt):
     return started
 
 
-def fresh_report(path, started):
+def fresh_report(path, started, utc_offset=0, recorded_ns=None):
+    observed = time.time_ns() if recorded_ns is None else recorded_ns
     # NTFS/ZIP-backed fixture files may round last-write time to a few milliseconds.
     if path.stat().st_mtime_ns + 5_000_000 < started:
         raise ValueError(f"{path}: XML predates the recorded execution start")
@@ -147,9 +185,11 @@ def fresh_report(path, started):
         if stamp:
             parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)  # CI runners execute in UTC.
+                parsed = parsed.replace(tzinfo=timezone(timedelta(seconds=utc_offset)))
             if parsed.timestamp() < started / 1_000_000_000 - 5:
                 raise ValueError(f"{path}: suite timestamp predates the recorded execution start")
+            if parsed.timestamp() > observed / 1_000_000_000 + 5:
+                raise ValueError(f"{path}: suite timestamp is in the future of the recorded execution")
 
 
 def report_paths(root):
@@ -161,12 +201,15 @@ def record(root, api, sha, run_id, attempt, device_api):
     if device_api != api:
         raise ValueError(f"device API {device_api} differs from matrix API {api}")
     started = execution_start(root, api, sha, run_id, attempt)
+    offset = report_offset(root)
+    recorded = time.time_ns()
     for path in report_paths(root):
-        fresh_report(path, started)
+        fresh_report(path, started, offset, recorded)
     manifest = {
         "checkoutSha": sha, "api": api, "deviceApi": device_api,
         "runId": run_id, "runAttempt": attempt,
         "startedNs": started,
+        "reportUtcOffsetSeconds": offset, "recordedNs": recorded,
         "reports": {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                     for path in report_paths(root)},
     }
@@ -178,15 +221,22 @@ def record(root, api, sha, run_id, attempt, device_api):
 def verify(root, api, sha, run_id, attempt):
     passed = set()
     started = 0
+    offset, recorded = 0, time.time_ns()
     executions = Counter()
     problems = []
     reports_now = {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                    for path in report_paths(root)}
     try:
         started = execution_start(root, api, sha, run_id, attempt)
+        offset = report_offset(root)
         manifest = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
+        candidate_recorded = manifest.get("recordedNs")
+        if not isinstance(candidate_recorded, int) or candidate_recorded < started or candidate_recorded > time.time_ns() + 5_000_000_000:
+            raise ValueError("invalid manifest recording time")
+        recorded = candidate_recorded
         expected = {"checkoutSha": sha, "api": api, "deviceApi": api,
-                    "runId": run_id, "runAttempt": attempt, "startedNs": started}
+                    "runId": run_id, "runAttempt": attempt, "startedNs": started,
+                    "reportUtcOffsetSeconds": offset}
         for field, value in expected.items():
             if manifest.get(field) != value:
                 problems.append(f"instrumentation manifest: {field} does not match expected {value}")
@@ -202,7 +252,7 @@ def verify(root, api, sha, run_id, attempt):
             problems.append(f"{module}: no connected-test XML reports")
         for report in reports:
             try:
-                fresh_report(report, started)
+                fresh_report(report, started, offset, recorded)
                 suite = ET.parse(report).getroot()
             except (ET.ParseError, OSError, ValueError, UnboundLocalError) as error:
                 problems.append(f"{report}: invalid report ({error})")
@@ -250,12 +300,14 @@ def main():
     parser.add_argument("--record", action="store_true", help="Record report hashes after fresh instrumentation")
     parser.add_argument("--begin", action="store_true", help="Require clean reports and bind execution start to Git HEAD")
     parser.add_argument("--device-api", type=int)
+    parser.add_argument("--report-timezone", help="Naive XML timestamp timezone: UTC or offset; default is local at --begin")
     args = parser.parse_args()
     if args.begin:
-        actual = subprocess.check_output(["git", "-C", str(args.root), "rev-parse", "HEAD"], text=True).strip()
-        begin(args.root, args.api, args.sha, args.run_id, args.attempt, actual)
+        actual = clean_checkout(args.root, args.sha)
+        begin(args.root, args.api, args.sha, args.run_id, args.attempt, actual, args.report_timezone)
         return 0
     if args.record:
+        clean_checkout(args.root, args.sha)
         record(args.root, args.api, args.sha, args.run_id, args.attempt, args.device_api)
         return 0
     problems = verify(args.root, args.api, args.sha, args.run_id, args.attempt)
