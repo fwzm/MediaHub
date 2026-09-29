@@ -10,6 +10,7 @@ import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.text.CueGroup
@@ -23,6 +24,9 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.PlaybackError
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -81,6 +85,8 @@ class PlaybackEngine(
         }
 
     private var session: PlaybackSession? = null
+    private var playbackGeneration = 0L
+    private var subtitleOperation = 0L
     private var progressJob: Job? = null
     private var released = false
     /** Visualizer 是按 UI/lifecycle 需求启用的重资源，默认不创建。 */
@@ -224,6 +230,9 @@ class PlaybackEngine(
     }
 
     override fun play(session: PlaybackSession) {
+        if (released) return
+        playbackGeneration++
+        subtitleOperation++
         // 同一个 ExoPlayer 可复用 audio session；每次媒体会话仍先释放旧 capture，防止迟到回调串流。
         audioSpectrumController.clear()
         audioSpectrumSessionActive = true
@@ -231,6 +240,7 @@ class PlaybackEngine(
         // 新媒体会话：外挂字幕与手动字幕轨选择不跨会话携带（匹配记忆由 ViewModel 层重放）。
         externalSubtitles.clear()
         lastSelectedSubtitle = null
+        clearTextSelectionOverrides()
         session.trace?.record(PlaybackStartupTrace.Milestone.MEDIA_REQUEST_STARTED)
         session.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_PREPARE_STARTED)
         headersHolder.setHeaders(buildRequestHeaders(session.source))
@@ -293,6 +303,7 @@ class PlaybackEngine(
     }
 
     override fun selectSubtitleTrack(selection: TrackSelection?) {
+        subtitleOperation++
         selectTrack(C.TRACK_TYPE_TEXT, selection)
     }
 
@@ -315,18 +326,86 @@ class PlaybackEngine(
     private var lastSelectedSubtitle: TrackSelection? = null
 
     override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
-        if (released || session == null) return false
-        val configuration = subtitle.toSubtitleConfiguration() ?: return false
-        externalSubtitles += configuration
-        rebuildMediaItemWithExternalSubtitles()
-        logger.i(
-            LogTag.PLAYER,
-            "Media3 外挂字幕重建 mime=${subtitle.mimeType} name=${subtitle.name} count=${externalSubtitles.size}",
-        )
-        return true
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        if (released) return false
+        val expectedSession = session ?: return false
+        val generation = playbackGeneration
+        val operation = subtitleOperation + 1
+        val configuration = subtitle.toSubtitleConfiguration("external-$generation-$operation") ?: return false
+        subtitleOperation = operation
+        fun currentRequest() = !released && session === expectedSession && playbackGeneration == generation && subtitleOperation == operation
+        val previousSelection = lastSelectedSubtitle
+        val previousParameters = trackSelector.parameters
+        var accepted = false
+        try {
+            context.ensureActive()
+            lastSelectedSubtitle = null
+            clearTextSelectionOverrides()
+            // Pending configurations are not retained after failure/cancellation; the next load
+            // cannot reattach an unconfirmed resource. Unique format IDs reject old Tracks events.
+            rebuildMediaItemWithExternalSubtitles(externalSubtitles.filter { it.uri != configuration.uri } + configuration)
+            repeat(EXTERNAL_SUBTITLE_CONFIRM_ATTEMPTS) { attempt ->
+                context.ensureActive()
+                if (!currentRequest()) return false
+                val tracks = player.currentTracks
+                val target = tracks.groups.firstNotNullOfOrNull { group ->
+                    if (group.type != C.TRACK_TYPE_TEXT) null
+                    else (0 until group.length).firstOrNull { group.getTrackFormat(it).id == configuration.id }
+                        ?.let { index -> group to index }
+                }
+                if (target != null) {
+                    val (group, index) = target
+                    if (!group.isTrackSupported(index)) return false
+                    if (group.isTrackSelected(index)) {
+                        context.ensureActive()
+                        if (!currentRequest()) return false
+                        externalSubtitles.removeAll { it.uri == configuration.uri }
+                        externalSubtitles += configuration
+                        accepted = true
+                        return true
+                    }
+                    context.ensureActive()
+                    if (!currentRequest()) return false
+                    trackSelector.setParameters(trackSelector.buildUponParameters()
+                        .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index)))
+                }
+                if (attempt < EXTERNAL_SUBTITLE_CONFIRM_ATTEMPTS - 1) delay(EXTERNAL_SUBTITLE_CONFIRM_INTERVAL_MS)
+            }
+            return false
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.w(LogTag.PLAYER, "Media3 external subtitle confirmation failed")
+            return false
+        } finally {
+            if (!accepted && currentRequest()) {
+                // Remove a late pending subtitle from the actual media item too. Do not roll back
+                // over an Off/new request/new media session that already superseded this request.
+                lastSelectedSubtitle = previousSelection
+                trackSelector.setParameters(previousParameters)
+                runCatching { rebuildMediaItemWithExternalSubtitles() }
+                    .onFailure { logger.w(LogTag.PLAYER, "Media3 subtitle rollback failed") }
+            }
+        }
     }
 
-    private fun ExternalSubtitle.toSubtitleConfiguration(): MediaItem.SubtitleConfiguration? {
+    private fun clearTextSelectionOverrides() {
+        val builder = trackSelector.buildUponParameters()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+        trackSelector.currentMappedTrackInfo?.let { mapped ->
+            for (renderer in 0 until mapped.rendererCount) {
+                if (mapped.getRendererType(renderer) == C.TRACK_TYPE_TEXT) {
+                    builder.clearSelectionOverrides(renderer)
+                    builder.setRendererDisabled(renderer, false)
+                }
+            }
+        }
+        trackSelector.setParameters(builder)
+    }
+
+    private fun ExternalSubtitle.toSubtitleConfiguration(nativeId: String): MediaItem.SubtitleConfiguration? {
         val uri = try {
             android.net.Uri.parse(uri)
         } catch (e: Exception) {
@@ -337,7 +416,7 @@ class PlaybackEngine(
             .setMimeType(mimeType)
             .setLabel(name)
             .setLanguage(language)
-            .setId(id)
+            .setId(nativeId)
             .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
             .build()
     }
@@ -348,7 +427,7 @@ class PlaybackEngine(
      * `setMediaItem(item, positionMs)` 在同一调用内完成换源与 seek，避免双跳帧；
      * 倍速/playWhenReady 在 Media3 中跨 setMediaItem 保留，此处仍显式重施（防御版本差异）。
      */
-    private fun rebuildMediaItemWithExternalSubtitles() {
+    private fun rebuildMediaItemWithExternalSubtitles(configurations: List<MediaItem.SubtitleConfiguration> = externalSubtitles.toList()) {
         val s = session ?: return
         val snapshot = PlaybackRestoreSnapshot(
             positionMs = player.currentPosition.coerceAtLeast(0),
@@ -357,7 +436,7 @@ class PlaybackEngine(
         )
         val mediaItem = s.source.toMedia3Item(s)
             .buildUpon()
-            .setSubtitleConfigurations(externalSubtitles.toList())
+            .setSubtitleConfigurations(configurations)
             .build()
         player.setMediaItem(mediaItem, snapshot.positionMs)
         player.prepare()
@@ -386,11 +465,19 @@ class PlaybackEngine(
     }
 
     private fun selectTrack(trackType: Int, selection: TrackSelection?) {
-        val mapped = trackSelector.currentMappedTrackInfo ?: return
+        val mapped = trackSelector.currentMappedTrackInfo
+        val builder = trackSelector.buildUponParameters().clearOverridesOfType(trackType)
+            .setTrackTypeDisabled(trackType, selection == null)
+        if (mapped == null) {
+            if (selection == null) {
+                if (trackType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = null
+                trackSelector.setParameters(builder)
+            }
+            return
+        }
         // Media3 renderer indices depend on the installed renderer order; C.TRACK_TYPE_* are types.
         val rendererIndices = (0 until mapped.rendererCount).filter { mapped.getRendererType(it) == trackType }
         if (rendererIndices.isEmpty()) return
-        val builder = trackSelector.buildUponParameters()
         if (selection == null) {
             rendererIndices.forEach { renderer ->
                 builder.clearSelectionOverrides(renderer)
@@ -414,6 +501,7 @@ class PlaybackEngine(
                 builder.clearSelectionOverrides(index)
                 builder.setRendererDisabled(index, index != renderer)
             }
+            builder.setOverrideForType(TrackSelectionOverride(groups[groupIndex], selection.trackIndex))
             builder.setSelectionOverride(renderer, groups, DefaultTrackSelector.SelectionOverride(groupIndex, selection.trackIndex))
             if (trackType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = selection
         }
@@ -485,18 +573,23 @@ class PlaybackEngine(
      * 3. 返回最终进度（调用方用于显式 final flush）。
      */
     override fun stop(): PlaybackProgress? {
+        playbackGeneration++
+        subtitleOperation++
         progressJob?.cancel()
         audioSpectrumSessionActive = false
         audioSpectrumController.clear()
         val finalProgress = currentProgress()
+        session = null
         _events.trySend(PlaybackEvent.Stopped)
-        logger.i(LogTag.PLAYER, "播放停止 serverId=${session?.serverId} itemId=${session?.itemId}")
+        logger.i(LogTag.PLAYER, "播放停止 serverId=${finalProgress?.serverId} itemId=${finalProgress?.itemId}")
         return finalProgress
     }
 
     override fun release() {
         if (released) return
         released = true
+        playbackGeneration++
+        subtitleOperation++
         audioSpectrumSessionActive = false
         progressJob?.cancel()
         audioSpectrumController.release()
@@ -549,6 +642,8 @@ class PlaybackEngine(
     }
 
     private companion object {
+        const val EXTERNAL_SUBTITLE_CONFIRM_ATTEMPTS = 41
+        const val EXTERNAL_SUBTITLE_CONFIRM_INTERVAL_MS = 50L
         const val PROGRESS_INTERVAL_MS = 1_000L
 
         /** 本引擎可侧挂的字幕 MIME（与 SubtitleFormats 覆盖面一致）。 */

@@ -4,9 +4,14 @@ import android.content.Context
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.TrackGroup
+import androidx.media3.common.Tracks
+import androidx.media3.common.Timeline
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.RendererCapabilities
+import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.trackselection.TrackSelector
 import androidx.media3.exoplayer.trackselection.MappingTrackSelector
@@ -19,10 +24,15 @@ import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,6 +46,7 @@ import org.robolectric.annotation.Config
  * - SubtitleConfiguration mime/uri/id 映射；多次加载累计；
  * - Media3 无偏移 API：setSubtitleOffset 如实拒绝（能力矩阵 externalLoad=true, offsetAdjust=false）。
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class PlaybackEngineExternalSubtitleTest {
@@ -49,6 +60,9 @@ class PlaybackEngineExternalSubtitleTest {
     fun setUp() {
         val context = RuntimeEnvironment.getApplication()
         val trackSelector = DefaultTrackSelector(context).also { selector = it }
+        trackSelector.init(object : TrackSelector.InvalidationListener {
+            override fun onTrackSelectionsInvalidated(parameters: androidx.media3.common.TrackSelectionParameters?) = Unit
+        }, DefaultBandwidthMeter.Builder(context).build())
         fake = FakeExoPlayerHandler(trackSelector)
         val proxy = Proxy.newProxyInstance(
             ExoPlayer::class.java.classLoader,
@@ -64,6 +78,8 @@ class PlaybackEngineExternalSubtitleTest {
             speedMonitor = PlaybackSpeedMonitor(),
         )
     }
+
+    @After fun releaseEngine() { engine.release() }
 
     private fun session(url: String = "https://media.example/movie.mkv") = PlaybackSession(
         serverId = "srv-1",
@@ -213,6 +229,129 @@ class PlaybackEngineExternalSubtitleTest {
         assertEquals(0, selector.parameters.getSelectionOverride(1, b)!!.groupIndex)
     }
 
+    @Test
+    fun `off then external re-enables real selector and confirms actual target format`() = runTest {
+        engine.play(session())
+        fake.currentTracks() // real selector maps its text renderer
+        engine.selectSubtitleTrack(null)
+        assertTrue(selector.parameters.getRendererDisabled(0))
+        assertTrue(engine.loadExternalSubtitle(subtitle()))
+        assertFalse(selector.parameters.getRendererDisabled(0))
+        val id = fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.single().id
+        assertTrue(fake.currentTracks().groups.any { group -> (0 until group.length).any { group.getTrackFormat(it).id == id && group.isTrackSelected(it) } })
+    }
+
+    @Test
+    fun `embedded then external clears real legacy override instead of replaying embedded`() = runTest {
+        engine.play(session()); fake.currentTracks()
+        engine.selectSubtitleTrack(TrackSelection(0, 0))
+        val embedded = selector.currentMappedTrackInfo!!.getTrackGroups(0)
+        assertTrue(selector.parameters.hasSelectionOverride(0, embedded))
+        assertTrue(engine.loadExternalSubtitle(subtitle()))
+        assertFalse(selector.parameters.hasSelectionOverride(0, embedded))
+        val id = fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.single().id
+        assertTrue(fake.currentTracks().groups.any { group -> (0 until group.length).any { group.getTrackFormat(it).id == id && group.isTrackSelected(it) } })
+    }
+
+    @Test
+    fun `configuration acceptance without prepared target never reports success`() = runTest {
+        engine.play(session())
+        fake.state.noPreparedSubtitleTracks = true
+        assertFalse(engine.loadExternalSubtitle(subtitle()))
+        assertEquals(2000L, testScheduler.currentTime)
+        assertTrue(fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.isEmpty())
+    }
+
+    @Test
+    fun `delayed prepared target is selected using real selector with bounded wait`() = runTest {
+        engine.play(session())
+        fake.state.emptyTrackReads = 2
+        assertTrue(engine.loadExternalSubtitle(subtitle()))
+        assertTrue(testScheduler.currentTime in 50L..2000L)
+    }
+
+    @Test
+    fun `unsupported target and wrong or old format identity never confirm`() = runTest {
+        engine.play(session())
+        fake.state.rejectExternalSupport = true
+        assertFalse(engine.loadExternalSubtitle(subtitle()))
+        fake.state.rejectExternalSupport = false
+        fake.state.wrongExternalFormatId = true
+        assertFalse(engine.loadExternalSubtitle(subtitle()))
+        assertTrue(fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.isEmpty())
+    }
+
+    @Test
+    fun `off during target preparation invalidates old confirmation and prevents late selection`() = runTest {
+        engine.play(session())
+        fake.state.noPreparedSubtitleTracks = true
+        val pending = async { engine.loadExternalSubtitle(subtitle()) }; runCurrent()
+        assertEquals(1, fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.size)
+        engine.selectSubtitleTrack(null)
+        fake.state.noPreparedSubtitleTracks = false
+        assertFalse(pending.await())
+        assertTrue(selector.parameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
+        assertTrue(fake.currentTracks().groups.none { it.isSelected })
+    }
+
+    @Test
+    fun `embedded selection during preparation wins over late external target`() = runTest {
+        engine.play(session())
+        fake.state.noPreparedSubtitleTracks = true
+        val pending = async { engine.loadExternalSubtitle(subtitle()) }; runCurrent()
+        fake.currentTracks() // mapped embedded group exists before the manual choice
+        engine.selectSubtitleTrack(TrackSelection(0, 0))
+        fake.state.noPreparedSubtitleTracks = false
+        assertFalse(pending.await())
+        val tracks = fake.currentTracks()
+        assertTrue(tracks.groups.any { group -> (0 until group.length).any {
+            group.getTrackFormat(it).id == "embedded" && group.isTrackSelected(it)
+        } })
+        assertTrue(tracks.groups.none { group -> (0 until group.length).any {
+            group.getTrackFormat(it).id != "embedded" && group.isTrackSelected(it)
+        } })
+    }
+
+    @Test
+    fun `cancelled preparation removes pending config and does not report success`() = runTest {
+        engine.play(session())
+        fake.state.noPreparedSubtitleTracks = true
+        val pending = async { engine.loadExternalSubtitle(subtitle()) }; runCurrent()
+        assertEquals(1, fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.size)
+        pending.cancel(); runCurrent()
+        assertTrue(pending.isCancelled)
+        assertTrue(fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.isEmpty())
+    }
+
+    @Test
+    fun `new session stop and release each invalidate a pending target`() = runTest {
+        engine.play(session())
+        fake.state.noPreparedSubtitleTracks = true
+        val first = async { engine.loadExternalSubtitle(subtitle()) }; runCurrent()
+        engine.play(session("https://media.example/new.mkv"))
+        assertFalse(first.await())
+        val second = async { engine.loadExternalSubtitle(subtitle()) }; runCurrent()
+        engine.stop()
+        assertFalse(second.await())
+        assertFalse(engine.loadExternalSubtitle(subtitle()))
+        engine.play(session())
+        val third = async { engine.loadExternalSubtitle(subtitle()) }; runCurrent()
+        engine.release()
+        assertFalse(third.await())
+    }
+
+    @Test
+    fun `new external request supersedes pending old identity and keeps only confirmed config`() = runTest {
+        engine.play(session()); fake.state.noPreparedSubtitleTracks = true
+        val pending = async { engine.loadExternalSubtitle(subtitle()) }; runCurrent()
+        fake.state.noPreparedSubtitleTracks = false
+        val new = subtitle(uri = "https://media.example/new.srt")
+        assertTrue(engine.loadExternalSubtitle(new))
+        assertFalse(pending.await())
+        val configs = fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations
+        assertEquals(listOf(new.uri), configs.map { it.uri.toString() })
+    }
+
     // ---- fake：反射 Proxy 实现 ExoPlayer，仅覆盖引擎真实触碰的成员 ----
 
     private class FakeExoPlayerState {
@@ -224,14 +363,43 @@ class PlaybackEngineExternalSubtitleTest {
         var speed = 1f
         var positionMs = 0L
         var released = false
+        var noPreparedSubtitleTracks = false
+        var emptyTrackReads = 0
+        var rejectExternalSupport = false
+        var wrongExternalFormatId = false
     }
 
-    private class FakeExoPlayerHandler(private val trackSelector: TrackSelector) : InvocationHandler {
+    private class FakeExoPlayerHandler(private val trackSelector: DefaultTrackSelector) : InvocationHandler {
         val state = FakeExoPlayerState()
+
+        private val embedded = TrackGroup("embedded", Format.Builder().setId("embedded").setSampleMimeType("application/x-subrip").build())
+        private val textRenderer = object : RendererCapabilities {
+            override fun getName() = "fixture-text"
+            override fun getTrackType() = C.TRACK_TYPE_TEXT
+            override fun supportsMixedMimeTypeAdaptation() = RendererCapabilities.ADAPTIVE_NOT_SUPPORTED
+            override fun supportsFormat(format: Format): Int = RendererCapabilities.create(
+                if (state.rejectExternalSupport && format.id != "embedded") C.FORMAT_UNSUPPORTED_TYPE else C.FORMAT_HANDLED)
+        }
+        fun currentTracks(): Tracks {
+            if (state.emptyTrackReads-- > 0) return Tracks.EMPTY
+            val configurations = state.lastMediaItem?.localConfiguration?.subtitleConfigurations.orEmpty()
+            val external = if (state.noPreparedSubtitleTracks) emptyList() else configurations.map { config ->
+                TrackGroup("group-${config.id}", Format.Builder().setId(if (state.wrongExternalFormatId) "old-format" else config.id)
+                    .setSampleMimeType(config.mimeType).setLanguage(config.language).setSelectionFlags(config.selectionFlags).build())
+            }
+            // Real ExoPlayer activates application parameters on its playback thread before
+            // selecting tracks (Media3 1.11 separates applicationParameters/playerParameters).
+            trackSelector.onParametersActivated(trackSelector.parameters)
+            val result = trackSelector.selectTracks(arrayOf(textRenderer), TrackGroupArray(*((listOf(embedded) + external).toTypedArray())),
+                MediaSource.MediaPeriodId("fixture-period"), Timeline.EMPTY)
+            trackSelector.onSelectionActivated(result.info)
+            return result.tracks
+        }
 
         override fun invoke(proxy: Any, method: Method, args: Array<out Any?>?): Any? {
             when (method.name) {
                 "getTrackSelector" -> return trackSelector
+                "getCurrentTracks" -> return currentTracks()
                 "setVideoSurface", "setAudioAttributes", "addListener", "removeListener",
                 "addAnalyticsListener", "removeAnalyticsListener", "setVolume",
                 -> return null
