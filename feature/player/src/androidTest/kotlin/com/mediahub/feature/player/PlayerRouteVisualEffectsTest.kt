@@ -9,6 +9,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -128,6 +129,15 @@ class PlayerRouteVisualEffectsTest {
         assertEquals(candidate.id, memory.entry!!.subtitleId)
         composeRule.onNodeWithText("+0.5s").performScrollToWithClock(composeRule).performClick()
         composeRule.waitUntil(10_000) { memory.entry?.offsetMs == 500L }
+        composeRule.onAllNodes(
+            SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.Selected, true) and
+                SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.Role, androidx.compose.ui.semantics.Role.RadioButton),
+            useUnmergedTree = true,
+        ).assertCountEquals(1) // An active external subtitle cannot also show Off.
+        val titleWidth = composeRule.onNodeWithText(checkNotNull(engine.uiState.value.mediaTitle))
+            .fetchSemanticsNode().boundsInRoot.width
+        assertTrue("portrait action buttons must leave a readable title row",
+            titleWidth >= context.resources.configuration.screenWidthDp * context.resources.displayMetrics.density / 2f)
         captureVisualEvidence(composeRule, "a-four-player-subtitle-selected")
         composeRule.onNodeWithText(context.getString(R.string.player_subtitles_off)).performScrollToWithClock(composeRule).performClick()
         composeRule.waitUntil(10_000) { vm.subtitleCenter.value.selectedExternalId == null && memory.entry?.subtitleId == null }
