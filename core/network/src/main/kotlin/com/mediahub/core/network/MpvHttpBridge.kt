@@ -4,6 +4,7 @@ import java.io.InputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.security.SecureRandom
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
@@ -15,7 +16,12 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /** Session-owned loopback media proxy; credentials remain on the origin-scoped OkHttp stack. */
-class MpvHttpBridge internal constructor(private val client: OkHttpClient) {
+class MpvHttpBridge internal constructor(
+    private val client: OkHttpClient,
+    private val headerTimeoutMs: Int = HEADER_TIMEOUT_MS,
+) {
+    init { require(headerTimeoutMs > 0) }
+
     constructor(httpClientFactory: HttpClientFactory) : this(httpClientFactory.mediaClient().newBuilder()
         .addNetworkInterceptor(OriginScopedCredentialInterceptor()).build())
     private val workers = ThreadPoolExecutor(0, MAX_CONNECTIONS, 60, TimeUnit.SECONDS,
@@ -77,12 +83,12 @@ class MpvHttpBridge internal constructor(private val client: OkHttpClient) {
         try {
             val conn = socket
             run {
-                conn.soTimeout = HEADER_TIMEOUT_MS
+                val headerDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(headerTimeoutMs.toLong())
                 val input = conn.getInputStream()
                 val output = conn.getOutputStream()
                 var remaining = MAX_HEADER_BYTES
                 fun line(): String? {
-                    val value = readLine(input, minOf(MAX_LINE_BYTES, remaining)) ?: return null
+                    val value = readLine(input, conn, headerDeadline, minOf(MAX_LINE_BYTES, remaining)) ?: return null
                     remaining -= value.length + 2
                     check(remaining > 0) { "header limit" }
                     return value
@@ -119,9 +125,14 @@ class MpvHttpBridge internal constructor(private val client: OkHttpClient) {
                 target.execute().use { response ->
                     responseStarted = true
                     output.write("HTTP/1.1 ${response.code} ${response.message}\r\n".toByteArray())
+                    val connectionHeaders = response.headers.values("Connection")
+                        .flatMap { it.split(',') }.map { it.trim().lowercase() }.toSet()
                     response.headers.forEach { (name, value) ->
                         // OkHttp exposes a decoded body; hop framing must not be forwarded.
-                        if (name.lowercase() !in HOP_HEADERS) output.write("$name: $value\r\n".toByteArray())
+                        val normalized = name.lowercase()
+                        if (normalized !in HOP_HEADERS && normalized !in connectionHeaders) {
+                            output.write("$name: $value\r\n".toByteArray())
+                        }
                     }
                     output.write("Connection: close\r\n\r\n".toByteArray())
                     if (method != "HEAD") response.body?.byteStream()?.use { it.copyTo(output, 32 * 1024) }
@@ -142,9 +153,15 @@ class MpvHttpBridge internal constructor(private val client: OkHttpClient) {
     }
 
     /** Reads at most limit bytes and rejects unterminated or overlong lines before allocation grows. */
-    private fun readLine(input: InputStream, limit: Int): String? {
+    private fun readLine(input: InputStream, socket: Socket, deadline: Long, limit: Int): String? {
         val text = StringBuilder()
         for (index in 0 until limit) {
+            // One monotonic deadline spans the complete request header. A peer cannot
+            // renew its admission by dripping bytes just before an idle timeout.
+            val remainingNanos = deadline - System.nanoTime()
+            if (remainingNanos <= 0) throw SocketTimeoutException("HTTP header deadline")
+            socket.soTimeout = ((remainingNanos + 999_999) / 1_000_000)
+                .coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
             val byte = input.read()
             if (byte == -1) return null
             if (byte == 10) return text.toString().removeSuffix("\r")

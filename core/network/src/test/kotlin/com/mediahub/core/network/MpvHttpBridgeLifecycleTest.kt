@@ -146,6 +146,51 @@ class MpvHttpBridgeLifecycleTest {
         }
     }
 
+    @Test fun `continuous slow header bytes cannot extend the aggregate header deadline`() {
+        MockWebServer().use { upstream ->
+            upstream.start()
+            val bridge = MpvHttpBridge(client(), headerTimeoutMs = 180)
+            val writer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+            val sent = java.util.concurrent.atomic.AtomicInteger()
+            try {
+                val url = bridge.start(upstream.url("/media").toString(), emptyMap())
+                Socket("127.0.0.1", URI(url).port).use { local ->
+                    local.soTimeout = 1_000
+                    local.getOutputStream().write("GET ${URI(url).path} HTTP/1.1\r\nX-Slow: ".toByteArray())
+                    local.getOutputStream().flush()
+                    val started = System.nanoTime()
+                    val dripping = writer.scheduleAtFixedRate({
+                        runCatching { local.getOutputStream().write('x'.code); local.getOutputStream().flush(); sent.incrementAndGet() }
+                    }, 0, 20, TimeUnit.MILLISECONDS)
+                    try {
+                        assertEquals("server closes despite continued bytes well within idle timeout", -1, local.getInputStream().read())
+                        assertTrue("actual slow-byte traffic reached the header window", sent.get() >= 3)
+                        assertTrue("aggregate deadline must expire before the client's read timeout",
+                            System.nanoTime() - started < TimeUnit.MILLISECONDS.toNanos(800))
+                        assertEquals(0, upstream.requestCount)
+                    } finally { dripping.cancel(true) }
+                }
+            } finally { bridge.stop(); writer.shutdownNow(); assertTrue(writer.awaitTermination(3, TimeUnit.SECONDS)) }
+        }
+    }
+
+    @Test fun `response Connection nominated headers are not forwarded`() {
+        MockWebServer().use { upstream ->
+            upstream.start()
+            upstream.enqueue(MockResponse().setHeader("Connection", "X-Upstream-Hop, keep-alive")
+                .setHeader("X-Upstream-Hop", "hop-value").setHeader("Content-Range", "bytes 0-3/4").setBody("body"))
+            val bridge = MpvHttpBridge(client())
+            try {
+                val url = bridge.start(upstream.url("/media").toString(), emptyMap())
+                client().newCall(Request.Builder().url(url).build()).execute().use {
+                    assertNull(it.header("X-Upstream-Hop"))
+                    assertEquals("bytes 0-3/4", it.header("Content-Range"))
+                    assertEquals("body", it.body!!.string())
+                }
+            } finally { bridge.stop() }
+        }
+    }
+
     @Test fun `chunked upstream response is streamed with valid close framing`() {
         MockWebServer().use { upstream ->
             upstream.start()
