@@ -103,7 +103,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           python3 .github/scripts/verify-unit-tests.py --record --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
-          python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest --required-suite com.mediahub.app.WebDavJointChainTest --required-suite com.mediahub.player.mpv.MpvSubtitleTest --required-suite com.mediahub.core.database.repository.ServerRepositorySubtitleIdentityTest --required-suite com.mediahub.feature.player.PlayerViewModelSubtitleCenterTest --required-suite com.mediahub.player.engine.PlaybackEngineExternalSubtitleTest
+          python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest --required-suite com.mediahub.app.WebDavJointChainTest --required-suite com.mediahub.player.mpv.MpvSubtitleTest --required-suite com.mediahub.core.database.repository.ServerRepositorySubtitleIdentityTest --required-suite com.mediahub.feature.player.PlayerViewModelSubtitleCenterTest --required-suite com.mediahub.player.engine.PlaybackEngineExternalSubtitleTest --required-suite com.mediahub.provider.webdav.WebDavParserPlatformCompatibilityTest --require-complete-suites
 
       - name: Lint
         if: ${{ !cancelled() }}

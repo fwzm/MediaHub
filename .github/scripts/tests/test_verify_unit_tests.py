@@ -65,6 +65,24 @@ class UnitGateTest(unittest.TestCase):
     def test_filtered_required_suite_fails(self):
         self.assertTrue(any("required unit suite" in p for p in self.problems(["Missing.RequiredTest"])))
 
+    def test_one_executed_method_cannot_certify_complete_required_suite(self):
+        source = self.root / "android/src/test/kotlin/ExampleTest.kt"
+        source.write_text('package android\nclass ExampleTest { @Test fun example() {}\n@Test fun `missing regression`() {} }')
+        problems = gate.verify(self.root, SHA, "run-1", "1", ["android.ExampleTest"], True)[0]
+        self.assertTrue(any("#missing regression: required unit method" in p for p in problems))
+        self.assertFalse(any("#example:" in p for p in problems))
+        tree = ET.parse(self.paths["android"])
+        tree.getroot().set("tests", "2")
+        ET.SubElement(tree.getroot(), "testcase", classname="android.ExampleTest", name="missing regression")
+        tree.write(self.paths["android"])
+        self.stamp()
+        self.assertEqual([], gate.verify(self.root, SHA, "run-1", "1", ["android.ExampleTest"], True)[0])
+
+    def test_complete_suite_missing_source_fails(self):
+        (self.root / "android/src/test/kotlin/ExampleTest.kt").unlink()
+        problems = gate.verify(self.root, SHA, "run-1", "1", ["android.ExampleTest"], True)[0]
+        self.assertTrue(any("source missing or ambiguous" in p for p in problems))
+
     def test_skipped_nonmandatory_unit_fails(self):
         tree = ET.parse(self.paths["jvm"])
         tree.getroot().set("skipped", "1")

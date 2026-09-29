@@ -49,7 +49,7 @@ def record(root, sha, run_id, attempt):
     path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
-def verify(root, sha, run_id, attempt, required_suites=()):
+def verify(root, sha, run_id, attempt, required_suites=(), complete_suites=False):
     active, no_source = configure(root)
     problems = gate.verify(root, "unit", sha, run_id, attempt)
     try:
@@ -58,7 +58,7 @@ def verify(root, sha, run_id, attempt, required_suites=()):
             problems.append("unit manifest: source module/NO-SOURCE inventory does not match checkout")
     except (OSError, ValueError):
         pass  # Common manifest verifier already records this failure.
-    suites, totals = set(), {}
+    suites, totals, executed = set(), {}, set()
     for module, report_directory in active.items():
         cases = []
         for path in (root / module / report_directory).rglob("TEST-*.xml"):
@@ -69,9 +69,32 @@ def verify(root, sha, run_id, attempt, required_suites=()):
         if not cases:
             problems.append(f"{module}: zero executed unit tests despite test sources")
         suites.update(c.get("classname", "") for c in cases)
+        executed.update((c.get("classname", ""), c.get("name", "").removesuffix("()")) for c in cases)
         totals[module] = len({(c.get("classname"), c.get("name")) for c in cases})
     for suite in sorted(set(required_suites) - suites):
         problems.append(f"{suite}: required unit suite did not execute")
+    if complete_suites:
+        # These explicitly required, ordinary Kotlin/JUnit suites are source contracts.
+        # Suite presence alone would allow --tests Suite.oneMethod to omit a regression.
+        for suite in sorted(set(required_suites)):
+            filename = suite.rsplit(".", 1)[-1] + ".kt"
+            sources = []
+            for module in active:
+                for path in (root / module / "src/test").rglob(filename):
+                    package = re.search(r'^\s*package\s+([\w.]+)', path.read_text(encoding="utf-8"), re.MULTILINE)
+                    if package and package.group(1) + "." + filename[:-3] == suite:
+                        sources.append(path)
+            if len(sources) != 1:
+                problems.append(f"{suite}: required Kotlin suite source missing or ambiguous")
+                continue
+            source = sources[0].read_text(encoding="utf-8")
+            names = re.findall(r'@Test(?:\([^)]*\))?\s+(?:@[^\n]+\s+)*(?:public\s+)?fun\s+(`[^`]+`|\w+)\s*\(', source)
+            if not names:
+                problems.append(f"{suite}: no ordinary Kotlin @Test methods discovered")
+            for name in names:
+                name = name.strip("`")
+                if (suite, name) not in executed:
+                    problems.append(f"{suite}#{name}: required unit method did not execute")
     return problems, totals, no_source
 
 
@@ -85,6 +108,7 @@ def main():
     parser.add_argument("--run-id")
     parser.add_argument("--attempt")
     parser.add_argument("--required-suite", action="append", default=[])
+    parser.add_argument("--require-complete-suites", action="store_true")
     parser.add_argument("--report-timezone")
     args = parser.parse_args()
     if args.clean:
@@ -109,7 +133,7 @@ def main():
         gate.clean_checkout(args.root, args.sha)
         record(args.root, args.sha, args.run_id, args.attempt)
         return 0
-    problems, totals, no_source = verify(args.root, args.sha, args.run_id, args.attempt, args.required_suite)
+    problems, totals, no_source = verify(args.root, args.sha, args.run_id, args.attempt, args.required_suite, args.require_complete_suites)
     print(json.dumps({"uniqueTestsPerModule": totals, "uniqueTests": sum(totals.values()),
                       "noSourceModules": no_source}, indent=2))
     if problems:
