@@ -242,12 +242,7 @@ jobs:
           # not OEM GPU/audio acceptance. swiftshader_indirect is deprecated.
           emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none
           # One device: serialize module instrumentation so activities cannot steal focus.
-          script: |
-            bash .github/scripts/prepare-visual-emulator.sh
-            test_status=0
-            ./gradlew :core:ui:connectedDebugAndroidTest :feature:player:connectedDebugAndroidTest :feature:settings:connectedDebugAndroidTest :provider:webdav:connectedDebugAndroidTest :core:database:connectedDebugAndroidTest --no-daemon --continue --no-parallel --max-workers=2 --rerun-tasks --no-build-cache || test_status=$?
-            python3 .github/scripts/verify-visual-tests.py --record --api "${{ matrix.api-level }}" --device-api "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
-            exit "$test_status"
+          script: bash .github/scripts/run-visual-validation.sh "${{ matrix.api-level }}"
 
       - name: Require executed visual assertions
         if: ${{ !cancelled() }}
