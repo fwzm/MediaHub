@@ -26,4 +26,10 @@ interface PlaybackProgressDao {
 
     @Query("DELETE FROM playback_progress WHERE serverId = :serverId")
     suspend fun deleteByServer(serverId: String)
+
+    @Query("SELECT * FROM playback_progress ORDER BY updatedAtEpochMs DESC")
+    suspend fun getAll(): List<PlaybackProgressEntity>
+
+    @Upsert
+    suspend fun upsertAll(entities: List<PlaybackProgressEntity>)
 }

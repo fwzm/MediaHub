@@ -18,10 +18,18 @@ import com.mediahub.provider.jellyfin.api.JellyfinEndpointResolver
 import com.mediahub.provider.jellyfin.session.JellyfinSession
 import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
 import java.util.concurrent.CancellationException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -402,6 +410,149 @@ class JellyfinAuthProviderTest {
         assertTrue("取消必须穿透（实际：$thrown）", thrown is CancellationException)
         assertNull("NonCancellable 保证取消下凭据仍被清理", tokenStore.readTokens("srv-1"))
         assertNull(sessionStore.read("srv-1"))
+    }
+
+    @Test
+    fun `late authentication response cannot repopulate credentials after restore invalidation`() = runBlocking {
+        val requestStarted = CountDownLatch(1)
+        val releaseResponse = CountDownLatch(1)
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requestStarted.countDown()
+                if (!releaseResponse.await(5, TimeUnit.SECONDS)) return MockResponse().setResponseCode(504)
+                return MockResponse().setResponseCode(200).setBody(
+                    """{"User":{"Id":"old-user","Name":"Old"},"AccessToken":"OLD-TOKEN","ServerId":"old-remote"}"""
+                )
+            }
+        }
+        val login = async(Dispatchers.Default) { provider().authenticate(Credentials.UsernamePassword("old", "test")) }
+        try {
+            assertTrue("Real authentication request must reach the barrier", withContext(Dispatchers.IO) {
+                requestStarted.await(5, TimeUnit.SECONDS)
+            })
+            tokenStore.clear(mediaServer.id)
+            sessionStore.clear(mediaServer.id)
+            assertNull(tokenStore.readTokens(mediaServer.id))
+            assertNull(sessionStore.read(mediaServer.id))
+            releaseResponse.countDown()
+            val result = withTimeout(5_000) { login.await() }
+            assertNull("Old response must not restore a Token for a replaced identity", tokenStore.readTokens(mediaServer.id))
+            assertNull("Old response must not restore session metadata", sessionStore.read(mediaServer.id))
+            assertTrue(result is AuthResult.Failure)
+        } finally {
+            releaseResponse.countDown()
+            login.cancelAndJoin()
+        }
+    }
+
+    @Test
+    fun `restore blocks old and interim providers but a fresh provider can authenticate afterward`() = runBlocking {
+        val old = provider()
+        var interim: JellyfinAuthProvider? = null
+        val credentials = Credentials.UsernamePassword("new", "test")
+        tokenStore.withRestoreIdentityChange(setOf(mediaServer.id)) {
+            tokenStore.clear(mediaServer.id)
+            sessionStore.clear(mediaServer.id)
+            assertTrue(old.authenticate(credentials) is AuthResult.Failure)
+            interim = provider()
+            assertTrue(interim!!.authenticate(credentials) is AuthResult.Failure)
+            assertEquals("Blocked authentication must not contact an old address", 0, server.requestCount)
+            assertNull(tokenStore.readTokens(mediaServer.id))
+            assertNull(sessionStore.read(mediaServer.id))
+        }
+        assertTrue(old.authenticate(credentials) is AuthResult.Failure)
+        assertTrue(interim!!.authenticate(credentials) is AuthResult.Failure)
+        assertEquals(0, server.requestCount)
+        server.enqueue(MockResponse().setResponseCode(200).setBody(
+            """{"User":{"Id":"new-user","Name":"New"},"AccessToken":"NEW-TOKEN","ServerId":"new-remote"}"""
+        ))
+        assertTrue(provider().authenticate(credentials) is AuthResult.Success)
+        assertEquals("NEW-TOKEN", tokenStore.readTokens(mediaServer.id)?.accessToken)
+        assertEquals("new-user", sessionStore.read(mediaServer.id)?.userId)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `ordinary logout permits the same provider instance to log in again`() = runBlocking {
+        val auth = provider()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(loginBody()))
+        assertTrue(auth.authenticate(Credentials.UsernamePassword("alice", "test")) is AuthResult.Success)
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"Id":"remote-1"}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        auth.logout()
+        assertNull(tokenStore.readTokens(mediaServer.id))
+        assertNull(sessionStore.read(mediaServer.id))
+        server.enqueue(MockResponse().setResponseCode(200).setBody(loginBody()))
+        assertTrue(auth.authenticate(Credentials.UsernamePassword("alice", "test")) is AuthResult.Success)
+        assertNotNull(tokenStore.readTokens(mediaServer.id))
+        assertNotNull(sessionStore.read(mediaServer.id))
+    }
+
+    @Test
+    fun `revoked auth handle cannot read restore or clear the new identity session`() = runBlocking {
+        val old = provider()
+        tokenStore.withRestoreIdentityChange(setOf(mediaServer.id)) { tokenStore.clear(mediaServer.id) }
+        seedSession()
+        tokenStore.saveTokens(mediaServer.id, StoredToken("NEW-TOKEN"))
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(200)
+                .setBody("""{"Id":"remote-1","Name":"New"}""")
+        }
+        val user = old.currentUser()
+        val restored = old.restoreSession()
+        old.logout()
+        assertNull("Old handle must not read the new identity", user)
+        assertEquals(AuthSessionState.SignedOut, restored)
+        assertEquals("NEW-TOKEN", tokenStore.readTokens(mediaServer.id)?.accessToken)
+        assertNotNull(sessionStore.read(mediaServer.id))
+        assertEquals("Revoked handle cannot begin requests", 0, server.requestCount)
+    }
+
+    @Test
+    fun `late restore unauthorized response cannot clear a newer identity session`() = runBlocking {
+        lateSessionResult(logout = false)
+    }
+
+    @Test
+    fun `late logout probe cannot clear a newer identity session or issue logout`() = runBlocking {
+        lateSessionResult(logout = true)
+    }
+
+    private suspend fun lateSessionResult(logout: Boolean) = kotlinx.coroutines.coroutineScope {
+        seedSession()
+        val old = provider()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val identityProbe = request.path!!.contains("/System/Info/Public")
+                if ((logout && identityProbe) || (!logout && !identityProbe)) {
+                    entered.countDown()
+                    if (!release.await(5, TimeUnit.SECONDS)) return MockResponse().setResponseCode(504)
+                }
+                return if (identityProbe) MockResponse().setResponseCode(200).setBody("""{"Id":"remote-1"}""")
+                else MockResponse().setResponseCode(if (logout) 204 else 401)
+            }
+        }
+        val action = async(Dispatchers.Default) { if (logout) old.logout() else old.restoreSession() }
+        try {
+            assertTrue(withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
+            tokenStore.withRestoreIdentityChange(setOf(mediaServer.id)) {
+                tokenStore.clear(mediaServer.id)
+                sessionStore.clear(mediaServer.id)
+            }
+            seedSession()
+            tokenStore.saveTokens(mediaServer.id, StoredToken("NEW-TOKEN"))
+            release.countDown()
+            val result = withTimeout(5_000) { action.await() }
+            assertEquals("NEW-TOKEN", tokenStore.readTokens(mediaServer.id)?.accessToken)
+            assertNotNull(sessionStore.read(mediaServer.id))
+            if (logout) assertEquals("No new logout after revocation", 1, server.requestCount)
+            else assertEquals(AuthSessionState.SignedOut, result)
+        } finally {
+            release.countDown()
+            action.cancelAndJoin()
+        }
     }
 
     private class FakeSecretStorage : SecretStorage {

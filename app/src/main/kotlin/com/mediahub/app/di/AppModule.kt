@@ -208,4 +208,24 @@ abstract class RegistryModule {
     @Binds
     @Singleton
     abstract fun bindEnginePreferenceHistory(impl: DataStoreEnginePreferenceHistory): EnginePreferenceHistory
+
+    @Binds
+    @Singleton
+    abstract fun bindBackupDataSource(impl: com.mediahub.feature.settings.backup.ProductionBackupDataSource): com.mediahub.feature.settings.backup.BackupDataSource
+
+    @Binds
+    @Singleton
+    abstract fun bindRestoreSnapshotStorage(impl: com.mediahub.feature.settings.backup.RestoreSnapshotStore): com.mediahub.feature.settings.backup.RestoreSnapshotStorage
+
+    @Binds
+    @Singleton
+    abstract fun bindRestoreJournal(impl: com.mediahub.feature.settings.backup.SharedPrefsRestoreJournal): com.mediahub.feature.settings.backup.RestoreJournal
+
+    @Binds
+    @Singleton
+    abstract fun bindRestoreLoginInvalidator(impl: com.mediahub.feature.settings.backup.TokenSessionLoginInvalidator): com.mediahub.feature.settings.backup.RestoreLoginInvalidator
+
+    @Binds
+    @Singleton
+    abstract fun bindBackupFileStore(impl: com.mediahub.feature.settings.backup.ProductionBackupFileStore): com.mediahub.feature.settings.backup.BackupFileStore
 }

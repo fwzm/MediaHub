@@ -22,6 +22,7 @@ import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerializationException
 
 /**
@@ -46,11 +47,15 @@ class EmbyAuthProvider(
     private val logger: Logger,
 ) : MediaAuthProvider {
 
+    private val authenticationLease = tokenStore.authenticationLease(server.id)
+
     override suspend fun authenticate(credentials: Credentials): AuthResult {
         val userPassword = credentials as? Credentials.UsernamePassword
             ?: return AuthResult.Failure(
                 ProviderException.AuthFailed(server.id, "不支持的凭据类型")
             )
+        val attempt = tokenStore.beginAuthentication(authenticationLease)
+            ?: return AuthResult.Failure(ProviderException.AuthFailed(server.id, "媒体源已更新，请重新打开登录"))
         return try {
             val result = api.authenticate(userPassword.username, userPassword.password)
             val accessToken = result.accessToken
@@ -64,8 +69,8 @@ class EmbyAuthProvider(
                 return AuthResult.Failure(ProviderException.Parse(server.id, null))
             }
 
-            tokenStore.saveTokens(server.id, StoredToken(accessToken = accessToken))
-            try {
+            val committed = tokenStore.commitAuthentication(
+                attempt, StoredToken(accessToken = accessToken), saveSession = {
                 sessionStore.save(
                     EmbySession(
                         localServerId = server.id,
@@ -74,12 +79,13 @@ class EmbyAuthProvider(
                         userName = userName.orEmpty(),
                     )
                 )
-            } catch (e: Exception) {
-                tokenStore.clear(server.id)
-                throw e
-            }
+                }, clearSession = { sessionStore.clear(server.id) },
+            )
+            if (!committed) return AuthResult.Failure(ProviderException.AuthFailed(server.id, "登录已失效，请重新登录"))
             logger.i(LogTag.AUTH, "Emby 登录成功 serverId=${server.id} remoteServerId=$remoteServerId")
             AuthResult.Success(EmbyUserMapper.map(EmbyUserDto(userId, userName), server.id))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             mapLoginFailure(e)
         }
@@ -101,14 +107,18 @@ class EmbyAuthProvider(
      * 失效策略（review #4）：仅 401 清会话；403/5xx/网络/协议异常保留。
      */
     override suspend fun restoreSession(): AuthSessionState {
+        val attempt = tokenStore.beginAuthentication(authenticationLease) ?: return AuthSessionState.SignedOut
         val tokens = tokenStore.readTokens(server.id) ?: return AuthSessionState.SignedOut
         val session = sessionStore.read(server.id) ?: return AuthSessionState.SignedOut
+        if (!tokenStore.isAuthenticationCurrent(attempt)) return AuthSessionState.SignedOut
 
         // 服务器身份校验：无 Token 请求，绝不对错误服务器发送旧 Token
         val currentRemoteServerId = try {
             api.getSystemInfoPublic().id
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: ApiException) {
-            return authErrorFromHttp(e, preserveSession = true)
+            return authErrorFromHttp(e, preserveSession = true, attempt)
         } catch (e: SerializationException) {
             return AuthSessionState.Error(
                 AuthSessionErrorKind.INVALID_RESPONSE,
@@ -120,6 +130,7 @@ class EmbyAuthProvider(
             return AuthSessionState.Error(AuthSessionErrorKind.UNKNOWN, "验证失败：${e.message}")
         }
 
+        if (!tokenStore.isAuthenticationCurrent(attempt)) return AuthSessionState.SignedOut
         if (currentRemoteServerId.isNullOrBlank()) {
             return AuthSessionState.Error(
                 AuthSessionErrorKind.INVALID_RESPONSE,
@@ -136,10 +147,13 @@ class EmbyAuthProvider(
 
         return try {
             val user = api.getCurrentUser(tokens.accessToken, session.userId)
+            if (!tokenStore.isAuthenticationCurrent(attempt)) return AuthSessionState.SignedOut
             AuthSessionState.Authenticated(EmbyUserMapper.map(user, server.id))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: ApiException) {
             // 仅 401（Token 已撤销）才清会话；403/5xx 保留（review #4）
-            authErrorFromHttp(e, preserveSession = e.statusCode != 401)
+            authErrorFromHttp(e, preserveSession = e.statusCode != 401, attempt)
         } catch (e: SerializationException) {
             // 协议异常 ≠ 认证失效：保留会话（review #4）
             AuthSessionState.Error(AuthSessionErrorKind.INVALID_RESPONSE, "服务器响应异常，请稍后重试")
@@ -151,24 +165,35 @@ class EmbyAuthProvider(
     }
 
     override suspend fun logout() {
-        val tokens = tokenStore.readTokens(server.id)
-        val session = sessionStore.read(server.id)
-        if (tokens != null && session != null) {
-            // 服务端撤销：best-effort，且仅当服务器身份一致（防把旧 Token 发给错误服务器，review #2）
-            val serverIdMatches = runCatching { api.getSystemInfoPublic().id }.getOrNull() == session.remoteServerId
-            if (serverIdMatches) {
-                runCatching { api.logout(tokens.accessToken, session.userId) }
-                    .onFailure { logger.w(LogTag.AUTH, "Emby 服务端登出失败（best-effort） serverId=${server.id}", it) }
+        val attempt = tokenStore.beginAuthentication(authenticationLease) ?: return
+        var cancellation: CancellationException? = null
+        try {
+            val tokens = tokenStore.readTokens(server.id)
+            val session = sessionStore.read(server.id)
+            if (!tokenStore.isAuthenticationCurrent(attempt)) return
+            if (tokens != null && session != null) {
+                // Only the current handle may start another request after the anonymous probe.
+                val remoteId = try { api.getSystemInfoPublic().id }
+                    catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+                if (remoteId == session.remoteServerId && tokenStore.isAuthenticationCurrent(attempt)) {
+                    try { api.logout(tokens.accessToken, session.userId) }
+                    catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { logger.w(LogTag.AUTH, "Emby 服务端登出失败（best-effort） serverId=${server.id}", e) }
+                }
             }
+        } catch (e: CancellationException) {
+            cancellation = e
+            throw e
+        } finally {
+            try { tokenStore.clearAuthenticationIfCurrent(attempt) { sessionStore.clear(server.id) } }
+            catch (cleanup: Exception) { cancellation?.addSuppressed(cleanup) ?: throw cleanup }
         }
-        // 本地清理：authoritative（ADR-026）
-        tokenStore.clear(server.id)
-        sessionStore.clear(server.id)
-        logger.i(LogTag.AUTH, "Emby 已登出 serverId=${server.id}")
     }
 
     override suspend fun currentUser(): MediaUser? {
+        val attempt = tokenStore.beginAuthentication(authenticationLease) ?: return null
         val session = sessionStore.read(server.id) ?: return null
+        if (!tokenStore.isAuthenticationCurrent(attempt)) return null
         return MediaUser(
             serverId = server.id,
             userId = session.userId,
@@ -176,17 +201,16 @@ class EmbyAuthProvider(
         )
     }
 
-    private suspend fun clearLocalSession() {
-        tokenStore.clear(server.id)
-        sessionStore.clear(server.id)
-    }
-
     /** HTTP 错误 → 会话状态；[preserveSession] 为 false 时（401）清理本地会话。 */
     private suspend fun authErrorFromHttp(
         e: ApiException,
         preserveSession: Boolean,
+        attempt: TokenStore.AuthenticationAttempt,
     ): AuthSessionState {
-        if (!preserveSession) clearLocalSession()
+        if (!tokenStore.isAuthenticationCurrent(attempt)) return AuthSessionState.SignedOut
+        if (!preserveSession && !tokenStore.clearAuthenticationIfCurrent(attempt) { sessionStore.clear(server.id) }) {
+            return AuthSessionState.SignedOut
+        }
         return when {
             e.statusCode == 401 -> AuthSessionState.Error(AuthSessionErrorKind.SESSION_EXPIRED, "登录已失效，请重新登录")
             e.statusCode == 403 -> AuthSessionState.Error(AuthSessionErrorKind.FORBIDDEN, "没有访问权限（403）")
