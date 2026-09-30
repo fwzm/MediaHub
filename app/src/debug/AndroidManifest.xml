@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only demo surface for the FlowGlow visual engine; never merged into release builds. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <activity
+            android:name="com.mediahub.app.debug.EffectsDemoActivity"
+            android:exported="true"
+            android:label="@string/effects_demo_label"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+    </application>
+</manifest>

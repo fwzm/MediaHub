@@ -6,10 +6,12 @@ import com.mediahub.core.database.dao.AccountDao
 import com.mediahub.core.database.dao.PlaybackProgressDao
 import com.mediahub.core.database.dao.ServerDao
 import com.mediahub.core.database.dao.ServerEndpointDao
+import com.mediahub.core.database.dao.SubtitleMemoryDao
 import com.mediahub.core.database.entity.AccountEntity
 import com.mediahub.core.database.entity.PlaybackProgressEntity
 import com.mediahub.core.database.entity.ServerEndpointEntity
 import com.mediahub.core.database.entity.ServerEntity
+import com.mediahub.core.database.entity.SubtitleMemoryEntity
 
 @Database(
     entities = [
@@ -17,8 +19,9 @@ import com.mediahub.core.database.entity.ServerEntity
         ServerEndpointEntity::class,
         AccountEntity::class,
         PlaybackProgressEntity::class,
+        SubtitleMemoryEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,6 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun serverEndpointDao(): ServerEndpointDao
     abstract fun accountDao(): AccountDao
     abstract fun playbackProgressDao(): PlaybackProgressDao
+    abstract fun subtitleMemoryDao(): SubtitleMemoryDao
 
     companion object {
         const val NAME = "mediahub.db"

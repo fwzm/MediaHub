@@ -272,7 +272,8 @@ class AddServerViewModel @Inject constructor(
                             // 事务回滚：认证成功但保存失败 → 清理会话（best-effort）
                             runCatching { auth.logout() }
                             _uiState.update {
-                                it.copy(isLoggingIn = false, loginError = "保存失败：${e.message}")
+                                // A4 脱敏收口：本地保存异常 message 不外显
+                                it.copy(isLoggingIn = false, loginError = "保存失败，请重试")
                             }
                         }
                     }
@@ -283,7 +284,8 @@ class AddServerViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 logger.w(LogTag.UI, "登录失败 serverId=${server.id}", e)
-                _uiState.update { it.copy(isLoggingIn = false, loginError = "登录失败：${e.message}") }
+                // A4 脱敏收口：非预期异常 message 可能携带实现细节，只给固定文案
+                _uiState.update { it.copy(isLoggingIn = false, loginError = "登录失败，请重试") }
             }
         }
     }
@@ -307,7 +309,9 @@ class AddServerViewModel @Inject constructor(
                 "HTTP ${e.statusCode}"
             }
             is ProviderException.Parse -> "服务器响应异常"
-            else -> e.message ?: "登录失败"
+            // 其余 ProviderException 子类 message 均为消毒后的固定文案（A3-4）；
+            // 此兜底仅在新增未映射子类时触发，同样不外显原始 message
+            else -> "登录失败"
         }
     }
 
@@ -343,7 +347,7 @@ class AddServerViewModel @Inject constructor(
                 onSaved(server)
             } catch (e: Exception) {
                 logger.e(LogTag.UI, "添加媒体源失败", e)
-                _uiState.update { it.copy(isSaving = false, error = "保存失败：${e.message}") }
+                _uiState.update { it.copy(isSaving = false, error = "保存失败，请重试") }
             }
         }
     }

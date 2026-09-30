@@ -11,6 +11,7 @@ import com.mediahub.model.PagedResult
 import com.mediahub.model.Season
 import com.mediahub.provider.api.MediaLibraryProvider
 import com.mediahub.provider.api.ProviderException
+import com.mediahub.provider.api.pageWindow
 import com.mediahub.provider.jellyfin.JellyfinProviderSupport
 import com.mediahub.provider.jellyfin.api.JellyfinApiClient
 import com.mediahub.provider.jellyfin.mapper.JellyfinImageMapper
@@ -131,12 +132,12 @@ class JellyfinLibraryProvider(
         }
     }
 
-    /** 条目映射 + 服务器分页数学（与浏览/季/集共用一份）。 */
+    /** 条目映射 + 服务器分页数学（与浏览共用一份；空页守卫见 [pageWindow]）。 */
     private fun toPagedResult(
         result: com.mediahub.provider.jellyfin.api.JellyfinQueryResultDto<com.mediahub.provider.jellyfin.api.JellyfinItemDto>,
         page: PageRequest,
     ): PagedResult<MediaItem> {
-        val hasMore = (page.offset + result.items.size) < result.totalRecordCount
+        val window = pageWindow(page.offset, result.items.size, result.totalRecordCount)
         return PagedResult(
             items = result.items.mapNotNull { dto ->
                 JellyfinItemMapper.map(dto, server.id)?.let { item ->
@@ -144,8 +145,8 @@ class JellyfinLibraryProvider(
                 }
             },
             totalCount = result.totalRecordCount,
-            hasMore = hasMore,
-            nextOffset = if (hasMore) page.offset + result.items.size else null,
+            hasMore = window.hasMore,
+            nextOffset = window.nextOffset,
         )
     }
 }

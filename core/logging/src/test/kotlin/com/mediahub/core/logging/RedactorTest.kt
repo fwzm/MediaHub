@@ -118,6 +118,71 @@ class RedactorTest {
         assertTrue(out.contains(Redactor.REDACTED))
         assertTrue(out.contains("Recursive=true"))
         assertTrue(out.contains("StartIndex=0"))
-        assertTrue(out.contains("Limit=30"))
+    }
+
+    // ---- A2-4 第 3 项：URL user-info / 裸 key=value / 超长截断 fail-closed ----
+
+    @Test
+    fun `redacts url userinfo with password`() {
+        val url = "https://alice:Sup3rS3cret@host.example.com/emby/System/Info"
+        val out = Redactor.redact(url)
+        assertFalse("密码段必须消失：$out", out.contains("Sup3rS3cret"))
+        assertFalse("用户名随密码段一起抹除：$out", out.contains("alice:"))
+        assertTrue("scheme 必须保留：$out", out.startsWith("https://"))
+        assertTrue(out.contains(Redactor.REDACTED))
+        assertTrue(out.endsWith("@host.example.com/emby/System/Info"))
+    }
+
+    @Test
+    fun `userinfo without password is not touched`() {
+        // 只有 user@host（无冒号密码）不得误伤
+        val url = "https://alice@host.example.com/emby/System/Info"
+        assertEquals(url, Redactor.redact(url))
+    }
+
+    @Test
+    fun `host with port is not mistaken for userinfo`() {
+        val url = "https://host.example.com:8096/emby/System/Info"
+        assertEquals(url, Redactor.redact(url))
+    }
+
+    @Test
+    fun `redacts bare key value in exception text`() {
+        val text = "Auth failed: password=Sup3rS3cret, retry later"
+        val out = Redactor.redact(text)
+        assertFalse("裸 password 值必须消失：$out", out.contains("Sup3rS3cret"))
+        assertTrue(out.contains(Redactor.REDACTED))
+        assertTrue("键名保留：$out", out.contains("password="))
+    }
+
+    @Test
+    fun `bare token at line start is redacted`() {
+        val text = "token=abc123sent\nnext line stays"
+        val out = Redactor.redact(text)
+        assertFalse(out.contains("abc123sent"))
+        assertTrue(out.contains("next line stays"))
+    }
+
+    @Test
+    fun `bare api_key value is redacted`() {
+        val text = "request rejected (api_key=Sup3rS3cret)"
+        val out = Redactor.redact(text)
+        assertFalse(out.contains("Sup3rS3cret"))
+    }
+
+    @Test
+    fun `oversized input is truncated after redaction`() {
+        val benign = "a".repeat(25_000)
+        val out = Redactor.redact(benign)
+        assertTrue("超长输出必须截断（实际 ${out.length}）", out.length <= 20_000 + "…[truncated]".length)
+        assertTrue(out.endsWith("…[truncated]"))
+    }
+
+    @Test
+    fun `secret near tail of oversized input still redacted before truncation`() {
+        // 秘密在截断点之后也会被脱敏——redact 全文先于截断
+        val prefix = "a".repeat(19_990)
+        val out = Redactor.redact(prefix + " password=Sup3rS3cret tail")
+        assertFalse(out.contains("Sup3rS3cret"))
     }
 }

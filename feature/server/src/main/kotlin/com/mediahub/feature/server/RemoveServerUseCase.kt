@@ -2,6 +2,7 @@ package com.mediahub.feature.server
 
 import com.mediahub.core.database.repository.AccountRepository
 import com.mediahub.core.database.repository.ProgressRepository
+import com.mediahub.core.database.repository.SubtitleMemoryRepository
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.core.security.TokenStore
@@ -28,6 +29,7 @@ interface ServerRemoveHandler {
 class RemoveServerUseCase @Inject constructor(
     private val serverRepository: ServerRepository,
     private val progressRepository: ProgressRepository,
+    private val subtitleMemoryRepository: SubtitleMemoryRepository,
     private val accountRepository: AccountRepository,
     private val tokenStore: TokenStore,
     private val credentialVault: CredentialVault,
@@ -40,6 +42,7 @@ class RemoveServerUseCase @Inject constructor(
         tokenStore.clear(server.id)
         credentialVault.clear(server.id)
         progressRepository.deleteByServer(server.id)
+        subtitleMemoryRepository.deleteByServer(server.id)
         serverIconStore.remove(server.id)
         sessionStoreCleaner.clear(server.id)
     }

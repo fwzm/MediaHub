@@ -5,17 +5,26 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.NavArgCodec
 import com.mediahub.core.database.prefs.UserPreferencesRepository
+import com.mediahub.core.database.repository.SubtitleMemoryEntry
+import com.mediahub.core.database.repository.SubtitleMemoryKeys
+import com.mediahub.core.database.repository.SubtitleMemoryStore
 import com.mediahub.core.network.PlaybackNetworkTraceRegistry
 import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
+import com.mediahub.core.ui.effects.VisualPalette
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
+import com.mediahub.model.PlaybackSource
+import com.mediahub.model.PlayerVisualEffectsPreferences
+import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleStyle
+import com.mediahub.model.SubtitleFormats
 import com.mediahub.player.engine.EnginePreferenceHistory
+import com.mediahub.player.engine.ExternalSubtitle
 import com.mediahub.player.engine.Media3EngineCreator
 import com.mediahub.player.engine.MpvEngineCreator
 import com.mediahub.player.engine.PlaybackEngineCreator
@@ -23,8 +32,11 @@ import com.mediahub.player.engine.PlaybackStartupTrace
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.ProgressSyncCoordinator
+import com.mediahub.player.engine.SubtitleCapabilities
 import com.mediahub.player.engine.SwitchablePlaybackEngine
+import com.mediahub.player.engine.TrackSelection
 import com.mediahub.provider.api.MediaProviderRegistry
+import com.mediahub.provider.api.DiscoveredSubtitle
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -36,6 +48,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** 播放源解析状态。 */
@@ -62,6 +75,24 @@ data class PlaybackDiagnosticsState(
     val bufferedMs: Long = 0,
 )
 
+/**
+ * 字幕中心状态（P2 切片一：同目录发现 + 导入 + 外挂加载 + 偏移 + 匹配记忆）。
+ * [manualSelection] = 用户本会话手动选过字幕；此后迟到发现与记忆回放都不得覆盖。
+ */
+data class SubtitleCenterState(
+    val discovering: Boolean = false,
+    val discovered: List<DiscoveredSubtitle> = emptyList(),
+    /** SAF 导入的候选（本会话；uri 已 persist）。 */
+    val imported: List<DiscoveredSubtitle> = emptyList(),
+    val selectedExternalId: String? = null,
+    val offsetMs: Long = 0,
+    /** 如实提示（加载失败/不支持的能力），展示后由 UI 消费。 */
+    val notice: String? = null,
+    val manualSelection: Boolean = false,
+) {
+    val allExternal: List<DiscoveredSubtitle> get() = imported + discovered
+}
+
 /** 播放页组合状态（解析状态 + 引擎状态）。 */
 data class PlayerCombinedState(
     val resolve: ResolveState = ResolveState.Resolving,
@@ -79,11 +110,13 @@ class PlayerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val serverStore: ServerStore,
     private val progressStore: ProgressStore,
+    private val subtitleMemoryStore: SubtitleMemoryStore,
     private val registry: MediaProviderRegistry,
     @Media3EngineCreator media3EngineFactory: PlaybackEngineCreator,
     @MpvEngineCreator mpvEngineFactory: PlaybackEngineCreator,
     engineHistory: EnginePreferenceHistory,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val artworkPaletteLoader: ArtworkPaletteLoader,
     private val logger: Logger,
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
@@ -95,6 +128,10 @@ class PlayerViewModel @Inject constructor(
     private val launchRuntime: String = savedStateHandle["runtime"] ?: ""
     private val launchPoster: String = savedStateHandle["poster"] ?: ""
     private val launchContainer: String = savedStateHandle["container"] ?: ""
+
+    /** 启动快照携带的容器（详情页直传；可能为空串=未提供）。 */
+    val launchContainerOrNull: String?
+        get() = launchContainer.takeIf { it.isNotBlank() }
     /** 最新偏好缓存（modeProvider 同步读取，避免 play() 挂起读 DataStore）。 */
     private var latestPreferences: com.mediahub.model.UserPreferences = com.mediahub.model.UserPreferences()
 
@@ -119,12 +156,22 @@ class PlayerViewModel @Inject constructor(
     val engineKind: StateFlow<com.mediahub.player.engine.EngineKind> get() = switchableEngine.engineKind
 
 
-    /** 用户偏好（字幕样式等，播放器 Bottom Sheet 消费；Phase 1B-2.4）。 */
-    val preferences: StateFlow<com.mediahub.model.UserPreferences> =
-        userPreferencesRepository.flow.stateIn(viewModelScope, SharingStarted.Eagerly, com.mediahub.model.UserPreferences())
+    /**
+     * 用户偏好（字幕样式等，播放器 Bottom Sheet 消费；Phase 1B-2.4）。
+     *
+     * null 是刻意保留的“DataStore 首帧尚未到达”状态。视觉层在此期间必须保持
+     * 0 fps，不能先用默认 Aurora 启动一次再被持久化的 Off 覆盖。
+     */
+    private val _preferences = MutableStateFlow<com.mediahub.model.UserPreferences?>(null)
+    val preferences: StateFlow<com.mediahub.model.UserPreferences?> = _preferences.asStateFlow()
 
     init {
-        viewModelScope.launch { userPreferencesRepository.flow.collect { latestPreferences = it } }
+        viewModelScope.launch {
+            userPreferencesRepository.flow.collect { stored ->
+                latestPreferences = stored
+                _preferences.value = stored
+            }
+        }
     }
 
     /**
@@ -142,14 +189,229 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    fun updatePlayerVisualEffects(
+        transform: (PlayerVisualEffectsPreferences) -> PlayerVisualEffectsPreferences,
+    ) {
+        viewModelScope.launch { userPreferencesRepository.updatePlayerVisualEffects(transform) }
+    }
+
+    fun resetPlayerVisualEffects() {
+        viewModelScope.launch { userPreferencesRepository.resetPlayerVisualEffects() }
+    }
+
+    // ---- 字幕中心（P2 切片一：发现/导入/外挂加载/偏移/匹配记忆） ----
+
+    private val _subtitleCenter = MutableStateFlow(SubtitleCenterState())
+    val subtitleCenter: StateFlow<SubtitleCenterState> = _subtitleCenter.asStateFlow()
+
+    /** 当前视频版本指纹（匹配记忆键）；resolve 成功后可用。 */
+    private var versionKey: String? = null
+    private var subtitleCenterJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * 播放会话代（A4 字幕操作归属）：每次 [startSubtitleCenter]（即每次 resolve
+     * 成功进入新播放会话）推进。字幕中心全部异步步骤（记忆读取、资源准备、
+     * 引擎提交、UI 更新、持久化）绑定发起时的代——**旧会话的迟到任务不得
+     * 修改新会话状态或覆盖更新的用户选择**（B 审查竞争 finding 的整链修复：
+     * 不止单点 manualSelection 二次检查）。
+     */
+    private val subtitleSessionGeneration = java.util.concurrent.atomic.AtomicLong(0)
+
+    private fun isSubtitleSessionCurrent(generation: Long): Boolean =
+        subtitleSessionGeneration.get() == generation
+
+    /**
+     * resolve 成功后启动：同目录发现 →（未手动选择时）回放匹配记忆。
+     * 记忆键 = serverId+itemId+sizeBytes（或路径指纹）——不同视频/版本互不共享。
+     */
+    private fun startSubtitleCenter(item: MediaItem) {
+        subtitleCenterJob?.cancel()
+        _subtitleCenter.value = SubtitleCenterState()
+        val key = SubtitleMemoryKeys.forItem(item)
+        versionKey = key
+        val generation = subtitleSessionGeneration.incrementAndGet()
+        subtitleCenterJob = viewModelScope.launch {
+            val discovery = handle?.subtitleDiscovery
+            if (discovery == null) {
+                _subtitleCenter.update { it.copy(discovering = false) }
+                return@launch
+            }
+            _subtitleCenter.update { it.copy(discovering = true) }
+            val found = runCatching { discovery.discoverSubtitles(item) }
+                .onFailure { logger.w(LogTag.PLAYER, "字幕发现失败 itemId=${item.id}", it) }
+                .getOrDefault(emptyList())
+            _subtitleCenter.update { it.copy(discovering = false, discovered = found) }
+            // 迟到发现保护（双重）：会话代已变 → 整个回放链作废；
+            // 用户已手动选择 → 不覆盖（手动优先）。
+            if (!isSubtitleSessionCurrent(generation)) return@launch
+            if (_subtitleCenter.value.manualSelection) return@launch
+            val memory = subtitleMemoryStore.recall(key) ?: return@launch
+            // recall 挂起窗口（记忆读取是迟到竞争的主要交错点）：恢复后必须再校验
+            if (!isSubtitleSessionCurrent(generation)) return@launch
+            if (_subtitleCenter.value.manualSelection) return@launch
+            if (memory.offsetMs != 0L && engine.setSubtitleOffset(memory.offsetMs) &&
+                isSubtitleSessionCurrent(generation)
+            ) {
+                _subtitleCenter.update { it.copy(offsetMs = memory.offsetMs) }
+            }
+            val target = memory.subtitleId
+                ?.let { id -> found.find { it.id == id } }
+                ?: return@launch
+            applyExternalSubtitle(target, remember = false, generation = generation)
+        }
+    }
+
+    /** 外挂字幕候选点击：真实加载到当前内核；成功才记忆（手动选择标记 + 匹配记忆写入）。 */
+    fun selectExternalSubtitle(subtitle: DiscoveredSubtitle) {
+        val generation = subtitleSessionGeneration.get()
+        viewModelScope.launch {
+            val ok = applyExternalSubtitle(subtitle, remember = true, generation = generation)
+            if (ok && isSubtitleSessionCurrent(generation)) {
+                _subtitleCenter.update { it.copy(manualSelection = true) }
+            }
+        }
+    }
+
+    /**
+     * 专业/精简切换（设置页或播放面板内快速切换）：只改信息面板密度，
+     * 不重建播放、不切换内核、不改画质。
+     */
+    fun updateProfessionalInfo(
+        transform: (ProfessionalInfoPreferences) -> ProfessionalInfoPreferences,
+    ) {
+        viewModelScope.launch {
+            userPreferencesRepository.update {
+                it.copy(professionalInfo = transform(it.professionalInfo))
+            }
+        }
+    }
+
+    /** 内嵌字幕轨手动选择：标记本会话手动优先，迟到的发现/记忆不再覆盖。 */
+    fun onEmbeddedSubtitleSelected(selection: TrackSelection?) {
+        engine.selectSubtitleTrack(selection)
+        _subtitleCenter.update { it.copy(manualSelection = true) }
+    }
+
+    /**
+     * SAF 导入回传：入口 + 持久化收到的 uri（真实 ACTION_OPEN_DOCUMENT）。
+     * 扩展名不支持时如实提示，不伪造候选。
+     */
+    fun importSubtitle(displayName: String, uri: String) {
+        val extension = displayName.substringAfterLast('.', "").lowercase()
+        if (extension !in SubtitleFormats.EXTENSIONS) {
+            _subtitleCenter.update {
+                it.copy(notice = "不支持的字幕格式：${displayName.substringAfterLast('.', "?")}")
+            }
+            return
+        }
+        val candidate = DiscoveredSubtitle(
+            id = uri,
+            name = displayName.substringBeforeLast('.').ifBlank { displayName },
+            fileName = displayName,
+            extension = extension,
+            language = SubtitleFormats.languageFromFileName(displayName),
+            uri = uri,
+        )
+        _subtitleCenter.update {
+            if (it.allExternal.any { c -> c.id == candidate.id }) it
+            else it.copy(imported = it.imported + candidate)
+        }
+    }
+
+    fun consumeSubtitleNotice() {
+        _subtitleCenter.update { it.copy(notice = null) }
+    }
+
+    /** 偏移调整（仅 mpv 内核真实生效；Media3 无公开偏移 API，引擎层如实拒绝）。 */
+    fun setSubtitleOffset(offsetMs: Long) {
+        if (!engine.setSubtitleOffset(offsetMs)) {
+            _subtitleCenter.update { it.copy(notice = "当前内核不支持字幕偏移") }
+            return
+        }
+        _subtitleCenter.update { it.copy(offsetMs = offsetMs) }
+        persistMemory()
+    }
+
+    private suspend fun applyExternalSubtitle(
+        subtitle: DiscoveredSubtitle,
+        remember: Boolean,
+        generation: Long = subtitleSessionGeneration.get(),
+    ): Boolean {
+        if (!engine.subtitleCapabilities.externalLoad) {
+            _subtitleCenter.update { it.copy(notice = "当前内核不支持外挂字幕") }
+            return false
+        }
+        val mimeType = subtitle.mimeType
+            ?: run {
+                _subtitleCenter.update { it.copy(notice = "不支持的字幕格式：.${subtitle.extension}") }
+                return false
+            }
+        val accepted = engine.loadExternalSubtitle(
+            ExternalSubtitle(
+                id = subtitle.id,
+                name = subtitle.name,
+                uri = subtitle.uri,
+                mimeType = mimeType,
+                language = subtitle.language,
+            ),
+        )
+        // 引擎提交完成即可被新会话的 rebuild/stop 重置；此后每一步（UI 更新、
+        // 记忆持久化）都必须仍属于发起会话——旧会话迟到结果不得改动新状态。
+        if (!isSubtitleSessionCurrent(generation)) return false
+        if (!accepted) {
+            _subtitleCenter.update { it.copy(notice = "字幕加载失败：${subtitle.fileName}") }
+            return false
+        }
+        _subtitleCenter.update { it.copy(selectedExternalId = subtitle.id) }
+        if (remember) persistMemory(subtitle.id, generation)
+        return true
+    }
+
+    /** 写入匹配记忆：字幕标识 + 偏移。无任何可记内容时删除记忆。 */
+    private fun persistMemory(
+        subtitleId: String? = _subtitleCenter.value.selectedExternalId,
+        generation: Long = subtitleSessionGeneration.get(),
+    ) {
+        val key = versionKey ?: return
+        val offset = _subtitleCenter.value.offsetMs
+        if (subtitleId == null && offset == 0L) {
+            viewModelScope.launch { subtitleMemoryStore.forget(key) }
+            return
+        }
+        viewModelScope.launch {
+            // 持久化前再校验会话代：旧会话的记忆写不得落到新视频的键上
+            if (!isSubtitleSessionCurrent(generation)) return@launch
+            subtitleMemoryStore.remember(
+                SubtitleMemoryEntry(
+                    versionKey = key,
+                    serverId = serverId,
+                    subtitleId = subtitleId,
+                    offsetMs = offset,
+                    updatedAtEpochMs = 0, // 仓库侧补齐时间戳
+                ),
+            )
+        }
+    }
+
     private val _resolveState = MutableStateFlow<ResolveState>(ResolveState.Resolving)
     val resolveState: StateFlow<ResolveState> = _resolveState.asStateFlow()
+
+    /**
+     * 本次 resolve 到的播放源（源参数面板数据源，PlaybackInfo 语义）。
+     * null=尚未解析成功；重试解析时先清空，面板相应字段回落为"未知"。
+     */
+    private val _playbackSource = MutableStateFlow<PlaybackSource?>(null)
+    val playbackSource: StateFlow<PlaybackSource?> = _playbackSource.asStateFlow()
 
     /** 服务器显示名 + 图标（Overlay 展示，Item 8）。 */
     private val _serverDisplayName = MutableStateFlow<String?>(null)
     val serverDisplayName: StateFlow<String?> = _serverDisplayName.asStateFlow()
     private val _serverIcon = MutableStateFlow<String?>(null)
     val serverIcon: StateFlow<String?> = _serverIcon.asStateFlow()
+
+    private val _artworkPalette = MutableStateFlow<VisualPalette?>(null)
+    val artworkPalette: StateFlow<VisualPalette?> = _artworkPalette.asStateFlow()
+    private var artworkUrl: String? = null
 
     /** 播放诊断信息（U4-E：Overlay 展示引擎/协议/首包/缓冲）。 */
     val diagnostics: StateFlow<PlaybackDiagnosticsState?> = combine(
@@ -217,6 +479,7 @@ class PlayerViewModel @Inject constructor(
     fun resolve() {
         viewModelScope.launch {
             _resolveState.value = ResolveState.Resolving
+            _playbackSource.value = null
             val trace = PlaybackStartupTrace(
                 traceId = PlaybackStartupTrace.newTraceId(),
                 serverId = serverId,
@@ -263,12 +526,14 @@ class PlayerViewModel @Inject constructor(
                     )
                 }
                 trace.record(PlaybackStartupTrace.Milestone.DETAIL_SNAPSHOT_READY)
+                updateArtworkPalette(item.posterUrl ?: item.backdropUrl)
                 val resume = progressStore.getResume(serverId, itemId)
                 val source = playbackProvider.resolvePlayback(
                     item,
                     PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
                 )
                 trace.record(PlaybackStartupTrace.Milestone.SOURCE_RESOLVED)
+                _playbackSource.value = source
                 logger.i(LogTag.PLAYER, "StartupTrace " + trace.summary())
                 engine.play(
                     PlaybackSession(
@@ -292,6 +557,8 @@ class PlayerViewModel @Inject constructor(
                     )
                     syncStarted = true
                 }
+                // 字幕中心：同目录发现 + 匹配记忆回放（异步，不阻塞 Ready）。
+                startSubtitleCenter(item)
                 _resolveState.value = ResolveState.Ready
                 PlaybackNetworkTraceRegistry.set(null)
             } catch (e: Exception) {
@@ -302,6 +569,24 @@ class PlayerViewModel @Inject constructor(
                 logger.w(LogTag.PLAYER, "播放解析失败 serverId=$serverId itemId=$itemId", e)
                 _resolveState.value = ResolveState.Failed(userMessage(e))
             }
+        }
+    }
+
+    private fun updateArtworkPalette(url: String?) {
+        artworkUrl = url
+        if (url.isNullOrBlank()) {
+            _artworkPalette.value = null
+            return
+        }
+        val expectedUrl = url
+        viewModelScope.launch {
+            val palette = artworkPaletteLoader.load(
+                artworkKey = "$serverId:$itemId:$expectedUrl",
+                url = expectedUrl,
+            )
+            // Keep the previous resolved palette while a replacement loads or fails. This avoids
+            // a preset -> artwork -> preset flash during retries and rejects late results.
+            if (artworkUrl == expectedUrl && palette != null) _artworkPalette.value = palette
         }
     }
 

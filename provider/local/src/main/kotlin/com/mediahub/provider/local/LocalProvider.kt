@@ -9,12 +9,15 @@ import com.mediahub.model.PlaybackMode
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.ServerType
+import com.mediahub.model.SubtitleFormats
 import com.mediahub.provider.api.AuthMethod
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.MediaBrowseProvider
 import com.mediahub.provider.api.MediaDetailProvider
 import com.mediahub.provider.api.MediaPlaybackProvider
 import com.mediahub.provider.api.MediaProvider
+import com.mediahub.provider.api.MediaSubtitleDiscoveryProvider
+import com.mediahub.provider.api.DiscoveredSubtitle
 import com.mediahub.provider.api.ProviderCapability
 import com.mediahub.provider.api.ProviderCategory
 import com.mediahub.provider.api.ProviderDescriptor
@@ -34,6 +37,7 @@ internal val LOCAL_PROVIDER_DESCRIPTOR = ProviderDescriptor(
         ProviderCapability.DETAIL,
         ProviderCapability.PLAYBACK,
         ProviderCapability.MULTI_VERSION,
+        ProviderCapability.SUBTITLE_DISCOVERY,
     ),
     authMethod = AuthMethod.NONE,
     status = ProviderStatus.STABLE,
@@ -50,7 +54,8 @@ class LocalProvider(
 ) : MediaProvider,
     MediaBrowseProvider,
     MediaDetailProvider,
-    MediaPlaybackProvider {
+    MediaPlaybackProvider,
+    MediaSubtitleDiscoveryProvider {
 
     override val serverId: String get() = server.id
     override val type: ServerType = ServerType.LOCAL
@@ -112,6 +117,29 @@ class LocalProvider(
             durationMs = null,
             mode = PlaybackMode.DIRECT_PLAY,
         )
+    }
+
+    // ---- 同目录字幕发现（P2 字幕中心切片一） ----
+
+    override suspend fun discoverSubtitles(video: com.mediahub.model.MediaItem): List<DiscoveredSubtitle> {
+        val videoFile = File(video.path ?: video.id)
+        val parent = videoFile.parentFile
+        if (!videoFile.exists() || parent == null || !parent.isDirectory) return emptyList()
+        return parent
+            .listFiles()
+            .orEmpty()
+            .filter { it.isFile && it.extension.lowercase() in SubtitleFormats.EXTENSIONS }
+            .map { file ->
+                DiscoveredSubtitle(
+                    id = file.absolutePath,
+                    name = file.nameWithoutExtension,
+                    fileName = file.name,
+                    extension = file.extension.lowercase(),
+                    language = SubtitleFormats.languageFromFileName(file.name),
+                    uri = file.absoluteFile.toURI().toString(),
+                )
+            }
+            .sortedWith(compareBy({ it.name.lowercase() }, { it.extension }))
     }
 
     // ---- 映射 ----

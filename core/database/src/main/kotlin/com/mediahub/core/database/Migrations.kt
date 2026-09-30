@@ -6,6 +6,22 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 /** Room 迁移（Phase 1B-2.5：servers 去 baseUrl、加 note/icon；新增 server_endpoints 表）。 */
 object Migrations {
 
+    /** P2 字幕中心切片一：新增 subtitle_memory 表（匹配记忆，键=视频版本指纹）。 */
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS subtitle_memory (" +
+                    "versionKey TEXT NOT NULL, " +
+                    "serverId TEXT NOT NULL, " +
+                    "subtitleId TEXT, " +
+                    "offsetMs INTEGER NOT NULL, " +
+                    "updatedAtEpochMs INTEGER NOT NULL, " +
+                    "PRIMARY KEY(versionKey))",
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_subtitle_memory_serverId ON subtitle_memory(serverId)")
+        }
+    }
+
     val MIGRATION_2_3 = object : Migration(2, 3) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE server_endpoints ADD COLUMN lastApiLatencyMs INTEGER")

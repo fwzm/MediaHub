@@ -5,8 +5,13 @@ import androidx.media3.common.text.CueGroup
 import com.mediahub.model.PlaybackProgress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+private val UnavailableAudioBands: StateFlow<AudioBandLevels?> =
+    MutableStateFlow<AudioBandLevels?>(null).asStateFlow()
 
 /** 播放内核种类（U2：Media3 快速路径 / mpv 兼容兜底）。 */
 enum class EngineKind { MEDIA3, MPV }
@@ -38,6 +43,13 @@ interface PlaybackEnginePort {
     val subtitleCues: StateFlow<CueGroup?>
     /** 真实媒体下载速度（B/s，TransferListener 统计；Overlay 展示）。 */
     val downloadSpeedBps: StateFlow<Long>
+    /**
+     * 可选的归一化音频频段。null 表示采样不可用，UI 应使用 baseline 动画；
+     * 非 null 的 [AudioBandLevels.ZERO] 表示后端可用但当前静音。
+     * mpv 等不提供 PCM/Visualizer session 的实现显式沿用默认 null 流。
+     */
+    val audioBands: StateFlow<AudioBandLevels?>
+        get() = UnavailableAudioBands
 
     /** 绑定/解绑视频渲染 Surface（null 解绑）。 */
     fun attachSurface(surface: Surface?)
@@ -47,6 +59,40 @@ interface PlaybackEnginePort {
     fun setSpeed(speed: Float)
     fun selectAudioTrack(selection: TrackSelection?)
     fun selectSubtitleTrack(selection: TrackSelection?)
+    /**
+     * 控制是否需要音频频谱采样。默认关闭；关闭必须立即释放采样资源并把
+     * [audioBands] 恢复为 null。不支持采样的引擎（包括 mpv）保持默认 no-op。
+     */
+    fun setAudioSpectrumEnabled(enabled: Boolean) = Unit
+    /**
+     * 权限可能晚于 audio session 建立；Media3 可用当前 session 重试频谱采样。
+     * 不支持采样的引擎（包括 mpv）保持默认 no-op。
+     */
+    fun retryAudioSpectrumCapture() = Unit
+
+    /**
+     * 外挂字幕能力（引擎如实自述；UI 据此显示/禁用"外挂字幕/偏移"控件）。
+     * 默认 = 双双不支持（不伪造能力）。
+     */
+    val subtitleCapabilities: SubtitleCapabilities
+        get() = SubtitleCapabilities(externalLoad = false, offsetAdjust = false)
+
+    /**
+     * 播放中加载外挂字幕（P2 字幕中心切片一）。成功返回 true；
+     * 不支持、URI 无法访问或 mime 不支持的引擎返回 false（调用方如实提示，不得伪造成功）。
+     * 注意：Media3 实现走媒体项重建（可能瞬断，位置/暂停/倍速保留）。
+     */
+    suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean = false
+
+    /**
+     * 字幕时间轴偏移（ms，正值 = 字幕延后显示）。仅 mpv（`sub-delay`）支持；
+     * 不支持的引擎返回 false 且**不改变任何状态**（UI 须按 [subtitleCapabilities] 隐藏）。
+     */
+    fun setSubtitleOffset(offsetMs: Long): Boolean = false
+
+    /** 当前字幕偏移（ms）；不支持的引擎恒为 0。 */
+    val subtitleOffsetMs: Long get() = 0L
+
     /** 停止并返回最终进度（ADR-023 退出 flush 用）。 */
     fun stop(): PlaybackProgress?
     fun release()

@@ -5,6 +5,7 @@ import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,7 +57,7 @@ class SwitchablePlaybackEngineTest {
         scope: CoroutineScope,
         media3: FakeEngine,
         mpv: FakeEngine,
-        history: InMemoryEnginePreferenceHistory = InMemoryEnginePreferenceHistory(),
+        history: EnginePreferenceHistory = InMemoryEnginePreferenceHistory(),
         mode: PlaybackEngineMode = PlaybackEngineMode.AUTO,
         audioSilentGraceMs: Long = 2_000L,
     ) = SwitchablePlaybackEngine(
@@ -126,6 +127,84 @@ class SwitchablePlaybackEngineTest {
         assertTrue(media3.stopped)
         assertTrue(media3.released)
         // switching 状态回落
+        assertFalse(engine.switching.value)
+    }
+
+    @Test
+    fun `queued fallback is invalidated by stop and cannot resurrect mpv`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val history = SuspendedEnginePreferenceHistory()
+        val engine = facade(backgroundScope, media3, mpv, history)
+        engine.play(session(source()))
+        runCurrent()
+
+        media3.updateState { it.copy(error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }
+        runCurrent()
+        assertTrue(history.recordStarted.isCompleted)
+
+        engine.stop()
+        history.allowRecord.complete(Unit)
+        runCurrent()
+
+        assertNull(mpv.playedSession)
+        assertFalse(engine.switching.value)
+    }
+
+    @Test
+    fun `queued fallback is invalidated by release and cannot resurrect mpv`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val history = SuspendedEnginePreferenceHistory()
+        val engine = facade(backgroundScope, media3, mpv, history)
+        engine.play(session(source()))
+        runCurrent()
+
+        media3.updateState { it.copy(error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }
+        runCurrent()
+        assertTrue(history.recordStarted.isCompleted)
+
+        engine.release()
+        history.allowRecord.complete(Unit)
+        runCurrent()
+
+        assertTrue(media3.released)
+        assertNull(mpv.playedSession)
+        assertFalse(engine.switching.value)
+    }
+
+    @Test
+    fun `queued fallback cannot replace a newer playback session`() = runTest(dispatcher) {
+        val first = FakeEngine(EngineKind.MEDIA3)
+        val second = FakeEngine(EngineKind.MEDIA3)
+        val engines = ArrayDeque(listOf(first, second))
+        val mpv = FakeEngine(EngineKind.MPV)
+        val history = SuspendedEnginePreferenceHistory()
+        val engine = SwitchablePlaybackEngine(
+            scope = backgroundScope,
+            media3Factory = PlaybackEngineCreator { engines.removeFirst() },
+            mpvFactory = PlaybackEngineCreator { mpv },
+            history = history,
+            modeProvider = { PlaybackEngineMode.AUTO },
+            logger = noOpLogger,
+        )
+        engine.play(session(source()))
+        runCurrent()
+
+        first.updateState { it.copy(error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }
+        runCurrent()
+        assertTrue(history.recordStarted.isCompleted)
+
+        val next = session(source()).copy(itemId = "item-2")
+        engine.play(next)
+        runCurrent()
+        history.allowRecord.complete(Unit)
+        runCurrent()
+
+        assertTrue(first.released)
+        assertEquals(next, second.playedSession)
+        assertNull(mpv.playedSession)
+        assertEquals(EngineKind.MEDIA3, engine.kind)
         assertFalse(engine.switching.value)
     }
 
@@ -238,6 +317,158 @@ class SwitchablePlaybackEngineTest {
         assertEquals(7_000L, media3.finalProgressOnStop?.positionMs)
     }
 
+    @Test
+    fun `audio bands forward from current engine and clear on stop`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.setAudioSpectrumEnabled(true)
+        engine.play(session(source()))
+        runCurrent()
+
+        val levels = AudioBandLevels(bass = 0.8f, mid = 0.4f, treble = 0.2f, amplitude = 0.8f)
+        media3.audio.value = levels
+        runCurrent()
+        assertEquals(levels, engine.audioBands.value)
+
+        engine.stop()
+        assertNull(engine.audioBands.value)
+
+        // stop 后旧引擎的迟到采样不能重新污染 facade。
+        media3.audio.value = AudioBandLevels(0.1f, 0.9f, 0.3f, 0.9f)
+        runCurrent()
+        assertNull(engine.audioBands.value)
+    }
+
+    @Test
+    fun `audio spectrum retry delegates only to current engine`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.play(session(source()))
+        runCurrent()
+
+        // 默认关闭时，授权结果等外部事件不能误启动采样。
+        engine.retryAudioSpectrumCapture()
+        assertEquals(0, media3.audioSpectrumRetries)
+
+        engine.setAudioSpectrumEnabled(true)
+        engine.retryAudioSpectrumCapture()
+
+        assertEquals(1, media3.audioSpectrumRetries)
+        assertEquals(0, mpv.audioSpectrumRetries)
+    }
+
+    @Test
+    fun `spectrum capture stays off by default and follows lifecycle demand`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.play(session(source()))
+        runCurrent()
+
+        assertEquals(listOf(false), media3.audioSpectrumEnabledHistory)
+        media3.audio.value = AudioBandLevels(0.7f, 0.3f, 0.1f, 0.7f)
+        runCurrent()
+        assertNull(engine.audioBands.value)
+
+        // Lifecycle STARTED + Spectrum/audio-reactive：建立转发并启用后端。
+        engine.setAudioSpectrumEnabled(true)
+        runCurrent()
+        assertEquals(listOf(false, true), media3.audioSpectrumEnabledHistory)
+        assertEquals(media3.audio.value, engine.audioBands.value)
+
+        // Lifecycle STOPPED / dispose：同步清空，并拒绝迟到采样重新点亮 UI。
+        engine.setAudioSpectrumEnabled(false)
+        assertEquals(listOf(false, true, false), media3.audioSpectrumEnabledHistory)
+        assertNull(engine.audioBands.value)
+        media3.audio.value = AudioBandLevels(0.1f, 0.8f, 0.2f, 0.8f)
+        runCurrent()
+        assertNull(engine.audioBands.value)
+    }
+
+    @Test
+    fun `audio spectrum intent is reapplied when fallback switches engines`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.setAudioSpectrumEnabled(true)
+        engine.play(session(source()))
+        runCurrent()
+
+        media3.updateState { it.copy(error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }
+        runCurrent()
+
+        assertEquals(EngineKind.MPV, engine.kind)
+        assertEquals(listOf(true), media3.audioSpectrumEnabledHistory)
+        assertEquals(listOf(true), mpv.audioSpectrumEnabledHistory)
+    }
+
+    @Test
+    fun `new playback session releases previous engine and forwards only new audio`() = runTest(dispatcher) {
+        val first = FakeEngine(EngineKind.MEDIA3)
+        val second = FakeEngine(EngineKind.MEDIA3)
+        val engines = ArrayDeque(listOf(first, second))
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = SwitchablePlaybackEngine(
+            scope = backgroundScope,
+            media3Factory = PlaybackEngineCreator { engines.removeFirst() },
+            mpvFactory = PlaybackEngineCreator { mpv },
+            history = InMemoryEnginePreferenceHistory(),
+            modeProvider = { PlaybackEngineMode.AUTO },
+            logger = noOpLogger,
+        )
+
+        engine.setAudioSpectrumEnabled(true)
+        engine.play(session(source()))
+        runCurrent()
+        first.audio.value = AudioBandLevels(0.7f, 0.1f, 0.1f, 0.7f)
+        runCurrent()
+        assertEquals(first.audio.value, engine.audioBands.value)
+
+        val nextSession = session(source()).copy(itemId = "item-2")
+        engine.play(nextSession)
+        runCurrent()
+
+        assertTrue(first.stopped)
+        assertTrue(first.released)
+        assertEquals(nextSession, second.playedSession)
+        assertEquals(listOf(true), first.audioSpectrumEnabledHistory)
+        assertEquals(listOf(true), second.audioSpectrumEnabledHistory)
+        assertNull(engine.audioBands.value)
+
+        first.audio.value = AudioBandLevels(0.9f, 0.9f, 0.9f, 0.9f)
+        runCurrent()
+        assertNull(engine.audioBands.value)
+
+        val nextLevels = AudioBandLevels(0.2f, 0.3f, 0.8f, 0.8f)
+        second.audio.value = nextLevels
+        runCurrent()
+        assertEquals(nextLevels, engine.audioBands.value)
+    }
+
+    @Test
+    fun `mpv exposes explicit unavailable audio and release clears facade`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(
+            scope = backgroundScope,
+            media3 = media3,
+            mpv = mpv,
+            mode = PlaybackEngineMode.MPV,
+        )
+
+        engine.play(session(source()))
+        runCurrent()
+        assertEquals(EngineKind.MPV, engine.kind)
+        assertNull(mpv.audioBands.value)
+        assertNull(engine.audioBands.value)
+
+        engine.release()
+        assertTrue(mpv.released)
+        assertNull(engine.audioBands.value)
+    }
+
     // ---- Fake ----
 
     private class FakeEngine(override val kind: EngineKind) : PlaybackEnginePort {
@@ -254,6 +485,8 @@ class SwitchablePlaybackEngineTest {
         var toggled = false
         var stopped = false
         var released = false
+        var audioSpectrumRetries = 0
+        val audioSpectrumEnabledHistory = mutableListOf<Boolean>()
         var finalProgressOnStop: PlaybackProgress? = null
 
         fun updateState(transform: (PlaybackUiState) -> PlaybackUiState) {
@@ -262,6 +495,8 @@ class SwitchablePlaybackEngineTest {
 
         override val subtitleCues: StateFlow<androidx.media3.common.text.CueGroup?> = MutableStateFlow(null)
         override val downloadSpeedBps: StateFlow<Long> = MutableStateFlow(0L)
+        val audio = MutableStateFlow<AudioBandLevels?>(null)
+        override val audioBands: StateFlow<AudioBandLevels?> = audio
         override fun attachSurface(surface: android.view.Surface?) = Unit
         override fun play(session: PlaybackSession) {
             playedSession = session
@@ -271,6 +506,11 @@ class SwitchablePlaybackEngineTest {
         override fun setSpeed(speed: Float) { speedSet = speed }
         override fun selectAudioTrack(selection: TrackSelection?) = Unit
         override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
+        override fun setAudioSpectrumEnabled(enabled: Boolean) {
+            audioSpectrumEnabledHistory += enabled
+            if (!enabled) audio.value = null
+        }
+        override fun retryAudioSpectrumCapture() { audioSpectrumRetries += 1 }
         override fun stop(): PlaybackProgress? {
             stopped = true
             finalProgressOnStop = PlaybackProgress(
@@ -284,5 +524,19 @@ class SwitchablePlaybackEngineTest {
             return finalProgressOnStop
         }
         override fun release() { released = true }
+    }
+
+    private class SuspendedEnginePreferenceHistory : EnginePreferenceHistory {
+        val recordStarted = CompletableDeferred<Unit>()
+        val allowRecord = CompletableDeferred<Unit>()
+        private val signatures = mutableSetOf<String>()
+
+        override fun mpvPreferredSignatures(): Set<String> = signatures.toSet()
+
+        override suspend fun recordMedia3Failure(signatureKey: String) {
+            recordStarted.complete(Unit)
+            allowRecord.await()
+            signatures += signatureKey
+        }
     }
 }

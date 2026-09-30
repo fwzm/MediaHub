@@ -36,6 +36,9 @@ enum class ProviderCapability {
     /** 字幕 */
     SUBTITLE,
 
+    /** 同目录外挂字幕发现（P2 字幕中心切片一；只读，不做在线字幕查询） */
+    SUBTITLE_DISCOVERY,
+
     /** 播放进度同步 */
     PROGRESS,
 

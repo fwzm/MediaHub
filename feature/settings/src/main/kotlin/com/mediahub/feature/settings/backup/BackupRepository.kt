@@ -199,6 +199,8 @@ class BackupRepository @Inject constructor(
                 val validated = try {
                     validate(importResult.payload)
                 } catch (e: ValidationRejectedException) {
+                    // message 为本模块类型化白名单文案（"未知媒体源类型"等，不含用户
+                    // 数据）——B 审查复核确认非泄漏点，保留分类信息
                     return@withContext PrepareResult.Rejected("备份内容校验失败：${e.message}")
                 }
                 PrepareResult.Prepared(validated)

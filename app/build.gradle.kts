@@ -57,6 +57,7 @@ dependencies {
     implementation(project(":core:database"))
     implementation(project(":core:security"))
     implementation(project(":core:logging"))
+    implementation(project(":core:ui"))
     implementation(libs.room.runtime)
 
     implementation(project(":player:engine"))
@@ -101,6 +102,12 @@ dependencies {
     implementation(libs.coil.compose)
 
     testImplementation(libs.okhttp.mockwebserver)
+    // A2-6 联合链路测试（WebDavJointChainTest）：真实 VM/Registry/Factory + Robolectric。
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.kotlinx.coroutines.test)
+    // PlaybackEnginePort.subtitleCues 签名含 media3 CueGroup：测试内实现引擎端口需可解析该类型。
+    testImplementation(libs.media3.common)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.uiautomator)
