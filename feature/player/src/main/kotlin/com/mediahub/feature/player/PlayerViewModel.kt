@@ -10,10 +10,12 @@ import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
+import com.mediahub.core.ui.effects.VisualPalette
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
+import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.player.engine.EnginePreferenceHistory
 import com.mediahub.player.engine.Media3EngineCreator
@@ -84,6 +86,7 @@ class PlayerViewModel @Inject constructor(
     @MpvEngineCreator mpvEngineFactory: PlaybackEngineCreator,
     engineHistory: EnginePreferenceHistory,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val artworkPaletteLoader: ArtworkPaletteLoader,
     private val logger: Logger,
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
@@ -119,12 +122,22 @@ class PlayerViewModel @Inject constructor(
     val engineKind: StateFlow<com.mediahub.player.engine.EngineKind> get() = switchableEngine.engineKind
 
 
-    /** 用户偏好（字幕样式等，播放器 Bottom Sheet 消费；Phase 1B-2.4）。 */
-    val preferences: StateFlow<com.mediahub.model.UserPreferences> =
-        userPreferencesRepository.flow.stateIn(viewModelScope, SharingStarted.Eagerly, com.mediahub.model.UserPreferences())
+    /**
+     * 用户偏好（字幕样式等，播放器 Bottom Sheet 消费；Phase 1B-2.4）。
+     *
+     * null 是刻意保留的“DataStore 首帧尚未到达”状态。视觉层在此期间必须保持
+     * 0 fps，不能先用默认 Aurora 启动一次再被持久化的 Off 覆盖。
+     */
+    private val _preferences = MutableStateFlow<com.mediahub.model.UserPreferences?>(null)
+    val preferences: StateFlow<com.mediahub.model.UserPreferences?> = _preferences.asStateFlow()
 
     init {
-        viewModelScope.launch { userPreferencesRepository.flow.collect { latestPreferences = it } }
+        viewModelScope.launch {
+            userPreferencesRepository.flow.collect { stored ->
+                latestPreferences = stored
+                _preferences.value = stored
+            }
+        }
     }
 
     /**
@@ -142,6 +155,16 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    fun updatePlayerVisualEffects(
+        transform: (PlayerVisualEffectsPreferences) -> PlayerVisualEffectsPreferences,
+    ) {
+        viewModelScope.launch { userPreferencesRepository.updatePlayerVisualEffects(transform) }
+    }
+
+    fun resetPlayerVisualEffects() {
+        viewModelScope.launch { userPreferencesRepository.resetPlayerVisualEffects() }
+    }
+
     private val _resolveState = MutableStateFlow<ResolveState>(ResolveState.Resolving)
     val resolveState: StateFlow<ResolveState> = _resolveState.asStateFlow()
 
@@ -150,6 +173,10 @@ class PlayerViewModel @Inject constructor(
     val serverDisplayName: StateFlow<String?> = _serverDisplayName.asStateFlow()
     private val _serverIcon = MutableStateFlow<String?>(null)
     val serverIcon: StateFlow<String?> = _serverIcon.asStateFlow()
+
+    private val _artworkPalette = MutableStateFlow<VisualPalette?>(null)
+    val artworkPalette: StateFlow<VisualPalette?> = _artworkPalette.asStateFlow()
+    private var artworkUrl: String? = null
 
     /** 播放诊断信息（U4-E：Overlay 展示引擎/协议/首包/缓冲）。 */
     val diagnostics: StateFlow<PlaybackDiagnosticsState?> = combine(
@@ -263,6 +290,7 @@ class PlayerViewModel @Inject constructor(
                     )
                 }
                 trace.record(PlaybackStartupTrace.Milestone.DETAIL_SNAPSHOT_READY)
+                updateArtworkPalette(item.posterUrl ?: item.backdropUrl)
                 val resume = progressStore.getResume(serverId, itemId)
                 val source = playbackProvider.resolvePlayback(
                     item,
@@ -302,6 +330,24 @@ class PlayerViewModel @Inject constructor(
                 logger.w(LogTag.PLAYER, "播放解析失败 serverId=$serverId itemId=$itemId", e)
                 _resolveState.value = ResolveState.Failed(userMessage(e))
             }
+        }
+    }
+
+    private fun updateArtworkPalette(url: String?) {
+        artworkUrl = url
+        if (url.isNullOrBlank()) {
+            _artworkPalette.value = null
+            return
+        }
+        val expectedUrl = url
+        viewModelScope.launch {
+            val palette = artworkPaletteLoader.load(
+                artworkKey = "$serverId:$itemId:$expectedUrl",
+                url = expectedUrl,
+            )
+            // Keep the previous resolved palette while a replacement loads or fails. This avoids
+            // a preset -> artwork -> preset flash during retries and rejects late results.
+            if (artworkUrl == expectedUrl && palette != null) _artworkPalette.value = palette
         }
     }
 

@@ -187,6 +187,36 @@ class GlobalSearchEngineTest {
         assertEquals("墨云阁", final.hits.first { it.item.id == "b2" }.serverName)
     }
 
+    // ---- A2-4 第 4 项：错误文案收口——原始异常文本不得进 errors ----
+
+    @Test
+    fun `non provider exception maps to generic message without leaking raw text`() = runTest {
+        val engine = GlobalSearchEngine()
+        val bad = target("s-bad", "坏服") { _, _ ->
+            throw IllegalStateException("internal failure token=Sup3rS3cret")
+        }
+
+        val final = engine.search(listOf(bad), "q").toList().last()
+
+        assertEquals("搜索失败", final.errors["s-bad"])
+        assertFalse(
+            "原始异常文本不得泄漏：${final.errors}",
+            final.errors.values.joinToString().contains("Sup3rS3cret"),
+        )
+    }
+
+    @Test
+    fun `provider exception message passes through sanitized`() = runTest {
+        val engine = GlobalSearchEngine()
+        val bad = target("s-bad", "坏服") { _, _ ->
+            throw com.mediahub.provider.api.ProviderException.Network("s-bad")
+        }
+
+        val final = engine.search(listOf(bad), "q").toList().last()
+
+        assertEquals("网络错误，请检查网络连接", final.errors["s-bad"])
+    }
+
     // ---- 真多线程并发完成：快照一致性（评审 P1-3） ----
 
     @Test

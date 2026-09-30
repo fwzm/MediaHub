@@ -14,6 +14,7 @@ import com.mediahub.model.PageRequest
 import com.mediahub.model.PagedResult
 import com.mediahub.model.ServerType
 import com.mediahub.model.Season
+import com.mediahub.provider.api.MediaBrowseProvider
 import com.mediahub.provider.api.MediaLibraryProvider
 import com.mediahub.provider.api.MediaProvider
 import com.mediahub.provider.api.MediaProviderRegistry
@@ -654,5 +655,128 @@ class LibraryViewModelTest {
         advanceUntilIdle()
         val state = vm.uiState.value as LibraryUiState.Content
         assertTrue(state.items.all { it.id.startsWith("fresh") })
+    }
+
+    // ---- WebDAV / browse 能力分支（无 library 能力的文件夹数据源）----
+
+    private class FakeBrowse : MediaBrowseProvider {
+        val requestedFolders = mutableListOf<String?>()
+        val requestedOffsets = mutableListOf<Int>()
+        val pages = ArrayDeque<PagedResult<MediaItem>>()
+        var failNext: Exception? = null
+
+        override suspend fun listFolder(folder: MediaItem?, page: PageRequest): PagedResult<MediaItem> {
+            failNext?.let { throw it }
+            requestedFolders += folder?.id
+            requestedOffsets += page.offset
+            return pages.removeFirst()
+        }
+    }
+
+    private class FakeBrowseRegistry(private val browse: MediaBrowseProvider) : MediaProviderRegistry {
+        override fun factoryFor(type: ServerType): com.mediahub.provider.api.MediaProviderFactory? = null
+        override val supportedTypes: Set<ServerType> = emptySet()
+        override fun create(server: MediaServer): ProviderHandle? =
+            ProviderHandle(provider = FakeProvider(), browse = browse)
+        override fun descriptors(): List<ProviderDescriptor> = emptyList()
+    }
+
+    private fun webdavFolder(id: String, title: String) =
+        MediaItem("srv-1", id, MediaType.FOLDER, title)
+
+    private fun webdavFile(id: String, title: String) =
+        MediaItem("srv-1", id, MediaType.VIDEO, title)
+
+    private fun browseVm(browse: FakeBrowse): LibraryViewModel = LibraryViewModel(
+        SavedStateHandle(mapOf("serverId" to "srv-1", "libraryId" to "root", "name" to "NAS")),
+        FakeServerStore(server()), FakeBrowseRegistry(browse), noOpLogger,
+    )
+
+    @Test
+    fun `browse root lists folder entries without library capability`() = runTest {
+        val browse = FakeBrowse().apply {
+            pages += PagedResult(
+                items = listOf(webdavFolder("http://x/dav/电影/", "电影"), webdavFile("http://x/dav/a.mkv", "a.mkv")),
+                totalCount = 2, hasMore = false, nextOffset = null,
+            )
+        }
+        val vm = browseVm(browse)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value as LibraryUiState.Content
+        assertEquals("root 必须以 folder=null 请求", listOf<String?>(null), browse.requestedFolders)
+        assertEquals(listOf("电影", "a.mkv"), state.items.map { it.title })
+        assertEquals("无 library 能力时不得渲染媒体库选择层", false, state is LibraryUiState.Libraries)
+        assertEquals(false, state.canGoUp)
+        assertEquals(false, state.hasMore)
+    }
+
+    @Test
+    fun `folder tap descends and up restores root listing`() = runTest {
+        val rootPage = PagedResult(
+            items = listOf(webdavFolder("http://x/dav/电影/", "电影")),
+            totalCount = 1, hasMore = false, nextOffset = null,
+        )
+        val childPage = PagedResult(
+            items = listOf(webdavFile("http://x/dav/电影/a.mkv", "a.mkv")),
+            totalCount = 1, hasMore = false, nextOffset = null,
+        )
+        val browse = FakeBrowse().apply { pages += rootPage; pages += childPage; pages += rootPage }
+        val vm = browseVm(browse)
+        advanceUntilIdle()
+        val folder = (vm.uiState.value as LibraryUiState.Content).items.single()
+
+        vm.openFolder(folder)
+        advanceUntilIdle()
+
+        val child = vm.uiState.value as LibraryUiState.Content
+        assertEquals("http://x/dav/电影/", child.currentFolder?.id)
+        assertEquals(true, child.canGoUp)
+        assertEquals("子目录以 folder.id 请求", listOf<String?>(null, "http://x/dav/电影/"), browse.requestedFolders)
+        assertEquals(listOf("a.mkv"), child.items.map { it.title })
+
+        vm.goToParent()
+        advanceUntilIdle()
+
+        val root = vm.uiState.value as LibraryUiState.Content
+        assertEquals("返回上级恢复 root 列表", listOf("电影"), root.items.map { it.title })
+        assertEquals(false, root.canGoUp)
+    }
+
+    @Test
+    fun `loadMore appends next page without duplicates`() = runTest {
+        val page1 = PagedResult(
+            items = listOf(webdavFile("http://x/dav/1.mkv", "1.mkv")),
+            totalCount = 2, hasMore = true, nextOffset = 1,
+        )
+        val page2 = PagedResult(
+            items = listOf(
+                webdavFile("http://x/dav/1.mkv", "1.mkv"), // 重复条目（服务器目录变更）必须去重
+                webdavFile("http://x/dav/2.mkv", "2.mkv"),
+            ),
+            totalCount = 2, hasMore = false, nextOffset = null,
+        )
+        val browse = FakeBrowse().apply { pages += page1; pages += page2 }
+        val vm = browseVm(browse)
+        advanceUntilIdle()
+
+        vm.loadMore()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value as LibraryUiState.Content
+        assertEquals(listOf("1.mkv", "2.mkv"), state.items.map { it.title })
+        assertEquals(false, state.hasMore)
+        assertEquals("第二页以 offset 续传", listOf(0, 1), browse.requestedOffsets)
+    }
+
+    @Test
+    fun `browse failure surfaces error state`() = runTest {
+        val browse = FakeBrowse().apply {
+            failNext = com.mediahub.provider.api.ProviderException.Network("srv-1")
+        }
+        val vm = browseVm(browse)
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value is LibraryUiState.Error)
     }
 }

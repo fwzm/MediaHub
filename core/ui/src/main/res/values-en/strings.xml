@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_visual_effects_title">Visual effects</string>
+    <string name="player_visual_effects_summary_off">Off</string>
+    <string name="player_visual_effects_summary_format">%1$s · %2$s</string>
+    <string name="player_visual_preview">Live preview</string>
+    <string name="player_visual_enabled">Enable visual effects</string>
+    <string name="player_visual_preset">Effect</string>
+    <string name="player_visual_preset_off">Off</string>
+    <string name="player_visual_preset_off_description">Stops all visual animation</string>
+    <string name="player_visual_preset_aurora">Aurora</string>
+    <string name="player_visual_preset_aurora_description">Soft, slow, large-scale light</string>
+    <string name="player_visual_preset_liquid">Liquid</string>
+    <string name="player_visual_preset_liquid_description">Stronger fluid motion and depth</string>
+    <string name="player_visual_preset_spectrum">Spectrum</string>
+    <string name="player_visual_preset_spectrum_description">Responds to bass, mids, and treble</string>
+    <string name="player_visual_intensity">Intensity</string>
+    <string name="player_visual_intensity_value">%1$d%%</string>
+    <string name="player_visual_follow_artwork">Follow artwork colors</string>
+    <string name="player_visual_audio_reactive">Audio reactive</string>
+    <string name="player_visual_audio_unavailable">Audio spectrum data is currently unavailable. Spectrum is using its baseline animation.</string>
+    <string name="player_visual_audio_starting">Checking the current player for spectrum data. Baseline animation remains available.</string>
+    <string name="player_visual_audio_privacy">Only a low-fidelity spectrum of the current player is analyzed. Microphone audio is not recorded, saved, or uploaded.</string>
+    <string name="player_visual_audio_enable_access">Enable spectrum access</string>
+    <string name="player_visual_audio_retry">Retry spectrum detection</string>
+    <string name="player_visual_audio_checked_during_playback">Spectrum availability is detected during playback and safely falls back to baseline animation when unavailable.</string>
+    <string name="player_visual_performance">Performance mode</string>
+    <string name="player_visual_performance_auto">Auto</string>
+    <string name="player_visual_performance_battery">Battery</string>
+    <string name="player_visual_performance_balanced">Balanced</string>
+    <string name="player_visual_performance_high">High</string>
+    <string name="player_visual_restore_defaults">Restore defaults</string>
+    <string name="player_visual_backend_shader">RuntimeShader</string>
+    <string name="player_visual_backend_fallback">Compatibility gradient</string>
+    <string name="player_visual_backend_stopped">Rendering stopped</string>
+    <string name="player_visual_backend_format">Renderer: %1$s</string>
+</resources>

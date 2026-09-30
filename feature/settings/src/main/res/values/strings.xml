@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_title">设置</string>
+    <string name="settings_back">返回</string>
+    <string name="settings_playback">播放</string>
+    <string name="settings_playback_engine">播放内核</string>
+    <string name="settings_default_speed">默认倍速</string>
+    <string name="settings_speed_two_decimals">%1$.2f×</string>
+    <string name="settings_speed_one_decimal">%1$.1f×</string>
+    <string name="settings_subtitle_size">字幕大小</string>
+    <string name="settings_subtitle_size_value">%1$d sp</string>
+    <string name="settings_prefer_hardware_decoding">优先硬件解码</string>
+    <string name="settings_prefer_direct_play">优先直连播放（Direct Play）</string>
+    <string name="settings_auto_play_next_episode">自动连播下一集</string>
+    <string name="settings_show_media_info">播放器显示媒体信息浮层</string>
+    <string name="settings_auto_landscape">播放视频时自动横屏</string>
+    <string name="settings_immersive_bars">播放时隐藏状态栏和导航栏</string>
+    <string name="settings_player_gestures">播放器手势</string>
+    <string name="settings_gesture_scrub">水平拖动快进快退</string>
+    <string name="settings_gesture_double_tap_rewind">双击左半屏快退</string>
+    <string name="settings_gesture_rewind_seconds">双击快退秒数</string>
+    <string name="settings_seconds_value">%1$d 秒</string>
+    <string name="settings_gesture_double_tap_forward">双击右半屏快进</string>
+    <string name="settings_gesture_forward_seconds">双击快进秒数</string>
+    <string name="settings_gesture_long_press_speed">长按临时倍速</string>
+    <string name="settings_gesture_long_press_directional">左侧快退 / 右侧快进</string>
+    <string name="settings_gesture_default_long_press_speed">默认长按倍率</string>
+    <string name="settings_gesture_min_speed">长按倍速下限</string>
+    <string name="settings_gesture_regular_slow_motion">常规慢放</string>
+    <string name="settings_gesture_frame_level_slow_motion">逐帧级慢放</string>
+    <string name="settings_engine_auto">自动</string>
+    <string name="settings_engine_auto_description">兼容性自动选择</string>
+    <string name="settings_engine_media3" translatable="false">Media3</string>
+    <string name="settings_engine_media3_description">快速路径</string>
+    <string name="settings_engine_mpv" translatable="false">mpv</string>
+    <string name="settings_engine_mpv_description">兼容内核</string>
+    <string name="settings_about">关于</string>
+    <string name="settings_product_name" translatable="false">MediaHub</string>
+    <string name="settings_version">版本 %1$s</string>
+    <string name="settings_product_description">多源统一媒体播放器 —— Emby / Jellyfin / NAS / 云盘 / 本地</string>
+    <string name="settings_github" translatable="false">GitHub</string>
+    <string name="settings_feedback">反馈问题</string>
+    <string name="settings_feedback_description">提交 Issue 报告 Bug 或建议新功能</string>
+</resources>
