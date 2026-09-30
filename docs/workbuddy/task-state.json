@@ -1,0 +1,230 @@
+{
+  "line": "workbuddy",
+  "agent": "WorkBuddy execution line",
+  "snapshotAt": "2026-09-20T11:06:36+08:00",
+  "updatedAt": "2026-09-20T12:05:00+08:00",
+  "repo": "fwzm/MediaHub",
+  "localWorktree": "D:/deepseek_test/MediaHub",
+  "toolchain": {
+    "git": "2.55.0.windows.5 (PortableGit)",
+    "gitKnownDefect": "cannot create new branch refs (worktree add -b / switch -c produce unresolvable HEAD); use `git worktree add --detach <path> <sha>` + `git push origin HEAD:refs/heads/<name>`",
+    "javaHome": "C:/Program Files/Java/jdk1.8.0_381 (BROKEN)",
+    "usableJdk": "C:/Program Files/Java/jdk-21",
+    "androidSdkEnvVars": "ANDROID_HOME / ANDROID_SDK_ROOT unset",
+    "androidSdkActualPath": "C:/Users/55160/AppData/Local/Android/Sdk (android-32..36 present)",
+    "adbOnPath": false,
+    "localUnitTestsRunnable": true,
+    "deviceAcceptancePossible": false,
+    "notes": "local.properties must be written with sdk.dir; it is gitignored"
+  },
+  "baseline": {
+    "originMain": "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1",
+    "pr18": {
+      "branch": "feature/backup-restore",
+      "head": "21231eefcb847f84b8d1092d9c2146438f472ddc",
+      "base": "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1",
+      "state": "OPEN",
+      "draft": true,
+      "mergeable": "MERGEABLE",
+      "ciRun": 34769586851,
+      "ciHeadSha": "21231eefcb847f84b8d1092d9c2146438f472ddc",
+      "ciConclusion": "success"
+    },
+    "pr10": {
+      "branch": "feature/playback-visual-effects",
+      "head": "3febdf8b77a6a1d63d54b9d0c409de708ed978bf",
+      "state": "OPEN",
+      "draft": false,
+      "mergeable": "MERGEABLE"
+    },
+    "pr16": {
+      "branch": "docs/1h-device-evidence",
+      "head": "f40363ce5199e05a4cd197b456a851c2b984492b",
+      "state": "OPEN",
+      "draft": false,
+      "mergeable": "MERGEABLE"
+    },
+    "pr6ExtraFound": {
+      "branch": "codex/post-1d-review-hardening",
+      "head": "7809facab2316f1c43f1e30deb2efeacd8c2ca78",
+      "state": "OPEN",
+      "draft": false,
+      "mergeable": "CONFLICTING",
+      "note": "not present in the task snapshot"
+    },
+    "agentsMdPresent": false
+  },
+  "crossBranchTrap": {
+    "finding": "TokenStore identity-generation lease API exists ONLY on PR #18 head, not on main",
+    "mainTokenStoreMembers": ["saveTokens", "readTokens", "clear"],
+    "pr18OnlyMembers": [
+      "authenticationLease",
+      "beginAuthentication",
+      "isAuthenticationCurrent",
+      "isAuthenticationLeaseCurrent",
+      "clearAuthenticationIfCurrent",
+      "withRestoreIdentityChange"
+    ],
+    "consequences": [
+      "code based on main must not depend on the lease API (compile failure + implicit dependency on an unmerged branch)",
+      "F-C1-1 presence/absence must be judged per-branch: on main the missing guard is expected, not a defect",
+      "W8 initially failed to compile with 8 unresolved references for this reason; guard was removed to match main's Emby/Jellyfin factories"
+    ]
+  },
+  "providerCapabilitiesOnMain": {
+    "emby": ["AUTH", "LIBRARY", "DETAIL", "PLAYBACK", "QUERY", "SEARCH", "IDENTITY_LOOKUP", "PROGRESS"],
+    "jellyfin": ["AUTH", "LIBRARY", "DETAIL", "SEARCH", "PLAYBACK", "PROGRESS"],
+    "webdav": [],
+    "local": ["BROWSE", "DETAIL", "PLAYBACK"]
+  },
+  "taskPackages": [
+    {
+      "id": "W0",
+      "title": "核对真实进度与任务归属",
+      "owner": "workbuddy",
+      "status": "DONE",
+      "artifacts": [
+        "docs/workbuddy/current-state.md",
+        "docs/workbuddy/task-state.json",
+        "docs/workbuddy/resume.md"
+      ]
+    },
+    {
+      "id": "W1",
+      "title": "PR #18 新 head 复验",
+      "owner": "workbuddy (verify only; impl owned by Agent A)",
+      "status": "CODE_LEVEL_VERIFIED_DEVICE_BLOCKED",
+      "artifacts": ["docs/workbuddy/w1-pr18-verification-2026-09-20.md"],
+      "evidence": {
+        "ciRun": 34769586851,
+        "ciHeadSha": "21231eefcb847f84b8d1092d9c2146438f472ddc",
+        "ciConclusion": "success",
+        "fc11SourceCheck": "EmbyProviderFactory.kt:57 and JellyfinProviderFactory.kt:56 both throw IOException; guard added at interceptor index 0",
+        "fc11AssertionQuality": "IdentityGuardFailureLayerTest L1 asserts exception TYPE (IOException) plus 0 requests; L2/L3 assert structured Failure with no leaked runtime exception; positive control present",
+        "localModules": ["core:common", "core:security", "feature:home", "feature:settings", "provider:emby", "provider:jellyfin"],
+        "xmlFiles": 48,
+        "tests": 926,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "executedEvidence": "batch 2 (--rerun-tasks --no-build-cache) ran 104/104 tasks executed for core:common, provider:emby, provider:jellyfin",
+        "fromCacheDisclosure": "batch 1 returned 3 test tasks FROM-CACHE; re-executed in batch 2"
+      },
+      "blocked": "emulator/device acceptance blocked (adb not on PATH): SAF path, 8 process-kill points, corrupted journal NOT executed -> PR #18 remains C REVIEW PENDING / DEVICE UNVERIFIED"
+    },
+    {
+      "id": "W2",
+      "title": "Media3 音轨字幕闭环",
+      "owner": "Agent B",
+      "status": "BLOCKED_BY_OWNER",
+      "evidence": "branch codex/fix-media3-track-selection is at 8e516e4 (= main) with zero commits"
+    },
+    {
+      "id": "W3",
+      "title": "SLOW-FINAL 定位与修复",
+      "owner": "unassigned",
+      "status": "NOT_STARTED",
+      "note": "PR #16 must stay docs-only"
+    },
+    {
+      "id": "W4",
+      "title": "EndpointTestService 脱敏与取消",
+      "owner": "unassigned",
+      "status": "FINDINGS_DELIVERED",
+      "artifacts": ["docs/workbuddy/w4-endpointtestservice-findings.md"],
+      "findings": [
+        "raw exception message (e.message) reaches user-visible EndpointTestResult.error without Redactor",
+        "CancellationException is folded into a normal result in Layer 1/2, making ServerEditorViewModel's cancellation rethrow unreachable",
+        "blocking Call.execute() on the caller's dispatcher (main) remains unaddressed and untested"
+      ]
+    },
+    {
+      "id": "W5",
+      "title": "PR #10 接回与正式视觉验收",
+      "owner": "Agent A (original branch)",
+      "status": "NOT_STARTED"
+    },
+    {
+      "id": "W6",
+      "title": "全应用界面和入口完整化",
+      "owner": "workbuddy (parallel line)",
+      "status": "NOT_STARTED"
+    },
+    {
+      "id": "W7",
+      "title": "Jellyfin 真实验收",
+      "owner": "unassigned",
+      "status": "BLOCKED_BY_SERVER"
+    },
+    {
+      "id": "W8",
+      "title": "只读 WebDAV 功能包",
+      "owner": "workbuddy",
+      "status": "DONE",
+      "branch": "workbuddy/feat-webdav-readonly",
+      "commit": "01c825e",
+      "pr": 19,
+      "verification": {
+        "command": ":provider:webdav:testDebugUnitTest",
+        "result": "BUILD SUCCESSFUL",
+        "xmlFiles": 5,
+        "tests": 55,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "perClass": {
+          "WebDavAuthProviderTest": 15,
+          "WebDavBrowseProviderTest": 14,
+          "WebDavUrlsTest": 11,
+          "WebDavMultistatusParserTest": 8,
+          "WebDavProviderFactoryTest": 7
+        }
+      },
+      "remoteCi": {
+        "run": 35487390680,
+        "job": "build",
+        "conclusion": "success",
+        "covers": ["assembleDebug", "testDebugUnitTest (whole repo)", "lintDebug"]
+      },
+      "notExecuted": ["real WebDAV server acceptance", "device acceptance"]
+    },
+    {
+      "id": "W9",
+      "title": "文档、候选 APK 与交接",
+      "owner": "workbuddy",
+      "status": "PARTIAL",
+      "note": "state/docs branch delivered; README/TASKS staleness correction and candidate APK not done"
+    }
+  ],
+  "worktreesCreated": [
+    { "path": "D:/deepseek_test/mh-wb-state", "mode": "detached", "sha": "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1", "purpose": "W0 state artifacts + W9 docs" },
+    { "path": "D:/deepseek_test/mh-wb-webdav", "mode": "detached", "sha": "8e516e40568e7d2eb309a1853f14a9c6c4ddc0b1", "purpose": "W8 read-only WebDAV package" },
+    { "path": "D:/deepseek_test/mh-wb-pr18", "mode": "detached", "sha": "21231eefcb847f84b8d1092d9c2146438f472ddc", "purpose": "W1 PR #18 verification (prepared, not yet run)" }
+  ],
+  "remoteBranches": [
+    {
+      "name": "workbuddy/w0-state",
+      "pushed": true,
+      "head": "f565107",
+      "pr": 20,
+      "draft": true,
+      "content": "W0 state artifacts + W4 findings (docs only, no production code)"
+    },
+    {
+      "name": "workbuddy/feat-webdav-readonly",
+      "pushed": true,
+      "head": "01c825e",
+      "pr": 19,
+      "draft": true,
+      "content": "W8 read-only WebDAV provider package"
+    }
+  ],
+  "notAuthorized": ["merge", "auto-merge", "release", "release signing", "personal device install"],
+  "unverified": [
+    "PR #18 emulator SAF / 8 process-kill points / corrupted journal (W1 device layer)",
+    "PR #10 visual gates on API 32/36",
+    "any real Emby/Jellyfin server acceptance",
+    "any real WebDAV server acceptance",
+    "full local assemble / lint gates (covered by remote CI on PR #19 only)"
+  ]
+}
