@@ -272,7 +272,8 @@ class MpvPlaybackEngine internal constructor(
             }
         }
         override fun property(name: String, value: String) = withCurrent(run) {
-            if (name == "media-title") _uiState.update { it.copy(mediaTitle = value) }
+            // The session owns a known item title; native media-title can be a bridge transport filename.
+            if (name == "media-title" && run.session.itemTitle.isBlank()) _uiState.update { it.copy(mediaTitle = value) }
         }
         override fun event(event: MpvInstance.Event) = withCurrent(run) {
             val tr = run.session.trace
