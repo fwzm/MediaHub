@@ -73,7 +73,7 @@ class WebDavIdentityContractTest {
         .setBody(WebDavFixtures.multistatus(WebDavFixtures.collection("/dav/", "root")))
 
     private fun vaultPassword(): String? =
-        kotlinx.coroutines.runBlocking { vault.read("s1", CredentialVault.CredentialKind.PASSWORD) }
+        kotlinx.coroutines.runBlocking { WebDavCredentialStore(vault, sharedCoordinator).readPassword("s1")?.password }
 
     /** A 探测在途（屏障挡住第一个请求），执行 [during]，放行后返回 A 的认证结果。 */
     private fun lateAuthA(during: suspend () -> Unit): AuthResult {

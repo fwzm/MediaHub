@@ -50,6 +50,17 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.coroutineContext
 
 /** 播放源解析状态。 */
 sealed interface ResolveState {
@@ -105,6 +116,11 @@ data class PlayerCombinedState(
     val error: com.mediahub.core.network.PlaybackError? = null,
 )
 
+private object SubtitleMemoryOwnership {
+    private val owners = java.util.WeakHashMap<SubtitleMemoryStore, Mutex>()
+    @Synchronized fun mutex(store: SubtitleMemoryStore): Mutex = owners.getOrPut(store) { Mutex() }
+}
+
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -118,6 +134,7 @@ class PlayerViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val artworkPaletteLoader: ArtworkPaletteLoader,
     private val logger: Logger,
+    private val importedSubtitleResolver: ImportedSubtitleResolver? = null,
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
     // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（见 core:common）
@@ -207,6 +224,11 @@ class PlayerViewModel @Inject constructor(
     /** 当前视频版本指纹（匹配记忆键）；resolve 成功后可用。 */
     private var versionKey: String? = null
     private var subtitleCenterJob: kotlinx.coroutines.Job? = null
+    private var subtitleOperationJob: Job? = null
+    private val subtitleOperationGeneration = java.util.concurrent.atomic.AtomicLong(0)
+    // Different navigation VMs sharing one repository must observe the same accepted writes.
+    private val subtitleMemoryMutex = SubtitleMemoryOwnership.mutex(subtitleMemoryStore)
+    private val subtitleMemoryWrites = mutableSetOf<Job>()
 
     /**
      * 播放会话代（A4 字幕操作归属）：每次 [startSubtitleCenter]（即每次 resolve
@@ -218,57 +240,83 @@ class PlayerViewModel @Inject constructor(
     private val subtitleSessionGeneration = java.util.concurrent.atomic.AtomicLong(0)
 
     private fun isSubtitleSessionCurrent(generation: Long): Boolean =
-        subtitleSessionGeneration.get() == generation
+        !stopped && subtitleSessionGeneration.get() == generation
+
+    private fun isSubtitleOperationCurrent(generation: Long, operation: Long): Boolean =
+        isSubtitleSessionCurrent(generation) && subtitleOperationGeneration.get() == operation
+
+    private fun invalidateSubtitleSession() {
+        subtitleSessionGeneration.incrementAndGet()
+        subtitleOperationGeneration.incrementAndGet()
+        subtitleCenterJob?.cancel()
+        subtitleOperationJob?.cancel()
+        subtitleCenterJob = null
+        subtitleOperationJob = null
+        versionKey = null
+        _subtitleCenter.value = SubtitleCenterState()
+    }
+
+    private fun beginManualSubtitleOperation(): Long {
+        val operation = subtitleOperationGeneration.incrementAndGet()
+        subtitleOperationJob?.cancel()
+        subtitleOperationJob = null
+        _subtitleCenter.update { it.copy(manualSelection = true, notice = null) }
+        return operation
+    }
 
     /**
      * resolve 成功后启动：同目录发现 →（未手动选择时）回放匹配记忆。
      * 记忆键 = serverId+itemId+sizeBytes（或路径指纹）——不同视频/版本互不共享。
      */
     private fun startSubtitleCenter(item: MediaItem) {
-        subtitleCenterJob?.cancel()
-        _subtitleCenter.value = SubtitleCenterState()
+        invalidateSubtitleSession()
         val key = SubtitleMemoryKeys.forItem(item)
         versionKey = key
         val generation = subtitleSessionGeneration.incrementAndGet()
         subtitleCenterJob = viewModelScope.launch {
             val discovery = handle?.subtitleDiscovery
-            if (discovery == null) {
-                _subtitleCenter.update { it.copy(discovering = false) }
-                return@launch
-            }
-            _subtitleCenter.update { it.copy(discovering = true) }
-            val found = runCatching { discovery.discoverSubtitles(item) }
+            _subtitleCenter.update { it.copy(discovering = discovery != null) }
+            val found = runCatching { discovery?.discoverSubtitles(item) ?: emptyList() }
+                .onFailure { if (it is CancellationException) throw it }
                 .onFailure { logger.w(LogTag.PLAYER, "字幕发现失败 itemId=${item.id}", it) }
                 .getOrDefault(emptyList())
+            if (!isSubtitleSessionCurrent(generation)) return@launch
             _subtitleCenter.update { it.copy(discovering = false, discovered = found) }
             // 迟到发现保护（双重）：会话代已变 → 整个回放链作废；
             // 用户已手动选择 → 不覆盖（手动优先）。
             if (!isSubtitleSessionCurrent(generation)) return@launch
             if (_subtitleCenter.value.manualSelection) return@launch
-            val memory = subtitleMemoryStore.recall(key) ?: return@launch
+            val operation = subtitleOperationGeneration.get()
+            subtitleOperationJob = coroutineContext[Job]
+            val memory = subtitleMemoryMutex.withLock { subtitleMemoryStore.recall(key) } ?: return@launch
             // recall 挂起窗口（记忆读取是迟到竞争的主要交错点）：恢复后必须再校验
-            if (!isSubtitleSessionCurrent(generation)) return@launch
+            if (!isSubtitleOperationCurrent(generation, operation)) return@launch
             if (_subtitleCenter.value.manualSelection) return@launch
+            if (memory.serverId != serverId) return@launch
             if (memory.offsetMs != 0L && engine.setSubtitleOffset(memory.offsetMs) &&
                 isSubtitleSessionCurrent(generation)
             ) {
-                _subtitleCenter.update { it.copy(offsetMs = memory.offsetMs) }
+                _subtitleCenter.update { it.copy(offsetMs = engine.subtitleOffsetMs) }
             }
-            val target = memory.subtitleId
-                ?.let { id -> found.find { it.id == id } }
-                ?: return@launch
-            applyExternalSubtitle(target, remember = false, generation = generation)
+            val id = memory.subtitleId ?: return@launch
+            val target = found.find { it.id == id } ?: importedSubtitleResolver?.resolve(id)
+            if (!isSubtitleOperationCurrent(generation, operation)) return@launch
+            if (target == null) {
+                if (id.startsWith("content://")) _subtitleCenter.update { it.copy(notice = "已记忆字幕不可读取，请重新导入") }
+                return@launch
+            }
+            if (target !in found) _subtitleCenter.update { it.copy(imported = it.imported + target) }
+            applyExternalSubtitle(target, remember = false, generation = generation, operation = operation)
         }
     }
 
     /** 外挂字幕候选点击：真实加载到当前内核；成功才记忆（手动选择标记 + 匹配记忆写入）。 */
     fun selectExternalSubtitle(subtitle: DiscoveredSubtitle) {
+        if (stopped) return
         val generation = subtitleSessionGeneration.get()
-        viewModelScope.launch {
-            val ok = applyExternalSubtitle(subtitle, remember = true, generation = generation)
-            if (ok && isSubtitleSessionCurrent(generation)) {
-                _subtitleCenter.update { it.copy(manualSelection = true) }
-            }
+        val operation = beginManualSubtitleOperation()
+        subtitleOperationJob = viewModelScope.launch {
+            applyExternalSubtitle(subtitle, remember = true, generation = generation, operation = operation)
         }
     }
 
@@ -288,8 +336,11 @@ class PlayerViewModel @Inject constructor(
 
     /** 内嵌字幕轨手动选择：标记本会话手动优先，迟到的发现/记忆不再覆盖。 */
     fun onEmbeddedSubtitleSelected(selection: TrackSelection?) {
+        if (stopped) return
+        beginManualSubtitleOperation()
         engine.selectSubtitleTrack(selection)
-        _subtitleCenter.update { it.copy(manualSelection = true) }
+        _subtitleCenter.update { it.copy(selectedExternalId = null) }
+        persistMemory(subtitleId = null)
     }
 
     /**
@@ -297,6 +348,7 @@ class PlayerViewModel @Inject constructor(
      * 扩展名不支持时如实提示，不伪造候选。
      */
     fun importSubtitle(displayName: String, uri: String) {
+        if (stopped) return
         val extension = displayName.substringAfterLast('.', "").lowercase()
         if (extension !in SubtitleFormats.EXTENSIONS) {
             _subtitleCenter.update {
@@ -318,17 +370,24 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    fun onSubtitleImportPermissionFailed() {
+        if (stopped) return
+        _subtitleCenter.update { it.copy(notice = "无法保留字幕读取权限，请重新导入") }
+    }
+
     fun consumeSubtitleNotice() {
         _subtitleCenter.update { it.copy(notice = null) }
     }
 
     /** 偏移调整（仅 mpv 内核真实生效；Media3 无公开偏移 API，引擎层如实拒绝）。 */
     fun setSubtitleOffset(offsetMs: Long) {
+        if (stopped) return
+        beginManualSubtitleOperation()
         if (!engine.setSubtitleOffset(offsetMs)) {
             _subtitleCenter.update { it.copy(notice = "当前内核不支持字幕偏移") }
             return
         }
-        _subtitleCenter.update { it.copy(offsetMs = offsetMs) }
+        _subtitleCenter.update { it.copy(offsetMs = engine.subtitleOffsetMs) }
         persistMemory()
     }
 
@@ -336,7 +395,9 @@ class PlayerViewModel @Inject constructor(
         subtitle: DiscoveredSubtitle,
         remember: Boolean,
         generation: Long = subtitleSessionGeneration.get(),
+        operation: Long = subtitleOperationGeneration.get(),
     ): Boolean {
+        if (!isSubtitleOperationCurrent(generation, operation)) return false
         if (!engine.subtitleCapabilities.externalLoad) {
             _subtitleCenter.update { it.copy(notice = "当前内核不支持外挂字幕") }
             return false
@@ -357,13 +418,14 @@ class PlayerViewModel @Inject constructor(
         )
         // 引擎提交完成即可被新会话的 rebuild/stop 重置；此后每一步（UI 更新、
         // 记忆持久化）都必须仍属于发起会话——旧会话迟到结果不得改动新状态。
-        if (!isSubtitleSessionCurrent(generation)) return false
+        if (!isSubtitleOperationCurrent(generation, operation)) return false
+        coroutineContext.ensureActive()
         if (!accepted) {
             _subtitleCenter.update { it.copy(notice = "字幕加载失败：${subtitle.fileName}") }
             return false
         }
         _subtitleCenter.update { it.copy(selectedExternalId = subtitle.id) }
-        if (remember) persistMemory(subtitle.id, generation)
+        if (remember) persistMemory(subtitle.id, generation, operation)
         return true
     }
 
@@ -371,26 +433,35 @@ class PlayerViewModel @Inject constructor(
     private fun persistMemory(
         subtitleId: String? = _subtitleCenter.value.selectedExternalId,
         generation: Long = subtitleSessionGeneration.get(),
+        operation: Long = subtitleOperationGeneration.get(),
     ) {
+        if (!isSubtitleOperationCurrent(generation, operation)) return
         val key = versionKey ?: return
         val offset = _subtitleCenter.value.offsetMs
-        if (subtitleId == null && offset == 0L) {
-            viewModelScope.launch { subtitleMemoryStore.forget(key) }
-            return
+        val write = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            // An accepted user mutation is finite database work. Do not drop it when the
+            // navigation scope closes while an earlier write is finishing.
+            withContext(NonCancellable) { subtitleMemoryMutex.withLock {
+                // This intent was accepted while current. Preserve its queue order across retry:
+                // a delayed remember must be followed by an already accepted Off/forget, and
+                // the next recall must wait for both. Session invalidation blocks new intents.
+                if (subtitleId == null && offset == 0L) {
+                    subtitleMemoryStore.forget(key)
+                    return@withLock
+                }
+                subtitleMemoryStore.remember(
+                    SubtitleMemoryEntry(
+                        versionKey = key,
+                        serverId = serverId,
+                        subtitleId = subtitleId,
+                        offsetMs = offset,
+                        updatedAtEpochMs = 0, // 仓库侧补齐时间戳
+                    ),
+                )
+            } }
         }
-        viewModelScope.launch {
-            // 持久化前再校验会话代：旧会话的记忆写不得落到新视频的键上
-            if (!isSubtitleSessionCurrent(generation)) return@launch
-            subtitleMemoryStore.remember(
-                SubtitleMemoryEntry(
-                    versionKey = key,
-                    serverId = serverId,
-                    subtitleId = subtitleId,
-                    offsetMs = offset,
-                    updatedAtEpochMs = 0, // 仓库侧补齐时间戳
-                ),
-            )
-        }
+        subtitleMemoryWrites.add(write)
+        write.invokeOnCompletion { subtitleMemoryWrites.remove(write) }
     }
 
     private val _resolveState = MutableStateFlow<ResolveState>(ResolveState.Resolving)
@@ -455,7 +526,10 @@ class PlayerViewModel @Inject constructor(
     )
     private var syncStarted = false
     private var stopped = false
+    private val stopCompleted = CompletableDeferred<Unit>()
     private var currentTrace: PlaybackStartupTrace? = null
+    private var resolveJob: Job? = null
+    private val resolveGeneration = java.util.concurrent.atomic.AtomicLong(0)
 
     val uiState: StateFlow<PlayerCombinedState> =
         combine(engine.uiState, _resolveState) { player, resolve ->
@@ -477,7 +551,11 @@ class PlayerViewModel @Inject constructor(
 
     /** 解析播放源并起播：server → handle → detail → resolvePlayback。 */
     fun resolve() {
-        viewModelScope.launch {
+        if (stopped) return
+        resolveJob?.cancel()
+        val generation = resolveGeneration.incrementAndGet()
+        invalidateSubtitleSession()
+        resolveJob = viewModelScope.launch {
             _resolveState.value = ResolveState.Resolving
             _playbackSource.value = null
             val trace = PlaybackStartupTrace(
@@ -492,6 +570,8 @@ class PlayerViewModel @Inject constructor(
             try {
                 val server = serverStore.getServer(serverId)
                     ?: throw ProviderException.NotFound(serverId, "媒体源")
+                coroutineContext.ensureActive()
+                if (stopped || resolveGeneration.get() != generation) return@launch
                 _serverDisplayName.value = server.displayName
                 _serverIcon.value = server.icon
                 val providerHandle = registry.create(server)
@@ -526,12 +606,18 @@ class PlayerViewModel @Inject constructor(
                     )
                 }
                 trace.record(PlaybackStartupTrace.Milestone.DETAIL_SNAPSHOT_READY)
+                coroutineContext.ensureActive()
+                if (stopped || resolveGeneration.get() != generation) return@launch
                 updateArtworkPalette(item.posterUrl ?: item.backdropUrl)
                 val resume = progressStore.getResume(serverId, itemId)
+                coroutineContext.ensureActive()
+                if (stopped || resolveGeneration.get() != generation) return@launch
                 val source = playbackProvider.resolvePlayback(
                     item,
                     PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
                 )
+                coroutineContext.ensureActive()
+                if (stopped || resolveGeneration.get() != generation) return@launch
                 trace.record(PlaybackStartupTrace.Milestone.SOURCE_RESOLVED)
                 _playbackSource.value = source
                 logger.i(LogTag.PLAYER, "StartupTrace " + trace.summary())
@@ -560,8 +646,12 @@ class PlayerViewModel @Inject constructor(
                 // 字幕中心：同目录发现 + 匹配记忆回放（异步，不阻塞 Ready）。
                 startSubtitleCenter(item)
                 _resolveState.value = ResolveState.Ready
-                PlaybackNetworkTraceRegistry.set(null)
+                if (currentTrace === trace) PlaybackNetworkTraceRegistry.set(null)
+            } catch (e: CancellationException) {
+                if (currentTrace === trace) PlaybackNetworkTraceRegistry.set(null)
+                throw e
             } catch (e: Exception) {
+                if (stopped || resolveGeneration.get() != generation) return@launch
                 trace.record(PlaybackStartupTrace.Milestone.FAILED)
                 trace.putMetadata("failedStage", "SOURCE_RESOLVED")
                 logger.w(LogTag.PLAYER, "StartupTrace " + trace.summary())
@@ -599,15 +689,24 @@ class PlayerViewModel @Inject constructor(
      * 释放播放器。幂等：可被返回按钮与 onDispose 兜底重复调用。
      */
     suspend fun stopAndFlush() {
-        if (stopped) return
+        if (stopped) { stopCompleted.await(); return }
         stopped = true
-        val finalProgress = engine.stop()
-        // 先停 periodic/critical 管线（禁止 final 之后的新 remote work——防
-        // Stopped 后被排队 sample 以 Playing/Progress 重开 Jellyfin 会话），
-        // 再执行单次权威 final 上报；flushFinal 不依赖 coordinator job。
-        syncCoordinator.stop()
-        syncCoordinator.flushFinal(finalProgress)
-        engine.release()
+        resolveGeneration.incrementAndGet()
+        resolveJob?.cancel()
+        invalidateSubtitleSession()
+        withContext(NonCancellable + Dispatchers.Main.immediate) {
+            try {
+                val finalProgress = engine.stop()
+                // Stop periodic work before draining accepted local writes and the bounded
+                // final report. Navigation cancellation must not strand the native engine.
+                syncCoordinator.stop()
+                subtitleMemoryWrites.toList().forEach { it.join() }
+                syncCoordinator.flushFinal(finalProgress)
+            } finally {
+                syncCoordinator.stop()
+                try { engine.release() } finally { stopCompleted.complete(Unit) }
+            }
+        }
     }
 
     /** 异步兜底入口（PlayerScreen onDispose 使用；返回按钮走 [stopAndFlush] 同步流程）。 */
@@ -617,15 +716,18 @@ class PlayerViewModel @Inject constructor(
 
     private fun userMessage(e: Exception): String = when (e) {
         is ProviderException -> e.message ?: "播放失败"
-        else -> "播放失败：${e.message}"
+        else -> "播放失败，请重试"
     }
 
     override fun onCleared() {
+        resolveGeneration.incrementAndGet()
+        resolveJob?.cancel()
+        invalidateSubtitleSession()
         // 兜底：若未走 stopAndFlush（如进程销毁/异常路径），确保停止采样并释放资源。
         if (!stopped) {
-            engine.stop()
-            syncCoordinator.stop()
-            engine.release()
+            stopped = true
+            try { engine.stop(); syncCoordinator.stop() }
+            finally { try { engine.release() } finally { stopCompleted.complete(Unit) } }
         }
         super.onCleared()
     }

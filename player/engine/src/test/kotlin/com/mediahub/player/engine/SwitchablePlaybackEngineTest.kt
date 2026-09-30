@@ -4,6 +4,7 @@ import com.mediahub.core.network.PlaybackError
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
+import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -469,6 +470,71 @@ class SwitchablePlaybackEngineTest {
         assertNull(engine.audioBands.value)
     }
 
+    private fun external(name: String = "zh") = ExternalSubtitle(name, name, "https://media/$name.srt", "application/x-subrip", name)
+
+    @Test
+    fun `external then off or embedded does not reopen external after fallback`() = runTest(dispatcher) {
+        for (selection in listOf(null, TrackSelection(0, 0))) {
+            val media3 = FakeEngine(EngineKind.MEDIA3)
+            val mpv = FakeEngine(EngineKind.MPV)
+            val engine = facade(backgroundScope, media3, mpv)
+            engine.play(session(source())); runCurrent()
+            assertTrue(engine.loadExternalSubtitle(external()))
+            engine.selectSubtitleTrack(selection)
+            media3.updateState { it.copy(error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }; runCurrent()
+            assertEquals(EngineKind.MPV, engine.kind)
+            assertTrue(mpv.externalLoads.isEmpty())
+            engine.release()
+        }
+    }
+
+    @Test
+    fun `late external success after manual off is rejected and absent from fallback`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.play(session(source())); runCurrent()
+        media3.loadGate = CompletableDeferred()
+        val pending = async { engine.loadExternalSubtitle(external()) }; runCurrent()
+        assertEquals(listOf(external()), media3.externalLoads)
+        engine.selectSubtitleTrack(null)
+        media3.loadGate!!.complete(Unit); runCurrent()
+        assertFalse(pending.await())
+        media3.updateState { it.copy(error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }; runCurrent()
+        assertTrue(mpv.externalLoads.isEmpty())
+    }
+
+    @Test
+    fun `late external success after session switch cannot seed newer fallback`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.play(session(source())); runCurrent()
+        media3.loadGate = CompletableDeferred()
+        val old = async { engine.loadExternalSubtitle(external("old")) }; runCurrent()
+        engine.play(session(source()).copy(itemId = "new")); runCurrent()
+        media3.loadGate!!.complete(Unit); runCurrent()
+        assertFalse(old.await())
+        media3.updateState { it.copy(error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }; runCurrent()
+        assertTrue(mpv.externalLoads.isEmpty())
+    }
+
+    @Test
+    fun `new external intent wins late old success and is the only fallback reload`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.play(session(source())); runCurrent()
+        val gate = CompletableDeferred<Unit>(); media3.loadGate = gate
+        val old = async { engine.loadExternalSubtitle(external("old")) }; runCurrent()
+        media3.loadGate = null
+        assertTrue(engine.loadExternalSubtitle(external("new")))
+        gate.complete(Unit); runCurrent()
+        assertFalse(old.await())
+        media3.updateState { it.copy(error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }; runCurrent()
+        assertEquals(listOf(external("new")), mpv.externalLoads)
+    }
+
     // ---- Fake ----
 
     private class FakeEngine(override val kind: EngineKind) : PlaybackEnginePort {
@@ -505,6 +571,14 @@ class SwitchablePlaybackEngineTest {
         override fun seekTo(positionMs: Long, mode: SeekMode) { seekedTo = positionMs }
         override fun setSpeed(speed: Float) { speedSet = speed }
         override fun selectAudioTrack(selection: TrackSelection?) = Unit
+        val externalLoads = mutableListOf<ExternalSubtitle>()
+        var loadGate: CompletableDeferred<Unit>? = null
+        override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
+            externalLoads += subtitle
+            val gate = loadGate
+            gate?.await()
+            return true
+        }
         override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
         override fun setAudioSpectrumEnabled(enabled: Boolean) {
             audioSpectrumEnabledHistory += enabled

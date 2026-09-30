@@ -111,4 +111,9 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.uiautomator)
+    // Optional native capability probe uses the exact same pinned AAR as production.
+    androidTestImplementation(libs.libmpv.android)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.okhttp.mockwebserver)
 }

@@ -5,6 +5,8 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -68,6 +70,7 @@ class A4BridgeTotalConcurrencyTest {
 
     /** OkHttp 真实 Call.cancel 触发计数（EventListener.canceled）。 */
     private val canceledCalls = AtomicInteger(0)
+    private val activeWorkers = AtomicInteger(0)
 
     @Before
     fun setUp() {
@@ -85,6 +88,7 @@ class A4BridgeTotalConcurrencyTest {
         // 放行一切可能仍阻塞在闸门的拦截器线程（已取消的 execute 会以 IOException 结束）
         gate.release(TOTAL_REQUESTS + 16)
         scope?.cancel()
+        check(awaitCondition(5_000) { activeWorkers.get() == 0 }) { "bridge workers remained after cleanup" }
         try {
             webServer.shutdown()
         } catch (ignored: Exception) {
@@ -97,10 +101,14 @@ class A4BridgeTotalConcurrencyTest {
         .readTimeout(5, TimeUnit.SECONDS)
         .addInterceptor { chain: Interceptor.Chain ->
             val index = chain.request().header("X-Test-Index")!!.toInt()
-            enteredIndexes.add(index)
-            check(gate.tryAcquire(15, TimeUnit.SECONDS)) { "闸门 15s 未放行 index=$index" }
-            // 不归还 permit：闸门通行权由测试侧精确控制，保证阶段推进的确定性
-            chain.proceed(chain.request()).also { passedIndexes.add(index) }
+            activeWorkers.incrementAndGet()
+            try {
+                enteredIndexes.add(index)
+                check(gate.tryAcquire(15, TimeUnit.SECONDS)) { "闸门 15s 未放行 index=$index" }
+                chain.proceed(chain.request()).also { passedIndexes.add(index) }
+            } finally {
+                activeWorkers.decrementAndGet()
+            }
         }
         .eventListener(object : EventListener() {
             override fun canceled(call: Call) {
@@ -221,6 +229,40 @@ class A4BridgeTotalConcurrencyTest {
         assertEquals("21 个调用必须全部成功返回 200", List(TOTAL_REQUESTS) { 200 }, codes)
         assertEquals("服务端恰见 $TOTAL_REQUESTS 个请求", TOTAL_REQUESTS, webServer.requestCount)
         assertEquals(TOTAL_REQUESTS, passedIndexes.size)
+    }
+
+    @Test
+    fun `canceled callers retain admission until their blocked workers exit`() = runBlocking {
+        val s = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        scope = s
+        val client = barrierClient()
+        val jobs = (0 until MAX_BRIDGE_THREADS).map { s.launchBridged(client, it) }
+        assertTrue(awaitCondition(5_000) { enteredIndexes.size == MAX_BRIDGE_THREADS })
+        jobs.forEach { it.cancel() }
+        withTimeout(5_000) { jobs.forEach { it.join() } }
+        assertEquals("every admitted Call receives cancellation", MAX_BRIDGE_THREADS, canceledCalls.get())
+        assertEquals("I/O workers are still blocked after coroutine completion", MAX_BRIDGE_THREADS, activeWorkers.get())
+
+        val submitted = CompletableDeferred<Unit>()
+        val followUp = s.async {
+            submitted.complete(Unit)
+            client.newCall(request(TOTAL_REQUESTS)).awaitCancellable { it.code }
+        }
+        withTimeout(5_000) { submitted.await() }
+        try {
+            assertTrue("cancel must not admit a 17th worker while 16 canceled workers remain blocked",
+                awaitStable(400) { enteredIndexes.size == MAX_BRIDGE_THREADS })
+            assertEquals("queued follow-up sends no request", 0, webServer.requestCount)
+            gate.release(MAX_BRIDGE_THREADS)
+            assertTrue("worker completion releases admission for the follow-up",
+                awaitCondition(5_000) { TOTAL_REQUESTS in enteredIndexes })
+            gate.release(1)
+            assertEquals(200, withTimeout(5_000) { followUp.await() })
+            assertEquals("canceled pre-network calls send nothing", 1, webServer.requestCount)
+        } finally {
+            gate.release(TOTAL_REQUESTS + MAX_BRIDGE_THREADS)
+            followUp.cancel()
+        }
     }
 
     /** 有界条件等待（20ms 轮询），不靠裸 sleep 伪造竞态。 */

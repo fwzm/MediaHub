@@ -206,6 +206,9 @@ fun PlayerRoute(
                 uri,
                 android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
             )
+        }.onFailure {
+            viewModel.onSubtitleImportPermissionFailed()
+            return@rememberLauncherForActivityResult
         }
         val displayName = runCatching {
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -492,7 +495,7 @@ fun PlayerRoute(
                         visualClock = sharedVisualClock,
                         forceVisualFallback = forceVisualFallback,
                         onVisualBackendChanged = reportVisualBackend,
-                        subtitleSelected = engineState.selectedSubtitle != null,
+                        subtitleSelected = engineState.selectedSubtitle != null || subtitleCenter.selectedExternalId != null,
                         onBack = exitPlayer,
                         onTogglePlayPause = viewModel.engine::togglePlayPause,
                         onSeek = { viewModel.engine.seekTo(it) },
@@ -731,6 +734,7 @@ private fun applySubtitleStyle(subtitleView: androidx.media3.ui.SubtitleView?, p
 
 private const val BASE_SUBTITLE_FRACTION = 0.0533f
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun PlayerControls(
     modifier: Modifier = Modifier,
@@ -793,6 +797,13 @@ private fun PlayerControls(
                     maxLines = 2,
                     modifier = Modifier.weight(1f),
                 )
+            }
+            // Keep the title readable on narrow/portrait screens; actions may wrap instead
+            // of consuming all of the title's weighted row width.
+            androidx.compose.foundation.layout.FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
+            ) {
                 PlayerVisualEffectsEntry(onClick = onShowVisualEffects)
                 TextButton(onClick = onShowInfo) {
                     Text(stringResource(R.string.player_info_entry), color = MaterialTheme.colorScheme.primary)

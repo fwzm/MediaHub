@@ -60,6 +60,76 @@ class MpvPlaybackEngineTest {
     }
 
     @Test
+    fun `trusted session title survives bridge media title during loadfile and later native updates`() = runTest {
+        val f = Fixture(backgroundScope)
+        val trustedTitle = "电影 a+b%.mp4"
+        f.bridgeTransportUrl = "http://127.0.0.1/fixture/synthetic-bridge-capability-A"
+        f.nativeTitleOnLoad = "synthetic-bridge-capability-A"
+        try {
+            f.engine.play(session("source-id").copy(itemTitle = trustedTitle))
+            runCurrent()
+            val native = f.instances.single()
+            assertEquals("loadfile must actually reach the initialized instance", 1, native.loads)
+            assertEquals("actual transport path must be loaded before its native title callback", f.bridgeTransportUrl, native.lastLoadedUrl)
+            assertEquals("native callback must actually arrive during loadfile", 1, native.titleCallbacks)
+            assertEquals(MpvInstance.Format.STRING, native.observedProperties["media-title"])
+            assertEquals(trustedTitle, f.engine.uiState.value.mediaTitle)
+            for (nativeTitle in listOf("synthetic-bridge-capability-B", "Native embedded metadata", "", "  ")) {
+                native.emitTitle(nativeTitle)
+                assertEquals("trusted item identity owns the title after every current callback", trustedTitle, f.engine.uiState.value.mediaTitle)
+            }
+            assertEquals(5, native.titleCallbacks)
+        } finally { f.engine.release() }
+    }
+
+    @Test
+    fun `empty and whitespace session titles permit normal native media title fallback`() = runTest {
+        for (itemTitle in listOf("", " 	 ")) {
+            val f = Fixture(backgroundScope)
+            f.nativeTitleOnLoad = "Native chapter title"
+            try {
+                f.engine.play(session("source-id").copy(itemTitle = itemTitle))
+                runCurrent()
+                val native = f.instances.single()
+                assertEquals(1, native.loads)
+                assertEquals(1, native.titleCallbacks)
+                assertEquals("Native chapter title", f.engine.uiState.value.mediaTitle)
+                native.emitTitle("Native updated chapter")
+                assertEquals("Native updated chapter", f.engine.uiState.value.mediaTitle)
+            } finally { f.engine.release() }
+        }
+    }
+
+    @Test
+    fun `native title fallback remains owned by current generation across replacement stop and release`() = runTest {
+        val f = Fixture(backgroundScope)
+        try {
+            f.nativeTitleOnLoad = "First native title"
+            f.engine.play(session("first").copy(itemTitle = "")); runCurrent()
+            val first = f.instances.single()
+            assertEquals("First native title", f.engine.uiState.value.mediaTitle)
+            f.nativeTitleOnLoad = "Second native title"
+            f.engine.play(session("second").copy(itemTitle = "")); runCurrent()
+            val second = f.instances.last()
+            assertEquals(1, second.titleCallbacks)
+            first.emitTitle("Stale first title")
+            assertEquals("Second native title", f.engine.uiState.value.mediaTitle)
+            f.engine.stop()
+            second.emitTitle("Stale stopped title")
+            assertEquals("Second native title", f.engine.uiState.value.mediaTitle)
+            f.nativeTitleOnLoad = "Third native title"
+            f.engine.play(session("third").copy(itemTitle = " 	 ")); runCurrent()
+            val third = f.instances.last()
+            second.emitTitle("Stale old generation")
+            assertEquals("Third native title", f.engine.uiState.value.mediaTitle)
+            f.engine.release()
+            third.emitTitle("Stale released title")
+            assertEquals("Third native title", f.engine.uiState.value.mediaTitle)
+            assertEquals(1, third.destroys)
+        } finally { f.engine.release() }
+    }
+
+    @Test
     fun `new play replaces a queued session without creating old resources`() = runTest {
         val f = Fixture(backgroundScope)
         f.engine.play(session("old"))
@@ -474,6 +544,8 @@ class MpvPlaybackEngineTest {
         var onBridgeStop: () -> Unit = {}
         var onInit: () -> Unit = {}
         var onDestroy: () -> Unit = {}
+        var nativeTitleOnLoad: String? = null
+        var bridgeTransportUrl = "http://127.0.0.1/fake"
         val engine = MpvPlaybackEngine(
             logger = object : Logger {
                 override fun d(tag: LogTag, message: String) = Unit
@@ -483,12 +555,12 @@ class MpvPlaybackEngineTest {
             },
             scope = scope,
             bridgeFactory = {
-                FakeBridge({ onBridgeStart() }, { onBridgeStop() }).also { bridges += it }
+                FakeBridge({ onBridgeStart() }, { onBridgeStop() }, { bridgeTransportUrl }).also { bridges += it }
             },
             instanceFactory = {
                 val id = instances.size + 1
                 order += "create-$id"
-                FakeInstance({ onInit() }, { order += "destroy-$id"; onDestroy() }).also { instances += it }
+                FakeInstance({ onInit() }, { order += "destroy-$id"; onDestroy() }, { nativeTitleOnLoad }).also { instances += it }
             },
             elapsedRealtime = { 100L },
             currentTimeMillis = { 200L },
@@ -497,32 +569,36 @@ class MpvPlaybackEngineTest {
         fun flushDeferred() { while (deferred.isNotEmpty()) deferred.removeFirst().invoke() }
     }
 
-    private class FakeBridge(val onStart: () -> Unit, val onStop: () -> Unit) : MpvBridge {
+    private class FakeBridge(val onStart: () -> Unit, val onStop: () -> Unit, val transportUrl: () -> String) : MpvBridge {
         var url: String? = null
         var stops = 0
         override fun start(url: String, headers: Map<String, String>): String {
             this.url = url
             onStart()
-            return "http://127.0.0.1/fake"
+            return transportUrl()
         }
         override fun stop() { stops++; onStop() }
     }
 
-    private class FakeInstance(val onInit: () -> Unit, val onDestroy: () -> Unit) : MpvInstance {
+    private class FakeInstance(val onInit: () -> Unit, val onDestroy: () -> Unit, val titleOnLoad: () -> String?) : MpvInstance {
         lateinit var observer: MpvInstance.Observer
         var loads = 0
+        var lastLoadedUrl: String? = null
         var destroys = 0
         var reads = 0
         var seeks = 0
         var position = 0.0
+        var titleCallbacks = 0
+        val observedProperties = mutableMapOf<String, MpvInstance.Format>()
+        fun emitTitle(value: String) { titleCallbacks++; observer.property("media-title", value) }
         override fun addObserver(observer: MpvInstance.Observer) { this.observer = observer }
         override fun setOptionString(name: String, value: String) = Unit
         override fun init() = onInit()
         override fun attachSurface(surface: Surface) = Unit
         override fun detachSurface() = Unit
-        override fun observeProperty(name: String, format: MpvInstance.Format) = Unit
+        override fun observeProperty(name: String, format: MpvInstance.Format) { observedProperties[name] = format }
         override fun command(args: Array<String>) {
-            if (args.first() == "loadfile") loads++
+            if (args.first() == "loadfile") { loads++; lastLoadedUrl = args[1]; titleOnLoad()?.let { emitTitle(it) } }
             if (args.first() == "seek") seeks++
         }
         override fun setPropertyBoolean(name: String, value: Boolean) = Unit

@@ -64,6 +64,25 @@ class WebDavBrowseProviderTest {
     }
 
     @Test
+    fun `mixed encoded and raw href retains bytes through browse detail and playback`() = runBlocking {
+        stack.storePassword()
+        val href = "/dav/电影%20a+b%25 raw.mkv"
+        val expectedPath = "/dav/%E7%94%B5%E5%BD%B1%20a+b%25%20raw.mkv"
+        enqueueMultistatus(WebDavFixtures.file(href, length = 15))
+        val item = stack.browseProvider().listFolder(null, PageRequest()).items.single()
+        assertEquals("电影 a+b% raw.mkv", item.title)
+        assertEquals(webServer.url(expectedPath).toString(), item.id)
+        enqueueMultistatus(WebDavFixtures.file(href, length = 15))
+        val detailed = WebDavDetailProvider(stack.server, stack.api, stack.session).getItemDetail(item.id).item
+        val source = stack.playbackProvider().resolvePlayback(detailed, PlaybackOptions())
+        webServer.takeRequest()
+        val detailRequest = webServer.takeRequest()
+        assertEquals(expectedPath, detailRequest.path)
+        assertEquals(item.id, source.url)
+        assertEquals(stack.expectedBasicHeader, source.headers["Authorization"])
+    }
+
+    @Test
     fun `self entry is removed and folders sort first`() = runBlocking {
         stack.storePassword()
         enqueueMultistatus(
