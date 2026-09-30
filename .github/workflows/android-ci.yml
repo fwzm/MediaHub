@@ -86,6 +86,9 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon
 
+      - name: Validate emulator preparation guards
+        run: python3 -m unittest discover -s .github/scripts/tests -p 'test_prepare_visual_emulator.py' -v
+
       # Phase CI-H1：测试挂死（无 failure 的 advanceUntilIdle 死锁等）不再吃满 job
       # timeout——15 分钟强杀使本 step 失败；Lint 用 !cancelled()——
       # 测试 FAIL/TIMEOUT 时仍执行，workflow 被 concurrency 取消时不执行
