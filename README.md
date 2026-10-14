@@ -152,7 +152,15 @@ CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：
 ### 最近更新（自动同步）
 
 <!-- WINDOWS-SYNC:START -->
-<!-- 本块由 scripts/sync-github-daily.ps1 自动维护（windows/ 目录最近 7 天的提交摘要），请勿手工编辑块内内容。 -->
+<!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
+- c9cb20d 2026-10-14 feat(windows): 给 Browse-only 来源一个真正的用户入口（P0-A）
+- 3bcd896 2026-10-14 fix(windows): 让 Space 真的能暂停播放，并停止把 29 MB 验收证据提交进仓库
+- c3d957b 2026-10-14 feat(windows): LGPL engine built, Emby deployed, and the Emby regression that exposed
+- d6d9720 2026-10-14 fix(windows): make a password-only source survive a restart, and recoverable when it does not
+- 3a1743e 2026-10-14 fix(windows): make "add a media source" probe the protocol the user actually picked
+- d0512e5 2026-10-14 feat(windows): make UI elements addressable, and characterise the resume defect it exposed
+- a568b99 2026-10-14 fix(windows): make the client work against a real Jellyfin 12.2, found only by running one
+- acb8583 2026-10-14 feat(windows): WebDAV provider integration and a real Jellyfin 12.2 test server harness
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
