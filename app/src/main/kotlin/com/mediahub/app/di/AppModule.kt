@@ -169,6 +169,26 @@ object AppModule {
         httpClientFactory: HttpClientFactory,
     ): PlaybackEngineCreator = MpvPlaybackEngineCreator(context, logger, httpClientFactory)
 
+    /**
+     * 设备能力采集（ADR-042）：结果在实现内部缓存（进程内不变）。
+     * 首次枚举 MediaCodecList / Display 需要数十毫秒，这里在后台预热，
+     * 保证起播同步路径只读缓存（不增加正常视频起播延迟）。
+     */
+    @Provides
+    @Singleton
+    fun provideDeviceCapabilitiesProvider(
+        @ApplicationContext context: Context,
+    ): com.mediahub.player.compatibility.DeviceCapabilitiesProvider {
+        val provider = com.mediahub.player.compatibility.AndroidDeviceCapabilitiesProvider(context)
+        Thread {
+            runCatching { provider.get() }
+        }.apply {
+            isDaemon = true
+            name = "device-capabilities-warmup"
+        }.start()
+        return provider
+    }
+
     @Provides
     @Singleton
     fun provideLocalRootProvider(@ApplicationContext context: Context): LocalRootProvider =
