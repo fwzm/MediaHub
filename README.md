@@ -7,6 +7,22 @@
 [![GitHub release](https://img.shields.io/github/v/release/fwzm/MediaHub?include_prereleases)](https://github.com/fwzm/MediaHub/releases)
 [![License](https://img.shields.io/github/license/fwzm/MediaHub)](LICENSE)
 
+<!-- MEDIAHUB:RECENT:START -->
+## 最近更新
+
+<sub>本区块由 scripts/github-nightly-sync.ps1 自动维护：每次同步时刷新近 7 天提交（最多 10 条）。</sub>
+
+- 2026-10-14 feat(network): M0-A 闭环 — 加载/删除/并发边界 + 自定义 UA 设置界面（ADR-045）
+- 2026-10-14 feat(network): 按服务器自定义 UA 持久化与身份代际清理（M0-A 闭环，ADR-045）
+- 2026-10-14 docs(adr): ADR-045 服务器请求治理阶段一（UA 作用域与重定向边界）
+- 2026-10-14 feat(network): 统一 UA 策略与逐跳 UA 注入（M0-A，ADR-045）
+- 2026-10-14 Merge pull request #27 from fwzm/docs/a4-convergence-closeout-2026-10-14
+- 2026-10-14 docs: A4 收敛闭环记录 — 合并证据、门禁计数与遗留项（2026-10-14）
+- 2026-10-14 Merge pull request #24 from fwzm/a/joint-candidate-a4
+- 2026-10-14 merge: integrate Agent B A4 convergence candidate 22e424d (33 commits)
+- 2026-10-14 Merge pull request #26 from fwzm/codex/pr18-review-docs-20260930
+<!-- MEDIAHUB:RECENT:END -->
+
 ## 下载测试版
 
 前往 [GitHub Releases](https://github.com/fwzm/MediaHub/releases) 下载最新 APK。
