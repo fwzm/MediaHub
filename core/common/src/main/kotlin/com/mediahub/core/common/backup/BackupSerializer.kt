@@ -4,7 +4,7 @@ package com.mediahub.core.common.backup
  * 备份文件序列化/反序列化管道（纯 JVM，Phase 1I-A）。
  *
  * 导出：payload JSON → PBKDF2 派生密钥 → AES-256-GCM(AAD) 加密 → envelope JSON → bytes
- * 导入：有界读取 bytes → envelope 验证（magic/版本/算法白名单/迭代范围/salt/nonce/密文最短）
+ * 导入：调用方提供已读取的 bytes → envelope 验证（magic/版本/算法白名单/迭代范围/salt/nonce/密文最短）
  *      → PBKDF2 重派生 → AES-256-GCM(AAD) 解密 → 内层版本/结构统一校验 → payload
  *
  * - 统一格式验证入口 [validateEnvelope] + [validatePayload]；合法 JSON ≠ 合法备份
@@ -12,8 +12,10 @@ package com.mediahub.core.common.backup
  *   Corrupted（结构/Base64/nonce/salt/引用/计数异常）/ NotABackupFile / VersionTooNew
  * - 解密链路上所有可预期异常（KDF 参数、Base64、nonce 长度）都转为类型化结果，
  *   不允许 `require` 异常逃出 [import]
- * - 文件大小上限 [MAX_FILE_BYTES]（有界读取——SAF 读取阶段即限制，不全量加载任意大文件）；
- *   导出结果同样受此上限约束（新文件必须满足自己的导入限制）
+ * - 导入文件上限为 [MAX_FILE_BYTES]；导出在返回前检查配置的文件大小上限。
+ *   import 接收已加载的 ByteArray，不能限制调用方此前读取时的内存分配。
+ *   调用方须对输入流执行有界读取；应用 SAF 路径由 BackupFileStore.readBounded 负责；
+ *   默认导出结果同样受 [MAX_FILE_BYTES] 上限约束（新文件必须满足自己的导入限制）
  */
 object BackupSerializer {
 
