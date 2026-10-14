@@ -60,12 +60,15 @@ class MpvPlaybackEngine internal constructor(
     private val subtitleCacheFactory: () -> SubtitleCache = {
         error("subtitle cache not configured")
     },
+    /** M2（ADR-044）：设备 HDR 证据；默认未知 → 不下发任何色调映射选项。 */
+    private val hdrEvidence: DeviceHdrEvidenceProvider = DeviceHdrEvidenceProvider { null },
 ) : PlaybackEnginePort {
     constructor(
         context: Context,
         logger: Logger,
         scope: CoroutineScope,
         httpClientFactory: HttpClientFactory,
+        hdrEvidence: DeviceHdrEvidenceProvider = DeviceHdrEvidenceProvider { null },
     ) : this(
         logger,
         scope,
@@ -92,6 +95,7 @@ class MpvPlaybackEngine internal constructor(
                 logger = logger,
             )
         },
+        hdrEvidence,
     )
 
     // Creation and Run binding share stateLock: release cannot miss a concurrent first use.
@@ -203,6 +207,19 @@ class MpvPlaybackEngine internal constructor(
                     val container = src.container?.lowercase()
                     if (container == "mpegts" || container == "ts" || container == "m2ts") {
                         m.setOptionString("demuxer-lavf-format", "mpegts")
+                    }
+                    // M2（ADR-044）：只下发有二进制证据的选项；证据缺失（null）时不干预。
+                    // 任何异常都不得影响起播——降级为空选项集。
+                    runCatching {
+                        MpvTuningOptions.build(
+                            MpvTuningInput(
+                                sourceHdr = src.hdrType,
+                                deviceSupportsSourceHdr = hdrEvidence.supports(src.hdrType),
+                            ),
+                        )
+                    }.getOrDefault(emptyList()).forEach { tuning ->
+                        m.setOptionString(tuning.name, tuning.value)
+                        logger.i(LogTag.PLAYER, "mpv tuning " + tuning.name + "=" + tuning.value)
                     }
                     val startMs = s.startPositionMs ?: s.resumePositionMs
                     if (startMs != null && startMs > 0) m.setOptionString("start", (startMs / 1000.0).toString())

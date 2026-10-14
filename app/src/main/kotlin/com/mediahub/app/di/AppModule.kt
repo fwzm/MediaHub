@@ -167,7 +167,21 @@ object AppModule {
         @ApplicationContext context: Context,
         logger: Logger,
         httpClientFactory: HttpClientFactory,
-    ): PlaybackEngineCreator = MpvPlaybackEngineCreator(context, logger, httpClientFactory)
+        deviceCapabilitiesProvider: com.mediahub.player.compatibility.DeviceCapabilitiesProvider,
+    ): PlaybackEngineCreator = MpvPlaybackEngineCreator(
+        context,
+        logger,
+        httpClientFactory,
+        // M2（ADR-044）：把设备 HDR 证据交给 mpv 参数层。未知一律返回 null（不干预）。
+        com.mediahub.player.mpv.DeviceHdrEvidenceProvider { hdr ->
+            if (hdr == com.mediahub.model.HdrType.NONE) {
+                true
+            } else {
+                val caps = runCatching { deviceCapabilitiesProvider.get() }.getOrNull()
+                if (caps == null || caps.hdrSupported.isEmpty()) null else hdr in caps.hdrSupported
+            }
+        },
+    )
 
     @Provides
     @Singleton
