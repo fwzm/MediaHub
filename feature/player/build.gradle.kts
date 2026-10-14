@@ -50,6 +50,8 @@ dependencies {
     implementation(project(":core:ui"))
     implementation(project(":provider:api"))
     implementation(project(":player:engine"))
+    // ADR-042：播放页需要设备能力评估（作为引擎选路证据），并供 UI/诊断展示。
+    implementation(project(":player:compatibility"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
