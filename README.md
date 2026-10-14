@@ -98,7 +98,8 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 
 - 技术栈：C# / .NET 10 + WinUI 3（Windows App SDK 1.8）+ libmpv（`--wid` 嵌入，D3D11 硬解），自包含部署
 - 代码位置：`windows/`；客户端自身说明见 [windows/README.md](windows/README.md)
-- 现状：全部工作在 `feature/windows-client` 分支（Draft PR #33），**尚未合并进 `main`，未提供任何安装包**
+- 现状：本章状态取自 `feature/windows-client` 分支（Draft PR #33），**尚未合并进 `main`，未提供任何安装包**；
+  其他并行分支上的 Windows 工作不在本章范围内
 
 > **读法**：本章只写有执行证据的结论。完整逐项状态（含 `UNVERIFIED` / `NOT_RUN` 标记）见
 > [windows/docs/CAPABILITY-MAP.md](windows/docs/CAPABILITY-MAP.md) 与 `windows/docs/W*-EVIDENCE.md`；
@@ -115,14 +116,17 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 | 桌面集成：文件菜单、拖放、窗口状态恢复、文件类型关联 | 提交 `5c232d6` |
 | **真实 Jellyfin 12.2**：登录 / 浏览 / 播放 / 播完标记 Played | `windows/docs/` W4 记录 |
 | **官方 Emby 4.10.1.0** 部署与 API 形状回归 | `windows/engine/emby/`、W5 记录 |
+| **WebDAV（Browse-only 来源）**：入口 → PROPFIND → 目录 → Range GET → libmpv 真实播放 | `windows/docs/W5-1-R3-GATE-A.md`（A-入口 / A-PROPFIND / A-媒体 = EXECUTED_PASS） |
 | GUI 验收：播放控制 / 全屏 / 生命周期（可观测断言 + 证据文件） | `windows/docs/W5-GUI-ACCEPTANCE.md` |
 | LGPL libmpv 引擎候选已实际构建（**尚未切换到产品**） | `windows/engine/lgpl/dist/` |
 
 ### 已知缺陷与未验证项
 
 - **中断恢复**：服务端轨迹显示 32 s / 180 s 的播放被记为「已看完」—— 未解决。
-- **WebDAV**：源可添加 / 认证 / 重启恢复；内容入口已在 P0-A（`c9cb20d`）补上独立文件夹浏览页，
-  但**该端到端尚未验收**，「媒体源」页的浏览入口仍未加。
+- **WebDAV（W5.1 Gate A 部分通过）**：源可添加 / 认证 / 重启恢复；入口 → PROPFIND → 目录 → Range GET →
+  真实播放已 EXECUTED_PASS（真实 WsgiDAV 4.3.3 + UIA，证据 `windows/docs/W5-1-R3-GATE-A.md`）；
+  但 **A-Seek、A-退出释放、A-边界（目录递进 / 返回上级 / 空目录 / 错误态 / 离线 / 重启 / generation guard）
+  全部 NOT_RUN —— Gate A 不得宣告完成**，Gate B1 未开工；「媒体源」页的浏览入口仍未加。
 - **真服覆盖面**：Emby 端到端仍为 `SERVER_UNVERIFIED`；远端进度**回写语义**未验证；
   回环中继的发布声明因远端条目无法启动而**未验证**。
 - **未执行**：真实第二 Windows 账户下的凭据库行为；系统代理 / PAC / TUN / VPN / SOCKS 出口一致性；
@@ -139,7 +143,7 @@ dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug -p:Platf
 
 CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
 与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
-截至 `c9cb20d`：编译 0 错误 0 警告，`MediaHub.Tests` 296 通过 0 失败。
+截至 `f6356e2`：编译 0 错误 0 警告，`MediaHub.Tests` 296 通过 0 失败；该 head 的 `windows-ci` 与 Android CI 均为 success。
 
 ### 引擎许可证（影响可发行性）
 
