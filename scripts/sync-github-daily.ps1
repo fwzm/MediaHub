@@ -40,6 +40,13 @@ $startMarker = '<!-- WINDOWS-SYNC:START -->'
 $endMarker   = '<!-- WINDOWS-SYNC:END -->'
 $protected   = @('main', 'master', 'HEAD')
 
+# 无人值守上下文（任务计划程序）没有控制台，原生命令 stdout 会按 ANSI 代码页解码：
+# 中文提交主题会变成乱码，且被吞掉换行 —— 2026-10-15 00:00 的计划任务运行因此把乱码块
+# 写进了 README（提交 44b4a46）。这里必须在任何 git 调用之前固定 UTF-8。
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
+try { [Console]::InputEncoding  = [System.Text.UTF8Encoding]::new($false) } catch { }
+try { $OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
+
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
@@ -112,19 +119,26 @@ function Has-Output {
 }
 
 function Build-SummaryBlock {
-    $args = @('log', ('--since=' + $SummaryDays + ' days ago'), '--pretty=format:%h %ad %s',
-              '--date=short', '--invert-grep', ('--grep=' + $script:SyncTag), '--', 'windows/')
-    $res  = Invoke-Git -GitArgs $args -AllowFail
+    # 用 git --output=<文件> 落盘后再以 UTF-8 读取：绕开控制台代码页，主题里的中文/换行不会损坏。
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('mh-sync-' + [guid]::NewGuid().ToString('N') + '.txt')
     $rows = @()
-    if ($res.Code -eq 0) {
-        foreach ($l in $res.Lines) {
-            $t = ([string]$l).Trim()
-            if ([string]::IsNullOrWhiteSpace($t)) { continue }
-            $rows += ('- ' + $t)
-            if ($rows.Count -ge 8) { break }
+    try {
+        $gitArgs = @('log', ('--since=' + $SummaryDays + ' days ago'), '--pretty=format:%h %ad %s',
+                     '--date=short', '--invert-grep', ('--grep=' + $script:SyncTag),
+                     ('--output=' + $tmp), '--', 'windows/')
+        $res = Invoke-Git -GitArgs $gitArgs -AllowFail
+        if ($res.Code -eq 0 -and (Test-Path -LiteralPath $tmp)) {
+            foreach ($l in [IO.File]::ReadAllLines($tmp, [System.Text.Encoding]::UTF8)) {
+                $t = ([string]$l).Trim()
+                if ([string]::IsNullOrWhiteSpace($t)) { continue }
+                $rows += ('- ' + $t)
+                if ($rows.Count -ge 8) { break }
+            }
+        } else {
+            Write-Log ('读取 windows/ 提交历史失败：' + ($res.Lines -join ' ')) 'WARN'
         }
-    } else {
-        Write-Log ('读取 windows/ 提交历史失败：' + ($res.Lines -join ' ')) 'WARN'
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
     }
     if ($rows.Count -eq 0) { $rows = @('- （最近 ' + $SummaryDays + ' 天 windows/ 无提交）') }
     $header = '<!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 ' + $SummaryDays + ' 天提交。请勿手工编辑块内内容。 -->'
@@ -144,7 +158,7 @@ function Get-ReadmePlan {
     $block   = Build-SummaryBlock
     $newText = $text.Substring(0, $si + $startMarker.Length) + [Environment]::NewLine + $block +
                [Environment]::NewLine + $text.Substring($ei)
-    return [pscustomobject]@{ Path = $readmePath; Old = $text; New = $newText; Changed = ($newText -ne $text) }
+    return [pscustomobject]@{ Path = $readmePath; Old = $text; New = $newText; Block = $block; Changed = ($newText -ne $text) }
 }
 
 function Ensure-PullRequest {
@@ -228,6 +242,18 @@ try {
             Write-Log '工作区有未提交改动，跳过 README 自动维护（不覆盖人工编辑）' 'WARN'
         } else {
             Set-Content -LiteralPath $plan.Path -Value $plan.New -NoNewline -Encoding utf8
+            # 写回后自检：块内容必须与预期逐字符一致，否则还原原文件并放弃本次提交。
+            $written = Get-Content -LiteralPath $plan.Path -Raw
+            $wsi = $written.IndexOf($startMarker)
+            $wei = $written.IndexOf($endMarker)
+            $wblock = ''
+            if ($wsi -ge 0 -and $wei -gt $wsi) {
+                $wblock = $written.Substring($wsi + $startMarker.Length, $wei - $wsi - $startMarker.Length).Trim([char]13, [char]10)
+            }
+            if ($wblock -ne $plan.Block) {
+                Set-Content -LiteralPath $plan.Path -Value $plan.Old -NoNewline -Encoding utf8
+                throw 'README 标记块写回后与预期不一致（疑似编码或换行损坏）；已还原原文件并放弃提交'
+            }
             Invoke-Git -GitArgs @('add', '--', 'README.md') | Out-Null
             $staged = @((Invoke-Git -GitArgs @('diff', '--cached', '--name-only')).Lines |
                         Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
@@ -236,7 +262,8 @@ try {
             }
             $msg = 'docs(readme): ' + $script:SyncTag + ' Windows 客户端最近更新（' + (Get-Date).ToString('yyyy-MM-dd') + '）'
             Invoke-Git -GitArgs @('commit', '--no-verify', '-m', $msg) | Out-Null
-            Write-Log ('已提交：' + (Get-Text (Invoke-Git -GitArgs @('log', '-1', '--pretty=format:%h %s'))))
+            # 只回读哈希（ASCII），主题用脚本自己构造的字符串，避免再从 git stdout 取中文
+            Write-Log ('已提交：' + (Get-Text (Invoke-Git -GitArgs @('log', '-1', '--pretty=format:%h'))) + ' ' + $msg)
             $didCommit = $true
             $result.committed = $true
         }
