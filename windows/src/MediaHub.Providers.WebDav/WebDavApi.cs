@@ -31,6 +31,17 @@ public enum WebDavRangeSupport
 internal sealed record WebDavRangeProbe(WebDavRangeSupport Support, int StatusCode, string? ContentRange, string? AcceptRanges);
 
 /// <summary>
+/// A parsed PROPFIND response together with the URI it was actually retrieved from.
+/// </summary>
+/// <remarks>
+/// The two differ whenever a redirect moved the request. RFC 3986 resolves hrefs against the
+/// <i>retrieved</i> URI, so resolving them against the URI we asked for would mis-resolve every entry
+/// after a same-origin redirect — including the collection's own entry, which then reappears in the
+/// listing as a duplicate.
+/// </remarks>
+internal sealed record WebDavPropfindResult(IReadOnlyList<WebDavResource> Resources, Uri EffectiveUri);
+
+/// <summary>
 /// Read-only WebDAV protocol client: <c>PROPFIND</c> (RFC 4918 §9.1), <c>OPTIONS</c> and a range probe.
 /// </summary>
 /// <remarks>
@@ -82,7 +93,7 @@ internal sealed class WebDavApi
     }
 
     /// <summary>PROPFIND. <paramref name="depth"/> 0 = the resource itself, 1 = itself plus children.</summary>
-    public async Task<IReadOnlyList<WebDavResource>> PropfindAsync(Uri url, int depth, CancellationToken ct)
+    public async Task<WebDavPropfindResult> PropfindAsync(Uri url, int depth, CancellationToken ct)
     {
         var request = new HttpRequestMessage(new HttpMethod("PROPFIND"), url)
         {
@@ -100,8 +111,9 @@ internal sealed class WebDavApi
 
         if (!response.IsSuccessStatusCode) throw MapFailure(response, "PROPFIND", url);
 
+        Uri effective = response.RequestMessage?.RequestUri ?? url;
         byte[] body = await ReadBoundedAsync(response.Content, ct).ConfigureAwait(false);
-        return WebDavMultistatusParser.Parse(body, _serverId);
+        return new WebDavPropfindResult(WebDavMultistatusParser.Parse(body, _serverId), effective);
     }
 
     /// <summary>

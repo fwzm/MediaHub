@@ -1,6 +1,7 @@
 using MediaHub.Domain;
 using MediaHub.Net;
 using MediaHub.Providers;
+using MediaHub.Providers.WebDav;
 using MediaHub.Providers.Local;
 using MediaHub.Providers.MediaBrowser;
 
@@ -31,6 +32,7 @@ public sealed class SourceRegistry
         _providers.Register(new LocalMediaProviderFactory());
         _providers.Register(new EmbyProviderFactory());
         _providers.Register(new JellyfinProviderFactory());
+        _providers.Register(new WebDavProviderFactory());
     }
 
     public IReadOnlyList<ProviderDescriptor> AvailableProviders => _providers.Descriptors;

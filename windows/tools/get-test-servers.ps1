@@ -51,7 +51,9 @@ function Get-Artifact {
     return $path
 }
 
-# 7zr handles .7z and .zip; it is the same standalone extractor the libmpv fetch uses.
+# 7zr is a 7z-ONLY extractor: it cannot open a .zip at all, and it fails with "Cannot open the
+# file as archive" rather than something that names the real problem. Zip archives therefore go
+# through Expand-Archive, and only the Emby .7z uses 7zr.
 $sevenZip = Join-Path $env:TEMP '7zr.exe'
 if (-not (Test-Path $sevenZip)) {
     Invoke-WebRequest -Uri 'https://www.7-zip.org/a/7zr.exe' -OutFile $sevenZip -UseBasicParsing -TimeoutSec 300
@@ -66,8 +68,7 @@ if (-not (Test-Path (Join-Path $jfDir 'jellyfin.exe')) -or $Force) {
     if (Test-Path $jfDir) { Remove-Item -Recurse -Force $jfDir }
     New-Item -ItemType Directory -Force -Path $jfDir | Out-Null
     Write-Host '  extracting jellyfin'
-    & $sevenZip x -y "-o$jfDir" $jfZip | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "extraction failed for jellyfin" }
+    Expand-Archive -Path $jfZip -DestinationPath $jfDir -Force
 }
 $records += [pscustomobject]@{
     Server = 'Jellyfin'; Version = $JellyfinVersion
@@ -83,7 +84,7 @@ if (-not (Test-Path (Join-Path $embyDir 'system\EmbyServer.exe')) -or $Force) {
     New-Item -ItemType Directory -Force -Path $embyDir | Out-Null
     Write-Host '  extracting emby'
     & $sevenZip x -y "-o$embyDir" $emby7z | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "extraction failed for emby" }
+    if ($LASTEXITCODE -ne 0) { throw 'extraction failed for emby' }
 }
 $records += [pscustomobject]@{
     Server = 'Emby'; Version = $EmbyTag
@@ -100,5 +101,9 @@ $records | ConvertTo-Json -Depth 4 | Set-Content -Path $recordPath -Encoding UTF
 Write-Host "versions recorded: $recordPath"
 
 Write-Host ''
-Write-Host 'jellyfin.exe : ' (Test-Path (Join-Path $jfDir 'jellyfin.exe'))
-Write-Host 'EmbyServer.exe: ' (Test-Path (Join-Path $embyDir 'system\EmbyServer.exe'))
+$jfExe = Get-ChildItem -Path $jfDir -Filter 'jellyfin.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+$emExe = Get-ChildItem -Path $embyDir -Filter 'EmbyServer.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+# The zip nests everything under a single top-level directory, so the executable is located rather
+# than assumed to be at the extraction root.
+Write-Host 'jellyfin.exe  : ' ($jfExe -ne $null) ' ' $jfExe.FullName
+Write-Host 'EmbyServer.exe: ' ($emExe -ne $null) ' ' $emExe.FullName

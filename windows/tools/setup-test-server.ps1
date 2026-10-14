@@ -39,7 +39,10 @@ $ProgressPreference = 'SilentlyContinue'
 
 if (-not (Test-Path $MediaRoot)) { throw "fixture root not found: $MediaRoot (run make-test-media.ps1)" }
 if (-not $DataRoot) { $DataRoot = Join-Path $InstallRoot ("data\" + $Server) }
-if (-not $Port) { $Port = if ($Server -eq 'jellyfin') { 18096 } else { 18097 } }
+# Jellyfin 12.2 has no --port option at all (its help lists --datadir, --webdir, --cachedir,
+# --configdir, --logdir and not much else), so the server keeps its default 8096. Trying to pass a
+# port is an immediate argument-parsing failure, which is what an earlier version of this script did.
+if (-not $Port) { $Port = 8096 }
 $base = "http://127.0.0.1:$Port"
 
 if ($Force -and (Test-Path $DataRoot)) { Remove-Item -Recurse -Force $DataRoot }
@@ -54,7 +57,12 @@ function Wait-Http {
             if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { return $r }
         }
         catch {
-            if ($_.Exception.Response) { return $null }
+            # A connection refusal is not a WebException and has no Response property at all, which
+            # under StrictMode is an error rather than a null. The distinction between "answered with
+            # an error" and "not listening yet" is made on the exception's own shape.
+            $response = $null
+            try { $response = $_.Exception.PSObject.Properties['Response'].Value } catch { }
+            if ($null -ne $response) { return $null }
         }
         Start-Sleep -Milliseconds 800
     }
@@ -73,13 +81,30 @@ function Invoke-Api {
         return Invoke-WebRequest @params
     }
     catch {
-        $status = $_.Exception.Response.StatusCode.value__
+        # PowerShell 7 raises HttpResponseException carrying an HttpResponseMessage, whereas
+        # Windows PowerShell raises WebException carrying a WebResponse. Reading the body through the
+        # wrong one produces a confusing "method not found" instead of the server's actual reply, so
+        # both shapes are handled explicitly.
+        $status = 'no-response'
         $detail = ''
         try {
-            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-            $detail = $reader.ReadToEnd()
+            $response = $_.Exception.PSObject.Properties['Response'].Value
+            if ($null -ne $response) {
+                if ($response -is [System.Net.Http.HttpResponseMessage]) {
+                    $status = [int]$response.StatusCode
+                    $detail = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                }
+                else {
+                    $status = $response.StatusCode.value__
+                    $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+                    $detail = $reader.ReadToEnd()
+                }
+            }
+            else {
+                $detail = $_.Exception.Message
+            }
         }
-        catch { }
+        catch { $detail = $_.Exception.Message }
         if ($AllowFailure) {
             Write-Host ("    " + $Method + " " + $Path + " -> " + $status + " (tolerated)")
             return $null
@@ -90,12 +115,12 @@ function Invoke-Api {
 
 # ---------------------------------------------------------------- start
 
-$exe = if ($Server -eq 'jellyfin') {
-    Join-Path $InstallRoot 'jellyfin\jellyfin.exe'
-} else {
-    Join-Path $InstallRoot 'emby\system\EmbyServer.exe'
-}
-if (-not (Test-Path $exe)) { throw "server binary not found: $exe (run get-test-servers.ps1)" }
+# Located rather than assumed: the Jellyfin zip nests its payload under a versioned directory,
+# and hard-coding the path would silently break on the next release layout change.
+$exeName = if ($Server -eq 'jellyfin') { 'jellyfin.exe' } else { 'EmbyServer.exe' }
+$exe = Get-ChildItem -Path (Join-Path $InstallRoot $Server) -Filter $exeName -Recurse -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty FullName
+if (-not $exe) { throw "$exeName not found under $InstallRoot\$Server (run get-test-servers.ps1)" }
 
 Get-Process jellyfin, EmbyServer -ErrorAction SilentlyContinue | ForEach-Object {
     try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch { }
@@ -109,8 +134,9 @@ $stderr = Join-Path $DataRoot 'server.err.log'
 if ($Server -eq 'jellyfin') {
     $startArgs = @{
         FilePath = $exe
-        ArgumentList = @('--datadir', $DataRoot, '--webdir', (Join-Path $InstallRoot 'jellyfin\jellyfin-web'),
-                         '--nowebclient', 'false', '--port', $Port)
+        ArgumentList = @('--datadir', $DataRoot, '--configdir', (Join-Path $DataRoot 'config'),
+                         '--cachedir', (Join-Path $DataRoot 'cache'), '--logdir', (Join-Path $DataRoot 'log'),
+                         '--webdir', (Join-Path (Split-Path -Parent $exe) 'jellyfin-web'))
         PassThru = $true
         WindowStyle = 'Hidden'
         RedirectStandardOutput = $stdout
@@ -120,7 +146,7 @@ if ($Server -eq 'jellyfin') {
 else {
     $startArgs = @{
         FilePath = $exe
-        ArgumentList = @('-port', $Port, '-datadir', $DataRoot, '-nointerface')
+        ArgumentList = @('-datadir', $DataRoot, '-nointerface')
         PassThru = $true
         WindowStyle = 'Hidden'
         RedirectStandardOutput = $stdout

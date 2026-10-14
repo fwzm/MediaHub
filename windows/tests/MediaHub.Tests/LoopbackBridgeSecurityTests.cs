@@ -262,7 +262,12 @@ public sealed class LoopbackBridgeSecurityTests
                 "GET /" + bridge.Token + "/stream HTTP/1.1\r\nHost: 127.0.0.1:" + bridge.Port + "\r\nConnection: close\r\n\r\n");
             await stream.WriteAsync(request);
             byte[] buffer = new byte[8192];
+            // Deliberately a partial read: the point is to take some bytes and then vanish, which is
+            // what a player does when the user seeks away. Reading to completion would defeat it, so
+            // the incomplete-read analyzer warning is suppressed here rather than "fixed".
+#pragma warning disable CA2022
             await stream.ReadAsync(buffer);
+#pragma warning restore CA2022
         }
 
         using var client = new HttpClient();

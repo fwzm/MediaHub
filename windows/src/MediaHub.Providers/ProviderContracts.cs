@@ -196,7 +196,17 @@ public sealed class ProviderHandle : IDisposable
     public Action? OnSessionExpired { get; set; }
 
     private readonly List<IDisposable> _owned = new();
-    internal void Own(IDisposable disposable) => _owned.Add(disposable);
+
+    /// <summary>
+    /// Registers something the handle must dispose with it.
+    /// </summary>
+    /// <remarks>
+    /// Public rather than internal because provider factories live in their own assemblies: a factory
+    /// that builds an HTTP client per source has to hand its lifetime to the handle, and the
+    /// alternative — having the factory implement IDisposable and hoping someone calls it — leaves the
+    /// connection pool alive for the process lifetime, since nothing enumerates factories on shutdown.
+    /// </remarks>
+    public void Own(IDisposable disposable) => _owned.Add(disposable);
 
     public ProviderCapability RuntimeCapabilities
     {

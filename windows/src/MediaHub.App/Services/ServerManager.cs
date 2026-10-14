@@ -5,6 +5,7 @@ using MediaHub.Domain;
 using MediaHub.Net;
 using MediaHub.Net.Security;
 using MediaHub.Providers;
+using MediaHub.Providers.WebDav;
 using MediaHub.Providers.Local;
 using MediaHub.Providers.MediaBrowser;
 
@@ -112,6 +113,7 @@ public sealed class ServerManager : IDisposable
         _providers.Register(new LocalMediaProviderFactory());
         _providers.Register(new EmbyProviderFactory());
         _providers.Register(new JellyfinProviderFactory());
+        _providers.Register(new WebDavProviderFactory());
     }
 
     public ReadOnlyObservableCollection<ServerEntry> Servers => new(_servers);
@@ -455,6 +457,11 @@ public sealed class ServerManager : IDisposable
             {
                 ["token"] = credential.Token ?? "",
                 ["userId"] = credential.UserId ?? "",
+                // Basic-authenticated sources need the password itself; a token-only dictionary makes
+                // adding a WebDAV source appear to succeed and then fail with 401 on every request.
+                ["password"] = credential.Password ?? "",
+                ["username"] = credential.UserName ?? "",
+                ["userName"] = credential.UserName ?? "",
             };
 
         ProviderHandle? handle = _providers.Create(server, policy ?? NetworkPolicy.FollowSystem, credentials);

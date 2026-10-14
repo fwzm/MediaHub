@@ -231,13 +231,17 @@ internal sealed class WebDavProvider :
             ? _sourceRoot
             : WebDavUrl.AsCollection(RequireItemUrl(folder.Path ?? folder.Id, "目录"));
 
-        IReadOnlyList<WebDavResource> resources = await _api.PropfindAsync(collection, 1, ct).ConfigureAwait(false);
-        string selfKey = WebDavUrl.CanonicalKey(collection);
+        WebDavPropfindResult result = await _api.PropfindAsync(collection, 1, ct).ConfigureAwait(false);
 
-        var items = new List<MediaItem>(resources.Count);
-        foreach (WebDavResource resource in resources)
+        // Resolved against the URI the response actually came from: after a same-origin redirect the
+        // entries are relative to the new location, and the collection's own entry is keyed by it too.
+        Uri baseUri = WebDavUrl.AsCollection(result.EffectiveUri);
+        string selfKey = WebDavUrl.CanonicalKey(baseUri);
+
+        var items = new List<MediaItem>(result.Resources.Count);
+        foreach (WebDavResource resource in result.Resources)
         {
-            MediaItem? child = MapChild(resource, collection, selfKey);
+            MediaItem? child = MapChild(resource, baseUri, selfKey);
             if (child is not null) items.Add(child);
         }
 
@@ -285,12 +289,12 @@ internal sealed class WebDavProvider :
     public async Task<MediaDetail> GetItemDetailAsync(string itemId, CancellationToken ct = default)
     {
         Uri target = RequireItemUrl(itemId, "文件");
-        IReadOnlyList<WebDavResource> resources = await _api.PropfindAsync(target, 0, ct).ConfigureAwait(false);
+        WebDavPropfindResult result = await _api.PropfindAsync(target, 0, ct).ConfigureAwait(false);
 
         WebDavResource? self = null;
-        foreach (WebDavResource resource in resources)
+        foreach (WebDavResource resource in result.Resources)
         {
-            WebDavHrefResult resolved = WebDavUrl.Resolve(target, resource.Href, _sourceRoot);
+            WebDavHrefResult resolved = WebDavUrl.Resolve(result.EffectiveUri, resource.Href, _sourceRoot);
             if (!resolved.Ok)
             {
                 Record(resource.Href, resolved.Rejection);
@@ -436,13 +440,14 @@ internal sealed class WebDavProvider :
 
         Uri videoUrl = video.Url!;
         Uri folder = WebDavUrl.AsCollection(WebDavUrl.ParentCollection(videoUrl));
-        IReadOnlyList<WebDavResource> resources = await _api.PropfindAsync(folder, 1, ct).ConfigureAwait(false);
+        WebDavPropfindResult result = await _api.PropfindAsync(folder, 1, ct).ConfigureAwait(false);
+        Uri baseUri = WebDavUrl.AsCollection(result.EffectiveUri);
         string videoKey = WebDavUrl.CanonicalKey(videoUrl);
 
         var candidates = new List<(string Name, string Extension, bool Forced, Uri Url)>();
-        foreach (WebDavResource resource in resources)
+        foreach (WebDavResource resource in result.Resources)
         {
-            WebDavHrefResult resolved = WebDavUrl.Resolve(folder, resource.Href, _sourceRoot);
+            WebDavHrefResult resolved = WebDavUrl.Resolve(baseUri, resource.Href, _sourceRoot);
             if (!resolved.Ok)
             {
                 Record(resource.Href, resolved.Rejection);
