@@ -305,11 +305,15 @@ class MpvHttpBridge internal constructor(
                 else RangeResult.Satisfiable(maxOf(0L, length - suffix), length - 1)
             } else {
                 val start = startText.toLong()
-                if (start < 0L || start >= length) {
-                    RangeResult.Unsatisfiable
-                } else {
-                    val end = if (endText.isEmpty()) length - 1 else minOf(endText.toLong(), length - 1)
-                    if (end < start) RangeResult.Unsatisfiable else RangeResult.Satisfiable(start, end)
+                // 未提供 last-byte-pos 时为 null：必须与"显式给出但小于 first"区分，
+                // 否则 0 字节文件上的 `bytes=0-` 会被误判成无效 spec（回归已由测试捕获）。
+                val rawEnd = if (endText.isEmpty()) null else endText.toLong()
+                when {
+                    // RFC 7233 §3.1：first 为负、或**显式** last < first → 无效 spec → MUST 忽略（完整 200）。
+                    start < 0L || (rawEnd != null && rawEnd < start) -> RangeResult.None
+                    // 语法合法但起点超出当前表示长度 → 不可满足 → 416（含 length == 0 的情形）。
+                    start >= length -> RangeResult.Unsatisfiable
+                    else -> RangeResult.Satisfiable(start, minOf(rawEnd ?: (length - 1), length - 1))
                 }
             }
         } catch (_: NumberFormatException) {
