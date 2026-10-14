@@ -100,19 +100,50 @@ jobs:
           if ($missing) { throw "missing from publish output: " + ($missing -join ", ") }
           "portable output size: " + [math]::Round((Get-ChildItem ./artifacts/portable -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1) + " MB"
 
-      - name: Engine integration probe (skipped without a media sample)
+      - name: Engine integration probe
         shell: pwsh
         working-directory: windows
+        env:
+          # A hosted runner has no GPU and no desktop, so the probe runs with the decoder exercised
+          # and the presentation path disabled. The same assertions still apply: duration reported,
+          # position advancing, seek landing, pause holding, tracks enumerated.
+          MEDIAHUB_MPV_VO: "null"
+          MEDIAHUB_MPV_HWDEC: "no"
         run: |
-          # The probe needs a real media file. CI has none, so it verifies the executable starts and
-          # reports its usage contract instead of pretending playback was exercised. Real playback
-          # evidence is recorded in docs/W1-EVIDENCE.md and must be reproduced on a device.
+          # Native stderr would otherwise become a terminating error under the runner's
+          # ErrorActionPreference, which is what made this step fail on the first CI run.
+          $ErrorActionPreference = "Continue"
+
           $exe = "./tools/MpvProbe/bin/x64/Debug/net10.0-windows/win-x64/MpvProbe.exe"
           if (-not (Test-Path $exe)) { throw "MpvProbe was not built" }
-          $out = & $exe 2>&1 | Out-String
-          "probe without arguments output: " + $out.Trim()
-          if ($LASTEXITCODE -eq 0) { throw "probe should fail without a media file" }
-          "MPV_PROBE_USAGE_CONTRACT OK (playback NOT exercised in CI -> DEVICE_UNVERIFIED)"
+
+          $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
+          if (-not $ffmpeg) {
+            $usage = & $exe 2>&1 | Out-String
+            "probe usage output: $usage"
+            if ($LASTEXITCODE -eq 0) { throw "probe should fail without a media file" }
+            "MPV_PROBE_USAGE_CONTRACT OK"
+            "WARNING: ffmpeg is unavailable on this runner, so real playback was NOT exercised."
+            "         Recorded as DEVICE_UNVERIFIED, not as a pass."
+            exit 0
+          }
+
+          $sample = Join-Path $env:RUNNER_TEMP "mediahub-ci-sample.mp4"
+          $ffArgs = @(
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=15:duration=6",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=6",
+            "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-ac", "2", "-shortest", $sample
+          )
+          & ffmpeg @ffArgs
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $sample)) { throw "ffmpeg could not generate a CI sample" }
+          "CI sample: " + (Get-Item $sample).Length + " bytes"
+
+          $output = & $exe $sample 4 2>&1 | Out-String
+          $output.Split([Environment]::NewLine) | Where-Object { $_ -match "^(vo=|engine:|media :|RESULT|MPV_PROBE|  t=)" } | ForEach-Object { $_ }
+          if ($LASTEXITCODE -ne 0) { throw "MPV_PROBE FAILED: the engine did not meet its assertions" }
+          "MPV_PROBE PASS in CI (decoder and clock asserted; presentation path NOT exercised -> GPU/HDR UNVERIFIED)"
 
       - name: Upload artifacts
         if: always()

@@ -55,12 +55,24 @@ internal static class Program
 
         string logPath = Path.Combine(Path.GetTempPath(), "mediahub-mpvprobe.log");
         try { File.Delete(logPath); } catch { }
+
+        // A CI runner has no GPU and no desktop, so the probe must be able to run with the decoder
+        // still exercised but the presentation path disabled. Overriding through the environment
+        // keeps the same code path under test instead of a second, divergent "test mode".
+        string? vo = Environment.GetEnvironmentVariable("MEDIAHUB_MPV_VO");
+        string? hwdec = Environment.GetEnvironmentVariable("MEDIAHUB_MPV_HWDEC");
+        string? gpuContext = Environment.GetEnvironmentVariable("MEDIAHUB_MPV_GPU_CONTEXT");
+
         var options = new MpvPlayerOptions
         {
-            Wid = surface.HostHandle,
+            Wid = string.IsNullOrEmpty(vo) ? surface.HostHandle : IntPtr.Zero,
             LogFile = logPath,
+            HwDec = hwdec ?? "auto-safe",
+            VideoOutput = vo ?? "gpu-next",
+            GpuContext = gpuContext ?? "d3d11",
             ExtraOptions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["msg-level"] = "all=v" },
         };
+        Console.WriteLine("vo=" + options.VideoOutput + " hwdec=" + options.HwDec + " ctx=" + options.GpuContext);
         var player = new MpvPlayer(options);
 
         var observed = new List<PlayerSnapshot>();
