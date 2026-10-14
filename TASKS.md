@@ -2,6 +2,17 @@
 
 > 状态：TODO / IN PROGRESS / DONE / BLOCKED。由完成任务的 AI 更新。
 
+## 2026-10-14 收敛队列：A4 联合候选并入 main（用户指示：先收敛，暂不做真机/真服验收）
+
+- [x] PR #26 并入 main（`75b3d42`）：`BackupSerializer` KDoc 澄清有界读取责任边界（1 文件 5+/3−），CI run 36663380493 通过。
+- [x] Agent B 的 A4 收敛候选 `22e424d`（33 提交，PR #25）以 merge 方式接回 A4 线：集成提交 `23ddd5b`（父 `89d5d78` + `22e424d`），63 文件 +4636/−622。唯一冲突 `.github/scripts/tests/test_prepare_visual_emulator.py`（add/add）按 B 的超集版本解决（含 wrapper/退出码夹具）；配套 `prepare-visual-emulator.sh` 两方逐字节相同，未丢内容。
+- [x] 集成头本地门禁 EXECUTED_PASS：`testDebugUnitTest :core:model:test :provider:api:test :metadata:test assembleDebug lintDebug :app:assembleDebugAndroidTest` → BUILD SUCCESSFUL (21m08s)，157 份 XML / 1275 tests / 0 失败 / 0 错误 / 0 跳过；`.github/scripts/tests` 51 项夹具 OK。
+- [x] CI run 38491200869 @ literal `23ddd5b`：visual-instrumentation (API 32)、visual-instrumentation (API 36)、build 三 job 全 SUCCESS。
+- [x] PR #24 并入 main（合并提交 `369b5a77`）；PR #25 / PR #23 由 GitHub 判定为已合并（`ac67d85` ⊂ `67af945` ⊂ `2f90327` ⊂ `89d5d78` ⊂ `23ddd5b`，收敛口径以祖先链为准）。
+- [x] 合并后 main push CI run 38493343170 已触发（对 `369b5a77` 的合并事实复验；结论以仓库 Actions 为准）。
+- [x] PR #22（T0002 Media3 选轨）以"生产契约已被主线实现取代"关闭并附源码证据：主线 `player/engine/.../PlaybackEngine.kt:473-515` 按 `mapped.getRendererType` 解析 renderer，组序号按类型过滤后的组顺序展开，使用类型级 `setOverrideForType(TrackSelectionOverride(...))`，非法输入直接 return。
+- [ ] 遗留（本轮不做，已登记）：① 真机 / 真实服务器 / 真实旧库升级验收（用户明确暂缓，DEVICE UNVERIFIED 与 BLOCKED_ENV 表述不变）；② T0002 引擎级回归测试移植（旧测试依赖 `tracksProvider` 构造参数，需改写注入为 `currentMappedTrackInfo`）；③ PR #16 证据归档 3 条脱敏处置；④ PR #10 视觉 8 条 finding 复核；⑤ SLOW-FINAL 真实服务器证据；⑥ Room 3→4 迁移测试与 T0001 F04/F06 的环境阻塞；⑦ PR #6/#20 的处置评估。
+
 ## 2026-09-09 当前队列：PR #18 独立复审与限定补丁
 
 - [x] Task 0：重新 fetch；读取 PR #18/#10/#16 全分页评论、审查、提交、threads 和真实 CI checkout，保留历史描述与实际 head 的区别。

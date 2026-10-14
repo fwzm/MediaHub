@@ -1,5 +1,13 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
+## 2026-10-14 A4 收敛：候选并入 main（真机/真服验收由用户暂缓）
+
+- 主线 `369b5a77` = PR #24 合并（父：`e06ad3b`←PR #18 备份、`75b3d42`←PR #26 文档、`23ddd5b`←A4 线 + B 收敛候选 `22e424d`）。PR #23/#25 记为已合并；PR #22 以"被主线实现取代"关闭并附源码证据；PR #6/#16/#20 仍开启待处置。
+- 集成方式：隔离 worktree `D:\deepseek_test\mh-converge-20261014` 上以 `89d5d78` 为第一父、`22e424d` 为第二父 merge；唯一冲突为 CI 夹具文件，按 B 超集版解决（脚本本体双方逐字节相同）。
+- 证据：本地门禁 1275 tests / 0 失败 / 0 错误 / 0 跳过（157 XML，21m08s）+ lint + assembleDebug + androidTest APK 构建；CI 38491200869 @ `23ddd5b` 三 job SUCCESS；合并后 main push run 38493343170。
+- 未验证边界（如实登记，不得简写为"通过"）：真机端到端、真实服务器（WebDAV/Emby/Jellyfin 慢终报与认证）、真实旧库升级 = NOT_RUN；mpv 暂停帧 OFF 暗字面 = readability NOT_ACCEPTED；备份 C 独立签字与 `DEVICE UNVERIFIED` 不变（**合并 ≠ 设备验收通过**）。
+- 下一步第一件事：核对 main push CI run 38493343170 结论；随后按 TASKS「2026-10-14 收敛队列」的遗留项推进，优先 T0002 回归移植与 PR #16 脱敏处置。
+
 ## 2026-09-09 Agent A 接回：本地备份集成，C REVIEW PENDING
 
 - B 的三提交链 `7e314c6 → 337c626 → 307b8f2` 按原 SHA fast-forward 接回。A 在独立 worktree 核验完整 57 文件差异，新增 `68d502f` 归档 CI 验证身份及产物，`9a8c309` 修复线路数组顺序与 Room 持久化排序不一致导致的来源/凭据裁决错误。
