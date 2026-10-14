@@ -1,4 +1,5 @@
 using MediaHub.App.Services;
+using MediaHub.Net;
 using Microsoft.UI.Xaml;
 
 namespace MediaHub.App;

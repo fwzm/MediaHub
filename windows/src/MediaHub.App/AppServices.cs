@@ -1,4 +1,5 @@
 using MediaHub.App.Services;
+using MediaHub.Net;
 
 namespace MediaHub.App;
 
@@ -17,6 +18,7 @@ public sealed class AppServices : IDisposable
         LocalLibrary = new LocalLibraryService(Settings);
         PlayerHost = new PlayerHostService(Settings, Log);
         SourceRegistry = new SourceRegistry(Settings);
+        SourceRegistry.RefreshLocal();
     }
 
     public LogService Log { get; }
@@ -28,6 +30,7 @@ public sealed class AppServices : IDisposable
 
     public void Dispose()
     {
+        SourceRegistry.Dispose();
         PlayerHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
         LocalLibrary.Dispose();
         PlaybackHistory.Dispose();

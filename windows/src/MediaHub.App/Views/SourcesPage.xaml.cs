@@ -13,8 +13,8 @@ public sealed partial class SourcesPage : Page
 
     private void Refresh()
     {
-        var rows = App.Services.SourceRegistry.Sources
-            .Select(s => new SourceRow(s.DisplayName, s.Type.ToString(), s.CapabilitySummary))
+        var rows = App.Services.SourceRegistry.Handles
+            .Select(h => new SourceRow(h.Server.DisplayName, h.Descriptor.DisplayName, h.CapabilitySummary))
             .ToList();
         SourceList.ItemsSource = rows;
         EmptyText.Visibility = rows.Count == 0 ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;

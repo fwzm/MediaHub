@@ -1,4 +1,5 @@
 using MediaHub.App.Interop;
+using MediaHub.Net;
 using MediaHub.Player;
 using MediaHub.Player.Mpv;
 

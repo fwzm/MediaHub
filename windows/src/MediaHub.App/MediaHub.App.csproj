@@ -29,6 +29,8 @@
     <ProjectReference Include="..\MediaHub.Domain\MediaHub.Domain.csproj" />
     <ProjectReference Include="..\MediaHub.Player\MediaHub.Player.csproj" />
     <ProjectReference Include="..\MediaHub.Player.Mpv\MediaHub.Player.Mpv.csproj" />
+    <ProjectReference Include="..\MediaHub.Net\MediaHub.Net.csproj" />
+    <ProjectReference Include="..\MediaHub.Providers\MediaHub.Providers.csproj" />
   </ItemGroup>
 
   <ItemGroup>

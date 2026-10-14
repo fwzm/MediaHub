@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>MediaHub.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MediaHub.Domain\MediaHub.Domain.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.Net\MediaHub.Net.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.Providers\MediaHub.Providers.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.Player\MediaHub.Player.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.Player.Mpv\MediaHub.Player.Mpv.csproj" />
+  </ItemGroup>
+</Project>

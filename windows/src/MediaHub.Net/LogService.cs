@@ -1,8 +1,10 @@
+// Moved from the app project into the network/security library so that redaction is covered by the
+// same test suite that covers redirect credential scoping — the two are one security surface.
 using System.Collections.ObjectModel;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace MediaHub.App.Services;
+namespace MediaHub.Net;
 
 public enum LogLevel { Debug, Info, Warn, Error }
 

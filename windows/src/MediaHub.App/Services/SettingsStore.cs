@@ -88,6 +88,25 @@ public sealed class SettingsStore
     }
 }
 
+/// <summary>
+/// A configured media server as persisted to disk.
+/// </summary>
+/// <remarks>
+/// Deliberately excludes the password and the session token: credentials belong in encrypted storage,
+/// and persisting them in a plain settings file would silently downgrade the security model that the
+/// Android client established. Wiring the encrypted vault is a later phase; until then a saved server
+/// requires re-authentication, which is the safe direction to fail.
+/// </remarks>
+public sealed class PersistedServer
+{
+    public string ServerId { get; set; } = "";
+    public string Type { get; set; } = "Emby";
+    public string DisplayName { get; set; } = "";
+    public string Url { get; set; } = "";
+    public string? UserName { get; set; }
+    public string? RemoteServerId { get; set; }
+}
+
 public sealed class MediaHubSettings
 {
     // ---- playback ----
@@ -114,6 +133,9 @@ public sealed class MediaHubSettings
     public string Theme { get; set; } = "Dark";
     public bool ShowDetailedMediaInfo { get; set; }
     public bool AutoHideControls { get; set; } = true;
+
+    // ---- configured media servers ----
+    public List<PersistedServer> Servers { get; set; } = new();
 
     // ---- local library ----
     public List<string> LocalFolders { get; set; } = new();
