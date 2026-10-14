@@ -60,12 +60,15 @@ class MpvPlaybackEngine internal constructor(
     private val subtitleCacheFactory: () -> SubtitleCache = {
         error("subtitle cache not configured")
     },
+    /** M2（ADR-044）：设备 HDR 证据；默认未知 → 不下发任何色调映射选项。 */
+    private val hdrEvidence: DeviceHdrEvidenceProvider = DeviceHdrEvidenceProvider { null },
 ) : PlaybackEnginePort {
     constructor(
         context: Context,
         logger: Logger,
         scope: CoroutineScope,
         httpClientFactory: HttpClientFactory,
+        hdrEvidence: DeviceHdrEvidenceProvider = DeviceHdrEvidenceProvider { null },
     ) : this(
         logger,
         scope,
@@ -92,6 +95,7 @@ class MpvPlaybackEngine internal constructor(
                 logger = logger,
             )
         },
+        hdrEvidence,
     )
 
     // Creation and Run binding share stateLock: release cannot miss a concurrent first use.
@@ -200,9 +204,28 @@ class MpvPlaybackEngine internal constructor(
                     m.setOptionString("vo", "gpu")
                     m.setOptionString("ao", "audiotrack")
                     m.setOptionString("hwdec", "mediacodec")
+                    // M6 真机缺陷修复（P1）：关闭 mpv 的 ytdl 钩子。
+                    // MediaHub 的媒体**一律经回放环桥**（http://127.0.0.1:<port>/media/<random>）
+                    // 以字节流形式提供，不是站点 URL；mpv 默认 ytdl=auto 会把它当站点，
+                    // 启动 yt-dlp 子进程（真机日志：Subprocess failed: init / youtube-dl failed）
+                    // 随后 "loading failed (reason 4)" → 黑屏、无首帧、无时钟推进。
+                    m.setOptionString("ytdl", "no")
                     val container = src.container?.lowercase()
                     if (container == "mpegts" || container == "ts" || container == "m2ts") {
                         m.setOptionString("demuxer-lavf-format", "mpegts")
+                    }
+                    // M2（ADR-044）：只下发有二进制证据的选项；证据缺失（null）时不干预。
+                    // 任何异常都不得影响起播——降级为空选项集。
+                    runCatching {
+                        MpvTuningOptions.build(
+                            MpvTuningInput(
+                                sourceHdr = src.hdrType,
+                                deviceSupportsSourceHdr = hdrEvidence.supports(src.hdrType),
+                            ),
+                        )
+                    }.getOrDefault(emptyList()).forEach { tuning ->
+                        m.setOptionString(tuning.name, tuning.value)
+                        logger.i(LogTag.PLAYER, "mpv tuning " + tuning.name + "=" + tuning.value)
                     }
                     val startMs = s.startPositionMs ?: s.resumePositionMs
                     if (startMs != null && startMs > 0) m.setOptionString("start", (startMs / 1000.0).toString())

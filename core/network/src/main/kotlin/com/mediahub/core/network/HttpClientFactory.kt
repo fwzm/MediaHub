@@ -19,7 +19,16 @@ import okhttp3.Response
  *
  * 两者共用脱敏日志与 X-Request-Id 注入。
  */
-class HttpClientFactory(private val logger: Logger) {
+class HttpClientFactory(
+    private val logger: Logger,
+    /**
+     * M0-A（ADR-045）：服务器作用域的 UA 策略。默认构造使用 MediaHub 默认 UA，
+     * 不读取任何全局可变状态。
+     */
+    private val userAgentPolicy: UserAgentPolicy = UserAgentPolicy(),
+    /** 由请求 URL 解析所属服务器；未知返回 null（跨 origin 跳转回落默认 UA）。 */
+    private val serverIdFor: ServerIdResolver = ServerIdResolver { null },
+) {
 
     fun apiClient(): OkHttpClient = baseClient()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -37,6 +46,9 @@ class HttpClientFactory(private val logger: Logger) {
     private fun baseClient(): OkHttpClient.Builder = OkHttpClient.Builder()
         .addInterceptor(RequestIdInterceptor())
         .addInterceptor(RedactingLoggingInterceptor(logger))
+        // M0-A（ADR-045）：network interceptor —— 对每一跳生效，重定向到未知 origin 时
+        // 自动回落默认 UA，不把原服务器的自定义 UA 泄漏给第三方域名。只写 UA，不碰认证头。
+        .addNetworkInterceptor(UserAgentInterceptor(userAgentPolicy, serverIdFor))
         .eventListenerFactory(StartupNetworkEventListener.FACTORY)
 
     private class RequestIdInterceptor : Interceptor {
