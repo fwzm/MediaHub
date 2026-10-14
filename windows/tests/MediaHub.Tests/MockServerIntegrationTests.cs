@@ -172,16 +172,20 @@ public sealed class MockServerIntegrationTests
     }
 
     [Fact]
-    public async Task Restore_session_round_trips_through_the_item_probe()
+    public async Task Restore_session_round_trips_through_the_current_user_probe()
     {
         await using var mock = await MockMediaServer.StartAsync(ServerType.Emby);
         using ProviderHandle handle = await ConnectAsync(mock, new EmbyProviderFactory());
 
+        // /Users/Me, not /Users/{id}/Items/{id}. The latter was the original probe and it is not merely
+        // unusual - it asks for a user as an item, which Jellyfin 12.2 answers with 404. The mock used
+        // to answer it with a stub, which is why this test passed while the client could not restore a
+        // session against any real server. See SessionRestoreProtocolTests.
         Assert.Equal(AuthSessionState.Authenticated, await handle.Auth!.RestoreSessionAsync());
-        Assert.NotEmpty(mock.RequestsFor("/emby/Users/user-1/Items/user-1"));
+        Assert.NotEmpty(mock.RequestsFor("/emby/Users/Me"));
 
         mock.SetTokenValid(false);
-        Assert.Equal(AuthSessionState.Expired, await handle.Auth!.RestoreSessionAsync());
+        Assert.NotEqual(AuthSessionState.Authenticated, await handle.Auth!.RestoreSessionAsync());
     }
 
     // ---------------------------------------------------------------- library, search, playback

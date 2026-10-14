@@ -64,8 +64,16 @@ internal sealed class MediaBrowserProvider :
 
         try
         {
-            using var doc = await _api.GetItemAsync(_api.UserId!, ct).ConfigureAwait(false);
+            // /Users/Me proves the token belongs to a real, current user. Fetching the user id as an
+            // item id proves nothing and a real server rejects it with 404.
+            using var doc = await _api.GetCurrentUserAsync(ct).ConfigureAwait(false);
             return AuthSessionState.Authenticated;
+        }
+        catch (ProviderException ex) when (ex.Code is ProviderErrorCode.NotFound)
+        {
+            // The token is well-formed but names no user on this server: the session cannot be used.
+            _onSessionExpired?.Invoke();
+            return AuthSessionState.Expired;
         }
         catch (ProviderHttpException ex) when (ex.StatusCode == 401)
         {
@@ -194,14 +202,21 @@ internal sealed class MediaBrowserProvider :
 
         JsonElement source = sources[0];
         string? mediaSourceId = MediaBrowserMapper.GetString(source, "Id");
-        string? playSessionId = MediaBrowserMapper.GetString(source, "PlaySessionId");
         string? container = MediaBrowserMapper.GetString(source, "Container");
+
+        // PlaySessionId lives at the ROOT of the PlaybackInfo response on Jellyfin 12.2; it is not a
+        // field of the media source at all. Reading it only from the source made every real-server
+        // playback fail with a parse error while the mock - which mirrored the client's mistaken
+        // assumption - kept the suite green. The source is still checked as a fallback because a
+        // server version that does nest it must keep working.
+        string? playSessionId = MediaBrowserMapper.GetString(doc.RootElement, "PlaySessionId")
+                                ?? MediaBrowserMapper.GetString(source, "PlaySessionId");
 
         if (string.IsNullOrEmpty(mediaSourceId))
             throw ProviderException.Parse(_serverId);
 
-        // Real Emby 4.x rejects progress bodies without a PlaySessionId, and the direct-stream URL
-        // needs one too, so a missing value is a broken response rather than something to invent.
+        // A missing PlaySessionId is a broken response rather than something to invent: the
+        // direct-stream URL needs one and providers reject progress bodies without it.
         if (string.IsNullOrEmpty(playSessionId))
             throw ProviderException.Parse(_serverId);
 

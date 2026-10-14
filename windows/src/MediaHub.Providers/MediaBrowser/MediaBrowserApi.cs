@@ -189,6 +189,18 @@ internal sealed class MediaBrowserApi
         return await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Require(UserId) + "/Items", query), ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// The authenticated user, used to validate a restored session.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately <c>/Users/Me</c>. The previous implementation asked for
+    /// <c>/Users/{userId}/Items/{userId}</c> — the user id used as an item id — which a mock server
+    /// answered with a stub and a real Jellyfin 12.2 answers with 404, so restoring a session against
+    /// a real server always failed while every test stayed green.
+    /// </remarks>
+    public async Task<JsonDocument> GetCurrentUserAsync(CancellationToken ct)
+        => await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/Me"), ct).ConfigureAwait(false);
+
     public async Task<JsonDocument> GetItemAsync(string itemId, CancellationToken ct)
         => await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Require(UserId) + "/Items/" + Uri.EscapeDataString(itemId)), ct).ConfigureAwait(false);
 

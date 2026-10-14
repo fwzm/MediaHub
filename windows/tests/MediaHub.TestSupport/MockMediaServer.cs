@@ -356,6 +356,12 @@ public sealed class MockMediaServer : IAsyncDisposable
         {
             if (segments is ["Users", _, "Views"]) { WriteJson(context, 200, Views().ToJsonString()); return; }
             if (segments is ["Users", _, "Items"]) { WriteJson(context, 200, ItemsPage(request)); return; }
+            // /Users/Me is what a real Jellyfin accepts as proof of a live session. Note there is
+            // deliberately NO route for /Users/{id}/Items/{id}: Jellyfin 12.2 answers that with 404
+            // (a user id is not an item id), and the mock used to answer it with a stub, which is
+            // exactly why the client's broken session probe stayed green here and failed on the real
+            // server. A mock that is more permissive than the server is worse than no mock.
+            if (segments is ["Users", "Me"]) { ServeCurrentUser(context); return; }
             if (segments is ["Users", _, "Items", var itemId]) { ServeItem(context, itemId); return; }
             if (segments is ["Items", _, "Images", _]) { WriteBytes(context, 200, OnePixelPng, 0, OnePixelPng.Length, null, PngContentType); return; }
             if (segments is ["Videos", _, var streamName] && streamName.StartsWith("stream", StringComparison.OrdinalIgnoreCase))
@@ -506,20 +512,20 @@ public sealed class MockMediaServer : IAsyncDisposable
         }.ToJsonString();
     }
 
+    /// <summary>The authenticated user, as a real server reports it.</summary>
+    private void ServeCurrentUser(HttpListenerContext context)
+    {
+        WriteJson(context, 200, new JsonObject
+        {
+            ["Id"] = _options.UserId,
+            ["Name"] = _options.UserName,
+            ["ServerId"] = _options.ServerId,
+            ["Policy"] = new JsonObject { ["IsAdministrator"] = true },
+        }.ToJsonString());
+    }
+
     private void ServeItem(HttpListenerContext context, string itemId)
     {
-        if (string.Equals(itemId, _options.UserId, StringComparison.Ordinal))
-        {
-            // GET /Users/{id}/Items/{id} is how the provider probes a stored token on restore.
-            WriteJson(context, 200, new JsonObject
-            {
-                ["Id"] = _options.UserId,
-                ["Name"] = _options.UserName,
-                ["Type"] = "User",
-            }.ToJsonString());
-            return;
-        }
-
         MockItem? item = _items.FirstOrDefault(candidate => string.Equals(candidate.Id, itemId, StringComparison.Ordinal));
         if (item is null)
         {
@@ -552,7 +558,6 @@ public sealed class MockMediaServer : IAsyncDisposable
             ["SupportsTranscoding"] = false,
             ["IsRemote"] = false,
             ["RunTimeTicks"] = item.RunTimeTicks,
-            ["PlaySessionId"] = playSessionId,
             ["MediaStreams"] = MediaStreams(),
             // Mixed on purpose: the provider must forward the harmless header and drop the
             // credential-shaped one (see MediaBrowserProvider.BuildPlaybackHeaders).
@@ -566,7 +571,9 @@ public sealed class MockMediaServer : IAsyncDisposable
         WriteJson(context, 200, new JsonObject
         {
             ["MediaSources"] = new JsonArray(source),
-            // Real Emby puts the session id at both levels; the provider reads it from the source.
+            // Root only, which is where Jellyfin 12.2 actually puts it. The mock previously duplicated
+            // it inside the media source as well, and that duplication is precisely why the client's
+            // source-only lookup passed here and failed against every real server.
             ["PlaySessionId"] = playSessionId,
         }.ToJsonString());
     }

@@ -180,10 +180,12 @@ public sealed class PlaybackCoordinator : IAsyncDisposable
 
         CurrentChanged?.Invoke(session);
         session.TryAdvance(PlaybackStage.Preparing);
+        StartupTrace.Write("playback:prepare-start item=" + request.ItemId + " server=" + request.ServerId);
 
         try
         {
             ActivePlayback active = await ResolveAsync(request, ct).ConfigureAwait(false);
+            StartupTrace.Write("playback:resolved url=" + active.DisplayUrl);
             if (!IsCurrent(session))
             {
                 // The user moved on while this was resolving. The relay that was just created must be
@@ -201,6 +203,9 @@ public sealed class PlaybackCoordinator : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            // Written to the persistent startup trace as well as the in-memory log: a playback failure
+            // that only exists in memory is invisible after the fact, which is exactly when it matters.
+            StartupTrace.Write("playback:prepare-failed " + ex.GetType().Name + ": " + ex.Message);
             session.TryAdvance(PlaybackStage.Error, ex.Message);
             _log.Error("playback", "播放准备失败", ex);
             throw;
@@ -293,8 +298,17 @@ public sealed class PlaybackCoordinator : IAsyncDisposable
         long? resumeTicks = request.StartPositionTicks > 0 ? request.StartPositionTicks : null;
         if (resumeTicks is null && handle.Progress is not null)
         {
-            try { resumeTicks = await handle.Progress.GetResumePositionAsync(request.ItemId!, ct).ConfigureAwait(false); }
-            catch (ProviderException) { /* resume is a convenience, never a blocker */ }
+            try
+            {
+                resumeTicks = await handle.Progress.GetResumePositionAsync(request.ItemId!, ct).ConfigureAwait(false);
+                StartupTrace.Write("playback:resume=" + (resumeTicks ?? 0));
+            }
+            catch (ProviderException ex)
+            {
+                // Resume is a convenience, never a blocker - but it must be visible when it fails,
+                // otherwise a source that cannot report resume looks like one that hangs.
+                StartupTrace.Write("playback:resume-failed " + ex.Code);
+            }
         }
 
         PlaybackSource source = await handle.Playback
