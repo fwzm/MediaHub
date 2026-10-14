@@ -35,7 +35,7 @@ public sealed class RedirectCredentialTests : IDisposable
                 {
                     var context = await listener.GetContextAsync().ConfigureAwait(false);
                     var captured = new HttpRequestMessage(new HttpMethod(context.Request.HttpMethod), context.Request.Url);
-                    foreach (string key in context.Request.Headers.AllKeys)
+                    foreach (string? key in context.Request.Headers.AllKeys)
                     {
                         if (key is null) continue;
                         captured.Headers.TryAddWithoutValidation(key, context.Request.Headers[key]);
@@ -106,7 +106,7 @@ public sealed class RedirectCredentialTests : IDisposable
                     else
                     {
                         var captured = new HttpRequestMessage(HttpMethod.Get, context.Request.Url);
-                        foreach (string key in context.Request.Headers.AllKeys)
+                        foreach (string? key in context.Request.Headers.AllKeys)
                         {
                             if (key is null) continue;
                             captured.Headers.TryAddWithoutValidation(key, context.Request.Headers[key]);

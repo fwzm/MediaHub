@@ -1,0 +1,126 @@
+name: windows-ci
+
+# The Windows client is built and tested independently of the Android pipeline. This workflow is
+# scoped to windows/** so a Windows-only change cannot fail or delay Android verification, and an
+# Android-only change never spends Windows runner minutes.
+on:
+  push:
+    branches: ["feature/windows-*", "windows/**"]
+    paths: ["windows/**", ".github/workflows/windows-ci.yml"]
+  pull_request:
+    paths: ["windows/**", ".github/workflows/windows-ci.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+  LIBMPV_DIR: ${{ github.workspace }}\windows\native\libmpv
+
+jobs:
+  build-test:
+    name: build / unit tests / packaging
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Cache libmpv
+        id: libmpv-cache
+        uses: actions/cache@v4
+        with:
+          path: windows/native/libmpv
+          key: libmpv-20261014-ec38361c56-win-x64
+
+      - name: Fetch libmpv
+        if: steps.libmpv-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./windows/tools/fetch-libmpv.ps1
+
+      - name: Verify libmpv is present
+        shell: pwsh
+        run: |
+          $dll = Join-Path $env:LIBMPV_DIR "libmpv-2.dll"
+          if (-not (Test-Path $dll)) { throw "libmpv-2.dll missing at $dll" }
+          "libmpv bytes: " + (Get-Item $dll).Length
+
+      - name: Restore
+        working-directory: windows
+        run: dotnet restore MediaHub.Windows.sln
+
+      - name: Build (Debug)
+        working-directory: windows
+        run: dotnet build MediaHub.Windows.sln -c Debug -p:Platform=x64 --no-restore
+
+      - name: Unit and contract tests
+        working-directory: windows
+        run: >
+          dotnet test tests/MediaHub.Tests/MediaHub.Tests.csproj
+          -c Debug -p:Platform=x64 --no-build
+          --logger "trx;LogFileName=windows-tests.trx"
+          --results-directory ./artifacts/test-results
+
+      - name: Fail if no test results were produced
+        shell: pwsh
+        working-directory: windows
+        run: |
+          # A test step that silently runs zero tests would otherwise be reported as success.
+          $files = Get-ChildItem ./artifacts/test-results -Filter *.trx -ErrorAction SilentlyContinue
+          if (-not $files) { throw "no .trx produced: the test run executed nothing" }
+          $xml = [xml](Get-Content $files[0].FullName -Raw)
+          $total = [int]$xml.TestRun.ResultSummary.Counters.total
+          $failed = [int]$xml.TestRun.ResultSummary.Counters.failed
+          "tests total=$total failed=$failed"
+          if ($total -lt 50) { throw "expected at least 50 tests, got $total" }
+          if ($failed -ne 0) { throw "$failed test(s) failed" }
+
+      - name: Portable publish (Release)
+        working-directory: windows
+        run: >
+          dotnet publish src/MediaHub.App/MediaHub.App.csproj
+          -c Release -p:Platform=x64
+          -o ./artifacts/portable
+
+      - name: Smoke-check the published output
+        shell: pwsh
+        working-directory: windows
+        run: |
+          # The published folder must be self-contained: an exe, the engine DLL and the app dll.
+          $required = @("MediaHub.exe", "libmpv-2.dll", "MediaHub.dll", "MediaHub.Net.dll", "MediaHub.Providers.dll")
+          $missing = $required | Where-Object { -not (Test-Path (Join-Path "./artifacts/portable" $_)) }
+          if ($missing) { throw "missing from publish output: " + ($missing -join ", ") }
+          "portable output size: " + [math]::Round((Get-ChildItem ./artifacts/portable -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1) + " MB"
+
+      - name: Engine integration probe (skipped without a media sample)
+        shell: pwsh
+        working-directory: windows
+        run: |
+          # The probe needs a real media file. CI has none, so it verifies the executable starts and
+          # reports its usage contract instead of pretending playback was exercised. Real playback
+          # evidence is recorded in docs/W1-EVIDENCE.md and must be reproduced on a device.
+          $exe = "./tools/MpvProbe/bin/x64/Debug/net10.0-windows/win-x64/MpvProbe.exe"
+          if (-not (Test-Path $exe)) { throw "MpvProbe was not built" }
+          $out = & $exe 2>&1 | Out-String
+          "probe without arguments output: " + $out.Trim()
+          if ($LASTEXITCODE -eq 0) { throw "probe should fail without a media file" }
+          "MPV_PROBE_USAGE_CONTRACT OK (playback NOT exercised in CI -> DEVICE_UNVERIFIED)"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mediahub-windows-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            windows/artifacts/test-results/**
+            windows/artifacts/portable/**

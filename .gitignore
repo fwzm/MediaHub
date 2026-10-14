@@ -37,3 +37,6 @@ windows/native/libmpv/
 
 # Local tooling scratch (fetched archives, verification screenshots) — not part of the product.
 /.tools/
+
+# Windows build/publish artifacts and test results
+windows/**/artifacts/
