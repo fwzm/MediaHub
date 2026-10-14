@@ -89,6 +89,7 @@ class SwitchablePlaybackEngine(
     private var fallbackJob: Job? = null
     private var session: PlaybackSession? = null
     private var sessionGeneration = 0L
+    private var subtitleOperation = 0L
     private var attachedSurface: Surface? = null
     private var fellBackThisSession = false
     private var released = false
@@ -114,6 +115,7 @@ class SwitchablePlaybackEngine(
             this.session = session
             fellBackThisSession = false
             // 新会话不携带上一会话的字幕状态（匹配记忆由 ViewModel 层重放）。
+            subtitleOperation++
             activeExternalSubtitle = null
             activeSubtitleOffsetMs = 0L
             _switching.value = false
@@ -153,7 +155,12 @@ class SwitchablePlaybackEngine(
     }
 
     override fun selectSubtitleTrack(selection: TrackSelection?) {
-        current?.selectSubtitleTrack(selection)
+        val engine = synchronized(stateLock) {
+            subtitleOperation++
+            activeExternalSubtitle = null
+            current
+        }
+        engine?.selectSubtitleTrack(selection)
     }
 
     /** 外挂字幕能力 = 当前引擎的能力如实上报；无引擎时双双不支持。 */
@@ -164,20 +171,39 @@ class SwitchablePlaybackEngine(
         get() = current?.subtitleOffsetMs ?: 0L
 
     override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
-        val engine = current ?: return false
-        val accepted = engine.loadExternalSubtitle(subtitle)
-        if (accepted) {
-            synchronized(stateLock) { activeExternalSubtitle = subtitle }
+        val engine: PlaybackEnginePort
+        val expectedSession: PlaybackSession
+        val generation: Long
+        val operation: Long
+        synchronized(stateLock) {
+            if (released) return false
+            engine = current ?: return false
+            expectedSession = session ?: return false
+            generation = sessionGeneration
+            operation = ++subtitleOperation
         }
-        return accepted
+        val accepted = engine.loadExternalSubtitle(subtitle)
+        return synchronized(stateLock) {
+            if (!accepted || subtitleOperation != operation || !isCurrentSessionLocked(expectedSession, generation, engine)) return@synchronized false
+            activeExternalSubtitle = subtitle
+            true
+        }
     }
 
     override fun setSubtitleOffset(offsetMs: Long): Boolean {
-        val accepted = current?.setSubtitleOffset(offsetMs) ?: false
-        if (accepted) {
-            synchronized(stateLock) { activeSubtitleOffsetMs = offsetMs }
+        val engine: PlaybackEnginePort
+        val generation: Long
+        synchronized(stateLock) {
+            if (released || session == null) return false
+            engine = current ?: return false
+            generation = sessionGeneration
         }
-        return accepted
+        val accepted = engine.setSubtitleOffset(offsetMs)
+        return synchronized(stateLock) {
+            if (!accepted || current !== engine || sessionGeneration != generation || released || session == null) return@synchronized false
+            activeSubtitleOffsetMs = engine.subtitleOffsetMs
+            true
+        }
     }
 
     private var activeExternalSubtitle: ExternalSubtitle? = null
@@ -188,10 +214,20 @@ class SwitchablePlaybackEngine(
      * - 已加载的外挂字幕 → 新引擎重载；mpv sub-add 失败时如实放弃（不阻塞降级流程）；
      * - 偏移 → 新引擎支持才重放。
      */
-    private suspend fun reapplySubtitleState(engine: PlaybackEnginePort) {
-        val subtitle = synchronized(stateLock) { activeExternalSubtitle }
+    private suspend fun reapplySubtitleState(
+        engine: PlaybackEnginePort,
+        expectedSession: PlaybackSession,
+        generation: Long,
+        operation: Long,
+        subtitle: ExternalSubtitle?,
+        offset: Long,
+    ) {
+        fun currentIntent() = synchronized(stateLock) {
+            subtitleOperation == operation && isCurrentSessionLocked(expectedSession, generation, engine)
+        }
+        if (!currentIntent()) return
         if (subtitle != null) engine.loadExternalSubtitle(subtitle)
-        val offset = synchronized(stateLock) { activeSubtitleOffsetMs }
+        if (!currentIntent()) return
         if (offset != 0L) engine.setSubtitleOffset(offset)
     }
 
@@ -222,6 +258,7 @@ class SwitchablePlaybackEngine(
             media3WatchJob?.cancel()
             media3WatchJob = null
             session = null
+            subtitleOperation++
             activeExternalSubtitle = null
             activeSubtitleOffsetMs = 0L
             current
@@ -244,6 +281,7 @@ class SwitchablePlaybackEngine(
             audioForwardJob?.cancel()
             media3WatchJob?.cancel()
             session = null
+            subtitleOperation++
             activeExternalSubtitle = null
             activeSubtitleOffsetMs = 0L
             val old = current
@@ -303,7 +341,15 @@ class SwitchablePlaybackEngine(
             engine.play(session)
         }
         // 降级切换后的字幕会话状态重施（外挂字幕重载/偏移重放）；异步，不阻塞起播。
-        started?.let { engine -> scope.launch { reapplySubtitleState(engine) } }
+        started?.let { engine ->
+            synchronized(stateLock) {
+                if (!isCurrentSessionLocked(expectedSession, expectedGeneration, engine)) return@let
+                val operation = subtitleOperation
+                val subtitle = activeExternalSubtitle
+                val offset = activeSubtitleOffsetMs
+                scope.launch { reapplySubtitleState(engine, expectedSession, expectedGeneration, operation, subtitle, offset) }
+            }
+        }
     }
 
     private fun startAudioBandForwarding(engine: PlaybackEnginePort) {

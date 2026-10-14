@@ -6,6 +6,7 @@ import android.security.keystore.KeyProperties
 import android.util.AtomicFile
 import com.mediahub.model.*
 import com.mediahub.core.common.backup.BackupDtos
+import com.mediahub.core.database.entity.SubtitleMemoryEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.*
 import java.security.KeyStore
@@ -107,7 +108,7 @@ class RestoreSnapshotStore private constructor(
 internal object RestoreImageCodec {
     fun encode(images: RestoreImages): ByteArray = ByteArrayOutputStream().use { bytes ->
         DataOutputStream(bytes).use { out ->
-            out.writeInt(1)
+            out.writeInt(2)
             out.snapshot(images.before); out.snapshot(images.after)
             out.preferences(images.beforePreferences); out.preferences(images.afterPreferences)
             out.text(images.record?.let(BackupDtos::encodePlanRecord))
@@ -115,8 +116,9 @@ internal object RestoreImageCodec {
         bytes.toByteArray()
     }
     fun decode(bytes: ByteArray): RestoreImages = DataInputStream(ByteArrayInputStream(bytes)).use { input ->
-        require(input.readInt() == 1) { "保护快照版本无效" }
-        RestoreImages(input.snapshot(), input.snapshot(), input.preferences(), input.preferences(),
+        val version = input.readInt()
+        require(version in 1..2) { "保护快照版本无效" }
+        RestoreImages(input.snapshot(version), input.snapshot(version), input.preferences(version), input.preferences(version),
             input.text()?.let(BackupDtos::decodePlanRecord)).also {
             require(input.available() == 0) { "保护快照尾部无效" }
         }
@@ -151,8 +153,12 @@ internal object RestoreImageCodec {
             text(p.serverId); text(p.itemId); writeLong(p.positionMs); writeLong(p.durationMs); writeBoolean(p.isPaused); writeLong(p.updatedAtEpochMs)
             text(p.mode?.name); text(p.itemTitle); text(p.posterUrl); text(p.itemType?.name)
         }
+        writeInt(snapshot.subtitleMemory.size)
+        snapshot.subtitleMemory.forEach { m ->
+            text(m.versionKey); text(m.serverId); text(m.subtitleId); writeLong(m.offsetMs); writeLong(m.updatedAtEpochMs)
+        }
     }
-    private fun DataInputStream.snapshot(): BackupSnapshot {
+    private fun DataInputStream.snapshot(version: Int): BackupSnapshot {
         val servers = List(count()) {
             val id = required(); val name = required(); val type = ServerType.valueOf(required())
             val username = text(); val note = text(); val icon = text(); val default = readBoolean(); val order = readInt(); val created = readLong()
@@ -167,7 +173,10 @@ internal object RestoreImageCodec {
             PlaybackProgress(required(), required(), readLong(), readLong(), readBoolean(), readLong(),
                 mode = text()?.let(PlaybackMode::valueOf), itemTitle = text(), posterUrl = text(), itemType = text()?.let(MediaType::valueOf))
         }
-        return BackupSnapshot(servers, progress)
+        val memory = if (version >= 2) List(count()) {
+            SubtitleMemoryEntity(required(), required(), text(), readLong(), readLong())
+        } else emptyList()
+        return BackupSnapshot(servers, progress, memory)
     }
     private fun DataOutputStream.preferences(p: UserPreferences) {
         text(p.playbackEngineMode.name); writeFloat(p.defaultPlaybackSpeed); writeInt(p.subtitleSizeSp)
@@ -182,11 +191,21 @@ internal object RestoreImageCodec {
             writeBoolean(g.doubleTapSeekForwardEnabled); writeInt(g.doubleTapSeekForwardSeconds); writeBoolean(g.longPressSpeedEnabled)
             writeFloat(g.longPressSpeedMin); writeFloat(g.longPressSpeedMax); writeBoolean(g.longPressDirectionalEnabled); writeFloat(g.longPressDefaultSpeed)
         }
+        p.playerVisualEffects.let { v ->
+            writeBoolean(v.enabled); text(v.preset.name); writeFloat(v.intensity)
+            writeBoolean(v.followArtworkColors); writeBoolean(v.audioReactive); text(v.performanceMode.name)
+        }
+        writeBoolean(p.professionalInfo.expertMode)
     }
-    private fun DataInputStream.preferences() = UserPreferences(
+    private fun DataInputStream.preferences(version: Int) = UserPreferences(
         PlaybackEngineMode.valueOf(required()), readFloat(), readInt(), readBoolean(), readBoolean(), readBoolean(), text()?.toLong(),
         readBoolean(), readBoolean(), readBoolean(),
         SubtitleStyle(readInt(), readInt(), readInt(), readInt(), readFloat(), readFloat(), readBoolean()),
         PlayerGestures(readBoolean(), readBoolean(), readInt(), readBoolean(), readInt(), readBoolean(), readFloat(), readFloat(), readBoolean(), readFloat()),
+        playerVisualEffects = if (version >= 2) PlayerVisualEffectsPreferences(
+            readBoolean(), PlayerVisualPreset.valueOf(required()), readFloat(), readBoolean(), readBoolean(),
+            VisualPerformanceMode.valueOf(required()),
+        ) else PlayerVisualEffectsPreferences.Default,
+        professionalInfo = if (version >= 2) ProfessionalInfoPreferences(readBoolean()) else ProfessionalInfoPreferences.Default,
     )
 }

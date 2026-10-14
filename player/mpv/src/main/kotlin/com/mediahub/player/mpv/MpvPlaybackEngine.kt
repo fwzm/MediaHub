@@ -94,16 +94,15 @@ class MpvPlaybackEngine internal constructor(
         },
     )
 
-    // A4：字幕缓存延迟创建（字幕能力未使用的引擎实例不触发工厂——默认工厂会抛
-    // "not configured"）；play/stop 的生命周期钩子经 subtitleCacheIfCreated 安全
-    // 访问，不强制初始化。工厂本身幂等无共享状态，竞争下多建一个实例无害。
-    @Volatile
+    // Creation and Run binding share stateLock: release cannot miss a concurrent first use.
     private var subtitleCacheInstance: SubtitleCache? = null
 
-    private fun subtitleCache(): SubtitleCache =
-        subtitleCacheInstance ?: subtitleCacheFactory().also { subtitleCacheInstance = it }
-
-    private fun subtitleCacheIfCreated(): SubtitleCache? = subtitleCacheInstance
+    private fun subtitleCache(run: Run): Pair<SubtitleCache, SubtitleCache.Session>? = synchronized(stateLock) {
+        if (!isCurrent(run)) return@synchronized null
+        val cache = subtitleCacheInstance ?: subtitleCacheFactory().also { subtitleCacheInstance = it }
+        val token = run.subtitleToken ?: cache.beginSession().also { run.subtitleToken = it }
+        cache to token
+    }
 
     override val kind: EngineKind = EngineKind.MPV
     private val _uiState = MutableStateFlow(PlaybackUiState())
@@ -123,6 +122,7 @@ class MpvPlaybackEngine internal constructor(
     private val initializationMutex = Mutex()
     private var generation = 0L
     private var current: Run? = null
+    private var subtitleOperation = 0L // stateLock; manual Off/another load invalidates pending confirmation
     private var released = false
     private var attachedSurface: Surface? = null
     private var activeResources: Resources? = null // nativeLock only
@@ -131,6 +131,7 @@ class MpvPlaybackEngine internal constructor(
         var playJob: Job? = null // stateLock
         var progressJob: Job? = null // stateLock
         var acceptsUpdates = true // stateLock
+        var subtitleToken: SubtitleCache.Session? = null // stateLock
         @Volatile var requestedAtMs = 0L
         @Volatile var resources: Resources? = null // published only after successful native initialization
     }
@@ -146,6 +147,8 @@ class MpvPlaybackEngine internal constructor(
             next = Run(++generation, session)
             val old = current
             current = next
+            subtitleOffsetMsValue = 0L
+            next.subtitleToken = subtitleCacheInstance?.beginSession()
             old?.acceptsUpdates = false
             old?.playJob?.cancel()
             old?.progressJob?.cancel()
@@ -154,11 +157,8 @@ class MpvPlaybackEngine internal constructor(
             next.playJob = scope.launch(start = CoroutineStart.LAZY) { initialize(next) }
             old
         }
-        // A4 缓存生命周期：新播放会话开始——上一会话的字幕缓存残留清空，落地资格
-        // 重新打开（迟到的旧会话下载被会话闸门 fail-closed，不会重新落地）。
-        // 仅当缓存实例已创建才清残留（字幕未用过的实例无需初始化）
-        subtitleCacheIfCreated()?.beginSession()
         closePublished(previous)
+        previous?.let { subtitleCacheInstance?.endSession(it.subtitleToken) }
         nativeOutsideStateLock { next.playJob?.start() }
     }
 
@@ -272,7 +272,8 @@ class MpvPlaybackEngine internal constructor(
             }
         }
         override fun property(name: String, value: String) = withCurrent(run) {
-            if (name == "media-title") _uiState.update { it.copy(mediaTitle = value) }
+            // The session owns a known item title; native media-title can be a bridge transport filename.
+            if (name == "media-title" && run.session.itemTitle.isBlank()) _uiState.update { it.copy(mediaTitle = value) }
         }
         override fun event(event: MpvInstance.Event) = withCurrent(run) {
             val tr = run.session.trace
@@ -298,7 +299,11 @@ class MpvPlaybackEngine internal constructor(
 
     private fun withNative(action: (Run, MpvInstance) -> Unit) {
         val run = synchronized(stateLock) { current } ?: return
-        // Initialization can block in JNI. Surface state is queued separately; controls need not wait.
+        withNative(run, action)
+    }
+
+    private fun withNative(run: Run, action: (Run, MpvInstance) -> Unit) {
+        // An expected Run is required after suspension; never borrow the newer current Run.
         if (run.resources == null) return
         nativeOutsideStateLock {
             synchronized(nativeLock) {
@@ -338,7 +343,10 @@ class MpvPlaybackEngine internal constructor(
     }
 
     override fun selectAudioTrack(selection: TrackSelection?) = Unit
-    override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
+    override fun selectSubtitleTrack(selection: TrackSelection?) {
+        synchronized(stateLock) { subtitleOperation++ }
+        if (selection == null) withNative { _, m -> m.command(arrayOf("set", "sid", "no")) }
+    }
 
     // ---- 外挂字幕 / 偏移（P2 字幕中心切片一） ----
 
@@ -353,8 +361,9 @@ class MpvPlaybackEngine internal constructor(
     override fun setSubtitleOffset(offsetMs: Long): Boolean {
         // ±60s 合理边界，防止误触把字幕推到整片之外
         val clamped = offsetMs.coerceIn(-60_000L, 60_000L)
+        val run = synchronized(stateLock) { current?.takeIf { isCurrent(it) } } ?: return false
         var accepted = false
-        withNative { _, m ->
+        withNative(run) { _, m ->
             m.setPropertyDouble("sub-delay", clamped / 1000.0)
             // A4 成功状态确认：命令调用完成 ≠ 生效——回读属性对值（上游
             // native 层业务错误码不回传，见 docs B 交接；读回值才可写状态）。
@@ -362,57 +371,79 @@ class MpvPlaybackEngine internal constructor(
                 kotlin.math.abs(it - clamped / 1000.0) < 0.001
             } == true
         }
-        if (accepted) {
-            synchronized(stateLock) { subtitleOffsetMsValue = clamped }
+        return synchronized(stateLock) {
+            if (accepted && isCurrent(run)) {
+                subtitleOffsetMsValue = clamped
+                true
+            } else false
         }
-        return accepted
     }
 
     @Volatile private var subtitleOffsetMsValue = 0L
     override val subtitleOffsetMs: Long get() = subtitleOffsetMsValue
 
     override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
-        // 落地缓存：本地路径原样；http(s)/content:// 先下载/拷贝到 cache（同 origin 才带凭据头）。
-        val session = synchronized(stateLock) { current?.session }
-        val localPath = subtitleCache().localPathFor(
+        val run: Run
+        val operation: Long
+        synchronized(stateLock) {
+            run = current?.takeIf { isCurrent(it) } ?: return false
+            operation = ++subtitleOperation
+        }
+        fun ownsOperation() = synchronized(stateLock) { isCurrent(run) && subtitleOperation == operation }
+        val (cache, token) = subtitleCache(run) ?: return false
+        val session = run.session
+        val localPath = cache.localPathFor(
             uri = subtitle.uri,
-            mediaUrl = session?.source?.url ?: "",
-            // scopeKey：媒体版本指纹（缓存隔离键）。serverId/itemId 组合为 A4 编译占位，
-            // 主代理接线时替换为真实媒体版本指纹；无会话时用固定串保持非空契约。
-            scopeKey = session?.let { "${it.serverId}/${it.itemId}" } ?: "no-session",
-            sessionHeaders = session?.let { buildHeaders(it.source) } ?: emptyMap(),
-        ) ?: run {
-            logger.w(LogTag.PLAYER, "mpv 外挂字幕落地失败 name=${subtitle.name}")
-            return false
-        }
-        // A4 成功状态确认：sub-add 命令完成 ≠ 加载成功（上游 native 层 mpv_command
-        // 业务错误码不回传——B 审查 upstream 证据）。以轨道表回读确认：
-        // 新轨道出现且类型为 sub 才算成功，未确认成功不得向上层报成功
-        // （上层据此写匹配记忆）。
+            mediaUrl = session.source.url,
+            scopeKey = "${session.serverId}/${session.itemId}/${session.source.url}",
+            sessionHeaders = buildHeaders(session.source),
+            token = token,
+        ) ?: return false
+        val requestContext = currentCoroutineContext()
+        requestContext.ensureActive()
+        var submitted = false
         var accepted = false
-        withNative { _, m ->
-            val before = (m.getPropertyDouble("track-list/count") ?: -1.0).toInt()
-            m.command(arrayOf("sub-add", localPath, "select"))
-            val after = (m.getPropertyDouble("track-list/count") ?: -1.0).toInt()
-            // A4 终审：**逐轨扫描新增轨道**，仅当出现 type=sub 且 external-filename
-            // 与本次目标一致且已被选中的轨道才算确认（count+1/末轨 sub 不足以
-            // 证明目标加载——并发无关轨道、目标非末轨、次字幕形态均会误判）。
-            for (i in before until after) {
-                val type = m.getPropertyString("track-list/$i/type")
-                val filename = m.getPropertyString("track-list/$i/external-filename")
-                val selected = m.getPropertyBoolean("track-list/$i/selected")
-                if (type == "sub" && filename == localPath && selected == true) {
-                    accepted = true
-                    break
-                }
+        try {
+            withNative(run) { _, m ->
+                if (!ownsOperation()) return@withNative
+                accepted = primarySubtitleMatches(m, localPath)
+                requestContext.ensureActive()
+                if (!ownsOperation()) return@withNative
+                if (!accepted) m.command(arrayOf("sub-add", localPath, "select"))
+                submitted = true
             }
+            if (!submitted) return false
+            // libmpv command/track changes can be asynchronous. Wait at most one second,
+            // releasing nativeLock between reads and validating the original Run each time.
+            repeat(SUBTITLE_CONFIRM_ATTEMPTS) { attempt ->
+                currentCoroutineContext().ensureActive()
+                if (!ownsOperation()) return false
+                withNative(run) { _, m -> if (ownsOperation()) accepted = primarySubtitleMatches(m, localPath) }
+                if (accepted) return ownsOperation()
+                if (attempt < SUBTITLE_CONFIRM_ATTEMPTS - 1) delay(SUBTITLE_CONFIRM_INTERVAL_MS)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.w(LogTag.PLAYER, "mpv primary external subtitle confirmation failed", e)
         }
-        if (accepted) {
-            logger.i(LogTag.PLAYER, "mpv 外挂字幕 sub-add 已确认（目标轨存在且已选中）path=$localPath")
-        } else {
-            logger.w(LogTag.PLAYER, "mpv 外挂字幕 sub-add 未确认成功（无匹配目标轨或未选中）path=$localPath")
+        return false
+    }
+
+    /** mpv 0.41: selected means decoded, including secondary-sid; sid identifies the primary. */
+    private fun primarySubtitleMatches(m: MpvInstance, path: String): Boolean {
+        val sid = m.getPropertyString("sid")?.toLongOrNull()?.takeIf { it > 0 } ?: return false
+        val rawCount = m.getPropertyDouble("track-list/count") ?: return false
+        if (!rawCount.isFinite() || rawCount < 0 || rawCount > 4096 || rawCount != rawCount.toInt().toDouble()) return false
+        for (i in 0 until rawCount.toInt()) {
+            if (m.getPropertyString("track-list/$i/type") != "sub") continue
+            if (m.getPropertyString("track-list/$i/external-filename") != path) continue
+            if (m.getPropertyString("track-list/$i/id")?.toLongOrNull() != sid) continue
+            if (m.getPropertyBoolean("track-list/$i/selected") != true) continue
+            // Re-read primary selection after scanning a table that may change between reads.
+            return m.getPropertyString("sid")?.toLongOrNull() == sid
         }
-        return accepted
+        return false
     }
 
     override fun stop(): PlaybackProgress? {
@@ -433,10 +464,7 @@ class MpvPlaybackEngine internal constructor(
                 .getOrElse { progressSnapshot(run, null, snapshot) }
         }
         closePublished(run)
-        // A4 缓存生命周期：会话终止——清空本会话字幕缓存并关闭落地资格
-        // （迟到的旧会话下载 fail-closed 丢弃；同一 SubtitleCache 实例随引擎，
-        // 新会话 play 时 beginSession 重开，不删除用户原文件，仅清应用缓存目录）。
-        subtitleCacheIfCreated()?.endSession()
+        subtitleCacheInstance?.endSession(run.subtitleToken)
         return final
     }
 
@@ -448,6 +476,8 @@ class MpvPlaybackEngine internal constructor(
             invalidateCurrent()
         }
         closePublished(run)
+        // Do not create a cache solely to release it; cleanup uses the invalidated Run token.
+        subtitleCacheInstance?.endSession(run?.subtitleToken)
     }
 
     /** stateLock held; invalidation never waits for JNI initialization or observer completion. */
@@ -531,6 +561,8 @@ class MpvPlaybackEngine internal constructor(
 
     private companion object {
         const val PROGRESS_INTERVAL_MS = 1_000L
+        const val SUBTITLE_CONFIRM_ATTEMPTS = 21
+        const val SUBTITLE_CONFIRM_INTERVAL_MS = 50L
 
         fun nativeDeferrer(): (() -> Unit) -> Unit {
             val dispatcher = Dispatchers.Default.limitedParallelism(1)

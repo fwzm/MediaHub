@@ -42,7 +42,6 @@ import com.mediahub.provider.base.DefaultProviderRegistry
 import com.mediahub.provider.webdav.WebDavCredentialCoordinator
 import com.mediahub.provider.webdav.WebDavProviderFactory
 import com.mediahub.app.di.DataStoreEnginePreferenceHistory
-import java.net.URLDecoder
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -53,6 +52,7 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import okhttp3.mockwebserver.MockResponse
@@ -122,7 +122,7 @@ class WebDavJointChainTest {
     }
 
     /** 记录 engine.play() 收到的会话：PlayerViewModel 全链产出（DIRECT_PLAY 播放源）的观测点。 */
-    private class RecordingEngine(private val sink: MutableList<PlaybackSession>) : PlaybackEnginePort {
+    private class RecordingEngine(private val sink: MutableList<PlaybackSession>, private val onPlay: () -> Unit) : PlaybackEnginePort {
         override val kind = EngineKind.MEDIA3
         override val uiState = MutableStateFlow(PlaybackUiState())
         override val progress = kotlinx.coroutines.flow.MutableSharedFlow<PlaybackProgress>()
@@ -130,7 +130,7 @@ class WebDavJointChainTest {
         override val subtitleCues = MutableStateFlow<CueGroup?>(null)
         override val downloadSpeedBps = MutableStateFlow(0L)
         override fun attachSurface(surface: Surface?) = Unit
-        override fun play(session: PlaybackSession) { sink += session }
+        override fun play(session: PlaybackSession) { sink += session; onPlay() }
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
@@ -164,6 +164,29 @@ class WebDavJointChainTest {
     private lateinit var registry: DefaultProviderRegistry
     private lateinit var base: String
     private val viewModelStore = ViewModelStore()
+    private val unknownCount = java.util.concurrent.atomic.AtomicInteger()
+    private val businessArrived = CountDownLatch(1)
+    private val discoveryArrived = CountDownLatch(1)
+    private val discoveryMaySend = CountDownLatch(1)
+    private val orderedRequests = CopyOnWriteArrayList<String>()
+    @Volatile private var jointPhase = false
+    private var businessFirst = true
+
+    /** HTTP path decoding: '+' is a literal path character, not form-urlencoded space. */
+    private fun decodedPath(request: RecordedRequest): String? =
+        request.requestUrl?.pathSegments?.joinToString("/", prefix = "/")
+
+    private val networkLogger = object : Logger by StdoutLogger() {
+        override fun d(tag: LogTag, message: String) {
+            // Existing production logging interceptor is before chain.proceed. Hold only the
+            // discovery request before any network I/O, to enforce actual request arrival order.
+            if (jointPhase && businessFirst && message.startsWith("-> PROPFIND ") &&
+                message.contains("%E7%94%B5%E5%BD%B1/") && !message.contains(".mkv")) {
+                check(discoveryMaySend.await(15, TimeUnit.SECONDS)) { "discovery send gate timed out" }
+            }
+            StdoutLogger().d(tag, message)
+        }
+    }
 
     @Before
     fun setUp() {
@@ -178,12 +201,21 @@ class WebDavJointChainTest {
         // 顺序——P2 字幕发现是 resolve 成功后的异步请求，与链路请求的到达顺序在
         // 真实调度下不确定，固定队列会把"文件详情"响应错发给字幕发现请求。
         // 未知请求（路径/方法/Depth 组合不匹配）→ 500 + 计数，绝不被泛化成功掩盖。
-        val unknownCount = java.util.concurrent.atomic.AtomicInteger()
         mock.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
-                val decodedPath = runCatching {
-                    URLDecoder.decode(requireNotNull(request.path), Charsets.UTF_8)
-                }.getOrNull()
+                val decodedPath = decodedPath(request)
+                if (jointPhase && request.method == "PROPFIND") {
+                    if (decodedPath == FILE_PATH_DECODED) {
+                        orderedRequests += "business"
+                        businessArrived.countDown()
+                        discoveryMaySend.countDown()
+                        if (businessFirst) check(discoveryArrived.await(15, TimeUnit.SECONDS))
+                    } else if (decodedPath == "/电影/") {
+                        orderedRequests += "discovery"
+                        discoveryArrived.countDown()
+                        if (!businessFirst) check(businessArrived.await(15, TimeUnit.SECONDS))
+                    }
+                }
                 val depth = request.getHeader("Depth")
                 return when {
                     request.method != "PROPFIND" -> unknownResponse(unknownCount)
@@ -212,7 +244,7 @@ class WebDavJointChainTest {
         }
         mock.start()
         base = mock.url("/").toString().trimEnd('/')
-        val logger = StdoutLogger()
+        val logger = networkLogger
         val storage = MemorySecretStorage()
         val factory = WebDavProviderFactory(
             httpClientFactory = HttpClientFactory(logger),
@@ -227,6 +259,9 @@ class WebDavJointChainTest {
 
     @After
     fun tearDown() {
+        discoveryMaySend.countDown()
+        businessArrived.countDown()
+        discoveryArrived.countDown()
         viewModelStore.clear() // PlayerViewModel.onCleared → engine stop/release（替身端口）
         db.close()
         Dispatchers.resetMain()
@@ -241,20 +276,18 @@ class WebDavJointChainTest {
     private fun expectedBasic(): String =
         "Basic " + Base64.getEncoder().encodeToString("alice:p@ss word".toByteArray(Charsets.UTF_8))
 
-    /** 有界轮询 resolve 状态：真实 IO 完成即返回，不靠 sleep 伪造时序。 */
-    private fun awaitResolve(vm: PlayerViewModel): ResolveState {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
-        while (System.nanoTime() < deadline) {
-            when (val state = vm.resolveState.value) {
-                is ResolveState.Ready, is ResolveState.Failed -> return state
-                else -> Thread.sleep(25)
-            }
-        }
-        return vm.resolveState.value
+    private fun awaitResolve(vm: PlayerViewModel): ResolveState = runBlocking {
+        withTimeout(20_000) { vm.resolveState.first { it is ResolveState.Ready || it is ResolveState.Failed } }
     }
 
     @Test
-    fun `webdav form to saved server to browse detail playback and player source`() {
+    fun `business request arrives before automatic subtitle discovery`() = runChain(true)
+
+    @Test
+    fun `automatic subtitle discovery arrives before business request`() = runChain(false)
+
+    private fun runChain(businessFirst: Boolean) {
+        this.businessFirst = businessFirst
         // ============================================================
         // 1. 表单：真实 AddServerViewModel + Room in-memory + 真实 Registry
         // ============================================================
@@ -348,7 +381,7 @@ class WebDavJointChainTest {
         //    （无 type 快照 → detail 分支真实打 PROPFIND Depth:0，第 4 个 207）
         // ============================================================
         val engineSessions = CopyOnWriteArrayList<PlaybackSession>()
-        val engineCreator = PlaybackEngineCreator { RecordingEngine(engineSessions) }
+        val engineCreator = PlaybackEngineCreator { RecordingEngine(engineSessions) { jointPhase = true } }
         val appContext = RuntimeEnvironment.getApplication()
 
         val playerVm = PlayerViewModel(
@@ -400,7 +433,8 @@ class WebDavJointChainTest {
         assertEquals("路由参数无损往返", video.id, decoded)
         assertFalse(encoded.contains('/'))
 
-        val roundtrip = runBlocking { detail.getItemDetail(decoded) }
+        if (!businessFirst) assertTrue("discovery must arrive before business is sent", discoveryArrived.await(15, TimeUnit.SECONDS))
+        val roundtrip = runBlocking { withTimeout(20_000) { detail.getItemDetail(decoded) } }
         assertEquals(video.id, roundtrip.item.id)
         assertEquals(FILE_TITLE, roundtrip.item.title)
         assertEquals(FILE_SIZE, roundtrip.item.sizeBytes)
@@ -409,13 +443,12 @@ class WebDavJointChainTest {
         // 字幕发现真实完成：resolve 成功触发的异步发现必须已经返回
         // （有界条件等待，不靠固定 sleep；discovered 含同目录 .srt 候选）
         // ============================================================
-        val discoveryDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
-        while (System.nanoTime() < discoveryDeadline) {
-            val center = playerVm.subtitleCenter.value
-            if (!center.discovering && center.discovered.isNotEmpty()) break
-            Thread.sleep(25)
+        val center = runBlocking {
+            withTimeout(15_000) { playerVm.subtitleCenter.first { !it.discovering && it.discovered.isNotEmpty() } }
         }
-        val center = playerVm.subtitleCenter.value
+        assertEquals("both branches arrived in controlled order",
+            if (businessFirst) listOf("business", "discovery") else listOf("discovery", "business"), orderedRequests.toList())
+        assertEquals("semantic dispatcher must reject zero unknown requests after both branches finish", 0, unknownCount.get())
         assertFalse("字幕发现必须已结束", center.discovering)
         assertTrue(
             "同目录字幕发现必须真实完成并返回候选（实际 ${center.discovered}）",
@@ -437,8 +470,7 @@ class WebDavJointChainTest {
             assertEquals("PROPFIND", request.method)
             assertEquals("每次请求都携带同一条 Basic 凭据", expectedBasic(), request.getHeader("Authorization"))
         }
-        fun decoded(request: RecordedRequest) =
-            URLDecoder.decode(requireNotNull(request.path), Charsets.UTF_8)
+        fun decoded(request: RecordedRequest) = decodedPath(request)
         val rootDepth0 = requests.count { decoded(it) == "/" && it.getHeader("Depth") == "0" }
         val rootDepth1 = requests.count { decoded(it) == "/" && it.getHeader("Depth") == "1" }
         val fileDepth0 = requests.count { decoded(it) == FILE_PATH_DECODED && it.getHeader("Depth") == "0" }

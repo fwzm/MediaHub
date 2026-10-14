@@ -210,7 +210,9 @@ fun SubtitleSheet(
             Text(stringResource(R.string.player_subtitles), style = MaterialTheme.typography.titleMedium)
 
             Text(stringResource(R.string.player_subtitle_tracks), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
-            SubtitleRow(label = stringResource(R.string.player_subtitles_off), selected = tracks.none { it.isSelected }, onClick = { onSelect(null) })
+            SubtitleRow(label = stringResource(R.string.player_subtitles_off),
+                selected = tracks.none { it.isSelected } && subtitleCenter.selectedExternalId == null,
+                onClick = { onSelect(null) })
             tracks.forEach { track ->
                 SubtitleRow(
                     label = buildString {

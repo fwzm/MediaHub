@@ -8,6 +8,9 @@ import com.mediahub.core.database.entity.SubtitleMemoryEntity
 @Dao
 interface SubtitleMemoryDao {
 
+    @Query("SELECT * FROM subtitle_memory")
+    suspend fun getAll(): List<SubtitleMemoryEntity>
+
     @Query("SELECT * FROM subtitle_memory WHERE versionKey = :versionKey")
     suspend fun get(versionKey: String): SubtitleMemoryEntity?
 

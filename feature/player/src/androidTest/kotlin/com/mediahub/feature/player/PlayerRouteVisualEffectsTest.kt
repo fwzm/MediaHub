@@ -9,10 +9,13 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelStore
@@ -82,6 +85,79 @@ class PlayerRouteVisualEffectsTest {
     private val viewModelStores = mutableListOf<ViewModelStore>()
     private var originalPreferences: UserPreferences? = null
     private var preferencesStore: UserPreferencesStore? = null
+    private var lastEngine: FakeEngine? = null
+
+    @Test
+    fun productionPlayerInformationAndSubtitleActionsPreservePlaybackSession() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val preferences = UserPreferencesStore(context)
+        preferencesStore = preferences
+        originalPreferences = runBlocking { preferences.flow.first() }
+        runBlocking { preferences.update { UserPreferences(autoLandscape = false, immersiveBars = false,
+            playerVisualEffects = PlayerVisualEffectsPreferences.Default.copy(enabled = false)) } }
+        val memory = object : com.mediahub.core.database.repository.SubtitleMemoryStore {
+            @Volatile var entry: com.mediahub.core.database.repository.SubtitleMemoryEntry? = null
+            override suspend fun recall(versionKey: String) = entry
+            override suspend fun remember(entry: com.mediahub.core.database.repository.SubtitleMemoryEntry) { this.entry = entry }
+            override suspend fun forget(versionKey: String) { entry = null }
+        }
+        val candidate = com.mediahub.provider.api.DiscoveredSubtitle(
+            id = "fixture.zh", name = "fixture.zh", fileName = "fixture.zh.srt", extension = "srt",
+            language = "zh", uri = "content://a4-fixture/subtitle.srt",
+        )
+        val discovery = object : com.mediahub.provider.api.MediaSubtitleDiscoveryProvider {
+            override suspend fun discoverSubtitles(video: MediaItem) = listOf(candidate)
+        }
+        val vm = createViewModel(preferences, memory, discovery)
+        routeVisible.value = true
+        composeRule.setContent { MaterialTheme { if (routeVisible.value) PlayerRoute(onBack = {}, viewModel = vm) } }
+        composeRule.waitUntil(10_000) { vm.resolveState.value is ResolveState.Ready && vm.subtitleCenter.value.discovered.size == 1 }
+        val engine = checkNotNull(lastEngine)
+        val initialSource = vm.playbackSource.value
+        composeRule.onNodeWithText(context.getString(R.string.player_info_entry)).performClick()
+        composeRule.onNodeWithText(context.getString(R.string.player_info_expert_toggle)).assertIsDisplayed()
+        captureVisualEvidence(composeRule, "a-four-player-information")
+        composeRule.onNode(isToggleable()).performClick()
+        composeRule.waitUntil(10_000) { vm.preferences.value?.professionalInfo?.expertMode == false }
+        assertFalse(runBlocking { preferences.flow.first() }.professionalInfo.expertMode)
+        composeRule.onNode(isToggleable()).performClick()
+        composeRule.waitUntil(10_000) { vm.preferences.value?.professionalInfo?.expertMode == true }
+        dismissProductSheet()
+        composeRule.onNodeWithText(context.getString(R.string.player_subtitles)).performClick()
+        composeRule.onNodeWithText(candidate.name).performScrollToWithClock(composeRule).performClick()
+        composeRule.waitUntil(10_000) { vm.subtitleCenter.value.selectedExternalId == candidate.id && memory.entry?.subtitleId == candidate.id }
+        assertEquals(candidate.id, memory.entry!!.subtitleId)
+        composeRule.onNodeWithText("+0.5s").performScrollToWithClock(composeRule).performClick()
+        composeRule.waitUntil(10_000) { memory.entry?.offsetMs == 500L }
+        composeRule.onAllNodes(
+            SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.Selected, true) and
+                SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.Role, androidx.compose.ui.semantics.Role.RadioButton),
+            useUnmergedTree = true,
+        ).assertCountEquals(1) // An active external subtitle cannot also show Off.
+        val titleWidth = composeRule.onNodeWithText(checkNotNull(engine.uiState.value.mediaTitle))
+            .fetchSemanticsNode().boundsInRoot.width
+        assertTrue("portrait action buttons must leave a readable title row",
+            titleWidth >= context.resources.configuration.screenWidthDp * context.resources.displayMetrics.density / 2f)
+        captureVisualEvidence(composeRule, "a-four-player-subtitle-selected")
+        composeRule.onNodeWithText(context.getString(R.string.player_subtitles_off)).performScrollToWithClock(composeRule).performClick()
+        composeRule.waitUntil(10_000) { vm.subtitleCenter.value.selectedExternalId == null && memory.entry?.subtitleId == null }
+        assertTrue(engine.subtitleOff)
+        assertEquals(1, engine.playCount)
+        assertEquals(12_000L, engine.uiState.value.positionMs)
+        org.junit.Assert.assertSame(initialSource, vm.playbackSource.value)
+        assertEquals(listOf(candidate.id), engine.loaded)
+        dismissProductSheet()
+    }
+
+    private fun dismissProductSheet() {
+        composeRule.onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss), useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.Dismiss) { assertTrue(it()) }
+        composeRule.waitUntil(10_000) {
+            composeRule.mainClock.advanceTimeBy(50)
+            composeRule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss), useUnmergedTree = true)
+                .fetchSemanticsNodes().isEmpty()
+        }
+    }
 
     @After
     fun restoreTestState() {
@@ -282,7 +358,11 @@ class PlayerRouteVisualEffectsTest {
         captureVisualEvidence(composeRule, name)
     }
 
-    private fun createViewModel(preferences: UserPreferencesRepository): PlayerViewModel {
+    private fun createViewModel(
+        preferences: UserPreferencesRepository,
+        memory: com.mediahub.core.database.repository.SubtitleMemoryStore = NoSubtitleMemory,
+        discovery: com.mediahub.provider.api.MediaSubtitleDiscoveryProvider? = null,
+    ): PlayerViewModel {
         val fixtureTitle = InstrumentationRegistry.getInstrumentation().context
             .getString(com.mediahub.feature.player.test.R.string.visual_acceptance_media_title)
         val item = MediaItem(
@@ -309,9 +389,9 @@ class PlayerRouteVisualEffectsTest {
             ),
             serverStore = FakeServerStore(server),
             progressStore = FakeProgressStore,
-            subtitleMemoryStore = NoSubtitleMemory,
-            registry = FakeRegistry(item),
-            media3EngineFactory = PlaybackEngineCreator { FakeEngine(fixtureTitle) },
+            subtitleMemoryStore = memory,
+            registry = FakeRegistry(item, discovery),
+            media3EngineFactory = PlaybackEngineCreator { FakeEngine(fixtureTitle).also { lastEngine = it } },
             mpvEngineFactory = PlaybackEngineCreator { FakeEngine(fixtureTitle) },
             engineHistory = InMemoryEnginePreferenceHistory(),
             userPreferencesRepository = preferences,
@@ -333,7 +413,10 @@ class PlayerRouteVisualEffectsTest {
         override suspend fun save(progress: PlaybackProgress) = Unit
     }
 
-    private class FakeRegistry(private val item: MediaItem) : MediaProviderRegistry {
+    private class FakeRegistry(
+        private val item: MediaItem,
+        private val discovery: com.mediahub.provider.api.MediaSubtitleDiscoveryProvider? = null,
+    ) : MediaProviderRegistry {
         override fun factoryFor(type: ServerType): com.mediahub.provider.api.MediaProviderFactory? = null
         override val supportedTypes: Set<ServerType> = setOf(ServerType.EMBY)
         override fun descriptors(): List<ProviderDescriptor> = emptyList()
@@ -349,6 +432,7 @@ class PlayerRouteVisualEffectsTest {
                     options: PlaybackOptions,
                 ): PlaybackSource = PlaybackSource(url = "https://example.invalid/movie.mp4")
             },
+            subtitleDiscovery = discovery,
         )
     }
 
@@ -371,7 +455,7 @@ class PlayerRouteVisualEffectsTest {
     private class FakeEngine(fixtureTitle: String) : PlaybackEnginePort {
         override val kind: EngineKind = EngineKind.MEDIA3
         override val uiState: StateFlow<PlaybackUiState> = MutableStateFlow(
-            PlaybackUiState(mediaTitle = fixtureTitle, durationMs = 60_000L),
+            PlaybackUiState(mediaTitle = fixtureTitle, durationMs = 60_000L, positionMs = 12_000L),
         )
         override val progress: SharedFlow<PlaybackProgress> = MutableSharedFlow()
         override val events: Flow<PlaybackEvent> = MutableSharedFlow()
@@ -379,12 +463,24 @@ class PlayerRouteVisualEffectsTest {
         override val downloadSpeedBps: StateFlow<Long> = MutableStateFlow(0L)
 
         override fun attachSurface(surface: android.view.Surface?) = Unit
-        override fun play(session: PlaybackSession) = Unit
+        var playCount = 0
+        var subtitleOff = false
+        val loaded = mutableListOf<String>()
+        override val subtitleCapabilities = com.mediahub.player.engine.SubtitleCapabilities(externalLoad = true, offsetAdjust = true)
+        override suspend fun loadExternalSubtitle(subtitle: com.mediahub.player.engine.ExternalSubtitle): Boolean {
+            loaded.add(subtitle.id); subtitleOff = false; return true
+        }
+        override var subtitleOffsetMs: Long = 0L
+            private set
+        override fun setSubtitleOffset(offsetMs: Long): Boolean {
+            subtitleOffsetMs = offsetMs.coerceIn(-60_000L, 60_000L); return true
+        }
+        override fun play(session: PlaybackSession) { playCount++ }
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
         override fun selectAudioTrack(selection: TrackSelection?) = Unit
-        override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
+        override fun selectSubtitleTrack(selection: TrackSelection?) { subtitleOff = selection == null }
         override fun stop(): PlaybackProgress? = null
         override fun release() = Unit
     }

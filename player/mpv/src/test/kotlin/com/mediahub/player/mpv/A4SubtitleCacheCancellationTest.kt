@@ -36,7 +36,7 @@ import org.junit.rules.TemporaryFolder
  *
  * 断言三层：
  * 1. 协程取消及时向上传播（本地桥接线程上执行，不再等 socket 超时）；
- * 2. 底层 call 真实取消——EventListener.callFailed 收到 "Canceled" IOException；
+ * 2. stable target Call identity + isCanceled + terminal I/O event (no exception-string contract);
  * 3. 桥接线程（mpv-subtitle-bridge）释放：取消后回到池空闲（TIMED_WAITING/消亡），
  *    不再占着 RUNNABLE/BLOCKED/WAITING。
  */
@@ -58,10 +58,16 @@ class A4SubtitleCacheCancellationTest {
     }
 
     private class RecordingListener : EventListener() {
-        val callFailures = mutableListOf<Throwable>()
+        val callFailures = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+        val target = java.util.concurrent.atomic.AtomicReference<Call>()
+        val terminal = CountDownLatch(1)
+        override fun callStart(call: Call) { check(target.compareAndSet(null, call)) }
+        override fun callEnd(call: Call) { if (call === target.get()) terminal.countDown() }
         val headersDone = CountDownLatch(1)
         override fun callFailed(call: Call, ioe: IOException) {
+            if (call !== target.get()) return
             callFailures += ioe
+            terminal.countDown()
         }
         override fun responseHeadersEnd(call: Call, response: Response) {
             headersDone.countDown()
@@ -122,13 +128,8 @@ class A4SubtitleCacheCancellationTest {
             )
         }
 
-        assertTrue(
-            "底层 call 必须真实取消（OkHttp 取消形态：Canceled 或 Socket closed）：${listener.callFailures}",
-            listener.callFailures.any {
-                val m = it.message?.lowercase()
-                m?.contains("cancel") == true || m?.contains("socket closed") == true
-            },
-        )
+        assertTrue("target Call must observe cancel", listener.target.get().isCanceled())
+        assertTrue("target Call I/O must reach terminal event", listener.terminal.await(10, TimeUnit.SECONDS))
         awaitBridgeReleased()
     }
 
@@ -161,6 +162,8 @@ class A4SubtitleCacheCancellationTest {
                 joinedInTime == true,
             )
         }
+        assertTrue("target Call must observe cancel", listener.target.get().isCanceled())
+        assertTrue("target Call I/O must reach terminal event", listener.terminal.await(10, TimeUnit.SECONDS))
         awaitBridgeReleased()
     }
 }

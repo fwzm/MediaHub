@@ -11,6 +11,7 @@ android {
 
     defaultConfig {
         minSdk = 26
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -20,6 +21,9 @@ android {
 
     // A4：迁移测试的 schema JSON 作为 test assets（MigrationTestHelper 读取）
     sourceSets.getByName("test") {
+        assets.srcDir("$projectDir/schemas")
+    }
+    sourceSets.getByName("androidTest") {
         assets.srcDir("$projectDir/schemas")
     }
 
@@ -63,4 +67,7 @@ dependencies {
     // A4：Room 3→4 迁移回归（MigrationTestHelper + schema JSON）
     testImplementation(libs.room.testing)
     testImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.room.testing)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }

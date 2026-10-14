@@ -95,7 +95,7 @@
     <string name="player_info_actual_engine">实际内核</string>
     <string name="player_info_actual_decoder">实际解码器</string>
     <string name="player_info_actual_resolution">实际分辨率</string>
-    <string name="player_info_audio_output">音频输出</string>
+    <string name="player_info_audio_output">当前音轨格式</string>
     <string name="player_info_audio_track_count">音轨</string>
     <string name="player_info_subtitle_track_count">字幕</string>
     <string name="player_info_on">开</string>

@@ -23,6 +23,21 @@ class PlayerInfoPanelStateTest {
 
     private val labels = PlayerInfoLabels()
 
+    @Test
+    fun `blank media metadata stays unknown instead of disappearing from information rows`() {
+        val sections = buildPlayerInfoSections(PlayerInfoPanelInputs(
+            source = PlaybackSource(url = "https://fixture.invalid", container = " ", videoCodec = "", audioCodec = " "),
+            launchContainer = null, preferences = UserPreferences(), engineKind = EngineKind.MEDIA3,
+            uiState = PlaybackUiState(audioFormatMime = " "),
+        ), labels)
+        val source = sections[0].rows.associateBy { it.label }
+        val runtime = sections[2].rows.associateBy { it.label }
+        assertEquals(labels.unknown, source.getValue(labels.container).value)
+        assertEquals(labels.unknown, source.getValue(labels.videoCodec).value)
+        assertEquals(labels.unknown, source.getValue(labels.audioCodec).value)
+        assertEquals(labels.unknown, runtime.getValue(labels.audioOutput).value)
+    }
+
     private fun fullSource() = PlaybackSource(
         url = "http://media/stream.mkv",
         container = "mkv",

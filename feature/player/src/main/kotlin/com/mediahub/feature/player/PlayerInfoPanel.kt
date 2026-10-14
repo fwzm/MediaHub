@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextAlign
 import com.mediahub.model.HdrType
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlaybackMode
@@ -91,7 +92,7 @@ data class PlayerInfoLabels(
     val actualEngine: String = "实际内核",
     val actualDecoder: String = "实际解码器",
     val actualResolution: String = "实际分辨率",
-    val audioOutput: String = "音频输出",
+    val audioOutput: String = "当前音轨格式",
     val audioTrackCount: String = "音轨",
     val subtitleTrackCount: String = "字幕",
     val on: String = "开",
@@ -203,11 +204,11 @@ fun buildPlayerInfoSections(
         rows = listOf(
             PlayerInfoRow(
                 label = labels.container,
-                value = source?.container ?: inputs.launchContainer?.takeIf { it.isNotBlank() } ?: unknown,
+                value = source?.container?.takeIf { it.isNotBlank() } ?: inputs.launchContainer?.takeIf { it.isNotBlank() } ?: unknown,
                 primary = true,
             ),
-            PlayerInfoRow(label = labels.videoCodec, value = source?.videoCodec ?: unknown, primary = true),
-            PlayerInfoRow(label = labels.audioCodec, value = source?.audioCodec ?: unknown),
+            PlayerInfoRow(label = labels.videoCodec, value = source?.videoCodec?.takeIf { it.isNotBlank() } ?: unknown, primary = true),
+            PlayerInfoRow(label = labels.audioCodec, value = source?.audioCodec?.takeIf { it.isNotBlank() } ?: unknown),
             PlayerInfoRow(label = labels.bitrate, value = formatPlayerInfoBitrate(source?.bitrate, unknown)),
             PlayerInfoRow(
                 label = labels.resolution,
@@ -266,7 +267,7 @@ fun buildPlayerInfoSections(
             ),
             PlayerInfoRow(
                 label = labels.audioOutput,
-                value = ui.audioFormatMime?.let { prettyCodecName(it) ?: it } ?: unknown,
+                value = ui.audioFormatMime?.takeIf { it.isNotBlank() }?.let { prettyCodecName(it) ?: it } ?: unknown,
             ),
             PlayerInfoRow(label = labels.audioTrackCount, value = ui.audioTracks.size.toString()),
             PlayerInfoRow(label = labels.subtitleTrackCount, value = ui.subtitleTracks.size.toString()),
@@ -346,6 +347,8 @@ fun PlayerInfoPanelSheet(
                             row.value,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f).padding(start = 8.dp),
+                            textAlign = TextAlign.End,
                         )
                     }
                 }

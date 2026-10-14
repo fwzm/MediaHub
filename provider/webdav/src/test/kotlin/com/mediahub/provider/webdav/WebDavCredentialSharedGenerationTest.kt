@@ -109,7 +109,7 @@ class WebDavCredentialSharedGenerationTest {
                 assertTrue("B 必须认证成功：$auth", auth is com.mediahub.provider.api.AuthResult.Success)
                 release.countDown()
                 outcome[0] = restore.await()
-                outcome[1] = vault.read("s1", CredentialVault.CredentialKind.PASSWORD)
+                outcome[1] = WebDavCredentialStore(vault, sharedCoordinator).readPasswordValue(server)
                 done.countDown()
             }
         }).apply { start() }

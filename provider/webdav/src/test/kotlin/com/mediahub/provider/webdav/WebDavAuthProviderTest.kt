@@ -189,8 +189,8 @@ class WebDavAuthProviderTest {
     @Test
     fun `credential vault is the only credential home`() = runBlocking {
         stack.storePassword("secret-1")
-        assertEquals("secret-1", stack.vault.read(WebDavTestStack.SERVER_ID, CredentialVault.CredentialKind.PASSWORD))
-        // 用户名不进 vault（复用 MediaServer.username，非敏感）。
+        assertEquals("secret-1", stack.credentialStore.readPasswordValue(stack.server))
+        // 密码仅在加密 vault 绑定记录；不伪造 API key 或 Token。
         assertFalse(stack.vault.contains(WebDavTestStack.SERVER_ID, CredentialVault.CredentialKind.API_KEY))
     }
 }
