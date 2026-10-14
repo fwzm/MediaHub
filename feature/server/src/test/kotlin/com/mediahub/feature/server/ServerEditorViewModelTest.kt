@@ -275,6 +275,20 @@ class ServerEditorViewModelTest {
         Dispatchers.resetMain()
     }
 
+    /** M0-A2 测试替身：内存版按服务器 UA 配置。 */
+    private val userAgentRepository = object : com.mediahub.core.database.repository.ServerUserAgentRepository {
+        val values = mutableMapOf<String, String>()
+        override val loaded: Boolean get() = true
+        override fun snapshot(): Map<String, String> = values.toMap()
+        override fun snapshotBlocking(timeoutMs: Long): Map<String, String> = snapshot()
+        override suspend fun awaitLoaded(timeoutMs: Long): Boolean = true
+        override suspend fun set(serverId: String, userAgent: String?) {
+            if (userAgent.isNullOrBlank()) values.remove(serverId) else values[serverId] = userAgent
+        }
+        override suspend fun purgeOrphans(existingServerIds: Set<String>): Int = 0
+        override suspend fun purge(serverId: String) { values.remove(serverId) }
+    }
+
     private fun viewModel(serverId: String): ServerEditorViewModel = ServerEditorViewModel(
         savedStateHandle = SavedStateHandle(mapOf("serverId" to serverId)),
         serverStore = store,
@@ -284,6 +298,9 @@ class ServerEditorViewModelTest {
         removeHandler = removeHandler,
         endpointTestService = service,
         logger = StdoutLogger(),
+        // M0-A2：UA 依赖（内存替身，加载恒完成，避免测试依赖磁盘时序）
+        serverUserAgentRepository = userAgentRepository,
+        userAgentPolicy = com.mediahub.core.network.UserAgentPolicy(),
     )
 
     // ---- P1：LOCAL 媒体源元数据编辑回归 ----
@@ -645,6 +662,8 @@ class ServerEditorViewModelTest {
                         removeHandler = removeHandler,
                         endpointTestService = realService,
                         logger = StdoutLogger(),
+                        serverUserAgentRepository = userAgentRepository,
+                        userAgentPolicy = com.mediahub.core.network.UserAgentPolicy(),
                     )
                     viewModelStore.put("editor", vm)
                     scopeJob.set(requireNotNull(vm.viewModelScope.coroutineContext[Job]).also { job ->
@@ -856,6 +875,8 @@ class ServerEditorViewModelTest {
             removeHandler = removeHandler,
             endpointTestService = hostileService,
             logger = StdoutLogger(),
+            serverUserAgentRepository = userAgentRepository,
+            userAgentPolicy = com.mediahub.core.network.UserAgentPolicy(),
         )
         advanceUntilIdle()
 
@@ -882,5 +903,57 @@ class ServerEditorViewModelTest {
         const val SAVED_URL = "https://media.example"
         const val WAIT_SECONDS = 8L
         const val WATCHDOG_SECONDS = 20L
+    }
+    // ---------- M0-A2：自定义 UA ----------
+
+    @Test
+    fun `saving a custom user agent persists it for that server only`() = runTest {
+        val vm = viewModel("srv-net")
+        advanceUntilIdle() // 先完成 load()，否则 save 会因草稿未就绪而提前返回
+        vm.updateUserAgent("Kodi/21.0")
+        vm.save {}
+
+        advanceUntilIdle()
+        assertEquals("Kodi/21.0", userAgentRepository.values["srv-net"])
+    }
+
+    @Test
+    fun `an invalid user agent is rejected and never silently rewritten`() = runTest {
+        val vm = viewModel("srv-net")
+        advanceUntilIdle()
+        // 含 CR/LF 的 UA 必须被拒绝（头部注入防护）
+        vm.updateUserAgent("Bad\r\nAgent")
+
+        val state = vm.uiState.value
+        assertEquals("Bad\r\nAgent", state.userAgent) // 原样保留，不静默改写
+        assertNotNull(state.userAgentError)
+
+        vm.save {}
+        advanceUntilIdle()
+        assertTrue("非法 UA 不得落盘", userAgentRepository.values.isEmpty())
+    }
+
+    @Test
+    fun `reset clears the custom user agent back to the default`() = runTest {
+        userAgentRepository.values["srv-net"] = "Kodi/21.0"
+        val vm = viewModel("srv-net")
+        advanceUntilIdle()
+        assertEquals("Kodi/21.0", vm.uiState.value.userAgent)
+
+        vm.resetUserAgent()
+        vm.save {}
+
+        advanceUntilIdle()
+        assertTrue(userAgentRepository.values.isEmpty())
+    }
+
+    @Test
+    fun `the editor shows the effective user agent for its own server`() = runTest {
+        userAgentRepository.values["srv-net"] = "Infuse/7"
+        val vm = viewModel("srv-local")
+
+        advanceUntilIdle()
+        assertEquals("", vm.uiState.value.userAgent)
+        assertTrue(vm.uiState.value.userAgentEffective.isNotBlank())
     }
 }
