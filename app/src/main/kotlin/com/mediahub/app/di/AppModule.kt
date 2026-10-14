@@ -135,7 +135,16 @@ object AppModule {
     fun provideUserAgentPolicy(
         serverUserAgent: com.mediahub.core.database.repository.ServerUserAgentRepository,
     ): com.mediahub.core.network.UserAgentPolicy =
-        com.mediahub.core.network.UserAgentPolicy(overrides = { serverUserAgent.snapshot() })
+        com.mediahub.core.network.UserAgentPolicy(
+            // 首次加载未完成时做**有界等待**（只等信号，拦截器线程不做 DataStore I/O），
+            // 避免在已保存配置尚未读出时静默发出与配置不一致的请求。
+            overrides = { serverUserAgent.snapshotBlocking() },
+            // 默认 UA 使用真实应用版本，不再硬编码 MediaHub/1.0。
+            defaultUserAgent = com.mediahub.core.network.MediaHubUserAgent.ofVersion(
+                com.mediahub.app.BuildConfig.VERSION_NAME,
+                android.os.Build.VERSION.RELEASE,
+            ),
+        )
 
     @Provides
     @Singleton
