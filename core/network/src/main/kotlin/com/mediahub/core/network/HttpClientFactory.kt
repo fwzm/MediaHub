@@ -46,9 +46,13 @@ class HttpClientFactory(
         .build()
 
     private fun baseClient(): OkHttpClient.Builder = OkHttpClient.Builder()
-        // M15：冷却判定的最外层。必须在 RetryOnceInterceptor 之前注册，
-        // 否则窗口内的快速失败会被当作可重试 IOException 放大请求。
-        .addInterceptor(RateLimitCooldownInterceptor(rateLimitCooldown) { url -> serverIdFor.serverIdFor(url) })
+        // M15-S3 测试 4：必须是 **network** interceptor（逐跳生效）。
+        // OkHttp 的应用拦截器只看到"原始请求 + 最终响应"，其 chain.request().url 永远是入口 URL；
+        // 而重定向后真正返回 429 的是**另一跳**（Emby Direct Stream: HTTPS→307→直链IP→对象存储）。
+        // 用入口 URL 记账会把第三方跳的 429 误记到原始服务器，造成跨服务器误冷却
+        // （M15-S3 测试 4 已复现）。network interceptor 对每一跳生效，chain.request() 即该跳真实
+        // URL —— 归属正确，且已冷却的跳在出网前快速失败，不会被反复撞击。
+        .addNetworkInterceptor(RateLimitCooldownInterceptor(rateLimitCooldown) { url -> serverIdFor.serverIdFor(url) })
         .addInterceptor(RequestIdInterceptor())
         .addInterceptor(RedactingLoggingInterceptor(logger))
         // M0-A（ADR-045）：network interceptor —— 对每一跳生效，重定向到未知 origin 时
@@ -82,6 +86,10 @@ class HttpClientFactory(
                 try {
                     return chain.proceed(request)
                 } catch (e: IOException) {
+                    // M15-S3 测试 4：冷却快速失败来自 network interceptor，会穿过本拦截器 ——
+                    // 必须显式排除，否则它会被当作普通网络失败重试，造成请求放大
+                    // （这正是原设计把冷却放在本拦截器之外的原因，改逐跳后需在此等价保证）。
+                    if (e is RateLimitedException) throw e
                     val retriable = request.method in setOf("GET", "HEAD", "DELETE")
                     if (attempt >= MAX_ATTEMPTS || !retriable) throw e
                     logger.w(LogTag.NETWORK, "请求失败，重试 ${attempt + 1}/$MAX_ATTEMPTS: ${request.method} ${Redactor.redact(request.url.toString())}", e)

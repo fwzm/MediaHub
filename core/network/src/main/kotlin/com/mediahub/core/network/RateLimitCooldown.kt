@@ -4,6 +4,8 @@ import java.io.IOException
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -27,8 +29,25 @@ class RateLimitedException(val scope: String, val remainingMs: Long) :
 class RateLimitCooldown(
     private val clockMs: () -> Long = { System.nanoTime() / 1_000_000L },
     private val maxCooldownMs: Long = MAX_COOLDOWN_MS,
+    /** 冷却表条目**硬上限**（M15-S3 测试 5）：大量不同 origin 不得使其无限增长。 */
+    private val maxEntries: Int = MAX_TRACKED_SCOPES,
 ) {
     private val deadlines = ConcurrentHashMap<String, Long>()
+
+    /**
+     * 仅保护"回收 + 淘汰 + 写入"这一小段临界区，用于保证容量上限在并发下**严格成立**。
+     *
+     * 注意与"用全局串行锁掩盖并发错误"的区别：本锁内**没有任何 I/O、没有任何 sleep**，
+     * 不参与请求放行判定，也不序列化 [RateLimitCooldownInterceptor] 的 `chain.proceed`；
+     * 它只让并发写入者对"当前条目集合"的观察与修改保持原子。
+     * 读取路径（[remainingMs]）完全无锁。
+     */
+    private val writeLock = ReentrantLock()
+
+    private val capacity: Int = maxEntries.coerceAtLeast(1)
+
+    /** 当前被追踪的作用域数量（容量契约的观测点，供诊断与测试使用）。 */
+    fun trackedScopeCount(): Int = deadlines.size
 
     /** 剩余冷却毫秒；不在冷却中返回 null。 */
     fun remainingMs(scope: String): Long? {
@@ -41,18 +60,51 @@ class RateLimitCooldown(
         return remaining
     }
 
+    /**
+     * 记录/刷新冷却。语义（M15-S3 测试 5）：
+     * - 非正时长表示**无冷却**，清除已有条目；
+     * - 已存在的作用域只**刷新**截止时间（`now + duration`），绝不累加 —— 反复续期不会变成永久冷却；
+     * - 写入前先回收**已过期**条目；仍满员时淘汰**最早到期**的一条，
+     *   即在容量压力下牺牲"最接近自然释放"的条目，保留有效窗口更长的冷却。
+     */
     fun apply(scope: String, retryAfterMs: Long) {
         if (retryAfterMs <= 0L) {
             deadlines.remove(scope)
             return
         }
-        deadlines[scope] = clockMs() + retryAfterMs.coerceAtMost(maxCooldownMs)
+        val now = clockMs()
+        val deadline = now + retryAfterMs.coerceAtMost(maxCooldownMs)
+        writeLock.withLock {
+            if (deadlines.containsKey(scope)) {
+                deadlines[scope] = deadline
+                return
+            }
+            if (deadlines.size >= capacity) {
+                // 1) 先回收已过期条目（它们对后续请求已无效，优先让位）
+                val iterator = deadlines.entries.iterator()
+                while (iterator.hasNext()) {
+                    if (iterator.next().value <= now) iterator.remove()
+                }
+                // 2) 仍满员则淘汰最早到期的条目，保证容量是**硬**上限
+                while (deadlines.size >= capacity) {
+                    val victim = deadlines.entries.minByOrNull { it.value } ?: break
+                    deadlines.remove(victim.key, victim.value)
+                }
+            }
+            deadlines[scope] = deadline
+        }
     }
 
     fun clear() = deadlines.clear()
 
     companion object {
         const val MAX_COOLDOWN_MS: Long = 15 * 60 * 1000L
+
+        /**
+         * 冷却表容量上限：防止海量 origin（多账号 / 多云盘 / 恶意重定向制造的无限作用域）
+         * 无限占用内存。256 条足以覆盖真实设备上的服务器数量级，同时把内存占用钉死为上界。
+         */
+        const val MAX_TRACKED_SCOPES: Int = 256
 
         /** Retry-After 缺失/非法时的保守默认值（仍受上限约束）。 */
         const val DEFAULT_COOLDOWN_MS: Long = 60 * 1000L
@@ -88,8 +140,14 @@ class RateLimitCooldown(
 /**
  * 429 冷却拦截器：窗口内快速失败；收到 429 时按作用域记录冷却。
  *
- * 注册位置必须在 RetryOnceInterceptor **之外**（baseClient 早于 apiClient 追加），
- * 否则冷却失败会被当作可重试的 IOException 造成请求放大。
+ * M15-S3 测试 4：注册为 OkHttp **network interceptor**（逐跳生效），与 [UserAgentInterceptor]、
+ * [OriginScopedCredentialInterceptor] 同一模式。原因：应用拦截器只能看到"原始请求 + 最终响应"，
+ * 其 request.url 恒为入口 URL；重定向链中真正返回 429 的是另一跳，按入口 URL 记账会造成
+ * **跨服务器误冷却**。network interceptor 的 `chain.request()` 是当前跳的真实 URL，
+ * 因此归属、冷却键与快速失败都落在真正相关的那一跳上。
+ *
+ * 由于它位于 [HttpClientFactory] 的 RetryOnceInterceptor 之内，后者必须显式排除
+ * [RateLimitedException]（不再重试），否则冷却失败会被当作可重试 IOException 放大请求。
  */
 class RateLimitCooldownInterceptor(
     private val cooldown: RateLimitCooldown,
