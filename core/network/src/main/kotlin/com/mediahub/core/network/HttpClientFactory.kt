@@ -28,6 +28,8 @@ class HttpClientFactory(
     private val userAgentPolicy: UserAgentPolicy = UserAgentPolicy(),
     /** 由请求 URL 解析所属服务器；未知返回 null（跨 origin 跳转回落默认 UA）。 */
     private val serverIdFor: ServerIdResolver = ServerIdResolver { null },
+    /** M15：按作用域的 429 冷却（可注入以做确定性测试）。 */
+    private val rateLimitCooldown: RateLimitCooldown = RateLimitCooldown(),
 ) {
 
     fun apiClient(): OkHttpClient = baseClient()
@@ -44,6 +46,9 @@ class HttpClientFactory(
         .build()
 
     private fun baseClient(): OkHttpClient.Builder = OkHttpClient.Builder()
+        // M15：冷却判定的最外层。必须在 RetryOnceInterceptor 之前注册，
+        // 否则窗口内的快速失败会被当作可重试 IOException 放大请求。
+        .addInterceptor(RateLimitCooldownInterceptor(rateLimitCooldown) { url -> serverIdFor.serverIdFor(url) })
         .addInterceptor(RequestIdInterceptor())
         .addInterceptor(RedactingLoggingInterceptor(logger))
         // M0-A（ADR-045）：network interceptor —— 对每一跳生效，重定向到未知 origin 时
