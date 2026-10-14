@@ -276,17 +276,25 @@ class MpvHttpBridge internal constructor(
     /**
      * 规范化并校验本地路径：接受绝对路径与 file:// URI；
      * canonicalFile 消解 `..` 与符号链接后才能通过 isFile/canRead 校验。
+     *
+     * file:// 必须经 [File] 的 URI 构造器解析，**不能**用 `URI.path`：
+     * 后者返回**未做百分号解码**的字符串，且在 Windows 上把 `file:///C:/x` 解析成
+     * `/C:/x`（非法路径）—— 结果使所有 file:// 授权（[MpvPlaybackEngine] 传入的
+     * file:// 媒体源、以及 ServerIconStore 风格的引用）恒被 404 拒绝。
+     * [File] 的 URI 构造器按平台语义归一化并解码，两种形态因而等价。
      */
     private fun resolveLocalFile(path: String): File? {
-        val decoded = when {
-            path.startsWith("file://", ignoreCase = true) ->
-                runCatching { java.net.URI(path).path }.getOrNull()
-            else -> path
+        val file = when {
+            // 必须匹配整个 "file:" scheme，而不是字面量 "file://"：
+            // Java/Kotlin 的 File.toURI() 产出 **单斜杠** 形式（file:/C:/x），
+            // Android 的 Uri.fromFile() 产出 file:///x —— 两者都合法，都要接受。
+            path.startsWith("file:", ignoreCase = true) ->
+                runCatching { File(java.net.URI(path)) }.getOrNull()
+            else -> path.takeIf { it.isNotBlank() }?.let(::File)
         } ?: return null
-        if (decoded.isBlank()) return null
-        val file = runCatching { File(decoded).canonicalFile }.getOrNull() ?: return null
-        if (!file.isFile || !file.canRead()) return null
-        return file
+        val canonical = runCatching { file.canonicalFile }.getOrNull() ?: return null
+        if (!canonical.isFile || !canonical.canRead()) return null
+        return canonical
     }
 
     private fun parseRange(header: String?, length: Long): RangeResult {
