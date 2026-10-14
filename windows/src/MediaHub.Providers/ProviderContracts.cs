@@ -26,6 +26,16 @@ public sealed record SessionMaterial(string? Token, string? UserId, string? User
 
 public interface IProviderAuth
 {
+    /// <summary>
+    /// Live session material, read from the provider rather than copied by the caller.
+    /// </summary>
+    /// <remarks>
+    /// A copy kept on the handle goes stale the moment the provider refreshes or revokes its token,
+    /// and a stale token is indistinguishable from a wrong one at the call site. Reading through the
+    /// provider makes the provider the single source of truth.
+    /// </remarks>
+    SessionMaterial CurrentSession { get; }
+
     Task<AuthResult> AuthenticateAsync(Credentials credentials, CancellationToken ct = default);
     Task<AuthSessionState> RestoreSessionAsync(CancellationToken ct = default);
     Task LogoutAsync(CancellationToken ct = default);
@@ -60,6 +70,22 @@ public interface IProviderBrowse
 public interface IProviderPlayback
 {
     Task<PlaybackSource> ResolvePlaybackAsync(MediaItem item, PlaybackOptions options, CancellationToken ct = default);
+
+    /// <summary>
+    /// Session headers that authenticate a media stream request, or empty when the protocol needs
+    /// none. Memory-only, and only ever sent to this source's own origin.
+    /// </summary>
+    IReadOnlyDictionary<string, string> StreamRequestHeaders { get; }
+
+    /// <summary>
+    /// Origin those headers belong to, or null when there is no such restriction.
+    /// </summary>
+    /// <remarks>
+    /// A server may hand back a stream URL on a different host (object storage, a CDN, a second
+    /// node). Sending the session token there would repeat the very leak the bridge exists to
+    /// prevent, so the caller compares this against the stream URL before attaching anything.
+    /// </remarks>
+    Uri? StreamHeaderOrigin { get; }
 }
 
 public interface IProviderSearch
@@ -91,6 +117,20 @@ public interface IProviderSubtitle
     Task<IReadOnlyList<SubtitleTrack>> GetSubtitlesAsync(string itemId, CancellationToken ct = default);
 }
 
+/// <summary>
+/// Artwork retrieval.
+/// </summary>
+/// <remarks>
+/// Bytes rather than a URL, deliberately. A URL would have to carry the token (forbidden) or be
+/// fetched by a loader that does not know the source's credential and routing rules. Returning bytes
+/// keeps artwork inside exactly the same network boundary as the rest of the source's traffic.
+/// </remarks>
+public interface IProviderImageFetcher
+{
+    /// <param name="imageType">Provider image kind, e.g. <c>Primary</c> or <c>Backdrop</c>.</param>
+    Task<byte[]> FetchImageAsync(string itemId, string imageType, string? tag, int maxWidth, CancellationToken ct = default);
+}
+
 // ---------------------------------------------------------------- handle
 
 /// <summary>
@@ -108,7 +148,14 @@ public sealed class ProviderHandle : IDisposable
     public required MediaServer Server { get; init; }
     public required ProviderDescriptor Descriptor { get; init; }
 
-    public SessionMaterial Session { get; set; } = new(null, null, null);
+    private SessionMaterial _session = new(null, null, null);
+
+    /// <summary>Session material for this source; delegates to the auth provider when one exists.</summary>
+    public SessionMaterial Session
+    {
+        get => Auth?.CurrentSession ?? _session;
+        set => _session = value;
+    }
 
     public IProviderAuth? Auth { get; init; }
     public IProviderLibrary? Library { get; init; }
@@ -118,9 +165,13 @@ public sealed class ProviderHandle : IDisposable
     public IProviderSearch? Search { get; init; }
     public IProviderProgress? Progress { get; init; }
     public IProviderSubtitle? Subtitle { get; init; }
+    public IProviderImageFetcher? Images { get; init; }
 
-    /// <summary>Callback invoked when the provider observes that the session is no longer valid.</summary>
-    public Action? OnSessionExpired { get; init; }
+    /// <summary>
+    /// Callback invoked when the provider observes that the session is no longer valid.
+    /// </summary>
+    /// <remarks>Settable rather than init-only: the owner attaches it after the handle is built.</remarks>
+    public Action? OnSessionExpired { get; set; }
 
     private readonly List<IDisposable> _owned = new();
     internal void Own(IDisposable disposable) => _owned.Add(disposable);
@@ -138,6 +189,7 @@ public sealed class ProviderHandle : IDisposable
             if (Search is not null) caps |= ProviderCapability.Search;
             if (Progress is not null) caps |= ProviderCapability.Progress;
             if (Subtitle is not null) caps |= ProviderCapability.Subtitle;
+            if (Images is not null) caps |= ProviderCapability.Subtitle; // artwork rides the same auth path
             if (Auth is not null && Progress is not null) caps |= ProviderCapability.Progress;
             return caps;
         }

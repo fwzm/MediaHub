@@ -22,8 +22,14 @@
         <NavigationViewItem Content="首页" Tag="home">
           <NavigationViewItem.Icon><FontIcon Glyph="&#xE80F;" /></NavigationViewItem.Icon>
         </NavigationViewItem>
-        <NavigationViewItem Content="本地媒体" Tag="local">
+        <NavigationViewItem Content="媒体库" Tag="libraries">
           <NavigationViewItem.Icon><FontIcon Glyph="&#xE8B7;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="搜索" Tag="search">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE721;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="继续观看" Tag="continue">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE81C;" /></NavigationViewItem.Icon>
         </NavigationViewItem>
         <NavigationViewItem Content="媒体源" Tag="sources">
           <NavigationViewItem.Icon><FontIcon Glyph="&#xE968;" /></NavigationViewItem.Icon>

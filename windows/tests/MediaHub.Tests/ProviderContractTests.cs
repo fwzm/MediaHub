@@ -103,6 +103,8 @@ public sealed class ProviderCapabilityTests
 
     private sealed class NoopAuth : IProviderAuth
     {
+        public SessionMaterial CurrentSession => new(null, null, null);
+
         public Task<AuthResult> AuthenticateAsync(Credentials c, CancellationToken ct = default) => Task.FromResult(new AuthResult("u", "n"));
         public Task<AuthSessionState> RestoreSessionAsync(CancellationToken ct = default) => Task.FromResult(AuthSessionState.Authenticated);
         public Task LogoutAsync(CancellationToken ct = default) => Task.CompletedTask;
@@ -118,6 +120,9 @@ public sealed class ProviderCapabilityTests
 
     private sealed class NoopPlayback : IProviderPlayback
     {
+        public IReadOnlyDictionary<string, string> StreamRequestHeaders => new Dictionary<string, string>();
+        public Uri? StreamHeaderOrigin => null;
+
         public Task<PlaybackSource> ResolvePlaybackAsync(MediaItem item, PlaybackOptions options, CancellationToken ct = default)
             => Task.FromResult(new PlaybackSource { Url = new Uri("file:///x") });
     }

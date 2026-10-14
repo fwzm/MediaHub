@@ -73,6 +73,34 @@ internal sealed class MediaBrowserDialect
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Headers required to fetch a media stream from this server.
+    /// </summary>
+    /// <remarks>
+    /// The stream endpoint authenticates the same way the API does — Emby via <c>X-Emby-Token</c>,
+    /// Jellyfin via the authorization header — so a stream request issued without these headers is
+    /// answered with 401. They are returned as data rather than attached to a request so the caller
+    /// can decide whether the destination is actually entitled to them.
+    /// </remarks>
+    public IReadOnlyDictionary<string, string> BuildStreamHeaders(string? userId, string? token)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (TokenInAuthHeader)
+        {
+            headers[AuthHeaderName] = BuildAuthorizationValue(null, token);
+        }
+        else
+        {
+            headers[AuthHeaderName] = BuildAuthorizationValue(userId, null);
+            if (!string.IsNullOrEmpty(token))
+            {
+                headers["X-Emby-Token"] = token!;
+                headers["X-MediaBrowser-Token"] = token!;
+            }
+        }
+        return headers;
+    }
+
     public void ApplyIdentity(System.Net.Http.HttpRequestMessage request, string? userId)
     {
         // The identity header is sent on every request, including the unauthenticated ones, because

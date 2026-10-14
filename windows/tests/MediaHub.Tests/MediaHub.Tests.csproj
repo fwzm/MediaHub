@@ -17,5 +17,10 @@
     <ProjectReference Include="..\..\src\MediaHub.Providers\MediaHub.Providers.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Player\MediaHub.Player.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Player.Mpv\MediaHub.Player.Mpv.csproj" />
+    <ProjectReference Include="..\MediaHub.TestSupport\MediaHub.TestSupport.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The playback engine tests need a real media file; it is committed so the tests are hermetic. -->
+    <Content Include="..\assets\sample-av.mp4" Link="assets\sample-av.mp4" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

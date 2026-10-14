@@ -20,7 +20,8 @@ internal sealed class MediaBrowserProvider :
     IProviderPlayback,
     IProviderSearch,
     IProviderProgress,
-    IProviderSubtitle
+    IProviderSubtitle,
+    IProviderImageFetcher
 {
     private readonly MediaBrowserApi _api;
     private readonly string _serverId;
@@ -35,7 +36,7 @@ internal sealed class MediaBrowserProvider :
         _api.UserId = session.UserId;
     }
 
-    public SessionMaterial Session => new(_api.Token, _api.UserId, null);
+    public SessionMaterial CurrentSession => new(_api.Token, _api.UserId, null);
 
     // ---------------------------------------------------------------- auth
 
@@ -220,6 +221,10 @@ internal sealed class MediaBrowserProvider :
         return headers;
     }
 
+    public IReadOnlyDictionary<string, string> StreamRequestHeaders => _api.BuildStreamHeaders();
+
+    public Uri? StreamHeaderOrigin => _api.ApiOrigin;
+
     // ---------------------------------------------------------------- search
 
     public async Task<PagedResult<MediaItem>> SearchAsync(string query, PageRequest page, CancellationToken ct = default)
@@ -326,6 +331,11 @@ internal sealed class MediaBrowserProvider :
         }
         return tracks;
     }
+
+    // ---------------------------------------------------------------- artwork
+
+    public async Task<byte[]> FetchImageAsync(string itemId, string imageType, string? tag, int maxWidth, CancellationToken ct = default)
+        => await _api.GetImageBytesAsync(itemId, imageType, tag, maxWidth, ct).ConfigureAwait(false);
 
     // ---------------------------------------------------------------- session
 

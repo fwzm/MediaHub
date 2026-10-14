@@ -4,37 +4,65 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-  <Grid Padding="28,20,28,20" RowSpacing="16">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="*" />
-    </Grid.RowDefinitions>
+  <ScrollViewer Padding="28,20,28,24">
+    <StackPanel Spacing="18" MaxWidth="1200" HorizontalAlignment="Left">
 
-    <StackPanel Grid.Row="0" Spacing="4">
-      <TextBlock Text="继续观看" Style="{StaticResource MediaHubSectionHeader}" />
-      <TextBlock x:Name="ContinueEmptyText" Style="{StaticResource MediaHubCaption}"
-                 Text="还没有播放记录。打开一个本地视频后，进度会自动记录在这里。" />
+      <TextBlock Text="MediaHub" FontSize="28" FontWeight="SemiBold" />
+      <TextBlock x:Name="SourceSummaryText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+
+      <StackPanel Orientation="Horizontal" Spacing="10">
+        <Button x:Name="LibrariesButton" Click="OnLibrariesClick">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <FontIcon Glyph="&#xE8B7;" FontSize="14" />
+            <TextBlock Text="媒体库" />
+          </StackPanel>
+        </Button>
+        <Button x:Name="SearchButton" Click="OnSearchClick">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <FontIcon Glyph="&#xE721;" FontSize="14" />
+            <TextBlock Text="搜索" />
+          </StackPanel>
+        </Button>
+        <Button x:Name="SourcesButton" Click="OnSourcesClick">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <FontIcon Glyph="&#xE968;" FontSize="14" />
+            <TextBlock Text="媒体源" />
+          </StackPanel>
+        </Button>
+        <Button x:Name="LocalButton" Click="OnLocalClick">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <FontIcon Glyph="&#xE8B7;" FontSize="14" />
+            <TextBlock Text="本地媒体" />
+          </StackPanel>
+        </Button>
+      </StackPanel>
+
+      <StackPanel Spacing="4">
+        <TextBlock Text="本地最近播放" Style="{StaticResource MediaHubSectionHeader}" />
+        <TextBlock x:Name="ContinueEmptyText" Style="{StaticResource MediaHubCaption}"
+                   Text="还没有本地播放记录。打开一个本地视频后，进度会自动记录在这里。" />
+      </StackPanel>
+
+      <GridView x:Name="ContinueGrid" SelectionMode="None" IsItemClickEnabled="True"
+                ItemClick="OnContinueItemClick" MaxHeight="420">
+        <GridView.ItemTemplate>
+          <DataTemplate>
+            <Border Width="240" Margin="0,0,12,12" CornerRadius="8" Padding="12"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+              <StackPanel Spacing="8">
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxLines="2" />
+                <ProgressBar Value="{Binding ProgressFraction}" Minimum="0" Maximum="1" />
+                <TextBlock Style="{StaticResource MediaHubCaption}">
+                  <Run Text="{Binding PositionDisplay}" />
+                  <Run Text=" / " />
+                  <Run Text="{Binding DurationDisplay}" />
+                </TextBlock>
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </GridView.ItemTemplate>
+      </GridView>
     </StackPanel>
-
-    <GridView x:Name="ContinueGrid" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True"
-              ItemClick="OnContinueItemClick">
-      <GridView.ItemTemplate>
-        <DataTemplate>
-          <Border Width="220" Margin="0,0,12,12" CornerRadius="8" Padding="12"
-                  Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                  BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-            <StackPanel Spacing="8">
-              <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxLines="2" />
-              <ProgressBar Value="{Binding ProgressFraction}" Minimum="0" Maximum="1" />
-              <TextBlock Style="{StaticResource MediaHubCaption}">
-                <Run Text="{Binding PositionDisplay}" />
-                <Run Text=" / " />
-                <Run Text="{Binding DurationDisplay}" />
-              </TextBlock>
-            </StackPanel>
-          </Border>
-        </DataTemplate>
-      </GridView.ItemTemplate>
-    </GridView>
-  </Grid>
+  </ScrollViewer>
 </Page>

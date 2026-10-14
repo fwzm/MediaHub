@@ -92,6 +92,7 @@ internal static class MediaBrowserProviderFactorySupport
             Search = provider,
             Progress = provider,
             Subtitle = provider,
+            Images = provider,
         };
         handle.Own(httpFactory);
         return handle;

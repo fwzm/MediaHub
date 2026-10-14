@@ -5,33 +5,26 @@ using MediaHub.Player.Mpv;
 
 namespace MediaHub.App.Services;
 
-/// <summary>What the player page was asked to play.</summary>
-public sealed record PlaybackRequest
-{
-    public required string Path { get; init; }
-    public required string Title { get; init; }
-    public string? ServerId { get; init; }
-    public string? ItemId { get; init; }
-    public IReadOnlyDictionary<string, string> Headers { get; init; } =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-    public long StartPositionTicks { get; init; }
-    public TimeSpan? DeclaredDuration { get; init; }
-    public IReadOnlyList<string> ExternalSubtitles { get; init; } = Array.Empty<string>();
-}
-
 /// <summary>
 /// Owns the single engine instance and the native video surface for the process lifetime.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The engine is intentionally not per-page: re-creating it on every navigation would drop the
 /// hardware-decoder and swapchain state, and would add hundreds of milliseconds to each entry into
 /// the player. The page binds to this host and detaches on unload.
+/// </para>
+/// <para>
+/// The engine is configured with an explicit proxy value derived from the active
+/// <see cref="NetworkPolicy"/> on every load. Left unset it consults the ambient <c>http_proxy</c> and
+/// <c>NO_PROXY</c> variables, which would make the media route depend on the user's shell environment
+/// rather than on the configured policy.
+/// </para>
 /// </remarks>
 public sealed class PlayerHostService : IAsyncDisposable
 {
     private readonly SettingsStore _settings;
     private readonly LogService _log;
-    private readonly PlayerSnapshot _empty = PlayerSnapshot.Empty;
 
     private MpvVideoSurface? _surface;
     private MpvPlayer? _player;
@@ -46,7 +39,7 @@ public sealed class PlayerHostService : IAsyncDisposable
     public MpvPlayer? Player => _player;
     public MpvVideoSurface? Surface => _surface;
     public bool IsInitialized => _player is not null;
-    public PlaybackRequest? Current { get; private set; }
+    public ActivePlayback? Current { get; private set; }
 
     public event EventHandler<PlayerSnapshot>? SnapshotChanged;
 
@@ -63,9 +56,8 @@ public sealed class PlayerHostService : IAsyncDisposable
         {
             Wid = _surface.HostHandle,
             InputConf = File.Exists(inputConf) ? inputConf : null,
+            HttpProxy = NetworkPolicy.FollowSystem.ToEngineProxyValue(new Uri("http://localhost")),
         };
-
-        foreach (var (k, v) in _settings.Current.EngineOptions) { /* applied below via ExtraOptions */ }
 
         var extra = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (k, v) in _settings.Current.EngineOptions) extra[k] = v;
@@ -73,10 +65,19 @@ public sealed class PlayerHostService : IAsyncDisposable
         _player = new MpvPlayer(options with { ExtraOptions = extra });
         _player.SnapshotChanged += (_, snap) => SnapshotChanged?.Invoke(this, snap);
 
-        _log.Info("player", $"播放引擎已初始化：libmpv client API {MpvPlayer.ClientApiVersion}，输出 {options.VideoOutput}/{options.GpuContext}，硬解 {options.HwDec}");
+        _log.Info("player", "播放引擎已初始化：libmpv client API " + MpvPlayer.ClientApiVersion
+            + "，输出 " + options.VideoOutput + "/" + options.GpuContext + "，硬解 " + options.HwDec
+            + "，代理 " + (string.IsNullOrEmpty(options.HttpProxy) ? "直连" : options.HttpProxy));
+
+        foreach (string problem in _player.OptionErrors)
+        {
+            // A rejected option is silent at runtime; surfacing it here is the only way to notice that
+            // the engine is not configured the way it was asked to be.
+            _log.Error("player", "引擎拒绝了选项：" + problem);
+        }
     }
 
-    /// <summary>Applies engine preferences that can be changed without restarting playback.</summary>
+    /// <summary>Applies subtitle preferences that can change without restarting playback.</summary>
     public void ApplySubtitleSettings()
     {
         if (_player is null) return;
@@ -97,32 +98,36 @@ public sealed class PlayerHostService : IAsyncDisposable
         });
     }
 
-    public async Task PlayAsync(PlaybackRequest request, CancellationToken ct = default)
+    /// <summary>Loads a resolved playback session into the engine.</summary>
+    public async Task PlayAsync(ActivePlayback playback, CancellationToken ct = default)
     {
         if (_player is null) throw new InvalidOperationException("PlayerHostService.Initialize must be called first.");
-        Current = request;
+        Current = playback;
 
-        _player.SetDeclaredDuration(request.DeclaredDuration);
+        _player.SetDeclaredDuration(playback.DeclaredDuration);
         var s = _settings.Current;
+
+        // Headers are deliberately empty. Credentials live with the bridge that fetches the stream, so
+        // the engine holds nothing that could be forwarded to a redirect target.
         var settings = new PlaybackSettings
         {
-            StartPositionTicks = request.StartPositionTicks,
-            Headers = request.Headers,
+            StartPositionTicks = playback.StartPositionTicks,
+            Headers = new Dictionary<string, string>(),
             Volume = s.DefaultVolume,
             Speed = s.DefaultSpeed,
             SubtitleVisible = s.SubtitlesEnabled,
         };
 
-        await _player.LoadAsync(request.Path, settings, ct).ConfigureAwait(true);
+        await _player.LoadAsync(playback.EngineUrl.ToString(), settings, ct).ConfigureAwait(true);
         ApplySubtitleSettings();
 
-        foreach (string sub in request.ExternalSubtitles)
+        foreach (string sub in playback.ExternalSubtitles)
         {
             try { _player.AddExternalSubtitle(sub); }
-            catch (Exception ex) { _log.Warn("player", $"外挂字幕加载失败：{Path.GetFileName(sub)} — {ex.GetType().Name}"); }
+            catch (Exception ex) { _log.Warn("player", "外挂字幕加载失败：" + Path.GetFileName(sub) + " — " + ex.GetType().Name); }
         }
 
-        _log.Info("player", $"开始播放：{LogService.Redact(request.Title)}");
+        _log.Info("player", "开始播放：" + LogService.Redact(playback.DisplayUrl));
     }
 
     /// <summary>Repositions the video surface. Coordinates are DIPs in the window's client space.</summary>

@@ -24,6 +24,7 @@ public sealed partial class PlayerPage : Page
 
     private PointerActivityWatcher? _pointerWatcher;
     private PlaybackRequest? _request;
+    private ActivePlayback? _active;
     private bool _scrubbing;
     private bool _controlsVisible = true;
     private bool _isFullScreen;
@@ -49,7 +50,7 @@ public sealed partial class PlayerPage : Page
         _hideTimer.Tick += (_, _) => { _hideTimer.Stop(); HideControlsIfAllowed(); };
 
         _historyTimer.Interval = ProgressSyncPolicy.LocalSnapshotInterval;
-        _historyTimer.Tick += (_, _) => RecordHistory();
+        _historyTimer.Tick += (_, _) => OnProgressTick();
 
         // A short timer re-syncs the native surface bounds. Relying on layout events alone misses
         // DPI changes and presenter transitions (windowed <-> fullscreen), which do not raise them.
@@ -75,8 +76,10 @@ public sealed partial class PlayerPage : Page
         }
 
         TitleText.Text = _request.Title;
-        SubtitleText.Text = _request.Path;
-        App.Services.Log.Info("player", $"进入播放页：{LogService.Redact(_request.Title)}");
+        // DisplayUrl, never the engine URL: for a server source the engine URL is a loopback bridge
+        // address carrying a per-session token, which must not be shown or logged.
+        SubtitleText.Text = _request.DisplayUrl;
+        App.Services.Log.Info("player", "进入播放页：" + LogService.Redact(_request.Title));
 
         var host = App.Services.PlayerHost;
 
@@ -90,11 +93,21 @@ public sealed partial class PlayerPage : Page
 
         try
         {
-            await host.PlayAsync(_request);
+            // Resolving a server stream also establishes the loopback relay, so the engine never
+            // receives server credentials.
+            _active = await App.Services.Playback.PrepareAsync(_request);
+            SubtitleText.Text = _active.DisplayUrl;
+            await host.PlayAsync(_active);
+        }
+        catch (ProviderException ex)
+        {
+            ShowStatus("播放失败：" + ex.Message);
+            App.Services.Log.Error("player", "播放启动失败", ex);
+            return;
         }
         catch (Exception ex)
         {
-            ShowStatus($"播放失败：{ex.Message}");
+            ShowStatus("播放失败：" + ex.Message);
             App.Services.Log.Error("player", "播放启动失败", ex);
             return;
         }
@@ -124,9 +137,51 @@ public sealed partial class PlayerPage : Page
         _boundsTimer.Stop();
         _historyTimer.Stop();
         _hideTimer.Stop();
-        RecordHistory();
+        FlushFinalProgress();
         try { App.Services.PlayerHost.Player?.Pause(); } catch { /* engine may already be gone */ }
         try { App.Services.PlayerHost.HideSurface(); } catch { /* surface may already be gone */ }
+    }
+
+    /// <summary>
+    /// Sends the last progress sample and releases the relay session.
+    /// </summary>
+    /// <remarks>
+    /// The final report has to be issued before the session is torn down, and the relay must be
+    /// disposed even when reporting fails, otherwise a cancelled playback leaves a listener and an
+    /// upstream connection pool alive for the rest of the process lifetime.
+    /// </remarks>
+    private void FlushFinalProgress()
+    {
+        ActivePlayback? active = _active;
+        _active = null;
+        if (active is null) return;
+
+        try
+        {
+            PlayerSnapshot snapshot = App.Services.PlayerHost.Player?.Snapshot ?? PlayerSnapshot.Empty;
+            if (snapshot.DurationSeconds > 0)
+            {
+                var sample = new PlayerProgressSample(
+                    (long)(snapshot.PositionSeconds * TimeSpan.TicksPerSecond),
+                    (long)(snapshot.DurationSeconds * TimeSpan.TicksPerSecond),
+                    IsPaused: true,
+                    IsMuted: snapshot.Muted);
+                // Best effort and bounded: a hanging report must not delay leaving the player.
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+                        await App.Services.Playback.OnProgressAsync(active, sample, final: true).WaitAsync(timeout.Token);
+                    }
+                    catch { }
+                });
+            }
+        }
+        catch { }
+
+        App.Services.Playback.EndSession();
+        _ = active.DisposeAsync().AsTask().ContinueWith(_ => { }, TaskScheduler.Default);
     }
 
     // ---------------------------------------------------------------- surface geometry
@@ -514,9 +569,9 @@ public sealed partial class PlayerPage : Page
 
     private void OnReloadSubtitleClick(object sender, RoutedEventArgs e)
     {
-        if (_request is null) return;
+        if (_request?.LocalPath is not { } path) return;
         int added = 0;
-        foreach (string sub in LocalLibraryService.FindSiblingSubtitles(_request.Path))
+        foreach (string sub in LocalLibraryService.FindSiblingSubtitles(path))
         {
             try { App.Services.PlayerHost.Player?.AddExternalSubtitle(sub); added++; }
             catch { /* a single unreadable subtitle file must not abort the rest */ }
@@ -560,19 +615,37 @@ public sealed partial class PlayerPage : Page
         if (App.Services.Settings.Current.AutoHideControls) _hideTimer.Start();
     }
 
-    private void RecordHistory()
+    /// <summary>
+    /// Local snapshot tier plus the remote reporting tier.
+    /// </summary>
+    /// <remarks>
+    /// Local playback is recorded locally and never reported to a server. Server playback is reported
+    /// by the coordinator, which owns the provider's throttling interval and session lifecycle; the
+    /// local history is not used for it because the server is the authority on resume position.
+    /// </remarks>
+    private void OnProgressTick()
     {
-        var request = _request;
-        var snapshot = App.Services.PlayerHost.Player?.Snapshot;
-        if (request is null || snapshot is null) return;
-        if (request.ServerId is not null) return; // server items are reported by the provider layer
-        if (snapshot.DurationSeconds <= 0) return;
+        PlaybackRequest? request = _request;
+        PlayerSnapshot? snapshot = App.Services.PlayerHost.Player?.Snapshot;
+        if (request is null || snapshot is null || snapshot.DurationSeconds <= 0) return;
 
-        App.Services.PlaybackHistory.Record(
-            request.Path,
-            request.Title,
+        if (request.LocalPath is { } localPath)
+        {
+            App.Services.PlaybackHistory.Record(
+                localPath,
+                request.Title,
+                (long)(snapshot.PositionSeconds * TimeSpan.TicksPerSecond),
+                (long)(snapshot.DurationSeconds * TimeSpan.TicksPerSecond));
+            return;
+        }
+
+        if (_active is null) return;
+        var sample = new PlayerProgressSample(
             (long)(snapshot.PositionSeconds * TimeSpan.TicksPerSecond),
-            (long)(snapshot.DurationSeconds * TimeSpan.TicksPerSecond));
+            (long)(snapshot.DurationSeconds * TimeSpan.TicksPerSecond),
+            snapshot.State == TransportState.Paused,
+            snapshot.Muted);
+        _ = App.Services.Playback.OnProgressAsync(_active, sample, final: false);
     }
 
     private void ShowStatus(string message)

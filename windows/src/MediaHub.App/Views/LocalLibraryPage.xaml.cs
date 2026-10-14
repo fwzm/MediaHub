@@ -107,16 +107,17 @@ public sealed partial class LocalLibraryPage : Page
 
     private static void PlayLocal(string path)
     {
-        var entry = App.Services.PlaybackHistory.Find(path);
+        PlaybackHistoryEntry? entry = App.Services.PlaybackHistory.Find(path);
         var request = new PlaybackRequest
         {
-            Path = path,
+            LocalPath = path,
             Title = System.IO.Path.GetFileNameWithoutExtension(path),
+            DisplayUrl = path,
             StartPositionTicks = App.Services.Settings.Current.ResumePlayback ? (entry?.PositionTicks ?? 0) : 0,
             DeclaredDuration = entry is { DurationTicks: > 0 } ? TimeSpan.FromTicks(entry.DurationTicks) : null,
             ExternalSubtitles = LocalLibraryService.FindSiblingSubtitles(path),
         };
-        (App.MainWindow as MainWindow)?.EnterPlayer(request);
+        MainWindow.Current?.EnterPlayer(request);
     }
 
     private sealed record FolderRow(string Path, bool Exists)

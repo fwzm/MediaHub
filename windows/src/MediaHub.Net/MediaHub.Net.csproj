@@ -5,4 +5,9 @@
   <ItemGroup>
     <ProjectReference Include="..\MediaHub.Domain\MediaHub.Domain.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- DPAPI CurrentUser for the credential vault. Deliberately the platform primitive rather than
+         a hand-rolled cipher: the key is derived from the Windows user profile and never stored. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
+  </ItemGroup>
 </Project>

@@ -36,6 +36,14 @@ public sealed record MpvPlayerOptions
     public bool Idle { get; init; } = true;
     public string? LogFile { get; init; }
 
+    /// <summary>
+    /// Proxy to configure on the engine. An empty string means "connect directly" and is applied
+    /// explicitly so an ambient <c>http_proxy</c> variable cannot silently reroute playback.
+    /// A null value leaves the engine's own default in place and must only be used where routing is
+    /// not a concern.
+    /// </summary>
+    public string? HttpProxy { get; init; }
+
     /// <summary>Optional input.conf path; when null the engine's built-in bindings are used.</summary>
     public string? InputConf { get; init; }
 

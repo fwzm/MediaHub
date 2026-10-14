@@ -178,6 +178,11 @@ internal sealed class LocalMediaProvider : IProviderBrowse, IProviderPlayback, I
         return Task.FromResult(new PagedResult<MediaItem>(window, page.Offset, ordered.Count));
     }
 
+    /// <summary>A local file needs no credentials.</summary>
+    public IReadOnlyDictionary<string, string> StreamRequestHeaders => new Dictionary<string, string>();
+
+    public Uri? StreamHeaderOrigin => null;
+
     public Task<PlaybackSource> ResolvePlaybackAsync(MediaItem item, PlaybackOptions options, CancellationToken ct = default)
     {
         string path = item.Path ?? item.Id;

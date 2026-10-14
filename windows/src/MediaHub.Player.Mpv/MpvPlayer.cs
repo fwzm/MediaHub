@@ -156,14 +156,25 @@ public sealed class MpvPlayer : IPlaybackEngine, ITrackController, IDisposable
         ("speed", MpvNative.MPV_FORMAT_DOUBLE),
     };
 
+    private readonly List<string> _optionErrors = new();
     private readonly List<string> _observeErrors = new();
+
+    /// <summary>Options the engine refused. Non-empty means the engine is not configured as intended.</summary>
+    public IReadOnlyList<string> OptionErrors => _optionErrors;
 
     /// <summary>Non-empty when a property could not be observed; surfaced by the diagnostics panel.</summary>
     public IReadOnlyList<string> ObserveErrors => _observeErrors;
 
     private void ApplyOptions()
     {
-        void Opt(string k, string v) => MpvNative.mpv_set_option_string(_ctx, k, v);
+        // The return code matters: an unknown or misspelled option is accepted silently by mpv and
+        // simply does nothing. A typo in a network option would therefore disable a security control
+        // without any visible symptom, so every rejected option is recorded and surfaced.
+        void Opt(string k, string v)
+        {
+            int result = MpvNative.mpv_set_option_string(_ctx, k, v);
+            if (result < 0) _optionErrors.Add(k + ": " + MpvNative.ErrorString(result));
+        }
 
         // Do not read the user's mpv.conf: MediaHub behaviour must be reproducible.
         Opt("config", "no");
@@ -187,6 +198,10 @@ public sealed class MpvPlayer : IPlaybackEngine, ITrackController, IDisposable
         Opt("msg-level", "all=warn");
         if (!string.IsNullOrEmpty(_options.LogFile)) Opt("log-file", _options.LogFile!);
         if (!string.IsNullOrEmpty(_options.InputConf)) Opt("input-conf", _options.InputConf!);
+        // Verified against this engine build: "http-proxy" is the accepted option name ("proxy" and
+        // "http_proxy" are rejected), and the engine also honours the ambient http_proxy/NO_PROXY
+        // variables, so the value is always set explicitly — including to empty for direct routing.
+        if (_options.HttpProxy is not null) Opt("http-proxy", _options.HttpProxy);
 
         if (_options.Wid != IntPtr.Zero)
         {
@@ -709,6 +724,16 @@ public sealed class MpvPlayer : IPlaybackEngine, ITrackController, IDisposable
 
     /// <summary>Hardware-decoding mode actually in use; null when nothing is playing.</summary>
     public string? CurrentHwDec => _ctx == IntPtr.Zero ? null : MpvNative.GetString(_ctx, "hwdec-current");
+
+    /// <summary>
+    /// Reads back an engine option after initialisation.
+    /// </summary>
+    /// <remarks>
+    /// The engine exposes its options as properties, which makes "the engine is configured the way we
+    /// asked" an observable fact rather than an assumption about an API call that returned void.
+    /// </remarks>
+    public string? GetOptionValue(string optionName)
+        => _ctx == IntPtr.Zero ? null : MpvNative.GetString(_ctx, "options/" + optionName);
 
     /// <summary>Asks the engine to write a frame to disk (HDR and OSD included).</summary>
     public bool TakeScreenshot(string filePath)

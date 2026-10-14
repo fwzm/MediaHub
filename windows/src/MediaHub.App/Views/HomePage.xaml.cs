@@ -1,4 +1,5 @@
 using MediaHub.App.Services;
+using MediaHub.Domain;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -25,6 +26,12 @@ public sealed partial class HomePage : Page
 
         ContinueGrid.ItemsSource = entries;
         ContinueEmptyText.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        int online = App.Services.Servers.Servers.Count(s => s.Status == ServerStatus.Online);
+        int total = App.Services.Servers.Servers.Count(s => s.Type != ServerType.Local);
+        SourceSummaryText.Text = total == 0
+            ? "尚未添加媒体服务器。前往“媒体源”添加 Emby 或 Jellyfin 后即可浏览媒体库。"
+            : "已配置 " + total + " 个媒体服务器，其中 " + online + " 个当前可用。";
     }
 
     private static string Format(TimeSpan t)
@@ -35,18 +42,30 @@ public sealed partial class HomePage : Page
         if (e.ClickedItem is not ContinueItem item) return;
         if (!System.IO.File.Exists(item.Path)) return;
 
-        var entry = App.Services.PlaybackHistory.Find(item.Path);
-        var request = new PlaybackRequest
+        PlaybackHistoryEntry? entry = App.Services.PlaybackHistory.Find(item.Path);
+        MainWindow.Current?.EnterPlayer(new PlaybackRequest
         {
-            Path = item.Path,
+            LocalPath = item.Path,
             Title = item.Title,
+            DisplayUrl = item.Path,
             StartPositionTicks = App.Services.Settings.Current.ResumePlayback ? (entry?.PositionTicks ?? 0) : 0,
             DeclaredDuration = entry is { DurationTicks: > 0 } ? TimeSpan.FromTicks(entry.DurationTicks) : null,
             ExternalSubtitles = LocalLibraryService.FindSiblingSubtitles(item.Path),
-        };
-
-        (App.MainWindow as MainWindow)?.EnterPlayer(request);
+        });
     }
 
-    private sealed record ContinueItem(string Title, string Path, double ProgressFraction, string PositionDisplay, string DurationDisplay);
+    private void OnLibrariesClick(object sender, RoutedEventArgs e)
+        => MainWindow.Current?.NavigateShell(typeof(LibrariesPage));
+
+    private void OnSearchClick(object sender, RoutedEventArgs e)
+        => MainWindow.Current?.NavigateShell(typeof(SearchPage));
+
+    private void OnSourcesClick(object sender, RoutedEventArgs e)
+        => MainWindow.Current?.NavigateShell(typeof(SourcesPage));
+
+    private void OnLocalClick(object sender, RoutedEventArgs e)
+        => MainWindow.Current?.NavigateShell(typeof(LocalLibraryPage));
+
+    private sealed record ContinueItem(
+        string Title, string Path, double ProgressFraction, string PositionDisplay, string DurationDisplay);
 }

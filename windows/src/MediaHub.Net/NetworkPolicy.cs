@@ -71,6 +71,64 @@ public sealed record NetworkPolicy
         }
     }
 
+    /// <summary>
+    /// Value to configure on the playback engine for this policy, or null to leave it unset.
+    /// </summary>
+    /// <remarks>
+    /// The engine has its own stack and does not read Windows proxy settings; left alone it consults
+    /// the ambient <c>http_proxy</c> / <c>NO_PROXY</c> environment variables instead, so routing
+    /// would depend on the user's shell environment rather than on the configured policy. Passing an
+    /// explicit value — including an empty one, which means "direct" — makes the engine's route a
+    /// function of the policy alone.
+    /// </remarks>
+    public string ToEngineProxyValue(Uri target)
+    {
+        switch (Mode)
+        {
+            case ProxyMode.Direct:
+                return ""; // explicitly disable, so an ambient http_proxy cannot take effect
+            case ProxyMode.Explicit:
+                return ProxyUrl ?? "";
+            default:
+                return ResolveSystemProxy(target) ?? "";
+        }
+    }
+
+    /// <summary>
+    /// Resolves the effective system proxy for <paramref name="target"/>, or null when the system
+    /// would connect directly.
+    /// </summary>
+    private static string? ResolveSystemProxy(Uri target)
+    {
+        try
+        {
+            IWebProxy proxy = HttpClient.DefaultProxy;
+            if (proxy is null || proxy.IsBypassed(target)) return null;
+
+            Uri? address = proxy.GetProxy(target);
+            if (address is null) return null;
+            // GetProxy returns the target itself when no proxy applies.
+            if (Uri.Compare(address, target, UriComponents.SchemeAndServer, UriFormat.Unescaped,
+                    StringComparison.OrdinalIgnoreCase) == 0)
+            {
+                return null;
+            }
+
+            // mpv wants a proxy URL. A SOCKS endpoint must keep its scheme so the engine selects the
+            // SOCKS implementation rather than speaking HTTP to it.
+            return address.Scheme switch
+            {
+                "socks5" => "socks5://" + address.Authority,
+                "socks4" => "socks4://" + address.Authority,
+                _ => "http://" + address.Authority,
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>Human-readable description for the connection diagnostics panel.</summary>
     public string Describe() => Mode switch
     {

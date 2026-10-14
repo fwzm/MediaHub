@@ -144,8 +144,13 @@ internal sealed class MediaBrowserApi
         {
             return await SendJsonAsync(request, ct).ConfigureAwait(false);
         }
-        catch (ProviderHttpException ex) when (ex.StatusCode == 401)
+        catch (ProviderException ex) when (ex.Code == ProviderErrorCode.AuthExpired)
         {
+            // SendJsonAsync maps every 401 to AuthExpired, so the login route must translate it back:
+            // the user typed a wrong password, they are not holding an expired session. Reporting
+            // "please log in again" to someone who is literally logging in is a dead end, and the
+            // earlier catch on ProviderHttpException could never fire because SendJsonAsync never
+            // throws that type for a 401.
             throw ProviderException.AuthFailed(_serverId, "用户名或密码不正确");
         }
     }
@@ -227,6 +232,16 @@ internal sealed class MediaBrowserApi
         await SendNoContentAsync(request, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Headers that authenticate a media stream request against this server.
+    /// </summary>
+    /// <remarks>Callers must only send these to the server's own origin; see PlaybackCoordinator.</remarks>
+    public IReadOnlyDictionary<string, string> BuildStreamHeaders()
+        => _dialect.BuildStreamHeaders(UserId, Token);
+
+    /// <summary>Origin of the API, used to decide whether a stream URL is entitled to the session.</summary>
+    public Uri ApiOrigin => _dialect.ApiRoot;
+
     /// <summary>Direct-stream URL for an item.</summary>
     /// <remarks>
     /// The token is deliberately absent: authentication for the stream travels in the injected header,
@@ -242,6 +257,41 @@ internal sealed class MediaBrowserApi
         };
         string path = "/Videos/" + Uri.EscapeDataString(itemId) + "/stream." + (string.IsNullOrWhiteSpace(container) ? "mp4" : container);
         return new Uri(_dialect.BuildUrl(path, query));
+    }
+
+    /// <summary>
+    /// Downloads artwork bytes.
+    /// </summary>
+    /// <remarks>
+    /// Artwork is fetched through the same request builder as every other API call, so it inherits the
+    /// source's identity headers, its origin-scoped redirect handling and its proxy policy. Handing an
+    /// image URL to an uncontrolled loader would move the request outside all three.
+    /// </remarks>
+    public async Task<byte[]> GetImageBytesAsync(string itemId, string imageType, string? tag, int maxWidth, CancellationToken ct)
+    {
+        HttpRequestMessage request = NewRequest(HttpMethod.Get,
+            "/Items/" + Uri.EscapeDataString(itemId) + "/Images/" + imageType,
+            new Dictionary<string, string?>
+            {
+                ["maxWidth"] = maxWidth.ToString(CultureInfo.InvariantCulture),
+                ["quality"] = "85",
+                ["tag"] = string.IsNullOrWhiteSpace(tag) ? null : tag,
+            });
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (HttpRequestException ex) { throw ProviderException.Network(_serverId, ex); }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+                throw new ProviderHttpException(_serverId, (int)response.StatusCode, "GET", UrlRedactor.Redact(request.RequestUri));
+            return await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        }
     }
 
     public Uri ImageUrl(string itemId, string imageType, string? tag, int maxWidth)
