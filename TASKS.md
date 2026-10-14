@@ -2,6 +2,17 @@
 
 > 状态：TODO / IN PROGRESS / DONE / BLOCKED。由完成任务的 AI 更新。
 
+## 2026-10-14 遗留问题核验（M4；完整证据见 docs/reviews/legacy-verification-2026-10-14.md）
+
+- [x] PR #6（post-1D review hardening，31 文件）：**已被 main 覆盖** → 建议关闭（superseded）。证据：`merge-base --is-ancestor` rc=1；`mergeStateStatus=DIRTY`；31 文件中 20 个 main 亦改过。**未执行关闭**（需授权）。
+- [ ] PR #16（1H 真机证据归档，1 文件）：**仍存在真实缺陷** —— 脱敏未完成（2 个主机名 + 1 个 IPv4 字面；wire 摘录仍含真实账号名）。→ 补丁前不合并；本次核验与文档均以 `<redacted>` 占位，未复制原文。
+- [x] PR #20（WorkBuddy W0–W4，Draft）：**实质发现已被 main 覆盖**（`EndpointProbeErrorMapper` + 显式 `catch(CancellationException){ throw e }` + `withContext(ioDispatcher)` + `enqueue`）；文档基线 `8e516e4` 已过期 → 建议提炼后关闭。
+- [ ] PR #10 视觉 8 条 inline（PR 本体已合并）：6 条已覆盖；**2 条仍成立** —— `FlowGlowClock` 丢余量（60Hz 下 24fps→20fps）与 smoother 用 `1f/fps` 而非真实 dt。→ 小补丁待做（不重开 PR #10）。
+- [ ] T0002：生产修复已在 main（`PlaybackEngine.kt:473-515`）；剩余为**测试迁移**（`PlaybackEngineTrackSelectionTest` 依赖已不存在的 `tracksProvider`，需按 `currentMappedTrackInfo` 改写）。另：PR #22 关闭评论中「未使用 renderer 索引级 API」措辞不准确（main 确实调用 `setSelectionOverride(renderer, …)`），需更正。
+- [x] Room 3→4 迁移阻塞：**降级为本地 Robolectric 限制** —— CI run `38496435020`（main @1246313）API32 日志实执 `:core:database:connectedDebugAndroidTest`（1 test → BUILD SUCCESSFUL），build job 实执 `:core:database:testDebugUnitTest`；本机 `android-all-instrumented-14/15` jar 可读。条目闭环。
+- [x] EndpointTestService F04/F06 阻塞：**已被 main 覆盖** —— `withContext(ioDispatcher)` + `ensureActive` + `awaitCancellable` + `EndpointProbeErrorMapper` + 1 MiB 有界采样；四件套测试齐备，CI 实执 `:core:network:testDebugUnitTest`。条目闭环。
+- [ ] SLOW-FINAL 真实服务器证据：生产修复已在 main，真实服务器侧仍 **NOT_RUN / OPEN** → 保留待设备/服务器，先脚本化验收。
+
 ## 2026-10-14 收敛队列：A4 联合候选并入 main（用户指示：先收敛，暂不做真机/真服验收）
 
 - [x] PR #26 并入 main（`75b3d42`）：`BackupSerializer` KDoc 澄清有界读取责任边界（1 文件 5+/3−），CI run 36663380493 通过。
