@@ -1,6 +1,9 @@
 package com.mediahub.core.network
 
+import java.io.File
 import java.io.InputStream
+import java.io.OutputStream
+import java.io.RandomAccessFile
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -27,8 +30,20 @@ class MpvHttpBridge internal constructor(
     private val workers = ThreadPoolExecutor(0, MAX_CONNECTIONS, 60, TimeUnit.SECONDS,
         SynchronousQueue(), { work -> Thread(work, "mpv-http-conn").apply { isDaemon = true } },
         ThreadPoolExecutor.AbortPolicy())
+    /**
+     * 上游来源模型（M9）：回环桥只服务**当前播放会话明确选择的一个**上游，
+     * 要么是 HTTP(S) 远端（既有行为，凭据仍在 origin-scoped OkHttp 栈上），
+     * 要么是本地授权媒体文件（本模块只读取该文件，不是通用文件服务器）。
+     */
+    internal sealed interface MpvUpstream {
+        data class Http(val url: String, val headers: Map<String, String>) : MpvUpstream
+
+        /** [path] 必须是绝对路径或 file:// URI；token 路径由本类随机生成，客户端无法指定文件。 */
+        data class LocalFile(val path: String) : MpvUpstream
+    }
+
     private class Session(val listener: ServerSocket, val path: String,
-        val url: String, val headers: Map<String, String>) {
+        val upstream: MpvUpstream) {
         var running = true // guarded by this Session's monitor
         val sockets: MutableSet<Socket> = ConcurrentHashMap.newKeySet()
         val calls: MutableSet<Call> = ConcurrentHashMap.newKeySet()
@@ -41,10 +56,28 @@ class MpvHttpBridge internal constructor(
         val listener = ServerSocket(0, MAX_CONNECTIONS, InetAddress.getByName("127.0.0.1"))
         val random = ByteArray(24).also { SecureRandom().nextBytes(it) }
         val path = "/media/" + Base64.getUrlEncoder().withoutPadding().encodeToString(random)
-        val session = Session(listener, path, upstreamUrl, upstreamHeaders.toMap())
+        val session = Session(listener, path, MpvUpstream.Http(upstreamUrl, upstreamHeaders.toMap()))
         current = session
         Thread({ acceptLoop(session) }, "mpv-http-bridge").apply { isDaemon = true }.start()
         return "http://127.0.0.1:${listener.localPort}$path"
+    }
+
+    /**
+     * 以**单个本地媒体文件**作为上游启动回环桥（M9-P0）。
+     *
+     * 设计边界：token 路径随机不可预测，客户端只能按 token 取该会话的这一个文件；
+     * 不接受客户端传入任何路径，因此不构成"任意文件读取服务"。
+     */
+    @Synchronized
+    fun startLocalFile(path: String): String {
+        stop()
+        val listener = ServerSocket(0, MAX_CONNECTIONS, InetAddress.getByName("127.0.0.1"))
+        val random = ByteArray(24).also { SecureRandom().nextBytes(it) }
+        val tokenPath = "/media/" + Base64.getUrlEncoder().withoutPadding().encodeToString(random)
+        val session = Session(listener, tokenPath, MpvUpstream.LocalFile(path))
+        current = session
+        Thread({ acceptLoop(session) }, "mpv-http-bridge").apply { isDaemon = true }.start()
+        return "http://127.0.0.1:${listener.localPort}$tokenPath"
     }
 
     @Synchronized
@@ -113,8 +146,10 @@ class MpvHttpBridge internal constructor(
                     val name = header.substring(0, colon).lowercase()
                     if (name in FORWARDED_HEADERS) forwarded[name] = header.substring(colon + 1).trim()
                 }
-                val builder = Request.Builder().url(session.url).method(method, null)
-                session.headers.forEach { (name, value) -> builder.header(name, value) }
+                when (val upstream = session.upstream) {
+                    is MpvUpstream.Http -> {
+                val builder = Request.Builder().url(upstream.url).method(method, null)
+                upstream.headers.forEach { (name, value) -> builder.header(name, value) }
                 forwarded.forEach { (name, value) -> builder.header(name, value) }
                 val target = client.newCall(builder.build())
                 call = target
@@ -139,6 +174,13 @@ class MpvHttpBridge internal constructor(
                     output.flush()
                 }
                 upstreamFinished = true
+                    }
+
+                    is MpvUpstream.LocalFile -> {
+                        responseStarted = true
+                        serveLocalFile(session, upstream.path, method, forwarded, output)
+                    }
+                }
             }
         } catch (_: Exception) {
             if (!responseStarted && call != null && !socket.isClosed) runCatching {
@@ -150,6 +192,148 @@ class MpvHttpBridge internal constructor(
             session.sockets -= socket
             runCatching { socket.close() }
         }
+    }
+
+    private sealed interface RangeResult {
+        data object None : RangeResult
+        data class Satisfiable(val start: Long, val end: Long) : RangeResult
+        data object Unsatisfiable : RangeResult
+    }
+
+    /**
+     * 服务**当前会话唯一的**本地媒体文件（M9-P0）。
+     *
+     * - 只读该文件，分块流式写出，绝不整文件载入内存；
+     * - 支持 GET/HEAD、单段 Range（含后缀 Range），不可满足返回 416；
+     * - 多段 Range 与畸形 Range 按 RFC 7233 忽略（返回完整 200）；
+     * - 出现 If-Range 时忽略 Range 返回完整 200（本桥不签发 ETag/Last-Modified，
+     *   任何校验器都不匹配，故这是协议一致且安全的行为）；
+     * - 打开失败返回明确 HTTP 状态（404），不让 mpv 只看到 TCP 静默关闭；
+     * - 日志与响应不输出真实路径。
+     */
+    private fun serveLocalFile(
+        session: Session,
+        path: String,
+        method: String,
+        forwarded: Map<String, String>,
+        output: OutputStream,
+    ) {
+        val file = resolveLocalFile(path)
+        if (file == null) {
+            writeHead(output, "404 Not Found", 0L)
+            return
+        }
+        val length = file.length()
+        val requested = if (forwarded.containsKey("if-range")) null else forwarded["range"]
+        val parsed = parseRange(requested, length)
+        if (parsed is RangeResult.Unsatisfiable) {
+            output.write((("HTTP/1.1 416 Range Not Satisfiable" + CRLF +
+                "Content-Range: bytes */" + length + CRLF +
+                "Content-Length: 0" + CRLF + CONNECTION_CLOSE + CRLF + CRLF)).toByteArray())
+            output.flush()
+            return
+        }
+        val partial = parsed as? RangeResult.Satisfiable
+        val start = partial?.start ?: 0L
+        val end = if (length == 0L) 0L else (partial?.end ?: (length - 1))
+        val contentLength = if (length == 0L) 0L else end - start + 1
+        val head = StringBuilder()
+            .append(if (partial != null) "HTTP/1.1 206 Partial Content" else "HTTP/1.1 200 OK").append(CRLF)
+            .append("Content-Type: ").append(contentTypeFor(file.name)).append(CRLF)
+            .append("Content-Length: ").append(contentLength).append(CRLF)
+            .append("Accept-Ranges: bytes").append(CRLF)
+        if (partial != null) {
+            head.append("Content-Range: bytes ").append(start).append('-').append(end)
+                .append('/').append(length).append(CRLF)
+        }
+        head.append(CONNECTION_CLOSE).append(CRLF).append(CRLF)
+        output.write(head.toString().toByteArray())
+        if (method == "HEAD" || contentLength == 0L) {
+            output.flush()
+            return
+        }
+        RandomAccessFile(file, "r").use { handle ->
+            handle.seek(start)
+            val buffer = ByteArray(LOCAL_COPY_BUFFER_BYTES)
+            var remaining = contentLength
+            while (remaining > 0 && synchronized(session) { session.running }) {
+                val read = handle.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                if (read <= 0) break
+                output.write(buffer, 0, read)
+                remaining -= read
+            }
+            output.flush()
+        }
+    }
+
+    /** 明确的状态行 + 空体（不输出任何真实路径）。 */
+    private fun writeHead(output: OutputStream, status: String, contentLength: Long) {
+        output.write(("HTTP/1.1 " + status + CRLF + "Content-Length: " + contentLength + CRLF +
+            CONNECTION_CLOSE + CRLF + CRLF).toByteArray())
+        output.flush()
+    }
+
+    /**
+     * 规范化并校验本地路径：接受绝对路径与 file:// URI；
+     * canonicalFile 消解 `..` 与符号链接后才能通过 isFile/canRead 校验。
+     */
+    private fun resolveLocalFile(path: String): File? {
+        val decoded = when {
+            path.startsWith("file://", ignoreCase = true) ->
+                runCatching { java.net.URI(path).path }.getOrNull()
+            else -> path
+        } ?: return null
+        if (decoded.isBlank()) return null
+        val file = runCatching { File(decoded).canonicalFile }.getOrNull() ?: return null
+        if (!file.isFile || !file.canRead()) return null
+        return file
+    }
+
+    private fun parseRange(header: String?, length: Long): RangeResult {
+        val raw = header?.trim().orEmpty()
+        if (raw.isEmpty() || !raw.startsWith("bytes=")) return RangeResult.None
+        val spec = raw.removePrefix("bytes=")
+        if (spec.contains(',')) return RangeResult.None
+        val dash = spec.indexOf('-')
+        if (dash < 0) return RangeResult.None
+        val startText = spec.substring(0, dash).trim()
+        val endText = spec.substring(dash + 1).trim()
+        return try {
+            if (startText.isEmpty()) {
+                val suffix = endText.toLong()
+                if (suffix <= 0L || length == 0L) RangeResult.Unsatisfiable
+                else RangeResult.Satisfiable(maxOf(0L, length - suffix), length - 1)
+            } else {
+                val start = startText.toLong()
+                if (start < 0L || start >= length) {
+                    RangeResult.Unsatisfiable
+                } else {
+                    val end = if (endText.isEmpty()) length - 1 else minOf(endText.toLong(), length - 1)
+                    if (end < start) RangeResult.Unsatisfiable else RangeResult.Satisfiable(start, end)
+                }
+            }
+        } catch (_: NumberFormatException) {
+            RangeResult.None
+        }
+    }
+
+    private fun contentTypeFor(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
+        "mp4", "m4v" -> "video/mp4"
+        "mkv" -> "video/x-matroska"
+        "webm" -> "video/webm"
+        "ts", "m2ts", "mts" -> "video/mp2t"
+        "mov" -> "video/quicktime"
+        "avi" -> "video/x-msvideo"
+        "flv" -> "video/x-flv"
+        "mp3" -> "audio/mpeg"
+        "aac" -> "audio/aac"
+        "flac" -> "audio/flac"
+        "m4a" -> "audio/mp4"
+        "ogg", "opus" -> "audio/ogg"
+        "srt" -> "application/x-subrip"
+        "ass", "ssa" -> "text/x-ssa"
+        "vtt" -> "text/vtt"
+        else -> "application/octet-stream"
     }
 
     /** Reads at most limit bytes and rejects unterminated or overlong lines before allocation grows. */
@@ -176,6 +360,13 @@ class MpvHttpBridge internal constructor(
         const val MAX_LINE_BYTES = 8_192
         const val MAX_HEADER_BYTES = 32_768
         const val MAX_HEADERS = 100
+
+        /** 本地文件分块写出大小：流式，绝不整文件载入内存。 */
+        const val LOCAL_COPY_BUFFER_BYTES = 64 * 1024
+
+        /** HTTP 行结束符：用字符码构造，避免源码中的转义序列歧义。 */
+        val CRLF: String = String(charArrayOf(13.toChar(), 10.toChar()))
+        const val CONNECTION_CLOSE = "Connection: close"
         val FORWARDED_HEADERS = setOf("range", "if-range", "if-none-match")
         val HOP_HEADERS = setOf("connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
             "te", "trailer", "transfer-encoding", "upgrade")
