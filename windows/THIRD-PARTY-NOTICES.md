@@ -7,14 +7,20 @@
 | .NET Runtime | 10.0 | MIT | 运行时（自包含） | 随发布产物 |
 | Windows App SDK (WinUI 3) | 1.8.260921001 | Microsoft Software License / MIT | UI 框架 | NuGet |
 | System.Security.Cryptography.ProtectedData | 10.0.13 | MIT | DPAPI 凭据加密 | NuGet |
-| **libmpv (mpv)** | **v0.41.0-1154-gec38361c5** | **GPL-2.0-or-later（见下）** | 播放引擎 | `tools/fetch-libmpv.ps1` |
-| FFmpeg (libav*) | N-127521-g2ec8998c3 | GPL-2.0-or-later（随本构建） | 解复用与解码 | 随 libmpv |
+| **libmpv (mpv)** | **v0.41.0-1154-gec38361c5** | **GPL-3.0-or-later（见下）** | 播放引擎 | `tools/fetch-libmpv.ps1` |
+| FFmpeg (libav*) | N-127521-g2ec8998c3 | **GPL-3.0-or-later**（随本构建） | 解复用与解码 | 随 libmpv |
+| rubberband / libdvdnav / libdvdread | 随 mpv 构建 | **GPL-2.0** | 变速、DVD 导航 | 随 libmpv（静态链接） |
 | libplacebo / libass / libcurl 等 | 随 mpv 构建 | LGPL-2.1-or-later / ISC 等 | 渲染、字幕、网络 | 随 libmpv |
 | xunit | 2.9.3 | Apache-2.0 | 测试 | NuGet（仅测试） |
 
 ## libmpv 的许可证判定（依据实际二进制，非推测）
 
-**结论：本构建为 GPL 构建。以当前产物对外分发将触发 GPL 义务。**
+**结论：本构建为 GPL 构建，具体为 GPL-3.0-or-later。以当前产物对外分发将触发 GPL 义务。**
+
+版本是 **3.0-or-later 而不是 2.0-or-later**：构建方（shinchiro/mpv-winbuild-cmake 的
+`packages/ffmpeg.cmake`）为 FFmpeg 传入 `--enable-gpl` **且** `--enable-version3`，
+而 FFmpeg 自己的 configure 帮助文本写明 `--enable-version3  upgrade (L)GPL to version 3`。
+详细的判定依据见 [docs/licensing/LICENCE-DECISION.md](docs/licensing/LICENCE-DECISION.md)。
 
 判定依据（对 `windows/native/libmpv/libmpv-2.dll` 的实测）：
 
@@ -27,6 +33,9 @@
 | `--enable-gpl` 字面量 | 未在二进制中以可检索形式出现（不作为反证） |
 
 **`gpl` 出现在 mpv 自己的 enabled-features 清单中，这是权威信号：该构建启用了 GPL 组件。**
+此外该 DLL 内嵌了自己的 meson 命令行且**不含** `-Dgpl`，而 mpv 的 meson 默认值为 `true`，
+两者互相印证。注意 mpv 官方 Copyright 明确说明 `-Dgpl=false` **本身并不构成 LGPL 授权**，
+且"链接的库仍会影响最终许可证（例如 FFmpeg 以 GPL 构建时）"。
 
 社区构建（shinchiro/mpv-winbuild-cmake）默认开启 GPL-only 组件（x264/x265 等）。
 mpv 自身的代码是 LGPL-2.1+，但**与 GPL 组件链接后的整体按 GPL 分发**。

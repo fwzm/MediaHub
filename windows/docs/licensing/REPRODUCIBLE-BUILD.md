@@ -77,8 +77,8 @@ working tree (which contained pre-existing `bin/`/`obj/` from earlier work):
 | --- | --- | --- | --- |
 | `MediaHub.exe` | `3149af9f…bc05` | `3149af9f…bc05` | `3149af9f…bc05` |
 | `MediaHub.dll` | `38a49c58…4d40` | `6aad1132…b7b4` | `6aad1132…b7b4` |
-| `MediaHub.Domain.dll` | `eb0ae47f…6cf` | same | same |
-| `MediaHub.Net.dll` | `b6b1c8fe…87c7` | `7eddd792…9b79` | `7dddd792…9b79` |
+| `MediaHub.Domain.dll` | `eb0ae47f…fad2` | same | same |
+| `MediaHub.Net.dll` | `b6b1c8fe…e1aa` | `7eddd792…9b79` | `7eddd792…9b79` |
 | `MediaHub.Player.dll` | `90a47ba7…5f39` | same | same |
 | `MediaHub.Player.Mpv.dll` | `cd01b876…ba8f` | same | same |
 | `MediaHub.Providers.dll` | `63b0d93d…e1bb` | `087be1c2…a388` | `087be1c2…a388` |
@@ -106,7 +106,7 @@ A pristine copy of `windows/` (123 files, excluding `bin/`, `obj/`, `artifacts/`
 | `MediaHub.Net.dll` | `c713f284…188a` | same | **yes** |
 | `MediaHub.Player.dll` | `a1795be5…51e9` | same | **yes** |
 | `MediaHub.Player.Mpv.dll` | `bfc0481b…2b41` | same | **yes** |
-| `MediaHub.Providers.dll` | `aa0e170c…3c6ad` | same | **yes** |
+| `MediaHub.Providers.dll` | `aa0e170c…c6ad` | same | **yes** |
 
 So: **same tree, same SDK, same command ⇒ byte-identical output.**
 

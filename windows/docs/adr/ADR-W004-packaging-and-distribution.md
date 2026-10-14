@@ -50,13 +50,26 @@ Windows App Runtime 完全不可控。必须在不要求用户预装运行时的
 | `libmpv-2.dll` | ~115 MB |
 | 应用自身 | < 1 MB |
 
-`libmpv-2.dll` **不入库**（`.gitignore` 已排除），由 `windows/tools/fetch-libmpv.ps1` 拉取，
-脚本记录钉住的 release tag 与资产名，并预留 SHA-256 校验位（当前为 `PENDING`，
-首次正式发布前必须回填——见"未完成项"）。
+`libmpv-2.dll` **不入库**（`.gitignore` 已排除），由 `windows/tools/fetch-libmpv.ps1` 拉取。
+
+脚本现在固定**两个**摘要，任一不符即拒绝安装：
+
+| 对象 | SHA-256 |
+| --- | --- |
+| `mpv-dev-x86_64-20261014-git-ec38361c56.7z`（31,562,418 字节） | `325555b4e0b1d87fb7c92c96010776581599c64e4988052cb9d05e130b52f939` |
+| 解包后的 `libmpv-2.dll`（120,989,696 字节） | `6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9` |
+
+**两个都固定**的理由：GitHub release 资产可以在原地被替换，URL 本身不构成身份。
+固定归档摘要可发现被替换的归档；再固定解包后 DLL 的摘要，还能发现解包环节产出的非受审二进制。
 
 ## 未完成项（如实登记）
 
-- `fetch-libmpv.ps1` 的 `$AssetSha256` 仍为 `PENDING`：**尚未固定校验和**。
-  在补齐之前，该脚本不能被视为完整供应链控制。
+- 供应链摘要已固定并强制校验（见上），且已验证：`fetch-libmpv.ps1` 对已安装副本返回
+  "already present and verified"。
+- 许可证：**本构建为 GPL-3.0-or-later**，发行阻断未解除；见
+  [../licensing/LICENCE-DECISION.md](../licensing/LICENCE-DECISION.md)。
+- 发布产物中**不含任何许可证/声明文件**（522 个文件里 0 个）——独立于 GPL 的合规缺口。
+- `MediaHub.exe` 与 `libmpv-2.dll` 的 `Get-AuthenticodeSignature` 均为 `NotSigned`：
+  **SIGNING_BLOCKED**。
 - 未生成 MSIX 包；未做代码签名；未做安装/卸载实测。
 - 未在干净机器上验证 portable 包（本机已具备构建期依赖）。
