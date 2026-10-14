@@ -51,6 +51,46 @@ namespace Mh
         [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int index);
+        [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+        [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
+        [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint attach, uint attachTo, bool fAttach);
+        [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+
+        /// <summary>
+        /// Raises a window the way an input driver has to. Plain SetForegroundWindow is refused for a
+        /// process that does not own the foreground, which is why a whole acceptance run can silently
+        /// deliver every synthetic keystroke to the wrong window. Attaching to the foreground thread's
+        /// input queue lifts that restriction for the duration of the call.
+        /// </summary>
+        public static bool ForceForeground(IntPtr h)
+        {
+            IntPtr current = GetForegroundWindow();
+            if (current == h) return true;
+            uint foreignThread = GetWindowThreadProcessId(current, out uint _);
+            uint ownThread = GetCurrentThreadId();
+            bool attached = false;
+            try
+            {
+                if (foreignThread != 0 && foreignThread != ownThread)
+                {
+                    attached = AttachThreadInput(ownThread, foreignThread, true);
+                }
+                BringWindowToTop(h);
+                SetForegroundWindow(h);
+                // SetFocus(h) is deliberately NOT called on the top-level window: doing so clears the
+                // XAML focus and the framework then hands keyboard focus to the first focusable
+                // element (the menu bar). Every later keystroke is then consumed by the menu - SPACE
+                // opened the File menu instead of pausing playback, which looked like a product bug
+                // for two full runs. Raising the window must not move focus inside it.
+            }
+            finally
+            {
+                if (attached) AttachThreadInput(ownThread, foreignThread, false);
+            }
+            return GetForegroundWindow() == h;
+        }
+        [DllImport("user32.dll")] public static extern IntPtr GetFocus();
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
         [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
@@ -337,14 +377,18 @@ function Set-MhForeground {
     SW_SHOW (5) is used instead of SW_RESTORE (9) on purpose: restoring would un-minimise a window
     whose minimised state is itself under test.
   #>
-  param([IntPtr]$Hwnd, [int]$SettleMs = 600)
+  param([IntPtr]$Hwnd, [int]$SettleMs = 600, [int]$Attempts = 3)
   # No ShowWindow here. Hide/show is the app's business (AppWindow), and calling SW_SHOW on a WinUI 3
   # window was observed to leave it non-visible while the process kept running - which then looked
   # like "the app died" to every later step. Raising is enough for synthetic input to land.
-  $ok = [Mh.Native]::SetForegroundWindow($Hwnd)
-  Start-Sleep -Milliseconds $SettleMs
+  $ok = $false
+  for ($i = 1; $i -le $Attempts; $i++) {
+    $ok = [Mh.Native]::ForceForeground($Hwnd)
+    Start-Sleep -Milliseconds $SettleMs
+    if ([Mh.Native]::GetForegroundWindow() -eq $Hwnd) { break }
+  }
   $fg = [Mh.Native]::GetForegroundWindow()
-  [pscustomobject]@{ setForegroundReturned = $ok; isForeground = ($fg -eq $Hwnd); foregroundHwnd = $fg.ToInt64() }
+  [pscustomobject]@{ setForegroundReturned = $ok; isForeground = ($fg -eq $Hwnd); foregroundHwnd = $fg.ToInt64(); attempts = $i }
 }
 
 # ---------------------------------------------------------------- element lookup
@@ -933,6 +977,56 @@ function Get-MhTrackList {
 
 function Get-MhWindowProcessCount {
   @(Get-MhProcess).Count
+}
+
+function Get-MhWindowStyle {
+  <#
+    Win32 window style. A window presented full screen loses WS_CAPTION (0x00C00000), which makes this
+    a stronger full-screen observable than the rectangle alone: a maximised window and a full-screen
+    window differ by exactly this bit, while both have the same width.
+  #>
+  param([IntPtr]$Hwnd = [IntPtr]::Zero)
+  if ($Hwnd -eq [IntPtr]::Zero) { $Hwnd = Get-MhWindowHandle }
+  if (-not $Hwnd) { return $null }
+  $s = [Mh.Native]::GetWindowLong($Hwnd, -16)
+  [pscustomobject]@{ style = $s; hex = ('0x{0:X8}' -f $s); hasCaption = [bool]($s -band 0x00C00000) }
+}
+
+function Test-MhFullScreen {
+  <# True when the window frame covers its monitor (within -Tolerance px) and the caption is gone. #>
+  param([int]$Tolerance = 4)
+  $i = Get-MhWindowInfo
+  if (-not $i) { return $false }
+  $style = Get-MhWindowStyle -Hwnd ([IntPtr]$i.hwnd)
+  $coversMonitor = ([Math]::Abs($i.frame.w - $i.monitor.monitor.w) -le $Tolerance -and
+                    [Math]::Abs($i.frame.h - $i.monitor.monitor.h) -le $Tolerance -and
+                    [Math]::Abs($i.frame.x) -le $Tolerance -and [Math]::Abs($i.frame.y) -le $Tolerance)
+  return ($coversMonitor -and -not $style.hasCaption)
+}
+
+function Send-MhKeysUntil {
+  <#
+    Sends a key (or key sequence) and waits for a predicate, retrying a bounded number of times.
+    Synthetic input is not reliable: a single injected keystroke is occasionally dropped before the
+    target window finishes activating, and treating that as a product failure is exactly the
+    false-negative this project keeps paying for. The attempt count is returned so the caller can
+    record whether the first press was honoured.
+  #>
+  param(
+    [Parameter(Mandatory)][string[]]$Keys,
+    [Parameter(Mandatory)][scriptblock]$Until,
+    [int]$TimeoutSec = 6,
+    [int]$MaxAttempts = 3
+  )
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    [void](Send-MhKeys -Keys $Keys)
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+      if (& $Until) { return [pscustomobject]@{ success = $true; attempts = $attempt; keys = $Keys } }
+      Start-Sleep -Milliseconds 250
+    }
+  }
+  return [pscustomobject]@{ success = $false; attempts = $MaxAttempts; keys = $Keys }
 }
 
 function Set-MhWindowSize {

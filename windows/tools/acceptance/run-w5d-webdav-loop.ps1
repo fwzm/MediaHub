@@ -113,10 +113,18 @@ if ($existing.Count -gt 0) {
     $ar = Get-MhElementRect -Element $anchor
     $del = Get-MhAppElementAll | Where-Object { (Get-MhControlType $_) -eq 'Button' -and $_.Current.Name -eq ([char]0x5220 + [char]0x9664) } | ForEach-Object { [pscustomobject]@{ e = $_; r = (Get-MhElementRect -Element $_) } } | Sort-Object { [Math]::Abs($_.r.cy - $ar.cy) } | Select-Object -First 1
     if ($del) {
+      # Guard: a delete that removes the wrong row would destroy unrelated test data. The count of
+      # source rows must drop by exactly one and the WebDAV row must be the one that disappeared.
+      $beforeRows = @(Get-ServerRowTexts -Match 'http').Count
       [void](Invoke-MhElement -Element $del.e)
       Wait-Seconds 2
       [void](Invoke-MhElement -Element (Find-MhAppElement -AutomationId 'PrimaryButton'))
       Wait-Seconds 3
+      $afterRows = @(Get-ServerRowTexts -Match 'http').Count
+      $stillWebdav = @(Get-ServerRowTexts -Match 'WebDav').Count
+      if ($stillWebdav -gt 0 -or ($beforeRows - $afterRows) -ne 1) {
+        Add-MhNote -Run $run -Text ('the pre-existing WebDAV row was NOT removed cleanly (rows ' + $beforeRows + ' -> ' + $afterRows + '); the add step below will report the collision instead')
+      }
     }
   }
 }

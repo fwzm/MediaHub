@@ -57,7 +57,7 @@
         <ColumnDefinition x:Name="PanelColumn" Width="0" />
       </Grid.ColumnDefinitions>
 
-      <Grid x:Name="VideoHost" Grid.Column="0" Background="Black"
+      <Grid x:Name="VideoHost" Grid.Column="0" Background="Black" IsTabStop="True"
             DoubleTapped="OnVideoHostDoubleTapped">
         <!-- Intentionally empty: this rectangle is covered by the native surface while playing.
              Status text is shown only when the surface is hidden (no media / error). -->

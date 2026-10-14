@@ -124,6 +124,13 @@ public sealed partial class PlayerPage : Page
         _historyTimer.Start();
         RestartHideTimer();
         RefreshTrackLists();
+
+        // Focus the video area rather than leaving it wherever it landed. XAML focus falls on the
+        // first focusable descendant, which here is a transport button - and a focused button eats
+        // Space before the page sees it. The tooltip and the documentation both advertise Space as
+        // play/pause, so with focus on 返回 the advertised shortcut instead left the player. Space
+        // activating a focused button is correct behaviour; starting with a button focused is not.
+        VideoHost.Focus(FocusState.Programmatic);
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)

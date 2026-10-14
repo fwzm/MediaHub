@@ -40,3 +40,9 @@ windows/native/libmpv/
 
 # Windows build/publish artifacts and test results
 windows/**/artifacts/
+
+# GUI acceptance evidence: screenshots, UIA dumps and protocol taps, currently ~29 MB and growing
+# with every run. It is an output of the harness, not an input to the product, and the findings it
+# supports are written up in windows/docs/W5-GUI-ACCEPTANCE.md and W5-WEBDAV-GUI.md. Re-running
+# windows/tools/acceptance/run-all.ps1 reproduces it.
+windows/tools/acceptance/evidence/

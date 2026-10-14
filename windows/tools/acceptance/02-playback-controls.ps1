@@ -31,7 +31,47 @@ $dump = { param($name) (Save-MhDump -Path (Join-Path $dir ($name + '.txt')) -Roo
 
 function Get-WinRect { $i = Get-MhWindowInfo; @($i.frame.x, $i.frame.y, $i.frame.w, $i.frame.h) }
 function Wait-Seconds { param([double]$s) Start-Sleep -Milliseconds ([int]($s * 1000)) }
+function Ensure-PlayerOpen {
+  # The client opens the player with keyboard focus on a Button (player.back). A Space keystroke
+  # therefore activates that button and leaves the player - a real finding, and also something the
+  # rest of this area has to recover from rather than die on.
+  param([string]$Exe, [string]$Media)
+  if (Find-MhAppElement -AutomationId 'SeekSlider') { return $false }
+  Get-MhProcess | Stop-Process -Force -ErrorAction SilentlyContinue
+  Wait-Seconds 2
+  [void](Start-MhApp -Exe $Exe -ArgumentList @($Media))
+  Wait-Seconds 8
+  [void](Set-MhForeground -Hwnd ([IntPtr](Get-MhWindowInfo).hwnd))
+  Wait-Seconds 1
+  return $true
+}
 
+function Reset-Position {
+  # The fixture is three minutes long and the control sweep takes longer than that; without a
+  # rewind the speed and mute measurements run against an already-ended stream and measure
+  # 'position stopped' as if it were a control defect. This is the harness fixing its own
+  # measurement window, not the product being let off.
+  param([double]$Fraction = 0.08)
+  $seek = Find-MhAppElement -AutomationId 'SeekSlider'
+  if (-not $seek) { return }
+  $r = Get-MhElementRect -Element $seek
+  [void](Set-MhForeground -Hwnd ([IntPtr](Get-MhWindowInfo).hwnd))
+  [void](Click-MhPoint -X ($r.x + [int]($r.w * $Fraction)) -Y $r.cy -SettleMs 1200)
+  # The aim is "playing, near the start". An earlier revision pressed the pause button here
+  # unconditionally, which left the stream paused and turned every later measurement into a false
+  # failure - the harness has to check the state it wanted, not assume the action it took.
+  $a = (Get-MhPlayerState -SkipSlow).positionSeconds
+  Wait-Seconds 0.9
+  $b = (Get-MhPlayerState -SkipSlow).positionSeconds
+  if ($null -ne $a -and $null -ne $b -and [Math]::Abs($b - $a) -lt 0.4) {
+    [void](Set-MhForeground -Hwnd ([IntPtr](Get-MhWindowInfo).hwnd))
+    [void](Send-MhKeys -Keys @('SPACE'))
+    Wait-Seconds 0.8
+  }
+  [void](Set-MhForeground -Hwnd ([IntPtr](Get-MhWindowInfo).hwnd))
+}
+
+try {
 Write-Host '== setup: fresh app, local 3-minute fixture, engine must be on the hardware path =='
 Get-MhProcess | Stop-Process -Force -ErrorAction SilentlyContinue
 Wait-Seconds 2
@@ -56,22 +96,40 @@ Add-MhCheck -Run $run -Id 'play.advances' -Before @{ position = $p1.position; se
 
 $beforePause = Get-MhPlayerState -SkipSlow
 [void](Set-MhForeground -Hwnd ([IntPtr](Get-MhWindowInfo).hwnd))
-$keyIn = Send-MhKeys -Keys @('SPACE')
+[void](Invoke-MhElement -Element (Find-MhAppElement -AutomationId 'player.playpause'))
 Wait-Seconds 1.5
 $pausedA = Get-MhPlayerState -SkipSlow
 Wait-Seconds 3
 $pausedB = Get-MhPlayerState -SkipSlow
 $frozen = ($null -ne $pausedA.positionSeconds -and $null -ne $pausedB.positionSeconds -and [Math]::Abs($pausedB.positionSeconds - $pausedA.positionSeconds) -lt 0.5)
 $evPauseAfter = @(& $shot '02-paused' (Get-WinRect))
-Add-MhCheck -Run $run -Id 'play.pause-frozen' -Before @{ position = $beforePause.position } -Input 'key SPACE (pause)' -After @{ position1 = $pausedA.position; position2 = $pausedB.position } -Assertion 'after the pause key the position does not advance over 3 s' -Result $(if ($frozen) { 'pass' } else { 'fail' }) -Evidence $evPauseAfter -Note 'the key is sent to the foreground window; the client routes SPACE to the player page'
+Add-MhCheck -Run $run -Id 'play.pause-button-frozen' -Before @{ position = $beforePause.position } -Input 'invoke player.playpause' -After @{ position1 = $pausedA.position; position2 = $pausedB.position } -Assertion 'pressing the play/pause control stops the position advancing for 3 s' -Result $(if ($frozen) { 'pass' } else { 'fail' }) -Evidence $evPauseAfter
 
-$keyIn = Send-MhKeys -Keys @('SPACE')
+[void](Invoke-MhElement -Element (Find-MhAppElement -AutomationId 'player.playpause'))
 Wait-Seconds 1
 $r1 = Get-MhPlayerState -SkipSlow
 Wait-Seconds 3
 $r2 = Get-MhPlayerState -SkipSlow
 $resumed = ($null -ne $r1.positionSeconds -and $null -ne $r2.positionSeconds -and $r2.positionSeconds -gt $r1.positionSeconds + 1)
-Add-MhCheck -Run $run -Id 'play.resume-advances' -Before @{ position = $r1.position } -Input 'key SPACE (resume)' -After @{ position = $r2.position } -Assertion 'position advances again after the second space press' -Result $(if ($resumed) { 'pass' } else { 'fail' }) -Evidence $evPauseAfter
+Add-MhCheck -Run $run -Id 'play.resume-button-advances' -Before @{ position = $r1.position } -Input 'invoke player.playpause again' -After @{ position = $r2.position } -Assertion 'the position advances again after the second press' -Result $(if ($resumed) { 'pass' } else { 'fail' }) -Evidence $evPauseAfter
+
+# The Space key, with the XAML focus state recorded: this is where a real usability problem shows up.
+$focusBefore = Get-MhFocused
+$posBeforeKey = Get-MhPlayerState -SkipSlow
+[void](Set-MhForeground -Hwnd ([IntPtr](Get-MhWindowInfo).hwnd))
+[void](Send-MhKeys -Keys @('SPACE'))
+Wait-Seconds 1.5
+$keyA = Get-MhPlayerState -SkipSlow
+Wait-Seconds 3
+$keyB = Get-MhPlayerState -SkipSlow
+$keyFroze = ($null -ne $keyA.positionSeconds -and $null -ne $keyB.positionSeconds -and [Math]::Abs($keyB.positionSeconds - $keyA.positionSeconds) -lt 0.5)
+$playerSurvived = ($null -ne (Find-MhAppElement -AutomationId 'SeekSlider'))
+$evSpace = @(& $shot '02b-space-key' (Get-WinRect))
+Add-MhCheck -Run $run -Id 'play.pause-key-space' -Before @{ focused = ($focusBefore.type + ' ' + $focusBefore.id + ' ' + $focusBefore.name); position = $posBeforeKey.position } -Input 'key SPACE' -After @{ position1 = $keyA.position; position2 = $keyB.position; playerStillOpen = $playerSurvived } -Assertion 'the Space key pauses the player (the shortcut the tooltip advertises)' -Result $(if ($keyFroze) { 'pass' } else { 'fail' }) -Evidence $evSpace -Note $(if ($focusBefore.type -eq 'Button') { 'FINDING: the player opens with keyboard focus on the button [' + $focusBefore.id + ']; a Space press activates that button instead of reaching the player shortcut' } else { 'focus was on ' + $focusBefore.type })
+
+if (Ensure-PlayerOpen -Exe $Exe -Media $Media) { Add-MhNote -Run $run -Text 'the Space keystroke left the player (the focused button was activated); the area restarted the player to continue' }
+[void](Invoke-MhElement -Element (Find-MhAppElement -AutomationId 'player.playpause'))
+Wait-Seconds 1
 
 # ---------------------------------------------------------------- seek: button, key, slider
 
@@ -120,6 +178,8 @@ Add-MhCheck -Run $run -Id 'volume.restore-100' -Before @{ volume = $v1.volume } 
 
 # ---------------------------------------------------------------- mute (measured, not assumed)
 
+Reset-Position
+Wait-Seconds 1
 $peakBefore = Get-MhAudioPeak
 [void](Set-MhForeground -Hwnd ([IntPtr](Get-MhWindowInfo).hwnd))
 [void](Invoke-MhElement -Element (Find-MhAppElement -AutomationId 'player.mute'))
@@ -138,7 +198,7 @@ Add-MhCheck -Run $run -Id 'mute.unmute-restores-audio' -Before @{ audioPeak = $p
 $speedCombo = Find-MhAppElement -AutomationId 'SpeedCombo'
 $speedItems = @()
 $expand = $null
-if ($speedCombo.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expand)) {
+if ($speedCombo -and $speedCombo.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expand)) {
   $expand.Expand(); Wait-Seconds 1
   $speedItems = @(Get-MhAppElementAll | Where-Object { (Get-MhControlType $_) -eq 'ListItem' -and $_.Current.Name -match '^\d' } | ForEach-Object { $_.Current.Name })
   $expand.Collapse(); Wait-Seconds 0.5
@@ -153,15 +213,21 @@ function Measure-Rate {
   if ($null -eq $a.positionSeconds -or $null -eq $b.positionSeconds) { return $null }
   return [Math]::Round(($b.positionSeconds - $a.positionSeconds) / $Seconds, 3)
 }
+Reset-Position
+Wait-Seconds 1
 $rate1 = Measure-Rate -Seconds 6
 [void](Set-MhForeground -Hwnd ([IntPtr](Get-MhWindowInfo).hwnd))
 $selSpeed = Select-MhComboItem -ComboElement $speedCombo -Text '2.0x'
 Wait-Seconds 2
 $curSpeed = (Get-MhPlayerState -SkipSlow).speed -join ','
+Reset-Position
+Wait-Seconds 1
 $rate2 = Measure-Rate -Seconds 6
 Add-MhCheck -Run $run -Id 'speed.2x-doubles-rate' -Before @{ rate = $rate1; selected = '1.0x' } -Input ('select speed 2.0x (' + $selSpeed + ')') -After @{ rate = $rate2; selected = $curSpeed } -Assertion 'the position advances roughly twice as fast at 2.0x as it did at 1.0x (rate > 1.5x baseline)' -Result $(if ($null -ne $rate1 -and $null -ne $rate2 -and $rate2 -gt ($rate1 * 1.5)) { 'pass' } else { 'fail' }) -Evidence @(& $shot '10-speed-2x' (Get-WinRect)) -Note ('rate1=' + $rate1 + ' rate2=' + $rate2 + ' combo=' + $curSpeed)
 
 [void](Select-MhComboItem -ComboElement $speedCombo -Text '1.0x')
+Wait-Seconds 1
+Reset-Position
 Wait-Seconds 1
 $rate3 = Measure-Rate -Seconds 4
 Add-MhCheck -Run $run -Id 'speed.restore-1x' -Before @{ rate = $rate2 } -Input 'select speed 1.0x' -After @{ rate = $rate3 } -Assertion 'the rate returns to about 1.0 after selecting 1.0x again' -Result $(if ($null -ne $rate3 -and $rate3 -gt 0.5 -and $rate3 -lt 1.6) { 'pass' } else { 'fail' }) -Evidence @(& $dump '11-speed-1x')
@@ -182,7 +248,8 @@ if ($audioBtn) {
   if ($rows.Count -ge 2) {
     $pick = @($rows | Where-Object { -not $_.selected })[0]
     $item = Find-MhAppElement -ControlType 'ListItem' -Name $pick.name
-    $r = Invoke-MhElement -Element $item
+    # Real click: SelectionItemPattern.Select() on these rows threw 'unrecognized error'.
+    $r = Click-MhElement -Element $item -SettleMs 1200
     Wait-Seconds 2
     $rows2 = @(Get-MhTrackList -Kind 'audio')
     $now = (($rows2 | Where-Object { $_.selected } | ForEach-Object { $_.name }) -join ' | ')
@@ -204,7 +271,7 @@ if ($subBtn) {
     $off = @($srows | Where-Object { $_.name -eq '关闭字幕' })[0]
     if ($off) {
       $item = Find-MhAppElement -ControlType 'ListItem' -Name $off.name
-      $r = Invoke-MhElement -Element $item
+      $r = Click-MhElement -Element $item -SettleMs 1200
       Wait-Seconds 1.5
       $srows2 = @(Get-MhTrackList -Kind 'subtitle')
       $selected = (($srows2 | Where-Object { $_.selected } | ForEach-Object { $_.name }) -join ' | ')
@@ -216,11 +283,18 @@ if ($subBtn) {
 # ---------------------------------------------------------------- evidence snapshot and teardown
 
 $final = Get-MhPlayerState
-Add-MhCheck -Run $run -Id 'final.state' -Before @{ } -Input 'read the final state' -After $final -Assertion 'the player is still healthy after every control was exercised: still playing, engine still on hwdec=d3d11va' -Result $(if ($final.playerVisible -and $final.technical -match 'hwdec=d3d11va') { 'pass' } else { 'fail' }) -Evidence @(& $shot '99-final' (Get-WinRect), (& $dump '99-final'))
+Add-MhCheck -Run $run -Id 'final.state' -Before @{ } -Input 'read the final state' -After $final -Assertion 'the player is still healthy after every control was exercised: still playing, engine still on hwdec=d3d11va' -Result $(if ($final.playerVisible -and $final.technical -match 'hwdec=d3d11va') { 'pass' } else { 'fail' }) -Evidence @((Save-MhScreenshot -Path (Join-Path $dir '99-final.png') -Rect (Get-WinRect)).path, (Save-MhDump -Path (Join-Path $dir '99-final.txt') -Root (Get-MhWindow) -VisibleOnly).path)
 
 if (-not $KeepRunning) {
   $close = Stop-MhAppGracefully -TimeoutSec 20
   Add-MhCheck -Run $run -Id 'teardown.close' -Before @{ processes = (Get-MhProcess).Count } -Input 'close the window normally' -After $close -Assertion 'the app exits when the window is closed (no force-kill was needed for this area)' -Result $(if ($close.method -eq 'graceful') { 'pass' } else { 'fail' }) -Evidence @()
+}
+
+} catch {
+  # An exception in the middle of the sweep must not lose the checks that already ran: an area
+  # whose evidence file is missing cannot be reviewed at all.
+  Add-MhCheck -Run $run -Id 'harness.unhandled-error' -Before @{ } -Input 'continue the sweep' -After @{ } -Assertion 'the area script completes every check it planned' -Result 'fail' -Evidence @() -Note ($_.Exception.GetType().Name + ': ' + $_.Exception.Message)
+  Add-MhNote -Run $run -Text ('the sweep stopped early at: ' + $_.InvocationInfo.ScriptLineNumber + ' -> ' + $_.InvocationInfo.Line.Trim())
 }
 
 $result = Save-MhRun -Run $run -MarkdownPath (Join-Path $dir 'results.md')
