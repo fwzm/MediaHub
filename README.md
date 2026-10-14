@@ -24,6 +24,10 @@
 详细设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，进度见 [ROADMAP.md](ROADMAP.md) / [TASKS.md](TASKS.md)，
 重要决策见 [DECISIONS.md](DECISIONS.md)，交接信息见 [HANDOFF.md](HANDOFF.md)。
 
+> **另有 Windows 原生桌面客户端正在开发中**：代码位于 `windows/`，全部工作在未合并分支
+> `feature/windows-client`（Draft PR #33），**尚未发布任何安装包**。
+> 状态与限制见 [Windows 桌面客户端（开发中，未发布）](#windows-桌面客户端开发中未发布)。
+
 ## 模块结构
 
 ```
@@ -86,6 +90,70 @@ docs/                providers / player / api 设计文档
 设置页可改默认倍速、字幕大小等（DataStore 持久化）。
 
 > Jellyfin / WebDAV / 搜索 / 播放进度上报为后续 Phase 候选，尚未实现（见 TASKS.md）。
+
+## Windows 桌面客户端（开发中，未发布）
+
+MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一产品语义（领域契约、能力声明、
+安全红线），但不共享源码，也不互相依赖运行时。
+
+- 技术栈：C# / .NET 10 + WinUI 3（Windows App SDK 1.8）+ libmpv（`--wid` 嵌入，D3D11 硬解），自包含部署
+- 代码位置：`windows/`；客户端自身说明见 [windows/README.md](windows/README.md)
+- 现状：全部工作在 `feature/windows-client` 分支（Draft PR #33），**尚未合并进 `main`，未提供任何安装包**
+
+> **读法**：本章只写有执行证据的结论。完整逐项状态（含 `UNVERIFIED` / `NOT_RUN` 标记）见
+> [windows/docs/CAPABILITY-MAP.md](windows/docs/CAPABILITY-MAP.md) 与 `windows/docs/W*-EVIDENCE.md`；
+> 这些表格与路线图可能滞后于最新提交，冲突时以代码与证据文档为准。
+
+### 已验证的能力（真实执行并观察通过）
+
+| 能力 | 证据 |
+| --- | --- |
+| libmpv 嵌入（`--wid`）+ D3D11 硬解播放真实视频 | `windows/docs/W1-EVIDENCE.md`（`hwdec=d3d11va`） |
+| 媒体源管理：添加（探测 → 登录 → 保存）/ 测试 / 重新登录 / 删除 | `windows/docs/W2-EVIDENCE.md`；DPAPI 凭据库 79 条测试 |
+| 库浏览（列表 / 海报墙 / 详情）、搜索、继续观看 | 同上 |
+| 引擎网络边界：改为经本地回环转发取流，**引擎不持有服务器凭据** | ADR-W006、`CAPABILITY-MAP` 网络边界表 |
+| 桌面集成：文件菜单、拖放、窗口状态恢复、文件类型关联 | 提交 `5c232d6` |
+| **真实 Jellyfin 12.2**：登录 / 浏览 / 播放 / 播完标记 Played | `windows/docs/` W4 记录 |
+| **官方 Emby 4.10.1.0** 部署与 API 形状回归 | `windows/engine/emby/`、W5 记录 |
+| GUI 验收：播放控制 / 全屏 / 生命周期（可观测断言 + 证据文件） | `windows/docs/W5-GUI-ACCEPTANCE.md` |
+| LGPL libmpv 引擎候选已实际构建（**尚未切换到产品**） | `windows/engine/lgpl/dist/` |
+
+### 已知缺陷与未验证项
+
+- **中断恢复**：服务端轨迹显示 32 s / 180 s 的播放被记为「已看完」—— 未解决。
+- **WebDAV**：源可添加 / 认证 / 重启恢复；内容入口已在 P0-A（`c9cb20d`）补上独立文件夹浏览页，
+  但**该端到端尚未验收**，「媒体源」页的浏览入口仍未加。
+- **真服覆盖面**：Emby 端到端仍为 `SERVER_UNVERIFIED`；远端进度**回写语义**未验证；
+  回环中继的发布声明因远端条目无法启动而**未验证**。
+- **未执行**：真实第二 Windows 账户下的凭据库行为；系统代理 / PAC / TUN / VPN / SOCKS 出口一致性；
+  文件菜单 / 拖放 / 队列区域的 GUI 验收脚本。
+- **尚未实现**：收藏与播放列表 GUI；剧集季 / 集在有数据服务器上的验证。
+
+### 构建与测试
+
+```powershell
+pwsh -File windows/tools/fetch-libmpv.ps1    # 首次：拉取 libmpv（约 115 MB，不入库）
+dotnet build windows/MediaHub.Windows.sln -c Debug -p:Platform=x64
+dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug -p:Platform=x64
+```
+
+CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
+与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
+截至 `c9cb20d`：编译 0 错误 0 警告，`MediaHub.Tests` 296 通过 0 失败。
+
+### 引擎许可证（影响可发行性）
+
+- 生产基线 `windows/native/libmpv/libmpv-2.dll` 为 **GPL-3.0-or-later**（构建未传 `-Dgpl=false`）。
+- LGPL 候选已构建于 `windows/engine/lgpl/dist/libmpv-2.dll`（3,327,274 B，sha256 `20035902…3C0A`），
+  但**尚未切换到产品**。
+- 因此**在完成引擎切换与合规判定前，Windows 客户端不具备分发条件**。
+  详见 [windows/THIRD-PARTY-NOTICES.md](windows/THIRD-PARTY-NOTICES.md) 与 `windows/docs/licensing/`。
+
+### 最近更新（自动同步）
+
+<!-- WINDOWS-SYNC:START -->
+<!-- 本块由 scripts/sync-github-daily.ps1 自动维护（windows/ 目录最近 7 天的提交摘要），请勿手工编辑块内内容。 -->
+<!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
 
