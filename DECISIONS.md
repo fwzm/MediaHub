@@ -623,3 +623,30 @@
 - 导入身份与冻结线路列表必须使用持久化排序，再按现有 enabled/primary 规则选择有效地址。同优先级的有效候选若指向不同规范化地址，导入及导出均拒绝；唯一有效主线路或同一规范化地址不因排序并列而拒绝。
 - 预览及未完成保护计划必须验证身份在持久化排序下稳定。旧计划若不稳定或存在歧义，保留现场、阻止自动续作/回滚和新恢复，不静默重算已确认决策。COMPLETED 仍只清理日志，不因此倒退恢复。
 - 本更正不改变同源替换保留登录的既有语义，不新增全局登出、线路管理策略或日志人工清理入口。状态仍为 C REVIEW PENDING，尚未合并。
+
+## ADR-042 设备能力证据驱动引擎选路（ADR-004 闭环）
+- 状态：已采纳（2026-10-14）
+- 背景：ADR-004 的 PlaybackCompatibilityEvaluator 此前只被单元测试调用；实际选路
+  （PlaybackEngineSelector）只用 container/videoCodec/audioCodec 签名与历史失败指纹，
+  设备能力完全未参与。且 DeviceCapabilities 体系里"设备不支持"与"我们不知道"都表现为
+  null/集合缺席，无法区分，容易被显示成"支持"。
+- 决策：
+  1. 新增 `CapabilityEvidence`（SUPPORTED / UNSUPPORTED / UNKNOWN）与
+     `DevicePlaybackAssessment`（video/audio/hdr/dolbyVision 四轴），由
+     `DevicePlaybackAssessor` 用「设备能力快照 + 本次播放源」合成证据；
+  2. 选路优先级：用户显式模式 > 历史失败指纹 > 音频编码 mpv 优先集合 >
+     设备**明确不支持**音频/视频（→ mpv / FFmpeg 软解）> 默认 Media3；
+  3. UNKNOWN 永不参与判定：既不当"支持"也不当"不支持"，不改变既有默认行为；
+  4. 采集器覆盖不到的编码（例如 TrueHD/MLP 没有 MIME 映射）一律 UNKNOWN，
+     绝不因为"集合里没有"就断言设备不支持；
+  5. 职责分离：evaluator = 服务端协商结论（DIRECT_PLAY/DIRECT_STREAM/TRANSCODE/UNSUPPORTED），
+     本评估 = 可执行的客户端路由证据。路由不得因 evaluator 给出 TRANSCODE 就改引擎；
+     兼容性展示也不得把 UNKNOWN 画成"支持"；
+  6. 评估必须同步、无 I/O（只读缓存快照），异常一律退化为 UNKNOWN 且不得阻断播放；
+     首次 MediaCodecList 枚举在 app 层后台预热，不进起播同步路径；
+  7. 别名归一化使用"最长别名匹配"，避免 `dts-hd` 被 `dts` 抢先命中而误判设备只支持 DTS。
+- 影响：起播同步路径新增一次纯内存计算（微秒级），无网络/磁盘访问；HDR 与 Dolby Vision
+  **暂不参与路由**——在 mpv tone-mapping / DV Profile 7→8.1 能力取证之前，只记录证据，
+  不得声称支持（能力取证属 ADR-043 范围）。降级链路（Media3 失败→mpv）与既有
+  fellBackThisSession 单次降级语义保持不变，不引入双重选路或递归重试。
+
