@@ -96,9 +96,15 @@ class RateLimitCooldownInterceptor(
     private val scopeOf: (HttpUrl) -> String?,
 ) : Interceptor {
 
+    /** 精确 origin 键：scheme://host:port（不含路径，避免把同源不同服务器混为一谈）。 */
+    private fun originKey(url: HttpUrl): String = url.scheme + "://" + url.host + ":" + url.port
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        val scope = scopeOf(request.url) ?: request.url.host
+        // 未知 serverId 时的回退键必须是**精确 origin**（scheme+host+port）。
+        // 用裸 host 会把同主机不同端口的另一台服务器误判为同一作用域，
+        // 导致 A 服 429 冷却静默阻断 B 服（M15-S3 测试 1 已复现）。
+        val scope = scopeOf(request.url) ?: originKey(request.url)
         cooldown.remainingMs(scope)?.let { remaining ->
             throw RateLimitedException(scope = scope, remainingMs = remaining)
         }
