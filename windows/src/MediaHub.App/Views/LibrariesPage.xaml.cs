@@ -32,13 +32,19 @@ public sealed partial class LibrariesPage : Page
 
         try
         {
-            var handles = App.Services.Servers.OnlineHandles.Where(h => h.Library is not null).ToList();
+            // A source that implements Library contributes its catalogues; a source that implements
+            // only Browse contributes its root folder. Both are ways of reaching content, and a source
+            // exposing only the second used to be invisible here - which is why a connected WebDAV
+            // source could not be opened from anywhere in the shell.
+            var handles = App.Services.Servers.OnlineHandles
+                .Where(h => h.Library is not null || h.Browse is not null)
+                .ToList();
             if (handles.Count == 0)
             {
                 LibraryGrid.ItemsSource = Array.Empty<LibraryCard>();
                 StatusBar.Severity = InfoBarSeverity.Informational;
                 StatusBar.Title = "没有可用的媒体库";
-                StatusBar.Message = "请先在“媒体源”中添加并登录 Emby 或 Jellyfin 服务器。";
+                StatusBar.Message = "请先在“媒体源”中添加并登录 Emby、Jellyfin 或 WebDAV 服务器。";
                 StatusBar.IsOpen = true;
                 return;
             }
@@ -49,9 +55,22 @@ public sealed partial class LibrariesPage : Page
             // Sources are queried independently so one unreachable server cannot blank the page.
             foreach (ProviderHandle handle in handles)
             {
+                if (handle.Library is null)
+                {
+                    // Browse-only source: offer its root folder. An empty library id is the marker the
+                    // click handler reads to open the folder browser instead of a library page.
+                    cards.Add(new LibraryCard(
+                        handle.ServerId,
+                        "",
+                        handle.Server.DisplayName,
+                        handle.Server.DisplayName,
+                        "文件夹浏览"));
+                    continue;
+                }
+
                 try
                 {
-                    IReadOnlyList<MediaLibrary> libraries = await handle.Library!.GetLibrariesAsync();
+                    IReadOnlyList<MediaLibrary> libraries = await handle.Library.GetLibrariesAsync();
                     cards.AddRange(libraries.Select(l => new LibraryCard(
                         handle.ServerId,
                         l.Id,
@@ -96,6 +115,15 @@ public sealed partial class LibrariesPage : Page
     private void OnLibraryClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not LibraryCard card) return;
+
+        // An empty library id means the source has no catalogue to open, only a tree to walk.
+        if (string.IsNullOrEmpty(card.LibraryId))
+        {
+            App.MainWindow?.NavigateShell(typeof(BrowsePage),
+                new Services.BrowseNavigation(card.ServerId, null, null, card.Name));
+            return;
+        }
+
         App.MainWindow?.NavigateShell(typeof(LibraryPage),
             new Services.LibraryNavigation(card.ServerId, card.LibraryId, card.Name));
     }
