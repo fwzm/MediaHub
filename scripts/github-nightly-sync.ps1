@@ -88,6 +88,42 @@ function Write-Log {
 }
 
 $StartStamp = Get-Date
+
+# ---------- 单实例锁 ----------
+# Windows 计划任务与 DSH 定时任务都在 00:00 触发，两个实例可能抢同一个 git index。
+$LockPath = Join-Path (Join-Path $Repo '.git') 'github-sync.lock'
+$MarkerPath = Join-Path (Join-Path $Repo '.git') 'github-sync-last-check'
+
+function Acquire-Lock {
+    try {
+        $fs = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        $sw = New-Object System.IO.StreamWriter($fs)
+        $sw.Write($StartStamp.ToString('o'))
+        $sw.Close(); $fs.Close()
+        return $true
+    } catch {
+        $age = $null
+        if (Test-Path -LiteralPath $LockPath) { $age = (Get-Date) - (Get-Item -LiteralPath $LockPath).LastWriteTime }
+        if ($age -and $age.TotalMinutes -gt 30) {
+            Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+            try {
+                $fs = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+                $sw = New-Object System.IO.StreamWriter($fs)
+                $sw.Write($StartStamp.ToString('o'))
+                $sw.Close(); $fs.Close()
+                return $true
+            } catch { return $false }
+        }
+        return $false
+    }
+}
+
+if (-not (Acquire-Lock)) {
+    Write-Log ("另一个同步实例正在运行（{0}），本次跳过。" -f $LockPath) 'WARN'
+    exit 0
+}
+
+try {
 Write-Log ("===== 夜间同步开始 (repo={0}, dryRun={1}) =====" -f $Repo, [bool]$DryRun)
 
 # ---------- 0. 同步远端引用 ----------
@@ -97,19 +133,31 @@ $branch = (Invoke-Git -GitArgs @('rev-parse', '--abbrev-ref', 'HEAD')).Text
 if ($branch -eq 'HEAD') { throw '当前处于 detached HEAD，无法自动同步，请先切到分支。' }
 Write-Log ("当前分支: {0}" -f $branch)
 
-# ---------- 1. 检测「当天更新」 ----------
-$today = (Get-Date).Date
-$sinceToday = $today.ToString('yyyy-MM-ddTHH:mm:ss')
+# ---------- 1. 检测「自上次检查以来是否有更新」 ----------
+# 关键：00:00 触发时若按「今天 00:00」取窗口，窗口只有几秒，会把刚结束那一天的全部工作漏掉（实测假绿）。
+# 因此改为「距上次检查」的时间窗，首次运行回看 24 小时。
+$defaultSince = $StartStamp.AddHours(-24)
+$since = $defaultSince
+$sinceSource = '默认回看 24 小时（无上次检查记录）'
+if (Test-Path -LiteralPath $MarkerPath) {
+    $parsed = [datetime]::MinValue
+    $rawMarker = (Get-Content -LiteralPath $MarkerPath -Raw -ErrorAction SilentlyContinue)
+    if ($rawMarker -and [datetime]::TryParse($rawMarker.Trim(), [ref]$parsed)) {
+        $since = $parsed
+        $sinceSource = "上次检查 $($parsed.ToString('yyyy-MM-dd HH:mm:ss'))"
+    }
+}
+$sinceIso = $since.ToString('yyyy-MM-ddTHH:mm:ss')
 
 # 本脚本自身产生的提交不算「项目更新」，也不进 README 摘要（否则每晚自增一条 → 无限提交）。
 $SyncCommitGrep = '^docs\(readme\): 自动同步最近更新'
 
-$todayCommits = @((Invoke-Git -GitArgs @('log', "--since=$sinceToday", '--invert-grep', '-E', "--grep=$SyncCommitGrep", '--pretty=format:%h|%ad|%s', '--date=short')).Lines | Where-Object { $_ })
+$todayCommits = @((Invoke-Git -GitArgs @('log', "--since=$sinceIso", '--invert-grep', '-E', "--grep=$SyncCommitGrep", '--pretty=format:%h|%ad|%s', '--date=short')).Lines | Where-Object { $_ })
 # 只统计「当前 HEAD 上、任何远端都没有」的提交 —— 推送当前分支即可发布的内容。
 $unpushedCommits = @((Invoke-Git -GitArgs @('log', 'HEAD', '--not', '--remotes', '--pretty=format:%h|%s')).Lines | Where-Object { $_ })
 $dirtyTracked = @((Invoke-Git -GitArgs @('status', '--porcelain', '--untracked-files=no')).Lines | Where-Object { $_ })
 
-Write-Log ("今日提交: {0} 条；当前分支未推送提交: {1} 条；已跟踪文件未提交改动: {2} 条" -f $todayCommits.Count, $unpushedCommits.Count, $dirtyTracked.Count)
+Write-Log ("检查窗口: {0} → 现在；窗口内提交: {1} 条；当前分支未推送提交: {2} 条；已跟踪文件未提交改动: {3} 条" -f $sinceSource, $todayCommits.Count, $unpushedCommits.Count, $dirtyTracked.Count)
 
 # 其它本地分支上的未推送提交：仅提示，绝不自动推送（可能是实验分支）。
 $otherUnpushed = @()
@@ -124,8 +172,10 @@ if ($otherUnpushed.Count -gt 0) {
 
 $hasUpdate = ($todayCommits.Count -gt 0) -or ($unpushedCommits.Count -gt 0)
 if (-not $hasUpdate) {
-    Write-Log '当天无更新，无需同步。' 'OK'
+    Write-Log '窗口内无更新，无需同步。' 'OK'
     if ($dirtyTracked.Count -gt 0) { Write-Log ('注意：存在未提交的已跟踪文件改动（不自动提交）: ' + (($dirtyTracked | Select-Object -First 5) -join ' | ')) 'WARN' }
+    # 即使无更新也推进检查点，保证下次窗口从本次检查时刻起算。
+    try { [System.IO.File]::WriteAllText($MarkerPath, $StartStamp.ToString('yyyy-MM-ddTHH:mm:ss'), (New-Object System.Text.UTF8Encoding($false))) } catch { }
     Write-Log '===== 夜间同步结束（无操作） ====='
     exit 0
 }
@@ -252,6 +302,11 @@ if ($slug) {
 }
 
 Write-Log ('===== 夜间同步结束（已同步 origin/{0}） =====' -f $targetBranch) 'OK'
+# 推进检查点：下次窗口从本次开始时刻起算。
+try { [System.IO.File]::WriteAllText($MarkerPath, $StartStamp.ToString('yyyy-MM-ddTHH:mm:ss'), (New-Object System.Text.UTF8Encoding($false))) } catch { }
 Write-Host ''
-Write-Host ("RESULT: branch={0} todayCommits={1} pushed=True readmeChanged={2} pr={3}" -f $targetBranch, $todayCommits.Count, $readmeChanged, $prUrl)
+Write-Host ("RESULT: branch={0} windowCommits={1} pushed=True readmeChanged={2} pr={3}" -f $targetBranch, $todayCommits.Count, $readmeChanged, $prUrl)
 exit 0
+} finally {
+    Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+}
