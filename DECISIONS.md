@@ -649,7 +649,25 @@
   **暂不参与路由**——在 mpv tone-mapping / DV Profile 7→8.1 能力取证之前，只记录证据，
   不得声称支持（能力取证属 ADR-043 范围）。降级链路（Media3 失败→mpv）与既有
   fellBackThisSession 单次降级语义保持不变，不引入双重选路或递归重试。
-
+## ADR-043 云盘与 STRM 接入契约（设计冻结；实现 NOT_STARTED）
+- 状态：已采纳（设计）（2026-10-14）；实现：**NOT_STARTED**
+- 决策：云盘类数据源（阿里云盘 / 百度网盘 / 夸克 / 中国移动云盘 / 天翼云盘）与 `.strm` 引用文件的接入，
+  必须先满足以下 11 条契约，细则与证据见 [云盘与 STRM 接入契约](docs/providers/cloud-strm-contract.md)
+  （含接口建议、14 条威胁模型、30 行测试矩阵、15 条待验证项）：
+  ① 目录/文件名优先的元数据获取；② 刮削阶段**禁止读取媒体文件头**；③ STRM 地址解析与资源身份；
+  ④ HTTP 302/307 重定向策略；⑤ 签名 URL 有效期三态（KNOWN/UNKNOWN/NONE）；⑥ 403/410 重新解析与熔断；
+  ⑦ 断点续播与 Range 边界；⑧ 缓存作用域、失效与清理；⑨ UA 穿透与凭据剥离的区分（**不得绕过 ADR-030**）；
+  ⑩ 取消传播、并发上限、超时与重试预算（403/429 语义熔断，禁止重试风暴）；⑪ 未验证直链**禁止落库**。
+- 影响：
+  - 后续任何云盘 Provider 的实现与 PR，须以本契约为前置门禁；契约本身不改动现有生产代码。
+  - 新增门禁：涉及云盘的测试必须包含"刮削零字节读取"与"直链不落库"两类断言。
+- 登记缺口（本次**只登记不修**，避免与 M1/M2 变更交叉）：
+  - `PlaybackSource.isExpired()` 已存在但生产零调用；
+  - `PlaybackErrorMapper` 未建模 410（落 UNKNOWN）；
+  - `ProviderException.RateLimited.retryAfterMs` 恒为 null（Retry-After 未解析）；
+  - `MediaHttpClient.probe` 回传 `finalUrl` 但零校验（SSRF 面）；
+  - `RetryOnceInterceptor` 只捕获 IOException，而 `Call.cancel()` 表现为 IOException("canceled")，
+    "取消后仍 sleep 300ms 重发"为**疑似**既有缺陷，需单测取证（未实测，不得当成已确认结论）。
 ## ADR-044 播放参数配置层（HDR 色调映射 / 音频下混 / AFR）
 - 状态：已采纳（2026-10-14）；实现：**PARTIAL**（配置层已实现并测试；真机验证 NOT_RUN）
 - 证据方法（可复现）：对打包产物 `dev.jdtech.mpv:libmpv:1.0.0` 的 AAR 内
