@@ -182,6 +182,7 @@ public sealed class MpvPlayer : IPlaybackEngine, ITrackController, IDisposable
         Opt("cursor-autohide", "1000");
         Opt("stop-screensaver", "yes");
         Opt("audio-exclusive", "no");
+        if (!string.IsNullOrEmpty(_options.AudioOutput)) Opt("ao", _options.AudioOutput);
         Opt("volume-max", "200");
         Opt("msg-level", "all=warn");
         if (!string.IsNullOrEmpty(_options.LogFile)) Opt("log-file", _options.LogFile!);

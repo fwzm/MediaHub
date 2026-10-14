@@ -62,6 +62,7 @@ internal static class Program
         string? vo = Environment.GetEnvironmentVariable("MEDIAHUB_MPV_VO");
         string? hwdec = Environment.GetEnvironmentVariable("MEDIAHUB_MPV_HWDEC");
         string? gpuContext = Environment.GetEnvironmentVariable("MEDIAHUB_MPV_GPU_CONTEXT");
+        string? ao = Environment.GetEnvironmentVariable("MEDIAHUB_MPV_AO");
 
         var options = new MpvPlayerOptions
         {
@@ -70,9 +71,11 @@ internal static class Program
             HwDec = hwdec ?? "auto-safe",
             VideoOutput = vo ?? "gpu-next",
             GpuContext = gpuContext ?? "d3d11",
+            AudioOutput = ao ?? "",
             ExtraOptions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["msg-level"] = "all=v" },
         };
-        Console.WriteLine("vo=" + options.VideoOutput + " hwdec=" + options.HwDec + " ctx=" + options.GpuContext);
+        Console.WriteLine("vo=" + options.VideoOutput + " hwdec=" + options.HwDec + " ctx=" + options.GpuContext
+            + " ao=" + (string.IsNullOrEmpty(options.AudioOutput) ? "(default)" : options.AudioOutput));
         var player = new MpvPlayer(options);
 
         var observed = new List<PlayerSnapshot>();
@@ -110,20 +113,32 @@ internal static class Program
         if (string.IsNullOrEmpty(final.Technical.VideoCodec)) failures.Add("engine never reported a video codec");
         if (final.Technical.HwDecCurrent is null) failures.Add("engine never reported hwdec-current");
 
+        // Transport assertions are ordered so they hold for clips of any length. A short fixture may
+        // already have reached end-of-file after the observation window, and a paused-at-EOF engine
+        // is legitimately "Ended" rather than "Paused", so the engine is seeked back and resumed
+        // first and only then asked to pause.
+        double span = final.DurationSeconds > 0.5 ? final.DurationSeconds : 4.0;
+        player.SeekAbsolute(span * 0.25);
+        player.Play();
+        Thread.Sleep(900);
+        double seeked = player.Snapshot.PositionSeconds;
+        if (seeked < 0.2) failures.Add($"seek did not move position (landed at {seeked:0.000})");
+
         // Pause must be observable by the engine, not merely recorded by the caller.
         player.Pause();
-        Thread.Sleep(900);
+        Thread.Sleep(600);
+        TransportState pausedState = player.Snapshot.State;
         double pausedPos = player.Snapshot.PositionSeconds;
         Thread.Sleep(900);
         double stillPos = player.Snapshot.PositionSeconds;
+        if (pausedState != TransportState.Paused) failures.Add($"state after Pause was {pausedState}, expected Paused");
         if (Math.Abs(stillPos - pausedPos) > 0.35) failures.Add($"pause did not hold position ({pausedPos:0.000} -> {stillPos:0.000})");
-        if (player.Snapshot.State != TransportState.Paused) failures.Add($"state after Pause was {player.Snapshot.State}, expected Paused");
 
-        // Seek must move the engine clock.
-        player.SeekAbsolute(Math.Max(0.5, final.DurationSeconds * 0.5));
-        Thread.Sleep(1200);
-        double seeked = player.Snapshot.PositionSeconds;
-        if (seeked < 0.2) failures.Add($"seek did not move position (landed at {seeked:0.000})");
+        // Resume must actually restart the clock.
+        player.Play();
+        Thread.Sleep(900);
+        double resumedPos = player.Snapshot.PositionSeconds;
+        if (resumedPos <= stillPos + 0.05) failures.Add($"resume did not advance the clock ({stillPos:0.000} -> {resumedPos:0.000})");
 
         // Track enumeration must produce at least one audio track for a normal movie file.
         if (final.AudioTracks.Count == 0) failures.Add("no audio tracks were enumerated");

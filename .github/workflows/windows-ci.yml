@@ -18,11 +18,10 @@ env:
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "true"
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
-  LIBMPV_DIR: ${{ github.workspace }}\windows\native\libmpv
 
 jobs:
   build-test:
-    name: build / unit tests / packaging
+    name: build / tests / playback probe / packaging
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -49,7 +48,7 @@ jobs:
       - name: Verify libmpv is present
         shell: pwsh
         run: |
-          $dll = Join-Path $env:LIBMPV_DIR "libmpv-2.dll"
+          $dll = "windows/native/libmpv/libmpv-2.dll"
           if (-not (Test-Path $dll)) { throw "libmpv-2.dll missing at $dll" }
           "libmpv bytes: " + (Get-Item $dll).Length
 
@@ -83,6 +82,35 @@ jobs:
           if ($total -lt 50) { throw "expected at least 50 tests, got $total" }
           if ($failed -ne 0) { throw "$failed test(s) failed" }
 
+      - name: Engine integration probe (real playback against the committed fixture)
+        shell: pwsh
+        working-directory: windows
+        env:
+          # A hosted runner has no GPU, no audio endpoint and no desktop, so the probe runs with the
+          # decoder and clock exercised and the presentation/audio paths disabled. The assertions are
+          # unchanged: duration reported, position advancing, seek landing, pause holding, resume
+          # advancing, tracks enumerated.
+          MEDIAHUB_MPV_VO: "null"
+          MEDIAHUB_MPV_HWDEC: "no"
+          MEDIAHUB_MPV_AO: "null"
+        run: |
+          # Native stderr becomes a terminating error under the runner's ErrorActionPreference,
+          # which is what made an earlier revision of this step fail.
+          $ErrorActionPreference = "Continue"
+
+          $exe = "./tools/MpvProbe/bin/x64/Debug/net10.0-windows/win-x64/MpvProbe.exe"
+          if (-not (Test-Path $exe)) { throw "MpvProbe was not built" }
+
+          # The fixture is committed (27 KB) so this step is hermetic: no ffmpeg, no network.
+          $sample = "./tests/assets/sample-av.mp4"
+          if (-not (Test-Path $sample)) { throw "committed media fixture is missing: $sample" }
+          "fixture: " + (Get-Item $sample).Length + " bytes"
+
+          $output = & $exe $sample 3 2>&1 | Out-String
+          $output.Split([Environment]::NewLine) | Where-Object { $_ -match "^(vo=|engine:|media :|RESULT|MPV_PROBE|  t=)" } | ForEach-Object { $_ }
+          if ($LASTEXITCODE -ne 0) { throw "MPV_PROBE FAILED: the engine did not meet its assertions" }
+          "MPV_PROBE PASS in CI (decode path, clock and transport asserted; GPU/HDR/audio output NOT exercised -> UNVERIFIED)"
+
       - name: Portable publish (Release)
         working-directory: windows
         run: >
@@ -94,56 +122,11 @@ jobs:
         shell: pwsh
         working-directory: windows
         run: |
-          # The published folder must be self-contained: an exe, the engine DLL and the app dll.
+          # The published folder must be self-contained: the exe, the engine DLL and the app assemblies.
           $required = @("MediaHub.exe", "libmpv-2.dll", "MediaHub.dll", "MediaHub.Net.dll", "MediaHub.Providers.dll")
           $missing = $required | Where-Object { -not (Test-Path (Join-Path "./artifacts/portable" $_)) }
           if ($missing) { throw "missing from publish output: " + ($missing -join ", ") }
           "portable output size: " + [math]::Round((Get-ChildItem ./artifacts/portable -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1) + " MB"
-
-      - name: Engine integration probe
-        shell: pwsh
-        working-directory: windows
-        env:
-          # A hosted runner has no GPU and no desktop, so the probe runs with the decoder exercised
-          # and the presentation path disabled. The same assertions still apply: duration reported,
-          # position advancing, seek landing, pause holding, tracks enumerated.
-          MEDIAHUB_MPV_VO: "null"
-          MEDIAHUB_MPV_HWDEC: "no"
-        run: |
-          # Native stderr would otherwise become a terminating error under the runner's
-          # ErrorActionPreference, which is what made this step fail on the first CI run.
-          $ErrorActionPreference = "Continue"
-
-          $exe = "./tools/MpvProbe/bin/x64/Debug/net10.0-windows/win-x64/MpvProbe.exe"
-          if (-not (Test-Path $exe)) { throw "MpvProbe was not built" }
-
-          $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
-          if (-not $ffmpeg) {
-            $usage = & $exe 2>&1 | Out-String
-            "probe usage output: $usage"
-            if ($LASTEXITCODE -eq 0) { throw "probe should fail without a media file" }
-            "MPV_PROBE_USAGE_CONTRACT OK"
-            "WARNING: ffmpeg is unavailable on this runner, so real playback was NOT exercised."
-            "         Recorded as DEVICE_UNVERIFIED, not as a pass."
-            exit 0
-          }
-
-          $sample = Join-Path $env:RUNNER_TEMP "mediahub-ci-sample.mp4"
-          $ffArgs = @(
-            "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=15:duration=6",
-            "-f", "lavfi", "-i", "sine=frequency=440:duration=6",
-            "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-ac", "2", "-shortest", $sample
-          )
-          & ffmpeg @ffArgs
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $sample)) { throw "ffmpeg could not generate a CI sample" }
-          "CI sample: " + (Get-Item $sample).Length + " bytes"
-
-          $output = & $exe $sample 4 2>&1 | Out-String
-          $output.Split([Environment]::NewLine) | Where-Object { $_ -match "^(vo=|engine:|media :|RESULT|MPV_PROBE|  t=)" } | ForEach-Object { $_ }
-          if ($LASTEXITCODE -ne 0) { throw "MPV_PROBE FAILED: the engine did not meet its assertions" }
-          "MPV_PROBE PASS in CI (decoder and clock asserted; presentation path NOT exercised -> GPU/HDR UNVERIFIED)"
 
       - name: Upload artifacts
         if: always()

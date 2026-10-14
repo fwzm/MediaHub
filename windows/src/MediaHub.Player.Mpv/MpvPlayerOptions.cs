@@ -21,6 +21,15 @@ public sealed record MpvPlayerOptions
     /// <summary>Direct3D 11 video decode API.</summary>
     public string HwDecCodecs { get; init; } = "d3d11va";
 
+    /// <summary>
+    /// Audio output driver. Empty selects the engine default (WASAPI on Windows).
+    /// </summary>
+    /// <remarks>
+    /// Overridable so the integration probe can run on a machine with no audio endpoint — a CI
+    /// runner, for example — without changing the code path under test.
+    /// </remarks>
+    public string AudioOutput { get; init; } = "";
+
     public bool Osc { get; init; }
     public int OsdLevel { get; init; } = 1;
     public bool KeepOpen { get; init; } = true;
