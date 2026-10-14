@@ -1,5 +1,13 @@
 # 变更记录（CHANGELOG）
 
+## [Unreleased — A4 联合候选并入 main] — 2026-10-14
+
+- 并入 A4 联合候选（PR #24，266 文件）：P1 播放专业信息面板、P2 字幕中心（同目录发现 / 导入 / 双内核加载 / mpv 偏移 / 匹配记忆）、WebDAV 修复链路、Media3 与 mpv 实际选轨及回滚、私有恢复一致性、播放器退出归属与代际。
+- 并入 Agent B A4 收敛候选（`22e424d`，33 提交）：字幕与缓存跨会话归属及 ABA 防护、字幕缓存生命周期（beginSession/endSession）、mpv 可信标题保留、Media3 实际 supported Tracks 与 rollback、WebDAV 取消/凭据/parser 门禁、恢复一致性。
+- 门禁：本地 1275 单测 / 0 失败 / 0 错误 / 0 跳过（157 XML）+ lint + assembleDebug + androidTest APK；CI run 38491200869 @ `23ddd5b` 三 job 全 SUCCESS；合并提交 `369b5a77` 触发 main push CI run 38493343170。
+- 文档候选 PR #26（`BackupSerializer` KDoc 有界读取责任划分）先行并入（`75b3d42`）。
+- 状态：真机 / 真实服务器 / 真实旧库验收 NOT_RUN（用户指示先收敛再做验收）；`DEVICE UNVERIFIED` 与 C 独立签字状态不变。
+
 ## [Unreleased — PR #18 Agent A integration] — 2026-09-09
 
 - 按原 SHA 接回 B 的三提交补丁，保留完整历史和审查边界。
