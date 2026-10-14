@@ -288,6 +288,16 @@ public sealed class ServerManager : IDisposable
         if (!ServerUrlNormalizer.TryNormalize(input, type, out NormalizedServerUrl normalized, out string? error))
             return (false, error ?? "地址无效");
 
+        if (type == ServerType.WebDav)
+        {
+            WebDavServerProbe.ProbeResult dav =
+                await WebDavServerProbe.ProbeAsync(normalized.BaseUri, policy, null, ct).ConfigureAwait(true);
+            return dav.Success
+                ? (true, "连接正常：" + (dav.ServerHeader ?? normalized.DisplayText)
+                         + (dav.DavClasses.Count > 0 ? "（DAV: " + string.Join(", ", dav.DavClasses) + "）" : ""))
+                : (false, dav.Message);
+        }
+
         MediaServerProbe.ProbeResult probe =
             await MediaServerProbe.ProbeMediaBrowserAsync(normalized.BaseUri, type, policy, ct).ConfigureAwait(true);
         return probe.Success
@@ -303,13 +313,42 @@ public sealed class ServerManager : IDisposable
         if (!ServerUrlNormalizer.TryNormalize(input, type, out NormalizedServerUrl normalized, out string? error))
             return (false, error ?? "地址无效");
 
-        MediaServerProbe.ProbeResult probe =
-            await MediaServerProbe.ProbeMediaBrowserAsync(normalized.BaseUri, type, policy, ct).ConfigureAwait(true);
-        if (!probe.Success) return (false, probe.Message);
+        // The probe must match the protocol the user picked. Probing a WebDAV endpoint with the
+        // MediaBrowser probe made "add a WebDAV source" impossible: the request went out as a
+        // Jellyfin /System/Info/Public call, the server answered 401, and the dialog reported
+        // "session expired" for a source that had never been contacted correctly at all.
+        string? probeServerName;
+        string? probeRemoteId;
+        if (type == ServerType.WebDav)
+        {
+            // Probed WITH the credentials: a WebDAV server that requires authentication answers 401 to
+            // an anonymous OPTIONS, and a probe that always failed would make secure servers unaddable.
+            var davCredentials = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["username"] = userName,
+                ["password"] = password,
+            };
+            WebDavServerProbe.ProbeResult dav = await WebDavServerProbe
+                .ProbeAsync(normalized.BaseUri, policy, davCredentials, ct).ConfigureAwait(true);
+            if (!dav.Success) return (false, dav.Message);
+            probeServerName = dav.ServerHeader;
+            // WebDAV has no server identity to report, so the endpoint itself is the identity. That is
+            // weaker than an Emby/Jellyfin id, which is exactly why the credential is also bound to the
+            // normalised URL rather than to a name the server chose.
+            probeRemoteId = normalized.BaseUri.Host + ":" + normalized.BaseUri.Port;
+        }
+        else
+        {
+            MediaServerProbe.ProbeResult probe = await MediaServerProbe
+                .ProbeMediaBrowserAsync(normalized.BaseUri, type, policy, ct).ConfigureAwait(true);
+            if (!probe.Success) return (false, probe.Message);
+            probeServerName = probe.ServerName;
+            probeRemoteId = probe.RemoteServerId;
+        }
 
         // The remote server id binds the credential to one physical server, so a token can never be
         // replayed against a different server that happens to reuse the same host name.
-        string serverId = type.ToString().ToLowerInvariant() + ":" + (probe.RemoteServerId ?? normalized.BaseUri.Host);
+        string serverId = type.ToString().ToLowerInvariant() + ":" + (probeRemoteId ?? normalized.BaseUri.Host);
         if (Find(serverId) is not null) return (false, "该服务器已经添加过了");
 
         var entry = new ServerEntry
@@ -317,7 +356,7 @@ public sealed class ServerManager : IDisposable
             ServerId = serverId,
             Type = type,
             Url = normalized.BaseUri.ToString(),
-            DisplayName = probe.ServerName ?? normalized.BaseUri.Host,
+            DisplayName = probeServerName ?? normalized.BaseUri.Host,
             UserName = userName,
             Status = ServerStatus.Checking,
         };
@@ -343,7 +382,7 @@ public sealed class ServerManager : IDisposable
             return (false, ex.Message);
         }
 
-        await PersistAsync(entry, probe.RemoteServerId, password, ct).ConfigureAwait(true);
+        await PersistAsync(entry, probeRemoteId, password, ct).ConfigureAwait(true);
         Changed?.Invoke(this, EventArgs.Empty);
         return (true, "已添加：" + entry.DisplayName);
     }
