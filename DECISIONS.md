@@ -623,3 +623,35 @@
 - 导入身份与冻结线路列表必须使用持久化排序，再按现有 enabled/primary 规则选择有效地址。同优先级的有效候选若指向不同规范化地址，导入及导出均拒绝；唯一有效主线路或同一规范化地址不因排序并列而拒绝。
 - 预览及未完成保护计划必须验证身份在持久化排序下稳定。旧计划若不稳定或存在歧义，保留现场、阻止自动续作/回滚和新恢复，不静默重算已确认决策。COMPLETED 仍只清理日志，不因此倒退恢复。
 - 本更正不改变同源替换保留登录的既有语义，不新增全局登出、线路管理策略或日志人工清理入口。状态仍为 C REVIEW PENDING，尚未合并。
+
+## ADR-044 播放参数配置层（HDR 色调映射 / 音频下混 / AFR）
+- 状态：已采纳（2026-10-14）；实现：**PARTIAL**（配置层已实现并测试；真机验证 NOT_RUN）
+- 证据方法（可复现）：对打包产物 `dev.jdtech.mpv:libmpv:1.0.0` 的 AAR 内
+  `jni/arm64-v8a/libmpv.so` 做字符串表探测。**方法自检**：生产已在使用的 `hwdec` 命中 65。
+  命中：`tone-mapping` 13、`hdr-compute-peak` 2、`libplacebo` 12、`gpu-api` 1、
+  `target-peak` 1、`gamut-mapping-mode` 3、`audio-normalize-downmix` 1、`volume-max` 1、`sub-ass` 23。
+  **未命中**：`audio-downmix` 0；`libavfilter.so` 中 `loudnorm`/`dynaudnorm`/`acompressor` 均为 0。
+- 决策：
+  1. 建立纯函数配置层 `MpvTuningOptions` + 契约测试：**只允许下发 `EVIDENCED_OPTIONS` 中的选项**，
+     `ABSENT_OPTIONS`（audio-downmix）与 `UNCOMPILED_FILTERS`（loudnorm 等）由测试禁止出现；
+  2. HDR 片源 **且** 设备明确不支持该 HDR 格式 → 下发 `tone-mapping=bt.2390` + `hdr-compute-peak=yes`；
+     设备能力**未知（null）或明确支持** → 不下发任何色调映射选项，保持既有直通行为；
+  3. 下混归一化（`audio-normalize-downmix`）默认关闭、机制先行，等设置页偏好接入再开启；
+  4. **不实现**（证据不足，登记为阻塞）：EBU R128 响度归一化（loudnorm 未编入 = BLOCKED_EVIDENCE）、
+     中置声道 +3~4.5dB（`audio-downmix` 在该版本不存在）、Dolby Vision Profile 7→8.1 转换（无证据）；
+  5. AFR：交付纯逻辑 `FrameRateMatcher`（源帧率 × 可用刷新率 × API 级别 → 判定表）+ 单测；
+     **Surface 侧接线未实现（NOT_STARTED）**，原因见下。
+- AFR 现状与阻塞（基于真实代码）：
+  - 唯一的 Surface 接缝是 `feature/player/.../PlayerScreen.kt:367-376`：`SurfaceView` +
+    `SurfaceHolder.Callback` → `engine.attachSurface(holder.surface)` / `attachSurface(null)`；
+    全仓**无** `setFrameRate` / `preferredDisplayModeId` 调用。
+  - `Surface.setFrameRate` 需要 **API 30+**（minSdk 26 → 必须运行时判级）；
+    `preferredDisplayModeId` 需要 Activity/Window 与可枚举 Display.Mode，多窗口行为不一致，本项目不采用。
+  - 帧率来源分引擎：Media3 经 `Format.frameRate`（track 信息），mpv 需新增属性观测
+    （当前只观测 time-pos/duration/pause/speed/media-title）；两侧都尚未提供该数据。
+  - 因此 AFR 的完整接线 = "帧率来源 + Surface 重建后的重放 + 失败静默"三件事，本轮只完成判定逻辑；
+    在真机上无法验证前不接线，避免引入"切换失败导致黑屏/卡顿"的风险。
+- 影响：HDR 片源在**明确不支持该 HDR 格式**的设备上，mpv 默认行为由"原样输出（发灰/偏色）"变为
+  色调映射输出；此变化依据设备能力证据 + 二进制选项存在性，**真机渲染结果 NOT_RUN**。
+  Media3 路径未做任何参数变更。
+
