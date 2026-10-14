@@ -9,6 +9,16 @@ import dev.jdtech.mpv.MPVLib
 /** Small native boundary: lifecycle tests exercise the engine without JNI or sockets. */
 internal interface MpvBridge {
     fun start(url: String, headers: Map<String, String>): String
+
+    /**
+     * 以**单个本地媒体文件**启动回环桥（M9-P0）。
+     *
+     * 默认实现**明确不支持**：实现方必须显式提供本地字节源，
+     * 否则本地播放会被静默路由到 HTTP 上游（真机实测表现为黑屏、无 time-pos）。
+     */
+    fun startLocalFile(path: String): String =
+        throw UnsupportedOperationException("MpvBridge 未实现本地文件上游")
+
     fun stop()
 }
 
@@ -39,6 +49,7 @@ internal interface MpvInstance {
 internal fun createMpvBridge(factory: HttpClientFactory): MpvBridge = object : MpvBridge {
     private val delegate = MpvHttpBridge(factory)
     override fun start(url: String, headers: Map<String, String>) = delegate.start(url, headers)
+    override fun startLocalFile(path: String) = delegate.startLocalFile(path)
     override fun stop() = delegate.stop()
 }
 

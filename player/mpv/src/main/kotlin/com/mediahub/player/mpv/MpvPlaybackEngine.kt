@@ -193,7 +193,16 @@ class MpvPlaybackEngine internal constructor(
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_BRIDGE_START)
                     val b = bridgeFactory().also { bridge = it }
                     checkCurrent()
-                    val bridgeUrl = b.start(src.url, buildHeaders(src))
+                    // M9-P0：本地媒体走本地字节源分支。判定基于**真实文件存在性**，
+                    // 不依赖 "/storage" 之类前缀猜测（避免把 URL 误判/漏判）。
+                    val localPath = src.url.takeIf {
+                        it.startsWith("file://") || (it.startsWith("/") && java.io.File(it).isFile)
+                    }
+                    val bridgeUrl = if (localPath != null) {
+                        b.startLocalFile(localPath)
+                    } else {
+                        b.start(src.url, buildHeaders(src))
+                    }
                     checkCurrent()
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_INSTANCE_CREATE_STARTED)
                     val m = instanceFactory().also { mpv = it }
