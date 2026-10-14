@@ -204,6 +204,12 @@ class MpvPlaybackEngine internal constructor(
                     m.setOptionString("vo", "gpu")
                     m.setOptionString("ao", "audiotrack")
                     m.setOptionString("hwdec", "mediacodec")
+                    // M6 真机缺陷修复（P1）：关闭 mpv 的 ytdl 钩子。
+                    // MediaHub 的媒体**一律经回放环桥**（http://127.0.0.1:<port>/media/<random>）
+                    // 以字节流形式提供，不是站点 URL；mpv 默认 ytdl=auto 会把它当站点，
+                    // 启动 yt-dlp 子进程（真机日志：Subprocess failed: init / youtube-dl failed）
+                    // 随后 "loading failed (reason 4)" → 黑屏、无首帧、无时钟推进。
+                    m.setOptionString("ytdl", "no")
                     val container = src.container?.lowercase()
                     if (container == "mpegts" || container == "ts" || container == "m2ts") {
                         m.setOptionString("demuxer-lavf-format", "mpegts")
