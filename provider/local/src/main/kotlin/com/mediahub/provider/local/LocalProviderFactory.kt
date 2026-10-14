@@ -27,6 +27,7 @@ class LocalProviderFactory @Inject constructor(
             browse = provider,
             detail = provider,
             playback = provider,
+            subtitleDiscovery = provider,
         )
     }
 }

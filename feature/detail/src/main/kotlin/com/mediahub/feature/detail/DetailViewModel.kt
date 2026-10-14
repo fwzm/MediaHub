@@ -148,8 +148,10 @@ class DetailViewModel @Inject constructor(
     }
 
     private fun userMessage(e: Exception): String = when (e) {
+        // ProviderException.message 为消毒后的固定文案（A3-4），可透出；
+        // 其余异常的 message 可能携带 URL/凭据等敏感文本，只给固定分类。
         is ProviderException -> e.message ?: "加载失败"
-        else -> "加载失败：${e.message}"
+        else -> "加载失败"
     }
 
     /**

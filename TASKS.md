@@ -15,6 +15,24 @@
 - [ ] WebDAV 云备份依赖本地格式/恢复稳定；WebDAV 媒体 Provider 为独立 backlog。其余播放器/Provider backlog 保持原范围。
 
 > 下方阶段正文是历史进度记录。1C—1F 和 Jellyfin 1G A/B/C 已有实现；尾部旧 TODO 不作为重开发授权。跨阶段文档的逐文件历史更正留后续任务 5。
+## Phase 1I 2C —— EndpointTestService 取消边界（T0001，2026-09-20）BLOCKED：完整验证待补
+
+- [x] F01/F02：未修复源码两条回归先红；响应在回调内消费关闭，Media 读体失败保留 API 状态码。
+- [x] F03/F05：明确 Media 等头/读体屏障、Call 身份、取消异常、关闭责任、独立 watchdog 和失败清理；
+      当前网络源码直接 JUnit 17 例通过，移除取消绑定的负对照按预期失败。
+- [x] F04 测试代码：八条 fake 保留，真实 HTTPS 切换及 ViewModelStore 生命周期清理测试已补齐并编译。
+- [ ] BLOCKED F04 运行与 F06 完整门禁：Robolectric Android JAR 读取被拒；Gradle 配置阶段权限失败，
+      两个模块单测、两个 lint 与应用 debug 构建均未取得通过证据。见 `.repair-evidence/README.md`。
+
+初次实现范围记录（不代表本次验证通过）：
+
+- [x] DONE 生产修复：`EndpointTestService` 双层探测移出调用方调度器；`Call.enqueue` 可取消桥接；
+      响应所有权统一释放；1 MiB 有界采样；取消引起的 IOException 不再被吞。
+- [x] DONE 回归：`EndpointTestServiceCancellationTest` 7 例 + `EndpointTestServiceTest` 新增 4 例
+      + `ServerEditorViewModelTest` 新增 2 例真实服务集成（取消穿透到 OkHttp `canceled`）。
+- [ ] TODO 设备验证与真实媒体测速：`probeUrl` 仍为占位；本任务不覆盖真机与真实服务器。
+- 来源：闭环控制目录 `D:/deepseek_test/mh-loop`，任务 `T0001`，任务书见该目录 `evidence/T0001/`。
+- 本任务不领取 2A（Agent B 持有）、2B（缺真实服务器证据）、PR #10 / PR #18 相关工作。
 
 ## Phase 0 —— 骨架（本次交付）✅ DONE
 

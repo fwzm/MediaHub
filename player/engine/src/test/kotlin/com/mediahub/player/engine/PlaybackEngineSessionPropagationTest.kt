@@ -28,8 +28,8 @@ import org.robolectric.annotation.Config
  * final 路径）都必须携带 source 的会话关联 id；null（Local/WebDAV 等无会话
  * 语义的 Provider）原样传播 null，行为零变化。
  *
- * mpv 引擎同款四构造点逐一注入同一字段（代码路径镜像，JVM 不可实例化 native
- * 引擎，真机 device smoke 以 mpv 为主引擎实弹覆盖）。
+ * mpv 的 periodic/final 路径共享 generation-owned progressSnapshot；对应会话传播
+ * 与切换隔离在 MpvPlaybackEngineTest 中通过 native 边界替身验证，真机另行验收。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)

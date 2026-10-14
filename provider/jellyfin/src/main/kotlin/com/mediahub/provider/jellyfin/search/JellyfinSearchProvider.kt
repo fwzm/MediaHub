@@ -8,6 +8,7 @@ import com.mediahub.model.PageRequest
 import com.mediahub.model.PagedResult
 import com.mediahub.provider.api.MediaSearchProvider
 import com.mediahub.provider.api.ProviderException
+import com.mediahub.provider.api.pageWindow
 import com.mediahub.provider.jellyfin.JellyfinProviderSupport
 import com.mediahub.provider.jellyfin.api.JellyfinApiClient
 import com.mediahub.provider.jellyfin.mapper.JellyfinImageMapper
@@ -49,6 +50,8 @@ class JellyfinSearchProvider(
                 recursive = true,
                 sortBy = null,
             )
+            // 空页守卫走 pageWindow（A2-4 第 5 项）：本页 0 条时终止分页，防 nextOffset==offset 死循环
+            val window = pageWindow(page.offset, result.items.size, result.totalRecordCount)
             PagedResult(
                 items = result.items.mapNotNull { dto ->
                     JellyfinItemMapper.map(dto, server.id)?.let { item ->
@@ -56,12 +59,8 @@ class JellyfinSearchProvider(
                     }
                 },
                 totalCount = result.totalRecordCount,
-                hasMore = (page.offset + result.items.size) < result.totalRecordCount,
-                nextOffset = if ((page.offset + result.items.size) < result.totalRecordCount) {
-                    page.offset + result.items.size
-                } else {
-                    null
-                },
+                hasMore = window.hasMore,
+                nextOffset = window.nextOffset,
             )
         } catch (e: Exception) {
             throw JellyfinProviderSupport.mapError(server.id, e)

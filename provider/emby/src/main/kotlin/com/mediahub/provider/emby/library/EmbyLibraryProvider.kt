@@ -14,6 +14,7 @@ import com.mediahub.model.Season
 import com.mediahub.provider.api.MediaLibraryProvider
 import com.mediahub.provider.api.MediaQueryLibraryProvider
 import com.mediahub.provider.api.ProviderException
+import com.mediahub.provider.api.pageWindow
 import com.mediahub.provider.emby.EmbyProviderSupport
 import com.mediahub.provider.emby.api.EmbyApiClient
 import com.mediahub.provider.emby.api.EmbyImageType
@@ -110,12 +111,12 @@ class EmbyLibraryProvider(
         }
     }
 
-    /** 条目映射 + 服务器分页数学（浏览与排序查询共用一份）。 */
+    /** 条目映射 + 服务器分页数学（浏览与排序查询共用一份；空页守卫见 [pageWindow]）。 */
     private fun toPagedResult(
         result: EmbyQueryResultDto<EmbyBaseItemDto>,
         page: PageRequest,
     ): PagedResult<MediaItem> {
-        val hasMore = (page.offset + result.items.size) < result.totalRecordCount
+        val window = pageWindow(page.offset, result.items.size, result.totalRecordCount)
         return PagedResult(
             items = result.items.mapNotNull { dto ->
                 EmbyMediaItemMapper.map(dto, server.id)?.let { item ->
@@ -123,8 +124,8 @@ class EmbyLibraryProvider(
                 }
             },
             totalCount = result.totalRecordCount,
-            hasMore = hasMore,
-            nextOffset = if (hasMore) page.offset + result.items.size else null,
+            hasMore = window.hasMore,
+            nextOffset = window.nextOffset,
         )
     }
 

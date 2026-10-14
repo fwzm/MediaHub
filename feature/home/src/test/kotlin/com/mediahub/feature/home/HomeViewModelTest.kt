@@ -440,5 +440,28 @@ class HomeViewModelTest {
         assertNull(vm.authStates.value["srv-1"])
     }
 
+    // ---- A2-6：首次装载标记（防首帧假空态闪烁） ----
+
+    @Test
+    fun `loaded flips true only after first server flow emission`() = runTest(dispatcher) {
+        val delayed = kotlinx.coroutines.flow.flow {
+            kotlinx.coroutines.delay(1_000)
+            emit(emptyList<MediaServer>())
+        }
+        val store = FakeServerStore(emptyList(), observedOverride = delayed)
+        val vm = HomeViewModel(store, FakeProgressStore(), FakeRegistry(), noOpLogger)
+        val owner = ViewModelStore().apply { put("home", vm) }
+        try {
+            runCurrent()
+            assertFalse("首次装载完成前不得标记 loaded（否则首帧闪现假空态）", vm.loaded.value)
+            testScheduler.advanceTimeBy(1_000)
+            runCurrent()
+            assertTrue("首次装载完成后必须标记 loaded", vm.loaded.value)
+        } finally {
+            owner.clear()
+            runCurrent()
+        }
+    }
+
     private fun fakeUser() = MediaUser("s1", "u1", "a")
 }

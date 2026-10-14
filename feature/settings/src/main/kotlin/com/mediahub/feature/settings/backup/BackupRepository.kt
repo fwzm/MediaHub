@@ -199,6 +199,8 @@ class BackupRepository @Inject constructor(
                 val validated = try {
                     validate(importResult.payload)
                 } catch (e: ValidationRejectedException) {
+                    // message 为本模块类型化白名单文案（"未知媒体源类型"等，不含用户
+                    // 数据）——B 审查复核确认非泄漏点，保留分类信息
                     return@withContext PrepareResult.Rejected("备份内容校验失败：${e.message}")
                 }
                 PrepareResult.Prepared(validated)
@@ -325,7 +327,10 @@ class BackupRepository @Inject constructor(
             val plan = RestorePlan(
                 "restore-${UUID.randomUUID()}", record,
                 validated.servers.filter { it.backupId in record.overwriteServerIds }.map { toMediaServer(it) },
-                progress, if (record.includePreferences) validated.preferences else null, before,
+                progress, if (record.includePreferences) validated.preferences?.copy(
+                    // The v1 export whitelist predates these keys. Missing fields must preserve local choices.
+                    playerVisualEffects = prefs.playerVisualEffects, professionalInfo = prefs.professionalInfo,
+                ) else null, before,
             )
             val images = RestoreImages(before, materializeRestorePlan(before, plan), prefs, plan.preferences ?: prefs, record)
             require(hasStableEndpointIdentities(images)) { "线路优先级无法确定稳定身份，已阻止恢复" }
@@ -529,7 +534,7 @@ class BackupRepository @Inject constructor(
 
     private fun fullImagePlan(id: String, image: BackupSnapshot, expected: BackupSnapshot) = RestorePlan(
         id, BackupDtos.RestorePlanRecord("ROLLBACK", overwriteServerIds = image.servers.map { it.id }),
-        image.servers, image.progress, null, expected,
+        image.servers, image.progress, null, expected, image.subtitleMemory,
     )
 
     private fun identityChangeTargets(images: RestoreImages): Set<String> {

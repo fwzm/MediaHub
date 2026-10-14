@@ -25,6 +25,10 @@ data class UserPreferences(
     val subtitleStyle: SubtitleStyle = SubtitleStyle(),
     /** 播放器手势（U3-B，独立于 defaultPlaybackSpeed，不复用）。 */
     val gestures: PlayerGestures = PlayerGestures(),
+    /** 播放器视觉效果：全局默认、预置、强度、媒体配色、音频响应与性能策略。 */
+    val playerVisualEffects: PlayerVisualEffectsPreferences = PlayerVisualEffectsPreferences.Default,
+    /** 播放专业信息面板（默认专业）：expertMode 只控制面板信息密度，不影响播放本身。 */
+    val professionalInfo: ProfessionalInfoPreferences = ProfessionalInfoPreferences.Default,
 )
 
 /**

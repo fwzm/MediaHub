@@ -11,11 +11,27 @@ android {
 
     defaultConfig {
         minSdk = 26
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    // A4：迁移测试的 schema JSON 作为 test assets（MigrationTestHelper 读取）
+    sourceSets.getByName("test") {
+        assets.srcDir("$projectDir/schemas")
+    }
+    sourceSets.getByName("androidTest") {
+        assets.srcDir("$projectDir/schemas")
+    }
+
+    testOptions {
+        unitTests {
+            // Robolectric 读取 test assets（迁移 schema JSON）的前提开关
+            isIncludeAndroidResources = true
+        }
     }
 }
 
@@ -48,6 +64,10 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.kotlinx.coroutines.test)
-
-    testImplementation(libs.junit)
+    // A4：Room 3→4 迁移回归（MigrationTestHelper + schema JSON）
+    testImplementation(libs.room.testing)
+    testImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.room.testing)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }

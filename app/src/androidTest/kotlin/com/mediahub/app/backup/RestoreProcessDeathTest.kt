@@ -59,7 +59,7 @@ class RestoreProcessDeathTest {
     private fun invalidator(db: AppDatabase) = TokenSessionLoginInvalidator(tokens(), CompositeSessionStoreCleaner(setOf(
         EmbySessionCleaner(EmbySessionStore.SharedPrefsStorage(context)),
         JellyfinSessionCleaner(JellyfinSessionStore.SharedPrefsStorage(context)),
-    )), vault(), AccountRepository(db))
+    )), vault(), AccountRepository(db), emptySet())
     private fun server(id: String, url: String) = MediaServer(id = id, name = "Task fixture $id", type = ServerType.EMBY,
         username = "fixture-user", createdAtEpochMs = 100,
         endpoints = listOf(ServerEndpoint("$id-main", id, "Primary", url, isPrimary = true)))

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,6 +53,7 @@ fun HomeRoute(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val servers by viewModel.servers.collectAsStateWithLifecycle()
+    val loaded by viewModel.loaded.collectAsStateWithLifecycle()
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
     val authStates by viewModel.authStates.collectAsStateWithLifecycle()
 
@@ -94,7 +96,19 @@ fun HomeRoute(
             item {
                 Text("媒体源", style = MaterialTheme.typography.titleMedium)
             }
-            if (servers.isEmpty()) {
+            if (!loaded) {
+                // 首次装载完成前不得展示空态文案（避免"还没有媒体源"闪烁）
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+            } else if (servers.isEmpty()) {
                 item {
                     EmptyHint("还没有媒体源\n点击右下角 + 添加 Emby / Jellyfin / WebDAV / 本地存储")
                 }

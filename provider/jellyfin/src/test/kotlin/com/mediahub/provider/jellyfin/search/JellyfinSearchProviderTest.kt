@@ -227,6 +227,22 @@ class JellyfinSearchProviderTest {
         assertNull(url.toHttpUrlOrNull()!!.queryParameter("X-Emby-Token"))
     }
 
+    // ---- A2-4 第 5 项：空页守卫——total 声称还有更多但本页 0 条时必须终止分页 ----
+
+    @Test
+    fun `empty page with remaining total terminates pagination`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":10}""")
+        )
+
+        val result = provider().search("fargo", PageRequest(offset = 0, limit = 30))
+
+        assertTrue(result.items.isEmpty())
+        assertFalse("空页不得宣称 hasMore（nextOffset==offset 会死循环）", result.hasMore)
+        assertNull("空页 nextOffset 必须为 null（实际：${result.nextOffset}）", result.nextOffset)
+    }
+
     private class FakeSecretStorage : SecretStorage {
         private val map = mutableMapOf<String, String>()
         override suspend fun put(key: String, value: String) { map[key] = value }

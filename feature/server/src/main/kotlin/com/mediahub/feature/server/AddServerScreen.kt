@@ -120,7 +120,11 @@ fun AddServerRoute(
                         visualTransformation = PasswordVisualTransformation(),
                     )
                     Text(
-                        text = "密码仅用于本次登录，不会保存在设备中",
+                        text = if (descriptor.serverType == ServerType.WEBDAV) {
+                            "WebDAV 密码加密保存在本机，仅用于此媒体源"
+                        } else {
+                            "密码仅用于本次登录，不会保存在设备中"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

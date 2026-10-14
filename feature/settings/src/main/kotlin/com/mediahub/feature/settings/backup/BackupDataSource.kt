@@ -2,22 +2,31 @@ package com.mediahub.feature.settings.backup
 
 import androidx.room.withTransaction
 import com.mediahub.core.common.backup.BackupDtos
+import com.mediahub.core.common.backup.BackupUrlGuard
 import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.database.entity.PlaybackProgressEntity
+import com.mediahub.core.database.entity.SubtitleMemoryEntity
 import com.mediahub.core.database.mapper.ServerEntityMappers.toDomain
 import com.mediahub.core.database.mapper.ServerEntityMappers.toEntity
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.UserPreferences
+import com.mediahub.model.activeEndpoint
 import javax.inject.Inject
 import kotlinx.coroutines.flow.first
 
 /** Full local persistent rows; read together in a Room transaction. Auth material is separate. */
-data class BackupSnapshot(val servers: List<MediaServer>, val progress: List<PlaybackProgress>) {
+data class BackupSnapshot(
+    val servers: List<MediaServer>,
+    val progress: List<PlaybackProgress>,
+    // Internal rollback image only; subtitle paths never enter the external backup DTO.
+    val subtitleMemory: List<SubtitleMemoryEntity> = emptyList(),
+) {
     fun sameData(other: BackupSnapshot): Boolean =
         servers.map { it.copy(endpoints = it.endpoints.sortedBy { ep -> ep.id }) }.associateBy { it.id } ==
             other.servers.map { it.copy(endpoints = it.endpoints.sortedBy { ep -> ep.id }) }.associateBy { it.id } &&
-            progress.associateBy { it.serverId to it.itemId } == other.progress.associateBy { it.serverId to it.itemId }
+            progress.associateBy { it.serverId to it.itemId } == other.progress.associateBy { it.serverId to it.itemId } &&
+            subtitleMemory.associateBy { it.versionKey } == other.subtitleMemory.associateBy { it.versionKey }
 }
 
 interface BackupDataSource {
@@ -33,13 +42,14 @@ data class RestorePlan(
     val progress: List<PlaybackProgress>,
     val preferences: UserPreferences?,
     val expectedBaseline: BackupSnapshot? = null,
+    val subtitleMemory: List<SubtitleMemoryEntity> = emptyList(),
 )
 
 class RestoreBaselineChangedException : Exception("本机数据已在预览后变化，请重新预览")
 
 /** Pure materialization shared by the frozen plan and Room adapter. */
 internal fun materializeRestorePlan(before: BackupSnapshot, plan: RestorePlan): BackupSnapshot {
-    if (plan.record.strategy == "ROLLBACK") return BackupSnapshot(plan.servers, plan.progress)
+    if (plan.record.strategy == "ROLLBACK") return BackupSnapshot(plan.servers, plan.progress, plan.subtitleMemory)
     val writing = plan.servers.filter { it.id in plan.record.overwriteServerIds && it.id !in plan.record.skipExistingServerIds }
     val merged = before.servers.associateBy { it.id }.toMutableMap().apply { writing.forEach { put(it.id, it) } }
     val defaultId = when (plan.record.strategy) {
@@ -56,7 +66,12 @@ internal fun materializeRestorePlan(before: BackupSnapshot, plan: RestorePlan): 
             if (plan.record.strategy != "MERGE" || local == null || local.updatedAtEpochMs < incoming.updatedAtEpochMs) put(key, incoming)
         }
     }.values.toList()
-    return BackupSnapshot(servers, progress)
+    fun identity(server: MediaServer) = BackupIdentity(server.type,
+        BackupUrlGuard.normalizeForIdentity(server.endpoints.activeEndpoint()?.url.orEmpty()), server.username)
+    val oldServers = before.servers.associateBy { it.id }
+    val changedSources = writing.filter { server -> oldServers[server.id]?.let { identity(it) == identity(server) } != true }
+        .map { it.id }.toSet()
+    return BackupSnapshot(servers, progress, before.subtitleMemory.filter { it.serverId !in changedSources })
 }
 
 class ProductionBackupDataSource @Inject constructor(private val db: AppDatabase) : BackupDataSource {
@@ -72,6 +87,7 @@ class ProductionBackupDataSource @Inject constructor(private val db: AppDatabase
                 mode = p.mode?.let(com.mediahub.model.PlaybackMode::valueOf), itemTitle = p.itemTitle, posterUrl = p.posterUrl,
                 itemType = p.itemType?.let(com.mediahub.model.MediaType::valueOf),
             ) },
+            db.subtitleMemoryDao().getAll(),
         )
     }
 
@@ -107,5 +123,9 @@ class ProductionBackupDataSource @Inject constructor(private val db: AppDatabase
             PlaybackProgressEntity(p.serverId, p.itemId, p.positionMs, p.durationMs, p.isPaused, p.updatedAtEpochMs,
                 p.mode?.name, p.itemTitle, p.posterUrl, p.itemType?.name)
         })
+        val memories = after.subtitleMemory.associateBy { it.versionKey }
+        before.subtitleMemory.filter { it.versionKey !in memories }.forEach { db.subtitleMemoryDao().delete(it.versionKey) }
+        val oldMemories = before.subtitleMemory.associateBy { it.versionKey }
+        after.subtitleMemory.filter { oldMemories[it.versionKey] != it }.forEach { db.subtitleMemoryDao().upsert(it) }
     }
 }

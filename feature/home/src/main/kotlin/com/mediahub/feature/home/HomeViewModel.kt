@@ -36,6 +36,13 @@ class HomeViewModel @Inject constructor(
     val servers: StateFlow<List<MediaServer>> = serverStore.observeServers()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /**
+     * 首次数据装载完成标记（A2-6）：Room 首帧前 [servers] 是初值空表，
+     * 不加此标记首页会闪现"还没有媒体源"的假空态。
+     */
+    private val _loaded = MutableStateFlow(false)
+    val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
+
     val continueWatching: StateFlow<List<PlaybackProgress>> =
         progressRepository.observeContinueWatching(limit = 20)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -58,6 +65,11 @@ class HomeViewModel @Inject constructor(
     )
 
     init {
+        // 首次装载标记必须来自**上游真实发射**（Room 首帧）——collect servers 的
+        // StateFlow 会先收到种子空表，不能作为装载完成的依据（幂等置位）。
+        viewModelScope.launch {
+            serverStore.observeServers().collect { _loaded.value = true }
+        }
         // 不在 collector 内等待网络：旧身份的慢请求不能阻塞恢复后的新身份。
         viewModelScope.launch {
             servers.collect { list ->

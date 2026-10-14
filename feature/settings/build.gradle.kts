@@ -12,6 +12,8 @@ android {
 
     defaultConfig {
         minSdk = 26
+        targetSdk = 35
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildFeatures {
@@ -35,6 +37,7 @@ dependencies {
     implementation(project(":core:database"))
     implementation(project(":core:common"))
     implementation(project(":core:security"))
+    implementation(project(":core:ui"))
     implementation(project(":provider:api"))
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
@@ -45,6 +48,7 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.ui.tooling.preview)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -60,4 +64,8 @@ dependencies {
     testImplementation(project(":core:logging"))
     testImplementation(project(":provider:emby"))
     testImplementation(project(":provider:jellyfin"))
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }

@@ -335,7 +335,9 @@ class ServerEditorViewModel @Inject constructor(
                 _uiState.update { it.copy(isSaving = false, server = server) }
                 onSaved()
             } catch (e: Exception) {
-                _uiState.update { it.copy(isSaving = false, error = "保存失败：" + e.message) }
+                // A4 脱敏收口：本地异常 message 可能携带 SQL/路径等实现细节，
+                // 只给固定分类文案（ProviderException 场景同理由固定文案覆盖）
+                _uiState.update { it.copy(isSaving = false, error = "保存失败，请重试") }
             }
         }
     }
@@ -351,7 +353,7 @@ class ServerEditorViewModel @Inject constructor(
                     )
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = "设置失败：" + e.message) }
+                _uiState.update { it.copy(error = "设置失败，请重试") }
             }
         }
     }
@@ -365,7 +367,7 @@ class ServerEditorViewModel @Inject constructor(
                 onDeleted()
             } catch (e: Exception) {
                 logger.e(LogTag.UI, "删除媒体源失败", e)
-                _uiState.update { it.copy(isDeleting = false, error = "删除失败：" + e.message) }
+                _uiState.update { it.copy(isDeleting = false, error = "删除失败，请重试") }
             }
         }
     }
@@ -377,7 +379,7 @@ class ServerEditorViewModel @Inject constructor(
                 val ref = serverIconStore.saveFromUri(serverId, uri)
                 _uiState.update { it.copy(icon = ref) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = "设置图标失败：" + e.message) }
+                _uiState.update { it.copy(error = "设置图标失败") }
             }
         }
     }

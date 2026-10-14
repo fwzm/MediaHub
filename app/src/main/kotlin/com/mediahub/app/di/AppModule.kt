@@ -135,7 +135,7 @@ object AppModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, AppDatabase.NAME)
-            .addMigrations(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3)
+            .addMigrations(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3, Migrations.MIGRATION_3_4)
             .build()
 
     @Provides
@@ -200,6 +200,10 @@ abstract class RegistryModule {
     @Binds
     @Singleton
     abstract fun bindProgressStore(impl: ProgressRepository): ProgressStore
+
+    @Binds
+    @Singleton
+    abstract fun bindSubtitleMemoryStore(impl: com.mediahub.core.database.repository.SubtitleMemoryRepository): com.mediahub.core.database.repository.SubtitleMemoryStore
 
     @Binds
     @Singleton
