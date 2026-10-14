@@ -30,7 +30,12 @@
               ItemClick="OnLibraryClick">
       <GridView.ItemTemplate>
         <DataTemplate>
+          <!-- Named and id'd so a tile is addressable by identity rather than by position or by a
+               display name that two sources can share. -->
           <Border Width="240" Height="120" Margin="0,0,12,12" CornerRadius="8" Padding="14"
+                  AutomationProperties.Name="{Binding Name}"
+                  AutomationProperties.AutomationId="{Binding AutomationId}"
+                  AutomationProperties.HelpText="{Binding KindLabel}"
                   Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                   BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
             <StackPanel Spacing="6" VerticalAlignment="Center">

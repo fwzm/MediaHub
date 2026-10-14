@@ -7,7 +7,34 @@ using Microsoft.UI.Xaml.Navigation;
 namespace MediaHub.App.Views;
 
 /// <summary>One library tile, tagged with the source it belongs to.</summary>
-public sealed record LibraryCard(string ServerId, string LibraryId, string Name, string SourceLabel, string KindLabel);
+public sealed record LibraryCard(string ServerId, string LibraryId, string Name, string SourceLabel, string KindLabel)
+{
+    /// <summary>
+    /// Stable, unique automation identifier for this tile.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Before this existed, two tiles from different sources shared the same accessible name - both a
+    /// local folder entry and a WebDAV entry read as "文件夹浏览" - so an automation script could only
+    /// reach one of them by guessing, and the WebDAV path never got exercised at all.
+    /// </para>
+    /// <para>
+    /// The form is <c>role|source|item</c>. A pipe is used as the separator because a source id
+    /// legitimately contains colons (<c>webdav:127.0.0.1:8181</c>), so splitting on a colon would be
+    /// ambiguous. A source with no catalogue - a browse-only source - has the fixed item token
+    /// <c>root</c>, which is what makes "open this source's root folder" addressable.
+    /// </para>
+    /// <para>
+    /// Both components are escaped. Neither carries a credential: a source id is type plus host or a
+    /// server-reported id, and a library id is a server-side collection identifier. Nothing here is
+    /// derived from a password, a token or a credentialed URL, and none of it may become so - the
+    /// identifier ends up in UIA dumps and screenshots.
+    /// </para>
+    /// </remarks>
+    public string AutomationId => string.IsNullOrEmpty(LibraryId)
+        ? "browse|" + Uri.EscapeDataString(ServerId) + "|root"
+        : "library|" + Uri.EscapeDataString(ServerId) + "|" + Uri.EscapeDataString(LibraryId);
+}
 
 public sealed partial class LibrariesPage : Page
 {

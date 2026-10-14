@@ -17,6 +17,12 @@
                 AutomationProperties.Name="返回上级" AutomationProperties.AutomationId="browse.up">
           <FontIcon Glyph="&#xE72B;" />
         </Button>
+        <!-- A stable way back to the shell. Walking up with the arrow only reaches the source root,
+             so without this the only exit from a root listing is the navigation pane. -->
+        <Button x:Name="RootsButton" Click="OnRootsClick" Background="Transparent"
+                AutomationProperties.Name="返回媒体库" AutomationProperties.AutomationId="browse.roots">
+          <FontIcon Glyph="&#xE8B7;" />
+        </Button>
         <TextBlock x:Name="TitleText" Style="{StaticResource MediaHubSectionHeader}" VerticalAlignment="Center" />
       </StackPanel>
       <!-- Breadcrumb. Shows where in the tree the user is, which matters because a WebDAV root can be

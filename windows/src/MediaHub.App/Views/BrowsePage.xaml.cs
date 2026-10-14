@@ -211,6 +211,9 @@ public sealed partial class BrowsePage : Page
         });
     }
 
+    private void OnRootsClick(object sender, RoutedEventArgs e)
+        => App.MainWindow?.NavigateShell(typeof(LibrariesPage));
+
     private async void OnUpClick(object sender, RoutedEventArgs e)
     {
         if (_currentFolder is null) return;
