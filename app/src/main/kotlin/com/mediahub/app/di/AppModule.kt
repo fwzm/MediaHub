@@ -167,21 +167,32 @@ object AppModule {
         @ApplicationContext context: Context,
         logger: Logger,
         httpClientFactory: HttpClientFactory,
-        deviceCapabilitiesProvider: com.mediahub.player.compatibility.DeviceCapabilitiesProvider,
-    ): PlaybackEngineCreator = MpvPlaybackEngineCreator(
-        context,
-        logger,
-        httpClientFactory,
-        // M2（ADR-044）：把设备 HDR 证据交给 mpv 参数层。未知一律返回 null（不干预）。
-        com.mediahub.player.mpv.DeviceHdrEvidenceProvider { hdr ->
-            if (hdr == com.mediahub.model.HdrType.NONE) {
-                true
-            } else {
-                val caps = runCatching { deviceCapabilitiesProvider.get() }.getOrNull()
-                if (caps == null || caps.hdrSupported.isEmpty()) null else hdr in caps.hdrSupported
-            }
-        },
-    )
+    ): PlaybackEngineCreator {
+        // M2（ADR-044）：设备 HDR 证据由本模块自有的采集器提供，**不依赖** PR #28（M1）引入的
+        // @Provides 绑定——避免与 M1 的 DeviceCapabilitiesProvider 产生重复绑定/缺少绑定。
+        // 跟随项：M1 合并后应改为复用其单一实例（见 ADR-044 影响节）。
+        val deviceCapabilities =
+            com.mediahub.player.compatibility.AndroidDeviceCapabilitiesProvider(context)
+        Thread {
+            runCatching { deviceCapabilities.get() }
+        }.apply {
+            isDaemon = true
+            name = "device-capabilities-warmup"
+        }.start()
+        return MpvPlaybackEngineCreator(
+            context,
+            logger,
+            httpClientFactory,
+            com.mediahub.player.mpv.DeviceHdrEvidenceProvider { hdr ->
+                if (hdr == com.mediahub.model.HdrType.NONE) {
+                    true
+                } else {
+                    val caps = runCatching { deviceCapabilities.get() }.getOrNull()
+                    if (caps == null || caps.hdrSupported.isEmpty()) null else hdr in caps.hdrSupported
+                }
+            },
+        )
+    }
 
     @Provides
     @Singleton
