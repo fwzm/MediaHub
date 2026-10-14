@@ -3,6 +3,7 @@ using MediaHub.Net;
 using MediaHub.App.Services;
 using MediaHub.Domain;
 using MediaHub.Player;
+using MediaHub.Providers;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -24,7 +25,8 @@ public sealed partial class PlayerPage : Page
 
     private PointerActivityWatcher? _pointerWatcher;
     private PlaybackRequest? _request;
-    private ActivePlayback? _active;
+    private PlaybackSession? _session;
+    private bool _autoAdvanceArmed;
     private bool _scrubbing;
     private bool _controlsVisible = true;
     private bool _isFullScreen;
@@ -95,9 +97,10 @@ public sealed partial class PlayerPage : Page
         {
             // Resolving a server stream also establishes the loopback relay, so the engine never
             // receives server credentials.
-            _active = await App.Services.Playback.PrepareAsync(_request);
-            SubtitleText.Text = _active.DisplayUrl;
-            await host.PlayAsync(_active);
+            _session = await App.Services.Playback.PrepareAsync(_request);
+            _session.Changed += OnSessionChanged;
+            SubtitleText.Text = _session.Active?.DisplayUrl ?? _request.DisplayUrl;
+            await host.PlayAsync(_session.Active!);
         }
         catch (ProviderException ex)
         {
@@ -132,6 +135,7 @@ public sealed partial class PlayerPage : Page
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         App.Services.PlayerHost.SnapshotChanged -= OnSnapshotChanged;
+        if (_session is not null) _session.Changed -= OnSessionChanged;
         _pointerWatcher?.Dispose();
         _pointerWatcher = null;
         _boundsTimer.Stop();
@@ -152,36 +156,49 @@ public sealed partial class PlayerPage : Page
     /// </remarks>
     private void FlushFinalProgress()
     {
-        ActivePlayback? active = _active;
-        _active = null;
-        if (active is null) return;
+        PlaybackSession? session = _session;
+        _session = null;
+        if (session is null) return;
 
         try
         {
             PlayerSnapshot snapshot = App.Services.PlayerHost.Player?.Snapshot ?? PlayerSnapshot.Empty;
             if (snapshot.DurationSeconds > 0)
             {
-                var sample = new PlayerProgressSample(
-                    (long)(snapshot.PositionSeconds * TimeSpan.TicksPerSecond),
-                    (long)(snapshot.DurationSeconds * TimeSpan.TicksPerSecond),
-                    IsPaused: true,
-                    IsMuted: snapshot.Muted);
-                // Best effort and bounded: a hanging report must not delay leaving the player.
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
-                        await App.Services.Playback.OnProgressAsync(active, sample, final: true).WaitAsync(timeout.Token);
-                    }
-                    catch { }
-                });
+                long position = (long)(snapshot.PositionSeconds * TimeSpan.TicksPerSecond);
+                long duration = (long)(snapshot.DurationSeconds * TimeSpan.TicksPerSecond);
+                session.LastPositionTicks = position;
+                session.LastDurationTicks = duration;
             }
         }
         catch { }
 
-        App.Services.Playback.EndSession();
-        _ = active.DisposeAsync().AsTask().ContinueWith(_ => { }, TaskScheduler.Default);
+        // The coordinator owns the stop report and the relay lifetime, so leaving the page is a
+        // session stop rather than a collection of things this page has to remember to undo. It is
+        // bounded so a hanging report cannot delay the navigation that is already in progress.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                await App.Services.Playback.StopAsync(PlaybackStopReasons.UserExited).WaitAsync(timeout.Token);
+            }
+            catch { }
+        });
+    }
+
+    /// <summary>Mirrors the session's stage into the status line and drives auto-advance.</summary>
+    private void OnSessionChanged(PlaybackSession session)
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(() => OnSessionChanged(session));
+            return;
+        }
+        if (session.Stage == PlaybackStage.Error && session.Error is { Length: > 0 } error)
+        {
+            ShowStatus("播放失败：" + error);
+        }
     }
 
     // ---------------------------------------------------------------- surface geometry
@@ -639,13 +656,91 @@ public sealed partial class PlayerPage : Page
             return;
         }
 
-        if (_active is null) return;
+        PlaybackSession? session = _session;
+        if (session is null) return;
+
         var sample = new PlayerProgressSample(
             (long)(snapshot.PositionSeconds * TimeSpan.TicksPerSecond),
             (long)(snapshot.DurationSeconds * TimeSpan.TicksPerSecond),
             snapshot.State == TransportState.Paused,
             snapshot.Muted);
-        _ = App.Services.Playback.OnProgressAsync(_active, sample, final: false);
+
+        // Start is sent exactly once, the first time the engine reports real playback. Sending it
+        // when the page opens would tell the server playback had begun before it had, and sending it
+        // on every tick would create a session storm.
+        if (!session.StartReported && snapshot.State == TransportState.Playing)
+        {
+            session.TryAdvance(PlaybackStage.Playing);
+            _ = App.Services.Playback.NotifyStartedAsync(session, sample);
+        }
+        else
+        {
+            session.TryAdvance(snapshot.State switch
+            {
+                TransportState.Playing => PlaybackStage.Playing,
+                TransportState.Paused => PlaybackStage.Paused,
+                TransportState.Loading => PlaybackStage.Buffering,
+                TransportState.Ended => PlaybackStage.Ended,
+                TransportState.Error => PlaybackStage.Error,
+                _ => session.Stage,
+            });
+        }
+
+        _ = App.Services.Playback.OnProgressAsync(session, sample, force: false);
+
+        if (snapshot.EofReached || snapshot.State == TransportState.Ended) _ = OnPlaybackFinishedAsync();
+    }
+
+    /// <summary>
+    /// End-of-item handling: mark the item watched and, when enabled, continue to the next episode.
+    /// </summary>
+    /// <remarks>
+    /// Guarded by a one-shot flag. The engine reports EofReached on every snapshot once it is
+    /// reached, so without the guard this would advance through the whole series in seconds.
+    /// </remarks>
+    private async Task OnPlaybackFinishedAsync()
+    {
+        if (_autoAdvanceArmed) return;
+        _autoAdvanceArmed = true;
+
+        PlaybackSession? session = _session;
+        if (session is null) return;
+        session.TryAdvance(PlaybackStage.Ended);
+
+        if (!App.Services.Settings.Current.AutoPlayNext) return;
+        if (_request?.ServerId is not { } serverId || _request.SeriesId is not { } seriesId || _request.ItemId is not { } itemId)
+            return;
+
+        try
+        {
+            ProviderHandle? handle = App.Services.Servers.FindHandle(serverId);
+            if (handle?.Library is null) return;
+
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            Episode? next = await handle.Library.GetNextEpisodeAsync(seriesId, itemId, timeout.Token);
+            if (next is null) return;
+
+            App.Services.Log.Info("playback", "自动连播下一集：" + LogService.Redact(next.Name));
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (App.MainWindow is not MainWindow shell) return;
+                shell.EnterPlayer(new PlaybackRequest
+                {
+                    ServerId = serverId,
+                    ItemId = next.Id,
+                    Title = next.Name,
+                    SeriesId = next.SeriesId,
+                    SeasonNumber = next.SeasonNumber,
+                    EpisodeNumber = next.EpisodeNumber,
+                });
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (ProviderException ex)
+        {
+            // Auto-advance is a convenience; failing it must leave the user on the finished item.
+            App.Services.Log.Debug("playback", "自动连播查询失败：" + ex.Code);
+        }
     }
 
     private void ShowStatus(string message)

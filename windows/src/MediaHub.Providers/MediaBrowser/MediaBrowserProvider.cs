@@ -137,6 +137,33 @@ internal sealed class MediaBrowserProvider :
         return MediaBrowserMapper.Items(doc).Select(MediaBrowserMapper.MapEpisode).ToList();
     }
 
+    /// <summary>
+    /// The episode that follows the given one, crossing season boundaries, or null at the end.
+    /// </summary>
+    /// <remarks>
+    /// Ordering is computed here from the real season and episode numbers rather than taken from the
+    /// server's response order, because a server is free to return episodes in any order and a
+    /// "next episode" that depends on response ordering would silently skip or repeat episodes.
+    /// Missing numbers are treated as "unknown" and sorted last within their season instead of being
+    /// guessed, so an episode without an index never displaces a real one.
+    /// </remarks>
+    public async Task<Episode?> GetNextEpisodeAsync(string seriesId, string currentEpisodeId, CancellationToken ct = default)
+    {
+        using var doc = await _api.GetAllEpisodesAsync(seriesId, ct).ConfigureAwait(false);
+        List<Episode> episodes = MediaBrowserMapper.Items(doc).Select(MediaBrowserMapper.MapEpisode).ToList();
+        if (episodes.Count == 0) return null;
+
+        List<Episode> ordered = episodes
+            .OrderBy(e => e.SeasonNumber)
+            .ThenBy(e => e.EpisodeNumber)
+            .ThenBy(e => e.Id, StringComparer.Ordinal)
+            .ToList();
+
+        int index = ordered.FindIndex(e => string.Equals(e.Id, currentEpisodeId, StringComparison.Ordinal));
+        if (index < 0) return null;
+        return index + 1 < ordered.Count ? ordered[index + 1] : null;
+    }
+
     // ---------------------------------------------------------------- detail
 
     public async Task<MediaDetail> GetItemDetailAsync(string itemId, CancellationToken ct = default)
@@ -243,6 +270,9 @@ internal sealed class MediaBrowserProvider :
 
     public Task ReportProgressAsync(PlaybackProgress progress, CancellationToken ct = default)
         => ReportAsync("Progress", progress, ct);
+
+    public Task ReportPlaybackStartedAsync(PlaybackProgress progress, CancellationToken ct = default)
+        => ReportAsync("Start", progress, ct);
 
     public async Task ReportFinalProgressAsync(PlaybackProgress progress, CancellationToken ct = default)
     {

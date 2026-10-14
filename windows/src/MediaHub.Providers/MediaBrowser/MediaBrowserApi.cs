@@ -192,6 +192,25 @@ internal sealed class MediaBrowserApi
     public async Task<JsonDocument> GetItemAsync(string itemId, CancellationToken ct)
         => await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Require(UserId) + "/Items/" + Uri.EscapeDataString(itemId)), ct).ConfigureAwait(false);
 
+    /// <summary>
+    /// Every episode of a series, in one request.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <c>/Shows/{id}/Episodes?StartItemId=</c>: the meaning of StartItemId differs
+    /// between Emby and Jellyfin and, on some versions, is inclusive of the item passed in. Returning
+    /// the full ordered list and selecting the successor locally keeps the "which episode is next"
+    /// decision in one place, where it can be tested against recordings rather than depending on a
+    /// server-side parameter whose semantics are not guaranteed across both products.
+    /// </remarks>
+    public async Task<JsonDocument> GetAllEpisodesAsync(string seriesId, CancellationToken ct)
+    {
+        string query = "?UserId=" + Uri.EscapeDataString(Require(UserId))
+            + "&Fields=SeriesId%2CSeasonId%2CIndexNumber%2CParentIndexNumber%2CRunTimeTicks%2COverview"
+            + "&IsMissing=false";
+        return await SendJsonAsync(NewRequest(HttpMethod.Get,
+            "/Shows/" + Uri.EscapeDataString(seriesId) + "/Episodes" + query), ct).ConfigureAwait(false);
+    }
+
     public async Task<JsonDocument> GetPlaybackInfoAsync(string itemId, PlaybackOptions options, CancellationToken ct)
     {
         var query = new Dictionary<string, string?> { ["UserId"] = Require(UserId) };

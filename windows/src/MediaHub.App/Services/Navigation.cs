@@ -31,4 +31,10 @@ public sealed record PlaybackRequest
     public long StartPositionTicks { get; init; }
     public TimeSpan? DeclaredDuration { get; init; }
     public IReadOnlyList<string> ExternalSubtitles { get; init; } = Array.Empty<string>();
+
+    /// <summary>Series this item belongs to, when it is an episode. Enables auto-advance.</summary>
+    public string? SeriesId { get; init; }
+
+    public int? SeasonNumber { get; init; }
+    public int? EpisodeNumber { get; init; }
 }

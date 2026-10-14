@@ -55,6 +55,17 @@ public interface IProviderLibrary
 
     /// <summary>Episodes of a season (parent = season).</summary>
     Task<IReadOnlyList<Episode>> GetEpisodesAsync(string seasonId, CancellationToken ct = default);
+
+    /// <summary>
+    /// The episode that follows the given one, across season boundaries, or null when the series ends.
+    /// </summary>
+    /// <remarks>
+    /// Default null means "this source cannot tell me", which disables auto-advance for that source
+    /// rather than guessing. Guessing a successor from a name would be worse than not advancing:
+    /// a wrong guess plays the wrong file, whereas a null just leaves the user where they are.
+    /// </remarks>
+    Task<Episode?> GetNextEpisodeAsync(string seriesId, string currentEpisodeId, CancellationToken ct = default)
+        => Task.FromResult<Episode?>(null);
 }
 
 public interface IProviderDetail
@@ -95,6 +106,17 @@ public interface IProviderSearch
 
 public interface IProviderProgress
 {
+    /// <summary>
+    /// Playback has begun. Sent once per session, before the first periodic report.
+    /// </summary>
+    /// <remarks>
+    /// A default no-op rather than an abstract member: a protocol that has no start notification
+    /// should not be forced to invent one, and a provider that forgets to implement it degrades to
+    /// "no start event" instead of failing to compile.
+    /// </remarks>
+    Task ReportPlaybackStartedAsync(PlaybackProgress progress, CancellationToken ct = default)
+        => Task.CompletedTask;
+
     /// <summary>Throttled periodic report.</summary>
     Task ReportProgressAsync(PlaybackProgress progress, CancellationToken ct = default);
 
