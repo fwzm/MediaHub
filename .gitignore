@@ -21,3 +21,19 @@ captures/
 .DS_Store
 .zcode/
 __pycache__/
+
+# ---- Windows client (windows/) ----
+# .NET build output. The Android 
+ule above only covers Gradle's build/ directory, so the
+# .NET bin/obj trees are listed explicitly.
+windows/**/bin/
+windows/**/obj/
+windows/.vs/
+windows/*.user
+windows/**/*.binlog
+
+# libmpv runtime is fetched by windows/tools/fetch-libmpv.ps1 (~115 MB DLL); never vendored.
+windows/native/libmpv/
+
+# Local tooling scratch (fetched archives, verification screenshots) — not part of the product.
+/.tools/

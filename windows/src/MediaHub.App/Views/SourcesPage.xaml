@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="MediaHub.App.Views.SourcesPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <ScrollViewer Padding="28,20,28,20">
+    <StackPanel Spacing="16" MaxWidth="880" HorizontalAlignment="Left">
+      <TextBlock Text="媒体源" Style="{StaticResource MediaHubSectionHeader}" />
+      <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                 Text="媒体源能力以运行时能力声明为准；未实现的能力不会出现在可用列表中，也不会被标记为已支持。" />
+
+      <ItemsControl x:Name="SourceList" />
+
+      <TextBlock x:Name="EmptyText" Style="{StaticResource MediaHubCaption}"
+                 Text="尚未配置媒体源。Emby / Jellyfin / WebDAV 支持将在后续阶段启用（见 windows/docs/ROADMAP-WINDOWS.md）。" />
+    </StackPanel>
+  </ScrollViewer>
+</Page>

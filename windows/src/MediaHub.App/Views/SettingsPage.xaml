@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="MediaHub.App.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <ScrollViewer Padding="28,20,28,28">
+    <StackPanel Spacing="18" MaxWidth="820" HorizontalAlignment="Left">
+      <TextBlock Text="设置" Style="{StaticResource MediaHubSectionHeader}" />
+
+      <Expander Header="播放" IsExpanded="True" HorizontalAlignment="Stretch">
+        <StackPanel Spacing="12" Padding="0,8,0,8">
+          <StackPanel Spacing="2">
+            <TextBlock Text="默认音量" />
+            <Slider x:Name="VolumeSlider" Minimum="0" Maximum="200" StepFrequency="1" ValueChanged="OnVolumeChanged" />
+          </StackPanel>
+          <StackPanel Spacing="2">
+            <TextBlock Text="默认倍速" />
+            <ComboBox x:Name="SpeedCombo" SelectionChanged="OnSpeedChanged" MinWidth="140" />
+          </StackPanel>
+          <ToggleSwitch x:Name="ResumeSwitch" Header="记忆播放位置" OnContent="开" OffContent="关" Toggled="OnResumeToggled" />
+          <ToggleSwitch x:Name="AutoPlayNextSwitch" Header="自动连播下一集" OnContent="开" OffContent="关" Toggled="OnAutoPlayNextToggled" />
+        </StackPanel>
+      </Expander>
+
+      <Expander Header="字幕" IsExpanded="False" HorizontalAlignment="Stretch">
+        <StackPanel Spacing="12" Padding="0,8,0,8">
+          <ToggleSwitch x:Name="SubtitleSwitch" Header="默认显示字幕" OnContent="开" OffContent="关" Toggled="OnSubtitleToggled" />
+          <StackPanel Spacing="2">
+            <TextBlock Text="字号" />
+            <Slider x:Name="SubtitleSizeSlider" Minimum="20" Maximum="120" StepFrequency="1" ValueChanged="OnSubtitleSizeChanged" />
+          </StackPanel>
+          <StackPanel Spacing="2">
+            <TextBlock Text="字体" />
+            <ComboBox x:Name="SubtitleFontCombo" IsEditable="True" MinWidth="240"
+                      SelectionChanged="OnSubtitleFontChanged" />
+          </StackPanel>
+          <StackPanel Spacing="2">
+            <TextBlock Text="颜色" />
+            <ComboBox x:Name="SubtitleColorCombo" SelectionChanged="OnSubtitleColorChanged" MinWidth="180" />
+          </StackPanel>
+          <StackPanel Spacing="2">
+            <TextBlock Text="描边粗细" />
+            <Slider x:Name="SubtitleBorderSlider" Minimum="0" Maximum="10" StepFrequency="0.5" ValueChanged="OnSubtitleBorderChanged" />
+          </StackPanel>
+          <StackPanel Spacing="2">
+            <TextBlock Text="垂直位置" />
+            <Slider x:Name="SubtitlePosSlider" Minimum="0" Maximum="150" StepFrequency="1" ValueChanged="OnSubtitlePosChanged" />
+          </StackPanel>
+          <StackPanel Spacing="2">
+            <TextBlock Text="ASS 样式覆盖" />
+            <ComboBox x:Name="AssOverrideCombo" SelectionChanged="OnAssOverrideChanged" MinWidth="200" />
+          </StackPanel>
+        </StackPanel>
+      </Expander>
+
+      <Expander Header="界面" IsExpanded="False" HorizontalAlignment="Stretch">
+        <StackPanel Spacing="12" Padding="0,8,0,8">
+          <ToggleSwitch x:Name="AutoHideSwitch" Header="播放时自动隐藏控制栏" OnContent="开" OffContent="关" Toggled="OnAutoHideToggled" />
+          <ToggleSwitch x:Name="DetailInfoSwitch" Header="默认显示详细媒体信息（编码/色彩/解码器）" OnContent="开" OffContent="关" Toggled="OnDetailInfoToggled" />
+        </StackPanel>
+      </Expander>
+
+      <Expander Header="播放引擎（高级）" IsExpanded="False" HorizontalAlignment="Stretch">
+        <StackPanel Spacing="12" Padding="0,8,0,8">
+          <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                     Text="这些选项直接传递给播放引擎。修改后需要重新进入播放页生效。硬件解码失败时会自动回退到软件解码。" />
+          <StackPanel Spacing="2">
+            <TextBlock Text="硬件解码" />
+            <ComboBox x:Name="HwDecCombo" SelectionChanged="OnHwDecChanged" MinWidth="220" />
+          </StackPanel>
+          <TextBlock x:Name="EngineInfoText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Expander>
+
+      <Expander Header="诊断" IsExpanded="False" HorizontalAlignment="Stretch">
+        <StackPanel Spacing="10" Padding="0,8,0,8">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="导出已脱敏日志" Click="OnExportLogClick" />
+            <Button Content="打开日志文件夹" Click="OnOpenLogFolderClick" />
+          </StackPanel>
+          <TextBlock x:Name="DiagnosticsText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Expander>
+    </StackPanel>
+  </ScrollViewer>
+</Page>

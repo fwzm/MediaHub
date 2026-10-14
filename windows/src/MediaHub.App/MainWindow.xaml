@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="MediaHub.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="MediaHub">
+
+  <Grid x:Name="RootGrid" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <!-- Shell layer: navigation chrome for browsing surfaces. -->
+    <NavigationView
+        x:Name="Nav"
+        IsBackButtonVisible="Collapsed"
+        IsSettingsVisible="False"
+        IsTitleBarAutoPaddingEnabled="True"
+        PaneDisplayMode="Left"
+        OpenPaneLength="228"
+        SelectionChanged="OnNavSelectionChanged">
+      <NavigationView.MenuItems>
+        <NavigationViewItem Content="首页" Tag="home">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE80F;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="本地媒体" Tag="local">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE8B7;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="媒体源" Tag="sources">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE968;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="设置" Tag="settings">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE713;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+      </NavigationView.MenuItems>
+      <Frame x:Name="ShellFrame" />
+    </NavigationView>
+
+    <!-- Player layer: a dedicated full-window surface. It is a sibling rather than a child of the
+         NavigationView so the video rectangle can use the entire window in fullscreen. -->
+    <Grid x:Name="PlayerLayer" Visibility="Collapsed">
+      <Frame x:Name="PlayerFrame" />
+    </Grid>
+  </Grid>
+</Window>

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Platforms>x64</Platforms>
+    <!-- Directory holding libmpv-2.dll. Populated by tools/fetch-libmpv.ps1; never committed. -->
+    <LibMpvDir Condition="'$(LibMpvDir)' == ''">$(MSBuildThisFileDirectory)..\..\native\libmpv</LibMpvDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaHub.Domain\MediaHub.Domain.csproj" />
+    <ProjectReference Include="..\MediaHub.Player\MediaHub.Player.csproj" />
+  </ItemGroup>
+
+  <!-- Fail the build loudly instead of producing a binary that cannot start. -->
+  <Target Name="VerifyLibMpv" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(LibMpvDir)\libmpv-2.dll')"
+           Text="libmpv-2.dll not found in '$(LibMpvDir)'. Run: pwsh -File windows/tools/fetch-libmpv.ps1" />
+  </Target>
+
+  <ItemGroup Condition="Exists('$(LibMpvDir)\libmpv-2.dll')">
+    <None Include="$(LibMpvDir)\libmpv-2.dll" Link="libmpv-2.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
