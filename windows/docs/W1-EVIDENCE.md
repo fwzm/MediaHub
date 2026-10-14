@@ -108,7 +108,37 @@ libmpv 契约禁止在处理事件时回调其 API。原实现在属性变更回
 2. 同一条用例传参未遵守方法契约（**测试缺陷**，已修正）；
 3. "同 origin 保留凭据"用例实际用了两个端口（**测试缺陷**，已改为单监听器自跳转）。
 
-## 5. 未执行 / 未验证（NOT_RUN / DEVICE_UNVERIFIED）
+## 5. Windows CI（EXECUTED_PASS）
+
+工作流 `.github/workflows/windows-ci.yml`，以 `paths: windows/**` 限定，不影响 Android 流水线。
+
+最终一次运行（`7203150`，run `38507025950`）全部步骤 success：
+
+| 步骤 | 结果 |
+| --- | --- |
+| restore / build（Debug，全解决方案） | success |
+| 单元与契约测试 | `tests total=99 failed=0` |
+| TRX 健全性检查 | success（本步骤专门用于拦截"零测试也算通过"） |
+| **播放引擎集成测试（真实播放）** | `fixture: 26985 bytes` → `RESULT duration=4.000s reached=3.100s seeked=1.800s audioTracks=1` → `MPV_PROBE PASS` |
+| 便携版发布 | `portable output size: 331.6 MB` |
+| 发布产物完整性检查 | success（exe + libmpv + 三个应用程序集齐全） |
+
+### 5.1 CI 演进过程中的两次自我纠正（值得记录）
+
+**第一次**：首版探针步骤失败。原因是探针把 usage 写到 stderr，而 runner 的
+`$ErrorActionPreference = 'Stop'` 会把原生 stderr 重定向变成终止性错误。
+
+**第二次（更重要）**：修复后所有步骤变绿，但**检查日志发现探针实际走了降级分支**——
+hosted runner 没有 `ffmpeg`，因此**真实播放从未被执行**，步骤却报告成功。
+这种"绿但没测到该测的东西"正是本仓库证据纪律要防的失败模式，因此**没有保留绿灯**，
+而是改为：提交 27 KB 媒体夹具（`windows/tests/assets/sample-av.mp4`），
+使该步骤完全自足（不依赖 ffmpeg 与网络）。
+
+**CI 中未验证的部分**（步骤自身会打印）：
+GPU 渲染、HDR、音频输出设备。CI 以 `vo=null` / `hwdec=no` / `ao=null` 运行，
+只验证解码路径、时钟与传输控制，**不验证呈现与音频**。
+
+## 6. 未执行 / 未验证（NOT_RUN / DEVICE_UNVERIFIED）
 
 | 项 | 状态 |
 | --- | --- |
@@ -121,5 +151,5 @@ libmpv 契约禁止在处理事件时回调其 API。原实现在属性变更回
 | 多显卡选择、设备丢失恢复 | **NOT_RUN** |
 | WASAPI 独占、HDMI 直通、多声道 | **NOT_IMPLEMENTED** |
 | MSIX 打包、代码签名、干净机安装 | **NOT_RUN** |
-| Windows CI | 本轮新增工作流，首次运行结果见 PR 检查页 |
+| Windows CI | **EXECUTED_PASS**（见第 5 节；CI 内的真实播放已于 §5.1 修正后生效） |
 | Intel / AMD / NVIDIA 兼容矩阵 | **NOT_RUN**（仅本机单卡） |
