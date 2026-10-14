@@ -24,6 +24,16 @@
 - 决策：`PlaybackMode`（DIRECT_PLAY/DIRECT_STREAM/TRANSCODE/UNSUPPORTED）统一语义；
   `PlaybackCompatibilityEvaluator`（纯函数）输出决策与原因，禁止散落 `if codec == xx` 链。
 - 影响：评估器可单测（已覆盖 9 用例）；服务端转码只在必要时请求。
+- **修订记录（2026-10-14，M5-2 联合审查）**：本条**部分被 ADR-042 限定**，边界如下：
+  - **已闭环（客户端路由）**：设备能力证据（ADR-042 `DevicePlaybackAssessment`）已进入生产选路链路 ——
+    `PlayerViewModel` → `SwitchablePlaybackEngine.deviceAssessmentProvider` →
+    `PlaybackEngineSelector.select(device=…)` → Media3/mpv 选择，并写入 PlaybackStartupTrace。
+  - **未接入（服务端协商）**：`PlaybackCompatibilityEvaluator` 仍**只在单元测试中被调用**（全仓核实）。
+    原因是本项目的无转码红线（Emby `EnableTranscoding=false`）使 TRANSCODE 结论无法转成服务端请求；
+    硬接会制造"评估说转码、实际直连"的假象。因此二者按 **ADR-042 的职责分离**执行：
+    evaluator = 服务端协商结论（UI/诊断与未来服务端能力协商），ADR-042 评估 = 可执行的客户端路由证据。
+  - **结论**：ADR-004 **部分闭环**；其"禁止散落 if codec == xx 链"的意图由 ADR-042 继承，
+    服务端协商语义保留待有转码能力时再启用。
 
 ## ADR-005 Provider 注册采用 Hilt @IntoSet（非 @IntoMap）
 - 状态：已采纳（2026-08-12），**修订记录见下**
