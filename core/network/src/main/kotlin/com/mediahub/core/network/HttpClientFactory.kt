@@ -7,6 +7,7 @@ import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import okhttp3.EventListener
+import okhttp3.HttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -32,6 +33,9 @@ class HttpClientFactory(
     private val rateLimitCooldown: RateLimitCooldown = RateLimitCooldown(),
 ) {
 
+    /** URL → 所属服务器；未知返回 null（此时冷却回退为精确 origin）。 */
+    private val scopeResolver: (HttpUrl) -> String? = { url -> serverIdFor.serverIdFor(url) }
+
     fun apiClient(): OkHttpClient = baseClient()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -46,18 +50,30 @@ class HttpClientFactory(
         .build()
 
     private fun baseClient(): OkHttpClient.Builder = OkHttpClient.Builder()
-        // M15-S3 测试 4：必须是 **network** interceptor（逐跳生效）。
-        // OkHttp 的应用拦截器只看到"原始请求 + 最终响应"，其 chain.request().url 永远是入口 URL；
-        // 而重定向后真正返回 429 的是**另一跳**（Emby Direct Stream: HTTPS→307→直链IP→对象存储）。
-        // 用入口 URL 记账会把第三方跳的 429 误记到原始服务器，造成跨服务器误冷却
-        // （M15-S3 测试 4 已复现）。network interceptor 对每一跳生效，chain.request() 即该跳真实
-        // URL —— 归属正确，且已冷却的跳在出网前快速失败，不会被反复撞击。
-        .addNetworkInterceptor(RateLimitCooldownInterceptor(rateLimitCooldown) { url -> serverIdFor.serverIdFor(url) })
+        // M15-S3：冷却判定拆成两层，缺一不可。
+        //
+        // ① 应用层（本行）：只做**入口作用域**的快速失败，不记账。
+        //    应用拦截器位于 OkHttp 的 ConnectInterceptor **之上**，因此被冷却的作用域
+        //    在建立任何 TCP/TLS 连接之前就失败 —— 真正做到"窗口内零出网"。
+        //    若只在 network 层判定，连接早已建立（且抛异常会关闭该连接），会持续产生
+        //    连接churn（M15-S3 测试 6 用 EventListener.connectStart 证伪）。
+        //
+        // ② network 层（见下方 addNetworkInterceptor）：负责 429 的**逐跳归属**与记账。
+        //    network 拦截器对重定向的每一跳生效，chain.request() 即该跳真实 URL；
+        //    Emby Direct Stream(HTTPS→307→直链IP→对象存储) 中真正返回 429 的是**另一跳**，
+        //    若按入口 URL 记账会把第三方跳的 429 误记到原始服务器（M15-S3 测试 4 已复现）。
+        .addInterceptor(
+            RateLimitCooldownInterceptor(rateLimitCooldown, scopeResolver, record429 = false),
+        )
         .addInterceptor(RequestIdInterceptor())
         .addInterceptor(RedactingLoggingInterceptor(logger))
         // M0-A（ADR-045）：network interceptor —— 对每一跳生效，重定向到未知 origin 时
         // 自动回落默认 UA，不把原服务器的自定义 UA 泄漏给第三方域名。只写 UA，不碰认证头。
         .addNetworkInterceptor(UserAgentInterceptor(userAgentPolicy, serverIdFor))
+        // M15-S3：逐跳 429 归属与记账（见上①的说明）。与①共用同一张冷却表。
+        .addNetworkInterceptor(
+            RateLimitCooldownInterceptor(rateLimitCooldown, scopeResolver, record429 = true),
+        )
         .eventListenerFactory(StartupNetworkEventListener.FACTORY)
 
     private class RequestIdInterceptor : Interceptor {
@@ -86,9 +102,9 @@ class HttpClientFactory(
                 try {
                     return chain.proceed(request)
                 } catch (e: IOException) {
-                    // M15-S3 测试 4：冷却快速失败来自 network interceptor，会穿过本拦截器 ——
-                    // 必须显式排除，否则它会被当作普通网络失败重试，造成请求放大
-                    // （这正是原设计把冷却放在本拦截器之外的原因，改逐跳后需在此等价保证）。
+                    // M15-S3 测试 6：逐跳冷却失败来自 network interceptor，位于本拦截器**之下**，
+                    // 因此一定会穿过这里。必须显式排除，否则会被当作普通网络失败重试，
+                    // 造成请求放大（M15-S3 测试 6 已用尝试计数证伪：删除本行该测试变红）。
                     if (e is RateLimitedException) throw e
                     val retriable = request.method in setOf("GET", "HEAD", "DELETE")
                     if (attempt >= MAX_ATTEMPTS || !retriable) throw e

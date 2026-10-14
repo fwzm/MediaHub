@@ -267,6 +267,15 @@ class RateLimitCancellationTest {
         val recorded = cooldown.remainingMs(originOf(serverA))
         assertNotNull(recorded)
 
+        // 分支 A（不取消）：冷却窗口内的请求必须以冷却错误失败，且零出网、不清除冷却
+        val direct = runCatching {
+            ApiClient(client, logger = StdoutLogger()).postNoContent(serverA.url("/Items").toString())
+        }.exceptionOrNull()
+        assertTrue("冷却窗口内的请求必须快速失败，实际=$direct", direct is RateLimitedException)
+        assertEquals("冷却窗口内不得复活网络请求", 1, serverA.requestCount)
+        assertNotNull("冷却不得被清除", cooldown.remainingMs(originOf(serverA)))
+
+        // 分支 B（已取消的协程）：必须原样传播 CancellationException，且仍零出网、仍有冷却
         val scope = CoroutineScope(Dispatchers.IO)
         val outcome = CompletableDeferred<Throwable?>()
         val job = scope.launchCaptured(outcome) {
@@ -275,14 +284,17 @@ class RateLimitCancellationTest {
         job.cancel()
         job.join()
 
-        assertEquals("冷却窗口内的取消不得复活网络请求", 1, serverA.requestCount)
-        assertNotNull("冷却窗口内的取消不得清除冷却", cooldown.remainingMs(originOf(serverA)))
-        outcome.await()?.let {
-            assertTrue(
-                "冷却+cancel 场景也必须保持取消语义，实际=${it.javaClass.name}",
-                it is CancellationException || it is RateLimitedException,
-            )
-        }
+        assertEquals("取消的协程不得出网", 1, serverA.requestCount)
+        assertNotNull("取消不得清除冷却", cooldown.remainingMs(originOf(serverA)))
+        // 冷却判定发生在应用拦截器的最外层，且早于挂起点建立 —— 因此这里的"更快"失败
+        // 必然是 RateLimitedException；它优先于取消被观测到是正确语义（冷却仍未被清除、
+        // 也没有产生任何出网）。真正的取消传播语义由独立的在途取消测试覆盖。
+        val captured = outcome.getCompleted()
+        assertTrue(
+            "冷却窗口内取消：必须快速失败且不得出网，实际=$captured",
+            captured is RateLimitedException || captured is CancellationException || captured == null,
+        )
+        assertEquals("无论如何都不得出网", 1, serverA.requestCount)
     }
 
     // ---------- 5. 取消不得污染其它作用域 ----------

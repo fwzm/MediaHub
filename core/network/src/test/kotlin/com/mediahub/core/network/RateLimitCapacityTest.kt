@@ -36,10 +36,17 @@ class RateLimitCapacityTest {
         for (i in 1..RateLimitCooldown.MAX_TRACKED_SCOPES * 8) {
             cold.apply("https://host-$i.example.com:443", 60_000L)
         }
-        assertTrue(
-            "冷却表条目数必须被封顶：上限=${RateLimitCooldown.MAX_TRACKED_SCOPES}，" +
-                "实际=${cold.trackedScopeCount()}",
-            cold.trackedScopeCount() <= RateLimitCooldown.MAX_TRACKED_SCOPES,
+        // 必须精确等于上限：仅断言 "<= 上限" 无法区分"正常淘汰"与
+        // "满员后静默丢弃新作用域"或"整表清空"这两种 fail-open。
+        assertEquals(
+            "冷却表必须恰好装满上限（静默丢弃新作用域会小于上限）",
+            RateLimitCooldown.MAX_TRACKED_SCOPES,
+            cold.trackedScopeCount(),
+        )
+        // 最近写入的作用域必须被保留：淘汰策略是"最早到期"，而不是清空整表
+        assertNotNull(
+            "最新作用域不得被丢弃",
+            cold.remainingMs("https://host-${RateLimitCooldown.MAX_TRACKED_SCOPES * 8}.example.com:443"),
         )
     }
 
@@ -201,14 +208,32 @@ class RateLimitCapacityTest {
     // ---------- 5. 时钟语义 ----------
 
     @Test
-    fun `a wall clock jump backwards cannot produce a negative or extended cooldown`() {
-        var monotonic = 1_000_000L
-        val cold = cooldown({ monotonic })
+    fun `a backwards clock jump can never yield a negative or over long cooldown`() {
+        // 时钟被往**回**拨（模拟系统时间跳变）。冷却实现只允许把时钟当单调源读取，
+        // 因此要么仍在窗口内、要么已释放，但绝不允许出现负剩余或超上限的剩余。
+        var now = 1_000_000L
+        val cap = RateLimitCooldown.MAX_COOLDOWN_MS
+        val cold = cooldown({ now })
         cold.apply("scope", 30_000L)
 
-        // 系统时间被往回调一年：单调时钟不受影响
-        monotonic += 30_000L
-        assertNull("单调时钟越过截止点即释放，不受墙钟回拨影响", cold.remainingMs("scope"))
+        for (jump in listOf(-1L, -30_000L, -365L * 24 * 3600 * 1000)) {
+            now += jump
+            val remaining = cold.remainingMs("scope")
+            if (remaining != null) {
+                assertTrue("剩余时长不得为负或为 0（实际=$remaining）", remaining > 0L)
+                assertTrue(
+                    "上限必须在每个读取点成立：时钟被回拨也不得放大冷却（实际=$remaining）",
+                    remaining <= cap,
+                )
+            }
+        }
+        // 墙钟回拨不得让冷却变成"永久"：单调时钟正常前进时仍须按期释放
+        now = 1_000_000L + 30_000L
+        assertNull("时钟恢复正常后必须按原截止点释放", cold.remainingMs("scope"))
+
+        // 正向越过截止点必须释放
+        now += 30_000L
+        assertNull("越过截止点即释放", cold.remainingMs("scope"))
     }
 
     @Test

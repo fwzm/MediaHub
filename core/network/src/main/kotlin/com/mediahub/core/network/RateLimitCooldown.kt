@@ -46,8 +46,11 @@ class RateLimitCooldown(
 
     private val capacity: Int = maxEntries.coerceAtLeast(1)
 
-    /** 当前被追踪的作用域数量（容量契约的观测点，供诊断与测试使用）。 */
-    fun trackedScopeCount(): Int = deadlines.size
+    /**
+     * 当前被追踪的作用域数量（容量契约的观测点；无锁读取，返回的是瞬时快照）。
+     * 仅同模块测试使用，不作为对外 API。
+     */
+    internal fun trackedScopeCount(): Int = deadlines.size
 
     /** 剩余冷却毫秒；不在冷却中返回 null。 */
     fun remainingMs(scope: String): Long? {
@@ -57,7 +60,9 @@ class RateLimitCooldown(
             deadlines.remove(scope, deadline)
             return null
         }
-        return remaining
+        // 上限**在每个读取点**都成立，而不只在写入点：即使时钟被回拨（或注入的时钟源
+        // 非单调）使剩余时长被放大，也绝不允许报出超过协议上限的冷却。
+        return remaining.coerceAtMost(maxCooldownMs)
     }
 
     /**
@@ -80,12 +85,9 @@ class RateLimitCooldown(
                 return
             }
             if (deadlines.size >= capacity) {
-                // 1) 先回收已过期条目（它们对后续请求已无效，优先让位）
-                val iterator = deadlines.entries.iterator()
-                while (iterator.hasNext()) {
-                    if (iterator.next().value <= now) iterator.remove()
-                }
-                // 2) 仍满员则淘汰最早到期的条目，保证容量是**硬**上限
+                // 淘汰**最早到期**的一条，保证容量是**硬**上限。
+                // 该规则天然优先淘汰已过期条目（过期条目截止时间必然小于任何有效条目），
+                // 因此不需要额外的"先回收"遍历：容量压力下牺牲的总是剩余保护最少的作用域。
                 while (deadlines.size >= capacity) {
                     val victim = deadlines.entries.minByOrNull { it.value } ?: break
                     deadlines.remove(victim.key, victim.value)
@@ -152,6 +154,21 @@ class RateLimitCooldown(
 class RateLimitCooldownInterceptor(
     private val cooldown: RateLimitCooldown,
     private val scopeOf: (HttpUrl) -> String?,
+    /**
+     * true = **逐跳记账 + 快速失败**（注册为 network interceptor）；
+     * false = **仅入口作用域快速失败，不记账**（注册为 application interceptor）。
+     *
+     * 必须拆成两个实例的原因（M15-S3 测试 4/6 评审裁定）：
+     * - OkHttp 的 ConnectInterceptor 位于 network interceptor **之上**，连接在 network
+     *   拦截器执行前就已建立/复用。若只在 network 层做冷却判定，被冷却的作用域**每次**
+     *   仍会发起 TCP/TLS 连接（抛异常还会触发 exitNetworkInterceptorExchange →
+     *   detachWithViolence 关闭该连接），与"窗口内零出网"的契约不符；
+     * - 应用层拦截器位于 ConnectInterceptor 之上，因此能真正做到**连接前**失败；
+     * - 但应用层只能看到"原始请求 + 最终响应"，用它在重定向链上记账会把第三方跳的 429
+     *   误记到入口服务器（跨服务器误冷却）。
+     * 因此：应用层实例只做入口快速失败（record429=false），network 层实例负责逐跳归属记账。
+     */
+    private val record429: Boolean = true,
 ) : Interceptor {
 
     /** 精确 origin 键：scheme://host:port（不含路径，避免把同源不同服务器混为一谈）。 */
@@ -167,7 +184,7 @@ class RateLimitCooldownInterceptor(
             throw RateLimitedException(scope = scope, remainingMs = remaining)
         }
         val response = chain.proceed(request)
-        if (response.code == 429) {
+        if (record429 && response.code == 429) {
             val retryAfterMs = RateLimitCooldown.parseRetryAfter(
                 header = response.header("Retry-After"),
                 nowEpochMs = System.currentTimeMillis(),
