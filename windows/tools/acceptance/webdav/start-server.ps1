@@ -21,7 +21,8 @@ param(
   [string]$StateDir = "D:\deepseek_test\MediaHub_Win\windows\tools\acceptance\evidence\webdav",
   [string]$User = "mediahub",
   [string]$Password = "hub-test-pw",
-  [switch]$Restart
+  [switch]$Restart,
+  [switch]$EmbyInfoShim
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,7 +48,7 @@ $script = Join-Path $PSScriptRoot "webdav_server.py"
 $py = (Get-Command python).Source
 $cmdLine = '"' + $py + '" -u "' + $script + '" --root "' + $Root + '" --port ' + $Port +
            ' --log "' + $tap + '" --user "' + $User + '" --password "' + $Password +
-           '" --stdout "' + $serverLog + '"'
+           '" --stdout "' + $serverLog + '"' + $(if ($EmbyInfoShim) { ' --emby-info-shim' } else { '' })
 
 $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
   CommandLine      = $cmdLine
@@ -97,6 +98,7 @@ $state = [ordered]@{
   python  = $py
   script  = $script
   cmdline = $cmdLine
+  embyInfoShim = [bool]$EmbyInfoShim
   started = (Get-Date).ToString("s")
 }
 $state | ConvertTo-Json | Set-Content -Path $stateFile -Encoding UTF8

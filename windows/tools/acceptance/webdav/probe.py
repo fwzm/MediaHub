@@ -71,7 +71,9 @@ def main() -> int:
     print("ROOT HREFS: " + json.dumps(root_names, ensure_ascii=False))
 
     # 3. the nested collection and the non-ASCII name, both of which must survive the round trip.
-    for rel in ["Season 01/", "中文 视频 空格.mp4", "Normal Movie.mp4"]:
+    # Note the full name: an earlier revision of this probe omitted the "Chinese " prefix and the
+    # resulting 404 was misread as "the server cannot serve non-ASCII names". It can.
+    for rel in ["Season 01/", "Chinese 中文 视频 空格.mp4", "Normal Movie.mp4"]:
         url = urllib.parse.urljoin(base, urllib.parse.quote(rel))
         rr = requests.request("PROPFIND", url, data=body, headers={"Depth": "0"}, auth=auth, timeout=10)
         record("browse", url, "PROPFIND", rr, "depth=0", href_ok=("<D:href>" in rr.text or "<d:href>" in rr.text))

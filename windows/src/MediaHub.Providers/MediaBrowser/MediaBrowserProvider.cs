@@ -64,10 +64,16 @@ internal sealed class MediaBrowserProvider :
 
         try
         {
-            // /Users/Me proves the token belongs to a real, current user. Fetching the user id as an
-            // item id proves nothing and a real server rejects it with 404.
-            using var doc = await _api.GetCurrentUserAsync(ct).ConfigureAwait(false);
-            return AuthSessionState.Authenticated;
+            // /Users/{id} first, /Users/Me as the fallback - in that order, for a measured reason.
+            // Emby 4.10.1.0 answers /Users/Me with HTTP 500 "Unrecognized Guid format.", because its
+            // item and user ids are short numerics ("5", "6") rather than GUIDs, while
+            // /Users/{userId} returns the full profile on BOTH Emby and Jellyfin. The original probe
+            // (/Users/{id}/Items/{id}) was wrong on both; /Users/Me alone fixed Jellyfin and broke
+            // Emby, which is exactly the failure mode of applying one server's conventions to
+            // another. Fetching the id that was already returned at login is the portable choice.
+            bool ok = await TryGetUserAsync(_api.UserId, ct).ConfigureAwait(false);
+            if (!ok) ok = await TryGetCurrentUserAsync(ct).ConfigureAwait(false);
+            return ok ? AuthSessionState.Authenticated : AuthSessionState.Expired;
         }
         catch (ProviderException ex) when (ex.Code is ProviderErrorCode.NotFound)
         {
@@ -89,6 +95,33 @@ internal sealed class MediaBrowserProvider :
         {
             // Unreachable is not the same as unauthenticated: the token is kept so a later attempt can succeed.
             return AuthSessionState.Unreachable;
+        }
+    }
+
+    private async Task<bool> TryGetUserAsync(string? userId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(userId)) return false;
+        try
+        {
+            using var doc = await _api.GetUserAsync(userId!, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (ProviderException ex) when (ex.Code is ProviderErrorCode.NotFound or ProviderErrorCode.Parse)
+        {
+            return false;
+        }
+    }
+
+    private async Task<bool> TryGetCurrentUserAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var doc = await _api.GetCurrentUserAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (ProviderException ex) when (ex.Code is ProviderErrorCode.NotFound or ProviderErrorCode.Parse)
+        {
+            return false;
         }
     }
 

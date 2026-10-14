@@ -1,0 +1,39 @@
+[tap] PROPFIND / range=- -> 401 Not Authorized bytes=139
+[tap] PROPFIND / range=- -> 207 Multi-Status bytes=2893
+[tap] PROPFIND /Season 01/ range=- -> 207 Multi-Status bytes=499
+[tap] PROPFIND /ä¸­æ è§é¢ ç©ºæ ¼.mp4 range=- -> 404 Not Found bytes=405
+[tap] PROPFIND /Normal Movie.mp4 range=- -> 207 Multi-Status bytes=467
+[tap] GET /Normal Movie.mp4 range=bytes=100-199 -> 206 Partial Content bytes=100
+[tap] GET /norange/NoRange æ èå´.mp4 range=bytes=100-199 -> 200 OK bytes=10444707
+[tap] GET /Subs Movie.srt range=- -> 200 OK bytes=1296
+[tap] PROPFIND / range=- -> 401 Not Authorized bytes=139
+[tap] PROPFIND / range=- -> 401 Not Authorized bytes=139
+[tap] PROPFIND / range=- -> 207 Multi-Status bytes=2893
+[tap] PROPFIND /Season 01/ range=- -> 207 Multi-Status bytes=499
+[tap] PROPFIND /Chinese ä¸­æ è§é¢ ç©ºæ ¼.mp4 range=- -> 207 Multi-Status bytes=539
+[tap] PROPFIND /Normal Movie.mp4 range=- -> 207 Multi-Status bytes=467
+[tap] GET /Normal Movie.mp4 range=bytes=100-199 -> 206 Partial Content bytes=100
+[tap] GET /norange/NoRange æ èå´.mp4 range=bytes=100-199 -> 200 OK bytes=10444707
+[tap] GET /Subs Movie.srt range=- -> 200 OK bytes=1296
+[tap] PROPFIND / range=- -> 401 Not Authorized bytes=139
+[tap] GET /System/Info/Public range=- -> 401 Not Authorized bytes=139
+[tap] GET /System/Info/Public range=- -> 401 Not Authorized bytes=139
+[tap] GET /System/Info/Public range=- -> 401 Not Authorized bytes=139
+[tap] GET /System/Info/Public range=- -> 401 Not Authorized bytes=139
+[tap] GET /System/Info/Public range=- -> 200 OK bytes=176
+[tap] PROPFIND / range=- -> 207 Multi-Status bytes=782
+[tap] GET /emby/System/Info/Public range=- -> 401 Not Authorized bytes=139
+[tap] GET /emby/System/Info/Public range=- -> 401 Not Authorized bytes=139
+[tap] OPTIONS / range=- -> 401 Not Authorized bytes=139
+[tap] OPTIONS / range=- -> 200 OK bytes=0
+[tap] OPTIONS / range=- -> 200 OK bytes=0
+[tap] OPTIONS / range=- -> 200 OK bytes=0
+[tap] OPTIONS / range=- -> 200 OK bytes=0
+[tap] OPTIONS / range=- -> 200 OK bytes=0
+[tap] GET /emby/System/Info/Public range=- -> 401 Not Authorized bytes=139
+[tap] OPTIONS / range=- -> 200 OK bytes=0
+[tap] OPTIONS / range=- -> 200 OK bytes=0
+[tap] OPTIONS / range=- -> 200 OK bytes=0
+[tap] OPTIONS / range=- -> 200 OK bytes=0
+[tap] OPTIONS / range=- -> 200 OK bytes=0
+[tap] OPTIONS / range=- -> 200 OK bytes=0

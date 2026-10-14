@@ -33,6 +33,51 @@ from cheroot import wsgi
 from wsgidav.wsgidav_app import WsgiDAVApp
 
 
+class MediaBrowserInfoShim:
+    """
+    Diagnostic-only stand-in for the Emby/Jellyfin "who are you" endpoint.
+
+    Why it exists: MediaHub's "add a media source" flow probes EVERY source type with the
+    MediaBrowser protocol (MediaHub.Providers/MediaBrowser/MediaBrowserFactories.cs
+    ProbeMediaBrowserAsync builds an Emby or Jellyfin dialect from the type and always GETs
+    /System/Info/Public). For a WebDAV source that request goes to a WebDAV server, which answers
+    401, and the add fails before the WebDAV provider is ever constructed.
+
+    Serving a Jellyfin-shaped /System/Info/Public is how the harness isolates that one broken step:
+    everything after it - the OPTIONS probe, the Basic authentication, PROPFIND browsing, Range
+    playback - is the real WebDAV provider talking to the real WebDAV server. It is OFF by default
+    (--emby-info-shim) precisely so the clean run stays clean, and the shim is never a claim that
+    the server is a media server.
+    """
+
+    def __init__(self, app, server_id: str, server_name: str):
+        self.app = app
+        self.server_id = server_id
+        self.server_name = server_name
+        self.payload = json.dumps(
+            {
+                "Id": server_id,
+                "ServerName": server_name,
+                "Version": "10.9.0",
+                "ProductName": "MediaHub WebDAV fixture",
+                "OperatingSystem": "Windows",
+            }
+        ).encode("utf-8")
+
+    def __call__(self, environ, start_response):
+        path = environ.get("PATH_INFO", "").rstrip("/")
+        if environ.get("REQUEST_METHOD") == "GET" and path == "/System/Info/Public":
+            start_response(
+                "200 OK",
+                [
+                    ("Content-Type", "application/json; charset=utf-8"),
+                    ("Content-Length", str(len(self.payload))),
+                ],
+            )
+            return [self.payload]
+        return self.app(environ, start_response)
+
+
 class TapMiddleware:
     """Records every request/response pair to a JSONL file, optionally stripping Range."""
 
@@ -151,7 +196,15 @@ class TapMiddleware:
             self._record(rec)
 
 
-def build_app(root: str, user: str, password: str, log_path: str, strip_range_prefix: str):
+def build_app(
+    root: str,
+    user: str,
+    password: str,
+    log_path: str,
+    strip_range_prefix: str,
+    info_shim: bool = False,
+    shim_id: str = "9d1f7c4ab2e34f6d8a05c1e73b6f2048",
+):
     config = {
         "provider_mapping": {"/": root},
         "http_authenticator": {
@@ -168,6 +221,8 @@ def build_app(root: str, user: str, password: str, log_path: str, strip_range_pr
         "dir_browser": {"enable": False},
     }
     app = WsgiDAVApp(config)
+    if info_shim:
+        app = MediaBrowserInfoShim(app, shim_id, "MediaHub WebDAV fixture")
     return TapMiddleware(app, log_path, strip_range_prefix)
 
 
@@ -183,6 +238,12 @@ def main() -> int:
         "--norange-prefix",
         default="/norange",
         help="path prefix whose Range headers are stripped (simulates a server without Range support)",
+    )
+    parser.add_argument(
+        "--emby-info-shim",
+        action="store_true",
+        help="answer GET /System/Info/Public with a Jellyfin-shaped payload (diagnostic workaround "
+             "for the MediaBrowser-probe defect in the add-source flow)",
     )
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument(
@@ -205,12 +266,15 @@ def main() -> int:
         print("root does not exist: " + args.root, file=sys.stderr)
         return 2
 
-    app = build_app(args.root, args.user, args.password, args.log, args.norange_prefix)
+    app = build_app(
+        args.root, args.user, args.password, args.log, args.norange_prefix, args.emby_info_shim
+    )
     server = wsgi.Server((args.host, args.port), app, numthreads=10)
     server.start()
     print(
         "PID=" + str(os.getpid()),
-        "READY wsgidav={ver} root={root} url=http://{host}:{port}/ norange_prefix={nr}".format(
+        "READY wsgidav={ver} root={root} url=http://{host}:{port}/ norange_prefix={nr} shim={shim}".format(
+            shim=bool(args.emby_info_shim),
             ver=__import__("wsgidav").__version__,
             root=args.root,
             host=args.host,

@@ -201,6 +201,17 @@ internal sealed class MediaBrowserApi
     public async Task<JsonDocument> GetCurrentUserAsync(CancellationToken ct)
         => await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/Me"), ct).ConfigureAwait(false);
 
+    /// <summary>
+    /// A specific user by id.
+    /// </summary>
+    /// <remarks>
+    /// The portable way to confirm a session: both Emby and Jellyfin answer it. <c>/Users/Me</c> is
+    /// not portable - Emby 4.10.1.0 returns HTTP 500 for it because it expects a GUID, while its own
+    /// user ids are short numerics.
+    /// </remarks>
+    public async Task<JsonDocument> GetUserAsync(string userId, CancellationToken ct)
+        => await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Uri.EscapeDataString(userId)), ct).ConfigureAwait(false);
+
     public async Task<JsonDocument> GetItemAsync(string itemId, CancellationToken ct)
         => await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Require(UserId) + "/Items/" + Uri.EscapeDataString(itemId)), ct).ConfigureAwait(false);
 
