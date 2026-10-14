@@ -167,7 +167,26 @@ object AppModule {
         @ApplicationContext context: Context,
         logger: Logger,
         httpClientFactory: HttpClientFactory,
-    ): PlaybackEngineCreator = MpvPlaybackEngineCreator(context, logger, httpClientFactory)
+        // M5-1 联合集成：复用 ADR-042 的**单一** DeviceCapabilitiesProvider 单例。
+        // 集成前 M1/M2 各自创建了一个采集器（两个 MediaCodecList 枚举 + 两个预热线程），
+        // 现统一为同一实例：线程安全（实现内部 synchronized 缓存）、进程内有效，
+        // 且不携带任何服务器/会话可变状态，因此不存在跨服务器或跨会话的状态污染。
+        deviceCapabilities: com.mediahub.player.compatibility.DeviceCapabilitiesProvider,
+    ): PlaybackEngineCreator {
+        return MpvPlaybackEngineCreator(
+            context,
+            logger,
+            httpClientFactory,
+            com.mediahub.player.mpv.DeviceHdrEvidenceProvider { hdr ->
+                if (hdr == com.mediahub.model.HdrType.NONE) {
+                    true
+                } else {
+                    val caps = runCatching { deviceCapabilities.get() }.getOrNull()
+                    if (caps == null || caps.hdrSupported.isEmpty()) null else hdr in caps.hdrSupported
+                }
+            },
+        )
+    }
 
     /**
      * 设备能力采集（ADR-042）：结果在实现内部缓存（进程内不变）。
