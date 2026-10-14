@@ -67,12 +67,19 @@ class RateLimitCooldown(
             val raw = header?.trim().orEmpty()
             if (raw.isEmpty()) return DEFAULT_COOLDOWN_MS
             raw.toLongOrNull()?.let { seconds ->
-                return if (seconds <= 0L) 0L else seconds * 1000L
+                // 饱和乘法：seconds * 1000 会溢出成负数，而负值在 apply() 里表示"无冷却"，
+                // 于是**超大 Retry-After 反而会取消冷却**（fail-open）。先按上限截断再乘。
+                if (seconds <= 0L) return 0L
+                return if (seconds >= MAX_COOLDOWN_MS / 1000L) MAX_COOLDOWN_MS else seconds * 1000L
             }
             return runCatching {
                 val target = ZonedDateTime.parse(raw, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli()
                 val delta = target - nowEpochMs
-                if (delta <= 0L) 0L else delta
+                when {
+                    delta <= 0L -> 0L
+                    delta >= MAX_COOLDOWN_MS -> MAX_COOLDOWN_MS
+                    else -> delta
+                }
             }.getOrDefault(DEFAULT_COOLDOWN_MS)
         }
     }
