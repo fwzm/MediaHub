@@ -29,6 +29,13 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        // Build-identity mode. The supply-chain record needs the engine's real version and build
+        // configuration, which only the library itself can report.
+        if (args.Length > 0 && args[0].Equals("--info", StringComparison.OrdinalIgnoreCase))
+        {
+            return PrintBuildInfo();
+        }
+
         string? mediaPath = args.Length > 0 ? args[0] : null;
         int runSeconds = args.Length > 1 && int.TryParse(args[1], out int s) ? s : 6;
 
@@ -165,6 +172,42 @@ internal static class Program
 
         foreach (string f in failures) Console.Error.WriteLine("MPV_PROBE FAIL: " + f);
         return 1;
+    }
+
+    /// <summary>Prints the engine's build identity, used by the dependency record.</summary>
+    private static int PrintBuildInfo()
+    {
+        using var player = new MpvPlayer(new MpvPlayerOptions
+        {
+            Wid = IntPtr.Zero,
+            VideoOutput = "null",
+            AudioOutput = "null",
+            HwDec = "no",
+        });
+
+        string dll = Path.Combine(AppContext.BaseDirectory, "libmpv-2.dll");
+        Console.WriteLine("libmpv-2.dll           : " + dll);
+        if (File.Exists(dll))
+        {
+            using var stream = File.OpenRead(dll);
+            Console.WriteLine("libmpv-2.dll sha256    : " + Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant());
+            Console.WriteLine("libmpv-2.dll bytes     : " + new FileInfo(dll).Length);
+        }
+
+        Console.WriteLine("client api version     : " + MpvPlayer.ClientApiVersion);
+        foreach (string property in new[] { "mpv-version", "mpv-configuration", "ffmpeg-version", "libass-version" })
+        {
+            Console.WriteLine((property + ":").PadRight(23) + ": " + (player.GetProperty(property) ?? "(property not available)"));
+        }
+
+        // The configuration string is what determines the licence: a build that enables GPL-only
+        // components is distributed under the GPL even though mpv's own code is LGPL.
+        string? configuration = player.GetProperty("mpv-configuration");
+        string banner = player.GetProperty("mpv-version") ?? "";
+        Console.WriteLine("configuration          : " + (configuration ?? "(unavailable)"));
+        Console.WriteLine("gpl mentioned in banner: " + banner.Contains("GPL", StringComparison.OrdinalIgnoreCase));
+        return 0;
     }
 
     // ---------------------------------------------------------------- hidden host window

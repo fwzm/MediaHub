@@ -27,11 +27,13 @@ public sealed partial class HomePage : Page
         ContinueGrid.ItemsSource = entries;
         ContinueEmptyText.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        int online = App.Services.Servers.Servers.Count(s => s.Status == ServerStatus.Online);
-        int total = App.Services.Servers.Servers.Count(s => s.Type != ServerType.Local);
-        SourceSummaryText.Text = total == 0
+        // Counted over servers only. Including the local source in the same sentence produced
+        // "1 configured, 2 available", which reads as a bug because it is one.
+        var remote = App.Services.Servers.Servers.Where(s => s.Type != ServerType.Local).ToList();
+        int online = remote.Count(s => s.Status == ServerStatus.Online);
+        SourceSummaryText.Text = remote.Count == 0
             ? "尚未添加媒体服务器。前往“媒体源”添加 Emby 或 Jellyfin 后即可浏览媒体库。"
-            : "已配置 " + total + " 个媒体服务器，其中 " + online + " 个当前可用。";
+            : "已配置 " + remote.Count + " 个媒体服务器，其中 " + online + " 个当前可用。";
     }
 
     private static string Format(TimeSpan t)

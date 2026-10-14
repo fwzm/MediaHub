@@ -735,6 +735,10 @@ public sealed class MpvPlayer : IPlaybackEngine, ITrackController, IDisposable
     public string? GetOptionValue(string optionName)
         => _ctx == IntPtr.Zero ? null : MpvNative.GetString(_ctx, "options/" + optionName);
 
+    /// <summary>Reads a plain engine property, e.g. <c>mpv-version</c> or <c>mpv-configuration</c>.</summary>
+    public string? GetProperty(string propertyName)
+        => _ctx == IntPtr.Zero ? null : MpvNative.GetString(_ctx, propertyName);
+
     /// <summary>Asks the engine to write a frame to disk (HDR and OSD included).</summary>
     public bool TakeScreenshot(string filePath)
         => !string.IsNullOrWhiteSpace(filePath) && Run("screenshot-to-file", filePath, "video") >= 0;
