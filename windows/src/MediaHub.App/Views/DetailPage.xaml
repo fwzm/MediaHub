@@ -43,13 +43,15 @@
             <TextBlock x:Name="MetaText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
             <TextBlock x:Name="SourceText" Style="{StaticResource MediaHubCaption}" />
             <StackPanel Orientation="Horizontal" Spacing="10">
-              <Button x:Name="PlayButton" Click="OnPlayClick" Style="{StaticResource AccentButtonStyle}">
+              <Button x:Name="PlayButton" Click="OnPlayClick" Style="{StaticResource AccentButtonStyle}"
+                      AutomationProperties.Name="播放" AutomationProperties.AutomationId="detail.play">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <FontIcon Glyph="&#xE768;" FontSize="14" />
                   <TextBlock x:Name="PlayButtonText" Text="播放" />
                 </StackPanel>
               </Button>
-              <Button x:Name="ResumeButton" Click="OnResumeClick" Visibility="Collapsed">
+              <Button x:Name="ResumeButton" Click="OnResumeClick" Visibility="Collapsed"
+                      AutomationProperties.Name="继续观看" AutomationProperties.AutomationId="detail.resume">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <FontIcon Glyph="&#xE81C;" FontSize="14" />
                   <TextBlock x:Name="ResumeButtonText" Text="继续观看" />

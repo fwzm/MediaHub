@@ -28,7 +28,15 @@
                 ItemClick="OnItemClick">
         <GridView.ItemTemplate>
           <DataTemplate>
-            <StackPanel Width="{Binding TileWidth}" Margin="0,0,14,16" Spacing="6">
+            <!-- A tile is named after the item it shows. Without this the automation name of every
+                 tile is the view-model's type name, so a test can only reach an item by its index in
+                 the grid - which is exactly the kind of fragile coupling that makes a UI test fail
+                 for reasons unrelated to the behaviour under test. It is also what a screen reader
+                 needs in order to announce anything useful. -->
+            <StackPanel Width="{Binding TileWidth}" Margin="0,0,14,16" Spacing="6"
+                        AutomationProperties.Name="{Binding Title}"
+                        AutomationProperties.AutomationId="{Binding AutomationId}"
+                        AutomationProperties.HelpText="{Binding Subtitle}">
               <Border Width="{Binding TileWidth}" Height="{Binding TileHeight}" CornerRadius="6"
                       Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
                       BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">

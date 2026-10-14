@@ -1,0 +1,14 @@
+{
+  "pid": 51756,
+  "url": "http://127.0.0.1:8181/",
+  "root": "D:\\mh-webdav\\root",
+  "user": "mediahub",
+  "passwordLength": 11,
+  "tap": "D:\\deepseek_test\\MediaHub_Win\\windows\\tools\\acceptance\\evidence\\webdav\\requests.jsonl",
+  "log": "D:\\deepseek_test\\MediaHub_Win\\windows\\tools\\acceptance\\evidence\\webdav\\server.log",
+  "version": "wsgidav 4.3.3 / cheroot 11.1.2 / python 3.13.2",
+  "python": "C:\\Python\\Python313\\python.exe",
+  "script": "D:\\deepseek_test\\MediaHub_Win\\windows\\tools\\acceptance\\webdav\\webdav_server.py",
+  "cmdline": "\"C:\\Python\\Python313\\python.exe\" -u \"D:\\deepseek_test\\MediaHub_Win\\windows\\tools\\acceptance\\webdav\\webdav_server.py\" --root \"D:\\mh-webdav\\root\" --port 8181 --log \"D:\\deepseek_test\\MediaHub_Win\\windows\\tools\\acceptance\\evidence\\webdav\\requests.jsonl\" --user \"mediahub\" --password \"hub-test-pw\" --stdout \"D:\\deepseek_test\\MediaHub_Win\\windows\\tools\\acceptance\\evidence\\webdav\\server.log\"",
+  "started": "2026-10-14T15:47:55"
+}

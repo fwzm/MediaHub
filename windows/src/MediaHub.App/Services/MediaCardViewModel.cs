@@ -24,6 +24,17 @@ public sealed class MediaCardViewModel : INotifyPropertyChanged
 
     public string Title => Item.Name;
 
+    /// <summary>
+    /// Stable automation identifier for this card.
+    /// </summary>
+    /// <remarks>
+    /// Composed from the source id and the media id, both of which are stable server-side, rather
+    /// than from the display name or the position in the grid. Two servers can legitimately hold
+    /// items with the same name, and a UI test that selects "the third tile" fails whenever a library
+    /// is rescanned - neither is a fact about the client's behaviour.
+    /// </remarks>
+    public string AutomationId => "media:" + Source.ServerId + ":" + Item.Id;
+
     public string Subtitle
     {
         get

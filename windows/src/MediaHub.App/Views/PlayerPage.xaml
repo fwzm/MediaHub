@@ -23,6 +23,7 @@
         </Grid.ColumnDefinitions>
 
         <Button x:Name="BackButton" Grid.Column="0" Click="OnBackClick" Background="Transparent"
+          AutomationProperties.Name="返回" AutomationProperties.AutomationId="player.back"
                 Foreground="{StaticResource MediaHubOverlayTextBrush}" ToolTipService.ToolTip="返回 (Esc)">
           <FontIcon Glyph="&#xE72B;" />
         </Button>
@@ -40,6 +41,7 @@
             <FontIcon Glyph="&#xE946;" />
           </ToggleButton>
           <Button x:Name="FullscreenButton" Click="OnFullscreenClick" Background="Transparent"
+          AutomationProperties.Name="全屏" AutomationProperties.AutomationId="player.fullscreen"
                   Foreground="{StaticResource MediaHubOverlayTextBrush}" ToolTipService.ToolTip="全屏 (F11)">
             <FontIcon x:Name="FullscreenIcon" Glyph="&#xE740;" />
           </Button>
@@ -143,14 +145,17 @@
 
           <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
             <Button x:Name="PlayPauseButton" Click="OnPlayPauseClick" Background="Transparent"
+          AutomationProperties.Name="播放暂停" AutomationProperties.AutomationId="player.playpause"
                     Foreground="{StaticResource MediaHubOverlayTextBrush}" ToolTipService.ToolTip="播放/暂停 (空格)">
               <FontIcon x:Name="PlayPauseIcon" Glyph="&#xE768;" />
             </Button>
             <Button Click="OnSeekBackClick" Background="Transparent" Foreground="{StaticResource MediaHubOverlayTextBrush}"
+          AutomationProperties.Name="快退" AutomationProperties.AutomationId="player.seekback"
                     ToolTipService.ToolTip="后退 10 秒 (←)">
               <FontIcon Glyph="&#xE892;" />
             </Button>
             <Button Click="OnSeekForwardClick" Background="Transparent" Foreground="{StaticResource MediaHubOverlayTextBrush}"
+          AutomationProperties.Name="快进" AutomationProperties.AutomationId="player.seekforward"
                     ToolTipService.ToolTip="前进 10 秒 (→)">
               <FontIcon Glyph="&#xE893;" />
             </Button>
@@ -158,6 +163,7 @@
 
           <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
             <Button x:Name="MuteButton" Click="OnMuteClick" Background="Transparent"
+          AutomationProperties.Name="静音" AutomationProperties.AutomationId="player.mute"
                     Foreground="{StaticResource MediaHubOverlayTextBrush}" ToolTipService.ToolTip="静音 (M)">
               <FontIcon x:Name="VolumeIcon" Glyph="&#xE767;" />
             </Button>
