@@ -708,4 +708,30 @@
 - 影响：HDR 片源在**明确不支持该 HDR 格式**的设备上，mpv 默认行为由"原样输出（发灰/偏色）"变为
   色调映射输出；此变化依据设备能力证据 + 二进制选项存在性，**真机渲染结果 NOT_RUN**。
   Media3 路径未做任何参数变更。
+## ADR-045 服务器请求治理 · 阶段一：统一 User-Agent 作用域与重定向边界（M0-A）
+- 状态：已采纳（部分实现）（2026-10-14）；后续阶段（限流状态机 / 重试预算 / 并发预算 / 可观测性边界）见 ADR-046（待 M0-B/C/D 冻结）
+- 背景：请求入口分散在四套装配（API 客户端、图片 Coil 客户端、Media3 OkHttpDataSource、mpv 回环桥上游），
+  改动前只有 Media3 硬编码 UA，其余为底层库默认标识；且 mpv 曾被误认为拥有独立公网 HTTP 栈。
+- 事实澄清（本次核验）：`MpvHttpBridge` 是**回环媒体代理** —— mpv 只连接 `127.0.0.1`，上游字节流
+  经 `HttpClientFactory.mediaClient() + OriginScopedCredentialInterceptor` 发送。因此 mpv **不存在**
+  独立的公网 HTTP 栈，UA 统一、凭据剥离、请求计数对其同样适用。
+- 决策（本阶段冻结）：
+  1. **单一 UA 策略**：`UserAgentPolicy` 按 **serverId** 作用域解析；覆盖来源以函数式快照注入，
+     禁止全局可变单例；未配置/未知服务器一律使用可识别默认 UA（`MediaHubUserAgent`），**不伪装**其它客户端；
+  2. **校验即拒绝**：自定义 UA 必须通过 `UserAgentValidator`（按原样拒绝 CR/LF 与 C0/C1 控制字符、
+     非可见 ASCII、超长），拒绝而非静默改写；
+  3. **逐跳注入**：`UserAgentInterceptor` 注册为 OkHttp **network interceptor**，对重定向的每一跳生效；
+     重定向到未知 origin 时回落默认 UA，**不把原服务器的自定义 UA 泄漏给第三方域名**；
+  4. **归属唯一**：URL→serverId 复用凭据归属的同一实现（`ProviderImageAuthStore.bestScopeFor`：
+     最长 path 前缀 + 同前缀多服务器歧义 fail-closed），杜绝"UA 按 A 服务器、凭据按 B 服务器"；
+  5. **边界不越权**：UA 拦截器只写 `User-Agent`，不读不改认证头；跨 origin 凭据剥离仍由
+     `OriginScopedCredentialInterceptor`（ADR-030）独占，Token 仍只走 header（ADR-026）。
+- 未冻结（明确登记，待后续阶段）：
+  - 429 `Retry-After` 解析、按作用域冷却状态机、403/429 硬熔断；
+  - 各层重试预算的合并规则（API / 图片 / 字幕 / 播放器不得相乘放大）；
+  - 连接与请求并发预算（媒体 2 / 图片 4–6 属**待验证的场景参数**，非通用硬限制）；
+  - 单播放会话请求计数与 mpv 侧可观测性边界；
+  - 按服务器自定义 UA 的**持久化、UI 入口、账号删除清理、备份恢复语义**（当前恒用默认 UA）。
+- 影响：所有出网路径（API / 进度 / 图片 / Media3 / mpv 上游 / 字幕）使用同一 UA 策略；
+  第三方服务器的具体限制由服务器管理者决定，**MediaHub 不承诺绕过白名单、地区限制或账号访问控制**。
 

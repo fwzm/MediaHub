@@ -108,9 +108,33 @@ object AppModule {
         cleaners: Set<@JvmSuppressWildcards com.mediahub.provider.api.ProviderSessionCleaner>,
     ): SessionStoreCleaner = com.mediahub.provider.api.CompositeSessionStoreCleaner(cleaners)
 
+    /**
+     * M0-A（ADR-045）：URL -> serverId 解析复用图片鉴权作用域（ProviderImageAuthStore），
+     * 保证 UA 归属与凭据归属是**同一套**最长前缀 + fail-closed 规则。
+     */
     @Provides
     @Singleton
-    fun provideHttpClientFactory(logger: Logger): HttpClientFactory = HttpClientFactory(logger)
+    fun provideServerIdResolver(
+        store: com.mediahub.app.image.ProviderImageAuthStore,
+    ): com.mediahub.core.network.ServerIdResolver =
+        com.mediahub.core.network.ServerIdResolver { url -> store.serverIdForUrl(url) }
+
+    /**
+     * M0-A（ADR-045）：全局 UA 策略。当前不配置自定义覆盖（保持 MediaHub 默认 UA）；
+     * 按服务器自定义 UA 的持久化在后续任务包接入（见 ADR-045 的 NOT_STARTED 清单）。
+     */
+    @Provides
+    @Singleton
+    fun provideUserAgentPolicy(): com.mediahub.core.network.UserAgentPolicy =
+        com.mediahub.core.network.UserAgentPolicy()
+
+    @Provides
+    @Singleton
+    fun provideHttpClientFactory(
+        logger: Logger,
+        userAgentPolicy: com.mediahub.core.network.UserAgentPolicy,
+        serverIdFor: com.mediahub.core.network.ServerIdResolver,
+    ): HttpClientFactory = HttpClientFactory(logger, userAgentPolicy, serverIdFor)
 
     @Provides
     @Singleton
@@ -148,7 +172,9 @@ object AppModule {
     fun providePlayerFactory(
         @ApplicationContext context: Context,
         mediaCacheProvider: MediaCacheProvider,
-    ): PlayerFactory = PlayerFactory(context, mediaCacheProvider)
+        userAgentPolicy: com.mediahub.core.network.UserAgentPolicy,
+        serverIdFor: com.mediahub.core.network.ServerIdResolver,
+    ): PlayerFactory = PlayerFactory(context, mediaCacheProvider, userAgentPolicy, serverIdFor)
 
     // U3-A：双内核工厂（Media3 快速路径 / mpv 兼容兜底），由 SwitchablePlaybackEngine
     // 按PlaybackEngineSelector + 失败指纹决定实际使用哪个；用户可在设置页强制指定。
