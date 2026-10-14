@@ -73,6 +73,20 @@
         </StackPanel>
       </Expander>
 
+      <Expander Header="系统集成" IsExpanded="False" HorizontalAlignment="Stretch">
+        <StackPanel Spacing="10" Padding="0,8,0,8">
+          <TextBlock Text="文件关联" FontWeight="SemiBold" />
+          <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                     Text="把 MediaHub 登记为视频文件的候选用“打开方式”程序。不会抢占系统默认播放器，也不会修改你的默认选择；如需将 MediaHub 设为默认，请在 Windows 设置中自行选择。" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button x:Name="RegisterAssocButton" Content="启用文件关联" Click="OnRegisterAssociationClick" />
+            <Button x:Name="UnregisterAssocButton" Content="移除文件关联" Click="OnUnregisterAssociationClick" />
+            <ProgressRing x:Name="AssocRing" IsActive="False" Width="20" Height="20" />
+          </StackPanel>
+          <TextBlock x:Name="AssocStatusText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Expander>
+
       <Expander Header="诊断" IsExpanded="False" HorizontalAlignment="Stretch">
         <StackPanel Spacing="10" Padding="0,8,0,8">
           <StackPanel Orientation="Horizontal" Spacing="8">

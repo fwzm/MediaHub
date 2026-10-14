@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using MediaHub.App.Services;
 using MediaHub.Net;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -36,7 +37,7 @@ public sealed partial class SettingsPage : Page
     public SettingsPage()
     {
         InitializeComponent();
-        Loaded += (_, _) => Load();
+        Loaded += (_, _) => { Load(); RefreshAssociationStatus(); };
     }
 
     private void Load()
@@ -192,6 +193,58 @@ public sealed partial class SettingsPage : Page
         if (idx < 0) return;
         App.Services.Settings.Update(s => s.EngineOptions["hwdec"] = HwDecModes[idx].Value);
         DiagnosticsText.Text = BuildDiagnostics();
+    }
+
+    // ---------------------------------------------------------------- system integration
+
+    private void RefreshAssociationStatus()
+    {
+        bool registered = FileAssociationService.IsRegistered();
+        AssocStatusText.Text = registered
+            ? "当前状态：已登记（" + FileAssociationService.Extensions.Length + " 种扩展名）。"
+            : "当前状态：未登记。可播放格式不会出现在“打开方式”列表中。";
+        UnregisterAssocButton.IsEnabled = registered;
+        RegisterAssocButton.IsEnabled = !registered;
+    }
+
+    private void OnRegisterAssociationClick(object sender, RoutedEventArgs e)
+    {
+        AssocRing.IsActive = true;
+        try
+        {
+            string exe = Environment.ProcessPath ?? "";
+            int count = FileAssociationService.Register(exe);
+            AssocStatusText.Text = "已为 " + count + " 种扩展名登记。现在可在“打开方式”中选择 MediaHub。";
+        }
+        catch (Exception ex)
+        {
+            // Surfaced rather than swallowed: a silent failure here looks like the feature is broken.
+            AssocStatusText.Text = "登记失败：" + ex.Message;
+        }
+        finally
+        {
+            AssocRing.IsActive = false;
+            RefreshAssociationStatus();
+        }
+    }
+
+    private void OnUnregisterAssociationClick(object sender, RoutedEventArgs e)
+    {
+        AssocRing.IsActive = true;
+        try
+        {
+            int count = FileAssociationService.Unregister();
+            AssocStatusText.Text = "已移除 " + count + " 种扩展名的登记，并清理了本应用创建的注册表项。";
+        }
+        catch (Exception ex)
+        {
+            AssocStatusText.Text = "移除失败：" + ex.Message;
+        }
+        finally
+        {
+            AssocRing.IsActive = false;
+            RefreshAssociationStatus();
+        }
     }
 
     private void OnExportLogClick(object sender, RoutedEventArgs e)

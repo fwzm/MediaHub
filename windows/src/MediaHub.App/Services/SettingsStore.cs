@@ -134,6 +134,15 @@ public sealed class MediaHubSettings
     public bool ShowDetailedMediaInfo { get; set; }
     public bool AutoHideControls { get; set; } = true;
 
+    /// <summary>
+    /// Serialised window position and size, restored on the next start when it still lands on a
+    /// display that exists.
+    /// </summary>
+    public string? WindowPlacement { get; set; }
+
+    /// <summary>Set once the user has been offered file association, so the prompt is not repeated.</summary>
+    public bool FileAssociationOffered { get; set; }
+
     // ---- configured media servers ----
     public List<PersistedServer> Servers { get; set; } = new();
 

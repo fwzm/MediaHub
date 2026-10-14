@@ -9,8 +9,36 @@
     Title="MediaHub">
 
   <Grid x:Name="RootGrid" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <!-- A real menu bar, because "open a file" is a shell-level action rather than a library one:
+         the user should not have to be inside a particular page for it to be reachable. -->
+    <MenuBar Grid.Row="0" x:Name="MainMenu">
+      <MenuBarItem Title="文件">
+        <MenuFlyoutItem Text="打开视频…" Click="OnOpenVideoClick">
+          <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8E5;" /></MenuFlyoutItem.Icon>
+        </MenuFlyoutItem>
+        <MenuFlyoutItem Text="打开文件夹…" Click="OnOpenFolderClick">
+          <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8B7;" /></MenuFlyoutItem.Icon>
+        </MenuFlyoutItem>
+        <MenuFlyoutSeparator />
+        <MenuFlyoutItem Text="退出" Click="OnExitClick" />
+      </MenuBarItem>
+      <MenuBarItem Title="播放">
+        <MenuFlyoutItem Text="播放 / 暂停" Click="OnPlayPauseMenuClick" />
+        <MenuFlyoutItem Text="全屏切换" Click="OnFullscreenMenuClick" />
+      </MenuBarItem>
+      <MenuBarItem Title="帮助">
+        <MenuFlyoutItem Text="关于 MediaHub" Click="OnAboutClick" />
+      </MenuBarItem>
+    </MenuBar>
+
     <!-- Shell layer: navigation chrome for browsing surfaces. -->
     <NavigationView
+        Grid.Row="1"
         x:Name="Nav"
         IsBackButtonVisible="Collapsed"
         IsSettingsVisible="False"
@@ -43,7 +71,7 @@
 
     <!-- Player layer: a dedicated full-window surface. It is a sibling rather than a child of the
          NavigationView so the video rectangle can use the entire window in fullscreen. -->
-    <Grid x:Name="PlayerLayer" Visibility="Collapsed">
+    <Grid x:Name="PlayerLayer" Grid.RowSpan="2" Visibility="Collapsed">
       <Frame x:Name="PlayerFrame" />
     </Grid>
   </Grid>

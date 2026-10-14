@@ -1,7 +1,9 @@
 using MediaHub.App.Services;
 using MediaHub.App.Views;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.Graphics;
 using WinRT.Interop;
 
 namespace MediaHub.App;
@@ -25,6 +27,10 @@ public sealed partial class MainWindow : Window
         Title = "MediaHub";
         ShellFrame.Navigate(typeof(HomePage));
         Nav.SelectedItem = Nav.MenuItems[0];
+
+        WindowPlacementStore.Restore(AppWindow, App.Services.Settings);
+        AttachWindowPlacementTracking();
+        AttachFileDrop();
 
         // Restoring configured sources hits the network, so it runs after the shell is on screen
         // rather than delaying first paint.
@@ -63,6 +69,208 @@ public sealed partial class MainWindow : Window
             case "settings": ShellFrame.Navigate(typeof(SettingsPage)); break;
         }
     }
+
+    // ---------------------------------------------------------------- window placement
+
+    private RectInt32 _restoredBounds;
+    private bool _hasRestoredBounds;
+    private bool _closingHandled;
+
+    /// <summary>
+    /// Tracks the rectangle to return to, and persists it on close.
+    /// </summary>
+    /// <remarks>
+    /// The bounds are captured while the window is in its normal state. Reading them at shutdown
+    /// instead would store the maximised size as the "restored" size, so un-maximising after a restart
+    /// would leave a full-screen-sized window.
+    /// </remarks>
+    private void AttachWindowPlacementTracking()
+    {
+        void CaptureIfNormal()
+        {
+            try
+            {
+                // OverlappedPresenter exposes its window state, not booleans. Reading the state is
+                // what makes "capture only while normal" correct: a maximised window's size is the
+                // screen, and storing that as the restore size would leave the window un-maximisable
+                // to anything smaller after a restart.
+                if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Restored })
+                {
+                    _restoredBounds = new RectInt32(AppWindow.Position.X, AppWindow.Position.Y,
+                        AppWindow.Size.Width, AppWindow.Size.Height);
+                    _hasRestoredBounds = true;
+                }
+            }
+            catch (Exception) { }
+        }
+
+        CaptureIfNormal();
+        AppWindow.Changed += (_, args) => { if (args.DidSizeChange || args.DidPositionChange) CaptureIfNormal(); };
+
+        AppWindow.Closing += (sender, args) =>
+        {
+            if (_closingHandled) return;
+            _closingHandled = true;
+            CaptureIfNormal();
+
+            bool maximized = AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Maximized };
+            RectInt32 bounds = _hasRestoredBounds
+                ? _restoredBounds
+                : new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
+            WindowPlacementStore.Save(App.Services.Settings, new WindowPlacementStore.Placement(
+                bounds.X, bounds.Y, bounds.Width, bounds.Height, maximized));
+
+            // The engine and the player host own native resources. Disposing them on close is what
+            // makes "no leftover process after exit" true rather than hopeful.
+            args.Cancel = true;
+            _ = ShutdownAsync();
+        };
+    }
+
+    private async Task ShutdownAsync()
+    {
+        try
+        {
+            await App.Services.ShutdownAsync();
+        }
+        catch (Exception ex)
+        {
+            Services.StartupTrace.Write("MainWindow:shutdown-failed " + ex.GetType().Name);
+        }
+        Close();
+    }
+
+    // ---------------------------------------------------------------- file drop
+
+    private void AttachFileDrop()
+    {
+        if (Content is not UIElement root) return;
+        root.AllowDrop = true;
+
+        root.DragOver += (_, args) =>
+        {
+            args.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy;
+            args.DragUIOverride.Caption = "播放";
+            args.DragUIOverride.IsCaptionVisible = true;
+            args.Handled = true;
+        };
+
+        root.Drop += async (_, args) =>
+        {
+            try
+            {
+                if (!args.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems)) return;
+                var items = await args.DataView.GetStorageItemsAsync();
+                List<string> paths = DroppedMedia.Expand(items.Select(i => i.Path));
+                if (paths.Count == 0) return;
+                OpenPaths(paths);
+            }
+            catch (Exception ex)
+            {
+                Services.StartupTrace.Write("drop:failed " + ex.GetType().Name);
+            }
+        };
+    }
+
+    /// <summary>Plays one path directly, or queues several as a temporary playlist.</summary>
+    public void OpenPaths(IReadOnlyList<string> paths)
+    {
+        List<PlaybackRequest> requests = paths.Select(DroppedMedia.ToRequest).ToList();
+        if (requests.Count == 0) return;
+
+        if (requests.Count == 1)
+        {
+            App.Services.Queue.Clear();
+            EnterPlayer(requests[0]);
+            return;
+        }
+
+        PlaybackRequest? first = App.Services.Queue.Reset(requests);
+        if (first is not null) EnterPlayer(first);
+    }
+
+    // ---------------------------------------------------------------- file menu
+
+    private async void OnOpenVideoClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle);
+            picker.ViewMode = Windows.Storage.Pickers.PickerViewMode.List;
+            picker.SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.VideosLibrary;
+            foreach (string extension in DroppedMedia.SupportedExtensions) picker.FileTypeFilter.Add(extension);
+
+            var files = await picker.PickMultipleFilesAsync();
+            if (files is null || files.Count == 0) return;
+            OpenPaths(files.Select(f => f.Path).ToList());
+        }
+        catch (Exception ex)
+        {
+            Services.StartupTrace.Write("open-video:failed " + ex.GetType().Name);
+        }
+    }
+
+    private async void OnOpenFolderClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FolderPicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle);
+            picker.SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.VideosLibrary;
+            picker.FileTypeFilter.Add("*");
+
+            Windows.Storage.StorageFolder? folder = await picker.PickSingleFolderAsync();
+            if (folder is null) return;
+
+            // Opening a folder adds it as a local library root and shows it, rather than playing a
+            // file: a folder is a place, and the user asked to see what is in it.
+            App.Services.Settings.Update(s =>
+            {
+                if (!s.LocalFolders.Contains(folder.Path, StringComparer.OrdinalIgnoreCase)) s.LocalFolders.Add(folder.Path);
+            });
+            // The library page rescans on load; it needs no invalidation hook, only to be shown.
+            NavigateShell(typeof(LocalLibraryPage));
+        }
+        catch (Exception ex)
+        {
+            Services.StartupTrace.Write("open-folder:failed " + ex.GetType().Name);
+        }
+    }
+
+    private void OnPlayPauseMenuClick(object sender, RoutedEventArgs e)
+    {
+        try { App.Services.PlayerHost.Player?.TogglePause(); } catch (Exception) { }
+    }
+
+    private void OnFullscreenMenuClick(object sender, RoutedEventArgs e)
+    {
+        if (PlayerLayer.Visibility != Visibility.Visible) return;
+        if (PlayerFrame.Content is PlayerPage page) page.ToggleFullScreen();
+    }
+
+    private void OnAboutClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "关于 MediaHub",
+            Content = "MediaHub Windows 客户端\n版本 " + AppVersion() + "\n\n播放引擎：libmpv（GPL 构建，详见 THIRD-PARTY-NOTICES.md）",
+            CloseButtonText = "关闭",
+        };
+        _ = dialog.ShowAsync();
+    }
+
+    private static string AppVersion()
+    {
+        try
+        {
+            return typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "未知";
+        }
+        catch { return "未知"; }
+    }
+
+    private void OnExitClick(object sender, RoutedEventArgs e) => Close();
 
     /// <summary>Navigates the shell frame and keeps the navigation highlight in step.</summary>
     public void NavigateShell(Type pageType, object? parameter = null)

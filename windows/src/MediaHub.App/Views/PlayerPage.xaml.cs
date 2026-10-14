@@ -442,7 +442,22 @@ public sealed partial class PlayerPage : Page
 
     private void OnFullscreenClick(object sender, RoutedEventArgs e) => ToggleFullScreen();
 
-    private void ToggleFullScreen()
+    /// <summary>
+    /// Double-clicking the video area toggles full screen.
+    /// </summary>
+    /// <remarks>
+    /// Handled on the container rather than on the video surface: the video is a child HWND owned by
+    /// the engine, so it does not participate in XAML input at all and a handler attached to it would
+    /// never fire.
+    /// </remarks>
+    private void OnVideoHostDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        ToggleFullScreen();
+        e.Handled = true;
+    }
+
+    /// <summary>Toggles full screen. Public so the shell menu can reach it.</summary>
+    public void ToggleFullScreen()
     {
         var window = App.MainWindow as MainWindow;
         if (window is null) return;
@@ -763,6 +778,7 @@ public sealed partial class PlayerPage : Page
                 e.Handled = true;
                 break;
             case VirtualKey.F11:
+            case VirtualKey.F:
                 ToggleFullScreen();
                 e.Handled = true;
                 break;

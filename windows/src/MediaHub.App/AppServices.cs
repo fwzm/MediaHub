@@ -25,6 +25,7 @@ public sealed class AppServices : IDisposable
         Servers = new ServerManager(Settings, Log, Vault);
         Search = new SearchService(Servers, Log);
         Playback = new PlaybackCoordinator(Servers, Log, PlaybackHistory);
+        Queue = new PlaybackQueue();
     }
 
     public LogService Log { get; }
@@ -37,11 +38,29 @@ public sealed class AppServices : IDisposable
     public SearchService Search { get; }
     public PlaybackCoordinator Playback { get; }
 
+    /// <summary>Temporary queue produced by opening or dropping several files at once.</summary>
+    public PlaybackQueue Queue { get; }
+
     /// <summary>Artwork cache. Needs the UI thread, so it is created when the window exists.</summary>
     public ImageCache? Images { get; private set; }
 
     public void InitializeArtwork(Microsoft.UI.Dispatching.DispatcherQueue dispatcher)
         => Images ??= new ImageCache(Log, dispatcher);
+
+    /// <summary>
+    /// Releases everything owned by the process, in dependency order.
+    /// </summary>
+    /// <remarks>
+    /// Called from the window's closing handler. Without it the engine keeps its decoder threads and
+    /// the relay keeps its listener, and the process can outlive its window — which is exactly the
+    /// "leftover process after exit" symptom.
+    /// </remarks>
+    public async Task ShutdownAsync()
+    {
+        try { await Playback.DisposeAsync(); } catch { }
+        try { PlayerHost.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
+        try { Servers.Dispose(); } catch { }
+    }
 
     public void Dispose()
     {
