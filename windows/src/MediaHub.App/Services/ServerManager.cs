@@ -199,7 +199,15 @@ public sealed class ServerManager : IDisposable
         }
 
         ServerCredential? credential = loaded.Credential;
-        if (credential is null || string.IsNullOrEmpty(credential.Token))
+
+        // A session token is not the only usable credential. WebDAV authenticates with Basic on every
+        // request and has no token at all, so requiring one here meant a WebDAV source restored as
+        // "login required" and stayed unusable until it was deleted and added again - a restart was
+        // enough to lose the source even though the password was sitting in the vault. A secret is
+        // present if there is a token OR a password.
+        bool hasSecret = credential is not null
+                         && (!string.IsNullOrEmpty(credential.Token) || !string.IsNullOrEmpty(credential.Password));
+        if (credential is null || !hasSecret)
         {
             entry.Status = ServerStatus.AuthRequired;
             return;
@@ -391,9 +399,25 @@ public sealed class ServerManager : IDisposable
     public async Task<(bool Ok, string Message)> ReconnectAsync(string serverId, string password, CancellationToken ct = default)
     {
         ServerEntry? entry = Find(serverId);
-        if (entry?.Handle?.Auth is null) return (false, "该媒体源不存在");
+        if (entry is null) return (false, "该媒体源不存在");
 
-        string userName = entry.UserName ?? (await _vault.LoadAsync(serverId, ct).ConfigureAwait(true)).Credential?.UserName ?? "";
+        VaultLoadResult loaded = await _vault.LoadAsync(serverId, ct).ConfigureAwait(true);
+
+        // Rebuild the handle when restore did not manage to create one. Reporting "该媒体源不存在" for a
+        // source that is plainly listed in the UI sends the user to delete and re-add it; the entry,
+        // the URL and the credential are all still here, so reconnecting is what was actually asked
+        // for. This is also the path that makes a WebDAV source recoverable after a restart.
+        if (entry.Handle?.Auth is null)
+        {
+            if (loaded.Credential is null) return (false, "凭据已丢失，请重新添加该媒体源");
+            ProviderHandle? rebuilt = BuildHandle(entry, loaded.Credential);
+            if (rebuilt?.Auth is null) return (false, "该媒体源不支持认证");
+            entry.Handle = rebuilt;
+        }
+
+        string userName = entry.UserName
+                          ?? loaded.Credential?.UserName
+                          ?? "";
         if (string.IsNullOrEmpty(userName)) return (false, "缺少用户名，请重新添加该媒体源");
 
         entry.Status = ServerStatus.Checking;
