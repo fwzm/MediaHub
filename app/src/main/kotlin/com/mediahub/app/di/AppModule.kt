@@ -119,14 +119,23 @@ object AppModule {
     ): com.mediahub.core.network.ServerIdResolver =
         com.mediahub.core.network.ServerIdResolver { url -> store.serverIdForUrl(url) }
 
+    /** M0-A 闭环：接口 → DataStore 实现的绑定（实现类自身可注入，此处按接口暴露）。 */
+    @Provides
+    @Singleton
+    fun provideServerUserAgentRepository(
+        impl: com.mediahub.core.database.repository.DataStoreServerUserAgentRepository,
+    ): com.mediahub.core.database.repository.ServerUserAgentRepository = impl
+
     /**
-     * M0-A（ADR-045）：全局 UA 策略。当前不配置自定义覆盖（保持 MediaHub 默认 UA）；
-     * 按服务器自定义 UA 的持久化在后续任务包接入（见 ADR-045 的 NOT_STARTED 清单）。
+     * M0-A（ADR-045）：全局 UA 策略。自定义覆盖来自 [ServerUserAgentRepository] 的
+     * **同步快照**（拦截器运行在请求线程上，不能 suspend）；未配置 / 非法值一律回落默认 UA。
      */
     @Provides
     @Singleton
-    fun provideUserAgentPolicy(): com.mediahub.core.network.UserAgentPolicy =
-        com.mediahub.core.network.UserAgentPolicy()
+    fun provideUserAgentPolicy(
+        serverUserAgent: com.mediahub.core.database.repository.ServerUserAgentRepository,
+    ): com.mediahub.core.network.UserAgentPolicy =
+        com.mediahub.core.network.UserAgentPolicy(overrides = { serverUserAgent.snapshot() })
 
     @Provides
     @Singleton
