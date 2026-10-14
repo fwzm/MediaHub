@@ -15,7 +15,7 @@ internal sealed class BridgeTestOrigin : IAsyncDisposable
 {
     private readonly HttpListener _listener = new();
     private readonly Dictionary<string, Func<HttpListenerContext, Task>> _routes = new(StringComparer.OrdinalIgnoreCase);
-    private readonly List<(string Path, Dictionary<string, string> Headers)> _seen = new();
+    private readonly List<(string Path, string Query, Dictionary<string, string> Headers)> _seen = new();
     private readonly object _gate = new();
 
     private BridgeTestOrigin(int port) => Port = port;
@@ -23,7 +23,10 @@ internal sealed class BridgeTestOrigin : IAsyncDisposable
     public int Port { get; }
     public string HostPort => "127.0.0.1:" + Port;
     public Uri BaseUri => new("http://127.0.0.1:" + Port + "/");
-    public IReadOnlyList<(string Path, Dictionary<string, string> Headers)> Seen { get { lock (_gate) return _seen.ToList(); } }
+    public IReadOnlyList<(string Path, string Query, Dictionary<string, string> Headers)> Seen
+    {
+        get { lock (_gate) return _seen.ToList(); }
+    }
 
     public void Map(string path, Func<HttpListenerContext, Task> handler) => _routes[path] = handler;
 
@@ -57,7 +60,8 @@ internal sealed class BridgeTestOrigin : IAsyncDisposable
                 headers[key] = ctx.Request.Headers[key] ?? "";
             }
             string path = ctx.Request.Url?.AbsolutePath ?? "";
-            lock (_gate) _seen.Add((path, headers));
+            string query = ctx.Request.Url?.Query ?? "";
+            lock (_gate) _seen.Add((path, query, headers));
 
             if (_routes.TryGetValue(path, out var handler))
             {
@@ -88,6 +92,12 @@ internal sealed class BridgeTestOrigin : IAsyncDisposable
         lock (_gate) return _seen.Any(e => e.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>Requests observed for a path, including the query string the upstream actually saw.</summary>
+    public IReadOnlyList<(string Path, string Query, Dictionary<string, string> Headers)> RequestsFor(string path)
+    {
+        lock (_gate) return _seen.Where(e => e.Path.Equals(path, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
     public void Clear() { lock (_gate) _seen.Clear(); }
 
     public ValueTask DisposeAsync()
@@ -96,7 +106,8 @@ internal sealed class BridgeTestOrigin : IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
-    internal static async Task ServeRangeAsync(HttpListenerContext ctx, byte[] data, string contentType = "video/mp4")
+    internal static async Task ServeRangeAsync(HttpListenerContext ctx, byte[] data, string contentType = "video/mp4",
+        bool advertiseRanges = true)
     {
         int start = 0, end = data.Length - 1;
         bool partial = false;
@@ -121,7 +132,7 @@ internal sealed class BridgeTestOrigin : IAsyncDisposable
         int count = end - start + 1;
         ctx.Response.StatusCode = partial ? 206 : 200;
         ctx.Response.ContentType = contentType;
-        ctx.Response.Headers["Accept-Ranges"] = "bytes";
+        if (advertiseRanges) ctx.Response.Headers["Accept-Ranges"] = "bytes";
         if (partial) ctx.Response.Headers["Content-Range"] = "bytes " + start + "-" + end + "/" + data.Length;
         ctx.Response.ContentLength64 = count;
         await ctx.Response.OutputStream.WriteAsync(data.AsMemory(start, count));

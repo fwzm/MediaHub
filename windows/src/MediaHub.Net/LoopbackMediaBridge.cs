@@ -61,12 +61,21 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
 
     /// <summary>Upstream connections the engine may hold open at once.</summary>
     private const int MaxConcurrentRequests = 4;
+    private const int MaxAdmittedRequests = 12;
+    private const int MaxRecordedDenials = 20;
 
     private readonly HttpListener _listener;
     private readonly BridgeTarget _target;
     private readonly MediaSourceHttpClientFactory _httpFactory;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly SemaphoreSlim _concurrency = new(MaxConcurrentRequests, MaxConcurrentRequests);
+
+    // Admission is deliberately separate from _concurrency. _concurrency bounds how many upstream
+    // fetches run at once; admission bounds how many request tasks exist at all. Without it the
+    // accept loop starts an unbounded number of tasks, so a local process that opens connections
+    // faster than they complete exhausts the thread pool and the socket table whether or not the
+    // upstream slots are full.
+    private readonly SemaphoreSlim _admission = new(MaxAdmittedRequests, MaxAdmittedRequests);
     private readonly List<string> _denied = new();
     private readonly object _gate = new();
 
@@ -74,15 +83,43 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
     private int _requestCount;
     private int _deniedCount;
 
-    private LoopbackMediaBridge(HttpListener listener, int port, string token, BridgeTarget target)
+    /// <summary>True only when every address the name resolves to is a loopback address.</summary>
+    private static bool ResolvesOnlyToLoopback(string host)
+    {
+        try
+        {
+            System.Net.IPAddress[] addresses = System.Net.Dns.GetHostAddresses(host);
+            if (addresses.Length == 0) return false;
+            foreach (System.Net.IPAddress address in addresses)
+            {
+                if (!System.Net.IPAddress.IsLoopback(address)) return false;
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private LoopbackMediaBridge(HttpListener listener, int port, string boundHost, string token, BridgeTarget target)
     {
         _listener = listener;
         Port = port;
         Token = token;
         _target = target;
         _httpFactory = new MediaSourceHttpClientFactory(target.Policy);
+
+        // The engine is always handed the literal loopback address, even when the listener was bound
+        // to the name, so the URL it holds can never depend on name resolution.
         BridgeUri = new Uri("http://127.0.0.1:" + port + "/" + token + "/stream");
+
+        var hosts = new List<string> { "127.0.0.1:" + port, "[::1]:" + port };
+        if (!boundHost.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)) hosts.Add(boundHost + ":" + port);
+        _acceptableHosts = hosts.ToArray();
     }
+
+    private readonly string[] _acceptableHosts;
 
     public int Port { get; }
 
@@ -111,8 +148,17 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
 
         HttpListener? listener = null;
         int boundPort = 0;
+        string boundHost = "";
         foreach (string host in new[] { "127.0.0.1", "localhost" })
         {
+            // A name is not an address. If the hosts file maps "localhost" somewhere else, binding to
+            // the name would publish this endpoint on a real interface, so the resolved addresses are
+            // checked and a non-loopback answer is refused rather than trusted.
+            if (!ResolvesOnlyToLoopback(host))
+            {
+                continue;
+            }
+
             for (int attempt = 0; attempt < 12; attempt++)
             {
                 int port = Random.Shared.Next(30000, 60000);
@@ -123,6 +169,7 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
                     candidate.Start();
                     listener = candidate;
                     boundPort = port;
+                    boundHost = host;
                     break;
                 }
                 catch (HttpListenerException)
@@ -136,7 +183,7 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
         if (listener is null)
             throw new InvalidOperationException("无法建立本地媒体转发端口（回环监听失败）");
 
-        var bridge = new LoopbackMediaBridge(listener, boundPort, token, target);
+        var bridge = new LoopbackMediaBridge(listener, boundPort, boundHost, token, target);
         _ = Task.Run(() => bridge.AcceptLoopAsync(bridge._shutdown.Token), CancellationToken.None);
         return Task.FromResult(bridge);
     }
@@ -155,7 +202,19 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
                 return; // listener stopped
             }
 
-            _ = Task.Run(() => HandleAsync(context, ct), CancellationToken.None);
+            if (!_admission.Wait(0))
+            {
+                // Rejected rather than queued. Waiting here would let a client that opens connections
+                // faster than they drain hold an unbounded number of sockets and tasks.
+                _ = Task.Run(() => FailAsync(context, 503, "bridge is busy"), CancellationToken.None);
+                continue;
+            }
+
+            _ = Task.Run(async () =>
+            {
+                try { await HandleAsync(context, ct).ConfigureAwait(false); }
+                finally { try { _admission.Release(); } catch (ObjectDisposedException) { } }
+            }, CancellationToken.None);
         }
     }
 
@@ -163,7 +222,7 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
     {
         try
         {
-            if (!await _concurrency.WaitAsync(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false))
+            if (!await _concurrency.WaitAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false))
             {
                 await FailAsync(context, 503, "bridge is busy").ConfigureAwait(false);
                 return;
@@ -175,7 +234,12 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
                 if (denial is not null)
                 {
                     Interlocked.Increment(ref _deniedCount);
-                    lock (_gate) _denied.Add(denial);
+                    // Capped: the counter stays exact, but the text list cannot grow without limit
+                    // when a local process decides to spam this port.
+                    lock (_gate)
+                    {
+                        if (_denied.Count < MaxRecordedDenials) _denied.Add(denial);
+                    }
                     await FailAsync(context, 403, denial).ConfigureAwait(false);
                     return;
                 }
@@ -207,7 +271,7 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
         lock (_gate)
         {
             if (_errors.Count >= 20) return;
-            _errors.Add(ex.GetType().Name + ": " + ex.Message);
+            _errors.Add(ex.GetType().Name + ": " + Redact(ex.Message));
         }
     }
 
@@ -232,21 +296,55 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
 
         // DNS rebinding: an attacker-controlled name resolving to 127.0.0.1 would still carry its own
         // Host header, so requiring the exact bound endpoint closes that path.
-        string expectedHost = "127.0.0.1:" + Port;
+        //
+        // The header must be PRESENT. An earlier version only validated a non-null Host, which meant
+        // an HTTP/1.0-style request with no Host header skipped the check entirely and defeated it.
         string? host = request.Headers["Host"];
-        if (host is not null && !host.Equals(expectedHost, StringComparison.OrdinalIgnoreCase) &&
-            !host.Equals("localhost:" + Port, StringComparison.OrdinalIgnoreCase))
-        {
-            return "refused: unexpected Host header (" + host + ")";
-        }
+        if (string.IsNullOrEmpty(host))
+            return "refused: missing Host header";
+        if (!IsExpectedHost(host))
+            return "refused: unexpected Host header (" + Redact(host) + ")";
 
-        // The token lives in the path, so a request that reached us without it is already suspect.
         string path = request.Url?.AbsolutePath ?? "";
-        if (!path.StartsWith("/" + Token + "/", StringComparison.Ordinal))
+        string[] segments = path.Split('/');
+        if (segments.Length < 3)
             return "refused: missing session token";
+
+        // Compared in constant time. A short-circuiting comparison leaks the token prefix through
+        // response timing, and this endpoint is reachable by any local process, so the number of
+        // samples an attacker needs is not as large as it would be over a network.
+        if (!FixedTimeEquals(segments[1], Token))
+            return "refused: invalid session token";
 
         return null;
     }
+
+    private bool IsExpectedHost(string host)
+    {
+        foreach (string candidate in _acceptableHosts)
+        {
+            if (host.Equals(candidate, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Constant-time equality over the ASCII bytes, safe for the fixed-length token.</summary>
+    private static bool FixedTimeEquals(string left, string right)
+    {
+        byte[] a = Encoding.ASCII.GetBytes(left);
+        byte[] b = Encoding.ASCII.GetBytes(right);
+        return a.Length == b.Length && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(a, b);
+    }
+
+    /// <summary>
+    /// Removes the session token from any text that is stored or surfaced.
+    /// </summary>
+    /// <remarks>
+    /// Diagnostics are the most likely place for a secret to escape: exception messages routinely
+    /// quote the URI that failed. Everything recorded by this class passes through here first.
+    /// </remarks>
+    private string Redact(string? text)
+        => string.IsNullOrEmpty(text) ? "" : text.Replace(Token, "<session-token>", StringComparison.OrdinalIgnoreCase);
 
     private async Task ProxyAsync(HttpListenerContext context, CancellationToken ct)
     {
@@ -307,7 +405,15 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
 
         if (upstream.Content.Headers.ContentRange is { } contentRange)
             response.AddHeader("Content-Range", contentRange.ToString());
-        response.AddHeader("Accept-Ranges", "bytes");
+
+        // Advertised only when the upstream demonstrably supports it. Announcing "bytes"
+        // unconditionally tells the engine it may seek, and a server that ignores Range answers such
+        // a request with a 200 and the whole body, so the seek would appear to succeed and then
+        // silently play from the wrong position.
+        bool upstreamSupportsRanges = upstream.Headers.AcceptRanges.Count > 0
+                                      || upstream.StatusCode == System.Net.HttpStatusCode.PartialContent
+                                      || upstream.Content.Headers.ContentRange is not null;
+        if (upstreamSupportsRanges) response.AddHeader("Accept-Ranges", "bytes");
         if (upstream.Headers.ETag is { } etag) response.AddHeader("ETag", etag.ToString());
         if (upstream.Content.Headers.LastModified is { } lastModified)
             response.AddHeader("Last-Modified", lastModified.ToString("R"));
@@ -352,6 +458,7 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
         try { _listener.Stop(); _listener.Close(); } catch { }
         _httpFactory.Dispose();
         _concurrency.Dispose();
+        _admission.Dispose();
         _shutdown.Dispose();
         return ValueTask.CompletedTask;
     }
