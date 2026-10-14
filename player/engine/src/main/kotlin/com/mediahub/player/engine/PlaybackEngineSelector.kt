@@ -2,6 +2,8 @@ package com.mediahub.player.engine
 
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlaybackSource
+import com.mediahub.player.compatibility.CapabilityEvidence
+import com.mediahub.player.compatibility.DevicePlaybackAssessment
 
 /**
  * 兼容性签名（U3-A）：container|videoCodec|audioCodec 小写归一。
@@ -58,6 +60,7 @@ object PlaybackEngineSelector {
         source: PlaybackSource,
         mode: PlaybackEngineMode,
         mpvPreferredSignatures: Set<String>,
+        device: DevicePlaybackAssessment = DevicePlaybackAssessment.UNKNOWN,
     ): EngineSelection {
         if (mode == PlaybackEngineMode.MEDIA3) {
             return EngineSelection(EngineKind.MEDIA3, "用户指定 Media3")
@@ -72,6 +75,16 @@ object PlaybackEngineSelector {
         if (signature.audioCodec in MPV_PREFERRED_AUDIO) {
             return EngineSelection(EngineKind.MPV, "音频 ${signature.audioCodec} 优先 mpv（软解）")
         }
+        // 4. 设备枚举明确不支持该音频编码 → mpv（FFmpeg 软解）。
+        //    UNKNOWN 不参与判定：没有证据时不得改变既有默认行为（ADR-042）。
+        if (device.audio.evidence == CapabilityEvidence.UNSUPPORTED) {
+            return EngineSelection(EngineKind.MPV, "设备音频能力不足：${device.audio.reason}")
+        }
+        // 5. 设备枚举明确不支持该视频编码 → mpv（FFmpeg 软解）。UNKNOWN 同样不参与判定。
+        if (device.video.evidence == CapabilityEvidence.UNSUPPORTED) {
+            return EngineSelection(EngineKind.MPV, "设备视频能力不足：${device.video.reason}")
+        }
+        // 6. 其余 → Media3。设备证据仅进入 trace/诊断，不在此处伪装成"支持"。
         return EngineSelection(EngineKind.MEDIA3, "AUTO 默认快速路径（${signature.key}）")
     }
 }

@@ -24,6 +24,16 @@
 - 决策：`PlaybackMode`（DIRECT_PLAY/DIRECT_STREAM/TRANSCODE/UNSUPPORTED）统一语义；
   `PlaybackCompatibilityEvaluator`（纯函数）输出决策与原因，禁止散落 `if codec == xx` 链。
 - 影响：评估器可单测（已覆盖 9 用例）；服务端转码只在必要时请求。
+- **修订记录（2026-10-14，M5-2 联合审查）**：本条**部分被 ADR-042 限定**，边界如下：
+  - **已闭环（客户端路由）**：设备能力证据（ADR-042 `DevicePlaybackAssessment`）已进入生产选路链路 ——
+    `PlayerViewModel` → `SwitchablePlaybackEngine.deviceAssessmentProvider` →
+    `PlaybackEngineSelector.select(device=…)` → Media3/mpv 选择，并写入 PlaybackStartupTrace。
+  - **未接入（服务端协商）**：`PlaybackCompatibilityEvaluator` 仍**只在单元测试中被调用**（全仓核实）。
+    原因是本项目的无转码红线（Emby `EnableTranscoding=false`）使 TRANSCODE 结论无法转成服务端请求；
+    硬接会制造"评估说转码、实际直连"的假象。因此二者按 **ADR-042 的职责分离**执行：
+    evaluator = 服务端协商结论（UI/诊断与未来服务端能力协商），ADR-042 评估 = 可执行的客户端路由证据。
+  - **结论**：ADR-004 **部分闭环**；其"禁止散落 if codec == xx 链"的意图由 ADR-042 继承，
+    服务端协商语义保留待有转码能力时再启用。
 
 ## ADR-005 Provider 注册采用 Hilt @IntoSet（非 @IntoMap）
 - 状态：已采纳（2026-08-12），**修订记录见下**
@@ -623,3 +633,79 @@
 - 导入身份与冻结线路列表必须使用持久化排序，再按现有 enabled/primary 规则选择有效地址。同优先级的有效候选若指向不同规范化地址，导入及导出均拒绝；唯一有效主线路或同一规范化地址不因排序并列而拒绝。
 - 预览及未完成保护计划必须验证身份在持久化排序下稳定。旧计划若不稳定或存在歧义，保留现场、阻止自动续作/回滚和新恢复，不静默重算已确认决策。COMPLETED 仍只清理日志，不因此倒退恢复。
 - 本更正不改变同源替换保留登录的既有语义，不新增全局登出、线路管理策略或日志人工清理入口。状态仍为 C REVIEW PENDING，尚未合并。
+
+## ADR-042 设备能力证据驱动引擎选路（ADR-004 闭环）
+- 状态：已采纳（2026-10-14）
+- 背景：ADR-004 的 PlaybackCompatibilityEvaluator 此前只被单元测试调用；实际选路
+  （PlaybackEngineSelector）只用 container/videoCodec/audioCodec 签名与历史失败指纹，
+  设备能力完全未参与。且 DeviceCapabilities 体系里"设备不支持"与"我们不知道"都表现为
+  null/集合缺席，无法区分，容易被显示成"支持"。
+- 决策：
+  1. 新增 `CapabilityEvidence`（SUPPORTED / UNSUPPORTED / UNKNOWN）与
+     `DevicePlaybackAssessment`（video/audio/hdr/dolbyVision 四轴），由
+     `DevicePlaybackAssessor` 用「设备能力快照 + 本次播放源」合成证据；
+  2. 选路优先级：用户显式模式 > 历史失败指纹 > 音频编码 mpv 优先集合 >
+     设备**明确不支持**音频/视频（→ mpv / FFmpeg 软解）> 默认 Media3；
+  3. UNKNOWN 永不参与判定：既不当"支持"也不当"不支持"，不改变既有默认行为；
+  4. 采集器覆盖不到的编码（例如 TrueHD/MLP 没有 MIME 映射）一律 UNKNOWN，
+     绝不因为"集合里没有"就断言设备不支持；
+  5. 职责分离：evaluator = 服务端协商结论（DIRECT_PLAY/DIRECT_STREAM/TRANSCODE/UNSUPPORTED），
+     本评估 = 可执行的客户端路由证据。路由不得因 evaluator 给出 TRANSCODE 就改引擎；
+     兼容性展示也不得把 UNKNOWN 画成"支持"；
+  6. 评估必须同步、无 I/O（只读缓存快照），异常一律退化为 UNKNOWN 且不得阻断播放；
+     首次 MediaCodecList 枚举在 app 层后台预热，不进起播同步路径；
+  7. 别名归一化使用"最长别名匹配"，避免 `dts-hd` 被 `dts` 抢先命中而误判设备只支持 DTS。
+- 影响：起播同步路径新增一次纯内存计算（微秒级），无网络/磁盘访问；HDR 与 Dolby Vision
+  **暂不参与路由**——在 mpv tone-mapping / DV Profile 7→8.1 能力取证之前，只记录证据，
+  不得声称支持（能力取证属 ADR-043 范围）。降级链路（Media3 失败→mpv）与既有
+  fellBackThisSession 单次降级语义保持不变，不引入双重选路或递归重试。
+## ADR-043 云盘与 STRM 接入契约（设计冻结；实现 NOT_STARTED）
+- 状态：已采纳（设计）（2026-10-14）；实现：**NOT_STARTED**
+- 决策：云盘类数据源（阿里云盘 / 百度网盘 / 夸克 / 中国移动云盘 / 天翼云盘）与 `.strm` 引用文件的接入，
+  必须先满足以下 11 条契约，细则与证据见 [云盘与 STRM 接入契约](docs/providers/cloud-strm-contract.md)
+  （含接口建议、14 条威胁模型、30 行测试矩阵、15 条待验证项）：
+  ① 目录/文件名优先的元数据获取；② 刮削阶段**禁止读取媒体文件头**；③ STRM 地址解析与资源身份；
+  ④ HTTP 302/307 重定向策略；⑤ 签名 URL 有效期三态（KNOWN/UNKNOWN/NONE）；⑥ 403/410 重新解析与熔断；
+  ⑦ 断点续播与 Range 边界；⑧ 缓存作用域、失效与清理；⑨ UA 穿透与凭据剥离的区分（**不得绕过 ADR-030**）；
+  ⑩ 取消传播、并发上限、超时与重试预算（403/429 语义熔断，禁止重试风暴）；⑪ 未验证直链**禁止落库**。
+- 影响：
+  - 后续任何云盘 Provider 的实现与 PR，须以本契约为前置门禁；契约本身不改动现有生产代码。
+  - 新增门禁：涉及云盘的测试必须包含"刮削零字节读取"与"直链不落库"两类断言。
+- 登记缺口（本次**只登记不修**，避免与 M1/M2 变更交叉）：
+  - `PlaybackSource.isExpired()` 已存在但生产零调用；
+  - `PlaybackErrorMapper` 未建模 410（落 UNKNOWN）；
+  - `ProviderException.RateLimited.retryAfterMs` 恒为 null（Retry-After 未解析）；
+  - `MediaHttpClient.probe` 回传 `finalUrl` 但零校验（SSRF 面）；
+  - `RetryOnceInterceptor` 只捕获 IOException，而 `Call.cancel()` 表现为 IOException("canceled")，
+    "取消后仍 sleep 300ms 重发"为**疑似**既有缺陷，需单测取证（未实测，不得当成已确认结论）。
+## ADR-044 播放参数配置层（HDR 色调映射 / 音频下混 / AFR）
+- 状态：已采纳（2026-10-14）；实现：**PARTIAL**（配置层已实现并测试；真机验证 NOT_RUN）
+- 证据方法（可复现）：对打包产物 `dev.jdtech.mpv:libmpv:1.0.0` 的 AAR 内
+  `jni/arm64-v8a/libmpv.so` 做字符串表探测。**方法自检**：生产已在使用的 `hwdec` 命中 65。
+  命中：`tone-mapping` 13、`hdr-compute-peak` 2、`libplacebo` 12、`gpu-api` 1、
+  `target-peak` 1、`gamut-mapping-mode` 3、`audio-normalize-downmix` 1、`volume-max` 1、`sub-ass` 23。
+  **未命中**：`audio-downmix` 0；`libavfilter.so` 中 `loudnorm`/`dynaudnorm`/`acompressor` 均为 0。
+- 决策：
+  1. 建立纯函数配置层 `MpvTuningOptions` + 契约测试：**只允许下发 `EVIDENCED_OPTIONS` 中的选项**，
+     `ABSENT_OPTIONS`（audio-downmix）与 `UNCOMPILED_FILTERS`（loudnorm 等）由测试禁止出现；
+  2. HDR 片源 **且** 设备明确不支持该 HDR 格式 → 下发 `tone-mapping=bt.2390` + `hdr-compute-peak=yes`；
+     设备能力**未知（null）或明确支持** → 不下发任何色调映射选项，保持既有直通行为；
+  3. 下混归一化（`audio-normalize-downmix`）默认关闭、机制先行，等设置页偏好接入再开启；
+  4. **不实现**（证据不足，登记为阻塞）：EBU R128 响度归一化（loudnorm 未编入 = BLOCKED_EVIDENCE）、
+     中置声道 +3~4.5dB（`audio-downmix` 在该版本不存在）、Dolby Vision Profile 7→8.1 转换（无证据）；
+  5. AFR：交付纯逻辑 `FrameRateMatcher`（源帧率 × 可用刷新率 × API 级别 → 判定表）+ 单测；
+     **Surface 侧接线未实现（NOT_STARTED）**，原因见下。
+- AFR 现状与阻塞（基于真实代码）：
+  - 唯一的 Surface 接缝是 `feature/player/.../PlayerScreen.kt:367-376`：`SurfaceView` +
+    `SurfaceHolder.Callback` → `engine.attachSurface(holder.surface)` / `attachSurface(null)`；
+    全仓**无** `setFrameRate` / `preferredDisplayModeId` 调用。
+  - `Surface.setFrameRate` 需要 **API 30+**（minSdk 26 → 必须运行时判级）；
+    `preferredDisplayModeId` 需要 Activity/Window 与可枚举 Display.Mode，多窗口行为不一致，本项目不采用。
+  - 帧率来源分引擎：Media3 经 `Format.frameRate`（track 信息），mpv 需新增属性观测
+    （当前只观测 time-pos/duration/pause/speed/media-title）；两侧都尚未提供该数据。
+  - 因此 AFR 的完整接线 = "帧率来源 + Surface 重建后的重放 + 失败静默"三件事，本轮只完成判定逻辑；
+    在真机上无法验证前不接线，避免引入"切换失败导致黑屏/卡顿"的风险。
+- 影响：HDR 片源在**明确不支持该 HDR 格式**的设备上，mpv 默认行为由"原样输出（发灰/偏色）"变为
+  色调映射输出；此变化依据设备能力证据 + 二进制选项存在性，**真机渲染结果 NOT_RUN**。
+  Media3 路径未做任何参数变更。
+
