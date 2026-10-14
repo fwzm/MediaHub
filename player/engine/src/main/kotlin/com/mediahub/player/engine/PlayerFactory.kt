@@ -24,9 +24,22 @@ import okhttp3.OkHttpClient
 class PlayerFactory(
     private val context: Context,
     private val mediaCacheProvider: MediaCacheProvider,
+    /** M0-A（ADR-045）：与 API / 图片共用同一 UA 策略。 */
+    private val userAgentPolicy: com.mediahub.core.network.UserAgentPolicy =
+        com.mediahub.core.network.UserAgentPolicy(),
+    private val serverIdFor: com.mediahub.core.network.ServerIdResolver =
+        com.mediahub.core.network.ServerIdResolver { null },
 ) {
 
-    fun create(headersHolder: PlaybackHeadersHolder, speedMonitor: PlaybackSpeedMonitor): ExoPlayer {
+    /**
+     * @param userAgent M0-A（ADR-045）：本次播放会话应使用的 UA（由上层按服务器作用域解析）。
+     *   默认值保持与历史一致，避免未经配置的调用方行为跳变。
+     */
+    fun create(
+        headersHolder: PlaybackHeadersHolder,
+        speedMonitor: PlaybackSpeedMonitor,
+        userAgent: String = USER_AGENT,
+    ): ExoPlayer {
         val renderersFactory = DefaultRenderersFactory(context)
             .setEnableDecoderFallback(true)
 
@@ -40,6 +53,10 @@ class PlayerFactory(
         // Emby 长期凭据只发给原始 origin，跨 origin 跳一律剥离。
         val okHttpClient = OkHttpClient.Builder()
             .addNetworkInterceptor(OriginScopedCredentialInterceptor())
+            // M0-A（ADR-045）：媒体流每一跳统一 UA；只写 UA，凭据剥离仍由上一行负责。
+            .addNetworkInterceptor(
+                com.mediahub.core.network.UserAgentInterceptor(userAgentPolicy, serverIdFor),
+            )
             .eventListenerFactory(StartupNetworkEventListener.FACTORY)
             .connectionPool(
                 okhttp3.ConnectionPool(5, 5, java.util.concurrent.TimeUnit.MINUTES)
@@ -47,7 +64,7 @@ class PlayerFactory(
             .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
             .build()
         val httpDataSourceFactory: DataSource.Factory = OkHttpDataSource.Factory(okHttpClient)
-            .setUserAgent(USER_AGENT)
+            .setUserAgent(userAgent)
             .setTransferListener(speedMonitor)
         val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
 

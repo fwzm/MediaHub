@@ -26,6 +26,14 @@ class MediaHubApp : Application(), ImageLoaderFactory {
     @Inject
     lateinit var imageAuthStore: ProviderImageAuthStore
 
+    /** M0-A（ADR-045）：全局唯一的 UA 策略（服务器作用域）。 */
+    @Inject
+    lateinit var userAgentPolicy: com.mediahub.core.network.UserAgentPolicy
+
+    /** M0-A：URL -> serverId 解析（复用图片鉴权作用域，fail closed）。 */
+    @Inject
+    lateinit var serverIdFor: com.mediahub.core.network.ServerIdResolver
+
     override fun newImageLoader(): ImageLoader =
         ImageLoader.Builder(this)
             .callFactory(imageHttpClient())
@@ -46,6 +54,10 @@ class MediaHubApp : Application(), ImageLoaderFactory {
             .callTimeout(30, TimeUnit.SECONDS)
             .addInterceptor(ProviderImageAuthInterceptor(imageAuthStore::headersForUrl))
             .addNetworkInterceptor(OriginScopedCredentialInterceptor())
+            // M0-A（ADR-045）：图片请求与 API / 媒体流使用同一 UA 策略。
+            .addNetworkInterceptor(
+                com.mediahub.core.network.UserAgentInterceptor(userAgentPolicy, serverIdFor),
+            )
             .build()
 
     private companion object {
