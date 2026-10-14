@@ -36,9 +36,6 @@ public sealed partial class MainWindow : Window
 
     public IntPtr WindowHandle => WindowNative.GetWindowHandle(this);
 
-    /// <summary>Used by pages to reach the shell for navigation and for entering the player layer.</summary>
-    public static MainWindow? Current => App.MainWindow;
-
     private async Task RestoreSourcesAsync()
     {
         try

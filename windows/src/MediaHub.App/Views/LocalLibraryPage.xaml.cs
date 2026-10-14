@@ -117,7 +117,7 @@ public sealed partial class LocalLibraryPage : Page
             DeclaredDuration = entry is { DurationTicks: > 0 } ? TimeSpan.FromTicks(entry.DurationTicks) : null,
             ExternalSubtitles = LocalLibraryService.FindSiblingSubtitles(path),
         };
-        MainWindow.Current?.EnterPlayer(request);
+        App.MainWindow?.EnterPlayer(request);
     }
 
     private sealed record FolderRow(string Path, bool Exists)

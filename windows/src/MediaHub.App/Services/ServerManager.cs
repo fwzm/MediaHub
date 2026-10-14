@@ -251,7 +251,11 @@ public sealed class ServerManager : IDisposable
 
     public void RefreshLocal()
     {
-        lock (_gate) _servers.Remove(_servers.FirstOrDefault(s => s.ServerId == "local"));
+        lock (_gate)
+        {
+            ServerEntry? existing = _servers.FirstOrDefault(s => s.ServerId == "local");
+            if (existing is not null) _servers.Remove(existing);
+        }
         var folders = _settings.Current.LocalFolders;
         var endpoints = folders.Select((f, i) => new ServerEndpoint(f, true, "文件夹 " + (i + 1))).ToList();
         var server = new MediaServer("local", ServerType.Local, "本地存储", endpoints);
@@ -469,7 +473,14 @@ public sealed class ServerManager : IDisposable
     {
         lock (_gate)
         {
-            _servers.Remove(_servers.FirstOrDefault(s => s.ServerId == entry.ServerId));
+            ServerEntry? duplicate = _servers.FirstOrDefault(s => s.ServerId == entry.ServerId);
+            if (duplicate is not null)
+            {
+                // The displaced handle owns an HTTP client factory; dropping it without disposing
+                // would leak the connection pool for a source the user has just replaced.
+                _servers.Remove(duplicate);
+                duplicate.Handle?.Dispose();
+            }
             _servers.Add(entry);
         }
         Changed?.Invoke(this, EventArgs.Empty);

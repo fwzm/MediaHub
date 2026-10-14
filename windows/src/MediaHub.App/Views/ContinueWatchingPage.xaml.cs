@@ -95,7 +95,7 @@ public sealed partial class ContinueWatchingPage : Page
     private void OnItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not ContinueRow row) return;
-        MainWindow.Current?.EnterPlayer(new PlaybackRequest
+        App.MainWindow?.EnterPlayer(new PlaybackRequest
         {
             ServerId = row.ServerId,
             ItemId = row.ItemId,

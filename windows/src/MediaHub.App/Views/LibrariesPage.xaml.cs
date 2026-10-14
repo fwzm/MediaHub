@@ -96,7 +96,7 @@ public sealed partial class LibrariesPage : Page
     private void OnLibraryClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not LibraryCard card) return;
-        MainWindow.Current?.NavigateShell(typeof(LibraryPage),
+        App.MainWindow?.NavigateShell(typeof(LibraryPage),
             new Services.LibraryNavigation(card.ServerId, card.LibraryId, card.Name));
     }
 }

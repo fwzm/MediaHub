@@ -94,7 +94,7 @@ public sealed partial class SearchPage : Page
     private void OnResultClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not SearchResultRow row) return;
-        MainWindow.Current?.NavigateShell(typeof(DetailPage),
+        App.MainWindow?.NavigateShell(typeof(DetailPage),
             new DetailNavigation(row.ServerId, row.ItemId, row.Title));
     }
 }

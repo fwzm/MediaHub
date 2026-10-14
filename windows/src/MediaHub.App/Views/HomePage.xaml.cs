@@ -45,7 +45,7 @@ public sealed partial class HomePage : Page
         if (!System.IO.File.Exists(item.Path)) return;
 
         PlaybackHistoryEntry? entry = App.Services.PlaybackHistory.Find(item.Path);
-        MainWindow.Current?.EnterPlayer(new PlaybackRequest
+        App.MainWindow?.EnterPlayer(new PlaybackRequest
         {
             LocalPath = item.Path,
             Title = item.Title,
@@ -57,16 +57,16 @@ public sealed partial class HomePage : Page
     }
 
     private void OnLibrariesClick(object sender, RoutedEventArgs e)
-        => MainWindow.Current?.NavigateShell(typeof(LibrariesPage));
+        => App.MainWindow?.NavigateShell(typeof(LibrariesPage));
 
     private void OnSearchClick(object sender, RoutedEventArgs e)
-        => MainWindow.Current?.NavigateShell(typeof(SearchPage));
+        => App.MainWindow?.NavigateShell(typeof(SearchPage));
 
     private void OnSourcesClick(object sender, RoutedEventArgs e)
-        => MainWindow.Current?.NavigateShell(typeof(SourcesPage));
+        => App.MainWindow?.NavigateShell(typeof(SourcesPage));
 
     private void OnLocalClick(object sender, RoutedEventArgs e)
-        => MainWindow.Current?.NavigateShell(typeof(LocalLibraryPage));
+        => App.MainWindow?.NavigateShell(typeof(LocalLibraryPage));
 
     private sealed record ContinueItem(
         string Title, string Path, double ProgressFraction, string PositionDisplay, string DurationDisplay);

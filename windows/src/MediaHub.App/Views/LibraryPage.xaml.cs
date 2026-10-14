@@ -123,12 +123,12 @@ public sealed partial class LibraryPage : Page
     }
 
     private void OnBackClick(object sender, RoutedEventArgs e)
-        => MainWindow.Current?.NavigateShell(typeof(LibrariesPage));
+        => App.MainWindow?.NavigateShell(typeof(LibrariesPage));
 
     private void OnItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not MediaCardViewModel card) return;
-        MainWindow.Current?.NavigateShell(typeof(DetailPage),
+        App.MainWindow?.NavigateShell(typeof(DetailPage),
             new DetailNavigation(card.Source.ServerId, card.Item.Id, card.Item.Name));
     }
 }

@@ -197,7 +197,7 @@ public sealed partial class DetailPage : Page
 
     private void PlayItem(string itemId, string title, long startTicks = 0)
     {
-        MainWindow.Current?.EnterPlayer(new PlaybackRequest
+        App.MainWindow?.EnterPlayer(new PlaybackRequest
         {
             ServerId = _handle!.ServerId,
             ItemId = itemId,
@@ -207,7 +207,7 @@ public sealed partial class DetailPage : Page
     }
 
     private void OnBackClick(object sender, RoutedEventArgs e)
-        => MainWindow.Current?.NavigateShell(typeof(LibrariesPage));
+        => App.MainWindow?.NavigateShell(typeof(LibrariesPage));
 
     private void Fail(string title, string message)
     {
