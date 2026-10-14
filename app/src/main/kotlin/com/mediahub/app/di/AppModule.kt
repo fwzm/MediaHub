@@ -109,15 +109,21 @@ object AppModule {
     ): SessionStoreCleaner = com.mediahub.provider.api.CompositeSessionStoreCleaner(cleaners)
 
     /**
-     * M0-A（ADR-045）：URL -> serverId 解析复用图片鉴权作用域（ProviderImageAuthStore），
-     * 保证 UA 归属与凭据归属是**同一套**最长前缀 + fail-closed 规则。
+     * M0-A（ADR-045）+ M0-A3 真机缺陷修复：URL -> serverId 解析。
+     *
+     * 先用**覆盖所有服务器类型**的 [ServerUrlIndex]（WebDAV / LOCAL 没有图片鉴权作用域，
+     * 旧实现会解析不到 serverId → 自定义 UA 不生效，真机实测复现）；
+     * 再回落到图片鉴权作用域，保持与凭据归属一致的最长前缀 + fail-closed 语义。
      */
     @Provides
     @Singleton
     fun provideServerIdResolver(
+        urlIndex: com.mediahub.app.net.ServerUrlIndex,
         store: com.mediahub.app.image.ProviderImageAuthStore,
     ): com.mediahub.core.network.ServerIdResolver =
-        com.mediahub.core.network.ServerIdResolver { url -> store.serverIdForUrl(url) }
+        com.mediahub.core.network.ServerIdResolver { url ->
+            urlIndex.serverIdFor(url) ?: store.serverIdForUrl(url)
+        }
 
     /** M0-A 闭环：接口 → DataStore 实现的绑定（实现类自身可注入，此处按接口暴露）。 */
     @Provides
