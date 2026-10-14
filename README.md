@@ -2,10 +2,26 @@
 
 > 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
 
-当前状态：**Phase 1B-2.5a**（ServerEndpoint 多线路地基 + Player Startup & Immersive UX：TTFF 单调时钟、临时时长回退、快照直传、自动横屏、沉浸式系统栏已实现并过真机；Overlay 两层 UI 与 Server Editor 进行中）。
+当前状态：**A4 联合候选已并入 main**（2026-10-14，PR #24）：P1 播放专业信息面板、P2 字幕中心（同目录发现 / 导入 / 双内核加载 / mpv 偏移）、WebDAV 修复链路与私有恢复一致性已落地；本地门禁 1275 单测 / 0 失败 / 0 跳过，CI run `38491200869` 三个 job 全 SUCCESS。进行中的分支工作：M0-A 服务器请求治理（UA 作用域与重定向边界，ADR-045）、M1 设备能力证据驱动选路（ADR-042）、M9 mpv 本地回环桥。真机 / 真实服务器端到端验收为 NOT_RUN（`DEVICE UNVERIFIED`）。
 
 [![GitHub release](https://img.shields.io/github/v/release/fwzm/MediaHub?include_prereleases)](https://github.com/fwzm/MediaHub/releases)
 [![License](https://img.shields.io/github/license/fwzm/MediaHub)](LICENSE)
+
+<!-- MEDIAHUB:RECENT:START -->
+## 最近更新
+
+<sub>本区块由 scripts/github-nightly-sync.ps1 自动维护：每次同步时刷新近 7 天提交（最多 10 条）。</sub>
+
+- 2026-10-14 feat(network): M0-A 闭环 — 加载/删除/并发边界 + 自定义 UA 设置界面（ADR-045）
+- 2026-10-14 feat(network): 按服务器自定义 UA 持久化与身份代际清理（M0-A 闭环，ADR-045）
+- 2026-10-14 docs(adr): ADR-045 服务器请求治理阶段一（UA 作用域与重定向边界）
+- 2026-10-14 feat(network): 统一 UA 策略与逐跳 UA 注入（M0-A，ADR-045）
+- 2026-10-14 Merge pull request #27 from fwzm/docs/a4-convergence-closeout-2026-10-14
+- 2026-10-14 docs: A4 收敛闭环记录 — 合并证据、门禁计数与遗留项（2026-10-14）
+- 2026-10-14 Merge pull request #24 from fwzm/a/joint-candidate-a4
+- 2026-10-14 merge: integrate Agent B A4 convergence candidate 22e424d (33 commits)
+- 2026-10-14 Merge pull request #26 from fwzm/codex/pr18-review-docs-20260930
+<!-- MEDIAHUB:RECENT:END -->
 
 ## 下载测试版
 

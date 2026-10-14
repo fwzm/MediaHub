@@ -86,6 +86,9 @@ class UserAgentPolicy(
     private val defaultUserAgent: String = MediaHubUserAgent.DEFAULT,
 ) {
 
+    /** 未配置自定义 UA 时实际发送的值（供设置界面展示"默认/当前生效"）。 */
+    val default: String get() = defaultUserAgent
+
     /** 解析某个服务器应使用的 UA。serverId 为空/未知/配置非法 → 默认 UA。 */
     fun forServer(serverId: String?): String {
         val id = serverId?.trim().orEmpty()
