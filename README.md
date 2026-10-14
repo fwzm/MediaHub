@@ -157,14 +157,14 @@ CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：
 
 <!-- WINDOWS-SYNC:START -->
 <!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
-- f6356e2 2026-10-14 test(windows): Gate A 濯掍綋璺緞瀹炴祴閫氳繃 鈥斺€?WebDAV GET/Range 涓?libmpv 鐪熷疄鎾斁
-- 9739cff 2026-10-14 fix(windows): 璁╂潵婧愬崱鐗囧彲琚簿纭鍧€锛屽苟璇佹槑 WebDAV 鐩綍璺緞鐪熸鎵撻€氾紙W5.1 Gate A锛?c9cb20d 2026-10-14 feat(windows): 缁?Browse-only 鏉ユ簮涓€涓湡姝ｇ殑鐢ㄦ埛鍏ュ彛锛圥0-A锛?3bcd896 2026-10-14 fix(windows): 璁?Space 鐪熺殑鑳芥殏鍋滄挱鏀撅紝骞跺仠姝㈡妸 29 MB 楠屾敹璇佹嵁鎻愪氦杩涗粨搴?c3d957b 2026-10-14 feat(windows): LGPL engine built, Emby deployed, and the Emby regression that exposed
+- f6356e2 2026-10-14 test(windows): Gate A 媒体路径实测通过 —— WebDAV GET/Range 与 libmpv 真实播放
+- 9739cff 2026-10-14 fix(windows): 让来源卡片可被精确寻址，并证明 WebDAV 目录路径真正打通（W5.1 Gate A）
+- c9cb20d 2026-10-14 feat(windows): 给 Browse-only 来源一个真正的用户入口（P0-A）
+- 3bcd896 2026-10-14 fix(windows): 让 Space 真的能暂停播放，并停止把 29 MB 验收证据提交进仓库
+- c3d957b 2026-10-14 feat(windows): LGPL engine built, Emby deployed, and the Emby regression that exposed
 - d6d9720 2026-10-14 fix(windows): make a password-only source survive a restart, and recoverable when it does not
 - 3a1743e 2026-10-14 fix(windows): make "add a media source" probe the protocol the user actually picked
 - d0512e5 2026-10-14 feat(windows): make UI elements addressable, and characterise the resume defect it exposed
-- a568b99 2026-10-14 fix(windows): make the client work against a real Jellyfin 12.2, found only by running one
-- acb8583 2026-10-14 feat(windows): WebDAV provider integration and a real Jellyfin 12.2 test server harness
-- a492224 2026-10-14 docs(windows): correct the engine licence to GPL-3.0-or-later and record the supply-chain state
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
