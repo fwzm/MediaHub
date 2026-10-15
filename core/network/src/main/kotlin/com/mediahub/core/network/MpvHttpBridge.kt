@@ -18,10 +18,30 @@ import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
+/**
+ * 打开本地媒体文件的**可注入**入口（M14-S4-A 测试缝）。
+ *
+ * 生产默认就是 `RandomAccessFile(file, "r")`；测试可注入一个**计数/受控**实现，
+ * 从而在不使用 sleep、不依赖调度的情况下精确断言"每个打开的句柄恰好被关闭一次"、
+ * "会话停止后句柄已关闭"等生命周期契约。
+ */
+internal fun interface FileOpener {
+    fun open(file: File): RandomAccessFile
+}
+
 /** Session-owned loopback media proxy; credentials remain on the origin-scoped OkHttp stack. */
 class MpvHttpBridge internal constructor(
     private val client: OkHttpClient,
     private val headerTimeoutMs: Int = HEADER_TIMEOUT_MS,
+    private val openBody: FileOpener = FileOpener { RandomAccessFile(it, "r") },
+    /**
+     * 单调时钟（M14-S4-C 可测性缝）。
+     *
+     * 生产默认就是 [System.nanoTime]，**行为完全不变**；注入可控时钟后，
+     * "聚合 header 截止时间"的测试可以精确断言契约（越过截止点即不再接收任何字节），
+     * 而不再依赖墙钟预算（原先的 `< 800ms` 断言在慢 runner 上本身就是抖动来源）。
+     */
+    private val nanoTime: () -> Long = System::nanoTime,
 ) {
     init { require(headerTimeoutMs > 0) }
 
@@ -47,6 +67,23 @@ class MpvHttpBridge internal constructor(
         var running = true // guarded by this Session's monitor
         val sockets: MutableSet<Socket> = ConcurrentHashMap.newKeySet()
         val calls: MutableSet<Call> = ConcurrentHashMap.newKeySet()
+
+        /**
+         * **会话级**本地文件句柄（M14-S4-B）。
+         *
+         * 为什么必须提升到会话级：
+         * - 旧实现**每次请求**都 `resolveLocalFile` + `RandomAccessFile(file)` 打开，
+         *   于是 `file.length()`（声明 Content-Length 的依据）与真正流式读取的句柄
+         *   来自**两次不同的打开** —— 两者之间发生 truncate 就会给出"声明的长度大于实际字节"
+         *   的错误响应（无需攻击者即可触发的正确性缺陷）；
+         * - 旧实现的句柄是**请求局部**的，不在 [stop] 的清理集合里，因此 `stop()` 返回后
+         *   仍可能有一个句柄存活一段有界时间。
+         * 提升到会话级后：长度取自**同一个**句柄（`handle.length()`），且句柄由 [stop]
+         * 在会话监视器内关闭，两个问题一并消除。
+         *
+         * 由本 Session 的监视器保护（与 [running] 同一把锁）。
+         */
+        var handle: RandomAccessFile? = null
     }
     private var current: Session? = null
 
@@ -84,7 +121,13 @@ class MpvHttpBridge internal constructor(
     fun stop() {
         val session = current ?: return
         current = null
-        synchronized(session) { session.running = false }
+        synchronized(session) {
+            session.running = false
+            // 会话级句柄必须在监视器内关闭：与"读取循环检查 running"用同一把锁，
+            // 因此 stop() 返回时句柄**一定**已关闭，不再依赖 socket 关闭的间接副作用。
+            session.handle?.let { runCatching { it.close() } }
+            session.handle = null
+        }
         runCatching { session.listener.close() }
         // All registrations check running under the same monitor; after invalidation no
         // accepted socket or newly created Call can escape this cleanup snapshot.
@@ -116,7 +159,7 @@ class MpvHttpBridge internal constructor(
         try {
             val conn = socket
             run {
-                val headerDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(headerTimeoutMs.toLong())
+                val headerDeadline = nanoTime() + TimeUnit.MILLISECONDS.toNanos(headerTimeoutMs.toLong())
                 val input = conn.getInputStream()
                 val output = conn.getOutputStream()
                 var remaining = MAX_HEADER_BYTES
@@ -218,12 +261,28 @@ class MpvHttpBridge internal constructor(
         forwarded: Map<String, String>,
         output: OutputStream,
     ) {
+        // 每次请求仍做**廉价的路径校验**（保持既有 404 语义：文件被删除后必须 404）。
         val file = resolveLocalFile(path)
         if (file == null) {
             writeHead(output, "404 Not Found", 0L)
             return
         }
-        val length = file.length()
+        // 会话级句柄：长度与字节流必须来自**同一次打开**（消除 check-then-open 的 W2：
+        // 声明长度与实际字节不一致）。句柄在会话监视器内获取/创建，stop() 在同一把锁内关闭。
+        val handle = synchronized(session) {
+            if (!session.running) return
+            session.handle ?: runCatching { openBody.open(file) }.getOrNull()?.also { session.handle = it }
+        }
+        if (handle == null) {
+            writeHead(output, "404 Not Found", 0L)
+            return
+        }
+        // 长度取自句柄本身，而不是另一次 file.length() 调用。
+        val length = runCatching { handle.length() }.getOrDefault(-1L)
+        if (length < 0L) {
+            writeHead(output, "404 Not Found", 0L)
+            return
+        }
         val requested = if (forwarded.containsKey("if-range")) null else forwarded["range"]
         val parsed = parseRange(requested, length)
         if (parsed is RangeResult.Unsatisfiable) {
@@ -252,17 +311,28 @@ class MpvHttpBridge internal constructor(
             output.flush()
             return
         }
-        RandomAccessFile(file, "r").use { handle ->
-            handle.seek(start)
-            val buffer = ByteArray(LOCAL_COPY_BUFFER_BYTES)
-            var remaining = contentLength
-            while (remaining > 0 && synchronized(session) { session.running }) {
-                val read = handle.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
-                if (read <= 0) break
-                output.write(buffer, 0, read)
-                remaining -= read
+        // 句柄是**会话级共享**的，因此 seek+read 必须在句柄上互斥（否则并发请求会互相
+        // 破坏文件位置）。句柄**不在此处关闭** —— 它的生命周期属于会话，由 stop() 关闭。
+        val buffer = ByteArray(LOCAL_COPY_BUFFER_BYTES)
+        var remaining = contentLength
+        try {
+            synchronized(handle) {
+                handle.seek(start)
+                while (remaining > 0 && synchronized(session) { session.running }) {
+                    val read = handle.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                    if (read <= 0) break
+                    output.write(buffer, 0, read)
+                    remaining -= read
+                }
             }
             output.flush()
+        } catch (_: java.io.IOException) {
+            // stop() 在会话监视器内关闭了句柄（或被客户端断开）：传输按设计中止。
+            // 句柄归属会话，不得在此关闭。
+            runCatching { output.flush() }
+        } catch (_: IllegalArgumentException) {
+            // 句柄已关闭：`seek` 会抛 IllegalArgumentException（closed RandomAccessFile）。
+            runCatching { output.flush() }
         }
     }
 
@@ -276,17 +346,25 @@ class MpvHttpBridge internal constructor(
     /**
      * 规范化并校验本地路径：接受绝对路径与 file:// URI；
      * canonicalFile 消解 `..` 与符号链接后才能通过 isFile/canRead 校验。
+     *
+     * file:// 必须经 [File] 的 URI 构造器解析，**不能**用 `URI.path`：
+     * 后者返回**未做百分号解码**的字符串，且在 Windows 上把 `file:///C:/x` 解析成
+     * `/C:/x`（非法路径）—— 结果使所有 file:// 授权（[MpvPlaybackEngine] 传入的
+     * file:// 媒体源、以及 ServerIconStore 风格的引用）恒被 404 拒绝。
+     * [File] 的 URI 构造器按平台语义归一化并解码，两种形态因而等价。
      */
     private fun resolveLocalFile(path: String): File? {
-        val decoded = when {
-            path.startsWith("file://", ignoreCase = true) ->
-                runCatching { java.net.URI(path).path }.getOrNull()
-            else -> path
+        val file = when {
+            // 必须匹配整个 "file:" scheme，而不是字面量 "file://"：
+            // Java/Kotlin 的 File.toURI() 产出 **单斜杠** 形式（file:/C:/x），
+            // Android 的 Uri.fromFile() 产出 file:///x —— 两者都合法，都要接受。
+            path.startsWith("file:", ignoreCase = true) ->
+                runCatching { File(java.net.URI(path)) }.getOrNull()
+            else -> path.takeIf { it.isNotBlank() }?.let(::File)
         } ?: return null
-        if (decoded.isBlank()) return null
-        val file = runCatching { File(decoded).canonicalFile }.getOrNull() ?: return null
-        if (!file.isFile || !file.canRead()) return null
-        return file
+        val canonical = runCatching { file.canonicalFile }.getOrNull() ?: return null
+        if (!canonical.isFile || !canonical.canRead()) return null
+        return canonical
     }
 
     private fun parseRange(header: String?, length: Long): RangeResult {
@@ -305,11 +383,15 @@ class MpvHttpBridge internal constructor(
                 else RangeResult.Satisfiable(maxOf(0L, length - suffix), length - 1)
             } else {
                 val start = startText.toLong()
-                if (start < 0L || start >= length) {
-                    RangeResult.Unsatisfiable
-                } else {
-                    val end = if (endText.isEmpty()) length - 1 else minOf(endText.toLong(), length - 1)
-                    if (end < start) RangeResult.Unsatisfiable else RangeResult.Satisfiable(start, end)
+                // 未提供 last-byte-pos 时为 null：必须与"显式给出但小于 first"区分，
+                // 否则 0 字节文件上的 `bytes=0-` 会被误判成无效 spec（回归已由测试捕获）。
+                val rawEnd = if (endText.isEmpty()) null else endText.toLong()
+                when {
+                    // RFC 7233 §3.1：first 为负、或**显式** last < first → 无效 spec → MUST 忽略（完整 200）。
+                    start < 0L || (rawEnd != null && rawEnd < start) -> RangeResult.None
+                    // 语法合法但起点超出当前表示长度 → 不可满足 → 416（含 length == 0 的情形）。
+                    start >= length -> RangeResult.Unsatisfiable
+                    else -> RangeResult.Satisfiable(start, minOf(rawEnd ?: (length - 1), length - 1))
                 }
             }
         } catch (_: NumberFormatException) {
@@ -342,7 +424,7 @@ class MpvHttpBridge internal constructor(
         for (index in 0 until limit) {
             // One monotonic deadline spans the complete request header. A peer cannot
             // renew its admission by dripping bytes just before an idle timeout.
-            val remainingNanos = deadline - System.nanoTime()
+            val remainingNanos = deadline - nanoTime()
             if (remainingNanos <= 0) throw SocketTimeoutException("HTTP header deadline")
             socket.soTimeout = ((remainingNanos + 999_999) / 1_000_000)
                 .coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
