@@ -157,14 +157,14 @@ CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：
 
 <!-- WINDOWS-SYNC:START -->
 <!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
+- 0f6ff8c 2026-10-15 fix(windows): 改用 WinAppSDK 1.8 桌面文件选择器；并修掉音轨面板关不掉与列表闪烁
+- 8fa94d1 2026-10-15 fix(windows): 文件菜单可寻址并记录选择器出口；记录 Gate B1 的确证缺陷
+- 314b77b 2026-10-15 test(windows): Gate A Seek 与回环释放实测通过，并修掉 SeekSlider 缺失的 AutomationId
 - f6356e2 2026-10-14 test(windows): Gate A 媒体路径实测通过 —— WebDAV GET/Range 与 libmpv 真实播放
 - 9739cff 2026-10-14 fix(windows): 让来源卡片可被精确寻址，并证明 WebDAV 目录路径真正打通（W5.1 Gate A）
 - c9cb20d 2026-10-14 feat(windows): 给 Browse-only 来源一个真正的用户入口（P0-A）
 - 3bcd896 2026-10-14 fix(windows): 让 Space 真的能暂停播放，并停止把 29 MB 验收证据提交进仓库
 - c3d957b 2026-10-14 feat(windows): LGPL engine built, Emby deployed, and the Emby regression that exposed
-- d6d9720 2026-10-14 fix(windows): make a password-only source survive a restart, and recoverable when it does not
-- 3a1743e 2026-10-14 fix(windows): make "add a media source" probe the protocol the user actually picked
-- d0512e5 2026-10-14 feat(windows): make UI elements addressable, and characterise the resume defect it exposed
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
