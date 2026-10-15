@@ -102,9 +102,10 @@ class HttpClientFactory(
                 try {
                     return chain.proceed(request)
                 } catch (e: IOException) {
-                    // M15-S3 测试 6：逐跳冷却失败来自 network interceptor，位于本拦截器**之下**，
-                    // 因此一定会穿过这里。必须显式排除，否则会被当作普通网络失败重试，
-                    // 造成请求放大（M15-S3 测试 6 已用尝试计数证伪：删除本行该测试变红）。
+                    // M15-S3 测试 6 / M15-S4-C：逐跳冷却失败来自 network interceptor，位于本拦截器**之下**，
+                    // 因此一定会穿过这里。必须显式排除，否则会被当作普通网络失败重试，造成请求放大。
+                    // 变异证据：删除本行后 RateLimitRetryMutationTest 的
+                    // "a per hop cooldown fast fail is not retried either" 转红（已实测）。
                     if (e is RateLimitedException) throw e
                     val retriable = request.method in setOf("GET", "HEAD", "DELETE")
                     if (attempt >= MAX_ATTEMPTS || !retriable) throw e
