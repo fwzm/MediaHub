@@ -193,6 +193,10 @@ public sealed partial class MainWindow : Window
 
     private async void OnOpenVideoClick(object sender, RoutedEventArgs e)
     {
+        // Recorded before anything can fail: the difference between "the menu command never ran" and
+        // "it ran and the picker or the file let it down" is the first thing an automated check needs,
+        // and it cannot be recovered after the fact from a transient dialog.
+        Services.StartupTrace.Write("menu:openvideo-invoked");
         try
         {
             var picker = new Windows.Storage.Pickers.FileOpenPicker();
@@ -202,12 +206,18 @@ public sealed partial class MainWindow : Window
             foreach (string extension in DroppedMedia.SupportedExtensions) picker.FileTypeFilter.Add(extension);
 
             var files = await picker.PickMultipleFilesAsync();
-            if (files is null || files.Count == 0) return;
+            if (files is null || files.Count == 0)
+            {
+                // Cancelling must leave the current playback session untouched.
+                Services.StartupTrace.Write("menu:openvideo-cancelled");
+                return;
+            }
+            Services.StartupTrace.Write("menu:openvideo-selected count=" + files.Count);
             OpenPaths(files.Select(f => f.Path).ToList());
         }
         catch (Exception ex)
         {
-            Services.StartupTrace.Write("open-video:failed " + ex.GetType().Name);
+            Services.StartupTrace.Write("menu:openvideo-failed " + ex.GetType().Name + ": " + ex.Message);
         }
     }
 
