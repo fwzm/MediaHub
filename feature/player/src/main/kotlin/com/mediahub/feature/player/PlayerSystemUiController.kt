@@ -64,21 +64,16 @@ class PlayerSystemUiController(private val activity: Activity) {
      * 计算退出时恢复的方向。MIUI 对动态方向（UNSPECIFIED/SENSOR/USER）恢复不敏感，
      * 显式指定方向（SENSOR_LANDSCAPE/PORTRAIT）才可靠；故把「原本竖屏/横屏」映射成显式值。
      */
-    private fun resolveRestoreOrientation(): Int = when (originalOrientation) {
-        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
-        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE,
-        ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE,
-        ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-
-        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
-        ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT,
-        ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-
-        else -> if (originalConfigOrientation == Configuration.ORIENTATION_LANDSCAPE) {
-            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        } else {
-            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        }
+    private fun resolveRestoreOrientation(): Int {
+        // P0：非播放页面恒为竖屏，横屏只是播放器的临时租约。旧实现的兜底分支
+        // 用「进入播放器时的物理配置方向」，横持点播放会让首页在退出后停留横屏。
+        // 捕获值仅用于诊断，不再参与决策。
+        Log.d(
+            "MediaHub/SYSUI",
+            "exitPlayback restore=PORTRAIT (captured=" + originalOrientation +
+                ", config=" + originalConfigOrientation + ")",
+        )
+        return ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
     }
 
     private fun controller(): WindowInsetsControllerCompat =
