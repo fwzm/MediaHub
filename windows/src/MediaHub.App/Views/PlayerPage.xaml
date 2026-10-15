@@ -127,8 +127,13 @@
           </Grid.ColumnDefinitions>
           <TextBlock x:Name="PositionText" Grid.Column="0" Foreground="{StaticResource MediaHubOverlayTextBrush}"
                      VerticalAlignment="Center" FontFamily="Consolas" FontSize="13" Text="0:00" MinWidth="56" />
+          <!-- The seek control needs an identity of its own. Without one, a test can only reach it
+               through the surrounding layout, and an earlier run of the Seek check silently degraded
+               into measuring natural playback advance while reporting as though it had seeked. -->
           <Slider x:Name="SeekSlider" Grid.Column="1" Minimum="0" Maximum="1" StepFrequency="0.0001"
-                  VerticalAlignment="Center" ValueChanged="OnSeekValueChanged" />
+                  VerticalAlignment="Center" ValueChanged="OnSeekValueChanged"
+                  AutomationProperties.Name="播放进度"
+                  AutomationProperties.AutomationId="player.seekslider" />
           <TextBlock x:Name="DurationText" Grid.Column="2" Foreground="{StaticResource MediaHubOverlaySubtleTextBrush}"
                      VerticalAlignment="Center" FontFamily="Consolas" FontSize="13" Text="0:00" MinWidth="56" />
         </Grid>

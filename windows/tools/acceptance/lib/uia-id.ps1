@@ -138,6 +138,30 @@ switch ($Action) {
     [MhInput]::mouse_event(0x0004,0,0,0,[IntPtr]::Zero)
     "CLICKED_XY " + $Text
   }
+  "set-range" {
+    # Drives a Slider through RangeValuePattern, which is the pattern a slider actually exposes.
+    # Setting .Value through a synthetic click would depend on where the thumb happens to be, and a
+    # seek test whose target depends on pointer arithmetic is not measuring the seek.
+    $e = Find-ByAutoId $AutoId
+    if (-not $e) { "NOT_FOUND $AutoId"; exit 2 }
+    $pat = $null
+    if (-not $e.TryGetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern, [ref]$pat)) {
+      "NO_RANGE_PATTERN " + $e.Current.Name; exit 3
+    }
+    $target = [double]$Text
+    $pat.SetValue($target)
+    $now = $pat.Current.Value
+    "SET_RANGE " + $e.Current.Name + " requested=" + $target + " actual=" + $now
+  }
+  "get-range" {
+    $e = Find-ByAutoId $AutoId
+    if (-not $e) { "NOT_FOUND $AutoId"; exit 2 }
+    $pat = $null
+    if (-not $e.TryGetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern, [ref]$pat)) {
+      "NO_RANGE_PATTERN " + $e.Current.Name; exit 3
+    }
+    "RANGE " + $pat.Current.Value + " min=" + $pat.Current.Minimum + " max=" + $pat.Current.Maximum
+  }
   "window" {
     $r = $root.Current.BoundingRectangle
     "WINDOW " + [int]$r.X + "," + [int]$r.Y + " " + [int]$r.Width + "x" + [int]$r.Height
