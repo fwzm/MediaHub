@@ -310,7 +310,12 @@ public sealed partial class PlayerPage : Page
         TechnicalSummary.Text = BuildTechnicalSummary(s);
         if (InfoToggle.IsChecked == true) PopulateInfo(s);
 
-        if (s.AudioTracks.Count != AudioList.Items.Count || s.SubtitleTracks.Count != SubtitleList.Items.Count)
+        // Compared against the tracks the list was built FROM, not against the number of rows it
+        // holds. The subtitle list carries an extra "关闭字幕" row, so comparing it to
+        // SubtitleTracks.Count was never equal - and this runs on every sampling tick (about ten
+        // times a second), so the list was torn down and rebuilt continuously. On an audio-only file,
+        // where there are no subtitle tracks at all, it flickered every single tick.
+        if (s.AudioTracks.Count != _renderedAudioCount || s.SubtitleTracks.Count != _renderedSubtitleCount)
         {
             RefreshTrackLists();
         }
@@ -495,47 +500,68 @@ public sealed partial class PlayerPage : Page
     {
         if (InfoToggle.IsChecked == true)
         {
-            ShowPanel("媒体信息", showInfo: true, showAudio: false, showSubtitle: false);
+            ShowPanel(PanelKind.Info, "媒体信息");
             PopulateInfo(App.Services.PlayerHost.Player?.Snapshot ?? PlayerSnapshot.Empty);
         }
-        else
+        else if (_openPanel == PanelKind.Info)
         {
+            // Only close the panel if the info panel is the one showing; unticking the info toggle
+            // must not dismiss an audio or subtitle list the user just opened.
             HidePanel();
         }
     }
 
+    // The transport buttons toggle. Before this they only ever opened the panel, and the sole way to
+    // close it was the separate info toggle - so once the audio list was open there was no control on
+    // the page that would put it away again.
     private void OnAudioPanelClick(object sender, RoutedEventArgs e)
     {
+        if (_openPanel == PanelKind.Audio) { HidePanel(); return; }
         RefreshTrackLists();
-        ShowPanel("音轨", showInfo: false, showAudio: true, showSubtitle: false);
+        ShowPanel(PanelKind.Audio, "音轨");
     }
 
     private void OnSubtitlePanelClick(object sender, RoutedEventArgs e)
     {
+        if (_openPanel == PanelKind.Subtitle) { HidePanel(); return; }
         RefreshTrackLists();
-        ShowPanel("字幕", showInfo: false, showAudio: false, showSubtitle: true);
+        ShowPanel(PanelKind.Subtitle, "字幕");
     }
 
-    private void ShowPanel(string header, bool showInfo, bool showAudio, bool showSubtitle)
+    /// <summary>Which side panel is showing, or <see cref="PanelKind.None"/>.</summary>
+    private enum PanelKind { None, Info, Audio, Subtitle }
+
+    private PanelKind _openPanel = PanelKind.None;
+
+    private void ShowPanel(PanelKind kind, string header)
     {
+        _openPanel = kind;
         PanelHeader.Text = header;
-        InfoSection.Visibility = showInfo ? Visibility.Visible : Visibility.Collapsed;
-        AudioSection.Visibility = showAudio ? Visibility.Visible : Visibility.Collapsed;
-        SubtitleSection.Visibility = showSubtitle ? Visibility.Visible : Visibility.Collapsed;
+        InfoSection.Visibility = kind == PanelKind.Info ? Visibility.Visible : Visibility.Collapsed;
+        AudioSection.Visibility = kind == PanelKind.Audio ? Visibility.Visible : Visibility.Collapsed;
+        SubtitleSection.Visibility = kind == PanelKind.Subtitle ? Visibility.Visible : Visibility.Collapsed;
         PanelColumn.Width = new GridLength(340);
         DispatcherQueue.TryEnqueue(UpdateSurfaceBounds);
     }
 
     private void HidePanel()
     {
+        _openPanel = PanelKind.None;
         PanelColumn.Width = new GridLength(0);
         DispatcherQueue.TryEnqueue(UpdateSurfaceBounds);
     }
+
+    /// <summary>Track counts the lists were last built from, used to avoid rebuilding them per tick.</summary>
+    private int _renderedAudioCount = -1;
+    private int _renderedSubtitleCount = -1;
 
     private void RefreshTrackLists()
     {
         var snapshot = App.Services.PlayerHost.Player?.Snapshot;
         if (snapshot is null) return;
+
+        _renderedAudioCount = snapshot.AudioTracks.Count;
+        _renderedSubtitleCount = snapshot.SubtitleTracks.Count;
 
         _suppressTrackEvents = true;
         try
@@ -781,7 +807,9 @@ public sealed partial class PlayerPage : Page
         switch (e.Key)
         {
             case VirtualKey.Escape:
-                if (_isFullScreen) ToggleFullScreen(); else ExitToShell();
+                if (_isFullScreen) { ToggleFullScreen(); break; }
+                if (_openPanel != PanelKind.None) { HidePanel(); break; }
+                ExitToShell();
                 e.Handled = true;
                 break;
             case VirtualKey.F11:

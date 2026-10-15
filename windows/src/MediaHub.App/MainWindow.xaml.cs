@@ -199,21 +199,29 @@ public sealed partial class MainWindow : Window
         Services.StartupTrace.Write("menu:openvideo-invoked");
         try
         {
-            var picker = new Windows.Storage.Pickers.FileOpenPicker();
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle);
-            picker.ViewMode = Windows.Storage.Pickers.PickerViewMode.List;
-            picker.SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.VideosLibrary;
+            // Windows App SDK 1.8 desktop picker. The previous code used the legacy
+            // Windows.Storage.Pickers picker plus InitializeWithWindow, and against an unpackaged
+            // WinUI 3 window that combination never returned and never threw: the menu command ran,
+            // PickMultipleFilesAsync hung, and no dialog window ever appeared on the desktop. Both
+            // were confirmed by instrumentation rather than assumed - see windows/docs/W5-1-R4-GATE-B1.md.
+            //
+            // The two APIs are deliberately not mixed: this one takes a WindowId and returns a
+            // PickFileResult carrying Path, and no StorageFile or InitializeWithWindow is involved.
+            var picker = new Microsoft.Windows.Storage.Pickers.FileOpenPicker(AppWindow.Id);
+            picker.SuggestedStartLocation = Microsoft.Windows.Storage.Pickers.PickerLocationId.VideosLibrary;
             foreach (string extension in DroppedMedia.SupportedExtensions) picker.FileTypeFilter.Add(extension);
+            Services.StartupTrace.Write("menu:openvideo-picker-created");
 
-            var files = await picker.PickMultipleFilesAsync();
-            if (files is null || files.Count == 0)
+            Microsoft.Windows.Storage.Pickers.PickFileResult? picked = await picker.PickSingleFileAsync();
+            if (picked is null || string.IsNullOrEmpty(picked.Path))
             {
                 // Cancelling must leave the current playback session untouched.
                 Services.StartupTrace.Write("menu:openvideo-cancelled");
                 return;
             }
-            Services.StartupTrace.Write("menu:openvideo-selected count=" + files.Count);
-            OpenPaths(files.Select(f => f.Path).ToList());
+
+            Services.StartupTrace.Write("menu:openvideo-selected");
+            OpenPaths(new[] { picked.Path });
         }
         catch (Exception ex)
         {
