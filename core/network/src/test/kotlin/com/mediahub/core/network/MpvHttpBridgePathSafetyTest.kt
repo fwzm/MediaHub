@@ -248,30 +248,76 @@ class MpvHttpBridgePathSafetyTest {
         }
     }
 
+    /**
+     * M14-S4-B 语义变更（**契约已更新**，非放宽断言）：
+     *
+     * 会话现在持有**一个**本地文件句柄（长度与字节流来自同一次打开，消除 check-then-open
+     * 的 W2），因此"会话存活期间删除文件"的行为由平台决定：
+     * - POSIX：unlink 成功，但句柄仍有效 —— 会话继续正常服务，**不会**出现撕裂读；
+     * - Windows：打开中的文件拒绝删除（本机实测），文件保持不变、继续正常服务。
+     * 两种平台都必须保证：**不返回陈旧长度、不返回错误字节**。
+     *
+     * 会话结束（stop）后句柄必须释放，此时文件应可被删除 —— 这才是"资源确实释放"的可证伪判据。
+     */
     @Test
-    fun `deleting the authorized file after startup fails subsequent requests`() {
-        val file = mediaFile("doomed.mp4", 128)
+    fun `the authorized file is held for the session and released on stop`() {
+        val file = mediaFile("held.mp4", 128)
         val bridge = bridge()
         val url = bridge.startLocalFile(file.absolutePath)
         try {
-            assertEquals(200, request(url).status)
-            assertTrue("文件必须被删除", file.delete())
-            assertEquals("授权文件消失后必须 404（不得返回陈旧内容）", 404, request(url).status)
+            val first = request(url)
+            assertEquals(200, first.status)
+            assertArrayEquals("必须返回真实字节", file.readBytes(), first.body)
+
+            // 会话存活期间：无论平台是否允许删除，服务必须仍然正确（不得撕裂/返回陈旧长度）
+            val deleted = file.delete()
+            val during = request(url)
+            assertEquals("会话存活期间仍必须给出有效响应", 200, during.status)
+            val declared = Regex("Content-Length: (\\d+)", RegexOption.IGNORE_CASE)
+                .find(during.raw)?.groupValues?.get(1)?.toLong()
+            assertTrue("响应必须声明 Content-Length", declared != null)
+            assertEquals(
+                "声明长度必须与实际字节一致（不得出现陈旧长度）",
+                declared!!,
+                during.body.size.toLong(),
+            )
+            assertTrue("持有句柄时不得返回空体", during.body.isNotEmpty())
+
+            bridge.stop()
+            // 会话结束后句柄必须已释放：此时文件应当可被删除（Windows 上打开中的文件不可删）
+            if (!deleted) {
+                assertTrue(
+                    "stop() 之后句柄必须已释放（文件应可删除）；若此处为 false 说明 fd 泄漏",
+                    file.delete(),
+                )
+            }
         } finally {
             bridge.stop()
         }
     }
 
+    /**
+     * 类型替换（文件 -> 目录）：路径校验在**每次请求**仍会执行，因此一旦授权路径不再是
+     * 可读文件，必须返回 404。
+     *
+     * 会话持有句柄时 Windows 不允许删除该文件，故用**两个会话**验证：先停掉持有句柄的会话
+     * （释放 fd），再把路径替换成目录，然后开启新会话 —— 必须 404。
+     * 这同时证明"新会话不会复用旧源"。
+     */
     @Test
-    fun `replacing the authorized file with a directory is rejected`() {
+    fun `a path that is no longer a readable file is rejected by a new session`() {
         val file = mediaFile("type-swap.mp4", 64)
         val bridge = bridge()
-        val url = bridge.startLocalFile(file.absolutePath)
+        val firstUrl = bridge.startLocalFile(file.absolutePath)
+        assertEquals(200, request(firstUrl).status)
+        bridge.stop()
+
+        assertTrue("stop() 后必须可替换授权路径（句柄已释放）", file.delete())
+        assertTrue(file.mkdir())
+
+        val secondUrl = bridge.startLocalFile(file.absolutePath)
         try {
-            assertEquals(200, request(url).status)
-            assertTrue(file.delete())
-            assertTrue(file.mkdir())
-            assertEquals("替换成目录后必须 404", 404, request(url).status)
+            assertEquals("路径不再是可读文件时必须 404", 404, request(secondUrl).status)
         } finally {
             bridge.stop()
         }

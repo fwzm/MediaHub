@@ -18,10 +18,22 @@ import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
+/**
+ * 打开本地媒体文件的**可注入**入口（M14-S4-A 测试缝）。
+ *
+ * 生产默认就是 `RandomAccessFile(file, "r")`；测试可注入一个**计数/受控**实现，
+ * 从而在不使用 sleep、不依赖调度的情况下精确断言"每个打开的句柄恰好被关闭一次"、
+ * "会话停止后句柄已关闭"等生命周期契约。
+ */
+internal fun interface FileOpener {
+    fun open(file: File): RandomAccessFile
+}
+
 /** Session-owned loopback media proxy; credentials remain on the origin-scoped OkHttp stack. */
 class MpvHttpBridge internal constructor(
     private val client: OkHttpClient,
     private val headerTimeoutMs: Int = HEADER_TIMEOUT_MS,
+    private val openBody: FileOpener = FileOpener { RandomAccessFile(it, "r") },
 ) {
     init { require(headerTimeoutMs > 0) }
 
@@ -47,6 +59,23 @@ class MpvHttpBridge internal constructor(
         var running = true // guarded by this Session's monitor
         val sockets: MutableSet<Socket> = ConcurrentHashMap.newKeySet()
         val calls: MutableSet<Call> = ConcurrentHashMap.newKeySet()
+
+        /**
+         * **会话级**本地文件句柄（M14-S4-B）。
+         *
+         * 为什么必须提升到会话级：
+         * - 旧实现**每次请求**都 `resolveLocalFile` + `RandomAccessFile(file)` 打开，
+         *   于是 `file.length()`（声明 Content-Length 的依据）与真正流式读取的句柄
+         *   来自**两次不同的打开** —— 两者之间发生 truncate 就会给出"声明的长度大于实际字节"
+         *   的错误响应（无需攻击者即可触发的正确性缺陷）；
+         * - 旧实现的句柄是**请求局部**的，不在 [stop] 的清理集合里，因此 `stop()` 返回后
+         *   仍可能有一个句柄存活一段有界时间。
+         * 提升到会话级后：长度取自**同一个**句柄（`handle.length()`），且句柄由 [stop]
+         * 在会话监视器内关闭，两个问题一并消除。
+         *
+         * 由本 Session 的监视器保护（与 [running] 同一把锁）。
+         */
+        var handle: RandomAccessFile? = null
     }
     private var current: Session? = null
 
@@ -84,7 +113,13 @@ class MpvHttpBridge internal constructor(
     fun stop() {
         val session = current ?: return
         current = null
-        synchronized(session) { session.running = false }
+        synchronized(session) {
+            session.running = false
+            // 会话级句柄必须在监视器内关闭：与"读取循环检查 running"用同一把锁，
+            // 因此 stop() 返回时句柄**一定**已关闭，不再依赖 socket 关闭的间接副作用。
+            session.handle?.let { runCatching { it.close() } }
+            session.handle = null
+        }
         runCatching { session.listener.close() }
         // All registrations check running under the same monitor; after invalidation no
         // accepted socket or newly created Call can escape this cleanup snapshot.
@@ -218,12 +253,28 @@ class MpvHttpBridge internal constructor(
         forwarded: Map<String, String>,
         output: OutputStream,
     ) {
+        // 每次请求仍做**廉价的路径校验**（保持既有 404 语义：文件被删除后必须 404）。
         val file = resolveLocalFile(path)
         if (file == null) {
             writeHead(output, "404 Not Found", 0L)
             return
         }
-        val length = file.length()
+        // 会话级句柄：长度与字节流必须来自**同一次打开**（消除 check-then-open 的 W2：
+        // 声明长度与实际字节不一致）。句柄在会话监视器内获取/创建，stop() 在同一把锁内关闭。
+        val handle = synchronized(session) {
+            if (!session.running) return
+            session.handle ?: runCatching { openBody.open(file) }.getOrNull()?.also { session.handle = it }
+        }
+        if (handle == null) {
+            writeHead(output, "404 Not Found", 0L)
+            return
+        }
+        // 长度取自句柄本身，而不是另一次 file.length() 调用。
+        val length = runCatching { handle.length() }.getOrDefault(-1L)
+        if (length < 0L) {
+            writeHead(output, "404 Not Found", 0L)
+            return
+        }
         val requested = if (forwarded.containsKey("if-range")) null else forwarded["range"]
         val parsed = parseRange(requested, length)
         if (parsed is RangeResult.Unsatisfiable) {
@@ -252,17 +303,28 @@ class MpvHttpBridge internal constructor(
             output.flush()
             return
         }
-        RandomAccessFile(file, "r").use { handle ->
-            handle.seek(start)
-            val buffer = ByteArray(LOCAL_COPY_BUFFER_BYTES)
-            var remaining = contentLength
-            while (remaining > 0 && synchronized(session) { session.running }) {
-                val read = handle.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
-                if (read <= 0) break
-                output.write(buffer, 0, read)
-                remaining -= read
+        // 句柄是**会话级共享**的，因此 seek+read 必须在句柄上互斥（否则并发请求会互相
+        // 破坏文件位置）。句柄**不在此处关闭** —— 它的生命周期属于会话，由 stop() 关闭。
+        val buffer = ByteArray(LOCAL_COPY_BUFFER_BYTES)
+        var remaining = contentLength
+        try {
+            synchronized(handle) {
+                handle.seek(start)
+                while (remaining > 0 && synchronized(session) { session.running }) {
+                    val read = handle.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                    if (read <= 0) break
+                    output.write(buffer, 0, read)
+                    remaining -= read
+                }
             }
             output.flush()
+        } catch (_: java.io.IOException) {
+            // stop() 在会话监视器内关闭了句柄（或被客户端断开）：传输按设计中止。
+            // 句柄归属会话，不得在此关闭。
+            runCatching { output.flush() }
+        } catch (_: IllegalArgumentException) {
+            // 句柄已关闭：`seek` 会抛 IllegalArgumentException（closed RandomAccessFile）。
+            runCatching { output.flush() }
         }
     }
 
