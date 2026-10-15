@@ -206,6 +206,71 @@ class MpvHttpBridgeLocalFileTest {
     }
 
     @Test
+    fun `serves a zero byte file and answers HEAD without a body`() {
+        val file = mediaFile("empty.mp4", 0)
+        val bridge = bridge()
+        try {
+            val url = bridge.startLocalFile(file.absolutePath)
+            val get = request(url)
+            assertEquals(200, get.status)
+            assertEquals("0", get.headers["content-length"])
+            assertEquals(0, get.body.size)
+            val head = request(url, method = "HEAD")
+            assertEquals(200, head.status)
+            assertEquals("0", head.headers["content-length"])
+            assertEquals(0, head.body.size)
+        } finally {
+            bridge.stop()
+        }
+    }
+
+    @Test
+    fun `serves a single byte range 0-0 on a one byte file`() {
+        val file = mediaFile("one.mp4", 1)
+        val bridge = bridge()
+        try {
+            val response = request(bridge.startLocalFile(file.absolutePath), extra = "Range: bytes=0-0\r\n")
+            assertEquals(206, response.status)
+            assertEquals("bytes 0-0/1", response.headers["content-range"])
+            assertEquals("1", response.headers["content-length"])
+            assertEquals(1, response.body.size)
+        } finally {
+            bridge.stop()
+        }
+    }
+
+    @Test
+    fun `any range on a zero byte file is unsatisfiable`() {
+        val file = mediaFile("empty.mp4", 0)
+        val bridge = bridge()
+        try {
+            val response = request(bridge.startLocalFile(file.absolutePath), extra = "Range: bytes=0-\r\n")
+            assertEquals(416, response.status)
+            assertEquals("bytes */0", response.headers["content-range"])
+        } finally {
+            bridge.stop()
+        }
+    }
+
+    /**
+     * RFC 7233 §3.1：last-byte-pos < first-byte-pos 属于**无效** byte-range-spec，
+     * 服务器 MUST 忽略整个 Range 字段并按完整实体返回 200。首版实现误判为 416 —— 先红后绿。
+     */
+    @Test
+    fun `an invalid range spec with last before first is ignored`() {
+        val file = mediaFile("clip.mp4", 512)
+        val bridge = bridge()
+        try {
+            val response = request(bridge.startLocalFile(file.absolutePath), extra = "Range: bytes=400-100\r\n")
+            assertEquals(200, response.status)
+            assertEquals("512", response.headers["content-length"])
+            assertEquals(512, response.body.size)
+        } finally {
+            bridge.stop()
+        }
+    }
+
+    @Test
     fun `restarting the bridge invalidates the previous session token`() {
         val first = mediaFile("a.mp4", 64)
         val second = mediaFile("b.mp4", 128)
