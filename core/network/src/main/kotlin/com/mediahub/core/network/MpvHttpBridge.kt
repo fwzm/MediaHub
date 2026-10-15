@@ -22,6 +22,18 @@ import okhttp3.Request
 class MpvHttpBridge internal constructor(
     private val client: OkHttpClient,
     private val headerTimeoutMs: Int = HEADER_TIMEOUT_MS,
+    /**
+     * 可选的网络交换观测台账（M16-S1）。
+     *
+     * 默认 null = **完全不观测**，行为与接线前逐字节一致（生产默认路径不变）。
+     *
+     * 接线后本桥上报两类事件（都不携带地址/路径/凭据，只是计数）：
+     * - 每一次**回环下游接入**（mpv 连到本桥）→ [NetworkExchangeLedger.recordLoopbackInbound]；
+     *   它**不是**上游出网，必须与真实出网分开计数；
+     * - 每一次**本地文件读取**（本桥的 local bytes 源）→ [NetworkExchangeLedger.recordLocalFileRead]；
+     *   本地文件根本不是网络请求。
+     */
+    private val ledger: NetworkExchangeLedger? = null,
 ) {
     init { require(headerTimeoutMs > 0) }
 
@@ -110,6 +122,8 @@ class MpvHttpBridge internal constructor(
     }
 
     private fun handleConnection(session: Session, socket: Socket) {
+        // M16-S1：一次**回环下游接入**（mpv 连到本桥）。这不是上游出网，单列计数。
+        ledger?.recordLoopbackInbound()
         var call: Call? = null
         var responseStarted = false
         var upstreamFinished = false
@@ -178,6 +192,8 @@ class MpvHttpBridge internal constructor(
 
                     is MpvUpstream.LocalFile -> {
                         responseStarted = true
+                        // M16-S1：本桥的**本地字节源**被读取。本地文件不是网络请求，单列计数。
+                        ledger?.recordLocalFileRead()
                         serveLocalFile(session, upstream.path, method, forwarded, output)
                     }
                 }
