@@ -34,6 +34,14 @@ class MpvHttpBridge internal constructor(
     private val client: OkHttpClient,
     private val headerTimeoutMs: Int = HEADER_TIMEOUT_MS,
     private val openBody: FileOpener = FileOpener { RandomAccessFile(it, "r") },
+    /**
+     * 单调时钟（M14-S4-C 可测性缝）。
+     *
+     * 生产默认就是 [System.nanoTime]，**行为完全不变**；注入可控时钟后，
+     * "聚合 header 截止时间"的测试可以精确断言契约（越过截止点即不再接收任何字节），
+     * 而不再依赖墙钟预算（原先的 `< 800ms` 断言在慢 runner 上本身就是抖动来源）。
+     */
+    private val nanoTime: () -> Long = System::nanoTime,
 ) {
     init { require(headerTimeoutMs > 0) }
 
@@ -151,7 +159,7 @@ class MpvHttpBridge internal constructor(
         try {
             val conn = socket
             run {
-                val headerDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(headerTimeoutMs.toLong())
+                val headerDeadline = nanoTime() + TimeUnit.MILLISECONDS.toNanos(headerTimeoutMs.toLong())
                 val input = conn.getInputStream()
                 val output = conn.getOutputStream()
                 var remaining = MAX_HEADER_BYTES
@@ -416,7 +424,7 @@ class MpvHttpBridge internal constructor(
         for (index in 0 until limit) {
             // One monotonic deadline spans the complete request header. A peer cannot
             // renew its admission by dripping bytes just before an idle timeout.
-            val remainingNanos = deadline - System.nanoTime()
+            val remainingNanos = deadline - nanoTime()
             if (remainingNanos <= 0) throw SocketTimeoutException("HTTP header deadline")
             socket.soTimeout = ((remainingNanos + 999_999) / 1_000_000)
                 .coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
