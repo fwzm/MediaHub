@@ -29,10 +29,21 @@ class RateLimitedException(val scope: String, val remainingMs: Long) :
 class RateLimitCooldown(
     private val clockMs: () -> Long = { System.nanoTime() / 1_000_000L },
     private val maxCooldownMs: Long = MAX_COOLDOWN_MS,
-    /** 冷却表条目**硬上限**（M15-S3 测试 5）：大量不同 origin 不得使其无限增长。 */
+    /** 冷却表条目**总**硬上限（M15-S3 测试 5）：大量不同 origin 不得使其无限增长。 */
     private val maxEntries: Int = MAX_TRACKED_SCOPES,
+    /**
+     * **受保护分区**（已登记服务器 / 真实 serverId 已知）的条目上限。
+     *
+     * 该分区中的冷却**绝不**被未知 origin 驱逐，用于消除 M15-S4-B 的 fail-open：
+     * 攻击者可控的大量未知 origin 不得把核心媒体源的冷却挤掉。
+     */
+    private val maxKnownScopes: Int = MAX_KNOWN_SCOPES,
 ) {
-    private val deadlines = ConcurrentHashMap<String, Long>()
+    /** 已知服务器（受保护分区）。 */
+    private val knownDeadlines = ConcurrentHashMap<String, Long>()
+
+    /** 未知 origin（非受保护分区；仅在**本分区内**互相淘汰）。 */
+    private val unknownDeadlines = ConcurrentHashMap<String, Long>()
 
     /**
      * 仅保护"回收 + 淘汰 + 写入"这一小段临界区，用于保证容量上限在并发下**严格成立**。
@@ -44,60 +55,97 @@ class RateLimitCooldown(
      */
     private val writeLock = ReentrantLock()
 
-    private val capacity: Int = maxEntries.coerceAtLeast(1)
+    private val knownCapacity: Int = maxKnownScopes.coerceAtLeast(1).coerceAtMost(maxEntries.coerceAtLeast(1))
+
+    /** 未知 origin 分区的容量 = 总上限 - 已知分区上限（两部分不互相挤占）。 */
+    private val unknownCapacity: Int = (maxEntries.coerceAtLeast(1) - knownCapacity).coerceAtLeast(1)
 
     /**
      * 当前被追踪的作用域数量（容量契约的观测点；无锁读取，返回的是瞬时快照）。
      * 仅同模块测试使用，不作为对外 API。
      */
-    internal fun trackedScopeCount(): Int = deadlines.size
+    internal fun trackedScopeCount(): Int = knownDeadlines.size + unknownDeadlines.size
+
+    /**
+     * 受保护分区当前条目数（容量契约观测点；无锁读取，瞬时快照）。
+     * 仅同模块测试使用。
+     */
+    internal fun knownScopeCount(): Int = knownDeadlines.size
+
+    /** 未知分区当前条目数（仅同模块测试使用）。 */
+    internal fun unknownScopeCount(): Int = unknownDeadlines.size
+
+    /** 在两个分区中查找截止时间；命中过期条目时惰性回收。 */
+    private fun lookup(scope: String): Long? {
+        val fromKnown = knownDeadlines[scope]
+        val fromUnknown = if (fromKnown == null) unknownDeadlines[scope] else null
+        val deadline = fromKnown ?: fromUnknown ?: return null
+        val source = if (fromKnown != null) knownDeadlines else unknownDeadlines
+        if (deadline - clockMs() <= 0L) {
+            // 条件删除：仅当值仍等于读到的截止时间才删，因此并发刷新不会被误删。
+            source.remove(scope, deadline)
+            return null
+        }
+        return deadline
+    }
 
     /** 剩余冷却毫秒；不在冷却中返回 null。 */
     fun remainingMs(scope: String): Long? {
-        val deadline = deadlines[scope] ?: return null
+        val deadline = lookup(scope) ?: return null
         val remaining = deadline - clockMs()
-        if (remaining <= 0L) {
-            deadlines.remove(scope, deadline)
-            return null
-        }
         // 上限**在每个读取点**都成立，而不只在写入点：即使时钟被回拨（或注入的时钟源
         // 非单调）使剩余时长被放大，也绝不允许报出超过协议上限的冷却。
         return remaining.coerceAtMost(maxCooldownMs)
     }
 
     /**
-     * 记录/刷新冷却。语义（M15-S3 测试 5）：
-     * - 非正时长表示**无冷却**，清除已有条目；
-     * - 已存在的作用域只**刷新**截止时间（`now + duration`），绝不累加 —— 反复续期不会变成永久冷却；
-     * - 写入前先回收**已过期**条目；仍满员时淘汰**最早到期**的一条，
-     *   即在容量压力下牺牲"最接近自然释放"的条目，保留有效窗口更长的冷却。
+     * 记录/刷新冷却（M15-S3 测试 5 + M15-S4-B 分区保护）。
+     *
+     * 语义：
+     * - 非正时长表示**无冷却**，清除两个分区中的已有条目；
+     * - 已存在的作用域只**刷新**截止时间（now + duration），绝不累加 —— 反复续期不会变成永久冷却；
+     * - [isKnownServer] = true 的条目进入**受保护分区**，只在受保护分区内按"最早到期"淘汰，
+     *   **绝不被未知 origin 驱逐**；
+     * - [isKnownServer] = false 的条目进入未知分区，只在未知分区内淘汰。
+     *
+     * 两个分区的容量之和 = [maxEntries]，因此总内存仍**有硬上限**（既不会无限扩容，
+     * 也不会因为保护已知服务器而全局阻断）。
      */
-    fun apply(scope: String, retryAfterMs: Long) {
+    @JvmOverloads
+    fun apply(scope: String, retryAfterMs: Long, isKnownServer: Boolean = false) {
         if (retryAfterMs <= 0L) {
-            deadlines.remove(scope)
+            knownDeadlines.remove(scope)
+            unknownDeadlines.remove(scope)
             return
         }
         val now = clockMs()
         val deadline = now + retryAfterMs.coerceAtMost(maxCooldownMs)
+        val target = if (isKnownServer) knownDeadlines else unknownDeadlines
+        val capacity = if (isKnownServer) knownCapacity else unknownCapacity
         writeLock.withLock {
-            if (deadlines.containsKey(scope)) {
-                deadlines[scope] = deadline
+            // 作用域可能因归属变化（例如先未知后已知）而换分区：先清掉旧分区条目。
+            val other = if (isKnownServer) unknownDeadlines else knownDeadlines
+            other.remove(scope)
+            if (target.containsKey(scope)) {
+                target[scope] = deadline
                 return
             }
-            if (deadlines.size >= capacity) {
-                // 淘汰**最早到期**的一条，保证容量是**硬**上限。
-                // 该规则天然优先淘汰已过期条目（过期条目截止时间必然小于任何有效条目），
-                // 因此不需要额外的"先回收"遍历：容量压力下牺牲的总是剩余保护最少的作用域。
-                while (deadlines.size >= capacity) {
-                    val victim = deadlines.entries.minByOrNull { it.value } ?: break
-                    deadlines.remove(victim.key, victim.value)
+            if (target.size >= capacity) {
+                // 淘汰**最早到期**的一条。该规则天然优先淘汰已过期条目
+                // （过期条目截止时间必然小于任何有效条目）。
+                while (target.size >= capacity) {
+                    val victim = target.entries.minByOrNull { it.value } ?: break
+                    target.remove(victim.key, victim.value)
                 }
             }
-            deadlines[scope] = deadline
+            target[scope] = deadline
         }
     }
 
-    fun clear() = deadlines.clear()
+    fun clear() {
+        knownDeadlines.clear()
+        unknownDeadlines.clear()
+    }
 
     companion object {
         const val MAX_COOLDOWN_MS: Long = 15 * 60 * 1000L
@@ -107,6 +155,18 @@ class RateLimitCooldown(
          * 无限占用内存。256 条足以覆盖真实设备上的服务器数量级，同时把内存占用钉死为上界。
          */
         const val MAX_TRACKED_SCOPES: Int = 256
+
+        /**
+         * **受保护分区**容量（M15-S4-B）：已登记服务器的冷却绝不被未知 origin 驱逐。
+         *
+         * 取值理由：真实设备上配置的媒体源数量级为个位数到十几个；64 条足以容纳
+         * 多账号 + 多协议（Emby/Jellyfin/WebDAV/云盘）的组合，同时给未知分区留下
+         * 192 条余量，两者之和仍为 [MAX_TRACKED_SCOPES]。
+         */
+        const val MAX_KNOWN_SCOPES: Int = 64
+
+        /** 未知 origin 分区容量 = [MAX_TRACKED_SCOPES] - [MAX_KNOWN_SCOPES]。 */
+        const val MAX_UNKNOWN_SCOPES: Int = MAX_TRACKED_SCOPES - MAX_KNOWN_SCOPES
 
         /** Retry-After 缺失/非法时的保守默认值（仍受上限约束）。 */
         const val DEFAULT_COOLDOWN_MS: Long = 60 * 1000L
@@ -179,7 +239,12 @@ class RateLimitCooldownInterceptor(
         // 未知 serverId 时的回退键必须是**精确 origin**（scheme+host+port）。
         // 用裸 host 会把同主机不同端口的另一台服务器误判为同一作用域，
         // 导致 A 服 429 冷却静默阻断 B 服（M15-S3 测试 1 已复现）。
-        val scope = scopeOf(request.url) ?: originKey(request.url)
+        // 区分"已知服务器"与"未知 origin"（M15-S4-B）：
+        // 解析出真实 serverId 的条目进入受保护分区，绝不被未知 origin 洪水驱逐；
+        // 回退到精确 origin 的条目只在未知分区内互相淘汰。
+        val resolved = scopeOf(request.url)
+        val scope = resolved ?: originKey(request.url)
+        val isKnownServer = resolved != null
         cooldown.remainingMs(scope)?.let { remaining ->
             throw RateLimitedException(scope = scope, remainingMs = remaining)
         }
@@ -189,7 +254,7 @@ class RateLimitCooldownInterceptor(
                 header = response.header("Retry-After"),
                 nowEpochMs = System.currentTimeMillis(),
             )
-            cooldown.apply(scope, retryAfterMs)
+            cooldown.apply(scope, retryAfterMs, isKnownServer = isKnownServer)
         }
         return response
     }

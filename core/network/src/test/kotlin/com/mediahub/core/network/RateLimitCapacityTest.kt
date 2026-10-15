@@ -36,12 +36,18 @@ class RateLimitCapacityTest {
         for (i in 1..RateLimitCooldown.MAX_TRACKED_SCOPES * 8) {
             cold.apply("https://host-$i.example.com:443", 60_000L)
         }
-        // 必须精确等于上限：仅断言 "<= 上限" 无法区分"正常淘汰"与
-        // "满员后静默丢弃新作用域"或"整表清空"这两种 fail-open。
+        // M15-S4-B 之后：未知 origin 只占**未知分区**，其容量为
+        // MAX_TRACKED_SCOPES - MAX_KNOWN_SCOPES。仍必须精确装满该分区：
+        // 仅断言 "<= 上限" 无法区分"正常淘汰"与"满员后静默丢弃新作用域"这两种 fail-open。
         assertEquals(
-            "冷却表必须恰好装满上限（静默丢弃新作用域会小于上限）",
-            RateLimitCooldown.MAX_TRACKED_SCOPES,
+            "未知分区必须恰好装满（静默丢弃新作用域会小于上限）",
+            RateLimitCooldown.MAX_UNKNOWN_SCOPES,
             cold.trackedScopeCount(),
+        )
+        assertEquals(
+            "未知 origin 不得占用受保护分区",
+            0,
+            cold.knownScopeCount(),
         )
         // 最近写入的作用域必须被保留：淘汰策略是"最早到期"，而不是清空整表
         assertNotNull(
@@ -53,17 +59,19 @@ class RateLimitCapacityTest {
     @Test
     fun `capacity pressure evicts the soonest deadline and keeps the freshest cooldowns`() {
         var now = 0L
+        // 淘汰只在**同一分区内**发生（M15-S4-B）：把总容量设为已知分区容量，
+        // 未知分区容量 = maxEntries - MAX_KNOWN_SCOPES，此处用 known=true 直接测已知分区。
         val limit = 3
-        val cold = cooldown({ now }, maxEntries = limit)
+        val cold = RateLimitCooldown(clockMs = { now }, maxEntries = limit, maxKnownScopes = limit)
 
         // 依次写入不同时长的冷却：short 最早到期
-        cold.apply("scope-short", 1_000L)
-        cold.apply("scope-mid", 5_000L)
-        cold.apply("scope-long", 60_000L)
+        cold.apply("scope-short", 1_000L, isKnownServer = true)
+        cold.apply("scope-mid", 5_000L, isKnownServer = true)
+        cold.apply("scope-long", 60_000L, isKnownServer = true)
         assertEquals(limit, cold.trackedScopeCount())
 
         // 第 4 个作用域触发容量淘汰
-        cold.apply("scope-new", 30_000L)
+        cold.apply("scope-new", 30_000L, isKnownServer = true)
         assertEquals("容量不得被突破", limit, cold.trackedScopeCount())
 
         assertNull("最早到期的冷却应被优先淘汰", cold.remainingMs("scope-short"))
@@ -77,15 +85,15 @@ class RateLimitCapacityTest {
     fun `expired entries are reclaimed instead of evicting still valid cooldowns`() {
         var now = 0L
         val limit = 2
-        val cold = cooldown({ now }, maxEntries = limit)
+        val cold = RateLimitCooldown(clockMs = { now }, maxEntries = limit, maxKnownScopes = limit)
 
-        cold.apply("scope-expiring", 1_000L)
-        cold.apply("scope-valid", 60_000L)
+        cold.apply("scope-expiring", 1_000L, isKnownServer = true)
+        cold.apply("scope-valid", 60_000L, isKnownServer = true)
         assertEquals(limit, cold.trackedScopeCount())
 
         // 让第一个作用域过期，再写入新作用域：应回收过期条目，而不是淘汰仍然有效的
         now = 1_000L
-        cold.apply("scope-new", 30_000L)
+        cold.apply("scope-new", 30_000L, isKnownServer = true)
 
         assertEquals("容量不得被突破", limit, cold.trackedScopeCount())
         assertNotNull(
