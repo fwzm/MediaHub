@@ -61,6 +61,19 @@ class MpvHttpBridge internal constructor(
 
     constructor(httpClientFactory: HttpClientFactory) : this(httpClientFactory.mediaClient().newBuilder()
         .addNetworkInterceptor(OriginScopedCredentialInterceptor()).build())
+
+    /**
+     * 与上者相同，但把**观测台账**一并注入（M16-S1 生产接线）。
+     *
+     * 之所以需要这个公开构造器：主构造器是 `internal`（模块可见），
+     * 而生产注入点是 `player:mpv` 模块，无法使用它。此处只多传 [ledger]，
+     * 其余参数保持默认 —— 即"不改变任何既有语义，仅开启观测"。
+     */
+    constructor(
+        httpClientFactory: HttpClientFactory,
+        ledger: NetworkExchangeLedger?,
+    ) : this(httpClientFactory.mediaClient().newBuilder()
+        .addNetworkInterceptor(OriginScopedCredentialInterceptor()).build(), ledger = ledger)
     private val workers = ThreadPoolExecutor(0, MAX_CONNECTIONS, 60, TimeUnit.SECONDS,
         SynchronousQueue(), { work -> Thread(work, "mpv-http-conn").apply { isDaemon = true } },
         ThreadPoolExecutor.AbortPolicy())

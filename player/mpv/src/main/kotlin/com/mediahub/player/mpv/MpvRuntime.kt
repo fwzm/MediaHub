@@ -46,8 +46,22 @@ internal interface MpvInstance {
     fun destroy()
 }
 
-internal fun createMpvBridge(factory: HttpClientFactory): MpvBridge = object : MpvBridge {
-    private val delegate = MpvHttpBridge(factory)
+/**
+ * 创建 mpv 回环桥（M16-S1 生产观测注入）。
+ *
+ * [ledger] 为可选观测台账：
+ * - 传入时，桥会把**回环下游接入**与**本地文件读取**两类事件上报到该台账
+ *   （两者都不是上游出网，单列计数）；
+ * - 不传时（旧调用形式）行为与接线前完全一致 —— 默认不观测。
+ *
+ * 注意：桥到自己 OkHttp 上游的那一次调用由 HttpClientFactory 上的 EventListener 计数
+ * （RequestChannel.BRIDGE_UPSTREAM），**不经**本参数，避免与回环计数混为一谈。
+ */
+internal fun createMpvBridge(
+    factory: HttpClientFactory,
+    ledger: com.mediahub.core.network.NetworkExchangeLedger? = null,
+): MpvBridge = object : MpvBridge {
+    private val delegate = MpvHttpBridge(factory, ledger)
     override fun start(url: String, headers: Map<String, String>) = delegate.start(url, headers)
     override fun startLocalFile(path: String) = delegate.startLocalFile(path)
     override fun stop() = delegate.stop()
