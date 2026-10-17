@@ -117,6 +117,8 @@ data class PlayerCombinedState(
     val speed: Float = 1f,
     val mediaTitle: String? = null,
     val error: com.mediahub.core.network.PlaybackError? = null,
+    val playWhenReady: Boolean = isPlaying,
+    val isEnded: Boolean = false,
 )
 
 private object SubtitleMemoryOwnership {
@@ -555,6 +557,8 @@ class PlayerViewModel @Inject constructor(
             PlayerCombinedState(
                 resolve = resolve,
                 isPlaying = player.isPlaying,
+                playWhenReady = player.playWhenReady,
+                isEnded = player.isEnded,
                 isBuffering = player.isBuffering,
                 positionMs = player.positionMs,
                 durationMs = player.durationMs,

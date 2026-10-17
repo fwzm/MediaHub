@@ -24,4 +24,6 @@ data class PlaybackUiState(
     val error: PlaybackError? = null,
     val mediaTitle: String? = null,
     val isSeekable: Boolean = true,
+    /** 用户播放意图；缓冲或音频焦点抑制时 isPlaying 可为 false，控制按钮仍应允许暂停。 */
+    val playWhenReady: Boolean = isPlaying,
 )
