@@ -401,7 +401,9 @@ class MpvPlaybackEngine internal constructor(
      * 读失败（属性不可用）时才回退到 UI 状态。
      */
     override fun togglePlayPause() = withNative { run, m ->
-        val paused = m.getPropertyBoolean("pause") ?: !_uiState.value.isPlaying
+        // Native observers are asynchronous; read the authoritative pause property under the native lock.
+        val wasPaused = m.getPropertyBoolean("pause") ?: return@withNative
+        val paused = wasPaused
         // 当前是暂停态 → 本次点击是继续（pause=false）；否则是暂停（pause=true）。
         m.setPropertyBoolean("pause", !paused)
         withCurrent(run) {
