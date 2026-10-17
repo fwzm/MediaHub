@@ -4,7 +4,7 @@
 
 1. **原有「暂停冻结 FAIL」是测量伪影，不是产品缺陷。** 改正测量方法后，真机 3/3 PASS。
 2. **`media key` 那条「独立实现」从未生效**，因此「两种实现各复现」的说法不成立。
-3. **另有三条真实代码缺陷**，**本轮全部修复**（均先红后绿）。
+3. **另有四条真实代码缺陷**，**本轮全部修复**（均先红后绿）。其中第 4 条是从兄弟分支 PR #46 交叉核对后补齐的。
 
 ---
 
@@ -88,6 +88,30 @@ Media3 的 `isPlaying` 在**缓冲中 / 未就绪 / 音频焦点短暂丢失**�
 
 ---
 
+### 3.4 播放/暂停图标跟随的是「实际在播」而非「播放意图」（已修）
+
+`PlayerScreen.kt:971-979` 旧实现：
+
+```kotlin
+if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow
+```
+
+缓冲中 / 音频焦点被短暂抑制 / surface 未就绪时 `isPlaying == false` 而用户并未暂停，
+图标会闪成「播放」；用户此时点它，语义上又变成「继续播放」—— 与 §3.1 的引擎缺陷叠加，
+就是完整的「暂停无效」观感。
+
+修复：`PlaybackUiState` 新增 `playWhenReady: Boolean = isPlaying`（默认取 isPlaying，
+未显式设置该字段的实现行为不变），Media3 通过 `onPlayWhenReadyChanged` 上报、
+`pause()/resume()` 立即同步；mpv 由 `pause` 属性同时驱动；UI 改为跟随意图：
+
+```kotlin
+val showPauseIcon = state.playWhenReady && !state.isEnded
+```
+
+> 交叉核对说明：兄弟分支 `codex/review-playback-controls-20261018`（PR #46，同 base）
+> 独立发现了同一组缺陷并给出了等价修法（`PlaybackUiState.playWhenReady` + 图标跟随意图）。
+> 本条按该结论补齐，两边实现语义一致，避免两份修复各自只覆盖一半。
+
 ## 4. 本轮修复的证据
 
 ### 先红后绿（`--rerun-tasks --no-build-cache`）
@@ -116,6 +140,7 @@ Media3 的 `isPlaying` 在**缓冲中 / 未就绪 / 音频焦点短暂丢失**�
 | Media3 暂停极性 | 未发现 | **真实缺陷，已修 + 先红后绿** |
 | mpv 暂停极性 | 未发现 | **真实缺陷，已修 + 先红后绿** |
 | 降级丢暂停意图 | 未发现 | **真实缺陷，已修 + 先红后绿（`PlaybackSession.startPaused`）** |
+| 播放/暂停图标跟随 isPlaying | 未发现 | **真实缺陷，已修（`PlaybackUiState.playWhenReady`，与 PR #46 交叉核对）** |
 | Seek 50% | `NOT_RUN` | `NOT_RUN`（uiautomator 取不到 SeekBar，本轮未处理） |
 
 ## 6. 残余风险
@@ -131,3 +156,8 @@ Media3 的 `isPlaying` 在**缓冲中 / 未就绪 / 音频焦点短暂丢失**�
 
 `:player:engine` + `:player:mpv` + `:core:network` + `:app` `--rerun-tasks --no-build-cache --continue`
 → **BUILD SUCCESSFUL**（3m34s / 400 tasks），**61 类 / 441 tests / 0 failures / 0 errors / 0 skipped**。
+
+补上 §3.4（UI 意图）后，跑全仓 `testDebugUnitTest :core:model:test :provider:api:test --continue`
+→ **BUILD SUCCESSFUL**（5m50s / 559 tasks），**188 类 / 1515 tests / 0 failures / 0 errors / 0 skipped**；
+其中 `PauseFreezeContractTest` 3 例（含新增的「缓冲时 playWhenReady 仍为 true」意图契约）、
+`SwitchablePlaybackEngineTest` 30 例、`MpvTogglePolarityTest` 1 例全绿。

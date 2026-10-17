@@ -968,11 +968,15 @@ private fun PlayerControls(
                                     strokeWidth = 2.dp,
                                 )
                             }
+                            // G3：图标必须跟随「播放意图」而不是「实际是否在出帧」。
+                            // 缓冲/音频焦点被抑制时 isPlaying=false 但用户并未暂停；
+                            // 若按 isPlaying 显示，图标会闪成「播放」，用户点它反而变成继续播放。
+                            val showPauseIcon = state.playWhenReady && !state.isEnded
                             IconButton(onClick = onTogglePlayPause) {
                                 Icon(
-                                    if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    if (showPauseIcon) Icons.Default.Pause else Icons.Default.PlayArrow,
                                     contentDescription = stringResource(
-                                        if (state.isPlaying) R.string.player_pause else R.string.player_play,
+                                        if (showPauseIcon) R.string.player_pause else R.string.player_play,
                                     ),
                                     tint = MaterialTheme.colorScheme.primary,
                                 )

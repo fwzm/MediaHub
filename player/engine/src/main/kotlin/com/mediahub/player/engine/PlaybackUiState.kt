@@ -24,4 +24,17 @@ data class PlaybackUiState(
     val error: PlaybackError? = null,
     val mediaTitle: String? = null,
     val isSeekable: Boolean = true,
+    /**
+     * **用户播放意图**（G3）。
+     *
+     * 与 [isPlaying]（实际是否在出帧/出声）是两个不同的概念：
+     * Media3 在缓冲中、音频焦点被短暂抑制、surface 未就绪时会令 isPlaying=false，
+     * 而此时 playWhenReady 仍为 true —— 用户并未暂停。
+     *
+     * 因此**播放/暂停按钮的图标与语义必须跟随本字段**，否则缓冲时图标会闪成「播放」，
+     * 用户点它反而变成「继续播放」，看起来像暂停无效。
+     *
+     * 默认值取 [isPlaying]：未显式设置该字段的引擎（如旧实现）行为保持不变。
+     */
+    val playWhenReady: Boolean = isPlaying,
 )
