@@ -87,7 +87,9 @@ class JellyfinProvider(
             ConnectionStatus(
                 ok = false,
                 message = when (e.statusCode) {
-                    401, 403 -> "服务器需要登录（HTTP ${e.statusCode}）"
+                    // 同 Emby：401（缺凭据）与 403（权限拒绝）不得合并成"需要登录"。
+                    401 -> "服务器需要登录（HTTP 401）"
+                    403 -> "服务器拒绝访问（HTTP 403）——这不是未登录，请检查该账号权限 / 远程访问 / IP 白名单"
                     404 -> "该地址不是 Jellyfin 服务（404）"
                     else -> "HTTP ${e.statusCode}"
                 },
