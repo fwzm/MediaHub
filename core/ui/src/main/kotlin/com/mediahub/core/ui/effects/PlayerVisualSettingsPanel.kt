@@ -42,6 +42,14 @@ import kotlin.math.roundToInt
 object PlayerVisualTestTags {
     const val OVERLAY = "player_visual_effects_overlay"
     const val PLAYER_CONTROLS = "player_visual_controls"
+    /**
+     * 播放进度 Slider（Seek 50% 验收用）。
+     *
+     * 之前该控件没有任何稳定语义标识，`uiautomator` 无法定位（Compose Slider 不是
+     * 平台 `android.widget.SeekBar`），导致真机 Seek 验收长期标 NOT_RUN。
+     * 加上 testTag 后可用 Compose instrumentation 做确定性拖动断言。
+     */
+    const val PLAYER_PROGRESS = "player_progress_slider"
     const val CHROME_AMBIENT = "player_visual_chrome_ambient"
     const val PLAYER_ENTRY = "player_visual_effects_entry"
     const val SETTINGS_ENTRY = "settings_visual_effects_entry"

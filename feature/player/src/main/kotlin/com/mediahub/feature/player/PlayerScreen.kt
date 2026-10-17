@@ -919,6 +919,9 @@ private fun PlayerControls(
                         // 进度条 preview→commit（U3-B）：拖动只更新本地预览值，松手才真正 seek
                         var sliderScrubValue by remember { mutableStateOf<Float?>(null) }
                         Slider(
+                            // 稳定语义标识：供 Compose instrumentation 做 Seek 验收
+                            // （Compose Slider 在 uiautomator 里不是 SeekBar，无法用 adb 定位）。
+                            modifier = Modifier.testTag(PlayerVisualTestTags.PLAYER_PROGRESS),
                             value = sliderScrubValue
                                 ?: state.positionMs.toFloat().coerceIn(0f, state.durationMs.toFloat()),
                             onValueChange = { sliderScrubValue = it },
