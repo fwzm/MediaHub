@@ -254,6 +254,12 @@ class MpvPlaybackEngine internal constructor(
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_LOADFILE)
                     m.command(arrayOf("loadfile", bridgeUrl))
                     checkCurrent()
+                    // G3：降级重播必须尊重暂停意图（默认 null = 沿用既有「起播即播放」行为）。
+                    // 必须在 loadfile 之后设置，否则会被 loadfile 重置为新文件默认的播放态。
+                    if (s.startPaused == true) {
+                        m.setPropertyBoolean("pause", true)
+                        withCurrent(run) { _uiState.update { it.copy(isPlaying = false) } }
+                    }
                     val resources = Resources(run, m, b)
                     // Publication and invalidation are atomic; release cannot miss a newly published handle.
                     synchronized(stateLock) {
