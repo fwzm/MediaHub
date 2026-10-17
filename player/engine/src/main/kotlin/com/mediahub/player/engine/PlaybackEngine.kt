@@ -125,6 +125,17 @@ class PlaybackEngine(
             /* handleAudioFocus = */ true,
         )
         player.addListener(object : Player.Listener {
+            /**
+             * G3：播放意图必须单独上报。
+             *
+             * [onIsPlayingChanged] 反映的是「实际是否在出帧/出声」，在缓冲、音频焦点被抑制、
+             * surface 未就绪时为 false，但用户并没有暂停。UI 的播放/暂停按钮必须以意图为准，
+             * 否则缓冲时图标会闪成「播放」，用户点它反而变成「继续播放」。
+             */
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                _uiState.update { it.copy(playWhenReady = playWhenReady) }
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
                     session?.trace?.record(PlaybackStartupTrace.Milestone.PLAYING)
@@ -248,7 +259,8 @@ class PlaybackEngine(
         player.setMediaItem(mediaItem)
         player.prepare()
         retryAudioSpectrumCapture()
-        player.playWhenReady = true
+        // G3：降级重播必须尊重暂停意图（默认 null = 沿用既有「起播即播放」行为）。
+        player.playWhenReady = session.startPaused != true
         val startPosition = session.startPositionMs ?: session.resumePositionMs
         if (startPosition != null && startPosition > 0) {
             player.seekTo(startPosition)
@@ -259,6 +271,7 @@ class PlaybackEngine(
         _uiState.value = PlaybackUiState(
             durationMs = session.source.durationMs ?: 0,
             mediaTitle = session.itemTitle,
+            playWhenReady = player.playWhenReady,
         )
         startProgressLoop()
         logger.i(LogTag.PLAYER, "开始播放 serverId=${session.serverId} itemId=${session.itemId}")
@@ -266,18 +279,30 @@ class PlaybackEngine(
 
     // ---- 控制 ----
 
+    /**
+     * 暂停/继续切换（G3 修复）。
+     *
+     * **判据必须是 playWhenReady（播放意图），不是 isPlaying（实际在播状态）。**
+     * Media3 的 isPlaying 在「已请求播放但尚未真正开始」的窗口里为 false ——
+     * 缓冲中、STATE_BUFFERING、音频焦点短暂丢失、surface 未就绪等都会命中。
+     * 用 isPlaying 判定会让「第一次点击本意是暂停」被解释成 resume，
+     * 用户看到的现象正是「点了暂停，位置还在继续走」。
+     */
     override fun togglePlayPause() {
-        if (player.isPlaying) pause() else resume()
+        if (player.playWhenReady) pause() else resume()
     }
 
     fun pause() {
         player.pause()
+        // 立即同步意图，不等 onPlayWhenReadyChanged 回调（按钮图标必须立刻翻转）。
+        _uiState.update { it.copy(playWhenReady = false) }
         _events.trySend(PlaybackEvent.Paused)
     }
 
     fun resume() {
         _events.trySend(PlaybackEvent.Resumed)
         player.play()
+        _uiState.update { it.copy(playWhenReady = true) }
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) {

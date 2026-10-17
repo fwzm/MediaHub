@@ -66,21 +66,29 @@ class ProviderImageAuthStore @Inject constructor(
     }
 
     /** 图片 URL → 鉴权头；非 known scope / 归属歧义 / 未登录返回 null（fail closed）。 */
-    fun headersForUrl(url: HttpUrl): Map<String, String>? {
+    /** 由请求 URL 唯一解析所属 serverId；无法唯一归属 -> null（fail closed，与凭据归属同一规则）。 */
+    fun serverIdForUrl(url: HttpUrl): String? = bestScopeFor(url)?.serverId
+
+    /**
+     * 唯一命中作用域（最长 path 前缀优先；同前缀多 serverId -> null）。
+     * UA 归属与凭据归属共用本实现，避免两套映射规则漂移。
+     */
+    private fun bestScopeFor(url: HttpUrl): AuthScope? {
         val origin = Origin(url.scheme, url.host, url.port)
         val requestSegments = url.encodedPath.split('/').filter { it.isNotEmpty() }
-
         val matched = authScopes
             .filter { it.origin == origin }
             .filter { isPathPrefix(requestSegments, it.scopeSegments) }
         if (matched.isEmpty()) return null
-
-        // 最长前缀（path-segment 数）优先
         val bestLength = matched.maxOf { it.scopeSegments.size }
         val best = matched.filter { it.scopeSegments.size == bestLength }
-        // 同 scope 多 serverId：URL 无法安全归属 → fail closed
         if (best.map { it.serverId }.distinct().size > 1) return null
-        val resolved = best.first()
+        return best.first()
+    }
+
+    /** 图片 URL -> 鉴权头；非 known scope / 归属歧义 / 未登录返回 null（fail closed）。 */
+    fun headersForUrl(url: HttpUrl): Map<String, String>? {
+        val resolved = bestScopeFor(url) ?: return null
         return runBlocking { resolved.contributor.headersFor(resolved.serverId) }
     }
 

@@ -33,6 +33,9 @@ import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.ProgressSyncCoordinator
 import com.mediahub.player.engine.SubtitleCapabilities
+import com.mediahub.player.compatibility.DeviceCapabilitiesProvider
+import com.mediahub.player.compatibility.DevicePlaybackAssessment
+import com.mediahub.player.compatibility.DevicePlaybackAssessor
 import com.mediahub.player.engine.SwitchablePlaybackEngine
 import com.mediahub.player.engine.TrackSelection
 import com.mediahub.provider.api.MediaProviderRegistry
@@ -114,6 +117,9 @@ data class PlayerCombinedState(
     val speed: Float = 1f,
     val mediaTitle: String? = null,
     val error: com.mediahub.core.network.PlaybackError? = null,
+    /** G3：用户播放意图（缓冲时 isPlaying=false 但本字段仍为 true）。 */
+    val playWhenReady: Boolean = false,
+    val isEnded: Boolean = false,
 )
 
 private object SubtitleMemoryOwnership {
@@ -135,6 +141,14 @@ class PlayerViewModel @Inject constructor(
     private val artworkPaletteLoader: ArtworkPaletteLoader,
     private val logger: Logger,
     private val importedSubtitleResolver: ImportedSubtitleResolver? = null,
+    /**
+     * 设备能力采集（ADR-042）。null = 没有设备证据（单元测试 / 无 Android 运行时），
+     * 此时评估一律 UNKNOWN，选路退回既有默认行为，不做任何"不支持"的推断。
+     *
+     * 采集结果由实现内部缓存，[DeviceCapabilitiesProvider.get] 在起播同步路径上只读缓存；
+     * 冷启动的首次枚举由 app 层预热，不在播放线程上触发。
+     */
+    private val deviceCapabilitiesProvider: DeviceCapabilitiesProvider? = null,
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
     // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（见 core:common）
@@ -163,6 +177,14 @@ class PlayerViewModel @Inject constructor(
         history = engineHistory,
         modeProvider = { latestPreferences.playbackEngineMode },
         logger = logger,
+        deviceAssessmentProvider = { source ->
+            val caps = deviceCapabilitiesProvider
+            if (caps == null) {
+                DevicePlaybackAssessment.UNKNOWN
+            } else {
+                DevicePlaybackAssessor.assess(source, caps.get())
+            }
+        },
     )
     val engine: PlaybackEnginePort = switchableEngine
 
@@ -542,6 +564,8 @@ class PlayerViewModel @Inject constructor(
                 speed = player.speed,
                 mediaTitle = player.mediaTitle,
                 error = player.error,
+                playWhenReady = player.playWhenReady,
+                isEnded = player.isEnded,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerCombinedState())
 

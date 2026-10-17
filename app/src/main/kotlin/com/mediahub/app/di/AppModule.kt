@@ -108,9 +108,73 @@ object AppModule {
         cleaners: Set<@JvmSuppressWildcards com.mediahub.provider.api.ProviderSessionCleaner>,
     ): SessionStoreCleaner = com.mediahub.provider.api.CompositeSessionStoreCleaner(cleaners)
 
+    /**
+     * M0-A（ADR-045）+ M0-A3 真机缺陷修复：URL -> serverId 解析。
+     *
+     * 先用**覆盖所有服务器类型**的 [ServerUrlIndex]（WebDAV / LOCAL 没有图片鉴权作用域，
+     * 旧实现会解析不到 serverId → 自定义 UA 不生效，真机实测复现）；
+     * 再回落到图片鉴权作用域，保持与凭据归属一致的最长前缀 + fail-closed 语义。
+     */
     @Provides
     @Singleton
-    fun provideHttpClientFactory(logger: Logger): HttpClientFactory = HttpClientFactory(logger)
+    fun provideServerIdResolver(
+        urlIndex: com.mediahub.app.net.ServerUrlIndex,
+        store: com.mediahub.app.image.ProviderImageAuthStore,
+    ): com.mediahub.core.network.ServerIdResolver =
+        com.mediahub.core.network.ServerIdResolver { url ->
+            urlIndex.serverIdFor(url) ?: store.serverIdForUrl(url)
+        }
+
+    /** M0-A 闭环：接口 → DataStore 实现的绑定（实现类自身可注入，此处按接口暴露）。 */
+    @Provides
+    @Singleton
+    fun provideServerUserAgentRepository(
+        impl: com.mediahub.core.database.repository.DataStoreServerUserAgentRepository,
+    ): com.mediahub.core.database.repository.ServerUserAgentRepository = impl
+
+    /**
+     * M0-A（ADR-045）：全局 UA 策略。自定义覆盖来自 [ServerUserAgentRepository] 的
+     * **同步快照**（拦截器运行在请求线程上，不能 suspend）；未配置 / 非法值一律回落默认 UA。
+     */
+    @Provides
+    @Singleton
+    fun provideUserAgentPolicy(
+        serverUserAgent: com.mediahub.core.database.repository.ServerUserAgentRepository,
+    ): com.mediahub.core.network.UserAgentPolicy =
+        com.mediahub.core.network.UserAgentPolicy(
+            // 首次加载未完成时做**有界等待**（只等信号，拦截器线程不做 DataStore I/O），
+            // 避免在已保存配置尚未读出时静默发出与配置不一致的请求。
+            overrides = { serverUserAgent.snapshotBlocking() },
+            // 默认 UA 使用真实应用版本，不再硬编码 MediaHub/1.0。
+            defaultUserAgent = com.mediahub.core.network.MediaHubUserAgent.ofVersion(
+                com.mediahub.app.BuildConfig.VERSION_NAME,
+                android.os.Build.VERSION.RELEASE,
+            ),
+        )
+
+    @Provides
+    @Singleton
+    fun provideHttpClientFactory(
+        logger: Logger,
+        userAgentPolicy: com.mediahub.core.network.UserAgentPolicy,
+        serverIdFor: com.mediahub.core.network.ServerIdResolver,
+    ): HttpClientFactory = HttpClientFactory(logger, userAgentPolicy, serverIdFor)
+
+    /**
+     * M16-G4：网络交换观测台账（进程内单例）。
+     *
+     * 设计约束（见 AGENTS.md 与 docs/reviews/m16-s0-metric-definition.md）：
+     * - **纯内存**、有界聚合，不持久化任何请求级细节；
+     * - 不携带 URL / path / query / token / cookie / Authorization / UA / 服务器名；
+     * - 观测是**可选**的：未被注入的调用方保持"不观测"的旧行为。
+     *
+     * 单例是必需的 —— Media3、Coil、mpv 桥必须上报到**同一张**台账，
+     * 否则 partialObservability 与计数会分散在多个实例里而无法汇总。
+     */
+    @Provides
+    @Singleton
+    fun provideNetworkExchangeLedger(): com.mediahub.core.network.NetworkExchangeLedger =
+        com.mediahub.core.network.NetworkExchangeLedger()
 
     @Provides
     @Singleton
@@ -148,7 +212,19 @@ object AppModule {
     fun providePlayerFactory(
         @ApplicationContext context: Context,
         mediaCacheProvider: MediaCacheProvider,
-    ): PlayerFactory = PlayerFactory(context, mediaCacheProvider)
+        userAgentPolicy: com.mediahub.core.network.UserAgentPolicy,
+        serverIdFor: com.mediahub.core.network.ServerIdResolver,
+        // M16/G4：Media3 取流路径的观测入口。**必须注入**，否则
+        // PlayerFactory.mediaDataSourceFactory 永远不会调用 recordUnobservable(MEDIA)，
+        // 台账会把"真实出网"表述成"零交换"（AGENTS.md §7.4 的伪造 0）。
+        networkLedger: com.mediahub.core.network.NetworkExchangeLedger,
+    ): PlayerFactory = PlayerFactory(
+        context,
+        mediaCacheProvider,
+        userAgentPolicy,
+        serverIdFor,
+        ledger = networkLedger,
+    )
 
     // U3-A：双内核工厂（Media3 快速路径 / mpv 兼容兜底），由 SwitchablePlaybackEngine
     // 按PlaybackEngineSelector + 失败指纹决定实际使用哪个；用户可在设置页强制指定。
@@ -167,7 +243,49 @@ object AppModule {
         @ApplicationContext context: Context,
         logger: Logger,
         httpClientFactory: HttpClientFactory,
-    ): PlaybackEngineCreator = MpvPlaybackEngineCreator(context, logger, httpClientFactory)
+        // M5-1 联合集成：复用 ADR-042 的**单一** DeviceCapabilitiesProvider 单例。
+        // 集成前 M1/M2 各自创建了一个采集器（两个 MediaCodecList 枚举 + 两个预热线程），
+        // 现统一为同一实例：线程安全（实现内部 synchronized 缓存）、进程内有效，
+        // 且不携带任何服务器/会话可变状态，因此不存在跨服务器或跨会话的状态污染。
+        deviceCapabilities: com.mediahub.player.compatibility.DeviceCapabilitiesProvider,
+        // M16/G4：mpv 回环接入 / 本地文件读取的观测台账（同上，必须注入）。
+        networkLedger: com.mediahub.core.network.NetworkExchangeLedger,
+    ): PlaybackEngineCreator {
+        return MpvPlaybackEngineCreator(
+            context,
+            logger,
+            httpClientFactory,
+            com.mediahub.player.mpv.DeviceHdrEvidenceProvider { hdr ->
+                if (hdr == com.mediahub.model.HdrType.NONE) {
+                    true
+                } else {
+                    val caps = runCatching { deviceCapabilities.get() }.getOrNull()
+                    if (caps == null || caps.hdrSupported.isEmpty()) null else hdr in caps.hdrSupported
+                }
+            },
+            networkLedger,
+        )
+    }
+
+    /**
+     * 设备能力采集（ADR-042）：结果在实现内部缓存（进程内不变）。
+     * 首次枚举 MediaCodecList / Display 需要数十毫秒，这里在后台预热，
+     * 保证起播同步路径只读缓存（不增加正常视频起播延迟）。
+     */
+    @Provides
+    @Singleton
+    fun provideDeviceCapabilitiesProvider(
+        @ApplicationContext context: Context,
+    ): com.mediahub.player.compatibility.DeviceCapabilitiesProvider {
+        val provider = com.mediahub.player.compatibility.AndroidDeviceCapabilitiesProvider(context)
+        Thread {
+            runCatching { provider.get() }
+        }.apply {
+            isDaemon = true
+            name = "device-capabilities-warmup"
+        }.start()
+        return provider
+    }
 
     @Provides
     @Singleton

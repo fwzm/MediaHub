@@ -4,6 +4,9 @@ import com.mediahub.core.network.PlaybackError
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
+import com.mediahub.player.compatibility.AxisAssessment
+import com.mediahub.player.compatibility.CapabilityEvidence
+import com.mediahub.player.compatibility.DevicePlaybackAssessment
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
@@ -61,6 +64,7 @@ class SwitchablePlaybackEngineTest {
         history: EnginePreferenceHistory = InMemoryEnginePreferenceHistory(),
         mode: PlaybackEngineMode = PlaybackEngineMode.AUTO,
         audioSilentGraceMs: Long = 2_000L,
+        device: (PlaybackSource) -> DevicePlaybackAssessment = { DevicePlaybackAssessment.UNKNOWN },
     ) = SwitchablePlaybackEngine(
         scope = scope,
         media3Factory = PlaybackEngineCreator { media3 },
@@ -69,6 +73,7 @@ class SwitchablePlaybackEngineTest {
         modeProvider = { mode },
         logger = noOpLogger,
         audioSilentGraceMs = audioSilentGraceMs,
+        deviceAssessmentProvider = device,
     )
 
     // ---- 初始选择 ----
@@ -101,6 +106,119 @@ class SwitchablePlaybackEngineTest {
         assertNull(media3.playedSession)
     }
 
+    // ---- 设备能力证据选路（ADR-042）----
+
+    private fun assessment(
+        video: CapabilityEvidence = CapabilityEvidence.UNKNOWN,
+        audio: CapabilityEvidence = CapabilityEvidence.UNKNOWN,
+    ) = DevicePlaybackAssessment(
+        video = AxisAssessment(video, "test-video"),
+        audio = AxisAssessment(audio, "test-audio"),
+        hdr = AxisAssessment.unknown("test"),
+        dolbyVision = AxisAssessment.unknown("test"),
+    )
+
+    @Test
+    fun `device unsupported video codec routes to mpv`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv, device = { assessment(video = CapabilityEvidence.UNSUPPORTED) })
+        engine.play(session(source()))
+        runCurrent()
+
+        assertEquals(EngineKind.MPV, engine.kind)
+        assertEquals(session(source()), mpv.playedSession)
+        assertNull(media3.playedSession)
+    }
+
+    @Test
+    fun `device unsupported audio codec routes to mpv`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv, device = { assessment(audio = CapabilityEvidence.UNSUPPORTED) })
+        engine.play(session(source()))
+        runCurrent()
+
+        assertEquals(EngineKind.MPV, engine.kind)
+        assertNull(media3.playedSession)
+    }
+
+    @Test
+    fun `unknown device evidence keeps the media3 default`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv, device = { assessment() })
+        engine.play(session(source()))
+        runCurrent()
+
+        assertEquals(EngineKind.MEDIA3, engine.kind)
+        assertNull(mpv.playedSession)
+    }
+
+    @Test
+    fun `device assessment failure is treated as unknown and never blocks playback`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv, device = { error("device enumeration exploded") })
+        engine.play(session(source()))
+        runCurrent()
+
+        assertEquals(EngineKind.MEDIA3, engine.kind)
+        assertEquals(session(source()), media3.playedSession)
+    }
+
+    @Test
+    fun `user forced media3 is not overridden by unsupported device evidence`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(
+            backgroundScope, media3, mpv,
+            mode = PlaybackEngineMode.MEDIA3,
+            device = { assessment(video = CapabilityEvidence.UNSUPPORTED, audio = CapabilityEvidence.UNSUPPORTED) },
+        )
+        engine.play(session(source()))
+        runCurrent()
+
+        assertEquals(EngineKind.MEDIA3, engine.kind)
+        assertEquals(session(source()), media3.playedSession)
+    }
+
+    @Test
+    fun `fallback still reaches mpv once when device evidence chose media3`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv, device = { assessment() })
+        engine.play(session(source()))
+        runCurrent()
+        assertEquals(EngineKind.MEDIA3, engine.kind)
+
+        media3.updateState { it.copy(positionMs = 7_000, error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }
+        runCurrent()
+
+        assertEquals(EngineKind.MPV, engine.kind)
+        assertEquals(7_000L, mpv.playedSession?.startPositionMs)
+    }
+
+    @Test
+    fun `consecutive sessions isolate device based engine choice`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        var evidence = CapabilityEvidence.UNSUPPORTED
+        val engine = facade(backgroundScope, media3, mpv, device = { assessment(video = evidence) })
+
+        engine.play(session(source()))
+        runCurrent()
+        assertEquals(EngineKind.MPV, engine.kind)
+
+        evidence = CapabilityEvidence.UNKNOWN
+        engine.stop()
+        engine.play(session(source(container = "mp4")))
+        runCurrent()
+
+        assertEquals(EngineKind.MEDIA3, engine.kind)
+        assertEquals(session(source(container = "mp4")), media3.playedSession)
+    }
+
     // ---- 错误降级 ----
 
     @Test
@@ -129,6 +247,52 @@ class SwitchablePlaybackEngineTest {
         assertTrue(media3.released)
         // switching 状态回落
         assertFalse(engine.switching.value)
+    }
+
+    @Test
+    fun `paused session stays paused after fallback to mpv`() = runTest(dispatcher) {
+        // G3 真实缺陷：降级重播此前无条件起播，把**已暂停**的会话重新播起来。
+        // 契约：降级必须把「暂停意图」带给新引擎（PlaybackSession.startPaused）。
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.play(session(source()))
+        runCurrent()
+
+        // 用户在 Media3 上暂停（uiState.isPlaying == false），随后发生解码错误触发降级
+        media3.updateState { it.copy(positionMs = 42_000, isPlaying = false) }
+        media3.updateState { it.copy(error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }
+        runCurrent()
+
+        assertEquals(EngineKind.MPV, engine.kind)
+        assertEquals(42_000L, mpv.playedSession?.startPositionMs)
+        assertEquals(
+            "降级必须携带暂停意图，否则暂停中的会话会被重新起播",
+            true,
+            mpv.playedSession?.startPaused,
+        )
+    }
+
+    @Test
+    fun `playing session stays playing after fallback to mpv`() = runTest(dispatcher) {
+        // 反向守卫：不能为了方便把所有降级都变成暂停。
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.play(session(source()))
+        runCurrent()
+
+        media3.updateState { it.copy(positionMs = 30_000, isPlaying = true) }
+        media3.updateState { it.copy(error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }
+        runCurrent()
+
+        assertEquals(EngineKind.MPV, engine.kind)
+        assertEquals(30_000L, mpv.playedSession?.startPositionMs)
+        assertEquals(
+            "播放中的会话降级后必须继续播放（不得被误判为暂停）",
+            false,
+            mpv.playedSession?.startPaused,
+        )
     }
 
     @Test
