@@ -1,6 +1,7 @@
 package com.mediahub.player.engine
 
 import android.content.Context
+import com.mediahub.core.network.NetworkExchangeLedger
 import com.mediahub.core.network.OriginScopedCredentialInterceptor
 import com.mediahub.core.network.StartupNetworkEventListener
 import androidx.media3.common.util.UnstableApi
@@ -29,6 +30,16 @@ class PlayerFactory(
         com.mediahub.core.network.UserAgentPolicy(),
     private val serverIdFor: com.mediahub.core.network.ServerIdResolver =
         com.mediahub.core.network.ServerIdResolver { null },
+    /**
+     * M16-G4：网络交换观测台账（Media3 取流路径的可观测性边界）。
+     *
+     * 默认 null = 不观测（生产默认路径行为不变）；传入时，**每一次真实取流**
+     * （ExoPlayer 打开媒体 DataSource）都会在该起点向台账登记
+     * [com.mediahub.core.network.RequestChannel.MEDIA] 为"不可观测通道"，
+     * 使 [com.mediahub.core.network.NetworkExchangeSnapshot.partialObservability] 为 true
+     * —— 而不是把"没有计数"冒充成"零交换"。
+     */
+    private val ledger: NetworkExchangeLedger? = null,
 ) {
 
     /**
@@ -45,6 +56,28 @@ class PlayerFactory(
 
         val trackSelector = DefaultTrackSelector(context)
 
+        val mediaSourceFactory = DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(mediaDataSourceFactory(headersHolder, speedMonitor, userAgent))
+
+        return ExoPlayer.Builder(context)
+            .setRenderersFactory(renderersFactory)
+            .setTrackSelector(trackSelector)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build()
+    }
+
+    /**
+     * 生产媒体 DataSource 链（ExoPlayer 真实取流的唯一入口）。
+     *
+     * 独立成公开方法是为了让"播放真实取流路径"可被 JVM 测试直接驱动：
+     * 测试拿到的是与 [create] **完全相同**的链，而不是另造一条替身链。
+     * 接线前后行为不变（同一组 OkHttp / 缓存 / 请求头注入组件）。
+     */
+    fun mediaDataSourceFactory(
+        headersHolder: PlaybackHeadersHolder,
+        speedMonitor: PlaybackSpeedMonitor,
+        userAgent: String = USER_AGENT,
+    ): DataSource.Factory {
         // Emby Direct Stream 常重定向到 HTTP 直链（HTTPS→307→HTTP IP→对象存储），
         // redirect 由 OkHttp 原生跟随（跨协议不受限，受平台 cleartext 策略约束）。
         // 凭据隔离：media3 DefaultHttpDataSource 的手动 redirect 循环会把 DataSpec
@@ -72,18 +105,21 @@ class PlayerFactory(
             .setCache(mediaCacheProvider.cache)
             .setUpstreamDataSourceFactory(dataSourceFactory)
 
-        val headerAwareFactory = HeaderAwareDataSourceFactory(cacheDataSourceFactory) {
+        // ---- M16-G4：可观测性边界登记（GREEN）----
+        //
+        // Media3 的取流不经过 HttpClientFactory 的 apiClient/mediaClient 观测链：
+        // 它有**自己**的 OkHttpClient（见上）与自己的 DataSource 组装，
+        // 因此按交换级记账在这里既不可得、也不该伪造。
+        //
+        // 语义（见 docs/reviews/m16-s0-metric-definition.md）：
+        // 把 MEDIA 通道登记为**不可观测**，使快照的 partialObservability 为 true ——
+        // 即"未知"，而**不是**"0 次上游请求"。这一步必须发生在**真实取流起点**，
+        // 否则又是一条"API 存在但永远不被调用"的死接线。
+        ledger?.recordUnobservable(com.mediahub.core.network.RequestChannel.MEDIA)
+
+        return HeaderAwareDataSourceFactory(cacheDataSourceFactory) {
             headersHolder.headers
         }
-
-        val mediaSourceFactory = DefaultMediaSourceFactory(context)
-            .setDataSourceFactory(headerAwareFactory)
-
-        return ExoPlayer.Builder(context)
-            .setRenderersFactory(renderersFactory)
-            .setTrackSelector(trackSelector)
-            .setMediaSourceFactory(mediaSourceFactory)
-            .build()
     }
 
     private companion object {
