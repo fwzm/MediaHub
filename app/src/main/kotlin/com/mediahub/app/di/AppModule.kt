@@ -214,7 +214,17 @@ object AppModule {
         mediaCacheProvider: MediaCacheProvider,
         userAgentPolicy: com.mediahub.core.network.UserAgentPolicy,
         serverIdFor: com.mediahub.core.network.ServerIdResolver,
-    ): PlayerFactory = PlayerFactory(context, mediaCacheProvider, userAgentPolicy, serverIdFor)
+        // M16/G4：Media3 取流路径的观测入口。**必须注入**，否则
+        // PlayerFactory.mediaDataSourceFactory 永远不会调用 recordUnobservable(MEDIA)，
+        // 台账会把"真实出网"表述成"零交换"（AGENTS.md §7.4 的伪造 0）。
+        networkLedger: com.mediahub.core.network.NetworkExchangeLedger,
+    ): PlayerFactory = PlayerFactory(
+        context,
+        mediaCacheProvider,
+        userAgentPolicy,
+        serverIdFor,
+        ledger = networkLedger,
+    )
 
     // U3-A：双内核工厂（Media3 快速路径 / mpv 兼容兜底），由 SwitchablePlaybackEngine
     // 按PlaybackEngineSelector + 失败指纹决定实际使用哪个；用户可在设置页强制指定。
@@ -238,6 +248,8 @@ object AppModule {
         // 现统一为同一实例：线程安全（实现内部 synchronized 缓存）、进程内有效，
         // 且不携带任何服务器/会话可变状态，因此不存在跨服务器或跨会话的状态污染。
         deviceCapabilities: com.mediahub.player.compatibility.DeviceCapabilitiesProvider,
+        // M16/G4：mpv 回环接入 / 本地文件读取的观测台账（同上，必须注入）。
+        networkLedger: com.mediahub.core.network.NetworkExchangeLedger,
     ): PlaybackEngineCreator {
         return MpvPlaybackEngineCreator(
             context,
@@ -251,6 +263,7 @@ object AppModule {
                     if (caps == null || caps.hdrSupported.isEmpty()) null else hdr in caps.hdrSupported
                 }
             },
+            networkLedger,
         )
     }
 
