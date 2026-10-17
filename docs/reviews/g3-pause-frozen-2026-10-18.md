@@ -4,7 +4,7 @@
 
 1. **原有「暂停冻结 FAIL」是测量伪影，不是产品缺陷。** 改正测量方法后，真机 3/3 PASS。
 2. **`media key` 那条「独立实现」从未生效**，因此「两种实现各复现」的说法不成立。
-3. **另有三条真实代码缺陷**（其中两条本轮已修，先红后绿）。
+3. **另有三条真实代码缺陷**，**本轮全部修复**（均先红后绿）。
 
 ---
 
@@ -78,14 +78,13 @@ Media3 的 `isPlaying` 在**缓冲中 / 未就绪 / 音频焦点短暂丢失**�
 
 已改为读 **mpv 的权威属性 `pause`**，不依赖回调时序；读失败才回退 UI 状态。
 
-### 3.3 引擎降级重播不保留暂停意图（**未修，本轮仅记录**）
+### 3.3 引擎降级重播不保留暂停意图（**已修，见 §3.3.1**）
 
 - `SwitchablePlaybackEngine.fallbackToMpv`（:417-480）只捕获位置，`startEngine(...)` 后 `engine.play(session)` **无条件起播**（:356）。
 - `PlaybackSession`（PlaybackSession.kt:7-18）**没有暂停意图字段** → 类型系统上无法表达「降级后保持暂停」。
 - 另有竞态：降级进行中（`current` 尚未置空）用户点击，`togglePlayPause` 会发给即将被 release 的旧引擎，pause 丢失。
 
-**未修原因**：需要给 `PlaybackSession` 增加 play-intent 字段并贯穿两引擎 + 恢复路径，属接口变更，
-应单独一个增量做，不与本轮两个定点修复混在一起。
+#### 3.3.1 修复（同轮完成）
 
 ---
 
@@ -116,10 +115,19 @@ Media3 的 `isPlaying` 在**缓冲中 / 未就绪 / 音频焦点短暂丢失**�
 | media key 暂停 | 「第二种实现各复现」 | **`NOT_APPLICABLE`**（该路径不存在，命令为 no-op） |
 | Media3 暂停极性 | 未发现 | **真实缺陷，已修 + 先红后绿** |
 | mpv 暂停极性 | 未发现 | **真实缺陷，已修 + 先红后绿** |
-| 降级丢暂停意图 | 未发现 | **真实缺陷，未修（记入残余风险）** |
+| 降级丢暂停意图 | 未发现 | **真实缺陷，已修 + 先红后绿（`PlaybackSession.startPaused`）** |
 | Seek 50% | `NOT_RUN` | `NOT_RUN`（uiautomator 取不到 SeekBar，本轮未处理） |
 
-## 6. 残余风险（新增一条）
+## 6. 残余风险
 
-引擎自动降级（Media3 失败 → mpv 同位置重播）会把**已暂停**的会话重新起播；
-`PlaybackSession` 目前无语义字段可表达暂停意图。真机复现条件：暂停与降级同时发生。
+（§3.3 的「降级丢暂停意图」已在本轮修复，不再列为残余风险。）
+
+仍在的：
+
+- **降级进行中的点击竞态**：`current` 尚未置空时用户点击，`togglePlayPause` 仍会发给即将被 release 的旧引擎，该次 pause 可能丢失。属窄窗口，未修。
+- **Seek 50%** 仍 `NOT_RUN`（uiautomator 取不到可解析 SeekBar）。
+
+## 7. 回归（含 §3.3 修复后重跑）
+
+`:player:engine` + `:player:mpv` + `:core:network` + `:app` `--rerun-tasks --no-build-cache --continue`
+→ **BUILD SUCCESSFUL**（3m34s / 400 tasks），**61 类 / 441 tests / 0 failures / 0 errors / 0 skipped**。

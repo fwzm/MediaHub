@@ -248,7 +248,8 @@ class PlaybackEngine(
         player.setMediaItem(mediaItem)
         player.prepare()
         retryAudioSpectrumCapture()
-        player.playWhenReady = true
+        // G3：降级重播必须尊重暂停意图（默认 null = 沿用既有「起播即播放」行为）。
+        player.playWhenReady = session.startPaused != true
         val startPosition = session.startPositionMs ?: session.resumePositionMs
         if (startPosition != null && startPosition > 0) {
             player.seekTo(startPosition)

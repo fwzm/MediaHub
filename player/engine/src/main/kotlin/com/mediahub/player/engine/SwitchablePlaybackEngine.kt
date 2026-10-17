@@ -431,6 +431,9 @@ class SwitchablePlaybackEngine(
                 history.recordMedia3Failure(CompatibilitySignature.from(s.source).key)
                 if (!isCurrentSession(s, fallbackGeneration, failedEngine)) return@launch
                 // 保存当前位置（先取 stop() 返回值，兜底 uiState）
+                // G3：**必须在 stop() 之前**读取暂停意图 —— stop() 会把引擎状态重置为
+                // 「已停止」，之后再读就永远是"未在播放"，降级会把暂停的会话重新播起来。
+                val wasPaused = failedEngine.uiState.value.isPlaying.not()
                 val position = failedEngine.stop()?.positionMs
                     ?: _uiState.value.positionMs
                 if (!isCurrentSession(s, fallbackGeneration, failedEngine)) {
@@ -455,7 +458,11 @@ class SwitchablePlaybackEngine(
                 )
                 startEngine(
                     EngineKind.MPV,
-                    s.copy(startPositionMs = position.takeIf { it > 0 }),
+                    s.copy(
+                        startPositionMs = position.takeIf { it > 0 },
+                        // G3：把暂停意图带给新引擎；不这么做，暂停中的会话会在降级后被重新起播。
+                        startPaused = wasPaused,
+                    ),
                     fallbackGeneration,
                     expectedSession = s,
                 )
