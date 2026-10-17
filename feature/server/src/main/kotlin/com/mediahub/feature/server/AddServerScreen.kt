@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -23,8 +24,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -111,13 +118,46 @@ fun AddServerRoute(
                         singleLine = true,
                         keyboardOptions = ServerTextInputOptions,
                     )
+                    // 显示/隐藏密码：纯本地 UI 状态，不影响提交的明文；
+                    // 默认隐藏（与既有行为一致），用户可主动切换为明文以便核对自己输入。
+                    var passwordVisible by rememberSaveable { mutableStateOf(false) }
                     OutlinedTextField(
                         value = state.password,
                         onValueChange = viewModel::updatePassword,
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("密码") },
                         singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
+                        visualTransformation = if (passwordVisible) {
+                            VisualTransformation.None
+                        } else {
+                            PasswordVisualTransformation()
+                        },
+                        keyboardOptions = ServerTextInputOptions.copy(
+                            keyboardType = if (passwordVisible) {
+                                KeyboardType.Text
+                            } else {
+                                KeyboardType.Password
+                            },
+                        ),
+                        // 图标只用 icons-core 里确定存在的 Lock，避免为两个图标引入
+                        // material-icons-extended（该依赖会显著增大 APK）。
+                        // 语义由 contentDescription 明确表达，视觉上配合文案切换。
+                        trailingIcon = {
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                if (passwordVisible) {
+                                    // 明文态：用文字提示"隐藏"，比图标更不易误解
+                                    Text(
+                                        text = "隐藏",
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Lock,
+                                        contentDescription = "显示密码",
+                                    )
+                                }
+                            }
+                        },
                     )
                     Text(
                         text = if (descriptor.serverType == ServerType.WEBDAV) {

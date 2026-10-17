@@ -292,9 +292,13 @@ class AddServerViewModel @Inject constructor(
 
     companion object {
         /**
-         * 登录失败的用户可操作文案。HTTP 403（Jellyfin remote access /
-         * Known Proxies 策略拒绝）不显示裸状态码——给出可自查的指引
-         * （ADR-039 review hardening，1G device smoke 衍生 UX 修复）。
+         * 登录失败的用户可操作文案。
+         *
+         * **403 不是密码错误**：Emby/Jellyfin 对「用户名或密码错误」返回 401，
+         * 403 表示访问策略拒绝（账号被禁用 / 不允许远程访问 / IP 或反代白名单 /
+         * 权限不足）。此时密码通常是对的，因此文案必须把用户引向权限自查，
+         * 而不是让他反复重输密码（ADR-039 review hardening 的延续，
+         * 本轮补齐 Emby 侧——此前 Emby 的 403 被误报为「用户名或密码错误」）。
          */
         fun loginErrorText(e: ProviderException): String = when (e) {
             is ProviderException.AuthFailed -> "用户名或密码错误"
@@ -303,8 +307,11 @@ class AddServerViewModel @Inject constructor(
             is ProviderException.Http -> if (e.statusCode in 500..599) {
                 "服务器错误（HTTP ${e.statusCode}）"
             } else if (e.statusCode == 403) {
-                "服务器拒绝登录（HTTP 403）。请检查该账号是否允许远程连接，" +
-                    "以及 Jellyfin 的反向代理 / Known Proxies 配置。"
+                // 403 常见于：账号被禁用、不允许远程访问、IP/反代白名单拒绝、
+                // 或该账号缺少所需权限。**不要**暗示密码错误。
+                "服务器拒绝访问（HTTP 403）——这不是密码错误。\n" +
+                    "请确认：该账号是否允许远程连接、是否被管理员禁用、" +
+                    "以及服务器 / 反向代理的 IP 白名单是否放行本机。"
             } else {
                 "HTTP ${e.statusCode}"
             }
