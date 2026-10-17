@@ -42,6 +42,7 @@ class PlayerFactory(
     private val ledger: NetworkExchangeLedger? = null,
 ) {
 
+
     /**
      * @param userAgent M0-A（ADR-045）：本次播放会话应使用的 UA（由上层按服务器作用域解析）。
      *   默认值保持与历史一致，避免未经配置的调用方行为跳变。
@@ -90,6 +91,17 @@ class PlayerFactory(
             .addNetworkInterceptor(
                 com.mediahub.core.network.UserAgentInterceptor(userAgentPolicy, serverIdFor),
             )
+            // G5（ADR-046）：**只记录不抑制** 的 429 观测。
+            // 这里刻意**不**接 RateLimitCooldownInterceptor —— 它会在冷却窗口内抛异常快速失败，
+            // 对播放取流等于把可恢复的限流变成播放硬中断。本拦截器只把 429 写进台账使其可见，
+            // 请求-响应语义逐字节不变（不重试、不等待、不改响应）。
+            .apply {
+                ledger?.let { l ->
+                    addNetworkInterceptor(
+                        com.mediahub.core.network.RateLimitRecordOnlyInterceptor(l),
+                    )
+                }
+            }
             .eventListenerFactory(StartupNetworkEventListener.FACTORY)
             .connectionPool(
                 okhttp3.ConnectionPool(5, 5, java.util.concurrent.TimeUnit.MINUTES)
