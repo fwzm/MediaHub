@@ -970,9 +970,9 @@ private fun PlayerControls(
                             }
                             IconButton(onClick = onTogglePlayPause) {
                                 Icon(
-                                    if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    if (state.playWhenReady && !state.isEnded) Icons.Default.Pause else Icons.Default.PlayArrow,
                                     contentDescription = stringResource(
-                                        if (state.isPlaying) R.string.player_pause else R.string.player_play,
+                                        if (state.playWhenReady && !state.isEnded) R.string.player_pause else R.string.player_play,
                                     ),
                                     tint = MaterialTheme.colorScheme.primary,
                                 )

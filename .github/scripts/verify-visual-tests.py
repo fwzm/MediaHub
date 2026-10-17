@@ -17,6 +17,10 @@ MODULES = ("core/ui", "feature/player", "feature/settings", "provider/webdav", "
 COMMON_TESTS = {
     (
         "com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
+        "productionPauseSeekAndResumeControlsPreserveControlledProgress",
+    ),
+    (
+        "com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
         "productionPlayerInformationAndSubtitleActionsPreservePlaybackSession",
     ),
     (

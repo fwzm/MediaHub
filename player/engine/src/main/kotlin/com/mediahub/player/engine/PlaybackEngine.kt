@@ -125,6 +125,10 @@ class PlaybackEngine(
             /* handleAudioFocus = */ true,
         )
         player.addListener(object : Player.Listener {
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                _uiState.update { it.copy(playWhenReady = playWhenReady) }
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
                     session?.trace?.record(PlaybackStartupTrace.Milestone.PLAYING)
@@ -259,6 +263,7 @@ class PlaybackEngine(
         _uiState.value = PlaybackUiState(
             durationMs = session.source.durationMs ?: 0,
             mediaTitle = session.itemTitle,
+            playWhenReady = player.playWhenReady,
         )
         startProgressLoop()
         logger.i(LogTag.PLAYER, "开始播放 serverId=${session.serverId} itemId=${session.itemId}")
@@ -267,7 +272,8 @@ class PlaybackEngine(
     // ---- 控制 ----
 
     override fun togglePlayPause() {
-        if (player.isPlaying) pause() else resume()
+        // isPlaying also becomes false during buffering/suppression, without a user pause.
+        if (player.playWhenReady && player.playbackState != Player.STATE_ENDED) pause() else resume()
     }
 
     fun pause() {

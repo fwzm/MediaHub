@@ -52,17 +52,26 @@ docs/                providers / player / api 设计文档
 ## 环境要求
 
 - JDK 17+
-- Android SDK（compileSdk 35，minSdk 26，build-tools 35.0.0）
-- Gradle 8.9（仓库已带 wrapper）
+- Android SDK（compileSdk 36，minSdk 26；CI 预装 build-tools 36.0.0）
+- Gradle 8.14（使用仓库自带 wrapper）
 
 ## 构建
 
 ```bash
 # 需要 local.properties 或 ANDROID_HOME 指向 SDK
 ./gradlew assembleDebug          # 编译 + 打包 APK
-./gradlew testDebugUnitTest      # 单元测试
+# 完整单元门禁：Android task 不会包含下列三个独立 JVM 模块
+./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --continue --rerun-tasks --no-build-cache
 ./gradlew lintDebug              # Lint 检查
 ```
+
+Windows 本机先设置有效 JDK，例如 `$env:JAVA_HOME='C:\Program Files\Java\jdk-21'`，
+再用 `.\gradlew.bat` 执行。内存受限时所有 Gradle 命令追加
+`--no-daemon --no-parallel --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx2048m' '-Pkotlin.compiler.execution.strategy=in-process'`。
+PowerShell 中含点号的 `-D` / `-P` 参数需像示例一样整体加引号。
+
+GitHub CI 的 API 32/36 门禁还要求真实播放页的暂停、暂停后定位、继续播放测试实际执行；
+缺失、跳过或失败均不能通过。该测试使用可控时钟和假引擎，不能替代真机原生解码器验收。
 
 产物：`app/build/outputs/apk/debug/app-debug.apk`
 

@@ -294,7 +294,7 @@ class MpvPlaybackEngine internal constructor(
 
     private fun observer(run: Run) = object : MpvInstance.Observer {
         override fun property(name: String, value: Boolean) = withCurrent(run) {
-            if (name == "pause") _uiState.update { it.copy(isPlaying = !value) }
+            if (name == "pause") _uiState.update { it.copy(isPlaying = !value, playWhenReady = !value) }
         }
         override fun property(name: String, value: Double) = withCurrent(run) {
             when (name) {
@@ -358,9 +358,15 @@ class MpvPlaybackEngine internal constructor(
     }
 
     override fun togglePlayPause() = withNative { run, m ->
-        val playing = _uiState.value.isPlaying
-        m.setPropertyBoolean("pause", playing)
-        withCurrent(run) { _events.trySend(if (playing) PlaybackEvent.Paused else PlaybackEvent.Resumed) }
+        // Observers are asynchronous. Read native intent under nativeLock so consecutive
+        // clicks remain ordered even when the UI has not received the preceding callback.
+        val wasPaused = m.getPropertyBoolean("pause") ?: return@withNative
+        val pause = !wasPaused
+        m.setPropertyBoolean("pause", pause)
+        withCurrent(run) {
+            _uiState.update { it.copy(playWhenReady = !pause) }
+            _events.trySend(if (pause) PlaybackEvent.Paused else PlaybackEvent.Resumed)
+        }
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) = withNative { run, m ->
@@ -483,7 +489,7 @@ class MpvPlaybackEngine internal constructor(
         val run = synchronized(stateLock) {
             val old = invalidateCurrent() ?: return null
             snapshot = _uiState.value
-            _uiState.update { it.copy(isPlaying = false) }
+            _uiState.update { it.copy(isPlaying = false, playWhenReady = false) }
             _events.trySend(PlaybackEvent.Stopped)
             old
         }
@@ -577,7 +583,7 @@ class MpvPlaybackEngine internal constructor(
         return PlaybackProgress(
             serverId = s.serverId, itemId = s.itemId, positionMs = pos,
             durationMs = if (dur > 0) dur else (s.source.durationMs ?: 0),
-            isPaused = m?.getPropertyBoolean("pause") ?: !fallback.isPlaying, updatedAtEpochMs = currentTimeMillis(),
+            isPaused = m?.getPropertyBoolean("pause") ?: !fallback.playWhenReady, updatedAtEpochMs = currentTimeMillis(),
             sessionId = s.source.sessionId,
             mode = s.source.mode, itemTitle = s.itemTitle, itemType = s.itemType, posterUrl = s.posterUrl,
         )
