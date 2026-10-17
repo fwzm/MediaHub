@@ -266,8 +266,17 @@ class PlaybackEngine(
 
     // ---- 控制 ----
 
+    /**
+     * 暂停/继续切换（G3 修复）。
+     *
+     * **判据必须是 playWhenReady（播放意图），不是 isPlaying（实际在播状态）。**
+     * Media3 的 isPlaying 在「已请求播放但尚未真正开始」的窗口里为 false ——
+     * 缓冲中、STATE_BUFFERING、音频焦点短暂丢失、surface 未就绪等都会命中。
+     * 用 isPlaying 判定会让「第一次点击本意是暂停」被解释成 resume，
+     * 用户看到的现象正是「点了暂停，位置还在继续走」。
+     */
     override fun togglePlayPause() {
-        if (player.isPlaying) pause() else resume()
+        if (player.playWhenReady) pause() else resume()
     }
 
     fun pause() {
