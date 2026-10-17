@@ -735,3 +735,35 @@
 - 影响：所有出网路径（API / 进度 / 图片 / Media3 / mpv 上游 / 字幕）使用同一 UA 策略；
   第三方服务器的具体限制由服务器管理者决定，**MediaHub 不承诺绕过白名单、地区限制或账号访问控制**。
 
+
+## ADR-046 播放与图片路径的 429 只记录不抑制（record-only）
+- 状态：已采纳（2026-10-18）
+- 背景：G5 已用可重复测试固定事实 —— Media3 ExoPlayer 取流与 Coil 图片两条**生产出网路径
+  完全没有 429 冷却**（证据：`docs/reviews/g5-429-evidence.md`，4 例全绿，含对照组
+  证明已具备冷却的 `apiClient` 在同源 429 后零出网）。前者是**实际播放视频**的路径，
+  后者是列表页并发封面的路径。
+- 决策：这两条路径**只接入记录能力，不接入抑制能力**。具体为
+  `RateLimitRecordOnlyInterceptor`：仅把 429 写进 `NetworkExchangeLedger.statusCounts`，
+  **不 throw、不 sleep、不重试、不改响应**。刻意**不**复用 `RateLimitCooldownInterceptor`。
+- 理由（关键取舍）：冷却器的行为是「窗口内抛异常快速失败」。
+  对 API 链正确（幂等、可重试、失败可提示）；但对播放是**把可恢复的限流变成播放硬中断**，
+  对图片是**整屏封面集体消失**。两者都比「多打几次被限流」更糟。
+  因此本轮优先解决**可见性**（把未知变成已知），把**退避**留给上层策略。
+- 契约（由 `RateLimitRecordOnlyInterceptorTest` 4 例固定）：
+  1. 429 原样返回调用方；
+  2. 台账 `statusCounts[429]` 递增；
+  3. 429 之后**同源后续请求仍真实出网**（绝不抑制）；
+  4. 未注入台账时不插拦截器，行为与接入前逐字节一致。
+- 影响：
+  - `PlayerFactory.mediaDataSourceFactory`：`ledger != null` 时附加该 network interceptor；
+  - `MediaHubApp.imageHttpClient`：同上；
+  - **明确不接入**冷却器，也明确不改变任何请求-响应语义。
+- 已知局限（不隐瞒）：本 ADR **不解决**重试风暴，只让它可见。
+  真正退避应在上层：Media3 的 `LoadErrorHandlingPolicy`（按 `Retry-After` 退避重试）、
+  Coil 的 retry/backoff 配置。属后续切片（G5-b）。
+- 附带结论：`httpClientFactory` 派生的 API/media 链**已有**完整冷却（应用层快速失败 + network 层逐跳记账），
+  本轮未改动该逻辑。
+- 驳回的方案：
+  - 「把 `RateLimitCooldownInterceptor` 铺到所有媒体/图片客户端」—— 会造成播放硬中断与封面集体消失，
+    且无 `Retry-After` 语义保护，属扩大伤害；
+  - 「什么都不做」—— 违背 AGENTS.md §7.1 的可见性要求，限流永远不可诊断。

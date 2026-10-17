@@ -7,6 +7,7 @@ import coil.disk.DiskCache
 import com.mediahub.app.image.ProviderImageAuthInterceptor
 import com.mediahub.app.image.ProviderImageAuthStore
 import com.mediahub.core.network.NetworkExchangeLedger
+import com.mediahub.core.network.RateLimitRecordOnlyInterceptor
 import com.mediahub.core.network.OriginScopedCredentialInterceptor
 import com.mediahub.core.network.ServerIdResolver
 import com.mediahub.core.network.UserAgentInterceptor
@@ -95,6 +96,14 @@ class MediaHubApp : Application(), ImageLoaderFactory {
                 .callTimeout(30, TimeUnit.SECONDS)
                 .addInterceptor(ProviderImageAuthInterceptor(headersForUrl))
                 .addNetworkInterceptor(OriginScopedCredentialInterceptor())
+                // G5（ADR-046）：图片路径同样只**记录** 429，不抑制。
+                // 图片是并发批量请求，一旦冷却器快速失败，整屏封面会集体消失，
+                // 比"多打几次被限流"更糟。可见性交给台账，退避策略留待后续切片。
+                .apply {
+                    ledger?.let { l ->
+                        addNetworkInterceptor(RateLimitRecordOnlyInterceptor(l))
+                    }
+                }
                 // M0-A（ADR-045）：图片请求与 API / 媒体流使用同一 UA 策略。
                 .addNetworkInterceptor(UserAgentInterceptor(userAgentPolicy, serverIdFor))
                 .build()
