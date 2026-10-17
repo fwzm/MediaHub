@@ -157,6 +157,8 @@ class MpvPlaybackEngine internal constructor(
             old?.playJob?.cancel()
             old?.progressJob?.cancel()
             _uiState.value = PlaybackUiState(durationMs = session.source.durationMs ?: 0, mediaTitle = session.itemTitle)
+            // 新会话默认未暂停（mpv 新实例不暂停）；避免继承上一次会话的暂停态。
+            nativePaused = false
             // LAZY ensures stop/release can always cancel the job, even with an immediate dispatcher.
             next.playJob = scope.launch(start = CoroutineStart.LAZY) { initialize(next) }
             old
@@ -294,7 +296,13 @@ class MpvPlaybackEngine internal constructor(
 
     private fun observer(run: Run) = object : MpvInstance.Observer {
         override fun property(name: String, value: Boolean) = withCurrent(run) {
-            if (name == "pause") _uiState.update { it.copy(isPlaying = !value) }
+            if (name == "pause") {
+                // mpv 是暂停状态的**单一事实源**：观察回调是唯一可靠来源（JNI 属性拉取
+                // 在播放刚开始/切换会话时可能返回 null）。这里同时刷新 uiState 与
+                // 引擎内部的权威字段，避免 togglePlayPause 依赖可能过期的快照。
+                nativePaused = value
+                _uiState.update { it.copy(isPlaying = !value) }
+            }
         }
         override fun property(name: String, value: Double) = withCurrent(run) {
             when (name) {
@@ -357,6 +365,14 @@ class MpvPlaybackEngine internal constructor(
         }
     }
 
+    /**
+     * mpv 侧 `pause` 属性的最新值（由观察回调维护）。
+     *
+     * 初始值 false = 未暂停。每次 [Run] 重新起播时应视为未暂停（mpv 新实例默认不暂停）。
+     */
+    @Volatile
+    private var nativePaused: Boolean = false
+
     override fun togglePlayPause() = withNative { run, m ->
         // G3 修复：**不得**用 _uiState.value.isPlaying 推断 mpv 当前是否在播放。
         //
@@ -369,7 +385,8 @@ class MpvPlaybackEngine internal constructor(
         // 正确做法：以 **mpv 自己的 pause 属性**为准（单一事实源）。
         // 读不到（null）时保守地按"当前在播放"处理 —— 即点击的语义是"暂停"，
         // 这符合用户意图，也不会把正在播放的会话误置为播放。
-        val pausedNow = m.getPropertyBoolean("pause") ?: false
+        // 优先用观察回调维护的权威值；仅在从未收到过回调时回退到 JNI 拉取。
+        val pausedNow = nativePaused || (m.getPropertyBoolean("pause") ?: false)
         val requestPause = !pausedNow
         m.setPropertyBoolean("pause", requestPause)
         withCurrent(run) {
