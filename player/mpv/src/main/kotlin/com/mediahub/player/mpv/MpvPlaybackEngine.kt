@@ -358,9 +358,24 @@ class MpvPlaybackEngine internal constructor(
     }
 
     override fun togglePlayPause() = withNative { run, m ->
-        val playing = _uiState.value.isPlaying
-        m.setPropertyBoolean("pause", playing)
-        withCurrent(run) { _events.trySend(if (playing) PlaybackEvent.Paused else PlaybackEvent.Resumed) }
+        // G3 修复：**不得**用 _uiState.value.isPlaying 推断 mpv 当前是否在播放。
+        //
+        // 该字段的唯一更新源是 mpv 的 `pause` 属性观察回调；起播阶段该回调可能尚未到达
+        // （或尚未把状态置为 true），此时 isPlaying 仍为构造默认值 false。
+        // 用它决定写入值会导致：点「暂停」→ setPropertyBoolean("pause", false) → **继续播放**，
+        // 表现为「暂停无效、位置继续推进」（真机 EXECUTED_FAIL 多轮复现，
+        // 单测 MpvPauseToggleContractTest 已固定：实际写入 (pause, false)）。
+        //
+        // 正确做法：以 **mpv 自己的 pause 属性**为准（单一事实源）。
+        // 读不到（null）时保守地按"当前在播放"处理 —— 即点击的语义是"暂停"，
+        // 这符合用户意图，也不会把正在播放的会话误置为播放。
+        val pausedNow = m.getPropertyBoolean("pause") ?: false
+        val requestPause = !pausedNow
+        m.setPropertyBoolean("pause", requestPause)
+        withCurrent(run) {
+            _uiState.update { it.copy(isPlaying = !requestPause) }
+            _events.trySend(if (requestPause) PlaybackEvent.Paused else PlaybackEvent.Resumed)
+        }
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) = withNative { run, m ->
