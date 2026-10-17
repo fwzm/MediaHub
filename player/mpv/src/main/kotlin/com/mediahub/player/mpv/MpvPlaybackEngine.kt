@@ -69,10 +69,15 @@ class MpvPlaybackEngine internal constructor(
         scope: CoroutineScope,
         httpClientFactory: HttpClientFactory,
         hdrEvidence: DeviceHdrEvidenceProvider = DeviceHdrEvidenceProvider { null },
+        /**
+         * M16/G4：观测台账。**生产必须传入**（AppModule 注入单例），默认 null 仅用于既有测试。
+         * 传了才会在回环接入 / 本地文件读取处上报，否则这些通道恒为未计数。
+         */
+        ledger: com.mediahub.core.network.NetworkExchangeLedger? = null,
     ) : this(
         logger,
         scope,
-        { createMpvBridge(httpClientFactory) },
+        { createMpvBridge(httpClientFactory, ledger) },
         { createMpvInstance(context) },
         SystemClock::elapsedRealtime,
         System::currentTimeMillis,
