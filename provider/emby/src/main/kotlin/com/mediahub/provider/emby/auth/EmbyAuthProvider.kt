@@ -227,7 +227,13 @@ class EmbyAuthProvider(
 
     private fun mapLoginFailure(e: Exception): AuthResult.Failure = when (e) {
         is ApiException -> when {
-            e.statusCode == 401 || e.statusCode == 403 ->
+            // 仅 **401** 报凭据错误。
+            //
+            // **403 = 访问策略拒绝，必须保留 HTTP 语义**（对齐 Jellyfin 的既有修正）。
+            // Emby 官方对「用户名/密码错误」返回 401；403 通常表示：账号被禁用、
+            // 不允许远程访问、IP/反代白名单拒绝，或该账号缺少所需权限 ——
+            // 这些情况下**密码往往是对的**，报「密码错误」会把用户引向错误的自查方向。
+            e.statusCode == 401 ->
                 AuthResult.Failure(ProviderException.AuthFailed(server.id, "用户名或密码错误"))
             e.statusCode in 500..599 ->
                 AuthResult.Failure(ProviderException.Http(server.id, e.statusCode, e.url, e.method, e.requestId))

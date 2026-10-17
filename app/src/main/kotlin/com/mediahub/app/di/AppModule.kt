@@ -160,6 +160,22 @@ object AppModule {
         serverIdFor: com.mediahub.core.network.ServerIdResolver,
     ): HttpClientFactory = HttpClientFactory(logger, userAgentPolicy, serverIdFor)
 
+    /**
+     * M16-G4：网络交换观测台账（进程内单例）。
+     *
+     * 设计约束（见 AGENTS.md 与 docs/reviews/m16-s0-metric-definition.md）：
+     * - **纯内存**、有界聚合，不持久化任何请求级细节；
+     * - 不携带 URL / path / query / token / cookie / Authorization / UA / 服务器名；
+     * - 观测是**可选**的：未被注入的调用方保持"不观测"的旧行为。
+     *
+     * 单例是必需的 —— Media3、Coil、mpv 桥必须上报到**同一张**台账，
+     * 否则 partialObservability 与计数会分散在多个实例里而无法汇总。
+     */
+    @Provides
+    @Singleton
+    fun provideNetworkExchangeLedger(): com.mediahub.core.network.NetworkExchangeLedger =
+        com.mediahub.core.network.NetworkExchangeLedger()
+
     @Provides
     @Singleton
     fun provideEndpointTestService(factory: HttpClientFactory): com.mediahub.core.network.EndpointTestService =
