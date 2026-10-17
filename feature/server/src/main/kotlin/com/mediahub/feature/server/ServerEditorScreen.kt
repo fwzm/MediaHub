@@ -211,7 +211,12 @@ fun ServerEditorRoute(
                     ) {
                         state.testResult?.let { r ->
                             Text(
-                                if (r.ok) "连接成功" else (r.message ?: "连接失败"),
+                                // P3：失败时补上按 errorCode 得出的可操作指引（此前该字段从未被消费）。
+                                if (r.ok) {
+                                    "连接成功"
+                                } else {
+                                    listOfNotNull(r.message, r.toActionableHint()).joinToString(String(charArrayOf(10.toChar())))
+                                },
                                 color = if (r.ok) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodySmall,
                             )
