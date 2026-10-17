@@ -357,10 +357,22 @@ class MpvPlaybackEngine internal constructor(
         }
     }
 
+    /**
+     * 暂停/继续切换（G3 修复）。
+     *
+     * 旧实现读 [_uiState].isPlaying —— 那是**异步 observer 回调**写入的派生状态，
+     * 在起播瞬间（pause 属性首次回传前）恒为 false，于是「第一次点击暂停」会走成
+     * resume 分支（只把 pause 设成 false，什么都不改变），表现为暂停无效、
+     * 位置继续推进。
+     *
+     * 现在直接读 **mpv 的权威属性 pause**：同步反映真实播放意图，不依赖回调时序。
+     * 读失败（属性不可用）时才回退到 UI 状态。
+     */
     override fun togglePlayPause() = withNative { run, m ->
-        val playing = _uiState.value.isPlaying
-        m.setPropertyBoolean("pause", playing)
-        withCurrent(run) { _events.trySend(if (playing) PlaybackEvent.Paused else PlaybackEvent.Resumed) }
+        val paused = m.getPropertyBoolean("pause") ?: !_uiState.value.isPlaying
+        // 当前是暂停态 → 本次点击是继续（pause=false）；否则是暂停（pause=true）。
+        m.setPropertyBoolean("pause", !paused)
+        withCurrent(run) { _events.trySend(if (paused) PlaybackEvent.Resumed else PlaybackEvent.Paused) }
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) = withNative { run, m ->
