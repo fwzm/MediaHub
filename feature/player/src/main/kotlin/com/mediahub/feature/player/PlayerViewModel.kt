@@ -117,6 +117,9 @@ data class PlayerCombinedState(
     val speed: Float = 1f,
     val mediaTitle: String? = null,
     val error: com.mediahub.core.network.PlaybackError? = null,
+    /** G3：用户播放意图（缓冲时 isPlaying=false 但本字段仍为 true）。 */
+    val playWhenReady: Boolean = false,
+    val isEnded: Boolean = false,
 )
 
 private object SubtitleMemoryOwnership {
@@ -561,6 +564,8 @@ class PlayerViewModel @Inject constructor(
                 speed = player.speed,
                 mediaTitle = player.mediaTitle,
                 error = player.error,
+                playWhenReady = player.playWhenReady,
+                isEnded = player.isEnded,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerCombinedState())
 

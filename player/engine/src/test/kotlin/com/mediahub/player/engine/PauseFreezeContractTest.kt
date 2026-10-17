@@ -177,4 +177,35 @@ class PauseFreezeContractTest {
             engine.release()
         }
     }
+
+    @Test
+    fun `playWhenReady is exposed separately from isPlaying while buffering`() = runTest {
+        // G3：缓冲中 isPlaying=false 但用户并未暂停。UI 的播放/暂停图标必须跟随意图，
+        // 否则图标会闪成「播放」，用户点它反而变成继续播放。
+        val state = FakeState().apply { positionMs = 5_000L }
+        val engine = engine(StandardTestDispatcher(testScheduler), state)
+        try {
+            engine.play(session())
+            runCurrent()
+            assertEquals("起播后意图应为播放", true, engine.uiState.value.playWhenReady)
+
+            // 模拟 Media3 进入缓冲：isPlaying=false，但 playWhenReady 仍为 true。
+            state.playing = false
+            state.playWhenReady = true
+            // 没有 onPlayWhenReadyChanged 回调 → 意图不应被 IsPlayingChanged 带偏
+            advanceTimeBy(1_100); runCurrent()
+            assertEquals(
+                "缓冲时 isPlaying 可变为 false，但 playWhenReady 必须保持 true（用户没有暂停）",
+                true,
+                engine.uiState.value.playWhenReady,
+            )
+
+            // 用户真正暂停后，意图必须立刻翻转（不等异步回调）
+            engine.togglePlayPause()
+            runCurrent()
+            assertEquals("点击暂停后意图必须立刻为 false", false, engine.uiState.value.playWhenReady)
+        } finally {
+            engine.release()
+        }
+    }
 }

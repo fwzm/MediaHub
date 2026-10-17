@@ -125,6 +125,17 @@ class PlaybackEngine(
             /* handleAudioFocus = */ true,
         )
         player.addListener(object : Player.Listener {
+            /**
+             * G3：播放意图必须单独上报。
+             *
+             * [onIsPlayingChanged] 反映的是「实际是否在出帧/出声」，在缓冲、音频焦点被抑制、
+             * surface 未就绪时为 false，但用户并没有暂停。UI 的播放/暂停按钮必须以意图为准，
+             * 否则缓冲时图标会闪成「播放」，用户点它反而变成「继续播放」。
+             */
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                _uiState.update { it.copy(playWhenReady = playWhenReady) }
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
                     session?.trace?.record(PlaybackStartupTrace.Milestone.PLAYING)
@@ -260,6 +271,7 @@ class PlaybackEngine(
         _uiState.value = PlaybackUiState(
             durationMs = session.source.durationMs ?: 0,
             mediaTitle = session.itemTitle,
+            playWhenReady = player.playWhenReady,
         )
         startProgressLoop()
         logger.i(LogTag.PLAYER, "开始播放 serverId=${session.serverId} itemId=${session.itemId}")
@@ -282,12 +294,15 @@ class PlaybackEngine(
 
     fun pause() {
         player.pause()
+        // 立即同步意图，不等 onPlayWhenReadyChanged 回调（按钮图标必须立刻翻转）。
+        _uiState.update { it.copy(playWhenReady = false) }
         _events.trySend(PlaybackEvent.Paused)
     }
 
     fun resume() {
         _events.trySend(PlaybackEvent.Resumed)
         player.play()
+        _uiState.update { it.copy(playWhenReady = true) }
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) {

@@ -258,7 +258,7 @@ class MpvPlaybackEngine internal constructor(
                     // 必须在 loadfile 之后设置，否则会被 loadfile 重置为新文件默认的播放态。
                     if (s.startPaused == true) {
                         m.setPropertyBoolean("pause", true)
-                        withCurrent(run) { _uiState.update { it.copy(isPlaying = false) } }
+                        withCurrent(run) { _uiState.update { it.copy(isPlaying = false, playWhenReady = false) } }
                     }
                     val resources = Resources(run, m, b)
                     // Publication and invalidation are atomic; release cannot miss a newly published handle.
@@ -300,7 +300,8 @@ class MpvPlaybackEngine internal constructor(
 
     private fun observer(run: Run) = object : MpvInstance.Observer {
         override fun property(name: String, value: Boolean) = withCurrent(run) {
-            if (name == "pause") _uiState.update { it.copy(isPlaying = !value) }
+            // G3：pause 属性同时表达「是否暂停」，因此它既是实际状态也是用户意图。
+            if (name == "pause") _uiState.update { it.copy(isPlaying = !value, playWhenReady = !value) }
         }
         override fun property(name: String, value: Double) = withCurrent(run) {
             when (name) {
@@ -378,7 +379,11 @@ class MpvPlaybackEngine internal constructor(
         val paused = m.getPropertyBoolean("pause") ?: !_uiState.value.isPlaying
         // 当前是暂停态 → 本次点击是继续（pause=false）；否则是暂停（pause=true）。
         m.setPropertyBoolean("pause", !paused)
-        withCurrent(run) { _events.trySend(if (paused) PlaybackEvent.Resumed else PlaybackEvent.Paused) }
+        withCurrent(run) {
+            // 立即同步意图，不等 observer 回调（按钮图标必须立刻翻转）。
+            _uiState.update { it.copy(playWhenReady = paused) }
+            _events.trySend(if (paused) PlaybackEvent.Resumed else PlaybackEvent.Paused)
+        }
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) = withNative { run, m ->
@@ -501,7 +506,7 @@ class MpvPlaybackEngine internal constructor(
         val run = synchronized(stateLock) {
             val old = invalidateCurrent() ?: return null
             snapshot = _uiState.value
-            _uiState.update { it.copy(isPlaying = false) }
+            _uiState.update { it.copy(isPlaying = false, playWhenReady = false) }
             _events.trySend(PlaybackEvent.Stopped)
             old
         }
@@ -595,7 +600,7 @@ class MpvPlaybackEngine internal constructor(
         return PlaybackProgress(
             serverId = s.serverId, itemId = s.itemId, positionMs = pos,
             durationMs = if (dur > 0) dur else (s.source.durationMs ?: 0),
-            isPaused = m?.getPropertyBoolean("pause") ?: !fallback.isPlaying, updatedAtEpochMs = currentTimeMillis(),
+            isPaused = m?.getPropertyBoolean("pause") ?: !fallback.playWhenReady, updatedAtEpochMs = currentTimeMillis(),
             sessionId = s.source.sessionId,
             mode = s.source.mode, itemTitle = s.itemTitle, itemType = s.itemType, posterUrl = s.posterUrl,
         )
