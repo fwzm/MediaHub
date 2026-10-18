@@ -13,7 +13,11 @@ import android.os.Build
 import android.view.WindowManager
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.KeyEvent
 import android.view.ViewGroup
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -363,7 +367,28 @@ fun PlayerRoute(
     }
 
     PlayerVisualTheme(palette = visualState.chromePalette) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                // V18-B：前台媒体键（耳机/蓝牙/车机/adb keyevent）。
+                // 仅播放器页面生效；后台/锁屏控制需要 MediaSession（未包含）。
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) {
+                        false
+                    } else {
+                        val action = MediaKeyMapper.actionFor(event.nativeKeyEvent.keyCode)
+                        if (action == null) {
+                            false
+                        } else {
+                            if (MediaKeyMapper.shouldAct(action, viewModel.engine.uiState.value.playWhenReady)) {
+                                viewModel.engine.togglePlayPause()
+                            }
+                            true
+                        }
+                    }
+                },
+        ) {
         // 视频渲染 Surface（Media3/mpv 统一走 attachSurface）
         AndroidView(
             factory = { context ->
