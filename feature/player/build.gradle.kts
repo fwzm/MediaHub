@@ -77,6 +77,10 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
+    // SEEK-A：Compose UI 测试跑在 JVM/Robolectric 上，让「真实生产组件」的交互契约
+    // 不依赖真机（真机 Compose instrumentation 会被 MIUI 待机策略 SIGKILL，见 AGENTS.md §8）。
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.robolectric)

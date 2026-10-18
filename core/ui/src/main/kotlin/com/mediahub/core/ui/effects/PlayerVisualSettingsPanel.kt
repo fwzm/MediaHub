@@ -42,6 +42,15 @@ import kotlin.math.roundToInt
 object PlayerVisualTestTags {
     const val OVERLAY = "player_visual_effects_overlay"
     const val PLAYER_CONTROLS = "player_visual_controls"
+
+    /**
+     * 播放页进度条（SEEK-A）。
+     *
+     * 存在的唯一原因是让「拖动 → 提交」契约可被**真实生产组件**的测试验证：
+     * Compose Slider 在 uiautomator 里不是 android.widget.SeekBar，无法用 adb 定位，
+     * 而复制一份 Slider 到测试里只能验证框架行为（PR #53 的教训）。
+     */
+    const val PLAYER_PROGRESS = "player_progress"
     const val CHROME_AMBIENT = "player_visual_chrome_ambient"
     const val PLAYER_ENTRY = "player_visual_effects_entry"
     const val SETTINGS_ENTRY = "settings_visual_effects_entry"
