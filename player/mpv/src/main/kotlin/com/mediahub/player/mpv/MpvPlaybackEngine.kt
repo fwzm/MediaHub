@@ -141,6 +141,8 @@ class MpvPlaybackEngine internal constructor(
         var progressJob: Job? = null // stateLock
         var acceptsUpdates = true // stateLock
         var subtitleToken: SubtitleCache.Session? = null // stateLock
+        /** V15-A: 最近一次读到的 mpv track-list 快照（stateLock 保护；切源时整体替换）。 */
+        var mpvTrackList: List<Map<String, String?>> = emptyList()
         @Volatile var requestedAtMs = 0L
         @Volatile var resources: Resources? = null // published only after successful native initialization
     }
@@ -322,7 +324,11 @@ class MpvPlaybackEngine internal constructor(
         override fun event(event: MpvInstance.Event) = withCurrent(run) {
             val tr = run.session.trace
             when (event) {
-                MpvInstance.Event.FILE_LOADED -> tr?.record(PlaybackStartupTrace.Milestone.MPV_FILE_LOADED)
+                MpvInstance.Event.FILE_LOADED -> {
+                tr?.record(PlaybackStartupTrace.Milestone.MPV_FILE_LOADED)
+                // V15-A：文件加载完成即枚举音轨（此前从不发布 audioTracks → 面板恒为空）
+                run.resources?.mpv?.let { refreshAudioTracks(run, it) }
+            }
                 MpvInstance.Event.VIDEO_RECONFIG -> {
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_VIDEO_RECONFIG)
                     tr?.record(PlaybackStartupTrace.Milestone.FIRST_FRAME_RENDERED)
@@ -416,7 +422,49 @@ class MpvPlaybackEngine internal constructor(
         withCurrent(run) { _uiState.update { it.copy(speed = clamped) } }
     }
 
-    override fun selectAudioTrack(selection: TrackSelection?) = Unit
+    /**
+     * V15-A：mpv 选轨。UI 用同类型内序号（TrackSelection.groupIndex），
+     * 需解析成 mpv 的 aid（track id，≠ stream index）；null → aid=no。
+     * 选择无效时不下发命令，避免静默把 aid 设成错误值。
+     */
+    override fun selectAudioTrack(selection: TrackSelection?) {
+        val run = synchronized(stateLock) { current } ?: return
+        val trackList = synchronized(stateLock) { run.mpvTrackList.orEmpty() }
+        val aid = MpvTrackMapper.nativeAudioId(trackList, selection) ?: run {
+            if (selection != null) return // 无效序号：保持现状，不伪造成功
+            "no"
+        }
+        withCurrent(run) {
+            withNative { _, m -> m.command(arrayOf("set", "aid", aid)) }
+            // 立即用 native 实际值回填，避免乐观 UI（失败时保持真实状态）
+            withNative { _, m -> refreshAudioTracks(run, m) }
+        }
+    }
+
+    /**
+     * V15-A：从 mpv 读取 track-list 并发布 audioTracks。
+     *
+     * 必须在 native 锁内调用；只读属性、不下发命令。
+     * 空列表（无音轨 / 尚未 file-loaded）如实发布为空，不伪造。
+     */
+    private fun refreshAudioTracks(run: Run, m: MpvInstance) {
+        val count = m.getPropertyDouble("track-list/count")?.toInt() ?: 0
+        val safeCount = if (count < 0 || count > MAX_TRACKS) 0 else count
+        val rows = ArrayList<Map<String, String?>>(safeCount)
+        for (i in 0 until safeCount) {
+            val row = HashMap<String, String?>(MpvTrackMapper.TRACK_PROPERTIES.size)
+            for (prop in MpvTrackMapper.TRACK_PROPERTIES) {
+                row[prop] = m.getPropertyString("track-list/$i/$prop")
+            }
+            rows += row
+        }
+        synchronized(stateLock) {
+            if (!isCurrent(run)) return
+            run.mpvTrackList = rows
+        }
+        val mapped = MpvTrackMapper.mapAudioTracks(rows)
+        withCurrent(run) { _uiState.update { it.copy(audioTracks = mapped) } }
+    }
     override fun selectSubtitleTrack(selection: TrackSelection?) {
         synchronized(stateLock) { subtitleOperation++ }
         if (selection == null) withNative { _, m -> m.command(arrayOf("set", "sid", "no")) }
@@ -635,6 +683,9 @@ class MpvPlaybackEngine internal constructor(
 
     private companion object {
         const val PROGRESS_INTERVAL_MS = 1_000L
+
+        /** V15-A：防御异常 track-list/count（与字幕枚举 4096 上限一致）。 */
+        const val MAX_TRACKS = 4096
         const val SUBTITLE_CONFIRM_ATTEMPTS = 21
         const val SUBTITLE_CONFIRM_INTERVAL_MS = 50L
 
