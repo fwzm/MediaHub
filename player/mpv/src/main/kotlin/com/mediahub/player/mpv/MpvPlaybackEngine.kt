@@ -329,7 +329,21 @@ class MpvPlaybackEngine internal constructor(
                     tr?.let { logger.i(LogTag.PLAYER, "StartupTrace ${it.summary()}") }
                 }
                 MpvInstance.Event.AUDIO_RECONFIG -> tr?.record(PlaybackStartupTrace.Milestone.AUDIO_INPUT_FORMAT_SEEN)
-                MpvInstance.Event.END_FILE -> _events.trySend(PlaybackEvent.Ended)
+                MpvInstance.Event.END_FILE -> {
+                    // SEEK-B 真机缺陷修复：到达 EOF 时必须更新 UI 状态。
+                    //
+                    // 此前只发 PlaybackEvent.Ended，**从不更新 _uiState.isEnded**；
+                    // 而进度循环里的 `eof-reached` 在 mpv 结束后不一定可读。
+                    // 结果：画面已冻结在最后一帧，但按钮仍显示「暂停」（isPlaying/playWhenReady 仍为 true），
+                    // 用户无法用播放按钮恢复 —— 真机实测（123e243f）截图 sha256 完全相同。
+                    //
+                    // 修复：EOF 时同时置 isEnded = true、playWhenReady = false，
+                    // 让 UI 的 `showPauseIcon = playWhenReady && !isEnded`（G3 已加）真正生效。
+                    withCurrent(run) {
+                        _uiState.update { it.copy(isEnded = true, playWhenReady = false) }
+                        _events.trySend(PlaybackEvent.Ended)
+                    }
+                }
             }
             logger.i(LogTag.PLAYER, "mpv $event ttff=${elapsedRealtime() - run.requestedAtMs}ms")
         }
