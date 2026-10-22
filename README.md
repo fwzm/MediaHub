@@ -166,9 +166,7 @@ CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：
 
 <!-- WINDOWS-SYNC:START -->
 <!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
-- 0f6ff8c 2026-10-15 fix(windows): 改用 WinAppSDK 1.8 桌面文件选择器；并修掉音轨面板关不掉与列表闪烁
-- 8fa94d1 2026-10-15 fix(windows): 文件菜单可寻址并记录选择器出口；记录 Gate B1 的确证缺陷
-- 314b77b 2026-10-15 test(windows): Gate A Seek 与回环释放实测通过，并修掉 SeekSlider 缺失的 AutomationId
+- 2021893 2026-10-22 fix(windows): 音频可达、文件选择器迁移，并修掉面板关不掉与提示被覆盖
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
