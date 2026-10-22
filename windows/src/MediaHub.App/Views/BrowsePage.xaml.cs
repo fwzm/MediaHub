@@ -37,9 +37,28 @@ public sealed partial class BrowsePage : Page
 {
     private BrowseNavigation? _navigation;
     private ProviderHandle? _handle;
-    private MediaItem? _currentFolder;
     private string _currentTitle = "";
     private bool _busy;
+    private bool _pendingReload;
+
+    // Where the user actually is, as a stack of visited folders. Index 0 is the source root.
+    //
+    // This is a trail rather than a parent URL derived on demand, for two measured reasons:
+    //   * a WebDAV href is an absolute percent-encoded URL and a MediaBrowser id is opaque, so
+    //     neither is a readable breadcrumb - "http://127.0.0.1:8181/Season%2001/" was what the
+    //     previous version displayed to the user;
+    //   * trimming a trailing path segment stopped one level short of the root, because the root
+    //     URL came back as an ordinary folder object. "Up" then stayed enabled at the root and a
+    //     second press was needed to reach it.
+    // The trail is per page instance; re-entering the page from the library list starts at the root,
+    // which is what the navigation argument asks for anyway.
+    private readonly List<BrowseCrumb> _trail = new();
+    private string _rootTitle = "根目录";
+
+    /// <summary>One step of the breadcrumb trail; <see cref="Folder"/> is null for the source root.</summary>
+    private sealed record BrowseCrumb(string Title, MediaItem? Folder);
+
+    private MediaItem? CurrentFolder => _trail.Count == 0 ? null : _trail[^1].Folder;
 
     // Bumped on every navigation. A response whose generation is stale is dropped, so clicking into
     // three folders quickly cannot end up rendering the first one's contents last.
@@ -61,26 +80,33 @@ public sealed partial class BrowsePage : Page
     {
         if (_navigation is null)
         {
-            Fail("未指定要浏览的来源。");
+            Fail("未指定要浏览的来源。", "根目录", "根目录", false);
             return;
         }
 
         _handle = App.Services.Servers.FindHandle(_navigation.ServerId);
         if (_handle?.Browse is null)
         {
-            Fail("该来源不支持文件夹浏览。");
+            Fail("该来源不支持文件夹浏览。", "根目录", "根目录", false);
             return;
         }
 
-        _currentTitle = _navigation.Title;
         // A null folder id means "the source root": the provider decides what that is, and it is the
         // only place that knows the configured root path.
-        _currentFolder = string.IsNullOrEmpty(_navigation.FolderId)
-            ? null
-            : new MediaItem { ServerId = _handle.ServerId, Id = _navigation.FolderId!, Name = _navigation.Title };
-        if (_currentFolder is not null && !string.IsNullOrEmpty(_navigation.FolderPath))
+        _rootTitle = string.IsNullOrEmpty(_navigation.Title) ? "根目录" : _navigation.Title;
+        _trail.Clear();
+        _trail.Add(new BrowseCrumb("根目录", null));
+        _currentTitle = _rootTitle;
+
+        if (!string.IsNullOrEmpty(_navigation.FolderId))
         {
-            _currentFolder = _currentFolder with { Path = _navigation.FolderPath };
+            MediaItem folder = new() { ServerId = _handle.ServerId, Id = _navigation.FolderId!, Name = _navigation.Title };
+            if (!string.IsNullOrEmpty(_navigation.FolderPath))
+            {
+                folder = folder with { Path = _navigation.FolderPath };
+            }
+            _trail.Add(new BrowseCrumb(_navigation.Title, folder));
+            _currentTitle = _navigation.Title;
         }
 
         await LoadAsync();
@@ -88,45 +114,72 @@ public sealed partial class BrowsePage : Page
 
     private async Task LoadAsync()
     {
-        if (_busy) return;
+        // Only one read is allowed in flight. A second request while one is running is remembered and
+        // re-run when the first finishes, rather than dropped: on a slow server a user who clicks a
+        // second folder expects to end up there, and losing the click looks like the app ignored them.
+        if (_busy)
+        {
+            _pendingReload = true;
+            StartupTrace.Write("browse:load defer title=" + _currentTitle);
+            return;
+        }
+
         _busy = true;
+        _pendingReload = false;
         int generation = ++_generation;
+
+        // Everything the render depends on is captured before the await. Reading _trail again after
+        // the response arrived would label slow1's contents with slow2's breadcrumb, because the user
+        // can navigate while a request is outstanding.
+        MediaItem? folder = CurrentFolder;
+        string title = _currentTitle;
+        string breadcrumb = string.Join("  /  ", _trail.Select(step => step.Title));
+        bool canGoUp = _trail.Count > 1;
+        StartupTrace.Write("browse:load gen=" + generation + " title=" + title
+            + " folder=" + (folder?.Id ?? "<root>"));
 
         LoadingRing.IsActive = true;
         EmptyPanel.Visibility = Visibility.Visible;
+        RetryButton.Visibility = Visibility.Collapsed;
         EmptyText.Text = "正在读取目录…";
         StatusBar.IsOpen = false;
 
         try
         {
             PagedResult<MediaItem> page = await _handle!.Browse!
-                .ListFolderAsync(_currentFolder, new PageRequest(0, 500))
+                .ListFolderAsync(folder, new PageRequest(0, 500))
                 .ConfigureAwait(true);
 
-            // Drop the response unless this is still the navigation that asked for it.
-            if (generation != _generation) return;
+            // Second line of defence: the serialisation above already prevents two reads from
+            // overlapping, so this only fires if some future caller starts one directly.
+            if (generation != _generation)
+            {
+                StartupTrace.Write("browse:load stale-discard gen=" + generation);
+                return;
+            }
 
             List<BrowseRow> rows = page.Items.Select(ToRow).ToList();
             ItemList.ItemsSource = rows;
 
-            TitleText.Text = _currentTitle;
+            TitleText.Text = title;
             SourceText.Text = "来源：" + _handle.Server.DisplayName + "  ·  " + _handle.Server.Type;
-            BreadcrumbText.Text = string.IsNullOrEmpty(_currentFolder?.Path) && _currentFolder is null
-                ? "根目录"
-                : (_currentFolder?.Path ?? "根目录");
-            UpButton.IsEnabled = _currentFolder is not null;
+            BreadcrumbText.Text = breadcrumb;
+            // Root is the bottom of this source: there is nowhere above it to go.
+            UpButton.IsEnabled = canGoUp;
 
+            // A failed listing must never look like an empty folder: only a successful response that
+            // genuinely carried no entries may say so.
             bool empty = rows.Count == 0;
             EmptyPanel.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
             if (empty) EmptyText.Text = "这个目录是空的。";
         }
         catch (ProviderException ex)
         {
-            if (generation == _generation) Fail(ex.Message);
+            if (generation == _generation) Fail(ex.Message, title, breadcrumb, canGoUp);
         }
         catch (Exception ex)
         {
-            if (generation == _generation) Fail(ex.Message);
+            if (generation == _generation) Fail(ex.Message, title, breadcrumb, canGoUp);
         }
         finally
         {
@@ -134,6 +187,11 @@ public sealed partial class BrowsePage : Page
             {
                 LoadingRing.IsActive = false;
                 _busy = false;
+                if (_pendingReload)
+                {
+                    _pendingReload = false;
+                    _ = LoadAsync();
+                }
             }
         }
     }
@@ -192,7 +250,7 @@ public sealed partial class BrowsePage : Page
         MediaItem item = row.Item;
         if (item.IsFolder || item.Type == MediaType.Folder)
         {
-            _currentFolder = item;
+            _trail.Add(new BrowseCrumb(item.Name, item));
             _currentTitle = item.Name;
             await LoadAsync();
             return;
@@ -216,48 +274,43 @@ public sealed partial class BrowsePage : Page
 
     private async void OnUpClick(object sender, RoutedEventArgs e)
     {
-        if (_currentFolder is null) return;
+        // Popping the trail returns to the folder the user came from, which is the only definition of
+        // "up" that cannot disagree with what they saw.
+        if (_trail.Count <= 1) return;
 
-        // Walk to the parent by trimming the last path segment. The provider validates that any folder
-        // it is given is inside the configured root, so an over-trimmed path is refused there rather
-        // than silently escaping the source.
-        string? path = _currentFolder.Path ?? _currentFolder.Id;
-        if (string.IsNullOrEmpty(path)) return;
-
-        var uri = new Uri(path, UriKind.Absolute);
-        string parent = uri.AbsoluteUri.TrimEnd('/');
-        int slash = parent.LastIndexOf('/');
-        if (slash <= uri.Scheme.Length + 2)
-        {
-            _currentFolder = null;
-            _currentTitle = _navigation?.Title ?? "根目录";
-        }
-        else
-        {
-            string parentUrl = parent[..(slash + 1)];
-            string name = Uri.UnescapeDataString(parent[(slash + 1)..]);
-            _currentFolder = new MediaItem
-            {
-                ServerId = _currentFolder.ServerId,
-                Id = parentUrl,
-                Name = name,
-                Path = parentUrl,
-                IsFolder = true,
-                Type = MediaType.Folder,
-            };
-            _currentTitle = name;
-        }
-
+        _trail.RemoveAt(_trail.Count - 1);
+        _currentTitle = CurrentFolder is null ? _rootTitle : _trail[^1].Title;
         await LoadAsync();
     }
 
-    private void Fail(string message)
+    private async void OnRetryClick(object sender, RoutedEventArgs e)
     {
+        StartupTrace.Write("browse:retry title=" + _currentTitle);
+        await LoadAsync();
+    }
+
+    // The header is part of the failure, not decoration. Measured defect: navigating from the source
+    // root into a folder whose listing failed left the header still reading the root and "up" still
+    // disabled, because only the success path ever rendered them. The user was then stranded in a
+    // folder that shows an error, with retry as the only control - and retry cannot fix a missing
+    // folder. The title, breadcrumb and up-state are therefore passed in from the same snapshot the
+    // request was made with, so a failed read still tells the user where they are and lets them leave.
+    private void Fail(string message, string title, string breadcrumb, bool canGoUp)
+    {
+        StartupTrace.Write("browse:load fail title=" + title + " message=" + message);
         LoadingRing.IsActive = false;
         _busy = false;
         ItemList.ItemsSource = null;
         EmptyPanel.Visibility = Visibility.Visible;
+        RetryButton.Visibility = Visibility.Visible;
         EmptyText.Text = message;
+        TitleText.Text = title;
+        BreadcrumbText.Text = breadcrumb;
+        UpButton.IsEnabled = canGoUp;
+        if (_handle is not null)
+        {
+            SourceText.Text = "来源：" + _handle.Server.DisplayName + "  ·  " + _handle.Server.Type;
+        }
         StatusBar.Severity = InfoBarSeverity.Error;
         StatusBar.Title = "无法读取目录";
         StatusBar.Message = message;

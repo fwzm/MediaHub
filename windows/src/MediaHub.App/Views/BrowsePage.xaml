@@ -64,6 +64,10 @@
                   Spacing="10" Visibility="Collapsed">
         <ProgressRing x:Name="LoadingRing" IsActive="False" Width="36" Height="36" />
         <TextBlock x:Name="EmptyText" HorizontalAlignment="Center" TextWrapping="Wrap" MaxWidth="460" />
+        <!-- Only a failed read shows this. Without it the page's only exit from a server error was to
+             navigate away and come back, which is not something a user should have to discover. -->
+        <Button x:Name="RetryButton" Content="重试" Click="OnRetryClick" Visibility="Collapsed"
+                HorizontalAlignment="Center" AutomationProperties.AutomationId="browse.retry" />
       </StackPanel>
     </Grid>
   </Grid>

@@ -25,9 +25,9 @@
 | 来源 | 浏览 | 播放 | 进度 | 说明 |
 | --- | --- | --- | --- | --- |
 | 本地 / 映射盘 / UNC | EXECUTED_PASS | EXECUTED_PASS | 本地快照 EXECUTED_PASS | 含同目录外挂字幕发现 |
-| Emby | EXECUTED_PASS（模拟服务器） | EXECUTED_PASS（模拟服务器） | IMPLEMENTED_UNVERIFIED | **真实服务器 SERVER_UNVERIFIED** |
-| Jellyfin | IMPLEMENTED_UNVERIFIED | IMPLEMENTED_UNVERIFIED | IMPLEMENTED_UNVERIFIED | 与 Emby 共享实现；模拟服务器契约测试通过，**未做真服** |
-| WebDAV | NOT_IMPLEMENTED | — | — | 注册表中不出现 |
+| Emby | EXECUTED_PASS（模拟服务器） | EXECUTED_PASS（模拟服务器） | IMPLEMENTED_UNVERIFIED | 真实服务器 4.10.1.0 已部署并完成协议探测，**完整播放与进度回写仍 SERVER_UNVERIFIED** |
+| Jellyfin | EXECUTED_PASS（真实 12.2） | EXECUTED_PASS（真实 12.2） | EXECUTED_PASS（真实 12.2） | 登录/浏览/5 部影片播放/进度回写均实测；**中断恢复 FAILED**（服务端 playstate 判定，未解决） |
+| WebDAV | EXECUTED_PASS（真实 WsgiDAV 4.3.3） | EXECUTED_PASS（真实 WsgiDAV 4.3.3） | 不支持（协议无 playstate） | 子根挂载、404/403/500/401、离线与重试、导航竞态、关闭应用释放回环：见 [W7-EVIDENCE.md](W7-EVIDENCE.md) |
 | Plex / SMB / 云盘 | NOT_STARTED | — | — | — |
 
 ## 媒体源管理与凭据（W2-A）
@@ -68,12 +68,14 @@
 | 远端媒体播放（经真实 UI 驱动） | **EXECUTED_PASS**（模拟服务器，见 W2-EVIDENCE） |
 | libmpv 嵌入（`--wid`）+ D3D11 硬解 | EXECUTED_PASS（`hwdec=d3d11va`） |
 | 播放 / 暂停 / 拖动 / 音量 / 倍速 | EXECUTED_PASS（引擎测试断言） |
-| 音轨 / 字幕轨道枚举 | IMPLEMENTED_UNVERIFIED（模拟服务器返回 1 条字幕轨） |
-| 内封 / 外挂字幕（SRT/ASS/SSA/VTT） | IMPLEMENTED_UNVERIFIED |
+| 音轨 / 字幕轨道枚举 | EXECUTED_PASS（真实文件 + UIA，轨道列表跟随引擎内容签名） |
+| 内封 / 外挂字幕（SRT/ASS/SSA/VTT） | EXECUTED_PASS（外挂字幕经真实文件对话框加载，列表与提示均实测） |
 | 字幕样式（字体/字号/颜色/描边/位置/延迟/ASS 覆盖） | IMPLEMENTED_UNVERIFIED |
 | 全屏切换 | IMPLEMENTED_UNVERIFIED（未截图确认） |
 | 播放进度恢复 | IMPLEMENTED_UNVERIFIED |
-| 自动连播下一集 / 播放列表 | NOT_IMPLEMENTED |
+| 剧集自动连播下一集 | IMPLEMENTED_UNVERIFIED（播放页内切换已实现，未在真实剧集库上做 GUI 验收） |
+| 多文件临时播放队列（上一项/下一项/移除/清空/EOF 与失败跳项） | EXECUTED_PASS（[W7-EVIDENCE.md](W7-EVIDENCE.md)：63/63 + 18/18） |
+| 持久播放列表 | NOT_IMPLEMENTED（队列只存在于本次会话） |
 | HDR / 色彩管理 | **NOT_RUN** |
 | 杜比视界 | **NOT_SUPPORTED**（不得用 HDR10 能力代替声明） |
 | 硬件解码故障回退实测 | **NOT_RUN** |

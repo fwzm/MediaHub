@@ -567,6 +567,31 @@ function Invoke-MhElement {
   return 'NO_PATTERN'
 }
 
+function Invoke-MhElementDeep {
+  <#
+    Invokes the nearest ancestor (including the element itself) that exposes an action pattern.
+    A DataTemplate body is the usual reason to need this: a GridView/ListView card is a Border with
+    no automation peer pattern of its own, while the ListViewItem around it does expose Invoke and
+    raises the item's ItemClick. Driving the Border with a synthetic mouse click was measured NOT to
+    navigate (R7/A3 first run), so "the click returned" is not evidence that anything happened.
+    The depth is reported so a caller can log which level actually answered.
+  #>
+  param($Element, [int]$MaxDepth = 5)
+  if (-not $Element) { return 'NOT_FOUND' }
+  $cur = $Element
+  for ($depth = 0; $depth -le $MaxDepth; $depth++) {
+    if (-not $cur) { break }
+    $r = Invoke-MhElement -Element $cur
+    if ($r -ne 'NO_PATTERN' -and $r -ne 'NOT_FOUND') { return ($r + '(depth=' + $depth + ')') }
+    $parent = $null
+    try { $parent = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($cur) } catch { break }
+    if (-not $parent) { break }
+    if ($parent.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window) { break }
+    $cur = $parent
+  }
+  return 'NO_PATTERN'
+}
+
 function Set-MhValue {
   param($Element, [string]$Value)
   if (-not $Element) { return 'NOT_FOUND' }

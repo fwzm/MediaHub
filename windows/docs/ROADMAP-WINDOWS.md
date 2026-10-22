@@ -38,10 +38,18 @@ libmpv 嵌入、D3D11 硬解、本地真实文件播放、控制层、设置、�
 - R4 Gate A 后半程（Seek、回环释放）：[W5-1-R4-GATE-A-SEEK-RELEASE.md](W5-1-R4-GATE-A-SEEK-RELEASE.md)
 - R4/R5 Gate B1（文件菜单与选择器）：[W5-1-R4-GATE-B1.md](W5-1-R4-GATE-B1.md)、[W5-1-R5-GATE-B1.md](W5-1-R5-GATE-B1.md)
 - R6 音频播放 + 三条选择器路径 + 面板缺陷：[W5-1-R6-AUDIO-PICKERS.md](W5-1-R6-AUDIO-PICKERS.md)
+- R7 多文件临时队列（B2）、WebDAV 目录与错误边界（A3）、R6 回归（C）：[W7-EVIDENCE.md](W7-EVIDENCE.md)
 
 验收过程中修掉的**产品**缺陷：音轨/字幕面板无法关闭、面板每 100 ms 重建、`.aac` 等音频不可达、
-旧文件选择器永不返回、字幕一次性提示被快照覆盖。仍在队列：关闭应用、目录边界、多选队列、
-收藏与继续观看写入闭环、WebDAV 内容从 UI 可达性。
+旧文件选择器永不返回、字幕一次性提示被快照覆盖。
+
+R7 再修掉七个：切项后新视频冻结在 0:00（mpv 的 `pause` 跨 `loadfile` 保留）、本地文件永不触发自动跳项
+（本地分支提前 return 掉 EOF 判断）、`DecodeEndFile` 不闩锁 EOF、面包屑显示未解码 URL 且根目录「返回上级」可用、
+列举失败时页头不更新（用户被困在报错目录）、启动时不可达的来源在媒体库页消失（离线→重试不可达）、
+慢服务器上第二次导航被静默丢弃。
+
+仍在队列：收藏与继续观看写入闭环、剧集自动连播的 GUI 验收、Emby 完整播放与进度回写、
+Jellyfin 中断恢复（服务端 playstate 判定，未解决）。
 
 ## W3 — Windows 播放体验
 

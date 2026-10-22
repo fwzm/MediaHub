@@ -410,10 +410,30 @@ public sealed partial class PlayerPage : Page
         // SubtitleTracks.Count was never equal - and this runs on every sampling tick (about ten
         // times a second), so the list was torn down and rebuilt continuously. On an audio-only file,
         // where there are no subtitle tracks at all, it flickered every single tick.
-        if (s.AudioTracks.Count != _renderedAudioCount || s.SubtitleTracks.Count != _renderedSubtitleCount)
+        // The comparison is on the CONTENT of the track lists, not on their sizes. Counting was
+        // enough to stop the per-tick flicker, but it misses the case that matters most: replacing one
+        // external subtitle with another leaves the count unchanged (two tracks before, two after)
+        // while the list on screen still names the file that is no longer loaded. Signatures include
+        // the track ids, labels and selection, so a same-size replacement is still a change.
+        if (TrackSignature(s.AudioTracks, static t => t.Id + ":" + t.Language + ":" + t.Codec + ":" + t.Title + ":" + t.Selected) != _renderedAudioSignature
+            || TrackSignature(s.SubtitleTracks, static t => t.Id + ":" + t.Language + ":" + t.Codec + ":" + t.Title + ":" + t.IsExternal + ":" + t.IsForced + ":" + t.Selected) != _renderedSubtitleSignature)
         {
             RefreshTrackLists();
         }
+
+        // The expiry of a one-shot result is not a track-list change, so nothing above would redraw it:
+        // once the lists settled, "已加载：xxx" stayed on screen indefinitely. Measured in Gate C (C3.5):
+        // nine seconds after loading a subtitle the hint still read the file name.
+        ExpireSubtitleNotice(s.SubtitleTracks.Count);
+    }
+
+    /// <summary>Drops an expired one-shot result and repaints the hint from the baseline text.</summary>
+    private void ExpireSubtitleNotice(int trackCount)
+    {
+        if (_subtitleNotice is null) return;
+        if (DateTime.UtcNow - _subtitleNoticeAt < SubtitleNoticeLifetime) return;
+        _subtitleNotice = null;
+        SubtitleHint.Text = ComposeSubtitleHint(trackCount);
     }
 
     private static string BuildTechnicalSummary(PlayerSnapshot s)
@@ -647,17 +667,22 @@ public sealed partial class PlayerPage : Page
         DispatcherQueue.TryEnqueue(UpdateSurfaceBounds);
     }
 
-    /// <summary>Track counts the lists were last built from, used to avoid rebuilding them per tick.</summary>
-    private int _renderedAudioCount = -1;
-    private int _renderedSubtitleCount = -1;
+    /// <summary>Signatures of the lists the track rows were last built from.</summary>
+    private string _renderedAudioSignature = "";
+    private string _renderedSubtitleSignature = "";
+
+    private int _renderedSubtitleCount => App.Services.PlayerHost.Player?.Snapshot?.SubtitleTracks.Count ?? 0;
+
+    private static string TrackSignature<T>(IReadOnlyList<T> tracks, Func<T, string> project)
+        => tracks.Count == 0 ? "" : string.Join(";", tracks.Select(project));
 
     private void RefreshTrackLists()
     {
         var snapshot = App.Services.PlayerHost.Player?.Snapshot;
         if (snapshot is null) return;
 
-        _renderedAudioCount = snapshot.AudioTracks.Count;
-        _renderedSubtitleCount = snapshot.SubtitleTracks.Count;
+        _renderedAudioSignature = TrackSignature(snapshot.AudioTracks, static t => t.Id + ":" + t.Language + ":" + t.Codec + ":" + t.Title + ":" + t.Selected);
+        _renderedSubtitleSignature = TrackSignature(snapshot.SubtitleTracks, static t => t.Id + ":" + t.Language + ":" + t.Codec + ":" + t.Title + ":" + t.IsExternal + ":" + t.IsForced + ":" + t.Selected);
 
         _suppressTrackEvents = true;
         try

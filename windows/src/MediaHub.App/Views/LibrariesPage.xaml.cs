@@ -1,3 +1,4 @@
+using MediaHub.App.Services;
 using MediaHub.Domain;
 using MediaHub.Providers;
 using Microsoft.UI.Xaml;
@@ -63,10 +64,16 @@ public sealed partial class LibrariesPage : Page
             // only Browse contributes its root folder. Both are ways of reaching content, and a source
             // exposing only the second used to be invisible here - which is why a connected WebDAV
             // source could not be opened from anywhere in the shell.
-            var handles = App.Services.Servers.OnlineHandles
-                .Where(h => h.Library is not null || h.Browse is not null)
+            //
+            // Sources that are offline or need a login are still listed when they can be browsed. An
+            // unreachable server that simply disappears from this page is indistinguishable from a
+            // deleted one, and the user has nowhere to go to find out what happened or to retry - the
+            // folder browser is exactly that place. Only enumerating catalogues requires a live
+            // session, so that part is skipped for them.
+            var entries = App.Services.Servers.Servers
+                .Where(e => e.Handle is { } h && (h.Library is not null || h.Browse is not null))
                 .ToList();
-            if (handles.Count == 0)
+            if (entries.Count == 0)
             {
                 LibraryGrid.ItemsSource = Array.Empty<LibraryCard>();
                 StatusBar.Severity = InfoBarSeverity.Informational;
@@ -80,18 +87,27 @@ public sealed partial class LibrariesPage : Page
             var failures = new List<string>();
 
             // Sources are queried independently so one unreachable server cannot blank the page.
-            foreach (ProviderHandle handle in handles)
+            foreach (ServerEntry entry in entries)
             {
-                if (handle.Library is null)
+                ProviderHandle handle = entry.Handle!;
+                bool live = entry.Status == ServerStatus.Online;
+                if (handle.Library is null || !live)
                 {
-                    // Browse-only source: offer its root folder. An empty library id is the marker the
-                    // click handler reads to open the folder browser instead of a library page.
+                    if (handle.Browse is null)
+                    {
+                        failures.Add(entry.DisplayName + "：" + entry.StatusText);
+                        continue;
+                    }
+
+                    // Browse-only source, or a source we cannot enumerate right now: offer its root
+                    // folder. An empty library id is the marker the click handler reads to open the
+                    // folder browser instead of a library page.
                     cards.Add(new LibraryCard(
-                        handle.ServerId,
+                        entry.ServerId,
                         "",
-                        handle.Server.DisplayName,
-                        handle.Server.DisplayName,
-                        "文件夹浏览"));
+                        entry.DisplayName,
+                        entry.DisplayName,
+                        live ? "文件夹浏览" : "文件夹浏览 · " + ShortStatus(entry.Status)));
                     continue;
                 }
 
@@ -108,6 +124,15 @@ public sealed partial class LibrariesPage : Page
                 catch (ProviderException ex)
                 {
                     failures.Add(handle.Server.DisplayName + "：" + ex.Message);
+                    if (handle.Browse is not null)
+                    {
+                        cards.Add(new LibraryCard(
+                            entry.ServerId,
+                            "",
+                            entry.DisplayName,
+                            entry.DisplayName,
+                            "文件夹浏览 · " + ShortStatus(entry.Status)));
+                    }
                 }
             }
 
@@ -127,6 +152,16 @@ public sealed partial class LibrariesPage : Page
             _loading = false;
         }
     }
+
+    /// <summary>Two or three characters describing why a source cannot be listed in full.</summary>
+    private static string ShortStatus(ServerStatus status) => status switch
+    {
+        ServerStatus.Unreachable => "离线",
+        ServerStatus.AuthRequired => "需要登录",
+        ServerStatus.AuthFailed => "认证失败",
+        ServerStatus.Checking => "连接中",
+        _ => "未连接",
+    };
 
     private static string DescribeKind(LibraryType type) => type switch
     {
