@@ -18,13 +18,30 @@ public sealed class LocalLibraryService : IDisposable
         ".ts", ".m2ts", ".mts", ".vob", ".rmvb", ".rm", ".3gp", ".ogv", ".divx", ".asf", ".iso",
     };
 
+    // Audio is kept out of VideoExtensions on purpose: that set also drives WebDAV media
+    // classification, where an audio file is not a browsable "video" item. Audio files are only
+    // opened through explicit user intent (Open with / file picker), never by library scanning.
+    private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".aac", ".mp3", ".flac", ".m4a", ".ogg", ".oga", ".opus", ".wav", ".wma", ".ape", ".alac", ".mka",
+    };
+
     private static readonly HashSet<string> SubtitleExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt", ".smi", ".sup",
     };
 
     public static IReadOnlyCollection<string> SupportedVideoExtensions => VideoExtensions;
+    public static IReadOnlyCollection<string> SupportedAudioExtensions => AudioExtensions;
     public static IReadOnlyCollection<string> SupportedSubtitleExtensions => SubtitleExtensions;
+
+    /// <summary>Everything the engine is expected to open when the user hands it a file directly.</summary>
+    public static IReadOnlyCollection<string> SupportedMediaExtensions { get; } =
+        VideoExtensions.Concat(AudioExtensions).ToArray();
+
+    /// <summary>True when the path carries an extension the engine can demux.</summary>
+    public static bool IsSupportedMediaFile(string path) =>
+        SupportedMediaExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 
     private readonly SettingsStore _settings;
     private readonly List<LocalMediaEntry> _items = new();

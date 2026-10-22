@@ -12,7 +12,6 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.Foundation;
-using Windows.Storage.Pickers;
 using Windows.System;
 
 namespace MediaHub.App.Views;
@@ -590,14 +589,37 @@ public sealed partial class PlayerPage : Page
             SubtitleList.ItemsSource = subs;
             SubtitleList.SelectedIndex = subs.FindIndex(s => s.Selected);
 
-            SubtitleHint.Text = snapshot.SubtitleTracks.Count == 0
-                ? "当前媒体没有可用的字幕轨道。可用“加载外挂字幕…”选择 SRT / ASS / SSA / VTT 文件。"
-                : $"共 {snapshot.SubtitleTracks.Count} 条字幕轨道。";
+            SubtitleHint.Text = ComposeSubtitleHint(snapshot.SubtitleTracks.Count);
         }
         finally
         {
             _suppressTrackEvents = false;
         }
+    }
+
+    // 一次性结果（已加载 / 加载失败）必须活得比一帧久：本方法由 10 Hz 快照驱动，
+    // 如果每次刷新都无条件重写提示文本，用户永远看不到"加载了哪个文件"，失败原因更是瞬间消失。
+    private static readonly TimeSpan SubtitleNoticeLifetime = TimeSpan.FromSeconds(8);
+    private string? _subtitleNotice;
+    private DateTime _subtitleNoticeAt;
+
+    private void SetSubtitleNotice(string text)
+    {
+        _subtitleNotice = text;
+        _subtitleNoticeAt = DateTime.UtcNow;
+        SubtitleHint.Text = ComposeSubtitleHint(_renderedSubtitleCount);
+    }
+
+    private string ComposeSubtitleHint(int trackCount)
+    {
+        string baseline = trackCount == 0
+            ? "当前媒体没有可用的字幕轨道。可用“加载外挂字幕…”选择 SRT / ASS / SSA / VTT 文件。"
+            : $"共 {trackCount} 条字幕轨道。";
+        if (_subtitleNotice is { Length: > 0 } notice && DateTime.UtcNow - _subtitleNoticeAt < SubtitleNoticeLifetime)
+        {
+            return trackCount == 0 ? notice : notice + " " + baseline;
+        }
+        return baseline;
     }
 
     private void OnAudioSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -614,21 +636,17 @@ public sealed partial class PlayerPage : Page
 
     private async void OnLoadSubtitleClick(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker();
-        foreach (string ext in LocalLibraryService.SupportedSubtitleExtensions) picker.FileTypeFilter.Add(ext);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, (App.MainWindow as MainWindow)!.WindowHandle);
-
-        var file = await picker.PickSingleFileAsync();
+        string? file = await FilePickerService.PickFileAsync(LocalLibraryService.SupportedSubtitleExtensions);
         if (file is null) return;
 
         try
         {
-            App.Services.PlayerHost.Player?.AddExternalSubtitle(file.Path);
-            SubtitleHint.Text = $"已加载：{System.IO.Path.GetFileName(file.Path)}";
+            App.Services.PlayerHost.Player?.AddExternalSubtitle(file);
+            SetSubtitleNotice($"已加载：{System.IO.Path.GetFileName(file)}");
         }
         catch (Exception ex)
         {
-            SubtitleHint.Text = $"加载失败：{ex.Message}";
+            SetSubtitleNotice($"加载失败：{ex.Message}");
         }
     }
 
@@ -641,7 +659,7 @@ public sealed partial class PlayerPage : Page
             try { App.Services.PlayerHost.Player?.AddExternalSubtitle(sub); added++; }
             catch { /* a single unreadable subtitle file must not abort the rest */ }
         }
-        SubtitleHint.Text = added == 0 ? "未在同目录找到匹配的外挂字幕文件。" : $"已重新加载 {added} 个字幕文件。";
+        SetSubtitleNotice(added == 0 ? "未在同目录找到匹配的外挂字幕文件。" : $"已重新加载 {added} 个字幕文件。");
     }
 
     // ---------------------------------------------------------------- control visibility

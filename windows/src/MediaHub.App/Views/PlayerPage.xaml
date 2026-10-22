@@ -92,20 +92,27 @@
                          Text="显示为“未知”的项目表示播放引擎未上报该信息，MediaHub 不会推测填充。" />
             </StackPanel>
 
-            <StackPanel x:Name="AudioSection" Spacing="6" Visibility="Collapsed"
-                    AutomationProperties.AutomationId="panel.audio">
+            <!--
+              The AutomationId sits on the ListView, not on the section panel. A bare StackPanel has no
+              automation peer, so an id placed on it never appears in the UI Automation tree at all -
+              which makes "the panel is open" unobservable from outside the process.
+            -->
+            <StackPanel x:Name="AudioSection" Spacing="6" Visibility="Collapsed">
               <TextBlock Text="音轨" FontWeight="SemiBold" />
-              <ListView x:Name="AudioList" SelectionMode="Single" SelectionChanged="OnAudioSelectionChanged" />
+              <ListView x:Name="AudioList" SelectionMode="Single" SelectionChanged="OnAudioSelectionChanged"
+                        AutomationProperties.AutomationId="panel.audio" />
             </StackPanel>
 
             <StackPanel x:Name="SubtitleSection" Spacing="6" Visibility="Collapsed">
               <TextBlock Text="字幕" FontWeight="SemiBold" />
-              <ListView x:Name="SubtitleList" SelectionMode="Single" SelectionChanged="OnSubtitleSelectionChanged" />
+              <ListView x:Name="SubtitleList" SelectionMode="Single" SelectionChanged="OnSubtitleSelectionChanged"
+                        AutomationProperties.AutomationId="panel.subtitle" />
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Button Content="加载外挂字幕…" Click="OnLoadSubtitleClick" />
                 <Button Content="重新选择文件" Click="OnReloadSubtitleClick" />
               </StackPanel>
-              <TextBlock x:Name="SubtitleHint" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+              <TextBlock x:Name="SubtitleHint" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                         AutomationProperties.AutomationId="player.subtitlehint" />
             </StackPanel>
           </StackPanel>
         </ScrollViewer>

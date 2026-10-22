@@ -207,13 +207,9 @@ public sealed partial class MainWindow : Window
             //
             // The two APIs are deliberately not mixed: this one takes a WindowId and returns a
             // PickFileResult carrying Path, and no StorageFile or InitializeWithWindow is involved.
-            var picker = new Microsoft.Windows.Storage.Pickers.FileOpenPicker(AppWindow.Id);
-            picker.SuggestedStartLocation = Microsoft.Windows.Storage.Pickers.PickerLocationId.VideosLibrary;
-            foreach (string extension in DroppedMedia.SupportedExtensions) picker.FileTypeFilter.Add(extension);
             Services.StartupTrace.Write("menu:openvideo-picker-created");
-
-            Microsoft.Windows.Storage.Pickers.PickFileResult? picked = await picker.PickSingleFileAsync();
-            if (picked is null || string.IsNullOrEmpty(picked.Path))
+            string? picked = await FilePickerService.PickFileAsync(LocalLibraryService.SupportedMediaExtensions);
+            if (picked is null)
             {
                 // Cancelling must leave the current playback session untouched.
                 Services.StartupTrace.Write("menu:openvideo-cancelled");
@@ -221,7 +217,7 @@ public sealed partial class MainWindow : Window
             }
 
             Services.StartupTrace.Write("menu:openvideo-selected");
-            OpenPaths(new[] { picked.Path });
+            OpenPaths(new[] { picked });
         }
         catch (Exception ex)
         {
@@ -231,29 +227,36 @@ public sealed partial class MainWindow : Window
 
     private async void OnOpenFolderClick(object sender, RoutedEventArgs e)
     {
+        Services.StartupTrace.Write("open-folder:invoked");
         try
         {
-            var picker = new Windows.Storage.Pickers.FolderPicker();
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle);
-            picker.SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.VideosLibrary;
-            picker.FileTypeFilter.Add("*");
-
-            Windows.Storage.StorageFolder? folder = await picker.PickSingleFolderAsync();
-            if (folder is null) return;
+            string? folder = await FilePickerService.PickFolderAsync();
+            if (folder is null)
+            {
+                Services.StartupTrace.Write("open-folder:cancelled");
+                return;
+            }
+            Services.StartupTrace.Write("open-folder:selected");
 
             // Opening a folder adds it as a local library root and shows it, rather than playing a
             // file: a folder is a place, and the user asked to see what is in it.
-            App.Services.Settings.Update(s =>
-            {
-                if (!s.LocalFolders.Contains(folder.Path, StringComparer.OrdinalIgnoreCase)) s.LocalFolders.Add(folder.Path);
-            });
+            AddLocalFolder(folder);
             // The library page rescans on load; it needs no invalidation hook, only to be shown.
             NavigateShell(typeof(LocalLibraryPage));
         }
         catch (Exception ex)
         {
-            Services.StartupTrace.Write("open-folder:failed " + ex.GetType().Name);
+            Services.StartupTrace.Write("open-folder:failed " + ex.GetType().Name + ": " + ex.Message);
         }
+    }
+
+    /// <summary>Adds a folder to the local library roots, keeping the list free of duplicates.</summary>
+    public void AddLocalFolder(string path)
+    {
+        App.Services.Settings.Update(s =>
+        {
+            if (!s.LocalFolders.Contains(path, StringComparer.OrdinalIgnoreCase)) s.LocalFolders.Add(path);
+        });
     }
 
     private void OnPlayPauseMenuClick(object sender, RoutedEventArgs e)
@@ -335,12 +338,31 @@ public sealed partial class MainWindow : Window
     private void TryOpenFromCommandLine()
     {
         string[] args = Environment.GetCommandLineArgs();
-        if (args.Length < 2) return;
+
+        // Traced even in the do-nothing case: without a record of "the shell handed us this and we
+        // dropped it", a file association that opens nothing is indistinguishable from one that was
+        // never invoked, and the previous version of this method had exactly that blind spot.
+        Services.StartupTrace.Write("cli:args=" + (args.Length - 1));
+        if (args.Length < 2)
+        {
+            Services.StartupTrace.Write("cli:no-argument");
+            return;
+        }
 
         string candidate = args[1];
-        if (!File.Exists(candidate)) return;
-        if (!LocalLibraryService.SupportedVideoExtensions.Contains(Path.GetExtension(candidate))) return;
+        if (!File.Exists(candidate))
+        {
+            Services.StartupTrace.Write("cli:not-a-file");
+            return;
+        }
+        // Audio counts here: double-clicking an .aac must reach the player, and the engine plays it.
+        if (!LocalLibraryService.IsSupportedMediaFile(candidate))
+        {
+            Services.StartupTrace.Write("cli:unsupported-extension " + Path.GetExtension(candidate));
+            return;
+        }
 
+        Services.StartupTrace.Write("cli:opening");
         EnterPlayer(new PlaybackRequest
         {
             LocalPath = candidate,

@@ -21,13 +21,27 @@ libmpv 嵌入、D3D11 硬解、本地真实文件播放、控制层、设置、�
 - **经真实 UI 的远端播放**：EXECUTED_PASS（模拟服务器）。
 
 **未完成（下一批可直接执行）**
-1. **真实 Emby / Jellyfin 服务器端到端**（登录、浏览、播放、进度回写）→ 完成后才能从
-   SERVER_UNVERIFIED 转为已验证。需要一台可合法使用的测试服务器。
+1. ~~真实 Emby / Jellyfin 服务器端到端~~ —— **已完成**：Jellyfin 12.2 与 Emby 4.10.1.0 均实测登录、浏览、
+   播放、进度回写（见 W4/W5 轮次证据），过程中暴露并修掉三个真实协议缺陷。
 2. 凭据库的真实第二 Windows 账户 / 跨机器行为验证。
 3. 收藏（Emby/Jellyfin 的 `IsFavorite`）与"继续观看"的写入闭环。
 4. 剧集页在有数据的服务器上的季/集验证（模拟服务器剧集库为空）。
 5. 全屏切换与控制栏按钮的逐一点击实测（W1 遗留）。
-6. WebDAV provider（Android 有只读实现可作协议参照）。
+6. ~~WebDAV provider~~ —— **已完成**：只读实现 + 真实 WsgiDAV 4.3.3 端到端（Gate A 目录与媒体路径实测，
+   见 [W5-1-R3-GATE-A.md](W5-1-R3-GATE-A.md)）。
+
+## W5.1 — 逐项 GUI 验收（进行中）
+
+用真实进程 + UI Automation 逐条核对已有能力，不以“页面能点开”代替成品验收。已完成轮次：
+
+- R2/R3 Gate A 打通到「目录可见 + 媒体 GET」：[W5-1-R3-GATE-A.md](W5-1-R3-GATE-A.md)
+- R4 Gate A 后半程（Seek、回环释放）：[W5-1-R4-GATE-A-SEEK-RELEASE.md](W5-1-R4-GATE-A-SEEK-RELEASE.md)
+- R4/R5 Gate B1（文件菜单与选择器）：[W5-1-R4-GATE-B1.md](W5-1-R4-GATE-B1.md)、[W5-1-R5-GATE-B1.md](W5-1-R5-GATE-B1.md)
+- R6 音频播放 + 三条选择器路径 + 面板缺陷：[W5-1-R6-AUDIO-PICKERS.md](W5-1-R6-AUDIO-PICKERS.md)
+
+验收过程中修掉的**产品**缺陷：音轨/字幕面板无法关闭、面板每 100 ms 重建、`.aac` 等音频不可达、
+旧文件选择器永不返回、字幕一次性提示被快照覆盖。仍在队列：关闭应用、目录边界、多选队列、
+收藏与继续观看写入闭环、WebDAV 内容从 UI 可达性。
 
 ## W3 — Windows 播放体验
 

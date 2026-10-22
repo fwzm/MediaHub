@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using MediaHub.App.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Windows.Storage.Pickers;
 
 namespace MediaHub.App.Views;
 
@@ -71,19 +70,10 @@ public sealed partial class LocalLibraryPage : Page
 
     private async void OnAddFolderClick(object sender, RoutedEventArgs e)
     {
-        var picker = new FolderPicker();
-        picker.FileTypeFilter.Add("*");
-        // Unpackaged apps must associate the picker with a window handle explicitly.
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, (App.MainWindow as MainWindow)!.WindowHandle);
-
-        var folder = await picker.PickSingleFolderAsync();
+        string? folder = await FilePickerService.PickFolderAsync();
         if (folder is null) return;
 
-        App.Services.Settings.Update(s =>
-        {
-            if (!s.LocalFolders.Contains(folder.Path, StringComparer.OrdinalIgnoreCase))
-                s.LocalFolders.Add(folder.Path);
-        });
+        App.MainWindow?.AddLocalFolder(folder);
         RefreshFolders();
         UpdateEmptyHint();
         await ScanAsync();
@@ -91,13 +81,11 @@ public sealed partial class LocalLibraryPage : Page
 
     private async void OnOpenFileClick(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker();
-        foreach (string ext in LocalLibraryService.SupportedVideoExtensions) picker.FileTypeFilter.Add(ext);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, (App.MainWindow as MainWindow)!.WindowHandle);
-
-        var file = await picker.PickSingleFileAsync();
+        // Audio included: the file picker is explicit user intent, so the narrower library-scan
+        // extension set would only hide files the engine can play.
+        string? file = await FilePickerService.PickFileAsync(LocalLibraryService.SupportedMediaExtensions);
         if (file is null) return;
-        PlayLocal(file.Path);
+        PlayLocal(file);
     }
 
     private void OnMediaItemClick(object sender, ItemClickEventArgs e)
