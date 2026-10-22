@@ -1,3 +1,4 @@
+using MediaHub.Domain;
 using System.Collections.ObjectModel;
 using MediaHub.App.Services;
 using Microsoft.UI.Xaml;

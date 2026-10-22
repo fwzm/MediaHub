@@ -1,3 +1,4 @@
+using MediaHub.Domain;
 using MediaHub.App.Services;
 using MediaHub.App.Views;
 using Microsoft.UI.Windowing;
@@ -161,9 +162,7 @@ public sealed partial class MainWindow : Window
             {
                 if (!args.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems)) return;
                 var items = await args.DataView.GetStorageItemsAsync();
-                List<string> paths = DroppedMedia.Expand(items.Select(i => i.Path));
-                if (paths.Count == 0) return;
-                OpenPaths(paths);
+                OpenPaths(items.Select(i => i.Path).ToList());
             }
             catch (Exception ex)
             {
@@ -172,21 +171,49 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    /// <summary>Plays one path directly, or queues several as a temporary playlist.</summary>
-    public void OpenPaths(IReadOnlyList<string> paths)
+    /// <summary>
+    /// Puts dropped, picked or command-line files into the temporary queue and shows the player.
+    /// </summary>
+    /// <remarks>
+    /// Every entry point — drag and drop, 文件 &gt; 打开视频, 文件 &gt; 加入播放队列, a shell "Open with"
+    /// hand-off — funnels through here, so the queue has exactly one intake that can be reasoned
+    /// about and tested. Replace and append are the only two behaviours, and the caller states which
+    /// one it wants instead of it being inferred from how many files happened to arrive.
+    /// </remarks>
+    public void OpenPaths(IReadOnlyList<string> rawPaths, QueueIntake mode = QueueIntake.Replace)
     {
-        List<PlaybackRequest> requests = paths.Select(DroppedMedia.ToRequest).ToList();
-        if (requests.Count == 0) return;
-
-        if (requests.Count == 1)
+        List<string> paths = DroppedMedia.Expand(rawPaths);
+        Services.StartupTrace.Write("queue:open mode=" + mode + " paths=" + paths.Count);
+        if (paths.Count == 0)
         {
-            App.Services.Queue.Clear();
-            EnterPlayer(requests[0]);
+            Services.StartupTrace.Write("queue:empty");
             return;
         }
 
-        PlaybackRequest? first = App.Services.Queue.Reset(requests);
-        if (first is not null) EnterPlayer(first);
+        List<PlaybackRequest> requests = paths.Select(DroppedMedia.ToRequest).ToList();
+        QueueIntakeResult intake = App.Services.Queue.Intake(requests, mode);
+        Services.StartupTrace.Write(
+            "queue:intake mode=" + intake.Mode
+            + " requested=" + intake.Requested
+            + " added=" + intake.Added
+            + " duplicates=" + intake.Duplicates
+            + " count=" + App.Services.Queue.Count);
+
+        PlaybackRequest? current = App.Services.Queue.Current;
+        if (current is null) return;
+
+        if (PlayerLayer.Visibility == Visibility.Visible && PlayerFrame.Content is PlayerPage page)
+        {
+            page.RefreshQueueView();
+            // Appending while something plays must not interrupt it: the new entries are visible in
+            // the queue and start only when the current item ends or the user asks for them.
+            if (intake.Mode == QueueIntake.Append) return;
+
+            _ = page.PlayQueueEntryAsync(current);
+            return;
+        }
+
+        EnterPlayer(current);
     }
 
     // ---------------------------------------------------------------- file menu
@@ -208,20 +235,53 @@ public sealed partial class MainWindow : Window
             // The two APIs are deliberately not mixed: this one takes a WindowId and returns a
             // PickFileResult carrying Path, and no StorageFile or InitializeWithWindow is involved.
             Services.StartupTrace.Write("menu:openvideo-picker-created");
-            string? picked = await FilePickerService.PickFileAsync(LocalLibraryService.SupportedMediaExtensions);
-            if (picked is null)
+            // Multi-select, because "open some videos" is one gesture for the user and one queue for
+            // the player. The picker returns them in the order the shell lists them; that order is
+            // preserved and becomes the queue order.
+            IReadOnlyList<string> picked = await FilePickerService.PickFilesAsync(LocalLibraryService.SupportedMediaExtensions);
+            if (picked.Count == 0)
             {
                 // Cancelling must leave the current playback session untouched.
                 Services.StartupTrace.Write("menu:openvideo-cancelled");
                 return;
             }
 
-            Services.StartupTrace.Write("menu:openvideo-selected");
-            OpenPaths(new[] { picked });
+            Services.StartupTrace.Write("menu:openvideo-selected count=" + picked.Count);
+            OpenPaths(picked);
         }
         catch (Exception ex)
         {
             Services.StartupTrace.Write("menu:openvideo-failed " + ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Adds files to the queue of the item already playing, without interrupting it.
+    /// </summary>
+    /// <remarks>
+    /// This is the "加入" half of the replace/append pair: 打开视频 replaces what is playing, this one
+    /// leaves it alone. Having both as separate commands is what removes the guesswork - the user
+    /// never has to reason about whether the current film will be interrupted.
+    /// </remarks>
+    private async void OnAddToQueueClick(object sender, RoutedEventArgs e)
+    {
+        Services.StartupTrace.Write("menu:addtoqueue-invoked");
+        try
+        {
+            Services.StartupTrace.Write("menu:addtoqueue-picker-created");
+            IReadOnlyList<string> picked = await FilePickerService.PickFilesAsync(LocalLibraryService.SupportedMediaExtensions);
+            if (picked.Count == 0)
+            {
+                Services.StartupTrace.Write("menu:addtoqueue-cancelled");
+                return;
+            }
+
+            Services.StartupTrace.Write("menu:addtoqueue-selected count=" + picked.Count);
+            OpenPaths(picked, QueueIntake.Append);
+        }
+        catch (Exception ex)
+        {
+            Services.StartupTrace.Write("menu:addtoqueue-failed " + ex.GetType().Name + ": " + ex.Message);
         }
     }
 
@@ -318,6 +378,14 @@ public sealed partial class MainWindow : Window
     /// <summary>Enters the player layer with a fully opaque full-window surface.</summary>
     public void EnterPlayer(PlaybackRequest request)
     {
+        // A queue left over from an earlier session would auto-advance into items the user is no
+        // longer watching, so entering the player with an unrelated request starts a clean queue.
+        if (App.Services.Queue.Current is not { } current
+            || !string.Equals(PlaybackQueue.IdentityOf(current), PlaybackQueue.IdentityOf(request), StringComparison.Ordinal))
+        {
+            App.Services.Queue.Clear();
+        }
+
         Nav.Visibility = Visibility.Collapsed;
         PlayerLayer.Visibility = Visibility.Visible;
         PlayerFrame.Navigate(typeof(PlayerPage), request);
@@ -349,26 +417,32 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        string candidate = args[1];
-        if (!File.Exists(candidate))
+        // Every argument is considered, not just the first: dropping three videos on the executable
+        // hands over three paths, and they belong in the same queue as if they had been picked.
+        var accepted = new List<string>();
+        foreach (string candidate in args.Skip(1))
         {
-            Services.StartupTrace.Write("cli:not-a-file");
-            return;
+            if (!File.Exists(candidate))
+            {
+                Services.StartupTrace.Write("cli:not-a-file " + Path.GetFileName(candidate));
+                continue;
+            }
+            // Audio counts here: double-clicking an .aac must reach the player, and the engine plays it.
+            if (!LocalLibraryService.IsSupportedMediaFile(candidate))
+            {
+                Services.StartupTrace.Write("cli:unsupported-extension " + Path.GetExtension(candidate));
+                continue;
+            }
+            accepted.Add(candidate);
         }
-        // Audio counts here: double-clicking an .aac must reach the player, and the engine plays it.
-        if (!LocalLibraryService.IsSupportedMediaFile(candidate))
+
+        if (accepted.Count == 0)
         {
-            Services.StartupTrace.Write("cli:unsupported-extension " + Path.GetExtension(candidate));
+            Services.StartupTrace.Write("cli:no-supported-file");
             return;
         }
 
-        Services.StartupTrace.Write("cli:opening");
-        EnterPlayer(new PlaybackRequest
-        {
-            LocalPath = candidate,
-            Title = Path.GetFileNameWithoutExtension(candidate),
-            DisplayUrl = candidate,
-            ExternalSubtitles = LocalLibraryService.FindSiblingSubtitles(candidate),
-        });
+        Services.StartupTrace.Write("cli:opening count=" + accepted.Count);
+        OpenPaths(accepted);
     }
 }

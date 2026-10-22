@@ -1,3 +1,4 @@
+using MediaHub.Domain;
 using MediaHub.App.Services;
 using MediaHub.Net;
 using MediaHub.Net.Security;

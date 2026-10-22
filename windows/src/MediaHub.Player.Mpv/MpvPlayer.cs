@@ -348,6 +348,15 @@ public sealed class MpvPlayer : IPlaybackEngine, ITrackController, IDisposable
         {
             _errorText = MpvNative.ErrorString(end.Error);
         }
+        else if (end.Reason == MpvNative.MPV_END_FILE_REASON_EOF)
+        {
+            // end-file is the authoritative end-of-stream signal. The observed "eof-reached"
+            // property is only true while the file is still loaded, and mpv unloads it immediately
+            // when keep-open is off, so polling that property alone silently loses the end of every
+            // file - the UI then never reports Ended and auto-advance never runs. The latch is
+            // cleared by the next LoadAsync.
+            _eof = true;
+        }
         Volatile.Write(ref _dirty, 1);
     }
 
@@ -599,6 +608,11 @@ public sealed class MpvPlayer : IPlaybackEngine, ITrackController, IDisposable
         SetProperty("volume", settings.Volume.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
         SetProperty("speed", _speed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
         SetProperty("sub-visibility", settings.SubtitleVisible ? "yes" : "no");
+
+        // mpv keeps the pause property across loadfile, so an item that was paused (or stopped by the
+        // shell right before the next queue entry) would leave the new file frozen at 0:00. Loading a
+        // file always means "start it"; pausing is an explicit user command afterwards.
+        SetProperty("pause", "no");
 
         int rc = Run("loadfile", path, "replace");
         if (rc < 0) throw new InvalidOperationException($"loadfile failed: {MpvNative.ErrorString(rc)}");

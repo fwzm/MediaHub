@@ -25,6 +25,10 @@
                         AutomationProperties.AutomationId="menu.openvideo">
           <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8E5;" /></MenuFlyoutItem.Icon>
         </MenuFlyoutItem>
+        <MenuFlyoutItem Text="加入播放队列…" Click="OnAddToQueueClick"
+                        AutomationProperties.AutomationId="menu.addtoqueue">
+          <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE710;" /></MenuFlyoutItem.Icon>
+        </MenuFlyoutItem>
         <MenuFlyoutItem Text="打开文件夹…" Click="OnOpenFolderClick"
                         AutomationProperties.AutomationId="menu.openfolder">
           <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8B7;" /></MenuFlyoutItem.Icon>
