@@ -2,7 +2,7 @@
 
 > 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
 
-当前状态：**A4 联合候选已并入 main**（2026-10-14，PR #24）：P1 播放专业信息面板、P2 字幕中心（同目录发现 / 导入 / 双内核加载 / mpv 偏移）、WebDAV 修复链路与私有恢复一致性已落地；本地门禁 1275 单测 / 0 失败 / 0 跳过，CI run `38491200869` 三个 job 全 SUCCESS。进行中的分支工作：M0-A 服务器请求治理（UA 作用域与重定向边界，ADR-045）、M1 设备能力证据驱动选路（ADR-042）、M9 mpv 本地回环桥。真机 / 真实服务器端到端验收为 NOT_RUN（`DEVICE UNVERIFIED`）。
+当前状态：**A4 联合候选已并入 main**（2026-10-14，PR #24）：P1 播放专业信息面板、P2 字幕中心（同目录发现 / 导入 / 双内核加载 / mpv 偏移）、WebDAV 修复链路与私有恢复一致性已落地；对应候选的本地门禁为 1275 单测 / 0 失败 / 0 跳过，CI run `38491200869` 三个 job 全 SUCCESS。当前 Draft 增量为 [M0-A 服务器请求治理闭环](https://github.com/fwzm/MediaHub/pull/36)：按服务器作用域的 User-Agent、持久化、删除清理、并发写入保护和设置页已接入；该增量尚未合入 main。真机 / 真实服务器端到端验收仍标记为 `DEVICE UNVERIFIED`，不能用 JVM 或 CI 结果替代。
 
 [![GitHub release](https://img.shields.io/github/v/release/fwzm/MediaHub?include_prereleases)](https://github.com/fwzm/MediaHub/releases)
 [![License](https://img.shields.io/github/license/fwzm/MediaHub)](LICENSE)
@@ -67,17 +67,19 @@ docs/                providers / player / api 设计文档
 
 ## 环境要求
 
-- JDK 17+
+- JDK 21（仓库当前 Android / Kotlin 构建以此版本验证）
 - Android SDK（compileSdk 35，minSdk 26，build-tools 35.0.0）
-- Gradle 8.9（仓库已带 wrapper）
+- Gradle Wrapper（仓库已带 wrapper；当前 wrapper 版本以 `gradle/wrapper/gradle-wrapper.properties` 为准）
 
 ## 构建
 
-```bash
-# 需要 local.properties 或 ANDROID_HOME 指向 SDK
-./gradlew assembleDebug          # 编译 + 打包 APK
-./gradlew testDebugUnitTest      # 单元测试
-./gradlew lintDebug              # Lint 检查
+```powershell
+# Windows：先为当前进程指定 JDK 21；需要 local.properties 或 ANDROID_HOME 指向 SDK
+$env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
+.\gradlew.bat assembleDebug --no-daemon --console=plain --no-parallel --max-workers=1
+.\gradlew.bat testDebugUnitTest :core:model:test :provider:api:test :metadata:test `
+  --no-daemon --console=plain --no-parallel --max-workers=1
+.\gradlew.bat lintDebug --no-daemon --console=plain --no-parallel --max-workers=1
 ```
 
 产物：`app/build/outputs/apk/debug/app-debug.apk`
@@ -101,7 +103,18 @@ docs/                providers / player / api 设计文档
 
 设置页可改默认倍速、字幕大小等（DataStore 持久化）。
 
-> Jellyfin / WebDAV / 搜索 / 播放进度上报为后续 Phase 候选，尚未实现（见 TASKS.md）。
+> 真机、真实 Emby/Jellyfin 服务器和旧版本数据库升级不属于上述 JVM 路径的自动保证范围；
+> 当前验证边界、尚未完成项和每个 Provider 的能力以 [TASKS.md](TASKS.md)、[ROADMAP.md](ROADMAP.md)
+> 与 [Provider 文档](docs/providers/README.md) 为准。
+
+## 当前分支已验证的 M0-A 能力
+
+- 默认 User-Agent 为可识别的 `MediaHub/... (Android)`，不会冒充其它播放器。
+- 自定义 User-Agent 按 `serverId` 隔离并持久化；删除服务器或确认的孤儿清理不会误删其它服务器配置。
+- 重定向按每一跳重新解析服务器归属；跨 origin 时回落默认 User-Agent，凭据剥离仍由独立拦截器负责。
+- 自定义值拒绝控制字符、非 ASCII 和超长输入；非法值不会被静默改写成另一条配置。
+- 本轮对 `DataStoreServerUserAgentRepository` 的加载等待做了无忙等优化，并通过
+  `:core:database:testDebugUnitTest`（14 tests / 0 failures）复跑持久化、并发和首次加载回归。
 
 ## 安全约定（强制）
 

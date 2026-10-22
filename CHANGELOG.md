@@ -1,5 +1,12 @@
 # 变更记录（CHANGELOG）
 
+## [Unreleased — M0-A repository wait optimization] — 2026-10-23
+
+- 优化 `DataStoreServerUserAgentRepository.awaitLoaded()`：用可取消的
+  `CompletableDeferred` 等待首份 DataStore 快照，移除 `yield` 忙等，避免加载期间持续占用协程调度器。
+- 保留同步网络拦截器使用的 `CountDownLatch` 有界等待；两条路径继续共享同一份首次加载完成信号。
+- 新增回归测试，覆盖等待协程在首份快照到达前挂起、到达后恢复的行为；本轮模块门禁为 14 tests / 0 failures。
+
 ## [Unreleased — A4 联合候选并入 main] — 2026-10-14
 
 - 并入 A4 联合候选（PR #24，266 文件）：P1 播放专业信息面板、P2 字幕中心（同目录发现 / 导入 / 双内核加载 / mpv 偏移 / 匹配记忆）、WebDAV 修复链路、Media3 与 mpv 实际选轨及回滚、私有恢复一致性、播放器退出归属与代际。
