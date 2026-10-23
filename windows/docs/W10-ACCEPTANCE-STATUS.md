@@ -27,7 +27,7 @@ U2/U3/U4 需要在这同一份二进制上复跑，才是「同一被测物、�
 
 证据目录：`D:\mh-verify\quiet-w10b\`（summary、`watch-*.abort`、`run-u2-emby-*.log`、`ABORT-NOTE.txt`）。
 
-## 五次尝试总账（同一被测二进制 `A8EDD448`）
+## 六次尝试总账（同一被测二进制 `A8EDD448`）
 
 | # | 起跑 | 结果 | 关键事实 |
 | --- | --- | --- | --- |
@@ -36,8 +36,11 @@ U2/U3/U4 需要在这同一份二进制上复跑，才是「同一被测物、�
 | 3 | 02:29（quiet-w10e，计划任务） | ABORTED-BY-USER 02:35:27 | 门禁 02:35:19 通过 → Emby 起 → 02:35:27 使用者输入即 abort；u2 的 P0 6/6 PASS 后 `P1.0` 因 abort 守卫拒绝开窗而 FAIL（`pid=164048` 无窗口）。**这一跑反证了 guard 链有效：用户在场时一个窗口都没开** |
 | 4 | 02:37（quiet-w10f，计划任务） | ABORTED-BY-USER 02:42:57 | idle 曲线 104→172→293→300→0：门禁刚满 300 s 放行、watchdog 与 Emby 刚起来，使用者就碰了键鼠；`watch-20261024-023718.abort` 记 `dryRun=False`。同样**零 MediaHub 窗口** |
 | 5 | 03:02（quiet-w10g，计划任务，**首次用可续跑驱动器**） | ABORTED-BY-USER 03:22:58 | 阈值抬到 1200 s；03:22:36 门禁放行（idle 从 3 s 一路涨到 1200 s，说明连续空闲 20 分钟确实拿得到）→ Emby 起（pid 207988）→ u2 套件进程 03:22:45 起 → **22 秒后**使用者输入即 abort（`watch-20261024-030230.abort` 记 `idle=0 threshold=1200 dryRun=False`），`Start-MhApp` 从未被调用 → **零 MediaHub 窗口**、检查点仍为空 |
+| 6 | 03:42（quiet-w10g，计划任务，可续跑驱动器） | ABORTED-BY-USER 04:02:58 | 阈值 1200 s；04:02:4x 门禁放行（idle 一路涨到 1200 s）→ Emby 起（pid 202764）→ u2 套件 04:02:47 起 → **16 秒后**使用者输入即 abort（`watch-20261024-034222.abort` 记 `idle=0 threshold=1200 dryRun=False`）。`Start-MhApp` 从未被调用 → **零 MediaHub 窗口**、检查点仍为空。此跑之后**主动停用计划任务**：每次使用者离开就起一次不可见 Emby，本身也是打扰 |
 
-五次都是「使用者就在机器前」导致的中断，不是产品失败，也不是门禁失效；五次合计**零窗口**（每次都在 `Start-MhApp` 之前就 abort）。第 5 跑另外证明：可续跑驱动器本身端到端可用（门禁 → 起服务器 → 起套件 → 被打断 → 收尾清理），只是它一格都还没跑完。
+六次都是「使用者就在机器前」导致的中断，不是产品失败，也不是门禁失效；六次合计**零窗口**（每次都在 `Start-MhApp` 之前就 abort）。第 5、6 跑另外证明：可续跑驱动器本身端到端可用（门禁 → 起服务器 → 起套件 → 被打断 → 收尾清理），只是它一格都还没跑完。
+
+**注意一个反复出现的形状**：门禁阈值从 300 s 提到 1200 s，都没有改变结果 —— 使用者确实能连续空闲 20 分钟（idle 实测从 3 s 涨到 1200 s），但**门禁一放行、服务器一起、套件一起**，16–22 秒内就有人碰键鼠。六次全部如此，因此按「等下一个空闲窗口」自动重试的收益为零，代价是每次都在使用者桌面上起一个不可见的媒体服务器进程。
 
 结论：这台机器拿不到约 40 分钟的连续空闲窗口，一次跑完六跑的方案不可行。因此改为**按组合可续跑**：
 
@@ -46,6 +49,12 @@ U2/U3/U4 需要在这同一份二进制上复跑，才是「同一被测物、�
 - 开跑前还有**构建清场守卫**：检测 `dotnet/MSBuild/VBCSCompiler/java/javaw` 的 1.5 s CPU 增量（>0.6 s 判忙），有构建在跑就等，避免 GUI 时序断言被抢 CPU 变假红；
 - 门禁阈值提高到 **1200 s 空闲**：只有使用者真的离开才开跑，减少「刚满 5 分钟就被碰」的无效尝试。
 
+
+## 结论：无人值守自动跑在这台机器上不可行（2026-10-24 04:05）
+
+计划任务 `MH-W10-Quiet` 在 04:02:58 第 6 次被打断后**已主动停用**（`schtasks /End`，状态回到 Ready，未删除，需要时可 `/Run` 重启）。理由：继续自动重试只会让「使用者离开 → 起一份不可见 Emby → 使用者回来 → 杀进程」循环反复发生，这本身就是打扰，而六次里没有一次跑到 `Start-MhApp`。
+
+因此 GUI 证据改由**人工授予窗口**：要么使用者自己挑一个不会被打断的时段跑下面这一条命令，要么在允许打扰的前提下用 `MH_ALLOW_ACTIVE=1` 直接跑（会抢焦点，必须明确同意）。在此之前，U2/U3/U4 在 `A8EDD448` 上仍是 **NOT_RUN**，W9 的 276 条断言仍然只对 `A15F6E4F` 有效。
 ## 这一跑暴露并已修的测试设施缺陷（不是产品缺陷）
 
 1. **看门狗从未真的杀进程**：`Start-Job -ArgumentList …, [bool]$DryRun, …` 把 `[bool]` 当字面量拼成字符串 `[bool]False`，
@@ -67,7 +76,9 @@ pwsh -File windows/tools/acceptance/run-quiet-resume.ps1 `
 ```
 
 无人值守时由计划任务 `MH-W10-Quiet` 承载（先 `schtasks /Change /TN MH-W10-Quiet /TR <wrapper>` 再 `/Run`），
-wrapper 调上面的命令并把 stdout 重定向到 `D:\mh-verify\w10g-console.log`。
+wrapper 调上面的命令并把 stdout 重定向到 `D:\mh-verify\w10g-console.log`。该任务在 04:02:58 第 6 次被打断后已 `schtasks /End` 停用（Status=Ready，未删除）。
+
+如果要人工跑一次：确认自己接下来 10–15 分钟不碰键鼠，直接在上面那条命令前加 `-Suites u2` 之类的单组合，跑完把 `summary-*.txt` 贴回来即可。
 
 跑完把 `D:\mh-verify\quiet-w10g\<组合>\summary-*.txt` 的每行 `exit=` / `RESULT:` 抄进 W10 证据，并逐套件核对
 `windows/tools/acceptance/evidence/u{2,3,4}/<server>/` 的截图与 checks.json。
@@ -75,6 +86,6 @@ wrapper 调上面的命令并把 stdout 重定向到 `D:\mh-verify\w10g-console.
 ## 明确不声称的东西
 
 - 不声称 U2/U3/U4 在 `A8EDD448` 上新二进制上通过。U3/U4 证据来自 `A15F6E4F`；U2 的 Emby 侧目录产物在 01:53 被 W10 中断跑覆盖（同目录原始 `run-console.log` 仍记 `RESULT: 35 passed, 0 failed`），Jellyfin 侧仍是 W9 原始产物。
-- 不声称「已复跑」——五次尝试都是被人打断的，不是结果（检查点 `D:\mh-verify\w10-checkpoint.json` 至今为空，说明零组合完成）。
+- 不声称「已复跑」——六次尝试都是被人打断的，不是结果（检查点 `D:\mh-verify\w10-checkpoint.json` 至今为空，说明零组合完成）。
 - 不声称「没有打扰使用者」以外的任何运行副作用：每次尝试都在门禁打开后**极短时间内**被 abort，实际只起过不可见的测试服务器进程，且已在收尾时停止。
 - 不声称任何 HDR / 签名 / LGPL 相关能力（仍是 `RELEASE_BLOCKED` / `SIGNING_BLOCKED`）。

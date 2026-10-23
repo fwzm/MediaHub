@@ -1,0 +1,210 @@
+LGPL engine - self-contained probe evidence
+==============================================
+generated-utc   : 2026-10-23T20:09:31Z
+repo            : D:\deepseek_test\MediaHub_Win
+git-head        : 1a38b06 (v0.1.0-alpha.1-291-g1a38b06-dirty)
+dotnet          : 10.0.113   pwsh: 7.6.7
+probe exe       : windows/src/MediaHub.EngineProbe/bin/Debug/net10.0/MediaHub.EngineProbe.exe
+core dll        : windows/engine/lgpl/dist/libmpv-2.dll
+core bytes      : 3327274
+core sha256     : 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+dependency dir  : windows/engine/lgpl/dist   (the only directory handed to --deps)
+media           : windows/tests/assets/sample-av.mp4, --seconds 3
+PATH handling   : every PATH entry matching msys64 | mh-servers | lgpl-build was removed before the probe ran
+PATH entries    : 64 kept, 1 dropped (C:\msys64\ucrt64\bin)
+command line    : D:\deepseek_test\MediaHub_Win\windows\src\MediaHub.EngineProbe\bin\Debug\net10.0\MediaHub.EngineProbe.exe --dll D:\deepseek_test\MediaHub_Win\windows\engine\lgpl\dist\libmpv-2.dll --deps D:\deepseek_test\MediaHub_Win\windows\engine\lgpl\dist --media D:\deepseek_test\MediaHub_Win\windows\tests\assets\sample-av.mp4 --seconds 3 --label lgpl-selfcontained --json C:\Users\55160\AppData\Local\Temp\selfcontained-probe-151bfd2b9bff479caf461a499b4a977e.json
+
+why this proves self-containment
+---------------------------------
+MediaHub.EngineProbe tries NativeLibrary.Load(<absolute path>) first and only falls back to
+AddDllDirectory(--deps) + SetDefaultDllDirectories, then to LoadLibraryExW, when that fails.
+The report records loadMode=native-library only when the Windows loader resolved every imported
+DLL on its own. PATH carried no MSYS2 or prefix entry, so the third-party DLLs in
+windows/engine/lgpl/dist could not be borrowed from C:\msys64\ucrt64\bin or
+D:\mh-servers\lgpl-build\prefix\bin: they were found next to libmpv-2.dll, which is exactly how
+the product loads them (the app copies them into its own output directory).
+
+assertions
+----------
+PASS probe exit code 0 (actual 0)
+PASS verdict=PASS (actual PASS)
+PASS loadMode=native-library, the primary load path with no dependency-directory fallback (actual native-library)
+PASS featuresSource=log (actual log)
+PASS featuresContainGpl=false, this is the LGPL build (actual False)
+PASS maxTimePos=3s >= floor 2.000s
+PASS core sha256 is the LGPL candidate 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+PASS PATH held no msys64 / mh-servers / lgpl-build entry while the probe ran
+PASS file loaded: H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 / AAC (Advanced Audio Coding) 160x120
+PASS error-level mpv log lines: 0 (actual 0)
+
+probe stdout
+------------
+== MediaHub engine probe ==
+label          : lgpl-selfcontained
+dll            : D:\deepseek_test\MediaHub_Win\windows\engine\lgpl\dist\libmpv-2.dll
+dll bytes      : 3327274
+dll sha256     : 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+load mode      : native-library
+dependency dirs: D:\deepseek_test\MediaHub_Win\windows\engine\lgpl\dist
+client api     : 2.5 (0x00020005)
+mpv version    : mpv v0.41.0-UNKNOWN
+ffmpeg version : 8.1.1
+enabled feats  : build-date cplugins d3d-hwaccel d3d11 d3d9-hwaccel dos-paths dxgi-debug-d3d11 ffmpeg gl gl-dxinterop gl-dxinterop-d3d9 gl-win32 glob glob-win32 iconv lcms2 libass libavdevice libplacebo shaderc spirv-cross vector wasapi win32 win32-desktop win32-executable win32-threads zlib  [source: log]
+gpl token      : absent
+media          : D:\deepseek_test\MediaHub_Win\windows\tests\assets\sample-av.mp4
+target         : 3.000 s (floor 2.000 s)
+file loaded    : True
+max time-pos   : 3.000 s
+final time-pos : 3.000 s
+eof reached    : False
+end-file       : n/a
+video          : H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 160x120
+audio          : AAC (Advanced Audio Coding)
+duration       : 4.000 s
+hwdec-current  : no
+log capture    : available
+error logs     : 0
+warn logs      : 0
+timed out      : False
+elapsed        : 3065 ms
+exit code      : 0
+verdict        : PASS
+reason         : file-loaded 且 time-pos 推进到 3.000 秒（下限 2.000 秒），error 级日志 0 条
+option warning : osc=no 失败：option not found
+option warning : ytdl=no 失败：option not found
+json           : C:\Users\55160\AppData\Local\Temp\selfcontained-probe-151bfd2b9bff479caf461a499b4a977e.json
+
+
+probe json
+----------
+{
+  "label": "lgpl-selfcontained",
+  "dllPath": "D:\\deepseek_test\\MediaHub_Win\\windows\\engine\\lgpl\\dist\\libmpv-2.dll",
+  "dllBytes": 3327274,
+  "dllSha256": "20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a",
+  "loadMode": "native-library",
+  "dependencyDirectories": [
+    "D:\\deepseek_test\\MediaHub_Win\\windows\\engine\\lgpl\\dist"
+  ],
+  "clientApiVersion": 131077,
+  "clientApiMajor": 2,
+  "clientApiMinor": 5,
+  "clientApiText": "2.5",
+  "mpvVersion": "mpv v0.41.0-UNKNOWN",
+  "ffmpegVersion": "8.1.1",
+  "enabledFeatures": [
+    "build-date",
+    "cplugins",
+    "d3d-hwaccel",
+    "d3d11",
+    "d3d9-hwaccel",
+    "dos-paths",
+    "dxgi-debug-d3d11",
+    "ffmpeg",
+    "gl",
+    "gl-dxinterop",
+    "gl-dxinterop-d3d9",
+    "gl-win32",
+    "glob",
+    "glob-win32",
+    "iconv",
+    "lcms2",
+    "libass",
+    "libavdevice",
+    "libplacebo",
+    "shaderc",
+    "spirv-cross",
+    "vector",
+    "wasapi",
+    "win32",
+    "win32-desktop",
+    "win32-executable",
+    "win32-threads",
+    "zlib"
+  ],
+  "featuresSource": "log",
+  "featuresContainGpl": false,
+  "mediaPath": "D:\\deepseek_test\\MediaHub_Win\\windows\\tests\\assets\\sample-av.mp4",
+  "targetSeconds": 3,
+  "successFloorSeconds": 2,
+  "fileLoaded": true,
+  "maxTimePos": 3,
+  "finalTimePos": 3,
+  "eofReached": false,
+  "videoCodec": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+  "audioCodec": "AAC (Advanced Audio Coding)",
+  "videoWidth": 160,
+  "videoHeight": 120,
+  "duration": 4,
+  "hwdecCurrent": "no",
+  "errorLogs": [],
+  "warnLogs": [],
+  "errorLogTotal": 0,
+  "warnLogTotal": 0,
+  "logCaptureAvailable": true,
+  "timedOut": false,
+  "elapsedMilliseconds": 3065,
+  "optionErrors": [
+    "osc=no 失败：option not found",
+    "ytdl=no 失败：option not found"
+  ],
+  "verdict": "PASS",
+  "reason": "file-loaded 且 time-pos 推进到 3.000 秒（下限 2.000 秒），error 级日志 0 条",
+  "exitCode": 0
+}
+
+
+dependency manifest - windows/engine/lgpl/dist/runtime-dependencies-collected.txt (33 third-party DLLs)
+----------------------------------------------------------------------------------------------------------
+# Runtime dependencies of the LGPL libmpv build (windows/engine/lgpl/dist)
+# generated by windows/tools/collect-lgpl-runtime.ps1
+# generated at    : 2026-10-24 04:07:46+08:00
+# core artefact   : libmpv-2.dll sha256=20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a bytes=3327274
+# dependency roots: D:\mh-servers\lgpl-build\prefix\bin ; C:\msys64\ucrt64\bin
+#
+# One line per shipped dependency: <name> <bytes> <sha256> <source>
+#   source = where the bytes came from; the dist path itself once the file is already in place.
+# system DLLs not copied (44): ADVAPI32.dll api-ms-win-core-path-l1-1-0.dll api-ms-win-core-synch-l1-2-0.dll api-ms-win-crt-convert-l1-1-0.dll api-ms-win-crt-environment-l1-1-0.dll api-ms-win-crt-filesystem-l1-1-0.dll api-ms-win-crt-heap-l1-1-0.dll api-ms-win-crt-locale-l1-1-0.dll api-ms-win-crt-math-l1-1-0.dll api-ms-win-crt-multibyte-l1-1-0.dll api-ms-win-crt-private-l1-1-0.dll api-ms-win-crt-process-l1-1-0.dll api-ms-win-crt-runtime-l1-1-0.dll api-ms-win-crt-stdio-l1-1-0.dll api-ms-win-crt-string-l1-1-0.dll api-ms-win-crt-time-l1-1-0.dll api-ms-win-crt-utility-l1-1-0.dll AVICAP32.dll AVRT.dll bcrypt.dll bcryptprimitives.dll CFGMGR32.dll CRYPT32.dll dwmapi.dll DWrite.dll GDI32.dll IMM32.dll KERNEL32.dll ncrypt.dll ntdll.dll ole32.dll OLEAUT32.dll OPENGL32.dll RPCRT4.dll Secur32.dll SHCORE.dll SHELL32.dll SHLWAPI.dll USER32.dll USERENV.dll USP10.dll UxTheme.dll VERSION.dll WS2_32.dll
+#
+avcodec-62.dll 18603520 1faacb7a3bfd9d16c5b8258ede66baf03c31d2578d828af68ade215ada6d9f4d D:\mh-servers\lgpl-build\prefix\bin\avcodec-62.dll
+avdevice-62.dll 153088 af2075f1e5d17a04e0a109d76af8704ca15b6c1438054962ebdfa596ce793ef2 D:\mh-servers\lgpl-build\prefix\bin\avdevice-62.dll
+avfilter-11.dll 5288448 c077cd1c46d337851e4035716fcfb218a48a771b073b27474cf86c1e4a6f9c05 D:\mh-servers\lgpl-build\prefix\bin\avfilter-11.dll
+avformat-62.dll 2805760 e6bf5d047479763b818ce34b73ae256c1d7d2163c1d6964cef6eff7ea5636257 D:\mh-servers\lgpl-build\prefix\bin\avformat-62.dll
+avutil-60.dll 1067520 c1ce3e99f2252ce1d977bc5e0d3d6e2e9d0200723a391c0ef1b781337e7bd353 D:\mh-servers\lgpl-build\prefix\bin\avutil-60.dll
+libass-9.dll 345174 cb2b46133b3bd9630384148bd7229e987af9703208d4329fc2215f4170b8dc6b C:\msys64\ucrt64\bin\libass-9.dll
+libbrotlicommon.dll 144565 c62c08223e450dfc2fff33c752cc228505ffd9d755201958ba800d5d30481a2c C:\msys64\ucrt64\bin\libbrotlicommon.dll
+libbrotlidec.dll 62619 e270b6e576594ee8ee6e33ccc54e34a54304616dd6225652e11e49d6f17ef896 C:\msys64\ucrt64\bin\libbrotlidec.dll
+libbz2-1.dll 78774 669a4bf9266d5f020e843aa5fd75b93ce8ebde27014d5ac466a8b3cf39d8aba7 C:\msys64\ucrt64\bin\libbz2-1.dll
+libdovi.dll 1370861 75988509f0d2166e2060ed548913bd7b34556bc16b3f9a02469de1dd2347a7fb C:\msys64\ucrt64\bin\libdovi.dll
+libexpat-1.dll 191185 00b9ad2a1f75bbf4f83428a9adcd609da1c8590a84c944226422f081cb1459e1 C:\msys64\ucrt64\bin\libexpat-1.dll
+libfontconfig-1.dll 505833 be30a200fa4000d0a7a1d3911391969627440148f01d0028a319bcb9fa112202 C:\msys64\ucrt64\bin\libfontconfig-1.dll
+libfreetype-6.dll 808305 19604dde573cbb8a13053fc231eee99b91cd972e0e9a3e1465f44ad6985e83ee C:\msys64\ucrt64\bin\libfreetype-6.dll
+libfribidi-0.dll 152541 14bd0ed4c24d0068434bc23cd4f39e8dc0edcf56f2c9996b6fe39b39ffc54673 C:\msys64\ucrt64\bin\libfribidi-0.dll
+libgcc_s_seh-1.dll 152895 6a68f99a316764b680bbb6f0553299fbc7130a3421a1d64bb044627cbe0c6db2 C:\msys64\ucrt64\bin\libgcc_s_seh-1.dll
+libglib-2.0-0.dll 1568604 3a1abec0184b238db54399cb9243393d9436d96b8fdb9bd9f2875da207c5b458 C:\msys64\ucrt64\bin\libglib-2.0-0.dll
+libgraphite2.dll 167857 93953e4744bcfce9a7bc439b956544bc213095cb1349c3602a58370f32b25c18 C:\msys64\ucrt64\bin\libgraphite2.dll
+libharfbuzz-0.dll 1612472 842d73ce2dd9ee506ef68f4d3e9ca29b62c87e34999cd2720505bf3c9d3f575c C:\msys64\ucrt64\bin\libharfbuzz-0.dll
+libiconv-2.dll 1135869 b37d1b4acab5310c4e4f6e2a961d146454ff740d943724a68fa3cebc85deb7cd C:\msys64\ucrt64\bin\libiconv-2.dll
+libintl-8.dll 212436 77184a77e8e751999816c311ae144fae3fe1957992dff525c13267bd845982d4 C:\msys64\ucrt64\bin\libintl-8.dll
+liblcms2-2.dll 448202 03314471fadd04cdd63c108472ff85d058903d236a0356c14eda363f0e1ccb65 C:\msys64\ucrt64\bin\liblcms2-2.dll
+libpcre2-8-0.dll 706022 1f609cde2ce432efb7d2b0c7b84a14a6dbfc9622d1ac1a3cbadf51c5b0b4dada C:\msys64\ucrt64\bin\libpcre2-8-0.dll
+libplacebo-360.dll 1235613 8eb2c3fe24a124d9dbf0383d60ac7dde6c0dd5607b2451cad0d924271e46d5b8 C:\msys64\ucrt64\bin\libplacebo-360.dll
+libpng16-16.dll 254777 7f425fd2b41d83869bb31bf761b4fb315f11040d55540661f96e582e1ec79a36 C:\msys64\ucrt64\bin\libpng16-16.dll
+libshaderc_shared.dll 10657197 331df8a45983735b823c893a9b872c3414af6eadca9fa189d0b6dfe97960b3cf C:\msys64\ucrt64\bin\libshaderc_shared.dll
+libspirv-cross-c-shared.dll 3433687 bc4bdcf63b9bbf60777bc10340050ae6edfbb3be3faf3fa636af53ecf7d2bbc8 C:\msys64\ucrt64\bin\libspirv-cross-c-shared.dll
+libstdc++-6.dll 2403882 9510ec8bbec49de557da9935f793ad19f1ffdb4e5e3ef7715bd40ffe0b5f3892 C:\msys64\ucrt64\bin\libstdc++-6.dll
+libunibreak-7.dll 141442 f1f4bb5b5bb3dbf8d142df3012f13e4b5b0246565496d43718a6f33321e96283 C:\msys64\ucrt64\bin\libunibreak-7.dll
+libwinpthread-1.dll 62176 0e013ffc123dda330d27c76f26ba74fcd690f1236bb0225d3b4f406d71774e9e C:\msys64\ucrt64\bin\libwinpthread-1.dll
+swresample-6.dll 140800 7fc1e4754c1ddf7f2eebec7801a32d3ffb0efe7d9753e84837d8a57d9e243ee0 D:\mh-servers\lgpl-build\prefix\bin\swresample-6.dll
+swscale-9.dll 2089984 e0d920aea621b242703c988807b353989a84ce3069bc80979135bc60f3255bae D:\mh-servers\lgpl-build\prefix\bin\swscale-9.dll
+vulkan-1.dll 724189 31862137c4179dcdbba782760f3e401f9fb526477947079d7f63987864f9b0eb C:\msys64\ucrt64\bin\vulkan-1.dll
+zlib1.dll 100279 1dc85208162ee57fe97e892bb5160fe9588903992995f90adc3a3a358dac6fc6 C:\msys64\ucrt64\bin\zlib1.dll
+
+
+scope and limits
+----------------
+GPU, HDR and audio output are not exercised (vo=null, ao=null, hwdec=no) - same caveat as the CI
+engine step. The 44 Windows DLLs listed in the manifest header are left to the OS (System32 and the
+api-ms-win-* API sets) and must not be shipped. Reproduce with the command line above after
+running: pwsh -File windows/tools/collect-lgpl-runtime.ps1
+
