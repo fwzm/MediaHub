@@ -5,11 +5,17 @@ namespace MediaHub.Sync;
 /// <summary>Stable reason and warning codes produced by <see cref="SourceSyncSession"/>.</summary>
 public static class SourceSyncSessionReasons
 {
-    /// <summary>Credential migration is not part of this layer; asking for secrets is refused, not silently dropped.</summary>
+    /// <summary>
+    /// The offline archive layer refuses envelopes that carry credentials (ADR-S005), so a passphrase and
+    /// <c>includeSecrets</c> cannot be combined. Refused loudly, never silently stripped.
+    /// </summary>
     public const string SecretsNotSupported = "secrets-not-supported";
 
     /// <summary>Prefix of a warning about a local source that could not be exported (serverId and reason follow).</summary>
     public const string SkippedSourcePrefix = "source-skipped";
+
+    /// <summary>Prefix of a warning about a credential whose sync source id matched nothing (id and reason follow).</summary>
+    public const string SkippedSecretPrefix = "secret-skipped";
 
     /// <summary>The envelope carried neither sources nor tombstones, so the peer has nothing to do with it.</summary>
     public const string EmptyEnvelope = "empty-envelope";

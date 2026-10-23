@@ -51,15 +51,19 @@ public sealed class SourceSyncSessionTests
     }
 
     [Fact]
-    public void Export_AskingForSecretsIsRefusedLoudly()
+    public void Export_AskingForSecretsWithoutAProtectorIsRefusedLoudly()
     {
         var store = new InMemoryLocalSourceStore();
         store.Save(Record());
         SourceSyncSession session = Session(store);
 
-        SyncContractException error = Assert.Throws<SyncContractException>(() => session.Export(includeSecrets: true));
+        SyncContractException error = Assert.Throws<SyncContractException>(
+            () => session.Export(includeSecrets: true, secrets: new Dictionary<string, byte[]>
+            {
+                ["src-1"] = Encoding.UTF8.GetBytes("webdav-password-42"),
+            }));
 
-        Assert.Equal(SourceSyncSessionReasons.SecretsNotSupported, error.Reason);
+        Assert.Equal(SecretError.SecretsRequireProtector, error.Reason);
     }
 
     [Fact]

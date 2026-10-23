@@ -42,4 +42,15 @@ public sealed record LocalSourceRecord
 
     /// <summary>Revision this device last recorded for the source.</summary>
     public long RecordRevision { get; init; }
+
+    /// <summary>
+    /// The credential for this source, sealed for this machine and this account (W6-6).
+    /// </summary>
+    /// <remarks>
+    /// Never plaintext: only a <see cref="ISecretProtector"/> can produce or open it, and import re-seals a
+    /// peer's block instead of copying it. It lives beside the source row so a single store write makes the
+    /// address and the credential land together; it is deliberately absent from every revision and hash the
+    /// sync contract compares, because a password is not source content.
+    /// </remarks>
+    public SecretEnvelope? Secret { get; init; }
 }

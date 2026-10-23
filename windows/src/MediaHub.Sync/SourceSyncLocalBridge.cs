@@ -225,9 +225,29 @@ public sealed class SourceSyncLocalBridge
     /// compares, so the second pass plans <see cref="SourceSyncAction.NoChange"/>.
     /// </para>
     /// </remarks>
-    public SourceSyncApplyResult Apply(SourceSyncEnvelope remote)
+    /// <param name="remote">Inbound envelope.</param>
+    /// <param name="secrets">
+    /// Credentials already re-sealed on this machine, keyed by sync source id. The bridge never sees plaintext
+    /// and never unseals anything: the session does that before planning, so a credential that cannot be
+    /// re-sealed stops the whole round before a single write happens.
+    /// </param>
+    public SourceSyncApplyResult Apply(
+        SourceSyncEnvelope remote,
+        IReadOnlyDictionary<string, SecretEnvelope>? secrets = null)
     {
         ArgumentNullException.ThrowIfNull(remote);
+
+        var sealedSecrets = new Dictionary<string, SecretEnvelope>(StringComparer.OrdinalIgnoreCase);
+        if (secrets is not null)
+        {
+            foreach ((string key, SecretEnvelope? value) in secrets)
+            {
+                if (!string.IsNullOrWhiteSpace(key) && value is not null)
+                {
+                    sealedSecrets[key.Trim()] = value;
+                }
+            }
+        }
 
         SourceSyncPlan plan = SourceSyncPlanner.Plan(remote, Store.GetAll());
         var outcomes = new List<SourceSyncApplyOutcome>(plan.Items.Count);
@@ -235,8 +255,8 @@ public sealed class SourceSyncLocalBridge
         {
             bool applied = candidate.Action switch
             {
-                SourceSyncAction.Update => ApplyUpdate(remote, candidate),
-                SourceSyncAction.Create => ApplyCreate(remote, candidate),
+                SourceSyncAction.Update => ApplyUpdate(remote, candidate, sealedSecrets),
+                SourceSyncAction.Create => ApplyCreate(remote, candidate, sealedSecrets),
                 _ => false,
             };
 
@@ -246,7 +266,10 @@ public sealed class SourceSyncLocalBridge
         return new SourceSyncApplyResult { Plan = plan, Outcomes = outcomes };
     }
 
-    private bool ApplyUpdate(SourceSyncEnvelope remote, SourceSyncCandidate candidate)
+    private bool ApplyUpdate(
+        SourceSyncEnvelope remote,
+        SourceSyncCandidate candidate,
+        IReadOnlyDictionary<string, SecretEnvelope> sealedSecrets)
     {
         SourceRecord? incoming = FindIncoming(remote, candidate.SyncSourceId);
         LocalSourceRecord? local = FindLocal(candidate.ServerId);
@@ -277,11 +300,17 @@ public sealed class SourceSyncLocalBridge
             AccountScope = Trimmed(incoming.AccountScope),
             DisplayName = incoming.DisplayName ?? "",
             RecordRevision = incoming.RecordRevision,
+            // An import that carries no credential for this source keeps the one already stored; silently
+            // dropping a working credential because a peer omitted it would be a downgrade, not a merge.
+            Secret = LookupSecret(sealedSecrets, incoming.SyncSourceId) ?? local.Secret,
         });
         return true;
     }
 
-    private bool ApplyCreate(SourceSyncEnvelope remote, SourceSyncCandidate candidate)
+    private bool ApplyCreate(
+        SourceSyncEnvelope remote,
+        SourceSyncCandidate candidate,
+        IReadOnlyDictionary<string, SecretEnvelope> sealedSecrets)
     {
         if (candidate.RequiresUserApproval)
         {
@@ -321,8 +350,17 @@ public sealed class SourceSyncLocalBridge
             AccountScope = Trimmed(incoming.AccountScope),
             DisplayName = incoming.DisplayName ?? "",
             RecordRevision = incoming.RecordRevision,
+            Secret = LookupSecret(sealedSecrets, serverId),
         });
         return true;
+    }
+
+    private static SecretEnvelope? LookupSecret(
+        IReadOnlyDictionary<string, SecretEnvelope> sealedSecrets,
+        string? syncSourceId)
+    {
+        string? key = Trimmed(syncSourceId);
+        return key is not null && sealedSecrets.TryGetValue(key, out SecretEnvelope? secret) ? secret : null;
     }
 
     private static string DeriveFrom(string wire, string normalizedUrl, string? accountScope)
