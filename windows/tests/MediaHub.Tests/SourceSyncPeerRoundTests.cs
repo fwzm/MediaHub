@@ -375,7 +375,13 @@ public sealed class SourceSyncPeerRoundTests : IDisposable
 
         SourceSyncPeerRoundResult received = await receiving;
 
-        Assert.True(sent.Succeeded, sent.Reason ?? "");
+        // The receiver stops at the first frame it cannot accept and drops the connection, so the
+        // sender either finishes writing before that close lands or sees io-failed. Both are correct
+        // protocol behaviour; anything else is a defect. (Asserting success alone is a race: it only
+        // loses when the machine is loaded, e.g. when the whole suite runs in parallel.)
+        Assert.True(
+            sent.Succeeded || sent.Reason == SourceSyncTransferReasons.IoFailed,
+            sent.Reason ?? "");
         Assert.False(received.Succeeded);
         Assert.Equal(SourceSyncTransferReasons.ChallengeMismatch, received.Reason);
         AssertCount(0, receiverStore.GetAll());

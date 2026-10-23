@@ -35,6 +35,15 @@ public enum SyncCliCommand
 
     /// <summary><c>pair forget</c>: dry-run by default, <c>--apply</c> drops one pinned device.</summary>
     PairForget = 10,
+
+    /// <summary><c>transfer serve</c>: receive one envelope over a loopback socket (W6-16/17).</summary>
+    TransferServe = 11,
+
+    /// <summary><c>transfer send</c>: export this device's envelope and push it to a loopback listener.</summary>
+    TransferSend = 12,
+
+    /// <summary><c>transfer roundtrip</c>: two devices, two directions, in one command.</summary>
+    TransferRoundtrip = 13,
 }
 
 /// <summary>A validated command line. Produced only by <see cref="CliParser"/>.</summary>
@@ -78,6 +87,24 @@ public sealed record CliInvocation
 
     /// <summary><c>--expect</c>: base64 of the plaintext the sealed secret must unseal to.</summary>
     public string? ExpectPlaintextBase64 { get; init; }
+
+    /// <summary><c>--to</c>: the <c>host:port</c> a <c>transfer send</c> dials. Loopback only.</summary>
+    public string? Target { get; init; }
+
+    /// <summary><c>--port</c>: the port a <c>transfer serve</c> binds; null or 0 means the system picks one.</summary>
+    public int? Port { get; init; }
+
+    /// <summary><c>--device-a</c>: the sender device id of <c>transfer roundtrip</c>'s first round.</summary>
+    public string? DeviceA { get; init; }
+
+    /// <summary><c>--device-b</c>: the receiver device id of <c>transfer roundtrip</c>'s first round.</summary>
+    public string? DeviceB { get; init; }
+
+    /// <summary>
+    /// <c>--once</c>: accepted for clarity. <c>transfer serve</c> always serves exactly one connection and
+    /// exits, because a command-line tool that blocks forever cannot be scripted or tested.
+    /// </summary>
+    public bool Once { get; init; }
 
     /// <summary><c>--apply</c>: really write. Without it <c>import</c> is a preview.</summary>
     public bool Apply { get; init; }

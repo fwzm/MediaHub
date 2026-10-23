@@ -55,6 +55,9 @@ public sealed class SyncCliRunner
             SyncCliCommand.PairVerify => RunPairVerify(invocation),
             SyncCliCommand.PairList => RunPairList(invocation),
             SyncCliCommand.PairForget => RunPairForget(invocation),
+            SyncCliCommand.TransferServe => RunTransferServe(invocation),
+            SyncCliCommand.TransferSend => RunTransferSend(invocation),
+            SyncCliCommand.TransferRoundtrip => RunTransferRoundtrip(invocation),
             _ => Fail(invocation, CliExitCode.UsageError, "unknown-command", "nothing to run"),
         };
     }
@@ -795,6 +798,544 @@ public sealed class SyncCliRunner
         _out.WriteLine("this removes the local pin only: sources, credentials and the peer are untouched.");
         _out.WriteLine("remaining: " + remainingCount.ToString(CultureInfo.InvariantCulture) + " paired devices");
         return CliExitCode.Success;
+    }
+
+    // ---- transfer group (W6-18) -------------------------------------------------------------
+    // The socket layer is W6-16's: 4-byte big-endian length frames, loopback only, and a non-loopback
+    // address is refused before any socket exists (binding a LAN address would make Windows ask the
+    // user to open the firewall). This group only wires that layer to the import round so the whole
+    // hand-over can be rehearsed from a terminal, and it reuses the round's gate for every write.
+
+    private static readonly TimeSpan TransferBudget = TimeSpan.FromSeconds(15);
+
+    private int RunTransferServe(CliInvocation invocation) => RunTransferServeAsync(invocation).GetAwaiter().GetResult();
+
+    private int RunTransferSend(CliInvocation invocation) => RunTransferSendAsync(invocation).GetAwaiter().GetResult();
+
+    private int RunTransferRoundtrip(CliInvocation invocation) => RunTransferRoundtripAsync(invocation).GetAwaiter().GetResult();
+
+    private async Task<int> RunTransferServeAsync(CliInvocation invocation)
+    {
+        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(
+            SourceSyncTransferAddress.DefaultAddress,
+            invocation.Port ?? 0);
+        SourceSyncTransferListener? bound = start.Listener;
+        if (!start.Started || bound is null)
+        {
+            return Fail(
+                invocation,
+                CliExitCode.InputProblem,
+                start.Reason ?? SourceSyncTransferReasons.ListenerFailed,
+                start.Detail ?? "the loopback listener could not be bound");
+        }
+
+        await using SourceSyncTransferListener listener = bound;
+        if (!TryOpenStoresAt(invocation, invocation.Root, out FileLocalSourceStore sources, out FileSourceSyncBaselineStore baselines, out int storeExit))
+        {
+            return storeExit;
+        }
+
+        // The port is announced before anything is accepted. With --json stdout carries exactly one
+        // document, written after the import finishes, so a script that waited for the port there
+        // would wait forever; stderr is the progress channel and always carries it.
+        _err.WriteLine("listening " + listener.Address + ":" + listener.Port.ToString(CultureInfo.InvariantCulture));
+        _err.Flush();
+
+        SourceSyncTransferResult received = await listener
+            .ReceiveOnceAsync(null, TransferBudget, CancellationToken.None)
+            .ConfigureAwait(false);
+        if (!received.Succeeded)
+        {
+            return Fail(
+                invocation,
+                CliExitCode.InputProblem,
+                received.Reason ?? SourceSyncTransferReasons.IoFailed,
+                received.Detail ?? "the peer did not deliver an envelope");
+        }
+
+        if (!SourceSyncInbox.TryDecode(received.Envelope, out SourceSyncEnvelope? envelope, out string? decodeError) || envelope is null)
+        {
+            return Fail(
+                invocation,
+                CliExitCode.InputProblem,
+                SourceSyncTransferReasons.EnvelopeInvalid,
+                decodeError ?? "the payload is not a sync envelope");
+        }
+
+        // A preview runs against a read-only copy: building a local envelope can persist identities,
+        // so a dry run must never hold the real store.
+        SourceSyncPeerRound receiver = new(DeviceIdOf(invocation), invocation.Apply ? sources : ReadOnlyCopy(sources), baselines);
+        SourceSyncApplyPreview preview = receiver.Preview(envelope);
+        SourceSyncApplyReport? report = invocation.Apply
+            ? await receiver.ApplyAsync(preview, TransferWriter(sources), null, CancellationToken.None).ConfigureAwait(false)
+            : null;
+
+        TransferOutcome outcome = new(envelope.DeviceId, receiver.DeviceId, received.Bytes, received.FrameCount, preview, report, null, null);
+        return WriteServeResult(invocation, listener.Port, listener.Address, outcome);
+    }
+
+    private async Task<int> RunTransferSendAsync(CliInvocation invocation)
+    {
+        if (!TryParseTarget(invocation.Target, out string host, out int port, out string? targetError))
+        {
+            return Fail(invocation, CliExitCode.InputProblem, "invalid-target", targetError ?? "the --to value must look like host:port");
+        }
+
+        if (!TryOpenStore(invocation, out FileLocalSourceStore sources, out int storeExit))
+        {
+            return storeExit;
+        }
+
+        // Sending writes nothing: the envelope is built from a copy, so even a missing syncSourceId
+        // cannot turn this command into a write on the sender's own disk.
+        SourceSyncPeerRound sender = new(DeviceIdOf(invocation), ReadOnlyCopy(sources));
+        SourceSyncEnvelope envelope = sender.Export();
+        SourceSyncPeerRoundResult sent = await sender
+            .SendAsync(envelope, host, port, null, TransferBudget, CancellationToken.None)
+            .ConfigureAwait(false);
+        if (!sent.Succeeded)
+        {
+            return Fail(
+                invocation,
+                CliExitCode.InputProblem,
+                sent.Reason ?? SourceSyncTransferReasons.IoFailed,
+                sent.Detail ?? "the envelope could not be sent");
+        }
+
+        return WriteSendResult(invocation, host, port, envelope, sent);
+    }
+
+    private async Task<int> RunTransferRoundtripAsync(CliInvocation invocation)
+    {
+        string deviceA = invocation.DeviceA!.Trim();
+        string deviceB = invocation.DeviceB!.Trim();
+        string rootA = Path.Combine(invocation.Root, "a");
+        string rootB = Path.Combine(invocation.Root, "b");
+        if (!TryOpenStoresAt(invocation, rootA, out FileLocalSourceStore sourcesA, out FileSourceSyncBaselineStore baselinesA, out int exitA))
+        {
+            return exitA;
+        }
+
+        if (!TryOpenStoresAt(invocation, rootB, out FileLocalSourceStore sourcesB, out FileSourceSyncBaselineStore baselinesB, out int exitB))
+        {
+            return exitB;
+        }
+
+        bool apply = invocation.Apply;
+
+        // --apply is the promise that this command may write, so only then do the two sides hold the
+        // real stores; without it every store in play is an in-memory copy and no file appears.
+        SourceSyncPeerRound senderA = new(deviceA, apply ? sourcesA : ReadOnlyCopy(sourcesA));
+        SourceSyncPeerRound receiverB = new(deviceB, apply ? sourcesB : ReadOnlyCopy(sourcesB), baselinesB);
+        TransferOutcome first = await TransferOnceAsync(senderA, receiverB, TransferWriter(sourcesB), apply).ConfigureAwait(false);
+        if (!first.Succeeded)
+        {
+            return Fail(invocation, CliExitCode.InputProblem, first.Reason ?? SourceSyncTransferReasons.IoFailed,
+                "round 1 (a -> b) failed: " + (first.Detail ?? "no detail"));
+        }
+
+        SourceSyncPeerRound senderB = new(deviceB, apply ? sourcesB : ReadOnlyCopy(sourcesB));
+        SourceSyncPeerRound receiverA = new(deviceA, apply ? sourcesA : ReadOnlyCopy(sourcesA), baselinesA);
+        TransferOutcome second = await TransferOnceAsync(senderB, receiverA, TransferWriter(sourcesA), apply).ConfigureAwait(false);
+        if (!second.Succeeded)
+        {
+            return Fail(invocation, CliExitCode.InputProblem, second.Reason ?? SourceSyncTransferReasons.IoFailed,
+                "round 2 (b -> a) failed: " + (second.Detail ?? "no detail"));
+        }
+
+        return WriteRoundtripResult(invocation, rootA, rootB, deviceA, deviceB, first, second);
+    }
+
+    /// <summary>One direction of a transfer, in the shape both the JSON and the text output need.</summary>
+    private sealed record TransferOutcome(
+        string From,
+        string To,
+        int Bytes,
+        int Frames,
+        SourceSyncApplyPreview? Preview,
+        SourceSyncApplyReport? Report,
+        string? Reason,
+        string? Detail)
+    {
+        public bool Succeeded => Reason is null;
+
+        public bool NoChange => Report is { Applied: 0 };
+    }
+
+    private async Task<TransferOutcome> TransferOnceAsync(
+        SourceSyncPeerRound sender,
+        SourceSyncPeerRound receiver,
+        SourceSyncRecordWriter writer,
+        bool apply)
+    {
+        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(SourceSyncTransferAddress.DefaultAddress, 0);
+        SourceSyncTransferListener? bound = start.Listener;
+        if (!start.Started || bound is null)
+        {
+            return new TransferOutcome(sender.DeviceId, receiver.DeviceId, 0, 0, null, null, start.Reason ?? SourceSyncTransferReasons.ListenerFailed, start.Detail);
+        }
+
+        await using SourceSyncTransferListener listener = bound;
+        byte[] payload = EnvelopeBytes(sender.Export());
+
+        // If the send fails there is no connection coming, so the receive side is cancelled rather
+        // than left to wait out the whole budget: a failed round must fail fast.
+        using CancellationTokenSource abort = new();
+        Task<SourceSyncTransferResult> receiving = listener.ReceiveOnceAsync(null, TransferBudget, abort.Token);
+        SourceSyncPeerRoundResult sent = await sender
+            .SendPayloadAsync(payload, SourceSyncTransferAddress.DefaultAddress, listener.Port, null, TransferBudget, CancellationToken.None)
+            .ConfigureAwait(false);
+        if (!sent.Succeeded)
+        {
+            abort.Cancel();
+            await ObserveAsync(receiving).ConfigureAwait(false);
+            return new TransferOutcome(sender.DeviceId, receiver.DeviceId, 0, 0, null, null, sent.Reason, sent.Detail);
+        }
+
+        SourceSyncTransferResult received = await receiving.ConfigureAwait(false);
+        if (!received.Succeeded)
+        {
+            return new TransferOutcome(sender.DeviceId, receiver.DeviceId, sent.Bytes, sent.FrameCount, null, null, received.Reason, received.Detail);
+        }
+
+        if (!SourceSyncInbox.TryDecode(received.Envelope, out SourceSyncEnvelope? envelope, out string? decodeError) || envelope is null)
+        {
+            return new TransferOutcome(sender.DeviceId, receiver.DeviceId, received.Bytes, received.FrameCount, null, null,
+                SourceSyncTransferReasons.EnvelopeInvalid, decodeError);
+        }
+
+        SourceSyncApplyPreview preview = receiver.Preview(envelope);
+        SourceSyncApplyReport? report = apply
+            ? await receiver.ApplyAsync(preview, writer, null, CancellationToken.None).ConfigureAwait(false)
+            : null;
+        return new TransferOutcome(envelope.DeviceId, receiver.DeviceId, received.Bytes, received.FrameCount, preview, report, null, null);
+    }
+
+    private static async Task ObserveAsync(Task task)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // The round already reported its own failure; this task exists only to be shut down.
+        }
+    }
+
+    private static byte[] EnvelopeBytes(SourceSyncEnvelope envelope) =>
+        Encoding.UTF8.GetBytes(SourceSyncCodec.Serialize(envelope));
+
+    private static SourceSyncRecordWriter TransferWriter(ILocalSourceStore store) =>
+        (item, record) => Task.FromResult(WriteTransferredSource(store, item, record));
+
+    private static SourceSyncWriteOutcome WriteTransferredSource(ILocalSourceStore store, SourceSyncApprovalItem item, SourceRecord? record)
+    {
+        if (record is null)
+        {
+            // A tombstone. The gate asks the user first, so reaching this line means it was allowed.
+            return store.Delete(item.SyncSourceId)
+                ? SourceSyncWriteOutcome.Written("removed " + item.SyncSourceId)
+                : SourceSyncWriteOutcome.Refused("nothing matched " + item.SyncSourceId);
+        }
+
+        LocalSourceRecord local = new()
+        {
+            ServerId = string.IsNullOrWhiteSpace(item.ServerId) ? "srv-" + item.SyncSourceId : item.ServerId.Trim(),
+            SyncSourceId = item.SyncSourceId,
+            Type = WindowsSourceTypeMap.ToServerType(record.SourceType.Wire),
+            SourceTypeRaw = record.SourceType.Raw,
+            Url = PrimaryUrl(record),
+            AccountScope = record.AccountScope,
+            DisplayName = record.DisplayName,
+            RecordRevision = record.RecordRevision,
+        };
+
+        try
+        {
+            store.Save(local);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return SourceSyncWriteOutcome.Refused(error.Message);
+        }
+
+        return SourceSyncWriteOutcome.Written("saved " + item.SyncSourceId);
+    }
+
+    private static string? PrimaryUrl(SourceRecord record)
+    {
+        SourceEndpoint? primary = record.Endpoints.FirstOrDefault(endpoint => endpoint.IsPrimary && endpoint.Enabled)
+            ?? record.Endpoints.FirstOrDefault(endpoint => endpoint.IsPrimary)
+            ?? record.Endpoints.FirstOrDefault();
+        return string.IsNullOrWhiteSpace(primary?.Url) ? null : primary.Url;
+    }
+
+    private bool TryOpenStoresAt(
+        CliInvocation invocation,
+        string directory,
+        out FileLocalSourceStore sources,
+        out FileSourceSyncBaselineStore baselines,
+        out int exitCode)
+    {
+        sources = new FileLocalSourceStore(directory);
+        baselines = new FileSourceSyncBaselineStore(directory);
+        if (sources.LoadError is not null)
+        {
+            // A damaged store is never silently treated as empty: an import would then overwrite
+            // sources the user still has (the store itself refuses to write in this state).
+            exitCode = Fail(invocation, CliExitCode.InputProblem, "store-unreadable", sources.LoadError);
+            return false;
+        }
+
+        _ = baselines.PeerDeviceIds;
+        return TryCheckLoadError(invocation, baselines.LoadError, baselines.LastQuarantinedPath, "the sync baseline could not be read", out exitCode);
+    }
+
+    private static bool TryParseTarget(string? target, out string host, out int port, out string? error)
+    {
+        host = "";
+        port = 0;
+        error = null;
+        string text = (target ?? "").Trim();
+        if (text.Length == 0)
+        {
+            error = "the --to value must look like 127.0.0.1:9000";
+            return false;
+        }
+
+        int colon = text.LastIndexOf(':');
+        if (colon <= 0 || colon == text.Length - 1)
+        {
+            error = "the --to value must look like host:port, got '" + text + "'";
+            return false;
+        }
+
+        host = text[..colon].Trim();
+        if (host.Length > 1 && host[0] == '[' && host[^1] == ']')
+        {
+            host = host[1..^1];
+        }
+
+        string portText = text[(colon + 1)..].Trim();
+        if (!int.TryParse(portText, NumberStyles.None, CultureInfo.InvariantCulture, out port) || port is < 1 or > 65535)
+        {
+            error = "the port in --to must be 1..65535, got '" + portText + "'";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static (int Apply, int RequiresApproval, int Unsupported, int Ignored, int Withheld) TransferBuckets(SourceSyncApplyPreview preview)
+    {
+        int requiresApproval = 0;
+        int unsupported = 0;
+        int ignored = 0;
+        foreach (SourceSyncApprovalItem item in preview.Items)
+        {
+            if (item.RequiresApproval)
+            {
+                requiresApproval++;
+            }
+
+            if (item.Action == SourceSyncAction.Unsupported)
+            {
+                unsupported++;
+            }
+
+            if (item.Action is SourceSyncAction.NoChange or SourceSyncAction.IgnoreStale)
+            {
+                ignored++;
+            }
+        }
+
+        return (preview.Gate.AppliedCount, requiresApproval, unsupported, ignored, preview.Gate.WithheldCount);
+    }
+
+    private int WriteServeResult(CliInvocation invocation, int port, string address, TransferOutcome outcome)
+    {
+        if (invocation.Json)
+        {
+            _out.WriteLine(CliJson.Write(writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("command", "transfer");
+                writer.WriteString("subcommand", "serve");
+                writer.WriteString("root", invocation.Root);
+                writer.WriteString("address", address);
+                writer.WriteNumber("port", port);
+                writer.WriteBoolean("once", true);
+                writer.WriteBoolean("applied", outcome.Report is not null);
+                WriteTransferFieldsJson(writer, outcome);
+                writer.WriteEndObject();
+            }));
+            return CliExitCode.Success;
+        }
+
+        _out.WriteLine("served one connection on " + address + ":" + port.ToString(CultureInfo.InvariantCulture));
+        WriteTransferText(outcome, invocation.Apply);
+        return CliExitCode.Success;
+    }
+
+    private int WriteSendResult(CliInvocation invocation, string address, int port, SourceSyncEnvelope envelope, SourceSyncPeerRoundResult sent)
+    {
+        if (invocation.Json)
+        {
+            _out.WriteLine(CliJson.Write(writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("command", "transfer");
+                writer.WriteString("subcommand", "send");
+                writer.WriteString("root", invocation.Root);
+                writer.WriteString("deviceId", envelope.DeviceId);
+                writer.WriteString("address", address);
+                writer.WriteNumber("port", port);
+                writer.WriteString("snapshotId", envelope.SnapshotId);
+                writer.WriteNumber("sourceCount", envelope.Sources.Count);
+                writer.WriteNumber("bytes", sent.Bytes);
+                writer.WriteNumber("frames", sent.FrameCount);
+                writer.WriteString("idempotency", "the receiver decides: this snapshot applies once, and a second delivery of it is a no-change round");
+                writer.WriteEndObject();
+            }));
+            return CliExitCode.Success;
+        }
+
+        _out.WriteLine("sent " + sent.FrameCount.ToString(CultureInfo.InvariantCulture) + " frames, " +
+            sent.Bytes.ToString(CultureInfo.InvariantCulture) + " bytes to " + address + ":" + port.ToString(CultureInfo.InvariantCulture));
+        _out.WriteLine("device: " + envelope.DeviceId + "  snapshot: " + envelope.SnapshotId +
+            "  sources: " + envelope.Sources.Count.ToString(CultureInfo.InvariantCulture));
+        _out.WriteLine("the receiver decides idempotency: this snapshot applies once; delivering it again is a no-change round.");
+        return CliExitCode.Success;
+    }
+
+    private int WriteRoundtripResult(
+        CliInvocation invocation,
+        string rootA,
+        string rootB,
+        string deviceA,
+        string deviceB,
+        TransferOutcome first,
+        TransferOutcome second)
+    {
+        if (invocation.Json)
+        {
+            _out.WriteLine(CliJson.Write(writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("command", "transfer");
+                writer.WriteString("subcommand", "roundtrip");
+                writer.WriteString("root", invocation.Root);
+                writer.WriteString("rootA", rootA);
+                writer.WriteString("rootB", rootB);
+                writer.WriteString("deviceA", deviceA);
+                writer.WriteString("deviceB", deviceB);
+                writer.WriteBoolean("applied", invocation.Apply);
+                writer.WriteBoolean("secondRoundNoChange", second.NoChange);
+                writer.WriteStartArray("rounds");
+                foreach (TransferOutcome outcome in new[] { first, second })
+                {
+                    writer.WriteStartObject();
+                    WriteTransferFieldsJson(writer, outcome);
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }));
+            return CliExitCode.Success;
+        }
+
+        _out.WriteLine("round 1 (" + deviceA + " -> " + deviceB + ")");
+        WriteTransferText(first, invocation.Apply);
+        _out.WriteLine("round 2 (" + deviceB + " -> " + deviceA + ")");
+        WriteTransferText(second, invocation.Apply);
+        _out.WriteLine("second round noChange: " + (second.NoChange ? "true" : "false"));
+        return CliExitCode.Success;
+    }
+
+    private static void WriteTransferFieldsJson(Utf8JsonWriter writer, TransferOutcome outcome)
+    {
+        writer.WriteString("from", outcome.From);
+        writer.WriteString("to", outcome.To);
+        writer.WriteNumber("bytes", outcome.Bytes);
+        writer.WriteNumber("frames", outcome.Frames);
+        writer.WriteBoolean("noChange", outcome.NoChange);
+        if (outcome.Preview is null)
+        {
+            writer.WriteString("reason", outcome.Reason ?? "");
+            return;
+        }
+
+        (int apply, int requiresApproval, int unsupported, int ignored, int withheld) = TransferBuckets(outcome.Preview);
+        writer.WriteStartObject("counts");
+        writer.WriteNumber("apply", apply);
+        writer.WriteNumber("requiresApproval", requiresApproval);
+        writer.WriteNumber("unsupported", unsupported);
+        writer.WriteNumber("ignored", ignored);
+        writer.WriteNumber("withheld", withheld);
+        writer.WriteEndObject();
+
+        writer.WriteStartArray("items");
+        foreach (SourceSyncApprovalItem item in outcome.Preview.Items)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("syncSourceId", item.SyncSourceId);
+            writer.WriteString("action", item.Action.ToString());
+            writer.WriteString("reason", item.Reason);
+            writer.WriteBoolean("requiresApproval", item.RequiresApproval);
+            writer.WriteBoolean("withheld", outcome.Preview.Gate.IsWithheld(item.SyncSourceId));
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+
+        if (outcome.Report is not null)
+        {
+            writer.WriteStartObject("report");
+            writer.WriteNumber("applied", outcome.Report.Applied);
+            writer.WriteNumber("skipped", outcome.Report.Skipped);
+            writer.WriteNumber("withheld", outcome.Report.Withheld);
+            writer.WriteNumber("notApplied", outcome.Report.NotApplied);
+            writer.WriteBoolean("baselineUpdated", outcome.Report.BaselineUpdated);
+            writer.WriteNumber("baselineEntries", outcome.Report.BaselineEntryCount);
+            writer.WriteString("summary", outcome.Report.Summary);
+            writer.WriteString("baseline", outcome.Report.BaselineLabel);
+            writer.WriteEndObject();
+        }
+    }
+
+    private void WriteTransferText(TransferOutcome outcome, bool apply)
+    {
+        _out.WriteLine(outcome.From + " -> " + outcome.To + ": " + outcome.Frames.ToString(CultureInfo.InvariantCulture) +
+            " frames, " + outcome.Bytes.ToString(CultureInfo.InvariantCulture) + " bytes");
+        if (outcome.Preview is null)
+        {
+            _out.WriteLine("nothing arrived: " + (outcome.Reason ?? SourceSyncTransferReasons.IoFailed));
+            return;
+        }
+
+        (int bucketsApply, int requiresApproval, int unsupported, int ignored, int withheld) = TransferBuckets(outcome.Preview);
+        _out.WriteLine("preview: " + bucketsApply.ToString(CultureInfo.InvariantCulture) + " to apply, " +
+            requiresApproval.ToString(CultureInfo.InvariantCulture) + " requiring approval, " +
+            unsupported.ToString(CultureInfo.InvariantCulture) + " unsupported, " +
+            ignored.ToString(CultureInfo.InvariantCulture) + " ignored, " +
+            withheld.ToString(CultureInfo.InvariantCulture) + " withheld");
+        foreach (SourceSyncApprovalItem item in outcome.Preview.Items)
+        {
+            _out.WriteLine("  " + item.SyncSourceId + "  " + item.Action.ToString().ToLowerInvariant() + "  " + item.Reason +
+                (item.RequiresApproval ? "  (needs approval)" : "") +
+                (outcome.Preview.Gate.IsWithheld(item.SyncSourceId) ? "  (withheld)" : ""));
+        }
+
+        if (outcome.Report is null)
+        {
+            _out.WriteLine(apply ? "nothing was written: the gate allowed nothing" : "nothing was written; pass --apply to import");
+            return;
+        }
+
+        _out.WriteLine(outcome.Report.Summary);
+        _out.WriteLine(outcome.Report.BaselineLabel);
     }
 
     // ---- shared helpers (W6-15) -------------------------------------------------------------

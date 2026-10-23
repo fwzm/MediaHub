@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace MediaHub.SyncCli;
 
 /// <summary>
@@ -12,7 +14,7 @@ namespace MediaHub.SyncCli;
 /// match on prose.
 /// </para>
 /// <para>
-/// <c>baseline</c> and <c>pair</c> are groups: the second token is the verb, and it may not be an
+/// <c>baseline</c>, <c>pair</c> and <c>transfer</c> are groups: the second token is the verb, and it may not be an
 /// option (<c>missing-subcommand:baseline</c>). Their invocation is labelled <c>baseline-show</c>,
 /// <c>pair-forget</c> and so on, so an option rejected for a group command still yields one flat
 /// printable code (<c>option-not-allowed-for-command:--apply:pair-link</c>).
@@ -44,6 +46,14 @@ public static class CliParser
         "  pair forget      --root <dir> --device <id> [--apply]\n" +
         "                                                      (preview unless --apply is given)\n" +
         "\n" +
+        "Transfer commands (loopback only: 127.0.0.1, ::1 or localhost, never a LAN address):\n" +
+        "  transfer serve     --root <dir> --device <id> [--port <n>] [--apply] [--once]\n" +
+        "                                                      (preview unless --apply is given;\n" +
+        "                                                       serves one connection, then exits)\n" +
+        "  transfer send      --to 127.0.0.1:<port> --root <dir> --device <id>\n" +
+        "  transfer roundtrip --root <dir> --device-a <id> --device-b <id> [--apply]\n" +
+        "                                                      (two devices under <root>/a and <root>/b)\n" +
+        "\n" +
         "Global:\n" +
         "  --json       stdout carries exactly one JSON document; progress goes to stderr\n" +
         "  --help, -h   this text\n" +
@@ -60,6 +70,9 @@ public static class CliParser
     private static readonly string[] PairVerifyValueOptions = ["--link"];
     private static readonly string[] PairListValueOptions = ["--root"];
     private static readonly string[] PairForgetValueOptions = ["--root", "--device"];
+    private static readonly string[] TransferServeValueOptions = ["--root", "--device", "--port"];
+    private static readonly string[] TransferSendValueOptions = ["--to", "--root", "--device"];
+    private static readonly string[] TransferRoundtripValueOptions = ["--root", "--device-a", "--device-b"];
 
     /// <summary>Parses a raw argument vector.</summary>
     public static CliParseResult Parse(IReadOnlyList<string>? args)
@@ -80,7 +93,7 @@ public static class CliParser
             return new CliParseResult { IsVersion = true };
         }
 
-        if (first is not ("export" or "import" or "plan" or "secret-check" or "baseline" or "pair"))
+        if (first is not ("export" or "import" or "plan" or "secret-check" or "baseline" or "pair" or "transfer"))
         {
             return Error("unknown-command:" + first);
         }
@@ -99,7 +112,7 @@ public static class CliParser
         // exist. --help in the verb slot is still a help request, not a missing verb.
         int start = 1;
         string commandName = first;
-        if (first is "baseline" or "pair")
+        if (first is "baseline" or "pair" or "transfer")
         {
             if (args.Count > 1 && args[1] is "--help" or "-h")
             {
@@ -120,6 +133,9 @@ public static class CliParser
                 ("pair", "verify") => SyncCliCommand.PairVerify,
                 ("pair", "list") => SyncCliCommand.PairList,
                 ("pair", "forget") => SyncCliCommand.PairForget,
+                ("transfer", "serve") => SyncCliCommand.TransferServe,
+                ("transfer", "send") => SyncCliCommand.TransferSend,
+                ("transfer", "roundtrip") => SyncCliCommand.TransferRoundtrip,
                 _ => SyncCliCommand.None,
             };
 
@@ -143,12 +159,16 @@ public static class CliParser
             SyncCliCommand.PairLink => PairLinkValueOptions,
             SyncCliCommand.PairVerify => PairVerifyValueOptions,
             SyncCliCommand.PairList => PairListValueOptions,
-            _ => PairForgetValueOptions,
+            SyncCliCommand.PairForget => PairForgetValueOptions,
+            SyncCliCommand.TransferServe => TransferServeValueOptions,
+            SyncCliCommand.TransferSend => TransferSendValueOptions,
+            _ => TransferRoundtripValueOptions,
         };
 
         Dictionary<string, string> values = new(StringComparer.Ordinal);
         bool json = false;
         bool apply = false;
+        bool once = false;
 
         for (int i = start; i < args.Count; i++)
         {
@@ -190,12 +210,30 @@ public static class CliParser
                     return Error("flag-takes-no-value:" + name);
                 }
 
-                if (command is not (SyncCliCommand.Import or SyncCliCommand.BaselineForget or SyncCliCommand.PairForget))
+                if (command is not (SyncCliCommand.Import or SyncCliCommand.BaselineForget or
+                    SyncCliCommand.PairForget or SyncCliCommand.TransferServe or SyncCliCommand.TransferRoundtrip))
                 {
                     return Error("option-not-allowed-for-command:" + name + ":" + commandName);
                 }
 
                 apply = true;
+                continue;
+            }
+
+            if (name == "--once")
+            {
+                if (inlineValue is not null)
+                {
+                    return Error("flag-takes-no-value:" + name);
+                }
+
+                // Only serve has a "how many connections" question, and its answer is always one.
+                if (command != SyncCliCommand.TransferServe)
+                {
+                    return Error("option-not-allowed-for-command:" + name + ":" + commandName);
+                }
+
+                once = true;
                 continue;
             }
 
@@ -269,6 +307,38 @@ public static class CliParser
             return Error("missing-required-option:--link");
         }
 
+        string? target = values.GetValueOrDefault("--to");
+        string? deviceA = values.GetValueOrDefault("--device-a");
+        string? deviceB = values.GetValueOrDefault("--device-b");
+        switch (command)
+        {
+            case SyncCliCommand.TransferServe when deviceId is null:
+                return Error("missing-required-option:--device");
+            case SyncCliCommand.TransferSend when target is null:
+                return Error("missing-required-option:--to");
+            case SyncCliCommand.TransferSend when deviceId is null:
+                return Error("missing-required-option:--device");
+            case SyncCliCommand.TransferRoundtrip when deviceA is null:
+                return Error("missing-required-option:--device-a");
+            case SyncCliCommand.TransferRoundtrip when deviceB is null:
+                return Error("missing-required-option:--device-b");
+        }
+
+        int? port = null;
+        string? portText = values.GetValueOrDefault("--port");
+        if (portText is not null)
+        {
+            // A port is 16 bits and a host order, not a hex string: reject anything else here so the
+            // runner never has to guess and socket code never sees an out-of-range value.
+            if (!int.TryParse(portText, NumberStyles.None, CultureInfo.InvariantCulture, out int parsedPort) ||
+                parsedPort is < 0 or > 65535)
+            {
+                return Error("invalid-port:" + portText);
+            }
+
+            port = parsedPort;
+        }
+
         string? passphrase = values.GetValueOrDefault("--passphrase");
         string? secretsJson = values.GetValueOrDefault("--secrets");
         if (passphrase is not null && secretsJson is not null)
@@ -295,6 +365,11 @@ public static class CliParser
                 SourceId = values.GetValueOrDefault("--source"),
                 Link = link,
                 ExpectPlaintextBase64 = expect,
+                Target = target,
+                Port = port,
+                DeviceA = deviceA,
+                DeviceB = deviceB,
+                Once = once,
                 Apply = apply,
                 Json = json,
             },
@@ -303,12 +378,14 @@ public static class CliParser
 
     /// <summary>Commands whose work happens inside a device directory; <c>pair link/verify</c> need none.</summary>
     private static bool RequiresRoot(SyncCliCommand command) => command is not (
-        SyncCliCommand.PairLink or SyncCliCommand.PairVerify);
+        SyncCliCommand.PairLink or SyncCliCommand.PairVerify or
+        SyncCliCommand.TransferServe or SyncCliCommand.TransferSend or SyncCliCommand.TransferRoundtrip);
 
     private static bool IsKnownOption(string name) => name is
         "--root" or "--out" or "--in" or "--passphrase" or "--secrets" or "--deletions" or
         "--device" or "--baseline" or "--id" or "--source" or "--link" or "--expect" or
-        "--apply" or "--json";
+        "--to" or "--port" or "--device-a" or "--device-b" or
+        "--apply" or "--once" or "--json";
 
     private static CliParseResult Error(string code) => new() { Error = code };
 }
