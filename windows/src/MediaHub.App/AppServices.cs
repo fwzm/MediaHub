@@ -1,6 +1,8 @@
+using MediaHub.Domain;
 using MediaHub.App.Services;
 using MediaHub.Net;
 using MediaHub.Net.Security;
+using MediaHub.Storage;
 
 namespace MediaHub.App;
 
@@ -16,6 +18,8 @@ public sealed class AppServices : IDisposable
         Log = new LogService();
         Settings = new SettingsStore();
         PlaybackHistory = new PlaybackHistoryStore();
+        // Saved playlists are local user data: no credentials, no network, no UI thread needed.
+        Playlists = new PlaylistStore();
         LocalLibrary = new LocalLibraryService(Settings);
         PlayerHost = new PlayerHostService(Settings, Log);
 
@@ -40,6 +44,13 @@ public sealed class AppServices : IDisposable
 
     /// <summary>Temporary queue produced by opening or dropping several files at once.</summary>
     public PlaybackQueue Queue { get; }
+
+    /// <summary>
+    /// The user's durable playlists. Deliberately separate from <see cref="Queue"/>: a playlist is
+    /// never auto-enqueued, and a queue is never written into a playlist. Not <see cref="IDisposable"/>:
+    /// every mutation is already on disk when the call returns.
+    /// </summary>
+    public PlaylistStore Playlists { get; }
 
     /// <summary>Artwork cache. Needs the UI thread, so it is created when the window exists.</summary>
     public ImageCache? Images { get; private set; }

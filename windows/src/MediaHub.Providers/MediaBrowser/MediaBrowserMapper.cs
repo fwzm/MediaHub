@@ -76,6 +76,7 @@ internal static class MediaBrowserMapper
             Genres = GetStringArray(item, "Genres"),
             UserDataPlaybackPositionTicks = GetLong(item, "UserData", "PlaybackPositionTicks"),
             UserDataPlayed = GetBool(item, "UserData", "Played"),
+            UserDataFavorite = GetBool(item, "UserData", "IsFavorite"),
             IsFolder = GetBool(item, "IsFolder") ?? false,
         };
     }

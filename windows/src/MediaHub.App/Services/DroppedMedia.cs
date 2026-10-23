@@ -1,3 +1,5 @@
+using MediaHub.Domain;
+
 namespace MediaHub.App.Services;
 
 /// <summary>Turns shell-supplied paths into playback requests.</summary>

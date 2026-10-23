@@ -46,3 +46,8 @@ windows/**/artifacts/
 # supports are written up in windows/docs/W5-GUI-ACCEPTANCE.md and W5-WEBDAV-GUI.md. Re-running
 # windows/tools/acceptance/run-all.ps1 reproduces it.
 windows/tools/acceptance/evidence/
+
+# Protocol taps written by the fault-injecting WebDAV server used for the A3 error-boundary
+# checks (windows/tools/acceptance/webdav/fault_server.py). One file per port, rewritten on every
+# run, so they are harness output rather than a fixture.
+windows/tools/acceptance/webdav/fault-requests-*.jsonl

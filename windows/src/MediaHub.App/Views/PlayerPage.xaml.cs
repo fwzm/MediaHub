@@ -12,7 +12,6 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.Foundation;
-using Windows.Storage.Pickers;
 using Windows.System;
 
 namespace MediaHub.App.Views;
@@ -26,7 +25,18 @@ public sealed partial class PlayerPage : Page
     private PointerActivityWatcher? _pointerWatcher;
     private PlaybackRequest? _request;
     private PlaybackSession? _session;
-    private bool _autoAdvanceArmed;
+    /// <summary>Set while a switch is in flight so the outgoing item's dying snapshots are ignored.</summary>
+    private bool _suppressFailureHandling;
+
+    /// <summary>One-shot per item: end-of-stream and errors must not each advance the queue twice.</summary>
+    private bool _advanceHandled;
+
+    /// <summary>Consecutive items that failed to start. Reset once anything reaches Playing.</summary>
+    private int _consecutiveFailures;
+
+    /// <summary>How many unplayable items a queue may skip before the player stops trying.</summary>
+    private const int MaxConsecutiveFailures = 3;
+
     private bool _scrubbing;
     private bool _controlsVisible = true;
     private bool _isFullScreen;
@@ -77,12 +87,6 @@ public sealed partial class PlayerPage : Page
             return;
         }
 
-        TitleText.Text = _request.Title;
-        // DisplayUrl, never the engine URL: for a server source the engine URL is a loopback bridge
-        // address carrying a per-session token, which must not be shown or logged.
-        SubtitleText.Text = _request.DisplayUrl;
-        App.Services.Log.Info("player", "进入播放页：" + LogService.Redact(_request.Title));
-
         var host = App.Services.PlayerHost;
 
         // A stale tail from the previous item must not leak into this one's first snapshot.
@@ -93,37 +97,12 @@ public sealed partial class PlayerPage : Page
         UpdateSurfaceBounds();
         host.ShowSurface();
 
-        try
-        {
-            // Resolving a server stream also establishes the loopback relay, so the engine never
-            // receives server credentials.
-            _session = await App.Services.Playback.PrepareAsync(_request);
-            _session.Changed += OnSessionChanged;
-            SubtitleText.Text = _session.Active?.DisplayUrl ?? _request.DisplayUrl;
-            await host.PlayAsync(_session.Active!);
-        }
-        catch (ProviderException ex)
-        {
-            ShowStatus("播放失败：" + ex.Message);
-            App.Services.Log.Error("player", "播放启动失败", ex);
-            return;
-        }
-        catch (Exception ex)
-        {
-            ShowStatus("播放失败：" + ex.Message);
-            App.Services.Log.Error("player", "播放启动失败", ex);
-            return;
-        }
-
-        UpdateSurfaceBounds();
-
         _pointerWatcher = new PointerActivityWatcher(host.WindowHandle, () => host.PhysicalBounds);
         _pointerWatcher.Activity += OnPointerActivity;
 
         _boundsTimer.Start();
         _historyTimer.Start();
         RestartHideTimer();
-        RefreshTrackLists();
 
         // Focus the video area rather than leaving it wherever it landed. XAML focus falls on the
         // first focusable descendant, which here is a transport button - and a focused button eats
@@ -131,6 +110,8 @@ public sealed partial class PlayerPage : Page
         // play/pause, so with focus on 返回 the advertised shortcut instead left the player. Space
         // activating a focused button is correct behaviour; starting with a button focused is not.
         VideoHost.Focus(FocusState.Programmatic);
+
+        await StartRequestAsync(_request);
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -148,53 +129,162 @@ public sealed partial class PlayerPage : Page
         _boundsTimer.Stop();
         _historyTimer.Stop();
         _hideTimer.Stop();
-        FlushFinalProgress();
-        try { App.Services.PlayerHost.Player?.Pause(); } catch { /* engine may already be gone */ }
-        try { App.Services.PlayerHost.HideSurface(); } catch { /* surface may already be gone */ }
-    }
-
-    /// <summary>
-    /// Sends the last progress sample and releases the relay session.
-    /// </summary>
-    /// <remarks>
-    /// The final report has to be issued before the session is torn down, and the relay must be
-    /// disposed even when reporting fails, otherwise a cancelled playback leaves a listener and an
-    /// upstream connection pool alive for the rest of the process lifetime.
-    /// </remarks>
-    private void FlushFinalProgress()
-    {
-        PlaybackSession? session = _session;
-        _session = null;
-        if (session is null) return;
-
-        try
-        {
-            PlayerSnapshot snapshot = App.Services.PlayerHost.Player?.Snapshot ?? PlayerSnapshot.Empty;
-            if (snapshot.DurationSeconds > 0)
-            {
-                long position = (long)(snapshot.PositionSeconds * TimeSpan.TicksPerSecond);
-                long duration = (long)(snapshot.DurationSeconds * TimeSpan.TicksPerSecond);
-                session.LastPositionTicks = position;
-                session.LastDurationTicks = duration;
-            }
-        }
-        catch { }
-
         // The coordinator owns the stop report and the relay lifetime, so leaving the page is a
         // session stop rather than a collection of things this page has to remember to undo. It is
         // bounded so a hanging report cannot delay the navigation that is already in progress.
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-                await App.Services.Playback.StopAsync(PlaybackStopReasons.UserExited).WaitAsync(timeout.Token);
-            }
-            catch { }
-        });
+        _ = StopCurrentAsync(PlaybackStopReasons.UserExited);
+        try { App.Services.PlayerHost.HideSurface(); } catch { /* surface may already be gone */ }
     }
 
-    /// <summary>Mirrors the session's stage into the status line and drives auto-advance.</summary>
+    // ---------------------------------------------------------------- playback lifecycle
+
+    /// <summary>Resolves and starts one request, replacing whatever this page was playing.</summary>
+    /// <returns>True when the engine accepted the media.</returns>
+    /// <remarks>
+    /// Failures here are handled, not thrown: a broken file must behave the same whether the user
+    /// picked it as the first item or as the fifth, and both paths end up in
+    /// <see cref="HandlePlaybackFailure"/> so the skip policy is applied in exactly one place.
+    /// </remarks>
+    private async Task<bool> StartRequestAsync(PlaybackRequest request)
+    {
+        _request = request;
+        _advanceHandled = false;
+        TitleText.Text = request.Title;
+        // DisplayUrl, never the engine URL: for a server source the engine URL is a loopback bridge
+        // address carrying a per-session token, which must not be shown or logged.
+        SubtitleText.Text = request.DisplayUrl;
+        UpdateQueueView();
+        App.Services.Log.Info("player", "进入播放页：" + LogService.Redact(request.Title));
+        Services.StartupTrace.Write("player:start " + request.Title + " local=" + (request.LocalPath is not null));
+
+        _suppressFailureHandling = true;
+        try
+        {
+            // Resolving a server stream also establishes the loopback relay, so the engine never
+            // receives server credentials.
+            _session = await App.Services.Playback.PrepareAsync(request);
+            _session.Changed += OnSessionChanged;
+            SubtitleText.Text = _session.Active?.DisplayUrl ?? request.DisplayUrl;
+            await App.Services.PlayerHost.PlayAsync(_session.Active!);
+        }
+        catch (Exception ex)
+        {
+            _suppressFailureHandling = false;
+            App.Services.Log.Error("player", "播放启动失败", ex);
+            HandlePlaybackFailure(ex.Message, requireActiveSession: false);
+            return false;
+        }
+
+        _suppressFailureHandling = false;
+        // ShowStatus hid the surface when the previous item failed; a new item starts clean.
+        App.Services.PlayerHost.ShowSurface();
+        UpdateSurfaceBounds();
+        return true;
+    }
+
+    /// <summary>Stops the current session, reporting its final position, and releases the relay.</summary>
+    private async Task StopCurrentAsync(string reason)
+    {
+        PlaybackSession? session = _session;
+        _session = null;
+        if (session is not null)
+        {
+            session.Changed -= OnSessionChanged;
+            CaptureLastPosition(session);
+        }
+
+        try { App.Services.PlayerHost.Player?.Pause(); } catch { /* engine may already be gone */ }
+
+        try
+        {
+            // Bounded: a hanging report must not hold up the item the user already asked for.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+            await App.Services.Playback.StopAsync(reason).WaitAsync(timeout.Token);
+        }
+        catch { }
+    }
+
+    /// <summary>Copies the engine's current position onto the session so the stop report carries it.</summary>
+    private static void CaptureLastPosition(PlaybackSession session)
+    {
+        try
+        {
+            PlayerSnapshot snapshot = App.Services.PlayerHost.Player?.Snapshot ?? PlayerSnapshot.Empty;
+            if (snapshot.DurationSeconds <= 0) return;
+            session.LastPositionTicks = (long)(snapshot.PositionSeconds * TimeSpan.TicksPerSecond);
+            session.LastDurationTicks = (long)(snapshot.DurationSeconds * TimeSpan.TicksPerSecond);
+        }
+        catch { }
+    }
+
+    /// <summary>Replaces what is playing with another queue entry, without leaving the page.</summary>
+    /// <remarks>
+    /// Switching in place, rather than navigating to a fresh page, is what makes "the previous
+    /// session's relay and progress report are released before the next item starts" a fact instead
+    /// of a race: the old session is stopped, reported and its relay disposed while the new one is
+    /// being resolved, and the coordinator refuses any write that belongs to the superseded
+    /// generation. The suppression flag keeps the old item's dying snapshots from being read as the
+    /// new item's failure.
+    /// </remarks>
+    private async Task SwitchToAsync(PlaybackRequest request, string stopReason)
+    {
+        Services.StartupTrace.Write("queue:switch reason=" + stopReason + " title=" + request.Title);
+        _suppressFailureHandling = true;
+        try
+        {
+            await StopCurrentAsync(stopReason);
+            await StartRequestAsync(request);
+        }
+        finally
+        {
+            _suppressFailureHandling = false;
+        }
+    }
+
+    /// <summary>Says one item failed, then moves on under a bounded skip policy.</summary>
+    /// <remarks>
+    /// Skip-on-failure is capped. Without a cap, a queue of unplayable files would be walked through
+    /// in a second or two with each message visible for a single frame - indistinguishable from a
+    /// crash, and leaving nothing on screen to explain it. At the cap the player stays put and keeps
+    /// the last error visible.
+    /// </remarks>
+    private void HandlePlaybackFailure(string message, bool requireActiveSession = true)
+    {
+        if (_suppressFailureHandling || _advanceHandled) return;
+        if (requireActiveSession && _session is null) return;
+
+        _advanceHandled = true;
+        _consecutiveFailures++;
+
+        ShowStatus("播放失败：" + message);
+        App.Services.Log.Error("player", "播放失败：" + message);
+        Services.StartupTrace.Write("queue:item-failed " + message.Replace('\n', ' ').Replace('\r', ' '));
+
+        if (!App.Services.Settings.Current.AutoPlayNext)
+        {
+            Services.StartupTrace.Write("queue:skip-disabled");
+            return;
+        }
+
+        if (_consecutiveFailures >= MaxConsecutiveFailures)
+        {
+            ShowStatus("播放失败：" + message
+                + "（已连续跳过 " + _consecutiveFailures + " 个无法播放的项目，停止继续跳过）");
+            Services.StartupTrace.Write("queue:skip-capped");
+            return;
+        }
+
+        PlaybackQueue queue = App.Services.Queue;
+        if (queue.NextItem is null)
+        {
+            Services.StartupTrace.Write("queue:no-next-item");
+            return;
+        }
+
+        if (queue.MoveBy(1) is { } next) _ = SwitchToAsync(next, PlaybackStopReasons.Replaced);
+    }
+
+    /// <summary>Mirrors the session's stage into the status line.</summary>
     private void OnSessionChanged(PlaybackSession session)
     {
         if (!DispatcherQueue.HasThreadAccess)
@@ -268,7 +358,9 @@ public sealed partial class PlayerPage : Page
     {
         if (s.State == TransportState.Error)
         {
-            ShowStatus(s.Error ?? "播放失败。");
+            // One place decides what a failure means, whether it arrived from the engine or from
+            // resolving the request: report it, then apply the bounded skip policy.
+            HandlePlaybackFailure(s.Error ?? "播放失败。");
         }
         else if (s.State == TransportState.Ended)
         {
@@ -285,6 +377,9 @@ public sealed partial class PlayerPage : Page
         {
             LoadingRing.IsActive = false;
             StatusPanel.Visibility = Visibility.Collapsed;
+            // Anything that reaches normal transport proves the item is playable, which is what the
+            // skip cap counts.
+            if (s.State == TransportState.Playing) _consecutiveFailures = 0;
         }
 
         PositionText.Text = Format(s.PositionSeconds);
@@ -310,10 +405,35 @@ public sealed partial class PlayerPage : Page
         TechnicalSummary.Text = BuildTechnicalSummary(s);
         if (InfoToggle.IsChecked == true) PopulateInfo(s);
 
-        if (s.AudioTracks.Count != AudioList.Items.Count || s.SubtitleTracks.Count != SubtitleList.Items.Count)
+        // Compared against the tracks the list was built FROM, not against the number of rows it
+        // holds. The subtitle list carries an extra "关闭字幕" row, so comparing it to
+        // SubtitleTracks.Count was never equal - and this runs on every sampling tick (about ten
+        // times a second), so the list was torn down and rebuilt continuously. On an audio-only file,
+        // where there are no subtitle tracks at all, it flickered every single tick.
+        // The comparison is on the CONTENT of the track lists, not on their sizes. Counting was
+        // enough to stop the per-tick flicker, but it misses the case that matters most: replacing one
+        // external subtitle with another leaves the count unchanged (two tracks before, two after)
+        // while the list on screen still names the file that is no longer loaded. Signatures include
+        // the track ids, labels and selection, so a same-size replacement is still a change.
+        if (TrackSignature(s.AudioTracks, static t => t.Id + ":" + t.Language + ":" + t.Codec + ":" + t.Title + ":" + t.Selected) != _renderedAudioSignature
+            || TrackSignature(s.SubtitleTracks, static t => t.Id + ":" + t.Language + ":" + t.Codec + ":" + t.Title + ":" + t.IsExternal + ":" + t.IsForced + ":" + t.Selected) != _renderedSubtitleSignature)
         {
             RefreshTrackLists();
         }
+
+        // The expiry of a one-shot result is not a track-list change, so nothing above would redraw it:
+        // once the lists settled, "已加载：xxx" stayed on screen indefinitely. Measured in Gate C (C3.5):
+        // nine seconds after loading a subtitle the hint still read the file name.
+        ExpireSubtitleNotice(s.SubtitleTracks.Count);
+    }
+
+    /// <summary>Drops an expired one-shot result and repaints the hint from the baseline text.</summary>
+    private void ExpireSubtitleNotice(int trackCount)
+    {
+        if (_subtitleNotice is null) return;
+        if (DateTime.UtcNow - _subtitleNoticeAt < SubtitleNoticeLifetime) return;
+        _subtitleNotice = null;
+        SubtitleHint.Text = ComposeSubtitleHint(trackCount);
     }
 
     private static string BuildTechnicalSummary(PlayerSnapshot s)
@@ -495,47 +615,74 @@ public sealed partial class PlayerPage : Page
     {
         if (InfoToggle.IsChecked == true)
         {
-            ShowPanel("媒体信息", showInfo: true, showAudio: false, showSubtitle: false);
+            ShowPanel(PanelKind.Info, "媒体信息");
             PopulateInfo(App.Services.PlayerHost.Player?.Snapshot ?? PlayerSnapshot.Empty);
         }
-        else
+        else if (_openPanel == PanelKind.Info)
         {
+            // Only close the panel if the info panel is the one showing; unticking the info toggle
+            // must not dismiss an audio or subtitle list the user just opened.
             HidePanel();
         }
     }
 
+    // The transport buttons toggle. Before this they only ever opened the panel, and the sole way to
+    // close it was the separate info toggle - so once the audio list was open there was no control on
+    // the page that would put it away again.
     private void OnAudioPanelClick(object sender, RoutedEventArgs e)
     {
+        if (_openPanel == PanelKind.Audio) { HidePanel(); return; }
         RefreshTrackLists();
-        ShowPanel("音轨", showInfo: false, showAudio: true, showSubtitle: false);
+        ShowPanel(PanelKind.Audio, "音轨");
     }
 
     private void OnSubtitlePanelClick(object sender, RoutedEventArgs e)
     {
+        if (_openPanel == PanelKind.Subtitle) { HidePanel(); return; }
         RefreshTrackLists();
-        ShowPanel("字幕", showInfo: false, showAudio: false, showSubtitle: true);
+        ShowPanel(PanelKind.Subtitle, "字幕");
     }
 
-    private void ShowPanel(string header, bool showInfo, bool showAudio, bool showSubtitle)
+    /// <summary>Which side panel is showing, or <see cref="PanelKind.None"/>.</summary>
+    private enum PanelKind { None, Info, Audio, Subtitle, Queue }
+
+    private PanelKind _openPanel = PanelKind.None;
+
+    private void ShowPanel(PanelKind kind, string header)
     {
+        _openPanel = kind;
         PanelHeader.Text = header;
-        InfoSection.Visibility = showInfo ? Visibility.Visible : Visibility.Collapsed;
-        AudioSection.Visibility = showAudio ? Visibility.Visible : Visibility.Collapsed;
-        SubtitleSection.Visibility = showSubtitle ? Visibility.Visible : Visibility.Collapsed;
+        InfoSection.Visibility = kind == PanelKind.Info ? Visibility.Visible : Visibility.Collapsed;
+        AudioSection.Visibility = kind == PanelKind.Audio ? Visibility.Visible : Visibility.Collapsed;
+        SubtitleSection.Visibility = kind == PanelKind.Subtitle ? Visibility.Visible : Visibility.Collapsed;
+        QueueSection.Visibility = kind == PanelKind.Queue ? Visibility.Visible : Visibility.Collapsed;
         PanelColumn.Width = new GridLength(340);
         DispatcherQueue.TryEnqueue(UpdateSurfaceBounds);
     }
 
     private void HidePanel()
     {
+        _openPanel = PanelKind.None;
         PanelColumn.Width = new GridLength(0);
         DispatcherQueue.TryEnqueue(UpdateSurfaceBounds);
     }
+
+    /// <summary>Signatures of the lists the track rows were last built from.</summary>
+    private string _renderedAudioSignature = "";
+    private string _renderedSubtitleSignature = "";
+
+    private int _renderedSubtitleCount => App.Services.PlayerHost.Player?.Snapshot?.SubtitleTracks.Count ?? 0;
+
+    private static string TrackSignature<T>(IReadOnlyList<T> tracks, Func<T, string> project)
+        => tracks.Count == 0 ? "" : string.Join(";", tracks.Select(project));
 
     private void RefreshTrackLists()
     {
         var snapshot = App.Services.PlayerHost.Player?.Snapshot;
         if (snapshot is null) return;
+
+        _renderedAudioSignature = TrackSignature(snapshot.AudioTracks, static t => t.Id + ":" + t.Language + ":" + t.Codec + ":" + t.Title + ":" + t.Selected);
+        _renderedSubtitleSignature = TrackSignature(snapshot.SubtitleTracks, static t => t.Id + ":" + t.Language + ":" + t.Codec + ":" + t.Title + ":" + t.IsExternal + ":" + t.IsForced + ":" + t.Selected);
 
         _suppressTrackEvents = true;
         try
@@ -564,14 +711,37 @@ public sealed partial class PlayerPage : Page
             SubtitleList.ItemsSource = subs;
             SubtitleList.SelectedIndex = subs.FindIndex(s => s.Selected);
 
-            SubtitleHint.Text = snapshot.SubtitleTracks.Count == 0
-                ? "当前媒体没有可用的字幕轨道。可用“加载外挂字幕…”选择 SRT / ASS / SSA / VTT 文件。"
-                : $"共 {snapshot.SubtitleTracks.Count} 条字幕轨道。";
+            SubtitleHint.Text = ComposeSubtitleHint(snapshot.SubtitleTracks.Count);
         }
         finally
         {
             _suppressTrackEvents = false;
         }
+    }
+
+    // 一次性结果（已加载 / 加载失败）必须活得比一帧久：本方法由 10 Hz 快照驱动，
+    // 如果每次刷新都无条件重写提示文本，用户永远看不到"加载了哪个文件"，失败原因更是瞬间消失。
+    private static readonly TimeSpan SubtitleNoticeLifetime = TimeSpan.FromSeconds(8);
+    private string? _subtitleNotice;
+    private DateTime _subtitleNoticeAt;
+
+    private void SetSubtitleNotice(string text)
+    {
+        _subtitleNotice = text;
+        _subtitleNoticeAt = DateTime.UtcNow;
+        SubtitleHint.Text = ComposeSubtitleHint(_renderedSubtitleCount);
+    }
+
+    private string ComposeSubtitleHint(int trackCount)
+    {
+        string baseline = trackCount == 0
+            ? "当前媒体没有可用的字幕轨道。可用“加载外挂字幕…”选择 SRT / ASS / SSA / VTT 文件。"
+            : $"共 {trackCount} 条字幕轨道。";
+        if (_subtitleNotice is { Length: > 0 } notice && DateTime.UtcNow - _subtitleNoticeAt < SubtitleNoticeLifetime)
+        {
+            return trackCount == 0 ? notice : notice + " " + baseline;
+        }
+        return baseline;
     }
 
     private void OnAudioSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -588,21 +758,17 @@ public sealed partial class PlayerPage : Page
 
     private async void OnLoadSubtitleClick(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker();
-        foreach (string ext in LocalLibraryService.SupportedSubtitleExtensions) picker.FileTypeFilter.Add(ext);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, (App.MainWindow as MainWindow)!.WindowHandle);
-
-        var file = await picker.PickSingleFileAsync();
+        string? file = await FilePickerService.PickFileAsync(LocalLibraryService.SupportedSubtitleExtensions);
         if (file is null) return;
 
         try
         {
-            App.Services.PlayerHost.Player?.AddExternalSubtitle(file.Path);
-            SubtitleHint.Text = $"已加载：{System.IO.Path.GetFileName(file.Path)}";
+            App.Services.PlayerHost.Player?.AddExternalSubtitle(file);
+            SetSubtitleNotice($"已加载：{System.IO.Path.GetFileName(file)}");
         }
         catch (Exception ex)
         {
-            SubtitleHint.Text = $"加载失败：{ex.Message}";
+            SetSubtitleNotice($"加载失败：{ex.Message}");
         }
     }
 
@@ -615,7 +781,140 @@ public sealed partial class PlayerPage : Page
             try { App.Services.PlayerHost.Player?.AddExternalSubtitle(sub); added++; }
             catch { /* a single unreadable subtitle file must not abort the rest */ }
         }
-        SubtitleHint.Text = added == 0 ? "未在同目录找到匹配的外挂字幕文件。" : $"已重新加载 {added} 个字幕文件。";
+        SetSubtitleNotice(added == 0 ? "未在同目录找到匹配的外挂字幕文件。" : $"已重新加载 {added} 个字幕文件。");
+    }
+
+    // ---------------------------------------------------------------- temporary queue
+
+    /// <summary>One row in the queue panel.</summary>
+    /// <summary>One row of the on-screen queue list.</summary>
+    /// <remarks>
+    /// <see cref="ToString"/> is overridden because a ListViewItem exposes the item's ToString as its
+    /// accessibility name: without this a screen reader (and UI Automation) reads the raw record
+    /// dump ("QueueRow { Index = 0, ... }") instead of the visible row text.
+    /// </remarks>
+    private sealed record QueueRow(int Index, string Label, bool IsCurrent)
+    {
+        public override string ToString() => Label;
+    }
+
+    /// <summary>Re-reads the queue and mirrors it into the title bar, the next-item line and the list.</summary>
+    /// <remarks>
+    /// Called by the shell after an intake, so adding files while something is playing updates the
+    /// on-screen queue without interrupting playback.
+    /// </remarks>
+    public void RefreshQueueView() => UpdateQueueView();
+
+    /// <summary>Called by the shell when a replace-intake arrives while this page is already open.</summary>
+    public Task PlayQueueEntryAsync(PlaybackRequest request) => SwitchToAsync(request, PlaybackStopReasons.Replaced);
+
+    private void UpdateQueueView()
+    {
+        PlaybackQueue queue = App.Services.Queue;
+        bool hasQueue = queue.Count > 0;
+
+        QueueCountText.Visibility = hasQueue ? Visibility.Visible : Visibility.Collapsed;
+        QueueCountText.Text = hasQueue ? $"队列 {queue.Index + 1}/{queue.Count}" : "";
+        QueuePrevButton.IsEnabled = queue.HasPrevious;
+        QueueNextButton.IsEnabled = queue.HasNext;
+
+        PlaybackRequest? next = queue.NextItem;
+        QueueNextTitle.Visibility = next is not null ? Visibility.Visible : Visibility.Collapsed;
+        QueueNextTitle.Text = next is not null ? "下一项：" + next.Title : "";
+
+        var rows = new List<QueueRow>(queue.Count);
+        for (int i = 0; i < queue.Count; i++)
+        {
+            PlaybackRequest item = queue.Items[i];
+            rows.Add(new QueueRow(i, (i == queue.Index ? "▶ " : "") + (i + 1) + ". " + item.Title, i == queue.Index));
+        }
+
+        QueueList.ItemsSource = rows;
+        QueueList.SelectedIndex = queue.Index;
+        QueuePlayButton.IsEnabled = rows.Count > 0;
+        QueueRemoveButton.IsEnabled = rows.Count > 0;
+        QueueClearButton.IsEnabled = hasQueue;
+    }
+
+    private void OnQueuePanelClick(object sender, RoutedEventArgs e)
+    {
+        if (_openPanel == PanelKind.Queue) { HidePanel(); return; }
+        UpdateQueueView();
+        ShowPanel(PanelKind.Queue, "播放队列");
+    }
+
+    private void OnQueuePrevClick(object sender, RoutedEventArgs e)
+    {
+        if (App.Services.Queue.MoveBy(-1) is { } previous)
+        {
+            _ = SwitchToAsync(previous, PlaybackStopReasons.Replaced);
+        }
+    }
+
+    private void OnQueueNextClick(object sender, RoutedEventArgs e)
+    {
+        if (App.Services.Queue.MoveBy(1) is { } next)
+        {
+            _ = SwitchToAsync(next, PlaybackStopReasons.Replaced);
+        }
+    }
+
+    private void OnQueueSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // Selecting a row is not a command. A single click must never interrupt what is playing -
+        // "播放所选" is the explicit action, and it is the only one that switches.
+    }
+
+    private void OnQueuePlaySelectedClick(object sender, RoutedEventArgs e)
+    {
+        if (QueueList.SelectedItem is not QueueRow row) return;
+
+        PlaybackQueue queue = App.Services.Queue;
+        // Asking to play the item that is already playing must not restart it.
+        if (row.Index == queue.Index && _session is not null) return;
+
+        if (queue.SelectAt(row.Index) is { } request)
+        {
+            _ = SwitchToAsync(request, PlaybackStopReasons.Replaced);
+        }
+    }
+
+    private void OnQueueRemoveClick(object sender, RoutedEventArgs e)
+    {
+        if (QueueList.SelectedItem is not QueueRow row) return;
+
+        PlaybackQueue queue = App.Services.Queue;
+        bool removingCurrent = row.Index == queue.Index;
+        if (!queue.RemoveAt(row.Index)) return;
+
+        Services.StartupTrace.Write("queue:remove index=" + row.Index + " remaining=" + queue.Count);
+        UpdateQueueView();
+
+        if (!removingCurrent) return;
+
+        // The playing entry itself was removed: stop it, then either continue with what is left or
+        // leave the player, because "the current item is gone and nothing else is queued" means the
+        // page has no subject any more.
+        if (queue.Current is { } next)
+        {
+            _ = SwitchToAsync(next, PlaybackStopReasons.Replaced);
+            return;
+        }
+
+        _ = StopCurrentAsync(PlaybackStopReasons.UserExited);
+        (App.MainWindow as MainWindow)?.ExitPlayer();
+    }
+
+    private void OnQueueClearClick(object sender, RoutedEventArgs e)
+    {
+        PlaybackQueue queue = App.Services.Queue;
+        if (queue.Count == 0) return;
+
+        queue.Clear();
+        Services.StartupTrace.Write("queue:clear");
+        UpdateQueueView();
+        // Clearing the queue ends the queue, not the film the user is watching: playback continues,
+        // and only auto-advance has nowhere left to go.
     }
 
     // ---------------------------------------------------------------- control visibility
@@ -668,6 +967,8 @@ public sealed partial class PlayerPage : Page
         PlayerSnapshot? snapshot = App.Services.PlayerHost.Player?.Snapshot;
         if (request is null || snapshot is null || snapshot.DurationSeconds <= 0) return;
 
+        bool finished = snapshot.EofReached || snapshot.State == TransportState.Ended;
+
         if (request.LocalPath is { } localPath)
         {
             App.Services.PlaybackHistory.Record(
@@ -675,6 +976,10 @@ public sealed partial class PlayerPage : Page
                 request.Title,
                 (long)(snapshot.PositionSeconds * TimeSpan.TicksPerSecond),
                 (long)(snapshot.DurationSeconds * TimeSpan.TicksPerSecond));
+
+            // End-of-item handling is engine-level, not server-level: the local branch returns here,
+            // so without this a queue made of local files never advanced past its first entry.
+            if (finished) _ = OnPlaybackFinishedAsync();
             return;
         }
 
@@ -710,7 +1015,7 @@ public sealed partial class PlayerPage : Page
 
         _ = App.Services.Playback.OnProgressAsync(session, sample, force: false);
 
-        if (snapshot.EofReached || snapshot.State == TransportState.Ended) _ = OnPlaybackFinishedAsync();
+        if (finished) _ = OnPlaybackFinishedAsync();
     }
 
     /// <summary>
@@ -722,15 +1027,31 @@ public sealed partial class PlayerPage : Page
     /// </remarks>
     private async Task OnPlaybackFinishedAsync()
     {
-        if (_autoAdvanceArmed) return;
-        _autoAdvanceArmed = true;
+        if (_advanceHandled || _suppressFailureHandling) return;
+        _advanceHandled = true;
 
         PlaybackSession? session = _session;
-        if (session is null) return;
-        session.TryAdvance(PlaybackStage.Ended);
+        session?.TryAdvance(PlaybackStage.Ended);
 
-        if (!App.Services.Settings.Current.AutoPlayNext) return;
-        if (_request?.ServerId is not { } serverId || _request.SeriesId is not { } seriesId || _request.ItemId is not { } itemId)
+        if (!App.Services.Settings.Current.AutoPlayNext)
+        {
+            Services.StartupTrace.Write("queue:auto-advance-disabled");
+            return;
+        }
+
+        // The temporary queue is the nearer answer to "what comes next": the user put those files
+        // there in that order, and a server episode is only consulted when the queue has nothing
+        // left after the current item.
+        PlaybackQueue queue = App.Services.Queue;
+        if (queue.NextItem is { } queuedNext && queue.MoveBy(1) is { } nextInQueue)
+        {
+            App.Services.Log.Info("playback", "队列下一项：" + LogService.Redact(queuedNext.Title));
+            Services.StartupTrace.Write("queue:auto-advance title=" + queuedNext.Title);
+            await SwitchToAsync(nextInQueue, PlaybackStopReasons.Completed);
+            return;
+        }
+
+        if (_request?.ServerId is not { } serverId || _request.ItemId is not { } itemId)
             return;
 
         try
@@ -739,14 +1060,36 @@ public sealed partial class PlayerPage : Page
             if (handle?.Library is null) return;
 
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+            // Most requests now carry the series, but the player must not turn "this request predates
+            // that field" into "this item has no next episode": the series is looked up from the item
+            // itself before auto-advance is given up on.
+            string? seriesId = _request.SeriesId;
+            if (string.IsNullOrEmpty(seriesId) && handle.Detail is not null)
+            {
+                MediaDetail detail = await handle.Detail.GetItemDetailAsync(itemId, timeout.Token);
+                seriesId = detail.Item.SeriesId;
+            }
+            if (string.IsNullOrEmpty(seriesId))
+            {
+                Services.StartupTrace.Write("queue:no-series");
+                return;
+            }
+
             Episode? next = await handle.Library.GetNextEpisodeAsync(seriesId, itemId, timeout.Token);
-            if (next is null) return;
+            if (next is null)
+            {
+                Services.StartupTrace.Write("queue:no-next-episode");
+                return;
+            }
 
             App.Services.Log.Info("playback", "自动连播下一集：" + LogService.Redact(next.Name));
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                if (App.MainWindow is not MainWindow shell) return;
-                shell.EnterPlayer(new PlaybackRequest
+            Services.StartupTrace.Write("queue:auto-advance episode=" + next.Id);
+
+            // In-place, not a new navigation: the finished item has to be stopped and reported
+            // before the next one starts, exactly like a queue switch.
+            await SwitchToAsync(
+                new PlaybackRequest
                 {
                     ServerId = serverId,
                     ItemId = next.Id,
@@ -754,8 +1097,8 @@ public sealed partial class PlayerPage : Page
                     SeriesId = next.SeriesId,
                     SeasonNumber = next.SeasonNumber,
                     EpisodeNumber = next.EpisodeNumber,
-                });
-            });
+                },
+                PlaybackStopReasons.Completed);
         }
         catch (OperationCanceledException) { }
         catch (ProviderException ex)
@@ -781,7 +1124,9 @@ public sealed partial class PlayerPage : Page
         switch (e.Key)
         {
             case VirtualKey.Escape:
-                if (_isFullScreen) ToggleFullScreen(); else ExitToShell();
+                if (_isFullScreen) { ToggleFullScreen(); break; }
+                if (_openPanel != PanelKind.None) { HidePanel(); break; }
+                ExitToShell();
                 e.Handled = true;
                 break;
             case VirtualKey.F11:

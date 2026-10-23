@@ -134,6 +134,38 @@ public interface IProviderProgress
     TimeSpan RemoteReportInterval => TimeSpan.FromSeconds(10);
 }
 
+/// <summary>
+/// Server-side favourites: marking an item as a favourite and listing what is favourited.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Separate from <see cref="IProviderDetail"/> because favouriting is a write with a lifetime, not a
+/// read: a provider that can show an item but not persist its flag must not claim the capability.
+/// </para>
+/// <para>
+/// Both Emby 4.10.2 and Jellyfin 12.2 answer the write on
+/// <c>POST|DELETE /Users/{userId}/FavoriteItems/{itemId}</c> and answer <b>404</b> on
+/// <c>/Users/{userId}/Favorites/{itemId}</c> — measured on both servers, not inferred from docs.
+/// The write returns no body, so <see cref="SetFavoriteAsync"/> re-reads the item and returns the
+/// state the server actually stored rather than echoing the request.
+/// </para>
+/// </remarks>
+public interface IProviderFavorites
+{
+    /// <summary>
+    /// Marks or unmarks one item, returning the favourite state the server reports afterwards.
+    /// </summary>
+    /// <remarks>
+    /// The returned value is the server's answer, not the requested value. If the write is silently
+    /// ignored (a read-only library, a permission the account lacks) the caller sees the unchanged
+    /// state instead of a UI that lies about having saved it.
+    /// </remarks>
+    Task<bool> SetFavoriteAsync(string itemId, bool favorite, CancellationToken ct = default);
+
+    /// <summary>Items the current user has favourited, newest first as the server orders them.</summary>
+    Task<IReadOnlyList<MediaItem>> GetFavoritesAsync(int limit, CancellationToken ct = default);
+}
+
 public interface IProviderSubtitle
 {
     Task<IReadOnlyList<SubtitleTrack>> GetSubtitlesAsync(string itemId, CancellationToken ct = default);
@@ -186,6 +218,7 @@ public sealed class ProviderHandle : IDisposable
     public IProviderPlayback? Playback { get; init; }
     public IProviderSearch? Search { get; init; }
     public IProviderProgress? Progress { get; init; }
+    public IProviderFavorites? Favorites { get; init; }
     public IProviderSubtitle? Subtitle { get; init; }
     public IProviderImageFetcher? Images { get; init; }
 
@@ -220,9 +253,8 @@ public sealed class ProviderHandle : IDisposable
             if (Playback is not null) caps |= ProviderCapability.Playback;
             if (Search is not null) caps |= ProviderCapability.Search;
             if (Progress is not null) caps |= ProviderCapability.Progress;
+            if (Favorites is not null) caps |= ProviderCapability.Favorite;
             if (Subtitle is not null) caps |= ProviderCapability.Subtitle;
-            if (Images is not null) caps |= ProviderCapability.Subtitle; // artwork rides the same auth path
-            if (Auth is not null && Progress is not null) caps |= ProviderCapability.Progress;
             return caps;
         }
     }

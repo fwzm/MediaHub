@@ -40,6 +40,15 @@ public sealed record MediaItem
     public IReadOnlyList<string> Genres { get; init; } = Array.Empty<string>();
     public long? UserDataPlaybackPositionTicks { get; init; }
     public bool? UserDataPlayed { get; init; }
+
+    /// <summary>
+    /// Server-side favourite flag for the current user, or null when the response did not say.
+    /// </summary>
+    /// <remarks>
+    /// Null is the honest default: a list response that omits UserData must not render as
+    /// "not favourited", because the user would then see an unstarred item they starred elsewhere.
+    /// </remarks>
+    public bool? UserDataFavorite { get; init; }
     public bool IsFolder { get; init; }
 
     public TimeSpan? RunTime => RunTimeTicks is { } t ? TimeSpan.FromTicks(t) : null;

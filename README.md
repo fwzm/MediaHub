@@ -24,6 +24,10 @@
 详细设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，进度见 [ROADMAP.md](ROADMAP.md) / [TASKS.md](TASKS.md)，
 重要决策见 [DECISIONS.md](DECISIONS.md)，交接信息见 [HANDOFF.md](HANDOFF.md)。
 
+> **另有 Windows 原生桌面客户端正在开发中**：代码位于 `windows/`，全部工作在未合并分支
+> `feature/windows-client`（Draft PR #33），**尚未发布任何安装包**。
+> 状态与限制见 [Windows 桌面客户端（开发中，未发布）](#windows-桌面客户端开发中未发布)。
+
 ## 模块结构
 
 ```
@@ -86,6 +90,84 @@ docs/                providers / player / api 设计文档
 设置页可改默认倍速、字幕大小等（DataStore 持久化）。
 
 > Jellyfin / WebDAV / 搜索 / 播放进度上报为后续 Phase 候选，尚未实现（见 TASKS.md）。
+
+## Windows 桌面客户端（开发中，未发布）
+
+MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一产品语义（领域契约、能力声明、
+安全红线），但不共享源码，也不互相依赖运行时。
+
+- 技术栈：C# / .NET 10 + WinUI 3（Windows App SDK 1.8）+ libmpv（`--wid` 嵌入，D3D11 硬解），自包含部署
+- 代码位置：`windows/`；客户端自身说明见 [windows/README.md](windows/README.md)
+- 现状：本章状态取自 `feature/windows-client` 分支（Draft PR #33），**尚未合并进 `main`，未提供任何安装包**；
+  其他并行分支上的 Windows 工作不在本章范围内
+
+> **读法**：本章只写有执行证据的结论。完整逐项状态（含 `UNVERIFIED` / `NOT_RUN` 标记）见
+> [windows/docs/CAPABILITY-MAP.md](windows/docs/CAPABILITY-MAP.md) 与 `windows/docs/W*-EVIDENCE.md`；
+> 这些表格与路线图可能滞后于最新提交，冲突时以代码与证据文档为准。
+
+### 已验证的能力（真实执行并观察通过）
+
+| 能力 | 证据 |
+| --- | --- |
+| libmpv 嵌入（`--wid`）+ D3D11 硬解播放真实视频 | `windows/docs/W1-EVIDENCE.md`（`hwdec=d3d11va`） |
+| 媒体源管理：添加（探测 → 登录 → 保存）/ 测试 / 重新登录 / 删除 | `windows/docs/W2-EVIDENCE.md`；DPAPI 凭据库 79 条测试 |
+| 库浏览（列表 / 海报墙 / 详情）、搜索、继续观看 | 同上 |
+| 引擎网络边界：改为经本地回环转发取流，**引擎不持有服务器凭据** | ADR-W006、`CAPABILITY-MAP` 网络边界表 |
+| 桌面集成：文件菜单、拖放、窗口状态恢复、文件类型关联 | 提交 `5c232d6` |
+| **真实 Jellyfin 12.2**：登录 / 浏览 / 播放 / 播完标记 Played | `windows/docs/` W4 记录 |
+| **官方 Emby 4.10.1.0** 部署与 API 形状回归 | `windows/engine/emby/`、W5 记录 |
+| **WebDAV（Browse-only 来源）**：入口 → PROPFIND → 目录 → Range GET → libmpv 真实播放 | `windows/docs/W5-1-R3-GATE-A.md`（A-入口 / A-PROPFIND / A-媒体 = EXECUTED_PASS） |
+| **WebDAV 播放中 Seek**：`RangeValuePattern` 驱动真实 `player.seekslider`，前跳与后跳都核对目标位置（0.60→`0:59`、0.15→`0:18`） | `windows/docs/W5-1-R4-GATE-A-SEEK-RELEASE.md`（A1 = EXECUTED_PASS） |
+| **正常退出时回环转发层的建立与释放**：经 http.sys 注册态证明「先建立、后消失」 | 同上（A2 = EXECUTED_PASS） |
+| GUI 验收：播放控制 / 全屏 / 生命周期（可观测断言 + 证据文件） | `windows/docs/W5-GUI-ACCEPTANCE.md` |
+| LGPL libmpv 引擎候选已实际构建（**尚未切换到产品**） | `windows/engine/lgpl/dist/` |
+
+### 已知缺陷与未验证项
+
+- **中断恢复**：服务端轨迹显示 32 s / 180 s 的播放被记为「已看完」—— 未解决。
+- **WebDAV（W5.1 Gate A 大部分通过，仍未收口）**：源可添加 / 认证 / 重启恢复；入口 → PROPFIND → 目录 →
+  Range GET → 真实播放（R3）、播放中 Seek 与退出时转发层释放（R4）均已 EXECUTED_PASS，
+  证据 `windows/docs/W5-1-R3-GATE-A.md` 与 `W5-1-R4-GATE-A-SEEK-RELEASE.md`（真实 WsgiDAV 4.3.3 + UIA）；
+  但 **A-边界（目录递进 / 面包屑返回 / 来源根返回 / 空目录 / 错误态 / generation guard / 认证失败 /
+  离线 / 重启恢复 / 挂载子根）与「关闭整个应用」全部 NOT_RUN —— Gate A 不得宣告完成**；
+  「媒体源」页的浏览入口仍未加。
+- **原生「打开视频」文件选择器（W5.1 Gate B1）**：旧 `Windows.Storage.Pickers` 路径下选择器**从未被创建**
+  （trace 只有 invoked，缺失 cancelled/selected/failed；桌面 12 个顶层窗口里不存在任何文件对话框）。
+  已迁移到 WinAppSDK 1.8 的 `Microsoft.Windows.Storage.Pickers.FileOpenPicker(AppWindow.Id)`，
+  trace 出现 `menu:openvideo-picker-created`，证明执行流越过了创建点。
+  状态为 **GUI_UNVERIFIED —— 既不是 PASS 也不是上一轮的 FAILED**：选中文件 → 播放 → 时间轴、取消与
+  错误路径均未验证（`windows/docs/W5-1-R5-GATE-B1.md`）。
+- **真服覆盖面**：Emby 端到端仍为 `SERVER_UNVERIFIED`；远端进度**回写语义**未验证；
+  回环中继的发布声明因远端条目无法启动而**未验证**。
+- **未执行**：真实第二 Windows 账户下的凭据库行为；系统代理 / PAC / TUN / VPN / SOCKS 出口一致性。
+- **尚未实现**：收藏与播放列表 GUI；剧集季 / 集在有数据服务器上的验证。
+
+### 构建与测试
+
+```powershell
+pwsh -File windows/tools/fetch-libmpv.ps1    # 首次：拉取 libmpv（约 115 MB，不入库）
+dotnet build windows/MediaHub.Windows.sln -c Debug -p:Platform=x64
+dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug -p:Platform=x64
+```
+
+CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
+与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
+截至 `0f6ff8c`：编译 0 错误 0 警告，`MediaHub.Tests` 296 通过 0 失败；该 head 的 `windows-ci` 与 Android CI 均为 success。
+
+### 引擎许可证（影响可发行性）
+
+- 生产基线 `windows/native/libmpv/libmpv-2.dll` 为 **GPL-3.0-or-later**（构建未传 `-Dgpl=false`）。
+- LGPL 候选已构建于 `windows/engine/lgpl/dist/libmpv-2.dll`（3,327,274 B，sha256 `20035902…3C0A`），
+  但**尚未切换到产品**。
+- 因此**在完成引擎切换与合规判定前，Windows 客户端不具备分发条件**。
+  详见 [windows/THIRD-PARTY-NOTICES.md](windows/THIRD-PARTY-NOTICES.md) 与 `windows/docs/licensing/`。
+
+### 最近更新（自动同步）
+
+<!-- WINDOWS-SYNC:START -->
+<!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
+- 2021893 2026-10-22 fix(windows): 音频可达、文件选择器迁移，并修掉面板关不掉与提示被覆盖
+<!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
 

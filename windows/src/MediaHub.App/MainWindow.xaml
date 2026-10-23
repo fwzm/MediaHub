@@ -17,11 +17,20 @@
     <!-- A real menu bar, because "open a file" is a shell-level action rather than a library one:
          the user should not have to be inside a particular page for it to be reachable. -->
     <MenuBar Grid.Row="0" x:Name="MainMenu">
-      <MenuBarItem Title="文件">
-        <MenuFlyoutItem Text="打开视频…" Click="OnOpenVideoClick">
+      <!-- Menu commands carry ids so a test can address them by identity. Without one, the only way
+           to reach "打开视频…" from automation is to open the menu and match on its label, which is
+           exactly the fragile step that made earlier file-entry checks unrepeatable. -->
+      <MenuBarItem Title="文件" AutomationProperties.AutomationId="menu.file">
+        <MenuFlyoutItem Text="打开视频…" Click="OnOpenVideoClick"
+                        AutomationProperties.AutomationId="menu.openvideo">
           <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8E5;" /></MenuFlyoutItem.Icon>
         </MenuFlyoutItem>
-        <MenuFlyoutItem Text="打开文件夹…" Click="OnOpenFolderClick">
+        <MenuFlyoutItem Text="加入播放队列…" Click="OnAddToQueueClick"
+                        AutomationProperties.AutomationId="menu.addtoqueue">
+          <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE710;" /></MenuFlyoutItem.Icon>
+        </MenuFlyoutItem>
+        <MenuFlyoutItem Text="打开文件夹…" Click="OnOpenFolderClick"
+                        AutomationProperties.AutomationId="menu.openfolder">
           <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8B7;" /></MenuFlyoutItem.Icon>
         </MenuFlyoutItem>
         <MenuFlyoutSeparator />
@@ -58,6 +67,12 @@
         </NavigationViewItem>
         <NavigationViewItem Content="继续观看" Tag="continue">
           <NavigationViewItem.Icon><FontIcon Glyph="&#xE81C;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="我的收藏" Tag="favorites">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE734;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="播放列表" Tag="playlists">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE8FD;" /></NavigationViewItem.Icon>
         </NavigationViewItem>
         <NavigationViewItem Content="媒体源" Tag="sources">
           <NavigationViewItem.Icon><FontIcon Glyph="&#xE968;" /></NavigationViewItem.Icon>

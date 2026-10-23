@@ -14,7 +14,7 @@
     <StackPanel Grid.Row="0" Spacing="8">
       <TextBlock Text="继续观看" Style="{StaticResource MediaHubSectionHeader}" />
       <StackPanel Orientation="Horizontal" Spacing="8">
-        <Button x:Name="ReloadButton" Content="刷新" Click="OnReloadClick" />
+        <Button x:Name="ReloadButton" AutomationProperties.AutomationId="continue.reload" Content="刷新" Click="OnReloadClick" />
         <ProgressRing x:Name="BusyRing" IsActive="False" Width="20" Height="20" />
       </StackPanel>
     </StackPanel>
@@ -22,7 +22,7 @@
     <InfoBar x:Name="StatusBar" Grid.Row="1" IsOpen="False" IsClosable="True" />
 
     <Grid Grid.Row="2">
-      <GridView x:Name="ItemGrid" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnItemClick">
+      <GridView x:Name="ItemGrid" AutomationProperties.AutomationId="continue.grid" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnItemClick">
         <GridView.ItemTemplate>
           <DataTemplate>
             <StackPanel Width="300" Margin="0,0,14,16" Spacing="6">
@@ -47,7 +47,7 @@
         </GridView.ItemTemplate>
       </GridView>
 
-      <StackPanel x:Name="EmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8"
+      <StackPanel x:Name="EmptyPanel" AutomationProperties.AutomationId="continue.empty" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8"
                   Visibility="Collapsed">
         <FontIcon Glyph="&#xE81C;" FontSize="34" Opacity="0.4" />
         <TextBlock x:Name="EmptyText" Text="还没有可继续观看的内容。" HorizontalAlignment="Center" />

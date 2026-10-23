@@ -2,39 +2,41 @@ using MediaHub.Domain;
 
 namespace MediaHub.App.Services;
 
+/// <summary>
+/// Navigation parameters for the folder browser.
+/// </summary>
+/// <remarks>
+/// <see cref="FolderId"/> and <see cref="FolderPath"/> are both carried because a browse source
+/// identifies a folder by URL while the provider needs the path to re-validate containment. A null
+/// id means "the source root", which only the provider knows.
+/// </remarks>
+public sealed record BrowseNavigation(string ServerId, string? FolderId, string? FolderPath, string Title);
+
 /// <summary>Navigation parameters for the library page.</summary>
-public sealed record LibraryNavigation(string ServerId, string LibraryId, string LibraryName);
+/// <remarks>
+/// <para>
+/// <see cref="FolderId"/> is set when the page shows the contents of a folder inside the library
+/// rather than the library root. Emby keeps one physical folder per title, so its library root lists
+/// folders (and a folder cannot be played); Jellyfin flattens the same library into titles. Without
+/// this the Emby path dead-ends on a folder whose "play" is a 500 from PlaybackInfo.
+/// </para>
+/// <para>
+/// <see cref="LibraryId"/> always names the library itself so going back up stays inside it.
+/// </para>
+/// </remarks>
+public sealed record LibraryNavigation(
+    string ServerId,
+    string LibraryId,
+    string LibraryName,
+    string? FolderId = null,
+    string? FolderTitle = null);
 
 /// <summary>Navigation parameters for the detail page.</summary>
 public sealed record DetailNavigation(string ServerId, string ItemId, string Title);
 
-/// <summary>
-/// What the player page was asked to play.
-/// </summary>
+/// <summary>Navigation parameters for a saved playlist's page.</summary>
 /// <remarks>
-/// <see cref="DisplayUrl"/> exists because the URL handed to the engine may be a loopback bridge
-/// address carrying a per-session token. That token is a secret and must never reach a title bar, a
-/// tooltip or a log, so the page displays this value instead.
+/// Only the id travels: the page re-reads the playlist from the store, so it shows the current name
+/// and entries rather than a snapshot taken before the last edit.
 /// </remarks>
-public sealed record PlaybackRequest
-{
-    public required string Title { get; init; }
-    public string? ServerId { get; init; }
-    public string? ItemId { get; init; }
-
-    /// <summary>Direct local file. Mutually exclusive with <see cref="ServerId"/>.</summary>
-    public string? LocalPath { get; init; }
-
-    /// <summary>Human-readable, credential-free URL shown in the UI.</summary>
-    public string DisplayUrl { get; init; } = "";
-
-    public long StartPositionTicks { get; init; }
-    public TimeSpan? DeclaredDuration { get; init; }
-    public IReadOnlyList<string> ExternalSubtitles { get; init; } = Array.Empty<string>();
-
-    /// <summary>Series this item belongs to, when it is an episode. Enables auto-advance.</summary>
-    public string? SeriesId { get; init; }
-
-    public int? SeasonNumber { get; init; }
-    public int? EpisodeNumber { get; init; }
-}
+public sealed record PlaylistNavigation(string PlaylistId);

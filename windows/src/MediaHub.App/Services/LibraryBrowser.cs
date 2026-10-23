@@ -39,6 +39,9 @@ public sealed class LibraryBrowser
 
     public string? ServerId { get; private set; }
     public string? LibraryId { get; private set; }
+
+    /// <summary>Folder whose children are being paged, or null for the library root.</summary>
+    public string? ParentId { get; private set; }
     public bool IsLoading { get; private set; }
     public bool HasMore { get; private set; } = true;
     public string? LastError { get; private set; }
@@ -48,8 +51,12 @@ public sealed class LibraryBrowser
 
     public event EventHandler? Changed;
 
-    /// <summary>Switches to a different library and discards everything from the previous one.</summary>
-    public void Open(string serverId, string libraryId, int pageSize = 60)
+    /// <summary>Switches to a different library (or a folder inside it) and discards everything from the previous one.</summary>
+    /// <param name="parentId">
+    /// Folder to list. Emby returns one physical folder per title at the library root, so browsing has
+    /// to descend into them; passing null lists the library itself.
+    /// </param>
+    public void Open(string serverId, string libraryId, int pageSize = 60, string? parentId = null)
     {
         lock (_gate)
         {
@@ -64,6 +71,7 @@ public sealed class LibraryBrowser
             LastError = null;
             ServerId = serverId;
             LibraryId = libraryId;
+            ParentId = parentId;
             PageSize = pageSize;
         }
         Changed?.Invoke(this, EventArgs.Empty);
@@ -89,6 +97,7 @@ public sealed class LibraryBrowser
         int pageSize;
         string? libraryId;
         string? serverId;
+        string? parentId;
         CancellationTokenSource linked;
 
         lock (_gate)
@@ -100,6 +109,7 @@ public sealed class LibraryBrowser
             pageSize = PageSize;
             libraryId = LibraryId;
             serverId = ServerId;
+            parentId = ParentId;
             _cts ??= new CancellationTokenSource();
             linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, ct);
         }
@@ -112,13 +122,13 @@ public sealed class LibraryBrowser
             if (libraryId is null) return null;
 
             PagedResult<MediaItem> page = await handle.Library
-                .GetItemsAsync(libraryId, new PageRequest(offset, pageSize), linked.Token)
+                .GetItemsAsync(parentId ?? libraryId, new PageRequest(offset, pageSize), linked.Token)
                 .ConfigureAwait(false);
 
             lock (_gate)
             {
                 // Drop the response unless this is still the same navigation *and* the same library.
-                if (generation != _generation || libraryId != LibraryId || serverId != ServerId)
+                if (generation != _generation || libraryId != LibraryId || serverId != ServerId || parentId != ParentId)
                 {
                     return null;
                 }

@@ -52,7 +52,10 @@ public sealed partial class LibraryPage : Page
         if (_loaded || _navigation is null) return;
         _loaded = true;
 
-        TitleText.Text = _navigation.LibraryName;
+        // A folder inside the library shows "Library / Folder" so the way back is obvious from the title.
+        TitleText.Text = _navigation.FolderTitle is null
+            ? _navigation.LibraryName
+            : _navigation.LibraryName + " / " + _navigation.FolderTitle;
         _handle = App.Services.Servers.FindHandle(_navigation.ServerId);
         if (_handle?.Library is null)
         {
@@ -63,7 +66,9 @@ public sealed partial class LibraryPage : Page
             return;
         }
 
-        _browser.Open(_navigation.ServerId, _navigation.LibraryId, pageSize: 60);
+        // Emby keeps one physical folder per title at the library root, so the page has to be able to
+        // list a folder's children; Jellyfin flattens the same library and never sets FolderId.
+        _browser.Open(_navigation.ServerId, _navigation.LibraryId, pageSize: 60, parentId: _navigation.FolderId);
         await LoadNextPageAsync();
     }
 
@@ -123,11 +128,32 @@ public sealed partial class LibraryPage : Page
     }
 
     private void OnBackClick(object sender, RoutedEventArgs e)
-        => App.MainWindow?.NavigateShell(typeof(LibrariesPage));
+    {
+        // Inside a folder "back" means one level up (the library root), not all the way to the source list.
+        if (_navigation is { FolderId: not null })
+        {
+            App.MainWindow?.NavigateShell(typeof(LibraryPage),
+                new LibraryNavigation(_navigation.ServerId, _navigation.LibraryId, _navigation.LibraryName));
+            return;
+        }
+
+        App.MainWindow?.NavigateShell(typeof(LibrariesPage));
+    }
 
     private void OnItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not MediaCardViewModel card) return;
+
+        // A folder has nothing to play: sending it to the detail page produced a play button that
+        // answered POST /Items/{folderId}/PlaybackInfo with 500 on Emby.
+        if (card.Item.IsFolder || card.Item.Type == MediaType.Folder)
+        {
+            App.MainWindow?.NavigateShell(typeof(LibraryPage),
+                new LibraryNavigation(card.Source.ServerId, _navigation?.LibraryId ?? "", _navigation?.LibraryName ?? "",
+                    card.Item.Id, card.Item.Name));
+            return;
+        }
+
         App.MainWindow?.NavigateShell(typeof(DetailPage),
             new DetailNavigation(card.Source.ServerId, card.Item.Id, card.Item.Name));
     }

@@ -39,11 +39,11 @@
 
       <StackPanel Spacing="4">
         <TextBlock Text="本地最近播放" Style="{StaticResource MediaHubSectionHeader}" />
-        <TextBlock x:Name="ContinueEmptyText" Style="{StaticResource MediaHubCaption}"
+        <TextBlock x:Name="ContinueEmptyText" AutomationProperties.AutomationId="home.continue.empty" Style="{StaticResource MediaHubCaption}"
                    Text="还没有本地播放记录。打开一个本地视频后，进度会自动记录在这里。" />
       </StackPanel>
 
-      <GridView x:Name="ContinueGrid" SelectionMode="None" IsItemClickEnabled="True"
+      <GridView x:Name="ContinueGrid" AutomationProperties.AutomationId="home.continue.grid" SelectionMode="None" IsItemClickEnabled="True"
                 ItemClick="OnContinueItemClick" MaxHeight="420">
         <GridView.ItemTemplate>
           <DataTemplate>
@@ -58,6 +58,7 @@
                   <Run Text=" / " />
                   <Run Text="{Binding DurationDisplay}" />
                 </TextBlock>
+                <TextBlock Style="{StaticResource MediaHubCaption}" Text="{Binding SourceLabel}" />
               </StackPanel>
             </Border>
           </DataTemplate>

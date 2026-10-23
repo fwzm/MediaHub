@@ -1,6 +1,8 @@
 using MediaHub.App.Services;
 using MediaHub.Domain;
+using Microsoft.UI.Xaml.Automation;
 using MediaHub.Providers;
+using MediaHub.Storage;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
@@ -15,9 +17,20 @@ public sealed partial class DetailPage : Page
     private MediaCardViewModel? _card;
     private IReadOnlyList<Season> _seasons = Array.Empty<Season>();
     private bool _loaded;
+    private bool _favorite;
+    private bool _favoriteBusy;
 
     private sealed record StreamRow(string Label, string Value);
-    private sealed record EpisodeRow(string Id, string EpisodeLabel, string Title, string ProgressLabel);
+    // The series identity travels with the row: auto-advance needs it, and the detail page is the
+    // only place that still has it after the user picks one episode out of a list.
+    private sealed record EpisodeRow(
+        string Id,
+        string EpisodeLabel,
+        string Title,
+        string ProgressLabel,
+        string? SeriesId,
+        int? SeasonNumber,
+        int? EpisodeNumber);
 
     public DetailPage()
     {
@@ -75,6 +88,30 @@ public sealed partial class DetailPage : Page
         MediaItem item = detail.Item;
         TitleText.Text = item.Name;
 
+        // Folders are containers, not playable items: Emby answers POST /Items/{folderId}/PlaybackInfo
+        // with 500, so offering the play button here only produces an error the user cannot act on.
+        bool isFolder = item.IsFolder || item.Type == MediaType.Folder;
+        PlayButton.Visibility = isFolder ? Visibility.Collapsed : Visibility.Visible;
+
+        // Favourites are a server-side write. The button appears only when this source advertises the
+        // capability, so a source without it shows no control rather than one that always fails.
+        _favorite = item.UserDataFavorite ?? false;
+        FavoriteButton.Visibility = !isFolder && _handle?.Favorites is not null ? Visibility.Visible : Visibility.Collapsed;
+        RenderFavorite();
+
+        // Filing an item into a playlist is local user data, so no server capability is involved;
+        // folders are containers rather than items and are the only case that hides the button.
+        AddToPlaylistButton.Visibility = isFolder ? Visibility.Collapsed : Visibility.Visible;
+
+        if (isFolder)
+        {
+            ResumeButton.Visibility = Visibility.Collapsed;
+            StatusBar.Severity = InfoBarSeverity.Informational;
+            StatusBar.Title = "这是一个文件夹";
+            StatusBar.Message = "该条目是文件夹，不是可播放的媒体。请返回媒体库并进入文件夹后选择其中的条目。";
+            StatusBar.IsOpen = true;
+        }
+
         var meta = new List<string>();
         if (item.Year is { } year && year > 0) meta.Add(year.ToString());
         if (item.RunTime is { } runtime) meta.Add(((int)runtime.TotalMinutes) + " 分钟");
@@ -103,7 +140,9 @@ public sealed partial class DetailPage : Page
         rows.Add(new StreamRow("字幕", streams.Count(s => s.Type == "subtitle") + " 条"));
         rows.Add(new StreamRow("容器", item.FileSizeBytes is { } size ? (size / (double)(1L << 20)).ToString("0.0") + " MB" : "未知"));
         StreamList.ItemsSource = rows;
-        VersionsSection.Visibility = Visibility.Visible;
+
+        // A folder carries no media streams; showing "视频 未知 / 音频 未知" would read as a broken file.
+        VersionsSection.Visibility = isFolder ? Visibility.Collapsed : Visibility.Visible;
 
         if (item.UserDataPlaybackPositionTicks is { } position && position > TimeSpan.TicksPerSecond * 15)
         {
@@ -166,7 +205,14 @@ public sealed partial class DetailPage : Page
             IReadOnlyList<Episode> episodes = await _handle!.Library!.GetEpisodesAsync(season.Id);
             EpisodeList.ItemsSource = episodes
                 .OrderBy(ep => ep.EpisodeNumber)
-                .Select(ep => new EpisodeRow(ep.Id, "E" + ep.EpisodeNumber.ToString("00"), ep.Name, ""))
+                .Select(ep => new EpisodeRow(
+                    ep.Id,
+                    "E" + ep.EpisodeNumber.ToString("00"),
+                    ep.Name,
+                    "",
+                    ep.SeriesId,
+                    ep.SeasonNumber,
+                    ep.EpisodeNumber))
                 .ToList();
         }
         catch (ProviderException ex)
@@ -185,24 +231,188 @@ public sealed partial class DetailPage : Page
     private void OnEpisodeClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not EpisodeRow row) return;
-        PlayItem(row.Id, row.Title);
+        PlayItem(row.Id, row.Title, 0, row.SeriesId, row.SeasonNumber, row.EpisodeNumber);
     }
 
     private void OnPlayClick(object sender, RoutedEventArgs e)
-        => PlayItem(_navigation!.ItemId, _detail?.Item.Name ?? _navigation!.Title, 0);
+        => PlayItem(_navigation!.ItemId, _detail?.Item.Name ?? _navigation!.Title, 0,
+            _detail?.Item.SeriesId, _detail?.Item.SeasonNumber, _detail?.Item.EpisodeNumber);
+
+    private void RenderFavorite()
+    {
+        FavoriteIcon.Glyph = _favorite ? "\uE735" : "\uE734";
+        FavoriteButtonText.Text = _favorite ? "已收藏" : "收藏";
+        ToolTipService.SetToolTip(FavoriteButton, _favorite ? "取消收藏" : "加入收藏");
+        AutomationProperties.SetName(FavoriteButton, _favorite ? "取消收藏" : "收藏");
+    }
+
+    private async void OnFavoriteClick(object sender, RoutedEventArgs e)
+    {
+        if (_favoriteBusy || _handle?.Favorites is null) return;
+
+        string itemId = _detail?.Item.Id ?? _navigation?.ItemId ?? "";
+        if (string.IsNullOrEmpty(itemId)) return;
+
+        bool target = !_favorite;
+        _favoriteBusy = true;
+        FavoriteButton.IsEnabled = false;
+        BusyRing.IsActive = true;
+        try
+        {
+            bool stored = await _handle.Favorites.SetFavoriteAsync(itemId, target);
+            _favorite = stored;
+            RenderFavorite();
+
+            // The button shows the server's answer. When the write did not take effect the message says
+            // so, instead of the star silently flipping back on the next visit.
+            if (stored != target)
+            {
+                StatusBar.Severity = InfoBarSeverity.Warning;
+                StatusBar.Title = "收藏未保存";
+                StatusBar.Message = "服务器没有记录这次收藏变更，界面已显示服务器上的实际状态。";
+                StatusBar.IsOpen = true;
+            }
+        }
+        catch (ProviderException ex)
+        {
+            Fail("无法更新收藏", ex.Message);
+        }
+        finally
+        {
+            _favoriteBusy = false;
+            FavoriteButton.IsEnabled = true;
+            BusyRing.IsActive = false;
+        }
+    }
+
+
+    /// <summary>Rebuilds the "add to playlist" menu from the store every time it opens.</summary>
+    /// <remarks>
+    /// Populating on open rather than on load means a playlist created, renamed or deleted on another
+    /// page is reflected here, instead of the menu offering a name that no longer exists.
+    /// </remarks>
+    private void OnAddToPlaylistOpening(object sender, object e)
+    {
+        AddToPlaylistMenu.Items.Clear();
+
+        IReadOnlyList<SavedPlaylist> playlists = App.Services.Playlists.GetAll();
+        foreach (SavedPlaylist playlist in playlists)
+        {
+            var entry = new MenuFlyoutItem { Text = playlist.Name, Tag = playlist.Id };
+            entry.Click += OnAddToExistingPlaylistClick;
+            AddToPlaylistMenu.Items.Add(entry);
+        }
+
+        if (playlists.Count > 0) AddToPlaylistMenu.Items.Add(new MenuFlyoutSeparator());
+
+        var create = new MenuFlyoutItem { Text = "新建播放列表…" };
+        create.Click += OnAddToNewPlaylistClick;
+        AddToPlaylistMenu.Items.Add(create);
+    }
+
+    private void OnAddToExistingPlaylistClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not string playlistId) return;
+
+        SavedPlaylist? playlist = App.Services.Playlists.Find(playlistId);
+        if (playlist is null)
+        {
+            ShowStatus(InfoBarSeverity.Warning, "播放列表不存在", "该播放列表可能已被删除，请重新打开菜单。");
+            return;
+        }
+
+        AddCurrentItemTo(playlist);
+    }
+
+    private async void OnAddToNewPlaylistClick(object sender, RoutedEventArgs e)
+    {
+        if (_detail?.Item is null || _handle is null) return;
+
+        string? name = await PlaylistNameDialog.PromptAsync(XamlRoot, "新建播放列表", "播放列表名称", "");
+        if (name is null) return;
+        if (name.Length == 0)
+        {
+            ShowStatus(InfoBarSeverity.Warning, "未创建播放列表", "播放列表名称不能为空。");
+            return;
+        }
+
+        try
+        {
+            SavedPlaylist created = App.Services.Playlists.Create(name);
+            AddCurrentItemTo(created);
+        }
+        catch (IOException ex)
+        {
+            ShowStatus(InfoBarSeverity.Error, "无法新建播放列表", ex.Message);
+        }
+    }
+
+    /// <summary>Writes the item on screen into <paramref name="playlist"/> and reports what the store said.</summary>
+    /// <remarks>
+    /// A <c>false</c> result is not an error: the store refuses an item the playlist already holds, and
+    /// "already in this list" is the honest answer rather than a generic failure.
+    /// </remarks>
+    private void AddCurrentItemTo(SavedPlaylist playlist)
+    {
+        if (_detail?.Item is not { } item || _handle is null) return;
+
+        try
+        {
+            bool added = App.Services.Playlists.AddItem(playlist.Id, new SavedPlaylistItem
+            {
+                ServerId = _handle.Server.ServerId,
+                ItemId = item.Id,
+                Title = item.Name,
+                RunTimeTicks = item.RunTimeTicks,
+            });
+
+            ShowStatus(
+                added ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
+                added ? "已加入播放列表" : "已在该列表中",
+                added
+                    ? "“" + item.Name + "”已加入“" + playlist.Name + "”。"
+                    : "“" + item.Name + "”已经在该列表中，没有重复添加。");
+        }
+        catch (IOException ex)
+        {
+            ShowStatus(InfoBarSeverity.Error, "无法加入播放列表", ex.Message);
+        }
+    }
+
+    /// <summary>Reports a store outcome in the page banner; store failures are never swallowed.</summary>
+    private void ShowStatus(InfoBarSeverity severity, string title, string message)
+    {
+        StatusBar.Severity = severity;
+        StatusBar.Title = title;
+        StatusBar.Message = message;
+        StatusBar.IsOpen = true;
+    }
 
     private void OnResumeClick(object sender, RoutedEventArgs e)
         => PlayItem(_navigation!.ItemId, _detail?.Item.Name ?? _navigation!.Title,
-            _detail?.Item.UserDataPlaybackPositionTicks ?? 0);
+            _detail?.Item.UserDataPlaybackPositionTicks ?? 0,
+            _detail?.Item.SeriesId, _detail?.Item.SeasonNumber, _detail?.Item.EpisodeNumber);
 
-    private void PlayItem(string itemId, string title, long startTicks = 0)
+    private void PlayItem(
+        string itemId,
+        string title,
+        long startTicks = 0,
+        string? seriesId = null,
+        int? seasonNumber = null,
+        int? episodeNumber = null)
     {
+        // Everything the player needs to find the next episode is captured here, while the list that
+        // knows it is still on screen. Dropping it would make auto-advance depend on a second server
+        // round-trip and fail silently when that lookup is not possible.
         App.MainWindow?.EnterPlayer(new PlaybackRequest
         {
             ServerId = _handle!.ServerId,
             ItemId = itemId,
             Title = title,
             StartPositionTicks = startTicks,
+            SeriesId = seriesId,
+            SeasonNumber = seasonNumber,
+            EpisodeNumber = episodeNumber,
         });
     }
 

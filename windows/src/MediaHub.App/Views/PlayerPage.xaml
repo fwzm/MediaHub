@@ -33,9 +33,32 @@
                      FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxLines="1" />
           <TextBlock x:Name="SubtitleText" Foreground="{StaticResource MediaHubOverlaySubtleTextBrush}"
                      FontSize="12" TextTrimming="CharacterEllipsis" MaxLines="1" />
+          <!-- Visible rather than a tooltip: "what plays next" is a question the user asks before the
+               current item ends, and a tooltip answers it only while the pointer happens to hover. -->
+          <TextBlock x:Name="QueueNextTitle" Foreground="{StaticResource MediaHubOverlaySubtleTextBrush}"
+                     FontSize="12" TextTrimming="CharacterEllipsis" MaxLines="1" Visibility="Collapsed"
+                     AutomationProperties.AutomationId="player.queuenexttitle" />
         </StackPanel>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+          <TextBlock x:Name="QueueCountText" VerticalAlignment="Center" FontSize="12" Visibility="Collapsed"
+                     Foreground="{StaticResource MediaHubOverlaySubtleTextBrush}"
+                     AutomationProperties.AutomationId="player.queuecount" />
+          <Button x:Name="QueuePrevButton" Click="OnQueuePrevClick" Background="Transparent"
+                  Foreground="{StaticResource MediaHubOverlayTextBrush}" ToolTipService.ToolTip="上一项"
+                  AutomationProperties.Name="上一项" AutomationProperties.AutomationId="player.queueprev">
+            <FontIcon Glyph="&#xE100;" />
+          </Button>
+          <Button x:Name="QueueNextButton" Click="OnQueueNextClick" Background="Transparent"
+                  Foreground="{StaticResource MediaHubOverlayTextBrush}" ToolTipService.ToolTip="下一项"
+                  AutomationProperties.Name="下一项" AutomationProperties.AutomationId="player.queuenext">
+            <FontIcon Glyph="&#xE101;" />
+          </Button>
+          <Button x:Name="QueuePanelButton" Click="OnQueuePanelClick" Background="Transparent"
+                  Foreground="{StaticResource MediaHubOverlayTextBrush}" ToolTipService.ToolTip="播放队列"
+                  AutomationProperties.Name="播放队列" AutomationProperties.AutomationId="player.queuepanel">
+            <FontIcon Glyph="&#xE8FD;" />
+          </Button>
           <ToggleButton x:Name="InfoToggle" Click="OnInfoToggleClick" Background="Transparent"
                         Foreground="{StaticResource MediaHubOverlayTextBrush}" ToolTipService.ToolTip="媒体信息 (I)">
             <FontIcon Glyph="&#xE946;" />
@@ -92,19 +115,43 @@
                          Text="显示为“未知”的项目表示播放引擎未上报该信息，MediaHub 不会推测填充。" />
             </StackPanel>
 
+            <!--
+              The AutomationId sits on the ListView, not on the section panel. A bare StackPanel has no
+              automation peer, so an id placed on it never appears in the UI Automation tree at all -
+              which makes "the panel is open" unobservable from outside the process.
+            -->
             <StackPanel x:Name="AudioSection" Spacing="6" Visibility="Collapsed">
               <TextBlock Text="音轨" FontWeight="SemiBold" />
-              <ListView x:Name="AudioList" SelectionMode="Single" SelectionChanged="OnAudioSelectionChanged" />
+              <ListView x:Name="AudioList" SelectionMode="Single" SelectionChanged="OnAudioSelectionChanged"
+                        AutomationProperties.AutomationId="panel.audio" />
             </StackPanel>
 
             <StackPanel x:Name="SubtitleSection" Spacing="6" Visibility="Collapsed">
               <TextBlock Text="字幕" FontWeight="SemiBold" />
-              <ListView x:Name="SubtitleList" SelectionMode="Single" SelectionChanged="OnSubtitleSelectionChanged" />
+              <ListView x:Name="SubtitleList" SelectionMode="Single" SelectionChanged="OnSubtitleSelectionChanged"
+                        AutomationProperties.AutomationId="panel.subtitle" />
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Button Content="加载外挂字幕…" Click="OnLoadSubtitleClick" />
                 <Button Content="重新选择文件" Click="OnReloadSubtitleClick" />
               </StackPanel>
-              <TextBlock x:Name="SubtitleHint" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+              <TextBlock x:Name="SubtitleHint" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                         AutomationProperties.AutomationId="player.subtitlehint" />
+            </StackPanel>
+
+            <StackPanel x:Name="QueueSection" Spacing="6" Visibility="Collapsed">
+              <TextBlock Text="播放队列" FontWeight="SemiBold" />
+              <ListView x:Name="QueueList" SelectionMode="Single" SelectionChanged="OnQueueSelectionChanged"
+                        MaxHeight="360" AutomationProperties.AutomationId="panel.queue" />
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button x:Name="QueuePlayButton" Content="播放所选" Click="OnQueuePlaySelectedClick"
+                        AutomationProperties.AutomationId="player.queueplay" />
+                <Button x:Name="QueueRemoveButton" Content="移除所选" Click="OnQueueRemoveClick"
+                        AutomationProperties.AutomationId="player.queueremove" />
+                <Button x:Name="QueueClearButton" Content="清空队列" Click="OnQueueClearClick"
+                        AutomationProperties.AutomationId="player.queueclear" />
+              </StackPanel>
+              <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                         Text="队列只存在于本次会话，不会被保存成播放列表。" />
             </StackPanel>
           </StackPanel>
         </ScrollViewer>
@@ -127,8 +174,13 @@
           </Grid.ColumnDefinitions>
           <TextBlock x:Name="PositionText" Grid.Column="0" Foreground="{StaticResource MediaHubOverlayTextBrush}"
                      VerticalAlignment="Center" FontFamily="Consolas" FontSize="13" Text="0:00" MinWidth="56" />
+          <!-- The seek control needs an identity of its own. Without one, a test can only reach it
+               through the surrounding layout, and an earlier run of the Seek check silently degraded
+               into measuring natural playback advance while reporting as though it had seeked. -->
           <Slider x:Name="SeekSlider" Grid.Column="1" Minimum="0" Maximum="1" StepFrequency="0.0001"
-                  VerticalAlignment="Center" ValueChanged="OnSeekValueChanged" />
+                  VerticalAlignment="Center" ValueChanged="OnSeekValueChanged"
+                  AutomationProperties.Name="播放进度"
+                  AutomationProperties.AutomationId="player.seekslider" />
           <TextBlock x:Name="DurationText" Grid.Column="2" Foreground="{StaticResource MediaHubOverlaySubtleTextBrush}"
                      VerticalAlignment="Center" FontFamily="Consolas" FontSize="13" Text="0:00" MinWidth="56" />
         </Grid>
@@ -176,10 +228,12 @@
 
           <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4">
             <Button Click="OnAudioPanelClick" Background="Transparent" Foreground="{StaticResource MediaHubOverlayTextBrush}"
+                    AutomationProperties.Name="音轨" AutomationProperties.AutomationId="player.audiopanel"
                     ToolTipService.ToolTip="音轨">
               <FontIcon Glyph="&#xE8D6;" />
             </Button>
             <Button Click="OnSubtitlePanelClick" Background="Transparent" Foreground="{StaticResource MediaHubOverlayTextBrush}"
+                    AutomationProperties.Name="字幕" AutomationProperties.AutomationId="player.subtitlepanel"
                     ToolTipService.ToolTip="字幕">
               <FontIcon Glyph="&#xED1E;" />
             </Button>

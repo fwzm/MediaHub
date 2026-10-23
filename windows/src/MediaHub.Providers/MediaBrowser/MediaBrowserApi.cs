@@ -174,6 +174,33 @@ internal sealed class MediaBrowserApi
         return await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Require(UserId) + "/Items", query), ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Items the server reports as resumable, most recently played first.
+    /// </summary>
+    /// <remarks>
+    /// Recursive=true is not optional here: Emby's /Items endpoint only descends into library folders
+    /// when asked, so a non-recursive query with an empty ParentId answers with the library folders
+    /// themselves — 0 items of type Movie/Episode, and "continue watching" stays empty forever even
+    /// though the server holds resume positions. Filters=IsResumable lets the server do the selection
+    /// so a limit does not silently truncate the list by name order (both Emby 4.10 and Jellyfin 12.2
+    /// honour it; verified against both).
+    /// </remarks>
+    public async Task<JsonDocument> GetResumableItemsAsync(int limit, CancellationToken ct)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["Recursive"] = "true",
+            ["IncludeItemTypes"] = "Movie,Episode",
+            ["Filters"] = "IsResumable",
+            ["Fields"] = MediaBrowserMapper.ItemFields,
+            ["SortBy"] = "DatePlayed",
+            ["SortOrder"] = "Descending",
+            ["Limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["ImageTypeLimit"] = "1",
+        };
+        return await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Require(UserId) + "/Items", query), ct).ConfigureAwait(false);
+    }
+
     public async Task<JsonDocument> SearchAsync(string term, PageRequest page, CancellationToken ct)
     {
         var query = new Dictionary<string, string?>
@@ -214,6 +241,40 @@ internal sealed class MediaBrowserApi
 
     public async Task<JsonDocument> GetItemAsync(string itemId, CancellationToken ct)
         => await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Require(UserId) + "/Items/" + Uri.EscapeDataString(itemId)), ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Marks or unmarks an item as a favourite.
+    /// </summary>
+    /// <remarks>
+    /// <c>FavoriteItems</c>, not <c>Favorites</c>. Measured on both lab servers: Emby 4.10.2.0 and
+    /// Jellyfin 12.2.0 answer 404 for <c>POST|DELETE /Users/{uid}/Favorites/{itemId}</c> and 200 for
+    /// <c>POST|DELETE /Users/{uid}/FavoriteItems/{itemId}</c>. The 200 carries an empty body, so the
+    /// caller has to re-read the item to learn the stored state.
+    /// </remarks>
+    public async Task SetFavoriteAsync(string itemId, bool favorite, CancellationToken ct)
+    {
+        string path = "/Users/" + Require(UserId) + "/FavoriteItems/" + Uri.EscapeDataString(itemId);
+        HttpMethod method = favorite ? HttpMethod.Post : HttpMethod.Delete;
+        await SendNoContentAsync(NewRequest(method, path), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Items the current user has favourited, via the IsFavorite server-side filter.</summary>
+    public async Task<JsonDocument> GetFavoritesAsync(int limit, CancellationToken ct)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["Filters"] = "IsFavorite",
+            ["Recursive"] = "true",
+            ["IncludeItemTypes"] = "Movie,Series,Episode,Video",
+            ["StartIndex"] = "0",
+            ["Limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["Fields"] = MediaBrowserMapper.ItemFields,
+            ["SortBy"] = "DateCreated",
+            ["SortOrder"] = "Descending",
+            ["ImageTypeLimit"] = "1",
+        };
+        return await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Require(UserId) + "/Items", query), ct).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Every episode of a series, in one request.

@@ -1,3 +1,4 @@
+using MediaHub.Domain;
 using MediaHub.App.Services;
 using MediaHub.App.Views;
 using Microsoft.UI.Windowing;
@@ -65,6 +66,8 @@ public sealed partial class MainWindow : Window
             case "libraries": ShellFrame.Navigate(typeof(LibrariesPage)); break;
             case "search": ShellFrame.Navigate(typeof(SearchPage)); break;
             case "continue": ShellFrame.Navigate(typeof(ContinueWatchingPage)); break;
+            case "favorites": ShellFrame.Navigate(typeof(FavoritesPage)); break;
+            case "playlists": ShellFrame.Navigate(typeof(PlaylistsPage)); break;
             case "sources": ShellFrame.Navigate(typeof(SourcesPage)); break;
             case "settings": ShellFrame.Navigate(typeof(SettingsPage)); break;
         }
@@ -161,9 +164,7 @@ public sealed partial class MainWindow : Window
             {
                 if (!args.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems)) return;
                 var items = await args.DataView.GetStorageItemsAsync();
-                List<string> paths = DroppedMedia.Expand(items.Select(i => i.Path));
-                if (paths.Count == 0) return;
-                OpenPaths(paths);
+                OpenPaths(items.Select(i => i.Path).ToList());
             }
             catch (Exception ex)
             {
@@ -172,70 +173,152 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    /// <summary>Plays one path directly, or queues several as a temporary playlist.</summary>
-    public void OpenPaths(IReadOnlyList<string> paths)
+    /// <summary>
+    /// Puts dropped, picked or command-line files into the temporary queue and shows the player.
+    /// </summary>
+    /// <remarks>
+    /// Every entry point — drag and drop, 文件 &gt; 打开视频, 文件 &gt; 加入播放队列, a shell "Open with"
+    /// hand-off — funnels through here, so the queue has exactly one intake that can be reasoned
+    /// about and tested. Replace and append are the only two behaviours, and the caller states which
+    /// one it wants instead of it being inferred from how many files happened to arrive.
+    /// </remarks>
+    public void OpenPaths(IReadOnlyList<string> rawPaths, QueueIntake mode = QueueIntake.Replace)
     {
-        List<PlaybackRequest> requests = paths.Select(DroppedMedia.ToRequest).ToList();
-        if (requests.Count == 0) return;
-
-        if (requests.Count == 1)
+        List<string> paths = DroppedMedia.Expand(rawPaths);
+        Services.StartupTrace.Write("queue:open mode=" + mode + " paths=" + paths.Count);
+        if (paths.Count == 0)
         {
-            App.Services.Queue.Clear();
-            EnterPlayer(requests[0]);
+            Services.StartupTrace.Write("queue:empty");
             return;
         }
 
-        PlaybackRequest? first = App.Services.Queue.Reset(requests);
-        if (first is not null) EnterPlayer(first);
+        List<PlaybackRequest> requests = paths.Select(DroppedMedia.ToRequest).ToList();
+        QueueIntakeResult intake = App.Services.Queue.Intake(requests, mode);
+        Services.StartupTrace.Write(
+            "queue:intake mode=" + intake.Mode
+            + " requested=" + intake.Requested
+            + " added=" + intake.Added
+            + " duplicates=" + intake.Duplicates
+            + " count=" + App.Services.Queue.Count);
+
+        PlaybackRequest? current = App.Services.Queue.Current;
+        if (current is null) return;
+
+        if (PlayerLayer.Visibility == Visibility.Visible && PlayerFrame.Content is PlayerPage page)
+        {
+            page.RefreshQueueView();
+            // Appending while something plays must not interrupt it: the new entries are visible in
+            // the queue and start only when the current item ends or the user asks for them.
+            if (intake.Mode == QueueIntake.Append) return;
+
+            _ = page.PlayQueueEntryAsync(current);
+            return;
+        }
+
+        EnterPlayer(current);
     }
 
     // ---------------------------------------------------------------- file menu
 
     private async void OnOpenVideoClick(object sender, RoutedEventArgs e)
     {
+        // Recorded before anything can fail: the difference between "the menu command never ran" and
+        // "it ran and the picker or the file let it down" is the first thing an automated check needs,
+        // and it cannot be recovered after the fact from a transient dialog.
+        Services.StartupTrace.Write("menu:openvideo-invoked");
         try
         {
-            var picker = new Windows.Storage.Pickers.FileOpenPicker();
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle);
-            picker.ViewMode = Windows.Storage.Pickers.PickerViewMode.List;
-            picker.SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.VideosLibrary;
-            foreach (string extension in DroppedMedia.SupportedExtensions) picker.FileTypeFilter.Add(extension);
+            // Windows App SDK 1.8 desktop picker. The previous code used the legacy
+            // Windows.Storage.Pickers picker plus InitializeWithWindow, and against an unpackaged
+            // WinUI 3 window that combination never returned and never threw: the menu command ran,
+            // PickMultipleFilesAsync hung, and no dialog window ever appeared on the desktop. Both
+            // were confirmed by instrumentation rather than assumed - see windows/docs/W5-1-R4-GATE-B1.md.
+            //
+            // The two APIs are deliberately not mixed: this one takes a WindowId and returns a
+            // PickFileResult carrying Path, and no StorageFile or InitializeWithWindow is involved.
+            Services.StartupTrace.Write("menu:openvideo-picker-created");
+            // Multi-select, because "open some videos" is one gesture for the user and one queue for
+            // the player. The picker returns them in the order the shell lists them; that order is
+            // preserved and becomes the queue order.
+            IReadOnlyList<string> picked = await FilePickerService.PickFilesAsync(LocalLibraryService.SupportedMediaExtensions);
+            if (picked.Count == 0)
+            {
+                // Cancelling must leave the current playback session untouched.
+                Services.StartupTrace.Write("menu:openvideo-cancelled");
+                return;
+            }
 
-            var files = await picker.PickMultipleFilesAsync();
-            if (files is null || files.Count == 0) return;
-            OpenPaths(files.Select(f => f.Path).ToList());
+            Services.StartupTrace.Write("menu:openvideo-selected count=" + picked.Count);
+            OpenPaths(picked);
         }
         catch (Exception ex)
         {
-            Services.StartupTrace.Write("open-video:failed " + ex.GetType().Name);
+            Services.StartupTrace.Write("menu:openvideo-failed " + ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Adds files to the queue of the item already playing, without interrupting it.
+    /// </summary>
+    /// <remarks>
+    /// This is the "加入" half of the replace/append pair: 打开视频 replaces what is playing, this one
+    /// leaves it alone. Having both as separate commands is what removes the guesswork - the user
+    /// never has to reason about whether the current film will be interrupted.
+    /// </remarks>
+    private async void OnAddToQueueClick(object sender, RoutedEventArgs e)
+    {
+        Services.StartupTrace.Write("menu:addtoqueue-invoked");
+        try
+        {
+            Services.StartupTrace.Write("menu:addtoqueue-picker-created");
+            IReadOnlyList<string> picked = await FilePickerService.PickFilesAsync(LocalLibraryService.SupportedMediaExtensions);
+            if (picked.Count == 0)
+            {
+                Services.StartupTrace.Write("menu:addtoqueue-cancelled");
+                return;
+            }
+
+            Services.StartupTrace.Write("menu:addtoqueue-selected count=" + picked.Count);
+            OpenPaths(picked, QueueIntake.Append);
+        }
+        catch (Exception ex)
+        {
+            Services.StartupTrace.Write("menu:addtoqueue-failed " + ex.GetType().Name + ": " + ex.Message);
         }
     }
 
     private async void OnOpenFolderClick(object sender, RoutedEventArgs e)
     {
+        Services.StartupTrace.Write("open-folder:invoked");
         try
         {
-            var picker = new Windows.Storage.Pickers.FolderPicker();
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle);
-            picker.SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.VideosLibrary;
-            picker.FileTypeFilter.Add("*");
-
-            Windows.Storage.StorageFolder? folder = await picker.PickSingleFolderAsync();
-            if (folder is null) return;
+            string? folder = await FilePickerService.PickFolderAsync();
+            if (folder is null)
+            {
+                Services.StartupTrace.Write("open-folder:cancelled");
+                return;
+            }
+            Services.StartupTrace.Write("open-folder:selected");
 
             // Opening a folder adds it as a local library root and shows it, rather than playing a
             // file: a folder is a place, and the user asked to see what is in it.
-            App.Services.Settings.Update(s =>
-            {
-                if (!s.LocalFolders.Contains(folder.Path, StringComparer.OrdinalIgnoreCase)) s.LocalFolders.Add(folder.Path);
-            });
+            AddLocalFolder(folder);
             // The library page rescans on load; it needs no invalidation hook, only to be shown.
             NavigateShell(typeof(LocalLibraryPage));
         }
         catch (Exception ex)
         {
-            Services.StartupTrace.Write("open-folder:failed " + ex.GetType().Name);
+            Services.StartupTrace.Write("open-folder:failed " + ex.GetType().Name + ": " + ex.Message);
         }
+    }
+
+    /// <summary>Adds a folder to the local library roots, keeping the list free of duplicates.</summary>
+    public void AddLocalFolder(string path)
+    {
+        App.Services.Settings.Update(s =>
+        {
+            if (!s.LocalFolders.Contains(path, StringComparer.OrdinalIgnoreCase)) s.LocalFolders.Add(path);
+        });
     }
 
     private void OnPlayPauseMenuClick(object sender, RoutedEventArgs e)
@@ -283,6 +366,9 @@ public sealed partial class MainWindow : Window
             _ when pageType == typeof(LibrariesPage) => "libraries",
             _ when pageType == typeof(SearchPage) => "search",
             _ when pageType == typeof(ContinueWatchingPage) => "continue",
+            _ when pageType == typeof(FavoritesPage) => "favorites",
+            _ when pageType == typeof(PlaylistsPage) => "playlists",
+            _ when pageType == typeof(PlaylistDetailPage) => "playlists",
             _ when pageType == typeof(SourcesPage) => "sources",
             _ when pageType == typeof(SettingsPage) => "settings",
             _ => null,
@@ -297,6 +383,14 @@ public sealed partial class MainWindow : Window
     /// <summary>Enters the player layer with a fully opaque full-window surface.</summary>
     public void EnterPlayer(PlaybackRequest request)
     {
+        // A queue left over from an earlier session would auto-advance into items the user is no
+        // longer watching, so entering the player with an unrelated request starts a clean queue.
+        if (App.Services.Queue.Current is not { } current
+            || !string.Equals(PlaybackQueue.IdentityOf(current), PlaybackQueue.IdentityOf(request), StringComparison.Ordinal))
+        {
+            App.Services.Queue.Clear();
+        }
+
         Nav.Visibility = Visibility.Collapsed;
         PlayerLayer.Visibility = Visibility.Visible;
         PlayerFrame.Navigate(typeof(PlayerPage), request);
@@ -317,18 +411,43 @@ public sealed partial class MainWindow : Window
     private void TryOpenFromCommandLine()
     {
         string[] args = Environment.GetCommandLineArgs();
-        if (args.Length < 2) return;
 
-        string candidate = args[1];
-        if (!File.Exists(candidate)) return;
-        if (!LocalLibraryService.SupportedVideoExtensions.Contains(Path.GetExtension(candidate))) return;
-
-        EnterPlayer(new PlaybackRequest
+        // Traced even in the do-nothing case: without a record of "the shell handed us this and we
+        // dropped it", a file association that opens nothing is indistinguishable from one that was
+        // never invoked, and the previous version of this method had exactly that blind spot.
+        Services.StartupTrace.Write("cli:args=" + (args.Length - 1));
+        if (args.Length < 2)
         {
-            LocalPath = candidate,
-            Title = Path.GetFileNameWithoutExtension(candidate),
-            DisplayUrl = candidate,
-            ExternalSubtitles = LocalLibraryService.FindSiblingSubtitles(candidate),
-        });
+            Services.StartupTrace.Write("cli:no-argument");
+            return;
+        }
+
+        // Every argument is considered, not just the first: dropping three videos on the executable
+        // hands over three paths, and they belong in the same queue as if they had been picked.
+        var accepted = new List<string>();
+        foreach (string candidate in args.Skip(1))
+        {
+            if (!File.Exists(candidate))
+            {
+                Services.StartupTrace.Write("cli:not-a-file " + Path.GetFileName(candidate));
+                continue;
+            }
+            // Audio counts here: double-clicking an .aac must reach the player, and the engine plays it.
+            if (!LocalLibraryService.IsSupportedMediaFile(candidate))
+            {
+                Services.StartupTrace.Write("cli:unsupported-extension " + Path.GetExtension(candidate));
+                continue;
+            }
+            accepted.Add(candidate);
+        }
+
+        if (accepted.Count == 0)
+        {
+            Services.StartupTrace.Write("cli:no-supported-file");
+            return;
+        }
+
+        Services.StartupTrace.Write("cli:opening count=" + accepted.Count);
+        OpenPaths(accepted);
     }
 }

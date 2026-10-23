@@ -20,6 +20,7 @@ internal sealed class MediaBrowserProvider :
     IProviderPlayback,
     IProviderSearch,
     IProviderProgress,
+    IProviderFavorites,
     IProviderSubtitle,
     IProviderImageFetcher
 {
@@ -186,7 +187,10 @@ internal sealed class MediaBrowserProvider :
     /// server's response order, because a server is free to return episodes in any order and a
     /// "next episode" that depends on response ordering would silently skip or repeat episodes.
     /// Missing numbers are treated as "unknown" and sorted last within their season instead of being
-    /// guessed, so an episode without an index never displaces a real one.
+    /// guessed, so an episode without an index never displaces a real one. The mapper folds a missing
+    /// number into 0, so 0 is read as "unknown" here; a genuine season 0 / episode 0 (specials) is
+    /// therefore also ordered last, which is the safe direction for "next episode": it is never played
+    /// before a numbered episode of the same season.
     /// </remarks>
     public async Task<Episode?> GetNextEpisodeAsync(string seriesId, string currentEpisodeId, CancellationToken ct = default)
     {
@@ -195,8 +199,8 @@ internal sealed class MediaBrowserProvider :
         if (episodes.Count == 0) return null;
 
         List<Episode> ordered = episodes
-            .OrderBy(e => e.SeasonNumber)
-            .ThenBy(e => e.EpisodeNumber)
+            .OrderBy(e => e.SeasonNumber > 0 ? e.SeasonNumber : int.MaxValue)
+            .ThenBy(e => e.EpisodeNumber > 0 ? e.EpisodeNumber : int.MaxValue)
             .ThenBy(e => e.Id, StringComparer.Ordinal)
             .ToList();
 
@@ -219,6 +223,30 @@ internal sealed class MediaBrowserProvider :
             Studios = MediaBrowserMapper.GetStringArray(doc.RootElement, "Studios", "0", "Name"),
             Streams = MediaBrowserMapper.MapStreams(doc.RootElement),
         };
+    }
+
+    // ---------------------------------------------------------------- favourites
+
+    public async Task<bool> SetFavoriteAsync(string itemId, bool favorite, CancellationToken ct = default)
+    {
+        await _api.SetFavoriteAsync(itemId, favorite, ct).ConfigureAwait(false);
+
+        // Read back rather than echo the request: the write answers 200 with an empty body on both
+        // servers, so "no exception" only proves the request was accepted, not that the flag changed.
+        // A library the account can read but not write would otherwise leave the UI showing a star the
+        // server never stored.
+        using var doc = await _api.GetItemAsync(itemId, ct).ConfigureAwait(false);
+        return MediaBrowserMapper.GetBool(doc.RootElement, "UserData", "IsFavorite") ?? favorite;
+    }
+
+    public async Task<IReadOnlyList<MediaItem>> GetFavoritesAsync(int limit, CancellationToken ct = default)
+    {
+        if (limit <= 0) return Array.Empty<MediaItem>();
+        using var doc = await _api.GetFavoritesAsync(limit, ct).ConfigureAwait(false);
+        return MediaBrowserMapper.Items(doc)
+            .Select(i => MediaBrowserMapper.MapItem(_serverId, i))
+            .Where(i => !IsBluRayIso(i))
+            .ToList();
     }
 
     // ---------------------------------------------------------------- playback
@@ -373,8 +401,9 @@ internal sealed class MediaBrowserProvider :
 
     public async Task<IReadOnlyList<MediaItem>> GetContinueWatchingAsync(int limit, CancellationToken ct = default)
     {
-        var query = new PageRequest(0, limit);
-        using var doc = await _api.GetItemsAsync(string.Empty, query, "Movie,Episode", ct).ConfigureAwait(false);
+        if (limit <= 0) return Array.Empty<MediaItem>();
+
+        using var doc = await _api.GetResumableItemsAsync(limit, ct).ConfigureAwait(false);
         return MediaBrowserMapper.Items(doc)
             .Select(i => MediaBrowserMapper.MapItem(_serverId, i))
             .Where(i => i.UserDataPlaybackPositionTicks is > 0 && i.UserDataPlayed != true)

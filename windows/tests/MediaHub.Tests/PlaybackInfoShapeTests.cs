@@ -49,7 +49,9 @@ public sealed class PlaybackInfoShapeTests
         await using (mock)
         using (handle)
         {
-            PagedResult<MediaItem> page = await handle.Library!.GetItemsAsync(string.Empty, new PageRequest(0, 1));
+            // Scoped to the movies library on purpose: an empty parent is not "the whole library" —
+            // a real server answers that with the library folders themselves, which are not playable.
+            PagedResult<MediaItem> page = await handle.Library!.GetItemsAsync(MockMediaServer.MoviesLibraryId, new PageRequest(0, 1));
             Assert.NotEmpty(page.Items);
 
             MediaDetail detail = await handle.Detail!.GetItemDetailAsync(page.Items[0].Id);
