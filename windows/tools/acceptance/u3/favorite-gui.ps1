@@ -224,6 +224,38 @@ $err1 = Find-AnyNameLike '无法更新收藏'
 $warn1 = Find-AnyNameLike '收藏未保存'
 Check 'P1.6 收藏成功没有出现错误/未保存提示' (($err1 -eq '') -and ($warn1 -eq '')) ('error=' + $err1 + ' warning=' + $warn1)
 
+# 收藏页：服务器侧写入必须能在跨来源列表里看到，而不是只有详情页知道
+Go-Nav '我的收藏' | Out-Null
+$grid = Wait-Element 'favorites.grid' 30
+$rowName = ''
+$deadline = (Get-Date).AddSeconds(45)
+while ((Get-Date) -lt $deadline) {
+  $hit = $null
+  foreach ($e in (Get-MhAppElementAll -IncludeOffscreen)) {
+    $n = $e.Current.Name
+    if ($null -ne $n -and $n -like ('*' + $itemName + '*') -and $e.Current.AutomationId -notlike 'LibraryCard*') { $hit = $n; break }
+  }
+  if ($hit) { $rowName = $hit; break }
+  Start-Sleep -Milliseconds 400
+}
+Check 'P1.7 「我的收藏」页出现刚收藏的条目' (($null -ne $grid) -and ($rowName -ne '')) ('grid=' + ($null -ne $grid) + ' row=' + $rowName)
+Save-MhScreenshot -Path (Join-Path $ev 'p1-favorites-page.png') | Out-Null
+
+$favClick = 'NO-ELEMENT'
+if ($rowName -ne '') {
+  foreach ($e in (Get-MhAppElementAll -IncludeOffscreen)) {
+    $c = $e.Current
+    if ($null -ne $c.Name -and $c.Name -like ('*' + $itemName + '*') -and $c.ControlType -eq 'ListItem') {
+      try { $favClick = Invoke-MhElementDeep -Element $e } catch { $favClick = 'ERROR: ' + $_.Exception.Message }
+      break
+    }
+  }
+  Start-Sleep -Seconds 2
+}
+$detailFromFav = $null -ne (Wait-Element 'detail.play' 30)
+$titleFromFav = Get-Text 'TitleText'
+Check 'P1.8 收藏页点条目进入详情页（不是死链接）' ($detailFromFav -and $titleFromFav -like ('*' + $itemName + '*')) ('invoke=' + $favClick + ' title=' + $titleFromFav)
+
 # ---------------------------------------------------------------- P2 重启后状态来自服务器
 Write-Host ''
 Write-Host '=== P2 完全重启客户端后状态仍为已收藏（服务器持久化，非本地缓存） ==='
@@ -251,6 +283,24 @@ Check 'P3.1 点击后界面回到未收藏' (($name3 -like '*收藏*') -and ($na
 $fav3 = Wait-Fav $itemId $false 25
 Check 'P3.2 服务器回读 IsFavorite=False' (-not $fav3) ('isFavorite=' + $fav3)
 Save-MhScreenshot -Path (Join-Path $ev 'p3-after-unfavorite.png') | Out-Null
+
+# 取消收藏后收藏页必须同步消失：列表来自服务器，不是本地缓存
+Go-Nav '我的收藏' | Out-Null
+$null = Wait-Element 'favorites.grid' 30
+Start-Sleep -Seconds 2
+if (Find-MhAppElement -AutomationId 'favorites.reload' -IncludeOffscreen) {
+  Invoke-MhElement -Element (Find-MhAppElement -AutomationId 'favorites.reload' -IncludeOffscreen) | Out-Null
+  Start-Sleep -Seconds 2
+}
+$stillThere = ''
+foreach ($e in (Get-MhAppElementAll -IncludeOffscreen)) {
+  $n = $e.Current.Name
+  if ($null -ne $n -and $n -like ('*' + $itemName + '*') -and $e.Current.AutomationId -like 'favorites*') { $stillThere = $n; break }
+}
+$emptyEl = Find-MhAppElement -AutomationId 'favorites.empty' -IncludeOffscreen
+$emptyVisible = ($null -ne $emptyEl) -and (-not $emptyEl.Current.IsOffscreen)
+Check 'P3.3 取消收藏后「我的收藏」页不再列出该条目（且显示空态）' (($stillThere -eq '') -and $emptyVisible) ('residual=' + $stillThere + ' emptyVisible=' + $emptyVisible)
+Save-MhScreenshot -Path (Join-Path $ev 'p3-favorites-empty.png') | Out-Null
 
 # ---------------------------------------------------------------- P4 播放未被破坏（回归）
 Write-Host ''
