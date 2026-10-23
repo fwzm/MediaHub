@@ -252,8 +252,120 @@ BUILD SUCCESSFUL in 1m 24s   (EXIT=0，--rerun-tasks 确保不是 UP-TO-DATE 复
 
 ## 10. 本轮未做项
 
-- **没有 apply**：预演只产出计划，不写库、不建服务器、不落墓碑；`bindSyncSourceId` / `updateSyncRecordRevision` / `applySyncIdentity` 已就绪但无人调用。
+- ~~**没有 apply**~~：预演只产出计划，不写库、不建服务器、不落墓碑；`bindSyncSourceId` / `updateSyncRecordRevision` / `applySyncIdentity` 已就绪但无人调用。——**W6-C 已补上应用路径，见 §11**。
 - **没有 UI**：预览页、逐条确认、冲突裁定都还在数据层。
 - **没有配对/传输层**：二维码只带临时地址+挑战+指纹、TLS 1.3 指纹钉扎、一次性配对、导入后 DPAPI ↔ SecretStorage 重封（D6）均未实现。
 - **确认结果不持久化**：`needsApproval` 只是列表，用户"接受/跳过"的裁定没有落盘位置。
 - **instrumented 未跑**：`RoomMigrationDeviceTest` 已同步改到 v5 并加唯一索引断言（保持源码一致），本机只跑 JVM 单测。
+
+## 11. 可用路径：导入应用 + 导出信封（W6-C）
+
+W6-A 给了契约（信封 / 规划器 / 编解码），W6-B 给了存储（servers 表的同步身份三列），本节把两者接成**真正能跑的一条路**：Windows 导出的信封 JSON 进来 → 规划 → 只写该写的 → 再把本机来源导出成信封。
+
+### 11.1 入口与落点
+
+| 文件 | 职责 |
+| --- | --- |
+| `core/database/src/main/kotlin/com/mediahub/core/database/sync/AndroidSourceSyncService.kt` | 唯一的写库入口：`importEnvelope(json)` / `export()` |
+| `core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncStore.kt` | 读写口（`listSourceSnapshots` / `createLocalSource` / `updateLocalSource` / `bindSyncIdentity`），**没有删除方法** |
+| `core/database/src/main/kotlin/com/mediahub/core/database/repository/ServerRepository.kt` | 上述接口的生产实现（Room）：`: ServerStore, SyncSourceStore, SourceSyncStore` |
+| `core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncFingerprints.kt` | 内容指纹（sha256；内容不含修订号、不含 secrets） |
+| `core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncLocalIds.kt` | 导出补号：`local-` + sha256(命名空间 + deviceId + serverId) 前 16 hex（总长 22，与 Windows 实测同形） |
+
+服务不依赖 Android Context / Compose：`AndroidSourceSyncService(store, deviceId, snapshotIdFactory, clock)`；`deviceId` 生产环境取 `ClientIdentityProvider.get().deviceId`（SharedPreferences 持久化）。**暂不注册 Hilt**（不扩 app DI 图，接 UI 时再补）。
+
+### 11.2 四个桶与 Windows CLI 的对应
+
+```
+applied            Create / Update 且无需确认            → 唯一写库的桶
+requiresApproval   冲突、歧义身份、无可用地址新建、Adopt、墓碑删除、未知类型 → 只报告
+  └ unsupported    requiresApproval 的子集：本端不认识 / 没有对应类型的 wire 值
+ignored            NoChange / IgnoreStale（含"墓碑指向本地没有的来源"）
+failed             Android 侧新增：规划后写入前本地行消失、端点全不可规范化
+```
+
+不变式：`applied + requiresApproval + ignored + failed == 计划条目数`（= sources + deletions）。
+
+为什么 `unsupported` 是子集而不是第四个互斥桶：Windows CLI **没有**独立 unsupported 计数，它把 `unknown-source-type` 计进 `counts.requiresApproval`（W6-A 黄金样本实测 2/1/1）。保留独立字段只为让界面能把"已保存但暂不支持"单独展示；跨端比数用 `requiresApprovalCount` 对 CLI 的 `counts.requiresApproval`。
+
+### 11.3 落库规则
+
+- 只对 `action ∈ {Create, Update}` 且 `!requiresUserApproval` 的条目写库，其余只报告。
+- 写入前再守两道：wire 解析不出 `ServerType` → `failed(unknown-source-type)`；所有端点都无法规范化出可拨号地址 → `failed(no-usable-endpoint)`（不写一条永远连不上的来源）。
+- 端点先过 `SyncUrlNormalizer`（D4：默认端口显式、去尾斜杠、丢 query、剥 userinfo）再落库，主端点排最前（存储层把第一条当主线路）。
+- 身份三列一起写：`sync_source_id` / `sync_record_revision` / `sync_source_type_raw`；仓库层用 DAO 单列更新，不经过 `toEntity()` 全量覆盖，避免一次远端同步抹掉本地偏好（isDefault / sortOrder / 创建时间）。
+- `failed` 的 `local-source-vanished` 属 Android 侧运营码（合同 13 个码写不出这个情形），只出现在结果里，不进线格式。
+
+### 11.4 墓碑：永远不删本地行
+
+信封里的 `deletions` 只解析成候选：命中本地来源 → `DELETE / tombstone` 进 `requiresApproval`；本地修订号更高 → `IGNORE_STALE / stale-revision`；本地没有这条 → `NO_CHANGE / no-local-source`。
+**类型层面的保证**：`SourceSyncStore` 根本没有删除方法，服务想删也删不了；要真删仍须用户在服务器管理页手动操作。
+
+### 11.5 未知类型保真
+
+`quantum-nas` 这类本端不认识的 wire 值：解析时原样保留（`SyncSourceTypeValue.raw`），导出的 `sourceType` 与能力声明里逐字带出；**绝不落库成 `ServerType`**（那等于把它降级成某个已知协议）。黄金样本里 `quantum-nas` 的原子串在导入结果 `unsupported[].sourceType` 与再次导出的信封里都能读到。
+
+### 11.6 幂等判据：修订号 + 内容指纹
+
+- 规划器逐字段比较（`ContentMatches`：wire + accountScope + displayName + 规范化地址）决定 `NoChange` 还是 `same-revision-different-content`。
+- `SourceSyncFingerprints.content(record)` 覆盖 syncSourceId / wire / displayName / accountScope / 端点集合，**不含 recordRevision、不含 secrets**；`content(envelope)` 是各记录摘要排序后拼接（与记录顺序无关，墓碑不参与），用于判定"这份信封我导过没有"。
+- 结果里的 `envelopeContentHash` 就是它，可直接与上次记录比对。
+
+实测：黄金信封连导两次，第二次 `applied = 0 / ignored = 3 / requiresApproval = 1 / failed = 0`，库不新增任何行。
+
+### 11.7 导出
+
+| 项 | 规则 |
+| --- | --- |
+| deviceId | 构造时传入的稳定标识（生产取 ClientIdentity.deviceId） |
+| snapshotId | 每次新生成（默认 UUID 去横线）；两次导出字节不同，判"同一份内容"用 `envelopeContentHash` |
+| 记录顺序 | 按 `syncSourceId` 升序，相同再按 displayName —— 两端 diff 可预期 |
+| 缺身份 | 按 `deviceId + serverId` 确定性派生 `local-` + 16 hex 并**回写**（与 Windows export 回写 store 同行为），下次导出 id 不漂移；补过号的 id 记在 `derivedIdentityServerIds`；回写失败（`bindSyncIdentity` 返回 false）时该来源不进这个列表，但 id 仍是确定性派生值、不会漂移 |
+| 无线路 / 无类型 | 跳过并列进 `skippedServerIds`（信封里塞 url 为空的记录会被读端判 missing-field:url，整份信封作废） |
+| deletions | **恒空**：本端没有删除日志表，不猜测"哪些来源被删过" |
+| capabilities | `canSendSecrets = false`；`sourceTypes` 先按合同词汇顺序列已知值，未知 wire 追加在后 |
+
+### 11.8 本轮测试
+
+```powershell
+$env:JAVA_HOME='C:\Program Files\Java\jdk-21'
+$env:ANDROID_HOME='C:\Users\55160\AppData\Local\Android\Sdk'; $env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
+cmd /c "cd /d D:\deepseek_test\MediaHub_Win && .\gradlew.bat :core:common:testDebugUnitTest :core:database:testDebugUnitTest --console=plain --rerun-tasks > %TEMP%\android-sync-task36.log 2>&1"
+```
+
+| 文件 | 例数 | 覆盖 |
+| --- | --- | --- |
+| `core/database/src/test/kotlin/com/mediahub/core/database/sync/AndroidSourceSyncServiceTest.kt` | 27 | 黄金信封四桶 2/1/1 与 reason 逐条、规范化落库、未知类型不写且保真、墓碑不删、二次导入零写入、同修订号不同内容→approval、更高修订→UPDATE、更低→stale、pre-W6→ADOPT、墓碑命中→approval、过时墓碑→stale、malformed/版本过高被拒且不读库、无端点→approval、端点不可规范化→failed、本地行消失→failed；导出排序、deviceId 稳定、snapshotId 唯一、补号只补一次、跳过无线路、导出→再导入自己 NoChange、不臆造墓碑；指纹忽略修订号与书写细节、四桶两两互斥且相加等于计划条目数（故意让四个桶同时非空的混合信封）|
+| `core/database/src/test/kotlin/com/mediahub/core/database/sync/AndroidSourceSyncServiceRoomTest.kt` | 6 | 真实 Room：导入后两行与三列、未知类型不入库、二次导入不加行、导入就地更新已绑定来源、导出给老来源补号且稳定、导出与导入自洽 |
+
+合计 **33 例**。实测结果：
+
+```
+EXIT=0
+BUILD SUCCESSFUL in 1m 29s
+
+MOD=core/common   SUITES=12 TESTS=165 FAILURES=0 ERRORS=0 SKIPPED=0
+MOD=core/database SUITES=13 TESTS=103 FAILURES=0 ERRORS=0 SKIPPED=0
+（core:database 基线 11 suites / 70 tests → 本轮 +2 suites / +33 tests；core:common 未变）
+
+新增两套：AndroidSourceSyncServiceTest 27 例、AndroidSourceSyncServiceRoomTest 6 例，全绿。
+（最后一次实跑到 103 是因为在 32 例之上补了 1 例「四桶互斥且相加等于计划条目数」的不变量测试。）
+
+实跑过程中修掉的 4 个问题（均为测试自身，生产实现与断言口径未放宽）：
+
+1. `Unclosed comment`：测试 KDoc 里写了 `core/*/test/resources/…`，Kotlin 块注释会嵌套，于是 "/*" 开了一个永不闭合的内层注释。改成文字描述路径。
+2. `Unresolved reference 'action'`：断言写成 `applied.action`，而 `AppliedSourceChange` 的动作在 `candidate` 上，改为 `applied.candidate.action`。
+3. `pre_w6_source_without_sync_id_is_only_adopted_after_approval` 断言 `createCalls == 0` 失败（实际 1）：同一份信封里还有一条本机没有的 jellyfin 来源，本来就应该被新建。改为钉住 "legacy 行未被改写"（updateCalls 0、srv-legacy 的 syncSourceId 仍为 null）+ "唯一的建库是那条 jellyfin"（createCalls 1、新行 syncSourceId = local-0a87ea9520c51a80），比原来的 "整次导入零写入" 更准。
+4. `:core:common:bundleLibCompileToJarDebug` 报 `java.nio.file.FileSystemException: …classes.jar: 另一个程序正在使用此文件`（Kotlin 编译守护进程残留句柄）：`gradlew.bat --stop` + 结束 CommandLine 含 `KotlinCompileDaemon` 的 java.exe 后恢复。
+```
+
+### 11.9 本轮未做项
+
+- **没有配对 / 传输层**：信封怎么从对端拿到（二维码临时地址 + 挑战 + 指纹、TLS 1.3 指纹钉扎、一次性配对）仍是空白；本轮只吃字符串。
+- **没有 UI**：预览页、逐条确认、冲突裁定、"我的来源"页都没接；服务也未注册 Hilt。
+- **没有凭据落地**：`secrets` 在信封里原样搬运、不解释不落盘；导入后应经 Android SecretStorage 重新封装，未做。
+- **导入后没有真实验证**：ADR-S001 D7 要求逐源验证认证并给出三态（可直接用 / 需重登 / 暂不支持），本轮只保证"配置已落库"，不等于能登录。
+- **没有删除日志表**：因此导出的 `deletions` 恒空，跨设备删除方向不可用。
+- **确认结果不持久化**：`requiresApproval` 只是列表，用户裁定没有落盘位置。
+- **instrumented 未跑**：`RoomMigrationDeviceTest` 只做源码一致，本机只跑 JVM 单测。
+
