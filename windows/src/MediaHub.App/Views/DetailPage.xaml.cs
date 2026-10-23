@@ -20,7 +20,16 @@ public sealed partial class DetailPage : Page
     private bool _favoriteBusy;
 
     private sealed record StreamRow(string Label, string Value);
-    private sealed record EpisodeRow(string Id, string EpisodeLabel, string Title, string ProgressLabel);
+    // The series identity travels with the row: auto-advance needs it, and the detail page is the
+    // only place that still has it after the user picks one episode out of a list.
+    private sealed record EpisodeRow(
+        string Id,
+        string EpisodeLabel,
+        string Title,
+        string ProgressLabel,
+        string? SeriesId,
+        int? SeasonNumber,
+        int? EpisodeNumber);
 
     public DetailPage()
     {
@@ -191,7 +200,14 @@ public sealed partial class DetailPage : Page
             IReadOnlyList<Episode> episodes = await _handle!.Library!.GetEpisodesAsync(season.Id);
             EpisodeList.ItemsSource = episodes
                 .OrderBy(ep => ep.EpisodeNumber)
-                .Select(ep => new EpisodeRow(ep.Id, "E" + ep.EpisodeNumber.ToString("00"), ep.Name, ""))
+                .Select(ep => new EpisodeRow(
+                    ep.Id,
+                    "E" + ep.EpisodeNumber.ToString("00"),
+                    ep.Name,
+                    "",
+                    ep.SeriesId,
+                    ep.SeasonNumber,
+                    ep.EpisodeNumber))
                 .ToList();
         }
         catch (ProviderException ex)
@@ -210,11 +226,12 @@ public sealed partial class DetailPage : Page
     private void OnEpisodeClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not EpisodeRow row) return;
-        PlayItem(row.Id, row.Title);
+        PlayItem(row.Id, row.Title, 0, row.SeriesId, row.SeasonNumber, row.EpisodeNumber);
     }
 
     private void OnPlayClick(object sender, RoutedEventArgs e)
-        => PlayItem(_navigation!.ItemId, _detail?.Item.Name ?? _navigation!.Title, 0);
+        => PlayItem(_navigation!.ItemId, _detail?.Item.Name ?? _navigation!.Title, 0,
+            _detail?.Item.SeriesId, _detail?.Item.SeasonNumber, _detail?.Item.EpisodeNumber);
 
     private void RenderFavorite()
     {
@@ -265,16 +282,29 @@ public sealed partial class DetailPage : Page
 
     private void OnResumeClick(object sender, RoutedEventArgs e)
         => PlayItem(_navigation!.ItemId, _detail?.Item.Name ?? _navigation!.Title,
-            _detail?.Item.UserDataPlaybackPositionTicks ?? 0);
+            _detail?.Item.UserDataPlaybackPositionTicks ?? 0,
+            _detail?.Item.SeriesId, _detail?.Item.SeasonNumber, _detail?.Item.EpisodeNumber);
 
-    private void PlayItem(string itemId, string title, long startTicks = 0)
+    private void PlayItem(
+        string itemId,
+        string title,
+        long startTicks = 0,
+        string? seriesId = null,
+        int? seasonNumber = null,
+        int? episodeNumber = null)
     {
+        // Everything the player needs to find the next episode is captured here, while the list that
+        // knows it is still on screen. Dropping it would make auto-advance depend on a second server
+        // round-trip and fail silently when that lookup is not possible.
         App.MainWindow?.EnterPlayer(new PlaybackRequest
         {
             ServerId = _handle!.ServerId,
             ItemId = itemId,
             Title = title,
             StartPositionTicks = startTicks,
+            SeriesId = seriesId,
+            SeasonNumber = seasonNumber,
+            EpisodeNumber = episodeNumber,
         });
     }
 

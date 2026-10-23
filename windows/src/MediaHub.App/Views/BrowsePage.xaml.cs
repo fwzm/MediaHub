@@ -265,7 +265,9 @@ public sealed partial class BrowsePage : Page
             ItemId = item.Id,
             Title = item.Name,
             DisplayUrl = item.Path ?? item.Id,
-            SeriesId = null,
+            SeriesId = item.SeriesId,
+            SeasonNumber = item.SeasonNumber,
+            EpisodeNumber = item.EpisodeNumber,
         });
     }
 

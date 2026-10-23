@@ -187,7 +187,10 @@ internal sealed class MediaBrowserProvider :
     /// server's response order, because a server is free to return episodes in any order and a
     /// "next episode" that depends on response ordering would silently skip or repeat episodes.
     /// Missing numbers are treated as "unknown" and sorted last within their season instead of being
-    /// guessed, so an episode without an index never displaces a real one.
+    /// guessed, so an episode without an index never displaces a real one. The mapper folds a missing
+    /// number into 0, so 0 is read as "unknown" here; a genuine season 0 / episode 0 (specials) is
+    /// therefore also ordered last, which is the safe direction for "next episode": it is never played
+    /// before a numbered episode of the same season.
     /// </remarks>
     public async Task<Episode?> GetNextEpisodeAsync(string seriesId, string currentEpisodeId, CancellationToken ct = default)
     {
@@ -196,8 +199,8 @@ internal sealed class MediaBrowserProvider :
         if (episodes.Count == 0) return null;
 
         List<Episode> ordered = episodes
-            .OrderBy(e => e.SeasonNumber)
-            .ThenBy(e => e.EpisodeNumber)
+            .OrderBy(e => e.SeasonNumber > 0 ? e.SeasonNumber : int.MaxValue)
+            .ThenBy(e => e.EpisodeNumber > 0 ? e.EpisodeNumber : int.MaxValue)
             .ThenBy(e => e.Id, StringComparer.Ordinal)
             .ToList();
 

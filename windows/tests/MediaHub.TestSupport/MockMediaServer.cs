@@ -27,6 +27,16 @@ public sealed class MockServerOptions
     /// track favourites answers with, so the client's "server did not say" branch can be exercised.
     /// </summary>
     public bool OmitIsFavoriteFromUserData { get; init; }
+
+    /// <summary>
+    /// Episodes the <c>/Shows/{seriesId}/Episodes</c> route serves, in exactly the order given.
+    /// </summary>
+    /// <remarks>
+    /// The order is preserved, not sorted: a real server answers in whatever order its index produces,
+    /// and ordering by season and episode is the client's job. A test can therefore hand the mock a
+    /// deliberately jumbled list and still expect the client to pick the right successor.
+    /// </remarks>
+    public IReadOnlyList<MockEpisode> Episodes { get; init; } = Array.Empty<MockEpisode>();
 }
 
 /// <summary>
@@ -35,7 +45,7 @@ public sealed class MockServerOptions
 /// </summary>
 /// <remarks>
 /// <para>
-/// Three deliberate fidelity choices, because the tests around them are the reason this exists:
+/// Four deliberate fidelity choices, because the tests around them are the reason this exists:
 /// </para>
 /// <list type="bullet">
 /// <item>the API root follows the dialect — Emby under <c>/emby</c>, Jellyfin from the root — and a
@@ -45,12 +55,16 @@ public sealed class MockServerOptions
 /// "token was stripped by a redirect" fact observable as a status code;</item>
 /// <item>favourite state is real state: the write routes change it and every later item payload
 /// reflects it, while <c>/Users/{uid}/Favorites/{id}</c> — which Emby and Jellyfin both answer 404 —
-/// is deliberately absent, so a client addressing the wrong spelling cannot stay green here.</item>
+/// is deliberately absent, so a client addressing the wrong spelling cannot stay green here;</item>
+/// <item>the episode list is scoped to one series and answered in seed order rather than sorted by
+/// season and episode, so "next episode" cannot come from the server's ordering; an episode whose
+/// season or episode number is unknown omits that field instead of sending a 0 that would look real.</item>
 /// </list>
 /// <para>
 /// The catalogue is flat and deterministic: <see cref="MockServerOptions.ItemCount"/> movies live in
-/// <see cref="MoviesLibraryId"/>, and the TV library exists (so the Views mapping can be asserted) but
-/// is empty — keeping the paging arithmetic exact rather than approximate.
+/// <see cref="MoviesLibraryId"/>, the TV library exists (so the Views mapping can be asserted) and
+/// holds the episodes seeded through <see cref="MockServerOptions.Episodes"/> — keeping the paging
+/// arithmetic exact rather than approximate.
 /// </para>
 /// </remarks>
 public sealed class MockMediaServer : IAsyncDisposable
@@ -74,6 +88,9 @@ public sealed class MockMediaServer : IAsyncDisposable
     private readonly string _rootPath;
     private readonly byte[] _media;
     private readonly List<MockItem> _items;
+
+    /// <summary>Episodes served on <c>/Shows/{seriesId}/Episodes</c>, kept in seed order.</summary>
+    private readonly List<MockEpisode> _episodes;
     private readonly List<RecordedRequest> _requests = new();
     private readonly Dictionary<string, RedirectRule> _redirects = new(StringComparer.OrdinalIgnoreCase);
 
@@ -105,6 +122,7 @@ public sealed class MockMediaServer : IAsyncDisposable
         _items = Enumerable.Range(0, Math.Max(0, options.ItemCount))
             .Select(index => CreateItem(index, _media.Length))
             .ToList();
+        _episodes = options.Episodes.ToList();
 
         (_listener, int port) = BindLoopbackListener();
         BaseUri = new Uri("http://127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture) + "/");
@@ -401,6 +419,9 @@ public sealed class MockMediaServer : IAsyncDisposable
             // server. A mock that is more permissive than the server is worse than no mock.
             if (segments is ["Users", "Me"]) { ServeCurrentUser(context); return; }
             if (segments is ["Users", _, "Items", var itemId]) { ServeItem(context, itemId); return; }
+            // One series' episodes. An id the mock has no episodes for is an empty page, which is what
+            // both servers answer; the client is the side that has to order them.
+            if (segments is ["Shows", var seriesId, "Episodes"]) { WriteJson(context, 200, EpisodesPage(seriesId)); return; }
             if (segments is ["Items", _, "Images", _]) { WriteBytes(context, 200, OnePixelPng, 0, OnePixelPng.Length, null, PngContentType); return; }
             if (segments is ["Videos", _, var streamName] && streamName.StartsWith("stream", StringComparison.OrdinalIgnoreCase))
             {
@@ -572,16 +593,69 @@ public sealed class MockMediaServer : IAsyncDisposable
         }.ToJsonString());
     }
 
+    /// <summary>Episode page for one series, in seed order and scoped to that series.</summary>
+    private string EpisodesPage(string seriesId)
+    {
+        List<MockEpisode> episodes = _episodes
+            .Where(episode => string.Equals(episode.SeriesId, seriesId, StringComparison.Ordinal))
+            .ToList();
+
+        var items = new JsonArray();
+        foreach (MockEpisode episode in episodes) items.Add(EpisodeJson(episode));
+
+        return new JsonObject
+        {
+            ["Items"] = items,
+            ["TotalRecordCount"] = episodes.Count,
+            ["StartIndex"] = 0,
+        }.ToJsonString();
+    }
+
+    /// <summary>Episode payload, as the episode list and the single-item route both serve it.</summary>
+    /// <remarks>
+    /// An unknown season or episode number is omitted rather than sent as 0: both servers leave the
+    /// field out when they do not know it, and a 0 would turn "unknown" into a number the client could
+    /// mistake for the first episode.
+    /// </remarks>
+    private JsonObject EpisodeJson(MockEpisode episode)
+    {
+        var json = new JsonObject
+        {
+            ["Id"] = episode.Id,
+            ["Name"] = episode.Name,
+            ["Type"] = "Episode",
+            ["MediaType"] = "Video",
+            ["SeriesId"] = episode.SeriesId,
+            ["SeasonId"] = episode.SeasonId,
+            ["IsFolder"] = false,
+            ["RunTimeTicks"] = episode.RunTimeTicks,
+            ["Path"] = "/media/tv/" + episode.SeriesId + "/" + episode.Id + ".mp4",
+            ["Container"] = "mp4",
+        };
+        if (episode.SeasonNumber is { } season) json["ParentIndexNumber"] = season;
+        if (episode.EpisodeNumber is { } number) json["IndexNumber"] = number;
+        return json;
+    }
+
     private void ServeItem(HttpListenerContext context, string itemId)
     {
         MockItem? item = _items.FirstOrDefault(candidate => string.Equals(candidate.Id, itemId, StringComparison.Ordinal));
-        if (item is null)
+        if (item is not null)
         {
-            WriteJson(context, 404, new JsonObject { ["Error"] = "Unknown item " + itemId }.ToJsonString());
+            WriteJson(context, 200, ItemJson(item).ToJsonString());
             return;
         }
 
-        WriteJson(context, 200, ItemJson(item).ToJsonString());
+        // An episode is an item too: the detail route has to answer for an episode id, or the
+        // auto-advance fallback that reads SeriesId back off the finished item could not be exercised.
+        MockEpisode? episode = _episodes.FirstOrDefault(candidate => string.Equals(candidate.Id, itemId, StringComparison.Ordinal));
+        if (episode is not null)
+        {
+            WriteJson(context, 200, EpisodeJson(episode).ToJsonString());
+            return;
+        }
+
+        WriteJson(context, 404, new JsonObject { ["Error"] = "Unknown item " + itemId }.ToJsonString());
     }
 
     /// <summary>Whether an item query asked for favourites only (<c>Filters=IsFavorite</c>).</summary>

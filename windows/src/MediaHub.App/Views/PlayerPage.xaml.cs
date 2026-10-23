@@ -1051,7 +1051,7 @@ public sealed partial class PlayerPage : Page
             return;
         }
 
-        if (_request?.ServerId is not { } serverId || _request.SeriesId is not { } seriesId || _request.ItemId is not { } itemId)
+        if (_request?.ServerId is not { } serverId || _request.ItemId is not { } itemId)
             return;
 
         try
@@ -1060,6 +1060,22 @@ public sealed partial class PlayerPage : Page
             if (handle?.Library is null) return;
 
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+            // Most requests now carry the series, but the player must not turn "this request predates
+            // that field" into "this item has no next episode": the series is looked up from the item
+            // itself before auto-advance is given up on.
+            string? seriesId = _request.SeriesId;
+            if (string.IsNullOrEmpty(seriesId) && handle.Detail is not null)
+            {
+                MediaDetail detail = await handle.Detail.GetItemDetailAsync(itemId, timeout.Token);
+                seriesId = detail.Item.SeriesId;
+            }
+            if (string.IsNullOrEmpty(seriesId))
+            {
+                Services.StartupTrace.Write("queue:no-series");
+                return;
+            }
+
             Episode? next = await handle.Library.GetNextEpisodeAsync(seriesId, itemId, timeout.Token);
             if (next is null)
             {

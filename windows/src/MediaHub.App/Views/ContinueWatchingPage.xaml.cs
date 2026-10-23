@@ -101,6 +101,11 @@ public sealed partial class ContinueWatchingPage : Page
             ItemId = row.ItemId,
             Title = row.Title,
             StartPositionTicks = row.PositionTicks,
+            // Resume and auto-advance are the same session: the series identity has to survive the
+            // jump from the continue-watching card into the player.
+            SeriesId = row.Card.Item.SeriesId,
+            SeasonNumber = row.Card.Item.SeasonNumber,
+            EpisodeNumber = row.Card.Item.EpisodeNumber,
         });
     }
 }
