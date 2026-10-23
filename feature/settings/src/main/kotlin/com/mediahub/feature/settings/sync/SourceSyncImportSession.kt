@@ -165,7 +165,21 @@ class SourceSyncImportSession(
             unsupportedCount = result.unsupportedCount,
             failedCount = result.failedCount,
             appliedTitles = result.applied.map { change -> titleOf(change.candidate) },
+            appliedSources = result.applied.map { change ->
+                appliedSourceOf(change.serverId, change.candidate)
+            },
         )
+
+    /** 一条落库来源：结果页据此渲染逐源「补录并验证」（W6-H）。 */
+    private fun appliedSourceOf(
+        serverId: String,
+        candidate: SourceSyncCandidate,
+    ): SourceSyncAppliedSource = SourceSyncAppliedSource(
+        serverId = serverId,
+        title = titleOf(candidate),
+        sourceTypeRaw = candidate.sourceType?.trim()?.takeIf { it.isNotEmpty() },
+        syncSourceId = candidate.syncSourceId?.trim()?.takeIf { it.isNotEmpty() },
+    )
 
     private fun titleOf(candidate: SourceSyncCandidate): String =
         candidate.displayName?.trim()?.takeIf { it.isNotEmpty() }
