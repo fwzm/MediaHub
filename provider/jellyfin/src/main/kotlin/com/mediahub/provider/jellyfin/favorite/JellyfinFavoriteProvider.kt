@@ -3,11 +3,14 @@ package com.mediahub.provider.jellyfin.favorite
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.security.TokenStore
+import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaServer
 import com.mediahub.provider.api.MediaFavoriteProvider
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.jellyfin.JellyfinProviderSupport
 import com.mediahub.provider.jellyfin.api.JellyfinApiClient
+import com.mediahub.provider.jellyfin.mapper.JellyfinImageMapper
+import com.mediahub.provider.jellyfin.mapper.JellyfinItemMapper
 import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
 import kotlinx.coroutines.CancellationException
 
@@ -59,6 +62,31 @@ class JellyfinFavoriteProvider(
         val (token, userId) = JellyfinProviderSupport.requireSession(server, tokenStore, sessionStore)
         return try {
             readBack(token, userId, itemId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw JellyfinProviderSupport.mapError(server.id, e)
+        }
+    }
+
+    /**
+     * 收藏列表（task-25 / A2）：与写/读回不同，列表读取走 ADR-039 现代路由
+     * `/Items?UserId=…&Filters=IsFavorite`；客户端仍按 [MediaItem.isFavorite] 兜底过滤。
+     * `limit <= 0` 直接返回空列表且不发 HTTP。
+     */
+    override suspend fun listFavorites(limit: Int): List<MediaItem> {
+        if (limit <= 0) return emptyList()
+        val capped = limit.coerceAtMost(MediaFavoriteProvider.MAX_FAVORITES_LIMIT)
+        val (token, userId) = JellyfinProviderSupport.requireSession(server, tokenStore, sessionStore)
+        return try {
+            api.getFavoriteItems(token, userId, capped).items
+                .mapNotNull { dto ->
+                    JellyfinItemMapper.map(dto, server.id)?.let { item ->
+                        JellyfinImageMapper.enrich(item, api, dto.imageTags, dto.backdropImageTags)
+                    }
+                }
+                .filter { it.isFavorite }
+                .distinctBy { it.id }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

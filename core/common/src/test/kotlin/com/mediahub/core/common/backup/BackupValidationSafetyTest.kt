@@ -5,13 +5,16 @@ import org.junit.Test
 
 /** Authenticated malformed input is constructed independently of the production exporter. */
 internal fun uncheckedBackup(payload: BackupDtos.BackupPayload, password: CharArray): ByteArray {
+    // 信封版本必须与载荷 manifest 一致：import 会校验「内外版本一致」(BackupSerializer.kt:273)，
+    // 写死 1 会让 v2 载荷被判 Corrupted（task-25 版本升级后暴露）。
+    val version = payload.manifest.formatVersion
     val salt = BackupCrypto.randomSalt()
     val key = BackupCrypto.deriveKey(password, salt, 10_000, 256)
     val nonce = BackupCrypto.randomNonce()
-    val aad = BackupCrypto.aadFor("MHBK", 1, key.params.algorithm, 10_000)
+    val aad = BackupCrypto.aadFor("MHBK", version, key.params.algorithm, 10_000)
     val encrypted = BackupCrypto.encrypt(BackupDtos.encodePayload(payload).toByteArray(), key.key, nonce, aad)
     return BackupFileFormat.encodeEnvelope(BackupFileFormat.Envelope(
-        "MHBK", 1, key.params.algorithm, BackupFileFormat.encodeB64(salt), 10_000, 256,
+        "MHBK", version, key.params.algorithm, BackupFileFormat.encodeB64(salt), 10_000, 256,
         BackupFileFormat.encodeB64(nonce), BackupFileFormat.encodeB64(encrypted),
     )).toByteArray()
 }
@@ -29,6 +32,14 @@ class BackupValidationSafetyTest {
             mapOf("servers" to 1, "progress" to 0, "preferences" to 1)),
         servers = listOf(server()), preferences = BackupDtos.PreferencesDto(),
     )
+    /** 当前格式版本（payload() 保持 v1 原样，用于验证旧文件仍可导入）。 */
+    private fun currentPayload() = payload().copy(
+        manifest = payload().manifest.copy(
+            formatVersion = BackupCrypto.FORMAT_VERSION,
+            minimumReaderVersion = BackupCrypto.MINIMUM_READER_VERSION,
+        ),
+    )
+
     private fun imported(payload: BackupDtos.BackupPayload) =
         BackupSerializer.import(uncheckedBackup(payload, password), password)
 
@@ -48,7 +59,7 @@ class BackupValidationSafetyTest {
     }
 
     @Test fun `local server without endpoints can round trip`() {
-        val local = payload().copy(servers = listOf(server().copy(type = "LOCAL", endpoints = emptyList())))
+        val local = currentPayload().copy(servers = listOf(server().copy(type = "LOCAL", endpoints = emptyList())))
         assertTrue(BackupSerializer.import(BackupSerializer.export(local, password), password) is BackupSerializer.ImportResult.Ok)
     }
 

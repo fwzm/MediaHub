@@ -161,7 +161,8 @@ class BackupRepositoryTest {
 
     private fun BackupDtosBackupManifest(servers: Int, progress: Int, prefs: Boolean) =
         com.mediahub.core.common.backup.BackupFileFormat.Manifest(
-            formatVersion = 1, minimumReaderVersion = 1,
+            formatVersion = com.mediahub.core.common.backup.BackupCrypto.FORMAT_VERSION,
+            minimumReaderVersion = com.mediahub.core.common.backup.BackupCrypto.MINIMUM_READER_VERSION,
             appVersion = "test", createdAtEpochMs = 0,
             includedSections = listOf("servers", "progress", "preferences"),
             recordCounts = mapOf("servers" to servers, "progress" to progress, "preferences" to if (prefs) 1 else 0),
@@ -526,7 +527,8 @@ class BackupRepositoryTest {
         assertEquals("名称保真", "My Server", validated.servers[0].name)
         assertEquals("账号保真", "alice", validated.servers[0].username)
         assertEquals("播放记录 1 条", 1, validated.progress.size)
-        assertEquals("基线版本", 1, validated.baselineFormatVersion)
+        // 导出永远写当前格式版本（task-25 起为 2）；断言跟随常量，避免版本升级后失真
+        assertEquals("基线版本", com.mediahub.core.common.backup.BackupCrypto.FORMAT_VERSION, validated.baselineFormatVersion)
         assertEquals("导出侧 appVersion 保真", "9.9.9-test", validated.baselineAppVersion)
     }
 

@@ -139,6 +139,8 @@ class ProviderHandleTest {
     private fun favoriteProvider() = object : MediaFavoriteProvider {
         override suspend fun setFavorite(itemId: String, favorite: Boolean): Boolean = favorite
         override suspend fun isFavorite(itemId: String): Boolean = false
+        // task-25 / A2：接口新增列表能力后 fake 必须补齐（不放宽接口约束）
+        override suspend fun listFavorites(limit: Int): List<com.mediahub.model.MediaItem> = emptyList()
     }
 
     @Test

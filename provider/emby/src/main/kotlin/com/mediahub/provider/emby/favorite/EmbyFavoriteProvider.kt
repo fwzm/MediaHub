@@ -3,11 +3,14 @@ package com.mediahub.provider.emby.favorite
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.security.TokenStore
+import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaServer
 import com.mediahub.provider.api.MediaFavoriteProvider
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.emby.EmbyProviderSupport
 import com.mediahub.provider.emby.api.EmbyApiClient
+import com.mediahub.provider.emby.mapper.EmbyImageMapper
+import com.mediahub.provider.emby.mapper.EmbyMediaItemMapper
 import com.mediahub.provider.emby.session.EmbySessionStore
 import kotlinx.coroutines.CancellationException
 
@@ -57,6 +60,33 @@ class EmbyFavoriteProvider(
         val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
         return try {
             readBack(token, userId, itemId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw EmbyProviderSupport.mapError(server.id, e)
+        }
+    }
+
+    /**
+     * 收藏列表（task-25 / A2）：服务端 `Filters=IsFavorite` 只是优化，
+     * 客户端仍按 [MediaItem.isFavorite] 兜底过滤，避免服务器忽略筛选时
+     * 把未收藏条目混进「我的收藏」。
+     *
+     * `limit <= 0` 直接返回空列表且不发 HTTP；上限 [MediaFavoriteProvider.MAX_FAVORITES_LIMIT]。
+     */
+    override suspend fun listFavorites(limit: Int): List<MediaItem> {
+        if (limit <= 0) return emptyList()
+        val capped = limit.coerceAtMost(MediaFavoriteProvider.MAX_FAVORITES_LIMIT)
+        val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
+        return try {
+            api.getFavoriteItems(token, userId, capped).items
+                .mapNotNull { dto ->
+                    EmbyMediaItemMapper.map(dto, server.id)?.let { item ->
+                        EmbyImageMapper.enrich(item, api, dto.imageTags, dto.backdropImageTags)
+                    }
+                }
+                .filter { it.isFavorite }
+                .distinctBy { it.id }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
