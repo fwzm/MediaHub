@@ -117,10 +117,20 @@ jobs:
       # committed documents untouched) and then assert the whole surface against it. The five LGPL
       # dependency rows that cannot quote a licence stay warnings on purpose: the default flavour is
       # GPL and does not ship those DLLs, so failing on them would be noise rather than a signal.
+      # MediaHub.EngineProbe and MediaHub.ResumeProbe are deliberately kept out of the solution (they are
+      # thin probe hosts, not shipped projects), so the `dotnet restore MediaHub.Windows.sln` earlier in
+      # this job never writes their obj/project.assets.json. license-report.ps1 treats a missing assets
+      # file as INCOMPLETE and exits non-zero, which is what turned run 40041056971 red on 4f8038f while
+      # the same command passed locally (a workstation has stale build output). Restore both projects
+      # explicitly first so the report is complete: 13 projects, 49 rows, 29 packages.
       - name: Licence report (evidence only, no docs rewrite)
         shell: pwsh
         working-directory: windows
-        run: pwsh -NoProfile -File tools/license-report.ps1 -OutDir artifacts/license-report -SkipDocs
+        run: |
+          $ErrorActionPreference = "Stop"
+          dotnet restore src/MediaHub.EngineProbe/MediaHub.EngineProbe.csproj
+          dotnet restore src/MediaHub.ResumeProbe/MediaHub.ResumeProbe.csproj
+          pwsh -NoProfile -File tools/license-report.ps1 -OutDir artifacts/license-report -SkipDocs
 
       - name: Licence surface guard (notices / SBOM / project drift)
         shell: pwsh
