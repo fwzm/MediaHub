@@ -58,6 +58,11 @@ class AndroidSourceSyncServiceRoomTest {
         javaClass.getResourceAsStream("/sync/windows-envelope-device-a.json")!!
             .use { it.readBytes().decodeToString() }
 
+    private fun recordJson(id: String, revision: Long): String =
+        "{\"syncSourceId\":\"" + id + "\",\"sourceType\":\"emby\",\"displayName\":\"来源 " + id + "\"," +
+            "\"endpoints\":[{\"url\":\"http://nas-a:8096/emby\",\"isPrimary\":true,\"enabled\":true}]," +
+            "\"recordRevision\":" + revision + "}"
+
     private fun legacyServer(name: String = "旧名"): MediaServer = MediaServer(
         id = "",
         name = name,
@@ -106,6 +111,21 @@ class AndroidSourceSyncServiceRoomTest {
         assertEquals(2, all.size)
         assertTrue(all.none { it.syncSourceTypeRaw == "quantum-nas" })
         assertNull(runBlocking { db.serverDao().getBySyncSourceId("local-76e5f67669136fae") })
+    }
+
+    @Test
+    fun a_duplicate_sync_source_id_envelope_is_rejected_before_any_row_is_written() {
+        // W6J-1 的真实 Room 证据：去重发生在规划之前，因此根本走不到
+        // index_servers_sync_source_id 这条唯一约束，也不会留下"第一条已提交、第二条崩"的半截状态。
+        val duplicate = "{\"schemaVersion\":1,\"minimumReaderVersion\":1,\"deviceId\":\"device-windows\"," +
+            "\"snapshotId\":\"snap-dup\",\"createdAtEpochMs\":1700000000000,\"capabilities\":{},\"sources\":[" +
+            recordJson("local-dup", 1L) + "," + recordJson("local-dup", 2L) + "],\"deletions\":[]}"
+
+        val result = runBlocking { service.importEnvelope(duplicate) }
+
+        assertTrue(result.isRejected)
+        assertEquals(AndroidSourceSyncService.DUPLICATE_SYNC_SOURCE_ID, result.rejectedReason)
+        assertEquals(0, runBlocking { db.serverDao().count() })
     }
 
     @Test
