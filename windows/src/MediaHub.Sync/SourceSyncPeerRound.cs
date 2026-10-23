@@ -207,15 +207,17 @@ public sealed class SourceSyncPeerRound
     }
 
     /// <summary>Applies a preview through the gate; only <paramref name="allowedIds"/> can turn a proposal into a write.</summary>
+    /// <param name="skippedIds">Identities the caller explicitly skipped; a skip outranks an allow for the same id.</param>
     public Task<SourceSyncApplyReport> ApplyAsync(
         SourceSyncApplyPreview preview,
         SourceSyncRecordWriter writer,
         IReadOnlyList<string>? allowedIds = null,
+        IReadOnlyList<string>? skippedIds = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(preview);
         ArgumentNullException.ThrowIfNull(writer);
-        return _inbox.Round.ApplyAsync(preview, allowedIds, writer, cancellationToken);
+        return _inbox.Round.ApplyAsync(preview, allowedIds, writer, skippedIds, cancellationToken);
     }
 
     /// <summary>Serializes an envelope and sends it to a loopback peer.</summary>

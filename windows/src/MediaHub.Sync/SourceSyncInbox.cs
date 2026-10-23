@@ -147,7 +147,7 @@ public sealed class SourceSyncInbox
         {
             SourceSyncApplyPreview preview = Round.Preview(envelope);
             SourceSyncApplyReport report = await Round
-                .ApplyAsync(preview, allowedIds, writer, cancellationToken)
+                .ApplyAsync(preview, allowedIds, writer, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return SourceSyncInboxResult.Ok(envelope, preview, report, 0, payload.Length);
         }

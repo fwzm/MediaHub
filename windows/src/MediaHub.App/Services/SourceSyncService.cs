@@ -362,6 +362,7 @@ public sealed class SourceSyncService
     public async Task<SourceSyncApplyReport> ApplyApprovedAsync(
         SourceSyncApplyPreview preview,
         IReadOnlyList<string>? allowedIds,
+        IReadOnlyList<string>? skippedIds = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(preview);
@@ -369,8 +370,10 @@ public sealed class SourceSyncService
         // The round writes in plan order, advances the stored baseline with exactly the records it wrote, and
         // reports the baseline as part of the result, so "the same envelope applied twice is a no-op" can be
         // proven from the app layer and not only from a test double.
+        // The skipped list is what makes "the user unticked this row" mean something: without it, a create that
+        // needs no approval is applied even though the page showed it as skipped.
         SourceSyncApplyReport result = await _round
-            .ApplyAsync(preview, allowedIds, WriteApprovedRecordAsync, ct)
+            .ApplyAsync(preview, allowedIds, WriteApprovedRecordAsync, skippedIds, ct)
             .ConfigureAwait(true);
 
         if (result.Withheld > 0)

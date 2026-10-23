@@ -340,14 +340,13 @@ public sealed class SyncPagePresenterTests : IDisposable
     }
 
     [Fact]
-    public async Task Apply_KnownGap_TheRoundStillWritesAnEntryThePageSkipped()
+    public async Task Apply_SkipThePageRecordedIsHonoured()
     {
-        // KNOWN GAP, reported to the lead: ApplyAsync receives only the allow list, and SourceSyncApprovalGate treats
-        // an item that is absent from the decisions as allowed unless it requires approval. A new source the user
-        // skipped is therefore still written today. The fix belongs to SourceSyncImportRound, which this task must
-        // not change, so the test pins the current contract: when that layer learns about skips this assertion flips.
+        // A create needs no approval, so its default verdict is "apply". If only the allow list travelled, a row the
+        // page showed as skipped would be written anyway — the skip list is what makes the row's verdict real.
         var local = new InMemoryLocalSourceStore();
-        var round = new SourceSyncImportRound(local);
+        var baselines = new InMemorySourceSyncBaselineStore();
+        var round = new SourceSyncImportRound(local, baselines);
         SourceSyncApplyPreview preview = round.Preview(Envelope(SenderId, Record("src-1")));
 
         var presenter = new SyncApplyPresenter();
@@ -355,13 +354,61 @@ public sealed class SyncPagePresenterTests : IDisposable
         presenter.Skip("src-1");
 
         Assert.Empty(presenter.AllowedIds());
+        Assert.Equal("src-1", Assert.Single(presenter.SkippedIds()));
         Assert.False(presenter.Gate().CanApply);
         Assert.Null(presenter.Confirm());
 
-        SourceSyncApplyReport report = await round.ApplyAsync(preview, presenter.AllowedIds(), Writer(local));
+        var attempted = new List<string>();
+        SourceSyncApplyReport report = await round.ApplyAsync(
+            preview,
+            presenter.AllowedIds(),
+            (item, _) =>
+            {
+                attempted.Add(item.SyncSourceId);
+                return Task.FromResult(SourceSyncWriteOutcome.Written("written"));
+            },
+            presenter.SkippedIds());
 
-        Assert.Equal(1, report.Applied);
-        Assert.Single(local.GetAll());
+        Assert.Empty(attempted);
+        Assert.Equal(0, report.Applied);
+        Assert.Equal(1, report.Skipped);
+        Assert.Equal(0, report.Withheld);
+        Assert.False(report.BaselineUpdated);
+        Assert.Empty(local.GetAll());
+    }
+
+    [Fact]
+    public void SkippedIds_ListsOnlyWhatTheUserTickedOff()
+    {
+        var presenter = new SyncApplyPresenter();
+        presenter.Load(PreviewOf(Envelope(SenderId, Record("src-1"), Record("src-2"))));
+
+        presenter.Skip("src-2");
+
+        // An untouched row keeps the default verdict (apply, no approval needed), so it lands in the allow list and
+        // must not also be reported as a skip — a skip list that named every row would just be a second allow list.
+        Assert.Equal("src-2", Assert.Single(presenter.SkippedIds()));
+        Assert.Equal("src-1", Assert.Single(presenter.AllowedIds()));
+    }
+
+    [Fact]
+    public void SkippedIds_NeverNamesAWithheldEntry()
+    {
+        // Withheld entries are refused before the decision table is consulted; listing one as a skip would suggest a
+        // decision could release it.
+        SourceSyncApplyPreview preview = PreviewOf(Envelope(
+            SenderId,
+            Record("src-1"),
+            Record("src-secret") with { Secrets = JsonDocument.Parse("{}").RootElement.Clone() }));
+        var presenter = new SyncApplyPresenter();
+        presenter.Load(preview);
+        presenter.Skip("src-secret");
+
+        Assert.DoesNotContain("src-secret", presenter.SkippedIds());
+        Assert.Contains(
+            SyncRoundReasons.SecretsRequireApproval,
+            presenter.Gate().BlockingReasons,
+            StringComparer.Ordinal);
     }
 
     // ---- pairing: an offline link, three states, and forgetting -------------------

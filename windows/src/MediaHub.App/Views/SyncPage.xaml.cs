@@ -780,8 +780,11 @@ public sealed partial class SyncPage : Page
             ApplyBusy.IsActive = true;
             ApplyConfirmButton.IsEnabled = false;
 
+            // Both lists travel: the allowed ids are what may be written, and the skipped ids are the rows the
+            // user unticked. The round lets a skip win over an allow, so a double click cannot write a skipped row.
             IReadOnlyList<string> allowed = Presenter.Apply.AllowedIds();
-            SourceSyncApplyReport result = await App.Services.Sync.ApplyApprovedAsync(preview, allowed);
+            IReadOnlyList<string> skipped = Presenter.Apply.SkippedIds();
+            SourceSyncApplyReport result = await App.Services.Sync.ApplyApprovedAsync(preview, allowed, skipped);
 
             // The result line carries three things: the three counts, whether the stored baseline moved (that is what
             // makes a second import of the same envelope a no-op), and the fixed sentence that a write is not a sign-in.

@@ -600,6 +600,28 @@ public sealed class SourceSyncPeerRoundTests : IDisposable
         Assert.False(File.Exists(receiverBaselines.FilePath), "a refused write must not advance the baseline");
     }
 
+    [Fact]
+    public async Task ThePeerRoundForwardsSkippedIdsToTheRound()
+    {
+        // The app reaches the round through SourceSyncPeerRound; if the skip list stopped at this boundary, a row
+        // the page shows as skipped would be written one layer down.
+        InMemoryLocalSourceStore receiverStore = new();
+        SourceSyncPeerRound sender = new(SenderId, SenderStore("Home"));
+        SourceSyncPeerRound receiver = new(ReceiverId, receiverStore);
+        SourceSyncApplyPreview preview = receiver.Preview(sender.Export());
+        Assert.Equal(SourceSyncAction.Create, Assert.Single(preview.Items).Action);
+
+        SourceSyncApplyReport report = await receiver.ApplyAsync(
+            preview,
+            Writer(receiverStore),
+            allowedIds: [],
+            skippedIds: ["src-1"]);
+
+        Assert.Equal(0, report.Applied);
+        Assert.Equal(1, report.Skipped);
+        AssertCount(0, receiverStore.GetAll());
+    }
+
     // ---- helpers -------------------------------------------------------------------------------------
 
     private static void AssertCount<T>(int expected, IReadOnlyCollection<T> items)

@@ -21,6 +21,7 @@ App 只做装配，round 承担全部可测逻辑——同一个实现被应用�
 - **预览不写入**：`Preview()` 不写文件、不分配身份、不动基线，只读一次基线用来告诉用户「这是全量还是增量」。
 - **应用必须逐条批准**：默认裁决来自 `SourceSyncApprovalGate`；`secrets-require-approval` 一类即使显式 Allow 也不会写入（`SecretsAreWithheldEvenWhenTheUserAllowsThem`）。
 - **基线只记真正写入的条目**：writer 返回 `Refused` 或抛 `IOException/UnauthorizedAccessException/InvalidOperationException` 的条目不计入基线（`AWriterThatRefusesLeavesTheBaselineAlone`），下一次导入仍会重新提议它。
+- **显式 skip 绝不写入**：`ApplyAsync(preview, allowedIds, writer, skippedIds, ct)` 的 `skippedIds` 是页面记录的「用户主动跳过」；它与 `allowedIds` 同时命中同一个 syncSourceId 时 **skip 胜**（gate 每个身份取最后一条裁决，round 把 skip 追加在 allow 之后），因此一次重复点击也不会把用户跳过的那条写进本机（W6-21）。
 - **删除不进基线**：对端声明删除时 writer 收到 `record = null`（`DeletionsReachTheWriterAsARecordlessEntry` 意义上的 `DeletionsReachTheWriterAsANullRecord`），删除没有 record 可存，因此事后重建同名来源仍被视为新建。
 - **基线写入失败不崩页面**：`IOException` / `UnauthorizedAccessException` 转成 warning 码 `baseline-write-failed`；revision 单调守卫拒绝时转成 `baseline-rejected:<n>:<reason>`，二者都渲染进结果行的提示段。
 - **损坏基线的降级**：store 把坏文件隔离成 `sync-baseline.corrupt-<ts>.json` 并令 `LoadError` 非空；round 据此把预览标成「全量」（`IsFullSnapshot = true`），页面弹 Warning「本机基线不可用 … 本次按全量计划预览」，写入成功后重建基线。

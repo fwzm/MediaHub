@@ -341,6 +341,25 @@ public sealed class SyncApplyPresenter
         return ids;
     }
 
+    /// <summary>The ids the apply call must not write, in gate order.</summary>
+    /// <remarks>
+    /// An allow list alone cannot express a skip: a create that needs no approval is applied even when the user
+    /// never allowed it, so the rows the page shows as skipped have to travel separately and be honoured.
+    /// Entries the gate withholds are not listed here — they are refused before the decision table is consulted,
+    /// and a decision list must never be able to smuggle one of them in.
+    /// </remarks>
+    public IReadOnlyList<string> SkippedIds()
+    {
+        SourceSyncApprovalResult gate = Gate();
+        var ids = new List<string>(gate.Skipped.Count);
+        foreach (SourceSyncApprovalItem item in gate.Skipped)
+        {
+            ids.Add(item.SyncSourceId);
+        }
+
+        return ids;
+    }
+
     /// <summary>Builds the bindable state of the section.</summary>
     public SyncApplyView View()
     {

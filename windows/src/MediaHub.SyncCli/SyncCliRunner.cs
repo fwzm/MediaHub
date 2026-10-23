@@ -867,7 +867,7 @@ public sealed class SyncCliRunner
         SourceSyncPeerRound receiver = new(DeviceIdOf(invocation), invocation.Apply ? sources : ReadOnlyCopy(sources), baselines);
         SourceSyncApplyPreview preview = receiver.Preview(envelope);
         SourceSyncApplyReport? report = invocation.Apply
-            ? await receiver.ApplyAsync(preview, TransferWriter(sources), null, CancellationToken.None).ConfigureAwait(false)
+            ? await receiver.ApplyAsync(preview, TransferWriter(sources), null, cancellationToken: CancellationToken.None).ConfigureAwait(false)
             : null;
 
         TransferOutcome outcome = new(envelope.DeviceId, receiver.DeviceId, received.Bytes, received.FrameCount, preview, report, null, null);
@@ -1006,7 +1006,7 @@ public sealed class SyncCliRunner
 
         SourceSyncApplyPreview preview = receiver.Preview(envelope);
         SourceSyncApplyReport? report = apply
-            ? await receiver.ApplyAsync(preview, writer, null, CancellationToken.None).ConfigureAwait(false)
+            ? await receiver.ApplyAsync(preview, writer, null, cancellationToken: CancellationToken.None).ConfigureAwait(false)
             : null;
         return new TransferOutcome(envelope.DeviceId, receiver.DeviceId, received.Bytes, received.FrameCount, preview, report, null, null);
     }

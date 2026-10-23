@@ -453,6 +453,138 @@ public sealed class SourceSyncImportRoundTests
         });
     }
 
+    // ---- explicit skips: a row the page shows as skipped must never be written -------------------------
+
+    [Fact]
+    public async Task AnExplicitSkipIsHonouredEvenWithoutAnAllowList()
+    {
+        // A create needs no approval, so its default verdict is "apply". If only the allow list travelled, a row
+        // the page showed as skipped would still be written; the skip list is what makes that verdict real.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncApplyPreview preview = round.Preview(Envelope(Record("local-aaaa", "webdav", "http://nas.local:5005", "NAS")));
+            Assert.Equal(SourceSyncAction.Create, Assert.Single(preview.Items).Action);
+
+            var seen = new List<SourceRecord?>();
+            SourceSyncApplyReport result = await round.ApplyAsync(preview, [], Writer(store, seen), ["local-aaaa"]);
+
+            Assert.Empty(seen);
+            Assert.Equal(0, result.Applied);
+            Assert.Equal(1, result.Skipped);
+            Assert.Empty(store.GetAll());
+            Assert.Equal(0, store.WriteCount);
+        });
+    }
+
+    [Fact]
+    public async Task ASkipOutranksAnAllowForTheSameIdentity()
+    {
+        // Both lists can name the same id after a double click. The gate keeps the last decision per identity and
+        // the round appends the skips last, so "do not write this" wins over "write this".
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncApplyPreview preview = round.Preview(Envelope(Record("local-aaaa", "webdav", "http://nas.local:5005", "NAS")));
+
+            var seen = new List<SourceRecord?>();
+            SourceSyncApplyReport result = await round.ApplyAsync(preview, ["local-aaaa"], Writer(store, seen), ["local-aaaa"]);
+
+            Assert.Empty(seen);
+            Assert.Equal(0, result.Applied);
+            Assert.Equal(1, result.Skipped);
+            Assert.Empty(store.GetAll());
+        });
+    }
+
+    [Fact]
+    public async Task WithoutSkippedIdsTheDefaultVerdictStillApplies()
+    {
+        // CLI callers pass no skip list and keep the previous behaviour: an entry that needs no approval is applied.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncApplyPreview preview = round.Preview(Envelope(Record("local-aaaa", "webdav", "http://nas.local:5005", "NAS")));
+
+            SourceSyncApplyReport result = await round.ApplyAsync(preview, [], Writer(store));
+
+            Assert.Equal(1, result.Applied);
+            Assert.Equal(0, result.Skipped);
+            Assert.Equal("NAS", Assert.Single(store.GetAll()).DisplayName);
+        });
+    }
+
+    [Fact]
+    public async Task ASkippedEntryIsCountedAsSkippedNotAsFailed()
+    {
+        // Skipped is the user's choice, withheld is a refusal: the report must not blur the two, and a skipped
+        // entry may not advance the baseline (otherwise the next import would treat it as already imported).
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var baselines = new FileSourceSyncBaselineStore(dir);
+            var round = new SourceSyncImportRound(store, baselines, () => baselines.LoadError);
+            SourceSyncApplyPreview preview = round.Preview(Envelope(Record("local-aaaa", "webdav", "http://nas.local:5005", "NAS")));
+
+            SourceSyncApplyReport result = await round.ApplyAsync(preview, [], Writer(store), ["local-aaaa"]);
+
+            Assert.Equal(0, result.Applied);
+            Assert.Equal(0, result.Withheld);
+            Assert.Equal(1, result.Skipped);
+            Assert.Equal(result.Skipped + result.Withheld, result.NotApplied);
+            Assert.Contains("跳过 1 条", result.Summary);
+            Assert.False(result.BaselineUpdated);
+            Assert.False(File.Exists(baselines.FilePath));
+        });
+    }
+
+    [Fact]
+    public async Task OnlyTheEntriesTheUserKeptAreWritten()
+    {
+        // The real shape of the screen: several rows, the user keeps one and skips the other.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncApplyPreview preview = round.Preview(Envelope(
+                Record("local-aaaa", "webdav", "http://nas.local:5005", "NAS"),
+                Record("local-bbbb", "smb", "smb://share.local/media", "Share")));
+            Assert.Equal(2, preview.Total);
+
+            SourceSyncApplyReport result = await round.ApplyAsync(
+                preview,
+                ["local-aaaa"],
+                Writer(store),
+                ["local-bbbb"]);
+
+            Assert.Equal(1, result.Applied);
+            Assert.Equal(1, result.Skipped);
+            LocalSourceRecord written = Assert.Single(store.GetAll());
+            Assert.Equal("local-aaaa", written.SyncSourceId);
+        });
+    }
+
+    [Fact]
+    public async Task ASkippedIdThatIsNotInTheEnvelopeChangesNothing()
+    {
+        // A stale skip list must not disturb the entries it does not mention.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncApplyPreview preview = round.Preview(Envelope(Record("local-aaaa", "webdav", "http://nas.local:5005", "NAS")));
+
+            SourceSyncApplyReport result = await round.ApplyAsync(preview, ["local-aaaa"], Writer(store), ["local-zzzz"]);
+
+            Assert.Equal(1, result.Applied);
+            Assert.Equal(0, result.Skipped);
+            Assert.Single(store.GetAll());
+        });
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static SourceSyncImportRound Round(ILocalSourceStore store, string directory)

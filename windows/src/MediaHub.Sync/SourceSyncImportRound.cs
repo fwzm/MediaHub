@@ -267,20 +267,27 @@ public sealed class SourceSyncImportRound
     /// <summary>
     /// Writes the entries the user allowed and advances the baseline with exactly those records.
     /// </summary>
+    /// <remarks>
+    /// An allow list on its own cannot carry a skip: an entry that needs no approval is applied by default, so
+    /// "the page showed this row and the user skipped it" has to travel as its own list. A skip always outranks
+    /// an allow for the same identity — the gate keeps the last decision per id, and the skips are appended last.
+    /// </remarks>
     /// <param name="preview">Result of <see cref="Preview"/>.</param>
     /// <param name="allowedIds">Identities the user explicitly allowed; everything else keeps the default verdict.</param>
     /// <param name="writer">App-layer writer; a null record means the peer stated a deletion.</param>
+    /// <param name="skippedIds">Identities the user explicitly skipped; never written, even when their default verdict is "apply".</param>
     /// <param name="cancellationToken">Cancels between entries, never mid-write.</param>
     public async Task<SourceSyncApplyReport> ApplyAsync(
         SourceSyncApplyPreview preview,
         IReadOnlyList<string>? allowedIds,
         SourceSyncRecordWriter writer,
+        IReadOnlyList<string>? skippedIds = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(preview);
         ArgumentNullException.ThrowIfNull(writer);
 
-        List<SourceSyncApprovalDecision> decisions = Decisions(allowedIds);
+        List<SourceSyncApprovalDecision> decisions = Decisions(allowedIds, skippedIds);
         SourceSyncApprovalResult gate = SourceSyncApprovalGate.Decide(preview.Items, decisions);
         var written = new List<SourceRecord>();
         int applied = 0;
@@ -363,7 +370,9 @@ public sealed class SourceSyncImportRound
         };
     }
 
-    private static List<SourceSyncApprovalDecision> Decisions(IReadOnlyList<string>? allowedIds)
+    private static List<SourceSyncApprovalDecision> Decisions(
+        IReadOnlyList<string>? allowedIds,
+        IReadOnlyList<string>? skippedIds = null)
     {
         var decisions = new List<SourceSyncApprovalDecision>();
         foreach (string? id in allowedIds ?? [])
@@ -371,6 +380,17 @@ public sealed class SourceSyncImportRound
             if (!string.IsNullOrWhiteSpace(id))
             {
                 decisions.Add(SourceSyncApprovalDecision.Allow(id));
+            }
+        }
+
+        // Appended after the allows on purpose: the gate takes the last decision per identity, so an id that
+        // arrives in both lists ends up skipped. The user saying "do not write this" must never be outranked by
+        // a default verdict or by a stale allow from the same screen.
+        foreach (string? id in skippedIds ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                decisions.Add(SourceSyncApprovalDecision.Skip(id));
             }
         }
 
