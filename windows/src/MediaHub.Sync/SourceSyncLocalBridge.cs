@@ -384,25 +384,10 @@ public sealed class SourceSyncLocalBridge
     private static string StoredUrl(SourceEndpoint endpoint)
         => SyncUrlNormalizer.Normalize(endpoint.Url) ?? endpoint.Url.Trim();
 
+    // Shared with the planner and the plan summary: one rule for "which address wins", so a record can never be
+    // planned against one endpoint and written with another.
     private static SourceEndpoint? SelectPrimaryEndpoint(SourceRecord record)
-    {
-        SourceEndpoint? primary = null;
-        SourceEndpoint? any = null;
-        foreach (SourceEndpoint endpoint in record.Endpoints)
-        {
-            if (any is null || endpoint.SortOrder < any.SortOrder)
-            {
-                any = endpoint;
-            }
-
-            if (endpoint.IsPrimary && (primary is null || endpoint.SortOrder < primary.SortOrder))
-            {
-                primary = endpoint;
-            }
-        }
-
-        return primary ?? any;
-    }
+        => SourceSyncEndpointPolicy.SelectPrimary(record);
 
     private static SourceRecord? FindIncoming(SourceSyncEnvelope remote, string? syncSourceId)
     {

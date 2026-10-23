@@ -19,7 +19,15 @@ public static class SourceSyncSessionReasons
 
     /// <summary>The envelope carried neither sources nor tombstones, so the peer has nothing to do with it.</summary>
     public const string EmptyEnvelope = "empty-envelope";
-}
+
+    /// <summary>Prefix of a warning that the stored baseline kept a newer entry than the round produced (count and reason follow).</summary>
+    public const string BaselineRejectedPrefix = "baseline-rejected";
+
+    /// <summary>
+    /// The import itself succeeded but its baseline could not be written. The next round degrades to a full
+    /// snapshot; reporting it keeps a silent persistence failure visible.
+    /// </summary>
+    public const string BaselineWriteFailed = SourceSyncBaselineStoreReasons.WriteFailed;}
 
 /// <summary>What one export produced: the envelope always, plain JSON or ciphertext depending on the passphrase.</summary>
 public sealed record ExportSession
@@ -87,6 +95,18 @@ public sealed record ImportResult
     public IReadOnlyList<SourceSyncImportEntry> Skipped { get; init; } = [];
 
     public IReadOnlyList<SourceSyncImportEntry> RequiresApproval { get; init; } = [];
+
+    /// <summary>Non-fatal problems from this round, in a stable order; empty when everything was persisted.</summary>
+    public IReadOnlyList<string> Warnings { get; init; } = [];
+
+    /// <summary>Addresses the inbound records carried that this client will not import (audit §5.4).</summary>
+    public IReadOnlyList<SourceSyncNotImportedEndpoint> NotImportedEndpoints { get; init; } = [];
+
+    /// <summary>How many addresses will not be imported.</summary>
+    public int NotImportedEndpointCount => NotImportedEndpoints.Count;
+
+    /// <summary>True when this import rewrote the stored baseline for the peer.</summary>
+    public bool BaselineUpdated { get; init; }
 
     public int AppliedCount => Applied.Count;
 

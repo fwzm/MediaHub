@@ -39,7 +39,16 @@ public sealed class SourceSyncSession
     /// <param name="store">Local source store; the only thing this class ever writes to.</param>
     /// <param name="deviceId">Wire identity of this device, stamped on every envelope it exports.</param>
     /// <param name="clock">Injected so tests can pin createdAtEpochMs; the default reads the wall clock once per export.</param>
-    public SourceSyncSession(ILocalSourceStore store, string deviceId, Func<DateTimeOffset>? clock = null)
+    /// <param name="baselineStore">
+    /// Where the per-peer baseline lives. When given, <see cref="Import"/> and <see cref="ImportPlain"/> load it
+    /// before planning and advance it after a successful round, which is what keeps the second round — including
+    /// one that happens after a restart — a no-op.
+    /// </param>
+    public SourceSyncSession(
+        ILocalSourceStore store,
+        string deviceId,
+        Func<DateTimeOffset>? clock = null,
+        ISourceSyncBaselineStore? baselineStore = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         if (string.IsNullOrWhiteSpace(deviceId))
@@ -50,11 +59,15 @@ public sealed class SourceSyncSession
         Store = store;
         DeviceId = deviceId.Trim();
         Bridge = new SourceSyncLocalBridge(store, DeviceId);
+        BaselineStore = baselineStore;
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
     }
 
     /// <summary>The local source store this session reads and writes.</summary>
     public ILocalSourceStore Store { get; }
+
+    /// <summary>Persistent per-peer baseline, when the caller supplied one.</summary>
+    public ISourceSyncBaselineStore? BaselineStore { get; }
 
     /// <summary>This device's wire identity.</summary>
     public string DeviceId { get; }
@@ -196,6 +209,12 @@ public sealed class SourceSyncSession
     {
         ArgumentNullException.ThrowIfNull(remote);
 
+        // What the peer had last round is what makes this round incremental. A caller may pass it explicitly;
+        // otherwise the persisted store answers, which is the whole point of W6-9: a restart must not turn an
+        // incremental round back into a full re-proposal. An empty or unreadable store degrades to "know nothing",
+        // which produces a full snapshot — noisy, but never a wrong guess.
+        baseline ??= LoadStoredBaseline(remote.DeviceId);
+
         // Credentials are re-sealed before anything is planned or written. A blob from another machine cannot be
         // opened here, and a half-imported round is worse than a refused one, so this either fully succeeds or the
         // whole import fails with zero writes.
@@ -266,13 +285,16 @@ public sealed class SourceSyncSession
             });
         }
 
-        return new ImportResult
+        var import = new ImportResult
         {
             Envelope = remote,
             Applied = appliedEntries,
             Skipped = skippedEntries,
             RequiresApproval = approvalEntries,
+            NotImportedEndpoints = result.Plan.NotImportedEndpoints,
         };
+
+        return PersistBaseline(import, remote, baseline);
     }
 
     /// <summary>Read-only preview of a bidirectional round against a shared baseline.</summary>
@@ -419,6 +441,101 @@ public sealed class SourceSyncSession
         }
 
         return envelope with { Sources = sources };
+    }
+
+    /// <summary>The stored baseline for one peer, or an empty one when this session has no store.</summary>
+    private SourceSyncBaseline LoadStoredBaseline(string? peerDeviceId)
+    {
+        if (BaselineStore is null || string.IsNullOrWhiteSpace(peerDeviceId))
+        {
+            return SourceSyncBaseline.Empty;
+        }
+
+        return BaselineStore.Load(peerDeviceId.Trim());
+    }
+
+    /// <summary>
+    /// Advances the stored baseline with exactly the records this round wrote, then stores it.
+    /// </summary>
+    /// <remarks>
+    /// Only applied records are folded in: a conflict, an unknown source type or a tombstone was not written, so
+    /// recording it as "the peer had this" would make the next round call the unwritten change up to date — the
+    /// silent data loss the whole review layer exists to prevent. A write failure is reported as a warning because
+    /// the source writes already happened; the next round degrades to a full snapshot instead of failing here.
+    /// </remarks>
+    private ImportResult PersistBaseline(ImportResult result, SourceSyncEnvelope remote, SourceSyncBaseline? baseline)
+    {
+        if (BaselineStore is null || !result.Succeeded)
+        {
+            return result;
+        }
+
+        var warnings = new List<string>(result.Warnings);
+        bool updated = false;
+        SourceSyncDigest applied = AppliedDigest(result, remote);
+        if (!applied.IsEmpty)
+        {
+            SourceSyncBaseline next = SourceSyncBaseline.Advance(baseline, applied, remote.SnapshotId);
+            try
+            {
+                SourceSyncBaselineSaveResult save = BaselineStore.Save(remote.DeviceId, next);
+                updated = save.Saved;
+                if (save.RejectedCount > 0)
+                {
+                    warnings.Add(
+                        SourceSyncSessionReasons.BaselineRejectedPrefix + ":" + save.RejectedCount + ":"
+                        + (save.Reason ?? ""));
+                }
+            }
+            catch (IOException)
+            {
+                warnings.Add(SourceSyncSessionReasons.BaselineWriteFailed);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                warnings.Add(SourceSyncSessionReasons.BaselineWriteFailed);
+            }
+        }
+
+        return result with { Warnings = warnings, BaselineUpdated = updated };
+    }
+
+    /// <summary>Builds a digest of the records this round actually wrote, so the baseline only learns those.</summary>
+    private static SourceSyncDigest AppliedDigest(ImportResult result, SourceSyncEnvelope remote)
+    {
+        var items = new List<SourceSyncDigestItem>();
+        foreach (SourceSyncImportEntry entry in result.Applied)
+        {
+            string key = entry.SyncSourceId.Trim();
+            SourceRecord? record = null;
+            foreach (SourceRecord candidate in remote.Sources)
+            {
+                if (string.Equals(candidate.SyncSourceId?.Trim(), key, StringComparison.OrdinalIgnoreCase))
+                {
+                    record = candidate;
+                    break;
+                }
+            }
+
+            if (record is null)
+            {
+                continue;
+            }
+
+            items.Add(new SourceSyncDigestItem
+            {
+                SyncSourceId = key,
+                Kind = SourceSyncChangeKind.Updated,
+                // The baseline records the peer's source, never its credential: credentials are re-sealed per
+                // machine on import and are not part of the content hash anyway.
+                Record = record with { Secrets = null },
+                RecordRevision = record.RecordRevision,
+                FieldVersion = record.FieldVersion,
+                ContentChanged = true,
+            });
+        }
+
+        return new SourceSyncDigest { Items = items };
     }
 
     private static SourceSyncImportEntry ToEntry(SourceSyncCandidate candidate) => new()

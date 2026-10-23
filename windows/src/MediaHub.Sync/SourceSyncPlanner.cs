@@ -51,7 +51,11 @@ public static class SourceSyncPlanner
             items.Add(PlanTombstone(tombstone, localSources));
         }
 
-        return new SourceSyncPlan { Items = items };
+        return new SourceSyncPlan
+        {
+            Items = items,
+            NotImportedEndpoints = SourceSyncEndpointPolicy.NotImported(envelope),
+        };
     }
 
     private static SourceSyncCandidate PlanRecord(SourceRecord record, IReadOnlyList<LocalSourceRecord> locals)
@@ -322,25 +326,11 @@ public static class SourceSyncPlanner
         return endpoint is null ? null : SyncUrlNormalizer.Normalize(endpoint.Url);
     }
 
+    // D2 allows exactly one primary. If a sender marks several, the smallest sortOrder wins and the sender's
+    // order decides ties — never an arbitrary pick. The policy owns this rule so the plan summary and the
+    // planner can never disagree about which address is the primary one.
     private static SourceEndpoint? SelectPrimaryEndpoint(SourceRecord record)
-    {
-        if (record.Endpoints.Count == 0)
-        {
-            return null;
-        }
-
-        // D2 allows exactly one primary. If a sender marks several, the smallest sortOrder wins and LINQ's
-        // stable ordering keeps the sender's order between equals — never an arbitrary pick.
-        SourceEndpoint? primary = record.Endpoints
-            .Where(endpoint => endpoint is not null && endpoint.IsPrimary)
-            .OrderBy(endpoint => endpoint.SortOrder)
-            .FirstOrDefault();
-
-        return primary ?? record.Endpoints
-            .Where(endpoint => endpoint is not null)
-            .OrderBy(endpoint => endpoint.SortOrder)
-            .FirstOrDefault();
-    }
+        => SourceSyncEndpointPolicy.SelectPrimary(record);
 
     private static bool SameSyncSourceId(string? left, string? right)
         => !string.IsNullOrWhiteSpace(left)

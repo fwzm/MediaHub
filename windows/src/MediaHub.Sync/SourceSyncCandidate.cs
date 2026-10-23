@@ -59,6 +59,15 @@ public sealed record SourceSyncPlan
     /// <summary>Record candidates first, in envelope order, then tombstone candidates.</summary>
     public IReadOnlyList<SourceSyncCandidate> Items { get; init; } = [];
 
+    /// <summary>
+    /// Addresses the inbound records carried that this client will not import, each with a stable reason. Windows
+    /// stores one address per source, so a multi-endpoint record loses the others — listed here instead of dropped.
+    /// </summary>
+    public IReadOnlyList<SourceSyncNotImportedEndpoint> NotImportedEndpoints { get; init; } = [];
+
+    /// <summary>How many addresses will not be imported; the number a plan summary shows.</summary>
+    public int NotImportedEndpointCount => NotImportedEndpoints.Count;
+
     /// <summary>Entries the user has to decide on before anything is written.</summary>
     public IReadOnlyList<SourceSyncCandidate> RequiringApproval
         => Items.Where(item => item.RequiresUserApproval).ToList();
