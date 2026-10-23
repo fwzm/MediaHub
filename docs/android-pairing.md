@@ -154,10 +154,123 @@ expires=1792800120000。生成器实测：载荷 JSON 精确 280 字节，帧 28
 
 ## 9. 未做项（明确不在本轮范围）
 
-- 真实 TLS 1.3 传输与指纹钉扎握手（只冻结了传输码表）。
+- 真实 TLS 1.3 传输与指纹钉扎握手（W6-G 已补回环 TCP 帧收发，TLS 与钉扎仍未做，见第 10 节）。
 - 二维码生成与相机扫码（CameraX 接入、权限流）。
 - challenge 一次性台账的持久化（Windows 有内存 PairingChallengeLedger；Android 未实现，跨进程重启会丢）。
 - PeerCard（对端名片）解析与 PairedDeviceObservation。
 - UI：配对页、候选地址选择、进度与失败提示。
 - 与 Windows 的端到端配对联调（本轮只做契约级互操作：同一份向量、同一批原因码与字节）。
 - 地址候选联调：Windows 用 NetworkInterface 枚举；Android 侧枚举待接入后再比同一份输出。
+
+## 10. 传输客户端（W6-G）
+
+### 10.1 能力边界（刻意收窄）
+
+- **只连回环**：127.0.0.1 / ::1 / localhost。其它目标在拨号前就被拒绝，码为 non-loopback-peer（Android 本地策略码）。
+- **不做 DNS**：只解析字面量地址。主机名的解析结果不受本端控制，放行等于把「只连回环」交给解析器决定。
+- **无 TLS 1.3、无证书指纹钉扎**：Windows 的 PairingTransportClient 有这两层；Android 本轮只对齐帧与失败码，没有握手。
+- **单次交换**：可选先写一帧请求再读一帧响应，读完立即关 socket，调用方不持有连接（也就没有长连接状态要管）。
+- **超时可配**：连接超时与读取超时分别可设；两类超时统一映射为合同码 peer-timeout。
+- **不串 UI**：客户端不依赖 Compose，也不读写任何界面状态。
+
+### 10.2 落点
+
+| 文件 | 内容 |
+| --- | --- |
+| core/common/src/main/kotlin/com/mediahub/core/common/pairing/PairingTransportClient.kt | 客户端：exchange（可选写请求 + 读响应）、fetchInvitation（帧 -> 载荷 -> 时效 -> challenge -> 指纹） |
+| core/common/src/main/kotlin/com/mediahub/core/common/pairing/PairingError.kt | 新增 object PairingClientReasons（NON_LOOPBACK_PEER）；合同码表未改 |
+| core/common/src/test/kotlin/com/mediahub/core/common/pairing/FakeWindowsPairingHost.kt | 测试替身：只绑 127.0.0.1:0，按 Windows 帧格式收发，可在断言线程检查工作线程异常 |
+| core/common/src/test/kotlin/com/mediahub/core/common/pairing/PairingTransportClientTest.kt | 21 例，覆盖收发与全部失败码 |
+| core/common/src/test/kotlin/com/mediahub/core/common/pairing/PairingTransportEndToEndTest.kt | 3 例，黄金信封 -> 规划三桶 |
+
+### 10.3 帧规则（与 PairingFrame 完全一致）
+
+4 字节大端长度 + 载荷；没有 magic、没有帧内版本（同第 4 节）；载荷长度 1..8192。
+读端拿到 4 字节头后先判长度再决定是否读体：长度 <= 0 或 > 8192 直接判 payload-invalid，**绝不为非法长度分配内存**；
+声明 8193 而主机一个体字节都不发时，客户端仍在毫秒级返回 payload-invalid（有用例钉住这一点，若实现读了体就会退化成 peer-timeout）。
+
+### 10.4 失败码表
+
+| 情形 | 码 | 归属 |
+| --- | --- | --- |
+| 连接被拒 / 连不上 | listener-failed | 合同码（PairingTransportReasons） |
+| 连接或读取超时 | peer-timeout | 合同码 |
+| 帧头不足 4 字节、长度 0、长度 > 8192、帧体不足、对端在读帧前关闭 | payload-invalid | 合同码 |
+| 帧内容不是合法配对载荷（malformed-json / missing-field:* / unsupported-version 等一律折叠） | payload-invalid | 合同码 |
+| 载荷已过期（expires <= now，等于即过期） | lifetime-exceeded | 合同码 |
+| 载荷 challenge 与本端期望不一致 | challenge-mismatch | 合同码（PairingReasons） |
+| 载荷公钥指纹与期望不符（仅当调用方传了期望指纹） | fingerprint-mismatch | 合同码 |
+| 目标地址不是回环 | non-loopback-peer | **Android 本地码**，不属于 ADR-S003 词汇，不可跨端比对 |
+
+校验顺序是刻意的：帧结构 -> 载荷解码 -> 时效 -> challenge -> 指纹。先证明字节是帧、再证明内容是载荷、再证明没过期、
+再证明是同一个邀请、最后才证明公钥；期望 challenge 为空时直接 bad-challenge 且根本不拨号。
+
+### 10.5 端到端：黄金信封 -> 规划三桶
+
+假主机发送的是 W6-A 冻结的黄金信封（core/common/src/test/resources/sync/windows-envelope-device-a.json，不是合成数据），
+客户端收帧后交给 SourceSyncCodec.decode 与 SourceSyncPlanner.plan，得到与 Windows CLI 相同的三桶：
+
+| 桶 | 本端规划值 | Windows CLI counts |
+| --- | --- | --- |
+| apply（create + update） | 2 | 2 |
+| requiresApproval（requiresUserApproval 或 unsupported） | 1 | 1 |
+| ignored（no-change + ignore-stale） | 1 | 1 |
+
+CLI 的 counts.requiresApproval 与规划器语义不同名：CLI 把 unknown-source-type 计入该桶，所以对照口径固定为
+`requiresUserApproval || action == UNSUPPORTED`（同 docs/android-source-sync.md 第 9 节）。字段层面另有断言：deviceId device-a、
+snapshotId 1b96e7eb417e4caeb27eb60f3d1acfc3、3 条来源（含 quantum-nas 未知类型逐字保留）、1 条墓碑（1760000000000）、
+capabilities.sourceTypes = [emby, jellyfin, quantum-nas]——即帧搬运没有丢字节。
+
+### 10.6 socket 已关闭 / 零残留怎么证明
+
+1. **客户端侧**：假主机在工作线程里读对端直到 EOF 才 countDown（FakeWindowsPairingHost.awaitEndOfStream -> awaitPeerClosed）；
+   用例在断言线程上要求 awaitPeerClosed(2000) 为真——说明客户端读完帧就自己关了 socket，不是等 GC。
+2. **服务端侧**：host.close() 关闭监听与在途 socket 并 join 工作线程；用例随后断言 isClosed、workerAlive == false，
+   并用新的 Socket 连同一端口必须失败（端口已释放，而不是「只是不再 accept」）。
+3. **不拨号**：非回环目标、空 challenge、空请求、超长请求四类用例都断言假主机的 acceptedCount == 0，证明拒绝发生在拨号之前。
+
+### 10.7 测试清单（24 例）
+
+| 测试类 | 例数 | 覆盖 |
+| --- | --- | --- |
+| PairingTransportClientTest | 21 | fetchInvitation 往返、先写请求后读响应、只读交换、8192 上限内可收、超长/空请求拒绝、空 challenge 拒绝、非回环三种目标、连接被拒、读取超时、长度 0、声明 8193 不读体、截断体、对端提前关闭、非法载荷、过期、challenge 不符、指纹不符、客户端关 socket、host 释放端口、非法参数 |
+| PairingTransportEndToEndTest | 3 | 黄金信封三桶 2/1/1 与 CLI 相等、信封字段逐条保真、假主机零残留（端口/线程/连接） |
+
+### 10.8 实测记录
+
+执行环境：JAVA_HOME=C:/Program Files/Java/jdk-21、ANDROID_HOME=ANDROID_SDK_ROOT=C:/Users/55160/AppData/Local/Android/Sdk，
+工作目录 D:/deepseek_test/MediaHub_Win，跑前 Get-Process MediaHub* 计数 0。
+
+    .\gradlew.bat :core:common:testDebugUnitTest --console=plain --rerun-tasks
+
+原始结果：
+
+    BUILD SUCCESSFUL in 1m
+    EXIT=0
+
+:core:common JUnit XML 汇总（core/common/build/test-results/testDebugUnitTest）：
+
+    SUITES=21 TESTS=262 FAILURES=0 ERRORS=0 SKIPPED=0
+
+基线（W6-E 收尾快照）：19 suites / 238 tests。本轮 +2 suites / +24 tests：
+
+| 测试类 | 例数 | 耗时 |
+| --- | --- | --- |
+| PairingTransportClientTest | 21 | 2.254 s（真实回环 socket，含一处 1.5 s 超时用例） |
+| PairingTransportEndToEndTest | 3 | 0.017 s |
+| 合计 | 24 | |
+
+一次设施故障（非代码）：首跑 :core:common:bundleLibCompileToJarDebug 失败，原因是 classes.jar 被残留编译 daemon 占用；
+执行 gradlew --stop 并结束残留 java 进程后重跑即绿（同第 8 节第 3 条）。
+
+E2E 结论：黄金信封经回环帧搬运后，规划三桶 2 / 1 / 1 与 Windows CLI 的 counts 完全相等；
+信封字段（deviceId / snapshotId / 3 条来源含未知 quantum-nas / 1 条墓碑 / capabilities）逐条保真。
+
+### 10.9 未做项
+
+- 真实 TLS 1.3 与证书指纹钉扎（本轮只做回环 TCP 帧；Windows 的 tls-version / fingerprint-mismatch 仍只存在于码表与载荷指纹校验里）。
+- 二维码生成与扫码、配对页 UI、候选地址选择。
+- challenge 一次性台账（跨进程重放判定仍缺）。
+- 与真机 / Windows 服务端的联调：本轮对端是 127.0.0.1 上的测试替身，验证的是帧与码，不是网络与握手。
+- 把客户端接进导入流程（拿到信封后自动预览/应用）——W6-C 的 AndroidSourceSyncService 已能导入，但两者尚未串成一条命令。
+

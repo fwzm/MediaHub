@@ -124,6 +124,19 @@ object PairingTransportReasons {
     )
 }
 
+/**
+ * 传输客户端本地的策略码：不属于 ADR-S003 合同词汇，只描述 Android 这一端的收窄策略。
+ *
+ * 合同码（PairingTransportReasons / PairingReasons）能表达的一律复用合同码，只有「拨号目标不是回环」
+ * 在合同里没有对应语义，才落在这里。日志与 UI 需要把两类码分开看：合同码可跨端比对，本码只对 Android 有意义。
+ */
+object PairingClientReasons {
+    /** 目标地址不是回环地址。Android 本轮只允许连 127.0.0.1 / ::1 / localhost，其它目标在拨号前就拒绝。 */
+    const val NON_LOOPBACK_PEER: String = "non-loopback-peer"
+
+    val ALL: List<String> = listOf(NON_LOOPBACK_PEER)
+}
+
 /** 局域网候选地址的排序/拒绝原因，与 Windows PairingAddressReasons 一致。 */
 object PairingAddressReasons {
     const val WIRED: String = "wired-interface"
