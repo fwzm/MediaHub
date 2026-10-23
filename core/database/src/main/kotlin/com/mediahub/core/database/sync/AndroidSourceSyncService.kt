@@ -17,6 +17,7 @@ import com.mediahub.core.common.sync.SyncSourceTypes
 import com.mediahub.core.common.sync.SyncUrlNormalizer
 import com.mediahub.model.ServerType
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Android 端的来源同步可用路径（W6-C）：导入应用 + 导出信封。
@@ -75,6 +76,21 @@ class AndroidSourceSyncService(
     }
 
     private suspend fun apply(envelope: SourceSyncEnvelope): SourceSyncImportResult {
+        // 信封内重复的 syncSourceId 会让规划器给出两条 CREATE：第一条写进库，第二条撞上
+        // servers 表 sync_source_id 的唯一索引 → SQLiteConstraintException 整封逃逸，且已经写了一条。
+        // 身份必须在信封内部先唯一，所以整封拒绝（不部分写入），返回稳定码而不是异常。
+        val duplicated = duplicateSyncSourceIds(envelope)
+        if (duplicated.isNotEmpty()) {
+            return SourceSyncImportResult(
+                deviceId = envelope.deviceId,
+                snapshotId = envelope.snapshotId,
+                envelopeContentHash = SourceSyncFingerprints.content(envelope),
+                rejectedReason = DUPLICATE_SYNC_SOURCE_ID,
+                rejectedMessage = "The envelope repeats the same syncSourceId more than once (" +
+                    duplicated.joinToString(", ") + "); nothing was imported.",
+            )
+        }
+
         val locals = store.listLocalSources()
         val plan = SourceSyncPlanner.plan(envelope, locals)
 
@@ -88,45 +104,55 @@ class AndroidSourceSyncService(
             if (!isWritable(candidate)) continue
             val record = envelope.sources[index]
 
-            val serverType = AndroidSourceTypeMap.toServerType(record.sourceType.raw)
-            if (serverType == null) {
-                // 理论上规划器已经把它拦成 Unsupported；这里再守一次，避免将来改动后静默写坏数据。
-                failed.add(candidate.copy(reason = SourceSyncReasons.UNKNOWN_SOURCE_TYPE))
-                failedIndexes.add(index)
-                continue
-            }
+            // 单条写入失败（磁盘满、唯一索引、权限）不得把异常抛出 importEnvelope：
+            // 那会让调用方既拿不到"哪一条失败"，也看不到已经写进去的那些。
+            try {
+                val serverType = AndroidSourceTypeMap.toServerType(record.sourceType.raw)
+                if (serverType == null) {
+                    // 理论上规划器已经把它拦成 Unsupported；这里再守一次，避免将来改动后静默写坏数据。
+                    failed.add(candidate.copy(reason = SourceSyncReasons.UNKNOWN_SOURCE_TYPE))
+                    failedIndexes.add(index)
+                    continue
+                }
 
-            val endpoints = normalizedEndpoints(record)
-            if (endpoints.isEmpty()) {
-                // 没有任何可拨号地址：写入只会得到一条永远连不上的来源。
-                failed.add(candidate.copy(reason = SourceSyncReasons.NO_USABLE_ENDPOINT))
-                failedIndexes.add(index)
-                continue
-            }
+                val endpoints = normalizedEndpoints(record)
+                if (endpoints.isEmpty()) {
+                    // 没有任何可拨号地址：写入只会得到一条永远连不上的来源。
+                    failed.add(candidate.copy(reason = SourceSyncReasons.NO_USABLE_ENDPOINT))
+                    failedIndexes.add(index)
+                    continue
+                }
 
-            val snapshot = snapshotOf(record, serverType, endpoints, candidate.serverId.orEmpty())
+                val snapshot = snapshotOf(record, serverType, endpoints, candidate.serverId.orEmpty())
 
-            if (candidate.action == SourceSyncAction.CREATE) {
-                val serverId = store.createLocalSource(snapshot)
+                if (candidate.action == SourceSyncAction.CREATE) {
+                    val serverId = store.createLocalSource(snapshot)
+                    applied.add(AppliedSourceChange(serverId, candidate, SourceSyncFingerprints.of(record)))
+                    writtenIndexes.add(index)
+                    continue
+                }
+
+                val serverId = candidate.serverId
+                if (serverId == null) {
+                    failed.add(candidate.copy(reason = SOURCE_VANISHED))
+                    failedIndexes.add(index)
+                    continue
+                }
+                if (!store.updateLocalSource(serverId, snapshot)) {
+                    // 规划之后、写入之前本地记录被删了：报出来，不要让调用方以为已应用。
+                    failed.add(candidate.copy(reason = SOURCE_VANISHED))
+                    failedIndexes.add(index)
+                    continue
+                }
                 applied.add(AppliedSourceChange(serverId, candidate, SourceSyncFingerprints.of(record)))
                 writtenIndexes.add(index)
-                continue
-            }
-
-            val serverId = candidate.serverId
-            if (serverId == null) {
-                failed.add(candidate.copy(reason = SOURCE_VANISHED))
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Exception) {
+                // 存储层拒绝（唯一索引 / IO / 权限）统一降级成 failed 桶，四桶不变式仍然成立。
+                failed.add(candidate.copy(reason = WRITE_FAILED + ":" + (failure::class.simpleName ?: "Exception")))
                 failedIndexes.add(index)
-                continue
             }
-            if (!store.updateLocalSource(serverId, snapshot)) {
-                // 规划之后、写入之前本地记录被删了：报出来，不要让调用方以为已应用。
-                failed.add(candidate.copy(reason = SOURCE_VANISHED))
-                failedIndexes.add(index)
-                continue
-            }
-            applied.add(AppliedSourceChange(serverId, candidate, SourceSyncFingerprints.of(record)))
-            writtenIndexes.add(index)
         }
 
         val ignored = ArrayList<SourceSyncCandidate>()
@@ -277,12 +303,46 @@ class AndroidSourceSyncService(
         return known + unknown
     }
 
+    /**
+     * 信封内部重复出现的 syncSourceId（trim 后忽略大小写）。
+     *
+     * 大小写也算重复：servers 表的唯一索引是大小写敏感的，但两端身份比较（Windows 的
+     * SourceSyncApprovalGate、本端 `findBySyncSourceId`）都把 id 当"trim + 忽略大小写"的身份，
+     * 因此仅大小写不同的两条记录本就指向同一个来源——放过去只会在库里留下两个身份相同的来源。
+     * 返回的是第一次出现的拼写，便于调用方在错误文案里展示。
+     */
+    private fun duplicateSyncSourceIds(envelope: SourceSyncEnvelope): List<String> {
+        val counts = LinkedHashMap<String, Int>()
+        val firstSpelling = LinkedHashMap<String, String>()
+        for (record in envelope.sources) {
+            val id = record.syncSourceId.trim()
+            if (id.isEmpty()) continue
+            val key = id.lowercase()
+            counts[key] = (counts[key] ?: 0) + 1
+            firstSpelling.putIfAbsent(key, id)
+        }
+        return counts.filterValues { it > 1 }.keys.mapNotNull { firstSpelling[it] }
+    }
+
     companion object {
         /**
          * Android 侧新增的 reason 码（合同词汇之外）：规划完成到写入之间本地记录消失（并发删除）。
          * 单独一个码而不是复用 stale-revision，是为了让调用方能区分"内容过期"与"记录没了"。
          */
         const val SOURCE_VANISHED: String = "local-source-vanished"
+
+        /**
+         * 同一份信封里出现两条相同 syncSourceId：整封拒绝（不部分写入）。
+         * 与 [SOURCE_VANISHED] 一样属于 Android 侧、不参与线上格式的稳定码。
+         */
+        const val DUPLICATE_SYNC_SOURCE_ID: String = "duplicate-sync-source-id"
+
+        /**
+         * 逐条写入抛异常时的稳定码前缀，实际值为 `local-source-write-failed:<异常类名>`。
+         * 异常类型进码里是为了让排查能区分"唯一索引冲突"与"磁盘/权限"——
+         * 两者对用户的处置完全不同，但都不该以异常形式冒给调用方。
+         */
+        const val WRITE_FAILED: String = "local-source-write-failed"
     }
 }
 
