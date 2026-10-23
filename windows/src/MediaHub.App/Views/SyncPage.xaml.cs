@@ -44,11 +44,19 @@ public sealed partial class SyncPage : Page
     private bool _busy;
     private bool _pairBusy;
 
-    // Apply state (W6-8). The envelope, the pending file and the per-entry decisions live only while the
-    // page is loaded; nothing here is persisted, and the passphrase is never stored at all.
-    private readonly Dictionary<string, bool> _applyDecisions = new(StringComparer.OrdinalIgnoreCase);
-    private SourceSyncApplyPreview? _applyPreview;
+    // Interaction state (W6-19). Every sentence and every pending decision lives in SyncPagePresenter in the Sync
+    // layer, so this page keeps only controls and the picked path; nothing here is persisted, and the passphrase is
+    // never stored at all.
+    private SyncPagePresenter? _presenter;
     private string? _applyPath;
+
+    /// <summary>
+    /// The page's presenter: one instance per page so the pending decisions cannot outlive the page, sharing the
+    /// service's paired-device registry so a fingerprint is pinned exactly once.
+    /// </summary>
+    private SyncPagePresenter Presenter => _presenter ??= new SyncPagePresenter(
+        App.Services.Sync.DeviceId,
+        App.Services.Sync.PairedDevices);
 
     public SyncPage()
     {
@@ -94,8 +102,7 @@ public sealed partial class SyncPage : Page
         _guest = null;
 
         // A preview is a list of pending writes; it must not survive the page that showed it.
-        _applyPreview = null;
-        _applyDecisions.Clear();
+        Presenter.Apply.Clear();
         _applyPath = null;
     }
 
@@ -505,11 +512,7 @@ public sealed partial class SyncPage : Page
     {
         try
         {
-            PairedDeviceRegistry registry = App.Services.Sync.PairedDevices;
-            PairedDeviceListView view = PairedDeviceListPresenter.Build(
-                registry.GetAll(),
-                registry.Capacity,
-                NowMilliseconds());
+            PairedDeviceListView view = Presenter.BuildPairedDevices(NowMilliseconds());
 
             PairedList.ItemsSource = view.Rows;
             PairedList.Visibility = view.IsEmpty ? Visibility.Collapsed : Visibility.Visible;
@@ -535,19 +538,25 @@ public sealed partial class SyncPage : Page
 
         try
         {
-            if (!await ConfirmForgetAsync(row))
+            if (Presenter.Pairing.AskForget(row) is not { } prompt)
             {
                 return;
             }
 
-            bool forgotten = App.Services.Sync.PairedDevices.Forget(row.DeviceId);
+            if (!await ConfirmForgetAsync(prompt))
+            {
+                // Cancelling is itself a receipt: it says nothing was deleted.
+                SyncForgetOutcome cancelled = Presenter.Pairing.CancelForget();
+                ShowStatus(InfoBarSeverity.Informational, cancelled.Title, cancelled.Message);
+                return;
+            }
+
+            SyncForgetOutcome outcome = Presenter.Pairing.ConfirmForget();
             ReloadPairedDevices();
             ShowStatus(
-                forgotten ? InfoBarSeverity.Informational : InfoBarSeverity.Warning,
-                forgotten ? "已忘记该设备" : "本机没有这台设备的登记",
-                forgotten
-                    ? "只删除了本机的配对登记：来源、凭据和对端设备都没有变化；下次配对会重新按首次配对处理。"
-                    : PairedDeviceRegistry.DescribeReason(PairedDeviceReasons.UnknownDevice));
+                outcome.Forgotten ? InfoBarSeverity.Informational : InfoBarSeverity.Warning,
+                outcome.Title,
+                outcome.Message);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -556,8 +565,8 @@ public sealed partial class SyncPage : Page
     }
 
     /// <summary>Confirms forgetting one device; the buttons carry the automation ids because a ContentDialog's own
-    /// buttons cannot be given one.</summary>
-    private async Task<bool> ConfirmForgetAsync(PairedDeviceRow row)
+    /// buttons cannot be given one. Every sentence comes from the presenter's prompt.</summary>
+    private async Task<bool> ConfirmForgetAsync(SyncForgetPrompt prompt)
     {
         var panel = new StackPanel { Width = 420, Spacing = 12 };
         AutomationProperties.SetAutomationId(panel, "sync.paired.forget.dialog");
@@ -565,17 +574,16 @@ public sealed partial class SyncPage : Page
         panel.Children.Add(new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
-            Text = "将忘记「" + row.DisplayName + "」（" + row.FingerprintLabel + "）。"
-                + "只删除本机的配对登记，来源、凭据和对端设备都不会被改动；下次配对会重新按首次配对处理。",
+            Text = prompt.Text,
         });
 
-        var cancel = new Button { Content = "取消" };
+        var cancel = new Button { Content = prompt.CancelLabel };
         AutomationProperties.SetAutomationId(cancel, "sync.paired.forget.cancel");
-        AutomationProperties.SetName(cancel, "取消忘记该设备");
+        AutomationProperties.SetName(cancel, prompt.CancelName);
 
-        var confirm = new Button { Content = "忘记" };
+        var confirm = new Button { Content = prompt.ConfirmLabel };
         AutomationProperties.SetAutomationId(confirm, "sync.paired.forget.confirm");
-        AutomationProperties.SetName(confirm, "确认忘记该设备");
+        AutomationProperties.SetName(confirm, prompt.ConfirmName);
 
         var buttons = new StackPanel
         {
@@ -591,7 +599,7 @@ public sealed partial class SyncPage : Page
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = "忘记这台设备？",
+            Title = prompt.Title,
             Content = panel,
         };
 
@@ -637,7 +645,7 @@ public sealed partial class SyncPage : Page
         }
 
         _applyPath = path;
-        _applyDecisions.Clear();
+        Presenter.Apply.Clear();
         ApplyFileText.Text = path;
         ApplyPreviewButton.IsEnabled = true;
         ApplyConfirmButton.IsEnabled = false;
@@ -690,8 +698,7 @@ public sealed partial class SyncPage : Page
             }
 
             SourceSyncApplyPreview preview = App.Services.Sync.PreviewApply(envelope);
-            _applyPreview = preview;
-            _applyDecisions.Clear();
+            Presenter.Apply.Load(preview);
 
             string kind = read.Kind == PeerFileKind.EncryptedArchive ? "加密存档" : "明文信封";
             ApplyFileText.Text = kind + "：" + _applyPath + " · " + preview.Total + " 条";
@@ -733,7 +740,7 @@ public sealed partial class SyncPage : Page
             return;
         }
 
-        _applyDecisions[row.SyncSourceId] = true;
+        Presenter.Apply.Allow(row.SyncSourceId);
         ReloadApplyRows();
     }
 
@@ -744,20 +751,19 @@ public sealed partial class SyncPage : Page
             return;
         }
 
-        _applyDecisions[row.SyncSourceId] = false;
+        Presenter.Apply.Skip(row.SyncSourceId);
         ReloadApplyRows();
     }
 
     /// <summary>Writes only the allowed entries, and only after the confirmation dialog.</summary>
     private async void OnApplyClick(object sender, RoutedEventArgs e)
     {
-        if (_busy || _applyPreview is not { } preview)
+        if (_busy || Presenter.Apply.Preview is not { } preview)
         {
             return;
         }
 
-        SourceSyncApprovalResult gate = ComputeGate();
-        if (!gate.CanApply)
+        if (!Presenter.Apply.Gate().CanApply)
         {
             ShowStatus(InfoBarSeverity.Warning, "没有可应用的条目", "所有条目都被跳过或不可应用。");
             return;
@@ -765,7 +771,7 @@ public sealed partial class SyncPage : Page
 
         try
         {
-            if (await ConfirmApplyAsync(gate) != ContentDialogResult.Primary)
+            if (await ConfirmApplyAsync() != ContentDialogResult.Primary)
             {
                 return;
             }
@@ -774,41 +780,26 @@ public sealed partial class SyncPage : Page
             ApplyBusy.IsActive = true;
             ApplyConfirmButton.IsEnabled = false;
 
-            var allowed = new List<string>();
-            foreach (SourceSyncApprovalItem item in gate.Applied)
-            {
-                allowed.Add(item.SyncSourceId);
-            }
-
+            IReadOnlyList<string> allowed = Presenter.Apply.AllowedIds();
             SourceSyncApplyReport result = await App.Services.Sync.ApplyApprovedAsync(preview, allowed);
 
             // The result line carries three things: the three counts, whether the stored baseline moved (that is what
             // makes a second import of the same envelope a no-op), and the fixed sentence that a write is not a sign-in.
-            string message = result.Summary + "。" + result.BaselineLabel + SourceSyncService.ApplyDisclaimer;
-            if (result.BlockingReasons.Count > 0)
-            {
-                message += " 不可应用：" + string.Join("、", result.BlockingReasons.Select(DescribeGateReason)) + "。";
-            }
-
-            if (result.Warnings.Count > 0)
-            {
-                message += " 提示：" + string.Join("、", result.Warnings.Select(DescribeBaselineWarning)) + "。";
-            }
-
-            string endpointSentence = SourceSyncNotImportedText.Summarize(result.Applied, preview.EndpointSummary);
+            // All of it is composed by the presenter, which also still sees the preview at this point.
+            SyncApplyResult applied = Presenter.Apply.DescribeResult(result);
 
             // The preview described writes that have now happened; keeping it on screen would invite a second apply
             // against a stale plan, so it is retired while the result line and the endpoint sentence stay.
             ClearApplyPreview(keepResult: true);
-            ApplyResultText.Text = message;
-            ApplyNotImportedCount.Text = endpointSentence;
+            ApplyResultText.Text = applied.Message;
+            ApplyNotImportedCount.Text = applied.EndpointSentence;
             ApplyNotImportedCount.Visibility = Visibility.Visible;
             ReloadSources();
 
             ShowStatus(
-                result.Applied > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
-                result.Applied > 0 ? "已写入远端变更" : "没有写入任何变更",
-                message);
+                applied.WroteChanges ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
+                applied.InfoTitle,
+                applied.Message);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -822,28 +813,14 @@ public sealed partial class SyncPage : Page
         }
     }
 
-    /// <summary>Runs the gate with the decisions made so far; an undecided approval entry is a skip.</summary>
-    private SourceSyncApprovalResult ComputeGate()
-    {
-        if (_applyPreview is not { } preview)
-        {
-            return SourceSyncApprovalResult.None;
-        }
+    /// <summary>The gate as it stands right now; the presenter owns the decisions.</summary>
+    private SourceSyncApprovalResult ComputeGate() => Presenter.Apply.Gate();
 
-        var decisions = new List<SourceSyncApprovalDecision>(_applyDecisions.Count);
-        foreach (KeyValuePair<string, bool> decision in _applyDecisions)
-        {
-            decisions.Add(decision.Value
-                ? SourceSyncApprovalDecision.Allow(decision.Key)
-                : SourceSyncApprovalDecision.Skip(decision.Key));
-        }
-
-        return SourceSyncApprovalGate.Decide(preview.Items, decisions);
-    }
-
+    /// <summary>Renders the section from the presenter's view; the page makes no decisions of its own.</summary>
     private void ReloadApplyRows()
     {
-        if (_applyPreview is not { } preview)
+        SyncApplyView view = Presenter.Apply.View();
+        if (!view.HasPreview)
         {
             ApplyList.ItemsSource = null;
             ApplyBlockedText.Visibility = Visibility.Collapsed;
@@ -853,56 +830,39 @@ public sealed partial class SyncPage : Page
             return;
         }
 
-        var rows = new List<ApplyRow>(preview.Items.Count);
-        foreach (SourceSyncApprovalItem item in preview.Items)
+        var rows = new List<ApplyRow>(view.Rows.Count);
+        foreach (SyncApplyRow row in view.Rows)
         {
-            bool allowable = SourceSyncApprovalGate.IsApplicable(item.Action)
-                && !SourceSyncApprovalGate.IsNeverAllowable(item.Reason);
-            bool allowed = _applyDecisions.TryGetValue(item.SyncSourceId, out bool decision)
-                ? decision
-                : allowable && !item.RequiresApproval;
-            string name = FirstNonBlank(item.DisplayName, item.SyncSourceId, item.ServerId, "（未命名来源）");
-
             rows.Add(new ApplyRow(
-                item.SyncSourceId,
-                name,
-                SyncPreviewText.DescribeAction(item.Action),
-                DescribeApplyDetail(item),
-                allowed ? "· 已允许" : "· 已跳过",
-                item.RequiresApproval,
-                allowable,
-                allowable ? "允许 " + name : "不可允许 " + name,
-                "跳过 " + name));
+                row.SyncSourceId,
+                row.Name,
+                row.ActionLabel,
+                row.DetailLabel,
+                row.StateLabel,
+                row.RequiresApproval,
+                row.Allowable,
+                row.AllowLabel,
+                row.SkipLabel));
         }
 
         ApplyList.ItemsSource = rows;
-
-        SourceSyncApprovalResult gate = ComputeGate();
-        ApplyConfirmButton.IsEnabled = gate.CanApply;
-        ApplyBlockedText.Visibility = gate.IsBlocked ? Visibility.Visible : Visibility.Collapsed;
-        ApplyBlockedText.Text = gate.IsBlocked
-            ? "不会被应用的条目：" + string.Join("、", gate.BlockingReasons.Select(DescribeGateReason))
-            : string.Empty;
-        ShowNotImported(preview);
+        ApplyConfirmButton.IsEnabled = view.CanApply;
+        ApplyBlockedText.Text = view.BlockedText;
+        ApplyBlockedText.Visibility = view.BlockedText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ShowNotImported(view);
     }
 
     /// <summary>
     /// Shows the addresses of the peer envelope this client will not store. Windows keeps one address per
     /// source, so the extra ones are counted and named rather than dropped without a trace.
     /// </summary>
-    private void ShowNotImported(SourceSyncApplyPreview preview)
+    private void ShowNotImported(SyncApplyView view)
     {
-        ApplyNotImportedCount.Text = SourceSyncNotImportedText.DescribeCount(preview.EndpointSummary);
+        ApplyNotImportedCount.Text = view.NotImportedCountText;
         ApplyNotImportedCount.Visibility = Visibility.Visible;
 
-        var rows = new List<string>(preview.NotImportedEndpoints.Count);
-        foreach (SourceSyncNotImportedEndpoint endpoint in preview.NotImportedEndpoints)
-        {
-            rows.Add(SourceSyncNotImportedText.Describe(endpoint));
-        }
-
-        ApplyNotImportedList.ItemsSource = rows;
-        ApplyNotImportedList.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ApplyNotImportedList.ItemsSource = view.NotImportedRows;
+        ApplyNotImportedList.Visibility = view.NotImportedRows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ClearNotImported()
@@ -913,26 +873,10 @@ public sealed partial class SyncPage : Page
         ApplyNotImportedList.Visibility = Visibility.Collapsed;
     }
 
-    /// <summary>Baseline problems arrive as stable codes; the page says what they mean for the next import.</summary>
-    private static string DescribeBaselineWarning(string warning)
-    {
-        if (warning.StartsWith(SourceSyncSessionReasons.BaselineRejectedPrefix, StringComparison.Ordinal))
-        {
-            return "本机基线拒绝了部分条目（"
-                + warning[SourceSyncSessionReasons.BaselineRejectedPrefix.Length..].TrimStart(':')
-                + "）";
-        }
-
-        return warning == SourceSyncSessionReasons.BaselineWriteFailed
-            ? "本机基线写入失败，下次导入会重复本次判断"
-            : warning;
-    }
-
     /// <summary>Drops the pending plan; <paramref name="keepResult"/> keeps the last result line readable.</summary>
     private void ClearApplyPreview(bool keepResult = false)
     {
-        _applyPreview = null;
-        _applyDecisions.Clear();
+        Presenter.Apply.Clear();
         ApplyList.ItemsSource = null;
         ApplyBlockedText.Visibility = Visibility.Collapsed;
         ApplyBlockedText.Text = string.Empty;
@@ -944,38 +888,43 @@ public sealed partial class SyncPage : Page
         }
     }
 
-    private async Task<ContentDialogResult> ConfirmApplyAsync(SourceSyncApprovalResult gate)
+    /// <summary>Asks before writing; the counts, the risk note and the disclaimer all come from the presenter.</summary>
+    private async Task<ContentDialogResult> ConfirmApplyAsync()
     {
+        if (Presenter.Apply.Confirm() is not { } confirm)
+        {
+            return ContentDialogResult.None;
+        }
+
         var panel = new StackPanel { Width = 420, Spacing = 8 };
         panel.Children.Add(new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
-            Text = "将写入本机 " + gate.AppliedCount + " 条来源，跳过 " + gate.SkippedCount
-                + " 条，保留未应用 " + gate.WithheldCount + " 条。",
+            Text = confirm.CountsText,
         });
 
-        if (gate.AcknowledgedRisk)
+        if (confirm.HasRisk)
         {
             panel.Children.Add(new TextBlock
             {
                 TextWrapping = TextWrapping.Wrap,
-                Text = "其中包含需要你确认的冲突变更（删除与修改相撞、字段冲突或版本相同但内容不同）；允许它们会覆盖本机当前配置。",
+                Text = confirm.RiskText,
             });
         }
 
         panel.Children.Add(new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
-            Text = SourceSyncService.ApplyDisclaimer,
+            Text = confirm.Disclaimer,
         });
 
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = "应用远端变更",
+            Title = confirm.Title,
             Content = panel,
-            PrimaryButtonText = "应用",
-            CloseButtonText = "取消",
+            PrimaryButtonText = confirm.ConfirmLabel,
+            CloseButtonText = confirm.CancelLabel,
             DefaultButton = ContentDialogButton.Close,
         };
 
@@ -1020,79 +969,6 @@ public sealed partial class SyncPage : Page
         string passphrase = box.Password;
         box.Password = string.Empty;
         return passphrase;
-    }
-
-    private static string DescribeApplyDetail(SourceSyncApprovalItem item)
-    {
-        var parts = new List<string>(4);
-        if (!string.IsNullOrWhiteSpace(item.SourceType))
-        {
-            parts.Add("类型 " + item.SourceType);
-        }
-
-        if (!string.IsNullOrWhiteSpace(item.NormalizedUrl))
-        {
-            parts.Add(item.NormalizedUrl);
-        }
-
-        if (item.LocalRevision is not null || item.RemoteRevision is not null)
-        {
-            parts.Add("本机版本 " + (item.LocalRevision?.ToString() ?? "无")
-                + " · 对端版本 " + (item.RemoteRevision?.ToString() ?? "无"));
-        }
-
-        parts.Add(DescribeGateReason(item.Reason));
-        return string.Join(" · ", parts);
-    }
-
-    /// <summary>Localises a gate reason; the gate itself carries codes only.</summary>
-    private static string DescribeGateReason(string? reason)
-    {
-        if (string.IsNullOrWhiteSpace(reason))
-        {
-            return "对端没有说明原因";
-        }
-
-        if (reason.StartsWith(SourceSyncApprovalGate.AmbiguousReasonPrefix, StringComparison.Ordinal))
-        {
-            return "有多个本机来源都像是它，无法确定";
-        }
-
-        return reason switch
-        {
-            SyncRoundReasons.SecretsRequireApproval => "带凭据，需人工迁移（本次不会写入）",
-            SyncRoundReasons.UnknownSourceType => "未知来源类型，Windows 无法应用",
-            SyncRoundReasons.NotSupportedOnWindows => "Windows 暂不支持该来源类型",
-            SyncRoundReasons.DeleteVsUpdate => "对端删除与本机修改相撞，需人工判断",
-            SyncRoundReasons.UpdateVsDelete => "本机删除与对端修改相撞，需人工判断",
-            SyncRoundReasons.FieldConflict => "两边把同一个字段改成了不同的值",
-            SyncRoundReasons.SameRevisionDifferentContent => "版本相同但内容不同",
-            SyncRoundReasons.TombstoneRequiresApproval => "对端删除了该来源，需人工确认",
-            SyncRoundReasons.TombstoneUnknown => "对端删除了一个本机没有的来源",
-            SyncRoundReasons.ApplyRemoteChange => "对端较新，可写入本机",
-            SyncRoundReasons.PushLocalChange => "本机较新，请到对端应用",
-            SyncRoundReasons.PushLocalDelete => "本机已删除，请到对端应用",
-            SyncRoundReasons.RemoteNewer => "对端较新",
-            SyncRoundReasons.LocalNewer => "本机较新",
-            SyncRoundReasons.AlreadyApplied => "已经应用过",
-            SyncRoundReasons.StaleRemote => "对端版本较旧",
-            SyncRoundReasons.StaleLocal => "本机版本较旧",
-            SyncRoundReasons.BothDeleted => "两边都已删除",
-            _ => SyncPreviewText.DescribeReason(reason),
-        };
-    }
-
-    private static string FirstNonBlank(params string?[] values)
-    {
-        foreach (string? value in values)
-        {
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value.Trim();
-            }
-        }
-
-        return string.Empty;
     }
 
     // ---- apply (W6-8) end ------------------------------------------------------
