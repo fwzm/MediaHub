@@ -204,6 +204,24 @@
                    AutomationProperties.AutomationId="sync.apply.result"
                    AutomationProperties.Name="应用结果" />
 
+        <!-- Addresses the peer offers that this client cannot store: counted and named, never silently dropped. -->
+        <TextBlock x:Name="ApplyNotImportedCount" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   AutomationProperties.AutomationId="sync.notimported.count"
+                   AutomationProperties.Name="未导入的次要地址数量" />
+
+        <ListView x:Name="ApplyNotImportedList" SelectionMode="None" MaxHeight="120" Visibility="Collapsed"
+                  AutomationProperties.AutomationId="sync.notimported.list"
+                  AutomationProperties.Name="未导入的次要地址">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              <Setter Property="Padding" Value="0" />
+              <Setter Property="MinHeight" Value="0" />
+            </Style>
+          </ListView.ItemContainerStyle>
+        </ListView>
+
         <!-- The one sentence that must survive any future edit: a write is not a sign-in. -->
         <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
                    Text="导入不代表已登录；请对每个来源点『验证』。" />

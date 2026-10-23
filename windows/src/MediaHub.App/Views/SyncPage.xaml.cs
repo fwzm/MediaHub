@@ -47,7 +47,7 @@ public sealed partial class SyncPage : Page
     // Apply state (W6-8). The envelope, the pending file and the per-entry decisions live only while the
     // page is loaded; nothing here is persisted, and the passphrase is never stored at all.
     private readonly Dictionary<string, bool> _applyDecisions = new(StringComparer.OrdinalIgnoreCase);
-    private SyncApplyPreview? _applyPreview;
+    private SourceSyncApplyPreview? _applyPreview;
     private string? _applyPath;
 
     public SyncPage()
@@ -558,7 +558,7 @@ public sealed partial class SyncPage : Page
                 return;
             }
 
-            SyncApplyPreview preview = App.Services.Sync.PreviewApply(envelope);
+            SourceSyncApplyPreview preview = App.Services.Sync.PreviewApply(envelope);
             _applyPreview = preview;
             _applyDecisions.Clear();
 
@@ -566,10 +566,21 @@ public sealed partial class SyncPage : Page
             ApplyFileText.Text = kind + "：" + _applyPath + " · " + preview.Total + " 条";
             ReloadApplyRows();
 
-            ShowStatus(
-                InfoBarSeverity.Informational,
-                "已生成应用预览",
-                SyncPreviewText.DescribeSummary(preview.Summary) + " 预览只计算，没有写入任何内容。");
+            if (preview.BaselineError is { Length: > 0 } baselineError)
+            {
+                // A damaged baseline file must never be presented as an ordinary first import.
+                ShowStatus(
+                    InfoBarSeverity.Warning,
+                    "本机基线不可用",
+                    baselineError + " 本次按全量计划预览；写入成功后会重建基线。");
+            }
+            else
+            {
+                ShowStatus(
+                    InfoBarSeverity.Informational,
+                    "已生成应用预览",
+                    SyncPreviewText.DescribeSummary(preview.Summary) + " 预览只计算，没有写入任何内容。");
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -638,17 +649,29 @@ public sealed partial class SyncPage : Page
                 allowed.Add(item.SyncSourceId);
             }
 
-            SyncApplyResult result = await App.Services.Sync.ApplyApprovedAsync(preview, allowed);
-            string message = result.Summary + "。" + SourceSyncService.ApplyDisclaimer;
+            SourceSyncApplyReport result = await App.Services.Sync.ApplyApprovedAsync(preview, allowed);
+
+            // The result line carries three things: the three counts, whether the stored baseline moved (that is what
+            // makes a second import of the same envelope a no-op), and the fixed sentence that a write is not a sign-in.
+            string message = result.Summary + "。" + result.BaselineLabel + SourceSyncService.ApplyDisclaimer;
             if (result.BlockingReasons.Count > 0)
             {
                 message += " 不可应用：" + string.Join("、", result.BlockingReasons.Select(DescribeGateReason)) + "。";
             }
 
+            if (result.Warnings.Count > 0)
+            {
+                message += " 提示：" + string.Join("、", result.Warnings.Select(DescribeBaselineWarning)) + "。";
+            }
+
+            string endpointSentence = SourceSyncNotImportedText.Summarize(result.Applied, preview.EndpointSummary);
+
             // The preview described writes that have now happened; keeping it on screen would invite a second apply
-            // against a stale plan, so it is retired while the result line stays.
+            // against a stale plan, so it is retired while the result line and the endpoint sentence stay.
             ClearApplyPreview(keepResult: true);
             ApplyResultText.Text = message;
+            ApplyNotImportedCount.Text = endpointSentence;
+            ApplyNotImportedCount.Visibility = Visibility.Visible;
             ReloadSources();
 
             ShowStatus(
@@ -695,6 +718,7 @@ public sealed partial class SyncPage : Page
             ApplyBlockedText.Visibility = Visibility.Collapsed;
             ApplyBlockedText.Text = string.Empty;
             ApplyConfirmButton.IsEnabled = false;
+            ClearNotImported();
             return;
         }
 
@@ -728,6 +752,49 @@ public sealed partial class SyncPage : Page
         ApplyBlockedText.Text = gate.IsBlocked
             ? "不会被应用的条目：" + string.Join("、", gate.BlockingReasons.Select(DescribeGateReason))
             : string.Empty;
+        ShowNotImported(preview);
+    }
+
+    /// <summary>
+    /// Shows the addresses of the peer envelope this client will not store. Windows keeps one address per
+    /// source, so the extra ones are counted and named rather than dropped without a trace.
+    /// </summary>
+    private void ShowNotImported(SourceSyncApplyPreview preview)
+    {
+        ApplyNotImportedCount.Text = SourceSyncNotImportedText.DescribeCount(preview.EndpointSummary);
+        ApplyNotImportedCount.Visibility = Visibility.Visible;
+
+        var rows = new List<string>(preview.NotImportedEndpoints.Count);
+        foreach (SourceSyncNotImportedEndpoint endpoint in preview.NotImportedEndpoints)
+        {
+            rows.Add(SourceSyncNotImportedText.Describe(endpoint));
+        }
+
+        ApplyNotImportedList.ItemsSource = rows;
+        ApplyNotImportedList.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ClearNotImported()
+    {
+        ApplyNotImportedCount.Text = string.Empty;
+        ApplyNotImportedCount.Visibility = Visibility.Collapsed;
+        ApplyNotImportedList.ItemsSource = null;
+        ApplyNotImportedList.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Baseline problems arrive as stable codes; the page says what they mean for the next import.</summary>
+    private static string DescribeBaselineWarning(string warning)
+    {
+        if (warning.StartsWith(SourceSyncSessionReasons.BaselineRejectedPrefix, StringComparison.Ordinal))
+        {
+            return "本机基线拒绝了部分条目（"
+                + warning[SourceSyncSessionReasons.BaselineRejectedPrefix.Length..].TrimStart(':')
+                + "）";
+        }
+
+        return warning == SourceSyncSessionReasons.BaselineWriteFailed
+            ? "本机基线写入失败，下次导入会重复本次判断"
+            : warning;
     }
 
     /// <summary>Drops the pending plan; <paramref name="keepResult"/> keeps the last result line readable.</summary>
@@ -739,6 +806,7 @@ public sealed partial class SyncPage : Page
         ApplyBlockedText.Visibility = Visibility.Collapsed;
         ApplyBlockedText.Text = string.Empty;
         ApplyConfirmButton.IsEnabled = false;
+        ClearNotImported();
         if (!keepResult)
         {
             ApplyResultText.Text = string.Empty;

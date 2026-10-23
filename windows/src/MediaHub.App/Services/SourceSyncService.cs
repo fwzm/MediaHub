@@ -64,9 +64,21 @@ public sealed class SourceSyncService
     private readonly LogService _log;
     private readonly ServerManager _servers;
     private readonly FileLocalSourceStore _store;
+    private readonly FileSourceSyncBaselineStore _baselines;
+    private readonly SourceSyncImportRound _round;
     private readonly string _deviceId;
 
-    public SourceSyncService(SettingsStore settings, LogService log, ServerManager servers, FileLocalSourceStore store)
+    /// <param name="store">Mirrored local source records.</param>
+    /// <param name="baselines">
+    /// Per-peer baseline file. Defaults to <c>sync-baseline.json</c> in the same folder as the mirrored
+    /// records, which is what makes "import the same envelope twice" a no-op even after a restart.
+    /// </param>
+    public SourceSyncService(
+        SettingsStore settings,
+        LogService log,
+        ServerManager servers,
+        FileLocalSourceStore store,
+        FileSourceSyncBaselineStore? baselines = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(log);
@@ -76,6 +88,8 @@ public sealed class SourceSyncService
         _log = log;
         _servers = servers;
         _store = store;
+        _baselines = baselines ?? new FileSourceSyncBaselineStore(store.DirectoryPath);
+        _round = new SourceSyncImportRound(store, _baselines, () => _baselines.LoadError);
         _deviceId = SyncIdentity.EnsureDeviceId(settings);
     }
 
@@ -103,15 +117,30 @@ public sealed class SourceSyncService
     public SourceSyncEnvelope BuildEnvelope()
         => new SourceSyncLocalBridge(_store, _deviceId).BuildEnvelope(includeSecrets: false);
 
+    /// <summary>The stored baseline that makes a repeated import a no-op.</summary>
+    public string BaselinePath => _baselines.FilePath;
+
+    /// <summary>
+    /// Set when the stored baseline could not be read. A damaged file degrades to a full plan instead of
+    /// crashing the page, and is reported here rather than silently ignored.
+    /// </summary>
+    public string? BaselineError => _baselines.LoadError;
+
+    /// <summary>
+    /// The sync session this service speaks through: one device identity, the mirrored records, and the
+    /// stored baseline. Exporting through it is what proves the baseline store is really wired in.
+    /// </summary>
+    public SourceSyncSession CreateSession() => new(_store, _deviceId, baselineStore: _baselines);
+
     /// <summary>Writes the envelope next to the mirrored source records and reports what it contains.</summary>
     public EnvelopeExportResult ExportEnvelope()
     {
-        SourceSyncEnvelope envelope = BuildEnvelope();
-        string json = SourceSyncCodec.Serialize(envelope);
+        ExportSession export = CreateSession().Export(includeSecrets: false);
+        SourceSyncEnvelope envelope = export.Envelope;
 
         System.IO.Directory.CreateDirectory(_store.DirectoryPath);
         string temp = EnvelopePath + ".tmp";
-        File.WriteAllText(temp, json);
+        File.WriteAllText(temp, export.EnvelopeJson);
         File.Move(temp, EnvelopePath, overwrite: true);
 
         _log.Info(LogCategory, "已导出同步信封，共 " + envelope.Sources.Count + " 个媒体源（不含任何密钥）");
@@ -280,31 +309,13 @@ public sealed class SourceSyncService
     /// <remarks>
     /// Pure. The returned preview is what the page binds to; a row only becomes a write when the user
     /// clicks 应用, and <see cref="ApplyApprovedAsync"/> is the only thing in the app that writes sources
-    /// from an envelope.
+    /// from an envelope. The round lives in MediaHub.Sync so that "plan against the stored baseline, then
+    /// write only what the user allowed" has one implementation, shared by the app and its tests.
     /// </remarks>
-    public SyncApplyPreview PreviewApply(SourceSyncEnvelope peer)
+    public SourceSyncApplyPreview PreviewApply(SourceSyncEnvelope peer)
     {
         ArgumentNullException.ThrowIfNull(peer);
-
-        SourceSyncPlan plan = SourceSyncPlanner.Plan(peer, _store.GetAll());
-        var items = new List<SourceSyncApprovalItem>(plan.Items.Count);
-        int secrets = 0;
-
-        foreach (SourceSyncCandidate candidate in plan.Items)
-        {
-            SourceSyncApprovalItem item = SourceSyncApprovalItem.FromCandidate(candidate);
-            if (CarriesSecrets(peer, item.SyncSourceId))
-            {
-                // The planner has no opinion about credentials; this app does. A record whose secret block
-                // arrived sealed on the other machine can never be re-sealed here, so it is withheld
-                // instead of written — and withholding it is why no foreign DPAPI blob is ever stored.
-                secrets++;
-                item = item with { Reason = SyncRoundReasons.SecretsRequireApproval, RequiresApproval = true };
-            }
-            items.Add(item);
-        }
-
-        return new SyncApplyPreview(peer, items, SourceSyncApprovalGate.Decide(items), SourceSyncPreviewSummary.FromPlan(plan), secrets);
+        return _round.Preview(peer);
     }
 
     /// <summary>
@@ -314,79 +325,56 @@ public sealed class SourceSyncService
     /// Entries the gate keeps as proposals (withheld) and entries whose write failed are reported together
     /// as 保留未应用, because from the user's side both mean "this did not take effect".
     /// </remarks>
-    public async Task<SyncApplyResult> ApplyApprovedAsync(
-        SyncApplyPreview preview,
+    public async Task<SourceSyncApplyReport> ApplyApprovedAsync(
+        SourceSyncApplyPreview preview,
         IReadOnlyList<string>? allowedIds,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(preview);
 
-        var decisions = new List<SourceSyncApprovalDecision>();
-        if (allowedIds is not null)
+        // The round writes in plan order, advances the stored baseline with exactly the records it wrote, and
+        // reports the baseline as part of the result, so "the same envelope applied twice is a no-op" can be
+        // proven from the app layer and not only from a test double.
+        SourceSyncApplyReport result = await _round
+            .ApplyAsync(preview, allowedIds, WriteApprovedRecordAsync, ct)
+            .ConfigureAwait(true);
+
+        if (result.Withheld > 0)
         {
-            foreach (string id in allowedIds)
-            {
-                if (!string.IsNullOrWhiteSpace(id)) decisions.Add(SourceSyncApprovalDecision.Allow(id));
-            }
+            _log.Warn(LogCategory, "应用对端信封时有 " + result.Withheld + " 条保留未应用（含凭据或写入被拒）");
         }
 
-        SourceSyncApprovalResult gate = SourceSyncApprovalGate.Decide(preview.Items, decisions);
-        int applied = 0;
-        int failed = 0;
-
-        foreach (SourceSyncApprovalItem item in gate.Applied)
-        {
-            ServerManager.RemoteSourceOutcome outcome;
-            SourceRecord? record = FindPeerRecord(preview.Envelope, item.SyncSourceId);
-
-            if (record is null)
-            {
-                // No record with that identity in the envelope means the peer stated a deletion.
-                outcome = await _servers.RemoveRemoteSourceAsync(item.SyncSourceId, ct).ConfigureAwait(true);
-            }
-            else if (item.Action == SourceSyncAction.Adopt && item.ServerId is { Length: > 0 } adoptServerId)
-            {
-                outcome = _servers.AdoptRemoteSource(adoptServerId, item.SyncSourceId, record.RecordRevision);
-            }
-            else
-            {
-                outcome = _servers.ApplyRemoteSource(record);
-            }
-
-            if (outcome.Applied) applied++;
-            else
-            {
-                failed++;
-                _log.Warn(LogCategory, "应用对端信封时跳过一条：" + outcome.Message);
-            }
-        }
-
-        int kept = gate.WithheldCount + failed + gate.SkippedCount;
         _log.Info(
             LogCategory,
-            "已应用对端信封：写入 " + applied + " 条，跳过 " + gate.SkippedCount + " 条，保留未应用 " + (gate.WithheldCount + failed) + " 条（不含任何凭据）");
+            "已应用对端信封：写入 " + result.Applied + " 条，跳过 " + result.Skipped + " 条，保留未应用 "
+            + result.Withheld + " 条；本机基线" + (result.BaselineUpdated ? "已更新" : "未变化") + "（不含任何凭据）");
 
-        return new SyncApplyResult(applied, gate.SkippedCount, gate.WithheldCount + failed, kept, gate.BlockingReasons, gate.AcknowledgedRisk);
+        return result;
     }
 
-    private static bool CarriesSecrets(SourceSyncEnvelope envelope, string syncSourceId)
+    /// <summary>Turns one approved entry into a real source change; the round owns ordering and the baseline.</summary>
+    private async Task<SourceSyncWriteOutcome> WriteApprovedRecordAsync(
+        SourceSyncApprovalItem item,
+        SourceRecord? record)
     {
-        foreach (SourceRecord record in envelope.Sources)
+        if (record is null)
         {
-            if (!string.Equals(record.SyncSourceId, syncSourceId, StringComparison.OrdinalIgnoreCase)) continue;
-            return record.Secrets is not null;
+            // No record with that identity in the envelope means the peer stated a deletion.
+            return Describe(await _servers.RemoveRemoteSourceAsync(item.SyncSourceId).ConfigureAwait(true));
         }
-        return false;
+
+        if (item.Action == SourceSyncAction.Adopt && item.ServerId is { Length: > 0 } adoptServerId)
+        {
+            return Describe(_servers.AdoptRemoteSource(adoptServerId, item.SyncSourceId, record.RecordRevision));
+        }
+
+        return Describe(_servers.ApplyRemoteSource(record));
     }
 
-    private static SourceRecord? FindPeerRecord(SourceSyncEnvelope envelope, string syncSourceId)
-    {
-        foreach (SourceRecord record in envelope.Sources)
-        {
-            if (string.Equals(record.SyncSourceId, syncSourceId, StringComparison.OrdinalIgnoreCase)) return record;
-        }
-        return null;
-    }
+    private static SourceSyncWriteOutcome Describe(ServerManager.RemoteSourceOutcome outcome)
+        => outcome.Applied
+            ? SourceSyncWriteOutcome.Written(outcome.Message)
+            : SourceSyncWriteOutcome.Refused(outcome.Message);
 }
 
 /// <summary>Which kind of file the peer sent.</summary>
@@ -401,37 +389,6 @@ public enum PeerFileKind
 public sealed record PeerFileResult(PeerFileKind Kind, SourceSyncEnvelope? Envelope, string? Error, bool NeedsPassphrase)
 {
     public bool Succeeded => Envelope is not null;
-}
-
-/// <summary>One envelope, its approval items and the gate's default verdict.</summary>
-public sealed record SyncApplyPreview(
-    SourceSyncEnvelope Envelope,
-    IReadOnlyList<SourceSyncApprovalItem> Items,
-    SourceSyncApprovalResult Gate,
-    SourceSyncPreviewSummary Summary,
-    int SecretCount)
-{
-    /// <summary>True when applying would write at least one source.</summary>
-    public bool CanApply => Gate.CanApply;
-
-    /// <summary>Entry count, for the "selected file" line.</summary>
-    public int Total => Items.Count;
-}
-
-/// <summary>What one apply did.</summary>
-public sealed record SyncApplyResult(
-    int Applied,
-    int Skipped,
-    int Withheld,
-    int NotApplied,
-    IReadOnlyList<string> BlockingReasons,
-    bool AcknowledgedRisk)
-{
-    /// <summary>The three counts the task asks for, in one line.</summary>
-    public string Summary => "已写入本地 " + Applied + " 条 / 跳过 " + Skipped + " 条 / 保留未应用 " + NotApplied + " 条";
-
-    /// <summary>True when the user allowed at least one change the gate flagged as risky.</summary>
-    public bool TouchedRiskyChange => AcknowledgedRisk;
 }
 
 /// <summary>One row of the merge preview, pre-formatted for the page.</summary>
