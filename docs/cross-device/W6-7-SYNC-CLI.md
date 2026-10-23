@@ -329,3 +329,75 @@ exit=1
 5. **文案硬编码中文**：与 `MediaHub.Sync` 其他 presenter 一致，尚无本地化资源。
 6. **未覆盖并发写**：两个 CLI 进程同时对同一个 root 执行 `--apply` 时，靠 store 的原子替换保证不写坏文件，但后写者会覆盖前者的删除意图（`baseline-nothing-forgotten` 能暴露部分情况）。
 
+
+## W6-20 追加 —— 根目录与导出路径的输入校验（对抗性回归修复）
+
+### 问题
+
+W12b 对抗性回归实测出两处输入处理缺陷：
+
+1. `--root` 指向一个**已存在的普通文件**时，`FileLocalSourceStore` / `FileSourceSyncBaselineStore` / `FilePairedDeviceStore` 都读不到文档，于是被静默当成「空根」：命令报 counts 0、exit 0。脚本与人都无法区分「库确实是空的」与「路径给错了」，而且这个错永远不会自己暴露。
+2. `export --out` 不规范化 `..`：日志与 JSON 回显的路径和实际落盘的路径不是同一个字符串，逐字比对会判错；`--out` 指向已存在目录时，失败以文件系统异常形式出现在写入阶段，消息不稳定、不可判定。
+
+### 决策（续 D11–D13）
+
+- **D11：`--root` 存在但不是目录 → 稳定码 `root-not-a-directory` + exit 2。** 路径**不存在仍按「新建根」处理**（export / import 本来就会创建它），不算错——这条区分是本次修复的重点，不能把「第一次用」也判死。
+- **D12：JSON 增加 `rootExisted`，语义是「命令运行之前该目录是否已存在」。** 该值在 `Execute` 入口采样一次；不能在写结果时现问——export / import 已经把目录建出来了，现问永远答 true，字段就没有信息量（首版实现正是这样，被 `Export_ReportsThatANewRootDidNotExistYet` 钉成红灯后才改）。
+- **D13：导出路径统一 `Path.GetFullPath` 规范化，同一个字符串既用于写入也用于 JSON / 文本回显。** 已存在目录 → `output-is-directory`；路径不可规范化（非法字符 / 超长 / 不支持格式）→ `output-path-invalid`。两者都是 exit 2。
+
+### 新增稳定码
+
+| 码 | 退出码 | 触发 | 备注 |
+| --- | --- | --- | --- |
+| `root-not-a-directory` | 2 | `--root` 指向已存在的普通文件（或其他非目录） | 十个需要根目录的命令都先校验，**早于**读 `--in` / `--out`，所以「根给错」不会被伪装成输出路径错误 |
+| `output-is-directory` | 2 | `export` 的 `--out`（或缺省导出路径）指向已存在目录 | 目录内一个文件都不写 |
+| `output-path-invalid` | 2 | 导出路径无法规范化 | 原 `ResolveExportPath` 的异常出口改为稳定码，不再让 `ArgumentException` 冒到顶层 |
+
+`rootExisted` 出现在 export / import / plan / baseline show / baseline forget / pair list / pair forget / transfer serve / transfer send / transfer roundtrip 的 JSON 里（含 `WriteRound` 与 `WriteImportResult`），位置紧跟 `root`。
+
+### 已接受差异（只补文档，不改行为）
+
+1. **挑战帧必须是第一帧**：`SourceSyncTransfer.cs:220-259` 已强制——当调用方给了 `expectedChallenge` 而第 0 帧不是 `0x01` 挑战帧时，直接 `challenge-mismatch` 并停止读后续帧。更宽容的写法（先读一帧再判）会让「谁先说话」成为协议里的非确定项，故不改。
+2. **`received == total` 之后的额外帧被忽略**：`SourceSyncTransfer.cs:336` 在收满已宣告字节数后提前返回（信封此时已完整）。多余帧不会污染信封也不会报错，只可能来自写错的对端；判决为忽略，而不是为一个已经成功的传输制造假失败。
+
+### 实测（本机真实运行，2026-10-24，D:\mh-w6；为可读性把临时目录前缀缩成 `<临时目录>`）
+
+```
+# 1) --root 指向一个普通文件：exit 2，稳定码，消息里带完整路径
+$ dotnet MediaHub.SyncCli.dll export --root <临时目录>\plain.txt --json ; echo exit=$?
+{"ok":false,"error":{"code":"root-not-a-directory","message":"the --root path exists but is not a directory: <临时目录>\\plain.txt"}}
+error root-not-a-directory: the --root path exists but is not a directory: <临时目录>\plain.txt
+exit=2
+
+# 2) --root 尚不存在：不是错误，按新建根处理，rootExisted=false
+$ dotnet MediaHub.SyncCli.dll export --root <临时目录>\fresh --json ; echo exit=$?
+{"command":"export","root":"<临时目录>\\fresh","rootExisted":false,"path":"<临时目录>\\fresh\\sync-envelope.json","encrypted":false,"deviceId":"cli-inkchoi","snapshotId":"38bacbbc…","sourceCount":0,"deletionCount":0,"canSendSecrets":false,"sealedSecretCount":0,"warningCount":1,"warnings":["empty-envelope"],"bytes":235}
+exit=0
+
+# 3) --out 指向已存在目录：exit 2，目录仍为空
+$ dotnet MediaHub.SyncCli.dll export --root <临时目录>\fresh --out <临时目录>\adir --json ; echo exit=$?
+{"ok":false,"error":{"code":"output-is-directory","message":"the export path is an existing directory: <临时目录>\\adir"}}
+exit=2
+
+# 4) --out 带 .. 段：回显的就是落盘的那个规范化路径（并且 rootExisted 现在为 true）
+$ dotnet MediaHub.SyncCli.dll export --root <临时目录>\fresh --out <临时目录>\fresh\a\..\b\env.json --json ; echo exit=$?
+{"command":"export","root":"<临时目录>\\fresh","rootExisted":true,"path":"<临时目录>\\fresh\\b\\env.json",…}
+exit=0
+$ find <临时目录>\fresh -type f
+fresh/sync-envelope.json
+fresh/b/env.json
+```
+
+### 测试
+
+`windows/tests/MediaHub.Tests/SyncCliRootAndOutputPathTests.cs`：18 个 `[Fact]`，钉住下列事实——
+
+- 十个需要根目录的命令（export / import / plan / secret-check / baseline show / baseline forget / pair list / pair forget / transfer send / transfer roundtrip）在 `--root` 是普通文件时**全部** exit 2 + `root-not-a-directory`，且 stderr 同时带码与路径；
+- 被拒绝的根**原样保留**（字节不变），目录里不产生任何 store 文件；
+- `rootExisted` 在「目录已存在」为 true、在「本次新建」为 false，`path` 落在请求的根下；
+- `--out` 的 `..` 段在 JSON 与文本两种模式下都被规范化，落盘位置与回显字符串一致；
+- `--out` 是已存在目录时 exit 2 + `output-is-directory`，且目录为空；根检查**先于** `--out` 检查（同一命令里两个都错时先报根）。
+
+实测行：`已通过! - 失败: 0，通过: 18，已跳过: 0，总计: 18，持续时间: 217 ms`。
+
+另有两条 W12b 对抗性用例的旧契约被本次修复推翻，已就地翻转（它们的名字与断言都写着「容忍」旧行为）：`A_root_that_is_a_file_is_tolerated_but_never_overwritten` → `A_root_that_is_a_file_is_refused_instead_of_being_treated_as_empty`（现在断言 exit 2 + `root-not-a-directory` + 文件字节不变），以及 `A_root_with_a_parent_traversal_is_resolved_by_the_operating_system` → `A_root_with_a_parent_traversal_is_canonicalised_before_it_is_echoed`（现在断言回显的是 `Path.GetFullPath` 的结果、不含 `..`，落盘位置不变）。这是**契约变更**而非放宽：旧断言把「静默当成空根」和「回显未规范化路径」当成了正确行为。

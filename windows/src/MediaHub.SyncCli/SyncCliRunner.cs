@@ -29,6 +29,9 @@ public sealed class SyncCliRunner
     private readonly TextWriter _err;
     private readonly Func<DateTimeOffset> _clock;
 
+    /// <summary>Whether --root named an existing directory before the command ran (W6-20).</summary>
+    private bool _rootExisted;
+
     /// <summary>Creates a runner that reports to the given writers.</summary>
     public SyncCliRunner(TextWriter stdout, TextWriter stderr, Func<DateTimeOffset>? clock = null)
     {
@@ -43,6 +46,11 @@ public sealed class SyncCliRunner
     public int Execute(CliInvocation invocation)
     {
         ArgumentNullException.ThrowIfNull(invocation);
+
+        // W6-20: whether --root already existed is sampled before the command runs. Export and import
+        // create the directory as a side effect, so asking Directory.Exists while writing the result
+        // would always answer "yes" and the field would carry no information.
+        _rootExisted = !string.IsNullOrWhiteSpace(invocation.Root) && Directory.Exists(invocation.Root.Trim());
         return invocation.Command switch
         {
             SyncCliCommand.Export => RunExport(invocation),
@@ -132,7 +140,11 @@ public sealed class SyncCliRunner
             return Fail(invocation, CliExitCode.InputProblem, "store-write-failed", error.Message);
         }
 
-        string path = ResolveExportPath(invocation, export.IsEncrypted);
+        if (!TryResolveExportPath(invocation, export.IsEncrypted, out string path, out string pathCode, out string? pathError))
+        {
+            return Fail(invocation, CliExitCode.InputProblem, pathCode, pathError ?? "the export path could not be resolved");
+        }
+
         byte[] bytes = export.IsEncrypted ? export.Archive : Encoding.UTF8.GetBytes(export.EnvelopeJson);
         try
         {
@@ -165,6 +177,7 @@ public sealed class SyncCliRunner
                 writer.WriteStartObject();
                 writer.WriteString("command", "export");
                 writer.WriteString("root", invocation.Root);
+                writer.WriteBoolean("rootExisted", RootExisted());
                 writer.WriteString("path", path);
                 writer.WriteBoolean("encrypted", export.IsEncrypted);
                 writer.WriteString("deviceId", session.DeviceId);
@@ -429,6 +442,7 @@ public sealed class SyncCliRunner
                 writer.WriteString("command", "baseline");
                 writer.WriteString("subcommand", "show");
                 writer.WriteString("root", invocation.Root);
+                writer.WriteBoolean("rootExisted", RootExisted());
                 writer.WriteString("path", store.FilePath);
                 writer.WriteBoolean("exists", exists);
                 writer.WriteNumber("documentVersion", FileSourceSyncBaselineStore.CurrentDocumentVersion);
@@ -545,6 +559,7 @@ public sealed class SyncCliRunner
                 writer.WriteBoolean("dryRun", !invocation.Apply);
                 writer.WriteBoolean("applied", applied);
                 writer.WriteString("root", invocation.Root);
+                writer.WriteBoolean("rootExisted", RootExisted());
                 writer.WriteString("path", store.FilePath);
                 writer.WriteString("deviceId", known);
                 writer.WriteString("sourceId", target?.SyncSourceId ?? "");
@@ -692,6 +707,7 @@ public sealed class SyncCliRunner
                 writer.WriteString("command", "pair");
                 writer.WriteString("subcommand", "list");
                 writer.WriteString("root", invocation.Root);
+                writer.WriteBoolean("rootExisted", RootExisted());
                 writer.WriteString("path", store.FilePath);
                 writer.WriteNumber("count", devices.Count);
                 writer.WriteStartArray("devices");
@@ -778,6 +794,7 @@ public sealed class SyncCliRunner
                 writer.WriteBoolean("dryRun", !invocation.Apply);
                 writer.WriteBoolean("applied", applied);
                 writer.WriteString("root", invocation.Root);
+                writer.WriteBoolean("rootExisted", RootExisted());
                 writer.WriteString("path", store.FilePath);
                 writer.WriteString("deviceId", device.DeviceId);
                 writer.WriteString("displayName", device.DisplayName);
@@ -909,6 +926,15 @@ public sealed class SyncCliRunner
     {
         string deviceA = invocation.DeviceA!.Trim();
         string deviceB = invocation.DeviceB!.Trim();
+
+        // The two devices live in <root>/a and <root>/b, so the base root is validated first: if it
+        // is a regular file the sub-paths look merely "missing" and the write would fail later with
+        // a file-system message instead of naming the typo (W6-20).
+        if (!TryValidateRoot(invocation, invocation.Root, out int rootExit))
+        {
+            return rootExit;
+        }
+
         string rootA = Path.Combine(invocation.Root, "a");
         string rootB = Path.Combine(invocation.Root, "b");
         if (!TryOpenStoresAt(invocation, rootA, out FileLocalSourceStore sourcesA, out FileSourceSyncBaselineStore baselinesA, out int exitA))
@@ -1078,6 +1104,13 @@ public sealed class SyncCliRunner
         out FileSourceSyncBaselineStore baselines,
         out int exitCode)
     {
+        sources = null!;
+        baselines = null!;
+        if (!TryValidateRoot(invocation, directory, out exitCode))
+        {
+            return false;
+        }
+
         sources = new FileLocalSourceStore(directory);
         baselines = new FileSourceSyncBaselineStore(directory);
         if (sources.LoadError is not null)
@@ -1163,6 +1196,7 @@ public sealed class SyncCliRunner
                 writer.WriteString("command", "transfer");
                 writer.WriteString("subcommand", "serve");
                 writer.WriteString("root", invocation.Root);
+                writer.WriteBoolean("rootExisted", RootExisted());
                 writer.WriteString("address", address);
                 writer.WriteNumber("port", port);
                 writer.WriteBoolean("once", true);
@@ -1188,6 +1222,7 @@ public sealed class SyncCliRunner
                 writer.WriteString("command", "transfer");
                 writer.WriteString("subcommand", "send");
                 writer.WriteString("root", invocation.Root);
+                writer.WriteBoolean("rootExisted", RootExisted());
                 writer.WriteString("deviceId", envelope.DeviceId);
                 writer.WriteString("address", address);
                 writer.WriteNumber("port", port);
@@ -1226,6 +1261,7 @@ public sealed class SyncCliRunner
                 writer.WriteString("command", "transfer");
                 writer.WriteString("subcommand", "roundtrip");
                 writer.WriteString("root", invocation.Root);
+                writer.WriteBoolean("rootExisted", RootExisted());
                 writer.WriteString("rootA", rootA);
                 writer.WriteString("rootB", rootB);
                 writer.WriteString("deviceA", deviceA);
@@ -1342,8 +1378,45 @@ public sealed class SyncCliRunner
 
     private const string LoopbackPlaceholderUrl = "http://127.0.0.1:0/";
 
+    /// <summary>Stable code for a --root that names something that is not a directory.</summary>
+    private const string RootNotADirectoryCode = "root-not-a-directory";
+
+    /// <summary>True when --root named a directory that already existed before this run touched it.</summary>
+    private bool RootExisted() => _rootExisted;
+
+    /// <summary>
+    /// The --root value names the directory the stores live in. A path that exists but is not a
+    /// directory is a typo, not an empty store: every command has to refuse it before any store is
+    /// opened, otherwise the user reads "0 sources" and believes there are none (W6-20, found by the
+    /// W12b adversarial pass). A path that does not exist yet stays valid — the stores create it on
+    /// the first write — and every JSON document carries <c>rootExisted</c> so a caller can tell the
+    /// two apart without guessing.
+    /// </summary>
+    private bool TryValidateRoot(CliInvocation invocation, string? directory, out int exitCode)
+    {
+        exitCode = CliExitCode.Success;
+        string root = (directory ?? "").Trim();
+        if (root.Length == 0 || Directory.Exists(root) || !File.Exists(root))
+        {
+            return true;
+        }
+
+        exitCode = Fail(
+            invocation,
+            CliExitCode.InputProblem,
+            RootNotADirectoryCode,
+            "the --root path exists but is not a directory: " + root);
+        return false;
+    }
+
     private bool TryLoadBaselineStore(CliInvocation invocation, out FileSourceSyncBaselineStore store, out int exitCode)
     {
+        store = null!;
+        if (!TryValidateRoot(invocation, invocation.Root, out exitCode))
+        {
+            return false;
+        }
+
         store = new FileSourceSyncBaselineStore(invocation.Root);
         _ = store.PeerDeviceIds;
         return TryCheckLoadError(invocation, store.LoadError, store.LastQuarantinedPath, "the sync baseline could not be read", out exitCode);
@@ -1351,6 +1424,12 @@ public sealed class SyncCliRunner
 
     private bool TryLoadPairedStore(CliInvocation invocation, out FilePairedDeviceStore store, out int exitCode)
     {
+        store = null!;
+        if (!TryValidateRoot(invocation, invocation.Root, out exitCode))
+        {
+            return false;
+        }
+
         store = new FilePairedDeviceStore(invocation.Root);
         _ = store.GetAll();
         return TryCheckLoadError(invocation, store.LoadError, store.LastQuarantinedPath, "the paired-device list could not be read", out exitCode);
@@ -1407,6 +1486,7 @@ public sealed class SyncCliRunner
                 writer.WriteBoolean("dryRun", dryRun);
                 writer.WriteBoolean("applied", false);
                 writer.WriteString("root", invocation.Root);
+                writer.WriteBoolean("rootExisted", RootExisted());
                 writer.WriteString("in", invocation.InPath ?? "");
                 writer.WriteBoolean("hasWork", round.HasWork);
                 WriteCounts(writer, round.Apply.Count, round.RequiresApproval.Count, round.Ignored.Count);
@@ -1438,6 +1518,7 @@ public sealed class SyncCliRunner
                 writer.WriteBoolean("applied", true);
                 writer.WriteBoolean("succeeded", result.Succeeded);
                 writer.WriteString("root", invocation.Root);
+                writer.WriteBoolean("rootExisted", RootExisted());
                 writer.WriteString("in", invocation.InPath ?? "");
                 writer.WriteNumber("appliedCount", result.Applied.Count);
                 writer.WriteNumber("requiresApprovalCount", result.RequiresApproval.Count);
@@ -1559,16 +1640,55 @@ public sealed class SyncCliRunner
         return count;
     }
 
-    private static string ResolveExportPath(CliInvocation invocation, bool encrypted)
+    /// <summary>
+    /// Where an export lands. The candidate path is normalized with <c>Path.GetFullPath</c> before it
+    /// is used for the write and before it is echoed in JSON or text: <c>--out a/../b/x.json</c> used
+    /// to be written through its <c>..</c> segments but reported verbatim, so a caller could not
+    /// compare the two strings (W6-20). A path that is an existing directory is refused here as well,
+    /// because letting the write fail would surface it as an IOException about the file system
+    /// instead of naming the actual mistake.
+    /// </summary>
+    private static bool TryResolveExportPath(
+        CliInvocation invocation,
+        bool encrypted,
+        out string path,
+        out string code,
+        out string? error)
     {
-        if (invocation.OutPath is not null)
+        path = "";
+        code = "output-path-invalid";
+        error = null;
+        string candidate = invocation.OutPath is not null
+            ? invocation.OutPath
+            : Path.Combine(invocation.Root, encrypted ? DefaultArchiveFileName : DefaultEnvelopeFileName);
+        try
         {
-            return invocation.OutPath;
+            path = Path.GetFullPath(candidate);
+        }
+        catch (ArgumentException failure)
+        {
+            error = "the --out path is not usable: " + failure.Message;
+            return false;
+        }
+        catch (NotSupportedException failure)
+        {
+            error = "the --out path is not usable: " + failure.Message;
+            return false;
+        }
+        catch (PathTooLongException failure)
+        {
+            error = "the --out path is too long: " + failure.Message;
+            return false;
         }
 
-        return Path.Combine(
-            invocation.Root,
-            encrypted ? DefaultArchiveFileName : DefaultEnvelopeFileName);
+        if (Directory.Exists(path))
+        {
+            code = "output-is-directory";
+            error = "the export path is an existing directory: " + path;
+            return false;
+        }
+
+        return true;
     }
 
     private bool TryReadInput(CliInvocation invocation, out byte[]? bytes, out int exitCode)
@@ -1714,6 +1834,12 @@ public sealed class SyncCliRunner
     private bool TryOpenStore(CliInvocation invocation, out FileLocalSourceStore store, out int exitCode)
     {
         exitCode = 0;
+        store = null!;
+        if (!TryValidateRoot(invocation, invocation.Root, out exitCode))
+        {
+            return false;
+        }
+
         store = new FileLocalSourceStore(invocation.Root);
         if (store.LoadError is null)
         {

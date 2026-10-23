@@ -799,7 +799,7 @@ public sealed class SyncCliRootAdversarialTests : IDisposable
     }
 
     [Fact]
-    public void A_root_that_is_a_file_is_tolerated_but_never_overwritten()
+    public void A_root_that_is_a_file_is_refused_instead_of_being_treated_as_empty()
     {
         string fileRoot = Path.Combine(_root, "root-is-a-file");
         byte[] original = Encoding.UTF8.GetBytes("this file happens to sit where a device root was expected");
@@ -807,14 +807,19 @@ public sealed class SyncCliRootAdversarialTests : IDisposable
 
         (int exitCode, string stdout, string stderr) = Run("pair", "list", "--root", fileRoot, "--json");
 
-        Assert.True(exitCode == 0, "pair list failed: " + stderr);
+        // W6-20 flipped this contract: a --root that names an existing file used to be tolerated as an
+        // empty root (exit 0, count 0), which made "empty store" and "wrong path" indistinguishable.
+        // It is now an input problem with a stable code, and the file is never touched.
+        Assert.Equal(2, exitCode);
         Assert.Equal(original, File.ReadAllBytes(fileRoot));
         JsonElement document = ParseSingleDocument(stdout);
-        Assert.Equal(0, document.GetProperty("count").GetInt32());
+        Assert.False(document.GetProperty("ok").GetBoolean());
+        Assert.Equal("root-not-a-directory", document.GetProperty("error").GetProperty("code").GetString());
+        Assert.Contains("root-not-a-directory", stderr, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void A_root_with_a_parent_traversal_is_resolved_by_the_operating_system()
+    public void A_root_with_a_parent_traversal_is_canonicalised_before_it_is_echoed()
     {
         string root = SeededRoot();
         Directory.CreateDirectory(Path.Combine(_root, "a"));
@@ -825,13 +830,16 @@ public sealed class SyncCliRootAdversarialTests : IDisposable
 
         Assert.True(exitCode == 0, "export failed: " + stderr);
         Assert.True(File.Exists(resolved));
-        // The runner does not canonicalise --out: the JSON echoes the argument exactly as given while
-        // the operating system resolves ".." and the bytes land in the parent directory.
-        Assert.Equal(traversal, ParseSingleDocument(stdout).GetProperty("path").GetString());
+        // W6-20: --out is canonicalised with Path.GetFullPath (W6-20 / D13), so the JSON echoes the very
+        // string that was written, not the argument with ".." still inside it. The bytes still land in
+        // the parent directory - only the reported path changed.
+        string echoed = ParseSingleDocument(stdout).GetProperty("path").GetString()!;
+        Assert.Equal(Path.GetFullPath(traversal), echoed);
+        Assert.DoesNotContain("..", echoed, StringComparison.Ordinal);
         Assert.Single(Directory.EnumerateFiles(Path.Combine(_root, "escaped")));
         Assert.Equal(
             Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(resolved))),
-            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(traversal))));
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(echoed))));
     }
 
     [Theory]
