@@ -60,7 +60,7 @@ jobs:
         working-directory: windows
         run: dotnet build MediaHub.Windows.sln -c Debug -p:Platform=x64 --no-restore
 
-      - name: Unit and contract tests
+      - name: Unit and contract tests (MediaHub.Tests)
         working-directory: windows
         run: >
           dotnet test tests/MediaHub.Tests/MediaHub.Tests.csproj
@@ -68,19 +68,44 @@ jobs:
           --logger "trx;LogFileName=windows-tests.trx"
           --results-directory ./artifacts/test-results
 
-      - name: Fail if no test results were produced
+      # The WebDAV provider suite used to be built here but never executed: `dotnet test` was pointed at
+      # MediaHub.Tests only, so its 104 tests were green "by construction" and never ran in CI. Two
+      # separate invocations keep the project filters explicit instead of relying on the solution layout.
+      - name: Unit and contract tests (MediaHub.WebDav.Tests)
+        working-directory: windows
+        run: >
+          dotnet test tests/MediaHub.WebDav.Tests/MediaHub.WebDav.Tests.csproj
+          -c Debug -p:Platform=x64 --no-build
+          --logger "trx;LogFileName=webdav-tests.trx"
+          --results-directory ./artifacts/test-results
+
+      - name: Fail if a suite ran nothing or lost tests
         shell: pwsh
         working-directory: windows
         run: |
-          # A test step that silently runs zero tests would otherwise be reported as success.
-          $files = Get-ChildItem ./artifacts/test-results -Filter *.trx -ErrorAction SilentlyContinue
-          if (-not $files) { throw "no .trx produced: the test run executed nothing" }
-          $xml = [xml](Get-Content $files[0].FullName -Raw)
-          $total = [int]$xml.TestRun.ResultSummary.Counters.total
-          $failed = [int]$xml.TestRun.ResultSummary.Counters.failed
-          "tests total=$total failed=$failed"
-          if ($total -lt 50) { throw "expected at least 50 tests, got $total" }
-          if ($failed -ne 0) { throw "$failed test(s) failed" }
+          # A test step that silently runs zero tests would otherwise be reported as success, and a
+          # suite that quietly loses half its cases still prints "Passed!". Assert each suite by name
+          # with a floor just under its known size (MediaHub.Tests 438, MediaHub.WebDav.Tests 104 as of
+          # 2026-10-24); raise the floors when the suites grow.
+          $expected = @(
+            @{ File = "windows-tests.trx"; Suite = "MediaHub.Tests";          Floor = 400 },
+            @{ File = "webdav-tests.trx";  Suite = "MediaHub.WebDav.Tests";    Floor = 100 }
+          )
+          $all = 0
+          foreach ($e in $expected) {
+            $path = Join-Path ./artifacts/test-results $e.File
+            if (-not (Test-Path $path)) { throw "no test results for $($e.Suite): $($e.File) was not produced" }
+            $xml = [xml](Get-Content $path -Raw)
+            $total = [int]$xml.TestRun.ResultSummary.Counters.total
+            $failed = [int]$xml.TestRun.ResultSummary.Counters.failed
+            $skipped = [int]$xml.TestRun.ResultSummary.Counters.notExecuted
+            "$($e.Suite): total=$total failed=$failed notExecuted=$skipped"
+            if ($total -lt $e.Floor) { throw "$($e.Suite) ran $total tests, expected at least $($e.Floor) - cases were dropped or skipped" }
+            if ($failed -ne 0) { throw "$($e.Suite): $failed test(s) failed" }
+            if ($skipped -ne 0) { throw "$($e.Suite): $skipped test(s) were not executed" }
+            $all += $total
+          }
+          "combined tests=$all"
 
       - name: Engine integration probe (real playback against the committed fixture)
         shell: pwsh
