@@ -5,13 +5,13 @@
 
 | 生成信息 | 值 |
 | --- | --- |
-| 生成时间（UTC） | 2026-10-23T18:57:12Z |
-| 生成命令 | pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir "D:\mh-verify\license" |
+| 生成时间（UTC） | 2026-10-24T00:00:00Z |
+| 生成命令 | pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir "windows/artifacts/license-report" -Sbom -TimestampUtc "2026-10-24T00:00:00Z" |
 | dotnet SDK / PowerShell | 10.0.113 / 7.6.7 |
 | 仓库 | D:\deepseek_test\MediaHub_Win |
-| 分支 / HEAD | feature/windows-client / afb0ef2 |
-| git describe | v0.1.0-alpha.1-278-gafb0ef2 |
-| 数据来源 | 11 个 csproj 的 obj/project.assets.json + 本机 NuGet 缓存中的 .nuspec |
+| 分支 / HEAD | feature/windows-client / 1c30471 |
+| git describe | v0.1.0-alpha.1-317-g1c30471-dirty |
+| 数据来源 | 13 个 csproj 的 obj/project.assets.json + 本机 NuGet 缓存中的 .nuspec |
 
 ## 0. 覆盖范围与边界
 
@@ -37,7 +37,7 @@
 | Newtonsoft.Json | 13.0.1 | MIT | expression | MediaHub.Tests, MediaHub.WebDav.Tests |
 | System.Numerics.Tensors | 9.0.0 | MIT | expression | MediaHub.App |
 | System.Reflection.Metadata | 1.6.0 | https://github.com/dotnet/corefx/blob/master/LICENSE.TXT | licenseUrl | MediaHub.Tests, MediaHub.WebDav.Tests |
-| System.Security.Cryptography.ProtectedData | 10.0.13 | MIT | expression | MediaHub.App, MediaHub.Net, MediaHub.Providers, MediaHub.Providers.WebDav, MediaHub.Tests, MediaHub.WebDav.Tests |
+| System.Security.Cryptography.ProtectedData | 10.0.13 | MIT | expression | MediaHub.App, MediaHub.Net, MediaHub.Providers, MediaHub.Providers.WebDav, MediaHub.ResumeProbe, MediaHub.Tests, MediaHub.WebDav.Tests |
 
 ## 2. 仅构建期 / 测试期使用的 NuGet 依赖
 
@@ -84,6 +84,49 @@
 - LGPL 候选构建已存在但**尚未切换**：windows/engine/lgpl/dist/libmpv-2.dll - 3,327,274 B, sha256 20035902597d...ee4a3c0a - built and verified, NOT shipped (windows/docs/licensing/W5-LGPL-BUILD.md:18-22)。
 - 切换到 LGPL 构建后必须履行的义务、可替换 DLL 的要求与分发前 checklist：`windows/docs/LGPL-COMPLIANCE.md`。
 
+### 3.3 LGPL flavour 额外带入的运行时依赖（默认 flavour 不分发它们）
+
+默认 flavour（-p:LibMpvFlavour=gpl）只带 `windows/native/libmpv/libmpv-2.dll`。下表是 **LGPL flavour 额外带入的**依赖，清单来自 `windows/engine/lgpl/dist/runtime-dependencies-collected.txt`（由 windows/tools/collect-lgpl-runtime.ps1 生成），许可转录自 `windows/engine/lgpl/component-licences.txt`。它们不随当前默认产物分发，但切到 LGPL flavour 就随包。
+
+| 文件 | 组件 | 许可 | 证据 |
+| --- | --- | --- | --- |
+| `avcodec-62.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (built by windows/engine/lgpl/build-ffmpeg-lgpl.sh; its configure reports "LGPL version 2.1 or later") |
+| `swscale-9.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (same FFmpeg build) |
+| `swresample-6.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (same FFmpeg build) |
+| `libwinpthread-1.dll` | mingw-w64 runtime | 未记录（component-licences.txt 无此包） | component-licences.txt 无行 - 待核实 |
+| `libunibreak-7.dll` | libunibreak | Zlib | component-licences.txt:18 |
+| `libstdc++-6.dll` | libstdc++ | GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later | component-licences.txt:26 |
+| `libspirv-cross-c-shared.dll` | spirv-cross | Apache-2.0 | component-licences.txt:9 |
+| `libshaderc_shared.dll` | shaderc | Apache-2.0 | component-licences.txt:8 |
+| `libpng16-16.dll` | libpng | custom (see upstream LICENSE) | component-licences.txt:20 |
+| `libplacebo-360.dll` | libplacebo | LGPL2.1 | component-licences.txt:7 |
+| `libpcre2-8-0.dll` | pcre2 | 未记录（component-licences.txt 无此包） | component-licences.txt 无行 - 待核实 |
+| `liblcms2-2.dll` | lcms2 | MIT AND GPL-3.0-or-later | component-licences.txt:16 |
+| `libintl-8.dll` | gettext | 未记录（component-licences.txt 无此包） | component-licences.txt 无行 - 待核实 |
+| `libiconv-2.dll` | libiconv | GPL-3.0-or-later | component-licences.txt:23 |
+| `libharfbuzz-0.dll` | harfbuzz | MIT | component-licences.txt:13 |
+| `vulkan-1.dll` | vulkan-loader | Apache-2.0 | component-licences.txt:10 |
+| `libgraphite2.dll` | graphite2 | LGPL-2.1-or-later | component-licences.txt:24 |
+| `libgcc_s_seh-1.dll` | libgcc | GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later | component-licences.txt:25 |
+| `libfribidi-0.dll` | fribidi | LGPL-2.1-or-later | component-licences.txt:14 |
+| `libfreetype-6.dll` | freetype | GPL-2.0-or-later OR FTL | component-licences.txt:12 |
+| `libfontconfig-1.dll` | fontconfig | custom (see upstream COPYING) | component-licences.txt:15 |
+| `libexpat-1.dll` | expat | 未记录（component-licences.txt 无此包） | component-licences.txt 无行 - 待核实 |
+| `libdovi.dll` | libdovi | MIT | component-licences.txt:17 |
+| `libbz2-1.dll` | bzip2 | 未记录（component-licences.txt 无此包） | component-licences.txt 无行 - 待核实 |
+| `libbrotlidec.dll` | brotli | MIT | component-licences.txt:21 |
+| `libbrotlicommon.dll` | brotli | MIT | component-licences.txt:21 |
+| `libass-9.dll` | libass | ISC | component-licences.txt:6 |
+| `avutil-60.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (same FFmpeg build) |
+| `avformat-62.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (same FFmpeg build) |
+| `avfilter-11.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (same FFmpeg build) |
+| `avdevice-62.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (same FFmpeg build) |
+| `libglib-2.0-0.dll` | glib2 | LGPL-2.1-or-later | component-licences.txt:19 |
+| `zlib1.dll` | zlib | Zlib | component-licences.txt:22 |
+
+- 合计 **33** 个 DLL，总字节 58,826,576。其中 libiconv-2.dll（GPL-3.0-or-later）、liblcms2-2.dll（MIT AND GPL-3.0-or-later）、libfreetype-6.dll（GPL-2.0-or-later OR FTL）、libgcc_s_seh-1.dll 与 libstdc++-6.dll（GPL-3.0-or-later WITH GCC-exception-3.1）携带 GPL 家族条款 ⇒ **切到 LGPL flavour 并不等于零 GPL 义务**，与 `windows/docs/licensing/W5-LGPL-BUILD.md:228-235` 记录的残留义务一致。
+- 缺口：libwinpthread-1.dll、libpcre2-8-0.dll、libintl-8.dll、libexpat-1.dll、libbz2-1.dll 在 `windows/engine/lgpl/component-licences.txt` 里**没有声明行**，本表只能标「未记录」。发布 LGPL flavour 前必须补齐这些包的许可证据（pacman -Si 的 License 字段）。
+
 ## 4. 仓库自身的许可
 
 - 仓库根**没有 LICENSE 文件**：`windows/docs/licensing/LICENCE-DECISION.md:180-190` 记录了这一点（`git ls-files` 无匹配，`git log -- LICENSE` 无输出）。
@@ -95,7 +138,8 @@
 策略：无许可元数据、或出现 GPL-/AGPL-/SSPL-/BUSL-/Commons-Clause 许可 → 违规；仅 `<licenseUrl>` 视为警告，`-RequireExact` 时升级为违规（要求 SPDX 表达式）。
 
 - 违规：**0**。
-- 警告：**3**
+- 警告：**4**
+  - MediaHub.Player.Mpv: project.assets.json is older than the .csproj - the resolved graph may be stale (dotnet restore windows/MediaHub.Windows.sln)
   - Microsoft.Windows.SDK.BuildTools/10.0.26100.4654: only the deprecated licenseUrl is published - no SPDX expression (a violation under -RequireExact)
   - System.Reflection.Metadata/1.6.0: only the deprecated licenseUrl is published - no SPDX expression (a violation under -RequireExact)
   - xunit.abstractions/2.0.3: only the deprecated licenseUrl is published - no SPDX expression (a violation under -RequireExact)
@@ -109,4 +153,4 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir <任意目录> -S
 
 脚本退出码：0 干净 / 1 未找到可检查的工程 / 2 缺 `project.assets.json`（先 restore）/ 3 策略违规。
 
-相关文件：`windows/docs/sbom-windows.cdx.json`（CycloneDX 1.5）、`windows/docs/LGPL-COMPLIANCE.md`、`windows/THIRD-PARTY-NOTICES.md`（历史手工清单：引擎 GPL 判定与固定摘要）、`windows/docs/licensing/`（W3/W5 记录）。
+相关文件：`windows/docs/sbom-windows.cdx.json`（CycloneDX 1.5）、`windows/docs/LGPL-COMPLIANCE.md`、`windows/THIRD-PARTY-NOTICES.md`（历史手工清单：引擎 GPL 判定与固定摘要）、`windows/tools/check-licence-surface.ps1`（核对本文件与 SBOM 是否跟得上仓库现状，退出码 0/1）、`windows/docs/licensing/`（W3/W5/W11b 记录）。

@@ -4,7 +4,7 @@
   "serialNumber": "urn:uuid:86b96735-9dbc-a7ba-fbcc-a4aec1d64053",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-10-23T18:56:11Z",
+    "timestamp": "2026-10-24T00:00:00Z",
     "tools": [
       {
         "vendor": "MediaHub",
@@ -14,18 +14,18 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/MediaHub.Windows@v0.1.0-alpha.1-278-gafb0ef2",
+      "bom-ref": "pkg:generic/MediaHub.Windows@v0.1.0-alpha.1-317-g1c30471",
       "name": "MediaHub.Windows",
-      "version": "v0.1.0-alpha.1-278-gafb0ef2"
+      "version": "v0.1.0-alpha.1-317-g1c30471"
     },
     "properties": [
       {
         "name": "mediahub:source-revision",
-        "value": "feature/windows-client@afb0ef2"
+        "value": "feature/windows-client@1c30471"
       },
       {
         "name": "mediahub:git-describe",
-        "value": "v0.1.0-alpha.1-278-gafb0ef2"
+        "value": "v0.1.0-alpha.1-317-g1c30471-dirty"
       },
       {
         "name": "mediahub:own-license",
@@ -34,6 +34,10 @@
       {
         "name": "mediahub:engine-license-blocker",
         "value": "libmpv-2.dll is a GPL-3.0-or-later build (windows/THIRD-PARTY-NOTICES.md:18); the LGPL candidate exists but is not shipped"
+      },
+      {
+        "name": "mediahub:lgpl-flavour-dependencies",
+        "value": "33 extra runtime DLLs under windows/engine/lgpl/dist/runtime-dependencies-collected.txt (licences transcribed from windows/engine/lgpl/component-licences.txt; 5 unrecorded); the default gpl flavour does not ship them"
       }
     ]
   },
