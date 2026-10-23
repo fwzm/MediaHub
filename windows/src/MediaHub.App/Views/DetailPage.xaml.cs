@@ -1,5 +1,6 @@
 using MediaHub.App.Services;
 using MediaHub.Domain;
+using Microsoft.UI.Xaml.Automation;
 using MediaHub.Providers;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -15,6 +16,8 @@ public sealed partial class DetailPage : Page
     private MediaCardViewModel? _card;
     private IReadOnlyList<Season> _seasons = Array.Empty<Season>();
     private bool _loaded;
+    private bool _favorite;
+    private bool _favoriteBusy;
 
     private sealed record StreamRow(string Label, string Value);
     private sealed record EpisodeRow(string Id, string EpisodeLabel, string Title, string ProgressLabel);
@@ -79,6 +82,13 @@ public sealed partial class DetailPage : Page
         // with 500, so offering the play button here only produces an error the user cannot act on.
         bool isFolder = item.IsFolder || item.Type == MediaType.Folder;
         PlayButton.Visibility = isFolder ? Visibility.Collapsed : Visibility.Visible;
+
+        // Favourites are a server-side write. The button appears only when this source advertises the
+        // capability, so a source without it shows no control rather than one that always fails.
+        _favorite = item.UserDataFavorite ?? false;
+        FavoriteButton.Visibility = !isFolder && _handle?.Favorites is not null ? Visibility.Visible : Visibility.Collapsed;
+        RenderFavorite();
+
         if (isFolder)
         {
             ResumeButton.Visibility = Visibility.Collapsed;
@@ -205,6 +215,53 @@ public sealed partial class DetailPage : Page
 
     private void OnPlayClick(object sender, RoutedEventArgs e)
         => PlayItem(_navigation!.ItemId, _detail?.Item.Name ?? _navigation!.Title, 0);
+
+    private void RenderFavorite()
+    {
+        FavoriteIcon.Glyph = _favorite ? "\uE735" : "\uE734";
+        FavoriteButtonText.Text = _favorite ? "已收藏" : "收藏";
+        ToolTipService.SetToolTip(FavoriteButton, _favorite ? "取消收藏" : "加入收藏");
+        AutomationProperties.SetName(FavoriteButton, _favorite ? "取消收藏" : "收藏");
+    }
+
+    private async void OnFavoriteClick(object sender, RoutedEventArgs e)
+    {
+        if (_favoriteBusy || _handle?.Favorites is null) return;
+
+        string itemId = _detail?.Item.Id ?? _navigation?.ItemId ?? "";
+        if (string.IsNullOrEmpty(itemId)) return;
+
+        bool target = !_favorite;
+        _favoriteBusy = true;
+        FavoriteButton.IsEnabled = false;
+        BusyRing.IsActive = true;
+        try
+        {
+            bool stored = await _handle.Favorites.SetFavoriteAsync(itemId, target);
+            _favorite = stored;
+            RenderFavorite();
+
+            // The button shows the server's answer. When the write did not take effect the message says
+            // so, instead of the star silently flipping back on the next visit.
+            if (stored != target)
+            {
+                StatusBar.Severity = InfoBarSeverity.Warning;
+                StatusBar.Title = "收藏未保存";
+                StatusBar.Message = "服务器没有记录这次收藏变更，界面已显示服务器上的实际状态。";
+                StatusBar.IsOpen = true;
+            }
+        }
+        catch (ProviderException ex)
+        {
+            Fail("无法更新收藏", ex.Message);
+        }
+        finally
+        {
+            _favoriteBusy = false;
+            FavoriteButton.IsEnabled = true;
+            BusyRing.IsActive = false;
+        }
+    }
 
     private void OnResumeClick(object sender, RoutedEventArgs e)
         => PlayItem(_navigation!.ItemId, _detail?.Item.Name ?? _navigation!.Title,

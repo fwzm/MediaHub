@@ -20,6 +20,7 @@ internal sealed class MediaBrowserProvider :
     IProviderPlayback,
     IProviderSearch,
     IProviderProgress,
+    IProviderFavorites,
     IProviderSubtitle,
     IProviderImageFetcher
 {
@@ -219,6 +220,30 @@ internal sealed class MediaBrowserProvider :
             Studios = MediaBrowserMapper.GetStringArray(doc.RootElement, "Studios", "0", "Name"),
             Streams = MediaBrowserMapper.MapStreams(doc.RootElement),
         };
+    }
+
+    // ---------------------------------------------------------------- favourites
+
+    public async Task<bool> SetFavoriteAsync(string itemId, bool favorite, CancellationToken ct = default)
+    {
+        await _api.SetFavoriteAsync(itemId, favorite, ct).ConfigureAwait(false);
+
+        // Read back rather than echo the request: the write answers 200 with an empty body on both
+        // servers, so "no exception" only proves the request was accepted, not that the flag changed.
+        // A library the account can read but not write would otherwise leave the UI showing a star the
+        // server never stored.
+        using var doc = await _api.GetItemAsync(itemId, ct).ConfigureAwait(false);
+        return MediaBrowserMapper.GetBool(doc.RootElement, "UserData", "IsFavorite") ?? favorite;
+    }
+
+    public async Task<IReadOnlyList<MediaItem>> GetFavoritesAsync(int limit, CancellationToken ct = default)
+    {
+        if (limit <= 0) return Array.Empty<MediaItem>();
+        using var doc = await _api.GetFavoritesAsync(limit, ct).ConfigureAwait(false);
+        return MediaBrowserMapper.Items(doc)
+            .Select(i => MediaBrowserMapper.MapItem(_serverId, i))
+            .Where(i => !IsBluRayIso(i))
+            .ToList();
     }
 
     // ---------------------------------------------------------------- playback

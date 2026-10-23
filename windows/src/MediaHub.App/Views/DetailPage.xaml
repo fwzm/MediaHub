@@ -57,6 +57,13 @@
                   <TextBlock x:Name="ResumeButtonText" Text="继续观看" />
                 </StackPanel>
               </Button>
+              <Button x:Name="FavoriteButton" Click="OnFavoriteClick" Visibility="Collapsed"
+                      AutomationProperties.Name="收藏" AutomationProperties.AutomationId="detail.favorite">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <FontIcon x:Name="FavoriteIcon" Glyph="&#xE734;" FontSize="14" />
+                  <TextBlock x:Name="FavoriteButtonText" Text="收藏" />
+                </StackPanel>
+              </Button>
               <ProgressRing x:Name="BusyRing" IsActive="False" Width="20" Height="20" />
             </StackPanel>
             <TextBlock x:Name="OverviewText" TextWrapping="Wrap" MaxLines="6" TextTrimming="CharacterEllipsis" />

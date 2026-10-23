@@ -21,6 +21,12 @@ public sealed class MockServerOptions
 
     /// <summary>Payload of the media route. Default: 64 KiB of deterministic bytes.</summary>
     public byte[]? MediaBytes { get; init; }
+
+    /// <summary>
+    /// Leaves <c>UserData.IsFavorite</c> out of every item payload, the shape a server that does not
+    /// track favourites answers with, so the client's "server did not say" branch can be exercised.
+    /// </summary>
+    public bool OmitIsFavoriteFromUserData { get; init; }
 }
 
 /// <summary>
@@ -29,14 +35,17 @@ public sealed class MockServerOptions
 /// </summary>
 /// <remarks>
 /// <para>
-/// Two deliberate fidelity choices, because the tests around them are the reason this exists:
+/// Three deliberate fidelity choices, because the tests around them are the reason this exists:
 /// </para>
 /// <list type="bullet">
 /// <item>the API root follows the dialect — Emby under <c>/emby</c>, Jellyfin from the root — and a
 /// request outside that root is answered 404, so a dialect mistake cannot pass silently;</item>
 /// <item>authentication is checked before routing, so any non-public path without a valid token is
 /// 401 even when the path does not exist, which is what a MediaBrowser server does and what makes a
-/// "token was stripped by a redirect" fact observable as a status code.</item>
+/// "token was stripped by a redirect" fact observable as a status code;</item>
+/// <item>favourite state is real state: the write routes change it and every later item payload
+/// reflects it, while <c>/Users/{uid}/Favorites/{id}</c> — which Emby and Jellyfin both answer 404 —
+/// is deliberately absent, so a client addressing the wrong spelling cannot stay green here.</item>
 /// </list>
 /// <para>
 /// The catalogue is flat and deterministic: <see cref="MockServerOptions.ItemCount"/> movies live in
@@ -67,10 +76,14 @@ public sealed class MockMediaServer : IAsyncDisposable
     private readonly List<MockItem> _items;
     private readonly List<RecordedRequest> _requests = new();
     private readonly Dictionary<string, RedirectRule> _redirects = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Ids the mock holds as favourited; the single source of truth for every favourite answer.</summary>
+    private readonly HashSet<string> _favorites = new(StringComparer.Ordinal);
     private readonly object _gate = new();
     private readonly Task _acceptLoop;
 
     private volatile bool _tokenValid = true;
+    private volatile bool _ignoreFavoriteWrites;
     private long _delayTicks;
     private int _failureStatus;
     private int _failureRemaining;
@@ -181,6 +194,23 @@ public sealed class MockMediaServer : IAsyncDisposable
         if (delay < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(delay));
         Interlocked.Exchange(ref _delayTicks, delay.Ticks);
     }
+
+    /// <summary>Whether the mock currently holds <paramref name="itemId"/> as a favourite.</summary>
+    public bool IsFavorite(string itemId)
+    {
+        ArgumentNullException.ThrowIfNull(itemId);
+        lock (_gate) return _favorites.Contains(itemId);
+    }
+
+    /// <summary>
+    /// Makes favourite writes answer 200 and change nothing.
+    /// </summary>
+    /// <remarks>
+    /// A server will accept a write it cannot apply — a stale session, a policy refusal reported with
+    /// 200. With this on, a client that echoes the value it was handed and one that reads the item back
+    /// stop looking alike, which is the only way a test can tell them apart.
+    /// </remarks>
+    public void SetFavoriteWritesIgnored(bool ignored) => _ignoreFavoriteWrites = ignored;
 
     /// <summary>
     /// Simulates an unreachable server: the listener is torn down, so later requests fail at the
@@ -343,6 +373,7 @@ public sealed class MockMediaServer : IAsyncDisposable
         {
             if (segments is ["Users", "AuthenticateByName"]) { ServeAuthenticate(context, body); return; }
             if (segments is ["Items", _, "PlaybackInfo"]) { ServePlaybackInfo(context, segments[1]); return; }
+            if (segments is ["Users", _, "FavoriteItems", var favoriteItemId]) { ServeFavorite(context, favoriteItemId, true); return; }
             if (segments is ["Sessions", "Playing"] or ["Sessions", "Progress"] or ["Sessions", "Stopped"] or ["Sessions", "Logout"]
                 || (segments is ["Sessions", "Playing", "Progress" or "Stopped"]))
             {
@@ -350,6 +381,13 @@ public sealed class MockMediaServer : IAsyncDisposable
                 WriteStatus(context, 204, null);
                 return;
             }
+        }
+
+        if (request.Method == HttpMethod.Delete.Method
+            && segments is ["Users", _, "FavoriteItems", var unfavoriteItemId])
+        {
+            ServeFavorite(context, unfavoriteItemId, false);
+            return;
         }
 
         if (request.Method == HttpMethod.Get.Method)
@@ -474,6 +512,7 @@ public sealed class MockMediaServer : IAsyncDisposable
         query.TryGetValue("SearchTerm", out string? searchTerm);
         query.TryGetValue("ParentId", out string? parentId);
         query.TryGetValue("IncludeItemTypes", out string? includeItemTypes);
+        query.TryGetValue("Filters", out string? filters);
         int startIndex = Math.Max(0, ParseInt(query, "StartIndex", 0));
         int limit = ParseInt(query, "Limit", 0);
 
@@ -496,13 +535,22 @@ public sealed class MockMediaServer : IAsyncDisposable
             matches = matches.Where(item => wanted.Contains(item.Type));
         }
 
+        if (HasIsFavoriteFilter(filters))
+        {
+            // A Filters=IsFavorite query answers exactly what the write routes were told, so a client
+            // that drops the filter cannot pass by being handed the whole library instead.
+            HashSet<string> favorites;
+            lock (_gate) favorites = new HashSet<string>(_favorites, StringComparer.Ordinal);
+            matches = matches.Where(item => favorites.Contains(item.Id));
+        }
+
         List<MockItem> all = matches.ToList();
         IEnumerable<MockItem> page = all.Skip(startIndex);
         // Emby treats an absent or zero Limit as "no limit".
         if (limit > 0) page = page.Take(limit);
 
         var items = new JsonArray();
-        foreach (MockItem item in page) items.Add(item.ToJson());
+        foreach (MockItem item in page) items.Add(ItemJson(item));
 
         return new JsonObject
         {
@@ -533,7 +581,57 @@ public sealed class MockMediaServer : IAsyncDisposable
             return;
         }
 
-        WriteJson(context, 200, item.ToJson().ToJsonString());
+        WriteJson(context, 200, ItemJson(item).ToJsonString());
+    }
+
+    /// <summary>Whether an item query asked for favourites only (<c>Filters=IsFavorite</c>).</summary>
+    /// <remarks>
+    /// Both servers express the filter as a comma-separated <c>Filters</c> list, so the check parses the
+    /// list rather than comparing the whole value — which keeps it correct alongside other filters.
+    /// </remarks>
+    private static bool HasIsFavoriteFilter(string? filters) =>
+        !string.IsNullOrWhiteSpace(filters)
+        && filters.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(value => value.Equals("IsFavorite", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Item payload with the mock's current favourite state folded into <c>UserData</c>.</summary>
+    private JsonObject ItemJson(MockItem item)
+    {
+        bool favorite;
+        lock (_gate) favorite = _favorites.Contains(item.Id);
+        return item.ToJson(favorite, includeFavorite: !_options.OmitIsFavoriteFromUserData);
+    }
+
+    /// <summary>
+    /// Answers a favourite write on <c>/Users/{uid}/FavoriteItems/{itemId}</c>, the route Emby 4.10.2
+    /// and Jellyfin 12.2 both accept.
+    /// </summary>
+    /// <remarks>
+    /// There is deliberately no <c>/Users/{uid}/Favorites/{id}</c> route: both servers answer that
+    /// spelling with 404, and a mock that accepted it would keep a client addressing the wrong path
+    /// green here and broken in production. The write itself is 200 with an empty body, which is what
+    /// both servers send.
+    /// </remarks>
+    private void ServeFavorite(HttpListenerContext context, string itemId, bool favorite)
+    {
+        if (!_items.Any(item => string.Equals(item.Id, itemId, StringComparison.Ordinal)))
+        {
+            WriteJson(context, 404, new JsonObject { ["Error"] = "Unknown item " + itemId }.ToJsonString());
+            return;
+        }
+
+        // Accepted but not applied leaves the stored state alone, so only a client that reads the item
+        // back can report what the server actually holds.
+        if (!_ignoreFavoriteWrites)
+        {
+            lock (_gate)
+            {
+                if (favorite) _favorites.Add(itemId);
+                else _favorites.Remove(itemId);
+            }
+        }
+
+        WriteStatus(context, 200, null);
     }
 
     private void ServePlaybackInfo(HttpListenerContext context, string itemId)
@@ -825,30 +923,41 @@ public sealed class MockMediaServer : IAsyncDisposable
         long RunTimeTicks,
         long SizeBytes)
     {
-        public JsonObject ToJson() => new()
+        /// <summary>
+        /// Item payload, with <paramref name="isFavorite"/> reported as <c>UserData.IsFavorite</c>
+        /// unless <paramref name="includeFavorite"/> is false (a server that does not track favourites
+        /// simply omits the field).
+        /// </summary>
+        public JsonObject ToJson(bool isFavorite, bool includeFavorite)
         {
-            ["Id"] = Id,
-            ["Name"] = Name,
-            ["Type"] = Type,
-            ["MediaType"] = "Video",
-            ["Path"] = Path,
-            ["Container"] = "mp4",
-            ["IsFolder"] = false,
-            ["ProductionYear"] = Year,
-            ["RunTimeTicks"] = RunTimeTicks,
-            ["Size"] = SizeBytes,
-            ["Overview"] = "Deterministic mock item " + Index.ToString(CultureInfo.InvariantCulture) + ".",
-            ["CommunityRating"] = 6.0 + (Index % 5) / 2.0,
-            ["ImageTags"] = new JsonObject { ["Primary"] = "primary-" + Id },
-            ["BackdropImageTags"] = new JsonArray("backdrop-" + Id),
-            ["UserData"] = new JsonObject
+            var userData = new JsonObject
             {
                 // A non-zero resume position on every seventh item, so continue-watching paths have
                 // something to find without inventing state in the test.
                 ["PlaybackPositionTicks"] = Index % 7 == 0 ? 300_000_000L : 0L,
                 ["Played"] = false,
-            },
-            ["MediaStreams"] = MediaStreams(),
-        };
+            };
+            if (includeFavorite) userData["IsFavorite"] = isFavorite;
+
+            return new JsonObject
+            {
+                ["Id"] = Id,
+                ["Name"] = Name,
+                ["Type"] = Type,
+                ["MediaType"] = "Video",
+                ["Path"] = Path,
+                ["Container"] = "mp4",
+                ["IsFolder"] = false,
+                ["ProductionYear"] = Year,
+                ["RunTimeTicks"] = RunTimeTicks,
+                ["Size"] = SizeBytes,
+                ["Overview"] = "Deterministic mock item " + Index.ToString(CultureInfo.InvariantCulture) + ".",
+                ["CommunityRating"] = 6.0 + (Index % 5) / 2.0,
+                ["ImageTags"] = new JsonObject { ["Primary"] = "primary-" + Id },
+                ["BackdropImageTags"] = new JsonArray("backdrop-" + Id),
+                ["UserData"] = userData,
+                ["MediaStreams"] = MediaStreams(),
+            };
+        }
     }
 }

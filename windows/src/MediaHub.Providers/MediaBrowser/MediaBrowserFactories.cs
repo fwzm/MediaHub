@@ -20,7 +20,7 @@ public sealed class EmbyProviderFactory : IMediaProviderFactory
         "Emby 媒体服务器（直接播放与直连串流）",
         ProviderCapability.Auth | ProviderCapability.Library | ProviderCapability.Detail |
         ProviderCapability.Playback | ProviderCapability.Search | ProviderCapability.Progress |
-        ProviderCapability.Subtitle);
+        ProviderCapability.Subtitle | ProviderCapability.Favorite);
 
     public ProviderHandle Create(MediaServer server, NetworkPolicy policy, IReadOnlyDictionary<string, string>? credentials = null)
     {
@@ -47,7 +47,7 @@ public sealed class JellyfinProviderFactory : IMediaProviderFactory
         "Jellyfin 媒体服务器（直接播放与直连串流）",
         ProviderCapability.Auth | ProviderCapability.Library | ProviderCapability.Detail |
         ProviderCapability.Playback | ProviderCapability.Search | ProviderCapability.Progress |
-        ProviderCapability.Subtitle);
+        ProviderCapability.Subtitle | ProviderCapability.Favorite);
 
     public ProviderHandle Create(MediaServer server, NetworkPolicy policy, IReadOnlyDictionary<string, string>? credentials = null)
     {
@@ -91,6 +91,7 @@ internal static class MediaBrowserProviderFactorySupport
             Playback = provider,
             Search = provider,
             Progress = provider,
+            Favorites = provider,
             Subtitle = provider,
             Images = provider,
         };
