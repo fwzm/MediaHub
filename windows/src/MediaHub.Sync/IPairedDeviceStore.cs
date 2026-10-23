@@ -43,6 +43,10 @@ public interface IPairedDeviceStore
     /// <summary>Inserts or replaces one device, matched by <see cref="PairedDevice.DeviceId"/>.</summary>
     /// <exception cref="ArgumentException">The device identifier is blank.</exception>
     /// <exception cref="System.IO.IOException">The list could not be persisted.</exception>
+    /// <exception cref="System.UnauthorizedAccessException">
+    /// The target file or its directory is read-only. The store still uses an atomic replace, so a read-only target
+    /// surfaces as this instead of <see cref="System.IO.IOException"/>; callers must treat both as "nothing was written".
+    /// </exception>
     void Save(PairedDevice device);
 
     /// <summary>Removes one device by identifier; false when it was not remembered.</summary>
