@@ -7,35 +7,58 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import com.mediahub.model.MediaServer
 
 /**
- * 按服务器作用域的自定义 User-Agent 持久化（M0-A 闭环 / ADR-045）。
+ * 按服务器作用域的自定义 User-Agent 持久化（M0-A / ADR-045）。
  *
- * - 与全局播放偏好**分开存储**（独立 DataStore 文件），避免偏好接口被服务器维度污染；
- * - 读取侧提供**同步快照**：OkHttp 拦截器在请求线程上必须能同步取值，
- *   不允许在拦截器里做 I/O 或 suspend；
- * - 服务器删除 / 备份恢复导致 serverId 变化时由 [purgeOrphans] 清理孤儿配置，
- *   保证**身份代际**语义：旧身份的 UA 配置不会被新身份复用；
- * - 本层不做语法校验：合法性由写入方（UI 走 core:network 的 UserAgentValidator）
- *   与读取方（UserAgentPolicy 解析时再次校验）共同保证。即使存储里残留非法值，
- *   也只会退化为默认 UA，不会把非法值发给服务器。
+ * 语义要点（对应 M0-A1 的三项边界修复）：
+ * 1. **加载状态显式化**：`loaded` 表示已从磁盘读到首份快照。拦截器路径不得执行 DataStore I/O，
+ *    只能通过 [snapshotBlocking] 做**有界等待**（IO 由专有协程完成）；
+ * 2. **删除驱动清理**：孤儿清理只由"已确认的删除"与"已建立基线后的服务器表差异"驱动，
+ *    绝不因为"列表为空"就清空用户配置（首次发射/瞬时空表都可能是未加载完成）；
+ * 3. **写透 + 序号防回退**：`set/purge` 立即刷新快照并递增写序号；较旧的 Flow 发射
+ *    若发现期间发生过写入则**丢弃**，不会覆盖更新的状态。
  */
 interface ServerUserAgentRepository {
-    /** 当前生效快照（serverId → 自定义 UA）。线程安全，供拦截器同步读取。 */
+    /** 是否已完成首次从磁盘加载。 */
+    val loaded: Boolean
+
+    /** 同步快照（serverId → 自定义 UA）。未加载完成时为空，见 [snapshotBlocking]。 */
     fun snapshot(): Map<String, String>
 
-    /** 写入 / 清除某服务器的自定义 UA；[userAgent] 为 null 或空白表示恢复默认。 */
+    /**
+     * 有界等待首次加载完成并返回快照。**不做 I/O**，只等待专有协程完成读取；
+     * 超时返回当前（可能为空的）快照，由调用方决定是否回落默认值。
+     */
+    fun snapshotBlocking(timeoutMs: Long = DEFAULT_LOAD_TIMEOUT_MS): Map<String, String>
+
+    /** 挂起版等待（供可挂起的调用方使用）。返回是否已加载完成。 */
+    suspend fun awaitLoaded(timeoutMs: Long = DEFAULT_LOAD_TIMEOUT_MS): Boolean
+
+    /** 写入 / 清除某服务器的自定义 UA；null 或空白表示恢复默认。 */
     suspend fun set(serverId: String, userAgent: String?)
 
-    /** 清理不再存在的服务器配置（删除账号 / 恢复后身份变化）。返回清理条数。 */
+    /** 清理不再存在的服务器配置（服务器表差异）。返回清理条数。 */
     suspend fun purgeOrphans(existingServerIds: Set<String>): Int
+
+    /** 清理单个服务器（删除账号 / 退出登录等**已确认**的删除路径）。 */
+    suspend fun purge(serverId: String)
+
+    companion object {
+        const val DEFAULT_LOAD_TIMEOUT_MS: Long = 300L
+    }
 }
 
 private val Context.serverUserAgentDataStore by preferencesDataStore(name = "server_user_agent")
@@ -57,14 +80,32 @@ class DataStoreServerUserAgentRepository(
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     )
 
+    private val lock = Any()
+    private val loadLatch = CountDownLatch(1)
+    /**
+     * 挂起调用方使用的加载信号。与 [loadLatch] 分开保留：同步拦截器路径需要
+     * 一个有界阻塞原语，而协程路径不应通过 `yield` 忙等消耗调度器。
+     */
+    private val loadedSignal = CompletableDeferred<Unit>()
+
     @Volatile
     private var cached: Map<String, String> = emptyMap()
 
-    /** 快照刷新与孤儿清理都跟随 DataStore/服务器表流动；失败不得影响启动。 */
+    @Volatile
+    private var loadedFlag: Boolean = false
+
+    /** 进程内本地权威写入次数：>0 后 Flow 发射不再覆盖 [cached]（避免过期发射回退新值）。 */
+    private var localWrites: Long = 0L
+
+    /** 服务器表基线是否已建立（首次发射只建立基线，不做清理）。 */
+    private var serversBaselineEstablished: Boolean = false
+
+    override val loaded: Boolean get() = loadedFlag
+
     init {
         scope.launch {
             runCatching {
-                dataStore.data.collect { prefs -> cached = readSnapshot(prefs) }
+                dataStore.data.collect { prefs -> applyFlowSnapshot(prefs) }
             }
         }
         scope.launch {
@@ -76,13 +117,22 @@ class DataStoreServerUserAgentRepository(
 
     override fun snapshot(): Map<String, String> = cached
 
-    /**
-     * 写透缓存：`edit` 返回写入后的 Preferences，直接据此刷新快照。
-     *
-     * 这样"保存设置 → 下一次请求生效"**不依赖** DataStore 流回调的调度时机，
-     * 消除"suspend 写入已返回、快照仍是旧值"的竞态窗口；流回调只作为
-     * 外部变更（多进程/恢复）的兜底刷新。
-     */
+    override fun snapshotBlocking(timeoutMs: Long): Map<String, String> {
+        if (!loadedFlag) {
+            // 只等信号，不在这里做 I/O：读取由 init 中的 IO 协程完成。
+            runCatching { loadLatch.await(timeoutMs.coerceAtLeast(0), TimeUnit.MILLISECONDS) }
+        }
+        return cached
+    }
+
+    override suspend fun awaitLoaded(timeoutMs: Long): Boolean {
+        if (loadedFlag) return true
+        return withTimeoutOrNull(timeoutMs.coerceAtLeast(0)) {
+            loadedSignal.await()
+            true
+        } ?: loadedFlag
+    }
+
     override suspend fun set(serverId: String, userAgent: String?) {
         val id = serverId.trim()
         require(id.isNotEmpty()) { "serverId must not be blank" }
@@ -91,7 +141,10 @@ class DataStoreServerUserAgentRepository(
             val key = stringPreferencesKey(KEY_PREFIX + id)
             if (value == null) prefs.remove(key) else prefs[key] = value
         }
-        cached = readSnapshot(updated)
+        synchronized(lock) {
+            localWrites += 1
+            cached = readSnapshot(updated)
+        }
     }
 
     override suspend fun purgeOrphans(existingServerIds: Set<String>): Int {
@@ -106,19 +159,54 @@ class DataStoreServerUserAgentRepository(
                 removed += 1
             }
         }
-        cached = readSnapshot(updated)
+        synchronized(lock) {
+            localWrites += 1
+            cached = readSnapshot(updated)
+        }
         return removed
     }
 
+    override suspend fun purge(serverId: String) {
+        val id = serverId.trim()
+        if (id.isEmpty()) return
+        val updated = dataStore.edit { prefs -> prefs.remove(stringPreferencesKey(KEY_PREFIX + id)) }
+        synchronized(lock) {
+            localWrites += 1
+            cached = readSnapshot(updated)
+        }
+    }
+
     /**
-     * 服务器表变化的统一入口（internal 供 JVM 单测确定性驱动）：
-     * 删除服务器 / 备份恢复导致 serverId 变化时，清理不再存在的身份配置。
+     * Flow 发射的处理。
+     *
+     * 并发语义：进程内一旦发生过**权威写入**（set/purge），`cached` 以写入结果为准，
+     * 后续 Flow 发射只用于确认加载完成，**不再覆盖**快照 —— 这样"较旧的发射晚到"
+     * 不可能把新值回退成旧值（测试用可控 DataStore 注入过期发射验证）。
+     * 首次加载（尚无任何写入）仍由 Flow 填充快照。
+     *
+     * 多进程/外部改动不在支持范围（本应用单进程，且恢复流程走应用自身写入）。
      */
-    internal suspend fun onServersChanged(servers: List<com.mediahub.model.MediaServer>) {
-        // 空列表**不做**清理：observeServers() 的首次发射可能只是"服务器表尚未加载"，
-        // 若据此清理会把用户已保存的自定义 UA 全部误删（测试已捕获该缺陷）。
-        // 孤儿配置本身无害（策略只按已解析到的 serverId 查表），
-        // 真正的删除由非空列表的差异清理覆盖，或由调用方显式调用 purgeOrphans。
+    private fun applyFlowSnapshot(prefs: Preferences) {
+        val snapshot = readSnapshot(prefs)
+        synchronized(lock) {
+            if (localWrites == 0L) cached = snapshot
+        }
+        loadedFlag = true
+        loadLatch.countDown()
+        loadedSignal.complete(Unit)
+    }
+
+    /**
+     * 服务器表变化：
+     * - 首次发射只建立基线（此时可能仍在加载，且空表不等于"没有服务器"）；
+     * - 建立基线后，仅在**非空**列表下按差异清理；空表一律不动（删除最后一台由
+     *   [purge] 在确认删除路径上处理）。
+     */
+    internal suspend fun onServersChanged(servers: List<MediaServer>) {
+        if (!serversBaselineEstablished) {
+            serversBaselineEstablished = true
+            return
+        }
         if (servers.isEmpty()) return
         purgeOrphans(servers.map { it.id }.toSet())
     }
