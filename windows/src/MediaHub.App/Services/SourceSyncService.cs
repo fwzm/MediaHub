@@ -68,6 +68,10 @@ public sealed class SourceSyncService
     private readonly SourceSyncImportRound _round;
     private readonly string _deviceId;
 
+    // W6-13: one registry for the whole process. Two would mean two pins for the same device — the presenters and
+    // the page must therefore share this instance instead of each constructing their own.
+    private readonly Lazy<PairedDeviceRegistry> _pairedDevices;
+
     /// <param name="store">Mirrored local source records.</param>
     /// <param name="baselines">
     /// Per-peer baseline file. Defaults to <c>sync-baseline.json</c> in the same folder as the mirrored
@@ -91,6 +95,10 @@ public sealed class SourceSyncService
         _baselines = baselines ?? new FileSourceSyncBaselineStore(store.DirectoryPath);
         _round = new SourceSyncImportRound(store, _baselines, () => _baselines.LoadError);
         _deviceId = SyncIdentity.EnsureDeviceId(settings);
+
+        // Lazily: a page that never pairs never reads the file, and the first use decides the directory once.
+        _pairedDevices = new Lazy<PairedDeviceRegistry>(
+            () => new PairedDeviceRegistry(new FilePairedDeviceStore(store.DirectoryPath)));
     }
 
     /// <summary>Identity of this installation, as it appears in every envelope.</summary>
@@ -131,6 +139,32 @@ public sealed class SourceSyncService
     /// stored baseline. Exporting through it is what proves the baseline store is really wired in.
     /// </summary>
     public SourceSyncSession CreateSession() => new(_store, _deviceId, baselineStore: _baselines);
+
+    /// <summary>
+    /// Devices this machine has paired with (W6-12 registry). The single instance every pairing presenter and the
+    /// page share, so a fingerprint is pinned exactly once.
+    /// </summary>
+    public PairedDeviceRegistry PairedDevices => _pairedDevices.Value;
+
+    /// <summary>Where paired devices are remembered: <c>paired-devices.json</c> next to the baseline.</summary>
+    public string PairedDevicesPath
+        => Path.Combine(_store.DirectoryPath, FilePairedDeviceStore.FileName);
+
+    /// <summary>Set when the paired-device file could not be read; shown instead of pretending nothing is paired.</summary>
+    public string? PairedDevicesError
+    {
+        get
+        {
+            try
+            {
+                return _pairedDevices.Value.LoadError;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return exception.Message;
+            }
+        }
+    }
 
     /// <summary>Writes the envelope next to the mirrored source records and reports what it contains.</summary>
     public EnvelopeExportResult ExportEnvelope()

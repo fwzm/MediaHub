@@ -68,9 +68,16 @@ public sealed partial class SyncPage : Page
         ReloadSources();
         ReloadPreview(null);
 
+        ReloadPairedDevices();
+
         if (App.Services.Sync.StoreError is { Length: > 0 } storeError)
         {
             ShowStatus(InfoBarSeverity.Error, "同步源清单不可用", storeError);
+        }
+        else if (App.Services.Sync.PairedDevicesError is { Length: > 0 } pairedError)
+        {
+            // A damaged paired-device file degrades to an empty list; saying so beats showing "nothing paired".
+            ShowStatus(InfoBarSeverity.Warning, "已配对设备清单不可用", pairedError);
         }
     }
 
@@ -314,9 +321,13 @@ public sealed partial class SyncPage : Page
     // state and sentence; the page only renders and never inspects the payload (the challenge must not reach a log
     // line, a message, or an exception that the UI shows).
 
-    private PairingPresenter HostPresenter => _host ??= new PairingPresenter(App.Services.Sync.DeviceId, ReadPeerEnvelope);
+    // W6-13: both presenters receive the service-owned registry. A second registry would read the same file but pin
+    // fingerprints independently, so two code paths could disagree about "the same device".
+    private PairingPresenter HostPresenter => _host ??=
+        new PairingPresenter(App.Services.Sync.DeviceId, ReadPeerEnvelope, App.Services.Sync.PairedDevices);
 
-    private PairingPresenter GuestPresenter => _guest ??= new PairingPresenter(App.Services.Sync.DeviceId, ReadPeerEnvelope);
+    private PairingPresenter GuestPresenter => _guest ??=
+        new PairingPresenter(App.Services.Sync.DeviceId, ReadPeerEnvelope, App.Services.Sync.PairedDevices);
 
     /// <summary>Reads the peer's exported envelope on demand; pairing counts it and never applies it.</summary>
     private static PairingPeerEnvelopeResult ReadPeerEnvelope()
@@ -409,6 +420,9 @@ public sealed partial class SyncPage : Page
         {
             ShowStatus(InfoBarSeverity.Error, "配对失败", snapshot.NextStep);
         }
+
+        // A finished attempt may have registered or refused a card; the list must not keep showing the old state.
+        ReloadPairedDevices();
     }
 
     /// <summary>Joins with a pasted code; success reports a count, never an import.</summary>
@@ -438,6 +452,9 @@ public sealed partial class SyncPage : Page
                 + (result.Paired || result.Reason is not { Length: > 0 } reason ? string.Empty : "（稳定码：" + reason + "）");
 
             ShowStatus(result.Paired ? InfoBarSeverity.Success : InfoBarSeverity.Error, title, message);
+
+            // The guest registers the host card; a failure may still have recorded a first-seen fingerprint.
+            ReloadPairedDevices();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ObjectDisposedException)
         {
@@ -477,6 +494,120 @@ public sealed partial class SyncPage : Page
     }
 
     // ---- pairing (W6-3c) end ---------------------------------------------------
+
+    // ---- paired devices (W6-13) begin ------------------------------------------
+    // The registry belongs to the service, not to this page: both presenters and every render read the same instance,
+    // which is what makes a fingerprint get pinned exactly once. Forgetting is deliberately local-only — it deletes one
+    // row from paired-devices.json and touches neither the sources, nor the credentials, nor the peer.
+
+    /// <summary>Rebuilds the section from the registry; every sentence comes from the Sync layer.</summary>
+    private void ReloadPairedDevices()
+    {
+        try
+        {
+            PairedDeviceRegistry registry = App.Services.Sync.PairedDevices;
+            PairedDeviceListView view = PairedDeviceListPresenter.Build(
+                registry.GetAll(),
+                registry.Capacity,
+                NowMilliseconds());
+
+            PairedList.ItemsSource = view.Rows;
+            PairedList.Visibility = view.IsEmpty ? Visibility.Collapsed : Visibility.Visible;
+            PairedEmptyPanel.Visibility = view.IsEmpty ? Visibility.Visible : Visibility.Collapsed;
+            PairedCountText.Text = view.CountLabel;
+            PairedEmptyText.Text = view.EmptyLabel;
+            PairedTofuText.Text = view.TofuLabel;
+            PairedCapacityText.Text = view.CapacityLabel;
+            PairedCapacityText.Visibility = view.CapacityLabel.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            ShowStatus(InfoBarSeverity.Error, "已配对设备清单不可用", ex.Message);
+        }
+    }
+
+    private async void OnForgetPairedDeviceClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: PairedDeviceRow row })
+        {
+            return;
+        }
+
+        try
+        {
+            if (!await ConfirmForgetAsync(row))
+            {
+                return;
+            }
+
+            bool forgotten = App.Services.Sync.PairedDevices.Forget(row.DeviceId);
+            ReloadPairedDevices();
+            ShowStatus(
+                forgotten ? InfoBarSeverity.Informational : InfoBarSeverity.Warning,
+                forgotten ? "已忘记该设备" : "本机没有这台设备的登记",
+                forgotten
+                    ? "只删除了本机的配对登记：来源、凭据和对端设备都没有变化；下次配对会重新按首次配对处理。"
+                    : PairedDeviceRegistry.DescribeReason(PairedDeviceReasons.UnknownDevice));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            ShowStatus(InfoBarSeverity.Error, "无法忘记该设备", ex.Message);
+        }
+    }
+
+    /// <summary>Confirms forgetting one device; the buttons carry the automation ids because a ContentDialog's own
+    /// buttons cannot be given one.</summary>
+    private async Task<bool> ConfirmForgetAsync(PairedDeviceRow row)
+    {
+        var panel = new StackPanel { Width = 420, Spacing = 12 };
+        AutomationProperties.SetAutomationId(panel, "sync.paired.forget.dialog");
+
+        panel.Children.Add(new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Text = "将忘记「" + row.DisplayName + "」（" + row.FingerprintLabel + "）。"
+                + "只删除本机的配对登记，来源、凭据和对端设备都不会被改动；下次配对会重新按首次配对处理。",
+        });
+
+        var cancel = new Button { Content = "取消" };
+        AutomationProperties.SetAutomationId(cancel, "sync.paired.forget.cancel");
+        AutomationProperties.SetName(cancel, "取消忘记该设备");
+
+        var confirm = new Button { Content = "忘记" };
+        AutomationProperties.SetAutomationId(confirm, "sync.paired.forget.confirm");
+        AutomationProperties.SetName(confirm, "确认忘记该设备");
+
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        };
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(confirm);
+        panel.Children.Add(buttons);
+
+        // No Primary/Close buttons on purpose: the two buttons above are the dialog's answers and they carry the ids.
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "忘记这台设备？",
+            Content = panel,
+        };
+
+        bool forget = false;
+        cancel.Click += (_, _) => dialog.Hide();
+        confirm.Click += (_, _) =>
+        {
+            forget = true;
+            dialog.Hide();
+        };
+
+        await dialog.ShowAsync();
+        return forget;
+    }
+
+    // ---- paired devices (W6-13) end --------------------------------------------
 
     // ---- apply (W6-8) begin ----------------------------------------------------
 

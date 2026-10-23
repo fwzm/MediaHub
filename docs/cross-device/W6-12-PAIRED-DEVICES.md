@@ -2,9 +2,9 @@
 
 - 状态: **IMPLEMENTED_UNVERIFIED**（代码已实现、22 个新测试全绿、全套 1004 例通过、App 工程 0 警告 0 错误；本轮**没有** GUI 证据）
 - 日期: 2026-10-24
-- 分支/HEAD: `feature/cross-device-source-sync` / `48267d0`（工作区有 4 改 9 增，**未 commit**）
+- 分支/HEAD: `feature/cross-device-source-sync` / `a75139b`（实现提交 `67b8446`，已 push；已 merge `feature/windows-client` `388200d`）
 - 前置: W6-3b 配对传输（回环 TLS + 邀请码）、W6-3c 配对 UI、W6-8 审批门禁、W6-10 基线落盘
-- 范围: 只动 `windows/src/MediaHub.Sync`（4 个已有文件 + 9 个新文件）、1 个新测试文件、本文档；未动 `MediaHub.App` / Providers / Domain / Storage，未 commit，未启动 GUI
+- 范围: 只动 `windows/src/MediaHub.Sync`（4 个已有文件 + 9 个新文件）、1 个新测试文件、本文档；未动 `MediaHub.App` / Providers / Domain / Storage，未启动 GUI
 
 ## 1 语义边界：配对成功 ≠ 已同步 ≠ 已登录
 
@@ -23,7 +23,7 @@
 | `windows/src/MediaHub.Sync/PairedDevice.cs` | 94 | 不可变登记项：`DeviceId` / `Fingerprint` / `DisplayName` / `PairedAtEpochMs` / `LastSeenEpochMs` / `SourceCount` + `Create` / `DisplayNameOrId` |
 | `windows/src/MediaHub.Sync/IPairedDeviceStore.cs` | 53 | 存储抽象：`GetAll()` / `Save(PairedDevice)` / `Forget(string)` / `LoadError` + `PairedDeviceStoreReasons`（稳定原因码 + `All`） |
 | `windows/src/MediaHub.Sync/InMemoryPairedDeviceStore.cs` | 112 | 测试与无盘环境用；`WriteCount` 记录写次数，`Capacity` 可注 |
-| `windows/src/MediaHub.Sync/FilePairedDeviceStore.cs` | 439 | `%LOCALAPPDATA%\MediaHub\paired-devices.json`，`version`+ `devices` 文档；原子写（临时文件 + `File.Move`）、`.bak`、损坏文件**隔离且永不覆盖**；`LoadError` / `LastQuarantinedPath` / `WriteCount` |
+| `windows/src/MediaHub.Sync/FilePairedDeviceStore.cs` | 439 | `%LOCALAPPDATA%\MediaHub\paired-devices.json`，`version`+ `devices` 文档；临时文件 + `Flush(true)` + `File.Replace`（保留 `.bak`，目标不存在时回落 `File.Move(overwrite: true)`）、损坏文件**隔离且永不覆盖**；`LoadError` / `LastQuarantinedPath` / `WriteCount` |
 | `windows/src/MediaHub.Sync/PairedDeviceRegistry.cs` | 415 | 指纹钉扎核心：`Verify`（三态）/ `Register`（Added / Updated / Unchanged / Rejected）/ `Forget` / `Describe` / `DescribeReason`；容量默认 32，满了**拒绝**而不是静默挤掉旧设备 |
 | `windows/src/MediaHub.Sync/PairingLink.cs` | 115 | `mediahub://pair?code=<base64url>` 分享链接；`Create` / `ExtractCode` / `Parse`，最长 8192，复用 `PairingCode` 的编解码与过期判定 |
 | `windows/src/MediaHub.Sync/PairingAddressCandidates.cs` | 324 | 把网卡枚举/注入的适配器排成候选地址（有线 > 无线 > 其他），逐条给原因码；**只用于显示**，不监听任何非回环地址 |

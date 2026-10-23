@@ -11,6 +11,7 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
@@ -228,7 +229,82 @@
       </StackPanel>
     </Border>
 
-    <Grid Grid.Row="5" ColumnSpacing="24">
+    <!-- Paired devices (W6-13): what the W6-12 registry remembered. Forgetting deletes only the local row; the
+         sources, the credentials and the peer are untouched. Every sentence comes from PairedDeviceListPresenter. -->
+    <Border Grid.Row="5" Padding="16" CornerRadius="8" BorderThickness="1"
+            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            AutomationProperties.AutomationId="sync.paired.card"
+            AutomationProperties.Name="已配对设备">
+      <StackPanel Spacing="8">
+        <Grid ColumnSpacing="8">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+
+          <TextBlock Grid.Column="0" Text="已配对设备" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <TextBlock x:Name="PairedCountText" Grid.Column="1" VerticalAlignment="Center"
+                     Style="{StaticResource MediaHubCaption}"
+                     AutomationProperties.AutomationId="sync.paired.count"
+                     AutomationProperties.Name="已配对设备数量" />
+        </Grid>
+
+        <!-- Only filled when the registry is full: the next pairing would be refused, so it must be said out loud. -->
+        <TextBlock x:Name="PairedCapacityText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+
+        <ListView x:Name="PairedList" SelectionMode="None" MaxHeight="248" Visibility="Collapsed"
+                  AutomationProperties.AutomationId="sync.paired.list"
+                  AutomationProperties.Name="已配对设备">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            </Style>
+          </ListView.ItemContainerStyle>
+          <ListView.ItemTemplate>
+            <DataTemplate>
+              <Border Margin="0,0,0,8" Padding="12" CornerRadius="8" BorderThickness="1"
+                      Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                      AutomationProperties.AutomationId="sync.paired.entry"
+                      AutomationProperties.Name="{Binding SummaryLine}">
+                <Grid ColumnSpacing="12">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+
+                  <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis" MaxLines="1" />
+                    <TextBlock Text="{Binding DetailLine}" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+                  </StackPanel>
+
+                  <Button Grid.Column="1" Content="忘记" Click="OnForgetPairedDeviceClick" Tag="{Binding}"
+                          VerticalAlignment="Center"
+                          AutomationProperties.AutomationId="sync.paired.forget"
+                          AutomationProperties.Name="{Binding ForgetLabel}"
+                          ToolTipService.ToolTip="只删除本机的配对登记，不影响来源、凭据与对端设备" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListView.ItemTemplate>
+        </ListView>
+
+        <StackPanel x:Name="PairedEmptyPanel" HorizontalAlignment="Center" Spacing="8" Visibility="Collapsed">
+          <FontIcon Glyph="&#xE8D7;" FontSize="28" Opacity="0.4" />
+          <TextBlock x:Name="PairedEmptyText" HorizontalAlignment="Center"
+                     AutomationProperties.AutomationId="sync.paired.empty" />
+        </StackPanel>
+
+        <TextBlock x:Name="PairedTofuText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   AutomationProperties.AutomationId="sync.paired.tofu" />
+      </StackPanel>
+    </Border>
+
+    <Grid Grid.Row="6" ColumnSpacing="24">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="3*" />
         <ColumnDefinition Width="2*" />
