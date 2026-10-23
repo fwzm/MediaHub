@@ -1,8 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using MediaHub.Sync;
 
-namespace MediaHub.App.Services;
+namespace MediaHub.Sync;
 
 /// <summary>
 /// This client's own source records, persisted next to settings.json as sync-sources.json.

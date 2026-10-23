@@ -3,6 +3,7 @@ using MediaHub.App.Services;
 using MediaHub.Net;
 using MediaHub.Net.Security;
 using MediaHub.Storage;
+using MediaHub.Sync;
 
 namespace MediaHub.App;
 
