@@ -17,8 +17,14 @@ import javax.crypto.spec.SecretKeySpec
  */
 object BackupCrypto {
 
-    const val FORMAT_VERSION = 1
-    const val MINIMUM_READER_VERSION = 1
+    /**
+     * 格式版本：2 = 内层载荷新增 `favorites` 段（收藏，task-25 / A2）。
+     * 读端接受 ≤ 本值的文件（v1 旧备份仍可导入）；写端永远写本值。
+     */
+    const val FORMAT_VERSION = 2
+
+    /** 本读端支持的最低「文件要求读版本」：v1 文件声明 1，v2 文件声明 2。 */
+    const val MINIMUM_READER_VERSION = 2
     const val MAGIC = "MHBK"
 
     /** OWASP 2025 密码存储指引 PBKDF2-HMAC-SHA256 推荐最低迭代数。 */

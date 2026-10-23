@@ -218,6 +218,33 @@ open class EmbyApiClient(
     }
 
     /**
+     * 收藏列表：`GET /emby/Users/{userId}/Items?Filters=IsFavorite&Recursive=true&…`
+     * （task-25 / A2「我的收藏」）。
+     *
+     * 服务器侧筛选是**优化不是保证**：调用方必须再按 IsFavorite 兜底过滤。
+     * [limit] 由调用方先 clamp（本方法不做边界判断，直接透传 Limit）。
+     */
+    suspend fun getFavoriteItems(
+        token: String,
+        userId: String,
+        limit: Int,
+    ): EmbyQueryResultDto<EmbyBaseItemDto> {
+        val url = buildUrl(
+            path = "/Users/$userId/Items",
+            query = mapOf(
+                "Filters" to FAVORITE_FILTER,
+                "Recursive" to "true",
+                "IncludeItemTypes" to FAVORITE_ITEM_TYPES,
+                "Fields" to LIBRARY_FIELDS,
+                "EnableUserData" to "true",
+                "StartIndex" to "0",
+                "Limit" to limit.toString(),
+            ),
+        )
+        return apiClient.get(url, authenticatedHeaders(token, userId))
+    }
+
+    /**
      * 播放信息：POST /emby/Items/{itemId}/PlaybackInfo?UserId=...（官方 MediaInfoService POST contract）。
      *
      * 无转码红线（Phase 1B-2.1）：协商参数全部走 typed JSON body
@@ -440,6 +467,12 @@ open class EmbyApiClient(
         const val SEARCH_FIELDS = "PrimaryImageAspectRatio,SortName,Path,ProductionYear,CommunityRating,Overview,ProviderIds"
         /** 收藏回读所需字段（只有 UserData 的最小请求，避免拉全量 detail 字段）。 */
         const val FAVORITE_FIELDS = "UserData"
+
+        /** 收藏列表的服务端筛选（官方 ItemFilter 值；仅优化，客户端仍兜底）。 */
+        const val FAVORITE_FILTER = "IsFavorite"
+
+        /** 收藏列表纳入的条目类型（与搜索/继续观看一致，不含 BoxSet/Playlist）。 */
+        const val FAVORITE_ITEM_TYPES = "Movie,Series,Episode"
         /**
          * 请求体序列化：encodeDefaults=true 保证 DeviceProfile 等默认值字段全部输出
          * （官方 server 期望完整字段）；explicitNulls=false 省略未设置的 null 字段。

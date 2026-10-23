@@ -162,4 +162,30 @@ interface MediaFavoriteProvider {
      * @throws ProviderException.Parse 回读缺 UserData.IsFavorite。
      */
     suspend fun isFavorite(itemId: String): Boolean
+
+    /**
+     * 列出服务器侧收藏（「我的收藏」列表页的数据源，task-25 / A2）。
+     *
+     * 服务端侧筛选：`GET /Users/{userId}/Items?Filters=IsFavorite&Recursive=true&…`。
+     * 服务器侧筛选只是**优化不是保证**（服务器可能忽略 Filters，也可能返回
+     * IsFavorite=false 的条目），实现**必须**在客户端再按 [MediaItem.isFavorite]
+     * 兜底过滤，不得把未收藏条目显示成收藏。
+     *
+     * 顺序由服务器决定（默认 SortName 升序）；不承诺分页：[limit] 是单次上限，
+     * 实现会 coerce 到 1..[MAX_FAVORITES_LIMIT]；`limit <= 0` 直接返回空列表且不发 HTTP。
+     *
+     * @throws ProviderException.AuthRequired 未登录 / 会话缺失。
+     * @throws ProviderException.AuthExpired 服务器返回 401。
+     * @throws ProviderException.NotFound 服务器返回 404。
+     * @throws ProviderException.Http 其他非 2xx。
+     */
+    suspend fun listFavorites(limit: Int = DEFAULT_FAVORITES_LIMIT): List<MediaItem>
+
+    companion object {
+        /** 默认单次拉取上限（列表页首屏）。 */
+        const val DEFAULT_FAVORITES_LIMIT = 100
+
+        /** 单次拉取硬上限（防止误传巨大值把服务器打满）。 */
+        const val MAX_FAVORITES_LIMIT = 200
+    }
 }

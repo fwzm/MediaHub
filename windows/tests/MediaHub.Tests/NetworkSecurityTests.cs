@@ -15,44 +15,66 @@ public sealed class RedirectCredentialTests : IDisposable
 
     private sealed record Hop(string Path, int Status, string? Location);
 
-    /// <summary>Starts a listener that answers according to <paramref name="hop"/>.</summary>
-    private (HttpListener Listener, int Port, TaskCompletionSource<HttpRequestMessage> Seen) StartServer(Hop hop)
+    /// <summary>
+    /// Binds a loopback listener on a random port, retrying when the drawn port is already taken.
+    /// http.sys reports a port that another process holds (or has reserved) as
+    /// <see cref="HttpListenerException"/> from <see cref="HttpListener.Start"/>, and the 20000-59999
+    /// draw range is small enough that a collision happens on a busy machine: CI failed once with
+    /// "The process cannot access the file because it is being used by another process".
+    /// </summary>
+    private HttpListener StartLoopbackListener(out int port)
     {
         for (int attempt = 0; attempt < 20; attempt++)
         {
-            int port = Random.Shared.Next(20000, 60000);
+            int candidate = Random.Shared.Next(20000, 60000);
             var listener = new HttpListener();
-            listener.Prefixes.Add("http://127.0.0.1:" + port + "/");
-            try { listener.Start(); }
-            catch (HttpListenerException) { continue; }
+            listener.Prefixes.Add("http://127.0.0.1:" + candidate + "/");
+            try
+            {
+                listener.Start();
+            }
+            catch (HttpListenerException)
+            {
+                listener.Close();
+                continue;
+            }
 
             _listeners.Add(listener);
-            var seen = new TaskCompletionSource<HttpRequestMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var context = await listener.GetContextAsync().ConfigureAwait(false);
-                    var captured = new HttpRequestMessage(new HttpMethod(context.Request.HttpMethod), context.Request.Url);
-                    foreach (string? key in context.Request.Headers.AllKeys)
-                    {
-                        if (key is null) continue;
-                        captured.Headers.TryAddWithoutValidation(key, context.Request.Headers[key]);
-                    }
-                    seen.TrySetResult(captured);
-
-                    context.Response.StatusCode = hop.Status;
-                    if (hop.Location is not null) context.Response.Headers["Location"] = hop.Location;
-                    context.Response.ContentLength64 = 0;
-                    context.Response.Close();
-                }
-                catch { /* listener torn down */ }
-            });
-
-            return (listener, port, seen);
+            port = candidate;
+            return listener;
         }
+
         throw new InvalidOperationException("could not bind a loopback listener");
+    }
+
+    /// <summary>Starts a listener that answers according to <paramref name="hop"/>.</summary>
+    private (HttpListener Listener, int Port, TaskCompletionSource<HttpRequestMessage> Seen) StartServer(Hop hop)
+    {
+        HttpListener listener = StartLoopbackListener(out int port);
+        var seen = new TaskCompletionSource<HttpRequestMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var context = await listener.GetContextAsync().ConfigureAwait(false);
+                var captured = new HttpRequestMessage(new HttpMethod(context.Request.HttpMethod), context.Request.Url);
+                foreach (string? key in context.Request.Headers.AllKeys)
+                {
+                    if (key is null) continue;
+                    captured.Headers.TryAddWithoutValidation(key, context.Request.Headers[key]);
+                }
+                seen.TrySetResult(captured);
+
+                context.Response.StatusCode = hop.Status;
+                if (hop.Location is not null) context.Response.Headers["Location"] = hop.Location;
+                context.Response.ContentLength64 = 0;
+                context.Response.Close();
+            }
+            catch { /* listener torn down */ }
+        });
+
+        return (listener, port, seen);
     }
 
     [Fact]
@@ -81,47 +103,39 @@ public sealed class RedirectCredentialTests : IDisposable
     /// <summary>One listener that redirects /start to /final on the same origin and captures /final.</summary>
     private int StartSameOriginChain(TaskCompletionSource<HttpRequestMessage> capture)
     {
-        for (int attempt = 0; attempt < 20; attempt++)
+        HttpListener listener = StartLoopbackListener(out int port);
+
+        _ = Task.Run(async () =>
         {
-            int port = Random.Shared.Next(20000, 60000);
-            var listener = new HttpListener();
-            listener.Prefixes.Add("http://127.0.0.1:" + port + "/");
-            try { listener.Start(); }
-            catch (HttpListenerException) { continue; }
-            _listeners.Add(listener);
-
-            _ = Task.Run(async () =>
+            while (listener.IsListening)
             {
-                while (listener.IsListening)
+                HttpListenerContext context;
+                try { context = await listener.GetContextAsync().ConfigureAwait(false); }
+                catch { return; }
+
+                if (context.Request.Url!.AbsolutePath == "/start")
                 {
-                    HttpListenerContext context;
-                    try { context = await listener.GetContextAsync().ConfigureAwait(false); }
-                    catch { return; }
-
-                    if (context.Request.Url!.AbsolutePath == "/start")
-                    {
-                        context.Response.StatusCode = 302;
-                        context.Response.Headers["Location"] = "http://127.0.0.1:" + port + "/final";
-                    }
-                    else
-                    {
-                        var captured = new HttpRequestMessage(HttpMethod.Get, context.Request.Url);
-                        foreach (string? key in context.Request.Headers.AllKeys)
-                        {
-                            if (key is null) continue;
-                            captured.Headers.TryAddWithoutValidation(key, context.Request.Headers[key]);
-                        }
-                        capture.TrySetResult(captured);
-                        context.Response.StatusCode = 200;
-                    }
-                    context.Response.ContentLength64 = 0;
-                    context.Response.Close();
+                    context.Response.StatusCode = 302;
+                    context.Response.Headers["Location"] = "http://127.0.0.1:" + port + "/final";
                 }
-            });
+                else
+                {
+                    var captured = new HttpRequestMessage(HttpMethod.Get, context.Request.Url);
+                    foreach (string? key in context.Request.Headers.AllKeys)
+                    {
+                        if (key is null) continue;
+                        captured.Headers.TryAddWithoutValidation(key, context.Request.Headers[key]);
+                    }
+                    capture.TrySetResult(captured);
+                    context.Response.StatusCode = 200;
+                }
 
-            return port;
-        }
-        throw new InvalidOperationException("could not bind a loopback listener");
+                context.Response.ContentLength64 = 0;
+                context.Response.Close();
+            }
+        });
+
+        return port;
     }
 
     [Fact]
@@ -176,11 +190,7 @@ public sealed class RedirectCredentialTests : IDisposable
     public async Task Redirect_chain_is_bounded()
     {
         // A server that always redirects to itself: without a bound this request would never end.
-        var listener = new HttpListener();
-        int port = Random.Shared.Next(20000, 60000);
-        listener.Prefixes.Add("http://127.0.0.1:" + port + "/");
-        listener.Start();
-        _listeners.Add(listener);
+        HttpListener listener = StartLoopbackListener(out int port);
 
         _ = Task.Run(async () =>
         {

@@ -228,6 +228,78 @@ class JellyfinFavoriteProviderTest {
         assertEquals(0, server.requestCount)
     }
 
+    // ---- 11-15：listFavorites（task-25 / A2，现代 /Items 路由） ----
+
+    private fun favoriteListBody(vararg items: Pair<String, Boolean>): String {
+        val entries = items.joinToString(",") { (id, fav) ->
+            """{"Id":"$id","Name":"条目$id","Type":"Movie","UserData":{"IsFavorite":$fav}}"""
+        }
+        return """{"Items":[$entries],"TotalRecordCount":${items.size}}"""
+    }
+
+    @Test
+    fun `listFavorites uses modern Items route with Filters IsFavorite`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(favoriteListBody("m1" to true, "m2" to true)))
+
+        val items = provider().listFavorites(limit = 50)
+
+        assertEquals(listOf("m1", "m2"), items.map { it.id })
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        // 列表读取走 ADR-039 现代路由（与写/回读的 /Users/… 家族不同）
+        assertEquals("/Items", request.requestUrl!!.encodedPath)
+        val query = request.requestUrl!!
+        assertEquals("user-1", query.queryParameter("UserId"))
+        assertEquals("IsFavorite", query.queryParameter("Filters"))
+        assertEquals("true", query.queryParameter("Recursive"))
+        assertEquals("Movie,Series,Episode", query.queryParameter("IncludeItemTypes"))
+        assertEquals("true", query.queryParameter("EnableUserData"))
+        assertEquals("50", query.queryParameter("Limit"))
+        assertFalse(request.path!!.contains("/emby"))
+        assertNull(request.getHeader("X-Emby-Token"))
+        assertTrue(request.getHeader("Authorization")!!.contains("""Token="tok-1""""))
+    }
+
+    @Test
+    fun `listFavorites drops items the server did not actually mark favorite`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(favoriteListBody("m1" to true, "m2" to false)))
+
+        assertEquals(listOf("m1"), provider().listFavorites().map { it.id })
+    }
+
+    @Test
+    fun `listFavorites returns empty list for empty server page`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":0}"""))
+
+        assertTrue(provider().listFavorites().isEmpty())
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `listFavorites 401 maps to AuthExpired`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(401))
+
+        val e = assertFailsWithType<ProviderException.AuthExpired> {
+            runBlocking { provider().listFavorites() }
+        }
+        assertEquals(ProviderException.ErrorCode.AUTH_EXPIRED, e.code)
+    }
+
+    @Test
+    fun `listFavorites 404 maps to NotFound`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(404))
+
+        val e = assertFailsWithType<ProviderException.NotFound> {
+            runBlocking { provider().listFavorites() }
+        }
+        assertEquals(ProviderException.ErrorCode.NOT_FOUND, e.code)
+    }
+
     inline fun <reified T : Throwable> assertFailsWithType(block: () -> Unit): T {
         try {
             block()

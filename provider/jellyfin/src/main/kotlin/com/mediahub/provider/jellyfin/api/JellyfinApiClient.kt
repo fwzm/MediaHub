@@ -268,6 +268,36 @@ open class JellyfinApiClient(
     }
 
     /**
+     * 收藏列表：`GET /Items?UserId=…&Filters=IsFavorite&Recursive=true&…`
+     * （task-25 / A2「我的收藏」；现代路由，ADR-039）。
+     *
+     * 与写/读回不同族——列表读取没有用户作用域端点问题，走现代 `/Items`。
+     * 服务器侧筛选是**优化不是保证**：调用方必须再按 IsFavorite 兜底过滤。
+     * [limit] 由调用方先 clamp（本方法直接透传 Limit）。
+     */
+    suspend fun getFavoriteItems(
+        token: String,
+        userId: String,
+        limit: Int,
+    ): JellyfinQueryResultDto<JellyfinItemDto> {
+        val url = buildUrl(
+            path = "/Items",
+            query = mapOf(
+                "UserId" to userId,
+                "Filters" to FAVORITE_FILTER,
+                "Recursive" to "true",
+                "IncludeItemTypes" to FAVORITE_ITEM_TYPES,
+                "Fields" to LIST_FIELDS,
+                "EnableUserData" to "true",
+                "EnableTotalRecordCount" to "true",
+                "StartIndex" to "0",
+                "Limit" to limit.toString(),
+            ),
+        )
+        return apiClient.get(url, authenticatedHeaders(token))
+    }
+
+    /**
      * 图片地址：GET /Items/{itemId}/Images/{type}?tag&maxWidth&quality。
      *
      * 红线（ADR-026/039）：**URL 永不含 Token/api_key**——鉴权由 app 层
@@ -318,6 +348,12 @@ open class JellyfinApiClient(
 
         /** 收藏回读字段：只要 UserData（官方 ItemFields 值），不拉全量 detail 字段。 */
         const val FAVORITE_FIELDS = "UserData"
+
+        /** 收藏列表的服务端筛选（官方 ItemFilter 值；仅优化，客户端仍兜底）。 */
+        const val FAVORITE_FILTER = "IsFavorite"
+
+        /** 收藏列表纳入的条目类型（与 Emby 同名同义，不含 BoxSet/Playlist）。 */
+        const val FAVORITE_ITEM_TYPES = "Movie,Series,Episode"
 
         /**
          * 请求体序列化：**encodeDefaults=true** 保证协商开关（EnableDirectStream/
