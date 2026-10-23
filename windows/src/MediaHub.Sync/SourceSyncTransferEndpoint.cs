@@ -1,0 +1,395 @@
+using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace MediaHub.Sync;
+
+/// <summary>
+/// Decides whether an address is a loopback address, before any socket is created.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Loopback is the only interface this build will ever touch during a transfer. Binding anything else makes
+/// Windows raise a firewall prompt, and a prompt that appears out of nowhere is worse than a refused transfer:
+/// the user must never have to answer a security question because the app tried a network feature in the
+/// background. So the refusal happens here, in a pure function, before a <see cref="TcpListener"/> exists —
+/// the failure is "not-loopback", never "listener-failed", and there is no socket to close afterwards.
+/// </para>
+/// <para>
+/// The accepted spellings are deliberately a closed list: <c>127.0.0.1</c>, <c>::1</c>, <c>localhost</c>, and a
+/// blank value (which means "the default loopback address"). Host names are not resolved: a name could point at
+/// a real interface, and resolving it would make the refusal depend on DNS.
+/// </para>
+/// </remarks>
+public static class SourceSyncTransferAddress
+{
+    /// <summary>The address used when the caller does not name one.</summary>
+    public const string DefaultAddress = "127.0.0.1";
+
+    /// <summary>The IPv6 loopback spelling.</summary>
+    public const string LoopbackV6 = "::1";
+
+    /// <summary>The only host name accepted, resolved to IPv4 loopback without a DNS lookup.</summary>
+    public const string LoopbackName = "localhost";
+
+    /// <summary>Whether <paramref name="address"/> names the loopback interface (blank means the default).</summary>
+    public static bool IsLoopbackAddress(string? address)
+        => TryResolveLoopback(address, 0, out _, out _);
+
+    /// <summary>Resolves a loopback address and port, or explains why it will not be dialled or bound.</summary>
+    /// <param name="address">The caller's address; blank means <see cref="DefaultAddress"/>.</param>
+    /// <param name="port">0 for a listener that picks its own port; 1..65535 for a dial.</param>
+    /// <param name="endpoint">The endpoint to use, when the address is accepted.</param>
+    /// <param name="detail">A human-readable refusal; never <c>null</c> when the address is rejected.</param>
+    public static bool TryResolveLoopback(string? address, int port, out IPEndPoint? endpoint, out string? detail)
+    {
+        endpoint = null;
+        detail = null;
+
+        string text = (address ?? "").Trim();
+        if (text.Length == 0)
+        {
+            text = DefaultAddress;
+        }
+
+        if (text.Length > 256)
+        {
+            detail = "An address is at most 256 characters; this one was not dialled.";
+            return false;
+        }
+
+        IPAddress resolved;
+        if (string.Equals(text, LoopbackName, StringComparison.OrdinalIgnoreCase))
+        {
+            resolved = IPAddress.Loopback;
+        }
+        else if (string.Equals(text, LoopbackV6, StringComparison.Ordinal))
+        {
+            resolved = IPAddress.IPv6Loopback;
+        }
+        else if (IPAddress.TryParse(text, out IPAddress? parsed) && parsed is not null)
+        {
+            if (!IPAddress.IsLoopback(parsed))
+            {
+                detail = "Only 127.0.0.1, ::1 and localhost are accepted, so '" + text
+                    + "' was refused before any socket was created: binding or dialling a non-loopback address "
+                    + "would make Windows ask the user to open the firewall.";
+                return false;
+            }
+
+            resolved = parsed;
+        }
+        else
+        {
+            detail = "'" + text + "' is not an IP literal and this build does not resolve host names for "
+                + "transfers; use 127.0.0.1, ::1 or localhost.";
+            return false;
+        }
+
+        if (port < 0 || port > 65535)
+        {
+            detail = "A port is 0..65535; " + port.ToString(CultureInfo.InvariantCulture) + " is out of range.";
+            return false;
+        }
+
+        endpoint = new IPEndPoint(resolved, port);
+        return true;
+    }
+}
+
+/// <summary>What <see cref="SourceSyncTransferListener.Start"/> did.</summary>
+public sealed record SourceSyncTransferStartResult
+{
+    /// <summary>True when a loopback listener is running and <see cref="Listener"/> is set.</summary>
+    public bool Started { get; init; }
+
+    /// <summary>One of <see cref="SourceSyncTransferReasons"/> when <see cref="Started"/> is false.</summary>
+    public string? Reason { get; init; }
+
+    /// <summary>Why it failed; never contains a credential.</summary>
+    public string? Detail { get; init; }
+
+    /// <summary>The running listener.</summary>
+    public SourceSyncTransferListener? Listener { get; init; }
+
+    /// <summary>The loopback listener that is now accepting exactly one connection.</summary>
+    public static SourceSyncTransferStartResult Ok(SourceSyncTransferListener listener) => new()
+    {
+        Started = true,
+        Listener = listener,
+    };
+
+    /// <summary>A refused or failed start.</summary>
+    public static SourceSyncTransferStartResult Failed(string reason, string? detail = null) => new()
+    {
+        Reason = reason,
+        Detail = detail,
+    };
+}
+
+/// <summary>
+/// A loopback TCP listener that accepts exactly one peer and hands it to <see cref="SourceSyncTransfer"/>.
+/// </summary>
+/// <remarks>
+/// One accept per listener keeps the lifetime obvious: the caller starts it, sends or receives once, and disposes
+/// it. There is no background loop, so nothing keeps running if the UI goes away.
+/// </remarks>
+public sealed class SourceSyncTransferListener : IAsyncDisposable
+{
+    /// <summary>How long a peer gets to connect and finish, unless the caller says otherwise.</summary>
+    public static TimeSpan DefaultTimeout { get; } = TimeSpan.FromSeconds(15);
+
+    private readonly TcpListener _listener;
+    private int _disposed;
+
+    private SourceSyncTransferListener(TcpListener listener, IPEndPoint endpoint)
+    {
+        _listener = listener;
+        LocalEndPoint = endpoint;
+    }
+
+    /// <summary>The endpoint actually bound; the port is real even when 0 was requested.</summary>
+    public IPEndPoint LocalEndPoint { get; }
+
+    /// <summary>The bound address as text.</summary>
+    public string Address => LocalEndPoint.Address.ToString();
+
+    /// <summary>The bound port.</summary>
+    public int Port => LocalEndPoint.Port;
+
+    /// <summary>Starts a loopback listener, refusing any other address before a socket exists.</summary>
+    /// <param name="address">Loopback address; blank means <see cref="SourceSyncTransferAddress.DefaultAddress"/>.</param>
+    /// <param name="port">0 to let the OS pick a free port.</param>
+    public static SourceSyncTransferStartResult Start(string? address = SourceSyncTransferAddress.DefaultAddress, int port = 0)
+    {
+        if (!SourceSyncTransferAddress.TryResolveLoopback(address, port, out IPEndPoint? endpoint, out string? detail)
+            || endpoint is null)
+        {
+            return SourceSyncTransferStartResult.Failed(SourceSyncTransferReasons.NotLoopback, detail);
+        }
+
+        TcpListener? listener = null;
+        try
+        {
+            listener = new TcpListener(endpoint);
+            listener.Start();
+            return SourceSyncTransferStartResult.Ok(
+                new SourceSyncTransferListener(listener, (IPEndPoint)listener.LocalEndpoint));
+        }
+        catch (SocketException error)
+        {
+            listener?.Stop();
+            return SourceSyncTransferStartResult.Failed(SourceSyncTransferReasons.ListenerFailed, error.Message);
+        }
+        catch (ObjectDisposedException error)
+        {
+            listener?.Stop();
+            return SourceSyncTransferStartResult.Failed(SourceSyncTransferReasons.ListenerFailed, error.Message);
+        }
+    }
+
+    /// <summary>Accepts one peer, reads one transfer, and closes the connection.</summary>
+    /// <param name="expectedChallenge">The invitation's challenge, or null to accept whatever the peer announces.</param>
+    /// <param name="timeout">How long the peer gets, defaulting to <see cref="DefaultTimeout"/>.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    public async Task<SourceSyncTransferResult> ReceiveOnceAsync(
+        string? expectedChallenge = null,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        TimeSpan budget = ResolveBudget(timeout);
+        using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(budget);
+
+        TcpClient? client = null;
+        try
+        {
+            client = await _listener.AcceptTcpClientAsync(cts.Token).ConfigureAwait(false);
+            using NetworkStream stream = client.GetStream();
+            return await SourceSyncTransfer.ReceiveAsync(stream, expectedChallenge, cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return Timeout(budget);
+        }
+        catch (SocketException error)
+        {
+            return SourceSyncTransferResult.Failed(SourceSyncTransferReasons.IoFailed, error.Message);
+        }
+        catch (ObjectDisposedException error)
+        {
+            return SourceSyncTransferResult.Failed(SourceSyncTransferReasons.IoFailed, error.Message);
+        }
+        finally
+        {
+            client?.Dispose();
+        }
+    }
+
+    /// <summary>Accepts one peer, writes one transfer, and closes the connection.</summary>
+    /// <param name="envelope">The serialized envelope.</param>
+    /// <param name="challenge">The invitation's challenge, or null.</param>
+    /// <param name="timeout">How long the peer gets, defaulting to <see cref="DefaultTimeout"/>.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    public async Task<SourceSyncTransferResult> SendOnceAsync(
+        ReadOnlyMemory<byte> envelope,
+        string? challenge = null,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        TimeSpan budget = ResolveBudget(timeout);
+        using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(budget);
+
+        TcpClient? client = null;
+        try
+        {
+            client = await _listener.AcceptTcpClientAsync(cts.Token).ConfigureAwait(false);
+            using NetworkStream stream = client.GetStream();
+            return await SourceSyncTransfer.SendAsync(stream, envelope, challenge, cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return Timeout(budget);
+        }
+        catch (SocketException error)
+        {
+            return SourceSyncTransferResult.Failed(SourceSyncTransferReasons.IoFailed, error.Message);
+        }
+        catch (ObjectDisposedException error)
+        {
+            return SourceSyncTransferResult.Failed(SourceSyncTransferReasons.IoFailed, error.Message);
+        }
+        finally
+        {
+            client?.Dispose();
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            try
+            {
+                _listener.Stop();
+            }
+            catch (SocketException)
+            {
+                // Stopping a listener that never accepted is not an error the caller can act on.
+            }
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    private static TimeSpan ResolveBudget(TimeSpan? timeout)
+    {
+        if (timeout is null || timeout.Value <= TimeSpan.Zero)
+        {
+            return DefaultTimeout;
+        }
+
+        return timeout.Value;
+    }
+
+    private static SourceSyncTransferResult Timeout(TimeSpan budget)
+        => SourceSyncTransferResult.Failed(
+            SourceSyncTransferReasons.TransferTimeout,
+            "The peer did not finish within " + budget.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s.");
+}
+
+/// <summary>The dialling half of a loopback transfer.</summary>
+public static class SourceSyncTransferClient
+{
+    /// <summary>Connects to a loopback listener and sends one envelope.</summary>
+    public static async Task<SourceSyncTransferResult> SendAsync(
+        string? address,
+        int port,
+        ReadOnlyMemory<byte> envelope,
+        string? challenge = null,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await RunAsync(
+            address,
+            port,
+            (stream, token) => SourceSyncTransfer.SendAsync(stream, envelope, challenge, token),
+            timeout,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Connects to a loopback listener and reads one envelope.</summary>
+    public static async Task<SourceSyncTransferResult> ReceiveAsync(
+        string? address,
+        int port,
+        string? expectedChallenge = null,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await RunAsync(
+            address,
+            port,
+            (stream, token) => SourceSyncTransfer.ReceiveAsync(stream, expectedChallenge, token),
+            timeout,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<SourceSyncTransferResult> RunAsync(
+        string? address,
+        int port,
+        Func<NetworkStream, CancellationToken, Task<SourceSyncTransferResult>> body,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken)
+    {
+        if (!SourceSyncTransferAddress.TryResolveLoopback(address, port, out IPEndPoint? endpoint, out string? detail)
+            || endpoint is null)
+        {
+            // Same order as the listener: refuse before dialling, so nothing is opened for a forbidden address.
+            return SourceSyncTransferResult.Failed(SourceSyncTransferReasons.NotLoopback, detail);
+        }
+
+        if (endpoint.Port == 0)
+        {
+            return SourceSyncTransferResult.Failed(
+                SourceSyncTransferReasons.ConnectFailed,
+                "A dial needs a real port; 0 only means 'pick a free one' for a listener.");
+        }
+
+        TimeSpan budget = timeout is null || timeout.Value <= TimeSpan.Zero
+            ? SourceSyncTransferListener.DefaultTimeout
+            : timeout.Value;
+
+        using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(budget);
+
+        TcpClient client = new();
+        try
+        {
+            await client.ConnectAsync(endpoint, cts.Token).ConfigureAwait(false);
+            using NetworkStream stream = client.GetStream();
+            return await body(stream, cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return SourceSyncTransferResult.Failed(
+                SourceSyncTransferReasons.TransferTimeout,
+                "The peer did not answer within " + budget.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s.");
+        }
+        catch (SocketException error)
+        {
+            return SourceSyncTransferResult.Failed(SourceSyncTransferReasons.ConnectFailed, error.Message);
+        }
+        catch (ObjectDisposedException error)
+        {
+            return SourceSyncTransferResult.Failed(SourceSyncTransferReasons.IoFailed, error.Message);
+        }
+        finally
+        {
+            client.Dispose();
+        }
+    }
+}
