@@ -113,6 +113,8 @@ jobs:
           #   sync.*      —— 与 Windows 的来源同步信封/规划器三桶口径
           #   Migration4to5 —— servers 表加同步身份三列的迁移（真机开库前的唯一守卫）
           #   UpNextResolver / PlayerAutoplay —— 跨季连播解析与 Ended 事件接线
+          #   pairing.PairingTransportClient / ...EndToEnd —— 只拨回环的 4 字节帧收发（W6-G）
+          #   feature.settings.sync.* —— 导入四桶分桶/失败关闭（W6-F 逻辑+会话）与补录验证协调器（W6-H）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -130,6 +132,11 @@ jobs:
             --required-suite com.mediahub.core.database.Migration4to5Test \
             --required-suite com.mediahub.model.UpNextResolverTest \
             --required-suite com.mediahub.feature.player.PlayerAutoplayTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportClientTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportEndToEndTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncImportLogicTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncImportSessionTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceVerificationCoordinatorTest \
             --require-complete-suites
 
       - name: Lint
