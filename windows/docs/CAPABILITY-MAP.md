@@ -25,8 +25,8 @@
 | 来源 | 浏览 | 播放 | 进度 | 说明 |
 | --- | --- | --- | --- | --- |
 | 本地 / 映射盘 / UNC | EXECUTED_PASS | EXECUTED_PASS | 本地快照 EXECUTED_PASS | 含同目录外挂字幕发现 |
-| Emby | EXECUTED_PASS（模拟服务器） | EXECUTED_PASS（模拟服务器） | IMPLEMENTED_UNVERIFIED | 真实服务器 4.10.1.0 已部署并完成协议探测，**完整播放与进度回写仍 SERVER_UNVERIFIED** |
-| Jellyfin | EXECUTED_PASS（真实 12.2） | EXECUTED_PASS（真实 12.2） | EXECUTED_PASS（真实 12.2） | 登录/浏览/5 部影片播放/进度回写均实测；**中断恢复 FAILED**（服务端 playstate 判定，未解决） |
+| Emby | EXECUTED_PASS（官方 4.10.x） | EXECUTED_PASS（官方 4.10.x） | EXECUTED_PASS（官方 4.10.x） | W8 真实 GUI 43/43：库（库根是每片一个文件夹）→ 详情 → 真播 600 s 片 → 中断回写 304.33 s → 重启恢复 306 s → 自然结束 played=True/pos=0 → 离线与令牌吊销（401、日志无令牌）。验收中途服务端自行升级到 4.10.2.0，已如实记录 |
+| Jellyfin | EXECUTED_PASS（真实 12.2） | EXECUTED_PASS（真实 12.2） | EXECUTED_PASS（真实 12.2） | 登录/浏览/播放/进度回写均实测；**中断恢复 W8 更正为 EXECUTED_PASS**：W4 的 FAILED 是夹具 180 s 低于服务端 `MinResumeDurationSeconds=300` 导致服务端按「已观看+清零」处理，非客户端缺陷（源码 + 三组对照）。600 s 片实测 29/29：中断 → 完全重启 → 引擎从 304 s 恢复 → 自然结束才 played=True |
 | WebDAV | EXECUTED_PASS（真实 WsgiDAV 4.3.3） | EXECUTED_PASS（真实 WsgiDAV 4.3.3） | 不支持（协议无 playstate） | 子根挂载、404/403/500/401、离线与重试、导航竞态、关闭应用释放回环：见 [W7-EVIDENCE.md](W7-EVIDENCE.md) |
 | Plex / SMB / 云盘 | NOT_STARTED | — | — | — |
 
@@ -72,7 +72,7 @@
 | 内封 / 外挂字幕（SRT/ASS/SSA/VTT） | EXECUTED_PASS（外挂字幕经真实文件对话框加载，列表与提示均实测） |
 | 字幕样式（字体/字号/颜色/描边/位置/延迟/ASS 覆盖） | IMPLEMENTED_UNVERIFIED |
 | 全屏切换 | IMPLEMENTED_UNVERIFIED（未截图确认） |
-| 播放进度恢复 | IMPLEMENTED_UNVERIFIED |
+| 播放进度恢复 | EXECUTED_PASS（真实 Jellyfin 12.2 与官方 Emby 4.10：中断回写 → 完全重启 → 引擎从服务端位置恢复） |
 | 剧集自动连播下一集 | IMPLEMENTED_UNVERIFIED（播放页内切换已实现，未在真实剧集库上做 GUI 验收） |
 | 多文件临时播放队列（上一项/下一项/移除/清空/EOF 与失败跳项） | EXECUTED_PASS（[W7-EVIDENCE.md](W7-EVIDENCE.md)：63/63 + 18/18） |
 | 持久播放列表 | NOT_IMPLEMENTED（队列只存在于本次会话） |
@@ -115,7 +115,7 @@
 | 凭据库与 URL 规范化 | EXECUTED_PASS（79 条，含变异验证） |
 | 播放引擎集成（真实解码） | EXECUTED_PASS（`MpvProbe`） |
 | GUI 端到端（UI Automation 驱动真实应用） | **EXECUTED_PASS（本地，脚本可复现）** |
-| 真实媒体服务器端到端 | **SERVER_UNVERIFIED** |
+| 真实媒体服务器端到端 | EXECUTED_PASS（Jellyfin 12.2 `W8 S1`、Emby 官方 4.10.x `W8 S2`），webdav 真实 WsgiDAV（R7 A3）；仍未做：跨来源「继续观看」页、收藏、剧集自动连播 GUI |
 | 硬件兼容矩阵（Intel/AMD/NVIDIA） | **NOT_RUN** |
 | Windows CI | 已配置（`.github/workflows/windows-ci.yml`），结果见 PR 检查页 |
 | 便携版构建 | EXECUTED_PASS（331.6 MB，可启动） |

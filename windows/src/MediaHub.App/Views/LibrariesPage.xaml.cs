@@ -73,6 +73,16 @@ public sealed partial class LibrariesPage : Page
             var entries = App.Services.Servers.Servers
                 .Where(e => e.Handle is { } h && (h.Library is not null || h.Browse is not null))
                 .ToList();
+
+            // A refresh used to only re-render already-known statuses: a source that had gone offline
+            // stayed offline here until the user found the 媒体源 page and reconnected by hand, so the
+            // refresh button could not recover anything. Retrying the connection makes this button the
+            // recovery path it looks like. Sources that are fine are not re-checked, so the common case
+            // costs nothing.
+            foreach (ServerEntry stale in entries.Where(x => x.Status != ServerStatus.Online && x.Type != ServerType.Local).ToList())
+            {
+                await App.Services.Servers.RetestAsync(stale.ServerId);
+            }
             if (entries.Count == 0)
             {
                 LibraryGrid.ItemsSource = Array.Empty<LibraryCard>();

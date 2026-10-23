@@ -75,6 +75,19 @@ public sealed partial class DetailPage : Page
         MediaItem item = detail.Item;
         TitleText.Text = item.Name;
 
+        // Folders are containers, not playable items: Emby answers POST /Items/{folderId}/PlaybackInfo
+        // with 500, so offering the play button here only produces an error the user cannot act on.
+        bool isFolder = item.IsFolder || item.Type == MediaType.Folder;
+        PlayButton.Visibility = isFolder ? Visibility.Collapsed : Visibility.Visible;
+        if (isFolder)
+        {
+            ResumeButton.Visibility = Visibility.Collapsed;
+            StatusBar.Severity = InfoBarSeverity.Informational;
+            StatusBar.Title = "这是一个文件夹";
+            StatusBar.Message = "该条目是文件夹，不是可播放的媒体。请返回媒体库并进入文件夹后选择其中的条目。";
+            StatusBar.IsOpen = true;
+        }
+
         var meta = new List<string>();
         if (item.Year is { } year && year > 0) meta.Add(year.ToString());
         if (item.RunTime is { } runtime) meta.Add(((int)runtime.TotalMinutes) + " 分钟");
@@ -103,7 +116,9 @@ public sealed partial class DetailPage : Page
         rows.Add(new StreamRow("字幕", streams.Count(s => s.Type == "subtitle") + " 条"));
         rows.Add(new StreamRow("容器", item.FileSizeBytes is { } size ? (size / (double)(1L << 20)).ToString("0.0") + " MB" : "未知"));
         StreamList.ItemsSource = rows;
-        VersionsSection.Visibility = Visibility.Visible;
+
+        // A folder carries no media streams; showing "视频 未知 / 音频 未知" would read as a broken file.
+        VersionsSection.Visibility = isFolder ? Visibility.Collapsed : Visibility.Visible;
 
         if (item.UserDataPlaybackPositionTicks is { } position && position > TimeSpan.TicksPerSecond * 15)
         {
