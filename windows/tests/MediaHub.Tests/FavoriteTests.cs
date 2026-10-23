@@ -231,7 +231,7 @@ public sealed class FavoriteMockFidelityTests
 
         // The whole library is still there without the filter, so the filter is doing the work rather
         // than the catalogue having shrunk to one item.
-        (_, string all) = await SendAsync(mock, HttpMethod.Get, "/Users/" + UserId + "/Items");
+        (_, string all) = await SendAsync(mock, HttpMethod.Get, "/Users/" + UserId + "/Items?Recursive=true");
         using JsonDocument everything = JsonDocument.Parse(all);
         Assert.Equal(25, everything.RootElement.GetProperty("TotalRecordCount").GetInt32());
     }

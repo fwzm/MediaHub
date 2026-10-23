@@ -29,6 +29,14 @@ public sealed class MockServerOptions
     public bool OmitIsFavoriteFromUserData { get; init; }
 
     /// <summary>
+    /// Playback state the item query reports, keyed by item id, laid on top of the default pattern
+    /// (every seventh item holds a resume position). Lets a test build an exact continue-watching set:
+    /// resumable items with distinct play times, one watched to the end, one never played.
+    /// </summary>
+    public IReadOnlyDictionary<string, MockUserData> UserData { get; init; } =
+        new Dictionary<string, MockUserData>(StringComparer.Ordinal);
+
+    /// <summary>
     /// Episodes the <c>/Shows/{seriesId}/Episodes</c> route serves, in exactly the order given.
     /// </summary>
     /// <remarks>
@@ -40,12 +48,18 @@ public sealed class MockServerOptions
 }
 
 /// <summary>
+/// Playback state as a server reports it in <c>UserData</c> — the fields Emby's <c>Filters=IsResumable</c>
+/// and <c>SortBy=DatePlayed</c> are defined on.
+/// </summary>
+public sealed record MockUserData(long PlaybackPositionTicks, bool Played, DateTime? LastPlayedDate = null);
+
+/// <summary>
 /// In-process Emby/Jellyfin stand-in, so integration tests can drive the real provider code over real
 /// sockets without a media server, a container or network access.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Four deliberate fidelity choices, because the tests around them are the reason this exists:
+/// Five deliberate fidelity choices, because the tests around them are the reason this exists:
 /// </para>
 /// <list type="bullet">
 /// <item>the API root follows the dialect — Emby under <c>/emby</c>, Jellyfin from the root — and a
@@ -59,6 +73,12 @@ public sealed class MockServerOptions
 /// <item>the episode list is scoped to one series and answered in seed order rather than sorted by
 /// season and episode, so "next episode" cannot come from the server's ordering; an episode whose
 /// season or episode number is unknown omits that field instead of sending a 0 that would look real.</item>
+/// <item>an item query is scoped the way the servers scope it: a non-recursive query with an empty
+/// <c>ParentId</c> answers with the library folders rather than their contents (Emby 4.10 behaves
+/// exactly so, and a client that read that answer as a video list saw "continue watching" stay empty
+/// forever while this mock — which returned the whole library — kept the defect invisible), while
+/// <c>Recursive=true</c> descends into the libraries; <c>Filters</c> and <c>SortBy=DatePlayed</c> are
+/// applied here too, so a client that drops one of them cannot pass by accident.</item>
 /// </list>
 /// <para>
 /// The catalogue is flat and deterministic: <see cref="MockServerOptions.ItemCount"/> movies live in
@@ -473,22 +493,8 @@ public sealed class MockMediaServer : IAsyncDisposable
     private static JsonObject Views() => new()
     {
         ["Items"] = new JsonArray(
-            new JsonObject
-            {
-                ["Id"] = MoviesLibraryId,
-                ["Name"] = "Movies",
-                ["Type"] = "CollectionFolder",
-                ["CollectionType"] = "movies",
-                ["IsFolder"] = true,
-            },
-            new JsonObject
-            {
-                ["Id"] = TvShowsLibraryId,
-                ["Name"] = "TV Shows",
-                ["Type"] = "CollectionFolder",
-                ["CollectionType"] = "tvshows",
-                ["IsFolder"] = true,
-            }),
+            LibraryFolderJson(MoviesLibraryId, "Movies", "movies"),
+            LibraryFolderJson(TvShowsLibraryId, "TV Shows", "tvshows")),
         ["TotalRecordCount"] = 2,
     };
 
@@ -527,6 +533,14 @@ public sealed class MockMediaServer : IAsyncDisposable
         }.ToJsonString());
     }
 
+    /// <summary>One page of <c>/Users/{uid}/Items</c>, scoped the way the real servers scope it.</summary>
+    /// <remarks>
+    /// Two rules matter for "continue watching". A non-recursive query with an empty ParentId answers
+    /// with the library folders, not with their contents — Emby 4.10 does exactly that, and a client
+    /// that reads the answer as a video list sees zero videos forever. Recursive=true descends into the
+    /// libraries. Filters and SortBy are applied here as well, so a client that drops one of them cannot
+    /// stay green by accident.
+    /// </remarks>
     private string ItemsPage(RecordedRequest request)
     {
         Dictionary<string, string> query = ParseQuery(request.Query);
@@ -534,52 +548,231 @@ public sealed class MockMediaServer : IAsyncDisposable
         query.TryGetValue("ParentId", out string? parentId);
         query.TryGetValue("IncludeItemTypes", out string? includeItemTypes);
         query.TryGetValue("Filters", out string? filters);
+        query.TryGetValue("SortBy", out string? sortBy);
+        query.TryGetValue("SortOrder", out string? sortOrder);
         int startIndex = Math.Max(0, ParseInt(query, "StartIndex", 0));
         int limit = ParseInt(query, "Limit", 0);
 
-        IEnumerable<MockItem> matches = _items;
-        if (!string.IsNullOrWhiteSpace(searchTerm))
+        List<JsonObject> all = ItemQuery(
+            searchTerm: string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm.Trim(),
+            parentId: string.IsNullOrEmpty(parentId) ? null : parentId,
+            recursive: IsTrue(query, "Recursive"),
+            wantedTypes: SplitTypes(includeItemTypes),
+            favoritesOnly: HasFilter(filters, "IsFavorite"),
+            resumableOnly: HasFilter(filters, "IsResumable"),
+            sortByDatePlayed: HasFilter(sortBy, "DatePlayed"),
+            descending: !string.Equals(sortOrder, "Ascending", StringComparison.OrdinalIgnoreCase));
+
+        IEnumerable<JsonObject> page = all.Skip(startIndex);
+        // Emby treats an absent or zero Limit as "no limit".
+        if (limit > 0) page = page.Take(limit);
+
+        return new JsonObject
         {
-            string term = searchTerm.Trim();
-            matches = matches.Where(item => item.Name.Contains(term, StringComparison.OrdinalIgnoreCase));
-        }
-        else if (!string.IsNullOrEmpty(parentId))
+            ["Items"] = new JsonArray(page.Select(node => (JsonNode?)node).ToArray()),
+            ["TotalRecordCount"] = all.Count,
+            ["StartIndex"] = startIndex,
+        }.ToJsonString();
+    }
+
+    /// <summary>The items one query matches, before paging.</summary>
+    private List<JsonObject> ItemQuery(
+        string? searchTerm,
+        string? parentId,
+        bool recursive,
+        HashSet<string>? wantedTypes,
+        bool favoritesOnly,
+        bool resumableOnly,
+        bool sortByDatePlayed,
+        bool descending)
+    {
+        // The top of the tree: not one video, but the library folders themselves.
+        if (searchTerm is null && parentId is null && !recursive) return LibraryFolders(wantedTypes);
+
+        // A series asks for its seasons; a season asks for its episodes.
+        if (searchTerm is null && parentId is not null)
         {
-            matches = matches.Where(item => string.Equals(item.LibraryId, parentId, StringComparison.OrdinalIgnoreCase));
+            if (_episodes.Any(episode => string.Equals(episode.SeriesId, parentId, StringComparison.Ordinal)))
+            {
+                IEnumerable<MockEpisode> ofSeries =
+                    _episodes.Where(episode => string.Equals(episode.SeriesId, parentId, StringComparison.Ordinal));
+                return wantedTypes is null || wantedTypes.Contains("Season")
+                    ? Seasons(parentId)
+                    : EpisodesOf(ofSeries, wantedTypes);
+            }
+            if (_episodes.Any(episode => string.Equals(episode.SeasonId, parentId, StringComparison.Ordinal)))
+            {
+                IEnumerable<MockEpisode> ofSeason =
+                    _episodes.Where(episode => string.Equals(episode.SeasonId, parentId, StringComparison.Ordinal));
+                return EpisodesOf(ofSeason, wantedTypes);
+            }
         }
 
-        if (!string.IsNullOrWhiteSpace(includeItemTypes))
+        IEnumerable<MockItem> movies = _items;
+        IEnumerable<MockEpisode> episodes = _episodes;
+        if (searchTerm is null && parentId is not null)
         {
-            HashSet<string> wanted = includeItemTypes
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            matches = matches.Where(item => wanted.Contains(item.Type));
+            if (string.Equals(parentId, MoviesLibraryId, StringComparison.OrdinalIgnoreCase))
+            {
+                episodes = Array.Empty<MockEpisode>();
+            }
+            else if (string.Equals(parentId, TvShowsLibraryId, StringComparison.OrdinalIgnoreCase))
+            {
+                movies = Array.Empty<MockItem>();
+            }
+            else
+            {
+                // An unknown parent has no children; the server answers an empty page rather than 404.
+                movies = Array.Empty<MockItem>();
+                episodes = Array.Empty<MockEpisode>();
+            }
         }
 
-        if (HasIsFavoriteFilter(filters))
+        if (searchTerm is not null)
+        {
+            movies = movies.Where(item => item.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase));
+            episodes = episodes.Where(episode => episode.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (wantedTypes is not null)
+        {
+            movies = movies.Where(item => wantedTypes.Contains(item.Type));
+            episodes = episodes.Where(_ => wantedTypes.Contains("Episode"));
+        }
+
+        if (favoritesOnly)
         {
             // A Filters=IsFavorite query answers exactly what the write routes were told, so a client
             // that drops the filter cannot pass by being handed the whole library instead.
             HashSet<string> favorites;
             lock (_gate) favorites = new HashSet<string>(_favorites, StringComparer.Ordinal);
-            matches = matches.Where(item => favorites.Contains(item.Id));
+            movies = movies.Where(item => favorites.Contains(item.Id));
+            episodes = Array.Empty<MockEpisode>();
         }
 
-        List<MockItem> all = matches.ToList();
-        IEnumerable<MockItem> page = all.Skip(startIndex);
-        // Emby treats an absent or zero Limit as "no limit".
-        if (limit > 0) page = page.Take(limit);
-
-        var items = new JsonArray();
-        foreach (MockItem item in page) items.Add(ItemJson(item));
-
-        return new JsonObject
+        if (resumableOnly)
         {
-            ["Items"] = items,
-            ["TotalRecordCount"] = all.Count,
-            ["StartIndex"] = startIndex,
-        }.ToJsonString();
+            movies = movies.Where(IsResumable);
+            // Episodes carry no playback state in this catalogue, so they are never resumable.
+            episodes = Array.Empty<MockEpisode>();
+        }
+
+        List<MockItem> movieList = movies.ToList();
+        if (sortByDatePlayed)
+        {
+            movieList = descending
+                ? movieList.OrderByDescending(PlayedAt).ThenBy(item => item.Index).ToList()
+                : movieList.OrderBy(PlayedAt).ThenBy(item => item.Index).ToList();
+        }
+
+        List<JsonObject> results = movieList.Select(ItemJson).ToList();
+        results.AddRange(episodes.Select(EpisodeJson));
+        return results;
     }
+
+    /// <summary>Play time <c>SortBy=DatePlayed</c> sorts on; an item never played sorts as the oldest.</summary>
+    private DateTime PlayedAt(MockItem item) => UserDataFor(item).LastPlayedDate ?? DateTime.MinValue;
+
+    private bool IsResumable(MockItem item)
+    {
+        MockUserData state = UserDataFor(item);
+        return state.PlaybackPositionTicks > 0 && !state.Played;
+    }
+
+    /// <summary>
+    /// Playback state for one movie: a test override when the options gave one, otherwise the default
+    /// pattern (every seventh item holds a resume position) so continue-watching paths have something
+    /// to find without a test inventing state.
+    /// </summary>
+    private MockUserData UserDataFor(MockItem item)
+    {
+        if (_options.UserData.TryGetValue(item.Id, out MockUserData? declared)) return declared;
+        return item.Index % 7 == 0
+            ? new MockUserData(300_000_000L, Played: false, LastPlayedDate: DefaultPlayedAt(item.Index))
+            : new MockUserData(0L, Played: false);
+    }
+
+    /// <summary>Deterministic play time, so <c>SortBy=DatePlayed</c> has a total order to sort.</summary>
+    private static DateTime DefaultPlayedAt(int index) =>
+        new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMinutes(index);
+
+    private static HashSet<string>? SplitTypes(string? includeItemTypes) =>
+        string.IsNullOrWhiteSpace(includeItemTypes)
+            ? null
+            : includeItemTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Whether a comma-separated list (<c>Filters</c>, <c>SortBy</c>) holds one value.</summary>
+    private static bool HasFilter(string? list, string wanted) =>
+        !string.IsNullOrWhiteSpace(list)
+        && list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(value => value.Equals(wanted, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsTrue(Dictionary<string, string> query, string name) =>
+        query.TryGetValue(name, out string? raw)
+        && (raw.Equals("true", StringComparison.OrdinalIgnoreCase) || raw == "1");
+
+    /// <summary>The library folders, shaped as the item query answers them.</summary>
+    /// <remarks>
+    /// No <c>UserData</c>, no media streams and no path: a library folder is not a playable item, and a
+    /// client that treats it as one has to fail here rather than against a real server.
+    /// </remarks>
+    private static List<JsonObject> LibraryFolders(HashSet<string>? wantedTypes)
+    {
+        if (wantedTypes is not null
+            && !wantedTypes.Contains("CollectionFolder")
+            && !wantedTypes.Contains("Folder"))
+        {
+            return new List<JsonObject>();
+        }
+
+        return new List<JsonObject>
+        {
+            LibraryFolderJson(MoviesLibraryId, "Movies", "movies"),
+            LibraryFolderJson(TvShowsLibraryId, "TV Shows", "tvshows"),
+        };
+    }
+
+    private static JsonObject LibraryFolderJson(string id, string name, string collectionType) => new()
+    {
+        ["Id"] = id,
+        ["Name"] = name,
+        ["Type"] = "CollectionFolder",
+        ["CollectionType"] = collectionType,
+        ["IsFolder"] = true,
+    };
+
+    /// <summary>Seasons of one series, derived from the seeded episodes and kept in seed order.</summary>
+    private List<JsonObject> Seasons(string seriesId)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var seasons = new List<JsonObject>();
+        foreach (MockEpisode episode in _episodes)
+        {
+            if (!string.Equals(episode.SeriesId, seriesId, StringComparison.Ordinal)) continue;
+            if (!seen.Add(episode.SeasonId)) continue;
+
+            var json = new JsonObject
+            {
+                ["Id"] = episode.SeasonId,
+                ["Name"] = episode.SeasonNumber is { } number
+                    ? "Season " + number.ToString(CultureInfo.InvariantCulture)
+                    : "Unknown Season",
+                ["Type"] = "Season",
+                ["SeriesId"] = episode.SeriesId,
+                ["IsFolder"] = true,
+            };
+            if (episode.SeasonNumber is { } index) json["IndexNumber"] = index;
+            seasons.Add(json);
+        }
+        return seasons;
+    }
+
+    /// <summary>Episodes of one parent, filtered by <c>IncludeItemTypes</c>.</summary>
+    private List<JsonObject> EpisodesOf(IEnumerable<MockEpisode> episodes, HashSet<string>? wantedTypes)
+        => wantedTypes is not null && !wantedTypes.Contains("Episode")
+            ? new List<JsonObject>()
+            : episodes.Select(EpisodeJson).ToList();
 
     /// <summary>The authenticated user, as a real server reports it.</summary>
     private void ServeCurrentUser(HttpListenerContext context)
@@ -658,22 +851,13 @@ public sealed class MockMediaServer : IAsyncDisposable
         WriteJson(context, 404, new JsonObject { ["Error"] = "Unknown item " + itemId }.ToJsonString());
     }
 
-    /// <summary>Whether an item query asked for favourites only (<c>Filters=IsFavorite</c>).</summary>
-    /// <remarks>
-    /// Both servers express the filter as a comma-separated <c>Filters</c> list, so the check parses the
-    /// list rather than comparing the whole value — which keeps it correct alongside other filters.
-    /// </remarks>
-    private static bool HasIsFavoriteFilter(string? filters) =>
-        !string.IsNullOrWhiteSpace(filters)
-        && filters.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Any(value => value.Equals("IsFavorite", StringComparison.OrdinalIgnoreCase));
-
-    /// <summary>Item payload with the mock's current favourite state folded into <c>UserData</c>.</summary>
+    /// <summary>Item payload with the mock's playback and favourite state folded into <c>UserData</c>.</summary>
     private JsonObject ItemJson(MockItem item)
     {
+        MockUserData userData = UserDataFor(item);
         bool favorite;
         lock (_gate) favorite = _favorites.Contains(item.Id);
-        return item.ToJson(favorite, includeFavorite: !_options.OmitIsFavoriteFromUserData);
+        return item.ToJson(userData, favorite, includeFavorite: !_options.OmitIsFavoriteFromUserData);
     }
 
     /// <summary>
@@ -998,20 +1182,23 @@ public sealed class MockMediaServer : IAsyncDisposable
         long SizeBytes)
     {
         /// <summary>
-        /// Item payload, with <paramref name="isFavorite"/> reported as <c>UserData.IsFavorite</c>
-        /// unless <paramref name="includeFavorite"/> is false (a server that does not track favourites
-        /// simply omits the field).
+        /// Item payload, with <paramref name="userData"/> reported as <c>UserData</c> and
+        /// <paramref name="isFavorite"/> as <c>UserData.IsFavorite</c>, unless
+        /// <paramref name="includeFavorite"/> is false (a server that does not track favourites simply
+        /// omits the field).
         /// </summary>
-        public JsonObject ToJson(bool isFavorite, bool includeFavorite)
+        public JsonObject ToJson(MockUserData userData, bool isFavorite, bool includeFavorite)
         {
-            var userData = new JsonObject
+            var playback = new JsonObject
             {
-                // A non-zero resume position on every seventh item, so continue-watching paths have
-                // something to find without inventing state in the test.
-                ["PlaybackPositionTicks"] = Index % 7 == 0 ? 300_000_000L : 0L,
-                ["Played"] = false,
+                ["PlaybackPositionTicks"] = userData.PlaybackPositionTicks,
+                ["Played"] = userData.Played,
             };
-            if (includeFavorite) userData["IsFavorite"] = isFavorite;
+            if (userData.LastPlayedDate is { } playedAt)
+            {
+                playback["LastPlayedDate"] = playedAt.ToString("o", CultureInfo.InvariantCulture);
+            }
+            if (includeFavorite) playback["IsFavorite"] = isFavorite;
 
             return new JsonObject
             {
@@ -1029,7 +1216,7 @@ public sealed class MockMediaServer : IAsyncDisposable
                 ["CommunityRating"] = 6.0 + (Index % 5) / 2.0,
                 ["ImageTags"] = new JsonObject { ["Primary"] = "primary-" + Id },
                 ["BackdropImageTags"] = new JsonArray("backdrop-" + Id),
-                ["UserData"] = userData,
+                ["UserData"] = playback,
                 ["MediaStreams"] = MediaStreams(),
             };
         }

@@ -174,6 +174,33 @@ internal sealed class MediaBrowserApi
         return await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Require(UserId) + "/Items", query), ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Items the server reports as resumable, most recently played first.
+    /// </summary>
+    /// <remarks>
+    /// Recursive=true is not optional here: Emby's /Items endpoint only descends into library folders
+    /// when asked, so a non-recursive query with an empty ParentId answers with the library folders
+    /// themselves — 0 items of type Movie/Episode, and "continue watching" stays empty forever even
+    /// though the server holds resume positions. Filters=IsResumable lets the server do the selection
+    /// so a limit does not silently truncate the list by name order (both Emby 4.10 and Jellyfin 12.2
+    /// honour it; verified against both).
+    /// </remarks>
+    public async Task<JsonDocument> GetResumableItemsAsync(int limit, CancellationToken ct)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["Recursive"] = "true",
+            ["IncludeItemTypes"] = "Movie,Episode",
+            ["Filters"] = "IsResumable",
+            ["Fields"] = MediaBrowserMapper.ItemFields,
+            ["SortBy"] = "DatePlayed",
+            ["SortOrder"] = "Descending",
+            ["Limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["ImageTypeLimit"] = "1",
+        };
+        return await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Require(UserId) + "/Items", query), ct).ConfigureAwait(false);
+    }
+
     public async Task<JsonDocument> SearchAsync(string term, PageRequest page, CancellationToken ct)
     {
         var query = new Dictionary<string, string?>

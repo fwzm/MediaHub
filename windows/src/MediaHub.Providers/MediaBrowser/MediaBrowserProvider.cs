@@ -401,8 +401,9 @@ internal sealed class MediaBrowserProvider :
 
     public async Task<IReadOnlyList<MediaItem>> GetContinueWatchingAsync(int limit, CancellationToken ct = default)
     {
-        var query = new PageRequest(0, limit);
-        using var doc = await _api.GetItemsAsync(string.Empty, query, "Movie,Episode", ct).ConfigureAwait(false);
+        if (limit <= 0) return Array.Empty<MediaItem>();
+
+        using var doc = await _api.GetResumableItemsAsync(limit, ct).ConfigureAwait(false);
         return MediaBrowserMapper.Items(doc)
             .Select(i => MediaBrowserMapper.MapItem(_serverId, i))
             .Where(i => i.UserDataPlaybackPositionTicks is > 0 && i.UserDataPlayed != true)
