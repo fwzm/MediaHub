@@ -36,6 +36,12 @@ namespace MhQuiet
 
         [DllImport("kernel32.dll")]
         public static extern uint GetTickCount();
+
+        // QUNS_* : what the shell thinks about interrupting right now. 2 busy / 3 D3D full screen /
+        // 4 presentation mode / 7 app window are all "the user is busy with something on screen",
+        // which idle time cannot see (watching a full-screen video produces no input at all).
+        [DllImport("shell32.dll")]
+        public static extern int SHQueryUserNotificationState(out int state);
     }
 }
 '@
@@ -59,6 +65,56 @@ function Get-MhUserIdleSeconds {
     $last = [uint64]$info.dwTime
     $delta = if ($tick -ge $last) { $tick - $last } else { (0x100000000 - $last) + $tick }
     return [int]($delta / 1000)
+}
+
+function Get-MhNotificationState {
+    <#
+    .SYNOPSIS Shell notification state (QUNS_*), $null when the query fails.
+    .DESCRIPTION 1 not-present, 2 busy, 3 D3D full screen, 4 presentation mode, 5 accepts notifications,
+    6 quiet time, 7 app window. Only 5 and 6 mean "it is safe to put a window on screen".
+    #>
+    [CmdletBinding()]
+    param()
+
+    try {
+        $state = 0
+        $hr = [MhQuiet.Native]::SHQueryUserNotificationState([ref]$state)
+        if ($hr -ne 0) { return $null }
+        return [int]$state
+    }
+    catch { return $null }
+}
+
+function Test-MhQuietScreenSafe {
+    <#
+    .SYNOPSIS $true when nothing full-screen/busy owns the screen, so a test window would not steal it.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $state = Get-MhNotificationState
+    if ($null -eq $state) { return $true }   # unknown: fall back to the idle gate alone
+    return ($state -eq 5 -or $state -eq 6)
+}
+
+function Wait-MhUserIdleAndQuiet {
+    <#
+    .SYNOPSIS Waits until the user has been away for -MinIdleSeconds and the screen is free.
+    #>
+    [CmdletBinding()]
+    param(
+        [int]$MinIdleSeconds = 180,
+        [int]$TimeoutSeconds = 0,
+        [int]$PollSeconds = 5
+    )
+
+    $deadline = (Get-Date).AddSeconds([Math]::Max(0, $TimeoutSeconds))
+    while ($true) {
+        $idle = Get-MhUserIdleSeconds
+        if ($null -ne $idle -and $idle -ge $MinIdleSeconds -and (Test-MhQuietScreenSafe)) { return $true }
+        if ((Get-Date) -ge $deadline) { return $false }
+        Start-Sleep -Seconds $PollSeconds
+    }
 }
 
 function Wait-MhUserIdle {
@@ -176,4 +232,4 @@ function Get-MhQuietAbortReason {
     return (Get-Content -Path $Watch.AbortFile -Raw -ErrorAction SilentlyContinue).Trim()
 }
 
-Export-ModuleMember -Function Get-MhUserIdleSeconds, Wait-MhUserIdle, Start-MhQuietWatch, Stop-MhQuietWatch, Test-MhQuietAborted, Get-MhQuietAbortReason
+Export-ModuleMember -Function Get-MhUserIdleSeconds, Wait-MhUserIdle, Wait-MhUserIdleAndQuiet, Get-MhNotificationState, Test-MhQuietScreenSafe, Start-MhQuietWatch, Stop-MhQuietWatch, Test-MhQuietAborted, Get-MhQuietAbortReason

@@ -1209,6 +1209,12 @@ function Start-MhApp {
                'Run windows/tools/acceptance/run-quiet.ps1 instead (it waits for an idle window and stops the app when you come back), ' +
                'or set MH_ALLOW_ACTIVE=1 if you really are watching and want the window now.')
       }
+      # Idle time cannot see someone watching a video full screen or giving a presentation; ask the
+      # shell instead, and stay out of the way when it says the screen is busy.
+      if ((Get-Command Test-MhQuietScreenSafe -ErrorAction SilentlyContinue) -and -not (Test-MhQuietScreenSafe)) {
+        throw ('refusing to start MediaHub: something is full screen or busy (QUNS state=' + (Get-MhNotificationState) + '). ' +
+               'Close it, or set MH_ALLOW_ACTIVE=1 to override.')
+      }
     }
   }
   if ($ResetTrace) {

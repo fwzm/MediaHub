@@ -136,9 +136,9 @@ $idle = Get-MhUserIdleSeconds
 Add-Line ('quiet-run ' + $stamp + ' suites=' + ($Suites -join ',') + ' servers=' + ($Servers -join ',') + ' idleNow=' + $idle + 's threshold=' + $MinIdleSeconds + 's waitMinutes=' + $WaitForIdleMinutes)
 
 # ---- gate ------------------------------------------------------------------
-$idleOk = Wait-MhUserIdle -MinIdleSeconds $MinIdleSeconds -TimeoutSeconds ($WaitForIdleMinutes * 60)
+$idleOk = Wait-MhUserIdleAndQuiet -MinIdleSeconds $MinIdleSeconds -TimeoutSeconds ($WaitForIdleMinutes * 60)
 if (-not $idleOk) {
-    Add-Line ('SKIPPED-USER-ACTIVE idle=' + (Get-MhUserIdleSeconds) + 's needed=' + $MinIdleSeconds + 's: nothing was started, no window was opened.')
+    Add-Line ('SKIPPED-USER-ACTIVE idle=' + (Get-MhUserIdleSeconds) + 's needed=' + $MinIdleSeconds + 's quns=' + (Get-MhNotificationState) + ': nothing was started, no window was opened.')
     exit 0
 }
 

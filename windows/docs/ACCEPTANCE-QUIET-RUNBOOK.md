@@ -34,7 +34,9 @@ pwsh -File windows/tools/acceptance/run-quiet.ps1 -Suites u1 -Servers emby
 
 ## 它对使用者承诺什么
 
-1. **不抢屏**：启动前要求键盘/鼠标/触摸连续无输入 180 秒（`GetLastInputInfo`，屏保同源）。
+1. **不抢屏**：启动前要求键盘/鼠标/触摸连续无输入 180 秒（`GetLastInputInfo`，屏保同源），**并且**外壳没有报告
+   全屏/忙碌状态（`SHQueryUserNotificationState` ∈ {5 可通知, 6 安静时间}；2 忙碌 / 3 D3D 全屏 / 4 演示 / 7 应用窗口一律
+   不启动）。第二条是必要的：全屏看视频、打游戏、开演示都不产生键鼠输入，光看 idle 会误判成「人不在」。
    不等空闲就不启动，退出码 0，一个窗口都不开。
 2. **人回来就停**：运行期后台 job 每 700 ms 轮询输入；一旦检测到输入，立刻杀掉 MediaHub 并写
    `watch-*.abort`（记录 idle 值与时间），本次运行标记 `ABORTED-BY-USER`。最多闪一下窗口，
@@ -54,7 +56,8 @@ pwsh -File windows/tools/acceptance/run-quiet.ps1 -Suites u1 -Servers emby
 
 - `<OutRoot>summary-<时间戳>.txt`：本次总账（每跑一行 `exit=` / `RESULT:` / `elapsed` / 失败行），
   末行 `RESULT: OK` / `RESULT: FAILED …` / `RESULT: ABORTED-BY-USER …`。
-- `<OutRoot>un-<suite>-<server>-<时间戳>.log`：该跑的完整断言流水（与单独跑脚本时同格式）。
+- `<OutRoot>` 下的 `run-<suite>-<server>-<时间戳>.log`：该跑的完整断言流水（与单独跑脚本时同格式）。
+- `<OutRoot>` 下的 `transcript-<时间戳>.log`：runner 自身 transcript（服务器启动结果、每次 exit code），runner 中途被杀也留得下。
 - 各套件自己的证据目录不变：`windows/tools/acceptance/evidence/<suite>/<server>/`。
 - 退出码：0 = 跑过或因人不在而跳过；1 = 有失败或被打断。
 
@@ -75,11 +78,25 @@ Start-Sleep 3; Test-MhQuietAborted $w; Get-MhQuietAbortReason $w
 Stop-MhQuietWatch $w
 ```
 
+## 实战踩坑（2026-10-24 首次无人值守跑暴露并已修）
+
+1. **看门狗没真的杀进程**：`Start-Job -ArgumentList …, [bool]$DryRun, …` 里的 `[bool]$DryRun` 在参数模式被当成字面量
+   拼成字符串 `[bool]False`，job 内 `[bool]` 转换恒为 `$true`，于是 `if (-not $DryRun)` 永不成立——abort 标记写着
+   `dryRun=True`，进程却一个没杀。改为传 `$DryRun.IsPresent`，job 内再用 `-match 'true$'` 按文本判定。
+   对照自检（dummy 进程）：真模式 4 s 内清空且 abort 记 `dryRun=False`；dry-run 模式 dummy 存活。
+2. **Emby 用错开关**：`EmbyServer.exe -datadir …` 被 Emby 忽略，它回落到 `app\programdata`、按默认端口绑 **8096**，
+   还会 `LaunchWebBrowser` 拉起浏览器（既没监听 8097，又真弹了窗口）。必须用 `-programdata D:\mh-servers\data\emby`；
+   实测 8097 起、`ServerId` 仍是 `1271d0a1040046db8c0089cc328bbbf1`。
+3. **只有 idle 门禁不够**：全屏视频/游戏/演示不产生输入，idle 会一路涨到阈值。已加 `SHQueryUserNotificationState`
+   门禁（只允许 5/6），runner 的 gate 与 `Start-MhApp` 的守卫都用它；实测本机返回 5。
+4. **Emby 自更新会吃掉第一次启动**：安装目录存在 `embyserver-win-x64-*.7z` 时进程复制 updater 后退出。
+   `Start-QuietServer` 现在记录 launch pid、检测提前退出并在函数内重试一次，端口等待 150 s，等待期间也可中止。
+
 ## 与历史证据的关系
 
 - W9 四门证据（U1/U2/U3/U4 × Emby/Jellyfin，276 断言）是在直接运行的旧方式下取得的，仍然有效；
   二进制 `MediaHub.dll A15F6E4F…`。
 - 之后修复了继续观看卡片封面（`ImageCache` 记录 `image:loaded`、`ContinueWatchingPage` 懒加载海报）并补了
   U1 的 P0.9/P2.6 断言，在当前二进制 `MediaHub.dll A8EDD448…` 上 U1 两服各 41/41 通过。
-- 其余六跑（U2/U3/U4 × 两服）在**同一二进制**上的完整复跑，改为用本 runbook 的空闲窗口执行，
-  结果写入 `D:mh-verifyquietsummary-*.txt` 并据此更新 W10 证据文档。
+  结果写入 `D:\mh-verify\quiet-w10b\summary-*.txt`（逐行 append，末行 `RESULT:`）并据此更新 W10 证据文档。
+  结果写入 `D:\mh-verify\quiet-w10b\summary-*.txt`（逐行 append，末行 `RESULT:`）并据此更新 W10 证据文档。
