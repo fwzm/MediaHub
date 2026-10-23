@@ -20,7 +20,7 @@
 
 .PARAMETER JsonPath
     The license-report.json written by license-report.ps1 -Json. When omitted, the script looks
-    for D:/mh-verify/w11b/license-report.json as a convenience default and, if that is absent too,
+    for windows/artifacts/license-report/license-report.json (the path the docs use) and, if that is absent too,
     the report-dependent checks are reported as SKIP instead of failing.
 
 .PARAMETER FailOnLicenceGaps
@@ -32,7 +32,7 @@
     pwsh -NoProfile -File windows/tools/check-licence-surface.ps1
 
 .EXAMPLE
-    pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath D:/mh-verify/w11b/license-report.json -FailOnLicenceGaps
+    pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json -FailOnLicenceGaps
 .NOTES
     Exit codes: 0 = every check passed (warnings allowed), 1 = at least one check failed,
     2 = usage problem (repository root not found).
@@ -68,7 +68,7 @@ function Resolve-RepoPath {
 $noticesFile = Resolve-RepoPath -Path $NoticesPath -Default 'windows/docs/THIRD-PARTY-NOTICES.md'
 $sbomFile = Resolve-RepoPath -Path $SbomPath -Default 'windows/docs/sbom-windows.cdx.json'
 $complianceFile = Resolve-RepoPath -Path $LgplCompliancePath -Default 'windows/docs/LGPL-COMPLIANCE.md'
-$reportFile = if ($JsonPath) { $JsonPath } else { 'D:/mh-verify/w11b/license-report.json' }
+$reportFile = if ($JsonPath) { $JsonPath } else { Join-Path $RepoRoot ('windows' + $pathSeparator + 'artifacts' + $pathSeparator + 'license-report' + $pathSeparator + 'license-report.json') }
 $collectedListFile = Resolve-RepoPath -Path '' -Default 'windows/engine/lgpl/dist/runtime-dependencies-collected.txt'
 
 $checks = [System.Collections.Generic.List[object]]::new()
