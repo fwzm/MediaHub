@@ -131,4 +131,16 @@ class ProviderImageAuthStoreTest {
             store.headersForUrl(url("https://media.example.com/emby/Items/1/Images/Primary"))!!["X-Emby-Token"],
         )
     }
+
+    @Test
+    fun `server without image auth contributor still resolves its id for request policy`() {
+        val store = store(
+            server("srv-webdav", ServerType.WEBDAV, "http://127.0.0.1:33780/dav"),
+        )
+
+        assertEquals("srv-webdav", store.serverIdForUrl(url("http://127.0.0.1:33780/dav/")))
+        assertNull("无图片鉴权 contributor 的服务器不得伪造认证头", store.headersForUrl(
+            url("http://127.0.0.1:33780/dav/"),
+        ))
+    }
 }

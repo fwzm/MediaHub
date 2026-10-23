@@ -1,5 +1,13 @@
 # 变更记录（CHANGELOG）
 
+## [Unreleased — M0-A provider scope attribution] — 2026-10-23
+
+- 修复没有 `ProviderImageAuthContributor` 的 Provider（当前实测为 WebDAV）无法解析 `serverId`、导致
+  User-Agent 请求策略回落默认值的问题；基础 URL 现在可用于归属，认证头仍保持 fail-closed。
+- 新增 `ProviderImageAuthStoreTest` 回归：WebDAV scope 能解析服务器 ID，但不会伪造图片认证头。
+- Xiaomi 14 Ultra / API 36 + 受控本地 WebDAV 真机复测通过：编辑页自定义 UA 重启后恢复，OPTIONS 请求使用
+  `MediaHubTest99`；冷启动 scope 建立前的首个后台请求使用默认 UA，作为未闭环时序边界保留。
+
 ## [Unreleased — M0-A repository wait optimization] — 2026-10-23
 
 - 优化 `DataStoreServerUserAgentRepository.awaitLoaded()`：用可取消的

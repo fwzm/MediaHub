@@ -2,7 +2,7 @@
 
 > 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
 
-当前状态：**A4 联合候选已并入 main**（2026-10-14，PR #24）：P1 播放专业信息面板、P2 字幕中心（同目录发现 / 导入 / 双内核加载 / mpv 偏移）、WebDAV 修复链路与私有恢复一致性已落地；对应候选的本地门禁为 1275 单测 / 0 失败 / 0 跳过，CI run `38491200869` 三个 job 全 SUCCESS。当前 Draft 增量为 [M0-A 服务器请求治理闭环](https://github.com/fwzm/MediaHub/pull/36)：按服务器作用域的 User-Agent、持久化、删除清理、并发写入保护和设置页已接入；该增量尚未合入 main。真机 / 真实服务器端到端验收仍标记为 `DEVICE UNVERIFIED`，不能用 JVM 或 CI 结果替代。
+当前状态：**A4 联合候选已并入 main**（2026-10-14，PR #24）：P1 播放专业信息面板、P2 字幕中心（同目录发现 / 导入 / 双内核加载 / mpv 偏移）、WebDAV 修复链路与私有恢复一致性已落地；对应候选的本地门禁为 1275 单测 / 0 失败 / 0 跳过，CI run `38491200869` 三个 job 全 SUCCESS。当前 Draft 增量为 [M0-A 服务器请求治理闭环](https://github.com/fwzm/MediaHub/pull/36)：按服务器作用域的 User-Agent、持久化、删除清理、并发写入保护、WebDAV 无图片鉴权 contributor 的 URL 归属和设置页已接入；该增量尚未合入 main。2026-10-23 已用受控本地 WebDAV + Xiaomi 14 Ultra 完成一条真机 UA 请求验证；真实 Emby/Jellyfin 服务器和更广的真机矩阵仍保持 `DEVICE UNVERIFIED`。
 
 [![GitHub release](https://img.shields.io/github/v/release/fwzm/MediaHub?include_prereleases)](https://github.com/fwzm/MediaHub/releases)
 [![License](https://img.shields.io/github/license/fwzm/MediaHub)](LICENSE)
@@ -111,10 +111,14 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 
 - 默认 User-Agent 为可识别的 `MediaHub/... (Android)`，不会冒充其它播放器。
 - 自定义 User-Agent 按 `serverId` 隔离并持久化；删除服务器或确认的孤儿清理不会误删其它服务器配置。
+- 没有图片鉴权 contributor 的 Provider（例如 WebDAV）仍按基础 URL 解析 `serverId`，因此可以应用 UA 策略，但不会伪造图片认证头。
 - 重定向按每一跳重新解析服务器归属；跨 origin 时回落默认 User-Agent，凭据剥离仍由独立拦截器负责。
 - 自定义值拒绝控制字符、非 ASCII 和超长输入；非法值不会被静默改写成另一条配置。
 - 本轮对 `DataStoreServerUserAgentRepository` 的加载等待做了无忙等优化，并通过
   `:core:database:testDebugUnitTest`（14 tests / 0 failures）复跑持久化、并发和首次加载回归。
+- 受控真机证据：WebDAV 编辑页保存的 `MediaHubTest99` 在进程重启后仍恢复；测试连接返回成功，
+  MockWebServer 实际收到 `OPTIONS` 的 `User-Agent: MediaHubTest99`。应用冷启动最早的后台请求可能发生在
+  server scope 快照建立前并使用默认 UA，该时序边界已登记，尚未宣称所有冷启动请求均覆盖。
 
 ## 安全约定（强制）
 
