@@ -67,6 +67,7 @@ public sealed partial class MainWindow : Window
             case "search": ShellFrame.Navigate(typeof(SearchPage)); break;
             case "continue": ShellFrame.Navigate(typeof(ContinueWatchingPage)); break;
             case "favorites": ShellFrame.Navigate(typeof(FavoritesPage)); break;
+            case "playlists": ShellFrame.Navigate(typeof(PlaylistsPage)); break;
             case "sources": ShellFrame.Navigate(typeof(SourcesPage)); break;
             case "settings": ShellFrame.Navigate(typeof(SettingsPage)); break;
         }
@@ -366,6 +367,8 @@ public sealed partial class MainWindow : Window
             _ when pageType == typeof(SearchPage) => "search",
             _ when pageType == typeof(ContinueWatchingPage) => "continue",
             _ when pageType == typeof(FavoritesPage) => "favorites",
+            _ when pageType == typeof(PlaylistsPage) => "playlists",
+            _ when pageType == typeof(PlaylistDetailPage) => "playlists",
             _ when pageType == typeof(SourcesPage) => "sources",
             _ when pageType == typeof(SettingsPage) => "settings",
             _ => null,

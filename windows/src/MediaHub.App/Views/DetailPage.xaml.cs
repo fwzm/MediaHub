@@ -2,6 +2,7 @@ using MediaHub.App.Services;
 using MediaHub.Domain;
 using Microsoft.UI.Xaml.Automation;
 using MediaHub.Providers;
+using MediaHub.Storage;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
@@ -97,6 +98,10 @@ public sealed partial class DetailPage : Page
         _favorite = item.UserDataFavorite ?? false;
         FavoriteButton.Visibility = !isFolder && _handle?.Favorites is not null ? Visibility.Visible : Visibility.Collapsed;
         RenderFavorite();
+
+        // Filing an item into a playlist is local user data, so no server capability is involved;
+        // folders are containers rather than items and are the only case that hides the button.
+        AddToPlaylistButton.Visibility = isFolder ? Visibility.Collapsed : Visibility.Visible;
 
         if (isFolder)
         {
@@ -278,6 +283,109 @@ public sealed partial class DetailPage : Page
             FavoriteButton.IsEnabled = true;
             BusyRing.IsActive = false;
         }
+    }
+
+
+    /// <summary>Rebuilds the "add to playlist" menu from the store every time it opens.</summary>
+    /// <remarks>
+    /// Populating on open rather than on load means a playlist created, renamed or deleted on another
+    /// page is reflected here, instead of the menu offering a name that no longer exists.
+    /// </remarks>
+    private void OnAddToPlaylistOpening(object sender, object e)
+    {
+        AddToPlaylistMenu.Items.Clear();
+
+        IReadOnlyList<SavedPlaylist> playlists = App.Services.Playlists.GetAll();
+        foreach (SavedPlaylist playlist in playlists)
+        {
+            var entry = new MenuFlyoutItem { Text = playlist.Name, Tag = playlist.Id };
+            entry.Click += OnAddToExistingPlaylistClick;
+            AddToPlaylistMenu.Items.Add(entry);
+        }
+
+        if (playlists.Count > 0) AddToPlaylistMenu.Items.Add(new MenuFlyoutSeparator());
+
+        var create = new MenuFlyoutItem { Text = "新建播放列表…" };
+        create.Click += OnAddToNewPlaylistClick;
+        AddToPlaylistMenu.Items.Add(create);
+    }
+
+    private void OnAddToExistingPlaylistClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not string playlistId) return;
+
+        SavedPlaylist? playlist = App.Services.Playlists.Find(playlistId);
+        if (playlist is null)
+        {
+            ShowStatus(InfoBarSeverity.Warning, "播放列表不存在", "该播放列表可能已被删除，请重新打开菜单。");
+            return;
+        }
+
+        AddCurrentItemTo(playlist);
+    }
+
+    private async void OnAddToNewPlaylistClick(object sender, RoutedEventArgs e)
+    {
+        if (_detail?.Item is null || _handle is null) return;
+
+        string? name = await PlaylistNameDialog.PromptAsync(XamlRoot, "新建播放列表", "播放列表名称", "");
+        if (name is null) return;
+        if (name.Length == 0)
+        {
+            ShowStatus(InfoBarSeverity.Warning, "未创建播放列表", "播放列表名称不能为空。");
+            return;
+        }
+
+        try
+        {
+            SavedPlaylist created = App.Services.Playlists.Create(name);
+            AddCurrentItemTo(created);
+        }
+        catch (IOException ex)
+        {
+            ShowStatus(InfoBarSeverity.Error, "无法新建播放列表", ex.Message);
+        }
+    }
+
+    /// <summary>Writes the item on screen into <paramref name="playlist"/> and reports what the store said.</summary>
+    /// <remarks>
+    /// A <c>false</c> result is not an error: the store refuses an item the playlist already holds, and
+    /// "already in this list" is the honest answer rather than a generic failure.
+    /// </remarks>
+    private void AddCurrentItemTo(SavedPlaylist playlist)
+    {
+        if (_detail?.Item is not { } item || _handle is null) return;
+
+        try
+        {
+            bool added = App.Services.Playlists.AddItem(playlist.Id, new SavedPlaylistItem
+            {
+                ServerId = _handle.Server.ServerId,
+                ItemId = item.Id,
+                Title = item.Name,
+                RunTimeTicks = item.RunTimeTicks,
+            });
+
+            ShowStatus(
+                added ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
+                added ? "已加入播放列表" : "已在该列表中",
+                added
+                    ? "“" + item.Name + "”已加入“" + playlist.Name + "”。"
+                    : "“" + item.Name + "”已经在该列表中，没有重复添加。");
+        }
+        catch (IOException ex)
+        {
+            ShowStatus(InfoBarSeverity.Error, "无法加入播放列表", ex.Message);
+        }
+    }
+
+    /// <summary>Reports a store outcome in the page banner; store failures are never swallowed.</summary>
+    private void ShowStatus(InfoBarSeverity severity, string title, string message)
+    {
+        StatusBar.Severity = severity;
+        StatusBar.Title = title;
+        StatusBar.Message = message;
+        StatusBar.IsOpen = true;
     }
 
     private void OnResumeClick(object sender, RoutedEventArgs e)

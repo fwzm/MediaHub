@@ -71,6 +71,9 @@
         <NavigationViewItem Content="我的收藏" Tag="favorites">
           <NavigationViewItem.Icon><FontIcon Glyph="&#xE734;" /></NavigationViewItem.Icon>
         </NavigationViewItem>
+        <NavigationViewItem Content="播放列表" Tag="playlists">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE8FD;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
         <NavigationViewItem Content="媒体源" Tag="sources">
           <NavigationViewItem.Icon><FontIcon Glyph="&#xE968;" /></NavigationViewItem.Icon>
         </NavigationViewItem>

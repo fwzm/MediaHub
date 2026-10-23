@@ -33,3 +33,10 @@ public sealed record LibraryNavigation(
 
 /// <summary>Navigation parameters for the detail page.</summary>
 public sealed record DetailNavigation(string ServerId, string ItemId, string Title);
+
+/// <summary>Navigation parameters for a saved playlist's page.</summary>
+/// <remarks>
+/// Only the id travels: the page re-reads the playlist from the store, so it shows the current name
+/// and entries rather than a snapshot taken before the last edit.
+/// </remarks>
+public sealed record PlaylistNavigation(string PlaylistId);
