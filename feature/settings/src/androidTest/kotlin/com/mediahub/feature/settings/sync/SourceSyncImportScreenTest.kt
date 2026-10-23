@@ -11,6 +11,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.mediahub.core.common.sync.SourceSyncAction
 import com.mediahub.core.common.sync.SourceSyncCandidate
@@ -31,6 +32,11 @@ import org.junit.runner.RunWith
  *
  * 本机不跑模拟器：这些用例只做编译校验，执行证据由 CI 提供（见 docs/android-sync-ui.md）。
  * 断言只依赖 SourceSyncImportTags 里的稳定标签与固定文案，不依赖布局位置。
+ *
+ * 页面根节点是 verticalScroll 的 Column（SourceSyncImportScreen.kt:155-160）：在真模拟器视口里
+ * 靠下的条目/结果卡并不在首屏，语义树里有节点但 assertIsDisplayed() 为假、点击也落不到。
+ * 所以凡是断言「看得见」或要点击的节点，一律先 performScrollTo()。
+ * 这条来自 API 32 上 4 个用例假红（2026-10-24，run 40028318723）的真实教训。
  */
 @RunWith(AndroidJUnit4::class)
 class SourceSyncImportScreenTest {
@@ -79,11 +85,12 @@ class SourceSyncImportScreenTest {
         val state = previewedState()
         render(state)
 
-        composeRule.onNodeWithText("可导入（2）").assertIsDisplayed()
-        composeRule.onNodeWithText("需确认（1）").assertIsDisplayed()
-        composeRule.onNodeWithText("已忽略（1）").assertIsDisplayed()
-        composeRule.onNodeWithText("暂不支持（1）").assertIsDisplayed()
+        composeRule.onNodeWithText("可导入（2）").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("需确认（1）").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("已忽略（1）").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("暂不支持（1）").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("共 5 条：可导入 2 · 需确认 1 · 已忽略 1 · 暂不支持 1")
+            .performScrollTo()
             .assertIsDisplayed()
     }
 
@@ -104,8 +111,8 @@ class SourceSyncImportScreenTest {
             decidedValue = decision
         })
 
-        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY).assertIsEnabled()
-        allowButton("sync-1").assertIsEnabled().performClick()
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY).performScrollTo().assertIsEnabled()
+        allowButton("sync-1").performScrollTo().assertIsEnabled().performClick()
 
         assertEquals("sync-1", decidedKey)
         assertEquals(SourceSyncEntryDecision.ALLOW, decidedValue)
@@ -120,7 +127,7 @@ class SourceSyncImportScreenTest {
             decidedValue = decision
         }
 
-        skipButton("sync-2").performClick()
+        skipButton("sync-2").performScrollTo().performClick()
 
         assertEquals("sync-2", decidedKey)
         assertEquals(SourceSyncEntryDecision.SKIP, decidedValue)
@@ -131,7 +138,7 @@ class SourceSyncImportScreenTest {
         var applies = 0
         render(previewedState().withAllow("sync-1"), onApply = { applies++ })
 
-        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY).performClick()
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY).performScrollTo().performClick()
 
         assertEquals(1, applies)
     }
@@ -187,11 +194,12 @@ class SourceSyncImportScreenTest {
         )
         render(state)
 
-        composeRule.onNodeWithTag(SourceSyncImportTags.RESULT).assertIsDisplayed()
-        composeRule.onNodeWithText(SourceSyncImportCopy.DISCLAIMER).assertIsDisplayed()
+        composeRule.onNodeWithTag(SourceSyncImportTags.RESULT).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(SourceSyncImportCopy.DISCLAIMER).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("已导入 1 · 需确认 1 · 已忽略 1 · 暂不支持 1 · 失败 0")
+            .performScrollTo()
             .assertIsDisplayed()
-        composeRule.onNodeWithText("- 客厅 Emby").assertIsDisplayed()
+        composeRule.onNodeWithText("- 客厅 Emby").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -223,14 +231,19 @@ class SourceSyncImportScreenTest {
     }
 
     @Test
-    fun theScreenKeepsTheWholeFlowOnOnePage() {
+    fun theWholeFlowLivesOnOneScrollableScreenWithoutASecondPage() {
         render(previewedState())
 
+        // 选择文件 / 预览 在首屏；应用按钮与条目在同一个滚动页面里，滚一下就到 —— 没有二级页面。
         composeRule.onNodeWithTag(SourceSyncImportTags.SCREEN).assertIsDisplayed()
         composeRule.onNodeWithTag(SourceSyncImportTags.PICK).assertIsDisplayed()
         composeRule.onNodeWithTag(SourceSyncImportTags.PREVIEW).assertIsDisplayed()
-        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY).assertIsDisplayed()
-        composeRule.onNodeWithTag(SourceSyncImportTags.entry("sync-1")).assertIsDisplayed()
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag(SourceSyncImportTags.entry("sync-1"))
+            .performScrollTo()
+            .assertIsDisplayed()
+        // 滚回去还能看到首屏按钮 ⇒ 全程没有页面跳转。
+        composeRule.onNodeWithTag(SourceSyncImportTags.PICK).performScrollTo().assertIsDisplayed()
     }
 
     // ---------------------------------------------------------------- 夹具
