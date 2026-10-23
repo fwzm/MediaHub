@@ -253,7 +253,7 @@ Secur32、SHCORE、SHELL32、SHLWAPI、USER32、USERENV、USP10、UxTheme、VERS
 
 ## 9. 已知边界与未覆盖
 
-- 只验了 **Debug x64**；Release/publish（含 CI 的 portable publish）未按 flavour 各跑一遍；
+- 构建层验到 **x64 的 Debug build 与 Release publish**（后者见第 10 节）；ARM64、MSIX 打包、签名与安装包形态均未验；
 - 探针设 `vo=null / ao=null / hwdec=no`，**GPU 解码、HDR、音频输出设备**均未验；
 - 依赖集合是本机 MSYS2/FFmpeg 的一次快照，换机器或换工具链后哈希会变（参见 `windows/docs/licensing/REPRODUCIBLE-BUILD.md`）；
 - `v0.41.0-UNKNOWN` 版本串（LGPL 构建拿不到 git describe）仍是既知瑕疵；
@@ -261,6 +261,112 @@ Secur32、SHCORE、SHELL32、SHLWAPI、USER32、USERENV、USP10、UxTheme、VERS
 - `collect-lgpl-runtime.ps1` 解析的是导入表（含延迟导入），不覆盖运行时 `LoadLibrary` 动态拉取的模块
   （例如用户自带的字体或显卡驱动侧的 DLL），这类缺失只会在真机播放时暴露；
 - 本文不评价「该不该换引擎」，那是第 7 节的事。
+
+## 10. Release/publish 两 flavour 实测
+
+第 3、4 节验的是 Debug build；真正会发给用户的形态是 Release publish。本节把两种 flavour 各发布一次，
+并证明**发布目录自身**自包含（与构建机的 MSYS2 / FFmpeg 前缀无关）。结论：两条命令都成功，
+两个目录各自独立可加载，LGPL 目录比 GPL 目录**恰好多 33 个依赖 DLL**，文本产物里没有任何构建机路径。
+
+### 10.1 原始命令行（working-directory = `windows`）
+
+命令形状与 CI 的 Portable publish 步骤一致（`.github/workflows/windows-ci.yml:172-177`），
+只把输出目录换成独立目录（不覆盖 CI 的 `./artifacts/portable`，也不碰既有的 `D:/mh-out*`）：
+
+```pwsh
+dotnet publish src/MediaHub.App/MediaHub.App.csproj -c Release -p:Platform=x64 -o D:/mh-out-pub-gpl
+dotnet publish src/MediaHub.App/MediaHub.App.csproj -c Release -p:Platform=x64 -p:LibMpvFlavour=lgpl -o D:/mh-out-pub-lgpl
+```
+
+### 10.2 原始输出
+
+| flavour | 退出码 | 耗时 | 尾部原始行 |
+| --- | --- | --- | --- |
+| gpl | 0 | 47 s | `MediaHub.App -> D:\mh-out-pub-gpl\` |
+| lgpl | 0 | 17 s | `MediaHub.App -> D:\mh-out-pub-lgpl\` |
+
+两次完整日志（本机证据 `D:\mh-verify\w13c\publish-gpl.log` / `publish-lgpl.log`）里
+按 `warning `、`error `、`个警告`、`个错误` 检索均为 **0 条命中**（dotnet 只在有问题时才打印警告/错误段）。
+LGPL 那次还打印了 `MediaHub.Player.Mpv -> …\MediaHub.Player.Mpv.dll`，与 GPL 那次一致。
+
+### 10.3 产物清单
+
+| 目录 | 文件数 | 总字节 | 折合 | libmpv-2.dll 字节 | libmpv-2.dll sha256 |
+| --- | --- | --- | --- | --- | --- |
+| `D:\mh-out-pub-gpl` | 526 | 348,275,148 | 332.14 MiB | 120,989,696 | `6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9` |
+| `D:\mh-out-pub-lgpl` | 559 | 289,439,302 | 276.03 MiB | 3,327,274 | `20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a` |
+
+LGPL 目录**总字节更小**，因为 core 从 120.99 MB 降到 3.33 MB（−117.6 MB），而新增的 33 个依赖只有 58.8 MB。
+两棵树根目录 `*.dll` 计数：GPL 280 → LGPL 313（+33）。
+CI 的 smoke-check 清单（`MediaHub.exe`、`libmpv-2.dll`、`MediaHub.dll`、`MediaHub.Net.dll`、`MediaHub.Providers.dll`）
+在两个目录里都齐全（missing=0）。
+
+### 10.4 两 flavour 的差异文件
+
+按相对路径递归比对（`Get-ChildItem -Recurse`，逐文件长度）：
+
+- **只在 LGPL 出现：33 个**（恰为第 5.2 节列的依赖集合，全在根目录）；
+- **只在 GPL 出现：0 个** —— 也就是说 GPL 目录里**没有**任何辅助 DLL，引擎 DLL 只有 1 个 `libmpv-2.dll`；
+- **同名但大小不同：1 个** —— `libmpv-2.dll`（120,989,696 → 3,327,274）。
+
+33 个新增文件逐个与 `windows/engine/lgpl/dist/` 源比对 sha256：**0 处不一致**，合计 58,826,576 B。
+FFmpeg 侧（7 个）：`avcodec-62`(18,603,520) `avdevice-62`(153,088) `avfilter-11`(5,288,448)
+`avformat-62`(2,805,760) `avutil-60`(1,067,520) `swresample-6`(140,800) `swscale-9`(2,089,984)；
+MSYS2 侧（26 个）：`libass-9` `libbrotlicommon` `libbrotlidec` `libbz2-1` `libdovi` `libexpat-1`
+`libfontconfig-1` `libfreetype-6` `libfribidi-0` `libgcc_s_seh-1` `libglib-2.0-0` `libgraphite2`
+`libharfbuzz-0` `libiconv-2` `libintl-8` `liblcms2-2` `libpcre2-8-0` `libplacebo-360` `libpng16-16`
+`libshaderc_shared`(10,657,197) `libspirv-cross-c-shared`(3,433,687) `libstdc++-6` `libunibreak-7`
+`libwinpthread-1` `vulkan-1` `zlib1`（逐文件 sha256 见第 5.2 节，本次实测与之一致）。
+LGPL 目录里的 core 与 `dist\libmpv-2.dll` 哈希相同：`20035902…3c0a`。
+
+### 10.5 自包含探针（把构建机路径从 PATH 里剔掉）
+
+用已构建的探针（不重新编译），两个发布目录各跑一次：
+
+```pwsh
+# 先剔除 PATH 中匹配 msys64|mh-servers|lgpl-build 的条目（实测：65 条 → 64 条，只掉 C:\msys64\ucrt64\bin）
+dotnet windows/src/MediaHub.EngineProbe/bin/Debug/net10.0/MediaHub.EngineProbe.dll `
+  --dll D:/mh-out-pub-gpl/libmpv-2.dll --deps D:/mh-out-pub-gpl `
+  --media windows/tests/assets/sample-av.mp4 --seconds 3 --label release-publish-gpl --json <out.json>
+```
+
+（LGPL 那次只把 `--dll/--deps` 换成 `D:/mh-out-pub-lgpl`、label 换成 `release-publish-lgpl`。）
+
+| 断言 | GPL 原始行 | LGPL 原始行 |
+| --- | --- | --- |
+| verdict=PASS | `"verdict": "PASS"` | `"verdict": "PASS"` |
+| loadMode 主路径 | `"loadMode": "native-library"` | `"loadMode": "native-library"` |
+| featuresSource=log | `"featuresSource": "log"` | `"featuresSource": "log"` |
+| errorLogTotal=0 | `"errorLogTotal": 0` | `"errorLogTotal": 0` |
+| maxTimePos≥2 | `"maxTimePos": 3` | `"maxTimePos": 3` |
+| GPL token | `"featuresContainGpl": true` | `"featuresContainGpl": false` |
+
+两侧退出码均为 0；探针 stdout 的判定行同为
+`verdict        : PASS` / `reason         : file-loaded 且 time-pos 推进到 3.000 秒（下限 2.000 秒），error 级日志 0 条`；
+`"dllBytes"` 分别为 120989696 与 3327274，`"clientApiVersion": 131077`（0x00020005 = 2.5）一致。
+
+**为什么这能证明自包含**：探针先 `NativeLibrary.Load(绝对路径)`（loadMode=`native-library`），
+只有它失败时才 `AddDllDirectory(--deps)` 重试（`native-library+user-dirs`）或退到 `LoadLibraryExW`。
+本次两侧都停在第一级，说明 Windows 加载器**自己**从 `libmpv-2.dll` 所在目录解析了全部 33 个依赖 ——
+这与产品形态一致（`MpvNative.cs:16` 用 `[DllImport("libmpv-2.dll")]`，App 输出目录就是 DLL 目录）。
+另外 `--deps` 虽然传了，但没有被用到（否则 loadMode 会是 +`user-dirs`）。
+
+### 10.6 泄漏检查（发布目录里不得残留构建机路径）
+
+对两棵树里的全部文本产物（`*.json` `*.config` `*.xml` `*.manifest` `*.txt` `*.props` `*.targets`
+`*.js` `*.html` `*.css`，每棵树 9 个文件）用正则 `msys64|lgpl-build|mh-servers` 检索：
+**GPL 0 条命中、LGPL 0 条命中**；按**文件名**检索同样 0 条。
+`MediaHub.deps.json` 里也不列这些引擎 DLL —— 它们是以 `None Include` 的 content 复制进输出目录的，
+不进 NuGet 依赖图，因此没有携带构建路径的载体。
+
+### 10.7 未覆盖（别把本节当发布放行）
+
+- 只验 **x64**；ARM64、MSIX 打包、代码签名、安装/升级流程均未验；
+- 探针固定 `vo=null / ao=null / hwdec=no` ⇒ **GPU 解码、HDR、音频输出设备**仍未验（与 Debug 轮同口径）；
+- 全程零窗口：未启动 GUI、未连真实服务器，只做 publish + 进程内解码；
+- 33 个依赖仍是本机 MSYS2/FFmpeg 快照，换机需重跑 `collect-lgpl-runtime.ps1`（第 6 节）；
+- 未验证「用户替换 DLL」在 publish 布局下的实际生效，那属于 `LGPL-COMPLIANCE.md` §3 的分发约束而非本轮实测；
+- 本节不改变第 7 节的结论：**默认仍分发 GPL 构建，RELEASE_BLOCKED 不变**。
 
 参考：`windows/docs/W13-LGPL-ENGINE-PROBE.md`（探针本身）、`windows/docs/LGPL-COMPLIANCE.md`（分发义务）、
 `windows/docs/licensing/LICENCE-DECISION.md`（许可判定）、`windows/docs/licensing/W5-LGPL-BUILD.md`（候选构建）。

@@ -146,9 +146,11 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   Plex / SMB / 云盘媒体源。
 - **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39)，stacked 在 `feature/windows-client` 上，仍为 Draft）：
   契约层、配对载荷/状态机/传输层（回环）、双向增量与设备注册表、凭据迁移（DPAPI 重封）、加密离线归档、同步 CLI、
-  同步页「预览 → 逐条审批 → 应用 → 推进基线」、基线落盘与重启幂等、已配对设备登记与指纹钉扎均已实现，
-  `MediaHub.Tests` **1004 通过 / 0 失败**（其中 W6 新增 566）；**尚未做**：二维码与扫码、跨机（非回环）配对、
-  已配对设备清单 UI、真实局域网传输与设备持久化、Android 端 apply 的 UI 与传输（Android 侧只到契约/规划/导入导出/配对契约）。
+  同步页「预览 → 逐条审批 → 应用 → 推进基线」、基线落盘与重启幂等、已配对设备登记与指纹钉扎、
+  已配对设备清单与「忘记」均已实现，`MediaHub.Tests` **1021 通过 / 0 失败**（其中 W6 新增 583）；
+  **尚未做**：二维码与扫码、跨机（非回环）配对、真实局域网传输与设备持久化、同步页/配对页/已配对清单的 GUI 证据
+  （三者均为 `IMPLEMENTED_UNVERIFIED`，本机没人观看窗口时无法跑）、Android 端 apply 的 UI 与传输
+  （Android 侧只到契约/规划/导入导出/配对契约）。
 - **发布阻断**：见下节许可证；另有 MSIX / 代码签名 / 干净机安装 `NOT_RUN`（`SIGNING_BLOCKED`）。
 
 ### 构建与测试
@@ -167,8 +169,17 @@ CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：
 （`MediaHub.Tests` ≥400、`MediaHub.WebDav.Tests` ≥100，`failed=0` 且 `notExecuted=0`）—— 此前 WebDav 套件虽然被构建、
 却从未被 `dotnet test` 指向，104 个用例在 CI 里长期空转（run 40019093231 起已修正，日志可见
 `MediaHub.Tests: total=438` / `MediaHub.WebDav.Tests: total=104` / `combined tests=542`）。
-W6 分支上 `MediaHub.Tests` 为 **1004 通过 / 0 失败**（`feature/windows-client` 既有 438 + W6 新增 566），
+W6 分支上 `MediaHub.Tests` 为 **1021 通过 / 0 失败**（`feature/windows-client` 既有 438 + W6 新增 583），
 `MediaHub.WebDav.Tests` 的 104 例同样适用于该分支（见 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 正文的验证表）。
+
+Android 侧（[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml)）的单元门禁同样按**名字**断言，
+不是「打印了 PASSED 就算过」：`verify-unit-tests.py` 除要求每个有测试源码的模块都真跑过之外，还用
+`--required-suite` 钉住 16 个套件（含跨端契约的 `PairingVectorsTest` / `PairingFrameTest` /
+`WindowsGoldenInteropTest` / `SourceSyncPlannerTest`、`AndroidSourceSyncServiceTest`、`Migration4to5Test`、
+`UpNextResolverTest` / `PlayerAutoplayTest`），并用 `--require-complete-suites` 从源码里解析每个 `@Test`
+方法、要求逐个都真的执行过 —— 套件被删、改名，或只跑单个方法（`--tests Suite.oneMethod`）都会失败。
+本地负向验证过这两条：把整套 XML 移走 → 22 条问题（1 条套件 + 21 条方法）；只删一个 `<testcase` →
+恰好 1 条 `PairingVectorsTest#rejected_addresses_match_windows`。
 
 > 历史记录：head `2757285` 时记录的 477（373 + 104）与当时 Android CI 的一处不稳定用例失败
 > （`core/network` 的 `MpvHttpBridgeLifecycleTest.stop cancels target upstream while response body cannot finish`）
