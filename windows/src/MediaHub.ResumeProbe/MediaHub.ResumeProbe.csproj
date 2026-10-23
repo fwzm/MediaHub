@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    W8 headless resume probe.
+
+    Deliberately not part of MediaHub.Windows.sln: it is an acceptance instrument, not a shipped
+    assembly. It also deliberately has no WinUI, no player and no engine reference — the point of the
+    tool is to show that the *product* provider stack (factories -> ProviderHandle -> IProviderProgress)
+    records, exposes and clears a resume point on a real Emby/Jellyfin server while no window exists.
+    A probe that spoke the HTTP protocol itself would prove nothing about the code we ship.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>MediaHub.ResumeProbe</AssemblyName>
+    <RootNamespace>MediaHub.ResumeProbe</RootNamespace>
+    <Platforms>AnyCPU</Platforms>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaHub.Providers\MediaHub.Providers.csproj" />
+    <ProjectReference Include="..\MediaHub.Domain\MediaHub.Domain.csproj" />
+    <ProjectReference Include="..\MediaHub.Net\MediaHub.Net.csproj" />
+  </ItemGroup>
+
+</Project>
