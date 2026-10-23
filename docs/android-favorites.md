@@ -38,10 +38,10 @@
 | `provider/api/src/main/kotlin/com/mediahub/provider/api/ProviderHandle.kt` | 新字段 `favorite: MediaFavoriteProvider? = null`（尾插，全部构造点用命名参数，无破坏）；`runtimeCapabilities` 增加 `if (favorite != null) add(ProviderCapability.FAVORITE)`；`hasAnyCapability` 补 `\|\| favorite != null` |
 | `core/network/src/main/kotlin/com/mediahub/core/network/ApiClient.kt` | 新增 `deleteNoContent(url, headers)` → `executeNoContent("DELETE", …, body = null)`（`buildBody` 对非 POST 的 null body 返回 null，满足 OkHttp DELETE 无 body） |
 | `provider/emby/.../api/EmbyFavoriteDtos.kt`（新建） | `EmbyFavoriteStateDto` / `EmbyFavoriteUserDataDto`（`IsFavorite: Boolean? = null`，null 表示"读不到"） |
-| `provider/emby/.../api/EmbyApiClient.kt` | `setFavorite(token, userId, itemId, favorite)`（:188）、`getFavoriteState(...): Boolean?`（:210）、`FAVORITE_FIELDS = "UserData"`（:442） |
+| `provider/emby/.../api/EmbyApiClient.kt` | `setFavorite(token, userId, itemId, favorite)`（:188）、`getFavoriteState(...): Boolean?`（:210）、`FAVORITE_FIELDS = "UserData"`（:469） |
 | `provider/emby/.../favorite/EmbyFavoriteProvider.kt`（新建） | 实现 `MediaFavoriteProvider`；`requireSession` → 写 → 回读；缺字段抛 `ProviderException.Parse` |
 | `provider/jellyfin/.../api/JellyfinFavoriteDtos.kt`（新建） | 同构 DTO |
-| `provider/jellyfin/.../api/JellyfinApiClient.kt` | `setFavorite`（:237）、`getFavoriteState`（:256）、`FAVORITE_FIELDS`（:316） |
+| `provider/jellyfin/.../api/JellyfinApiClient.kt` | `setFavorite`（:237）、`getFavoriteState`（:260）、`FAVORITE_FIELDS`（:350） |
 | `provider/jellyfin/.../favorite/JellyfinFavoriteProvider.kt`（新建） | 同构实现；KDoc 记录：收藏回读走 `/Users/{userId}/Items/{id}` 是**既有选择、不是 ADR-039 现代路由**（现代读法为 `/Items/{id}?UserId=`）；写/读同族以保证同一用户作用域，例外不外溢到 library/detail/search |
 | `EmbyProvider.kt` / `JellyfinProvider.kt` | `declaredCapabilities` 增加 `ProviderCapability.FAVORITE` |
 | `EmbyProviderFactory.kt` / `JellyfinProviderFactory.kt` | 装配 `favorite = …FavoriteProvider(...)` |
@@ -64,9 +64,9 @@
 | 无 Token / 无会话 | `ProviderException.AuthRequired`（0 次 HTTP） | `setFavorite without session …` |
 | IOException | `ProviderException.Network`（`mapError` 既有分支，未单测） | — |
 
-## 5. 测试清单（共 23 例，全部 MockWebServer / 纯 JVM）
+## 5. 测试清单（当前实测：Emby 17 + Jellyfin 15 = 32 例，另 ApiClientNoContentTest 3、ProviderHandleTest 7；task-22 交付时为 23 例，快照值见各条标注。全部 MockWebServer / 纯 JVM）
 
-`provider/emby/src/test/kotlin/com/mediahub/provider/emby/favorite/EmbyFavoriteProviderTest.kt`（10）
+`provider/emby/src/test/kotlin/com/mediahub/provider/emby/favorite/EmbyFavoriteProviderTest.kt`（task-22 验收快照 10 例；task-25 追加 7 例后**当前 17 例**，新增项见 §7.4）
 1. POST 正确路径/头/空 body + 回读 `true`，且 path 不含 `/Favorites/`
 2. DELETE 正确（bodySize 0）+ 回读 `false`
 3. 服务器忽略写入 → 回读 `false`（不谎报成功）
@@ -78,7 +78,7 @@
 9. `isFavorite` 单请求读回
 10. 无会话 → AuthRequired，0 次 HTTP
 
-`provider/jellyfin/src/test/kotlin/com/mediahub/provider/jellyfin/favorite/JellyfinFavoriteProviderTest.kt`（10）
+`provider/jellyfin/src/test/kotlin/com/mediahub/provider/jellyfin/favorite/JellyfinFavoriteProviderTest.kt`（task-22 验收快照 10 例；task-25 追加 5 例后**当前 15 例**，新增项见 §7.4）
 1. POST **无 `/emby` 前缀** + `Authorization: MediaBrowser …` 含 `Token="tok-1"` + **无 `X-Emby-Token`** + 空 body + 回读 `true`
 2. DELETE 正确 + 回读 `false`
 3. 服务器忽略写入 → `false`
@@ -112,7 +112,7 @@
 7. **验收（已完成，2026-10-23）**：收到 lead GO 后已跑真实 gradle（JDK 21，`--console=plain`），全部绿：
    - `gradlew.bat :provider:api:test :core:network:testDebugUnitTest :provider:emby:testDebugUnitTest --tests *Favorite* :provider:jellyfin:testDebugUnitTest --tests *Favorite*` → `BUILD SUCCESSFUL in 16s`（116 tasks）；
    - `gradlew.bat :provider:emby:testDebugUnitTest :provider:jellyfin:testDebugUnitTest`（整模块全量，含被过滤掉的 EmbyProviderFactoryTest / JellyfinProviderCapabilityAuditTest）→ `BUILD SUCCESSFUL in 18s`；
-   - 用例数（JUnit XML）：emby 20 suites / 185 tests / 0 failures；jellyfin 14 suites / 104 tests / 0 failures；core:network 11 suites / 56 tests；provider:api 4 suites / 17 tests；其中 EmbyFavoriteProviderTest=10、JellyfinFavoriteProviderTest=10、ApiClientNoContentTest=3、ProviderHandleTest=7、EmbyProviderFactoryTest=1、JellyfinProviderCapabilityAuditTest=3。
+   - 用例数（JUnit XML；**前置数值 = 当前实测（HEAD 11ed12e），括号内 = task-22 验收快照**）：emby 20 suites / **192 tests**（验收时 185，task-25 追加 7 例）/ 0 failures；jellyfin 14 suites / **109 tests**（验收时 104，追加 5 例）/ 0 failures；core:network 11 suites / 56 tests（未变）；provider:api 4 suites / 17 tests（未变）；其中 EmbyFavoriteProviderTest=**17**（验收时 10）、JellyfinFavoriteProviderTest=**15**（验收时 10）、ApiClientNoContentTest=3、ProviderHandleTest=7、EmbyProviderFactoryTest=1、JellyfinProviderCapabilityAuditTest=3 未变。
    - 首跑曾 1 例红：`assertEquals(0L, server.requestCount)` 中 requestCount 为 Int，Long 与 Integer 用 Object 重载比较 → `expected: java.lang.Long<0> but was: java.lang.Integer<0>`；改为 `assertEquals(0, …)` 后转绿（**未放宽任何断言**）。
    - 命令提示：Android library 模块的 `test` 是生命周期任务，不接受 `--tests`；须用 `testDebugUnitTest`。provider:api 为纯 JVM 模块，用 `test`。
 
@@ -138,7 +138,7 @@
 | 状态迁移纯函数 | `feature/detail/.../FavoriteToggleState.kt`：`FavoriteToggle.fromServerState / pending / confirmed / failed`（4 例单测） |
 | 「我的收藏」列表页 | `feature/library/.../favorites/FavoritesScreen.kt`（Loading / Empty / Content / Error 四态；刷新失败保留旧列表只挂提示）；`FavoritesViewModel` 走 `handle.favorite.listFavorites()` |
 | 入口 | 媒体库页 TopAppBar 收藏图标（`LibraryRoute(onOpenFavorites = …)`）→ 路由 `favorites/{serverId}`（`app/.../MediaHubNavHost.kt`，`Routes.FAVORITES`） |
-| 状态纯函数 | `feature/library/.../favorites/FavoritesState.kt`：`loading / loaded / failed / unsupported`（6 例单测，含 `subtitleOf`） |
+| 状态纯函数 | `feature/library/.../favorites/FavoritesState.kt`：`loading / loaded / failed / unsupported`；文案函数 `subtitleOf` **不在该文件**，在 `feature/library/.../favorites/FavoritesScreen.kt:137`（`FavoritesStateTest` 6 例覆盖两者） |
 
 ### 7.3 备份结构（`core/common/.../backup`）
 
@@ -182,14 +182,21 @@ gradlew.bat :core:common:testDebugUnitTest :provider:api:test :provider:emby:tes
 
 | 模块 | suites | tests |
 | --- | --- | --- |
-| core:common | 5 | 78 |
+| core:common | 19 | 238 |
 | provider:api | 4 | 17 |
 | provider:emby | 20 | 192 |
 | provider:jellyfin | 14 | 109 |
 | feature:detail | 4 | 41 |
 | feature:library | 5 | 54 |
 | feature:settings | 9 | 115 |
-| **合计** | **61** | **606** |
+| **合计** | **75** | **766** |
+
+口径与快照说明：
+
+- 本表出自 2026-10-24 那次 7 模块运行（`BUILD SUCCESSFUL in 1m 12s`），**core:common 一栏已按当前实测更新**：task-25 当时是 5 suites / 78 tests，此后 W6-A 新增 sync 契约 87 例、W6-E 新增 pairing 73 例；截至 HEAD 11ed12e 的 `core/common/build/test-results/testDebugUnitTest` XML 为 **19 suites / 238 tests**。
+- 因此**旧的合计口径「61 suites / 606 tests」（W6-A 之前）现已作废**；现行合计为 **75 suites / 766 tests**。
+- 其余 6 个模块在 HEAD 11ed12e 上未变：provider:api 4/17、provider:emby 20/192、provider:jellyfin 14/109、feature:detail 4/41、feature:library 5/54、feature:settings 9/115。其中 9/115 是**已提交状态**；工作树里若存在未提交的 W6-F 界面测试（`feature/settings/.../sync/`），会让 feature:settings 临时变大（本机曾见 11/141），不代表 HEAD。
+- 口径：Android library 模块取 `testDebugUnitTest`，纯 JVM 模块取 `test`；同模块 `testReleaseUnitTest` 会重复计同一批用例，不另计（`core/common` 的 release 目录里 12/165 就是旧产物）。
 
 红例复盘（全部为夹具/版本升级引发，实现与断言均未放宽）：
 

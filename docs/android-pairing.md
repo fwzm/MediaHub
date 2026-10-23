@@ -71,7 +71,9 @@ apipa-address、interface-down、not-ipv4、no-usable-address、address-enumerat
 
 ## 6. 黄金向量与互操作证据
 
-向量文件：core/common/src/test/resources/pairing/windows-pairing-vectors.json（11260 字节）。
+向量文件：core/common/src/test/resources/pairing/windows-pairing-vectors.json（11100 字节，仓库 blob 尺寸）。
+仓库尺寸一律取 git blob（`git cat-file -s HEAD:<path>`），不用本机检出尺寸：本仓库 core.autocrlf=true，
+该文件 161 行在本机检出为 11260 字节（多 160 字节即行尾 CRLF），GH 上看到的是 11100 字节。
 它由 Windows 侧**真实 API** 生成，不是手写：临时生成器工程 D:/mh-verify/pairing-vectors
 （net10.0 console，ProjectReference 到 D:/mh-w6/windows/src/MediaHub.Sync/MediaHub.Sync.csproj），
 **生成器不入库**。
@@ -85,17 +87,17 @@ apipa-address、interface-down、not-ipv4、no-usable-address、address-enumerat
 ephemeralUrl=https://192.168.1.20:8942/pairing、challenge=字节 0x00..0x1F、指纹=字节 0xA0..0xBF、
 expires=1792800120000。生成器实测：载荷 JSON 精确 280 字节，帧 284 字节（长度头 00000118）。
 
-测试清单（7 个文件，共 61 例）：
+测试清单（7 个文件，共 73 例；口径：`core/common/build/test-results/testDebugUnitTest` 的 JUnit XML，HEAD 11ed12e 实测，与第 8 节同源）：
 
 | 文件 | 例数 | 覆盖 |
 | --- | --- | --- |
-| PairingVectorsTest | 20 | 向量驱动：载荷逐字段、重编码逐字节、帧十六进制、帧结构拒绝、剩余毫秒、toString 脱敏、18 条错误码、过期边界、码/链接往返与拒绝、大小写规范化、未知属性、非规范 challenge、候选与拒绝地址表、重复地址丢弃 |
+| PairingVectorsTest | 21 | 向量驱动：载荷逐字段、重编码逐字节、帧十六进制、帧结构拒绝、剩余毫秒、toString 脱敏、18 条错误码、过期边界、码/链接往返与拒绝、大小写规范化、未知属性、非规范 challenge、候选与拒绝地址表、重复地址丢弃 |
 | PairingPayloadTest | 12 | create 生存期、deviceId/URL 校验、编码字段顺序、编码前校验、往返、未知属性、空白/非对象根、tryDecode、剩余毫秒下限、边界过期、http/https 白名单 |
 | PairingChallengeTest | 7 | 规范 base64、长度校验、非规范拼写拒绝、parse 原因码、常量时间比较、随机生成、toString 脱敏 |
-| PairingFingerprintTest | 8 | 小写 hex、长度校验、大写读入规范化、非法 hex 拒绝、展示形式、比较、相等性、hex 白名单 |
+| PairingFingerprintTest | 9 | 小写 hex、长度校验、大写读入规范化、非法 hex 拒绝、展示形式、比较、相等性、hex 白名单 |
 | PairingFrameTest | 6 | 大端长度、上限/空载荷、忽略尾随字节、六类结构拒绝、超长不分配、UTF-8 文本往返 |
 | PairingLinkTest | 9 | 生成/提取往返、code= 与大写前缀容错、链接原因码、过期边界、规范化、填充/非法字符、UTF-8 与原因映射、码白名单 |
-| PairingAddressCandidatesTest | 8 | 优先级排序、按字节排序、loopback/tunnel、not-ipv4 先于 down、down/apipa/loopback、重复丢弃、空集与枚举失败、IPv4 严格解析、展示 URL |
+| PairingAddressCandidatesTest | 9 | 优先级排序、按字节排序、loopback/tunnel、not-ipv4 先于 down、down/apipa/loopback、重复丢弃、空集与枚举失败、IPv4 严格解析、展示 URL |
 
 实测结果见第 8 节。
 
@@ -125,7 +127,7 @@ expires=1792800120000。生成器实测：载荷 JSON 精确 280 字节，帧 28
 
     SUITES=19 TESTS=238 FAILURES=0 ERRORS=0 SKIPPED=0
 
-基线（本任务前）：12 suites / 165 tests。本轮 +7 suites / +73 tests，全部新增在 pairing 包：
+基线（W6-E 起跑前快照，非当前值）：12 suites / 165 tests。本轮 +7 suites / +73 tests，全部新增在 pairing 包：
 
 | 测试类 | 例数 |
 | --- | --- |
