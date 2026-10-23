@@ -16,12 +16,25 @@ public sealed partial class HomePage : Page
     private void Refresh()
     {
         var entries = App.Services.PlaybackHistory.ContinueWatching()
-            .Select(e => new ContinueItem(
-                e.Title,
-                e.MediaPath,
-                e.ProgressFraction,
-                Format(e.Position),
-                Format(e.Duration)))
+            .Select(e =>
+            {
+                // Server playback keeps only a local "recently played" record keyed by
+                // "<itemId>@<serverId>" (see PlaybackCoordinator); it is not a file on disk, so the
+                // local-file branch must not swallow it. Parsing here keeps the click path honest
+                // instead of silently doing nothing for those rows.
+                bool isServer = TryParseServerIdentity(e.MediaPath, out string serverId, out string itemId)
+                    && !System.IO.File.Exists(e.MediaPath);
+                return new ContinueItem(
+                    e.Title,
+                    e.MediaPath,
+                    e.ProgressFraction,
+                    Format(e.Position),
+                    Format(e.Duration),
+                    isServer,
+                    isServer ? serverId : null,
+                    isServer ? itemId : null,
+                    isServer ? ServerLabelOf(serverId) : null);
+            })
             .ToList();
 
         ContinueGrid.ItemsSource = entries;
@@ -36,12 +49,33 @@ public sealed partial class HomePage : Page
             : "已配置 " + remote.Count + " 个媒体服务器，其中 " + online + " 个当前可用。";
     }
 
+    private static string? ServerLabelOf(string serverId)
+    {
+        ServerEntry? server = App.Services.Servers.Servers.FirstOrDefault(s => s.ServerId == serverId);
+        if (server is null) return null;
+        return string.IsNullOrWhiteSpace(server.DisplayName) ? server.TypeName : server.DisplayName;
+    }
+
     private static string Format(TimeSpan t)
         => t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
 
     private void OnContinueItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not ContinueItem item) return;
+
+        if (item.IsServer)
+        {
+            PlaybackHistoryEntry? serverEntry = App.Services.PlaybackHistory.Find(item.Path);
+            App.MainWindow?.EnterPlayer(new PlaybackRequest
+            {
+                ServerId = item.ServerId,
+                ItemId = item.ItemId,
+                Title = item.Title,
+                StartPositionTicks = App.Services.Settings.Current.ResumePlayback ? (serverEntry?.PositionTicks ?? 0) : 0,
+            });
+            return;
+        }
+
         if (!System.IO.File.Exists(item.Path)) return;
 
         PlaybackHistoryEntry? entry = App.Services.PlaybackHistory.Find(item.Path);
@@ -68,6 +102,39 @@ public sealed partial class HomePage : Page
     private void OnLocalClick(object sender, RoutedEventArgs e)
         => App.MainWindow?.NavigateShell(typeof(LocalLibraryPage));
 
+    /// <summary>
+    /// Splits the "<itemId>@<serverId>" identity that server playback writes into the local history
+    /// store. Local paths never use that shape (they carry a directory separator), and the caller
+    /// still prefers a real file when one exists.
+    /// </summary>
+    private static bool TryParseServerIdentity(string value, out string serverId, out string itemId)
+    {
+        serverId = string.Empty;
+        itemId = string.Empty;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        int at = value.LastIndexOf('@');
+        if (at <= 0 || at == value.Length - 1) return false;
+
+        string candidateItem = value[..at];
+        string candidateServer = value[(at + 1)..];
+        if (candidateItem.Contains(Path.DirectorySeparatorChar) || candidateItem.Contains(Path.AltDirectorySeparatorChar)) return false;
+        if (candidateServer.Contains(Path.DirectorySeparatorChar) || candidateServer.Contains(Path.AltDirectorySeparatorChar)) return false;
+        if (candidateServer.Contains(':')) return false;
+
+        itemId = candidateItem;
+        serverId = candidateServer;
+        return true;
+    }
+
     private sealed record ContinueItem(
-        string Title, string Path, double ProgressFraction, string PositionDisplay, string DurationDisplay);
+        string Title,
+        string Path,
+        double ProgressFraction,
+        string PositionDisplay,
+        string DurationDisplay,
+        bool IsServer,
+        string? ServerId,
+        string? ItemId,
+        string? SourceLabel);
 }
