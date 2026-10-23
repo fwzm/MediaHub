@@ -188,6 +188,20 @@ public sealed record PairingPayload
     /// <summary>How much of the invitation's lifetime is left, floored at zero.</summary>
     public long RemainingMilliseconds(long nowEpochMs) => Math.Max(0, ExpiresAtEpochMs - nowEpochMs);
 
+    /// <summary>Prints the payload without the challenge.</summary>
+    /// <remarks>
+    /// A record's default output prints every property, and the challenge is the one value in this document that
+    /// must never reach a log line or an exception message (ADR-S003 D6). Redacting it here makes that a property
+    /// of the type rather than something every call site has to remember.
+    /// </remarks>
+    public override string ToString() =>
+        "PairingPayload(v" + SchemaVersion.ToString(CultureInfo.InvariantCulture)
+        + ", " + DeviceId
+        + ", " + EphemeralUrl
+        + ", challenge=<redacted>"
+        + ", " + PublicKeyFingerprint
+        + ", expires=" + ExpiresAtEpochMs.ToString(CultureInfo.InvariantCulture) + ")";
+
     private static void ValidateEphemeralUrl(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
