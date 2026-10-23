@@ -26,6 +26,18 @@ function Get-Text([string]$id) {
   if ($e) { return $e.Current.Name }
   return $null
 }
+# 等播放位置长到阈值：切换/起播后立刻采样 position 往往仍是 0:00，
+# 固定时刻采样会把「刚起播」误判成「没在播放」（本轮回归就出现了一次假失败）。
+function Wait-Position([int]$minSeconds, [int]$timeoutSec = 30) {
+  $deadline = (Get-Date).AddSeconds($timeoutSec)
+  do {
+    $s = Get-MhPlayerState -SkipSlow
+    if ($null -ne $s.positionSeconds -and $s.positionSeconds -ge $minSeconds) { return $s }
+    Start-Sleep -Milliseconds 400
+  } while ((Get-Date) -lt $deadline)
+  return (Get-MhPlayerState -SkipSlow)
+}
+
 function Wait-Text([string]$id, [string]$expected, [int]$timeoutSec = 25) {
   $deadline = (Get-Date).AddSeconds($timeoutSec)
   $last = $null
@@ -213,8 +225,8 @@ if ($dlg -ne [IntPtr]::Zero) {
 }
 Check 'B2-8 替换后队列只剩该文件 1/1' (Wait-Text 'player.queuecount' '队列 1/1' 40) ('actual=' + (Get-Text 'player.queuecount'))
 Check 'B2-8 真的切到新文件（含中文空格）' (Wait-Text 'TitleText' 'Chinese 中文 空格' 40) ('actual=' + (Get-Text 'TitleText'))
-$st4 = Get-MhPlayerState -SkipSlow
-Check 'B2-8 新文件在播放' ([bool]($st4.positionSeconds -gt 0 -and $st4.durationSeconds -gt 0)) ('position=' + $st4.position + ' duration=' + $st4.duration)
+$st4 = Wait-Position 1 30
+Check 'B2-8 新文件在播放' ([bool]($st4.positionSeconds -ge 1 -and $st4.durationSeconds -gt 0)) ('position=' + $st4.position + ' duration=' + $st4.duration)
 $trace = Get-MhLog
 Check 'B2-8 trace: Replace requested=1 added=1' ([bool]($trace -match 'queue:intake mode=Replace requested=1 added=1')) (($trace | Where-Object { $_ -match 'queue:intake' }) -join ' / ')
 $prev2 = Find-MhAppElement -AutomationId 'player.queueprev'

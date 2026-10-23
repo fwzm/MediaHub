@@ -175,7 +175,17 @@ if (((num > 0) & flag) && !(item is AudioBook) && !(item is Book))
 | App 构建（`-p:MediaHubBinRoot=D:\mh-out\`） | 0 警告 0 错误 |
 | S1 GUI 门禁 | 29/29 |
 | S2 GUI 门禁 | 43/43 |
-| R7 队列 / WebDAV / 音频 / 选择器脚本 | 未重放（见「仍未完成」） |
+| R7 队列回归 `r7-b2-queue.ps1` | 63/63（见下节「R7 防回归重放」） |
+| R7 WebDAV 回归 `r7-a3-webdav.ps1` | 24/24（见下节） |
+
+## R7 防回归重放（W8 改了库页与详情页，必须回放）
+
+| 脚本 | 首跑 | 终局 | 说明 |
+| --- | --- | --- | --- |
+| `windows\tools\acceptance\r7-a3-webdav.ps1` | 24/24 | 24/24 | WebDAV 走 `BrowsePage`，不受本轮库页改动影响；目录列举/逐级导航/中文空格文件播放/关闭整个应用释放回环端口（before=39784 → after 空）全部复现 |
+| `windows\tools\acceptance\r7-b2-queue.ps1` | 62/63 | **63/63** | 唯一失败项 `B2-8 新文件在播放 :: position=0:00 duration=0:10` 是**判据竞态**：切换后立刻采样 position，起播第一秒必然还是 0:00。已把该断言改为等位置长到 1 s（`Wait-Position`），不是产品缺陷 |
+
+证据：`windows/tools/acceptance/evidence/r7-regress-w8/b2-queue.log`（首跑，含那一条 FAIL 原文）、`b2-queue-rerun.log`（63/63）、`a3-webdav.log`（24/24）。
 
 ## 仍未完成（不得误报为已解决）
 
@@ -185,7 +195,7 @@ if (((num > 0) & flag) && !(item is AudioBook) && !(item is Book))
 | Gate U2 AutoPlayNext 多集实测 | NOT_RUN | 剧集自动连播逻辑在 R7 已实现，本轮未在真服上跑多集 |
 | Gate U3 收藏 / 永久播放列表 | NOT_IMPLEMENTED | 未开工 |
 | LGPL 引擎切换 / 许可 / 签名 | RELEASE_BLOCKED / SIGNING_BLOCKED | 本轮未动；`libmpv-2.dll` 仍是 GPL 构建，切换 LGPL 构建不在本轮范围 |
-| R7 脚本重放 | NOT_RUN | 本轮改了 `LibraryPage`/`LibrariesPage`/`DetailPage`，WebDAV 走 `BrowsePage` 未受影响；下一轮应重放 `r7-a3-webdav.ps1` 与 `r7-b2-queue.ps1` 作为防回归 |
+| R7 脚本重放 | EXECUTED_PASS | `r7-b2-queue.ps1` 63/63、`r7-a3-webdav.ps1` 24/24（见上节）；`r6-audio`/`r6-pickers` 本轮未重放（R7 的 C 回归已覆盖，R7 之后无相关改动） |
 
 ## 计数口径说明
 
@@ -204,4 +214,7 @@ pwsh -File windows\tools\acceptance\w8\s1-threshold.ps1
 pwsh -File windows\tools\acceptance\w8\s1-resume-gui.ps1
 # S2 Emby 端到端（正式留证不要带 -OnlyP5）
 pwsh -File windows\tools\acceptance\w8\s2-emby-gui.ps1
+# W8 改动后的 R7 防回归
+pwsh -File windows\tools\acceptance\r7-b2-queue.ps1
+pwsh -File windows\tools\acceptance\r7-a3-webdav.ps1
 ~~~
