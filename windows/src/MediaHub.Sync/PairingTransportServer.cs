@@ -49,6 +49,19 @@ public sealed class PairingTransportServerOptions
 
     /// <summary>Source of "now" in Unix milliseconds. Only tests set this.</summary>
     public Func<long>? Clock { get; init; }
+
+    /// <summary>
+    /// How long the listener waits for the peer's card after sending the invitation. Left null the exchange stays
+    /// one-way (payload only) and the caller learns nothing about the peer — the pre-W6-12 behaviour every existing
+    /// caller and test relies on. Setting it enables the optional, best-effort card exchange.
+    /// </summary>
+    public TimeSpan? PeerReplyTimeout { get; init; }
+
+    /// <summary>
+    /// Card the listener sends back once it has the peer's card. Left null, one is derived from
+    /// <see cref="DeviceId"/>, so a returning peer sees a stable fingerprint instead of a fresh certificate.
+    /// </summary>
+    public PairingPeerCard? SelfCard { get; init; }
 }
 
 /// <summary>
@@ -86,6 +99,8 @@ public sealed class PairingTransportServer : IDisposable, IAsyncDisposable
     private readonly bool _certificateMatchesAdvertisement;
     private readonly CancellationTokenSource _lifetime;
     private readonly TimeSpan _handshakeTimeout;
+    private readonly TimeSpan? _peerReplyTimeout;
+    private readonly PairingPeerCard _selfCard;
     private TcpClient? _connection;
     private SslStream? _stream;
     private int _pairing;
@@ -100,7 +115,9 @@ public sealed class PairingTransportServer : IDisposable, IAsyncDisposable
         string certificateFingerprint,
         PairingPayload invitation,
         TimeSpan lifetime,
-        TimeSpan handshakeTimeout)
+        TimeSpan handshakeTimeout,
+        TimeSpan? peerReplyTimeout,
+        PairingPeerCard selfCard)
     {
         _listener = listener;
         _certificate = certificate;
@@ -110,6 +127,8 @@ public sealed class PairingTransportServer : IDisposable, IAsyncDisposable
             PairingFingerprint.Parse(certificateFingerprint).Matches(invitation.ParseFingerprint());
         Invitation = invitation;
         _handshakeTimeout = handshakeTimeout;
+        _peerReplyTimeout = peerReplyTimeout;
+        _selfCard = selfCard;
         _lifetime = new CancellationTokenSource(lifetime);
 
         var endPoint = (IPEndPoint)listener.LocalEndpoint;
@@ -134,6 +153,13 @@ public sealed class PairingTransportServer : IDisposable, IAsyncDisposable
 
     /// <summary>True once the listener is closed.</summary>
     public bool IsStopped => Volatile.Read(ref _stopped) != 0;
+
+    /// <summary>Card a listener sends when the caller supplied none: stable, derived from the device id, secret-free.</summary>
+    private static PairingPeerCard DefaultSelfCard(string deviceId) => new()
+    {
+        DeviceId = deviceId,
+        DeviceFingerprint = PairingSelfIdentity.DeriveFingerprint(deviceId).Hex,
+    };
 
     /// <summary>Binds the loopback listener and publishes the invitation.</summary>
     /// <exception cref="ArgumentException"><c>DeviceId</c> is empty.</exception>
@@ -184,7 +210,9 @@ public sealed class PairingTransportServer : IDisposable, IAsyncDisposable
                 fingerprint,
                 invitation,
                 options.Lifetime,
-                options.HandshakeTimeout);
+                options.HandshakeTimeout,
+                options.PeerReplyTimeout,
+                options.SelfCard ?? DefaultSelfCard(options.DeviceId));
         }
         catch
         {
@@ -302,6 +330,20 @@ public sealed class PairingTransportServer : IDisposable, IAsyncDisposable
             await PairingFrame.WriteAsync(ssl, frame, linked.Token).ConfigureAwait(false);
             await ssl.FlushAsync(linked.Token).ConfigureAwait(false);
 
+            // Optional second leg: the peer says who it is, and we answer with our own card. It is best effort by
+            // design — a peer that says nothing (an older build, or a test that only wants the payload) still
+            // pairs, it just is not remembered. A card holds no secret, and a failed read must never turn a
+            // delivered invitation into a failure.
+            PairingPeerCard? peerCard = null;
+            if (_peerReplyTimeout is { } replyTimeout)
+            {
+                peerCard = await ReadPeerCardAsync(ssl, linked.Token, replyTimeout).ConfigureAwait(false);
+                if (peerCard is not null)
+                {
+                    await TryWriteCardAsync(ssl, _selfCard, linked.Token, replyTimeout).ConfigureAwait(false);
+                }
+            }
+
             // One-shot: stop listening first, so a second peer cannot even reach the handshake, then let the
             // peer close cleanly. The payload is already written; nothing below can change that.
             Interlocked.Exchange(ref _paired, 1);
@@ -316,7 +358,7 @@ public sealed class PairingTransportServer : IDisposable, IAsyncDisposable
                 // The peer may already have closed. The payload is away; a missing close_notify changes nothing.
             }
 
-            return PairingTransportResult.Success(Invitation, protocol);
+            return PairingTransportResult.Success(Invitation, protocol, peerCard);
         }
         catch (OperationCanceledException)
         {
@@ -356,6 +398,47 @@ public sealed class PairingTransportServer : IDisposable, IAsyncDisposable
                     _connection = null;
                 }
             }
+        }
+    }
+
+    /// <summary>Reads one optional peer card within a budget; null means "no card", never "pairing failed".</summary>
+    private static async Task<PairingPeerCard?> ReadPeerCardAsync(SslStream ssl, CancellationToken token, TimeSpan timeout)
+    {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
+        budget.CancelAfter(timeout);
+        byte[]? reply;
+        try
+        {
+            reply = await PairingFrame.ReadAsync(ssl, budget.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or OperationCanceledException or ObjectDisposedException)
+        {
+            return null;
+        }
+
+        if (reply is null)
+        {
+            return null;
+        }
+
+        return PairingPeerCardCodec.TryDeserialize(Encoding.UTF8.GetString(reply), out PairingPeerCard? card, out _)
+            ? card
+            : null;
+    }
+
+    /// <summary>Writes our card back; the peer may already be gone, which changes nothing.</summary>
+    private static async Task TryWriteCardAsync(SslStream ssl, PairingPeerCard card, CancellationToken token, TimeSpan timeout)
+    {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
+        budget.CancelAfter(timeout);
+        try
+        {
+            byte[] payload = Encoding.UTF8.GetBytes(PairingPeerCardCodec.Serialize(card));
+            await PairingFrame.WriteAsync(ssl, payload, budget.Token).ConfigureAwait(false);
+            await ssl.FlushAsync(budget.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or OperationCanceledException or ObjectDisposedException)
+        {
         }
     }
 

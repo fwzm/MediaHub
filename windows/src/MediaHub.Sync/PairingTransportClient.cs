@@ -29,6 +29,15 @@ public sealed class PairingTransportClientOptions
     /// refuses a TLS 1.2 peer instead of silently negotiating something weaker.
     /// </summary>
     public SslProtocols EnabledProtocols { get; init; } = SslProtocols.Tls13;
+
+    /// <summary>
+    /// Card to send about ourselves after the payload is verified. Left null the exchange stays one-way — the
+    /// peer then cannot remember us, which is exactly the pre-W6-12 behaviour.
+    /// </summary>
+    public PairingPeerCard? Reply { get; init; }
+
+    /// <summary>Budget for the optional card exchange (write ours, read theirs).</summary>
+    public TimeSpan ReplyTimeout { get; init; } = TimeSpan.FromSeconds(5);
 }
 
 /// <summary>
@@ -131,7 +140,16 @@ public static class PairingTransportClient
                 return PairingTransportResult.Failure(PairingTransportReasons.FingerprintMismatch);
             }
 
-            return PairingTransportResult.Success(payload, ssl.SslProtocol);
+            // Optional second leg, only after the pin and the payload both checked out: never tell a peer who we
+            // are before we know who it is. A card that never arrives is not a failure — the pairing stands, we
+            // simply cannot remember the other side.
+            PairingPeerCard? peerCard = null;
+            if (options.Reply is { } reply)
+            {
+                peerCard = await ExchangeCardsAsync(ssl, reply, budget.Token, options.ReplyTimeout).ConfigureAwait(false);
+            }
+
+            return PairingTransportResult.Success(payload, ssl.SslProtocol, peerCard);
         }
         catch (AuthenticationException)
         {
@@ -151,6 +169,36 @@ public static class PairingTransportClient
         catch (OperationCanceledException)
         {
             return PairingTransportResult.Failure(PairingTransportReasons.PeerTimeout);
+        }
+    }
+
+    /// <summary>Sends our card and reads the peer's; null when the peer does not answer in time.</summary>
+    private static async Task<PairingPeerCard?> ExchangeCardsAsync(
+        SslStream ssl,
+        PairingPeerCard card,
+        CancellationToken token,
+        TimeSpan timeout)
+    {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
+        budget.CancelAfter(timeout);
+        try
+        {
+            byte[] payload = Encoding.UTF8.GetBytes(PairingPeerCardCodec.Serialize(card));
+            await PairingFrame.WriteAsync(ssl, payload, budget.Token).ConfigureAwait(false);
+            await ssl.FlushAsync(budget.Token).ConfigureAwait(false);
+            byte[]? reply = await PairingFrame.ReadAsync(ssl, budget.Token).ConfigureAwait(false);
+            if (reply is null)
+            {
+                return null;
+            }
+
+            return PairingPeerCardCodec.TryDeserialize(Encoding.UTF8.GetString(reply), out PairingPeerCard? peerCard, out _)
+                ? peerCard
+                : null;
+        }
+        catch (Exception exception) when (exception is IOException or OperationCanceledException or ObjectDisposedException)
+        {
+            return null;
         }
     }
 }

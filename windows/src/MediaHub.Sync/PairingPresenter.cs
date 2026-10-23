@@ -202,6 +202,8 @@ public sealed class PairingPresenter : IDisposable
 {
     private readonly string _deviceId;
     private readonly PairingPeerEnvelopeReader? _envelopeReader;
+    private readonly PairedDeviceRegistry? _registry;
+    private readonly PairingSelfIdentity _identity;
 
     private PairingTransportServer? _server;
     private CancellationTokenSource? _acceptCancellation;
@@ -219,8 +221,17 @@ public sealed class PairingPresenter : IDisposable
     /// Reads the peer's source envelope on demand. Optional: without it the guest side still pairs and still reports
     /// that no source list was read, which is the honest answer when nothing provides one.
     /// </param>
+    /// <param name="registry">
+    /// Remembers paired devices (W6-12). Optional, and deliberately so: without it the exchange stays one-way and
+    /// the host cannot name the peer, which is exactly the pre-W6-12 behaviour. Supplying it turns on the optional
+    /// peer-card step — both sides then exchange a small, self-declared card, the first fingerprint seen for a
+    /// device is pinned, and a later mismatch refuses the pairing instead of silently re-pinning.
+    /// </param>
     /// <exception cref="ArgumentException"><paramref name="deviceId"/> is blank.</exception>
-    public PairingPresenter(string deviceId, PairingPeerEnvelopeReader? envelopeReader = null)
+    public PairingPresenter(
+        string deviceId,
+        PairingPeerEnvelopeReader? envelopeReader = null,
+        PairedDeviceRegistry? registry = null)
     {
         if (string.IsNullOrWhiteSpace(deviceId))
         {
@@ -229,7 +240,15 @@ public sealed class PairingPresenter : IDisposable
 
         _deviceId = deviceId.Trim();
         _envelopeReader = envelopeReader;
+        _registry = registry;
+        _identity = PairingSelfIdentity.Create(_deviceId);
     }
+
+    /// <summary>The paired-device registry this presenter writes to, or null when cards are not exchanged.</summary>
+    public PairedDeviceRegistry? Registry => _registry;
+
+    /// <summary>This installation's own card (device id plus derived fingerprint); never contains a secret.</summary>
+    public PairingPeerCard SelfCard => _identity.ToCard();
 
     /// <summary>This installation's device id, as carried in the invitation.</summary>
     public string DeviceId => _deviceId;
@@ -283,6 +302,10 @@ public sealed class PairingPresenter : IDisposable
             DeviceId = _deviceId,
             Challenge = PairingChallenge.Create(),
             Clock = () => nowEpochMs,
+            // Without a registry there is nobody to remember the peer, so the exchange stays one-way: the peer
+            // learns the invitation and nothing else, exactly as before W6-12.
+            PeerReplyTimeout = _registry is null ? null : TimeSpan.FromSeconds(5),
+            SelfCard = _registry is null ? null : _identity.ToCard(),
         };
 
         PairingTransportServer server;
@@ -330,14 +353,34 @@ public sealed class PairingPresenter : IDisposable
 
             if (result.Paired)
             {
-                _state = PairingHostState.Paired;
-                _reason = null;
-                _detail = null;
-                // The W6-3b wire is one-way: the server sends its invitation and the client sends nothing back,
-                // so the host learns THAT a peer connected but not WHO it is. result.Payload is the host's own
-                // invitation, and adopting it here would print the host's device id as the peer's.
-                PeerDeviceId = null;
-                PeerFingerprintDisplay = null;
+                // result.Payload is the host's own invitation, so it must never be adopted as the peer's identity.
+                // result.PeerPayload only exists when the optional card exchange ran, and it is self-declared text,
+                // not a proof: the first card seen for a device is pinned exactly as a certificate would be.
+                PairedDeviceRegistration? registration = null;
+                if (result.PeerPayload is { } card)
+                {
+                    PeerDeviceId = card.DeviceId;
+                    PeerFingerprintDisplay = DisplayFingerprintHex(card.DeviceFingerprint);
+                    registration = _registry?.Register(PairedDeviceObservation.FromCard(card, nowEpochMs));
+                }
+                else
+                {
+                    PeerDeviceId = null;
+                    PeerFingerprintDisplay = null;
+                }
+
+                if (registration is { IsMismatch: true })
+                {
+                    _state = PairingHostState.Failed;
+                    _reason = registration.Reason;
+                    _detail = "对端设备的指纹与首次配对时登记的不一致，已拒绝这次配对。";
+                }
+                else
+                {
+                    _state = PairingHostState.Paired;
+                    _reason = null;
+                    _detail = registration?.Device is { } device ? "已记住对端：" + device.DisplayNameOrId : null;
+                }
             }
             else
             {
@@ -426,6 +469,8 @@ public sealed class PairingPresenter : IDisposable
                 {
                     Endpoint = endpoint,
                     ExpectedFingerprint = invitation.PublicKeyFingerprint,
+                    // Only a presenter with a registry announces itself: an older build keeps the one-way wire.
+                    Reply = _registry is null ? null : _identity.ToCard(),
                 },
                 cancellationToken).ConfigureAwait(false);
         }
@@ -450,6 +495,27 @@ public sealed class PairingPresenter : IDisposable
         {
             string reason = transport.Reason ?? PairingTransportReasons.PeerTimeout;
             return GuestFailure(reason, PairingUiText.DescribeTransportFailure(reason), invitation);
+        }
+
+        // Remembering the host needs the host's own card. The invitation's fingerprint is the ephemeral
+        // certificate's and changes every pairing, so registering it would guarantee a false mismatch next time.
+        if (_registry is not null && transport.PeerPayload is { } hostCard)
+        {
+            PairedDeviceRegistration registration =
+                _registry.Register(PairedDeviceObservation.FromCard(hostCard, nowEpochMs));
+            if (registration.IsMismatch)
+            {
+                string who = hostCard.DisplayName.Length > 0 ? hostCard.DisplayName : hostCard.DeviceId;
+                return new PairingGuestResult(
+                    Paired: false,
+                    StepCode: PairingStepCodes.GuestFailed,
+                    Message: "对端设备 " + who + " 的指纹与首次配对时登记的不一致，已中止配对。",
+                    Reason: registration.Reason,
+                    PeerDeviceId: hostCard.DeviceId,
+                    PeerFingerprintDisplay: DisplayFingerprintHex(hostCard.DeviceFingerprint),
+                    PeerSourceCount: 0,
+                    HasPeerEnvelope: false);
+            }
         }
 
         PairingPayload peerPayload = transport.Payload ?? invitation;
@@ -562,6 +628,9 @@ public sealed class PairingPresenter : IDisposable
             return null;
         }
     }
+
+    private static string? DisplayFingerprintHex(string? hex) =>
+        PairingFingerprint.TryParse(hex, out PairingFingerprint fingerprint) ? fingerprint.ToDisplayString() : null;
 
     private PairingPeerEnvelopeResult ReadPeerEnvelope()
     {
