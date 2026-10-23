@@ -71,11 +71,15 @@ jobs:
       # The WebDAV provider suite used to be built here but never executed: `dotnet test` was pointed at
       # MediaHub.Tests only, so its 104 tests were green "by construction" and never ran in CI. Two
       # separate invocations keep the project filters explicit instead of relying on the solution layout.
+      # No -p:Platform=x64 here on purpose: the solution maps this project to "Any CPU"
+      # ({C2441453-...}.Debug|x64.ActiveCfg = Debug|Any CPU), so the sln build drops it in
+      # bin\Debug\net10.0. Passing Platform=x64 makes dotnet test look in bin\x64\Debug and fail
+      # with "The test source file ... was not found" - which is exactly what happened on 97a0f8e.
       - name: Unit and contract tests (MediaHub.WebDav.Tests)
         working-directory: windows
         run: >
           dotnet test tests/MediaHub.WebDav.Tests/MediaHub.WebDav.Tests.csproj
-          -c Debug -p:Platform=x64 --no-build
+          -c Debug --no-build
           --logger "trx;LogFileName=webdav-tests.trx"
           --results-directory ./artifacts/test-results
 
