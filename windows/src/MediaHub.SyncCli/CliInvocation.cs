@@ -1,6 +1,6 @@
 namespace MediaHub.SyncCli;
 
-/// <summary>The three verbs plus the verification-only verb.</summary>
+/// <summary>The envelope verbs, the verification-only verb, and the two offline maintenance groups.</summary>
 public enum SyncCliCommand
 {
     /// <summary>No command was recognised.</summary>
@@ -17,6 +17,24 @@ public enum SyncCliCommand
 
     /// <summary>Verification-only: does this device's sealed secret unseal to the expected bytes?</summary>
     SecretCheck = 4,
+
+    /// <summary><c>baseline show</c>: read-only dump of the stored per-peer baselines.</summary>
+    BaselineShow = 5,
+
+    /// <summary><c>baseline forget</c>: dry-run by default, <c>--apply</c> drops a peer or one source.</summary>
+    BaselineForget = 6,
+
+    /// <summary><c>pair link</c>: build this device's shareable pairing link, offline.</summary>
+    PairLink = 7,
+
+    /// <summary><c>pair verify</c>: parse a pairing link and report the peer it names, offline.</summary>
+    PairVerify = 8,
+
+    /// <summary><c>pair list</c>: read-only list of the devices pinned on this machine.</summary>
+    PairList = 9,
+
+    /// <summary><c>pair forget</c>: dry-run by default, <c>--apply</c> drops one pinned device.</summary>
+    PairForget = 10,
 }
 
 /// <summary>A validated command line. Produced only by <see cref="CliParser"/>.</summary>
@@ -51,6 +69,12 @@ public sealed record CliInvocation
 
     /// <summary><c>--id</c>: the syncSourceId to verify (<c>secret-check</c> only).</summary>
     public string? SyncSourceId { get; init; }
+
+    /// <summary><c>--source</c>: one syncSourceId to forget (<c>baseline forget</c> only).</summary>
+    public string? SourceId { get; init; }
+
+    /// <summary><c>--link</c>: the <c>mediahub://pair?...</c> link to read (<c>pair verify</c> only).</summary>
+    public string? Link { get; init; }
 
     /// <summary><c>--expect</c>: base64 of the plaintext the sealed secret must unseal to.</summary>
     public string? ExpectPlaintextBase64 { get; init; }

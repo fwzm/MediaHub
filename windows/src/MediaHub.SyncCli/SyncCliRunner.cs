@@ -1,5 +1,6 @@
 namespace MediaHub.SyncCli;
 
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -48,6 +49,12 @@ public sealed class SyncCliRunner
             SyncCliCommand.Import => RunImport(invocation),
             SyncCliCommand.Plan => RunPlan(invocation),
             SyncCliCommand.SecretCheck => RunSecretCheck(invocation),
+            SyncCliCommand.BaselineShow => RunBaselineShow(invocation),
+            SyncCliCommand.BaselineForget => RunBaselineForget(invocation),
+            SyncCliCommand.PairLink => RunPairLink(invocation),
+            SyncCliCommand.PairVerify => RunPairVerify(invocation),
+            SyncCliCommand.PairList => RunPairList(invocation),
+            SyncCliCommand.PairForget => RunPairForget(invocation),
             _ => Fail(invocation, CliExitCode.UsageError, "unknown-command", "nothing to run"),
         };
     }
@@ -387,6 +394,466 @@ public sealed class SyncCliRunner
         }
 
         return matches ? CliExitCode.Success : CliExitCode.NeedsApproval;
+    }
+
+    // ---- baseline group (W6-15) -------------------------------------------------------------
+    // The baseline store merges on Save, so it can never drop an entry; the CLI forget verbs go
+    // through the store's own atomic write (temporary file + File.Replace) instead of editing JSON.
+
+    private int RunBaselineShow(CliInvocation invocation)
+    {
+        if (!TryLoadBaselineStore(invocation, out FileSourceSyncBaselineStore store, out int storeExit))
+        {
+            return storeExit;
+        }
+
+        IReadOnlyList<string> peers = store.PeerDeviceIds;
+        bool exists = File.Exists(store.FilePath);
+        List<(string DeviceId, SourceSyncBaseline Baseline)> rows = [];
+        int entryCount = 0;
+        foreach (string peer in peers)
+        {
+            SourceSyncBaseline baseline = store.Load(peer);
+            rows.Add((peer, baseline));
+            entryCount += baseline.Entries.Count;
+        }
+
+        if (invocation.Json)
+        {
+            _out.WriteLine(CliJson.Write(writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("command", "baseline");
+                writer.WriteString("subcommand", "show");
+                writer.WriteString("root", invocation.Root);
+                writer.WriteString("path", store.FilePath);
+                writer.WriteBoolean("exists", exists);
+                writer.WriteNumber("documentVersion", FileSourceSyncBaselineStore.CurrentDocumentVersion);
+                writer.WriteNumber("peerCount", rows.Count);
+                writer.WriteNumber("entryCount", entryCount);
+                writer.WriteStartArray("peers");
+                foreach ((string deviceId, SourceSyncBaseline baseline) in rows)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("deviceId", deviceId);
+                    writer.WriteString("snapshotId", baseline.SnapshotId ?? "");
+                    writer.WriteNumber("entryCount", baseline.Entries.Count);
+                    writer.WriteStartArray("entries");
+                    foreach (SourceSyncBaselineEntry entry in baseline.Entries)
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("syncSourceId", entry.SyncSourceId);
+                        writer.WriteNumber("recordRevision", entry.RecordRevision);
+                        writer.WriteNumber("fieldVersion", entry.FieldVersion);
+                        writer.WriteString("contentHash", entry.ContentHash);
+                        writer.WriteString("contentHashPrefix", Prefix(entry.ContentHash, 12));
+                        writer.WriteEndObject();
+                    }
+
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }));
+            return CliExitCode.Success;
+        }
+
+        _out.WriteLine("baseline: " + store.FilePath);
+        _out.WriteLine("exists: " + (exists ? "true" : "false"));
+        _out.WriteLine("version: " + FileSourceSyncBaselineStore.CurrentDocumentVersion.ToString(CultureInfo.InvariantCulture));
+        _out.WriteLine("peers: " + rows.Count.ToString(CultureInfo.InvariantCulture));
+        _out.WriteLine("entries: " + entryCount.ToString(CultureInfo.InvariantCulture));
+        foreach ((string deviceId, SourceSyncBaseline baseline) in rows)
+        {
+            _out.WriteLine("peer " + deviceId + " (" + baseline.Entries.Count.ToString(CultureInfo.InvariantCulture) + " entries)");
+            foreach (SourceSyncBaselineEntry entry in baseline.Entries)
+            {
+                _out.WriteLine("  " + entry.SyncSourceId + "  rev " + entry.RecordRevision.ToString(CultureInfo.InvariantCulture) + "  " + Prefix(entry.ContentHash, 12));
+            }
+        }
+
+        if (!exists)
+        {
+            _out.WriteLine("nothing has been imported from a peer yet");
+        }
+
+        return CliExitCode.Success;
+    }
+
+    private int RunBaselineForget(CliInvocation invocation)
+    {
+        if (!TryLoadBaselineStore(invocation, out FileSourceSyncBaselineStore store, out int storeExit))
+        {
+            return storeExit;
+        }
+
+        string deviceId = invocation.DeviceId!.Trim();
+        string? known = store.PeerDeviceIds.FirstOrDefault(peer => string.Equals(peer, deviceId, StringComparison.OrdinalIgnoreCase));
+        if (known is null)
+        {
+            return Fail(invocation, CliExitCode.InputProblem, "baseline-device-unknown", "the sync baseline holds nothing for device " + deviceId);
+        }
+
+        SourceSyncBaseline baseline = store.Load(known);
+        string? sourceId = invocation.SourceId?.Trim();
+        SourceSyncBaselineEntry? target = null;
+        if (!string.IsNullOrEmpty(sourceId))
+        {
+            target = baseline.Find(sourceId);
+            if (target is null)
+            {
+                return Fail(invocation, CliExitCode.InputProblem, "baseline-source-unknown", "device " + known + " has no baseline entry for source " + sourceId);
+            }
+        }
+
+        IReadOnlyList<SourceSyncBaselineEntry> removed = target is null ? baseline.Entries : [target];
+        int remainingEntries = baseline.Entries.Count - removed.Count;
+        bool applied = false;
+        if (invocation.Apply)
+        {
+            bool written;
+            try
+            {
+                written = target is null ? store.ForgetPeer(known) : store.ForgetEntry(known, target.SyncSourceId);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                return Fail(invocation, CliExitCode.InputProblem, "baseline-write-failed", error.Message);
+            }
+
+            if (!written)
+            {
+                return Fail(invocation, CliExitCode.InputProblem, "baseline-nothing-forgotten", "the sync baseline did not change; nothing was written");
+            }
+
+            applied = true;
+            remainingEntries = store.Load(known).Entries.Count;
+        }
+
+        if (invocation.Json)
+        {
+            _out.WriteLine(CliJson.Write(writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("command", "baseline");
+                writer.WriteString("subcommand", "forget");
+                writer.WriteBoolean("dryRun", !invocation.Apply);
+                writer.WriteBoolean("applied", applied);
+                writer.WriteString("root", invocation.Root);
+                writer.WriteString("path", store.FilePath);
+                writer.WriteString("deviceId", known);
+                writer.WriteString("sourceId", target?.SyncSourceId ?? "");
+                writer.WriteNumber("removedCount", removed.Count);
+                writer.WriteNumber("remainingEntries", remainingEntries);
+                writer.WriteBoolean("peerRemoved", remainingEntries == 0);
+                writer.WriteStartArray("removed");
+                foreach (SourceSyncBaselineEntry entry in removed)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("syncSourceId", entry.SyncSourceId);
+                    writer.WriteNumber("recordRevision", entry.RecordRevision);
+                    writer.WriteString("contentHashPrefix", Prefix(entry.ContentHash, 12));
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }));
+            return CliExitCode.Success;
+        }
+
+        if (!invocation.Apply)
+        {
+            _err.WriteLine("preview: nothing was written; pass --apply to forget");
+        }
+
+        _out.WriteLine((invocation.Apply ? "forgotten " : "would forget ")
+            + removed.Count.ToString(CultureInfo.InvariantCulture) + " entries for " + known);
+        foreach (SourceSyncBaselineEntry entry in removed)
+        {
+            _out.WriteLine("  " + entry.SyncSourceId + "  rev " + entry.RecordRevision.ToString(CultureInfo.InvariantCulture));
+        }
+
+        _out.WriteLine("remaining: " + remainingEntries.ToString(CultureInfo.InvariantCulture) + " entries");
+        return CliExitCode.Success;
+    }
+
+    // ---- pair group (W6-15) -----------------------------------------------------------------
+    // Nothing here opens a socket: "pair link" only describes this machine and "pair verify" only
+    // decodes a link, so no CLI invocation can trip the Windows Firewall prompt.
+
+    private int RunPairLink(CliInvocation invocation)
+    {
+        long now = _clock().ToUnixTimeMilliseconds();
+        PairingPayload payload;
+        string link;
+        try
+        {
+            PairingSelfIdentity identity = PairingSelfIdentity.Create(DeviceIdOf(invocation));
+            payload = PairingPayload.Create(
+                identity.DeviceId,
+                LoopbackPlaceholderUrl,
+                PairingChallenge.Create(),
+                identity.Fingerprint,
+                now);
+            link = PairingLink.Create(payload);
+        }
+        catch (SyncContractException error)
+        {
+            return Fail(invocation, CliExitCode.InputProblem, error.Reason, error.Message);
+        }
+
+        string fingerprintPrefix = Prefix(payload.PublicKeyFingerprint, 8);
+        if (invocation.Json)
+        {
+            _out.WriteLine(CliJson.Write(writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("command", "pair");
+                writer.WriteString("subcommand", "link");
+                writer.WriteString("deviceId", payload.DeviceId);
+                writer.WriteString("fingerprintPrefix", fingerprintPrefix);
+                writer.WriteString("link", link);
+                writer.WriteNumber("expiresAtEpochMs", payload.ExpiresAtEpochMs);
+                writer.WriteNumber("lifetimeSeconds", PairingPayload.LifetimeSeconds);
+                writer.WriteBoolean("listens", false);
+                writer.WriteEndObject();
+            }));
+            return CliExitCode.Success;
+        }
+
+        _out.WriteLine("device: " + payload.DeviceId);
+        _out.WriteLine("fingerprint: " + fingerprintPrefix + "...");
+        _out.WriteLine("expires: " + FormatEpoch(payload.ExpiresAtEpochMs));
+        _out.WriteLine("link: " + link);
+        _out.WriteLine("note: this CLI does not listen; the link identifies this device and is checked offline (pair verify).");
+        return CliExitCode.Success;
+    }
+
+    private int RunPairVerify(CliInvocation invocation)
+    {
+        long now = _clock().ToUnixTimeMilliseconds();
+        PairingLinkResult result = PairingLink.Parse(invocation.Link, now);
+        if (!result.Succeeded || result.Payload is null)
+        {
+            return Fail(
+                invocation,
+                CliExitCode.InputProblem,
+                result.Reason ?? PairingCodeReasons.PayloadInvalid,
+                result.Detail ?? "the pairing link could not be read");
+        }
+
+        PairingPayload payload = result.Payload;
+        string fingerprintPrefix = Prefix(payload.PublicKeyFingerprint, 8);
+        long remainingSeconds = Math.Max(0, (payload.ExpiresAtEpochMs - now) / 1000);
+        if (invocation.Json)
+        {
+            _out.WriteLine(CliJson.Write(writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("command", "pair");
+                writer.WriteString("subcommand", "verify");
+                writer.WriteString("deviceId", payload.DeviceId);
+                writer.WriteString("fingerprintPrefix", fingerprintPrefix);
+                writer.WriteString("ephemeralUrl", payload.EphemeralUrl);
+                writer.WriteNumber("expiresAtEpochMs", payload.ExpiresAtEpochMs);
+                writer.WriteNumber("remainingSeconds", remainingSeconds);
+                writer.WriteEndObject();
+            }));
+            return CliExitCode.Success;
+        }
+
+        _out.WriteLine("pairing link ok");
+        _out.WriteLine("device: " + payload.DeviceId);
+        _out.WriteLine("fingerprint: " + fingerprintPrefix + "...");
+        _out.WriteLine("expires: " + FormatEpoch(payload.ExpiresAtEpochMs) + " (" + remainingSeconds.ToString(CultureInfo.InvariantCulture) + "s left)");
+        _out.WriteLine("note: the fingerprint is self-declared, so compare it on both devices before trusting the link.");
+        return CliExitCode.Success;
+    }
+
+    private int RunPairList(CliInvocation invocation)
+    {
+        if (!TryLoadPairedStore(invocation, out FilePairedDeviceStore store, out int storeExit))
+        {
+            return storeExit;
+        }
+
+        IReadOnlyList<PairedDevice> devices = store.GetAll();
+        if (invocation.Json)
+        {
+            _out.WriteLine(CliJson.Write(writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("command", "pair");
+                writer.WriteString("subcommand", "list");
+                writer.WriteString("root", invocation.Root);
+                writer.WriteString("path", store.FilePath);
+                writer.WriteNumber("count", devices.Count);
+                writer.WriteStartArray("devices");
+                foreach (PairedDevice device in devices)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("deviceId", device.DeviceId);
+                    writer.WriteString("displayName", device.DisplayName);
+                    writer.WriteString("fingerprintSuffix", Suffix(device.Fingerprint, 8));
+                    writer.WriteNumber("sourceCount", device.SourceCount);
+                    writer.WriteNumber("pairedAtEpochMs", device.PairedAtEpochMs);
+                    writer.WriteNumber("lastSeenEpochMs", device.LastSeenEpochMs);
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }));
+            return CliExitCode.Success;
+        }
+
+        _out.WriteLine("paired devices: " + devices.Count.ToString(CultureInfo.InvariantCulture));
+        if (devices.Count == 0)
+        {
+            _out.WriteLine("no devices are paired on this machine");
+        }
+
+        foreach (PairedDevice device in devices)
+        {
+            _out.WriteLine(device.DeviceId + "  name=" + device.DisplayNameOrId
+                + "  fp=..." + Suffix(device.Fingerprint, 8)
+                + "  sources " + device.SourceCount.ToString(CultureInfo.InvariantCulture)
+                + "  last " + FormatEpoch(device.LastSeenEpochMs));
+        }
+
+        return CliExitCode.Success;
+    }
+
+    private int RunPairForget(CliInvocation invocation)
+    {
+        if (!TryLoadPairedStore(invocation, out FilePairedDeviceStore store, out int storeExit))
+        {
+            return storeExit;
+        }
+
+        string deviceId = invocation.DeviceId!.Trim();
+        PairedDevice? device = store.GetAll().FirstOrDefault(candidate =>
+            string.Equals(candidate.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
+        if (device is null)
+        {
+            return Fail(invocation, CliExitCode.InputProblem, "device-unknown", "no paired device has id " + deviceId);
+        }
+
+        bool applied = false;
+        if (invocation.Apply)
+        {
+            bool forgotten;
+            try
+            {
+                forgotten = store.Forget(device.DeviceId);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                return Fail(invocation, CliExitCode.InputProblem, "store-write-failed", error.Message);
+            }
+
+            if (!forgotten)
+            {
+                return Fail(invocation, CliExitCode.InputProblem, "device-unknown", "the paired-device list did not contain " + device.DeviceId);
+            }
+
+            applied = true;
+        }
+
+        int remainingCount = store.GetAll().Count - (applied ? 0 : 1);
+        string fingerprintSuffix = Suffix(device.Fingerprint, 8);
+        if (invocation.Json)
+        {
+            _out.WriteLine(CliJson.Write(writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("command", "pair");
+                writer.WriteString("subcommand", "forget");
+                writer.WriteBoolean("dryRun", !invocation.Apply);
+                writer.WriteBoolean("applied", applied);
+                writer.WriteString("root", invocation.Root);
+                writer.WriteString("path", store.FilePath);
+                writer.WriteString("deviceId", device.DeviceId);
+                writer.WriteString("displayName", device.DisplayName);
+                writer.WriteString("fingerprintSuffix", fingerprintSuffix);
+                writer.WriteNumber("remainingCount", remainingCount);
+                writer.WriteEndObject();
+            }));
+            return CliExitCode.Success;
+        }
+
+        if (!invocation.Apply)
+        {
+            _err.WriteLine("preview: nothing was written; pass --apply to forget");
+        }
+
+        _out.WriteLine((invocation.Apply ? "forgotten " : "would forget ") + device.DeviceId
+            + " (" + device.DisplayNameOrId + ", fp ..." + fingerprintSuffix + ")");
+        _out.WriteLine("this removes the local pin only: sources, credentials and the peer are untouched.");
+        _out.WriteLine("remaining: " + remainingCount.ToString(CultureInfo.InvariantCulture) + " paired devices");
+        return CliExitCode.Success;
+    }
+
+    // ---- shared helpers (W6-15) -------------------------------------------------------------
+
+    private const string LoopbackPlaceholderUrl = "http://127.0.0.1:0/";
+
+    private bool TryLoadBaselineStore(CliInvocation invocation, out FileSourceSyncBaselineStore store, out int exitCode)
+    {
+        store = new FileSourceSyncBaselineStore(invocation.Root);
+        _ = store.PeerDeviceIds;
+        return TryCheckLoadError(invocation, store.LoadError, store.LastQuarantinedPath, "the sync baseline could not be read", out exitCode);
+    }
+
+    private bool TryLoadPairedStore(CliInvocation invocation, out FilePairedDeviceStore store, out int exitCode)
+    {
+        store = new FilePairedDeviceStore(invocation.Root);
+        _ = store.GetAll();
+        return TryCheckLoadError(invocation, store.LoadError, store.LastQuarantinedPath, "the paired-device list could not be read", out exitCode);
+    }
+
+    private bool TryCheckLoadError(CliInvocation invocation, string? loadError, string? quarantinedPath, string message, out int exitCode)
+    {
+        exitCode = CliExitCode.Success;
+        if (loadError is null)
+        {
+            return true;
+        }
+
+        exitCode = Fail(
+            invocation,
+            CliExitCode.InputProblem,
+            loadError,
+            message + (quarantinedPath is null ? "" : "; the damaged document was kept at " + quarantinedPath));
+        return false;
+    }
+
+    private static string Prefix(string? value, int length) =>
+        string.IsNullOrEmpty(value) ? "" : value.Length <= length ? value : value[..length];
+
+    private static string Suffix(string? value, int length) =>
+        string.IsNullOrEmpty(value) ? "" : value.Length <= length ? value : value[^length..];
+
+    private static string FormatEpoch(long epochMs)
+    {
+        if (epochMs <= 0)
+        {
+            return "unknown";
+        }
+
+        try
+        {
+            return DateTimeOffset.FromUnixTimeMilliseconds(epochMs)
+                .ToLocalTime()
+                .ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return "unknown";
+        }
     }
     private void WriteRound(CliInvocation invocation, string command, SyncRoundResult round, bool dryRun)
     {

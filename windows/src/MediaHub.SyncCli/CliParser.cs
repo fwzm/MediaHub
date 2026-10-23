@@ -5,24 +5,44 @@ namespace MediaHub.SyncCli;
 /// enough that the option table below *is* the documentation, and the tests can pin every code.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Accepted shapes are <c>--name value</c> and <c>--name=value</c>. A flag (<c>--apply</c>,
 /// <c>--json</c>) never takes a value, not even an empty one: silently ignoring <c>--apply=false</c>
 /// would turn a preview into a write. Every rejection carries a stable code so callers never have to
 /// match on prose.
+/// </para>
+/// <para>
+/// <c>baseline</c> and <c>pair</c> are groups: the second token is the verb, and it may not be an
+/// option (<c>missing-subcommand:baseline</c>). Their invocation is labelled <c>baseline-show</c>,
+/// <c>pair-forget</c> and so on, so an option rejected for a group command still yields one flat
+/// printable code (<c>option-not-allowed-for-command:--apply:pair-link</c>).
+/// </para>
 /// </remarks>
 public static class CliParser
 {
     /// <summary>Usage text printed for <c>--help</c> and on a usage error.</summary>
     public const string UsageText =
-        "MediaHub.SyncCli <command> --root <dir> [options]\n" +
+        "MediaHub.SyncCli <command> [options]\n" +
         "\n" +
-        "Commands:\n" +
+        "Envelope commands:\n" +
         "  export       --root <dir> [--out <file>] [--passphrase <pw>] [--secrets <json>]\n" +
         "               [--deletions <json>] [--device <id>]\n" +
         "  import       --root <dir> --in <file> [--passphrase <pw>] [--apply] [--baseline <file>]\n" +
         "               [--device <id>]                       (preview unless --apply is given)\n" +
         "  plan         --root <dir> --in <file> [--baseline <file>] [--device <id>]\n" +
         "  secret-check --root <dir> --id <syncSourceId> --expect <base64 plaintext>\n" +
+        "\n" +
+        "Baseline commands (local bookkeeping, no network):\n" +
+        "  baseline show    --root <dir>\n" +
+        "  baseline forget  --root <dir> --device <id> [--source <syncSourceId>] [--apply]\n" +
+        "                                                      (preview unless --apply is given)\n" +
+        "\n" +
+        "Pairing commands (offline: this CLI never listens on a socket):\n" +
+        "  pair link        [--device <id>]\n" +
+        "  pair verify      --link <mediahub://pair?...>\n" +
+        "  pair list        --root <dir>\n" +
+        "  pair forget      --root <dir> --device <id> [--apply]\n" +
+        "                                                      (preview unless --apply is given)\n" +
         "\n" +
         "Global:\n" +
         "  --json       stdout carries exactly one JSON document; progress goes to stderr\n" +
@@ -34,6 +54,12 @@ public static class CliParser
     private static readonly string[] ImportValueOptions = ["--root", "--in", "--passphrase", "--baseline", "--device"];
     private static readonly string[] PlanValueOptions = ["--root", "--in", "--baseline", "--device"];
     private static readonly string[] SecretCheckValueOptions = ["--root", "--id", "--expect"];
+    private static readonly string[] BaselineShowValueOptions = ["--root"];
+    private static readonly string[] BaselineForgetValueOptions = ["--root", "--device", "--source"];
+    private static readonly string[] PairLinkValueOptions = ["--device"];
+    private static readonly string[] PairVerifyValueOptions = ["--link"];
+    private static readonly string[] PairListValueOptions = ["--root"];
+    private static readonly string[] PairForgetValueOptions = ["--root", "--device"];
 
     /// <summary>Parses a raw argument vector.</summary>
     public static CliParseResult Parse(IReadOnlyList<string>? args)
@@ -54,6 +80,12 @@ public static class CliParser
             return new CliParseResult { IsVersion = true };
         }
 
+        if (first is not ("export" or "import" or "plan" or "secret-check" or "baseline" or "pair"))
+        {
+            return Error("unknown-command:" + first);
+        }
+
+        // baseline/pair stay None until the verb slot is read, because the verb selects the options.
         SyncCliCommand command = first switch
         {
             "export" => SyncCliCommand.Export,
@@ -63,9 +95,41 @@ public static class CliParser
             _ => SyncCliCommand.None,
         };
 
-        if (command == SyncCliCommand.None)
+        // The group verbs are read before the option loop, because the verb decides which options
+        // exist. --help in the verb slot is still a help request, not a missing verb.
+        int start = 1;
+        string commandName = first;
+        if (first is "baseline" or "pair")
         {
-            return Error("unknown-command:" + first);
+            if (args.Count > 1 && args[1] is "--help" or "-h")
+            {
+                return new CliParseResult { IsHelp = true };
+            }
+
+            if (args.Count < 2 || args[1].StartsWith("--", StringComparison.Ordinal))
+            {
+                return Error("missing-subcommand:" + first);
+            }
+
+            string sub = args[1];
+            command = (first, sub) switch
+            {
+                ("baseline", "show") => SyncCliCommand.BaselineShow,
+                ("baseline", "forget") => SyncCliCommand.BaselineForget,
+                ("pair", "link") => SyncCliCommand.PairLink,
+                ("pair", "verify") => SyncCliCommand.PairVerify,
+                ("pair", "list") => SyncCliCommand.PairList,
+                ("pair", "forget") => SyncCliCommand.PairForget,
+                _ => SyncCliCommand.None,
+            };
+
+            if (command == SyncCliCommand.None)
+            {
+                return Error("unknown-subcommand:" + first + ":" + sub);
+            }
+
+            commandName = first + "-" + sub;
+            start = 2;
         }
 
         string[] allowed = command switch
@@ -73,14 +137,20 @@ public static class CliParser
             SyncCliCommand.Export => ExportValueOptions,
             SyncCliCommand.Import => ImportValueOptions,
             SyncCliCommand.Plan => PlanValueOptions,
-            _ => SecretCheckValueOptions,
+            SyncCliCommand.SecretCheck => SecretCheckValueOptions,
+            SyncCliCommand.BaselineShow => BaselineShowValueOptions,
+            SyncCliCommand.BaselineForget => BaselineForgetValueOptions,
+            SyncCliCommand.PairLink => PairLinkValueOptions,
+            SyncCliCommand.PairVerify => PairVerifyValueOptions,
+            SyncCliCommand.PairList => PairListValueOptions,
+            _ => PairForgetValueOptions,
         };
 
         Dictionary<string, string> values = new(StringComparer.Ordinal);
         bool json = false;
         bool apply = false;
 
-        for (int i = 1; i < args.Count; i++)
+        for (int i = start; i < args.Count; i++)
         {
             string token = args[i];
             if (token is "--help" or "-h")
@@ -120,9 +190,9 @@ public static class CliParser
                     return Error("flag-takes-no-value:" + name);
                 }
 
-                if (command != SyncCliCommand.Import)
+                if (command is not (SyncCliCommand.Import or SyncCliCommand.BaselineForget or SyncCliCommand.PairForget))
                 {
-                    return Error("option-not-allowed-for-command:" + name + ":" + first);
+                    return Error("option-not-allowed-for-command:" + name + ":" + commandName);
                 }
 
                 apply = true;
@@ -132,7 +202,7 @@ public static class CliParser
             if (Array.IndexOf(allowed, name) < 0)
             {
                 return Error(IsKnownOption(name)
-                    ? "option-not-allowed-for-command:" + name + ":" + first
+                    ? "option-not-allowed-for-command:" + name + ":" + commandName
                     : "unknown-option:" + name);
             }
 
@@ -161,7 +231,7 @@ public static class CliParser
         }
 
         string root = values.GetValueOrDefault("--root") ?? "";
-        if (root.Length == 0)
+        if (RequiresRoot(command) && root.Length == 0)
         {
             return Error("missing-required-option:--root");
         }
@@ -187,6 +257,18 @@ public static class CliParser
             }
         }
 
+        string? deviceId = values.GetValueOrDefault("--device");
+        if (command is SyncCliCommand.BaselineForget or SyncCliCommand.PairForget && deviceId is null)
+        {
+            return Error("missing-required-option:--device");
+        }
+
+        string? link = values.GetValueOrDefault("--link");
+        if (command == SyncCliCommand.PairVerify && link is null)
+        {
+            return Error("missing-required-option:--link");
+        }
+
         string? passphrase = values.GetValueOrDefault("--passphrase");
         string? secretsJson = values.GetValueOrDefault("--secrets");
         if (passphrase is not null && secretsJson is not null)
@@ -208,8 +290,10 @@ public static class CliParser
                 Passphrase = passphrase,
                 SecretsJson = secretsJson,
                 DeletionsJson = values.GetValueOrDefault("--deletions"),
-                DeviceId = values.GetValueOrDefault("--device"),
+                DeviceId = deviceId,
                 SyncSourceId = syncSourceId,
+                SourceId = values.GetValueOrDefault("--source"),
+                Link = link,
                 ExpectPlaintextBase64 = expect,
                 Apply = apply,
                 Json = json,
@@ -217,9 +301,14 @@ public static class CliParser
         };
     }
 
+    /// <summary>Commands whose work happens inside a device directory; <c>pair link/verify</c> need none.</summary>
+    private static bool RequiresRoot(SyncCliCommand command) => command is not (
+        SyncCliCommand.PairLink or SyncCliCommand.PairVerify);
+
     private static bool IsKnownOption(string name) => name is
         "--root" or "--out" or "--in" or "--passphrase" or "--secrets" or "--deletions" or
-        "--device" or "--baseline" or "--id" or "--expect" or "--apply" or "--json";
+        "--device" or "--baseline" or "--id" or "--source" or "--link" or "--expect" or
+        "--apply" or "--json";
 
     private static CliParseResult Error(string code) => new() { Error = code };
 }

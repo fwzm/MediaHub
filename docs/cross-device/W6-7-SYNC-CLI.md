@@ -158,3 +158,174 @@ pwsh -NoProfile -File windows/tools/acceptance/w6/sync-cli-e2e.ps1
 ```
 
 期望：构建 0 警告 0 错误；`MediaHub.Tests` 全绿（其中 `SyncCliTests` 36 例）；脚本 `RESULT: 14 passed, 0 failed`。
+## W6-15 追加 —— `baseline` 与 `pair` 子命令（无 GUI 也能管理基线与已配对设备）
+
+- 状态：**已交付**（6 个新命令 + 32 例进程内测试；全量 `MediaHub.Tests` 1053 通过 / 0 失败）
+- 日期：2026-10-23
+- 实现：`windows/src/MediaHub.SyncCli/CliParser.cs`（组命令/子命令解析与用法文本）、`windows/src/MediaHub.SyncCli/CliInvocation.cs`（6 个命令枚举值 + `--source`/`--link`）、`windows/src/MediaHub.SyncCli/SyncCliRunner.cs`（`RunBaselineShow` / `RunBaselineForget` / `RunPairLink` / `RunPairVerify` / `RunPairList` / `RunPairForget`）、`windows/src/MediaHub.Sync/FileSourceSyncBaselineStore.cs`（新增 `PeerDeviceIds` / `ForgetPeer` / `ForgetEntry`）
+- 测试：`windows/tests/MediaHub.Tests/SyncCliBaselinePairTests.cs`（32 例）
+
+### 问题
+
+W6-9 的基线文档（`sync-baseline.json`）与 W6-12 的配对登记（`paired-devices.json`）此前只能被 App 或测试触碰：一台没有桌面会话的机器既看不到「我从谁那儿导入过什么」，也清不掉一条已经作废的登记。两个文件都落在 `%LOCALAPPDATA%\MediaHub`，让用户手改 JSON 会绕过 merge 语义与原子写——必须给 CLI 一条受控路径。
+
+### 决策（续 D7–D10）
+
+#### D7：删除与枚举由 store 提供，CLI 不自己写 JSON
+
+`FileSourceSyncBaselineStore.Save` 是 merge 语义（revision 不回退、只增不减），永远删不掉一条已作废的基线。如果 CLI 自己反序列化再整份覆盖写，就绕过了两条不变量：同目录 `.tmp` + `File.Replace` 的原子写，以及「文档损坏时拒绝覆盖」（`!_writable`）。因此 `PeerDeviceIds` / `ForgetPeer` / `ForgetEntry` 加在 store 内，CLI 只是调用者。
+
+反面后果：CLI 自己写盘，一次 `--apply` 在断电或并发下就能写坏基线，App 与 CLI 对「我从谁那儿导入过什么」会给出两份不一致的答案。
+
+#### D8：`pair` 组永不监听端口
+
+`pair link` 载荷里的 `ephemeralUrl` 只是占位（`http://127.0.0.1:0/`，端口 0 即「不存在」）；JSON 里 `"listens": false` 显式声明，文本模式最后一行也写明。理由：W6-12 已确定「绑非回环地址会触发 Windows 防火墙弹窗」，CLI 没有理由承担这个副作用——它要做的是生成/校验一个串，不是建立连接。`pair verify` 同样只解析，不发任何 TCP/UDP。
+
+#### D9：破坏性动作默认 dry-run，`--apply` 才写
+
+`baseline forget` / `pair forget` 与既有 `import` 一致：不带 `--apply` 只报告「将要忘掉什么」，退出码 0。dry-run 的证据是 `dryRun:true` / `applied:false` 字段加上文件字节未变（`SyncCliBaselinePairTests` 用字节级断言钉住；json 模式下**不打印** `preview:` 句，见下文）。
+
+#### D10：一个条件只有一个稳定码，不为别名再造一层
+
+错误码直接复用 `PairingLinkReasons` / `PairingCodeReasons` / `SourceSyncBaselineStoreReasons`（映射表见下）。`wrong-scheme` 与 `bad-payload` 在这套实现里是**类别**而不是码：`PairingLink.Parse` 已能把「不是配对链接」与「载荷解不出来」分开（`not-a-pairing-link` vs `payload-invalid` / `not-base64url`），再加一层别名会让脚本对同一次失败判两个码都算对。
+
+### 命令参考
+
+| 命令 | 作用 | 选项 | 默认退出码 |
+| --- | --- | --- | --- |
+| `baseline show --root <dir>` | 打印基线文件路径、是否存在、文档版本、peers/entries 计数与每条记录的 (peer, syncSourceId, revision, 内容哈希前 12) | `--root`、`--json` | 0 |
+| `baseline forget --root <dir> --device <id> [--source <syncSourceId>]` | 忘掉某个 peer（或它下面某一条来源）的基线；默认 dry-run | `--root`、`--device`、`--source`、`--apply`、`--json` | 0 / 2 |
+| `pair link [--device <id>]` | 生成本机 `mediahub://pair?...` 链接 + 设备 id + 指纹前 8 位；不监听 | `--device`、`--json` | 0 |
+| `pair verify --link <url>` | 离线解析并校验链接（过期、版本、字段形状），打印对端 deviceId 与指纹 | `--link`、`--json` | 0 / 2 |
+| `pair list --root <dir>` | 列出本机已登记的配对设备（id、名字、指纹后 8 位、来源数、最后相见）；空表合法 | `--root`、`--json` | 0 / 2 |
+| `pair forget --root <dir> --device <id>` | 忘掉一台已登记设备；默认 dry-run | `--root`、`--device`、`--apply`、`--json` | 0 / 2 |
+
+组命令的第二个位置参数是动词：`missing-subcommand:<group>`（缺失或紧跟 `--`）与 `unknown-subcommand:<group>:<verb>`（不认识）都是用法错误（退出码 1）。`--root` 只在需要读写本地文档的命令上必填，`pair link` / `pair verify` 不需要根目录。
+
+### 退出码（沿用 D2，补充新触发）
+
+| 退出码 | 新增触发 |
+| --- | --- |
+| 0 | 六个新命令的正常结果（含 dry-run、空表、链接校验通过） |
+| 1 | 缺子命令、未知子命令、缺 `--root` / `--device` / `--link`、`--apply` 用在不写盘的命令上 |
+| 2 | 未知 peer / 未知来源 / 未知设备、链接解析失败（各细分码）、基线或登记文档损坏（已隔离）、写盘失败 |
+| 3 / 4 | 新命令不产生（它们不碰信封、不碰凭据、不碰归档） |
+
+### `--json` 单文档约束（补充 D3）
+
+1. `--json` 时 stdout **恰好一个** JSON 文档；失败时该文档是 `{"ok":false,"error":{"code":"...","message":"..."}}`，同时 stderr 多一行 `error <code>: <message>`。
+2. 一切进度与预览提示写 stderr；**json 模式不打印 `preview: ...` 句**（与既有 `WriteRound` 一致：json 分支先 return）。dry-run 在 json 下的证据是 `dryRun` / `applied` 字段与文件字节未变，`preview:` 只出现在文本模式（钉住用例：`PairForget_TextModeAnnouncesThePreviewAndWhatIsKeptUntouched`）。
+3. 字段顺序与缩进不承诺稳定，脚本按名取字段；文档为紧凑单行（`CliJson` 关闭缩进、放开非 ASCII 转义）。
+
+### 稳定错误码
+
+| 码 | 退出码 | 触发 | 任务书里的类别 |
+| --- | --- | --- | --- |
+| `not-a-pairing-link` | 2 | 前缀/协议不对（不是 `mediahub://pair?`） | wrong-scheme |
+| `pairing-link-empty` / `pairing-link-too-long` | 2 | 空串 / 超过 8192 字符 | bad-payload |
+| `code-empty` / `not-base64url` / `code-too-long` | 2 | 链接里的载荷段本身坏了 | bad-payload |
+| `payload-invalid` | 2 | 载荷解出的字节不是合法 JSON/UTF-8 | bad-payload |
+| `unsupported-version` | 2 | 载荷 `schemaVersion` 不认识 | unsupported-version |
+| `expired` | 2 | 链接过期（默认 120 秒） | expired |
+| `bad-challenge` / `bad-fingerprint` / `bad-url` | 2 | 载荷字段形状不合法（challenge 不是 32 字节、指纹不是 64 hex、地址不是绝对 http(s)） | bad-payload |
+| `baseline-device-unknown` | 2 | 基线里没有这个 peer | input problem |
+| `baseline-source-unknown` | 2 | 该 peer 下没有这个 syncSourceId | input problem |
+| `baseline-write-failed` | 2 | 原子写失败（IO / 权限） | input problem |
+| `baseline-nothing-forgotten` | 2 | store 返回 false（并发下已被别人删掉） | input problem |
+| `device-unknown` | 2 | `pair list` 里没有这个 deviceId | input problem |
+| `store-write-failed` | 2 | `paired-devices.json` 写失败 | input problem |
+| `store-unreadable` / `<隔离原因>`（如 `baseline-too-deep`） | 2 | 文档读不了或结构损坏；损坏件已被改名隔离，消息里带隔离后的完整路径 | input problem |
+
+### PairingLink 的真实线上格式
+
+输出侧的链接是 `mediahub://pair?<base64url>`——**没有 `code=` 参数**（`PairingLink.cs:47` 的 `Prefix`，`:56-59` 的 `Create = Prefix + PairingCode.Encode(payload)`）。输入侧的 `ExtractCode`（`:63-74`）会容忍旧的 `?code=<base64url>` 拼法，所以两种写法都能被 `pair verify` 读。断言请用 `PairingLink.Prefix`，不要硬编码 `?code=`（本任务的测试首轮就因为硬编码而红了 5 例）。
+
+### 实测输出（本机真实运行，2026-10-23，D:\mh-w6）
+
+```
+$ dotnet MediaHub.SyncCli.dll pair link --json
+{"command":"pair","subcommand":"link","deviceId":"cli-inkchoi","fingerprintPrefix":"27b64d6d","link":"mediahub://pair?eyJzY2hlbWFWZXJzaW9uIjoxLC…（实测 561 字符，此处按段截断）","expiresAtEpochMs":1792790388437,"lifetimeSeconds":120,"listens":false}
+```
+
+```
+$ dotnet MediaHub.SyncCli.dll pair link
+device: cli-inkchoi
+fingerprint: 27b64d6d...
+expires: 2026-10-24 05:19
+link: mediahub://pair?eyJzY2hlbWFWZXJzaW9uIjoxLC…（此处截断）
+note: this CLI does not listen; the link identifies this device and is checked offline (pair verify).
+```
+
+设备 id 未给 `--device` 时取 `cli-` + 机器名（小写净化）：本机即 `cli-inkchoi`。
+
+```
+$ dotnet MediaHub.SyncCli.dll pair verify --link <上一步的 link>
+pairing link ok
+device: cli-inkchoi
+fingerprint: 27b64d6d...
+expires: 2026-10-24 05:19 (119s left)
+note: the fingerprint is self-declared, so compare it on both devices before trusting the link.
+
+$ dotnet MediaHub.SyncCli.dll pair verify --link mediahub://pair?zzzz   ; echo exit=$?
+error payload-invalid: 配对码解出的内容不是 UTF-8 文本，可能复制时缺少一段。
+exit=2
+
+$ dotnet MediaHub.SyncCli.dll pair verify --link https://example.com/pair?code=abc ; echo exit=$?
+error not-a-pairing-link: 这不是 MediaHub 配对链接。
+exit=2
+```
+
+```
+$ dotnet MediaHub.SyncCli.dll baseline show --root <空目录>
+baseline: C:\Users\55160\AppData\Local\Temp\mh-w6-15-real-f308240c\empty\sync-baseline.json
+exists: false
+version: 1
+peers: 0
+entries: 0
+nothing has been imported from a peer yet
+
+$ dotnet MediaHub.SyncCli.dll baseline forget --root <空目录> --device peer-1 ; echo exit=$?
+error baseline-device-unknown: the sync baseline holds nothing for device peer-1
+exit=2
+```
+
+```
+# 损坏文档：写入 {"version":1,"peers":[{"deviceId":"peer-1","baseline":{"entries":[  之后再 show
+$ dotnet MediaHub.SyncCli.dll baseline show --root <损坏目录> ; echo exit=$?
+error baseline-too-deep: the sync baseline could not be read; the damaged document was kept at C:\Users\55160\AppData\Local\Temp\mh-w6-15-real-f308240c\corrupt\sync-baseline.corrupt-20261023211749.json
+exit=2
+# 目录里现在只剩隔离件：sync-baseline.corrupt-20261023211749.json
+```
+
+```
+$ dotnet MediaHub.SyncCli.dll pair list --root <空目录>
+paired devices: 0
+no devices are paired on this machine
+
+$ dotnet MediaHub.SyncCli.dll pair forget --root <空目录> --device dev-x ; echo exit=$?
+error device-unknown: no paired device has id dev-x
+exit=2
+```
+
+```
+$ dotnet MediaHub.SyncCli.dll baseline ; echo exit=$?
+error missing-subcommand:baseline: run with --help for usage
+MediaHub.SyncCli <command> [options]
+...（随后打印完整用法文本）
+exit=1
+
+$ dotnet MediaHub.SyncCli.dll pair dance ; echo exit=$?
+error unknown-subcommand:pair:dance: run with --help for usage
+...（随后打印完整用法文本）
+exit=1
+```
+
+### 局限（本节的 NOT_COVERED）
+
+1. **`pair verify` 不联网**：它只保证链接自洽、未过期、字段合法，不验证对端此刻可达（CLI 绝不监听也绝不出站连接）。
+2. **没有真机 Android 互操作证据**：链接格式与 App 共用同一套 `PairingLink` / `PairingCode`，但跨平台实测仍属 W6-3c / W6-12 的 GUI 侧；本节只钉住「同一串在两处算出的结论一致」。
+3. **`baseline forget` 只动基线**：不撤销已落盘的来源、不删凭据、不通知对端；忘记之后下一轮导入会被当作新来源重新逐条确认。
+4. **`--json` 不承诺字段顺序**，也不保证跨版本只增不减；脚本按名取字段。
+5. **文案硬编码中文**：与 `MediaHub.Sync` 其他 presenter 一致，尚无本地化资源。
+6. **未覆盖并发写**：两个 CLI 进程同时对同一个 root 执行 `--apply` 时，靠 store 的原子替换保证不写坏文件，但后写者会覆盖前者的删除意图（`baseline-nothing-forgotten` 能暴露部分情况）。
+

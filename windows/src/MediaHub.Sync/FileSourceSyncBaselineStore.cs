@@ -113,12 +113,7 @@ public sealed class FileSourceSyncBaselineStore : ISourceSyncBaselineStore
         lock (_gate)
         {
             EnsureLoaded();
-            if (!_writable)
-            {
-                throw new IOException(
-                    "The stored sync baseline could not be read (" + (LoadError ?? "unknown")
-                    + "); refusing to overwrite it.");
-            }
+            EnsureWritable();
 
             string key = peerDeviceId.Trim();
             _peers.TryGetValue(key, out SourceSyncBaseline? existing);
@@ -157,6 +152,168 @@ public sealed class FileSourceSyncBaselineStore : ISourceSyncBaselineStore
 
             WriteCount++;
             return SourceSyncBaselineSaveResult.Written(merge.RejectedSyncSourceIds, merge.Reason);
+        }
+    }
+
+    /// <summary>
+    /// Peer device ids the document knows about, sorted the same way the document is written.
+    /// </summary>
+    /// <remarks>
+    /// Reading this property loads the document. Unlike <see cref="Load"/> it answers "which peers are
+    /// there at all", which a store keyed by peer id otherwise cannot: the document is the index.
+    /// </remarks>
+    public IReadOnlyList<string> PeerDeviceIds
+    {
+        get
+        {
+            lock (_gate)
+            {
+                EnsureLoaded();
+                return _peers.Keys
+                    .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
+        }
+    }
+
+    /// <summary>Forgets everything the document holds about one peer.</summary>
+    /// <param name="peerDeviceId">Peer device id; compared trimmed and case-insensitively.</param>
+    /// <returns>True when a peer entry was removed and the document rewritten; false when the peer was absent.</returns>
+    /// <exception cref="ArgumentException"><paramref name="peerDeviceId"/> is blank.</exception>
+    /// <exception cref="IOException">
+    /// The document exists but could not be read (so it is not overwritten), or the write itself failed;
+    /// the in-memory state is unchanged in both cases.
+    /// </exception>
+    /// <remarks>
+    /// This is a deliberate deletion, not a merge: <see cref="Save"/> can only move a baseline forward, so
+    /// a peer that should be forgotten would otherwise stay forever. Forgetting is local bookkeeping — it
+    /// says nothing to the peer and touches no source.
+    /// </remarks>
+    public bool ForgetPeer(string peerDeviceId)
+    {
+        if (string.IsNullOrWhiteSpace(peerDeviceId))
+        {
+            throw new ArgumentException("A peer device id is required.", nameof(peerDeviceId));
+        }
+
+        lock (_gate)
+        {
+            EnsureLoaded();
+            EnsureWritable();
+
+            string key = peerDeviceId.Trim();
+            if (!_peers.TryGetValue(key, out SourceSyncBaseline? existing))
+            {
+                return false;
+            }
+
+            _peers.Remove(key);
+            try
+            {
+                Persist();
+            }
+            catch
+            {
+                _peers[key] = existing;
+                throw;
+            }
+
+            WriteCount++;
+            return true;
+        }
+    }
+
+    /// <summary>Forgets one source inside one peer's baseline.</summary>
+    /// <param name="peerDeviceId">Peer device id; compared trimmed and case-insensitively.</param>
+    /// <param name="syncSourceId">Sync identity to drop; compared trimmed and case-insensitively.</param>
+    /// <returns>True when an entry was removed and the document rewritten; false when nothing matched.</returns>
+    /// <exception cref="ArgumentException">Either id is blank.</exception>
+    /// <exception cref="IOException">
+    /// The document exists but could not be read (so it is not overwritten), or the write itself failed;
+    /// the in-memory state is unchanged in both cases.
+    /// </exception>
+    /// <remarks>
+    /// Dropping the last entry drops the peer node with it: an empty baseline and no baseline are the
+    /// same fact, and <see cref="Load"/> returns <see cref="SourceSyncBaseline.Empty"/> either way.
+    /// </remarks>
+    public bool ForgetEntry(string peerDeviceId, string syncSourceId)
+    {
+        if (string.IsNullOrWhiteSpace(peerDeviceId))
+        {
+            throw new ArgumentException("A peer device id is required.", nameof(peerDeviceId));
+        }
+
+        if (string.IsNullOrWhiteSpace(syncSourceId))
+        {
+            throw new ArgumentException("A sync source id is required.", nameof(syncSourceId));
+        }
+
+        lock (_gate)
+        {
+            EnsureLoaded();
+            EnsureWritable();
+
+            string key = peerDeviceId.Trim();
+            if (!_peers.TryGetValue(key, out SourceSyncBaseline? existing))
+            {
+                return false;
+            }
+
+            string wanted = syncSourceId.Trim();
+            List<SourceSyncBaselineEntry> remaining = [];
+            bool removed = false;
+            foreach (SourceSyncBaselineEntry entry in existing.Entries)
+            {
+                if (entry is not null && string.Equals(entry.SyncSourceId.Trim(), wanted, StringComparison.OrdinalIgnoreCase))
+                {
+                    removed = true;
+                    continue;
+                }
+
+                if (entry is not null)
+                {
+                    remaining.Add(entry);
+                }
+            }
+
+            if (!removed)
+            {
+                return false;
+            }
+
+            if (remaining.Count == 0)
+            {
+                _peers.Remove(key);
+            }
+            else
+            {
+                _peers[key] = existing with { Entries = remaining };
+            }
+
+            try
+            {
+                Persist();
+            }
+            catch
+            {
+                _peers[key] = existing;
+                throw;
+            }
+
+            WriteCount++;
+            return true;
+        }
+    }
+
+    /// <summary>Refuses every write while the stored document is unreadable but still intact.</summary>
+    /// <exception cref="IOException">The last load failed for an I/O reason.</exception>
+    private void EnsureWritable()
+    {
+        if (!_writable)
+        {
+            throw new IOException(
+                "The stored sync baseline could not be read (" + (LoadError ?? "unknown")
+                + "); refusing to overwrite it.");
         }
     }
 
