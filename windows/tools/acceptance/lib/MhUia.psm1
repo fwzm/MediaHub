@@ -1192,6 +1192,31 @@ function Start-MhApp {
     [int]$TimeoutSec = 40
   )
   if (-not (Test-Path $Exe)) { throw "app not found: $Exe" }
+  # Refuse to put a window on screen while the person who owns this machine is using it. GUI
+  # automation cannot run invisibly (UIA needs an unlocked desktop and the window must be visible),
+  # so the only honest protection is to not start at all. run-quiet.ps1 relies on this guard and
+  # never sets MH_ALLOW_ACTIVE; the override exists only for a human who is sitting there and wants
+  # the run anyway.
+  if ($env:MH_ALLOW_ACTIVE -ne '1') {
+    $minIdle = 120
+    if ($env:MH_MIN_IDLE_SECONDS) { $minIdle = [int]$env:MH_MIN_IDLE_SECONDS }
+    $quietModule = Join-Path $PSScriptRoot 'MhQuiet.psm1'
+    if (Test-Path $quietModule) {
+      if (-not (Get-Command Get-MhUserIdleSeconds -ErrorAction SilentlyContinue)) { Import-Module $quietModule -Force }
+      $idleNow = Get-MhUserIdleSeconds
+      if ($null -ne $idleNow -and $idleNow -lt $minIdle) {
+        throw ('refusing to start MediaHub: the user is active (idle=' + $idleNow + 's, need ' + $minIdle + 's). ' +
+               'Run windows/tools/acceptance/run-quiet.ps1 instead (it waits for an idle window and stops the app when you come back), ' +
+               'or set MH_ALLOW_ACTIVE=1 if you really are watching and want the window now.')
+      }
+      # Idle time cannot see someone watching a video full screen or giving a presentation; ask the
+      # shell instead, and stay out of the way when it says the screen is busy.
+      if ((Get-Command Test-MhQuietScreenSafe -ErrorAction SilentlyContinue) -and -not (Test-MhQuietScreenSafe)) {
+        throw ('refusing to start MediaHub: something is full screen or busy (QUNS state=' + (Get-MhNotificationState) + '). ' +
+               'Close it, or set MH_ALLOW_ACTIVE=1 to override.')
+      }
+    }
+  }
   if ($ResetTrace) {
     $log = Get-MhLogPath
     $dir = Split-Path $log -Parent

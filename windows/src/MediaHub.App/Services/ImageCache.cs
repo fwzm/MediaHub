@@ -100,7 +100,15 @@ public sealed class ImageCache : IDisposable
                 _ = Task.Run(() => WriteToDiskAsync(key, bytes), CancellationToken.None);
             }
 
-            return await ToBitmapAsync(bytes, ct).ConfigureAwait(false);
+            BitmapImage? image = await ToBitmapAsync(bytes, ct).ConfigureAwait(false);
+            if (image is not null)
+            {
+                // Positive trace into the same file the acceptance harness reads. A successful poster
+                // load is otherwise invisible, and "the card is there but the artwork is blank" is
+                // exactly the failure this line rules out.
+                StartupTrace.Write("image:loaded item=" + itemId + " type=" + imageType + " w=" + maxWidth);
+            }
+            return image;
         }
         catch (OperationCanceledException)
         {

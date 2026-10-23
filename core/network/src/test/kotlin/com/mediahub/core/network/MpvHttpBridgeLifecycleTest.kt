@@ -23,7 +23,8 @@ class MpvHttpBridgeLifecycleTest {
         getOutputStream().write((request + "\r\nHost: localhost\r\n\r\n").toByteArray())
         getOutputStream().flush()
     }
-    private fun client() = OkHttpClient.Builder().readTimeout(3, TimeUnit.SECONDS).build()
+    private fun client(readTimeoutSeconds: Long = 3) =
+        OkHttpClient.Builder().readTimeout(readTimeoutSeconds, TimeUnit.SECONDS).build()
 
     @Test fun `unsupported method and unknown or old capability never reach upstream`() {
         MockWebServer().use { upstream ->
@@ -68,7 +69,9 @@ class MpvHttpBridgeLifecycleTest {
             val canceled = CountDownLatch(1)
             val terminal = CountDownLatch(1)
             val target = AtomicReference<Call>()
-            val http = client().newBuilder().eventListenerFactory { call ->
+            // A generous read timeout keeps "terminated" attributable to cancel alone: a read
+            // timeout cannot fire inside the terminal budget asserted below.
+            val http = client(readTimeoutSeconds = 10).newBuilder().eventListenerFactory { call ->
                 target.set(call)
                 object : EventListener() {
                     override fun responseBodyStart(eventCall: Call) { assertSame(call, eventCall); bodyRead.countDown() }
@@ -83,11 +86,13 @@ class MpvHttpBridgeLifecycleTest {
                     assertTrue(arrived.await(3, TimeUnit.SECONDS))
                     if (!blockHeaders) assertTrue("real response body consumption reached", bodyRead.await(3, TimeUnit.SECONDS))
                     bridge.stop()
-                    // Headers/a partial body may already be buffered; drain to EOF with a socket deadline.
+                    // Headers/a partial body may already be buffered; drain to EOF with a short socket
+                    // deadline so the drain cannot consume the terminal budget that follows it.
+                    local.soTimeout = 1_000
                     while (local.getInputStream().read() != -1) { }
                     assertTrue(canceled.await(3, TimeUnit.SECONDS))
                     assertTrue(target.get().isCanceled())
-                    assertTrue("target I/O terminates before server gate opens", terminal.await(3, TimeUnit.SECONDS))
+                    assertTrue("target I/O terminates before server gate opens", terminal.await(5, TimeUnit.SECONDS))
                     val newer = bridge.start(upstream.url("/new").toString(), emptyMap())
                     release.countDown()
                     upstream.dispatcher = object : Dispatcher() {

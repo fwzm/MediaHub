@@ -27,7 +27,8 @@
 # 用法：pwsh -File windows\tools\acceptance\u1\continue-watching-gui.ps1 -Server emby
 #       pwsh -File windows\tools\acceptance\u1\continue-watching-gui.ps1 -Server jellyfin
 param(
-  [ValidateSet('emby','jellyfin')][string]$Server = 'emby'
+  [ValidateSet('emby','jellyfin')][string]$Server = 'emby',
+  [string]$Exe = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
 )
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
@@ -36,7 +37,7 @@ Import-Module ($R + 'windows\tools\acceptance\lib\MhUia.psm1') -Force -WarningAc
 $ev = $R + 'windows\tools\acceptance\evidence\u1-continue\' + $Server
 New-Item -ItemType Directory -Force -Path $ev | Out-Null
 
-$exe      = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
+$exe      = $Exe
 $seed     = $R + 'windows\tools\SeedSource\bin\x64\Debug\net10.0-windows\win-x64\SeedSource.exe'
 $settings = Join-Path $env:LOCALAPPDATA 'MediaHub\settings.json'
 $NL = [Environment]::NewLine
@@ -145,6 +146,30 @@ function Set-PositionZero([string]$id) {
   return 'played-toggle-fallback'
 }
 function Clear-Played([string]$id) { $null = Api 'DELETE' ('/Users/' + $script:uid + '/PlayedItems/' + $id) }
+# 夹具封面：u1 的 P2.6 要断「卡片封面真的加载」，前提是服务器上该条目有 Primary 图。
+# 实验室夹具（D:\mh-media 的合成视频）原本没有任何图像，等于这条链路从来没被跑到过；
+# 因此在 P0 里补一步：条目没有 Primary 图就上传一张 60x90 的占位封面，让断言有真实对象。
+# 两端（Emby 4.10 / Jellyfin 12.2）的图像上传端点都只吃 **base64 字符串体**（原始字节会 500），实测 204。
+$script:fixturePosterB64 = 'iVBORw0KGgoAAAANSUhEUgAAADwAAABaCAIAAABrM6JiAAAAx0lEQVR4nO3ZMQ3DUBAE0fkj4wiOYDGSQDAMV8FiWAbgLlKcjPRfudVpy73xWHdqJEiCJEiCJGi5Rse68Wee71e+aQmSIAmSIAmSIAmSIAmSIAmSIAmSIAmSIAmSIAmSIAmSIAkac+q9iQRJkARJkARJkAQt12h+Ar5CgiRIgiRIgiRIgiRIgiRIgiRIgiRIgiRIgsbc8m4iQRIkQRIkQRIkQRIkQRIkQRIkQRIkQRIkQRIkQRIkQRIkQRIkQRIkQRLkrw/4xAmZ+gn+1nMa6AAAAABJRU5ErkJggg=='
+function Ensure-FixtureImage([string]$id) {
+  $d = Api 'GET' ('/Users/' + $script:uid + '/Items/' + $id + '?Fields=ImageTags')
+  $tag = $null
+  if ($d -and $d.ImageTags) { $tag = $d.ImageTags.Primary }
+  if ($tag) { return [pscustomobject]@{ already = $true; tag = [string]$tag; upload = 'skipped' } }
+  Add-Type -AssemblyName System.Net.Http | Out-Null
+  $client = [System.Net.Http.HttpClient]::new()
+  $client.DefaultRequestHeaders.TryAddWithoutValidation('Authorization', ($script:authHdr + ', Token="' + $script:token + '"')) | Out-Null
+  $content = [System.Net.Http.StringContent]::new($script:fixturePosterB64)
+  $content.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('image/png')
+  $resp = $client.PostAsync(($base + '/Items/' + $id + '/Images/Primary'), $content).GetAwaiter().GetResult()
+  $status = [int]$resp.StatusCode
+  Start-Sleep -Milliseconds 700
+  $d2 = Api 'GET' ('/Users/' + $script:uid + '/Items/' + $id + '?Fields=ImageTags')
+  $tag2 = $null
+  if ($d2 -and $d2.ImageTags) { $tag2 = $d2.ImageTags.Primary }
+  return [pscustomobject]@{ already = $false; tag = [string]$tag2; upload = ('HTTP ' + $status) }
+}
+
 function Set-Played([string]$id) { $null = Api 'POST' ('/Users/' + $script:uid + '/PlayedItems/' + $id) }
 # 只保留被测来源：其它来源会在列表里产生噪声行，让「行数/空态」判据不可解释（u2/u3 的既有范式）。
 function Keep-OnlyServer([string]$pattern) {
@@ -586,6 +611,9 @@ try {
   try { $dllHash = (Get-FileHash (Join-Path (Split-Path $exe -Parent) 'MediaHub.dll') -Algorithm SHA256).Hash } catch { }
   try { $scriptHash = (Get-FileHash $PSCommandPath -Algorithm SHA256).Hash } catch { }
   Check 'P0.8 被测产物与脚本指纹已钉住（验收报告可追溯）' ([bool]($dllHash -and $scriptHash -and $dllHash.Length -eq 64)) ('MediaHub.dll SHA256=' + $dllHash + ' script SHA256=' + $scriptHash + ' exeExists=' + (Test-Path $exe))
+
+  $fx = Ensure-FixtureImage $itemId
+  Check 'P0.9 夹具封面已就绪（服务器有 Primary 图像标签；P2.6 的必要前提，缺图时脚本自建）' ([bool]($fx.tag)) ('already=' + $fx.already + ' upload=' + $fx.upload + ' primaryTag=' + $(if ($fx.tag) { $fx.tag } else { 'MISSING' }) + ' item=' + $itemId)
   Stop-MhAppForced | Out-Null
   Start-Sleep -Milliseconds 800
 
@@ -605,7 +633,14 @@ try {
   Check 'P1.2 详情页出现播放入口（detail.play）' ($null -ne $playBtn) $(if ($playBtn) { 'name=' + $playBtn.Current.Name } else { 'detail.play missing' })
   $playInvoke = Invoke-Safe $playBtn
   $playerUp1 = Wait-Player 60
+  # 起播瞬间时长可能还没读出来（实测读到 duration=0:00 → 假红）。轮询到 20 s 再判，把「时序」和「缺陷」分开。
   $st1 = Get-MhPlayerState -SkipSlow
+  $dDeadline = (Get-Date).AddSeconds(20)
+  while ((Get-Date) -lt $dDeadline) {
+    if ($null -ne $st1.durationSeconds -and [math]::Abs([double]$st1.durationSeconds - $durationSec) -le 30) { break }
+    Start-Sleep -Milliseconds 500
+    $st1 = Get-MhPlayerState -SkipSlow
+  }
   Check 'P1.3 点播放后进入播放页' $playerUp1 ('invoke=' + $playInvoke)
   Check 'P1.4 播放页标题为长片条目' ([bool]($st1.title -and $st1.title.Contains($itemName))) ('title=' + $st1.title)
   Check 'P1.5 播放时长与条目一致（约 600 s，±30）' ([bool]($null -ne $st1.durationSeconds -and [math]::Abs([double]$st1.durationSeconds - $durationSec) -le 30)) ('duration=' + $st1.duration + ' seconds=' + $st1.durationSeconds + ' expected=' + $durationSec)
@@ -673,6 +708,17 @@ try {
   $progressLabel = Find-ProgressText $srvPos 25
   $labelInRow = ($progressLabel -ne '' -and $rowText2.Contains($progressLabel))
   Check 'P2.5 行上的进度文案来自服务器记录（±25 s，且出现在该行文本里）' ([bool]($srvPos -gt 0 -and $progressLabel -ne '' -and $labelInRow)) ('label=' + $(if ($progressLabel) { $progressLabel } else { 'NOT-FOUND' }) + ' inRow=' + $labelInRow + ' serverPos=' + $srvPos + 's row=' + $rowText2)
+
+  # 封面加载的正向证据只能来自 StartupTrace（LogService 只进内存，不落盘）。
+  $posterPat = 'image:loaded item=' + [regex]::Escape($itemId)
+  $posterHits = @()
+  $pdeadline = (Get-Date).AddSeconds(20)
+  while ((Get-Date) -lt $pdeadline) {
+    $posterHits = @(Get-MhLogMatched -Pattern $posterPat)
+    if ($posterHits.Count -ge 1) { break }
+    Start-Sleep -Milliseconds 400
+  }
+  Check 'P2.6 列表卡片封面经 ImageCache 真实加载（startup.log 出现 image:loaded item=<itemId>，排除「卡片在但封面空白」）' ($posterHits.Count -ge 1) ('hits=' + $posterHits.Count + ' first=' + $(if ($posterHits.Count -ge 1) { $posterHits[0] } else { 'NONE' }) + ' pattern=' + $posterPat)
 
   # -------------------------------------------------------------- P3 从卡片续播
   Write-Host ''

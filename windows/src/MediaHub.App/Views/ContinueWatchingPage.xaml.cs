@@ -92,6 +92,13 @@ public sealed partial class ContinueWatchingPage : Page
         return t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
     }
 
+    /// <summary>Requests artwork as tiles are realised, so a long resume list stays cheap.</summary>
+    private void OnContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        if (args.Item is not ContinueRow row) return;
+        row.Card.RequestPoster(App.Services.Images!, CancellationToken.None);
+    }
+
     private void OnItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not ContinueRow row) return;

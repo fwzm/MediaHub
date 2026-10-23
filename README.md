@@ -113,46 +113,60 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 | 媒体源管理：添加（探测 → 登录 → 保存）/ 测试 / 重新登录 / 删除 | `windows/docs/W2-EVIDENCE.md`；DPAPI 凭据库 79 条测试 |
 | 库浏览（列表 / 海报墙 / 详情）、搜索、继续观看 | 同上 |
 | 引擎网络边界：改为经本地回环转发取流，**引擎不持有服务器凭据** | ADR-W006、`CAPABILITY-MAP` 网络边界表 |
-| 桌面集成：文件菜单、拖放、窗口状态恢复、文件类型关联 | 提交 `5c232d6` |
-| **真实 Jellyfin 12.2**：登录 / 浏览 / 播放 / 播完标记 Played | `windows/docs/` W4 记录 |
-| **官方 Emby 4.10.1.0** 部署与 API 形状回归 | `windows/engine/emby/`、W5 记录 |
-| **WebDAV（Browse-only 来源）**：入口 → PROPFIND → 目录 → Range GET → libmpv 真实播放 | `windows/docs/W5-1-R3-GATE-A.md`（A-入口 / A-PROPFIND / A-媒体 = EXECUTED_PASS） |
-| **WebDAV 播放中 Seek**：`RangeValuePattern` 驱动真实 `player.seekslider`，前跳与后跳都核对目标位置（0.60→`0:59`、0.15→`0:18`） | `windows/docs/W5-1-R4-GATE-A-SEEK-RELEASE.md`（A1 = EXECUTED_PASS） |
-| **正常退出时回环转发层的建立与释放**：经 http.sys 注册态证明「先建立、后消失」 | 同上（A2 = EXECUTED_PASS） |
+| 桌面集成：文件菜单、拖放、窗口状态恢复、文件类型关联（HKCU 登记，设置页可开关） | 提交 `5c232d6`（单测覆盖；GUI 逐项点击未单独验收） |
+| **官方 Emby 4.10.x 端到端（W8 S2，43/43）**：库浏览（库根为「每片一个文件夹」）→ 详情 → 600 s 真实播放 → 中断回写 304.33 s → 完全重启后从 306 s 恢复 → 自然结束才 `played=True` → 离线与令牌吊销（401，日志无令牌） | `windows/docs/W8-EVIDENCE.md`（验收途中官方实例自动升级到 4.10.2.0，如实记录） |
+| **Jellyfin 12.2 中断续播（W8 S1，29/29）**：中断 → 完全重启 → 引擎从 304 s 继续 → 自然结束才算看完；并更正 W4 的「中断恢复 FAILED」不是客户端缺陷 | 同上（S1.1 源码级确认：判据是片长是否达到 `MinResumeDurationSeconds`=300 s，180 s 夹具被服务端按「已看完且清零」处理） |
+| **WebDAV（Browse-only 来源）Gate A 全部项**：入口 → PROPFIND → 目录 → Range GET → 真实播放（R3）、播放中 Seek 与退出时回环释放（R4）、目录递进 / 返回上级 / 空目录 / 中文空格文件名（206 + `bytes=`）/ **关闭整个应用**释放回环（A3 第一部分 24/24）、子根挂载 / 404 / 403 / 500 / 401 / 慢服务器导航竞态 / 离线 → 重试（故障注入 54/54） | `windows/docs/W5-1-R3-GATE-A.md`、`W5-1-R4-GATE-A-SEEK-RELEASE.md`、`W7-EVIDENCE.md`（真实 WsgiDAV 4.3.3 + UI Automation） |
+| **多文件临时播放队列（B2）**：原生多选 → 队列 → 上一项 / 下一项 / 移除 / 清空、EOF 自动跳项、失败跳项与连续失败上限、`AutoPlayNext=false` 负向对照 | `windows/docs/W7-EVIDENCE.md`（`r7-b2-queue.ps1` 63/63、`r7-b2-failure.ps1` 18/18） |
+| **跨来源「继续观看」（U1）**：真实进度 → 跨来源列表 → 卡片续播 → 已看完消失 | `windows/docs/W9-EVIDENCE.md`（Emby 39/39、Jellyfin 39/39） |
+| **剧集自动连播，含跨季（U2）**：同季跨集、跨季、关闭开关的负向对照 | 同上（35/35 × 2 服；`queue:auto-advance` trace + 服务器回读） |
+| **收藏端到端（U3）**：详情页收藏 → 服务器回读 `UserData.IsFavorite` → 重启保持 → 取消 → 「我的收藏」页 | 同上（24/24 × 2 服；写端点是 `FavoriteItems`，`/Favorites/` 在真服不存在） |
+| **永久播放列表（U4）**：加入 / 命名 / 落盘 `%LOCALAPPDATA%\MediaHub\playlists.json` / 列表页播放不改写列表 / 移除与删除 | 同上（40/40 × 2 服；与临时队列解耦，共 276 条 GUI 断言全绿） |
+| 音频文件（`.aac`）真实播放，以及三条真实文件对话框路径：打开视频 / 打开文件夹 / 加载外挂字幕 | `windows/docs/W5-1-R6-AUDIO-PICKERS.md`（12/12、18/18；`PEAK=0.088583` 对齐 W3 基线，不是「静音也算通过」） |
 | GUI 验收：播放控制 / 全屏 / 生命周期（可观测断言 + 证据文件） | `windows/docs/W5-GUI-ACCEPTANCE.md` |
+| 便携版构建（331.6 MB，可启动） | `CAPABILITY-MAP` 测试与交付表；MSIX / 代码签名 / 干净机安装仍未做 |
 | LGPL libmpv 引擎候选已实际构建（**尚未切换到产品**） | `windows/engine/lgpl/dist/` |
 
 ### 已知缺陷与未验证项
 
-- **中断恢复**：服务端轨迹显示 32 s / 180 s 的播放被记为「已看完」—— 未解决。
-- **WebDAV（W5.1 Gate A 大部分通过，仍未收口）**：源可添加 / 认证 / 重启恢复；入口 → PROPFIND → 目录 →
-  Range GET → 真实播放（R3）、播放中 Seek 与退出时转发层释放（R4）均已 EXECUTED_PASS，
-  证据 `windows/docs/W5-1-R3-GATE-A.md` 与 `W5-1-R4-GATE-A-SEEK-RELEASE.md`（真实 WsgiDAV 4.3.3 + UIA）；
-  但 **A-边界（目录递进 / 面包屑返回 / 来源根返回 / 空目录 / 错误态 / generation guard / 认证失败 /
-  离线 / 重启恢复 / 挂载子根）与「关闭整个应用」全部 NOT_RUN —— Gate A 不得宣告完成**；
-  「媒体源」页的浏览入口仍未加。
-- **原生「打开视频」文件选择器（W5.1 Gate B1）**：旧 `Windows.Storage.Pickers` 路径下选择器**从未被创建**
-  （trace 只有 invoked，缺失 cancelled/selected/failed；桌面 12 个顶层窗口里不存在任何文件对话框）。
-  已迁移到 WinAppSDK 1.8 的 `Microsoft.Windows.Storage.Pickers.FileOpenPicker(AppWindow.Id)`，
-  trace 出现 `menu:openvideo-picker-created`，证明执行流越过了创建点。
-  状态为 **GUI_UNVERIFIED —— 既不是 PASS 也不是上一轮的 FAILED**：选中文件 → 播放 → 时间轴、取消与
-  错误路径均未验证（`windows/docs/W5-1-R5-GATE-B1.md`）。
-- **真服覆盖面**：Emby 端到端仍为 `SERVER_UNVERIFIED`；远端进度**回写语义**未验证；
-  回环中继的发布声明因远端条目无法启动而**未验证**。
-- **未执行**：真实第二 Windows 账户下的凭据库行为；系统代理 / PAC / TUN / VPN / SOCKS 出口一致性。
-- **尚未实现**：收藏与播放列表 GUI；剧集季 / 集在有数据服务器上的验证。
+- **进度回写的服务端语义**：中断位置写入与「完全重启后恢复」已在 Jellyfin 12.2 与 Emby 4.10.x 实测；
+  但多客户端并发、快进后未达阈值等服务端判定细节未测。W4 记录的「中断恢复 FAILED」已更正为
+  **夹具片长低于服务端阈值**（`MinResumeDurationSeconds`=300 s），不是客户端缺陷。
+- **真服覆盖面是单机单实例**：Emby 与 Jellyfin 各只在隔离实例上验证一次；服务端版本差异会改变行为
+  （W8 验收途中 Emby 自行从 4.10.1.0 升级到 4.10.2.0），未做多版本矩阵。
+- **搜索**：多源搜索仅有模拟服务器与单测，服务端搜索接口未接入，真服路径未测。
+- **体验缺口**：「继续观看」卡片海报未懒加载（行可点、海报位为占位图标，属已知缺口）；
+  永久播放列表内拖拽排序仅单测覆盖（`NOT_RUN`）。
+- **NOT_RUN / IMPLEMENTED_UNVERIFIED**：HDR 与色彩管理（不声称任何 HDR 能力；杜比视界 `NOT_SUPPORTED`）、
+  硬件解码故障回退、全屏切换的截图确认、字幕样式（字体 / 字号 / 颜色 / 描边 / 位置 / 延迟 / ASS 覆盖）、
+  季 / 集导航的专项断言（U2 已在真服按季 / 集选中并播出）、图片缓存上限与磁盘 TTL、
+  TUN / VPN / PAC 出口一致性与 SOCKS 代理、真实第二 Windows 账户下的凭据库行为、
+  Intel / AMD / NVIDIA 硬件兼容矩阵。
+- **尚未实现**：音频独占 / HDMI 直通 / 多声道 / 音画同步偏移；系统媒体按键、任务栏状态、多窗口；
+  Plex / SMB / 云盘媒体源；W6 跨设备来源同步（设计见 PR #39，实现 `NOT_STARTED`）。
+- **发布阻断**：见下节许可证；另有 MSIX / 代码签名 / 干净机安装 `NOT_RUN`（`SIGNING_BLOCKED`）。
 
 ### 构建与测试
 
 ```powershell
 pwsh -File windows/tools/fetch-libmpv.ps1    # 首次：拉取 libmpv（约 115 MB，不入库）
-dotnet build windows/MediaHub.Windows.sln -c Debug -p:Platform=x64
-dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug -p:Platform=x64
+cd windows
+dotnet build MediaHub.Windows.sln -c Debug -p:Platform=x64
+dotnet test  MediaHub.Windows.sln -c Debug
 ```
 
 CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
 与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
-截至 `0f6ff8c`：编译 0 错误 0 警告，`MediaHub.Tests` 296 通过 0 失败；该 head 的 `windows-ci` 与 Android CI 均为 success。
+截至 `2757285`：`MediaHub.Tests` 373 + `MediaHub.WebDav.Tests` 104 = **477 通过 / 0 失败 / 0 跳过**
+（`windows/docs/W9-EVIDENCE.md` 同工作树记录）；该 head 的 `windows-ci`（构建 / 测试 / 播放探测 / 打包）为 success。
+
+同一 head 的 Android CI 在 `build` 的单元测试门禁上失败（`core/network` 的
+`MpvHttpBridgeLifecycleTest.stop cancels target upstream while response body cannot finish`），
+而上一个 head `883e9e9` 的 Android CI 为 success；该提交只改 `windows/docs`，失败点在被测 Android 代码里，
+属 Android 侧待单独排查的不稳定用例，与本分支的 Windows 改动无关。
+
+真服 GUI 验收脚本入库在 `windows/tools/acceptance/`（`r7-*`、`u1/`–`u4/`），可用 `pwsh` 7 重放；
+证据目录被 `.gitignore` 排除，可在本机重跑复现。
 
 ### 引擎许可证（影响可发行性）
 
@@ -166,7 +180,14 @@ CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：
 
 <!-- WINDOWS-SYNC:START -->
 <!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
-- 2021893 2026-10-22 fix(windows): 音频可达、文件选择器迁移，并修掉面板关不掉与提示被覆盖
+- 2757285 2026-10-23 docs(windows): W9 证据（两服四门 276 断言全绿）+ 能力图/路线图状态更新
+- 99585f4 2026-10-23 test(windows): W9 四门真服 GUI 验收脚本（继续观看/自动连播/收藏/永久播放列表）
+- c832fe8 2026-10-23 fix(windows): 继续观看改用递归 + IsResumable 查询（Emby 非递归只回库文件夹）
+- 883e9e9 2026-10-23 fix(windows): 首页服务器历史卡片可点击 + 继续观看/首页容器补 AutomationId
+- adab0e7 2026-10-23 feat(windows): U4 永久播放列表接入 UI（播放列表页/列表详情页/详情页加入按钮）
+- af4aa4e 2026-10-23 test(windows): U2 跨季自动连播真实 GUI 验收脚本（Emby 32/32、Jellyfin 32/32）
+- 529ba93 2026-10-23 feat(windows): U4 永久播放列表存储层（与临时队列解耦）
+- b154475 2026-10-23 feat(windows): 新增「我的收藏」页面并扩展收藏验收脚本
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）

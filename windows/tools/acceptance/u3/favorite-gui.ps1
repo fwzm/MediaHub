@@ -5,7 +5,8 @@
 #      Jellyfin 12.2 上都是 404，写死旧路由会得到一条永远绿的假用例）；
 #   3) 「重启后仍显示已收藏」必须来自服务器回读，不是本地缓存——因此重启前后都直接查服务器。
 param(
-  [ValidateSet('emby','jellyfin')][string]$Server = 'emby'
+  [ValidateSet('emby','jellyfin')][string]$Server = 'emby',
+  [string]$Exe = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
 )
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
@@ -14,7 +15,7 @@ Import-Module ($R + 'windows\tools\acceptance\lib\MhUia.psm1') -Force -WarningAc
 $ev = $R + 'windows\tools\acceptance\evidence\u3-favorite\' + $Server
 New-Item -ItemType Directory -Force -Path $ev | Out-Null
 
-$exe      = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
+$exe      = $Exe
 $seed     = $R + 'windows\tools\SeedSource\bin\x64\Debug\net10.0-windows\win-x64\SeedSource.exe'
 $settings = Join-Path $env:LOCALAPPDATA 'MediaHub\settings.json'
 
