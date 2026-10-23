@@ -24,6 +24,13 @@ public sealed record LocalSourceRecord
     /// <summary>Local source type as the Windows client models it.</summary>
     public ServerType Type { get; init; } = ServerType.Unknown;
 
+    /// <summary>
+    /// Wire value kept verbatim when <see cref="Type"/> is <see cref="ServerType.Unknown"/> because this build
+    /// cannot map it. Without it a source imported from a peer would be downgraded or dropped on the way back
+    /// ("saved but not supported yet", audit §5.1) — preserving it is what makes the type set lossless.
+    /// </summary>
+    public string? SourceTypeRaw { get; init; }
+
     /// <summary>Address as the Windows client stores it; compared only through <see cref="SyncUrlNormalizer"/>.</summary>
     public string? Url { get; init; }
 
