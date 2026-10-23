@@ -147,7 +147,8 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 - **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39)，stacked 在 `feature/windows-client` 上，仍为 Draft）：
   契约层、配对载荷/状态机/传输层（回环）、双向增量与设备注册表、凭据迁移（DPAPI 重封）、加密离线归档、同步 CLI、
   同步页「预览 → 逐条审批 → 应用 → 推进基线」、基线落盘与重启幂等、已配对设备登记与指纹钉扎、
-  已配对设备清单与「忘记」均已实现，`MediaHub.Tests` **1021 通过 / 0 失败**（其中 W6 新增 583）；
+  已配对设备清单与「忘记」、同步 CLI 的 `baseline` / `pair` 命令组（离线查询与预览，
+  不监听端口、写操作默认 dry-run）均已实现，`MediaHub.Tests` **1053 通过 / 0 失败**（其中 W6 新增 615）；
   **尚未做**：二维码与扫码、跨机（非回环）配对、真实局域网传输与设备持久化、同步页/配对页/已配对清单的 GUI 证据
   （三者均为 `IMPLEMENTED_UNVERIFIED`，本机没人观看窗口时无法跑）、Android 端 apply 的 UI 与传输
   （Android 侧只到契约/规划/导入导出/配对契约）。
@@ -169,7 +170,7 @@ CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：
 （`MediaHub.Tests` ≥400、`MediaHub.WebDav.Tests` ≥100，`failed=0` 且 `notExecuted=0`）—— 此前 WebDav 套件虽然被构建、
 却从未被 `dotnet test` 指向，104 个用例在 CI 里长期空转（run 40019093231 起已修正，日志可见
 `MediaHub.Tests: total=438` / `MediaHub.WebDav.Tests: total=104` / `combined tests=542`）。
-W6 分支上 `MediaHub.Tests` 为 **1021 通过 / 0 失败**（`feature/windows-client` 既有 438 + W6 新增 583），
+W6 分支上 `MediaHub.Tests` 为 **1053 通过 / 0 失败**（`feature/windows-client` 既有 438 + W6 新增 615，其中 W6-15 的 CLI 命令组贡献 32），
 `MediaHub.WebDav.Tests` 的 104 例同样适用于该分支（见 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 正文的验证表）。
 
 Android 侧（[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml)）的单元门禁同样按**名字**断言，
