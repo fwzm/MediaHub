@@ -92,13 +92,32 @@ Stop-MhQuietWatch $w
 4. **Emby 自更新会吃掉第一次启动**：安装目录存在 `embyserver-win-x64-*.7z` 时进程复制 updater 后退出。
    `Start-QuietServer` 现在记录 launch pid、检测提前退出并在函数内重试一次，端口等待 150 s，等待期间也可中止。
 
+## 拿不到长窗口时：可续跑驱动器（2026-10-24 加）
+
+这台机器的使用者在场时间长且不可预测：四次整跑（quiet-w10b/d/e/f）全部在门禁打开后 1–3 分钟被输入打断，
+一次完整的 40 分钟窗口都没拿到。与其反复重跑，不如把验收拆成**可续跑的组合**：
+
+```powershell
+pwsh -NoProfile -File windows/tools/acceptance/run-quiet-resume.ps1 `
+  -MinIdleSeconds 900 -WaitForIdleMinutes 420 -OutRoot D:\mh-verify\quiet-w10r
+```
+
+- 组合 = 6 个「套件 × 服务器」（`u2/u3/u4` × `emby/jellyfin`），**每个组合单独过一次门禁、单独起停服务器**。
+- 检查点 `checkpoint.json` 记 `done`/`failed`；`RESULT: OK` 记完成并继续下一个组合，
+  `ABORTED-BY-USER` 立即停（下个窗口从断点继续），`FAILED` 记下后继续其余组合。
+- 每个组合开跑前还有一道 **build 清场**：`dotnet`/`MSBuild`/`VBCSCompiler`/`MediaHub` 任一在跑就先等最多
+  `-BuildWaitMinutes`（默认 20）分钟；等不到就放弃本窗口（写 `BUSY-BUILD`）而不是污染时序断言。
+- 默认门禁比单跑更严（`-MinIdleSeconds 900`）：只有人真的离开 15 分钟以上才开跑，避免又一次「刚满 5 分钟就被碰键盘」。
+- 收尾总会杀 `MediaHub`/`EmbyServer`/`jellyfin`，并在 `<OutRoot>\resume-summary.txt` 写 `RESULT: COMPLETE` 或 `RESULT: INCOMPLETE stopped=…`。
+
+进度判读只看两处：`resume-summary.txt`（每行一个组合的结果）与各组合目录下的 `summary-*.txt`（自己那一跑的原始结论）。
+
 ## 与历史证据的关系
 
 - W9 四门证据（U1/U2/U3/U4 × Emby/Jellyfin，276 断言）是在直接运行的旧方式下取得的，仍然有效；
   二进制 `MediaHub.dll A15F6E4F…`。
 - 之后修复了继续观看卡片封面（`ImageCache` 记录 `image:loaded`、`ContinueWatchingPage` 懒加载海报）并补了
   U1 的 P0.9/P2.6 断言，在当前二进制 `MediaHub.dll A8EDD448…` 上 U1 两服各 41/41 通过。
-  结果写入 `D:\mh-verify\quiet-w10b\summary-*.txt`（逐行 append，末行 `RESULT:`）并据此更新 W10 证据文档。
   结果写入 `D:\mh-verify\quiet-w10b\summary-*.txt`（逐行 append，末行 `RESULT:`）并据此更新 W10 证据文档。
 
 ## 套件内重启与看门狗的分工（2026-10-24 修）
