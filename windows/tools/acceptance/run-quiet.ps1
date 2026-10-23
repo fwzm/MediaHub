@@ -59,7 +59,9 @@ $serverExe = @{
     jellyfin = 'D:\mh-servers\jellyfin\jellyfin\jellyfin.exe'
 }
 $serverArgs = @{
-    emby     = @('-datadir', 'D:\mh-servers\data\emby', '-nointerface')
+    # Emby ignores -datadir (it silently falls back to app\programdata, binds 8096 and opens a browser);
+    # -programdata is the switch that actually selects the lab instance on 8097.
+    emby     = @('-programdata', 'D:\mh-servers\data\emby', '-nointerface')
     jellyfin = @('--datadir', 'D:\mh-servers\data\jellyfin',
                  '--configdir', 'D:\mh-servers\data\jellyfin\config',
                  '--cachedir', 'D:\mh-servers\data\jellyfin\cache',
@@ -80,26 +82,37 @@ function Test-PortOpen([int]$Port) {
 }
 
 function Start-QuietServer([string]$Name) {
+    # Emby may launch its self-updater and exit on the first start after it staged an update, so a
+    # single attempt is not enough: retry once when the process dies before the port opens.
     if (Test-PortOpen $serverPorts[$Name]) { return 'already-running' }
     if (-not (Test-Path $serverExe[$Name])) { return 'missing-exe' }
 
     $log = Join-Path $OutRoot ('server-' + $Name + '.log')
-    $startArgs = @{
-        FilePath = $serverExe[$Name]
-        ArgumentList = $serverArgs[$Name]
-        WindowStyle = 'Hidden'
-        PassThru = $true
-        RedirectStandardOutput = $log
-        RedirectStandardError = ($log + '.err')
-    }
-    Start-Process @startArgs | Out-Null
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        $startArgs = @{
+            FilePath = $serverExe[$Name]
+            ArgumentList = $serverArgs[$Name]
+            WindowStyle = 'Hidden'
+            PassThru = $true
+            RedirectStandardOutput = $log
+            RedirectStandardError = ($log + '.err')
+        }
+        $proc = Start-Process @startArgs
+        Add-Line ('server ' + $Name + ': launch attempt ' + $attempt + ' pid=' + $proc.Id)
 
-    $deadline = (Get-Date).AddSeconds(240)
-    while ((Get-Date) -lt $deadline) {
-        if (Test-PortOpen $serverPorts[$Name]) { return 'started' }
+        $deadline = (Get-Date).AddSeconds(150)
+        $exitNote = $null
+        while ((Get-Date) -lt $deadline) {
+            if (Test-MhQuietAborted $watch) { return 'aborted' }
+            if (Test-PortOpen $serverPorts[$Name]) { return 'started' }
+            if ($proc.HasExited) { $exitNote = 'pid ' + $proc.Id + ' exited early code=' + $proc.ExitCode; break }
+            Start-Sleep -Seconds 2
+        }
+        if ($null -eq $exitNote) { return 'start-timeout' }
+        Add-Line ('server ' + $Name + ': ' + $exitNote)
         Start-Sleep -Seconds 3
     }
-    return 'start-timeout'
+    return 'start-failed'
 }
 
 function Stop-QuietServer([string]$Name) {
@@ -115,7 +128,8 @@ $lines = New-Object System.Collections.Generic.List[string]
 function Add-Line([string]$Text) {
     $lines.Add($Text)
     Write-Host $Text
-    Set-Content -Path $summaryPath -Value $lines -Encoding UTF8
+    # Append one line at a time: rewriting the whole file loses the tail if a run is killed mid-write.
+    Add-Content -Path $summaryPath -Value $Text -Encoding UTF8
 }
 
 $idle = Get-MhUserIdleSeconds
@@ -132,6 +146,8 @@ if (-not $idleOk) {
 $watch = $null
 $failed = @()
 $aborted = $false
+$transcriptPath = Join-Path $OutRoot ('transcript-' + $stamp + '.log')
+try { Start-Transcript -Path $transcriptPath -Force | Out-Null } catch { }
 try {
     $watch = Start-MhQuietWatch -MinIdleSeconds $MinIdleSeconds -FlagPath (Join-Path $OutRoot ('watch-' + $stamp))
     Add-Line ('watchdog started (kills MediaHub within ~1s of any input, threshold=' + $MinIdleSeconds + 's)')
@@ -139,7 +155,12 @@ try {
     foreach ($server in $Servers) {
         $serverState = Start-QuietServer $server
         Add-Line ('server ' + $server + ': ' + $serverState)
-        if ($serverState -in @('missing-exe', 'start-timeout')) {
+        if ($serverState -eq 'aborted') {
+            $aborted = $true
+            Add-Line ($server + ' server startup ABORTED-BY-USER (' + (Get-MhQuietAbortReason $watch) + ')')
+            break
+        }
+        if ($serverState -in @('missing-exe', 'start-timeout', 'start-failed')) {
             $failed += ($server + ' (server unavailable: ' + $serverState + ')')
             continue
         }
@@ -186,6 +207,7 @@ finally {
         foreach ($s in @('emby', 'jellyfin')) { Stop-QuietServer $s }
     }
     Add-Line ('cleanup done: MediaHub processes=' + @(Get-Process MediaHub -ErrorAction SilentlyContinue).Count + ' serversKept=' + [bool]$KeepServers)
+    try { Stop-Transcript | Out-Null } catch { }
 }
 
 if ($aborted) {

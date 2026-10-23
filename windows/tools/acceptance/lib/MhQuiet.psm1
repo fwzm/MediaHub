@@ -121,18 +121,21 @@ function Start-MhQuietWatch {
             $idle = [int]($delta / 1000)
 
             if ($idle -lt $MinIdleSeconds) {
-                if (-not $DryRun) {
+                # $DryRun crosses the job boundary as a serialized value; treat it as text so that a
+                # "[bool]False" style string (the old argument-passing bug) can never read as "kill".
+                $isDry = ("$DryRun" -match '(?i)true\s*$')
+                if (-not $isDry) {
                     foreach ($name in $KillProcessNames) {
                         Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
                     }
                 }
-                $line = 'user-active idle=' + $idle + ' threshold=' + $MinIdleSeconds + ' at ' + (Get-Date).ToString('o') + ' dryRun=' + [bool]$DryRun
+                $line = 'user-active idle=' + $idle + ' threshold=' + $MinIdleSeconds + ' at ' + (Get-Date).ToString('o') + ' dryRun=' + $isDry
                 Set-Content -Path $abortFile -Value $line -Encoding UTF8
                 break
             }
             Start-Sleep -Milliseconds $PollMilliseconds
         }
-    } -ArgumentList $MinIdleSeconds, $PollMilliseconds, $FlagPath, $KillProcessNames, [bool]$DryRun, $script:MhQuietTypeSource
+    } -ArgumentList @($MinIdleSeconds, $PollMilliseconds, $FlagPath, $KillProcessNames, $DryRun.IsPresent, $script:MhQuietTypeSource)
 
     return [pscustomobject]@{
         Job      = $job
