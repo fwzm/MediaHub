@@ -7,7 +7,7 @@
 
 - ADR-S001 的同步信封**不在本仓文档里**：权威文本是 `D:\mh-w6\docs\cross-device\adr\ADR-S001-source-sync-contract.md`，
   本仓 `docs/cross-device/` 目录不存在。本文的每条规则都以该 ADR 与 `D:\mh-w6\windows\src\MediaHub.Sync\` 的实现为准。
-- Android 侧实现为 `core/common/src/main/kotlin/com/mediahub/core/common/sync/` 下 14 个文件；线格式与 Windows **逐字段、逐顺序、逐 reason 码**对齐。
+- Android 侧实现为 `core/common/src/main/kotlin/com/mediahub/core/common/sync/` 下 **16 个文件**（`Get-ChildItem core/common/src/main/kotlin/com/mediahub/core/common/sync/*.kt` 实测；W6-C 新增了内容指纹与本地 id 派生两个文件）；线格式与 Windows **逐字段、逐顺序、逐 reason 码**对齐。
 - 互操作已实测三件事：(a) 解析 Windows 真实信封不丢字段；(b) 同一信封在本机规划出的三桶计数与 Windows CLI 完全一致；
   (c) Kotlin 重新编码出的信封喂回 Windows CLI，CLI 给出与自产信封**相同**的 plan 结果（exit 3、counts 2/1/1）。
 
@@ -17,7 +17,7 @@
 
 | 候选 | 判断 |
 | --- | --- |
-| 新建 :core:sync 模块 | 否决：只为 14 个文件增加一个模块，构建图与装配成本大于收益 |
+| 新建 :core:sync 模块 | 否决：只为 16 个文件增加一个模块，构建图与装配成本大于收益 |
 | :provider:api | 否决：它是唯一纯 JVM 模块但没有 kotlinx.serialization 依赖；同步是"设备间"契约，与 provider 能力无关 |
 | :core:common（选中） | 已有 kotlinx.serialization.json、与 backup/ 同族（同属"跨端数据搬移"）、单测直接跑 JVM（`testDebugUnitTest`） |
 
@@ -44,6 +44,11 @@
 | SourceSyncCandidate.cs / LocalSourceRecord.cs | SourceSyncCandidate.kt / LocalSourceRecord.kt | 建议项字段一一对应 |
 | SourceSyncPreviewSummary.cs | SourceSyncSummary.kt | apply=create+update、ignored=unchanged、ambiguous 只数 ambiguous-legacy-identity |
 | SyncContractException | SourceSyncContractException.kt | reason 形如 missing-field:x / invalid-field:x |
+
+上表是 Windows 有同名源文件的 14 组映射；全包共 **16 个 .kt** —— 另两个是 W6-C 新增的
+`SourceSyncFingerprints.kt`（记录内容指纹，供幂等判据用）与 `SourceSyncLocalIds.kt`（按 deviceId + serverId
+确定性派生 `local-` + 16 hex 身份），它们属本包实现细节，Windows 侧对应逻辑内联在 `SourceSyncPlanner.cs`
+的 ContentMatches 与 SyncCli 导出流程中，未逐行对照。
 
 Android 的 ServerType 没有 Unknown 项，因此 LocalSourceRecord.type 用 ServerType?（null = 无类型），
 规划时的 AndroidSourceTypeResolution.sourceType 仍是完整的 SyncSourceTypeValue（raw 不丢）。
@@ -105,9 +110,13 @@ Android 测试资源（**字节原样**复制，不要手改）：
 
 | 文件 | 大小 | 内容 |
 | --- | --- | --- |
-| core/common/src/test/resources/sync/windows-envelope-device-a.json | 1093 B | device-a 的 export 信封：3 源（emby / jellyfin / 未知 quantum-nas）+ 1 墓碑 |
-| core/common/src/test/resources/sync/windows-plan-device-b-empty.json | 1089 B | device-b 空目录时对该信封的 plan（counts 2/1/1） |
-| core/common/src/test/resources/sync/windows-plan-device-b-applied.json | 1083 B | device-b import --apply 之后再次 plan（counts 0/1/3） |
+| core/common/src/test/resources/sync/windows-envelope-device-a.json | 仓库 blob 1093 B（Windows 检出同值） | device-a 的 export 信封：3 源（emby / jellyfin / 未知 quantum-nas）+ 1 墓碑 |
+| core/common/src/test/resources/sync/windows-plan-device-b-empty.json | 仓库 blob 1088 B；Windows 检出 1089 B | device-b 空目录时对该信封的 plan（counts 2/1/1） |
+| core/common/src/test/resources/sync/windows-plan-device-b-applied.json | 仓库 blob 1082 B；Windows 检出 1083 B | device-b import --apply 之后再次 plan（counts 0/1/3） |
+
+尺寸口径：上表以**仓库 blob**为准（`git cat-file -s HEAD:<path>` 逐份核过）。Windows 本机 `core.autocrlf=true`，
+检出时 plan-* 两份各多 1 字节（行尾 CRLF），即 1089 / 1083；envelope 那份 blob 与检出同值（1093）。
+`core/database/src/test/resources/sync/` 下另有一份同源 envelope 副本（1093 B，blob 与检出同值），测试资源按模块隔离。
 
 复跑命令（PowerShell；`$root` 换成一个空临时目录）：
 
@@ -167,7 +176,7 @@ $env:ANDROID_HOME='C:\Users\55160\AppData\Local\Android\Sdk'; $env:ANDROID_SDK_R
 cmd /c "cd /d D:\deepseek_test\MediaHub_Win && .\gradlew.bat :core:common:testDebugUnitTest --console=plain > %TEMP%\android-sync-task29.log 2>&1"
 ```
 
-结果：BUILD SUCCESSFUL in 11s；:core:common 12 suites / **165 tests / 0 failures / 0 errors / 0 skipped**。
+结果：BUILD SUCCESSFUL in 11s；:core:common **12 suites / 165 tests / 0 failures / 0 errors / 0 skipped**（**task-29 当时快照**；此后 W6-E 的 pairing 契约追加 7 套 / 73 例，当前 HEAD c86fabf 实测为 **19 suites / 238 tests**，见 §11.8）。
 
 本轮新增 87 例（全绿）：
 
@@ -244,7 +253,7 @@ cmd /c "cd /d D:\deepseek_test\MediaHub_Win && .\gradlew.bat :core:database:test
 
 ```
 BUILD SUCCESSFUL in 1m 24s   (EXIT=0，--rerun-tasks 确保不是 UP-TO-DATE 复用)
-:core:database 11 suites / 70 tests / 0 failures / 0 errors / 0 skipped
+:core:database **11 suites / 70 tests / 0 failures / 0 errors / 0 skipped**（**W6-B 当时快照**；W6-C 追加 2 套 / 33 例后当前实测 **13 suites / 103 tests**，见 §11.8）
 基线 7 suites / 39 tests → 本轮 +4 suites / +31 tests
 ```
 
@@ -346,7 +355,7 @@ BUILD SUCCESSFUL in 1m 29s
 
 MOD=core/common   SUITES=12 TESTS=165 FAILURES=0 ERRORS=0 SKIPPED=0
 MOD=core/database SUITES=13 TESTS=103 FAILURES=0 ERRORS=0 SKIPPED=0
-（core:database 基线 11 suites / 70 tests → 本轮 +2 suites / +33 tests；core:common 未变）
+（core:database 基线 11 suites / 70 tests → 本轮 +2 suites / +33 tests；core:common 在该次运行未变，是其后 W6-E 才追加 7 套 / 73 例，现为 19/238）
 
 新增两套：AndroidSourceSyncServiceTest 27 例、AndroidSourceSyncServiceRoomTest 6 例，全绿。
 （最后一次实跑到 103 是因为在 32 例之上补了 1 例「四桶互斥且相加等于计划条目数」的不变量测试。）
@@ -358,6 +367,10 @@ MOD=core/database SUITES=13 TESTS=103 FAILURES=0 ERRORS=0 SKIPPED=0
 3. `pre_w6_source_without_sync_id_is_only_adopted_after_approval` 断言 `createCalls == 0` 失败（实际 1）：同一份信封里还有一条本机没有的 jellyfin 来源，本来就应该被新建。改为钉住 "legacy 行未被改写"（updateCalls 0、srv-legacy 的 syncSourceId 仍为 null）+ "唯一的建库是那条 jellyfin"（createCalls 1、新行 syncSourceId = local-0a87ea9520c51a80），比原来的 "整次导入零写入" 更准。
 4. `:core:common:bundleLibCompileToJarDebug` 报 `java.nio.file.FileSystemException: …classes.jar: 另一个程序正在使用此文件`（Kotlin 编译守护进程残留句柄）：`gradlew.bat --stop` + 结束 CommandLine 含 `KotlinCompileDaemon` 的 java.exe 后恢复。
 ```
+
+口径对齐（本轮审计修正）：该次运行（task-36）里 core/common 仍是 12 suites / 165 tests；W6-E 的 pairing 契约上线后
+core/common 现为 **19 suites / 238 tests**（+7 套 / +73 例），core/database 现为 **13 suites / 103 tests**，均为 HEAD c86fabf
+本机 `testDebugUnitTest` JUnit XML 实测（failures / errors / skipped 全 0）。上文 §6 与 §9.1 的两处旧值已原地标注为当时快照。
 
 ### 11.9 本轮未做项
 
