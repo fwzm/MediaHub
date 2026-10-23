@@ -23,7 +23,11 @@ New-Item -ItemType Directory -Force -Path $ev | Out-Null
 $exe      = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
 $seed     = $R + 'windows\tools\SeedSource\bin\x64\Debug\net10.0-windows\win-x64\SeedSource.exe'
 $settings = Join-Path $env:LOCALAPPDATA 'MediaHub\settings.json'
+$dllPath  = Join-Path (Split-Path $exe -Parent) 'MediaHub.dll'
 $NL = [Environment]::NewLine
+# 运行期间可能被其他构建任务替换输出目录，记下起始 hash 以便收尾比对（跑之前/之后 hash 不一致则结果不可信）
+$hashAtStart = $null
+try { $hashAtStart = (Get-FileHash $dllPath -Algorithm SHA256).Hash } catch { }
 
 # 每台服务器的连接参数与探测线索（id 一律运行时探测，这里只有名字与版本模式）
 if ($Server -eq 'emby') {
@@ -169,14 +173,31 @@ function Wait-Player([int]$timeoutSec = 45) {
   return $false
 }
 # 干净基线：杀掉再起（P1 已证明「冷启动 → 媒体库 → 剧集 → 播放」这条路径稳定）
+# 抗干扰：exe 可能在被其他构建任务同时写（临时不存在），所以先等文件回来，启动失败再重试 3 次。
 function Restart-App([switch]$ResetTrace) {
-  Stop-MhAppForced | Out-Null
-  Start-Sleep -Milliseconds 800
-  $a = Start-MhApp -Exe $exe -ResetTrace:$ResetTrace -TimeoutSec 60
-  Start-Sleep -Seconds 3
-  $h = Get-MhWindowHandle
-  if ($h) { Set-MhForeground -Hwnd $h | Out-Null }
-  return $a
+  for ($attempt = 1; $attempt -le 4; $attempt++) {
+    Stop-MhAppForced | Out-Null
+    Start-Sleep -Milliseconds (1000 + 500 * $attempt)
+    $waitDeadline = (Get-Date).AddSeconds(60)
+    while ((-not (Test-Path $exe)) -and ((Get-Date) -lt $waitDeadline)) { Start-Sleep -Milliseconds 500 }
+    if (-not (Test-Path $exe)) {
+      Write-Host ('  restart attempt ' + $attempt + ': exe missing, waiting')
+      continue
+    }
+    try {
+      $a = Start-MhApp -Exe $exe -ResetTrace:($ResetTrace -and $attempt -eq 1) -TimeoutSec 60
+      if ($a) {
+        Start-Sleep -Seconds 3
+        $h = Get-MhWindowHandle
+        if ($h) { Set-MhForeground -Hwnd $h | Out-Null }
+        return $a
+      }
+    } catch { Write-Host ('  restart attempt ' + $attempt + ' failed: ' + $_.Exception.Message) }
+    Stop-Process -Name MediaHub -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+  }
+  Write-Host '  restart FAILED after 4 attempts'
+  return $null
 }
 
 function Exit-Player([int]$timeoutSec = 12) {
@@ -409,7 +430,13 @@ $playerUp = Wait-Player 60
 $st1 = Get-MhPlayerState -SkipSlow
 Check 'P1.2 进入播放页' $playerUp ('open=' + $open1 + ' playerVisible=' + $st1.playerVisible)
 Check 'P1.3 播放页标题为 S01E01' ([bool]($st1.title -and ($st1.title -eq $nameS01E01))) ('title=' + $st1.title + ' expected=' + $nameS01E01)
-Check 'P1.4 播放时长与条目一致（约 ' + [math]::Round($durS01E01) + ' s）' ([bool]($null -ne $st1.durationSeconds -and [math]::Abs([double]$st1.durationSeconds - $durS01E01) -le 2)) ('duration=' + $st1.duration + ' durationSeconds=' + $st1.durationSeconds + ' server=' + $durS01E01)
+# 时长要等解码器报告（刚进播放页时 Duration 可能还是 0，不能立刻判 FAIL）
+$durDeadline = (Get-Date).AddSeconds(10)
+while ((Get-Date) -lt $durDeadline -and (-not $st1.durationSeconds -or [double]$st1.durationSeconds -le 0)) {
+  Start-Sleep -Milliseconds 400
+  $st1 = Get-MhPlayerState -SkipSlow
+}
+Check ('P1.4 播放时长与条目一致（约 ' + [math]::Round($durS01E01) + ' s）') ([bool]($null -ne $st1.durationSeconds -and [double]$st1.durationSeconds -gt 0 -and [math]::Abs([double]$st1.durationSeconds - $durS01E01) -le 2)) ('duration=' + $st1.duration + ' durationSeconds=' + $st1.durationSeconds + ' server=' + $durS01E01)
 $w1 = Watch-Playback 6
 Save-MhScreenshot -Path (Join-Path $ev 'p1-s01e01-playing.png') | Out-Null
 Check 'P1.5 视频真的在播放（位置推进 / seek 值推进 / 已切集任一成立）' ([bool]($w1.posOk -or $w1.seekOk -or $w1.advanced)) ('posOk=' + $w1.posOk + ' seekOk=' + $w1.seekOk + ' advanced=' + $w1.advanced + ' samples=' + (($w1.samples | Select-Object -Last 5) -join ' '))
@@ -536,13 +563,21 @@ Write-Host ('AutoPlayNext 已恢复: ' + $on + ' (restoreMode=' + $restoreMode +
 # ---------------------------------------------------------------- 收尾
 $fullTrace = @(Get-MhLog)
 $fullTrace -join $NL | Set-Content (Join-Path $ev 'trace.log') -Encoding UTF8
-$advAll = @($fullTrace | Where-Object { $_ -match 'queue:auto-advance|queue:no-next-episode|queue:auto-advance-disabled|player:start' })
+# 每次启动都会重写 startup.log，最终实例里没有前几个阶段的队列行；证据汇总用逐阶段窗口（trace-p1..p4）的合并结果
+$phaseTrace = @($new1) + @($new2) + @($new3) + @($new4) + @($fullTrace)
+$advAll = @($phaseTrace | Where-Object { $_ -match 'queue:|player:start' } | Select-Object -Unique)
 Stop-MhAppForced | Out-Null
 
+$hashAtEnd = $null
+try { $hashAtEnd = (Get-FileHash $dllPath -Algorithm SHA256).Hash } catch { }
+Check '收尾 被测二进制在运行期间未被替换（MediaHub.dll hash 一致）' ([bool]($hashAtStart -and $hashAtEnd -and ($hashAtStart -eq $hashAtEnd))) ('start=' + $hashAtStart + ' end=' + $hashAtEnd)
+# 断言条数自检：预期 P0=6 P1=6 P2=8 P3=7 P4=6 + 收尾 hash = 34 条（历史教训：Check 调用写错会静默少一条）
+$preCount = $checks.Count
+Check '收尾 断言条数与预期一致（34 条，无静默跳过）' ($preCount -eq 34) ('checksBeforeThis=' + $preCount + ' expected=34')
 $pass = @($checks | Where-Object { $_.pass }).Count
 $fail = @($checks | Where-Object { -not $_.pass }).Count
 $checks | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $ev 'checks.json') -Encoding UTF8
-$dllHash = (Get-FileHash (Join-Path (Split-Path $exe -Parent) 'MediaHub.dll') -Algorithm SHA256).Hash
+$dllHash = if ($hashAtEnd) { $hashAtEnd } else { (Get-FileHash $dllPath -Algorithm SHA256).Hash }
 $md = @()
 $md += ('# U2 跨季自动连播门禁（' + $Server + '）')
 $md += ''

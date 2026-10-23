@@ -168,6 +168,55 @@ function Click-Favorite {
   try { return (Invoke-MhElement -Element $e) } catch { return ('ERROR: ' + $_.Exception.Message) }
 }
 
+# 收藏页的行只在 favorites.grid 子树里找：页面标题、来源标签、详情页标题都可能含同一条目名，
+# 全树按名字找会打偏（U1 已踩过「同名 TextBlock 抢先命中」的坑）。GridViewItem 在 UIA 里以
+# ListItem/DataItem 暴露；首跑用 $e.Current.ControlType -eq 'ListItem' 比较 ControlType 对象与
+# 字符串，一条都命中不了（P1.8 invoke=NO-ELEMENT），必须走 Get-MhControlType。
+function Get-FavRows($grid) {
+  if (-not $grid) { return @() }
+  $rows = @()
+  foreach ($e in @(Get-MhElementAll -Root $grid)) {
+    $ct = Get-MhControlType $e
+    if ($ct -eq 'ListItem' -or $ct -eq 'DataItem') { $rows += $e }
+  }
+  return @($rows)
+}
+function Find-FavRow([string]$needle) {
+  $grid = Find-MhAppElement -AutomationId 'favorites.grid' -IncludeOffscreen
+  if (-not $grid) { return $null }
+  foreach ($r in @(Get-FavRows $grid)) {
+    $n = $r.Current.Name
+    if ($null -ne $n -and $n -like ('*' + $needle + '*')) { return $r }
+  }
+  # 兜底：个别帧里行本身无名字、只有子 TextBlock 带名字 —— 交给 Invoke-MhElementDeep 向上找可执行祖先。
+  foreach ($e in @(Get-MhElementAll -Root $grid)) {
+    $n = $e.Current.Name
+    if ($null -ne $n -and $n -like ('*' + $needle + '*') -and (Get-MhControlType $e) -ne 'Image') { return $e }
+  }
+  return $null
+}
+function Get-FavEmptyVisible {
+  # favorites.empty 是空态 StackPanel 的 AutomationId；Collapsed 时整个子树不在 UIA 树里。
+  # WinUI 的 StackPanel 默认不产生 automation peer，所以「按文案找 TextBlock」是主路径而非备用路径：
+  # 首跑只查 favorites.empty，拿到 emptyVisible=False 的假阴性（截图里空态文案明明在屏幕上）。
+  $e = Find-MhAppElement -AutomationId 'favorites.empty' -IncludeOffscreen
+  if ($e) { return (-not $e.Current.IsOffscreen) }
+  $t = Find-MhAppElement -Name '还没有收藏的内容。' -IncludeOffscreen
+  if (-not $t) { return $false }
+  return (-not $t.Current.IsOffscreen)
+}
+function Dump-Tree([string]$name) {
+  # 失败时能区分「条目按预期消失」与「整页没加载」：一行一个元素，含 ControlType/AutomationId/Name/offscreen。
+  $path = Join-Path $ev ($name + '.txt')
+  $lines = New-Object System.Collections.Generic.List[string]
+  foreach ($e in @(Get-MhAppElementAll -IncludeOffscreen)) {
+    $c = $e.Current
+    $lines.Add(('{0} | id={1} | name={2} | offscreen={3}' -f (Get-MhControlType $e), $c.AutomationId, $c.Name, $c.IsOffscreen))
+  }
+  $lines | Set-Content $path -Encoding UTF8
+  return $path
+}
+
 # ---------------------------------------------------------------- P0 复位与播种
 Write-Host ('=== P0 ' + $Server + ' 复位、来源播种 ===')
 $login = $null
@@ -227,30 +276,27 @@ Check 'P1.6 收藏成功没有出现错误/未保存提示' (($err1 -eq '') -and
 # 收藏页：服务器侧写入必须能在跨来源列表里看到，而不是只有详情页知道
 Go-Nav '我的收藏' | Out-Null
 $grid = Wait-Element 'favorites.grid' 30
-$rowName = ''
+$favRow1 = $null
 $deadline = (Get-Date).AddSeconds(45)
 while ((Get-Date) -lt $deadline) {
-  $hit = $null
-  foreach ($e in (Get-MhAppElementAll -IncludeOffscreen)) {
-    $n = $e.Current.Name
-    if ($null -ne $n -and $n -like ('*' + $itemName + '*') -and $e.Current.AutomationId -notlike 'LibraryCard*') { $hit = $n; break }
-  }
-  if ($hit) { $rowName = $hit; break }
+  $favRow1 = Find-FavRow $itemName
+  if ($favRow1) { break }
   Start-Sleep -Milliseconds 400
 }
-Check 'P1.7 「我的收藏」页出现刚收藏的条目' (($null -ne $grid) -and ($rowName -ne '')) ('grid=' + ($null -ne $grid) + ' row=' + $rowName)
+$rowName = if ($favRow1) { $favRow1.Current.Name } else { '' }
+$rowCt = if ($favRow1) { Get-MhControlType $favRow1 } else { 'n/a' }
+Check 'P1.7 「我的收藏」页出现刚收藏的条目' (($null -ne $grid) -and ($null -ne $favRow1)) ('grid=' + ($null -ne $grid) + ' rowType=' + $rowCt + ' row=' + $rowName)
+$null = Dump-Tree 'p1-favorites-tree'
 Save-MhScreenshot -Path (Join-Path $ev 'p1-favorites-page.png') | Out-Null
 
 $favClick = 'NO-ELEMENT'
-if ($rowName -ne '') {
-  foreach ($e in (Get-MhAppElementAll -IncludeOffscreen)) {
-    $c = $e.Current
-    if ($null -ne $c.Name -and $c.Name -like ('*' + $itemName + '*') -and $c.ControlType -eq 'ListItem') {
-      try { $favClick = Invoke-MhElementDeep -Element $e } catch { $favClick = 'ERROR: ' + $_.Exception.Message }
-      break
-    }
-  }
-  Start-Sleep -Seconds 2
+$target = $favRow1
+if (-not $target) {
+  $deadline = (Get-Date).AddSeconds(10)
+  while ((Get-Date) -lt $deadline -and -not $target) { $target = Find-FavRow $itemName; Start-Sleep -Milliseconds 300 }
+}
+if ($target) {
+  try { $favClick = Invoke-MhElementDeep -Element $target } catch { $favClick = 'ERROR: ' + $_.Exception.Message }
 }
 $detailFromFav = $null -ne (Wait-Element 'detail.play' 30)
 $titleFromFav = Get-Text 'TitleText'
@@ -285,26 +331,36 @@ Check 'P3.2 服务器回读 IsFavorite=False' (-not $fav3) ('isFavorite=' + $fav
 Save-MhScreenshot -Path (Join-Path $ev 'p3-after-unfavorite.png') | Out-Null
 
 # 取消收藏后收藏页必须同步消失：列表来自服务器，不是本地缓存
+# 刷新会被页面 Loaded 的首次拉取吞掉（FavoritesPage.LoadAsync 有 _loading 守卫，加载中点刷新是 no-op），
+# 所以点一次就断言语义上等于「赌竞态」——改成点到状态稳定为止（最多 5 轮，每轮 3 s）。
 Go-Nav '我的收藏' | Out-Null
 $null = Wait-Element 'favorites.grid' 30
-Start-Sleep -Seconds 2
-if (Find-MhAppElement -AutomationId 'favorites.reload' -IncludeOffscreen) {
-  Invoke-MhElement -Element (Find-MhAppElement -AutomationId 'favorites.reload' -IncludeOffscreen) | Out-Null
-  Start-Sleep -Seconds 2
+$attempt3 = 0
+$residual3 = $null
+$emptyVisible = $false
+while ($attempt3 -lt 5) {
+  $attempt3++
+  $rb = Find-MhAppElement -AutomationId 'favorites.reload' -IncludeOffscreen
+  if ($rb) { Invoke-MhElement -Element $rb | Out-Null }
+  Start-Sleep -Seconds 3
+  $residual3 = Find-FavRow $itemName
+  $emptyVisible = Get-FavEmptyVisible
+  if ((-not $residual3) -and $emptyVisible) { break }
 }
-$stillThere = ''
-foreach ($e in (Get-MhAppElementAll -IncludeOffscreen)) {
-  $n = $e.Current.Name
-  if ($null -ne $n -and $n -like ('*' + $itemName + '*') -and $e.Current.AutomationId -like 'favorites*') { $stillThere = $n; break }
-}
-$emptyEl = Find-MhAppElement -AutomationId 'favorites.empty' -IncludeOffscreen
-$emptyVisible = ($null -ne $emptyEl) -and (-not $emptyEl.Current.IsOffscreen)
-Check 'P3.3 取消收藏后「我的收藏」页不再列出该条目（且显示空态）' (($stillThere -eq '') -and $emptyVisible) ('residual=' + $stillThere + ' emptyVisible=' + $emptyVisible)
+$residualText = if ($residual3) { $residual3.Current.Name } else { '' }
+$warn3 = Find-AnyNameLike '个媒体源未能返回收藏列表'
+Check 'P3.3 取消收藏后「我的收藏」页不再列出该条目' ($null -eq $residual3) ('refreshAttempts=' + $attempt3 + ' residual=' + $residualText)
+Check 'P3.4 页面呈真空态（空态文案可见）且没有加载失败横幅' ($emptyVisible -and ($warn3 -eq '')) ('emptyVisible=' + $emptyVisible + ' warning=' + $warn3)
+$null = Dump-Tree 'p3-page-tree'
 Save-MhScreenshot -Path (Join-Path $ev 'p3-favorites-empty.png') | Out-Null
 
 # ---------------------------------------------------------------- P4 播放未被破坏（回归）
 Write-Host ''
 Write-Host '=== P4 收藏改动未破坏播放路径（回归） ==='
+# 上一段停在「我的收藏」页，详情页已不在栈顶：必须显式重新打开，否则 P4 拿到的是空壳断言
+# （首跑 P4.1 invoke= / P4.2 duration= 就是漏了这一步的级联，而不是播放路径真的坏了）。
+$reopen = Open-ItemDetail
+Check 'P4.0 从收藏页重新打开详情页（独立路径）' ($reopen -eq 'OK') $reopen
 $play = $null
 $pb = Wait-Element 'detail.play' 20
 if ($pb) { try { $play = Invoke-MhElement -Element $pb } catch { $play = 'ERROR: ' + $_.Exception.Message } }
@@ -318,6 +374,7 @@ Check 'P4.1 详情页播放仍能进入播放页' $playerUp ('invoke=' + $play)
 Start-Sleep -Seconds 2
 $state = Get-MhPlayerState -SkipSlow
 Check 'P4.2 播放时长与条目一致（600 s）' ($null -ne $state.durationSeconds -and [math]::Abs([double]$state.durationSeconds - 600) -le 30) ('duration=' + $state.durationSeconds)
+$null = Dump-Tree 'p4-player-tree'
 $back = Find-MhAppElement -AutomationId 'player.back' -IncludeOffscreen
 if ($back) { Invoke-MhElement -Element $back | Out-Null }
 Start-Sleep -Seconds 2
