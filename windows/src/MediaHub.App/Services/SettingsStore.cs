@@ -115,6 +115,16 @@ public sealed class PersistedServer
     /// where the user has one. Absent for sources that cannot travel (a local folder, an unusable address).
     /// </remarks>
     public string? SyncSourceId { get; set; }
+
+    /// <summary>
+    /// Revision of this source as last written by a cross-device apply.
+    /// </summary>
+    /// <remarks>
+    /// Without it the mirror would claim revision 0 forever, so every preview would propose the same
+    /// update again and "already applied" could never be reached. It is the local side of the record
+    /// revision the planner compares (W6-8), not a timestamp.
+    /// </remarks>
+    public long SyncRecordRevision { get; set; }
 }
 
 public sealed class MediaHubSettings

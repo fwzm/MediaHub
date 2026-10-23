@@ -562,6 +562,180 @@ public sealed class ServerManager : IDisposable
         return handle;
     }
 
+    // ------------------------------------------------------- cross-device apply (W6-8)
+
+    /// <summary>What one approved cross-device change did to the local source list.</summary>
+    /// <remarks>
+    /// Carries no URL and no credential: an apply message is shown in the UI and written to the log, and a
+    /// record that arrived from another device may contain an address the user does not want echoed.
+    /// </remarks>
+    public sealed record RemoteSourceOutcome(string SyncSourceId, bool Applied, string Message);
+
+    /// <summary>
+    /// Writes one remote source record into the local list: creates the source, or replaces the source that
+    /// already carries this cross-device identity.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Offline by design. The record describes a source on another device; this machine has no credential
+    /// for it, so the source is added in <see cref="ServerStatus.AuthRequired"/> and the user signs in from
+    /// the sources page. Pretending it is connected would be the one thing this method cannot know.
+    /// </para>
+    /// <para>
+    /// Called only after the approval gate has accepted the entry, so an unsupported kind or an unusable
+    /// address here is a second line of defence rather than the primary check.
+    /// </para>
+    /// </remarks>
+    public RemoteSourceOutcome ApplyRemoteSource(SourceRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+
+        if (string.IsNullOrWhiteSpace(record.SyncSourceId))
+        {
+            return new RemoteSourceOutcome("", false, "对端记录缺少来源标识，已跳过");
+        }
+
+        string syncSourceId = record.SyncSourceId.Trim();
+        if (!WindowsSourceTypeMap.TryToServerType(record.SourceType.Wire, out ServerType type))
+        {
+            return new RemoteSourceOutcome(syncSourceId, false, "Windows 暂不支持该来源类型：" + record.SourceType.Wire);
+        }
+
+        string? url = SyncUrlNormalizer.Normalize(PrimaryUrl(record));
+        if (url is null)
+        {
+            return new RemoteSourceOutcome(syncSourceId, false, "该来源没有可用地址，已跳过");
+        }
+
+        ServerEntry? existing;
+        string serverId;
+        lock (_gate)
+        {
+            existing = _servers.FirstOrDefault(s => string.Equals(s.SyncSourceId, syncSourceId, StringComparison.OrdinalIgnoreCase));
+            // The bridge's own convention is "ServerId == syncSourceId"; it is reused only when nothing
+            // else already owns that id, so an applied source can never displace an unrelated one.
+            bool idFree = _servers.All(s => s.ServerId != syncSourceId);
+            serverId = existing?.ServerId ?? (idFree ? syncSourceId : "sync:" + syncSourceId);
+        }
+
+        var entry = new ServerEntry
+        {
+            ServerId = serverId,
+            Type = type,
+            Url = url,
+            DisplayName = string.IsNullOrWhiteSpace(record.DisplayName) ? url : record.DisplayName.Trim(),
+            UserName = string.IsNullOrWhiteSpace(record.AccountScope) ? null : record.AccountScope.Trim(),
+            SyncSourceId = syncSourceId,
+            Status = ServerStatus.AuthRequired,
+            StatusDetail = "来自对端信封，需要登录后使用",
+        };
+
+        AddEntry(entry);
+
+        _settings.Update(state =>
+        {
+            state.Servers.RemoveAll(x => x.ServerId == serverId);
+            state.Servers.Add(new PersistedServer
+            {
+                ServerId = serverId,
+                Type = entry.Type.ToString(),
+                DisplayName = entry.DisplayName,
+                Url = entry.Url,
+                UserName = entry.UserName,
+                SyncSourceId = syncSourceId,
+                SyncRecordRevision = record.RecordRevision,
+            });
+        });
+
+        // The mirror row follows the live list, and now carries the applied revision, so the next preview
+        // of the same envelope reaches "already applied" instead of proposing the same write again.
+        EnsureSyncSourceIds();
+        _log.Info("sync", "已按对端信封写入媒体源：" + entry.DisplayName);
+        return new RemoteSourceOutcome(syncSourceId, true, "已写入本地：" + entry.DisplayName + "（需要登录）");
+    }
+
+    /// <summary>
+    /// Binds a source that predates cross-device identities to the identity the peer matched it with.
+    /// </summary>
+    /// <remarks>
+    /// Adopting is the one apply path that does not touch address or account: the local source keeps its
+    /// working configuration and only gains the identity, so a user who has been using it keeps using it.
+    /// </remarks>
+    public RemoteSourceOutcome AdoptRemoteSource(string serverId, string syncSourceId, long recordRevision)
+    {
+        if (string.IsNullOrWhiteSpace(syncSourceId))
+        {
+            return new RemoteSourceOutcome("", false, "对端记录缺少来源标识，已跳过");
+        }
+
+        string id = syncSourceId.Trim();
+        ServerEntry? entry;
+        lock (_gate)
+        {
+            entry = _servers.FirstOrDefault(s => s.ServerId == serverId);
+        }
+
+        if (entry is null) return new RemoteSourceOutcome(id, false, "本机没有找到要接管的来源，已跳过");
+
+        entry.SyncSourceId = id;
+        _settings.Update(state =>
+        {
+            PersistedServer? persisted = state.Servers.FirstOrDefault(x => x.ServerId == serverId);
+            if (persisted is null) return;
+            persisted.SyncSourceId = id;
+            persisted.SyncRecordRevision = recordRevision;
+        });
+
+        EnsureSyncSourceIds();
+        Changed?.Invoke(this, EventArgs.Empty);
+        _log.Info("sync", "已接管来源标识：" + entry.DisplayName);
+        return new RemoteSourceOutcome(id, true, "已接管已有来源：" + entry.DisplayName + "（需要登录核对）");
+    }
+
+    /// <summary>Removes the local source that carries this cross-device identity.</summary>
+    /// <remarks>
+    /// Goes through <see cref="DeleteAsync"/> so the credential in the vault is removed with the source;
+    /// a "deleted" source whose token is still on disk is not deleted.
+    /// </remarks>
+    public async Task<RemoteSourceOutcome> RemoveRemoteSourceAsync(string syncSourceId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(syncSourceId))
+        {
+            return new RemoteSourceOutcome("", false, "对端记录缺少来源标识，已跳过");
+        }
+
+        string id = syncSourceId.Trim();
+        ServerEntry? entry;
+        lock (_gate)
+        {
+            entry = _servers.FirstOrDefault(s => string.Equals(s.SyncSourceId, id, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (entry is null) return new RemoteSourceOutcome(id, false, "本机没有这条来源，已跳过");
+        if (entry.Type == ServerType.Local) return new RemoteSourceOutcome(id, false, "本地媒体源不参与跨设备删除");
+
+        string name = entry.DisplayName;
+        await DeleteAsync(entry.ServerId, ct).ConfigureAwait(true);
+        _log.Info("sync", "已按对端信封移除媒体源：" + name);
+        return new RemoteSourceOutcome(id, true, "已从本机移除：" + name);
+    }
+
+    /// <summary>Revision this device last stored for a source, or 0 when it never applied one.</summary>
+    private long RevisionOf(string serverId)
+        => _settings.Current.Servers.FirstOrDefault(x => x.ServerId == serverId)?.SyncRecordRevision ?? 0;
+
+    /// <summary>The address the planner matched on: the primary endpoint, else the first by sort order.</summary>
+    private static string? PrimaryUrl(SourceRecord record)
+    {
+        if (record.Endpoints.Count == 0) return null;
+        SourceEndpoint? primary = record.Endpoints
+            .Where(endpoint => endpoint.IsPrimary)
+            .OrderBy(endpoint => endpoint.SortOrder)
+            .FirstOrDefault();
+        primary ??= record.Endpoints.OrderBy(endpoint => endpoint.SortOrder).First();
+        return primary.Url;
+    }
+
     // ------------------------------------------------------- cross-device identity
 
     /// <summary>
@@ -627,6 +801,7 @@ public sealed class ServerManager : IDisposable
                 Url = entry.Url,
                 AccountScope = entry.UserName,
                 DisplayName = entry.DisplayName,
+                RecordRevision = RevisionOf(entry.ServerId),
             }).ToList();
         }
         return LocalSourceMapper.Map(inputs);

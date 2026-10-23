@@ -1,3 +1,4 @@
+using System.Text;
 using MediaHub.Domain;
 using MediaHub.Net;
 using MediaHub.Providers;
@@ -209,6 +210,228 @@ public sealed class SourceSyncService
             return SourceVerification.NotVerified("验证过程中出现错误（" + ex.GetType().Name + "）：" + ex.Message);
         }
     }
+
+    // ---------------------------------------------------------------- apply (W6-8)
+
+    /// <summary>
+    /// A fixed sentence shown after every apply. Nothing in this feature proves a sign-in, so the app says
+    /// so instead of letting 「已写入」 read as 「已同步」.
+    /// </summary>
+    public const string ApplyDisclaimer = "导入不代表已登录；请对每个来源点『验证』。";
+
+    /// <summary>
+    /// Reads the file the user picked: either a plain envelope or an encrypted archive.
+    /// </summary>
+    /// <remarks>
+    /// The passphrase is used for one call and never stored, logged, or copied into an error message: a
+    /// wrong passphrase and an edited archive are the same observable event in AES-GCM, and the reader's
+    /// error code is the only thing that leaves this method.
+    /// </remarks>
+    public PeerFileResult ReadPeerFile(string? path, string? passphrase)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return new PeerFileResult(PeerFileKind.None, null, "没有选择信封文件。", false);
+        }
+
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new PeerFileResult(PeerFileKind.None, null, "无法读取信封文件（" + ex.GetType().Name + "）。", false);
+        }
+
+        if (EncryptedArchiveReader.TryReadHeader(bytes, out _, out _))
+        {
+            if (string.IsNullOrEmpty(passphrase))
+            {
+                return new PeerFileResult(PeerFileKind.EncryptedArchive, null, "这个信封是加密的，需要输入口令。", true);
+            }
+
+            if (!EncryptedArchiveReader.TryRead(bytes, passphrase, out SourceSyncEnvelope? decrypted, out string? reason))
+            {
+                // The reader deliberately collapses "wrong passphrase" and "tampered" into one code; the
+                // message says so without echoing anything the user typed.
+                return new PeerFileResult(
+                    PeerFileKind.EncryptedArchive,
+                    null,
+                    "无法解密信封（" + reason + "）。口令错误或文件被修改过；口令不会写入日志。",
+                    true);
+            }
+
+            return new PeerFileResult(PeerFileKind.EncryptedArchive, decrypted, null, false);
+        }
+
+        string text = Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF');
+        if (!SourceSyncCodec.TryDeserialize(text, out SourceSyncEnvelope? envelope, out string? decodeError))
+        {
+            return new PeerFileResult(PeerFileKind.PlainEnvelope, null, "信封无法解析：" + decodeError, false);
+        }
+
+        return new PeerFileResult(PeerFileKind.PlainEnvelope, envelope, null, false);
+    }
+
+    /// <summary>
+    /// Computes what applying this envelope would do, including the gate's default verdict per entry.
+    /// </summary>
+    /// <remarks>
+    /// Pure. The returned preview is what the page binds to; a row only becomes a write when the user
+    /// clicks 应用, and <see cref="ApplyApprovedAsync"/> is the only thing in the app that writes sources
+    /// from an envelope.
+    /// </remarks>
+    public SyncApplyPreview PreviewApply(SourceSyncEnvelope peer)
+    {
+        ArgumentNullException.ThrowIfNull(peer);
+
+        SourceSyncPlan plan = SourceSyncPlanner.Plan(peer, _store.GetAll());
+        var items = new List<SourceSyncApprovalItem>(plan.Items.Count);
+        int secrets = 0;
+
+        foreach (SourceSyncCandidate candidate in plan.Items)
+        {
+            SourceSyncApprovalItem item = SourceSyncApprovalItem.FromCandidate(candidate);
+            if (CarriesSecrets(peer, item.SyncSourceId))
+            {
+                // The planner has no opinion about credentials; this app does. A record whose secret block
+                // arrived sealed on the other machine can never be re-sealed here, so it is withheld
+                // instead of written — and withholding it is why no foreign DPAPI blob is ever stored.
+                secrets++;
+                item = item with { Reason = SyncRoundReasons.SecretsRequireApproval, RequiresApproval = true };
+            }
+            items.Add(item);
+        }
+
+        return new SyncApplyPreview(peer, items, SourceSyncApprovalGate.Decide(items), SourceSyncPreviewSummary.FromPlan(plan), secrets);
+    }
+
+    /// <summary>
+    /// Writes the entries the user allowed, then reports counts. The only write path for an envelope.
+    /// </summary>
+    /// <remarks>
+    /// Entries the gate keeps as proposals (withheld) and entries whose write failed are reported together
+    /// as 保留未应用, because from the user's side both mean "this did not take effect".
+    /// </remarks>
+    public async Task<SyncApplyResult> ApplyApprovedAsync(
+        SyncApplyPreview preview,
+        IReadOnlyList<string>? allowedIds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(preview);
+
+        var decisions = new List<SourceSyncApprovalDecision>();
+        if (allowedIds is not null)
+        {
+            foreach (string id in allowedIds)
+            {
+                if (!string.IsNullOrWhiteSpace(id)) decisions.Add(SourceSyncApprovalDecision.Allow(id));
+            }
+        }
+
+        SourceSyncApprovalResult gate = SourceSyncApprovalGate.Decide(preview.Items, decisions);
+        int applied = 0;
+        int failed = 0;
+
+        foreach (SourceSyncApprovalItem item in gate.Applied)
+        {
+            ServerManager.RemoteSourceOutcome outcome;
+            SourceRecord? record = FindPeerRecord(preview.Envelope, item.SyncSourceId);
+
+            if (record is null)
+            {
+                // No record with that identity in the envelope means the peer stated a deletion.
+                outcome = await _servers.RemoveRemoteSourceAsync(item.SyncSourceId, ct).ConfigureAwait(true);
+            }
+            else if (item.Action == SourceSyncAction.Adopt && item.ServerId is { Length: > 0 } adoptServerId)
+            {
+                outcome = _servers.AdoptRemoteSource(adoptServerId, item.SyncSourceId, record.RecordRevision);
+            }
+            else
+            {
+                outcome = _servers.ApplyRemoteSource(record);
+            }
+
+            if (outcome.Applied) applied++;
+            else
+            {
+                failed++;
+                _log.Warn(LogCategory, "应用对端信封时跳过一条：" + outcome.Message);
+            }
+        }
+
+        int kept = gate.WithheldCount + failed + gate.SkippedCount;
+        _log.Info(
+            LogCategory,
+            "已应用对端信封：写入 " + applied + " 条，跳过 " + gate.SkippedCount + " 条，保留未应用 " + (gate.WithheldCount + failed) + " 条（不含任何凭据）");
+
+        return new SyncApplyResult(applied, gate.SkippedCount, gate.WithheldCount + failed, kept, gate.BlockingReasons, gate.AcknowledgedRisk);
+    }
+
+    private static bool CarriesSecrets(SourceSyncEnvelope envelope, string syncSourceId)
+    {
+        foreach (SourceRecord record in envelope.Sources)
+        {
+            if (!string.Equals(record.SyncSourceId, syncSourceId, StringComparison.OrdinalIgnoreCase)) continue;
+            return record.Secrets is not null;
+        }
+        return false;
+    }
+
+    private static SourceRecord? FindPeerRecord(SourceSyncEnvelope envelope, string syncSourceId)
+    {
+        foreach (SourceRecord record in envelope.Sources)
+        {
+            if (string.Equals(record.SyncSourceId, syncSourceId, StringComparison.OrdinalIgnoreCase)) return record;
+        }
+        return null;
+    }
+}
+
+/// <summary>Which kind of file the peer sent.</summary>
+public enum PeerFileKind
+{
+    None = 0,
+    PlainEnvelope,
+    EncryptedArchive,
+}
+
+/// <summary>What reading the picked file produced; <see cref="NeedsPassphrase"/> drives the dialog.</summary>
+public sealed record PeerFileResult(PeerFileKind Kind, SourceSyncEnvelope? Envelope, string? Error, bool NeedsPassphrase)
+{
+    public bool Succeeded => Envelope is not null;
+}
+
+/// <summary>One envelope, its approval items and the gate's default verdict.</summary>
+public sealed record SyncApplyPreview(
+    SourceSyncEnvelope Envelope,
+    IReadOnlyList<SourceSyncApprovalItem> Items,
+    SourceSyncApprovalResult Gate,
+    SourceSyncPreviewSummary Summary,
+    int SecretCount)
+{
+    /// <summary>True when applying would write at least one source.</summary>
+    public bool CanApply => Gate.CanApply;
+
+    /// <summary>Entry count, for the "selected file" line.</summary>
+    public int Total => Items.Count;
+}
+
+/// <summary>What one apply did.</summary>
+public sealed record SyncApplyResult(
+    int Applied,
+    int Skipped,
+    int Withheld,
+    int NotApplied,
+    IReadOnlyList<string> BlockingReasons,
+    bool AcknowledgedRisk)
+{
+    /// <summary>The three counts the task asks for, in one line.</summary>
+    public string Summary => "已写入本地 " + Applied + " 条 / 跳过 " + Skipped + " 条 / 保留未应用 " + NotApplied + " 条";
+
+    /// <summary>True when the user allowed at least one change the gate flagged as risky.</summary>
+    public bool TouchedRiskyChange => AcknowledgedRisk;
 }
 
 /// <summary>One row of the merge preview, pre-formatted for the page.</summary>

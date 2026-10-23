@@ -10,6 +10,7 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
@@ -117,7 +118,99 @@
       </Border>
     </Grid>
 
-    <Grid Grid.Row="4" ColumnSpacing="24">
+    <!-- Apply: pick a peer envelope, preview it, approve entry by entry, then write. -->
+    <Border Grid.Row="4" Padding="16" CornerRadius="8" BorderThickness="1"
+            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            AutomationProperties.Name="应用远端信封">
+      <StackPanel Spacing="8">
+        <TextBlock Text="应用远端信封" FontSize="15" FontWeight="SemiBold" />
+        <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Text="选择对端导出的信封文件（sync-envelope.json，或加密存档 .mhsync）。先预览，再逐条决定允许或跳过：在你点「应用」之前，本机不会写入任何内容。带凭据的条目不会写入，也不会被自动允许。" />
+
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button x:Name="ApplyPickButton" Content="选择信封文件" Click="OnPickApplyFileClick"
+                  AutomationProperties.AutomationId="sync.apply"
+                  AutomationProperties.Name="选择信封文件"
+                  ToolTipService.ToolTip="选择对端导出的信封文件；加密存档会要求输入口令" />
+          <Button x:Name="ApplyPreviewButton" Content="预览变更" Click="OnPreviewApplyClick" IsEnabled="False"
+                  AutomationProperties.AutomationId="sync.apply.preview"
+                  AutomationProperties.Name="预览变更"
+                  ToolTipService.ToolTip="重新计算这份信封会做什么，不写入任何内容" />
+          <Button x:Name="ApplyConfirmButton" Content="应用" Click="OnApplyClick" IsEnabled="False"
+                  AutomationProperties.AutomationId="sync.apply.confirm"
+                  AutomationProperties.Name="应用已允许的变更"
+                  ToolTipService.ToolTip="只写入你已允许的条目" />
+          <ProgressRing x:Name="ApplyBusy" IsActive="False" Width="20" Height="20" />
+        </StackPanel>
+
+        <TextBlock x:Name="ApplyFileText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   AutomationProperties.Name="已选择的信封文件"
+                   Text="尚未选择文件。" />
+
+        <TextBlock x:Name="ApplyBlockedText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed" Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                   AutomationProperties.AutomationId="sync.apply.blocked"
+                   AutomationProperties.Name="不可应用的条目" />
+
+        <ListView x:Name="ApplyList" SelectionMode="None" MaxHeight="220"
+                  AutomationProperties.Name="逐条确认">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              <Setter Property="Padding" Value="0" />
+            </Style>
+          </ListView.ItemContainerStyle>
+          <ListView.ItemTemplate>
+            <DataTemplate>
+              <Border Margin="0,0,0,6" Padding="12" CornerRadius="6" BorderThickness="1"
+                      Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                      AutomationProperties.AutomationId="sync.apply.entry"
+                      AutomationProperties.Name="{Binding Name}">
+                <Grid ColumnSpacing="12">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                               Text="{Binding DetailLabel}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Style="{StaticResource MediaHubCaption}" Text="{Binding ActionLabel}" />
+                      <TextBlock Style="{StaticResource MediaHubCaption}" Text="{Binding StateLabel}" />
+                      <TextBlock Style="{StaticResource MediaHubCaption}"
+                                 Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                 Text="{Binding ConfirmLabel}" />
+                    </StackPanel>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button Content="允许" Click="OnAllowEntryClick" Tag="{Binding}"
+                            IsEnabled="{Binding Allowable}"
+                            AutomationProperties.AutomationId="sync.entry.allow"
+                            AutomationProperties.Name="{Binding AllowLabel}" />
+                    <Button Content="跳过" Click="OnSkipEntryClick" Tag="{Binding}"
+                            AutomationProperties.AutomationId="sync.entry.skip"
+                            AutomationProperties.Name="{Binding SkipLabel}" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListView.ItemTemplate>
+        </ListView>
+
+        <TextBlock x:Name="ApplyResultText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   AutomationProperties.AutomationId="sync.apply.result"
+                   AutomationProperties.Name="应用结果" />
+
+        <!-- The one sentence that must survive any future edit: a write is not a sign-in. -->
+        <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Text="导入不代表已登录；请对每个来源点『验证』。" />
+      </StackPanel>
+    </Border>
+
+    <Grid Grid.Row="5" ColumnSpacing="24">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="3*" />
         <ColumnDefinition Width="2*" />
