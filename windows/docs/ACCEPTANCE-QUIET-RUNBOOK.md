@@ -100,3 +100,15 @@ Stop-MhQuietWatch $w
   U1 的 P0.9/P2.6 断言，在当前二进制 `MediaHub.dll A8EDD448…` 上 U1 两服各 41/41 通过。
   结果写入 `D:\mh-verify\quiet-w10b\summary-*.txt`（逐行 append，末行 `RESULT:`）并据此更新 W10 证据文档。
   结果写入 `D:\mh-verify\quiet-w10b\summary-*.txt`（逐行 append，末行 `RESULT:`）并据此更新 W10 证据文档。
+
+## 套件内重启与看门狗的分工（2026-10-24 修）
+
+- 问题：`Start-MhApp` 的 idle 守卫会拒绝套件内部的重启（u2/u3 为拿干净基线会 stop + start）。
+  一次真实的 W10 跑里 3 段各重启 4 次全被拒（`refusing to start MediaHub: the user is active (idle=2s…)`），
+  于是 P1/P3 成片 `[FAIL]`，而产品其实一次窗口都没起来 —— 属测试设施误判，不是产品缺陷。
+- 现在的分工：`run-quiet.ps1` 的门禁与看门狗才是这个时间窗的「别打扰」契约持有者，
+  因此它给套件进程设置 `MH_ALLOW_ACTIVE=1`（允许套件内重启）并导出 `MH_QUIET_ABORT_FILE`（看门狗的 abort 标记）。
+- `Start-MhApp` 先查 abort 标记：一旦使用者回来、看门狗落下 abort，任何重启都会直接抛错而不会把窗口再弹出来。
+  守卫的优先级因此是：abort 标记 > `MH_ALLOW_ACTIVE` > idle/QUNS。
+- 自检：把 `MH_QUIET_ABORT_FILE` 指向一份已存在的 abort 文件后调用 `Start-MhApp`，立即抛
+  `refusing to start MediaHub: the quiet run was aborted by user input (…)`，`Get-Process MediaHub` 计数为 0。

@@ -1197,6 +1197,13 @@ function Start-MhApp {
   # so the only honest protection is to not start at all. run-quiet.ps1 relies on this guard and
   # never sets MH_ALLOW_ACTIVE; the override exists only for a human who is sitting there and wants
   # the run anyway.
+  # A quiet run (run-quiet.ps1) owns the desktop: it sets MH_ALLOW_ACTIVE so mid-run restarts are
+  # allowed, and exports the abort marker so a restart can never put the window back on screen after
+  # the user has returned. The marker check runs first and applies to every caller.
+  if ($env:MH_QUIET_ABORT_FILE -and (Test-Path $env:MH_QUIET_ABORT_FILE)) {
+    $why = (Get-Content -Path $env:MH_QUIET_ABORT_FILE -TotalCount 1 -ErrorAction SilentlyContinue)
+    throw ('refusing to start MediaHub: the quiet run was aborted by user input (' + $why + ').')
+  }
   if ($env:MH_ALLOW_ACTIVE -ne '1') {
     $minIdle = 120
     if ($env:MH_MIN_IDLE_SECONDS) { $minIdle = [int]$env:MH_MIN_IDLE_SECONDS }

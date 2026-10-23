@@ -174,7 +174,20 @@ try {
             $log = Join-Path $OutRoot ('run-' + $suite + '-' + $server + '-' + $stamp + '.log')
             $errLog = $log + '.err'
             $started = Get-Date
-            $proc = Start-Process pwsh -ArgumentList @('-NoProfile', '-File', $suitePaths[$suite], '-Server', $server, '-Exe', $Exe) -RedirectStandardOutput $log -RedirectStandardError $errLog -PassThru -Wait -WindowStyle Hidden
+            # The gate and the watchdog already own the keep-out contract for this window, so the
+            # in-suite restarts (stop + start for a clean baseline) must not be refused for idle time —
+            # that guard is for a bare Start-MhApp. The abort marker is still exported, so a restart
+            # after the user comes back fails loudly instead of flashing a window on screen.
+            $savedAllow = $env:MH_ALLOW_ACTIVE
+            $savedAbort = $env:MH_QUIET_ABORT_FILE
+            $env:MH_ALLOW_ACTIVE = '1'
+            if ($watch) { $env:MH_QUIET_ABORT_FILE = [string]$watch.AbortFile }
+            try {
+                $proc = Start-Process pwsh -ArgumentList @('-NoProfile', '-File', $suitePaths[$suite], '-Server', $server, '-Exe', $Exe) -RedirectStandardOutput $log -RedirectStandardError $errLog -PassThru -Wait -WindowStyle Hidden
+            } finally {
+                $env:MH_ALLOW_ACTIVE = $savedAllow
+                $env:MH_QUIET_ABORT_FILE = $savedAbort
+            }
             $elapsed = [int]((Get-Date) - $started).TotalSeconds
 
             $result = 'NO-RESULT'
