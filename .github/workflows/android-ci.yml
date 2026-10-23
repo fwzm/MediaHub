@@ -117,6 +117,8 @@ jobs:
           #   feature.settings.sync.* —— 导入四桶分桶/失败关闭（W6-F 逻辑+会话）与补录验证协调器（W6-H）
           #   pairing.* / AndroidSourceSyncSecurityTest —— 对抗性输入回归（W6-J：畸形载荷/帧、非回环拒绝、
           #     凭据不回显、坏信封零写入、重复 syncSourceId 整封拒绝=W6J-1）
+          #   sync.SourceSyncTransfer* —— 分块帧传输与 Windows 逐字节互操作（W6-22：向量由真 API 生成，
+          #     19 条错误流的 reason 与 Windows 同名同序；收满即返、尾随帧不读）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -143,6 +145,9 @@ jobs:
             --required-suite com.mediahub.core.common.pairing.PairingTransportSecurityTest \
             --required-suite com.mediahub.core.common.pairing.PairingCredentialLeakTest \
             --required-suite com.mediahub.core.database.sync.AndroidSourceSyncSecurityTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferVectorsTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferRoundTripTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferLoopbackTest \
             --require-complete-suites
 
       - name: Lint

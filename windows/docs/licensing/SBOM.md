@@ -5,6 +5,13 @@
   because that is what a licence obligation attaches to.
 - Related: [LICENCE-DECISION.md](LICENCE-DECISION.md) (the GPL analysis and the recommendation).
 
+> **Update 2026-10-24 (W11b).** The inventory below is the **GPL single-flavour** snapshot taken in
+> W3-H (522 files / 347,972,263 bytes, engine 120,989,696 bytes). Since W13 this repository can also
+> be published with `-p:LibMpvFlavour=lgpl`, which swaps the engine for the 3,327,274-byte LGPL
+> candidate **plus 33 runtime DLLs** that the default flavour never ships. The two release trees are
+> measured in §7; nothing in §0–§6 was re-measured for the LGPL flavour, so read those tables as
+> "GPL flavour, W3-H" and not as "the package".
+
 ## 0. How this inventory was produced
 
 ```powershell
@@ -188,3 +195,68 @@ Get-Content "$out/MediaHub.deps.json" | Select-String 'Microsoft.WindowsAppSDK|r
 Get-ChildItem -Recurse -File $out | Where-Object { $_.Name -match 'LICEN|NOTICE|COPYING' }  # -> nothing
 Get-AuthenticodeSignature "$out/MediaHub.exe"                       # -> NotSigned
 ```
+
+## 7. Two flavours after W13 (2026-10-24, W11b)
+
+### 7.1 Measured `dotnet publish` trees
+
+Both commands are the CI shape (`dotnet publish src/MediaHub.App/MediaHub.App.csproj -c Release -p:Platform=x64 -o <dir>`),
+measured on this machine; evidence file `windows/engine/lgpl/dist/flavour-builds.txt`.
+
+| | GPL flavour (default) | LGPL flavour (`-p:LibMpvFlavour=lgpl`) |
+| --- | --- | --- |
+| Files | 526 | 559 (+33) |
+| Bytes on disk | 348,275,148 (332.14 MiB) | 289,439,302 (276.03 MiB) |
+| Engine `libmpv-2.dll` | 120,989,696 B, SHA-256 `6a48faec…63d9` | 3,327,274 B, SHA-256 `20035902…3c0a` |
+| Engine directory | `windows/native/libmpv/` | `windows/engine/lgpl/dist/` |
+| Sibling DLLs | none | 33 (see §7.2) |
+
+The whole size difference is the engine: 120,989,696 − 3,327,274 = 117,662,422 B smaller, plus
+58,826,576 B of sibling DLLs, net 289,439,302 B. File-name diff is exactly the 33 dependencies —
+no file appears only in the GPL tree, and the only same-name file with a different size is
+`libmpv-2.dll` itself.
+
+### 7.2 The 33 DLLs the LGPL flavour adds
+
+All 33 come from the same two build roots the engine probe uses (`D:\mh-servers\lgpl-build\prefix\bin` and
+`C:\msys64\ucrt64\bin`), collected by `windows/tools/collect-lgpl-runtime.ps1` into
+`windows/engine/lgpl/dist/` and recorded (name, size, sha256, source) in
+`runtime-dependencies-collected.txt`. Row-level licence table:
+[THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) §3.3; per-file evidence line numbers come from
+`windows/engine/lgpl/component-licences.txt`.
+
+| Licence family | Files | Bytes | Examples |
+| --- | --- | --- | --- |
+| LGPL-2.1-or-later / LGPL2.1 (incl. the LGPL FFmpeg build) | 11 | 33,273,735 | `avcodec-62`, `avfilter-11`, `libplacebo-360`, `glib-2.0-0` |
+| GPL family (GPL-3.0-or-later / GPL-2.0-or-later / MIT AND GPL) | 5 | 4,949,153 | `libiconv-2`, `libstdc++-6`, `lcms2`, `libfreetype-6` |
+| Apache-2.0 | 3 | 14,815,073 | `libshaderc_shared`, `libspirv-cross-c-shared`, `vulkan-1` |
+| MIT / ISC / Zlib | 7 | 3,777,412 | `libharfbuzz-0`, `libdovi`, `libbrotli*`, `libass-9`, `zlib1`, `libunibreak-7` |
+| custom upstream text | 2 | 760,610 | `libpng16-16`, `fontconfig` |
+| **未记录** (no declaration line in `component-licences.txt`) | 5 | 1,250,593 | `libwinpthread-1`, `libpcre2-8-0`, `libintl-8`, `libexpat-1`, `libbz2-1` |
+| **Total** | **33** | **58,826,576** | |
+
+### 7.3 What that means for compliance
+
+- The default flavour is unchanged: it ships one GPL-3.0-or-later engine and none of these DLLs.
+- Switching to the LGPL flavour **does not** mean "no GPL obligations": `libiconv`, `lcms2`,
+  `libfreetype`, `libgcc_s_seh` and `libstdc++` carry GPL-family terms (see
+  `windows/docs/licensing/W5-LGPL-BUILD.md:222-252` for the outstanding obligations).
+- Five DLLs have no licence declaration in the packager's own list; they are printed as 未记录 in the
+  notices rather than guessed. `windows/tools/check-licence-surface.ps1 -FailOnLicenceGaps` turns that gap
+  into a hard failure, which is the gate to use before publishing the LGPL flavour.
+- `RELEASE BLOCKER` in [LICENCE-DECISION.md](LICENCE-DECISION.md) and in
+  [windows/THIRD-PARTY-NOTICES.md](../../THIRD-PARTY-NOTICES.md) is **not** cleared by having a second flavour.
+
+### 7.4 Refreshing this section
+
+```powershell
+pwsh -NoProfile -File windows/tools/collect-lgpl-runtime.ps1      # refresh the 33-DLL manifest from the build roots
+dotnet restore windows/MediaHub.Windows.sln                       # keep project.assets.json current
+pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts/license-report -Sbom
+pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
+```
+
+Then re-measure the two publish trees (the commands in §0 and `windows/docs/LGPL-ENGINE-SWITCH.md` §10.1)
+and update the table above; the machine-readable copy lives in
+`windows/engine/lgpl/dist/flavour-builds.txt`. How the scripts work:
+[LICENSE-SURFACE-CHECK.md](LICENSE-SURFACE-CHECK.md).

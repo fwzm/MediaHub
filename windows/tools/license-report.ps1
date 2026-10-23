@@ -111,6 +111,60 @@ $NativeEngine = [ordered]@{
     Compliance    = 'windows/docs/LGPL-COMPLIANCE.md'
 }
 
+# Fixed facts about the LGPL flavour's runtime dependency set. Those 33 DLLs are NOT shipped by the
+# default flavour (the GPL build above); they appear only when the app is built with
+# -p:LibMpvFlavour=lgpl. They are still real licence obligations of that flavour, so the generated
+# notices must enumerate them instead of leaving a blank page. The file list is read from the
+# artefact that windows/tools/collect-lgpl-runtime.ps1 writes; the licence of each file comes from
+# the table below, transcribed from windows/engine/lgpl/component-licences.txt (the MSYS2
+# packager's own declaration) whose line number is kept as evidence. Files with no row in that file
+# are reported as 未记录 rather than guessed - a guessed licence is worse than a visible gap.
+$LgplRuntimeInfo = [ordered]@{
+    CoreDll       = 'windows/engine/lgpl/dist/libmpv-2.dll'
+    CollectedList = 'windows/engine/lgpl/dist/runtime-dependencies-collected.txt'
+    LicenceTable  = 'windows/engine/lgpl/component-licences.txt'
+    BuildDoc      = 'windows/docs/licensing/W5-LGPL-BUILD.md'
+    SwitchDoc     = 'windows/docs/LGPL-ENGINE-SWITCH.md'
+}
+
+# file name -> @(component, licence, evidence). Only names that actually appear in the collected
+# list belong here; anything unmapped is reported as a gap, never silently dropped.
+$LgplComponentMap = [ordered]@{
+    'avcodec-62.dll'             = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (built by windows/engine/lgpl/build-ffmpeg-lgpl.sh; its configure reports "LGPL version 2.1 or later")')
+    'avdevice-62.dll'            = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (same FFmpeg build)')
+    'avfilter-11.dll'            = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (same FFmpeg build)')
+    'avformat-62.dll'            = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (same FFmpeg build)')
+    'avutil-60.dll'              = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (same FFmpeg build)')
+    'swresample-6.dll'           = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (same FFmpeg build)')
+    'swscale-9.dll'              = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (same FFmpeg build)')
+    'libass-9.dll'               = @('libass', 'ISC', 'component-licences.txt:6')
+    'libplacebo-360.dll'         = @('libplacebo', 'LGPL2.1', 'component-licences.txt:7')
+    'libshaderc_shared.dll'      = @('shaderc', 'Apache-2.0', 'component-licences.txt:8')
+    'libspirv-cross-c-shared.dll' = @('spirv-cross', 'Apache-2.0', 'component-licences.txt:9')
+    'vulkan-1.dll'               = @('vulkan-loader', 'Apache-2.0', 'component-licences.txt:10')
+    'libfreetype-6.dll'          = @('freetype', 'GPL-2.0-or-later OR FTL', 'component-licences.txt:12')
+    'libharfbuzz-0.dll'          = @('harfbuzz', 'MIT', 'component-licences.txt:13')
+    'libfribidi-0.dll'           = @('fribidi', 'LGPL-2.1-or-later', 'component-licences.txt:14')
+    'libfontconfig-1.dll'        = @('fontconfig', 'custom (see upstream COPYING)', 'component-licences.txt:15')
+    'liblcms2-2.dll'             = @('lcms2', 'MIT AND GPL-3.0-or-later', 'component-licences.txt:16')
+    'libdovi.dll'                = @('libdovi', 'MIT', 'component-licences.txt:17')
+    'libunibreak-7.dll'          = @('libunibreak', 'Zlib', 'component-licences.txt:18')
+    'libglib-2.0-0.dll'          = @('glib2', 'LGPL-2.1-or-later', 'component-licences.txt:19')
+    'libpng16-16.dll'            = @('libpng', 'custom (see upstream LICENSE)', 'component-licences.txt:20')
+    'libbrotlicommon.dll'        = @('brotli', 'MIT', 'component-licences.txt:21')
+    'libbrotlidec.dll'           = @('brotli', 'MIT', 'component-licences.txt:21')
+    'zlib1.dll'                  = @('zlib', 'Zlib', 'component-licences.txt:22')
+    'libiconv-2.dll'             = @('libiconv', 'GPL-3.0-or-later', 'component-licences.txt:23')
+    'libgraphite2.dll'           = @('graphite2', 'LGPL-2.1-or-later', 'component-licences.txt:24')
+    'libgcc_s_seh-1.dll'         = @('libgcc', 'GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later', 'component-licences.txt:25')
+    'libstdc++-6.dll'            = @('libstdc++', 'GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later', 'component-licences.txt:26')
+    'libbz2-1.dll'               = @('bzip2', '未记录（component-licences.txt 无此包）', 'component-licences.txt 无行 - 待核实')
+    'libexpat-1.dll'             = @('expat', '未记录（component-licences.txt 无此包）', 'component-licences.txt 无行 - 待核实')
+    'libintl-8.dll'              = @('gettext', '未记录（component-licences.txt 无此包）', 'component-licences.txt 无行 - 待核实')
+    'libpcre2-8-0.dll'           = @('pcre2', '未记录（component-licences.txt 无此包）', 'component-licences.txt 无行 - 待核实')
+    'libwinpthread-1.dll'        = @('mingw-w64 runtime', '未记录（component-licences.txt 无此包）', 'component-licences.txt 无行 - 待核实')
+}
+
 function Write-Utf8 {
     param([string] $Path, [string] $Text)
     $dir = Split-Path -Parent $Path
@@ -118,6 +172,43 @@ function Write-Utf8 {
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
     }
     [System.IO.File]::WriteAllText($Path, $Text, [System.Text.UTF8Encoding]::new($false))
+}
+
+function Resolve-LgplRuntimeDependencies {
+    param([string] $Root)
+    $resolved = @{ Present = $false; Rows = @(); Missing = @(); Gaps = @() }
+    $listPath = Join-Path $Root ($LgplRuntimeInfo.CollectedList -replace '/', $pathSeparator)
+    if (-not (Test-Path -LiteralPath $listPath)) { return $resolved }
+    $resolved.Present = $true
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $missing = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in (Get-Content -LiteralPath $listPath)) {
+        $text = $line.Trim()
+        if (-not $text -or $text.StartsWith('#')) { continue }
+        $parts = $text -split '\s+'
+        if ($parts.Count -lt 4) { continue }
+        $name = $parts[0]
+        $mapped = $LgplComponentMap[$name]
+        if (-not $mapped) {
+            $mapped = @('未记录', '未记录（映射表没有这个文件名）', '需人工补')
+            $missing.Add($name) | Out-Null
+        }
+        $rows.Add([ordered]@{
+            name      = $name
+            bytes     = [int64]$parts[1]
+            sha256    = $parts[2]
+            source    = $parts[3]
+            component = $mapped[0]
+            license   = $mapped[1]
+            evidence  = $mapped[2]
+        }) | Out-Null
+    }
+    $resolved.Rows = @($rows | Sort-Object -Property name)
+    $resolved.Missing = @($missing)
+    # A row whose licence line cannot be quoted from the packager's declaration is a gap even when the
+    # file name is known: an unmapped name and an unmapped *licence* are both 'not yet verified'.
+    $resolved.Gaps = @($resolved.Rows | Where-Object { ([string]$_.license).StartsWith('未记录') } | ForEach-Object { $_.name })
+    return $resolved
 }
 
 function Format-Argument {
@@ -466,6 +557,12 @@ else {
     $warnings.Add("$($NativeEngine.Path): not present on this machine (fetch it with windows/tools/fetch-libmpv.ps1)")
 }
 
+# --- LGPL flavour runtime dependency set -----------------------------------------------------
+# Absent is not an error: the default flavour does not ship these DLLs. It only means the collector
+# has never run on this machine, which the notices state explicitly instead of pretending the
+# LGPL flavour carries no dependencies.
+$lgplRuntime = Resolve-LgplRuntimeDependencies -Root $RepoRoot
+
 # --- summary ---------------------------------------------------------------------------------
 $expressionCount = 0
 $fileCount = 0
@@ -533,6 +630,24 @@ $jsonReport = [ordered]@{
         observed     = $nativeObserved
         note         = 'GPL-only engine: NOT covered by this report policy; see windows/docs/LGPL-COMPLIANCE.md'
     }
+    lgplFlavour    = [ordered]@{
+        present      = $lgplRuntime.Present
+        collectedList = $LgplRuntimeInfo.CollectedList
+        licenceTable = $LgplRuntimeInfo.LicenceTable
+        count        = @($lgplRuntime.Rows).Count
+        unrecorded   = @($lgplRuntime.Gaps)
+        note         = 'Runtime DLLs of the optional -p:LibMpvFlavour=lgpl build. The default flavour ships none of them; they are enumerated because switching flavour makes them part of the distributed package.'
+        dependencies = @($lgplRuntime.Rows | ForEach-Object {
+            [ordered]@{
+                name      = $_.name
+                bytes     = $_.bytes
+                sha256    = $_.sha256
+                component = $_.component
+                license   = $_.license
+                evidence  = $_.evidence
+            }
+        })
+    }
 }
 
 Write-Utf8 -Path $Json -Text (($jsonReport | ConvertTo-Json -Depth 12) + [Environment]::NewLine)
@@ -543,6 +658,7 @@ Write-Output "license-report  dotnet=$dotnetVersion  pwsh=$pwshVersion  generate
 Write-Output "license-report  projects=$($summary.projects)  rows=$($summary.rows)  packages=$($summary.packages)"
 Write-Output "license-report  licence sources: expression=$($summary.expression) file=$($summary.licenseFile) licenseUrl=$($summary.licenseUrl) missing=$($summary.missing)"
 Write-Output "license-report  native-engine: $($NativeEngine.License) ($($NativeEngine.Path), observed=$($nativeObserved.bytes) B, matchesPin=$($nativeObserved.matchesPin)) - NOT covered by this check"
+Write-Output "license-report  lgpl-flavour dependencies: present=$($lgplRuntime.Present) count=$(@($lgplRuntime.Rows).Count) unrecorded=$(@($lgplRuntime.Gaps).Count) ($($LgplRuntimeInfo.CollectedList))"
 foreach ($warning in $warnings) { Write-Output "license-report  WARN  $warning" }
 foreach ($violation in $violations) { Write-Output "license-report  DENY  $($violation.package)/$($violation.version): $($violation.reason) [$($violation.license)]" }
 Write-Output "license-report  violations=$($violations.Count)  warnings=$($warnings.Count)"
@@ -691,6 +807,29 @@ if (-not $SkipDocs) {
     $notices.Add("- LGPL 候选构建已存在但**尚未切换**：$($NativeEngine.LgplCandidate)。")
     $notices.Add('- 切换到 LGPL 构建后必须履行的义务、可替换 DLL 的要求与分发前 checklist：`windows/docs/LGPL-COMPLIANCE.md`。')
     $notices.Add('')
+    $notices.Add('### 3.3 LGPL flavour 额外带入的运行时依赖（默认 flavour 不分发它们）')
+    $notices.Add('')
+    if (-not $lgplRuntime.Present) {
+        $notices.Add('- 本机没有 ' + [char]96 + $LgplRuntimeInfo.CollectedList + [char]96 + '：还没跑过 windows/tools/collect-lgpl-runtime.ps1，因此无法枚举 LGPL flavour 的依赖。以默认 flavour 分发时这不算缺口；一旦要发布 LGPL flavour，必须先跑一次收集脚本。')
+    }
+    else {
+        $notices.Add('默认 flavour（-p:LibMpvFlavour=gpl）只带 ' + [char]96 + $NativeEngine.Path + [char]96 + '。下表是 **LGPL flavour 额外带入的**依赖，清单来自 ' + [char]96 + $LgplRuntimeInfo.CollectedList + [char]96 + '（由 windows/tools/collect-lgpl-runtime.ps1 生成），许可转录自 ' + [char]96 + $LgplRuntimeInfo.LicenceTable + [char]96 + '。它们不随当前默认产物分发，但切到 LGPL flavour 就随包。')
+        $notices.Add('')
+        $notices.Add('| 文件 | 组件 | 许可 | 证据 |')
+        $notices.Add('| --- | --- | --- | --- |')
+        foreach ($row in $lgplRuntime.Rows) {
+            $notices.Add('| ' + [char]96 + $row.name + [char]96 + ' | ' + $row.component + ' | ' + $row.license + ' | ' + $row.evidence + ' |')
+        }
+        $notices.Add('')
+        $notices.Add('- 合计 **' + @($lgplRuntime.Rows).Count + '** 个 DLL，总字节 ' + ('{0:N0}' -f (@($lgplRuntime.Rows | ForEach-Object { [int64]$_.bytes } | Measure-Object -Sum).Sum)) + '。其中 libiconv-2.dll（GPL-3.0-or-later）、liblcms2-2.dll（MIT AND GPL-3.0-or-later）、libfreetype-6.dll（GPL-2.0-or-later OR FTL）、libgcc_s_seh-1.dll 与 libstdc++-6.dll（GPL-3.0-or-later WITH GCC-exception-3.1）携带 GPL 家族条款 ⇒ **切到 LGPL flavour 并不等于零 GPL 义务**，与 ' + [char]96 + $LgplRuntimeInfo.BuildDoc + ':228-235' + [char]96 + ' 记录的残留义务一致。')
+        if (@($lgplRuntime.Gaps).Count -gt 0) {
+            $notices.Add('- 缺口：' + (@($lgplRuntime.Gaps) -join '、') + ' 在 ' + [char]96 + $LgplRuntimeInfo.LicenceTable + [char]96 + ' 里**没有声明行**，本表只能标「未记录」。发布 LGPL flavour 前必须补齐这些包的许可证据（pacman -Si 的 License 字段）。')
+        }
+        else {
+            $notices.Add('- 本表 33 行都有 ' + [char]96 + $LgplRuntimeInfo.LicenceTable + [char]96 + ' 的声明行可引；没有任何一行靠猜测填写。')
+        }
+    }
+    $notices.Add('')
     $notices.Add('## 4. 仓库自身的许可')
     $notices.Add('')
     $notices.Add('- 仓库根**没有 LICENSE 文件**：`windows/docs/licensing/LICENCE-DECISION.md:180-190` 记录了这一点（`git ls-files` 无匹配，`git log -- LICENSE` 无输出）。')
@@ -725,7 +864,7 @@ if (-not $SkipDocs) {
     $notices.Add('')
     $notices.Add('脚本退出码：0 干净 / 1 未找到可检查的工程 / 2 缺 `project.assets.json`（先 restore）/ 3 策略违规。')
     $notices.Add('')
-    $notices.Add('相关文件：`windows/docs/sbom-windows.cdx.json`（CycloneDX 1.5）、`windows/docs/LGPL-COMPLIANCE.md`、`windows/THIRD-PARTY-NOTICES.md`（历史手工清单：引擎 GPL 判定与固定摘要）、`windows/docs/licensing/`（W3/W5 记录）。')
+    $notices.Add('相关文件：`windows/docs/sbom-windows.cdx.json`（CycloneDX 1.5）、`windows/docs/LGPL-COMPLIANCE.md`、`windows/THIRD-PARTY-NOTICES.md`（历史手工清单：引擎 GPL 判定与固定摘要）、`windows/tools/check-licence-surface.ps1`（核对本文件与 SBOM 是否跟得上仓库现状，退出码 0/1）、`windows/docs/licensing/`（W3/W5/W11b 记录）。')
     Write-Utf8 -Path $NoticesPath -Text (($notices -join [Environment]::NewLine) + [Environment]::NewLine)
 }
 
@@ -764,6 +903,17 @@ if ($Sbom) {
     $hex = -join ($hash[0..15] | ForEach-Object { $_.ToString('x2') })
     $serial = 'urn:uuid:' + $hex.Substring(0, 8) + '-' + $hex.Substring(8, 4) + '-' + $hex.Substring(12, 4) + '-' + $hex.Substring(16, 4) + '-' + $hex.Substring(20, 12)
 
+    # One line of SBOM metadata records whether the LGPL flavour's extra DLL set is
+    # present in this checkout. The LGPL candidate is a shipping *option*, not the
+    # default, so an absent dist/ is reported as a fact, never as a failure.
+    if ($lgplRuntime.Present) {
+        $lgplFlavourProperty = @($lgplRuntime.Rows).Count.ToString() + ' extra runtime DLLs under ' + $LgplRuntimeInfo.CollectedList +
+            ' (licences transcribed from ' + $LgplRuntimeInfo.LicenceTable + '; ' + @($lgplRuntime.Gaps).Count.ToString() + ' unrecorded); the default gpl flavour does not ship them'
+    }
+    else {
+        $lgplFlavourProperty = 'not collected on this machine: ' + $LgplRuntimeInfo.CollectedList + ' is absent, so the lgpl flavour cannot be built from this checkout'
+    }
+
     $bom = [ordered]@{
         bomFormat    = 'CycloneDX'
         specVersion  = '1.5'
@@ -782,7 +932,8 @@ if ($Sbom) {
                 [ordered]@{ name = 'mediahub:source-revision'; value = "$gitBranch@$gitHead" },
                 [ordered]@{ name = 'mediahub:git-describe'; value = $gitDescribe },
                 [ordered]@{ name = 'mediahub:own-license'; value = 'undocumented - no LICENSE file in the repository (windows/docs/licensing/LICENCE-DECISION.md:180-190)' },
-                [ordered]@{ name = 'mediahub:engine-license-blocker'; value = 'libmpv-2.dll is a GPL-3.0-or-later build (windows/THIRD-PARTY-NOTICES.md:18); the LGPL candidate exists but is not shipped' }
+                [ordered]@{ name = 'mediahub:engine-license-blocker'; value = 'libmpv-2.dll is a GPL-3.0-or-later build (windows/THIRD-PARTY-NOTICES.md:18); the LGPL candidate exists but is not shipped' },
+                [ordered]@{ name = 'mediahub:lgpl-flavour-dependencies'; value = $lgplFlavourProperty }
             )
         }
         components   = @($components)

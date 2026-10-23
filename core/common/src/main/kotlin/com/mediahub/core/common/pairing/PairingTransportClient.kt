@@ -1,8 +1,6 @@
 package com.mediahub.core.common.pairing
 
 import java.io.IOException
-import java.io.InputStream
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
@@ -48,7 +46,7 @@ class PairingTransportClient(
         require(responseLimit in 1..PairingFrame.MAXIMUM_PAYLOAD_BYTES) {
             "响应上限必须在 1.." + PairingFrame.MAXIMUM_PAYLOAD_BYTES + "，实际 " + responseLimit
         }
-        val address = loopbackAddressOrNull(host)
+        val address = LoopbackOnly.addressOrNull(host)
             ?: return PairingFrameResult.Failed(
                 PairingClientReasons.NON_LOOPBACK_PEER,
                 "只允许连回环地址，实际 " + host,
@@ -79,7 +77,7 @@ class PairingTransportClient(
                 output.write(requestFrame)
                 output.flush()
             }
-            when (val read = readFrame(opened.getInputStream(), responseLimit)) {
+            when (val read = PairingFrameIo.readFrame(opened.getInputStream(), responseLimit)) {
                 is FrameRead.Payload -> PairingFrameResult.Ok(read.bytes)
                 is FrameRead.Rejected -> PairingFrameResult.Failed(
                     PairingTransportReasons.PAYLOAD_INVALID,
@@ -101,7 +99,7 @@ class PairingTransportClient(
                 )
             }
         } finally {
-            closeQuietly(socket)
+            LoopbackOnly.closeQuietly(socket)
         }
     }
 
@@ -167,79 +165,6 @@ class PairingTransportClient(
         return PairingInvitationResult.Ok(payload, text)
     }
 
-    private sealed interface FrameRead {
-        class Payload(val bytes: ByteArray) : FrameRead
-        class Rejected(val detail: String) : FrameRead
-    }
-
-    private fun readFrame(input: InputStream, limit: Int): FrameRead {
-        val header = readFully(input, PairingFrame.HEADER_BYTES)
-            ?: return FrameRead.Rejected("帧头不足 " + PairingFrame.HEADER_BYTES + " 字节")
-        val length = ((header[0].toInt() and 0xFF) shl 24) or
-            ((header[1].toInt() and 0xFF) shl 16) or
-            ((header[2].toInt() and 0xFF) shl 8) or
-            (header[3].toInt() and 0xFF)
-        if (length <= 0) {
-            return FrameRead.Rejected("帧长度非法：" + length)
-        }
-        if (length > limit) {
-            return FrameRead.Rejected("帧长度 " + length + " 字节超过上限 " + limit)
-        }
-        val body = readFully(input, length)
-            ?: return FrameRead.Rejected("帧体不足：声明 " + length + " 字节，实际提前结束")
-        return FrameRead.Payload(body)
-    }
-
-    /** 读满 size 字节；对端提前关闭返回 null。超时与其它 IO 错误交给 exchange 的 catch 统一映射。 */
-    private fun readFully(input: InputStream, size: Int): ByteArray? {
-        val buffer = ByteArray(size)
-        var offset = 0
-        while (offset < size) {
-            val read = input.read(buffer, offset, size - offset)
-            if (read < 0) {
-                return null
-            }
-            offset += read
-        }
-        return buffer
-    }
-
-    /**
-     * 只解析字面量地址，不做 DNS：主机名解析结果不受本端控制，等于把「只连回环」交给解析器决定。
-     * 返回 null 一律由调用方映射成 non-loopback-peer。
-     */
-    private fun loopbackAddressOrNull(host: String): InetAddress? {
-        val trimmed = host.trim()
-        if (trimmed.isEmpty()) {
-            return null
-        }
-        if (trimmed.equals("localhost", ignoreCase = true)) {
-            return InetAddress.getLoopbackAddress()
-        }
-        val literal = trimmed.removePrefix("[").removeSuffix("]")
-        val looksLikeIpv4 = IPV4_LITERAL.matches(literal)
-        val looksLikeIpv6 = literal.contains(':') && IPV6_LITERAL.matches(literal)
-        if (!looksLikeIpv4 && !looksLikeIpv6) {
-            return null
-        }
-        val address = try {
-            InetAddress.getByName(literal)
-        } catch (error: Exception) {
-            return null
-        }
-        return if (address.isLoopbackAddress) address else null
-    }
-
-    private fun closeQuietly(socket: Socket?) {
-        if (socket == null) {
-            return
-        }
-        try {
-            socket.close()
-        } catch (error: IOException) {
-        }
-    }
-
     companion object {
         /** 默认连接超时，毫秒。 */
         const val DEFAULT_CONNECT_TIMEOUT_MS: Int = 3_000
@@ -248,9 +173,6 @@ class PairingTransportClient(
         const val DEFAULT_READ_TIMEOUT_MS: Int = 5_000
 
         private const val MAXIMUM_PORT = 65_535
-
-        private val IPV4_LITERAL = Regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}")
-        private val IPV6_LITERAL = Regex("^[0-9a-fA-F:.]+$")
     }
 }
 

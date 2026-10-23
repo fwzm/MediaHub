@@ -111,6 +111,22 @@ jobs:
           }
           "combined tests=$all"
 
+      # The licence deliverable rots silently: a new csproj appears and the NuGet inventory is never
+      # regenerated, the generated notices lose the libmpv GPL conclusion, or the SBOM stops being a
+      # valid CycloneDX document. Regenerate the report here (evidence only - -SkipDocs keeps the
+      # committed documents untouched) and then assert the whole surface against it. The five LGPL
+      # dependency rows that cannot quote a licence stay warnings on purpose: the default flavour is
+      # GPL and does not ship those DLLs, so failing on them would be noise rather than a signal.
+      - name: Licence report (evidence only, no docs rewrite)
+        shell: pwsh
+        working-directory: windows
+        run: pwsh -NoProfile -File tools/license-report.ps1 -OutDir artifacts/license-report -SkipDocs
+
+      - name: Licence surface guard (notices / SBOM / project drift)
+        shell: pwsh
+        working-directory: windows
+        run: pwsh -NoProfile -File tools/check-licence-surface.ps1 -JsonPath artifacts/license-report/license-report.json
+
       - name: Engine integration probe (real playback against the committed fixture)
         shell: pwsh
         working-directory: windows
@@ -196,4 +212,5 @@ jobs:
           path: |
             windows/artifacts/test-results/**
             windows/artifacts/engine-probe-ci.json
+            windows/artifacts/license-report/**
             windows/artifacts/portable/**

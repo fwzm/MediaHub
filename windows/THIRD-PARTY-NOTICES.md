@@ -62,6 +62,39 @@ mpv 自身的代码是 LGPL-2.1+，但**与 GPL 组件链接后的整体按 GPL 
 **不得将 Windows 便携包作为正式发行版对外分发**。
 本仓库自身为 MIT，该许可**不覆盖** `libmpv-2.dll`。
 
+## LGPL flavour 额外带入的运行时依赖（默认 flavour 不分发）
+
+默认构建（`-p:LibMpvFlavour=gpl`）只带一个引擎 DLL：`windows/native/libmpv/libmpv-2.dll`
+（120,989,696 字节，GPL-3.0-or-later，判定见上一节）。以 `-p:LibMpvFlavour=lgpl` 构建时，引擎换成
+
+`windows/engine/lgpl/dist/libmpv-2.dll`（**3,327,274 字节**，SHA-256
+`20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a`），并**额外带入 33 个运行时 DLL**，
+合计 58,826,576 字节。实测树的差别只有这些：`dotnet publish` 文件数 526 → 559，字节数
+348,275,148 → 289,439,302（引擎从 115.4 MB 降到 3.2 MB，抵消了这 58.8 MB 依赖）。证据：
+`windows/engine/lgpl/dist/flavour-builds.txt`、`windows/engine/lgpl/dist/runtime-dependencies-collected.txt`。
+
+| 许可族 | 文件数 | 字节 | 代表文件 |
+| --- | --- | --- | --- |
+| LGPL-2.1-or-later / LGPL2.1（含 LGPL 配置的 FFmpeg） | 11 | 33,273,735 | `avcodec-62`、`avfilter-11`、`libplacebo-360`、`libglib-2.0-0` |
+| GPL 家族（GPL-3.0-or-later / GPL-2.0-or-later / MIT AND GPL-3.0-or-later） | 5 | 4,949,153 | `libiconv-2`、`libstdc++-6`、`liblcms2-2`、`libfreetype-6`、`libgcc_s_seh-1` |
+| Apache-2.0 | 3 | 14,815,073 | `libshaderc_shared`、`libspirv-cross-c-shared`、`vulkan-1` |
+| MIT / ISC / Zlib | 7 | 3,777,412 | `libharfbuzz-0`、`libdovi`、`libbrotli*`、`libass-9`、`zlib1` |
+| 自定义上游文本 | 2 | 760,610 | `libpng16-16`、`libfontconfig-1` |
+| **未记录**（`component-licences.txt` 无声明行） | 5 | 1,250,593 | `libwinpthread-1`、`libpcre2-8-0`、`libintl-8`、`libexpat-1`、`libbz2-1` |
+| **合计** | **33** | **58,826,576** | |
+
+两点必须写清楚：
+
+1. **切到 LGPL flavour 不等于零 GPL 义务。** 上表 GPL 家族的 5 个文件（以及 FFmpeg 之外仍然 GPL 的
+   `libiconv`、GPL 双许可的 `lcms2`/`libfreetype`）本身就带 GPL 条款；残余义务见
+   `windows/docs/licensing/W5-LGPL-BUILD.md`。
+2. **5 个未记录项的许可尚未核实**，本文件不猜。逐行证据（文件名/字节/SHA-256/来源路径/许可/证据行号）
+   见 `windows/docs/THIRD-PARTY-NOTICES.md` §3.3；核对脚本 `windows/tools/check-licence-surface.ps1 -FailOnLicenceGaps` 会把该缺口判为失败，
+   作为「发布 LGPL flavour 之前」的硬门。
+
+上述任何一项都不改变本文件开头的结论：在维护者拍板之前，`libmpv-2.dll` 的 GPL 问题仍是 **RELEASE BLOCKER**，
+默认 flavour 仍随包分发 GPL 构建。
+
 ## 供应链固定
 
 `windows/tools/fetch-libmpv.ps1` 固定两个摘要并在安装前强制校验：
