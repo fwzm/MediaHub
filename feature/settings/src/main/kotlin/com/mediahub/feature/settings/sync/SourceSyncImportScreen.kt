@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -27,15 +28,21 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -58,7 +65,26 @@ object SourceSyncImportTags {
 
     /** 条目当前决策的一行回执（未决定 / 已允许 / 已跳过 / 不可允许原因）。 */
     const val ENTRY_STATE = "sync.entry.state"
+
+    /** W6-H：结果页每个来源的「补录并验证」按钮。 */
+    const val VERIFY = "sync.source.verify"
+
+    /** 补录凭据对话框本体。 */
+    const val VERIFY_DIALOG = "sync.source.verify.dialog"
+
+    /** 密码输入框（视觉上被 PasswordVisualTransformation 遮蔽，语义上带 Password 标记）。 */
+    const val VERIFY_INPUT = "sync.source.verify.input"
+
+    const val VERIFY_CONFIRM = "sync.source.verify.confirm"
+    const val VERIFY_CANCEL = "sync.source.verify.cancel"
+
+    /** 单个来源的三态状态行（需补录凭据 / 已验证 / 验证失败：原因）。 */
+    const val VERIFY_STATE = "sync.source.verify.state"
+
     fun entry(key: String): String = "sync.entry:" + key
+
+    /** 每个来源的验证区块（同页多条时要能把状态行限定到某一条）。 */
+    fun verifyRow(serverId: String): String = "sync.source.verify.row:" + serverId
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -68,6 +94,7 @@ fun SourceSyncImportRoute(
     viewModel: SourceSyncImportViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val verification by viewModel.verificationState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -84,11 +111,15 @@ fun SourceSyncImportRoute(
         onDecide = viewModel::decide,
         onApply = viewModel::apply,
         onBack = onBack,
+        verification = verification,
+        onVerifyRequest = viewModel::openVerificationDialog,
+        onVerifyDismiss = viewModel::dismissVerificationDialog,
+        onVerifyConfirm = viewModel::verify,
     )
 }
 
 /**
- * 无状态导入页：整页只由 [state] 与五个回调驱动。
+ * 无状态导入页：整页只由 [state] / [verification] 与回调驱动。
  *
  * 这样 UI 测试可以直接渲染本函数（不需要 Hilt、不需要真实仓库），
  * 交互证据与逻辑证据因此能分开取。
@@ -102,6 +133,11 @@ fun SourceSyncImportScreen(
     onDecide: (String, SourceSyncEntryDecision) -> Unit,
     onApply: () -> Unit,
     onBack: () -> Unit,
+    /** W6-H：结果页的逐源验证状态；默认空（既有调用点无需改动）。 */
+    verification: SourceVerificationViewState = SourceVerificationViewState(),
+    onVerifyRequest: (String) -> Unit = {},
+    onVerifyDismiss: () -> Unit = {},
+    onVerifyConfirm: (String, String) -> Unit = { _, _ -> },
 ) {
     Scaffold(
         modifier = Modifier.testTag(SourceSyncImportTags.SCREEN),
@@ -246,6 +282,24 @@ fun SourceSyncImportScreen(
                         applied.appliedTitles.forEach { title ->
                             Text("- " + title, style = MaterialTheme.typography.bodySmall)
                         }
+                        if (verification.hasSources) {
+                            Spacer(Modifier.height(8.dp))
+                            Text("逐源验证", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                SourceVerificationCopy.DIALOG_HINT,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            verification.sources.forEach { source ->
+                                VerificationRow(
+                                    source = source,
+                                    line = verification.lineFor(source.serverId),
+                                    state = verification.stateOf(source.serverId),
+                                    busy = verification.isBusy(source.serverId),
+                                    onVerify = onVerifyRequest,
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(8.dp))
                         Text(
                             SourceSyncImportCopy.DISCLAIMER,
@@ -253,6 +307,15 @@ fun SourceSyncImportScreen(
                         )
                     }
                 }
+            }
+
+            verification.dialogSource?.let { source ->
+                VerifyCredentialDialog(
+                    source = source,
+                    busy = verification.isBusy(source.serverId),
+                    onConfirm = onVerifyConfirm,
+                    onDismiss = onVerifyDismiss,
+                )
             }
         }
     }
@@ -334,6 +397,105 @@ private fun EntryCard(
             }
         }
     }
+}
+
+/**
+ * 结果页里的一个来源：标题 + 三态状态行 + 「补录并验证」按钮。
+ *
+ * 状态行永远可见（未验证时显示"需补录凭据"），否则用户看不出"导入成功"与"已经登录"的区别。
+ */
+@Composable
+private fun VerificationRow(
+    source: SourceVerificationSource,
+    line: String,
+    state: SourceVerificationState,
+    busy: Boolean,
+    onVerify: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(SourceSyncImportTags.verifyRow(source.serverId)),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(source.title, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            line,
+            style = MaterialTheme.typography.bodySmall,
+            color = when (state) {
+                SourceVerificationState.VERIFIED -> MaterialTheme.colorScheme.primary
+                SourceVerificationState.FAILED -> MaterialTheme.colorScheme.error
+                SourceVerificationState.NEEDS_CREDENTIALS ->
+                    MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            modifier = Modifier.testTag(SourceSyncImportTags.VERIFY_STATE),
+        )
+        Button(
+            onClick = { onVerify(source.serverId) },
+            enabled = !busy,
+            modifier = Modifier.testTag(SourceSyncImportTags.VERIFY),
+        ) {
+            Text(SourceVerificationCopy.VERIFY_ACTION)
+        }
+    }
+}
+
+/**
+ * 补录凭据对话框。
+ *
+ * 密码框用 PasswordVisualTransformation（语义上带 Password 标记，UI 测试据此断言"输入被遮蔽"），
+ * 密码只存在于本 composable 的局部状态里，随对话框关闭一起丢弃 —— 落盘只发生在认证通过之后。
+ */
+@Composable
+private fun VerifyCredentialDialog(
+    source: SourceVerificationSource,
+    busy: Boolean,
+    onConfirm: (String, String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var secret by remember(source.serverId) { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(SourceSyncImportTags.VERIFY_DIALOG),
+        title = { Text(SourceVerificationCopy.DIALOG_TITLE) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(source.title, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    SourceVerificationCopy.DIALOG_HINT,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = secret,
+                    onValueChange = { secret = it },
+                    label = { Text(SourceVerificationCopy.INPUT_LABEL) },
+                    singleLine = true,
+                    enabled = !busy,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(SourceSyncImportTags.VERIFY_INPUT),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(source.serverId, secret) },
+                enabled = !busy && secret.isNotBlank(),
+                modifier = Modifier.testTag(SourceSyncImportTags.VERIFY_CONFIRM),
+            ) {
+                Text(SourceVerificationCopy.CONFIRM)
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag(SourceSyncImportTags.VERIFY_CANCEL),
+            ) {
+                Text(SourceVerificationCopy.CANCEL)
+            }
+        },
+    )
 }
 
 /** 读信封文本与文件名；读不出来返回 null（页面保持"未选文件"状态）。 */

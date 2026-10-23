@@ -151,6 +151,20 @@ enum class SourceSyncImportStatus {
     BLOCKED,
 }
 
+/**
+ * 一条真正落库的来源（W6-H 的入口）。
+ *
+ * W6-F 的结果页只报导入了几条，但导入后每条来源都处于没有凭据的状态；
+ * 要让用户点「补录并验证」，结果页必须知道这次到底落了哪些 serverId。
+ * [sourceTypeRaw] 是信封里的 wire 值（可能是本机不支持的未知类型，这里只用于展示与映射）。
+ */
+data class SourceSyncAppliedSource(
+    val serverId: String,
+    val title: String,
+    val sourceTypeRaw: String? = null,
+    val syncSourceId: String? = null,
+)
+
 /** 应用之后的摘要（只用于结果页，不再参与任何判定）。 */
 data class SourceSyncApplySummary(
     val appliedCount: Int,
@@ -159,6 +173,9 @@ data class SourceSyncApplySummary(
     val unsupportedCount: Int,
     val failedCount: Int,
     val appliedTitles: List<String> = emptyList(),
+
+    /** 真正写入的每一条来源（按结果顺序）；结果页据此渲染「补录并验证」入口。 */
+    val appliedSources: List<SourceSyncAppliedSource> = emptyList(),
 ) {
     val totalCount: Int
         get() = appliedCount + requiresApprovalCount + ignoredCount + failedCount
