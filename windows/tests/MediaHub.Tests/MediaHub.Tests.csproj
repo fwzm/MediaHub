@@ -19,6 +19,7 @@
     <ProjectReference Include="..\..\src\MediaHub.Player.Mpv\MediaHub.Player.Mpv.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Storage\MediaHub.Storage.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Sync\MediaHub.Sync.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.SyncCli\MediaHub.SyncCli.csproj" />
     <ProjectReference Include="..\MediaHub.TestSupport\MediaHub.TestSupport.csproj" />
   </ItemGroup>
   <ItemGroup>
