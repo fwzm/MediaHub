@@ -17,4 +17,9 @@ data class LocalSourceRecord(
     val accountScope: String? = null,
     val displayName: String? = null,
     val recordRevision: Long = 0L,
+    /**
+     * 本地记录里保存的原始 wire 类型值（对应 Windows LocalSourceRecord.SourceTypeRaw）。
+     * 本端不认识的值必须能原样带出去再带回来，不能被 [type] 的 null/默认值覆盖。
+     */
+    val sourceTypeRaw: String? = null,
 )

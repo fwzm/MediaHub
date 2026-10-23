@@ -186,11 +186,74 @@ cmd /c "cd /d D:\deepseek_test\MediaHub_Win && .\gradlew.bat :core:common:testDe
 
 ## 7. 未做项与已知差异
 
-- **没有存储接线**：本机没有 syncSourceId 列（Room v4 的 servers 表无该字段），因此 LocalSourceRecord 目前只能由调用方
-  手工构造；plan 之后没有任何"应用建议"的实现（不写库、不建服务器、不落墓碑）。
+- ~~**没有存储接线**~~：**已由第 8 节落地**（Room v5 + SyncSourceStore + 映射）。仍缺的是"apply"（把计划写进库）与 UI，见第 10 节。
 - **没有 UI**：预览页、确认流程、冲突逐条裁定都只停留在数据层。
 - **没有真实导入验证**：ADR-S001 D7 要求导入后逐源验证认证并三态呈现（可用/需重登/暂不支持），本轮未做。
 - **secrets 只是搬运**：SourceRecord.secrets 原样保留不解析；接 SecretStorage 重新封装属下一步。
 - **Windows 的 not-supported-on-windows 分支在 Android 不可达**：Android 的 ServerType 覆盖全部 12 个 wire 值。
 - **没有与 .mhbackup 互通**：按 D1，同步信封与备份文件是两套格式，本库不复用 BackupDtos。
 - CLI 的 plan/import 与本库的 reason 码**不是同一套**（见 5.2 段），跨端日志不要按字符串互认。
+
+---
+
+## 8. 存储接线（W6-B：Room v5）
+
+servers 表新增三列（列名用 snake_case，与协议报告字段一致；历史列不改名）：
+
+| 列 | 类型 | 约束 | 用途 |
+| --- | --- | --- | --- |
+| `sync_source_id` | TEXT | 可空 + 唯一索引 `index_servers_sync_source_id` | 持久同步身份；NULL = 未同步（旧记录，正是 ADOPT 规则的对象） |
+| `sync_record_revision` | INTEGER | NOT NULL DEFAULT 0 | 合并次序的唯一依据（禁墙上时间 LWW，D5） |
+| `sync_source_type_raw` | TEXT | 可空 | 原始 wire 类型逐字保留（D3：未知值不丢弃） |
+
+- 迁移：`Migrations.MIGRATION_4_5`（4→5）；`AppDatabase.version = 5`；`app/src/main/kotlin/com/mediahub/app/di/AppModule.kt` 的 `addMigrations` 已加入。
+- 唯一索引语义：SQLite 唯一索引允许多个 NULL，所以未同步记录之间不冲突；把同一身份绑到第二条来源会抛 `SQLiteConstraintException`——必须先经预演判定冲突，不要静默覆盖。
+- 映射（`core/database/src/main/kotlin/com/mediahub/core/database/sync/ServerSyncMappers.kt`）：`ServerEntity.toLocalSourceRecord(primaryUrl)` / `ServerEntity.sourceType()` / `LocalSourceRecord.toSyncIdentity()` / `ServerEntity.applySyncIdentity(identity)`。未知 raw → `type = null` 且 raw 原样保留；只有完全没有 raw 的旧记录才回退 `type` 列的 `valueOf`。
+- 读口：`SyncSourceStore : ServerStore`（**只有读方法**）→ 预演服务在编译期就拿不到写路径。`ServerRepository` 实现它，并另提供三个写方法 `bindSyncSourceId` / `updateSyncRecordRevision` / `applySyncIdentity`（留给将来的"应用变更"步骤，本轮不调用）。
+- 编辑保身份：`ServerRepository.updateServer` 在 upsert 前回填上一版的三列。原因：`MediaServer.toEntity()` 不携带同步字段，不补的话用户「改个名字」就会把身份抹成 null，下次同步把它当全新来源。
+- 导出结构必须与迁移 SQL 逐字一致：`ServerEntity.syncRecordRevision` 声明了 `@ColumnInfo(defaultValue = "0")`，所以 KSP 导出的 `core/database/schemas/com.mediahub.core.database.AppDatabase/5.json` 里是 `sync_record_revision INTEGER NOT NULL DEFAULT 0`，与 `MIGRATION_4_5` 的 `DEFAULT 0` 相同。少这一句会出现「迁移跑通、真机打开即校验失败」。
+- 任务书里的 "ServerRecord" 在本仓不存在（grep 0 命中）：实际落点是 `ServerEntity` + `ServerSyncMappers`；`LocalSourceRecord`（core:common）新增 `sourceTypeRaw` 字段承接原始值（对应 Windows `LocalSourceRecord.SourceTypeRaw`）。
+
+## 9. 预演服务（零写入）
+
+`core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncPreviewService.kt`：
+
+- `preview(envelopeJson: String): SourceSyncPreview` —— 先走 `SourceSyncCodec.tryDecode`；失败返回 `Rejected(reason, message)`（reason 直接用契约码：`malformed-json` / `missing-field:schemaVersion` / `unsupported-schema-version:2` …），成功转 `previewOf`。
+- `previewOf(envelope): SourceSyncPreview.Ready` —— `listLocalSources()` → `SourceSyncPlanner.plan(...)` → `SourceSyncSummary.fromPlan`；**不另写一套判定规则**（规划器已由 87 例契约测试 + Windows 黄金样本互操作验证）。
+- `Ready` 暴露：`buckets = SourceSyncBuckets(apply, requiresApproval, ignored)`（与 Windows CLI `plan --json` 的 counts 同义，可跨端比数）、`toApply`（plan.effective）、`needsApproval`、`ignoredItems`（NO_CHANGE + IGNORE_STALE）、`hasChanges`；另带 `deviceId` / `snapshotId` 供界面标注"来自哪台设备、哪个快照"。
+- `requiresApproval` 的口径与 CLI 一致：**规划器标了 `requiresUserApproval` 的条目 + 本端不支持的（UNSUPPORTED）**。依据是 task-29 实测——Windows CLI 把 `unknown-source-type` 计进 `counts.requiresApproval`（黄金样本 2/1/1）；若这里只数 `summary.requiresConfirmation`，同一信封在两端会差 1。纯规划器语义仍可从 `plan.requiringApproval` 取。
+- 只读性双重保证：类型上 `SyncSourceStore` 没有写方法 + 测试用 Fake 计数（写方法被调用即 `writeAttempts > 0`）。
+- 不依赖 Android Context / Compose，纯 JVM 可测；**暂不注册 Hilt**（不扩 app DI 图，接 UI 时再补绑定）。
+
+### 9.1 本轮测试
+
+```powershell
+$env:JAVA_HOME='C:\Program Files\Java\jdk-21'
+$env:ANDROID_HOME='C:\Users\55160\AppData\Local\Android\Sdk'; $env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
+cmd /c "cd /d D:\deepseek_test\MediaHub_Win && .\gradlew.bat :core:database:testDebugUnitTest --console=plain > %TEMP%\android-sync-task33.log 2>&1"
+```
+
+| 文件 | 例数 | 覆盖 |
+| --- | --- | --- |
+| `Migration4to5Test.kt` | 2 | 三列与默认值、旧行保留、`sync_record_revision` NOT NULL DEFAULT 0、唯一索引存在；重复身份被拒而多个 NULL 允许 |
+| `repository/ServerSyncStoreTest.kt` | 10 | 绑定/查询往返、未知身份 null、缺服务器 false、修订号写回、唯一索引冲突、生效线路 URL、未知 raw 保真、**改名不抹身份**、applySyncIdentity 只写三列、多条未同步共存 |
+| `sync/ServerSyncMappersTest.kt` | 10 | 字段映射、空白转 null、raw 优先、未知 raw 保真且 type=null、旧记录回退 type 列、未知枚举名得 null、toSyncIdentity 反推 wire、applySyncIdentity 不动其他列 |
+| `sync/SourceSyncPreviewServiceTest.kt` | 9 | 三桶 2/1/1、拒绝非法信封且不读库、版本过高被拒、零写入、幂等、逐条复用规划器、deviceId/snapshotId、同修订号不同内容→冲突、本地更新→IGNORE_STALE |
+
+合计 **31 例**（2 + 10 + 10 + 9）。实测结果：
+
+```
+BUILD SUCCESSFUL in 1m 24s   (EXIT=0，--rerun-tasks 确保不是 UP-TO-DATE 复用)
+:core:database 11 suites / 70 tests / 0 failures / 0 errors / 0 skipped
+基线 7 suites / 39 tests → 本轮 +4 suites / +31 tests
+```
+
+踩坑（本轮复现两次）：`:core:common:bundleLibCompileToJarDebug` 报 `classes.jar: 另一个程序正在使用此文件，进程无法访问`，是上一轮被中断的构建留在 Kotlin 编译 daemon 里的句柄；`gradlew --stop` + 结束命令行含 `KotlinCompileDaemon` 的 java 进程后重跑即恢复（与 task-29 同一现象）。
+
+## 10. 本轮未做项
+
+- **没有 apply**：预演只产出计划，不写库、不建服务器、不落墓碑；`bindSyncSourceId` / `updateSyncRecordRevision` / `applySyncIdentity` 已就绪但无人调用。
+- **没有 UI**：预览页、逐条确认、冲突裁定都还在数据层。
+- **没有配对/传输层**：二维码只带临时地址+挑战+指纹、TLS 1.3 指纹钉扎、一次性配对、导入后 DPAPI ↔ SecretStorage 重封（D6）均未实现。
+- **确认结果不持久化**：`needsApproval` 只是列表，用户"接受/跳过"的裁定没有落盘位置。
+- **instrumented 未跑**：`RoomMigrationDeviceTest` 已同步改到 v5 并加唯一索引断言（保持源码一致），本机只跑 JVM 单测。
