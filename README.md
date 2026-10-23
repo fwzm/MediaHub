@@ -143,7 +143,12 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   TUN / VPN / PAC 出口一致性与 SOCKS 代理、真实第二 Windows 账户下的凭据库行为、
   Intel / AMD / NVIDIA 硬件兼容矩阵。
 - **尚未实现**：音频独占 / HDMI 直通 / 多声道 / 音画同步偏移；系统媒体按键、任务栏状态、多窗口；
-  Plex / SMB / 云盘媒体源；W6 跨设备来源同步（设计见 PR #39，实现 `NOT_STARTED`）。
+  Plex / SMB / 云盘媒体源。
+- **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39)，stacked 在 `feature/windows-client` 上，仍为 Draft）：
+  契约层、配对载荷/状态机/传输层（回环）、双向增量与设备注册表、凭据迁移（DPAPI 重封）、加密离线归档、同步 CLI、
+  同步页「预览 → 逐条审批 → 应用 → 推进基线」、基线落盘与重启幂等、已配对设备登记与指纹钉扎均已实现，
+  `MediaHub.Tests` **1004 通过 / 0 失败**（其中 W6 新增 566）；**尚未做**：二维码与扫码、跨机（非回环）配对、
+  已配对设备清单 UI、真实局域网传输与设备持久化、Android 端 apply 的 UI 与传输（Android 侧只到契约/规划/导入导出/配对契约）。
 - **发布阻断**：见下节许可证；另有 MSIX / 代码签名 / 干净机安装 `NOT_RUN`（`SIGNING_BLOCKED`）。
 
 ### 构建与测试
@@ -157,13 +162,17 @@ dotnet test  MediaHub.Windows.sln -c Debug
 
 CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
 与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
-截至 `2757285`：`MediaHub.Tests` 373 + `MediaHub.WebDav.Tests` 104 = **477 通过 / 0 失败 / 0 跳过**
-（`windows/docs/W9-EVIDENCE.md` 同工作树记录）；该 head 的 `windows-ci`（构建 / 测试 / 播放探测 / 打包）为 success。
+截至 `388200d`：`MediaHub.Tests` **438** + `MediaHub.WebDav.Tests` **104** = **542 通过 / 0 失败 / 0 跳过**。
+这不是本地口径而是 CI 实测：`windows-ci` 现在把两个套件**分两步**跑并各自产出 trx，再按套件名断言下限
+（`MediaHub.Tests` ≥400、`MediaHub.WebDav.Tests` ≥100，`failed=0` 且 `notExecuted=0`）—— 此前 WebDav 套件虽然被构建、
+却从未被 `dotnet test` 指向，104 个用例在 CI 里长期空转（run 40019093231 起已修正，日志可见
+`MediaHub.Tests: total=438` / `MediaHub.WebDav.Tests: total=104` / `combined tests=542`）。
+W6 分支上 `MediaHub.Tests` 为 **1004 通过 / 0 失败**（`feature/windows-client` 既有 438 + W6 新增 566），
+`MediaHub.WebDav.Tests` 的 104 例同样适用于该分支（见 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 正文的验证表）。
 
-同一 head 的 Android CI 在 `build` 的单元测试门禁上失败（`core/network` 的
-`MpvHttpBridgeLifecycleTest.stop cancels target upstream while response body cannot finish`），
-而上一个 head `883e9e9` 的 Android CI 为 success；该提交只改 `windows/docs`，失败点在被测 Android 代码里，
-属 Android 侧待单独排查的不稳定用例，与本分支的 Windows 改动无关。
+> 历史记录：head `2757285` 时记录的 477（373 + 104）与当时 Android CI 的一处不稳定用例失败
+> （`core/network` 的 `MpvHttpBridgeLifecycleTest.stop cancels target upstream while response body cannot finish`）
+> 均已过时；`f5e4eb7` 的 Android CI 为 success，该用例是否彻底稳定未做专项反复复现。
 
 真服 GUI 验收脚本入库在 `windows/tools/acceptance/`（`r7-*`、`u1/`–`u4/`），可用 `pwsh` 7 重放；
 证据目录被 `.gitignore` 排除，可在本机重跑复现。
