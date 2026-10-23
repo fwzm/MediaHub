@@ -129,3 +129,37 @@ interface MediaProgressProvider {
         const val DEFAULT_REMOTE_INTERVAL_MS = 10_000L
     }
 }
+
+/**
+ * 收藏能力（task-22 / A1：Android 收藏端到端，数据层 + 提供者层）。
+ *
+ * 语义硬约束（真机验证，Emby 4.10.2 与 Jellyfin 12.2 一致）：
+ * - 写端点两端均为 `POST/DELETE /Users/{userId}/FavoriteItems/{itemId}`；
+ *   `/Users/{userId}/Favorites/{itemId}` 在两个真服上**都是 404**，禁止使用。
+ * - **写后必须回读**服务器真实状态：返回值是"服务器回读到的 IsFavorite"，
+ *   不是"我们发出了什么"。写成功但服务器忽略时返回 false（不得谎报成功）。
+ * - 回读字段缺失（服务器未返回 UserData.IsFavorite）视为**协议破损**，
+ *   抛 [ProviderException.Parse]，绝不静默降级为 false。
+ *
+ * 收藏状态**只在服务端**（UserData），本能力不引入本地表（见 docs/android-favorites.md）。
+ */
+interface MediaFavoriteProvider {
+    /**
+     * 收藏 / 取消收藏并回读。
+     *
+     * @return 服务器回读到的真实收藏状态（true=已收藏）。
+     * @throws ProviderException.AuthRequired 未登录 / 会话缺失。
+     * @throws ProviderException.AuthExpired 服务器返回 401。
+     * @throws ProviderException.NotFound 服务器返回 404（条目不存在 / 端点不存在）。
+     * @throws ProviderException.Http 其他非 2xx。
+     * @throws ProviderException.Parse 回读缺 UserData.IsFavorite。
+     */
+    suspend fun setFavorite(itemId: String, favorite: Boolean): Boolean
+
+    /**
+     * 只读查询服务器侧收藏状态（同样以回读为准）。
+     *
+     * @throws ProviderException.Parse 回读缺 UserData.IsFavorite。
+     */
+    suspend fun isFavorite(itemId: String): Boolean
+}

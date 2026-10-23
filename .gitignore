@@ -51,3 +51,5 @@ windows/tools/acceptance/evidence/
 # checks (windows/tools/acceptance/webdav/fault_server.py). One file per port, rewritten on every
 # run, so they are harness output rather than a fixture.
 windows/tools/acceptance/webdav/fault-requests-*.jsonl
+# DSH progress CLI 运行产物（不是仓库内容）
+.dsh-progress/
