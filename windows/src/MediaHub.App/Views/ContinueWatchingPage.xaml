@@ -22,7 +22,8 @@
     <InfoBar x:Name="StatusBar" Grid.Row="1" IsOpen="False" IsClosable="True" />
 
     <Grid Grid.Row="2">
-      <GridView x:Name="ItemGrid" AutomationProperties.AutomationId="continue.grid" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnItemClick">
+      <GridView x:Name="ItemGrid" AutomationProperties.AutomationId="continue.grid" SelectionMode="None" IsItemClickEnabled="True"
+                ItemClick="OnItemClick" ContainerContentChanging="OnContainerContentChanging">
         <GridView.ItemTemplate>
           <DataTemplate>
             <StackPanel Width="300" Margin="0,0,14,16" Spacing="6">

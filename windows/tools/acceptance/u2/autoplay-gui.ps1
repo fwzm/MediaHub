@@ -11,7 +11,8 @@
 # 时序纪律（首跑教训）：S01E01 只有 10 s，任何「等结束」的断言必须与「mark → 起播 → seek」在同一窗口内，
 #   否则 queue: 行会落在 mark 之前，出现假 FAIL。
 param(
-  [ValidateSet('emby', 'jellyfin')][string]$Server = 'emby'
+  [ValidateSet('emby', 'jellyfin')][string]$Server = 'emby',
+  [string]$Exe = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
 )
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
@@ -20,7 +21,7 @@ Import-Module ($R + 'windows\tools\acceptance\lib\MhUia.psm1') -Force -WarningAc
 $ev = $R + 'windows\tools\acceptance\evidence\u2-autoplay\' + $Server
 New-Item -ItemType Directory -Force -Path $ev | Out-Null
 
-$exe      = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
+$exe      = $Exe
 $seed     = $R + 'windows\tools\SeedSource\bin\x64\Debug\net10.0-windows\win-x64\SeedSource.exe'
 $settings = Join-Path $env:LOCALAPPDATA 'MediaHub\settings.json'
 $dllPath  = Join-Path (Split-Path $exe -Parent) 'MediaHub.dll'

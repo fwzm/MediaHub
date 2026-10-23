@@ -26,7 +26,8 @@
 # 用法：pwsh -File windows\tools\acceptance\u4\playlists-gui.ps1 -Server emby
 #       pwsh -File windows\tools\acceptance\u4\playlists-gui.ps1 -Server jellyfin
 param(
-  [ValidateSet('emby','jellyfin')][string]$Server = 'emby'
+  [ValidateSet('emby','jellyfin')][string]$Server = 'emby',
+  [string]$Exe = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
 )
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
@@ -35,8 +36,8 @@ Import-Module ($R + 'windows\tools\acceptance\lib\MhUia.psm1') -Force -WarningAc
 $ev = $R + 'windows\tools\acceptance\evidence\u4-playlists\' + $Server
 New-Item -ItemType Directory -Force -Path $ev | Out-Null
 
-$exe      = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
-$dll      = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.dll'
+$exe      = $Exe
+$dll      = Join-Path (Split-Path $exe -Parent) 'MediaHub.dll'
 $seed     = $R + 'windows\tools\SeedSource\bin\x64\Debug\net10.0-windows\win-x64\SeedSource.exe'
 $localApp = Join-Path $env:LOCALAPPDATA 'MediaHub'
 $settings = Join-Path $localApp 'settings.json'
