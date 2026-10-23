@@ -15,6 +15,11 @@ DEVICE_UNVERIFIED · NOT_RUN · NOT_IMPLEMENTED · FAILED · BLOCKED · RELEASE_
 
 合计 276 条 GUI 断言（138 × 2 服）全部通过，0 失败、0 跳过，四个 run 均 exit 0，跑动期间被测 dll 哈希未变。
 
+> 2026-10-24 复核（[W12-DOC-AUDIT.md](W12-DOC-AUDIT.md)）：U1 已扩为两服各 41/41（`A8EDD448`）；
+> U2 Emby 的目录级产物（`checks.json`/`results.md`/截图）被 W10 的中断跑覆盖成「23 通过 / 12 失败」
+> （失败项全是守卫拒绝开窗，非产品失败），但那次 W9 跑自身的 `run-console.log`
+> （`RESULT: 35 passed, 0 failed`，2026-10-23 23:50）与 `run-exit.txt`（`0`）仍在，故 U2-Emby 结论**仍可复核**，只是不能只看 `checks.json`。
+
 自动化门禁（同一工作树）：`dotnet test windows/MediaHub.Windows.sln -c Debug` → MediaHub.Tests **373 passed**、
 MediaHub.WebDav.Tests **104 passed**，合计 **477 / 0 failed / 0 skipped**。
 
@@ -51,6 +56,7 @@ dotnet build windows/src/MediaHub.App/MediaHub.App.csproj -c Debug -p:Platform=x
 ## 3. U1 跨来源「继续观看」
 
 - 脚本：`windows/tools/acceptance/u1/continue-watching-gui.ps1`（844 行，SHA256 `2E670C38150A3AE30FDA7C03CC4DED16DC7D2FD6304744A2FF94DBBA6CA87C70`）
+  —— W10 扩写后当前值：**890 行 / `991D5BC76A78C09EA3CB6A423A8DD6A10024F3D41098B14C2EF70A537C55ABC9`**（见 [W12-DOC-AUDIT.md](W12-DOC-AUDIT.md)）
 - 证据：`windows/tools/acceptance/evidence/u1-continue/{emby,jellyfin}/`（checks.json、results.md、截图、页面全树、trace.log）
 - 流程：P0 复位/播种 → P1 真播 600 s、seek 到中点、退出（服务器回读 303 s、played=false）→
   P2 继续观看页出现该条目且无警告 → P3 点卡片续播（起点与服务器差 ≤ 15 s 且 > 30 s）→
@@ -69,6 +75,7 @@ dotnet build windows/src/MediaHub.App/MediaHub.App.csproj -c Debug -p:Platform=x
 ## 4. U2 自动连播（同季 / 跨季 / 关开关）
 
 - 脚本：`windows/tools/acceptance/u2/autoplay-gui.ps1`（605 行，SHA256 `99C4F2D6FB7946201682FCE4D572260BE07D99F889ABD15DECE6B75203756F9D`）
+  —— 当前值：**606 行 / `6A686143DBF991FFE8C98797A62DF929E2A791161096837FDCFF997ECA9CB4ED`**
 - 证据：`windows/tools/acceptance/evidence/u2-autoplay/{emby,jellyfin}/`
 - 断言要点：P2 seek 到 93% 后自动切到 S01E02（trace `queue:auto-advance episode=16`，播放页标题为 S01E02，
   服务器回读上一集 played=True）；P3 从 S01E03 播到结束跨季进 S02E01（`episode=18`）；P4 关闭 AutoPlayNext 后
@@ -82,6 +89,7 @@ dotnet build windows/src/MediaHub.App/MediaHub.App.csproj -c Debug -p:Platform=x
 ## 5. U3 收藏端到端
 
 - 脚本：`windows/tools/acceptance/u3/favorite-gui.ps1`（396 行，SHA256 `E3256CA617BCAD4EC32B9AFC4BFAB984164C25CFA8F1E3D82D027AD50F8C17BF`）
+  —— 当前值：**397 行 / `2A1771F0109C1B735561D5C5E6EA241EFD2C034207A9693F8E0879E5F25D784F`**
 - 证据：`windows/tools/acceptance/evidence/u3-favorite/{emby,jellyfin}/`
 - 断言要点：详情页点 `detail.favorite` → 按钮变「取消收藏」+ 服务器回读 `IsFavorite=True`（不是本地乐观态）→
   完全重启客户端后仍是「取消收藏」→ 再点回「收藏」且服务器 False → 「我的收藏」页列出条目、点行进详情页（非死链接）→
@@ -91,10 +99,12 @@ dotnet build windows/src/MediaHub.App/MediaHub.App.csproj -c Debug -p:Platform=x
   没有任何 `/Favorites` 写路由）。写操作返回空 body，必须回读 `UserData.IsFavorite` 才能确认。
   `Filters=IsFavorite` 可用于服务端筛选。测试夹具因此**故意不提供** `/Favorites/{id}` 的 200 —— mock 不得比真服宽松。
 - 未覆盖：`Favorite` 在 Android 侧尚未实现（Android 只读筛选，无写入），跨端收藏同步属 W6 范围。
+  （2026-10-24 复核：工作树里有**未提交**的 `ProviderCapability.FAVORITE` 改动，未入库、未验证，故本条仍按已入库代码判定。）
 
 ## 6. U4 永久播放列表
 
 - 脚本：`windows/tools/acceptance/u4/playlists-gui.ps1`（874 行，SHA256 `5FC1050FBBB7BE6511C52155BEA0B52C9443CD2B8DA56E5DC697185CBB0AF333`）
+  —— 当前值：**875 行 / `A07A0B1180AF21257B4E71D5AF4EBD5E57F1B7DCDE859D1BA90DBAEC0DBF15B9`**
 - 证据：`windows/tools/acceptance/evidence/u4-playlists/{emby,jellyfin}/`
 - 断言要点：详情页「加入播放列表」→ 命名对话框 → `%LOCALAPPDATA%\MediaHub\playlists.json` 落地并满足契约
   （`version:1`、camelCase、`runTimeTicks`）→ 重复加入提示「已在该列表中」且 JSON 不重复 → 播放列表页/详情页可见 →
@@ -122,11 +132,12 @@ MockMediaServer 已按真服语义收紧：非递归空 `ParentId` 只回库文�
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| 「继续观看」卡片海报 | IMPLEMENTED_UNVERIFIED（已知缺口） | 页面未调用 `Card.RequestPoster`，卡片显示占位图标；功能与断言不受影响，属体验缺口，留待下一轮修 |
+| 「继续观看」卡片海报 | EXECUTED_PASS（W10 已修） | 页面已调用 `Card.RequestPoster`（`Views/ContinueWatchingPage.xaml.cs:99`，同款在 `FavoritesPage.xaml.cs:86`、`LibraryPage.xaml.cs:121`；定义 `MediaCardViewModel.cs:73`）；U1 的 P2.6 断言在 `A8EDD448` 上两服各 41/41 验证 |
 | U4 列表内拖拽排序 GUI | NOT_RUN | `MoveItem` 仅单测覆盖 |
+| U2 Emby 目录级产物 | 部分被覆盖（结论仍可复核） | W9 的 35/35 产物被 W10 中断跑（2026-10-24 01:53，23 通过 / 12 失败，失败项全是「守卫拒绝开窗」）覆盖；同一目录的 W9 `run-console.log`（`RESULT: 35 passed, 0 failed`）+ `run-exit.txt`（`0`）仍在，以此为据。Jellyfin 侧 35/35 产物完整。见 [W12-DOC-AUDIT.md](W12-DOC-AUDIT.md) |
 | 收藏/播放列表跨端同步（W6） | BLOCKED | PR #39 停在 01233ca（base=`feature/windows-client`，相对当前分支 21 behind、mergeable=UNKNOWN）；Android 侧无收藏写入、无播放列表模型 |
 | Android 侧对应能力 | NOT_IMPLEMENTED | 收藏只读筛选；`autoPlayNextEpisode` 是死开关（9 处引用无消费方）；无播放列表/队列 |
-| 引擎 LGPL 替换（libmpv 当前 GPL-3.0-or-later） | RELEASE_BLOCKED | `libmpv-2.dll` v0.41.0 内嵌 meson 参数含 gpl；LGPL 构建与许可证清单未完成 |
+| 引擎 LGPL 替换（libmpv 当前 GPL-3.0-or-later） | RELEASE_BLOCKED | LGPL 构建**已产出**（[W5-LGPL-BUILD.md](licensing/W5-LGPL-BUILD.md)：BUILT AND VERIFIED，3,327,274 B / `20035902…3C0A`），但随包发布的仍是 GPL 构建（`windows/native/libmpv/libmpv-2.dll` 120,989,696 B / `6A48FAEC…63D9`，见 [LGPL-COMPLIANCE.md](LGPL-COMPLIANCE.md) 与 `sbom-windows.cdx.json`）；切换与签名决策未做，故仍阻塞 |
 | 代码签名 / MSIX / 干净机安装 | SIGNING_BLOCKED | 与 W7/W8 同结论，未动 |
 | HDR / 多 GPU / 音频独占 / 设备兼容矩阵 | NOT_RUN / DEVICE_UNVERIFIED | 单机单卡环境，未执行 |
 | PR #33 转正式（取消 Draft） | BLOCKED（需维护者决定） | 分支 CI 全绿，Draft 状态只能由人解除；本项目不自称 RELEASE READY |

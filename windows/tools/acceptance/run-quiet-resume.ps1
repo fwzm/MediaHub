@@ -63,8 +63,9 @@ Write-Rollup ('already done: ' + ($(if ($state.done.Count) { $state.done -join '
 # 只按「名字」判忙会误杀：dotnet build 结束后 MSBuild 节点与 VBCSCompiler 会空闲存活很久，
 # 于是空闲窗口里永远看到 dotnet 进程、驱动器一直等下去。改为看 1.5 秒内的 CPU 增量：
 # 真正的构建/测试会吃掉可观 CPU，空闲节点几乎为 0。MediaHub 进程则一律算忙（GUI 已在跑）。
+# java/javaw 是 Gradle 跑 Android 单测的宿主：同样只看 CPU 增量，闲置的 Gradle/Kotlin 守护进程不会误判。
 function Test-BuildBusy {
-    $procs = @(Get-Process dotnet, MSBuild, VBCSCompiler, MediaHub -ErrorAction SilentlyContinue)
+    $procs = @(Get-Process dotnet, MSBuild, VBCSCompiler, MediaHub, java, javaw -ErrorAction SilentlyContinue)
     if ($procs.Count -eq 0) { return $false }
     if (@($procs | Where-Object { $_.ProcessName -eq 'MediaHub' }).Count -gt 0) { return $true }
     $before = @{}

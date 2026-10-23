@@ -132,4 +132,25 @@ class ProviderHandleTest {
         val withoutLookup = ProviderHandle(provider = l)
         assertTrue(ProviderCapability.IDENTITY_LOOKUP !in withoutLookup.runtimeCapabilities)
     }
+
+    // ---- task-22 / A1：FAVORITE 能力推导 ----
+
+    /** 实现收藏能力的最小 fake（只读语义：回读服务器状态才是真值）。 */
+    private fun favoriteProvider() = object : MediaFavoriteProvider {
+        override suspend fun setFavorite(itemId: String, favorite: Boolean): Boolean = favorite
+        override suspend fun isFavorite(itemId: String): Boolean = false
+    }
+
+    @Test
+    fun `favorite capability derived from field and absent when null`() {
+        val p = provider()
+        val f = favoriteProvider()
+        val withFavorite = ProviderHandle(provider = p, favorite = f)
+        assertEquals(setOf(ProviderCapability.FAVORITE), withFavorite.runtimeCapabilities)
+        assertTrue(withFavorite.hasAnyCapability)
+
+        val withoutFavorite = ProviderHandle(provider = p)
+        assertTrue(ProviderCapability.FAVORITE !in withoutFavorite.runtimeCapabilities)
+        assertFalse(withoutFavorite.hasAnyCapability)
+    }
 }

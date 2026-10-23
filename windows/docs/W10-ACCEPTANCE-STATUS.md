@@ -61,6 +61,6 @@ pwsh -File windows/tools/acceptance/run-quiet.ps1 -Suites u2,u3,u4 -Servers emby
 
 ## 明确不声称的东西
 
-- 不声称 U2/U3/U4 在 `A8EDD448` 上新二进制上通过——它们的证据仍来自 `A15F6E4F`。
+- 不声称 U2/U3/U4 在 `A8EDD448` 上新二进制上通过。U3/U4 证据来自 `A15F6E4F`；U2 的 Emby 侧目录产物在 01:53 被 W10 中断跑覆盖（同目录原始 `run-console.log` 仍记 `RESULT: 35 passed, 0 failed`），Jellyfin 侧仍是 W9 原始产物。
 - 不声称「已复跑」——本次是被人打断的尝试，不是结果。
 - 不声称任何 HDR / 签名 / LGPL 相关能力（仍是 `RELEASE_BLOCKED` / `SIGNING_BLOCKED`）。

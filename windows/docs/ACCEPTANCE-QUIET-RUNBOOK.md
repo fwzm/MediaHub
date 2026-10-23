@@ -118,7 +118,9 @@ pwsh -NoProfile -File windows/tools/acceptance/run-quiet-resume.ps1 `
   二进制 `MediaHub.dll A15F6E4F…`。
 - 之后修复了继续观看卡片封面（`ImageCache` 记录 `image:loaded`、`ContinueWatchingPage` 懒加载海报）并补了
   U1 的 P0.9/P2.6 断言，在当前二进制 `MediaHub.dll A8EDD448…` 上 U1 两服各 41/41 通过。
-  结果写入 `D:\mh-verify\quiet-w10b\summary-*.txt`（逐行 append，末行 `RESULT:`）并据此更新 W10 证据文档。
+  这一跑是**直接运行套件脚本**取得的，证据在 `windows/tools/acceptance/evidence/u1-continue/{emby,jellyfin}/`
+  （`checks.json` 各 41 条全 pass，`results.md` 头记录被测 dll `A8EDD448…` 与本脚本 `991D5BC7…`），不是 quiet runner 的输出；
+  `D:\mh-verify\quiet-w10b\` 只有 W10 那次 `ABORTED-BY-USER` 的尝试（summary 里没有 U1/41/41），不要拿它当 U1 证据。
 
 ## 套件内重启与看门狗的分工（2026-10-24 修）
 

@@ -173,6 +173,50 @@ open class EmbyApiClient(
         return apiClient.get(url, authenticatedHeaders(token, userId))
     }
 
+    // ---- task-22 / A1：收藏写入（真机验证端点，ADR-0XX 收藏语义） ----
+
+    /**
+     * 收藏 / 取消收藏：`POST|DELETE /emby/Users/{userId}/FavoriteItems/{itemId}`。
+     *
+     * 端点依据（真机验证，Emby 4.10.2）：写成功返回 **200 空体**。
+     * **禁止** `/Users/{userId}/Favorites/{itemId}`——真服返回 404；
+     * 单测 mock 也不得为该路径返回 200（mock 不得比真服宽松）。
+     *
+     * 本方法**不判断结果**：服务器可以接受写请求却忽略（返回 200 但状态未变），
+     * 所以真正的结果必须由调用方回读 [getFavoriteState]。
+     */
+    suspend fun setFavorite(token: String, userId: String, itemId: String, favorite: Boolean) {
+        val url = buildUrlWithSegments(
+            path = "/Users/$userId/FavoriteItems",
+            segments = listOf(itemId),
+            query = emptyMap(),
+        )
+        val headers = authenticatedHeaders(token, userId)
+        if (favorite) {
+            // 收藏：POST，无 body（buildBody 对 POST 的 null body 生成空 RequestBody）。
+            apiClient.postNoContent(url = url, headers = headers)
+        } else {
+            // 取消：DELETE，无 body（OkHttp 的 DELETE 不允许 body）。
+            apiClient.deleteNoContent(url = url, headers = headers)
+        }
+    }
+
+    /**
+     * 收藏回读：`GET /emby/Users/{userId}/Items/{itemId}?Fields=UserData`。
+     *
+     * 返回 `null` = 服务器没有返回 `UserData.IsFavorite`（协议破损，**不是** false）；
+     * 由 Provider 层转成 ProviderException.Parse，避免"没读到"被谎报成"未收藏"。
+     */
+    suspend fun getFavoriteState(token: String, userId: String, itemId: String): Boolean? {
+        val url = buildUrlWithSegments(
+            path = "/Users/$userId/Items",
+            segments = listOf(itemId),
+            query = mapOf("Fields" to FAVORITE_FIELDS),
+        )
+        val dto: EmbyFavoriteStateDto = apiClient.get(url, authenticatedHeaders(token, userId))
+        return dto.userData?.isFavorite
+    }
+
     /**
      * 播放信息：POST /emby/Items/{itemId}/PlaybackInfo?UserId=...（官方 MediaInfoService POST contract）。
      *
@@ -394,6 +438,8 @@ open class EmbyApiClient(
          * Library 浏览 payload 不扩大（LIBRARY_FIELDS 不动）。
          */
         const val SEARCH_FIELDS = "PrimaryImageAspectRatio,SortName,Path,ProductionYear,CommunityRating,Overview,ProviderIds"
+        /** 收藏回读所需字段（只有 UserData 的最小请求，避免拉全量 detail 字段）。 */
+        const val FAVORITE_FIELDS = "UserData"
         /**
          * 请求体序列化：encodeDefaults=true 保证 DeviceProfile 等默认值字段全部输出
          * （官方 server 期望完整字段）；explicitNulls=false 省略未设置的 null 字段。

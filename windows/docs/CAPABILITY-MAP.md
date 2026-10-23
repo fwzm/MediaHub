@@ -90,9 +90,9 @@
 | 海报墙（虚拟化 / 懒加载 / 占位图 / 分页预取） | EXECUTED_PASS（40 项） |
 | 图片缓存（内存上限 + 磁盘 TTL + 容量上限 + 在途去重） | IMPLEMENTED_UNVERIFIED |
 | 电影详情页（真实流信息） | EXECUTED_PASS |
-| 季 / 集导航 | IMPLEMENTED_UNVERIFIED（模拟服务器剧集库为空，**未在有数据下验证**） |
+| 季 / 集导航 | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：U2 在真实 Emby 4.10.2 / Jellyfin 12.2 上走「媒体库→库→剧→第 1 季→S01E01」，两服各 35/35；证据覆盖问题见 [W12-DOC-AUDIT.md](W12-DOC-AUDIT.md)） |
 | 搜索（多源 / 部分失败提示 / 取消过期请求） | IMPLEMENTED_UNVERIFIED |
-| 继续观看（服务端 resume，跨来源） | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：Emby 39/39 + Jellyfin 39/39，真实进度→列表→续播→已看完消失；卡片海报仍未懒加载） |
+| 继续观看（服务端 resume，跨来源） | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：Emby 41/41 + Jellyfin 41/41（`A8EDD448`，含 P0.9 夹具封面就绪 / P2.6 海报真实加载），真实进度→列表→续播→已看完消失；卡片海报懒加载已实现） |
 | 收藏（详情页 + 我的收藏页） | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：Emby 24/24 + Jellyfin 24/24，写端点 `FavoriteItems`，重启后保持） |
 | 深色 / 浅色主题、多 DPI、窗口自适应 | IMPLEMENTED_UNVERIFIED（150% DPI 下已实测布局） |
 | 本地媒体页 | EXECUTED_PASS |
@@ -115,7 +115,7 @@
 | 凭据库与 URL 规范化 | EXECUTED_PASS（79 条，含变异验证） |
 | 播放引擎集成（真实解码） | EXECUTED_PASS（`MpvProbe`） |
 | GUI 端到端（UI Automation 驱动真实应用） | **EXECUTED_PASS（本地，脚本可复现）** |
-| 真实媒体服务器端到端 | EXECUTED_PASS（Jellyfin 12.2 `W8 S1`、Emby 官方 4.10.x `W8 S2`），webdav 真实 WsgiDAV（R7 A3）；跨来源「继续观看」、收藏、剧集自动连播、永久播放列表见 [W9-EVIDENCE.md](W9-EVIDENCE.md)（两服四门共 276 条断言全绿） |
+| 真实媒体服务器端到端 | EXECUTED_PASS（Jellyfin 12.2 `W8 S1`、Emby 官方 4.10.x `W8 S2`），webdav 真实 WsgiDAV（R7 A3）；跨来源「继续观看」、收藏、剧集自动连播、永久播放列表见 [W9-EVIDENCE.md](W9-EVIDENCE.md)（W9 口径两服四门共 276 条断言全绿；U1 已扩为两服各 41/41（`A8EDD448`，见 [W10-ACCEPTANCE-STATUS.md](W10-ACCEPTANCE-STATUS.md)），U2 Emby 那份产物已被 W10 中断跑覆盖，见 [W12-DOC-AUDIT.md](W12-DOC-AUDIT.md)） |
 | 硬件兼容矩阵（Intel/AMD/NVIDIA） | **NOT_RUN** |
 | Windows CI | 已配置（`.github/workflows/windows-ci.yml`），结果见 PR 检查页 |
 | 便携版构建 | EXECUTED_PASS（331.6 MB，可启动） |
