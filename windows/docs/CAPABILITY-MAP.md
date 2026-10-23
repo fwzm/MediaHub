@@ -73,9 +73,9 @@
 | 字幕样式（字体/字号/颜色/描边/位置/延迟/ASS 覆盖） | IMPLEMENTED_UNVERIFIED |
 | 全屏切换 | IMPLEMENTED_UNVERIFIED（未截图确认） |
 | 播放进度恢复 | EXECUTED_PASS（真实 Jellyfin 12.2 与官方 Emby 4.10：中断回写 → 完全重启 → 引擎从服务端位置恢复） |
-| 剧集自动连播下一集 | IMPLEMENTED_UNVERIFIED（播放页内切换已实现，未在真实剧集库上做 GUI 验收） |
+| 剧集自动连播下一集（含跨季） | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：Emby 35/35 + Jellyfin 35/35，覆盖同季跨集、跨季、关闭开关负向） |
 | 多文件临时播放队列（上一项/下一项/移除/清空/EOF 与失败跳项） | EXECUTED_PASS（[W7-EVIDENCE.md](W7-EVIDENCE.md)：63/63 + 18/18） |
-| 持久播放列表 | NOT_IMPLEMENTED（队列只存在于本次会话） |
+| 持久播放列表（与临时队列解耦） | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：Emby 40/40 + Jellyfin 40/40，落盘 `playlists.json`，播放不改写列表） |
 | HDR / 色彩管理 | **NOT_RUN** |
 | 杜比视界 | **NOT_SUPPORTED**（不得用 HDR10 能力代替声明） |
 | 硬件解码故障回退实测 | **NOT_RUN** |
@@ -92,8 +92,8 @@
 | 电影详情页（真实流信息） | EXECUTED_PASS |
 | 季 / 集导航 | IMPLEMENTED_UNVERIFIED（模拟服务器剧集库为空，**未在有数据下验证**） |
 | 搜索（多源 / 部分失败提示 / 取消过期请求） | IMPLEMENTED_UNVERIFIED |
-| 继续观看（服务端 resume） | IMPLEMENTED_UNVERIFIED |
-| 收藏 | NOT_IMPLEMENTED |
+| 继续观看（服务端 resume，跨来源） | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：Emby 39/39 + Jellyfin 39/39，真实进度→列表→续播→已看完消失；卡片海报仍未懒加载） |
+| 收藏（详情页 + 我的收藏页） | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：Emby 24/24 + Jellyfin 24/24，写端点 `FavoriteItems`，重启后保持） |
 | 深色 / 浅色主题、多 DPI、窗口自适应 | IMPLEMENTED_UNVERIFIED（150% DPI 下已实测布局） |
 | 本地媒体页 | EXECUTED_PASS |
 
@@ -109,13 +109,13 @@
 
 | 项 | 状态 |
 | --- | --- |
-| 单元与契约测试 | **EXECUTED_PASS — 210 tests / 0 failed** |
+| 单元与契约测试 | **EXECUTED_PASS — 477 tests / 0 failed**（MediaHub.Tests 373 + MediaHub.WebDav.Tests 104） |
 | 模拟服务器集成（真实 socket） | EXECUTED_PASS（23 条） |
 | 引擎网络边界与凭据不泄漏 | EXECUTED_PASS（9 条） |
 | 凭据库与 URL 规范化 | EXECUTED_PASS（79 条，含变异验证） |
 | 播放引擎集成（真实解码） | EXECUTED_PASS（`MpvProbe`） |
 | GUI 端到端（UI Automation 驱动真实应用） | **EXECUTED_PASS（本地，脚本可复现）** |
-| 真实媒体服务器端到端 | EXECUTED_PASS（Jellyfin 12.2 `W8 S1`、Emby 官方 4.10.x `W8 S2`），webdav 真实 WsgiDAV（R7 A3）；仍未做：跨来源「继续观看」页、收藏、剧集自动连播 GUI |
+| 真实媒体服务器端到端 | EXECUTED_PASS（Jellyfin 12.2 `W8 S1`、Emby 官方 4.10.x `W8 S2`），webdav 真实 WsgiDAV（R7 A3）；跨来源「继续观看」、收藏、剧集自动连播、永久播放列表见 [W9-EVIDENCE.md](W9-EVIDENCE.md)（两服四门共 276 条断言全绿） |
 | 硬件兼容矩阵（Intel/AMD/NVIDIA） | **NOT_RUN** |
 | Windows CI | 已配置（`.github/workflows/windows-ci.yml`），结果见 PR 检查页 |
 | 便携版构建 | EXECUTED_PASS（331.6 MB，可启动） |
