@@ -152,7 +152,9 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   同步页「预览 → 逐条审批 → 应用 → 推进基线」、基线落盘与重启幂等、已配对设备登记与指纹钉扎、
   已配对设备清单与「忘记」、同步 CLI 的 `baseline` / `pair` 命令组（离线查询与预览，
   不监听端口、写操作默认 dry-run）、回环传输与双向回环编排（导出 → 帧分块传输 → 对端导入轮，
-  往返幂等、墓碑需显式确认）均已实现，`MediaHub.Tests` **1175 通过 / 0 失败**（其中 W6 新增 737）；
+  往返幂等、墓碑需显式确认）、同步页/配对页的可判定逻辑（抽成无 WinUI 依赖的 presenter）、
+  审批门禁的「跳过即不写入」（同一身份 allow 与 skip 并存时 skip 胜）均已实现，
+  `MediaHub.Tests` **1238 通过 / 0 失败**（其中 W6 新增 800）；
   W12b 对抗性安全回归 66 例（畸形配对载荷、设备登记表在损坏/容量满/独占/只读时必须拒绝而不是静默清空、
   传输层声明长度不触发分配、`--json` 单文档、异常与 stderr 不含口令）；
   **尚未做**：二维码与扫码、跨机（非回环）配对、真实局域网传输与设备持久化、同步页/配对页/已配对清单的 GUI 证据
@@ -178,10 +180,10 @@ CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：
 却从未被 `dotnet test` 指向，104 个用例在 CI 里长期空转（run 40019093231 起已修正，日志可见
 `MediaHub.Tests: total=438` / `MediaHub.WebDav.Tests: total=104` / `combined tests=542`；此后 `4238edc` 又给 `MediaHub.Tests`
 加了 31 例，CI 的 floor（≥400 / ≥100）因此仍有余量）。
-W6 分支上 `MediaHub.Tests` 为 **1194 通过 / 0 失败**（`feature/windows-client` 的 438 基线 + W6 新增 756：
+W6 分支上 `MediaHub.Tests` 为 **1238 通过 / 0 失败**（`feature/windows-client` 的 438 基线 + W6 新增 800：
 W6-1…W6-14 合计 583（其中 W6-10 的接线 14、W6-13 的清单 UI 17），再加 W6-15 的 CLI 命令组 32、
-W6-16 的回环传输 34、W6-17 的双向编排 22，另加 W12b 的对抗性回归 66、W6-18 的 transfer 命令组 19
-—— 583+32+34+22+66+19 = 756），
+W6-16 的回环传输 34、W6-17 的双向编排 22，另加 W12b 的对抗性回归 66、W6-18 的 transfer 命令组 19、
+W6-19 的 presenter 35、W6-21 的 skip 语义 9 —— 583+32+34+22+66+19+35+9 = 800），
 `MediaHub.WebDav.Tests` 的 104 例同样适用于该分支（见 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 正文的验证表）。
 
 Android 侧（[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml)）的单元门禁同样按**名字**断言，
