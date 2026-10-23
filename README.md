@@ -148,7 +148,10 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   契约层、配对载荷/状态机/传输层（回环）、双向增量与设备注册表、凭据迁移（DPAPI 重封）、加密离线归档、同步 CLI、
   同步页「预览 → 逐条审批 → 应用 → 推进基线」、基线落盘与重启幂等、已配对设备登记与指纹钉扎、
   已配对设备清单与「忘记」、同步 CLI 的 `baseline` / `pair` 命令组（离线查询与预览，
-  不监听端口、写操作默认 dry-run）均已实现，`MediaHub.Tests` **1053 通过 / 0 失败**（其中 W6 新增 615）；
+  不监听端口、写操作默认 dry-run）、回环传输与双向回环编排（导出 → 帧分块传输 → 对端导入轮，
+  往返幂等、墓碑需显式确认）均已实现，`MediaHub.Tests` **1175 通过 / 0 失败**（其中 W6 新增 737）；
+  W12b 对抗性安全回归 66 例（畸形配对载荷、设备登记表在损坏/容量满/独占/只读时必须拒绝而不是静默清空、
+  传输层声明长度不触发分配、`--json` 单文档、异常与 stderr 不含口令）；
   **尚未做**：二维码与扫码、跨机（非回环）配对、真实局域网传输与设备持久化、同步页/配对页/已配对清单的 GUI 证据
   （三者均为 `IMPLEMENTED_UNVERIFIED`，本机没人观看窗口时无法跑）、Android 端 apply 的 UI 与传输
   （Android 侧只到契约/规划/导入导出/配对契约）。
@@ -170,14 +173,19 @@ CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：
 （`MediaHub.Tests` ≥400、`MediaHub.WebDav.Tests` ≥100，`failed=0` 且 `notExecuted=0`）—— 此前 WebDav 套件虽然被构建、
 却从未被 `dotnet test` 指向，104 个用例在 CI 里长期空转（run 40019093231 起已修正，日志可见
 `MediaHub.Tests: total=438` / `MediaHub.WebDav.Tests: total=104` / `combined tests=542`）。
-W6 分支上 `MediaHub.Tests` 为 **1053 通过 / 0 失败**（`feature/windows-client` 既有 438 + W6 新增 615，其中 W6-15 的 CLI 命令组贡献 32），
+W6 分支上 `MediaHub.Tests` 为 **1175 通过 / 0 失败**（`feature/windows-client` 既有 438 + W6 新增 737：
+W6-1…W6-14 合计 583（其中 W6-10 的接线 14、W6-13 的清单 UI 17），再加 W6-15 的 CLI 命令组 32、
+W6-16 的回环传输 34、W6-17 的双向编排 22，另加 W12b 的对抗性回归 66 —— 583+32+34+22+66 = 737），
 `MediaHub.WebDav.Tests` 的 104 例同样适用于该分支（见 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 正文的验证表）。
 
 Android 侧（[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml)）的单元门禁同样按**名字**断言，
 不是「打印了 PASSED 就算过」：`verify-unit-tests.py` 除要求每个有测试源码的模块都真跑过之外，还用
-`--required-suite` 钉住 16 个套件（含跨端契约的 `PairingVectorsTest` / `PairingFrameTest` /
+`--required-suite` 钉住 **25** 个套件（含跨端契约的 `PairingVectorsTest` / `PairingFrameTest` /
 `WindowsGoldenInteropTest` / `SourceSyncPlannerTest`、`AndroidSourceSyncServiceTest`、`Migration4to5Test`、
-`UpNextResolverTest` / `PlayerAutoplayTest`），并用 `--require-complete-suites` 从源码里解析每个 `@Test`
+`UpNextResolverTest` / `PlayerAutoplayTest`，W6-G 的 `PairingTransportClientTest` / `PairingTransportEndToEndTest`，
+W6-F/W6-H 的 `SourceSyncImportLogicTest` / `SourceSyncImportSessionTest` / `SourceVerificationCoordinatorTest`，
+以及 W6-J 的 `PairingMaliciousInputTest` / `PairingTransportSecurityTest` / `PairingCredentialLeakTest` /
+`AndroidSourceSyncSecurityTest`），并用 `--require-complete-suites` 从源码里解析每个 `@Test`
 方法、要求逐个都真的执行过 —— 套件被删、改名，或只跑单个方法（`--tests Suite.oneMethod`）都会失败。
 本地负向验证过这两条：把整套 XML 移走 → 22 条问题（1 条套件 + 21 条方法）；只删一个 `<testcase` →
 恰好 1 条 `PairingVectorsTest#rejected_addresses_match_windows`。
