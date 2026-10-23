@@ -9,6 +9,7 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
@@ -40,7 +41,83 @@
              AutomationProperties.AutomationId="sync.status"
              AutomationProperties.Name="同步状态" />
 
-    <Grid Grid.Row="3" ColumnSpacing="24">
+    <!-- Pairing: both sides sit side by side so one screen can drive a two-device handshake. -->
+    <Grid Grid.Row="3" ColumnSpacing="16">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+
+      <Border Grid.Column="0" Padding="16" CornerRadius="8" BorderThickness="1"
+              Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+              BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+              AutomationProperties.Name="配对设备（本机）">
+        <StackPanel Spacing="8">
+          <TextBlock Text="配对设备（本机）" FontSize="15" FontWeight="SemiBold" />
+          <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                     Text="开始配对后把配对码发给对方；一次配对码只能成功连接一次，过期或结束后监听会立即关闭。" />
+
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button x:Name="StartPairButton" Content="开始配对" Click="OnStartPairClick"
+                    AutomationProperties.AutomationId="sync.pair.host"
+                    AutomationProperties.Name="开始配对"
+                    ToolTipService.ToolTip="打开本机监听并生成一次性配对码" />
+            <Button x:Name="StopPairButton" Content="结束配对" Click="OnStopPairClick" IsEnabled="False"
+                    AutomationProperties.AutomationId="sync.pair.stop"
+                    AutomationProperties.Name="结束配对" />
+            <Button x:Name="CopyCodeButton" Content="复制配对码" Click="OnCopyCodeClick" IsEnabled="False"
+                    AutomationProperties.AutomationId="sync.pair.copy"
+                    AutomationProperties.Name="复制配对码" />
+          </StackPanel>
+
+          <TextBox x:Name="PairCodeBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="64"
+                   FontFamily="Consolas" FontSize="12"
+                   AutomationProperties.AutomationId="sync.pair.code"
+                   AutomationProperties.Name="配对码" />
+
+          <StackPanel Spacing="2">
+            <TextBlock Text="证书指纹（双方应完全一致）" Style="{StaticResource MediaHubCaption}" />
+            <TextBlock x:Name="PairFingerprintText" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap"
+                       IsTextSelectionEnabled="True"
+                       AutomationProperties.AutomationId="sync.pair.fingerprint"
+                       AutomationProperties.Name="配对证书指纹" />
+          </StackPanel>
+
+          <TextBlock x:Name="PairStatusText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                     AutomationProperties.AutomationId="sync.pair.status"
+                     AutomationProperties.Name="配对状态"
+                     Text="还没有开始配对。点「开始配对」会在本机打开监听并生成一次性配对码。" />
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Column="1" Padding="16" CornerRadius="8" BorderThickness="1"
+              Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+              BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+              AutomationProperties.Name="加入配对（对端）">
+        <StackPanel Spacing="8">
+          <TextBlock Text="加入配对（对端）" FontSize="15" FontWeight="SemiBold" />
+          <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                     Text="粘贴对端显示的配对码后点「连接」。连接会校验配对码里的证书指纹并要求 TLS 1.3；配对成功只统计来源数量，不会导入任何来源。" />
+
+          <TextBox x:Name="PairInputBox" AcceptsReturn="True" TextWrapping="Wrap" Height="64"
+                   FontFamily="Consolas" FontSize="12" PlaceholderText="粘贴对端的配对码"
+                   AutomationProperties.AutomationId="sync.pair.input"
+                   AutomationProperties.Name="粘贴对端配对码" />
+
+          <Button x:Name="JoinPairButton" Content="连接" Click="OnJoinPairClick"
+                  AutomationProperties.AutomationId="sync.pair.join"
+                  AutomationProperties.Name="连接对端"
+                  ToolTipService.ToolTip="用配对码连接对端，失败时按稳定码给出原因" />
+
+          <TextBlock x:Name="PairResultText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                     AutomationProperties.AutomationId="sync.pair.result"
+                     AutomationProperties.Name="配对结果"
+                     Text="尚未连接。" />
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.Row="4" ColumnSpacing="24">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="3*" />
         <ColumnDefinition Width="2*" />

@@ -2,6 +2,7 @@ using MediaHub.App.Services;
 using MediaHub.Sync;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace MediaHub.App.Views;
 
@@ -33,13 +34,22 @@ public sealed record SyncSourceRow(
 public sealed partial class SyncPage : Page
 {
     private readonly Dictionary<string, SourceVerification> _verifications = new(StringComparer.Ordinal);
+    private readonly DispatcherTimer _pairTimer = new();
+    private PairingPresenter? _host;
+    private PairingPresenter? _guest;
     private bool _busy;
+    private bool _pairBusy;
 
     public SyncPage()
     {
         InitializeComponent();
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+
+        // The hosting side advances only when someone polls it; a timer keeps the countdown honest and notices the
+        // peer arriving while the page is idle.
+        _pairTimer.Interval = TimeSpan.FromMilliseconds(500);
+        _pairTimer.Tick += OnPairTick;
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -57,6 +67,14 @@ public sealed partial class SyncPage : Page
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         App.Services.Servers.Changed -= OnServersChanged;
+
+        // Leaving the page must never leave a pairing listener open: the port is a door, and the invitation is a
+        // one-shot credential.
+        StopPairTimer();
+        _host?.Dispose();
+        _host = null;
+        _guest?.Dispose();
+        _guest = null;
     }
 
     private void OnServersChanged(object? sender, EventArgs e)
@@ -275,4 +293,173 @@ public sealed partial class SyncPage : Page
         StatusBar.Message = message;
         StatusBar.IsOpen = true;
     }
+
+    // ---- pairing (W6-3c) begin -------------------------------------------------
+    // Both directions live on this page so one screen can drive a two-device handshake. The presenter decides every
+    // state and sentence; the page only renders and never inspects the payload (the challenge must not reach a log
+    // line, a message, or an exception that the UI shows).
+
+    private PairingPresenter HostPresenter => _host ??= new PairingPresenter(App.Services.Sync.DeviceId, ReadPeerEnvelope);
+
+    private PairingPresenter GuestPresenter => _guest ??= new PairingPresenter(App.Services.Sync.DeviceId, ReadPeerEnvelope);
+
+    /// <summary>Reads the peer's exported envelope on demand; pairing counts it and never applies it.</summary>
+    private static PairingPeerEnvelopeResult ReadPeerEnvelope()
+    {
+        if (App.Services.Sync.TryReadEnvelope(out SourceSyncEnvelope? envelope, out string? error) && envelope is not null)
+        {
+            return PairingPeerEnvelopeResult.Found(envelope);
+        }
+
+        return PairingPeerEnvelopeResult.Missing(error ?? "没有可读的对端来源清单。");
+    }
+
+    private static long NowMilliseconds() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+    private void OnStartPairClick(object sender, RoutedEventArgs e)
+    {
+        PairingHostSnapshot snapshot = HostPresenter.StartHost(NowMilliseconds());
+        RenderHost(snapshot);
+
+        if (snapshot.State == PairingHostState.Failed)
+        {
+            ShowStatus(InfoBarSeverity.Error, "无法开始配对", snapshot.NextStep);
+            return;
+        }
+
+        StopPairTimer();
+        _pairTimer.Start();
+        PairResultText.Text = "尚未连接。";
+        ShowStatus(
+            InfoBarSeverity.Informational,
+            "已开始配对",
+            "配对码 " + PairingPayload.LifetimeSeconds + " 秒内有效，且只能成功连接一次。请把配对码和证书指纹一起发给对方核对。");
+    }
+
+    private void OnStopPairClick(object sender, RoutedEventArgs e)
+    {
+        PairingHostSnapshot snapshot = HostPresenter.StopHost(NowMilliseconds());
+        StopPairTimer();
+        RenderHost(snapshot);
+        ShowStatus(InfoBarSeverity.Informational, "已结束配对", snapshot.NextStep);
+    }
+
+    private void OnCopyCodeClick(object sender, RoutedEventArgs e)
+    {
+        string code = HostPresenter.PairingCodeText;
+        if (code.Length == 0)
+        {
+            ShowStatus(InfoBarSeverity.Warning, "没有可复制的配对码", "请先点「开始配对」。");
+            return;
+        }
+
+        try
+        {
+            DataPackage package = new();
+            package.SetText(code);
+            Clipboard.SetContent(package);
+            ShowStatus(InfoBarSeverity.Informational, "配对码已复制", "配对码会随倒计时失效；请与证书指纹一起核对。");
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
+        {
+            ShowStatus(InfoBarSeverity.Warning, "无法复制配对码", "剪贴板不可用：" + ex.Message);
+        }
+    }
+
+    private void OnPairTick(object? sender, object e)
+    {
+        PairingHostSnapshot snapshot = HostPresenter.PollHost(NowMilliseconds());
+        RenderHost(snapshot);
+
+        if (snapshot.IsListening)
+        {
+            return;
+        }
+
+        StopPairTimer();
+
+        if (snapshot.State == PairingHostState.Paired)
+        {
+            PairResultText.Text = "对端 " + (HostPresenter.PeerDeviceId ?? "（未知设备）") + " 已连接。来源清单仍需逐项确认，不会自动导入。";
+            ShowStatus(
+                InfoBarSeverity.Success,
+                "配对成功",
+                "已与对端建立可信连接（指纹一致：" + (HostPresenter.PeerFingerprintDisplay ?? "未知") + "）。配对不会导入任何来源。");
+        }
+        else if (snapshot.State == PairingHostState.Expired)
+        {
+            ShowStatus(InfoBarSeverity.Warning, "配对码已过期", snapshot.NextStep);
+        }
+        else if (snapshot.State == PairingHostState.Failed)
+        {
+            ShowStatus(InfoBarSeverity.Error, "配对失败", snapshot.NextStep);
+        }
+    }
+
+    /// <summary>Joins with a pasted code; success reports a count, never an import.</summary>
+    private async void OnJoinPairClick(object sender, RoutedEventArgs e)
+    {
+        if (_pairBusy)
+        {
+            return;
+        }
+
+        _pairBusy = true;
+        JoinPairButton.IsEnabled = false;
+        BusyRing.IsActive = true;
+        PairResultText.Text = "正在连接对端…";
+
+        try
+        {
+            PairingGuestResult result = await GuestPresenter.AcceptGuestAsync(PairInputBox.Text, NowMilliseconds());
+            PairResultText.Text = result.Message
+                + (result.Paired && result.PeerDeviceId is { Length: > 0 } device ? "\n对端设备：" + device : string.Empty);
+
+            string title = result.Paired
+                ? "已配对（未导入任何来源）"
+                : result.StepCode == PairingStepCodes.GuestCodeRefused ? "配对码无法使用" : "连接失败";
+            // A failure names its stable code so a user can quote it and a test can pin it; a success has none.
+            string message = result.Message
+                + (result.Paired || result.Reason is not { Length: > 0 } reason ? string.Empty : "（稳定码：" + reason + "）");
+
+            ShowStatus(result.Paired ? InfoBarSeverity.Success : InfoBarSeverity.Error, title, message);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ObjectDisposedException)
+        {
+            // An async void handler must not let anything reach the dispatcher, or the app dies instead of showing a
+            // sentence.
+            PairResultText.Text = "配对没有完成：" + ex.Message;
+            ShowStatus(InfoBarSeverity.Error, "配对没有完成", ex.Message);
+        }
+        finally
+        {
+            _pairBusy = false;
+            JoinPairButton.IsEnabled = true;
+            BusyRing.IsActive = false;
+        }
+    }
+
+    private void RenderHost(PairingHostSnapshot snapshot)
+    {
+        bool listening = snapshot.IsListening;
+
+        PairCodeBox.Text = listening ? HostPresenter.PairingCodeText : string.Empty;
+        PairFingerprintText.Text = snapshot.FingerprintDisplay;
+        StartPairButton.IsEnabled = !listening;
+        StopPairButton.IsEnabled = listening;
+        CopyCodeButton.IsEnabled = listening && PairCodeBox.Text.Length > 0;
+
+        string countdown = listening ? " · 剩余 " + snapshot.RemainingSeconds + " 秒" : string.Empty;
+        PairStatusText.Text = PairingUiText.DescribeHostState(snapshot.State) + countdown + "\n" + snapshot.NextStep;
+    }
+
+    private void StopPairTimer()
+    {
+        if (_pairTimer.IsEnabled)
+        {
+            _pairTimer.Stop();
+        }
+    }
+
+    // ---- pairing (W6-3c) end ---------------------------------------------------
 }
