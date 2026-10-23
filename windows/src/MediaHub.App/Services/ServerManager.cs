@@ -8,6 +8,7 @@ using MediaHub.Providers;
 using MediaHub.Providers.WebDav;
 using MediaHub.Providers.Local;
 using MediaHub.Providers.MediaBrowser;
+using MediaHub.Sync;
 
 namespace MediaHub.App.Services;
 
@@ -31,6 +32,13 @@ public sealed class ServerEntry : INotifyPropertyChanged
     public string DisplayName { get; set; } = "";
     public string? UserName { get; set; }
     public ProviderHandle? Handle { get; set; }
+
+    /// <summary>Cross-device identity of this source, or null when it cannot travel to another device.</summary>
+    /// <remarks>
+    /// Persisted next to the source (ADR-S001 D5): the identity has to survive a restart, because a
+    /// re-derived id would look like a second source to the other device. A local folder never gets one.
+    /// </remarks>
+    public string? SyncSourceId { get; set; }
 
     private ServerStatus _status = ServerStatus.Unknown;
     public ServerStatus Status
@@ -103,12 +111,18 @@ public sealed class ServerManager : IDisposable
     private readonly ProviderRegistry _providers = new();
     private readonly ObservableCollection<ServerEntry> _servers = new();
     private readonly object _gate = new();
+    private readonly ILocalSourceStore? _syncSources;
 
-    public ServerManager(SettingsStore settings, LogService log, ICredentialStore vault)
+    /// <param name="syncSources">
+    /// Where cross-device source identities are mirrored. Optional so that a headless host or a test
+    /// that only needs connections can leave cross-device sync out entirely; null means "no sync".
+    /// </param>
+    public ServerManager(SettingsStore settings, LogService log, ICredentialStore vault, ILocalSourceStore? syncSources = null)
     {
         _settings = settings;
         _log = log;
         _vault = vault;
+        _syncSources = syncSources;
 
         _providers.Register(new LocalMediaProviderFactory());
         _providers.Register(new EmbyProviderFactory());
@@ -173,12 +187,17 @@ public sealed class ServerManager : IDisposable
                 Url = persisted.Url,
                 DisplayName = string.IsNullOrWhiteSpace(persisted.DisplayName) ? url.Host : persisted.DisplayName,
                 UserName = persisted.UserName,
+                SyncSourceId = persisted.SyncSourceId,
                 Status = ServerStatus.Checking,
             };
             AddEntry(entry);
 
             await RestoreAsync(entry, ct).ConfigureAwait(true);
         }
+
+        // First load of a build that predates cross-device sync has no stored identity yet; assigning it
+        // here means every later export already carries the ids the peer will remember.
+        EnsureSyncSourceIds();
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -391,6 +410,8 @@ public sealed class ServerManager : IDisposable
         }
 
         await PersistAsync(entry, probeRemoteId, password, ct).ConfigureAwait(true);
+        // The new source gets its cross-device identity while its address is still in hand.
+        EnsureSyncSourceIds();
         Changed?.Invoke(this, EventArgs.Empty);
         return (true, "已添加：" + entry.DisplayName);
     }
@@ -467,6 +488,8 @@ public sealed class ServerManager : IDisposable
         // a lie, and the orphan is unreachable from the UI.
         await _vault.DeleteAsync(serverId, ct).ConfigureAwait(true);
         _settings.Update(s => s.Servers.RemoveAll(x => x.ServerId == serverId));
+        // Mirrored rows follow the live list: a deleted source must stop being advertised to peers.
+        EnsureSyncSourceIds();
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -539,6 +562,144 @@ public sealed class ServerManager : IDisposable
         return handle;
     }
 
+    // ------------------------------------------------------- cross-device identity
+
+    /// <summary>
+    /// Gives every source that can travel a stable cross-device identity and mirrors the source list
+    /// into the sync store.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Idempotent: an identity that is already known locally (in settings or in the store) is kept
+    /// untouched. Re-deriving it would change the identity of a source whose address or account was
+    /// edited, and the peer would then show two sources where the user has one.
+    /// </para>
+    /// <para>
+    /// The store mirrors the live list instead of accumulating. A row left behind by a deleted source
+    /// would keep telling the other device that this installation still has that source, which is
+    /// exactly the kind of thing a user cannot see and cannot fix.
+    /// </para>
+    /// </remarks>
+    /// <returns>How many sources received a new identity.</returns>
+    public int EnsureSyncSourceIds()
+    {
+        if (_syncSources is null) return 0;
+
+        try
+        {
+            LocalSourceMappingResult mapped = DescribeSyncSources();
+            PruneSyncSourceRows(mapped);
+            MergeSyncSourceRows(mapped);
+
+            var bridge = new SourceSyncLocalBridge(_syncSources, SyncIdentity.EnsureDeviceId(_settings));
+            int assigned = ApplySyncSourceAssignments(bridge.EnsureSourceIds());
+            if (assigned > 0) PersistSyncSourceIds();
+            return assigned;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // Cross-device sync is an extra. A sync store that cannot be written must never stop the
+            // app from restoring the sources the user actually wants to browse.
+            _log.Warn("sync", "无法写入跨设备来源清单：" + ex.Message);
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Maps the configured sources into the shape the sync contract works with. Read-only.
+    /// </summary>
+    /// <remarks>
+    /// Sources that cannot travel come back as issues instead of records: a local folder has a device path
+    /// rather than an address, a pasted credential is not a URL, and an unparseable address cannot be
+    /// matched to anything on the other device. Reporting them is what keeps "why is this source missing
+    /// from the export" answerable.
+    /// </remarks>
+    public LocalSourceMappingResult DescribeSyncSources()
+    {
+        List<LocalSourceMappingInput> inputs;
+        lock (_gate)
+        {
+            inputs = _servers.Select(entry => new LocalSourceMappingInput
+            {
+                ServerId = entry.ServerId,
+                SyncSourceId = entry.SyncSourceId,
+                Type = entry.Type,
+                Url = entry.Url,
+                AccountScope = entry.UserName,
+                DisplayName = entry.DisplayName,
+            }).ToList();
+        }
+        return LocalSourceMapper.Map(inputs);
+    }
+
+    private void PruneSyncSourceRows(LocalSourceMappingResult mapped)
+    {
+        if (_syncSources is null) return;
+
+        var present = new HashSet<string>(mapped.Records.Select(record => record.ServerId), StringComparer.Ordinal);
+        foreach (LocalSourceRecord stored in _syncSources.GetAll())
+        {
+            if (present.Contains(stored.ServerId)) continue;
+            // Rows without an identity cannot be addressed by the store's delete; they are also never
+            // exported (the bridge drops id-less records), so leaving them costs nothing but a line.
+            if (stored.SyncSourceId is { Length: > 0 } id) _syncSources.Delete(id);
+        }
+    }
+
+    private void MergeSyncSourceRows(LocalSourceMappingResult mapped)
+    {
+        if (_syncSources is null) return;
+
+        var known = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (LocalSourceRecord stored in _syncSources.GetAll()) known[stored.ServerId] = stored.SyncSourceId;
+
+        foreach (LocalSourceRecord record in mapped.Records)
+        {
+            string? identity = record.SyncSourceId is { Length: > 0 } own
+                ? own
+                : known.TryGetValue(record.ServerId, out string? storedId) ? storedId : null;
+            _syncSources.Save(record with { SyncSourceId = identity });
+        }
+    }
+
+    private int ApplySyncSourceAssignments(IReadOnlyList<SourceIdAssignment> assignments)
+    {
+        int assigned = 0;
+        foreach (SourceIdAssignment assignment in assignments)
+        {
+            if (!assignment.Assigned) continue;
+            if (assignment.SyncSourceId is not { Length: > 0 } identity) continue;
+
+            ServerEntry? entry = Find(assignment.ServerId);
+            if (entry is null || entry.SyncSourceId == identity) continue;
+            entry.SyncSourceId = identity;
+            assigned++;
+        }
+        return assigned;
+    }
+
+    private void PersistSyncSourceIds()
+    {
+        var identities = new List<(string ServerId, string SyncSourceId)>();
+        lock (_gate)
+        {
+            foreach (ServerEntry entry in _servers)
+            {
+                if (entry.SyncSourceId is { Length: > 0 } identity) identities.Add((entry.ServerId, identity));
+            }
+        }
+        if (identities.Count == 0) return;
+
+        _settings.Update(settings =>
+        {
+            foreach ((string serverId, string syncSourceId) in identities)
+            {
+                PersistedServer? persisted = settings.Servers.FirstOrDefault(x => x.ServerId == serverId);
+                if (persisted is not null) persisted.SyncSourceId = syncSourceId;
+            }
+        });
+    }
+
     private void AddEntry(ServerEntry entry)
     {
         lock (_gate)
@@ -582,6 +743,7 @@ public sealed class ServerManager : IDisposable
                 Url = entry.Url,
                 UserName = entry.UserName,
                 RemoteServerId = remoteServerId,
+                SyncSourceId = entry.SyncSourceId,
             });
         });
 
