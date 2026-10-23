@@ -37,6 +37,29 @@ public sealed class MockServerOptions
         new Dictionary<string, MockUserData>(StringComparer.Ordinal);
 
     /// <summary>
+    /// Runtime each item reports, keyed by item id, laid over the ninety-minute default.
+    /// </summary>
+    /// <remarks>
+    /// A test needs this to place a title under a server's minimum resume duration: every generated
+    /// item is far longer than 300 s, so the "a short title never keeps a resume point" rule has no
+    /// way to fire without an override.
+    /// </remarks>
+    public IReadOnlyDictionary<string, long> RunTimeTicks { get; init; } =
+        new Dictionary<string, long>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The resume rules the reporting routes apply before storing a position. Null means "whatever the
+    /// emulated server does": Emby keeps from 2 % up, Jellyfin from 5 % up, both require 300 s and treat
+    /// more than 90 % as finished.
+    /// </summary>
+    /// <remarks>
+    /// Defaulting per server type rather than to "store anything" is the point: a mock that stores a
+    /// position the real server would have thrown away keeps exactly the client bugs these tests exist
+    /// to catch.
+    /// </remarks>
+    public MockResumeFloor? ResumeFloor { get; init; }
+
+    /// <summary>
     /// Episodes the <c>/Shows/{seriesId}/Episodes</c> route serves, in exactly the order given.
     /// </summary>
     /// <remarks>
@@ -54,12 +77,47 @@ public sealed class MockServerOptions
 public sealed record MockUserData(long PlaybackPositionTicks, bool Played, DateTime? LastPlayedDate = null);
 
 /// <summary>
+/// The rules a MediaBrowser server applies to a reported playback position before it stores it, as
+/// <c>UserDataManager.UpdatePlayState</c> applies them.
+/// </summary>
+/// <remarks>
+/// The numbers are measured, not assumed. Emby 4.10.2 was bisected on a 600 s title: 1.99 %
+/// (119,400,000 ticks) was discarded and 2.00 % (120,000,000 ticks) was kept, so the floor is a
+/// percentage, not a number of seconds — <c>windows/docs/W8-HEADLESS-RESUME.md</c> §5 records the run.
+/// Jellyfin 12.2 ships <c>MinResumePct=5</c> and <c>MinResumeDurationSeconds=300</c> in
+/// <c>config/system.xml</c>, and <c>windows/docs/W8-EVIDENCE.md</c> §S1.1 quotes the decompiled
+/// function both servers share: below the floor the position is cleared without marking the item
+/// watched, above the ceiling (or within ten seconds of the end) it is cleared and the item is marked
+/// watched, and a title shorter than the minimum duration is marked watched as well.
+/// </remarks>
+public sealed record MockResumeFloor(int MinimumPercent, int MinimumRuntimeSeconds, int MaximumPercent = 90)
+{
+    /// <summary>Emby 4.10.2's measured floor: 2 % of the runtime.</summary>
+    public static readonly MockResumeFloor Emby = new(2, 300);
+
+    /// <summary>Jellyfin 12.2's shipped floor: 5 % of the runtime, above a 300 s minimum duration.</summary>
+    public static readonly MockResumeFloor Jellyfin = new(5, 300);
+
+    /// <summary>The floor the emulated server type applies.</summary>
+    public static MockResumeFloor ForServerType(ServerType type) => type switch
+    {
+        ServerType.Jellyfin => Jellyfin,
+        ServerType.Emby => Emby,
+        _ => throw new NotSupportedException(
+            "The MediaBrowser mock emulates Emby (2 % floor) and Jellyfin (5 % floor); " + type + " has another resume policy."),
+    };
+
+    /// <summary><see cref="MinimumRuntimeSeconds"/> in ticks, the unit item runtimes use.</summary>
+    public long MinimumRuntimeTicks => MinimumRuntimeSeconds * TimeSpan.TicksPerSecond;
+}
+
+/// <summary>
 /// In-process Emby/Jellyfin stand-in, so integration tests can drive the real provider code over real
 /// sockets without a media server, a container or network access.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Five deliberate fidelity choices, because the tests around them are the reason this exists:
+/// Six deliberate fidelity choices, because the tests around them are the reason this exists:
 /// </para>
 /// <list type="bullet">
 /// <item>the API root follows the dialect — Emby under <c>/emby</c>, Jellyfin from the root — and a
@@ -79,6 +137,11 @@ public sealed record MockUserData(long PlaybackPositionTicks, bool Played, DateT
 /// forever while this mock — which returned the whole library — kept the defect invisible), while
 /// <c>Recursive=true</c> descends into the libraries; <c>Filters</c> and <c>SortBy=DatePlayed</c> are
 /// applied here too, so a client that drops one of them cannot pass by accident.</item>
+/// <item>a playback report is state, not an acknowledgement: the progress and stop routes run the
+/// position through <see cref="MockResumeFloor"/> before storing it, a stop without a position marks
+/// the item watched, and <c>DELETE /Users/{uid}/PlayedItems/{id}</c> resets both — so a client that
+/// reports ten seconds of a ten-minute title ends up with no resume point here as well, which is
+/// exactly what the live-server runs in <c>windows/docs/W8-HEADLESS-RESUME.md</c> measured.</item>
 /// </list>
 /// <para>
 /// The catalogue is flat and deterministic: <see cref="MockServerOptions.ItemCount"/> movies live in
@@ -99,6 +162,12 @@ public sealed class MockMediaServer : IAsyncDisposable
     private const string MediaContentType = "video/mp4";
     private const string PngContentType = "image/png";
 
+    /// <summary>A report within ten seconds of the end is a finish, not a resume point.</summary>
+    private const long TrailingWindowTicks = 10_000_000L;
+
+    /// <summary>Base for the play date a report stamps, so no assertion depends on the wall clock.</summary>
+    private static readonly DateTime ReportEpoch = new(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc);
+
     /// <summary>A real 1x1 PNG: the artwork route serves image bytes rather than a placeholder string.</summary>
     private static readonly byte[] OnePixelPng = Convert.FromBase64String(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
@@ -117,6 +186,14 @@ public sealed class MockMediaServer : IAsyncDisposable
     /// <summary>Ids the mock holds as favourited; the single source of truth for every favourite answer.</summary>
     private readonly HashSet<string> _favorites = new(StringComparer.Ordinal);
     private readonly object _gate = new();
+
+    /// <summary>
+    /// Playback state written through the reporting routes, keyed by item id. Kept apart from the
+    /// seeded <see cref="MockServerOptions.UserData"/> on purpose: a seed describes what the server
+    /// already holds and is reported as given, whereas a report is what the resume rules act on.
+    /// </summary>
+    private readonly Dictionary<string, MockUserData> _reported = new(StringComparer.Ordinal);
+    private readonly MockResumeFloor _resumeFloor;
     private readonly Task _acceptLoop;
 
     private volatile bool _tokenValid = true;
@@ -126,6 +203,7 @@ public sealed class MockMediaServer : IAsyncDisposable
     private int _failureRemaining;
     private string? _failureRetryAfter;
     private int _stopped;
+    private int _reportSequence;
 
     private MockMediaServer(ServerType type, MockServerOptions options)
     {
@@ -138,6 +216,7 @@ public sealed class MockMediaServer : IAsyncDisposable
             _ => throw new NotSupportedException(
                 "The MediaBrowser mock emulates Emby (root /emby) and Jellyfin (root /); " + type + " has a different protocol."),
         };
+        _resumeFloor = options.ResumeFloor ?? MockResumeFloor.ForServerType(type);
         _media = options.MediaBytes ?? CreateDefaultMediaBytes();
         _items = Enumerable.Range(0, Math.Max(0, options.ItemCount))
             .Select(index => CreateItem(index, _media.Length))
@@ -238,6 +317,17 @@ public sealed class MockMediaServer : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(itemId);
         lock (_gate) return _favorites.Contains(itemId);
+    }
+
+    /// <summary>
+    /// The playback state the mock currently holds for one item: what a report wrote, else the seeded
+    /// override, else the default pattern. Null when the catalogue has no such item.
+    /// </summary>
+    public MockUserData? UserDataOf(string itemId)
+    {
+        ArgumentNullException.ThrowIfNull(itemId);
+        MockItem? item = _items.FirstOrDefault(candidate => string.Equals(candidate.Id, itemId, StringComparison.Ordinal));
+        return item is null ? null : UserDataFor(item);
     }
 
     /// <summary>
@@ -415,8 +505,20 @@ public sealed class MockMediaServer : IAsyncDisposable
             if (segments is ["Sessions", "Playing"] or ["Sessions", "Progress"] or ["Sessions", "Stopped"] or ["Sessions", "Logout"]
                 || (segments is ["Sessions", "Playing", "Progress" or "Stopped"]))
             {
-                // Acknowledged and recorded; the request list is where tests read the payload back.
-                WriteStatus(context, 204, null);
+                if (segments is ["Sessions", "Logout"])
+                {
+                    WriteStatus(context, 204, null);
+                    return;
+                }
+
+                /* Both servers answer these with 204 and then apply the position through their resume
+                   rules. Recording without applying used to make the mock more permissive than the
+                   server: a below-floor report looked stored here and vanished in production. */
+                ServePlaybackReport(
+                    context,
+                    body,
+                    stopping: segments[^1].Equals("Stopped", StringComparison.OrdinalIgnoreCase),
+                    starting: segments is ["Sessions", "Playing"]);
                 return;
             }
         }
@@ -425,6 +527,15 @@ public sealed class MockMediaServer : IAsyncDisposable
             && segments is ["Users", _, "FavoriteItems", var unfavoriteItemId])
         {
             ServeFavorite(context, unfavoriteItemId, false);
+            return;
+        }
+
+        // The route the field drivers use to put a title back to "never played" before a run; both
+        // servers reset the watched flag and the position here.
+        if (request.Method == HttpMethod.Delete.Method
+            && segments is ["Users", _, "PlayedItems", var playedItemId])
+        {
+            ServePlayedItemsReset(context, playedItemId);
             return;
         }
 
@@ -686,6 +797,11 @@ public sealed class MockMediaServer : IAsyncDisposable
     /// </summary>
     private MockUserData UserDataFor(MockItem item)
     {
+        lock (_gate)
+        {
+            if (_reported.TryGetValue(item.Id, out MockUserData? written)) return written;
+        }
+
         if (_options.UserData.TryGetValue(item.Id, out MockUserData? declared)) return declared;
         return item.Index % 7 == 0
             ? new MockUserData(300_000_000L, Played: false, LastPlayedDate: DefaultPlayedAt(item.Index))
@@ -892,6 +1008,135 @@ public sealed class MockMediaServer : IAsyncDisposable
         WriteStatus(context, 200, null);
     }
 
+    /// <summary>
+    /// Applies a playback report the way a real server does instead of only acknowledging it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The routes are not the same event. <c>/Sessions/Playing</c> opens a session and stores nothing,
+    /// so a start report never changes the position. The progress and stop routes carry the position
+    /// through <see cref="MockResumeFloor"/> before it is stored, so a client that reports ten seconds
+    /// of a ten-minute title ends up with no resume point at all — the behaviour W8 kept tripping over
+    /// against live servers.
+    /// </para>
+    /// <para>
+    /// A stop with no <c>PositionTicks</c> counts as "watched to the end": Emby reads a null position as
+    /// the full runtime. The product client always sends the field
+    /// (<c>MediaBrowserProvider.ReportAsync</c> writes 0 as well as any value), and this branch is what
+    /// would catch a regression there.
+    /// </para>
+    /// </remarks>
+    private void ServePlaybackReport(HttpListenerContext context, string body, bool stopping, bool starting)
+    {
+        if (!starting)
+        {
+            string? itemId = null;
+            long? reportedTicks = null;
+            if (!string.IsNullOrWhiteSpace(body))
+            {
+                try
+                {
+                    using JsonDocument document = JsonDocument.Parse(body);
+                    JsonElement root = document.RootElement;
+                    if (root.ValueKind == JsonValueKind.Object)
+                    {
+                        if (root.TryGetProperty("ItemId", out JsonElement id) && id.ValueKind == JsonValueKind.String)
+                            itemId = id.GetString();
+                        if (root.TryGetProperty("PositionTicks", out JsonElement position)
+                            && position.ValueKind == JsonValueKind.Number
+                            && position.TryGetInt64(out long ticks))
+                        {
+                            reportedTicks = ticks;
+                        }
+                    }
+                }
+                catch (JsonException)
+                {
+                    // A malformed report is still a 204; the recorded request is where a test reads it.
+                }
+            }
+
+            MockItem? item = itemId is null
+                ? null
+                : _items.FirstOrDefault(candidate => string.Equals(candidate.Id, itemId, StringComparison.Ordinal));
+            if (item is not null) ApplyReport(item, reportedTicks, stopping);
+        }
+
+        WriteStatus(context, 204, null);
+    }
+
+    /// <summary>
+    /// The resume rules, in the order the decompiled <c>UserDataManager.UpdatePlayState</c> applies them.
+    /// </summary>
+    /// <remarks>
+    /// Only reports pass through here. Seeded state (<see cref="MockServerOptions.UserData"/>) is what
+    /// the server already holds and is reported as given, which is what lets a test build a pre-existing
+    /// resume point the rules would never have produced.
+    /// </remarks>
+    private void ApplyReport(MockItem item, long? reportedTicks, bool stopping)
+    {
+        lock (_gate)
+        {
+            MockUserData previous = UserDataFor(item);
+
+            if (stopping && reportedTicks is null)
+            {
+                _reported[item.Id] = new MockUserData(0L, Played: true, LastPlayedDate: NextPlayedAt());
+                return;
+            }
+
+            long position = reportedTicks ?? 0L;
+            bool played = previous.Played;
+
+            if (position > 0 && item.RunTimeTicks > 0)
+            {
+                decimal percent = (decimal)position * 100m / item.RunTimeTicks;
+                if (percent < _resumeFloor.MinimumPercent)
+                {
+                    // Below the floor: the position is dropped and the item is not marked watched, so a
+                    // report that overwrites a stored position erases it rather than keeping the larger.
+                    position = 0L;
+                }
+                else if (percent > _resumeFloor.MaximumPercent
+                    || position >= item.RunTimeTicks - TrailingWindowTicks)
+                {
+                    position = 0L;
+                    played = true;
+                }
+                else if (item.RunTimeTicks < _resumeFloor.MinimumRuntimeTicks)
+                {
+                    // Shorter than the minimum resume duration: nothing to resume, treated as watched.
+                    position = 0L;
+                    played = true;
+                }
+            }
+
+            _reported[item.Id] = new MockUserData(position, played, NextPlayedAt());
+        }
+    }
+
+    /// <summary>
+    /// <c>DELETE /Users/{uid}/PlayedItems/{itemId}</c>: resets the watched flag and the position.
+    /// </summary>
+    /// <remarks>
+    /// A fixture control rather than part of the playback loop: it overwrites the seeded state too,
+    /// because that is what "put this title back to never played" has to mean for a repeatable run.
+    /// </remarks>
+    private void ServePlayedItemsReset(HttpListenerContext context, string itemId)
+    {
+        if (!_items.Any(item => string.Equals(item.Id, itemId, StringComparison.Ordinal)))
+        {
+            WriteJson(context, 404, new JsonObject { ["Error"] = "Unknown item " + itemId }.ToJsonString());
+            return;
+        }
+
+        lock (_gate) _reported[itemId] = new MockUserData(0L, Played: false);
+        WriteStatus(context, 204, null);
+    }
+
+    /// <summary>Deterministic play time for a report, so <c>SortBy=DatePlayed</c> keeps a total order.</summary>
+    private DateTime NextPlayedAt() => ReportEpoch.AddSeconds(++_reportSequence);
+
     private void ServePlaybackInfo(HttpListenerContext context, string itemId)
     {
         MockItem? item = _items.FirstOrDefault(candidate => string.Equals(candidate.Id, itemId, StringComparison.Ordinal));
@@ -1029,7 +1274,7 @@ public sealed class MockMediaServer : IAsyncDisposable
 
     // ---------------------------------------------------------------- helpers
 
-    private static MockItem CreateItem(int index, long mediaSize)
+    private MockItem CreateItem(int index, long mediaSize)
     {
         string id = "item-" + index.ToString("D3", CultureInfo.InvariantCulture);
         return new MockItem(
@@ -1042,7 +1287,9 @@ public sealed class MockMediaServer : IAsyncDisposable
             LibraryId: MoviesLibraryId,
             Path: "/media/" + id + ".mp4",
             Year: 1990 + (index % 30),
-            RunTimeTicks: TimeSpan.FromMinutes(90 + index).Ticks,
+            RunTimeTicks: _options.RunTimeTicks.TryGetValue(id, out long declaredRuntime)
+                ? declaredRuntime
+                : TimeSpan.FromMinutes(90 + index).Ticks,
             SizeBytes: mediaSize);
     }
 
