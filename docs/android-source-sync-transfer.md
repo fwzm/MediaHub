@@ -660,3 +660,178 @@ JUnit XML 亲数（`core/common/build/test-results/testDebugUnitTest`）：**30 
 3. **明文客户端打 TLS 端点时，客户端侧拿到的码取决于 `SslStream` 断连方式**（可能 `io-failed`、也可能 `frame-truncated`），本轮不锁定客户端码，只锁定 Windows 侧与零写入。
 4. **未覆盖**：真机与 instrumentation（未跑）；非回环（全部 127.0.0.1）、跨机、跨网段；Android 作为服务端只在第 10 例的本机回环用过；Windows 侧 GUI 与 Android 侧 UI 都没接发送流程；Windows 的 `transfer send` 只作对端使用，没有做「Windows 发 → Android 收」的全链路。
 5. **Windows 文件一个都没改**（本轮只读）；Android 侧唯一的生产代码改动是 `SourceSyncTransferClient.receiveFrom/sendTo` 各加 `auth: SourceSyncTransferOptions? = null` 并透传（默认 `null`，默认路径字节与既有 386 例完全一致）——原客户端没有 auth 参数，Android 发送端无法带 tag 帧，跨端认证用例根本无从写起。
+
+## 19. 回环监听端（W6-34）
+
+第 18 节证明的是「Android 主动拨号」这一半。本节补另一半：**Android 当接收端**，在回环上监听，
+让 Windows 的 `transfer send` 把信封推进来，收完直接走同一套预览/审批/应用流程。
+
+### 19.1 范围
+
+- 只绑回环（`127.0.0.1` / `::1` / `localhost` 字面量，不做 DNS）。非回环地址在创建 socket 之前就被拒。
+- 端口 `0` 表示让系统分配，实际端口从 `listener.port` 取——两个进程同机时不需要事先约定端口。
+- 单连接串行：每次 `receiveOnce` 只接一条连接，处理完（或失败）返回，之后可以继续 `receiveOnce`，
+  直到 `close()`。这与 Windows `SourceSyncTransferListener`（一次 accept 一个连接）语义一致，
+  区别在于 Windows 的 CLI `serve` 进程收完一条就退出，而 Android 是长驻对象。
+- 解帧、挑战、认证、TLS 全部复用既有实现，**没有第二套帧逻辑、也没有新造稳定码**：
+  帧层走 `SourceSyncTransfer.receive`，TLS 走 `SourceSyncTls.handshakeServer` / `probePlaintext` / `gracefulClose`，
+  认证走 `SourceSyncTransferOptions` 的 tag 校验与非重放缓存（W6-25 的五码）。
+
+### 19.2 API
+
+`core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncTransferListener.kt`
+
+| 成员 | 说明 |
+| --- | --- |
+| `SourceSyncTransferListener.open(host, port, tls, identity, acceptTimeoutMs, readTimeoutMs, handshakeTimeoutMs, closeBudgetMs)` | 打开监听。返回 `SourceSyncListenerStart.Started(listener)` 或 `.Failed(code, detail)`；判定次序是地址 → 端口 → 超时 → 证书 → bind，所以 `listener-failed` 一定是 bind 这一层（通常是端口被占用） |
+| `listener.address` / `port` | 实际绑定值（host 传 null 时就是 `127.0.0.1`） |
+| `listener.tlsEnabled` / `certificateFingerprint` | TLS 开着时给出本端公钥指纹（小写 64 hex），明文时为 null |
+| `listener.receiveOnce(expectedChallenge = null, auth = null)` | 阻塞式收一封信封，返回 `SourceSyncListenerTransfer.Received(envelope, envelopeJson, frames, bytes, challenge)` 或 `.Failed(code, detail)`；方法整体 `synchronized`，不会有两个线程同时 accept |
+| `listener.close()` | 幂等关监听并释放端口 |
+
+`core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncListenerImportService.kt`
+
+| 成员 | 说明 |
+| --- | --- |
+| `SourceSyncListenerImportService.start(gateway, host, port, tls, identity, 超时…)` | 打开监听并接上导入网关；生产用 `AndroidSourceSyncService` 包成 `SourceSyncImportGateway`，只想解码不写库用 `SourceSyncImportGateways.acceptOnly()` |
+| `service.receiveAndImport(expectedChallenge = null, auth = null)` | `suspend`；在 `Dispatchers.IO` 上收，然后 `importEnvelopeBytes`。返回与 W6-23 同一个三段结果：`TransferFailed` / `EnvelopeRejected` / `Imported` |
+| `service.port` / `address` / `tlsEnabled` / `certificateFingerprint` / `isClosed` | 透传监听的属性，UI 用来显示「告诉对端什么」 |
+
+三段失败域没有合并（与第 14 节同一条理由）：传输层码、解码码、导入层四桶各自有出处，界面可以原样显示。
+
+### 19.3 与 Windows `transfer send` 对接的命令
+
+Android 侧先把端口与（TLS 时的）指纹显示出来，然后 Windows 侧执行：
+
+```
+# 明文
+dotnet MediaHub.SyncCli.dll transfer send --to 127.0.0.1:<android port> --root <windows dir> --device win-b --json
+
+# TLS：--expect-fingerprint 必须等于 Android 打印的 certificateFingerprint
+dotnet MediaHub.SyncCli.dll transfer send --to 127.0.0.1:<android port> --root <windows dir> --device win-b --json --tls --expect-fingerprint <pin>
+
+# 认证：Windows 侧读环境变量里的口令，nonce 由它自己随机生成并写进挑战帧
+dotnet MediaHub.SyncCli.dll transfer send --to 127.0.0.1:<android port> --root <windows dir> --device win-b --json --authenticate --secret-env MH_W634_SECRET
+```
+
+`expectedChallenge` 传 null（默认）表示接受对端宣布的任何挑战——这正是 Windows `serve` 的口径；
+要收紧就传具体文本，对端宣布的不一样会得到 `challenge-mismatch`。
+
+### 19.4 码表（哪些码一定没写库）
+
+监听端不新增码，全部来自既有三张表：传输十码、认证五码、TLS 四码。
+
+| 情形 | 码 | 是否写过库 |
+| --- | --- | --- |
+| 绑定地址不是回环 | `not-loopback` | 否（socket 都没建） |
+| 端口被占用 / bind 失败 / 端口越界 / 超时非正数 | `listener-failed` | 否 |
+| TLS 开着但没有可用证书 | `tls-certificate-unavailable` | 否（在 socket 之前） |
+| 等不到连接（accept 预算耗尽） | `transfer-timeout` | 否 |
+| 帧头长度非法 / 体不足 / 空流 | `frame-truncated` | 否 |
+| 帧种类非法 / 挑战帧不在首位 | `frame-invalid` | 否 |
+| 声明长度超过 8 MiB | `payload-too-large` | 否 |
+| 挑战不匹配 | `challenge-mismatch` | 否 |
+| 含信封但 JSON 不合契约 | `envelope-invalid` | 否 |
+| 对端认证失败 | `auth-required` / `auth-missing` / `auth-mismatch` / `auth-replayed` / `auth-secret-unavailable` | 否 |
+| TLS 握手 / 指纹问题 | `tls-handshake-failed` / `tls-fingerprint-mismatch` / `tls-not-enabled` | 否 |
+| 读连接时 IO 异常 | `io-failed` | 否 |
+
+零写入是结构性的：`receiveAndImport` 先拿传输结果，`Failed` 直接转 `TransferFailed` 返回，
+只有 `Received` 才把字节交给 `importEnvelopeBytes`；而 `importEnvelopeBytes` 解码失败给 `EnvelopeRejected`，
+根本不调网关。测试里用「网关调用数 = 0」与「`createLocalSource` 调用数 = 0」两个计数器钉住。
+
+### 19.5 与 Windows 监听端的差异
+
+1. **生命周期**：Windows `SourceSyncTransferListener` 每次 `ReceiveOnceAsync` 只 accept 一条连接、CLI `serve` 收完即退出；
+   Android 的 `receiveOnce` 可在同一个监听上连续调用，直到 `close()`。两者都不并发处理多条连接。
+2. **端口越界的归类**：Windows 的 `TryResolveLoopback` 把 `port < 0 || > 65535` 归进地址解析失败（`not-loopback`），
+   Android 归进 `listener-failed`（地址合法才轮到端口）。语义上都是「没起来」，码不同，跨端日志对比时要注意。
+3. **TLS 身份来源**：Windows 每次启动用 `PairingCertificate.CreateEphemeral` 现造一张两小时有效期的临时证书；
+   Android 不自造证书（不引 BouncyCastle），身份由调用方以 `KeyStore` 传入，`SourceSyncTlsIdentity.NONE` 时开 TLS 直接 `tls-certificate-unavailable`。
+   所以 Android 的指纹在证书换之前是稳定的，Windows 的每次都变——操作员要按当次打印的值输入。
+4. **超时**：Windows 一个 `DefaultTimeout = 15 s` 预算贯穿 accept 与读；Android 把 accept、读、握手、关闭四个预算分开，
+   默认 accept 与读各 15 s、握手 10 s、关闭 2 s。
+5. **诊断文本**：码逐字相同，detail 文案是各自语言写的（Android 中文、Windows 英文），跨端只对比码。
+
+### 19.6 测试
+
+`core/common/src/test/kotlin/com/mediahub/core/common/sync/SourceSyncTransferListenerTest.kt`（22 例，全部真回环 socket）
+
+| 分组 | 用例 |
+| --- | --- |
+| 形态与默认值（2） | `defaultsBindLoopbackAndLeaveThePortToTheOs`、`closedListenerServesNothingAndLeavesNoThreadBehind` |
+| 明文收发（3） | `plaintextClientDeliversTheGoldenEnvelope`、`secondConnectionOnTheSameListenerIsAccepted`、`challengeIsEchoedAndMustMatchWhenExpectationIsGiven`（含 `challenge-mismatch` 负例） |
+| 打开失败（3） | `nonLoopbackHostIsRefusedBeforeAnySocketExists`、`tlsWithoutAnIdentityIsRefusedWithCertificateUnavailable`、`busyPortIsReportedAsListenerFailed` |
+| TLS（3） | `pinnedTlsClientDeliversOverRealTls13`、`tlsClientAgainstAPlaintextListenerIsNamedNotEnabled`、`plaintextClientAgainstATlsListenerIsNamedHandshakeFailed` |
+| 认证（5） | `authenticatedClientIsVerifiedAndCountsTheTagFrame`（frames = 块数 + 2）、`wrongSecretIsRefusedAsAuthMismatch`、`replayedNonceIsRefusedAsAuthReplayed`（共享 `SourceSyncNonceCache`，count 仍为 1）、`clientWithoutATagFrameIsRefusedAsAuthMissing`、`tlsAndAuthenticationComposeOnTheSameConnection` |
+| 生命周期（2） | `closedListenerReleasesThePortForTheNextOne`、`receiveAfterCloseIsReportedAsListenerFailed` |
+| 坏帧与预算（4） | `acceptTimeoutIsReportedAsTransferTimeout`（200 ms 预算）、`oversizedDeclaredFrameLengthIsFrameTruncated`、`zeroLengthFrameIsFrameTruncated`、`halfAFrameIsFrameTruncated` |
+
+`core/database/src/test/kotlin/com/mediahub/core/database/sync/SourceSyncListenerImportTest.kt`（8 例，全链路：socket → 解帧 → 解码 → `AndroidSourceSyncService` 写库）
+
+| 用例 | 断言 |
+| --- | --- |
+| `plaintextEnvelopeIsImportedAndAppliesTwoSources` | applied=2 / requiresApproval=1 / ignored=1、`createLocalSource` 调 2 次、库里 2 条、`deviceId=device-a` |
+| `secondRunOfTheSameEnvelopeWritesNothingNew` | 第二轮 applied=0 / requiresApproval=1 / ignored=3，`createCalls` 不变、`updateCalls=0` |
+| `rejectedEnvelopeIsNotHandedToTheGateway` | 载荷 `null`（合法 JSON 非信封）→ `EnvelopeRejected(malformed-json)`、网关 0 次、库里 0 条 |
+| `truncatedStreamIsReportedAsTransferFailureWithoutWrites` | 4 个零字节 → `TransferFailed(frame-truncated)`、网关 0 次 |
+| `nonLoopbackHostIsRefusedBeforeAnySocketExists` | `start(host = 10.1.2.3)` → `not-loopback`、网关 0 次 |
+| `busyPortIsReportedAsListenerFailed` | 第二监听同端口 → `listener-failed` |
+| `wrongSecretIsRefusedAsAuthMismatchWithoutWrites` | 两端口令不同 → `TransferFailed(auth-mismatch)`、网关 0 次、库里 0 条 |
+| `startExposesTheBoundPortAndCloseReleasesIt` | 端口在 1..65535、address 127.0.0.1、close 后同端口可立刻重绑 |
+
+### 19.7 实测
+
+```
+**命令**（`JAVA_HOME=C:\Program Files\Android\Android Studio\jbr`、`ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk` 先在 pwsh 里设好，再 `cmd /c` 重定向日志）：
+
+```
+gradlew.bat :core:common:testDebugUnitTest :core:database:testDebugUnitTest \
+    --console=plain --rerun-tasks --no-daemon -Pkotlin.compiler.execution.strategy=in-process
+```
+
+**原始尾行**：
+
+```
+BUILD SUCCESSFUL in 1m 50s
+75 actionable tasks: 75 executed
+EXIT=0
+```
+
+**JUnit XML 亲数**（`build/test-results/testDebugUnitTest/*.xml` 逐文件累加）：
+
+| 模块 | SUITES | TESTS | FAILURES | ERRORS | SKIPPED |
+| --- | --- | --- | --- | --- | --- |
+| core:common | 31 | 418 | 0 | 0 | 10 |
+| core:database | 17 | 158 | 0 | 0 | 0 |
+
+两个新套件单列：`SourceSyncTransferListenerTest` tests=22 / time=0.838 s / skipped=0；
+`SourceSyncListenerImportTest` tests=8 / time=0.112 s / failures=0。
+
+扣除本轮新增的 22 + 8 = 30 例，两模块分别是 388 与 150 例 —— 与基线一致，无回归。
+
+> 10 个 skipped 不是本轮引入的：`SourceSyncTlsInteropTest` 在 `MH_W632_SYNC_DLL` 未设置时整类 `assumeTrue` 跳过（第 18 节已实证），
+> 这里刻意没有设该变量，所以跨端联调 10 例按设计 skip。
+
+**修红过程**（三条，全部是测试/编译层面的真修，没有放宽断言）：
+
+1. 编译红：`SourceSyncTransferListener.kt:306` / `:312` 里 `LoopbackOnly.closeQuietly(opened)` 报
+   `actual type is ServerSocket?, but Socket? was expected` —— `open()` 失败路径关的是 `ServerSocket`。
+   改成 `opened?.let { server -> runCatching { server.close() } }`（生产代码唯一一处修改）。
+2. 测试红：`defaultsBindLoopbackAndLeaveThePortToTheOs` 断言 `DEFAULT_ACCEPT_TIMEOUT_MS`（15 000）却用 helper 起的监听（helper 传 10 000）。
+   改成该例直接调 `SourceSyncTransferListener.open()`（绕过 helper），断言不动。
+3. 编译红（core:database）：测试文件多写了 `import com.mediahub.core.common.sync.SourceSyncImportResult`（该类在 core:database 同包）、
+   `com.mediahub.core.model.MediaServer`（实际包 `com.mediahub.model`）、漏 `AndroidSourceTypeMap` 的 import，
+   且 `describeStart` 只接受 `SourceSyncListenerStart`。修法：删错 import、补对 import、为 `SourceSyncListenerImportStart` 加一个同形重载。
+```
+
+### 19.8 未覆盖
+
+1. 未跑 instrumentation、未在真机上点过监听端（全部 JVM 单测）。
+2. 只在本机回环上验证；非回环、跨机、跨网段、防火墙/NAT 都没测（按设计本来就不允许非回环）。
+3. Android 作为服务端只与「本仓自己的客户端」「Windows CLI `transfer send`（第 18 节第 10 例）」对过，
+   没有和 Windows 的**监听端**同时出现在同一条链路上的编排测试。
+4. 没做并发压测：`receiveOnce` 是串行的（`synchronized`），两个线程同时调用时后者等前者结束；没有测过长时间连续接收。
+5. Windows 的 `--confirm-delivery` 在 Android 侧仍无对应物（第 18.5 节第 1 条）：`sendTo` 的 `Ok` 只表示帧写进了 socket。
+6. CI 只把 `SourceSyncTransferListenerTest` 钉进 required-suite（31 条）；`SourceSyncListenerImportTest` 在 core:database 里照常执行但不单独钉。
+

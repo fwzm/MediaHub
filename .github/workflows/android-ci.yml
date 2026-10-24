@@ -123,6 +123,8 @@ jobs:
           #     HMAC-SHA256 over nonce‖envelope，金标向量由 Windows 实现生成；关闭认证时与 W6-22 向量全等）
           #   sync.SourceSyncTlsTest —— TLS 1.3 + SPKI 指纹钉扎（W6-29：只协商 1.3、pin=SHA-256(publicKey.encoded)、
           #     四码与 Windows 同名同序、接收端 5 字节嗅探、graceful close；夹具与期望指纹由 Windows 权威实现生成）
+          #   sync.SourceSyncTransferListenerTest —— 回环监听端（W6-34：只绑回环、端口 0 取实际值、单连接串行、
+          #     复用 SourceSyncTransfer.receive 解帧，TLS 走 handshakeServer / 明文走 5 字节嗅探，关闭 TLS 走 graceful close）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -154,6 +156,7 @@ jobs:
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferLoopbackTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferAuthTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTlsTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferListenerTest \
             --require-complete-suites
 
       - name: Lint
