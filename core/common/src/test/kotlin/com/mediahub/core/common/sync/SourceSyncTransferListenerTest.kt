@@ -394,6 +394,136 @@ class SourceSyncTransferListenerTest {
         (rebound as SourceSyncListenerStart.Started).listener.close()
     }
 
+    // ---------- W6-40 回执帧（0x04） ----------
+
+    @Test
+    fun receiverWritesTheReceiptByteWhenItIsOn() {
+        val listener = openListener()
+        try {
+            val call = ReceiveCall(listener, receipt = SourceSyncReceiptOptions.writing()).start()
+            val byte = sendFramesAndReadOneByte(listener.port, goldenEnvelope())
+            assertEquals("回执帧就是一字节 0x04", 0x04, byte)
+            val received = assertReceived(call.await())
+            assertTrue("监听端应该记录已回执", received.receiptWritten)
+            assertEquals(SourceSyncTransfer.chunkCount(received.bytes), received.frames)
+        } finally {
+            listener.close()
+        }
+    }
+
+    @Test
+    fun receiverStaysSilentWhenTheGateRefuses() {
+        val listener = openListener()
+        try {
+            val call = ReceiveCall(
+                listener,
+                receipt = SourceSyncReceiptOptions.writing(),
+                receiptGate = { false },
+            ).start()
+            assertNull(
+                "闸门拒绝时线上不得多一个字节",
+                sendFramesAndReadOneByte(listener.port, goldenEnvelope()),
+            )
+            assertFalse(assertReceived(call.await()).receiptWritten)
+        } finally {
+            listener.close()
+        }
+    }
+
+    @Test
+    fun receiverStaysSilentWhenReceiptsAreOff() {
+        val listener = openListener()
+        try {
+            val call = ReceiveCall(listener).start()
+            assertNull(
+                "默认关闭时不得写回执",
+                sendFramesAndReadOneByte(listener.port, goldenEnvelope()),
+            )
+            val received = assertReceived(call.await())
+            assertFalse(received.receiptWritten)
+            assertEquals(SourceSyncTransfer.chunkCount(received.bytes), received.frames)
+        } finally {
+            listener.close()
+        }
+    }
+
+    @Test
+    fun clientAwaitingAReceiptConfirmsAgainstAListeningPeer() {
+        val listener = openListener()
+        try {
+            val call = ReceiveCall(listener, receipt = SourceSyncReceiptOptions.writing()).start()
+            val sent = SendCall(
+                "127.0.0.1",
+                listener.port,
+                goldenEnvelope(),
+                receipt = SourceSyncReceiptOptions.awaiting(2_000),
+            ).start().await()
+            assertSentOk(sent)
+            assertTrue(assertReceived(call.await()).receiptWritten)
+        } finally {
+            listener.close()
+        }
+    }
+
+    @Test
+    fun clientAwaitingAReceiptReportsMissingWhenTheListenerIsSilent() {
+        val listener = openListener()
+        try {
+            val call = ReceiveCall(listener).start()
+            val sent = SendCall(
+                "127.0.0.1",
+                listener.port,
+                goldenEnvelope(),
+                receipt = SourceSyncReceiptOptions.awaiting(2_000),
+            ).start().await()
+            assertEquals(
+                SourceSyncReceiptReasons.RECEIPT_MISSING,
+                (sent as SourceSyncTransferResult.Failed).reason,
+            )
+            assertFalse(assertReceived(call.await()).receiptWritten)
+        } finally {
+            listener.close()
+        }
+    }
+
+    @Test
+    fun tlsConnectionCarriesTheReceiptToo() {
+        val identity = identityOf("mediahub-sync-test")
+        val pin = pinOf("mediahub-sync-test")
+        val listener = openListener(tls = SourceSyncTlsOptions.pinned(pin), identity = identity)
+        try {
+            val call = ReceiveCall(listener, receipt = SourceSyncReceiptOptions.writing()).start()
+            val sent = SendCall(
+                "127.0.0.1",
+                listener.port,
+                goldenEnvelope(),
+                tls = SourceSyncTlsOptions.pinned(pin),
+                receipt = SourceSyncReceiptOptions.awaiting(2_000),
+            ).start().await()
+            assertSentOk(sent)
+            assertTrue(assertReceived(call.await()).receiptWritten)
+            assertEquals(pin, listener.certificateFingerprint)
+        } finally {
+            listener.close()
+        }
+    }
+
+    /** 用裸 socket 把整段帧写过去，再读回最多一个字节（对端不写回执时读到 EOF 或 RST）。 */
+    private fun sendFramesAndReadOneByte(port: Int, envelope: ByteArray): Int? {
+        Socket().use { socket ->
+            socket.connect(java.net.InetSocketAddress(InetAddress.getLoopbackAddress(), port), 5_000)
+            socket.soTimeout = 10_000
+            val frames = SourceSyncTransfer.encode(envelope)
+            socket.getOutputStream().write(frames)
+            socket.getOutputStream().flush()
+            return try {
+                val value = socket.getInputStream().read()
+                if (value < 0) null else value
+            } catch (error: java.io.IOException) {
+                null
+            }
+        }
+    }
     // ---------- 夹具 ----------
 
     private fun openListener(
@@ -520,12 +650,14 @@ class SourceSyncTransferListenerTest {
         private val listener: SourceSyncTransferListener,
         private val expectedChallenge: String? = null,
         private val auth: SourceSyncTransferOptions? = null,
+        private val receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
+        private val receiptGate: ((ByteArray) -> Boolean)? = null,
     ) {
         private val result = AtomicReference<SourceSyncListenerTransfer?>(null)
         private val failure = AtomicReference<Throwable?>(null)
         private val thread = Thread {
             try {
-                result.set(listener.receiveOnce(expectedChallenge, auth))
+                result.set(listener.receiveOnce(expectedChallenge, auth, receipt, receiptGate))
             } catch (error: Throwable) {
                 failure.set(error)
             }
@@ -555,13 +687,14 @@ class SourceSyncTransferListenerTest {
         private val challenge: String? = null,
         private val tls: SourceSyncTlsOptions = SourceSyncTlsOptions.Off,
         private val auth: SourceSyncTransferOptions? = null,
+        private val receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
     ) {
         private val result = AtomicReference<SourceSyncTransferResult?>(null)
         private val failure = AtomicReference<Throwable?>(null)
         private val client = SourceSyncTransferClient(connectTimeoutMs = 5_000, readTimeoutMs = 10_000)
         private val thread = Thread {
             try {
-                result.set(client.sendTo(host, port, envelope, challenge, tls, auth))
+                result.set(client.sendTo(host, port, envelope, challenge, tls, auth, receipt))
             } catch (error: Throwable) {
                 failure.set(error)
             }

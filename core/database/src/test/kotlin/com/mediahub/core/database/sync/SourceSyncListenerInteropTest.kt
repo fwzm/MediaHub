@@ -1,13 +1,23 @@
 package com.mediahub.core.database.sync
 
 import androidx.room.Room
+import com.mediahub.core.common.sync.SourceSyncCodec
+import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncNonceCache
+import com.mediahub.core.common.sync.SourceSyncReceiptOptions
+import com.mediahub.core.common.sync.SourceSyncReceiptReasons
 import com.mediahub.core.common.sync.SourceSyncTlsIdentity
 import com.mediahub.core.common.sync.SourceSyncTlsOptions
 import com.mediahub.core.common.sync.SourceSyncTransfer
 import com.mediahub.core.common.sync.SourceSyncTransferAuthReasons
+import com.mediahub.core.common.sync.SourceSyncTransferClient
 import com.mediahub.core.common.sync.SourceSyncTransferOptions
 import com.mediahub.core.common.sync.SourceSyncTransferReasons
+import com.mediahub.core.common.sync.SourceSyncTransferResult
+import com.mediahub.core.common.sync.SourceEndpoint
+import com.mediahub.core.common.sync.SourceRecord
+import com.mediahub.core.common.sync.SyncCapabilities
+import com.mediahub.core.common.sync.SyncSourceTypeValue
 import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.database.repository.ServerRepository
 import kotlinx.coroutines.runBlocking
@@ -360,12 +370,217 @@ class SourceSyncListenerInteropTest {
         }
     }
 
+    // ---------------------------------------------------------------- W6-40 回执（0x04）
+
+    @Test
+    fun windowsAwaitingAReceiptGetsConfirmedByTheKotlinListener() {
+        val listener = startListener(receipt = true)
+        try {
+            val pending = listener.receiveAsync()
+            val send = runSend(sendRoot(), listener.port, listOf("--await-receipt"))
+            val outcome = pending.await()
+
+            assertEquals(send.toString(), 0, send.exitCode)
+            val json = send.json()
+            assertEquals(true, jsonBool(json, "awaitReceipt") ?: false)
+            assertEquals(
+                "Windows 侧必须只凭线上一字节回执得出结论",
+                true,
+                jsonBool(json, "receiptConfirmed") ?: false,
+            )
+            val imported = outcome as SourceSyncTransferImportOutcome.Imported
+            assertTrue("本端应记录已写回执", imported.receiptWritten)
+            assertEquals(2, imported.result.appliedCount)
+            assertEquals(2, runBlocking { db.serverDao().count() })
+        } finally {
+            listener.close()
+        }
+    }
+
+    @Test
+    fun kotlinAwaitingAReceiptConfirmsAgainstWindowsServe() {
+        val root = newWorkspace("serve-root")
+        val serve = startServe(root, sendReceipt = true)
+        try {
+            val client = SourceSyncTransferClient(connectTimeoutMs = 10_000, readTimeoutMs = 30_000)
+            val sent = client.sendTo(
+                "127.0.0.1",
+                serve.port,
+                androidEnvelope(),
+                receipt = SourceSyncReceiptOptions.awaiting(20_000),
+            )
+            assertTrue("期待回执确认，实际 " + describeSent(sent), sent is SourceSyncTransferResult.Ok)
+
+            val exit = serve.awaitExit()
+            assertEquals(serve.diagnostics(), 0, exit)
+            val json = serve.json()
+            assertEquals(true, jsonBool(json, "sendReceipt") ?: false)
+            assertEquals(
+                "Windows 侧必须记录它写过回执，实测 JSON：" + json,
+                true,
+                jsonBool(json, "receiptWritten") ?: false,
+            )
+            assertEquals("对端 apply 之后应有两条来源落盘", 2, writtenSourceCount(root))
+        } finally {
+            serve.close()
+        }
+    }
+
+    @Test
+    fun kotlinAwaitingAReceiptWithoutAWindowsReceiptIsMissing() {
+        val root = newWorkspace("serve-root")
+        val serve = startServe(root, sendReceipt = false)
+        try {
+            val client = SourceSyncTransferClient(connectTimeoutMs = 10_000, readTimeoutMs = 30_000)
+            val sent = client.sendTo(
+                "127.0.0.1",
+                serve.port,
+                androidEnvelope(),
+                receipt = SourceSyncReceiptOptions.awaiting(2_000),
+            )
+            assertTrue("期待失败裁决，实际 " + describeSent(sent), sent is SourceSyncTransferResult.Failed)
+            assertEquals(
+                SourceSyncReceiptReasons.RECEIPT_MISSING,
+                (sent as SourceSyncTransferResult.Failed).reason,
+            )
+
+            val exit = serve.awaitExit()
+            assertEquals(serve.diagnostics(), 0, exit)
+            val json = serve.json()
+            assertTrue(
+                "没开 --send-receipt 时 Windows 不得写回执，实测 " + jsonBool(json, "receiptWritten"),
+                jsonBool(json, "receiptWritten") != true,
+            )
+            assertEquals("对端仍然会把信封收下并落盘", 2, writtenSourceCount(root))
+        } finally {
+            serve.close()
+        }
+    }
+
+    // ---------------------------------------------------------------- Windows serve 夹具
+
+    private fun startServe(root: File, sendReceipt: Boolean): ServeCli {
+        val cli = windowsCli() ?: throw AssertionError(SKIP_MESSAGE)
+        val command = ArrayList<String>()
+        command.add(dotnet())
+        command.add(cli.absolutePath)
+        command.add("transfer")
+        command.add("serve")
+        command.add("--root")
+        command.add(root.absolutePath)
+        command.add("--device")
+        command.add(SERVE_DEVICE)
+        command.add("--json")
+        command.add("--apply")
+        if (sendReceipt) command.add("--send-receipt")
+        val builder = ProcessBuilder(command)
+        builder.redirectErrorStream(false)
+        builder.directory(root)
+        val process = builder.start()
+        val stdout = StreamDrain(process.inputStream)
+        val stderr = StreamDrain(process.errorStream)
+        val listening = stderr.awaitLine(LISTENING_PREFIX, 30_000)
+            ?: throw AssertionError("Windows serve 没有报 listening：" + stderr.text())
+        val port = listening.substringAfterLast(':').trim().toIntOrNull()
+            ?: throw AssertionError("listening 行里没有端口：" + listening)
+        return ServeCli(process, root, port, stdout, stderr)
+    }
+
+    private class ServeCli(
+        private val process: Process,
+        val root: File,
+        val port: Int,
+        private val stdout: StreamDrain,
+        private val stderr: StreamDrain,
+    ) : Closeable {
+
+        fun awaitExit(timeoutMs: Long = 60_000): Int {
+            if (!process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+                process.destroyForcibly()
+                throw AssertionError("Windows serve 没有在超时内退出：" + diagnostics())
+            }
+            stdout.await()
+            stderr.await()
+            return process.exitValue()
+        }
+
+        fun json(): String {
+            val text = stdout.text()
+            val start = text.indexOf('{')
+            if (start < 0) throw AssertionError("serve 没有输出 JSON：" + diagnostics())
+            return text.substring(start).trim()
+        }
+
+        fun diagnostics(): String =
+            "exit=" + (if (process.isAlive) "alive" else process.exitValue().toString()) +
+                " stdout=" + stdout.text() + " stderr=" + stderr.text()
+
+        override fun close() {
+            if (process.isAlive) {
+                process.destroy()
+                try {
+                    process.waitFor(5, TimeUnit.SECONDS)
+                } catch (_: InterruptedException) {
+                }
+            }
+            if (process.isAlive) process.destroyForcibly()
+        }
+    }
+
+    /** 本端当发送方时用的信封：两条已知来源，Windows apply 后应落两行。 */
+    private fun androidEnvelope(): ByteArray = SourceSyncCodec.encode(
+        SourceSyncEnvelope(
+            deviceId = ANDROID_DEVICE,
+            snapshotId = "snap-w640",
+            createdAtEpochMs = 1_792_800_000_000L,
+            capabilities = SyncCapabilities(canSendSecrets = false, sourceTypes = listOf("emby", "jellyfin")),
+            sources = listOf(
+                SourceRecord(
+                    syncSourceId = SEND_RECORD_EMBY_ID,
+                    sourceType = SyncSourceTypeValue.parse("emby"),
+                    displayName = "w640 emby",
+                    accountScope = "alice",
+                    endpoints = listOf(SourceEndpoint(url = "http://127.0.0.1:8097", isPrimary = true, enabled = true)),
+                    recordRevision = 4L,
+                    fieldVersion = 1,
+                ),
+                SourceRecord(
+                    syncSourceId = SEND_RECORD_JELLYFIN_ID,
+                    sourceType = SyncSourceTypeValue.parse("jellyfin"),
+                    displayName = "w640 jellyfin",
+                    endpoints = listOf(SourceEndpoint(url = "http://127.0.0.1:8096", isPrimary = true, enabled = true)),
+                    recordRevision = 2L,
+                    fieldVersion = 1,
+                ),
+            ),
+        ),
+    ).toByteArray(Charsets.UTF_8)
+
+    /** Windows FileLocalSourceStore 落盘条数：按 serverId 出现次数数。 */
+    private fun writtenSourceCount(root: File): Int {
+        val file = File(root, "sync-sources.json")
+        if (!file.isFile) return 0
+        val text = file.readText(Charsets.UTF_8)
+        var count = 0
+        var index = text.indexOf("\"serverId\"")
+        while (index >= 0) {
+            count++
+            index = text.indexOf("\"serverId\"", index + 1)
+        }
+        return count
+    }
+
+    private fun describeSent(result: SourceSyncTransferResult): String = when (result) {
+        is SourceSyncTransferResult.Ok -> "ok frames=" + result.frameCount
+        is SourceSyncTransferResult.Failed -> result.reason + " / " + (result.message ?: "")
+    }
     // ---------------------------------------------------------------- 监听端夹具
 
     private fun startListener(
         tls: Boolean = false,
         identity: SourceSyncTlsIdentity = SourceSyncTlsIdentity.NONE,
         authSecret: String? = null,
+        receipt: Boolean = false,
     ): ListenerFixture {
         val pin = identity.certificateFingerprint
         assertTrue("TLS 监听必须有可用身份证书", !tls || pin != null)
@@ -389,17 +604,19 @@ class SourceSyncListenerInteropTest {
                 deviceId = null,
             )
         }
-        return ListenerFixture(startedService, auth)
+        val receiptOptions = SourceSyncReceiptOptions.writingOrOff(receipt)
+        return ListenerFixture(startedService, auth, receiptOptions)
     }
 
     private class ListenerFixture(
         val service: SourceSyncListenerImportService,
         private val auth: SourceSyncTransferOptions?,
+        private val receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
     ) : Closeable {
 
         val port: Int get() = service.port
 
-        fun receiveAsync(): PendingReceive = PendingReceive(service, auth)
+        fun receiveAsync(): PendingReceive = PendingReceive(service, auth, receipt)
 
         override fun close() {
             service.close()
@@ -409,13 +626,14 @@ class SourceSyncListenerInteropTest {
     private class PendingReceive(
         private val service: SourceSyncListenerImportService,
         private val auth: SourceSyncTransferOptions?,
+        private val receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
     ) {
 
         private val result = AtomicReference<SourceSyncTransferImportOutcome?>(null)
         private val failure = AtomicReference<Throwable?>(null)
         private val worker: Thread = Thread({
             try {
-                result.set(runBlocking { service.receiveAndImport(null, auth) })
+                result.set(runBlocking { service.receiveAndImport(null, auth, receipt) })
             } catch (error: Throwable) {
                 failure.set(error)
             }
@@ -523,6 +741,21 @@ class SourceSyncListenerInteropTest {
         fun await() {
             worker.join(15_000)
         }
+
+        /** 轮询等到某一行出现（CLI 的 listening 行是子进程启动后才写的，不能一次读完就判断）。 */
+        fun awaitLine(prefix: String, timeoutMs: Long): String? {
+            val deadline = System.currentTimeMillis() + timeoutMs
+            while (System.currentTimeMillis() < deadline) {
+                val found = lineWithPrefix(prefix)
+                if (found != null) return found
+                Thread.sleep(50)
+            }
+            return lineWithPrefix(prefix)
+        }
+
+        private fun lineWithPrefix(prefix: String): String? = text().lines()
+            .map { line -> line.trim() }
+            .firstOrNull { line -> line.startsWith(prefix) }
 
         fun text(): String = buffer.toString("UTF-8")
     }
@@ -701,6 +934,10 @@ class SourceSyncListenerInteropTest {
         private const val WINDOWS_DEVICE = "win-c"
         private const val RECORD_EMBY_ID = "local-w638-emby"
         private const val RECORD_JELLYFIN_ID = "local-w638-jellyfin"
+        private const val SERVE_DEVICE = "win-a"
+        private const val LISTENING_PREFIX = "listening "
+        private const val SEND_RECORD_EMBY_ID = "local-w640-emby"
+        private const val SEND_RECORD_JELLYFIN_ID = "local-w640-jellyfin"
         private const val MAIN_FIXTURE = "mediahub-sync-test"
         private const val P12_PASSWORD = "mediahub-tls-test"
         private const val SKIP_MESSAGE =

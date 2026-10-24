@@ -126,12 +126,17 @@ private class FakeFactory(
 
     var lastTls: Boolean? = null
 
+    var lastReceipt: Boolean? = null
+
     override fun tlsAvailability(): SourceSyncListenTlsAvailability = availability
 
-    override fun open(port: Int, tls: Boolean): SourceSyncListenerOpenResult {
+    override fun open(port: Int, tls: Boolean): SourceSyncListenerOpenResult = open(port, tls, false)
+
+    override fun open(port: Int, tls: Boolean, receipt: Boolean): SourceSyncListenerOpenResult {
         openCalls++
         lastPort = port
         lastTls = tls
+        lastReceipt = receipt
         return opened
     }
 }
@@ -660,6 +665,63 @@ class SourceSyncListenerControllerTest {
         )
     }
 
+    // ------- W6-40 回执开关（界面先不加控件，默认关） -------
+
+    @Test
+    fun formReceiptFlagIsForwardedToTheFactory() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession()))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+
+        assertTrue(controller.start(SourceSyncListenForm()))
+        assertEquals("默认必须是关着的", false, factory.lastReceipt)
+
+        controller.stop()
+        assertTrue(controller.start(SourceSyncListenForm(port = "", tls = false, receipt = true)))
+        assertEquals("开了就必须原样传下去", true, factory.lastReceipt)
+        assertEquals(2, factory.openCalls)
+    }
+
+    @Test
+    fun receivedCarriesTheReceiptFlagIntoTheState() = runTest {
+        val listener = FakeSession(
+            outcome = SourceSyncTransferImportOutcome.Imported(
+                result = SourceSyncImportResult(
+                    deviceId = "device-a",
+                    snapshotId = "snap-1",
+                    envelopeContentHash = "hash-1",
+                ),
+                envelopeJson = envelopeText(),
+                receiptWritten = true,
+            ),
+        )
+        val controller = SourceSyncListenerController(FakeFactory(opened = opened(listener))) { _, _ -> }
+
+        controller.start(SourceSyncListenForm(receipt = true))
+        assertTrue(controller.awaitOnce())
+
+        val state = controller.state.value
+        assertTrue("期待已收到状态，实际 " + state, state is SourceSyncListenState.Received)
+        assertTrue((state as SourceSyncListenState.Received).receiptWritten)
+        assertTrue(
+            "回执成功时结果行要点出对端能确认",
+            SourceSyncListenCopy.lineOf(state).orEmpty().contains(SourceSyncListenCopy.RECEIPT_WRITTEN_HINT),
+        )
+    }
+
+    @Test
+    fun defaultFormAsksForNoReceiptAndSaysNothingAboutIt() = runTest {
+        val listener = FakeSession(outcome = imported(envelopeText()))
+        val controller = SourceSyncListenerController(FakeFactory(opened = opened(listener))) { _, _ -> }
+
+        controller.start(SourceSyncListenForm())
+        assertTrue(controller.awaitOnce())
+
+        val state = controller.state.value as SourceSyncListenState.Received
+        assertFalse("默认关着就不该声称回了回执", state.receiptWritten)
+        assertFalse(
+            SourceSyncListenCopy.lineOf(state).orEmpty().contains(SourceSyncListenCopy.RECEIPT_WRITTEN_HINT),
+        )
+    }
     private suspend fun seededSession(): Seeded {
         val preview = FakePreviewPort(readyPreview())
         val apply = FakeApplyPort(appliedResult())

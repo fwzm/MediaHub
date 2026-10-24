@@ -163,42 +163,126 @@ object SourceSyncTransfer {
         envelope: ByteArray,
         challenge: String? = null,
         options: SourceSyncTransferOptions? = null,
+    ): SourceSyncTransferResult =
+        when (val written = writeFrames(output, envelope, challenge, options)) {
+            is FramesWrite.Failed -> written.result
+            is FramesWrite.Sent -> SourceSyncTransferResult.Ok(envelope.copyOf(), written.frames, written.challenge)
+        }
+
+    /**
+     * 写完信封后等一个回执字节（对应 Windows SendAsync 的 receipt 参数）。
+     *
+     * 帧照旧全部写出并 flush，随后只在 receipt 开启时才读一个字节：
+     * 收到 0x04 才算送达；对端关了连接而没写字节是 receipt-missing；
+     * 预算内既没有字节也没有关闭是 receipt-timeout；读到别的字节是 receipt-invalid；
+     * 本端根本没有可读流是 receipt-not-enabled。
+     *
+     * 没等到回执时返回的是失败而不是「带警告的成功」：这一点比帧计数重要——
+     * 对端拒收之后也照样关连接，所以「字节写完了」本身不是送达证据。
+     *
+     * readTimeoutSetter 由端点层提供（把回执预算落到当前活跃 socket 的 soTimeout 上），
+     * 这样不必另起线程就能把「对端静默」与「对端关了」分开；设不上按 receipt-not-enabled 报。
+     */
+    fun sendAndAwaitReceipt(
+        output: OutputStream,
+        input: InputStream?,
+        envelope: ByteArray,
+        challenge: String? = null,
+        options: SourceSyncTransferOptions? = null,
+        receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.awaiting(),
+        readTimeoutSetter: ((Int) -> Unit)? = null,
     ): SourceSyncTransferResult {
-        if (envelope.isEmpty()) {
+        val written = when (val frames = writeFrames(output, envelope, challenge, options)) {
+            is FramesWrite.Failed -> return frames.result
+            is FramesWrite.Sent -> frames
+        }
+        if (!receipt.enabled) {
+            return SourceSyncTransferResult.Ok(envelope.copyOf(), written.frames, written.challenge)
+        }
+        if (input == null) {
             return SourceSyncTransferResult.Failed(
-                SourceSyncTransferReasons.PAYLOAD_TOO_LARGE,
-                "信封至少要有 1 字节；什么都没有写出",
+                SourceSyncReceiptReasons.RECEIPT_NOT_ENABLED,
+                "本端读不到回执：没有可读的流，所以这个「成功」没有送达证据。",
+            )
+        }
+        if (readTimeoutSetter != null) {
+            try {
+                readTimeoutSetter(receipt.budgetMs)
+            } catch (error: Exception) {
+                return SourceSyncTransferResult.Failed(
+                    SourceSyncReceiptReasons.RECEIPT_NOT_ENABLED,
+                    "等回执的读超时设不上，所以回执可能永远等不到：" + error.javaClass.simpleName,
+                )
+            }
+        }
+        val answer = SourceSyncReceipt.await(input, receipt.budgetMs)
+        if (!answer.confirmed) {
+            return SourceSyncTransferResult.Failed(
+                answer.reason ?: SourceSyncReceiptReasons.RECEIPT_MISSING,
+                answer.detail,
+            )
+        }
+        return SourceSyncTransferResult.Ok(envelope.copyOf(), written.frames, written.challenge)
+    }
+
+    /** 帧到底写没写出去：三条前置拒绝与成功共用一份实现，回执路径不得复制校验逻辑。 */
+    private sealed interface FramesWrite {
+        class Sent(val frames: Int, val challenge: String?) : FramesWrite
+        class Failed(val result: SourceSyncTransferResult) : FramesWrite
+    }
+
+    /** 校验 + 写帧 + 认证 tag 帧 + flush（对应 Windows SendAsync 的前半段）。 */
+    private fun writeFrames(
+        output: OutputStream,
+        envelope: ByteArray,
+        challenge: String?,
+        options: SourceSyncTransferOptions?,
+    ): FramesWrite {
+        if (envelope.isEmpty()) {
+            return FramesWrite.Failed(
+                SourceSyncTransferResult.Failed(
+                    SourceSyncTransferReasons.PAYLOAD_TOO_LARGE,
+                    "信封至少要有 1 字节；什么都没有写出",
+                ),
             )
         }
         if (envelope.size > MAXIMUM_ENVELOPE_BYTES) {
-            return SourceSyncTransferResult.Failed(
-                SourceSyncTransferReasons.PAYLOAD_TOO_LARGE,
-                "信封 " + envelope.size + " 字节超过 " + MAXIMUM_ENVELOPE_BYTES + " 字节上限；什么都没有写出",
+            return FramesWrite.Failed(
+                SourceSyncTransferResult.Failed(
+                    SourceSyncTransferReasons.PAYLOAD_TOO_LARGE,
+                    "信封 " + envelope.size + " 字节超过 " + MAXIMUM_ENVELOPE_BYTES + " 字节上限；什么都没有写出",
+                ),
             )
         }
         val frames = try {
             encodeFrames(envelope, challenge)
         } catch (error: IllegalArgumentException) {
-            return SourceSyncTransferResult.Failed(
-                SourceSyncTransferReasons.PAYLOAD_TOO_LARGE,
-                "挑战超过 " + MAXIMUM_CHALLENGE_BYTES + " 字节上限；什么都没有写出",
+            return FramesWrite.Failed(
+                SourceSyncTransferResult.Failed(
+                    SourceSyncTransferReasons.PAYLOAD_TOO_LARGE,
+                    "挑战超过 " + MAXIMUM_CHALLENGE_BYTES + " 字节上限；什么都没有写出",
+                ),
             )
         }
         val authentication = options?.takeIf { it.authenticate }
         var tagFrame: ByteArray? = null
         if (authentication != null) {
             if (!authentication.hasSecret) {
-                return SourceSyncTransferResult.Failed(
-                    SourceSyncTransferAuthReasons.AUTH_SECRET_UNAVAILABLE,
-                    "Authentication is on but this process holds no secret; nothing was sent.",
+                return FramesWrite.Failed(
+                    SourceSyncTransferResult.Failed(
+                        SourceSyncTransferAuthReasons.AUTH_SECRET_UNAVAILABLE,
+                        "Authentication is on but this process holds no secret; nothing was sent.",
+                    ),
                 )
             }
             val nonce = challenge?.trim()
             if (nonce.isNullOrEmpty()) {
-                return SourceSyncTransferResult.Failed(
-                    SourceSyncTransferAuthReasons.AUTH_REQUIRED,
-                    "Authentication is on but no challenge was announced; " +
-                        "the challenge is the nonce the tag binds to, so nothing was sent.",
+                return FramesWrite.Failed(
+                    SourceSyncTransferResult.Failed(
+                        SourceSyncTransferAuthReasons.AUTH_REQUIRED,
+                        "Authentication is on but no challenge was announced; " +
+                            "the challenge is the nonce the tag binds to, so nothing was sent.",
+                    ),
                 )
             }
             tagFrame = SourceSyncTransferAuthenticator.createTagFrame(
@@ -219,12 +303,14 @@ object SourceSyncTransfer {
             }
             output.flush()
         } catch (error: IOException) {
-            return SourceSyncTransferResult.Failed(
-                SourceSyncTransferReasons.IO_FAILED,
-                "写到第 " + written + " 帧时失败：" + error.javaClass.simpleName,
+            return FramesWrite.Failed(
+                SourceSyncTransferResult.Failed(
+                    SourceSyncTransferReasons.IO_FAILED,
+                    "写到第 " + written + " 帧时失败：" + error.javaClass.simpleName,
+                ),
             )
         }
-        return SourceSyncTransferResult.Ok(envelope.copyOf(), written, challenge?.trim())
+        return FramesWrite.Sent(written, challenge?.trim())
     }
 
     /** 从内存字节解码（测试与离线回放用）；语义与 receive 完全相同。 */

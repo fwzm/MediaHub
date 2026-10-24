@@ -4,6 +4,7 @@ import com.mediahub.core.common.pairing.LoopbackOnly
 import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -28,6 +29,8 @@ sealed interface SourceSyncListenerTransfer {
      * @param frames 实际读到的帧数（明文无挑战帧时等于块数，开认证时块数加 2）。
      * @param bytes 信封字节数。
      * @param challenge 对端在挑战帧里宣布的挑战，没有则为 null。
+     * @param receiptWritten 本端是否真的写出了 0x04 回执（回执关着、没有可写流、'
+     *   或解码闸门拒收时为 false）。
      */
     class Received(
         val envelope: ByteArray,
@@ -35,6 +38,7 @@ sealed interface SourceSyncListenerTransfer {
         val frames: Int,
         val bytes: Int,
         val challenge: String?,
+        val receiptWritten: Boolean = false,
     ) : SourceSyncListenerTransfer
 
     /** 没收到信封：码来自既有三张码表，detail 是给人看的诊断。 */
@@ -109,14 +113,20 @@ class SourceSyncTransferListener private constructor(
      * @param expectedChallenge 非空时，对端在挑战帧里宣布的挑战必须逐字相等，否则 challenge-mismatch；
      *   null 表示接受对端宣布的任何挑战（与 Windows CLI serve 同口径）。
      * @param auth 可选的对端认证（W6-25）：非 null 且持口令时要求对端在最后一块之后跟一帧 HMAC tag。
+     * @param receipt 可选的回执（W6-40）：开启且信封按帧收全时，向对端写一个裸 0x04 字节；
+     *   默认 [SourceSyncReceiptOptions.Off]，不多写一个字节。
+     * @param receiptGate 可选解码闸门：返回 false 时刻意沉默（不写回执，也不把接收改成失败），
+     *   对应 Windows ReceiveOnceAsync 的 receiptGate 参数。
      * @return [SourceSyncListenerTransfer.Received] 或 [SourceSyncListenerTransfer.Failed]，不抛异常。
      */
     fun receiveOnce(
         expectedChallenge: String? = null,
         auth: SourceSyncTransferOptions? = null,
+        receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
+        receiptGate: ((ByteArray) -> Boolean)? = null,
     ): SourceSyncListenerTransfer {
         synchronized(acceptLock) {
-            return acceptAndReceive(expectedChallenge, auth)
+            return acceptAndReceive(expectedChallenge, auth, receipt, receiptGate)
         }
     }
 
@@ -138,6 +148,8 @@ class SourceSyncTransferListener private constructor(
     private fun acceptAndReceive(
         expectedChallenge: String?,
         auth: SourceSyncTransferOptions?,
+        receipt: SourceSyncReceiptOptions,
+        receiptGate: ((ByteArray) -> Boolean)?,
     ): SourceSyncListenerTransfer {
         if (closed.get()) {
             return failed(SourceSyncTransferReasons.LISTENER_FAILED, CLOSED_DETAIL)
@@ -157,15 +169,18 @@ class SourceSyncTransferListener private constructor(
                 "接受连接时出了 IO 错误：" + error.javaClass.simpleName,
             )
         }
-        return receiveOver(socket, expectedChallenge, auth)
+        return receiveOver(socket, expectedChallenge, auth, receipt, receiptGate)
     }
 
     private fun receiveOver(
         socket: Socket,
         expectedChallenge: String?,
         auth: SourceSyncTransferOptions?,
+        receipt: SourceSyncReceiptOptions,
+        receiptGate: ((ByteArray) -> Boolean)?,
     ): SourceSyncListenerTransfer {
         var tlsSocket: Socket? = null
+        var writeStream: OutputStream? = null
         return try {
             socket.tcpNoDelay = true
             socket.soTimeout = readTimeoutMs
@@ -182,19 +197,32 @@ class SourceSyncTransferListener private constructor(
                     is SourceSyncTlsResult.Ok -> {
                         tlsSocket = negotiated.session.socket
                         negotiated.session.socket.soTimeout = readTimeoutMs
+                        writeStream = negotiated.session.output
                         negotiated.session.input
                     }
                 }
             }
             when (val received = SourceSyncTransfer.receive(input, expectedChallenge, auth)) {
                 is SourceSyncTransferResult.Failed -> failed(received.reason, received.message)
-                is SourceSyncTransferResult.Ok -> SourceSyncListenerTransfer.Received(
-                    envelope = received.envelope,
-                    envelopeJson = received.envelope.toString(Charsets.UTF_8),
-                    frames = received.frameCount,
-                    bytes = received.envelope.size,
-                    challenge = received.challenge,
-                )
+                is SourceSyncTransferResult.Ok -> {
+                    // 回执只在按帧收全之后写：半帧、校验失败、认证失配一律沉默，
+                    // 与 Windows WriteReceiptAsync 的位置（ReceiveAsync 之后、gate 之前写）同形。
+                    // 明文时写到 socket 本身而不是嗅探包装流——包装流只读（Windows 同样写 writable socket）。
+                    val receiptWritten = if (receipt.enabled) {
+                        val writable = writeStream ?: socket.getOutputStream()
+                        SourceSyncReceipt.acknowledge(writable, received.envelope, receipt, receiptGate).confirmed
+                    } else {
+                        false
+                    }
+                    SourceSyncListenerTransfer.Received(
+                        envelope = received.envelope,
+                        envelopeJson = received.envelope.toString(Charsets.UTF_8),
+                        frames = received.frameCount,
+                        bytes = received.envelope.size,
+                        challenge = received.challenge,
+                        receiptWritten = receiptWritten,
+                    )
+                }
             }
         } catch (timeout: SocketTimeoutException) {
             failed(

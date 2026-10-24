@@ -37,6 +37,9 @@ class SourceSyncTransferClient(
      *
      * @param tls 默认关闭；开启时先握手再读帧，握手失败直接返回 tls- 前缀的稳定码。
      * @param auth 可选的对端认证（W6-25）；默认 null，字节与今天完全一致。
+     * @param receipt 可选的回执（W6-40）：本端当接收方时，收全一封信封后写一个裸 0x04；
+     *   默认 [SourceSyncReceiptOptions.Off]，一个字节都不多写。
+     * @param receiptGate 可选解码闸门：返回 false 时沉默（不写回执，也不把这次接收改成失败）。
      */
     fun receiveFrom(
         host: String,
@@ -44,9 +47,15 @@ class SourceSyncTransferClient(
         expectedChallenge: String? = null,
         tls: SourceSyncTlsOptions = SourceSyncTlsOptions.Off,
         auth: SourceSyncTransferOptions? = null,
+        receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
+        receiptGate: ((ByteArray) -> Boolean)? = null,
     ): SourceSyncTransferResult {
-        return withConnection(host, port, tls) { input, _ ->
-            SourceSyncTransfer.receive(input, expectedChallenge, auth)
+        return withConnection(host, port, tls) { input, output, _ ->
+            val received = SourceSyncTransfer.receive(input, expectedChallenge, auth)
+            if (receipt.enabled && received is SourceSyncTransferResult.Ok) {
+                SourceSyncReceipt.acknowledge(output, received.envelope, receipt, receiptGate)
+            }
+            received
         }
     }
 
@@ -54,6 +63,8 @@ class SourceSyncTransferClient(
      * 连上对端并送出一封信封（本端是发送方）。
      *
      * @param auth 可选的对端认证（W6-25）；非 null 且持口令时信封后追加一帧 HMAC tag。
+     * @param receipt 可选的等回执（W6-40）：开启时写完帧后读一个字节，收到 0x04 才算送达；
+     *   预算默认 2000 毫秒，会临时改这条连接的读超时（连接随即关闭，所以不恢复）。
      */
     fun sendTo(
         host: String,
@@ -62,9 +73,22 @@ class SourceSyncTransferClient(
         challenge: String? = null,
         tls: SourceSyncTlsOptions = SourceSyncTlsOptions.Off,
         auth: SourceSyncTransferOptions? = null,
+        receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
     ): SourceSyncTransferResult {
-        return withConnection(host, port, tls) { _, output ->
-            SourceSyncTransfer.sendTo(output, envelope, challenge, auth)
+        return withConnection(host, port, tls) { input, output, setReadTimeout ->
+            if (receipt.enabled) {
+                SourceSyncTransfer.sendAndAwaitReceipt(
+                    output = output,
+                    input = input,
+                    envelope = envelope,
+                    challenge = challenge,
+                    options = auth,
+                    receipt = receipt,
+                    readTimeoutSetter = setReadTimeout,
+                )
+            } else {
+                SourceSyncTransfer.sendTo(output, envelope, challenge, auth)
+            }
         }
     }
 
@@ -72,7 +96,7 @@ class SourceSyncTransferClient(
         host: String,
         port: Int,
         tls: SourceSyncTlsOptions,
-        body: (InputStream, OutputStream) -> SourceSyncTransferResult,
+        body: (InputStream, OutputStream, (Int) -> Unit) -> SourceSyncTransferResult,
     ): SourceSyncTransferResult {
         val address = LoopbackOnly.addressOrNull(host)
             ?: return SourceSyncTransferResult.Failed(
@@ -108,7 +132,10 @@ class SourceSyncTransferClient(
                     }
                 }
             }
-            body(input, output)
+            // 第三个参数把「改这条连接的读超时」交给业务层：等回执必须把预算落到活跃 socket 上，
+            // 这样「对端静默」与「对端关了」才分得开，也不必另起线程。
+            val activeSocket = tlsSocket ?: opened
+            body(input, output) { millis -> activeSocket.soTimeout = millis }
         } catch (timeout: SocketTimeoutException) {
             SourceSyncTransferResult.Failed(
                 SourceSyncTransferReasons.TRANSFER_TIMEOUT,
