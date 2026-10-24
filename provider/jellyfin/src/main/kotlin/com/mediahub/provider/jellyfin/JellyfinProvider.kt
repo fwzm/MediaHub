@@ -73,7 +73,11 @@ class JellyfinProvider(
             val latencyMs = (System.nanoTime() - start) / 1_000_000
             // 协议特征校验（ADR-019）：HTTP 200 + JSON 可解析 ≠ 有效 Jellyfin。
             if (info.id.isNullOrBlank() || info.version.isNullOrBlank()) {
-                return ConnectionStatus(ok = false, message = "服务器响应不是有效的 Jellyfin SystemInfo")
+                return ConnectionStatus(
+                ok = false,
+                message = "服务器响应不是有效的 Jellyfin SystemInfo",
+                errorCode = ProviderException.ErrorCode.PARSE,
+            )
             }
             ConnectionStatus(
                 ok = true,
@@ -93,11 +97,17 @@ class JellyfinProvider(
                     404 -> "该地址不是 Jellyfin 服务（404）"
                     else -> "HTTP ${e.statusCode}"
                 },
+                errorCode = when (e.statusCode) {
+                    401 -> ProviderException.ErrorCode.AUTH_REQUIRED
+                    403, in 500..599 -> ProviderException.ErrorCode.HTTP
+                    404 -> ProviderException.ErrorCode.NOT_FOUND
+                    else -> ProviderException.ErrorCode.HTTP
+                },
             )
         } catch (e: ProviderException) {
-            ConnectionStatus(ok = false, message = e.message ?: "连接失败")
+            ConnectionStatus(ok = false, message = e.message ?: "连接失败", errorCode = e.code)
         } catch (e: Exception) {
-            ConnectionStatus(ok = false, message = "连接失败：${e.message}")
+            ConnectionStatus(ok = false, message = "连接失败：${e.message}", errorCode = ProviderException.ErrorCode.UNKNOWN)
         }
     }
 

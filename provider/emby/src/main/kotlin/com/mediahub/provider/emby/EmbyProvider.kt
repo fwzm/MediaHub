@@ -76,7 +76,11 @@ class EmbyProvider(
             val latencyMs = (System.nanoTime() - start) / 1_000_000
             // 协议特征校验（ADR-024）：HTTP 200 + JSON 可解析 ≠ 有效 Emby。
             if (info.id.isNullOrBlank() || info.version.isNullOrBlank()) {
-                return ConnectionStatus(ok = false, message = "服务器响应不是有效的 Emby SystemInfo")
+                return ConnectionStatus(
+                ok = false,
+                message = "服务器响应不是有效的 Emby SystemInfo",
+                errorCode = ProviderException.ErrorCode.PARSE,
+            )
             }
             ConnectionStatus(
                 ok = true,
@@ -96,11 +100,18 @@ class EmbyProvider(
                     404 -> "该地址不是 Emby 服务（404）"
                     else -> "HTTP ${e.statusCode}"
                 },
+                // P3：填 errorCode，让 UI 能按类别给出差异化指引（此前该字段从未被 Emby 设置）
+                errorCode = when (e.statusCode) {
+                    401 -> ProviderException.ErrorCode.AUTH_REQUIRED
+                    403, in 500..599 -> ProviderException.ErrorCode.HTTP
+                    404 -> ProviderException.ErrorCode.NOT_FOUND
+                    else -> ProviderException.ErrorCode.HTTP
+                },
             )
         } catch (e: ProviderException) {
-            ConnectionStatus(ok = false, message = e.message ?: "连接失败")
+            ConnectionStatus(ok = false, message = e.message ?: "连接失败", errorCode = e.code)
         } catch (e: Exception) {
-            ConnectionStatus(ok = false, message = "连接失败：${e.message}")
+            ConnectionStatus(ok = false, message = "连接失败：${e.message}", errorCode = ProviderException.ErrorCode.UNKNOWN)
         }
     }
 

@@ -9,11 +9,13 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.mediahub.model.MediaServer
 import com.mediahub.model.ServerType
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -147,6 +149,23 @@ class DataStoreServerUserAgentRepositoryTest {
 
         assertTrue(repository.loaded)
         assertTrue(repository.awaitLoaded(1_000))
+    }
+
+    @Test
+    fun `awaitLoaded suspends until the first snapshot without polling`() = runTest {
+        val gated = GatedDataStore()
+        val repository = repo(uaScope(), gated)
+        advanceUntilIdle()
+
+        val waiter = async(start = CoroutineStart.UNDISPATCHED) {
+            repository.awaitLoaded(timeoutMs = 10_000)
+        }
+        assertFalse("首份快照未到达时等待协程不得提前完成", waiter.isCompleted)
+
+        gated.releaseInitialSnapshot()
+        advanceUntilIdle()
+
+        assertTrue(waiter.await())
     }
 
     @Test

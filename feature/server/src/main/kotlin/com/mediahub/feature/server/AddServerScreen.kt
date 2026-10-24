@@ -173,7 +173,13 @@ fun AddServerRoute(
 
             state.testResult?.let { result ->
                 Text(
-                    text = result.message ?: if (result.ok) "连接正常" else "连接失败",
+                    // P3：失败时优先展示**按 errorCode 得出的可操作指引**，
+                    // 而不是只把自由文本 message 丢给用户（此前 errorCode 从未被消费）。
+                    text = if (result.ok) {
+                        result.message ?: "连接正常"
+                    } else {
+                        listOfNotNull(result.message, result.toActionableHint()).joinToString(String(charArrayOf(10.toChar())))
+                    },
                     color = if (result.ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodyMedium,
                 )

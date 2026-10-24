@@ -11,6 +11,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -81,6 +82,11 @@ class DataStoreServerUserAgentRepository(
 
     private val lock = Any()
     private val loadLatch = CountDownLatch(1)
+    /**
+     * 挂起调用方使用的加载信号。与 [loadLatch] 分开保留：同步拦截器路径需要
+     * 一个有界阻塞原语，而协程路径不应通过 `yield` 忙等消耗调度器。
+     */
+    private val loadedSignal = CompletableDeferred<Unit>()
 
     @Volatile
     private var cached: Map<String, String> = emptyMap()
@@ -122,7 +128,7 @@ class DataStoreServerUserAgentRepository(
     override suspend fun awaitLoaded(timeoutMs: Long): Boolean {
         if (loadedFlag) return true
         return withTimeoutOrNull(timeoutMs.coerceAtLeast(0)) {
-            while (!loadedFlag) kotlinx.coroutines.yield()
+            loadedSignal.await()
             true
         } ?: loadedFlag
     }
@@ -187,6 +193,7 @@ class DataStoreServerUserAgentRepository(
         }
         loadedFlag = true
         loadLatch.countDown()
+        loadedSignal.complete(Unit)
     }
 
     /**
