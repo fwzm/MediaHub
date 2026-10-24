@@ -2067,3 +2067,96 @@ gradlew.bat --max-workers=2 --rerun-tasks :feature:settings:testDebugUnitTest :f
 - **W6-54**：把 `acceptTimeoutMs` / `readTimeoutMs` / `closeBudgetMs` 做成界面旋钮（现在只在库层有默认值）。
 - **W6-55**：把 `SourceSyncHostAddressTest`、本节的 `SourceSyncListenerControllerTest` 等钉进 `--required-suite`。
 - 两端跨机真题仍需两台机器与用户授权窗口，见 §28.8 第 2 条。
+
+## 30. 监听端等待预算旋钮（W6-54）
+
+### 30.1 动机
+
+Android 缺口表第 3 条：等待预算此前只存在于库层 —— `SourceSyncTransferListener.open(..., acceptTimeoutMs = 15_000, readTimeoutMs = 15_000, ...)`（`core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncTransferListener.kt:279`）与 `SourceSyncListenerImportService.start(..., acceptTimeoutMs, readTimeoutMs, ...)`（`core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncListenerImportService.kt:131-141`）都支持，但监听卡的 `start(form)` 一律用默认值：用户在大信封或慢网络上没有任何旋钮，只能等 15 秒后看到 `transfer-timeout`。
+
+本轮只加这一个旋钮，**不改任何线上字节**：预算只在本地决定「等多久就放弃」，不进入信封、不进 tag 帧、不进回执。
+
+### 30.2 与 Windows `transfer serve --budget-ms` 的同名同义
+
+| 维度 | Windows（W6-50） | Android（W6-54） |
+| --- | --- | --- |
+| 名字 | `--budget-ms N` | 界面「等待预算（毫秒，留空=15000）」 |
+| 缺省 | 15000 ms | 留空 = 15000 ms |
+| 范围 | 100..600000 | 100..600000 |
+| 作用点 | `transfer serve` 等连接与读 | `SourceSyncTransferListener` 等连接（accept）与每次读（read） |
+| 非法值 | CLI 码 `invalid-budget-ms:<值>`（退出码 2） | 本地码 `listen-budget-invalid`（不开 socket） |
+| 线上影响 | 无 | 无 |
+
+**一个框管两段等待**是刻意的：core 的两个超时都是「单次等待的上限」（`SO_TIMEOUT` 落在 accept 与每次 read 上），不是一个整场传输的总预算；把它拆成两个输入框等于让用户去猜到底哪一段在超时。文案把这件事直接写在卡片上（`SourceSyncListenCopy.BUDGET_HINT`），不留在文档里。
+
+### 30.3 三条外部可观察语义
+
+1. **不合法就不开 socket**：预算文本非数字或落在 100..600000 之外时，控制器在 `starting` 单飞之前就返回，状态是 `Failed(port = null, code = "listen-budget-invalid", detail = BUDGET_INVALID_HINT)`，工厂的 `open` 一次都没被调用。
+2. **留空等于 15000**：空白文本不当作 0，也不当作错误；`budgetMillis` 直接给 `SourceSyncTransferListener.DEFAULT_ACCEPT_TIMEOUT_MS`，与 W6-53 之前逐字同行为。
+3. **数字原样到达 core**：控制器把毫秒数同时填进 `acceptTimeoutMs` 与 `readTimeoutMs`，中间不做单位换算、不做四舍五入；界面只转交文本，解析与范围判定只有一处（`SourceSyncListenForm.budgetMillis`）。
+
+### 30.4 落点（文件 + 行号）
+
+| 位置 | 内容 |
+| --- | --- |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncListenerController.kt:141` | `BUDGET_LABEL`（"等待预算（毫秒，留空=15000）"） |
+| 同上 `:150` | `BUDGET_HINT`（一个框管两段等待、范围与 Windows 同值同义） |
+| 同上 `:156` | `BUDGET_INVALID_HINT`（本端兜底文案） |
+| 同上 `:252` | `SourceSyncListenForm.budget: String = ""` |
+| 同上 `:269` | `budgetMillis: Int?`（留空→15000，越界/非数字→null） |
+| 同上 `:276` / `:278` | `isBudgetTextAcceptable` 进 `canSubmit` |
+| 同上 `:298` | `VALID_BUDGET_MILLIS = 100..600_000` |
+| 同上 `:404` | 工厂接口第 7 参重载 `open(..., budgetMillis: Int)`（带默认实现，既有替身零改动） |
+| 同上 `:477-489` | `start(form)` 的预算闸门（口令闸门之后、`starting` 之前） |
+| 同上 `:647` | `const val BUDGET_INVALID = "listen-budget-invalid"` |
+| 同上 `:704` | 生产工厂 6 参重载以默认预算转调 7 参 |
+| 同上 `:714` / `:729-730` | 生产工厂 7 参把同一个毫秒数同时交给 `acceptTimeoutMs` 与 `readTimeoutMs` |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportScreen.kt:130` | tag `sync.listen.budget` |
+| 同上 `:877-887` / `:888-892` | 监听卡的预算输入框与说明 |
+
+### 30.5 JVM 用例（5 例）
+
+| 用例 | 行号 | 钉住什么 |
+| --- | --- | --- |
+| `defaultFormPassesTheFifteenSecondBudgetAndCanSubmit` | `SourceSyncListenerControllerTest.kt:938` | 留空 = 15000，且按钮可提交 |
+| `aTypedBudgetTravelsVerbatimToTheFactory` | `:951` | 30000 原样到达工厂；前后空白不改数字 |
+| `theBudgetRangeEndsAreBothAccepted` | `:962` | 100 与 600000 两个端点都被接受 |
+| `anOutOfRangeBudgetIsRefusedBeforeAnySocket` | `:973` | 99 越界 → `listen-budget-invalid`、`openCalls == 0`、状态行逐字 |
+| `aNonNumericBudgetIsRefusedAndStillShowsInTheFormToString` | `:996` | `12s` 不当作缺省；toString 里预算原文可读、口令仍打码 |
+
+替身新增：`FakeFactory.lastBudget`（`:141`）与 7 参 `open`（`:190`）。
+
+### 30.6 androidTest 用例（4 例）
+
+| 用例 | 行号 | 钉住什么 |
+| --- | --- | --- |
+| `theListenCardOffersABudgetFieldWithItsRangeHint` | `SourceSyncSectionsScreenTest.kt:257` | 输入框存在、可编辑，标签与范围说明都在界面上 |
+| `theListenFormCarriesTheTypedBudgetVerbatim` | `:270` | 填 30000 点开始 → 表单 `budget == "30000"`、`budgetMillis == 30000` |
+| `anOutOfRangeBudgetKeepsTheListenButtonDisabled` | `:287` | 99 / 12s 都让按钮禁用，清空后恢复可点 |
+| `whileListeningTheBudgetFieldIsLocked` | `:303` | 监听中该框不可编辑 |
+
+### 30.7 实跑证据（本机）
+
+命令（先 `gradlew --stop`；`JAVA_HOME=C:\Program Files\Android\Android Studio\jbr`、`ANDROID_HOME=C:\Users\55160\AppData\Local\Android\Sdk`、`GRADLE_OPTS=-Xmx2560m -XX:MaxMetaspaceSize=896m`）：
+
+```
+gradlew.bat --max-workers=2 --rerun-tasks :feature:settings:testDebugUnitTest :feature:settings:assembleDebugAndroidTest
+```
+
+- `BUILD SUCCESSFUL in 5m 5s`、`212 actionable tasks: 212 executed`，日志 `D:/mh-verify/w6-54-gradle.log`。
+- XML：`feature/settings` **16 套件 / 272 例 / 0 失败 / 0 错误 / 0 跳过**（267 + 5）；`SourceSyncListenerControllerTest` **43/43**（38 + 5，XML 时间 `2026-10-24T16:59:37Z`）。
+- APK `feature/settings/build/outputs/apk/androidTest/debug/settings-debug-androidTest.apk` = **20426910 B**（`10/25/2026 01:00:03`）。**大小与 W6-49/W6-53 时相同，已解包确认不是陈旧产物**：`Expand-Archive` 后 20 个 dex，四个新用例名都在 `classes17.dex`（100480 B），`listen-budget-invalid` 与 `sync.listen.budget` 在 `classes12.dex`（681324 B）。
+- 收尾：`gradlew --stop` → `1 Daemon stopped`、残留 java 进程 0；仓库里没有 `hs_err_pid*.log` / `replay_pid*.log`。
+
+### 30.8 未覆盖（如实记录）
+
+1. **真机 / 模拟器执行未做**：本机无设备，四个 androidTest 用例只进了 APK，设备结论待 CI 的 visual-instrumentation（API 32 / 36）。
+2. **真实超时行为未跑**：没有跑「预算 100 ms + 大信封」去观察 `transfer-timeout` 的实际毫秒数；本机可做的只有解析与透传，跨进程计时需要真实 socket 路径（已由 W6-28 验收脚本在 Windows 侧覆盖）。
+3. **发送卡与拨号接收卡仍无预算旋钮**：本轮只做监听端（与 W6-52 同一取舍），发送端 `SourceSyncSendForm` 的等待仍走控制器常量。
+4. **Hilt 注入与进程重建未覆盖**：表单状态只存在于 Compose 的 `remember`，进程重建后预算输入会回到空（=15000）。
+5. **未进 required-suite**：`SourceSyncListenerControllerTest` 已在 33 条 `--required-suite` 里，androidTest 四个新用例不在任何 required 名单里（android instrumentation 不进那 33 条）。
+6. **无视觉回归**：只断言标签、文案与 enabled 状态，没有截图对比。
+
+### 30.9 下一步
+
+W6-55：把 `SourceSyncHostAddressTest`、`SourceSyncReceiptTest` 等已存在但未钉住的套件加进 `.github/workflows/android-ci.yml` 的 `--required-suite`（改门禁脚本必须同步跑 `.github/scripts/tests` 的 unittest）；发送端与拨号接收卡的预算/地址/认证开关合并为 W6-52b。
