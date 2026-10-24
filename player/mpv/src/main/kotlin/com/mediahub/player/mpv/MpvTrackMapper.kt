@@ -1,6 +1,7 @@
 package com.mediahub.player.mpv
 
 import com.mediahub.model.AudioTrack
+import com.mediahub.model.SubtitleTrack
 import com.mediahub.player.engine.TrackSelection
 
 /**
@@ -18,7 +19,7 @@ import com.mediahub.player.engine.TrackSelection
 object MpvTrackMapper {
 
     /** 一行 track-list 快照所需属性（顺序见 [TRACK_PROPERTIES]）。 */
-    val TRACK_PROPERTIES: List<String> = listOf("id", "type", "lang", "title", "codec", "selected")
+    val TRACK_PROPERTIES: List<String> = listOf("id", "type", "lang", "title", "codec", "selected", "default", "forced", "external")
 
     /**
      * 把 mpv 的 track-list 行映射为音频轨列表。
@@ -52,7 +53,32 @@ object MpvTrackMapper {
      */
     fun nativeAudioId(trackList: List<Map<String, String?>>, selection: TrackSelection?): String? {
         if (selection == null) return null
-        return nativeAudioIds(trackList).getOrNull(selection.groupIndex)
+        return nativeId(trackList, "audio", selection)
+    }
+
+    fun mapSubtitleTracks(trackList: List<Map<String, String?>>): List<SubtitleTrack> =
+        trackList.filter { it["type"] == "sub" }.mapIndexed { index, row ->
+            SubtitleTrack(
+                index = index,
+                language = row["lang"]?.takeIf(String::isNotBlank),
+                title = row["title"]?.takeIf(String::isNotBlank),
+                format = row["codec"]?.takeIf(String::isNotBlank),
+                isDefault = row["default"] == "yes",
+                isForced = row["forced"] == "yes",
+                isExternal = row["external"] == "yes",
+                isSelected = row["selected"] == "yes",
+                isSupported = row["id"]?.toLongOrNull()?.let { it > 0 } == true,
+            )
+        }
+
+    fun nativeSubtitleId(trackList: List<Map<String, String?>>, selection: TrackSelection?): String? =
+        selection?.let { nativeId(trackList, "sub", it) }
+
+    private fun nativeId(rows: List<Map<String, String?>>, type: String, selection: TrackSelection): String? {
+        if (selection.trackIndex != 0) return null
+        // Index the same rows as the UI, without compacting missing IDs and shifting later tracks.
+        return rows.filter { it["type"] == type }.getOrNull(selection.groupIndex)?.get("id")
+            ?.takeIf { it.toLongOrNull()?.let { id -> id > 0 } == true }
     }
 
     /** 与 [mapAudioTracks] 输出一一对应的 mpv track id 列表。 */

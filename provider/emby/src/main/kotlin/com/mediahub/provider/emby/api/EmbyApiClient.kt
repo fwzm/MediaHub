@@ -298,6 +298,15 @@ open class EmbyApiClient(
         return builder.build().toString()
     }
 
+    /** Official subtitle stream endpoint. Never propagate DeliveryUrl query credentials. */
+    fun subtitleStreamUrl(itemId: String, mediaSourceId: String, index: Int, format: String): String {
+        require(index >= 0 && format in setOf("srt", "ass", "ssa", "vtt"))
+        return endpointResolver.endpoint("/Videos").toHttpUrl().newBuilder()
+            .addPathSegment(itemId).addPathSegment(mediaSourceId)
+            .addPathSegment("Subtitles").addPathSegment(index.toString())
+            .addPathSegment("Stream.$format").build().toString()
+    }
+
     /**
      * 图片（海报/缩略图/背景图）地址：GET /emby/Items/{itemId}/Images/{type}。
      *

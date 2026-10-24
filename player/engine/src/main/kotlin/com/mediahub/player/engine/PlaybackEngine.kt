@@ -164,6 +164,10 @@ class PlaybackEngine(
                 val mapped = mapPlayerError(error)
                 logger.e(LogTag.PLAYER, "播放错误 code=${error.errorCode} msg=${error.message}")
                 _uiState.update { it.copy(error = mapped, isBuffering = false) }
+                if (error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED ||
+                    error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED) {
+                    _uiState.update { it.copy(audioOutputStatus = AudioOutputStatus.UNAVAILABLE) }
+                }
             }
 
             override fun onTracksChanged(tracks: Tracks) {
@@ -201,6 +205,9 @@ class PlaybackEngine(
         })
         // 音频输出信号（无声判据，Phase 1B-2.4）：AnalyticsListener 才有 onAudioFormatChanged
         player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onAudioPositionAdvancing(eventTime: AnalyticsListener.EventTime, playoutStartSystemTimeMs: Long) {
+                _uiState.update { it.copy(audioOutputStatus = AudioOutputStatus.ACTIVE) }
+            }
             override fun onAudioInputFormatChanged(
                 eventTime: AnalyticsListener.EventTime,
                 format: Format,

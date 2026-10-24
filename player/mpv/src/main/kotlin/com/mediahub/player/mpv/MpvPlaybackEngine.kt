@@ -327,14 +327,17 @@ class MpvPlaybackEngine internal constructor(
                 MpvInstance.Event.FILE_LOADED -> {
                 tr?.record(PlaybackStartupTrace.Milestone.MPV_FILE_LOADED)
                 // V15-A：文件加载完成即枚举音轨（此前从不发布 audioTracks → 面板恒为空）
-                run.resources?.mpv?.let { refreshAudioTracks(run, it) }
+                withNative(run) { _, m -> refreshTracks(run, m) }
             }
                 MpvInstance.Event.VIDEO_RECONFIG -> {
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_VIDEO_RECONFIG)
                     tr?.record(PlaybackStartupTrace.Milestone.FIRST_FRAME_RENDERED)
                     tr?.let { logger.i(LogTag.PLAYER, "StartupTrace ${it.summary()}") }
                 }
-                MpvInstance.Event.AUDIO_RECONFIG -> tr?.record(PlaybackStartupTrace.Milestone.AUDIO_INPUT_FORMAT_SEEN)
+                MpvInstance.Event.AUDIO_RECONFIG -> {
+                    tr?.record(PlaybackStartupTrace.Milestone.AUDIO_INPUT_FORMAT_SEEN)
+                    withNative(run) { _, m -> refreshTracks(run, m) }
+                }
                 MpvInstance.Event.END_FILE -> {
                     // SEEK-B 真机缺陷修复：到达 EOF 时必须更新 UI 状态。
                     //
@@ -438,7 +441,7 @@ class MpvPlaybackEngine internal constructor(
         withCurrent(run) {
             withNative { _, m -> m.command(arrayOf("set", "aid", aid)) }
             // 立即用 native 实际值回填，避免乐观 UI（失败时保持真实状态）
-            withNative { _, m -> refreshAudioTracks(run, m) }
+            withNative(run) { _, m -> refreshTracks(run, m) }
         }
     }
 
@@ -448,7 +451,7 @@ class MpvPlaybackEngine internal constructor(
      * 必须在 native 锁内调用；只读属性、不下发命令。
      * 空列表（无音轨 / 尚未 file-loaded）如实发布为空，不伪造。
      */
-    private fun refreshAudioTracks(run: Run, m: MpvInstance) {
+    private fun refreshTracks(run: Run, m: MpvInstance) {
         val count = m.getPropertyDouble("track-list/count")?.toInt() ?: 0
         val safeCount = if (count < 0 || count > MAX_TRACKS) 0 else count
         val rows = ArrayList<Map<String, String?>>(safeCount)
@@ -463,12 +466,46 @@ class MpvPlaybackEngine internal constructor(
             if (!isCurrent(run)) return
             run.mpvTrackList = rows
         }
-        val mapped = MpvTrackMapper.mapAudioTracks(rows)
-        withCurrent(run) { _uiState.update { it.copy(audioTracks = mapped) } }
+        val audio = MpvTrackMapper.mapAudioTracks(rows)
+        val primarySid = m.getPropertyString("sid")
+        val subtitleRows = rows.filter { it["type"] == "sub" }
+        val subtitles = MpvTrackMapper.mapSubtitleTracks(rows).mapIndexed { index, track ->
+            if (primarySid == null || primarySid == "auto") track else track.copy(
+                isSelected = subtitleRows.getOrNull(index)?.get("id") == primarySid,
+            )
+        }
+        val outputFormat = m.getPropertyString("audio-out-params/format")?.takeIf(String::isNotBlank)
+        // This describes samples written to the audio API, not the AC3/AAC encoded input.
+        val outputMime = outputFormat?.let {
+            if (it.startsWith("spdif")) "audio/x-iec61937" else "audio/raw"
+        }
+        withCurrent(run) {
+            val old = _uiState.value
+            if (old.audioFormatMime != outputMime || old.subtitleTracks.size != subtitles.size || old.audioTracks.size != audio.size) {
+                logger.i(LogTag.PLAYER, "mpv tracks audio=${audio.size} subtitles=${subtitles.size} output=${outputMime ?: "unknown"}")
+            }
+            _uiState.update { it.copy(
+                audioTracks = audio,
+                subtitleTracks = subtitles,
+                selectedAudio = audio.firstOrNull { track -> track.isSelected }?.let { track -> TrackSelection(track.index, 0) },
+                selectedSubtitle = subtitles.firstOrNull { track -> track.isSelected }?.let { track -> TrackSelection(track.index, 0) },
+                audioFormatMime = outputMime,
+                audioOutputStatus = if (outputFormat != null) com.mediahub.player.engine.AudioOutputStatus.ACTIVE
+                    else com.mediahub.player.engine.AudioOutputStatus.UNKNOWN,
+            ) }
+        }
     }
     override fun selectSubtitleTrack(selection: TrackSelection?) {
-        synchronized(stateLock) { subtitleOperation++ }
-        if (selection == null) withNative { _, m -> m.command(arrayOf("set", "sid", "no")) }
+        val run = synchronized(stateLock) { subtitleOperation++; current } ?: return
+        val rows = synchronized(stateLock) { run.mpvTrackList }
+        val sid = MpvTrackMapper.nativeSubtitleId(rows, selection) ?: run {
+            if (selection != null) return
+            "no"
+        }
+        withNative(run) { _, m ->
+            m.command(arrayOf("set", "sid", sid))
+            refreshTracks(run, m)
+        }
     }
 
     // ---- 外挂字幕 / 偏移（P2 字幕中心切片一） ----
@@ -542,7 +579,10 @@ class MpvPlaybackEngine internal constructor(
                 currentCoroutineContext().ensureActive()
                 if (!ownsOperation()) return false
                 withNative(run) { _, m -> if (ownsOperation()) accepted = primarySubtitleMatches(m, localPath) }
-                if (accepted) return ownsOperation()
+                if (accepted) {
+                    withNative(run) { _, m -> if (ownsOperation()) refreshTracks(run, m) }
+                    return ownsOperation()
+                }
                 if (attempt < SUBTITLE_CONFIRM_ATTEMPTS - 1) delay(SUBTITLE_CONFIRM_INTERVAL_MS)
             }
         } catch (e: CancellationException) {
@@ -647,6 +687,9 @@ class MpvPlaybackEngine internal constructor(
                     if (resources.closed || synchronized(stateLock) { !isCurrent(run) }) return@launch
                     val value = progressSnapshot(run, resources.mpv, _uiState.value)
                     val ended = resources.mpv.getPropertyBoolean("eof-reached") ?: false
+                    // FILE_LOADED may precede publication; track changes and delayed audio output
+                    // must still become visible after that event and after sid/aid reconfiguration.
+                    refreshTracks(run, resources.mpv)
                     withCurrent(run) {
                         _uiState.update { it.copy(positionMs = value.positionMs, durationMs = value.durationMs, isEnded = ended) }
                         _progress.tryEmit(value)

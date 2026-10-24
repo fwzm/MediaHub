@@ -4,6 +4,9 @@ import com.mediahub.core.network.PlaybackError
 import com.mediahub.model.AudioTrack
 import com.mediahub.model.SubtitleTrack
 
+/** Evidence from the audio output API, independent of the encoded input codec. */
+enum class AudioOutputStatus { UNKNOWN, ACTIVE, UNAVAILABLE }
+
 /** 播放器 UI 状态（Compose 直接收集）。 */
 data class PlaybackUiState(
     val isPlaying: Boolean = false,
@@ -18,8 +21,9 @@ data class PlaybackUiState(
     val audioTracks: List<AudioTrack> = emptyList(),
     val subtitleTracks: List<SubtitleTrack> = emptyList(),
     val selectedAudio: TrackSelection? = null,
-    /** 实际正在输出的音频格式（MIME）；null=无音频输出（无声判据，Phase 1B-2.4）。 */
+    /** Engine-reported format: Media3 input MIME or mpv output samples. Null means unknown. */
     val audioFormatMime: String? = null,
+    val audioOutputStatus: AudioOutputStatus = AudioOutputStatus.UNKNOWN,
     val selectedSubtitle: TrackSelection? = null,
     val error: PlaybackError? = null,
     val mediaTitle: String? = null,
@@ -37,4 +41,8 @@ data class PlaybackUiState(
      * 默认值取 [isPlaying]：未显式设置该字段的引擎（如旧实现）行为保持不变。
      */
     val playWhenReady: Boolean = isPlaying,
-)
+) {
+    fun shouldWarnAboutAudioOutput(): Boolean =
+        audioOutputStatus == AudioOutputStatus.UNAVAILABLE && audioTracks.isNotEmpty() &&
+            isPlaying && !isBuffering && !isEnded
+}

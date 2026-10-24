@@ -537,10 +537,9 @@ fun PlayerRoute(
                 }
 
                 // 有画面但无音频输出 → 显式提示，不再"安静地没有声音"（Phase 1B-2.4）。
-                // 判据用 Media3 audioFormat（真实输出信号），不用 isTrackSupported
-                // （DTS-HD 等轨道标不支持，但设备解码器（如 c2.qti.dts.decoder）实际可解）。
-                val audioUnsupported = engineState.audioTracks.isNotEmpty() &&
-                    engineState.audioFormatMime == null && !engineState.isBuffering
+                // Only confirmed output failures warn. Missing metadata is UNKNOWN,
+                // and an encoded AC3 input alone says nothing about decoded PCM output.
+                val audioUnsupported = engineState.shouldWarnAboutAudioOutput()
                 // 播放期错误（Source error 等）：resolve 已成功但引擎报错，显式展示（Phase 1B-2.4）
                 state.error?.let { e ->
                     Text(
