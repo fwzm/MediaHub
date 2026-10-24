@@ -57,6 +57,20 @@ public sealed record SourceSyncPeerRoundResult
     public int Bytes { get; init; }
 
     /// <summary>
+    /// What the wait for the peer's close saw, or null when the caller did not ask for confirmation.
+    /// </summary>
+    /// <remarks>
+    /// A sender that asked for confirmation and did not get it is a failed round whose <see cref="Reason"/> is
+    /// <see cref="SourceSyncDeliveryReasons.DeliveryUnconfirmed"/>; the frames did leave, so <see cref="Bytes"/> and
+    /// <see cref="FrameCount"/> still describe them. Null means nobody asked, and a success then only says the frames
+    /// left this device.
+    /// </remarks>
+    public bool? DeliveryConfirmed { get; init; }
+
+    /// <summary>How long the wait for the peer's close took; zero when no confirmation was requested.</summary>
+    public TimeSpan DeliveryElapsed { get; init; }
+
+    /// <summary>
     /// True when the round succeeded and wrote nothing because this device already matched the envelope.
     /// </summary>
     /// <remarks>
@@ -109,6 +123,8 @@ public sealed record SourceSyncPeerRoundResult
             Detail = transfer.Detail,
             FrameCount = transfer.FrameCount,
             Bytes = transfer.Bytes,
+            DeliveryConfirmed = transfer.DeliveryConfirmed,
+            DeliveryElapsed = transfer.DeliveryElapsed,
         };
     }
 
@@ -234,6 +250,7 @@ public sealed class SourceSyncPeerRound
     /// <param name="cancellationToken">Cancels the transfer.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     /// <param name="tls">The optional TLS pin; null or off keeps the W6-16 plaintext path.</param>
+    /// <param name="delivery">The optional delivery confirmation; null keeps the fire-and-forget send.</param>
     public async Task<SourceSyncPeerRoundResult> SendAsync(
         SourceSyncEnvelope envelope,
         string? address,
@@ -242,7 +259,8 @@ public sealed class SourceSyncPeerRound
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
         SourceSyncTransferOptions? options = null,
-        SourceSyncTlsOptions? tls = null)
+        SourceSyncTlsOptions? tls = null,
+        SourceSyncDeliveryOptions? delivery = null)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
@@ -260,7 +278,7 @@ public sealed class SourceSyncPeerRound
             };
         }
 
-        return await SendPayloadAsync(payload, address, port, challenge, timeout, cancellationToken, options, tls)
+        return await SendPayloadAsync(payload, address, port, challenge, timeout, cancellationToken, options, tls, delivery)
             .ConfigureAwait(false);
     }
 
@@ -277,6 +295,7 @@ public sealed class SourceSyncPeerRound
     /// <param name="cancellationToken">Cancels the transfer.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     /// <param name="tls">The optional TLS pin; null or off keeps the W6-16 plaintext path.</param>
+    /// <param name="delivery">The optional delivery confirmation; null keeps the fire-and-forget send.</param>
     public async Task<SourceSyncPeerRoundResult> SendPayloadAsync(
         ReadOnlyMemory<byte> payload,
         string? address,
@@ -285,10 +304,11 @@ public sealed class SourceSyncPeerRound
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
         SourceSyncTransferOptions? options = null,
-        SourceSyncTlsOptions? tls = null)
+        SourceSyncTlsOptions? tls = null,
+        SourceSyncDeliveryOptions? delivery = null)
     {
         SourceSyncTransferResult sent = await SourceSyncTransferClient
-            .SendAsync(address, port, payload, challenge, timeout, cancellationToken, options, tls)
+            .SendAsync(address, port, payload, challenge, timeout, cancellationToken, options, tls, delivery)
             .ConfigureAwait(false);
 
         SourceSyncPeerRoundResult result = sent.Succeeded

@@ -401,3 +401,50 @@ fresh/b/env.json
 实测行：`已通过! - 失败: 0，通过: 18，已跳过: 0，总计: 18，持续时间: 217 ms`。
 
 另有两条 W12b 对抗性用例的旧契约被本次修复推翻，已就地翻转（它们的名字与断言都写着「容忍」旧行为）：`A_root_that_is_a_file_is_tolerated_but_never_overwritten` → `A_root_that_is_a_file_is_refused_instead_of_being_treated_as_empty`（现在断言 exit 2 + `root-not-a-directory` + 文件字节不变），以及 `A_root_with_a_parent_traversal_is_resolved_by_the_operating_system` → `A_root_with_a_parent_traversal_is_canonicalised_before_it_is_echoed`（现在断言回显的是 `Path.GetFullPath` 的结果、不含 `..`，落盘位置不变）。这是**契约变更**而非放宽：旧断言把「静默当成空根」和「回显未规范化路径」当成了正确行为。
+
+## W6-30 追加 —— `transfer send --confirm-delivery`（送达确认）
+
+### 问题
+
+`transfer send` 只写不读：帧进了 socket 缓冲区就 exit 0，即使对端一个字节都没接收（W6-28 F 用例：serve 2 `tls-handshake-failed`、零写入，send 0 且无任何稳定码）。所以「send 成功」不是送达证据。
+
+### 决策（续 D14–D15）
+
+#### D14：把「对端关闭」当作唯一可观测的送达证据，且默认关闭
+
+写完最后一个帧并 flush 后，等对端关闭连接（读到 EOF）：收到即成功；预算内没收到、或读取抛错（RST 等）即失败。默认关闭，因为确认依赖「接收端拿到信封后立即关闭」——本仓库 Windows 监听端如此，Android 端**未验证**，开启会让每次发送多等一个预算。
+
+#### D15：失败用独立码 `delivery-unconfirmed`，不折成 `io-failed`
+
+`io-failed` 是接收侧的码（读帧时 I/O 失败）；送达未确认是发送侧的语义（帧确实出去了，但没有回执证据）。混用会让排障者看不出是哪一侧的问题。该码独立成集 `SourceSyncDeliveryReasons`，与传输十码集、认证五码集、TLS 四码集两两不重叠。
+
+### 命令参考
+
+```text
+transfer send --to 127.0.0.1:<port> --root <dir> --device <id> [--confirm-delivery] [--json]
+              [--tls --expect-fingerprint HEX] [--authenticate --secret-env NAME]
+```
+
+| 参数组合 | 结果 |
+| --- | --- |
+| `--confirm-delivery` 用在 serve / roundtrip | exit 1 `option-not-allowed-for-command:--confirm-delivery:<命令>` |
+| `--confirm-delivery=1` | exit 1 `flag-takes-no-value:--confirm-delivery` |
+| 确认成功 | exit 0；JSON `confirmDelivery=true`、`deliveryConfirmed=true`；文本多一行 `delivery: confirmed (peer closed after N ms)` |
+| 预算内对端没关 / 读失败 | exit 2 `delivery-unconfirmed`，message 写清写了多少字节、等了多久 |
+| 不开开关 | exit 0；JSON `confirmDelivery=false`、`deliveryConfirmed=null`（没有人问，就没有回执） |
+
+### 线上字节
+
+不开开关时写入序列与 W6-16 完全一致（95 字节冻结向量用例仍逐字节相等）。开确认时也不多写一个字节：明文路径在 flush 后做 `Shutdown(Send)` 半关闭（只发 FIN，FIN 不携带载荷），TLS 路径不做半关闭（TLS 1.3 的收尾是 close_notify，裸 FIN 会被当成截断）。
+
+### `transfer roundtrip`
+
+roundtrip 的两个方向都是本进程刚建的监听端，收完即关，所以内部**总是**开启确认——它只会把「静默的 maybe」变成 `delivery-unconfirmed`，不新增 JSON 字段，也不改既有 16 个 CLI 用例的契约。
+
+### 未覆盖
+
+对端「先拒绝再关闭」与「接收后关闭」在 TCP 层无法区分（关闭只是必要条件，不是充分条件）。要真正拿到回执需要一个反向确认帧，那要改线格式并让 Android 侧同步实现，W6-30 明确不做。详见 `docs/cross-device/W6-30-DELIVERY-CONFIRM.md` 第 6 节。
+
+### 验收
+
+`windows/tools/acceptance/w6/transfer-tls-auth.ps1` 新增 A2（明文 + 确认 → send 0 + `deliveryConfirmed=true`、1 个信封）、F2（明文 client + 确认打 TLS 监听端 → 记录已知盲区）、I（对端接受后永不关闭 → send 2 `delivery-unconfirmed`、2.3 s）。实测 **11/11 PASS**，总 15.3 s，残留进程 0。

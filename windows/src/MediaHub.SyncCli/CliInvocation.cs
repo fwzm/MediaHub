@@ -132,6 +132,13 @@ public sealed record CliInvocation
     /// </summary>
     public string? ExpectFingerprint { get; init; }
 
+    /// <summary>
+    /// <c>--confirm-delivery</c> (<c>transfer send</c> only): after the last frame, wait for the peer to
+    /// close the connection, and treat everything short of that as a failure (W6-30). Off by default,
+    /// because a receiver that keeps the connection open would otherwise turn every send into a timeout.
+    /// </summary>
+    public bool ConfirmDelivery { get; init; }
+
     /// <summary><c>--apply</c>: really write. Without it <c>import</c> is a preview.</summary>
     public bool Apply { get; init; }
 

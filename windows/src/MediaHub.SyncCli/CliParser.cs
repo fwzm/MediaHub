@@ -64,6 +64,9 @@ public static class CliParser
         "                     with --tls on 'transfer send': pin the listener's SHA-256 public-key\n" +
         "                     fingerprint (64 hex characters, either case) - 'transfer serve' prints\n" +
         "                     its own as 'certificate fingerprint: ...', and roundtrip pins itself\n" +
+        "  --confirm-delivery with 'transfer send': after the last frame, wait for the peer to close the\n" +
+        "                     connection and fail with delivery-unconfirmed if it does not (W6-30);\n" +
+        "                     off by default, so a send never waits and never adds a byte\n" +
         "\n" +
         "Global:\n" +
         "  --json       stdout carries exactly one JSON document; progress goes to stderr\n" +
@@ -185,6 +188,7 @@ public static class CliParser
         bool once = false;
         bool authenticate = false;
         bool tls = false;
+        bool confirmDelivery = false;
 
         for (int i = start; i < args.Count; i++)
         {
@@ -286,6 +290,24 @@ public static class CliParser
                 }
 
                 tls = true;
+                continue;
+            }
+
+            if (name == "--confirm-delivery")
+            {
+                if (inlineValue is not null)
+                {
+                    return Error("flag-takes-no-value:" + name);
+                }
+
+                // Only the dialling half has a peer whose close it could wait for; serve and roundtrip
+                // own the listener, so their own close is not evidence of anything.
+                if (command != SyncCliCommand.TransferSend)
+                {
+                    return Error("option-not-allowed-for-command:" + name + ":" + commandName);
+                }
+
+                confirmDelivery = true;
                 continue;
             }
 
@@ -471,6 +493,7 @@ public static class CliParser
                 SecretEnv = secretEnv,
                 Tls = tls,
                 ExpectFingerprint = expectFingerprint,
+                ConfirmDelivery = confirmDelivery,
                 Apply = apply,
                 Json = json,
             },
@@ -486,7 +509,7 @@ public static class CliParser
         "--root" or "--out" or "--in" or "--passphrase" or "--secrets" or "--deletions" or
         "--device" or "--baseline" or "--id" or "--source" or "--link" or "--expect" or
         "--to" or "--port" or "--device-a" or "--device-b" or
-        "--authenticate" or "--secret-env" or "--tls" or "--expect-fingerprint" or
+        "--authenticate" or "--secret-env" or "--tls" or "--expect-fingerprint" or "--confirm-delivery" or
         "--apply" or "--once" or "--json";
 
     private static CliParseResult Error(string code) => new() { Error = code };

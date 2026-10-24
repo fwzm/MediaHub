@@ -943,8 +943,15 @@ public sealed class SyncCliRunner
         SourceSyncTlsOptions tls = invocation.Tls
             ? SourceSyncTlsOptions.Pinned(invocation.ExpectFingerprint)
             : SourceSyncTlsOptions.Off;
+        // W6-30: a write that reached the socket buffer is not evidence of receipt (W6-28 case F: the peer
+        // rejected the first byte and the send still reported success). --confirm-delivery waits for the
+        // peer's close; it stays opt-in because a receiver that holds the connection open would otherwise
+        // turn every send into a two-second timeout.
+        SourceSyncDeliveryOptions delivery = invocation.ConfirmDelivery
+            ? SourceSyncDeliveryOptions.Confirming()
+            : SourceSyncDeliveryOptions.Off;
         SourceSyncPeerRoundResult sent = await sender
-            .SendAsync(envelope, host, port, challenge, TransferBudget, CancellationToken.None, options, tls)
+            .SendAsync(envelope, host, port, challenge, TransferBudget, CancellationToken.None, options, tls, delivery)
             .ConfigureAwait(false);
         if (!sent.Succeeded)
         {
@@ -1070,10 +1077,15 @@ public sealed class SyncCliRunner
         SourceSyncTlsOptions? pin = tls
             ? SourceSyncTlsOptions.Pinned(bound.CertificateFingerprint)
             : null;
+
+        // W6-30: both halves are this process, and the receiving listener closes as soon as it has the
+        // envelope, so a roundtrip can always afford the receipt - no operator flag needed, and no JSON
+        // field either: it only turns a silent "maybe" into delivery-unconfirmed.
+        SourceSyncDeliveryOptions delivery = SourceSyncDeliveryOptions.Confirming();
         using CancellationTokenSource abort = new();
         Task<SourceSyncTransferResult> receiving = listener.ReceiveOnceAsync(null, TransferBudget, abort.Token, options);
         SourceSyncPeerRoundResult sent = await sender
-            .SendPayloadAsync(payload, SourceSyncTransferAddress.DefaultAddress, listener.Port, challenge, TransferBudget, CancellationToken.None, options, pin)
+            .SendPayloadAsync(payload, SourceSyncTransferAddress.DefaultAddress, listener.Port, challenge, TransferBudget, CancellationToken.None, options, pin, delivery)
             .ConfigureAwait(false);
         if (!sent.Succeeded)
         {
@@ -1203,6 +1215,42 @@ public sealed class SyncCliRunner
         _out.WriteLine(pin is null
             ? "tls: yes (TLS 1.3, ephemeral certificate)"
             : "tls: yes (TLS 1.3, certificate pinned to " + pin + ")");
+    }
+
+    /// <summary>
+    /// W6-30: whether this run asked for a receipt, and what the answer was.
+    /// </summary>
+    /// <remarks>
+    /// <c>confirmDelivery</c> is the request (the flag), <c>deliveryConfirmed</c> is the evidence. The
+    /// second one is null when nobody asked - which is exactly what a default send reports, so no caller
+    /// can read a plain success as a delivery guarantee.
+    /// </remarks>
+    private static void WriteDeliveryFieldsJson(
+        Utf8JsonWriter writer,
+        CliInvocation invocation,
+        SourceSyncPeerRoundResult sent)
+    {
+        writer.WriteBoolean("confirmDelivery", invocation.ConfirmDelivery);
+        if (sent.DeliveryConfirmed is null)
+        {
+            writer.WriteNull("deliveryConfirmed");
+        }
+        else
+        {
+            writer.WriteBoolean("deliveryConfirmed", sent.DeliveryConfirmed.Value);
+        }
+    }
+
+    /// <summary>The text-mode counterpart of <see cref="WriteDeliveryFieldsJson"/>: only a real confirmation is news.</summary>
+    private void WriteDeliveryText(SourceSyncPeerRoundResult sent)
+    {
+        if (sent.DeliveryConfirmed is not true)
+        {
+            return;
+        }
+
+        _out.WriteLine("delivery: confirmed (peer closed after "
+            + ((int)sent.DeliveryElapsed.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + " ms)");
     }
 
     /// <summary>
@@ -1435,6 +1483,7 @@ public sealed class SyncCliRunner
                 // The peer presented this certificate and the handshake checked it against the pin,
                 // so on the dialling side the pin *is* the fingerprint that was seen.
                 WriteTlsFieldsJson(writer, invocation, invocation.Tls ? NormalizeFingerprint(invocation.ExpectFingerprint) : null);
+                WriteDeliveryFieldsJson(writer, invocation, sent);
                 writer.WriteEndObject();
             }));
             return CliExitCode.Success;
@@ -1447,6 +1496,7 @@ public sealed class SyncCliRunner
         _out.WriteLine("the receiver decides idempotency: this snapshot applies once; delivering it again is a no-change round.");
         WriteAuthText(invocation);
         WriteTlsText(invocation);
+        WriteDeliveryText(sent);
         return CliExitCode.Success;
     }
 

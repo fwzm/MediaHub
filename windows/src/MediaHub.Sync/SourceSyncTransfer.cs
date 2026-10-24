@@ -31,14 +31,39 @@ public sealed record SourceSyncTransferResult
     /// <summary>The challenge the sender announced, or the one the receiver accepted.</summary>
     public string? Challenge { get; init; }
 
+    /// <summary>
+    /// What the wait for the peer's close saw, or null when the caller did not ask for confirmation.
+    /// </summary>
+    /// <remarks>
+    /// Null and false mean different things on purpose: null is "nobody asked, a success only says the frames left",
+    /// false is "we asked, and the peer did not close within the budget" - which is why a confirmed send is a
+    /// <see cref="Succeeded"/> false result carrying <see cref="SourceSyncDeliveryReasons.DeliveryUnconfirmed"/>.
+    /// </remarks>
+    public bool? DeliveryConfirmed { get; init; }
+
+    /// <summary>How long the wait for the peer's close took; zero when no confirmation was requested.</summary>
+    public TimeSpan DeliveryElapsed { get; init; }
+
     /// <summary>A successful transfer.</summary>
-    public static SourceSyncTransferResult Ok(byte[] envelope, int frameCount, string? challenge = null) => new()
+    /// <param name="envelope">The payload that left or arrived.</param>
+    /// <param name="frameCount">How many frames carried it.</param>
+    /// <param name="challenge">The challenge that travelled with it, or null.</param>
+    /// <param name="deliveryConfirmed">The confirmation outcome, or null when none was requested.</param>
+    /// <param name="deliveryElapsed">How long the confirmation waited.</param>
+    public static SourceSyncTransferResult Ok(
+        byte[] envelope,
+        int frameCount,
+        string? challenge = null,
+        bool? deliveryConfirmed = null,
+        TimeSpan deliveryElapsed = default) => new()
     {
         Succeeded = true,
         Envelope = envelope,
         FrameCount = frameCount,
         Bytes = envelope.Length,
         Challenge = challenge,
+        DeliveryConfirmed = deliveryConfirmed,
+        DeliveryElapsed = deliveryElapsed,
     };
 
     /// <summary>A failed transfer; nothing was written by the caller.</summary>

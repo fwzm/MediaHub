@@ -413,6 +413,8 @@ public static class SourceSyncTransferClient
     /// <param name="cancellationToken">Cancels the transfer.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     /// <param name="tls">The optional TLS pin; null or off keeps the W6-16 plaintext path.</param>
+    /// <param name="delivery">The optional delivery confirmation. Null or off writes the frames and returns exactly as
+    /// before: no extra read, no extra wait, and no extra byte on the wire.</param>
     public static async Task<SourceSyncTransferResult> SendAsync(
         string? address,
         int port,
@@ -421,7 +423,8 @@ public static class SourceSyncTransferClient
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
         SourceSyncTransferOptions? options = null,
-        SourceSyncTlsOptions? tls = null)
+        SourceSyncTlsOptions? tls = null,
+        SourceSyncDeliveryOptions? delivery = null)
     {
         return await RunAsync(
             address,
@@ -430,7 +433,8 @@ public static class SourceSyncTransferClient
             timeout,
             cancellationToken,
             tls,
-            probePlaintext: false).ConfigureAwait(false);
+            probePlaintext: false,
+            delivery).ConfigureAwait(false);
     }
 
     /// <summary>Connects to a loopback listener and reads one envelope.</summary>
@@ -480,6 +484,58 @@ public static class SourceSyncTransferClient
         }
     }
 
+    /// <summary>Attaches the confirmation outcome to a send that already wrote its frames.</summary>
+    /// <param name="sent">The successful write.</param>
+    /// <param name="confirmed">What the wait for the peer's close saw.</param>
+    /// <remarks>
+    /// An unconfirmed delivery is a failed send that still reports how far it got: the frames really did leave, so the
+    /// envelope, frame count and byte count stay, and only the reason changes. Reporting zero bytes here would make a
+    /// real partial failure look like "nothing happened".
+    /// </remarks>
+    private static SourceSyncTransferResult Combine(
+        SourceSyncTransferResult sent,
+        SourceSyncDeliveryResult confirmed)
+    {
+        if (confirmed.Confirmed)
+        {
+            return sent with { DeliveryConfirmed = true, DeliveryElapsed = confirmed.Elapsed };
+        }
+
+        return SourceSyncTransferResult.Failed(
+            confirmed.Reason ?? SourceSyncDeliveryReasons.DeliveryUnconfirmed,
+            confirmed.Detail) with
+        {
+            Envelope = sent.Envelope,
+            FrameCount = sent.FrameCount,
+            Bytes = sent.Bytes,
+            Challenge = sent.Challenge,
+            DeliveryConfirmed = false,
+            DeliveryElapsed = confirmed.Elapsed,
+        };
+    }
+
+    /// <summary>Sends a FIN behind the flushed frames without closing the socket.</summary>
+    /// <param name="client">The connection the frames were written to.</param>
+    /// <remarks>
+    /// Plaintext only. A half-close is what lets the peer's reading loop finish, and it is invisible on the wire: a FIN
+    /// carries no payload, so the byte stream a receiver sees is unchanged.
+    /// </remarks>
+    private static void TryHalfClose(TcpClient client)
+    {
+        try
+        {
+            client.Client.Shutdown(SocketShutdown.Send);
+        }
+        catch (SocketException)
+        {
+            // The peer may already be gone; the confirmation below reports that with its own reason.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Same: a closed socket cannot be half-closed, and the confirmation decides the outcome.
+        }
+    }
+
     private static async Task<SourceSyncTransferResult> RunAsync(
         string? address,
         int port,
@@ -487,7 +543,8 @@ public static class SourceSyncTransferClient
         TimeSpan? timeout,
         CancellationToken cancellationToken,
         SourceSyncTlsOptions? tls = null,
-        bool probePlaintext = false)
+        bool probePlaintext = false,
+        SourceSyncDeliveryOptions? delivery = null)
     {
         if (!SourceSyncTransferAddress.TryResolveLoopback(address, port, out IPEndPoint? endpoint, out string? detail)
             || endpoint is null)
@@ -531,6 +588,17 @@ public static class SourceSyncTransferClient
                 try
                 {
                     SourceSyncTransferResult result = await body(handshake.Stream, cts.Token).ConfigureAwait(false);
+                    if (result.Succeeded && delivery is { Confirm: true })
+                    {
+                        // No half-close on this path: a TLS 1.3 stream ends with close_notify, and a bare FIN would
+                        // look like a truncated record sequence. The peer's close_notify arrives as a zero-length
+                        // read, which is exactly what the confirmation waits for.
+                        SourceSyncDeliveryResult confirmed = await SourceSyncDeliveryConfirmation
+                            .ConfirmAsync(handshake.Stream, result.Bytes, delivery.Budget, cts.Token)
+                            .ConfigureAwait(false);
+                        return Combine(result, confirmed);
+                    }
+
                     if (result.Succeeded)
                     {
                         // The receiver closes first. Waiting for its close_notify here is what keeps the close below
@@ -561,7 +629,19 @@ public static class SourceSyncTransferClient
                 return await body(probe.Stream, cts.Token).ConfigureAwait(false);
             }
 
-            return await body(stream, cts.Token).ConfigureAwait(false);
+            SourceSyncTransferResult plain = await body(stream, cts.Token).ConfigureAwait(false);
+            if (plain.Succeeded && delivery is { Confirm: true })
+            {
+                // Half-close, never a close: Shutdown(Send) puts the FIN behind the frames that are already flushed and
+                // adds no byte to the wire, while the socket stays readable so the confirmation can see the peer's close.
+                TryHalfClose(client);
+                SourceSyncDeliveryResult confirmed = await SourceSyncDeliveryConfirmation
+                    .ConfirmAsync(stream, plain.Bytes, delivery.Budget, cts.Token)
+                    .ConfigureAwait(false);
+                return Combine(plain, confirmed);
+            }
+
+            return plain;
         }
         catch (OperationCanceledException)
         {

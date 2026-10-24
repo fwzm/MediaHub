@@ -418,6 +418,19 @@ function Invoke-TransferCase {
         # 6 no shared secret may appear anywhere in the case logs
         Test-CaseLogsForSecret -Directory $caseDir -Secrets $secretsInPlay
 
+        # 7 W6-30: the delivery confirmation surface. A send that did not ask must say so (null),
+        # and a send that asked must report what the wait for the peer's close saw.
+        if ($null -ne $sendJson -and $Spec.Expect.SendExit -eq 0) {
+            $askedForIt = ($Spec.Contains('ConfirmDelivery') -and $Spec.ConfirmDelivery)
+            Assert-Condition ($sendJson.confirmDelivery -eq $askedForIt) ('send JSON confirmDelivery: expected ' + $askedForIt + ' but was ' + $sendJson.confirmDelivery)
+            if ($askedForIt) {
+                Assert-Condition ($sendJson.deliveryConfirmed -eq $true) 'a confirming send that succeeded must report deliveryConfirmed=true'
+                Assert-Condition ($Spec.ExpectedDeliveryConfirmed -eq $true) 'the case and its expectation disagree about the confirmation'
+            } else {
+                Assert-Condition ($null -eq $sendJson.deliveryConfirmed) 'a fire-and-forget send must report deliveryConfirmed=null instead of claiming a receipt'
+            }
+        }
+
         $detail = 'send=' + $sendExit + ' serve=' + $serveExit + ' frames=' + $actual.frames + ' records=' + $recordCount + ' envelopes=' + $envelopeCount + ' codes=[' + $sendCode + '/' + $serveCode + '] ' + $actual.durationMs + ' ms'
         return [ordered]@{ Name = $name; Title = $Spec.Title; Expected = $Spec.Expect.Table; Actual = $actual; Detail = $detail; Passed = $true }
     } catch {
@@ -434,6 +447,106 @@ function Invoke-TransferCase {
     }
 }
 
+function Invoke-SilentPeerCase {
+    # W6-30: the one shape where a one-way sender really can observe a missing receipt - a peer that
+    # accepts the connection, takes the bytes and never closes. There is no CLI listener for that, so the
+    # peer is a PowerShell job holding a loopback socket open.
+    $name = 'I-silent-peer'
+    $title = 'I --confirm-delivery against a peer that accepts and never closes'
+    $expected = 'send 2 delivery-unconfirmed / no write'
+    $caseDir = Join-Path $script:outDir $name
+    $rootDir = Join-Path $script:rootsDir $name
+    New-Item -ItemType Directory -Path $caseDir, $rootDir -Force | Out-Null
+    $senderRoot = Join-Path $rootDir 'sender'
+    New-SenderStore -Directory $senderRoot
+    $sendOut = Join-Path $caseDir 'send.stdout.txt'
+    $sendErr = Join-Path $caseDir 'send.stderr.txt'
+
+    $peer = $null
+    $send = $null
+    try {
+        $peer = Start-Job -ScriptBlock {
+            $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+            $listener.Start()
+            $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+            Write-Output ('PORT ' + $port)
+            $client = $listener.AcceptTcpClient()
+            Start-Sleep -Seconds 30
+            $client.Dispose()
+            $listener.Stop()
+        }
+
+        $port = 0
+        $deadline = (Get-Date).AddSeconds(25)
+        while ((Get-Date) -lt $deadline) {
+            foreach ($line in @(Receive-Job -Job $peer -Keep)) {
+                if ([string]$line -match '^PORT (\d+)$') { $port = [int]$Matches[1] }
+            }
+            if ($port -gt 0) { break }
+            Start-Sleep -Milliseconds 100
+        }
+        if ($port -le 0) { throw 'the silent peer never announced its port' }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $send = Start-CliProcess -Name ($name + '-send') -Arguments @($script:cliDll, 'transfer', 'send', '--to', ('127.0.0.1:' + $port), '--root', $senderRoot, '--device', 'tx-device', '--json', '--confirm-delivery') -StdoutPath $sendOut -StderrPath $sendErr
+        $exited = Wait-ForExitOrKill -Process $send -TimeoutMs $script:exitWaitMs -Label 'send'
+        $stopwatch.Stop()
+
+        $sendStdout = Read-Shared -Path $sendOut
+        $sendStderr = Read-Shared -Path $sendErr
+        $sendJson = Get-JsonDocument -Text $sendStdout
+        $sendCode = Get-ErrorCode -Stdout $sendStdout -Stderr $sendStderr -Document $sendJson
+        $sendExit = -1
+        if ($exited) { $sendExit = $send.ExitCode }
+        $message = ''
+        if ($null -ne $sendJson -and $null -ne $sendJson.error) { $message = [string]$sendJson.error.message }
+
+        $actual = [ordered]@{
+            sendExit = $sendExit; serveExit = -1; sendCode = $sendCode; serveCode = ''
+            frames = -1; receiverRecords = 0; envelopeCount = 0
+            receiverStoreExists = $false; receiverBaseline = $false; receiverDisplayNames = ''
+            port = $port; fingerprint = ''; durationMs = [int]$stopwatch.ElapsedMilliseconds
+        }
+
+        try {
+            Assert-Condition ($exited) 'the send had to be killed (it never exited)'
+            Assert-Condition ($sendExit -eq 2) ('send exit code: expected 2 but was ' + $sendExit)
+            Assert-Condition ($sendCode -eq 'delivery-unconfirmed') ('send stable code: expected [delivery-unconfirmed] but was [' + $sendCode + ']')
+            Assert-Condition ($sendStderr.Contains('error delivery-unconfirmed:')) 'send stderr must carry "error delivery-unconfirmed:"'
+            Assert-Condition ($message.Contains('did not close the connection within 2000 ms')) ('the failure must name the budget; message was: ' + $message)
+            Assert-Condition ($actual.durationMs -ge 1900) ('the confirmation budget must really be waited out; the send took ' + $actual.durationMs + ' ms')
+            Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $rootDir 'receiver'))) 'nothing may be written for a peer that never closed'
+            $detail = 'send=' + $sendExit + ' code=' + $sendCode + ' no receipt in ' + $actual.durationMs + ' ms'
+            return [ordered]@{ Name = $name; Title = $title; Expected = $expected; Actual = $actual; Detail = $detail; Passed = $true }
+        } catch {
+            $actual.sendStderr = $sendStderr
+            return [ordered]@{ Name = $name; Title = $title; Expected = $expected; Actual = $actual; Detail = $_.Exception.Message; Passed = $false }
+        }
+    } finally {
+        if ($null -ne $send -and -not $send.HasExited) { try { $send.Kill() } catch { } }
+        if ($null -ne $peer) {
+            try { Stop-Job -Job $peer -ErrorAction SilentlyContinue } catch { }
+            try { Remove-Job -Job $peer -Force -ErrorAction SilentlyContinue } catch { }
+        }
+        if (-not $KeepArtifacts) { try { Remove-Item -LiteralPath $rootDir -Recurse -Force -ErrorAction SilentlyContinue } catch { } }
+    }
+}
+
+function Write-CaseResult {
+    param($Result)
+    $script:results.Add($Result)
+    if ($Result.Passed) {
+        Write-Host ('PASS ' + $Result.Name + ' :: ' + $Result.Detail)
+    } else {
+        Write-Host ('FAIL ' + $Result.Name + ' :: ' + $Result.Detail)
+        if ($Result.Actual.Contains('sendStderr') -and $Result.Actual.sendStderr) {
+            Write-Host ('  send stderr: ' + ($Result.Actual.sendStderr.Trim() -replace '\r?\n', ' | '))
+        }
+        if ($Result.Actual.Contains('serveStderr') -and $Result.Actual.serveStderr) {
+            Write-Host ('  serve stderr: ' + ($Result.Actual.serveStderr.Trim() -replace '\r?\n', ' | '))
+        }
+    }
+}
 function Write-CaseTable {
     param($Rows)
     Write-Host ''
@@ -560,6 +673,34 @@ $specs = @(
         ServeDevice = 'rx-device'; SendDevice = 'tx-device'
         Expect = [ordered]@{ SendExit = 0; ServeExit = 2; SendCode = ''; ServeCode = 'auth-mismatch'; Records = 0; Frames = -1
             Table = 'serve 2 auth-mismatch / 0 writes' }
+    },
+    [ordered]@{
+        Name = 'A2-plaintext-confirm-delivery'; Title = 'A2 plaintext + --confirm-delivery'
+        TlsListener = $false; ClientTls = $false; PinOverride = ''
+        ConfirmDelivery = $true; ExpectedDeliveryConfirmed = $true
+        ServeExtra = @(); SendExtra = @('--confirm-delivery')
+        ServeSecretEnv = ''; SendSecretEnv = ''; ServeSecret = ''; SendSecret = ''
+        ServeDevice = 'rx-device'; SendDevice = 'tx-device'
+        # The receiver closes as soon as it has the envelope, so the sender can see the receipt.
+        Expect = [ordered]@{ SendExit = 0; ServeExit = 0; SendCode = ''; ServeCode = ''; Records = 2; Frames = 1
+            Table = 'send 0 + deliveryConfirmed / 1 envelope' }
+    },
+    [ordered]@{
+        Name = 'F2-plaintext-confirm-vs-tls'; Title = 'F2 plaintext + --confirm-delivery -> TLS listener (blind spot)'
+        TlsListener = $true; ClientTls = $false; PinOverride = ''
+        ConfirmDelivery = $true; ExpectedDeliveryConfirmed = $true
+        ServeExtra = @('--tls'); SendExtra = @('--confirm-delivery')
+        ServeSecretEnv = ''; SendSecretEnv = ''; ServeSecret = ''; SendSecret = ''
+        ServeDevice = 'rx-device'; SendDevice = 'tx-device'
+        # MEASURED, and deliberately pinned: the listener rejects the first record and then CLOSES the
+        # socket, and a close is the only receipt a one-way frame protocol can observe, so the sender
+        # reports deliveryConfirmed=true even though nothing was imported (serve says
+        # tls-handshake-failed and wrote nothing). This case exists to keep that blind spot visible in
+        # the table: closing is necessary evidence, not sufficient. Only a receiver that closes without
+        # accepting is indistinguishable from one that accepted - a real acknowledgement would need a
+        # new frame type and an Android change, which W6-30 deliberately does not do.
+        Expect = [ordered]@{ SendExit = 0; ServeExit = 2; SendCode = ''; ServeCode = 'tls-handshake-failed'; Records = 0; Frames = 1
+            Table = 'send 0 deliveryConfirmed (blind spot) / serve 2 / 0 writes' }
     }
 )
 
@@ -570,19 +711,18 @@ foreach ($spec in $specs) {
     } catch {
         $result = New-FailedCase -Name $spec.Name -Title $spec.Title -Expected $spec.Expect.Table -Detail ('the case aborted: ' + $_.Exception.Message)
     }
-    $script:results.Add($result)
-    if ($result.Passed) {
-        Write-Host ('PASS ' + $result.Name + ' :: ' + $result.Detail)
-    } else {
-        Write-Host ('FAIL ' + $result.Name + ' :: ' + $result.Detail)
-        if ($result.Actual.Contains('sendStderr') -and $result.Actual.sendStderr) {
-            Write-Host ('  send stderr: ' + ($result.Actual.sendStderr.Trim() -replace '\r?\n', ' | '))
-        }
-        if ($result.Actual.Contains('serveStderr') -and $result.Actual.serveStderr) {
-            Write-Host ('  serve stderr: ' + ($result.Actual.serveStderr.Trim() -replace '\r?\n', ' | '))
-        }
-    }
+    Write-CaseResult -Result $result
 }
+
+Write-Host ('-- ' + 'I --confirm-delivery against a peer that accepts and never closes')
+$silentResult = $null
+try {
+    $silentResult = Invoke-SilentPeerCase
+} catch {
+    $silentResult = New-FailedCase -Name 'I-silent-peer' -Title 'I --confirm-delivery against a peer that accepts and never closes' -Expected 'send 2 delivery-unconfirmed / no write' -Detail ('the case aborted: ' + $_.Exception.Message)
+}
+
+Write-CaseResult -Result $silentResult
 
 # ---------------------------------------------------------------------------------------------
 # Lingering process check: by name+command line, and by the pids this script started.

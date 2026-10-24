@@ -189,6 +189,6 @@ pwsh -NoProfile -File windows/tools/acceptance/w6/transfer-tls-auth.ps1
 
 实测（2026-10-24，W6 分支 `a6b13d4` + 本脚本）：**8/8 PASS，9.6 s**，退出 0，收尾断言本机无残留 `MediaHub.SyncCli` 进程；产物 `w6-28-summary.json` 记录每个用例的 exit code、稳定码、帧数、信封数与日志路径。
 
-**验收脚本暴露的一个真实缺陷（尚未修）**：F 用例里 `transfer send` **exit 0 且不带任何稳定码**——它只写不读，明文帧进了 socket 缓冲区就算"成功"，而 TLS 监听端其实一个字节都没接收（`tls-handshake-failed`）。也就是说"发送端报成功"目前**不是**送达证据。E/G/H 同理（send 侧 0，只有 serve 侧报错）。候选修法见 W6-30：给 `transfer send` 增加显式的送达确认（读完对端关闭或拿到明确码），失败时给独立稳定码而不是静默成功。
+**验收脚本暴露的一个真实缺陷（尚未修）**：F 用例里 `transfer send` **exit 0 且不带任何稳定码**——它只写不读，明文帧进了 socket 缓冲区就算"成功"，而 TLS 监听端其实一个字节都没接收（`tls-handshake-failed`）。也就是说"发送端报成功"目前**不是**送达证据。E/G/H 同理（send 侧 0，只有 serve 侧报错）。候选修法见 W6-30。**已由 W6-30 修（默认关闭，开 `--confirm-delivery`）**：`transfer send` 写完后等待对端关闭连接——收到关闭则 `deliveryConfirmed=true`，预算（2000 ms）内没关或读取失败则 exit 2 + `delivery-unconfirmed`；不开此开关时线上字节与本文件描述完全一致。**已知残留盲区**：对端「拒绝后关闭」与「接收后关闭」在 TCP 层不可区分，因此本文件 F 用例重跑仍是 send 0（W6-30 文档第 6 节把这一点写成了可复跑的 F2 用例，而不是假装修好了）。
 
 未动：`MediaHub.App` / `MediaHub.Providers` / `MediaHub.Domain` / `MediaHub.Storage` / `docs` 其它文件 / `LICENSE`；未 commit、未 push。
