@@ -287,6 +287,14 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
         {
             return SourceSyncTransferResult.Failed(SourceSyncTransferReasons.IoFailed, error.Message);
         }
+        catch (IOException error)
+        {
+            // W6-31: the plaintext probe is the one read in this method that is not inside SourceSyncTransfer,
+            // so it is the one read a peer could make throw something other than a SocketException (a stack
+            // that reports a reset as an I/O error rather than as EOF). A receive method must answer with a
+            // code, never with an exception: same code, same meaning, nothing was written.
+            return SourceSyncTransferResult.Failed(SourceSyncTransferReasons.IoFailed, error.Message);
+        }
         finally
         {
             client?.Dispose();
