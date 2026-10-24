@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -42,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -85,6 +87,22 @@ object SourceSyncImportTags {
 
     /** 每个来源的验证区块（同页多条时要能把状态行限定到某一条）。 */
     fun verifyRow(serverId: String): String = "sync.source.verify.row:" + serverId
+
+    // ---- W6-27：从 Windows 接收 ----
+
+    /** 接收区块本体（地址 / 端口 / 挑战 / 接收按钮）。 */
+    const val RECEIVE = "sync.receive"
+
+    const val RECEIVE_HOST = "sync.receive.host"
+
+    const val RECEIVE_PORT = "sync.receive.port"
+
+    const val RECEIVE_CHALLENGE = "sync.receive.challenge"
+
+    const val RECEIVE_ACTION = "sync.receive.action"
+
+    /** 接收结果行（已收下 / 接收失败：码 / 信封被拒：码）。 */
+    const val RECEIVE_STATE = "sync.receive.state"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -95,6 +113,7 @@ fun SourceSyncImportRoute(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val verification by viewModel.verificationState.collectAsStateWithLifecycle()
+    val receiveState by viewModel.receiveState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -115,6 +134,8 @@ fun SourceSyncImportRoute(
         onVerifyRequest = viewModel::openVerificationDialog,
         onVerifyDismiss = viewModel::dismissVerificationDialog,
         onVerifyConfirm = viewModel::verify,
+        receiveState = receiveState,
+        onReceive = viewModel::receive,
     )
 }
 
@@ -138,6 +159,9 @@ fun SourceSyncImportScreen(
     onVerifyRequest: (String) -> Unit = {},
     onVerifyDismiss: () -> Unit = {},
     onVerifyConfirm: (String, String) -> Unit = { _, _ -> },
+    /** W6-27：从 Windows 接收区块的状态；默认 Idle（既有调用点与 UI 测试无需改动）。 */
+    receiveState: SourceSyncReceiveState = SourceSyncReceiveState.Idle,
+    onReceive: (SourceSyncReceiveForm) -> Unit = {},
 ) {
     Scaffold(
         modifier = Modifier.testTag(SourceSyncImportTags.SCREEN),
@@ -165,6 +189,8 @@ fun SourceSyncImportScreen(
                     "预览不会写入任何数据。",
                 style = MaterialTheme.typography.bodyMedium,
             )
+            ReceiveSection(state = receiveState, onReceive = onReceive)
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -496,6 +522,109 @@ private fun VerifyCredentialDialog(
             }
         },
     )
+}
+
+/**
+ * W6-27：「从 Windows 接收」区块。
+ *
+ * 表单只是三个输入框 + 一个按钮，**判定全在 SourceSyncReceiveController**：这里不算地址是否回环
+ * （那是传输客户端的 not-loopback），也不猜失败原因（码与诊断原样显示）。端口没填好时按钮就是
+ * 点不动的，并直接说明为什么——让用户对着禁用按钮猜原因是最糟的体验。
+ */
+@Composable
+private fun ReceiveSection(
+    state: SourceSyncReceiveState,
+    onReceive: (SourceSyncReceiveForm) -> Unit,
+) {
+    var form by remember { mutableStateOf(SourceSyncReceiveForm()) }
+    val receiving = state == SourceSyncReceiveState.Receiving
+    val resultLine = SourceSyncReceiveCopy.lineOf(state)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(SourceSyncImportTags.RECEIVE),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(SourceSyncReceiveCopy.TITLE, style = MaterialTheme.typography.titleSmall)
+            Text(
+                SourceSyncReceiveCopy.HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = form.host,
+                onValueChange = { form = form.copy(host = it) },
+                label = { Text(SourceSyncReceiveCopy.HOST_LABEL) },
+                singleLine = true,
+                enabled = !receiving,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.RECEIVE_HOST),
+            )
+            OutlinedTextField(
+                value = form.port,
+                onValueChange = { form = form.copy(port = it) },
+                label = { Text(SourceSyncReceiveCopy.PORT_LABEL) },
+                singleLine = true,
+                enabled = !receiving,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.RECEIVE_PORT),
+            )
+            OutlinedTextField(
+                value = form.challenge,
+                onValueChange = { form = form.copy(challenge = it) },
+                label = { Text(SourceSyncReceiveCopy.CHALLENGE_LABEL) },
+                singleLine = true,
+                enabled = !receiving,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.RECEIVE_CHALLENGE),
+            )
+            Button(
+                onClick = { onReceive(form) },
+                enabled = form.canSubmit && !receiving,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.RECEIVE_ACTION),
+            ) {
+                Text(SourceSyncReceiveCopy.ACTION)
+            }
+            if (receiving) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.height(16.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Text(SourceSyncReceiveCopy.BUSY, style = MaterialTheme.typography.bodySmall)
+                }
+            } else if (!form.canSubmit) {
+                Text(
+                    SourceSyncReceiveCopy.PORT_REQUIRED,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (resultLine != null) {
+                Text(
+                    resultLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = when (state) {
+                        is SourceSyncReceiveState.Received -> MaterialTheme.colorScheme.primary
+                        is SourceSyncReceiveState.Failed, is SourceSyncReceiveState.Rejected ->
+                            MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.testTag(SourceSyncImportTags.RECEIVE_STATE),
+                )
+            }
+        }
+    }
 }
 
 /** 读信封文本与文件名；读不出来返回 null（页面保持"未选文件"状态）。 */
