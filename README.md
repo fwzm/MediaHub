@@ -230,14 +230,14 @@ W6-23 新增的 `core/database` 套件 `SourceSyncTransferImportTest`（19 例�
 
 <!-- WINDOWS-SYNC:START -->
 <!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
-- 2757285 2026-10-23 docs(windows): W9 证据（两服四门 276 断言全绿）+ 能力图/路线图状态更新
-- 99585f4 2026-10-23 test(windows): W9 四门真服 GUI 验收脚本（继续观看/自动连播/收藏/永久播放列表）
-- c832fe8 2026-10-23 fix(windows): 继续观看改用递归 + IsResumable 查询（Emby 非递归只回库文件夹）
-- 883e9e9 2026-10-23 fix(windows): 首页服务器历史卡片可点击 + 继续观看/首页容器补 AutomationId
-- adab0e7 2026-10-23 feat(windows): U4 永久播放列表接入 UI（播放列表页/列表详情页/详情页加入按钮）
-- af4aa4e 2026-10-23 test(windows): U2 跨季自动连播真实 GUI 验收脚本（Emby 32/32、Jellyfin 32/32）
-- 529ba93 2026-10-23 feat(windows): U4 永久播放列表存储层（与临时队列解耦）
-- b154475 2026-10-23 feat(windows): 新增「我的收藏」页面并扩展收藏验收脚本
+- 1deccca 2026-10-24 ci(windows): 许可证面门禁接进流水线（先按现状生成报告，再校验 notices/SBOM/项目漂移）
+- ef5344d 2026-10-24 docs(licensing): W11b 许可证清单与 SBOM 按现状重跑（13 csproj / 49 行 / 29 包 + LGPL 33 DLL 许可族），新增 check-licence-surface.ps1 门禁
+- 4238edc 2026-10-24 test(w8): 把两服续播下限语义固化成离屏契约（mock 按 2%/5% 落实下限，31 例）
+- a4684a8 2026-10-24 feat(w8): 无窗口真服续播闭环（ResumeProbe 走产品 provider 栈 + 双服驱动，两服各 16 条断言全绿）
+- 214e048 2026-10-24 docs(engine): W13c Release/publish 两 flavour 自包含实测（10.1-10.7）
+- 97a0f8e 2026-10-24 feat(engine): W13b LGPL 引擎自包含打包与可选切换开关（默认仍 GPL 基线）
+- 1a38b06 2026-10-24 docs(windows): W10 登记第 6 次被打断并停用自动重试，GUI 证据改为人工授予窗口
+- dd0ff31 2026-10-24 feat(tools): W13 LGPL 引擎无头探针——按绝对路径加载两份 libmpv 实测解码等价性
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
