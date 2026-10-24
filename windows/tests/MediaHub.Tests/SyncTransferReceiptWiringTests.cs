@@ -256,6 +256,153 @@ public sealed class SyncTransferReceiptPresenterTests : IDisposable
         Assert.Contains("AwaitReceipt = True", send.ToString(), StringComparison.Ordinal);
     }
 
+    // ---- W6-43: the page renders from these fields, so they must be enough to say "decoded" apart from "arrived" --
+
+    /// <summary>
+    /// W6-43: the receive card derives its receipt line from three states. Off is silence, a decoded envelope is
+    /// <c>ReceiptWritten = true</c>, and a payload that never decoded still has to render a sentence — it reports its
+    /// reason instead, because the listener deliberately wrote nothing (asserting "no receipt" there would be a lie:
+    /// the byte is gated on the decode, not on the switch).
+    /// </summary>
+    [Fact]
+    public async Task The_view_can_render_the_receive_receipt_line_in_all_three_states()
+    {
+        // 1. off: nothing is claimed and nothing is written.
+        SyncTransferPresenter quiet = NewPresenter();
+        SyncTransferOutcome quietPrepared = quiet.PrepareReceive(new SyncTransferReceiveForm());
+        Assert.True(quietPrepared.Succeeded, quietPrepared.Summary);
+        Assert.False(quiet.ReceiveState.WritesReceipt);
+        Task<SyncTransferOutcome> quietWaiting = quiet.ReceiveOnceAsync(TimeSpan.FromSeconds(10));
+        byte[] quietAnswer = await SendEnvelopeAndCollectAnswerAsync(
+            quietPrepared.BoundPort!.Value,
+            EnvelopeOf(PeerDeviceId, Source("sync-1", "Living Room Emby")),
+            TimeSpan.FromSeconds(10));
+        SyncTransferOutcome quietReceived = await quietWaiting;
+        Assert.True(quietReceived.Succeeded, quietReceived.Summary);
+        Assert.Null(quietReceived.ReceiptWritten);
+        Assert.Empty(quietAnswer);
+        Assert.False(string.IsNullOrWhiteSpace(quietReceived.Summary));
+
+        // 2. on and decoded: the page can say "已回写 0x04" because the outcome carries true.
+        SyncTransferPresenter writer = NewPresenter();
+        SyncTransferOutcome writerPrepared = writer.PrepareReceive(new SyncTransferReceiveForm { WriteReceipt = true });
+        Assert.True(writerPrepared.Succeeded, writerPrepared.Summary);
+        Assert.True(writer.ReceiveState.WritesReceipt);
+        Task<SyncTransferOutcome> writerWaiting = writer.ReceiveOnceAsync(TimeSpan.FromSeconds(10));
+        byte[] writerAnswer = await SendEnvelopeAndCollectAnswerAsync(
+            writerPrepared.BoundPort!.Value,
+            EnvelopeOf(PeerDeviceId, Source("sync-1", "Living Room Emby")),
+            TimeSpan.FromSeconds(10));
+        SyncTransferOutcome writerReceived = await writerWaiting;
+        Assert.True(writerReceived.Succeeded, writerReceived.Summary);
+        Assert.True(writerReceived.ReceiptWritten);
+        Assert.Equal([SourceSyncReceipt.ReceiptFrameKind], writerAnswer);
+
+        // 3. on but undecodable: no byte went out, and the reason is what the card has to show.
+        SyncTransferPresenter refused = NewPresenter();
+        SyncTransferOutcome refusedPrepared = refused.PrepareReceive(new SyncTransferReceiveForm { WriteReceipt = true });
+        Task<SyncTransferOutcome> refusedWaiting = refused.ReceiveOnceAsync(TimeSpan.FromSeconds(10));
+        byte[] refusedAnswer = await SendEnvelopeAndCollectAnswerAsync(
+            refusedPrepared.BoundPort!.Value,
+            Encoding.UTF8.GetBytes("{ this is not a source envelope }"),
+            TimeSpan.FromSeconds(10));
+        SyncTransferOutcome refusedReceived = await refusedWaiting;
+        Assert.False(refusedReceived.Succeeded);
+        Assert.Equal(SourceSyncTransferReasons.EnvelopeInvalid, refusedReceived.Reason);
+        Assert.Empty(refusedAnswer);
+        Assert.Contains(
+            SourceSyncTransferReasons.EnvelopeInvalid,
+            SyncTransferCopy.DescribeReason(refusedReceived.Reason),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// W6-43: the send card derives its receipt line from the outcome alone — no receipt asked, a receipt received, and
+    /// the ways it never arrives. Every one of them has a non-empty sentence, so the line is never blank.
+    /// </summary>
+    [Fact]
+    public async Task The_view_can_render_the_send_receipt_line_in_all_three_states()
+    {
+        // 1. not asked: the outcome must not pretend it knows anything about a receipt.
+        RawPeer quietPeer = NewPeer(hold: false);
+        SyncTransferPresenter quietSender = NewPresenter(withEnvelope: true);
+        SyncTransferOutcome quiet = await quietSender.SendAsync(SendForm(quietPeer.Port, awaitReceipt: false));
+        Assert.True(quiet.Succeeded, quiet.Summary);
+        Assert.Null(quiet.ReceiptConfirmed);
+        Assert.Contains("没有要求送达确认", quiet.Summary, StringComparison.Ordinal);
+        quietPeer.Release();
+        await quietPeer.Completion;
+
+        // 2. asked and answered: true, with the sentence that spells out what the byte proves.
+        SyncTransferPresenter receiver = NewPresenter(deviceId: "presenter-w643-receiver");
+        SyncTransferOutcome prepared = receiver.PrepareReceive(new SyncTransferReceiveForm { WriteReceipt = true });
+        Task<SyncTransferOutcome> waiting = receiver.ReceiveOnceAsync(TimeSpan.FromSeconds(10));
+        SyncTransferPresenter sender = NewPresenter(withEnvelope: true);
+        SyncTransferOutcome confirmed = await sender.SendAsync(SendForm(prepared.BoundPort!.Value, awaitReceipt: true));
+        _ = await waiting;
+        Assert.True(confirmed.Succeeded, confirmed.Summary);
+        Assert.True(confirmed.ReceiptConfirmed);
+        Assert.Contains(SyncTransferCopy.ReceiptConfirmedSuffix, confirmed.Summary, StringComparison.Ordinal);
+
+        // 3. asked and never answered: the receipt codes are what the card renders, and each one has words.
+        RawPeer silent = NewPeer(hold: true);
+        SyncTransferPresenter timedSender = NewPresenter(withEnvelope: true);
+        timedSender.ReceiptBudget = TimeSpan.FromMilliseconds(400);
+        SyncTransferOutcome timed = await timedSender.SendAsync(SendForm(silent.Port, awaitReceipt: true));
+        Assert.False(timed.Succeeded);
+        Assert.Equal(SourceSyncReceiptReasons.ReceiptTimeout, timed.Reason);
+        Assert.Null(timed.ReceiptConfirmed);
+        foreach (string code in new[]
+                 {
+                     SourceSyncReceiptReasons.ReceiptMissing,
+                     SourceSyncReceiptReasons.ReceiptTimeout,
+                     SourceSyncReceiptReasons.ReceiptInvalid,
+                     SourceSyncReceiptReasons.ReceiptNotEnabled,
+                 })
+        {
+            string sentence = SyncTransferCopy.DescribeReason(code);
+            Assert.False(string.IsNullOrWhiteSpace(sentence), code);
+            Assert.Contains(code, sentence, StringComparison.Ordinal);
+            Assert.Contains("回执", sentence, StringComparison.Ordinal);
+        }
+
+        silent.Release();
+        await silent.Completion;
+    }
+
+    /// <summary>
+    /// W6-43: the page paints from the returned outcome, but a reload or a second render reads the presenter's own
+    /// <c>LastSend</c> / <c>LastReceive</c>. Those must carry the same receipt verdict, or the line would change on
+    /// a repaint.
+    /// </summary>
+    [Fact]
+    public async Task The_presenter_keeps_the_receipt_verdict_for_a_later_render()
+    {
+        RawPeer peer = NewPeer(hold: false);
+        SyncTransferPresenter sender = NewPresenter(withEnvelope: true);
+        SyncTransferOutcome sent = await sender.SendAsync(SendForm(peer.Port, awaitReceipt: true));
+        Assert.False(sent.Succeeded);
+        Assert.NotNull(sender.LastSend);
+        Assert.Equal(sent.Succeeded, sender.LastSend!.Succeeded);
+        Assert.Equal(sent.Reason, sender.LastSend.Reason);
+        Assert.Equal(sent.ReceiptConfirmed, sender.LastSend.ReceiptConfirmed);
+        peer.Release();
+        await peer.Completion;
+
+        SyncTransferPresenter receiver = NewPresenter();
+        SyncTransferOutcome prepared = receiver.PrepareReceive(new SyncTransferReceiveForm { WriteReceipt = true });
+        Task<SyncTransferOutcome> waiting = receiver.ReceiveOnceAsync(TimeSpan.FromSeconds(10));
+        byte[] answer = await SendEnvelopeAndCollectAnswerAsync(
+            prepared.BoundPort!.Value,
+            EnvelopeOf(PeerDeviceId, Source("sync-1", "Living Room Emby")),
+            TimeSpan.FromSeconds(10));
+        SyncTransferOutcome received = await waiting;
+        Assert.True(received.ReceiptWritten);
+        Assert.Equal([SourceSyncReceipt.ReceiptFrameKind], answer);
+        Assert.NotNull(receiver.LastReceive);
+        Assert.Equal(received.ReceiptWritten, receiver.LastReceive!.ReceiptWritten);
+    }
+
     public void Dispose()
     {
         foreach (SyncTransferPresenter presenter in _presenters)

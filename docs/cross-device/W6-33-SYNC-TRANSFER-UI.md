@@ -195,3 +195,41 @@ dotnet build windows/src/MediaHub.App/MediaHub.App.csproj -c Debug -p:Platform=x
 ```
 
 期望：29 / 1453 / 0 警告 0 错误。**不要**在没有空闲门禁的机器上启动 `MediaHub.dll`。
+
+## 14 W6-43 追加：回执的两个开关与结果行
+
+W6-33 的传输卡片在 W6-39 之后有了 presenter 层的回执能力，但**页面上没有任何入口**；本节补三个控件，把「对端读懂了」这件事第一次显式暴露给使用者。W6-37 记下的语义继续成立：对端关闭是必要证据、不是充分证据，回执字节（`0x04`）才是「读懂了」的证据。
+
+### 14.1 三个控件与 AutomationId
+
+| 控件 | AutomationId | 可访问名称 | 绑定 | 默认 |
+| --- | --- | --- | --- | --- |
+| CheckBox「接收后写回执（0x04）」 | `sync.transfer.receive.receipt` | 接收后写回执 | `SyncTransferReceiveForm.WriteReceipt` | 不勾 |
+| CheckBox「等待对端回执（0x04）」 | `sync.transfer.send.receipt` | 等待对端回执 | `SyncTransferSendForm.AwaitReceipt` | 不勾 |
+| TextBlock（只读结果行） | `sync.transfer.send.receipt-result` | 回执结果 | `FormatSendReceipt` 从 `SyncTransferOutcome` 派生 | 空 |
+
+接收侧没有独立的结果行：回执结论接在卡片级状态句 `sync.transfer.status`（`TransferStatusText`）里，与「接收了一个信封」同一句，避免同一件事被两个控件各说一半。
+
+### 14.2 语义（页面只做映射，不做判断）
+
+- **开关只说「要不要」，写不写由 presenter 的解码门决定**：接收侧勾上后，只有在信封真的解出来之后才回写 `0x04`；解不出就一个字节都不写（`SourceSyncInbox.TryDecode` 就是 gate）。页面把「勾了但载荷没解出」渲染成失败句 + `envelope-invalid`，而不是「没有回执」——后者会让人以为是开关没生效。
+- **发送侧回执优先于送达确认**：两个都勾时 `SourceSyncReceiptOptions.Awaiting` 让传输层不再等关闭（两者不会抢同一次读）。`receipt-missing` 是**失败**，不软化成「已发送」。
+- **`ReceiptWritten` 的三态各有各的句子**：`true` = 已回写；`false` = 要求了但这一端没写出去；`null` = 没有要求（或者这次没走到写）。页面用 `FormatReceiveReceipt(outcome, writesReceipt)` 把「没要求」和「没写」分开，参数来自点击时用户勾选框的快照——接收结束后 `ReceiveState` 已经回到 Idle，不能再问它。
+- **页面不编造码**：四个 receipt 码（`receipt-missing` / `receipt-timeout` / `receipt-invalid` / `receipt-not-enabled`）全部经 `SyncTransferCopy.DescribeReason` 出中文，句尾保留原码；未知码原样回显。口令与回执状态都不进日志（页面没有日志调用，只有 InfoBar 文案）。
+
+### 14.3 实测
+
+- `dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug --no-build` → **1518 通过 / 0 失败 / 0 跳过**（W6-39 基线 1515 + 3：`The_view_can_render_the_receive_receipt_line_in_all_three_states`、`The_view_can_render_the_send_receipt_line_in_all_three_states`、`The_presenter_keeps_the_receipt_verdict_for_a_later_render`）。
+- 三例都只断言 presenter 交出的字段（`ReceiptWritten` / `ReceiptConfirmed` / `Reason` / `Summary` / `LastSend` / `LastReceive`），因此它们证明的是「视图层拿到的字段足够渲染」，**不是**「控件渲染正确」。
+- `dotnet build windows/src/MediaHub.App/MediaHub.App.csproj -c Debug -p:Platform=x64 -p:MediaHubBinRoot=D:/mh-out-w6/ -t:Build` → `MediaHub.App -> D:\mh-out-w6\...\MediaHub.dll`，0 警告 0 错误。
+
+### 14.4 GUI_UNVERIFIED（明确不声称）
+
+1. 两个勾选框在真实窗口里的初始态、可见性、UIA 名称——未验证；本轮不允许启动 MediaHub。
+2. 结果行在长文案下是否换行/截断、与发送结果行是否挤在同一屏——未验证。
+3. 真实对端时序（真 CLI 写回执 / 真 CLI 不回执）下页面的最终文案——未验证；这两条路径由 presenter 单测覆盖，页面只做字符串映射。
+4. 接收侧回执结论与 `sync.transfer.receive.info`（监听地址句）在同一卡片里是否互相覆盖——按代码不会（不同控件），但无 GUI 证据。
+
+### 14.5 回退
+
+删掉 `SyncPage.xaml` 里三个控件（`sync.transfer.receive.receipt` / `sync.transfer.send.receipt` / `sync.transfer.send.receipt-result`）、`SyncPage.xaml.cs` 里 `FormatReceiveReceipt` / `FormatSendReceipt` 与两处 form 赋值即可；presenter 与传输层一行未动，测试仍全绿（三例会编译失败，需一并删除）。

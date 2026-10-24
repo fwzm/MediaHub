@@ -171,3 +171,7 @@ W6-37 只在传输层与 CLI 上开了回执；**同步页（presenter）与 `tr
 
 - `dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug --no-build` → **1515 通过 / 0 失败 / 0 跳过**（基线 1488 + 27：presenter 16 + roundtrip 4 + CLI roundtrip 6，其中 1 个 Theory 展开 4 例）。
 - `pwsh -NoProfile -File windows/tools/acceptance/w6/presenter-e2e.ps1 -SkipBuild -OutDir D:/mh-verify/w6-39` → **12/12 用例 PASS**，新增 R8（presenter 回执 + 真 CLI `--await-receipt`）、R9（presenter `AwaitReceipt` 打真 `serve --send-receipt --apply`）、R10（真 serve 不写回执 → presenter `receipt-missing` 且对端零写入）；`residual MediaHub.SyncCli processes: 0`。
+
+### 13.4 GUI 入口（W6-43 追加）
+
+同步页的传输卡片现在有两个勾选框和一行结果，W6-37 的回执字节第一次有了人工入口：接收侧 `sync.transfer.receive.receipt`（「接收后写回执（0x04）」→ `SyncTransferReceiveForm.WriteReceipt`）、发送侧 `sync.transfer.send.receipt`（「等待对端回执（0x04）」→ `SyncTransferSendForm.AwaitReceipt`），发送结果单独一行 `sync.transfer.send.receipt-result`（`TransferReceiptResultText`）。默认都不勾，所以不勾时线上字节与 W6-16 冻结向量仍然逐字节相等。渲染规则见 `W6-33-SYNC-TRANSFER-UI.md` §14；**GUI_UNVERIFIED**：勾选框在真实窗口里的初始态、结果行在 UIA 树中的可见性都没有证据（本轮禁止启动 MediaHub）。

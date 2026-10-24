@@ -456,6 +456,13 @@
                          AutomationProperties.AutomationId="sync.transfer.receive.secret"
                          AutomationProperties.Name="接收共享口令" />
 
+            <!-- W6-43: the receipt is the only byte that says "decoded" instead of "arrived", so the switch sits
+                 beside the secret it shares a connection with. It is off by default: closing already looks like success. -->
+            <CheckBox x:Name="TransferWriteReceiptCheck" Content="接收后写回执（0x04）"
+                      AutomationProperties.AutomationId="sync.transfer.receive.receipt"
+                      AutomationProperties.Name="接收后写回执"
+                      ToolTipService.ToolTip="解出信封后回写一个回执字节 0x04；解不出就不回执" />
+
             <StackPanel Orientation="Horizontal" Spacing="8">
               <Button x:Name="TransferStartReceiveButton" Content="开始接收" Click="OnTransferStartReceiveClick"
                       AutomationProperties.AutomationId="sync.transfer.receive.start"
@@ -505,6 +512,12 @@
                       AutomationProperties.AutomationId="sync.transfer.send.confirm"
                       AutomationProperties.Name="要求送达确认" />
 
+            <!-- W6-43: a receipt outranks the close evidence; when both are ticked the presenter waits for the byte. -->
+            <CheckBox x:Name="TransferAwaitReceiptCheck" Content="等待对端回执（0x04）"
+                      AutomationProperties.AutomationId="sync.transfer.send.receipt"
+                      AutomationProperties.Name="等待对端回执"
+                      ToolTipService.ToolTip="写完后等对端的回执字节；拿不到就以 receipt-missing / receipt-timeout / receipt-invalid 失败" />
+
             <StackPanel Orientation="Horizontal" Spacing="8">
               <Button x:Name="TransferSendButton" Content="发送" Click="OnTransferSendClick"
                       AutomationProperties.AutomationId="sync.transfer.send"
@@ -515,6 +528,11 @@
             <TextBlock x:Name="TransferSendResultText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
                        AutomationProperties.AutomationId="sync.transfer.send.result"
                        AutomationProperties.Name="发送结果" />
+
+            <!-- W6-43: the receipt verdict on its own line, so "arrived" and "understood" never share a sentence. -->
+            <TextBlock x:Name="TransferReceiptResultText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="sync.transfer.send.receipt-result"
+                       AutomationProperties.Name="回执结果" />
           </StackPanel>
         </Grid>
 

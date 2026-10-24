@@ -1019,6 +1019,8 @@ public sealed partial class SyncPage : Page
                 PortText = TransferReceivePortBox.Text ?? string.Empty,
                 UseTls = TransferReceiveTlsCheck.IsChecked == true,
                 Secret = TransferReceiveSecretBox.Password,
+                // W6-43: the presenter decides when to write the byte; the page only says whether the user asked.
+                WriteReceipt = TransferWriteReceiptCheck.IsChecked == true,
             };
 
             SyncTransferOutcome prepared = Transfer.PrepareReceive(form);
@@ -1033,7 +1035,7 @@ public sealed partial class SyncPage : Page
 
             SyncTransferOutcome received = await Transfer.ReceiveOnceAsync();
             RenderTransferState();
-            RenderReceiveResult(received);
+            RenderReceiveResult(received, form.WriteReceipt);
         }
         catch (Exception error) when (error is IOException or InvalidOperationException or ObjectDisposedException or ArgumentException)
         {
@@ -1079,6 +1081,8 @@ public sealed partial class SyncPage : Page
                 ExpectedFingerprint = TransferPinBox.Text,
                 Secret = TransferSendSecretBox.Password,
                 ConfirmDelivery = TransferConfirmDeliveryCheck.IsChecked == true,
+                // W6-43: a receipt is the only proof the peer decoded the envelope; a close proves neither way.
+                AwaitReceipt = TransferAwaitReceiptCheck.IsChecked == true,
             };
 
             SyncTransferOutcome sent = await Transfer.SendAsync(form);
@@ -1092,6 +1096,7 @@ public sealed partial class SyncPage : Page
             }
 
             TransferSendResultText.Text = sentence;
+            TransferReceiptResultText.Text = FormatSendReceipt(sent, form.AwaitReceipt);
             if (sent.Succeeded)
             {
                 ShowStatus(InfoBarSeverity.Success, "已发送", sentence);
@@ -1133,7 +1138,9 @@ public sealed partial class SyncPage : Page
     }
 
     /// <summary>Shows what one receive did, and hands a received envelope to the apply preview only.</summary>
-    private void RenderReceiveResult(SyncTransferOutcome outcome)
+    /// <param name="outcome">The finished receive.</param>
+    /// <param name="writesReceipt">Whether the user asked for a receipt; the presenter's state is Idle again by now.</param>
+    private void RenderReceiveResult(SyncTransferOutcome outcome, bool writesReceipt)
     {
         string sentence = outcome.Summary;
         if (!outcome.Succeeded && !outcome.Cancelled && outcome.Detail is { Length: > 0 } detail)
@@ -1141,6 +1148,8 @@ public sealed partial class SyncPage : Page
             sentence = sentence + " 详情：" + detail;
         }
 
+        // W6-43: the receipt byte is the only "decoded" evidence this card can produce, so the sentence says it out loud.
+        sentence = sentence + " " + FormatReceiveReceipt(outcome, writesReceipt);
         TransferStatusText.Text = sentence;
 
         if (outcome.Cancelled)
@@ -1170,6 +1179,68 @@ public sealed partial class SyncPage : Page
         }
 
         ShowStatus(InfoBarSeverity.Success, "已接收一个信封（只生成预览）", sentence);
+    }
+
+    /// <summary>
+    /// W6-43: the receive-side receipt verdict. Only the presenter's <c>ReceiptWritten</c> decides it; an unchecked
+    /// switch and a receive that never decoded look different to the user, so they must not share one sentence.
+    /// </summary>
+    private static string FormatReceiveReceipt(SyncTransferOutcome outcome, bool writesReceipt)
+    {
+        if (!writesReceipt)
+        {
+            return "回执：没有要求（未勾选「接收后写回执」）。";
+        }
+
+        if (outcome.ReceiptWritten is true)
+        {
+            return "回执：已回写 0x04——对端可以据此确认信封被读懂（不代表已应用）。";
+        }
+
+        if (outcome.ReceiptWritten is false)
+        {
+            return "回执：要求了但没有写出——这一端不能写回执。";
+        }
+
+        return outcome.Succeeded
+            ? "回执：没有写出——这次没有解出信封，回执只在解出之后才写。"
+            : "回执：没有写出——" + SyncTransferCopy.DescribeReason(outcome.Reason);
+    }
+
+    /// <summary>
+    /// W6-43: the send-side receipt verdict, rendered into its own line. A receipt that never arrived stays a failure:
+    /// <c>receipt-missing</c> is not softened into "sent", because a close proves neither decoding nor refusal.
+    /// </summary>
+    private static string FormatSendReceipt(SyncTransferOutcome sent, bool awaitReceipt)
+    {
+        if (!awaitReceipt)
+        {
+            return "回执：没有要求（未勾选「等待对端回执」）。";
+        }
+
+        if (sent.FormIssue != SyncTransferFormIssue.None)
+        {
+            return "回执：发送前检查没通过，这次没有连到对端。";
+        }
+
+        if (sent.Cancelled)
+        {
+            return "回执：已取消，没有等到对端的回执。";
+        }
+
+        if (sent.ReceiptConfirmed is true)
+        {
+            return "回执：已收到 0x04——对端读懂了这份信封（不代表已应用）。";
+        }
+
+        if (SourceSyncReceiptReasons.IsReceiptReason(sent.Reason))
+        {
+            return "回执：未收到——" + SyncTransferCopy.DescribeReason(sent.Reason);
+        }
+
+        return sent.Reason is { Length: > 0 } reason
+            ? "回执：没有走到等回执这一步（" + reason + "）。"
+            : "回执：未收到——这一端无法承载回执。";
     }
 
     // ---- transport (W6-33) end --------------------------------------------------
