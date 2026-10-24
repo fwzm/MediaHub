@@ -96,6 +96,9 @@ object SourceSyncImportTags {
 
     const val RECEIVE_HOST = "sync.receive.host"
 
+    /** W6-52b：允许连一个非回环单播地址的开关。 */
+    const val RECEIVE_ALLOW_HOST = "sync.receive.allow-host"
+
     const val RECEIVE_PORT = "sync.receive.port"
 
     const val RECEIVE_CHALLENGE = "sync.receive.challenge"
@@ -153,6 +156,9 @@ object SourceSyncImportTags {
     const val SEND = "sync.send"
 
     const val SEND_HOST = "sync.send.host"
+
+    /** W6-52b：允许发给一个非回环单播地址的开关。 */
+    const val SEND_ALLOW_HOST = "sync.send.allow-host"
 
     const val SEND_PORT = "sync.send.port"
 
@@ -681,6 +687,23 @@ private fun ReceiveSection(
                     .fillMaxWidth()
                     .testTag(SourceSyncImportTags.RECEIVE_HOST),
             )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = form.allowExplicitHost,
+                    onCheckedChange = { checked -> form = form.copy(allowExplicitHost = checked) },
+                    enabled = !receiving,
+                    modifier = Modifier.testTag(SourceSyncImportTags.RECEIVE_ALLOW_HOST),
+                )
+                Text(
+                    SourceSyncReceiveCopy.ALLOW_HOST_LABEL,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                SourceSyncReceiveCopy.ALLOW_HOST_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             OutlinedTextField(
                 value = form.port,
                 onValueChange = { form = form.copy(port = it) },
@@ -1026,6 +1049,23 @@ private fun SendSection(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag(SourceSyncImportTags.SEND_HOST),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = form.allowExplicitHost,
+                    onCheckedChange = { checked -> form = form.copy(allowExplicitHost = checked) },
+                    enabled = !sending,
+                    modifier = Modifier.testTag(SourceSyncImportTags.SEND_ALLOW_HOST),
+                )
+                Text(
+                    SourceSyncSendCopy.ALLOW_HOST_LABEL,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                SourceSyncSendCopy.ALLOW_HOST_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedTextField(
                 value = form.port,

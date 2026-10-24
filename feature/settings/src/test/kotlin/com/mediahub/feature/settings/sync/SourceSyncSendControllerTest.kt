@@ -610,6 +610,36 @@ class SourceSyncSendControllerTest {
         assertTrue("口令位置打码：" + printed, printed.contains("secret=<redacted>"))
     }
 
+    @Test
+    fun theCrossMachineSwitchIsOffByDefaultAndPrintedInTheForm() {
+        val fresh = SourceSyncSendForm(host = "192.168.1.5", port = "9000")
+        assertFalse("W6-52b：缺省不许发给非回环机器", fresh.allowExplicitHost)
+        assertTrue("诊断要看得出开关状态：" + fresh, fresh.toString().contains("allowExplicitHost=false"))
+        val lit = fresh.copy(allowExplicitHost = true)
+        assertTrue("点亮后 form 自己也要看得出来：" + lit, lit.toString().contains("allowExplicitHost=true"))
+    }
+
+    @Test
+    fun theCrossMachineSwitchTravelsVerbatimToThePort() = runTest {
+        val send = FakeSendPort()
+        val controller = SourceSyncSendController(exportPort(), send)
+        assertTrue(controller.send(form(host = "192.168.1.5", port = "9000", allowExplicitHost = true)))
+        assertEquals("地址原样交给端口，不在控制器里改写", "192.168.1.5", send.host)
+        assertEquals("W6-52b：开关必须一起透传到端口", true, send.allowExplicitHost)
+        assertTrue(controller.state.value is SourceSyncSendState.Sent)
+    }
+
+    @Test
+    fun aCrossMachineAddressWithoutTheSwitchIsNotRefusedHereButCarriesFalse() = runTest {
+        // 判定只有一处：core 的 SourceSyncHostAddress。控制器不许自己再判一遍，
+        // 否则两处会对「什么算可接受」给出不同答案；这里只钉住开关照实往下传。
+        val send = FakeSendPort()
+        val controller = SourceSyncSendController(exportPort(), send)
+        assertTrue(controller.send(form(host = "192.168.1.5", port = "9000")))
+        assertEquals("192.168.1.5", send.host)
+        assertEquals("没点开关就是 false，拒与不拒由 core 决定", false, send.allowExplicitHost)
+    }
+
     // ---- 夹具 ----
 
 
@@ -623,6 +653,7 @@ class SourceSyncSendControllerTest {
         secret: String = "",
         receipt: Boolean = false,
         delivery: Boolean = false,
+        allowExplicitHost: Boolean = false,
     ): SourceSyncSendForm = SourceSyncSendForm(
         host = host,
         port = port,
@@ -633,6 +664,7 @@ class SourceSyncSendControllerTest {
         secret = secret,
         receipt = receipt,
         delivery = delivery,
+        allowExplicitHost = allowExplicitHost,
     )
 
     /** 两来源信封：与 Windows transfer serve 的 apply 计数口径一致（emby + jellyfin，无墓碑）。 */
@@ -878,6 +910,9 @@ class SourceSyncSendControllerTest {
         var delivery: SourceSyncDeliveryOptions = SourceSyncDeliveryOptions.Off
         var envelope: ByteArray? = null
 
+        /** W6-52b：控制器有没有把「允许非回环」这个开关带到端口上。 */
+        var allowExplicitHost: Boolean? = null
+
         override suspend fun send(
             host: String,
             port: Int,
@@ -887,6 +922,19 @@ class SourceSyncSendControllerTest {
             auth: SourceSyncTransferOptions?,
             receipt: SourceSyncReceiptOptions,
             delivery: SourceSyncDeliveryOptions,
+        ): SourceSyncTransferResult =
+            send(host, port, envelope, challenge, tls, auth, receipt, delivery, false)
+
+        override suspend fun send(
+            host: String,
+            port: Int,
+            envelope: ByteArray,
+            challenge: String?,
+            tls: SourceSyncTlsOptions,
+            auth: SourceSyncTransferOptions?,
+            receipt: SourceSyncReceiptOptions,
+            delivery: SourceSyncDeliveryOptions,
+            allowExplicitHost: Boolean,
         ): SourceSyncTransferResult {
             calls++
             this.host = host
@@ -897,6 +945,7 @@ class SourceSyncSendControllerTest {
             this.auth = auth
             this.receipt = receipt
             this.delivery = delivery
+            this.allowExplicitHost = allowExplicitHost
             gate?.await()
             return result
         }

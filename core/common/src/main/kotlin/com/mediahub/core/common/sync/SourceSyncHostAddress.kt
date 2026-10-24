@@ -38,8 +38,10 @@ object SourceSyncHostAddress {
      *
      * @param host 调用方给的地址；null 或空白表示 [SourceSyncTransferListener.DEFAULT_HOST]。
      * @param allowExplicitHost 调用方是否自己打开了非回环开关；false 时与 W6-52 之前逐字同行为。
+     * @param verb 拒绝句里描述动作的那个词：监听端是「绑定」，拨号端（W6-52b 的客户端）是「连」。
+     *   只改第 (a) 句的措辞，不改任何判定；缺省值让监听端 W6-52 的文案逐字不变。
      */
-    fun resolve(host: String?, allowExplicitHost: Boolean): Resolution {
+    fun resolve(host: String?, allowExplicitHost: Boolean, verb: String = "绑定"): Resolution {
         val text = host?.trim().orEmpty().ifEmpty { SourceSyncTransferListener.DEFAULT_HOST }
         if (text.length > MAX_LENGTH) {
             return refused("地址最多 " + MAX_LENGTH + " 个字符，这个没有去绑。")
@@ -50,7 +52,7 @@ object SourceSyncHostAddress {
             return Resolution.Accepted(loopback, text)
         }
         if (!allowExplicitHost) {
-            return refused("只允许绑定回环地址（127.0.0.1 / ::1 / localhost），实际 " + text)
+            return refused("只允许" + verb + "回环地址（127.0.0.1 / ::1 / localhost），实际 " + text)
         }
         val literal = parseLiteral(text)
             ?: return refused(

@@ -98,6 +98,39 @@ class SourceSyncSectionsScreenTest {
         assertEquals(8999, form.portNumber)
     }
 
+    // ------------------------------------------- W6-52b 接收卡的「允许非回环单播」开关
+
+    @Test
+    fun theReceiveCardOffersACrossMachineSwitch() {
+        render()
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_ALLOW_HOST).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+        // 说明必须写清「只收单播字面量、码仍是 not-loopback」，否则用户会以为是域名输入框。
+        composeRule.onNodeWithText(SourceSyncReceiveCopy.ALLOW_HOST_HINT).performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(SourceSyncReceiveCopy.ALLOW_HOST_LABEL).assertIsDisplayed()
+    }
+
+    @Test
+    fun theReceiveFormCarriesTheCrossMachineSwitchVerbatim() {
+        var received: SourceSyncReceiveForm? = null
+        render(onReceive = { received = it })
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_PORT).performScrollTo()
+            .performTextReplacement("8999")
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_ALLOW_HOST).performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_ACTION).performScrollTo()
+            .performClick()
+
+        val form = received
+        assertNotNull("接收按钮没把表单交出去", form)
+        assertTrue("点了开关就必须原样带过去", form!!.allowExplicitHost)
+        assertEquals(8999, form.portNumber)
+    }
+
     @Test
     fun aNotLoopbackFailureIsShownWithItsStableCode() {
         render(receiveState = SourceSyncReceiveState.Failed("not-loopback", null))
@@ -354,6 +387,41 @@ class SourceSyncSectionsScreenTest {
         assertFalse("默认不开 TLS", form.tls)
         assertFalse("默认不开认证", form.auth)
         assertFalse("默认不等回执", form.receipt)
+    }
+
+    // ------------------------------------------- W6-52b 发送卡的「允许非回环单播」开关
+
+    @Test
+    fun theSendCardOffersACrossMachineSwitch() {
+        render()
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.SEND_ALLOW_HOST).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+        composeRule.onNodeWithText(SourceSyncSendCopy.ALLOW_HOST_HINT).performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(SourceSyncSendCopy.ALLOW_HOST_LABEL).assertIsDisplayed()
+    }
+
+    @Test
+    fun theSendFormCarriesTheCrossMachineSwitchVerbatim() {
+        var sent: SourceSyncSendForm? = null
+        render(onSend = { sent = it })
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.SEND_HOST).performScrollTo()
+            .performTextReplacement("192.168.1.5")
+        composeRule.onNodeWithTag(SourceSyncImportTags.SEND_ALLOW_HOST).performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag(SourceSyncImportTags.SEND_PORT).performScrollTo()
+            .performTextReplacement("8942")
+        composeRule.onNodeWithTag(SourceSyncImportTags.SEND_ACTION).performScrollTo()
+            .performClick()
+
+        val form = sent
+        assertNotNull("发送按钮没把表单交出去", form)
+        // 地址与开关都只原样转交；「能不能连」只有 core 的 SourceSyncHostAddress 一处判定。
+        assertEquals("192.168.1.5", form!!.hostOrLoopback)
+        assertTrue("点了开关就必须原样带过去", form.allowExplicitHost)
     }
 
     @Test
