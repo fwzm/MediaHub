@@ -109,3 +109,11 @@ These simulations do not run tests or establish behavior compatibility. #33/#39 
 - Full combined Android unit/APK/lint validation starts after the next documentation commit. Until it completes, combined candidate status is PARTIAL / CI_PENDING; no old green run certifies this tree.
 - PR6 remains unresolved: 13 source conflicts require invariant-by-invariant review and preservation of current implementations; it must not be merged by selecting an entire old production tree.
 - No PR merge/close/mark-ready, main write, or further history rewrite has been performed this round.
+
+## PR57 lifecycle fixture correction
+
+- CI Android 40096618857 at 5e028a31: API32/API36 passed; build failed at MpvHttpBridgeLifecycleTest line173. Downloaded XML confirms 8 cases /1 failure /0 errors/skips: `real upstream body read must be reached before stop`.
+- The added precondition could not be reached by the header-only RawUpstream fixture. Fix is test-only: send one body byte while promising 500, verify actual downstream receipt of that byte before stop, retain Call.cancel and upstream peer hang-up assertions. No timeout was relaxed and no production code was modified.
+- Local corrected lifecycle suite: --rerun-tasks --no-build-cache, JDK21/in-process Kotlin/serial Gradle; 8 tests /0 failures/errors/skips, exit0, 27 tasks executed. Fixture source SHA256 8224d45813318e33ecd29dfba64e032591eabeaf684d4b52c0cc27f357fa59a1.
+- Local combined attempt at 5e028a31 was interrupted without a recorded exit: exec handle79596, Python48872 and Java processes were missing when revalidated; log ended in compilation. Archived as INTERRUPTED_ENV, never PASS.
+- Current PR53 CI40096311477 is SUCCESS for 507b9ebe (build/API32/API36). Current PR57 Windows CI40096618908 is SUCCESS for 5e028a31. These do not certify the next fixture-fix commit.
