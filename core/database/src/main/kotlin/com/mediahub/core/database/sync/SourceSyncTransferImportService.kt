@@ -1,6 +1,7 @@
 package com.mediahub.core.database.sync
 
 import com.mediahub.core.common.sync.SourceSyncCodec
+import com.mediahub.core.common.sync.SourceSyncFingerprints
 import com.mediahub.core.common.sync.SourceSyncTransferClient
 import com.mediahub.core.common.sync.SourceSyncTransferResult
 import kotlinx.coroutines.Dispatchers
@@ -34,7 +35,17 @@ sealed interface SourceSyncTransferImportOutcome {
     data class EnvelopeRejected(val reason: String, val message: String? = null) : SourceSyncTransferImportOutcome
 
     /** 已交给导入服务（result.isRejected 仍可能为 true，例如信封内重复 syncSourceId）。 */
-    data class Imported(val result: SourceSyncImportResult) : SourceSyncTransferImportOutcome
+    data class Imported(
+        val result: SourceSyncImportResult,
+        /**
+         * 收到的信封原文（W6-27）。
+         *
+         * 帧层与解码都通过才走到这里，界面要把这份文本交给 SourceSyncImportSession.loadEnvelope
+         * 才能进入"预览 -> 逐条允许 -> 应用"的同一条流程；因此它随结果一起回传，而不是让调用方
+         * 自己从 socket 字节里再捞一次。写入仍只由 apply 触发。
+         */
+        val envelopeJson: String? = null,
+    ) : SourceSyncTransferImportOutcome
 
     val isTransferFailure: Boolean get() = this is TransferFailed
 
@@ -100,7 +111,33 @@ class SourceSyncTransferImportService(
                 SourceSyncTransferImportOutcome.EnvelopeRejected(decoded.reason, decoded.message)
 
             is SourceSyncCodec.DecodeResult.Ok ->
-                SourceSyncTransferImportOutcome.Imported(gateway.importEnvelope(json))
+                SourceSyncTransferImportOutcome.Imported(gateway.importEnvelope(json), json)
+        }
+    }
+}
+
+/**
+ * W6-27：界面上「从 Windows 接收」用的网关。
+ *
+ * 接收发生在用户预览与逐条允许**之前**：这里若接 [AndroidSourceSyncService]，收到的每一条可写来源
+ * 都会被直接写库，逐条审批就形同虚设。acceptOnly 只解码、回显信封身份与内容指纹，一个字节都不写；
+ * 真正的写入仍然只经 SourceSyncImportSession.apply()（内部才是 AndroidSourceSyncService）。
+ */
+object SourceSyncImportGateways {
+
+    fun acceptOnly(): SourceSyncImportGateway = SourceSyncImportGateway { envelopeJson ->
+        when (val decoded = SourceSyncCodec.tryDecode(envelopeJson)) {
+            is SourceSyncCodec.DecodeResult.Failed -> SourceSyncImportResult(
+                rejectedReason = decoded.reason,
+                rejectedMessage = decoded.message,
+            )
+
+            is SourceSyncCodec.DecodeResult.Ok -> SourceSyncImportResult(
+                deviceId = decoded.envelope.deviceId,
+                snapshotId = decoded.envelope.snapshotId,
+                // 与 AndroidSourceSyncService 同一个指纹算法，界面据此判断"这份信封收过没有"。
+                envelopeContentHash = SourceSyncFingerprints.content(decoded.envelope),
+            )
         }
     }
 }

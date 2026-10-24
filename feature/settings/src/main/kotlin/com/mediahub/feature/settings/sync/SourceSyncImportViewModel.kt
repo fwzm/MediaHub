@@ -48,6 +48,20 @@ class SourceSyncImportViewModel @Inject constructor(
 
     val state: StateFlow<SourceSyncImportState> = session.state
 
+    /**
+     * W6-27：从 Windows 接收。
+     *
+     * 接收成功只把信封交给 [SourceSyncImportSession.loadEnvelope]（等于"用户手动选了文件"），
+     * 预览、逐条允许、应用仍然要用户自己点；失败路径不碰 session 的任何既有数据。
+     */
+    private val receiveController = SourceSyncReceiveController(
+        port = SourceSyncTransferReceivePort(),
+        onEnvelope = { envelopeJson, fileName -> session.loadEnvelope(envelopeJson, fileName) },
+    )
+
+    /** 接收区块的四态（Idle / Receiving / Received / Rejected / Failed）。 */
+    val receiveState: StateFlow<SourceSyncReceiveState> = receiveController.state
+
     private val _verification = MutableStateFlow(SourceVerificationViewState())
 
     /** 结果页的逐源验证状态（三态 + 对话框 + 忙碌标记）。 */
@@ -61,8 +75,20 @@ class SourceSyncImportViewModel @Inject constructor(
         }
     }
 
+    /** 手动选文件：顺手清掉上一次的接收结论，避免界面上挂着"已收下信封"的旧回执。 */
     fun loadEnvelope(envelopeJson: String, fileName: String? = null) {
+        receiveController.clear()
         session.loadEnvelope(envelopeJson, fileName)
+    }
+
+    /**
+     * 从 Windows 接收一封信封。
+     *
+     * 端口为空/非法时 [SourceSyncReceiveController.receive] 直接返回 false（不发请求、不改状态）；
+     * 已有一条在飞时同样返回 false，所以连点只会发一次。
+     */
+    fun receive(form: SourceSyncReceiveForm) {
+        viewModelScope.launch { receiveController.receive(form) }
     }
 
     fun preview() {
@@ -83,6 +109,7 @@ class SourceSyncImportViewModel @Inject constructor(
 
     fun reset() {
         session.reset()
+        receiveController.clear()
         _verification.value = SourceVerificationViewState()
     }
 
