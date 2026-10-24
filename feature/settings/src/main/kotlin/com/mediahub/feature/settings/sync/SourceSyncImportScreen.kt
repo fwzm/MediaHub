@@ -114,6 +114,9 @@ object SourceSyncImportTags {
 
     const val LISTEN_TLS = "sync.listen.tls"
 
+    /** 收下后回一个裸 0x04（W6-40）：对端才能区分「接受」与「收完就断」。 */
+    const val LISTEN_RECEIPT = "sync.listen.receipt"
+
     const val LISTEN_START = "sync.listen.start"
 
     const val LISTEN_STOP = "sync.listen.stop"
@@ -151,6 +154,9 @@ object SourceSyncImportTags {
     const val SEND_SECRET = "sync.send.secret"
 
     const val SEND_RECEIPT = "sync.send.receipt"
+
+    /** 等对端关闭连接（W6-46 投递确认）：与回执同时开时回执优先，所以勾了回执它就禁用。 */
+    const val SEND_DELIVERY = "sync.send.delivery"
 
     const val SEND_ACTION = "sync.send.action"
 
@@ -790,6 +796,23 @@ private fun ListenSection(
                 },
                 modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_INFO),
             )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = form.receipt,
+                    onCheckedChange = { checked -> form = form.copy(receipt = checked) },
+                    enabled = !listening && !receiving,
+                    modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_RECEIPT),
+                )
+                Text(
+                    SourceSyncListenCopy.RECEIPT_LABEL,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                SourceSyncListenCopy.RECEIPT_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -990,6 +1013,24 @@ private fun SendSection(
             }
             Text(
                 SourceSyncSendCopy.RECEIPT_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = form.delivery,
+                    // 回执优先：勾着等回执时投递确认不起作用，所以禁用而不是「勾了也没用」。
+                    onCheckedChange = { checked -> form = form.copy(delivery = checked) },
+                    enabled = !sending && !form.receipt,
+                    modifier = Modifier.testTag(SourceSyncImportTags.SEND_DELIVERY),
+                )
+                Text(
+                    SourceSyncSendCopy.DELIVERY_LABEL,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                SourceSyncSendCopy.DELIVERY_HINT,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

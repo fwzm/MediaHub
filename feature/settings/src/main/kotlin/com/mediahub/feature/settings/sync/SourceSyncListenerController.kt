@@ -78,6 +78,13 @@ object SourceSyncListenCopy {
 
     const val TLS_LABEL: String = "用 TLS 1.3 接收（需要本机身份证书）"
 
+    /** 收到能解码的信封后回一个裸 0x04（W6-40）：这是对端唯一能拿到的「收下了」证据。 */
+    const val RECEIPT_LABEL: String = "收下后回 0x04 回执"
+
+    /** 回执的边界如实写清楚：解码成功才回，解不出的载荷保持沉默（对端看到 receipt-missing）。 */
+    const val RECEIPT_HINT: String =
+        "只有信封解码成功才回一个裸 0x04；解不出的载荷保持沉默，对端会看到 receipt-missing。"
+
     const val START: String = "开始监听"
 
     const val STOP: String = "停止监听"
