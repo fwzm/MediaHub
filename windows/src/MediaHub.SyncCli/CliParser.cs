@@ -72,6 +72,8 @@ public static class CliParser
         "  --await-receipt    with 'transfer send': wait for that byte after the last frame and fail with\n" +
         "                     receipt-missing, receipt-timeout or receipt-invalid when it does not come;\n" +
         "                     off by default, so a send never waits and never reads back\n" +
+        "  --budget-ms N      with 'transfer serve': the whole wait for one peer, in milliseconds\n" +
+        "                     (100..600000, default 15000); running out is transfer-timeout (W6-50)\n" +
         "\n" +
         "Global:\n" +
         "  --json       stdout carries exactly one JSON document; progress goes to stderr\n" +
@@ -90,7 +92,7 @@ public static class CliParser
     private static readonly string[] PairListValueOptions = ["--root"];
     private static readonly string[] PairForgetValueOptions = ["--root", "--device"];
     private static readonly string[] TransferServeValueOptions =
-        ["--root", "--device", "--port", "--secret-env", "--expect-fingerprint"];
+        ["--root", "--device", "--port", "--budget-ms", "--secret-env", "--expect-fingerprint"];
     private static readonly string[] TransferSendValueOptions =
         ["--to", "--root", "--device", "--secret-env", "--expect-fingerprint"];
     private static readonly string[] TransferRoundtripValueOptions =
@@ -500,6 +502,23 @@ public static class CliParser
             port = parsedPort;
         }
 
+        int? budgetMilliseconds = null;
+        string? budgetText = values.GetValueOrDefault("--budget-ms");
+        if (budgetText is not null)
+        {
+            // The budget is the whole wait for one peer: a value under a tenth of a second would fail
+            // before a handshake could finish, and a value over ten minutes would hang a script with no
+            // way to tell "slow peer" from "no peer". Same shape as --port: refuse here rather than let
+            // the runner clamp or guess.
+            if (!int.TryParse(budgetText, NumberStyles.None, CultureInfo.InvariantCulture, out int parsedBudget) ||
+                parsedBudget is < 100 or > 600000)
+            {
+                return Error("invalid-budget-ms:" + budgetText);
+            }
+
+            budgetMilliseconds = parsedBudget;
+        }
+
         string? passphrase = values.GetValueOrDefault("--passphrase");
         string? secretsJson = values.GetValueOrDefault("--secrets");
         if (passphrase is not null && secretsJson is not null)
@@ -528,6 +547,7 @@ public static class CliParser
                 ExpectPlaintextBase64 = expect,
                 Target = target,
                 Port = port,
+                BudgetMilliseconds = budgetMilliseconds,
                 DeviceA = deviceA,
                 DeviceB = deviceB,
                 Once = once,
@@ -552,7 +572,7 @@ public static class CliParser
     private static bool IsKnownOption(string name) => name is
         "--root" or "--out" or "--in" or "--passphrase" or "--secrets" or "--deletions" or
         "--device" or "--baseline" or "--id" or "--source" or "--link" or "--expect" or
-        "--to" or "--port" or "--device-a" or "--device-b" or
+        "--to" or "--port" or "--budget-ms" or "--device-a" or "--device-b" or
         "--authenticate" or "--secret-env" or "--tls" or "--expect-fingerprint" or "--confirm-delivery" or
         "--send-receipt" or "--await-receipt" or
         "--apply" or "--once" or "--json";

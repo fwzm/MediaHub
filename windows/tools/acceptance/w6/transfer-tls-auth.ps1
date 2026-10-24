@@ -33,6 +33,12 @@
       O  wrong pin with the tag switched on  send 2 tls-fingerprint-mismatch / no auth-* anywhere, zero writes
       P  plaintext listener, TLS sender      send 2 tls-handshake-failed (never receipt-missing) / serve 2 tls-not-enabled
 
+    W6-50 turns the receive budget (a hard-coded fifteen seconds) into a switch, so two cases cover the
+    option itself, with no sockets beyond the two real child processes:
+
+      S1  --budget-ms 1200, nobody dials    serve 2 transfer-timeout after ~1.2 s, "budget: 1200 ms" on stderr
+      S2  --budget-ms 30000, a real sender  send 0 / serve 0, two records, JSON budgetMs=30000
+
     Each case also asserts: the receiver's sync-sources.json holds exactly the sender's two
     sources (or does not exist at all when the case must not write), the receiver's
     sync-baseline.json exists only after a successful apply, and no log line contains either
@@ -701,6 +707,168 @@ function Invoke-ReceiptTimeoutCase {
     }
 }
 
+function Invoke-BudgetTimeoutCase {
+    # W6-50: the receive budget used to be a hard-coded fifteen seconds. A listener nobody dials is the
+    # cheapest way to prove that the option, not the constant, is the clock that runs out - and text mode
+    # is the shape that prints the number, right after the port.
+    $name = 'S1-budget-timeout'
+    $title = 'S1 --budget-ms 1200 with no peer at all'
+    $expected = 'serve 2 transfer-timeout after ~1.2 s, budget line on stderr, no writes'
+    $caseDir = Join-Path $script:outDir $name
+    $rootDir = Join-Path $script:rootsDir $name
+    New-Item -ItemType Directory -Path $caseDir, $rootDir -Force | Out-Null
+    $receiverRoot = Join-Path $rootDir 'receiver'
+    New-Item -ItemType Directory -Path $receiverRoot -Force | Out-Null
+    $serveOut = Join-Path $caseDir 'serve.stdout.txt'
+    $serveErr = Join-Path $caseDir 'serve.stderr.txt'
+
+    $serve = $null
+    try {
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $serve = Start-CliProcess -Name ($name + '-serve') -Arguments @($script:cliDll, 'transfer', 'serve', '--root', $receiverRoot, '--device', 'rx-device', '--port', '0', '--apply', '--budget-ms', '1200') -StdoutPath $serveOut -StderrPath $serveErr
+        $exited = Wait-ForExitOrKill -Process $serve -TimeoutMs $script:exitWaitMs -Label 'serve'
+        $stopwatch.Stop()
+
+        $serveStdout = Read-Shared -Path $serveOut
+        $serveStderr = Read-Shared -Path $serveErr
+        $serveExit = -1
+        if ($exited) { $serveExit = $serve.ExitCode }
+        $serveJson = Get-JsonDocument -Text $serveStdout
+        $serveCode = Get-ErrorCode -Stdout $serveStdout -Stderr $serveStderr -Document $serveJson
+        $listeningAt = $serveStderr.IndexOf('listening 127.0.0.1:', [System.StringComparison]::Ordinal)
+        $budgetAt = $serveStderr.IndexOf('budget: ', [System.StringComparison]::Ordinal)
+
+        $actual = [ordered]@{
+            serveExit = $serveExit; sendExit = -1; serveCode = $serveCode; sendCode = ''
+            frames = -1; receiverRecords = 0; envelopeCount = 0
+            receiverStoreExists = $false; receiverBaseline = $false; receiverDisplayNames = ''
+            port = 0; fingerprint = ''; durationMs = [int]$stopwatch.ElapsedMilliseconds
+        }
+
+        try {
+            Assert-Condition ($exited) 'the serve process had to be killed (it never exited)'
+            Assert-Condition ($serveExit -eq 2) ('serve exit code: expected 2 but was ' + $serveExit)
+            Assert-Condition ($serveCode -eq 'transfer-timeout') ('serve stable code: expected [transfer-timeout] but was [' + $serveCode + ']')
+            Assert-Condition ($serveStderr.Contains('error transfer-timeout:')) 'serve stderr must carry "error transfer-timeout:"'
+            Assert-Condition ($serveStderr.Contains('within 1.2 s')) ('the failure must name the configured budget; stderr was: ' + $serveStderr)
+            Assert-Condition ($listeningAt -ge 0) 'the port must still be announced before the wait begins'
+            Assert-Condition ($budgetAt -gt $listeningAt) 'the budget line belongs after the listening line'
+            Assert-Condition ($serveStderr.Contains('budget: 1200 ms')) 'text mode must print "budget: 1200 ms"'
+            Assert-Condition (-not $serveStderr.Contains('served one connection')) 'a serve that timed out must not report a connection'
+            Assert-Condition (-not $serveStdout.Contains('{')) 'text mode must not print a JSON document'
+            Assert-Condition ($actual.durationMs -ge 1100) ('the budget must really be waited out; the serve took ' + $actual.durationMs + ' ms')
+            Assert-Condition ($actual.durationMs -lt 9000) ('the budget must not be overshot; the serve took ' + $actual.durationMs + ' ms')
+            Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $receiverRoot 'sync-sources.json'))) 'a serve that timed out must not write the receiver store'
+            $detail = 'serve=' + $serveExit + ' code=' + $serveCode + ' gave up in ' + $actual.durationMs + ' ms, no writes'
+            return [ordered]@{ Name = $name; Title = $title; Expected = $expected; Actual = $actual; Detail = $detail; Passed = $true }
+        } catch {
+            $actual.serveStderr = $serveStderr
+            return [ordered]@{ Name = $name; Title = $title; Expected = $expected; Actual = $actual; Detail = $_.Exception.Message; Passed = $false }
+        }
+    } finally {
+        if ($null -ne $serve -and -not $serve.HasExited) { try { $serve.Kill() } catch { } }
+        if (-not $KeepArtifacts) { try { Remove-Item -LiteralPath $rootDir -Recurse -Force -ErrorAction SilentlyContinue } catch { } }
+    }
+}
+
+function Invoke-BudgetJsonCase {
+    # W6-50: the number also has to reach a serve that succeeds, as budgetMs in the one JSON document. A
+    # budget far larger than the transfer needs must change nothing else about the round.
+    $name = 'S2-budget-in-json'
+    $title = 'S2 --budget-ms 30000 against a real sender'
+    $expected = 'send 0 / serve 0, two records, JSON budgetMs=30000'
+    $caseDir = Join-Path $script:outDir $name
+    $rootDir = Join-Path $script:rootsDir $name
+    New-Item -ItemType Directory -Path $caseDir, $rootDir -Force | Out-Null
+    $receiverRoot = Join-Path $rootDir 'receiver'
+    New-Item -ItemType Directory -Path $receiverRoot -Force | Out-Null
+    $senderRoot = Join-Path $rootDir 'sender'
+    New-SenderStore -Directory $senderRoot
+    $serveOut = Join-Path $caseDir 'serve.stdout.txt'
+    $serveErr = Join-Path $caseDir 'serve.stderr.txt'
+    $sendOut = Join-Path $caseDir 'send.stdout.txt'
+    $sendErr = Join-Path $caseDir 'send.stderr.txt'
+
+    $serve = $null
+    $send = $null
+    try {
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $serve = Start-CliProcess -Name ($name + '-serve') -Arguments @($script:cliDll, 'transfer', 'serve', '--root', $receiverRoot, '--device', 'rx-device', '--port', '0', '--apply', '--json', '--budget-ms', '30000') -StdoutPath $serveOut -StderrPath $serveErr
+        $ready = Wait-ForServeReady -Process $serve -StderrPath $serveErr
+        Assert-Condition ($ready) ('the listener never announced its port; stderr was: ' + (Read-Shared -Path $serveErr))
+        $port = $script:lastPort
+
+        $send = Start-CliProcess -Name ($name + '-send') -Arguments @($script:cliDll, 'transfer', 'send', '--to', ('127.0.0.1:' + $port), '--root', $senderRoot, '--device', 'tx-device', '--json') -StdoutPath $sendOut -StderrPath $sendErr
+        $sendExited = Wait-ForExitOrKill -Process $send -TimeoutMs $script:exitWaitMs -Label 'send'
+        $serveExited = Wait-ForExitOrKill -Process $serve -TimeoutMs $script:exitWaitMs -Label 'serve'
+        $stopwatch.Stop()
+
+        $serveStdout = Read-Shared -Path $serveOut
+        $serveStderr = Read-Shared -Path $serveErr
+        $sendStdout = Read-Shared -Path $sendOut
+        $sendStderr = Read-Shared -Path $sendErr
+        $serveJson = Get-JsonDocument -Text $serveStdout
+        $sendJson = Get-JsonDocument -Text $sendStdout
+        $serveExit = -1
+        if ($serveExited) { $serveExit = $serve.ExitCode }
+        $sendExit = -1
+        if ($sendExited) { $sendExit = $send.ExitCode }
+        $serveCode = Get-ErrorCode -Stdout $serveStdout -Stderr $serveStderr -Document $serveJson
+        $sendCode = Get-ErrorCode -Stdout $sendStdout -Stderr $sendStderr -Document $sendJson
+
+        $storePath = Join-Path $receiverRoot 'sync-sources.json'
+        $storeExists = Test-Path -LiteralPath $storePath
+        $recordCount = 0
+        $displayNames = @()
+        if ($storeExists) {
+            try {
+                $records = @(ConvertFrom-Json -InputObject (Read-Shared -Path $storePath))
+                $recordCount = $records.Count
+                $displayNames = @($records | ForEach-Object { [string]$_.displayName })
+            } catch { }
+        }
+        $baselineExists = Test-Path -LiteralPath (Join-Path $receiverRoot 'sync-baseline.json')
+
+        $actual = [ordered]@{
+            serveExit = $serveExit; sendExit = $sendExit; serveCode = $serveCode; sendCode = $sendCode
+            frames = -1; receiverRecords = $recordCount; envelopeCount = $recordCount
+            receiverStoreExists = $storeExists; receiverBaseline = $baselineExists
+            receiverDisplayNames = ($displayNames -join ', ')
+            port = $port; fingerprint = ''; durationMs = [int]$stopwatch.ElapsedMilliseconds
+        }
+        if ($null -ne $sendJson) { $actual.frames = [int]$sendJson.frames }
+
+        try {
+            Assert-Condition ($sendExited) 'the send process had to be killed (it never exited)'
+            Assert-Condition ($serveExited) 'the serve process had to be killed (it never exited)'
+            Assert-Condition ($sendExit -eq 0) ('send exit code: expected 0 but was ' + $sendExit + ' (' + $sendCode + ')')
+            Assert-Condition ($serveExit -eq 0) ('serve exit code: expected 0 but was ' + $serveExit + ' (' + $serveCode + ')')
+            Assert-Condition ($null -ne $serveJson) 'the serve process printed no JSON document'
+            Assert-Condition ($null -ne $serveJson.budgetMs) 'serve JSON has no budgetMs field'
+            Assert-Condition ([int]$serveJson.budgetMs -eq 30000) ('serve JSON budgetMs: expected 30000 but was ' + $serveJson.budgetMs)
+            Assert-Condition ($serveJson.applied -eq $true) 'serve JSON must report applied=true under --apply'
+            Assert-Condition ([int]$serveJson.report.applied -eq 2) 'serve report.applied must stay 2: a large budget changes nothing about the apply'
+            Assert-Condition (-not $serveStderr.Contains('budget: ')) 'json mode must not print the human budget line on stderr'
+            Assert-Condition ($storeExists) 'the receiver store was not written'
+            Assert-Condition ($recordCount -eq 2) ('receiver record count: expected 2 but was ' + $recordCount)
+            foreach ($expectedName in $script:expectedSources) {
+                Assert-Condition ($displayNames -contains $expectedName) ('receiver is missing source ' + $expectedName)
+            }
+            Assert-Condition ($baselineExists) 'the receiver baseline was not updated after a successful apply'
+            $detail = 'send=' + $sendExit + ' serve=' + $serveExit + ' budgetMs=' + $serveJson.budgetMs + ' records=' + $recordCount + ' in ' + $actual.durationMs + ' ms'
+            return [ordered]@{ Name = $name; Title = $title; Expected = $expected; Actual = $actual; Detail = $detail; Passed = $true }
+        } catch {
+            $actual.sendStderr = $sendStderr
+            $actual.serveStderr = $serveStderr
+            return [ordered]@{ Name = $name; Title = $title; Expected = $expected; Actual = $actual; Detail = $_.Exception.Message; Passed = $false }
+        }
+    } finally {
+        if ($null -ne $send -and -not $send.HasExited) { try { $send.Kill() } catch { } }
+        if ($null -ne $serve -and -not $serve.HasExited) { try { $serve.Kill() } catch { } }
+        if (-not $KeepArtifacts) { try { Remove-Item -LiteralPath $rootDir -Recurse -Force -ErrorAction SilentlyContinue } catch { } }
+    }
+}
+
 function Write-CaseResult {
     param($Result)
     $script:results.Add($Result)
@@ -990,6 +1158,26 @@ try {
 }
 
 Write-CaseResult -Result $receiptTimeoutResult
+
+Write-Host ('-- ' + 'S1 --budget-ms 1200 with no peer at all')
+$budgetTimeoutResult = $null
+try {
+    $budgetTimeoutResult = Invoke-BudgetTimeoutCase
+} catch {
+    $budgetTimeoutResult = New-FailedCase -Name 'S1-budget-timeout' -Title 'S1 --budget-ms 1200 with no peer at all' -Expected 'serve 2 transfer-timeout after ~1.2 s / no write' -Detail ('the case aborted: ' + $_.Exception.Message)
+}
+
+Write-CaseResult -Result $budgetTimeoutResult
+
+Write-Host ('-- ' + 'S2 --budget-ms 30000 against a real sender')
+$budgetJsonResult = $null
+try {
+    $budgetJsonResult = Invoke-BudgetJsonCase
+} catch {
+    $budgetJsonResult = New-FailedCase -Name 'S2-budget-in-json' -Title 'S2 --budget-ms 30000 against a real sender' -Expected 'send 0 / serve 0, two records, budgetMs=30000' -Detail ('the case aborted: ' + $_.Exception.Message)
+}
+
+Write-CaseResult -Result $budgetJsonResult
 
 # ---------------------------------------------------------------------------------------------
 # Lingering process check: by name+command line, and by the pids this script started.

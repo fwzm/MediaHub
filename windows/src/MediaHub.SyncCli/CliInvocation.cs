@@ -153,6 +153,13 @@ public sealed record CliInvocation
     /// </summary>
     public bool AwaitReceipt { get; init; }
 
+    /// <summary>
+    /// <c>--budget-ms</c> (<c>transfer serve</c> only): how long to wait for one peer before giving up
+    /// with <c>transfer-timeout</c>, in milliseconds (100..600000). Null means the built-in fifteen
+    /// seconds, so an invocation that never mentions the option is byte-for-byte the pre-W6-50 one.
+    /// </summary>
+    public int? BudgetMilliseconds { get; init; }
+
     /// <summary><c>--apply</c>: really write. Without it <c>import</c> is a preview.</summary>
     public bool Apply { get; init; }
 

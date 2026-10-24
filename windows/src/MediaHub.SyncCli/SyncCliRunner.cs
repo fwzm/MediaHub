@@ -823,7 +823,14 @@ public sealed class SyncCliRunner
     // user to open the firewall). This group only wires that layer to the import round so the whole
     // hand-over can be rehearsed from a terminal, and it reuses the round's gate for every write.
 
-    private static readonly TimeSpan TransferBudget = TimeSpan.FromSeconds(15);
+    private const int DefaultTransferBudgetMilliseconds = 15_000;
+
+    /// <summary>
+    /// One transfer's default budget: the whole wait for one peer, handshake included. It stays
+    /// fifteen seconds so every existing verb behaves exactly as it did before W6-50; only
+    /// <c>transfer serve</c> can be told otherwise, through <c>--budget-ms</c>.
+    /// </summary>
+    private static readonly TimeSpan TransferBudget = TimeSpan.FromMilliseconds(DefaultTransferBudgetMilliseconds);
 
     private int RunTransferServe(CliInvocation invocation) => RunTransferServeAsync(invocation).GetAwaiter().GetResult();
 
@@ -871,6 +878,17 @@ public sealed class SyncCliRunner
         // document, written after the import finishes, so a script that waited for the port there
         // would wait forever; stderr is the progress channel and always carries it.
         _err.WriteLine("listening " + listener.Address + ":" + listener.Port.ToString(CultureInfo.InvariantCulture));
+
+        // W6-50: the budget is the whole wait for one peer, so which number a silent run is about to
+        // spend belongs next to the port. It goes to stderr, the progress channel, because in --json
+        // mode stdout must stay exactly one document - there the same number is the budgetMs field.
+        int budgetMilliseconds = invocation.BudgetMilliseconds ?? DefaultTransferBudgetMilliseconds;
+        TimeSpan budget = TimeSpan.FromMilliseconds(budgetMilliseconds);
+        if (!invocation.Json)
+        {
+            _err.WriteLine("budget: " + budgetMilliseconds.ToString(CultureInfo.InvariantCulture) + " ms");
+        }
+
         _err.Flush();
 
         // With authentication on the expected challenge stays null: the sender announces the nonce,
@@ -882,7 +900,7 @@ public sealed class SyncCliRunner
         SourceSyncTransferResult received = await listener
             .ReceiveOnceAsync(
                 null,
-                TransferBudget,
+                budget,
                 CancellationToken.None,
                 options,
                 receipt,
@@ -915,7 +933,7 @@ public sealed class SyncCliRunner
             : null;
 
         TransferOutcome outcome = new(envelope.DeviceId, receiver.DeviceId, received.Bytes, received.FrameCount, preview, report, null, null, received.ReceiptWritten);
-        return WriteServeResult(invocation, listener.Port, listener.Address, listener.CertificateFingerprint, outcome);
+        return WriteServeResult(invocation, listener.Port, listener.Address, listener.CertificateFingerprint, budgetMilliseconds, outcome);
     }
 
     private async Task<int> RunTransferSendAsync(CliInvocation invocation)
@@ -1531,7 +1549,7 @@ public sealed class SyncCliRunner
         return (preview.Gate.AppliedCount, requiresApproval, unsupported, ignored, preview.Gate.WithheldCount);
     }
 
-    private int WriteServeResult(CliInvocation invocation, int port, string address, string? certificateFingerprint, TransferOutcome outcome)
+    private int WriteServeResult(CliInvocation invocation, int port, string address, string? certificateFingerprint, int budgetMilliseconds, TransferOutcome outcome)
     {
         if (invocation.Json)
         {
@@ -1545,6 +1563,9 @@ public sealed class SyncCliRunner
                 writer.WriteString("address", address);
                 writer.WriteNumber("port", port);
                 writer.WriteBoolean("once", true);
+                // W6-50: additive, so a reader that does not know the key sees the same document it
+                // always did. It is the number that produced (or ended) the wait, never a secret.
+                writer.WriteNumber("budgetMs", budgetMilliseconds);
                 writer.WriteBoolean("applied", outcome.Report is not null);
                 WriteAuthFieldsJson(writer, invocation);
                 WriteTlsFieldsJson(writer, invocation, certificateFingerprint);
