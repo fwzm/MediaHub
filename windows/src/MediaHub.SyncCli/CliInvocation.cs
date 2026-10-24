@@ -119,6 +119,19 @@ public sealed record CliInvocation
     /// </summary>
     public string? SecretEnv { get; init; }
 
+    /// <summary>
+    /// <c>--tls</c> (the three socket verbs only): wrap the frames in TLS 1.3 with a self-signed
+    /// certificate (W6-26). Off by default, so the bytes on the wire stay exactly W6-16's.
+    /// </summary>
+    public bool Tls { get; init; }
+
+    /// <summary>
+    /// <c>--expect-fingerprint</c> (with <c>--tls</c>): the peer certificate's SHA-256 public-key
+    /// fingerprint, sixty-four hex characters. Public data, so it is printed and logged freely — but
+    /// a peer that cannot produce it is refused before a single frame is read.
+    /// </summary>
+    public string? ExpectFingerprint { get; init; }
+
     /// <summary><c>--apply</c>: really write. Without it <c>import</c> is a preview.</summary>
     public bool Apply { get; init; }
 

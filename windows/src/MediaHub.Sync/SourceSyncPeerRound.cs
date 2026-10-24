@@ -233,6 +233,7 @@ public sealed class SourceSyncPeerRound
     /// <param name="timeout">How long the peer gets, defaulting to 15 seconds.</param>
     /// <param name="cancellationToken">Cancels the transfer.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
+    /// <param name="tls">The optional TLS pin; null or off keeps the W6-16 plaintext path.</param>
     public async Task<SourceSyncPeerRoundResult> SendAsync(
         SourceSyncEnvelope envelope,
         string? address,
@@ -240,7 +241,8 @@ public sealed class SourceSyncPeerRound
         string? challenge = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncTlsOptions? tls = null)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
@@ -258,7 +260,7 @@ public sealed class SourceSyncPeerRound
             };
         }
 
-        return await SendPayloadAsync(payload, address, port, challenge, timeout, cancellationToken, options)
+        return await SendPayloadAsync(payload, address, port, challenge, timeout, cancellationToken, options, tls)
             .ConfigureAwait(false);
     }
 
@@ -274,6 +276,7 @@ public sealed class SourceSyncPeerRound
     /// <param name="timeout">How long the peer gets, defaulting to 15 seconds.</param>
     /// <param name="cancellationToken">Cancels the transfer.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
+    /// <param name="tls">The optional TLS pin; null or off keeps the W6-16 plaintext path.</param>
     public async Task<SourceSyncPeerRoundResult> SendPayloadAsync(
         ReadOnlyMemory<byte> payload,
         string? address,
@@ -281,10 +284,11 @@ public sealed class SourceSyncPeerRound
         string? challenge = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncTlsOptions? tls = null)
     {
         SourceSyncTransferResult sent = await SourceSyncTransferClient
-            .SendAsync(address, port, payload, challenge, timeout, cancellationToken, options)
+            .SendAsync(address, port, payload, challenge, timeout, cancellationToken, options, tls)
             .ConfigureAwait(false);
 
         SourceSyncPeerRoundResult result = sent.Succeeded
@@ -305,6 +309,7 @@ public sealed class SourceSyncPeerRound
     /// <param name="timeout">How long the peer gets, defaulting to 15 seconds.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
+    /// <param name="tls">True to accept a TLS 1.3 peer on this listener instead of plaintext frames.</param>
     public async Task<SourceSyncPeerRoundResult> ReceiveOnceAsync(
         SourceSyncRecordWriter writer,
         string? address = null,
@@ -313,11 +318,12 @@ public sealed class SourceSyncPeerRound
         IReadOnlyList<string>? allowedIds = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncTlsOptions? tls = null)
     {
         ArgumentNullException.ThrowIfNull(writer);
 
-        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(address, port);
+        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(address, port, tls is { Enabled: true });
         if (!start.Started || start.Listener is null)
         {
             return SourceSyncPeerRoundResult
@@ -382,6 +388,7 @@ public sealed class SourceSyncPeerRound
     /// <param name="options">The optional authentication settings, applied to both ends; null keeps the W6-16
     /// byte stream exactly. When authentication is on, <paramref name="challenge"/> is the nonce and both sides
     /// must be given the same value.</param>
+    /// <param name="tls">The optional TLS pin, applied to both ends; null or off keeps the W6-16 plaintext path.</param>
     public static async Task<SourceSyncPeerRoundResult> ExchangeAsync(
         SourceSyncPeerRound sender,
         SourceSyncPeerRound receiver,
@@ -391,7 +398,8 @@ public sealed class SourceSyncPeerRound
         string? challenge = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncTlsOptions? tls = null)
     {
         ArgumentNullException.ThrowIfNull(sender);
 
@@ -405,7 +413,8 @@ public sealed class SourceSyncPeerRound
                 challenge,
                 timeout,
                 cancellationToken,
-                options)
+                options,
+                tls)
             .ConfigureAwait(false);
     }
 
@@ -421,6 +430,7 @@ public sealed class SourceSyncPeerRound
     /// <param name="options">The optional authentication settings, applied to both ends; null keeps the W6-16
     /// byte stream exactly. When authentication is on, <paramref name="challenge"/> is the nonce and both sides
     /// must be given the same value.</param>
+    /// <param name="tls">The optional TLS pin, applied to both ends; null or off keeps the W6-16 plaintext path.</param>
     public static async Task<SourceSyncPeerRoundResult> ExchangePayloadAsync(
         SourceSyncPeerRound sender,
         SourceSyncPeerRound receiver,
@@ -430,13 +440,14 @@ public sealed class SourceSyncPeerRound
         string? challenge = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncTlsOptions? tls = null)
     {
         ArgumentNullException.ThrowIfNull(sender);
         ArgumentNullException.ThrowIfNull(receiver);
         ArgumentNullException.ThrowIfNull(receiverWriter);
 
-        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start();
+        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(tls: tls is { Enabled: true });
         if (!start.Started || start.Listener is null)
         {
             return SourceSyncPeerRoundResult
@@ -473,7 +484,8 @@ public sealed class SourceSyncPeerRound
                 challenge,
                 timeout,
                 cancellationToken,
-                options)
+                options,
+                tls)
             .ConfigureAwait(false);
 
         if (!sent.Succeeded)

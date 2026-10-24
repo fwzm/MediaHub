@@ -180,12 +180,13 @@ public sealed class SourceSyncInbox
         IReadOnlyList<string>? allowedIds = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncTlsOptions? tls = null)
     {
         ArgumentNullException.ThrowIfNull(writer);
 
         SourceSyncTransferResult transfer = await SourceSyncTransferClient
-            .ReceiveAsync(address, port, expectedChallenge, timeout, cancellationToken, options)
+            .ReceiveAsync(address, port, expectedChallenge, timeout, cancellationToken, options, tls)
             .ConfigureAwait(false);
         if (!transfer.Succeeded)
         {

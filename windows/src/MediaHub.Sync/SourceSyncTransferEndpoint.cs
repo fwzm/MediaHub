@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -142,12 +143,14 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
     public static TimeSpan DefaultTimeout { get; } = TimeSpan.FromSeconds(15);
 
     private readonly TcpListener _listener;
+    private readonly SourceSyncTlsIdentity? _identity;
     private int _disposed;
 
-    private SourceSyncTransferListener(TcpListener listener, IPEndPoint endpoint)
+    private SourceSyncTransferListener(TcpListener listener, IPEndPoint endpoint, SourceSyncTlsIdentity? identity)
     {
         _listener = listener;
         LocalEndPoint = endpoint;
+        _identity = identity;
     }
 
     /// <summary>The endpoint actually bound; the port is real even when 0 was requested.</summary>
@@ -159,15 +162,39 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
     /// <summary>The bound port.</summary>
     public int Port => LocalEndPoint.Port;
 
+    /// <summary>Whether this listener speaks TLS (W6-26); false means the W6-16 plaintext path.</summary>
+    public bool TlsEnabled => _identity is not null;
+
+    /// <summary>
+    /// The fingerprint of the certificate this listener presents, or null on a plaintext listener. It is public:
+    /// a peer that does not pin it cannot tell this listener from any other process on the machine.
+    /// </summary>
+    public string? CertificateFingerprint => _identity?.Fingerprint;
+
     /// <summary>Starts a loopback listener, refusing any other address before a socket exists.</summary>
     /// <param name="address">Loopback address; blank means <see cref="SourceSyncTransferAddress.DefaultAddress"/>.</param>
     /// <param name="port">0 to let the OS pick a free port.</param>
-    public static SourceSyncTransferStartResult Start(string? address = SourceSyncTransferAddress.DefaultAddress, int port = 0)
+    /// <param name="tls">
+    /// True to wrap every accepted connection in TLS 1.3 with a fresh ephemeral certificate; false keeps the
+    /// W6-16 plaintext path byte for byte.
+    /// </param>
+    public static SourceSyncTransferStartResult Start(
+        string? address = SourceSyncTransferAddress.DefaultAddress,
+        int port = 0,
+        bool tls = false)
     {
         if (!SourceSyncTransferAddress.TryResolveLoopback(address, port, out IPEndPoint? endpoint, out string? detail)
             || endpoint is null)
         {
             return SourceSyncTransferStartResult.Failed(SourceSyncTransferReasons.NotLoopback, detail);
+        }
+
+        // The certificate is created before the socket exists: a listener that cannot present a key must fail
+        // here rather than accept a connection it can never finish.
+        SourceSyncTlsIdentity? identity = null;
+        if (tls && !SourceSyncTlsIdentity.TryCreate(out identity, out string? tlsError))
+        {
+            return SourceSyncTransferStartResult.Failed(SourceSyncTlsReasons.CertificateUnavailable, tlsError);
         }
 
         TcpListener? listener = null;
@@ -176,16 +203,18 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
             listener = new TcpListener(endpoint);
             listener.Start();
             return SourceSyncTransferStartResult.Ok(
-                new SourceSyncTransferListener(listener, (IPEndPoint)listener.LocalEndpoint));
+                new SourceSyncTransferListener(listener, (IPEndPoint)listener.LocalEndpoint, identity));
         }
         catch (SocketException error)
         {
             listener?.Stop();
+            identity?.Dispose();
             return SourceSyncTransferStartResult.Failed(SourceSyncTransferReasons.ListenerFailed, error.Message);
         }
         catch (ObjectDisposedException error)
         {
             listener?.Stop();
+            identity?.Dispose();
             return SourceSyncTransferStartResult.Failed(SourceSyncTransferReasons.ListenerFailed, error.Message);
         }
     }
@@ -210,7 +239,41 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
         {
             client = await _listener.AcceptTcpClientAsync(cts.Token).ConfigureAwait(false);
             using NetworkStream stream = client.GetStream();
-            return await SourceSyncTransfer.ReceiveAsync(stream, expectedChallenge, cts.Token, options).ConfigureAwait(false);
+
+            if (_identity is not null)
+            {
+                // TLS on: the frames are unchanged, they just travel inside TLS records.
+                SourceSyncTlsHandshakeResult handshake = await SourceSyncTlsHandshake
+                    .AuthenticateServerAsync(stream, _identity.Certificate, null, budget, cts.Token)
+                    .ConfigureAwait(false);
+                if (!handshake.Succeeded || handshake.Stream is null)
+                {
+                    return SourceSyncTransferResult.Failed(
+                        handshake.Reason ?? SourceSyncTlsReasons.HandshakeFailed,
+                        handshake.Detail);
+                }
+
+                try
+                {
+                    return await SourceSyncTransfer
+                        .ReceiveAsync(handshake.Stream, expectedChallenge, cts.Token, options)
+                        .ConfigureAwait(false);
+                }
+                finally
+                {
+                    await SourceSyncTlsHandshake.CloseQuietlyAsync(handshake.Stream, stream).ConfigureAwait(false);
+                }
+            }
+
+            // Plaintext: a peer that is actually a TLS client is named as such instead of looking like a frame
+            // whose length prefix is nonsense. Every other peer is read exactly as before (the probe is replayed).
+            SourceSyncTlsProbeResult probe = await SourceSyncTlsProbe.ReadAsync(stream, cts.Token).ConfigureAwait(false);
+            if (!probe.Accepted || probe.Stream is null)
+            {
+                return SourceSyncTransferResult.Failed(probe.Reason ?? SourceSyncTlsReasons.NotEnabled, probe.Detail);
+            }
+
+            return await SourceSyncTransfer.ReceiveAsync(probe.Stream, expectedChallenge, cts.Token, options).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -252,6 +315,31 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
         {
             client = await _listener.AcceptTcpClientAsync(cts.Token).ConfigureAwait(false);
             using NetworkStream stream = client.GetStream();
+
+            if (_identity is not null)
+            {
+                SourceSyncTlsHandshakeResult handshake = await SourceSyncTlsHandshake
+                    .AuthenticateServerAsync(stream, _identity.Certificate, null, budget, cts.Token)
+                    .ConfigureAwait(false);
+                if (!handshake.Succeeded || handshake.Stream is null)
+                {
+                    return SourceSyncTransferResult.Failed(
+                        handshake.Reason ?? SourceSyncTlsReasons.HandshakeFailed,
+                        handshake.Detail);
+                }
+
+                try
+                {
+                    return await SourceSyncTransfer
+                        .SendAsync(handshake.Stream, envelope, challenge, cts.Token, options)
+                        .ConfigureAwait(false);
+                }
+                finally
+                {
+                    await SourceSyncTlsHandshake.CloseQuietlyAsync(handshake.Stream, stream).ConfigureAwait(false);
+                }
+            }
+
             return await SourceSyncTransfer.SendAsync(stream, envelope, challenge, cts.Token, options).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -285,6 +373,9 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
             {
                 // Stopping a listener that never accepted is not an error the caller can act on.
             }
+
+            // The ephemeral key lives exactly as long as the listener that presents it.
+            _identity?.Dispose();
         }
 
         return ValueTask.CompletedTask;
@@ -309,6 +400,10 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
 /// <summary>The dialling half of a loopback transfer.</summary>
 public static class SourceSyncTransferClient
 {
+    // A peer that closes the envelope properly closes the connection within milliseconds; the budget only stops a
+    // peer that keeps the connection open from holding the dialling side for the whole transfer budget.
+    private static readonly TimeSpan PeerCloseBudget = TimeSpan.FromMilliseconds(1500);
+
     /// <summary>Connects to a loopback listener and sends one envelope.</summary>
     /// <param name="address">The loopback address to dial; null means <see cref="SourceSyncTransferAddress.DefaultAddress"/>.</param>
     /// <param name="port">The listener's port.</param>
@@ -317,6 +412,7 @@ public static class SourceSyncTransferClient
     /// <param name="timeout">How long the transfer gets, defaulting to <see cref="SourceSyncTransferListener.DefaultTimeout"/>.</param>
     /// <param name="cancellationToken">Cancels the transfer.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
+    /// <param name="tls">The optional TLS pin; null or off keeps the W6-16 plaintext path.</param>
     public static async Task<SourceSyncTransferResult> SendAsync(
         string? address,
         int port,
@@ -324,14 +420,17 @@ public static class SourceSyncTransferClient
         string? challenge = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncTlsOptions? tls = null)
     {
         return await RunAsync(
             address,
             port,
             (stream, token) => SourceSyncTransfer.SendAsync(stream, envelope, challenge, token, options),
             timeout,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            tls,
+            probePlaintext: false).ConfigureAwait(false);
     }
 
     /// <summary>Connects to a loopback listener and reads one envelope.</summary>
@@ -341,28 +440,54 @@ public static class SourceSyncTransferClient
     /// <param name="timeout">How long the transfer gets, defaulting to <see cref="SourceSyncTransferListener.DefaultTimeout"/>.</param>
     /// <param name="cancellationToken">Cancels the transfer.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
+    /// <param name="tls">The optional TLS pin; null or off keeps the W6-16 plaintext path.</param>
     public static async Task<SourceSyncTransferResult> ReceiveAsync(
         string? address,
         int port,
         string? expectedChallenge = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncTlsOptions? tls = null)
     {
         return await RunAsync(
             address,
             port,
             (stream, token) => SourceSyncTransfer.ReceiveAsync(stream, expectedChallenge, token, options),
             timeout,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            tls,
+            probePlaintext: true).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads until the peer sends its close_notify, so the close below is graceful.</summary>
+    /// <param name="stream">The encrypted stream; nothing is expected to arrive on it any more.</param>
+    private static async Task WaitForPeerCloseAsync(SslStream stream)
+    {
+        try
+        {
+            using CancellationTokenSource cts = new(PeerCloseBudget);
+            byte[] scratch = new byte[64];
+            while (await stream.ReadAsync(scratch, cts.Token).ConfigureAwait(false) > 0)
+            {
+                // Post-handshake records (TLS 1.3 session tickets) are consumed here instead of at close time.
+            }
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException
+            or InvalidOperationException or OperationCanceledException or NotSupportedException)
+        {
+            // A peer that is already gone has nothing left to read; the close below still happens.
+        }
     }
 
     private static async Task<SourceSyncTransferResult> RunAsync(
         string? address,
         int port,
-        Func<NetworkStream, CancellationToken, Task<SourceSyncTransferResult>> body,
+        Func<Stream, CancellationToken, Task<SourceSyncTransferResult>> body,
         TimeSpan? timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SourceSyncTlsOptions? tls = null,
+        bool probePlaintext = false)
     {
         if (!SourceSyncTransferAddress.TryResolveLoopback(address, port, out IPEndPoint? endpoint, out string? detail)
             || endpoint is null)
@@ -390,6 +515,52 @@ public static class SourceSyncTransferClient
         {
             await client.ConnectAsync(endpoint, cts.Token).ConfigureAwait(false);
             using NetworkStream stream = client.GetStream();
+
+            if (tls is { Enabled: true })
+            {
+                SourceSyncTlsHandshakeResult handshake = await SourceSyncTlsHandshake
+                    .AuthenticateClientAsync(stream, tls.ExpectedFingerprint, budget, cts.Token)
+                    .ConfigureAwait(false);
+                if (!handshake.Succeeded || handshake.Stream is null)
+                {
+                    return SourceSyncTransferResult.Failed(
+                        handshake.Reason ?? SourceSyncTlsReasons.HandshakeFailed,
+                        handshake.Detail);
+                }
+
+                try
+                {
+                    SourceSyncTransferResult result = await body(handshake.Stream, cts.Token).ConfigureAwait(false);
+                    if (result.Succeeded)
+                    {
+                        // The receiver closes first. Waiting for its close_notify here is what keeps the close below
+                        // graceful: a TLS 1.3 server sends its session tickets right after the handshake, and closing a
+                        // socket that still holds unread inbound records is an abortive close - the peer sees a reset
+                        // and the records it had not read yet are thrown away.
+                        await WaitForPeerCloseAsync(handshake.Stream).ConfigureAwait(false);
+                    }
+
+                    return result;
+                }
+                finally
+                {
+                    await SourceSyncTlsHandshake.CloseQuietlyAsync(handshake.Stream, stream).ConfigureAwait(false);
+                }
+            }
+
+            if (probePlaintext)
+            {
+                // Reading side only: a TLS listener answers our plaintext frames by not answering at all, and the
+                // probe turns "the bytes are not a frame" into the reason that names it.
+                SourceSyncTlsProbeResult probe = await SourceSyncTlsProbe.ReadAsync(stream, cts.Token).ConfigureAwait(false);
+                if (!probe.Accepted || probe.Stream is null)
+                {
+                    return SourceSyncTransferResult.Failed(probe.Reason ?? SourceSyncTlsReasons.NotEnabled, probe.Detail);
+                }
+
+                return await body(probe.Stream, cts.Token).ConfigureAwait(false);
+            }
+
             return await body(stream, cts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)

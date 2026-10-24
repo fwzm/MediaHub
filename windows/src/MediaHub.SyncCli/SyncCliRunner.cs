@@ -845,7 +845,8 @@ public sealed class SyncCliRunner
 
         SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(
             SourceSyncTransferAddress.DefaultAddress,
-            invocation.Port ?? 0);
+            invocation.Port ?? 0,
+            invocation.Tls);
         SourceSyncTransferListener? bound = start.Listener;
         if (!start.Started || bound is null)
         {
@@ -861,6 +862,10 @@ public sealed class SyncCliRunner
         {
             return storeExit;
         }
+
+        // With TLS on, the listener's own fingerprint is the only thing a dialling peer can pin, so it
+        // is announced before the port. It is a public key digest: no certificate, no secret.
+        WriteCertificateFingerprint(invocation, listener.CertificateFingerprint);
 
         // The port is announced before anything is accepted. With --json stdout carries exactly one
         // document, written after the import finishes, so a script that waited for the port there
@@ -901,7 +906,7 @@ public sealed class SyncCliRunner
             : null;
 
         TransferOutcome outcome = new(envelope.DeviceId, receiver.DeviceId, received.Bytes, received.FrameCount, preview, report, null, null);
-        return WriteServeResult(invocation, listener.Port, listener.Address, outcome);
+        return WriteServeResult(invocation, listener.Port, listener.Address, listener.CertificateFingerprint, outcome);
     }
 
     private async Task<int> RunTransferSendAsync(CliInvocation invocation)
@@ -933,8 +938,13 @@ public sealed class SyncCliRunner
         SourceSyncTransferOptions options = secret is null
             ? SourceSyncTransferOptions.Off
             : SourceSyncTransferOptions.WithSecret(secret, deviceId: sender.DeviceId);
+        // W6-26: the dialling side is the one that has to know who it is talking to, so --tls here
+        // always carries a pin (the parser refuses --tls on 'transfer send' without one).
+        SourceSyncTlsOptions tls = invocation.Tls
+            ? SourceSyncTlsOptions.Pinned(invocation.ExpectFingerprint)
+            : SourceSyncTlsOptions.Off;
         SourceSyncPeerRoundResult sent = await sender
-            .SendAsync(envelope, host, port, challenge, TransferBudget, CancellationToken.None, options)
+            .SendAsync(envelope, host, port, challenge, TransferBudget, CancellationToken.None, options, tls)
             .ConfigureAwait(false);
         if (!sent.Succeeded)
         {
@@ -992,7 +1002,7 @@ public sealed class SyncCliRunner
         SourceSyncTransferOptions optionsAB = secret is null
             ? SourceSyncTransferOptions.Off
             : SourceSyncTransferOptions.WithSecret(secret, deviceId: deviceB);
-        TransferOutcome first = await TransferOnceAsync(senderA, receiverB, TransferWriter(sourcesB), apply, optionsAB).ConfigureAwait(false);
+        TransferOutcome first = await TransferOnceAsync(senderA, receiverB, TransferWriter(sourcesB), apply, optionsAB, invocation.Tls).ConfigureAwait(false);
         if (!first.Succeeded)
         {
             return Fail(invocation, CliExitCode.InputProblem, first.Reason ?? SourceSyncTransferReasons.IoFailed,
@@ -1004,7 +1014,7 @@ public sealed class SyncCliRunner
         SourceSyncTransferOptions optionsBA = secret is null
             ? SourceSyncTransferOptions.Off
             : SourceSyncTransferOptions.WithSecret(secret, deviceId: deviceA);
-        TransferOutcome second = await TransferOnceAsync(senderB, receiverA, TransferWriter(sourcesA), apply, optionsBA).ConfigureAwait(false);
+        TransferOutcome second = await TransferOnceAsync(senderB, receiverA, TransferWriter(sourcesA), apply, optionsBA, invocation.Tls).ConfigureAwait(false);
         if (!second.Succeeded)
         {
             return Fail(invocation, CliExitCode.InputProblem, second.Reason ?? SourceSyncTransferReasons.IoFailed,
@@ -1035,9 +1045,10 @@ public sealed class SyncCliRunner
         SourceSyncPeerRound receiver,
         SourceSyncRecordWriter writer,
         bool apply,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        bool tls = false)
     {
-        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(SourceSyncTransferAddress.DefaultAddress, 0);
+        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(SourceSyncTransferAddress.DefaultAddress, 0, tls);
         SourceSyncTransferListener? bound = start.Listener;
         if (!start.Started || bound is null)
         {
@@ -1052,10 +1063,17 @@ public sealed class SyncCliRunner
         // One fresh nonce per direction; the receiver learns it from the challenge frame and checks
         // the tag against it, so the nonce never has to be agreed on out of band.
         string? challenge = options is { Authenticate: true } ? SourceSyncTransferAuthenticator.CreateNonce() : null;
+
+        // The listener was created a line above, so its fingerprint is knowable in-process: a
+        // roundtrip pins it automatically instead of asking the operator to copy a value between two
+        // halves of one command.
+        SourceSyncTlsOptions? pin = tls
+            ? SourceSyncTlsOptions.Pinned(bound.CertificateFingerprint)
+            : null;
         using CancellationTokenSource abort = new();
         Task<SourceSyncTransferResult> receiving = listener.ReceiveOnceAsync(null, TransferBudget, abort.Token, options);
         SourceSyncPeerRoundResult sent = await sender
-            .SendPayloadAsync(payload, SourceSyncTransferAddress.DefaultAddress, listener.Port, challenge, TransferBudget, CancellationToken.None, options)
+            .SendPayloadAsync(payload, SourceSyncTransferAddress.DefaultAddress, listener.Port, challenge, TransferBudget, CancellationToken.None, options, pin)
             .ConfigureAwait(false);
         if (!sent.Succeeded)
         {
@@ -1144,6 +1162,76 @@ public sealed class SyncCliRunner
             _out.WriteLine("authenticated: yes (secret read from " + invocation.SecretEnv + ")");
         }
     }
+
+    /// <summary>
+    /// W6-26: whether this run wrapped the frames in TLS, which pin the operator gave, and (when this
+    /// side is the one that created a certificate) its public-key fingerprint. All three are public:
+    /// a fingerprint is a digest of a public key, and the private key never leaves the process.
+    /// </summary>
+    private static void WriteTlsFieldsJson(Utf8JsonWriter writer, CliInvocation invocation, string? certificateFingerprint = null)
+    {
+        writer.WriteBoolean("tls", invocation.Tls);
+        string? pin = NormalizeFingerprint(invocation.ExpectFingerprint);
+        if (pin is null)
+        {
+            writer.WriteNull("expectFingerprint");
+        }
+        else
+        {
+            writer.WriteString("expectFingerprint", pin);
+        }
+
+        if (certificateFingerprint is null)
+        {
+            writer.WriteNull("certificateFingerprint");
+        }
+        else
+        {
+            writer.WriteString("certificateFingerprint", certificateFingerprint);
+        }
+    }
+
+    /// <summary>The text-mode counterpart of <see cref="WriteTlsFieldsJson"/>: no secret, only the pin.</summary>
+    private void WriteTlsText(CliInvocation invocation)
+    {
+        if (!invocation.Tls)
+        {
+            return;
+        }
+
+        string? pin = NormalizeFingerprint(invocation.ExpectFingerprint);
+        _out.WriteLine(pin is null
+            ? "tls: yes (TLS 1.3, ephemeral certificate)"
+            : "tls: yes (TLS 1.3, certificate pinned to " + pin + ")");
+    }
+
+    /// <summary>
+    /// Prints the listening side's own fingerprint before the port. stderr always carries it (a JSON
+    /// run keeps stdout to one document, and a caller needs the pin *before* it can dial); text mode
+    /// also puts it on stdout where a human reads it.
+    /// </summary>
+    private void WriteCertificateFingerprint(CliInvocation invocation, string? fingerprint)
+    {
+        if (!invocation.Tls || fingerprint is null)
+        {
+            return;
+        }
+
+        string line = "certificate fingerprint: " + fingerprint;
+        _err.WriteLine(line);
+        _err.Flush();
+        if (!invocation.Json)
+        {
+            _out.WriteLine(line);
+            _out.Flush();
+        }
+    }
+
+    /// <summary>Lower-cases a pin so JSON and text can never disagree about its case.</summary>
+    private static string? NormalizeFingerprint(string? fingerprint) =>
+        fingerprint is not null && PairingFingerprint.TryParse(fingerprint, out PairingFingerprint parsed)
+            ? parsed.Hex
+            : fingerprint;
 
     private static async Task ObserveAsync(Task task)
     {
@@ -1294,7 +1382,7 @@ public sealed class SyncCliRunner
         return (preview.Gate.AppliedCount, requiresApproval, unsupported, ignored, preview.Gate.WithheldCount);
     }
 
-    private int WriteServeResult(CliInvocation invocation, int port, string address, TransferOutcome outcome)
+    private int WriteServeResult(CliInvocation invocation, int port, string address, string? certificateFingerprint, TransferOutcome outcome)
     {
         if (invocation.Json)
         {
@@ -1310,6 +1398,7 @@ public sealed class SyncCliRunner
                 writer.WriteBoolean("once", true);
                 writer.WriteBoolean("applied", outcome.Report is not null);
                 WriteAuthFieldsJson(writer, invocation);
+                WriteTlsFieldsJson(writer, invocation, certificateFingerprint);
                 WriteTransferFieldsJson(writer, outcome);
                 writer.WriteEndObject();
             }));
@@ -1318,6 +1407,7 @@ public sealed class SyncCliRunner
 
         _out.WriteLine("served one connection on " + address + ":" + port.ToString(CultureInfo.InvariantCulture));
         WriteAuthText(invocation);
+        WriteTlsText(invocation);
         WriteTransferText(outcome, invocation.Apply);
         return CliExitCode.Success;
     }
@@ -1342,6 +1432,9 @@ public sealed class SyncCliRunner
                 writer.WriteNumber("frames", sent.FrameCount);
                 writer.WriteString("idempotency", "the receiver decides: this snapshot applies once, and a second delivery of it is a no-change round");
                 WriteAuthFieldsJson(writer, invocation);
+                // The peer presented this certificate and the handshake checked it against the pin,
+                // so on the dialling side the pin *is* the fingerprint that was seen.
+                WriteTlsFieldsJson(writer, invocation, invocation.Tls ? NormalizeFingerprint(invocation.ExpectFingerprint) : null);
                 writer.WriteEndObject();
             }));
             return CliExitCode.Success;
@@ -1353,6 +1446,7 @@ public sealed class SyncCliRunner
             "  sources: " + envelope.Sources.Count.ToString(CultureInfo.InvariantCulture));
         _out.WriteLine("the receiver decides idempotency: this snapshot applies once; delivering it again is a no-change round.");
         WriteAuthText(invocation);
+        WriteTlsText(invocation);
         return CliExitCode.Success;
     }
 
@@ -1381,6 +1475,9 @@ public sealed class SyncCliRunner
                 writer.WriteBoolean("applied", invocation.Apply);
                 writer.WriteBoolean("secondRoundNoChange", second.NoChange);
                 WriteAuthFieldsJson(writer, invocation);
+                // Each direction pinned a freshly created ephemeral certificate, so there is no single
+                // fingerprint to report here: only the fact that TLS was on.
+                WriteTlsFieldsJson(writer, invocation);
                 writer.WriteStartArray("rounds");
                 foreach (TransferOutcome outcome in new[] { first, second })
                 {
@@ -1401,6 +1498,7 @@ public sealed class SyncCliRunner
         WriteTransferText(second, invocation.Apply);
         _out.WriteLine("second round noChange: " + (second.NoChange ? "true" : "false"));
         WriteAuthText(invocation);
+        WriteTlsText(invocation);
         return CliExitCode.Success;
     }
 

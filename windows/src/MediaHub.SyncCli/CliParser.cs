@@ -1,4 +1,5 @@
 using System.Globalization;
+using MediaHub.Sync;
 
 namespace MediaHub.SyncCli;
 
@@ -57,6 +58,12 @@ public static class CliParser
         "                     off by default, so the bytes stay exactly W6-16's\n" +
         "  --secret-env NAME  with --authenticate: read the secret from environment variable NAME\n" +
         "                     (the value is never an argument and is never printed)\n" +
+        "  --tls              transfer only: wrap the frames in TLS 1.3 with an ephemeral self-signed\n" +
+        "                     certificate (W6-26); off by default, so the bytes stay exactly W6-16's\n" +
+        "  --expect-fingerprint HEX\n" +
+        "                     with --tls on 'transfer send': pin the listener's SHA-256 public-key\n" +
+        "                     fingerprint (64 hex characters, either case) - 'transfer serve' prints\n" +
+        "                     its own as 'certificate fingerprint: ...', and roundtrip pins itself\n" +
         "\n" +
         "Global:\n" +
         "  --json       stdout carries exactly one JSON document; progress goes to stderr\n" +
@@ -74,9 +81,12 @@ public static class CliParser
     private static readonly string[] PairVerifyValueOptions = ["--link"];
     private static readonly string[] PairListValueOptions = ["--root"];
     private static readonly string[] PairForgetValueOptions = ["--root", "--device"];
-    private static readonly string[] TransferServeValueOptions = ["--root", "--device", "--port", "--secret-env"];
-    private static readonly string[] TransferSendValueOptions = ["--to", "--root", "--device", "--secret-env"];
-    private static readonly string[] TransferRoundtripValueOptions = ["--root", "--device-a", "--device-b", "--secret-env"];
+    private static readonly string[] TransferServeValueOptions =
+        ["--root", "--device", "--port", "--secret-env", "--expect-fingerprint"];
+    private static readonly string[] TransferSendValueOptions =
+        ["--to", "--root", "--device", "--secret-env", "--expect-fingerprint"];
+    private static readonly string[] TransferRoundtripValueOptions =
+        ["--root", "--device-a", "--device-b", "--secret-env", "--expect-fingerprint"];
 
     /// <summary>Parses a raw argument vector.</summary>
     public static CliParseResult Parse(IReadOnlyList<string>? args)
@@ -174,6 +184,7 @@ public static class CliParser
         bool apply = false;
         bool once = false;
         bool authenticate = false;
+        bool tls = false;
 
         for (int i = start; i < args.Count; i++)
         {
@@ -257,6 +268,24 @@ public static class CliParser
                 }
 
                 authenticate = true;
+                continue;
+            }
+
+            if (name == "--tls")
+            {
+                if (inlineValue is not null)
+                {
+                    return Error("flag-takes-no-value:" + name);
+                }
+
+                // TLS only makes sense where there is a socket and a peer certificate to pin.
+                if (command is not (SyncCliCommand.TransferServe or SyncCliCommand.TransferSend or
+                    SyncCliCommand.TransferRoundtrip))
+                {
+                    return Error("option-not-allowed-for-command:" + name + ":" + commandName);
+                }
+
+                tls = true;
                 continue;
             }
 
@@ -348,6 +377,7 @@ public static class CliParser
         }
 
         string? secretEnv = values.GetValueOrDefault("--secret-env");
+        string? expectFingerprint = values.GetValueOrDefault("--expect-fingerprint");
         if (command is SyncCliCommand.TransferServe or SyncCliCommand.TransferSend or SyncCliCommand.TransferRoundtrip)
         {
             // The secret itself never travels on the command line, so both halves of the pair are
@@ -362,6 +392,33 @@ public static class CliParser
             {
                 return Error("missing-required-option:--authenticate");
             }
+
+            if (!tls && expectFingerprint is not null)
+            {
+                return Error("missing-required-option:--tls");
+            }
+
+            // A pin is what makes TLS mean anything on the dialling side: an unpinned session accepts
+            // whatever certificate answered, which authenticates nothing. Only transfer send dials a
+            // listener it did not just create, so only it needs one: serve is the side presenting the
+            // certificate, and roundtrip pins the listener it bound a moment earlier.
+            if (tls && command == SyncCliCommand.TransferSend && expectFingerprint is null)
+            {
+                return Error("missing-required-option:--expect-fingerprint");
+            }
+
+            if (expectFingerprint is not null
+                && command is SyncCliCommand.TransferServe or SyncCliCommand.TransferRoundtrip)
+            {
+                return Error("option-not-allowed-for-command:--expect-fingerprint:" + commandName);
+            }
+        }
+
+        if (expectFingerprint is not null && !PairingFingerprint.TryParse(expectFingerprint, out _))
+        {
+            // A pin that cannot be parsed would silently never match, so it is refused as a usage
+            // error instead of surfacing later as an unexplained handshake failure.
+            return Error("invalid-fingerprint:" + expectFingerprint);
         }
 
         int? port = null;
@@ -412,6 +469,8 @@ public static class CliParser
                 Once = once,
                 Authenticate = authenticate,
                 SecretEnv = secretEnv,
+                Tls = tls,
+                ExpectFingerprint = expectFingerprint,
                 Apply = apply,
                 Json = json,
             },
@@ -427,7 +486,7 @@ public static class CliParser
         "--root" or "--out" or "--in" or "--passphrase" or "--secrets" or "--deletions" or
         "--device" or "--baseline" or "--id" or "--source" or "--link" or "--expect" or
         "--to" or "--port" or "--device-a" or "--device-b" or
-        "--authenticate" or "--secret-env" or
+        "--authenticate" or "--secret-env" or "--tls" or "--expect-fingerprint" or
         "--apply" or "--once" or "--json";
 
     private static CliParseResult Error(string code) => new() { Error = code };
