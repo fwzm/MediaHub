@@ -108,9 +108,11 @@ class HttpClientFactory(
                     // "a per hop cooldown fast fail is not retried either" 转红（已实测）。
                     if (e is RateLimitedException) throw e
                     val retriable = request.method in setOf("GET", "HEAD", "DELETE")
-                    if (attempt >= MAX_ATTEMPTS || !retriable) throw e
+                    if (chain.call().isCanceled() || attempt >= MAX_ATTEMPTS || !retriable) throw e
                     logger.w(LogTag.NETWORK, "请求失败，重试 ${attempt + 1}/$MAX_ATTEMPTS: ${request.method} ${Redactor.redact(request.url.toString())}", e)
                     Thread.sleep(RETRY_DELAY_MS)
+                    // Call.cancel() 不会中断 interceptor 的 Thread.sleep；睡眠后必须在重试前再检查。
+                    if (chain.call().isCanceled()) throw e
                 }
             }
         }

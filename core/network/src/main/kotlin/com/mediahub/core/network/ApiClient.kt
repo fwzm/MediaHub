@@ -95,7 +95,7 @@ class ApiClient(
                 if (!response.isSuccessful) {
                     logger.w(
                         LogTag.NETWORK,
-                        "API ${response.code} $method ${Redactor.redact(url)} body=${Redactor.redact(responseBody.take(500))}"
+                        "API ${response.code} $method ${Redactor.redact(url)} body=${Redactor.redact(responseBody).take(500)}"
                     )
                     throw ApiException(
                         statusCode = response.code,

@@ -697,3 +697,11 @@
 
 ### 已知限制
 - 沙箱（Linux aarch64）无法原生跑 aapt2，验证时启用 qemu 包装器（见 HANDOFF.md）。
+
+
+### 2026-10-24 — PR6 integration follow-up
+
+- Complete quoted/truncated sensitive value redaction and redact HTTP error bodies before limiting log length; retain modern logger/cause sanitation.
+- Cancelled retry backoff never starts a second attempt; keep existing cooldown behavior.
+- Reject unsupported filter types, restore working sort/filter after query failure, and restore one shared search query state.
+- Targeted RED:167 executed/14 failures (11 behavioral differences,3 legacy-format expectations); Emby compile failure separately retained. GREEN:204 tests/0 failures/errors/skips,177 tasks executed,forced rerun/no-cache. Historical acceptance above is unchanged; no new physical-device pass.

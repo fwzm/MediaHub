@@ -1,5 +1,6 @@
 package com.mediahub.feature.search
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.database.repository.ServerStore
@@ -21,7 +22,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.MutableStateFlow
+
+internal const val SEARCH_QUERY_KEY = "searchQuery"
 
 /**
  * 聚合搜索 ViewModel（Phase 1C-1）。
@@ -34,21 +36,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
  */
 @HiltViewModel
 class GlobalSearchViewModel @Inject constructor(
+    private val savedStateHandle: SavedStateHandle,
     private val serverStore: ServerStore,
     private val registry: MediaProviderRegistry,
     private val engine: GlobalSearchEngine,
     private val logger: Logger,
 ) : ViewModel() {
 
-    private val queryFlow = MutableStateFlow("")
+    /** 输入框与正式搜索共用一个可恢复的 source of truth，避免进程重建后 UI/VM 分裂。 */
+    val query: StateFlow<String> = savedStateHandle.getStateFlow(SEARCH_QUERY_KEY, "")
 
     /** UI 提交查询（原始输入，含空白）；去抖在下游统一做。 */
     fun onQueryChange(query: String) {
-        queryFlow.value = query
+        savedStateHandle[SEARCH_QUERY_KEY] = query
     }
 
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
-    val state: StateFlow<GlobalSearchState> = queryFlow
+    val state: StateFlow<GlobalSearchState> = query
         .debounce(DEBOUNCE_MS)
         .flatMapLatest { query ->
             flow {

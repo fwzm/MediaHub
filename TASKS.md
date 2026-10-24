@@ -481,3 +481,10 @@
 ## V0.2 / V0.3 / V1.0
 
 见 ROADMAP.md（SMB、云盘、聚合媒体库等）。
+
+
+### 2026-10-24 PR6 reconciliation
+- [x] Preserve original PR6 history with modern infrastructure; targeted seven-task gate204/0 after real RED.
+- [x] Preserve both native request-cancellation and interceptor-cancellation tests; remove one exact duplicate test method only.
+- [ ] Exact-head combined CI/full APK/lint and Windows interoperability gate.
+- [ ] Physical acceptance remains separate; device offline this round.
