@@ -138,6 +138,8 @@ private class FakeFactory(
 
     var authCalls = 0
 
+    var lastBudget: Int? = null
+
     override fun tlsAvailability(): SourceSyncListenTlsAvailability = availability
 
     override fun open(port: Int, tls: Boolean): SourceSyncListenerOpenResult = open(port, tls, false)
@@ -175,6 +177,20 @@ private class FakeFactory(
         authCalls++
         lastAuth = auth
         return open(port, tls, receipt, host, allowExplicitHost)
+    }
+
+    // W6-54：等待预算（毫秒）原样落到这里，供用例断言界面层有没有把数字传到。
+    override fun open(
+        port: Int,
+        tls: Boolean,
+        receipt: Boolean,
+        host: String?,
+        allowExplicitHost: Boolean,
+        auth: SourceSyncTransferOptions?,
+        budgetMillis: Int,
+    ): SourceSyncListenerOpenResult {
+        lastBudget = budgetMillis
+        return open(port, tls, receipt, host, allowExplicitHost, auth)
     }
 }
 
@@ -914,6 +930,85 @@ class SourceSyncListenerControllerTest {
         assertEquals("口令原文不得出现在 toString 里", false, text.contains("s3cret"))
         assertTrue("要如实说明打了码，实际 " + text, text.contains("secret=<redacted>"))
         assertTrue("其余字段照旧可读", text.contains("host=192.168.1.5") && text.contains("auth=true"))
+    }
+
+    // ------- W6-54 等待预算（毫秒）旋钮 -------
+
+    @Test
+    fun defaultFormPassesTheFifteenSecondBudgetAndCanSubmit() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession()))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+        val form = SourceSyncListenForm()
+
+        assertEquals("留空就是 15000 毫秒（与 Windows transfer serve 同值）", 15_000, form.budgetMillis)
+        assertTrue(form.canSubmit)
+        assertTrue(controller.start(form))
+
+        assertEquals(15_000, factory.lastBudget)
+    }
+
+    @Test
+    fun aTypedBudgetTravelsVerbatimToTheFactory() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession()))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+
+        assertTrue(controller.start(SourceSyncListenForm(budget = "30000")))
+
+        assertEquals(30_000, factory.lastBudget)
+        assertEquals("前后空白不该改变数字", 30_000, SourceSyncListenForm(budget = "  30000  ").budgetMillis)
+    }
+
+    @Test
+    fun theBudgetRangeEndsAreBothAccepted() = runTest {
+        val low = FakeFactory(opened = opened(FakeSession()))
+        assertTrue(SourceSyncListenerController(low) { _, _ -> }.start(SourceSyncListenForm(budget = "100")))
+        assertEquals(100, low.lastBudget)
+
+        val high = FakeFactory(opened = opened(FakeSession()))
+        assertTrue(SourceSyncListenerController(high) { _, _ -> }.start(SourceSyncListenForm(budget = "600000")))
+        assertEquals(600_000, high.lastBudget)
+    }
+
+    @Test
+    fun anOutOfRangeBudgetIsRefusedBeforeAnySocket() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession()))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+        val form = SourceSyncListenForm(budget = "99")
+
+        assertEquals("越界的预算连按钮都不该放行", false, form.canSubmit)
+        assertFalse(controller.start(form))
+
+        val state = controller.state.value
+        assertTrue("期待失败状态，实际 " + state, state is SourceSyncListenState.Failed)
+        state as SourceSyncListenState.Failed
+        assertEquals(SourceSyncListenerController.BUDGET_INVALID, state.code)
+        assertEquals(SourceSyncListenCopy.BUDGET_INVALID_HINT, state.detail)
+        assertNull(state.port)
+        assertEquals("预算非法时一个 socket 都不该开", 0, factory.openCalls)
+        assertFalse(controller.isListening)
+        assertEquals(
+            "失败：listen-budget-invalid（" + SourceSyncListenCopy.BUDGET_INVALID_HINT + "）",
+            SourceSyncListenCopy.lineOf(state),
+        )
+    }
+
+    @Test
+    fun aNonNumericBudgetIsRefusedAndStillShowsInTheFormToString() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession()))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+        val form = SourceSyncListenForm(budget = "12s", secret = "s3cret")
+
+        assertFalse(controller.start(form))
+
+        val state = controller.state.value
+        assertTrue("期待失败状态，实际 " + state, state is SourceSyncListenState.Failed)
+        assertEquals(SourceSyncListenerController.BUDGET_INVALID, (state as SourceSyncListenState.Failed).code)
+        assertEquals(0, factory.openCalls)
+        assertEquals("预算不是数字时不能当成 0 或缺省值", null, form.budgetMillis)
+
+        val text = form.toString()
+        assertTrue("预算原文照旧可读（它就是用户输入的数字）", text.contains("budget=12s"))
+        assertEquals("口令仍然打码", false, text.contains("s3cret"))
     }
 
     private suspend fun seededSession(): Seeded {

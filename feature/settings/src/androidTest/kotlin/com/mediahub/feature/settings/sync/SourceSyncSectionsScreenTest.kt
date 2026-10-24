@@ -251,6 +251,62 @@ class SourceSyncSectionsScreenTest {
         composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_SECRET).assertIsNotEnabled()
     }
 
+    // ------------------------------------------------- W6-54 等待预算（毫秒）旋钮
+
+    @Test
+    fun theListenCardOffersABudgetFieldWithItsRangeHint() {
+        render()
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_BUDGET).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+        // 范围与「一个框管两段等待」必须写在界面上，否则用户会把 15000 当成整场传输的总时长。
+        composeRule.onNodeWithText(SourceSyncListenCopy.BUDGET_LABEL).assertIsDisplayed()
+        composeRule.onNodeWithText(SourceSyncListenCopy.BUDGET_HINT).performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun theListenFormCarriesTheTypedBudgetVerbatim() {
+        var listened: SourceSyncListenForm? = null
+        render(onListenStart = { listened = it })
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_BUDGET).performScrollTo()
+            .performTextReplacement("30000")
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_START).performScrollTo()
+            .performClick()
+
+        val form = listened
+        assertNotNull("开始监听没把表单交出去", form)
+        // 界面只原样转交文本；毫秒解析与范围判定只有一处（SourceSyncListenForm.budgetMillis）。
+        assertEquals("30000", form!!.budget)
+        assertEquals(30_000, form.budgetMillis)
+    }
+
+    @Test
+    fun anOutOfRangeBudgetKeepsTheListenButtonDisabled() {
+        render()
+
+        val budget = composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_BUDGET).performScrollTo()
+        budget.performTextReplacement("99")
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_START).assertIsNotEnabled()
+
+        budget.performTextReplacement("12s")
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_START).assertIsNotEnabled()
+
+        // 留空等于缺省 15000 毫秒，按钮回到可点。
+        budget.performTextReplacement("")
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_START).assertIsEnabled()
+    }
+
+    @Test
+    fun whileListeningTheBudgetFieldIsLocked() {
+        render(listenState = SourceSyncListenState.Listening(port = 45678, tls = false))
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_BUDGET).performScrollTo()
+            .assertIsNotEnabled()
+    }
+
     // ------------------------------------------------------------------ 发送
 
     @Test

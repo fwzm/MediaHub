@@ -126,6 +126,9 @@ object SourceSyncImportTags {
     /** W6-53：对端口令输入框（按密码显示，只留在内存）。 */
     const val LISTEN_SECRET = "sync.listen.secret"
 
+    /** W6-54：等待预算（毫秒）输入框。 */
+    const val LISTEN_BUDGET = "sync.listen.budget"
+
     /** 收下后回一个裸 0x04（W6-40）：对端才能区分「接受」与「收完就断」。 */
     const val LISTEN_RECEIPT = "sync.listen.receipt"
 
@@ -868,6 +871,22 @@ private fun ListenSection(
             )
             Text(
                 SourceSyncListenCopy.AUTH_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = form.budget,
+                onValueChange = { form = form.copy(budget = it) },
+                label = { Text(SourceSyncListenCopy.BUDGET_LABEL) },
+                singleLine = true,
+                enabled = !listening && !receiving,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.LISTEN_BUDGET),
+            )
+            Text(
+                SourceSyncListenCopy.BUDGET_HINT,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

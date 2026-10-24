@@ -129,6 +129,12 @@ jobs:
           #     写完最后一帧后读对端直到 FIN，预算 2000 ms、最多排水 64 KiB，回执优先；Off 时不读一个字节）
           #   feature.settings.sync.SourceSyncSendLauncherTest —— 发送取消的 Job 记账薄壳（W6-49：取消回 Idle
           #     不产生失败码、释放单飞可立刻重发、没在发时 cancel 是 no-op、clear 后状态仍可用）
+          #   sync.SourceSyncReceiptTest —— 反向回执帧 0x04（W6-40：四码与 Windows 同名同序、回执只在信封解码成功后写、
+          #     没开回执的监听端一个字节都不发）
+          #   sync.SourceSyncHostAddressTest —— 监听卡绑定地址判定（W6-52：四类拒绝句、自己算 IPv4 字面量永不查 DNS、
+          #     只放行一个单播地址、建 socket 之前就拒）
+          #   feature.settings.sync.SourceSyncListenerControllerTest —— 监听卡控制器（W6-36 起；W6-52 地址、W6-53 对端
+          #     口令、W6-54 等待预算三段都在这里，界面本地码 listen-secret-missing / listen-budget-invalid 各有用例）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -163,6 +169,9 @@ jobs:
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferListenerTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncDeliveryTest \
             --required-suite com.mediahub.feature.settings.sync.SourceSyncSendLauncherTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncReceiptTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncHostAddressTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncListenerControllerTest \
             --require-complete-suites
 
       - name: Lint
