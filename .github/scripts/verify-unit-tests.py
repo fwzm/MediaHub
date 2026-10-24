@@ -23,6 +23,9 @@ spec.loader.exec_module(gate)
 # reports, so "silently vanished" is caught as well.
 ENVIRONMENT_GATED_SUITES = frozenset({
     "com.mediahub.core.common.sync.SourceSyncTlsInteropTest",
+    # W6-38: the reverse direction (Windows transfer send -> Android listener) needs the
+    # same out-of-band DLL, so it skips on a runner for exactly the same reason.
+    "com.mediahub.core.database.sync.SourceSyncListenerInteropTest",
 })
 
 
