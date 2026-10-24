@@ -45,6 +45,13 @@ sealed interface SourceSyncTransferImportOutcome {
          * 自己从 socket 字节里再捞一次。写入仍只由 apply 触发。
          */
         val envelopeJson: String? = null,
+        /**
+         * 本端是否真的给对端写回了 0x04 回执（W6-40）。
+         *
+         * 只有监听端这条路（[SourceSyncListenerImportService.receiveAndImport] 开了回执）才可能为 true；
+         * 拨号收帧的 W6-23 路径恒为 false。它只是"我确认了"，不改变写入判定。
+         */
+        val receiptWritten: Boolean = false,
     ) : SourceSyncTransferImportOutcome
 
     val isTransferFailure: Boolean get() = this is TransferFailed

@@ -1,5 +1,6 @@
 package com.mediahub.feature.settings.sync
 
+import com.mediahub.core.common.sync.SourceSyncReceiptOptions
 import com.mediahub.core.common.sync.SourceSyncTlsIdentity
 import com.mediahub.core.common.sync.SourceSyncTlsOptions
 import com.mediahub.core.common.sync.SourceSyncTlsReasons
@@ -45,6 +46,8 @@ sealed interface SourceSyncListenState {
         val port: Int,
         val deviceId: String?,
         val fileName: String,
+        /** 本端是否真的给对端写回了 0x04 回执（W6-40）；默认关回执时为 false。 */
+        val receiptWritten: Boolean = false,
     ) : SourceSyncListenState
 
     /** 帧层成功但载荷不是合法信封（码来自 SourceSyncCodec）。 */
@@ -96,6 +99,9 @@ object SourceSyncListenCopy {
     const val TLS_AVAILABLE_HINT: String =
         "TLS 已可用：开监听后把下面这行的指纹交给 Windows，发送时要带 --tls --expect-fingerprint。"
 
+    /** 回执写出去了才追加的一句（W6-40）：对端现在能区分「接受」与「收完就断」。 */
+    const val RECEIPT_WRITTEN_HINT: String = "已回执 0x04，对端能确认这封信封被收下了。"
+
     /** 一条状态行（Idle 没有状态行）。 */
     fun lineOf(state: SourceSyncListenState): String? = when (state) {
         SourceSyncListenState.Idle -> null
@@ -144,7 +150,8 @@ object SourceSyncListenCopy {
         } else {
             "已收下信封（设备：" + device + "）。"
         }
-        return head + RECEIVED_HINT
+        val receipt = if (state.receiptWritten) RECEIPT_WRITTEN_HINT else ""
+        return head + RECEIVED_HINT + receipt
     }
 }
 
@@ -158,6 +165,13 @@ object SourceSyncListenCopy {
 data class SourceSyncListenForm(
     val port: String = "",
     val tls: Boolean = false,
+    /**
+     * 收到一封能解码的信封后写一个 0x04 回执（W6-40），默认关。
+     *
+     * 关着时线上一个字节都不多写（与 W6-22 至今逐字节相同）；开着只影响「写不写回执」，
+     * 不影响写库——写入仍然只经预览与逐条允许。
+     */
+    val receipt: Boolean = false,
 ) {
 
     /** 留空给 0（系统分配）；非数字、越界一律 null。 */
@@ -224,6 +238,14 @@ interface SourceSyncListenerFactory {
 
     /** 同步开监听（绑 socket），由控制器的 IO 上下文调用。 */
     fun open(port: Int, tls: Boolean): SourceSyncListenerOpenResult
+
+    /**
+     * W6-40：带回执开关的开监听。
+     *
+     * 默认实现忽略回执、等价于 [open]：既有工厂（含测试替身）不必改一行；
+     * 支持回执的工厂覆盖这个方法即可。
+     */
+    fun open(port: Int, tls: Boolean, receipt: Boolean): SourceSyncListenerOpenResult = open(port, tls)
 }
 
 /**
@@ -290,7 +312,7 @@ class SourceSyncListenerController(
         try {
             if (session != null) return false
             val opened = try {
-                withContext(Dispatchers.IO) { factory.open(targetPort, form.tls) }
+                withContext(Dispatchers.IO) { factory.open(targetPort, form.tls, form.receipt) }
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (unexpected: Exception) {
@@ -399,6 +421,7 @@ class SourceSyncListenerController(
                     port = active.port,
                     deviceId = outcome.result.deviceId,
                     fileName = LISTEN_FILE_NAME,
+                    receiptWritten = outcome.receiptWritten,
                 )
             }
         }
@@ -449,7 +472,9 @@ class SourceSyncListenerImportFactory(
             SourceSyncListenTlsAvailability(false, SourceSyncListenCopy.TLS_UNAVAILABLE)
         }
 
-    override fun open(port: Int, tls: Boolean): SourceSyncListenerOpenResult {
+    override fun open(port: Int, tls: Boolean): SourceSyncListenerOpenResult = open(port, tls, receipt = false)
+
+    override fun open(port: Int, tls: Boolean, receipt: Boolean): SourceSyncListenerOpenResult {
         if (tls && !identity.isUsable) {
             return SourceSyncListenerOpenResult.Failed(
                 code = SourceSyncTlsReasons.CERTIFICATE_UNAVAILABLE,
@@ -467,13 +492,18 @@ class SourceSyncListenerImportFactory(
                 SourceSyncListenerOpenResult.Failed(opened.code, opened.detail)
 
             is SourceSyncListenerImportStart.Started ->
-                SourceSyncListenerOpenResult.Opened(ImportSession(opened.service))
+                SourceSyncListenerOpenResult.Opened(ImportSession(opened.service, receipt))
         }
     }
 
     private class ImportSession(
         private val service: SourceSyncListenerImportService,
+        receipt: Boolean,
     ) : SourceSyncListenerSession {
+
+        /** W6-40：回执开关在开监听时定下来，之后每次 receiveOnce 都用它。 */
+        private val receiptOptions: SourceSyncReceiptOptions =
+            SourceSyncReceiptOptions.writingOrOff(receipt)
 
         override val port: Int get() = service.port
 
@@ -481,7 +511,8 @@ class SourceSyncListenerImportFactory(
 
         override val certificateFingerprint: String? get() = service.certificateFingerprint
 
-        override suspend fun receiveOnce(): SourceSyncTransferImportOutcome = service.receiveAndImport()
+        override suspend fun receiveOnce(): SourceSyncTransferImportOutcome =
+            service.receiveAndImport(receipt = receiptOptions)
 
         override fun close() {
             service.close()

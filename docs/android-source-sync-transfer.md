@@ -389,10 +389,12 @@ gradlew.bat :core:common:testDebugUnitTest --console=plain
 
 ### 16.1 入口位置
 
-- 设置 → 数据同步 → 导入页（`SourceSyncImportScreen`）正文第一个引导文案之后、文件选择行之前，新增一张「从 Windows 接收」卡片：调用点是 `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportScreen.kt:192`（`ReceiveSection`），实现从 `:535` 开始。
-- 三个输入框 + 一个按钮 + 一行结果：host（默认 `127.0.0.1`，testTag `sync.receive.host`，`:568`）、port（数字键盘，默认空，`:579`）、挑战（可留空，`:589`）、按钮（`:596`）、结果行（`:623`）。testTag 常量集中在 `SourceSyncImportTags`（`:94`–`:105`）。
-- Route 在 `:116` 收集 `viewModel.receiveState`，`:137` 传进 `Screen`；`Screen` 的两个新参数带默认值（`:163`），既有调用点与 androidTest 不需要改。
-- ViewModel：`feature/settings/.../sync/SourceSyncImportViewModel.kt:57` 构造控制器（生产端口 `SourceSyncTransferReceivePort`），`:63` 暴露 `receiveState`，`:90` 的 `receive(form)` 把协程挂到 `viewModelScope`。
+- 设置 → 数据同步 → 导入页（`SourceSyncImportScreen`）**页面末尾**（结果卡与 `VerifyCredentialDialog` 之后、`Column` 收尾之前）新增一张「从 Windows 接收」卡片：调用点 `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportScreen.kt:389`（`ReceiveSection`），实现从 `:586` 开始；紧随其后的「接收（监听）」（W6-36）卡片调用点 `:390`–`:396`（`ListenSection` 定义 `:690`）。
+- **W6-41 的位置修订（2026-10-24）**：两张卡片原本插在正文引导文案之后、文件选择行之前（W6-27 / W6-36 的原始位置），把首屏的「选择文件 / 预览」行与阻塞卡挤出模拟器视口，使 `SourceSyncImportScreenTest` 的 6 例 instrumentation 首屏可见性断言在 CI 上真实变红（API 32 / API 36 两个 job 都红，不是 flaky）。W6-41 因此把两张卡片整体下移到页尾：**首屏保留原「选择文件 → 预览 → 应用」主流程，接收区块只是入口捷径**，往下滚一格就能看到。只改调用次序与注释，不动任何 testTag / 文案 / 状态机 / 签名。
+- **W6-41 的验证边界**：本机未跑 instrumentation（未起模拟器），只做到「`androidTest` 编译通过 + 首屏构成回到 W6-27 之前的形状」；那 6 例是否转绿由 CI 的 visual-instrumentation（API 32 / API 36）证明。逐例复核结论：6 例失败除「被挤出首屏」外**无第二因** —— `SourceSyncImportScreenTest` 全文不出现任何 `sync.receive.*` / `sync.listen.*` tag，也没有对新区块顺序或存在性的断言（其余用例都自带 `performScrollTo()`，因此不受影响）。
+- 三个输入框 + 一个按钮 + 一行结果：host（默认 `127.0.0.1`，testTag `sync.receive.host`，`:619`）、port（数字键盘，默认空，`:630`）、挑战（可留空，`:640`）、按钮（`:647`）、结果行（`:674`）。testTag 常量集中在 `SourceSyncImportTags` 的 W6-27 五枚（`:95`–`:106`）与 W6-36 九枚（`:111`–`:130`），均只下移未改名。
+- Route 在 `:141` 收集 `viewModel.receiveState`（`:142` 收集 `listenState`），`:163`–`:169` 传进 `Screen`；`Screen` 的接收/监听共 7 个新参数都带默认值（`:194`–`:204`），既有调用点与 androidTest 不需要改。
+- ViewModel：`feature/settings/.../sync/SourceSyncImportViewModel.kt:57` 构造控制器（生产端口 `SourceSyncTransferReceivePort`），`:63` 暴露 `receiveState`，`:110` 的 `receive(form)` 把协程挂到 `viewModelScope`。
 
 ### 16.2 状态机
 
@@ -845,11 +847,11 @@ EXIT=0
 
 | 层 | 文件 | 位置 |
 | --- | --- | --- |
-| 状态机 | `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncListenerController.kt` | 类 `:240`；六态 `:28`；文案与三行 `lineOf` / `codeOf` / `portLineOf` `:66` / `:100` / `:112` / `:128`；表单 `:158`；两个接口 `:204` / `:220`；生产实现 `SourceSyncListenerImportFactory` `:440` |
-| ViewModel | `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportViewModel.kt` | 控制器 `:72`、`listenState` `:78`、`listenTls` `:81`、`startListening` `:126`、`stopListening` `:131`、`awaitListenOnce` `:136`、`onCleared` 关监听 `:159` |
-| 界面 | `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportScreen.kt` | 调用点 `:233`、`ListenSection` 定义 `:686`、九枚 testTag `:111`–`:130`、Route 收集 `:142`、新参数带默认值 `:197` |
+| 状态机 | `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncListenerController.kt` | 类 `:262`；六态 `:29`；文案与三行 `lineOf` / `codeOf` / `portLineOf` `:69` / `:106` / `:118` / `:134`；表单 `:165`（回执字段 `:174`，默认关）；两个接口 `:218` / `:234`；生产实现 `SourceSyncListenerImportFactory` `:463`。以上行号按 W6-40 之后的当前文件（522 行）核对 —— W6-40 往状态与表单里加了回执字段，旧值整体下移 |
+| ViewModel | `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportViewModel.kt` | 控制器 `:72`、`listenState` `:78`、`listenTls` `:81`、`startListening` `:126`、`stopListening` `:131`、`awaitListenOnce` `:136`、`onCleared` 关监听 `:160` |
+| 界面 | `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportScreen.kt` | 调用点 `:390`（`ListenSection`）、定义 `:690`、九枚 testTag `:111`–`:130`、Route 收集 `:142`、新参数带默认值 `:197`（W6-41 把两张接收卡下移到页尾，行号已按当前文件更新，见 §16.1） |
 
-- 区块在导入页里紧跟在 W6-27 的「从 Windows 接收」之后：**按钮位置一样、方向相反**——拨号接收要填 host/port 主动去连对端；
+- 区块在导入页里紧跟在 W6-27 的「从 Windows 接收」之后，两者都在**整页末尾**（结果卡与 verify 区之后；W6-41 为此把它们从顶部下移，理由见 §16.1）：**按钮位置一样、方向相反**——拨号接收要填 host/port 主动去连对端；
   监听接收是自己先占一个端口，让 Windows 用 `transfer send` 拨进来。
 - 九枚 testTag：`sync.listen` / `sync.listen.port` / `sync.listen.tls` / `sync.listen.start` / `sync.listen.stop` / `sync.listen.receive` / `sync.listen.status` / `sync.listen.port-line` / `sync.listen.info`。
 - `SourceSyncImportScreen` 的新参数全部带默认值（`:197`），所以既有 UI 测试的调用点一行都不用改。
@@ -997,3 +999,234 @@ JUnit XML 亲数（`build/test-results/testDebugUnitTest/*.xml` 逐文件累加�
 4. 只在本机回环上验证；非回环、跨机、防火墙/NAT、手机与 PC 不同网段都没测（按设计也不允许非回环）。
 5. 没有 Compose UI 测试：九枚 testTag 已就位，只验证到「`SourceSyncImportScreen` 新参数有默认值、既有调用点不改」这一层。
 6. 连续接收只测到两轮，也没有长时间挂监听的资源压测（accept 超时循环、反复开关端口）。
+
+## 21. 反向跨端联调（W6-38）
+
+第 18 节验的是「Android 发、Windows 收」；本节把方向反过来：**Windows 的 `transfer send` 作为发送方，Android 的监听端（第 19 节）作为接收方**。两个方向都跑过一遍，跨端才不是单向自证。
+
+### 21.1 范围与边界
+
+- 被测对象是 `SourceSyncListenerImportService`（第 19 节）+ 真 Windows CLI 子进程。**不是假对端**：每一例都用 `ProcessBuilder` 起一个新进程 `dotnet <MediaHub.SyncCli.dll> transfer send ...`，读完 stdout 的单份 JSON 与 stderr，再比对 Android 侧**真实的** Room `servers` 表行。
+- Android 没有 Windows 的 `sync-sources.json` / `sync-baseline.json`；本端的等价外部证据是 Room `servers` 表行（`syncSourceId` / `syncRecordRevision` / `type` / `syncSourceTypeRaw` / 端点行），「基线」就是 `syncRecordRevision` 列。
+- 断言只认三类外部证据：①子进程退出码与 `--json` 字段（`sourceCount` / `bytes` / `frames` / `tls` / `certificateFingerprint` / `secretEnv` / `deliveryConfirmed`）；②Room 真实行；③监听端返回的稳定码。**任何一例都不只看退出码**——`transfer send` 的 exit 0 只代表字节写进了 socket（第 18 节已实测：对端读都不读直接 close，它照样 exit 0）。
+- 文件：`core/database/src/test/kotlin/com/mediahub/core/database/sync/SourceSyncListenerInteropTest.kt`（9 例；JUnit **4** + Robolectric `@Config(sdk=[34])`，与 W6-32 一样用 `org.junit.Assume` 门控——本仓 `core:database` 的测试依赖里没有 JUnit 5）。
+- TLS 夹具 `core/database/src/test/resources/tls/mediahub-sync-test.p12` 是从 `core/common/src/test/resources/tls/` **同源复制**的（2454 B，sha256 `8b7329f862f550a8cd33edb38e5d8b9740825a3ec898984a974581941af14bc9`，口令 `mediahub-tls-test`，SPKI pin `2bb12d139178ee3b0f219e409a89c99b51be165914e21189eeb039b2e4dd37ce`）：`core:database` 看不到别的模块的 test resources，故复制而非引用，**不自造证书**。
+
+### 21.2 运行方式与环境变量
+
+```text
+pwsh> $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
+pwsh> $env:ANDROID_HOME="$env:LOCALAPPDATA\Android\Sdk"
+pwsh> $env:MH_W638_SYNC_DLL="D:\mh-w6\windows\src\MediaHub.SyncCli\bin\Debug\net10.0\MediaHub.SyncCli.dll"
+pwsh> cmd /c "cd /d D:\deepseek_test\MediaHub_Win && gradlew.bat :core:database:testDebugUnitTest --console=plain --rerun-tasks --no-daemon -Pkotlin.compiler.execution.strategy=in-process > D:\mh-verify\w6-38-full.log 2>&1"
+```
+
+| 变量 | 必需 | 含义 |
+| --- | --- | --- |
+| `MH_W638_SYNC_DLL` | 是 | `MediaHub.SyncCli.dll` 的绝对路径；没有或不是普通文件 → 整类 9 例 `skipped`（见 21.4 第 3 次实跑） |
+| `MH_W638_DOTNET` | 否 | dotnet 可执行文件，缺省 `dotnet` |
+| `MH_W638_SECRET` | 认证例用 | 口令**只从子进程环境读**，不进命令行（与 CLI 的 `--secret-env` 同口径） |
+
+必须 `--no-daemon`：Gradle daemon 的环境是它启动那一刻的快照，测试 worker 继承不到新设的 `MH_*` 变量，会整套 skipped 而「绿」。
+
+### 21.3 九例
+
+| # | 用例 | Windows 对端命令 | 断言要点 |
+| --- | --- | --- | --- |
+| 1 | `plaintextSendIsImportedAndWritesTwoRows` | `transfer send --to 127.0.0.1:<port> --root <tmp> --device win-c --json` | exit 0；`sourceCount=2`、`frames=1`、`bytes` == 收到的信封 UTF-8 长度、`frames == chunkCount(bytes)`；Room 两行（emby：`EMBY` / raw `emby` / rev 3 / `alice` / 端点 `http://127.0.0.1:8097` 为 primary；jellyfin：rev 2）；`appliedCount=2` |
+| 2 | `tlsPinnedSendIsAcceptedByTheListener` | 加 `--tls --expect-fingerprint <pin>` | exit 0；JSON `tls=true`、`certificateFingerprint == expectFingerprint ==` 身份指纹；`service.tlsEnabled`；`appliedCount=2` |
+| 3 | `wrongPinIsRefusedBeforeAnyEnvelopeByteIsWritten` | `--tls --expect-fingerprint <首字符改一位>` | Windows 侧 exit≠0 且 stderr 含 `tls-fingerprint-mismatch`；Room 0 行；**监听端拿到的是帧层码**（`frame-truncated` 或 `io-failed`）——钉扎在客户端，服务端握手成功后才看到对端关流（21.5 第 1 条） |
+| 4 | `authenticatedSendIsImportedOnlyAfterTheTagFrameIsVerified` | `--authenticate --secret-env MH_W638_SECRET` | exit 0；`authenticate=true`、`secretEnv=MH_W638_SECRET`、`frames == chunkCount + 2`（挑战帧 + tag 帧）；`appliedCount=2` |
+| 5 | `wrongSecretIsRejectedByTheListenerAndNothingIsWritten` | 同上，口令 `interop-secret-bravo`（监听端持 `alpha`） | 监听端 `TransferFailed(auth-mismatch)`；Room 0 行；`deliveryConfirmed` 为 null；**Windows 的 stderr 里没有 `auth-mismatch`**（发送端没有回执通道，看不到自己被拒） |
+| 6 | `replayedFramesAreRefusedAsAuthReplayed` | 先经 `RecordingRelay` 代理端口把 Windows→本端的 782 B 原样录下，再把同一串字节裸写给同一个监听端 | 录制长度 == `envelope + 4 + 9 + 27 + 37`；第二次 `TransferFailed(auth-replayed)`；Room 仍 2 行且逐行 `syncSourceId + syncRecordRevision` 不变。CLI 没有固定 nonce 开关（`CreateNonce()` 每次随机），重放只能录真实帧 |
+| 7 | `plaintextSendAgainstATlsListenerIsRejectedOnTheAndroidSide` | 监听端 TLS，Windows **明文**发 | 监听端给 `tls-` 前缀码（实测 `tls-handshake-failed`）；Room 0 行；`deliveryConfirmed` 为 null |
+| 8 | `tlsAndAuthenticationComposeInOneConnection` | `--tls --expect-fingerprint <pin> --authenticate --secret-env ...` | exit 0；`tls=true` 且 `authenticate=true`；`appliedCount=2` |
+| 9 | `theSecondSendOfTheSameSourcesWritesNothingNew` | 同一 `--root` 连发两次 | 第二次 `appliedCount=0`、`ignoredCount=2`、Room 仍 2 行（第二封规划成 `NO_CHANGE`） |
+
+### 21.4 实测
+
+三次实跑全部 `--rerun-tasks`（非增量），跑前 `Get-Process java` 为 0：
+
+1. **定向单类**（`--tests com.mediahub.core.database.sync.SourceSyncListenerInteropTest`）：`BUILD SUCCESSFUL in 1m 39s` / `70 actionable tasks: 70 executed` / EXIT=0；XML `tests=9 skipped=0 failures=0 errors=0 time=6.816s`。
+2. **全模块带 DLL**：`BUILD SUCCESSFUL in 1m 50s` / `70 actionable tasks: 70 executed` / EXIT=0；**18 套件 / 167 例 / 0 失败 / 0 错误 / 0 skipped**（基线 17 / 158 → **+1 套件 / +9 例**，扣掉新增 9 例仍 158，无回归）。
+3. **全模块不带 `MH_W638_SYNC_DLL`**：`BUILD SUCCESSFUL in 1m 55s` / EXIT=0；18 套件 / 167 例 / 0 失败 / 0 错误 / **9 skipped**，跳过原因原文：`MH_W638_SYNC_DLL 没有指向 MediaHub.SyncCli.dll，跳过反向跨端联调（CI 上必须跳过）`。
+
+逐例耗时（带 DLL，取自 JUnit XML；整类 6.816 s）：
+
+| 用例 | 耗时(s) |
+| --- | --- |
+| `plaintextSendIsImportedAndWritesTwoRows` | 0.283 |
+| `tlsPinnedSendIsAcceptedByTheListener` | 3.760 |
+| `wrongPinIsRefusedBeforeAnyEnvelopeByteIsWritten` | 0.379 |
+| `authenticatedSendIsImportedOnlyAfterTheTagFrameIsVerified` | 0.362 |
+| `wrongSecretIsRejectedByTheListenerAndNothingIsWritten` | 0.363 |
+| `replayedFramesAreRefusedAsAuthReplayed` | 0.301 |
+| `plaintextSendAgainstATlsListenerIsRejectedOnTheAndroidSide` | 0.334 |
+| `tlsAndAuthenticationComposeInOneConnection` | 0.442 |
+| `theSecondSendOfTheSameSourcesWritesNothingNew` | 0.591 |
+
+（第一例 TLS 慢到 3.76 s 是本机 JSSE 首次建 SSLContext/KeyStore + 真子进程冷启动的固定成本，不是重试。）
+
+修红一条（**断言错、实现对**）：第 1 轮定向跑 `BUILD FAILED in 1m 45s`，9 例 8 绿 1 红。`wrongPinIsRefusedBeforeAnyEnvelopeByteIsWritten` 原先断言「监听端给 `tls-` 前缀码」，实测 `frame-truncated`：指纹钉扎在客户端（Windows 的 SslStream 握手成功后才比对证书，随即关流），服务端握手本身成功、接着读帧读到 EOF。改为断言帧层码（`frame-truncated` / `io-failed`）并加注释；Windows 侧证据（exit≠0 + stderr 里的 `tls-fingerprint-mismatch`）与「Room 0 行」**未放宽**。
+
+### 21.5 跨端事实与未覆盖
+
+实测出来的跨端事实（写下来免得下次重新踩）：
+
+1. **指纹钉扎只在客户端**：pin 失配时服务端看不到 `tls-fingerprint-mismatch`，只看到「TLS 之上对端直接关流」→ `frame-truncated`。两端日志对不上是正常的，判据要分侧看。
+2. `transfer send` 的 exit 0 **不代表对端接受**：没有 `--confirm-delivery` / `--await-receipt` 时没有任何回执证据；加了 `--confirm-delivery` 也只是等对端 close（探针里对端只读不收、照样 `deliveryConfirmed=true`）。
+3. **发送端看不到失败原因**：错口令例里 Windows 侧只报它自己的错误，stderr 里没有 `auth-mismatch`；「本端拒收」的证据只能从监听端码 + Room 行数取。
+4. 线长可预算：明文 = `4 + 9 + bytes`；认证再 `+ 27`（挑战帧 = 4 + 1 + 22 字符 nonce）`+ 37`（tag 帧 = 4 + 1 + 32）。`frames`：明文 = `chunkCount(bytes)`、认证 = `chunkCount + 2`。
+5. CLI **没有固定 nonce 开关**（`SourceSyncTransferAuthenticator.CreateNonce()` 每次随机），所以进程级重放只能靠录制真实帧再原样重放。
+6. 明文客户端打 TLS 监听端时，**服务端**能给出 `tls-handshake-failed`——与第 1 条不同：那条是「握手成功后对端关流」，这条是「握手本身就失败」。
+7. 反向没有与 Windows 的 `transfer serve` 做对称测试（那是第 18 节的方向）；本节的 Windows 侧只用 `transfer send`。
+
+未覆盖：
+
+1. 未跑 instrumentation、未在真机上点过监听区块：本节证据是 JVM（Robolectric）单测 + 真子进程，不含设备侧行为。
+2. 只在本机回环 `127.0.0.1` 上跑：非回环、跨机、防火墙/NAT、手机与 PC 不同网段都没测（按设计也不允许非回环）。
+3. 只验证了「Windows 发一封、Android 收一封」：多封连发、长信封（多数据块）、`--await-receipt` / `--send-receipt`（0x04 回执）都没测。
+4. 认证开关今天没进界面（20.8 第 2 条）：本节认证例是直接构造 `SourceSyncTransferOptions.withSecret(...)` 传进监听端，不是用户点出来的。
+5. 本套件**不入** `.github/workflows/android-ci.yml` 的 required-suite（仍 31 条）：CI 上没有 Windows CLI 与 dotnet，整类按设计 skipped。
+
+## 22. 回执帧（W6-40）
+
+W6-37 在 Windows 侧加了「接收端解码成功后回一个裸 `0x04` 字节」，本节是 Android 侧对齐它的实现与证据。
+
+### 22.1 为什么需要它（不是可选装饰）
+
+传输层原本只有一种「对端收到了」的证据：传输结束时的 close。但**拒收之后关流与接受之后关流在 TCP 上长得一模一样**：
+
+- W6-28 case F（明文）与 W6-35 case R6a（TLS）实测：发送端报成功（`exit 0`），而监听端在第一处校验就把信封拒了，一个信封字节都没入库；
+- 加 `--confirm-delivery` 也只等到 close，对端只读不收、照样 `deliveryConfirmed=true`（第 21.5 节第 2 条已实测）。
+
+所以只有「接收端解码后主动写出的一个字节」能区分「解码通过」与「拒收后关流」。这个字节**不参与帧长度/kind 体系**：
+
+```
+0x04            <- 一个字节，裸的：没有 4 字节大端长度前缀，也没有 kind 字节
+```
+
+对比其余帧（第 2 节）：挑战帧 `4 + 1 + n`、数据块 `4 + 9 + payload`、tag 帧 `4 + 1 + 32`。回执帧是唯一一个**不带长度前缀**的帧，读端只读一个字节、多余字节不读。
+
+写入时机（两端同位置：端点层，不是帧解码器）：信封**解码成功之后**才写；解码失败、半帧、校验失败、认证失败、TLS 失败一律**沉默**——沉默不是错误，是「我拒了」的既定表达。
+
+### 22.2 四码表（独立封闭集）
+
+与 Windows `SourceSyncReceiptReasons` 同名同序，**不并入**传输十码 / 认证五码 / TLS 四码 / 投递一码。理由：「对端回了错字节」既不是帧失败、也不是认证失败、也不是 TLS 失败。
+
+| 码 | 触发 | 帧是否已写出 | 备注 |
+| --- | --- | --- | --- |
+| `receipt-not-enabled` | 本端流不可读/不可写（读回执但流只写、写回执但流只读），或发送端 `input == null`，或消费方给不出超时设置器 | 否 | 是**本端能力**问题，不是对端问题 |
+| `receipt-missing` | 对端关闭了连接却没有写任何字节 | 是（帧全写出去了） | 最容易被误读成成功：它正好是「拒收后关流」的形状 |
+| `receipt-timeout` | 预算内既没字节也没关闭 | 是 | 与 `transfer-timeout`（读业务字节超时）刻意分开 |
+| `receipt-invalid` | 读到别的字节（如 `0x02`） | 是 | detail 里带实际字节的十六进制 |
+
+Android 侧 `object SourceSyncReceiptReasons`（`core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncReceipt.kt`）四个常量 + `ALL`（同序），测试钉住：
+
+- 四码顺序与 Windows 逐字一致；
+- 四码与 `SourceSyncTransferReasons.ALL`（10）、`SourceSyncTransferAuthReasons.ALL`（5）、`SourceSyncTlsReasons.ALL`（4）两两不相交，且全部以 `receipt-` 前缀（`receiptCodesDoNotOverlapTheOtherThreeTables`）。
+
+### 22.3 API 与 gate 语义
+
+| 位置 | 成员 | 作用 |
+| --- | --- | --- |
+| `SourceSyncReceipt` | `RECEIPT_FRAME_KIND = 0x04` / `RECEIPT_FRAME_BYTES = 1` | 全仓唯一能写 `0x04` 的地方 |
+| `SourceSyncReceipt` | `write(output: OutputStream?)` | 写一字节 + flush；不可写 → `receipt-not-enabled` |
+| `SourceSyncReceipt` | `await(input: InputStream?, budgetMs = 2000)` | 读一字节；EOF → missing、别的字节 → invalid、超时 → timeout |
+| `SourceSyncReceipt` | `acknowledge(output, envelope, options, gate)` | 端点层用：回执关着 → 沉默；gate 拒 → 沉默；否则 write |
+| `SourceSyncReceiptOptions` | `Off` / `writing()` / `awaiting(budgetMs)` / `writingOrOff(bool)` / `awaitingOrOff(bool, budgetMs)` | 接收端角色 / 发送端角色；`awaiting` 非正或 null → 2000 |
+| `SourceSyncTransfer` | `sendAndAwaitReceipt(output, input, envelope, challenge, options, receipt, readTimeoutSetter)` | 写完全部帧后等回执；**不确认时帧已写出**（`Ok` 变 `Failed(码)`，字节与帧数仍如实记） |
+| `SourceSyncTransferListener` | `receiveOnce(..., receipt, receiptGate)` + `Received.receiptWritten` | 监听端的回执开关与证据位 |
+| `SourceSyncTransferClient` | `receiveFrom(..., receipt, receiptGate)` / `sendTo(..., receipt)` | 拨号端的同一对能力 |
+| `SourceSyncListenerImportService` | `receiveAndImport(..., receipt)` + `Imported.receiptWritten` | 导入层；gate = 信封能被 `SourceSyncCodec.tryDecode` 解出来 |
+| `SourceSyncListenerController` | `SourceSyncListenForm.receipt` / `Received.receiptWritten` / `SourceSyncListenCopy.RECEIPT_WRITTEN_HINT` | 界面层；默认关，本轮**不加控件** |
+
+gate 就是「解码是否成功」，与 Windows CLI 同形（`payload => SourceSyncInbox.TryDecode(...)`）：CLI 里解码做两次（gate 一次、之后正式导入再一次），Android 也做两次——gate 在 `SourceSyncListenerImportService` 里，正式导入在 `AndroidSourceSyncService.importEnvelope` 里。这样做的好处是：**回执只在「这封信封会被接受」时写出，而不是在「字节收全了」时写出**。
+
+gate 拒绝时**不把一次好接收变成失败**：`acknowledge` 返回 `isSilent == true`（`confirmed=false, reason=null`），监听端照常返回 `Received(receiptWritten=false)`，导入层照常返回 `EnvelopeRejected(码)`。
+
+### 22.4 与 Windows 对齐表
+
+| 语义 | Windows（`D:/mh-w6/windows/src/MediaHub.Sync`） | Android（本节实现） |
+| --- | --- | --- |
+| 回执字节 | `SourceSyncReceipt.ReceiptFrameKind = 0x04`、`ReceiptFrameBytes = 1` | `SourceSyncReceipt.RECEIPT_FRAME_KIND = 0x04`、`RECEIPT_FRAME_BYTES = 1` |
+| 四码 | `SourceSyncReceiptReasons`（missing / timeout / invalid / not-enabled，`All` 同序） | `SourceSyncReceiptReasons`（同名同序 + `ALL`） |
+| 选项 | `SourceSyncReceiptOptions`：`Off` / `Sending()` / `Awaiting(budget)`、`DefaultBudgetMilliseconds = 2000` | `Off` / `writing()` / `awaiting(budgetMs)`、`DEFAULT_BUDGET_MS = 2000` |
+| 写回执 | `SourceSyncReceipt.WriteAsync` | `SourceSyncReceipt.write` |
+| 等回执 | `SourceSyncReceipt.AwaitAsync`（只读一个字节） | `SourceSyncReceipt.await`（只读一个字节） |
+| 端点层闸门 | `ReceiveOnceAsync(..., receipt, receiptGate)` → `WriteReceiptAsync` | `receiveOnce(..., receipt, receiptGate)` → `SourceSyncReceipt.acknowledge` |
+| 发送端裁决 | `SendAsync(..., receipt)`：不确认时 `Failed(... ) with { FrameCount, Bytes }` | `sendAndAwaitReceipt`：不确认时 `Failed(码, detail)`，`writeFrames` 已计数 |
+| 明文路径写回执用哪个流 | 写到 **socket 本身**（probe 包装只读、拒绝写） | 同样：`writeStream ?: socket.getOutputStream()` |
+| 结果位 | `ReceiptWritten` / `ReceiptConfirmed` | `Received.receiptWritten` / `Ok`（确认即 `Ok`，不确认即 `Failed`） |
+
+### 22.5 关闭时字节完全不变
+
+回执默认关（`SourceSyncReceiptOptions.Off`）：
+
+- 发送端不读入站任何字节（只写帧 + flush，与 W6-22 一模一样）；
+- 接收端不写任何字节，`Received.receiptWritten` 恒 `false`；
+- 两个冻结向量文件 `core/common/src/test/resources/sync/windows-transfer-vectors.json` 与 `windows-auth-vectors.json` **本轮一个字节都没改**；`sendWithReceiptsOffWritesTheFrozenBytes` 断言 `sendAndAwaitReceipt(..., Off)` 写出的字节与 `SourceSyncTransfer.encode(envelope)` 逐字节相等。
+
+### 22.6 用例表
+
+| 套件 | 例数 | 覆盖 |
+| --- | --- | --- |
+| `core/common` `SourceSyncReceiptTest`（新建） | 33 | 码表同序与不相交；Off/writing/awaiting 选项与预算；Result 三工厂与 `isSilent`；`write` 一字节 / 不可写 / 坏流；`await` 确认 / EOF / 非法字节 / 超时 / IO；`acknowledge` 三态；`sendAndAwaitReceipt` 九例（Off 字节全等、确认、missing 时帧已写出、input null、timeout、invalid、setter 抛异常、预算落到 socket 超时、空信封仍先拒） |
+| `core/common` `SourceSyncTransferListenerTest`（追加 6） | +6 | 监听端开回执写一字节、gate 拒收沉默、默认关不写、客户端等回执成功、客户端等回执 missing、TLS 上回执 |
+| `core/database` `SourceSyncListenerImportTest`（追加 2） | +2 | 解码通过才回执（`Imported.receiptWritten == true`）；解不出的载荷沉默 + `EnvelopeRejected` + 网关 0 次调用 |
+| `core/database` `SourceSyncListenerInteropTest`（追加 3，门控 `MH_W638_SYNC_DLL`） | +3 | 真 `transfer send --await-receipt` → `receiptConfirmed=true` + Room 2 行；Kotlin 等回执打真 `transfer serve --send-receipt` → `receiptWritten=true`；Windows 不带 `--send-receipt` → Kotlin `receipt-missing` |
+| `feature/settings` `SourceSyncListenerControllerTest`（追加 3） | +3 | `form.receipt` 原样传到工厂；`Received.receiptWritten` 与结果行提示；默认关不声称回执 |
+
+### 22.7 实跑计数
+
+三次模块一起重跑（`--rerun-tasks`，跑前 `Get-Process java` = 0）：
+
+```powershell
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+$env:ANDROID_HOME="$env:LOCALAPPDATA\Android\Sdk"
+$env:MH_W638_SYNC_DLL='D:\mh-verify\w6-38-cli\MediaHub.SyncCli.dll'   # 只有跨端三例用它
+cmd /c "gradlew.bat :core:common:testDebugUnitTest :core:database:testDebugUnitTest :feature:settings:testDebugUnitTest --console=plain --rerun-tasks --no-daemon -Pkotlin.compiler.execution.strategy=in-process > D:\mh-verify\w6-40-receipt.log 2>&1"
+```
+
+原始尾行：`BUILD SUCCESSFUL in 3m 30s` / `167 actionable tasks: 167 executed` / `EXIT=0`。
+
+JUnit XML 亲数（逐文件累加 `<testsuite>` 属性）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 |
+| --- | --- | --- | --- | --- | --- |
+| `core:common` | 32 | 457 | 0 | 0 | 10 |
+| `core:database` | 18 | 172 | 0 | 0 | 0 |
+| `feature:settings` | 14 | 217 | 0 | 0 | 0 |
+
+本次新增/追加的套件单列：
+
+| 套件 | 用例句数 | 套件耗时 | 备注 |
+| --- | --- | --- | --- |
+| `core.common.sync.SourceSyncReceiptTest` | 33 | 0.034 s | 新套件 |
+| `core.common.sync.SourceSyncTransferListenerTest` | 28 | 0.443 s | 基线 22 → +6 |
+| `core.database.sync.SourceSyncListenerImportTest` | 10 | — | 基线 8 → +2 |
+| `core.database.sync.SourceSyncListenerInteropTest` | 12 | 2.778 s | 基线 9 → +3，**本次带 DLL 真跑**（没跳过） |
+| `feature.settings.sync.SourceSyncListenerControllerTest` | 28 | 0.067 s | 基线 25 → +3 |
+
+无回归算式：`core:common` 418 + 33 + 6 = 457；`core:database` 167 + 2 + 3 = 172；`feature:settings` 214 + 3 = 217。三个模块都是 0 失败 0 错误；唯一的 10 个 skipped 是 `SourceSyncTlsInteropTest` 在无 `MH_W632_SYNC_DLL` 时按设计整类跳过（第 18 节），本节没有新增跳过的套件。
+
+跨端三例是**真子进程**跑的（`MH_W638_SYNC_DLL` 指向 `D:/mh-verify/w6-38-cli/MediaHub.SyncCli.dll`，不重新编译 `windows/`），逐例耗时：
+
+| 用例 | 耗时(s) | 结论 |
+| --- | --- | --- |
+| `windowsAwaitingAReceiptGetsConfirmedByTheKotlinListener` | 0.406 | Windows `send --await-receipt` 拿到 `receiptConfirmed=true`；Android `Imported.receiptWritten=true`，Room 2 行 |
+| `kotlinAwaitingAReceiptConfirmsAgainstWindowsServe` | 0.419 | Kotlin 等回执打 `serve --send-receipt` → `Ok`；serve JSON `sendReceipt=true`、`receiptWritten=true`，Windows 落 2 条 |
+| `kotlinAwaitingAReceiptWithoutAWindowsReceiptIsMissing` | 0.423 | 对端没开回执 → Kotlin `receipt-missing`；serve 仍 exit 0（发送端看不到拒收原因，与 21.5 第 3 条一致） |
+
+CI 跳过行为实测（去掉 `MH_W638_SYNC_DLL` 单跑该套件）：`BUILD SUCCESSFUL in 1m 37s` / `70 actionable tasks: 70 executed` / EXIT=0，XML 为 `tests="12" skipped="12" failures="0" errors="0"`，跳过原因原文：`MH_W638_SYNC_DLL 没有指向 MediaHub.SyncCli.dll，跳过反向跨端联调（CI 上必须跳过）`。
+
+修红：**0 条**——本轮三模块首跑即全绿（编译 0 错，47 例新用例全过）。这点如实写明：没有放宽任何断言，也没有为了让测试变绿改实现语义。
+
+### 22.8 未覆盖
+
+1. **界面没有回执控件**：`SourceSyncListenForm.receipt`（`feature/settings/.../sync/SourceSyncListenerController.kt:174`）默认 `false`，只有测试与代码调用能打开 —— `SourceSyncImportScreen.kt` 全文没有 `receipt` 字样，界面上既无开关也无位置可言（W6-41 挪动两张接收卡片同样不涉及它）；要给用户开关是另一轮的事（还要先定文案：开了会让对端多等一个字节的往返）。
+2. 未跑 instrumentation、未在真机上验证回执：全是 JVM 单测（Robolectric）与真子进程。
+3. 回执只在本机回环上验证：非回环、跨机、手机 ↔ PC 不同网段都没测（按设计也不允许非回环）。
+4. 未做「同一连接多封」：回执是一封一次（监听端一次 `receiveOnce` 只回一个字节），没有流水线/批量语义。
+5. 未测对端写半个回执或多写字节的行为：读端只读一个字节，多余字节留给后续（或就此丢弃），没有专门用例钉住「多写字节会破坏下一封」这件事。
+6. 跨端三例仍**不入** `.github/workflows/android-ci.yml` 的 required-suite（仍 31 条）：CI 上没有 dotnet 与 Windows CLI，整类按设计 skipped。

@@ -2,6 +2,8 @@ package com.mediahub.core.database.sync
 
 import com.mediahub.core.common.sync.SourceSyncListenerStart
 import com.mediahub.core.common.sync.SourceSyncListenerTransfer
+import com.mediahub.core.common.sync.SourceSyncCodec
+import com.mediahub.core.common.sync.SourceSyncReceiptOptions
 import com.mediahub.core.common.sync.SourceSyncTls
 import com.mediahub.core.common.sync.SourceSyncTlsIdentity
 import com.mediahub.core.common.sync.SourceSyncTlsOptions
@@ -71,22 +73,43 @@ class SourceSyncListenerImportService(
      * @param expectedChallenge 非空时要求对端的挑战逐字相等，否则 challenge-mismatch；
      *   null 表示接受对端宣布的任何挑战（与 Windows CLI serve 同口径）。
      * @param auth 可选的对端认证（W6-25），五码由 receive 给出。
+     * @param receipt 可选的回执（W6-40），默认关。开启时闸门先按 codec 解一次：
+     *   解不出来就**刻意沉默**（一个字节都不写，对端看到 receipt-missing），
+     *   解出来才写一个裸 0x04 —— 与 Windows CLI 的 receiptGate = TryDecode 同形
+     *   （那边也是解码两次：先闸门、后真正导入）。
      * @return 与 W6-23 同一个三段结果类型：TransferFailed / EnvelopeRejected / Imported。
      */
     suspend fun receiveAndImport(
         expectedChallenge: String? = null,
         auth: SourceSyncTransferOptions? = null,
+        receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
     ): SourceSyncTransferImportOutcome {
+        val gate: ((ByteArray) -> Boolean)? = if (receipt.enabled) {
+            { envelope ->
+                SourceSyncCodec.tryDecode(envelope.toString(Charsets.UTF_8)) is SourceSyncCodec.DecodeResult.Ok
+            }
+        } else {
+            null
+        }
         val received = withContext(Dispatchers.IO) {
-            listener.receiveOnce(expectedChallenge, auth)
+            listener.receiveOnce(expectedChallenge, auth, receipt, gate)
         }
         return when (received) {
             is SourceSyncListenerTransfer.Failed ->
                 SourceSyncTransferImportOutcome.TransferFailed(received.code, received.detail)
 
-            is SourceSyncListenerTransfer.Received -> imports.importEnvelopeBytes(received.envelope)
+            is SourceSyncListenerTransfer.Received ->
+                imports.importEnvelopeBytes(received.envelope).withReceipt(received.receiptWritten)
         }
     }
+
+    /** 把监听端写没写出回执这件事带回结果（只有 Imported 携带，另两段本来就没写）。 */
+    private fun SourceSyncTransferImportOutcome.withReceipt(written: Boolean): SourceSyncTransferImportOutcome =
+        if (this is SourceSyncTransferImportOutcome.Imported) {
+            SourceSyncTransferImportOutcome.Imported(result, envelopeJson, written)
+        } else {
+            this
+        }
 
     /** 关掉监听并释放端口；重复调用无副作用。 */
     override fun close() {

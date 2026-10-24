@@ -229,15 +229,6 @@ fun SourceSyncImportScreen(
                     "预览不会写入任何数据。",
                 style = MaterialTheme.typography.bodyMedium,
             )
-            ReceiveSection(state = receiveState, onReceive = onReceive)
-            ListenSection(
-                state = listenState,
-                tls = listenTls,
-                onStart = onListenStart,
-                onStop = onListenStop,
-                onReceive = onListenReceive,
-            )
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -390,6 +381,19 @@ fun SourceSyncImportScreen(
                     onDismiss = onVerifyDismiss,
                 )
             }
+
+            // W6-41：两个接收区块刻意放在整页末尾 —— 首屏保留 W6-27 之前的
+            // 「选择文件 / 预览」主流程构成，instrumentation 依赖首屏可见性
+            // （SourceSyncImportScreenTest 的 pick/preview/blocked 断言不做滚动），
+            // 而接收区块只是入口捷径，往下滚一格就能看到。
+            ReceiveSection(state = receiveState, onReceive = onReceive)
+            ListenSection(
+                state = listenState,
+                tls = listenTls,
+                onStart = onListenStart,
+                onStop = onListenStop,
+                onReceive = onListenReceive,
+            )
         }
     }
 }

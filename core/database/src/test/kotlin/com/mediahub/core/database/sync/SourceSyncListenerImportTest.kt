@@ -4,10 +4,13 @@ import com.mediahub.core.common.sync.LocalSourceRecord
 import com.mediahub.core.common.sync.AndroidSourceTypeMap
 import com.mediahub.core.common.sync.SourceSyncListenerStart
 import com.mediahub.core.common.sync.SourceSyncNonceCache
+import com.mediahub.core.common.sync.SourceSyncReceiptOptions
+import com.mediahub.core.common.sync.SourceSyncReceiptReasons
 import com.mediahub.core.common.sync.SourceSyncTransferAuthReasons
 import com.mediahub.core.common.sync.SourceSyncTransferClient
 import com.mediahub.core.common.sync.SourceSyncTransferListener
 import com.mediahub.core.common.sync.SourceSyncTransferOptions
+import com.mediahub.core.common.sync.SourceSyncTransferResult
 import com.mediahub.core.common.sync.SourceSyncTransferReasons
 import com.mediahub.model.MediaServer
 import java.io.InputStream
@@ -214,6 +217,64 @@ class SourceSyncListenerImportTest {
         }
     }
 
+    // ---------------------------------------------------------------- W6-40 回执（0x04）
+
+    @Test
+    fun successfulImportWritesTheReceiptOnlyAfterTheEnvelopeDecodes() = runBlocking {
+        val store = ImportFakeStore()
+        val service = serviceOver(store)
+        try {
+            val sent = SendCall(
+                service.port,
+                goldenEnvelope(),
+                receipt = SourceSyncReceiptOptions.awaiting(5_000),
+            ).start()
+            val outcome = service.receiveAndImport(receipt = SourceSyncReceiptOptions.writing())
+            sent.await()
+
+            assertTrue("期待导入成功，实际 " + describe(outcome), outcome is SourceSyncTransferImportOutcome.Imported)
+            val imported = outcome as SourceSyncTransferImportOutcome.Imported
+            assertTrue("解码成功之后才允许回执", imported.receiptWritten)
+            assertEquals(2, imported.result.appliedCount)
+            assertEquals(2, store.snapshots.size)
+            assertTrue("发送端必须收到 0x04 才算送达", sent.sent() is SourceSyncTransferResult.Ok)
+        } finally {
+            service.close()
+        }
+    }
+
+    @Test
+    fun anUndecodablePayloadStaysSilentAndWritesNothing() = runBlocking {
+        val store = ImportFakeStore()
+        val gateway = RecordingGateway()
+        val service = gatewayService(gateway)
+        try {
+            val sent = SendCall(
+                service.port,
+                "null".toByteArray(Charsets.UTF_8),
+                receipt = SourceSyncReceiptOptions.awaiting(2_000),
+            ).start()
+            val outcome = service.receiveAndImport(receipt = SourceSyncReceiptOptions.writing())
+            sent.await()
+
+            assertTrue(
+                "解码失败必须在解码层被拒，实际 " + describe(outcome),
+                outcome is SourceSyncTransferImportOutcome.EnvelopeRejected,
+            )
+            assertEquals("malformed-json", (outcome as SourceSyncTransferImportOutcome.EnvelopeRejected).reason)
+            assertEquals("解码失败就不能碰网关", 0, gateway.calls)
+            assertEquals(0, store.createCalls)
+            val answer = sent.sent()
+            assertTrue("发送端应该看到一个失败裁决，实际 " + answer, answer is SourceSyncTransferResult.Failed)
+            assertEquals(
+                "拒收时不得回执，发送端只能看到缺失",
+                SourceSyncReceiptReasons.RECEIPT_MISSING,
+                (answer as SourceSyncTransferResult.Failed).reason,
+            )
+        } finally {
+            service.close()
+        }
+    }
     // ---------------------------------------------------------------- 夹具
 
     private fun serviceOver(store: ImportFakeStore): SourceSyncListenerImportService {
@@ -268,12 +329,14 @@ class SourceSyncListenerImportTest {
         private val payload: ByteArray,
         private val challenge: String? = null,
         private val auth: SourceSyncTransferOptions? = null,
+        private val receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
     ) {
         private val failure = AtomicReference<Throwable?>(null)
+        private val result = AtomicReference<SourceSyncTransferResult?>(null)
         private val client = SourceSyncTransferClient(connectTimeoutMs = 5_000, readTimeoutMs = 10_000)
         private val thread = Thread {
             try {
-                client.sendTo(HOST, port, payload, challenge, auth = auth)
+                result.set(client.sendTo(HOST, port, payload, challenge, auth = auth, receipt = receipt))
             } catch (error: Throwable) {
                 failure.set(error)
             }
@@ -296,6 +359,9 @@ class SourceSyncListenerImportTest {
         fun awaitQuietly() {
             thread.join(30_000)
         }
+
+        /** 发送端看到的结果：Ok 表示收到 0x04，Failed 表示回执层的裁决。 */
+        fun sent(): SourceSyncTransferResult? = result.get()
     }
 
     /** 裸 socket 送几个字节再半关写端，用于构造坏帧。 */
