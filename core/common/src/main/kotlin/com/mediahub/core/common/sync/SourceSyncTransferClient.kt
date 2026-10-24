@@ -65,6 +65,10 @@ class SourceSyncTransferClient(
      * @param auth 可选的对端认证（W6-25）；非 null 且持口令时信封后追加一帧 HMAC tag。
      * @param receipt 可选的等回执（W6-40）：开启时写完帧后读一个字节，收到 0x04 才算送达；
      *   预算默认 2000 毫秒，会临时改这条连接的读超时（连接随即关闭，所以不恢复）。
+     * @param delivery 可选的投递确认（W6-46）：开启时写完帧后读对端直到它关连接，读不到 FIN 就不算送达。
+     *   默认 [SourceSyncDeliveryOptions.Off]——一个字节不多写、一次读不多做、一毫秒不多等。
+     *   **回执优先**：receipt 开启时 delivery 被忽略（0x04 是应用层答案，比「关了连接」信息量更大，
+     *   也与 Windows CLI 的 ConfirmDelivery && !AwaitReceipt 同口径）。
      */
     fun sendTo(
         host: String,
@@ -74,7 +78,10 @@ class SourceSyncTransferClient(
         tls: SourceSyncTlsOptions = SourceSyncTlsOptions.Off,
         auth: SourceSyncTransferOptions? = null,
         receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
+        delivery: SourceSyncDeliveryOptions = SourceSyncDeliveryOptions.Off,
     ): SourceSyncTransferResult {
+        val effectiveDelivery: SourceSyncDeliveryOptions =
+            if (receipt.enabled) SourceSyncDeliveryOptions.Off else delivery
         return withConnection(host, port, tls) { input, output, setReadTimeout ->
             if (receipt.enabled) {
                 SourceSyncTransfer.sendAndAwaitReceipt(
@@ -87,8 +94,45 @@ class SourceSyncTransferClient(
                     readTimeoutSetter = setReadTimeout,
                 )
             } else {
-                SourceSyncTransfer.sendTo(output, envelope, challenge, auth)
+                when (val sent = SourceSyncTransfer.sendTo(output, envelope, challenge, auth)) {
+                    is SourceSyncTransferResult.Ok ->
+                        if (!effectiveDelivery.confirm) {
+                            sent
+                        } else {
+                            awaitPeerClose(input, sent, envelope, effectiveDelivery, setReadTimeout)
+                        }
+                    is SourceSyncTransferResult.Failed -> sent
+                }
             }
+        }
+    }
+
+    /** 帧写完之后等对端关连接；只有读到 FIN 才把结果原样（加上确认）交回，否则折成 delivery-unconfirmed。 */
+    private fun awaitPeerClose(
+        input: InputStream,
+        sent: SourceSyncTransferResult.Ok,
+        envelope: ByteArray,
+        delivery: SourceSyncDeliveryOptions,
+        setReadTimeout: (Int) -> Unit,
+    ): SourceSyncTransferResult {
+        return when (
+            val confirmation = SourceSyncDeliveryConfirmation.confirm(
+                input = input,
+                sentBytes = envelope.size,
+                budgetMs = delivery.budgetMs,
+                setReadTimeout = setReadTimeout,
+            )
+        ) {
+            is SourceSyncDeliveryResult.Confirmed -> SourceSyncTransferResult.Ok(
+                envelope = sent.envelope,
+                frameCount = sent.frameCount,
+                challenge = sent.challenge,
+                delivery = confirmation,
+            )
+            is SourceSyncDeliveryResult.Unconfirmed -> SourceSyncTransferResult.Failed(
+                confirmation.reason,
+                confirmation.detail,
+            )
         }
     }
 

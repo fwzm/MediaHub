@@ -52,11 +52,14 @@ sealed interface SourceSyncTransferResult {
      * @param envelope 重组后的信封字节（与发送端送出的字节逐字节相同）。
      * @param frameCount 实际读/写的帧数，挑战帧也计数（Windows 的语义）。
      * @param challenge 对端声明（读）或本端送出（写）的挑战，已去首尾空白；没有挑战帧时为 null。
+     * @param delivery 可选的投递确认（W6-46）：只在发送端开了 [SourceSyncDeliveryOptions.Confirming] 时非 null，
+     *   见 [SourceSyncDeliveryResult]。默认 null，读端与今天的行为完全一致。
      */
     class Ok(
         val envelope: ByteArray,
         val frameCount: Int,
         val challenge: String?,
+        val delivery: SourceSyncDeliveryResult? = null,
     ) : SourceSyncTransferResult
 
     class Failed(val reason: String, val message: String? = null) : SourceSyncTransferResult

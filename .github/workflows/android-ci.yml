@@ -125,6 +125,8 @@ jobs:
           #     四码与 Windows 同名同序、接收端 5 字节嗅探、graceful close；夹具与期望指纹由 Windows 权威实现生成）
           #   sync.SourceSyncTransferListenerTest —— 回环监听端（W6-34：只绑回环、端口 0 取实际值、单连接串行、
           #     复用 SourceSyncTransfer.receive 解帧，TLS 走 handshakeServer / 明文走 5 字节嗅探，关闭 TLS 走 graceful close）
+          #   sync.SourceSyncDeliveryTest —— 发送端投递确认（W6-46：单码 delivery-unconfirmed 独立封闭集、
+          #     写完最后一帧后读对端直到 FIN，预算 2000 ms、最多排水 64 KiB，回执优先；Off 时不读一个字节）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -157,6 +159,7 @@ jobs:
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferAuthTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTlsTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferListenerTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncDeliveryTest \
             --require-complete-suites
 
       - name: Lint

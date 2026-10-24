@@ -1405,4 +1405,177 @@ cmd /c "gradlew.bat :feature:settings:assembleDebugAndroidTest --console=plain -
 5. **未覆盖 Hilt 注入路径**：测试直接调 `SourceSyncImportScreen(...)` 组合函数并手传状态，`SourceSyncImportRoute` / `SourceSyncImportViewModel` 的注入与状态收集（`collectAsStateWithLifecycle`）没有 instrumentation 证据。
 6. 本套件同样**不入** `.github/workflows/android-ci.yml` 的 required-suite（仍 31 条）；它是 androidTest，CI 会随 visual-instrumentation 的 `connectedDebugAndroidTest` 跑到。
 
+## 25. 投递确认（W6-46，对齐 Windows W6-30 / W6-39）
+
+### 25.1 为什么需要它
+
+单向发送的 `Ok` 只证明「帧写进了 socket」，不证明对端读完或接受。这一点本仓有两条反证：§7 差异之一、§18 用例 5/7（明文客户端打 TLS 端点、口令不一致时，发送端都报 `Ok`，真正拒绝只发生在 Windows 一侧）。Windows 侧早已用「写完最后一帧后读对端直到 FIN，预算 2000 ms」把这一步补上（`D:/mh-w6/windows/src/MediaHub.Sync/SourceSyncTransferEndpoint.cs:730-732` 收完帧 `TryHalfClose` 半关、`SourceSyncDeliveryConfirm.cs` 发送端读 FIN），Android 侧此前没有对应物。本节补上它，并保持「默认全关、开了才变」的纪律。
+
+### 25.2 一个失败码（独立封闭集）
+
+`SourceSyncDeliveryReasons` 只有一条，与传输十码（§4）、认证五码（§15）、TLS 四码（§17）、回执四码（§22）**没有任何重名**（`deliveryCodeDoesNotOverlapTheOtherFourTables` 钉住）。
+
+| 码 | 触发 | detail 里有什么 |
+| --- | --- | --- |
+| `delivery-unconfirmed` | 开了确认，但没读到对端关连接 | 已发信封字节数 + 「N 毫秒内没关」/「还在发（已读 M 字节）」/异常类名，不含信封内容 |
+
+`SourceSyncDeliveryResult` 只有两种：`Confirmed(bytesRead, elapsedMs)` 与 `Unconfirmed(reason, detail, elapsedMs)`；`confirm(...)` **永不抛异常**，失败一律折成 `Unconfirmed`。
+
+### 25.3 API 与语义
+
+| 组件 | 形状 | 语义 |
+| --- | --- | --- |
+| `SourceSyncDeliveryOptions` | `Off` / `Confirming(budgetMs)`；`DEFAULT_BUDGET_MS = 2_000`；`confirming(budgetMs?)`、`confirmingOrOff(enabled, budgetMs?)` | `budgetMs <= 0` 或 `null` 一律回落 2000；`toString` 只印 Confirm 与 BudgetMs |
+| `SourceSyncDeliveryConfirmation.confirm(input, sentBytes, budgetMs, setReadTimeout)` | `MAXIMUM_DRAIN_BYTES = 64 * 1024`、256 字节 scratch | 每轮把**剩余预算**（最少 1 ms）设进 soTimeout 再读 |
+| `SourceSyncTransferResult.Ok` | 第 4 个参数 `delivery: SourceSyncDeliveryResult? = null` | 只在发送端开了 Confirming 时非 null；读端与既有三参构造零影响 |
+| `SourceSyncTransferClient.sendTo(...)` | 末参 `delivery: SourceSyncDeliveryOptions = SourceSyncDeliveryOptions.Off` | 见 25.5 的优先级；`Off` 时不读一个字节、不多等一次 |
+| `SourceSyncSendController` | `SourceSyncSendForm.delivery`、`SourceSyncSendState.Sent.deliveryConfirmed`、`SourceSyncSendCopy.DELIVERY_LABEL/DELIVERY_HINT` | `deliveryConfirmed` 语义：`true` = 读到对端关连接；`null` = 没开或被回执取代（读不到 FIN **不会**落到 `Sent`，而是 `Failed("delivery-unconfirmed")`） |
+
+判定次序（`confirm` 内部）：
+
+| 观察 | 结论 |
+| --- | --- |
+| `read` 返回 `-1`（EOF / FIN） | `Confirmed(drained, elapsed)` |
+| 累计读到 `> 64 KiB` | `Unconfirmed`：对端在一封信封之后还在发，不是在确认收到 |
+| `SocketTimeoutException` | `Unconfirmed`：对端没有在 `<budgetMs>` 毫秒内关闭连接 |
+| `IOException` / 其它异常 | `Unconfirmed`：只带类名，不带消息 |
+| `setReadTimeout` 本身抛 | `Unconfirmed`：读超时设不上 |
+
+### 25.4 与 Windows 对齐表
+
+| 项 | Android（本节点） | Windows |
+| --- | --- | --- |
+| 失败码 | `delivery-unconfirmed` | `SourceSyncDeliveryReasons.DeliveryUnconfirmed = "delivery-unconfirmed"` |
+| 默认预算 | `DEFAULT_BUDGET_MS = 2_000` | `SourceSyncDeliveryOptions.DefaultBudgetMilliseconds = 2000` |
+| 排空上限 | `MAXIMUM_DRAIN_BYTES = 64 * 1024` | `SourceSyncDeliveryConfirmation.MaximumDrainBytes = 64 * 1024` |
+| scratch | 256 字节 | 256 字节 |
+| 成功判据 | 读到 EOF | 读到 0 字节（EOF） |
+| 优先级 | 回执 > 投递确认 | `SyncCliRunner.cs:964` `ConfirmDelivery && !AwaitReceipt` |
+| CLI 开关 | 无（控制器参数 + 端口参数，界面无控件） | `transfer send --confirm-delivery`，JSON 字段 `confirmDelivery`（`SyncCliRunner.cs:1284`） |
+
+### 25.5 优先级：回执优先，两端同口径
+
+回执是应用层的 0x04 ACK（§22），投递确认是传输层的 FIN；两者同时开只会多一次读，没有额外信息。因此**回执优先**在三处各挡一次：
+
+1. Windows CLI：`SourceSyncDeliveryOptions delivery = invocation.ConfirmDelivery && !invocation.AwaitReceipt ? Confirming : Off;`（`SyncCliRunner.cs:964-966`）。
+2. Android 客户端：`val effectiveDelivery = if (receipt.enabled) SourceSyncDeliveryOptions.Off else delivery`。
+3. Android 控制器：`SourceSyncDeliveryOptions.confirmingOrOff(form.delivery && !form.receipt)`（界面两个开关都开时也不会把确认传下去）。
+
+### 25.6 预算与 64 KiB 上限
+
+- **预算**：默认 2000 ms；`confirming(0)` / 负值回落 2000（`budgetFallsBackToTheDefault`）。超时是用「剩余预算」逐轮重设 `soTimeout` 实现的，所以超时时能报出「对端没有在 2000 毫秒内关闭连接」而不是笼统的 `transfer-timeout`。
+- **64 KiB**：对端在信封之后继续说话 → `Unconfirmed`。理由与 Windows 同：回一发信封的对端不是在确认收到。64 KiB 只在**排空量**上生效，正常对端读到 EOF 时 `bytesRead` 通常是 0（真 Windows serve 实测就是 0，见 §25.8 的互操作用例）。
+
+### 25.7 默认全关时行为与线上字节完全不变
+
+- `SourceSyncDeliveryOptions.Off` 时**不调用** `confirm`：不读一个字节、不多等一次、不多设一次读超时（`offDoesNotWaitForThePeerToClose`、`deliveryIsOffByDefaultAndCarriesNoConfirmation`）。
+- 冻结向量未改：`core/common/src/test/resources/sync/windows-transfer-vectors.json`、`windows-auth-vectors.json` 本轮零改动；`sendWithReceiptsOffWritesTheFrozenBytes` 仍然断言 `sendAndAwaitReceipt(..., Off)` 写出的字节 == `SourceSyncTransfer.encode(envelope)`。
+- 控制器默认文案一字未变：`delivery = false` 时 `lineOf(Sent)` 只是原有的「已发送 N 字节（F 帧，来源 S 条）。…」，新增那句只有 `deliveryConfirmed == true` 时才追加。
+
+### 25.8 用例表（27 条新增，全部纯 JVM）
+
+**core/common `SourceSyncDeliveryTest`（20 例，新建）**
+
+| 用例 | 钉住的行为 |
+| --- | --- |
+| `reasonsAreTheFrozenSingleCode` | 码表只有 `delivery-unconfirmed` |
+| `deliveryCodeDoesNotOverlapTheOtherFourTables` | 与传输/认证/TLS/回执四张码表零重名 |
+| `defaultOptionsAreOffAndSaySo` | `Off` 默认、`toString` 如实 |
+| `confirmingSpeaksItsBudget` | `Confirming(1500)` 的 `toString` 带 BudgetMs |
+| `budgetFallsBackToTheDefault` | 0 / 负数 → 2000 |
+| `booleanHelperMapsToOffOrOn` | `confirmingOrOff` 两向映射 |
+| `optionsNeverCarryASecret` | options 的字符串里没有口令样式串 |
+| `maximumDrainIsSixtyFourKilobytes` | 常量 = 65536 |
+| `theReadTimeoutSetterSeesTheRemainingBudget` | 逐轮设的是剩余预算（单调不增） |
+| `aFailingReadTimeoutSetterIsReportedNotThrown` | setter 抛异常 → `Unconfirmed` 而不是崩 |
+| `peerThatClosesAfterTheEnvelopeCountsAsConfirmed` | 真回环：读完就关 → `Confirmed` |
+| `bytesThePeerSentBeforeTheFinAreCounted` | 关前发出的字节被计入 `bytesRead` |
+| `aPeerThatKeepsTheConnectionOpenIsNotConfirmed` | 持连接不发 → `Unconfirmed`，detail 含「没有在 N 毫秒内关闭」 |
+| `aTinyBudgetStillSaysWhichBudgetItUsed` | 预算 1 ms 也能跑，detail 报出用的预算 |
+| `aPeerThatKeepsTalkingIsNotConfirmed` | 信封后继续发 > 64 KiB → `Unconfirmed`「还在发」 |
+| `aResetConnectionIsNotConfirmed` | RST → `Unconfirmed` |
+| `detailNeverCarriesTheEnvelopeBytes` | detail 不含信封内容 |
+| `offDoesNotWaitForThePeerToClose` | `Off` 时零字节读取 |
+| `deliveryIsIgnoredWhenTheReceiptIsAwaited` | 回执优先 |
+| `aTlsPeerThatClosesAfterTheEnvelopeIsConfirmed` | 真 TLS 1.3（夹具 p12）同样 `Confirmed` |
+
+**feature:settings `SourceSyncSendControllerTest`（+6 例，共 32 例）**
+
+| 用例 | 钉住的行为 |
+| --- | --- |
+| `deliveryIsOffByDefaultAndCarriesNoConfirmation` | 默认 `Off`、`Sent.deliveryConfirmed == null`、文案不出现确认那句 |
+| `deliveryOnIsForwardedWithTheDefaultBudget` | 开了 → 端口收到 `Confirming(2000)`，`Sent.deliveryConfirmed == true`，文案出现「对端读完就关了连接」 |
+| `receiptTakesPrecedenceOverDelivery` | 回执 + 确认同开 → 端口收到 `Off`，`deliveryConfirmed == null` |
+| `unconfirmedDeliveryIsSurfacedWithItsOwnCode` | 失败行是「发送失败：delivery-unconfirmed（detail）」 |
+| `realLoopbackSendIsOnlyConfirmedWhenThePeerCloses` | 真回环 + 真 `SourceSyncTransferSendPort` → `Sent.deliveryConfirmed == true` |
+| `formPrintsTheDeliveryFlagButNeverTheSecret` | `toString` 有 `delivery=true`、口令仍然 `<redacted>` |
+
+**core/common `SourceSyncTlsInteropTest`（+1 例，共 11 例；`MH_W632_SYNC_DLL` 门控）**
+
+| 用例 | 钉住的行为 |
+| --- | --- |
+| `deliveryConfirmationSeesTheRealServeCloseTheConnection` | 真 Windows `transfer serve --json --apply`（w6-46-cli）：`sendTo(delivery = Confirming())` → `Ok` 且 `delivery is Confirmed`、`bytesRead == 0`，serve exit 0、`counts.apply == 2`、`sync-sources.json` 两来源 |
+
+同时修正了既有两例里已过时的注释（「Ok 只表示帧写进 socket，Android 侧没有 `--confirm-delivery` 的对应物」）——**断言一字未改**，因为那两例用的就是默认 `Off`。
+
+### 25.9 实跑计数（两轮，本机，`--no-daemon`）
+
+命令（A 轮带门控变量，B 轮清掉它）：
+
+```powershell
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+$env:ANDROID_HOME="$env:LOCALAPPDATA\Android\Sdk"
+# A 轮：$env:MH_W632_SYNC_DLL='D:\mh-verify\w6-46-cli\MediaHub.SyncCli.dll'
+cmd /c "gradlew.bat :core:common:testDebugUnitTest :core:database:testDebugUnitTest :feature:settings:testDebugUnitTest --console=plain --rerun-tasks --no-daemon -Pkotlin.compiler.execution.strategy=in-process > %TEMP%\w646.log 2>&1"
+```
+
+**A 轮（带 `MH_W632_SYNC_DLL`）** 原始尾行：`BUILD SUCCESSFUL in 3m 42s` / `167 actionable tasks: 167 executed` / `EXIT=0`。
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 |
+| --- | --- | --- | --- | --- | --- |
+| core:common | 33 | 478 | 0 | 0 | 0 |
+| core:database | 18 | 172 | 0 | 0 | 12 |
+| feature:settings | 15 | 249 | 0 | 0 | 0 |
+
+（core:database 那 12 个跳过是 `SourceSyncListenerInteropTest`——它由 `MH_W638_SYNC_DLL` 门控，本轮**故意只设** `MH_W632_SYNC_DLL`；W6-44 记录过设齐两个变量时它是 0 跳过。）
+
+门控与新增套件单列（A 轮 XML）：`SourceSyncTlsInteropTest` tests=11 failures=0 skipped=**0**（真跑了 Windows CLI，含本节点新增的第 11 例）；`SourceSyncDeliveryTest` tests=20 skipped=0；`SourceSyncSendControllerTest` tests=32 skipped=0。
+
+**B 轮（不带任何 `MH_*` 门控变量）** 原始尾行：`BUILD SUCCESSFUL in 3m 1s` / `167 actionable tasks: 167 executed` / `EXIT=0`。
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 |
+| --- | --- | --- | --- | --- | --- |
+| core:common | 33 | 478 | 0 | 0 | 11 |
+| core:database | 18 | 172 | 0 | 0 | 12 |
+| feature:settings | 15 | 249 | 0 | 0 | 0 |
+
+B 轮的门控套件是**跳过而不是消失**：`SourceSyncTlsInteropTest` tests=11 failures=0 errors=0 **skipped=11**、`SourceSyncListenerInteropTest` tests=12 **skipped=12** 两个 `TEST-*.xml` 都在，套件数与用例数与 A 轮完全相同，只有 skipped 从 0 变成满额。
+
+**无回归算式**（基线取自 §22/§23 快照）：core:common 457 + 20（SourceSyncDeliveryTest）+ 1（互操作新增）= **478**，套件 32 → 33；feature:settings 243 + 6 = **249**，套件仍 15；core:database 172 不变（skipped 12 的差异只来自本轮没设 `MH_W638_SYNC_DLL`）。
+
+### 25.10 本次改动的文件
+
+| 文件 | 变化 |
+| --- | --- |
+| `core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncDelivery.kt` | 新建，208 行 |
+| `core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncTransfer.kt` | `Ok` 增第 4 个默认参数（564 → 567 行） |
+| `core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncTransferClient.kt` | `sendTo` 增 `delivery` 参数 + `awaitPeerClose` |
+| `feature/settings/.../sync/SourceSyncSendController.kt` | `Form.delivery`、`Sent.deliveryConfirmed`、端口第 8 参、文案 |
+| `core/common/src/test/.../sync/SourceSyncDeliveryTest.kt` | 新建，556 行 / 20 例 |
+| `core/common/src/test/.../sync/SourceSyncTlsInteropTest.kt` | +1 例、两处过时注释修正 |
+| `feature/settings/src/test/.../sync/SourceSyncSendControllerTest.kt` | +6 例（共 32 例） |
+
+**`Screen` 未改**：任务书要求本节点只到「控制器 + 端口」，界面上没有投递确认开关（见 25.11 第 2 条）。
+
+### 25.11 未覆盖
+
+1. **TLS 下 close_notify 与 FIN 的差异没有对真 Windows 实测**：Windows 的 TLS 分支是先 `WaitForPeerCloseAsync`（1500 ms）再 `CloseQuietlyAsync`，Android 侧读到的可能是 TLS close_notify 而不是 TCP FIN，且可能接近默认 2000 ms 预算。回环 TLS 单测（`aTlsPeerThatClosesAfterTheEnvelopeIsConfirmed`）能过，但**跨端 TLS + 投递确认没有用例**（§18 的跨端 TLS 用例仍是默认 `Off`）。
+2. **界面没有开关**：`SourceSyncSendForm.delivery` 与 `Sent.deliveryConfirmed` 都有，`SendSection` 里没有控件，真机上开不了（任务书明确要求本节点不动 `Screen`）。
+3. **未跨机**：全部只连回环，没有跨设备/跨网卡证据。
+4. **未测大信封边界**：8 MiB 上限附近的信封 + 慢读对端没有用例；也没有「对端慢慢读、FIN 迟迟不到」的时延分布测量。
+5. **未测对端发 1..64 KiB 再关的中间态**：设计上仍判 `Confirmed`（只要没超 64 KiB 且最终 EOF），但没有专门用例逐段覆盖。
+6. **未接日志/未跑真机**：没有日志器接入，也没有 instrumentation 或设备证据。
+7. **本节点没有新增 required-suite**：`.github/workflows/android-ci.yml` 仍是 31 条；`SourceSyncDeliveryTest` 会随模块的 `testDebugUnitTest` 在 CI 里跑到，但不单独点名。
+
+
 
