@@ -1949,3 +1949,121 @@ gradlew.bat --max-workers=2 --rerun-tasks :core:common:testDebugUnitTest `
 5. **本套件尚未钉进 required-suite**：`.github/workflows/android-ci.yml` 的 33 条 `--required-suite` 未包含 `SourceSyncHostAddressTest`；
    按缺口表它是 W6-55 的内容（改 `android-ci.yml` 必须同步跑 `.github/scripts/tests` 的 unittest）。
 6. **未测无障碍 / 深色主题 / 200% 字体 / 超长地址的实际换行**：新增两个控件没有视觉回归。
+## 29. 监听端对端口令（W6-53）
+
+### 29.1 为什么需要这一节
+
+缺口表第 2 条（`D:/mh-verify/android-w6-gap-table.md`）指出：Window 侧 `transfer serve` 早就有 `--authenticate` + `--secret-env`，
+Android 当**发送端**时（W6-42）也有 `sync.send.auth` / `sync.send.secret` 两个控件；唯独 Android 当**接收端**时界面没有办法要求对端证明自己持有同一口令。
+服务层的本事是现成的：`core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncListenerImportService.kt:82-86` 的
+`suspend fun receiveAndImport(expectedChallenge: String? = null, auth: SourceSyncTransferOptions? = null, receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off)`
+早就把 `auth` 透传给 `listener.receiveOnce(...)`（W6-25 对齐 Windows W6-24 的 HMAC-SHA256 认证）；
+可 `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncListenerController.kt` 里的 `SourceSyncListenerFactory.open(...)` 一路只透传 tls / identity / receipt / host，**从不动 auth**，
+所以界面上的开关永远出现不了。本节只补这道接线：协议、tag 帧字节与码表都不动。
+
+### 29.2 与 Windows `transfer serve` 同名同义
+
+| 语义 | Windows（W6-24 / W6-28） | Android W6-53 |
+| --- | --- | --- |
+| 要求对端认证 | `transfer serve --authenticate`（必须与 `--secret-env NAME` 成对，缺一在解析期就报 `missing-required-option:--secret-env` / `missing-required-option:--authenticate`） | 监听卡复选框（tag `sync.listen.auth`） |
+| 口令从哪来 | 环境变量：命令行只出现变量名，口令本身不上命令行 | 口令输入框（tag `sync.listen.secret`），`PasswordVisualTransformation`，只进内存 |
+| 缺省行为 | 不认证 | 完全不变：开关关 ⇒ `auth = null`，走 W6-34 原路径 |
+| 对端没带认证 | `auth-required` | 同码透传，界面不新增码 |
+| 对端口令不对 | `auth-mismatch` | 同上 |
+| 重放 | `auth-replayed` | 同上 |
+| 本端根本没有口令可用 | `auth-secret-unavailable` | 同上 |
+| 本端开了认证却没填口令 | 解析期拒绝（见上） | 控制器在**建 socket 之前**拒：本地码 `listen-secret-missing` |
+
+那四个线上码在 Android 的常量是 `core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncTransferAuth.kt:19`（`AUTH_REQUIRED`）、`:25`（`AUTH_MISMATCH`）、
+`:28`（`AUTH_REPLAYED`）、`:31`（`AUTH_SECRET_UNAVAILABLE`），与 Windows 同名同序，本节一个都没碰。
+`listen-secret-missing` 与发送卡的 `send-secret-missing`（W6-42）同属**界面本地码**：只在「本端配置自相矛盾」时出现，对端永远看不到，因此不需要两端同名同序（ADR 结论 C 只管线上码）。
+
+### 29.3 三条外部可观察语义
+
+1. **开了认证不填口令 ⇒ 一个 socket 都不开**：`start(form)` 立刻返回 `false`，状态是 `Failed(port = null, code = "listen-secret-missing", detail = SECRET_REQUIRED)`，工厂的 `open` 调用计数为 0（没有监听行、没有端口、没有半开的监听）。与 W6-51 的地址判定同一原则：拒绝必须发生在副作用之前。
+2. **开了认证且填了口令 ⇒ 选项带口令字节过去**：工厂收到的 `auth` 是 `SourceSyncTransferOptions`，`authenticate = true`、`hasSecret = true`、`secret` 逐字节等于输入内容；状态行、`lineOf`、`portLineOf` 与日志里都没有口令原文。
+3. **口令框只在开关点亮时可编辑**：开关关闭时口令框 `enabled = false`；监听中（`listening`）与接收中（`receiving`）「开关 + 口令框」一起锁住；`SourceSyncListenForm.toString()` 打的是 `secret=<redacted>`（防止异常栈或调试日志把口令带出去）。
+
+### 29.4 实现落点
+
+| 文件 | 行号 | 落了什么 |
+| --- | --- | --- |
+| `feature/settings/.../sync/SourceSyncListenerController.kt` | `:126` | `AUTH_LABEL =「要求对端带口令（HMAC 认证）」` |
+| 同上 | `:129` | `SECRET_LABEL =「口令（只留在内存）」` |
+| 同上 | `:132` | `AUTH_HINT`：对端没带 tag 判 `auth-required`、tag 对不上判 `auth-mismatch`，口令不进状态行 / 日志 / 导出 |
+| 同上 | `:137` | `SECRET_REQUIRED`：开了认证没填口令时对端的 tag 帧一律 `auth-secret-unavailable` |
+| 同上 | `:224` / `:226` | 表单新增 `auth: Boolean = false`、`secret: String = ""` |
+| 同上 | `:240` / `:242` | `isSecretAcceptable = !auth` 或 `secret.isNotEmpty()`；`canSubmit = isPortTextAcceptable && isSecretAcceptable` |
+| 同上 | `:245` | `toString()` 打 `secret=<redacted>` |
+| 同上 | `:342` | 工厂接口新增第 6 参重载 `open(port, tls, receipt, host, allowExplicitHost, auth)`，默认转 5 参重载 ⇒ 既有测试替身零改动 |
+| 同上 | `:412-419` | 口令闸门（在 TLS 检查之后、`starting` 单飞与 `factory.open` 之前） |
+| 同上 | `:426` | `SourceSyncTransferOptions.withSecret(form.secret.toByteArray(Charsets.UTF_8))`，原文只活在这个局部变量里 |
+| 同上 | `:577` | `const val SECRET_MISSING = "listen-secret-missing"` |
+| 同上 | `:610` / `:619` | 生产工厂：5 参 `open` 委托成 6 参（`auth = null`）；6 参 `open` 承载原 body |
+| 同上 | `:646` / `:650` / `:670` | `ImportSession(service, receipt, auth)`；`receiveOnce() = service.receiveAndImport(auth = auth, receipt = receiptOptions)` |
+| `feature/settings/.../sync/SourceSyncImportScreen.kt` | `:124` / `:127` | 两个 tag：`sync.listen.auth`、`sync.listen.secret` |
+| 同上 | `:847-850` | 认证 `Checkbox`：`enabled = !listening && !receiving` |
+| 同上 | `:858-867` | 口令框：`PasswordVisualTransformation()` + `KeyboardType.Password` + `enabled = !listening && !receiving && form.auth` |
+| 同上 | `:870` | `AUTH_HINT` 说明文字（把两端的码写清） |
+
+控件次序刻意排成「认证开关 → 口令框 → 说明」，与发送卡（`:1056` / `:1067`）同一顺序，用户在两卡之间来回时不必重新学。
+
+### 29.5 JVM 用例（`SourceSyncListenerControllerTest`，新增 5 例）
+
+| # | 用例 | 行号 | 钉住的行为 |
+| --- | --- | --- | --- |
+| 1 | `defaultFormAsksForNoSecretAndPassesNoAuthOptions` | :851 | 缺省表单传到工厂的第 6 参是 `null`，`authCalls` 记账 1 次 |
+| 2 | `authOnWithoutASecretIsRefusedBeforeAnySocket` | :863 | 开关开、口令空 ⇒ `Failed(null, listen-secret-missing, SECRET_REQUIRED)`、端口 null、`openCalls == 0`、状态行是 `失败：listen-secret-missing（…）` |
+| 3 | `authOnWithASecretPassesOptionsCarryingTheSecretBytes` | :883 | 开关开 + 口令 `s3cret` ⇒ `auth.authenticate` / `auth.hasSecret` 均 true、`auth.secret` 与 `s3cret` 的 UTF-8 字节逐字节相等、状态行不含口令 |
+| 4 | `aTypedSecretWithTheSwitchOffIsIgnored` | :899 | 开关关时口令框内容不参与判定（传 `null`），不因为「框里有字」就偷偷认证 |
+| 5 | `theSecretNeverAppearsInTheFormToString` | :909 | `toString()` 含 `secret=<redacted>` 且不含口令原文 |
+
+FakeFactory 侧新增 `var lastAuth: SourceSyncTransferOptions?`（`:137`）、`var authCalls`（`:139`）与第 6 参 override（`:175`），只记账不改行为。
+
+### 29.6 androidTest（`SourceSyncSectionsScreenTest`，新增 3 例）
+
+| # | 用例 | 行号 | 钉住的行为 |
+| --- | --- | --- | --- |
+| 1 | `theListenCardOffersAnAuthSwitchAndASecretField` | :210 | 开关在树里、缺省关闭；口令框在树里但缺省禁用；`AUTH_LABEL` 与 `AUTH_HINT` 都显示 |
+| 2 | `theListenFormCarriesTheAuthSwitchAndTheSecretVerbatim` | :226 | 点开关 → 填 `s3cret` → 点开始，回调收到的表单 `auth = true`、`secret = "s3cret"` |
+| 3 | `whileListeningTheAuthSwitchAndTheSecretAreLocked` | :246 | 已监听时两控件都禁用（避免「再开一个」） |
+
+滚动纪律同 §26/§27/§28：页尾节点一律先 `performScrollTo()`。
+
+### 29.7 实跑证据（本机）
+
+串行执行，跑前 `gradlew --stop` 清 daemon；同一时段机器上没有 dotnet 大套件。
+
+```
+$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
+$env:ANDROID_HOME="C:\Users\55160\AppData\Local\Android\Sdk"
+$env:GRADLE_OPTS="-Xmx2560m -XX:MaxMetaspaceSize=896m"
+gradlew.bat --max-workers=2 --rerun-tasks :feature:settings:testDebugUnitTest :feature:settings:assembleDebugAndroidTest
+```
+
+`BUILD SUCCESSFUL in 6m 15s`、`212 actionable tasks: 212 executed`（日志 `D:/mh-verify/w6-53-gradle.log`）。
+
+| 项 | 结果 |
+| --- | --- |
+| feature:settings | 16 套件 / **267 例** / 0 失败 / 0 错误 / 0 跳过（基线 262 + 本节 5；`SourceSyncListenerControllerTest` 38/38） |
+| core:common / core:database | 未改代码，沿用 §28.7 的 492 / 172（本节只动 feature/settings） |
+| androidTest 编译 | `assembleDebugAndroidTest` 成功，`settings-debug-androidTest.apk` = **20426910 B**（2026-10-25 00:37:14） |
+| APK 内容抽查 | 大小与 W6-49 时巧合相同，故解包核对：3 个新用例的方法名都在 `classes17.dex`（98412 B），`sync.listen.auth` 与 `listen-secret-missing` 在 `classes12.dex`（676188 B），`SourceSyncSectionsScreenTest.class` 34871 B @ 00:35:17 —— 确属本次编译产物 |
+| 收尾 | `gradlew --stop`（要带对 `JAVA_HOME`，否则报 `JAVA_HOME is set to an invalid directory`）→ `1 Daemon stopped`，残留 java 进程 0；仓库内无 `hs_err_pid*.log` |
+| 设备执行 | **未执行**：`adb devices` 无设备，按纪律不起模拟器；3 例 instrumentation 的实跑证据由 CI 的 visual-instrumentation（API 32 / 36）提供 |
+
+### 29.8 未覆盖（如实列出）
+
+1. **真实两机未跑（NOT_RUN）**：本机用例不 bind / 不 dial 任何非回环地址，也没有第二台设备来对齐口令；「两台机器开着认证真的连上了、密码错了真的被判 `auth-mismatch`」仍是两端 NOT_RUN。
+2. **「口令错 / 重放」的控制器级用例没有**：那四条线上码的判定在 core 层（W6-25 / W6-31 已有用例），本节只测「本端配置自相矛盾」与「选项透传」，没有构造 `auth-mismatch` 的 outcome 走到界面状态。
+3. **口令在 Kotlin `String` 里不可擦除**：不落盘、不进状态行、不进 `toString`、不进导出，但内存里仍是不可变字符串，dump 可见。要真正擦除得把表单改成 `CharArray` / `ByteArray` 并在 UI 层就不留字符串，那是另一件事。
+4. **Hilt 注入路径与进程重建未覆盖**：用例直接构造控制器 / `setContent`，旋转屏幕后口令框内容是否保留未测。
+5. **本套件仍不入 required-suite**：`.github/workflows/android-ci.yml` 的 33 条 `--required-suite` 里没有这两个套件（W6-55 的内容；改 `android-ci.yml` 必须同步跑 `.github/scripts/tests` 的 unittest）。
+6. **无视觉回归**：无障碍 / 深色主题 / 200% 字体 / 超长口令的换行与遮挡都未测。
+
+### 29.9 下一步
+
+- **W6-52b**：发送端（拨号出去）与「接收」卡（拨号进来）补齐同一套地址开关，语义照 §28.2。
+- **W6-54**：把 `acceptTimeoutMs` / `readTimeoutMs` / `closeBudgetMs` 做成界面旋钮（现在只在库层有默认值）。
+- **W6-55**：把 `SourceSyncHostAddressTest`、本节的 `SourceSyncListenerControllerTest` 等钉进 `--required-suite`。
+- 两端跨机真题仍需两台机器与用户授权窗口，见 §28.8 第 2 条。
