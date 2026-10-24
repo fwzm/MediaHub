@@ -2298,3 +2298,108 @@ androidTest APK `feature/settings/build/outputs/apk/androidTest/debug/settings-d
 2. 门禁自带单测（改 `.github/workflows/` 或 `.github/scripts/` 后必跑）：`python -m unittest discover -s .github/scripts/tests` → `Ran 54 tests in 104.789s` / `OK`。
 
 **未覆盖**：套件只验证闸门本身（一次都不真拨非回环地址，理由见 §31.8 第 1 条）；设备执行仍 DEVICE_UNVERIFIED；真实两机 NOT_RUN；CI 侧「37 条 `--required-suite` 都真跑过」的证据记在 PR #33 的 exact-SHA 表里，本节写就时该 head 的 run 尚未回执。
+
+## 32. W6-57：回环上的四维组合矩阵（TLS × 认证 × 回执 × 投递）
+
+### 32.1 动机
+
+`D:/mh-verify/android-w6-gap-table.md` 第 5 条：Windows 侧有 `windows/tools/acceptance/w6/transfer-tls-auth.ps1`（20 例，真进程）与 presenter-e2e（14 例），Android 侧只有**单维**套件——`SourceSyncTransferRoundTripTest`（分块/挑战/截断）、`SourceSyncTransferAuthTest`（五码 + tag 向量）、`SourceSyncTlsTest`（握手 + 指纹钉扎）、`SourceSyncReceiptTest`（0x04 四码）、`SourceSyncDeliveryTest`（`delivery-unconfirmed`）。每一维各自成立，但**没有一处把四个开关同时打开放在同一条真实回环 socket 上跑**：谁压掉谁（回执 vs 投递）、失败落在发送端还是监听端、TLS 之后的码是否与明文逐字相同，都没有断言钉住。
+
+W6-57 补的正是这一格：新增 `core/common/src/test/kotlin/com/mediahub/core/common/sync/SourceSyncTransferMatrixTest.kt`，20 个格子，每格起一枚真监听端、一枚真客户端，走真实 TCP（含真实 JSSE 握手），逐格断言外部可观察结果与稳定码。
+
+### 32.2 矩阵（20 格）
+
+| 格 | 开什么 | 发送端结果 | 监听端结果 | 钉住的外部语义 |
+| --- | --- | --- | --- | --- |
+| 1 | 全关 | `Ok`，`delivery = null` | `Received`，信封逐字节等于 golden | 基线：两个都不开会回任何字节 |
+| 2 | 只给挑战 | `Ok` | `Received.challenge` 回显同一挑战 | 挑战只是回显，不是认证 |
+| 3 | 两端认证（同口令） | `Ok` | `Received` | 认证单开可通过 |
+| 4 | 客户端口令错 | `Ok`（不读回话，看不见失败） | `auth-mismatch` | 失败只落在监听端——想确认必须开回执/投递 |
+| 5 | 监听端要认证、客户端不带 tag | `Ok` | `auth-missing` | 「没送 tag」与「没宣布挑战」不是一个码 |
+| 6 | 监听端开认证却无口令 | 写完即 `Ok` | `auth-secret-unavailable` | 配置错误在读帧时暴露，不自作主张跳过校验 |
+| 7 | 只开回执 | `Ok` | `receiptWritten = true` | 0x04 真写出来了 |
+| 8 | 客户端等回执、监听端沉默 | `receipt-missing` | `receiptWritten = false` | 没写回执的监听端不谎称写过 |
+| 9 | 只开投递 | `Ok(..., delivery = Confirmed(bytesRead = 0))` | `Received` | 对端只关连接、不回字节 |
+| 10 | 对端既不关也不说话（裸 ServerSocket） | `delivery-unconfirmed` | ——（本格刻意不用监听端） | 预算耗光即折码，不抛异常 |
+| 11 | 回执 + 投递 | `Ok`，`delivery = null` | `receiptWritten = true` | 回执优先，投递确认被忽略 |
+| 12 | 只开 TLS | `Ok` | `Received` | 握手指纹钉对即可通行 |
+| 13 | 指纹钉错 | `tls-fingerprint-mismatch` | 握手前就断 | 一个信封字节都不写 |
+| 14 | TLS + 认证 | `Ok` | `Received` | tag 帧走加密流 |
+| 15 | TLS + 口令错 | `Ok` | `auth-mismatch` | 加密后码与明文逐字相同 |
+| 16 | TLS + 回执 | `Ok` | `receiptWritten = true` | 0x04 写在 `TlsStream` 上 |
+| 17 | TLS + 投递 | `Ok(..., Confirmed)` | `Received` | graceful close 也能当 FIN |
+| 18 | TLS + 认证 + 回执 | `Ok` | `Received` + `receiptWritten` | 三维同时开不互相干扰 |
+| 19 | TLS + 认证 + 投递 | `Ok(..., Confirmed)` | `Received` | 认证成功后 graceful close 仍可判投递 |
+| 20 | 四维全开 | `Ok` | `Received` + `receiptWritten` | 四码集合互不污染 |
+
+### 32.3 一条协议事实：认证必须同时宣布挑战（首跑 6 红的根因）
+
+tag 的 MAC 输入是「挑战的 UTF-8 字节 ‖ 信封字节」，所以**没有挑战就没有可绑定的 nonce**：发送端在 `sendTo` 里本地就报 `auth-required` 并**一个字节都不写**（detail 原文 `Authentication is on but no challenge was announced; the challenge is the nonce the tag binds to, so nothing was sent.`）。对端只会看到一条空连接，因而报 `frame-truncated`。
+
+W6-57 首跑正是栽在这里：格 3 / 14 / 19 只开了认证没给挑战，于是发送端本地拒绝、监听端读到空流；格 4 / 15 期望 `auth-mismatch` 却拿到 `frame-truncated`（同上原因）；格 5 期望 `auth-required` 实际是 `auth-missing`——`auth-required` 只属于「本端要认证却没挑战」，不属于「对端没送 tag」。修法是每格开认证就同时给挑战，并把格 5 的期望改成 `auth-missing`；类 KDoc 里把这条协议事实写下来，后续任何人加格子都不会再踩。
+
+### 32.4 实现落点
+
+| 位置 | 内容 |
+| --- | --- |
+| `SourceSyncTransferMatrixTest.kt:374` | `private fun exchange(tls, challenge, listenerAuth, clientAuth, listenerReceipt, clientReceipt, delivery, clientPin): Outcome`——起监听（`port = 0` 由系统分配）→ 后台 `ReceiveCall` → 主线程 `SendCall` → 收两侧结果，`finally` 关监听 |
+| `:413` | `private fun silentPeer(server: ServerSocket): Thread`——裸 ServerSocket 读走帧流后挂住不关，只给格 10 用 |
+| `:433` / `:466` | `ReceiveCall` / `SendCall` 两个后台线程包装（`join(30_000)`，抛过异常就让测试红，不吞） |
+| `:68`–`:341` | 20 个 `cellNN_*` 用例（行号见 32.5） |
+| `:551` | `assertSentOk` / `assertReceived` / `failedReasonOf` / `listenerCodeOf` / `describeSent` / `describeListener` |
+
+纪律写在类 KDoc 里：**只碰 `127.0.0.1`**。非回环地址一格都不 bind、不拨——那会让 Windows 弹防火墙授权窗，违背 GUI 纪律；跨机证据仍记 NOT_RUN。
+
+### 32.5 用例清单（20 例，行号）
+
+| 行 | 用例 |
+| --- | --- |
+| `:68` | `cell01_nothingEnabledIsThePlainBaseline` |
+| `:82` | `cell02_challengeAloneIsEchoedVerbatim` |
+| `:94` | `cell03_authAloneWithTheSameSecretSucceeds` |
+| `:111` | `cell04_aWrongSecretIsMismatchOnTheListenerAndInvisibleToTheSender` |
+| `:128` | `cell05_aListenerThatRequiresAuthRefusesAPeerWithoutATagFrame` |
+| `:139` | `cell06_aListenerWithAuthButNoSecretSaysSecretUnavailable` |
+| `:155` | `cell07_receiptAloneIsWrittenAndAwaited` |
+| `:166` | `cell08_awaitingAReceiptFromASilentListenerIsReceiptMissing` |
+| `:176` | `cell09_deliveryAloneIsConfirmedByTheListenerClosing` |
+| `:194` | `cell10_aPeerThatNeverClosesLeavesDeliveryUnconfirmed` |
+| `:209` | `cell11_theReceiptWinsWhenBothAreEnabled` |
+| `:224` | `cell12_tlsAloneCarriesTheEnvelope` |
+| `:237` | `cell13_aWrongPinStopsBeforeAnyEnvelopeByte` |
+| `:257` | `cell14_tlsPlusAuthSucceeds` |
+| `:270` | `cell15_tlsPlusAWrongSecretFailsAtTheTagFrame` |
+| `:282` | `cell16_tlsPlusReceiptConfirmsOverTheEncryptedStream` |
+| `:294` | `cell17_tlsPlusDeliveryIsConfirmedByAGracefulClose` |
+| `:306` | `cell18_tlsPlusAuthPlusReceiptSucceeds` |
+| `:323` | `cell19_tlsPlusAuthPlusDeliverySucceeds` |
+| `:341` | `cell20_allFourDimensionsTogetherStillSucceed` |
+
+### 32.6 本机实跑证据（EXECUTED_PASS）
+
+- 单套件：`gradlew.bat --max-workers=2 :core:common:testDebugUnitTest --tests "com.mediahub.core.common.sync.SourceSyncTransferMatrixTest"` → `BUILD SUCCESSFUL in 1m 38s`；XML `<testsuite ... tests="20" skipped="0" failures="0" errors="0" ... time="2.408">`。日志 `D:/mh-verify/w6-57-matrix.log`。
+- 模块全量（`--rerun-tasks :core:common:testDebugUnitTest`）→ `BUILD SUCCESSFUL in 2m 43s`、`17 actionable tasks: 17 executed`；XML 合计 **36 套件 / 523 例 / 0 失败 / 0 错误 / 11 跳过**（503 + 20），矩阵套件在列。日志 `D:/mh-verify/w6-57-core-full.log`。
+- 首跑（未修前）：`BUILD FAILED in 1m 39s`，`20 tests completed, 6 failed`（格 3/4/5/14/15/19），原因见 32.3。
+
+### 32.7 门禁（W6-57 的一部分）
+
+`.github/workflows/android-ci.yml` 增加注释两行 + `--required-suite com.mediahub.core.common.sync.SourceSyncTransferMatrixTest`，`--required-suite` **37 → 38** 条；`yaml.safe_load` 自检通过（`jobs = 2`）。改门禁必须同步跑的门禁自带单测：`python -m unittest discover -s .github/scripts/tests` → `Ran 54 tests in 94.641s` / `OK`。日志 `D:/mh-verify/w6-57-gate-unittest.log`。
+
+矩阵只碰回环，CI runner 上不需要任何设备或额外服务，因此可以直接进单元门禁（与 androidTest 无关）。
+
+### 32.8 未覆盖
+
+1. **真实两机**：`cross-machine` 证据两端 NOT_RUN——需要第二台机器，且要让 Windows 弹一次防火墙授权（用户当面要求 GUI/网络类验证走空闲门禁，本轮不做）。
+2. **设备执行**：矩阵是 JVM 单元测试（跑在 CI 的 ubuntu runner 的 JVM 上），未在任何 Android 设备上执行过；`DEVICE_UNVERIFIED`。
+3. **跨进程重放**：`auth-replayed` 需要共享 `SourceSyncNonceCache` 跨两封信封，本矩阵每格只发一封，重放语义仍只由 `SourceSyncTransferAuthTest` 的流级用例覆盖（`:411` 起）。
+4. **客户端身份证书 / mTLS**：`SourceSyncTlsIdentity` 只用于监听端服务端证书，矩阵没有「客户端出示证书」这一维（协议不支持）。
+5. **大信封耗时**：矩阵用 `windows-envelope-device-a.json`（单块），分块与 `payload-too-large` 走 `SourceSyncTransferRoundTripTest`，矩阵不重复测吞吐。
+6. **视觉/界面**：矩阵不碰 Compose，界面侧的开关联动仍由 `SourceSyncSectionsScreenTest` 的 instrumentation 覆盖。
+7. **CI 实证**：本节的 38 条套件与 2098 唯一用例要到下一次 push 后的 Android CI 上才有 exact-SHA 证明（本节写就时只有本机 `unittest` + gradle）。
+
+### 32.9 下一步
+
+1. 监听端取消接收（缺口表 #8 的另一半：`SourceSyncReceiveController` 只有 `receive`/`clear`，没有 cancel，真实 Socket 中途取消 NOT_RUN）。
+2. W6-47 跨机契约在 Android 侧的引用点：把 `docs/cross-device/W6-47-CROSS-MACHINE.md` 的结论 A/B/C 写进 `docs/android-source-sync-transfer.md` 的索引，让两端文档互指。
+3. 真实两机取证（等用户授权与第二台机器）。
+
