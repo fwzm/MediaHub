@@ -98,3 +98,14 @@ These simulations do not run tests or establish behavior compatibility. #33/#39 
 - Real EngineProbe on committed sample, pinned native DLL: exit 0 / PASS, file-loaded, duration 4 s, time-pos 3 s, no error logs. Headless software decode only; GPU/HDR/audio output and GUI behavior remain unverified.
 - Windows CI improvement: explicitly check out and record expected PR head; remove the two previous generated TRX reports before execution; raise observed-suite floors to 1518 and 104. YAML parsed and the extracted real TRX gate passed locally.
 - PR16 cannot be imported unchanged because its historical document still contained real server origins. A sanitized snapshot is ported without making the original document commit a parent; original revision and local evidence are retained. This is a privacy correction, not a new device pass.
+
+## Combined candidate status after seek reconciliation
+
+- PR46 current remote head a9f5e948: exact-head CI 40094375055 SUCCESS, all three jobs. Downloaded revision.json checkout/head match. Fresh XML: 200 suites / 1561 unique tests / 0 failures / 0 errors / 0 skips.
+- PR53 current remote head 507b9ebe: ordinary fast-forward push from original 970df7fc; local production baseline 8/0, both mutants 8/4 assertion failures, restored final 8/0. New exact-head CI 40096311477 is pending.
+- Combined merge 005d6cb includes current PR46 and PR53, Windows 96b6a9e, source-sync b7890aa and historical PR20. All 36 required Android suite names from these branches are retained.
+- PR16 is a sanitized content port, rather than an ancestry merge of a document containing real service origins. The original branch is not eligible for direct merge unchanged.
+- Windows src/tests/tools are byte-identical between d150b4a (native validation above) and the combined candidate. This is scoped source equivalence, not a new full-head build claim.
+- Full combined Android unit/APK/lint validation starts after the next documentation commit. Until it completes, combined candidate status is PARTIAL / CI_PENDING; no old green run certifies this tree.
+- PR6 remains unresolved: 13 source conflicts require invariant-by-invariant review and preservation of current implementations; it must not be merged by selecting an entire old production tree.
+- No PR merge/close/mark-ready, main write, or further history rewrite has been performed this round.
