@@ -57,7 +57,7 @@ import java.util.concurrent.atomic.AtomicReference
  *    servers.syncRecordRevision 就是本端的基线；
  * 3. 监听端自己返回的稳定码（auth-mismatch / auth-replayed / tls-*）。
  *
- * 门禁：MH_W638_SYNC_DLL 指向 MediaHub.SyncCli.dll 才跑，否则整类 skipped（CI 上必须跳过，
+ * 门禁：MH_W638_SYNC_DLL 指向 MediaHub.SyncCli.dll 才跑，否则整类 skipped（普通 Linux 单测环境，
  * 本套件刻意不进 android-ci.yml 的 --required-suite 名单）。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -941,6 +941,6 @@ class SourceSyncListenerInteropTest {
         private const val MAIN_FIXTURE = "mediahub-sync-test"
         private const val P12_PASSWORD = "mediahub-tls-test"
         private const val SKIP_MESSAGE =
-            "MH_W638_SYNC_DLL 没有指向 MediaHub.SyncCli.dll，跳过反向跨端联调（CI 上必须跳过）"
+            "MH_W638_SYNC_DLL 没有指向 MediaHub.SyncCli.dll，跳过反向跨端联调（Windows interoperability job 禁止跳过）"
     }
 }
