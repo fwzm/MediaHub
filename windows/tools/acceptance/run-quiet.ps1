@@ -29,7 +29,7 @@ pwsh -File windows/tools/acceptance/run-quiet.ps1 -Suites all -WaitForIdleMinute
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('u1', 'u2', 'u3', 'u4', 'all')][string[]]$Suites = @('all'),
+    [ValidateSet('u1', 'u2', 'u3', 'u4', 'w6', 'all')][string[]]$Suites = @('all'),
     [ValidateSet('emby', 'jellyfin')][string[]]$Servers = @('emby', 'jellyfin'),
     [int]$MinIdleSeconds = 180,
     [int]$WaitForIdleMinutes = 0,
@@ -49,6 +49,7 @@ $suitePaths = @{
     u2 = Join-Path $here 'u2\autoplay-gui.ps1'
     u3 = Join-Path $here 'u3\favorite-gui.ps1'
     u4 = Join-Path $here 'u4\playlists-gui.ps1'
+    w6 = Join-Path $here 'w6\sync-page-gui.ps1'
 }
 
 if ($Suites -contains 'all') { $Suites = @('u1', 'u2', 'u3', 'u4') }
