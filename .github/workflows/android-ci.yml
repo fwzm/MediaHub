@@ -162,6 +162,8 @@ jobs:
             --required-suite com.mediahub.core.common.sync.SourceSyncTlsTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferListenerTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncDeliveryTest \
+            --required-suite com.mediahub.feature.player.PlayerSeekBarContractTest \
+            --required-suite com.mediahub.feature.player.PlayerSeekContractRobolectricTest \
             --require-complete-suites
 
       - name: Lint
