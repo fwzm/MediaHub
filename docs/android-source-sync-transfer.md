@@ -997,3 +997,92 @@ JUnit XML 亲数（`build/test-results/testDebugUnitTest/*.xml` 逐文件累加�
 4. 只在本机回环上验证；非回环、跨机、防火墙/NAT、手机与 PC 不同网段都没测（按设计也不允许非回环）。
 5. 没有 Compose UI 测试：九枚 testTag 已就位，只验证到「`SourceSyncImportScreen` 新参数有默认值、既有调用点不改」这一层。
 6. 连续接收只测到两轮，也没有长时间挂监听的资源压测（accept 超时循环、反复开关端口）。
+
+## 21. 反向跨端联调（W6-38）
+
+第 18 节验的是「Android 发、Windows 收」；本节把方向反过来：**Windows 的 `transfer send` 作为发送方，Android 的监听端（第 19 节）作为接收方**。两个方向都跑过一遍，跨端才不是单向自证。
+
+### 21.1 范围与边界
+
+- 被测对象是 `SourceSyncListenerImportService`（第 19 节）+ 真 Windows CLI 子进程。**不是假对端**：每一例都用 `ProcessBuilder` 起一个新进程 `dotnet <MediaHub.SyncCli.dll> transfer send ...`，读完 stdout 的单份 JSON 与 stderr，再比对 Android 侧**真实的** Room `servers` 表行。
+- Android 没有 Windows 的 `sync-sources.json` / `sync-baseline.json`；本端的等价外部证据是 Room `servers` 表行（`syncSourceId` / `syncRecordRevision` / `type` / `syncSourceTypeRaw` / 端点行），「基线」就是 `syncRecordRevision` 列。
+- 断言只认三类外部证据：①子进程退出码与 `--json` 字段（`sourceCount` / `bytes` / `frames` / `tls` / `certificateFingerprint` / `secretEnv` / `deliveryConfirmed`）；②Room 真实行；③监听端返回的稳定码。**任何一例都不只看退出码**——`transfer send` 的 exit 0 只代表字节写进了 socket（第 18 节已实测：对端读都不读直接 close，它照样 exit 0）。
+- 文件：`core/database/src/test/kotlin/com/mediahub/core/database/sync/SourceSyncListenerInteropTest.kt`（9 例；JUnit **4** + Robolectric `@Config(sdk=[34])`，与 W6-32 一样用 `org.junit.Assume` 门控——本仓 `core:database` 的测试依赖里没有 JUnit 5）。
+- TLS 夹具 `core/database/src/test/resources/tls/mediahub-sync-test.p12` 是从 `core/common/src/test/resources/tls/` **同源复制**的（2454 B，sha256 `8b7329f862f550a8cd33edb38e5d8b9740825a3ec898984a974581941af14bc9`，口令 `mediahub-tls-test`，SPKI pin `2bb12d139178ee3b0f219e409a89c99b51be165914e21189eeb039b2e4dd37ce`）：`core:database` 看不到别的模块的 test resources，故复制而非引用，**不自造证书**。
+
+### 21.2 运行方式与环境变量
+
+```text
+pwsh> $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
+pwsh> $env:ANDROID_HOME="$env:LOCALAPPDATA\Android\Sdk"
+pwsh> $env:MH_W638_SYNC_DLL="D:\mh-w6\windows\src\MediaHub.SyncCli\bin\Debug\net10.0\MediaHub.SyncCli.dll"
+pwsh> cmd /c "cd /d D:\deepseek_test\MediaHub_Win && gradlew.bat :core:database:testDebugUnitTest --console=plain --rerun-tasks --no-daemon -Pkotlin.compiler.execution.strategy=in-process > D:\mh-verify\w6-38-full.log 2>&1"
+```
+
+| 变量 | 必需 | 含义 |
+| --- | --- | --- |
+| `MH_W638_SYNC_DLL` | 是 | `MediaHub.SyncCli.dll` 的绝对路径；没有或不是普通文件 → 整类 9 例 `skipped`（见 21.4 第 3 次实跑） |
+| `MH_W638_DOTNET` | 否 | dotnet 可执行文件，缺省 `dotnet` |
+| `MH_W638_SECRET` | 认证例用 | 口令**只从子进程环境读**，不进命令行（与 CLI 的 `--secret-env` 同口径） |
+
+必须 `--no-daemon`：Gradle daemon 的环境是它启动那一刻的快照，测试 worker 继承不到新设的 `MH_*` 变量，会整套 skipped 而「绿」。
+
+### 21.3 九例
+
+| # | 用例 | Windows 对端命令 | 断言要点 |
+| --- | --- | --- | --- |
+| 1 | `plaintextSendIsImportedAndWritesTwoRows` | `transfer send --to 127.0.0.1:<port> --root <tmp> --device win-c --json` | exit 0；`sourceCount=2`、`frames=1`、`bytes` == 收到的信封 UTF-8 长度、`frames == chunkCount(bytes)`；Room 两行（emby：`EMBY` / raw `emby` / rev 3 / `alice` / 端点 `http://127.0.0.1:8097` 为 primary；jellyfin：rev 2）；`appliedCount=2` |
+| 2 | `tlsPinnedSendIsAcceptedByTheListener` | 加 `--tls --expect-fingerprint <pin>` | exit 0；JSON `tls=true`、`certificateFingerprint == expectFingerprint ==` 身份指纹；`service.tlsEnabled`；`appliedCount=2` |
+| 3 | `wrongPinIsRefusedBeforeAnyEnvelopeByteIsWritten` | `--tls --expect-fingerprint <首字符改一位>` | Windows 侧 exit≠0 且 stderr 含 `tls-fingerprint-mismatch`；Room 0 行；**监听端拿到的是帧层码**（`frame-truncated` 或 `io-failed`）——钉扎在客户端，服务端握手成功后才看到对端关流（21.5 第 1 条） |
+| 4 | `authenticatedSendIsImportedOnlyAfterTheTagFrameIsVerified` | `--authenticate --secret-env MH_W638_SECRET` | exit 0；`authenticate=true`、`secretEnv=MH_W638_SECRET`、`frames == chunkCount + 2`（挑战帧 + tag 帧）；`appliedCount=2` |
+| 5 | `wrongSecretIsRejectedByTheListenerAndNothingIsWritten` | 同上，口令 `interop-secret-bravo`（监听端持 `alpha`） | 监听端 `TransferFailed(auth-mismatch)`；Room 0 行；`deliveryConfirmed` 为 null；**Windows 的 stderr 里没有 `auth-mismatch`**（发送端没有回执通道，看不到自己被拒） |
+| 6 | `replayedFramesAreRefusedAsAuthReplayed` | 先经 `RecordingRelay` 代理端口把 Windows→本端的 782 B 原样录下，再把同一串字节裸写给同一个监听端 | 录制长度 == `envelope + 4 + 9 + 27 + 37`；第二次 `TransferFailed(auth-replayed)`；Room 仍 2 行且逐行 `syncSourceId + syncRecordRevision` 不变。CLI 没有固定 nonce 开关（`CreateNonce()` 每次随机），重放只能录真实帧 |
+| 7 | `plaintextSendAgainstATlsListenerIsRejectedOnTheAndroidSide` | 监听端 TLS，Windows **明文**发 | 监听端给 `tls-` 前缀码（实测 `tls-handshake-failed`）；Room 0 行；`deliveryConfirmed` 为 null |
+| 8 | `tlsAndAuthenticationComposeInOneConnection` | `--tls --expect-fingerprint <pin> --authenticate --secret-env ...` | exit 0；`tls=true` 且 `authenticate=true`；`appliedCount=2` |
+| 9 | `theSecondSendOfTheSameSourcesWritesNothingNew` | 同一 `--root` 连发两次 | 第二次 `appliedCount=0`、`ignoredCount=2`、Room 仍 2 行（第二封规划成 `NO_CHANGE`） |
+
+### 21.4 实测
+
+三次实跑全部 `--rerun-tasks`（非增量），跑前 `Get-Process java` 为 0：
+
+1. **定向单类**（`--tests com.mediahub.core.database.sync.SourceSyncListenerInteropTest`）：`BUILD SUCCESSFUL in 1m 39s` / `70 actionable tasks: 70 executed` / EXIT=0；XML `tests=9 skipped=0 failures=0 errors=0 time=6.816s`。
+2. **全模块带 DLL**：`BUILD SUCCESSFUL in 1m 50s` / `70 actionable tasks: 70 executed` / EXIT=0；**18 套件 / 167 例 / 0 失败 / 0 错误 / 0 skipped**（基线 17 / 158 → **+1 套件 / +9 例**，扣掉新增 9 例仍 158，无回归）。
+3. **全模块不带 `MH_W638_SYNC_DLL`**：`BUILD SUCCESSFUL in 1m 55s` / EXIT=0；18 套件 / 167 例 / 0 失败 / 0 错误 / **9 skipped**，跳过原因原文：`MH_W638_SYNC_DLL 没有指向 MediaHub.SyncCli.dll，跳过反向跨端联调（CI 上必须跳过）`。
+
+逐例耗时（带 DLL，取自 JUnit XML；整类 6.816 s）：
+
+| 用例 | 耗时(s) |
+| --- | --- |
+| `plaintextSendIsImportedAndWritesTwoRows` | 0.283 |
+| `tlsPinnedSendIsAcceptedByTheListener` | 3.760 |
+| `wrongPinIsRefusedBeforeAnyEnvelopeByteIsWritten` | 0.379 |
+| `authenticatedSendIsImportedOnlyAfterTheTagFrameIsVerified` | 0.362 |
+| `wrongSecretIsRejectedByTheListenerAndNothingIsWritten` | 0.363 |
+| `replayedFramesAreRefusedAsAuthReplayed` | 0.301 |
+| `plaintextSendAgainstATlsListenerIsRejectedOnTheAndroidSide` | 0.334 |
+| `tlsAndAuthenticationComposeInOneConnection` | 0.442 |
+| `theSecondSendOfTheSameSourcesWritesNothingNew` | 0.591 |
+
+（第一例 TLS 慢到 3.76 s 是本机 JSSE 首次建 SSLContext/KeyStore + 真子进程冷启动的固定成本，不是重试。）
+
+修红一条（**断言错、实现对**）：第 1 轮定向跑 `BUILD FAILED in 1m 45s`，9 例 8 绿 1 红。`wrongPinIsRefusedBeforeAnyEnvelopeByteIsWritten` 原先断言「监听端给 `tls-` 前缀码」，实测 `frame-truncated`：指纹钉扎在客户端（Windows 的 SslStream 握手成功后才比对证书，随即关流），服务端握手本身成功、接着读帧读到 EOF。改为断言帧层码（`frame-truncated` / `io-failed`）并加注释；Windows 侧证据（exit≠0 + stderr 里的 `tls-fingerprint-mismatch`）与「Room 0 行」**未放宽**。
+
+### 21.5 跨端事实与未覆盖
+
+实测出来的跨端事实（写下来免得下次重新踩）：
+
+1. **指纹钉扎只在客户端**：pin 失配时服务端看不到 `tls-fingerprint-mismatch`，只看到「TLS 之上对端直接关流」→ `frame-truncated`。两端日志对不上是正常的，判据要分侧看。
+2. `transfer send` 的 exit 0 **不代表对端接受**：没有 `--confirm-delivery` / `--await-receipt` 时没有任何回执证据；加了 `--confirm-delivery` 也只是等对端 close（探针里对端只读不收、照样 `deliveryConfirmed=true`）。
+3. **发送端看不到失败原因**：错口令例里 Windows 侧只报它自己的错误，stderr 里没有 `auth-mismatch`；「本端拒收」的证据只能从监听端码 + Room 行数取。
+4. 线长可预算：明文 = `4 + 9 + bytes`；认证再 `+ 27`（挑战帧 = 4 + 1 + 22 字符 nonce）`+ 37`（tag 帧 = 4 + 1 + 32）。`frames`：明文 = `chunkCount(bytes)`、认证 = `chunkCount + 2`。
+5. CLI **没有固定 nonce 开关**（`SourceSyncTransferAuthenticator.CreateNonce()` 每次随机），所以进程级重放只能靠录制真实帧再原样重放。
+6. 明文客户端打 TLS 监听端时，**服务端**能给出 `tls-handshake-failed`——与第 1 条不同：那条是「握手成功后对端关流」，这条是「握手本身就失败」。
+7. 反向没有与 Windows 的 `transfer serve` 做对称测试（那是第 18 节的方向）；本节的 Windows 侧只用 `transfer send`。
+
+未覆盖：
+
+1. 未跑 instrumentation、未在真机上点过监听区块：本节证据是 JVM（Robolectric）单测 + 真子进程，不含设备侧行为。
+2. 只在本机回环 `127.0.0.1` 上跑：非回环、跨机、防火墙/NAT、手机与 PC 不同网段都没测（按设计也不允许非回环）。
+3. 只验证了「Windows 发一封、Android 收一封」：多封连发、长信封（多数据块）、`--await-receipt` / `--send-receipt`（0x04 回执）都没测。
+4. 认证开关今天没进界面（20.8 第 2 条）：本节认证例是直接构造 `SourceSyncTransferOptions.withSecret(...)` 传进监听端，不是用户点出来的。
+5. 本套件**不入** `.github/workflows/android-ci.yml` 的 required-suite（仍 31 条）：CI 上没有 Windows CLI 与 dotnet，整类按设计 skipped。
