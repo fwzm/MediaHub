@@ -1230,3 +1230,125 @@ CI 跳过行为实测（去掉 `MH_W638_SYNC_DLL` 单跑该套件）：`BUILD SU
 4. 未做「同一连接多封」：回执是一封一次（监听端一次 `receiveOnce` 只回一个字节），没有流水线/批量语义。
 5. 未测对端写半个回执或多写字节的行为：读端只读一个字节，多余字节留给后续（或就此丢弃），没有专门用例钉住「多写字节会破坏下一封」这件事。
 6. 跨端三例仍**不入** `.github/workflows/android-ci.yml` 的 required-suite（仍 31 条）：CI 上没有 dotnet 与 Windows CLI，整类按设计 skipped。
+
+## 23. 发送端与发送控制器（W6-42）
+
+到 §22 为止，Android 侧验的都是「收」的方向（§19 回环监听端、§20 界面、§21 反向联调）。本节补「Android 当发送端」：`SourceSyncSendController` 把「先校验 → 再导出 → 最后拨号」钉成一条界面可点的路径，界面只负责贴表单。
+
+### 23.1 为什么需要一个控制器（不是界面里直接调客户端）
+
+- **顺序是硬约束**。`AndroidSourceSyncService.export()`（`core/database/src/main/kotlin/com/mediahub/core/database/sync/AndroidSourceSyncService.kt:199`）导出时会为没有 `syncSourceId` 的来源派生身份号并 `store.bindSyncIdentity(...)` **回写数据库**。若先导出、再发现「TLS 开了却没填指纹」，就白写一批身份号。控制器把三项前置校验放在导出之前：`unusableFingerprintIsRejectedBeforeExporting`（`SourceSyncSendControllerTest.kt:307`）与 `tlsWithoutFingerprintIsAlsoRejected`（:321）都用「导出端口调用数为 0」断言一步都没导出。
+- **单飞**。导出会写库，重复点按并发两次就是两条并行导出。用 `AtomicBoolean.compareAndSet` 而不是读 `StateFlow`（后者在 `Sending` 落盘前有窗口）。`duplicateTapSendsOnlyOne`（:428）断言第二次调用返回 `false`，且对端只收到一封。
+- **口令只在内存**。`SourceSyncSendForm.toString` 把口令打成 `secret=<redacted>`；所有 `Failed` 的 detail 只放稳定码或异常类名。`secretNeverAppearsInToStringOrState`（:410）断言整份 `state` 与表单字符串都不含口令原文。
+- **失败码不翻译**。传输十码（§4）、认证五码（§15）、TLS 四码（§17）、回执四码（§22）在 `Failed(result.reason, result.message)` 里原样透传；本层只补 5 个「还没到传输层」的码（23.2）。界面文案 `SourceSyncSendCopy.lineOf` 只把人话写在结果行，不产生新码。
+
+### 23.2 五码表（本层新增，独立封闭集）
+
+五个常量在 `SourceSyncSendController` 的 companion（`feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncSendController.kt:366-378`），全部 `send-` 前缀，与传输十码 / 认证五码 / TLS 四码 / 回执四码**两两不相交**，单独成一集（它们是「本端表单还没填好」或「导出/拨号抛了没码的异常」，不是任何既有层的语义）。
+
+| 码 | 触发 | 拨号 | 导出 |
+| --- | --- | --- | --- |
+| `send-port-invalid`（:366） | `portNumber == null`：空、0、越界、非数字 | 否 | 否 |
+| `send-fingerprint-invalid`（:369） | 开了 TLS 但 `fingerprintOrNull == null`（不是 64 位 hex） | 否 | 否 |
+| `send-secret-missing`（:372） | 开了认证但口令为空 | 否 | 否 |
+| `send-export-failed`（:375） | 导出抛异常；detail 只有异常类名 | 否 | 失败 |
+| `send-failed`（:378） | 传输层抛了非传输码的异常；detail 只有异常类名 | 是 | 是 |
+
+前四项都不拨号（`invalidPortsNeverReachTheTransport`（:77）用「对端零连接」证明端口那一项；`unusableFingerprint...`/`tlsWithoutFingerprint...` 证明指纹两项；`exportFailureIsReportedWithoutDialing`（:444）证明导出项），只有 `send-failed` 是拨号之后。
+
+### 23.3 API 与语义
+
+| 位置（`SourceSyncSendController.kt`） | 成员 | 作用 |
+| --- | --- | --- |
+| :24 | `sealed interface SourceSyncSendState` | 四态：`Idle`（:27）/ `Sending`（:30）/ `Sent`（:38）/ `Failed`（:47） |
+| :38 | `Sent(bytes, frames, receipt, sourceCount, skippedCount)` | `bytes` 是**信封字节数**（不是线上字节，线上字节见 23.5）；`frames` 是传输层写出的帧数 |
+| :51-126 | `object SourceSyncSendCopy` | 全部界面文案（标题/标签/三句必填提示/结果行）；`lineOf(state)`（:87）/ `codeOf(state)`（:95） |
+| :128 | `data class SourceSyncSendExport(envelopeJson, sourceCount, skippedCount)` | 导出端口的一次返回值 |
+| :135 | `fun interface SourceSyncExportPort { suspend fun export() }` | 允许测试塞假导出、生产塞 `AndroidSourceSyncService` |
+| :145 | `fun interface SourceSyncSendPort { suspend fun send(host, port, envelope, challenge, tls, auth, receipt) }` | 传输端口；生产实现 `SourceSyncTransferSendPort`（:162）转调 `SourceSyncTransferClient` |
+| :190 | `data class SourceSyncSendForm(host, port, challenge, tls, fingerprint, auth, secret, receipt)` | 表单值对象；派生 `hostOrLoopback`（:202）/ `portNumber`（:206）/ `challengeOrNull`（:209）/ `fingerprintOrNull`（:213）/ `isFingerprintAcceptable`（:216）/ `isSecretAcceptable`（:219）/ `canSubmit`（:222） |
+| :226 | `toString` | 口令打码为 `secret=<redacted>` |
+| :257 / :279 | `class SourceSyncSendController` / `suspend fun send(form): Boolean` | 顺序见 23.1；`false` 表示「这次根本没发」（前置校验失败或单飞被挡） |
+| :359 | `fun clearResult()` | 清掉上一次的 `Sent`/`Failed`，回到 `Idle` |
+
+界面接线（`feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportScreen.kt`）：tags 在 `object SourceSyncImportTags` 末尾 `sync.send.*` 十一个（`SEND`/`SEND_HOST`/`SEND_PORT`/`SEND_CHALLENGE`/`SEND_TLS`/`SEND_PIN`/`SEND_AUTH`/`SEND_SECRET`/`SEND_RECEIPT`/`SEND_ACTION`/`SEND_STATE`（:158））；`SendSection`（:871）放在页面 **Column 末尾**（调用点 :432，紧跟 `ListenSection`），遵守 W6-41 的「接收/发送区块放页尾、首屏保留导入主流程」纪律；口令框用 `PasswordVisualTransformation()`（:973）。ViewModel 侧（`SourceSyncImportViewModel.kt`）：`sourceSyncService`（:93）→ `sendController`（:104，用显式 `object : SourceSyncExportPort` 而不是 SAM lambda）→ `sendState`（:119）→ `send(form)`（:197）→ `clearSendResult()`（:202）；`reset()`（:210）与 `onCleared()`（:221）各清一次发送结论。
+
+### 23.4 与 Windows `transfer send` 对齐表
+
+| 语义 | Windows（`D:/mh-w6/windows/src/MediaHub.Sync` + CLI） | Android（本节实现） |
+| --- | --- | --- |
+| 目标 | `transfer send --to 127.0.0.1:<port>` | `form.host`（默认 `127.0.0.1`，:238）+ `form.portNumber`（必填，1-65535；发送端没有「系统分配端口」） |
+| TLS + 钉扎 | `--tls --expect-fingerprint <64hex>` | `tls=true` + `fingerprint` → `SourceSyncTlsOptions.Pinned(hex)`（§17） |
+| 认证 | `--authenticate --secret-env <ENV>`（口令只从环境变量读） | `auth=true` + `secret` → `SourceSyncTransferOptions.withSecret(ByteArray)`（§15）；口令只从界面进内存，不进日志 |
+| 挑战 / nonce | CLI 不暴露；由 CLI 内部与 `--authenticate` 一起处理 | `form.challenge` 去除首尾空白后原样传给传输层（`challengeIsTrimmedAndForwarded`（:503））；开着认证但挑战为空时由引擎先拒（`authWithoutChallengeIsRefusedByTheEngineBeforeWriting`（:389）） |
+| 回执 | `--await-receipt`（对端要开 `--send-receipt`） | `form.receipt` → `SourceSyncReceiptOptions.awaiting()`（§22） |
+| 计数 | `--json` 里的 `sourceCount` / `bytes` / `frames` | `Sent.sourceCount` / `Sent.bytes` / `Sent.frames` 同名同义 |
+| 投递确认 | `--confirm-delivery` 只等 close，不代表对端接受（§21.5 第 2 条） | 不提供；只认回执（`form.receipt`） |
+
+### 23.5 默认全关时线上字节不变
+
+默认「TLS 关 / 认证关 / 不等回执」时，线上字节与 W6-22 冻结向量、W6-25 认证向量**逐字节等价**，证据是三条断言（不是「测试全绿」这种笼统说法）：
+
+1. `core/common` 的 `sendWithReceiptsOffWritesTheFrozenBytes`（`core/common/src/test/kotlin/com/mediahub/core/common/sync/SourceSyncReceiptTest.kt:238`）：`sendAndAwaitReceipt(..., SourceSyncReceiptOptions.Off)` 写出的字节 == `SourceSyncTransfer.encode(envelope)`。它固定住了「回执关 = 一个字节都不多写」。
+2. 本节新增的 `realLoopbackDeliveryWritesTheEnvelopeJson`（`SourceSyncSendControllerTest.kt:115`）：控制器走完 `send` 之后，回环对端**从流里读到的字节数** == `SourceSyncTransfer.encode(payload).size`（:126），且 `recorder.envelope` 与导出信封逐字节相等（:125）。即「控制器这一层没有额外写任何东西」。
+3. `plainSendWithoutReceiptSaysSoInTheLine`（:156）：全关时结果行**明确写着没等回执**，不会把 close 当成送达。
+
+两个冻结向量文件 `core/common/src/test/resources/sync/windows-transfer-vectors.json` 与 `windows-auth-vectors.json` 本轮一个字节都没改。
+
+注意 `Sent.bytes` 与「线上字节」不是同一个数：`Sent.bytes` = 信封字节（如 665），线上字节 = 4 字节帧长 + 9 字节块头 + 信封，用例里分别断言（`Recorder.bytes` 的 KDoc 已写明它含帧头）。
+
+### 23.6 用例表（26 例，纯 JVM）
+
+| 组 | 用例（行号在 `SourceSyncSendControllerTest.kt`） | 钉住什么 |
+| --- | --- | --- |
+| 初态与表单 | `defaultsAreIdleAndSafe`（:59）、`boundaryPortsAreAccepted`（:95）、`invalidPortsNeverReachTheTransport`（:77）、`tlsWithoutFingerprintIsAlsoRejected`（:321）、`unusableFingerprintIsRejectedBeforeExporting`（:307） | 四态初值、端口边界 1/65535、非法端口/缺指纹不拨号也不导出 |
+| 明文投递 | `realLoopbackDeliveryWritesTheEnvelopeJson`（:115）、`sentStateCarriesBytesFramesAndSourceCount`（:135）、`plainSendWithoutReceiptSaysSoInTheLine`（:156）、`nonLoopbackHostIsRejectedBeforeDialing`（:106）、`cancelledSendGoesBackToIdle`（:486） | 真回环字节、`Sent` 三计数、全关时结果行、非回环在拨号前被拒、取消回 `Idle` |
+| 回执四码 | `receiptConfirmedWhenThePeerAcks`（:172）、`receiptMissingWhenThePeerClosesWithoutAnswering`（:194）、`receiptTimeoutWhenThePeerStaysSilent`（:213）、`receiptInvalidWhenThePeerAnswersAnotherByte`（:235） | 四码全部由真对端行为触发，控制器只透传 |
+| TLS | `tlsPinnedDeliveryOverRealTls13`（:257）、`wrongPinIsRefusedBeforeAnyEnvelopeByte`（:283） | 真 `SSLServerSocket`（TLSv1.3）收一封；错 pin 时对端收到 0 字节 |
+| 认证 | `authenticatedDeliveryAddsTheTagFrame`（:361）、`authMismatchIsSeenByThePeerNotByTheSender`（:334）、`authWithoutChallengeIsRefusedByTheEngineBeforeWriting`（:389）、`challengeIsTrimmedAndForwarded`（:503） | tag 帧存在、错口令由对端发现（发送端仍 `Ok`，与 §18.5 一致）、空挑战先拒、挑战去空白 |
+| 口令不外泄 | `secretNeverAppearsInToStringOrState`（:410） | 表单字符串与整份 `state` 都不含口令 |
+| 状态机 | `duplicateTapSendsOnlyOne`（:428）、`exportFailureIsReportedWithoutDialing`（:444）、`successAfterFailureCarriesNoStaleCode`（:459）、`clearResultDropsThePreviousResult`（:476） | 单飞、导出异常码、成功后不残留旧码、清结果 |
+| 夹具自证 | `fixturePinsMatchTheFrozenWindowsVectors`（:516） | 抄来的两枚 p12 的 pin 与冻结向量逐字相等（防夹具漂移） |
+
+测试替身：`CountingInput` 统计应用写出的字节；`Peer` 用 `ServerSocket(0, 8, loopback)` 起真回环对端、`await()` 把线程异常带栈抛回测试线程；TLS 对端用 `feature/settings/src/test/resources/tls/` 下的两枚 p12（`mediahub-sync-test.p12` 2454 B、`mediahub-sync-other.p12` 2462 B，与 `core/common` 同一对）。
+
+### 23.7 实跑计数与修红记录
+
+三模块一起重跑（`--rerun-tasks`，跑前 `Get-Process java` = 0）：
+
+```powershell
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+$env:ANDROID_HOME="$env:LOCALAPPDATA\Android\Sdk"
+$env:MH_W638_SYNC_DLL='D:\mh-verify\w6-38-cli\MediaHub.SyncCli.dll'
+cmd /c "gradlew.bat :feature:settings:testDebugUnitTest :core:common:testDebugUnitTest :core:database:testDebugUnitTest --console=plain --rerun-tasks --no-daemon -Pkotlin.compiler.execution.strategy=in-process > %TEMP%\w642b.log 2>&1"
+```
+
+原始尾行：`BUILD SUCCESSFUL in 3m 32s` / `167 actionable tasks: 167 executed` / `EXIT=0`。
+
+JUnit XML 亲数（逐文件累加 `<testsuite>` 属性）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 |
+| --- | --- | --- | --- | --- | --- |
+| `core:common` | 32 | 457 | 0 | 0 | 10 |
+| `core:database` | 18 | 172 | 0 | 0 | 0 |
+| `feature:settings` | 15 | 243 | 0 | 0 | 0 |
+
+本次新增套件单列：`feature.settings.sync.SourceSyncSendControllerTest` = 26 例、耗时 3.062 s（`tests="26" failures="0" skipped="0"`）。
+
+无回归算式：`feature:settings` 217 + 26 = 243（套件 14 → 15，新增 1 个）；`core:common` 与 `core:database` 数字与 §22 快照完全一致（457 / 172，未改一行生产代码）；10 个 skipped 仍是 `SourceSyncTlsInteropTest` 在无 `MH_W632_SYNC_DLL` 时按设计整类跳过（§18），本节没有新增跳过。
+
+**修红记录（如实写）**：首跑 `243 tests completed, 4 failed`，三例是测试夹具错位——`FakeExportPort` 的默认信封只有 203 B（deviceId/snapshotId 最小信封），断言却拿两来源的 665 B 信封比；另有一条把 `Recorder.bytes`（线上字节，含帧头）当信封字节比。**都是夹具/断言尺度问题**，改法是给 `exportPort()` 助手统一给 665 B 信封、`Recorder.bytes` 比 `SourceSyncTransfer.encode(payload).size`；**没有放宽任何断言**。
+
+剩下的一例是环境问题，不是实现缺陷：`tlsPinnedDeliveryOverRealTls13` 在全模块运行时红、单类运行自己变绿。根因是**本模块的 Robolectric 用例（backup 套件）会把 Conscrypt 插为该 JVM 的默认 TLS provider 且一直存活**，JDK 21 上 Conscrypt 要反射读 `InetAddress` 内部字段，缺 `--add-opens` 时握手抛 `InaccessibleObjectException`（栈：`org.conscrypt.Platform.getOriginalHostNameFromInetAddress(Platform.java:571)`）。处置：`feature/settings/build.gradle.kts:35-41` 给本模块的**测试 JVM** 加 `--add-opens=java.base/java.net=ALL-UNNAMED`（`tasks.withType<Test>().configureEach { jvmArgs(...) }`），**只放宽测试 JVM 的模块访问，不改断言、不改生产语义**；真机上 Conscrypt 是平台组件，不存在这个编译期/运行期限制。这也是「单类绿 ≠ 模块绿」的一个具体例子。
+
+### 23.8 未覆盖
+
+1. **界面没有取消按钮**：控制器支持取消（`cancelledSendGoesBackToIdle`），但 `SendSection` 只把 `Sending` 期间的控件禁用，没有「中止」入口 —— 取消能力目前只有代码/测试可达。
+2. **表单不持久化**：主机、端口、挑战、指纹、TLS/认证/回执三个开关都只活在一次组合内（`remember`），离开页面即丢；也没有「上次用过的配置」记忆。
+3. **只有一个目标**：发送时只填「主机 + 端口」，没有对接 Windows 的 `--root`/设备号（那些是 Windows 侧参数），也没有多目标列表或重发历史。
+4. 未跑 instrumentation、未在真机验证发送流程：全是 JVM 单测（真回环 socket + 真 TLSv1.3 握手），界面层只有编译与 tags 层面的证据。
+5. 只覆盖回环：非回环按设计在拨号前拒（`non-loopback-peer`），跨机、手机 ↔ PC 不同网段、非 `localhost` 的 IPv6 字面量都没测。
+6. 未测大信封与预算：没有「来源很多 → 信封接近 8192 帧上限」的用例，也没有对端慢读时 `transfer-timeout` 的端到端用例（那是传输层 §4 的范围，本节未重复）。
+7. 跨端联调不在本轮：本节的 TLS 对端是**测试里的** `SSLServerSocket`，不是真 Windows `transfer serve`；真 CLI 的跨端证据仍只有 §18（Android 发）/ §21（Windows 发）。
+8. 本套件**不入** `.github/workflows/android-ci.yml` 的 required-suite（仍 31 条，按任务书不碰 CI 名单）；它是纯 JVM 单测，CI 会随 `:feature:settings:testDebugUnitTest` 跑到，但没有单独的必跑条目。
+

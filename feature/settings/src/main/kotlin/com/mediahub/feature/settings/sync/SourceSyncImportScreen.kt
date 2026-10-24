@@ -128,6 +128,34 @@ object SourceSyncImportTags {
 
     /** TLS 可用性那句实话（不可用时必须看得见，且开关点不动）。 */
     const val LISTEN_INFO = "sync.listen.info"
+
+    // ---- W6-42：发送（Android → Windows） ----
+
+    /** 发送区块本体（地址 / 端口 / 挑战 / TLS 与指纹 / 认证与口令 / 回执 / 发送按钮）。 */
+    const val SEND = "sync.send"
+
+    const val SEND_HOST = "sync.send.host"
+
+    const val SEND_PORT = "sync.send.port"
+
+    const val SEND_CHALLENGE = "sync.send.challenge"
+
+    const val SEND_TLS = "sync.send.tls"
+
+    /** 期望指纹输入框（TLS 关着时禁用，但仍然存在）。 */
+    const val SEND_PIN = "sync.send.pin"
+
+    const val SEND_AUTH = "sync.send.auth"
+
+    /** 口令输入框（认证关着时禁用；文本被 PasswordVisualTransformation 遮蔽）。 */
+    const val SEND_SECRET = "sync.send.secret"
+
+    const val SEND_RECEIPT = "sync.send.receipt"
+
+    const val SEND_ACTION = "sync.send.action"
+
+    /** 发送结果行（已发送 / 发送中 / 发送失败：码）。 */
+    const val SEND_STATE = "sync.send.state"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -140,6 +168,7 @@ fun SourceSyncImportRoute(
     val verification by viewModel.verificationState.collectAsStateWithLifecycle()
     val receiveState by viewModel.receiveState.collectAsStateWithLifecycle()
     val listenState by viewModel.listenState.collectAsStateWithLifecycle()
+    val sendState by viewModel.sendState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -167,6 +196,8 @@ fun SourceSyncImportRoute(
         onListenStart = viewModel::startListening,
         onListenStop = viewModel::stopListening,
         onListenReceive = viewModel::awaitListenOnce,
+        sendState = sendState,
+        onSend = viewModel::send,
     )
 }
 
@@ -202,6 +233,9 @@ fun SourceSyncImportScreen(
     onListenStart: (SourceSyncListenForm) -> Unit = {},
     onListenStop: () -> Unit = {},
     onListenReceive: () -> Unit = {},
+    /** W6-42：发送（Android → Windows）区块的状态；默认 Idle（既有调用点与 UI 测试无需改动）。 */
+    sendState: SourceSyncSendState = SourceSyncSendState.Idle,
+    onSend: (SourceSyncSendForm) -> Unit = {},
 ) {
     Scaffold(
         modifier = Modifier.testTag(SourceSyncImportTags.SCREEN),
@@ -394,6 +428,8 @@ fun SourceSyncImportScreen(
                 onStop = onListenStop,
                 onReceive = onListenReceive,
             )
+            // W6-42：发送区块同样放页尾，理由与上面两块一致（首屏不动）。
+            SendSection(state = sendState, onSend = onSend)
         }
     }
 }
@@ -819,6 +855,182 @@ private fun ListenSection(
         }
     }
 }
+
+/**
+ * W6-42：「发送（Android → Windows）」区块——手机当发送端，把本机信封推给 Windows 的 transfer serve。
+ *
+ * 与上面两块的区别写在标题里：那两块是 Windows 发过来（一块手机拨号、一块手机开端口等），
+ * 这一块是手机主动推给 Windows。判定全在 [SourceSyncSendController]：这里只画输入框、三个开关
+ * 与一行结果，不算地址是否回环、不猜失败原因（码与诊断原样显示）。
+ *
+ * 指纹与口令只在对应开关打开时才有意义，所以关着时**禁用而不是隐藏**：tag 与键盘状态稳定，
+ * UI 测试不必因为开关状态去分支查找。没填好时按钮点不动，并直接说明缺哪一项——
+ * 让用户对着禁用按钮猜原因是最糟的体验。
+ */
+@Composable
+private fun SendSection(
+    state: SourceSyncSendState,
+    onSend: (SourceSyncSendForm) -> Unit,
+) {
+    var form by remember { mutableStateOf(SourceSyncSendForm()) }
+    val sending = state == SourceSyncSendState.Sending
+    val resultLine = SourceSyncSendCopy.lineOf(state)
+    val missing = when {
+        form.portNumber == null -> SourceSyncSendCopy.PORT_REQUIRED
+        !form.isFingerprintAcceptable -> SourceSyncSendCopy.PIN_REQUIRED
+        !form.isSecretAcceptable -> SourceSyncSendCopy.SECRET_REQUIRED
+        else -> null
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(SourceSyncImportTags.SEND),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(SourceSyncSendCopy.TITLE, style = MaterialTheme.typography.titleSmall)
+            Text(
+                SourceSyncSendCopy.HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = form.host,
+                onValueChange = { form = form.copy(host = it) },
+                label = { Text(SourceSyncSendCopy.HOST_LABEL) },
+                singleLine = true,
+                enabled = !sending,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.SEND_HOST),
+            )
+            OutlinedTextField(
+                value = form.port,
+                onValueChange = { form = form.copy(port = it) },
+                label = { Text(SourceSyncSendCopy.PORT_LABEL) },
+                singleLine = true,
+                enabled = !sending,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.SEND_PORT),
+            )
+            OutlinedTextField(
+                value = form.challenge,
+                onValueChange = { form = form.copy(challenge = it) },
+                label = { Text(SourceSyncSendCopy.CHALLENGE_LABEL) },
+                singleLine = true,
+                enabled = !sending,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.SEND_CHALLENGE),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = form.tls,
+                    onCheckedChange = { checked -> form = form.copy(tls = checked) },
+                    enabled = !sending,
+                    modifier = Modifier.testTag(SourceSyncImportTags.SEND_TLS),
+                )
+                Text(
+                    SourceSyncSendCopy.TLS_LABEL,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            OutlinedTextField(
+                value = form.fingerprint,
+                onValueChange = { form = form.copy(fingerprint = it) },
+                label = { Text(SourceSyncSendCopy.PIN_LABEL) },
+                singleLine = true,
+                enabled = !sending && form.tls,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.SEND_PIN),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = form.auth,
+                    onCheckedChange = { checked -> form = form.copy(auth = checked) },
+                    enabled = !sending,
+                    modifier = Modifier.testTag(SourceSyncImportTags.SEND_AUTH),
+                )
+                Text(
+                    SourceSyncSendCopy.AUTH_LABEL,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            OutlinedTextField(
+                value = form.secret,
+                onValueChange = { form = form.copy(secret = it) },
+                label = { Text(SourceSyncSendCopy.SECRET_LABEL) },
+                singleLine = true,
+                enabled = !sending && form.auth,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.SEND_SECRET),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = form.receipt,
+                    onCheckedChange = { checked -> form = form.copy(receipt = checked) },
+                    enabled = !sending,
+                    modifier = Modifier.testTag(SourceSyncImportTags.SEND_RECEIPT),
+                )
+                Text(
+                    SourceSyncSendCopy.RECEIPT_LABEL,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                SourceSyncSendCopy.RECEIPT_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = { onSend(form) },
+                enabled = form.canSubmit && !sending,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.SEND_ACTION),
+            ) {
+                Text(SourceSyncSendCopy.ACTION)
+            }
+            if (sending) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.height(16.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Text(SourceSyncSendCopy.BUSY, style = MaterialTheme.typography.bodySmall)
+                }
+            } else if (missing != null) {
+                Text(
+                    missing,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (resultLine != null) {
+                Text(
+                    resultLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = when (state) {
+                        is SourceSyncSendState.Sent -> MaterialTheme.colorScheme.primary
+                        is SourceSyncSendState.Failed -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.testTag(SourceSyncImportTags.SEND_STATE),
+                )
+            }
+        }
+    }
+}
+
 /** 读信封文本与文件名；读不出来返回 null（页面保持"未选文件"状态）。 */
 private fun readEnvelope(context: Context, uri: Uri): Pair<String, String>? {
     val name = displayNameOf(context, uri)
