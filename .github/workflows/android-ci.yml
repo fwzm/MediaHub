@@ -135,6 +135,8 @@ jobs:
           #     只放行一个单播地址、建 socket 之前就拒）
           #   feature.settings.sync.SourceSyncListenerControllerTest —— 监听卡控制器（W6-36 起；W6-52 地址、W6-53 对端
           #     口令、W6-54 等待预算三段都在这里，界面本地码 listen-secret-missing / listen-budget-invalid 各有用例）
+          #   sync.SourceSyncTransferClientHostTest —— 拨号侧地址判定（W6-52b：sendTo / receiveFrom 的 allowExplicitHost
+          #     与 verb 参数，开关关着时拒绝句与 W6-23 逐字相同；通配/广播/组播/主机名在拨号之前就拒，本机不真拨非回环）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -172,6 +174,7 @@ jobs:
             --required-suite com.mediahub.core.common.sync.SourceSyncReceiptTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncHostAddressTest \
             --required-suite com.mediahub.feature.settings.sync.SourceSyncListenerControllerTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferClientHostTest \
             --require-complete-suites
 
       - name: Lint
