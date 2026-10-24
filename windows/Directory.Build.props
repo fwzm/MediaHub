@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <Deterministic>true</Deterministic>
+    <!-- .NET 10 prunes framework packages out of self-contained output, which needs package-prune
+         data that ships with the targeting packs. A developer machine whose .NET installation has no
+         packs/ directory (framework references then resolve through NuGet) fails to build at all
+         with NETSDK1226. Pruning is a publish-size optimisation only, so skipping it costs nothing
+         at runtime and keeps local and CI builds on identical settings. -->
+    <AllowMissingPrunePackageData>true</AllowMissingPrunePackageData>
+  </PropertyGroup>
+</Project>

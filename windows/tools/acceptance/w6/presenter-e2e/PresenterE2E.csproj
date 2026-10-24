@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- W6-35: headless end-to-end evidence for the sync page's transfer presenter.
+         This project is deliberately NOT in windows/MediaHub.Windows.sln and NOT in
+         windows/tests/MediaHub.Tests: the main suite's 1453 passed / 0 skipped number is
+         pinned by README, and every test here spawns real MediaHub.SyncCli processes. -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>MediaHub.PresenterE2E</RootNamespace>
+    <AssemblyName>MediaHub.PresenterE2E</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Only the Sync layer: MediaHub.SyncCli is NOT referenced on purpose, so the peer in every
+         test is a real OS process running the shipped command line, not an in-process helper. -->
+    <ProjectReference Include="..\..\..\..\src\MediaHub.Sync\MediaHub.Sync.csproj" />
+  </ItemGroup>
+</Project>

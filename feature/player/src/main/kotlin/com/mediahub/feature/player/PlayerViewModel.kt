@@ -23,6 +23,7 @@ import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.SubtitleFormats
+import com.mediahub.model.UpNextResolver
 import com.mediahub.player.engine.EnginePreferenceHistory
 import com.mediahub.player.engine.ExternalSubtitle
 import com.mediahub.player.engine.Media3EngineCreator
@@ -30,6 +31,7 @@ import com.mediahub.player.engine.MpvEngineCreator
 import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackStartupTrace
 import com.mediahub.player.engine.PlaybackEnginePort
+import com.mediahub.player.engine.PlaybackEvent
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.ProgressSyncCoordinator
 import com.mediahub.player.engine.SubtitleCapabilities
@@ -44,6 +46,7 @@ import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -152,13 +155,15 @@ class PlayerViewModel @Inject constructor(
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
     // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（见 core:common）
-    private val itemId: String = NavArgCodec.decode(checkNotNull(savedStateHandle["itemId"]))
+    // 自动连播会在同一 ViewModel 内切到下一集，故 itemId 为 var。
+    private var itemId: String = NavArgCodec.decode(checkNotNull(savedStateHandle["itemId"]))
     private val itemTitle: String = savedStateHandle["title"] ?: ""
     // 播放启动快照（详情页直传，跳过重复 detail 拉取；type 非空 = 快照有效）
-    private val launchType: String = savedStateHandle["type"] ?: ""
-    private val launchRuntime: String = savedStateHandle["runtime"] ?: ""
-    private val launchPoster: String = savedStateHandle["poster"] ?: ""
-    private val launchContainer: String = savedStateHandle["container"] ?: ""
+    // 自动连播切集前必须清空（见 advanceToNextEpisode）：否则上一集的快照会套到新一集。
+    private var launchType: String = savedStateHandle["type"] ?: ""
+    private var launchRuntime: String = savedStateHandle["runtime"] ?: ""
+    private var launchPoster: String = savedStateHandle["poster"] ?: ""
+    private var launchContainer: String = savedStateHandle["container"] ?: ""
 
     /** 启动快照携带的容器（详情页直传；可能为空串=未提供）。 */
     val launchContainerOrNull: String?
@@ -553,6 +558,19 @@ class PlayerViewModel @Inject constructor(
     private var resolveJob: Job? = null
     private val resolveGeneration = java.util.concurrent.atomic.AtomicLong(0)
 
+    /** 当前实际在播的条目（连播要读它的季/集身份）；engine.play 前刷新。 */
+    private var currentItem: MediaItem? = null
+    /** 连播进行中（避免 Ended 重复触发）。 */
+    private var autoplayInFlight = false
+    /** 连播切换失败过一次就整轮停住：不重试、不连环跳集。 */
+    private var autoplayBlocked = false
+    private var autoplayJob: Job? = null
+    /** 已经为哪个条目安排过连播（同一集重复 Ended 不连跳两集）。 */
+    private var autoplayHandledItemId: String? = null
+    private var eventsTapStarted = false
+    /** engine.events 是单消费者 Channel：先 tap 一次，再分发给同步管线与连播逻辑。 */
+    private val playbackEventBus = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 32)
+
     val uiState: StateFlow<PlayerCombinedState> =
         combine(engine.uiState, _resolveState) { player, resolve ->
             PlayerCombinedState(
@@ -575,6 +593,14 @@ class PlayerViewModel @Inject constructor(
 
     /** 解析播放源并起播：server → handle → detail → resolvePlayback。 */
     fun resolve() {
+        resolveInternal(autoplay = false)
+    }
+
+    /**
+     * [resolve] 的实现。autoplay=true 表示本次解析由「播完自动连播」触发：
+     * 失败时永久停住本轮播放（autoplayBlocked），不重试也不连环跳集。
+     */
+    private fun resolveInternal(autoplay: Boolean) {
         if (stopped) return
         resolveJob?.cancel()
         val generation = resolveGeneration.incrementAndGet()
@@ -645,6 +671,7 @@ class PlayerViewModel @Inject constructor(
                 trace.record(PlaybackStartupTrace.Milestone.SOURCE_RESOLVED)
                 _playbackSource.value = source
                 logger.i(LogTag.PLAYER, "StartupTrace " + trace.summary())
+                currentItem = item
                 engine.play(
                     PlaybackSession(
                         serverId = serverId,
@@ -659,9 +686,11 @@ class PlayerViewModel @Inject constructor(
                 )
 
                 if (!syncStarted) {
+                    // engine.events 只允许被订阅一次：先 tap，再由 playbackEventBus 分发。
+                    startEventsTap()
                     syncCoordinator.start(
                         progress = engine.progress,
-                        events = engine.events,
+                        events = playbackEventBus,
                         remoteIntervalMs = providerHandle.progress?.remoteReportIntervalMs
                             ?: 10_000L,
                     )
@@ -669,12 +698,14 @@ class PlayerViewModel @Inject constructor(
                 }
                 // 字幕中心：同目录发现 + 匹配记忆回放（异步，不阻塞 Ready）。
                 startSubtitleCenter(item)
+                if (!autoplay) autoplayBlocked = false
                 _resolveState.value = ResolveState.Ready
                 if (currentTrace === trace) PlaybackNetworkTraceRegistry.set(null)
             } catch (e: CancellationException) {
                 if (currentTrace === trace) PlaybackNetworkTraceRegistry.set(null)
                 throw e
             } catch (e: Exception) {
+                if (autoplay) autoplayBlocked = true
                 if (stopped || resolveGeneration.get() != generation) return@launch
                 trace.record(PlaybackStartupTrace.Milestone.FAILED)
                 trace.putMetadata("failedStage", "SOURCE_RESOLVED")
@@ -684,6 +715,97 @@ class PlayerViewModel @Inject constructor(
                 _resolveState.value = ResolveState.Failed(userMessage(e))
             }
         }
+    }
+
+    /**
+     * 只订阅一次 [PlaybackEnginePort.events]，再分发到 [playbackEventBus]。
+     *
+     * SwitchablePlaybackEngine 的 events 是 Channel.receiveAsFlow()（单消费者）：
+     * 连播逻辑若直接再 collect 一次，ProgressSyncCoordinator 会丢事件（Pause/Seek/Ended 的 flush）。
+     */
+    private fun startEventsTap() {
+        if (eventsTapStarted) return
+        eventsTapStarted = true
+        viewModelScope.launch {
+            engine.events.collect { event ->
+                playbackEventBus.emit(event)
+                if (event == PlaybackEvent.Ended) onPlaybackEnded()
+            }
+        }
+    }
+
+    /**
+     * 一集播完：开关打开、当前是剧集且拿得到 seriesId 时安排下一集。
+     *
+     * 关掉 autoPlayNextEpisode 时什么都不做（不弹提示、不排队）；同一集重复 Ended 只安排一次；
+     * 切换失败过一次就整轮停住（autoplayBlocked），避免失败后连环跳集。
+     */
+    private fun onPlaybackEnded() {
+        if (stopped || autoplayBlocked || autoplayInFlight) return
+        if (!latestPreferences.autoPlayNextEpisode) return
+        val played = currentItem ?: return
+        if (played.id == autoplayHandledItemId) return
+        if (played.type != MediaType.EPISODE) return
+        autoplayHandledItemId = played.id
+        autoplayInFlight = true
+        autoplayJob = viewModelScope.launch {
+            try {
+                advanceToNextEpisode(played)
+            } finally {
+                autoplayInFlight = false
+            }
+        }
+    }
+
+    /**
+     * 取下一集并复用既有加载路径重播：同季优先，本季播完则跨季取下一季第一集。
+     *
+     * 不新写一套播放流程：改 itemId、清空启动快照后直接走 [resolveInternal]，
+     * 由它完成 detail → resume → resolvePlayback → engine.play → 字幕中心。
+     */
+    private suspend fun advanceToNextEpisode(finished: MediaItem) {
+        val library = handle?.library ?: return
+        // 详情页直传的启动快照只有 type/title，缺 seriesId/seasonId/集号：
+        // 缺了这层元数据跨季判断无从下手（连播会静默失效），先补一次 detail。
+        val played = hydrateEpisodeMetadata(finished)
+        val seriesId = played.seriesId?.takeIf { it.isNotBlank() } ?: return
+        val seasons = runCatching { library.getSeasons(seriesId) }.getOrNull().orEmpty()
+        val currentSeasonEpisodes = played.seasonId
+            ?.let { seasonId -> runCatching { library.getEpisodes(seasonId) }.getOrNull() }
+            .orEmpty()
+        var nextEpisodeId = UpNextResolver.nextInSeason(
+            episodes = currentSeasonEpisodes,
+            currentEpisodeId = played.id,
+            currentEpisodeNumber = played.episodeNumber,
+        )?.id
+        if (nextEpisodeId == null) {
+            for (season in UpNextResolver.followingSeasons(seasons, played.seasonId, played.seasonNumber)) {
+                val episodes = runCatching { library.getEpisodes(season.id) }.getOrNull().orEmpty()
+                val first = UpNextResolver.firstEpisode(episodes) ?: continue
+                nextEpisodeId = first.id
+                break
+            }
+        }
+        val targetId = nextEpisodeId ?: return
+        if (stopped) return
+        logger.i(LogTag.PLAYER, "自动连播 serverId=$serverId from=$itemId to=$targetId")
+        itemId = targetId
+        // 启动快照属于上一集：不清空会把上一集的 type/runtime/poster/container 套到新一集。
+        launchType = ""
+        launchRuntime = ""
+        launchPoster = ""
+        launchContainer = ""
+        resolveInternal(autoplay = true)
+    }
+
+    /** 用 detail 补齐快照缺的季/集元数据（已有 seriesId+seasonId 时零额外请求）。 */
+    private suspend fun hydrateEpisodeMetadata(item: MediaItem): MediaItem {
+        if (!item.seriesId.isNullOrBlank() && !item.seasonId.isNullOrBlank()) return item
+        val detail = handle?.detail ?: return item
+        return runCatching { detail.getItemDetail(item.id).item }
+            .getOrNull()
+            ?.takeIf { it.type == MediaType.EPISODE }
+            ?: item
     }
 
     private fun updateArtworkPalette(url: String?) {
@@ -717,6 +839,7 @@ class PlayerViewModel @Inject constructor(
         stopped = true
         resolveGeneration.incrementAndGet()
         resolveJob?.cancel()
+        autoplayJob?.cancel()
         invalidateSubtitleSession()
         withContext(NonCancellable + Dispatchers.Main.immediate) {
             try {
@@ -746,6 +869,7 @@ class PlayerViewModel @Inject constructor(
     override fun onCleared() {
         resolveGeneration.incrementAndGet()
         resolveJob?.cancel()
+        autoplayJob?.cancel()
         invalidateSubtitleSession()
         // 兜底：若未走 stopAndFlush（如进程销毁/异常路径），确保停止采样并释放资源。
         if (!stopped) {

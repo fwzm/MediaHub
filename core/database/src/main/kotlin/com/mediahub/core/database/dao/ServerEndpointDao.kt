@@ -15,6 +15,10 @@ interface ServerEndpointDao {
     @Query("SELECT * FROM server_endpoints WHERE serverId = :serverId ORDER BY sortOrder ASC")
     suspend fun getByServer(serverId: String): List<ServerEndpointEntity>
 
+    /** 全量线路快照（同步预演一次读全，避免按 server 逐条查）。 */
+    @Query("SELECT * FROM server_endpoints ORDER BY serverId ASC, sortOrder ASC")
+    suspend fun getAll(): List<ServerEndpointEntity>
+
     @Upsert
     suspend fun upsert(entity: ServerEndpointEntity)
 

@@ -18,8 +18,8 @@ import org.junit.Test
 
 /**
  * Integration gate：ProviderFactory 最终 capability audit（ADR-039，1G 全 slice 落地后）。
- * runtime capabilities 必须精确等于 1G 冻结集合——QUERY/IDENTITY_LOOKUP 因 out-of-scope /
- * 协议缺口必须缺席（不得因后续 slice 意外暴露）。
+ * runtime capabilities 必须精确等于冻结集合（1G 六项 + task-22 / A1 的 FAVORITE）——
+ * QUERY/IDENTITY_LOOKUP 因 out-of-scope / 协议缺口必须缺席（不得因后续 slice 意外暴露）。
  */
 class JellyfinProviderCapabilityAuditTest {
 
@@ -53,7 +53,7 @@ class JellyfinProviderCapabilityAuditTest {
     )
 
     @Test
-    fun `runtime capabilities equal the frozen 1g set`() {
+    fun `runtime capabilities equal the frozen 1g set plus favorite`() {
         val handle = handle()
         assertEquals(
             setOf(
@@ -63,6 +63,8 @@ class JellyfinProviderCapabilityAuditTest {
                 ProviderCapability.SEARCH,
                 ProviderCapability.PLAYBACK,
                 ProviderCapability.PROGRESS,
+                // task-22 / A1：收藏（与 Emby 同名同义端点 + UserData 回读）
+                ProviderCapability.FAVORITE,
             ),
             handle.runtimeCapabilities,
         )
@@ -90,6 +92,11 @@ class JellyfinProviderCapabilityAuditTest {
         org.junit.Assert.assertNotNull(handle.search)
         org.junit.Assert.assertNotNull(handle.playback)
         org.junit.Assert.assertNotNull(handle.progress)
+        org.junit.Assert.assertNotNull(handle.favorite)
+        org.junit.Assert.assertEquals(true, ProviderCapability.FAVORITE in handle.runtimeCapabilities)
+        org.junit.Assert.assertTrue(
+            handle.runtimeCapabilities.all { it in handle.provider.descriptor.declaredCapabilities }
+        )
     }
 
     private class FakeSecretStorage : SecretStorage {
