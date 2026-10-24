@@ -1663,7 +1663,7 @@ gradlew.bat :feature:settings:assembleDebugAndroidTest :feature:settings:testDeb
 3. **未测深色主题 / 字体缩放 / 窄屏换行**：长文案在 200% 字体下的折行没有视觉回归。
 4. **未覆盖 Hilt 注入路径**：用例直接 `setContent { SourceSyncImportScreen(...) }`，`SourceSyncImportRoute` + ViewModel 未在本节点被覆盖。
 5. **开关不持久化**：两处都是 `remember { mutableStateOf(...) }`，离开页面即复位；没有写进设置项（本节点未要求）。
-6. **不入 required-suite**：`.github/workflows/android-ci.yml` 仍是 32 条 `--required-suite`（本节点未改 CI），本套件由 visual-instrumentation job 覆盖。
+6. **不入 required-suite**：`.github/workflows/android-ci.yml` 在本节写就时是 32 条 `--required-suite`（同一分支后来随 `SourceSyncSendLauncherTest` 变成 33 条，本套件仍未钉），本套件由 visual-instrumentation job 覆盖。
 7. **没有新增网络证据**：回执与投递确认的线上行为仍由 §21 / §22 / §25 的既有用例负责，本节点只补界面。
 
 ### 26.8 本次改动的文件
@@ -1792,3 +1792,160 @@ gradlew.bat --max-workers=2 --rerun-tasks :feature:settings:testDebugUnitTest :f
 5. **取消态不持久化**：状态在内存里，离开页面即复位。
 6. **不入 required-suite**：`.github/workflows/android-ci.yml` 仍是 32 条 `--required-suite`（本节点未改 CI），本套件由 visual-instrumentation job 覆盖。
 7. **未测无障碍 / 深色主题 / 200% 字体**：取消按钮与新增布局没有视觉回归。
+
+## 28. 监听端显式单播地址（W6-52）
+
+### 28.1 为什么需要这一节
+
+W6-51 在 Windows 侧开了 `transfer serve --bind ADDR` 与 `--allow-non-loopback`，但 Android 侧同一轮留下的缺口表（`D:/mh-verify/android-w6-gap-table.md` 第 1 条）指出：全仓 Kotlin 没有任何 `allowExplicitHost` 命中，
+`core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncTransferListener.kt` 的地址闸门用 `LoopbackOnly.addressOrNull` 硬只收回环，拒绝句固定是「只允许绑定回环地址（127.0.0.1 / ::1 / localhost），实际 …」。
+于是一台手机要把库推给另一台手机（或 Windows 反向连手机）时，Android 端没有任何办法说「绑这块网卡上的这个地址」。**本节只拆监听端的地址闸门**：不做发现、不做域名解析、不碰协议与码表、不改线上字节；
+发送端（拨号出去）与「接收」卡（拨号进来）的同类开关留到 W6-52b，未做事实见 §28.6。
+
+### 28.2 与 Windows W6-51 同名同义
+
+| 语义 | Windows W6-51 | Android W6-52 |
+| --- | --- | --- |
+| 指定绑定地址 | `transfer serve --bind ADDR` | 监听卡「绑定地址」输入框（tag `sync.listen.host`），留空 = 127.0.0.1 |
+| 打开非回环闸门 | `transfer serve --allow-non-loopback` | 监听卡复选框（tag `sync.listen.allow-host`） |
+| 缺省行为 | 只绑 127.0.0.1 | 完全不变：留空 + 开关关 = 只绑 127.0.0.1 |
+| 接受范围（开关打开后） | 一个单播字面量 | 同一个：一个单播字面量 |
+| 一律拒绝（开关打开也一样） | 通配 / 广播 / 组播 / 保留地址、主机名、超过 256 字符 | 同上，逐条同义 |
+| 稳定码 | `not-loopback` 不变 | `not-loopback` 不变 |
+| 诊断载体 | detail 句子 | detail 句子（四条，见 §28.3） |
+| 拒绝时机 | 建 socket 之前 | 建 socket 之前 |
+
+两边都刻意不新开码：W6-47 的 ADR（`docs/cross-device/W6-47-CROSS-MACHINE.md` §4.3 结论 A/B）要求「跨机失败都落进现有五集」，
+并把 `not-loopback` 的含义钉成「调用方给的地址不被本构建接受」——放宽之后「非回环」不再是被拒理由，但「这个地址我不收」这层原义仍然成立。
+与 W6-51 相同的代价也照抄：**机器不可辨**（同一个 `not-loopback` 既可能是「没开开关」也可能是「写了个广播地址」），
+要机器可辨必须两端同名同序新开集合（ADR 结论 C），那是另一件事。
+
+### 28.3 四条拒绝句（逐字，测试按这四句断言）
+
+码一律 `SourceSyncTransferReasons.NOT_LOOPBACK`；detail 由 `SourceSyncHostAddress.kt` 生成：
+
+1. 没开开关（与 W6-52 之前**逐字相同**，既有用例零改动）：
+
+   ```
+   只允许绑定回环地址（127.0.0.1 / ::1 / localhost），实际 <用户输入>
+   ```
+
+2. 开关开着，但不是 IP 字面量：
+
+   ```
+   「<用户输入>」不是 IP 字面量，本版本传输不做域名解析；请填 127.0.0.1、::1、localhost 或那台机器的单播 IP。
+   ```
+
+3. 开关开着，是字面量但不是「一台机器的地址」：
+
+   ```
+   「<用户输入>」不是一个具体某台机器的地址（通配 / 广播 / 组播 / 保留地址），建 socket 之前就拒绝了；请填一个单播地址，例如 192.168.1.20。
+   ```
+
+4. 超过 256 个字符（先于任何解析）：
+
+   ```
+   地址最多 256 个字符，这个没有去绑。
+   ```
+
+「单播字面量」的判定写在一处（`SourceSyncHostAddress.isUnicastLiteral`）：IPv4 首字节不能是 0（`0.0.0.0/8`）、不能是 `255.255.255.255`、不能 ≥224（组播 + 保留）；
+IPv6 不能是全零、首字节不能是 `0xFF`（组播）。IPv4 自己按点分十进制算四个字节（`decodeIpv4`，带前导零的段直接拒），**永不走 DNS**；
+IPv6 只接受 `^[0-9a-fA-F:.]+$` 形状再交给 `InetAddress.getByName`（那个形状不可能触发解析）。
+
+### 28.4 改动的文件与行号
+
+| 文件 | 变化 | 关键行 |
+| --- | --- | --- |
+| `core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncHostAddress.kt` | 新建 148 行 | :21 `MAX_LENGTH`、:24 `EXAMPLE_UNICAST`、:27 `Resolution`、:42 `resolve`、:53 / :57 / :62 三句、:78 `parseLiteral`、:92 `decodeIpv4`、:124 `isUnicastLiteral` |
+| `.../sync/SourceSyncTransferListener.kt` | 348 → 350 行 | :275 KDoc、:288 末位 `allowExplicitHost = false`、:290 改用 `SourceSyncHostAddress.resolve`（原两句删除） |
+| `core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncListenerImportService.kt` | 162 → 167 行 | :127/:129 KDoc、:140 `allowExplicitHost`、:150 透传 |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncListenerController.kt` | 528 → 589 行 | :40 `Listening.host`、:79 `HOST_LABEL`、:82 `ALLOW_HOST_LABEL`、:85 `ALLOW_HOST_HINT`、:128 `lineOf`、:155 `portLineOf`、:197-202 表单两个新字段、:276/:284 旧工厂方法、:292-298 新 `open(...)` 默认实现、:366 `start` 里透传、:487 `listeningStateOf`、:529-553 生产工厂、:573 `ImportSession.address` |
+| `.../sync/SourceSyncImportScreen.kt` | 1145 行 | :116 tag `LISTEN_HOST`、:119 tag `LISTEN_ALLOW_HOST`、:787 地址输入框、:794 复选框 |
+| `core/common/src/test/kotlin/.../SourceSyncHostAddressTest.kt` | 新建 189 行 / 14 例 | 见 §28.5 |
+| `feature/settings/src/test/kotlin/.../SourceSyncListenerControllerTest.kt` | 740 → 842 行 / +5 例 | :747 / :758 / :769 / :782 / :805 |
+| `feature/settings/src/androidTest/kotlin/.../SourceSyncSectionsScreenTest.kt` | 396 → 446 行 / +3 例 | :161 / :177 / :197 |
+| `docs/android-source-sync-transfer.md` | 本节（§28） | — |
+
+两条界面纪律与 W6-44 / W6-48 / W6-49 一致：
+**常驻不隐藏**（地址框与开关一直在，只在监听中/接收中 `enabled = false`），**地址只原样转交**（界面层不 trim、不判回环、不判字面量，判定只有 `SourceSyncHostAddress` 一处——否则同一个错误会有两种说法，与接收卡 §24 的口径相同）。
+
+### 28.5 JVM 用例表
+
+**core:common 新增 14 例**（`SourceSyncHostAddressTest.kt`）：地址解析器是纯函数，这一层钉「接受什么、拒绝什么、拒绝句说的是哪一类」。
+
+| # | 用例 | 行号 | 钉住的行为 |
+| --- | --- | --- | --- |
+| 1 | `blank_and_null_mean_the_default_loopback_address` | :39 | `null` / `""` / 全空白 → 127.0.0.1，text 为 `"127.0.0.1"` |
+| 2 | `every_loopback_spelling_is_accepted_with_and_without_the_switch` | :48 | 7 种回环拼写（含 `[::1]`、`LocalHost`、`127.0.0.2`）× 开关两态都接受 |
+| 3 | `the_switch_does_not_make_a_blank_host_non_loopback` | :59 | 开着开关留空仍是 127.0.0.1（开关只放宽「显式写的那个地址」） |
+| 4 | `a_non_loopback_address_without_the_switch_keeps_the_exact_pre_w6_52_sentence` | :68 | 无开关 `192.168.1.5` → 码 `not-loopback` + 原句逐字相等 |
+| 5 | `a_host_name_without_the_switch_is_refused_by_the_same_sentence` | :75 | 无开关 `nas` → 同一句原句 |
+| 6 | `one_unicast_ipv4_literal_is_accepted_when_the_switch_is_on` | :84 | 3 个私网地址 + 前后空白，接受且 `text` 已 trim |
+| 7 | `one_unicast_ipv6_literal_is_accepted_when_the_switch_is_on` | :93 | `fd00::1` 接受（唯一 IPv6 正例） |
+| 8 | `wildcard_addresses_are_refused_and_the_sentence_says_wildcard` | :100 | `0.0.0.0` / `::` / `0.1.2.3` → 第 3 句（含「不是一个具体某台机器的地址」与「通配」） |
+| 9 | `broadcast_multicast_and_reserved_addresses_share_the_same_refusal_sentence` | :113 | 广播 / 组播 / 保留共 6 个 → 同一句（含「通配 / 广播 / 组播 / 保留地址」） |
+| 10 | `host_names_are_refused_because_the_transfer_path_never_resolves_them` | :126 | `mediahub-lan.local` / `nas` / `example.com` / `192.168.1` → 第 2 句（含「不是 IP 字面量」） |
+| 11 | `an_over_long_address_is_refused_by_length_before_anything_is_parsed` | :138 | 257 字符 → 第 4 句（含「最多 256」） |
+| 12 | `the_listener_refuses_a_wildcard_even_when_the_switch_is_on` | :147 | 真监听器 `open("0.0.0.0", 0, allowExplicitHost = true)` 返回 `Failed(not-loopback)`，**socket 未创建** |
+| 13 | `the_listener_refuses_a_unicast_address_when_the_switch_is_off` | :161 | 同上但没开开关，`Failed(not-loopback)` |
+| 14 | `the_switch_is_harmless_when_the_address_is_still_loopback` | :174 | 回环 + 开关 → `Started`，address/port/isClosed 三项正确，finally close |
+
+（第 1–11 条是纯解析器，12–14 条打真监听器；共 14 个 `@Test`。）
+
+**feature:settings 新增 5 例**（`SourceSyncListenerControllerTest.kt`）：这一层钉「界面说了什么，传到工厂的就是什么」。
+
+| # | 用例 | 行号 | 钉住的行为 |
+| --- | --- | --- | --- |
+| 1 | `defaultFormLeavesTheHostBlankAndKeepsTheSwitchOff` | :747 | 缺省表单 → 工厂收到 `host = ""`（表单缺省是空串，空白由 core 当缺省回环）、`allowExplicitHost = false` |
+| 2 | `aTypedHostWithoutTheSwitchStillTravelsButStaysOff` | :758 | 写了地址没点开关 → 地址原样传、开关仍是 false（判断在 core） |
+| 3 | `hostAndSwitchTravelVerbatimAndTrimmingIsLeftToTheCore` | :769 | `"  192.168.1.5  "` 不做 trim；开关 true 原样传 |
+| 4 | `notLoopbackFromTheFactoryKeepsTheCodeAndTheSentenceVerbatim` | :782 | 工厂回 `not-loopback` → 状态 `Failed(null, 码, 句子)`、结果行逐字、`isListening` 假、**信封一个都没往导入页送** |
+| 5 | `theListeningLinesNameTheBoundHostInsteadOfLoopback` | :805 | 监听状态带 `host = "192.168.1.5"`，`lineOf` / `portLineOf` 都写这个地址、不再出现 127.0.0.1 |
+
+### 28.6 androidTest 用例表（3 例，`SourceSyncSectionsScreenTest.kt`）
+
+| # | 用例 | 行号 | 钉住的行为 |
+| --- | --- | --- | --- |
+| 1 | `theListenCardOffersAHostFieldAndAnExplicitHostSwitch` | :161 | 地址框与开关在树里、可点；`HOST_LABEL` 与 `ALLOW_HOST_HINT` 都显示（说明必须写清「只收单播字面量」） |
+| 2 | `theListenFormCarriesTheTypedHostAndTheSwitchVerbatim` | :177 | 输入 `192.168.1.5` + 点开关 + 点开始 → 回调收到的表单 `host` / `allowExplicitHost` 逐字正确 |
+| 3 | `whileListeningTheHostFieldAndTheSwitchAreLocked` | :197 | 监听中端口行写 `192.168.1.5:45678`，地址框与开关都禁用（避免「再开一个」） |
+
+滚动纪律同 §26/§27：页尾节点一律先 `performScrollTo()`。
+
+### 28.7 实跑证据（本机）
+
+串行执行，跑前 `gradlew --stop` 清 daemon；同一时段机器上没有 dotnet 大套件（同机器并发跑 gradle 与 dotnet 曾在 2026-10-24 触发 JVM OOM）。
+
+```
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+$env:ANDROID_HOME='C:\Users\55160\AppData\Local\Android\Sdk'
+$env:GRADLE_OPTS='-Xmx2560m -XX:MaxMetaspaceSize=896m'
+gradlew.bat --max-workers=2 --rerun-tasks :core:common:testDebugUnitTest `
+  :core:database:testDebugUnitTest :feature:settings:testDebugUnitTest `
+  :feature:settings:assembleDebugAndroidTest
+```
+
+**第一次全量跑（`--rerun-tasks`）**：`BUILD FAILED in 6m 23s`、`220 actionable tasks: 220 executed`。`:core:common:testDebugUnitTest` 与 `:core:database:testDebugUnitTest` 通过；`:feature:settings:testDebugUnitTest` 报 `262 tests completed, 1 failed`，唯一失败是 `SourceSyncListenerControllerTest` 里**新写的那条期望写错了**（断言表单缺省把 `host = null` 传给工厂，实际传的是空串，`AssertionError: 留空就该传 null… expected null, but was:<>`）。
+判定：源码行为正确（`SourceSyncListenForm.host` 缺省是空串，空白由 core 的 `SourceSyncHostAddress` 当缺省回环处理），改测试为断言空串、用例改名为 `defaultFormLeavesTheHostBlankAndKeepsTheSwitchOff`。**失败使 `assembleDebugAndroidTest` 当次未执行**，所以修完重跑。
+
+**第二次（不带 `--rerun-tasks`，只跑 feature:settings 的两个任务，core 两个模块沿用上面的结果）**：`BUILD SUCCESSFUL in 1m 49s`、`212 actionable tasks: 8 executed, 204 up-to-date`。
+
+| 项 | 结果 |
+| --- | --- |
+| core:common | 34 套件 / **492 例** / 0 失败 / 0 错误 / 11 跳过（基线 478 + 本节 14；`SourceSyncHostAddressTest` 14/14） |
+| core:database | 18 套件 / **172 例** / 0 失败 / 0 错误 / 12 跳过（与本节前一致，未受影响） |
+| feature:settings | 16 套件 / **262 例** / 0 失败 / 0 错误 / 0 跳过（基线 257 + 本节 5；`SourceSyncListenerControllerTest` 33/33） |
+| androidTest 编译 | `assembleDebugAndroidTest` 成功，`feature/settings/build/outputs/apk/androidTest/debug/settings-debug-androidTest.apk` = **20697523 B**（2026-10-25 00:17:44） |
+| 既有回环用例 | 未被文案改动打红：`SourceSyncTransferLoopbackTest` 10/10、`SourceSyncTransferListenerTest` 28/28 |
+| 收尾 | `gradlew --stop` → `2 Daemons stopped`，残留 java 进程 0；仓库内无 `hs_err_pid*.log` / `replay_pid*.log` |
+| 设备执行 | **未执行**：`adb devices` 无设备，按纪律不起模拟器；instrumentation 证据由 CI 的 visual-instrumentation（API 32 / 36）提供 |
+### 28.8 未覆盖（如实列出）
+
+1. **发送端与「接收」卡未放宽（W6-52b）**：`SourceSyncTransferClient` 拨号出去仍只认回环，接收卡（拨号进来）也没有地址开关。本节只做了监听端。
+2. **真实两机未跑（NOT_RUN）**：本机所有用例都不 bind / 不 dial 任何非回环地址（那会触发 Windows 防火墙确认框，违背「测试不得干扰使用者」的纪律），
+   所以「两台机器真的能互传」这件事仍是两端 NOT_RUN，只有「建 socket 之前就拒绝」有确定性证据。CI 的模拟器同样没有第二台机器。
+3. **不做 DNS**：写主机名一律拒绝（第 2 句）。要支持名字得先决定「解析失败算哪个码」，那是新码集合的问题（ADR 结论 C）。
+4. **未覆盖 Hilt 注入路径与进程重建**：用例直接构造控制器 / `setContent`，旋转屏幕后的表单保留不在本节点。
+5. **本套件尚未钉进 required-suite**：`.github/workflows/android-ci.yml` 的 33 条 `--required-suite` 未包含 `SourceSyncHostAddressTest`；
+   按缺口表它是 W6-55 的内容（改 `android-ci.yml` 必须同步跑 `.github/scripts/tests` 的 unittest）。
+6. **未测无障碍 / 深色主题 / 200% 字体 / 超长地址的实际换行**：新增两个控件没有视觉回归。

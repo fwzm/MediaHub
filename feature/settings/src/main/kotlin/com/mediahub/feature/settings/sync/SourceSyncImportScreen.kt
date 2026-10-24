@@ -112,6 +112,12 @@ object SourceSyncImportTags {
 
     const val LISTEN_PORT = "sync.listen.port"
 
+    /** W6-52：绑定地址输入框。 */
+    const val LISTEN_HOST = "sync.listen.host"
+
+    /** W6-52：允许绑非回环单播地址的开关。 */
+    const val LISTEN_ALLOW_HOST = "sync.listen.allow-host"
+
     const val LISTEN_TLS = "sync.listen.tls"
 
     /** 收下后回一个裸 0x04（W6-40）：对端才能区分「接受」与「收完就断」。 */
@@ -766,6 +772,34 @@ private fun ListenSection(
             Text(SourceSyncListenCopy.TITLE, style = MaterialTheme.typography.titleSmall)
             Text(
                 SourceSyncListenCopy.HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = form.host,
+                onValueChange = { form = form.copy(host = it) },
+                label = { Text(SourceSyncListenCopy.HOST_LABEL) },
+                singleLine = true,
+                enabled = !listening && !receiving,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.LISTEN_HOST),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = form.allowExplicitHost,
+                    onCheckedChange = { checked -> form = form.copy(allowExplicitHost = checked) },
+                    enabled = !listening && !receiving,
+                    modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_ALLOW_HOST),
+                )
+                Text(
+                    SourceSyncListenCopy.ALLOW_HOST_LABEL,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                SourceSyncListenCopy.ALLOW_HOST_HINT,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

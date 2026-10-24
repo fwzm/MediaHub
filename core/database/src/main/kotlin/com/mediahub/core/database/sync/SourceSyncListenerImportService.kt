@@ -47,7 +47,7 @@ class SourceSyncListenerImportService(
         listener: SourceSyncTransferListener,
     ) : this(SourceSyncTransferImportService(service), listener)
 
-    /** 监听的地址文本（回环）。 */
+    /** 监听的地址文本（缺省回环；W6-52 放宽后是调用方给的单播字面量）。 */
     val address: String get() = listener.address
 
     /** 实际绑定的端口；open 时给 0 也会在这里拿到系统分配的端口。 */
@@ -123,8 +123,10 @@ class SourceSyncListenerImportService(
          *
          * @param gateway 生产用 AndroidSourceSyncService 包出来的网关；只想解码不写库的场合用
          *   SourceSyncImportGateways.acceptOnly()。
-         * @param host null 或空白表示 127.0.0.1；非回环在创建 socket 之前就被拒绝。
+         * @param host null 或空白表示 127.0.0.1；非回环在创建 socket 之前就被拒绝，
+         *   除非 [allowExplicitHost] 为 true 且它正是一个单播字面量（W6-52）。
          * @param port 0 表示让系统分配。
+         * @param allowExplicitHost W6-52：调用方自己打开了非回环开关；默认 false，与之前逐字同行为。
          */
         fun start(
             gateway: SourceSyncImportGateway,
@@ -135,6 +137,7 @@ class SourceSyncListenerImportService(
             acceptTimeoutMs: Int = SourceSyncTransferListener.DEFAULT_ACCEPT_TIMEOUT_MS,
             readTimeoutMs: Int = SourceSyncTransferListener.DEFAULT_READ_TIMEOUT_MS,
             handshakeTimeoutMs: Int = SourceSyncTls.DEFAULT_HANDSHAKE_TIMEOUT_MS,
+            allowExplicitHost: Boolean = false,
         ): SourceSyncListenerImportStart {
             val opened = SourceSyncTransferListener.open(
                 host = host,
@@ -144,6 +147,7 @@ class SourceSyncListenerImportService(
                 acceptTimeoutMs = acceptTimeoutMs,
                 readTimeoutMs = readTimeoutMs,
                 handshakeTimeoutMs = handshakeTimeoutMs,
+                allowExplicitHost = allowExplicitHost,
             )
             return when (opened) {
                 is SourceSyncListenerStart.Failed ->

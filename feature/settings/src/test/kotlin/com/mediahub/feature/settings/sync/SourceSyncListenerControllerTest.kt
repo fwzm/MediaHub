@@ -7,6 +7,7 @@ import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SourceSyncSummary
+import com.mediahub.core.common.sync.SourceSyncTransferListener
 import com.mediahub.core.common.sync.SourceSyncTransferReasons
 import com.mediahub.core.common.sync.SourceSyncTlsReasons
 import com.mediahub.core.common.sync.SourceRecord
@@ -128,6 +129,10 @@ private class FakeFactory(
 
     var lastReceipt: Boolean? = null
 
+    var lastHost: String? = null
+
+    var lastAllowExplicitHost: Boolean? = null
+
     override fun tlsAvailability(): SourceSyncListenTlsAvailability = availability
 
     override fun open(port: Int, tls: Boolean): SourceSyncListenerOpenResult = open(port, tls, false)
@@ -139,6 +144,19 @@ private class FakeFactory(
         lastReceipt = receipt
         return opened
     }
+
+    // W6-52：显式地址与「允许非回环单播」开关原样落到这里，供用例断言界面层有没有把话传到。
+    override fun open(
+        port: Int,
+        tls: Boolean,
+        receipt: Boolean,
+        host: String?,
+        allowExplicitHost: Boolean,
+    ): SourceSyncListenerOpenResult {
+        lastHost = host
+        lastAllowExplicitHost = allowExplicitHost
+        return open(port, tls, receipt)
+    }
 }
 
 /** 监听会话替身：可挂一道闸（用来测并发重入与取消），也可换下一次的结果。 */
@@ -146,6 +164,7 @@ private class FakeSession(
     override val port: Int = 45_678,
     override val tlsEnabled: Boolean = false,
     override val certificateFingerprint: String? = null,
+    override val address: String = SourceSyncTransferListener.DEFAULT_HOST,
     var outcome: SourceSyncTransferImportOutcome = imported("{}"),
 ) : SourceSyncListenerSession {
 
@@ -722,6 +741,91 @@ class SourceSyncListenerControllerTest {
             SourceSyncListenCopy.lineOf(state).orEmpty().contains(SourceSyncListenCopy.RECEIPT_WRITTEN_HINT),
         )
     }
+    // ------- W6-52 绑定地址与「允许非回环单播」开关 -------
+
+    @Test
+    fun defaultFormLeavesTheHostBlankAndKeepsTheSwitchOff() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession()))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+
+        assertTrue(controller.start(SourceSyncListenForm()))
+
+        // 表单的 host 缺省是空串而不是 null：空白由 core 的 SourceSyncHostAddress 当「缺省回环」处理，
+        // 界面层不替用户猜一个地址。生产工厂把 null 与空串交给同一处解析，两种写法等价。
+        assertEquals("", factory.lastHost)
+        assertEquals("开关默认必须是关着的", false, factory.lastAllowExplicitHost)
+    }
+
+    @Test
+    fun aTypedHostWithoutTheSwitchStillTravelsButStaysOff() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession()))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+
+        assertTrue(controller.start(SourceSyncListenForm(host = "192.168.1.5")))
+
+        assertEquals("写了什么就传什么，判断在 core", "192.168.1.5", factory.lastHost)
+        assertEquals("没点开关就不许放宽", false, factory.lastAllowExplicitHost)
+    }
+
+    @Test
+    fun hostAndSwitchTravelVerbatimAndTrimmingIsLeftToTheCore() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession(address = "192.168.1.5")))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+
+        assertTrue(
+            controller.start(SourceSyncListenForm(host = "  192.168.1.5  ", allowExplicitHost = true)),
+        )
+
+        assertEquals("界面层不做 trim：空白由 core 的地址解析器收尾", "  192.168.1.5  ", factory.lastHost)
+        assertEquals(true, factory.lastAllowExplicitHost)
+    }
+
+    @Test
+    fun notLoopbackFromTheFactoryKeepsTheCodeAndTheSentenceVerbatim() = runTest {
+        val sentence = "只允许绑定回环地址（127.0.0.1 / ::1 / localhost），实际 0.0.0.0"
+        val factory = FakeFactory(opened = openFailed(SourceSyncTransferReasons.NOT_LOOPBACK, sentence))
+        val handled = mutableListOf<String>()
+        val controller = SourceSyncListenerController(factory) { envelope, _ -> handled += envelope }
+
+        assertFalse(controller.start(SourceSyncListenForm(host = "0.0.0.0", allowExplicitHost = true)))
+
+        val state = controller.state.value
+        assertTrue("期待失败状态，实际 " + state, state is SourceSyncListenState.Failed)
+        state as SourceSyncListenState.Failed
+        assertEquals(SourceSyncTransferReasons.NOT_LOOPBACK, state.code)
+        assertEquals(sentence, state.detail)
+        assertNull("还没开起来就不该有端口", state.port)
+        assertFalse("地址被拒时不能声称在监听", controller.isListening)
+        assertTrue("地址被拒时一个字都不往导入页送", handled.isEmpty())
+        assertEquals(
+            "失败：" + SourceSyncTransferReasons.NOT_LOOPBACK + "（" + sentence + "）",
+            SourceSyncListenCopy.lineOf(state),
+        )
+    }
+
+    @Test
+    fun theListeningLinesNameTheBoundHostInsteadOfLoopback() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession(port = 45_678, address = "192.168.1.5")))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+
+        assertTrue(
+            controller.start(SourceSyncListenForm(host = "192.168.1.5", allowExplicitHost = true)),
+        )
+
+        val state = controller.state.value
+        assertTrue("期待监听状态，实际 " + state, state is SourceSyncListenState.Listening)
+        assertEquals("192.168.1.5", (state as SourceSyncListenState.Listening).host)
+        assertEquals(
+            "正在监听 192.168.1.5:45678（明文），等 Windows 发送…",
+            SourceSyncListenCopy.lineOf(state),
+        )
+        assertEquals("监听 192.168.1.5:45678（明文）", SourceSyncListenCopy.portLineOf(state))
+        assertFalse(
+            "既然绑的是那台机器的地址，就不该再写 127.0.0.1",
+            SourceSyncListenCopy.portLineOf(state).orEmpty().contains("127.0.0.1"),
+        )
+    }
+
     private suspend fun seededSession(): Seeded {
         val preview = FakePreviewPort(readyPreview())
         val apply = FakeApplyPort(appliedResult())
