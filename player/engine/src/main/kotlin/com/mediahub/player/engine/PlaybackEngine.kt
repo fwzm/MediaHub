@@ -289,7 +289,7 @@ class PlaybackEngine(
      * 用户看到的现象正是「点了暂停，位置还在继续走」。
      */
     override fun togglePlayPause() {
-        if (player.playWhenReady) pause() else resume()
+        if (player.playWhenReady && player.playbackState != Player.STATE_ENDED) pause() else resume()
     }
 
     fun pause() {
