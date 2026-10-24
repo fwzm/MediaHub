@@ -13,7 +13,9 @@ import java.net.SocketTimeoutException
  * 分块信封传输的客户端：一次连接只做一件事（送一封信封，或收一封信封），做完即关。
  *
  * 与 PairingTransportClient 同一条纪律：
- * - 只连回环（127.0.0.1 / ::1 / localhost），别的目标在拨号前拒绝，码为 not-loopback；
+ * - 缺省只连回环（127.0.0.1 / ::1 / localhost），别的目标在拨号前拒绝，码为 not-loopback；
+ *   W6-52b 起可由调用方显式同意放宽到一个**单播字面量**（[allowExplicitHost]，判定在
+ *   [SourceSyncHostAddress] 里，与监听端 W6-52 同名同义）；
  * - 主机名不做 DNS 解析，避免把「只连本机」交给解析器决定；
  * - TLS 1.3 + 公钥指纹钉扎是可选的（W6-29，默认 [SourceSyncTlsOptions.Off]）：
  *   关闭时一个字节都不多说，字节与 W6-22 至今完全一致；开启时只谈 TLS 1.3，
@@ -40,6 +42,8 @@ class SourceSyncTransferClient(
      * @param receipt 可选的回执（W6-40）：本端当接收方时，收全一封信封后写一个裸 0x04；
      *   默认 [SourceSyncReceiptOptions.Off]，一个字节都不多写。
      * @param receiptGate 可选解码闸门：返回 false 时沉默（不写回执，也不把这次接收改成失败）。
+     * @param allowExplicitHost 只有 true 时才允许连一个显式的非回环单播字面量（W6-52b）；
+     *   默认 false，与 W6-23 起的「只连回环、别的在拨号前拒」逐字同义。
      */
     fun receiveFrom(
         host: String,
@@ -49,8 +53,9 @@ class SourceSyncTransferClient(
         auth: SourceSyncTransferOptions? = null,
         receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
         receiptGate: ((ByteArray) -> Boolean)? = null,
+        allowExplicitHost: Boolean = false,
     ): SourceSyncTransferResult {
-        return withConnection(host, port, tls) { input, output, _ ->
+        return withConnection(host, port, tls, allowExplicitHost) { input, output, _ ->
             val received = SourceSyncTransfer.receive(input, expectedChallenge, auth)
             if (receipt.enabled && received is SourceSyncTransferResult.Ok) {
                 SourceSyncReceipt.acknowledge(output, received.envelope, receipt, receiptGate)
@@ -69,6 +74,8 @@ class SourceSyncTransferClient(
      *   默认 [SourceSyncDeliveryOptions.Off]——一个字节不多写、一次读不多做、一毫秒不多等。
      *   **回执优先**：receipt 开启时 delivery 被忽略（0x04 是应用层答案，比「关了连接」信息量更大，
      *   也与 Windows CLI 的 ConfirmDelivery && !AwaitReceipt 同口径）。
+     * @param allowExplicitHost 只有 true 时才允许连一个显式的非回环单播字面量（W6-52b），
+     *   判定与诊断句都来自 [SourceSyncHostAddress]，与监听端 W6-52 同名同义。
      */
     fun sendTo(
         host: String,
@@ -79,10 +86,11 @@ class SourceSyncTransferClient(
         auth: SourceSyncTransferOptions? = null,
         receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
         delivery: SourceSyncDeliveryOptions = SourceSyncDeliveryOptions.Off,
+        allowExplicitHost: Boolean = false,
     ): SourceSyncTransferResult {
         val effectiveDelivery: SourceSyncDeliveryOptions =
             if (receipt.enabled) SourceSyncDeliveryOptions.Off else delivery
-        return withConnection(host, port, tls) { input, output, setReadTimeout ->
+        return withConnection(host, port, tls, allowExplicitHost) { input, output, setReadTimeout ->
             if (receipt.enabled) {
                 SourceSyncTransfer.sendAndAwaitReceipt(
                     output = output,
@@ -140,13 +148,16 @@ class SourceSyncTransferClient(
         host: String,
         port: Int,
         tls: SourceSyncTlsOptions,
+        allowExplicitHost: Boolean,
         body: (InputStream, OutputStream, (Int) -> Unit) -> SourceSyncTransferResult,
     ): SourceSyncTransferResult {
-        val address = LoopbackOnly.addressOrNull(host)
-            ?: return SourceSyncTransferResult.Failed(
-                SourceSyncTransferReasons.NOT_LOOPBACK,
-                "只允许连回环地址，实际 " + host,
-            )
+        val address = when (
+            val resolution = SourceSyncHostAddress.resolve(host, allowExplicitHost, verb = "连")
+        ) {
+            is SourceSyncHostAddress.Resolution.Failed ->
+                return SourceSyncTransferResult.Failed(resolution.code, resolution.detail)
+            is SourceSyncHostAddress.Resolution.Accepted -> resolution.address
+        }
         if (port !in 1..MAXIMUM_PORT) {
             return SourceSyncTransferResult.Failed(
                 SourceSyncTransferReasons.CONNECT_FAILED,

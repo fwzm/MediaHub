@@ -102,6 +102,9 @@ class EvidenceGateTest(unittest.TestCase):
             "theListenFormCarriesTheTypedHostAndTheSwitchVerbatim",
             "theListenFormCarriesTheAuthSwitchAndTheSecretVerbatim",
             "whileListeningTheAuthSwitchAndTheSecretAreLocked",
+            "theListenFormCarriesTheTypedBudgetVerbatim",
+            "theReceiveFormCarriesTheCrossMachineSwitchVerbatim",
+            "theSendFormCarriesTheCrossMachineSwitchVerbatim",
         )
         for api in (32, 36):
             for name in names:
@@ -113,6 +116,19 @@ class EvidenceGateTest(unittest.TestCase):
                         suite.set("tests", str(len(suite)))
                     self.edit("feature/settings", remove, api=api)
                     self.assertTrue(any(name in p and "no passing execution" in p for p in self.problems(api)))
+
+    def test_non_overwriting_backup_flow_is_required_on_both_apis(self):
+        key = ("com.mediahub.app.backup.BackupUserFlowNonOverwritingDeviceTest",
+               "exportCancelSaveWrongPasswordAndUnconfirmedReplaceAreNonOverwriting")
+        for api in (32, 36):
+            with self.subTest(api=api):
+                self.assertIn(key, gate.required_tests(api))
+                self.build(api)
+                def remove(suite):
+                    suite.remove(next(case for case in suite if (case.get("classname"), case.get("name")) == key))
+                    suite.set("tests", str(len(suite)))
+                self.edit("app", remove, api=api)
+                self.assertTrue(any(key[1] in problem and "no passing execution" in problem for problem in self.problems(api)))
 
     def test_zero_tests_fails_even_with_valid_manifest(self):
         for module in gate.MODULES:

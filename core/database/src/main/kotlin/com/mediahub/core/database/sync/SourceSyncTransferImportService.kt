@@ -89,14 +89,17 @@ class SourceSyncTransferImportService(
      * 连回环对端收一封信封并导入。
      *
      * expectedChallenge 非空时，帧流里的挑战必须与之逐字相等，否则 challenge-mismatch。
+     * @param allowExplicitHost 只有 true 时才允许拨一个显式的非回环单播字面量（W6-52b）；
+     *   默认 false，与 W6-23 起的「只连回环」逐字同义（判定与诊断句都在 core:common 的 SourceSyncHostAddress）。
      */
     suspend fun receiveAndImport(
         host: String,
         port: Int,
         expectedChallenge: String? = null,
+        allowExplicitHost: Boolean = false,
     ): SourceSyncTransferImportOutcome {
         val received = withContext(Dispatchers.IO) {
-            client.receiveFrom(host, port, expectedChallenge)
+            client.receiveFrom(host, port, expectedChallenge, allowExplicitHost = allowExplicitHost)
         }
         return when (received) {
             is SourceSyncTransferResult.Failed ->

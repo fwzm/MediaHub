@@ -137,6 +137,25 @@ object SourceSyncListenCopy {
     const val SECRET_REQUIRED: String =
         "开了认证就必须填口令：没有口令时对端带来的 tag 帧一律判 auth-secret-unavailable。"
 
+    /** W6-54：等待预算（毫秒）的标签，与 Windows 端 transfer serve --budget-ms 同一个词。 */
+    const val BUDGET_LABEL: String = "等待预算（毫秒，留空=15000）"
+
+    /**
+     * W6-54：一个框管两段等待，原因写在文案里而不是让用户猜。
+     *
+     * core 的监听有两个超时：等第一条连接（SO_TIMEOUT on accept）与连上之后每次读（SO_TIMEOUT on read）。
+     * 后者是单次读的上限、不是整场传输的总预算，所以两段用同一个数字是安全的：
+     * 值太小会让大信封提前断，值太大只是失败得慢一点。
+     */
+    const val BUDGET_HINT: String =
+        "一个框管两段等待：等第一条连接最多多久，连上之后每次读最多等多久" +
+            "（这是单次读的上限，不是整场传输的总预算）。范围 100..600000 毫秒，" +
+            "与 Windows 端 transfer serve --budget-ms 同值同义。"
+
+    /** 预算文本不合法时的提示：与端口非法同一姿势，连 socket 都不开。 */
+    const val BUDGET_INVALID_HINT: String =
+        "等待预算是 100..600000 毫秒之间的整数，留空表示 15000 毫秒；这个值没有被使用。"
+
     /** 一条状态行（Idle 没有状态行）。 */
     fun lineOf(state: SourceSyncListenState): String? = when (state) {
         SourceSyncListenState.Idle -> null
@@ -224,6 +243,13 @@ data class SourceSyncListenForm(
     val auth: Boolean = false,
     /** 口令原文（只在内存里用一次，不落盘、不进状态行）；[auth] 关着时忽略。 */
     val secret: String = "",
+    /**
+     * 等待预算（毫秒，W6-54）：留空 = 15000，与 W6-50 的 transfer serve 默认同值。
+     *
+     * 同一个数字既给「等第一条连接」也给「连上之后每次读」，理由见 [SourceSyncListenCopy.BUDGET_HINT]；
+     * 非数字或越界不会去开 socket，状态留在本地码 listen-budget-invalid。
+     */
+    val budget: String = "",
 ) {
 
     /** 留空给 0（系统分配）；非数字、越界一律 null。 */
@@ -239,7 +265,17 @@ data class SourceSyncListenForm(
     /** 开了认证就必须有口令：空口令等于自己把自己锁在门外。 */
     val isSecretAcceptable: Boolean get() = !auth || secret.isNotEmpty()
 
-    val canSubmit: Boolean get() = isPortTextAcceptable && isSecretAcceptable
+    /** 留空给缺省 15000 毫秒；非数字、越界一律 null（不开 socket）。 */
+    val budgetMillis: Int?
+        get() {
+            val text = budget.trim()
+            if (text.isEmpty()) return SourceSyncTransferListener.DEFAULT_ACCEPT_TIMEOUT_MS
+            return text.toIntOrNull()?.takeIf { it in VALID_BUDGET_MILLIS }
+        }
+
+    val isBudgetTextAcceptable: Boolean get() = budgetMillis != null
+
+    val canSubmit: Boolean get() = isPortTextAcceptable && isSecretAcceptable && isBudgetTextAcceptable
 
     /** 诊断 / 日志安全：口令原文一律不出现在 toString 里。 */
     override fun toString(): String = "SourceSyncListenForm(port=" + port +
@@ -247,6 +283,7 @@ data class SourceSyncListenForm(
         ", receipt=" + receipt +
         ", host=" + host +
         ", allowExplicitHost=" + allowExplicitHost +
+        ", budget=" + budget +
         ", auth=" + auth +
         ", secret=<redacted>)"
 
@@ -256,6 +293,9 @@ data class SourceSyncListenForm(
         const val SYSTEM_ASSIGNED_PORT: Int = 0
 
         val VALID_PORTS: IntRange = 1..65535
+
+        /** W6-54：与 Windows 端 transfer serve --budget-ms 同一个范围（100..600000 毫秒）。 */
+        val VALID_BUDGET_MILLIS: IntRange = 100..600_000
     }
 }
 
@@ -347,6 +387,22 @@ interface SourceSyncListenerFactory {
         allowExplicitHost: Boolean,
         auth: SourceSyncTransferOptions?,
     ): SourceSyncListenerOpenResult = open(port, tls, receipt, host, allowExplicitHost)
+
+    /**
+     * W6-54：带等待预算（毫秒）的开监听。
+     *
+     * [budgetMillis] 既给「等第一条连接」也给「连上之后每次读」，缺省 15000 与 W6-53 之前逐字同行为。
+     * 默认实现把预算丢掉、等价于上一个重载：既有工厂（含测试替身）不必改一行。
+     */
+    fun open(
+        port: Int,
+        tls: Boolean,
+        receipt: Boolean,
+        host: String?,
+        allowExplicitHost: Boolean,
+        auth: SourceSyncTransferOptions?,
+        budgetMillis: Int,
+    ): SourceSyncListenerOpenResult = open(port, tls, receipt, host, allowExplicitHost, auth)
 }
 
 /**
@@ -418,6 +474,16 @@ class SourceSyncListenerController(
             )
             return false
         }
+        val budgetMillis = form.budgetMillis
+        if (budgetMillis == null) {
+            // 预算文本不合法：同样一个 socket 都不开（W6-54），码是本端的，不是线上码。
+            _state.value = SourceSyncListenState.Failed(
+                port = null,
+                code = BUDGET_INVALID,
+                detail = SourceSyncListenCopy.BUDGET_INVALID_HINT,
+            )
+            return false
+        }
         if (!starting.compareAndSet(false, true)) return false
         try {
             if (session != null) return false
@@ -436,6 +502,7 @@ class SourceSyncListenerController(
                         form.host,
                         form.allowExplicitHost,
                         auth,
+                        budgetMillis,
                     )
                 }
             } catch (cancellation: CancellationException) {
@@ -576,6 +643,9 @@ class SourceSyncListenerController(
         /** W6-53：开了认证却没填口令（本地拦下，不开 socket）。 */
         const val SECRET_MISSING: String = "listen-secret-missing"
 
+        /** W6-54：等待预算文本不合法（本地拦下，不开 socket）。 */
+        const val BUDGET_INVALID: String = "listen-budget-invalid"
+
         const val MISSING_ENVELOPE: String = "missing-envelope"
 
         /** 没开监听就想等一次发送时给界面的提示（不是状态行，按钮此时本来就点不动）。 */
@@ -623,6 +693,25 @@ class SourceSyncListenerImportFactory(
         host: String?,
         allowExplicitHost: Boolean,
         auth: SourceSyncTransferOptions?,
+    ): SourceSyncListenerOpenResult =
+        open(
+            port,
+            tls,
+            receipt,
+            host,
+            allowExplicitHost,
+            auth,
+            budgetMillis = SourceSyncTransferListener.DEFAULT_ACCEPT_TIMEOUT_MS,
+        )
+
+    override fun open(
+        port: Int,
+        tls: Boolean,
+        receipt: Boolean,
+        host: String?,
+        allowExplicitHost: Boolean,
+        auth: SourceSyncTransferOptions?,
+        budgetMillis: Int,
     ): SourceSyncListenerOpenResult {
         if (tls && !identity.isUsable) {
             return SourceSyncListenerOpenResult.Failed(
@@ -636,6 +725,9 @@ class SourceSyncListenerImportFactory(
             port = port,
             tls = if (tls) SourceSyncTlsOptions.pinned(identity.certificateFingerprint) else SourceSyncTlsOptions.Off,
             identity = identity,
+            // W6-54：一个框管两段等待，两段都用同一个毫秒数（理由见 SourceSyncListenCopy.BUDGET_HINT）。
+            acceptTimeoutMs = budgetMillis,
+            readTimeoutMs = budgetMillis,
             allowExplicitHost = allowExplicitHost,
         )
         return when (opened) {

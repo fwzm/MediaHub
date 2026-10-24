@@ -24,7 +24,7 @@ jobs:
     # 即使仪器测试失败也保留原来的 build/unit/lint 诊断，最后再断言总门禁。
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -84,7 +84,7 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug --no-daemon --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process
 
       - name: Validate emulator preparation guards
         run: python3 -m unittest discover -s .github/scripts/tests -p 'test_prepare_visual_emulator.py' -v
@@ -98,9 +98,9 @@ jobs:
           python3 .github/scripts/verify-unit-tests.py --begin --report-timezone UTC --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
 
       - name: Unit tests
-        timeout-minutes: 15
+        timeout-minutes: 30
         # testDebugUnitTest 不会运行独立 Kotlin/JVM 模块的 test task。
-        run: ./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon --continue --rerun-tasks --no-build-cache
+        run: ./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon --continue --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process --rerun-tasks --no-build-cache
 
       - name: Require fresh unit test evidence
         if: ${{ !cancelled() }}
@@ -129,6 +129,12 @@ jobs:
           #     写完最后一帧后读对端直到 FIN，预算 2000 ms、最多排水 64 KiB，回执优先；Off 时不读一个字节）
           #   feature.settings.sync.SourceSyncSendLauncherTest —— 发送取消的 Job 记账薄壳（W6-49：取消回 Idle
           #     不产生失败码、释放单飞可立刻重发、没在发时 cancel 是 no-op、clear 后状态仍可用）
+          #   sync.SourceSyncReceiptTest —— 反向回执帧 0x04（W6-40：四码与 Windows 同名同序、回执只在信封解码成功后写、
+          #     没开回执的监听端一个字节都不发）
+          #   sync.SourceSyncHostAddressTest —— 监听卡绑定地址判定（W6-52：四类拒绝句、自己算 IPv4 字面量永不查 DNS、
+          #     只放行一个单播地址、建 socket 之前就拒）
+          #   feature.settings.sync.SourceSyncListenerControllerTest —— 监听卡控制器（W6-36 起；W6-52 地址、W6-53 对端
+          #     口令、W6-54 等待预算三段都在这里，界面本地码 listen-secret-missing / listen-budget-invalid 各有用例）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -181,12 +187,16 @@ jobs:
             --required-suite com.mediahub.feature.settings.sync.SourceSyncSendLauncherTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncHostAddressTest \
             --required-suite com.mediahub.provider.emby.EmbyAuthenticationInterleavingStressTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncReceiptTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncListenerControllerTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferClientHostTest \
+            --required-suite com.mediahub.core.network.EndpointTestServiceRedactionTest \
             --require-complete-suites
 
       - name: Lint
         if: ${{ !cancelled() }}
         timeout-minutes: 15
-        run: ./gradlew lintDebug --no-daemon
+        run: ./gradlew lintDebug --no-daemon --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process
 
       # Preserve failures as well as passes; this does not retry or change any gate.
       - name: Upload validation reports
@@ -226,7 +236,7 @@ jobs:
   visual-instrumentation:
     name: visual-instrumentation (API ${{ matrix.api-level }})
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -267,14 +277,15 @@ jobs:
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null
 
       - name: Compile visual instrumentation APKs
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: >-
           ./gradlew :core:ui:assembleDebugAndroidTest
           :feature:player:assembleDebugAndroidTest
           :feature:settings:assembleDebugAndroidTest
           :provider:webdav:assembleDebugAndroidTest
           :core:database:assembleDebugAndroidTest
-          --no-daemon --continue --max-workers=2
+          :app:assembleDebug :app:assembleDebugAndroidTest
+          --no-daemon --continue --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process
 
       - name: Test instrumentation evidence gate
         run: python3 -m unittest discover -s .github/scripts/tests -v
@@ -283,7 +294,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import pathlib, shutil
-          for module in ('core/ui', 'feature/player', 'feature/settings', 'provider/webdav', 'core/database'):
+          for module in ('core/ui', 'feature/player', 'feature/settings', 'provider/webdav', 'core/database', 'app'):
               shutil.rmtree(pathlib.Path(module) / 'build/outputs/androidTest-results/connected', ignore_errors=True)
           pathlib.Path('ci-evidence/instrumentation-manifest.json').unlink(missing_ok=True)
           PY
@@ -304,7 +315,7 @@ jobs:
           test -r /dev/kvm && test -w /dev/kvm
 
       - name: Run production visual paths on emulator
-        timeout-minutes: 20
+        timeout-minutes: 30
         # v2.37.0 uses Node 24 + build-tools 36, matching this project's compile SDK.
         uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a
         with:
@@ -337,6 +348,8 @@ jobs:
           path: |
             ci-evidence/
             core/ui/build/outputs/androidTest-results/
+            app/build/outputs/androidTest-results/
+            app/build/reports/androidTests/
             core/ui/build/reports/androidTests/
             feature/player/build/outputs/androidTest-results/
             feature/player/build/reports/androidTests/

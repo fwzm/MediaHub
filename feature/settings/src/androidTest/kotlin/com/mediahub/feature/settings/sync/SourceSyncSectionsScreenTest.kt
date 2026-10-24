@@ -4,12 +4,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -95,6 +97,41 @@ class SourceSyncSectionsScreenTest {
         // 非回环地址**故意不在表单层拦**（SourceSyncReceiveController.kt:88-90）：拒绝是传输客户端的
         // not-loopback 判定，表单只负责原样转交，否则同一个错误会有两个来源、两种说法。
         assertEquals("192.168.1.5", form!!.host)
+        assertEquals(8999, form.portNumber)
+    }
+
+    // ------------------------------------------- W6-52b 接收卡的「允许非回环单播」开关
+
+    @Test
+    fun theReceiveCardOffersACrossMachineSwitch() {
+        render()
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_ALLOW_HOST).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+        // 说明必须写清「只收单播字面量、码仍是 not-loopback」，否则用户会以为是域名输入框。
+        // 发送卡与接收卡用的是同一句说明（同一件事的两个方向），所以整页语义树里必然命中 2 个节点：
+        // 这里只断言「两处都在」，单节点断言会直接报 Expected exactly '1' node but found '2'
+        // （第一次 CI 实跑就红在这里——本机 JVM 测试看不到两张卡同时在场）。
+        composeRule.onAllNodesWithText(SourceSyncReceiveCopy.ALLOW_HOST_HINT).assertCountEquals(2)
+        composeRule.onNodeWithText(SourceSyncReceiveCopy.ALLOW_HOST_LABEL).assertIsDisplayed()
+    }
+
+    @Test
+    fun theReceiveFormCarriesTheCrossMachineSwitchVerbatim() {
+        var received: SourceSyncReceiveForm? = null
+        render(onReceive = { received = it })
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_PORT).performScrollTo()
+            .performTextReplacement("8999")
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_ALLOW_HOST).performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_ACTION).performScrollTo()
+            .performClick()
+
+        val form = received
+        assertNotNull("接收按钮没把表单交出去", form)
+        assertTrue("点了开关就必须原样带过去", form!!.allowExplicitHost)
         assertEquals(8999, form.portNumber)
     }
 
@@ -251,6 +288,62 @@ class SourceSyncSectionsScreenTest {
         composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_SECRET).assertIsNotEnabled()
     }
 
+    // ------------------------------------------------- W6-54 等待预算（毫秒）旋钮
+
+    @Test
+    fun theListenCardOffersABudgetFieldWithItsRangeHint() {
+        render()
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_BUDGET).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+        // 范围与「一个框管两段等待」必须写在界面上，否则用户会把 15000 当成整场传输的总时长。
+        composeRule.onNodeWithText(SourceSyncListenCopy.BUDGET_LABEL).assertIsDisplayed()
+        composeRule.onNodeWithText(SourceSyncListenCopy.BUDGET_HINT).performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun theListenFormCarriesTheTypedBudgetVerbatim() {
+        var listened: SourceSyncListenForm? = null
+        render(onListenStart = { listened = it })
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_BUDGET).performScrollTo()
+            .performTextReplacement("30000")
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_START).performScrollTo()
+            .performClick()
+
+        val form = listened
+        assertNotNull("开始监听没把表单交出去", form)
+        // 界面只原样转交文本；毫秒解析与范围判定只有一处（SourceSyncListenForm.budgetMillis）。
+        assertEquals("30000", form!!.budget)
+        assertEquals(30_000, form.budgetMillis)
+    }
+
+    @Test
+    fun anOutOfRangeBudgetKeepsTheListenButtonDisabled() {
+        render()
+
+        val budget = composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_BUDGET).performScrollTo()
+        budget.performTextReplacement("99")
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_START).assertIsNotEnabled()
+
+        budget.performTextReplacement("12s")
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_START).assertIsNotEnabled()
+
+        // 留空等于缺省 15000 毫秒，按钮回到可点。
+        budget.performTextReplacement("")
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_START).assertIsEnabled()
+    }
+
+    @Test
+    fun whileListeningTheBudgetFieldIsLocked() {
+        render(listenState = SourceSyncListenState.Listening(port = 45678, tls = false))
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_BUDGET).performScrollTo()
+            .assertIsNotEnabled()
+    }
+
     // ------------------------------------------------------------------ 发送
 
     @Test
@@ -298,6 +391,41 @@ class SourceSyncSectionsScreenTest {
         assertFalse("默认不开 TLS", form.tls)
         assertFalse("默认不开认证", form.auth)
         assertFalse("默认不等回执", form.receipt)
+    }
+
+    // ------------------------------------------- W6-52b 发送卡的「允许非回环单播」开关
+
+    @Test
+    fun theSendCardOffersACrossMachineSwitch() {
+        render()
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.SEND_ALLOW_HOST).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+        // 同接收卡：这句说明两张卡共用，整页里命中 2 个节点（第一次 CI 实跑红在单节点断言上）。
+        composeRule.onAllNodesWithText(SourceSyncSendCopy.ALLOW_HOST_HINT).assertCountEquals(2)
+        composeRule.onNodeWithText(SourceSyncSendCopy.ALLOW_HOST_LABEL).assertIsDisplayed()
+    }
+
+    @Test
+    fun theSendFormCarriesTheCrossMachineSwitchVerbatim() {
+        var sent: SourceSyncSendForm? = null
+        render(onSend = { sent = it })
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.SEND_HOST).performScrollTo()
+            .performTextReplacement("192.168.1.5")
+        composeRule.onNodeWithTag(SourceSyncImportTags.SEND_ALLOW_HOST).performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag(SourceSyncImportTags.SEND_PORT).performScrollTo()
+            .performTextReplacement("8942")
+        composeRule.onNodeWithTag(SourceSyncImportTags.SEND_ACTION).performScrollTo()
+            .performClick()
+
+        val form = sent
+        assertNotNull("发送按钮没把表单交出去", form)
+        // 地址与开关都只原样转交；「能不能连」只有 core 的 SourceSyncHostAddress 一处判定。
+        assertEquals("192.168.1.5", form!!.hostOrLoopback)
+        assertTrue("点了开关就必须原样带过去", form.allowExplicitHost)
     }
 
     @Test

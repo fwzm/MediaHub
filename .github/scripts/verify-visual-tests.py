@@ -13,8 +13,24 @@ import sys
 import xml.etree.ElementTree as ET
 
 
-MODULES = ("core/ui", "feature/player", "feature/settings", "provider/webdav", "core/database")
+MODULES = ("core/ui", "feature/player", "feature/settings", "provider/webdav", "core/database", "app")
 COMMON_TESTS = {
+    (
+        "com.mediahub.app.backup.BackupUserFlowNonOverwritingDeviceTest",
+        "exportCancelSaveWrongPasswordAndUnconfirmedReplaceAreNonOverwriting",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest",
+        "theListenFormCarriesTheTypedBudgetVerbatim",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest",
+        "theReceiveFormCarriesTheCrossMachineSwitchVerbatim",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest",
+        "theSendFormCarriesTheCrossMachineSwitchVerbatim",
+    ),
     (
         "com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
         "productionPauseSeekAndResumeControlsPreserveControlledProgress",
