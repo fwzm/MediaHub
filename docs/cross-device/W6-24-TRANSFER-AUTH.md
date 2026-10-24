@@ -2,7 +2,7 @@
 
 - 状态: **IMPLEMENTED_UNVERIFIED**（代码已实现、45 个新用例全绿、全套 1332 例通过、App 工程 0 警告 0 错误；本轮**没有** GUI 证据，也**没有**与 Android 端的联调证据）
 - 日期: 2026-10-24
-- 分支: `feature/cross-device-source-sync` / HEAD `55767e4`（本任务改动**未提交**，仍在工作区）
+- 分支: `feature/cross-device-source-sync`（交付基线 `55767e4`；本任务改动已入库：提交 `3bc7c7b`）
 - 前置: W6-16 回环传输分帧、W6-17/18 收件箱与对端回合、W6-22 Android 分块传输向量、W6-12 配对指纹钉扎
 - 范围: 只动 `windows/src/MediaHub.Sync`（5 个文件，其中 1 个新增）、`windows/src/MediaHub.SyncCli`（3 个文件）、2 个新测试文件、本文档；未动 `MediaHub.App` / Providers / Domain / Storage，未启动 GUI，零 NuGet
 
@@ -164,4 +164,4 @@ dotnet build windows/src/MediaHub.App/MediaHub.App.csproj -c Debug -p:Platform=x
 - `SourceSyncTransferReasons` 的 10 码**不动**，新码另立 `SourceSyncTransferAuthReasons`：既有测试断言它 `Count == 10` 且无重复，扩它会直接破测。
 - 接收端在**认证关闭**时仍保持"收满即返回"，所以对端多发的 `0x03` 不会被读（既有行为不变）；认证开启时才要求 tag。
 - 设计上删掉了一个不可达分支（"第二个 tag 帧"）：第一个有效 tag 就 `return Ok`，第二次进不了分支。测试改为覆盖"tag 先于首块"这种可达的错误顺序。
-- 本任务只写 `D:/mh-out-w6`；`D:/mh-out`、`D:/mh-out2`、`D:/mh-out3` 未被触碰；未 commit / 未 push。
+- 本任务只写 `D:/mh-out-w6`；`D:/mh-out`、`D:/mh-out2`、`D:/mh-out3` 未被触碰；交付当时未 commit / 未 push，随后随 `3bc7c7b` 入库。
