@@ -67,7 +67,21 @@ presenter 是纯 .NET（`namespace MediaHub.Sync`，**零 WinUI / Windows.UI 引
 
 命名约定：**本区块的所有 x:Name 以 `Transfer` 开头**，与页面上既有的 `Pair*` / `Apply*` / `Paired*` / `Sync*` 前缀不冲突；AutomationId 统一走 `sync.transfer.*` 命名空间。
 
-## 4 稳定码 → 界面文案（20 码全覆盖）
+### 3.1 回执（receipt）在 presenter 层的两个开关（W6-39）
+
+W6-39 给 presenter 加了「反向回执帧 0x04」（见 W6-37-RECEIPT.md）。**开关只存在于 presenter 层，页面上还没有对应控件**，所以这一节描述的是已实现、已单测、但**没有 GUI 证据**的能力：
+
+| presenter 成员 | 默认 | 语义 |
+| --- | --- | --- |
+| `SyncTransferReceiveForm.WriteReceipt` | `false` | 接收侧：信封**解码成功**后回写 1 字节 `0x04`；解码失败或传输失败一字节都不写（gate 就是解码谓词） |
+| `SyncTransferSendForm.AwaitReceipt` | `false` | 发送侧：写完全部帧后等回执字节，等不到就是 `receipt-missing` / `receipt-timeout` / `receipt-invalid`，按失败呈现 |
+| `SyncTransferPresenter.ReceiptBudget` | 2000 ms | 等回执的预算（`SourceSyncReceipt.DefaultBudget`），页面上不可调 |
+| `SyncTransferReceiveState.WritesReceipt` | `false` | 监听中状态回显「本次会不会回执」，页面只在状态句里用到 |
+| `SyncTransferOutcome.ReceiptConfirmed` / `ReceiptWritten` | `null` | `null` = 没要求；成功时 `true` 并写进结果句（「并收到回执：对端读懂了这份信封（0x04）。」） |
+
+默认两个开关都关闭时，线上字节与等待行为**与 W6-33 交付时完全一致**（95 字节冻结向量仍逐字节相等）。`DescribeReason` 随之从 20 码扩到 24 码（多出 `receipt-missing` / `receipt-timeout` / `receipt-invalid` / `receipt-not-enabled`），仍然每条带原码、未知码回显。
+
+## 4 稳定码 → 界面文案（W6-39 起 24 码全覆盖）
 
 `SyncTransferCopy.DescribeReason` 逐条翻译，**每条末尾把码本身原样写在括号里**，未知码回显为「未识别的结果码。（码本身）」——presenter 不自造码，也不隐藏码。
 

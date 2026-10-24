@@ -1055,7 +1055,9 @@ public sealed class SyncCliRunner
         SourceSyncApplyReport? Report,
         string? Reason,
         string? Detail,
-        bool? ReceiptWritten = null)
+        bool? ReceiptWritten = null,
+        bool? ReceiptConfirmed = null,
+        string? ReceiptReason = null)
     {
         public bool Succeeded => Reason is null;
 
@@ -1093,16 +1095,40 @@ public sealed class SyncCliRunner
             ? SourceSyncTlsOptions.Pinned(bound.CertificateFingerprint)
             : null;
 
-        // W6-30: both halves are this process, and the receiving listener closes as soon as it has the
-        // envelope, so a roundtrip can always afford the receipt - no operator flag needed, and no JSON
-        // field either: it only turns a silent "maybe" into delivery-unconfirmed.
-        SourceSyncDeliveryOptions delivery = SourceSyncDeliveryOptions.Confirming();
+        // W6-39: both halves are this process, so the roundtrip exchanges the W6-37 receipt without asking
+        // the operator: this listener is told to write one 0x04 byte once the envelope decoded, and the
+        // sender waits for it. That is real evidence, which is why the W6-30 close-based confirmation is not
+        // also run here - a close cannot tell "decoded" from "refused", and the receipt can.
+        // A receipt that never arrives does not fail the round: the envelope did arrive and did decode, so
+        // the round stays a success and the missing acknowledgement is reported as receiptReason.
+        SourceSyncReceiptOptions receipt = SourceSyncReceiptOptions.Awaiting(SourceSyncReceipt.DefaultBudget);
+        SourceSyncReceiptOptions receiverReceipt = SourceSyncReceiptOptions.Sending();
         using CancellationTokenSource abort = new();
-        Task<SourceSyncTransferResult> receiving = listener.ReceiveOnceAsync(null, TransferBudget, abort.Token, options);
+        Task<SourceSyncTransferResult> receiving = listener.ReceiveOnceAsync(
+            null,
+            TransferBudget,
+            abort.Token,
+            options,
+            receiverReceipt,
+            payload => SourceSyncInbox.TryDecode(payload, out _, out _));
         SourceSyncPeerRoundResult sent = await sender
-            .SendPayloadAsync(payload, SourceSyncTransferAddress.DefaultAddress, listener.Port, challenge, TransferBudget, CancellationToken.None, options, pin, delivery)
+            .SendPayloadAsync(
+                payload,
+                SourceSyncTransferAddress.DefaultAddress,
+                listener.Port,
+                challenge,
+                TransferBudget,
+                CancellationToken.None,
+                options,
+                pin,
+                delivery: null,
+                receipt: receipt)
             .ConfigureAwait(false);
-        if (!sent.Succeeded)
+
+        // A bearer of a receipt code is the advisory case: the frames left, the acknowledgement did not come
+        // back. That is not a failed round; it is a successful round with an unconfirmed peer.
+        bool receiptAdvisory = SourceSyncReceiptReasons.IsReceiptReason(sent.Reason);
+        if (!sent.Succeeded && !receiptAdvisory)
         {
             abort.Cancel();
             await ObserveAsync(receiving).ConfigureAwait(false);
@@ -1125,7 +1151,17 @@ public sealed class SyncCliRunner
         SourceSyncApplyReport? report = apply
             ? await receiver.ApplyAsync(preview, writer, null, cancellationToken: CancellationToken.None).ConfigureAwait(false)
             : null;
-        return new TransferOutcome(envelope.DeviceId, receiver.DeviceId, received.Bytes, received.FrameCount, preview, report, null, null);
+        return new TransferOutcome(
+            envelope.DeviceId,
+            receiver.DeviceId,
+            received.Bytes,
+            received.FrameCount,
+            preview,
+            report,
+            null,
+            null,
+            ReceiptConfirmed: sent.ReceiptConfirmed,
+            ReceiptReason: receiptAdvisory ? sent.Reason : null);
     }
 
     /// <summary>
@@ -1614,8 +1650,10 @@ public sealed class SyncCliRunner
 
         _out.WriteLine("round 1 (" + deviceA + " -> " + deviceB + ")");
         WriteTransferText(first, invocation.Apply);
+        WriteRoundReceiptText(first);
         _out.WriteLine("round 2 (" + deviceB + " -> " + deviceA + ")");
         WriteTransferText(second, invocation.Apply);
+        WriteRoundReceiptText(second);
         _out.WriteLine("second round noChange: " + (second.NoChange ? "true" : "false"));
         WriteAuthText(invocation);
         WriteTlsText(invocation);
@@ -1629,6 +1667,30 @@ public sealed class SyncCliRunner
         writer.WriteNumber("bytes", outcome.Bytes);
         writer.WriteNumber("frames", outcome.Frames);
         writer.WriteBoolean("noChange", outcome.NoChange);
+
+        // W6-39: each roundtrip direction carries its own receipt answer. A send or serve leaves both null
+        // here because those commands report the same facts through WriteReceiptFieldsJson.
+        if (outcome.ReceiptConfirmed is not null || outcome.ReceiptReason is not null)
+        {
+            if (outcome.ReceiptConfirmed is null)
+            {
+                writer.WriteNull("receiptConfirmed");
+            }
+            else
+            {
+                writer.WriteBoolean("receiptConfirmed", outcome.ReceiptConfirmed.Value);
+            }
+
+            if (outcome.ReceiptReason is null)
+            {
+                writer.WriteNull("receiptReason");
+            }
+            else
+            {
+                writer.WriteString("receiptReason", outcome.ReceiptReason);
+            }
+        }
+
         if (outcome.Preview is null)
         {
             writer.WriteString("reason", outcome.Reason ?? "");
@@ -1670,6 +1732,24 @@ public sealed class SyncCliRunner
             writer.WriteString("summary", outcome.Report.Summary);
             writer.WriteString("baseline", outcome.Report.BaselineLabel);
             writer.WriteEndObject();
+        }
+    }
+
+    /// <summary>
+    /// W6-39: what the receipt exchange of one roundtrip direction produced. Only real evidence is printed;
+    /// a round whose receipt was asked for and did not arrive says so, because that is the difference between
+    /// "the peer decoded it" and "the peer went quiet".
+    /// </summary>
+    private void WriteRoundReceiptText(TransferOutcome outcome)
+    {
+        if (outcome.ReceiptConfirmed is true)
+        {
+            _out.WriteLine("receipt: received (0x04) - the peer decoded this envelope");
+        }
+        else if (outcome.ReceiptReason is not null)
+        {
+            _out.WriteLine("receipt: none (" + outcome.ReceiptReason +
+                ") - the envelope arrived, the peer did not confirm it");
         }
     }
 

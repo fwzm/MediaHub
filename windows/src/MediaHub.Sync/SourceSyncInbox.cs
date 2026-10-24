@@ -33,6 +33,16 @@ public sealed record SourceSyncInboxResult
     public int Bytes { get; init; }
 
     /// <summary>
+    /// Whether this end wrote the W6-37 receipt byte, or null when no receipt was requested (W6-39).
+    /// </summary>
+    /// <remarks>
+    /// True only when the payload decoded and the write went through: the receipt is written after the decode for
+    /// exactly that reason. False means the caller asked for one and it did not leave, which is a different fact from
+    /// "nobody asked".
+    /// </remarks>
+    public bool? ReceiptWritten { get; init; }
+
+    /// <summary>
     /// True when the round wrote nothing because this device already matched the envelope.
     /// </summary>
     /// <remarks>
@@ -133,14 +143,23 @@ public sealed class SourceSyncInbox
 
         SourceSyncInboxResult imported = await ImportAsync(transfer.Envelope, writer, allowedIds, cancellationToken)
             .ConfigureAwait(false);
+        bool? receiptWritten = null;
         if (imported.Succeeded && receipt is { Enabled: true })
         {
             // W6-37: written only after the decode succeeded. Acknowledging a payload this build cannot read would tell
             // the sender exactly the wrong thing, which is the defect the receipt exists to close.
-            await SourceSyncReceipt.WriteAsync(stream, cancellationToken).ConfigureAwait(false);
+            SourceSyncReceiptResult written = await SourceSyncReceipt
+                .WriteAsync(stream, cancellationToken)
+                .ConfigureAwait(false);
+            receiptWritten = written.Confirmed;
         }
 
-        return imported with { FrameCount = transfer.FrameCount, Bytes = transfer.Bytes };
+        return imported with
+        {
+            FrameCount = transfer.FrameCount,
+            Bytes = transfer.Bytes,
+            ReceiptWritten = receiptWritten,
+        };
     }
 
     /// <summary>Decodes a payload, then previews, gates, writes and advances the baseline.</summary>
@@ -205,7 +224,12 @@ public sealed class SourceSyncInbox
 
         SourceSyncInboxResult imported = await ImportAsync(transfer.Envelope, writer, allowedIds, cancellationToken)
             .ConfigureAwait(false);
-        return imported with { FrameCount = transfer.FrameCount, Bytes = transfer.Bytes };
+        return imported with
+        {
+            FrameCount = transfer.FrameCount,
+            Bytes = transfer.Bytes,
+            ReceiptWritten = transfer.ReceiptWritten,
+        };
     }
 
     /// <summary>Decodes an envelope payload without importing it.</summary>
@@ -285,7 +309,12 @@ public static class SourceSyncInboxExtensions
             .ImportAsync(transfer.Envelope, writer, allowedIds, cancellationToken)
             .ConfigureAwait(false);
 
-        return imported with { FrameCount = transfer.FrameCount, Bytes = transfer.Bytes };
+        return imported with
+        {
+            FrameCount = transfer.FrameCount,
+            Bytes = transfer.Bytes,
+            ReceiptWritten = transfer.ReceiptWritten,
+        };
     }
 
     /// <summary>The decode check the receipt is gated on: a payload that does not decode gets no acknowledgement.</summary>

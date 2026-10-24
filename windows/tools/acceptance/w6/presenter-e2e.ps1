@@ -61,7 +61,10 @@ $script:CaseNames = @(
     'R6a_confirm_delivery_against_a_real_serve_reports_the_close',
     'R6b_confirm_delivery_against_a_silent_peer_is_delivery_unconfirmed',
     'R7a_stopping_the_receiver_releases_the_port_for_a_rebind',
-    'R7b_cancelling_a_waiting_receive_reports_cancelled_and_writes_nothing'
+    'R7b_cancelling_a_waiting_receive_reports_cancelled_and_writes_nothing',
+    'R8_a_receipt_written_by_the_presenter_is_read_back_by_a_real_cli_send',
+    'R9_a_presenter_send_that_awaits_a_receipt_gets_one_from_a_real_serve',
+    'R10_a_real_serve_that_does_not_acknowledge_leaves_the_presenter_with_receipt_missing'
 )
 
 function Write-Step {

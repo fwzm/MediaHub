@@ -14,8 +14,9 @@ namespace MediaHub.Sync;
 /// <para>
 /// Two sentences are load-bearing and must not soften:
 /// <see cref="AutoApplyNote"/> says a received envelope only becomes a preview (this section can never write a
-/// source record), and <see cref="DescribeReason"/> reports <c>delivery-unconfirmed</c> as a failure - the peer not
-/// closing is the only receipt this protocol has, so claiming a delivery it did not see would be a lie.
+/// source record), and <see cref="DescribeReason"/> reports <c>delivery-unconfirmed</c> as a failure: a peer closing
+/// proves only that it closed, so claiming a delivery this side did not see would be a lie. W6-39 adds the one piece of
+/// evidence that does distinguish the two - the W6-37 receipt byte - and still reports its absence as a failure.
 /// </para>
 /// </remarks>
 public static class SyncTransferCopy
@@ -66,6 +67,17 @@ public static class SyncTransferCopy
     /// <summary>Visible text for a cancelled send.</summary>
     public const string SendCancelledStatus = "已取消发送；对端是否收到这个信封无法确定。";
 
+    /// <summary>What the receive-side receipt switch promises (W6-39).</summary>
+    public const string ReceiptReceiveNote =
+        "打开回执后，只有信封被解出来才会回写一个 0x04 字节；对端因此能区分『读懂了』和『只是关掉了连接』。解不出信封时一个字节都不回。";
+
+    /// <summary>What the send-side receipt switch promises (W6-39).</summary>
+    public const string ReceiptSendNote =
+        "打开等回执后，发送端会等对端回写一个 0x04 字节；等不到就按 receipt-missing / receipt-timeout / receipt-invalid 失败，而不是靠对端关闭来猜。";
+
+    /// <summary>Sentence appended to a send that saw the peer's receipt byte.</summary>
+    public const string ReceiptConfirmedSuffix = "，并收到回执：对端读懂了这份信封（0x04）。";
+
     /// <summary>Describes one form-validation problem in words a user can act on.</summary>
     /// <param name="issue">The issue a form check returned.</param>
     /// <returns>A Chinese sentence; the empty issue returns an empty string.</returns>
@@ -85,7 +97,7 @@ public static class SyncTransferCopy
     /// <summary>
     /// Describes one stable reason code in Chinese, quoting the code itself.
     /// </summary>
-    /// <param name="reason">One of the twenty reason codes the transfer stack can produce.</param>
+    /// <param name="reason">One of the twenty-four reason codes the transfer stack can produce.</param>
     /// <returns>A sentence that ends with the code in parentheses; an unknown code is echoed verbatim.</returns>
     /// <remarks>A new code is never invented here: an unrecognised value is shown exactly as it arrived.</remarks>
     public static string DescribeReason(string? reason)
@@ -114,6 +126,14 @@ public static class SyncTransferCopy
             SourceSyncTlsReasons.NotEnabled => "对端用 TLS 握手开头，但这个端点只接受明文传输。",
             SourceSyncDeliveryReasons.DeliveryUnconfirmed =>
                 "全部帧已写出，但对端没有在期限内关闭连接：这不算送达（delivery-unconfirmed）。",
+            SourceSyncReceiptReasons.ReceiptMissing =>
+                "对端在回写回执之前就关闭了连接：这次没有拿到回执，不能认定对端读懂了信封。",
+            SourceSyncReceiptReasons.ReceiptTimeout =>
+                "对端一直保持连接，却在期限内没有回写回执字节。",
+            SourceSyncReceiptReasons.ReceiptInvalid =>
+                "对端回写的字节不是回执帧类型 0x04：这次没有拿到有效回执。",
+            SourceSyncReceiptReasons.ReceiptNotEnabled =>
+                "这一端无法承载回执：流不可写，或不可读回。",
             _ => "未识别的结果码。",
         };
 
@@ -132,10 +152,24 @@ public static class SyncTransferCopy
     /// <param name="frames">How many frames carried it.</param>
     /// <param name="confirmed">What the wait for the peer's close saw, or null when none was requested.</param>
     /// <param name="elapsed">How long that wait took.</param>
-    public static string DescribeSent(int bytes, int frames, bool? confirmed, TimeSpan elapsed)
+    /// <param name="receiptConfirmed">
+    /// What the wait for the peer's receipt byte saw (W6-39), or null when no receipt was requested. A receipt is the
+    /// only evidence that the peer decoded the envelope, so when it arrived it is the sentence a user reads.
+    /// </param>
+    public static string DescribeSent(
+        int bytes,
+        int frames,
+        bool? confirmed,
+        TimeSpan elapsed,
+        bool? receiptConfirmed = null)
     {
         string head = "已发送（" + bytes.ToString(CultureInfo.InvariantCulture) + " 字节，"
             + frames.ToString(CultureInfo.InvariantCulture) + " 帧）";
+        if (receiptConfirmed is true)
+        {
+            return head + ReceiptConfirmedSuffix;
+        }
+
         return confirmed switch
         {
             true => head + "，并确认送达：对端在 "
@@ -198,9 +232,16 @@ public sealed record SyncTransferReceiveForm
     /// </summary>
     public string? Secret { get; init; }
 
+    /// <summary>
+    /// True to answer with the W6-37 receipt byte after the envelope decoded (W6-39). Off by default, so the bytes on
+    /// the wire and the shape of the connection stay exactly what they were before this switch existed.
+    /// </summary>
+    public bool WriteReceipt { get; init; }
+
     /// <summary>Never prints the secret.</summary>
     public override string ToString() =>
         "SyncTransferReceiveForm { PortText = " + PortText + ", UseTls = " + UseTls
+        + ", WriteReceipt = " + WriteReceipt
         + ", Secret = " + (string.IsNullOrEmpty(Secret) ? "<none>" : "<redacted>") + " }";
 }
 
@@ -225,10 +266,18 @@ public sealed record SyncTransferSendForm
     /// <summary>True to wait for the peer's close and fail with delivery-unconfirmed when it does not come.</summary>
     public bool ConfirmDelivery { get; init; }
 
+    /// <summary>
+    /// True to wait for the peer's W6-37 receipt byte after the last frame (W6-39); the wait is bounded by
+    /// <see cref="SyncTransferPresenter.ReceiptBudget"/>. A receipt outranks the close evidence: when both switches are
+    /// on, the presenter reports the receipt, because a close happens just as readily when the peer refuses the bytes.
+    /// </summary>
+    public bool AwaitReceipt { get; init; }
+
     /// <summary>Never prints the secret.</summary>
     public override string ToString() =>
         "SyncTransferSendForm { Host = " + Host + ", PortText = " + PortText + ", UseTls = " + UseTls
         + ", ExpectedFingerprint = " + (ExpectedFingerprint ?? "<none>") + ", ConfirmDelivery = " + ConfirmDelivery
+        + ", AwaitReceipt = " + AwaitReceipt
         + ", Secret = " + (string.IsNullOrEmpty(Secret) ? "<none>" : "<redacted>") + " }";
 }
 
@@ -250,6 +299,9 @@ public sealed record SyncTransferReceiveState
     /// <summary>The listener's own fingerprint; the peer pins this value when it dials with TLS.</summary>
     public string? CertificateFingerprint { get; init; }
 
+    /// <summary>True when this prepared receive will answer with a receipt byte once the envelope decoded.</summary>
+    public bool WritesReceipt { get; init; }
+
     /// <summary>The sentence to show next to the buttons.</summary>
     public string StatusText { get; init; } = SyncTransferCopy.IdleStatus;
 
@@ -263,7 +315,7 @@ public sealed record SyncTransferOutcome
     /// <summary>True when the operation did what it said it would.</summary>
     public bool Succeeded { get; init; }
 
-    /// <summary>One of the twenty stable reason codes when <see cref="Succeeded"/> is false and a code applies.</summary>
+    /// <summary>One of the twenty-four stable reason codes when <see cref="Succeeded"/> is false and a code applies.</summary>
     public string? Reason { get; init; }
 
     /// <summary>Optional transport detail; never contains a credential or an envelope body.</summary>
@@ -290,6 +342,17 @@ public sealed record SyncTransferOutcome
     /// <summary>Null when no confirmation was requested; false never travels with a success.</summary>
     public bool? DeliveryConfirmed { get; init; }
 
+    /// <summary>
+    /// Whether the peer's receipt byte arrived (W6-39), or null when this operation did not wait for one. A send that
+    /// asked and did not get it fails with one of <see cref="SourceSyncReceiptReasons"/>.
+    /// </summary>
+    public bool? ReceiptConfirmed { get; init; }
+
+    /// <summary>
+    /// Whether this end wrote a receipt byte (receive side), or null when no receipt was requested.
+    /// </summary>
+    public bool? ReceiptWritten { get; init; }
+
     /// <summary>The listener's own fingerprint, when a prepared receive has one.</summary>
     public string? CertificateFingerprint { get; init; }
 
@@ -309,7 +372,9 @@ public sealed record SyncTransferOutcome
         "SyncTransferOutcome { Succeeded = " + Succeeded + ", Reason = " + (Reason ?? "<none>")
         + ", FormIssue = " + FormIssue + ", Cancelled = " + Cancelled + ", Bytes = " + Bytes
         + ", Frames = " + Frames + ", DeliveryConfirmed = "
-        + (DeliveryConfirmed is null ? "<none>" : DeliveryConfirmed.ToString()) + " }";
+        + (DeliveryConfirmed is null ? "<none>" : DeliveryConfirmed.ToString())
+        + ", ReceiptConfirmed = " + (ReceiptConfirmed is null ? "<none>" : ReceiptConfirmed.ToString())
+        + ", ReceiptWritten = " + (ReceiptWritten is null ? "<none>" : ReceiptWritten.ToString()) + " }";
 }
 
 /// <summary>
@@ -341,6 +406,7 @@ public sealed class SyncTransferPresenter : IDisposable
     private SourceSyncTransferListener? _listener;
     private CancellationTokenSource? _receiveCts;
     private byte[] _receiveSecret = [];
+    private SourceSyncReceiptOptions? _receiveReceipt;
     private bool _receiving;
     private int _session;
     private SyncTransferOutcome? _lastReceive;
@@ -384,6 +450,12 @@ public sealed class SyncTransferPresenter : IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// How long a send waits for the peer's receipt byte when <see cref="SyncTransferSendForm.AwaitReceipt"/> is on
+    /// (W6-39); defaults to the transport's own 2000 ms budget.
+    /// </summary>
+    public TimeSpan ReceiptBudget { get; set; } = SourceSyncReceipt.DefaultBudget;
 
     /// <summary>True while a secret is held in memory; false after a stop, a finish, or a dispose.</summary>
     public bool HoldsSecretInMemory
@@ -473,6 +545,7 @@ public sealed class SyncTransferPresenter : IDisposable
 
             _listener = start.Listener;
             _receiveSecret = CopySecret(form.Secret);
+            _receiveReceipt = form.WriteReceipt ? SourceSyncReceiptOptions.Sending() : null;
             _receiveCts = new CancellationTokenSource();
             _session++;
             string address = start.Listener.Address;
@@ -490,6 +563,11 @@ public sealed class SyncTransferPresenter : IDisposable
                 status += "，明文传输（不加密）";
             }
 
+            if (form.WriteReceipt)
+            {
+                status += "，解出信封后回写回执（0x04）";
+            }
+
             ReceiveState = new SyncTransferReceiveState
             {
                 Listening = true,
@@ -497,6 +575,7 @@ public sealed class SyncTransferPresenter : IDisposable
                 Port = boundPort,
                 UseTls = form.UseTls,
                 CertificateFingerprint = fingerprint,
+                WritesReceipt = form.WriteReceipt,
                 StatusText = status,
             };
 
@@ -521,12 +600,14 @@ public sealed class SyncTransferPresenter : IDisposable
         SourceSyncTransferListener? listener;
         CancellationTokenSource? generator;
         byte[] secret;
+        SourceSyncReceiptOptions? receipt;
         int session;
         lock (_gate)
         {
             listener = _listener;
             generator = _receiveCts;
             secret = _receiveSecret;
+            receipt = _receiveReceipt;
             session = _session;
             if (listener is null || generator is null)
             {
@@ -551,11 +632,15 @@ public sealed class SyncTransferPresenter : IDisposable
             SourceSyncTransferOptions options = holder.Secret.Length > 0
                 ? SourceSyncTransferOptions.WithSecret(holder.Secret, deviceId: _deviceId)
                 : SourceSyncTransferOptions.Off;
+            // W6-39: the receipt is gated on the inbox's own decode check, never on "the frames arrived". A payload
+            // this build cannot read must not be acknowledged, which is exactly the defect the receipt exists to close.
             SourceSyncTransferResult received = await listener.ReceiveOnceAsync(
                 null,
                 budget ?? DefaultReceiveBudget,
                 linked.Token,
-                options);
+                options,
+                receipt,
+                receipt is null ? null : Decodes);
 
             if (generator.IsCancellationRequested || cancellationToken.IsCancellationRequested)
             {
@@ -623,6 +708,7 @@ public sealed class SyncTransferPresenter : IDisposable
             receiving = _receiving;
             _receiveCts = null;
             _listener = null;
+            _receiveReceipt = null;
             _session++;
             ZeroSecretLocked();
             ReceiveState = SyncTransferReceiveState.Idle;
@@ -731,6 +817,13 @@ public sealed class SyncTransferPresenter : IDisposable
                 ? SourceSyncDeliveryOptions.Confirming()
                 : SourceSyncDeliveryOptions.Off;
 
+            // W6-39: a receipt is a byte the receiver chose to send after decoding this envelope, so it outranks the
+            // close evidence. The transport drops the close wait by itself when a receipt is awaited, so the two
+            // switches never race for the same read.
+            SourceSyncReceiptOptions receipt = form.AwaitReceipt
+                ? SourceSyncReceiptOptions.Awaiting(ReceiptBudget)
+                : SourceSyncReceiptOptions.Off;
+
             SourceSyncTransferResult sent = await SourceSyncTransferClient.SendAsync(
                 host,
                 port,
@@ -740,7 +833,8 @@ public sealed class SyncTransferPresenter : IDisposable
                 cancellationToken,
                 options,
                 tls,
-                delivery);
+                delivery,
+                receipt);
 
             if (cancellationToken.IsCancellationRequested)
             {
@@ -761,12 +855,14 @@ public sealed class SyncTransferPresenter : IDisposable
                     Bytes = sent.Bytes,
                     Frames = sent.FrameCount,
                     DeliveryConfirmed = sent.DeliveryConfirmed,
+                    ReceiptConfirmed = sent.ReceiptConfirmed,
                     CertificateFingerprint = form.UseTls ? pin.Hex : null,
                     Summary = SyncTransferCopy.DescribeSent(
                         sent.Bytes,
                         sent.FrameCount,
                         sent.DeliveryConfirmed,
-                        sent.DeliveryElapsed),
+                        sent.DeliveryElapsed,
+                        sent.ReceiptConfirmed),
                 };
             }
         }
@@ -796,6 +892,7 @@ public sealed class SyncTransferPresenter : IDisposable
             receiving = _receiving;
             _receiveCts = null;
             _listener = null;
+            _receiveReceipt = null;
             _session++;
             ZeroSecretLocked();
             ReceiveState = SyncTransferReceiveState.Idle;
@@ -846,11 +943,18 @@ public sealed class SyncTransferPresenter : IDisposable
             Succeeded = true,
             Bytes = received.Bytes,
             Frames = received.FrameCount,
+            ReceiptWritten = received.ReceiptWritten,
             Envelope = envelope,
             EnvelopeJson = json,
             Summary = SyncTransferCopy.DescribeReceived(received.Bytes, received.FrameCount),
         };
     }
+
+    /// <summary>
+    /// The decode predicate the receipt is gated on (W6-39): the listener must never acknowledge a payload this build
+    /// cannot read, because the whole point of the byte is to tell "understood" apart from "arrived".
+    /// </summary>
+    private static bool Decodes(byte[] payload) => SourceSyncInbox.TryDecode(payload, out _, out _);
 
     private void EndReceive(int session)
     {
@@ -869,6 +973,7 @@ public sealed class SyncTransferPresenter : IDisposable
             generator = _receiveCts;
             _listener = null;
             _receiveCts = null;
+            _receiveReceipt = null;
             _session++;
             ZeroSecretLocked();
             ReceiveState = SyncTransferReceiveState.Idle;

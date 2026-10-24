@@ -422,6 +422,114 @@ public sealed class SyncTransferPresenterEndToEndTests : IDisposable
         Assert.Empty(Directory.GetFiles(witness));
     }
 
+    // ---------------------------------------------------------------- R8
+
+    /// <summary>
+    /// R8 (W6-39): the presenter is told to write a receipt, a real "transfer send --await-receipt" child process
+    /// reads that byte back, and both sides report it — the presenter from its outcome, the CLI from its own JSON
+    /// document. Nothing is written on disk.
+    /// </summary>
+    [Fact]
+    public async Task R8_a_receipt_written_by_the_presenter_is_read_back_by_a_real_cli_send()
+    {
+        using SyncTransferPresenter presenter = NewPresenter();
+        SyncTransferOutcome prepared = presenter.PrepareReceive(new SyncTransferReceiveForm { PortText = "0", WriteReceipt = true });
+        Assert.True(prepared.Succeeded, prepared.Summary);
+        Assert.True(prepared.BoundPort is > 0, "the listener did not publish a real port");
+        Assert.True(presenter.ReceiveState.WritesReceipt, "the prepared receive did not announce a receipt");
+        int port = prepared.BoundPort!.Value;
+
+        string senderRoot = NewDirectory("r8/sender");
+        string senderStoreFile = SeedSender(senderRoot);
+        DateTime senderStampBefore = File.GetLastWriteTimeUtc(senderStoreFile);
+
+        string witness = NewDirectory("r8/witness");
+        Assert.Empty(Directory.GetFiles(witness));
+
+        Task<SyncTransferOutcome> receiving = presenter.ReceiveOnceAsync(TimeSpan.FromSeconds(30));
+        CliRun send = await RunCliAsync(
+            environment: null,
+            "transfer", "send", "--to", "127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture),
+            "--root", senderRoot, "--device", PeerDeviceB, "--json", "--await-receipt");
+
+        SyncTransferOutcome received = await receiving;
+
+        Assert.Equal(0, send.ExitCode);
+        Assert.Contains("\"receiptConfirmed\":true", send.StdOut, StringComparison.Ordinal);
+        Assert.True(received.Succeeded, received.Summary + " | send stderr: " + send.StdErr);
+        Assert.True(received.ReceiptWritten is true, "the presenter did not report the receipt it wrote: " + received.Summary);
+
+        // The receipt is one bare byte after the last frame: it adds no frame and no envelope byte.
+        Assert.Equal(Encoding.UTF8.GetByteCount(received.EnvelopeJson!), received.Bytes);
+        Assert.Equal(SourceSyncTransfer.ChunkCount(received.Bytes), received.Frames);
+
+        Assert.Empty(Directory.GetFiles(witness));
+        Assert.Equal(senderStampBefore, File.GetLastWriteTimeUtc(senderStoreFile));
+        Assert.False(presenter.ReceiveState.Listening);
+    }
+
+    // ---------------------------------------------------------------- R9
+
+    /// <summary>
+    /// R9 (W6-39): the presenter sends with AwaitReceipt on to a real "transfer serve --send-receipt --apply"
+    /// child process; the receipt comes back as evidence the peer decoded the envelope, and the peer's own store
+    /// file is the external proof that it really applied it.
+    /// </summary>
+    [Fact]
+    public async Task R9_a_presenter_send_that_awaits_a_receipt_gets_one_from_a_real_serve()
+    {
+        string peerRoot = NewDirectory("r9/peer");
+        using CliServe serve = StartServe(
+            "transfer", "serve", "--root", peerRoot, "--device", PeerDeviceA, "--json", "--apply", "--send-receipt");
+        Assert.True(await serve.WaitForListeningAsync(ServeReadyBudget), "serve never announced a port: " + serve.StdErr);
+
+        using SyncTransferPresenter presenter = NewPresenter();
+        SyncTransferOutcome sent = await presenter.SendAsync(SendForm(serve.Port) with { AwaitReceipt = true });
+
+        Assert.True(sent.Succeeded, sent.Summary);
+        Assert.True(sent.ReceiptConfirmed is true, "the presenter did not report the peer's receipt: " + sent.Summary);
+        Assert.Contains(SyncTransferCopy.ReceiptConfirmedSuffix, sent.Summary, StringComparison.Ordinal);
+        Assert.Null(sent.DeliveryConfirmed);
+
+        int exitCode = await serve.WaitForExitAsync(CliBudget);
+        Assert.Equal(0, exitCode);
+        Assert.Contains("\"receiptWritten\":true", serve.StdOut, StringComparison.Ordinal);
+
+        FileLocalSourceStore applied = new(peerRoot);
+        Assert.Equal(2, applied.GetAll().Count);
+    }
+
+    // ---------------------------------------------------------------- R10
+
+    /// <summary>
+    /// R10 (W6-39): a real serve that decodes the envelope but was not told to acknowledge it writes nothing and
+    /// sends no receipt, so the presenter's awaiting send fails with receipt-missing. The peer exiting 0 and the
+    /// empty directory are the evidence that "no receipt" is not the same thing as "the peer failed".
+    /// </summary>
+    [Fact]
+    public async Task R10_a_real_serve_that_does_not_acknowledge_leaves_the_presenter_with_receipt_missing()
+    {
+        string peerRoot = NewDirectory("r10/peer");
+
+        // No --send-receipt and no --apply: the peer decodes the envelope, writes nothing, closes silently.
+        using CliServe serve = StartServe(
+            "transfer", "serve", "--root", peerRoot, "--device", PeerDeviceA, "--json");
+        Assert.True(await serve.WaitForListeningAsync(ServeReadyBudget), "serve never announced a port: " + serve.StdErr);
+
+        using SyncTransferPresenter presenter = NewPresenter();
+        SyncTransferOutcome sent = await presenter.SendAsync(SendForm(serve.Port) with { AwaitReceipt = true });
+
+        Assert.False(sent.Succeeded);
+        Assert.Equal(SourceSyncReceiptReasons.ReceiptMissing, sent.Reason);
+        Assert.Null(sent.ReceiptConfirmed);
+
+        int exitCode = await serve.WaitForExitAsync(CliBudget);
+        Assert.Equal(0, exitCode);
+        Assert.Contains("\"receiptWritten\":null", serve.StdOut, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(peerRoot, "sync-sources.json")), "the peer wrote a store although --apply was not given");
+        Assert.False(File.Exists(Path.Combine(peerRoot, "sync-baseline.json")), "the peer wrote a baseline although --apply was not given");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static string ResolveCliDll()

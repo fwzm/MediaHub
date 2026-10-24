@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -44,6 +45,11 @@ public static class SourceSyncReceiptReasons
     /// <summary>Every receipt reason, in a fixed order.</summary>
     public static IReadOnlyList<string> All { get; } =
         new[] { ReceiptMissing, ReceiptTimeout, ReceiptInvalid, ReceiptNotEnabled };
+
+    /// <summary>True when the code belongs to this set, so a caller can treat it as "the bytes left, nothing came back".</summary>
+    /// <param name="reason">A reason code, or null.</param>
+    public static bool IsReceiptReason(string? reason) =>
+        reason is not null && All.Contains(reason, StringComparer.Ordinal);
 }
 
 /// <summary>What writing or waiting for a receipt did.</summary>

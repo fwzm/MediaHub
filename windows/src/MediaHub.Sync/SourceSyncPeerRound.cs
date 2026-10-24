@@ -80,6 +80,22 @@ public sealed record SourceSyncPeerRoundResult
     public bool? ReceiptConfirmed { get; init; }
 
     /// <summary>
+    /// Whether this device wrote the W6-37 receipt byte, or null when the round did not ask for one (W6-39).
+    /// </summary>
+    public bool? ReceiptWritten { get; init; }
+
+    /// <summary>
+    /// The receipt code when the frames left and the receipt did not arrive (W6-39), else null.
+    /// </summary>
+    /// <remarks>
+    /// A receipt that fails never turns a delivered envelope into a failed round: the envelope did arrive and it did
+    /// decode, so the round is a success and the missing acknowledgement is carried here. This is the difference
+    /// between "the peer did not confirm" and "the round failed", and collapsing the two would make a working transfer
+    /// look broken.
+    /// </remarks>
+    public string? ReceiptReason { get; init; }
+
+    /// <summary>
     /// True when the round succeeded and wrote nothing because this device already matched the envelope.
     /// </summary>
     /// <remarks>
@@ -153,6 +169,7 @@ public sealed record SourceSyncPeerRoundResult
             Report = result.Report,
             FrameCount = result.FrameCount,
             Bytes = result.Bytes,
+            ReceiptWritten = result.ReceiptWritten,
         };
     }
 }
@@ -446,6 +463,8 @@ public sealed class SourceSyncPeerRound
     /// byte stream exactly. When authentication is on, <paramref name="challenge"/> is the nonce and both sides
     /// must be given the same value.</param>
     /// <param name="tls">The optional TLS pin, applied to both ends; null or off keeps the W6-16 plaintext path.</param>
+    /// <param name="receiptBudget">How long the sender waits for the receiver's receipt byte (W6-39); null means the
+    /// round exchanges no receipt at all and behaves exactly as it did before the receipt existed.</param>
     public static async Task<SourceSyncPeerRoundResult> ExchangeAsync(
         SourceSyncPeerRound sender,
         SourceSyncPeerRound receiver,
@@ -456,7 +475,8 @@ public sealed class SourceSyncPeerRound
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
         SourceSyncTransferOptions? options = null,
-        SourceSyncTlsOptions? tls = null)
+        SourceSyncTlsOptions? tls = null,
+        TimeSpan? receiptBudget = null)
     {
         ArgumentNullException.ThrowIfNull(sender);
 
@@ -471,7 +491,8 @@ public sealed class SourceSyncPeerRound
                 timeout,
                 cancellationToken,
                 options,
-                tls)
+                tls,
+                receiptBudget)
             .ConfigureAwait(false);
     }
 
@@ -488,6 +509,10 @@ public sealed class SourceSyncPeerRound
     /// byte stream exactly. When authentication is on, <paramref name="challenge"/> is the nonce and both sides
     /// must be given the same value.</param>
     /// <param name="tls">The optional TLS pin, applied to both ends; null or off keeps the W6-16 plaintext path.</param>
+    /// <param name="receiptBudget">How long the sender waits for the receiver's receipt byte (W6-39), or null to
+    /// exchange none. When given, the receiver writes one 0x04 byte after the envelope decoded and the sender waits
+    /// up to this long for it. A receipt that never arrives is recorded in
+    /// <see cref="SourceSyncPeerRoundResult.ReceiptReason"/> and does not fail the round.</param>
     public static async Task<SourceSyncPeerRoundResult> ExchangePayloadAsync(
         SourceSyncPeerRound sender,
         SourceSyncPeerRound receiver,
@@ -498,11 +523,21 @@ public sealed class SourceSyncPeerRound
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
         SourceSyncTransferOptions? options = null,
-        SourceSyncTlsOptions? tls = null)
+        SourceSyncTlsOptions? tls = null,
+        TimeSpan? receiptBudget = null)
     {
         ArgumentNullException.ThrowIfNull(sender);
         ArgumentNullException.ThrowIfNull(receiver);
         ArgumentNullException.ThrowIfNull(receiverWriter);
+
+        // Both halves are this process, so one switch decides both sides: the listener is told to write the byte and
+        // the sender is told to wait for it. Null keeps the round byte-for-byte what it was before W6-39.
+        SourceSyncReceiptOptions? receiverReceipt = receiptBudget is null
+            ? null
+            : SourceSyncReceiptOptions.Sending();
+        SourceSyncReceiptOptions senderReceipt = receiptBudget is null
+            ? SourceSyncReceiptOptions.Off
+            : SourceSyncReceiptOptions.Awaiting(receiptBudget);
 
         SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(tls: tls is { Enabled: true });
         if (!start.Started || start.Listener is null)
@@ -531,7 +566,8 @@ public sealed class SourceSyncPeerRound
             allowedIds,
             timeout,
             abort.Token,
-            options);
+            options,
+            receiverReceipt);
 
         SourceSyncPeerRoundResult sent = await sender
             .SendPayloadAsync(
@@ -542,10 +578,13 @@ public sealed class SourceSyncPeerRound
                 timeout,
                 cancellationToken,
                 options,
-                tls)
+                tls,
+                delivery: null,
+                receipt: senderReceipt)
             .ConfigureAwait(false);
 
-        if (!sent.Succeeded)
+        bool receiptAdvisory = receiptBudget is not null && SourceSyncReceiptReasons.IsReceiptReason(sent.Reason);
+        if (!sent.Succeeded && !receiptAdvisory)
         {
             await abort.CancelAsync().ConfigureAwait(false);
             try
@@ -566,6 +605,11 @@ public sealed class SourceSyncPeerRound
             SenderDeviceId = sender.DeviceId,
             FrameCount = sent.FrameCount,
             Bytes = sent.Bytes,
+
+            // The receipt is evidence about the receiver, so it is reported on the round that produced it - and only
+            // as a reason when it was asked for and did not arrive.
+            ReceiptConfirmed = receiptBudget is null ? null : sent.ReceiptConfirmed,
+            ReceiptReason = receiptAdvisory ? sent.Reason : received.ReceiptReason,
         };
     }
 

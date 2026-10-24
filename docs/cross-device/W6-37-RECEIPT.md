@@ -147,3 +147,27 @@ pwsh -NoProfile -File windows/tools/acceptance/w6/transfer-tls-auth.ps1 -OutDir 
 ```
 
 脚本退出码 0 才表示 14 例全 PASS；`<OutDir>/w6-28-summary.json` 里每例都带 `receiptConfirmed` / `receiptWritten`。
+
+## 13 W6-39 追加：同步页与 roundtrip 的接线
+
+W6-37 只在传输层与 CLI 上开了回执；**同步页（presenter）与 `transfer roundtrip` 当时都还用「等对端关闭」当证据**。W6-39 把回执接到这两处，按 W6-37 的结论（关闭是必要证据、不是充分证据）统一改用真回执。
+
+### 13.1 presenter（`windows/src/MediaHub.Sync/SyncTransferPresenter.cs`）
+
+- 接收：`SyncTransferReceiveForm.WriteReceipt`（默认 `false`）→ `SourceSyncReceiptOptions.Sending()` 传给 `listener.ReceiveOnceAsync(..., receipt, Decodes)`。**gate 就是解码谓词** `SourceSyncInbox.TryDecode`，所以「解不出的载荷绝不回执」在 presenter 层同样成立；`SyncTransferReceiveState.WritesReceipt` 让监听中状态句如实回显。
+- 发送：`SyncTransferSendForm.AwaitReceipt`（默认 `false`）→ `SourceSyncReceiptOptions.Awaiting(ReceiptBudget)`，预算 `SyncTransferPresenter.ReceiptBudget` 默认 2000 ms（= `SourceSyncReceipt.DefaultBudget`）。
+- 文案：`DescribeSent` 在拿到回执时以「，并收到回执：对端读懂了这份信封（0x04）。」结尾，且**不再**说「对端在 X ms 内关闭了连接」——回执比关闭更强，两者不混着说。`DescribeReason` 从 20 码扩到 24 码，四个 receipt 码逐条中文、句尾仍带原码。
+- 默认关闭时：receipt 为 `null` / `Off`，线上字节与等待行为与 W6-33 完全一致，W6-16 的 95 字节冻结向量逐字节相等（有单测钉住）。
+
+### 13.2 roundtrip（`SourceSyncPeerRound.ExchangePayloadAsync` + CLI `transfer roundtrip`）
+
+- `ExchangeAsync(...)` / `ExchangePayloadAsync(...)` 新增 `TimeSpan? receiptBudget = null`：给了预算，接收端就 `Sending()`、发送端就 `Awaiting(budget)`；不给则完全不碰回执（旧行为）。
+- **回执失败不把已送达的信封变成失败轮**：发送端返回 `receipt-missing` / `receipt-timeout` / `receipt-invalid` 时，`ExchangePayloadAsync` 只把它记进新字段 `SourceSyncPeerRoundResult.ReceiptReason`，轮结果仍是 `Succeeded`（信封确实到了），并把 `ReceiptConfirmed` 如实带出。判据是 `SourceSyncReceiptReasons.IsReceiptReason(sent.Reason)`。
+- `SourceSyncPeerRoundResult` 因此多两个字段：`bool? ReceiptWritten`（接收端是否写出回执，来自 `SourceSyncInboxResult.ReceiptWritten`）与 `string? ReceiptReason`。**既有字段一个都没改名**。
+- CLI `transfer roundtrip` 现在默认就交换回执（不再跑 W6-30 的 close 等待）：每轮 JSON 多 `receiptConfirmed` 与 `receiptReason`（只在该轮真的问过回执时出现，避免与 serve/send 的 `WriteReceiptFieldsJson` 撞出重复键），文本每轮多一行 `receipt: received (0x04) - the peer decoded this envelope` 或 `receipt: none (<code>) - the envelope arrived, the peer did not confirm it`。冻结向量不受影响：回执不加帧、不加信封字节（`frames == SourceSyncTransfer.ChunkCount(bytes)` 有单测钉住）。
+- `--send-receipt` / `--await-receipt` 在 `transfer roundtrip` 上仍是**用法错**（`option-not-allowed-for-command:...:transfer-roundtrip`）——roundtrip 由内部决定，不接受操作员逐侧开关。
+
+### 13.3 实测（本轮自己跑的）
+
+- `dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug --no-build` → **1515 通过 / 0 失败 / 0 跳过**（基线 1488 + 27：presenter 16 + roundtrip 4 + CLI roundtrip 6，其中 1 个 Theory 展开 4 例）。
+- `pwsh -NoProfile -File windows/tools/acceptance/w6/presenter-e2e.ps1 -SkipBuild -OutDir D:/mh-verify/w6-39` → **12/12 用例 PASS**，新增 R8（presenter 回执 + 真 CLI `--await-receipt`）、R9（presenter `AwaitReceipt` 打真 `serve --send-receipt --apply`）、R10（真 serve 不写回执 → presenter `receipt-missing` 且对端零写入）；`residual MediaHub.SyncCli processes: 0`。
