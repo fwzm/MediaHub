@@ -50,6 +50,12 @@ public sealed partial class SyncPage : Page
     private SyncPagePresenter? _presenter;
     private string? _applyPath;
 
+    // Transport state (W6-33). SyncTransferPresenter owns the listener, the pending receive and the in-memory secret;
+    // this page only renders what it returns, so a secret never lands in a field that could outlive the click.
+    private SyncTransferPresenter? _transfer;
+    private bool _transferReceiving;
+    private bool _transferSending;
+
     /// <summary>
     /// The page's presenter: one instance per page so the pending decisions cannot outlive the page, sharing the
     /// service's paired-device registry so a fingerprint is pinned exactly once.
@@ -77,6 +83,7 @@ public sealed partial class SyncPage : Page
         ReloadPreview(null);
 
         ReloadPairedDevices();
+        RenderTransferState();
 
         if (App.Services.Sync.StoreError is { Length: > 0 } storeError)
         {
@@ -104,6 +111,15 @@ public sealed partial class SyncPage : Page
         // A preview is a list of pending writes; it must not survive the page that showed it.
         Presenter.Apply.Clear();
         _applyPath = null;
+
+        // W6-33: leaving the page closes the transport listener and zeroes the secret with it. Dispose is safe to
+        // call synchronously because SourceSyncTransferListener.DisposeAsync completes inline.
+        _transfer?.Dispose();
+        _transfer = null;
+        _transferReceiving = false;
+        _transferSending = false;
+        TransferReceiveSecretBox.Password = string.Empty;
+        TransferSendSecretBox.Password = string.Empty;
     }
 
     private void OnServersChanged(object? sender, EventArgs e)
@@ -975,6 +991,188 @@ public sealed partial class SyncPage : Page
     }
 
     // ---- apply (W6-8) end ------------------------------------------------------
+
+    // ---- transport (W6-33) begin ------------------------------------------------
+    // The presenter owns the listener, the pending receive and the in-memory secret; the page only renders what it
+    // returns. A received envelope goes through the same apply gate as a file import and stops there, so a peer can
+    // never write a source: the 应用 click above is still the only writer on this page.
+
+    /// <summary>The transport presenter: one per page, so a half-finished receive cannot outlive it.</summary>
+    private SyncTransferPresenter Transfer => _transfer ??= new SyncTransferPresenter(
+        App.Services.Sync.DeviceId,
+        () => App.Services.Sync.BuildEnvelope());
+
+    private async void OnTransferStartReceiveClick(object sender, RoutedEventArgs e)
+    {
+        if (_transferReceiving)
+        {
+            return;
+        }
+
+        _transferReceiving = true;
+        TransferStartReceiveButton.IsEnabled = false;
+        TransferReceiveBusy.IsActive = true;
+        try
+        {
+            SyncTransferReceiveForm form = new()
+            {
+                PortText = TransferReceivePortBox.Text ?? string.Empty,
+                UseTls = TransferReceiveTlsCheck.IsChecked == true,
+                Secret = TransferReceiveSecretBox.Password,
+            };
+
+            SyncTransferOutcome prepared = Transfer.PrepareReceive(form);
+            RenderTransferState();
+            if (!prepared.Succeeded)
+            {
+                ShowStatus(InfoBarSeverity.Error, "无法开始接收", prepared.Summary);
+                return;
+            }
+
+            ShowStatus(InfoBarSeverity.Informational, "正在等待对端连接", prepared.Summary);
+
+            SyncTransferOutcome received = await Transfer.ReceiveOnceAsync();
+            RenderTransferState();
+            RenderReceiveResult(received);
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException or ObjectDisposedException or ArgumentException)
+        {
+            ShowStatus(InfoBarSeverity.Error, "接收失败", error.Message);
+        }
+        finally
+        {
+            _transferReceiving = false;
+            TransferReceiveBusy.IsActive = false;
+            TransferStartReceiveButton.IsEnabled = true;
+            TransferReceiveSecretBox.Password = string.Empty;
+            RenderTransferState();
+        }
+    }
+
+    private async void OnTransferStopReceiveClick(object sender, RoutedEventArgs e)
+    {
+        TransferStopReceiveButton.IsEnabled = false;
+
+        // Cancelling is the only way out of a receive that is still waiting; the listener is released either way.
+        SyncTransferOutcome stopped = await Transfer.StopReceiveAsync();
+        RenderTransferState();
+        ShowStatus(InfoBarSeverity.Informational, "已停止接收", stopped.Summary);
+    }
+
+    private async void OnTransferSendClick(object sender, RoutedEventArgs e)
+    {
+        if (_transferSending)
+        {
+            return;
+        }
+
+        _transferSending = true;
+        TransferSendButton.IsEnabled = false;
+        TransferSendBusy.IsActive = true;
+        try
+        {
+            SyncTransferSendForm form = new()
+            {
+                Host = TransferSendHostBox.Text ?? string.Empty,
+                PortText = TransferSendPortBox.Text ?? string.Empty,
+                UseTls = TransferSendTlsCheck.IsChecked == true,
+                ExpectedFingerprint = TransferPinBox.Text,
+                Secret = TransferSendSecretBox.Password,
+                ConfirmDelivery = TransferConfirmDeliveryCheck.IsChecked == true,
+            };
+
+            SyncTransferOutcome sent = await Transfer.SendAsync(form);
+
+            // A send that asked for delivery and did not see the peer close is a failure, not a soft warning: the
+            // presenter already words it that way and this page must not soften it.
+            string sentence = sent.Summary;
+            if (!sent.Succeeded && sent.Detail is { Length: > 0 } detail)
+            {
+                sentence = sentence + " 详情：" + detail;
+            }
+
+            TransferSendResultText.Text = sentence;
+            if (sent.Succeeded)
+            {
+                ShowStatus(InfoBarSeverity.Success, "已发送", sentence);
+            }
+            else
+            {
+                ShowStatus(
+                    sent.IsFormIssue ? InfoBarSeverity.Warning : InfoBarSeverity.Error,
+                    sent.IsFormIssue ? "发送前检查未通过" : "发送失败",
+                    sentence);
+            }
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException or ObjectDisposedException or ArgumentException)
+        {
+            ShowStatus(InfoBarSeverity.Error, "发送失败", error.Message);
+        }
+        finally
+        {
+            _transferSending = false;
+            TransferSendBusy.IsActive = false;
+            TransferSendButton.IsEnabled = true;
+            TransferSendSecretBox.Password = string.Empty;
+        }
+    }
+
+    /// <summary>Renders the listener state; the sentence (including the TLS fingerprint) comes from the presenter.</summary>
+    private void RenderTransferState()
+    {
+        SyncTransferReceiveState state = Transfer.ReceiveState;
+        TransferStatusText.Text = state.StatusText;
+        TransferReceiveInfoText.Text = state.StatusText;
+        TransferStopReceiveButton.IsEnabled = state.Listening && !_transferReceiving;
+
+        // W6-9 keeps the exact wording: an idle page must never look like it is listening.
+        if (!state.Listening)
+        {
+            TransferStartReceiveButton.IsEnabled = !_transferReceiving;
+        }
+    }
+
+    /// <summary>Shows what one receive did, and hands a received envelope to the apply preview only.</summary>
+    private void RenderReceiveResult(SyncTransferOutcome outcome)
+    {
+        string sentence = outcome.Summary;
+        if (!outcome.Succeeded && !outcome.Cancelled && outcome.Detail is { Length: > 0 } detail)
+        {
+            sentence = sentence + " 详情：" + detail;
+        }
+
+        TransferStatusText.Text = sentence;
+
+        if (outcome.Cancelled)
+        {
+            ShowStatus(InfoBarSeverity.Informational, "已取消接收", sentence);
+            return;
+        }
+
+        if (!outcome.Succeeded)
+        {
+            ShowStatus(
+                outcome.IsFormIssue ? InfoBarSeverity.Warning : InfoBarSeverity.Error,
+                outcome.IsFormIssue ? "接收前检查未通过" : "接收失败",
+                sentence);
+            return;
+        }
+
+        if (outcome.Envelope is not null)
+        {
+            // Preview only: the same gate the file import uses. Nothing is written, and nothing is applied until the
+            // user allows the entries and presses 应用.
+            SourceSyncApplyPreview preview = App.Services.Sync.PreviewApply(outcome.Envelope);
+            Presenter.Apply.Load(preview);
+            _applyPath = null;
+            ApplyFileText.Text = "传输（本机回环）· " + preview.Total + " 条";
+            ReloadApplyRows();
+        }
+
+        ShowStatus(InfoBarSeverity.Success, "已接收一个信封（只生成预览）", sentence);
+    }
+
+    // ---- transport (W6-33) end --------------------------------------------------
 }
 
 /// <summary>
