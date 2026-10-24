@@ -192,3 +192,16 @@ pwsh -NoProfile -File windows/tools/acceptance/w6/transfer-tls-auth.ps1
 **验收脚本暴露的一个真实缺陷（尚未修）**：F 用例里 `transfer send` **exit 0 且不带任何稳定码**——它只写不读，明文帧进了 socket 缓冲区就算"成功"，而 TLS 监听端其实一个字节都没接收（`tls-handshake-failed`）。也就是说"发送端报成功"目前**不是**送达证据。E/G/H 同理（send 侧 0，只有 serve 侧报错）。候选修法见 W6-30。**已由 W6-30 修（默认关闭，开 `--confirm-delivery`）**：`transfer send` 写完后等待对端关闭连接——收到关闭则 `deliveryConfirmed=true`，预算（2000 ms）内没关或读取失败则 exit 2 + `delivery-unconfirmed`；不开此开关时线上字节与本文件描述完全一致。**已知残留盲区**：对端「拒绝后关闭」与「接收后关闭」在 TCP 层不可区分，因此本文件 F 用例重跑仍是 send 0（W6-30 文档第 6 节把这一点写成了可复跑的 F2 用例，而不是假装修好了）。
 
 未动：`MediaHub.App` / `MediaHub.Providers` / `MediaHub.Domain` / `MediaHub.Storage` / `docs` 其它文件 / `LICENSE`；未 commit、未 push。
+
+## 15 追加（W6-37 同期）：握手超时分类的 flaky 修正
+
+**现象**：windows-ci 在 `ff286c9` 上唯一失败的是既有用例 `SourceSyncTlsTransportTests.The_handshake_gives_up_when_the_peer_never_speaks_tls`（`Failed 1 / Passed 1452 / Total 1453`，该例 810 ms）：断言等的是 `did not finish within`，实际 detail 是 `The caller cancelled the TLS handshake.`。
+
+**根因**：`SourceSyncTransferListener.ReceiveOnceAsync` 先 `cts.CancelAfter(预算)`（accept 之前），再把**同一个 token** 当作握手的取消令牌传给 `AuthenticateServerAsync`；而握手内部从握手开始才计自己的 clock。accept 慢（CI 冷启动约 100 ms）时，握手自己的 deadline 还没到，caller 的预算 token 已经取消，于是真实超时被分类成「caller 取消」。这是竞态，不是断言写错。
+
+**改法（确定性，不靠容差）**：`SourceSyncTlsTransport.AuthenticateServerAsync` / `AuthenticateClientAsync` 各自用 `CancellationTokenSource(deadlineAfter)` 建**独立 deadline**，再与 caller token `CreateLinkedTokenSource`；catch 时只看 `deadline.IsCancellationRequested` 判断是谁触发的——deadline 到点即 `did not finish within X s`（并列时归超时文案），否则才是 `The caller cancelled the TLS handshake.`。三个调用点（`ReceiveOnceAsync` / `SendOnceAsync` / client `RunAsync`）统一改成：只把**操作员 token** 传下去，预算余额用新助手 `SourceSyncTransferListener.Remaining(budget, elapsed)` 算成握手的 deadline。
+
+**新用例（都在 `SourceSyncTlsTransportTests`，连跑 10 次全绿）**：
+
+- `A_timeout_is_reported_as_a_timeout_even_when_the_accept_was_slow`：先起 900 ms 预算的接收，400 ms 后才让客户端连接 → 确定性复现 CI 的慢 accept 竞态，断言 detail 含 `did not finish within`。
+- `A_caller_that_cancels_before_the_deadline_is_reported_as_a_cancellation`：客户端连上后 250 ms 取消 caller token（预算 10 s）→ 断言 detail 含 `caller cancelled` 且不含 `did not finish within`。

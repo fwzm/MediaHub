@@ -71,6 +71,15 @@ public sealed record SourceSyncPeerRoundResult
     public TimeSpan DeliveryElapsed { get; init; }
 
     /// <summary>
+    /// Whether the peer's receipt byte arrived, or null when this send did not wait for one (W6-37).
+    /// </summary>
+    /// <remarks>
+    /// A receipt is the only evidence that the peer understood the envelope: a close happens just as well when the peer
+    /// refuses the bytes. False therefore means the frames left this device and nothing came back.
+    /// </remarks>
+    public bool? ReceiptConfirmed { get; init; }
+
+    /// <summary>
     /// True when the round succeeded and wrote nothing because this device already matched the envelope.
     /// </summary>
     /// <remarks>
@@ -125,6 +134,7 @@ public sealed record SourceSyncPeerRoundResult
             Bytes = transfer.Bytes,
             DeliveryConfirmed = transfer.DeliveryConfirmed,
             DeliveryElapsed = transfer.DeliveryElapsed,
+            ReceiptConfirmed = transfer.ReceiptConfirmed,
         };
     }
 
@@ -251,6 +261,7 @@ public sealed class SourceSyncPeerRound
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     /// <param name="tls">The optional TLS pin; null or off keeps the W6-16 plaintext path.</param>
     /// <param name="delivery">The optional delivery confirmation; null keeps the fire-and-forget send.</param>
+    /// <param name="receipt">The optional receipt wait (W6-37); null or off adds no byte and reads nothing back.</param>
     public async Task<SourceSyncPeerRoundResult> SendAsync(
         SourceSyncEnvelope envelope,
         string? address,
@@ -260,7 +271,8 @@ public sealed class SourceSyncPeerRound
         CancellationToken cancellationToken = default,
         SourceSyncTransferOptions? options = null,
         SourceSyncTlsOptions? tls = null,
-        SourceSyncDeliveryOptions? delivery = null)
+        SourceSyncDeliveryOptions? delivery = null,
+        SourceSyncReceiptOptions? receipt = null)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
@@ -278,7 +290,17 @@ public sealed class SourceSyncPeerRound
             };
         }
 
-        return await SendPayloadAsync(payload, address, port, challenge, timeout, cancellationToken, options, tls, delivery)
+        return await SendPayloadAsync(
+                payload,
+                address,
+                port,
+                challenge,
+                timeout,
+                cancellationToken,
+                options,
+                tls,
+                delivery,
+                receipt)
             .ConfigureAwait(false);
     }
 
@@ -296,6 +318,7 @@ public sealed class SourceSyncPeerRound
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     /// <param name="tls">The optional TLS pin; null or off keeps the W6-16 plaintext path.</param>
     /// <param name="delivery">The optional delivery confirmation; null keeps the fire-and-forget send.</param>
+    /// <param name="receipt">The optional receipt wait (W6-37); null or off adds no byte and reads nothing back.</param>
     public async Task<SourceSyncPeerRoundResult> SendPayloadAsync(
         ReadOnlyMemory<byte> payload,
         string? address,
@@ -305,10 +328,11 @@ public sealed class SourceSyncPeerRound
         CancellationToken cancellationToken = default,
         SourceSyncTransferOptions? options = null,
         SourceSyncTlsOptions? tls = null,
-        SourceSyncDeliveryOptions? delivery = null)
+        SourceSyncDeliveryOptions? delivery = null,
+        SourceSyncReceiptOptions? receipt = null)
     {
         SourceSyncTransferResult sent = await SourceSyncTransferClient
-            .SendAsync(address, port, payload, challenge, timeout, cancellationToken, options, tls, delivery)
+            .SendAsync(address, port, payload, challenge, timeout, cancellationToken, options, tls, delivery, receipt)
             .ConfigureAwait(false);
 
         SourceSyncPeerRoundResult result = sent.Succeeded
@@ -330,6 +354,7 @@ public sealed class SourceSyncPeerRound
     /// <param name="cancellationToken">Cancels the wait.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     /// <param name="tls">True to accept a TLS 1.3 peer on this listener instead of plaintext frames.</param>
+    /// <param name="receipt">The optional receipt write (W6-37); null or off sends no extra byte to the peer.</param>
     public async Task<SourceSyncPeerRoundResult> ReceiveOnceAsync(
         SourceSyncRecordWriter writer,
         string? address = null,
@@ -339,7 +364,8 @@ public sealed class SourceSyncPeerRound
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
         SourceSyncTransferOptions? options = null,
-        SourceSyncTlsOptions? tls = null)
+        SourceSyncTlsOptions? tls = null,
+        SourceSyncReceiptOptions? receipt = null)
     {
         ArgumentNullException.ThrowIfNull(writer);
 
@@ -354,7 +380,15 @@ public sealed class SourceSyncPeerRound
         }
 
         await using SourceSyncTransferListener listener = start.Listener;
-        return await ReceiveOnAsync(listener, writer, expectedChallenge, allowedIds, timeout, cancellationToken, options)
+        return await ReceiveOnAsync(
+                listener,
+                writer,
+                expectedChallenge,
+                allowedIds,
+                timeout,
+                cancellationToken,
+                options,
+                receipt)
             .ConfigureAwait(false);
     }
 
@@ -370,6 +404,8 @@ public sealed class SourceSyncPeerRound
     /// <param name="timeout">How long the peer gets, defaulting to 15 seconds.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
+    /// <param name="receipt">The optional receipt write (W6-37), gated on the inbox's decode check; null or off sends
+    /// no extra byte to the peer.</param>
     public async Task<SourceSyncPeerRoundResult> ReceiveOnAsync(
         SourceSyncTransferListener listener,
         SourceSyncRecordWriter writer,
@@ -377,13 +413,14 @@ public sealed class SourceSyncPeerRound
         IReadOnlyList<string>? allowedIds = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncReceiptOptions? receipt = null)
     {
         ArgumentNullException.ThrowIfNull(listener);
         ArgumentNullException.ThrowIfNull(writer);
 
         SourceSyncInboxResult imported = await listener
-            .ReceiveAndImportAsync(_inbox, writer, expectedChallenge, allowedIds, timeout, cancellationToken, options)
+            .ReceiveAndImportAsync(_inbox, writer, expectedChallenge, allowedIds, timeout, cancellationToken, options, receipt)
             .ConfigureAwait(false);
 
         return SourceSyncPeerRoundResult.Received(imported) with { ReceiverDeviceId = DeviceId };

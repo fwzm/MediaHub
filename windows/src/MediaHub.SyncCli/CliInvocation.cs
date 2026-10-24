@@ -139,6 +139,20 @@ public sealed record CliInvocation
     /// </summary>
     public bool ConfirmDelivery { get; init; }
 
+    /// <summary>
+    /// <c>--send-receipt</c> (<c>transfer serve</c> only): once the envelope has decoded, write one receipt
+    /// byte (0x04) before the connection closes, so the sender can tell "understood" from "closed" (W6-37).
+    /// Off by default, so the bytes on the wire stay exactly W6-16's.
+    /// </summary>
+    public bool SendReceipt { get; init; }
+
+    /// <summary>
+    /// <c>--await-receipt</c> (<c>transfer send</c> only): after the last frame, wait for that receipt byte
+    /// and fail with <c>receipt-missing</c>, <c>receipt-timeout</c> or <c>receipt-invalid</c> when it does
+    /// not arrive (W6-37). Off by default, so a send never waits and never reads back.
+    /// </summary>
+    public bool AwaitReceipt { get; init; }
+
     /// <summary><c>--apply</c>: really write. Without it <c>import</c> is a preview.</summary>
     public bool Apply { get; init; }
 

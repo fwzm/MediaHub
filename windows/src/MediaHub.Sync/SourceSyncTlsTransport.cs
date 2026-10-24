@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net.Security;
@@ -304,9 +303,16 @@ public static class SourceSyncTlsHandshake
         }
 
         var ssl = new SslStream(transport, leaveInnerStreamOpen: false);
-        Stopwatch elapsed = Stopwatch.StartNew();
-        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        budget.CancelAfter(timeout);
+
+        // W6-26 fix: the deadline is its own source, so "did my own clock run out" is a state check on that source
+        // instead of a guess made from a stopwatch and a 25 ms tolerance. The old guess compared an elapsed time that
+        // started after the caller's budget had already been running: a slow accept ate most of it, the linked token
+        // fired before the handshake's own clock could reach the same number, and a plain timeout was reported as a
+        // caller cancel. A tie goes to the timeout wording, because the timeout is what a user needs to read when a
+        // peer never speaks TLS.
+        TimeSpan deadlineAfter = timeout > TimeSpan.Zero ? timeout : TimeSpan.FromMilliseconds(1);
+        using var deadline = new CancellationTokenSource(deadlineAfter);
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         try
         {
             await ssl.AuthenticateAsServerAsync(
@@ -323,15 +329,14 @@ public static class SourceSyncTlsHandshake
         }
         catch (OperationCanceledException)
         {
-            // The transfer endpoint hands its own budget token in here, so "which token fired" cannot
-            // tell a timeout from a caller cancel; the clock can, and the timeout wording is the one a
-            // user needs to read when a peer simply never spoke TLS.
+            // deadline.IsCancellationRequested is set by the source that fired, before the linked token propagates,
+            // so this is a fact about which source cancelled rather than an inference from elapsed time.
             return AfterFailure(
                 ssl,
                 SourceSyncTlsReasons.HandshakeFailed,
-                cancellationToken.IsCancellationRequested && elapsed.Elapsed + TimeSpan.FromMilliseconds(25) < timeout
-                    ? "The caller cancelled the TLS handshake."
-                    : TimeoutDetail(timeout));
+                deadline.IsCancellationRequested
+                    ? TimeoutDetail(deadlineAfter)
+                    : "The caller cancelled the TLS handshake.");
         }
         catch (AuthenticationException error)
         {
@@ -371,9 +376,11 @@ public static class SourceSyncTlsHandshake
             // Identity is the pin, checked below; the chain is irrelevant for a self-signed peer.
             static (sender, certificate, chain, errors) => true);
 
-        Stopwatch elapsed = Stopwatch.StartNew();
-        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        budget.CancelAfter(timeout);
+        // Same shape as the server direction: an independent deadline source decides "timeout" versus "caller
+        // cancelled" as a state check, so the verdict cannot depend on how long the caller spent before dialling.
+        TimeSpan deadlineAfter = timeout > TimeSpan.Zero ? timeout : TimeSpan.FromMilliseconds(1);
+        using var deadline = new CancellationTokenSource(deadlineAfter);
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         try
         {
             await ssl.AuthenticateAsClientAsync(
@@ -390,9 +397,9 @@ public static class SourceSyncTlsHandshake
             return AfterFailure(
                 ssl,
                 SourceSyncTlsReasons.HandshakeFailed,
-                cancellationToken.IsCancellationRequested && elapsed.Elapsed + TimeSpan.FromMilliseconds(25) < timeout
-                    ? "The caller cancelled the TLS handshake."
-                    : TimeoutDetail(timeout));
+                deadline.IsCancellationRequested
+                    ? TimeoutDetail(deadlineAfter)
+                    : "The caller cancelled the TLS handshake.");
         }
         catch (AuthenticationException error)
         {

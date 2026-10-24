@@ -67,6 +67,11 @@ public static class CliParser
         "  --confirm-delivery with 'transfer send': after the last frame, wait for the peer to close the\n" +
         "                     connection and fail with delivery-unconfirmed if it does not (W6-30);\n" +
         "                     off by default, so a send never waits and never adds a byte\n" +
+        "  --send-receipt     with 'transfer serve': after the envelope decoded, write one receipt byte\n" +
+        "                     (0x04) so the sender knows it was understood (W6-37); off by default\n" +
+        "  --await-receipt    with 'transfer send': wait for that byte after the last frame and fail with\n" +
+        "                     receipt-missing, receipt-timeout or receipt-invalid when it does not come;\n" +
+        "                     off by default, so a send never waits and never reads back\n" +
         "\n" +
         "Global:\n" +
         "  --json       stdout carries exactly one JSON document; progress goes to stderr\n" +
@@ -189,6 +194,8 @@ public static class CliParser
         bool authenticate = false;
         bool tls = false;
         bool confirmDelivery = false;
+        bool sendReceipt = false;
+        bool awaitReceipt = false;
 
         for (int i = start; i < args.Count; i++)
         {
@@ -308,6 +315,41 @@ public static class CliParser
                 }
 
                 confirmDelivery = true;
+                continue;
+            }
+
+            if (name == "--send-receipt")
+            {
+                if (inlineValue is not null)
+                {
+                    return Error("flag-takes-no-value:" + name);
+                }
+
+                // Only the receiving half can answer: a receipt says "I decoded your envelope", and the dialling half
+                // has nothing to decode.
+                if (command != SyncCliCommand.TransferServe)
+                {
+                    return Error("option-not-allowed-for-command:" + name + ":" + commandName);
+                }
+
+                sendReceipt = true;
+                continue;
+            }
+
+            if (name == "--await-receipt")
+            {
+                if (inlineValue is not null)
+                {
+                    return Error("flag-takes-no-value:" + name);
+                }
+
+                // Only the sending half can wait for one; serve and roundtrip write receipts from their own side.
+                if (command != SyncCliCommand.TransferSend)
+                {
+                    return Error("option-not-allowed-for-command:" + name + ":" + commandName);
+                }
+
+                awaitReceipt = true;
                 continue;
             }
 
@@ -494,6 +536,8 @@ public static class CliParser
                 Tls = tls,
                 ExpectFingerprint = expectFingerprint,
                 ConfirmDelivery = confirmDelivery,
+                SendReceipt = sendReceipt,
+                AwaitReceipt = awaitReceipt,
                 Apply = apply,
                 Json = json,
             },
@@ -510,6 +554,7 @@ public static class CliParser
         "--device" or "--baseline" or "--id" or "--source" or "--link" or "--expect" or
         "--to" or "--port" or "--device-a" or "--device-b" or
         "--authenticate" or "--secret-env" or "--tls" or "--expect-fingerprint" or "--confirm-delivery" or
+        "--send-receipt" or "--await-receipt" or
         "--apply" or "--once" or "--json";
 
     private static CliParseResult Error(string code) => new() { Error = code };

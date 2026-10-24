@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Security;
@@ -224,15 +225,24 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
     /// <param name="timeout">How long the peer gets, defaulting to <see cref="DefaultTimeout"/>.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
+    /// <param name="receipt">The optional receipt write (W6-37). Null or <see cref="SourceSyncReceiptOptions.Off"/>
+    /// writes no extra byte, so the receiver's output stays exactly today's. When on, one 0x04 byte is written after the
+    /// envelope decoded and before the connection closes.</param>
+    /// <param name="receiptGate">Asked once with the received envelope bytes, right before the receipt byte would be
+    /// written; returning false keeps this end silent. Null accepts every decodable envelope, so pass the decode check
+    /// here rather than gating after the connection is already gone.</param>
     public async Task<SourceSyncTransferResult> ReceiveOnceAsync(
         string? expectedChallenge = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncReceiptOptions? receipt = null,
+        Func<byte[], bool>? receiptGate = null)
     {
         TimeSpan budget = ResolveBudget(timeout);
         using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(budget);
+        Stopwatch elapsed = Stopwatch.StartNew();
 
         TcpClient? client = null;
         try
@@ -243,8 +253,11 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
             if (_identity is not null)
             {
                 // TLS on: the frames are unchanged, they just travel inside TLS records.
+                // W6-26 fix: the handshake gets the budget that is genuinely left after the accept, and only the
+                // caller's own token as "cancel". Handing it this method's budget token made a timeout look like a
+                // caller cancel whenever the accept was slow, because the handshake's own deadline started late.
                 SourceSyncTlsHandshakeResult handshake = await SourceSyncTlsHandshake
-                    .AuthenticateServerAsync(stream, _identity.Certificate, null, budget, cts.Token)
+                    .AuthenticateServerAsync(stream, _identity.Certificate, null, Remaining(budget, elapsed), cancellationToken)
                     .ConfigureAwait(false);
                 if (!handshake.Succeeded || handshake.Stream is null)
                 {
@@ -255,8 +268,10 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
 
                 try
                 {
-                    return await SourceSyncTransfer
+                    SourceSyncTransferResult received = await SourceSyncTransfer
                         .ReceiveAsync(handshake.Stream, expectedChallenge, cts.Token, options)
+                        .ConfigureAwait(false);
+                    return await WriteReceiptAsync(handshake.Stream, received, receipt, receiptGate, cts.Token)
                         .ConfigureAwait(false);
                 }
                 finally
@@ -273,7 +288,12 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
                 return SourceSyncTransferResult.Failed(probe.Reason ?? SourceSyncTlsReasons.NotEnabled, probe.Detail);
             }
 
-            return await SourceSyncTransfer.ReceiveAsync(probe.Stream, expectedChallenge, cts.Token, options).ConfigureAwait(false);
+            SourceSyncTransferResult plaintext = await SourceSyncTransfer
+                .ReceiveAsync(probe.Stream, expectedChallenge, cts.Token, options)
+                .ConfigureAwait(false);
+
+            // The probe wrapper replays the first bytes and refuses writes, so the receipt goes to the socket itself.
+            return await WriteReceiptAsync(stream, plaintext, receipt, receiptGate, cts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -317,6 +337,7 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
         TimeSpan budget = ResolveBudget(timeout);
         using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(budget);
+        Stopwatch elapsed = Stopwatch.StartNew();
 
         TcpClient? client = null;
         try
@@ -327,7 +348,7 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
             if (_identity is not null)
             {
                 SourceSyncTlsHandshakeResult handshake = await SourceSyncTlsHandshake
-                    .AuthenticateServerAsync(stream, _identity.Certificate, null, budget, cts.Token)
+                    .AuthenticateServerAsync(stream, _identity.Certificate, null, Remaining(budget, elapsed), cancellationToken)
                     .ConfigureAwait(false);
                 if (!handshake.Succeeded || handshake.Stream is null)
                 {
@@ -389,6 +410,20 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>What is left of a budget once the steps before the handshake have consumed part of it.</summary>
+    /// <param name="budget">The whole budget for the operation.</param>
+    /// <param name="elapsed">A clock started when the budget started.</param>
+    /// <remarks>
+    /// A handshake that is handed the whole budget measures its deadline from its own start, which is strictly later
+    /// than the caller's deadline: it can then never reach that deadline and any expiry arrives as a caller cancel.
+    /// The floor keeps the value legal for a cancellation timer when nothing is left.
+    /// </remarks>
+    internal static TimeSpan Remaining(TimeSpan budget, Stopwatch elapsed)
+    {
+        TimeSpan left = budget - elapsed.Elapsed;
+        return left > TimeSpan.Zero ? left : TimeSpan.FromMilliseconds(1);
+    }
+
     private static TimeSpan ResolveBudget(TimeSpan? timeout)
     {
         if (timeout is null || timeout.Value <= TimeSpan.Zero)
@@ -397,6 +432,43 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
         }
 
         return timeout.Value;
+    }
+
+    /// <summary>Writes the receipt byte for a receive that already decoded, when this end was asked to.</summary>
+    /// <param name="writable">The stream that can carry the byte back: the socket, or the TLS stream over it.</param>
+    /// <param name="received">What the receive did.</param>
+    /// <param name="receipt">The receipt options, or null/off to write nothing.</param>
+    /// <param name="receiptGate">The decode check, or null to accept everything that arrived.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <remarks>
+    /// A receipt that cannot be written never turns a good receive into a failure: the envelope did arrive. What it does
+    /// do is record <see cref="SourceSyncTransferResult.ReceiptWritten"/> as false, so the CLI can tell an operator that
+    /// the peer will wait for an acknowledgement this end could not send.
+    /// </remarks>
+    private static async Task<SourceSyncTransferResult> WriteReceiptAsync(
+        Stream writable,
+        SourceSyncTransferResult received,
+        SourceSyncReceiptOptions? receipt,
+        Func<byte[], bool>? receiptGate,
+        CancellationToken cancellationToken)
+    {
+        if (receipt is not { Enabled: true } || !received.Succeeded)
+        {
+            return received;
+        }
+
+        if (receiptGate is not null && !receiptGate(received.Envelope))
+        {
+            // W6-37: the byte means "I decoded your envelope". A gate that refuses the payload keeps this end silent, so
+            // a sender that awaits a receipt fails instead of being told that unintelligible bytes arrived. It is a
+            // deliberate silence, not an absent feature, so it is recorded as false rather than left unknown.
+            return received with { ReceiptWritten = false };
+        }
+
+        SourceSyncReceiptResult written = await SourceSyncReceipt
+            .WriteAsync(writable, cancellationToken)
+            .ConfigureAwait(false);
+        return received with { ReceiptWritten = written.Confirmed };
     }
 
     private static SourceSyncTransferResult Timeout(TimeSpan budget)
@@ -423,6 +495,9 @@ public static class SourceSyncTransferClient
     /// <param name="tls">The optional TLS pin; null or off keeps the W6-16 plaintext path.</param>
     /// <param name="delivery">The optional delivery confirmation. Null or off writes the frames and returns exactly as
     /// before: no extra read, no extra wait, and no extra byte on the wire.</param>
+    /// <param name="receipt">The optional receipt wait (W6-37). Null or off adds no byte and reads nothing back. When on,
+    /// the send only succeeds once the peer's 0x04 byte arrives; the peer's close is then not used as evidence, because
+    /// a receiver that refuses the payload also closes.</param>
     public static async Task<SourceSyncTransferResult> SendAsync(
         string? address,
         int port,
@@ -432,17 +507,23 @@ public static class SourceSyncTransferClient
         CancellationToken cancellationToken = default,
         SourceSyncTransferOptions? options = null,
         SourceSyncTlsOptions? tls = null,
-        SourceSyncDeliveryOptions? delivery = null)
+        SourceSyncDeliveryOptions? delivery = null,
+        SourceSyncReceiptOptions? receipt = null)
     {
+        // W6-37: a receipt outranks a close. When both are asked for, the receipt decides the verdict and the close wait
+        // is skipped, otherwise a peer that keeps the connection open after acknowledging would be reported as an
+        // unconfirmed delivery even though it proved receipt.
+        SourceSyncDeliveryOptions? effectiveDelivery = receipt is { Enabled: true } ? null : delivery;
+
         return await RunAsync(
             address,
             port,
-            (stream, token) => SourceSyncTransfer.SendAsync(stream, envelope, challenge, token, options),
+            (stream, token) => SourceSyncTransfer.SendAsync(stream, envelope, challenge, token, options, receipt),
             timeout,
             cancellationToken,
             tls,
             probePlaintext: false,
-            delivery).ConfigureAwait(false);
+            effectiveDelivery).ConfigureAwait(false);
     }
 
     /// <summary>Connects to a loopback listener and reads one envelope.</summary>
@@ -574,6 +655,7 @@ public static class SourceSyncTransferClient
 
         using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(budget);
+        Stopwatch elapsed = Stopwatch.StartNew();
 
         TcpClient client = new();
         try
@@ -583,8 +665,13 @@ public static class SourceSyncTransferClient
 
             if (tls is { Enabled: true })
             {
+                // Same rule as the listener side: what is left of the budget, and only the caller's token as cancel.
                 SourceSyncTlsHandshakeResult handshake = await SourceSyncTlsHandshake
-                    .AuthenticateClientAsync(stream, tls.ExpectedFingerprint, budget, cts.Token)
+                    .AuthenticateClientAsync(
+                        stream,
+                        tls.ExpectedFingerprint,
+                        SourceSyncTransferListener.Remaining(budget, elapsed),
+                        cancellationToken)
                     .ConfigureAwait(false);
                 if (!handshake.Succeeded || handshake.Stream is null)
                 {

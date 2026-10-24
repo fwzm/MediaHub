@@ -431,6 +431,59 @@ public sealed class SourceSyncTlsTransportTests
         }
     }
 
+    // ---- 6. the timeout classification is deterministic, not a race ------------------------
+
+    [Fact]
+    public async Task A_timeout_is_reported_as_a_timeout_even_when_the_accept_was_slow()
+    {
+        // W6-26 regression: the endpoint starts the transfer budget *before* it accepts, so a slow accept
+        // used to consume budget the handshake still counted on. The handshake then saw its own caller
+        // cancelled well before its own deadline and reported "the caller cancelled" for what was really a
+        // timeout - the windows-ci failure this test now pins down. The accept is delayed here on purpose,
+        // so the race is reproduced every time instead of one run in three.
+        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(null, 0, true);
+        Assert.True(start.Started, start.Detail);
+        await using SourceSyncTransferListener listener = start.Listener!;
+
+        Task<SourceSyncTransferResult> receiving =
+            listener.ReceiveOnceAsync(null, TimeSpan.FromMilliseconds(900));
+        await Task.Delay(TimeSpan.FromMilliseconds(400));
+
+        using TcpClient silent = new();
+        await silent.ConnectAsync(IPAddress.Loopback, listener.Port);
+        await using NetworkStream stream = silent.GetStream();
+
+        SourceSyncTransferResult received = await receiving;
+        Assert.False(received.Succeeded);
+        Assert.Equal(SourceSyncTlsReasons.HandshakeFailed, received.Reason);
+        Assert.Contains("did not finish within", received.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("caller cancelled", received.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_caller_that_cancels_before_the_deadline_is_reported_as_a_cancellation()
+    {
+        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(null, 0, true);
+        Assert.True(start.Started, start.Detail);
+        await using SourceSyncTransferListener listener = start.Listener!;
+
+        using TcpClient silent = new();
+        await silent.ConnectAsync(IPAddress.Loopback, listener.Port);
+        await using NetworkStream stream = silent.GetStream();
+
+        // The budget is generous and the operator's token is the only thing that fires: this is the one
+        // case that must keep saying "the caller cancelled".
+        using CancellationTokenSource cancelled = new(TimeSpan.FromMilliseconds(250));
+        SourceSyncTransferResult received = await listener.ReceiveOnceAsync(
+            null,
+            TimeSpan.FromSeconds(10),
+            cancelled.Token);
+        Assert.False(received.Succeeded);
+        Assert.Equal(SourceSyncTlsReasons.HandshakeFailed, received.Reason);
+        Assert.Contains("caller cancelled", received.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("did not finish within", received.Detail, StringComparison.Ordinal);
+    }
+
     // ---- helpers -------------------------------------------------------------------------
 
     private static byte[] Payload(int length = 64)

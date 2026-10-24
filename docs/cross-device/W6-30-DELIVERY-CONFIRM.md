@@ -1,6 +1,8 @@
 # W6-30 `transfer send` 送达确认（`--confirm-delivery`）
 
 > **状态：IMPLEMENTED_UNVERIFIED。** 代码已实现、19 个新用例全绿、全套 1388 例通过、`MediaHub.App` 工程 0 警告 0 错误、W6-28 验收脚本 11/11 PASS。本轮没有 GUI 证据、没有与 Android 端联调的证据；「送达已确认」只表示**对端关闭了连接**，不表示对端接受并写入了信封（第 6 节）。
+>
+> **后续：本文件的「关闭只是必要条件」盲区已由 W6-37 修（真回执帧 `0x04`，默认关闭，开 `transfer serve --send-receipt` / `transfer send --await-receipt`）。** 本文件的 `--confirm-delivery` 行为一字未改；两者同时给出时以回执为准。见 `docs/cross-device/W6-37-RECEIPT.md`。
 
 - 日期：2026-10-24
 - 分支：`feature/cross-device-source-sync`（工作树 `D:\mh-w6`，基线 `a47b530`）

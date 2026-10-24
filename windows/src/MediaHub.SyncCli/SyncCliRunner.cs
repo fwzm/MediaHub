@@ -876,8 +876,17 @@ public sealed class SyncCliRunner
         // With authentication on the expected challenge stays null: the sender announces the nonce,
         // and the tag proves it also holds the secret. A sender that announces no nonce is refused
         // with auth-missing rather than silently accepted.
+        // W6-37: --send-receipt answers "understood" with one 0x04 byte, but only after the envelope
+        // decoded. The decode check is the gate, so a payload this side cannot read is never acknowledged.
+        SourceSyncReceiptOptions? receipt = invocation.SendReceipt ? SourceSyncReceiptOptions.Sending() : null;
         SourceSyncTransferResult received = await listener
-            .ReceiveOnceAsync(null, TransferBudget, CancellationToken.None, options)
+            .ReceiveOnceAsync(
+                null,
+                TransferBudget,
+                CancellationToken.None,
+                options,
+                receipt,
+                payload => SourceSyncInbox.TryDecode(payload, out _, out _))
             .ConfigureAwait(false);
         if (!received.Succeeded)
         {
@@ -905,7 +914,7 @@ public sealed class SyncCliRunner
             ? await receiver.ApplyAsync(preview, TransferWriter(sources), null, cancellationToken: CancellationToken.None).ConfigureAwait(false)
             : null;
 
-        TransferOutcome outcome = new(envelope.DeviceId, receiver.DeviceId, received.Bytes, received.FrameCount, preview, report, null, null);
+        TransferOutcome outcome = new(envelope.DeviceId, receiver.DeviceId, received.Bytes, received.FrameCount, preview, report, null, null, received.ReceiptWritten);
         return WriteServeResult(invocation, listener.Port, listener.Address, listener.CertificateFingerprint, outcome);
     }
 
@@ -947,11 +956,16 @@ public sealed class SyncCliRunner
         // rejected the first byte and the send still reported success). --confirm-delivery waits for the
         // peer's close; it stays opt-in because a receiver that holds the connection open would otherwise
         // turn every send into a two-second timeout.
-        SourceSyncDeliveryOptions delivery = invocation.ConfirmDelivery
+        // W6-37: a receipt byte is real evidence, so --await-receipt wins over the close-as-evidence
+        // heuristic: when both are asked for, the sender does not also wait for the peer's close.
+        SourceSyncReceiptOptions receipt = invocation.AwaitReceipt
+            ? SourceSyncReceiptOptions.Awaiting()
+            : SourceSyncReceiptOptions.Off;
+        SourceSyncDeliveryOptions delivery = invocation.ConfirmDelivery && !invocation.AwaitReceipt
             ? SourceSyncDeliveryOptions.Confirming()
             : SourceSyncDeliveryOptions.Off;
         SourceSyncPeerRoundResult sent = await sender
-            .SendAsync(envelope, host, port, challenge, TransferBudget, CancellationToken.None, options, tls, delivery)
+            .SendAsync(envelope, host, port, challenge, TransferBudget, CancellationToken.None, options, tls, delivery, receipt)
             .ConfigureAwait(false);
         if (!sent.Succeeded)
         {
@@ -1040,7 +1054,8 @@ public sealed class SyncCliRunner
         SourceSyncApplyPreview? Preview,
         SourceSyncApplyReport? Report,
         string? Reason,
-        string? Detail)
+        string? Detail,
+        bool? ReceiptWritten = null)
     {
         public bool Succeeded => Reason is null;
 
@@ -1254,6 +1269,56 @@ public sealed class SyncCliRunner
     }
 
     /// <summary>
+    /// W6-37: which receipt flag this run carried, and what the answer was. <c>receiptConfirmed</c>
+    /// belongs to the sender (it heard the byte), <c>receiptWritten</c> to the receiver (it wrote one).
+    /// Both stay null when the question was never asked, so a default run reports no evidence either way.
+    /// </summary>
+    private static void WriteReceiptFieldsJson(
+        Utf8JsonWriter writer,
+        CliInvocation invocation,
+        bool? receiptConfirmed = null,
+        bool? receiptWritten = null)
+    {
+        writer.WriteBoolean("sendReceipt", invocation.SendReceipt);
+        writer.WriteBoolean("awaitReceipt", invocation.AwaitReceipt);
+        if (receiptConfirmed is null)
+        {
+            writer.WriteNull("receiptConfirmed");
+        }
+        else
+        {
+            writer.WriteBoolean("receiptConfirmed", receiptConfirmed.Value);
+        }
+
+        if (receiptWritten is null)
+        {
+            writer.WriteNull("receiptWritten");
+        }
+        else
+        {
+            writer.WriteBoolean("receiptWritten", receiptWritten.Value);
+        }
+    }
+
+    /// <summary>The text-mode counterpart of <see cref="WriteReceiptFieldsJson"/>: only real evidence is news.</summary>
+    private void WriteReceiptText(CliInvocation invocation, bool? receiptConfirmed = null, bool? receiptWritten = null)
+    {
+        if (receiptWritten is true)
+        {
+            _out.WriteLine("receipt: written (0x04) - the sender can tell understood from closed");
+        }
+        else if (invocation.SendReceipt && receiptWritten is false)
+        {
+            _out.WriteLine("receipt: not written - the envelope was not acknowledged");
+        }
+
+        if (receiptConfirmed is true)
+        {
+            _out.WriteLine("receipt: received (0x04) - the peer decoded this envelope");
+        }
+    }
+
+    /// <summary>
     /// Prints the listening side's own fingerprint before the port. stderr always carries it (a JSON
     /// run keeps stdout to one document, and a caller needs the pin *before* it can dial); text mode
     /// also puts it on stdout where a human reads it.
@@ -1447,6 +1512,7 @@ public sealed class SyncCliRunner
                 writer.WriteBoolean("applied", outcome.Report is not null);
                 WriteAuthFieldsJson(writer, invocation);
                 WriteTlsFieldsJson(writer, invocation, certificateFingerprint);
+                WriteReceiptFieldsJson(writer, invocation, receiptWritten: outcome.ReceiptWritten);
                 WriteTransferFieldsJson(writer, outcome);
                 writer.WriteEndObject();
             }));
@@ -1456,6 +1522,7 @@ public sealed class SyncCliRunner
         _out.WriteLine("served one connection on " + address + ":" + port.ToString(CultureInfo.InvariantCulture));
         WriteAuthText(invocation);
         WriteTlsText(invocation);
+        WriteReceiptText(invocation, receiptWritten: outcome.ReceiptWritten);
         WriteTransferText(outcome, invocation.Apply);
         return CliExitCode.Success;
     }
@@ -1484,6 +1551,7 @@ public sealed class SyncCliRunner
                 // so on the dialling side the pin *is* the fingerprint that was seen.
                 WriteTlsFieldsJson(writer, invocation, invocation.Tls ? NormalizeFingerprint(invocation.ExpectFingerprint) : null);
                 WriteDeliveryFieldsJson(writer, invocation, sent);
+                WriteReceiptFieldsJson(writer, invocation, receiptConfirmed: sent.ReceiptConfirmed);
                 writer.WriteEndObject();
             }));
             return CliExitCode.Success;
@@ -1497,6 +1565,7 @@ public sealed class SyncCliRunner
         WriteAuthText(invocation);
         WriteTlsText(invocation);
         WriteDeliveryText(sent);
+        WriteReceiptText(invocation, receiptConfirmed: sent.ReceiptConfirmed);
         return CliExitCode.Success;
     }
 
@@ -1528,6 +1597,7 @@ public sealed class SyncCliRunner
                 // Each direction pinned a freshly created ephemeral certificate, so there is no single
                 // fingerprint to report here: only the fact that TLS was on.
                 WriteTlsFieldsJson(writer, invocation);
+                WriteReceiptFieldsJson(writer, invocation);
                 writer.WriteStartArray("rounds");
                 foreach (TransferOutcome outcome in new[] { first, second })
                 {

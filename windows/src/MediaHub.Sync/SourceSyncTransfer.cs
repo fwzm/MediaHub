@@ -44,18 +44,41 @@ public sealed record SourceSyncTransferResult
     /// <summary>How long the wait for the peer's close took; zero when no confirmation was requested.</summary>
     public TimeSpan DeliveryElapsed { get; init; }
 
+    /// <summary>
+    /// What the wait for the peer's receipt frame saw, or null when the caller did not ask for a receipt.
+    /// </summary>
+    /// <remarks>
+    /// A receipt is the only positive evidence this protocol has (W6-37): the peer writes 0x04 back after it decoded
+    /// the envelope, so <c>true</c> here means "the peer holds this envelope", which no close ever proved. Null means
+    /// nobody asked; false means a receipt was asked for and did not arrive, and the send is then a failure carrying
+    /// one of <see cref="SourceSyncReceiptReasons"/> - the frames left, but nothing acknowledges them.
+    /// </remarks>
+    public bool? ReceiptConfirmed { get; init; }
+
+    /// <summary>
+    /// Whether this end wrote its receipt byte, or null when this end is not the receiver or was not asked to.
+    /// </summary>
+    /// <remarks>
+    /// False on a receive means the envelope arrived but the peer will never learn that: the usual cause is a stream
+    /// this end cannot write (<see cref="SourceSyncReceiptReasons.ReceiptNotEnabled"/>). The receive itself still
+    /// succeeded, because the envelope really did arrive.
+    /// </remarks>
+    public bool? ReceiptWritten { get; init; }
+
     /// <summary>A successful transfer.</summary>
     /// <param name="envelope">The payload that left or arrived.</param>
     /// <param name="frameCount">How many frames carried it.</param>
     /// <param name="challenge">The challenge that travelled with it, or null.</param>
     /// <param name="deliveryConfirmed">The confirmation outcome, or null when none was requested.</param>
     /// <param name="deliveryElapsed">How long the confirmation waited.</param>
+    /// <param name="receiptConfirmed">The receipt outcome, or null when no receipt was requested.</param>
     public static SourceSyncTransferResult Ok(
         byte[] envelope,
         int frameCount,
         string? challenge = null,
         bool? deliveryConfirmed = null,
-        TimeSpan deliveryElapsed = default) => new()
+        TimeSpan deliveryElapsed = default,
+        bool? receiptConfirmed = null) => new()
     {
         Succeeded = true,
         Envelope = envelope,
@@ -64,6 +87,7 @@ public sealed record SourceSyncTransferResult
         Challenge = challenge,
         DeliveryConfirmed = deliveryConfirmed,
         DeliveryElapsed = deliveryElapsed,
+        ReceiptConfirmed = receiptConfirmed,
     };
 
     /// <summary>A failed transfer; nothing was written by the caller.</summary>
@@ -133,12 +157,16 @@ public static class SourceSyncTransfer
     /// <param name="cancellationToken">Cancels between frames.</param>
     /// <param name="options">The optional authentication settings. Null or <see cref="SourceSyncTransferOptions.Off"/>
     /// writes exactly the W6-16 byte stream: no tag frame, no extra flush, unchanged frame count.</param>
+    /// <param name="receipt">The optional receipt wait (W6-37). Null or <see cref="SourceSyncReceiptOptions.Off"/> adds
+    /// no byte and reads nothing back, which is exactly today's send. When on, the last frame is followed by a read of
+    /// one byte: 0x04 means the peer decoded the envelope, and no byte means it did not.</param>
     public static async Task<SourceSyncTransferResult> SendAsync(
         Stream stream,
         ReadOnlyMemory<byte> envelope,
         string? challenge = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncReceiptOptions? receipt = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
 
@@ -233,6 +261,36 @@ public static class SourceSyncTransfer
         catch (Exception error) when (error is IOException or ObjectDisposedException or InvalidOperationException)
         {
             return SourceSyncTransferResult.Failed(SourceSyncTransferReasons.IoFailed, error.Message);
+        }
+
+        if (receipt is { Enabled: true })
+        {
+            // W6-37: the frames are flushed, and success now depends on a byte the peer chooses to send back. It is
+            // read here, inside the same transfer budget, so a peer that never answers costs one budget and not two.
+            SourceSyncReceiptResult answer = await SourceSyncReceipt
+                .AwaitAsync(stream, receipt.Budget, cancellationToken)
+                .ConfigureAwait(false);
+            if (!answer.Confirmed)
+            {
+                // The frames really did leave, so the counts stay: only the verdict changes. Reporting zero bytes here
+                // would make "the peer never acknowledged" look like "nothing was sent".
+                return SourceSyncTransferResult.Failed(
+                    answer.Reason ?? SourceSyncReceiptReasons.ReceiptMissing,
+                    answer.Detail) with
+                {
+                    Envelope = envelope.ToArray(),
+                    FrameCount = frames,
+                    Bytes = total,
+                    Challenge = challenge?.Trim(),
+                    ReceiptConfirmed = false,
+                };
+            }
+
+            return SourceSyncTransferResult.Ok(
+                envelope.ToArray(),
+                frames,
+                challenge?.Trim(),
+                receiptConfirmed: true);
         }
 
         return SourceSyncTransferResult.Ok(envelope.ToArray(), frames, challenge?.Trim());

@@ -448,3 +448,50 @@ roundtrip 的两个方向都是本进程刚建的监听端，收完即关，所�
 ### 验收
 
 `windows/tools/acceptance/w6/transfer-tls-auth.ps1` 新增 A2（明文 + 确认 → send 0 + `deliveryConfirmed=true`、1 个信封）、F2（明文 client + 确认打 TLS 监听端 → 记录已知盲区）、I（对端接受后永不关闭 → send 2 `delivery-unconfirmed`、2.3 s）。实测 **11/11 PASS**，总 15.3 s，残留进程 0。
+
+## W6-37 追加 —— 反向回执帧：`transfer serve --send-receipt` 与 `transfer send --await-receipt`
+
+### 问题
+
+W6-30 只能观测「对端关闭」，而「拒绝后关闭」与「接收后关闭」在 TCP 上不可区分（F2 用例：serve 2 `tls-handshake-failed`、零写入，而 send 报 `deliveryConfirmed=true`）。缺的是**反向信息**：接收端读懂了没有。
+
+### 决策（续 D16–D17）
+
+#### D16：回执是 1 个字节 `0x04`，不带长度前缀，默认关闭
+
+接收端在「全部帧收齐 + 信封解码成功」之后、关闭 socket 之前写 1 个 `0x04`；发送端读完最后一帧再读 1 个字节。之所以不套 `PairingFrame` 的 4 字节长度头：发送端只需要判 4 种结局（收到 / EOF / 别的字节 / 超时），套头会让「EOF 与半帧」再次混在一起。默认关闭，关闭时两端字节与 W6-16 完全一致（95 字节冻结向量仍逐字节相等）。
+
+#### D17：回执用独立码集 `SourceSyncReceiptReasons`
+
+`receipt-missing`（EOF）/ `receipt-timeout`（预算到期）/ `receipt-invalid`（别的字节）/ `receipt-not-enabled`（本端流不可读或不可写）。与传输十码、认证五码、TLS 四码、送达一码两两不重叠。`receipt-not-enabled` 是**本端能力**问题，`receipt-missing` 是**对端行为**问题，两者不混。
+
+### 命令参考
+
+```text
+transfer serve --root <dir> --device <id> [--send-receipt] [--json] [--tls] [--authenticate --secret-env NAME]
+transfer send  --to 127.0.0.1:<port> --root <dir> --device <id> [--await-receipt] [--json]
+               [--tls --expect-fingerprint HEX] [--authenticate --secret-env NAME]
+```
+
+| 参数组合 | 结果 |
+| --- | --- |
+| `--send-receipt` 用在 send / roundtrip，或 `--await-receipt` 用在 serve / roundtrip | exit 1 `option-not-allowed-for-command:<flag>:<命令>` |
+| 两个 flag 带值（`--await-receipt=1`） | exit 1 `flag-takes-no-value:<flag>` |
+| 收到 `0x04` | exit 0；JSON `awaitReceipt=true`、`receiptConfirmed=true`；文本 `receipt: received (0x04) - the peer decoded this envelope` |
+| 对端关闭但没写 `0x04` | exit 2 `receipt-missing` |
+| 预算（2000 ms）内没有字节 | exit 2 `receipt-timeout` |
+| 读到别的字节 | exit 2 `receipt-invalid` |
+| serve 侧写出回执 | JSON `sendReceipt=true`、`receiptWritten=true`；文本 `receipt: written (0x04) - the sender can tell understood from closed` |
+| 不开开关 | 两端 JSON 四个字段分别为 `false` / `false` 与 `null` / `null` |
+
+### 与 `--confirm-delivery` 同时使用
+
+回执优先：`--await-receipt` 在的时候不再等对端关闭，`deliveryConfirmed` 为 `null`，结论看 `receiptConfirmed`。两个字段都写进 JSON，脚本可区分「没问」与「问了没成」。
+
+### 线上字节
+
+发送端在 `--await-receipt` 下**不多写一个字节**（只多读 1 字节）；接收端在 `--send-receipt` 下多写 1 字节。不开开关时两侧与 W6-16 完全一致。
+
+### 验收
+
+`windows/tools/acceptance/w6/transfer-tls-auth.ps1` 新增 J（对端 `--send-receipt` → send 0 + `receiptConfirmed=true`，serve `receiptWritten=true`）、K（对端不写回执 → send 2 `receipt-missing`，而 serve 0 且已应用 2 条）、L（对端收下字节后既不回执也不关闭 → send 2 `receipt-timeout`、2.3 s）。实测 **14/14 PASS**，总 21.4 s，残留进程 0。详见 `docs/cross-device/W6-37-RECEIPT.md`。

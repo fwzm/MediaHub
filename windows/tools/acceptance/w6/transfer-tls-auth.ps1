@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
     MediaHub W6-28 acceptance: the transfer layer over real, separate processes
-    (W6-16 plaintext, W6-24 shared-secret tags, W6-26 TLS 1.3 with a pinned fingerprint).
+    (W6-16 plaintext, W6-24 shared-secret tags, W6-26 TLS 1.3 with a pinned fingerprint,
+    W6-37 the one-byte receipt frame that tells "decoded" from "merely closed").
 
 .DESCRIPTION
     Every case starts a REAL "transfer serve" child process, reads the loopback port (and,
@@ -20,6 +21,9 @@
       F  plaintext client -> TLS listener    serve 2 tls-handshake-failed, zero writes
       G  TLS client -> plaintext listener    send 2 tls-handshake-failed, serve 2 tls-not-enabled, zero writes
       H  TLS + two different secrets         serve 2 auth-mismatch, zero writes
+      J  --await-receipt + --send-receipt    send 0 receiptConfirmed=true / serve receiptWritten=true
+      K  --await-receipt, no receipt written send 2 receipt-missing / serve 0, two records
+      L  --await-receipt, peer never closes  send 2 receipt-timeout, zero writes
 
     Each case also asserts: the receiver's sync-sources.json holds exactly the sender's two
     sources (or does not exist at all when the case must not write), the receiver's
@@ -324,6 +328,8 @@ function Invoke-TransferCase {
         receiverDisplayNames = ($displayNames -join ', ')
         port                 = $port
         fingerprint          = $fingerprint
+        receiptConfirmed     = $null
+        receiptWritten       = $null
         durationMs           = [int]$stopwatch.ElapsedMilliseconds
     }
     if ($null -ne $sendJson) { $actual.frames = [int]$sendJson.frames }
@@ -431,6 +437,32 @@ function Invoke-TransferCase {
             }
         }
 
+        # 8 W6-37: the receipt frame. A send that asked has to say whether the 0x04 byte arrived, and a
+        # serve that was told to write one has to say whether it wrote it; when the flag is absent the
+        # field must stay null so "not asked" is never confused with "asked and refused".
+        $askedForReceipt = ($Spec.Contains('AwaitReceipt') -and $Spec.AwaitReceipt)
+        $toldToWriteReceipt = ($Spec.Contains('SendReceipt') -and $Spec.SendReceipt)
+        # A failing side prints one error document ({"ok":false,...}), which carries no flags at all,
+        # so the flag assertions only run for the side that actually produced a result document.
+        if ($null -ne $sendJson -and $Spec.Expect.SendExit -eq 0) {
+            Assert-Condition ($sendJson.awaitReceipt -eq $askedForReceipt) ('send JSON awaitReceipt: expected ' + $askedForReceipt + ' but was ' + $sendJson.awaitReceipt)
+            $actual.receiptConfirmed = $sendJson.receiptConfirmed
+            if ($askedForReceipt) {
+                Assert-Condition ($sendJson.receiptConfirmed -eq $true) 'a send that awaited a receipt and succeeded must report receiptConfirmed=true'
+            } else {
+                Assert-Condition ($null -eq $sendJson.receiptConfirmed) 'a send that never asked for a receipt must report receiptConfirmed=null'
+            }
+        }
+        if ($null -ne $serveJson -and $Spec.Expect.ServeExit -eq 0) {
+            Assert-Condition ($serveJson.sendReceipt -eq $toldToWriteReceipt) ('serve JSON sendReceipt: expected ' + $toldToWriteReceipt + ' but was ' + $serveJson.sendReceipt)
+            $actual.receiptWritten = $serveJson.receiptWritten
+            if ($toldToWriteReceipt) {
+                Assert-Condition ($serveJson.receiptWritten -eq $true) 'a serve told to write a receipt and that decoded the envelope must report receiptWritten=true'
+            } else {
+                Assert-Condition ($null -eq $serveJson.receiptWritten) 'a serve that was not told to write a receipt must report receiptWritten=null'
+            }
+        }
+
         $detail = 'send=' + $sendExit + ' serve=' + $serveExit + ' frames=' + $actual.frames + ' records=' + $recordCount + ' envelopes=' + $envelopeCount + ' codes=[' + $sendCode + '/' + $serveCode + '] ' + $actual.durationMs + ' ms'
         return [ordered]@{ Name = $name; Title = $Spec.Title; Expected = $Spec.Expect.Table; Actual = $actual; Detail = $detail; Passed = $true }
     } catch {
@@ -516,6 +548,119 @@ function Invoke-SilentPeerCase {
             Assert-Condition ($message.Contains('did not close the connection within 2000 ms')) ('the failure must name the budget; message was: ' + $message)
             Assert-Condition ($actual.durationMs -ge 1900) ('the confirmation budget must really be waited out; the send took ' + $actual.durationMs + ' ms')
             Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $rootDir 'receiver'))) 'nothing may be written for a peer that never closed'
+            $detail = 'send=' + $sendExit + ' code=' + $sendCode + ' no receipt in ' + $actual.durationMs + ' ms'
+            return [ordered]@{ Name = $name; Title = $title; Expected = $expected; Actual = $actual; Detail = $detail; Passed = $true }
+        } catch {
+            $actual.sendStderr = $sendStderr
+            return [ordered]@{ Name = $name; Title = $title; Expected = $expected; Actual = $actual; Detail = $_.Exception.Message; Passed = $false }
+        }
+    } finally {
+        if ($null -ne $send -and -not $send.HasExited) { try { $send.Kill() } catch { } }
+        if ($null -ne $peer) {
+            try { Stop-Job -Job $peer -ErrorAction SilentlyContinue } catch { }
+            try { Remove-Job -Job $peer -Force -ErrorAction SilentlyContinue } catch { }
+        }
+        if (-not $KeepArtifacts) { try { Remove-Item -LiteralPath $rootDir -Recurse -Force -ErrorAction SilentlyContinue } catch { } }
+    }
+}
+
+function Invoke-ReceiptTimeoutCase {
+    # W6-37: a peer that takes every byte, never writes the 0x04 receipt byte and never closes. The
+    # listener CLI always closes, so the only way to observe the receipt budget running out is a peer
+    # of our own - it is also the shape that tells "no receipt yet" from "no receipt ever".
+    $name = 'L-receipt-timeout'
+    $title = 'L --await-receipt against a peer that never sends a receipt'
+    $expected = 'send 2 receipt-timeout / no write'
+    $caseDir = Join-Path $script:outDir $name
+    $rootDir = Join-Path $script:rootsDir $name
+    New-Item -ItemType Directory -Path $caseDir, $rootDir -Force | Out-Null
+    $senderRoot = Join-Path $rootDir 'sender'
+    New-SenderStore -Directory $senderRoot
+    $sendOut = Join-Path $caseDir 'send.stdout.txt'
+    $sendErr = Join-Path $caseDir 'send.stderr.txt'
+
+    $peer = $null
+    $send = $null
+    try {
+        $peer = Start-Job -ScriptBlock {
+            $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+            $listener.Start()
+            $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+            Write-Output ('PORT ' + $port)
+            $client = $listener.AcceptTcpClient()
+            $stream = $client.GetStream()
+            $stream.ReadTimeout = 500
+            $buffer = New-Object 'System.Byte[]' 8192
+            $total = 0
+            while ($true) {
+                try {
+                    $read = $stream.Read($buffer, 0, $buffer.Length)
+                    if ($read -le 0) { break }
+                    $total += $read
+                } catch {
+                    break
+                }
+            }
+            Write-Output ('BYTES ' + $total)
+            # W6-37: read everything, then hold the connection open and stay silent. No 0x04, no close.
+            Start-Sleep -Seconds 30
+            $client.Dispose()
+            $listener.Stop()
+        }
+
+        $port = 0
+        $peerBytes = -1
+        $deadline = (Get-Date).AddSeconds(25)
+        while ((Get-Date) -lt $deadline) {
+            foreach ($line in @(Receive-Job -Job $peer -Keep)) {
+                $text = [string]$line
+                if ($text -match '^PORT (\d+)$') { $port = [int]$Matches[1] }
+                if ($text -match '^BYTES (\d+)$') { $peerBytes = [int]$Matches[1] }
+            }
+            # Only the port can arrive before the sender connects: the peer announces BYTES after it
+            # has drained the envelope, so waiting for that here would wait for the send we have not
+            # started yet (a deadlock the first version of this case really had).
+            if ($port -gt 0) { break }
+            Start-Sleep -Milliseconds 100
+        }
+        if ($port -le 0) { throw 'the silent peer never announced its port' }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $send = Start-CliProcess -Name ($name + '-send') -Arguments @($script:cliDll, 'transfer', 'send', '--to', ('127.0.0.1:' + $port), '--root', $senderRoot, '--device', 'tx-device', '--json', '--await-receipt') -StdoutPath $sendOut -StderrPath $sendErr
+        $exited = Wait-ForExitOrKill -Process $send -TimeoutMs $script:exitWaitMs -Label 'send'
+        $stopwatch.Stop()
+
+        $sendStdout = Read-Shared -Path $sendOut
+        $sendStderr = Read-Shared -Path $sendErr
+        $sendJson = Get-JsonDocument -Text $sendStdout
+        $sendCode = Get-ErrorCode -Stdout $sendStdout -Stderr $sendStderr -Document $sendJson
+        $sendExit = -1
+        if ($exited) { $sendExit = $send.ExitCode }
+        $message = ''
+        if ($null -ne $sendJson -and $null -ne $sendJson.error) { $message = [string]$sendJson.error.message }
+        foreach ($line in @(Receive-Job -Job $peer -Keep)) {
+            $text = [string]$line
+            if ($text -match '^BYTES (\d+)$') { $peerBytes = [int]$Matches[1] }
+        }
+
+        $actual = [ordered]@{
+            sendExit = $sendExit; serveExit = -1; sendCode = $sendCode; serveCode = ''
+            frames = -1; receiverRecords = 0; envelopeCount = 0
+            receiverStoreExists = $false; receiverBaseline = $false; receiverDisplayNames = ''
+            port = $port; fingerprint = ''; receiptConfirmed = $null; receiptWritten = $null
+            peerBytes = $peerBytes
+            durationMs = [int]$stopwatch.ElapsedMilliseconds
+        }
+
+        try {
+            Assert-Condition ($exited) 'the send had to be killed (it never exited)'
+            Assert-Condition ($sendExit -eq 2) ('send exit code: expected 2 but was ' + $sendExit)
+            Assert-Condition ($sendCode -eq 'receipt-timeout') ('send stable code: expected [receipt-timeout] but was [' + $sendCode + ']')
+            Assert-Condition ($sendStderr.Contains('error receipt-timeout:')) 'send stderr must carry "error receipt-timeout:"'
+            Assert-Condition ($message.Contains('kept the connection open for 2000 ms')) ('the failure must name the receipt budget; message was: ' + $message)
+            Assert-Condition ($actual.durationMs -ge 1900) ('the receipt budget must really be waited out; the send took ' + $actual.durationMs + ' ms')
+            Assert-Condition ($peerBytes -gt 0) ('the peer must have accepted the envelope bytes before going silent; it read ' + $peerBytes)
+            Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $rootDir 'receiver'))) 'nothing may be written for a peer that never acknowledged'
             $detail = 'send=' + $sendExit + ' code=' + $sendCode + ' no receipt in ' + $actual.durationMs + ' ms'
             return [ordered]@{ Name = $name; Title = $title; Expected = $expected; Actual = $actual; Detail = $detail; Passed = $true }
         } catch {
@@ -701,6 +846,31 @@ $specs = @(
         # new frame type and an Android change, which W6-30 deliberately does not do.
         Expect = [ordered]@{ SendExit = 0; ServeExit = 2; SendCode = ''; ServeCode = 'tls-handshake-failed'; Records = 0; Frames = 1
             Table = 'send 0 deliveryConfirmed (blind spot) / serve 2 / 0 writes' }
+    },
+    [ordered]@{
+        Name = 'J-receipt-written'; Title = 'J --await-receipt against a listener that writes the receipt'
+        TlsListener = $false; ClientTls = $false; PinOverride = ''; ConfirmDelivery = $false
+        SendReceipt = $true; AwaitReceipt = $true
+        ServeExtra = @('--send-receipt'); SendExtra = @('--await-receipt')
+        ServeSecretEnv = ''; SendSecretEnv = ''; ServeSecret = ''; SendSecret = ''
+        ServeDevice = 'rx-device'; SendDevice = 'tx-device'
+        # W6-37: the receipt is the first evidence a one-way sender can get that the receiver
+        # DECODED the envelope. The byte travels back on the same connection, so the sender's own
+        # output is still the W6-16 stream (1 frame here).
+        Expect = [ordered]@{ SendExit = 0; ServeExit = 0; SendCode = ''; ServeCode = ''; Records = 2; Frames = 1
+            Table = 'send 0 receipt confirmed / serve receiptWritten / 1 envelope' }
+    },
+    [ordered]@{
+        Name = 'K-receipt-missing'; Title = 'K --await-receipt against a listener that never writes one'
+        TlsListener = $false; ClientTls = $false; PinOverride = ''; ConfirmDelivery = $false
+        SendReceipt = $false; AwaitReceipt = $true
+        ServeExtra = @(); SendExtra = @('--await-receipt')
+        ServeSecretEnv = ''; SendSecretEnv = ''; ServeSecret = ''; SendSecret = ''
+        ServeDevice = 'rx-device'; SendDevice = 'tx-device'
+        # The listener accepted and applied (serve 0, two records) but closed without a 0x04, so the
+        # sender finally distinguishes "understood" from "merely closed": send 2 receipt-missing.
+        Expect = [ordered]@{ SendExit = 2; ServeExit = 0; SendCode = 'receipt-missing'; ServeCode = ''; Records = 2; Frames = -1
+            Table = 'send 2 receipt-missing / serve 0 / 2 records' }
     }
 )
 
@@ -723,6 +893,16 @@ try {
 }
 
 Write-CaseResult -Result $silentResult
+
+Write-Host ('-- ' + 'L --await-receipt against a peer that never sends a receipt')
+$receiptTimeoutResult = $null
+try {
+    $receiptTimeoutResult = Invoke-ReceiptTimeoutCase
+} catch {
+    $receiptTimeoutResult = New-FailedCase -Name 'L-receipt-timeout' -Title 'L --await-receipt against a peer that never sends a receipt' -Expected 'send 2 receipt-timeout / no write' -Detail ('the case aborted: ' + $_.Exception.Message)
+}
+
+Write-CaseResult -Result $receiptTimeoutResult
 
 # ---------------------------------------------------------------------------------------------
 # Lingering process check: by name+command line, and by the pids this script started.
@@ -788,6 +968,8 @@ $summary = [ordered]@{
             frames = $_.Actual.frames
             receiverRecords = $_.Actual.receiverRecords
             envelopeCount = $_.Actual.envelopeCount
+            receiptConfirmed = $_.Actual.receiptConfirmed
+            receiptWritten = $_.Actual.receiptWritten
             receiverStoreExists = $_.Actual.receiverStoreExists
             receiverBaseline = $_.Actual.receiverBaseline
             receiverDisplayNames = $_.Actual.receiverDisplayNames

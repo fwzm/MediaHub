@@ -110,13 +110,16 @@ public sealed class SourceSyncInbox
     /// <param name="allowedIds">Restricts which sources may be written, or null for the gate's own decision.</param>
     /// <param name="cancellationToken">Cancels between frames.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
+    /// <param name="receipt">The optional receipt write (W6-37). Null or off writes no extra byte. When on, one 0x04 byte
+    /// goes out after the import finished, which by construction means the payload decoded.</param>
     public async Task<SourceSyncInboxResult> ReceiveAsync(
         Stream stream,
         string? expectedChallenge,
         SourceSyncRecordWriter writer,
         IReadOnlyList<string>? allowedIds = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncReceiptOptions? receipt = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(writer);
@@ -130,6 +133,13 @@ public sealed class SourceSyncInbox
 
         SourceSyncInboxResult imported = await ImportAsync(transfer.Envelope, writer, allowedIds, cancellationToken)
             .ConfigureAwait(false);
+        if (imported.Succeeded && receipt is { Enabled: true })
+        {
+            // W6-37: written only after the decode succeeded. Acknowledging a payload this build cannot read would tell
+            // the sender exactly the wrong thing, which is the defect the receipt exists to close.
+            await SourceSyncReceipt.WriteAsync(stream, cancellationToken).ConfigureAwait(false);
+        }
+
         return imported with { FrameCount = transfer.FrameCount, Bytes = transfer.Bytes };
     }
 
@@ -245,6 +255,7 @@ public static class SourceSyncInboxExtensions
     /// <param name="timeout">How long the peer gets.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
     /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
+    /// <param name="receipt">The optional receipt write (W6-37); null or off adds no byte to the receiver's output.</param>
     public static async Task<SourceSyncInboxResult> ReceiveAndImportAsync(
         this SourceSyncTransferListener listener,
         SourceSyncInbox inbox,
@@ -253,14 +264,18 @@ public static class SourceSyncInboxExtensions
         IReadOnlyList<string>? allowedIds = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
-        SourceSyncTransferOptions? options = null)
+        SourceSyncTransferOptions? options = null,
+        SourceSyncReceiptOptions? receipt = null)
     {
         ArgumentNullException.ThrowIfNull(listener);
         ArgumentNullException.ThrowIfNull(inbox);
         ArgumentNullException.ThrowIfNull(writer);
 
-        SourceSyncTransferResult transfer =
-            await listener.ReceiveOnceAsync(expectedChallenge, timeout, cancellationToken, options).ConfigureAwait(false);
+        // The listener owns the connection, the inbox owns the decode. The receipt therefore leaves from the listener,
+        // gated on the inbox's own decode check, so "receipt" can never mean "bytes arrived but nothing understood them".
+        SourceSyncTransferResult transfer = await listener
+            .ReceiveOnceAsync(expectedChallenge, timeout, cancellationToken, options, receipt, Decodes)
+            .ConfigureAwait(false);
         if (!transfer.Succeeded)
         {
             return SourceSyncInboxResult.Failed(transfer.Reason ?? SourceSyncTransferReasons.FrameInvalid, transfer.Detail);
@@ -272,4 +287,7 @@ public static class SourceSyncInboxExtensions
 
         return imported with { FrameCount = transfer.FrameCount, Bytes = transfer.Bytes };
     }
+
+    /// <summary>The decode check the receipt is gated on: a payload that does not decode gets no acknowledgement.</summary>
+    private static bool Decodes(byte[] payload) => SourceSyncInbox.TryDecode(payload, out _, out _);
 }
