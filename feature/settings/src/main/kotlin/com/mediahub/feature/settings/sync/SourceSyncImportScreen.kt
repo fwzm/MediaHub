@@ -160,6 +160,9 @@ object SourceSyncImportTags {
 
     const val SEND_ACTION = "sync.send.action"
 
+    /** W6-49：取消按钮（只在发送中可点；取消回 Idle，不产生失败码）。 */
+    const val SEND_CANCEL = "sync.send.cancel"
+
     /** 发送结果行（已发送 / 发送中 / 发送失败：码）。 */
     const val SEND_STATE = "sync.send.state"
 }
@@ -204,6 +207,7 @@ fun SourceSyncImportRoute(
         onListenReceive = viewModel::awaitListenOnce,
         sendState = sendState,
         onSend = viewModel::send,
+        onSendCancel = viewModel::cancelSend,
     )
 }
 
@@ -242,6 +246,8 @@ fun SourceSyncImportScreen(
     /** W6-42：发送（Android → Windows）区块的状态；默认 Idle（既有调用点与 UI 测试无需改动）。 */
     sendState: SourceSyncSendState = SourceSyncSendState.Idle,
     onSend: (SourceSyncSendForm) -> Unit = {},
+    /** W6-49：取消正在飞的那一次发送；默认空实现（既有调用点与 UI 测试无需改动）。 */
+    onSendCancel: () -> Unit = {},
 ) {
     Scaffold(
         modifier = Modifier.testTag(SourceSyncImportTags.SCREEN),
@@ -435,7 +441,7 @@ fun SourceSyncImportScreen(
                 onReceive = onListenReceive,
             )
             // W6-42：发送区块同样放页尾，理由与上面两块一致（首屏不动）。
-            SendSection(state = sendState, onSend = onSend)
+            SendSection(state = sendState, onSend = onSend, onCancel = onSendCancel)
         }
     }
 }
@@ -894,6 +900,7 @@ private fun ListenSection(
 private fun SendSection(
     state: SourceSyncSendState,
     onSend: (SourceSyncSendForm) -> Unit,
+    onCancel: () -> Unit,
 ) {
     var form by remember { mutableStateOf(SourceSyncSendForm()) }
     val sending = state == SourceSyncSendState.Sending
@@ -1042,6 +1049,17 @@ private fun SendSection(
                     .testTag(SourceSyncImportTags.SEND_ACTION),
             ) {
                 Text(SourceSyncSendCopy.ACTION)
+            }
+            // W6-49：取消只在发送中可点。这里沿用本区块的「禁用而不是隐藏」纪律
+            // （tag 与布局稳定，UI 测试不必为状态切换去分支查找）；取消回 Idle，不显示失败码。
+            OutlinedButton(
+                onClick = onCancel,
+                enabled = sending,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.SEND_CANCEL),
+            ) {
+                Text(SourceSyncSendCopy.CANCEL)
             }
             if (sending) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

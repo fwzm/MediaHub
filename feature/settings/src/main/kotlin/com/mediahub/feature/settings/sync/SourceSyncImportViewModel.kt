@@ -118,6 +118,16 @@ class SourceSyncImportViewModel @Inject constructor(
     /** 发送区块的状态（Idle / Sending / Sent / Failed）。 */
     val sendState: StateFlow<SourceSyncSendState> = sendController.state
 
+    /**
+     * W6-49：把「一次发送 = 一个可取消的 Job」这层记账单独拿出来（见 [SourceSyncSendLauncher]）。
+     *
+     * 用 viewModelScope 起的 Job 会随页面销毁自动取消；用户点「取消发送」时调 [cancelSend]，
+     * 取消语义全在控制器里：状态回 Idle、不产生任何稳定码、inFlight 立刻释放所以能马上重发。
+     */
+    private val sendLauncher = SourceSyncSendLauncher(viewModelScope) { form ->
+        sendController.send(form)
+    }
+
     private val _verification = MutableStateFlow(SourceVerificationViewState())
 
     /** 结果页的逐源验证状态（三态 + 对话框 + 忙碌标记）。 */
@@ -195,7 +205,17 @@ class SourceSyncImportViewModel @Inject constructor(
      * **不导出、不拨号、不改任何本地数据**。已有一条在飞时同样只发一次（单飞由控制器保证）。
      */
     fun send(form: SourceSyncSendForm) {
-        viewModelScope.launch { sendController.send(form) }
+        sendLauncher.launch(form)
+    }
+
+    /**
+     * W6-49：取消正在飞的那一次发送。
+     *
+     * 没在发时是 no-op（不伪造 Failed、不改状态）；正在发时取消后控制器把状态写回 Idle，
+     * 界面回到「能再发一次」的样子——**取消是用户操作，不是失败，所以没有任何稳定码**。
+     */
+    fun cancelSend() {
+        sendLauncher.cancel()
     }
 
     /** 清掉上一次的发送结论（换页或换表单时用），不影响正在飞的那一次。 */
@@ -207,6 +227,7 @@ class SourceSyncImportViewModel @Inject constructor(
         session.reset()
         receiveController.clear()
         listenerController.clearResult()
+        sendLauncher.clear()
         sendController.clearResult()
         _verification.value = SourceVerificationViewState()
     }
@@ -218,6 +239,8 @@ class SourceSyncImportViewModel @Inject constructor(
      */
     override fun onCleared() {
         listenerController.stop()
+        // viewModelScope 取消时那条 Job 自己会收尾（控制器把状态写回 Idle），这里只丢引用。
+        sendLauncher.clear()
         sendController.clearResult()
         super.onCleared()
     }
