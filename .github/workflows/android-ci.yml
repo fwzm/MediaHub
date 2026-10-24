@@ -137,6 +137,8 @@ jobs:
           #     口令、W6-54 等待预算三段都在这里，界面本地码 listen-secret-missing / listen-budget-invalid 各有用例）
           #   sync.SourceSyncTransferClientHostTest —— 拨号侧地址判定（W6-52b：sendTo / receiveFrom 的 allowExplicitHost
           #     与 verb 参数，开关关着时拒绝句与 W6-23 逐字相同；通配/广播/组播/主机名在拨号之前就拒，本机不真拨非回环）
+          #   sync.SourceSyncTransferMatrixTest —— 真实回环 socket 上的四维组合矩阵（W6-57：TLS × 认证 × 回执 × 投递
+          #     20 格逐格钉住外部可观察结果与稳定码；认证格同时宣布挑战，回执压掉投递，只碰 127.0.0.1）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -175,6 +177,7 @@ jobs:
             --required-suite com.mediahub.core.common.sync.SourceSyncHostAddressTest \
             --required-suite com.mediahub.feature.settings.sync.SourceSyncListenerControllerTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferClientHostTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferMatrixTest \
             --require-complete-suites
 
       - name: Lint
