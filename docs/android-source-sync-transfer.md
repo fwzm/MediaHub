@@ -1352,3 +1352,57 @@ JUnit XML 亲数（逐文件累加 `<testsuite>` 属性）：
 7. 跨端联调不在本轮：本节的 TLS 对端是**测试里的** `SSLServerSocket`，不是真 Windows `transfer serve`；真 CLI 的跨端证据仍只有 §18（Android 发）/ §21（Windows 发）。
 8. 本套件**不入** `.github/workflows/android-ci.yml` 的 required-suite（仍 31 条，按任务书不碰 CI 名单）；它是纯 JVM 单测，CI 会随 `:feature:settings:testDebugUnitTest` 跑到，但没有单独的必跑条目。
 
+## 24. 三张卡（接收 / 监听 / 发送）的界面证据（W6-44）
+
+### 24.1 为什么补这一节
+
+W6-27 / W6-36 / W6-42 把三张卡加到了同步页页尾，但三张卡的行为（端口闸门、TLS 指纹闸门、口令闸门、失败码与结果行）此前只有 JVM 单测与纯 Kotlin 控制器测试钉住；`feature/settings` 的 androidTest 只有导入主流程的 6 例（`SourceSyncImportScreenTest.kt`，324 行），三张卡没有任何 instrumentation 证据。
+
+新增 `feature/settings/src/androidTest/kotlin/com/mediahub/feature/settings/sync/SourceSyncSectionsScreenTest.kt`（396 行，19 例）。**没有改动任何生产代码**，也没有改既有导入页那 6 例的任何断言（它们在同一个 androidTest 编译单元里，照样编译通过）。
+
+### 24.2 用例表（19 例）
+
+| 组 | 用例（行号在 `SourceSyncSectionsScreenTest.kt`） | 钉住什么 |
+| --- | --- | --- |
+| 接收 | `receiveSectionStartsOnTheLoopbackHostAndWaitsForAPort`（:55）、`receivePortGateAcceptsOnlyRealPorts`（:67） | host 默认 `127.0.0.1`；端口没填时 `接收` 禁用且显示 `PORT_REQUIRED`；`0` / `70000` 仍禁用、`8999` 才启用 |
+| 接收 | `nonLoopbackReceiveHostIsForwardedAsTyped`（:82）、`aNotLoopbackFailureIsShownWithItsStableCode`（:102） | 非回环地址**原样转交**（表单层不拦，见 `SourceSyncReceiveController.kt:88-90`）；`Failed("not-loopback")` 渲染成 `接收失败：not-loopback` |
+| 监听 | `listenStartsWithASystemAssignedPortAndStopsDisabled`（:112）、`anIllegalListenPortBlocksStarting`（:134） | 端口留空 = 系统分配 ⇒ `开始监听` 可用；`0` 禁用、`45555` 启用；空转态没有端口行、`停止` / `等一次发送` 禁用 |
+| 监听 | `listenTlsIsDisabledAndTheReasonIsShown`（:124） | 本机无 KeyStore 身份时 TLS 开关禁用，且 `TLS_UNAVAILABLE` 原文显示在 `LISTEN_INFO` 上（不给假开关） |
+| 监听 | `listeningShowsThePortLineAndEnablesStopAndReceive`（:146） | `Listening(45678)` 时端口行含 `45678`，`停止` / `等一次发送` 启用，端口框与 `开始监听` 锁住 |
+| 发送 | `sendSectionNeedsAPortAndKeepsPinAndSecretDisabled`（:161）、`sendPortGateAcceptsOnlyRealPorts`（:174） | 默认 `发送` 禁用 + `PORT_REQUIRED`；TLS/认证都没开时指纹框与口令框不可编辑；`0` / `70000` 禁用、`8942` 启用 |
+| 发送 | `aValidPortHandsTheSendFormOverExactly`（:189） | 点下去交出的表单就是所填：`portNumber=8942`、`hostOrLoopback=127.0.0.1`、TLS/认证/回执三个开关全关 |
+| 发送 | `tlsOnWithoutAUsablePinBlocksSending`（:208）、`aPinnedFingerprintLetsTheFormSubmit`（:224） | 开 TLS 后指纹框才可编辑；指纹 `abc` 仍禁用并显示 `PIN_REQUIRED`；64 位 hex（`"a0" * 32`）才启用且 `fingerprintOrNull` 可解析 |
+| 发送 | `authOnWithoutASecretBlocksSending`（:246）、`theSecretFieldIsMaskedAndItsValueIsForwarded`（:260） | 开认证后口令框才可编辑；空口令禁用并显示 `SECRET_REQUIRED`；口令框带 `SemanticsProperties.Password`（真打码）、值原样交给表单、表单 `toString` 里是 `secret=<redacted>` |
+| 发送 | `aSendFailureShowsItsOwnCode`（:285）、`aSendSuccessSaysWhetherTheReceiptWasAwaited`（:293） | 失败行 = `发送失败：peer-timeout`；关着等回执时成功行必须写「没有等回执」（不能让人以为对端收下了，同 §22/§23 的说法） |
+| 首屏不变式 | `theThreeSectionCardsNeverPushTheMainFlowOffTheFirstScreen`（:313）、`theMainFlowStaysOnTheFirstScreenEvenWithAPreviewBelow`（:326） | **不滚动**就断言 `选择文件` / `预览` 仍在首屏；三张卡要滚动才可见；预览展开后主流程仍在首屏（W6-41 的回归闸门） |
+
+### 24.3 滚动纪律
+
+- 页面根节点是 `verticalScroll` 的 `Column`（`SourceSyncImportScreen.kt:253`），三张卡刻意放在页尾（`:419-422` 的注释），真机视口里它们在首屏之外——**凡是要断言「看得见」或要点击的节点，一律先 `performScrollTo()`**（§24.2 里除首屏不变式两组外全部如此）。
+- 首屏不变式两组**故意不滚动**：它们要证明的就是「主流程没被顶下去」。这条纪律来自 API 32 上 4 个用例假红（2026-10-24，run 40028318723）与 W6-41 的修复（那两个接收区块移到页尾）。
+- 断言只依赖 `SourceSyncImportTags` 的稳定标签与 `SourceSyncReceiveCopy` / `SourceSyncListenCopy` / `SourceSyncSendCopy` 的常量文案，不依赖布局顺序、不依赖像素。
+
+### 24.4 编译证据（本机；DEVICE_UNVERIFIED）
+
+本机 `adb devices` 输出只有表头（无设备、无模拟器），按纪律**不起模拟器**，因此 `connectedDebugAndroidTest` 未运行——本节的设备证据状态是 **DEVICE_UNVERIFIED**，执行证据由 CI 的 visual-instrumentation job（API 32 / API 36）提供。
+
+```powershell
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+$env:ANDROID_HOME="$env:LOCALAPPDATA\Android\Sdk"
+cmd /c "gradlew.bat :feature:settings:assembleDebugAndroidTest --console=plain --no-daemon -Pkotlin.compiler.execution.strategy=in-process > %TEMP%\w644.log 2>&1"
+```
+
+原始尾行：`BUILD SUCCESSFUL in 43s` / `155 actionable tasks: 6 executed, 149 up-to-date` / `EXIT=0`（`packageDebugAndroidTest` 与 `assembleDebugAndroidTest` 均在输出末尾）。
+
+**编译修红记录（如实写）**：首跑 `:feature:settings:compileDebugAndroidTestKotlin FAILED`，唯一错误 `SourceSyncSectionsScreenTest.kt:7:33 Unresolved reference 'assertDoesNotExist'`——`assertDoesNotExist()` 是 `SemanticsNodeInteraction` 的成员函数，不是扩展函数，**不能 import**；删掉那行 import 后第二次编译即绿（`BUILD SUCCESSFUL in 43s`）。除此之外没有改过任何断言。
+
+### 24.5 未覆盖
+
+1. **未在设备上执行**：本机无 adb 设备，19 例只到「编译通过 + 打包出 androidTest APK」，实际执行结果要等 CI（DEVICE_UNVERIFIED）。
+2. **未覆盖三张卡的端到端路径**：本节全是纯界面证据（回调参数 + 状态渲染），真 socket / 真 TLS / 真回执由 §18（Android 发）、§21（Windows 发）、§23（发送控制器 JVM 单测）覆盖，本节不重复。
+3. **未覆盖 `Sending` 与 `Receiving` 忙碌态**：只断言了 Idle / Sent / Failed / Listening 四个状态的渲染，忙碌态的进度行与控件禁用没有专门用例。
+4. **未覆盖超长文案与窄屏换行**：19 例都不改字体缩放、不模拟窄屏，中文长句换行后的布局没有断言（那是渲染层截图对比的活，不在本仓 Compose 测试范围内）。
+5. **未覆盖 Hilt 注入路径**：测试直接调 `SourceSyncImportScreen(...)` 组合函数并手传状态，`SourceSyncImportRoute` / `SourceSyncImportViewModel` 的注入与状态收集（`collectAsStateWithLifecycle`）没有 instrumentation 证据。
+6. 本套件同样**不入** `.github/workflows/android-ci.yml` 的 required-suite（仍 31 条）；它是 androidTest，CI 会随 visual-instrumentation 的 `connectedDebugAndroidTest` 跑到。
+
+
