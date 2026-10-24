@@ -4,12 +4,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -108,8 +110,10 @@ class SourceSyncSectionsScreenTest {
             .assertIsDisplayed()
             .assertIsEnabled()
         // 说明必须写清「只收单播字面量、码仍是 not-loopback」，否则用户会以为是域名输入框。
-        composeRule.onNodeWithText(SourceSyncReceiveCopy.ALLOW_HOST_HINT).performScrollTo()
-            .assertIsDisplayed()
+        // 发送卡与接收卡用的是同一句说明（同一件事的两个方向），所以整页语义树里必然命中 2 个节点：
+        // 这里只断言「两处都在」，单节点断言会直接报 Expected exactly '1' node but found '2'
+        // （第一次 CI 实跑就红在这里——本机 JVM 测试看不到两张卡同时在场）。
+        composeRule.onAllNodesWithText(SourceSyncReceiveCopy.ALLOW_HOST_HINT).assertCountEquals(2)
         composeRule.onNodeWithText(SourceSyncReceiveCopy.ALLOW_HOST_LABEL).assertIsDisplayed()
     }
 
@@ -398,8 +402,8 @@ class SourceSyncSectionsScreenTest {
         composeRule.onNodeWithTag(SourceSyncImportTags.SEND_ALLOW_HOST).performScrollTo()
             .assertIsDisplayed()
             .assertIsEnabled()
-        composeRule.onNodeWithText(SourceSyncSendCopy.ALLOW_HOST_HINT).performScrollTo()
-            .assertIsDisplayed()
+        // 同接收卡：这句说明两张卡共用，整页里命中 2 个节点（第一次 CI 实跑红在单节点断言上）。
+        composeRule.onAllNodesWithText(SourceSyncSendCopy.ALLOW_HOST_HINT).assertCountEquals(2)
         composeRule.onNodeWithText(SourceSyncSendCopy.ALLOW_HOST_LABEL).assertIsDisplayed()
     }
 
