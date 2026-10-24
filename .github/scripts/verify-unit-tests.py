@@ -63,7 +63,8 @@ def record(root, sha, run_id, attempt):
     path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
-def verify(root, sha, run_id, attempt, required_suites=(), complete_suites=False):
+def verify(root, sha, run_id, attempt, required_suites=(), complete_suites=False,
+           require_environment_gated=False):
     active, no_source = configure(root)
     problems = gate.verify(root, "unit", sha, run_id, attempt)
     try:
@@ -92,8 +93,12 @@ def verify(root, sha, run_id, attempt, required_suites=(), complete_suites=False
     for classname, name in sorted(skipped):
         if classname not in ENVIRONMENT_GATED_SUITES:
             problems.append(f"{classname}.{name}: mandatory assertion was skipped")
-    for suite in sorted(ENVIRONMENT_GATED_SUITES - suites):
-        problems.append(f"{suite}: environment-gated suite did not execute at all")
+    # An allowlisted suite that vanishes is a real regression (deleted, renamed, or no longer
+    # collected), but only the production run asks for this check: fixtures that exercise the
+    # ordinary rules do not carry the gated suite, and must not be forced to invent it.
+    if require_environment_gated:
+        for suite in sorted(ENVIRONMENT_GATED_SUITES - suites):
+            problems.append(f"{suite}: environment-gated suite did not execute at all")
     if complete_suites:
         # These explicitly required, ordinary Kotlin/JUnit suites are source contracts.
         # Suite presence alone would allow --tests Suite.oneMethod to omit a regression.
@@ -154,7 +159,9 @@ def main():
         gate.clean_checkout(args.root, args.sha)
         record(args.root, args.sha, args.run_id, args.attempt)
         return 0
-    problems, totals, no_source = verify(args.root, args.sha, args.run_id, args.attempt, args.required_suite, args.require_complete_suites)
+    # The real CI run is the one place where the environment-gated allowlist must be verified
+    # end to end: the suite has to appear in the reports, even when every method of it skipped.
+    problems, totals, no_source = verify(args.root, args.sha, args.run_id, args.attempt, args.required_suite, args.require_complete_suites, True)
     print(json.dumps({"uniqueTestsPerModule": totals, "uniqueTests": sum(totals.values()),
                       "noSourceModules": no_source}, indent=2))
     if problems:

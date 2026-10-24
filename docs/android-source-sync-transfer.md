@@ -835,3 +835,165 @@ EXIT=0
 5. Windows 的 `--confirm-delivery` 在 Android 侧仍无对应物（第 18.5 节第 1 条）：`sendTo` 的 `Ok` 只表示帧写进了 socket。
 6. CI 只把 `SourceSyncTransferListenerTest` 钉进 required-suite（31 条）；`SourceSyncListenerImportTest` 在 core:database 里照常执行但不单独钉。
 
+
+## 20. 界面接线：手机当接收端（W6-36）
+
+> 与第 19 节的分工：第 19 节交付的是 `core:common` / `core:database` 里的回环监听端本身（能用、有 30 例回归）；
+> 本节交付的是「用户怎么点得到它」——一个纯 Kotlin 状态机、一段 Compose 区块，以及三条不肯让步的规矩。
+
+### 20.1 入口位置
+
+| 层 | 文件 | 位置 |
+| --- | --- | --- |
+| 状态机 | `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncListenerController.kt` | 类 `:240`；六态 `:28`；文案与三行 `lineOf` / `codeOf` / `portLineOf` `:66` / `:100` / `:112` / `:128`；表单 `:158`；两个接口 `:204` / `:220`；生产实现 `SourceSyncListenerImportFactory` `:440` |
+| ViewModel | `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportViewModel.kt` | 控制器 `:72`、`listenState` `:78`、`listenTls` `:81`、`startListening` `:126`、`stopListening` `:131`、`awaitListenOnce` `:136`、`onCleared` 关监听 `:159` |
+| 界面 | `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportScreen.kt` | 调用点 `:233`、`ListenSection` 定义 `:686`、九枚 testTag `:111`–`:130`、Route 收集 `:142`、新参数带默认值 `:197` |
+
+- 区块在导入页里紧跟在 W6-27 的「从 Windows 接收」之后：**按钮位置一样、方向相反**——拨号接收要填 host/port 主动去连对端；
+  监听接收是自己先占一个端口，让 Windows 用 `transfer send` 拨进来。
+- 九枚 testTag：`sync.listen` / `sync.listen.port` / `sync.listen.tls` / `sync.listen.start` / `sync.listen.stop` / `sync.listen.receive` / `sync.listen.status` / `sync.listen.port-line` / `sync.listen.info`。
+- `SourceSyncImportScreen` 的新参数全部带默认值（`:197`），所以既有 UI 测试的调用点一行都不用改。
+
+### 20.2 状态机（六态）
+
+| 状态 | 字段 | 怎么来的 |
+| --- | --- | --- |
+| `Idle` | — | 初始；`stop()` 之后；`clearResult()` 且没在监听 |
+| `Listening` | `port` / `tls` / `certificateFingerprint` | `start()` 成功，值全部取自实际绑定的会话（端口留空时就是系统分配的那个） |
+| `Receiving` | `port` | `awaitOnce()` 开始等 |
+| `Received` | `port` / `deviceId` / `fileName` | 收到信封并已交给 `loadEnvelope` |
+| `Rejected` | `port` / `reason` / `message` | 帧层成功但载荷不是合法信封，或网关整封拒绝（如信封内重复 `syncSourceId`） |
+| `Failed` | `port?` / `code` / `detail` | 开监听失败时 `port` 为 null；接收中途失败带上当时的端口 |
+
+三条入口的返回值语义：
+
+- `start(form): Boolean` —— 端口留空 = 让系统分配（`0`）；端口非数字或越界 → `Failed(null, port-invalid)`，**工厂一次都不调用**；
+  TLS 但没有可用身份 → `Failed(null, tls-certificate-unavailable)`，**连 socket 都不开**；已经在监听 → 直接 `false` 且状态不变。
+- `awaitOnce(): Boolean` —— 没开监听 → `false`；已有一条在飞 → `false`（`AtomicBoolean` 单飞，连点只发一次）；
+  成功、失败、拒收都返回 `true`（"这次真的等过并拿到了一个结果"）。
+- `stop()` —— 幂等：只 `close()` 一次，第二次什么都不做；`clearResult()` 只清回执，监听开着就回到 `Listening`，不关端口。
+
+超过约 5 秒的等待不是界面自己的超时：accept 与读帧的超时由监听端给（`acceptTimeoutMs` / `readTimeoutMs`，默认各 15 000 ms），
+超时以 `SourceSyncTransferReasons.TRANSFER_TIMEOUT`（`transfer-timeout`）回到状态行，界面只显示码。
+
+### 20.3 零写入保证（三层，缺一层都不算）
+
+1. **网关固定 `acceptOnly`**：`SourceSyncListenerImportFactory` 的默认网关是 `SourceSyncImportGateways.acceptOnly()`（`SourceSyncTransferImportService.kt:126`），
+   它只解码、回显 `deviceId` / `snapshotId` / 内容指纹，**一个字节都不写库**。监听阶段若接 `AndroidSourceSyncService`，等于绕过预览与逐条允许直接写库。
+2. **控制器只在一条路径上回调**：`Imported` 且 `result.rejectedReason` 为空、且 `envelopeJson` 非空，才调用 `onEnvelope`；
+   `TransferFailed` / `EnvelopeRejected` / 整封拒绝 / 缺信封原文 都只改本区块状态，`session` 一个字不动。
+3. **`onEnvelope` 只走 `loadEnvelope`**：等价于用户手选了文件，**不调 `preview()`、不调 `apply()`**；预览与逐条允许仍然要用户自己点。
+
+证据（`SourceSyncListenerControllerTest`，7 例）：失败/拒收路径逐例先种一个「已加载信封 + 已预览 + 已允许一条」的 session，
+再断言 `assertEquals(before, session.state.value)`（整份 data class 相等）、`preview.calls` 仍为 1、`apply.calls` 为 0。
+
+### 20.4 TLS 身份前提（今天的诚实边界）
+
+- Android 不自造临时证书（那要在 App 里带 BouncyCastle），身份只能由调用方以 `KeyStore` 形式注入；
+  今天 App 里**没有证书下发通道**，所以生产实现 `SourceSyncListenerImportFactory()` 用默认的 `SourceSyncTlsIdentity.NONE`，
+  `tlsAvailability` 如实返回「不可用」，旁注原文就是 `SourceSyncListenCopy.TLS_UNAVAILABLE`（"这不是设置问题：证书下发还没做，界面不会假装支持。"）。
+- 这种情况下点 TLS：控制器给 `tls-certificate-unavailable`，**socket 都不开**（不是先开再失败），TLS 开关在界面上是 disabled。
+- 有身份时：监听端用 `SourceSyncTlsOptions.pinned(identity.certificateFingerprint)` 自钉扎，端口行追加「证书指纹：<64 hex>」供用户抄给 Windows 的 `--expect-fingerprint`。
+
+### 20.5 与 Windows `transfer send` 的联调口径
+
+```text
+# 1) Android：点「开始监听」（端口留空或填一个），读端口行 → 127.0.0.1:<port>
+# 2) Windows：
+dotnet MediaHub.SyncCli.dll transfer send --to 127.0.0.1:<port> --root <dir> --device win-b --json
+
+# TLS（Android 侧必须真的有身份证书，否则该开关点不动）
+dotnet MediaHub.SyncCli.dll transfer send --to 127.0.0.1:<port> --root <dir> --device win-b \
+    --tls --expect-fingerprint <Android 端口行上的 64 hex> --json
+
+# 认证（Android 侧的 auth 参数今天固定 null，见 20.6 未覆盖第 2 条）
+```
+
+- 顺序固定：**Android 先绑端口，Windows 后拨**；Windows 的 `transfer send` 每次只发一封，发完即退。
+- Android 侧开着监听可以连续接第二次（`awaitOnce()` 可重复调用），不必重新开端口。
+
+### 20.6 用例表（25 例，全部 JVM 单测）
+
+`feature/settings/src/test/kotlin/com/mediahub/feature/settings/sync/SourceSyncListenerControllerTest.kt`（678 行）。
+
+| 分组 | 用例 | 断言要点 |
+| --- | --- | --- |
+| 默认值与表单（4） | `defaultsAreIdleAndSayNothing` / `blankPortAsksTheOsForOne` / `typedPortIsUsedVerbatim` / `invalidPortsNeverReachTheFactory` | Idle 三行皆空；空端口传 0 给工厂；`8899` 原样传；`0/65536/-1/abc/9000.5/" 0x10"` 一律 `port-invalid` 且工厂 0 次 |
+| 监听状态（3） | `listeningReportsTheBoundPortTlsFlagAndFingerprint` / `plaintextPortLineSaysPlaintext` / `stopIsIdempotentAndClosesOnce` | 端口/TLS/指纹取自会话；明文端口行是「（明文）」；`stop()` 两次只 `close` 一次 |
+| 收一封进预览（3） | `receivingOnceDeliversTheEnvelopeIntoTheSession` / `importedEnvelopeCarriesTheListenFileName` / `twoReceivesInARowBothReachThePreviewPath` | 真 `SourceSyncImportSession`：`READY_TO_PREVIEW`、信封原样、`preview`/`applied` 为 null、`preview.calls` 0、`apply.calls` 0；文件名 `windows-listener.envelope.json`；连续两次都能换掉信封 |
+| 失败零写入（4） | `transferFailureKeepsTheSessionUntouched` / `rejectedEnvelopeKeepsTheSessionUntouched` / `rejectedImportResultWritesNothing` / `importedWithoutEnvelopeJsonIsALocalFailure` | 每例先种 session，再断言整份 state 相等 + `preview.calls` 1 + `apply.calls` 0；`Rejected` 码原样（`duplicate-sync-source-id`）；缺信封原文 → `Failed(receive-failed, missing-envelope)` 且不回调 |
+| TLS 前提（3） | `tlsWithoutAnIdentityIsRefusedBeforeOpening` / `tlsWithAnAvailableIdentityOpensAPinnedListener` / `listenerOpenFailureIsReportedAsItsCode` | 无证书：工厂 0 次 + 码 `tls-certificate-unavailable`；有证书：`lastTls=true`、指纹进状态；开失败：`listener-failed` + 端口进状态行 |
+| 并发与重入（4） | `duplicateReceiveIsRejectedWhileOneIsInFlight` / `startWhileListeningIsRejected` / `awaitOnceWithoutListeningDoesNothing` / `cancelledReceiveGoesBackToListening` | 同刻第二次接收返回 false 且 `receiveCalls` 仍 1；已监听再开返回 false 且工厂 1 次；未监听 `awaitOnce` false；取消后回到 `Listening` 而不是留在 `Receiving` |
+| 结果行与清空（4） | `acceptTimeoutIsReportedAsATimeoutCode` / `successAfterFailureCarriesNoStaleCode` / `clearResultDropsTheReceiptButKeepsListening` / `resultLineShowsTheCodeAndTheDiagnosticVerbatim` | 超时码 `transfer-timeout`；失败→成功后不留旧码；`clearResult()` 回 `Listening` 且端口还在；状态行逐字（`失败：码（detail）` / `信封被拒：码（msg）` / 含 `RECEIVED_HINT`） |
+
+> 为什么这里不写 Compose UI 测试：区块里的逻辑全在状态机里（可 JVM 直接断言），真 socket 路径由 `core:common` 的
+> `SourceSyncTransferListenerTest`（22 例）与 `core:database` 的 `SourceSyncListenerImportTest`（8 例）钉住；
+> 在 UI 测试里再造一遍 fake 只会重复。
+
+### 20.7 实测
+
+本轮实跑（三模块全量重跑，非增量）：
+
+```
+pwsh> $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
+pwsh> $env:ANDROID_HOME="$env:LOCALAPPDATA\Android\Sdk"
+pwsh> cmd /c "cd /d D:\deepseek_test\MediaHub_Win && gradlew.bat 
+        :feature:settings:testDebugUnitTest :core:common:testDebugUnitTest 
+        :core:database:testDebugUnitTest --console=plain --rerun-tasks 
+        --no-daemon -Pkotlin.compiler.execution.strategy=in-process 
+        > D:\mh-verify\w6-36-listen.log 2>&1"
+EXIT=0
+```
+
+原始输出末尾两行：
+
+```
+BUILD SUCCESSFUL in 3m 35s
+167 actionable tasks: 167 executed
+```
+
+JUnit XML 亲数（`build/test-results/testDebugUnitTest/*.xml` 逐文件累加）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 | 与基线对比 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `core:common` | 31 | 418 | 0 | 0 | 10 | 与基线 31 / 418 相同（10 skipped 仍是第 18 节的 `SourceSyncTlsInteropTest`：没有 `MH_W632_SYNC_DLL` 时按设计整类跳过） |
+| `core:database` | 17 | 158 | 0 | 0 | 0 | 与基线 17 / 158 相同 |
+| `feature:settings` | 14 | 214 | 0 | 0 | 0 | 基线 13 / 189 → **+1 套件 / +25 例**；扣掉新增 25 例仍为 189，无回归 |
+
+`feature:settings` 逐套件（本轮新增的加粗）：
+
+| 套件 | 用例 | 耗时(s) |
+| --- | --- | --- |
+| `backup.BackupRepositoryTest` | 20 | 0 |
+| `backup.BackupRestoreSafetyTest` | 19 | 0 |
+| `backup.BackupViewModelTest` | 16 | 0 |
+| `backup.ProductionBackupDataSourceTest` | 10 | 0 |
+| `backup.ProductionBackupFileStoreTest` | 12 | 0 |
+| `backup.ProductionCredentialRemovalTest` | 6 | 0 |
+| `backup.RestoreSnapshotStoreTest` | 10 | 0 |
+| `backup.SharedPrefsRestoreJournalTest` | 19 | 0 |
+| `SettingsViewModelTest` | 3 | 0 |
+| `sync.SourceSyncImportLogicTest` | 16 | 0 |
+| `sync.SourceSyncImportSessionTest` | 11 | 0 |
+| **`sync.SourceSyncListenerControllerTest`** | **25** | 0 |
+| `sync.SourceSyncReceiveControllerTest` | 25 | 0 |
+| `sync.SourceVerificationCoordinatorTest` | 22 | 0 |
+
+> 耗时列全为 0：Gradle 在聚合报告里只给了秒级精度，而本模块最慢的单例也在 1 s 以内（25 例合计 0.0x s）。
+> 这不影响结论——断言数（25）与失败数（0）才是判据。
+
+本轮**首跑即绿**：没有出现编译红，也没有放宽任何断言或改产品语义（对比 §16.7、§19.7 都各自修过红）。
+编译期只有仓库既有告警（`SettingsScreen.kt:92` 的 `Icons.Filled.ArrowBack` deprecated、`BackupRepository.kt:707` 恒真条件等），
+本任务新增/修改的文件没有引入新告警。
+
+> CI 口径：本套件只跑 JVM 单测、不依赖 Windows CLI，故**不入** `.github/workflows/android-ci.yml` 的 required-suite（仍 31 条）。
+
+### 20.8 未覆盖
+
+1. 未跑 instrumentation、未在真机上点过监听区块：本节全部证据是 JVM 单测 + 假工厂/假会话。
+2. **认证开关没进界面**：`receiveAndImport(expectedChallenge, auth)` 的 `auth` 今天由界面固定传 `null`（即"对端宣布什么 nonce 都接受"的旧口径），
+   认证能力本身已在 `core:common` 由 24 例钉住、并在第 18 节与 Windows 联调过，但用户还没有开关。
+3. 证书下发通道不存在：今天只能明文；TLS 分支的端到端只在 `core:common` / `core:database` 单测与第 18 节跨端联调里验证过（Android 作服务端只在该节第 10 例用过）。
+4. 只在本机回环上验证；非回环、跨机、防火墙/NAT、手机与 PC 不同网段都没测（按设计也不允许非回环）。
+5. 没有 Compose UI 测试：九枚 testTag 已就位，只验证到「`SourceSyncImportScreen` 新参数有默认值、既有调用点不改」这一层。
+6. 连续接收只测到两轮，也没有长时间挂监听的资源压测（accept 超时循环、反复开关端口）。
