@@ -2265,7 +2265,7 @@ androidTest APK `feature/settings/build/outputs/apk/androidTest/debug/settings-d
 
 1. **真实两机 NOT_RUN**：本机一次都没有 bind / dial 任何非回环地址——那会让 Windows 弹出防火墙授权框并抢焦点，违反「GUI/自动化不得干扰使用者」的纪律。所以「两个单播地址之间真能传完一封信封」这件事，两端都还没有证据（Windows 侧 E1–E6 也仍是 NOT_RUN，见 `docs/cross-device/W6-51-EXPLICIT-HOST.md` §8）。
 2. **设备执行未做**：本节新增的 4 个 androidTest 只到「编译进 APK」为止，DEVICE_UNVERIFIED；设备结论要等 CI 的 visual-instrumentation 作业。
-3. **门禁未钉**：`SourceSyncSectionsScreenTest` 与 `SourceSyncTransferClientHostTest` 都还没进 `.github/workflows/android-ci.yml` 的 `--required-suite`（W6-55 钉的是另外三个；androidTest 那类本来就不在单元门禁里）。
+3. **单元门禁**：`SourceSyncTransferClientHostTest` 已由 W6-56 钉进 `--required-suite`（36 → 37 个套件，见 §31.10）；`SourceSyncSectionsScreenTest` 属 androidTest，本来就不在单元门禁里（由 visual-instrumentation 作业覆盖，见 §31.7）。
 4. **只有开关，没有发现机制**：不扫网段、不解析 mDNS、不记忆上次地址；地址要靠人抄。
 5. **没有「地址簿」**：抖动或换网后用户要重新填。
 6. **无视觉回归**：复选框位置与说明文字只有断言「存在且可点」，没有截图比对。
