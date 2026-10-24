@@ -850,10 +850,14 @@ public sealed class SyncCliRunner
             ? SourceSyncTransferOptions.Off
             : SourceSyncTransferOptions.WithSecret(secret, deviceId: DeviceIdOf(invocation));
 
+        // W6-51: --bind names the address, and --allow-non-loopback is the caller's consent for it. With
+        // neither option present the two arguments below are the pre-W6-51 constants, so the default
+        // invocation binds, prints and behaves exactly as it did before.
         SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(
-            SourceSyncTransferAddress.DefaultAddress,
+            invocation.BindAddress ?? SourceSyncTransferAddress.DefaultAddress,
             invocation.Port ?? 0,
-            invocation.Tls);
+            invocation.Tls,
+            invocation.AllowExplicitHost);
         SourceSyncTransferListener? bound = start.Listener;
         if (!start.Started || bound is null)
         {
@@ -983,7 +987,7 @@ public sealed class SyncCliRunner
             ? SourceSyncDeliveryOptions.Confirming()
             : SourceSyncDeliveryOptions.Off;
         SourceSyncPeerRoundResult sent = await sender
-            .SendAsync(envelope, host, port, challenge, TransferBudget, CancellationToken.None, options, tls, delivery, receipt)
+            .SendAsync(envelope, host, port, challenge, TransferBudget, CancellationToken.None, options, tls, delivery, receipt, invocation.AllowExplicitHost)
             .ConfigureAwait(false);
         if (!sent.Succeeded)
         {

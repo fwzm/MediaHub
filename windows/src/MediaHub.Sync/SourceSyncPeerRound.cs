@@ -270,7 +270,8 @@ public sealed class SourceSyncPeerRound
     /// forbidden address as <see cref="SourceSyncTransferReasons.NotLoopback"/> before any socket is opened.
     /// </remarks>
     /// <param name="envelope">The envelope to send.</param>
-    /// <param name="address">Loopback address; anything else is refused before a socket exists.</param>
+    /// <param name="address">Loopback address; anything else is refused before a socket exists, unless
+    /// <paramref name="allowExplicitHost"/> names it as the one address the caller accepts (W6-51).</param>
     /// <param name="port">The listener's port.</param>
     /// <param name="challenge">The nonce both sides quote, or null for an unauthenticated transfer.</param>
     /// <param name="timeout">How long the peer gets, defaulting to 15 seconds.</param>
@@ -289,7 +290,8 @@ public sealed class SourceSyncPeerRound
         SourceSyncTransferOptions? options = null,
         SourceSyncTlsOptions? tls = null,
         SourceSyncDeliveryOptions? delivery = null,
-        SourceSyncReceiptOptions? receipt = null)
+        SourceSyncReceiptOptions? receipt = null,
+        bool allowExplicitHost = false)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
@@ -317,7 +319,8 @@ public sealed class SourceSyncPeerRound
                 options,
                 tls,
                 delivery,
-                receipt)
+                receipt,
+                allowExplicitHost)
             .ConfigureAwait(false);
     }
 
@@ -327,7 +330,8 @@ public sealed class SourceSyncPeerRound
     /// case — and still go through the same address gate, framing and receiving path as a real transfer.
     /// </remarks>
     /// <param name="payload">The exact bytes to put on the wire.</param>
-    /// <param name="address">Loopback address; anything else is refused before a socket exists.</param>
+    /// <param name="address">Loopback address; anything else is refused before a socket exists, unless
+    /// <paramref name="allowExplicitHost"/> names it as the one address the caller accepts (W6-51).</param>
     /// <param name="port">The listener's port.</param>
     /// <param name="challenge">The nonce both sides quote, or null for an unauthenticated transfer.</param>
     /// <param name="timeout">How long the peer gets, defaulting to 15 seconds.</param>
@@ -346,10 +350,11 @@ public sealed class SourceSyncPeerRound
         SourceSyncTransferOptions? options = null,
         SourceSyncTlsOptions? tls = null,
         SourceSyncDeliveryOptions? delivery = null,
-        SourceSyncReceiptOptions? receipt = null)
+        SourceSyncReceiptOptions? receipt = null,
+        bool allowExplicitHost = false)
     {
         SourceSyncTransferResult sent = await SourceSyncTransferClient
-            .SendAsync(address, port, payload, challenge, timeout, cancellationToken, options, tls, delivery, receipt)
+            .SendAsync(address, port, payload, challenge, timeout, cancellationToken, options, tls, delivery, receipt, allowExplicitHost)
             .ConfigureAwait(false);
 
         SourceSyncPeerRoundResult result = sent.Succeeded
@@ -363,7 +368,8 @@ public sealed class SourceSyncPeerRound
 
     /// <summary>Binds a loopback listener and imports the one envelope that arrives.</summary>
     /// <param name="writer">How an approved entry becomes a real source on this device.</param>
-    /// <param name="address">Loopback address; anything else is refused before a socket exists.</param>
+    /// <param name="address">Loopback address; anything else is refused before a socket exists, unless
+    /// <paramref name="allowExplicitHost"/> names it as the one address the caller accepts (W6-51).</param>
     /// <param name="port">0 to let the OS pick a free port.</param>
     /// <param name="expectedChallenge">The pairing challenge this transfer must quote, or null to accept any.</param>
     /// <param name="allowedIds">Entries the user explicitly allowed; without this, proposals stay proposals.</param>
@@ -382,11 +388,16 @@ public sealed class SourceSyncPeerRound
         CancellationToken cancellationToken = default,
         SourceSyncTransferOptions? options = null,
         SourceSyncTlsOptions? tls = null,
-        SourceSyncReceiptOptions? receipt = null)
+        SourceSyncReceiptOptions? receipt = null,
+        bool allowExplicitHost = false)
     {
         ArgumentNullException.ThrowIfNull(writer);
 
-        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(address, port, tls is { Enabled: true });
+        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(
+            address,
+            port,
+            tls is { Enabled: true },
+            allowExplicitHost);
         if (!start.Started || start.Listener is null)
         {
             return SourceSyncPeerRoundResult

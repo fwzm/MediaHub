@@ -160,6 +160,21 @@ public sealed record CliInvocation
     /// </summary>
     public int? BudgetMilliseconds { get; init; }
 
+    /// <summary>
+    /// <c>--bind</c> (<c>transfer serve</c> only): the local address the listener binds. Null keeps
+    /// <see cref="MediaHub.Sync.SourceSyncTransferAddress.DefaultAddress"/>, so an invocation that never
+    /// mentions the option is byte-for-byte the pre-W6-51 one (W6-51).
+    /// </summary>
+    public string? BindAddress { get; init; }
+
+    /// <summary>
+    /// <c>--allow-non-loopback</c> (<c>transfer serve</c> and <c>transfer send</c>): the caller explicitly
+    /// accepts one named non-loopback address. Without it the gate stays exactly the pre-W6-51 loopback
+    /// gate, refusal text and code included; with it, wildcard, broadcast, multicast and reserved
+    /// addresses are still refused, now with a sentence that says which of those it is (W6-51).
+    /// </summary>
+    public bool AllowExplicitHost { get; init; }
+
     /// <summary><c>--apply</c>: really write. Without it <c>import</c> is a preview.</summary>
     public bool Apply { get; init; }
 

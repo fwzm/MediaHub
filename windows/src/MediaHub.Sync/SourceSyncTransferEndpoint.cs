@@ -46,6 +46,25 @@ public static class SourceSyncTransferAddress
     /// <param name="endpoint">The endpoint to use, when the address is accepted.</param>
     /// <param name="detail">A human-readable refusal; never <c>null</c> when the address is rejected.</param>
     public static bool TryResolveLoopback(string? address, int port, out IPEndPoint? endpoint, out string? detail)
+        => TryResolve(address, port, allowExplicitHost: false, out endpoint, out detail);
+
+    /// <summary>Resolves an address when the caller has explicitly widened the gate (W6-51).</summary>
+    /// <remarks>
+    /// <para>
+    /// <paramref name="allowExplicitHost"/> is the only difference between this method and
+    /// <see cref="TryResolveLoopback"/>: with it false the two are byte-for-byte the same, refusal sentences
+    /// included, so every pre-W6-51 caller and test keeps the behaviour and the text it already had. With it true a
+    /// single unicast IP literal outside loopback is accepted too — the caller has said on its own command line that
+    /// it wants that interface, which is exactly the consent a firewall prompt would have asked for.
+    /// </para>
+    /// <para>
+    /// Still refused, with <c>not-loopback</c> and a sentence that names the reason: a host name (C3 — no DNS on the
+    /// transfer path), a wildcard address (<c>0.0.0.0</c>, <c>::</c>), a broadcast address, and multicast or
+    /// reserved ranges. None of those names one machine, so accepting them would either open every interface or
+    /// address nobody, which are the two outcomes the gate exists to prevent.
+    /// </para>
+    /// </remarks>
+    public static bool TryResolve(string? address, int port, bool allowExplicitHost, out IPEndPoint? endpoint, out string? detail)
     {
         endpoint = null;
         detail = null;
@@ -73,15 +92,31 @@ public static class SourceSyncTransferAddress
         }
         else if (IPAddress.TryParse(text, out IPAddress? parsed) && parsed is not null)
         {
-            if (!IPAddress.IsLoopback(parsed))
+            if (IPAddress.IsLoopback(parsed))
+            {
+                resolved = parsed;
+            }
+            else if (!allowExplicitHost)
             {
                 detail = "Only 127.0.0.1, ::1 and localhost are accepted, so '" + text
                     + "' was refused before any socket was created: binding or dialling a non-loopback address "
                     + "would make Windows ask the user to open the firewall.";
                 return false;
             }
-
-            resolved = parsed;
+            else if (!IsUnicastLiteral(parsed))
+            {
+                // W6-51: the gate is open only for an address that names one machine. A wildcard would listen on
+                // every interface and a broadcast/multicast address names a group, so both stay refused - and the
+                // sentence says which of the two it was, because that is the only place the diagnosis can live.
+                detail = "'" + text + "' is not one machine's address: a wildcard, broadcast, multicast or "
+                    + "reserved address was refused before any socket was created. Name one unicast address, "
+                    + "for example 192.168.1.20.";
+                return false;
+            }
+            else
+            {
+                resolved = parsed;
+            }
         }
         else
         {
@@ -98,6 +133,35 @@ public static class SourceSyncTransferAddress
 
         endpoint = new IPEndPoint(resolved, port);
         return true;
+    }
+
+    /// <summary>Whether an address literal names one machine (W6-51).</summary>
+    /// <remarks>
+    /// Loopback never reaches this method: it is accepted before the check. What is left is either a unicast
+    /// address, which is a peer, or something that is not one address at all — <c>0.0.0.0</c>/<c>::</c> (every
+    /// interface), <c>255.255.255.255</c> (every host on the local wire), multicast, and the reserved ranges.
+    /// </remarks>
+    private static bool IsUnicastLiteral(IPAddress address)
+    {
+        if (address.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            return !address.Equals(IPAddress.IPv6Any) && !address.IsIPv6Multicast;
+        }
+
+        byte[] bytes = address.GetAddressBytes();
+        if (bytes[0] == 0)
+        {
+            // 0.0.0.0/8 is "this network": 0.0.0.0 itself means every interface.
+            return false;
+        }
+
+        if (address.Equals(IPAddress.Broadcast))
+        {
+            return false;
+        }
+
+        // 224/4 is multicast, 240/4 is reserved; neither is a peer.
+        return bytes[0] < 224;
     }
 }
 
@@ -179,12 +243,15 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
     /// True to wrap every accepted connection in TLS 1.3 with a fresh ephemeral certificate; false keeps the
     /// W6-16 plaintext path byte for byte.
     /// </param>
+    /// <param name="allowExplicitHost">W6-51: true only when the caller asked, on its own command line, for the one
+    /// non-loopback address it also named. False keeps every pre-W6-51 caller byte-for-byte.</param>
     public static SourceSyncTransferStartResult Start(
         string? address = SourceSyncTransferAddress.DefaultAddress,
         int port = 0,
-        bool tls = false)
+        bool tls = false,
+        bool allowExplicitHost = false)
     {
-        if (!SourceSyncTransferAddress.TryResolveLoopback(address, port, out IPEndPoint? endpoint, out string? detail)
+        if (!SourceSyncTransferAddress.TryResolve(address, port, allowExplicitHost, out IPEndPoint? endpoint, out string? detail)
             || endpoint is null)
         {
             return SourceSyncTransferStartResult.Failed(SourceSyncTransferReasons.NotLoopback, detail);
@@ -508,7 +575,8 @@ public static class SourceSyncTransferClient
         SourceSyncTransferOptions? options = null,
         SourceSyncTlsOptions? tls = null,
         SourceSyncDeliveryOptions? delivery = null,
-        SourceSyncReceiptOptions? receipt = null)
+        SourceSyncReceiptOptions? receipt = null,
+        bool allowExplicitHost = false)
     {
         // W6-37: a receipt outranks a close. When both are asked for, the receipt decides the verdict and the close wait
         // is skipped, otherwise a peer that keeps the connection open after acknowledging would be reported as an
@@ -523,7 +591,8 @@ public static class SourceSyncTransferClient
             cancellationToken,
             tls,
             probePlaintext: false,
-            effectiveDelivery).ConfigureAwait(false);
+            delivery: effectiveDelivery,
+            allowExplicitHost: allowExplicitHost).ConfigureAwait(false);
     }
 
     /// <summary>Connects to a loopback listener and reads one envelope.</summary>
@@ -541,7 +610,8 @@ public static class SourceSyncTransferClient
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default,
         SourceSyncTransferOptions? options = null,
-        SourceSyncTlsOptions? tls = null)
+        SourceSyncTlsOptions? tls = null,
+        bool allowExplicitHost = false)
     {
         return await RunAsync(
             address,
@@ -550,7 +620,9 @@ public static class SourceSyncTransferClient
             timeout,
             cancellationToken,
             tls,
-            probePlaintext: true).ConfigureAwait(false);
+            probePlaintext: true,
+            delivery: null,
+            allowExplicitHost: allowExplicitHost).ConfigureAwait(false);
     }
 
     /// <summary>Reads until the peer sends its close_notify, so the close below is graceful.</summary>
@@ -633,9 +705,10 @@ public static class SourceSyncTransferClient
         CancellationToken cancellationToken,
         SourceSyncTlsOptions? tls = null,
         bool probePlaintext = false,
-        SourceSyncDeliveryOptions? delivery = null)
+        SourceSyncDeliveryOptions? delivery = null,
+        bool allowExplicitHost = false)
     {
-        if (!SourceSyncTransferAddress.TryResolveLoopback(address, port, out IPEndPoint? endpoint, out string? detail)
+        if (!SourceSyncTransferAddress.TryResolve(address, port, allowExplicitHost, out IPEndPoint? endpoint, out string? detail)
             || endpoint is null)
         {
             // Same order as the listener: refuse before dialling, so nothing is opened for a forbidden address.

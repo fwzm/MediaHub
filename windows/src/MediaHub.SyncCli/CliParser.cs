@@ -74,6 +74,14 @@ public static class CliParser
         "                     off by default, so a send never waits and never reads back\n" +
         "  --budget-ms N      with 'transfer serve': the whole wait for one peer, in milliseconds\n" +
         "                     (100..600000, default 15000); running out is transfer-timeout (W6-50)\n" +
+        "  --bind ADDR        with 'transfer serve': the local address to bind (default 127.0.0.1);\n" +
+        "                     a non-loopback ADDR still needs --allow-non-loopback (W6-51)\n" +
+        "  --allow-non-loopback\n" +
+        "                     with 'transfer serve' / 'transfer send': accept one explicitly named\n" +
+        "                     non-loopback unicast address - a LAN address literal, never a wildcard,\n" +
+        "                     broadcast, multicast or host name. Without it only 127.0.0.1, ::1 and\n" +
+        "                     localhost are accepted, exactly as before W6-51, so the option is the\n" +
+        "                     consent a firewall prompt would otherwise have to ask for\n" +
         "\n" +
         "Global:\n" +
         "  --json       stdout carries exactly one JSON document; progress goes to stderr\n" +
@@ -92,7 +100,7 @@ public static class CliParser
     private static readonly string[] PairListValueOptions = ["--root"];
     private static readonly string[] PairForgetValueOptions = ["--root", "--device"];
     private static readonly string[] TransferServeValueOptions =
-        ["--root", "--device", "--port", "--budget-ms", "--secret-env", "--expect-fingerprint"];
+        ["--root", "--device", "--port", "--budget-ms", "--bind", "--secret-env", "--expect-fingerprint"];
     private static readonly string[] TransferSendValueOptions =
         ["--to", "--root", "--device", "--secret-env", "--expect-fingerprint"];
     private static readonly string[] TransferRoundtripValueOptions =
@@ -198,6 +206,7 @@ public static class CliParser
         bool confirmDelivery = false;
         bool sendReceipt = false;
         bool awaitReceipt = false;
+        bool allowExplicitHost = false;
 
         for (int i = start; i < args.Count; i++)
         {
@@ -352,6 +361,25 @@ public static class CliParser
                 }
 
                 awaitReceipt = true;
+                continue;
+            }
+
+            if (name == "--allow-non-loopback")
+            {
+                if (inlineValue is not null)
+                {
+                    return Error("flag-takes-no-value:" + name);
+                }
+
+                // Only the two verbs that name exactly one peer address can be given consent for it: serve
+                // binds one address and send dials one. Roundtrip invents both of its own addresses, so a
+                // consent flag there would have nothing to consent to (W6-51).
+                if (command is not (SyncCliCommand.TransferServe or SyncCliCommand.TransferSend))
+                {
+                    return Error("option-not-allowed-for-command:" + name + ":" + commandName);
+                }
+
+                allowExplicitHost = true;
                 continue;
             }
 
@@ -519,6 +547,11 @@ public static class CliParser
             budgetMilliseconds = parsedBudget;
         }
 
+        // --bind is only reachable for 'transfer serve': every other command's value-option list omits it,
+        // so the loop above already refused it with option-not-allowed-for-command. Nothing to re-check
+        // here, and the runner still substitutes the loopback default when it is absent.
+        string? bindAddress = values.GetValueOrDefault("--bind");
+
         string? passphrase = values.GetValueOrDefault("--passphrase");
         string? secretsJson = values.GetValueOrDefault("--secrets");
         if (passphrase is not null && secretsJson is not null)
@@ -548,6 +581,8 @@ public static class CliParser
                 Target = target,
                 Port = port,
                 BudgetMilliseconds = budgetMilliseconds,
+                BindAddress = bindAddress,
+                AllowExplicitHost = allowExplicitHost,
                 DeviceA = deviceA,
                 DeviceB = deviceB,
                 Once = once,
@@ -572,7 +607,7 @@ public static class CliParser
     private static bool IsKnownOption(string name) => name is
         "--root" or "--out" or "--in" or "--passphrase" or "--secrets" or "--deletions" or
         "--device" or "--baseline" or "--id" or "--source" or "--link" or "--expect" or
-        "--to" or "--port" or "--budget-ms" or "--device-a" or "--device-b" or
+        "--to" or "--port" or "--budget-ms" or "--bind" or "--allow-non-loopback" or "--device-a" or "--device-b" or
         "--authenticate" or "--secret-env" or "--tls" or "--expect-fingerprint" or "--confirm-delivery" or
         "--send-receipt" or "--await-receipt" or
         "--apply" or "--once" or "--json";
