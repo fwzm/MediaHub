@@ -1577,5 +1577,106 @@ B 轮的门控套件是**跳过而不是消失**：`SourceSyncTlsInteropTest` te
 6. **未接日志/未跑真机**：没有日志器接入，也没有 instrumentation 或设备证据。
 7. **本节点没有新增 required-suite**：`.github/workflows/android-ci.yml` 仍是 31 条；`SourceSyncDeliveryTest` 会随模块的 `testDebugUnitTest` 在 CI 里跑到，但不单独点名。
 
+## 26. 两个协议开关的界面接线（W6-48）
+
+### 26.1 为什么需要这一节
+
+W6-40 把回执（裸 0x04）做进了监听端、W6-46 把投递确认做进了发送端，但两处都只到控制器/协议层：
+`SourceSyncListenForm.receipt` 与 `SourceSyncSendForm.delivery` 早就存在，**界面上没有任何控件**，
+真机上这两项能力开不了——§25.11 第 2 条当时如实记录了这一点，本节是它的后续（旧条目保留，不追改）。
+
+本节点只补界面与接线：不改协议、不改任何码表、不动线上字节，也不改控制器的判定语义。
+
+### 26.2 两个开关的语义与优先级
+
+| 开关 | 控件 tag | 表单字段 | 打开后发生什么 | 关着时 |
+| --- | --- | --- | --- | --- |
+| 发送端「投递确认」 | `sync.send.delivery` | `SourceSyncSendForm.delivery` | 写完最后一帧后读对端直到 FIN（预算 2000 ms、上限 64 KiB），读到 FIN 才置 `Sent.deliveryConfirmed = true` | 线上字节与冻结向量逐字节相同（§25.5） |
+| 监听端「回 0x04 回执」 | `sync.listen.receipt` | `SourceSyncListenForm.receipt` | 只有信封解码成功才回一个裸 0x04；写库仍要预览与逐条允许 | 一个字节都不多写（§22.5） |
+
+**优先级：回执优先。** 勾着「等回执」（`sync.send.receipt`）时，投递确认复选框**禁用**
+（`enabled = !sending && !form.receipt`）；控制器里还有同一道门
+（`SourceSyncDeliveryOptions.confirmingOrOff(form.delivery && !form.receipt)`），
+`core/common` 的 `SourceSyncTransferClient` 再兜一次（`if (receipt.enabled) Off`）。
+三层同口径，与 Windows `SyncCliRunner` 的 `ConfirmDelivery && !AwaitReceipt` 一致。
+
+禁用而不是「勾了也没用」：用户点不动的控件旁边有 `DELIVERY_HINT` 那句「与回执同时开时回执优先」，
+不需要去猜为什么。
+
+### 26.3 testTag 表（新增 2 个，既有 tag 一个没改）
+
+| 常量 | 值 | 定义位置 | 落在哪个控件 |
+| --- | --- | --- | --- |
+| `SourceSyncImportTags.LISTEN_RECEIPT` | `sync.listen.receipt` | `SourceSyncImportScreen.kt:118` | `ListenSection` 里的 `Checkbox`（:804） |
+| `SourceSyncImportTags.SEND_DELIVERY` | `sync.send.delivery` | `SourceSyncImportScreen.kt:159` | `SendSection` 里的 `Checkbox`（:1025） |
+
+命名与既有风格一致：`sync.listen.*` / `sync.send.*` 前缀，kebab-case 后缀。
+
+### 26.4 接线方式：只加控件，不加逻辑
+
+| 环节 | 位置 | 本节点做了什么 |
+| --- | --- | --- |
+| 表单字段 | `SourceSyncListenerController.kt:181`（`val receipt: Boolean = false`）、`SourceSyncSendController.kt:217`（`val delivery: Boolean = false`） | **未改**：W6-40 / W6-46 已有 |
+| 文案 | `SourceSyncListenerController.kt:82`（`RECEIPT_LABEL`）/ `:85`（`RECEIPT_HINT`）新增；`SourceSyncSendController.kt:80`（`DELIVERY_LABEL`）/ `:94`（`DELIVERY_HINT`）**复用 W6-46 既有常量** | 监听端两条新常量，发送端零改动 |
+| 控件 | `SourceSyncImportScreen.kt:799-815`（监听，`enabled = !listening && !receiving`）、`:1019-1036`（发送，`enabled = !sending && !form.receipt`） | 新增两个勾选框 + 各自一句说明 |
+| 控制器透传 | `SourceSyncListenerController.kt:322`（`factory.open(targetPort, form.tls, form.receipt)`）、`SourceSyncSendController.kt:345`（`confirmingOrOff(form.delivery && !form.receipt)`） | **未改**：表单本来就被原样交给控制器 |
+| ViewModel | `SourceSyncImportViewModel.kt:163`（`startListening` → `listenerController.start(form)`）、`:197`（`send` → `sendController.send(form)`） | **未改** |
+
+监听回执的文案把边界写清楚：只有解码成功才回，解不出的载荷保持沉默（对端看到 `receipt-missing`）。
+发送端的两句分别说明「什么时候算送达」与「与回执的优先级」。
+
+### 26.5 androidTest 用例表（8 例，`SourceSyncProtocolSwitchesScreenTest.kt`）
+
+| # | 用例 | 行号 | 钉住的行为 |
+| --- | --- | --- | --- |
+| 1 | `bothProtocolSwitchesStartUnchecked` | :45 | 两个开关默认都是关（`assertIsOff`） |
+| 2 | `theDeliverySwitchCanBeToggledAndIsForwarded` | :53 | 能勾上，且提交的表单里 `delivery == true`、`receipt` 仍为假 |
+| 3 | `theDeliverySwitchIsDisabledWhileTheReceiptIsAwaited` | :72 | 勾「等回执」→ 投递确认禁用；取消回执 → 又能点 |
+| 4 | `aFormSubmittedWithTheReceiptOnNeverCarriesTheDelivery` | :88 | 回执优先：提交表单 `receipt == true && delivery == false` |
+| 5 | `theListenReceiptSwitchCanBeToggledBothWays` | :106 | 监听回执能开能关 |
+| 6 | `theListenReceiptSwitchIsForwardedWithTheForm` | :118 | 点「开始监听」后表单里 `receipt == true`，端口仍是系统分配（0） |
+| 7 | `theListenReceiptSwitchIsFrozenWhileListening` | :136 | 监听已开（`Listening(40404, tls = false)`）时回执开关禁用（`assertIsNotEnabled().assertIsOff()`） |
+| 8 | `bothSwitchesSitAtThePageTailAndTheMainFlowStaysOnTheFirstScreen` | :147 | 不滚动的 `PICK`/`PREVIEW` 仍在首屏；两个开关要 `performScrollTo()` 才可见 |
+
+滚动纪律与 W6-44 相同：任何针对页尾节点的断言先 `performScrollTo()`，只有第 8 例的前两句故意不滚动，
+它要证明的正是「首屏主流程没被顶下去」。既有 `SourceSyncSectionsScreenTest.kt`（19 例）一行未改。
+
+### 26.6 实跑证据（本机，**DEVICE_UNVERIFIED**）
+
+命令（`--no-daemon`，跑前残留 `java.exe` = 0）：
+
+```
+gradlew.bat :feature:settings:assembleDebugAndroidTest :feature:settings:testDebugUnitTest --console=plain --rerun-tasks --no-daemon -Pkotlin.compiler.execution.strategy=in-process
+```
+
+| 项 | 结果 |
+| --- | --- |
+| 尾行 | `BUILD SUCCESSFUL in 3m 6s` / `212 actionable tasks: 212 executed` / `EXIT=0` |
+| androidTest 编译产物 | `feature/settings/build/outputs/apk/androidTest/debug/settings-debug-androidTest.apk`（20410526 B）；`build/tmp/kotlin-classes/debugAndroidTest/.../SourceSyncProtocolSwitchesScreenTest.class`（22233 B） |
+| JVM 回归（feature:settings） | 15 套件 / 249 例 / 0 失败 / 0 错误 / 0 跳过——与 W6-46 基线**逐项相同**（本节点不加 JVM 用例） |
+| 设备执行 | **未执行**：`adb devices` 无设备，按纪律不起模拟器；执行证据由 CI 的 visual-instrumentation（API 32 / 36）提供 |
+
+### 26.7 未覆盖（如实列出）
+
+1. **设备未跑（DEVICE_UNVERIFIED）**：本机无模拟器/真机，本节点只证明编译与语义断言的可编译性，真机执行等 CI。
+2. **忙碌态未覆盖**：`Sending`（发送中）与 `Receiving`（接收中）时两个开关的禁用只有代码里的 `!sending` / `!listening && !receiving`，没有对应用例。
+3. **未测深色主题 / 字体缩放 / 窄屏换行**：长文案在 200% 字体下的折行没有视觉回归。
+4. **未覆盖 Hilt 注入路径**：用例直接 `setContent { SourceSyncImportScreen(...) }`，`SourceSyncImportRoute` + ViewModel 未在本节点被覆盖。
+5. **开关不持久化**：两处都是 `remember { mutableStateOf(...) }`，离开页面即复位；没有写进设置项（本节点未要求）。
+6. **不入 required-suite**：`.github/workflows/android-ci.yml` 仍是 32 条 `--required-suite`（本节点未改 CI），本套件由 visual-instrumentation job 覆盖。
+7. **没有新增网络证据**：回执与投递确认的线上行为仍由 §21 / §22 / §25 的既有用例负责，本节点只补界面。
+
+### 26.8 本次改动的文件
+
+| 文件 | 变化 |
+| --- | --- |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportScreen.kt` | 1052 → 1093 行：2 个 tag + 监听/发送各一个勾选框与说明 |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncListenerController.kt` | 521 → 528 行：`RECEIPT_LABEL` / `RECEIPT_HINT` 两条文案 |
+| `feature/settings/src/androidTest/kotlin/com/mediahub/feature/settings/sync/SourceSyncProtocolSwitchesScreenTest.kt` | 新建，194 行 / 8 例 |
+| `docs/android-source-sync-transfer.md` | 本节（§26） |
+
+**未改**：`windows/`、`README`、`.github/`、两个冻结向量、`core/common` 与 `core/database` 任何文件、
+既有的 `SourceSyncSectionsScreenTest.kt`（19 例）与既有 testTag/文案。
+
 
 
