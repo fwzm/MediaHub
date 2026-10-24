@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Same TFM and platform as MediaHub.Tests: the mock is a plain library, so it stays off the
+         Windows App SDK road and never drags MediaHub.App into the test build. -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Platforms>x64</Platforms>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>MediaHub.TestSupport</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MediaHub.Domain\MediaHub.Domain.csproj" />
+  </ItemGroup>
+</Project>

@@ -106,7 +106,65 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           python3 .github/scripts/verify-unit-tests.py --record --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
-          python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest --required-suite com.mediahub.app.WebDavJointChainTest --required-suite com.mediahub.player.mpv.MpvSubtitleTest --required-suite com.mediahub.core.database.repository.ServerRepositorySubtitleIdentityTest --required-suite com.mediahub.feature.player.PlayerViewModelSubtitleCenterTest --required-suite com.mediahub.player.engine.PlaybackEngineExternalSubtitleTest --required-suite com.mediahub.provider.webdav.WebDavParserPlatformCompatibilityTest --require-complete-suites
+          # 每个 required-suite 参数的语义是"这个套件必须真的执行过"。理由同 windows-ci 的
+          # WebDav 教训：套件整体消失时 gradle 仍会打印 BUILD SUCCESSFUL，
+          # 只有把跨端契约/互操作套件按名字钉住才能发现"测试还在文件里却没跑"。
+          #   pairing.*   —— 与 Windows 的配对载荷字节级互操作（黄金向量由真 API 生成）
+          #   sync.*      —— 与 Windows 的来源同步信封/规划器三桶口径
+          #   Migration4to5 —— servers 表加同步身份三列的迁移（真机开库前的唯一守卫）
+          #   UpNextResolver / PlayerAutoplay —— 跨季连播解析与 Ended 事件接线
+          #   pairing.PairingTransportClient / ...EndToEnd —— 只拨回环的 4 字节帧收发（W6-G）
+          #   feature.settings.sync.* —— 导入四桶分桶/失败关闭（W6-F 逻辑+会话）与补录验证协调器（W6-H）
+          #   pairing.* / AndroidSourceSyncSecurityTest —— 对抗性输入回归（W6-J：畸形载荷/帧、非回环拒绝、
+          #     凭据不回显、坏信封零写入、重复 syncSourceId 整封拒绝=W6J-1）
+          #   sync.SourceSyncTransfer* —— 分块帧传输与 Windows 逐字节互操作（W6-22：向量由真 API 生成，
+          #     19 条错误流的 reason 与 Windows 同名同序；收满即返、尾随帧不读）
+          #   sync.SourceSyncTransferAuthTest —— 传输对端认证（W6-25：五码 + 33 字节 tag 帧 0x03 +
+          #     HMAC-SHA256 over nonce‖envelope，金标向量由 Windows 实现生成；关闭认证时与 W6-22 向量全等）
+          #   sync.SourceSyncTlsTest —— TLS 1.3 + SPKI 指纹钉扎（W6-29：只协商 1.3、pin=SHA-256(publicKey.encoded)、
+          #     四码与 Windows 同名同序、接收端 5 字节嗅探、graceful close；夹具与期望指纹由 Windows 权威实现生成）
+          #   sync.SourceSyncTransferListenerTest —— 回环监听端（W6-34：只绑回环、端口 0 取实际值、单连接串行、
+          #     复用 SourceSyncTransfer.receive 解帧，TLS 走 handshakeServer / 明文走 5 字节嗅探，关闭 TLS 走 graceful close）
+          #   sync.SourceSyncDeliveryTest —— 发送端投递确认（W6-46：单码 delivery-unconfirmed 独立封闭集、
+          #     写完最后一帧后读对端直到 FIN，预算 2000 ms、最多排水 64 KiB，回执优先；Off 时不读一个字节）
+          python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
+            --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
+            --required-suite com.mediahub.app.WebDavJointChainTest \
+            --required-suite com.mediahub.player.mpv.MpvSubtitleTest \
+            --required-suite com.mediahub.core.database.repository.ServerRepositorySubtitleIdentityTest \
+            --required-suite com.mediahub.feature.player.PlayerViewModelSubtitleCenterTest \
+            --required-suite com.mediahub.player.engine.PlaybackEngineExternalSubtitleTest \
+            --required-suite com.mediahub.provider.webdav.WebDavParserPlatformCompatibilityTest \
+            --required-suite com.mediahub.player.engine.PlaybackEnginePlaybackControlTest \
+            --required-suite com.mediahub.player.mpv.MpvPlaybackEngineTest \
+            --required-suite com.mediahub.core.common.pairing.PairingVectorsTest \
+            --required-suite com.mediahub.core.common.pairing.PairingFrameTest \
+            --required-suite com.mediahub.core.common.sync.WindowsGoldenInteropTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncPlannerTest \
+            --required-suite com.mediahub.core.database.sync.AndroidSourceSyncServiceTest \
+            --required-suite com.mediahub.core.database.Migration4to5Test \
+            --required-suite com.mediahub.model.UpNextResolverTest \
+            --required-suite com.mediahub.feature.player.PlayerAutoplayTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportClientTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportEndToEndTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncImportLogicTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncImportSessionTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceVerificationCoordinatorTest \
+            --required-suite com.mediahub.core.common.pairing.PairingMaliciousInputTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportSecurityTest \
+            --required-suite com.mediahub.core.common.pairing.PairingCredentialLeakTest \
+            --required-suite com.mediahub.core.database.sync.AndroidSourceSyncSecurityTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferVectorsTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferRoundTripTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferLoopbackTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferAuthTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTlsTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferListenerTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncDeliveryTest \
+            --required-suite com.mediahub.feature.player.PlayerSeekBarContractTest \
+            --required-suite com.mediahub.feature.player.PlayerSeekContractRobolectricTest \
+            --require-complete-suites
 
       - name: Lint
         if: ${{ !cancelled() }}

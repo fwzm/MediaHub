@@ -15,6 +15,9 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.lifecycle.SavedStateHandle
@@ -86,6 +89,74 @@ class PlayerRouteVisualEffectsTest {
     private var originalPreferences: UserPreferences? = null
     private var preferencesStore: UserPreferencesStore? = null
     private var lastEngine: FakeEngine? = null
+
+    @Test
+    fun productionPauseSeekAndResumeControlsPreserveControlledProgress() {
+        Log.i("PlayerControlTest", "start controlled playback route")
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        check(context.packageName == "com.mediahub.feature.player.test")
+        val preferences = UserPreferencesStore(context)
+        preferencesStore = preferences
+        originalPreferences = runBlocking { preferences.flow.first() }
+        runBlocking { preferences.update { UserPreferences(autoLandscape = false, immersiveBars = false,
+            playerVisualEffects = PlayerVisualEffectsPreferences.Default.copy(enabled = false)) } }
+        val vm = createViewModel(preferences, playOnStart = true)
+        routeVisible.value = true
+        composeRule.setContent { MaterialTheme { if (routeVisible.value) PlayerRoute(onBack = {}, viewModel = vm) } }
+        composeRule.waitUntil(10_000) { vm.resolveState.value is ResolveState.Ready && vm.uiState.value.isPlaying }
+        Log.i("PlayerControlTest", "route ready")
+        val engine = checkNotNull(lastEngine)
+        composeRule.runOnIdle { engine.advanceBy(10_000L) }
+        composeRule.waitUntil(10_000) { vm.uiState.value.positionMs == 22_000L }
+        // The production buffering spinner owns an infinite animation. Freeze its frame
+        // clock before enabling it, otherwise a pointer lookup waits for animation idle.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.runOnIdle { engine.beginBuffering() }
+        composeRule.waitUntil(10_000) {
+            composeRule.mainClock.advanceTimeByFrame()
+            vm.uiState.value.isBuffering && !vm.uiState.value.isPlaying
+        }
+        Log.i("PlayerControlTest", "buffering pause control")
+
+        // Exercise actual pointer delivery through the production control/gesture layers.
+        composeRule.onNodeWithContentDescription(context.getString(R.string.player_pause))
+            .assertIsDisplayed().performTouchInput { click() }
+        composeRule.waitUntil(10_000) {
+            composeRule.mainClock.advanceTimeByFrame()
+            !vm.uiState.value.playWhenReady
+        }
+        assertEquals(1, engine.toggleCount)
+        composeRule.runOnIdle { engine.finishBuffering() }
+        repeat(3) {
+            composeRule.runOnIdle { engine.advanceBy(5_000L) }
+            composeRule.mainClock.advanceTimeBy(5_000L)
+            assertEquals(22_000L, vm.uiState.value.positionMs)
+        }
+        composeRule.onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))
+            .performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(30_000f)) }
+        composeRule.waitUntil(10_000) {
+            composeRule.mainClock.advanceTimeByFrame()
+            vm.uiState.value.positionMs == 30_000L
+        }
+        assertEquals(listOf(30_000L to SeekMode.COMMIT), engine.seeks)
+        composeRule.runOnIdle { engine.advanceBy(5_000L) }
+        assertEquals(30_000L, engine.uiState.value.positionMs)
+        assertFalse(engine.uiState.value.isPlaying)
+        composeRule.onNodeWithContentDescription(context.getString(R.string.player_play))
+            .assertIsDisplayed().performTouchInput { click() }
+        composeRule.waitUntil(10_000) {
+            composeRule.mainClock.advanceTimeByFrame()
+            vm.uiState.value.isPlaying
+        }
+        composeRule.runOnIdle { engine.advanceBy(5_000L) }
+        composeRule.waitUntil(10_000) {
+            composeRule.mainClock.advanceTimeByFrame()
+            vm.uiState.value.positionMs == 35_000L
+        }
+        assertEquals(2, engine.toggleCount)
+        assertEquals(1, engine.playCount)
+        Log.i("PlayerControlTest", "pause freeze seek resume assertions complete")
+    }
 
     @Test
     fun productionPlayerInformationAndSubtitleActionsPreservePlaybackSession() {
@@ -362,6 +433,7 @@ class PlayerRouteVisualEffectsTest {
         preferences: UserPreferencesRepository,
         memory: com.mediahub.core.database.repository.SubtitleMemoryStore = NoSubtitleMemory,
         discovery: com.mediahub.provider.api.MediaSubtitleDiscoveryProvider? = null,
+        playOnStart: Boolean = false,
     ): PlayerViewModel {
         val fixtureTitle = InstrumentationRegistry.getInstrumentation().context
             .getString(com.mediahub.feature.player.test.R.string.visual_acceptance_media_title)
@@ -391,7 +463,7 @@ class PlayerRouteVisualEffectsTest {
             progressStore = FakeProgressStore,
             subtitleMemoryStore = memory,
             registry = FakeRegistry(item, discovery),
-            media3EngineFactory = PlaybackEngineCreator { FakeEngine(fixtureTitle).also { lastEngine = it } },
+            media3EngineFactory = PlaybackEngineCreator { FakeEngine(fixtureTitle, playOnStart).also { lastEngine = it } },
             mpvEngineFactory = PlaybackEngineCreator { FakeEngine(fixtureTitle) },
             engineHistory = InMemoryEnginePreferenceHistory(),
             userPreferencesRepository = preferences,
@@ -452,9 +524,9 @@ class PlayerRouteVisualEffectsTest {
         override suspend fun testConnection(): ConnectionStatus = ConnectionStatus(ok = true)
     }
 
-    private class FakeEngine(fixtureTitle: String) : PlaybackEnginePort {
+    private class FakeEngine(fixtureTitle: String, private val playOnStart: Boolean = false) : PlaybackEnginePort {
         override val kind: EngineKind = EngineKind.MEDIA3
-        override val uiState: StateFlow<PlaybackUiState> = MutableStateFlow(
+        override val uiState = MutableStateFlow(
             PlaybackUiState(mediaTitle = fixtureTitle, durationMs = 60_000L, positionMs = 12_000L),
         )
         override val progress: SharedFlow<PlaybackProgress> = MutableSharedFlow()
@@ -464,6 +536,13 @@ class PlayerRouteVisualEffectsTest {
 
         override fun attachSurface(surface: android.view.Surface?) = Unit
         var playCount = 0
+        var toggleCount = 0
+        val seeks = mutableListOf<Pair<Long, SeekMode>>()
+        fun advanceBy(durationMs: Long) {
+            if (uiState.value.isPlaying) uiState.value = uiState.value.copy(positionMs = uiState.value.positionMs + durationMs)
+        }
+        fun beginBuffering() { uiState.value = uiState.value.copy(isBuffering = true, isPlaying = false) }
+        fun finishBuffering() { uiState.value = uiState.value.copy(isBuffering = false, isPlaying = uiState.value.playWhenReady) }
         var subtitleOff = false
         val loaded = mutableListOf<String>()
         override val subtitleCapabilities = com.mediahub.player.engine.SubtitleCapabilities(externalLoad = true, offsetAdjust = true)
@@ -475,9 +554,19 @@ class PlayerRouteVisualEffectsTest {
         override fun setSubtitleOffset(offsetMs: Long): Boolean {
             subtitleOffsetMs = offsetMs.coerceIn(-60_000L, 60_000L); return true
         }
-        override fun play(session: PlaybackSession) { playCount++ }
-        override fun togglePlayPause() = Unit
-        override fun seekTo(positionMs: Long, mode: SeekMode) = Unit
+        override fun play(session: PlaybackSession) {
+            playCount++
+            if (playOnStart) uiState.value = uiState.value.copy(isPlaying = true, playWhenReady = true)
+        }
+        override fun togglePlayPause() {
+            toggleCount++
+            val requested = !uiState.value.playWhenReady
+            uiState.value = uiState.value.copy(playWhenReady = requested, isPlaying = requested && !uiState.value.isBuffering)
+        }
+        override fun seekTo(positionMs: Long, mode: SeekMode) {
+            seeks += positionMs to mode
+            uiState.value = uiState.value.copy(positionMs = positionMs)
+        }
         override fun setSpeed(speed: Float) = Unit
         override fun selectAudioTrack(selection: TrackSelection?) = Unit
         override fun selectSubtitleTrack(selection: TrackSelection?) { subtitleOff = selection == null }

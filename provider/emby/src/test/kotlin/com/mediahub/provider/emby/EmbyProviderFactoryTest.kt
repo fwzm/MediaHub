@@ -18,7 +18,7 @@ import org.junit.Test
 /**
  * ADR-022/026：Emby Handle composition-root audit——当前实现能力精确为
  * AUTH + LIBRARY + DETAIL + PLAYBACK + QUERY + SEARCH + IDENTITY_LOOKUP + PROGRESS
- * （Phase 1H 起含进度上报），其余能力必须为 null；运行时 ⊆ 计划。
+ * + FAVORITE（task-22 / A1 收藏），其余能力必须为 null；运行时 ⊆ 计划。
  */
 class EmbyProviderFactoryTest {
 
@@ -40,7 +40,7 @@ class EmbyProviderFactoryTest {
     }
 
     @Test
-    fun `handle exposes auth library detail playback query search identityLookup progress capabilities`() {
+    fun `handle exposes auth library detail playback query search identityLookup progress favorite capabilities`() {
         val handle = factory().create(server)
         assertNotNull(handle.auth)
         assertNotNull(handle.library)
@@ -56,6 +56,9 @@ class EmbyProviderFactoryTest {
         assertNotNull(handle.identityLookup)
         // Phase 1H（Emby PROGRESS closeout）：进度上报落地
         assertNotNull(handle.progress)
+        // task-22 / A1：FAVORITE（FavoriteItems 写入 + UserData 回读）落地
+        assertNotNull(handle.favorite)
+        assertTrue(ProviderCapability.FAVORITE in handle.provider.descriptor.declaredCapabilities)
         assertNull(handle.subtitle)
         assertEquals(
             setOf(
@@ -67,6 +70,7 @@ class EmbyProviderFactoryTest {
                 ProviderCapability.SEARCH,
                 ProviderCapability.IDENTITY_LOOKUP,
                 ProviderCapability.PROGRESS,
+                ProviderCapability.FAVORITE,
             ),
             handle.runtimeCapabilities,
         )

@@ -14,6 +14,13 @@ SHA = "2f9032732fc8365d19b5badac90f66b10310f500"
 
 
 class EvidenceGateTest(unittest.TestCase):
+    def test_pause_seek_route_is_mandatory_on_both_apis(self):
+        key = ("com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
+               "productionPauseSeekAndResumeControlsPreserveControlledProgress")
+        for api in (32, 36):
+            with self.subTest(api=api):
+                self.assertIn(key, gate.required_tests(api))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -78,6 +85,7 @@ class EvidenceGateTest(unittest.TestCase):
             ("core/database", "historicalSchemasMigrateAndReopenThroughActualRoom"),
             ("feature/settings", "productionSettingsInfoDensityPersistsAndBackupEntryDispatches"),
             ("feature/player", "productionPlayerInformationAndSubtitleActionsPreservePlaybackSession"),
+            ("feature/player", "productionPauseSeekAndResumeControlsPreserveControlledProgress"),
         ):
             with self.subTest(name=name):
                 self.build(32)

@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>MediaHub.App</RootNamespace>
+    <AssemblyName>MediaHub</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <!-- Unpackaged + self-contained: runs from a copied folder with no runtime install required.
+         See docs/adr/ADR-W004 for the packaging comparison against MSIX. -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <WindowsSdkPackageVersion>10.0.26100.56</WindowsSdkPackageVersion>
+    <!-- Optional output redirect. Used by CI and packaging jobs that must not collide with a
+         running instance's image file; leave empty for the default bin/ layout. -->
+    <BaseOutputPath Condition="'$(MediaHubBinRoot)' != ''">$(MediaHubBinRoot)</BaseOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaHub.Domain\MediaHub.Domain.csproj" />
+    <ProjectReference Include="..\MediaHub.Player\MediaHub.Player.csproj" />
+    <ProjectReference Include="..\MediaHub.Player.Mpv\MediaHub.Player.Mpv.csproj" />
+    <ProjectReference Include="..\MediaHub.Net\MediaHub.Net.csproj" />
+    <ProjectReference Include="..\MediaHub.Providers\MediaHub.Providers.csproj" />
+  <ProjectReference Include="..\MediaHub.Providers.WebDav\MediaHub.Providers.WebDav.csproj" />
+    <ProjectReference Include="..\MediaHub.Storage\MediaHub.Storage.csproj" />
+    <ProjectReference Include="..\MediaHub.Sync\MediaHub.Sync.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\input.conf" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

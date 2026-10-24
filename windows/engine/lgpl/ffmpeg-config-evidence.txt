@@ -1,0 +1,34 @@
+# FFmpeg build configuration facts, read from ffbuild/config.mak
+CONFIG_SCHANNEL=yes
+CONFIG_ZLIB=yes
+CONFIG_D3D11VA=yes
+CONFIG_D3D12VA=yes
+CONFIG_SHARED=yes
+CONFIG_NETWORK=yes
+
+# first lines of ffbuild/config.log (the configure invocation, verbatim)
+# ./configure --prefix=/d/mh-servers/lgpl-build/prefix --arch=x86_64 --target-os=mingw32 --disable-gpl --disable-version3 --disable-nonfree --enable-shared --disable-static --disable-autodetect --enable-zlib --enable-d3d11va --enable-d3d12va --enable-schannel --enable-network --enable-w32threads --enable-runtime-cpudetect --disable-debug --disable-doc --disable-htmlpages --disable-manpages --disable-podpages --disable-txtpages --extra-cflags=-O2
+ALLUSERSPROFILE='C:\ProgramData'
+ALL_COMPONENTS='
+    
+    aac_adtstoasc_bsf
+ahx_to_mp2_bsf
+apv_metadata_bsf
+av1_frame_merge_bsf
+av1_frame_split_bsf
+av1_metadata_bsf
+chomp_bsf
+dump_extradata_bsf
+dca_core_bsf
+dovi_rpu_bsf
+dts2pts_bsf
+dv_error_marker_bsf
+eac3_core_bsf
+eia608_to_smpte436m_bsf
+evc_frame_merge_bsf
+extract_extradata_bsf
+filter_units_bsf
+h264_metadata_bsf
+h264_mp4toannexb_bsf
+h264_redundant_pps_bsf
+hapqa_extract_bsf

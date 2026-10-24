@@ -398,10 +398,11 @@ class MpvPlaybackEngine internal constructor(
      * 位置继续推进。
      *
      * 现在直接读 **mpv 的权威属性 pause**：同步反映真实播放意图，不依赖回调时序。
-     * 读失败（属性不可用）时才回退到 UI 状态。
+     * 读失败（属性不可用）时不发控制指令或成功事件，避免用迟到的 UI 状态猜测播放意图。
      */
     override fun togglePlayPause() = withNative { run, m ->
-        val paused = m.getPropertyBoolean("pause") ?: !_uiState.value.isPlaying
+        // Native observers are asynchronous; read the authoritative pause property under the native lock.
+        val paused = m.getPropertyBoolean("pause") ?: return@withNative
         // 当前是暂停态 → 本次点击是继续（pause=false）；否则是暂停（pause=true）。
         m.setPropertyBoolean("pause", !paused)
         withCurrent(run) {
