@@ -81,6 +81,9 @@ object SourceSyncSendCopy {
 
     const val ACTION = "发送"
 
+    /** W6-49：发送中可取消；取消不是失败，界面不许因此显示失败码。 */
+    const val CANCEL = "取消发送"
+
     const val BUSY = "发送中…"
 
     const val PORT_REQUIRED = "端口必须是 1-65535 的数字，填好才能发送（发送端没有系统分配端口）。"

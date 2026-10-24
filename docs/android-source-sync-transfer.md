@@ -1678,5 +1678,117 @@ gradlew.bat :feature:settings:assembleDebugAndroidTest :feature:settings:testDeb
 **未改**：`windows/`、`README`、`.github/`、两个冻结向量、`core/common` 与 `core/database` 任何文件、
 既有的 `SourceSyncSectionsScreenTest.kt`（19 例）与既有 testTag/文案。
 
+## 27. 发送取消（W6-49）
 
+### 27.1 为什么需要这一节
 
+W6-42 的发送区块只有一个「发送」按钮：从点下去到结束，界面能显示的只有 `发送中…` 与一个禁用的按钮。
+一次发送包含导出（读库、打包信封）与传输（拨号、写帧、等回执或等 FIN）两段，Windows 端 `transfer serve` 的默认等待预算
+是 15 s、W6-50 起可配到 600 s —— 这段时间里用户没有任何撤回手段。§23 覆盖的是「发出去会怎样」，本节补的是
+「发一半不想发了」。**本节只加界面与一层薄记账：不改协议、不改码表、不动线上字节、不改控制器的判定语义。**
+
+### 27.2 三条外部可观察语义
+
+| # | 语义 | 钉在哪里 |
+| --- | --- | --- |
+| 1 | **取消后回 Idle，不是失败** | `SourceSyncSendState.Idle`；结果行为空、稳定码为空（`SourceSyncSendCopy.lineOf` / `codeOf` 均为 `null`），界面不出现「发送失败：<码>」 |
+| 2 | **取消立刻释放单飞** | 控制器 `inFlight` 在 `finally` 释放（`SourceSyncSendController.kt:374-383`）；取消后可以马上再发一次，不必等超时 |
+| 3 | **没在发时取消是 no-op** | 从未发送、或那条 Job 已收尾时，`cancel()` 返回 `null`，不改状态、不写结果、不报错 |
+
+这三条都是用户能直接看见的差别（「点了取消，界面停在发送中/显示失败」都是缺陷），所以必须有确定性证据，而不是靠代码阅读。
+
+### 27.3 实现：一层薄壳 + 两行委托（含偏离说明）
+
+**偏离（如实记录）**：任务书原本要求「在 `SourceSyncImportViewModel` 里加 `private var sendJob: Job?`」。
+实际收进新类 `SourceSyncSendLauncher`（`feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncSendLauncher.kt`，56 行，纯 Kotlin）——
+因为该 ViewModel 的构造依赖 Room 仓库、Keystore 凭据库与 provider 注册表，纯 JVM 造不出来；而上面三条正是用户可见语义。
+薄壳可以被 JVM 用例直接钉住，ViewModel 只留两行委托（`send` → `launcher.launch(form)`、`cancelSend` → `launcher.cancel()`），
+因此 JVM 用例钉的就是真路径，不是影子实现。
+
+薄壳的职责只有记账，边界写死在注释里：
+
+| 成员 | 行号 | 行为 |
+| --- | --- | --- |
+| `class SourceSyncSendLauncher(scope, send)` | :22 | 持有 `CoroutineScope` 与 `suspend (SourceSyncSendForm) -> Boolean`，不持表单以外的任何东西 |
+| `val isActive` | :30 | `job?.isActive == true`，界面据此决定取消按钮可不可点 |
+| `fun launch(form): Boolean` | :34 | 在飞时返回 `false`（不排队、不重复发）；否则起一条 Job |
+| `fun cancel(): Job?` | :45 | 只取消在飞的那条并把它交回调用方去 `join`；没有在飞时返回 `null` |
+| `fun clear()` | :53 | 只丢引用，**不取消**（取消必须是用户显式动作） |
+
+**不越界**：不持信封字节、不持口令或 `SecretHandle`（每次发送的数据只活在控制器调用栈与该 Job 的协程里，随 Job 收尾释放）；
+不判 `Sending/Sent/Failed/Idle`；不复制单飞——控制器的 `inFlight` 仍是唯一权威，薄壳的 `isActive` 只是界面门。
+`onCleared()` 里也只 `clear()`：`viewModelScope` 取消时那条 Job 自己收尾，控制器把状态写回 Idle。
+
+### 27.4 改动的文件与行号
+
+| 文件 | 变化 | 关键行 |
+| --- | --- | --- |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncSendLauncher.kt` | 新建 56 行 | :22 类、:30 `isActive`、:34 `launch`、:45 `cancel`、:53 `clear` |
+| `.../sync/SourceSyncImportViewModel.kt` | 271 → 294 行 | :124-129 `sendLauncher`、:208 `launch`、:217-219 `cancelSend()`、:230 `reset()` 里 `clear()`、:243 `onCleared()` 里 `clear()` |
+| `.../sync/SourceSyncSendController.kt` | 只加一条文案 | :85 `const val CANCEL = "取消发送"`（判定与码表零改动） |
+| `.../sync/SourceSyncImportScreen.kt` | 1093 → 1111 行 | :164 tag `SEND_CANCEL`、:210 `onSendCancel = viewModel::cancelSend`、:250 参数、:444 `SendSection(..., onCancel = ...)`、:1053-1063 取消按钮 |
+| `feature/settings/src/test/kotlin/.../SourceSyncSendLauncherTest.kt` | 新建 221 行 / 8 例 | 见 §27.5 |
+| `feature/settings/src/androidTest/kotlin/.../SourceSyncSendCancelScreenTest.kt` | 新建 128 行 / 6 例 | 见 §27.6 |
+| `docs/android-source-sync-transfer.md` | 本节（§27） | — |
+
+按钮纪律与 W6-48 一致：**常驻且禁用，不隐藏**（`enabled = sending`，见 :1057）——
+tag 与布局稳定，UI 测试不必为状态切换去分支查找；位置在「发送」按钮正下方、仍属页尾区块（§26 的页尾纪律不变）。
+
+### 27.5 JVM 用例表（8 例，`SourceSyncSendLauncherTest.kt`）
+
+造「在飞」的手法不是 sleep：假导出端 / 假传输端在 `started` 信号之后 `awaitCancellation()`，
+于是用例可以在「状态确实是 Sending、单飞标记确实被占着」的那一刻取消，再用 `join()` 等它真的收尾。
+
+| # | 用例 | 行号 | 钉住的行为 |
+| --- | --- | --- | --- |
+| 1 | `launchStartsTheSendAndMarksItInFlight` | :36 | 起一条 → `isActive` 为真、控制器状态 `Sending`、`isSending` 为真 |
+| 2 | `cancelDuringExportReturnsToIdleWithoutAnyFailure` | :54 | 导出阶段取消 → Idle、单飞释放、**传输端一次都没被调用**（`send.calls == 0`）、结果行与稳定码均为 null |
+| 3 | `cancelDuringTransportReturnsToIdleAndFreesTheSingleFlightGuard` | :75 | 传输阶段取消 → Idle、单飞释放，**随即再发一次能成功**（`Sent`，两次拨号） |
+| 4 | `cancelWhenNothingWasEverSentIsANoop` | :98 | 从未发送 → `cancel()` 返回 null、状态仍是 Idle、无稳定码 |
+| 5 | `cancelAfterTheCancelledSendFinishedIsStillANoop` | :109 | 取消并收尾后再点取消 → no-op，不改 Idle |
+| 6 | `aSecondLaunchWhileInFlightIsIgnored` | :124 | 在飞期间第二次 `launch` 返回 false、导出端只被调用一次 |
+| 7 | `cancellingTwiceOnlyCancelsTheFirstTime` | :140 | 同一条只能取消一次，第二次返回 null |
+| 8 | `clearBetweenSendsIsHarmlessAndCancelAfterItIsANoop` | :155 | `clear()` 不取消、之后 `cancel()` 是 no-op；再起一条仍正常收尾 |
+
+### 27.6 androidTest 用例表（6 例，`SourceSyncSendCancelScreenTest.kt`）
+
+| # | 用例 | 行号 | 钉住的行为 |
+| --- | --- | --- | --- |
+| 1 | `theCancelButtonIsThereButDisabledBeforeAnythingIsSent` | :41 | 空闲时按钮在树里（`assertIsDisplayed`）但禁用（`assertIsNotEnabled`） |
+| 2 | `theCancelButtonBecomesUsableWhileSending` | :52 | `Sending` 时可点 |
+| 3 | `tappingCancelWhileSendingCallsBackExactlyOnce` | :63 | 点一次回调恰好一次 |
+| 4 | `aSuccessfulSendLeavesTheCancelButtonDisabled` | :73 | `Sent` 后回到禁用 |
+| 5 | `aFailedSendAlsoLeavesTheCancelButtonDisabled` | :86 | `Failed` 后同样禁用（取消不是失败的重试入口） |
+| 6 | `theCancelButtonSitsAtThePageTailAndTheMainFlowStaysOnTheFirstScreen` | :95 | 不滚动的首屏仍有 `PICK`/`PREVIEW`；取消按钮要 `performScrollTo()` 才可见 |
+
+滚动纪律与 W6-44 / W6-48 相同：针对页尾节点的断言先 `performScrollTo()`，只有第 6 例前两句故意不滚动。
+
+### 27.7 实跑证据（本机）
+
+命令（串行执行，跑前确认没有其它 gradle/dotnet 大套件在跑）：
+
+```
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+$env:ANDROID_HOME='C:\Users\55160\AppData\Local\Android\Sdk'
+$env:GRADLE_OPTS='-Xmx2560m -XX:MaxMetaspaceSize=896m'
+gradlew.bat --max-workers=2 --rerun-tasks :feature:settings:testDebugUnitTest :feature:settings:assembleDebugAndroidTest
+```
+
+| 项 | 结果 |
+| --- | --- |
+| 尾行 | `BUILD SUCCESSFUL in 2m 51s` / `212 actionable tasks: 212 executed` / `EXIT=0` |
+| JVM 回归（feature:settings） | **16 套件 / 257 例 / 0 失败 / 0 错误 / 0 跳过**（W6-48 基线 249 例 + 本节 8 例） |
+| 新增套件 | `SourceSyncSendLauncherTest` 8 例 / 0 失败 |
+| androidTest 编译产物 | `feature/settings/build/outputs/apk/androidTest/debug/settings-debug-androidTest.apk`（20426910 B，21:36:13）；`build/tmp/kotlin-classes/debugAndroidTest/.../SourceSyncSendCancelScreenTest.class`（16863 B，21:34:41） |
+| 收尾 | `gradlew --stop` 后残留 `java.exe` = 0 |
+| 设备执行 | **未执行**：`adb devices` 无设备，按纪律不起模拟器；执行证据由 CI 的 visual-instrumentation（API 32 / 36）提供 |
+
+### 27.8 未覆盖（如实列出）
+
+1. **设备未跑（DEVICE_UNVERIFIED）**：本机无模拟器/真机，本节点只证明编译与断言的可编译性，真机执行等 CI。
+2. **取消只覆盖到控制器边界**：假端口用 `awaitCancellation()` 挂住，没有覆盖真实 Socket 在写帧中途被取消时的收尾（`SourceSyncTransferClient` 的 close 路径）。
+3. **取消与回执/投递确认的交互无用例**：取消后不发回执、不等 FIN 的字节级断言仍 NOT_RUN。
+4. **未覆盖 Hilt 注入路径与进程重建**：用例直接 `setContent { SourceSyncImportScreen(...) }`，旋转屏幕/进程重建后的取消不在本节点。
+5. **取消态不持久化**：状态在内存里，离开页面即复位。
+6. **不入 required-suite**：`.github/workflows/android-ci.yml` 仍是 32 条 `--required-suite`（本节点未改 CI），本套件由 visual-instrumentation job 覆盖。
+7. **未测无障碍 / 深色主题 / 200% 字体**：取消按钮与新增布局没有视觉回归。
