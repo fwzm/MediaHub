@@ -120,6 +120,12 @@ object SourceSyncImportTags {
 
     const val LISTEN_TLS = "sync.listen.tls"
 
+    /** W6-53：要求对端带口令（HMAC 认证）的开关。 */
+    const val LISTEN_AUTH = "sync.listen.auth"
+
+    /** W6-53：对端口令输入框（按密码显示，只留在内存）。 */
+    const val LISTEN_SECRET = "sync.listen.secret"
+
     /** 收下后回一个裸 0x04（W6-40）：对端才能区分「接受」与「收完就断」。 */
     const val LISTEN_RECEIPT = "sync.listen.receipt"
 
@@ -835,6 +841,35 @@ private fun ListenSection(
                     MaterialTheme.colorScheme.error
                 },
                 modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_INFO),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = form.auth,
+                    onCheckedChange = { checked -> form = form.copy(auth = checked) },
+                    enabled = !listening && !receiving,
+                    modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_AUTH),
+                )
+                Text(
+                    SourceSyncListenCopy.AUTH_LABEL,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            OutlinedTextField(
+                value = form.secret,
+                onValueChange = { form = form.copy(secret = it) },
+                label = { Text(SourceSyncListenCopy.SECRET_LABEL) },
+                singleLine = true,
+                enabled = !listening && !receiving && form.auth,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.LISTEN_SECRET),
+            )
+            Text(
+                SourceSyncListenCopy.AUTH_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(

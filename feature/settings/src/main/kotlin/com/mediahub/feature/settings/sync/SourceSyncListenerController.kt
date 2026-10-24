@@ -5,6 +5,7 @@ import com.mediahub.core.common.sync.SourceSyncTlsIdentity
 import com.mediahub.core.common.sync.SourceSyncTlsOptions
 import com.mediahub.core.common.sync.SourceSyncTlsReasons
 import com.mediahub.core.common.sync.SourceSyncTransferListener
+import com.mediahub.core.common.sync.SourceSyncTransferOptions
 import com.mediahub.core.database.sync.SourceSyncImportGateway
 import com.mediahub.core.database.sync.SourceSyncImportGateways
 import com.mediahub.core.database.sync.SourceSyncListenerImportService
@@ -121,6 +122,21 @@ object SourceSyncListenCopy {
     /** 回执写出去了才追加的一句（W6-40）：对端现在能区分「接受」与「收完就断」。 */
     const val RECEIPT_WRITTEN_HINT: String = "已回执 0x04，对端能确认这封信封被收下了。"
 
+    /** W6-53：要求对端在 tag 帧里带口令（HMAC-SHA256），口令只留在内存。 */
+    const val AUTH_LABEL: String = "要求对端带口令（HMAC 认证）"
+
+    /** 口令框只在开关点亮时可用，输入内容按密码处理。 */
+    const val SECRET_LABEL: String = "口令（只留在内存）"
+
+    /** 开关的边界如实写清楚：对端没带 tag 判 auth-required，tag 对不上判 auth-mismatch。 */
+    const val AUTH_HINT: String =
+        "开了之后，对端必须在 tag 帧里带同一口令的 HMAC，对不上判 auth-mismatch；" +
+            "对端根本没带认证则判 auth-required。口令只进内存，不进状态行、日志与导出。"
+
+    /** 开了认证却没填口令时的提示：连 socket 都不开（与 W6-42 发送端同一口径）。 */
+    const val SECRET_REQUIRED: String =
+        "开了认证就必须填口令：没有口令时对端带来的 tag 帧一律判 auth-secret-unavailable。"
+
     /** 一条状态行（Idle 没有状态行）。 */
     fun lineOf(state: SourceSyncListenState): String? = when (state) {
         SourceSyncListenState.Idle -> null
@@ -200,6 +216,14 @@ data class SourceSyncListenForm(
     val host: String = "",
     /** 是否允许绑一个显式单播地址（W6-52）；关着时只接受回环，拒绝码仍是 not-loopback。 */
     val allowExplicitHost: Boolean = false,
+    /**
+     * 是否要求对端带口令（W6-53）：开着时对端每一帧 tag 都要用同一口令算 HMAC-SHA256。
+     *
+     * 默认关，与 W6-25 之前逐字同行为；关着时一个认证字节都不多读。
+     */
+    val auth: Boolean = false,
+    /** 口令原文（只在内存里用一次，不落盘、不进状态行）；[auth] 关着时忽略。 */
+    val secret: String = "",
 ) {
 
     /** 留空给 0（系统分配）；非数字、越界一律 null。 */
@@ -212,7 +236,19 @@ data class SourceSyncListenForm(
 
     val isPortTextAcceptable: Boolean get() = portNumber != null
 
-    val canSubmit: Boolean get() = isPortTextAcceptable
+    /** 开了认证就必须有口令：空口令等于自己把自己锁在门外。 */
+    val isSecretAcceptable: Boolean get() = !auth || secret.isNotEmpty()
+
+    val canSubmit: Boolean get() = isPortTextAcceptable && isSecretAcceptable
+
+    /** 诊断 / 日志安全：口令原文一律不出现在 toString 里。 */
+    override fun toString(): String = "SourceSyncListenForm(port=" + port +
+        ", tls=" + tls +
+        ", receipt=" + receipt +
+        ", host=" + host +
+        ", allowExplicitHost=" + allowExplicitHost +
+        ", auth=" + auth +
+        ", secret=<redacted>)"
 
     companion object {
 
@@ -296,6 +332,21 @@ interface SourceSyncListenerFactory {
         host: String?,
         allowExplicitHost: Boolean,
     ): SourceSyncListenerOpenResult = open(port, tls, receipt)
+
+    /**
+     * W6-53：带对端口令要求的开监听。
+     *
+     * [auth] 为 null 表示不要求认证（与之前逐字同行为）；非空表示每一帧 tag 都要用这个口令验证。
+     * 默认实现把 auth 丢掉、等价于上一个重载：既有工厂（含测试替身）不必改一行。
+     */
+    fun open(
+        port: Int,
+        tls: Boolean,
+        receipt: Boolean,
+        host: String?,
+        allowExplicitHost: Boolean,
+        auth: SourceSyncTransferOptions?,
+    ): SourceSyncListenerOpenResult = open(port, tls, receipt, host, allowExplicitHost)
 }
 
 /**
@@ -358,12 +409,34 @@ class SourceSyncListenerController(
             )
             return false
         }
+        if (!form.isSecretAcceptable) {
+            // 开了认证却没有口令：一个 socket 都不开，码是本端的，不是线上码。
+            _state.value = SourceSyncListenState.Failed(
+                port = null,
+                code = SECRET_MISSING,
+                detail = SourceSyncListenCopy.SECRET_REQUIRED,
+            )
+            return false
+        }
         if (!starting.compareAndSet(false, true)) return false
         try {
             if (session != null) return false
+            // 口令在这里换成 core 的选项：原文只活在这个局部变量里，进不了状态、日志与导出。
+            val auth = if (form.auth) {
+                SourceSyncTransferOptions.withSecret(form.secret.toByteArray(Charsets.UTF_8))
+            } else {
+                null
+            }
             val opened = try {
                 withContext(Dispatchers.IO) {
-                    factory.open(targetPort, form.tls, form.receipt, form.host, form.allowExplicitHost)
+                    factory.open(
+                        targetPort,
+                        form.tls,
+                        form.receipt,
+                        form.host,
+                        form.allowExplicitHost,
+                        auth,
+                    )
                 }
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -500,6 +573,9 @@ class SourceSyncListenerController(
 
         const val RECEIVE_FAILED: String = "receive-failed"
 
+        /** W6-53：开了认证却没填口令（本地拦下，不开 socket）。 */
+        const val SECRET_MISSING: String = "listen-secret-missing"
+
         const val MISSING_ENVELOPE: String = "missing-envelope"
 
         /** 没开监听就想等一次发送时给界面的提示（不是状态行，按钮此时本来就点不动）。 */
@@ -537,6 +613,16 @@ class SourceSyncListenerImportFactory(
         receipt: Boolean,
         host: String?,
         allowExplicitHost: Boolean,
+    ): SourceSyncListenerOpenResult =
+        open(port, tls, receipt, host, allowExplicitHost, auth = null)
+
+    override fun open(
+        port: Int,
+        tls: Boolean,
+        receipt: Boolean,
+        host: String?,
+        allowExplicitHost: Boolean,
+        auth: SourceSyncTransferOptions?,
     ): SourceSyncListenerOpenResult {
         if (tls && !identity.isUsable) {
             return SourceSyncListenerOpenResult.Failed(
@@ -557,13 +643,15 @@ class SourceSyncListenerImportFactory(
                 SourceSyncListenerOpenResult.Failed(opened.code, opened.detail)
 
             is SourceSyncListenerImportStart.Started ->
-                SourceSyncListenerOpenResult.Opened(ImportSession(opened.service, receipt))
+                SourceSyncListenerOpenResult.Opened(ImportSession(opened.service, receipt, auth))
         }
     }
 
     private class ImportSession(
         private val service: SourceSyncListenerImportService,
         receipt: Boolean,
+        /** W6-53：对端口令要求在开监听时定下来，之后每次 receiveOnce 都用它。 */
+        private val auth: SourceSyncTransferOptions?,
     ) : SourceSyncListenerSession {
 
         /** W6-40：回执开关在开监听时定下来，之后每次 receiveOnce 都用它。 */
@@ -579,7 +667,7 @@ class SourceSyncListenerImportFactory(
         override val certificateFingerprint: String? get() = service.certificateFingerprint
 
         override suspend fun receiveOnce(): SourceSyncTransferImportOutcome =
-            service.receiveAndImport(receipt = receiptOptions)
+            service.receiveAndImport(auth = auth, receipt = receiptOptions)
 
         override fun close() {
             service.close()

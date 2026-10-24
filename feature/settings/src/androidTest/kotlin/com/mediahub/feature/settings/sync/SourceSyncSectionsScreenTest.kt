@@ -204,6 +204,53 @@ class SourceSyncSectionsScreenTest {
         composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_ALLOW_HOST).assertIsNotEnabled()
     }
 
+    // ------------------------------------------------- W6-53 对端口令（HMAC 认证）开关
+
+    @Test
+    fun theListenCardOffersAnAuthSwitchAndASecretField() {
+        render()
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_AUTH).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+        // 开关没点亮时口令框不可编辑（与发送卡同一口径：避免"填了也没用"的假象）。
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_SECRET).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsNotEnabled()
+        composeRule.onNodeWithText(SourceSyncListenCopy.AUTH_HINT).performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(SourceSyncListenCopy.AUTH_LABEL).assertIsDisplayed()
+    }
+
+    @Test
+    fun theListenFormCarriesTheAuthSwitchAndTheSecretVerbatim() {
+        var listened: SourceSyncListenForm? = null
+        render(onListenStart = { listened = it })
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_AUTH).performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_SECRET).performScrollTo()
+            .assertIsEnabled()
+            .performTextReplacement("s3cret")
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_START).performScrollTo()
+            .performClick()
+
+        val form = listened
+        assertNotNull("开始监听没把表单交出去", form)
+        // 口令只原样转交给控制器；怎么变成 core 的选项、有没有泄漏，由控制器单测钉住。
+        assertTrue("点了开关就必须原样带过去", form!!.auth)
+        assertEquals("s3cret", form.secret)
+    }
+
+    @Test
+    fun whileListeningTheAuthSwitchAndTheSecretAreLocked() {
+        render(listenState = SourceSyncListenState.Listening(port = 45678, tls = false))
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_AUTH).performScrollTo()
+            .assertIsNotEnabled()
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_SECRET).assertIsNotEnabled()
+    }
+
     // ------------------------------------------------------------------ 发送
 
     @Test

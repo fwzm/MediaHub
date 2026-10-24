@@ -8,6 +8,7 @@ import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SourceSyncSummary
 import com.mediahub.core.common.sync.SourceSyncTransferListener
+import com.mediahub.core.common.sync.SourceSyncTransferOptions
 import com.mediahub.core.common.sync.SourceSyncTransferReasons
 import com.mediahub.core.common.sync.SourceSyncTlsReasons
 import com.mediahub.core.common.sync.SourceRecord
@@ -133,6 +134,10 @@ private class FakeFactory(
 
     var lastAllowExplicitHost: Boolean? = null
 
+    var lastAuth: SourceSyncTransferOptions? = null
+
+    var authCalls = 0
+
     override fun tlsAvailability(): SourceSyncListenTlsAvailability = availability
 
     override fun open(port: Int, tls: Boolean): SourceSyncListenerOpenResult = open(port, tls, false)
@@ -156,6 +161,20 @@ private class FakeFactory(
         lastHost = host
         lastAllowExplicitHost = allowExplicitHost
         return open(port, tls, receipt)
+    }
+
+    // W6-53：对端口令要求原样落到这里；null 表示不要求认证。
+    override fun open(
+        port: Int,
+        tls: Boolean,
+        receipt: Boolean,
+        host: String?,
+        allowExplicitHost: Boolean,
+        auth: SourceSyncTransferOptions?,
+    ): SourceSyncListenerOpenResult {
+        authCalls++
+        lastAuth = auth
+        return open(port, tls, receipt, host, allowExplicitHost)
     }
 }
 
@@ -824,6 +843,77 @@ class SourceSyncListenerControllerTest {
             "既然绑的是那台机器的地址，就不该再写 127.0.0.1",
             SourceSyncListenCopy.portLineOf(state).orEmpty().contains("127.0.0.1"),
         )
+    }
+
+    // ------- W6-53 对端口令（HMAC 认证）开关 -------
+
+    @Test
+    fun defaultFormAsksForNoSecretAndPassesNoAuthOptions() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession()))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+
+        assertTrue(controller.start(SourceSyncListenForm()))
+
+        assertEquals("默认不要求认证：工厂收到的认证选项必须是 null", null, factory.lastAuth)
+        assertEquals(1, factory.authCalls)
+        assertEquals("默认表单可以不填口令就提交", true, SourceSyncListenForm().canSubmit)
+    }
+
+    @Test
+    fun authOnWithoutASecretIsRefusedBeforeAnySocket() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession()))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+        val form = SourceSyncListenForm(auth = true)
+
+        assertEquals("开了认证却没口令时，界面本来就不该放行", false, form.canSubmit)
+        assertFalse(controller.start(form))
+
+        val state = controller.state.value
+        assertTrue("期待失败状态，实际 " + state, state is SourceSyncListenState.Failed)
+        state as SourceSyncListenState.Failed
+        assertEquals(SourceSyncListenerController.SECRET_MISSING, state.code)
+        assertEquals(SourceSyncListenCopy.SECRET_REQUIRED, state.detail)
+        assertNull(state.port)
+        assertEquals("口令缺失时一个 socket 都不该开", 0, factory.openCalls)
+        assertFalse(controller.isListening)
+        assertEquals("失败：listen-secret-missing（" + SourceSyncListenCopy.SECRET_REQUIRED + "）", SourceSyncListenCopy.lineOf(state))
+    }
+
+    @Test
+    fun authOnWithASecretPassesOptionsCarryingTheSecretBytes() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession()))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+
+        assertTrue(controller.start(SourceSyncListenForm(auth = true, secret = "s3cret")))
+
+        val auth = factory.lastAuth
+        assertTrue("开了认证就该把选项交给工厂，实际 " + auth, auth != null)
+        auth as SourceSyncTransferOptions
+        assertEquals(true, auth.authenticate)
+        assertEquals(true, auth.hasSecret)
+        assertTrue("口令按 UTF-8 原样交给 core", auth.secret.contentEquals("s3cret".toByteArray(Charsets.UTF_8)))
+        assertEquals("口令进了状态行就等于泄漏", false, SourceSyncListenCopy.lineOf(controller.state.value).orEmpty().contains("s3cret"))
+    }
+
+    @Test
+    fun aTypedSecretWithTheSwitchOffIsIgnored() = runTest {
+        val factory = FakeFactory(opened = opened(FakeSession()))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+
+        assertTrue(controller.start(SourceSyncListenForm(secret = "s3cret")))
+
+        assertEquals("开关没点亮时，写了口令也不该要求对端认证", null, factory.lastAuth)
+    }
+
+    @Test
+    fun theSecretNeverAppearsInTheFormToString() {
+        val form = SourceSyncListenForm(host = "192.168.1.5", auth = true, secret = "s3cret")
+
+        val text = form.toString()
+
+        assertEquals("口令原文不得出现在 toString 里", false, text.contains("s3cret"))
+        assertTrue("要如实说明打了码，实际 " + text, text.contains("secret=<redacted>"))
+        assertTrue("其余字段照旧可读", text.contains("host=192.168.1.5") && text.contains("auth=true"))
     }
 
     private suspend fun seededSession(): Seeded {
