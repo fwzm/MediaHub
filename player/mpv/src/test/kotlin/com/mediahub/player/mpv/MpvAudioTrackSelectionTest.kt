@@ -44,10 +44,12 @@ class MpvAudioTrackSelectionTest {
         val aidWrites = mutableListOf<String>()
         var outputFormat: String? = null
         val sidWrites = mutableListOf<String>()
+        val options = mutableMapOf<String, String>()
+        var initialized = false
 
         override fun addObserver(observer: MpvInstance.Observer) { this.observer = observer }
-        override fun setOptionString(name: String, value: String) = Unit
-        override fun init() = Unit
+        override fun setOptionString(name: String, value: String) { options[name] = value }
+        override fun init() { initialized = true }
         override fun attachSurface(surface: Surface) = Unit
         override fun detachSurface() = Unit
         override fun observeProperty(name: String, format: MpvInstance.Format) = Unit
@@ -115,6 +117,18 @@ class MpvAudioTrackSelectionTest {
         currentTimeMillis = { 200L },
         deferNative = { it() },
     )
+
+    @Test
+    fun `Android subtitle default chooses a text font instead of a zero space clock font`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val instance = FakeInstance()
+        val engine = engineWith(instance, scope)
+        try {
+            engine.play(session())
+            withTimeout(5_000) { while (!instance.initialized) delay(10) }
+            assertEquals("Roboto", instance.options["sub-font"])
+        } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
+    }
 
     @Test
     fun `embedded subtitles are published and selection writes native sid then reads back`() = runBlocking {

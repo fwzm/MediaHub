@@ -219,6 +219,9 @@ class MpvPlaybackEngine internal constructor(
                     m.addObserver(observer(run))
                     m.setOptionString("vo", "gpu")
                     m.setOptionString("ao", "audiotrack")
+                    // Android fontconfig fallback can select an OEM clock font whose space
+                    // advance is zero. Use the platform text family; CJK still uses fallback.
+                    m.setOptionString("sub-font", "Roboto")
                     m.setOptionString("hwdec", "mediacodec")
                     // M6 真机缺陷修复（P1）：关闭 mpv 的 ytdl 钩子。
                     // MediaHub 的媒体**一律经回放环桥**（http://127.0.0.1:<port>/media/<random>）
