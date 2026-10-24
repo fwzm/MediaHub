@@ -579,3 +579,84 @@ JUnit XML 亲数（`core/common/build/test-results/testDebugUnitTest`，最新 X
 4. **证书不持久化、不轮换、无吊销/OCSP/CT**：有效期与 pin 的流转全靠人工（Windows 侧同样是临时证书）。
 5. **无 ALPN、无会话恢复 / 0-RTT、不提供 TLS 1.2 回退**（刻意：只认 1.3）。
 6. **只允许回环**；且探针只在接收端做，Android 侧没有实现「发送端也要先探测对端是否明文」的对称逻辑（与 Windows 现状一致）。
+
+## 18. 跨端联调（W6-32）
+
+### 18.1 为什么单独做一次跨端联调
+
+第 16、17 节里「对端」都是本机 JVM：`SourceSyncTlsTest` 的 TLS 对端是 `SSLServerSocket`，`SourceSyncTransferImportTest` 的对端是同进程 `ServerSocket`。这些用例能证明「Android 与自己一致」，17.6 也把「未与真实 Windows 端点联调」如实列为未覆盖项。W6-32 把对端换成**真 Windows 进程**（`MediaHub.SyncCli.dll` 的 `transfer serve`），两端各跑自己的生产代码，特意跨过 JSSE ↔ .NET `SslStream` 这条边界：记录层分片、NewSessionTicket 时序、close_notify 与 abortive close 只在跨端时才暴露。
+
+用例仍是 JUnit4 JVM 单测（`SourceSyncTlsInteropTest.kt`，10 例），但**没有 mock**：端口、证书指纹、认证口令、`sync-sources.json` 里的实体都是真的；断言同时看子进程退出码、stdout 的那一份 JSON 与落盘文件，不只看退出码。
+
+### 18.2 运行方式与环境变量
+
+| 环境变量 | 必需 | 含义 |
+| --- | --- | --- |
+| `MH_W632_SYNC_DLL` | 是 | `MediaHub.SyncCli.dll` 的绝对路径；缺失则整套 skipped |
+| `MH_W632_DOTNET` | 否 | dotnet 可执行文件，默认 `dotnet` |
+
+前置：Windows 侧仓库已构建出 `windows/src/MediaHub.SyncCli/bin/Debug/net10.0/MediaHub.SyncCli.dll`（本机 dotnet 10.0.113）。先设好 `JAVA_HOME` / `ANDROID_HOME`，再：
+
+```
+gradlew.bat :core:common:testDebugUnitTest --console=plain --rerun-tasks --no-daemon
+```
+
+**必须 `--no-daemon`**：Gradle daemon 的环境变量是它启动时的快照，新设的 `MH_W632_SYNC_DLL` 不会被测试 worker 继承，结果是 BUILD SUCCESSFUL 但整套 skipped（看起来绿，其实一例没跑）。
+
+CI 上这套件**刻意不在** `.github/workflows/android-ci.yml` 的 `--required-suite` 名单里（现 30 条）：没有 `MH_W632_SYNC_DLL` 时 `@Before` 的 `assumeTrue` 抛 `AssumptionViolatedException`，JUnit4 记为 skipped 而非 failed。实测：同一套件去掉该环境变量后 `tests=10 skipped=10 failures=0 errors=0`，skip message 是「MH_W632_SYNC_DLL 没有指向 MediaHub.SyncCli.dll，跳过跨端联调（CI 上必须跳过）」。所以它不会污染 CI 门禁，本地设变量即可真跑。
+
+### 18.3 用例表（`SourceSyncTlsInteropTest.kt`，661 行 / 10 例）
+
+每个用例都通过 `ProcessBuilder` 起一次性子进程 `dotnet <dll> transfer serve --root <临时目录> --device win-a --json --apply [--tls] [--authenticate --secret-env MH_W632_SECRET]`，从 stderr 抓 `listening 127.0.0.1:<port>`（`--tls` 时更早还有一行 `certificate fingerprint: <64hex>`），`finally` 里 `destroy()` → `destroyForcibly()` → 递归删临时目录。
+
+| # | 用例（行号） | 场景 | 断言要点 |
+| --- | --- | --- | --- |
+| 1 | `plaintextKotlinEnvelopeIsAppliedByWindows`（:67） | 明文，Kotlin 发 → Windows serve 收 | `counts.apply=2`、`report.applied=2`、`sync-sources.json` 恰好两条且 id 就是 `local-w632-emby` / `local-w632-jellyfin`、`frames == chunkCount(信封字节数)`（明文没有挑战帧，Windows 的 `frames` 只数它读到的帧）、`from=android-a`、`to=win-a` |
+| 2 | `tlsPinnedHandshakeDeliversTheEnvelope`（:91） | TLS + 从 stderr 抓 pin | 客户端 `Ok`、`json.certificateFingerprint` 等于 stderr 那个 pin、`tls=true`、`counts.apply=2` |
+| 3 | `wrongPinIsRefusedBeforeAnyEnvelopeByteIsSent`（:122） | pin 改一位 | 客户端 `Failed(tls-fingerprint-mismatch)`、serve 退出码非 0、`sync-sources.json` 不存在（零写入） |
+| 4 | `tlsClientAgainstAPlaintextServeFailsTheHandshake`（:153） | TLS 客户端打明文 serve | 客户端 `Failed(tls-handshake-failed)`、serve 退出码非 0、零写入 |
+| 5 | `plaintextClientAgainstATlsServeIsRejectedOnTheWindowsSide`（:179） | 明文客户端打 TLS serve | Windows 侧 `tls-handshake-failed`（stderr 含该码）、退出码非 0、零写入；客户端侧因无投递确认仍是 `Ok(frameCount=1)`（见 18.5 第 1 条） |
+| 6 | `authenticatedKotlinTagIsVerifiedByWindows`（:208） | 挑战文本当 nonce，Kotlin 带 tag | `authenticate=true`、`secretEnv=MH_W632_SECRET`、`frames == chunkCount + 2`（挑战帧 + 数据块 + tag 帧）、`counts.apply=2`、落盘两条 |
+| 7 | `wrongSecretIsRefusedAsAuthMismatch`（:239） | 两端口令不一致 | serve stderr 含 `auth-mismatch`、退出码非 0、零写入；客户端仍 `Ok(frameCount=3)`（同一原因） |
+| 8 | `tlsAndAuthenticationCompose`（:268） | TLS + 认证同开 | `tls=true` 且 `authenticate=true`、pin 与 stderr 一致、`counts.apply=2` |
+| 9 | `theSameNonceIsAcceptedByTwoSeparateServeProcesses`（:297） | 同 nonce 打两个新进程 | 两个独立进程都接受（nonce 缓存是**进程级**）；进程内重放由 `SourceSyncTransferAuthTest` 覆盖 |
+| 10 | `windowsSendPinsTheKotlinTlsListener`（:325） | 反向：Windows `transfer send --tls --expect-fingerprint` 打 Kotlin `SSLServerSocket` | Kotlin 侧 `handshakeServer` + `SourceSyncTransfer.receive` 收到信封、解码后 `deviceId=win-b`、Windows 退出码 0、Windows 不写自己的仓库；Kotlin 侧收完必须 `SourceSyncTls.gracefulClose`（TLS 1.3 服务端不半关会让对端 RST） |
+
+### 18.4 实测（原始输出与计数）
+
+```
+pwsh 里设 JAVA_HOME=C:\Program Files\Android\Android Studio\jbr、ANDROID_HOME、MH_W632_SYNC_DLL 后：
+cmd /c "gradlew.bat :core:common:testDebugUnitTest --console=plain --rerun-tasks --no-daemon > D:\mh-verify\w6-32-interop.log 2>&1"
+BUILD SUCCESSFUL in 1m 6s
+17 actionable tasks: 17 executed
+EXIT=0
+```
+
+JUnit XML 亲数（`core/common/build/test-results/testDebugUnitTest`）：**30 suites / 396 tests / 0 failures / 0 errors / 0 skipped**。基线是 29 套件 / 386 例（第 17 节），本轮 +1 套件 +10 例；`SourceSyncTlsInteropTest` 单列 tests=10 / time=4.807s / skipped=0。
+
+| 用例 | 耗时 | 结论 |
+| --- | --- | --- |
+| `plaintextKotlinEnvelopeIsAppliedByWindows` | 0.380s | 通过 |
+| `tlsPinnedHandshakeDeliversTheEnvelope` | 0.543s | 通过 |
+| `wrongPinIsRefusedBeforeAnyEnvelopeByteIsSent` | 0.755s | 通过 |
+| `tlsClientAgainstAPlaintextServeFailsTheHandshake` | 0.281s | 通过 |
+| `plaintextClientAgainstATlsServeIsRejectedOnTheWindowsSide` | 0.453s | 通过 |
+| `authenticatedKotlinTagIsVerifiedByWindows` | 0.378s | 通过 |
+| `wrongSecretIsRefusedAsAuthMismatch` | 0.277s | 通过 |
+| `tlsAndAuthenticationCompose` | 0.545s | 通过 |
+| `theSameNonceIsAcceptedByTwoSeparateServeProcesses` | 0.735s | 通过 |
+| `windowsSendPinsTheKotlinTlsListener` | 0.456s | 通过 |
+
+修红三条（如实记）：
+
+1. 编译红 `Unresolved reference: readString`：`Files.readString` 是 Java 11 API，Android 的 `android.jar` 里没有；改用 `String(Files.readAllBytes(file), StandardCharsets.UTF_8)`。
+2. `frames` 语义写错：最初按「数据块 + 挑战帧」断言，实测明文时 Windows 的 `frames` 只数它读到的帧（明文发送端不送挑战帧，故 `frames == chunkCount`），认证时才多出挑战帧与 tag 帧（`chunkCount + 2`）。改断言，不改实现。
+3. 两例把「发送端返回 Ok」当成「对端接受」：协议单向、无投递确认（见 18.5 第 1 条），改成如实断言客户端 `Ok` 并核对帧数，拒绝只从 Windows 侧观察。
+
+### 18.5 跨端事实与未覆盖项
+
+1. **协议是单向的，发送端没有投递确认**：`SourceSyncTransfer.sendTo` 返回的 `Ok` 只表示帧写进了 socket。第 5、7 例实测：Windows 报 `tls-handshake-failed` / `auth-mismatch` 且零写入，Kotlin 发送端照样 `Ok`（`frameCount` 分别为 1 和 3）。Windows CLI 的 `transfer send` 有 `--confirm-delivery`（JSON 里有 `deliveryConfirmed`），Android 侧**没有**对应物；若以后要显示「对端已接受」，需两端一起定一个回执语义，不在本轮范围。
+2. **nonce 重放窗口是进程级**：CLI 的 `transfer serve` 每个进程只服务一条连接就退出，跨端用例无法构造「进程内二次投递」，第 9 例只证明两个新进程各自接受同一 nonce；进程内 `auth-replayed` 仍由 `SourceSyncTransferAuthTest`（第 15 节）覆盖。
+3. **明文客户端打 TLS 端点时，客户端侧拿到的码取决于 `SslStream` 断连方式**（可能 `io-failed`、也可能 `frame-truncated`），本轮不锁定客户端码，只锁定 Windows 侧与零写入。
+4. **未覆盖**：真机与 instrumentation（未跑）；非回环（全部 127.0.0.1）、跨机、跨网段；Android 作为服务端只在第 10 例的本机回环用过；Windows 侧 GUI 与 Android 侧 UI 都没接发送流程；Windows 的 `transfer send` 只作对端使用，没有做「Windows 发 → Android 收」的全链路。
+5. **Windows 文件一个都没改**（本轮只读）；Android 侧唯一的生产代码改动是 `SourceSyncTransferClient.receiveFrom/sendTo` 各加 `auth: SourceSyncTransferOptions? = null` 并透传（默认 `null`，默认路径字节与既有 386 例完全一致）——原客户端没有 auth 参数，Android 发送端无法带 tag 帧，跨端认证用例根本无从写起。

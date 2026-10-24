@@ -36,28 +36,35 @@ class SourceSyncTransferClient(
      * 连上对端并读一封信封（对端是发送方）。
      *
      * @param tls 默认关闭；开启时先握手再读帧，握手失败直接返回 tls- 前缀的稳定码。
+     * @param auth 可选的对端认证（W6-25）；默认 null，字节与今天完全一致。
      */
     fun receiveFrom(
         host: String,
         port: Int,
         expectedChallenge: String? = null,
         tls: SourceSyncTlsOptions = SourceSyncTlsOptions.Off,
+        auth: SourceSyncTransferOptions? = null,
     ): SourceSyncTransferResult {
         return withConnection(host, port, tls) { input, _ ->
-            SourceSyncTransfer.receive(input, expectedChallenge)
+            SourceSyncTransfer.receive(input, expectedChallenge, auth)
         }
     }
 
-    /** 连上对端并送出一封信封（本端是发送方）。 */
+    /**
+     * 连上对端并送出一封信封（本端是发送方）。
+     *
+     * @param auth 可选的对端认证（W6-25）；非 null 且持口令时信封后追加一帧 HMAC tag。
+     */
     fun sendTo(
         host: String,
         port: Int,
         envelope: ByteArray,
         challenge: String? = null,
         tls: SourceSyncTlsOptions = SourceSyncTlsOptions.Off,
+        auth: SourceSyncTransferOptions? = null,
     ): SourceSyncTransferResult {
         return withConnection(host, port, tls) { _, output ->
-            SourceSyncTransfer.sendTo(output, envelope, challenge)
+            SourceSyncTransfer.sendTo(output, envelope, challenge, auth)
         }
     }
 
