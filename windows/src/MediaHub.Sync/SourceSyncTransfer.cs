@@ -101,16 +101,19 @@ public static class SourceSyncTransfer
         return (envelopeBytes + ChunkPayloadBytes - 1) / ChunkPayloadBytes;
     }
 
-    /// <summary>Writes the optional challenge frame, then every chunk, then flushes.</summary>
+    /// <summary>Writes the optional challenge frame, then every chunk, then the optional tag frame, then flushes.</summary>
     /// <param name="stream">An open stream; the caller owns its lifetime.</param>
     /// <param name="envelope">The serialized envelope.</param>
     /// <param name="challenge">The invitation's challenge, or null to send the envelope without one.</param>
     /// <param name="cancellationToken">Cancels between frames.</param>
+    /// <param name="options">The optional authentication settings. Null or <see cref="SourceSyncTransferOptions.Off"/>
+    /// writes exactly the W6-16 byte stream: no tag frame, no extra flush, unchanged frame count.</param>
     public static async Task<SourceSyncTransferResult> SendAsync(
         Stream stream,
         ReadOnlyMemory<byte> envelope,
         string? challenge = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
 
@@ -143,6 +146,27 @@ public static class SourceSyncTransfer
             }
         }
 
+        SourceSyncTransferOptions? auth = options is { Authenticate: true } ? options : null;
+        byte[]? tagNonce = null;
+        if (auth is not null)
+        {
+            if (!auth.HasSecret)
+            {
+                return SourceSyncTransferResult.Failed(
+                    SourceSyncTransferAuthReasons.AuthSecretUnavailable,
+                    "Authentication is on but this process holds no secret; nothing was sent.");
+            }
+
+            if (challengeBytes is null)
+            {
+                return SourceSyncTransferResult.Failed(
+                    SourceSyncTransferAuthReasons.AuthRequired,
+                    "Authentication is on but no challenge was announced; the challenge is the nonce the tag binds to, so nothing was sent.");
+            }
+
+            tagNonce = challengeBytes;
+        }
+
         int frames = 0;
         try
         {
@@ -167,6 +191,18 @@ public static class SourceSyncTransfer
                 frames++;
             }
 
+            if (auth is not null && tagNonce is not null)
+            {
+                // The tag covers the exact bytes just written and the exact nonce the peer was told. It goes after
+                // the last chunk so a receiver missing it can tell "no proof" apart from "cut off mid-envelope".
+                byte[] tag = SourceSyncTransferAuthenticator.CreateTag(auth.Secret, tagNonce, envelope.Span);
+                byte[] tagFrame = new byte[SourceSyncTransferAuthenticator.TagFrameBytes];
+                tagFrame[0] = SourceSyncTransferAuthenticator.TagFrameKind;
+                tag.CopyTo(tagFrame, 1);
+                await PairingFrame.WriteAsync(stream, tagFrame, cancellationToken).ConfigureAwait(false);
+                frames++;
+            }
+
             await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception error) when (error is IOException or ObjectDisposedException or InvalidOperationException)
@@ -177,20 +213,36 @@ public static class SourceSyncTransfer
         return SourceSyncTransferResult.Ok(envelope.ToArray(), frames, challenge?.Trim());
     }
 
-    /// <summary>Reads frames until the announced total has arrived, and returns the reassembled payload.</summary>
+    /// <summary>
+    /// Reads frames until the announced total has arrived, checks the peer's tag frame when authentication is on,
+    /// and returns the reassembled payload.
+    /// </summary>
     /// <param name="stream">An open stream; the caller owns its lifetime.</param>
     /// <param name="expectedChallenge">The invitation's challenge, or null to accept whatever the peer announces.</param>
     /// <param name="cancellationToken">Cancels between frames.</param>
+    /// <param name="options">The optional authentication settings. When on, a complete envelope is only accepted
+    /// after a valid tag frame whose nonce this device has not seen before. Null or
+    /// <see cref="SourceSyncTransferOptions.Off"/> reads exactly the W6-16 byte stream.</param>
     public static async Task<SourceSyncTransferResult> ReceiveAsync(
         Stream stream,
         string? expectedChallenge = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
+
+        SourceSyncTransferOptions? auth = options is { Authenticate: true } ? options : null;
+        if (auth is not null && !auth.HasSecret)
+        {
+            return SourceSyncTransferResult.Failed(
+                SourceSyncTransferAuthReasons.AuthSecretUnavailable,
+                "Authentication is on but this process holds no secret to check the peer's tag with; nothing was read.");
+        }
 
         string expected = expectedChallenge?.Trim() ?? "";
         bool challengeRequired = expected.Length > 0;
         byte[]? assembled = null;
+        bool complete = false;
         int total = -1;
         int received = 0;
         int frames = 0;
@@ -203,6 +255,13 @@ public static class SourceSyncTransfer
                 byte[]? frame = await PairingFrame.ReadAsync(stream, cancellationToken).ConfigureAwait(false);
                 if (frame is null)
                 {
+                    if (auth is not null && complete)
+                    {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferAuthReasons.AuthMissing,
+                            "The peer sent the whole envelope but no tag frame; nothing was accepted.");
+                    }
+
                     return assembled is null
                         ? SourceSyncTransferResult.Failed(
                             SourceSyncTransferReasons.FrameTruncated,
@@ -216,6 +275,68 @@ public static class SourceSyncTransfer
 
                 frames++;
                 byte kind = frame[0];
+
+                if (kind == SourceSyncTransferAuthenticator.TagFrameKind)
+                {
+                    if (auth is null)
+                    {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferReasons.FrameInvalid,
+                            "Unknown frame kind 0x03.");
+                    }
+
+                    if (assembled is null)
+                    {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferReasons.FrameInvalid,
+                            "The tag frame arrived before the first chunk.");
+                    }
+
+                    if (!complete)
+                    {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferReasons.FrameInvalid,
+                            "The tag frame arrived after " + received.ToString(CultureInfo.InvariantCulture) + " of "
+                            + total.ToString(CultureInfo.InvariantCulture) + " bytes; it must follow the last chunk.");
+                    }
+
+                    if (frame.Length != SourceSyncTransferAuthenticator.TagFrameBytes)
+                    {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferReasons.FrameInvalid,
+                            "A tag frame is " + frame.Length.ToString(CultureInfo.InvariantCulture)
+                            + " bytes; an HMAC-SHA256 tag is "
+                            + SourceSyncTransferAuthenticator.TagBytes.ToString(CultureInfo.InvariantCulture)
+                            + " bytes plus the kind byte.");
+                    }
+
+                    byte[] tag = frame.AsSpan(1).ToArray();
+
+                    if (string.IsNullOrEmpty(offered))
+                    {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferAuthReasons.AuthMissing,
+                            "The peer sent a tag but announced no challenge for it to bind to; nothing was accepted.");
+                    }
+
+                    if (!SourceSyncTransferAuthenticator.VerifyTag(auth.Secret, offered, assembled, tag))
+                    {
+                        // The nonce is deliberately not recorded here: a forged envelope must not be able to burn
+                        // the real nonce and so make the legitimate transfer look like a replay.
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferAuthReasons.AuthMismatch,
+                            "The tag does not match this envelope and nonce under this secret; nothing was accepted and the nonce was not recorded.");
+                    }
+
+                    if (!auth.ActiveNonces.Accept(auth.DeviceId, offered))
+                    {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferAuthReasons.AuthReplayed,
+                            "This device already accepted an envelope under this nonce; a replayed transfer is ignored and nothing was accepted.");
+                    }
+
+                    return SourceSyncTransferResult.Ok(assembled, frames, offered);
+                }
 
                 if (kind == ChallengeFrameKind)
                 {
@@ -249,6 +370,13 @@ public static class SourceSyncTransfer
                     return SourceSyncTransferResult.Failed(
                         SourceSyncTransferReasons.FrameInvalid,
                         "Unknown frame kind 0x" + kind.ToString("x2", CultureInfo.InvariantCulture) + ".");
+                }
+
+                if (complete)
+                {
+                    return SourceSyncTransferResult.Failed(
+                        SourceSyncTransferReasons.FrameInvalid,
+                        "The peer sent another chunk after the envelope was complete; the tag frame must follow the last chunk.");
                 }
 
                 if (frames == 1 && challengeRequired)
@@ -335,7 +463,14 @@ public static class SourceSyncTransfer
 
                 if (received == total)
                 {
-                    return SourceSyncTransferResult.Ok(assembled, frames, offered);
+                    if (auth is null)
+                    {
+                        return SourceSyncTransferResult.Ok(assembled, frames, offered);
+                    }
+
+                    // With authentication on a complete envelope is not yet a successful transfer: keep reading and
+                    // wait for the tag frame (or for the peer to close, which is auth-missing).
+                    complete = true;
                 }
             }
         }

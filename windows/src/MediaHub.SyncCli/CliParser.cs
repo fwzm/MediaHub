@@ -53,6 +53,10 @@ public static class CliParser
         "  transfer send      --to 127.0.0.1:<port> --root <dir> --device <id>\n" +
         "  transfer roundtrip --root <dir> --device-a <id> --device-b <id> [--apply]\n" +
         "                                                      (two devices under <root>/a and <root>/b)\n" +
+        "  --authenticate     transfer only: both ends prove they hold a shared secret (W6-24);\n" +
+        "                     off by default, so the bytes stay exactly W6-16's\n" +
+        "  --secret-env NAME  with --authenticate: read the secret from environment variable NAME\n" +
+        "                     (the value is never an argument and is never printed)\n" +
         "\n" +
         "Global:\n" +
         "  --json       stdout carries exactly one JSON document; progress goes to stderr\n" +
@@ -70,9 +74,9 @@ public static class CliParser
     private static readonly string[] PairVerifyValueOptions = ["--link"];
     private static readonly string[] PairListValueOptions = ["--root"];
     private static readonly string[] PairForgetValueOptions = ["--root", "--device"];
-    private static readonly string[] TransferServeValueOptions = ["--root", "--device", "--port"];
-    private static readonly string[] TransferSendValueOptions = ["--to", "--root", "--device"];
-    private static readonly string[] TransferRoundtripValueOptions = ["--root", "--device-a", "--device-b"];
+    private static readonly string[] TransferServeValueOptions = ["--root", "--device", "--port", "--secret-env"];
+    private static readonly string[] TransferSendValueOptions = ["--to", "--root", "--device", "--secret-env"];
+    private static readonly string[] TransferRoundtripValueOptions = ["--root", "--device-a", "--device-b", "--secret-env"];
 
     /// <summary>Parses a raw argument vector.</summary>
     public static CliParseResult Parse(IReadOnlyList<string>? args)
@@ -169,6 +173,7 @@ public static class CliParser
         bool json = false;
         bool apply = false;
         bool once = false;
+        bool authenticate = false;
 
         for (int i = start; i < args.Count; i++)
         {
@@ -234,6 +239,24 @@ public static class CliParser
                 }
 
                 once = true;
+                continue;
+            }
+
+            if (name == "--authenticate")
+            {
+                if (inlineValue is not null)
+                {
+                    return Error("flag-takes-no-value:" + name);
+                }
+
+                // Only the three socket verbs have a peer to authenticate.
+                if (command is not (SyncCliCommand.TransferServe or SyncCliCommand.TransferSend or
+                    SyncCliCommand.TransferRoundtrip))
+                {
+                    return Error("option-not-allowed-for-command:" + name + ":" + commandName);
+                }
+
+                authenticate = true;
                 continue;
             }
 
@@ -324,6 +347,23 @@ public static class CliParser
                 return Error("missing-required-option:--device-b");
         }
 
+        string? secretEnv = values.GetValueOrDefault("--secret-env");
+        if (command is SyncCliCommand.TransferServe or SyncCliCommand.TransferSend or SyncCliCommand.TransferRoundtrip)
+        {
+            // The secret itself never travels on the command line, so both halves of the pair are
+            // required: --authenticate without --secret-env would have nothing to authenticate with,
+            // and --secret-env alone names a secret that nothing reads.
+            if (authenticate && secretEnv is null)
+            {
+                return Error("missing-required-option:--secret-env");
+            }
+
+            if (!authenticate && secretEnv is not null)
+            {
+                return Error("missing-required-option:--authenticate");
+            }
+        }
+
         int? port = null;
         string? portText = values.GetValueOrDefault("--port");
         if (portText is not null)
@@ -370,6 +410,8 @@ public static class CliParser
                 DeviceA = deviceA,
                 DeviceB = deviceB,
                 Once = once,
+                Authenticate = authenticate,
+                SecretEnv = secretEnv,
                 Apply = apply,
                 Json = json,
             },
@@ -385,6 +427,7 @@ public static class CliParser
         "--root" or "--out" or "--in" or "--passphrase" or "--secrets" or "--deletions" or
         "--device" or "--baseline" or "--id" or "--source" or "--link" or "--expect" or
         "--to" or "--port" or "--device-a" or "--device-b" or
+        "--authenticate" or "--secret-env" or
         "--apply" or "--once" or "--json";
 
     private static CliParseResult Error(string code) => new() { Error = code };

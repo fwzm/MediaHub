@@ -103,19 +103,26 @@ public sealed class SourceSyncInbox
     /// <summary>The import round this inbox delegates to.</summary>
     public SourceSyncImportRound Round { get; }
 
-    /// <summary>Reads one envelope from a stream and imports it.</summary>
+    /// <summary>Reads one envelope from a stream, optionally checks the peer's tag, and imports it.</summary>
+    /// <param name="stream">An open stream; the caller owns its lifetime.</param>
+    /// <param name="expectedChallenge">The invitation's challenge, or null to accept whatever the peer announces.</param>
+    /// <param name="writer">Where the gated records are written once the transfer is accepted.</param>
+    /// <param name="allowedIds">Restricts which sources may be written, or null for the gate's own decision.</param>
+    /// <param name="cancellationToken">Cancels between frames.</param>
+    /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     public async Task<SourceSyncInboxResult> ReceiveAsync(
         Stream stream,
         string? expectedChallenge,
         SourceSyncRecordWriter writer,
         IReadOnlyList<string>? allowedIds = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(writer);
 
         SourceSyncTransferResult transfer =
-            await SourceSyncTransfer.ReceiveAsync(stream, expectedChallenge, cancellationToken).ConfigureAwait(false);
+            await SourceSyncTransfer.ReceiveAsync(stream, expectedChallenge, cancellationToken, options).ConfigureAwait(false);
         if (!transfer.Succeeded)
         {
             return SourceSyncInboxResult.Failed(transfer.Reason ?? SourceSyncTransferReasons.FrameInvalid, transfer.Detail);
@@ -172,12 +179,13 @@ public sealed class SourceSyncInbox
         string? expectedChallenge = null,
         IReadOnlyList<string>? allowedIds = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(writer);
 
         SourceSyncTransferResult transfer = await SourceSyncTransferClient
-            .ReceiveAsync(address, port, expectedChallenge, timeout, cancellationToken)
+            .ReceiveAsync(address, port, expectedChallenge, timeout, cancellationToken, options)
             .ConfigureAwait(false);
         if (!transfer.Succeeded)
         {
@@ -228,6 +236,14 @@ public sealed class SourceSyncInbox
 public static class SourceSyncInboxExtensions
 {
     /// <summary>Accepts one peer, reads one envelope from it, imports it, and closes the connection.</summary>
+    /// <param name="listener">The listening half; it accepts exactly one peer.</param>
+    /// <param name="inbox">The inbox that previews, gates and writes the envelope.</param>
+    /// <param name="writer">Where the gated records are written.</param>
+    /// <param name="expectedChallenge">The invitation's challenge, or null to accept whatever the peer announces.</param>
+    /// <param name="allowedIds">Restricts which sources may be written, or null for the gate's own decision.</param>
+    /// <param name="timeout">How long the peer gets.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     public static async Task<SourceSyncInboxResult> ReceiveAndImportAsync(
         this SourceSyncTransferListener listener,
         SourceSyncInbox inbox,
@@ -235,14 +251,15 @@ public static class SourceSyncInboxExtensions
         string? expectedChallenge = null,
         IReadOnlyList<string>? allowedIds = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(listener);
         ArgumentNullException.ThrowIfNull(inbox);
         ArgumentNullException.ThrowIfNull(writer);
 
         SourceSyncTransferResult transfer =
-            await listener.ReceiveOnceAsync(expectedChallenge, timeout, cancellationToken).ConfigureAwait(false);
+            await listener.ReceiveOnceAsync(expectedChallenge, timeout, cancellationToken, options).ConfigureAwait(false);
         if (!transfer.Succeeded)
         {
             return SourceSyncInboxResult.Failed(transfer.Reason ?? SourceSyncTransferReasons.FrameInvalid, transfer.Detail);

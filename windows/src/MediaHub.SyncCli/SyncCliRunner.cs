@@ -833,6 +833,16 @@ public sealed class SyncCliRunner
 
     private async Task<int> RunTransferServeAsync(CliInvocation invocation)
     {
+        byte[]? secret = TryReadTransferSecret(invocation, out string? secretError);
+        if (secretError is not null)
+        {
+            return Fail(invocation, CliExitCode.InputProblem, SourceSyncTransferAuthReasons.AuthSecretUnavailable, secretError);
+        }
+
+        SourceSyncTransferOptions options = secret is null
+            ? SourceSyncTransferOptions.Off
+            : SourceSyncTransferOptions.WithSecret(secret, deviceId: DeviceIdOf(invocation));
+
         SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(
             SourceSyncTransferAddress.DefaultAddress,
             invocation.Port ?? 0);
@@ -858,8 +868,11 @@ public sealed class SyncCliRunner
         _err.WriteLine("listening " + listener.Address + ":" + listener.Port.ToString(CultureInfo.InvariantCulture));
         _err.Flush();
 
+        // With authentication on the expected challenge stays null: the sender announces the nonce,
+        // and the tag proves it also holds the secret. A sender that announces no nonce is refused
+        // with auth-missing rather than silently accepted.
         SourceSyncTransferResult received = await listener
-            .ReceiveOnceAsync(null, TransferBudget, CancellationToken.None)
+            .ReceiveOnceAsync(null, TransferBudget, CancellationToken.None, options)
             .ConfigureAwait(false);
         if (!received.Succeeded)
         {
@@ -893,6 +906,12 @@ public sealed class SyncCliRunner
 
     private async Task<int> RunTransferSendAsync(CliInvocation invocation)
     {
+        byte[]? secret = TryReadTransferSecret(invocation, out string? secretError);
+        if (secretError is not null)
+        {
+            return Fail(invocation, CliExitCode.InputProblem, SourceSyncTransferAuthReasons.AuthSecretUnavailable, secretError);
+        }
+
         if (!TryParseTarget(invocation.Target, out string host, out int port, out string? targetError))
         {
             return Fail(invocation, CliExitCode.InputProblem, "invalid-target", targetError ?? "the --to value must look like host:port");
@@ -907,8 +926,15 @@ public sealed class SyncCliRunner
         // cannot turn this command into a write on the sender's own disk.
         SourceSyncPeerRound sender = new(DeviceIdOf(invocation), ReadOnlyCopy(sources));
         SourceSyncEnvelope envelope = sender.Export();
+
+        // W6-24: the nonce rides in the challenge frame, so it must be fresh every run — a reused
+        // nonce is exactly what the receiver's replay cache refuses.
+        string? challenge = secret is null ? null : SourceSyncTransferAuthenticator.CreateNonce();
+        SourceSyncTransferOptions options = secret is null
+            ? SourceSyncTransferOptions.Off
+            : SourceSyncTransferOptions.WithSecret(secret, deviceId: sender.DeviceId);
         SourceSyncPeerRoundResult sent = await sender
-            .SendAsync(envelope, host, port, null, TransferBudget, CancellationToken.None)
+            .SendAsync(envelope, host, port, challenge, TransferBudget, CancellationToken.None, options)
             .ConfigureAwait(false);
         if (!sent.Succeeded)
         {
@@ -926,6 +952,14 @@ public sealed class SyncCliRunner
     {
         string deviceA = invocation.DeviceA!.Trim();
         string deviceB = invocation.DeviceB!.Trim();
+
+        // Read the secret before the stores are opened: a run that cannot authenticate must not
+        // create the two device directories on its way to failing.
+        byte[]? secret = TryReadTransferSecret(invocation, out string? secretError);
+        if (secretError is not null)
+        {
+            return Fail(invocation, CliExitCode.InputProblem, SourceSyncTransferAuthReasons.AuthSecretUnavailable, secretError);
+        }
 
         // The two devices live in <root>/a and <root>/b, so the base root is validated first: if it
         // is a regular file the sub-paths look merely "missing" and the write would fail later with
@@ -953,7 +987,12 @@ public sealed class SyncCliRunner
         // real stores; without it every store in play is an in-memory copy and no file appears.
         SourceSyncPeerRound senderA = new(deviceA, apply ? sourcesA : ReadOnlyCopy(sourcesA));
         SourceSyncPeerRound receiverB = new(deviceB, apply ? sourcesB : ReadOnlyCopy(sourcesB), baselinesB);
-        TransferOutcome first = await TransferOnceAsync(senderA, receiverB, TransferWriter(sourcesB), apply).ConfigureAwait(false);
+        // Each direction gets its own options (and therefore its own nonce cache partition), keyed by
+        // the receiver's device id: a replayed round is refused even though both rounds share a secret.
+        SourceSyncTransferOptions optionsAB = secret is null
+            ? SourceSyncTransferOptions.Off
+            : SourceSyncTransferOptions.WithSecret(secret, deviceId: deviceB);
+        TransferOutcome first = await TransferOnceAsync(senderA, receiverB, TransferWriter(sourcesB), apply, optionsAB).ConfigureAwait(false);
         if (!first.Succeeded)
         {
             return Fail(invocation, CliExitCode.InputProblem, first.Reason ?? SourceSyncTransferReasons.IoFailed,
@@ -962,7 +1001,10 @@ public sealed class SyncCliRunner
 
         SourceSyncPeerRound senderB = new(deviceB, apply ? sourcesB : ReadOnlyCopy(sourcesB));
         SourceSyncPeerRound receiverA = new(deviceA, apply ? sourcesA : ReadOnlyCopy(sourcesA), baselinesA);
-        TransferOutcome second = await TransferOnceAsync(senderB, receiverA, TransferWriter(sourcesA), apply).ConfigureAwait(false);
+        SourceSyncTransferOptions optionsBA = secret is null
+            ? SourceSyncTransferOptions.Off
+            : SourceSyncTransferOptions.WithSecret(secret, deviceId: deviceA);
+        TransferOutcome second = await TransferOnceAsync(senderB, receiverA, TransferWriter(sourcesA), apply, optionsBA).ConfigureAwait(false);
         if (!second.Succeeded)
         {
             return Fail(invocation, CliExitCode.InputProblem, second.Reason ?? SourceSyncTransferReasons.IoFailed,
@@ -992,7 +1034,8 @@ public sealed class SyncCliRunner
         SourceSyncPeerRound sender,
         SourceSyncPeerRound receiver,
         SourceSyncRecordWriter writer,
-        bool apply)
+        bool apply,
+        SourceSyncTransferOptions? options = null)
     {
         SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(SourceSyncTransferAddress.DefaultAddress, 0);
         SourceSyncTransferListener? bound = start.Listener;
@@ -1006,10 +1049,13 @@ public sealed class SyncCliRunner
 
         // If the send fails there is no connection coming, so the receive side is cancelled rather
         // than left to wait out the whole budget: a failed round must fail fast.
+        // One fresh nonce per direction; the receiver learns it from the challenge frame and checks
+        // the tag against it, so the nonce never has to be agreed on out of band.
+        string? challenge = options is { Authenticate: true } ? SourceSyncTransferAuthenticator.CreateNonce() : null;
         using CancellationTokenSource abort = new();
-        Task<SourceSyncTransferResult> receiving = listener.ReceiveOnceAsync(null, TransferBudget, abort.Token);
+        Task<SourceSyncTransferResult> receiving = listener.ReceiveOnceAsync(null, TransferBudget, abort.Token, options);
         SourceSyncPeerRoundResult sent = await sender
-            .SendPayloadAsync(payload, SourceSyncTransferAddress.DefaultAddress, listener.Port, null, TransferBudget, CancellationToken.None)
+            .SendPayloadAsync(payload, SourceSyncTransferAddress.DefaultAddress, listener.Port, challenge, TransferBudget, CancellationToken.None, options)
             .ConfigureAwait(false);
         if (!sent.Succeeded)
         {
@@ -1035,6 +1081,68 @@ public sealed class SyncCliRunner
             ? await receiver.ApplyAsync(preview, writer, null, cancellationToken: CancellationToken.None).ConfigureAwait(false)
             : null;
         return new TransferOutcome(envelope.DeviceId, receiver.DeviceId, received.Bytes, received.FrameCount, preview, report, null, null);
+    }
+
+    /// <summary>
+    /// Reads the shared secret named by <c>--secret-env</c>. The value only ever exists as bytes in
+    /// the caller's hand: it is not printed, not written to JSON and not attached to an error, so a
+    /// CI log or an issue report can never leak it. A missing variable is a plain failure with the
+    /// W6-24 code, never a fallback to unauthenticated bytes.
+    /// </summary>
+    private static byte[]? TryReadTransferSecret(CliInvocation invocation, out string? error)
+    {
+        error = null;
+        if (!invocation.Authenticate)
+        {
+            return null;
+        }
+
+        string name = invocation.SecretEnv ?? "";
+        string? value;
+        try
+        {
+            value = Environment.GetEnvironmentVariable(name);
+        }
+        catch (ArgumentException)
+        {
+            // '=' or an embedded NUL: not a variable name at all.
+            error = "The name given to --secret-env is not a valid environment variable name, so no shared secret is available.";
+            return null;
+        }
+
+        if (string.IsNullOrEmpty(value))
+        {
+            error = "The environment variable " + name + " is not set (or is empty), so no shared secret is available.";
+            return null;
+        }
+
+        return Encoding.UTF8.GetBytes(value);
+    }
+
+    /// <summary>
+    /// W6-24: whether this run authenticated the peer, and which variable held the secret. The value
+    /// of that variable is deliberately absent.
+    /// </summary>
+    private static void WriteAuthFieldsJson(Utf8JsonWriter writer, CliInvocation invocation)
+    {
+        writer.WriteBoolean("authenticate", invocation.Authenticate);
+        if (invocation.SecretEnv is null)
+        {
+            writer.WriteNull("secretEnv");
+        }
+        else
+        {
+            writer.WriteString("secretEnv", invocation.SecretEnv);
+        }
+    }
+
+    /// <summary>The text-mode counterpart of <see cref="WriteAuthFieldsJson"/>: names, never values.</summary>
+    private void WriteAuthText(CliInvocation invocation)
+    {
+        if (invocation.Authenticate)
+        {
+            _out.WriteLine("authenticated: yes (secret read from " + invocation.SecretEnv + ")");
+        }
     }
 
     private static async Task ObserveAsync(Task task)
@@ -1201,6 +1309,7 @@ public sealed class SyncCliRunner
                 writer.WriteNumber("port", port);
                 writer.WriteBoolean("once", true);
                 writer.WriteBoolean("applied", outcome.Report is not null);
+                WriteAuthFieldsJson(writer, invocation);
                 WriteTransferFieldsJson(writer, outcome);
                 writer.WriteEndObject();
             }));
@@ -1208,6 +1317,7 @@ public sealed class SyncCliRunner
         }
 
         _out.WriteLine("served one connection on " + address + ":" + port.ToString(CultureInfo.InvariantCulture));
+        WriteAuthText(invocation);
         WriteTransferText(outcome, invocation.Apply);
         return CliExitCode.Success;
     }
@@ -1231,6 +1341,7 @@ public sealed class SyncCliRunner
                 writer.WriteNumber("bytes", sent.Bytes);
                 writer.WriteNumber("frames", sent.FrameCount);
                 writer.WriteString("idempotency", "the receiver decides: this snapshot applies once, and a second delivery of it is a no-change round");
+                WriteAuthFieldsJson(writer, invocation);
                 writer.WriteEndObject();
             }));
             return CliExitCode.Success;
@@ -1241,6 +1352,7 @@ public sealed class SyncCliRunner
         _out.WriteLine("device: " + envelope.DeviceId + "  snapshot: " + envelope.SnapshotId +
             "  sources: " + envelope.Sources.Count.ToString(CultureInfo.InvariantCulture));
         _out.WriteLine("the receiver decides idempotency: this snapshot applies once; delivering it again is a no-change round.");
+        WriteAuthText(invocation);
         return CliExitCode.Success;
     }
 
@@ -1268,6 +1380,7 @@ public sealed class SyncCliRunner
                 writer.WriteString("deviceB", deviceB);
                 writer.WriteBoolean("applied", invocation.Apply);
                 writer.WriteBoolean("secondRoundNoChange", second.NoChange);
+                WriteAuthFieldsJson(writer, invocation);
                 writer.WriteStartArray("rounds");
                 foreach (TransferOutcome outcome in new[] { first, second })
                 {
@@ -1287,6 +1400,7 @@ public sealed class SyncCliRunner
         _out.WriteLine("round 2 (" + deviceB + " -> " + deviceA + ")");
         WriteTransferText(second, invocation.Apply);
         _out.WriteLine("second round noChange: " + (second.NoChange ? "true" : "false"));
+        WriteAuthText(invocation);
         return CliExitCode.Success;
     }
 

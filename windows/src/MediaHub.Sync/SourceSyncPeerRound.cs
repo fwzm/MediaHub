@@ -226,13 +226,21 @@ public sealed class SourceSyncPeerRound
     /// <see cref="SourceSyncTransferReasons.EnvelopeInvalid"/> with the contract reason in the detail, and a
     /// forbidden address as <see cref="SourceSyncTransferReasons.NotLoopback"/> before any socket is opened.
     /// </remarks>
+    /// <param name="envelope">The envelope to send.</param>
+    /// <param name="address">Loopback address; anything else is refused before a socket exists.</param>
+    /// <param name="port">The listener's port.</param>
+    /// <param name="challenge">The nonce both sides quote, or null for an unauthenticated transfer.</param>
+    /// <param name="timeout">How long the peer gets, defaulting to 15 seconds.</param>
+    /// <param name="cancellationToken">Cancels the transfer.</param>
+    /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     public async Task<SourceSyncPeerRoundResult> SendAsync(
         SourceSyncEnvelope envelope,
         string? address,
         int port,
         string? challenge = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
@@ -250,7 +258,7 @@ public sealed class SourceSyncPeerRound
             };
         }
 
-        return await SendPayloadAsync(payload, address, port, challenge, timeout, cancellationToken)
+        return await SendPayloadAsync(payload, address, port, challenge, timeout, cancellationToken, options)
             .ConfigureAwait(false);
     }
 
@@ -259,16 +267,24 @@ public sealed class SourceSyncPeerRound
     /// Exists so a caller can hand over bytes that are not an envelope this build produced — the tampered-payload
     /// case — and still go through the same address gate, framing and receiving path as a real transfer.
     /// </remarks>
+    /// <param name="payload">The exact bytes to put on the wire.</param>
+    /// <param name="address">Loopback address; anything else is refused before a socket exists.</param>
+    /// <param name="port">The listener's port.</param>
+    /// <param name="challenge">The nonce both sides quote, or null for an unauthenticated transfer.</param>
+    /// <param name="timeout">How long the peer gets, defaulting to 15 seconds.</param>
+    /// <param name="cancellationToken">Cancels the transfer.</param>
+    /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     public async Task<SourceSyncPeerRoundResult> SendPayloadAsync(
         ReadOnlyMemory<byte> payload,
         string? address,
         int port,
         string? challenge = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         SourceSyncTransferResult sent = await SourceSyncTransferClient
-            .SendAsync(address, port, payload, challenge, timeout, cancellationToken)
+            .SendAsync(address, port, payload, challenge, timeout, cancellationToken, options)
             .ConfigureAwait(false);
 
         SourceSyncPeerRoundResult result = sent.Succeeded
@@ -287,6 +303,8 @@ public sealed class SourceSyncPeerRound
     /// <param name="expectedChallenge">The pairing challenge this transfer must quote, or null to accept any.</param>
     /// <param name="allowedIds">Entries the user explicitly allowed; without this, proposals stay proposals.</param>
     /// <param name="timeout">How long the peer gets, defaulting to 15 seconds.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     public async Task<SourceSyncPeerRoundResult> ReceiveOnceAsync(
         SourceSyncRecordWriter writer,
         string? address = null,
@@ -294,7 +312,8 @@ public sealed class SourceSyncPeerRound
         string? expectedChallenge = null,
         IReadOnlyList<string>? allowedIds = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(writer);
 
@@ -309,7 +328,7 @@ public sealed class SourceSyncPeerRound
         }
 
         await using SourceSyncTransferListener listener = start.Listener;
-        return await ReceiveOnAsync(listener, writer, expectedChallenge, allowedIds, timeout, cancellationToken)
+        return await ReceiveOnAsync(listener, writer, expectedChallenge, allowedIds, timeout, cancellationToken, options)
             .ConfigureAwait(false);
     }
 
@@ -318,19 +337,27 @@ public sealed class SourceSyncPeerRound
     /// Split from <see cref="ReceiveOnceAsync"/> so two rounds can meet on a port that is already known: the
     /// listener must be bound before the sender learns where to dial, otherwise the dial races the bind.
     /// </remarks>
+    /// <param name="listener">An already-bound listener.</param>
+    /// <param name="writer">How an approved entry becomes a real source on this device.</param>
+    /// <param name="expectedChallenge">The pairing challenge this transfer must quote, or null to accept any.</param>
+    /// <param name="allowedIds">Entries the user explicitly allowed; without this, proposals stay proposals.</param>
+    /// <param name="timeout">How long the peer gets, defaulting to 15 seconds.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     public async Task<SourceSyncPeerRoundResult> ReceiveOnAsync(
         SourceSyncTransferListener listener,
         SourceSyncRecordWriter writer,
         string? expectedChallenge = null,
         IReadOnlyList<string>? allowedIds = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(listener);
         ArgumentNullException.ThrowIfNull(writer);
 
         SourceSyncInboxResult imported = await listener
-            .ReceiveAndImportAsync(_inbox, writer, expectedChallenge, allowedIds, timeout, cancellationToken)
+            .ReceiveAndImportAsync(_inbox, writer, expectedChallenge, allowedIds, timeout, cancellationToken, options)
             .ConfigureAwait(false);
 
         return SourceSyncPeerRoundResult.Received(imported) with { ReceiverDeviceId = DeviceId };
@@ -351,6 +378,10 @@ public sealed class SourceSyncPeerRound
     /// <param name="allowedIds">Entries the receiving user explicitly allowed.</param>
     /// <param name="challenge">Pairing challenge both sides quote, or null.</param>
     /// <param name="timeout">Per-side budget, defaulting to 15 seconds.</param>
+    /// <param name="cancellationToken">Cancels both sides.</param>
+    /// <param name="options">The optional authentication settings, applied to both ends; null keeps the W6-16
+    /// byte stream exactly. When authentication is on, <paramref name="challenge"/> is the nonce and both sides
+    /// must be given the same value.</param>
     public static async Task<SourceSyncPeerRoundResult> ExchangeAsync(
         SourceSyncPeerRound sender,
         SourceSyncPeerRound receiver,
@@ -359,7 +390,8 @@ public sealed class SourceSyncPeerRound
         IReadOnlyList<string>? allowedIds = null,
         string? challenge = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(sender);
 
@@ -372,7 +404,8 @@ public sealed class SourceSyncPeerRound
                 allowedIds,
                 challenge,
                 timeout,
-                cancellationToken)
+                cancellationToken,
+                options)
             .ConfigureAwait(false);
     }
 
@@ -384,6 +417,10 @@ public sealed class SourceSyncPeerRound
     /// <param name="allowedIds">Entries the receiving user explicitly allowed.</param>
     /// <param name="challenge">Pairing challenge both sides quote, or null.</param>
     /// <param name="timeout">Per-side budget, defaulting to 15 seconds.</param>
+    /// <param name="cancellationToken">Cancels both sides.</param>
+    /// <param name="options">The optional authentication settings, applied to both ends; null keeps the W6-16
+    /// byte stream exactly. When authentication is on, <paramref name="challenge"/> is the nonce and both sides
+    /// must be given the same value.</param>
     public static async Task<SourceSyncPeerRoundResult> ExchangePayloadAsync(
         SourceSyncPeerRound sender,
         SourceSyncPeerRound receiver,
@@ -392,7 +429,8 @@ public sealed class SourceSyncPeerRound
         IReadOnlyList<string>? allowedIds = null,
         string? challenge = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(sender);
         ArgumentNullException.ThrowIfNull(receiver);
@@ -424,7 +462,8 @@ public sealed class SourceSyncPeerRound
             challenge,
             allowedIds,
             timeout,
-            abort.Token);
+            abort.Token,
+            options);
 
         SourceSyncPeerRoundResult sent = await sender
             .SendPayloadAsync(
@@ -433,7 +472,8 @@ public sealed class SourceSyncPeerRound
                 listener.Port,
                 challenge,
                 timeout,
-                cancellationToken)
+                cancellationToken,
+                options)
             .ConfigureAwait(false);
 
         if (!sent.Succeeded)

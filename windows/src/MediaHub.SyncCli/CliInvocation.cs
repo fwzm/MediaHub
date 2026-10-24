@@ -106,6 +106,19 @@ public sealed record CliInvocation
     /// </summary>
     public bool Once { get; init; }
 
+    /// <summary>
+    /// <c>--authenticate</c> (the three socket verbs only): make both ends prove they hold a shared
+    /// secret (W6-24 tag frame). Off by default, so the bytes on the wire stay exactly W6-16's.
+    /// </summary>
+    public bool Authenticate { get; init; }
+
+    /// <summary>
+    /// <c>--secret-env</c>: the <em>name</em> of the environment variable that holds the shared
+    /// secret. Only the name is kept here; the value is read at run time and never printed, never
+    /// written to JSON and never attached to an error.
+    /// </summary>
+    public string? SecretEnv { get; init; }
+
     /// <summary><c>--apply</c>: really write. Without it <c>import</c> is a preview.</summary>
     public bool Apply { get; init; }
 

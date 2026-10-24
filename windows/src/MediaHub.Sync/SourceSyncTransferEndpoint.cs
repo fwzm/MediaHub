@@ -194,10 +194,12 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
     /// <param name="expectedChallenge">The invitation's challenge, or null to accept whatever the peer announces.</param>
     /// <param name="timeout">How long the peer gets, defaulting to <see cref="DefaultTimeout"/>.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     public async Task<SourceSyncTransferResult> ReceiveOnceAsync(
         string? expectedChallenge = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         TimeSpan budget = ResolveBudget(timeout);
         using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -208,7 +210,7 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
         {
             client = await _listener.AcceptTcpClientAsync(cts.Token).ConfigureAwait(false);
             using NetworkStream stream = client.GetStream();
-            return await SourceSyncTransfer.ReceiveAsync(stream, expectedChallenge, cts.Token).ConfigureAwait(false);
+            return await SourceSyncTransfer.ReceiveAsync(stream, expectedChallenge, cts.Token, options).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -233,11 +235,13 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
     /// <param name="challenge">The invitation's challenge, or null.</param>
     /// <param name="timeout">How long the peer gets, defaulting to <see cref="DefaultTimeout"/>.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     public async Task<SourceSyncTransferResult> SendOnceAsync(
         ReadOnlyMemory<byte> envelope,
         string? challenge = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         TimeSpan budget = ResolveBudget(timeout);
         using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -248,7 +252,7 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
         {
             client = await _listener.AcceptTcpClientAsync(cts.Token).ConfigureAwait(false);
             using NetworkStream stream = client.GetStream();
-            return await SourceSyncTransfer.SendAsync(stream, envelope, challenge, cts.Token).ConfigureAwait(false);
+            return await SourceSyncTransfer.SendAsync(stream, envelope, challenge, cts.Token, options).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -306,34 +310,49 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
 public static class SourceSyncTransferClient
 {
     /// <summary>Connects to a loopback listener and sends one envelope.</summary>
+    /// <param name="address">The loopback address to dial; null means <see cref="SourceSyncTransferAddress.DefaultAddress"/>.</param>
+    /// <param name="port">The listener's port.</param>
+    /// <param name="envelope">The serialized envelope.</param>
+    /// <param name="challenge">The invitation's challenge, or null.</param>
+    /// <param name="timeout">How long the transfer gets, defaulting to <see cref="SourceSyncTransferListener.DefaultTimeout"/>.</param>
+    /// <param name="cancellationToken">Cancels the transfer.</param>
+    /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     public static async Task<SourceSyncTransferResult> SendAsync(
         string? address,
         int port,
         ReadOnlyMemory<byte> envelope,
         string? challenge = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         return await RunAsync(
             address,
             port,
-            (stream, token) => SourceSyncTransfer.SendAsync(stream, envelope, challenge, token),
+            (stream, token) => SourceSyncTransfer.SendAsync(stream, envelope, challenge, token, options),
             timeout,
             cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Connects to a loopback listener and reads one envelope.</summary>
+    /// <param name="address">The loopback address to dial; null means <see cref="SourceSyncTransferAddress.DefaultAddress"/>.</param>
+    /// <param name="port">The listener's port.</param>
+    /// <param name="expectedChallenge">The invitation's challenge, or null to accept whatever the peer announces.</param>
+    /// <param name="timeout">How long the transfer gets, defaulting to <see cref="SourceSyncTransferListener.DefaultTimeout"/>.</param>
+    /// <param name="cancellationToken">Cancels the transfer.</param>
+    /// <param name="options">The optional authentication settings; null keeps the W6-16 byte stream exactly.</param>
     public static async Task<SourceSyncTransferResult> ReceiveAsync(
         string? address,
         int port,
         string? expectedChallenge = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SourceSyncTransferOptions? options = null)
     {
         return await RunAsync(
             address,
             port,
-            (stream, token) => SourceSyncTransfer.ReceiveAsync(stream, expectedChallenge, token),
+            (stream, token) => SourceSyncTransfer.ReceiveAsync(stream, expectedChallenge, token, options),
             timeout,
             cancellationToken).ConfigureAwait(false);
     }
