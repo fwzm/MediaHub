@@ -80,6 +80,8 @@ class GlobalSearchEngineTest {
         assertEquals("墨云阁", final.hits[2].serverName)
         // 失败只进 errors，不影响其它服务器
         assertTrue(final.errors.containsKey("s-bad"))
+        assertEquals("搜索失败", final.errors["s-bad"])
+        assertFalse(final.errors.values.any { it.contains("wire down") })
         assertEquals(setOf("s-a", "s-bad", "s-c"), final.completedServers)
         assertTrue(final.searchingServers.isEmpty())
         assertFalse(final.isSearching)

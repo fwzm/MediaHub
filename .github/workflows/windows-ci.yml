@@ -259,3 +259,103 @@ jobs:
             windows/artifacts/engine-probe-ci.json
             windows/artifacts/license-report/**
             windows/artifacts/portable/**
+
+
+  interoperability:
+    name: Windows CLI / Kotlin interoperability (23 cases)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          persist-credentials: false
+
+      - name: Record exact interoperability checkout
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_HEAD) { throw "interop checkout mismatch" }
+          New-Item -ItemType Directory -Force windows/artifacts/interop | Out-Null
+          @{ checkoutSha=$actual; headSha=$env:EXPECTED_HEAD; runId=$env:GITHUB_RUN_ID; attempt=$env:GITHUB_RUN_ATTEMPT } |
+            ConvertTo-Json | Set-Content -Encoding utf8 windows/artifacts/interop/revision.json
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+        with:
+          packages: platform-tools
+
+      - name: Install Android compile components
+        shell: pwsh
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build this checkout's Windows peer
+        shell: pwsh
+        run: dotnet build windows/src/MediaHub.SyncCli/MediaHub.SyncCli.csproj -c Debug -p:Platform=x64 -m:1
+
+      - name: Execute both cross-end directions with real Windows peer
+        shell: pwsh
+        run: |
+          $peer = (Resolve-Path windows/src/MediaHub.SyncCli/bin/x64/Debug/net10.0/MediaHub.SyncCli.dll).Path
+          $env:MH_W632_SYNC_DLL = $peer
+          $env:MH_W638_SYNC_DLL = $peer
+          $env:MH_W632_DOTNET = (Get-Command dotnet).Source
+          $env:MH_W638_DOTNET = $env:MH_W632_DOTNET
+          foreach ($path in @(
+            'core/common/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.common.sync.SourceSyncTlsInteropTest.xml',
+            'core/database/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.database.sync.SourceSyncListenerInteropTest.xml'
+          )) {
+            if (Test-Path -LiteralPath $path -PathType Leaf) { Remove-Item -LiteralPath $path -Force }
+          }
+          ./gradlew.bat '-Dorg.gradle.jvmargs=-Xmx2048m -XX:ActiveProcessorCount=4' '-Pkotlin.compiler.execution.strategy=in-process' `
+            :core:common:testDebugUnitTest --tests '*SourceSyncTlsInteropTest' `
+            :core:database:testDebugUnitTest --tests '*SourceSyncListenerInteropTest' `
+            --rerun-tasks --no-build-cache --no-daemon --no-parallel --max-workers=1 --console=plain --continue
+
+      - name: Require 23 actual interop assertions with no skips
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $expected = @(
+            @{ Module='core/common'; Suite='com.mediahub.core.common.sync.SourceSyncTlsInteropTest'; Floor=11 },
+            @{ Module='core/database'; Suite='com.mediahub.core.database.sync.SourceSyncListenerInteropTest'; Floor=12 }
+          )
+          $total = 0
+          foreach ($entry in $expected) {
+            $path = "$($entry.Module)/build/test-results/testDebugUnitTest/TEST-$($entry.Suite).xml"
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "interop report missing: $($entry.Suite)" }
+            $xml = [xml](Get-Content -LiteralPath $path -Raw)
+            $cases = @($xml.testsuite.testcase)
+            if ($xml.testsuite.name -ne $entry.Suite -or $cases.Count -lt $entry.Floor -or [int]$xml.testsuite.tests -ne $cases.Count) {
+              throw "interop suite missing cases or wrong identity: $($entry.Suite)"
+            }
+            foreach ($counter in @('failures','errors','skipped')) {
+              if ([int]$xml.testsuite.GetAttribute($counter) -ne 0) { throw "interop $counter must be zero" }
+            }
+            if ($xml.SelectNodes('//testcase[failure or error or skipped]').Count -ne 0) { throw 'interop did not execute successfully' }
+            "$($entry.Suite): $($cases.Count) executed, no failures/errors/skips"
+            $total += $cases.Count
+          }
+          "cross-end total=$total"
+
+      - name: Upload Windows interoperability evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-interop-${{ env.EXPECTED_HEAD }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            windows/artifacts/interop/revision.json
+            core/common/build/test-results/testDebugUnitTest/TEST-*InteropTest.xml
+            core/database/build/test-results/testDebugUnitTest/TEST-*InteropTest.xml

@@ -35,7 +35,7 @@ import kotlin.concurrent.thread
  * 客户端收到的稳定码、serve 退出码、serve 的 JSON 结果，以及落盘的 sync-sources.json 里到底有几条来源。
  *
  * 纪律：
- * - 找不到 Windows CLI 时跳过（[assumeTrue]），所以 CI 上这个套件永远 skipped，不需要 Windows 产物；
+ * - 找不到 Windows CLI 时跳过（[assumeTrue]），所以 普通 Linux 单测可 skipped；Windows interoperability job 必须执行且禁止跳过；
  * - 不碰 Windows 仓库的任何文件，只起它已经编好的 dll；
  * - 每例都杀子进程 + 删临时目录，不留常驻进程；
  * - 只连回环，不碰真实网卡。
@@ -49,7 +49,7 @@ class SourceSyncTlsInteropTest {
     fun requireTheWindowsCli() {
         val dll = System.getenv(ENV_SYNC_DLL)
         assumeTrue(
-            ENV_SYNC_DLL + " 没有指向 MediaHub.SyncCli.dll，跳过跨端联调（CI 上必须跳过）",
+            ENV_SYNC_DLL + " 没有指向 MediaHub.SyncCli.dll，跳过跨端联调（Windows interoperability job 禁止跳过）",
             dll != null && dll.isNotBlank(),
         )
         val path = java.nio.file.Paths.get(dll!!)

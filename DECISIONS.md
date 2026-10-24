@@ -767,3 +767,9 @@
   - 「把 `RateLimitCooldownInterceptor` 铺到所有媒体/图片客户端」—— 会造成播放硬中断与封面集体消失，
     且无 `Retry-After` 语义保护，属扩大伤害；
   - 「什么都不做」—— 违背 AGENTS.md §7.1 的可见性要求，限流永远不可诊断。
+
+### 2026-10-24 PR6 integration clarification (append-only)
+
+The current query contract uses MediaQueryCapabilities(sortFields, filterFields), container-scoped filter and session-wide sort. MediaFilter v1 accepts only MOVIE/SERIES/EPISODE or null; unsupported values fail before network dispatch. Failed query changes roll back to the last working selection, guarded by navigation generation. SearchRoute and its engine share a SavedStateHandle-backed query; multi-source expansion remains independent UI state.
+
+Preserve later cancellation identity, IOException type-preserving sanitation, asynchronous network/cooldown boundaries and shared pageWindow semantics. The shared internal Emby wire mapper retains nullable unsupported-type behavior for canonical lookup, which already rejects unsupported types explicitly; the MediaFilter constructor enforces the filter boundary. Keep current userinfo-without-password and diagnostic-prefix contracts. No new provider capability, protocol assertion or physical-device pass is introduced by this reconciliation.
