@@ -67,7 +67,9 @@ sealed interface SourceSyncTransferResult {
  *
  * 帧形状（全部走 4 字节大端长度帧，上限 8192 字节/帧）：
  * - 挑战帧：[0x01][挑战的 UTF-8 字节]；
- * - 数据帧：[0x02][4 字节大端 total][4 字节大端 offset][数据]，数据最多 8183 字节。
+ * - 数据帧：[0x02][4 字节大端 total][4 字节大端 offset][数据]，数据最多 8183 字节；
+ * - tag 帧：[0x03][HMAC-SHA256 tag 32 字节]——可选，只有调用方传了开启认证的 options 才出现，
+ *   且必须紧跟最后一块数据之后（W6-25；认证关闭时这条分支一行都不执行，字节与 W6-22 全等）。
  *
  * 为什么带 total/offset 而不是「读到流结束」：单帧上限 8192 字节装不下信封，而
  * 「读到结束」无法区分「对端停了」和「对端挂了」；显式 total 让半截传输有稳定码 frame-truncated。
@@ -160,6 +162,7 @@ object SourceSyncTransfer {
         output: OutputStream,
         envelope: ByteArray,
         challenge: String? = null,
+        options: SourceSyncTransferOptions? = null,
     ): SourceSyncTransferResult {
         if (envelope.isEmpty()) {
             return SourceSyncTransferResult.Failed(
@@ -181,10 +184,37 @@ object SourceSyncTransfer {
                 "挑战超过 " + MAXIMUM_CHALLENGE_BYTES + " 字节上限；什么都没有写出",
             )
         }
+        val authentication = options?.takeIf { it.authenticate }
+        var tagFrame: ByteArray? = null
+        if (authentication != null) {
+            if (!authentication.hasSecret) {
+                return SourceSyncTransferResult.Failed(
+                    SourceSyncTransferAuthReasons.AUTH_SECRET_UNAVAILABLE,
+                    "Authentication is on but this process holds no secret; nothing was sent.",
+                )
+            }
+            val nonce = challenge?.trim()
+            if (nonce.isNullOrEmpty()) {
+                return SourceSyncTransferResult.Failed(
+                    SourceSyncTransferAuthReasons.AUTH_REQUIRED,
+                    "Authentication is on but no challenge was announced; " +
+                        "the challenge is the nonce the tag binds to, so nothing was sent.",
+                )
+            }
+            tagFrame = SourceSyncTransferAuthenticator.createTagFrame(
+                authentication.secretForAuthentication,
+                nonce.toByteArray(StandardCharsets.UTF_8),
+                envelope,
+            )
+        }
         var written = 0
         try {
             for (frame in frames) {
                 PairingFrameIo.writeFrame(output, frame)
+                written++
+            }
+            if (tagFrame != null) {
+                PairingFrameIo.writeFrame(output, tagFrame)
                 written++
             }
             output.flush()
@@ -198,8 +228,12 @@ object SourceSyncTransfer {
     }
 
     /** 从内存字节解码（测试与离线回放用）；语义与 receive 完全相同。 */
-    fun decode(bytes: ByteArray, expectedChallenge: String? = null): SourceSyncTransferResult =
-        receive(ByteArrayInputStream(bytes), expectedChallenge)
+    fun decode(
+        bytes: ByteArray,
+        expectedChallenge: String? = null,
+        options: SourceSyncTransferOptions? = null,
+    ): SourceSyncTransferResult =
+        receive(ByteArrayInputStream(bytes), expectedChallenge, options)
 
     /**
      * 从流里读一封信封（对应 Windows 的 ReceiveAsync）。
@@ -211,10 +245,22 @@ object SourceSyncTransfer {
      * 本端没有独立端点层，因此在这里就把 SocketTimeoutException 折成 transfer-timeout，
      * 两端的对外码因此保持一致；其它 IO 失败仍是 io-failed。
      */
-    fun receive(input: InputStream, expectedChallenge: String? = null): SourceSyncTransferResult {
+    fun receive(
+        input: InputStream,
+        expectedChallenge: String? = null,
+        options: SourceSyncTransferOptions? = null,
+    ): SourceSyncTransferResult {
+        val authentication = options?.takeIf { it.authenticate }
+        if (authentication != null && !authentication.hasSecret) {
+            return SourceSyncTransferResult.Failed(
+                SourceSyncTransferAuthReasons.AUTH_SECRET_UNAVAILABLE,
+                "Authentication is on but this process holds no secret to check the peer's tag with; nothing was read.",
+            )
+        }
         val expected = expectedChallenge?.trim() ?: ""
         val challengeRequired = expected.isNotEmpty()
         var assembled: ByteArray? = null
+        var complete = false
         var total = -1
         var received = 0
         var frames = 0
@@ -223,6 +269,12 @@ object SourceSyncTransfer {
             while (true) {
                 val read = PairingFrameIo.readFrame(input, PairingFrame.MAXIMUM_PAYLOAD_BYTES)
                 if (read is FrameRead.Rejected) {
+                    if (authentication != null && complete) {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferAuthReasons.AUTH_MISSING,
+                            "The peer sent the whole envelope but no tag frame; nothing was accepted.",
+                        )
+                    }
                     return SourceSyncTransferResult.Failed(
                         SourceSyncTransferReasons.FRAME_TRUNCATED,
                         if (assembled == null) {
@@ -235,6 +287,63 @@ object SourceSyncTransfer {
                 val frame = (read as FrameRead.Payload).bytes
                 frames++
                 val kind = frame[0].toInt() and 0xFF
+                if (kind == SourceSyncTransferAuthenticator.TAG_FRAME_KIND) {
+                    if (authentication == null) {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferReasons.FRAME_INVALID,
+                            "Unknown frame kind 0x03.",
+                        )
+                    }
+                    if (assembled == null) {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferReasons.FRAME_INVALID,
+                            "The tag frame arrived before the first chunk.",
+                        )
+                    }
+                    if (!complete) {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferReasons.FRAME_INVALID,
+                            "The tag frame arrived after " + received + " of " + total +
+                                " bytes; it must follow the last chunk.",
+                        )
+                    }
+                    if (frame.size != SourceSyncTransferAuthenticator.TAG_FRAME_BYTES) {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferReasons.FRAME_INVALID,
+                            "A tag frame is " + frame.size + " bytes; an HMAC-SHA256 tag is " +
+                                SourceSyncTransferAuthenticator.TAG_BYTES + " bytes plus the kind byte.",
+                        )
+                    }
+                    if (offered.isNullOrEmpty()) {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferAuthReasons.AUTH_MISSING,
+                            "The peer sent a tag but announced no challenge for it to bind to; nothing was accepted.",
+                        )
+                    }
+                    val tag = frame.copyOfRange(1, frame.size)
+                    val matches = SourceSyncTransferAuthenticator.verifyTag(
+                        authentication.secretForAuthentication,
+                        offered.toByteArray(StandardCharsets.UTF_8),
+                        assembled,
+                        tag,
+                    )
+                    if (!matches) {
+                        // nonce 刻意不在这里记：伪造信封不能让真 nonce 被烧掉，否则合法传输会被当成重放。
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferAuthReasons.AUTH_MISMATCH,
+                            "The tag does not match this envelope and nonce under this secret; " +
+                                "nothing was accepted and the nonce was not recorded.",
+                        )
+                    }
+                    if (!authentication.activeNonces.accept(authentication.deviceId, offered)) {
+                        return SourceSyncTransferResult.Failed(
+                            SourceSyncTransferAuthReasons.AUTH_REPLAYED,
+                            "This device already accepted an envelope under this nonce; " +
+                                "a replayed transfer is ignored and nothing was accepted.",
+                        )
+                    }
+                    return SourceSyncTransferResult.Ok(assembled, frames, offered)
+                }
                 if (kind == CHALLENGE_FRAME_KIND) {
                     if (frames != 1) {
                         return SourceSyncTransferResult.Failed(
@@ -261,6 +370,13 @@ object SourceSyncTransfer {
                     return SourceSyncTransferResult.Failed(
                         SourceSyncTransferReasons.FRAME_INVALID,
                         "未知帧类型 0x" + Integer.toHexString(kind),
+                    )
+                }
+                if (complete) {
+                    return SourceSyncTransferResult.Failed(
+                        SourceSyncTransferReasons.FRAME_INVALID,
+                        "The peer sent another chunk after the envelope was complete; " +
+                            "the tag frame must follow the last chunk.",
                     )
                 }
                 if (frames == 1 && challengeRequired) {
@@ -326,7 +442,11 @@ object SourceSyncTransfer {
                 frame.copyInto(assembled, received, CHUNK_HEADER_BYTES, frame.size)
                 received += payloadLength
                 if (received == total) {
-                    return SourceSyncTransferResult.Ok(assembled, frames, offered)
+                    if (authentication == null) {
+                        return SourceSyncTransferResult.Ok(assembled, frames, offered)
+                    }
+                    // 认证开着时「收满」还不是成功：继续读 tag 帧；对端此时关流会落到 auth-missing。
+                    complete = true
                 }
             }
         } catch (timeout: java.net.SocketTimeoutException) {
