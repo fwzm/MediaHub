@@ -2,7 +2,7 @@
 
 - 状态: **IMPLEMENTED_UNVERIFIED**（代码已实现、37 个新用例全绿、全套 1369 例通过、App 工程 0 警告 0 错误；本轮**没有** GUI 证据，也**没有**与 Android 端的联调证据，**不声称** RELEASE READY）
 - 日期: 2026-10-24
-- 分支: `feature/cross-device-source-sync` / HEAD `814d519`（本任务改动**未提交**，仍在工作区）
+- 分支: `feature/cross-device-source-sync`（本任务改动已入库：提交 `924c555`，合并 `3b3ad6a` 后为 `a6b13d4`）
 - 前置: W6-16 回环传输分帧、W6-17/18 收件箱与对端回合、W6-3b 配对证书与公钥指纹原语（`PairingCertificate` / `PairingFingerprint`）、W6-24 传输认证
 - 范围: 只动 `windows/src/MediaHub.Sync`（4 个文件，其中 1 个新增）、`windows/src/MediaHub.SyncCli`（3 个文件）、2 个新测试文件、本文档；未动 `MediaHub.App` / Providers / Domain / Storage，未启动 GUI，零 NuGet
 
@@ -164,5 +164,31 @@ mediahub-sync transfer roundtrip --root D:\two-way --device-a a --device-b b --t
 | `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` | 1906 → 1995 | serve 打印指纹、send 钉扎、roundtrip 自钉扎、JSON/text 新字段 |
 | `windows/tests/MediaHub.Tests/SourceSyncTlsTransportTests.cs` | 380（新增） | 21 个用例 |
 | `windows/tests/MediaHub.Tests/SyncCliTlsTests.cs` | 451（新增） | 16 个用例 |
+
+## 14 复跑验收脚本（W6-28，真实两进程）
+
+单元测试跑在同一个进程里，看不到"两个终端各自一条命令"时的握手/关闭行为。W6-28 补的就是这一段：
+
+```powershell
+pwsh -NoProfile -File windows/tools/acceptance/w6/transfer-tls-auth.ps1
+# 参数：-OutDir（默认 D:/mh-verify/w6-28）、-SkipBuild、-KeepArtifacts
+```
+
+脚本串行跑 8 个组合，每个组合都真起 `transfer serve` 子进程（从 stderr 抓端口与 `certificate fingerprint:`）再跑 `transfer send` 子进程，超时即 kill 并记 FAIL：
+
+| 用例 | 组合 | 断言 |
+| --- | --- | --- |
+| A | 明文 + 无认证 | send 0 / serve 0、frames=1、接收端恰好落 1 个信封 2 条来源 |
+| B | 明文 + tag | send 0 / serve 0、frames=3、`authenticate`=true |
+| C | TLS + 无认证 | send 0 / serve 0、`certificateFingerprint` 等于小写 pin |
+| D | TLS + tag | send 0 / serve 0、frames=3、认证与指纹同时成立 |
+| E | 错 pin（64 个 0） | send 2 `tls-fingerprint-mismatch`、接收端 `sync-sources.json` 与 `sync-baseline.json` **都不存在** |
+| F | 明文 client → TLS listener | serve 2 `tls-handshake-failed`、零写入 |
+| G | TLS client → 明文 listener | send 2 `tls-handshake-failed` / serve 2 `tls-not-enabled`、零写入 |
+| H | TLS + 两端口令不同 | serve 2 `auth-mismatch`、零写入 |
+
+实测（2026-10-24，W6 分支 `a6b13d4` + 本脚本）：**8/8 PASS，9.6 s**，退出 0，收尾断言本机无残留 `MediaHub.SyncCli` 进程；产物 `w6-28-summary.json` 记录每个用例的 exit code、稳定码、帧数、信封数与日志路径。
+
+**验收脚本暴露的一个真实缺陷（尚未修）**：F 用例里 `transfer send` **exit 0 且不带任何稳定码**——它只写不读，明文帧进了 socket 缓冲区就算"成功"，而 TLS 监听端其实一个字节都没接收（`tls-handshake-failed`）。也就是说"发送端报成功"目前**不是**送达证据。E/G/H 同理（send 侧 0，只有 serve 侧报错）。候选修法见 W6-30：给 `transfer send` 增加显式的送达确认（读完对端关闭或拿到明确码），失败时给独立稳定码而不是静默成功。
 
 未动：`MediaHub.App` / `MediaHub.Providers` / `MediaHub.Domain` / `MediaHub.Storage` / `docs` 其它文件 / `LICENSE`；未 commit、未 push。
