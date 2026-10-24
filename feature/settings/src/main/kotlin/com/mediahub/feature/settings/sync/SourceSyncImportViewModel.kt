@@ -62,6 +62,25 @@ class SourceSyncImportViewModel @Inject constructor(
     /** 接收区块的四态（Idle / Receiving / Received / Rejected / Failed）。 */
     val receiveState: StateFlow<SourceSyncReceiveState> = receiveController.state
 
+    /**
+     * W6-36：手机当接收端（监听）。
+     *
+     * 生产实现固定用 [SourceSyncListenerImportFactory]（网关是 acceptOnly，只解码不写库），
+     * 收到信封同样只交给 [SourceSyncImportSession.loadEnvelope]：等于用户手选了文件，
+     * 预览、逐条允许、应用仍然要用户自己点。
+     */
+    private val listenerController = SourceSyncListenerController(
+        factory = SourceSyncListenerImportFactory(),
+        onEnvelope = { envelopeJson, fileName -> session.loadEnvelope(envelopeJson, fileName) },
+    )
+
+    /** 监听区块的六态（Idle / Listening / Receiving / Received / Rejected / Failed）。 */
+    val listenState: StateFlow<SourceSyncListenState> = listenerController.state
+
+    /** TLS 能不能开：今天 App 里没有证书下发通道，因此如实为「不可用」。 */
+    val listenTls: SourceSyncListenTlsAvailability
+        get() = listenerController.tlsAvailability
+
     private val _verification = MutableStateFlow(SourceVerificationViewState())
 
     /** 结果页的逐源验证状态（三态 + 对话框 + 忙碌标记）。 */
@@ -78,6 +97,7 @@ class SourceSyncImportViewModel @Inject constructor(
     /** 手动选文件：顺手清掉上一次的接收结论，避免界面上挂着"已收下信封"的旧回执。 */
     fun loadEnvelope(envelopeJson: String, fileName: String? = null) {
         receiveController.clear()
+        listenerController.clearResult()
         session.loadEnvelope(envelopeJson, fileName)
     }
 
@@ -95,6 +115,28 @@ class SourceSyncImportViewModel @Inject constructor(
         viewModelScope.launch { session.preview() }
     }
 
+    // ---- W6-36：手机当接收端（监听） ----
+
+    /**
+     * 开回环监听等 Windows 发过来。
+     *
+     * 端口留空 = 系统分配；TLS 只在有可用身份证书时才允许（否则控制器给 tls-certificate-unavailable，
+     * 连 socket 都不开）。绑 socket 在控制器的 IO 上下文里做，界面线程不碰。
+     */
+    fun startListening(form: SourceSyncListenForm) {
+        viewModelScope.launch { listenerController.start(form) }
+    }
+
+    /** 停止监听并释放端口；重复调用无副作用。 */
+    fun stopListening() {
+        listenerController.stop()
+    }
+
+    /** 等一次发送：收到就交给导入页（只进预览，不写库），失败只更新监听区块的状态。 */
+    fun awaitListenOnce() {
+        viewModelScope.launch { listenerController.awaitOnce() }
+    }
+
     fun decide(key: String, decision: SourceSyncEntryDecision) {
         session.decide(key, decision)
     }
@@ -110,7 +152,14 @@ class SourceSyncImportViewModel @Inject constructor(
     fun reset() {
         session.reset()
         receiveController.clear()
+        listenerController.clearResult()
         _verification.value = SourceVerificationViewState()
+    }
+
+    /** 页面销毁时必须关掉监听，否则端口会一直占着（accept 线程也会留着）。 */
+    override fun onCleared() {
+        listenerController.stop()
+        super.onCleared()
     }
 
     // ---- W6-H：逐源补录并验证 ----

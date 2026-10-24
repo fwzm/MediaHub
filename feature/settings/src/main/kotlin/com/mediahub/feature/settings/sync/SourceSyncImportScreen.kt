@@ -22,6 +22,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -103,6 +104,30 @@ object SourceSyncImportTags {
 
     /** 接收结果行（已收下 / 接收失败：码 / 信封被拒：码）。 */
     const val RECEIVE_STATE = "sync.receive.state"
+
+    // ---- W6-36：接收（监听） ----
+
+    /** 监听区块本体（端口 / TLS 开关 / 开始 / 停止 / 等一次发送）。 */
+    const val LISTEN = "sync.listen"
+
+    const val LISTEN_PORT = "sync.listen.port"
+
+    const val LISTEN_TLS = "sync.listen.tls"
+
+    const val LISTEN_START = "sync.listen.start"
+
+    const val LISTEN_STOP = "sync.listen.stop"
+
+    const val LISTEN_RECEIVE = "sync.listen.receive"
+
+    /** 监听状态行（正在监听 / 接收中 / 已收下 / 失败：码 / 信封被拒：码）。 */
+    const val LISTEN_STATUS = "sync.listen.status"
+
+    /** 端口行：TLS 时带证书指纹，用户要抄给 Windows 的就是这行。 */
+    const val LISTEN_PORT_LINE = "sync.listen.port-line"
+
+    /** TLS 可用性那句实话（不可用时必须看得见，且开关点不动）。 */
+    const val LISTEN_INFO = "sync.listen.info"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -114,6 +139,7 @@ fun SourceSyncImportRoute(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val verification by viewModel.verificationState.collectAsStateWithLifecycle()
     val receiveState by viewModel.receiveState.collectAsStateWithLifecycle()
+    val listenState by viewModel.listenState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -136,6 +162,11 @@ fun SourceSyncImportRoute(
         onVerifyConfirm = viewModel::verify,
         receiveState = receiveState,
         onReceive = viewModel::receive,
+        listenState = listenState,
+        listenTls = viewModel.listenTls,
+        onListenStart = viewModel::startListening,
+        onListenStop = viewModel::stopListening,
+        onListenReceive = viewModel::awaitListenOnce,
     )
 }
 
@@ -162,6 +193,15 @@ fun SourceSyncImportScreen(
     /** W6-27：从 Windows 接收区块的状态；默认 Idle（既有调用点与 UI 测试无需改动）。 */
     receiveState: SourceSyncReceiveState = SourceSyncReceiveState.Idle,
     onReceive: (SourceSyncReceiveForm) -> Unit = {},
+    /** W6-36：手机当接收端（监听）区块的状态与可用性；默认 Idle + TLS 不可用。 */
+    listenState: SourceSyncListenState = SourceSyncListenState.Idle,
+    listenTls: SourceSyncListenTlsAvailability = SourceSyncListenTlsAvailability(
+        available = false,
+        note = SourceSyncListenCopy.TLS_UNAVAILABLE,
+    ),
+    onListenStart: (SourceSyncListenForm) -> Unit = {},
+    onListenStop: () -> Unit = {},
+    onListenReceive: () -> Unit = {},
 ) {
     Scaffold(
         modifier = Modifier.testTag(SourceSyncImportTags.SCREEN),
@@ -190,6 +230,13 @@ fun SourceSyncImportScreen(
                 style = MaterialTheme.typography.bodyMedium,
             )
             ReceiveSection(state = receiveState, onReceive = onReceive)
+            ListenSection(
+                state = listenState,
+                tls = listenTls,
+                onStart = onListenStart,
+                onStop = onListenStop,
+                onReceive = onListenReceive,
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -627,6 +674,147 @@ private fun ReceiveSection(
     }
 }
 
+/**
+ * W6-36：「接收（监听）」区块——手机当服务端，等 Windows 端点用 transfer send 发过来。
+ *
+ * 与上一个区块的区别写在标题里：上一个（从 Windows 接收）是手机主动拨号；这一块是手机开端口等对端。
+ * 判定同样全在 SourceSyncListenController：这里只画输入框、两个按钮与两行文案，
+ * 不猜原因、不把码折成布尔。TLS 不可用时开关直接 disabled 并显示那句实话——
+ * 让用户面对一个点了必然失败的开关是最糟的体验。
+ */
+@Composable
+private fun ListenSection(
+    state: SourceSyncListenState,
+    tls: SourceSyncListenTlsAvailability,
+    onStart: (SourceSyncListenForm) -> Unit,
+    onStop: () -> Unit,
+    onReceive: () -> Unit,
+) {
+    var form by remember { mutableStateOf(SourceSyncListenForm()) }
+    val listening = state is SourceSyncListenState.Listening ||
+        state is SourceSyncListenState.Receiving ||
+        state is SourceSyncListenState.Received ||
+        state is SourceSyncListenState.Rejected ||
+        state is SourceSyncListenState.Failed && state.port != null
+    val receiving = state is SourceSyncListenState.Receiving
+    val statusLine = SourceSyncListenCopy.lineOf(state)
+    val portLine = SourceSyncListenCopy.portLineOf(state)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(SourceSyncImportTags.LISTEN),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(SourceSyncListenCopy.TITLE, style = MaterialTheme.typography.titleSmall)
+            Text(
+                SourceSyncListenCopy.HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = form.port,
+                onValueChange = { form = form.copy(port = it) },
+                label = { Text(SourceSyncListenCopy.PORT_LABEL) },
+                singleLine = true,
+                enabled = !listening && !receiving,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.LISTEN_PORT),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = form.tls,
+                    onCheckedChange = { checked -> form = form.copy(tls = checked) },
+                    enabled = tls.available && !listening && !receiving,
+                    modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_TLS),
+                )
+                Text(
+                    SourceSyncListenCopy.TLS_LABEL,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                tls.note,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (tls.available) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_INFO),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = { onStart(form) },
+                    enabled = form.canSubmit && !listening && !receiving,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag(SourceSyncImportTags.LISTEN_START),
+                ) {
+                    Text(SourceSyncListenCopy.START)
+                }
+                OutlinedButton(
+                    onClick = onStop,
+                    enabled = listening,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag(SourceSyncImportTags.LISTEN_STOP),
+                ) {
+                    Text(SourceSyncListenCopy.STOP)
+                }
+            }
+            Button(
+                onClick = onReceive,
+                enabled = (state is SourceSyncListenState.Listening ||
+                    state is SourceSyncListenState.Received ||
+                    state is SourceSyncListenState.Rejected) && !receiving,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.LISTEN_RECEIVE),
+            ) {
+                Text(SourceSyncListenCopy.RECEIVE_ONE)
+            }
+            if (receiving) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.height(16.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Text(SourceSyncListenCopy.BUSY, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (portLine != null) {
+                Text(
+                    portLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_PORT_LINE),
+                )
+            }
+            if (statusLine != null) {
+                Text(
+                    statusLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = when (state) {
+                        is SourceSyncListenState.Received -> MaterialTheme.colorScheme.primary
+                        is SourceSyncListenState.Failed, is SourceSyncListenState.Rejected ->
+                            MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_STATUS),
+                )
+            }
+        }
+    }
+}
 /** 读信封文本与文件名；读不出来返回 null（页面保持"未选文件"状态）。 */
 private fun readEnvelope(context: Context, uri: Uri): Pair<String, String>? {
     val name = displayNameOf(context, uri)
