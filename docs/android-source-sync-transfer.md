@@ -2275,3 +2275,26 @@ androidTest APK `feature/settings/build/outputs/apk/androidTest/debug/settings-d
 
 - 真实两机取证（需要一台第二台机器 + 允许一次防火墙授权的窗口）：先在 Windows 用 `transfer serve --bind <IP> --allow-non-loopback` 起监听，Android 发送卡填同一 IP、点亮开关发一次；再反向（Android 监听端填 IP + 开关，Windows `transfer send --allow-non-loopback`）。两侧都要抓 `not-loopback` 之外的码。
 - 若将来要把「被策略拒绝」与「地址不是回环」在机器可辨层面分开，必须两端同时新开一个码集合、同名同序、各有用例（W6-47 结论 C），单端做不算。
+
+### 31.10 W6-56：把拨号侧地址判定钉进单元门禁
+
+**为什么钉**：`--required-suite` 的语义是「这个套件必须真的执行过」。没有这一行，套件整体消失（文件被误删、被 `@Ignore`、source set 变更导致整类不参与编译）时 gradle 依然打印 `BUILD SUCCESSFUL` —— 这正是 windows-ci 上 WebDav 套件踩过的坑。两个方向的地址判定此前只有一半受保护：监听端（绑定）的 `SourceSyncHostAddressTest` 已由 W6-55 钉住，拨号端（`sendTo` / `receiveFrom`）的 `SourceSyncTransferClientHostTest` 到本节才钉。
+
+**改动**（`.github/workflows/android-ci.yml`，+3 行）：两行注释 + 一行 `--required-suite com.mediahub.core.common.sync.SourceSyncTransferClientHostTest`，钉住套件数 **36 → 37**；`--require-complete-suites` 与其余 36 行一字未动。
+
+**口径回顾（一个判定、两个视角）**：地址判定仍然只有一处 `SourceSyncHostAddress.resolve(host, allowExplicitHost, verb)`，`verb` 只改「开关关着」那句里的动词（监听端缺省 `绑定`、拨号端传 `连`）。因此：
+
+- 拨号端开关关着 ⇒ 与 W6-23 起的原文逐字相同：`只允许连回环地址（127.0.0.1 / ::1 / localhost），实际 <text>`
+- 监听端开关关着 ⇒ 与 W6-52 逐字相同：`只允许绑定回环地址（127.0.0.1 / ::1 / localhost），实际 <text>`
+- 另外三条两端共用同一句、不含动词：
+  - `「<text>」不是 IP 字面量，本版本传输不做域名解析；请填 127.0.0.1、::1、localhost 或那台机器的单播 IP。`
+  - `「<text>」不是一个具体某台机器的地址（通配 / 广播 / 组播 / 保留地址），建 socket 之前就拒绝了；请填一个单播地址，例如 192.168.1.20。`
+  - `地址最多 256 个字符，这个没有去绑。`
+- 码始终是 `not-loopback`（W6-47 结论 B）；机器可辨的新码集合本轮不做（结论 C：要两端同时新开、同名同序、各有用例）。
+
+**本机核对**：
+
+1. 只跑该套件：`gradlew.bat --max-workers=2 :core:common:testDebugUnitTest --tests "com.mediahub.core.common.sync.SourceSyncTransferClientHostTest"` → 11 例全绿（W6-52b 的先导证据：`BUILD SUCCESSFUL in 2m 9s`、`17 actionable tasks: 5 executed`、XML `tests=11 failures=0 errors=0`）。
+2. 门禁自带单测（改 `.github/workflows/` 或 `.github/scripts/` 后必跑）：`python -m unittest discover -s .github/scripts/tests` → `Ran 54 tests in 104.789s` / `OK`。
+
+**未覆盖**：套件只验证闸门本身（一次都不真拨非回环地址，理由见 §31.8 第 1 条）；设备执行仍 DEVICE_UNVERIFIED；真实两机 NOT_RUN；CI 侧「37 条 `--required-suite` 都真跑过」的证据记在 PR #33 的 exact-SHA 表里，本节写就时该 head 的 run 尚未回执。
