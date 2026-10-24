@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.ClientIdentity
 import com.mediahub.core.common.sync.AndroidSourceTypeMap
 import com.mediahub.core.database.repository.ServerRepository
+import com.mediahub.core.database.sync.AndroidSourceSyncService
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.provider.api.MediaProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -81,6 +82,42 @@ class SourceSyncImportViewModel @Inject constructor(
     val listenTls: SourceSyncListenTlsAvailability
         get() = listenerController.tlsAvailability
 
+    // ---- W6-42：发送（Android → Windows） ----
+
+    /**
+     * 导出端取生产实现 [AndroidSourceSyncService]。
+     *
+     * 导出本身会为还没有同步身份的来源派生 id 并回写（与 Windows export 一致），本层不再补任何字段；
+     * 没有可用线路、或类型未知的来源会被跳过，条数如实报给界面（[SourceSyncSendExport.skippedCount]）。
+     */
+    private val sourceSyncService = AndroidSourceSyncService(
+        store = serverRepository,
+        deviceId = clientIdentity.deviceId,
+    )
+
+    /**
+     * 发送控制器（W6-42）：只把「本机导出」与「core:common 的传输客户端」接起来。
+     *
+     * 协议细节一行都不在这里：分帧、认证 tag、TLS 钉扎、回执四码全部由 [SourceSyncTransferClient] 负责，
+     * 失败码原样透传；本层只多「端口/指纹/口令还没填好就拒」的四个码。
+     */
+    private val sendController = SourceSyncSendController(
+        exportPort = object : SourceSyncExportPort {
+            override suspend fun export(): SourceSyncSendExport {
+                val exported = sourceSyncService.export()
+                return SourceSyncSendExport(
+                    envelopeJson = exported.json,
+                    sourceCount = exported.envelope.sources.size,
+                    skippedCount = exported.skippedServerIds.size,
+                )
+            }
+        },
+        sendPort = SourceSyncTransferSendPort(),
+    )
+
+    /** 发送区块的状态（Idle / Sending / Sent / Failed）。 */
+    val sendState: StateFlow<SourceSyncSendState> = sendController.state
+
     private val _verification = MutableStateFlow(SourceVerificationViewState())
 
     /** 结果页的逐源验证状态（三态 + 对话框 + 忙碌标记）。 */
@@ -149,16 +186,39 @@ class SourceSyncImportViewModel @Inject constructor(
         }
     }
 
+    // ---- W6-42：Android 当发送端 ----
+
+    /**
+     * 导出本机信封并发给 Windows 的 transfer serve。
+     *
+     * 端口为空/越界/非数字、开了 TLS 却没填指纹、开了认证却没填口令时，控制器直接返回 false：
+     * **不导出、不拨号、不改任何本地数据**。已有一条在飞时同样只发一次（单飞由控制器保证）。
+     */
+    fun send(form: SourceSyncSendForm) {
+        viewModelScope.launch { sendController.send(form) }
+    }
+
+    /** 清掉上一次的发送结论（换页或换表单时用），不影响正在飞的那一次。 */
+    fun clearSendResult() {
+        sendController.clearResult()
+    }
+
     fun reset() {
         session.reset()
         receiveController.clear()
         listenerController.clearResult()
+        sendController.clearResult()
         _verification.value = SourceVerificationViewState()
     }
 
-    /** 页面销毁时必须关掉监听，否则端口会一直占着（accept 线程也会留着）。 */
+    /**
+     * 页面销毁时必须关掉监听，否则端口会一直占着（accept 线程也会留着）。
+     *
+     * 发送端不占端口：连接随 viewModelScope 取消关闭，所以这里只清结论、不做别的。
+     */
     override fun onCleared() {
         listenerController.stop()
+        sendController.clearResult()
         super.onCleared()
     }
 
@@ -209,4 +269,3 @@ class SourceSyncImportViewModel @Inject constructor(
             )
         }
 }
-
