@@ -48,7 +48,7 @@ sealed interface SourceSyncListenerTransfer {
 /** [SourceSyncTransferListener.open] 的结果：要么监听已起来，要么一个稳定码。 */
 sealed interface SourceSyncListenerStart {
 
-    /** 监听已在回环上起来；用完必须 close，否则端口一直占着。 */
+    /** 监听已起来（回环，或 W6-52 的显式单播地址）；用完必须 close，否则端口一直占着。 */
     class Started(val listener: SourceSyncTransferListener) : SourceSyncListenerStart
 
     /** 监听没有起来（not-loopback / tls-certificate-unavailable / listener-failed）。 */
@@ -56,7 +56,7 @@ sealed interface SourceSyncListenerStart {
 }
 
 /**
- * W6-34：只绑回环的接收端。
+ * W6-34：缺省只绑回环的接收端（W6-52 起可由调用方显式放宽到单播字面量，见 SourceSyncHostAddress）。
  *
  * 与 Windows SourceSyncTransferListener（SourceSyncTransferEndpoint.cs:140）对齐的部分：
  * - 解帧一律走 SourceSyncTransfer.receive，本类不复制任何一帧的长度判定；
@@ -84,7 +84,7 @@ class SourceSyncTransferListener private constructor(
 
     private val closed = AtomicBoolean(false)
 
-    /** 绑定的回环地址文本。 */
+    /** 绑定的地址文本（缺省是回环；W6-52 放宽后可能是调用方给的单播字面量）。 */
     val address: String get() = boundAddress
 
     /** 实际绑定的端口；open 时给 0 也会在这里拿到系统分配的端口。 */
@@ -271,7 +271,8 @@ class SourceSyncTransferListener private constructor(
          * 判定次序与 Windows Start 一致：先地址，再证书（TLS 开着但没有证书时在 socket 之前就失败），
          * 最后才 bind，所以 listener-failed 一定是"端口被占用"这一层的问题。
          *
-         * @param host 回环地址，null 或空白表示 127.0.0.1；非回环在创建 socket 之前就被拒绝（not-loopback）。
+         * @param host 回环地址，null 或空白表示 127.0.0.1；非回环在创建 socket 之前就被拒绝（not-loopback），
+         *   除非 [allowExplicitHost] 为 true 且它正是一个单播字面量（W6-52）。
          * @param port 0 表示让系统分配；实际端口从返回的 listener.port 取。
          * @param tls 默认关闭；开启时要求 identity 可用，否则 tls-certificate-unavailable。
          */
@@ -284,13 +285,13 @@ class SourceSyncTransferListener private constructor(
             readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
             handshakeTimeoutMs: Int = SourceSyncTls.DEFAULT_HANDSHAKE_TIMEOUT_MS,
             closeBudgetMs: Int = SourceSyncTls.DEFAULT_CLOSE_BUDGET_MS,
+            allowExplicitHost: Boolean = false,
         ): SourceSyncListenerStart {
-            val text = host?.trim().orEmpty()
-            val address = LoopbackOnly.addressOrNull(if (text.isEmpty()) DEFAULT_HOST else text)
-                ?: return SourceSyncListenerStart.Failed(
-                    SourceSyncTransferReasons.NOT_LOOPBACK,
-                    "只允许绑定回环地址（127.0.0.1 / ::1 / localhost），实际 " + text,
-                )
+            val address = when (val resolution = SourceSyncHostAddress.resolve(host, allowExplicitHost)) {
+                is SourceSyncHostAddress.Resolution.Failed ->
+                    return SourceSyncListenerStart.Failed(resolution.code, resolution.detail)
+                is SourceSyncHostAddress.Resolution.Accepted -> resolution.address
+            }
             if (port !in 0..MAXIMUM_PORT) {
                 return SourceSyncListenerStart.Failed(
                     SourceSyncTransferReasons.LISTENER_FAILED,

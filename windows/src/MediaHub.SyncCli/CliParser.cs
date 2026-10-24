@@ -72,6 +72,16 @@ public static class CliParser
         "  --await-receipt    with 'transfer send': wait for that byte after the last frame and fail with\n" +
         "                     receipt-missing, receipt-timeout or receipt-invalid when it does not come;\n" +
         "                     off by default, so a send never waits and never reads back\n" +
+        "  --budget-ms N      with 'transfer serve': the whole wait for one peer, in milliseconds\n" +
+        "                     (100..600000, default 15000); running out is transfer-timeout (W6-50)\n" +
+        "  --bind ADDR        with 'transfer serve': the local address to bind (default 127.0.0.1);\n" +
+        "                     a non-loopback ADDR still needs --allow-non-loopback (W6-51)\n" +
+        "  --allow-non-loopback\n" +
+        "                     with 'transfer serve' / 'transfer send': accept one explicitly named\n" +
+        "                     non-loopback unicast address - a LAN address literal, never a wildcard,\n" +
+        "                     broadcast, multicast or host name. Without it only 127.0.0.1, ::1 and\n" +
+        "                     localhost are accepted, exactly as before W6-51, so the option is the\n" +
+        "                     consent a firewall prompt would otherwise have to ask for\n" +
         "\n" +
         "Global:\n" +
         "  --json       stdout carries exactly one JSON document; progress goes to stderr\n" +
@@ -90,7 +100,7 @@ public static class CliParser
     private static readonly string[] PairListValueOptions = ["--root"];
     private static readonly string[] PairForgetValueOptions = ["--root", "--device"];
     private static readonly string[] TransferServeValueOptions =
-        ["--root", "--device", "--port", "--secret-env", "--expect-fingerprint"];
+        ["--root", "--device", "--port", "--budget-ms", "--bind", "--secret-env", "--expect-fingerprint"];
     private static readonly string[] TransferSendValueOptions =
         ["--to", "--root", "--device", "--secret-env", "--expect-fingerprint"];
     private static readonly string[] TransferRoundtripValueOptions =
@@ -196,6 +206,7 @@ public static class CliParser
         bool confirmDelivery = false;
         bool sendReceipt = false;
         bool awaitReceipt = false;
+        bool allowExplicitHost = false;
 
         for (int i = start; i < args.Count; i++)
         {
@@ -353,6 +364,25 @@ public static class CliParser
                 continue;
             }
 
+            if (name == "--allow-non-loopback")
+            {
+                if (inlineValue is not null)
+                {
+                    return Error("flag-takes-no-value:" + name);
+                }
+
+                // Only the two verbs that name exactly one peer address can be given consent for it: serve
+                // binds one address and send dials one. Roundtrip invents both of its own addresses, so a
+                // consent flag there would have nothing to consent to (W6-51).
+                if (command is not (SyncCliCommand.TransferServe or SyncCliCommand.TransferSend))
+                {
+                    return Error("option-not-allowed-for-command:" + name + ":" + commandName);
+                }
+
+                allowExplicitHost = true;
+                continue;
+            }
+
             if (Array.IndexOf(allowed, name) < 0)
             {
                 return Error(IsKnownOption(name)
@@ -500,6 +530,28 @@ public static class CliParser
             port = parsedPort;
         }
 
+        int? budgetMilliseconds = null;
+        string? budgetText = values.GetValueOrDefault("--budget-ms");
+        if (budgetText is not null)
+        {
+            // The budget is the whole wait for one peer: a value under a tenth of a second would fail
+            // before a handshake could finish, and a value over ten minutes would hang a script with no
+            // way to tell "slow peer" from "no peer". Same shape as --port: refuse here rather than let
+            // the runner clamp or guess.
+            if (!int.TryParse(budgetText, NumberStyles.None, CultureInfo.InvariantCulture, out int parsedBudget) ||
+                parsedBudget is < 100 or > 600000)
+            {
+                return Error("invalid-budget-ms:" + budgetText);
+            }
+
+            budgetMilliseconds = parsedBudget;
+        }
+
+        // --bind is only reachable for 'transfer serve': every other command's value-option list omits it,
+        // so the loop above already refused it with option-not-allowed-for-command. Nothing to re-check
+        // here, and the runner still substitutes the loopback default when it is absent.
+        string? bindAddress = values.GetValueOrDefault("--bind");
+
         string? passphrase = values.GetValueOrDefault("--passphrase");
         string? secretsJson = values.GetValueOrDefault("--secrets");
         if (passphrase is not null && secretsJson is not null)
@@ -528,6 +580,9 @@ public static class CliParser
                 ExpectPlaintextBase64 = expect,
                 Target = target,
                 Port = port,
+                BudgetMilliseconds = budgetMilliseconds,
+                BindAddress = bindAddress,
+                AllowExplicitHost = allowExplicitHost,
                 DeviceA = deviceA,
                 DeviceB = deviceB,
                 Once = once,
@@ -552,7 +607,7 @@ public static class CliParser
     private static bool IsKnownOption(string name) => name is
         "--root" or "--out" or "--in" or "--passphrase" or "--secrets" or "--deletions" or
         "--device" or "--baseline" or "--id" or "--source" or "--link" or "--expect" or
-        "--to" or "--port" or "--device-a" or "--device-b" or
+        "--to" or "--port" or "--budget-ms" or "--bind" or "--allow-non-loopback" or "--device-a" or "--device-b" or
         "--authenticate" or "--secret-env" or "--tls" or "--expect-fingerprint" or "--confirm-delivery" or
         "--send-receipt" or "--await-receipt" or
         "--apply" or "--once" or "--json";

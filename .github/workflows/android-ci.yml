@@ -127,6 +127,8 @@ jobs:
           #     复用 SourceSyncTransfer.receive 解帧，TLS 走 handshakeServer / 明文走 5 字节嗅探，关闭 TLS 走 graceful close）
           #   sync.SourceSyncDeliveryTest —— 发送端投递确认（W6-46：单码 delivery-unconfirmed 独立封闭集、
           #     写完最后一帧后读对端直到 FIN，预算 2000 ms、最多排水 64 KiB，回执优先；Off 时不读一个字节）
+          #   feature.settings.sync.SourceSyncSendLauncherTest —— 发送取消的 Job 记账薄壳（W6-49：取消回 Idle
+          #     不产生失败码、释放单飞可立刻重发、没在发时 cancel 是 no-op、clear 后状态仍可用）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -176,6 +178,9 @@ jobs:
             --required-suite com.mediahub.feature.search.engine.GlobalSearchEngineTest \
             --required-suite com.mediahub.provider.emby.EmbyLibraryProviderTest \
             --required-suite com.mediahub.provider.emby.EmbySearchProviderTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncSendLauncherTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncHostAddressTest \
+            --required-suite com.mediahub.provider.emby.EmbyAuthenticationInterleavingStressTest \
             --require-complete-suites
 
       - name: Lint

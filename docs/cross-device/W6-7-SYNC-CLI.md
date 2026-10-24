@@ -495,3 +495,94 @@ transfer send  --to 127.0.0.1:<port> --root <dir> --device <id> [--await-receipt
 ### 验收
 
 `windows/tools/acceptance/w6/transfer-tls-auth.ps1` 新增 J（对端 `--send-receipt` → send 0 + `receiptConfirmed=true`，serve `receiptWritten=true`）、K（对端不写回执 → send 2 `receipt-missing`，而 serve 0 且已应用 2 条）、L（对端收下字节后既不回执也不关闭 → send 2 `receipt-timeout`、2.3 s）。实测 **14/14 PASS**，总 21.4 s，残留进程 0。详见 `docs/cross-device/W6-37-RECEIPT.md`。
+
+## W6-50 追加 —— `transfer serve --budget-ms`（接收预算从常量变成开关）
+
+### 问题
+
+`transfer serve` 的接收预算一直是 `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` 里的常量 `TransferBudget`（15 s）。两个后果：
+
+1. **验收无法提速**：要证明「等不到对端会超时」，脚本只能真等 15 s；W6-45 的用例矩阵已到 20 例量级，再加两个 15 s 用例不合算。
+2. **常量不可测**：`transfer-timeout` 在 15 s 尺度上与其他慢路径难以区分，看上去像「卡住」而不是「按预算放弃」。
+
+### 决策（续 D18–D20）
+
+#### D18：只有 `transfer serve` 开放 `--budget-ms`，缺省仍是 15000
+
+`--budget-ms` 同时写进 `TransferServeValueOptions` 与 `IsKnownOption`，因此选项表、帮助文本与「未知选项」判定三者一致：
+
+| 情况 | 结果 |
+| --- | --- |
+| 不传 | `CliInvocation.BudgetMilliseconds = null`，runner 回落常量 15000。构造出的调用与 W6-50 前逐字节相同，1518 个既有测试全绿 |
+| 100..600000 的整数（含 `--budget-ms=1500` 形式） | 该值就是这次接收的预算 |
+| `0` / `99` / `600001` / `-1` / `abc` / `15s` | exit 1 `invalid-budget-ms:<原文>` |
+| `--budget-ms` 后面没有值 | exit 1 `missing-value:--budget-ms` |
+| `--budget-ms ""` | exit 1 `empty-value:--budget-ms`（走通用空值规则，不进范围检查） |
+| 用在 `transfer send` / `transfer roundtrip` / `pair link` / `export` / 其它命令 | exit 1 `option-not-allowed-for-command:--budget-ms:<命令名>` |
+
+码名前缀用 `invalid-budget-ms:` 而不是 `invalid-option-value:`：本 CLI 从来没有第二个前缀（端口用的是 `invalid-port:`），另造一个会和既有脚本的匹配习惯冲突。范围检查用 `int.TryParse(text, NumberStyles.None, InvariantCulture)`，与端口解析同一套写法，因此 `+100`、`1_000`、` 100` 都不被接受。
+
+#### D19：文本模式打在 stderr，JSON 模式只出 `budgetMs`
+
+- **文本模式**（不带 `--json`）：`listening 127.0.0.1:<port>` 之后紧接一行 `budget: <N> ms`，然后才是结果或错误。放在 listening 之后，是因为端口行是脚本的就绪信号，预算值必须与它同一时刻可见。
+- **JSON 模式**：stderr 不出现该行，数值走结果文档的新增字段 `budgetMs`（写在 `once` 之后）。理由沿用 D3：「`--json` 时 stdout 只有一个文档」；新增的人类可读行只进 stderr，脚本需要的数直接从文档取。
+
+#### D20：`send` 侧不跟这个开关
+
+send 的等待预算是 W6-30 的投递确认（2000 ms）与 W6-37 的回执（2000 ms），各有自己的常量与码；把接收预算塞进 send 会让「超时」第一次出现两个语义。roundtrip 自己建监听、自己拨号，也不接受该选项。
+
+### 命令参考
+
+```text
+transfer serve --root <dir> --device <id> [--budget-ms N] [--send-receipt] [--json] [--tls] [--authenticate --secret-env NAME]
+```
+
+N 的范围 100..600000，缺省 15000；预算耗尽即 `transfer-timeout`（exit 2），消息里带秒数（`The peer did not finish within 1.2 s.`）。
+
+### 实测（本机真实运行，2026-10-24，D:\mh-w6；全部为真实子进程，未启动 GUI）
+
+```text
+# 1) 越界：exit 1，稳定码带原文（随后是完整帮助文本）
+$ dotnet MediaHub.SyncCli.dll transfer serve --root <dir> --device dev-b --budget-ms 0
+error invalid-budget-ms:0: run with --help for usage
+
+# 2) 文本模式，预算 300，无对端：listening → budget 行 → 错误，墙钟 1027 ms
+listening 127.0.0.1:5183
+budget: 300 ms
+error transfer-timeout: The peer did not finish within 0.3 s.
+
+# 3) JSON 模式，预算 1200，无对端：stdout 只有一份文档，stderr 无 budget 行
+{"ok":false,"error":{"code":"transfer-timeout","message":"The peer did not finish within 1.2 s."}}
+stderr: listening 127.0.0.1:<port> 与 error transfer-timeout: The peer did not finish within 1.2 s.
+
+# 4) 用在别的命令：拒绝码里带命令名
+transfer send --budget-ms 100   -> error option-not-allowed-for-command:--budget-ms:transfer-send
+export --budget-ms 100          -> error option-not-allowed-for-command:--budget-ms:export
+pair link --budget-ms 100       -> error option-not-allowed-for-command:--budget-ms:pair-link
+
+# 5) --help 里新增两行（逐字）
+  --budget-ms N      with 'transfer serve': the whole wait for one peer, in milliseconds
+                     (100..600000, default 15000); running out is transfer-timeout (W6-50)
+```
+
+### 测试
+
+`windows/tests/MediaHub.Tests/SyncCliBudgetTests.cs`：19 个用例（13 个 `[Fact]` + 1 个 `[Theory]` 6 组 `[InlineData]`），覆盖缺省为 null、上下界、四种非法值、空值/缺值、四条命令被拒、文本模式的行序与 JSON 模式的行缺席、1200 ms 的真实墙钟（1100..4000 ms 且消息含 `1.2 s`），以及两次真实 serve 的 `budgetMs`（缺省 15000 / 显式 30000，并复核 `port`、`once`、`applied`、`report.applied` 未被改变）。全套 **1537 通过 / 0 失败 / 0 跳过**（基线 1518）。
+
+### 验收脚本
+
+`windows/tools/acceptance/w6/transfer-tls-auth.ps1` 新增两例（真实 `dotnet MediaHub.SyncCli.dll` 子进程）：
+
+| 用例 | 形态 | 断言 |
+| --- | --- | --- |
+| S1 `--budget-ms 1200`，无人拨号 | 文本模式 serve，无对端 | exit 2 `transfer-timeout`；stderr 有 `error transfer-timeout:` 与 `within 1.2 s`；`budget: 1200 ms` 出现在 listening **之后**；无 `served one connection`；stdout 无 JSON；墙钟 1100..9000 ms；`sync-sources.json` 不存在 |
+| S2 `--budget-ms 30000`，真发送端 | JSON 模式 serve + 真 send | 两侧 exit 0；`budgetMs=30000`；`applied=true` 且 `report.applied=2`；stderr 无 `budget: ` 行；接收端 2 条记录（`Living Room Emby` / `WebDAV Gate`）且 baseline 已写 |
+
+实测 **20/20 PASS**（原 18 例全绿），总 58 151 ms，残留 `dotnet.exe ... MediaHub.SyncCli.dll` 进程 0：S1 1681 ms、S2 1519 ms。
+
+### 局限（NOT_COVERED）
+
+- 预算只覆盖「等对端」这一段（`ReceiveOnceAsync` 的 timeout 参数），不含进程启动与临时证书生成，所以 S1 的墙钟是 1681 ms 而不是 1200 ms。
+- 任务书写的是 `library` 命令，本 CLI 没有这个动词；本地侧动词是 `export`，用它验证了同一条拒绝路径。
+- `send` / `roundtrip` 的预算仍是常量，不可配（D20）。
+- 没有 GUI 入口：`SyncPage` 的传输卡片用 presenter 自己的预算（W6-33），与本开关无关。

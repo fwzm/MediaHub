@@ -32,6 +32,26 @@ COMMON_TESTS = {
         "productionSettingsInfoDensityPersistsAndBackupEntryDispatches",
     ),
     (
+        "com.mediahub.feature.settings.sync.SourceSyncSendCancelScreenTest",
+        "theCancelButtonIsThereButDisabledBeforeAnythingIsSent",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSendCancelScreenTest",
+        "tappingCancelWhileSendingCallsBackExactlyOnce",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest",
+        "theListenFormCarriesTheTypedHostAndTheSwitchVerbatim",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest",
+        "theListenFormCarriesTheAuthSwitchAndTheSecretVerbatim",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest",
+        "whileListeningTheAuthSwitchAndTheSecretAreLocked",
+    ),
+    (
         "com.mediahub.feature.player.PlayerVisualEffectsPathTest",
         "playerEntryOpensSettingsAndPresetOffPathUpdatesProductState",
     ),

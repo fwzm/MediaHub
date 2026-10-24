@@ -189,17 +189,18 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   （W6-24：`transfer … --authenticate --secret-env NAME`，口令只从环境变量进、不进命令行与 JSON；
   开启时在最后一个数据块之后追加一个 `0x03` tag 帧（33 字节 = 1 字节帧类型 + 32 字节 HMAC-SHA256），
   关闭时线上字节与 W6-16 全等，重放按进程内 64 条 nonce 窗口拒绝）、来源同步传输的 TLS 1.3 与公钥指纹钉扎（W6-26：`transfer serve --tls` 在 stderr 打 `certificate fingerprint:`，`transfer send --tls --expect-fingerprint` 只信任钉住的那一枚，四个 `tls-*` 稳定码；默认关闭时线上字节与 W6-16 全等）、可选投递确认（W6-30：`--confirm-delivery` 要等到对端关闭连接才认定送达，否则 `delivery-unconfirmed` 而不是静默成功）、传输层恶意与畸形帧回归（W6-31：36 例、十类攻击面，接收端永不把异常抛给调用方）、同步页的传输卡片（W6-33：本机回环收/发、收到的信封只进预览绝不自动应用、20 个稳定码逐条文案，抽成无 WinUI 依赖的 `SyncTransferPresenter`）、同步页 presenter 与真实 `SyncCli` 子进程的 headless 端到端（W6-35：独立测试工程、不入 sln、9 例全部真起子进程，主套件例数不变）、反向回执帧（W6-37：`transfer serve --send-receipt` 只在信封解码成功后回一个裸 `0x04` 字节，`transfer send --await-receipt` 没等到就报 `receipt-missing`/`receipt-timeout`/`receipt-invalid`/`receipt-not-enabled`，不再把「对端关连接」当送达证据；默认关闭时线上字节仍与 W6-16 全等，同批修掉 W6-26 握手「超时 vs 调用方取消」的分类竞态）、回执帧接进同步页与双向编排（W6-39：接收侧解码成功才回 `0x04`、发送侧可等回执、roundtrip 内部默认交换回执，回执失败只作 advisory、不改轮结果）、同步页上的两个回执控件（W6-43：接收后写回执 / 等待对端回执各一个勾选框与一行回执结论，`receipt-*` 四码原样呈现，`receipt-missing` 不软化成「已发送」；GUI_UNVERIFIED）、TLS × 认证 × 回执的组合矩阵验收（W6-45：验收脚本 14 → 18 例、presenter-e2e 12 → 14 例，全开 / 口令不一致 / 错 pin + 认证 / 明文对 TLS 四种组合各自断言稳定码与接收端零信封写入；口令不一致时发送端只能观察到 `receipt-missing`（信封单向，不能凭缺失猜原因），serve 侧则必须不出现任何 `receipt-*`）、发送端投递确认（W6-46：Android 侧对齐 Windows W6-30，写完最后一帧后读对端直到 FIN 才算送达，`delivery-unconfirmed` 是独立单码封闭集，预算 2000 ms、最多排水 64 KiB、回执优先；默认关闭时不读一个字节、线上字节与 W6-22 向量逐字节相等；界面开关见 W6-48）、跨机（非回环）传输的契约 ADR（W6-47：现状硬边界、信任模型、十条实现约束、错误码归并结论与 DoD 证据表全 NOT_RUN，只在 W6 分支上的文档、不改代码）、同步页补上两个协议开关（W6-48：发送卡片可勾「等对端关闭连接（投递确认）」、监听卡片可勾「收下后回 0x04 回执」，回执优先所以勾着等回执时投递确认勾选框直接禁用；两者接进既有表单字段，8 例 androidTest 全部先滚动到页尾再断言、主流程仍在首屏）、
+  发送卡可以在途取消（W6-49：`SourceSyncSendLauncher` 只做 `Job` 记账、不持信封与口令，`sync.send.cancel` 按钮只在发送中可用，取消后状态回 Idle 且不产生失败码、释放单飞后可立刻重发、没在发时是 no-op；JVM 8 例 + androidTest 6 例）、`transfer serve` 的接收预算可调（W6-50：`--budget-ms` 默认仍是 15000 ms、取值 100..600000、只对 serve 生效，非法值报 `invalid-budget-ms:<值>`，`--json` 多一个 `budgetMs` 字段、文本模式多一行 `budget: N ms`；19 例单测 + 验收脚本 S1/S2 分别断言「预算到点报 `transfer-timeout`」与「命令值被原样回显」）、跨机（非回环）的第一个入口——显式单播主机（W6-51：`transfer serve --bind ADDR` 与 `transfer send|serve --allow-non-loopback`，同意后只接受一个单播字面量，通配 / 广播 / 组播 / 保留段 / 主机名仍在建 socket 之前就拒掉、因此不触发防火墙弹窗；复用冻结的 `not-loopback` 码、把诊断写进拒绝句子的取舍，已作为对 W6-47 ADR §4.5 第 2 条的显式偏差记进 `docs/cross-device/W6-51-EXPLICIT-HOST.md`；40 例单测；跨机证据 E1–E6 仍 NOT_RUN）、Android 监听端也可以绑一个显式单播地址（W6-52：监听卡的 `sync.listen.host` 输入框 + `sync.listen.allow-host` 复选框，与 Windows W6-51 同名同义——留空仍是 127.0.0.1，同意后只接受一个单播字面量，通配 / 广播 / 组播 / 保留段与主机名在建 socket 之前就拒，码仍是 `not-loopback` 并由四条 detail 句子承载诊断（与 W6-52 之前的拒绝句逐字相同的那条保留给「没开开关」）；地址判定收在一处 `SourceSyncHostAddress`，界面层只原样转交不 trim 不判；JVM 14 + 5 例、androidTest 3 例；发送端与拨号接收卡的同类开关是 W6-52b，未做）、Android 监听端可以要求对端口令（W6-53：监听卡的 `sync.listen.auth` 开关 + `sync.listen.secret` 口令框（密码遮罩、只进内存、`toString` 打 `secret=<redacted>`），与 Windows `transfer serve` 的 `--authenticate --secret-env` 同名同义——四个线上码 `auth-required` / `auth-mismatch` / `auth-replayed` / `auth-secret-unavailable` 原样透传、界面不新增码；开了认证却没填口令时在**建 socket 之前**用本地码 `listen-secret-missing` 拒掉，工厂的 `open` 一次都不调；JVM 5 例 + androidTest 3 例）、
   审批门禁的「跳过即不写入」（同一身份 allow 与 skip 并存时 skip 胜）、同步 CLI 的 `--root` 误指已存在文件改为稳定拒绝
   （`root-not-a-directory`，每份 JSON 带 `rootExisted` 区分「新建根」与「路径写错」）与导出路径规范化
   （`../` 解析后再回显，`--out` 指向目录给 `output-is-directory`）均已实现，
-  `MediaHub.Tests` **1518 通过 / 0 失败**（其中 W6 新增 1049）；
+  `MediaHub.Tests` **1577 通过 / 0 失败**（其中 W6 新增 1108）；
   W12b 对抗性安全回归 66 例（畸形配对载荷、设备登记表在损坏/容量满/独占/只读时必须拒绝而不是静默清空、
   传输层声明长度不触发分配、`--json` 单文档、异常与 stderr 不含口令）；
-  **尚未做**：二维码与扫码、跨机（非回环）配对与真实局域网传输（目前只有契约 ADR W6-47，没有实现）、设备持久化、同步页/配对页/已配对清单的 GUI 证据
+  **尚未做**：二维码与扫码、跨机（非回环）配对与真实局域网传输（Windows 端已有显式非回环入口 W6-51，但一次真实跨机传输都没跑过；Android 监听端已有同样的地址闸门开关（W6-52），发送端与拨号接收卡还没有）、设备持久化、同步页/配对页/已配对清单的 GUI 证据
   （三者均为 `IMPLEMENTED_UNVERIFIED`，本机没人观看窗口时无法跑）、Android 端接收页的 GUI 证据与真实跨机（非回环）传输
   （Android 侧的契约/规划/导入导出/配对契约/分块传输协议/「回环传输 → 导入闭环」已就位，
   协议与 Windows 逐字节对齐，见 `docs/android-source-sync-transfer.md`；Windows 端已有可选的传输对端认证
-  （Windows W6-24 / Android W6-25，五个稳定码与帧格式两端同名同序）；TLS 1.3 与公钥指纹钉扎两端也都就位（Windows W6-26 / Android W6-29，四个 `tls-*` 码同名同序，Android 用 SPKI 而非整证书算指纹），并有与 Windows 真子进程的双向联调（W6-32，JSSE ↔ SslStream）；仍缺：两端都没有跨机（非回环）路径与真机/真网卡证据（Android 发送端的投递确认已由 W6-46 补上、界面开关见 W6-48，但默认仍关闭）；Android 侧已有回环监听端（W6-34：`SourceSyncTransferListener` 只绑回环、可连续 accept，`SourceSyncListenerImportService` 把它接进导入闭环，Windows 的 `transfer send` 可以直接推到 Android 的监听端口，界面入口也已就位（W6-36：同步页的「接收（监听）」区块可以开一个回环监听、等一次发送，收到的信封只进预览、写入仍要逐条允许后再应用；今天 App 里没有证书下发通道，所以 TLS 开关如实禁用、只能明文）；Android 端也已对齐回执帧（W6-40：`receipt-*` 四码与 Windows 同名同序，监听端只在信封解码成功后回一个裸 `0x04` 字节、gate 在端点层，拨号端可等回执，默认关时线上字节与 W6-22 的冻结向量逐字节相等；界面还没有开关）；导入页的两张接收卡片按 W6-41 移到页面末尾，首屏保留「选择文件 → 预览 → 应用」主流程（此前它们被插在按钮行之前，把主流程挤出首屏，CI 的 visual-instrumentation 上两次 Android run 就红在这 6 例首屏可见性断言上）；Android 也已是发送端（W6-42：同步页末尾的「发送（Android → Windows）」区块把本机导出的信封推给 Windows 的 `transfer serve`，可选 TLS 指纹钉扎 / HMAC 认证 / 等回执，默认全关时线上字节与 W6-22 冻结向量逐字节相等；本层只补 5 个「还没拨号就拒」的码，其余码原样透传；界面还没有取消按钮，Android → Windows 的发送方向也还没和真 CLI 对跑）；三张卡（接收 / 监听 / 发送）另有 27 例 instrumentation 证据（W6-44 的 19 例与 W6-48 的 8 例：端口闸门与「TLS 无证书就禁用」、口令框的 Password 语义、失败行与成功行文案，以及「不滚动也看得见选择文件 / 预览」的首屏不变式；本机无设备，设备结论只来自 CI 的 API 32 / 36 模拟器；W6-48 的两个协议开关同样先 performScrollTo 再断言，关掉时不影响主流程首屏））。
+  （Windows W6-24 / Android W6-25，五个稳定码与帧格式两端同名同序）；TLS 1.3 与公钥指纹钉扎两端也都就位（Windows W6-26 / Android W6-29，四个 `tls-*` 码同名同序，Android 用 SPKI 而非整证书算指纹），并有与 Windows 真子进程的双向联调（W6-32，JSSE ↔ SslStream）；仍缺：跨机（非回环）的真实证据——Windows 的地址闸门已由 W6-51 显式放开（`--bind` 加 `--allow-non-loopback`，只接受单播字面量），但一台机器证明不了它，E1–E6 全 NOT_RUN，Android 的监听端也已有同形状的地址入口（W6-52：`sync.listen.host` + `sync.listen.allow-host`，只收单播字面量），但发送端与拨号接收卡仍没有（W6-52b）（Android 发送端的投递确认已由 W6-46 补上、界面开关见 W6-48，但默认仍关闭）；Android 侧已有回环监听端（W6-34：`SourceSyncTransferListener` 只绑回环、可连续 accept，`SourceSyncListenerImportService` 把它接进导入闭环，Windows 的 `transfer send` 可以直接推到 Android 的监听端口，界面入口也已就位（W6-36：同步页的「接收（监听）」区块可以开一个回环监听、等一次发送，收到的信封只进预览、写入仍要逐条允许后再应用；今天 App 里没有证书下发通道，所以 TLS 开关如实禁用、只能明文）；Android 端也已对齐回执帧（W6-40：`receipt-*` 四码与 Windows 同名同序，监听端只在信封解码成功后回一个裸 `0x04` 字节、gate 在端点层，拨号端可等回执，默认关时线上字节与 W6-22 的冻结向量逐字节相等；界面还没有开关）；导入页的两张接收卡片按 W6-41 移到页面末尾，首屏保留「选择文件 → 预览 → 应用」主流程（此前它们被插在按钮行之前，把主流程挤出首屏，CI 的 visual-instrumentation 上两次 Android run 就红在这 6 例首屏可见性断言上）；Android 也已是发送端（W6-42：同步页末尾的「发送（Android → Windows）」区块把本机导出的信封推给 Windows 的 `transfer serve`，可选 TLS 指纹钉扎 / HMAC 认证 / 等回执，默认全关时线上字节与 W6-22 冻结向量逐字节相等；本层只补 5 个「还没拨号就拒」的码，其余码原样透传；在途发送可以取消（W6-49：新增 `SourceSyncSendLauncher` 只做 Job 记账、不持信封与口令，`sync.send.cancel` 按钮发送中才可用，取消后状态回到 Idle 且不产生任何失败码，释放单飞后可以立刻重发；真实 Socket 中途取消与真机按钮仍是 `NOT_RUN` / `DEVICE_UNVERIFIED`），Android → Windows 的发送方向也还没和真 CLI 对跑）；三张卡（接收 / 监听 / 发送）另有 36 例 instrumentation 证据（W6-44 的 19 例、W6-48 的 8 例、W6-49 的 6 例与 W6-52 的 3 例：W6-52 那 3 例钉住地址框与开关在树里可交互、表单逐字回传、监听中两者禁用且端口行写实际地址；这 3 例本机没有设备/模拟器可跑，设备结论待下一次 CI；W6-49 那 6 例钉住「发送中才启用取消按钮、点完回到 Idle、失败行不出现」；端口闸门与「TLS 无证书就禁用」、口令框的 Password 语义、失败行与成功行文案，以及「不滚动也看得见选择文件 / 预览」的首屏不变式；本机无设备，设备结论只来自 CI 的 API 32 / 36 模拟器；W6-48 的两个协议开关同样先 performScrollTo 再断言，关掉时不影响主流程首屏））。
 - **发布阻断**：见下节许可证；另有 MSIX / 代码签名 / 干净机安装 `NOT_RUN`（`SIGNING_BLOCKED`）。
 
 ### 构建与测试
@@ -220,25 +221,25 @@ CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：
 却从未被 `dotnet test` 指向，104 个用例在 CI 里长期空转（run 40019093231 起已修正，日志可见
 `MediaHub.Tests: total=438` / `MediaHub.WebDav.Tests: total=104` / `combined tests=542`；此后 `4238edc` 又给 `MediaHub.Tests`
 加了 31 例，CI 的 floor（≥400 / ≥100）因此仍有余量）。
-W6 分支上 `MediaHub.Tests` 为 **1518 通过 / 0 失败**（主线 469 = 438 基线 + 31 例续播下限契约，加 W6 新增 1049：
+W6 分支上 `MediaHub.Tests` 为 **1577 通过 / 0 失败**（主线 469 = 438 基线 + 31 例续播下限契约，加 W6 新增 1108：
 W6-1…W6-14 合计 583（其中 W6-10 的接线 14、W6-13 的清单 UI 17），再加 W6-15 的 CLI 命令组 32、
 W6-16 的回环传输 34、W6-17 的双向编排 22，另加 W12b 的对抗性回归 66、W6-18 的 transfer 命令组 19、
-W6-19 的 presenter 35、W6-21 的 skip 语义 9、W6-20 的 `--root`/导出路径 18、W6-24 的传输对端认证 45、W6-26 的 TLS 与指纹钉扎 37、W6-30 的投递确认 19、W6-31 的恶意帧回归 36、W6-33 的传输卡片 presenter 29、W6-37 的回执帧与握手超时分类修正 35、W6-39 的同步页回执接线 27、W6-43 的回执控件与结果行 3
-—— 583+32+34+22+66+19+35+9+18+45+37+19+36+29+35+27+3 = 1049，即 1287 + 45 + 121 + 35 + 27 + 3），
+W6-19 的 presenter 35、W6-21 的 skip 语义 9、W6-20 的 `--root`/导出路径 18、W6-24 的传输对端认证 45、W6-26 的 TLS 与指纹钉扎 37、W6-30 的投递确认 19、W6-31 的恶意帧回归 36、W6-33 的传输卡片 presenter 29、W6-37 的回执帧与握手超时分类修正 35、W6-39 的同步页回执接线 27、W6-43 的回执控件与结果行 3、W6-50 的 `transfer serve` 预算 19、W6-51 的显式主机入口 40
+—— 583+32+34+22+66+19+35+9+18+45+37+19+36+29+35+27+3+19+40 = 1108，即 1306 + 45 + 121 + 35 + 27 + 3 + 40），
 `MediaHub.WebDav.Tests` 的 104 例同样适用于该分支（见 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 正文的验证表）。
 
 Android 侧（[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml)）的单元门禁同样按**名字**断言，
 不是「打印了 PASSED 就算过」：`verify-unit-tests.py` 除要求每个有测试源码的模块都真跑过之外，还用
-`--required-suite` 钉住 **32** 个套件（含跨端契约的 `PairingVectorsTest` / `PairingFrameTest` /
+`--required-suite` 钉住 **33** 个套件（含跨端契约的 `PairingVectorsTest` / `PairingFrameTest` /
 `WindowsGoldenInteropTest` / `SourceSyncPlannerTest`、`AndroidSourceSyncServiceTest`、`Migration4to5Test`、
 `UpNextResolverTest` / `PlayerAutoplayTest`，W6-G 的 `PairingTransportClientTest` / `PairingTransportEndToEndTest`，
 W6-F/W6-H 的 `SourceSyncImportLogicTest` / `SourceSyncImportSessionTest` / `SourceVerificationCoordinatorTest`，
 以及 W6-J 的 `PairingMaliciousInputTest` / `PairingTransportSecurityTest` / `PairingCredentialLeakTest` /
 `AndroidSourceSyncSecurityTest`，和 W6-22 的 `SourceSyncTransferVectorsTest` / `SourceSyncTransferRoundTripTest` /
-`SourceSyncTransferLoopbackTest`，W6-25 的 `SourceSyncTransferAuthTest`、W6-29 的 `SourceSyncTlsTest`，W6-34 的 `SourceSyncTransferListenerTest`，和 W6-46 的 `SourceSyncDeliveryTest`），并用 `--require-complete-suites` 从源码里解析每个 `@Test`
+`SourceSyncTransferLoopbackTest`，W6-25 的 `SourceSyncTransferAuthTest`、W6-29 的 `SourceSyncTlsTest`，W6-34 的 `SourceSyncTransferListenerTest`，W6-46 的 `SourceSyncDeliveryTest`，和 W6-49 的 `SourceSyncSendLauncherTest`），并用 `--require-complete-suites` 从源码里解析每个 `@Test`
 方法、要求逐个都真的执行过 —— 套件被删、改名，或只跑单个方法（`--tests Suite.oneMethod`）都会失败。
-W6-23 新增的 `core/database` 套件 `SourceSyncTransferImportTest`（19 例）不在 32 个钉住名单里，
-但由 `--require-complete-suites` 与其他套件一起逐个方法核对（`core/database` 该模块 172 例、`core/common` 478 例（含 W6-40 的 `SourceSyncReceiptTest` 33 例与 W6-46 的 `SourceSyncDeliveryTest` 20 例）、`feature/settings` 249 例（W6-36 的 `SourceSyncListenerControllerTest` 28 例、W6-42 的 `SourceSyncSendControllerTest` 32 例），门禁脚本本地口径合计 2024 个唯一用例；以上只是 JVM 单测，同步页三张卡的 Compose 断言另有 27 例 `androidTest`（W6-44 的 19 例与 W6-48 的 8 例），走 CI 的 visual-instrumentation（API 32 / 36）而不计入这些数字）。
+W6-23 新增的 `core/database` 套件 `SourceSyncTransferImportTest`（19 例）不在 33 个钉住名单里，
+但由 `--require-complete-suites` 与其他套件一起逐个方法核对（`core/database` 该模块 172 例、`core/common` 492 例（含 W6-40 的 `SourceSyncReceiptTest` 33 例、W6-46 的 `SourceSyncDeliveryTest` 20 例与 W6-52 的 `SourceSyncHostAddressTest` 14 例）、`feature/settings` 267 例（W6-36 的 `SourceSyncListenerControllerTest` 38 例（W6-52 增 5 例、W6-53 增 5 例）、W6-42 的 `SourceSyncSendControllerTest` 32 例、W6-49 的 `SourceSyncSendLauncherTest` 8 例），门禁脚本本地口径合计 2056 个唯一用例（W6-52 的 19 例与 W6-53 的 5 例已计入；上一 CI 基线为 2032）；以上只是 JVM 单测，同步页三张卡的 Compose 断言另有 39 例 `androidTest`（W6-44 的 19 例、W6-48 的 8 例、W6-49 的 6 例、W6-52 的 3 例与 W6-53 的 3 例），走 CI 的 visual-instrumentation（API 32 / 36）而不计入这些数字）。
 唯一允许跳过的是两个环境门控套件：`SourceSyncTlsInteropTest`（core/common，W6-32 的客户端方向）与 `SourceSyncListenerInteropTest`（core/database，W6-38 的反向方向），两者都要真实 Windows `SyncCli` 的 DLL 才能跑，CI runner 上按 JUnit5 assumption 跳过：门禁脚本用 `ENVIRONMENT_GATED_SUITES` 逐个类点名放行，同时还要求这类套件必须出现在报告里（凭空消失同样报错），其他任何被跳过的用例仍然是硬失败。
 本地负向验证过这两条：把整套 XML 移走 → 22 条问题（1 条套件 + 21 条方法）；只删一个 `<testcase` →
 恰好 1 条 `PairingVectorsTest#rejected_addresses_match_windows`。
@@ -262,14 +263,14 @@ W6-23 新增的 `core/database` 套件 `SourceSyncTransferImportTest`（19 例�
 
 <!-- WINDOWS-SYNC:START -->
 <!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
-- 2757285 2026-10-23 docs(windows): W9 证据（两服四门 276 断言全绿）+ 能力图/路线图状态更新
-- 99585f4 2026-10-23 test(windows): W9 四门真服 GUI 验收脚本（继续观看/自动连播/收藏/永久播放列表）
-- c832fe8 2026-10-23 fix(windows): 继续观看改用递归 + IsResumable 查询（Emby 非递归只回库文件夹）
-- 883e9e9 2026-10-23 fix(windows): 首页服务器历史卡片可点击 + 继续观看/首页容器补 AutomationId
-- adab0e7 2026-10-23 feat(windows): U4 永久播放列表接入 UI（播放列表页/列表详情页/详情页加入按钮）
-- af4aa4e 2026-10-23 test(windows): U2 跨季自动连播真实 GUI 验收脚本（Emby 32/32、Jellyfin 32/32）
-- 529ba93 2026-10-23 feat(windows): U4 永久播放列表存储层（与临时队列解耦）
-- b154475 2026-10-23 feat(windows): 新增「我的收藏」页面并扩展收藏验收脚本
+- 1deccca 2026-10-24 ci(windows): 许可证面门禁接进流水线（先按现状生成报告，再校验 notices/SBOM/项目漂移）
+- ef5344d 2026-10-24 docs(licensing): W11b 许可证清单与 SBOM 按现状重跑（13 csproj / 49 行 / 29 包 + LGPL 33 DLL 许可族），新增 check-licence-surface.ps1 门禁
+- 4238edc 2026-10-24 test(w8): 把两服续播下限语义固化成离屏契约（mock 按 2%/5% 落实下限，31 例）
+- a4684a8 2026-10-24 feat(w8): 无窗口真服续播闭环（ResumeProbe 走产品 provider 栈 + 双服驱动，两服各 16 条断言全绿）
+- 214e048 2026-10-24 docs(engine): W13c Release/publish 两 flavour 自包含实测（10.1-10.7）
+- 97a0f8e 2026-10-24 feat(engine): W13b LGPL 引擎自包含打包与可选切换开关（默认仍 GPL 基线）
+- 1a38b06 2026-10-24 docs(windows): W10 登记第 6 次被打断并停用自动重试，GUI 证据改为人工授予窗口
+- dd0ff31 2026-10-24 feat(tools): W13 LGPL 引擎无头探针——按绝对路径加载两份 libmpv 实测解码等价性
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）

@@ -155,6 +155,102 @@ class SourceSyncSectionsScreenTest {
         composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_PORT).assertIsNotEnabled()
     }
 
+    // ------------------------------------------------- W6-52 绑定地址与「允许非回环单播」开关
+
+    @Test
+    fun theListenCardOffersAHostFieldAndAnExplicitHostSwitch() {
+        render()
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_HOST).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_ALLOW_HOST).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+        // 开关的说明必须写清「只收单播字面量、码仍是 not-loopback」，否则用户会以为是域名输入框。
+        composeRule.onNodeWithText(SourceSyncListenCopy.ALLOW_HOST_HINT).performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(SourceSyncListenCopy.HOST_LABEL).assertIsDisplayed()
+    }
+
+    @Test
+    fun theListenFormCarriesTheTypedHostAndTheSwitchVerbatim() {
+        var listened: SourceSyncListenForm? = null
+        render(onListenStart = { listened = it })
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_HOST).performScrollTo()
+            .performTextReplacement("192.168.1.5")
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_ALLOW_HOST).performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_START).performScrollTo()
+            .performClick()
+
+        val form = listened
+        assertNotNull("开始监听没把表单交出去", form)
+        // 与 W6-27 的接收卡同一口径：地址与开关只原样转交，判断（是否回环 / 是否单播字面量）
+        // 只有一处——core 的 SourceSyncHostAddress（W6-52），否则同一个错误会有两种说法。
+        assertEquals("192.168.1.5", form!!.host)
+        assertTrue("点了开关就必须原样带过去", form.allowExplicitHost)
+    }
+
+    @Test
+    fun whileListeningTheHostFieldAndTheSwitchAreLocked() {
+        render(listenState = SourceSyncListenState.Listening(port = 45678, tls = false, host = "192.168.1.5"))
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_PORT_LINE).performScrollTo()
+            .assertTextContains("192.168.1.5:45678", substring = true)
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_HOST).performScrollTo()
+            .assertIsNotEnabled()
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_ALLOW_HOST).assertIsNotEnabled()
+    }
+
+    // ------------------------------------------------- W6-53 对端口令（HMAC 认证）开关
+
+    @Test
+    fun theListenCardOffersAnAuthSwitchAndASecretField() {
+        render()
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_AUTH).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+        // 开关没点亮时口令框不可编辑（与发送卡同一口径：避免"填了也没用"的假象）。
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_SECRET).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsNotEnabled()
+        composeRule.onNodeWithText(SourceSyncListenCopy.AUTH_HINT).performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(SourceSyncListenCopy.AUTH_LABEL).assertIsDisplayed()
+    }
+
+    @Test
+    fun theListenFormCarriesTheAuthSwitchAndTheSecretVerbatim() {
+        var listened: SourceSyncListenForm? = null
+        render(onListenStart = { listened = it })
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_AUTH).performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_SECRET).performScrollTo()
+            .assertIsEnabled()
+            .performTextReplacement("s3cret")
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_START).performScrollTo()
+            .performClick()
+
+        val form = listened
+        assertNotNull("开始监听没把表单交出去", form)
+        // 口令只原样转交给控制器；怎么变成 core 的选项、有没有泄漏，由控制器单测钉住。
+        assertTrue("点了开关就必须原样带过去", form!!.auth)
+        assertEquals("s3cret", form.secret)
+    }
+
+    @Test
+    fun whileListeningTheAuthSwitchAndTheSecretAreLocked() {
+        render(listenState = SourceSyncListenState.Listening(port = 45678, tls = false))
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_AUTH).performScrollTo()
+            .assertIsNotEnabled()
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_SECRET).assertIsNotEnabled()
+    }
+
     // ------------------------------------------------------------------ 发送
 
     @Test

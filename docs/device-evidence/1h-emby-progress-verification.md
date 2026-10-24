@@ -77,7 +77,9 @@
 | 19:12:56 | Progress | 982,230,000 | 98.223 |
 | 19:12:57 | **Stopped** | **996,830,000** | **99.683** |
 
-全部 204。紧接查询：`UserData.PlaybackPositionTicks = 996,830,000`（**99.683 秒**），**与最终 Stopped.PositionTicks delta = 0**；PlayedPercentage = 3.23%（与该条目时长自洽）。
+全部 204。Agent A reported 紧接查询：`UserData.PlaybackPositionTicks = 996,830,000`（**99.683 秒**），**与最终 Stopped.PositionTicks delta = 0**；PlayedPercentage = 3.23%（reported，与该条目时长自洽）。
+
+> 历史 C 复核补充（`45afb870`，本脱敏副本于 2026-10-25 补入）：六份归档中没有 `UserData` / `PlaybackPositionTicks` 响应原文，也没有独立 BACK 时间戳，因此不能从该归档独立复现 `delta = 0`。当时 C 可复核的是表中 13 条 `REQ_BODY.PositionTicks`（登记为 13/13 与表值一致）；本轮未重新取得六份原始文件，不把该历史登记升格为当前 head 的独立验收。
 
 ## 4. Cold final：退出前无普通上报 → final 补发 Playing → Stopped — HAPPY PATH PASS（reported）
 
@@ -99,11 +101,15 @@
 ### #2 服务器Y S01E01（clean #1 包，09-05 19:01，7s 窗口，脱敏摘录）
 
 ```text
+19:01:00.230  -> GET …/Videos/item-Y-C/stream.mkv?MediaSourceId=…&PlaySessionId=…&static=true
 19:01:01.508  -> POST https://server-y.invalid/emby/Sessions/Playing
 19:01:01.997  <- 204（488ms）
 19:01:02.002  -> POST …/Sessions/Playing/Stopped
+19:01:02.528  <- 502 …/Videos/item-Y-C/stream.mkv（2296ms）
 19:01:02.667  <- 204（665ms）
 ```
+
+历史 C 复核将本例限定为：退出前没有普通进度上报，退出后补发 Playing/Stopped 均为 204。同一个 `coldfinal3_full.txt` 样本的媒体 GET 返回 502，因此本例不能证明媒体可播放，也不能证明已按服务端位置续播；该结论不由进度端点的 204 推导。
 
 ### 原始证据索引（执行工作区 `.smoke/`，文件未入 repo）
 
@@ -113,8 +119,8 @@
 | `sceneA3_wire.txt` | `dca8f0c835614960` | 6,183B | §3.1 同轮完整 NETWORK 行 |
 | `diag_wire.txt` | `5e32492ea06b23f1` | 7,251B | §3.3 精确对 REQ_BODY 序列（diag 包） |
 | `coldfinal_wire.txt` | `bb020cde193e7861` | 578B | cold final #1（服务器M） |
-| `coldfinal2_wire.txt` | `9a4d1cd9fe0c5e2f` | 278B | cold final #2（服务器Y）wire 摘录 |
-| `coldfinal3_full.txt` | `746b8d26edd70445` | 1,946B | cold final #2 全 NETWORK/PLAYER/UI 行 |
+| `coldfinal2_wire.txt` | `9a4d1cd9fe0c5e2f` | 278B | §5 的 18:59 慢请求失败样本：Playing 204/3787ms、无 Stopped；不是 §4 #2 成功样本（历史索引更正） |
+| `coldfinal3_full.txt` | `746b8d26edd70445` | 1,946B | §4 #2 实际来源，19:00:54–19:01:02；含媒体 GET 502，仅进度补发端点成功 |
 
 ## 5. SLOW-FINAL COMPLETION — OPEN（失败样本，未结案）
 
@@ -147,8 +153,8 @@
 
 ```text
 正常播放 lifecycle（服务器Y/服务器M）        PASS — wire + 服务端回写 + app 反射（服务器Y）
-服务端位置写入精度                       PASS — 同 PSID Stopped 996,830,000 == UserData（delta 0，diag 包）
-cold final happy path                    PASS — 两台服务器各一次（§4 #1/#2）
+服务端位置写入精度                       REPORTED — delta0 缺响应原文，无法由六份归档独立复现
+cold final happy path                    PASS（限定 reported）— 两台服务器的进度补发端点；不含媒体可播性
 SLOW-FINAL COMPLETION                    OPEN — §5（源码已有 2000ms 预算路径；精确取消来源待复现）
 Scene C 短会话三端点请求                 PASS — reported（Progress 归因已更正为采样周期边界，见 §8）
 Scene B（真机切条目 final）              NOT AVAILABLE ON DEVICE / UNIT CONTRACT COVERED

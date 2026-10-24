@@ -112,7 +112,19 @@ object SourceSyncImportTags {
 
     const val LISTEN_PORT = "sync.listen.port"
 
+    /** W6-52：绑定地址输入框。 */
+    const val LISTEN_HOST = "sync.listen.host"
+
+    /** W6-52：允许绑非回环单播地址的开关。 */
+    const val LISTEN_ALLOW_HOST = "sync.listen.allow-host"
+
     const val LISTEN_TLS = "sync.listen.tls"
+
+    /** W6-53：要求对端带口令（HMAC 认证）的开关。 */
+    const val LISTEN_AUTH = "sync.listen.auth"
+
+    /** W6-53：对端口令输入框（按密码显示，只留在内存）。 */
+    const val LISTEN_SECRET = "sync.listen.secret"
 
     /** 收下后回一个裸 0x04（W6-40）：对端才能区分「接受」与「收完就断」。 */
     const val LISTEN_RECEIPT = "sync.listen.receipt"
@@ -160,6 +172,9 @@ object SourceSyncImportTags {
 
     const val SEND_ACTION = "sync.send.action"
 
+    /** W6-49：取消按钮（只在发送中可点；取消回 Idle，不产生失败码）。 */
+    const val SEND_CANCEL = "sync.send.cancel"
+
     /** 发送结果行（已发送 / 发送中 / 发送失败：码）。 */
     const val SEND_STATE = "sync.send.state"
 }
@@ -204,6 +219,7 @@ fun SourceSyncImportRoute(
         onListenReceive = viewModel::awaitListenOnce,
         sendState = sendState,
         onSend = viewModel::send,
+        onSendCancel = viewModel::cancelSend,
     )
 }
 
@@ -242,6 +258,8 @@ fun SourceSyncImportScreen(
     /** W6-42：发送（Android → Windows）区块的状态；默认 Idle（既有调用点与 UI 测试无需改动）。 */
     sendState: SourceSyncSendState = SourceSyncSendState.Idle,
     onSend: (SourceSyncSendForm) -> Unit = {},
+    /** W6-49：取消正在飞的那一次发送；默认空实现（既有调用点与 UI 测试无需改动）。 */
+    onSendCancel: () -> Unit = {},
 ) {
     Scaffold(
         modifier = Modifier.testTag(SourceSyncImportTags.SCREEN),
@@ -435,7 +453,7 @@ fun SourceSyncImportScreen(
                 onReceive = onListenReceive,
             )
             // W6-42：发送区块同样放页尾，理由与上面两块一致（首屏不动）。
-            SendSection(state = sendState, onSend = onSend)
+            SendSection(state = sendState, onSend = onSend, onCancel = onSendCancel)
         }
     }
 }
@@ -764,6 +782,34 @@ private fun ListenSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedTextField(
+                value = form.host,
+                onValueChange = { form = form.copy(host = it) },
+                label = { Text(SourceSyncListenCopy.HOST_LABEL) },
+                singleLine = true,
+                enabled = !listening && !receiving,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.LISTEN_HOST),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = form.allowExplicitHost,
+                    onCheckedChange = { checked -> form = form.copy(allowExplicitHost = checked) },
+                    enabled = !listening && !receiving,
+                    modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_ALLOW_HOST),
+                )
+                Text(
+                    SourceSyncListenCopy.ALLOW_HOST_LABEL,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                SourceSyncListenCopy.ALLOW_HOST_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
                 value = form.port,
                 onValueChange = { form = form.copy(port = it) },
                 label = { Text(SourceSyncListenCopy.PORT_LABEL) },
@@ -795,6 +841,35 @@ private fun ListenSection(
                     MaterialTheme.colorScheme.error
                 },
                 modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_INFO),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = form.auth,
+                    onCheckedChange = { checked -> form = form.copy(auth = checked) },
+                    enabled = !listening && !receiving,
+                    modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_AUTH),
+                )
+                Text(
+                    SourceSyncListenCopy.AUTH_LABEL,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            OutlinedTextField(
+                value = form.secret,
+                onValueChange = { form = form.copy(secret = it) },
+                label = { Text(SourceSyncListenCopy.SECRET_LABEL) },
+                singleLine = true,
+                enabled = !listening && !receiving && form.auth,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.LISTEN_SECRET),
+            )
+            Text(
+                SourceSyncListenCopy.AUTH_HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(
@@ -894,6 +969,7 @@ private fun ListenSection(
 private fun SendSection(
     state: SourceSyncSendState,
     onSend: (SourceSyncSendForm) -> Unit,
+    onCancel: () -> Unit,
 ) {
     var form by remember { mutableStateOf(SourceSyncSendForm()) }
     val sending = state == SourceSyncSendState.Sending
@@ -1042,6 +1118,17 @@ private fun SendSection(
                     .testTag(SourceSyncImportTags.SEND_ACTION),
             ) {
                 Text(SourceSyncSendCopy.ACTION)
+            }
+            // W6-49：取消只在发送中可点。这里沿用本区块的「禁用而不是隐藏」纪律
+            // （tag 与布局稳定，UI 测试不必为状态切换去分支查找）；取消回 Idle，不显示失败码。
+            OutlinedButton(
+                onClick = onCancel,
+                enabled = sending,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.SEND_CANCEL),
+            ) {
+                Text(SourceSyncSendCopy.CANCEL)
             }
             if (sending) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

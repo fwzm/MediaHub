@@ -52,12 +52,12 @@ class EvidenceGateTest(unittest.TestCase):
     def problems(self, api=32):
         return gate.verify(self.root, api, SHA, "run-1", "1")
 
-    def edit(self, module, mutation):
+    def edit(self, module, mutation, api=32):
         path = self.paths[module]
         tree = ET.parse(path)
         mutation(tree.getroot())
         tree.write(path)
-        self.stamp()
+        self.stamp(api)
 
     def test_complete_reports_pass_both_apis(self):
         self.assertEqual([], self.problems())
@@ -94,6 +94,25 @@ class EvidenceGateTest(unittest.TestCase):
                     suite.set("tests", str(len(suite)))
                 self.edit(module, remove)
                 self.assertTrue(any(name in p and "no passing execution" in p for p in self.problems()))
+
+    def test_sync_cancel_and_listener_controls_cannot_be_omitted(self):
+        names = (
+            "theCancelButtonIsThereButDisabledBeforeAnythingIsSent",
+            "tappingCancelWhileSendingCallsBackExactlyOnce",
+            "theListenFormCarriesTheTypedHostAndTheSwitchVerbatim",
+            "theListenFormCarriesTheAuthSwitchAndTheSecretVerbatim",
+            "whileListeningTheAuthSwitchAndTheSecretAreLocked",
+        )
+        for api in (32, 36):
+            for name in names:
+                with self.subTest(api=api, name=name):
+                    self.assertTrue(any(key[1] == name for key in gate.required_tests(api)), name)
+                    self.build(api)
+                    def remove(suite):
+                        suite.remove(next(c for c in suite if c.get("name") == name))
+                        suite.set("tests", str(len(suite)))
+                    self.edit("feature/settings", remove, api=api)
+                    self.assertTrue(any(name in p and "no passing execution" in p for p in self.problems(api)))
 
     def test_zero_tests_fails_even_with_valid_manifest(self):
         for module in gate.MODULES:
