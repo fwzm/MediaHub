@@ -146,7 +146,7 @@ dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug
 pwsh -NoProfile -File windows/tools/acceptance/w6/transfer-tls-auth.ps1 -OutDir D:/mh-verify/w6-37
 ```
 
-脚本退出码 0 才表示 14 例全 PASS；`<OutDir>/w6-28-summary.json` 里每例都带 `receiptConfirmed` / `receiptWritten`。
+脚本退出码 0 才表示全 PASS（W6-37 时 14 例，W6-45 起 18 例）；`<OutDir>/w6-28-summary.json` 里每例都带 `receiptConfirmed` / `receiptWritten`。
 
 ## 13 W6-39 追加：同步页与 roundtrip 的接线
 
@@ -175,3 +175,40 @@ W6-37 只在传输层与 CLI 上开了回执；**同步页（presenter）与 `tr
 ### 13.4 GUI 入口（W6-43 追加）
 
 同步页的传输卡片现在有两个勾选框和一行结果，W6-37 的回执字节第一次有了人工入口：接收侧 `sync.transfer.receive.receipt`（「接收后写回执（0x04）」→ `SyncTransferReceiveForm.WriteReceipt`）、发送侧 `sync.transfer.send.receipt`（「等待对端回执（0x04）」→ `SyncTransferSendForm.AwaitReceipt`），发送结果单独一行 `sync.transfer.send.receipt-result`（`TransferReceiptResultText`）。默认都不勾，所以不勾时线上字节与 W6-16 冻结向量仍然逐字节相等。渲染规则见 `W6-33-SYNC-TRANSFER-UI.md` §14；**GUI_UNVERIFIED**：勾选框在真实窗口里的初始态、结果行在 UIA 树中的可见性都没有证据（本轮禁止启动 MediaHub）。
+
+## 14 追加（W6-45）：回执与前两个开关同时打开
+
+W6-39 把回执接进 presenter 与 roundtrip 时，回执只在「明文 + 无口令」被验证过；W6-28 的 TLS 用例又都没开回执。三开关同时打开的实测结论与失败码归属写在 `W6-26-TLS-TRANSPORT.md` §16，本节只记回执侧。
+
+### 14.1 回执在 TLS 里照常往返（M）
+
+- 回执是**裸字节 0x04，不是帧**，所以它不进帧预算：M 例 frames 仍是 3（挑战帧 + 数据块帧 + tag 帧），`Bytes` 仍等于信封长度。
+- 两端各自如实报告：发送端 `receiptConfirmed=true`（读到 0x04），接收端 `receiptWritten=true`（写出 0x04）；两个开关互不吞并，768 ms。
+
+### 14.2 回执缺失是发送端唯一看得见的症状（N）
+
+两端口令不同时：serve 2 `auth-mismatch`、send 2 `receipt-missing`、store 与 baseline 都不存在（602 ms）。这是 §2 语义边界在组合场景下的直接体现：
+
+- 发送端**不可能**报 `auth-mismatch`——它没有接收端校验结果的通道。`receipt-missing` 只说明「对端没确认」，不说明「对端没读懂」；真正的失败原因只在对端日志里。
+- 因此组合场景下的排障顺序是**先看 serve 的稳定码，再看 send 的**。反过来读会得出「发送端认证失败」的错误结论。
+
+### 14.3 presenter 侧的同构证据（R11/R12，`presenter-e2e` 12 → 14 例）
+
+- **R11**（TLS + 回执同开）：presenter `PrepareReceive` 用 `{ UseTls = true, WriteReceipt = true }`，把自己 `ReceiveState.CertificateFingerprint`（64 位小写 hex）交给真子进程 `transfer send --tls --expect-fingerprint <pin> --await-receipt`。断言 `received.ReceiptWritten is true`、子进程 JSON 同时有 `tls:true` 与 `receiptConfirmed:true`、`Bytes` 等于 UTF-8 信封字节数、`Frames == SourceSyncTransfer.ChunkCount(Bytes)`（回执不加帧）、监听释放后 `ReceiveState.Listening == false`；459 ms。
+- **R12**（三开关全开，再拿掉确认）。前半段 presenter `SendAsync` 用 `{ UseTls, ExpectedFingerprint = serve.Fingerprint, Secret, AwaitReceipt = true }` 打真 `transfer serve --tls --authenticate --secret-env MH_W635_SECRET --apply --send-receipt`：`ReceiptConfirmed is true`、summary 含 `SyncTransferCopy.ReceiptConfirmedSuffix`（「，并收到回执：对端读懂了这份信封（0x04）。」）、`DeliveryConfirmed` 仍为 `null`（回执优先）、对端 exit 0 且两文件都写、stdout 有 `receiptWritten:true`，而口令在 stdout / stderr / summary 三处都不出现；971 ms。
+  - 后半段把 `--send-receipt` 拿掉（TLS + 口令 + `--apply` 都在）：presenter 仍是 `receipt-missing` 失败，**对端 exit 0 且两条来源真的落地**——外部证据说明「没收到回执」≠「对端失败」。对端 JSON 是 `receiptWritten:null`（没开，不是「开了没写」），这正是 §6 里 close 与 receipt 的差别在 JSON 上的样子。
+
+### 14.4 验收脚本 14 → 18 例，以及一个容易漏的坑
+
+- `transfer-tls-auth.ps1` 追加 M/N/O/P 四个 spec；`Invoke-TransferCase` 新增断言块 2b（`ForbidSendCodePrefixes` / `ForbidServeCodePrefixes`，稳定码 `StartsWith` + stderr `error <prefix>` 双查）。实测 **18/18 PASS，17.99 s**，退出 0，末行 `RESULT: 18 passed, 0 failed`，`residual SynCli processes: 0`；逐例的 `receiptConfirmed` / `receiptWritten` 在 `<OutDir>/w6-28-summary.json`。
+- `presenter-e2e.ps1` 的 `$script:CaseNames` 是**硬编码清单**。新测试方法会被 vstest 计入总数并真的执行，但逐例表格与 `cases: N/N` 只按清单列：首跑就是 `tests: 14 passed` 而 `cases: 12/12`，且判据是 `Passed -ge CaseNames.Count`，所以脚本仍然退出 0——绿了但没被列出来。已补 R11/R12，现为 `RESULT: 14 passed, 0 failed (14 cases)`。**新增 e2e 用例必须同时改这份清单**。
+
+### 14.5 复跑
+
+```powershell
+pwsh -NoProfile -File windows/tools/acceptance/w6/presenter-e2e.ps1 -OutDir D:/mh-verify/w6-45-e2e
+pwsh -NoProfile -File windows/tools/acceptance/w6/transfer-tls-auth.ps1 -OutDir D:/mh-verify/w6-45
+```
+
+2026-10-24 实测：presenter-e2e **14 个测试 / 14 个用例全过，15.07 s，residual 0**；验收脚本 **18/18 PASS，17.99 s，residual 0**。两者都不启动 GUI、不写 `D:/mh-out`。
+

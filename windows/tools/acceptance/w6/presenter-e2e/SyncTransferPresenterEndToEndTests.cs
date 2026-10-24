@@ -530,6 +530,140 @@ public sealed class SyncTransferPresenterEndToEndTests : IDisposable
         Assert.False(File.Exists(Path.Combine(peerRoot, "sync-baseline.json")), "the peer wrote a baseline although --apply was not given");
     }
 
+    // ---------------------------------------------------------------- R11
+
+    /// <summary>
+    /// R11 (W6-45): TLS and the receipt switched on at the same time. The presenter publishes its fingerprint and
+    /// promises the 0x04, the child pins exactly that fingerprint and awaits the byte, and the receipt comes back
+    /// inside the TLS stream the certificate protected - so neither switch may displace the other.
+    /// </summary>
+    [Fact]
+    public async Task R11_tls_receive_that_promises_a_receipt_acknowledges_a_pinned_send()
+    {
+        using SyncTransferPresenter presenter = NewPresenter();
+        SyncTransferOutcome prepared = presenter.PrepareReceive(
+            new SyncTransferReceiveForm { PortText = "0", UseTls = true, WriteReceipt = true });
+        Assert.True(prepared.Succeeded, prepared.Summary);
+        int port = prepared.BoundPort!.Value;
+        Assert.True(presenter.ReceiveState.WritesReceipt, "the receipt promise never reached the presenter's state");
+
+        string? fingerprint = presenter.ReceiveState.CertificateFingerprint;
+        Assert.NotNull(fingerprint);
+        Assert.Matches("^[0-9a-f]{64}$", fingerprint!);
+
+        string senderRoot = NewDirectory("r11/sender");
+        SeedSender(senderRoot);
+        string witness = NewDirectory("r11/witness");
+
+        Task<SyncTransferOutcome> receiving = presenter.ReceiveOnceAsync(TimeSpan.FromSeconds(30));
+        CliRun send = await RunCliAsync(
+            environment: null,
+            "transfer", "send", "--to", "127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture),
+            "--root", senderRoot, "--device", PeerDeviceB, "--json",
+            "--tls", "--expect-fingerprint", fingerprint!, "--await-receipt");
+
+        SyncTransferOutcome received = await receiving;
+
+        Assert.Equal(0, send.ExitCode);
+        Assert.True(received.Succeeded, received.Summary + " | send stderr: " + send.StdErr);
+        Assert.True(received.ReceiptWritten is true, "the presenter never reported writing the receipt: " + received.Summary);
+        Assert.Contains("\"tls\":true", send.StdOut, StringComparison.Ordinal);
+        Assert.Contains("\"receiptConfirmed\":true", send.StdOut, StringComparison.Ordinal);
+
+        // The receipt is one bare byte outside the frame budget: the counted stream is still the envelope.
+        Assert.Equal(Encoding.UTF8.GetByteCount(received.EnvelopeJson!), received.Bytes);
+        Assert.Equal(SourceSyncTransfer.ChunkCount(received.Bytes), received.Frames);
+
+        // External evidence: the receiver writes nothing, and the listener was released after one envelope.
+        Assert.Empty(Directory.GetFiles(witness));
+        Assert.False(presenter.ReceiveState.Listening);
+    }
+
+    // ---------------------------------------------------------------- R12
+
+    /// <summary>
+    /// R12 (W6-45): all three switches on the send side at once. The presenter pins the fingerprint the child
+    /// published, signs its envelope with a secret that only reaches the child through its environment, and awaits
+    /// a receipt - which arrives over the same TLS channel the tag protected. The second half keeps TLS and the tag
+    /// but takes the acknowledgement away: the peer still applies both sources, and the presenter must still fail
+    /// with receipt-missing rather than reporting a successful send.
+    /// </summary>
+    [Fact]
+    public async Task R12_tls_authenticated_send_that_awaits_a_receipt_needs_the_acknowledgement()
+    {
+        Dictionary<string, string> environment = new(StringComparer.Ordinal) { [SecretEnvName] = Secret };
+
+        string acknowledgedRoot = NewDirectory("r12/acknowledged");
+        using (CliServe serve = StartServe(
+            environment,
+            "transfer", "serve", "--root", acknowledgedRoot, "--device", PeerDeviceA, "--json", "--apply",
+            "--tls", "--authenticate", "--secret-env", SecretEnvName, "--send-receipt"))
+        {
+            Assert.True(await serve.WaitForListeningAsync(ServeReadyBudget), "serve never announced a port: " + serve.StdErr);
+            string? fingerprint = serve.Fingerprint;
+            Assert.NotNull(fingerprint);
+            Assert.Matches("^[0-9a-f]{64}$", fingerprint!);
+
+            using SyncTransferPresenter presenter = NewPresenter();
+            SyncTransferOutcome sent = await presenter.SendAsync(new SyncTransferSendForm
+            {
+                Host = SourceSyncTransferAddress.DefaultAddress,
+                PortText = serve.Port.ToString(CultureInfo.InvariantCulture),
+                UseTls = true,
+                ExpectedFingerprint = fingerprint,
+                Secret = Secret,
+                AwaitReceipt = true,
+            });
+
+            Assert.True(sent.Succeeded, sent.Summary);
+            Assert.True(sent.ReceiptConfirmed is true, "the authenticated send never saw a receipt: " + sent.Summary);
+            Assert.Contains(SyncTransferCopy.ReceiptConfirmedSuffix, sent.Summary, StringComparison.Ordinal);
+            Assert.Null(sent.DeliveryConfirmed);
+            Assert.DoesNotContain(Secret, sent.Summary, StringComparison.Ordinal);
+
+            Assert.Equal(0, await serve.WaitForExitAsync(CliBudget));
+            Assert.Contains("\"receiptWritten\":true", serve.StdOut, StringComparison.Ordinal);
+            Assert.Contains("\"authenticate\":true", serve.StdOut, StringComparison.Ordinal);
+            Assert.DoesNotContain(Secret, serve.StdOut, StringComparison.Ordinal);
+            Assert.DoesNotContain(Secret, serve.StdErr, StringComparison.Ordinal);
+            Assert.Equal(2, new FileLocalSourceStore(acknowledgedRoot).GetAll().Count);
+        }
+
+        // Same three switches minus the acknowledgement: the peer authenticates, applies, and closes silently.
+        string silentRoot = NewDirectory("r12/silent");
+        using (CliServe serve = StartServe(
+            environment,
+            "transfer", "serve", "--root", silentRoot, "--device", PeerDeviceA, "--json", "--apply",
+            "--tls", "--authenticate", "--secret-env", SecretEnvName))
+        {
+            Assert.True(await serve.WaitForListeningAsync(ServeReadyBudget), "serve never announced a port: " + serve.StdErr);
+            string? fingerprint = serve.Fingerprint;
+            Assert.NotNull(fingerprint);
+
+            using SyncTransferPresenter presenter = NewPresenter();
+            SyncTransferOutcome sent = await presenter.SendAsync(new SyncTransferSendForm
+            {
+                Host = SourceSyncTransferAddress.DefaultAddress,
+                PortText = serve.Port.ToString(CultureInfo.InvariantCulture),
+                UseTls = true,
+                ExpectedFingerprint = fingerprint,
+                Secret = Secret,
+                AwaitReceipt = true,
+            });
+
+            Assert.False(sent.Succeeded);
+            Assert.Equal(SourceSyncReceiptReasons.ReceiptMissing, sent.Reason);
+            Assert.Null(sent.ReceiptConfirmed);
+            Assert.DoesNotContain(SyncTransferCopy.ReceiptConfirmedSuffix, sent.Summary, StringComparison.Ordinal);
+
+            // External evidence that only the acknowledgement was missing: the tag was accepted (exit 0) and
+            // both sources really landed.
+            Assert.Equal(0, await serve.WaitForExitAsync(CliBudget));
+            Assert.Equal(2, new FileLocalSourceStore(silentRoot).GetAll().Count);
+            Assert.Contains("\"receiptWritten\":null", serve.StdOut, StringComparison.Ordinal);
+        }
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static string ResolveCliDll()
@@ -692,9 +826,11 @@ public sealed class SyncTransferPresenterEndToEndTests : IDisposable
         return info;
     }
 
-    private static CliServe StartServe(params string[] args)
+    private static CliServe StartServe(params string[] args) => StartServe(environment: null, args);
+
+    private static CliServe StartServe(IReadOnlyDictionary<string, string>? environment, params string[] args)
     {
-        ProcessStartInfo info = NewStartInfo(environment: null, args);
+        ProcessStartInfo info = NewStartInfo(environment, args);
         CliServe serve = CliServe.Start(info);
         return serve;
     }

@@ -25,6 +25,14 @@
       K  --await-receipt, no receipt written send 2 receipt-missing / serve 0, two records
       L  --await-receipt, peer never closes  send 2 receipt-timeout, zero writes
 
+    W6-45 adds the corners where TWO of the three optional switches are on at once, because W6-28
+    (TLS x tag) and W6-37 (receipt alone) each measured only one axis at a time:
+
+      M  TLS + tag + receipt, all on         send 0 receiptConfirmed=true / serve 0 receiptWritten=true, 2 records
+      N  same, but the two secrets differ    serve 2 auth-mismatch / send 2 receipt-missing, zero writes
+      O  wrong pin with the tag switched on  send 2 tls-fingerprint-mismatch / no auth-* anywhere, zero writes
+      P  plaintext listener, TLS sender      send 2 tls-handshake-failed (never receipt-missing) / serve 2 tls-not-enabled
+
     Each case also asserts: the receiver's sync-sources.json holds exactly the sender's two
     sources (or does not exist at all when the case must not write), the receiver's
     sync-baseline.json exists only after a successful apply, and no log line contains either
@@ -350,6 +358,22 @@ function Invoke-TransferCase {
         }
         if ($Spec.Expect.ServeCode) {
             Assert-Condition ($serveStderr.Contains('error ' + $Spec.Expect.ServeCode + ':')) ('serve stderr must carry "error ' + $Spec.Expect.ServeCode + ':"')
+        }
+
+        # 2b W6-45: a combination case can forbid a whole code family. This is what turns "the TLS
+        # mismatch did not get rewritten into an auth or receipt failure" from an observation into an
+        # assertion: the expected code is checked above, and the absence of the other family here.
+        if ($Spec.Contains('ForbidSendCodePrefixes') -or $Spec.Contains('ForbidServeCodePrefixes')) {
+            foreach ($prefix in @($Spec.ForbidSendCodePrefixes)) {
+                if (-not $prefix) { continue }
+                Assert-Condition (-not $sendCode.StartsWith($prefix, [System.StringComparison]::Ordinal)) ('send reported a forbidden ' + $prefix + '* code: ' + $sendCode)
+                Assert-Condition (-not $sendStderr.Contains('error ' + $prefix)) ('send stderr carried a forbidden ' + $prefix + '* error line')
+            }
+            foreach ($prefix in @($Spec.ForbidServeCodePrefixes)) {
+                if (-not $prefix) { continue }
+                Assert-Condition (-not $serveCode.StartsWith($prefix, [System.StringComparison]::Ordinal)) ('serve reported a forbidden ' + $prefix + '* code: ' + $serveCode)
+                Assert-Condition (-not $serveStderr.Contains('error ' + $prefix)) ('serve stderr carried a forbidden ' + $prefix + '* error line')
+            }
         }
 
         # 3 what actually landed on the receiver
@@ -871,6 +895,69 @@ $specs = @(
         # sender finally distinguishes "understood" from "merely closed": send 2 receipt-missing.
         Expect = [ordered]@{ SendExit = 2; ServeExit = 0; SendCode = 'receipt-missing'; ServeCode = ''; Records = 2; Frames = -1
             Table = 'send 2 receipt-missing / serve 0 / 2 records' }
+    },
+
+    # --- W6-45: two switches at once -------------------------------------------------------------------
+    [ordered]@{
+        Name = 'M-tls-tag-receipt'; Title = 'M TLS 1.3 + shared-secret tag + receipt, all three on'
+        TlsListener = $true; ClientTls = $true; PinOverride = ''
+        ConfirmDelivery = $false; SendReceipt = $true; AwaitReceipt = $true
+        ServeExtra = @('--tls', '--authenticate', '--secret-env', $script:envA, '--send-receipt')
+        SendExtra = @('--authenticate', '--secret-env', $script:envA, '--await-receipt')
+        ServeSecretEnv = $script:envA; SendSecretEnv = $script:envA; ServeSecret = $script:secretA; SendSecret = $script:secretA
+        ServeDevice = 'rx-device'; SendDevice = 'tx-device'
+        # The receipt travels back inside the very TLS stream the tag protected, so neither switch may
+        # displace the other: 3 frames (challenge + chunk + tag) and a confirmed receipt on both sides.
+        Expect = [ordered]@{ SendExit = 0; ServeExit = 0; SendCode = ''; ServeCode = ''; Records = 2; Frames = 3
+            Table = 'send 0 receiptConfirmed / serve 0 receiptWritten / 2 records' }
+    },
+    [ordered]@{
+        Name = 'N-tls-tag-receipt-wrong-secret'; Title = 'N TLS 1.3 + tag + receipt, the two secrets differ'
+        TlsListener = $true; ClientTls = $true; PinOverride = ''
+        ConfirmDelivery = $false; SendReceipt = $true; AwaitReceipt = $true
+        ServeExtra = @('--tls', '--authenticate', '--secret-env', $script:envA, '--send-receipt')
+        SendExtra = @('--authenticate', '--secret-env', $script:envB, '--await-receipt')
+        ServeSecretEnv = $script:envA; SendSecretEnv = $script:envB; ServeSecret = $script:secretA; SendSecret = $script:secretB
+        ServeDevice = 'rx-device'; SendDevice = 'tx-device'
+        # MEASURED, and it corrects the W6-45 task book: the send side CANNOT report auth-mismatch. The
+        # envelope is one-way, so a sender never watches the peer verify its tag - all it can observe is
+        # that the receipt byte never arrived, which is receipt-missing (exit 2). The peer names the real
+        # reason (auth-mismatch) and writes nothing at all. Both halves are asserted so the pairing
+        # "the sender reports the symptom, the listener names the cause" stays visible.
+        ForbidServeCodePrefixes = @('receipt-')
+        Expect = [ordered]@{ SendExit = 2; ServeExit = 2; SendCode = 'receipt-missing'; ServeCode = 'auth-mismatch'; Records = 0; Frames = -1
+            Table = 'serve 2 auth-mismatch / send 2 receipt-missing / 0 writes' }
+    },
+    [ordered]@{
+        Name = 'O-wrong-pin-with-tag'; Title = 'O wrong pin while the tag is switched on'
+        TlsListener = $true; ClientTls = $true; PinOverride = ('0' * 64)
+        ConfirmDelivery = $false
+        ServeExtra = @('--tls', '--authenticate', '--secret-env', $script:envA)
+        SendExtra = @('--authenticate', '--secret-env', $script:envA)
+        ServeSecretEnv = $script:envA; SendSecretEnv = $script:envA; ServeSecret = $script:secretA; SendSecret = $script:secretA
+        ServeDevice = 'rx-device'; SendDevice = 'tx-device'
+        # The pin is checked during the handshake, before a single frame exists, so the tag can never be
+        # the reason: the client says tls-fingerprint-mismatch and the listener sees the aborted
+        # handshake (io-failed, exactly as case E measures it without the tag). No auth-* and no
+        # receipt-* code may appear on either side.
+        ForbidSendCodePrefixes = @('auth-', 'receipt-')
+        ForbidServeCodePrefixes = @('auth-', 'receipt-')
+        Expect = [ordered]@{ SendExit = 2; ServeExit = 2; SendCode = 'tls-fingerprint-mismatch'; ServeCode = 'io-failed'; Records = 0; Frames = -1
+            Table = 'send 2 tls-fingerprint-mismatch / serve 2 io-failed / 0 writes' }
+    },
+    [ordered]@{
+        Name = 'P-plaintext-listener-tls-sender-receipt'; Title = 'P plaintext listener + TLS sender that awaits a receipt'
+        TlsListener = $false; ClientTls = $true; PinOverride = ('b' * 64)
+        ConfirmDelivery = $false; AwaitReceipt = $true
+        ServeExtra = @(); SendExtra = @('--await-receipt')
+        ServeSecretEnv = ''; SendSecretEnv = ''; ServeSecret = ''; SendSecret = ''
+        ServeDevice = 'rx-device'; SendDevice = 'tx-device'
+        # The listener answers the TLS record with tls-not-enabled and closes, so the client's handshake
+        # never completes. Asking for a receipt must not relabel that: the receipt wait is never reached
+        # and the failure stays tls-handshake-failed instead of degrading into receipt-missing.
+        ForbidSendCodePrefixes = @('receipt-')
+        Expect = [ordered]@{ SendExit = 2; ServeExit = 2; SendCode = 'tls-handshake-failed'; ServeCode = 'tls-not-enabled'; Records = 0; Frames = -1
+            Table = 'send 2 tls-handshake-failed (not receipt-missing) / serve 2 tls-not-enabled' }
     }
 )
 

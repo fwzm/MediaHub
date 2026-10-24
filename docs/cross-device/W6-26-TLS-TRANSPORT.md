@@ -205,3 +205,37 @@ pwsh -NoProfile -File windows/tools/acceptance/w6/transfer-tls-auth.ps1
 
 - `A_timeout_is_reported_as_a_timeout_even_when_the_accept_was_slow`：先起 900 ms 预算的接收，400 ms 后才让客户端连接 → 确定性复现 CI 的慢 accept 竞态，断言 detail 含 `did not finish within`。
 - `A_caller_that_cancels_before_the_deadline_is_reported_as_a_cancellation`：客户端连上后 250 ms 取消 caller token（预算 10 s）→ 断言 detail 含 `caller cancelled` 且不含 `did not finish within`。
+
+## 16 追加（W6-45）：TLS × 口令 × 回执的三开关组合矩阵
+
+W6-28 的 A–H 每次只开 TLS 或口令，W6-37 的 J/K/L 只在明文上开回执——**三开关同时打开时谁会说话**此前没有任何实测。W6-45 在 `windows/tools/acceptance/w6/transfer-tls-auth.ps1` 里追加 M/N/O/P 四例（每例仍是一对真实 `dotnet MediaHub.SyncCli.dll` 子进程），脚本从 14 例变 18 例。
+
+### 16.1 新增四例的实测
+
+| 用例 | 组合 | 实测（2026-10-24，`6038e7d` + 本轮改动） |
+| --- | --- | --- |
+| M | TLS + 口令 + 回执 全开 | send 0 / serve 0，frames=3，`receiptConfirmed=true`、`receiptWritten=true`，两文件都写，768 ms |
+| N | 同上，但两端口令不同 | serve 2 `auth-mismatch` / send 2 `receipt-missing`，零写入，602 ms |
+| O | 错 pin，同时开口令 | send 2 `tls-fingerprint-mismatch` / serve 2 `io-failed`，零写入，678 ms |
+| P | 明文 listener + TLS 发送端 + `--await-receipt` | send 2 `tls-handshake-failed` / serve 2 `tls-not-enabled`，零写入，387 ms |
+
+### 16.2 三条结论（都收紧了口径）
+
+1. **口令的见证者在接收端，不在发送端（N）**。信封是单向的：发送端写完就等回执，它没有任何通道知道对端校验 tag 的结果。tag 不对时对端一个字节都不收就关闭连接，发送端唯一能观察到的是「回执没来」，于是稳定码是 `receipt-missing`；真正报 `auth-mismatch` 的是 serve 侧。W6-45 任务书原文要求「send 报 `auth-mismatch` 且不得出现 `receipt-*`」，实测不成立——这不是缺陷，而是协议的必然方向；若真让发送端报 `auth-mismatch`，就等于凭"没收到回执"猜原因，会把网络抖动也说成认证失败。
+2. **pin 失败不会被口令或回执改写（O）**。指纹校验发生在握手期、帧流之前，口令根本走不到校验点：客户端仍是 `tls-fingerprint-mismatch`，监听端仍是 `io-failed`（与 E 完全相同），两侧都不出现 `auth-*` / `receipt-*`。
+3. **回执等待不会把 TLS 失败降级成回执失败（P）**。明文 listener 以 `tls-not-enabled` 拒掉 TLS 记录并关闭，客户端握手未完成，回执等待代码根本走不到：仍是 `tls-handshake-failed`。
+
+### 16.3 「没有出现」升级成「必须不出现」
+
+`Invoke-TransferCase` 新增断言块 2b，消费 spec 的可选字段 `ForbidSendCodePrefixes` / `ForbidServeCodePrefixes`：对稳定码做 `StartsWith`、对 stderr 做 `error <prefix>` 双查，任一命中即 FAIL。O 例 forbid `auth-` 与 `receipt-`，P 例 forbid `receipt-`——这样「pin 失败没有被说成认证失败」「TLS 失败没有被说成回执失败」是断言，不是观察。既有 A–L 不带这两个字段，行为不变。
+
+### 16.4 复跑
+
+```powershell
+pwsh -NoProfile -File windows/tools/acceptance/w6/transfer-tls-auth.ps1 -OutDir D:/mh-verify/w6-45
+```
+
+2026-10-24 实测：**18/18 PASS，17.99 s**，退出 0，末行 `RESULT: 18 passed, 0 failed`，`residual SynCli processes: 0`；逐例 exit code / 稳定码 / 帧数 / 信封数写在 `<OutDir>/w6-28-summary.json`。presenter 侧的同构证据（R11/R12）见 `W6-37-RECEIPT.md` §14.3。
+
+未动：`MediaHub.App` / `MediaHub.Providers` / `MediaHub.Domain` / `MediaHub.Storage` / 产品代码；未 commit、未 push；未启动 GUI。
+

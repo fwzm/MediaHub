@@ -64,7 +64,9 @@ $script:CaseNames = @(
     'R7b_cancelling_a_waiting_receive_reports_cancelled_and_writes_nothing',
     'R8_a_receipt_written_by_the_presenter_is_read_back_by_a_real_cli_send',
     'R9_a_presenter_send_that_awaits_a_receipt_gets_one_from_a_real_serve',
-    'R10_a_real_serve_that_does_not_acknowledge_leaves_the_presenter_with_receipt_missing'
+    'R10_a_real_serve_that_does_not_acknowledge_leaves_the_presenter_with_receipt_missing',
+    'R11_tls_receive_that_promises_a_receipt_acknowledges_a_pinned_send',
+    'R12_tls_authenticated_send_that_awaits_a_receipt_needs_the_acknowledgement'
 )
 
 function Write-Step {
