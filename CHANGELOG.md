@@ -1,5 +1,20 @@
 # 变更记录（CHANGELOG）
 
+## [Unreleased — M0-A provider scope attribution] — 2026-10-23
+
+- 修复没有 `ProviderImageAuthContributor` 的 Provider（当前实测为 WebDAV）无法解析 `serverId`、导致
+  User-Agent 请求策略回落默认值的问题；基础 URL 现在可用于归属，认证头仍保持 fail-closed。
+- 新增 `ProviderImageAuthStoreTest` 回归：WebDAV scope 能解析服务器 ID，但不会伪造图片认证头。
+- Xiaomi 14 Ultra / API 36 + 受控本地 WebDAV 真机复测通过：编辑页自定义 UA 重启后恢复，OPTIONS 请求使用
+  `MediaHubTest99`；冷启动 scope 建立前的首个后台请求使用默认 UA，作为未闭环时序边界保留。
+
+## [Unreleased — M0-A repository wait optimization] — 2026-10-23
+
+- 优化 `DataStoreServerUserAgentRepository.awaitLoaded()`：用可取消的
+  `CompletableDeferred` 等待首份 DataStore 快照，移除 `yield` 忙等，避免加载期间持续占用协程调度器。
+- 保留同步网络拦截器使用的 `CountDownLatch` 有界等待；两条路径继续共享同一份首次加载完成信号。
+- 新增回归测试，覆盖等待协程在首份快照到达前挂起、到达后恢复的行为；本轮模块门禁为 14 tests / 0 failures。
+
 ## [Unreleased — A4 联合候选并入 main] — 2026-10-14
 
 - 并入 A4 联合候选（PR #24，266 文件）：P1 播放专业信息面板、P2 字幕中心（同目录发现 / 导入 / 双内核加载 / mpv 偏移 / 匹配记忆）、WebDAV 修复链路、Media3 与 mpv 实际选轨及回滚、私有恢复一致性、播放器退出归属与代际。

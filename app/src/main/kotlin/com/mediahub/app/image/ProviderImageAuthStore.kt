@@ -41,7 +41,8 @@ class ProviderImageAuthStore @Inject constructor(
         val origin: Origin,
         val scopeSegments: List<String>,
         val serverId: String,
-        val contributor: ProviderImageAuthContributor,
+        /** Null for providers without image authentication (for example WebDAV). */
+        val contributor: ProviderImageAuthContributor?,
     )
 
     private val contributorByType: Map<ServerType, ProviderImageAuthContributor> =
@@ -89,13 +90,19 @@ class ProviderImageAuthStore @Inject constructor(
     /** 图片 URL -> 鉴权头；非 known scope / 归属歧义 / 未登录返回 null（fail closed）。 */
     fun headersForUrl(url: HttpUrl): Map<String, String>? {
         val resolved = bestScopeFor(url) ?: return null
-        return runBlocking { resolved.contributor.headersFor(resolved.serverId) }
+        val contributor = resolved.contributor ?: return null
+        return runBlocking { contributor.headersFor(resolved.serverId) }
     }
 
     private fun List<MediaServer>.toAuthScopes(): List<AuthScope> =
         asSequence().mapNotNull { server ->
-            val contributor = contributorByType[server.type] ?: return@mapNotNull null
-            val scopeUrl = runCatching { contributor.authScopeUrl(server.baseUrl).toHttpUrl() }
+            val contributor = contributorByType[server.type]
+            // Providers without image authentication still need a URL -> serverId
+            // scope so the shared User-Agent policy can attribute their requests.
+            // They keep a null contributor and therefore emit no auth headers.
+            val scopeUrl = runCatching {
+                (contributor?.authScopeUrl(server.baseUrl) ?: server.baseUrl).toHttpUrl()
+            }
                 .getOrNull() ?: return@mapNotNull null
             AuthScope(
                 origin = Origin(scopeUrl.scheme, scopeUrl.host, scopeUrl.port),
