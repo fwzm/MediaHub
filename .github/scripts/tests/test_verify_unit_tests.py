@@ -118,6 +118,23 @@ class UnitGateTest(unittest.TestCase):
         (sources / "NewTest.kt").write_text("class NewTest")
         self.assertTrue(any("NO-SOURCE inventory" in p for p in self.problems()))
 
+    def test_environment_gated_suite_must_appear_in_the_production_run(self):
+        problems = gate.verify(self.root, SHA, "run-1", "1", (), False, True)[0]
+        self.assertTrue(any("environment-gated suite did not execute at all" in p for p in problems))
+
+    def test_environment_gated_suite_may_skip_but_other_skips_still_fail(self):
+        gated = "com.mediahub.core.common.sync.SourceSyncTlsInteropTest"
+        path = self.paths["jvm"]
+        root = ET.parse(path).getroot()
+        ET.SubElement(ET.SubElement(root, "testcase", classname=gated, name="gated_method"), "skipped")
+        ET.SubElement(ET.SubElement(root, "testcase", classname="jvm.ExampleTest", name="plain_method"), "skipped")
+        root.set("tests", "4")
+        ET.ElementTree(root).write(path)
+        self.stamp()
+        problems = gate.verify(self.root, SHA, "run-1", "1", (), False, True)[0]
+        self.assertFalse(any(gated in p for p in problems))
+        self.assertTrue(any("jvm.ExampleTest.plain_method: mandatory assertion was skipped" in p for p in problems))
+
 
 if __name__ == "__main__":
     unittest.main()
