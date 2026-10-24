@@ -121,6 +121,8 @@ jobs:
           #     19 条错误流的 reason 与 Windows 同名同序；收满即返、尾随帧不读）
           #   sync.SourceSyncTransferAuthTest —— 传输对端认证（W6-25：五码 + 33 字节 tag 帧 0x03 +
           #     HMAC-SHA256 over nonce‖envelope，金标向量由 Windows 实现生成；关闭认证时与 W6-22 向量全等）
+          #   sync.SourceSyncTlsTest —— TLS 1.3 + SPKI 指纹钉扎（W6-29：只协商 1.3、pin=SHA-256(publicKey.encoded)、
+          #     四码与 Windows 同名同序、接收端 5 字节嗅探、graceful close；夹具与期望指纹由 Windows 权威实现生成）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -151,6 +153,7 @@ jobs:
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferRoundTripTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferLoopbackTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferAuthTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTlsTest \
             --require-complete-suites
 
       - name: Lint

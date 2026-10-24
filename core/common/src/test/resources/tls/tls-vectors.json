@@ -1,0 +1,32 @@
+{
+  "source": "MediaHub.Sync PairingCertificate.ComputeFingerprint (Windows authority)",
+  "pkcs12Password": "mediahub-tls-test",
+  "commonName": "mediahub-sync",
+  "generatedFor": "android SourceSyncTlsTest fixture",
+  "fixtures": [
+    {
+      "name": "mediahub-sync-test",
+      "file": "mediahub-sync-test.p12",
+      "pkcs12Password": "mediahub-tls-test",
+      "spkiSha256Hex": "2bb12d139178ee3b0f219e409a89c99b51be165914e21189eeb039b2e4dd37ce",
+      "displayFingerprint": "2BB1 2D13 9178 EE3B 0F21 9E40 9A89 C99B 51BE 1659 14E2 1189 EEB0 39B2 E4DD 37CE",
+      "subject": "CN=mediahub-sync-test",
+      "notBeforeUtc": "2026-01-01T00:00:00Z",
+      "notAfterUtc": "2046-01-01T00:00:00Z",
+      "keyBits": 2048,
+      "pkcs12Sha256Hex": "8b7329f862f550a8cd33edb38e5d8b9740825a3ec898984a974581941af14bc9"
+    },
+    {
+      "name": "mediahub-sync-other",
+      "file": "mediahub-sync-other.p12",
+      "pkcs12Password": "mediahub-tls-test",
+      "spkiSha256Hex": "2341fc10318175128d05ca4ab1acb59a764f8b2860670759619f396a478802ac",
+      "displayFingerprint": "2341 FC10 3181 7512 8D05 CA4A B1AC B59A 764F 8B28 6067 0759 619F 396A 4788 02AC",
+      "subject": "CN=mediahub-sync-other",
+      "notBeforeUtc": "2026-01-01T00:00:00Z",
+      "notAfterUtc": "2046-01-01T00:00:00Z",
+      "keyBits": 2048,
+      "pkcs12Sha256Hex": "b7db6a49ee5516b46b500e4d44ee6279f19868a19aa2af86f497a224724e4da6"
+    }
+  ]
+}
