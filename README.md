@@ -166,7 +166,7 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   （三者均为 `IMPLEMENTED_UNVERIFIED`，本机没人观看窗口时无法跑）、Android 端 apply 的 UI 与跨机传输
   （Android 侧的契约/规划/导入导出/配对契约/分块传输协议/「回环传输 → 导入闭环」已就位，
   协议与 Windows 逐字节对齐，见 `docs/android-source-sync-transfer.md`；Windows 端已有可选的传输对端认证
-  （W6-24），Android 端尚未实现，两端也都还没有 TLS 与指纹钉扎）。
+  （Windows W6-24 / Android W6-25，五个稳定码与帧格式两端同名同序，Android 的金标向量由 Windows 实现生成），两端都还没有 TLS 与指纹钉扎）。
 - **发布阻断**：见下节许可证；另有 MSIX / 代码签名 / 干净机安装 `NOT_RUN`（`SIGNING_BLOCKED`）。
 
 ### 构建与测试
@@ -196,15 +196,15 @@ W6-19 的 presenter 35、W6-21 的 skip 语义 9、W6-20 的 `--root`/导出路�
 
 Android 侧（[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml)）的单元门禁同样按**名字**断言，
 不是「打印了 PASSED 就算过」：`verify-unit-tests.py` 除要求每个有测试源码的模块都真跑过之外，还用
-`--required-suite` 钉住 **28** 个套件（含跨端契约的 `PairingVectorsTest` / `PairingFrameTest` /
+`--required-suite` 钉住 **29** 个套件（含跨端契约的 `PairingVectorsTest` / `PairingFrameTest` /
 `WindowsGoldenInteropTest` / `SourceSyncPlannerTest`、`AndroidSourceSyncServiceTest`、`Migration4to5Test`、
 `UpNextResolverTest` / `PlayerAutoplayTest`，W6-G 的 `PairingTransportClientTest` / `PairingTransportEndToEndTest`，
 W6-F/W6-H 的 `SourceSyncImportLogicTest` / `SourceSyncImportSessionTest` / `SourceVerificationCoordinatorTest`，
 以及 W6-J 的 `PairingMaliciousInputTest` / `PairingTransportSecurityTest` / `PairingCredentialLeakTest` /
 `AndroidSourceSyncSecurityTest`，和 W6-22 的 `SourceSyncTransferVectorsTest` / `SourceSyncTransferRoundTripTest` /
-`SourceSyncTransferLoopbackTest`），并用 `--require-complete-suites` 从源码里解析每个 `@Test`
+`SourceSyncTransferLoopbackTest`，和 W6-25 的 `SourceSyncTransferAuthTest`），并用 `--require-complete-suites` 从源码里解析每个 `@Test`
 方法、要求逐个都真的执行过 —— 套件被删、改名，或只跑单个方法（`--tests Suite.oneMethod`）都会失败。
-W6-23 新增的 `core/database` 套件 `SourceSyncTransferImportTest`（19 例）不在 28 个钉住名单里，
+W6-23 新增的 `core/database` 套件 `SourceSyncTransferImportTest`（19 例）不在 29 个钉住名单里，
 但由 `--require-complete-suites` 与其他套件一起逐个方法核对（`core/database` 该模块 145 例）。
 本地负向验证过这两条：把整套 XML 移走 → 22 条问题（1 条套件 + 21 条方法）；只删一个 `<testcase` →
 恰好 1 条 `PairingVectorsTest#rejected_addresses_match_windows`。

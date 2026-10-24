@@ -119,6 +119,8 @@ jobs:
           #     凭据不回显、坏信封零写入、重复 syncSourceId 整封拒绝=W6J-1）
           #   sync.SourceSyncTransfer* —— 分块帧传输与 Windows 逐字节互操作（W6-22：向量由真 API 生成，
           #     19 条错误流的 reason 与 Windows 同名同序；收满即返、尾随帧不读）
+          #   sync.SourceSyncTransferAuthTest —— 传输对端认证（W6-25：五码 + 33 字节 tag 帧 0x03 +
+          #     HMAC-SHA256 over nonce‖envelope，金标向量由 Windows 实现生成；关闭认证时与 W6-22 向量全等）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -148,6 +150,7 @@ jobs:
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferVectorsTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferRoundTripTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferLoopbackTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferAuthTest \
             --require-complete-suites
 
       - name: Lint
