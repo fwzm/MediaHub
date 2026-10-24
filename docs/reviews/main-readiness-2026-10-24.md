@@ -85,3 +85,16 @@ These simulations do not run tests or establish behavior compatibility. #33/#39 
 - Historical exact-head CI 40088109717 verified at `1858d944`: checkout/head matched; downloaded reports contain 200 suites / 1561 unique tests / 0 failures / 0 errors / 0 skipped. This historical run does not certify a later commit.
 - Current physical native verification: BLOCKED_ENV (no ADB devices). UI/emulator and JVM evidence do not replace physical native acceptance.
 - No production behavior was altered by the ancestry merge; the following cleanup only corrects the mpv missing-property comment and removes an unnecessary local alias.
+
+## Windows/source-sync integration evidence
+
+- Local combined candidate: `d150b4a884b459b6453ee5444b80278f314e5df2`, parents include controls `a9f5e94` and cross-device `b7890aa`; the latter contains Windows `96b6a9e`.
+- Resolved Android CI required-suite list by union, retaining both playback-control and cross-device suites.
+- Lifecycle fixture resolution requires actual response-body consumption before stop, then verifies native Call cancellation and a loopback upstream peer hang-up; combined Android tests are still pending.
+- Windows initial main-suite build: exit 1 because the ignored native DLL was absent. Original failure preserved locally; no assertion was bypassed.
+- Reused local DLL only after matching repository SHA256 `6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9`; binary remains ignored.
+- Windows repeated tests: MediaHub.Tests 1518/1518 passed and MediaHub.WebDav.Tests 104/104 passed; both exit 0, no errors or skipped cases (TRX counters inspected).
+- WinUI application build on d150b4a: exit 0 / 0 warnings / 0 errors. This is compile evidence, not GUI acceptance.
+- Real EngineProbe on committed sample, pinned native DLL: exit 0 / PASS, file-loaded, duration 4 s, time-pos 3 s, no error logs. Headless software decode only; GPU/HDR/audio output and GUI behavior remain unverified.
+- Windows CI improvement: explicitly check out and record expected PR head; remove the two previous generated TRX reports before execution; raise observed-suite floors to 1518 and 104. YAML parsed and the extracted real TRX gate passed locally.
+- PR16 cannot be imported unchanged because its historical document still contained real server origins. A sanitized snapshot is ported without making the original document commit a parent; original revision and local evidence are retained. This is a privacy correction, not a new device pass.

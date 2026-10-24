@@ -15,6 +15,7 @@ permissions:
   contents: read
 
 env:
+  EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "true"
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
@@ -27,6 +28,28 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          persist-credentials: false
+
+      - name: Verify and record validation revision
+        shell: pwsh
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_HEAD) {
+            throw "checkout does not match the expected validation head"
+          }
+          New-Item -ItemType Directory -Force -Path windows/artifacts | Out-Null
+          @{
+            checkoutSha = $actual
+            headSha = $env:EXPECTED_HEAD
+            baseSha = $env:PR_BASE
+            eventSha = $env:GITHUB_SHA
+            runId = $env:GITHUB_RUN_ID
+            runAttempt = $env:GITHUB_RUN_ATTEMPT
+          } | ConvertTo-Json | Set-Content -Encoding utf8 windows/artifacts/revision.json
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -60,6 +83,17 @@ jobs:
         working-directory: windows
         run: dotnet build MediaHub.Windows.sln -c Debug -p:Platform=x64 --no-restore
 
+      - name: Remove earlier test reports
+        shell: pwsh
+        working-directory: windows
+        run: |
+          foreach ($name in @("windows-tests.trx", "webdav-tests.trx")) {
+            $report = Join-Path ./artifacts/test-results $name
+            if (Test-Path -LiteralPath $report -PathType Leaf) {
+              Remove-Item -LiteralPath $report -Force
+            }
+          }
+
       - name: Unit and contract tests (MediaHub.Tests)
         working-directory: windows
         run: >
@@ -89,11 +123,11 @@ jobs:
         run: |
           # A test step that silently runs zero tests would otherwise be reported as success, and a
           # suite that quietly loses half its cases still prints "Passed!". Assert each suite by name
-          # with a floor just under its known size (MediaHub.Tests 438, MediaHub.WebDav.Tests 104 as of
-          # 2026-10-24); raise the floors when the suites grow.
+          # against the executed integration baseline (1518 + 104 on 2026-10-24).
+          # Raise these floors when the suites grow; do not lower them to hide missing coverage.
           $expected = @(
-            @{ File = "windows-tests.trx"; Suite = "MediaHub.Tests";          Floor = 400 },
-            @{ File = "webdav-tests.trx";  Suite = "MediaHub.WebDav.Tests";    Floor = 100 }
+            @{ File = "windows-tests.trx"; Suite = "MediaHub.Tests";          Floor = 1518 },
+            @{ File = "webdav-tests.trx";  Suite = "MediaHub.WebDav.Tests";    Floor = 104 }
           )
           $all = 0
           foreach ($e in $expected) {
@@ -216,10 +250,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mediahub-windows-${{ github.sha }}
+          name: mediahub-windows-${{ env.EXPECTED_HEAD }}
           if-no-files-found: warn
           retention-days: 14
           path: |
+            windows/artifacts/revision.json
             windows/artifacts/test-results/**
             windows/artifacts/engine-probe-ci.json
             windows/artifacts/license-report/**
