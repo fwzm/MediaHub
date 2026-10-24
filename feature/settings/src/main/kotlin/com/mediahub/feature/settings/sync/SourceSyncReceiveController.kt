@@ -40,6 +40,12 @@ object SourceSyncReceiveCopy {
 
     const val HOST_LABEL: String = "地址（默认回环）"
 
+    /** W6-52b：允许向一台非回环机器要信封（只在地址填了单播字面量时才起作用）。 */
+    const val ALLOW_HOST_LABEL: String = "允许连一个非回环的单播地址（跨机接收）"
+
+    const val ALLOW_HOST_HINT: String = "只有在这个框里写下一个单播 IP（例如 192.168.1.20）时才会被接受；" +
+        "通配、广播、组播地址与主机名一律在拨号之前拒绝，码仍是 not-loopback。"
+
     const val PORT_LABEL: String = "端口（必填）"
 
     const val CHALLENGE_LABEL: String = "挑战（可留空）"
@@ -93,6 +99,8 @@ data class SourceSyncReceiveForm(
     val host: String = DEFAULT_HOST,
     val port: String = "",
     val challenge: String = "",
+    /** W6-52b：是否允许向一台**非回环**的机器要信封（只在地址填了单播字面量时才起作用）。 */
+    val allowExplicitHost: Boolean = false,
 ) {
 
     /** 留空即回环：既是最常用的联调地址，也是唯一不会被传输层拒绝的地址。 */
@@ -118,6 +126,19 @@ data class SourceSyncReceiveForm(
  */
 fun interface SourceSyncReceivePort {
     suspend fun receive(host: String, port: Int, expectedChallenge: String?): SourceSyncTransferImportOutcome
+
+    /**
+     * W6-52b：带「允许显式非回环地址」开关的变体。
+     *
+     * 缺省实现忽略开关转调上面那条（既有的 lambda 替身零改动）；生产端口覆盖它，
+     * 把开关交给 core:common 的地址闸门（SourceSyncHostAddress），判定与诊断句都只有一处。
+     */
+    suspend fun receive(
+        host: String,
+        port: Int,
+        expectedChallenge: String?,
+        allowExplicitHost: Boolean,
+    ): SourceSyncTransferImportOutcome = receive(host, port, expectedChallenge)
 }
 
 /**
@@ -153,7 +174,12 @@ class SourceSyncReceiveController(
         try {
             _state.value = SourceSyncReceiveState.Receiving
             val outcome = try {
-                port.receive(form.hostOrLoopback, targetPort, form.challengeOrNull)
+                port.receive(
+                    form.hostOrLoopback,
+                    targetPort,
+                    form.challengeOrNull,
+                    form.allowExplicitHost,
+                )
             } catch (cancellation: CancellationException) {
                 _state.value = SourceSyncReceiveState.Idle
                 throw cancellation
@@ -236,5 +262,14 @@ class SourceSyncTransferReceivePort(
         host: String,
         port: Int,
         expectedChallenge: String?,
-    ): SourceSyncTransferImportOutcome = service.receiveAndImport(host, port, expectedChallenge)
+    ): SourceSyncTransferImportOutcome =
+        service.receiveAndImport(host, port, expectedChallenge, allowExplicitHost = false)
+
+    override suspend fun receive(
+        host: String,
+        port: Int,
+        expectedChallenge: String?,
+        allowExplicitHost: Boolean,
+    ): SourceSyncTransferImportOutcome =
+        service.receiveAndImport(host, port, expectedChallenge, allowExplicitHost = allowExplicitHost)
 }

@@ -45,6 +45,40 @@ class SourceSyncReceiveControllerTest {
     }
 
     @Test
+    fun theCrossMachineSwitchIsOffByDefault() {
+        val fresh = SourceSyncReceiveForm(host = "192.168.1.5", port = "8942")
+        assertFalse("W6-52b：缺省不许连非回环机器", fresh.allowExplicitHost)
+        assertTrue("点亮后表单自己也要看得出来", fresh.copy(allowExplicitHost = true).allowExplicitHost)
+    }
+
+    @Test
+    fun theCrossMachineSwitchTravelsVerbatimToThePort() = runTest {
+        val port = FakeReceivePort(importedOutcome())
+        val controller = SourceSyncReceiveController(port) { _, _ -> }
+
+        assertTrue(
+            controller.receive(
+                SourceSyncReceiveForm(host = "192.168.1.5", port = "8942", allowExplicitHost = true),
+            ),
+        )
+
+        assertEquals("地址原样交给端口", "192.168.1.5", port.host)
+        assertEquals("W6-52b：开关必须一起透传到端口", true, port.allowExplicitHost)
+    }
+
+    @Test
+    fun aCrossMachineAddressWithoutTheSwitchCarriesFalse() = runTest {
+        // 拒与不拒只在 core 的 SourceSyncHostAddress 里判；控制器不许自己再判一遍。
+        val port = FakeReceivePort(importedOutcome())
+        val controller = SourceSyncReceiveController(port) { _, _ -> }
+
+        assertTrue(controller.receive(SourceSyncReceiveForm(host = "192.168.1.5", port = "8942")))
+
+        assertEquals("192.168.1.5", port.host)
+        assertEquals(false, port.allowExplicitHost)
+    }
+
+    @Test
     fun blankPortSubmitsNothing() = runTest {
         val port = FakeReceivePort(importedOutcome())
         var loads = 0
@@ -429,14 +463,25 @@ class SourceSyncReceiveControllerTest {
         var host: String? = null
         var challenge: String? = null
 
+        /** W6-52b：控制器有没有把「允许非回环」这个开关带到端口上。 */
+        var allowExplicitHost: Boolean? = null
+
         override suspend fun receive(
             host: String,
             port: Int,
             expectedChallenge: String?,
+        ): SourceSyncTransferImportOutcome = receive(host, port, expectedChallenge, false)
+
+        override suspend fun receive(
+            host: String,
+            port: Int,
+            expectedChallenge: String?,
+            allowExplicitHost: Boolean,
         ): SourceSyncTransferImportOutcome {
             calls++
             this.host = host
             this.challenge = expectedChallenge
+            this.allowExplicitHost = allowExplicitHost
             gate?.await()
             return outcome
         }

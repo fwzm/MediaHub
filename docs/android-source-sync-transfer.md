@@ -2160,3 +2160,118 @@ gradlew.bat --max-workers=2 --rerun-tasks :feature:settings:testDebugUnitTest :f
 ### 30.9 下一步
 
 W6-55：把 `SourceSyncHostAddressTest`、`SourceSyncReceiptTest` 等已存在但未钉住的套件加进 `.github/workflows/android-ci.yml` 的 `--required-suite`（改门禁脚本必须同步跑 `.github/scripts/tests` 的 unittest）；发送端与拨号接收卡的预算/地址/认证开关合并为 W6-52b。
+
+## 31. W6-52b：拨号侧（发送卡 / 接收卡）的显式单播地址
+
+> 状态口径：本机单元测试与构建 EXECUTED_PASS；androidTest 只编译、未在设备上执行（DEVICE_UNVERIFIED，设备结论由 CI 的 visual-instrumentation 提供）；真实两机跨网证据 NOT_RUN（见 §31.8）。
+
+### 31.1 为什么现在补
+
+缺口表（`D:/mh-verify/android-w6-gap-table.md` 第 1 条）在 W6-52 之后只剩一半：监听端已经能绑一台机器的单播地址，但**拨号方向仍硬只连回环**——`core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncTransferClient.kt` 的 `receiveFrom` / `sendTo` 都经 `withConnection`，那里原本只认 `LoopbackOnly`。
+
+于是「Windows 当 serve、Android 当 send」这条主用法在 W6-52 之后成立，而反过来的「Android 开监听、Windows 用 `transfer send` 发过来」只要 Windows 侧绑了网卡（W6-51 的 `--bind <IP>`），Android 仍然连不过去。本节补的就是这个方向：把拨号端也做成「默认只回环，显式同意后只接受一个单播字面量」。
+
+### 31.2 与 Windows W6-51 同名同义
+
+| 项 | Windows（W6-51） | Android（W6-52b） |
+| --- | --- | --- |
+| 开关名 | `transfer serve --bind ADDR` / `--allow-non-loopback`、`transfer send --allow-non-loopback` | 发送卡「允许发给一个非回环的单播地址（跨机发送）」= tag `sync.send.allow-host`；接收卡「允许连一个非回环的单播地址（跨机接收）」= tag `sync.receive.allow-host` |
+| 缺省 | 关：只接受 127.0.0.1 / ::1 / localhost | 同 |
+| 打开后接受集合 | 一个单播 IP 字面量（IPv4 / IPv6） | 同（`SourceSyncHostAddress.isUnicastLiteral`） |
+| 拒绝时机 | 建 socket 之前 | 同（`withConnection` 在 `ServerSocket`/`Socket` 之前判定） |
+| 拒绝码 | `not-loopback`（不新增码集合，W6-47 结论 A/B） | 同，仍是 `SourceSyncTransferReasons.NOT_LOOPBACK` |
+| 诊断 | detail 句承载「为什么这个地址不行」 | 同，四条句子见 §31.4 |
+| DNS | 不解析主机名 | 同（`decodeIpv4` 自算四字节，IPv6 必须先含 `:` 且只含 hex 与 `.`/`:` 才 `getByName`，永不查 DNS） |
+
+### 31.3 判定只有一处，拒句分「绑定」与「连」
+
+地址判定的唯一实现是 `SourceSyncHostAddress.resolve(host, allowExplicitHost, verb)`（`SourceSyncHostAddress.kt:44`）。W6-52 的监听端用缺省 `verb = "绑定"`；本节让拨号端传 `verb = "连"`（`SourceSyncTransferClient.kt:155`）。
+
+这样做的硬理由：开关关着时，拨号端那句必须与 W6-23 起的原文**逐字相同**（`只允许连回环地址，实际 <地址>`），否则等于在没人要求的情况下改了既有诊断；监听端那句也必须保持 W6-52 的原文（`只允许绑定回环地址（127.0.0.1 / ::1 / localhost），实际 <地址>`）。两条都由单测钉住。
+
+### 31.4 四条拒绝句（照抄自 `SourceSyncHostAddress.kt`）
+
+1. 开关关着：`只允许<verb>回环地址（127.0.0.1 / ::1 / localhost），实际 <原文>` —— 拨号端 verb=连，监听端 verb=绑定。
+2. 开关开着但不是 IP 字面量：`「<原文>」不是 IP 字面量，本版本传输不做域名解析；请填 127.0.0.1、::1、localhost 或那台机器的单播 IP。`
+3. 开关开着但是通配 / 广播 / 组播 / 保留地址：`「<原文>」不是一个具体某台机器的地址（通配 / 广播 / 组播 / 保留地址），建 socket 之前就拒绝了；请填一个单播地址，例如 192.168.1.20。`
+4. 超过 256 字符：`地址最多 256 个字符，这个没有去绑。`
+
+### 31.5 落点（行号即本节写就时的实测值）
+
+| 文件 | 行 | 内容 |
+| --- | --- | --- |
+| `core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncTransferClient.kt` | :48 / :80 | `receiveFrom` / `sendTo` 末位各加 `allowExplicitHost: Boolean = false` |
+| 同上 | :147 | `private fun withConnection(host, port, tls, allowExplicitHost, body)` |
+| 同上 | :155 | `SourceSyncHostAddress.resolve(host, allowExplicitHost, verb = "连")` |
+| `core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncHostAddress.kt` | :44 | `fun resolve(host: String?, allowExplicitHost: Boolean, verb: String = "绑定"): Resolution` |
+| 同上 | :21 / :24 | `MAX_LENGTH = 256` / `EXAMPLE_UNICAST = "192.168.1.20"` |
+| `core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncTransferImportService.kt` | :95 / :102 | `receiveAndImport(..., allowExplicitHost)` → `client.receiveFrom(..., allowExplicitHost = …)` |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncSendController.kt` | :67 / :69 | `ALLOW_HOST_LABEL` / `ALLOW_HOST_HINT` |
+| 同上 | :259 | `SourceSyncSendForm.allowExplicitHost: Boolean = false` |
+| 同上 | :196 / :225 / :235 | `SourceSyncSendPort` 的 8 参默认实现 / 9 参方法 / 8 参转发到 9 参 |
+| 同上 | :296 | `toString()` 末尾 `", allowExplicitHost=" + allowExplicitHost` |
+| 同上 | :399 | `send(form)` 把开关一起交给端口 |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncReceiveController.kt` | :44 / :46 | 同两条文案（接收卡口径） |
+| 同上 | :103 / :140 / :272 / :274 | 表单字段 / 4 参默认实现 / 4 参 override / `service.receiveAndImport(..., allowExplicitHost = …)` |
+| 同上 | :181 | `receive(form)` 把开关交给端口 |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportScreen.kt` | :100 / :161 | tag `sync.receive.allow-host` / `sync.send.allow-host` |
+| 同上 | :695 / :1058 | 两张卡的复选框（`enabled = !receiving` / `!sending`） |
+
+### 31.6 用例
+
+`core/common/src/test/kotlin/com/mediahub/core/common/sync/SourceSyncTransferClientHostTest.kt`（11 例，全部 EXECUTED_PASS）：
+
+| 行 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :44 | `sending_without_the_switch_keeps_the_exact_pre_w6_52b_sentence` | 无开关 `sendTo(192.168.1.5)` → `not-loopback`，句子逐字等于 W6-23 起的原文 |
+| :52 | `receiving_without_the_switch_uses_the_same_sentence` | `receiveFrom(10.0.0.7)` 同句 |
+| :60 | `the_dialling_side_says_connect_and_never_bind` | 拨号端句子里是「连」不是「绑定」 |
+| :68 | `the_listener_side_keeps_its_bind_wording` | `resolve("192.168.1.5", false)` 仍是「绑定」句（守住缺省 verb） |
+| :81 | `a_unicast_literal_is_accepted_by_the_resolver_on_the_dialling_side` | 开关开着接受 192.168.1.5 且 `isLoopbackAddress == false` |
+| :89 | `wildcard_addresses_are_refused_before_any_socket_with_the_switch_on` | `0.0.0.0` / `::` 开关开也拒，且整段 < 2000 ms（证明没拨号） |
+| :107 | `broadcast_multicast_and_reserved_addresses_are_refused_with_the_switch_on` | 255.255.255.255 / 239.1.2.3 / 224.0.0.1 / 240.0.0.1 / ff02::1 |
+| :122 | `host_names_are_refused_even_with_the_switch_on` | `mediahub-lan.local` / `nas` / `192.168.1` |
+| :137 | `an_over_long_address_is_refused_by_length_before_anything_is_parsed` | 257 字符 |
+| :152 | `a_loopback_target_gets_past_the_gate_and_only_then_fails_to_connect` | 回环 + 刚释放端口 → `connect-failed`（不是 `not-loopback`） |
+| :170 | `a_blank_host_still_means_loopback_on_the_dialling_side` | 空白地址 = 回环，开关开着也一样 |
+
+`feature/settings/src/test/kotlin/com/mediahub/feature/settings/sync/SourceSyncSendControllerTest.kt`（+3 例）：:614 `theCrossMachineSwitchIsOffByDefaultAndPrintedInTheForm`（缺省 false、`toString` 含 `allowExplicitHost=false/true`）、:623 `theCrossMachineSwitchTravelsVerbatimToThePort`（地址与开关原样到端口、状态 Sent）、:633 `aCrossMachineAddressWithoutTheSwitchIsNotRefusedHereButCarriesFalse`（控制器不自己判，只照实传 false）。
+
+`feature/settings/src/test/kotlin/com/mediahub/feature/settings/sync/SourceSyncReceiveControllerTest.kt`（+3 例）：:48 `theCrossMachineSwitchIsOffByDefault`、:55 `theCrossMachineSwitchTravelsVerbatimToThePort`（`receive` 真走完，端口收到 192.168.1.5 + true）、:70 `aCrossMachineAddressWithoutTheSwitchCarriesFalse`。
+
+`feature/settings/src/androidTest/kotlin/com/mediahub/feature/settings/sync/SourceSyncSectionsScreenTest.kt`（+4 例，只编译不执行）：:104 `theReceiveCardOffersACrossMachineSwitch`、:117 `theReceiveFormCarriesTheCrossMachineSwitchVerbatim`、:395 `theSendCardOffersACrossMachineSwitch`、:407 `theSendFormCarriesTheCrossMachineSwitchVerbatim`。
+
+### 31.7 本机实跑
+
+命令（先 `gradlew --stop`；`JAVA_HOME=C:\Program Files\Android\Android Studio\jbr`、`ANDROID_HOME=C:\Users\55160\AppData\Local\Android\Sdk`、`GRADLE_OPTS=-Xmx2560m -XX:MaxMetaspaceSize=896m`）：
+
+`gradlew.bat --max-workers=2 --rerun-tasks :core:common:testDebugUnitTest :core:database:testDebugUnitTest :feature:settings:testDebugUnitTest :feature:settings:assembleDebugAndroidTest` → **`BUILD SUCCESSFUL in 7m 24s`**、`234 actionable tasks: 234 executed`、`EXIT=0`；日志 `D:/mh-verify/w6-52b-gradle.log`，脚本 `D:/mh-verify/w6-52b-gradle.ps1`。
+
+XML 口径（`*/build/test-results/testDebugUnitTest/` 逐文件解析 `<testsuite>` 属性）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 | 本节带来的变化 |
+| --- | --- | --- | --- | --- | --- | --- |
+| core/common | 35 | **503** | 0 | 0 | 11 | 492 + `SourceSyncTransferClientHostTest` 11 |
+| core/database | 18 | 172 | 0 | 0 | 12 | 不变（只加透传参数，无新增用例） |
+| feature/settings | 16 | **278** | 0 | 0 | 0 | 272 + 6（`SourceSyncSendControllerTest` 35 例、`SourceSyncReceiveControllerTest` 28 例） |
+
+androidTest APK `feature/settings/build/outputs/apk/androidTest/debug/settings-debug-androidTest.apk` = **20443294 B**（2026-10-25 01:40:26）。大小与 W6-49/W6-53 那几次相同过，所以做了逐 dex 解包核对：`Expand-Archive` 展开 19 个 dex 后用 `Buffer.includes` 查字节，四个新用例名与两个新 tag 都在 `classes17.dex`（103328 B）里，`sync.receive.allow-host` / `sync.send.allow-host` 另在 `classes12.dex`（691048 B）——这张包确为本次编译产物，不是陈旧复用。
+
+先导证据：`SourceSyncTransferClientHostTest` 在全量跑之前单独跑过一次（`BUILD SUCCESSFUL in 2m 9s`、11/11、`17 actionable tasks: 5 executed`），日志 `D:/mh-verify/w6-52b-core.log`。
+
+收尾：`gradlew --stop` → 残留 java 0；仓库内无 `hs_err_pid*.log` / `replay_pid*.log`。
+
+### 31.8 未覆盖（诚实清单）
+
+1. **真实两机 NOT_RUN**：本机一次都没有 bind / dial 任何非回环地址——那会让 Windows 弹出防火墙授权框并抢焦点，违反「GUI/自动化不得干扰使用者」的纪律。所以「两个单播地址之间真能传完一封信封」这件事，两端都还没有证据（Windows 侧 E1–E6 也仍是 NOT_RUN，见 `docs/cross-device/W6-51-EXPLICIT-HOST.md` §8）。
+2. **设备执行未做**：本节新增的 4 个 androidTest 只到「编译进 APK」为止，DEVICE_UNVERIFIED；设备结论要等 CI 的 visual-instrumentation 作业。
+3. **门禁未钉**：`SourceSyncSectionsScreenTest` 与 `SourceSyncTransferClientHostTest` 都还没进 `.github/workflows/android-ci.yml` 的 `--required-suite`（W6-55 钉的是另外三个；androidTest 那类本来就不在单元门禁里）。
+4. **只有开关，没有发现机制**：不扫网段、不解析 mDNS、不记忆上次地址；地址要靠人抄。
+5. **没有「地址簿」**：抖动或换网后用户要重新填。
+6. **无视觉回归**：复选框位置与说明文字只有断言「存在且可点」，没有截图比对。
+7. **Android 侧没有对应的 `--bind` 之外的等价物**：监听端绑非回环靠 W6-52 的地址框 + 本节无关；拨号端没有「从监听到的地址自动回填」这类联动。
+
+### 31.9 下一步
+
+- 真实两机取证（需要一台第二台机器 + 允许一次防火墙授权的窗口）：先在 Windows 用 `transfer serve --bind <IP> --allow-non-loopback` 起监听，Android 发送卡填同一 IP、点亮开关发一次；再反向（Android 监听端填 IP + 开关，Windows `transfer send --allow-non-loopback`）。两侧都要抓 `not-loopback` 之外的码。
+- 若将来要把「被策略拒绝」与「地址不是回环」在机器可辨层面分开，必须两端同时新开一个码集合、同名同序、各有用例（W6-47 结论 C），单端做不算。

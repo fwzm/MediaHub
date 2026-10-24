@@ -61,7 +61,13 @@ object SourceSyncSendCopy {
     const val HINT = "把本机来源导出成一封信封，推给 Windows 上正在跑的 transfer serve。" +
         "只发送，不改本机数据；是否导入由 Windows 侧决定。"
 
-    const val HOST_LABEL = "Windows 地址（只允许回环）"
+    const val HOST_LABEL = "Windows 地址（默认回环）"
+
+    /** W6-52b：允许发给一台非回环机器（只在地址填了单播字面量时才起作用）。 */
+    const val ALLOW_HOST_LABEL = "允许发给一个非回环的单播地址（跨机发送）"
+
+    const val ALLOW_HOST_HINT = "只有在这个框里写下一个单播 IP（例如 192.168.1.20）时才会被接受；" +
+        "通配、广播、组播地址与主机名一律在拨号之前拒绝，码仍是 not-loopback。"
 
     const val PORT_LABEL = "端口（必填，1-65535）"
 
@@ -171,6 +177,24 @@ fun interface SourceSyncSendPort {
         receipt: SourceSyncReceiptOptions,
         delivery: SourceSyncDeliveryOptions,
     ): SourceSyncTransferResult
+
+    /**
+     * W6-52b：带「允许显式非回环地址」开关的变体。
+     *
+     * 缺省实现直接忽略开关转调上面那条——既有的 lambda 替身因此一行都不用改（SAM 抽象方法仍然只有一个），
+     * 只有生产端口覆盖它并把开关交给 core:common 的地址闸门（SourceSyncHostAddress）。
+     */
+    suspend fun send(
+        host: String,
+        port: Int,
+        envelope: ByteArray,
+        challenge: String?,
+        tls: SourceSyncTlsOptions,
+        auth: SourceSyncTransferOptions?,
+        receipt: SourceSyncReceiptOptions,
+        delivery: SourceSyncDeliveryOptions,
+        allowExplicitHost: Boolean,
+    ): SourceSyncTransferResult = send(host, port, envelope, challenge, tls, auth, receipt, delivery)
 }
 
 /** 生产传输端口：阻塞的 socket 调用落在控制器给的 Dispatchers.IO 上，这里只做转调。 */
@@ -187,6 +211,18 @@ class SourceSyncTransferSendPort(
         auth: SourceSyncTransferOptions?,
         receipt: SourceSyncReceiptOptions,
         delivery: SourceSyncDeliveryOptions,
+    ): SourceSyncTransferResult = send(host, port, envelope, challenge, tls, auth, receipt, delivery, false)
+
+    override suspend fun send(
+        host: String,
+        port: Int,
+        envelope: ByteArray,
+        challenge: String?,
+        tls: SourceSyncTlsOptions,
+        auth: SourceSyncTransferOptions?,
+        receipt: SourceSyncReceiptOptions,
+        delivery: SourceSyncDeliveryOptions,
+        allowExplicitHost: Boolean,
     ): SourceSyncTransferResult = client.sendTo(
         host = host,
         port = port,
@@ -196,6 +232,7 @@ class SourceSyncTransferSendPort(
         auth = auth,
         receipt = receipt,
         delivery = delivery,
+        allowExplicitHost = allowExplicitHost,
     )
 }
 
@@ -218,6 +255,8 @@ data class SourceSyncSendForm(
     val secret: String = "",
     val receipt: Boolean = false,
     val delivery: Boolean = false,
+    /** W6-52b：是否允许把信封推给一台**非回环**的机器（只在地址填了单播字面量时才起作用）。 */
+    val allowExplicitHost: Boolean = false,
 ) {
 
     /** 空白地址回落到回环；不做 DNS（底层 LoopbackOnly 只认字面量）。 */
@@ -253,7 +292,8 @@ data class SourceSyncSendForm(
         ", auth=" + auth +
         ", secret=<redacted>" +
         ", receipt=" + receipt +
-        ", delivery=" + delivery + ")"
+        ", delivery=" + delivery +
+        ", allowExplicitHost=" + allowExplicitHost + ")"
 
     companion object {
 
@@ -356,6 +396,7 @@ class SourceSyncSendController(
                     auth = auth,
                     receipt = receipt,
                     delivery = delivery,
+                    allowExplicitHost = form.allowExplicitHost,
                 )
             }
             _state.value = when (result) {
