@@ -186,9 +186,9 @@ class SourceSyncTlsInteropTest {
                 envelopeOf(ANDROID_DEVICE, "snap-w632-plain-vs-tls"),
             )
             val exit = serve.awaitExit()
-            // 协议是单向的：sendTo 的 Ok 只表示「帧写进了 socket」，不代表对端接受（没有投递确认，
-            // Windows CLI 的 --confirm-delivery 在 Android 侧尚无对应物）。所以客户端这里就是 Ok，
-            // 真正的拒绝只能从 Windows 侧观察 —— 这个不对称记在 docs 第 18 节。
+            // 协议是单向的：没有开投递确认（W6-46）时，sendTo 的 Ok 只表示「帧写进了 socket」，
+            // 不代表对端接受；本用例故意用默认的 delivery = Off，所以客户端这里就是 Ok，
+            // 真正的拒绝只能从 Windows 侧观察 —— 这个不对称记在 docs 第 18 节与第 25 节。
             assertTrue("发送端本地能写成功，实际 " + describe(result), result is SourceSyncTransferResult.Ok)
             assertEquals(1, (result as SourceSyncTransferResult.Ok).frameCount)
             assertFalse("TLS serve 不该把这次连接当成功，实际 exit=" + exit, exit == 0)
@@ -254,7 +254,8 @@ class SourceSyncTlsInteropTest {
                 serve.stderrText().contains(SourceSyncTransferAuthReasons.AUTH_MISMATCH),
             )
             assertTrue("验签失败时不该写库，实际 " + writtenSources(root), writtenSources(root).isEmpty())
-            // 同上：发送端没有投递确认，口令错了它也会报 Ok(3 帧)。拒绝只发生在 Windows 一侧。
+            // 同上：本用例没开投递确认（delivery 默认 Off），口令错了发送端也会报 Ok(3 帧)，
+            // 拒绝只发生在 Windows 一侧；开了确认时 Windows 会先关连接，发送端能读到这个拒绝信号。
             assertTrue("发送端本地能写成功，实际 " + describe(result), result is SourceSyncTransferResult.Ok)
             assertEquals(3, (result as SourceSyncTransferResult.Ok).frameCount)
         } finally {
@@ -374,7 +375,40 @@ class SourceSyncTlsInteropTest {
         }
     }
 
+    // ---- 用例 11：投递确认（W6-46）——对真 Windows serve 读到它写完帧后的 FIN ----
+
+    @Test
+    fun deliveryConfirmationSeesTheRealServeCloseTheConnection() {
+        val root = newRoot("delivery")
+        val serve = startServe(root)
+        try {
+            val payload = envelopeOf(ANDROID_DEVICE, "snap-w646-delivery")
+            val result = SourceSyncTransferClient().sendTo(
+                "127.0.0.1",
+                serve.port(),
+                payload,
+                delivery = SourceSyncDeliveryOptions.confirming(),
+            )
+            val exit = serve.awaitExit()
+            val json = serve.stdoutJson()
+            assertTrue("开启确认后应当仍是 Ok：" + describe(result), result is SourceSyncTransferResult.Ok)
+            val ok = result as SourceSyncTransferResult.Ok
+            val delivery = ok.delivery
+            assertTrue("开了确认就必须带确认结论，实际 " + delivery, delivery is SourceSyncDeliveryResult.Confirmed)
+            val confirmed = delivery as SourceSyncDeliveryResult.Confirmed
+            // Windows 收完帧就 Shutdown(Send) 半关，所以 Android 侧应当读到 EOF 而不是超时。
+            assertEquals("没有回发数据的对端不该被读出字节", 0, confirmed.bytesRead)
+            assertTrue("耗时不该是负的，实际 " + confirmed.elapsedMs, confirmed.elapsedMs >= 0)
+            assertEquals("serve 应当成功退出；stderr=" + serve.stderrText(), 0, exit)
+            assertEquals(2, json.obj("counts").int("apply"))
+            assertEquals(listOf("local-w632-emby", "local-w632-jellyfin"), writtenSources(root))
+        } finally {
+            serve.close()
+        }
+    }
+
     // ---- 夹具与工具 ----
+
 
     private fun startServe(
         root: Path,

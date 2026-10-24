@@ -4,6 +4,7 @@ import com.mediahub.core.common.pairing.PairingFingerprint
 import com.mediahub.core.common.sync.SourceEndpoint
 import com.mediahub.core.common.sync.SourceRecord
 import com.mediahub.core.common.sync.SourceSyncCodec
+import com.mediahub.core.common.sync.SourceSyncDeliveryOptions
 import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncReceipt
 import com.mediahub.core.common.sync.SourceSyncReceiptOptions
@@ -524,7 +525,93 @@ class SourceSyncSendControllerTest {
         assertEquals(MAIN_PIN, parsed!!.hex)
     }
 
+    // ---- W6-46 投递确认（对齐 Windows W6-30 / W6-39） ----
+
+    @Test
+    fun deliveryIsOffByDefaultAndCarriesNoConfirmation() = runTest {
+        val send = FakeSendPort()
+        val controller = SourceSyncSendController(exportPort(), send)
+        assertTrue(controller.send(form(port = "9000")))
+        assertEquals(SourceSyncDeliveryOptions.Off, send.delivery)
+        val state = controller.state.value as SourceSyncSendState.Sent
+        assertNull("没开确认时没有确认结论", state.deliveryConfirmed)
+        val line = checkNotNull(SourceSyncSendCopy.lineOf(state))
+        assertFalse("没开确认不该出现投递确认那句：" + line, line.contains("对端读完就关了连接"))
+    }
+
+    @Test
+    fun deliveryOnIsForwardedWithTheDefaultBudget() = runTest {
+        val send = FakeSendPort(SourceSyncTransferResult.Ok(ByteArray(0), 2, null))
+        val controller = SourceSyncSendController(exportPort(), send)
+        assertTrue(controller.send(form(port = "9000", delivery = true)))
+        val forwarded = send.delivery
+        assertTrue("确认必须传给传输层，实际 " + forwarded, forwarded.confirm)
+        assertEquals(SourceSyncDeliveryOptions.DEFAULT_BUDGET_MS, forwarded.budgetMs)
+        val state = controller.state.value as SourceSyncSendState.Sent
+        assertEquals(true, state.deliveryConfirmed)
+        val line = checkNotNull(SourceSyncSendCopy.lineOf(state))
+        assertTrue("确认成功要说清对端是读完就关：" + line, line.contains("对端读完就关了连接"))
+    }
+
+    @Test
+    fun receiptTakesPrecedenceOverDelivery() = runTest {
+        val send = FakeSendPort(SourceSyncTransferResult.Ok(ByteArray(0), 2, null))
+        val controller = SourceSyncSendController(exportPort(), send)
+        assertTrue(controller.send(form(port = "9000", receipt = true, delivery = true)))
+        assertEquals(
+            "回执优先：两个都开时投递确认必须是 Off",
+            SourceSyncDeliveryOptions.Off,
+            send.delivery,
+        )
+        assertTrue(send.receipt.enabled)
+        val state = controller.state.value as SourceSyncSendState.Sent
+        assertTrue(state.receipt)
+        assertNull("被回执取代时没有确认结论", state.deliveryConfirmed)
+    }
+
+    @Test
+    fun unconfirmedDeliveryIsSurfacedWithItsOwnCode() = runTest {
+        val send = FakeSendPort(
+            SourceSyncTransferResult.Failed(
+                "delivery-unconfirmed",
+                "信封已写出（665 字节），但对端没有在 2000 毫秒内关闭连接。",
+            ),
+        )
+        val controller = SourceSyncSendController(exportPort(), send)
+        assertTrue(controller.send(form(port = "9000", delivery = true)))
+        val state = controller.state.value as SourceSyncSendState.Failed
+        assertEquals("delivery-unconfirmed", state.code)
+        val line = checkNotNull(SourceSyncSendCopy.lineOf(state))
+        assertTrue("失败行必须带自己的码：" + line, line.contains("发送失败：delivery-unconfirmed"))
+        assertTrue("失败行要带 detail：" + line, line.contains("毫秒内关闭连接"))
+    }
+
+    @Test
+    fun realLoopbackSendIsOnlyConfirmedWhenThePeerCloses() = runTest {
+        val recorder = Recorder()
+        val peer = plainPeer(recorder)
+        try {
+            val controller = SourceSyncSendController(exportPort(), SourceSyncTransferSendPort())
+            assertTrue(controller.send(form(port = peer.port.toString(), delivery = true)))
+            peer.await()
+            val state = controller.state.value as SourceSyncSendState.Sent
+            assertEquals(true, state.deliveryConfirmed)
+            assertEquals(SourceSyncTransfer.chunkCount(recorder.envelope.get()!!.size), state.frames)
+        } finally {
+            peer.close()
+        }
+    }
+
+    @Test
+    fun formPrintsTheDeliveryFlagButNeverTheSecret() {
+        val printed = form(port = "9000", auth = true, secret = "s3cr3t-value", delivery = true).toString()
+        assertTrue("诊断要看得出开了确认：" + printed, printed.contains("delivery=true"))
+        assertFalse("口令不得出现在 toString：" + printed, printed.contains("s3cr3t-value"))
+        assertTrue("口令位置打码：" + printed, printed.contains("secret=<redacted>"))
+    }
+
     // ---- 夹具 ----
+
 
     private fun form(
         host: String = SourceSyncSendForm.DEFAULT_HOST,
@@ -535,6 +622,7 @@ class SourceSyncSendControllerTest {
         auth: Boolean = false,
         secret: String = "",
         receipt: Boolean = false,
+        delivery: Boolean = false,
     ): SourceSyncSendForm = SourceSyncSendForm(
         host = host,
         port = port,
@@ -544,6 +632,7 @@ class SourceSyncSendControllerTest {
         auth = auth,
         secret = secret,
         receipt = receipt,
+        delivery = delivery,
     )
 
     /** 两来源信封：与 Windows transfer serve 的 apply 计数口径一致（emby + jellyfin，无墓碑）。 */
@@ -786,6 +875,7 @@ class SourceSyncSendControllerTest {
         var tls: SourceSyncTlsOptions = SourceSyncTlsOptions.Off
         var auth: SourceSyncTransferOptions? = null
         var receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off
+        var delivery: SourceSyncDeliveryOptions = SourceSyncDeliveryOptions.Off
         var envelope: ByteArray? = null
 
         override suspend fun send(
@@ -796,6 +886,7 @@ class SourceSyncSendControllerTest {
             tls: SourceSyncTlsOptions,
             auth: SourceSyncTransferOptions?,
             receipt: SourceSyncReceiptOptions,
+            delivery: SourceSyncDeliveryOptions,
         ): SourceSyncTransferResult {
             calls++
             this.host = host
@@ -805,6 +896,7 @@ class SourceSyncSendControllerTest {
             this.tls = tls
             this.auth = auth
             this.receipt = receipt
+            this.delivery = delivery
             gate?.await()
             return result
         }

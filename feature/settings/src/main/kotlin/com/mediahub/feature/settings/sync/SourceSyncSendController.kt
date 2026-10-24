@@ -1,6 +1,7 @@
 package com.mediahub.feature.settings.sync
 
 import com.mediahub.core.common.pairing.PairingFingerprint
+import com.mediahub.core.common.sync.SourceSyncDeliveryOptions
 import com.mediahub.core.common.sync.SourceSyncReceiptOptions
 import com.mediahub.core.common.sync.SourceSyncTlsOptions
 import com.mediahub.core.common.sync.SourceSyncTransferClient
@@ -34,6 +35,10 @@ sealed interface SourceSyncSendState {
      *
      * [receipt] 为 true 才表示「对端回了 0x04」——只有这种情形下「发送成功」才等于「对端收下了」；
      * 关着等回执时这个状态只说明字节写完了（对端拒收之后同样会关连接，见 Windows W6-35 case R6a）。
+     *
+     * [deliveryConfirmed] 是 W6-46 的投递确认：true 表示写完帧后读到对端关了连接；
+     * null 表示没开确认，或者被回执取代（回执优先，两个都开时只有回执说话）；
+     * 开了确认却读不到 FIN 时不会落到这个状态，而是 [Failed] + delivery-unconfirmed。
      */
     data class Sent(
         val bytes: Int,
@@ -41,6 +46,7 @@ sealed interface SourceSyncSendState {
         val receipt: Boolean,
         val sourceCount: Int = 0,
         val skippedCount: Int = 0,
+        val deliveryConfirmed: Boolean? = null,
     ) : SourceSyncSendState
 
     /** 失败：稳定码 + 底层诊断原文（不折成布尔，也不新造同义码）。 */
@@ -71,6 +77,8 @@ object SourceSyncSendCopy {
 
     const val RECEIPT_LABEL = "等回执（0x04）"
 
+    const val DELIVERY_LABEL = "等对端关闭连接（投递确认）"
+
     const val ACTION = "发送"
 
     const val BUSY = "发送中…"
@@ -82,6 +90,8 @@ object SourceSyncSendCopy {
     const val SECRET_REQUIRED = "开了认证就必须填口令：没有口令的 tag 帧对端会判 auth-secret-unavailable。"
 
     const val RECEIPT_HINT = "开了等回执，对端回了 0x04 才算送达；关着时「成功」只代表字节写完了。"
+
+    const val DELIVERY_HINT = "开了投递确认，读完信封后对端关连接才算送达；与回执同时开时回执优先。"
 
     /** 状态 → 一行中文（Idle 时没有可显示的行）。 */
     fun lineOf(state: SourceSyncSendState): String? = when (state) {
@@ -110,7 +120,12 @@ object SourceSyncSendCopy {
         } else {
             "没有等回执：这只说明字节写完了，不代表对端接受了。"
         }
-        return head + skipped + delivery
+        val closed = if (state.deliveryConfirmed == true) {
+            "对端读完就关了连接，这封信封确实送到了。"
+        } else {
+            ""
+        }
+        return head + skipped + delivery + closed
     }
 
     private fun detailSuffix(detail: String?): String {
@@ -151,6 +166,7 @@ fun interface SourceSyncSendPort {
         tls: SourceSyncTlsOptions,
         auth: SourceSyncTransferOptions?,
         receipt: SourceSyncReceiptOptions,
+        delivery: SourceSyncDeliveryOptions,
     ): SourceSyncTransferResult
 }
 
@@ -167,6 +183,7 @@ class SourceSyncTransferSendPort(
         tls: SourceSyncTlsOptions,
         auth: SourceSyncTransferOptions?,
         receipt: SourceSyncReceiptOptions,
+        delivery: SourceSyncDeliveryOptions,
     ): SourceSyncTransferResult = client.sendTo(
         host = host,
         port = port,
@@ -175,6 +192,7 @@ class SourceSyncTransferSendPort(
         tls = tls,
         auth = auth,
         receipt = receipt,
+        delivery = delivery,
     )
 }
 
@@ -196,6 +214,7 @@ data class SourceSyncSendForm(
     val auth: Boolean = false,
     val secret: String = "",
     val receipt: Boolean = false,
+    val delivery: Boolean = false,
 ) {
 
     /** 空白地址回落到回环；不做 DNS（底层 LoopbackOnly 只认字面量）。 */
@@ -230,7 +249,8 @@ data class SourceSyncSendForm(
         ", fingerprint=" + (if (fingerprintOrNull == null) "<none>" else "<set>") +
         ", auth=" + auth +
         ", secret=<redacted>" +
-        ", receipt=" + receipt + ")"
+        ", receipt=" + receipt +
+        ", delivery=" + delivery + ")"
 
     companion object {
 
@@ -321,6 +341,8 @@ class SourceSyncSendController(
             } else {
                 SourceSyncReceiptOptions.Off
             }
+            // 回执优先：两个都开时确认被忽略（core:common 的 sendTo 里也再兜一次，避免调用方绕过）。
+            val delivery = SourceSyncDeliveryOptions.confirmingOrOff(form.delivery && !form.receipt)
             val result = withContext(Dispatchers.IO) {
                 sendPort.send(
                     host = form.hostOrLoopback,
@@ -330,6 +352,7 @@ class SourceSyncSendController(
                     tls = tls,
                     auth = auth,
                     receipt = receipt,
+                    delivery = delivery,
                 )
             }
             _state.value = when (result) {
@@ -339,6 +362,8 @@ class SourceSyncSendController(
                     receipt = form.receipt,
                     sourceCount = exported.sourceCount,
                     skippedCount = exported.skippedCount,
+                    // 开了确认又能走到 Ok，说明确实读到了 FIN；被回执取代或没开时一律 null。
+                    deliveryConfirmed = if (delivery.confirm) true else null,
                 )
                 is SourceSyncTransferResult.Failed -> SourceSyncSendState.Failed(result.reason, result.message)
             }
