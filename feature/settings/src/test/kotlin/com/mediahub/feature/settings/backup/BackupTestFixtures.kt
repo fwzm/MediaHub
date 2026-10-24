@@ -16,10 +16,13 @@ internal class MemoryRestoreSnapshotStorage : RestoreSnapshotStorage {
 internal fun authenticatedTestBytes(payload: BackupDtos.BackupPayload, password: CharArray): ByteArray {
     val salt = BackupCrypto.randomSalt()
     val key = BackupCrypto.deriveKey(password, salt, 10_000, 256)
+    // 信封/AAD 版本必须与载荷 manifest 一致：import 会校验「内外版本一致」(BackupSerializer.kt:273)，
+    // 写死 1 会让 v2 载荷被判 Corrupted（task-25 格式版本 2 后暴露）。仍然绕过 export 校验，保持夹具用途不变。
+    val version = payload.manifest.formatVersion
     val nonce = BackupCrypto.randomNonce()
     val encrypted = BackupCrypto.encrypt(BackupDtos.encodePayload(payload).toByteArray(), key.key, nonce,
-        BackupCrypto.aadFor(BackupCrypto.MAGIC, 1, key.params.algorithm, 10_000))
-    return BackupFileFormat.encodeEnvelope(BackupFileFormat.Envelope(BackupCrypto.MAGIC, 1, key.params.algorithm,
+        BackupCrypto.aadFor(BackupCrypto.MAGIC, version, key.params.algorithm, 10_000))
+    return BackupFileFormat.encodeEnvelope(BackupFileFormat.Envelope(BackupCrypto.MAGIC, version, key.params.algorithm,
         BackupFileFormat.encodeB64(salt), 10_000, 256, BackupFileFormat.encodeB64(nonce), BackupFileFormat.encodeB64(encrypted))).toByteArray()
 }
 

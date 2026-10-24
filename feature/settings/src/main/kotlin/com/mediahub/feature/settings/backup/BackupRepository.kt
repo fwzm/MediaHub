@@ -692,21 +692,33 @@ class BackupRepository @Inject constructor(
             )
         }
         val prefsDto = toPreferencesDto(prefs)
+        // 收藏（task-25 / A2）：真源在服务端 UserData，本机没有收藏表，因此当前导出恒为空。
+        // 结构（DTO + 校验 + 格式版本 2）已就位；这里只把非空段写进 manifest，避免向外宣称"已备份收藏"。
+        val favoriteDtos = emptyList<BackupDtos.FavoriteDto>()
+        val sections = buildList {
+            add("servers")
+            add("progress")
+            add("preferences")
+            if (favoriteDtos.isNotEmpty()) add("favorites")
+        }
+        val counts = buildMap {
+            put("servers", serverDtos.size)
+            put("progress", progressDtos.size)
+            put("preferences", if (prefsDto != null) 1 else 0)
+            if (favoriteDtos.isNotEmpty()) put("favorites", favoriteDtos.size)
+        }
         return BackupDtos.BackupPayload(
             manifest = BackupFileFormat.Manifest(
                 formatVersion = BackupCrypto.FORMAT_VERSION,
                 minimumReaderVersion = BackupCrypto.MINIMUM_READER_VERSION,
                 appVersion = appVersion,
                 createdAtEpochMs = System.currentTimeMillis(),
-                includedSections = listOf("servers", "progress", "preferences"),
-                recordCounts = mapOf(
-                    "servers" to serverDtos.size,
-                    "progress" to progressDtos.size,
-                    "preferences" to if (prefsDto != null) 1 else 0,
-                ),
+                includedSections = sections,
+                recordCounts = counts,
             ),
             servers = serverDtos,
             progress = progressDtos,
+            favorites = favoriteDtos,
             preferences = prefsDto,
         )
     }

@@ -58,6 +58,7 @@ import com.mediahub.core.ui.effects.PlayerVisualPresetMapper
 import com.mediahub.core.ui.effects.PlayerVisualTestTags
 import com.mediahub.core.ui.effects.playerVisualPresetName
 import com.mediahub.core.ui.effects.visualPerformanceModeName
+import com.mediahub.feature.settings.sync.SourceSyncImportRoute
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.UserPreferences
 
@@ -72,8 +73,15 @@ fun SettingsRoute(
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
+    var showSourceSyncImport by remember { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
+
+    // W6-F：导入页在本页内托管（不改 app 导航图），返回即回到设置列表。
+    if (showSourceSyncImport) {
+        SourceSyncImportRoute(onBack = { showSourceSyncImport = false })
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -101,6 +109,14 @@ fun SettingsRoute(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("同步与备份")
+            }
+            androidx.compose.material3.OutlinedButton(
+                onClick = { showSourceSyncImport = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("sync.import.entry"),
+            ) {
+                Text("从文件导入来源")
             }
 
             Spacer(Modifier.height(8.dp))

@@ -1,0 +1,70 @@
+LGPL engine switch - build evidence for both flavours
+=======================================================
+generated-utc : 2026-10-23T20:12:23Z
+repo          : D:\deepseek_test\MediaHub_Win
+git-head      : 1a38b06 (v0.1.0-alpha.1-291-g1a38b06-dirty)
+dotnet        : 10.0.113
+command (gpl) : dotnet build src/MediaHub.App/MediaHub.App.csproj -c Debug -p:Platform=x64 -p:MediaHubBinRoot=D:/mh-out-gpl/
+command (lgpl): dotnet build src/MediaHub.App/MediaHub.App.csproj -c Debug -p:Platform=x64 -p:MediaHubBinRoot=D:/mh-out-lgpl/ -p:LibMpvFlavour=lgpl
+build result  : both "0 个警告 / 0 个错误" (0 warnings, 0 errors); the app assembly is MediaHub.dll
+
+1) default flavour (gpl) - windows/native/libmpv
+   output : D:\mh-out-gpl\x64\Debug\net10.0-windows10.0.19041.0\win-x64
+   files  : 352
+   libmpv-2.dll bytes  : 120989696
+   libmpv-2.dll sha256 : 6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9
+   engine DLLs in the output: 1 (only libmpv-2.dll; the GPL build links FFmpeg statically)
+
+2) lgpl flavour - windows/engine/lgpl/dist
+   output : D:\mh-out-lgpl\x64\Debug\net10.0-windows10.0.19041.0\win-x64
+   files  : 385
+   libmpv-2.dll bytes  : 3327274
+   libmpv-2.dll sha256 : 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+   engine DLLs in the output: 34 (libmpv-2.dll plus the 33 collected dependencies)
+
+   name                          bytes     sha256                                                     matches dist source
+   ----------------------------  --------  ---------------------------------------------------------  ------------------
+   libmpv-2.dll                  3327274  20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a  True
+   avcodec-62.dll               18603520  1faacb7a3bfd9d16c5b8258ede66baf03c31d2578d828af68ade215ada6d9f4d  True
+   avdevice-62.dll                153088  af2075f1e5d17a04e0a109d76af8704ca15b6c1438054962ebdfa596ce793ef2  True
+   avfilter-11.dll               5288448  c077cd1c46d337851e4035716fcfb218a48a771b073b27474cf86c1e4a6f9c05  True
+   avformat-62.dll               2805760  e6bf5d047479763b818ce34b73ae256c1d7d2163c1d6964cef6eff7ea5636257  True
+   avutil-60.dll                 1067520  c1ce3e99f2252ce1d977bc5e0d3d6e2e9d0200723a391c0ef1b781337e7bd353  True
+   libass-9.dll                   345174  cb2b46133b3bd9630384148bd7229e987af9703208d4329fc2215f4170b8dc6b  True
+   libbrotlicommon.dll            144565  c62c08223e450dfc2fff33c752cc228505ffd9d755201958ba800d5d30481a2c  True
+   libbrotlidec.dll                62619  e270b6e576594ee8ee6e33ccc54e34a54304616dd6225652e11e49d6f17ef896  True
+   libbz2-1.dll                    78774  669a4bf9266d5f020e843aa5fd75b93ce8ebde27014d5ac466a8b3cf39d8aba7  True
+   libdovi.dll                   1370861  75988509f0d2166e2060ed548913bd7b34556bc16b3f9a02469de1dd2347a7fb  True
+   libexpat-1.dll                 191185  00b9ad2a1f75bbf4f83428a9adcd609da1c8590a84c944226422f081cb1459e1  True
+   libfontconfig-1.dll            505833  be30a200fa4000d0a7a1d3911391969627440148f01d0028a319bcb9fa112202  True
+   libfreetype-6.dll              808305  19604dde573cbb8a13053fc231eee99b91cd972e0e9a3e1465f44ad6985e83ee  True
+   libfribidi-0.dll               152541  14bd0ed4c24d0068434bc23cd4f39e8dc0edcf56f2c9996b6fe39b39ffc54673  True
+   libgcc_s_seh-1.dll             152895  6a68f99a316764b680bbb6f0553299fbc7130a3421a1d64bb044627cbe0c6db2  True
+   libglib-2.0-0.dll             1568604  3a1abec0184b238db54399cb9243393d9436d96b8fdb9bd9f2875da207c5b458  True
+   libgraphite2.dll               167857  93953e4744bcfce9a7bc439b956544bc213095cb1349c3602a58370f32b25c18  True
+   libharfbuzz-0.dll             1612472  842d73ce2dd9ee506ef68f4d3e9ca29b62c87e34999cd2720505bf3c9d3f575c  True
+   libiconv-2.dll                1135869  b37d1b4acab5310c4e4f6e2a961d146454ff740d943724a68fa3cebc85deb7cd  True
+   libintl-8.dll                  212436  77184a77e8e751999816c311ae144fae3fe1957992dff525c13267bd845982d4  True
+   liblcms2-2.dll                 448202  03314471fadd04cdd63c108472ff85d058903d236a0356c14eda363f0e1ccb65  True
+   libpcre2-8-0.dll               706022  1f609cde2ce432efb7d2b0c7b84a14a6dbfc9622d1ac1a3cbadf51c5b0b4dada  True
+   libplacebo-360.dll            1235613  8eb2c3fe24a124d9dbf0383d60ac7dde6c0dd5607b2451cad0d924271e46d5b8  True
+   libpng16-16.dll                254777  7f425fd2b41d83869bb31bf761b4fb315f11040d55540661f96e582e1ec79a36  True
+   libshaderc_shared.dll        10657197  331df8a45983735b823c893a9b872c3414af6eadca9fa189d0b6dfe97960b3cf  True
+   libspirv-cross-c-shared.dll   3433687  bc4bdcf63b9bbf60777bc10340050ae6edfbb3be3faf3fa636af53ecf7d2bbc8  True
+   libstdc++-6.dll               2403882  9510ec8bbec49de557da9935f793ad19f1ffdb4e5e3ef7715bd40ffe0b5f3892  True
+   libunibreak-7.dll              141442  f1f4bb5b5bb3dbf8d142df3012f13e4b5b0246565496d43718a6f33321e96283  True
+   libwinpthread-1.dll             62176  0e013ffc123dda330d27c76f26ba74fcd690f1236bb0225d3b4f406d71774e9e  True
+   swresample-6.dll               140800  7fc1e4754c1ddf7f2eebec7801a32d3ffb0efe7d9753e84837d8a57d9e243ee0  True
+   swscale-9.dll                 2089984  e0d920aea621b242703c988807b353989a84ce3069bc80979135bc60f3255bae  True
+   vulkan-1.dll                   724189  31862137c4179dcdbba782760f3e401f9fb526477947079d7f63987864f9b0eb  True
+   zlib1.dll                      100279  1dc85208162ee57fe97e892bb5160fe9588903992995f90adc3a3a358dac6fc6  True
+
+   cross-check: 34 files compared, 0 mismatching
+
+3) the lgpl output folder loads and decodes on its own
+   MediaHub.EngineProbe --dll <lgpl output>\libmpv-2.dll --deps <lgpl output> --media windows/tests/assets/sample-av.mp4 --seconds 3
+   with every PATH entry matching msys64|mh-servers|lgpl-build removed:
+   verdict=PASS loadMode=native-library maxTimePos=3 gplToken=False dllBytes=3327274
+   (native-library is the primary load path: the loader needed no dependency-directory fallback, so
+    the folder is self-contained. Full run: windows/engine/lgpl/dist/selfcontained-probe.txt.)
+
