@@ -129,7 +129,9 @@ class MpvHttpBridgeLifecycleTest {
                         head.append(byte.toChar())
                     }
                     requestReceived.countDown()
-                    it.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 500\r\n\r\n".toByteArray())
+                    // Send one real body byte, then keep the declared remaining 499 bytes pending.
+                    // A header-only response cannot witness a completed first body read.
+                    it.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 500\r\n\r\np".toByteArray())
                     it.getOutputStream().flush()
                     it.soTimeout = 8_000
                     val hungUp = try {
@@ -171,9 +173,18 @@ class MpvHttpBridgeLifecycleTest {
                 socket(url, "GET " + URI(url).path + " HTTP/1.1").use { local ->
                     assertTrue("bridge forwarded the request upstream", upstream.requestReceived.await(3, TimeUnit.SECONDS))
                     assertTrue("real upstream body read must be reached before stop", bodyRead.await(3, TimeUnit.SECONDS))
+                    val input = local.getInputStream()
+                    val responseHead = StringBuilder()
+                    while (!responseHead.endsWith("\r\n\r\n")) {
+                        val byte = input.read()
+                        assertTrue("response headers must arrive before the body", byte >= 0)
+                        responseHead.append(byte.toChar())
+                        assertTrue("response headers must stay bounded", responseHead.length <= 8_192)
+                    }
+                    assertEquals("the first upstream byte must traverse the actual bridge", 'p'.code, input.read())
                     bridge.stop()
                     local.soTimeout = 1_000
-                    while (local.getInputStream().read() != -1) { }
+                    while (input.read() != -1) { }
                     assertTrue(canceled.await(3, TimeUnit.SECONDS))
                     assertTrue(target.get().isCanceled())
                     assertTrue("upstream connection must be closed after stop",
