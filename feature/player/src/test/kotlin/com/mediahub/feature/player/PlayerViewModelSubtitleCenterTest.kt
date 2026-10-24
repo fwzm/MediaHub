@@ -338,6 +338,29 @@ class PlayerViewModelSubtitleCenterTest {
     // ---- 记忆自动回放 ----
 
     @Test
+    fun `provider sidecars appear without directory discovery and can really be selected`() = runTest(dispatcher) {
+        val engine = RecordingEngine()
+        val uri = "https://media/emby/Videos/m1/src1/Subtitles/2/Stream.srt"
+        val playback = object : MediaPlaybackProvider {
+            override suspend fun resolvePlayback(item: MediaItem, options: PlaybackOptions) = PlaybackSource(
+                url = "https://media/stream.mkv",
+                externalSubtitles = listOf(com.mediahub.model.SubtitleTrack(
+                    index = 2, language = "zho", title = "Chinese", format = "srt", isExternal = true, url = uri)),
+            )
+        }
+        val vm = buildVm(engine, null, MemoryStore(), playback = playback)
+        try {
+            runCurrent()
+            assertEquals(listOf(uri), vm.subtitleCenter.value.discovered.map { it.uri })
+            vm.selectExternalSubtitle(vm.subtitleCenter.value.discovered.single())
+            runCurrent()
+            assertEquals(uri, engine.loaded.single().uri)
+            assertEquals("application/x-subrip", engine.loaded.single().mimeType)
+            assertEquals(vm.subtitleCenter.value.discovered.single().id, vm.subtitleCenter.value.selectedExternalId)
+        } finally { vm.stopAndFlush(); runCurrent() }
+    }
+
+    @Test
     fun `remembered subtitle and offset auto applied without manual selection`() = runTest(dispatcher) {
         val engine = RecordingEngine()
         val memory = MemoryStore()

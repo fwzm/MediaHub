@@ -34,6 +34,8 @@ data class PlaybackSource(
     /** 链接过期时间（epoch ms），null 表示未知/不过期 */
     val expiresAtEpochMs: Long? = null,
     val supportsSeeking: Boolean = true,
+    /** Provider-resolved sidecar subtitles for this media version; URLs stay in memory. */
+    val externalSubtitles: List<SubtitleTrack> = emptyList(),
 ) {
     val isDirectPlay: Boolean get() = mode == PlaybackMode.DIRECT_PLAY
     val isDirectStream: Boolean get() = mode == PlaybackMode.DIRECT_STREAM

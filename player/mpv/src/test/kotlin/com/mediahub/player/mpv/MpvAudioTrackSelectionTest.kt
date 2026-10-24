@@ -42,14 +42,24 @@ class MpvAudioTrackSelectionTest {
         var tracks: List<Map<String, String?>> = emptyList()
         var currentAid: String = "no"
         val aidWrites = mutableListOf<String>()
+        var outputFormat: String? = null
+        val sidWrites = mutableListOf<String>()
+        val options = mutableMapOf<String, String>()
+        var initialized = false
 
         override fun addObserver(observer: MpvInstance.Observer) { this.observer = observer }
-        override fun setOptionString(name: String, value: String) = Unit
-        override fun init() = Unit
+        override fun setOptionString(name: String, value: String) { options[name] = value }
+        override fun init() { initialized = true }
         override fun attachSurface(surface: Surface) = Unit
         override fun detachSurface() = Unit
         override fun observeProperty(name: String, format: MpvInstance.Format) = Unit
         override fun command(args: Array<String>) {
+            if (args.size == 3 && args[0] == "set" && args[1] == "sid") {
+                sidWrites += args[2]
+                tracks = tracks.map { row ->
+                    if (row["type"] == "sub") row + ("selected" to if (row["id"] == args[2]) "yes" else "no") else row
+                }
+            }
             if (args.size == 3 && args[0] == "set" && args[1] == "aid") {
                 aidWrites += args[2]
                 currentAid = args[2]
@@ -67,6 +77,7 @@ class MpvAudioTrackSelectionTest {
         override fun getPropertyDouble(name: String): Double? =
             if (name == "track-list/count") tracks.size.toDouble() else null
         override fun getPropertyString(name: String): String? {
+            if (name == "audio-out-params/format") return outputFormat
             if (name == "aid") return currentAid
             val prefix = "track-list/"
             if (!name.startsWith(prefix)) return null
@@ -106,6 +117,67 @@ class MpvAudioTrackSelectionTest {
         currentTimeMillis = { 200L },
         deferNative = { it() },
     )
+
+    @Test
+    fun `Android subtitle default chooses a text font instead of a zero space clock font`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val instance = FakeInstance()
+        val engine = engineWith(instance, scope)
+        try {
+            engine.play(session())
+            withTimeout(5_000) { while (!instance.initialized) delay(10) }
+            assertEquals("Roboto", instance.options["sub-font"])
+        } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
+    }
+
+    @Test
+    fun `embedded subtitles are published and selection writes native sid then reads back`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val instance = FakeInstance().apply {
+            tracks = listOf(videoTrack(),
+                mapOf("id" to "4", "type" to "sub", "lang" to "eng", "codec" to "subrip", "selected" to "no"),
+                mapOf("id" to "9", "type" to "sub", "lang" to "zho", "codec" to "ass", "selected" to "no"))
+        }
+        val engine = engineWith(instance, scope)
+        try {
+            engine.play(session())
+            withTimeout(5_000) { while (instance.observer == null) delay(10) }
+            instance.observer!!.event(MpvInstance.Event.FILE_LOADED)
+            assertEquals(listOf("eng", "zho"), engine.uiState.value.subtitleTracks.map { it.language })
+            engine.selectSubtitleTrack(TrackSelection(1, 0))
+            assertEquals(listOf("9"), instance.sidWrites)
+            assertTrue(engine.uiState.value.subtitleTracks[1].isSelected)
+            assertEquals(TrackSelection(1, 0), engine.uiState.value.selectedSubtitle)
+            engine.selectSubtitleTrack(null)
+            assertEquals(listOf("9", "no"), instance.sidWrites)
+            assertTrue(engine.uiState.value.subtitleTracks.none { it.isSelected })
+            engine.selectSubtitleTrack(TrackSelection(99, 0))
+            assertEquals(listOf("9", "no"), instance.sidWrites)
+        } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
+    }
+
+    @Test
+    fun `audio reconfiguration reports real PCM output for an AC3 input`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val instance = FakeInstance().apply {
+            tracks = listOf(audioTrack("1", "eng", true) + ("codec" to "ac3"))
+        }
+        val engine = engineWith(instance, scope)
+        try {
+            engine.play(session())
+            withTimeout(5_000) { while (instance.observer == null) delay(10) }
+            instance.observer!!.event(MpvInstance.Event.FILE_LOADED)
+            assertNull(engine.uiState.value.audioFormatMime)
+            instance.outputFormat = "floatp"
+            instance.observer!!.event(MpvInstance.Event.AUDIO_RECONFIG)
+            assertEquals("audio/raw", engine.uiState.value.audioFormatMime)
+            assertEquals(com.mediahub.player.engine.AudioOutputStatus.ACTIVE, engine.uiState.value.audioOutputStatus)
+            instance.outputFormat = null
+            instance.observer!!.event(MpvInstance.Event.AUDIO_RECONFIG)
+            assertNull("Do not retain evidence from the previous output configuration", engine.uiState.value.audioFormatMime)
+            assertEquals(com.mediahub.player.engine.AudioOutputStatus.UNKNOWN, engine.uiState.value.audioOutputStatus)
+        } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
+    }
 
     @Test
     fun `file loaded publishes two mapped audio tracks with ui indices zero and one`() = runBlocking {

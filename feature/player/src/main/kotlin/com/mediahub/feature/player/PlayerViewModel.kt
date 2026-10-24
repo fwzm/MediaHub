@@ -295,7 +295,7 @@ class PlayerViewModel @Inject constructor(
      * resolve 成功后启动：同目录发现 →（未手动选择时）回放匹配记忆。
      * 记忆键 = serverId+itemId+sizeBytes（或路径指纹）——不同视频/版本互不共享。
      */
-    private fun startSubtitleCenter(item: MediaItem) {
+    private fun startSubtitleCenter(item: MediaItem, source: PlaybackSource) {
         invalidateSubtitleSession()
         val key = SubtitleMemoryKeys.forItem(item)
         versionKey = key
@@ -303,10 +303,22 @@ class PlayerViewModel @Inject constructor(
         subtitleCenterJob = viewModelScope.launch {
             val discovery = handle?.subtitleDiscovery
             _subtitleCenter.update { it.copy(discovering = discovery != null) }
-            val found = runCatching { discovery?.discoverSubtitles(item) ?: emptyList() }
+            val serverSubtitles = source.externalSubtitles.mapNotNull { track ->
+                if (!track.isExternal) return@mapNotNull null
+                val uri = track.url ?: return@mapNotNull null
+                val extension = track.format?.lowercase() ?: return@mapNotNull null
+                if (com.mediahub.model.SubtitleFormats.mimeTypeOf(extension) == null) return@mapNotNull null
+                DiscoveredSubtitle(
+                    id = uri, uri = uri,
+                    name = track.title?.takeIf(String::isNotBlank) ?: track.language ?: "Subtitle ${track.index}",
+                    fileName = "subtitle-${track.index}.$extension", extension = extension, language = track.language,
+                )
+            }
+            val directorySubtitles = runCatching { discovery?.discoverSubtitles(item) ?: emptyList() }
                 .onFailure { if (it is CancellationException) throw it }
                 .onFailure { logger.w(LogTag.PLAYER, "字幕发现失败 itemId=${item.id}", it) }
                 .getOrDefault(emptyList())
+            val found = (serverSubtitles + directorySubtitles).distinctBy { it.uri }
             if (!isSubtitleSessionCurrent(generation)) return@launch
             _subtitleCenter.update { it.copy(discovering = false, discovered = found) }
             // 迟到发现保护（双重）：会话代已变 → 整个回放链作废；
@@ -697,7 +709,7 @@ class PlayerViewModel @Inject constructor(
                     syncStarted = true
                 }
                 // 字幕中心：同目录发现 + 匹配记忆回放（异步，不阻塞 Ready）。
-                startSubtitleCenter(item)
+                startSubtitleCenter(item, source)
                 if (!autoplay) autoplayBlocked = false
                 _resolveState.value = ResolveState.Ready
                 if (currentTrace === trace) PlaybackNetworkTraceRegistry.set(null)
