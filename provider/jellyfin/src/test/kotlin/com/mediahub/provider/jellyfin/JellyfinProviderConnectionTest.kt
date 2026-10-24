@@ -86,6 +86,25 @@ class JellyfinProviderConnectionTest {
         assertFalse(result.ok)
     }
 
+    @Test
+    fun `http 401 asks for login`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(401))
+        val result = provider().testConnection()
+        assertFalse(result.ok)
+        assertTrue("401 应提示需要登录（实际：${result.message}）", result.message!!.contains("需要登录"))
+    }
+
+    @Test
+    fun `http 403 is reported as access denied, not as missing login`() = runBlocking {
+        // 401 与 403 语义不同：403 往往凭据完全正确，只是访问被策略拒绝。
+        // 合并成"需要登录"会让用户在错误方向上反复重输密码（G3 已修过同一类问题）。
+        server.enqueue(MockResponse().setResponseCode(403))
+        val result = provider().testConnection()
+        assertFalse(result.ok)
+        assertTrue("403 必须说明是访问被拒（实际：${result.message}）", result.message!!.contains("拒绝访问"))
+        assertFalse("403 不得再暗示需要登录（实际：${result.message}）", result.message!!.contains("需要登录"))
+    }
+
     // ---- ADR-039：反代子路径必须保留，禁止 /emby 前缀 ----
 
     @Test

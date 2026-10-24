@@ -153,6 +153,45 @@ fun ServerEditorRoute(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 )
 
+                // M0-A2：按服务器自定义 User-Agent（ADR-045）
+                SectionHeader("网络标识（User-Agent）")
+                OutlinedTextField(
+                    value = state.userAgent,
+                    onValueChange = viewModel::updateUserAgent,
+                    label = { Text("自定义 User-Agent") },
+                    placeholder = { Text(state.userAgentDefault) },
+                    isError = state.userAgentError != null,
+                    supportingText = {
+                        Text(
+                            state.userAgentError
+                                ?: "当前生效：${state.userAgentEffective}",
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    singleLine = true,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "默认值：${state.userAgentDefault}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    TextButton(
+                        onClick = { viewModel.resetUserAgent() },
+                        enabled = state.userAgent.isNotEmpty(),
+                    ) { Text("恢复默认") }
+                }
+                Text(
+                    "留空表示使用默认标识；填写服务器白名单要求的标识时需自行确认其合规性。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+
                 // LOCAL 媒体源无网络地址语义：隐藏连接/线路质量区（Phase 1I review P1）
                 if (state.server?.type != ServerType.LOCAL) {
                     SectionHeader("连接")
@@ -172,7 +211,12 @@ fun ServerEditorRoute(
                     ) {
                         state.testResult?.let { r ->
                             Text(
-                                if (r.ok) "连接成功" else (r.message ?: "连接失败"),
+                                // P3：失败时补上按 errorCode 得出的可操作指引（此前该字段从未被消费）。
+                                if (r.ok) {
+                                    "连接成功"
+                                } else {
+                                    listOfNotNull(r.message, r.toActionableHint()).joinToString(String(charArrayOf(10.toChar())))
+                                },
                                 color = if (r.ok) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodySmall,
                             )

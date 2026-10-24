@@ -2,10 +2,26 @@
 
 > 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
 
-当前状态：**Phase 1B-2.5a**（ServerEndpoint 多线路地基 + Player Startup & Immersive UX：TTFF 单调时钟、临时时长回退、快照直传、自动横屏、沉浸式系统栏已实现并过真机；Overlay 两层 UI 与 Server Editor 进行中）。
+当前状态：**A4 联合候选已并入 main**（2026-10-14，PR #24）：P1 播放专业信息面板、P2 字幕中心（同目录发现 / 导入 / 双内核加载 / mpv 偏移）、WebDAV 修复链路与私有恢复一致性已落地；对应候选的本地门禁为 1275 单测 / 0 失败 / 0 跳过，CI run `38491200869` 三个 job 全 SUCCESS。当前 Draft 增量为 [M0-A 服务器请求治理闭环](https://github.com/fwzm/MediaHub/pull/36)：按服务器作用域的 User-Agent、持久化、删除清理、并发写入保护、WebDAV 无图片鉴权 contributor 的 URL 归属和设置页已接入；该增量尚未合入 main。2026-10-23 已用受控本地 WebDAV + Xiaomi 14 Ultra 完成一条真机 UA 请求验证；真实 Emby/Jellyfin 服务器和更广的真机矩阵仍保持 `DEVICE UNVERIFIED`。
 
 [![GitHub release](https://img.shields.io/github/v/release/fwzm/MediaHub?include_prereleases)](https://github.com/fwzm/MediaHub/releases)
 [![License](https://img.shields.io/github/license/fwzm/MediaHub)](LICENSE)
+
+<!-- MEDIAHUB:RECENT:START -->
+## 最近更新
+
+<sub>本区块由 scripts/github-nightly-sync.ps1 自动维护：每次同步时刷新近 7 天提交（最多 10 条）。</sub>
+
+- 2026-10-14 feat(network): M0-A 闭环 — 加载/删除/并发边界 + 自定义 UA 设置界面（ADR-045）
+- 2026-10-14 feat(network): 按服务器自定义 UA 持久化与身份代际清理（M0-A 闭环，ADR-045）
+- 2026-10-14 docs(adr): ADR-045 服务器请求治理阶段一（UA 作用域与重定向边界）
+- 2026-10-14 feat(network): 统一 UA 策略与逐跳 UA 注入（M0-A，ADR-045）
+- 2026-10-14 Merge pull request #27 from fwzm/docs/a4-convergence-closeout-2026-10-14
+- 2026-10-14 docs: A4 收敛闭环记录 — 合并证据、门禁计数与遗留项（2026-10-14）
+- 2026-10-14 Merge pull request #24 from fwzm/a/joint-candidate-a4
+- 2026-10-14 merge: integrate Agent B A4 convergence candidate 22e424d (33 commits)
+- 2026-10-14 Merge pull request #26 from fwzm/codex/pr18-review-docs-20260930
+<!-- MEDIAHUB:RECENT:END -->
 
 ## 下载测试版
 
@@ -51,17 +67,19 @@ docs/                providers / player / api 设计文档
 
 ## 环境要求
 
-- JDK 17+
+- JDK 21（仓库当前 Android / Kotlin 构建以此版本验证）
 - Android SDK（compileSdk 35，minSdk 26，build-tools 35.0.0）
-- Gradle 8.9（仓库已带 wrapper）
+- Gradle Wrapper（仓库已带 wrapper；当前 wrapper 版本以 `gradle/wrapper/gradle-wrapper.properties` 为准）
 
 ## 构建
 
-```bash
-# 需要 local.properties 或 ANDROID_HOME 指向 SDK
-./gradlew assembleDebug          # 编译 + 打包 APK
-./gradlew testDebugUnitTest      # 单元测试
-./gradlew lintDebug              # Lint 检查
+```powershell
+# Windows：先为当前进程指定 JDK 21；需要 local.properties 或 ANDROID_HOME 指向 SDK
+$env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
+.\gradlew.bat assembleDebug --no-daemon --console=plain --no-parallel --max-workers=1
+.\gradlew.bat testDebugUnitTest :core:model:test :provider:api:test :metadata:test `
+  --no-daemon --console=plain --no-parallel --max-workers=1
+.\gradlew.bat lintDebug --no-daemon --console=plain --no-parallel --max-workers=1
 ```
 
 产物：`app/build/outputs/apk/debug/app-debug.apk`
@@ -85,7 +103,22 @@ docs/                providers / player / api 设计文档
 
 设置页可改默认倍速、字幕大小等（DataStore 持久化）。
 
-> Jellyfin / WebDAV / 搜索 / 播放进度上报为后续 Phase 候选，尚未实现（见 TASKS.md）。
+> 真机、真实 Emby/Jellyfin 服务器和旧版本数据库升级不属于上述 JVM 路径的自动保证范围；
+> 当前验证边界、尚未完成项和每个 Provider 的能力以 [TASKS.md](TASKS.md)、[ROADMAP.md](ROADMAP.md)
+> 与 [Provider 文档](docs/providers/README.md) 为准。
+
+## 当前分支已验证的 M0-A 能力
+
+- 默认 User-Agent 为可识别的 `MediaHub/... (Android)`，不会冒充其它播放器。
+- 自定义 User-Agent 按 `serverId` 隔离并持久化；删除服务器或确认的孤儿清理不会误删其它服务器配置。
+- 没有图片鉴权 contributor 的 Provider（例如 WebDAV）仍按基础 URL 解析 `serverId`，因此可以应用 UA 策略，但不会伪造图片认证头。
+- 重定向按每一跳重新解析服务器归属；跨 origin 时回落默认 User-Agent，凭据剥离仍由独立拦截器负责。
+- 自定义值拒绝控制字符、非 ASCII 和超长输入；非法值不会被静默改写成另一条配置。
+- 本轮对 `DataStoreServerUserAgentRepository` 的加载等待做了无忙等优化，并通过
+  `:core:database:testDebugUnitTest`（14 tests / 0 failures）复跑持久化、并发和首次加载回归。
+- 受控真机证据：WebDAV 编辑页保存的 `MediaHubTest99` 在进程重启后仍恢复；测试连接返回成功，
+  MockWebServer 实际收到 `OPTIONS` 的 `User-Agent: MediaHubTest99`。应用冷启动最早的后台请求可能发生在
+  server scope 快照建立前并使用默认 UA，该时序边界已登记，尚未宣称所有冷启动请求均覆盖。
 
 ## 安全约定（强制）
 

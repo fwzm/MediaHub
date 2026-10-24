@@ -13,7 +13,11 @@ import android.os.Build
 import android.view.WindowManager
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.KeyEvent
 import android.view.ViewGroup
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -45,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderColors
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -362,7 +367,28 @@ fun PlayerRoute(
     }
 
     PlayerVisualTheme(palette = visualState.chromePalette) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                // V18-B：前台媒体键（耳机/蓝牙/车机/adb keyevent）。
+                // 仅播放器页面生效；后台/锁屏控制需要 MediaSession（未包含）。
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) {
+                        false
+                    } else {
+                        val action = MediaKeyMapper.actionFor(event.nativeKeyEvent.keyCode)
+                        if (action == null) {
+                            false
+                        } else {
+                            if (MediaKeyMapper.shouldAct(action, viewModel.engine.uiState.value.playWhenReady)) {
+                                viewModel.engine.togglePlayPause()
+                            }
+                            true
+                        }
+                    }
+                },
+        ) {
         // 视频渲染 Surface（Media3/mpv 统一走 attachSurface）
         AndroidView(
             factory = { context ->
@@ -915,30 +941,15 @@ private fun PlayerControls(
                             )
                         }
                     }
-                    if (state.durationMs > 0) {
-                        // 进度条 preview→commit（U3-B）：拖动只更新本地预览值，松手才真正 seek
-                        var sliderScrubValue by remember { mutableStateOf<Float?>(null) }
-                        Slider(
-                            value = sliderScrubValue
-                                ?: state.positionMs.toFloat().coerceIn(0f, state.durationMs.toFloat()),
-                            onValueChange = { sliderScrubValue = it },
-                            onValueChangeFinished = {
-                                sliderScrubValue?.let { onSeek(it.roundToLong()) }
-                                sliderScrubValue = null
-                            },
-                            valueRange = 0f..state.durationMs.toFloat(),
-                            colors = seekBarColors,
-                        )
-                    } else {
-                        // 时长未知（无临时时长且 Media3 timeline 未就绪）：禁用进度条，绝不拿 1ms 画满条
-                        Slider(
-                            value = 0f,
-                            onValueChange = {},
-                            valueRange = 0f..1f,
-                            enabled = false,
-                            colors = seekBarColors,
-                        )
-                    }
+                    // SEEK-A：进度条已抽成生产组件 PlayerSeekBar（本文件下方定义）。
+                    // 抽取的唯一目的是让「拖动 → 提交」契约能被**真实组件**测试验证，
+                    // 而不是在测试里复制一份 Slider 只验证框架行为（PR #53 的教训）。
+                    PlayerSeekBar(
+                        positionMs = state.positionMs,
+                        durationMs = state.durationMs,
+                        onSeek = onSeek,
+                        colors = seekBarColors,
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -968,11 +979,15 @@ private fun PlayerControls(
                                     strokeWidth = 2.dp,
                                 )
                             }
+                            // G3：图标必须跟随「播放意图」而不是「实际是否在出帧」。
+                            // 缓冲/音频焦点被抑制时 isPlaying=false 但用户并未暂停；
+                            // 若按 isPlaying 显示，图标会闪成「播放」，用户点它反而变成继续播放。
+                            val showPauseIcon = state.playWhenReady && !state.isEnded
                             IconButton(onClick = onTogglePlayPause) {
                                 Icon(
-                                    if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    if (showPauseIcon) Icons.Default.Pause else Icons.Default.PlayArrow,
                                     contentDescription = stringResource(
-                                        if (state.isPlaying) R.string.player_pause else R.string.player_play,
+                                        if (showPauseIcon) R.string.player_pause else R.string.player_play,
                                     ),
                                     tint = MaterialTheme.colorScheme.primary,
                                 )
@@ -995,6 +1010,57 @@ private fun PlayerControls(
  * 手势 seek 预览指示（scrub / 连续快退共用，U3-B）：
  * 居中显示 delta（带符号）与目标时间，松手后消失。
  */
+/**
+ * 播放进度条（SEEK-A 抽取的**生产组件**）。
+ *
+ * 为什么单独存在：Compose 的 `Slider` 在 uiautomator 里不是 `android.widget.SeekBar`，
+ * 用 adb 定位不到，所以 Seek 长期处于 `NOT_RUN`。而「在测试里复制一份 Slider」
+ * 只能验证 Compose 框架行为 —— PR #53 的 4 个测试正是如此：把生产 `onValueChange`
+ * 改成「变更即提交」后它们仍然 4/0 全绿（变异存活）。把进度条抽成可独立组合的
+ * **生产**组件后，测试可以直接组合它并断言「拖动期间 0 次提交、松手恰好 1 次提交」。
+ *
+ * 契约（由 `PlayerSeekBarContractTest` 固定，并做 MUT-1/MUT-2 变异验证）：
+ * 1. 拖动中（onValueChange）**只更新本地预览**，绝不调用 [onSeek]；
+ * 2. 松手（onValueChangeFinished）**恰好一次**调用 [onSeek]，目标 = 最后一次预览值；
+ * 3. [durationMs] <= 0 时禁用且不可提交（绝不拿 1ms 画满条、绝不伪造可 Seek）。
+ *
+ * 行为与原内联实现逐字节等价（同一 Slider 参数、同一 preview→commit 顺序）。
+ */
+@Composable
+internal fun PlayerSeekBar(
+    positionMs: Long,
+    durationMs: Long,
+    onSeek: (Long) -> Unit,
+    colors: SliderColors,
+    modifier: Modifier = Modifier,
+) {
+    if (durationMs > 0) {
+        var sliderScrubValue by remember { mutableStateOf<Float?>(null) }
+        Slider(
+            modifier = modifier.testTag(PlayerVisualTestTags.PLAYER_PROGRESS),
+            value = sliderScrubValue
+                ?: positionMs.toFloat().coerceIn(0f, durationMs.toFloat()),
+            onValueChange = { sliderScrubValue = it },
+            onValueChangeFinished = {
+                sliderScrubValue?.let { onSeek(it.roundToLong()) }
+                sliderScrubValue = null
+            },
+            valueRange = 0f..durationMs.toFloat(),
+            colors = colors,
+        )
+    } else {
+        // 时长未知（无临时时长且 Media3 timeline 未就绪）：禁用进度条，绝不拿 1ms 画满条
+        Slider(
+            modifier = modifier.testTag(PlayerVisualTestTags.PLAYER_PROGRESS),
+            value = 0f,
+            onValueChange = {},
+            valueRange = 0f..1f,
+            enabled = false,
+            colors = colors,
+        )
+    }
+}
+
 @Composable
 private fun GestureSeekIndicator(preview: GestureSeekPreview, modifier: Modifier = Modifier) {
     val sign = if (preview.deltaMs >= 0) "+" else "-"

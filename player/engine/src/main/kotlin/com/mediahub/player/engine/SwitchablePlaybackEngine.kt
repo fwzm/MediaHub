@@ -7,6 +7,8 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.PlaybackError
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlaybackProgress
+import com.mediahub.model.PlaybackSource
+import com.mediahub.player.compatibility.DevicePlaybackAssessment
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -50,6 +52,14 @@ class SwitchablePlaybackEngine(
     private val logger: Logger,
     /** 无声判据宽限期（ms）：音轨就绪后等待 audioFormatMime 出现的时间。 */
     private val audioSilentGraceMs: Long = 2_000L,
+    /**
+     * 设备能力评估（ADR-042）：把"设备能不能解这个流"作为**可执行的选路证据**。
+     *
+     * 实现必须是同步、无 I/O 的（只读设备能力缓存快照）——本回调在 play() 的同步路径上
+     * 调用，不得引入网络或磁盘访问；抛出的任何异常等价于 UNKNOWN，绝不阻断播放。
+     */
+    private val deviceAssessmentProvider: (PlaybackSource) -> DevicePlaybackAssessment =
+        { DevicePlaybackAssessment.UNKNOWN },
 ) : PlaybackEnginePort {
 
     private val _engineKind = MutableStateFlow(EngineKind.MEDIA3)
@@ -123,10 +133,14 @@ class SwitchablePlaybackEngine(
         }
         session.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_SELECTION_STARTED)
         val mode = modeProvider()
+        // ADR-042：设备证据评估为同步纯计算（读缓存快照）。异常 → UNKNOWN，不阻断播放。
+        val deviceAssessment = runCatching { deviceAssessmentProvider(session.source) }
+            .getOrDefault(DevicePlaybackAssessment.UNKNOWN)
         val selection = PlaybackEngineSelector.select(
             source = session.source,
             mode = mode,
             mpvPreferredSignatures = history.mpvPreferredSignatures(),
+            device = deviceAssessment,
         )
         logger.i(LogTag.PLAYER, "引擎选择 kind=${selection.kind} mode=$mode reason=${selection.reason}")
         session.trace?.let { t ->
@@ -134,6 +148,7 @@ class SwitchablePlaybackEngine(
             t.putMetadata("engine", selection.kind.name)
             t.putMetadata("signature", CompatibilitySignature.from(session.source).key)
             t.putMetadata("selectorReason", selection.reason)
+            deviceAssessment.traceMetadata().forEach { (key, value) -> t.putMetadata(key, value) }
         }
         startEngine(selection.kind, session, generation)
     }
@@ -416,6 +431,9 @@ class SwitchablePlaybackEngine(
                 history.recordMedia3Failure(CompatibilitySignature.from(s.source).key)
                 if (!isCurrentSession(s, fallbackGeneration, failedEngine)) return@launch
                 // 保存当前位置（先取 stop() 返回值，兜底 uiState）
+                // G3：**必须在 stop() 之前**读取暂停意图 —— stop() 会把引擎状态重置为
+                // 「已停止」，之后再读就永远是"未在播放"，降级会把暂停的会话重新播起来。
+                val wasPaused = failedEngine.uiState.value.isPlaying.not()
                 val position = failedEngine.stop()?.positionMs
                     ?: _uiState.value.positionMs
                 if (!isCurrentSession(s, fallbackGeneration, failedEngine)) {
@@ -440,7 +458,11 @@ class SwitchablePlaybackEngine(
                 )
                 startEngine(
                     EngineKind.MPV,
-                    s.copy(startPositionMs = position.takeIf { it > 0 }),
+                    s.copy(
+                        startPositionMs = position.takeIf { it > 0 },
+                        // G3：把暂停意图带给新引擎；不这么做，暂停中的会话会在降级后被重新起播。
+                        startPaused = wasPaused,
+                    ),
                     fallbackGeneration,
                     expectedSession = s,
                 )

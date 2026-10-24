@@ -60,16 +60,24 @@ class MpvPlaybackEngine internal constructor(
     private val subtitleCacheFactory: () -> SubtitleCache = {
         error("subtitle cache not configured")
     },
+    /** M2（ADR-044）：设备 HDR 证据；默认未知 → 不下发任何色调映射选项。 */
+    private val hdrEvidence: DeviceHdrEvidenceProvider = DeviceHdrEvidenceProvider { null },
 ) : PlaybackEnginePort {
     constructor(
         context: Context,
         logger: Logger,
         scope: CoroutineScope,
         httpClientFactory: HttpClientFactory,
+        hdrEvidence: DeviceHdrEvidenceProvider = DeviceHdrEvidenceProvider { null },
+        /**
+         * M16/G4：观测台账。**生产必须传入**（AppModule 注入单例），默认 null 仅用于既有测试。
+         * 传了才会在回环接入 / 本地文件读取处上报，否则这些通道恒为未计数。
+         */
+        ledger: com.mediahub.core.network.NetworkExchangeLedger? = null,
     ) : this(
         logger,
         scope,
-        { createMpvBridge(httpClientFactory) },
+        { createMpvBridge(httpClientFactory, ledger) },
         { createMpvInstance(context) },
         SystemClock::elapsedRealtime,
         System::currentTimeMillis,
@@ -92,6 +100,7 @@ class MpvPlaybackEngine internal constructor(
                 logger = logger,
             )
         },
+        hdrEvidence,
     )
 
     // Creation and Run binding share stateLock: release cannot miss a concurrent first use.
@@ -132,6 +141,8 @@ class MpvPlaybackEngine internal constructor(
         var progressJob: Job? = null // stateLock
         var acceptsUpdates = true // stateLock
         var subtitleToken: SubtitleCache.Session? = null // stateLock
+        /** V15-A: 最近一次读到的 mpv track-list 快照（stateLock 保护；切源时整体替换）。 */
+        var mpvTrackList: List<Map<String, String?>> = emptyList()
         @Volatile var requestedAtMs = 0L
         @Volatile var resources: Resources? = null // published only after successful native initialization
     }
@@ -189,7 +200,16 @@ class MpvPlaybackEngine internal constructor(
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_BRIDGE_START)
                     val b = bridgeFactory().also { bridge = it }
                     checkCurrent()
-                    val bridgeUrl = b.start(src.url, buildHeaders(src))
+                    // M9-P0：本地媒体走本地字节源分支。判定基于**真实文件存在性**，
+                    // 不依赖 "/storage" 之类前缀猜测（避免把 URL 误判/漏判）。
+                    val localPath = src.url.takeIf {
+                        it.startsWith("file://") || (it.startsWith("/") && java.io.File(it).isFile)
+                    }
+                    val bridgeUrl = if (localPath != null) {
+                        b.startLocalFile(localPath)
+                    } else {
+                        b.start(src.url, buildHeaders(src))
+                    }
                     checkCurrent()
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_INSTANCE_CREATE_STARTED)
                     val m = instanceFactory().also { mpv = it }
@@ -200,9 +220,28 @@ class MpvPlaybackEngine internal constructor(
                     m.setOptionString("vo", "gpu")
                     m.setOptionString("ao", "audiotrack")
                     m.setOptionString("hwdec", "mediacodec")
+                    // M6 真机缺陷修复（P1）：关闭 mpv 的 ytdl 钩子。
+                    // MediaHub 的媒体**一律经回放环桥**（http://127.0.0.1:<port>/media/<random>）
+                    // 以字节流形式提供，不是站点 URL；mpv 默认 ytdl=auto 会把它当站点，
+                    // 启动 yt-dlp 子进程（真机日志：Subprocess failed: init / youtube-dl failed）
+                    // 随后 "loading failed (reason 4)" → 黑屏、无首帧、无时钟推进。
+                    m.setOptionString("ytdl", "no")
                     val container = src.container?.lowercase()
                     if (container == "mpegts" || container == "ts" || container == "m2ts") {
                         m.setOptionString("demuxer-lavf-format", "mpegts")
+                    }
+                    // M2（ADR-044）：只下发有二进制证据的选项；证据缺失（null）时不干预。
+                    // 任何异常都不得影响起播——降级为空选项集。
+                    runCatching {
+                        MpvTuningOptions.build(
+                            MpvTuningInput(
+                                sourceHdr = src.hdrType,
+                                deviceSupportsSourceHdr = hdrEvidence.supports(src.hdrType),
+                            ),
+                        )
+                    }.getOrDefault(emptyList()).forEach { tuning ->
+                        m.setOptionString(tuning.name, tuning.value)
+                        logger.i(LogTag.PLAYER, "mpv tuning " + tuning.name + "=" + tuning.value)
                     }
                     val startMs = s.startPositionMs ?: s.resumePositionMs
                     if (startMs != null && startMs > 0) m.setOptionString("start", (startMs / 1000.0).toString())
@@ -222,6 +261,12 @@ class MpvPlaybackEngine internal constructor(
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_LOADFILE)
                     m.command(arrayOf("loadfile", bridgeUrl))
                     checkCurrent()
+                    // G3：降级重播必须尊重暂停意图（默认 null = 沿用既有「起播即播放」行为）。
+                    // 必须在 loadfile 之后设置，否则会被 loadfile 重置为新文件默认的播放态。
+                    if (s.startPaused == true) {
+                        m.setPropertyBoolean("pause", true)
+                        withCurrent(run) { _uiState.update { it.copy(isPlaying = false, playWhenReady = false) } }
+                    }
                     val resources = Resources(run, m, b)
                     // Publication and invalidation are atomic; release cannot miss a newly published handle.
                     synchronized(stateLock) {
@@ -262,7 +307,8 @@ class MpvPlaybackEngine internal constructor(
 
     private fun observer(run: Run) = object : MpvInstance.Observer {
         override fun property(name: String, value: Boolean) = withCurrent(run) {
-            if (name == "pause") _uiState.update { it.copy(isPlaying = !value) }
+            // G3：pause 属性同时表达「是否暂停」，因此它既是实际状态也是用户意图。
+            if (name == "pause") _uiState.update { it.copy(isPlaying = !value, playWhenReady = !value) }
         }
         override fun property(name: String, value: Double) = withCurrent(run) {
             when (name) {
@@ -278,14 +324,32 @@ class MpvPlaybackEngine internal constructor(
         override fun event(event: MpvInstance.Event) = withCurrent(run) {
             val tr = run.session.trace
             when (event) {
-                MpvInstance.Event.FILE_LOADED -> tr?.record(PlaybackStartupTrace.Milestone.MPV_FILE_LOADED)
+                MpvInstance.Event.FILE_LOADED -> {
+                tr?.record(PlaybackStartupTrace.Milestone.MPV_FILE_LOADED)
+                // V15-A：文件加载完成即枚举音轨（此前从不发布 audioTracks → 面板恒为空）
+                run.resources?.mpv?.let { refreshAudioTracks(run, it) }
+            }
                 MpvInstance.Event.VIDEO_RECONFIG -> {
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_VIDEO_RECONFIG)
                     tr?.record(PlaybackStartupTrace.Milestone.FIRST_FRAME_RENDERED)
                     tr?.let { logger.i(LogTag.PLAYER, "StartupTrace ${it.summary()}") }
                 }
                 MpvInstance.Event.AUDIO_RECONFIG -> tr?.record(PlaybackStartupTrace.Milestone.AUDIO_INPUT_FORMAT_SEEN)
-                MpvInstance.Event.END_FILE -> _events.trySend(PlaybackEvent.Ended)
+                MpvInstance.Event.END_FILE -> {
+                    // SEEK-B 真机缺陷修复：到达 EOF 时必须更新 UI 状态。
+                    //
+                    // 此前只发 PlaybackEvent.Ended，**从不更新 _uiState.isEnded**；
+                    // 而进度循环里的 `eof-reached` 在 mpv 结束后不一定可读。
+                    // 结果：画面已冻结在最后一帧，但按钮仍显示「暂停」（isPlaying/playWhenReady 仍为 true），
+                    // 用户无法用播放按钮恢复 —— 真机实测（123e243f）截图 sha256 完全相同。
+                    //
+                    // 修复：EOF 时同时置 isEnded = true、playWhenReady = false，
+                    // 让 UI 的 `showPauseIcon = playWhenReady && !isEnded`（G3 已加）真正生效。
+                    withCurrent(run) {
+                        _uiState.update { it.copy(isEnded = true, playWhenReady = false) }
+                        _events.trySend(PlaybackEvent.Ended)
+                    }
+                }
             }
             logger.i(LogTag.PLAYER, "mpv $event ttff=${elapsedRealtime() - run.requestedAtMs}ms")
         }
@@ -325,10 +389,26 @@ class MpvPlaybackEngine internal constructor(
         }
     }
 
+    /**
+     * 暂停/继续切换（G3 修复）。
+     *
+     * 旧实现读 [_uiState].isPlaying —— 那是**异步 observer 回调**写入的派生状态，
+     * 在起播瞬间（pause 属性首次回传前）恒为 false，于是「第一次点击暂停」会走成
+     * resume 分支（只把 pause 设成 false，什么都不改变），表现为暂停无效、
+     * 位置继续推进。
+     *
+     * 现在直接读 **mpv 的权威属性 pause**：同步反映真实播放意图，不依赖回调时序。
+     * 读失败（属性不可用）时才回退到 UI 状态。
+     */
     override fun togglePlayPause() = withNative { run, m ->
-        val playing = _uiState.value.isPlaying
-        m.setPropertyBoolean("pause", playing)
-        withCurrent(run) { _events.trySend(if (playing) PlaybackEvent.Paused else PlaybackEvent.Resumed) }
+        val paused = m.getPropertyBoolean("pause") ?: !_uiState.value.isPlaying
+        // 当前是暂停态 → 本次点击是继续（pause=false）；否则是暂停（pause=true）。
+        m.setPropertyBoolean("pause", !paused)
+        withCurrent(run) {
+            // 立即同步意图，不等 observer 回调（按钮图标必须立刻翻转）。
+            _uiState.update { it.copy(playWhenReady = paused) }
+            _events.trySend(if (paused) PlaybackEvent.Resumed else PlaybackEvent.Paused)
+        }
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) = withNative { run, m ->
@@ -342,7 +422,49 @@ class MpvPlaybackEngine internal constructor(
         withCurrent(run) { _uiState.update { it.copy(speed = clamped) } }
     }
 
-    override fun selectAudioTrack(selection: TrackSelection?) = Unit
+    /**
+     * V15-A：mpv 选轨。UI 用同类型内序号（TrackSelection.groupIndex），
+     * 需解析成 mpv 的 aid（track id，≠ stream index）；null → aid=no。
+     * 选择无效时不下发命令，避免静默把 aid 设成错误值。
+     */
+    override fun selectAudioTrack(selection: TrackSelection?) {
+        val run = synchronized(stateLock) { current } ?: return
+        val trackList = synchronized(stateLock) { run.mpvTrackList.orEmpty() }
+        val aid = MpvTrackMapper.nativeAudioId(trackList, selection) ?: run {
+            if (selection != null) return // 无效序号：保持现状，不伪造成功
+            "no"
+        }
+        withCurrent(run) {
+            withNative { _, m -> m.command(arrayOf("set", "aid", aid)) }
+            // 立即用 native 实际值回填，避免乐观 UI（失败时保持真实状态）
+            withNative { _, m -> refreshAudioTracks(run, m) }
+        }
+    }
+
+    /**
+     * V15-A：从 mpv 读取 track-list 并发布 audioTracks。
+     *
+     * 必须在 native 锁内调用；只读属性、不下发命令。
+     * 空列表（无音轨 / 尚未 file-loaded）如实发布为空，不伪造。
+     */
+    private fun refreshAudioTracks(run: Run, m: MpvInstance) {
+        val count = m.getPropertyDouble("track-list/count")?.toInt() ?: 0
+        val safeCount = if (count < 0 || count > MAX_TRACKS) 0 else count
+        val rows = ArrayList<Map<String, String?>>(safeCount)
+        for (i in 0 until safeCount) {
+            val row = HashMap<String, String?>(MpvTrackMapper.TRACK_PROPERTIES.size)
+            for (prop in MpvTrackMapper.TRACK_PROPERTIES) {
+                row[prop] = m.getPropertyString("track-list/$i/$prop")
+            }
+            rows += row
+        }
+        synchronized(stateLock) {
+            if (!isCurrent(run)) return
+            run.mpvTrackList = rows
+        }
+        val mapped = MpvTrackMapper.mapAudioTracks(rows)
+        withCurrent(run) { _uiState.update { it.copy(audioTracks = mapped) } }
+    }
     override fun selectSubtitleTrack(selection: TrackSelection?) {
         synchronized(stateLock) { subtitleOperation++ }
         if (selection == null) withNative { _, m -> m.command(arrayOf("set", "sid", "no")) }
@@ -451,7 +573,7 @@ class MpvPlaybackEngine internal constructor(
         val run = synchronized(stateLock) {
             val old = invalidateCurrent() ?: return null
             snapshot = _uiState.value
-            _uiState.update { it.copy(isPlaying = false) }
+            _uiState.update { it.copy(isPlaying = false, playWhenReady = false) }
             _events.trySend(PlaybackEvent.Stopped)
             old
         }
@@ -545,7 +667,7 @@ class MpvPlaybackEngine internal constructor(
         return PlaybackProgress(
             serverId = s.serverId, itemId = s.itemId, positionMs = pos,
             durationMs = if (dur > 0) dur else (s.source.durationMs ?: 0),
-            isPaused = m?.getPropertyBoolean("pause") ?: !fallback.isPlaying, updatedAtEpochMs = currentTimeMillis(),
+            isPaused = m?.getPropertyBoolean("pause") ?: !fallback.playWhenReady, updatedAtEpochMs = currentTimeMillis(),
             sessionId = s.source.sessionId,
             mode = s.source.mode, itemTitle = s.itemTitle, itemType = s.itemType, posterUrl = s.posterUrl,
         )
@@ -561,6 +683,9 @@ class MpvPlaybackEngine internal constructor(
 
     private companion object {
         const val PROGRESS_INTERVAL_MS = 1_000L
+
+        /** V15-A：防御异常 track-list/count（与字幕枚举 4096 上限一致）。 */
+        const val MAX_TRACKS = 4096
         const val SUBTITLE_CONFIRM_ATTEMPTS = 21
         const val SUBTITLE_CONFIRM_INTERVAL_MS = 50L
 

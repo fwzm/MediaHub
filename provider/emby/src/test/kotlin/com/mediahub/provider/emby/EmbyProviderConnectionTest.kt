@@ -104,11 +104,15 @@ class EmbyProviderConnectionTest {
     }
 
     @Test
-    fun `http 403 fails with auth hint`() = runBlocking {
+    fun `http 403 is reported as access denied, not as missing login`() = runBlocking {
+        // 旧断言要求 403 文案含「登录」—— 那是把缺陷固化成契约：403 往往凭据完全正确，
+        // 引导用户"去登录/重输密码"会让他们在错误的方向上反复尝试。
         server.enqueue(MockResponse().setResponseCode(403))
         val result = provider().testConnection()
         assertFalse(result.ok)
-        assertTrue(result.message!!.contains("登录"))
+        assertTrue("403 必须说明是访问被拒（实际：${result.message}）", result.message!!.contains("拒绝访问"))
+        assertTrue("403 必须明确指出不是未登录（实际：${result.message}）", result.message!!.contains("不是未登录"))
+        assertFalse("403 不得再暗示需要登录（实际：${result.message}）", result.message!!.contains("需要登录"))
     }
 
     private class FakeSecretStorage : SecretStorage {

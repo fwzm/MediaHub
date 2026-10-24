@@ -76,7 +76,11 @@ class EmbyProvider(
             val latencyMs = (System.nanoTime() - start) / 1_000_000
             // 协议特征校验（ADR-024）：HTTP 200 + JSON 可解析 ≠ 有效 Emby。
             if (info.id.isNullOrBlank() || info.version.isNullOrBlank()) {
-                return ConnectionStatus(ok = false, message = "服务器响应不是有效的 Emby SystemInfo")
+                return ConnectionStatus(
+                ok = false,
+                message = "服务器响应不是有效的 Emby SystemInfo",
+                errorCode = ProviderException.ErrorCode.PARSE,
+            )
             }
             ConnectionStatus(
                 ok = true,
@@ -87,15 +91,27 @@ class EmbyProvider(
             ConnectionStatus(
                 ok = false,
                 message = when (e.statusCode) {
-                    401, 403 -> "服务器需要登录（HTTP ${e.statusCode}）"
+                    // G3 同源修正的延伸：401 与 403 语义不同，不得合并成"需要登录"。
+                    // 401 = 缺少/无效凭据（确实需要登录）；
+                    // 403 = 凭据有效但访问被拒（账号禁用 / 不允许远程访问 / IP 白名单 / 权限不足）。
+                    // 合并会让用户在 403 时反复输入正确密码 —— 正是 G3 修过的那个坑。
+                    401 -> "服务器需要登录（HTTP 401）"
+                    403 -> "服务器拒绝访问（HTTP 403）——这不是未登录，请检查该账号权限 / 远程访问 / IP 白名单"
                     404 -> "该地址不是 Emby 服务（404）"
                     else -> "HTTP ${e.statusCode}"
                 },
+                // P3：填 errorCode，让 UI 能按类别给出差异化指引（此前该字段从未被 Emby 设置）
+                errorCode = when (e.statusCode) {
+                    401 -> ProviderException.ErrorCode.AUTH_REQUIRED
+                    403, in 500..599 -> ProviderException.ErrorCode.HTTP
+                    404 -> ProviderException.ErrorCode.NOT_FOUND
+                    else -> ProviderException.ErrorCode.HTTP
+                },
             )
         } catch (e: ProviderException) {
-            ConnectionStatus(ok = false, message = e.message ?: "连接失败")
+            ConnectionStatus(ok = false, message = e.message ?: "连接失败", errorCode = e.code)
         } catch (e: Exception) {
-            ConnectionStatus(ok = false, message = "连接失败：${e.message}")
+            ConnectionStatus(ok = false, message = "连接失败：${e.message}", errorCode = ProviderException.ErrorCode.UNKNOWN)
         }
     }
 
