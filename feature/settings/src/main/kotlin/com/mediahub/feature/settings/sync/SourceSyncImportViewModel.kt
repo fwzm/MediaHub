@@ -6,7 +6,10 @@ import com.mediahub.core.common.ClientIdentity
 import com.mediahub.core.common.sync.AndroidSourceTypeMap
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.database.sync.AndroidSourceSyncService
+import com.mediahub.core.database.sync.SourceSyncArchiveArtifact
+import com.mediahub.core.database.sync.SourceSyncArchiveExport
 import com.mediahub.core.database.sync.SourceSyncDocumentInput
+import com.mediahub.feature.settings.backup.BackupFileStore
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.provider.api.MediaProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -37,6 +40,7 @@ class SourceSyncImportViewModel @Inject constructor(
     clientIdentity: ClientIdentity,
     credentialVault: CredentialVault,
     providerRegistry: MediaProviderRegistry,
+    backupFileStore: BackupFileStore,
 ) : ViewModel() {
 
     private val session = SourceSyncImportSession.production(
@@ -174,6 +178,30 @@ class SourceSyncImportViewModel @Inject constructor(
 
     /** 口令卡状态：只有选到归档时才可见。 */
     val archivePrompt: StateFlow<SourceSyncArchivePrompt> = archiveController.prompt
+
+    /**
+     * W6-64：导出侧「另存为文件」的状态机（见 [SourceSyncArchiveExportController]）。
+     *
+     * 与发送卡共用同一份导出产物（[AndroidSourceSyncService.export]）：口令留空写明文 JSON，
+     * 口令非空由 [SourceSyncArchiveExport] 调 ArchiveWriter 包成归档。写盘走既有的 [BackupFileStore]
+     * （SAF 的 openOutputStream），本层不碰 Context，也不在磁盘上留中间副本。
+     */
+    private val archiveExportController = SourceSyncArchiveExportController(
+        exportPort = SourceSyncArchiveExportPort { passphrase ->
+            SourceSyncArchiveExport.of(sourceSyncService.export(), passphrase)
+        },
+        filePort = SourceSyncArchiveFilePort { uriString, bytes ->
+            when (val written = backupFileStore.write(uriString, bytes)) {
+                is BackupFileStore.WriteResult.Written -> SourceSyncArchiveWriteResult.Written
+                is BackupFileStore.WriteResult.StreamUnavailable -> SourceSyncArchiveWriteResult.StreamUnavailable
+                is BackupFileStore.WriteResult.WriteFailed ->
+                    SourceSyncArchiveWriteResult.WriteFailed(written.cause)
+            }
+        },
+    )
+
+    /** 导出卡片的状态（Idle / AwaitingPassphrase / Ready / Saving / Saved / Failed）。 */
+    val archiveExportState: StateFlow<SourceSyncArchiveExportState> = archiveExportController.state
 
     private val _verification = MutableStateFlow(SourceVerificationViewState())
 
@@ -317,9 +345,44 @@ class SourceSyncImportViewModel @Inject constructor(
         sendController.clearResult()
     }
 
+    // ---- W6-64：导出（另存为文件） ----
+
+    /** 展开「导出（另存为文件）」卡片（幂等：已展开或已有产物时不重置）。 */
+    fun requestArchiveExport() {
+        archiveExportController.request()
+    }
+
+    /**
+     * 生成产物：口令留空 = 明文信封（.json），非空 = 加密归档（.mharchive）。
+     *
+     * 口令策略与凭据拒绝都在 ArchiveWriter 里判，码原样留在卡片错误行；
+     * PBKDF2-SHA256 是刻意慢的（60 万轮），所以放 Dispatchers.Default 上算。
+     */
+    fun prepareArchiveExport(passphrase: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.Default) { archiveExportController.prepare(passphrase) }
+        }
+    }
+
+    /** 系统保存位置已选：把内存里的字节写过去（只写这一个文件，不留副本）。 */
+    fun saveArchiveExport(uriString: String) {
+        viewModelScope.launch { archiveExportController.save(uriString) }
+    }
+
+    /** 用户在保存器上点了取消：丢弃产物回 Idle，一个字节都没写。 */
+    fun cancelArchiveExportSave() {
+        archiveExportController.saveCancelled()
+    }
+
+    /** 收起导出卡片并丢弃暂存字节。 */
+    fun dismissArchiveExport() {
+        archiveExportController.dismiss()
+    }
+
     fun reset() {
         session.reset()
         archiveController.clear()
+        archiveExportController.dismiss()
         receiveController.clear()
         listenerController.clearResult()
         receiveLauncher.clear()
@@ -336,6 +399,7 @@ class SourceSyncImportViewModel @Inject constructor(
      */
     override fun onCleared() {
         archiveController.clear()
+        archiveExportController.dismiss()
         listenerController.stop()
         // viewModelScope 取消时那两条 Job 自己会收尾（控制器把状态写回 Idle），这里只丢引用。
         receiveLauncher.clear()

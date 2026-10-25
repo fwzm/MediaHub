@@ -150,6 +150,10 @@ jobs:
           #     magic == MHSYNCA1 才算归档；无口令报 passphrase-required 且网关零调用；错口令与篡改
           #     同码 wrong-passphrase-or-tampered；弱口令在建密钥之前就拒；结构错只报结构码；明文信封
           #     的文本路径逐字节不变；Windows 写出的 1282 B 归档解开后与明文件逐字段相等）
+          #   core.database.sync.SourceSyncArchiveExportTest —— 导出落成文件（W6-64：口令为 null 原样交出
+          #     导出 JSON 不重新编码；口令非空由 ArchiveWriter 包成 .mharchive，读回来与信封逐字段相等；
+          #     归档头时间戳取信封自己的时间戳、迭代数 600000；弱口令/空白口令/自报携带凭据折成 ArchiveError
+          #     稳定码且一个都不改写；空白口令绝不悄悄退化成明文导出）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -198,6 +202,7 @@ jobs:
             --required-suite com.mediahub.core.common.archive.ArchiveVectorsTest \
             --required-suite com.mediahub.core.common.archive.ArchiveRoundTripTest \
             --required-suite com.mediahub.core.database.sync.SourceSyncArchiveImportTest \
+            --required-suite com.mediahub.core.database.sync.SourceSyncArchiveExportTest \
             --require-complete-suites
 
       - name: Lint

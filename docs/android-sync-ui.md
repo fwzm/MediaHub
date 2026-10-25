@@ -80,6 +80,12 @@ UI 里没有「直接导入」，必须先预览出四桶。理由：四个桶�
 | `sync.apply` | 应用按钮 | 没有任何允许时禁用 |
 | `sync.apply.blocked` | 阻断卡片 | 预览失败 / 整份信封被拒 / 一个都没允许 |
 | `sync.apply.result` | 结果卡片 | 导入结果计数 + 免责句 |
+| `sync.export.card` | 导出卡片（W6-64） | 「导出（另存为文件）」整卡；按 W6-41 首屏纪律放页尾 |
+| `sync.export.action` | 收起状态的「导出」按钮（W6-64） | 只有 Idle 时渲染，点了展开出口令步骤 |
+| `sync.export.passphrase` | 导出口令输入框（W6-64） | 密码遮罩；留空 = 明文导出，非空 = 加密归档；口令只在卡片局部 `remember` 里 |
+| `sync.export.submit` | 生成并保存按钮（W6-64） | Ready/Saving/Saved 时禁用，避免连点生成两份不同字节 |
+| `sync.export.state` | 导出结果行（W6-64） | 成功显示文件名/字节数/来源数；失败原样带稳定码 |
+| `sync.export.dismiss` | 「收起」按钮（W6-64） | 丢弃暂存产物回 Idle（不写盘） |
 
 多条目页面上 allow/skip 会重复出现，UI 测试用 `hasTestTag(ENTRY_ALLOW) and hasAnyAncestor(hasTestTag(entry(key)))` 把按钮限定到某一条，避免「点了第一行却断言第二行」。
 
