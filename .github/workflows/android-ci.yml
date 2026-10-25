@@ -200,6 +200,8 @@ jobs:
             --required-suite com.mediahub.core.network.ApiClientSecurityTest \
             --required-suite com.mediahub.core.network.ApiExceptionTest \
             --required-suite com.mediahub.provider.api.ProviderExceptionTest \
+            --required-suite com.mediahub.provider.api.ProviderHandleTest \
+            --required-suite com.mediahub.provider.base.DefaultProviderRegistryTest \
             --required-suite com.mediahub.feature.library.LibraryFilterViewModelTest \
             --required-suite com.mediahub.feature.library.LibrarySortViewModelTest \
             --required-suite com.mediahub.feature.search.GlobalSearchViewModelTest \

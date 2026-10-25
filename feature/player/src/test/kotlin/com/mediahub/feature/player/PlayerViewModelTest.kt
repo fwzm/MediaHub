@@ -517,7 +517,8 @@ class PlayerViewModelTest {
             serverType = ServerType.EMBY,
             displayName = "Emby",
             category = ProviderCategory.MEDIA_SERVER,
-            declaredCapabilities = setOf(ProviderCapability.AUTH, ProviderCapability.LIBRARY),
+            declaredCapabilities = setOf(ProviderCapability.AUTH, ProviderCapability.LIBRARY,
+                ProviderCapability.DETAIL, ProviderCapability.PLAYBACK, ProviderCapability.PROGRESS),
             authMethod = com.mediahub.provider.api.AuthMethod.USERNAME_PASSWORD,
             status = ProviderStatus.STABLE,
         )
