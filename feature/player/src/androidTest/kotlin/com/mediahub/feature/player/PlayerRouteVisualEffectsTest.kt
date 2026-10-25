@@ -1,6 +1,9 @@
 package com.mediahub.feature.player
 
 import android.Manifest
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.util.Log
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +92,7 @@ class PlayerRouteVisualEffectsTest {
     private var originalPreferences: UserPreferences? = null
     private var preferencesStore: UserPreferencesStore? = null
     private var lastEngine: FakeEngine? = null
+    private var mediaKeyAudioOutput: AudioTrack? = null
 
     @Test
     fun productionSystemMediaKeysPausePlayAndToggleExactlyOnce() {
@@ -122,6 +126,27 @@ class PlayerRouteVisualEffectsTest {
                 instrumentation.uiAutomation.executeShellCommand("input keyevent $key"),
             ).use { it.readBytes() }
             instrumentation.waitForIdleSync()
+        }
+        // A real STARTED audio UID is how Android selects the addressed media session.
+        // FakeEngine state alone never registers audio playback with the system service.
+        val output = startControlledMediaOutput()
+        assertEquals(AudioTrack.PLAYSTATE_PLAYING, output.playState)
+        var ownSessionPresent = false
+        var addressed = false
+        try {
+            composeRule.waitUntil(10_000) {
+                val dump = android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                    instrumentation.uiAutomation.executeShellCommand("dumpsys media_session"),
+                ).bufferedReader().use { it.readText() }
+                val owner = context.packageName + "/MediaHub.Foreground"
+                ownSessionPresent = dump.contains(owner)
+                addressed = dump.lineSequence().any {
+                    it.trim().startsWith("Media button session is ") && it.contains(owner)
+                }
+                addressed
+            }
+        } finally {
+            Log.i("SystemMediaKeyTest", "ownSession=$ownSessionPresent addressed=$addressed audioState=${output.playState}")
         }
         sendKey("KEYCODE_MEDIA_PAUSE")
         composeRule.waitUntil(10_000) { !vm.uiState.value.playWhenReady }
@@ -300,8 +325,30 @@ class PlayerRouteVisualEffectsTest {
         }
     }
 
+    private fun startControlledMediaOutput(): AudioTrack {
+        val frames = 48_000
+        val silence = ByteArray(frames * 2)
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+            .setAudioFormat(AudioFormat.Builder().setSampleRate(frames)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
+            .setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(silence.size).build()
+        mediaKeyAudioOutput = track
+        check(track.write(silence, 0, silence.size) == silence.size)
+        check(track.state == AudioTrack.STATE_INITIALIZED)
+        check(track.setLoopPoints(0, frames, -1) == AudioTrack.SUCCESS)
+        track.play()
+        return track
+    }
+
     @After
     fun restoreTestState() {
+        mediaKeyAudioOutput?.let { track ->
+            runCatching { track.stop() }
+            track.release()
+        }
+        mediaKeyAudioOutput = null
         composeRule.mainClock.autoAdvance = false
         composeRule.runOnUiThread {
             routeVisible.value = false
