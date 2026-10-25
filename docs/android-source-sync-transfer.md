@@ -3245,10 +3245,14 @@ XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-63
 6. **口令的界外情况**：继承 §35.8 第 6 条（超长口令、NUL、代理对）。界面上也没有「显示口令」开关、
    没有剪贴板粘贴的专项验证。
 7. **门禁**：本轮把 `SourceSyncArchiveImportTest` 加进 `--required-suite`（46 → **47** 个套件），
-   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`；
-   「CI 上这个套件确实被门禁跑过」只能由新 head 的 Android CI 日志证明，本节写就时该 head 尚未 push。
-8. **instrumentation**：新增 5 例 Compose 断言本机无设备/模拟器可跑 ⇒ 设备结论待 CI 的 API 32 / 36 作业；
-   真机仍 DEVICE_UNVERIFIED。
+   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`。
+   CI 侧已在 head `6857bdd` 上落实：Android CI run **40215577317** success，日志实计
+   `--required-suite com.` **47** 行（末两条 `ArchiveRoundTripTest` → `SourceSyncArchiveImportTest`，
+   紧接 `--require-complete-suites`），`uniqueTests 2246` 且 `core/database` 报 **184** 例。
+8. **instrumentation**：新增 5 例 Compose 断言本机无设备/模拟器可跑，设备侧证据来自 CI：
+   `6857bdd` 的 API 32 / API 36 两个作业里 `:feature:settings:connectedDebugAndroidTest`
+   **Starting 105 → Finished 105**、0 FAILED，作业末断言 `API 32/36: 19 unique mandatory visual/parser tests passed`
+   命中该 SHA；真机仍 DEVICE_UNVERIFIED。
 
 ### §36.9 下一步
 
