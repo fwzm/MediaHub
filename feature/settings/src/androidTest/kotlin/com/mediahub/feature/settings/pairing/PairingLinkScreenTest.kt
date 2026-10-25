@@ -18,6 +18,7 @@ import com.mediahub.core.common.pairing.PairingCodeReasons
 import com.mediahub.core.common.pairing.PairingFingerprint
 import com.mediahub.core.common.pairing.PairingLink
 import com.mediahub.core.common.pairing.PairingPayload
+import com.mediahub.core.common.pairing.PairingTransportReasons
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -25,11 +26,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * W6-59：配对页的界面证据（instrumentation，真跑在模拟器/真机上）。
+ * W6-59 / W6-59b：配对页的界面证据（instrumentation，真跑在模拟器/真机上）。
  *
- * 与 JVM 的 [PairingLinkControllerTest] 分工：那边钉解析与稳定码，这边只钉「用户能看见并点到什么」——
+ * 与 JVM 的 [PairingLinkControllerTest] 分工：那边钉解析、稳定码与拨号参数，这边只钉「用户能看见并点到什么」——
  * 输入框在空的时候按钮不可点、贴了链接能点、核对之后结果行里出现的就是链接里写明的设备与指纹、
- * 返回回调只被调一次。文案断言只用 [PairingLinkCopy] 与 [PairingLinkTags] 的常量，不写死布局位置。
+ * 拉邀请按钮只在核对过之后可点、拉的过程中整页不可点、返回回调只被调一次。
+ * 文案断言只用 [PairingLinkCopy] 与 [PairingLinkTags] 的常量，不写死布局位置。
  */
 @RunWith(AndroidJUnit4::class)
 class PairingLinkScreenTest {
@@ -39,14 +41,15 @@ class PairingLinkScreenTest {
 
     private val issuedAt: Long = 1_760_000_000_000L
 
+    private val fingerprint: PairingFingerprint =
+        PairingFingerprint.fromBytes(ByteArray(PairingFingerprint.BYTE_LENGTH) { index -> (index + 3).toByte() })
+
     private fun link(): String {
         val payload = PairingPayload.create(
             deviceId = "windows-a",
             ephemeralUrl = "https://192.168.1.20:8443/pairing",
             challenge = PairingChallenge.createRandom(),
-            publicKeyFingerprint = PairingFingerprint.fromBytes(
-                ByteArray(PairingFingerprint.BYTE_LENGTH) { index -> (index + 3).toByte() },
-            ),
+            publicKeyFingerprint = fingerprint,
             nowEpochMs = issuedAt,
         )
         return PairingLink.create(payload)
@@ -55,6 +58,7 @@ class PairingLinkScreenTest {
     private fun render(
         state: PairingLinkState = PairingLinkState.Idle,
         onVerify: (String) -> Unit = {},
+        onFetch: () -> Unit = {},
         onClear: () -> Unit = {},
         onBack: () -> Unit = {},
     ) {
@@ -63,12 +67,20 @@ class PairingLinkScreenTest {
                 PairingLinkScreen(
                     state = state,
                     onVerify = onVerify,
+                    onFetch = onFetch,
                     onClear = onClear,
                     onBack = onBack,
                 )
             }
         }
     }
+
+    private fun parsed(): PairingLinkState.Parsed = PairingLinkState.Parsed(
+        deviceId = "windows-a",
+        fingerprint = fingerprint.displayString,
+        endpoint = "192.168.1.20:8443",
+        remainingSeconds = 90L,
+    )
 
     @Test
     fun theEntryStartsEmptyAndTheVerifyButtonIsDisabled() {
@@ -96,17 +108,7 @@ class PairingLinkScreenTest {
 
     @Test
     fun aParsedStateShowsTheDeviceIdTheFingerprintAndTheRemainingSeconds() {
-        val fingerprint = PairingFingerprint.fromBytes(
-            ByteArray(PairingFingerprint.BYTE_LENGTH) { index -> (index + 3).toByte() },
-        )
-        render(
-            state = PairingLinkState.Parsed(
-                deviceId = "windows-a",
-                fingerprint = fingerprint.displayString,
-                endpoint = "192.168.1.20:8443",
-                remainingSeconds = 90L,
-            ),
-        )
+        render(state = parsed())
 
         // assertTextContains 的第二个参数是 substring，缺省为 false（要求整段相等）；
         // 结果行是「已核对：…」整句，所以这里必须显式 substring = true。
@@ -126,6 +128,76 @@ class PairingLinkScreenTest {
             .performScrollTo()
             .assertIsDisplayed()
             .assertTextContains(PairingCodeReasons.NOT_BASE64URL, substring = true)
+    }
+
+    @Test
+    fun theFetchButtonIsDisabledUntilTheLinkIsVerified() {
+        // 没贴链接、没核对过：拉邀请按钮必须在，但不能点——不知道对端是谁就没有可钉的对象。
+        render(state = PairingLinkState.Idle)
+
+        composeRule.onNodeWithTag(PairingLinkTags.FETCH).performScrollTo().assertIsDisplayed().assertIsNotEnabled()
+    }
+
+    @Test
+    fun aParsedStateEnablesTheFetchButtonAndTheClickIsReported() {
+        var fetches = 0
+        render(state = parsed(), onFetch = { fetches += 1 })
+
+        composeRule.onNodeWithTag(PairingLinkTags.FETCH).performScrollTo().assertIsEnabled().performClick()
+
+        assertEquals(1, fetches)
+    }
+
+    @Test
+    fun aFetchingStateDisablesEverythingAndSaysItIsConnecting() {
+        render(
+            state = PairingLinkState.Fetching(
+                deviceId = "windows-a",
+                fingerprint = fingerprint.displayString,
+                endpoint = "192.168.1.20:8443",
+            ),
+        )
+
+        composeRule.onNodeWithTag(PairingLinkTags.LINK).performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithTag(PairingLinkTags.ACTION).performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithTag(PairingLinkTags.FETCH).performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithTag(PairingLinkTags.CLEAR).performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithTag(PairingLinkTags.STATE)
+            .performScrollTo()
+            .assertTextContains("正在连接", substring = true)
+        composeRule.onNodeWithText(PairingLinkCopy.FETCHING_HINT).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun aFetchedStateShowsTheValidatedInvitationAndSaysSyncIsStillSeparate() {
+        render(
+            state = PairingLinkState.Fetched(
+                deviceId = "windows-b",
+                fingerprint = fingerprint.displayString,
+                endpoint = "192.168.1.20:8443",
+                remainingSeconds = 69L,
+            ),
+        )
+
+        composeRule.onNodeWithTag(PairingLinkTags.STATE)
+            .performScrollTo()
+            .assertTextContains("邀请已校验", substring = true)
+        composeRule.onNodeWithText(PairingLinkCopy.FETCHED_HINT).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun aFetchFailureShowsTheCoreCodeInTheStateLine() {
+        render(
+            state = PairingLinkState.Failed(
+                PairingTransportReasons.FINGERPRINT_MISMATCH,
+                "对端公钥指纹与链接不符",
+            ),
+        )
+
+        composeRule.onNodeWithTag(PairingLinkTags.STATE)
+            .performScrollTo()
+            .assertTextContains(PairingTransportReasons.FINGERPRINT_MISMATCH, substring = true)
+        composeRule.onNodeWithTag(PairingLinkTags.FETCH).performScrollTo().assertIsNotEnabled()
     }
 
     @Test

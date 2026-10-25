@@ -1,6 +1,12 @@
 package com.mediahub.core.common.pairing
 
+import com.mediahub.core.common.sync.SourceSyncTls
+import com.mediahub.core.common.sync.SourceSyncTlsOptions
+import com.mediahub.core.common.sync.SourceSyncTlsResult
+import com.mediahub.core.common.sync.SourceSyncTlsSession
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
@@ -12,9 +18,12 @@ import java.nio.charset.StandardCharsets
  * 帧格式与 PairingFrame 完全一致（4 字节大端长度 + 载荷；没有 magic、没有帧内版本），
  * 上限 8192 字节。读端拿到长度后立刻判上限，绝不为非法长度分配内存——超长声明只值 4 个字节的代价。
  *
- * 能力边界（W6-G 刻意收窄，未做项见 docs/android-pairing.md 第 10 节）：
- * - 只连回环：127.0.0.1 / ::1 / localhost。其它目标在拨号前拒绝，码为 PairingClientReasons.NON_LOOPBACK_PEER；
- * - 不做 TLS 1.3、不做证书指纹钉扎（Windows 侧有；Android 侧要等真机传输接入）；
+ * 能力边界：
+ * - 只连回环：127.0.0.1 / ::1 / localhost。其它目标在拨号前拒绝，码为 PairingClientReasons.NON_LOOPBACK_PEER
+ *   （W6-59b 只放开 TLS，没有放开地址闸门；放开地址要等候选地址接网卡枚举的那一轮）；
+ * - TLS 1.3 + 公钥指纹钉扎可选（W6-59b，对齐 Windows PairingTransportClient）：不给
+ *   [PairingTlsOptions] 时字节与 W6-G 至今逐字一致；给了就以钉住的指纹为信任根，链验证不参与
+ *   （自签证书没有 CA，二维码才是信任根）；
  * - 单次交换：可选先写一帧请求，再读一帧响应，读完即关 socket，调用方不需要持有连接；
  * - 连接与读取超时都可配；两类超时统一映射为合同码 peer-timeout。
  *
@@ -35,12 +44,18 @@ class PairingTransportClient(
      *
      * request 为 null 表示只读（Windows 的配对服务端是先发载荷的一方，客户端不需要先说话）。
      * 任何失败都折成 PairingFrameResult.Failed，不抛异常；调用方只按 reason 分支。
+     *
+     * @param tls 传输层要不要走 TLS 1.3 并钉住指纹。缺省 [PairingTlsOptions.Off]：字节与 W6-G
+     *   至今完全一致。给了 Pinned 时，指纹不是合法 hex 会在**拨号之前**判成
+     *   [PairingReasons.BAD_FINGERPRINT]（一个字节都不发）；握手里任何失败按 [pairingTlsReasonOf]
+     *   收敛成 tls-version 或 fingerprint-mismatch。
      */
     fun exchange(
         host: String,
         port: Int,
         request: ByteArray? = null,
         responseLimit: Int = PairingFrame.MAXIMUM_PAYLOAD_BYTES,
+        tls: PairingTlsOptions = PairingTlsOptions.Off,
     ): PairingFrameResult {
         require(port in 1..MAXIMUM_PORT) { "端口必须在 1..65535，实际 " + port }
         require(responseLimit in 1..PairingFrame.MAXIMUM_PAYLOAD_BYTES) {
@@ -63,8 +78,20 @@ class PairingTransportClient(
             )
             else -> PairingFrame.encode(request)
         }
+        // 指纹在拨号前判：没有可靠指纹就不该把字节发出去，也不该悄悄降级成明文（与 Windows 同序）。
+        val pinned = if (!tls.enabled) {
+            null
+        } else {
+            tls.expectedFingerprint?.let { PairingFingerprint.tryParse(it) }
+                ?: return PairingFrameResult.Failed(
+                    PairingReasons.BAD_FINGERPRINT,
+                    "TLS 已开启，但钉住的指纹不是 64 位十六进制：没有可比对的对象，连接没有发起。",
+                )
+        }
         var socket: Socket? = null
+        var session: SourceSyncTlsSession? = null
         var connected = false
+        var handshakeCompleted = false
         return try {
             val opened = Socket()
             socket = opened
@@ -72,12 +99,33 @@ class PairingTransportClient(
             connected = true
             opened.soTimeout = readTimeoutMs
             opened.tcpNoDelay = true
+            var input: InputStream = opened.getInputStream()
+            var output: OutputStream = opened.getOutputStream()
+            if (pinned != null) {
+                val handshake = SourceSyncTls.handshakeClient(
+                    opened,
+                    SourceSyncTlsOptions.Pinned(pinned.hex),
+                    timeoutMs = readTimeoutMs,
+                    targetHostName = PAIRING_TLS_TARGET_HOST_NAME,
+                )
+                when (handshake) {
+                    is SourceSyncTlsResult.Failed -> return PairingFrameResult.Failed(
+                        pairingTlsReasonOf(handshake.reason),
+                        handshake.detail,
+                    )
+                    is SourceSyncTlsResult.Ok -> {
+                        session = handshake.session
+                        input = handshake.session.input
+                        output = handshake.session.output
+                        handshakeCompleted = true
+                    }
+                }
+            }
             if (requestFrame != null) {
-                val output = opened.getOutputStream()
                 output.write(requestFrame)
                 output.flush()
             }
-            when (val read = PairingFrameIo.readFrame(opened.getInputStream(), responseLimit)) {
+            when (val read = PairingFrameIo.readFrame(input, responseLimit)) {
                 is FrameRead.Payload -> PairingFrameResult.Ok(read.bytes)
                 is FrameRead.Rejected -> PairingFrameResult.Failed(
                     PairingTransportReasons.PAYLOAD_INVALID,
@@ -99,7 +147,13 @@ class PairingTransportClient(
                 )
             }
         } finally {
-            LoopbackOnly.closeQuietly(socket)
+            val held = session
+            if (held != null) {
+                // TLS 1.3 握手后立刻硬关是 abortive close(RST)，对端会读成 io-failed：半关 + 排水 + 关。
+                SourceSyncTls.gracefulClose(held.socket, readTimeoutMs)
+            } else {
+                LoopbackOnly.closeQuietly(socket)
+            }
         }
     }
 
@@ -108,6 +162,9 @@ class PairingTransportClient(
      *
      * 顺序是刻意的：先证明字节是帧、再证明内容是载荷、再证明没过期、再证明是同一个 challenge、
      * 最后（可选的）证明公钥指纹就是邀请里钉的那一个。任何一步失败都给稳定码，不给半成品。
+     *
+     * @param tls 传输层 TLS 选项。开启时载荷里的指纹**也必须**等于钉住的那一枚——
+     *   Windows 的第二道冗余检查：回别人邀请的对端不是我们拨的那一台。
      */
     fun fetchInvitation(
         host: String,
@@ -115,6 +172,7 @@ class PairingTransportClient(
         expectedChallenge: PairingChallenge,
         expectedFingerprint: PairingFingerprint? = null,
         nowEpochMs: Long = System.currentTimeMillis(),
+        tls: PairingTlsOptions = PairingTlsOptions.Off,
     ): PairingInvitationResult {
         if (expectedChallenge.isEmpty) {
             return PairingInvitationResult.Failed(
@@ -122,10 +180,13 @@ class PairingTransportClient(
                 "没有期望 challenge 就无法判定对端是不是同一个邀请",
             )
         }
-        return when (val frame = exchange(host, port, request = null)) {
+        // TLS 钉住的那一枚是信任根（握手已经证明过），所以它优先于调用方另给的期望指纹。
+        val pinned = (tls as? PairingTlsOptions.Pinned)?.fingerprint
+        val required = pinned ?: expectedFingerprint
+        return when (val frame = exchange(host, port, request = null, tls = tls)) {
             is PairingFrameResult.Failed -> PairingInvitationResult.Failed(frame.reason, frame.message)
             is PairingFrameResult.Ok ->
-                validate(frame.payload, expectedChallenge, expectedFingerprint, nowEpochMs)
+                validate(frame.payload, expectedChallenge, required, nowEpochMs)
         }
     }
 
@@ -169,7 +230,7 @@ class PairingTransportClient(
         /** 默认连接超时，毫秒。 */
         const val DEFAULT_CONNECT_TIMEOUT_MS: Int = 3_000
 
-        /** 默认读取超时，毫秒。 */
+        /** 默认读取超时，毫秒；TLS 路径同时用它当握手预算。 */
         const val DEFAULT_READ_TIMEOUT_MS: Int = 5_000
 
         private const val MAXIMUM_PORT = 65_535
