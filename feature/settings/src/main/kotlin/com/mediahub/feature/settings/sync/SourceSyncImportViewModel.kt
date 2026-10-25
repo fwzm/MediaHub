@@ -139,6 +139,17 @@ class SourceSyncImportViewModel @Inject constructor(
         receiveController.receive(form, cancel)
     }
 
+    /**
+     * W6-61：监听端「等一次发送」的记账薄壳（见 [SourceSyncListenLauncher]）。
+     *
+     * 与接收那条同形同理由：等 accept 与分块读帧都是阻塞调用，只 cancel() 协程会让界面停在「接收中」
+     * 直到 accept/读超时（缺省 15 秒）。取消要把手先解开阻塞，再把状态写回「正在监听」——
+     * **监听不关**，可以立刻再等一次。
+     */
+    private val listenLauncher = SourceSyncListenLauncher(viewModelScope) { cancel ->
+        listenerController.awaitOnce(cancel)
+    }
+
     private val _verification = MutableStateFlow(SourceVerificationViewState())
 
     /** 结果页的逐源验证状态（三态 + 对话框 + 忙碌标记）。 */
@@ -202,7 +213,18 @@ class SourceSyncImportViewModel @Inject constructor(
 
     /** 等一次发送：收到就交给导入页（只进预览，不写库），失败只更新监听区块的状态。 */
     fun awaitListenOnce() {
-        viewModelScope.launch { listenerController.awaitOnce() }
+        listenLauncher.launch()
+    }
+
+    /**
+     * W6-61：取消正在飞的那一次等待。
+     *
+     * 没在等时是 no-op（不伪造 Failed、不关监听）；正在等时先解开阻塞的 accept / 读，
+     * 再取消协程，控制器把状态写回「正在监听」——**取消是用户操作，不是失败，所以没有稳定码**，
+     * 监听端口仍然开着，可以立刻再等一次。
+     */
+    fun cancelListening() {
+        listenLauncher.cancel()
     }
 
     fun decide(key: String, decision: SourceSyncEntryDecision) {
@@ -250,6 +272,7 @@ class SourceSyncImportViewModel @Inject constructor(
         listenerController.clearResult()
         receiveLauncher.clear()
         sendLauncher.clear()
+        listenLauncher.clear()
         sendController.clearResult()
         _verification.value = SourceVerificationViewState()
     }
@@ -264,6 +287,7 @@ class SourceSyncImportViewModel @Inject constructor(
         // viewModelScope 取消时那两条 Job 自己会收尾（控制器把状态写回 Idle），这里只丢引用。
         receiveLauncher.clear()
         sendLauncher.clear()
+        listenLauncher.clear()
         sendController.clearResult()
         super.onCleared()
     }

@@ -144,6 +144,9 @@ object SourceSyncImportTags {
 
     const val LISTEN_RECEIVE = "sync.listen.receive"
 
+    /** W6-61：取消这一次等待（只在接收中可点；取消回「正在监听」，监听不关，不留码）。 */
+    const val LISTEN_CANCEL = "sync.listen.cancel"
+
     /** 监听状态行（正在监听 / 接收中 / 已收下 / 失败：码 / 信封被拒：码）。 */
     const val LISTEN_STATUS = "sync.listen.status"
 
@@ -230,6 +233,7 @@ fun SourceSyncImportRoute(
         onListenStart = viewModel::startListening,
         onListenStop = viewModel::stopListening,
         onListenReceive = viewModel::awaitListenOnce,
+        onListenCancel = viewModel::cancelListening,
         sendState = sendState,
         onSend = viewModel::send,
         onSendCancel = viewModel::cancelSend,
@@ -270,6 +274,8 @@ fun SourceSyncImportScreen(
     onListenStart: (SourceSyncListenForm) -> Unit = {},
     onListenStop: () -> Unit = {},
     onListenReceive: () -> Unit = {},
+    /** W6-61：取消正在飞的那一次等待；默认空实现（既有调用点与 UI 测试无需改动）。 */
+    onListenCancel: () -> Unit = {},
     /** W6-42：发送（Android → Windows）区块的状态；默认 Idle（既有调用点与 UI 测试无需改动）。 */
     sendState: SourceSyncSendState = SourceSyncSendState.Idle,
     onSend: (SourceSyncSendForm) -> Unit = {},
@@ -470,6 +476,7 @@ fun SourceSyncImportScreen(
                 onStart = onListenStart,
                 onStop = onListenStop,
                 onReceive = onListenReceive,
+                onCancel = onListenCancel,
             )
             // W6-42：发送区块同样放页尾，理由与上面两块一致（首屏不动）。
             SendSection(state = sendState, onSend = onSend, onCancel = onSendCancel)
@@ -801,6 +808,7 @@ private fun ListenSection(
     onStart: (SourceSyncListenForm) -> Unit,
     onStop: () -> Unit,
     onReceive: () -> Unit,
+    onCancel: () -> Unit,
 ) {
     var form by remember { mutableStateOf(SourceSyncListenForm()) }
     val listening = state is SourceSyncListenState.Listening ||
@@ -985,6 +993,15 @@ private fun ListenSection(
                     .testTag(SourceSyncImportTags.LISTEN_RECEIVE),
             ) {
                 Text(SourceSyncListenCopy.RECEIVE_ONE)
+            }
+            OutlinedButton(
+                onClick = onCancel,
+                enabled = receiving,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.LISTEN_CANCEL),
+            ) {
+                Text(SourceSyncListenCopy.CANCEL_RECEIVE)
             }
             if (receiving) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
