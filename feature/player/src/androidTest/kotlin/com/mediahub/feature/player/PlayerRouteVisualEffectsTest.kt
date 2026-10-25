@@ -667,7 +667,8 @@ class PlayerRouteVisualEffectsTest {
             serverType = ServerType.EMBY,
             displayName = "Test",
             category = ProviderCategory.MEDIA_SERVER,
-            declaredCapabilities = setOf(ProviderCapability.AUTH, ProviderCapability.LIBRARY),
+            declaredCapabilities = setOf(ProviderCapability.AUTH, ProviderCapability.LIBRARY,
+                ProviderCapability.DETAIL, ProviderCapability.PLAYBACK, ProviderCapability.SUBTITLE_DISCOVERY),
             authMethod = com.mediahub.provider.api.AuthMethod.USERNAME_PASSWORD,
             status = ProviderStatus.STABLE,
         )

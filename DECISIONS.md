@@ -801,3 +801,13 @@ the captured owner, and EOF/native state publication cannot rewrite old-event da
 The old branch's reset-on-critical periodic-window policy is not adopted; existing
 independent sample clocks continue. This preserves current cadence while fixing
 critical payload correctness and ownership.
+
+### 2026-10-25 ADR-015/022 clarification: fail-fast registration invariants
+
+Registered factories must have unique ServerType keys and unique stable descriptor
+IDs. Validate and index the same captured descriptor values; duplicates must not be
+silently hidden by associateBy. ProviderHandle construction, including copy, requires
+runtime capabilities to be a subset of declaredCapabilities. Planned extra capabilities
+with null runtime fields remain valid. Preserve the current ServerType persistence
+and split credential stores; this invariant port does not adopt the old open-ID schema.
+Test doubles must declare their actual provided fields rather than bypassing validation.

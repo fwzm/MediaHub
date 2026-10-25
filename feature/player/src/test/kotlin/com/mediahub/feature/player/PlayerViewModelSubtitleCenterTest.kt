@@ -202,7 +202,11 @@ class PlayerViewModelSubtitleCenterTest {
         override val displayName = "s"
         override val descriptor = ProviderDescriptor(
             id = "fake", serverType = ServerType.EMBY, displayName = "fake",
-            category = ProviderCategory.MEDIA_SERVER, declaredCapabilities = emptySet(),
+            category = ProviderCategory.MEDIA_SERVER, declaredCapabilities = setOf(
+                com.mediahub.provider.api.ProviderCapability.DETAIL,
+                com.mediahub.provider.api.ProviderCapability.PLAYBACK,
+                com.mediahub.provider.api.ProviderCapability.SUBTITLE_DISCOVERY,
+            ),
             authMethod = com.mediahub.provider.api.AuthMethod.NONE, status = ProviderStatus.EXPERIMENTAL,
         )
         override suspend fun testConnection() = ConnectionStatus(ok = true)
