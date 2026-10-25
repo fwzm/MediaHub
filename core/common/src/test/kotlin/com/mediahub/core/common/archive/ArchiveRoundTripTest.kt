@@ -357,6 +357,19 @@ class ArchiveRoundTripTest {
         assertEquals(envelope(), ArchiveReader.tryRead(atMinimum, passphrase).first)
     }
 
+    @Test
+    fun writing_refuses_a_payload_that_is_larger_than_the_archive_limit() {
+        // Windows 侧一直有这例（OversizedPayload_IsRejectedWhenWriting，9 MB 载荷）；
+        // Android 侧此前只断言了常量本身，没有真的走一遍写端判定，上限被改坏时两组用例都不会响。
+        // W6-65 反向互操作补上这一例，让「写端 8 MiB」在两端都有真实行为证据。
+        val oversized = envelope().copy(sources = listOf(record("local-1", "x".repeat(9_000_000))))
+        assertEquals(ArchiveError.PAYLOAD_TOO_LARGE, reasonOf { written(oversized) })
+
+        // 上限是「大于才拒」：明显更小的载荷仍应写成功，否则拒绝理由可能来自别处。
+        val smaller = envelope().copy(sources = listOf(record("local-1", "x".repeat(4_000_000))))
+        assertNull(reasonOf { written(smaller) })
+    }
+
     // ------------------------------------------------------------------ 不可区分与不泄露
 
     @Test
