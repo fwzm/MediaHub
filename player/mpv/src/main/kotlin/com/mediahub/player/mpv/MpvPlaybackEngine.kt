@@ -148,7 +148,8 @@ class MpvPlaybackEngine internal constructor(
         @Volatile var resources: Resources? = null // published only after successful native initialization
     }
 
-    private class Resources(val owner: Run, val mpv: MpvInstance, val bridge: MpvBridge) {
+    private class Resources(val owner: Run, val mpv: MpvInstance, val bridge: MpvBridge,
+        val surfaces: MpvSurfaceBinding) {
         var closed = false // nativeLock
     }
 
@@ -255,7 +256,8 @@ class MpvPlaybackEngine internal constructor(
                     checkCurrent()
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_INIT_FINISHED)
                     val initialSurface = synchronized(stateLock) { attachedSurface }
-                    initialSurface?.let { m.attachSurface(it) }
+                    val surfaces = MpvSurfaceBinding(m)
+                    surfaces.replace(initialSurface)
                     m.observeProperty("time-pos", MpvInstance.Format.DOUBLE)
                     m.observeProperty("duration", MpvInstance.Format.DOUBLE)
                     m.observeProperty("pause", MpvInstance.Format.FLAG)
@@ -267,7 +269,7 @@ class MpvPlaybackEngine internal constructor(
                     checkCurrent()
                     // G3：降级重播必须尊重暂停意图（默认 null = 沿用既有「起播即播放」行为）。
                     // 必须在 loadfile 之后设置，否则会被 loadfile 重置为新文件默认的播放态。
-                    val resources = Resources(run, m, b)
+                    val resources = Resources(run, m, b, surfaces)
                     // Publication and invalidation are atomic; release cannot miss a newly published handle.
                     synchronized(stateLock) {
                         checkCurrent()
@@ -287,7 +289,7 @@ class MpvPlaybackEngine internal constructor(
                     // Surface changes made while init was unpublished must not block Main or get lost.
                     val latestSurface = synchronized(stateLock) { attachedSurface }
                     if (latestSurface !== initialSurface) {
-                        if (latestSurface != null) m.attachSurface(latestSurface) else m.detachSurface()
+                        surfaces.replace(latestSurface)
                     }
                     startProgressLoop(run)
                     withCurrent(run) { logger.i(LogTag.PLAYER, "mpv 开始播放 serverId=${s.serverId} itemId=${s.itemId}") }
@@ -395,9 +397,9 @@ class MpvPlaybackEngine internal constructor(
             if (released) return
             attachedSurface = surface
         }
-        withNative { _, m ->
+        withNative { run, _ ->
             val latest = synchronized(stateLock) { attachedSurface }
-            if (latest != null) m.attachSurface(latest) else m.detachSurface()
+            run.resources?.surfaces?.replace(latest)
         }
     }
 
