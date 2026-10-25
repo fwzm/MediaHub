@@ -69,6 +69,10 @@ UI 里没有「直接导入」，必须先预览出四桶。理由：四个桶�
 | `sync.import.screen` | 整页 Scaffold | 页面根节点 |
 | `sync.import.pick` | 选择文件按钮 | 拉起系统文件选择器（OpenDocument） |
 | `sync.import.preview` | 预览按钮 | 未选文件时禁用 |
+| `sync.import.passphrase.card` | 口令卡片（W6-63） | 只有选到的是加密归档时出现；明文路径不渲染任何口令控件 |
+| `sync.import.passphrase` | 口令输入框（W6-63） | 密码遮罩；口令只活在这张卡片的局部 `remember` 里，不进任何 StateFlow |
+| `sync.import.unlock` | 「解密」按钮（W6-63） | 口令为空时禁用（避免用空口令白跑一次 600 000 轮密钥派生） |
+| `sync.import.passphrase.error` | 口令错误行（W6-63） | 解密失败时出现，原样带 ArchiveError 稳定码 |
 | `sync.entry.state` | 每条目状态行 | 未决定 / 已允许 / 已跳过 / 不可允许原因（点了按钮必须有回执） |
 | `sync.entry.allow` | 每条目「允许」 | 仅可允许条目可点；未知/不支持/冲突一律 disabled |
 | `sync.entry.skip` | 每条目「跳过」 | 同上 |

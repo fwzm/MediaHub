@@ -146,6 +146,10 @@ jobs:
           #   feature.settings.pairing.PairingLinkControllerTest —— 配对链接核对（W6-59：合法链接解出设备 / 指纹 /
           #     剩余秒，非法链接原样透出 core:common 的码（code-empty / not-a-pairing-link / code-too-long /
           #     not-base64url / payload-invalid / expired），核对成功也不泄露挑战，失败作废上一次结论）
+          #   core.database.sync.SourceSyncArchiveImportTest —— 加密归档接进导入入口（W6-63：前 8 字节
+          #     magic == MHSYNCA1 才算归档；无口令报 passphrase-required 且网关零调用；错口令与篡改
+          #     同码 wrong-passphrase-or-tampered；弱口令在建密钥之前就拒；结构错只报结构码；明文信封
+          #     的文本路径逐字节不变；Windows 写出的 1282 B 归档解开后与明文件逐字段相等）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -193,6 +197,7 @@ jobs:
             --required-suite com.mediahub.core.common.sync.SourceSyncListenerCancelTest \
             --required-suite com.mediahub.core.common.archive.ArchiveVectorsTest \
             --required-suite com.mediahub.core.common.archive.ArchiveRoundTripTest \
+            --required-suite com.mediahub.core.database.sync.SourceSyncArchiveImportTest \
             --require-complete-suites
 
       - name: Lint

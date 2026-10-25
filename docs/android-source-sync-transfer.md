@@ -3070,3 +3070,189 @@ envelope.sources.any { source ->
 - 设备侧取证：把 15 + 23 例里能在 androidTest 上跑的部分搬上模拟器（PBKDF2 600 000 轮在低端机上耗时是可观察项）；
 - 真实两机搬运取证（上面 §35.8 第 5 条），届时与 §33.8 / §34.8 的跨机项一起改成 EXECUTED_PASS；
 - 口令策略补超长口令与畸形 Unicode 用例。
+
+
+## §36 加密归档接进 Android 导入入口（W6-63）
+
+### §36.1 动机：读端交付了，但没有调用方
+
+§35.8 第 1 条如实记着：「`ArchiveReader` 与 `ArchiveWriter` 目前是 `core/common` 里的纯函数，
+Android 侧还没有任何调用方。把它接到『导入信封』那条链上是下一个切片的活。」
+本节补的就是这条缝：**不新造一条导入流程**，而是让既有那条（选文件 → 预览 → 逐条允许 → 应用）
+多认一种输入——离线加密归档 `.mharchive`。
+
+边界仍然照 W6-62 的写法：只做「读进来并交给既有网关」，不做导出侧的「另存为归档」、
+不给传输链路口令通道、不碰数据库。
+
+### §36.2 分支语义：对齐 Windows `SyncCliRunner.TryResolveEnvelope`
+
+Windows 的权威语义在 `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` L2159-2217：
+先看前 8 字节是不是 `MHSYNCA1`，是归档且没带 `--passphrase` 就报 `passphrase-required`；
+带了口令就走 `EncryptedArchiveReader.Read`，`ArchiveException` 的 `Reason` 原样当稳定码输出。
+Android 侧的分流是同一个顺序，落在一处纯函数 `SourceSyncDocumentInput.resolve` 里：
+
+| 输入 | 返回 | 外部可观察结果 |
+| --- | --- | --- |
+| 长度 < 8 或前 8 字节不是 `MHSYNCA1` | `Plaintext` | 走既有明文路径（宽松 UTF-8 → codec → 网关），与 W6-23 逐字节相同 |
+| 是归档，调用方没给口令 | `PassphraseRequired` | `passphrase-required`（本地闸，网关零调用） |
+| 是归档 + 口令，但结构坏 | `Rejected` | `magic-mismatch` / `corrupt-header` / `unsupported-version:<n>` / `unknown-kdf:<k>` / `invalid-iterations` / `corrupt-ciphertext` / `payload-too-large` |
+| 是归档 + 口令，口令本身不合策略 | `Rejected` | `passphrase-empty` / `passphrase-too-weak`（在建密钥之前就拒，白跑不了一次 PBKDF2） |
+| 是归档 + 口令，解密或认证失败 | `Rejected` | `wrong-passphrase-or-tampered`（错口令与密文被改同码，不做攻击者 oracle） |
+| 是归档 + 口令，解开了但载荷不是合法信封 | `Rejected` | `malformed-payload` |
+| 是归档 + 口令，信封宣称携带凭据 | `Rejected` | `secrets-not-allowed`（写侧 W6-62 也拒，两侧同义） |
+| 是归档 + 口令，成功 | `Decrypted` | 用 `SourceSyncCodec.encode` 重新编码成明文 JSON，再走同一条 codec → 网关路径 |
+
+两条与 Windows 的**有意差异**，都写在这里免得后人当成漏做：
+
+1. **没有退出码分类**：Windows 把归档失败归成 `CliExitCode.ArchiveOrCredential`（4）、把 `passphrase-required` 归成 `InputProblem`（2），
+   因为 CLI 的退出码是给脚本判断「换参数重试还是换文件」用的。Android 没有退出码，码本身就是分类；
+   `passphrase-required` 与 `malformed-json` 一样属于「这份输入还缺一步」的本地闸，不是归档结构码。
+2. **没有 `archive-not-supported-by-plan`**：Windows 的 `plan` 子命令只读明文信封，所以要专门拒一次归档。
+   Android 的导入页只有一条路，预览发生在解密**之后**，这条分支没有调用方，就不造一个没人报的码。
+
+### §36.3 三处落点的分工：为什么嗅探在 core:database、暂存在控制器、口令在卡片里
+
+**嗅探与解密放 `core:database`**（`SourceSyncDocumentInput`），因为两个入口都汇到这里：
+拨号路 `SourceSyncTransferImportService.receiveAndImport` 与监听路 `SourceSyncListenerImportService` 最终都调
+`importEnvelopeBytes`。加在它前面一处，两条路同时得到归档支持，不必改两遍。
+
+**暂存密文放 ViewModel 的控制器里**（`SourceSyncArchiveController`），不放 `SourceSyncImportState`。理由有三条：
+state 是 `StateFlow`，会被 Compose 反复重组、被测试整份比较、也可能被日志打印；
+密文留在控制器的私有字段里，对外只暴露 `pendingByteCount` 一个长度。
+第三条是生命周期：重选文件、点重置、离开页面都必须把暂存丢掉，控制器正好有 `clear()` 这个点。
+
+**口令只活在卡片分支的局部 `remember` 里**：不写 StateFlow、不落盘、不进日志。
+点「解密」时它被原样交给 ViewModel，ViewModel 在 `Dispatchers.Default` 上跑 PBKDF2（600 000 轮），
+用完即弃——卡片一消失（解开、重选、离开页面）那份字符串就随组合一起被丢弃。
+把关卡做成「常驻但按不动的按钮」而不是隐藏按钮，是为了避免用空口令白跑一次 600 000 轮密钥派生。
+
+### §36.4 三条外部可观察语义
+
+1. **没口令不猜**：归档 + 无口令 ⇒ `passphrase-required`，网关一次都不会被调（零写入的第一道闸）。
+   这条与 W6-30 的 `delivery-unconfirmed` 是同一种态度：宁可报「我缺东西」，不假装成功。
+2. **错口令与篡改同码**：`wrong-passphrase-or-tampered`。GCM 的 tag 校验天然分不出这两者，
+   伪造出区别就等于给攻击者一个 oracle；说法与 W6-62 §35.3 完全一致。
+3. **明文路径一个字节都没变**：`plaintextEnvelopeKeepsTheExactTextPath` 断言网关收到的是
+   `bytes.toString(Charsets.UTF_8)` 的同一个字符串（不是重新编码的等价物）。
+   既有 W6-23 的 19 例包括「0xB1 这类非法 UTF-8 ⇒ malformed-json」，全部仍然绿。
+
+### §36.5 落点行号表
+
+| 文件 | 行 | 内容 |
+| --- | --- | --- |
+| `core/database/.../sync/SourceSyncDocumentInput.kt` | :19 | `object SourceSyncDocumentInput`（新文件，74 行） |
+| 同上 | :22 | `PASSPHRASE_REQUIRED = "passphrase-required"` |
+| 同上 | :27 | `looksLikeArchive`：逐字节比 8 字节 magic，短于 8 字节直接 false |
+| 同上 | :36 | `resolve(bytes, passphrase)`：四分支 Plaintext / Decrypted / PassphraseRequired / Rejected |
+| 同上 | :45 | `ArchiveReader.tryRead`；:47 失败时 `reason ?: MALFORMED_PAYLOAD` |
+| 同上 | :50 | 成功时 `SourceSyncCodec.encode(envelope)`，runCatching 兜底 `malformed-payload` |
+| 同上 | :61 | `sealed interface SourceSyncDocumentResolution`（四个实现 :64/:67/:70/:73） |
+| `core/database/.../sync/SourceSyncTransferImportService.kt` | :130 | 原 `importEnvelopeBytes(bytes)` 保留签名，转调带口令重载（既有 5 处调用点零改动） |
+| 同上 | :143 | 新 `importEnvelopeBytes(bytes, passphrase: String?)`：按 resolve 四分支分派 |
+| 同上 | :161 | `private suspend fun deliverText(json)`：原来的 tryDecode → EnvelopeRejected / Imported 原样搬进来 |
+| `feature/settings/.../sync/SourceSyncArchiveController.kt` | :11 | `SourceSyncArchivePrompt(visible, fileName, error)`（新文件，126 行） |
+| 同上 | :18 | `SourceSyncArchiveCopy`：HINT / LABEL / ACTION / `errorOf(reason)` |
+| 同上 | :37 | `fun interface SourceSyncArchiveUnlockPort`（单方法，替身测试不跑 PBKDF2） |
+| 同上 | :53 | `class SourceSyncArchiveController`；:71 `offer`、:88 `unlock`、:120 `clear` |
+| `feature/settings/.../sync/SourceSyncImportViewModel.kt` | :163 | 控制器组装（port 直连 `SourceSyncDocumentInput.resolve`） |
+| 同上 | :176 | `val archivePrompt: StateFlow<SourceSyncArchivePrompt>` |
+| 同上 | :197 | `fun loadPickedDocument(bytes, fileName)`：非归档就直接当明文走既有 loadEnvelope |
+| 同上 | :210 | `fun unlockArchive(passphrase)`：`Dispatchers.Default` 上跑解密 |
+| 同上 | :322 / :338 | `reset()` / `onCleared()` 里 `archiveController.clear()` |
+| `feature/settings/.../sync/SourceSyncImportSession.kt` | :61 | `fun requirePassphrase(reason, message, fileName)`：整份置 BLOCKED，密文绝不进 envelopeJson |
+| `feature/settings/.../sync/SourceSyncImportLogic.kt` | :51 / :54 | `PASSPHRASE_REQUIRED` / `UNLOCK_FAILED` 两条中文文案；:76-77 `blockedText` 返回自身 |
+| `feature/settings/.../sync/SourceSyncImportScreen.kt` | :197-206 | 四个新 tag：`sync.import.passphrase.card` / `sync.import.passphrase` / `sync.import.unlock` / `sync.import.passphrase.error` |
+| 同上 | :220 / :224 | Route 收集 `archivePrompt`；picker 改调 `readPickedDocument` |
+| 同上 | :299-301 | 两个新形参都带缺省值 ⇒ 既有调用点与 11 个 androidTest 零改动 |
+| 同上 | :327 | 说明句补「或加密归档（.mharchive，需要导出时设置的口令）。」 |
+| 同上 | :368-418 | 口令卡：HINT + 密码遮罩输入框 + 「解密」按钮（空口令禁用）+ 错误行 |
+| 同上 | :1338 | `readPickedDocument` 改成 `stream.readBytes()`（原 `readEnvelope` 只读文本，二进制归档会被读坏，已删除） |
+
+### §36.6 用例清单
+
+**A. `SourceSyncArchiveImportTest`（core/database，12 例，进 `--required-suite`）**
+
+| 行 | 用例 | 断言 |
+| --- | --- | --- |
+| :28 | `looksLikeArchiveOnlyMatchesTheEightByteMagic` | 归档 true；空数组 / `"MHSYNC"` / 明文信封 false |
+| :36 | `windowsArchiveIsDecryptedAndHandedToTheGatewayAsPlainEnvelope` | Windows 写的 1282 B 归档解开后网关收到明文；解码结果与明文件**结构化相等**；`canSendSecrets == false`；3 条来源 + 1 条墓碑 |
+| :55 | `archiveWithoutAPassphraseIsRejectedWithTheStableCode` | `passphrase-required`；网关 0 调用 |
+| :69 | `wrongPassphraseReportsTheArchiveCodeAndNeverCallsTheGateway` | `wrong-passphrase-or-tampered`；0 调用 |
+| :81 | `aTamperedCiphertextReportsTheSameCode` | 翻掉最后一字节（tag 区）⇒ 同一个码 |
+| :97 | `aPassphraseBelowThePolicyIsRejectedBeforeAnyKeyIsDerived` | `"short"` ⇒ `passphrase-too-weak`；0 调用 |
+| :109 | `aTruncatedArchiveReportsItsStructuralCode` | 截到 20 B ⇒ `corrupt-header`（结构错不冒充口令错） |
+| :122 | `bytesThatOnlyStartWithTheMagicAreRejectedAsACorruptArchive` | 只有 magic 的 16 B ⇒ `corrupt-header` |
+| :136 | `bytesShorterThanTheMagicAreTreatedAsPlaintext` | `"MHSYNC"` 六字节 ⇒ 明文路径 ⇒ `malformed-json` |
+| :148 | `plaintextEnvelopeKeepsTheExactTextPath` | 网关收到 == `String(bytes, UTF_8)`，明文路径零变化 |
+| :162 | `aLocallyWrittenArchiveRoundTripsThroughTheSamePath` | 用 `ArchiveWriter.write` 现造归档 ⇒ 同一入口解开 ⇒ 信封结构相等 |
+| :180 | `acceptOnlyGatewayEchoesTheDecryptedIdentityWithoutWriting` | `acceptOnly` 网关回显 deviceId / snapshotId / 64 字符内容指纹；零写入 |
+
+**B. `SourceSyncArchiveControllerTest`（feature/settings，8 例）**
+
+| 用例 | 断言 |
+| --- | --- |
+| `plaintextIsNotOfferedAndLeavesNoPrompt` | 非归档 ⇒ `offer` false、卡片不可见、不碰端口 |
+| `anArchiveShowsThePromptAndAsksForThePassphrase` | 归档 ⇒ 卡片可见、带文件名、`onBlocked(passphrase-required)` |
+| `aCorrectPassphraseHandsBackTheEnvelopeAndDropsTheArchive` | 成功 ⇒ 回调解出信封、卡片收起、暂存清空 |
+| `aWrongPassphraseKeepsThePromptAndPutsTheArchiveCodeOnTheErrorLine` | 失败 ⇒ 卡片保持、错误行含 ArchiveError 原码、主文案是 UNLOCK_FAILED |
+| `aBlankPassphraseNeverReachesThePort` | 空白口令不调端口（不白跑 PBKDF2） |
+| `unlockWithoutAnOfferedArchiveDoesNothing` | 没暂存时 `unlock` 是 no-op |
+| `clearDropsTheStashedArchiveAndThePrompt` | `clear()` 同时丢密文与卡片 |
+| `pickingAnotherFileClearsThePreviousPrompt` | 重选明文文件 ⇒ 上一份归档的提示被清掉 |
+
+**C. `SourceSyncPassphraseScreenTest`（feature/settings androidTest，5 例）**
+
+| 用例 | 断言 |
+| --- | --- |
+| `noPassphraseCardIsRenderedWhenThePickerDidNotSeeAnArchive` | 明文路径不出现任何口令控件，首屏 PICK/PREVIEW 仍可见 |
+| `anArchiveShowsTheCardWithItsFileNameAndADisabledUnlockButton` | 卡片与输入框在；空口令时「解密」按不动；错误行不存在 |
+| `typingAPassphraseEnablesUnlockAndTappingItHandsTheTextBack` | 输字后按钮可用；点击把口令**原样**交回（`listOf("correct horse battery staple")`） |
+| `aRejectedPassphraseKeepsTheCardOpenAndShowsTheReasonCode` | 错误行显示 `wrong-passphrase-or-tampered` |
+| `thePassphraseCardSitsAboveThePreviewBlockAndKeepsTheMainFlowOnTheFirstScreen` | 不滚动：口令卡与首屏 PICK/PREVIEW 同时可见（W6-41 的首屏纪律没被破坏） |
+
+### §36.7 本机实跑（串行，低内存）
+
+| 步骤 | 命令 / 脚本 | 结果 |
+| --- | --- | --- |
+| 三模块单测 | `D:/mh-verify/run-w6-63.bat`（`:core:common:testDebugUnitTest :core:database:testDebugUnitTest :feature:settings:testDebugUnitTest`，`--max-workers=1 "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" "-Dkotlin.daemon.jvm.options=-Xmx1024m"`） | `BUILD SUCCESSFUL in 6m 53s`、`167 actionable tasks: 26 executed`、`EXIT=0` |
+| androidTest 编译 | `assembleDebugAndroidTest`（同一低内存参数） | `BUILD SUCCESSFUL in 3m 26s`、`EXIT=0` |
+| 门禁脚本自测 | `python -m unittest discover -s .github/scripts/tests` | `Ran 54 tests` / `OK` |
+| 清理 | 跑完 `gradlew --stop` | `java-left=0`；仓库根 `hs_err_pid*.log` / `replay_pid*.log` 计数均 0 |
+
+XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-63.log`）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `core/common` | 42 | 595 | 0 | 0 | 11 | 不变（11 个跳过仍是两个环境门控套件） |
+| `core/database` | 19 | **184** | 0 | 0 | 12 | 172 → 184（+12 = W6-63 的 `SourceSyncArchiveImportTest`） |
+| `feature/settings` | 22 | **342** | 0 | 0 | 0 | 334 → 342（+8 = W6-63 的 `SourceSyncArchiveControllerTest`） |
+
+关键套件逐个：`SourceSyncArchiveImportTest` **12/12**（14.60 s，主要花在 4 次真 PBKDF2 上：
+解开归档 2.25 s、错口令 2.91 s、篡改 2.48 s、本地写+读 4.70 s）、
+`SourceSyncArchiveControllerTest` **8/8**（0.043 s，端口是替身，不跑 PBKDF2）。
+
+### §36.8 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机搬运**：把归档拷到另一台机器再导入的完整流程 NOT_RUN（同 §33.8 / §34.8 / §35.8 第 5 条，都需要第二台机器）。
+2. **设备侧密码学**：全部结论来自 JVM；Android 上 `javax.crypto` 由 Conscrypt 实现，PBKDF2 600 000 轮在低端机上的耗时
+   与峰值内存未测 ⇒ DEVICE_UNVERIFIED。
+3. **传输路没有口令通道**：`receiveAndImport` 与监听路调的是单参重载（`passphrase = null`），
+   所以线上真收到一份归档只会得到 `passphrase-required` 而不是解开它。这是**有意**的：口令不过网。
+   要支持「对端发归档」就得在线协议里开口令通道，那是另一个安全评审的活，本轮不做。
+   也因此「归档在真实 socket 上跑过」这条证据不存在——归档的端到端只有文件选择器这一条路。
+4. **导出侧没有做**：「另存为 .mharchive」零实现，`ArchiveWriter.write` 目前只有测试调用方。
+5. **8 MiB 上限**：继承 §35.8 第 3 条，只测了判定写法没测接近上限的真数据。
+6. **口令的界外情况**：继承 §35.8 第 6 条（超长口令、NUL、代理对）。界面上也没有「显示口令」开关、
+   没有剪贴板粘贴的专项验证。
+7. **门禁**：本轮把 `SourceSyncArchiveImportTest` 加进 `--required-suite`（46 → **47** 个套件），
+   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`；
+   「CI 上这个套件确实被门禁跑过」只能由新 head 的 Android CI 日志证明，本节写就时该 head 尚未 push。
+8. **instrumentation**：新增 5 例 Compose 断言本机无设备/模拟器可跑 ⇒ 设备结论待 CI 的 API 32 / 36 作业；
+   真机仍 DEVICE_UNVERIFIED。
+
+### §36.9 下一步
+
+- 导出侧：「另存为 .mharchive」（`ArchiveWriter.write` 已有写端，缺的是导出页与文件落盘）；
+- 设备侧取证：把 PBKDF2 600 000 轮的耗时搬到模拟器上量一次（低端机是主要风险面）；
+- 真实两机搬运取证（§36.8 第 1 条），届时与 §33.8 / §34.8 / §35.8 的跨机项一起改成 EXECUTED_PASS；
+- 若产品上要「对端直接发归档」，先写一份安全评审：口令怎么进、超时多久、失败怎么告诉用户不泄露信息。

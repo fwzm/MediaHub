@@ -53,6 +53,20 @@ class SourceSyncImportSession(
         )
     }
 
+    /**
+     * 选到的是加密归档、但口令还没给（或给错了）：停在"要口令"的位置。
+     *
+     * 刻意不把密文写进 envelopeJson：状态里躺着二进制密文既没有用，也会让 canPreview 误判为可预览。
+     */
+    fun requirePassphrase(reason: String, message: String?, fileName: String? = null) {
+        _state.value = SourceSyncImportState(
+            status = SourceSyncImportStatus.BLOCKED,
+            fileName = fileName,
+            blockedReason = reason,
+            blockedMessage = message,
+        )
+    }
+
     /** 预演：把信封交给只读的规划服务，得到四桶。 */
     suspend fun preview() {
         val json = _state.value.envelopeJson

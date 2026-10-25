@@ -6,15 +6,18 @@ import com.mediahub.core.common.ClientIdentity
 import com.mediahub.core.common.sync.AndroidSourceTypeMap
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.database.sync.AndroidSourceSyncService
+import com.mediahub.core.database.sync.SourceSyncDocumentInput
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.provider.api.MediaProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 跨设备来源导入页的 ViewModel（W6-F + W6-H）。
@@ -150,6 +153,28 @@ class SourceSyncImportViewModel @Inject constructor(
         listenerController.awaitOnce(cancel)
     }
 
+    /**
+     * W6-63：离线加密归档（.mharchive）的口令流程（见 [SourceSyncArchiveController]）。
+     *
+     * 选中的文件先过这里：不是归档返回 false，界面继续走既有明文路径；是归档就停在"要口令"，
+     * 解开后把明文 JSON 交给同一个 [loadEnvelope]——预览与应用对归档和明文完全同路。
+     * 口令只在内存里用一次：解开即丢暂存字节，不落盘、不进日志。
+     */
+    private val archiveController = SourceSyncArchiveController(
+        port = SourceSyncArchiveUnlockPort { bytes, passphrase ->
+            SourceSyncDocumentInput.resolve(bytes, passphrase)
+        },
+        onUnlocked = { envelopeJson, fileName -> loadEnvelope(envelopeJson, fileName) },
+        onBlocked = { reason, message, fileName ->
+            receiveController.clear()
+            listenerController.clearResult()
+            session.requirePassphrase(reason, message, fileName)
+        },
+    )
+
+    /** 口令卡状态：只有选到归档时才可见。 */
+    val archivePrompt: StateFlow<SourceSyncArchivePrompt> = archiveController.prompt
+
     private val _verification = MutableStateFlow(SourceVerificationViewState())
 
     /** 结果页的逐源验证状态（三态 + 对话框 + 忙碌标记）。 */
@@ -160,6 +185,32 @@ class SourceSyncImportViewModel @Inject constructor(
             session.state.collect { current ->
                 _verification.update { view -> view.withSources(targetsOf(current)) }
             }
+        }
+    }
+
+    /**
+     * W6-63：用户选中一个文件（字节 + 文件名）。
+     *
+     * 两条路：加密归档进口令流程（[SourceSyncArchiveController.offer] 返回 true，本方法到此为止）；
+     * 其余按 UTF-8 文本原样交给 [loadEnvelope]——与 W6-63 之前的明文路径逐字节一致。
+     */
+    fun loadPickedDocument(documentBytes: ByteArray, fileName: String) {
+        if (archiveController.offer(documentBytes, fileName)) return
+        val text = documentBytes.toString(Charsets.UTF_8)
+        if (text.isBlank()) return
+        loadEnvelope(text, fileName)
+    }
+
+    /**
+     * W6-63：用口令解开刚选中的归档。
+     *
+     * PBKDF2-SHA256 是刻意慢的（60 万轮），所以放 Dispatchers.Default 上算，主线程只收状态。
+     * 成功后走 [loadEnvelope]，失败把 ArchiveError 原码留在口令卡错误行。
+     */
+    fun unlockArchive(passphrase: String) {
+        if (passphrase.isBlank()) return
+        viewModelScope.launch {
+            withContext(Dispatchers.Default) { archiveController.unlock(passphrase) }
         }
     }
 
@@ -268,6 +319,7 @@ class SourceSyncImportViewModel @Inject constructor(
 
     fun reset() {
         session.reset()
+        archiveController.clear()
         receiveController.clear()
         listenerController.clearResult()
         receiveLauncher.clear()
@@ -283,6 +335,7 @@ class SourceSyncImportViewModel @Inject constructor(
      * 发送端不占端口：连接随 viewModelScope 取消关闭，所以这里只清结论、不做别的。
      */
     override fun onCleared() {
+        archiveController.clear()
         listenerController.stop()
         // viewModelScope 取消时那两条 Job 自己会收尾（控制器把状态写回 Idle），这里只丢引用。
         receiveLauncher.clear()
