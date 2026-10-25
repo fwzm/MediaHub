@@ -8,6 +8,9 @@ import com.mediahub.player.compatibility.AxisAssessment
 import com.mediahub.player.compatibility.CapabilityEvidence
 import com.mediahub.player.compatibility.DevicePlaybackAssessment
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -23,6 +26,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 /**
@@ -33,6 +37,27 @@ import org.junit.Test
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SwitchablePlaybackEngineTest {
+    @Test
+    fun `facade forwards the exact critical progress envelope without resampling`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val outer = facade(backgroundScope, media3, mpv, mode = PlaybackEngineMode.MEDIA3)
+        val events = mutableListOf<PlaybackEventMessage>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { outer.events.collect { events += it } }
+        try {
+            outer.play(session(source())); runCurrent()
+            val captured = PlaybackEventSnapshot(PlaybackEvent.Seeked, PlaybackProgress(
+                serverId = "srv-1", itemId = "item-1", positionMs = 40_000,
+                durationMs = 90_000, isPaused = true, updatedAtEpochMs = 200,
+            ))
+            media3.emitEvent(captured)
+            media3.updateState { it.copy(positionMs = 80_000) }
+            runCurrent()
+            assertSame(captured, events.single())
+            assertEquals(40_000L, events.single().progress!!.positionMs)
+        } finally { outer.release() }
+    }
+
 
     private val dispatcher = StandardTestDispatcher()
 
@@ -731,8 +756,9 @@ class SwitchablePlaybackEngineTest {
         override val uiState: StateFlow<PlaybackUiState> get() = ui
         private val progressFlow = MutableSharedFlow<PlaybackProgress>(extraBufferCapacity = 1)
         override val progress: SharedFlow<PlaybackProgress> get() = progressFlow
-        private val eventsFlow = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
-        override val events: kotlinx.coroutines.flow.Flow<PlaybackEvent> get() = eventsFlow
+        private val eventsFlow = MutableSharedFlow<PlaybackEventMessage>(extraBufferCapacity = 8)
+        override val events: kotlinx.coroutines.flow.Flow<PlaybackEventMessage> get() = eventsFlow
+        fun emitEvent(event: PlaybackEventMessage) { eventsFlow.tryEmit(event) }
 
         var playedSession: PlaybackSession? = null
         var seekedTo: Long = -1

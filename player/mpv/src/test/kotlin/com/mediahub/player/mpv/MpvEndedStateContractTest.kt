@@ -96,7 +96,7 @@ class MpvEndedStateContractTest {
             assertFalse("起播后 isEnded 应为 false", engine.uiState.value.isEnded)
 
             val events = mutableListOf<PlaybackEvent>()
-            val collector = scope.launch { engine.events.collect { events += it } }
+            val collector = scope.launch { engine.events.collect { events += it.kind } }
 
             // mpv 播放结束
             instance.observer!!.event(MpvInstance.Event.END_FILE)

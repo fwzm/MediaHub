@@ -15,6 +15,8 @@ import com.mediahub.player.engine.EngineKind
 import com.mediahub.player.engine.ExternalSubtitle
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackEvent
+import com.mediahub.player.engine.PlaybackEventMessage
+import com.mediahub.player.engine.PlaybackEventSnapshot
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.PlaybackStartupTrace
 import com.mediahub.player.engine.PlaybackUiState
@@ -118,8 +120,8 @@ class MpvPlaybackEngine internal constructor(
     override val uiState: StateFlow<PlaybackUiState> = _uiState.asStateFlow()
     private val _progress = MutableSharedFlow<PlaybackProgress>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val progress: SharedFlow<PlaybackProgress> = _progress.asSharedFlow()
-    private val _events = Channel<PlaybackEvent>(Channel.UNLIMITED)
-    override val events: Flow<PlaybackEvent> = _events.receiveAsFlow()
+    private val _events = Channel<PlaybackEventMessage>(Channel.UNLIMITED)
+    override val events: Flow<PlaybackEventMessage> = _events.receiveAsFlow()
     // mpv/libass renders subtitles directly; there are no external cues or audio-session samples.
     override val subtitleCues: StateFlow<CueGroup?> = MutableStateFlow(null)
     override val downloadSpeedBps: StateFlow<Long> = MutableStateFlow(0L)
@@ -360,8 +362,10 @@ class MpvPlaybackEngine internal constructor(
                     // 修复：EOF 时同时置 isEnded = true、playWhenReady = false，
                     // 让 UI 的 `showPauseIcon = playWhenReady && !isEnded`（G3 已加）真正生效。
                     withCurrent(run) {
+                        val progress = progressSnapshot(run, null,
+                            _uiState.value.copy(isEnded = true, playWhenReady = false))
                         _uiState.update { it.copy(isEnded = true, playWhenReady = false) }
-                        _events.trySend(PlaybackEvent.Ended)
+                        _events.trySend(PlaybackEventSnapshot(PlaybackEvent.Ended, progress))
                     }
                 }
             }
@@ -424,10 +428,11 @@ class MpvPlaybackEngine internal constructor(
             // Native observers are asynchronous; read authoritative pause under nativeLock.
             val paused = m.getPropertyBoolean("pause") ?: return@withNative
             m.setPropertyBoolean("pause", !paused)
+            val progress = criticalProgress(run, m, _uiState.value.copy(playWhenReady = paused))
             withCurrent(run) {
                 run.requestedPlayWhenReady = paused
                 _uiState.update { it.copy(playWhenReady = paused) }
-                _events.trySend(if (paused) PlaybackEvent.Resumed else PlaybackEvent.Paused)
+                _events.trySend(PlaybackEventSnapshot(if (paused) PlaybackEvent.Resumed else PlaybackEvent.Paused, progress))
             }
         }
     }
@@ -442,16 +447,21 @@ class MpvPlaybackEngine internal constructor(
         withNative(run) { _, m ->
             val previous = m.getPropertyBoolean("pause")
             m.setPropertyBoolean("pause", !play)
+            val progress = criticalProgress(run, m, _uiState.value.copy(playWhenReady = play))
             withCurrent(run) {
                 _uiState.update { it.copy(playWhenReady = play) }
-                if (previous != !play) _events.trySend(if (play) PlaybackEvent.Resumed else PlaybackEvent.Paused)
+                if (previous != !play) _events.trySend(PlaybackEventSnapshot(if (play) PlaybackEvent.Resumed else PlaybackEvent.Paused, progress))
             }
         }
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) = withNative { run, m ->
         m.command(arrayOf("seek", (positionMs / 1000.0).toString(), "absolute"))
-        if (mode == SeekMode.COMMIT) withCurrent(run) { _events.trySend(PlaybackEvent.Seeked) }
+        if (mode == SeekMode.COMMIT) {
+            val progress = criticalProgress(run, m, _uiState.value)
+                .copy(positionMs = positionMs.coerceAtLeast(0))
+            withCurrent(run) { _events.trySend(PlaybackEventSnapshot(PlaybackEvent.Seeked, progress)) }
+        }
     }
 
     override fun setSpeed(speed: Float) = withNative { run, m ->
@@ -744,6 +754,12 @@ class MpvPlaybackEngine internal constructor(
         }
         job.start()
     }
+
+    // Called under nativeLock, before acquiring stateLock. A failed diagnostic read
+    // must not turn a successfully issued control into an exception.
+    private fun criticalProgress(run: Run, m: MpvInstance, fallback: PlaybackUiState): PlaybackProgress =
+        runCatching { progressSnapshot(run, m, fallback) }
+            .getOrElse { progressSnapshot(run, null, fallback) }
 
     private fun progressSnapshot(run: Run, m: MpvInstance?, fallback: PlaybackUiState): PlaybackProgress {
         val s = run.session

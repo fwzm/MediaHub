@@ -786,3 +786,18 @@ returning the unwrapped delegate. The real delayed-HLS and late-reader tests are
 mandatory CI contracts. This clarification ports a useful legacy architecture
 contract without adopting its incompatible provider IDs, storage model or progress
 pipeline. Physical playback remains a separate deferred gate.
+
+### 2026-10-25 ADR-017 clarification: immutable critical-event progress
+
+Critical Pause/Seek/Ended messages carry the owning PlaybackProgress captured before
+callbacks or later controls can change state. The coordinator flushes that snapshot
+instead of the last periodic sample. Keep existing periodic intervals and the single
+explicit final-flush authority; Stopped is still a notification, and preview seeks do
+not generate remote commits. Preserve the enum kinds through PlaybackEventMessage,
+with nullable progress only for legacy enum producers. In-repository consumers use
+kind and are rebuilt; no external binary API compatibility is inferred. The single
+engine channel is tapped once after multicast subscribers are ready. Autoplay checks
+the captured owner, and EOF/native state publication cannot rewrite old-event data.
+The old branch's reset-on-critical periodic-window policy is not adopted; existing
+independent sample clocks continue. This preserves current cadence while fixing
+critical payload correctness and ownership.
