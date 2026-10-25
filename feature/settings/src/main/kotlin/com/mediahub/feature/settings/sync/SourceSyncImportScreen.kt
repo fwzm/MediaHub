@@ -192,6 +192,18 @@ object SourceSyncImportTags {
 
     /** 发送结果行（已发送 / 发送中 / 发送失败：码）。 */
     const val SEND_STATE = "sync.send.state"
+
+    /** W6-63：加密归档的口令卡（只在选到 .mharchive 时出现）。 */
+    const val PASSPHRASE_CARD = "sync.import.passphrase.card"
+
+    /** W6-63：加密归档的口令输入框（只在选到 .mharchive 时出现）。 */
+    const val PASSPHRASE = "sync.import.passphrase"
+
+    /** W6-63：口令卡上的「解密」按钮。 */
+    const val UNLOCK = "sync.import.unlock"
+
+    /** W6-63：口令卡的错误行（口令不对 / 归档被改坏时带 ArchiveError 原码）。 */
+    const val PASSPHRASE_ERROR = "sync.import.passphrase.error"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -205,12 +217,13 @@ fun SourceSyncImportRoute(
     val receiveState by viewModel.receiveState.collectAsStateWithLifecycle()
     val listenState by viewModel.listenState.collectAsStateWithLifecycle()
     val sendState by viewModel.sendState.collectAsStateWithLifecycle()
+    val archivePrompt by viewModel.archivePrompt.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            val loaded = readEnvelope(context, uri)
+            val loaded = readPickedDocument(context, uri)
             if (loaded != null) {
-                viewModel.loadEnvelope(loaded.first, loaded.second)
+                viewModel.loadPickedDocument(loaded.first, loaded.second)
             }
         }
     }
@@ -237,6 +250,8 @@ fun SourceSyncImportRoute(
         sendState = sendState,
         onSend = viewModel::send,
         onSendCancel = viewModel::cancelSend,
+        archivePrompt = archivePrompt,
+        onUnlockArchive = viewModel::unlockArchive,
     )
 }
 
@@ -281,6 +296,10 @@ fun SourceSyncImportScreen(
     onSend: (SourceSyncSendForm) -> Unit = {},
     /** W6-49：取消正在飞的那一次发送；默认空实现（既有调用点与 UI 测试无需改动）。 */
     onSendCancel: () -> Unit = {},
+    /** W6-63：加密归档的口令卡状态；默认不可见（既有调用点与 UI 测试无需改动）。 */
+    archivePrompt: SourceSyncArchivePrompt = SourceSyncArchivePrompt(),
+    /** W6-63：提交口令解密；默认空实现（既有调用点与 UI 测试无需改动）。 */
+    onUnlockArchive: (String) -> Unit = {},
 ) {
     Scaffold(
         modifier = Modifier.testTag(SourceSyncImportTags.SCREEN),
@@ -304,7 +323,8 @@ fun SourceSyncImportScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                "选择另一台设备导出的信封文件（.json 或 .mhsync 的明文信封）。" +
+                "选择另一台设备导出的信封文件（.json 或 .mhsync 的明文信封），" +
+                    "或加密归档（.mharchive，需要导出时设置的口令）。" +
                     "预览不会写入任何数据。",
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -342,6 +362,58 @@ fun SourceSyncImportScreen(
                     CircularProgressIndicator(modifier = Modifier.height(16.dp))
                     Spacer(Modifier.height(4.dp))
                     Text("处理中…", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+
+            if (archivePrompt.visible) {
+                // 口令只活在这个分支的局部状态里：卡片一消失（解开、重选、离开页面）它就被丢弃，
+                // 不写 StateFlow、不落盘、不进日志。PBKDF2 在 ViewModel 里跑，这里只管输入。
+                var passphrase by remember { mutableStateOf("") }
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(SourceSyncImportTags.PASSPHRASE_CARD),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    ),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            SourceSyncArchiveCopy.HINT,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        OutlinedTextField(
+                            value = passphrase,
+                            onValueChange = { passphrase = it },
+                            label = { Text(SourceSyncArchiveCopy.LABEL) },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(SourceSyncImportTags.PASSPHRASE),
+                        )
+                        Button(
+                            onClick = { onUnlockArchive(passphrase) },
+                            enabled = passphrase.isNotBlank(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(SourceSyncImportTags.UNLOCK),
+                        ) {
+                            Text(SourceSyncArchiveCopy.ACTION)
+                        }
+                        archivePrompt.error?.let { line ->
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag(SourceSyncImportTags.PASSPHRASE_ERROR),
+                            )
+                        }
+                    }
                 }
             }
 
@@ -1257,16 +1329,19 @@ private fun SendSection(
     }
 }
 
-/** 读信封文本与文件名；读不出来返回 null（页面保持"未选文件"状态）。 */
-private fun readEnvelope(context: Context, uri: Uri): Pair<String, String>? {
+/**
+ * 读选中文件的原始字节与文件名；读不出来返回 null（页面保持"未选文件"状态）。
+ *
+ * W6-63 起必须按字节读：加密归档（.mharchive）是二进制，按文本解码会把它毁掉。
+ * 明文信封继续由 ViewModel 用 UTF-8 宽松解码，行为与 W6-63 之前一致。
+ */
+private fun readPickedDocument(context: Context, uri: Uri): Pair<ByteArray, String>? {
     val name = displayNameOf(context, uri)
-    val text = runCatching {
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-        }
+    val bytes = runCatching {
+        context.contentResolver.openInputStream(uri)?.use { stream -> stream.readBytes() }
     }.getOrNull()
-    if (text.isNullOrBlank()) return null
-    return text to (name ?: uri.lastPathSegment ?: "envelope.json")
+    if (bytes == null || bytes.isEmpty()) return null
+    return bytes to (name ?: uri.lastPathSegment ?: "envelope.json")
 }
 
 private fun displayNameOf(context: Context, uri: Uri): String? = runCatching {
