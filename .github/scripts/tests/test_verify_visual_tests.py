@@ -14,6 +14,19 @@ SHA = "2f9032732fc8365d19b5badac90f66b10310f500"
 
 
 class EvidenceGateTest(unittest.TestCase):
+    def test_system_media_keys_are_required_on_both_apis(self):
+        key = ("com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
+               "productionSystemMediaKeysPausePlayAndToggleExactlyOnce")
+        for api in (32, 36):
+            with self.subTest(api=api):
+                self.assertIn(key, gate.required_tests(api))
+                self.build(api)
+                def remove(suite):
+                    suite.remove(next(c for c in suite if c.get("name") == key[1]))
+                    suite.set("tests", str(len(suite)))
+                self.edit("feature/player", remove, api)
+                self.assertTrue(any(key[1] in p and "no passing execution" in p for p in self.problems(api)))
+
     def test_pause_seek_route_is_mandatory_on_both_apis(self):
         key = ("com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
                "productionPauseSeekAndResumeControlsPreserveControlledProgress")

@@ -103,6 +103,7 @@ class SwitchablePlaybackEngine(
     private var attachedSurface: Surface? = null
     private var fellBackThisSession = false
     private var released = false
+    private var requestedPlayWhenReady: Boolean? = null // stateLock; retained across replacement gap
     /** UI 的采样需求意图；引擎切换后必须原样重施给新引擎。 */
     private var audioSpectrumEnabled = false
 
@@ -123,6 +124,7 @@ class SwitchablePlaybackEngine(
             fallbackJob = null
             sessionGeneration += 1
             this.session = session
+            requestedPlayWhenReady = session.startPaused?.not()
             fellBackThisSession = false
             // 新会话不携带上一会话的字幕状态（匹配记忆由 ViewModel 层重放）。
             subtitleOperation++
@@ -154,7 +156,30 @@ class SwitchablePlaybackEngine(
     }
 
     override fun togglePlayPause() {
-        current?.togglePlayPause()
+        val engine = synchronized(stateLock) {
+            if (released || session == null) return
+            val active = current
+            if (active == null) {
+                val play = !(requestedPlayWhenReady ?: _uiState.value.playWhenReady)
+                requestedPlayWhenReady = play
+                _uiState.value = _uiState.value.copy(playWhenReady = play)
+            } else requestedPlayWhenReady = null
+            active
+        }
+        engine?.togglePlayPause()
+        synchronized(stateLock) {
+            if (!released && current === engine && engine != null) requestedPlayWhenReady = engine.uiState.value.playWhenReady
+        }
+    }
+
+    override fun setPlayWhenReady(play: Boolean) {
+        val engine = synchronized(stateLock) {
+            if (released || session == null) return
+            requestedPlayWhenReady = play
+            _uiState.value = _uiState.value.copy(playWhenReady = play)
+            current
+        }
+        engine?.setPlayWhenReady(play)
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) {
@@ -353,7 +378,7 @@ class SwitchablePlaybackEngine(
                 media3WatchJob = null
             }
             attachedSurface?.let { engine.attachSurface(it) }
-            engine.play(session)
+            engine.play(requestedPlayWhenReady?.let { session.copy(startPaused = !it) } ?: session)
         }
         // 降级切换后的字幕会话状态重施（外挂字幕重载/偏移重放）；异步，不阻塞起播。
         started?.let { engine ->
@@ -433,7 +458,9 @@ class SwitchablePlaybackEngine(
                 // 保存当前位置（先取 stop() 返回值，兜底 uiState）
                 // G3：**必须在 stop() 之前**读取暂停意图 —— stop() 会把引擎状态重置为
                 // 「已停止」，之后再读就永远是"未在播放"，降级会把暂停的会话重新播起来。
-                val wasPaused = failedEngine.uiState.value.isPlaying.not()
+                val wasPaused = synchronized(stateLock) {
+                    requestedPlayWhenReady?.not() ?: failedEngine.uiState.value.playWhenReady.not()
+                }
                 val position = failedEngine.stop()?.positionMs
                     ?: _uiState.value.positionMs
                 if (!isCurrentSession(s, fallbackGeneration, failedEngine)) {

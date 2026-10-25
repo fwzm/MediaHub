@@ -299,6 +299,15 @@ class PlaybackEngine(
         if (player.playWhenReady && player.playbackState != Player.STATE_ENDED) pause() else resume()
     }
 
+    override fun setPlayWhenReady(play: Boolean) {
+        if (released) return
+        if (player.playWhenReady != play) {
+            if (play) resume() else pause()
+        } else {
+            _uiState.update { it.copy(playWhenReady = play) }
+        }
+    }
+
     fun pause() {
         player.pause()
         // 立即同步意图，不等 onPlayWhenReadyChanged 回调（按钮图标必须立刻翻转）。

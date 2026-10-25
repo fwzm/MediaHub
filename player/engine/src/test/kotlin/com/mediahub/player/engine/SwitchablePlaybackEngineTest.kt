@@ -108,6 +108,31 @@ class SwitchablePlaybackEngineTest {
 
     // ---- 设备能力证据选路（ADR-042）----
 
+    @Test
+    fun `buffering fallback preserves positive playback intent`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.play(session(source()));runCurrent()
+        media3.updateState { it.copy(isPlaying = false, playWhenReady = true, isBuffering = true,
+            error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }
+        runCurrent()
+        assertEquals(false, mpv.playedSession?.startPaused)
+    }
+
+    @Test
+    fun `absolute pause in fallback release gap reaches the replacement engine`() = runTest(dispatcher) {
+        val media3 = FakeEngine(EngineKind.MEDIA3)
+        val mpv = FakeEngine(EngineKind.MPV)
+        val engine = facade(backgroundScope, media3, mpv)
+        engine.play(session(source()));runCurrent()
+        media3.releaseHook = { engine.setPlayWhenReady(false) }
+        media3.updateState { it.copy(isPlaying = true, playWhenReady = true,
+            error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }
+        runCurrent()
+        assertEquals(true, mpv.playedSession?.startPaused)
+    }
+
     private fun assessment(
         video: CapabilityEvidence = CapabilityEvidence.UNKNOWN,
         audio: CapabilityEvidence = CapabilityEvidence.UNKNOWN,
@@ -282,7 +307,7 @@ class SwitchablePlaybackEngineTest {
         engine.play(session(source()))
         runCurrent()
 
-        media3.updateState { it.copy(positionMs = 30_000, isPlaying = true) }
+        media3.updateState { it.copy(positionMs = 30_000, isPlaying = true, playWhenReady = true) }
         media3.updateState { it.copy(error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }
         runCurrent()
 
@@ -715,6 +740,7 @@ class SwitchablePlaybackEngineTest {
         var toggled = false
         var stopped = false
         var released = false
+        var releaseHook: (() -> Unit)? = null
         var audioSpectrumRetries = 0
         val audioSpectrumEnabledHistory = mutableListOf<Boolean>()
         var finalProgressOnStop: PlaybackProgress? = null
@@ -761,7 +787,7 @@ class SwitchablePlaybackEngineTest {
             )
             return finalProgressOnStop
         }
-        override fun release() { released = true }
+        override fun release() { released = true; releaseHook?.invoke() }
     }
 
     private class SuspendedEnginePreferenceHistory : EnginePreferenceHistory {

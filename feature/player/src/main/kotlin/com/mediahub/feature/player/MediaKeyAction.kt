@@ -5,15 +5,14 @@ import android.view.KeyEvent
 /**
  * V18-B：媒体键 → 播放动作映射（纯函数，可确定性测试）。
  *
- * 背景：全仓无 MediaSession / 无 dispatchKeyEvent / 无 onKeyEvent，
- * 因此 adb KEYCODE_MEDIA_PAUSE 或耳机/蓝牙媒体键都**没有接收者**。
+ * 前台 PlayerRoute 的系统媒体会话与焦点按键共用此映射。
  *
  * 产品契约（本轮最小范围，仅前台播放器）：
  * - MEDIA_PLAY_PAUSE / HEADSETHOOK → TOGGLE（与 UI 暂停按钮同一语义）
  * - MEDIA_PLAY / MEDIA_PAUSE → 显式语义，幂等（已是该状态则不动作）
  * - 其它按键不消费（返回 null），避免抢占音量/返回等系统行为
  *
- * 后台/锁屏控制需要 MediaSession（未包含在本轮范围）。
+ * 会话随页面生命周期停用与释放；后台播放不在此契约内。
  */
 enum class MediaKeyAction { TOGGLE, PLAY, PAUSE }
 

@@ -91,6 +91,76 @@ class PlayerRouteVisualEffectsTest {
     private var lastEngine: FakeEngine? = null
 
     @Test
+    fun productionSystemMediaKeysPausePlayAndToggleExactlyOnce() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        check(context.packageName == "com.mediahub.feature.player.test")
+        val preferences = UserPreferencesStore(context)
+        preferencesStore = preferences
+        originalPreferences = runBlocking { preferences.flow.first() }
+        runBlocking { preferences.update { UserPreferences(autoLandscape = false, immersiveBars = false,
+            playerVisualEffects = PlayerVisualEffectsPreferences.Default.copy(enabled = false)) } }
+        val vm = createViewModel(preferences, playOnStart = true)
+        val routeOwner = object : androidx.lifecycle.LifecycleOwner {
+            val registry = androidx.lifecycle.LifecycleRegistry(this)
+            override val lifecycle: androidx.lifecycle.Lifecycle get() = registry
+        }
+        instrumentation.runOnMainSync {
+            routeOwner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
+        }
+        routeVisible.value = true
+        composeRule.setContent { MaterialTheme {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.lifecycle.compose.LocalLifecycleOwner provides routeOwner,
+            ) { if (routeVisible.value) PlayerRoute(onBack = {}, viewModel = vm) }
+        } }
+        composeRule.waitUntil(10_000) { vm.resolveState.value is ResolveState.Ready && vm.uiState.value.playWhenReady }
+        composeRule.waitForIdle()
+        val engine = checkNotNull(lastEngine)
+        fun sendKey(key: String) {
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                instrumentation.uiAutomation.executeShellCommand("input keyevent $key"),
+            ).use { it.readBytes() }
+            instrumentation.waitForIdleSync()
+        }
+        sendKey("KEYCODE_MEDIA_PAUSE")
+        composeRule.waitUntil(10_000) { !vm.uiState.value.playWhenReady }
+        val pausedPosition = vm.uiState.value.positionMs
+        val pausedCount = engine.toggleCount
+        sendKey("KEYCODE_MEDIA_PAUSE")
+        composeRule.runOnIdle { engine.advanceBy(5_000L) }
+        assertEquals(pausedPosition, engine.uiState.value.positionMs)
+        assertEquals("Explicit Pause is idempotent", pausedCount, engine.toggleCount)
+        composeRule.mainClock.autoAdvance = false
+        instrumentation.runOnMainSync {
+            routeOwner.registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED
+        }
+        sendKey("KEYCODE_MEDIA_PLAY")
+        assertFalse("ON_STOP must reject commands without waiting for another Compose frame", engine.uiState.value.playWhenReady)
+        assertEquals(pausedCount, engine.toggleCount)
+        instrumentation.runOnMainSync {
+            routeOwner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
+        }
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+        sendKey("KEYCODE_MEDIA_PLAY")
+        composeRule.waitUntil(10_000) { vm.uiState.value.playWhenReady }
+        composeRule.runOnIdle { engine.advanceBy(5_000L) }
+        assertEquals(pausedPosition + 5_000L, engine.uiState.value.positionMs)
+        val playingCount = engine.toggleCount
+        sendKey("KEYCODE_MEDIA_PLAY")
+        assertEquals("Explicit Play is idempotent", playingCount, engine.toggleCount)
+        sendKey("KEYCODE_MEDIA_PLAY_PAUSE")
+        composeRule.waitUntil(10_000) { !vm.uiState.value.playWhenReady }
+        assertEquals("Down/up must produce one toggle", playingCount + 1, engine.toggleCount)
+        composeRule.runOnIdle { routeVisible.value = false }
+        composeRule.waitForIdle()
+        sendKey("KEYCODE_MEDIA_PLAY")
+        assertEquals("Disposed route cannot receive media commands", playingCount + 1, engine.toggleCount)
+        assertEquals(1, engine.playCount)
+    }
+
+    @Test
     fun productionPauseSeekAndResumeControlsPreserveControlledProgress() {
         Log.i("PlayerControlTest", "start controlled playback route")
         val context = InstrumentationRegistry.getInstrumentation().targetContext

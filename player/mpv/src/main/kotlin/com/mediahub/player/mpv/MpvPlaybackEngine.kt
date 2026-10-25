@@ -137,6 +137,7 @@ class MpvPlaybackEngine internal constructor(
     private var activeResources: Resources? = null // nativeLock only
 
     private class Run(val generation: Long, val session: PlaybackSession) {
+        var requestedPlayWhenReady = session.startPaused?.not() // stateLock; null keeps native startup default
         var playJob: Job? = null // stateLock
         var progressJob: Job? = null // stateLock
         var acceptsUpdates = true // stateLock
@@ -266,10 +267,6 @@ class MpvPlaybackEngine internal constructor(
                     checkCurrent()
                     // G3：降级重播必须尊重暂停意图（默认 null = 沿用既有「起播即播放」行为）。
                     // 必须在 loadfile 之后设置，否则会被 loadfile 重置为新文件默认的播放态。
-                    if (s.startPaused == true) {
-                        m.setPropertyBoolean("pause", true)
-                        withCurrent(run) { _uiState.update { it.copy(isPlaying = false, playWhenReady = false) } }
-                    }
                     val resources = Resources(run, m, b)
                     // Publication and invalidation are atomic; release cannot miss a newly published handle.
                     synchronized(stateLock) {
@@ -277,6 +274,15 @@ class MpvPlaybackEngine internal constructor(
                         activeResources = resources
                         run.resources = resources
                         published = true
+                    }
+                    // An explicit command may arrive inside loadfile before publication. Read it
+                    // after publishing; later commands can now queue behind nativeLock safely.
+                    val desiredPlay = synchronized(stateLock) { run.requestedPlayWhenReady }
+                    if (desiredPlay != null) {
+                        m.setPropertyBoolean("pause", !desiredPlay)
+                        withCurrent(run) { _uiState.update {
+                            it.copy(isPlaying = it.isPlaying && desiredPlay, playWhenReady = desiredPlay)
+                        } }
                     }
                     // Surface changes made while init was unpublished must not block Main or get lost.
                     val latestSurface = synchronized(stateLock) { attachedSurface }
@@ -406,15 +412,38 @@ class MpvPlaybackEngine internal constructor(
      * 现在直接读 **mpv 的权威属性 pause**：同步反映真实播放意图，不依赖回调时序。
      * 读失败（属性不可用）时不发控制指令或成功事件，避免用迟到的 UI 状态猜测播放意图。
      */
-    override fun togglePlayPause() = withNative { run, m ->
-        // Native observers are asynchronous; read the authoritative pause property under the native lock.
-        val paused = m.getPropertyBoolean("pause") ?: return@withNative
-        // 当前是暂停态 → 本次点击是继续（pause=false）；否则是暂停（pause=true）。
-        m.setPropertyBoolean("pause", !paused)
-        withCurrent(run) {
-            // 立即同步意图，不等 observer 回调（按钮图标必须立刻翻转）。
-            _uiState.update { it.copy(playWhenReady = paused) }
-            _events.trySend(if (paused) PlaybackEvent.Resumed else PlaybackEvent.Paused)
+    override fun togglePlayPause() {
+        val pending = synchronized(stateLock) { current?.takeIf { isCurrent(it) && it.resources == null } }
+        if (pending != null) {
+            setPlayWhenReady(!synchronized(stateLock) { pending.requestedPlayWhenReady ?: true })
+            return
+        }
+        withNative { run, m ->
+            // Native observers are asynchronous; read authoritative pause under nativeLock.
+            val paused = m.getPropertyBoolean("pause") ?: return@withNative
+            m.setPropertyBoolean("pause", !paused)
+            withCurrent(run) {
+                run.requestedPlayWhenReady = paused
+                _uiState.update { it.copy(playWhenReady = paused) }
+                _events.trySend(if (paused) PlaybackEvent.Resumed else PlaybackEvent.Paused)
+            }
+        }
+    }
+
+    override fun setPlayWhenReady(play: Boolean) {
+        val run = synchronized(stateLock) {
+            val owner = current?.takeIf { isCurrent(it) } ?: return
+            owner.requestedPlayWhenReady = play
+            _uiState.update { it.copy(playWhenReady = play) }
+            owner
+        }
+        withNative(run) { _, m ->
+            val previous = m.getPropertyBoolean("pause")
+            m.setPropertyBoolean("pause", !play)
+            withCurrent(run) {
+                _uiState.update { it.copy(playWhenReady = play) }
+                if (previous != !play) _events.trySend(if (play) PlaybackEvent.Resumed else PlaybackEvent.Paused)
+            }
         }
     }
 

@@ -55,6 +55,10 @@ interface PlaybackEnginePort {
     fun attachSurface(surface: Surface?)
     fun play(session: PlaybackSession)
     fun togglePlayPause()
+    /** Explicit playback intent. Engines with authoritative native state override this fallback. */
+    fun setPlayWhenReady(play: Boolean) {
+        if (uiState.value.playWhenReady != play) togglePlayPause()
+    }
     fun seekTo(positionMs: Long, mode: SeekMode = SeekMode.COMMIT)
     fun setSpeed(speed: Float)
     fun selectAudioTrack(selection: TrackSelection?)

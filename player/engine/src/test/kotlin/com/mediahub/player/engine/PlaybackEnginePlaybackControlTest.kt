@@ -31,6 +31,29 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class PlaybackEnginePlaybackControlTest {
     @Test
+    fun `absolute controls use native intent even when UI observer lags`() = runTest {
+        val native = ControlledPlayer()
+        val engine = PlaybackEngine(native.proxy(), PlaybackHeadersHolder(), NoLogger, backgroundScope, PlaybackSpeedMonitor())
+        try {
+            engine.play(session())
+            native.playWhenReady = false // no observer delivery; UI still offers Pause
+            engine.setPlayWhenReady(false)
+            assertFalse(native.playWhenReady)
+            assertFalse(engine.uiState.value.playWhenReady)
+            native.playWhenReady = true // UI still offers Play
+            engine.setPlayWhenReady(true)
+            assertTrue(native.playWhenReady)
+            assertTrue(engine.uiState.value.playWhenReady)
+            engine.setPlayWhenReady(false)
+            engine.setPlayWhenReady(false)
+            assertFalse(native.playWhenReady)
+            engine.setPlayWhenReady(true)
+            engine.setPlayWhenReady(true)
+            assertTrue(native.playWhenReady)
+        } finally { engine.release() }
+    }
+
+    @Test
     fun `toggle cancels play intent while buffering and resumes on the next click`() = runTest {
         val native = ControlledPlayer()
         val engine = PlaybackEngine(native.proxy(), PlaybackHeadersHolder(), NoLogger, backgroundScope, PlaybackSpeedMonitor())
