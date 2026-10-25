@@ -1,5 +1,6 @@
 package com.mediahub.feature.settings.sync
 
+import com.mediahub.core.common.sync.SourceSyncCancellation
 import com.mediahub.core.database.sync.SourceSyncTransferImportOutcome
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,6 +52,9 @@ object SourceSyncReceiveCopy {
     const val CHALLENGE_LABEL: String = "挑战（可留空）"
 
     const val ACTION: String = "接收"
+
+    /** W6-58：接收途中可以取消（关掉这条连接，不是等它超时）。 */
+    const val CANCEL: String = "取消接收"
 
     const val BUSY: String = "接收中…"
 
@@ -139,6 +143,20 @@ fun interface SourceSyncReceivePort {
         expectedChallenge: String?,
         allowExplicitHost: Boolean,
     ): SourceSyncTransferImportOutcome = receive(host, port, expectedChallenge)
+
+    /**
+     * W6-58：带「本地取消把手」的变体。
+     *
+     * 缺省实现忽略把手转调上面那条（既有 lambda 与类替身零改动）；生产端口覆盖它，
+     * 把手一路透传到 core:common 的客户端——取消时先置位再关 socket，被阻塞的读立刻返回。
+     */
+    suspend fun receive(
+        host: String,
+        port: Int,
+        expectedChallenge: String?,
+        allowExplicitHost: Boolean,
+        cancel: SourceSyncCancellation?,
+    ): SourceSyncTransferImportOutcome = receive(host, port, expectedChallenge, allowExplicitHost)
 }
 
 /**
@@ -166,9 +184,14 @@ class SourceSyncReceiveController(
     /**
      * 发起一次接收。
      *
+     * @param cancel 可选的本地取消把手（W6-58）：非 null 时调用方可以在接收途中取消；
+     *   取消是**用户动作、不是失败**——状态回 [SourceSyncReceiveState.Idle]，不留任何失败码。
      * @return true 表示本次真的调用了一次端口；false 表示端口不合法（不提交）或已有一次在飞。
      */
-    suspend fun receive(form: SourceSyncReceiveForm): Boolean {
+    suspend fun receive(
+        form: SourceSyncReceiveForm,
+        cancel: SourceSyncCancellation? = null,
+    ): Boolean {
         val targetPort = form.portNumber ?: return false
         if (!inFlight.compareAndSet(false, true)) return false
         try {
@@ -179,6 +202,7 @@ class SourceSyncReceiveController(
                     targetPort,
                     form.challengeOrNull,
                     form.allowExplicitHost,
+                    cancel,
                 )
             } catch (cancellation: CancellationException) {
                 _state.value = SourceSyncReceiveState.Idle
@@ -190,6 +214,12 @@ class SourceSyncReceiveController(
                     reason = RECEIVE_FAILED,
                     detail = unexpected::class.java.simpleName,
                 )
+                return true
+            }
+            // W6-58：取消不是失败。客户端会把取消折成本地码 transfer-cancelled，
+            // 但它属于「用户按了取消」，界面不该挂一条失败行——直接回 Idle。
+            if (cancel?.isCancelled == true) {
+                _state.value = SourceSyncReceiveState.Idle
                 return true
             }
             apply(outcome)
@@ -272,4 +302,18 @@ class SourceSyncTransferReceivePort(
         allowExplicitHost: Boolean,
     ): SourceSyncTransferImportOutcome =
         service.receiveAndImport(host, port, expectedChallenge, allowExplicitHost = allowExplicitHost)
+
+    override suspend fun receive(
+        host: String,
+        port: Int,
+        expectedChallenge: String?,
+        allowExplicitHost: Boolean,
+        cancel: SourceSyncCancellation?,
+    ): SourceSyncTransferImportOutcome = service.receiveAndImport(
+        host,
+        port,
+        expectedChallenge,
+        allowExplicitHost = allowExplicitHost,
+        cancel = cancel,
+    )
 }
