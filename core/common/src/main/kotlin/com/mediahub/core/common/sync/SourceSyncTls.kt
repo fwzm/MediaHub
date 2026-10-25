@@ -311,11 +311,15 @@ object SourceSyncTls {
      *
      * 拨号前就把「没有可用指纹」判掉（与 Windows AuthenticateClientAsync 同序），
      * 所以 certificate-unavailable 一定是「一个字节都没发」。
+     *
+     * @param targetHostName SNI / 目标主机名。缺省是同步传输的 [TARGET_HOST_NAME]；配对传输传
+     *   「mediahub-pairing」（与 Windows PairingTransportClient.TargetHostName 一致）。
      */
     fun handshakeClient(
         socket: Socket,
         options: SourceSyncTlsOptions,
         timeoutMs: Int = DEFAULT_HANDSHAKE_TIMEOUT_MS,
+        targetHostName: String = TARGET_HOST_NAME,
     ): SourceSyncTlsResult {
         if (timeoutMs <= 0) {
             return failed(SourceSyncTlsReasons.HANDSHAKE_FAILED, "握手超时必须为正，实际 " + timeoutMs)
@@ -334,7 +338,7 @@ object SourceSyncTls {
                 "本机没有可用的 TLS 1.3 实现，握手没有发起。",
             )
         val tlsSocket = try {
-            context.socketFactory.createSocket(socket, TARGET_HOST_NAME, socket.port, true) as SSLSocket
+            context.socketFactory.createSocket(socket, targetHostName, socket.port, true) as SSLSocket
         } catch (error: IOException) {
             return failed(
                 SourceSyncTlsReasons.HANDSHAKE_FAILED,

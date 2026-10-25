@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -14,6 +15,29 @@ SHA = "2f9032732fc8365d19b5badac90f66b10310f500"
 
 
 class EvidenceGateTest(unittest.TestCase):
+    def test_pairing_tls_address_and_listen_routes_require_every_actual_case(self):
+        root = Path(__file__).resolve().parents[3]
+        suites = (
+            ("com.mediahub.feature.settings.pairing.PairingLinkScreenTest", 12),
+            ("com.mediahub.feature.settings.pairing.PairingLinkAddressScreenTest", 7),
+            ("com.mediahub.feature.settings.sync.SourceSyncListenCancelScreenTest", 6),
+        )
+        for suite_name, minimum in suites:
+            source = root / "feature/settings/src/androidTest/kotlin" / Path(*suite_name.split("."))
+            methods = re.findall(r"@Test\s+fun\s+(\w+)\s*\(", source.with_suffix(".kt").read_text(encoding="utf-8-sig"))
+            self.assertGreaterEqual(len(methods), minimum)
+            for api in (32, 36):
+                for method in methods:
+                    key = (suite_name, method)
+                    with self.subTest(api=api, suite=suite_name, method=method):
+                        self.assertIn(key, gate.required_tests(api))
+                        self.build(api)
+                        def remove(suite):
+                            suite.remove(next(c for c in suite if c.get("name") == method))
+                            suite.set("tests", str(len(suite)))
+                        self.edit("feature/settings", remove, api)
+                        self.assertTrue(any(method in p and "no passing execution" in p for p in self.problems(api)))
+
     def test_pairing_and_receive_cancel_routes_are_mandatory(self):
         keys = [('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theEntryStartsEmptyAndTheVerifyButtonIsDisabled'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'typingALinkEnablesTheVerifyButtonAndHandsTheTextOver'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aParsedStateShowsTheDeviceIdTheFingerprintAndTheRemainingSeconds'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aFailedStateShowsTheStableCode'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theBackButtonCallsBackExactlyOnce'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theClearButtonWipesTheFieldAndReportsIt'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theWholePageNeverPrintsTheChallenge'), ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'theReceiveCardOffersACancelButtonThatIsDisabledWhenIdle'), ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'whileReceivingTheCancelButtonCallsBackAndTheReceiveButtonIsLocked'), ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'onceTheEnvelopeIsInTheCancelButtonIsLockedAgain'), ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'afterAFailureTheCancelButtonIsLockedAgain')]
         for api in (32, 36):

@@ -1,5 +1,6 @@
 package com.mediahub.core.database.sync
 
+import com.mediahub.core.common.sync.SourceSyncCancellation
 import com.mediahub.core.common.sync.SourceSyncListenerStart
 import com.mediahub.core.common.sync.SourceSyncListenerTransfer
 import com.mediahub.core.common.sync.SourceSyncCodec
@@ -77,12 +78,16 @@ class SourceSyncListenerImportService(
      *   解不出来就**刻意沉默**（一个字节都不写，对端看到 receipt-missing），
      *   解出来才写一个裸 0x04 —— 与 Windows CLI 的 receiptGate = TryDecode 同形
      *   （那边也是解码两次：先闸门、后真正导入）。
+     * @param cancel W6-61 的可选取消把手：非 null 时这一次等待可被本地取消，
+     *   取消给出本地码 transfer-cancelled（码不进跨机词汇表，监听仍然开着）。
+     *   默认 null 与 W6-61 之前逐字同行为。
      * @return 与 W6-23 同一个三段结果类型：TransferFailed / EnvelopeRejected / Imported。
      */
     suspend fun receiveAndImport(
         expectedChallenge: String? = null,
         auth: SourceSyncTransferOptions? = null,
         receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
+        cancel: SourceSyncCancellation? = null,
     ): SourceSyncTransferImportOutcome {
         val gate: ((ByteArray) -> Boolean)? = if (receipt.enabled) {
             { envelope ->
@@ -92,7 +97,7 @@ class SourceSyncListenerImportService(
             null
         }
         val received = withContext(Dispatchers.IO) {
-            listener.receiveOnce(expectedChallenge, auth, receipt, gate)
+            listener.receiveOnce(expectedChallenge, auth, receipt, gate, cancel)
         }
         return when (received) {
             is SourceSyncListenerTransfer.Failed ->

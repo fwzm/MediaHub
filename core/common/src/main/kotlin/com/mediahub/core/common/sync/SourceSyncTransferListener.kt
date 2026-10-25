@@ -117,6 +117,11 @@ class SourceSyncTransferListener private constructor(
      *   默认 [SourceSyncReceiptOptions.Off]，不多写一个字节。
      * @param receiptGate 可选解码闸门：返回 false 时刻意沉默（不写回执，也不把接收改成失败），
      *   对应 Windows ReceiveOnceAsync 的 receiptGate 参数。
+     * @param cancel W6-61 的可选取消把手：非 null 时本次等待变成**可取消的一次等待**——
+     *   等 accept 期间每 [ACCEPT_SLICE_MS] 检查一次，连上之后把手会关掉这条连接，
+     *   收尾给出的码是本地码 [SourceSyncLocalReasons.CANCELLED]（transfer-cancelled，不进跨机词汇表）。
+     *   **取消不是 close**：监听仍然开着，可以马上再调一次 receiveOnce 等下一次投递。
+     *   默认 null 与 W6-61 之前逐字同行为。
      * @return [SourceSyncListenerTransfer.Received] 或 [SourceSyncListenerTransfer.Failed]，不抛异常。
      */
     fun receiveOnce(
@@ -124,9 +129,10 @@ class SourceSyncTransferListener private constructor(
         auth: SourceSyncTransferOptions? = null,
         receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
         receiptGate: ((ByteArray) -> Boolean)? = null,
+        cancel: SourceSyncCancellation? = null,
     ): SourceSyncListenerTransfer {
         synchronized(acceptLock) {
-            return acceptAndReceive(expectedChallenge, auth, receipt, receiptGate)
+            return acceptAndReceive(expectedChallenge, auth, receipt, receiptGate, cancel)
         }
     }
 
@@ -135,6 +141,10 @@ class SourceSyncTransferListener private constructor(
      *
      * 正在等待 accept 的线程会立刻拿到 SocketException，被翻译成 listener-failed（监听已关闭）。
      * 正在读一条连接的线程不受影响，它按自己的读超时收尾。
+     *
+     * W6-61 起「只取消这一次等待、监听继续开着」不走 close，而是给 receiveOnce 传一个
+     * [SourceSyncCancellation]（见那个方法的 cancel 参数）。close 仍然是**关闭整个监听**，
+     * 所以 listener-failed 只剩「真的 close 过」这一种来源。
      */
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
@@ -150,26 +160,75 @@ class SourceSyncTransferListener private constructor(
         auth: SourceSyncTransferOptions?,
         receipt: SourceSyncReceiptOptions,
         receiptGate: ((ByteArray) -> Boolean)?,
+        cancel: SourceSyncCancellation?,
     ): SourceSyncListenerTransfer {
         if (closed.get()) {
             return failed(SourceSyncTransferReasons.LISTENER_FAILED, CLOSED_DETAIL)
         }
-        val socket = try {
-            server.accept()
-        } catch (timeout: SocketTimeoutException) {
-            return failed(
-                SourceSyncTransferReasons.TRANSFER_TIMEOUT,
-                "在 " + acceptTimeoutMs + " 毫秒内没有对端连上来，本次接收结束。",
-            )
-        } catch (closedNow: SocketException) {
-            return failed(SourceSyncTransferReasons.LISTENER_FAILED, CLOSED_DETAIL)
-        } catch (error: IOException) {
-            return failed(
-                SourceSyncTransferReasons.IO_FAILED,
-                "接受连接时出了 IO 错误：" + error.javaClass.simpleName,
-            )
+        return when (val accepted = acceptSocket(cancel)) {
+            is AcceptOutcome.Refused -> accepted.failure
+            is AcceptOutcome.Accepted -> {
+                val socket = accepted.socket
+                // 连上之后把这条连接交给把手：取消时它会被立刻关掉，阻塞的读随之返回。
+                cancel?.attach(socket)
+                receiveOver(socket, expectedChallenge, auth, receipt, receiptGate, cancel)
+            }
         }
-        return receiveOver(socket, expectedChallenge, auth, receipt, receiptGate)
+    }
+
+    /**
+     * 等一个对端连上来，切成 [ACCEPT_SLICE_MS] 的小片轮询，好让取消在毫秒级生效。
+     *
+     * 为什么不能直接阻塞在 server.accept() 上：阻塞期间没有任何挂起点，取消把无法打断它——
+     * 界面就得等到 [acceptTimeoutMs]（缺省 15 秒）才回得来。切片轮询的总预算仍然是
+     * [acceptTimeoutMs]（到点照样报 transfer-timeout），取消时把手一置位，最迟一片之后返回本地码。
+     *
+     * 监听被 close 时 server.accept() 抛 SocketException，仍然翻译成 listener-failed——
+     * 那是「监听没了」，与「这一次被取消」是两件事。
+     */
+    private fun acceptSocket(cancel: SourceSyncCancellation?): AcceptOutcome {
+        val deadlineNanos = System.nanoTime() + acceptTimeoutMs.toLong() * NANOS_PER_MILLI
+        while (true) {
+            if (cancel?.isCancelled == true) return AcceptOutcome.Refused(cancelledResult())
+            val remainingMillis = (deadlineNanos - System.nanoTime()) / NANOS_PER_MILLI
+            if (remainingMillis <= 0L) return AcceptOutcome.Refused(acceptTimeoutResult())
+            val sliceMillis = remainingMillis.coerceAtMost(ACCEPT_SLICE_MS.toLong()).toInt().coerceAtLeast(1)
+            try {
+                server.soTimeout = sliceMillis
+                return AcceptOutcome.Accepted(server.accept())
+            } catch (timeout: SocketTimeoutException) {
+                // 只是这一片到点：回到循环顶部重新看取消与总预算。
+                if (cancel?.isCancelled == true) return AcceptOutcome.Refused(cancelledResult())
+            } catch (closedNow: SocketException) {
+                if (cancel?.isCancelled == true) return AcceptOutcome.Refused(cancelledResult())
+                return AcceptOutcome.Refused(failed(SourceSyncTransferReasons.LISTENER_FAILED, CLOSED_DETAIL))
+            } catch (error: IOException) {
+                if (cancel?.isCancelled == true) return AcceptOutcome.Refused(cancelledResult())
+                return AcceptOutcome.Refused(
+                    failed(
+                        SourceSyncTransferReasons.IO_FAILED,
+                        "接受连接时出了 IO 错误：" + error.javaClass.simpleName,
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun acceptTimeoutResult(): SourceSyncListenerTransfer = failed(
+        SourceSyncTransferReasons.TRANSFER_TIMEOUT,
+        "在 " + acceptTimeoutMs + " 毫秒内没有对端连上来，本次接收结束。",
+    )
+
+    private fun cancelledResult(): SourceSyncListenerTransfer = failed(
+        SourceSyncLocalReasons.CANCELLED,
+        CANCELLED_DETAIL,
+    )
+
+    /** accept 这一步的两种收尾：拿到了连接，或者一个已经算好的失败。 */
+    private sealed interface AcceptOutcome {
+        class Accepted(val socket: Socket) : AcceptOutcome
+
+        class Refused(val failure: SourceSyncListenerTransfer) : AcceptOutcome
     }
 
     private fun receiveOver(
@@ -178,6 +237,7 @@ class SourceSyncTransferListener private constructor(
         auth: SourceSyncTransferOptions?,
         receipt: SourceSyncReceiptOptions,
         receiptGate: ((ByteArray) -> Boolean)?,
+        cancel: SourceSyncCancellation?,
     ): SourceSyncListenerTransfer {
         var tlsSocket: Socket? = null
         var writeStream: OutputStream? = null
@@ -203,7 +263,11 @@ class SourceSyncTransferListener private constructor(
                 }
             }
             when (val received = SourceSyncTransfer.receive(input, expectedChallenge, auth)) {
-                is SourceSyncTransferResult.Failed -> failed(received.reason, received.message)
+                // 取消优先在这里也要成立一次：协议层自己会把「连接被本地关掉」折成 io-failed 返回，
+                // 那时下面两个 catch 压根不会被触发（W6-58 在客户端侧踩过同一个坑）。
+                // 只改写失败结果——已经收全的信封不会被晚到的取消抹掉。
+                is SourceSyncTransferResult.Failed ->
+                    if (cancel?.isCancelled == true) cancelledResult() else failed(received.reason, received.message)
                 is SourceSyncTransferResult.Ok -> {
                     // 回执只在按帧收全之后写：半帧、校验失败、认证失配一律沉默，
                     // 与 Windows WriteReceiptAsync 的位置（ReceiveAsync 之后、gate 之前写）同形。
@@ -225,16 +289,28 @@ class SourceSyncTransferListener private constructor(
                 }
             }
         } catch (timeout: SocketTimeoutException) {
-            failed(
-                SourceSyncTransferReasons.TRANSFER_TIMEOUT,
-                "对端在这条连接上超时，信封没有收全。",
-            )
+            // 取消优先于超时：读超时是因为本地把连接关了，对端并没有超时。
+            if (cancel?.isCancelled == true) {
+                cancelledResult()
+            } else {
+                failed(
+                    SourceSyncTransferReasons.TRANSFER_TIMEOUT,
+                    "对端在这条连接上超时，信封没有收全。",
+                )
+            }
         } catch (error: IOException) {
-            failed(
-                SourceSyncTransferReasons.IO_FAILED,
-                "读取这条连接时出了 IO 错误：" + error.javaClass.simpleName,
-            )
+            if (cancel?.isCancelled == true) {
+                cancelledResult()
+            } else {
+                failed(
+                    SourceSyncTransferReasons.IO_FAILED,
+                    "读取这条连接时出了 IO 错误：" + error.javaClass.simpleName,
+                )
+            }
         } finally {
+            // 先把连接从把手上摘下来，再关它：否则 gracefulClose 期间的一次取消会去关一个
+            // 已经进入关闭流程的 socket（幂等但不必要），也可能把关闭预算拖长。
+            cancel?.detach(socket)
             val negotiatedSocket = tlsSocket
             if (negotiatedSocket != null) {
                 SourceSyncTls.gracefulClose(negotiatedSocket, closeBudgetMs)
@@ -264,6 +340,14 @@ class SourceSyncTransferListener private constructor(
         private const val MAXIMUM_PORT = 65_535
 
         private const val CLOSED_DETAIL = "监听已经关闭，没有接受连接。"
+
+        /** W6-61：取消后回给界面的诊断（码是本地码 transfer-cancelled，不进跨机词汇表）。 */
+        private const val CANCELLED_DETAIL = "本次接收已被本地取消：连接在本地关闭，监听仍然开着，可以再等一次。"
+
+        /** W6-61：等 accept 的切片长度，毫秒。取消的最坏延迟就是这一片。 */
+        private const val ACCEPT_SLICE_MS = 50
+
+        private const val NANOS_PER_MILLI = 1_000_000L
 
         /**
          * 在回环上打开监听。
