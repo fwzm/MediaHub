@@ -376,6 +376,7 @@ class PlayerViewModel @Inject constructor(
     /** 内嵌字幕轨手动选择：标记本会话手动优先，迟到的发现/记忆不再覆盖。 */
     fun onEmbeddedSubtitleSelected(selection: TrackSelection?) {
         if (stopped) return
+        if (!engine.isTrackSelectionCurrent(selection)) return
         beginManualSubtitleOperation()
         engine.selectSubtitleTrack(selection)
         _subtitleCenter.update { it.copy(selectedExternalId = null) }

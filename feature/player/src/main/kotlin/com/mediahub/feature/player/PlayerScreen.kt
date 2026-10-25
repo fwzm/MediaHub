@@ -724,28 +724,35 @@ fun PlayerRoute(
     }
 
     if (showAudioDialog) {
+        val selectionSnapshot = engineState
+        val selectionKind = engineKind
         PlayerVisualTheme(palette = visualState.chromePalette) {
             AudioTrackSheet(
-                tracks = engineState.audioTracks,
+                tracks = selectionSnapshot.audioTracks,
                 onDismiss = { showAudioDialog = false },
                 onSelect = { track: AudioTrack ->
-                    viewModel.engine.selectAudioTrack(TrackSelection(track.index, 0))
+                    PlayerTrackSelection.addressOf(selectionSnapshot, track, selectionKind)
+                        ?.let(viewModel.engine::selectAudioTrack)
                     showAudioDialog = false
                 },
             )
         }
     }
     if (showSubtitleDialog) {
+        val selectionSnapshot = engineState
+        val selectionKind = engineKind
         PlayerVisualTheme(palette = visualState.chromePalette) {
             SubtitleSheet(
-                tracks = engineState.subtitleTracks,
+                tracks = selectionSnapshot.subtitleTracks,
                 style = preferences.subtitleStyle,
                 subtitleCenter = subtitleCenter,
                 externalLoadSupported = viewModel.engine.subtitleCapabilities.externalLoad,
                 offsetSupported = viewModel.engine.subtitleCapabilities.offsetAdjust,
                 onDismiss = { showSubtitleDialog = false },
                 onSelect = { track: SubtitleTrack? ->
-                    viewModel.onEmbeddedSubtitleSelected(track?.let { TrackSelection(it.index, 0) })
+                    if (track == null) viewModel.onEmbeddedSubtitleSelected(null)
+                    else PlayerTrackSelection.addressOf(selectionSnapshot, track, selectionKind)
+                        ?.let(viewModel::onEmbeddedSubtitleSelected)
                 },
                 onStyleChange = { newStyle -> viewModel.updateSubtitleStyle { newStyle } },
                 onSelectExternal = viewModel::selectExternalSubtitle,

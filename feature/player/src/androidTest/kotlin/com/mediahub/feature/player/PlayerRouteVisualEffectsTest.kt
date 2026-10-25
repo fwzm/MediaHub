@@ -95,6 +95,40 @@ class PlayerRouteVisualEffectsTest {
     private var mediaKeyAudioOutput: AudioTrack? = null
 
     @Test
+    fun productionGroupedTrackRowsUseExactSnapshotAddresses() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        check(context.packageName == "com.mediahub.feature.player.test")
+        val preferences = UserPreferencesStore(context)
+        preferencesStore = preferences
+        originalPreferences = runBlocking { preferences.flow.first() }
+        runBlocking { preferences.update { UserPreferences(autoLandscape = false, immersiveBars = false,
+            playerVisualEffects = PlayerVisualEffectsPreferences.Default.copy(enabled = false)) } }
+        val vm = createViewModel(preferences)
+        routeVisible.value = true
+        composeRule.setContent { MaterialTheme { if (routeVisible.value) PlayerRoute(onBack = {}, viewModel = vm) } }
+        composeRule.waitUntil(10_000) { vm.resolveState.value is ResolveState.Ready }
+        val engine = checkNotNull(lastEngine)
+        composeRule.runOnIdle {
+            engine.uiState.value = engine.uiState.value.copy(
+                audioTracks = listOf(com.mediahub.model.AudioTrack(0, title = "audio-first"),
+                    com.mediahub.model.AudioTrack(1, title = "audio-second")),
+                subtitleTracks = listOf(com.mediahub.model.SubtitleTrack(0, title = "text-first"),
+                    com.mediahub.model.SubtitleTrack(1, title = "text-second")),
+                trackRowMap = com.mediahub.player.engine.TrackRowMap(
+                    audio = mapOf(0 to TrackSelection(0, 0, 777L), 1 to TrackSelection(0, 1, 777L)),
+                    subtitle = mapOf(0 to TrackSelection(0, 0, 777L), 1 to TrackSelection(0, 1, 777L)),
+                    snapshotToken = 777L))
+        }
+        composeRule.onNodeWithText(context.getString(R.string.player_audio_tracks)).performClick()
+        composeRule.onNodeWithText("audio-second", substring = true).performClick()
+        composeRule.runOnIdle { assertEquals(TrackSelection(0, 1, 777L), engine.audioSelection) }
+        composeRule.onNodeWithText(context.getString(R.string.player_subtitles)).performClick()
+        composeRule.onNodeWithText("text-second", substring = true).performClick()
+        composeRule.runOnIdle { assertEquals(TrackSelection(0, 1, 777L), engine.subtitleSelection) }
+        assertEquals(1, engine.playCount)
+    }
+
+    @Test
     fun productionSystemMediaKeysPausePlayAndToggleExactlyOnce() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -661,6 +695,8 @@ class PlayerRouteVisualEffectsTest {
         fun beginBuffering() { uiState.value = uiState.value.copy(isBuffering = true, isPlaying = false) }
         fun finishBuffering() { uiState.value = uiState.value.copy(isBuffering = false, isPlaying = uiState.value.playWhenReady) }
         var subtitleOff = false
+        var audioSelection: TrackSelection? = null
+        var subtitleSelection: TrackSelection? = null
         val loaded = mutableListOf<String>()
         override val subtitleCapabilities = com.mediahub.player.engine.SubtitleCapabilities(externalLoad = true, offsetAdjust = true)
         override suspend fun loadExternalSubtitle(subtitle: com.mediahub.player.engine.ExternalSubtitle): Boolean {
@@ -685,8 +721,8 @@ class PlayerRouteVisualEffectsTest {
             uiState.value = uiState.value.copy(positionMs = positionMs)
         }
         override fun setSpeed(speed: Float) = Unit
-        override fun selectAudioTrack(selection: TrackSelection?) = Unit
-        override fun selectSubtitleTrack(selection: TrackSelection?) { subtitleOff = selection == null }
+        override fun selectAudioTrack(selection: TrackSelection?) { audioSelection = selection }
+        override fun selectSubtitleTrack(selection: TrackSelection?) { subtitleSelection = selection; subtitleOff = selection == null }
         override fun stop(): PlaybackProgress? = null
         override fun release() = Unit
     }

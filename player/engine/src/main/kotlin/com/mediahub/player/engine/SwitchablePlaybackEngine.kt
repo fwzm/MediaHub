@@ -191,11 +191,24 @@ class SwitchablePlaybackEngine(
     }
 
     override fun selectAudioTrack(selection: TrackSelection?) {
-        current?.selectAudioTrack(selection)
+        val engine = synchronized(stateLock) { if (released) return; current } ?: return
+        if (!engine.isTrackSelectionCurrent(selection)) return
+        if (synchronized(stateLock) { !released && current === engine }) engine.selectAudioTrack(selection)
+    }
+
+    override fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean {
+        val engine = synchronized(stateLock) { if (released) return false; current }
+        // Off is valid during a replacement gap and must still cancel pending subtitles.
+        if (selection == null) return true
+        return engine?.isTrackSelectionCurrent(selection) == true &&
+            synchronized(stateLock) { !released && current === engine }
     }
 
     override fun selectSubtitleTrack(selection: TrackSelection?) {
+        val expected = synchronized(stateLock) { if (released) return; current }
+        if (selection != null && expected?.isTrackSelectionCurrent(selection) != true) return
         val engine = synchronized(stateLock) {
+            if (released || (selection != null && current !== expected)) return
             subtitleOperation++
             activeExternalSubtitle = null
             current
