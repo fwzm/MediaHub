@@ -108,6 +108,9 @@ object SourceSyncImportTags {
     /** 接收结果行（已收下 / 接收失败：码 / 信封被拒：码）。 */
     const val RECEIVE_STATE = "sync.receive.state"
 
+    /** W6-58：取消正在飞的那一次接收（只在接收中可点）。 */
+    const val RECEIVE_CANCEL = "sync.receive.cancel"
+
     // ---- W6-36：接收（监听） ----
 
     /** 监听区块本体（端口 / TLS 开关 / 开始 / 停止 / 等一次发送）。 */
@@ -221,6 +224,7 @@ fun SourceSyncImportRoute(
         onVerifyConfirm = viewModel::verify,
         receiveState = receiveState,
         onReceive = viewModel::receive,
+        onReceiveCancel = viewModel::cancelReceive,
         listenState = listenState,
         listenTls = viewModel.listenTls,
         onListenStart = viewModel::startListening,
@@ -255,6 +259,8 @@ fun SourceSyncImportScreen(
     /** W6-27：从 Windows 接收区块的状态；默认 Idle（既有调用点与 UI 测试无需改动）。 */
     receiveState: SourceSyncReceiveState = SourceSyncReceiveState.Idle,
     onReceive: (SourceSyncReceiveForm) -> Unit = {},
+    /** W6-58：取消正在飞的那一次接收；默认空实现（既有调用点与 UI 测试无需改动）。 */
+    onReceiveCancel: () -> Unit = {},
     /** W6-36：手机当接收端（监听）区块的状态与可用性；默认 Idle + TLS 不可用。 */
     listenState: SourceSyncListenState = SourceSyncListenState.Idle,
     listenTls: SourceSyncListenTlsAvailability = SourceSyncListenTlsAvailability(
@@ -453,7 +459,11 @@ fun SourceSyncImportScreen(
             // 「选择文件 / 预览」主流程构成，instrumentation 依赖首屏可见性
             // （SourceSyncImportScreenTest 的 pick/preview/blocked 断言不做滚动），
             // 而接收区块只是入口捷径，往下滚一格就能看到。
-            ReceiveSection(state = receiveState, onReceive = onReceive)
+            ReceiveSection(
+                state = receiveState,
+                onReceive = onReceive,
+                onCancel = onReceiveCancel,
+            )
             ListenSection(
                 state = listenState,
                 tls = listenTls,
@@ -655,6 +665,7 @@ private fun VerifyCredentialDialog(
 private fun ReceiveSection(
     state: SourceSyncReceiveState,
     onReceive: (SourceSyncReceiveForm) -> Unit,
+    onCancel: () -> Unit,
 ) {
     var form by remember { mutableStateOf(SourceSyncReceiveForm()) }
     val receiving = state == SourceSyncReceiveState.Receiving
@@ -733,6 +744,17 @@ private fun ReceiveSection(
                     .testTag(SourceSyncImportTags.RECEIVE_ACTION),
             ) {
                 Text(SourceSyncReceiveCopy.ACTION)
+            }
+            // W6-58：取消只在接收中可点。沿用本页「禁用而不是隐藏」的纪律（tag 与布局稳定），
+            // 取消回 Idle、不显示失败码——用户按的取消不是错误。
+            OutlinedButton(
+                onClick = onCancel,
+                enabled = receiving,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(SourceSyncImportTags.RECEIVE_CANCEL),
+            ) {
+                Text(SourceSyncReceiveCopy.CANCEL)
             }
             if (receiving) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
