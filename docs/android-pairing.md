@@ -364,6 +364,32 @@ instrumentation `feature/settings/src/androidTest/kotlin/com/mediahub/feature/se
 | 设备执行 | **DEVICE_UNVERIFIED**：7 例 instrumentation 本机无设备可跑，结论待 CI 的 visual-instrumentation 作业 |
 
 
+### 11.7.1 模拟器首红与修复（`c5f2d08` → `3400796`）
+
+本机 JVM 与 `assembleDebugAndroidTest` 都是绿的，但第一次真跑 instrumentation 时 `PairingLinkScreenTest` 红了 3 例：
+
+```
+PairingLinkScreenTest > theBackButtonCallsBackExactlyOnce FAILED
+  java.lang.AssertionError: Assert failed: The component is not displayed!
+PairingLinkScreenTest > aFailedStateShowsTheStableCode FAILED
+  java.lang.AssertionError: Failed to assert the following: (Text + EditableText contains 'not-base64url' (ignoreCase: false))
+PairingLinkScreenTest > aParsedStateShowsTheDeviceIdTheFingerprintAndTheRemainingSeconds FAILED
+  java.lang.AssertionError: Failed to assert the following: (Text + EditableText contains 'windows-a' (ignoreCase: false))
+```
+
+两条根因都不是产品代码的问题，是**测试自己的匹配器用错了**：
+
+1. `assertTextContains(text)` 的第二个参数 `substring` **缺省是 false**，即要求整段相等。结果行是
+   「已核对：windows-a，指纹 …，剩余 90 秒（本版本不连接对端）。」这一整句，所以三处断言都必须写成
+   `assertTextContains(..., substring = true)`。这一条本机永远发现不了——JVM 侧只断言 `lineOf()` 返回的字符串，
+   不经过 Compose 语义树。
+2. 返回按钮是 `IconButton { Icon(contentDescription = "返回") }`，它是**内容描述**不是文本：
+   `onNodeWithText("返回")` 匹配不到任何节点 ⇒ `The component is not displayed!`。改用 `onNodeWithContentDescription("返回")`。
+
+修完只重编 androidTest（`gradlew.bat --max-workers=2 :feature:settings:assembleDebugAndroidTest`）→
+`BUILD SUCCESSFUL in 2m 9s`、`155 actionable tasks: 6 executed, 149 up-to-date`、`java-left=0`，
+最终以 CI 的 visual-instrumentation 结论为准。
+
 ### 11.8 未做项（本版明确不做）
 
 - **不连接对端**：真实拉取邀请需要 TLS 1.3 + 证书指纹钉扎，Android 侧尚未实现（W6-59b）。

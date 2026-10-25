@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -107,12 +108,14 @@ class PairingLinkScreenTest {
             ),
         )
 
+        // assertTextContains 的第二个参数是 substring，缺省为 false（要求整段相等）；
+        // 结果行是「已核对：…」整句，所以这里必须显式 substring = true。
         composeRule.onNodeWithTag(PairingLinkTags.STATE)
             .performScrollTo()
             .assertIsDisplayed()
-            .assertTextContains("windows-a")
-            .assertTextContains(fingerprint.displayString)
-            .assertTextContains("90 秒")
+            .assertTextContains("windows-a", substring = true)
+            .assertTextContains(fingerprint.displayString, substring = true)
+            .assertTextContains("90 秒", substring = true)
     }
 
     @Test
@@ -122,7 +125,7 @@ class PairingLinkScreenTest {
         composeRule.onNodeWithTag(PairingLinkTags.STATE)
             .performScrollTo()
             .assertIsDisplayed()
-            .assertTextContains(PairingCodeReasons.NOT_BASE64URL)
+            .assertTextContains(PairingCodeReasons.NOT_BASE64URL, substring = true)
     }
 
     @Test
@@ -130,8 +133,9 @@ class PairingLinkScreenTest {
         var backs = 0
         render(onBack = { backs += 1 })
 
-        composeRule.onNodeWithText("返回").assertIsDisplayed()
-        composeRule.onNodeWithText("返回").performClick()
+        // 返回是 IconButton 的 contentDescription，不是文本：用 onNodeWithText 匹配不到它。
+        composeRule.onNodeWithContentDescription("返回").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("返回").performClick()
 
         assertEquals(1, backs)
     }
