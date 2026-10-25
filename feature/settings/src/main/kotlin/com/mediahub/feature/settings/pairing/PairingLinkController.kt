@@ -1,5 +1,7 @@
 package com.mediahub.feature.settings.pairing
 
+import com.mediahub.core.common.pairing.PairingAddressEnumerator
+import com.mediahub.core.common.pairing.PairingAddressReport
 import com.mediahub.core.common.pairing.PairingCodeReasons
 import com.mediahub.core.common.pairing.PairingInvitationResult
 import com.mediahub.core.common.pairing.PairingLink
@@ -48,6 +50,24 @@ sealed interface PairingLinkState {
 
     /** 失败（码来自 core:common 的 Pairing 词汇表，或本层的前置条件码）。 */
     data class Failed(val reason: String, val message: String? = null) : PairingLinkState
+}
+
+/**
+ * 「本机可被连的地址」区块的状态（W6-60）。
+ *
+ * 与 [PairingLinkState] 分开：这一块和「贴链接」是两条互不相干的信息，
+ * 混成一个状态会让「链接还没贴」和「网卡还没读」互相压制。
+ */
+sealed interface PairingAddressState {
+
+    /** 还没读过网卡。 */
+    data object NotRead : PairingAddressState
+
+    /** 读到了（可能没有可用地址，此时 report.reason 说明是哪一种）。 */
+    data class Ready(val report: PairingAddressReport) : PairingAddressState
+
+    /** 本次构建没有可用的枚举出口（界面预览态或未接线）：不读、不假装读到空。 */
+    data object Unavailable : PairingAddressState
 }
 
 /** 配对页的固定文案（界面、测试与文档共用一份）。 */
@@ -126,11 +146,21 @@ object PairingLinkCopy {
 class PairingLinkController(
     private val now: () -> Long = { System.currentTimeMillis() },
     private val fetchPort: PairingFetchPort? = null,
+    private val addressEnumerator: PairingAddressEnumerator? = null,
 ) {
 
     private val _state = MutableStateFlow<PairingLinkState>(PairingLinkState.Idle)
 
     val state: StateFlow<PairingLinkState> = _state.asStateFlow()
+
+    private val _addresses = MutableStateFlow<PairingAddressState>(
+        if (addressEnumerator == null) PairingAddressState.Unavailable else PairingAddressState.NotRead,
+    )
+
+    /** 本机可被连的地址（只读展示，见 [refreshAddresses]）。 */
+    val addresses: StateFlow<PairingAddressState> = _addresses.asStateFlow()
+
+    private val readingAddresses = AtomicBoolean(false)
 
     /** 解析成功时留住的载荷：挑战与指纹都在这里，界面看不到。 */
     private var held: PairingPayload? = null
@@ -228,6 +258,32 @@ class PairingLinkController(
             }
         } finally {
             fetching.set(false)
+        }
+    }
+
+    /**
+     * 读一次本机网卡，得到「可被连的地址」（W6-60）。
+     *
+     * 同步读：只查本机网卡属性（不发包、不解析 DNS、不 bind），与 Windows 的 Describe() 同形状，
+     * 因此不需要协程，JVM 单测可以直接调。已经有一次在飞就直接返回 false，不读第二遍。
+     *
+     * 读不到一律落成 address-enumeration-failed（由 PairingAddressCandidates.failed 给），
+     * 不新造 Android 专用码；没有可用地址且读成功则是 no-usable-address。
+     */
+    fun refreshAddresses(): Boolean {
+        val enumerator = addressEnumerator
+        if (enumerator == null) {
+            _addresses.value = PairingAddressState.Unavailable
+            return false
+        }
+        if (!readingAddresses.compareAndSet(false, true)) {
+            return false
+        }
+        try {
+            _addresses.value = PairingAddressState.Ready(enumerator.enumerate())
+            return true
+        } finally {
+            readingAddresses.set(false)
         }
     }
 

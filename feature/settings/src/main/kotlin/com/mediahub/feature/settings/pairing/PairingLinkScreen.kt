@@ -23,6 +23,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +34,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mediahub.core.common.pairing.PairingAddressEnumerator
 import kotlinx.coroutines.launch
 
 /**
@@ -51,6 +53,14 @@ object PairingLinkTags {
     const val STATE: String = "pairing.state"
 
     const val CLEAR: String = "pairing.clear"
+
+    const val ADDRESSES: String = "pairing.addresses"
+
+    const val ADDRESS_LINE: String = "pairing.addresses.line"
+
+    const val ADDRESS_STATE: String = "pairing.addresses.state"
+
+    const val ADDRESS_REFRESH: String = "pairing.addresses.refresh"
 }
 
 /**
@@ -63,15 +73,25 @@ object PairingLinkTags {
 fun PairingLinkRoute(
     onBack: () -> Unit,
     controller: PairingLinkController = remember {
-        PairingLinkController(fetchPort = PairingTransportFetchPort())
+        PairingLinkController(
+            fetchPort = PairingTransportFetchPort(),
+            addressEnumerator = PairingAddressEnumerator(),
+        )
     },
 ) {
     val state by controller.state.collectAsStateWithLifecycle()
+    val addresses by controller.addresses.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    // 进页就读一次本机地址：读的是网卡属性，不发包，所以不需要用户先点任何按钮。
+    LaunchedEffect(controller) {
+        controller.refreshAddresses()
+    }
     PairingLinkScreen(
         state = state,
+        addressState = addresses,
         onVerify = { link -> controller.verify(link) },
         onFetch = { scope.launch { controller.fetchInvitation() } },
+        onRefreshAddresses = { controller.refreshAddresses() },
         onClear = { controller.clear() },
         onBack = onBack,
     )
@@ -91,6 +111,8 @@ fun PairingLinkScreen(
     onFetch: () -> Unit,
     onClear: () -> Unit,
     onBack: () -> Unit,
+    addressState: PairingAddressState = PairingAddressState.NotRead,
+    onRefreshAddresses: () -> Unit = {},
 ) {
     var link by remember { mutableStateOf("") }
     val line = PairingLinkCopy.lineOf(state)
@@ -177,6 +199,66 @@ fun PairingLinkScreen(
             ) {
                 Text("清空")
             }
+            Spacer(Modifier.height(16.dp))
+            PairingAddressBlock(state = addressState, busy = busy, onRefresh = onRefreshAddresses)
+        }
+    }
+}
+
+/**
+ * 「本机可被连的地址」区块（W6-60）：只读展示，**没有任何「开始监听」按钮**。
+ *
+ * 与 Windows 侧同义：候选地址只变成文字，从不变成 socket。刷新按钮只是重新读一次网卡属性。
+ */
+@Composable
+private fun PairingAddressBlock(
+    state: PairingAddressState,
+    busy: Boolean,
+    onRefresh: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(PairingLinkTags.ADDRESSES),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(PairingAddressSummary.TITLE, style = MaterialTheme.typography.titleSmall)
+        Text(PairingAddressSummary.DISPLAY_ONLY_HINT, style = MaterialTheme.typography.bodySmall)
+        when (state) {
+            PairingAddressState.NotRead -> Text(
+                PairingAddressSummary.NOT_READ_HINT,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.testTag(PairingLinkTags.ADDRESS_STATE),
+            )
+            PairingAddressState.Unavailable -> Text(
+                PairingAddressSummary.UNAVAILABLE_HINT,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.testTag(PairingLinkTags.ADDRESS_STATE),
+            )
+            is PairingAddressState.Ready -> {
+                Text(
+                    PairingAddressSummary.lineOf(state.report),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.testTag(PairingLinkTags.ADDRESS_STATE),
+                )
+                val lines = PairingAddressSummary.linesOf(state.report)
+                for (index in lines.indices) {
+                    Text(
+                        lines[index],
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag(PairingLinkTags.ADDRESS_LINE + "." + index),
+                    )
+                }
+            }
+        }
+        OutlinedButton(
+            onClick = onRefresh,
+            enabled = !busy,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(PairingLinkTags.ADDRESS_REFRESH),
+        ) {
+            Text(PairingAddressSummary.REFRESH)
         }
     }
 }
