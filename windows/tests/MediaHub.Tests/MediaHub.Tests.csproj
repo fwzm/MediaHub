@@ -25,5 +25,7 @@
   <ItemGroup>
     <!-- The playback engine tests need a real media file; it is committed so the tests are hermetic. -->
     <Content Include="..\assets\sample-av.mp4" Link="assets\sample-av.mp4" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Written by the Android Kotlin ArchiveWriter (W6-65); the Windows reader must consume its exact bytes. -->
+    <Content Include="..\assets\android-written-archive.mharchive" Link="assets\android-written-archive.mharchive" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
