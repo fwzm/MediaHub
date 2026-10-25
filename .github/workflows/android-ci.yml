@@ -143,6 +143,9 @@ jobs:
           #     结果是本地码 transfer-cancelled 而非 io-failed；只覆盖失败结果，成功收下的信封不被晚到的取消抹掉）
           #   feature.settings.sync.SourceSyncReceiveLauncherTest —— 接收卡的单飞与取消（W6-58：取消回 Idle 不留码、
           #     未在收时是 no-op、每次启动一枚新把手，旧取消不泄漏到下一次接收）
+          #   feature.settings.pairing.PairingLinkControllerTest —— 配对链接核对（W6-59：合法链接解出设备 / 指纹 /
+          #     剩余秒，非法链接原样透出 core:common 的码（code-empty / not-a-pairing-link / code-too-long /
+          #     not-base64url / payload-invalid / expired），核对成功也不泄露挑战，失败作废上一次结论）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -184,6 +187,7 @@ jobs:
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferMatrixTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferCancelTest \
             --required-suite com.mediahub.feature.settings.sync.SourceSyncReceiveLauncherTest \
+            --required-suite com.mediahub.feature.settings.pairing.PairingLinkControllerTest \
             --require-complete-suites
 
       - name: Lint
