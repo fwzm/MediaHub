@@ -274,3 +274,101 @@ E2E 结论：黄金信封经回环帧搬运后，规划三桶 2 / 1 / 1 与 Wind
 - 与真机 / Windows 服务端的联调：本轮对端是 127.0.0.1 上的测试替身，验证的是帧与码，不是网络与握手。
 - 把客户端接进导入流程（拿到信封后自动预览/应用）——W6-C 的 AndroidSourceSyncService 已能导入，但两者尚未串成一条命令。
 
+## 11. 配对入口（W6-59：只核对链接）
+
+### 11.1 动机（缺口是真的）
+
+第 1-10 节把 Android 侧配对**契约**做齐了：载荷、帧、码、挑战、指纹、链接、候选地址、回环传输客户端，
+共 10 个测试套件。但 `feature/` 层对 `PairingLink` / `PairingPayload` / `PairingTransportClient` /
+`PairingAddressCandidates` **零引用**（在 app / core / feature / provider 的非测试代码里搜这四类名只命中 core:common 自身）。
+也就是说：契约能解析一段链接，可用户没有地方贴这段链接——目标书 ③「二维码安全配对」在 Android 侧
+等于没有入口。本轮补的就是这个入口的第一段。
+
+### 11.2 为什么本版只核对、不连接
+
+| 项 | Windows | Android 本版 | 结论 |
+| --- | --- | --- | --- |
+| 回环 TCP 帧交换 | 有（PairingTransportClient.cs） | 有（PairingTransportClient.kt，W6-G） | 可做 |
+| TLS 1.3 + 证书指纹钉扎 | 有 | **没有** | 连接邀请这一步得等 |
+| 二维码生成/扫码 | 有（PairingCode） | 无相机依赖、无扫码 | 本版只接受粘贴的文本 |
+| 凭据写入 | 有（配对后落库） | 无 | 本版不写任何凭据 |
+
+所以本版的边界写进界面常量（`PairingLinkCopy.NOT_YET`）：**只核对链接里写明的设备与公钥指纹，不会连接对端**。
+把「已实现」和「没做」分开写，是为了避免用户把「核对成功」当成「已经配好」。
+
+### 11.3 三条外部可观察语义
+
+| 输入 | 结果 | 稳定码来源 |
+| --- | --- | --- |
+| 合法链接（`mediahub://pair?...`） | 状态 `Parsed`，显示设备标识 / 公钥指纹（`displayString` 16 组 4 字符大写）/ 剩余秒数 / 对端 host:port | 无码（`codeOf` 为 null） |
+| 空白输入 | 状态 `Failed(pairing-link-empty)`，配一句人话 | 契约码 `PairingLinkReasons.EMPTY` |
+| 非配对链接前缀 | `Failed(not-a-pairing-link)` | `PairingLinkReasons.NOT_A_LINK` |
+| 超过 8192 字符 | `Failed(pairing-link-too-long)` | `PairingLinkReasons.TOO_LONG` |
+| 非法 base64url / 长度模 4 余 1 | `Failed(not-base64url)` | `PairingCodeReasons.NOT_BASE64URL` |
+| 不是合法配对载荷 / 版本不符 / 字段缺失 | `Failed(payload-invalid)` 等 | `PairingCode` 的映射（五个业务码透传） |
+| 已过期（expires <= now） | `Failed(expired)` | `PairingReasons.EXPIRED` |
+
+**没有新增任何 Android 专用码**：界面只显示 core:common 已有的码，本层唯一的补充是给 `pairing-link-empty`
+配一句人话（`EMPTY_HINT`），码本身仍是契约值。
+
+### 11.4 不泄漏挑战
+
+`challenge` 是这次邀请的一次性凭据。状态 `Parsed` 里**没有**它，结果行没有它，`PairingLinkState` 的任何字段也没有它；
+校验用 JVM 用例钉住（`theSuccessLineLeaksNeitherTheChallengeNorTheRawLink`）：结果行不含 `challenge.base64`、不含 `mediahub://`、
+不含 `PairingChallenge(<redacted>)`。链接原文也不进状态（只进输入框，输入框内容不随状态保存）。
+
+### 11.5 落点（文件与行号）
+
+| 文件 | 行号 | 内容 |
+| --- | --- | --- |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/pairing/PairingLinkController.kt` | `:19` / `:37` / `:62` / `:71` / `:90` / `:107` / `:133` / `:138` | `PairingLinkState`（Idle / Parsed / Failed）、`PairingLinkCopy`（含 `:62` `lineOf` 与 `:71` `codeOf`）、`:90` `PairingLinkController(now)`、`:107` `verify`、`:133` `clear`、`:138` `endpointOf`（https 缺省 443、其它 80） |
+| `.../pairing/PairingLinkScreen.kt` | `:39` / `:58` / `:78` | `PairingLinkTags`（`:41` `pairing.screen`、`:43` `pairing.link`、`:45` `pairing.action`、`:47` `pairing.state`、`:49` `pairing.clear`）、`:58` `PairingLinkRoute`（remember 控制器，无 Hilt）、`:78` 无状态 `PairingLinkScreen` |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/SettingsScreen.kt` | `:61` / `:78` / `:89` / `:130` | `:61` import、`:78` `var showPairing`、`:89` `if (showPairing) { PairingLinkRoute(...); return }`（与 W6-F 的导入页同一种页内托管，不改导航图）、`:130` 同步区块的「配对设备」按钮（testTag `pairing.entry` 在 `:133`） |
+
+### 11.6 用例清单
+
+JVM `feature/settings/src/test/kotlin/com/mediahub/feature/settings/pairing/PairingLinkControllerTest.kt`（13 例，全部用 `PairingPayload.create` + `PairingLink.create` 现场造链接、注入固定时钟，不写死 base64）：
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `aRealLinkYieldsTheDeviceFingerprintEndpointAndRemainingSeconds` | Parsed 三字段 + 剩余 90 秒 + 结果行含三项 + `codeOf` 为 null |
+| `anHttpsLinkWithoutAPortFallsBackToFourFortyThree` | 地址规范化（缺省端口 443） |
+| `aBlankLinkIsRefusedWithTheContractEmptyCode` | 空链接 = 契约 `pairing-link-empty`，不是自造码 |
+| `aBareCodeWithoutTheLinkPrefixIsNotAPairingLink` | 只有码没有前缀 → `not-a-pairing-link` |
+| `anExpiredLinkIsRefused` | 过期 → `expired` |
+| `anOverLongLinkIsRefusedByLength` | 超 8192 → `pairing-link-too-long` |
+| `textThatIsNotBase64UrlIsRefused` | 非 base64url → `not-base64url` |
+| `aPayloadThatIsNotAPairingPayloadIsPayloadInvalid` | 合法 base64 但不是载荷 → `payload-invalid` |
+| `aFailedVerifyAfterASuccessDropsThePreviousConclusion` | 不留半成品：失败后上一次成功结论被作废 |
+| `clearReturnsToIdle` | 清空回 Idle，结果行与码都为 null |
+| `theSuccessLineLeaksNeitherTheChallengeNorTheRawLink` | 不泄漏挑战/链接原文 |
+| `theFailureLineCarriesTheStableCode` | 失败行含稳定码与那句人话 |
+| `theCopyIsStableAndSaysTheVersionDoesNotConnect` | 固定文案（标题/按钮/tag）与「不会连接对端」 |
+
+instrumentation `feature/settings/src/androidTest/kotlin/com/mediahub/feature/settings/pairing/PairingLinkScreenTest.kt`（7 例）：
+空态按钮不可点、贴链接后按钮可点并把原文交给回调、Parsed 行显示设备/指纹/剩余秒、Failed 行显示稳定码、
+返回回调只调一次、「清空」把输入框与按钮一起复位、整页不打印挑战。
+
+### 11.7 实测记录
+
+本机串行实跑（跑前 `gradlew --stop`、跑完再 `--stop` 并确认 `Get-Process java` 为 0）：
+
+| 项 | 结果 |
+| --- | --- |
+| 命令 | `gradlew.bat --max-workers=2 --rerun-tasks :feature:settings:testDebugUnitTest :feature:settings:assembleDebugAndroidTest`（`JAVA_HOME`=Android Studio JBR、`ANDROID_HOME`=Sdk） |
+| 构建 | `BUILD SUCCESSFUL in 5m 17s`、`212 actionable tasks: 212 executed`、EXIT=0 |
+| `feature/settings` JVM | **18 套件 / 304 例 / 0 失败 / 0 错误 / 0 跳过**（291 + 13）；`PairingLinkControllerTest` **13/13** |
+| androidTest APK | `settings-debug-androidTest.apk` = **20476121 B**（2026-10-25 13:09 +08:00 重打） |
+| APK 解包核对 | 19 个 dex；7 个新用例名与 `PairingLinkScreenTest` 全在 `classes16.dex`（14248 B）；`pairing.link` / `pairing.action` / `pairing.state` / `pairing.clear` 在 `classes16.dex` 与 `classes8.dex`；入口 tag `pairing.entry` 在 `classes9.dex` ⇒ 不是陈旧包 |
+| 收尾 | `gradlew --stop`、`java-left=0`、仓库无 `hs_err_pid*.log` / `replay_pid*.log` |
+| 设备执行 | **DEVICE_UNVERIFIED**：7 例 instrumentation 本机无设备可跑，结论待 CI 的 visual-instrumentation 作业 |
+
+
+### 11.8 未做项（本版明确不做）
+
+- **不连接对端**：真实拉取邀请需要 TLS 1.3 + 证书指纹钉扎，Android 侧尚未实现（W6-59b）。
+- **不扫码**：没有相机依赖，也不引入；本版只接受粘贴的链接文本。
+- **不写任何凭据/Token**：契约层也没有这类字段，配对成功后落库属于后续任务。
+- **不做候选地址枚举接入**：`PairingAddressCandidates` 仍是纯计算（W6-60）。
+- **真机未跑**：instrumentation 只在模拟器/CI 上跑，真机状态 DEVICE_UNVERIFIED。
+- **未做视觉回归**：只断言标签、文案与语义树，不比对像素。
