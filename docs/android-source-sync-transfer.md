@@ -2591,3 +2591,218 @@ androidTest APK：`feature/settings/build/outputs/apk/androidTest/debug/settings
 - 监听卡补「取消这一次接收」（同一把手的复用：监听端的阻塞点在建连与读帧两处）；
 - ~~把 `SourceSyncTransferCancelTest` 与 `SourceSyncReceiveLauncherTest` 钉进 `--required-suite`（38 → 40）~~ —— 本轮已完成（见 §33.8 第 5 条），待新 head 的 CI 日志确认；
 - 真实两机取消取证（需第二台机器 + 防火墙同意），届时把 §33.8 第 1 条改成 EXECUTED_PASS。
+
+
+## §34 监听端「取消这一次接收」（W6-61）
+
+> 本节记录手机当接收端（监听卡）在等对端连上来、或已经连上但帧没收全时，
+> 用户可以**只取消这一次等待**而不关掉监听的实现与证据。
+> §33 做的是拨号侧（手机主动连 Windows），本节是对称的另一半：缺口表 #8 的后半条。
+
+### §34.1 动机：缺口表 #8 的后半条，以及 close() 为什么不能当取消用
+
+监听卡原先只有「停止监听」（`SourceSyncListenerController.stop()` → `session.close()`），
+没有「取消这一次接收」。用户按下「等一次发送」之后，界面会停在「接收中…」直到
+`acceptTimeoutMs`（缺省 15 000 ms）或读超时到点，中间没有任何退路。
+
+一个看似省事的做法是「取消就调 `close()`」。这条路在本项目**不成立**，两条原因都是硬约束：
+
+1. `close()` 关的是 `ServerSocket`，**监听从此作废**——端口没了，用户想再等一次必须重新「开始监听」，
+   界面上等于「取消」把整张卡拆了；
+2. 更糟的是 `close()` 让等待中的 `accept()` 抛 `SocketException`，被翻译成 `listener-failed`。
+   也就是说「用户按了取消」会显示成一行失败、带一个稳定码——把用户的动作算成了故障，
+   与 §33.4 那条纪律（码只用于对端/协议层面的失败）直接冲突。
+
+所以 W6-61 的目标定义得很窄：**取消只结束这一次等待，监听仍然开着、端口不变、不留码。**
+
+### §34.2 设计取舍：accept 必须切成小片轮询，否则取消只能等到超时
+
+`ServerSocket.accept()` 是阻塞调用，超时由 `soTimeout` 决定（原先一次设成 `acceptTimeoutMs` = 15 s）。
+只把取消把手接进来是不够的：阻塞在 `accept()` 里的线程要等 15 s 才会返回，
+用户按了取消界面纹丝不动——这正是 §33.2 在拨号侧记过的那类「取消看似无效」。
+
+实现上把一段 15 s 的等待拆成**以 `ACCEPT_SLICE_MS = 50` 为片长的轮询**
+（`core/common/.../sync/SourceSyncTransferListener.kt:348`），且**总 deadline 不变**：
+
+| 环节 | 做法 | 位置 |
+| --- | --- | --- |
+| deadline | `deadlineNanos = System.nanoTime() + acceptTimeoutMs * NANOS_PER_MILLI` | `SourceSyncTransferListener.kt:190` |
+| 每片先看取消 | `if (cancel?.isCancelled == true) return Refused(cancelledResult())` | 同上 :192 |
+| 到点 | 剩余 ≤ 0 ⇒ `acceptTimeoutResult()`（码仍是 `transfer-timeout`，文案不变） | 同上 :194 / :217 |
+| 片长 | `remainingMillis.coerceAtMost(ACCEPT_SLICE_MS).coerceAtLeast(1)` 写回 `server.soTimeout` | 同上 :195-197 |
+| 三处异常 | `SocketTimeoutException` 回循环；`SocketException`/`IOException` **先看取消**再分类 | 同上 :201 / :203 / :206 |
+
+两处刻意保留的语义：
+
+- `transfer-timeout` 的文案与触发条件一字未改——切片只是实现细节，外部看到的还是「在 N 毫秒内没有对端连上来」；
+- `listener-failed` 仍然存在，但**只剩「真的 close 过」一种来源**（用例 `closingTheListenerIsStillReportedAsListenerFailedNotAsACancellation` 钉住这一点）。
+
+连上之后的读阶段同理：socket 在 `accept` 成功那一刻就 `cancel?.attach(socket)`（:173），
+`receiveOver` 的 `finally` 首行 `cancel?.detach(socket)`（:313）把槽清干净；
+阻塞读抛异常时两个 catch（:294 `SocketTimeoutException` / :303 `IOException`）同样「取消优先」。
+
+### §34.3 仍然没有新码：`transfer-cancelled` 是本地码
+
+与 §33.3 完全同一条立场：取消是本端事件，对端只会看到连接断了，看不到任何「取消帧」。
+
+- 五集（传输 10 / TLS 4 / 认证 5 / 回执 4 / 投递 1）一字未动，符合 W6-47 ADR 结论 A；
+- 复用的是 W6-58 已存在的 `SourceSyncLocalReasons.CANCELLED = "transfer-cancelled"`，W6-61 没有新增任何码常量；
+- 用例 `theLocalCodeIsNeverPartOfTheCrossMachineVocabulary` 继续钉 `SourceSyncTransferReasons.ALL.size == 10` 且不含本地码；
+- 界面层咽掉：`SourceSyncListenerController.awaitOnce` 在 `apply(...)` 之前判断把手已取消，
+  把状态置回 `Listening` 并 `return true`（`SourceSyncListenerController.kt:583`）——不写失败行、不留码。
+
+一句话区别记在这里：**§33 的取消让状态回 `Idle`（没有在监听）；§34 的取消让状态回 `Listening`（监听还在，只是这次不收了）。**
+
+### §34.4 五条外部可观察语义
+
+| # | 情形 | 可观察结果 | 由谁钉住 |
+| --- | --- | --- | --- |
+| 1 | 等 accept 期间按「取消这一次接收」 | 毫秒级返回；码 `transfer-cancelled`；`listener.isClosed == false` | `cancellingWhileWaitingForAcceptReturnsTheLocalCodeWithinMilliseconds`（< 2 000 ms） |
+| 2 | 已连上、帧还没收全时取消 | 同样本地码（不是 `io-failed`） | `cancellingDuringABlockedReadAlsoYieldsTheLocalCode` |
+| 3 | 取消之后同一监听再等一次 | 能正常收到下一封信封（端口与监听都没坏） | `theListenerStillAcceptsAfterACancelledWait` |
+| 4 | 真的 `close()` 掉监听 | 仍是 `listener-failed`，不会被误认成取消 | `closingTheListenerIsStillReportedAsListenerFailedNotAsACancellation` |
+| 5 | 界面层取消 | 状态回 `Listening`；`codeOf == null`；`lineOf == null`；之后能再等一次 | `aCancelledWaitGoesBackToListeningWithoutAnyCode`、`aCancelledWaitCanBeFollowedByAnotherOneThatSucceeds` |
+
+把手没在场（`cancel == null`）时行为与 W6-61 之前**逐字相同**：`receiveOnce` 的第五参缺省为 null，
+既有全部监听用例、导入服务调用点、测试替身都不需要改动。
+用例 `aHandleThatWasNeverCancelledDoesNotDisturbANormalReceive` 钉住这一点。
+
+### §34.5 落点行号表
+
+| 文件 | 行号 | 内容 |
+| --- | --- | --- |
+| `core/common/.../sync/SourceSyncTransferListener.kt` | :127 | `fun receiveOnce(...)` 第五尾参 `cancel: SourceSyncCancellation? = null`（:132） |
+| 同上 | :149 | `override fun close()`（KDoc 补一段：取消不走 close，`listener-failed` 只剩真 close） |
+| 同上 | :173 | `cancel?.attach(socket)` —— accept 成功即挂把手 |
+| 同上 | :189 / :217 / :222 | `private fun acceptSocket` / `acceptTimeoutResult()` / `cancelledResult()` |
+| 同上 | :234 / :313 | `private fun receiveOver(..., cancel)` / `finally` 首行 `cancel?.detach(socket)` |
+| 同上 | :270 | `SourceSyncTransfer.receive(...)` 的 Failed 分支统一裁决：`if (cancel?.isCancelled) cancelledResult()` |
+| 同上 | :345 / :348 / :350 | `CANCELLED_DETAIL` / `ACCEPT_SLICE_MS = 50` / `NANOS_PER_MILLI = 1_000_000L` |
+| `core/database/.../sync/SourceSyncListenerImportService.kt` | :90 / :100 | `receiveAndImport(..., cancel = null)` / 透传给 `listener.receiveOnce(..., gate, cancel)` |
+| `feature/.../sync/SourceSyncListenerController.kt` | :109 | `SourceSyncListenCopy.CANCEL_RECEIVE = "取消这一次接收"` |
+| 同上 | :357 | `SourceSyncListenerSession` 的带缺省实现重载 `suspend fun receiveOnce(cancel)`（既有替身零改动） |
+| 同上 | :565 / :571 / :583 | `suspend fun awaitOnce(cancel = null)` / `active.receiveOnce(cancel)` / 取消 ⇒ 回 `Listening` 并 `return true` |
+| 同上 | :789 | `ImportSession` 覆盖带 cancel 版，透传给 `service.receiveAndImport` |
+| `feature/.../sync/SourceSyncListenLauncher.kt` | :27 / :41 / :62 / :71 | `class` / `fun launch()` / `fun cancel()` / `fun clear()`（新文件，与 `SourceSyncReceiveLauncher` 同形） |
+| `feature/.../sync/SourceSyncImportViewModel.kt` | :149 / :215-216 / :226-227 / :275 / :290 | `listenLauncher` / `awaitListenOnce()` / `cancelListening()` / `reset()` 与 `onCleared()` 各 `clear()` |
+| `feature/.../sync/SourceSyncImportScreen.kt` | :148 / :236 / :278 / :479 / :1002-1004 | tag `sync.listen.cancel` / Route 接线 / 尾参 / 调用处 / 按钮（`enabled = receiving`，常驻禁用而非隐藏） |
+
+### §34.6 用例清单
+
+#### core/common：`SourceSyncListenerCancelTest`（7 例，新文件）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :96 | `cancellingWhileWaitingForAcceptReturnsTheLocalCodeWithinMilliseconds` | 等 accept 期间取消，< 2 000 ms 返回，码是本地码，`isClosed == false` |
+| :122 | `cancellingDuringABlockedReadAlsoYieldsTheLocalCode` | 已连上但帧没发来，取消仍回本地码（不是 `io-failed`） |
+| :154 | `cancellingBeforeTheWaitStartsStillYieldsTheLocalCode` | 还没开始等就先取消，也回本地码 |
+| :169 | `theListenerStillAcceptsAfterACancelledWait` | 取消之后同一监听还能收下一封（端口没坏） |
+| :194 | `aHandleThatWasNeverCancelledDoesNotDisturbANormalReceive` | 把手在场但不取消：正常收帧 |
+| :212 | `closingTheListenerIsStillReportedAsListenerFailedNotAsACancellation` | 真 close 仍报 `listener-failed`，两个语义不混 |
+| :225 | `theLocalCodeIsNeverPartOfTheCrossMachineVocabulary` | 跨机码集合仍是 10 个、不含 `transfer-cancelled` |
+
+#### feature/settings：`SourceSyncListenerControllerTest`（+3 例）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :692 | `aCancelledWaitGoesBackToListeningWithoutAnyCode` | 把手原样送到会话层（:718）；状态回 `Listening`；`codeOf == null` |
+| :723 | `aCancelledWaitCanBeFollowedByAnotherOneThatSucceeds` | 取消后再等一次能成功，单飞标记已释放 |
+| :754 | `aRealFailureAfterACancelStillReportsItsCode` | 没取消时真失败码原样透出（取消优先不等于吞掉故障） |
+
+#### feature/settings：`SourceSyncListenLauncherTest`（7 例，新文件）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :55 | `launchStartsTheWaitAndMarksItInFlight` | 起一条 + `isActive` |
+| :69 | `aSecondLaunchWhileInFlightIsIgnored` | 在飞时第二次 launch 被忽略 |
+| :82 | `cancelClosesTheHandleAndEndsTheJob` | 取消真的把把手置为已取消（等价于关连接） |
+| :99 | `cancelWhenNothingWasEverStartedIsANoop` | 没在等：cancel 返回 null |
+| :109 | `cancelAfterTheWaitFinishedIsStillNoop` | 收尾之后再点取消仍是 no-op |
+| :125 | `eachLaunchGetsAFreshHandleSoAnOldCancellationDoesNotLeak` | 每次 launch 新把手，旧取消不泄漏 |
+| :146 | `clearBetweenWaitsIsHarmless` | clear 只丢引用、不取消 |
+
+#### androidTest：`SourceSyncListenCancelScreenTest`（6 例，新文件）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :43 | `theCancelButtonIsThereButDisabledWhenNothingIsBeingWaitedFor` | 常驻按钮、文案固定、空闲时禁用 |
+| :54 | `theCancelButtonBecomesUsableOnlyWhileReceiving` | 仅 `Receiving` 可点；同时「等一次发送」与「开始监听」被锁 |
+| :66 | `tappingCancelWhileReceivingCallsBackExactlyOnce` | 点击回调只来一次 |
+| :76 | `cancelStaysDisabledAfterAReceivedEnvelope` | 收下之后又禁用（取消不清结果） |
+| :92 | `cancelStaysDisabledAfterAFailedWait` | 失败之后同样禁用 |
+| :101 | `theCancelButtonSitsAtThePageTailAndTheMainFlowStaysOnTheFirstScreen` | 按钮在页尾、首屏主流程（选择文件/预览）不被挤走——W6-41 的回归守卫 |
+
+### §34.7 本机实跑（串行，低内存）
+
+| 步骤 | 命令/脚本 | 结果 |
+| --- | --- | --- |
+| 四任务全量 | `D:/mh-verify/run-w6-61d.bat`（`:core:common:testDebugUnitTest :feature:settings:testDebugUnitTest :feature:settings:assembleDebugAndroidTest`，`--max-workers=1 "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" "-Dkotlin.daemon.jvm.options=-Xmx1024m"`） | `BUILD SUCCESSFUL in 3m 21s`、`217 actionable tasks: 10 executed, 207 up-to-date`、`EXIT=0` |
+| 清理 | 跑完 `gradlew --stop` | `java-left=0`；仓库根 `hs_err_pid*.log` / `replay_pid*.log` 计数均 0 |
+
+XML 逐套件汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-61d.log`）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `core/common` | 40 | **557** | 0 | 0 | 11 | 550 → 557（+7 `SourceSyncListenerCancelTest`） |
+| `feature/settings` | 21 | **334** | 0 | 0 | 0 | 324 → 334（+3 控制器 +7 新 launcher 套件） |
+
+关键套件逐个：`SourceSyncListenerCancelTest` 7/7（1.248 s）、`SourceSyncListenerControllerTest` 46/46（0.324 s，回归未破）、
+`SourceSyncListenLauncherTest` 7/7（0.635 s）、`SourceSyncTransferCancelTest` 6/6（0.343 s，§33 的拨号侧未受影响）。
+11 个跳过仍是 `SourceSyncTlsInteropTest` + `SourceSyncListenerInteropTest` 两个环境门控套件，与既有口径一致。
+
+androidTest APK：`feature/settings/build/outputs/apk/androidTest/debug/settings-debug-androidTest.apk` = **20758198 B**（`2026-10-25 18:22:49`）。
+解包核对（先复制成 `.zip` 再 `Expand-Archive`，共 **20 个 dex**）：`SourceSyncListenCancelScreenTest`、
+`theCancelButtonIsThereButDisabledWhenNothingIsBeingWaitedFor`、`tappingCancelWhileReceivingCallsBackExactlyOnce`、
+`theCancelButtonSitsAtThePageTailAndTheMainFlowStaysOnTheFirstScreen` 全在 `classes18.dex`（117068 B），
+tag `sync.listen.cancel` 同时出现在 `classes12.dex`（706552 B）与 `classes18.dex` —— 因此这个 APK 不是陈旧产物。
+
+#### §34.7.1 断点记录：三次首红与真因（本节最值钱的部分）
+
+**红 1（core，1 例运行时）**：`cancellingDuringABlockedReadAlsoYieldsTheLocalCode` 报
+`org.junit.ComparisonFailure: expected:<[transfer-cancel]led> but was:<[io-fai]led>`（`SourceSyncListenerCancelTest.kt:137`）。
+
+根因与 §33.7.1 的「红 2」是**同一个坑，只是换了一侧**：取消关 socket 后阻塞读抛的 `SocketException`
+先被协议层 `SourceSyncTransfer.receive(...)` 自己 catch 并折成 `SourceSyncTransferResult.Failed(io-failed)` 返回，
+`receiveOver` 的那两个 catch 压根不会被触发，所以「catch 首行先看 `isCancelled`」那层防御对这条路径是空的。
+
+修法：在 `receiveOver` 里对 `receive(...)` 的 `is Failed` 分支加统一裁决
+（`SourceSyncTransferListener.kt:265-270`）：
+`if (cancel?.isCancelled == true) cancelledResult() else failed(received.reason, received.message)`。
+两条约束：①取消在任何失败分类之前胜出；②**只改写失败结果**，已收全的信封不会被晚到的取消抹掉。
+
+**红 2（feature/settings，3 例）**：`SourceSyncListenLauncherTest` 的 `launchStartsTheWaitAndMarksItInFlight` /
+`aSecondLaunchWhileInFlightIsIgnored` / `eachLaunchGetsAFreshHandleSoAnOldCancellationDoesNotLeak` 报
+`kotlinx.coroutines.test.UncompletedCoroutinesError: After waiting for 1m, there were active child jobs`。
+
+根因不是产品缺陷，是**测试的作用域挂错**：Launcher 挂在 `this`（测试体作用域）上，
+「故意挂着等取消」的 Job 成了测试体的子协程，`runTest` 收尾时判「还有活跃子协程」。
+修法：7 处 `SourceSyncListenLauncher(this)` → `SourceSyncListenLauncher(backgroundScope)`
+（`backgroundScope` 是 `TestScope` 成员，无需 import）。副作用是 `advanceUntilIdle()` 不再推进那边的活，
+所以 `cancelAfterTheWaitFinishedIsStillNoop` 改用 `runCurrent()`。
+
+**红 3（androidTest，编译期 1 例）**：`e: ...SourceSyncListenCancelScreenTest.kt:44:62 No value passed for parameter 'tls'`。
+`SourceSyncListenState.Listening(port, tls, ...)` 的 `tls` **没有缺省值**，而 androidTest 里只写了 `port = 45_678`。
+修法：`Listening(port = 45_678, tls = false)`。
+
+三次红各自的性质值得记一笔：红 1 是**产品缺陷**（防御层覆盖不到协议层自己折的码），
+红 2 是**测试脚手架缺陷**（作用域），红 3 是**编译期契约**（Kotlin 无缺省值参数）。
+只有红 1 改了生产代码；后两次都只动测试。
+
+### §34.8 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机**：取消时对端此刻看到 RST 还是 FIN 未取证，需要第二台机器与用户同意开防火墙 ⇒ NOT_RUN。
+2. **TLS 握手中取消**：把手在 `accept` 成功那一刻 attach，握手阶段理论上也被覆盖，但**没有专门用例**卡「TLS 1.3 握手进行中」这个窗口。
+3. **多连接并发**：`receiveOnce` 由 `acceptLock` 串行化，单次只能等一条连接；并发两路不在本里程碑范围。
+4. **Hilt 注入与进程重建**：`SourceSyncListenLauncher` 由 ViewModel 持有，进程被杀后的恢复没有用例。
+5. **设备执行**：本机无连接设备，androidTest 的 6 例只到「APK 里确实编进了这些用例」这一层 ⇒ DEVICE_UNVERIFIED；
+   设备结论由新 head 的 CI visual-instrumentation 提供。
+6. **视觉回归**：按钮在真机首屏之外（页尾第三卡），布局没有像素级基线。
+7. **门禁**：`SourceSyncListenerCancelTest` 本轮已进 `--required-suite`（43 → **44** 个套件），
+   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`；
+   「CI 上这个套件确实被门禁跑过」只能由新 head 的 Android CI 日志证明，本节写就时该 head 尚未 push。
+
+### §34.9 下一步
+
+- ~~监听卡补「取消这一次接收」~~ —— 本节已完成（W6-61），§33.8 第 3 条与 §33.9 第 1 条同时失效；
+- 配对页接二维码（W6-60 之后把「本机地址」直接生成二维码，省掉手抄）——NOT_RUN；
+- 真实两机取消取证（§34.8 第 1 条），届时把 §33.8 第 1 条与本处第 1 条一起改成 EXECUTED_PASS。

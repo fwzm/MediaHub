@@ -190,6 +190,7 @@ jobs:
             --required-suite com.mediahub.feature.settings.pairing.PairingLinkControllerTest \
             --required-suite com.mediahub.core.common.pairing.PairingTransportTlsTest \
             --required-suite com.mediahub.core.common.pairing.PairingAddressEnumeratorTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncListenerCancelTest \
             --require-complete-suites
 
       - name: Lint
