@@ -15,6 +15,17 @@ import xml.etree.ElementTree as ET
 
 MODULES = ("core/ui", "feature/player", "feature/settings", "provider/webdav", "core/database", "app")
 COMMON_TESTS = {
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theEntryStartsEmptyAndTheVerifyButtonIsDisabled'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'typingALinkEnablesTheVerifyButtonAndHandsTheTextOver'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aParsedStateShowsTheDeviceIdTheFingerprintAndTheRemainingSeconds'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aFailedStateShowsTheStableCode'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theBackButtonCallsBackExactlyOnce'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theClearButtonWipesTheFieldAndReportsIt'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theWholePageNeverPrintsTheChallenge'),
+    ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'theReceiveCardOffersACancelButtonThatIsDisabledWhenIdle'),
+    ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'whileReceivingTheCancelButtonCallsBackAndTheReceiveButtonIsLocked'),
+    ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'onceTheEnvelopeIsInTheCancelButtonIsLockedAgain'),
+    ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'afterAFailureTheCancelButtonIsLockedAgain'),
     (
         "com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
         "productionGroupedTrackRowsUseExactSnapshotAddresses",

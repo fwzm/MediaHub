@@ -91,15 +91,25 @@ class SourceSyncTransferImportService(
      * expectedChallenge 非空时，帧流里的挑战必须与之逐字相等，否则 challenge-mismatch。
      * @param allowExplicitHost 只有 true 时才允许拨一个显式的非回环单播字面量（W6-52b）；
      *   默认 false，与 W6-23 起的「只连回环」逐字同义（判定与诊断句都在 core:common 的 SourceSyncHostAddress）。
+     * @param cancel 可选的本地取消把手（W6-58）：取消会立刻关掉这条连接，本次调用随即以
+     *   [com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED] 返回 TransferFailed；
+     *   缺省 null 时行为与 W6-52b 逐字相同。
      */
     suspend fun receiveAndImport(
         host: String,
         port: Int,
         expectedChallenge: String? = null,
         allowExplicitHost: Boolean = false,
+        cancel: com.mediahub.core.common.sync.SourceSyncCancellation? = null,
     ): SourceSyncTransferImportOutcome {
         val received = withContext(Dispatchers.IO) {
-            client.receiveFrom(host, port, expectedChallenge, allowExplicitHost = allowExplicitHost)
+            client.receiveFrom(
+                host,
+                port,
+                expectedChallenge,
+                allowExplicitHost = allowExplicitHost,
+                cancel = cancel,
+            )
         }
         return when (received) {
             is SourceSyncTransferResult.Failed ->

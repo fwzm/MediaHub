@@ -14,6 +14,19 @@ SHA = "2f9032732fc8365d19b5badac90f66b10310f500"
 
 
 class EvidenceGateTest(unittest.TestCase):
+    def test_pairing_and_receive_cancel_routes_are_mandatory(self):
+        keys = [('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theEntryStartsEmptyAndTheVerifyButtonIsDisabled'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'typingALinkEnablesTheVerifyButtonAndHandsTheTextOver'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aParsedStateShowsTheDeviceIdTheFingerprintAndTheRemainingSeconds'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aFailedStateShowsTheStableCode'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theBackButtonCallsBackExactlyOnce'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theClearButtonWipesTheFieldAndReportsIt'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theWholePageNeverPrintsTheChallenge'), ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'theReceiveCardOffersACancelButtonThatIsDisabledWhenIdle'), ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'whileReceivingTheCancelButtonCallsBackAndTheReceiveButtonIsLocked'), ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'onceTheEnvelopeIsInTheCancelButtonIsLockedAgain'), ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'afterAFailureTheCancelButtonIsLockedAgain')]
+        for api in (32, 36):
+            for key in keys:
+                with self.subTest(api=api, name=key[1]):
+                    self.assertIn(key, gate.required_tests(api))
+                    self.build(api)
+                    def remove(suite):
+                        suite.remove(next(c for c in suite if c.get("name") == key[1]))
+                        suite.set("tests", str(len(suite)))
+                    self.edit("feature/settings", remove, api)
+                    self.assertTrue(any(key[1] in p and "no passing execution" in p for p in self.problems(api)))
+
     def test_grouped_track_route_is_required_on_both_apis(self):
         key = ("com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
                "productionGroupedTrackRowsUseExactSnapshotAddresses")

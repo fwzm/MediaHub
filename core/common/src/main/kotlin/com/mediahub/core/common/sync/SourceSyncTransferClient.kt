@@ -44,6 +44,9 @@ class SourceSyncTransferClient(
      * @param receiptGate 可选解码闸门：返回 false 时沉默（不写回执，也不把这次接收改成失败）。
      * @param allowExplicitHost 只有 true 时才允许连一个显式的非回环单播字面量（W6-52b）；
      *   默认 false，与 W6-23 起的「只连回环、别的在拨号前拒」逐字同义。
+     * @param cancel 可选的本地取消把手（W6-58）：非 null 时，取消会立刻关掉这条连接，
+     *   被阻塞的读随即返回本地码 [SourceSyncLocalReasons.CANCELLED]——不是 io-failed，
+     *   也与任何跨机码无关。缺省 null 时行为与 W6-52b 逐字相同。
      */
     fun receiveFrom(
         host: String,
@@ -54,8 +57,9 @@ class SourceSyncTransferClient(
         receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
         receiptGate: ((ByteArray) -> Boolean)? = null,
         allowExplicitHost: Boolean = false,
+        cancel: SourceSyncCancellation? = null,
     ): SourceSyncTransferResult {
-        return withConnection(host, port, tls, allowExplicitHost) { input, output, _ ->
+        return withConnection(host, port, tls, allowExplicitHost, cancel) { input, output, _ ->
             val received = SourceSyncTransfer.receive(input, expectedChallenge, auth)
             if (receipt.enabled && received is SourceSyncTransferResult.Ok) {
                 SourceSyncReceipt.acknowledge(output, received.envelope, receipt, receiptGate)
@@ -115,6 +119,18 @@ class SourceSyncTransferClient(
         }
     }
 
+    /**
+     * 本地取消的结果（W6-58）。
+     *
+     * 单独抽出来是为了让「取消」在任何 catch 分支里都优先于网络分类：
+     * 关掉本地 socket 会让阻塞的读抛 SocketException/IOException，那些类名对用户毫无意义。
+     */
+    private fun cancelledResult(): SourceSyncTransferResult =
+        SourceSyncTransferResult.Failed(
+            SourceSyncLocalReasons.CANCELLED,
+            "本次接收已被本地取消：连接在本地关闭，对端可能只看到断开。",
+        )
+
     /** 帧写完之后等对端关连接；只有读到 FIN 才把结果原样（加上确认）交回，否则折成 delivery-unconfirmed。 */
     private fun awaitPeerClose(
         input: InputStream,
@@ -149,6 +165,7 @@ class SourceSyncTransferClient(
         port: Int,
         tls: SourceSyncTlsOptions,
         allowExplicitHost: Boolean,
+        cancel: SourceSyncCancellation? = null,
         body: (InputStream, OutputStream, (Int) -> Unit) -> SourceSyncTransferResult,
     ): SourceSyncTransferResult {
         val address = when (
@@ -169,6 +186,8 @@ class SourceSyncTransferClient(
         return try {
             val opened = Socket()
             socket = opened
+            // W6-58：先挂上取消把手再拨号——取消若发生在 connect/read 期间，关掉这个 socket 就能把阻塞解开。
+            cancel?.attach(opened)
             opened.connect(InetSocketAddress(address, port), connectTimeoutMs)
             opened.soTimeout = readTimeoutMs
             opened.tcpNoDelay = true
@@ -190,23 +209,36 @@ class SourceSyncTransferClient(
             // 第三个参数把「改这条连接的读超时」交给业务层：等回执必须把预算落到活跃 socket 上，
             // 这样「对端静默」与「对端关了」才分得开，也不必另起线程。
             val activeSocket = tlsSocket ?: opened
-            body(input, output) { millis -> activeSocket.soTimeout = millis }
+            val outcome = body(input, output) { millis -> activeSocket.soTimeout = millis }
+            // 取消优先（W6-58）：协议层自己会把「本地关连接」折成 io-failed / frame-truncated，
+            // 那些类名对用户毫无意义；用户按的取消必须在任何失败分类之前胜出。只覆盖失败结果，
+            // 成功收下的一封信封不会被一次晚到的取消抹掉。
+            if (cancel?.isCancelled == true && outcome is SourceSyncTransferResult.Failed) {
+                cancelledResult()
+            } else {
+                outcome
+            }
         } catch (timeout: SocketTimeoutException) {
+            // 取消优先：本地关连接会让阻塞的读/连立刻返回，这不能被记成对端超时。
+            if (cancel?.isCancelled == true) return cancelledResult()
             SourceSyncTransferResult.Failed(
                 SourceSyncTransferReasons.TRANSFER_TIMEOUT,
                 "对端在超时前没有响应",
             )
         } catch (refused: SocketException) {
+            if (cancel?.isCancelled == true) return cancelledResult()
             SourceSyncTransferResult.Failed(
                 SourceSyncTransferReasons.CONNECT_FAILED,
                 "无法连接对端：" + refused.javaClass.simpleName,
             )
         } catch (error: IOException) {
+            if (cancel?.isCancelled == true) return cancelledResult()
             SourceSyncTransferResult.Failed(
                 SourceSyncTransferReasons.IO_FAILED,
                 "连接失败：" + error.javaClass.simpleName,
             )
         } finally {
+            socket?.let { cancel?.detach(it) }
             val negotiatedSocket = tlsSocket
             if (negotiatedSocket != null) {
                 SourceSyncTls.gracefulClose(negotiatedSocket)

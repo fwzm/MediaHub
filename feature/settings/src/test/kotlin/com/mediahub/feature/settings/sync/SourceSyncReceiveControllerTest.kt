@@ -1,9 +1,11 @@
 package com.mediahub.feature.settings.sync
 
 import com.mediahub.core.common.sync.SourceSyncAction
+import com.mediahub.core.common.sync.SourceSyncCancellation
 import com.mediahub.core.common.sync.SourceSyncCandidate
 import com.mediahub.core.common.sync.SourceSyncCodec
 import com.mediahub.core.common.sync.SourceSyncEnvelope
+import com.mediahub.core.common.sync.SourceSyncLocalReasons
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SourceSyncSummary
@@ -397,6 +399,76 @@ class SourceSyncReceiveControllerTest {
         assertEquals(before, seeded.session.state.value)
     }
 
+    // ---------------------------------------------------------------- W6-58：取消接收
+
+    @Test
+    fun withoutAHandleThePortGetsNullAndNothingIsCancellable() = runTest {
+        val port = FakeReceivePort(importedOutcome())
+        val controller = SourceSyncReceiveController(port) { _, _ -> }
+
+        assertTrue(controller.receive(SourceSyncReceiveForm(port = "8942")))
+
+        // 缺省不给把手：端口收到 null，行为与 W6-52b 逐字相同（既有调用点零改动）。
+        assertNull(port.cancel)
+        assertTrue(controller.state.value is SourceSyncReceiveState.Received)
+    }
+
+    @Test
+    fun theHandleTravelsVerbatimToThePort() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val port = FakeReceivePort(importedOutcome(), gate = gate)
+        val controller = SourceSyncReceiveController(port) { _, _ -> }
+        val cancellation = SourceSyncCancellation()
+
+        val job = launch { controller.receive(SourceSyncReceiveForm(port = "8942"), cancellation) }
+        runCurrent()
+
+        assertTrue("同一个把手必须原样交给端口", port.cancel === cancellation)
+        gate.complete(Unit)
+        job.join()
+        assertTrue(controller.state.value is SourceSyncReceiveState.Received)
+    }
+
+    @Test
+    fun aCancelledReceiveGoesBackToIdleWithoutKeepingTheLocalCode() = runTest {
+        // 端口按真实客户端的形状返回本地码；控制器的责任是把「取消」咽掉，不留失败行。
+        val port = FakeReceivePort(SourceSyncTransferImportOutcome.TransferFailed(SourceSyncLocalReasons.CANCELLED))
+        var loads = 0
+        val controller = SourceSyncReceiveController(port) { _, _ -> loads++ }
+        val cancellation = SourceSyncCancellation()
+        cancellation.cancel()
+
+        assertTrue(controller.receive(SourceSyncReceiveForm(port = "8942"), cancellation))
+
+        assertEquals(SourceSyncReceiveState.Idle, controller.state.value)
+        assertNull("取消不是失败，不该挂任何码", SourceSyncReceiveCopy.codeOf(controller.state.value))
+        assertEquals("取消不该把信封交给导入页", 0, loads)
+        // 取消之后还能再来一次（单飞闸已释放、把手是新的）。
+        port.outcome = importedOutcome()
+        assertTrue(controller.receive(SourceSyncReceiveForm(port = "8943")))
+        assertTrue(controller.state.value is SourceSyncReceiveState.Received)
+    }
+
+    @Test
+    fun aFreshHandleDoesNotSwallowARealFailureCode() = runTest {
+        val port = FakeReceivePort(SourceSyncTransferImportOutcome.TransferFailed("connect-failed", "Connection refused"))
+        val controller = SourceSyncReceiveController(port) { _, _ -> }
+
+        assertTrue(controller.receive(SourceSyncReceiveForm(port = "8942"), SourceSyncCancellation()))
+
+        // 没被取消 ⇒ 码必须原样透出（只有「确实取消了」才咽掉）。
+        assertEquals("connect-failed", SourceSyncReceiveCopy.codeOf(controller.state.value))
+        assertEquals(
+            "接收失败：connect-failed（Connection refused）",
+            SourceSyncReceiveCopy.lineOf(controller.state.value),
+        )
+    }
+
+    @Test
+    fun theCancelButtonCopyIsStable() {
+        assertEquals("取消接收", SourceSyncReceiveCopy.CANCEL)
+    }
+
     @Test
     fun clearDropsThePreviousResult() = runTest {
         val controller = SourceSyncReceiveController(FakeReceivePort(importedOutcome())) { _, _ -> }
@@ -466,6 +538,9 @@ class SourceSyncReceiveControllerTest {
         /** W6-52b：控制器有没有把「允许非回环」这个开关带到端口上。 */
         var allowExplicitHost: Boolean? = null
 
+        /** W6-58：控制器有没有把取消把手带到端口上（缺省 null 表示「这次不可取消」）。 */
+        var cancel: SourceSyncCancellation? = null
+
         override suspend fun receive(
             host: String,
             port: Int,
@@ -477,11 +552,20 @@ class SourceSyncReceiveControllerTest {
             port: Int,
             expectedChallenge: String?,
             allowExplicitHost: Boolean,
+        ): SourceSyncTransferImportOutcome = receive(host, port, expectedChallenge, allowExplicitHost, null)
+
+        override suspend fun receive(
+            host: String,
+            port: Int,
+            expectedChallenge: String?,
+            allowExplicitHost: Boolean,
+            cancel: SourceSyncCancellation?,
         ): SourceSyncTransferImportOutcome {
             calls++
             this.host = host
             this.challenge = expectedChallenge
             this.allowExplicitHost = allowExplicitHost
+            this.cancel = cancel
             gate?.await()
             return outcome
         }

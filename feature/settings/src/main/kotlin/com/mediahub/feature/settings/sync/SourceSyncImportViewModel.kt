@@ -128,6 +128,17 @@ class SourceSyncImportViewModel @Inject constructor(
         sendController.send(form)
     }
 
+    /**
+     * W6-58：把「一次接收 = 一个可取消的 Job + 一个取消把手」这层记账单独拿出来
+     * （见 [SourceSyncReceiveLauncher]）。
+     *
+     * 与发送那条的唯一区别是取消要**真的关连接**：分块收帧是阻塞 socket 读，
+     * 只 cancel() 协程会让界面停在「接收中」直到读超时（缺省 15 秒）。
+     */
+    private val receiveLauncher = SourceSyncReceiveLauncher(viewModelScope) { form, cancel ->
+        receiveController.receive(form, cancel)
+    }
+
     private val _verification = MutableStateFlow(SourceVerificationViewState())
 
     /** 结果页的逐源验证状态（三态 + 对话框 + 忙碌标记）。 */
@@ -155,7 +166,17 @@ class SourceSyncImportViewModel @Inject constructor(
      * 已有一条在飞时同样返回 false，所以连点只会发一次。
      */
     fun receive(form: SourceSyncReceiveForm) {
-        viewModelScope.launch { receiveController.receive(form) }
+        receiveLauncher.launch(form)
+    }
+
+    /**
+     * W6-58：取消正在飞的那一次接收。
+     *
+     * 没在收时是 no-op（不伪造 Failed、不关任何连接）；正在收时先关连接（阻塞的读立刻返回），
+     * 再取消协程，控制器把状态写回 Idle——**取消是用户操作，不是失败，所以没有任何稳定码**。
+     */
+    fun cancelReceive() {
+        receiveLauncher.cancel()
     }
 
     fun preview() {
@@ -227,6 +248,7 @@ class SourceSyncImportViewModel @Inject constructor(
         session.reset()
         receiveController.clear()
         listenerController.clearResult()
+        receiveLauncher.clear()
         sendLauncher.clear()
         sendController.clearResult()
         _verification.value = SourceVerificationViewState()
@@ -239,7 +261,8 @@ class SourceSyncImportViewModel @Inject constructor(
      */
     override fun onCleared() {
         listenerController.stop()
-        // viewModelScope 取消时那条 Job 自己会收尾（控制器把状态写回 Idle），这里只丢引用。
+        // viewModelScope 取消时那两条 Job 自己会收尾（控制器把状态写回 Idle），这里只丢引用。
+        receiveLauncher.clear()
         sendLauncher.clear()
         sendController.clearResult()
         super.onCleared()
