@@ -147,6 +147,8 @@ jobs:
             --required-suite com.mediahub.player.engine.PlaybackEnginePlaybackControlTest \
             --required-suite com.mediahub.player.mpv.MpvPlaybackEngineTest \
             --required-suite com.mediahub.player.mpv.MpvSurfaceBindingTest \
+            --required-suite com.mediahub.app.net.ColdUserAgentStartupTest \
+            --required-suite com.mediahub.app.net.ServerUrlIndexTest \
             --required-suite com.mediahub.feature.player.ForegroundMediaSessionControllerTest \
             --required-suite com.mediahub.core.common.pairing.PairingVectorsTest \
             --required-suite com.mediahub.core.common.pairing.PairingFrameTest \
