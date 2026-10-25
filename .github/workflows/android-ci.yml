@@ -191,6 +191,8 @@ jobs:
             --required-suite com.mediahub.core.common.pairing.PairingTransportTlsTest \
             --required-suite com.mediahub.core.common.pairing.PairingAddressEnumeratorTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncListenerCancelTest \
+            --required-suite com.mediahub.core.common.archive.ArchiveVectorsTest \
+            --required-suite com.mediahub.core.common.archive.ArchiveRoundTripTest \
             --require-complete-suites
 
       - name: Lint
