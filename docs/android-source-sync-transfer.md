@@ -3419,7 +3419,7 @@ XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-64
 1. **真实两机搬运**：把导出的 `.mharchive` 拷到另一台机器再导入的完整流程 NOT_RUN（同 §33.8 / §34.8 / §35.8 第 5 条 / §36.8 第 1 条，都需要第二台机器）。
 2. **设备侧密码学**：全部结论来自 JVM；写侧的 PBKDF2 600 000 轮在 Android（Conscrypt）上的耗时与峰值内存未测 ⇒ DEVICE_UNVERIFIED。
    参考量级：W6-63 在 JVM 上单次解锁 2.2–4.7 s，写侧与读侧同量级。
-3. **androidTest 7 例未跑**：本机只证明编译通过；设备侧证据要等新 head 的 CI（API 32 / 36 两个作业）。即便 CI 绿，真机仍 DEVICE_UNVERIFIED。
+3. **androidTest 7 例已在 CI 上跑过，但没有真机**：`b3d0030` 与 `7cc68ac` 的 Android CI 里 `:feature:settings:connectedDebugAndroidTest` 都是 **Starting 112 → Finished 112**、0 FAILED（等于把 `SourceSyncArchiveExportScreenTest` 的 7 例连同既有 105 例全跑了一遍），两个作业末尾各有 `API 32/36: 19 unique mandatory visual/parser tests passed at <该 head>`。真机仍是 DEVICE_UNVERIFIED。
 4. **扩展名差异**：Windows CLI 的加密导出默认名是 `sync-envelope.mhsync`（`SyncCliRunner.DefaultArchiveFileName`），
    Android 侧统一 `.mharchive`（W6-62 / W6-63 的文案与夹具已经定了）。两者是**同一字节格式**，只是默认名不同；
    要统一得两边一起改（改 Windows 默认名会碰到既有 CLI 契约与验收脚本），本轮不动。
@@ -3429,7 +3429,7 @@ XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-64
    成功行只带来源数 / 字节数 / 明文或加密，逐条跳过原因（`skippedServerIds`）不进界面。
 8. **SAF 的可写性**：部分设备上 `CreateDocument` 可能返回不可写的 URI（`openOutputStream` 返回 null）⇒ 本地码 `archive-export-stream-unavailable`，真机上未验。
 9. **门禁**：本轮把 `SourceSyncArchiveExportTest` 加进 `--required-suite`（47 → **48** 个套件），
-   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`；CI 侧要等新 head 的日志（写就本节时该 head 尚未 push）。
+   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`；`b3d0030` 与 `7cc68ac` 的 Android CI `build` 作业里 `--required-suite com.` 实计 **48** 行（末三条 `ArchiveVectorsTest` / `ArchiveRoundTripTest` / `SourceSyncArchiveExportTest`，紧接 `--require-complete-suites`），`uniqueTests` **2265**、`uniqueTestsPerModule` 报 `core/database` **192** 例与 `feature/settings` **353** 例，作业绿。
 
 ### §37.9 下一步
 
