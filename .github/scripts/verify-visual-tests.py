@@ -17,6 +17,10 @@ MODULES = ("core/ui", "feature/player", "feature/settings", "provider/webdav", "
 COMMON_TESTS = {
     (
         "com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
+        "productionGroupedTrackRowsUseExactSnapshotAddresses",
+    ),
+    (
+        "com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
         "productionSystemMediaKeysPausePlayAndToggleExactlyOnce",
     ),
     (

@@ -171,13 +171,16 @@ class PlaybackEngine(
             }
 
             override fun onTracksChanged(tracks: Tracks) {
+                if (released) return
                 val mapped = TrackMapper.mapTracks(tracks)
+                currentTrackSnapshotToken = mapped.snapshotToken
                 _uiState.update {
                     it.copy(
                         audioTracks = mapped.audioTracks,
                         subtitleTracks = mapped.subtitleTracks,
                         selectedAudio = mapped.selectedAudio,
                         selectedSubtitle = mapped.selectedSubtitle,
+                        trackRowMap = mapped.rowMap,
                         audioFormatMime = player.audioFormat?.sampleMimeType,
                     )
                 }
@@ -250,6 +253,7 @@ class PlaybackEngine(
     override fun play(session: PlaybackSession) {
         if (released) return
         playbackGeneration++
+        currentTrackSnapshotToken = 0L
         subtitleOperation++
         // 同一个 ExoPlayer 可复用 audio session；每次媒体会话仍先释放旧 capture，防止迟到回调串流。
         audioSpectrumController.clear()
@@ -344,9 +348,15 @@ class PlaybackEngine(
     }
 
     override fun selectSubtitleTrack(selection: TrackSelection?) {
+        if (!isTrackSelectionCurrent(selection)) return
         subtitleOperation++
         selectTrack(C.TRACK_TYPE_TEXT, selection)
     }
+
+    private var currentTrackSnapshotToken = 0L
+
+    override fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean =
+        !released && (selection?.snapshotToken?.let { it != 0L && it == currentTrackSnapshotToken } ?: true)
 
     // ---- 外挂字幕（P2 字幕中心切片一） ----
 
@@ -512,6 +522,7 @@ class PlaybackEngine(
     }
 
     private fun selectTrack(trackType: Int, selection: TrackSelection?) {
+        if (!isTrackSelectionCurrent(selection)) return
         val mapped = trackSelector.currentMappedTrackInfo
         val builder = trackSelector.buildUponParameters().clearOverridesOfType(trackType)
             .setTrackTypeDisabled(trackType, selection == null)
@@ -543,13 +554,15 @@ class PlaybackEngine(
             }
             if (renderer < 0) return
             val groups = mapped.getTrackGroups(renderer)
-            if (selection.trackIndex !in 0 until groups[groupIndex].length) return
+            val plan = TrackSelectionPlanner.plan(renderer, groups,
+                selection.copy(groupIndex = groupIndex), currentTrackSnapshotToken)
+                as? TrackSelectionPlanner.Plan.Override ?: return
             rendererIndices.forEach { index ->
                 builder.clearSelectionOverrides(index)
                 builder.setRendererDisabled(index, index != renderer)
             }
             builder.setOverrideForType(TrackSelectionOverride(groups[groupIndex], selection.trackIndex))
-            builder.setSelectionOverride(renderer, groups, DefaultTrackSelector.SelectionOverride(groupIndex, selection.trackIndex))
+            TrackSelectionPlanner.apply(builder, plan)
             if (trackType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = selection
         }
         trackSelector.setParameters(builder)

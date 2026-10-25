@@ -408,6 +408,25 @@ class PlayerViewModelSubtitleCenterTest {
     // ---- 手动选择优先 ----
 
     @Test
+    fun `stale embedded row cannot cancel the current external selection or overwrite its memory`() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val engine = RecordingEngine().apply { loadHook = { gate.await() } }
+        val memory = MemoryStore()
+        val vm = buildVm(engine, Discovery(), memory)
+        try {
+            runCurrent(); runCurrent()
+            val target = vm.subtitleCenter.value.discovered.first { it.extension == "srt" }
+            vm.selectExternalSubtitle(target); runCurrent()
+            assertEquals(1, engine.loaded.size)
+            vm.onEmbeddedSubtitleSelected(TrackSelection(0, 0, snapshotToken = Long.MIN_VALUE))
+            assertNull(engine.selectedSubtitle)
+            gate.complete(Unit); runCurrent(); runCurrent()
+            assertEquals(target.id, vm.subtitleCenter.value.selectedExternalId)
+            assertEquals(target.id, memory.entries[SubtitleMemoryKeys.forItem(videoItem)]!!.subtitleId)
+        } finally { vm.stopAndFlush(); runCurrent() }
+    }
+
+    @Test
     fun `late discovery does not override manual embedded selection`() = runTest(dispatcher) {
         val gate = CompletableDeferred<List<DiscoveredSubtitle>>()
         val engine = RecordingEngine()

@@ -145,6 +145,10 @@ jobs:
             --required-suite com.mediahub.player.engine.PlaybackEngineExternalSubtitleTest \
             --required-suite com.mediahub.provider.webdav.WebDavParserPlatformCompatibilityTest \
             --required-suite com.mediahub.player.engine.PlaybackEnginePlaybackControlTest \
+            --required-suite com.mediahub.player.engine.PlaybackEngineTrackSelectionTest \
+            --required-suite com.mediahub.player.engine.TrackSelectionPlannerContractTest \
+            --required-suite com.mediahub.player.engine.TrackMapperTest \
+            --required-suite com.mediahub.feature.player.PlayerTrackSelectionTest \
             --required-suite com.mediahub.player.mpv.MpvPlaybackEngineTest \
             --required-suite com.mediahub.player.mpv.MpvSurfaceBindingTest \
             --required-suite com.mediahub.app.net.ColdUserAgentStartupTest \

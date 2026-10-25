@@ -61,6 +61,9 @@ interface PlaybackEnginePort {
     }
     fun seekTo(positionMs: Long, mode: SeekMode = SeekMode.COMMIT)
     fun setSpeed(speed: Float)
+    /** Snapshot-bound requests must remain owned by the current engine; raw legacy addresses remain compatible. */
+    fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean =
+        selection?.snapshotToken?.let { uiState.value.trackRowMap.matches(it) } ?: true
     fun selectAudioTrack(selection: TrackSelection?)
     fun selectSubtitleTrack(selection: TrackSelection?)
     /**

@@ -466,6 +466,7 @@ class MpvPlaybackEngine internal constructor(
      * 选择无效时不下发命令，避免静默把 aid 设成错误值。
      */
     override fun selectAudioTrack(selection: TrackSelection?) {
+        if (!isTrackSelectionCurrent(selection)) return
         val run = synchronized(stateLock) { current } ?: return
         val trackList = synchronized(stateLock) { run.mpvTrackList.orEmpty() }
         val aid = MpvTrackMapper.nativeAudioId(trackList, selection) ?: run {
@@ -530,6 +531,7 @@ class MpvPlaybackEngine internal constructor(
         }
     }
     override fun selectSubtitleTrack(selection: TrackSelection?) {
+        if (!isTrackSelectionCurrent(selection)) return
         val run = synchronized(stateLock) { subtitleOperation++; current } ?: return
         val rows = synchronized(stateLock) { run.mpvTrackList }
         val sid = MpvTrackMapper.nativeSubtitleId(rows, selection) ?: run {
@@ -543,6 +545,11 @@ class MpvPlaybackEngine internal constructor(
     }
 
     // ---- 外挂字幕 / 偏移（P2 字幕中心切片一） ----
+
+    // Media3 row snapshots cannot be reinterpreted as mpv native ordinals after fallback.
+    override fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean = synchronized(stateLock) {
+        !released && current != null && selection?.snapshotToken == null
+    }
 
     /**
      * mpv 能力矩阵（如实自述）：

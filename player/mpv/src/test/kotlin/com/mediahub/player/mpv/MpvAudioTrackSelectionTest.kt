@@ -123,6 +123,26 @@ class MpvAudioTrackSelectionTest {
     )
 
     @Test
+    fun `foreign Media3 snapshots cannot become native aid or sid ordinals`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val instance = FakeInstance(); val engine = engineWith(instance, scope)
+        instance.tracks = listOf(audioTrack("7", "eng", true),
+            mapOf("id" to "5", "type" to "sub", "lang" to "eng", "selected" to "yes"))
+        try {
+            engine.play(session())
+            instance.observer!!.event(MpvInstance.Event.FILE_LOADED)
+            instance.aidWrites.clear(); instance.sidWrites.clear()
+            engine.selectAudioTrack(TrackSelection(0, 0, snapshotToken = 777L))
+            engine.selectSubtitleTrack(TrackSelection(0, 0, snapshotToken = 777L))
+            assertTrue(instance.aidWrites.isEmpty()); assertTrue(instance.sidWrites.isEmpty())
+            engine.selectAudioTrack(TrackSelection(0, 0))
+            engine.selectSubtitleTrack(TrackSelection(0, 0))
+            assertEquals(listOf("7"), instance.aidWrites)
+            assertEquals(listOf("5"), instance.sidWrites)
+        } finally { engine.release(); scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
+    }
+
+    @Test
     fun `explicit pause stays paused when UI intent lags the native pause property`() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val instance = FakeInstance();val engine = engineWith(instance, scope)

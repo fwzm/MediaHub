@@ -41,6 +41,8 @@ data class PlaybackUiState(
      * 默认值取 [isPlaying]：未显式设置该字段的引擎（如旧实现）行为保持不变。
      */
     val playWhenReady: Boolean = isPlaying,
+    /** Media3 row ordinals and engine group/track coordinates belong to this snapshot. */
+    val trackRowMap: TrackRowMap = TrackRowMap.EMPTY,
 ) {
     fun shouldWarnAboutAudioOutput(): Boolean =
         audioOutputStatus == AudioOutputStatus.UNAVAILABLE && audioTracks.isNotEmpty() &&
