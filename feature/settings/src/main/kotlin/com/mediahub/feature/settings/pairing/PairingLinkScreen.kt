@@ -26,12 +26,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 
 /**
  * 配对页的测试标签（界面测试与文档共用）。
@@ -44,45 +46,55 @@ object PairingLinkTags {
 
     const val ACTION: String = "pairing.action"
 
+    const val FETCH: String = "pairing.fetch"
+
     const val STATE: String = "pairing.state"
 
     const val CLEAR: String = "pairing.clear"
 }
 
 /**
- * 配对入口（W6-59）：在设置页内托管，返回即回设置列表。
+ * 配对入口（W6-59 / W6-59b）：在设置页内托管，返回即回设置列表。
  *
- * 不注入任何依赖：核对是纯 Kotlin 的一次解析，控制器随页面 remember 即可。
+ * 拉邀请是唯一会拨号的动作，所以出口在这里注入：生产实现是 TLS 1.3 + SPKI 指纹钉扎，
+ * 界面测试与预览可以换成替身，页面本身不含任何网络代码。
  */
 @Composable
 fun PairingLinkRoute(
     onBack: () -> Unit,
-    controller: PairingLinkController = remember { PairingLinkController() },
+    controller: PairingLinkController = remember {
+        PairingLinkController(fetchPort = PairingTransportFetchPort())
+    },
 ) {
     val state by controller.state.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
     PairingLinkScreen(
         state = state,
         onVerify = { link -> controller.verify(link) },
+        onFetch = { scope.launch { controller.fetchInvitation() } },
         onClear = { controller.clear() },
         onBack = onBack,
     )
 }
 
 /**
- * 配对页（无状态）：贴链接 → 核对 → 显示设备标识 / 公钥指纹 / 剩余有效期。
+ * 配对页（无状态）：贴链接 → 核对 → 拉邀请（TLS 1.3 + 指纹钉扎）。
  *
- * 页面里写明「本版本不连接对端」，避免用户把「核对成功」当成「已经配好」。
+ * 两个动作分开摆：核对不发字节，拉邀请才拨号。页面上写明后者做了什么、失败给什么码，
+ * 避免用户把「核对成功」当成「已经配好」。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PairingLinkScreen(
     state: PairingLinkState,
     onVerify: (String) -> Unit,
+    onFetch: () -> Unit,
     onClear: () -> Unit,
     onBack: () -> Unit,
 ) {
     var link by remember { mutableStateOf("") }
     val line = PairingLinkCopy.lineOf(state)
+    val busy = state is PairingLinkState.Fetching
     Scaffold(
         modifier = Modifier.testTag(PairingLinkTags.SCREEN),
         topBar = {
@@ -110,6 +122,7 @@ fun PairingLinkScreen(
                 onValueChange = { link = it },
                 label = { Text(PairingLinkCopy.LINK_LABEL) },
                 singleLine = true,
+                enabled = !busy,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -117,7 +130,7 @@ fun PairingLinkScreen(
             )
             Button(
                 onClick = { onVerify(link) },
-                enabled = link.isNotBlank(),
+                enabled = link.isNotBlank() && !busy,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag(PairingLinkTags.ACTION),
@@ -131,8 +144,24 @@ fun PairingLinkScreen(
                     modifier = Modifier.testTag(PairingLinkTags.STATE),
                 )
             }
-            if (state is PairingLinkState.Parsed) {
+            if (state is PairingLinkState.Parsed || state is PairingLinkState.Fetched) {
                 Text(PairingLinkCopy.PARSED_HINT, style = MaterialTheme.typography.bodySmall)
+            }
+            OutlinedButton(
+                onClick = onFetch,
+                enabled = (state is PairingLinkState.Parsed || state is PairingLinkState.Fetched) && !busy,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(PairingLinkTags.FETCH),
+            ) {
+                Text(PairingLinkCopy.FETCH_ACTION)
+            }
+            Text(PairingLinkCopy.FETCH_HINT, style = MaterialTheme.typography.bodySmall)
+            if (busy) {
+                Text(PairingLinkCopy.FETCHING_HINT, style = MaterialTheme.typography.bodySmall)
+            }
+            if (state is PairingLinkState.Fetched) {
+                Text(PairingLinkCopy.FETCHED_HINT, style = MaterialTheme.typography.bodySmall)
             }
             Text(PairingLinkCopy.NOT_YET, style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(8.dp))
@@ -141,7 +170,7 @@ fun PairingLinkScreen(
                     link = ""
                     onClear()
                 },
-                enabled = link.isNotEmpty() || state !is PairingLinkState.Idle,
+                enabled = (link.isNotEmpty() || state !is PairingLinkState.Idle) && !busy,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag(PairingLinkTags.CLEAR),

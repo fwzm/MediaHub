@@ -392,9 +392,129 @@ PairingLinkScreenTest > aParsedStateShowsTheDeviceIdTheFingerprintAndTheRemainin
 
 ### 11.8 未做项（本版明确不做）
 
-- **不连接对端**：真实拉取邀请需要 TLS 1.3 + 证书指纹钉扎，Android 侧尚未实现（W6-59b）。
+- ~~不连接对端~~：**已在第 12 节实现**（W6-59b：TLS 1.3 + 证书指纹钉扎，按链接里那一枚指纹钉）。第 11 节描述的版本确实只核对不连接。
 - **不扫码**：没有相机依赖，也不引入；本版只接受粘贴的链接文本。
 - **不写任何凭据/Token**：契约层也没有这类字段，配对成功后落库属于后续任务。
 - **不做候选地址枚举接入**：`PairingAddressCandidates` 仍是纯计算（W6-60）。
 - **真机未跑**：instrumentation 只在模拟器/CI 上跑，真机状态 DEVICE_UNVERIFIED。
 - **未做视觉回归**：只断言标签、文案与语义树，不比对像素。
+
+## 12. 配对入口第二段：真正拉一次邀请（W6-59b）
+
+### 12.1 为什么这一步必须现在就做
+
+第 11 节把「贴链接 → 核对」做完了，但两边能力表里那一行仍然空着：**Android 侧没有 TLS 1.3、没有证书指纹钉扎**，
+所以核对完只能显示「还没连对端」。而拉邀请是配对的第二个必需动作——不验证对端真的是链接里那一台，
+后面「写凭据 / 建同步」就无从谈起（谁都能冒充一个写着别人的链接）。本轮补齐的就是这一段：
+按链接里写明的地址与**那一枚**公钥指纹去拨一次，TLS 1.3 握手时钉扎它，再逐项校验对端回的邀请。
+
+### 12.2 两步刻意分开（第 11 节的边界规则不变）
+
+| 动作 | 发字节 | 失败码来源 | 结果态 |
+| --- | --- | --- | --- |
+| 核对链接（`verify`） | **一个字节都不发** | core:common 的载荷 / 码 / 链接三组码 | `Parsed` |
+| 拉取邀请（`fetchInvitation`） | 一次 TLS 1.3 连接 | core:common 的传输组码（四个）+ 本层两个前置条件码 | `Fetched` / `Failed` |
+
+也就是说：**核对成功仍然不代表配好了**。`PairingLinkCopy.NOT_YET` 仍在页面上，写的是
+「本页只做『核对链接 + 拉一次邀请』：不写任何凭据、不建立同步」，本轮没有放宽这句。
+
+### 12.3 钉扎的信任根只有一处
+
+`PairingTransportFetchPort` 把链接里的指纹同时当作两样东西：
+
+1. `expectedFingerprint`——用于校验对端回传载荷里写的指纹（core 的 `validate`：不符即 `fingerprint-mismatch`）；
+2. `PairingTlsOptions.Pinned(expectedFingerprint.hex)`——TLS 1.3 握手时钉住对端证书 SPKI。
+
+出口接口 `PairingFetchPort` 收的是 `(host, port, expectedChallenge, expectedFingerprint)` 四个值，
+**没有**第五个「另给的信任根」参数：链接就是唯一的根，多一个来源只多一个可被替换的地方。
+
+### 12.4 两个新增的本地前置条件码（不进 core 词汇表）
+
+| 码 | 什么时候 | 会不会拨号 |
+| --- | --- | --- |
+| `pairing-not-verified` | 没先核对链接（或核对失败后）就点「拉取邀请」 | 不会 |
+| `pairing-fetch-unavailable` | 本次构建没有注入拉取出口（预览态 / 未接线） | 不会 |
+
+两条都是**本层前置条件**，不进 `PairingError.kt` 的任何码集合，也不与跨机五套码冲突：
+它们描述的是「本页还没具备拨号的前提」，不是「对端怎么了」。跨机失败码仍然只有 core 的传输组那四个。
+
+### 12.5 外部可观察语义
+
+| 输入 / 时机 | 结果 |
+| --- | --- |
+| 核对后点「拉取邀请」，对端回的邀请逐项通过 | `Fetched`：显示对端设备标识、指纹、`host:port`、剩余秒数，结果行以「邀请已校验」开头 |
+| 指纹对不上 | `Failed(fingerprint-mismatch)`，界面原样显示这个码 |
+| 对端回传的挑战与本端不一致 | `Failed(challenge-mismatch)` |
+| 邀请已过期 | `Failed(lifetime-exceeded)` |
+| 握手超时 / 连接不上 | `Failed(peer-timeout)` 等传输组码 |
+| 拉取进行中再点一次 | 直接忽略（单飞），不拨第二次，状态仍是 `Fetching` |
+| 拉取进行中 | 输入框、核对、拉取、清空四个控件全部禁用，另显示「正在拉邀请」 |
+
+### 12.6 落点
+
+| 文件 | 内容 |
+| --- | --- |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/pairing/PairingFetchPort.kt` | `fun interface PairingFetchPort`（四参数的 `suspend fun fetch`）+ 生产实现 `PairingTransportFetchPort`（`Dispatchers.IO` 里调 `PairingTransportClient.fetchInvitation(..., tls = Pinned(...))`） |
+| `.../pairing/PairingLinkController.kt` | 状态加 `Fetching` / `Fetched`；`suspend fun fetchInvitation()`；`endpointOf` / `endpointText`（https 缺省 443、其它 80）；两个前置条件码常量 |
+| `.../pairing/PairingLinkScreen.kt` | 新 tag `pairing.fetch`；拉取按钮（只在 `Parsed` / `Fetched` 且不忙时可点）；`FETCH_HINT` / `FETCHING_HINT` / `FETCHED_HINT` 三段解释；`NOT_YET` 补回页面底部 |
+
+### 12.7 用例清单
+
+JVM `PairingLinkControllerTest`（**22 例**，原 13 例 + 新增 9 例；拨号一律走替身 `FakeFetchPort`，本类不建 socket）：
+
+| 新增用例 | 钉住什么 |
+| --- | --- |
+| `fetchingWithoutAVerifiedLinkIsRefusedBeforeAnyPort` | 没核对 → `pairing-not-verified`，替身调用 0 次 |
+| `fetchingWithoutAPortReportsTheUnavailableCode` | 没注入口 → `pairing-fetch-unavailable` |
+| `aSuccessfulFetchShowsTheValidatedInvitation` | `Fetched` 四字段 + 剩余秒数按固定时钟算 |
+| `thePortGetsTheHostPortChallengeAndFingerprintFromTheLink` | 交给出口的 host / port / challenge / fingerprint 逐项等于链接里那四项 |
+| `aFetchFailureKeepsTheCoreCodeVerbatim` | 出口的失败码与句子原样透出，不自造码 |
+| `aSecondFetchWhileOneIsInFlightIsIgnored` | 单飞：在飞时再点不拨第二次（替身调用数恒为 1） |
+| `theFetchedLineLeaksNeitherTheChallengeNorTheRawLink` | `Fetched` 结果行不含挑战、不含 `mediahub://`、不含 `PairingChallenge(...)` |
+| `clearAfterAFetchReturnsToIdle` | 拉成功后清空仍回 `Idle` |
+| `aFetchAfterAFailedVerifyIsRefusedBecauseNothingIsHeld` | 核对失败后拉取被拒且不拨号（不留半成品） |
+
+另把 `theCopyIsStableAndSaysTheVersionDoesNotConnect` 改成 `theCopyIsStableAndSaysTheVersionOnlyVerifiesAndFetches`：
+旧断言「不会连接对端」在本轮已经不成立（现在会连），改为断言「不写任何凭据」「不建立同步」，并追加
+`FETCH_HINT` 里三个失败码（`fingerprint-mismatch` / `challenge-mismatch` / `lifetime-exceeded`）。
+**这是一次故意的断言转向**：文案变了，钉的仍然是同一条边界——「连过」不等于「配好」。
+
+instrumentation `PairingLinkScreenTest`（**12 例**，原 7 例 + 新增 5 例）：
+
+| 新增用例 | 钉住什么 |
+| --- | --- |
+| `theFetchButtonIsDisabledUntilTheLinkIsVerified` | `Idle` 时拉取按钮在但不可点 |
+| `aParsedStateEnablesTheFetchButtonAndTheClickIsReported` | `Parsed` 时可点且回调被调一次 |
+| `aFetchingStateDisablesEverythingAndSaysItIsConnecting` | 忙时四个控件全禁 + 状态行含「正在连接」+ 显示 `FETCHING_HINT` |
+| `aFetchedStateShowsTheValidatedInvitationAndSaysSyncIsStillSeparate` | 结果行含「邀请已校验」+ `FETCHED_HINT` 在页面上 |
+| `aFetchFailureShowsTheCoreCodeInTheStateLine` | 失败行含 `fingerprint-mismatch`，且拉取按钮不可点 |
+
+### 12.8 实测记录
+
+本机串行实跑（每轮跑前 `gradlew --stop`、跑完再 `--stop`，两轮之间不并发；`--max-workers=1`、`-Xmx1536m`）：
+
+| 轮次 | 命令 | 结果 |
+| --- | --- | --- |
+| 1 | `:feature:settings:testDebugUnitTest` | **BUILD SUCCESSFUL in 5m 27s**、EXIT=0、`127 actionable tasks: 18 executed, 109 up-to-date`；**18 套件 / 313 例 / 0 失败 / 0 错误 / 0 跳过**（304 + 9），`PairingLinkControllerTest` **22/22** |
+| 2 | `:core:common:testDebugUnitTest :feature:settings:assembleDebugAndroidTest` | **BUILD SUCCESSFUL in 3m 44s**、EXIT=0、`160 actionable tasks: 11 executed, 149 up-to-date`；`core/common` **38 套件 / 542 例 / 0 失败 / 0 错误 / 11 跳过**（跳过的是两个环境门控套件 `SourceSyncTlsInteropTest` 与 `SourceSyncListenerInteropTest`，无 Windows CLI 时按 assumption 跳过，与既有口径一致）；`settings-debug-androidTest.apk` = **20587433 B**（2026-10-25 15:16:21 重打） |
+| 收尾 | — | `gradlew --stop` 两次、`java-left=0`、仓库根 `hs_err_pid*.log` 计数 0 |
+
+androidTest APK 解包核对（不是看大小，是看内容）：20 个 dex；`PairingLinkScreenTest` 与五个新用例名
+（`theFetchButtonIsDisabledUntilTheLinkIsVerified` / `aParsedStateEnablesTheFetchButtonAndTheClickIsReported` /
+`aFetchingStateDisablesEverythingAndSaysItIsConnecting` / `aFetchedStateShowsTheValidatedInvitationAndSaysSyncIsStillSeparate` /
+`aFetchFailureShowsTheCoreCodeInTheStateLine`）以及 tag `pairing.fetch` **全部命中 `classes16.dex`**（17628 B）。
+
+| 项 | 状态 |
+| --- | --- |
+| `feature/settings` JVM（本机实跑） | **EXECUTED_PASS**：313 例 / 0 失败 |
+| `core/common` JVM（本机实跑） | **EXECUTED_PASS**：542 例 / 0 失败（11 skip 全部是环境门控） |
+| androidTest APK 构建 + 内容核对 | **EXECUTED_PASS** |
+| 12 例 instrumentation 真跑 | **DEVICE_UNVERIFIED**（本机无设备；以 CI visual-instrumentation 为准） |
+| 与真实 Windows 对端的跨端拉取 | **NOT_RUN**（需要 Windows 侧起 TLS 1.3 监听 + 第二台机器/同机跨进程，目前只有回环 e2e） |
+
+### 12.9 未做项
+
+- **跨机拉取仍 NOT_RUN**：本轮 TLS 证据只到「core 层 13 例 `PairingTransportTlsTest` + 回环 e2e」，真实两台机器之间没跑。
+- **不写凭据**：`Fetched` 之后没有落库动作，配对完成态属于后续任务。
+- **不做候选地址枚举**：`PairingAddressCandidates` 仍未接 Android 网卡枚举（W6-60）。
+- **不扫码**：仍只接受粘贴文本。
