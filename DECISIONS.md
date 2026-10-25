@@ -773,3 +773,16 @@
 The current query contract uses MediaQueryCapabilities(sortFields, filterFields), container-scoped filter and session-wide sort. MediaFilter v1 accepts only MOVIE/SERIES/EPISODE or null; unsupported values fail before network dispatch. Failed query changes roll back to the last working selection, guarded by navigation generation. SearchRoute and its engine share a SavedStateHandle-backed query; multi-source expansion remains independent UI state.
 
 Preserve later cancellation identity, IOException type-preserving sanitation, asynchronous network/cooldown boundaries and shared pageWindow semantics. The shared internal Emby wire mapper retains nullable unsupported-type behavior for canonical lookup, which already rejects unsupported types explicitly; the MediaFilter constructor enforces the filter boundary. Keep current userinfo-without-password and diagnostic-prefix contracts. No new provider capability, protocol assertion or physical-device pass is introduced by this reconciliation.
+
+### 2026-10-25 ADR-018 clarification: bind headers at MediaSource creation
+
+A per-engine mutable holder alone does not isolate delayed requests from successive
+sources on the same engine. Controlled real HTTP reproduced the old A source sending
+B's fake credentials after a source switch. Publish immutable copied holder values
+and capture them when each MediaSource is created, before asynchronous loading.
+Keep cache/connections/UA/redirect stripping/record-only429 behavior shared through
+the existing base DataSource chain. Forward all factory configuration APIs without
+returning the unwrapped delegate. The real delayed-HLS and late-reader tests are
+mandatory CI contracts. This clarification ports a useful legacy architecture
+contract without adopting its incompatible provider IDs, storage model or progress
+pipeline. Physical playback remains a separate deferred gate.

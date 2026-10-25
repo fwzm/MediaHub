@@ -12,6 +12,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import okhttp3.OkHttpClient
 
@@ -57,14 +58,28 @@ class PlayerFactory(
 
         val trackSelector = DefaultTrackSelector(context)
 
-        val mediaSourceFactory = DefaultMediaSourceFactory(context)
-            .setDataSourceFactory(mediaDataSourceFactory(headersHolder, speedMonitor, userAgent))
+        val mediaSourceFactory = mediaSourceFactory(headersHolder, speedMonitor, userAgent)
 
         return ExoPlayer.Builder(context)
             .setRenderersFactory(renderersFactory)
             .setTrackSelector(trackSelector)
             .setMediaSourceFactory(mediaSourceFactory)
             .build()
+    }
+
+    /** The actual source factory installed by create(); also drives delayed-source tests. */
+    fun mediaSourceFactory(
+        headersHolder: PlaybackHeadersHolder,
+        speedMonitor: PlaybackSpeedMonitor,
+        userAgent: String = USER_AGENT,
+    ): MediaSource.Factory {
+        // Share connections, cache and monitoring within this player; only the header
+        // wrapper is private to each MediaSource, including its late HLS/DASH readers.
+        val base = baseMediaDataSourceFactory(speedMonitor, userAgent)
+        return SnapshotMediaSourceFactory(DefaultMediaSourceFactory(context)) {
+            val snapshot = headersHolder.headers
+            HeaderAwareDataSourceFactory(base) { snapshot }
+        }
     }
 
     /**
@@ -78,6 +93,14 @@ class PlayerFactory(
         headersHolder: PlaybackHeadersHolder,
         speedMonitor: PlaybackSpeedMonitor,
         userAgent: String = USER_AGENT,
+    ): DataSource.Factory {
+        val snapshot = headersHolder.headers
+        return HeaderAwareDataSourceFactory(baseMediaDataSourceFactory(speedMonitor, userAgent)) { snapshot }
+    }
+
+    private fun baseMediaDataSourceFactory(
+        speedMonitor: PlaybackSpeedMonitor,
+        userAgent: String,
     ): DataSource.Factory {
         // Emby Direct Stream 常重定向到 HTTP 直链（HTTPS→307→HTTP IP→对象存储），
         // redirect 由 OkHttp 原生跟随（跨协议不受限，受平台 cleartext 策略约束）。
@@ -129,9 +152,7 @@ class PlayerFactory(
         // 否则又是一条"API 存在但永远不被调用"的死接线。
         ledger?.recordUnobservable(com.mediahub.core.network.RequestChannel.MEDIA)
 
-        return HeaderAwareDataSourceFactory(cacheDataSourceFactory) {
-            headersHolder.headers
-        }
+        return cacheDataSourceFactory
     }
 
     private companion object {
