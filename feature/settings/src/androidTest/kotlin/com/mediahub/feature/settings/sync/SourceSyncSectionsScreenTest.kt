@@ -143,6 +143,54 @@ class SourceSyncSectionsScreenTest {
             .assertTextEquals("接收失败：not-loopback")
     }
 
+    // ------------------------------------------- W6-58 接收中的「取消接收」
+
+    @Test
+    fun theReceiveCardOffersACancelButtonThatIsDisabledWhenIdle() {
+        render()
+
+        // 取消是「接收中才存在」的动作：没人接收时按钮在场但点不动（本页纪律是禁用而不是隐藏，
+        // tag 与布局保持稳定），文案固定，免得用户把「取消」误当「清空结果」。
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_CANCEL).performScrollTo()
+            .assertIsDisplayed()
+            .assertIsNotEnabled()
+        composeRule.onNodeWithText(SourceSyncReceiveCopy.CANCEL).performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun whileReceivingTheCancelButtonCallsBackAndTheReceiveButtonIsLocked() {
+        var cancelled = 0
+        render(receiveState = SourceSyncReceiveState.Receiving, onReceiveCancel = { cancelled++ })
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_CANCEL).performScrollTo()
+            .assertIsEnabled()
+            .performClick()
+        assertEquals("取消必须把回调交出去（关连接由控制器负责）", 1, cancelled)
+
+        // 同一时刻不能「再收一个」：接收按钮锁住，四个输入框也锁住。
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_ACTION).assertIsNotEnabled()
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_PORT).assertIsNotEnabled()
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_HOST).assertIsNotEnabled()
+    }
+
+    @Test
+    fun onceTheEnvelopeIsInTheCancelButtonIsLockedAgain() {
+        // 收下之后不是「可取消」的时刻：取消不是清空结果的动作（那条路是 clearResult）。
+        render(receiveState = SourceSyncReceiveState.Received("windows-a", "windows-listener.envelope.json"))
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_CANCEL).performScrollTo()
+            .assertIsNotEnabled()
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_STATE).performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun afterAFailureTheCancelButtonIsLockedAgain() {
+        render(receiveState = SourceSyncReceiveState.Failed("connect-failed", "Connection refused"))
+        composeRule.onNodeWithTag(SourceSyncImportTags.RECEIVE_CANCEL).performScrollTo()
+            .assertIsNotEnabled()
+    }
+
     // ------------------------------------------------------------------ 监听
 
     @Test
@@ -566,6 +614,7 @@ class SourceSyncSectionsScreenTest {
         listenTls: SourceSyncListenTlsAvailability = NO_TLS,
         sendState: SourceSyncSendState = SourceSyncSendState.Idle,
         onReceive: (SourceSyncReceiveForm) -> Unit = {},
+        onReceiveCancel: () -> Unit = {},
         onListenStart: (SourceSyncListenForm) -> Unit = {},
         onSend: (SourceSyncSendForm) -> Unit = {},
     ) {
@@ -580,6 +629,7 @@ class SourceSyncSectionsScreenTest {
                     onBack = {},
                     receiveState = receiveState,
                     onReceive = onReceive,
+                    onReceiveCancel = onReceiveCancel,
                     listenState = listenState,
                     listenTls = listenTls,
                     onListenStart = onListenStart,
