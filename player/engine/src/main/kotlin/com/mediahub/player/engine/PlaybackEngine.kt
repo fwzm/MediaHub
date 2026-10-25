@@ -74,10 +74,10 @@ class PlaybackEngine(
 
     // 关键事件通道：改 Channel(UNLIMITED)（review P2-3），保证 Pause/Seek/Resume 快速
     // 连续发生时逐条保留、严格保序、不被 conflate/drop。周期性 position 仍由 StateFlow conflate。
-    private val _events = Channel<PlaybackEvent>(Channel.UNLIMITED)
+    private val _events = Channel<PlaybackEventMessage>(Channel.UNLIMITED)
 
     /** 关键事件流（Pause/Seek/Ended/Stopped）。 */
-    override val events: Flow<PlaybackEvent> = _events.receiveAsFlow()
+    override val events: Flow<PlaybackEventMessage> = _events.receiveAsFlow()
 
     private val trackSelector: DefaultTrackSelector =
         requireNotNull(player.trackSelector as? DefaultTrackSelector) {
@@ -144,6 +144,7 @@ class PlaybackEngine(
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                val endedProgress = if (playbackState == Player.STATE_ENDED) currentProgress() else null
                 if (playbackState == Player.STATE_READY) {
                     session?.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_READY)
                 }
@@ -156,7 +157,7 @@ class PlaybackEngine(
                     )
                 }
                 if (playbackState == Player.STATE_ENDED) {
-                    _events.trySend(PlaybackEvent.Ended)
+                    emitEvent(PlaybackEvent.Ended, endedProgress)
                 }
             }
 
@@ -313,22 +314,28 @@ class PlaybackEngine(
     }
 
     fun pause() {
+        val generation = playbackGeneration
+        val progress = currentProgress()?.copy(isPaused = true)
         player.pause()
         // 立即同步意图，不等 onPlayWhenReadyChanged 回调（按钮图标必须立刻翻转）。
-        _uiState.update { it.copy(playWhenReady = false) }
-        _events.trySend(PlaybackEvent.Paused)
+        if (playbackGeneration == generation) _uiState.update { it.copy(playWhenReady = false) }
+        emitEvent(PlaybackEvent.Paused, progress)
     }
 
     fun resume() {
-        _events.trySend(PlaybackEvent.Resumed)
+        val generation = playbackGeneration
+        val progress = currentProgress()?.copy(isPaused = false)
         player.play()
-        _uiState.update { it.copy(playWhenReady = true) }
+        if (playbackGeneration == generation) _uiState.update { it.copy(playWhenReady = true) }
+        emitEvent(PlaybackEvent.Resumed, progress)
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) {
-        player.seekTo(positionMs.coerceAtLeast(0))
+        val target = positionMs.coerceAtLeast(0)
+        val progress = if (mode == SeekMode.COMMIT) currentProgress()?.copy(positionMs = target) else null
+        player.seekTo(target)
         // PREVIEW（手势拖动/连续快退节流）不发 Seeked，避免远端即时同步风暴（U3-B）
-        if (mode == SeekMode.COMMIT) _events.trySend(PlaybackEvent.Seeked)
+        if (mode == SeekMode.COMMIT) emitEvent(PlaybackEvent.Seeked, progress)
     }
 
     override fun setSpeed(speed: Float) {
@@ -610,6 +617,10 @@ class PlaybackEngine(
     /**
      * 立即读取当前进度（不依赖每秒循环，退出瞬间取值用）。
      */
+    private fun emitEvent(kind: PlaybackEvent, progress: PlaybackProgress?) {
+        if (progress != null) _events.trySend(PlaybackEventSnapshot(kind, progress))
+    }
+
     fun currentProgress(): PlaybackProgress? = session?.let { s ->
         PlaybackProgress(
             serverId = s.serverId,

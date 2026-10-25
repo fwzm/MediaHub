@@ -79,8 +79,8 @@ class SwitchablePlaybackEngine(
     )
     override val progress: SharedFlow<PlaybackProgress> = _progress.asSharedFlow()
 
-    private val _events = Channel<PlaybackEvent>(Channel.UNLIMITED)
-    override val events: Flow<PlaybackEvent> = _events.receiveAsFlow()
+    private val _events = Channel<PlaybackEventMessage>(Channel.UNLIMITED)
+    override val events: Flow<PlaybackEventMessage> = _events.receiveAsFlow()
 
     private val _subtitleCues = MutableStateFlow<CueGroup?>(null)
     override val subtitleCues: StateFlow<CueGroup?> = _subtitleCues.asStateFlow()

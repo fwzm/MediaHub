@@ -32,6 +32,7 @@ import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackStartupTrace
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackEvent
+import com.mediahub.player.engine.PlaybackEventMessage
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.ProgressSyncCoordinator
 import com.mediahub.player.engine.SubtitleCapabilities
@@ -582,7 +583,7 @@ class PlayerViewModel @Inject constructor(
     private var autoplayHandledItemId: String? = null
     private var eventsTapStarted = false
     /** engine.events 是单消费者 Channel：先 tap 一次，再分发给同步管线与连播逻辑。 */
-    private val playbackEventBus = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 32)
+    private val playbackEventBus = MutableSharedFlow<PlaybackEventMessage>(extraBufferCapacity = 32)
 
     val uiState: StateFlow<PlayerCombinedState> =
         combine(engine.uiState, _resolveState) { player, resolve ->
@@ -700,13 +701,13 @@ class PlayerViewModel @Inject constructor(
 
                 if (!syncStarted) {
                     // engine.events 只允许被订阅一次：先 tap，再由 playbackEventBus 分发。
-                    startEventsTap()
                     syncCoordinator.start(
                         progress = engine.progress,
                         events = playbackEventBus,
                         remoteIntervalMs = providerHandle.progress?.remoteReportIntervalMs
                             ?: 10_000L,
                     )
+                    startEventsTap()
                     syncStarted = true
                 }
                 // 字幕中心：同目录发现 + 匹配记忆回放（异步，不阻塞 Ready）。
@@ -742,7 +743,12 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             engine.events.collect { event ->
                 playbackEventBus.emit(event)
-                if (event == PlaybackEvent.Ended) onPlaybackEnded()
+                if (event.kind == PlaybackEvent.Ended) {
+                    val owner = event.progress
+                    if (owner == null || (owner.serverId == serverId && owner.itemId == currentItem?.id)) {
+                        onPlaybackEnded()
+                    }
+                }
             }
         }
     }

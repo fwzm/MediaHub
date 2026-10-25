@@ -38,7 +38,7 @@ interface PlaybackEnginePort {
     /** 每秒进度流（进度同步管线消费，见 ADR-017）。 */
     val progress: SharedFlow<PlaybackProgress>
     /** 关键事件流（Pause/Seek/Ended/Stopped）。 */
-    val events: Flow<PlaybackEvent>
+    val events: Flow<PlaybackEventMessage>
     /** 字幕 cues（Media3 引擎发出；mpv 内部渲染，恒发 null）。 */
     val subtitleCues: StateFlow<CueGroup?>
     /** 真实媒体下载速度（B/s，TransferListener 统计；Overlay 展示）。 */
