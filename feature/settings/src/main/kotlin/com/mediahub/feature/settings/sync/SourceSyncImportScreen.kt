@@ -366,9 +366,7 @@ fun SourceSyncImportScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                "选择另一台设备导出的信封文件（.json 或 .mhsync 的明文信封），" +
-                    "或加密归档（.mharchive，需要导出时设置的口令）。" +
-                    "预览不会写入任何数据。",
+                SourceSyncImportCopy.PICK_HINT,
                 style = MaterialTheme.typography.bodyMedium,
             )
             Row(

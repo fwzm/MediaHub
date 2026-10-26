@@ -3290,7 +3290,7 @@ Windows 的权威语义分两处：`windows/src/MediaHub.Sync/SourceSyncSession.
 | `includeSecrets && protector == null` ⇒ `secrets-require-protector`；给了 `secrets` 却 `includeSecrets == false` ⇒ `secrets-not-requested` | 不适用 | Android 的导出恒 `canSendSecrets = false`（`AndroidSourceSyncService.export()`），没有 secrets 通道 |
 | `EnsureSourceIds()` 的未分配项进 `Warnings`（`source-skipped:<serverId>:<reason>`） | `AndroidSourceSyncService.export()` 的 `skippedServerIds` | 部分等价：Android 只跳「没有可用端点 / 没有可写类型」的来源，identity 由 `SourceSyncLocalIds.derive` 确定性派生（不是 warning） |
 | `TryResolveExportPath` 的 `export-path-*` 码 + `File.WriteAllBytes` 的 `write-failed` | SAF `CreateDocument` 选位置 + `BackupFileStore.write` | 不等价，也不该等价：Android 没有路径（用户选 URI），失败折成本层两个码（见 §37.4） |
-| `DefaultEnvelopeFileName = "sync-envelope.json"` / `DefaultArchiveFileName = "sync-envelope.mhsync"` | `PLAIN_FILE_NAME = "sync-envelope.json"` / `SourceSyncArchiveExport.DEFAULT_FILE_NAME = "sync-envelope.mharchive"` | 明文同名；加密载体**同一字节格式、默认扩展名不同**（历史遗留，见 §37.8 第 4 条） |
+| `DefaultEnvelopeFileName = "sync-envelope.json"` / `DefaultArchiveFileName = "sync-envelope.mharchive"`（W6-66 起；旧名 `LegacyArchiveFileName = "sync-envelope.mhsync"` 仍只读兼容） | `PLAIN_FILE_NAME = "sync-envelope.json"` / `SourceSyncArchiveExport.DEFAULT_FILE_NAME = "sync-envelope.mharchive"` | 明文同名；加密载体**同一字节格式、同一默认扩展名**（§37.8 第 4 条已由 §39 关闭） |
 | `--json` 的十六个字段（command / root / path / encrypted / deviceId / snapshotId / sourceCount / deletionCount / canSendSecrets / sealedSecretCount / warningCount / warnings / bytes…） | 无对等物：成功行是「已导出<明文信封\|加密归档>（<文件名>，<字节数> 字节，<来源数> 个来源）」 | 不等价：Android 是 GUI，没有脚本消费方。计数只保留真实会变的三个（来源数、字节数、明文 / 加密） |
 
 一条容易误读的地方写在这里：Windows 的 `ExportSession.Archive` 与 `EnvelopeJson` 是二选一（`IsEncrypted => Archive.Length > 0`），
@@ -3420,9 +3420,9 @@ XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-64
 2. **设备侧密码学**：全部结论来自 JVM；写侧的 PBKDF2 600 000 轮在 Android（Conscrypt）上的耗时与峰值内存未测 ⇒ DEVICE_UNVERIFIED。
    参考量级：W6-63 在 JVM 上单次解锁 2.2–4.7 s，写侧与读侧同量级。
 3. **androidTest 7 例已在 CI 上跑过，但没有真机**：`b3d0030` 与 `7cc68ac` 的 Android CI 里 `:feature:settings:connectedDebugAndroidTest` 都是 **Starting 112 → Finished 112**、0 FAILED（等于把 `SourceSyncArchiveExportScreenTest` 的 7 例连同既有 105 例全跑了一遍），两个作业末尾各有 `API 32/36: 19 unique mandatory visual/parser tests passed at <该 head>`。真机仍是 DEVICE_UNVERIFIED。
-4. **扩展名差异**：Windows CLI 的加密导出默认名是 `sync-envelope.mhsync`（`SyncCliRunner.DefaultArchiveFileName`），
-   Android 侧统一 `.mharchive`（W6-62 / W6-63 的文案与夹具已经定了）。两者是**同一字节格式**，只是默认名不同；
-   要统一得两边一起改（改 Windows 默认名会碰到既有 CLI 契约与验收脚本），本轮不动。
+4. ~~扩展名差异~~（**已由 §39 关闭**，W6-66）：此前 Windows CLI 的加密导出默认名是 `sync-envelope.mhsync`、
+   Android 侧是 `.mharchive`（W6-62 / W6-63 定的）。§39 已把两端统一为 `.mharchive`；旧名 `.mhsync` 保留为**只读兼容名**
+   （`SyncCliRunner.LegacyArchiveFileName`），因为两端的读端本来就按 `MHSYNCA1` magic 嗅探、从不按扩展名分支。
 5. **8 MiB 上限**：继承 §35.8 第 3 条 / §36.8 第 5 条，只测了判定写法没测接近上限的真数据。
 6. **口令的界外情况**：继承 §36.8 第 6 条（超长口令、NUL、代理对）。导出卡也没有「显示口令」开关、没有剪贴板粘贴的专项验证。
 7. **Windows 的 warnings 与 JSON 输出面没有对等物**：Android 是 GUI，没有 `--json` 消费方；
@@ -3435,7 +3435,7 @@ XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-64
 
 - 设备侧取证：把 PBKDF2 600 000 轮的耗时与峰值内存在模拟器 / 低端机上量一次（写读两侧都要），补 §37.8 第 2 条与 §36.8 第 2 条；
 - 真实两机搬运：Windows 导出 `.mharchive` → 拷到另一台机器 → Android 导入，两端各留 exact 证据（同时关闭 §36.8 第 1 条与 §37.8 第 1 条）；
-- 扩展名统一：若维护者希望与 Windows CLI 默认名一致，需在 CLI 加参数而不是单方面改 Android（否则既有文案与夹具不同步）；
+- ~~扩展名统一~~（**已由 §39 完成**，W6-66）：Windows CLI 的默认名改为 `.mharchive`，`.mhsync` 作为只读兼容名继续被接受；不需要新增 CLI 参数，因为读端按 magic 嗅探而不是按扩展名分支；
 - 若产品上要「对端直接发归档」，先写一份安全评审：口令怎么进、超时多久、失败怎么告诉用户不泄露信息（与 §36.9 最后一条同一件事）。
 
 ## §38 反向互操作：Android 写出的 `.mharchive` 由 Windows 读（W6-65）
@@ -3619,6 +3619,136 @@ XML 汇总（`<testsuite>` 属性相加，非估算）：
 ### §38.10 下一步
 
 - 把 §38.3 的资产再加「异迭代数（如 700 000）」与「`minimumReaderVersion`=2」两份，做成跨端演进用例（候选 W6-66）；
+- 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条与 §37.8 第 1 条）；
+- 设备侧密码学：PBKDF2 600 000 轮在模拟器 / 低端机上的耗时与峰值内存，写读两侧都要；
+- 归档格式若要演进（新 KDF、新字段），先按 W6-47 ADR 的方法写契约，再两端同步加码——不要单边加。
+## §39 归档扩展名统一：Windows CLI 默认名改为 `.mharchive`（W6-66）
+
+> 状态词按本项目口径：EXECUTED_PASS / IMPLEMENTED_UNVERIFIED / GUI_UNVERIFIED / SERVER_UNVERIFIED / DEVICE_UNVERIFIED / NOT_RUN / BLOCKED / FAILED / RELEASE_BLOCKED / SIGNING_BLOCKED。
+> 本轮边界：**只改默认文件名与提示文案**，归档字节格式、magic、KDF、AAD、判定序一行不改；旧的 `.mhsync` 文件继续可读。
+
+### §39.1 动机：§37.8 第 4 条留下的那一处「同名不同后缀」
+
+W6-64 的导出卡把 Android 的加密归档接到界面上时，实现在 `core/database` 的 `SourceSyncArchiveExport` 里写死
+`DEFAULT_FILE_NAME = "sync-envelope.mharchive"`；而 Windows CLI 从 ADR-S005 起，`export --passphrase` 落盘的名字一直是
+`sync-envelope.mhsync`。两端写的是**同一套字节格式**（magic `MHSYNCA1`、PBKDF2-HMAC-SHA256 600 000 轮、
+AES-GCM、AAD = `magic + BE int32 + headerJson`），差别只在默认扩展名一个字。
+
+这件事本身没有功能后果，因为**两端读端都按前 8 字节 magic 嗅探，从不按扩展名分支**；但它在两个地方持续放血：
+
+1. 文档要把「扩展名差异」当成一条遗留缺口记（§37.2 对比表、§37.8 第 4 条、§37.9 第 3 条），每读一次都要先解释「这不是两个格式」；
+2. 用户看到 Android 导出 `.mharchive`、Windows 导出 `.mhsync`，最自然的推断就是两种文件需要两种打开方式——而事实恰好相反。
+
+W6-66 因此只做一件事：**把 Windows CLI 的默认名改成 `.mharchive`，把 `.mhsync` 降级为只读兼容名**。
+选择「改默认名」而不是「改格式」，是因为格式一侧没有任何理由动——两端的读端已经证明能互吃（W6-65 的 Kotlin 写 → C# 读、
+W6-62 的 C# 写 → Kotlin 读）。
+
+### §39.2 设计：默认名与兼容名分开，读端行为一字不改
+
+| 决定 | 取值 | 理由 |
+| --- | --- | --- |
+| 写端默认名 | `sync-envelope.mharchive` | 与 Android `SourceSyncArchiveExport.DEFAULT_FILE_NAME` 逐字相同 |
+| 旧名 | `sync-envelope.mhsync`，保留为 `SyncCliRunner.LegacyArchiveFileName` | 测试与外部调用方需要一个不写字符串字面量的入口；旧文件继续可读 |
+| 新增 CLI 参数 | **不加** | 读端按 magic 嗅探，`--in` 传什么名字都能读；加参数只是把命名选择推给用户 |
+| 读端扩展名白名单 | **不加** | 加了就等于「按扩展名分支」，会同时破坏「明文信封改名成 `.mharchive` 仍按明文读」这条行为 |
+| 界面选择器 | `[".json", ".mharchive", ".mhsync"]` | `.mharchive` 是规范名，`.mhsync` 只为兼容老文件仍可选 |
+
+刻意**不采用**的两个方案，理由要写下来（否则以后会有人再提）：
+
+1. *在归档头里加一个 `fileExtension` 字段*——头部 JSON 是 GCM 的 AAD 一部分（§38.5），改它等于改格式，且扩展名属文件系统元数据，不该进密码学头；
+2. *按扩展名决定要不要索要口令*——这正是「明文信封改名成 `.mharchive` 仍按明文读」这条反例要否掉的：扩展名只是提示，判据只能是内容。
+
+### §39.3 落点行号表
+
+| 文件 | 行 | 内容 |
+| --- | --- | --- |
+| `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` | :26-30 | `DefaultArchiveFileName = "sync-envelope.mharchive"`（注释写明「every reader sniffs the magic bytes and never the extension」） |
+| 同上 | :32-33 | `LegacyArchiveFileName = "sync-envelope.mhsync"`（注释写明 pre-W6-66 后缀，保留只为调用方不必写字符串字面量） |
+| 同上 | :2107 | `Path.Combine(invocation.Root, encrypted ? DefaultArchiveFileName : DefaultEnvelopeFileName)` |
+| `windows/src/MediaHub.App/Views/SyncPage.xaml` | :33 | 导出按钮 ToolTip 追加「加密导出写入 sync-envelope.mharchive」 |
+| 同上 | :132 | 应用卡说明改为「sync-envelope.json，或加密存档 .mharchive」 |
+| `windows/src/MediaHub.App/Views/SyncPage.xaml.cs` | :649-651 | 选择器改为 `PickFileAsync([".json", ".mharchive", ".mhsync"])`，注释写明 canonical / 兼容名 |
+| `windows/tests/MediaHub.Tests/SyncCliTests.cs` | :562 | 新分节注释 `// ---- archive file names (W6-66) ---` |
+| 同上 | :566 / :582 / :601 | 三个 `[Fact]`：`Run_EncryptedExportUsesTheCanonicalArchiveSuffix` / `Run_ArchiveUnderTheLegacySuffixIsStillRead` / `Run_PlainEnvelopeNamedLikeAnArchiveIsStillPlaintext` |
+| `windows/tools/acceptance/w6/sync-cli-e2e.ps1` | :324 / :339 | 两个新 `Check`（插在 #9 `passphrase-archive-round-trips-to-a-fresh-device` 之后） |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportLogic.kt` | :61 | 新增 `SourceSyncImportCopy.PICK_HINT`（含 `.json` / `.mharchive` / 旧 `.mhsync` 三句） |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportScreen.kt` | :369 | 选文件区改用该常量（原内联长句 `.json 或 .mhsync 的明文信封` 已删） |
+| `feature/settings/src/test/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportLogicTest.kt` | :280 | 新用例 `thePickHintNamesTheCanonicalArchiveSuffixAndNeverCallsTheLegacySuffixPlaintext` |
+
+Android 侧只改文案、不改行为：选文件仍然读字节、仍然按 magic 嗅探、仍然在口令卡里解密。改文案的原因和 Windows 一样——
+旧提示写「`.json` 或 `.mhsync` 的明文信封」，把 `.mhsync` 说成明文，恰恰与两端读端的实际判据相反。
+
+### §39.4 用例清单
+
+Windows 三个 `[Fact]`（`SyncCliTests.cs`，每个都在临时根目录里跑真 CLI）：
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `Run_EncryptedExportUsesTheCanonicalArchiveSuffix` | 加密导出后 `sync-envelope.mharchive` 存在、`sync-envelope.mhsync` **不存在**；同时断言常量值本身 |
+| `Run_ArchiveUnderTheLegacySuffixIsStillRead` | 把规范名归档改名成 `.mhsync` 再 `import --passphrase --apply`：exit 0、`appliedCount=1`、stderr 不含 `malformed-payload` |
+| `Run_PlainEnvelopeNamedLikeAnArchiveIsStillPlaintext` | 把明文信封改名成 `.mharchive` 再 `import --apply`：exit 0、`appliedCount=1`、stderr 不含 `passphrase-required` |
+
+第二、三是**反向对照**：只断言「默认名变了」的话，把读端改成按扩展名分支也能绿；这两条把「扩展名不是判据」钉成行为断言。
+
+验收脚本两个新检查（`sync-cli-e2e.ps1`，14 → 16 项）：
+
+| # | 检查 | 钉住的规则 |
+| --- | --- | --- |
+| 10 | `encrypted-export-uses-the-canonical-archive-suffix` | 规范名落盘、旧名不再写；把规范名复制成 `.mhsync` 后新设备仍能导入（`appliedCount=2`） |
+| 11 | `plain-envelope-renamed-to-an-archive-suffix-is-still-plaintext` | 明文信封复制成 `.mharchive` 后仍按明文导入（`appliedCount=2`），不索要口令 |
+
+Kotlin 一例：`thePickHintNamesTheCanonicalArchiveSuffixAndNeverCallsTheLegacySuffixPlaintext`——四条断言（含 `.mharchive` / `.json` / `.mhsync`，且**不含** `.mhsync 的明文信封`）。
+这是文案的回归锁：下一次有人把旧句改回去会红。
+
+### §39.5 本机实跑（串行，防 OOM）
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| C# 全量 + 验收脚本 | `D:/mh-verify/run-w6-66a-windows.bat`（内部先 `dotnet build-server shutdown`，再 build、`dotnet test`、跑 `sync-cli-e2e.ps1`） | `BUILD_EXIT=0`；**1588 通过 / 0 失败 / 0 跳过**（1585 → 1588，+3）；`RESULT: 16 passed, 0 failed`、`ACCEPT_EXIT=0` |
+| C# 只看新例 | `dotnet test … --filter "FullyQualifiedName~Run_EncryptedExportUsesTheCanonicalArchiveSuffix|FullyQualifiedName~Run_ArchiveUnderTheLegacySuffixIsStillRead|FullyQualifiedName~Run_PlainEnvelopeNamedLikeAnArchiveIsStillPlaintext"` | **3/3 通过**、`EXIT=0`（`D:/mh-verify/w6-66a-filter.log`） |
+| 验收脚本 detail 抽样 | 同上日志 | `encrypted-export-uses-the-canonical-archive-suffix :: written=sync-envelope.mharchive legacy-name-still-reads applied=2`；`plain-envelope-renamed-to-an-archive-suffix-is-still-plaintext :: the reader sniffs MHSYNCA1 instead of trusting the extension`；`passphrase-archive-round-trips-to-a-fresh-device :: magic=MHSYNCA1 bytes=1189 applied=2` |
+| Android 三模块 | `D:/mh-verify/run-w6-66b-gradle.bat`（低内存模板 + `--rerun-tasks`，确保三模块都真跑而不是 UP-TO-DATE） | `BUILD SUCCESSFUL in 3m 18s`、`167 actionable tasks: 167 executed`、`EXIT=0` |
+| 清理 | 跑完 `gradlew --stop` | 仓库根 `hs_err_pid*.log` 计数 0、残留 java/dotnet 进程 0 |
+
+首轮全量 build 撞到一次 `error MSB3021: 无法将文件 …DirectML.dll 复制到 …`（同样 onnxruntime.dll）：
+目标文件当时并不存在、目录 ACL 正常、手工 `Copy-Item` 也成功 ⇒ 是**残留 MSBuild / VBCSCompiler 节点句柄**造成的瞬时锁，
+`dotnet build-server shutdown` 后单项目 build 成功、整轮即绿。这条已写进验证脚本的头部。
+
+XML 汇总（`<testsuite>` 属性相加，非估算；`--rerun-tasks` 后三模块都是当轮产物）：
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | 42 | 596 | 0 | 11 | 不变 |
+| `core/database` | 20 | 192 | 0 | 12 | 不变 |
+| `feature/settings` | 23 | **354** | 0 | 0 | 353 → 354（+1 = §39.4 的文案用例） |
+
+三模块合计 **1142** 例（596 + 192 + 354）。本轮**没有**新增套件，`--required-suite` 仍是 48 条；
+`androidTest` 仍 88 例（文案改动没有新增 Compose 断言）。
+
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 `completed / success`：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `8c26230b4762bf91d57710365cfa41cc7d2cb5d9` | `windows-ci` | 40330806529 | `MediaHub.Tests` 469 + `MediaHub.WebDav.Tests` 104 = 573；licence `projects=13 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40330806617 | `uniqueTests` **2267**（`core/common` 596 / `core/database` 192 / `feature/settings` 354）；`--required-suite` 48 条；两个 visual-instrumentation job 各 112 例，API 32/36 各 `19 unique mandatory` 命中该 SHA |
+| `53d2571f480202b0506d92e6017a2758d09ea01f`（W6 树，此刻尚未 merge 本轮主树提交） | `windows-ci` | 40331895690 | `MediaHub.Tests` **1588** + `MediaHub.WebDav.Tests` 104 = **1692**；licence `projects=15 rows=47 packages=28`、`RESULT: PASS` |
+| 同上 | `android-ci` | 40331895747 | `uniqueTests` **2266**（`core/common` 596 / `core/database` 192 / `feature/settings` 354）；`--required-suite` 48 条；instrumentation 112 例、API 32/36 各 `19 unique mandatory` |
+
+主树 `uniqueTests` 由上一基线 2266 增至 **2267**（+1 = §39.4 的 Kotlin 文案用例，与本机 XML `feature/settings` 353 → 354 一致）。
+W6 树那两条比主树少 1 例，原因是 W6 分支此刻还没 merge `8c26230`——Android 侧代码在本轮主树提交里，W6 树只带到 `d3be762`；因此 **2267 是本轮 Android 口径**，W6 的 2266 只是它自己 head 上的实测值，不是回归。
+
+
+### §39.6 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机搬运**：把 Windows 导出的 `.mharchive` 拷到另一台机器再让 Android 导入的完整流程 NOT_RUN（同 §33.8–§38.9 各节，都需要第二台机器）。
+2. **已发布版本的兼容性**：`.mhsync` 只读兼容是**读端行为**，本机用改名文件验过；但「用旧版本 CLI 导出的真实历史文件」没有样本可测（旧版本写出的字节格式与本轮相同，风险在此一处）。
+3. **其他调用方的默认名**：仓库内除 CLI 与 App 外没有第三处写归档名的代码；仓库外的脚本若硬编码 `.mhsync`，本轮无法感知。
+4. **不涉及 GUI 证据**：App 只改提示文案与文件选择器的扩展名列表，没有新增控件、没有改交互顺序；同步页四张卡的 GUI 证据仍按 W6-43 / W6-49 / W6-58 / W6-64 的既有口径记为 GUI_UNVERIFIED。
+5. **设备侧**：Android 侧只加一条纯 JVM 文案用例，无设备依赖；真机 `DEVICE_UNVERIFIED` 的既有口径不变。
+
+### §39.7 下一步
+
+- §37.2 的对比表与 §37.8 第 4 条、§37.9 第 3 条已在本轮回标关闭，无需再动；
 - 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条与 §37.8 第 1 条）；
 - 设备侧密码学：PBKDF2 600 000 轮在模拟器 / 低端机上的耗时与峰值内存，写读两侧都要；
 - 归档格式若要演进（新 KDF、新字段），先按 W6-47 ADR 的方法写契约，再两端同步加码——不要单边加。
