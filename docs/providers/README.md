@@ -30,8 +30,8 @@ UI 调用 `handle.provider.testConnection()`，具体实现负责探测协议：
   [Jellyfin](../../provider/jellyfin/src/main/kotlin/com/mediahub/provider/jellyfin/JellyfinProvider.kt)
   分别使用自己的公开信息接口和身份判定；端点解析、认证与响应映射不能混用。
 - [WebDAV](../../provider/webdav/src/main/kotlin/com/mediahub/provider/webdav/WebDavProvider.kt)
-  发 OPTIONS，当前成功分支按 2xx 判断，DAV 响应头用于诊断展示；认证另经受保护的 PROPFIND 验证。
-  旧分支要求非空 DAV 头的更严格协议识别尚未合入，作为独立契约差异继续核对，不能把任意 2xx 当作已证明 WebDAV 身份。
+  发 OPTIONS，成功状态还须有 DAV class 1 声明；重复响应头按列表解析，扩展 URI 内的数字不作为 class 标记。
+  该检查确认协议声明，实际认证另经受保护的 PROPFIND 验证；状态文案不回显服务端的原始能力载荷。
 - Local 检查配置的本地根目录；完整的系统文档树授权路径仍见下节的边界。
 
 Emby/Jellyfin 使用独立的 AuthProvider、TokenStore 与各自的非敏感 SessionStore；登录后不保存密码。

@@ -244,6 +244,7 @@ jobs:
             --required-suite com.mediahub.feature.settings.sync.SourceSyncArchiveExportControllerTest \
             --required-suite com.mediahub.feature.settings.sync.SourceSyncArchiveExportCancellationTest \
             --required-suite com.mediahub.feature.settings.sync.SourceSyncArchiveSelectionTest \
+            --required-suite com.mediahub.provider.webdav.WebDavProtocolIdentityTest \
             --require-complete-suites
 
       - name: Lint
