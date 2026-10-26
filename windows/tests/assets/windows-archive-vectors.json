@@ -1386,5 +1386,44 @@
         "writeReason": null
       }
     ]
+  },
+  "nearLimit": {
+    "maxPayloadBytes": 8388608,
+    "recipe": {
+      "deviceId": "device-near-limit",
+      "snapshotId": "0123456789abcdef0123456789abcdef",
+      "createdAtEpochMs": 1700000000000,
+      "capabilities": {
+        "canSendSecrets": false,
+        "sourceTypes": [
+          "emby"
+        ]
+      },
+      "syncSourceId": "near-limit-1",
+      "sourceType": "emby",
+      "displayNameUnit": "x",
+      "displayNameLength": 8388242,
+      "recordRevision": 1,
+      "fieldVersion": 1,
+      "passphrase": "correct horse battery staple",
+      "iterations": 600000,
+      "saltBase64": "AAECAwQFBgcICQoLDA0ODw==",
+      "nonceBase64": "EBESExQVFhcYGRob"
+    },
+    "payloadByteLength": 8388608,
+    "payloadSha256": "f6bc78f30a55b46b3a8cb64c28ad035f04e4fad86ba6542f8be64d02b3fa11ae",
+    "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH0=",
+    "prefixByteLength": 173,
+    "archiveByteLength": 8388797,
+    "archiveSha256": "b47b3cc3c4bd4abe3a317c39632d1f220415dfc703eb21a8c881deacd2edc287",
+    "tooLarge": {
+      "displayNameLength": 8388243,
+      "payloadByteLength": 8388609,
+      "writeReason": "payload-too-large"
+    },
+    "oversizedCiphertext": {
+      "cipherLength": 8388609,
+      "readReason": "payload-too-large"
+    }
   }
 }
