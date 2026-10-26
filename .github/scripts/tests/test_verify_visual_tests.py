@@ -15,6 +15,24 @@ SHA = "2f9032732fc8365d19b5badac90f66b10310f500"
 
 
 class EvidenceGateTest(unittest.TestCase):
+    def test_archive_routes_require_every_actual_case(self):
+        root = Path(__file__).resolve().parents[3]
+        for name, minimum in (("SourceSyncPassphraseScreenTest", 5), ("SourceSyncArchiveExportScreenTest", 7)):
+            suite_name = "com.mediahub.feature.settings.sync." + name
+            source = root / "feature/settings/src/androidTest/kotlin" / Path(*suite_name.split("."))
+            methods = re.findall(r"@Test\s+fun\s+(\w+)\s*\(", source.with_suffix(".kt").read_text(encoding="utf-8-sig"))
+            self.assertGreaterEqual(len(methods), minimum)
+            for api in (32, 36):
+                for method in methods:
+                    with self.subTest(api=api, suite=suite_name, method=method):
+                        self.assertIn((suite_name, method), gate.required_tests(api))
+                        self.build(api)
+                        def remove(suite):
+                            suite.remove(next(c for c in suite if c.get("name") == method))
+                            suite.set("tests", str(len(suite)))
+                        self.edit("feature/settings", remove, api)
+                        self.assertTrue(any(method in p and "no passing execution" in p for p in self.problems(api)))
+
     def test_pairing_tls_address_and_listen_routes_require_every_actual_case(self):
         root = Path(__file__).resolve().parents[3]
         suites = (

@@ -47,6 +47,12 @@ object SourceSyncImportCopy {
 
     const val APPLY_FAILED: String = "应用失败"
 
+    /** 选到加密归档（.mharchive）但还没有口令时的说明。 */
+    const val PASSPHRASE_REQUIRED: String = "这份文件是加密归档，请输入导出时设置的口令。"
+
+    /** 口令不对 / 归档被改坏时的说明（具体原因码由 blockedReason 原样带出）。 */
+    const val UNLOCK_FAILED: String = "解密失败"
+
     /** 桶标题（四桶固定顺序）。 */
     fun titleOf(bucket: SourceSyncImportBucket): String = when (bucket) {
         SourceSyncImportBucket.APPLY -> "可导入"
@@ -67,6 +73,8 @@ object SourceSyncImportCopy {
         NOTHING_ALLOWED -> NOTHING_ALLOWED
         PREVIEW_FAILED -> PREVIEW_FAILED
         APPLY_FAILED -> APPLY_FAILED
+        PASSPHRASE_REQUIRED -> PASSPHRASE_REQUIRED
+        UNLOCK_FAILED -> UNLOCK_FAILED
         NO_ENVELOPE, NO_PREVIEW -> NO_ENVELOPE
         else -> "无法继续：$reason"
     }

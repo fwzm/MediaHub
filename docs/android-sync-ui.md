@@ -69,6 +69,10 @@ UI 里没有「直接导入」，必须先预览出四桶。理由：四个桶�
 | `sync.import.screen` | 整页 Scaffold | 页面根节点 |
 | `sync.import.pick` | 选择文件按钮 | 拉起系统文件选择器（OpenDocument） |
 | `sync.import.preview` | 预览按钮 | 未选文件时禁用 |
+| `sync.import.passphrase.card` | 口令卡片（W6-63） | 只有选到的是加密归档时出现；明文路径不渲染任何口令控件 |
+| `sync.import.passphrase` | 口令输入框（W6-63） | 密码遮罩；口令只活在这张卡片的局部 `remember` 里，不进任何 StateFlow |
+| `sync.import.unlock` | 「解密」按钮（W6-63） | 口令为空时禁用（避免用空口令白跑一次 600 000 轮密钥派生） |
+| `sync.import.passphrase.error` | 口令错误行（W6-63） | 解密失败时出现，原样带 ArchiveError 稳定码 |
 | `sync.entry.state` | 每条目状态行 | 未决定 / 已允许 / 已跳过 / 不可允许原因（点了按钮必须有回执） |
 | `sync.entry.allow` | 每条目「允许」 | 仅可允许条目可点；未知/不支持/冲突一律 disabled |
 | `sync.entry.skip` | 每条目「跳过」 | 同上 |
@@ -76,6 +80,12 @@ UI 里没有「直接导入」，必须先预览出四桶。理由：四个桶�
 | `sync.apply` | 应用按钮 | 没有任何允许时禁用 |
 | `sync.apply.blocked` | 阻断卡片 | 预览失败 / 整份信封被拒 / 一个都没允许 |
 | `sync.apply.result` | 结果卡片 | 导入结果计数 + 免责句 |
+| `sync.export.card` | 导出卡片（W6-64） | 「导出（另存为文件）」整卡；按 W6-41 首屏纪律放页尾 |
+| `sync.export.action` | 收起状态的「导出」按钮（W6-64） | 只有 Idle 时渲染，点了展开出口令步骤 |
+| `sync.export.passphrase` | 导出口令输入框（W6-64） | 密码遮罩；留空 = 明文导出，非空 = 加密归档；口令只在卡片局部 `remember` 里 |
+| `sync.export.submit` | 生成并保存按钮（W6-64） | Ready/Saving/Saved 时禁用，避免连点生成两份不同字节 |
+| `sync.export.state` | 导出结果行（W6-64） | 成功显示文件名/字节数/来源数；失败原样带稳定码 |
+| `sync.export.dismiss` | 「收起」按钮（W6-64） | 丢弃暂存产物回 Idle（不写盘） |
 
 多条目页面上 allow/skip 会重复出现，UI 测试用 `hasTestTag(ENTRY_ALLOW) and hasAnyAncestor(hasTestTag(entry(key)))` 把按钮限定到某一条，避免「点了第一行却断言第二行」。
 

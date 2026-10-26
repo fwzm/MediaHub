@@ -1,8 +1,5 @@
 package com.mediahub.feature.settings.sync
 
-import android.content.Context
-import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -36,13 +33,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -192,6 +189,36 @@ object SourceSyncImportTags {
 
     /** 发送结果行（已发送 / 发送中 / 发送失败：码）。 */
     const val SEND_STATE = "sync.send.state"
+
+    /** W6-63：加密归档的口令卡（只在选到 .mharchive 时出现）。 */
+    const val PASSPHRASE_CARD = "sync.import.passphrase.card"
+
+    /** W6-63：加密归档的口令输入框（只在选到 .mharchive 时出现）。 */
+    const val PASSPHRASE = "sync.import.passphrase"
+
+    /** W6-63：口令卡上的「解密」按钮。 */
+    const val UNLOCK = "sync.import.unlock"
+
+    /** W6-63：口令卡的错误行（口令不对 / 归档被改坏时带 ArchiveError 原码）。 */
+    const val PASSPHRASE_ERROR = "sync.import.passphrase.error"
+
+    /** W6-64：导出（另存为文件）卡片。 */
+    const val EXPORT_CARD = "sync.export.card"
+
+    /** W6-64：展开导出卡片的按钮。 */
+    const val EXPORT_ACTION = "sync.export.action"
+
+    /** W6-64：导出卡的口令输入框（留空 = 明文信封，非空 = 加密归档）。 */
+    const val EXPORT_PASSPHRASE = "sync.export.passphrase"
+
+    /** W6-64：生成产物并拉起系统保存器的按钮。 */
+    const val EXPORT_SUBMIT = "sync.export.submit"
+
+    /** W6-64：导出结果行（已导出 / 失败：码）。 */
+    const val EXPORT_STATE = "sync.export.state"
+
+    /** W6-64：收起导出卡片（丢弃暂存字节）。 */
+    const val EXPORT_DISMISS = "sync.export.dismiss"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -205,14 +232,23 @@ fun SourceSyncImportRoute(
     val receiveState by viewModel.receiveState.collectAsStateWithLifecycle()
     val listenState by viewModel.listenState.collectAsStateWithLifecycle()
     val sendState by viewModel.sendState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
+    val archivePrompt by viewModel.archivePrompt.collectAsStateWithLifecycle()
+    val archiveExportState by viewModel.archiveExportState.collectAsStateWithLifecycle()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            val loaded = readEnvelope(context, uri)
-            if (loaded != null) {
-                viewModel.loadEnvelope(loaded.first, loaded.second)
-            }
+            viewModel.readPickedDocument(uri.toString())
         }
+    }
+    // W6-64：导出产物一旦就绪就拉起系统保存位置选择器（与备份页同一范式：
+    // 选好位置才写盘，用户点取消则丢弃字节、一个字节都不落下）。
+    val exportSaver = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri ->
+        if (uri != null) viewModel.saveArchiveExport(uri.toString()) else viewModel.cancelArchiveExportSave()
+    }
+    LaunchedEffect(archiveExportState) {
+        val ready = archiveExportState as? SourceSyncArchiveExportState.Ready ?: return@LaunchedEffect
+        exportSaver.launch(ready.fileName)
     }
     SourceSyncImportScreen(
         state = state,
@@ -237,6 +273,12 @@ fun SourceSyncImportRoute(
         sendState = sendState,
         onSend = viewModel::send,
         onSendCancel = viewModel::cancelSend,
+        archivePrompt = archivePrompt,
+        onUnlockArchive = viewModel::unlockArchive,
+        archiveExportState = archiveExportState,
+        onExportRequest = viewModel::requestArchiveExport,
+        onExportPrepare = viewModel::prepareArchiveExport,
+        onExportDismiss = viewModel::dismissArchiveExport,
     )
 }
 
@@ -281,6 +323,18 @@ fun SourceSyncImportScreen(
     onSend: (SourceSyncSendForm) -> Unit = {},
     /** W6-49：取消正在飞的那一次发送；默认空实现（既有调用点与 UI 测试无需改动）。 */
     onSendCancel: () -> Unit = {},
+    /** W6-63：加密归档的口令卡状态；默认不可见（既有调用点与 UI 测试无需改动）。 */
+    archivePrompt: SourceSyncArchivePrompt = SourceSyncArchivePrompt(),
+    /** W6-63：提交口令解密；默认空实现（既有调用点与 UI 测试无需改动）。 */
+    onUnlockArchive: (String) -> Unit = {},
+    /** W6-64：导出（另存为文件）卡片的状态；默认 Idle（既有调用点与 UI 测试无需改动）。 */
+    archiveExportState: SourceSyncArchiveExportState = SourceSyncArchiveExportState.Idle,
+    /** W6-64：展开导出卡片；默认空实现。 */
+    onExportRequest: () -> Unit = {},
+    /** W6-64：提交口令生成产物（留空 = 明文）；默认空实现。 */
+    onExportPrepare: (String) -> Unit = {},
+    /** W6-64：收起导出卡片并丢弃暂存字节；默认空实现。 */
+    onExportDismiss: () -> Unit = {},
 ) {
     Scaffold(
         modifier = Modifier.testTag(SourceSyncImportTags.SCREEN),
@@ -304,7 +358,8 @@ fun SourceSyncImportScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                "选择另一台设备导出的信封文件（.json 或 .mhsync 的明文信封）。" +
+                "选择另一台设备导出的信封文件（.json 或 .mhsync 的明文信封），" +
+                    "或加密归档（.mharchive，需要导出时设置的口令）。" +
                     "预览不会写入任何数据。",
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -342,6 +397,58 @@ fun SourceSyncImportScreen(
                     CircularProgressIndicator(modifier = Modifier.height(16.dp))
                     Spacer(Modifier.height(4.dp))
                     Text("处理中…", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+
+            if (archivePrompt.visible) {
+                // 口令只活在这个分支的局部状态里：卡片一消失（解开、重选、离开页面）它就被丢弃，
+                // 不写 StateFlow、不落盘、不进日志。PBKDF2 在 ViewModel 里跑，这里只管输入。
+                var passphrase by remember(archivePrompt.selectionId) { mutableStateOf("") }
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(SourceSyncImportTags.PASSPHRASE_CARD),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    ),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            SourceSyncArchiveCopy.HINT,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        OutlinedTextField(
+                            value = passphrase,
+                            onValueChange = { passphrase = it },
+                            label = { Text(SourceSyncArchiveCopy.LABEL) },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(SourceSyncImportTags.PASSPHRASE),
+                        )
+                        Button(
+                            onClick = { onUnlockArchive(passphrase) },
+                            enabled = passphrase.isNotBlank(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(SourceSyncImportTags.UNLOCK),
+                        ) {
+                            Text(SourceSyncArchiveCopy.ACTION)
+                        }
+                        archivePrompt.error?.let { line ->
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag(SourceSyncImportTags.PASSPHRASE_ERROR),
+                            )
+                        }
+                    }
                 }
             }
 
@@ -480,6 +587,13 @@ fun SourceSyncImportScreen(
             )
             // W6-42：发送区块同样放页尾，理由与上面两块一致（首屏不动）。
             SendSection(state = sendState, onSend = onSend, onCancel = onSendCancel)
+            // W6-64：导出（另存为文件）同样放页尾，首屏保持「选择文件 / 预览」主流程。
+            ArchiveExportSection(
+                state = archiveExportState,
+                onRequest = onExportRequest,
+                onPrepare = onExportPrepare,
+                onDismiss = onExportDismiss,
+            )
         }
     }
 }
@@ -1257,22 +1371,118 @@ private fun SendSection(
     }
 }
 
-/** 读信封文本与文件名；读不出来返回 null（页面保持"未选文件"状态）。 */
-private fun readEnvelope(context: Context, uri: Uri): Pair<String, String>? {
-    val name = displayNameOf(context, uri)
-    val text = runCatching {
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+/**
+ * W6-64：导出（另存为文件）区块。
+ *
+ * 三段式：收起时只有一行「导出」按钮 → 展开后填口令 → 产物就绪后由 Route 的
+ * LaunchedEffect 拉起系统保存器（本区块不直接碰 Activity Result）。
+ * 口令留空导出明文信封，非空导出加密归档；两种产物共用同一份导出数据。
+ */
+@Composable
+private fun ArchiveExportSection(
+    state: SourceSyncArchiveExportState,
+    onRequest: () -> Unit,
+    onPrepare: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var passphrase by remember(state is SourceSyncArchiveExportState.AwaitingPassphrase) { mutableStateOf("") }
+    val busy = state is SourceSyncArchiveExportState.Saving || state is SourceSyncArchiveExportState.Preparing
+    val resultLine = when (state) {
+        is SourceSyncArchiveExportState.Saved -> SourceSyncArchiveExportCopy.savedLineOf(state)
+        is SourceSyncArchiveExportState.Failed -> SourceSyncArchiveExportCopy.failedLineOf(state.code)
+        else -> null
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(SourceSyncImportTags.EXPORT_CARD),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(SourceSyncArchiveExportCopy.TITLE, style = MaterialTheme.typography.titleSmall)
+            Text(
+                SourceSyncArchiveExportCopy.HINT,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (state is SourceSyncArchiveExportState.Idle) {
+                Button(
+                    onClick = onRequest,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(SourceSyncImportTags.EXPORT_ACTION),
+                ) {
+                    Text(SourceSyncArchiveExportCopy.ACTION)
+                }
+            } else {
+                OutlinedTextField(
+                    value = passphrase,
+                    onValueChange = { passphrase = it },
+                    label = { Text(SourceSyncArchiveExportCopy.PASSPHRASE_LABEL) },
+                    singleLine = true,
+                    enabled = !busy && state !is SourceSyncArchiveExportState.Saved,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(SourceSyncImportTags.EXPORT_PASSPHRASE),
+                )
+                // 生成物就绪/保存中时按钮禁用，避免连点生成两份不同字节。
+                Button(
+                    onClick = { onPrepare(passphrase) },
+                    enabled = !busy &&
+                        state !is SourceSyncArchiveExportState.Ready &&
+                        state !is SourceSyncArchiveExportState.Saved,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(SourceSyncImportTags.EXPORT_SUBMIT),
+                ) {
+                    Text(SourceSyncArchiveExportCopy.ACTION)
+                }
+                OutlinedButton(
+                    onClick = onDismiss,
+                    enabled = !busy,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(SourceSyncImportTags.EXPORT_DISMISS),
+                ) {
+                    Text(SourceSyncArchiveExportCopy.CANCEL)
+                }
+            }
+            if (state is SourceSyncArchiveExportState.Ready) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.height(16.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "等待选择保存位置…",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            if (busy) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.height(16.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Text("正在写入…", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (resultLine != null) {
+                Text(
+                    resultLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (state is SourceSyncArchiveExportState.Failed) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    modifier = Modifier.testTag(SourceSyncImportTags.EXPORT_STATE),
+                )
+            }
         }
-    }.getOrNull()
-    if (text.isNullOrBlank()) return null
-    return text to (name ?: uri.lastPathSegment ?: "envelope.json")
+    }
 }
-
-private fun displayNameOf(context: Context, uri: Uri): String? = runCatching {
-    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-        ?.use { cursor ->
-            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
-        }
-}.getOrNull()
