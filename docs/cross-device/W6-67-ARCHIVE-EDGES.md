@@ -148,6 +148,17 @@ XML 汇总（`<testsuite>` 属性相加，非估算）：
 
 首跑 `dotnet build windows/MediaHub.sln` 撞 `MSBUILD : error MSB1009: 项目文件不存在` —— 真实文件名是 `MediaHub.Windows.sln`，属验证脚本自身的笔误，不涉及产品代码，改正后 `BUILD_EXIT=0`。
 
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 `completed / success`：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `c287964d9c7877f114e92f26171f38207680d3d0`（主树） | `windows-ci` | 40372134565 | `MediaHub.Tests` 469 + 104 = 573；licence `projects=13 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40372137888 | `uniqueTests` **2278**（core/common 607 / core/database 192 / feature/settings 354）；`--required-suite` **49** 条；API 32/36 各 `19 unique mandatory` |
+| `2a25a919abde3cb5b122133fceba6d39fa298dd2`（本树） | `windows-ci` | 40372214715 | `MediaHub.Tests` **1599** + 104 = **1703**；licence `projects=15 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40372214599 | `uniqueTests` **2278**（同主树口径，本树已 merge 主树提交）；`--required-suite` 49 条；instrumentation 112 例 |
+
+C# 侧由 1588 增至 **1599**（+11）；Android 侧由 2267 增至 **2278**（+11）。两条 Android CI 的 `uniqueTests` 相同，说明本树 merge 后与主树口径一致。
+
 ---
 
 ## 9 未覆盖（本节交付时必须如实保留）
