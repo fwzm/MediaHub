@@ -1,11 +1,11 @@
 # W6-7 —— SyncCli：无桌面环境下的跨设备同步端到端证据
 
-- 状态：**已交付**（W6-7 产出：14 项验收检查 + 36 例进程内测试）
+- 状态：**已交付**（W6-7 产出：16 项验收检查 + 39 例进程内测试；W6-66 起加密导出默认后缀为 `.mharchive`，旧 `.mhsync` 仍可读）
 - 日期：2026-10-23
 - 前置：[ADR-S001](./adr/ADR-S001-source-sync-contract.md)（信封契约）、[ADR-S004](./adr/ADR-S004-delta-sync.md)（增量与冲突）、[ADR-S005](./adr/ADR-S005-archive-encryption.md)（加密归档）、[ADR-S006](./adr/ADR-S006-credential-resealing.md)（凭据重封）
 - 实现：`windows/src/MediaHub.SyncCli/`（`MediaHub.SyncCli.csproj`、`CliParser.cs`、`CliInvocation.cs`、`CliExitCode.cs`、`CliJson.cs`、`SyncCliRunner.cs`、`SyncCliProgram.cs`、`Program.cs`）
-- 测试：`windows/tests/MediaHub.Tests/SyncCliTests.cs`（36 例）
-- 验收脚本：`windows/tools/acceptance/w6/sync-cli-e2e.ps1`（14 项检查）
+- 测试：`windows/tests/MediaHub.Tests/SyncCliTests.cs`（39 例）
+- 验收脚本：`windows/tools/acceptance/w6/sync-cli-e2e.ps1`（16 项检查）
 
 ## 问题
 
@@ -65,7 +65,7 @@ dotnet windows/src/MediaHub.SyncCli/bin/Debug/net10.0/MediaHub.SyncCli.dll <comm
 
 | 命令 | 作用 | 允许的选项 |
 | --- | --- | --- |
-| `export` | 把本机来源导出为信封（`--passphrase` 时加密为 `.mhsync`） | `--root`、`--out`、`--passphrase`、`--secrets`、`--deletions`、`--device`、`--json` |
+| `export` | 把本机来源导出为信封（`--passphrase` 时加密为 `.mharchive`；旧名 `.mhsync` 仍可读） | `--root`、`--out`、`--passphrase`、`--secrets`、`--deletions`、`--device`、`--json` |
 | `import` | 读取信封并合并（默认 dry-run，`--apply` 才写盘） | `--root`、`--in`、`--passphrase`、`--baseline`、`--device`、`--apply`、`--json` |
 | `plan` | 只算三桶计划，不写盘；拒绝归档输入 | `--root`、`--in`、`--baseline`、`--device`、`--json` |
 | `secret-check` | 校验本机能否解开封存凭据（比较明文） | `--root`、`--id`、`--expect`、`--json` |
@@ -94,7 +94,7 @@ dotnet MediaHub.SyncCli.dll import --root D:\devB --in D:\devA\sync-envelope.jso
 
 # 加密导出 / 导入
 dotnet MediaHub.SyncCli.dll export --root D:\devA --passphrase "correct horse battery staple" --json
-dotnet MediaHub.SyncCli.dll import --root D:\devB --in D:\devA\sync-envelope.mhsync --passphrase "correct horse battery staple" --apply --json
+dotnet MediaHub.SyncCli.dll import --root D:\devB --in D:\devA\sync-envelope.mharchive --passphrase "correct horse battery staple" --apply --json
 ```
 
 ## 退出码与 `--json` 的组合
@@ -119,7 +119,7 @@ dotnet MediaHub.SyncCli.dll import --root D:\devB --in D:\devA\sync-envelope.mhs
 
 ## 验收脚本
 
-`windows/tools/acceptance/w6/sync-cli-e2e.ps1`：两个临时根目录模拟两台设备，14 项检查：
+`windows/tools/acceptance/w6/sync-cli-e2e.ps1`：两个临时根目录模拟两台设备，16 项检查：
 
 | # | 检查 | 钉住的规则 |
 | --- | --- | --- |
@@ -132,11 +132,13 @@ dotnet MediaHub.SyncCli.dll import --root D:\devB --in D:\devA\sync-envelope.mhs
 | 7 | `unsupported-source-type-survives-the-wire-untouched` | 未知 wire 值 `quantum-nas` 在信封与 A 的 store 里逐字保留 |
 | 8 | `second-round-is-idempotent` | 第二轮 `apply=0`、两条 `already-applied`、未知类型仍待确认、墓碑仍只报告 |
 | 9 | `passphrase-archive-round-trips-to-a-fresh-device` | 归档 magic `MHSYNCA1`，新设备导入成功 |
-| 10 | `wrong-passphrase-fails-closed-and-writes-nothing` | 退出码 4、`wrong-passphrase-or-tampered`、目标目录无 store |
-| 11 | `secrets-are-resealed-with-the-local-dpapi-key` | 信封 blob 与 B 落盘 blob 不同，但 `secret-check` 用同一明文匹配成功 |
-| 12 | `no-plaintext-secret-in-any-artefact` | transcript 与全部产物里搜不到明文及其 base64 |
-| 13 | `no-gui-or-media-server-was-started` | 没有任何 `MediaHub` GUI 进程 |
-| 14 | `device-roots-are-independent` | 五个根目录互相隔离且都在临时沙箱内 |
+| 10 | `encrypted-export-uses-the-canonical-archive-suffix` | 加密导出落盘 `sync-envelope.mharchive`、不再写 `sync-envelope.mhsync`；把规范名复制成旧后缀后新设备仍能导入（`appliedCount=2`） |
+| 11 | `plain-envelope-renamed-to-an-archive-suffix-is-still-plaintext` | 明文信封复制成 `.mharchive` 后仍按明文导入（`appliedCount=2`），不索要口令——判据是 magic 不是扩展名 |
+| 12 | `wrong-passphrase-fails-closed-and-writes-nothing` | 退出码 4、`wrong-passphrase-or-tampered`、目标目录无 store |
+| 13 | `secrets-are-resealed-with-the-local-dpapi-key` | 信封 blob 与 B 落盘 blob 不同，但 `secret-check` 用同一明文匹配成功 |
+| 14 | `no-plaintext-secret-in-any-artefact` | transcript 与全部产物里搜不到明文及其 base64 |
+| 15 | `no-gui-or-media-server-was-started` | 没有任何 `MediaHub` GUI 进程 |
+| 16 | `device-roots-are-independent` | 五个根目录互相隔离且都在临时沙箱内 |
 
 输出约定：每条一行 `PASS|FAIL <名字> :: <detail>`，收尾 `RESULT: N passed, M failed`，失败时退出码 1。证据（transcript、检查清单、两台设备的 store 与信封）写到 `windows/tools/acceptance/evidence/w6-sync-cli/<时间戳>/`。
 
@@ -157,7 +159,7 @@ dotnet test  windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug --nolog
 pwsh -NoProfile -File windows/tools/acceptance/w6/sync-cli-e2e.ps1
 ```
 
-期望：构建 0 警告 0 错误；`MediaHub.Tests` 全绿（其中 `SyncCliTests` 36 例）；脚本 `RESULT: 14 passed, 0 failed`。
+期望：构建 0 警告 0 错误；`MediaHub.Tests` 全绿（其中 `SyncCliTests` 39 例）；脚本 `RESULT: 16 passed, 0 failed`。
 ## W6-15 追加 —— `baseline` 与 `pair` 子命令（无 GUI 也能管理基线与已配对设备）
 
 - 状态：**已交付**（6 个新命令 + 32 例进程内测试；全量 `MediaHub.Tests` 1053 通过 / 0 失败）

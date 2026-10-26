@@ -30,7 +30,7 @@
       <Button x:Name="ExportButton" Content="导出同步信封" Click="OnExportClick"
               AutomationProperties.AutomationId="sync.export"
               AutomationProperties.Name="导出同步信封"
-              ToolTipService.ToolTip="写入 sync-envelope.json，默认不含任何密钥" />
+              ToolTipService.ToolTip="写入 sync-envelope.json，默认不含任何密钥；加密导出写入 sync-envelope.mharchive" />
       <Button x:Name="PreviewButton" Content="预览合并" Click="OnPreviewClick"
               AutomationProperties.AutomationId="sync.preview"
               AutomationProperties.Name="预览合并"
@@ -129,7 +129,7 @@
       <StackPanel Spacing="8">
         <TextBlock Text="应用远端信封" FontSize="15" FontWeight="SemiBold" />
         <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
-                   Text="选择对端导出的信封文件（sync-envelope.json，或加密存档 .mhsync）。先预览，再逐条决定允许或跳过：在你点「应用」之前，本机不会写入任何内容。带凭据的条目不会写入，也不会被自动允许。" />
+                   Text="选择对端导出的信封文件（sync-envelope.json，或加密存档 .mharchive）。先预览，再逐条决定允许或跳过：在你点「应用」之前，本机不会写入任何内容。带凭据的条目不会写入，也不会被自动允许。" />
 
         <StackPanel Orientation="Horizontal" Spacing="8">
           <Button x:Name="ApplyPickButton" Content="选择信封文件" Click="OnPickApplyFileClick"

@@ -647,7 +647,8 @@ public sealed partial class SyncPage : Page
         try
         {
             // Both shapes of a peer export: the canonical JSON and the passphrase-protected archive.
-            path = await FilePickerService.PickFileAsync([".json", ".mhsync"]);
+            // .mharchive is the canonical archive suffix (W6-66); .mhsync stays selectable for older files.
+            path = await FilePickerService.PickFileAsync([".json", ".mharchive", ".mhsync"]);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
         {

@@ -32,7 +32,8 @@
 
 ## 3 交互流程
 
-1. **选择信封文件**（`sync.apply`）：`FilePickerService.PickFileAsync([".json", ".mhsync"])`。取消则什么都不发生。
+1. **选择信封文件**（`sync.apply`）：`FilePickerService.PickFileAsync([".json", ".mharchive", ".mhsync"])`。取消则什么都不发生。
+   - W6-66 后：`.mharchive` 是加密归档的规范后缀（Windows CLI 默认名与 Android 导出默认名由此统一），`.mhsync` 只为兼容旧文件仍可选；读端按 magic `MHSYNCA1` 嗅探，扩展名不参与判定。
 2. **读取**：`ReadPeerFile(path, null)`。命中加密存档头 → 需要口令 → 弹 `ContentDialog` + `PasswordBox`（`sync.passphrase.dialog` / `sync.passphrase.input`）；取消则只提示「没有读取任何内容」。口令只作为这一次调用的实参，读完即丢弃。
 3. **预览**（`sync.apply.preview`，同一路径自动触发一次）：`SourceSyncPlanner.Plan` → 每条转 `SourceSyncApprovalItem`（信封里带 `secrets` 的条目改写为 `secrets-require-approval` 且要求审批）→ 审批门默认判决。此时**没有任何写入**，页面只显示条目与计数。
 4. **逐条决定**：每行 `sync.entry.allow` / `sync.entry.skip`，按 `syncSourceId` 记决策（不看名字、不看行号）。不可允许的条目「允许」按钮禁用（`Allowable=false`），并列出到 `sync.apply.blocked`。

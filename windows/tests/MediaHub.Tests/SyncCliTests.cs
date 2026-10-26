@@ -558,4 +558,60 @@ public sealed class SyncCliTests : IDisposable
         Assert.Equal(CliExitCode.InputProblem, exitCode);
         Assert.Contains("input-file-missing", stderr, StringComparison.Ordinal);
     }
+
+    // ---- archive file names (W6-66) -------------------------------------------------------
+
+    /// <summary>An encrypted export lands on the canonical .mharchive name and not the legacy one.</summary>
+    [Fact]
+    public void Run_EncryptedExportUsesTheCanonicalArchiveSuffix()
+    {
+        string source = DeviceRoot("a");
+        WriteStore(source, EmbyRecord());
+
+        (int exitCode, _, _) = Run(
+            "export", "--root", source, "--device", "device-a", "--passphrase", Passphrase);
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        Assert.Equal("sync-envelope.mharchive", SyncCliRunner.DefaultArchiveFileName);
+        Assert.True(File.Exists(Path.Combine(source, "sync-envelope.mharchive")));
+        Assert.False(File.Exists(Path.Combine(source, "sync-envelope.mhsync")));
+    }
+
+    /// <summary>An archive renamed to the legacy .mhsync suffix is still read: the reader sniffs the magic.</summary>
+    [Fact]
+    public void Run_ArchiveUnderTheLegacySuffixIsStillRead()
+    {
+        string source = DeviceRoot("a");
+        string target = DeviceRoot("b");
+        WriteStore(source, EmbyRecord());
+        Run("export", "--root", source, "--device", "device-a", "--passphrase", Passphrase);
+        string renamed = Path.Combine(source, SyncCliRunner.LegacyArchiveFileName);
+        File.Move(ArchivePath(source), renamed);
+
+        (int exitCode, _, string stderr) = Run(
+            "import", "--root", target, "--in", renamed, "--passphrase", Passphrase, "--apply");
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        Assert.DoesNotContain("malformed-payload", stderr, StringComparison.Ordinal);
+        Assert.Single(ReadStore(target));
+    }
+
+    /// <summary>A plain envelope renamed to .mharchive is still plaintext: extension is never the discriminator.</summary>
+    [Fact]
+    public void Run_PlainEnvelopeNamedLikeAnArchiveIsStillPlaintext()
+    {
+        string source = DeviceRoot("a");
+        string target = DeviceRoot("b");
+        WriteStore(source, EmbyRecord());
+        Run("export", "--root", source, "--device", "device-a");
+        string renamed = Path.Combine(source, SyncCliRunner.DefaultArchiveFileName);
+        File.Move(EnvelopePath(source), renamed);
+
+        (int exitCode, _, string stderr) = Run(
+            "import", "--root", target, "--in", renamed, "--apply");
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        Assert.DoesNotContain("passphrase-required", stderr, StringComparison.Ordinal);
+        Assert.Single(ReadStore(target));
+    }
 }

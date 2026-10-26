@@ -22,8 +22,15 @@ public sealed class SyncCliRunner
     /// <summary>Default file name written by <c>export</c> when <c>--out</c> is absent.</summary>
     public const string DefaultEnvelopeFileName = "sync-envelope.json";
 
-    /// <summary>Default file name written by an encrypted <c>export</c>.</summary>
-    public const string DefaultArchiveFileName = "sync-envelope.mhsync";
+    /// <summary>
+    /// Default file name written by an encrypted <c>export</c>. The suffix matches the format name
+    /// (<c>.mharchive</c>) and the Android writer; the older <c>.mhsync</c> files remain readable because
+    /// every reader sniffs the magic bytes and never the extension.
+    /// </summary>
+    public const string DefaultArchiveFileName = "sync-envelope.mharchive";
+
+    /// <summary>The pre-W6-66 archive suffix; kept so callers can name old files without a literal.</summary>
+    public const string LegacyArchiveFileName = "sync-envelope.mhsync";
 
     private readonly TextWriter _out;
     private readonly TextWriter _err;

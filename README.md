@@ -167,10 +167,15 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
    生成器跑完即删、资产是唯一事实来源；本机 C# 1585 通过（W6 分支）/ Android core/common 596 例。唯一新发现写在 `docs/cross-device/W6-65-ANDROID-ARCHIVE-INTEROP.md` §5：
    `System.Text.Json` 把 `+` 转义成 `\u002B` 而 kotlinx 原样写，头部「同值但不同字节」，GCM 认证的是磁盘原字节所以无害——
    教训是不要用「重序列化后字节相等」当跨语言契约判据；真实两机搬运与设备侧耗时仍 NOT_RUN / DEVICE_UNVERIFIED）；
+   归档扩展名统一（W6-66：W6-64 的导出卡把 Android 的加密归档默认名定成 `sync-envelope.mharchive`，而 Windows CLI 从 ADR-S005 起一直写 `.mhsync` —— 两端是**同一套字节格式**（magic `MHSYNCA1`、PBKDF2 600 000 轮、AES-GCM、AAD = magic + BE int32 + headerJson），差别只在默认名一个字。
+   本轮只做命名归一：CLI 默认名改为 `sync-envelope.mharchive`，旧名降级为 `SyncCliRunner.LegacyArchiveFileName` 只读兼容；**不加 CLI 参数、不加读端扩展名白名单**——两端读端本来就按前 8 字节 magic 嗅探、从不按扩展名分支，加白名单反而会破坏「明文信封改名成 `.mharchive` 仍按明文读」这条行为。
+   界面侧同步页选择器改为 `PickFileAsync([".json", ".mharchive", ".mhsync"])`、两处说明文案跟着改；Android 侧只改提示文案（`SourceSyncImportCopy.PICK_HINT` 说清「扩展名只是提示，真正的依据是文件内容」），不改任何行为。
+   三个新 C# 用例分别钉「规范名落盘且旧名不再写」「旧后缀归档仍能读」「明文信封改名成归档后缀仍按明文读」，后两条是反向对照（只钉默认名变了的话，把读端改成按扩展名分支也能绿）；验收脚本 14 → 16 项、`SyncCliTests` 36 → 39 例。
+   本机 C# 1588 通过 / 0 失败（1585 → 1588）、验收 16/16 PASS、Android 三模块 596 + 192 + 354 = 1142 例全绿；§37.8 第 4 条与 §37.9 第 3 条已回标关闭。真实两机搬运与设备侧耗时仍 NOT_RUN / DEVICE_UNVERIFIED）；
   审批门禁的「跳过即不写入」（同一身份 allow 与 skip 并存时 skip 胜）、同步 CLI 的 `--root` 误指已存在文件改为稳定拒绝
   （`root-not-a-directory`，每份 JSON 带 `rootExisted` 区分「新建根」与「路径写错」）与导出路径规范化
   （`../` 解析后再回显，`--out` 指向目录给 `output-is-directory`）均已实现，
-  `MediaHub.Tests` **1585 通过 / 0 失败**（其中 W6 新增 1116）；
+  `MediaHub.Tests` **1588 通过 / 0 失败**（其中 W6 新增 1119）；
   W12b 对抗性安全回归 66 例（畸形配对载荷、设备登记表在损坏/容量满/独占/只读时必须拒绝而不是静默清空、
   传输层声明长度不触发分配、`--json` 单文档、异常与 stderr 不含口令）；
   **尚未做**：二维码与扫码、跨机（非回环）配对与真实局域网传输（Windows 端已有显式非回环入口 W6-51，但一次真实跨机传输都没跑过；Android 的监听端（W6-52）与拨号侧两张卡（W6-52b）也都有同形状的地址闸门开关）、设备持久化、同步页/配对页/已配对清单的 GUI 证据
@@ -198,11 +203,11 @@ CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：
 却从未被 `dotnet test` 指向，104 个用例在 CI 里长期空转（run 40019093231 起已修正，日志可见
 `MediaHub.Tests: total=438` / `MediaHub.WebDav.Tests: total=104` / `combined tests=542`；此后 `4238edc` 又给 `MediaHub.Tests`
 加了 31 例，CI 的 floor（≥400 / ≥100）因此仍有余量）。
-W6 分支上 `MediaHub.Tests` 为 **1585 通过 / 0 失败**（主线 469 = 438 基线 + 31 例续播下限契约，加 W6 新增 1116：
+W6 分支上 `MediaHub.Tests` 为 **1588 通过 / 0 失败**（主线 469 = 438 基线 + 31 例续播下限契约，加 W6 新增 1119：
 W6-1…W6-14 合计 583（其中 W6-10 的接线 14、W6-13 的清单 UI 17），再加 W6-15 的 CLI 命令组 32、
 W6-16 的回环传输 34、W6-17 的双向编排 22，另加 W12b 的对抗性回归 66、W6-18 的 transfer 命令组 19、
-W6-19 的 presenter 35、W6-21 的 skip 语义 9、W6-20 的 `--root`/导出路径 18、W6-24 的传输对端认证 45、W6-26 的 TLS 与指纹钉扎 37、W6-30 的投递确认 19、W6-31 的恶意帧回归 36、W6-33 的传输卡片 presenter 29、W6-37 的回执帧与握手超时分类修正 35、W6-39 的同步页回执接线 27、W6-43 的回执控件与结果行 3、W6-50 的 `transfer serve` 预算 19、W6-51 的显式主机入口 40
-—— 583+32+34+22+66+19+35+9+18+45+37+19+36+29+35+27+3+19+40+8 = 1116，即 1306 + 45 + 121 + 35 + 27 + 3 + 40 + 8），
+W6-19 的 presenter 35、W6-21 的 skip 语义 9、W6-20 的 `--root`/导出路径 18、W6-24 的传输对端认证 45、W6-26 的 TLS 与指纹钉扎 37、W6-30 的投递确认 19、W6-31 的恶意帧回归 36、W6-33 的传输卡片 presenter 29、W6-37 的回执帧与握手超时分类修正 35、W6-39 的同步页回执接线 27、W6-43 的回执控件与结果行 3、W6-50 的 `transfer serve` 预算 19、W6-51 的显式主机入口 40、W6-66 的归档默认名 3
+—— 583+32+34+22+66+19+35+9+18+45+37+19+36+29+35+27+3+19+40+8+3 = 1119，即 1306 + 45 + 121 + 35 + 27 + 3 + 40 + 8 + 3），
 `MediaHub.WebDav.Tests` 的 104 例同样适用于该分支（见 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 正文的验证表）。
 
 Android 侧（[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml)）的单元门禁同样按**名字**断言，
@@ -216,7 +221,7 @@ W6-F/W6-H 的 `SourceSyncImportLogicTest` / `SourceSyncImportSessionTest` / `Sou
 `SourceSyncTransferLoopbackTest`，W6-25 的 `SourceSyncTransferAuthTest`、W6-29 的 `SourceSyncTlsTest`，W6-34 的 `SourceSyncTransferListenerTest`，W6-46 的 `SourceSyncDeliveryTest`，W6-49 的 `SourceSyncSendLauncherTest`，和 W6-55 补钉的 `SourceSyncReceiptTest` / `SourceSyncHostAddressTest` / `SourceSyncListenerControllerTest`，W6-58 的 `SourceSyncTransferCancelTest` / `SourceSyncReceiveLauncherTest`，以及 W6-59 的 `PairingLinkControllerTest`，和 W6-59b 补钉的 `PairingTransportTlsTest`，和 W6-60 补钉的 `PairingAddressEnumeratorTest`，以及 W6-61 的 `SourceSyncListenerCancelTest`，和 W6-62 的 `ArchiveVectorsTest` / `ArchiveRoundTripTest`，以及 W6-63 的 `SourceSyncArchiveImportTest`，和 W6-64 的 `SourceSyncArchiveExportTest`），并用 `--require-complete-suites` 从源码里解析每个 `@Test`
 方法、要求逐个都真的执行过 —— 套件被删、改名，或只跑单个方法（`--tests Suite.oneMethod`）都会失败。
 W6-23 新增的 `core/database` 套件 `SourceSyncTransferImportTest`（19 例）不在 48 个钉住名单里，
-但由 `--require-complete-suites` 与其他套件一起逐个方法核对（`core/database` 该模块 192 例、`core/common` 596 例（含 W6-40 的 `SourceSyncReceiptTest` 33 例、W6-46 的 `SourceSyncDeliveryTest` 20 例、W6-52 的 `SourceSyncHostAddressTest` 14 例、W6-52b 的 `SourceSyncTransferClientHostTest` 11 例、W6-57 的 `SourceSyncTransferMatrixTest` 20 例与 W6-58 的 `SourceSyncTransferCancelTest` 6 例、W6-61 的 `SourceSyncListenerCancelTest` 7 例、W6-62 的 `ArchiveVectorsTest` 15 例与 `ArchiveRoundTripTest` 24 例）、`feature/settings` 353 例（W6-36 的 `SourceSyncListenerControllerTest` 43 例（W6-52 增 5 例、W6-53 增 5 例、W6-54 增 5 例）、W6-42 的 `SourceSyncSendControllerTest` 35 例（W6-52b 增 3 例）、W6-49 的 `SourceSyncSendLauncherTest` 8 例、W6-58 的 `SourceSyncReceiveLauncherTest` 8 例、W6-61 的 `SourceSyncListenLauncherTest` 7 例、W6-59 的 `PairingLinkControllerTest` 22 例（W6-59b 增 9 例），另有 W6-52b 增 3 例与 W6-58 增 5 例的 `SourceSyncReceiveControllerTest` 33 例），门禁脚本本地口径合计 2266 个唯一用例（W6-52 的 19 例、W6-53 的 5 例、W6-54 的 5 例、W6-52b 的 17 例、W6-57 的 20 例、W6-58 的 19 例、W6-59 的 13 例、W6-59b 的 9 例 + 补钉的 13 例与 W6-60 的 19 例与 W6-61 的 17 例与 W6-62 的 38 例与 W6-63 的 20 例与 W6-64 的 19 例与 W6-65 的 1 例已计入；上一 CI 基线为 2032）；以上只是 JVM 单测，同步页三张卡的 Compose 断言另有 88 例 `androidTest`（W6-44 的 19 例、W6-48 的 8 例、W6-49 的 6 例、W6-52 的 3 例、W6-53 的 3 例、W6-54 的 4 例、W6-52b 的 4 例、W6-58 的 4 例、W6-59 的 7 例、W6-59b 的 5 例与 W6-60 的 7 例与 W6-61 的 6 例与 W6-63 的 5 例与 W6-64 的 7 例），走 CI 的 visual-instrumentation（API 32 / 36）而不计入这些数字）。
+但由 `--require-complete-suites` 与其他套件一起逐个方法核对（`core/database` 该模块 192 例、`core/common` 596 例（含 W6-40 的 `SourceSyncReceiptTest` 33 例、W6-46 的 `SourceSyncDeliveryTest` 20 例、W6-52 的 `SourceSyncHostAddressTest` 14 例、W6-52b 的 `SourceSyncTransferClientHostTest` 11 例、W6-57 的 `SourceSyncTransferMatrixTest` 20 例与 W6-58 的 `SourceSyncTransferCancelTest` 6 例、W6-61 的 `SourceSyncListenerCancelTest` 7 例、W6-62 的 `ArchiveVectorsTest` 15 例与 `ArchiveRoundTripTest` 24 例）、`feature/settings` **354** 例（W6-36 的 `SourceSyncListenerControllerTest` 43 例（W6-52 增 5 例、W6-53 增 5 例、W6-54 增 5 例）、W6-42 的 `SourceSyncSendControllerTest` 35 例（W6-52b 增 3 例）、W6-49 的 `SourceSyncSendLauncherTest` 8 例、W6-58 的 `SourceSyncReceiveLauncherTest` 8 例、W6-61 的 `SourceSyncListenLauncherTest` 7 例、W6-59 的 `PairingLinkControllerTest` 22 例（W6-59b 增 9 例），另有 W6-52b 增 3 例与 W6-58 增 5 例的 `SourceSyncReceiveControllerTest` 33 例），门禁脚本本地口径合计 2267 个唯一用例（= 上一 CI 基线 2266 + W6-66 的 1 例文案回归；W6-52 的 19 例、W6-53 的 5 例、W6-54 的 5 例、W6-52b 的 17 例、W6-57 的 20 例、W6-58 的 19 例、W6-59 的 13 例、W6-59b 的 9 例 + 补钉的 13 例与 W6-60 的 19 例与 W6-61 的 17 例与 W6-62 的 38 例与 W6-63 的 20 例与 W6-64 的 19 例与 W6-65 的 1 例与 W6-66 的 1 例已计入；上述 2267 为本地口径，正式数字以 CI `uniqueTests` 实测为准）；以上只是 JVM 单测，同步页三张卡的 Compose 断言另有 88 例 `androidTest`（W6-44 的 19 例、W6-48 的 8 例、W6-49 的 6 例、W6-52 的 3 例、W6-53 的 3 例、W6-54 的 4 例、W6-52b 的 4 例、W6-58 的 4 例、W6-59 的 7 例、W6-59b 的 5 例与 W6-60 的 7 例与 W6-61 的 6 例与 W6-63 的 5 例与 W6-64 的 7 例），走 CI 的 visual-instrumentation（API 32 / 36）而不计入这些数字）。
 唯一允许跳过的是两个环境门控套件：`SourceSyncTlsInteropTest`（core/common，W6-32 的客户端方向）与 `SourceSyncListenerInteropTest`（core/database，W6-38 的反向方向），两者都要真实 Windows `SyncCli` 的 DLL 才能跑，CI runner 上按 JUnit5 assumption 跳过：门禁脚本用 `ENVIRONMENT_GATED_SUITES` 逐个类点名放行，同时还要求这类套件必须出现在报告里（凭空消失同样报错），其他任何被跳过的用例仍然是硬失败。
 本地负向验证过这两条：把整套 XML 移走 → 22 条问题（1 条套件 + 21 条方法）；只删一个 `<testcase` →
 恰好 1 条 `PairingVectorsTest#rejected_addresses_match_windows`。
