@@ -14,6 +14,42 @@ namespace MediaHub.Tests;
 /// </summary>
 public sealed class ArchiveEncryptionTests
 {
+    [Fact]
+    public void ReaderRejectsActualSecretsWhenCapabilityFlagIsFalse()
+    {
+        using var secret = JsonDocument.Parse("{\"opaque\":\"fixture-only\"}");
+        SourceSyncEnvelope envelope = Envelope(Record("source-1", secrets: secret.RootElement.Clone()));
+        Assert.False(envelope.Capabilities.CanSendSecrets);
+        byte[] archive = CraftArchive(NewHeader(), Encoding.UTF8.GetBytes(SourceSyncCodec.Serialize(envelope)), Passphrase);
+        Assert.False(EncryptedArchiveReader.TryRead(archive, Passphrase, out _, out string? reason));
+        Assert.Equal(ArchiveError.SecretsNotAllowed, reason);
+    }
+
+    [Fact]
+    public void ReaderAllowsAnExplicitJsonNullSecretsBlock()
+    {
+        using var secret = JsonDocument.Parse("null");
+        SourceSyncEnvelope envelope = Envelope(Record("source-1", secrets: secret.RootElement.Clone()));
+        string json = SourceSyncCodec.Serialize(envelope);
+        Assert.Contains("\"secrets\":null", json);
+        byte[] archive = CraftArchive(NewHeader(), Encoding.UTF8.GetBytes(json), Passphrase);
+        Assert.True(EncryptedArchiveReader.TryRead(archive, Passphrase, out SourceSyncEnvelope? result, out string? reason));
+        Assert.Null(reason);
+        Assert.Null(Assert.Single(result!.Sources).Secrets);
+    }
+
+    [Fact]
+    public void InvalidUtf8HeaderIsRejectedBeforePassphraseValidation()
+    {
+        byte[] header = ArchiveHeaderCodec.Serialize(NewHeader());
+        int offset = Encoding.UTF8.GetString(header).IndexOf(ArchiveKdf.Pbkdf2Sha256Name, StringComparison.Ordinal);
+        Assert.True(offset >= 0);
+        header[offset] = 0xff;
+        byte[] archive = [.. Prefix(header), .. new byte[1 + ArchiveHeader.TagSize]];
+        Assert.False(EncryptedArchiveReader.TryRead(archive, null, out _, out string? reason));
+        Assert.Equal(ArchiveError.CorruptHeader, reason);
+    }
+
     private const string Passphrase = "correct horse battery staple";
 
     private const string OtherPassphrase = "a different long passphrase";

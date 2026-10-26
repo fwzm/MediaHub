@@ -2806,3 +2806,267 @@ tag `sync.listen.cancel` 同时出现在 `classes12.dex`（706552 B）与 `class
 - ~~监听卡补「取消这一次接收」~~ —— 本节已完成（W6-61），§33.8 第 3 条与 §33.9 第 1 条同时失效；
 - 配对页接二维码（W6-60 之后把「本机地址」直接生成二维码，省掉手抄）——NOT_RUN；
 - 真实两机取消取证（§34.8 第 1 条），届时把 §33.8 第 1 条与本处第 1 条一起改成 EXECUTED_PASS。
+
+## §35 Android 侧离线加密归档：读与写（W6-62）
+
+> 本节记录把 Windows 的 `.mharchive`（ADR-S005）契约移植到 Android `core/common` 的实现与证据：
+> 同一份归档，Windows 写的 Android 读得出来，Android 写的 Windows 也读得出来，十二个稳定码逐字一致。
+> 这是缺口表里「离线加密导入导出」那一项在 Android 侧的从零补齐。
+
+### §35.1 动机：Windows 早就有了，Android 侧一个文件都没有
+
+Windows 侧 ADR-S005 已经落地了一整套离线加密归档（`windows/src/MediaHub.Sync/` 下的
+`EncryptedArchiveWriter` / `EncryptedArchiveReader` / `ArchiveHeader` / `ArchiveKdf` /
+`ArchivePassphrase` / `ArchiveError` 六个文件），CLI 也已经接上（`transfer export --passphrase`、
+`transfer import --passphrase`，归档输入走 `ArchiveOrCredential = 4` 退出码）。
+
+Android 侧此前是**零**：`core/common/src/main/kotlin/com/mediahub/core/common/sync/` 下三十个生产文件里
+没有任何 `Archive*` 对等物，`grep -i "archive"` 在 sync 包零命中。
+需要说清楚的是，`core/common/.../backup/` 里那套 `.mhbackup`（magic `MHBK`）**不是**这个东西——
+它是整机灾难恢复格式，载荷是 manifest 加各 section 记录；而 `.mharchive` 的载荷是**双向同步信封**
+（`SourceSyncCodec` 编出来的 `SourceSyncEnvelope`），用途是把一次同步快照加密搬到另一台机器上导入。
+两套格式的差异在 §35.4 逐项列，代码里也分在两个包（`archive` / `backup`），不许混用。
+
+W6-62 的目标因此定得很窄：**只做 `core/common` 里的纯内存读与写**，不接 CLI、不接界面、不碰数据库。
+这个边界是从 Windows 侧照搬的——`EncryptedArchiveReader` 的类注释写明它是纯内存 API，不碰文件系统。
+
+### §35.2 文件布局与契约表
+
+归档的字节布局（与 `EncryptedArchiveWriter.cs:12` 的 remarks 逐字同构）：
+
+```
+magic(8) | headerLength(4, 大端) | headerJson | ciphertext | tag(16)
+```
+
+三个刻意的设计点，Android 侧一字不改地继承：
+
+1. **magic 与长度在最前面**：不解密、不解析 header 就能把「这不是本产品的归档」拒掉；
+2. **header 是明文 JSON**：回答「哪个版本 / 哪个 kdf / 迭代多少轮」不需要口令，
+   支持场景里首先要问的正是这三件事；
+3. **header 的精确字节就是 AAD**：想偷偷改迭代数、时间戳或 kdf 名字，tag 立刻对不上。
+
+契约常量（`ArchiveHeader` / `ArchiveKdf` / `ArchivePassphrase` 三个伴生对象）：
+
+| 项 | 值 | 定义位置 |
+| --- | --- | --- |
+| magic | `MHSYNCA1`（8 字节 ASCII） | `ArchiveHeader.kt:29` |
+| 归档版本 | `1` | `ArchiveHeader.kt:30` |
+| header 上限 | `4096` 字节 | `ArchiveHeader.kt:39` |
+| 载荷上限 | `8 * 1024 * 1024` 字节 | `ArchiveHeader.kt:42` |
+| GCM nonce | `12` 字节 | `ArchiveHeader.kt:33` |
+| GCM tag | `16` 字节 | `ArchiveHeader.kt:36` |
+| KDF 名 | `pbkdf2-sha256`（只认这一个，不回落） | `ArchiveKdf.kt:16` / `:29` |
+| salt | `16` 字节 | `ArchiveKdf.kt:18` |
+| 派生密钥 | `32` 字节 | `ArchiveKdf.kt:19` |
+| 迭代下限 / 缺省 | `600_000` / `600_000` | `ArchiveKdf.kt:22-23` |
+| 口令最短 | `12` 字符 | `ArchivePassphrase.kt:16` |
+| AAD | `magic + 大端 int32(headerJson.length) + headerJson` 原字节 | `ArchiveWriter.kt:106`（`buildPrefix`） |
+
+header 的 JSON 字段序固定、camelCase、无空白：
+`version, kdf, iterations, saltBase64, nonceBase64, createdAtEpochMs`
+（`ArchiveHeader.kt:53` 的 `serialize`）。Reader **不解码重排**——它认证的是盘上那些原字节，
+所以「Kotlin 先 parse 再 serialize 回来再当 AAD」这种做法是错的，必须取原切片。
+
+口令策略（`ArchivePassphrase.tryValidate`，:50）按序四条：
+空或全空白 ⇒ `passphrase-empty`；**原始长度** < 12 ⇒ `passphrase-too-weak`；
+trim 后命中 24 条弱口令表（忽略大小写）⇒ `passphrase-too-weak`；
+单字符重复或全 ASCII 数字 ⇒ `passphrase-too-weak`。
+弱表 24 条与 Windows `ArchivePassphrase.cs` 逐字同序（由用例 `the_passphrase_policy_is_identical_to_the_windows_twenty_four_word_deny_list` 钉住）。
+
+### §35.3 判定次序：框架错误优先于口令错误
+
+读侧的十步判定序（`ArchiveReader.layoutOf`，:84）。**这个顺序就是外部可观察的优先级**，
+改顺序会让同一份坏文件报出不同的码：
+
+| # | 条件 | 报的码 |
+| --- | --- | --- |
+| 1 | 长度 < 8 或前 8 字节不是 magic | `magic-mismatch` |
+| 2 | 长度 < 12（magic + 4 字节长度都不够） | `corrupt-header` |
+| 3 | headerLength ≤ 0、> 4096、或超出剩余字节 | `corrupt-header` |
+| 4 | header JSON 解析失败（含不是对象、字段缺失、类型不符） | `corrupt-header` |
+| 5 | 归档版本 ≠ 1 | `unsupported-version:<n>` |
+| 6 | kdf 名不认识 | `unknown-kdf:<kdf>` |
+| 7 | 迭代数 < 600 000 | `invalid-iterations` |
+| 8 | salt / nonce 的 base64 解不出，或解出长度不是 16 / 12 | `corrupt-header` |
+| 9 | 密文长度 ≤ 0 ⇒ `corrupt-ciphertext`；> 8 MiB ⇒ `payload-too-large` | 同左 |
+| 10 | 走到这里：`aad = archive[0 .. trailer)` 的拷贝，交给解密 | — |
+
+门禁式的两条：**先跑完 layout，再看口令**。Windows 的注释把这层意思写得很直白——
+「so "this file is from a newer version" wins over "you typed nothing"」：
+一个来自新版本的文件 + 空口令，用户更该看到的是「文件太新」，不是「你没输口令」。
+Android 侧 `decrypt`（:166）第一行就是这句注释的同义实现：口令策略在 `deriveKey` 之前。
+
+写侧五步（`ArchiveWriter.write`，:37）：
+
+| # | 条件 | 报的码 | 证据用例 |
+| --- | --- | --- | --- |
+| 1 | 口令策略不过 | `passphrase-empty` / `passphrase-too-weak` | `empty-passphrase-wins`、`weak-passphrase-wins` |
+| 2 | `capabilities.canSendSecrets` 或任一 source 带凭据块 | `secrets-not-allowed` | `secrets-flag-refused`、`secrets-block-refused` |
+| 3 | 迭代数 < 600 000 | `invalid-iterations` | `low-iterations-refused` |
+| 4 | 载荷序列化后 > 8 MiB | `payload-too-large` | `a_payload_that_is_not_an_envelope_is_malformed_payload`（读侧同源） |
+| 5 | 全过：新随机 salt(16) + nonce(12) → header → 加密 → `prefix + 密文 + tag` | — | `happy-path` |
+
+两条优先级是用例直接钉死的：`passphrase-before-secrets`（空口令 + 带凭据 ⇒ 报 `passphrase-empty`）与
+`secrets-before-iterations`（带凭据 + 1000 轮 ⇒ 报 `secrets-not-allowed`）。
+也就是说口令 → 凭据 → 迭代数这个次序不是实现巧合，是契约。
+写侧对凭据的态度是**拒绝而不是静默剥掉**：`secrets-not-allowed` 让用户知道「这份东西本来就不该进归档」，
+而不是悄悄改成一份缺凭据的信封让人以为搬成功了。
+
+### §35.4 与 `.mhbackup` 的区别：两套格式不许混
+
+`core/common/.../backup/` 里那套是本项目自己的整机备份格式，与本节的归档长得像但**没有一个字段可以互换**：
+
+| 维度 | `.mharchive`（本节，W6-62） | `.mhbackup`（`core/common/.../backup/`） |
+| --- | --- | --- |
+| magic | `MHSYNCA1`（二进制前缀） | `MHBK`（JSON 里的 `magic` 字段） |
+| 外层形态 | `magic + BE int32 + 明文 header + 密文 + tag` | 整份 JSON 信封（`ciphertextB64` 等字段） |
+| salt | 16 字节 | 32 字节 |
+| AAD | `magic + BE int32 + headerJson` 原字节 | 字符串 `"$magic|$formatVersion|$kdfAlgorithm|$kdfIterations"` |
+| 载荷 | `SourceSyncCodec` 编出的双向同步信封 | manifest + 各 section 记录 |
+| 用途 | 双向增量同步的离线搬运 | 整机备份 / 恢复 |
+| 迭代下限 | 600 000 | 10 000（`MIN_ITERATIONS`） |
+
+两套都用了 PBKDF2-HMAC-SHA256 + AES-GCM，但**参数与 AAD 形状完全不同**，所以
+「拿 `.mhbackup` 的代码改改变成 `.mharchive`」这条路是不通的：
+AAD 差一个字节，tag 就永远对不上。本节因此没有复用 `BackupCrypto` 的任何一行，只借了它的结论——
+`javax.crypto` 的 `PBKDF2WithHmacSHA256` + `AES/GCM/NoPadding` 在 Android 上零依赖可用，不需要引入任何新库。
+
+### §35.5 落点行号表
+
+生产代码六个文件（`core/common/src/main/kotlin/com/mediahub/core/common/archive/`）：
+
+| 文件 | 行 / 字节 | 内容 |
+| --- | --- | --- |
+| `ArchiveError.kt` | 82 / 3349 | `object ArchiveError` 十二个 const（:16 magic-mismatch、:19 corrupt-header、:22 unsupported-version、:25 unknown-kdf、:28 invalid-iterations、:31 passphrase-empty、:34 passphrase-too-weak、:37 secrets-not-allowed、:40 payload-too-large、:43 corrupt-ciphertext、:46 wrong-passphrase-or-tampered、:49 malformed-payload）、`ALL`（:52，十二项同序）、`unsupportedVersion(Int)`（:67）、`unknownKdf(String?)`（:69）、`ArchiveException(reason, message, cause?)`（:77） |
+| `ArchiveKdf.kt` | 49 / 2120 | `PBKDF2_SHA256_NAME`（:16）、`SALT_SIZE`（:18）、`KEY_SIZE`（:19）、`MIN_ITERATIONS`（:22）、`DEFAULT_ITERATIONS`（:23）、`tryParse`（:29，只认一个名字、不回落）、`deriveKey`（:35，`require` 校验 salt 与迭代下限，`PBEKeySpec` + `finally clearPassword()`） |
+| `ArchivePassphrase.kt` | 78 / 3159 | `MIN_LENGTH = 12`（:16）、`WEAK_PASSPHRASES` 二十四条（:22）、`tryValidate`（:50）、`validate`（:60）、`messageOf`（:66） |
+| `ArchiveHeader.kt` | 114 / 4676 | `data class ArchiveHeader`（:20，六个字段全带缺省值）、六个契约常量（:29-42）、`ArchiveHeaderCodec.serialize`（:53）、`tryParse`（:66）、`parse`（:90）、三个私有取值器（:96 / :102 / :108） |
+| `ArchiveReader.kt` | 253 / 11034 | `readHeader`（:31）、`tryReadHeader`（:38）、`read`（:41）、`tryRead`（:56）、`describe`（:64）、`Layout`（:77）、`layoutOf` 十步（:84）、`decrypt`（:166）、`decodePayload`（:203）、`decodeBase64`（:233）、`lastReason`（:249） |
+| `ArchiveWriter.kt` | 129 / 5940 | `write`（:37，五步判定序）、`buildPrefix`（:106，`internal`，供用例逐字节对照）、`carriesSecrets`（:123） |
+
+测试与资源：
+
+| 文件 | 规模 | 内容 |
+| --- | --- | --- |
+| `core/common/src/test/kotlin/.../archive/ArchiveVectorsTest.kt` | 419 行 / 21429 B / **15 例** | 与 Windows 黄金向量逐字节对照：常量、十二码、三条 PBKDF2 密钥、header 161 B、archive 1282 B、19 条错误向量、9 条 writerCases、四条有效口令 + 九条无效口令 |
+| `core/common/src/test/kotlin/.../archive/ArchiveRoundTripTest.kt` | 418 行 / 20056 B / **23 例** | 纯 Kotlin 回环与边界：逐字段往返、两次写不重复 salt/nonce/密文、篡改 tag/密文/header、双侧凭据拒绝、8 MiB 上限、口令 11 拒 12 收、中文口令、不泄露明文 |
+| `core/common/src/test/resources/archive/windows-archive-vectors.json` | 294 行 / **49950 B** | 由 `D:/mh-verify/archive-vectors`（临时 net10.0 生成器，`ProjectReference` 指向权威 `MediaHub.Sync.csproj`）生成，不入 git 的生成器本身不在仓库里 |
+
+### §35.6 用例清单
+
+#### `ArchiveVectorsTest`（15 例，跨端对照）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :95 | `the_kdf_and_header_constants_match_the_windows_contract` | 六个常量与 kdf 参数逐项等于 Windows |
+| :118 | `the_twelve_stable_codes_are_identical_and_in_the_same_order_as_windows` | 十二个码字符串与顺序 |
+| :145 | `the_three_frozen_pbkdf2_keys_reproduce_byte_for_byte` | 三条冻结密钥（英文 / 第二 salt / 中文口令）逐字节相同 |
+| :166 | `the_kdf_parser_rejects_everything_but_the_one_frozen_name` | `tryParse` 只认 `pbkdf2-sha256`，大小写与空格归一、其它一律 false |
+| :177 | `the_header_serializer_reproduces_the_windows_bytes_exactly` | header 161 B 逐字节相同（字段序 + 无空白） |
+| :200 | `kotlin_reproduces_the_windows_archive_byte_for_byte` | 用冻结 payload + salt + nonce，Kotlin 算出 1282 B / sha256 `17514e08…ee21` 与 Windows 完全相同 |
+| :243 | `the_frozen_archive_decrypts_back_to_the_same_envelope` | 读回的信封逐字段相等 |
+| :254 | `the_header_can_be_read_without_any_passphrase` | `readHeader` 不需要口令 |
+| :268 | `every_error_vector_reports_the_reason_windows_reports` | 19 条错误向量逐条同码 |
+| :291 | `every_error_vector_agrees_on_whether_the_header_parses` | 19 条逐条同 `headerParses` |
+| :305 | `the_error_vectors_cover_every_bucket_a_reader_can_report` | 向量覆盖读到得了的每一种码，没有漏桶 |
+| :331 | `every_writer_case_reports_the_reason_windows_reports` | 9 条写侧用例逐条同码 |
+| :359 | `the_writer_case_order_proves_the_passphrase_then_secrets_then_iterations_precedence` | 口令 → 凭据 → 迭代数 |
+| :378 | `the_passphrase_policy_agrees_with_every_frozen_candidate` | 四条有效 / 九条无效逐条判定一致 |
+| :395 | `the_passphrase_policy_is_identical_to_the_windows_twenty_four_word_deny_list` | 弱表二十四条逐字同序 |
+
+#### `ArchiveRoundTripTest`（23 例，纯 Kotlin）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :140 | `a_written_archive_reads_back_with_every_field_intact` | 逐字段往返（含 endpoint 三属性、accountScope、tombstone） |
+| :162 | `an_empty_envelope_also_round_trips` | 空信封也能往返 |
+| :168 | `writing_twice_never_repeats_salt_nonce_or_ciphertext` | 每次写新 salt / nonce，密文不同 |
+| :180 | `the_reader_is_pure_and_can_be_called_repeatedly` | 读是纯操作，同一份可重复读 |
+| :193 | `a_tampered_tag_byte_is_wrong_passphrase_or_tampered` | 改 tag 一个字节 ⇒ 同码 |
+| :200 | `a_tampered_ciphertext_byte_is_wrong_passphrase_or_tampered` | 改密文一个字节 ⇒ 同码 |
+| :208 | `a_tampered_header_timestamp_still_parses_but_never_decrypts` | 改 header 时间戳：header 仍可读，解密必失败（AAD 覆盖） |
+| :224 | `a_tampered_version_reports_unsupported_version_before_any_passphrase_work` | 改版本号 ⇒ 框架错误先于口令 |
+| :237 | `a_tampered_kdf_name_reports_unknown_kdf_with_the_name` | 改 kdf ⇒ 码里带原名字 |
+| :244 | `a_tampered_iteration_count_is_refused_at_the_structural_layer` | 改迭代数 ⇒ `invalid-iterations` |
+| :263 | `a_truncated_archive_never_reports_a_decryption_error` | 截断只报结构码，不冒充「口令错」 |
+| :283 | `writing_refuses_an_envelope_that_declares_can_send_secrets` | 写侧拒 `canSendSecrets` |
+| :288 | `writing_refuses_an_envelope_that_carries_a_secrets_block_even_when_the_flag_is_off` | 写侧拒凭据块（即使 flag 关） |
+| :308 | `a_json_null_secrets_block_is_not_credentials_on_either_side` | `"secrets": null` 不算凭据（见 §35.7.1） |
+| :318 | `reading_refuses_a_payload_that_declares_can_send_secrets` | 读侧拒 `canSendSecrets` |
+| :326 | `the_passphrase_boundary_is_eleven_refused_and_twelve_accepted` | 11 拒 12 收 |
+| :337 | `a_chinese_passphrase_round_trips_and_a_wrong_one_does_not` | 中文口令往返、错口令报同码 |
+| :349 | `a_low_iteration_count_is_refused_by_the_writer_and_the_boundary_is_allowed` | 999_999 拒、600_000 收 |
+| :363 | `a_wrong_passphrase_and_a_tampered_file_report_the_exact_same_code` | 错口令与篡改同码（不做攻击者 oracle） |
+| :373 | `the_describe_texts_never_quote_the_payload_or_the_passphrase` | `describe` 文案不含载荷 / 口令 |
+| :390 | `the_archive_bytes_never_contain_the_plaintext` | 归档字节里搜不到明文片段，但能找到 magic |
+| :402 | `a_payload_that_is_not_an_envelope_is_malformed_payload` | 载荷不是信封 ⇒ `malformed-payload` |
+| :409 | `a_payload_with_an_unknown_schema_version_stays_malformed_payload` | 载荷 schemaVersion 不是 1 ⇒ `malformed-payload` |
+
+### §35.7 本机实跑（串行，低内存）
+
+| 步骤 | 命令 / 脚本 | 结果 |
+| --- | --- | --- |
+| 单模块全量 | `D:/mh-verify/run-w6-62.bat`（`:core:common:testDebugUnitTest`，`--max-workers=1 "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" "-Dkotlin.daemon.jvm.options=-Xmx1024m"`） | `BUILD SUCCESSFUL in 3m 19s`、`17 actionable tasks: 7 executed, 10 up-to-date`、`EXIT=0` |
+| 清理 | 跑完 `gradlew --stop` | `java-left=0`；仓库根 `hs_err_pid*.log` / `replay_pid*.log` 计数均 0 |
+
+XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-62.log`）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `core/common` | 42 | **595** | 0 | 0 | 11 | 557 → 595（+2 套件 = 15 + 23） |
+
+关键套件逐个：`ArchiveRoundTripTest` **23/23**（22.89 s）、`ArchiveVectorsTest` **15/15**（6.138 s，
+其中 600 000 轮 PBKDF2 每个用例一次，时间主要花在这里）；
+11 个跳过仍是 `SourceSyncTlsInteropTest` + `SourceSyncListenerInteropTest` 两个环境门控套件，与既有口径一致。
+
+#### §35.7.1 断点记录：一个跨端契约上的真缺陷（`"secrets": null`）
+
+首跑之前自查出来的，不是跑挂的——但性质比跑挂更严重，因为它只在一条路径上显形：
+
+`ArchiveWriter.carriesSecrets` 第一版写的是 `envelope.sources.any { it.secrets != null }`。
+Windows 权威实现的判据是 `source.Secrets is { } secrets && secrets.ValueKind != JsonValueKind.Null`——
+也就是说，一个显式的 `"secrets": null` 块 **不算**携带凭据。
+可是在 Kotlin 里 `JsonNull` 是个非 null 的对象，`it.secrets != null` 对它是 true。
+后果是：同一份信封，Windows 说能写、Android 说 `secrets-not-allowed`——两端对「什么算凭据」判断不一致。
+
+修法（`ArchiveWriter.kt:123`）：
+
+```kotlin
+envelope.sources.any { source ->
+    val secrets = source.secrets;
+    secrets != null && secrets !is kotlinx.serialization.json.JsonNull
+}
+```
+
+为什么只有一条路径暴露：`SourceSyncCodec.readRecord` 已经把 `element["secrets"]?.takeIf { it !is JsonNull }`
+折成了 Kotlin 的 null（`SourceSyncCodec.kt:183`），所以从 JSON 解码进来的信封碰不到这个 bug；
+只有「用 Kotlin 对象直接构造信封再写」这条路才会踩到。用例
+`a_json_null_secrets_block_is_not_credentials_on_either_side` 现在钉住两端同判。
+
+### §35.8 未覆盖（本节交付时必须如实保留）
+
+1. **没有接 CLI / 界面 / 数据库**：`ArchiveReader` 与 `ArchiveWriter` 目前是 `core/common` 里的纯函数，
+   Android 侧还没有任何调用方。把它接到「导入信封」那条链上（`SourceSyncTransferImportService.importEnvelopeBytes`）
+   是下一个切片的活，本节不算完成端到端。
+2. **没有真实设备**：全部结论来自 JVM 单测；Android 上 `javax.crypto` 的实现（Conscrypt）与 JVM 的 SunJCE
+   在 AES-GCM 与 PBKDF2 上理应一致，但**没有在设备上跑过** ⇒ DEVICE_UNVERIFIED。
+3. **8 MiB 上限只测了写法没测真数据**：上限判定在两侧都有，但没有构造一份接近 8 MiB 的真实归档跑内存与耗时；
+   低内存设备上 600 000 轮 PBKDF2 与 8 MiB 明文的峰值内存没有测过。
+4. **跨端双向互操作只到「读 Windows 的向量」**：Kotlin 写出的归档由 C# 读这一半，本轮的证据是
+   「Kotlin 复算出的字节与 Windows 冻结字节完全相同」（`kotlin_reproduces_the_windows_archive_byte_for_byte`），
+   属于**等价证明**而非真的跑了一次 C# Reader 去读 Kotlin 的输出。生成器里没有做这一半，是因为
+   它要往 Windows 工程里加测试入口；等价证明在密码学上没有信息损失，但口径上要记成「互操作 = 逐字节等价」。
+5. **真实两机搬运**：把归档拷到另一台机器再导入的完整流程 NOT_RUN（与 §33.8 / §34.8 的跨机项同源，都需要第二台机器）。
+6. **口令策略的界外情况**：只有「11 拒 12 收」与中文口令；没有测超长口令（数千字符）与含 NUL / 代理对的字符串。
+7. **门禁**：本轮把两个套件都加进 `--required-suite`（44 → **46** 个套件），
+   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`；
+   「CI 上这两个套件确实被门禁跑过」只能由新 head 的 Android CI 日志证明，本节写就时该 head 尚未 push。
+
+### §35.9 下一步
+
+- 把 `ArchiveReader` 接到 Android 的导出 / 导入入口：导出侧给「另存为 .mharchive」，
+  导入侧在 `SourceSyncTransferImportService` 前面加一层「这是不是归档」的嗅探（`magic == MHSYNCA1`），
+  对齐 Windows `SyncCliRunner.TryResolveEnvelope` 的分支语义；
+- 设备侧取证：把 15 + 23 例里能在 androidTest 上跑的部分搬上模拟器（PBKDF2 600 000 轮在低端机上耗时是可观察项）；
+- 真实两机搬运取证（上面 §35.8 第 5 条），届时与 §33.8 / §34.8 的跨机项一起改成 EXECUTED_PASS；
+- 口令策略补超长口令与畸形 Unicode 用例。

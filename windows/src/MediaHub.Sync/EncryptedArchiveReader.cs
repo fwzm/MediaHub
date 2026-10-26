@@ -144,7 +144,8 @@ public static class EncryptedArchiveReader
 
         // Defence in depth: a writer that never emits secrets plus a reader that refuses them means a doctored
         // archive cannot smuggle credentials into an import path that later starts trusting this format.
-        if (decoded!.Capabilities.CanSendSecrets)
+        if (decoded!.Capabilities.CanSendSecrets || decoded.Sources.Any(source =>
+            source.Secrets is { } secrets && secrets.ValueKind != System.Text.Json.JsonValueKind.Null))
         {
             reason = ArchiveError.SecretsNotAllowed;
             return false;
