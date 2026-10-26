@@ -1,5 +1,6 @@
 package com.mediahub.core.common.archive
 
+import com.mediahub.core.common.sync.WireText
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -71,6 +72,10 @@ object ArchiveHeaderCodec {
             return null
         }
         val json = root as? JsonObject ?: return null
+        // 转义的孤立代理项：kotlinx.serialization 会收下（得到 [D800] 这样的码元序列），
+        // System.Text.Json 在 JsonDocument.Parse 阶段就抛 —— 两端必须都判 corrupt-header，
+        // 否则同一份头部在两端一个能读一个不能读。
+        if (WireText.containsLoneSurrogate(json)) return null
         val version = json.intOf("version") ?: return null
         val iterations = json.intOf("iterations") ?: return null
         val createdAtEpochMs = json.longOf("createdAtEpochMs") ?: return null

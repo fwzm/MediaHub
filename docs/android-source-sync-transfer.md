@@ -3752,3 +3752,124 @@ W6 树那两条比主树少 1 例，原因是 W6 分支此刻还没 merge `8c262
 - 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条与 §37.8 第 1 条）；
 - 设备侧密码学：PBKDF2 600 000 轮在模拟器 / 低端机上的耗时与峰值内存，写读两侧都要；
 - 归档格式若要演进（新 KDF、新字段），先按 W6-47 ADR 的方法写契约，再两端同步加码——不要单边加。
+
+## §40 跨语言文本边界契约：空白、大小写折叠、孤立代理项（W6-67）
+
+> 状态词按本项目口径：EXECUTED_PASS / IMPLEMENTED_UNVERIFIED / GUI_UNVERIFIED / SERVER_UNVERIFIED / DEVICE_UNVERIFIED / NOT_RUN / BLOCKED / FAILED / RELEASE_BLOCKED / SIGNING_BLOCKED。
+> 本轮边界：**只对齐文本判定规则与畸形输入的处理**，归档字节布局、magic、KDF 参数、AAD、稳定码集合（仍 12 个）一行不改；Windows 侧行为零变化（它的运行时默认本来就是 Unicode White_Space），Android 侧向同一套显式规则收敛。
+
+### §40.1 动机：同一份字节，两端给出不同的稳定码
+
+W6-62 到 W6-66 建立的互操作契约都依赖同一个前提：**同一条坏输入，两端必须报同一个 reason**。前三轮把字节布局、KDF、AAD、判序都钉住了，但还有一层没有钉：**文本判定本身**。
+
+这一层默认继承各语言的运行时，而运行时并不一致。用探针在本机实测（Java 21.0.9 / .NET 10.0.113），得到四处硬分歧：
+
+| # | 分歧 | JVM（Kotlin 默认） | .NET（C# 默认） | 后果 |
+| --- | --- | --- | --- | --- |
+| 1 | 空白集 | `Char.isWhitespace \|\| isSpaceChar`：**含** U+001C–U+001F，**不含** U+0085 | `char.IsWhiteSpace` = Unicode White_Space：**含** U+0085，**不含** U+001C–U+001F | 口令 `U+0085+password1234` 在 Windows 是 `passphrase-too-weak`，在 Android 被接受 |
+| 2 | `trim` 语义 | `String.trim()` 只剥 `<= U+0020`，与它自己的空白集不一致 | `String.Trim()` 与 White_Space 集一致 | 12×U+001C：Android 判 `passphrase-empty`，Windows 判 `passphrase-too-weak` |
+| 3 | 大小写折叠 | `equalsIgnoreCase` 会把 U+017F（长 s）、U+212A（开尔文符号）折成 ASCII | `OrdinalIgnoreCase` 只折 ASCII A–Z | `paſſword1234` 在 Android 命中弱口令表，在 Windows 不命中 |
+| 4 | 孤立代理项 | `PBEKeySpec` 静默替换成 `?` 后派生出一个对端永远读不开的密钥 | `Rfc2898DeriveBytes.Pbkdf2` 抛**未捕获**的 `EncoderFallbackException` | 同一口令，一端写出死文件、另一端直接崩 |
+
+前三条是「同一条坏输入两端不同码」，第四条更严重：**两端都没有把错误当成错误**。所以这一轮不是加功能，是把四条边界钉成显式契约。
+
+### §40.2 设计：把规则从运行时默认里拿出来，写成两端各一份的同源表
+
+| 决定 | 取值 | 理由 |
+| --- | --- | --- |
+| 空白定义 | 显式列出 Unicode White_Space 的 25 个 BMP 码点 | 只有显式表能同时钉住「哪 25 个」与「不含 U+001C–U+001F」；C# 侧用例再逐码点断言该表等于 `char.IsWhiteSpace` |
+| 大小写 | 只折叠 ASCII A–Z，其余码元逐字比较 | 覆盖口令弱表与 kdf 名两个消费点；不依赖 `equalsIgnoreCase` / `OrdinalIgnoreCase` 的本地化行为 |
+| 孤立代理项 | 口令策略层判 `passphrase-too-weak`（**不新增错误码**） | 码表 12 个稳定码是对外契约，新增第 13 个会让旧读端把它当未知码；口令不可编码本质上就是「这个口令不能用」 |
+| 信封里的孤立代理项 | 文档级 `malformed-json`；可选文本字段（displayName / accountScope）`invalid-field:<字段>` | 与「未知字段忽略、必需字段缺失 missing-field」的既有分诊一致；不允许悄悄写成 U+FFFD |
+| 头部里的孤立代理项 | `corrupt-header` | 头解析失败本来就是这一个码 |
+| 共享实现 | Kotlin `com.mediahub.core.common.sync.WireText` / C# `MediaHub.Sync.WireText` | 五个消费点各自实现会漂移；两份实现由同一份黄金向量逐条对照 |
+
+刻意**不采用**的两个方案：
+
+1. *让 Android 照抄 .NET 的 `char.IsWhiteSpace` 但继续用 `String.trim()`*——不行，`trim` 的语义与空白集是两件事，混用会在 U+0085 上给出第三种答案；
+2. *新增 `passphrase-unencodable` 稳定码*——两端码表必须同名同序（W6-47 结论 C），加码得两端同时改且各有交集为空的用例；而这条的对外语义与「这个口令不能用」完全重合，不值得扩表。
+
+### §40.3 落点行号表
+
+| 文件 | 行 | 内容 |
+| --- | --- | --- |
+| `core/common/.../sync/WireText.kt` | 全文（88 行） | `WHITESPACE_CODE_POINTS` 25 码点 / `isWhitespace`（二分）/ `isBlank` / `trim` / `equalsAsciiIgnoreCase` / `hasLoneSurrogate` / `containsLoneSurrogate(JsonElement)` |
+| `core/common/.../archive/ArchivePassphrase.kt` | :62-68 | `tryValidate` 判序：`WireText.isBlank` → 长度 → **`hasLoneSurrogate` → too-weak** → `WireText.trim` → `equalsAsciiIgnoreCase` 对弱表 |
+| `core/common/.../archive/ArchiveKdf.kt` | :34-36 | `tryParse` 改为 `WireText.equalsAsciiIgnoreCase(WireText.trim(name), PBKDF2_SHA256_NAME)`（不再 `lowercase()`：JVM 会把 U+212A 折成 k） |
+| `core/common/.../archive/ArchiveHeader.kt` | :78 | `tryParse` 在转成 `JsonObject` 之后 `if (WireText.containsLoneSurrogate(json)) return null` |
+| `core/common/.../sync/SourceSyncCodec.kt` | :112-129 | `requireText` 的空白判定换 `WireText.isBlank` 并追加 `hasLoneSurrogate → invalid-field`；新增 `requireWellFormed` 供可选字段用 |
+| 同上 | :105-106 | `validateForWrite` 对 `displayName` / `accountScope` 调 `requireWellFormed` |
+| 同上 | :145-150 | `decode` 入口在 `root !is JsonObject` 之后判 `WireText.containsLoneSurrogate(root)` → `malformed-json` |
+| `windows/src/MediaHub.Sync/WireText.cs` | 全文（168 行） | 同 25 码点表 + `IsWhitespace`/`IsBlank`/`Trim`/`EqualsAsciiIgnoreCase`/`HasLoneSurrogate`/`ContainsLoneSurrogate(JsonElement)` |
+| `windows/src/MediaHub.Sync/ArchivePassphrase.cs` | :56-90 | `TryValidate` 判序同 Kotlin（`WireText.*` + 孤立代理项 → `PassphraseTooWeak`） |
+| `windows/src/MediaHub.Sync/ArchiveKdf.cs` | :60-65 | `TryParse` 改用 `WireText.EqualsAsciiIgnoreCase(WireText.Trim(name), …)` |
+| `windows/src/MediaHub.Sync/ArchiveHeader.cs` | :112 / :181-186 | `TryParse` 补 `catch (ArgumentException)`（`JsonDocument.Parse` 对转义孤立代理项抛这个）；`TryReadString` 把 `GetString()` 包进 `catch (InvalidOperationException)` |
+| `windows/src/MediaHub.Sync/SourceSyncCodec.cs` | :71 / :418-446 / :469-480 | `Deserialize` 入口判 `WireText.ContainsLoneSurrogate` → `malformed-json`；`RequireText` 换 `WireText.IsBlank` 并加孤立代理项判定；新增 `RequireWellFormed` 给可选字段 |
+| `core/common/src/test/resources/archive/windows-archive-vectors.json` | `edges` 段 | 由 Windows 权威实现生成的 10 组边界向量（+1098 行） |
+| `windows/tests/assets/windows-archive-vectors.json` | 全文（与上同字节） | C# 测试读取的副本；两份 sha256 相同 |
+| `core/common/src/test/kotlin/.../ArchiveEdgeContractTest.kt` | 全文（11 例） | Kotlin 侧逐条消费 `edges` 段 |
+| `windows/tests/MediaHub.Tests/ArchiveEdgeContractTests.cs` | 全文（11 例） | C# 侧逐条消费同一段；csproj 加一条 Content 挂载向量文件 |
+
+### §40.4 用例清单
+
+两端各 11 例，**逐条对应**同一份 `edges` 向量（Kotlin 与 C# 的用例名一一同义，便于对照阅读）：
+
+| # | Kotlin（`ArchiveEdgeContractTest`） | C#（`ArchiveEdgeContractTests`） | 钉住什么 |
+| --- | --- | --- | --- |
+| 1 | `the_whitespace_table_is_the_unicode_white_space_property_used_by_dotnet` | `TheWhitespaceTableIsTheUnicodeWhiteSpacePropertyOfDotNet` | 25 码点表与向量相等；C# 侧还逐码点断言与 `char.IsWhiteSpace` 全 BMP 一致；两端都断言 U+001C/U+001F/U+200B/U+FEFF/U+00AD 不算空白 |
+| 2 | `is_blank_and_trim_agree_with_the_windows_answers_for_every_candidate` | `IsBlankAndTrimAgreeWithEveryVectorCandidate` | 13 条候选的 `blank` 与 `trimmed` 逐条相等 |
+| 3 | `ascii_case_folding_never_folds_a_non_ascii_lookalike` | `AsciiCaseFoldingNeverFoldsANonAsciiLookalike` | 6 组折叠对；另有长 s / 开尔文符号两条硬断言 |
+| 4 | `lone_surrogates_are_detected_by_code_unit_not_by_character_count` | `LoneSurrogatesAreDetectedByCodeUnitNotByCharacterCount` | 7 条候选（尾随高代理、前导低代理、内部高代理、合法代理对、两个连续高代理、低后高） |
+| 5 | `the_passphrase_policy_gives_the_windows_answer_for_every_candidate` | `ThePassphrasePolicyGivesTheVectorAnswerForEveryCandidate` | 11 条口令候选的 reason 逐条相等 |
+| 6 | `a_lone_surrogate_passphrase_is_rejected_before_pbkdf2_sees_it` | `TheWriterRefusesALoneSurrogatePassphraseBeforePbkdf2SeesIt` | 策略层先拒；写侧抛的是 `passphrase-too-weak` 而不是编码器异常 |
+| 7 | `kdf_names_are_matched_with_ascii_folding_and_the_unicode_whitespace_set` | `KdfNamesAreMatchedWithAsciiFoldingAndTheUnicodeWhitespaceSet` | 9 条 kdf 名候选 |
+| 8 | `header_parsing_and_kdf_acceptance_agree_with_the_windows_answers` | `HeaderParsingAndKdfAcceptanceAgreeWithEveryVector` | 10 条头部变体的 parses / kdfAccepted / version（含重复键后胜、未知字段忽略） |
+| 9 | `envelope_decoding_reports_the_windows_reason_for_every_variant` | `EnvelopeDecodingReportsTheVectorReasonForEveryVariant` | 11 条信封变体的 reason（含 `malformed-json` 与 `missing-field:deviceId`） |
+| 10 | `envelope_writing_rejects_the_same_documents_the_windows_writer_rejects` | `EnvelopeWritingRejectsTheDocumentsTheWindowsWriterRejects` | 4 条写侧拒绝：`invalid-field:deviceId` / `missing-field:deviceId` / `invalid-field:displayName` |
+| 11 | `archive_reading_and_writing_agree_on_every_passphrase_case` | `ArchiveReadingAndWritingAgreeOnEveryPassphraseCase` | 5 条归档口令：读侧 reason 与写侧 reason 同时相等 |
+
+`edges` 段共 10 组向量（由 Windows 权威实现产出，生成器 `D:/mh-verify/archive-vectors`，不入库）：`whitespaceCodePoints`（25）/ `blankCandidates`（13）/ `kdfNameCandidates`（9）/ `caseFoldPairs`（6）/ `loneSurrogateCandidates`（7）/ `passphraseCandidates`（11）/ `headerVariants`（10）/ `envelopeVariants`（11）/ `envelopeWriteRejections`（4）/ `archivePassphraseCases`（5）。
+
+### §40.5 本机实跑（串行，防 OOM）
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| 生成器重跑 | `cd D:/mh-verify/archive-vectors && dotnet run -c Release` | `wrote …windows-archive-vectors.json (75552 bytes)`、`EXIT=0`；磁盘 **75553 B**（含行尾换行）；老 12 段 JSON 深度全等，仅新增 `edges` |
+| C# 全量 build + test | `D:/mh-verify/run-w6-67-windows.bat`（先 `dotnet build-server shutdown`，再 build `MediaHub.Windows.sln`、`dotnet test`、再 filtered 跑一遍新例） | `BUILD_EXIT=0`（0 警告 0 错误）、`TEST_EXIT=0` → **1599 通过 / 0 失败 / 0 跳过**（1588 → 1599，+11）、`EDGE_EXIT=0` → 11/11 |
+| C# 只看新例 | 同上脚本第三段 `--filter "FullyQualifiedName~ArchiveEdgeContractTests"` | **11/11 通过**，578 ms |
+| Android 三模块 | `D:/mh-verify/run-w6-67-gradle.bat`（低内存模板 + `--no-daemon`） | `BUILD SUCCESSFUL in 2m 41s`、`167 actionable tasks: 26 executed, 141 up-to-date`、`EXIT=0`；仓库根无 `hs_err_pid*.log` |
+
+XML 汇总（`<testsuite>` 属性相加，非估算）：
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | **43** | **607** | 0 | 11 | 42 → 43 套件（+1 = `ArchiveEdgeContractTest`）、596 → 607（+11） |
+| `core/database` | 20 | 192 | 0 | 12 | 不变 |
+| `feature/settings` | 23 | 354 | 0 | 0 | 不变 |
+
+三模块合计 **1153** 例。`--required-suite` 由 48 条增至 **49 条**（新钉 `com.mediahub.core.common.archive.ArchiveEdgeContractTest`）；`androidTest` 仍 88 例、instrumentation 仍 112 例（本轮无 Compose 断言）。
+
+首跑 `dotnet build windows/MediaHub.sln` 撞 `MSBUILD : error MSB1009: 项目文件不存在` —— 解法文件名是 `MediaHub.Windows.sln`；这是本轮验证脚本自身的笔误，不涉及产品代码，改正后 `BUILD_EXIT=0`。
+
+### §40.6 本轮修掉的三个真实缺陷（都是探针实测，不是推断）
+
+1. **Windows 写端会抛未捕获异常**：`ArchiveKdf.DeriveKey` 对含孤立代理项的口令抛 `System.Text.EncoderFallbackException`，它不是 `ArchiveException`，会穿透 `EncryptedArchiveWriter.Write` 的 `catch (ArchiveException)` 与上层 UI。修法是在口令策略层（`ArchivePassphrase.TryValidate`）就判 `passphrase-too-weak`，派生之前返回。
+2. **Android 写端会产出对端永远读不开的文件**：`PBEKeySpec` 把孤立代理项静默替换成 `?`（实测 UTF-8 末三字节 `6c653f`），两端「都成功」但对端永远解密失败。同一处修法一并覆盖。
+3. **C# 头解析对转义孤立代理项会抛未捕获异常**：`JsonDocument.Parse` 接受 `"\ud800"`，失败推迟到 `GetString()`，抛的是 `InvalidOperationException`（`ArchiveHeader.cs:181-186`），而 `TryParse` 只 `catch (JsonException)`。修法是把 `GetString()` 包进 `catch (InvalidOperationException)` → `corrupt-header`；`Deserialize` 侧同理由 `WireText.ContainsLoneSurrogate` 在入口拦成 `malformed-json`。
+
+另外 `Utf8JsonWriter.WriteString` 遇孤立代理项**不抛**，静默写成 `\uFFFD`（实测 `"a\ud800b"` → `{"deviceId":"a\uFFFDb"}`）——这是「写端必须自己拒」的实证依据，不是理论担忧。
+
+### §40.7 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机搬运**：两端对同一份坏输入的码已在本机逐条对齐，但「一台真机写、另一台真机读」的端到端流程仍 NOT_RUN（同 §33.8–§39.6 各节，都需要第二台机器）。
+2. **非 BMP 码点**：空白表只覆盖 BMP（Unicode White_Space 本身只在 BMP）。补充平面的字符在代理层不可能是空白，`isWhitespace(Char)` 按码元判已足够；但**非 BMP 的孤立代理项组合**只按码元判定，没有做码点级规范化（两端都不做，因此一致）。
+3. **其他可能消费文本规则的模块**：本轮只改口令、kdf 名、信封文本字段、归档头四处；备份（`.mhbackup`）与配对（pairing）两侧**没有**改用 `WireText`，它们的空白判定仍是各自原状——若将来发现跨端分叉，需要单独排查。
+4. **JVM/CLR 的 Unicode 版本差异**：显式表钉住的是**当前**代码点集；将来 Unicode 版本若给 White_Space 增减码点，两端必须同时改表（黄金向量会立刻红，这是设计意图）。
+5. **不涉及 GUI 与设备**：纯 JVM/C# 逻辑层，无新增控件、无设备依赖；真机 `DEVICE_UNVERIFIED` 与 GUI `GUI_UNVERIFIED` 的既有口径不变。
+
+### §40.8 下一步
+
+- 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条、§37.8 第 1 条、§39.6 第 1 条）；
+- 备份（`.mhbackup`）与配对（pairing）两侧的文本判定是否也该收进 `WireText`：先按 W6-47 ADR 的方法写一份口径表，再决定要不要动；
+- 8 MiB 上限附近的真实数据（口令正确、载荷刚好超限）仍无边测；
+- 归档格式若要演进（新 KDF、新字段），先写契约再两端同步加码——不要单边加。
