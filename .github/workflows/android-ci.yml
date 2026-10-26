@@ -220,6 +220,11 @@ jobs:
             --required-suite com.mediahub.feature.settings.sync.SourceSyncSendLauncherTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncHostAddressTest \
             --required-suite com.mediahub.provider.emby.EmbyAuthenticationInterleavingStressTest \
+            --required-suite com.mediahub.provider.emby.api.EmbyEndpointResolverTest \
+            --required-suite com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilderTest \
+            --required-suite com.mediahub.provider.emby.EmbyAuthProviderTest \
+            --required-suite com.mediahub.provider.emby.EmbyProviderConnectionTest \
+            --required-suite com.mediahub.provider.jellyfin.JellyfinProviderConnectionTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncReceiptTest \
             --required-suite com.mediahub.feature.settings.sync.SourceSyncListenerControllerTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferClientHostTest \

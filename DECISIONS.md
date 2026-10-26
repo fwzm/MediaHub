@@ -811,3 +811,22 @@ runtime capabilities to be a subset of declaredCapabilities. Planned extra capab
 with null runtime fields remain valid. Preserve the current ServerType persistence
 and split credential stores; this invariant port does not adopt the old open-ID schema.
 Test doubles must declare their actual provided fields rather than bypassing validation.
+
+### 2026-10-26 ADR-019/026 clarification: protocol and restored-user identity
+
+Preserve the deployed public-probe compatibility for an absent/null/blank ProductName.
+The official Jellyfin generated SDK declares that field optional and nullable:
+https://typescript-sdk.jellyfin.org/interfaces/generated-client.PublicSystemInfo.html
+An explicit Jellyfin marker must not pass an Emby probe; an explicit non-Jellyfin
+product must not pass a Jellyfin probe. Keep Id/Version validation and structured
+401/403 guidance, and do not echo arbitrary product strings in failure messages.
+This ports the useful old product distinction without adopting its mandatory-field
+requirement, which would reject the existing missing-field compatibility fixtures.
+
+After the anonymous server-identity check and the current authentication-attempt
+guard, a restored user must have a nonblank ID equal to the stored user ID.
+An invalid response yields INVALID_RESPONSE and retains the stored session/token;
+only an actual 401 follows the existing expiration cleanup policy. Keep cancellation
+identity and lease/epoch ownership. Normalize the Emby root's outer whitespace and
+endpoint separator, and escape quoted identity-header fields while retaining
+X-Emby-Authorization and separate X-Emby-Token. No store/schema migration is involved.

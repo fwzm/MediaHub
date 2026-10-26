@@ -9,10 +9,12 @@ package com.mediahub.provider.emby.api
 class EmbyEndpointResolver(userBaseUrl: String) {
 
     private val apiBase: String = buildString {
-        append(userBaseUrl.trimEnd('/'))
+        val base = userBaseUrl.trim().trimEnd('/')
+        require(base.isNotBlank()) { "Emby 服务器地址不能为空" }
+        append(base)
         if (!endsWith("/emby")) append("/emby")
     }
 
-    /** 返回完整 endpoint（path 以 / 开头）。 */
-    fun endpoint(path: String): String = apiBase + path
+    /** 根路径和 endpoint 之间保持一个分隔符，兼容有或无前导斜线的 path。 */
+    fun endpoint(path: String): String = "$apiBase/${path.trimStart('/')}"
 }

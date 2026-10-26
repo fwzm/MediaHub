@@ -81,6 +81,14 @@ class JellyfinProvider(
                 errorCode = ProviderException.ErrorCode.PARSE,
             )
             }
+            val productName = info.productName
+            if (!productName.isNullOrBlank() && !productName.contains("Jellyfin", ignoreCase = true)) {
+                return ConnectionStatus(
+                    ok = false,
+                    message = "服务器产品不是 Jellyfin，请选择对应的媒体源类型",
+                    errorCode = ProviderException.ErrorCode.PARSE,
+                )
+            }
             ConnectionStatus(
                 ok = true,
                 latencyMs = latencyMs,
