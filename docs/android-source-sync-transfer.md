@@ -3851,6 +3851,18 @@ XML 汇总（`<testsuite>` 属性相加，非估算）：
 
 首跑 `dotnet build windows/MediaHub.sln` 撞 `MSBUILD : error MSB1009: 项目文件不存在` —— 解法文件名是 `MediaHub.Windows.sln`；这是本轮验证脚本自身的笔误，不涉及产品代码，改正后 `BUILD_EXIT=0`。
 
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 `completed / success`：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `c287964d9c7877f114e92f26171f38207680d3d0`（主树） | `windows-ci` | 40372134565 | `MediaHub.Tests` 469 + `MediaHub.WebDav.Tests` 104 = 573；licence `projects=13 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40372137888 | `uniqueTests` **2278**（`core/common` 607 / `core/database` 192 / `feature/settings` 354）；`--required-suite` **49** 条；两个 visual-instrumentation job 各 `19 unique mandatory` 命中该 SHA（`feature:settings` 分组 112 例） |
+| `2a25a919abde3cb5b122133fceba6d39fa298dd2`（W6 树，已 merge 主树本轮提交） | `windows-ci` | 40372214715 | `MediaHub.Tests` **1599** + `MediaHub.WebDav.Tests` 104 = **1703**；licence `projects=15 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40372214599 | `uniqueTests` **2278**（同主树口径）；`--required-suite` 49 条；instrumentation 112 例、API 32/36 各 `19 unique mandatory` |
+
+主树 `uniqueTests` 由上一基线 2267 增至 **2278**（+11 = §40.4 的两个测试类各 11 例，与本机 XML `core/common` 596 → 607 一致）。
+W6 树本轮 merge 了主树提交，因此**两条 Android CI 的 `uniqueTests` 同为 2278**，不再有上一轮那种差 1 例的口径分裂。
+
 ### §40.6 本轮修掉的三个真实缺陷（都是探针实测，不是推断）
 
 1. **Windows 写端会抛未捕获异常**：`ArchiveKdf.DeriveKey` 对含孤立代理项的口令抛 `System.Text.EncoderFallbackException`，它不是 `ArchiveException`，会穿透 `EncryptedArchiveWriter.Write` 的 `catch (ArchiveException)` 与上层 UI。修法是在口令策略层（`ArchivePassphrase.TryValidate`）就判 `passphrase-too-weak`，派生之前返回。
@@ -3872,4 +3884,127 @@ XML 汇总（`<testsuite>` 属性相加，非估算）：
 - 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条、§37.8 第 1 条、§39.6 第 1 条）；
 - 备份（`.mhbackup`）与配对（pairing）两侧的文本判定是否也该收进 `WireText`：先按 W6-47 ADR 的方法写一份口径表，再决定要不要动；
 - 8 MiB 上限附近的真实数据（口令正确、载荷刚好超限）仍无边测；
+- 归档格式若要演进（新 KDF、新字段），先写契约再两端同步加码——不要单边加。
+
+## §41 8 MiB 上限附近的真数据穿越 AES-256-GCM（W6-68）
+
+> 状态词：两端本机 **EXECUTED_PASS**；四条 CI 待本轮提交后取证。`--required-suite` 49 → 50。
+> 边界：本轮只碰测试与门禁脚本，除新增一个测试套件外没有改动任何生产代码路径。
+
+### §41.1 动机（为什么「拒绝过大」不够）
+
+归档层从 W6-62 起就有 8 MiB 的载荷上限，两端各自都有「超限就拒」的用例：
+Kotlin 侧 `ArchiveRoundTripTest.writing_refuses_a_payload_that_is_larger_than_the_archive_limit` 用 9 000 000 字节断言 `payload-too-large`，
+C# 侧 `ArchiveEncryptionTests.OversizedCiphertext_IsRejectedBeforeDecryption` / `OversizedPayload_IsRejectedWhenWriting` 用 `MaxPayloadBytes + 1` 分别钉读端与写端。
+但这三条用例合起来只证明了一件事：**超限会被拒**。真正会撞上的问题是相反的——
+一份大型媒体库导出的信封，载荷恰好落在上限附近时，加密、写盘、读回、GCM 校验这条完整链路还成不成立。
+
+这个缺口有三重风险，都不是理论担忧：
+
+1. **差一错误（off-by-one）**。写端判据是 `payload.size > MAX`（大于才拒），读端是 `cipherLength > MAX`；
+   只要其中一处的比较符写反成 `>=`，恰好等于 8388608 B 的合法载荷就会被两端同时或单端拒绝，而既有用例全是 9 MB 级，永远碰不到这个边界。
+2. **长度假设**。AES-GCM 的密文长度等于明文长度，读端是**在解密之前**按 `cipherLength` 判上限的——
+   这条等价关系一旦被将来的压缩/分块改写破坏，读端就会在解密后才发现超限，等于先花 600 000 轮 PBKDF2 再失败。
+3. **跨语言一致性**。两端各自的编码器（kotlinx `buildJsonObject{}.toString()` 与 `Utf8JsonWriter`）字段序相同、
+   但一旦载荷逼近上限，任何一端的细微差异（多一个空格、字段顺序不同）都会让同一份信封在两个实现里得到不同的字节长度——
+   恰好在下限附近，这就决定了一份归档能不能被对端打开。
+
+所以本轮把「上限本身可用」写成契约：用 Windows 权威实现生成一份**恰好 8 MiB** 的载荷与其归档，
+让 Kotlin 端逐字节复现同一份载荷、同一份归档，并且两端都验证「恰好上限可读、MAX+1 被拒」。
+
+### §41.2 设计（不存 8 MB 字节，只存配方与哈希）
+
+直接把 8 MiB 的归档当测试资源入库是不可接受的：单测仓库会因此膨胀 16 MB（Kotlin 与 C# 各一份），
+而且二进制资源无法 review「它到底是哪个信封」。采用的做法是**只存配方**：
+
+| 决定 | 内容 | 理由 |
+| --- | --- | --- |
+| 载荷用可计算的长度 | 一个 source 的 `displayName` 由 ASCII 单字符 `x` 重复到精确长度（`displayNameLength = 8388242`），其余字段固定 | 载荷字节长度 = 基准 JSON 长度 + displayName 长度，可反解到恰好 8388608 B；纯 ASCII 不触发任何转义，长度稳定 |
+| 固定 salt/nonce | 向量里存 `saltBase64 = "AAECAwQFBgcICQoLDA0ODw=="`（0..15）与 `nonceBase64 = "EBESExQVFhcYGRob"`（16..27） | 两端的 `write()` 都自取随机 salt/nonce，**不可能**逐字节相同；只有手工按固定 salt/nonce 加密才能让 Kotlin 与 Windows 得到同一份归档字节 |
+| 只存哈希与长度 | `payloadByteLength` / `payloadSha256` / `archiveByteLength` / `archiveSha256` / `headerBase64` / `prefixByteLength` | 8 MB 资源不入库；断言靠「编码结果的长度与 sha256」等价于逐字节比较，且失败时能立刻定位是载荷还是归档 |
+| 写端往返只钉语义 | 真实 `ArchiveWriter.write` / `EncryptedArchiveWriter.Write` 各自生成随机 salt/nonce，只断言「写→读回的信封 encode 结果相等」 | 与上面同因；把「随机 salt 也应可复现」当成断言只会造出 flaky 用例 |
+| 读端超限单独构造 | `prefix + 8388609 字节零密文 + 16 字节 tag` | 读端必须在**解密前**就返回 `payload-too-large`；用零密文可以证明它没有先尝试解密（否则会给 `wrong-passphrase-or-tampered`） |
+
+两个刻意不采用的做法：
+
+- **把 8 MiB 归档直接入库**：仓库永久多 16 MB 二进制，且无法解释「这份字节是从哪个信封来的」。
+- **在测试里现场构造 8 MiB 再和另一端比**：两端测试无法互调，只能各自构造，等于没有跨语言断言——必须由一端的权威实现产出答案，另一端去对。
+
+### §41.3 落点行号表
+
+| 位置 | 内容 |
+| --- | --- |
+| `core/common/src/test/kotlin/…/archive/ArchiveNearLimitTest.kt`（新，244 行） | Kotlin 侧五个用例；`craft()` 用向量固定 salt/nonce 手工加密，`envelopeWithDisplayName(n)` 按配方重建信封 |
+| `core/common/src/test/resources/archive/windows-archive-vectors.json`（74164 → **77034 B**） | 新增根键 `nearLimit`（原 13 段逐字节不变） |
+| `.github/workflows/android-ci.yml` | `--required-suite` 49 → **50**（新钉 `com.mediahub.core.common.archive.ArchiveNearLimitTest`），注释块加 3 行说明 |
+| `windows/tests/MediaHub.Tests/ArchiveNearLimitTests.cs`（新，196 行，W6 树） | C# 侧五个同义用例，消费同一份向量 |
+| `windows/tests/assets/windows-archive-vectors.json`（W6 树，74164 → **77034 B**） | 与主树测试资源同字节（`sha256` 相同） |
+
+### §41.4 用例清单（两端同义）
+
+| # | Kotlin（`ArchiveNearLimitTest`） | C#（`ArchiveNearLimitTests`） | 钉住的规则 |
+| --- | --- | --- | --- |
+| 1 | `the_recipe_reproduces_the_windows_payload_byte_for_byte` | `TheRecipeReproducesTheWindowsPayloadByteForByte` | 两端对同一配方 encode 出 **8388608 B**，sha256 逐字节相同 |
+| 2 | `the_header_from_the_recipe_is_the_canonical_aad_windows_used` | `TheHeaderFromTheRecipeIsTheCanonicalAadWindowsUsed` | 头部 JSON 就是 Windows 用作 AAD 的那串字节；`buildPrefix` 长度 = 173 |
+| 3 | `a_payload_of_exactly_the_ceiling_encrypts_to_the_windows_archive_hash_and_reads_back` | `APayloadOfExactlyTheCeilingEncryptsToTheWindowsArchiveHashAndReadsBack` | 用固定 salt/nonce 加密出的归档长度 8388797、sha256 与 Windows 相同；读回来逐字段相等 |
+| 4 | `the_writer_accepts_exactly_the_ceiling_and_refuses_one_byte_more` | `TheWriterAcceptsExactlyTheCeilingAndRefusesOneByteMore` | 恰好上限可写可读；MAX+1（8388609 B）写端给 `payload-too-large` |
+| 5 | `the_reader_refuses_an_oversized_ciphertext_before_decryption` | `TheReaderRefusesAnOversizedCiphertextBeforeDecryption` | 读端对 8388609 B 密文在**解密前**就给 `payload-too-large`，且不返回信封 |
+
+向量 `nearLimit` 段（生成器 `D:/mh-verify/archive-vectors`，临时工程不入库）：
+
+| 字段 | 值 |
+| --- | --- |
+| `recipe.displayNameLength` | 8388242 |
+| `payloadByteLength` / `payloadSha256` | 8388608 / `f6bc78f30a55b46b3a8cb64c28ad035f04e4fad86ba6542f8be64d02b3fa11ae` |
+| `headerBase64`（161 B 头）→ `prefixByteLength` | 173（magic 8 + BE int32 4 + header 161） |
+| `archiveByteLength` / `archiveSha256` | 8388797 / `b47b3cc3c4bd4abe3a317c39632d1f220415dfc703eb21a8c881deacd2edc287` |
+| `tooLarge` | displayName 8388243 → 载荷 8388609 B → 写端 `payload-too-large` |
+| `oversizedCiphertext` | 密文 8388609 B → 读端 `payload-too-large` |
+
+### §41.5 本机实跑（串行，防 OOM）
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| 生成器重跑 | `cd D:/mh-verify/archive-vectors && dotnet run -c Release` | 首次失败（见下），修复后 `wrote …windows-archive-vectors.json (77033 bytes)`、`EXIT=0`；磁盘 **77034 B**（含行尾换行）；老 13 段 JSON 深度全等，仅新增 `nearLimit` |
+| C# 全量 build + test | `D:/mh-verify/run-w6-68-windows2.sh`（`dotnet build windows/MediaHub.Windows.sln -c Debug`、`dotnet test -p:Platform=x64`、再 filtered 跑新例） | `BUILD_EXIT=0`（0 警告 0 错误）、`TEST_EXIT=0` → **1604 通过 / 0 失败 / 0 跳过**（1599 → 1604，+5）、`NEAR_EXIT=0` → 5/5 |
+| Android 三模块 | `D:/mh-verify/run-w6-68-gradle.bat`（低内存模板 + `--no-daemon`） | `BUILD SUCCESSFUL in 2m 1s`、`167 actionable tasks: 17 executed, 150 up-to-date`、`EXIT=0`；仓库根无 `hs_err_pid*.log` |
+
+XML 汇总（`<testsuite>` 属性相加，非估算；三模块 mtime 均为当轮 19:33–19:34Z）：
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | **44** | **612** | 0 | 11 | 43 → 44 套件（+1 = `ArchiveNearLimitTest`）、607 → 612（+5） |
+| `core/database` | 20 | 192 | 0 | 12 | 不变 |
+| `feature/settings` | 23 | 354 | 0 | 0 | 不变 |
+
+三模块合计 **1158** 例。`--required-suite` 由 49 条增至 **50 条**；`androidTest` 仍 88 例、instrumentation 仍 112 例（本轮无 Compose 断言）。
+
+### §41.6 本轮踩到的两个真实坑
+
+1. **`dotnet test` 用了 x86 输出目录**。首轮脚本跑 `dotnet build windows/MediaHub.Windows.sln -c Debug` 之后再 `dotnet test … --no-build`，
+   日志里的可执行路径是 `bin\Debug\net10.0-windows\win-x64\MediaHub.Tests.dll`（无 `x64` 段），
+   而 `MediaHub.Tests.csproj` 的 `Platforms` 是 `x64`、`.sln` 里项目只映射到 `x64` 平台。
+   结果：新文件已编译进 `bin\x64\…` 那份 DLL（`strings` 能搜到 `ArchiveNearLimitTests`），
+   但 `dotnet test` 加载的是旧的 `bin\Debug\…` DLL，跑出 1599 例、`--filter ArchiveNearLimitTests` 报 “No test matches”。
+   修法：**显式 `-p:Platform=x64`** 后再 build + test（`run-w6-68-windows2.sh`），1604 例、新例 5/5。
+   这条与 W6-67 那次「解决方案文件名 `MediaHub.sln` vs `MediaHub.Windows.sln`」是同一类错误：**验证脚本自身写错了路径，看起来却像产品缺陷**。
+2. **Kotlin 里 `JsonElement.getValue` 不存在**。首轮 gradle 编译报 5 处 `Unresolved reference 'getValue'`：
+   `record.getValue("tooLarge").getValue("displayNameLength")` —— 第一个 `getValue` 是 `JsonObject` 的，返回 `JsonElement`，
+   第二层必须显式转成 `JsonObject` 才能再取键。修法是 `record.getValue("tooLarge").jsonObject.getValue("displayNameLength")`。
+   教训：向量文件的嵌套断言写成链式取值时，Kotlin 的类型是 `JsonElement`，不像 `JsonObject` 那样有 `getValue`。
+
+### §41.7 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机搬运**：8 MiB 载荷的端到端搬运（Windows 导出 → 拷到另一台机器 → Android 导入）仍 NOT_RUN，同 §33.8–§40.7，需要第二台机器。
+2. **恰好上限的载荷只覆盖一种形状**：一个 source、纯 ASCII 的 displayName。多 source、含中文/转义字符、含 secrets 的载荷在同一字节长度下的行为没有单独测；
+   不过 `displayName` 的长度是唯一变量，其余字段的形状已由 §40 与既有 `ArchiveRoundTripTest` 覆盖。
+3. **PBKDF2 的耗时**：8 MiB 载荷的加密/解密在本机耗时约 1 s（600 000 轮 PBKDF2 占绝大部分），没有做性能断言，也没有在低端设备上测。
+4. **传输层上限**：本轮只碰归档层（8 MiB 载荷上限）；传输层的 8 MiB 常量（`SourceSyncTransferReasons.PayloadTooLarge`）是另一层，未动。
+5. **不涉及 GUI 与设备**：纯 JVM/C# 逻辑层，无新增控件、无设备依赖；真机 `DEVICE_UNVERIFIED` 与 GUI `GUI_UNVERIFIED` 的既有口径不变。
+
+### §41.8 下一步
+
+- 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条、§37.8 第 1 条、§39.6 第 1 条、§40.7 第 1 条、§41.7 第 1 条）；
+- 备份（`.mhbackup`）与配对（pairing）两侧的文本判定是否也该收进 `WireText`（§40.7 第 3 条的遗留）；
+- Windows 同步页真 GUI UIA 证据（W10 U2/U3/U4 需要用户授权窗口）；
 - 归档格式若要演进（新 KDF、新字段），先写契约再两端同步加码——不要单边加。
