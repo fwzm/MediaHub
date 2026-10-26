@@ -171,6 +171,15 @@ XML 汇总（`<testsuite>` 属性相加）：
 `ArchiveRoundTripTest` 单套件由 23 例增至 **24 例**、0 失败。
 本轮**没有**新增套件，`--required-suite` 仍是 48 条；门禁用例数随 core/common +1。
 
+CI 侧（exact-SHA，四条 run 全部 `completed / success`）：
+
+| head | 工作流 | run id | 与本轮相关的计数 |
+| --- | --- | --- | --- |
+| 主树 `94b9432d1db3121aafecf5eb2a226734d904c822` | `windows-ci` / `android-ci` | 40245159664 / 40245159540 | `MediaHub.Tests` 469 + WebDav 104 = 573；`uniqueTests` **2266**、`core/common` **596**、`--required-suite` 48、instrumentation 112 |
+| W6 树 `bd71e3200a284c77e1fdfd8237fed7aa3e4e153a` | `windows-ci` / `android-ci` | 40245165822 / 40245165765 | `MediaHub.Tests` **1585** + WebDav 104 = **1689**；licence `projects=15` / `RESULT: PASS` / `checks=21 failed=0`；Android 与主树同口径 |
+
+`uniqueTests` 2265 → **2266**（+1 = §7 新补的那例），C# 侧 1577 → **1585**（+8 = 本文件第 4 节）。两个 head 的 Android 计数必然相同：W6 树只是 merge 了主树，Kotlin 侧同一份代码。
+
 ---
 
 ## 9 未覆盖（本节交付时必须如实保留）
