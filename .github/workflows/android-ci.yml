@@ -157,6 +157,9 @@ jobs:
           #   core.common.archive.ArchiveEdgeContractTest —— 跨语言边界契约（W6-67：空白=Unicode White_Space
           #     25 码点、大小写只折 ASCII、孤立代理项在口令策略与信封读写两侧都拒；黄金向量 edges 段由
           #     Windows 实现生成，Kotlin 逐条比对，两端对同一坏输入必须给出同一个稳定码）
+          #   core.common.archive.ArchiveNearLimitTest —— 8 MiB 上限附近的真数据穿越 GCM（W6-68：载荷恰好
+          #     8388608 B 时加密/写盘/读回整条路仍通；MAX+1 写端与读端都在解密前拒；黄金向量 nearLimit 段
+          #     由 Windows 实现生成，只存配方与 sha256，不存 8 MB 字节）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -207,6 +210,7 @@ jobs:
             --required-suite com.mediahub.core.database.sync.SourceSyncArchiveImportTest \
             --required-suite com.mediahub.core.database.sync.SourceSyncArchiveExportTest \
             --required-suite com.mediahub.core.common.archive.ArchiveEdgeContractTest \
+            --required-suite com.mediahub.core.common.archive.ArchiveNearLimitTest \
             --require-complete-suites
 
       - name: Lint
