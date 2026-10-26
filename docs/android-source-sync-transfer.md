@@ -3979,6 +3979,18 @@ XML 汇总（`<testsuite>` 属性相加，非估算；三模块 mtime 均为当�
 
 三模块合计 **1158** 例。`--required-suite` 由 49 条增至 **50 条**；`androidTest` 仍 88 例、instrumentation 仍 112 例（本轮无 Compose 断言）。
 
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 `completed / success`：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `7d0f055600ae20e8df1fcfa4892e6799478fa0ab`（主树） | `windows-ci` | 40389203079 | `MediaHub.Tests` 469 + 104 = 573；licence `projects=13 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40389203196 | `uniqueTests` **2283**（core/common 612 / core/database 192 / feature/settings 354）；`--required-suite` **50** 条；两个 VI job 各 `19 unique mandatory` 命中 `7d0f0556…` |
+| `b08186be87c5d983c8628dfee852416fb534fdf9`（W6 树） | `windows-ci` | 40389300435 | `MediaHub.Tests` **1604** + 104 = **1708**；licence `projects=15 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40389300211 | `uniqueTests` **2283**（与主树同口径，说明 merge 已生效）；`--required-suite` 50 条；两个 VI job 各 `19 unique mandatory` 命中 `b08186be…` |
+
+主树 windows 仍 573（本轮只有 Android 与 W6 侧改动）；W6 windows 由 1692 增至 **1708**（+5，1588→1604 那 16 例含 W6-67 的 11 例与 W6-68 的 5 例）。
+两条 Android CI 的 `uniqueTests` 都是 **2283**，与本机口径一致，说明 `nearLimit` 段的 5 例在两端都真跑了。
+
 ### §41.6 本轮踩到的两个真实坑
 
 1. **`dotnet test` 用了 x86 输出目录**。首轮脚本跑 `dotnet build windows/MediaHub.Windows.sln -c Debug` 之后再 `dotnet test … --no-build`，
