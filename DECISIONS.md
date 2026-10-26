@@ -139,6 +139,15 @@
 - 决策：`LocalRootProvider.contentRoots()` 预留 content:// 树根；Phase 0.6 接入
   ACTION_OPEN_DOCUMENT_TREE + takePersistableUriPermission + DocumentFile 树导航，
   长期本地媒体以 content:// 为准，不围绕 file:// 扩展。
+- 2026-10-26 接线：每个 LOCAL 媒体源用既有主线路 URL 保存一个 tree URI，
+  不增加数据库列；系统持久读授权通过 `contentRoots()` 核验。无 tree 的历史媒体源
+  保留应用外部私有目录。树导航使用 DocumentsContract 的 tree-backed URI，文档 ID
+  按不透明标识处理；不得把所有系统授权目录自动并入一个来源。
+- Media3 使用 ContentResolver 数据源；mpv 使用会话独占的文档字节源回环桥。
+  已知长度支持单段范围读取，未知长度只提供顺序流，不复制整部影片。
+  停止/切源撤销旧回环能力并关闭文档流；文档 URI 不经过 HTTP 凭据栈。
+- 可迁移备份继续排除 LOCAL 的设备目录绑定与系统授权；本机加密回滚快照保留
+  原目录绑定但不创建/恢复 OS 授权。授权失效通过目录选择器重新授权原媒体源。
 
 ## ADR-021 保留 23 模块结构（不合并）
 - 状态：已采纳（2026-08-12，Phase 0.5）

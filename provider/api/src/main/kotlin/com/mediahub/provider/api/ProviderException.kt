@@ -42,6 +42,10 @@ sealed class ProviderException(
     }
 
     /** 需要登录。 */
+    class DirectoryAccessRequired(serverId: String) :
+        ProviderException(serverId, ErrorCode.CONNECTION, "本地目录授权失效或不可访问，请重新选择目录")
+
+    /** 需要登录。 */
     class AuthRequired(serverId: String) :
         ProviderException(serverId, ErrorCode.AUTH_REQUIRED, "需要登录：$serverId")
 

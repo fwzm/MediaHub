@@ -84,9 +84,18 @@ fun LibraryRoute(
     onOpenItem: (MediaItem) -> Unit,
     /** 「我的收藏」入口（task-25 / A2）；null = 宿主未接线，不显示入口。 */
     onOpenFavorites: (() -> Unit)? = null,
+    onReauthorizeDirectory: (() -> Unit)? = null,
+    reauthorizedSource: String? = null,
+    onReauthorizationConsumed: () -> Unit = {},
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(reauthorizedSource) {
+        if (reauthorizedSource == serverId) {
+            viewModel.load()
+            onReauthorizationConsumed()
+        }
+    }
     var showSortSheet by rememberSaveable { mutableStateOf(false) }
     var showFilterSheet by rememberSaveable { mutableStateOf(false) }
     val filterContent = state as? LibraryUiState.Content
@@ -179,6 +188,9 @@ fun LibraryRoute(
                         color = MaterialTheme.colorScheme.error,
                     )
                     TextButton(onClick = viewModel::load) { Text("重试") }
+                    if (s.reauthorizeDirectory && onReauthorizeDirectory != null) {
+                        TextButton(onClick = onReauthorizeDirectory) { Text("重新授权目录") }
+                    }
                 }
             }
 

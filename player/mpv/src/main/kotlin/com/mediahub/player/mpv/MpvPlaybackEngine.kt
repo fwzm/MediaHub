@@ -79,7 +79,7 @@ class MpvPlaybackEngine internal constructor(
     ) : this(
         logger,
         scope,
-        { createMpvBridge(httpClientFactory, ledger) },
+        { createMpvBridge(httpClientFactory, ledger, context.applicationContext) },
         { createMpvInstance(context) },
         SystemClock::elapsedRealtime,
         System::currentTimeMillis,
@@ -207,9 +207,11 @@ class MpvPlaybackEngine internal constructor(
                     // M9-P0：本地媒体走本地字节源分支。判定基于**真实文件存在性**，
                     // 不依赖 "/storage" 之类前缀猜测（避免把 URL 误判/漏判）。
                     val localPath = src.url.takeIf {
-                        it.startsWith("file://") || (it.startsWith("/") && java.io.File(it).isFile)
+                        it.startsWith("file:", ignoreCase = true) || (it.startsWith("/") && java.io.File(it).isFile)
                     }
-                    val bridgeUrl = if (localPath != null) {
+                    val bridgeUrl = if (src.url.startsWith("content:", ignoreCase = true)) {
+                        b.startContentUri(src.url)
+                    } else if (localPath != null) {
                         b.startLocalFile(localPath)
                     } else {
                         b.start(src.url, buildHeaders(src))

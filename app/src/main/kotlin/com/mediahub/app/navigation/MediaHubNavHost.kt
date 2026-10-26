@@ -163,6 +163,8 @@ fun MediaHubNavHost() {
             ),
         ) { entry ->
             val serverId = entry.arguments?.getString("serverId").orEmpty()
+            val reauthorized by entry.savedStateHandle.getStateFlow<String?>("auth_changed_server_id", null)
+                .collectAsStateWithLifecycle()
             LibraryRoute(
                 serverId = serverId,
                 libraryId = entry.arguments?.getString("libraryId").orEmpty(),
@@ -180,6 +182,11 @@ fun MediaHubNavHost() {
                     )
                 },
                 onOpenFavorites = { navController.navigate("favorites/$serverId") },
+                onReauthorizeDirectory = {
+                    navController.navigate("server/add?reauthorizeId=${Uri.encode(serverId)}")
+                },
+                reauthorizedSource = reauthorized,
+                onReauthorizationConsumed = { entry.savedStateHandle["auth_changed_server_id"] = null },
             )
         }
 

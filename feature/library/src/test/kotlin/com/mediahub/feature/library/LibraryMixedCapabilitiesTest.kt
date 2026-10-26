@@ -43,6 +43,7 @@ class LibraryMixedCapabilitiesTest {
     }
 
     private inner class Listing : MediaLibraryProvider, MediaBrowseProvider, MediaQueryLibraryProvider {
+        var browseFailure: Exception? = null
         var views = 0
         val libraryCalls = mutableListOf<Pair<String, Int>>()
         val browseCalls = mutableListOf<Pair<String?, Int>>()
@@ -75,6 +76,7 @@ class LibraryMixedCapabilitiesTest {
             return resultPage("query-$libraryId", query.page)
         }
         override suspend fun listFolder(folder: MediaItem?, page: PageRequest): PagedResult<MediaItem> {
+            browseFailure?.let { throw it }
             browseCalls += folder?.id to page.offset
             if (failFolder && folder != null) throw ProviderException.Connection(server.id, "fixture folder rejected")
             if (folder != null && page.offset != 0 && heldBrowsePage != null) {
@@ -119,6 +121,24 @@ class LibraryMixedCapabilitiesTest {
     private fun content(vm: LibraryViewModel): LibraryUiState.Content {
         assertTrue("Expected content, got ${vm.uiState.value}", vm.uiState.value is LibraryUiState.Content)
         return vm.uiState.value as LibraryUiState.Content
+    }
+
+    @Test fun aRevokedDirectoryOffersReauthorizationAndRetryCanRecover() = runTest(dispatcher) {
+        val listing = Listing().also { it.browseFailure = ProviderException.DirectoryAccessRequired(server.id) }
+        val vm = model(listing, root = "root", library = false)
+        advanceUntilIdle()
+        val error = vm.uiState.value as LibraryUiState.Error
+        assertTrue("An unavailable grant needs a directory picker action", error.reauthorizeDirectory)
+        listing.browseFailure = null
+        vm.load(); advanceUntilIdle()
+        assertEquals("browse-root-1", content(vm).items.first().id)
+    }
+
+    @Test fun ordinaryBrowseErrorsDoNotOfferDirectoryAuthorization() = runTest(dispatcher) {
+        val listing = Listing().also { it.browseFailure = ProviderException.Connection(server.id, "Fixture unavailable") }
+        val vm = model(listing, root = "root", library = false)
+        advanceUntilIdle()
+        assertFalse((vm.uiState.value as LibraryUiState.Error).reauthorizeDirectory)
     }
 
     @Test fun rootViewsYieldToBrowseOnlyAfterExplicitFolderNavigation() = runTest(dispatcher) {

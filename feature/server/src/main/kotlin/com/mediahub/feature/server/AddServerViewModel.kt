@@ -112,8 +112,10 @@ class AddServerViewModel @Inject constructor(
                                 baseUrl = server.baseUrl,
                                 username = server.username.orEmpty(),
                                 preferHttps = detected?.let { s -> s == "https" } ?: true,
-                                resolvedUrl = (normalized as? ServerAddressNormalizer.Result.Ok)?.address?.url,
-                                addressError = (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
+                                resolvedUrl = if (server.type == ServerType.LOCAL) localTree(server.baseUrl)
+                                    else (normalized as? ServerAddressNormalizer.Result.Ok)?.address?.url,
+                                addressError = if (server.type == ServerType.LOCAL) null
+                                    else (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
                                 addressVersion = 1,
                                 isLoadingExisting = false,
                             )
@@ -174,6 +176,12 @@ class AddServerViewModel @Inject constructor(
      * scheme 同步 HTTPS 开关；地址变化即递增草稿版本并清除旧测试结果。
      */
     fun updateBaseUrl(raw: String) = updateEditable { st ->
+        if (descriptorOf(st.selectedDescriptorId)?.serverType == ServerType.LOCAL) {
+            val tree = localTree(raw)
+            return@updateEditable st.copy(baseUrl = raw, resolvedUrl = tree,
+                addressError = if (tree == null) "请选择需要授权的本地目录" else null,
+                addressVersion = st.addressVersion + 1, testResult = null, error = null)
+        }
         val detected = ServerAddressNormalizer.explicitHttpScheme(raw)
         val preferHttps = detected?.let { it == "https" } ?: st.preferHttps
         val normalized = ServerAddressNormalizer.normalize(raw, preferHttps)
@@ -192,6 +200,7 @@ class AddServerViewModel @Inject constructor(
      * 重写文本协议（"粘贴内容为准"仅作用于粘贴同步那一刻）；显式端口与反代子路径保留。
      */
     fun toggleHttps(enabled: Boolean) = updateEditable { st ->
+        if (descriptorOf(st.selectedDescriptorId)?.serverType == ServerType.LOCAL) return@updateEditable st
         val target = if (enabled) "https" else "http"
         val newText = if (st.baseUrl.isBlank()) st.baseUrl else ServerAddressNormalizer.withScheme(st.baseUrl, target)
         val normalized = ServerAddressNormalizer.normalize(newText, enabled)
@@ -341,6 +350,13 @@ class AddServerViewModel @Inject constructor(
     }
 
     companion object {
+        private fun localTree(raw: String): String? = runCatching {
+            val uri = java.net.URI(raw)
+            val parts = uri.rawPath.orEmpty().trim('/').split('/')
+            raw.takeIf { uri.scheme.equals("content", true) && !uri.rawAuthority.isNullOrBlank() &&
+                uri.rawUserInfo == null && uri.port == -1 && uri.rawQuery == null && uri.rawFragment == null &&
+                parts.size == 2 && parts[0] == "tree" && parts[1].isNotBlank() }
+        }.getOrNull()
         /**
          * 登录失败的用户可操作文案。
          *
@@ -380,6 +396,10 @@ class AddServerViewModel @Inject constructor(
         }
         val state = _uiState.value
         if (formLocked(state) || state.isTesting) return
+        if (descriptor.serverType == ServerType.LOCAL && localTree(state.baseUrl) == null) {
+            _uiState.update { it.copy(error = "请选择需要授权的本地目录") }
+            return
+        }
         if (descriptor.serverType != ServerType.LOCAL) {
             if (state.baseUrl.isBlank()) {
                 _uiState.update { it.copy(error = "请填写服务器地址") }
@@ -398,6 +418,13 @@ class AddServerViewModel @Inject constructor(
         _uiState.update { it.copy(isSaving = true, error = null) }
         viewModelScope.launch {
             try {
+                if (descriptor.serverType == ServerType.LOCAL) {
+                    val status = registry.create(server)?.provider?.testConnection()
+                    if (status?.ok != true) {
+                        _uiState.update { it.copy(isSaving = false, error = "目录不可访问，请重新选择并授权") }
+                        return@launch
+                    }
+                }
                 if (existingServer != null) serverRepository.updateServer(server)
                 else serverRepository.addServer(server)
                 // 密码仅用于后续 Provider 认证（Phase 1，经 CredentialVault 加密存储），
@@ -419,16 +446,17 @@ class AddServerViewModel @Inject constructor(
     /** 网络类型地址非法时返回 null（调用方负责把 [AddServerUiState.addressError] 呈现给用户）。 */
     private fun buildServer(descriptor: ProviderDescriptor): MediaServer? {
         val state = _uiState.value
-        val url = if (descriptor.serverType == ServerType.LOCAL) "" else state.resolvedUrl ?: return null
+        val url = if (descriptor.serverType == ServerType.LOCAL) localTree(state.baseUrl) ?: return null
+            else state.resolvedUrl ?: return null
         // Phase 1B-2.5：地址从单一 baseUrl 迁为线路列表；单线路时生成一条主线路。
-        val endpoints = if (descriptor.serverType == ServerType.LOCAL || url.isBlank()) {
+        val endpoints = if (url.isBlank()) {
             emptyList()
         } else {
             listOf(
                 ServerEndpoint(
                     id = "",
                     serverId = "",
-                    name = "默认线路",
+                    name = if (descriptor.serverType == ServerType.LOCAL) "本地目录" else "默认线路",
                     url = url,
                     isPrimary = true,
                     enabled = true,

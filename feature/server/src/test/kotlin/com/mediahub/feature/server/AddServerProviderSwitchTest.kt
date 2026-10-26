@@ -258,7 +258,7 @@ class AddServerProviderSwitchTest {
     @Test
     fun pendingSaveLocksProviderSynchronouslyAndReleasesItAfterCallback() {
         val vm = model()
-        main { vm.selectProvider(local); vm.updateName("Fixture local") }
+        main { vm.selectProvider(local); vm.updateName("Fixture local"); vm.updateBaseUrl("content://fixture.documents/tree/root") }
         val saved = CountDownLatch(1)
         var result: MediaServer? = null
         main {
@@ -333,5 +333,88 @@ class AddServerProviderSwitchTest {
         val before = vm.uiState.value
         main { vm.selectProvider(dav.copy(id = "fixture-unregistered")) }
         assertEquals(before, vm.uiState.value)
+    }
+
+    @Test
+    fun aNewLocalSourceRequiresAnExplicitDirectorySelection() {
+        val vm = model()
+        main {
+            vm.selectProvider(local); vm.save { error("Unselected directory must not persist") }
+            assertNotNull("Directory selection must be validated before launching a save", vm.uiState.value.error)
+        }
+        assertTrue(runBlocking { repository.observeServers().first().isEmpty() })
+    }
+
+    @Test
+    fun aSelectedTreeIsPersistedAsTheLocalDeviceBinding() {
+        val vm = model(); val uri = "content://fixture.documents/tree/root%3Amedia"
+        val saved = CountDownLatch(1); var result: MediaServer? = null
+        main { vm.selectProvider(local); vm.updateBaseUrl(uri); vm.save { result = it; saved.countDown() } }
+        await(saved)
+        assertEquals(uri, result?.baseUrl)
+        assertEquals(1, result?.endpoints?.size)
+        assertEquals(ServerType.LOCAL, result?.type)
+    }
+
+    @Test
+    fun aLocalDirectoryCannotBeAnHttpAddress() {
+        val vm = model()
+        main {
+            vm.selectProvider(local); vm.updateBaseUrl("https://fixture.invalid/tree"); vm.save { error("Not a tree") }
+            assertNotNull(vm.uiState.value.error)
+        }
+        assertTrue(runBlocking { repository.observeServers().first().isEmpty() })
+    }
+
+    @Test
+    fun localReauthorizationUpdatesTheOriginalRecordAndKeepsItsMetadata() {
+        val old = "content://fixture.documents/tree/old"
+        val selected = "content://fixture.documents/tree/new"
+        val existing = runBlocking {
+            repository.addServer(MediaServer(id = "fixture-local-existing", name = "Existing local", type = ServerType.LOCAL,
+                baseUrl = old, createdAtEpochMs = 123))
+        }
+        val vm = model(existing.id)
+        awaitState(vm) { !it.isLoadingExisting }
+        val saved = CountDownLatch(1); var result: MediaServer? = null
+        main { vm.updateBaseUrl(selected); vm.save { result = it; saved.countDown() } }
+        await(saved)
+        assertEquals(existing.id, result?.id)
+        assertEquals(selected, result?.baseUrl)
+        assertEquals(existing.createdAtEpochMs, result?.createdAtEpochMs)
+        assertEquals(existing.isDefault, result?.isDefault)
+        assertEquals(1, runBlocking { repository.observeServers().first().size })
+    }
+
+    @Test
+    fun anUnreadableDirectoryIsNotPersistedAfterItsProviderPreflight() {
+        val vm = model()
+        probes.getValue(ServerType.LOCAL).gate = CompletableDeferred(ConnectionStatus(false, message = "Fixture revoked"))
+        main {
+            vm.selectProvider(local); vm.updateBaseUrl("content://fixture.documents/tree/root")
+            vm.save { error("Unreadable tree must not be persisted") }
+        }
+        awaitState(vm) { !it.isSaving && it.error != null }
+        assertTrue(runBlocking { repository.observeServers().first().isEmpty() })
+    }
+
+    @Test
+    fun aPendingDirectoryPreflightOwnsTheBindingUntilTheSaveCompletes() {
+        val vm = model(); val gate = CompletableDeferred<ConnectionStatus>()
+        probes.getValue(ServerType.LOCAL).gate = gate
+        val uri = "content://fixture.documents/tree/original"
+        val saved = CountDownLatch(1); var result: MediaServer? = null
+        main {
+            vm.selectProvider(local); vm.updateBaseUrl(uri)
+            vm.save { result = it; saved.countDown() }
+            vm.updateBaseUrl("content://fixture.documents/tree/replacement")
+            vm.selectProvider(dav)
+            assertEquals(uri, vm.uiState.value.baseUrl)
+            assertEquals("local", vm.uiState.value.selectedDescriptorId)
+            assertTrue(vm.uiState.value.isSaving)
+        }
+        gate.complete(ConnectionStatus(true))
+        await(saved)
+        assertEquals(uri, result?.baseUrl)
     }
 }

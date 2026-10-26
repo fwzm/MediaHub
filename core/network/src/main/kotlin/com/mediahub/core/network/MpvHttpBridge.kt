@@ -1,6 +1,7 @@
 package com.mediahub.core.network
 
 import java.io.File
+import java.io.FilterInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.io.RandomAccessFile
@@ -14,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -87,6 +89,7 @@ class MpvHttpBridge internal constructor(
 
         /** [path] 必须是绝对路径或 file:// URI；token 路径由本类随机生成，客户端无法指定文件。 */
         data class LocalFile(val path: String) : MpvUpstream
+        data class Content(val source: ContentByteSource) : MpvUpstream
     }
 
     private class Session(val listener: ServerSocket, val path: String,
@@ -94,6 +97,7 @@ class MpvHttpBridge internal constructor(
         var running = true // guarded by this Session's monitor
         val sockets: MutableSet<Socket> = ConcurrentHashMap.newKeySet()
         val calls: MutableSet<Call> = ConcurrentHashMap.newKeySet()
+        val streams = mutableSetOf<InputStream>() // guarded by this Session's monitor
 
         /**
          * **会话级**本地文件句柄（M14-S4-B）。
@@ -144,17 +148,39 @@ class MpvHttpBridge internal constructor(
         return "http://127.0.0.1:${listener.localPort}$tokenPath"
     }
 
+    /** Takes ownership of one selected document. Resolver I/O runs on connection workers. */
+    @Synchronized
+    fun startContent(source: ContentByteSource): String {
+        stop()
+        try {
+            val listener = ServerSocket(0, MAX_CONNECTIONS, InetAddress.getByName("127.0.0.1"))
+            val random = ByteArray(24).also { SecureRandom().nextBytes(it) }
+            val path = "/media/" + Base64.getUrlEncoder().withoutPadding().encodeToString(random)
+            val session = Session(listener, path, MpvUpstream.Content(source))
+            current = session
+            Thread({ acceptLoop(session) }, "mpv-http-bridge").apply { isDaemon = true }.start()
+            return "http://127.0.0.1:${listener.localPort}$path"
+        } catch (failure: Exception) {
+            runCatching { source.close() }
+            throw failure
+        }
+    }
+
     @Synchronized
     fun stop() {
         val session = current ?: return
         current = null
-        synchronized(session) {
+        val streams = synchronized(session) {
             session.running = false
             // 会话级句柄必须在监视器内关闭：与"读取循环检查 running"用同一把锁，
             // 因此 stop() 返回时句柄**一定**已关闭，不再依赖 socket 关闭的间接副作用。
             session.handle?.let { runCatching { it.close() } }
             session.handle = null
+            session.streams.toList().also { session.streams.clear() }
         }
+        // close() must be able to interrupt a blocked document read or resolver open.
+        (session.upstream as? MpvUpstream.Content)?.let { runCatching { it.source.close() } }
+        streams.forEach { runCatching { it.close() } }
         runCatching { session.listener.close() }
         // All registrations check running under the same monitor; after invalidation no
         // accepted socket or newly created Call can escape this cleanup snapshot.
@@ -254,6 +280,11 @@ class MpvHttpBridge internal constructor(
                         ledger?.recordLocalFileRead()
                         serveLocalFile(session, upstream.path, method, forwarded, output)
                     }
+                    is MpvUpstream.Content -> {
+                        responseStarted = true
+                        ledger?.recordLocalFileRead()
+                        serveContent(session, upstream.source, method, forwarded, output)
+                    }
                 }
             }
         } catch (_: Exception) {
@@ -272,6 +303,88 @@ class MpvHttpBridge internal constructor(
         data object None : RangeResult
         data class Satisfiable(val start: Long, val end: Long) : RangeResult
         data object Unsatisfiable : RangeResult
+    }
+
+    private class OwnedStream(input: InputStream) : FilterInputStream(input) {
+        private val closed = AtomicBoolean()
+        override fun close() { if (closed.compareAndSet(false, true)) super.close() }
+    }
+
+    private fun serveContent(
+        session: Session,
+        source: ContentByteSource,
+        method: String,
+        forwarded: Map<String, String>,
+        output: OutputStream,
+    ) {
+        if (!synchronized(session) { session.running }) return
+        val info = try { source.info() } catch (_: Exception) {
+            writeHead(output, "404 Not Found", 0L)
+            return
+        }
+        val length = info.length?.takeIf { it >= 0 }
+        val requested = if (forwarded.containsKey("if-range")) null else forwarded["range"]
+        val parsed = if (length == null) RangeResult.None else parseRange(requested, length)
+        if (parsed is RangeResult.Unsatisfiable) {
+            output.write(("HTTP/1.1 416 Range Not Satisfiable${CRLF}Content-Range: bytes */$length" +
+                "${CRLF}Content-Length: 0${CRLF}$CONNECTION_CLOSE$CRLF$CRLF").toByteArray())
+            output.flush()
+            return
+        }
+        val partial = parsed as? RangeResult.Satisfiable
+        val start = partial?.start ?: 0L
+        val count = partial?.let { it.end - it.start + 1 } ?: length
+        var stream: OwnedStream? = null
+        try {
+            if (method != "HEAD" && count != 0L) {
+                stream = try { OwnedStream(source.open()) } catch (_: Exception) {
+                    writeHead(output, "404 Not Found", 0L)
+                    return
+                }
+                val admitted = synchronized(session) {
+                    if (!session.running) false else { session.streams += stream; true }
+                }
+                if (!admitted) return
+                var skip = start
+                while (skip > 0 && synchronized(session) { session.running }) {
+                    val skipped = stream.skip(skip)
+                    if (skipped > 0) skip -= skipped
+                    else if (stream.read() == -1) {
+                        writeHead(output, "404 Not Found", 0L)
+                        return
+                    } else skip--
+                }
+            }
+            if (!synchronized(session) { session.running }) return
+            // Provider metadata is untrusted HTTP header input.
+            val mime = info.mimeType?.takeIf { MIME_TYPE.matches(it) } ?: "application/octet-stream"
+            val head = StringBuilder(if (partial == null) "HTTP/1.1 200 OK" else "HTTP/1.1 206 Partial Content")
+                .append(CRLF).append("Content-Type: ").append(mime).append(CRLF)
+            if (count != null) head.append("Content-Length: ").append(count).append(CRLF)
+            if (length != null) head.append("Accept-Ranges: bytes").append(CRLF)
+            if (partial != null) head.append("Content-Range: bytes ").append(partial.start).append('-')
+                .append(partial.end).append('/').append(length).append(CRLF)
+            head.append(CONNECTION_CLOSE).append(CRLF).append(CRLF)
+            output.write(head.toString().toByteArray())
+            val body = stream
+            if (body != null) {
+                val buffer = ByteArray(LOCAL_COPY_BUFFER_BYTES)
+                var remaining = count ?: Long.MAX_VALUE
+                while (remaining > 0 && synchronized(session) { session.running }) {
+                    val read = body.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                    if (read < 0) break
+                    if (read == 0) continue
+                    output.write(buffer, 0, read)
+                    remaining -= read
+                }
+            }
+            output.flush()
+        } finally {
+            stream?.let {
+                synchronized(session) { session.streams -= it }
+                runCatching { it.close() }
+            }
+        }
     }
 
     /**
@@ -483,5 +596,6 @@ class MpvHttpBridge internal constructor(
         val FORWARDED_HEADERS = setOf("range", "if-range", "if-none-match")
         val HOP_HEADERS = setOf("connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
             "te", "trailer", "transfer-encoding", "upgrade")
+        val MIME_TYPE = Regex("[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+")
     }
 }

@@ -78,7 +78,7 @@ sealed interface LibraryUiState {
         val filterFields: List<MediaFilterField> = emptyList(),
     ) : LibraryUiState
 
-    data class Error(val message: String) : LibraryUiState
+    data class Error(val message: String, val reauthorizeDirectory: Boolean = false) : LibraryUiState
 }
 
 @HiltViewModel
@@ -354,7 +354,7 @@ class LibraryViewModel @Inject constructor(
                 sortRollbackOnFailure = null
                 filterRollbackOnFailure = null
                 logger.w(LogTag.UI, "加载媒体库失败 serverId=$serverId", e)
-                _uiState.value = LibraryUiState.Error(userMessage(e))
+                _uiState.value = LibraryUiState.Error(userMessage(e), e is ProviderException.DirectoryAccessRequired)
             }
         }
     }
