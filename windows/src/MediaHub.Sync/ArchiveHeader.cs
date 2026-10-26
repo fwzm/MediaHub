@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text;
 
 namespace MediaHub.Sync;
 
@@ -102,7 +103,16 @@ public static class ArchiveHeaderCodec
         JsonDocument document;
         try
         {
+            // JsonDocument decodes some string tokens lazily. Reject invalid bytes
+            // here so TryParse cannot throw later while extracting a known field.
+            _ = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
+                .GetCharCount(headerBytes);
             document = JsonDocument.Parse(headerBytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            error = ArchiveError.CorruptHeader;
+            return false;
         }
         catch (JsonException)
         {
