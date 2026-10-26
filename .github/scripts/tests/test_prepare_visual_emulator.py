@@ -81,6 +81,11 @@ esac
         self.assertNotEqual(0, result.returncode)
         self.assertEqual("", commands)
 
+    def test_wrapper_rejects_physical_before_device_setup_or_test_install(self):
+        result, commands = self.invoke(serial="fixture-physical", wrapper=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual("", commands)
+
     def test_single_process_wrapper_preserves_success_exit(self):
         result, commands = self.invoke(wrapper=True)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)

@@ -1,0 +1,545 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="MediaHub.App.Views.SyncPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <Grid Padding="28,20,28,20" RowSpacing="12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <!-- W6-33: the transfer card is the last block on the page, so it gets its own row. -->
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <StackPanel Grid.Row="0" Spacing="8">
+      <TextBlock Text="设备同步" Style="{StaticResource MediaHubSectionHeader}" />
+      <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                 Text="在两台设备之间同步媒体源配置。这里只导出本机信封、只预览对端信封：预览不会写入或修改任何媒体源。密码和令牌不会进入信封。" />
+    </StackPanel>
+
+    <StackPanel x:Name="ActionBar" Grid.Row="1" Orientation="Horizontal" Spacing="8"
+                AutomationProperties.AutomationId="sync.actions"
+                AutomationProperties.Name="同步操作">
+      <!-- Ids so acceptance runs can address the controls by identity instead of by localised text. -->
+      <Button x:Name="ExportButton" Content="导出同步信封" Click="OnExportClick"
+              AutomationProperties.AutomationId="sync.export"
+              AutomationProperties.Name="导出同步信封"
+              ToolTipService.ToolTip="写入 sync-envelope.json，默认不含任何密钥" />
+      <Button x:Name="PreviewButton" Content="预览合并" Click="OnPreviewClick"
+              AutomationProperties.AutomationId="sync.preview"
+              AutomationProperties.Name="预览合并"
+              ToolTipService.ToolTip="读取同一目录下的对端信封，只计算不写入" />
+      <Button x:Name="RefreshButton" Content="刷新" Click="OnRefreshClick"
+              AutomationProperties.AutomationId="sync.refresh"
+              AutomationProperties.Name="刷新本机媒体源清单" />
+      <ProgressRing x:Name="BusyRing" IsActive="False" Width="20" Height="20" />
+    </StackPanel>
+
+    <InfoBar x:Name="StatusBar" Grid.Row="2" IsOpen="False" IsClosable="True"
+             AutomationProperties.AutomationId="sync.status"
+             AutomationProperties.Name="同步状态" />
+
+    <!-- Pairing: both sides sit side by side so one screen can drive a two-device handshake. -->
+    <Grid Grid.Row="3" ColumnSpacing="16">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+
+      <Border Grid.Column="0" Padding="16" CornerRadius="8" BorderThickness="1"
+              Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+              BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+              AutomationProperties.Name="配对设备（本机）">
+        <StackPanel Spacing="8">
+          <TextBlock Text="配对设备（本机）" FontSize="15" FontWeight="SemiBold" />
+          <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                     Text="开始配对后把配对码发给对方；一次配对码只能成功连接一次，过期或结束后监听会立即关闭。" />
+
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button x:Name="StartPairButton" Content="开始配对" Click="OnStartPairClick"
+                    AutomationProperties.AutomationId="sync.pair.host"
+                    AutomationProperties.Name="开始配对"
+                    ToolTipService.ToolTip="打开本机监听并生成一次性配对码" />
+            <Button x:Name="StopPairButton" Content="结束配对" Click="OnStopPairClick" IsEnabled="False"
+                    AutomationProperties.AutomationId="sync.pair.stop"
+                    AutomationProperties.Name="结束配对" />
+            <Button x:Name="CopyCodeButton" Content="复制配对码" Click="OnCopyCodeClick" IsEnabled="False"
+                    AutomationProperties.AutomationId="sync.pair.copy"
+                    AutomationProperties.Name="复制配对码" />
+          </StackPanel>
+
+          <TextBox x:Name="PairCodeBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="64"
+                   FontFamily="Consolas" FontSize="12"
+                   AutomationProperties.AutomationId="sync.pair.code"
+                   AutomationProperties.Name="配对码" />
+
+          <StackPanel Spacing="2">
+            <TextBlock Text="证书指纹（双方应完全一致）" Style="{StaticResource MediaHubCaption}" />
+            <TextBlock x:Name="PairFingerprintText" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap"
+                       IsTextSelectionEnabled="True"
+                       AutomationProperties.AutomationId="sync.pair.fingerprint"
+                       AutomationProperties.Name="配对证书指纹" />
+          </StackPanel>
+
+          <TextBlock x:Name="PairStatusText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                     AutomationProperties.AutomationId="sync.pair.status"
+                     AutomationProperties.Name="配对状态"
+                     Text="还没有开始配对。点「开始配对」会在本机打开监听并生成一次性配对码。" />
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Column="1" Padding="16" CornerRadius="8" BorderThickness="1"
+              Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+              BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+              AutomationProperties.Name="加入配对（对端）">
+        <StackPanel Spacing="8">
+          <TextBlock Text="加入配对（对端）" FontSize="15" FontWeight="SemiBold" />
+          <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                     Text="粘贴对端显示的配对码后点「连接」。连接会校验配对码里的证书指纹并要求 TLS 1.3；配对成功只统计来源数量，不会导入任何来源。" />
+
+          <TextBox x:Name="PairInputBox" AcceptsReturn="True" TextWrapping="Wrap" Height="64"
+                   FontFamily="Consolas" FontSize="12" PlaceholderText="粘贴对端的配对码"
+                   AutomationProperties.AutomationId="sync.pair.input"
+                   AutomationProperties.Name="粘贴对端配对码" />
+
+          <Button x:Name="JoinPairButton" Content="连接" Click="OnJoinPairClick"
+                  AutomationProperties.AutomationId="sync.pair.join"
+                  AutomationProperties.Name="连接对端"
+                  ToolTipService.ToolTip="用配对码连接对端，失败时按稳定码给出原因" />
+
+          <TextBlock x:Name="PairResultText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                     AutomationProperties.AutomationId="sync.pair.result"
+                     AutomationProperties.Name="配对结果"
+                     Text="尚未连接。" />
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <!-- Apply: pick a peer envelope, preview it, approve entry by entry, then write. -->
+    <Border Grid.Row="4" Padding="16" CornerRadius="8" BorderThickness="1"
+            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            AutomationProperties.Name="应用远端信封">
+      <StackPanel Spacing="8">
+        <TextBlock Text="应用远端信封" FontSize="15" FontWeight="SemiBold" />
+        <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Text="选择对端导出的信封文件（sync-envelope.json，或加密存档 .mhsync）。先预览，再逐条决定允许或跳过：在你点「应用」之前，本机不会写入任何内容。带凭据的条目不会写入，也不会被自动允许。" />
+
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button x:Name="ApplyPickButton" Content="选择信封文件" Click="OnPickApplyFileClick"
+                  AutomationProperties.AutomationId="sync.apply"
+                  AutomationProperties.Name="选择信封文件"
+                  ToolTipService.ToolTip="选择对端导出的信封文件；加密存档会要求输入口令" />
+          <Button x:Name="ApplyPreviewButton" Content="预览变更" Click="OnPreviewApplyClick" IsEnabled="False"
+                  AutomationProperties.AutomationId="sync.apply.preview"
+                  AutomationProperties.Name="预览变更"
+                  ToolTipService.ToolTip="重新计算这份信封会做什么，不写入任何内容" />
+          <Button x:Name="ApplyConfirmButton" Content="应用" Click="OnApplyClick" IsEnabled="False"
+                  AutomationProperties.AutomationId="sync.apply.confirm"
+                  AutomationProperties.Name="应用已允许的变更"
+                  ToolTipService.ToolTip="只写入你已允许的条目" />
+          <ProgressRing x:Name="ApplyBusy" IsActive="False" Width="20" Height="20" />
+        </StackPanel>
+
+        <TextBlock x:Name="ApplyFileText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   AutomationProperties.Name="已选择的信封文件"
+                   Text="尚未选择文件。" />
+
+        <TextBlock x:Name="ApplyBlockedText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed" Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                   AutomationProperties.AutomationId="sync.apply.blocked"
+                   AutomationProperties.Name="不可应用的条目" />
+
+        <ListView x:Name="ApplyList" SelectionMode="None" MaxHeight="220"
+                  AutomationProperties.Name="逐条确认">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              <Setter Property="Padding" Value="0" />
+            </Style>
+          </ListView.ItemContainerStyle>
+          <ListView.ItemTemplate>
+            <DataTemplate>
+              <Border Margin="0,0,0,6" Padding="12" CornerRadius="6" BorderThickness="1"
+                      Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                      AutomationProperties.AutomationId="sync.apply.entry"
+                      AutomationProperties.Name="{Binding Name}">
+                <Grid ColumnSpacing="12">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                               Text="{Binding DetailLabel}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Style="{StaticResource MediaHubCaption}" Text="{Binding ActionLabel}" />
+                      <TextBlock Style="{StaticResource MediaHubCaption}" Text="{Binding StateLabel}" />
+                      <TextBlock Style="{StaticResource MediaHubCaption}"
+                                 Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                 Text="{Binding ConfirmLabel}" />
+                    </StackPanel>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button Content="允许" Click="OnAllowEntryClick" Tag="{Binding}"
+                            IsEnabled="{Binding Allowable}"
+                            AutomationProperties.AutomationId="sync.entry.allow"
+                            AutomationProperties.Name="{Binding AllowLabel}" />
+                    <Button Content="跳过" Click="OnSkipEntryClick" Tag="{Binding}"
+                            AutomationProperties.AutomationId="sync.entry.skip"
+                            AutomationProperties.Name="{Binding SkipLabel}" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListView.ItemTemplate>
+        </ListView>
+
+        <TextBlock x:Name="ApplyResultText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   AutomationProperties.AutomationId="sync.apply.result"
+                   AutomationProperties.Name="应用结果" />
+
+        <!-- Addresses the peer offers that this client cannot store: counted and named, never silently dropped. -->
+        <TextBlock x:Name="ApplyNotImportedCount" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   AutomationProperties.AutomationId="sync.notimported.count"
+                   AutomationProperties.Name="未导入的次要地址数量" />
+
+        <ListView x:Name="ApplyNotImportedList" SelectionMode="None" MaxHeight="120" Visibility="Collapsed"
+                  AutomationProperties.AutomationId="sync.notimported.list"
+                  AutomationProperties.Name="未导入的次要地址">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              <Setter Property="Padding" Value="0" />
+              <Setter Property="MinHeight" Value="0" />
+            </Style>
+          </ListView.ItemContainerStyle>
+        </ListView>
+
+        <!-- The one sentence that must survive any future edit: a write is not a sign-in. -->
+        <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Text="导入不代表已登录；请对每个来源点『验证』。" />
+      </StackPanel>
+    </Border>
+
+    <!-- Paired devices (W6-13): what the W6-12 registry remembered. Forgetting deletes only the local row; the
+         sources, the credentials and the peer are untouched. Every sentence comes from PairedDeviceListPresenter. -->
+    <Border Grid.Row="5" Padding="16" CornerRadius="8" BorderThickness="1"
+            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            AutomationProperties.AutomationId="sync.paired.card"
+            AutomationProperties.Name="已配对设备">
+      <StackPanel Spacing="8">
+        <Grid ColumnSpacing="8">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+
+          <TextBlock Grid.Column="0" Text="已配对设备" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <TextBlock x:Name="PairedCountText" Grid.Column="1" VerticalAlignment="Center"
+                     Style="{StaticResource MediaHubCaption}"
+                     AutomationProperties.AutomationId="sync.paired.count"
+                     AutomationProperties.Name="已配对设备数量" />
+        </Grid>
+
+        <!-- Only filled when the registry is full: the next pairing would be refused, so it must be said out loud. -->
+        <TextBlock x:Name="PairedCapacityText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+
+        <ListView x:Name="PairedList" SelectionMode="None" MaxHeight="248" Visibility="Collapsed"
+                  AutomationProperties.AutomationId="sync.paired.list"
+                  AutomationProperties.Name="已配对设备">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            </Style>
+          </ListView.ItemContainerStyle>
+          <ListView.ItemTemplate>
+            <DataTemplate>
+              <Border Margin="0,0,0,8" Padding="12" CornerRadius="8" BorderThickness="1"
+                      Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                      AutomationProperties.AutomationId="sync.paired.entry"
+                      AutomationProperties.Name="{Binding SummaryLine}">
+                <Grid ColumnSpacing="12">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+
+                  <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis" MaxLines="1" />
+                    <TextBlock Text="{Binding DetailLine}" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+                  </StackPanel>
+
+                  <Button Grid.Column="1" Content="忘记" Click="OnForgetPairedDeviceClick" Tag="{Binding}"
+                          VerticalAlignment="Center"
+                          AutomationProperties.AutomationId="sync.paired.forget"
+                          AutomationProperties.Name="{Binding ForgetLabel}"
+                          ToolTipService.ToolTip="只删除本机的配对登记，不影响来源、凭据与对端设备" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListView.ItemTemplate>
+        </ListView>
+
+        <StackPanel x:Name="PairedEmptyPanel" HorizontalAlignment="Center" Spacing="8" Visibility="Collapsed">
+          <FontIcon Glyph="&#xE8D7;" FontSize="28" Opacity="0.4" />
+          <TextBlock x:Name="PairedEmptyText" HorizontalAlignment="Center"
+                     AutomationProperties.AutomationId="sync.paired.empty" />
+        </StackPanel>
+
+        <TextBlock x:Name="PairedTofuText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   AutomationProperties.AutomationId="sync.paired.tofu" />
+      </StackPanel>
+    </Border>
+
+    <Grid Grid.Row="6" ColumnSpacing="24">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="3*" />
+        <ColumnDefinition Width="2*" />
+      </Grid.ColumnDefinitions>
+
+      <Grid Grid.Column="0" RowSpacing="8">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="本机媒体源" Style="{StaticResource MediaHubSectionHeader}" Margin="0" />
+
+        <Grid Grid.Row="1">
+          <ListView x:Name="SourceList" SelectionMode="None"
+                    AutomationProperties.AutomationId="sync.sources"
+                    AutomationProperties.Name="本机媒体源">
+            <ListView.ItemContainerStyle>
+              <Style TargetType="ListViewItem">
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+              <DataTemplate>
+                <Border Margin="0,0,0,8" Padding="14" CornerRadius="8" BorderThickness="1"
+                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        AutomationProperties.Name="{Binding DisplayName}">
+                  <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Spacing="2">
+                      <TextBlock Text="{Binding DisplayName}" FontSize="15" FontWeight="SemiBold"
+                                 TextTrimming="CharacterEllipsis" MaxLines="1" />
+                      <TextBlock Text="{Binding DetailLabel}" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+                      <TextBlock Text="{Binding IdentityLabel}" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center" HorizontalAlignment="Right">
+                      <TextBlock Text="{Binding VerificationLabel}" HorizontalAlignment="Right"
+                                 Style="{StaticResource MediaHubCaption}" />
+                      <Button Content="验证" Click="OnVerifyClick" Tag="{Binding}"
+                              AutomationProperties.AutomationId="sync.verify"
+                              AutomationProperties.Name="{Binding VerifyLabel}"
+                              ToolTipService.ToolTip="用真实认证和一次媒体库列表请求验证该源" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ListView.ItemTemplate>
+          </ListView>
+
+          <StackPanel x:Name="EmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8"
+                      Visibility="Collapsed" AutomationProperties.Name="没有可同步的媒体源">
+            <FontIcon Glyph="&#xE895;" FontSize="34" Opacity="0.4" />
+            <TextBlock Text="还没有可同步的媒体源。" HorizontalAlignment="Center"
+                       AutomationProperties.AutomationId="sync.empty" />
+          </StackPanel>
+        </Grid>
+      </Grid>
+
+      <Grid Grid.Column="1" RowSpacing="8">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="合并预览" Style="{StaticResource MediaHubSectionHeader}" Margin="0" />
+
+        <TextBlock x:Name="PreviewSummaryText" Grid.Row="1" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Text="尚未预览。预览只读取对端信封，不会写入任何内容。" />
+
+        <ListView x:Name="PreviewList" Grid.Row="2" SelectionMode="None"
+                  AutomationProperties.AutomationId="sync.preview.details"
+                  AutomationProperties.Name="合并预览明细">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            </Style>
+          </ListView.ItemContainerStyle>
+          <ListView.ItemTemplate>
+            <DataTemplate>
+              <Border Margin="0,0,0,8" Padding="12" CornerRadius="8" BorderThickness="1"
+                      Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                      AutomationProperties.Name="{Binding Name}">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"
+                             TextTrimming="CharacterEllipsis" MaxLines="1" />
+                  <TextBlock Text="{Binding ActionLabel}" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding DetailLabel}" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+                  <!-- A conflict is never applied automatically: the line says so instead of asking the user to infer it. -->
+                  <TextBlock Text="{Binding ConfirmLabel}" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                             Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ListView.ItemTemplate>
+        </ListView>
+      </Grid>
+    </Grid>
+
+    <!-- W6-33: transport is a separate capability from importing a file. Receiving produces an apply preview and
+         nothing else: no code path here writes a source, and the 应用 click above is still the only writer. No secret
+         is ever bound to a TextBlock, and a PasswordBox is cleared as soon as its use ends. -->
+    <Border Grid.Row="7" Padding="16" CornerRadius="8" BorderThickness="1"
+            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            AutomationProperties.AutomationId="sync.transfer.card"
+            AutomationProperties.Name="传输（本机回环）">
+      <StackPanel Spacing="8">
+        <TextBlock Text="传输（本机回环）" FontSize="16" FontWeight="SemiBold" />
+
+        <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Text="接收只等一次连接：信封到达后只生成导入预览，本机不写入任何内容，也不会自动应用。" />
+
+        <TextBlock x:Name="TransferStatusText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   AutomationProperties.AutomationId="sync.transfer.status"
+                   AutomationProperties.Name="传输状态" />
+
+        <Grid ColumnSpacing="16">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+
+          <!-- Receive: one connection, one envelope, preview only. -->
+          <StackPanel Grid.Column="0" Spacing="8">
+            <TextBlock Text="接收一个信封" FontSize="15" FontWeight="SemiBold" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="端口" VerticalAlignment="Center" Style="{StaticResource MediaHubCaption}" />
+              <TextBox x:Name="TransferReceivePortBox" Width="88" Text="0"
+                       AutomationProperties.AutomationId="sync.transfer.receive.port"
+                       AutomationProperties.Name="接收端口"
+                       ToolTipService.ToolTip="0 = 自动分配端口" />
+              <CheckBox x:Name="TransferReceiveTlsCheck" Content="使用 TLS 1.3"
+                        AutomationProperties.AutomationId="sync.transfer.receive.tls"
+                        AutomationProperties.Name="接收使用 TLS 1.3" />
+            </StackPanel>
+
+            <PasswordBox x:Name="TransferReceiveSecretBox" PlaceholderText="共享口令（可空；只留在内存）"
+                         AutomationProperties.AutomationId="sync.transfer.receive.secret"
+                         AutomationProperties.Name="接收共享口令" />
+
+            <!-- W6-43: the receipt is the only byte that says "decoded" instead of "arrived", so the switch sits
+                 beside the secret it shares a connection with. It is off by default: closing already looks like success. -->
+            <CheckBox x:Name="TransferWriteReceiptCheck" Content="接收后写回执（0x04）"
+                      AutomationProperties.AutomationId="sync.transfer.receive.receipt"
+                      AutomationProperties.Name="接收后写回执"
+                      ToolTipService.ToolTip="解出信封后回写一个回执字节 0x04；解不出就不回执" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button x:Name="TransferStartReceiveButton" Content="开始接收" Click="OnTransferStartReceiveClick"
+                      AutomationProperties.AutomationId="sync.transfer.receive.start"
+                      AutomationProperties.Name="开始接收一个信封"
+                      ToolTipService.ToolTip="打开回环监听并等待一次连接；信封只进预览" />
+              <Button x:Name="TransferStopReceiveButton" Content="停止接收" Click="OnTransferStopReceiveClick"
+                      IsEnabled="False"
+                      AutomationProperties.AutomationId="sync.transfer.receive.stop"
+                      AutomationProperties.Name="停止接收并释放端口" />
+              <ProgressRing x:Name="TransferReceiveBusy" IsActive="False" Width="20" Height="20" />
+            </StackPanel>
+
+            <!-- The listening address, the real port and the certificate fingerprint, selectable so the peer can pin it. -->
+            <TextBlock x:Name="TransferReceiveInfoText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                       IsTextSelectionEnabled="True"
+                       AutomationProperties.AutomationId="sync.transfer.receive.info"
+                       AutomationProperties.Name="接收状态与证书指纹" />
+          </StackPanel>
+
+          <!-- Send: this device's own envelope, to one loopback peer. -->
+          <StackPanel Grid.Column="1" Spacing="8">
+            <TextBlock Text="发送本机信封" FontSize="15" FontWeight="SemiBold" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBox x:Name="TransferSendHostBox" Width="150" Text="127.0.0.1"
+                       AutomationProperties.AutomationId="sync.transfer.send.host"
+                       AutomationProperties.Name="目标主机（只允许回环地址）" />
+              <TextBox x:Name="TransferSendPortBox" Width="88"
+                       PlaceholderText="端口"
+                       AutomationProperties.AutomationId="sync.transfer.send.port"
+                       AutomationProperties.Name="目标端口" />
+              <CheckBox x:Name="TransferSendTlsCheck" Content="TLS 1.3"
+                        AutomationProperties.AutomationId="sync.transfer.send.tls"
+                        AutomationProperties.Name="发送使用 TLS 1.3" />
+            </StackPanel>
+
+            <TextBox x:Name="TransferPinBox" FontFamily="Consolas" FontSize="12"
+                     PlaceholderText="对端证书指纹（64 位 hex；TLS 时必填）"
+                     AutomationProperties.AutomationId="sync.transfer.send.pin"
+                     AutomationProperties.Name="对端证书指纹" />
+
+            <PasswordBox x:Name="TransferSendSecretBox" PlaceholderText="共享口令（可空；只留在内存）"
+                         AutomationProperties.AutomationId="sync.transfer.send.secret"
+                         AutomationProperties.Name="发送共享口令" />
+
+            <CheckBox x:Name="TransferConfirmDeliveryCheck" Content="要求送达确认（等对端关闭连接）"
+                      AutomationProperties.AutomationId="sync.transfer.send.confirm"
+                      AutomationProperties.Name="要求送达确认" />
+
+            <!-- W6-43: a receipt outranks the close evidence; when both are ticked the presenter waits for the byte. -->
+            <CheckBox x:Name="TransferAwaitReceiptCheck" Content="等待对端回执（0x04）"
+                      AutomationProperties.AutomationId="sync.transfer.send.receipt"
+                      AutomationProperties.Name="等待对端回执"
+                      ToolTipService.ToolTip="写完后等对端的回执字节；拿不到就以 receipt-missing / receipt-timeout / receipt-invalid 失败" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button x:Name="TransferSendButton" Content="发送" Click="OnTransferSendClick"
+                      AutomationProperties.AutomationId="sync.transfer.send"
+                      AutomationProperties.Name="发送本机信封" />
+              <ProgressRing x:Name="TransferSendBusy" IsActive="False" Width="20" Height="20" />
+            </StackPanel>
+
+            <TextBlock x:Name="TransferSendResultText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="sync.transfer.send.result"
+                       AutomationProperties.Name="发送结果" />
+
+            <!-- W6-43: the receipt verdict on its own line, so "arrived" and "understood" never share a sentence. -->
+            <TextBlock x:Name="TransferReceiptResultText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="sync.transfer.send.receipt-result"
+                       AutomationProperties.Name="回执结果" />
+          </StackPanel>
+        </Grid>
+
+        <!-- The sentence that must survive any future edit: moving records is not signing in. -->
+        <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Text="传输只搬运来源记录，不代表已登录；验证仍需在来源页逐个点。" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</Page>

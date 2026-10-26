@@ -35,9 +35,13 @@ class RemoveServerUseCase @Inject constructor(
     private val credentialVault: CredentialVault,
     private val serverIconStore: ServerIconStore,
     private val sessionStoreCleaner: SessionStoreCleaner,
+    // M0-A1：删除是**已确认**的清理信号，不依赖"服务器表是否为空"推断，
+    // 因此删除最后一台服务器时也能正确移除其自定义 UA 配置。
+    private val serverUserAgentRepository: com.mediahub.core.database.repository.ServerUserAgentRepository,
 ) : ServerRemoveHandler {
     override suspend fun remove(server: MediaServer) {
         serverRepository.deleteServer(server.id)
+        serverUserAgentRepository.purge(server.id)
         accountRepository.deleteForServer(server.id)
         tokenStore.clear(server.id)
         credentialVault.clear(server.id)

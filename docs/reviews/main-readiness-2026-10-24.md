@@ -1,0 +1,119 @@
+# Main readiness ledger - 2026-10-24
+
+Scope: reconcile all active PR work into candidates that can be reviewed for main. Existing merged or superseded implementation must be preserved or explicitly reconciled, rather than revived blindly. This ledger does not authorize PR merge/close/mark-ready.
+
+## Source revisions
+
+- main: `1246313c7a66d492258b5b4b20b51cbdcf2da9cc`
+- current main-facing candidate #45: `1a9879ae31768e8b36d12ec52b9542a5d9e3c1ae`
+- Inventory was refreshed from GitHub open PR metadata and local ancestry after git fetch origin.
+- Main readiness, physical-device acceptance and release/distribution readiness are separate evidence claims. A green branch CI does not prove an integrated candidate.
+
+## Open PR coverage
+
+| PR | Head | Contained in #45 | Next action |
+| --- | --- | --- | --- |
+| #6 | `7809faca` | no | Old hardening branch conflicts; compare every invariant with current production and migrate remaining behavior/tests additively. |
+| #16 | `f40363ce` | no | Historical evidence-only document; preserve its original scope and append a dated current-state note before integration. |
+| #20 | `1f3e6ace` | no | Historical W0/W4 documents; retain snapshot dates and distinguish superseded findings from current issues. |
+| #28 | `f55db267` | yes | Already contained by ancestry; do not merge it again. |
+| #29 | `1637b9e9` | yes | Already contained by ancestry; do not merge it again. |
+| #30 | `faa06fdb` | yes | Already contained by ancestry; do not merge it again. |
+| #31 | `a1ee9bca` | yes | Already contained by ancestry; do not merge it again. |
+| #32 | `208203e0` | yes | Already contained by ancestry; do not merge it again. |
+| #33 | `96b6a9ee` | no | Windows + Android favorites/sync/autoplay; verify joint compatibility and current Windows/Android workflow evidence. Release/signing gates stay separately recorded. |
+| #34 | `7616f14f` | yes | Already contained by ancestry; do not merge it again. |
+| #35 | `91852d17` | yes | Already contained by ancestry; do not merge it again. |
+| #36 | `ef9f6e0a` | yes | Already contained by ancestry; do not merge it again. |
+| #37 | `916e2fb4` | yes | Already contained by ancestry; do not merge it again. |
+| #38 | `acfdedf2` | yes | Already contained by ancestry; do not merge it again. |
+| #39 | `b7890aaa` | no | Contains current #33 tip; verify incremental synchronization integration and Windows/Android contract evidence. |
+| #40 | `b9ec54e5` | yes | Already contained by ancestry; do not merge it again. |
+| #42 | `83329106` | yes | Already contained by ancestry; do not merge it again. |
+| #43 | `afe74050` | yes | Already contained by ancestry; do not merge it again. |
+| #44 | `86ba9e1e` | yes | Already contained by ancestry; do not merge it again. |
+| #45 | `1a9879ae` | yes | Unified candidate; retain Draft until all required integration evidence is reconciled. |
+| #46 | `1858d944` | no | Reconcile original 5236f22 and replayed 1858d94 using additive merge. Fresh RED/GREEN and exact-head gates required. |
+| #53 | `970df7fc` | no | Migrate copied Slider tests to production PlayerSeekBar; preserve production testTag and real touch contracts from #54. No rebase/force push. |
+
+## Reconciliation guardrails
+
+- #46: preserve both original and replayed heads. Never use another forced push.
+- #53: the integrated PLAYER_PROGRESS tag and production PlayerSeekBar already exist via #54. The old duplicated Slider test is insufficient production evidence.
+- #33 and #39: Android production deltas are present as well as windows/. Validate overlap against #45 before claiming main readiness.
+- Real device `123e243f`: adb devices -l returned no devices on this round; physical tests BLOCKED_ENV. No installation or device-data action was attempted.
+- Cold-start UA scope readiness, redirect matrix, audio boundary cases and media key routing retain their pending evidence; do not infer their completion from the ancestry table.
+- Historical documents in #16/#20 retain their dates and original failures; a later correction must be append-only.
+
+## Local evidence location
+
+Raw command logs, XML reports, original PR metadata and CI downloads are kept outside the repository at `D:\deepseek_test\mh-main-readiness-evidence-20261024`. Only sanitized counts and revision bindings belong in this repository.
+
+## Merge simulation against current #45
+
+- #39: git merge-tree exit 1; 1 conflicted files.
+  - `core/network/src/test/kotlin/com/mediahub/core/network/MpvHttpBridgeLifecycleTest.kt`
+- #33: git merge-tree exit 1; 1 conflicted files.
+  - `core/network/src/test/kotlin/com/mediahub/core/network/MpvHttpBridgeLifecycleTest.kt`
+- #20: git merge-tree exit 0; 0 conflicted files.
+- #16: git merge-tree exit 0; 0 conflicted files.
+- #6: git merge-tree exit 1; 13 conflicted files.
+  - `core/logging/src/main/kotlin/com/mediahub/core/logging/LogBuffer.kt`
+  - `core/logging/src/main/kotlin/com/mediahub/core/logging/LogcatLogger.kt`
+  - `core/logging/src/main/kotlin/com/mediahub/core/logging/Redactor.kt`
+  - `core/network/src/main/kotlin/com/mediahub/core/network/ApiClient.kt`
+  - `core/network/src/main/kotlin/com/mediahub/core/network/ApiException.kt`
+  - `feature/library/src/main/kotlin/com/mediahub/feature/library/LibraryViewModel.kt`
+  - `feature/search/src/main/kotlin/com/mediahub/feature/search/SearchScreen.kt`
+  - `feature/search/src/main/kotlin/com/mediahub/feature/search/engine/GlobalSearchEngine.kt`
+  - `provider/api/src/main/kotlin/com/mediahub/provider/api/ProviderException.kt`
+  - `provider/emby/src/main/kotlin/com/mediahub/provider/emby/api/EmbyApiClient.kt`
+  - `provider/emby/src/main/kotlin/com/mediahub/provider/emby/library/EmbyLibraryProvider.kt`
+  - `provider/emby/src/main/kotlin/com/mediahub/provider/emby/search/EmbySearchProvider.kt`
+  - `provider/emby/src/test/kotlin/com/mediahub/provider/emby/EmbySearchProviderTest.kt`
+
+These simulations do not run tests or establish behavior compatibility. #33/#39 both conflict only in MpvHttpBridgeLifecycleTest.kt; retain the flake hardening and verify the combined suite.
+
+## PR46 reconciliation evidence
+
+- Original head: `5236f22c761962e1d89c69fd9bdb42d1048834dc`.
+- Replayed head: `1858d944b30e2735657f1c6d2860a578cc441036`.
+- Additive ancestry merge: `edf9602e05bf5448f4c8f0b8eaadce250913eff0`; both heads are parents, and its tree is byte-identical to the replayed head. The earlier forced update remains recorded as a rule violation; this merge preserves the original history without another rewrite.
+- RED: current #45 production control files (`1a9879ae`) with reconciled PR46 tests: 4 Media3 + 26 mpv tests, exactly 2 assertion failures, exit 1. Failures: ended Media3 toggle emitted pause, and unavailable native mpv pause emitted a fabricated success.
+- GREEN: same 30 tests, 0 failures / 0 errors / 0 skipped, exit 0. Both commands used `--rerun-tasks --no-build-cache --no-daemon --no-parallel --max-workers=1`, JDK21, in-process Kotlin, JVM 2048 MB.
+- Python CI evidence gate tests: 52 passed, exit 0. No timeout or assertion was relaxed.
+- Historical exact-head CI 40088109717 verified at `1858d944`: checkout/head matched; downloaded reports contain 200 suites / 1561 unique tests / 0 failures / 0 errors / 0 skipped. This historical run does not certify a later commit.
+- Current physical native verification: BLOCKED_ENV (no ADB devices). UI/emulator and JVM evidence do not replace physical native acceptance.
+- No production behavior was altered by the ancestry merge; the following cleanup only corrects the mpv missing-property comment and removes an unnecessary local alias.
+
+## Windows/source-sync integration evidence
+
+- Local combined candidate: `d150b4a884b459b6453ee5444b80278f314e5df2`, parents include controls `a9f5e94` and cross-device `b7890aa`; the latter contains Windows `96b6a9e`.
+- Resolved Android CI required-suite list by union, retaining both playback-control and cross-device suites.
+- Lifecycle fixture resolution requires actual response-body consumption before stop, then verifies native Call cancellation and a loopback upstream peer hang-up; combined Android tests are still pending.
+- Windows initial main-suite build: exit 1 because the ignored native DLL was absent. Original failure preserved locally; no assertion was bypassed.
+- Reused local DLL only after matching repository SHA256 `6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9`; binary remains ignored.
+- Windows repeated tests: MediaHub.Tests 1518/1518 passed and MediaHub.WebDav.Tests 104/104 passed; both exit 0, no errors or skipped cases (TRX counters inspected).
+- WinUI application build on d150b4a: exit 0 / 0 warnings / 0 errors. This is compile evidence, not GUI acceptance.
+- Real EngineProbe on committed sample, pinned native DLL: exit 0 / PASS, file-loaded, duration 4 s, time-pos 3 s, no error logs. Headless software decode only; GPU/HDR/audio output and GUI behavior remain unverified.
+- Windows CI improvement: explicitly check out and record expected PR head; remove the two previous generated TRX reports before execution; raise observed-suite floors to 1518 and 104. YAML parsed and the extracted real TRX gate passed locally.
+- PR16 cannot be imported unchanged because its historical document still contained real server origins. A sanitized snapshot is ported without making the original document commit a parent; original revision and local evidence are retained. This is a privacy correction, not a new device pass.
+
+## Combined candidate status after seek reconciliation
+
+- PR46 current remote head a9f5e948: exact-head CI 40094375055 SUCCESS, all three jobs. Downloaded revision.json checkout/head match. Fresh XML: 200 suites / 1561 unique tests / 0 failures / 0 errors / 0 skips.
+- PR53 current remote head 507b9ebe: ordinary fast-forward push from original 970df7fc; local production baseline 8/0, both mutants 8/4 assertion failures, restored final 8/0. New exact-head CI 40096311477 is pending.
+- Combined merge 005d6cb includes current PR46 and PR53, Windows 96b6a9e, source-sync b7890aa and historical PR20. All 36 required Android suite names from these branches are retained.
+- PR16 is a sanitized content port, rather than an ancestry merge of a document containing real service origins. The original branch is not eligible for direct merge unchanged.
+- Windows src/tests/tools are byte-identical between d150b4a (native validation above) and the combined candidate. This is scoped source equivalence, not a new full-head build claim.
+- Full combined Android unit/APK/lint validation starts after the next documentation commit. Until it completes, combined candidate status is PARTIAL / CI_PENDING; no old green run certifies this tree.
+- PR6 remains unresolved: 13 source conflicts require invariant-by-invariant review and preservation of current implementations; it must not be merged by selecting an entire old production tree.
+- No PR merge/close/mark-ready, main write, or further history rewrite has been performed this round.
+
+## PR57 lifecycle fixture correction
+
+- CI Android 40096618857 at 5e028a31: API32/API36 passed; build failed at MpvHttpBridgeLifecycleTest line173. Downloaded XML confirms 8 cases /1 failure /0 errors/skips: `real upstream body read must be reached before stop`.
+- The added precondition could not be reached by the header-only RawUpstream fixture. Fix is test-only: send one body byte while promising 500, verify actual downstream receipt of that byte before stop, retain Call.cancel and upstream peer hang-up assertions. No timeout was relaxed and no production code was modified.
+- Local corrected lifecycle suite: --rerun-tasks --no-build-cache, JDK21/in-process Kotlin/serial Gradle; 8 tests /0 failures/errors/skips, exit0, 27 tasks executed. Fixture source SHA256 8224d45813318e33ecd29dfba64e032591eabeaf684d4b52c0cc27f357fa59a1.
+- Local combined attempt at 5e028a31 was interrupted without a recorded exit: exec handle79596, Python48872 and Java processes were missing when revalidated; log ended in compilation. Archived as INTERRUPTED_ENV, never PASS.
+- Current PR53 CI40096311477 is SUCCESS for 507b9ebe (build/API32/API36). Current PR57 Windows CI40096618908 is SUCCESS for 5e028a31. These do not certify the next fixture-fix commit.

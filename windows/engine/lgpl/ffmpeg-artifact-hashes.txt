@@ -1,0 +1,9 @@
+b531edef5c6279851c047df74d68a3b29bcb8975fd0c5137d3a7ee74b4e742c9 */d/mh-servers/lgpl-build/prefix/bin/ffmpeg.exe
+7173e3edd08cb1e76c496820c8f213dbca11c047d09de1171cef40fbaac94a24 */d/mh-servers/lgpl-build/prefix/bin/ffprobe.exe
+1faacb7a3bfd9d16c5b8258ede66baf03c31d2578d828af68ade215ada6d9f4d */d/mh-servers/lgpl-build/prefix/bin/avcodec-62.dll
+af2075f1e5d17a04e0a109d76af8704ca15b6c1438054962ebdfa596ce793ef2 */d/mh-servers/lgpl-build/prefix/bin/avdevice-62.dll
+c077cd1c46d337851e4035716fcfb218a48a771b073b27474cf86c1e4a6f9c05 */d/mh-servers/lgpl-build/prefix/bin/avfilter-11.dll
+e6bf5d047479763b818ce34b73ae256c1d7d2163c1d6964cef6eff7ea5636257 */d/mh-servers/lgpl-build/prefix/bin/avformat-62.dll
+c1ce3e99f2252ce1d977bc5e0d3d6e2e9d0200723a391c0ef1b781337e7bd353 */d/mh-servers/lgpl-build/prefix/bin/avutil-60.dll
+7fc1e4754c1ddf7f2eebec7801a32d3ffb0efe7d9753e84837d8a57d9e243ee0 */d/mh-servers/lgpl-build/prefix/bin/swresample-6.dll
+e0d920aea621b242703c988807b353989a84ce3069bc80979135bc60f3255bae */d/mh-servers/lgpl-build/prefix/bin/swscale-9.dll

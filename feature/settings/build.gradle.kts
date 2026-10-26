@@ -32,6 +32,14 @@ kotlin {
     }
 }
 
+// 本模块的 Robolectric 用例（backup 套件）会把 Conscrypt 插为默认 TLS provider，且该 provider
+// 在 JVM 内一直存活；JDK 21 上 Conscrypt 需反射读 InetAddress 内部字段，缺 --add-opens 时
+// 同模块之后的真 TLS 用例（W6-42）会在握手阶段抛 InaccessibleObjectException。
+// 仅放宽测试 JVM 的模块访问，不改断言、不改生产语义；真机上 Conscrypt 是平台组件，无此问题。
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    jvmArgs("--add-opens=java.base/java.net=ALL-UNNAMED")
+}
+
 dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:database"))

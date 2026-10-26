@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Movie
@@ -28,6 +29,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -54,7 +56,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -81,6 +82,8 @@ fun LibraryRoute(
     onBack: () -> Unit,
     onOpenLibrary: (MediaLibrary) -> Unit,
     onOpenItem: (MediaItem) -> Unit,
+    /** 「我的收藏」入口（task-25 / A2）；null = 宿主未接线，不显示入口。 */
+    onOpenFavorites: (() -> Unit)? = null,
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -110,12 +113,17 @@ fun LibraryRoute(
                     }
                 },
                 actions = {
+                    if (onOpenFavorites != null) {
+                        IconButton(onClick = onOpenFavorites) {
+                            Icon(Icons.Default.Favorite, contentDescription = "我的收藏")
+                        }
+                    }
                     if (filterEntryVisible) {
                         IconButton(onClick = { showFilterSheet = true }) {
                             Icon(
                                 Icons.Default.FilterList,
                                 contentDescription = if (filterActive) "筛选（已启用）" else "筛选",
-                                tint = if (filterActive) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                                tint = if (filterActive) MaterialTheme.colorScheme.primary else LocalContentColor.current,
                             )
                         }
                     }
@@ -339,7 +347,8 @@ internal fun favoriteFilterLabel(value: Boolean?): String = when (value) {
 }
 
 /** 排序选项中文标签（用户口径）。 */
-internal fun sortLabel(field: MediaSortField): String = when (field) {    MediaSortField.SERVER_DEFAULT -> "默认"
+internal fun sortLabel(field: MediaSortField): String = when (field) {
+    MediaSortField.SERVER_DEFAULT -> "默认"
     MediaSortField.DATE_ADDED -> "加入日期"
     MediaSortField.TITLE -> "标题"
     MediaSortField.COMMUNITY_RATING -> "公众评分"

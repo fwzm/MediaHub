@@ -1,0 +1,10 @@
+libmpv-2.dll           : D:\mh-servers\lgpl-build\probe-lgpl\libmpv-2.dll
+libmpv-2.dll sha256    : 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+libmpv-2.dll bytes     : 3327274
+client api version     : 0.131077
+mpv-version:           : mpv v0.41.0-UNKNOWN
+mpv-configuration:     : -Dbuildtype=release -Dprefix=D:/mh-servers/lgpl-build/prefix-mpv -Dgpl=false -Dlibmpv=true -Dcplayer=true -Dwin32-subsystem=console -Dwin32-threads=enabled -Ddefault_library=shared -Dprefer_static=false -Dpdf-build=disabled -Dtests=false -Dd3d11=enabled -Dd3d-hwaccel=enabled -Dwasapi=enabled -Dvulkan=enabled -Dshaderc=enabled -Dspirv-cross=enabled -Dlcms2=enabled -Diconv=enabled -Dgl=enabled -Degl-angle=disabled -Ddirect3d=disabled -Dx11=disabled -Dlua=disabled -Djavascript=disabled -Dlibcurl=disabled -Dlibarchive=disabled -Dlibbluray=disabled -Ddvdnav=disabled -Ddvda=disabled -Duchardet=disabled -Drubberband=disabled -Dsixel=disabled -Dsubrandr=disabled -Dzimg=disabled -Djpeg=disabled -Dvapoursynth=disabled -Dopenal=disabled -Dsdl2-gamepad=disabled -Dsdl2-video=disabled -Dsdl2-audio=disabled -Dvaapi-win32=disabled
+ffmpeg-version:        : 8.1.1
+libass-version:        : 24137728
+configuration          : -Dbuildtype=release -Dprefix=D:/mh-servers/lgpl-build/prefix-mpv -Dgpl=false -Dlibmpv=true -Dcplayer=true -Dwin32-subsystem=console -Dwin32-threads=enabled -Ddefault_library=shared -Dprefer_static=false -Dpdf-build=disabled -Dtests=false -Dd3d11=enabled -Dd3d-hwaccel=enabled -Dwasapi=enabled -Dvulkan=enabled -Dshaderc=enabled -Dspirv-cross=enabled -Dlcms2=enabled -Diconv=enabled -Dgl=enabled -Degl-angle=disabled -Ddirect3d=disabled -Dx11=disabled -Dlua=disabled -Djavascript=disabled -Dlibcurl=disabled -Dlibarchive=disabled -Dlibbluray=disabled -Ddvdnav=disabled -Ddvda=disabled -Duchardet=disabled -Drubberband=disabled -Dsixel=disabled -Dsubrandr=disabled -Dzimg=disabled -Djpeg=disabled -Dvapoursynth=disabled -Dopenal=disabled -Dsdl2-gamepad=disabled -Dsdl2-video=disabled -Dsdl2-audio=disabled -Dvaapi-win32=disabled
+gpl mentioned in banner: False

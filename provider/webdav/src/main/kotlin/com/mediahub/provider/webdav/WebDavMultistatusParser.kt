@@ -101,110 +101,97 @@ internal object WebDavMultistatusParser {
     }
 
     private class Handler : DefaultHandler() {
-
         val result = mutableListOf<WebDavResource>()
-
         private var href: String? = null
         private var isCollection = false
         private var inPropstat = false
         private var propstatOk = false
+        private var successfulPropstat = false
         private var pendingCollection = false
-
-        /** response 级 status（非 propstat）：出现即按其成败决定整条 response 去留。 */
         private var responseLevelStatusSeen = false
         private var responseLevelOk = false
-
         private val okProps = mutableMapOf<String, String>()
         private val pendingProps = mutableMapOf<String, String>()
         private var text: StringBuilder? = null
 
+        // Only the six ancestry levels used by selected DAV properties are retained.
+        private val path = ArrayList<Pair<String?, String?>>(6)
+        private var depth = 0
+
+        private fun at(expected: List<String>, leaf: String? = null): Boolean {
+            val size = expected.size + if (leaf == null) 0 else 1
+            if (depth != size || path.size != size) return false
+            if (expected.indices.any { path[it].first != DAV_NS || path[it].second != expected[it] }) return false
+            return leaf == null || (path.last().first == DAV_NS && path.last().second == leaf)
+        }
+
         override fun startElement(uri: String?, localName: String?, qName: String?, attributes: Attributes?) {
-            if (uri != DAV_NS) return
-            when (localName) {
-                "response" -> reset()
-                "propstat" -> {
+            if (text != null) throw SAXException("Nested markup in a DAV scalar is not allowed")
+            depth++
+            if (depth <= 6) path.add(uri to localName)
+            if (depth == 1 && !at(ROOT)) throw SAXException("Expected a DAV multistatus document root")
+            when {
+                at(RESPONSE) -> reset()
+                at(PROPSTAT) -> {
                     inPropstat = true
                     propstatOk = false
                     pendingProps.clear()
                     pendingCollection = false
                 }
-                "status" -> text = StringBuilder()
-                "collection" -> {
-                    // collection 归属当前 propstat；只有成功 propstat 的才会计入
-                    if (inPropstat) pendingCollection = true
-                }
-                "href",
-                "displayname",
-                "getcontentlength",
-                "getcontenttype",
-                "getlastmodified",
-                "getetag",
-                -> text = StringBuilder()
-                else -> Unit
+                at(RESPONSE, "href") || at(RESPONSE, "status") || at(PROPSTAT, "status") -> text = StringBuilder()
+                at(RESOURCE_TYPE, "collection") -> if (inPropstat) pendingCollection = true
+                localName in SCALAR_PROPERTIES && at(PROPS, localName) -> text = StringBuilder()
             }
         }
 
-        override fun characters(ch: CharArray?, start: Int, length: Int) {
-            text?.append(ch, start, length)
-        }
+        override fun characters(ch: CharArray?, start: Int, length: Int) { text?.append(ch, start, length) }
 
         override fun endElement(uri: String?, localName: String?, qName: String?) {
-            if (uri != DAV_NS) return
-            val value = text?.toString()?.trim()
-            when (localName) {
-                "status" -> {
-                    if (inPropstat) {
-                        // 只有 2xx 的 propstat 才是有效属性来源（按状态行解析取码）
-                        propstatOk = isSuccess(value)
-                    } else {
-                        // response 级 status：非 2xx → 整条丢弃；未出现 → 不影响
+            try {
+                val value = text?.toString()?.trim()
+                when {
+                    at(PROPSTAT, "status") -> { propstatOk = isSuccess(value); text = null }
+                    at(RESPONSE, "status") -> {
                         responseLevelStatusSeen = true
                         responseLevelOk = isSuccess(value)
+                        text = null
                     }
-                    text = null
-                }
-                "propstat" -> {
-                    if (propstatOk) {
-                        okProps.putAll(pendingProps)
-                        isCollection = isCollection || pendingCollection
+                    at(PROPSTAT) -> {
+                        if (propstatOk) {
+                            successfulPropstat = true
+                            okProps.putAll(pendingProps)
+                            isCollection = isCollection || pendingCollection
+                        }
+                        pendingProps.clear()
+                        pendingCollection = false
+                        inPropstat = false
+                        propstatOk = false
                     }
-                    pendingProps.clear()
-                    pendingCollection = false
-                    inPropstat = false
-                    propstatOk = false
+                    at(RESPONSE, "href") -> { href = value; text = null }
+                    localName in SCALAR_PROPERTIES && at(PROPS, localName) -> {
+                        if (value != null && localName != null && inPropstat) pendingProps[localName] = value
+                        text = null
+                    }
+                    at(RESPONSE) -> { emit(); reset() }
                 }
-                "href" -> {
-                    href = value
-                    text = null
-                }
-                "displayname", "getcontentlength", "getcontenttype", "getlastmodified", "getetag" -> {
-                    text = null
-                    val key = localName ?: return
-                    val v = value ?: return
-                    if (!inPropstat) return
-                    pendingProps[key] = v
-                }
-                "response" -> {
-                    emit()
-                    reset()
-                }
-                else -> Unit
+            } finally {
+                if (depth <= 6) path.removeAt(path.lastIndex)
+                depth--
             }
         }
 
         private fun emit() {
             if (responseLevelStatusSeen && !responseLevelOk) return
-            val h = href ?: return
-            if (h.isBlank()) return
-            val length = okProps["getcontentlength"]?.toLongOrNull()
+            val h = href?.takeIf { it.isNotBlank() } ?: return
             result += WebDavResource(
                 href = h,
                 isCollection = isCollection,
                 displayName = okProps["displayname"]?.takeIf { it.isNotBlank() },
-                contentLength = length,
-                contentType = okProps["getcontenttype"]?.takeIf { it.isNotBlank() },
-                lastModified = okProps["getlastmodified"]?.takeIf { it.isNotBlank() },
-                etag = okProps["getetag"]?.takeIf { it.isNotBlank() },
+                contentLength = okProps["getcontentlength"]?.toLongOrNull(),
+                contentType = okProps["getcontenttype"],
+                lastModified = okProps["getlastmodified"],
+                etag = okProps["getetag"],
+                hasSuccessfulStatus = if (responseLevelStatusSeen) responseLevelOk else successfulPropstat,
             )
         }
 
@@ -213,6 +200,7 @@ internal object WebDavMultistatusParser {
             isCollection = false
             inPropstat = false
             propstatOk = false
+            successfulPropstat = false
             pendingCollection = false
             responseLevelStatusSeen = false
             responseLevelOk = false
@@ -220,5 +208,15 @@ internal object WebDavMultistatusParser {
             pendingProps.clear()
             text = null
         }
+
+        private companion object {
+            val ROOT = listOf("multistatus")
+            val RESPONSE = ROOT + "response"
+            val PROPSTAT = RESPONSE + "propstat"
+            val PROPS = PROPSTAT + "prop"
+            val RESOURCE_TYPE = PROPS + "resourcetype"
+            val SCALAR_PROPERTIES = setOf("displayname", "getcontentlength", "getcontenttype", "getlastmodified", "getetag")
+        }
     }
+
 }

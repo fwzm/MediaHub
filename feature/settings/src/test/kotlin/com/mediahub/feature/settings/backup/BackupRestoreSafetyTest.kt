@@ -75,7 +75,11 @@ class BackupRestoreSafetyTest {
         serverId = id, itemId = item, positionMs = 100, durationMs = 1000, isPaused = true, updatedAtEpochMs = 10,
     )
     private fun payload(servers: List<MediaServer>, progress: List<PlaybackProgress> = emptyList(), preference: Int? = null) = BackupDtos.BackupPayload(
-        manifest = BackupFileFormat.Manifest(1, 1, "test", 0, listOf("servers", "progress", "preferences"),
+        // 版本用当前常量：export 要求 manifest.formatVersion == BackupCrypto.FORMAT_VERSION（task-25 起为 2）
+        manifest = BackupFileFormat.Manifest(
+            com.mediahub.core.common.backup.BackupCrypto.FORMAT_VERSION,
+            com.mediahub.core.common.backup.BackupCrypto.MINIMUM_READER_VERSION,
+            "test", 0, listOf("servers", "progress", "preferences"),
             mapOf("servers" to servers.size, "progress" to progress.size, "preferences" to if (preference == null) 0 else 1)),
         servers = servers.map { s -> BackupDtos.ServerDto(s.id, s.name, s.type.name, isDefault = s.isDefault,
             endpoints = s.endpoints.map { BackupDtos.EndpointDto(it.name, it.url, it.isPrimary, it.enabled, it.sortOrder) }) },

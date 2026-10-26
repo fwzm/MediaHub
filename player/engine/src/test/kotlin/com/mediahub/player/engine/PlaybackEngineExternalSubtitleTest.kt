@@ -403,6 +403,16 @@ class PlaybackEngineExternalSubtitleTest {
         assertTrue(fake.state.lastMediaItem!!.localConfiguration!!.subtitleConfigurations.isEmpty())
     }
 
+    @Test
+    fun `stale embedded row does not cancel an owned external subtitle preparation`() = runTest {
+        engine.play(session())
+        fake.state.noPreparedSubtitleTracks = true
+        val pending = async { engine.loadExternalSubtitle(subtitle()) }; runCurrent()
+        engine.selectSubtitleTrack(TrackSelection(0, 0, snapshotToken = Long.MIN_VALUE))
+        fake.state.noPreparedSubtitleTracks = false
+        assertTrue(pending.await())
+    }
+
     // ---- fake：反射 Proxy 实现 ExoPlayer，仅覆盖引擎真实触碰的成员 ----
 
     private class FakeExoPlayerState {

@@ -108,11 +108,18 @@ data class MediaFilter(
     val favorite: Boolean? = null,
 ) {
     init {
+        require(
+            mediaType == null ||
+                mediaType == MediaType.MOVIE ||
+                mediaType == MediaType.SERIES ||
+                mediaType == MediaType.EPISODE
+        ) { "mediaType 筛选当前仅支持 MOVIE、SERIES、EPISODE 或 null" }
         require(year == null || year > 0) { "year 必须为正整数或 null" }
     }
 
     /** 全部字段均不过滤（默认态）。 */
-    val isDefault: Boolean get() = this == MediaFilter()
+    val isDefault: Boolean
+        get() = mediaType == null && year == null && played == null && favorite == null
 }
 
 /**

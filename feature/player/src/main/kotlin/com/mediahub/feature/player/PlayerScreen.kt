@@ -13,7 +13,11 @@ import android.os.Build
 import android.view.WindowManager
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.KeyEvent
 import android.view.ViewGroup
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -45,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderColors
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,6 +59,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -74,6 +81,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 import com.mediahub.model.AudioTrack
@@ -149,6 +157,41 @@ fun PlayerRoute(
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
     val lifecycleStarted = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+    val handleMediaAction by rememberUpdatedState<(MediaKeyAction) -> Unit> { action ->
+        when (action) {
+            MediaKeyAction.TOGGLE -> viewModel.engine.togglePlayPause()
+            MediaKeyAction.PLAY -> viewModel.engine.setPlayWhenReady(true)
+            MediaKeyAction.PAUSE -> viewModel.engine.setPlayWhenReady(false)
+        }
+    }
+    val mediaSession = remember(context, viewModel.engine) {
+        ForegroundMediaSessionController(AndroidForegroundMediaSessionPort(context)) { handleMediaAction(it) }
+    }
+    DisposableEffect(mediaSession, lifecycleOwner) {
+        // A stopped window may defer Compose frames. Deactivate synchronously instead of
+        // waiting for currentStateAsState to trigger a recomposition in that window.
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START, Lifecycle.Event.ON_STOP -> {
+                    val latest = viewModel.engine.uiState.value
+                    mediaSession.update(latest, latest.mediaTitle,
+                        lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
+                            viewModel.resolveState.value is ResolveState.Ready)
+                }
+                Lifecycle.Event.ON_DESTROY -> mediaSession.close()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            mediaSession.close()
+        }
+    }
+    SideEffect {
+        mediaSession.update(engineState, engineState.mediaTitle,
+            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && resolve is ResolveState.Ready)
+    }
     val powerSaveMode = rememberPowerSaveMode(context)
     val reduceMotion = rememberReduceMotion(context)
     var recordAudioPermissionGranted by remember(context) {
@@ -362,7 +405,25 @@ fun PlayerRoute(
     }
 
     PlayerVisualTheme(palette = visualState.chromePalette) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                // Directly focused keys share the same commands as the system media session.
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) {
+                        false
+                    } else {
+                        val action = MediaKeyMapper.actionFor(event.nativeKeyEvent.keyCode)
+                        if (action == null) {
+                            false
+                        } else {
+                            if (event.nativeKeyEvent.repeatCount == 0) handleMediaAction(action)
+                            true
+                        }
+                    }
+                },
+        ) {
         // 视频渲染 Surface（Media3/mpv 统一走 attachSurface）
         AndroidView(
             factory = { context ->
@@ -511,10 +572,9 @@ fun PlayerRoute(
                 }
 
                 // 有画面但无音频输出 → 显式提示，不再"安静地没有声音"（Phase 1B-2.4）。
-                // 判据用 Media3 audioFormat（真实输出信号），不用 isTrackSupported
-                // （DTS-HD 等轨道标不支持，但设备解码器（如 c2.qti.dts.decoder）实际可解）。
-                val audioUnsupported = engineState.audioTracks.isNotEmpty() &&
-                    engineState.audioFormatMime == null && !engineState.isBuffering
+                // Only confirmed output failures warn. Missing metadata is UNKNOWN,
+                // and an encoded AC3 input alone says nothing about decoded PCM output.
+                val audioUnsupported = engineState.shouldWarnAboutAudioOutput()
                 // 播放期错误（Source error 等）：resolve 已成功但引擎报错，显式展示（Phase 1B-2.4）
                 state.error?.let { e ->
                     Text(
@@ -664,28 +724,35 @@ fun PlayerRoute(
     }
 
     if (showAudioDialog) {
+        val selectionSnapshot = engineState
+        val selectionKind = engineKind
         PlayerVisualTheme(palette = visualState.chromePalette) {
             AudioTrackSheet(
-                tracks = engineState.audioTracks,
+                tracks = selectionSnapshot.audioTracks,
                 onDismiss = { showAudioDialog = false },
                 onSelect = { track: AudioTrack ->
-                    viewModel.engine.selectAudioTrack(TrackSelection(track.index, 0))
+                    PlayerTrackSelection.addressOf(selectionSnapshot, track, selectionKind)
+                        ?.let(viewModel.engine::selectAudioTrack)
                     showAudioDialog = false
                 },
             )
         }
     }
     if (showSubtitleDialog) {
+        val selectionSnapshot = engineState
+        val selectionKind = engineKind
         PlayerVisualTheme(palette = visualState.chromePalette) {
             SubtitleSheet(
-                tracks = engineState.subtitleTracks,
+                tracks = selectionSnapshot.subtitleTracks,
                 style = preferences.subtitleStyle,
                 subtitleCenter = subtitleCenter,
                 externalLoadSupported = viewModel.engine.subtitleCapabilities.externalLoad,
                 offsetSupported = viewModel.engine.subtitleCapabilities.offsetAdjust,
                 onDismiss = { showSubtitleDialog = false },
                 onSelect = { track: SubtitleTrack? ->
-                    viewModel.onEmbeddedSubtitleSelected(track?.let { TrackSelection(it.index, 0) })
+                    if (track == null) viewModel.onEmbeddedSubtitleSelected(null)
+                    else PlayerTrackSelection.addressOf(selectionSnapshot, track, selectionKind)
+                        ?.let(viewModel::onEmbeddedSubtitleSelected)
                 },
                 onStyleChange = { newStyle -> viewModel.updateSubtitleStyle { newStyle } },
                 onSelectExternal = viewModel::selectExternalSubtitle,
@@ -915,30 +982,15 @@ private fun PlayerControls(
                             )
                         }
                     }
-                    if (state.durationMs > 0) {
-                        // 进度条 preview→commit（U3-B）：拖动只更新本地预览值，松手才真正 seek
-                        var sliderScrubValue by remember { mutableStateOf<Float?>(null) }
-                        Slider(
-                            value = sliderScrubValue
-                                ?: state.positionMs.toFloat().coerceIn(0f, state.durationMs.toFloat()),
-                            onValueChange = { sliderScrubValue = it },
-                            onValueChangeFinished = {
-                                sliderScrubValue?.let { onSeek(it.roundToLong()) }
-                                sliderScrubValue = null
-                            },
-                            valueRange = 0f..state.durationMs.toFloat(),
-                            colors = seekBarColors,
-                        )
-                    } else {
-                        // 时长未知（无临时时长且 Media3 timeline 未就绪）：禁用进度条，绝不拿 1ms 画满条
-                        Slider(
-                            value = 0f,
-                            onValueChange = {},
-                            valueRange = 0f..1f,
-                            enabled = false,
-                            colors = seekBarColors,
-                        )
-                    }
+                    // SEEK-A：进度条已抽成生产组件 PlayerSeekBar（本文件下方定义）。
+                    // 抽取的唯一目的是让「拖动 → 提交」契约能被**真实组件**测试验证，
+                    // 而不是在测试里复制一份 Slider 只验证框架行为（PR #53 的教训）。
+                    PlayerSeekBar(
+                        positionMs = state.positionMs,
+                        durationMs = state.durationMs,
+                        onSeek = onSeek,
+                        colors = seekBarColors,
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -968,11 +1020,15 @@ private fun PlayerControls(
                                     strokeWidth = 2.dp,
                                 )
                             }
+                            // G3：图标必须跟随「播放意图」而不是「实际是否在出帧」。
+                            // 缓冲/音频焦点被抑制时 isPlaying=false 但用户并未暂停；
+                            // 若按 isPlaying 显示，图标会闪成「播放」，用户点它反而变成继续播放。
+                            val showPauseIcon = state.playWhenReady && !state.isEnded
                             IconButton(onClick = onTogglePlayPause) {
                                 Icon(
-                                    if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    if (showPauseIcon) Icons.Default.Pause else Icons.Default.PlayArrow,
                                     contentDescription = stringResource(
-                                        if (state.isPlaying) R.string.player_pause else R.string.player_play,
+                                        if (showPauseIcon) R.string.player_pause else R.string.player_play,
                                     ),
                                     tint = MaterialTheme.colorScheme.primary,
                                 )
@@ -995,6 +1051,57 @@ private fun PlayerControls(
  * 手势 seek 预览指示（scrub / 连续快退共用，U3-B）：
  * 居中显示 delta（带符号）与目标时间，松手后消失。
  */
+/**
+ * 播放进度条（SEEK-A 抽取的**生产组件**）。
+ *
+ * 为什么单独存在：Compose 的 `Slider` 在 uiautomator 里不是 `android.widget.SeekBar`，
+ * 用 adb 定位不到，所以 Seek 长期处于 `NOT_RUN`。而「在测试里复制一份 Slider」
+ * 只能验证 Compose 框架行为 —— PR #53 的 4 个测试正是如此：把生产 `onValueChange`
+ * 改成「变更即提交」后它们仍然 4/0 全绿（变异存活）。把进度条抽成可独立组合的
+ * **生产**组件后，测试可以直接组合它并断言「拖动期间 0 次提交、松手恰好 1 次提交」。
+ *
+ * 契约（由 `PlayerSeekBarContractTest` 固定，并做 MUT-1/MUT-2 变异验证）：
+ * 1. 拖动中（onValueChange）**只更新本地预览**，绝不调用 [onSeek]；
+ * 2. 松手（onValueChangeFinished）**恰好一次**调用 [onSeek]，目标 = 最后一次预览值；
+ * 3. [durationMs] <= 0 时禁用且不可提交（绝不拿 1ms 画满条、绝不伪造可 Seek）。
+ *
+ * 行为与原内联实现逐字节等价（同一 Slider 参数、同一 preview→commit 顺序）。
+ */
+@Composable
+internal fun PlayerSeekBar(
+    positionMs: Long,
+    durationMs: Long,
+    onSeek: (Long) -> Unit,
+    colors: SliderColors,
+    modifier: Modifier = Modifier,
+) {
+    if (durationMs > 0) {
+        var sliderScrubValue by remember { mutableStateOf<Float?>(null) }
+        Slider(
+            modifier = modifier.testTag(PlayerVisualTestTags.PLAYER_PROGRESS),
+            value = sliderScrubValue
+                ?: positionMs.toFloat().coerceIn(0f, durationMs.toFloat()),
+            onValueChange = { sliderScrubValue = it },
+            onValueChangeFinished = {
+                sliderScrubValue?.let { onSeek(it.roundToLong()) }
+                sliderScrubValue = null
+            },
+            valueRange = 0f..durationMs.toFloat(),
+            colors = colors,
+        )
+    } else {
+        // 时长未知（无临时时长且 Media3 timeline 未就绪）：禁用进度条，绝不拿 1ms 画满条
+        Slider(
+            modifier = modifier.testTag(PlayerVisualTestTags.PLAYER_PROGRESS),
+            value = 0f,
+            onValueChange = {},
+            valueRange = 0f..1f,
+            enabled = false,
+            colors = colors,
+        )
+    }
+}
+
 @Composable
 private fun GestureSeekIndicator(preview: GestureSeekPreview, modifier: Modifier = Modifier) {
     val sign = if (preview.deltaMs >= 0) "+" else "-"

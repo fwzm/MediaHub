@@ -1,0 +1,43 @@
+# Runtime bundle of the LGPL libmpv-2.dll (W5-H)
+# generated 2026-10-14T16:09:46+08:00
+#
+# Core artifact:
+20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a */d/mh-servers/lgpl-build/prefix-mpv/bin/libmpv-2.dll
+
+# FFmpeg shared libraries - LGPL-2.1-or-later, built by windows/engine/lgpl/build-ffmpeg-lgpl.sh
+1faacb7a3bfd9d16c5b8258ede66baf03c31d2578d828af68ade215ada6d9f4d */d/mh-servers/lgpl-build/prefix/bin/avcodec-62.dll
+af2075f1e5d17a04e0a109d76af8704ca15b6c1438054962ebdfa596ce793ef2 */d/mh-servers/lgpl-build/prefix/bin/avdevice-62.dll
+c077cd1c46d337851e4035716fcfb218a48a771b073b27474cf86c1e4a6f9c05 */d/mh-servers/lgpl-build/prefix/bin/avfilter-11.dll
+e6bf5d047479763b818ce34b73ae256c1d7d2163c1d6964cef6eff7ea5636257 */d/mh-servers/lgpl-build/prefix/bin/avformat-62.dll
+c1ce3e99f2252ce1d977bc5e0d3d6e2e9d0200723a391c0ef1b781337e7bd353 */d/mh-servers/lgpl-build/prefix/bin/avutil-60.dll
+7fc1e4754c1ddf7f2eebec7801a32d3ffb0efe7d9753e84837d8a57d9e243ee0 */d/mh-servers/lgpl-build/prefix/bin/swresample-6.dll
+e0d920aea621b242703c988807b353989a84ce3069bc80979135bc60f3255bae */d/mh-servers/lgpl-build/prefix/bin/swscale-9.dll
+b531edef5c6279851c047df74d68a3b29bcb8975fd0c5137d3a7ee74b4e742c9 */d/mh-servers/lgpl-build/prefix/bin/ffmpeg.exe
+7173e3edd08cb1e76c496820c8f213dbca11c047d09de1171cef40fbaac94a24 */d/mh-servers/lgpl-build/prefix/bin/ffprobe.exe
+
+# Third-party dependencies from MSYS2 UCRT64 (all LGPL / permissive; see msys2-package-hashes.txt)
+03314471fadd04cdd63c108472ff85d058903d236a0356c14eda363f0e1ccb65 */ucrt64/bin/liblcms2-2.dll
+0e013ffc123dda330d27c76f26ba74fcd690f1236bb0225d3b4f406d71774e9e */ucrt64/bin/libwinpthread-1.dll
+14bd0ed4c24d0068434bc23cd4f39e8dc0edcf56f2c9996b6fe39b39ffc54673 */ucrt64/bin/libfribidi-0.dll
+19604dde573cbb8a13053fc231eee99b91cd972e0e9a3e1465f44ad6985e83ee */ucrt64/bin/libfreetype-6.dll
+1dc85208162ee57fe97e892bb5160fe9588903992995f90adc3a3a358dac6fc6 */ucrt64/bin/zlib1.dll
+31862137c4179dcdbba782760f3e401f9fb526477947079d7f63987864f9b0eb */ucrt64/bin/vulkan-1.dll
+331df8a45983735b823c893a9b872c3414af6eadca9fa189d0b6dfe97960b3cf */ucrt64/bin/libshaderc_shared.dll
+3a1abec0184b238db54399cb9243393d9436d96b8fdb9bd9f2875da207c5b458 */ucrt64/bin/libglib-2.0-0.dll
+6a68f99a316764b680bbb6f0553299fbc7130a3421a1d64bb044627cbe0c6db2 */ucrt64/bin/libgcc_s_seh-1.dll
+75988509f0d2166e2060ed548913bd7b34556bc16b3f9a02469de1dd2347a7fb */ucrt64/bin/libdovi.dll
+77184a77e8e751999816c311ae144fae3fe1957992dff525c13267bd845982d4 */ucrt64/bin/libintl-8.dll
+7f425fd2b41d83869bb31bf761b4fb315f11040d55540661f96e582e1ec79a36 */ucrt64/bin/libpng16-16.dll
+842d73ce2dd9ee506ef68f4d3e9ca29b62c87e34999cd2720505bf3c9d3f575c */ucrt64/bin/libharfbuzz-0.dll
+8eb2c3fe24a124d9dbf0383d60ac7dde6c0dd5607b2451cad0d924271e46d5b8 */ucrt64/bin/libplacebo-360.dll
+93953e4744bcfce9a7bc439b956544bc213095cb1349c3602a58370f32b25c18 */ucrt64/bin/libgraphite2.dll
+9510ec8bbec49de557da9935f793ad19f1ffdb4e5e3ef7715bd40ffe0b5f3892 */ucrt64/bin/libstdc++-6.dll
+b37d1b4acab5310c4e4f6e2a961d146454ff740d943724a68fa3cebc85deb7cd */ucrt64/bin/libiconv-2.dll
+bc4bdcf63b9bbf60777bc10340050ae6edfbb3be3faf3fa636af53ecf7d2bbc8 */ucrt64/bin/libspirv-cross-c-shared.dll
+be69c64319b7db83c253ae224a13d74149e98b092ab2b3d9d184b1b7d36b59c7 */ucrt64/bin/glslang.dll
+c62c08223e450dfc2fff33c752cc228505ffd9d755201958ba800d5d30481a2c */ucrt64/bin/libbrotlicommon.dll
+cb2b46133b3bd9630384148bd7229e987af9703208d4329fc2215f4170b8dc6b */ucrt64/bin/libass-9.dll
+e270b6e576594ee8ee6e33ccc54e34a54304616dd6225652e11e49d6f17ef896 */ucrt64/bin/libbrotlidec.dll
+
+# NOTE: glslang.dll fails to load against the gcc-14 runtime shipped here (missing export);
+#       it is not used by this build - mpv's shader path is shaderc + spirv-cross.

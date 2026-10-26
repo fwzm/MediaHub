@@ -150,7 +150,8 @@ class BackupViewModelTest {
     private fun backupBytes(e: Env, pw: CharArray = password): ByteArray {
         val payload = BackupDtos.BackupPayload(
             manifest = com.mediahub.core.common.backup.BackupFileFormat.Manifest(
-                formatVersion = 1, minimumReaderVersion = 1,
+                formatVersion = com.mediahub.core.common.backup.BackupCrypto.FORMAT_VERSION,
+                minimumReaderVersion = com.mediahub.core.common.backup.BackupCrypto.MINIMUM_READER_VERSION,
                 appVersion = "test", createdAtEpochMs = 0,
                 includedSections = listOf("servers", "progress", "preferences"),
                 recordCounts = mapOf("servers" to 1, "progress" to 0, "preferences" to 0),
@@ -485,7 +486,8 @@ class BackupViewModelTest {
         val e = env()
         val payload = BackupDtos.BackupPayload(
             manifest = com.mediahub.core.common.backup.BackupFileFormat.Manifest(
-                formatVersion = 1, minimumReaderVersion = 1,
+                formatVersion = com.mediahub.core.common.backup.BackupCrypto.FORMAT_VERSION,
+                minimumReaderVersion = com.mediahub.core.common.backup.BackupCrypto.MINIMUM_READER_VERSION,
                 appVersion = "test", createdAtEpochMs = 0,
                 includedSections = listOf("servers", "progress", "preferences"),
                 recordCounts = mapOf("servers" to 1, "progress" to 0, "preferences" to 0),

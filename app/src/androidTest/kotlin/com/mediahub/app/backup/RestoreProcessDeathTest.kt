@@ -120,13 +120,16 @@ class RestoreProcessDeathTest {
             val servers = listOf(server("probe-current", "https://changed.example"), server("probe-added", "https://added.example"))
             val incoming = (1..35).map { progress("probe-current", "item-$it", it * 1000L) } + progress("probe-added", "new", 3000)
             val payload = BackupDtos.BackupPayload(
-                BackupFileFormat.Manifest(1, 1, "instrumented-fixture", 1, listOf("servers", "progress", "preferences"),
+                manifest = BackupFileFormat.Manifest(
+                    com.mediahub.core.common.backup.BackupCrypto.FORMAT_VERSION,
+                    com.mediahub.core.common.backup.BackupCrypto.MINIMUM_READER_VERSION,
+                    "instrumented-fixture", 1, listOf("servers", "progress", "preferences"),
                     mapOf("servers" to 2, "progress" to incoming.size, "preferences" to 1)),
-                servers.map { s -> BackupDtos.ServerDto(s.id, s.name, s.type.name, username = s.username,
+                servers = servers.map { s -> BackupDtos.ServerDto(s.id, s.name, s.type.name, username = s.username,
                     endpoints = s.endpoints.map { BackupDtos.EndpointDto(it.name, it.url, it.isPrimary, it.enabled, it.sortOrder) }) },
-                incoming.map { BackupDtos.ProgressDto(it.serverId, it.itemId, it.positionMs, it.durationMs, it.isPaused, it.updatedAtEpochMs,
+                progress = incoming.map { BackupDtos.ProgressDto(it.serverId, it.itemId, it.positionMs, it.durationMs, it.isPaused, it.updatedAtEpochMs,
                     itemTitle = it.itemTitle, itemType = it.itemType?.name) },
-                BackupDtos.PreferencesDto(defaultPlaybackSpeed = newPreferences.defaultPlaybackSpeed,
+                preferences = BackupDtos.PreferencesDto(defaultPlaybackSpeed = newPreferences.defaultPlaybackSpeed,
                     subtitleSizeSp = newPreferences.subtitleSizeSp, maxBitrateBps = newPreferences.maxBitrateBps),
             )
             val bytes = BackupSerializer.export(payload, "fixture-password".toCharArray())

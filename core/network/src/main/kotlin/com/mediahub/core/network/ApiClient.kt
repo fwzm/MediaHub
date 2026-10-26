@@ -65,6 +65,18 @@ class ApiClient(
         contentType: String? = null,
     ): Unit = executeNoContent("POST", url, headers, body, contentType)
 
+    /**
+     * 发送 DELETE 请求但不解析响应体（收藏取消：Emby/Jellyfin 的
+     * `DELETE /Users/{userId}/FavoriteItems/{itemId}` 成功返回 200 空体）。
+     *
+     * OkHttp 的 DELETE **不允许携带请求体**（[buildBody] 对非 POST 的 null body
+     * 返回 null，正是为此），故本方法不暴露 body 参数。
+     */
+    suspend fun deleteNoContent(
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+    ): Unit = executeNoContent("DELETE", url, headers, null, null)
+
     /** 通用执行：非 2xx 抛出 [ApiException]，返回体按 [deserializer] 解码。 */
     @PublishedApi
     internal suspend fun <T> execute(
@@ -83,7 +95,7 @@ class ApiClient(
                 if (!response.isSuccessful) {
                     logger.w(
                         LogTag.NETWORK,
-                        "API ${response.code} $method ${Redactor.redact(url)} body=${Redactor.redact(responseBody.take(500))}"
+                        "API ${response.code} $method ${Redactor.redact(url)} body=${Redactor.redact(responseBody).take(500)}"
                     )
                     throw ApiException(
                         statusCode = response.code,
