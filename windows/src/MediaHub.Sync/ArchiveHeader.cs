@@ -109,6 +109,15 @@ public static class ArchiveHeaderCodec
             error = ArchiveError.CorruptHeader;
             return false;
         }
+        catch (ArgumentException)
+        {
+            // JsonDocument.Parse throws ArgumentException (not JsonException) when the document contains an
+            // escaped lone surrogate such as "\ud800". kotlinx.serialization accepts it, so the Kotlin end has to
+            // reject it explicitly; here it is already a parse failure and must map to corrupt-header rather
+            // than escape to the caller as an unhandled exception.
+            error = ArchiveError.CorruptHeader;
+            return false;
+        }
 
         using (document)
         {
@@ -167,7 +176,20 @@ public static class ArchiveHeaderCodec
             return false;
         }
 
-        value = element.GetString();
+        try
+        {
+            value = element.GetString();
+        }
+        catch (InvalidOperationException)
+        {
+            // JsonDocument.Parse accepts an escaped lone surrogate such as "\ud800" and defers the failure
+            // to GetString(), which throws InvalidOperationException ("Cannot read incomplete UTF-16 JSON
+            // text as string with missing low surrogate"). kotlinx.serialization accepts the same document,
+            // so the Kotlin end rejects it explicitly in ArchiveHeaderCodec.tryParse; here it has to become
+            // corrupt-header instead of escaping to the caller as an unhandled exception.
+            return false;
+        }
+
         return value is not null;
     }
 }

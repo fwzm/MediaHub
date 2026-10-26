@@ -27,5 +27,7 @@
     <Content Include="..\assets\sample-av.mp4" Link="assets\sample-av.mp4" CopyToOutputDirectory="PreserveNewest" />
     <!-- Written by the Android Kotlin ArchiveWriter (W6-65); the Windows reader must consume its exact bytes. -->
     <Content Include="..\assets\android-written-archive.mharchive" Link="assets\android-written-archive.mharchive" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Golden vectors shared with the Android ArchiveEdgeContractTest (W6-67); the bytes are the answer key. -->
+    <Content Include="..\assets\windows-archive-vectors.json" Link="assets\windows-archive-vectors.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

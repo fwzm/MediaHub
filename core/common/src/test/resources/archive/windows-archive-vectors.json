@@ -290,5 +290,1101 @@
       "iterations": 1000,
       "reason": "secrets-not-allowed"
     }
-  ]
+  ],
+  "edges": {
+    "whitespaceCodePoints": [
+      9,
+      10,
+      11,
+      12,
+      13,
+      32,
+      133,
+      160,
+      5760,
+      8192,
+      8193,
+      8194,
+      8195,
+      8196,
+      8197,
+      8198,
+      8199,
+      8200,
+      8201,
+      8202,
+      8232,
+      8233,
+      8239,
+      8287,
+      12288
+    ],
+    "blankCandidates": [
+      {
+        "name": "empty",
+        "utf16": [],
+        "blank": true,
+        "trimmed": []
+      },
+      {
+        "name": "ascii-space",
+        "utf16": [
+          32
+        ],
+        "blank": true,
+        "trimmed": []
+      },
+      {
+        "name": "mixed-unicode",
+        "utf16": [
+          9,
+          10,
+          32,
+          133,
+          160
+        ],
+        "blank": true,
+        "trimmed": []
+      },
+      {
+        "name": "record-separator",
+        "utf16": [
+          28
+        ],
+        "blank": false,
+        "trimmed": [
+          28
+        ]
+      },
+      {
+        "name": "unit-separator",
+        "utf16": [
+          31
+        ],
+        "blank": false,
+        "trimmed": [
+          31
+        ]
+      },
+      {
+        "name": "next-line",
+        "utf16": [
+          133
+        ],
+        "blank": true,
+        "trimmed": []
+      },
+      {
+        "name": "no-break-space",
+        "utf16": [
+          160
+        ],
+        "blank": true,
+        "trimmed": []
+      },
+      {
+        "name": "ideographic-space",
+        "utf16": [
+          12288
+        ],
+        "blank": true,
+        "trimmed": []
+      },
+      {
+        "name": "zero-width-space",
+        "utf16": [
+          8203
+        ],
+        "blank": false,
+        "trimmed": [
+          8203
+        ]
+      },
+      {
+        "name": "bom",
+        "utf16": [
+          65279
+        ],
+        "blank": false,
+        "trimmed": [
+          65279
+        ]
+      },
+      {
+        "name": "letters",
+        "utf16": [
+          97,
+          98,
+          99
+        ],
+        "blank": false,
+        "trimmed": [
+          97,
+          98,
+          99
+        ]
+      },
+      {
+        "name": "padded-letters",
+        "utf16": [
+          133,
+          97,
+          98,
+          99,
+          28,
+          97,
+          98,
+          99
+        ],
+        "blank": false,
+        "trimmed": [
+          97,
+          98,
+          99,
+          28,
+          97,
+          98,
+          99
+        ]
+      },
+      {
+        "name": "soft-hyphen",
+        "utf16": [
+          173
+        ],
+        "blank": false,
+        "trimmed": [
+          173
+        ]
+      }
+    ],
+    "kdfNameCandidates": [
+      {
+        "name": "exact",
+        "utf16": [
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          115,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "accepted": true
+      },
+      {
+        "name": "upper",
+        "utf16": [
+          80,
+          66,
+          75,
+          68,
+          70,
+          50,
+          45,
+          83,
+          72,
+          65,
+          50,
+          53,
+          54
+        ],
+        "accepted": true
+      },
+      {
+        "name": "padded-ascii",
+        "utf16": [
+          32,
+          32,
+          80,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          83,
+          104,
+          97,
+          50,
+          53,
+          54,
+          32,
+          32
+        ],
+        "accepted": true
+      },
+      {
+        "name": "leading-next-line",
+        "utf16": [
+          133,
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          115,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "accepted": true
+      },
+      {
+        "name": "leading-record-separator",
+        "utf16": [
+          28,
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          115,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "accepted": false
+      },
+      {
+        "name": "leading-no-break-space",
+        "utf16": [
+          160,
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          115,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "accepted": true
+      },
+      {
+        "name": "long-s",
+        "utf16": [
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          383,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "accepted": false
+      },
+      {
+        "name": "kelvin",
+        "utf16": [
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          8490,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "accepted": false
+      },
+      {
+        "name": "other",
+        "utf16": [
+          97,
+          114,
+          103,
+          111,
+          110,
+          50,
+          105,
+          100
+        ],
+        "accepted": false
+      }
+    ],
+    "caseFoldPairs": [
+      {
+        "name": "ascii-mixed",
+        "left": [
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "right": [
+          80,
+          65,
+          83,
+          83,
+          87,
+          79,
+          82,
+          68,
+          49,
+          50,
+          51,
+          52
+        ],
+        "equal": true
+      },
+      {
+        "name": "ascii-same",
+        "left": [
+          99,
+          111,
+          114,
+          114,
+          101,
+          99,
+          116,
+          32,
+          104,
+          111,
+          114,
+          115,
+          101,
+          32,
+          98,
+          97,
+          116,
+          116,
+          101,
+          114,
+          121,
+          32,
+          115,
+          116,
+          97,
+          112,
+          108,
+          101
+        ],
+        "right": [
+          99,
+          111,
+          114,
+          114,
+          101,
+          99,
+          116,
+          32,
+          104,
+          111,
+          114,
+          115,
+          101,
+          32,
+          98,
+          97,
+          116,
+          116,
+          101,
+          114,
+          121,
+          32,
+          115,
+          116,
+          97,
+          112,
+          108,
+          101
+        ],
+        "equal": true
+      },
+      {
+        "name": "ascii-different",
+        "left": [
+          97,
+          98,
+          99
+        ],
+        "right": [
+          97,
+          98,
+          100
+        ],
+        "equal": false
+      },
+      {
+        "name": "long-s-lookalike",
+        "left": [
+          112,
+          97,
+          383,
+          383,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "right": [
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "equal": false
+      },
+      {
+        "name": "kelvin-lookalike",
+        "left": [
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          8490,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "right": [
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          107,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "equal": false
+      },
+      {
+        "name": "length-differs",
+        "left": [
+          97,
+          98,
+          99
+        ],
+        "right": [
+          97,
+          98
+        ],
+        "equal": false
+      }
+    ],
+    "loneSurrogateCandidates": [
+      {
+        "name": "plain",
+        "utf16": [
+          97,
+          98
+        ],
+        "lone": false
+      },
+      {
+        "name": "trailing-high",
+        "utf16": [
+          97,
+          55296
+        ],
+        "lone": true
+      },
+      {
+        "name": "leading-low",
+        "utf16": [
+          56320,
+          97
+        ],
+        "lone": true
+      },
+      {
+        "name": "interior-high",
+        "utf16": [
+          97,
+          55296,
+          98
+        ],
+        "lone": true
+      },
+      {
+        "name": "valid-pair",
+        "utf16": [
+          97,
+          55357,
+          56594
+        ],
+        "lone": false
+      },
+      {
+        "name": "high-then-high",
+        "utf16": [
+          55296,
+          55296
+        ],
+        "lone": true
+      },
+      {
+        "name": "low-then-high",
+        "utf16": [
+          56320,
+          55296
+        ],
+        "lone": true
+      }
+    ],
+    "passphraseCandidates": [
+      {
+        "name": "strong",
+        "utf16": [
+          99,
+          111,
+          114,
+          114,
+          101,
+          99,
+          116,
+          32,
+          104,
+          111,
+          114,
+          115,
+          101,
+          32,
+          98,
+          97,
+          116,
+          116,
+          101,
+          114,
+          121,
+          32,
+          115,
+          116,
+          97,
+          112,
+          108,
+          101
+        ],
+        "reason": null
+      },
+      {
+        "name": "chinese",
+        "utf16": [
+          25105,
+          30340,
+          32,
+          78,
+          65,
+          83,
+          32,
+          25918,
+          36827,
+          20102,
+          38401,
+          27004
+        ],
+        "reason": null
+      },
+      {
+        "name": "blank",
+        "utf16": [
+          32,
+          32,
+          32
+        ],
+        "reason": "passphrase-empty"
+      },
+      {
+        "name": "too-short",
+        "utf16": [
+          115,
+          104,
+          111,
+          114,
+          116
+        ],
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "name": "listed-weak",
+        "utf16": [
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "name": "next-line-prefixed-weak",
+        "utf16": [
+          133,
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "name": "record-separator-prefixed-weak",
+        "utf16": [
+          28,
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "reason": null
+      },
+      {
+        "name": "twelve-record-separators",
+        "utf16": [
+          28,
+          28,
+          28,
+          28,
+          28,
+          28,
+          28,
+          28,
+          28,
+          28,
+          28,
+          28
+        ],
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "name": "twelve-next-lines",
+        "utf16": [
+          133,
+          133,
+          133,
+          133,
+          133,
+          133,
+          133,
+          133,
+          133,
+          133,
+          133,
+          133
+        ],
+        "reason": "passphrase-empty"
+      },
+      {
+        "name": "lone-surrogate-tail",
+        "utf16": [
+          99,
+          111,
+          114,
+          114,
+          101,
+          99,
+          116,
+          32,
+          104,
+          111,
+          114,
+          115,
+          101,
+          32,
+          98,
+          97,
+          116,
+          116,
+          101,
+          114,
+          121,
+          32,
+          115,
+          116,
+          97,
+          112,
+          108,
+          101,
+          55296
+        ],
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "name": "long-s-lookalike",
+        "utf16": [
+          112,
+          97,
+          383,
+          383,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "reason": null
+      }
+    ],
+    "headerVariants": [
+      {
+        "name": "canonical",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH0=",
+        "parses": true,
+        "kdfAccepted": true,
+        "version": 1
+      },
+      {
+        "name": "kdf-leading-next-line",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJcdTAwODVwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH0=",
+        "parses": true,
+        "kdfAccepted": true,
+        "version": 1
+      },
+      {
+        "name": "kdf-leading-record-separator",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJcdTAwMUNwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH0=",
+        "parses": true,
+        "kdfAccepted": false,
+        "version": 1
+      },
+      {
+        "name": "kdf-long-s",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItXHUwMTdGaGEyNTYiLCJpdGVyYXRpb25zIjo2MDAwMDAsInNhbHRCYXNlNjQiOiJBQUVDQXdRRkJnY0lDUW9MREEwT0R3PT0iLCJub25jZUJhc2U2NCI6IkVCRVNFeFFWRmhjWUdSb2IiLCJjcmVhdGVkQXRFcG9jaE1zIjoxNzAwMDAwMDAwMDAwfQ==",
+        "parses": true,
+        "kdfAccepted": false,
+        "version": 1
+      },
+      {
+        "name": "kdf-kelvin",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItXHUyMTJBaGEyNTYiLCJpdGVyYXRpb25zIjo2MDAwMDAsInNhbHRCYXNlNjQiOiJBQUVDQXdRRkJnY0lDUW9MREEwT0R3PT0iLCJub25jZUJhc2U2NCI6IkVCRVNFeFFWRmhjWUdSb2IiLCJjcmVhdGVkQXRFcG9jaE1zIjoxNzAwMDAwMDAwMDAwfQ==",
+        "parses": true,
+        "kdfAccepted": false,
+        "version": 1
+      },
+      {
+        "name": "kdf-unknown",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJhcmdvbjJpZCIsIml0ZXJhdGlvbnMiOjYwMDAwMCwic2FsdEJhc2U2NCI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHc9PSIsIm5vbmNlQmFzZTY0IjoiRUJFU0V4UVZGaGNZR1JvYiIsImNyZWF0ZWRBdEVwb2NoTXMiOjE3MDAwMDAwMDAwMDB9",
+        "parses": true,
+        "kdfAccepted": false,
+        "version": 1
+      },
+      {
+        "name": "kdf-lone-surrogate",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJcdWQ4MDAiLCJpdGVyYXRpb25zIjo2MDAwMDAsInNhbHRCYXNlNjQiOiJBQUVDQXdRRkJnY0lDUW9MREEwT0R3PT0iLCJub25jZUJhc2U2NCI6IkVCRVNFeFFWRmhjWUdSb2IiLCJjcmVhdGVkQXRFcG9jaE1zIjoxNzAwMDAwMDAwMDAwfQ==",
+        "parses": false,
+        "kdfAccepted": null,
+        "version": null
+      },
+      {
+        "name": "iterations-below-min",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6MTAwMCwic2FsdEJhc2U2NCI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHc9PSIsIm5vbmNlQmFzZTY0IjoiRUJFU0V4UVZGaGNZR1JvYiIsImNyZWF0ZWRBdEVwb2NoTXMiOjE3MDAwMDAwMDAwMDB9",
+        "parses": true,
+        "kdfAccepted": true,
+        "version": 1
+      },
+      {
+        "name": "duplicate-version",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJ2ZXJzaW9uIjoyLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH0=",
+        "parses": true,
+        "kdfAccepted": true,
+        "version": 2
+      },
+      {
+        "name": "unknown-field",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMCwibm90ZSI6Imlnbm9yZWQifQ==",
+        "parses": true,
+        "kdfAccepted": true,
+        "version": 1
+      }
+    ],
+    "envelopeVariants": [
+      {
+        "name": "canonical",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": true,
+        "reason": null
+      },
+      {
+        "name": "device-id-emoji",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022a\\ud83d\\udd12b\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": true,
+        "reason": null
+      },
+      {
+        "name": "device-id-next-line-only",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022\\u0085\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": false,
+        "reason": "missing-field:deviceId"
+      },
+      {
+        "name": "device-id-no-break-space-only",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022\\u00A0\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": false,
+        "reason": "missing-field:deviceId"
+      },
+      {
+        "name": "device-id-record-separator-only",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022\\u001C\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": true,
+        "reason": null
+      },
+      {
+        "name": "device-id-padded-ascii",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022  device-a  \u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": true,
+        "reason": null
+      },
+      {
+        "name": "device-id-lone-surrogate",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022a\\ud800b\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": false,
+        "reason": "malformed-json"
+      },
+      {
+        "name": "snapshot-id-lone-surrogate",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u0022a\\ud800b\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": false,
+        "reason": "malformed-json"
+      },
+      {
+        "name": "source-display-name-lone-surrogate",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022s1\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022a\\ud800b\u0022,\u0022endpoints\u0022:[],\u0022recordRevision\u0022:1}],\u0022deletions\u0022:[]}",
+        "accepted": false,
+        "reason": "malformed-json"
+      },
+      {
+        "name": "unknown-field-lone-surrogate",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[],\u0022note\u0022:\u0022a\\ud800b\u0022}",
+        "accepted": false,
+        "reason": "malformed-json"
+      },
+      {
+        "name": "source-id-record-separator-only",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022\\u001C\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022x\u0022,\u0022endpoints\u0022:[],\u0022recordRevision\u0022:1}],\u0022deletions\u0022:[]}",
+        "accepted": true,
+        "reason": null
+      }
+    ],
+    "envelopeWriteRejections": [
+      {
+        "name": "canonical",
+        "writeReason": null
+      },
+      {
+        "name": "device-id-lone-surrogate",
+        "writeReason": "invalid-field:deviceId"
+      },
+      {
+        "name": "device-id-next-line-only",
+        "writeReason": "missing-field:deviceId"
+      },
+      {
+        "name": "display-name-lone-surrogate",
+        "writeReason": "invalid-field:displayName"
+      }
+    ],
+    "archivePassphraseCases": [
+      {
+        "name": "canonical",
+        "passphraseUtf16": [
+          99,
+          111,
+          114,
+          114,
+          101,
+          99,
+          116,
+          32,
+          104,
+          111,
+          114,
+          115,
+          101,
+          32,
+          98,
+          97,
+          116,
+          116,
+          101,
+          114,
+          121,
+          32,
+          115,
+          116,
+          97,
+          112,
+          108,
+          101
+        ],
+        "readReason": null,
+        "writeReason": null
+      },
+      {
+        "name": "lone-surrogate-tail",
+        "passphraseUtf16": [
+          99,
+          111,
+          114,
+          114,
+          101,
+          99,
+          116,
+          32,
+          104,
+          111,
+          114,
+          115,
+          101,
+          32,
+          98,
+          97,
+          116,
+          116,
+          101,
+          114,
+          121,
+          32,
+          115,
+          116,
+          97,
+          112,
+          108,
+          101,
+          55296
+        ],
+        "readReason": "passphrase-too-weak",
+        "writeReason": "passphrase-too-weak"
+      },
+      {
+        "name": "too-short",
+        "passphraseUtf16": [
+          115,
+          104,
+          111,
+          114,
+          116
+        ],
+        "readReason": "passphrase-too-weak",
+        "writeReason": "passphrase-too-weak"
+      },
+      {
+        "name": "next-line-prefixed-weak",
+        "passphraseUtf16": [
+          133,
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "readReason": "passphrase-too-weak",
+        "writeReason": "passphrase-too-weak"
+      },
+      {
+        "name": "record-separator-prefixed-weak",
+        "passphraseUtf16": [
+          28,
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "readReason": "wrong-passphrase-or-tampered",
+        "writeReason": null
+      }
+    ]
+  }
 }
