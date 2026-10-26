@@ -214,6 +214,7 @@ jobs:
             --required-suite com.mediahub.provider.base.DefaultProviderRegistryTest \
             --required-suite com.mediahub.feature.library.LibraryFilterViewModelTest \
             --required-suite com.mediahub.feature.library.LibrarySortViewModelTest \
+            --required-suite com.mediahub.feature.library.LibraryMixedCapabilitiesTest \
             --required-suite com.mediahub.feature.search.GlobalSearchViewModelTest \
             --required-suite com.mediahub.feature.search.engine.GlobalSearchEngineTest \
             --required-suite com.mediahub.provider.emby.EmbyLibraryProviderTest \
