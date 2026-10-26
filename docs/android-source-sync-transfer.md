@@ -3725,6 +3725,19 @@ XML 汇总（`<testsuite>` 属性相加，非估算；`--rerun-tasks` 后三模�
 三模块合计 **1142** 例（596 + 192 + 354）。本轮**没有**新增套件，`--required-suite` 仍是 48 条；
 `androidTest` 仍 88 例（文案改动没有新增 Compose 断言）。
 
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 `completed / success`：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `8c26230b4762bf91d57710365cfa41cc7d2cb5d9` | `windows-ci` | 40330806529 | `MediaHub.Tests` 469 + `MediaHub.WebDav.Tests` 104 = 573；licence `projects=13 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40330806617 | `uniqueTests` **2267**（`core/common` 596 / `core/database` 192 / `feature/settings` 354）；`--required-suite` 48 条；两个 visual-instrumentation job 各 112 例，API 32/36 各 `19 unique mandatory` 命中该 SHA |
+| `53d2571f480202b0506d92e6017a2758d09ea01f`（W6 树，此刻尚未 merge 本轮主树提交） | `windows-ci` | 40331895690 | `MediaHub.Tests` **1588** + `MediaHub.WebDav.Tests` 104 = **1692**；licence `projects=15 rows=47 packages=28`、`RESULT: PASS` |
+| 同上 | `android-ci` | 40331895747 | `uniqueTests` **2266**（`core/common` 596 / `core/database` 192 / `feature/settings` 354）；`--required-suite` 48 条；instrumentation 112 例、API 32/36 各 `19 unique mandatory` |
+
+主树 `uniqueTests` 由上一基线 2266 增至 **2267**（+1 = §39.4 的 Kotlin 文案用例，与本机 XML `feature/settings` 353 → 354 一致）。
+W6 树那两条比主树少 1 例，原因是 W6 分支此刻还没 merge `8c26230`——Android 侧代码在本轮主树提交里，W6 树只带到 `d3be762`；因此 **2267 是本轮 Android 口径**，W6 的 2266 只是它自己 head 上的实测值，不是回归。
+
+
 ### §39.6 未覆盖（本节交付时必须如实保留）
 
 1. **真实两机搬运**：把 Windows 导出的 `.mharchive` 拷到另一台机器再让 Android 导入的完整流程 NOT_RUN（同 §33.8–§38.9 各节，都需要第二台机器）。
