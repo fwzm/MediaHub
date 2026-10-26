@@ -22,7 +22,7 @@ import kotlinx.coroutines.withContext
  * 每次请求都携带 Basic 凭据，因此：
  * - 密码进 [com.mediahub.core.security.CredentialVault]，**不写入** TokenStore
  *   （不伪造 access/refresh token；[TokenStore] 只用于 logout 时的会话清理）；
- * - "认证验证" = 对根目录做 `PROPFIND Depth: 0`，要求 2xx；验证通过才落盘凭据；
+ * - "认证验证" = `PROPFIND Depth: 0` 的有效 DAV 响应，包含同 origin 的配置根及成功状态；通过才落盘；
  * - `restoreSession` 在读不到密码时直接 [AuthSessionState.SignedOut]，
  *   绝不以匿名请求代替已失效会话。
  */
@@ -59,7 +59,7 @@ internal class WebDavAuthProvider(
         val attemptIdentity = credentialStore.identityOf(server)
 
         try {
-            api.propfind(rootUrl, depth = 0, authorization = header)
+            requireRootResponse(rootUrl, header)
         } catch (e: CancellationException) {
             throw e
         } catch (e: ProviderException.AuthExpired) {
@@ -87,6 +87,11 @@ internal class WebDavAuthProvider(
         return AuthResult.Success(MediaUser(serverId = server.id, userId = username, displayName = username))
     }
 
+    private suspend fun requireRootResponse(rootUrl: String, authorization: String) {
+        val resources = api.propfind(rootUrl, depth = 0, authorization = authorization)
+        if (!WebDavRootEvidence.isRepresented(rootUrl, resources)) throw ProviderException.Parse(server.id)
+    }
+
     override suspend fun refreshSession(): AuthResult = when (val state = restoreSession()) {
         is AuthSessionState.Authenticated -> AuthResult.Success(state.user)
         is AuthSessionState.Error ->
@@ -107,11 +112,7 @@ internal class WebDavAuthProvider(
             return AuthSessionState.Error(AuthSessionErrorKind.INVALID_RESPONSE, "服务器地址为空")
         }
         return try {
-            api.propfind(
-                rootUrl,
-                depth = 0,
-                authorization = WebDavAuth.basicHeader(username, credential.password),
-            )
+            requireRootResponse(rootUrl, WebDavAuth.basicHeader(username, credential.password))
             // 迟到 2xx（A3-2）：响应到达时身份/世代已变 → 不得复活旧用户状态。
             // 世代推进覆盖：较新登录（含同身份重登，旧密码已失效）、登出/删除、
             // restore 失效——一律回 SignedOut 交由上层重新认证。

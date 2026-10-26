@@ -37,6 +37,9 @@ UI 调用 `handle.provider.testConnection()`，具体实现负责探测协议：
 Emby/Jellyfin 使用独立的 AuthProvider、TokenStore 与各自的非敏感 SessionStore；登录后不保存密码。
 恢复时核对远端身份与会话，确定失效与暂时不可用分别处理。具体行为由各 Provider 的连接、认证、恢复隔离测试约束。
 
+WebDAV 认证及恢复的 Depth:0 响应须为有效 DAV multistatus，并包含同 origin、匹配配置根地址的成功资源状态。
+HTML、空结果或其他资源的元数据不触发保存密码或发布已认证状态；无效恢复响应保留原凭据并报告响应异常。
+
 WebDAV 的 [`WebDavCredentialStore`](../../provider/webdav/src/main/kotlin/com/mediahub/provider/webdav/WebDavCredentials.kt)
 把身份和密码写进一条加密记录，按规范化地址、用户名及进程内世代限制旧 handle/旧认证结果。
 当前 Basic 头按 UTF-8 编码；旧分支的另一种字符集重试策略并未采用，不能声称已支持该兼容路径。

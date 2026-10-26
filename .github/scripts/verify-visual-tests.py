@@ -15,6 +15,8 @@ import xml.etree.ElementTree as ET
 
 MODULES = ("core/ui", "feature/player", "feature/settings", "provider/webdav", "core/database", "app")
 COMMON_TESTS = {
+    ('com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest', 'documentRootMustBeDavMultistatus'),
+    ('com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest', 'directDavAncestryAndSuccessfulStatusRemainOwnedByTheirResponse'),
     ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'selectingAnotherArchiveWithTheSameNameClearsThePassphrase'),
     ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'dismissingAndReopeningTheCardClearsThePassphrase'),
     ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'noPassphraseCardIsRenderedWhenThePickerDidNotSeeAnArchive'),
