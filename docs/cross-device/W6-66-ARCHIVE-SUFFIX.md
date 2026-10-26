@@ -134,6 +134,18 @@ XML 汇总（`<testsuite>` 属性相加，非估算；`--rerun-tasks` 后三模�
 三模块合计 **1142** 例（596 + 192 + 354）。本轮**没有**新增套件，`--required-suite` 仍是 48 条；
 `androidTest` 仍 88 例（文案改动没有新增 Compose 断言）。
 
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 completed / success：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `8c26230b4762bf91d57710365cfa41cc7d2cb5d9`（主树） | `windows-ci` | 40330806529 | `MediaHub.Tests` 469 + WebDav 104 = 573；licence `projects=13 rows=47 packages=28` RESULT: PASS；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40330806617 | `uniqueTests` **2267**（core/common 596 / core/database 192 / feature/settings 354）；required-suite 48；instrumentation 112、API 32/36 各 19 unique mandatory 命中该 SHA |
+| `53d2571f480202b0506d92e6017a2758d09ea01f`（W6 树） | `windows-ci` | 40331895690 | `MediaHub.Tests` **1588** + WebDav 104 = **1692**；licence `projects=15 rows=47 packages=28` |
+| 同上 | `android-ci` | 40331895747 | `uniqueTests` **2266**；required-suite 48；instrumentation 112、API 32/36 各 19 unique mandatory 命中该 SHA |
+
+W6 树的 Android 计数比主树少 1，原因是该 head 尚未 merge `8c26230`（Android 侧改动在主树提交里）——不是回归；本轮 Android 口径以主树 **2267** 为准。
+
+
 ---
 
 ## 7 未覆盖（本节交付时必须如实保留）
