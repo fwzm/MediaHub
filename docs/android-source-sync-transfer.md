@@ -3593,6 +3593,18 @@ XML 汇总（`<testsuite>` 属性相加，非估算）：
 `ArchiveRoundTripTest` 单套件由 23 例增至 **24 例**、0 失败。
 本轮**没有**新增套件，`--required-suite` 仍是 48 条；门禁用例数随 core/common +1。
 
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 `completed / success`：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `94b9432d1db3121aafecf5eb2a226734d904c822` | `windows-ci` | 40245159664 | `MediaHub.Tests` 469 + `MediaHub.WebDav.Tests` 104 = 573；licence `projects=13 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40245159540 | `uniqueTests` **2266**（`core/common` **596** / `core/database` 192 / `feature/settings` 353）；`--required-suite` 48 条；两个 visual-instrumentation job 各 112 例 `feature:settings` 全过，API 32/36 各 `19 unique mandatory` 命中该 SHA |
+| `bd71e3200a284c77e1fdfd8237fed7aa3e4e153a`（W6 树，已 merge 主树） | `windows-ci` | 40245165822 | `MediaHub.Tests` **1585** + `MediaHub.WebDav.Tests` 104 = **1689**；licence `projects=15 rows=47 packages=28`、`RESULT: PASS` |
+| 同上 | `android-ci` | 40245165765 | 与主树同口径（`uniqueTests` 2266、required-suite 48、instrumentation 112）：Kotlin 侧是同一份代码 |
+
+`uniqueTests` 由上一基线 2265 增至 **2266**（+1 = §38.7 新补的写端 8 MiB 用例，本机 XML 口径 `core/common` 595 → 596 与之一致）；`--required-suite` 仍 48 条、`androidTest` 仍 88 例，本轮都不新增套件。
+
+
 ### §38.9 未覆盖（本节交付时必须如实保留）
 
 1. **设备侧**：C# 用例全部在 Windows 本机跑；Android 侧写端是纯 JVM 逻辑，但 PBKDF2 600 000 轮在真机（Conscrypt）上的耗时与峰值内存仍未测 ⇒ DEVICE_UNVERIFIED（同 §35.8 第 2 条 / §37.8 第 2 条）。
