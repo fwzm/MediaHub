@@ -61,7 +61,7 @@ public readonly struct PairingFingerprint : IEquatable<PairingFingerprint>
     public static bool TryParse(string? hex, out PairingFingerprint fingerprint)
     {
         fingerprint = default;
-        if (string.IsNullOrWhiteSpace(hex) || hex.Length != HexLength)
+        if (WireText.IsBlank(hex) || hex!.Length != HexLength)
         {
             return false;
         }

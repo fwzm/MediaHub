@@ -73,7 +73,7 @@ public readonly struct PairingChallenge : IEquatable<PairingChallenge>
     public static bool TryParse(string? base64, out PairingChallenge challenge)
     {
         challenge = default;
-        if (string.IsNullOrWhiteSpace(base64))
+        if (WireText.IsBlank(base64))
         {
             return false;
         }

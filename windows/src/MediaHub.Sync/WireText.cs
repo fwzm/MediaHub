@@ -162,6 +162,98 @@ public static class WireText
         }
     }
 
+    /// <summary>Case-insensitive prefix test that folds ASCII A-Z only.</summary>
+    public static bool StartsWithAsciiIgnoreCase(string value, string prefix)
+    {
+        if (prefix.Length > value.Length)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < prefix.Length; index++)
+        {
+            if (FoldAscii(value[index]) != FoldAscii(prefix[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Lowercases ASCII A-Z only (interface-name classification must not fold non-ASCII).</summary>
+    public static string LowercaseAscii(string value)
+    {
+        bool changed = false;
+        foreach (char character in value)
+        {
+            if (character is >= 'A' and <= 'Z')
+            {
+                changed = true;
+                break;
+            }
+        }
+
+        if (!changed)
+        {
+            return value;
+        }
+
+        var builder = new System.Text.StringBuilder(value.Length);
+        foreach (char character in value)
+        {
+            builder.Append(FoldAscii(character));
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>Uppercases ASCII a-z only (fingerprint display; must not touch non-ASCII).</summary>
+    public static string UppercaseAscii(string value)
+    {
+        bool changed = false;
+        foreach (char character in value)
+        {
+            if (character is >= 'a' and <= 'z')
+            {
+                changed = true;
+                break;
+            }
+        }
+
+        if (!changed)
+        {
+            return value;
+        }
+
+        var builder = new System.Text.StringBuilder(value.Length);
+        foreach (char character in value)
+        {
+            builder.Append(FoldAsciiUpper(character));
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>Ordering that folds ASCII A-Z only; a stable total order for interface names.</summary>
+    public static int CompareAsciiIgnoreCase(string left, string right)
+    {
+        int shared = Math.Min(left.Length, right.Length);
+        for (int index = 0; index < shared; index++)
+        {
+            int delta = FoldAscii(left[index]) - FoldAscii(right[index]);
+            if (delta != 0)
+            {
+                return delta;
+            }
+        }
+
+        return left.Length - right.Length;
+    }
+
     private static char FoldAscii(char character) =>
         character is >= 'A' and <= 'Z' ? (char)(character + ('a' - 'A')) : character;
+
+    private static char FoldAsciiUpper(char character) =>
+        character is >= 'a' and <= 'z' ? (char)(character - ('a' - 'A')) : character;
 }

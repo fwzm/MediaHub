@@ -62,16 +62,16 @@ public static class PairingLink
     /// <summary>Extracts the code part of a link without decoding it; empty when the text is not a link.</summary>
     public static string ExtractCode(string? link)
     {
-        string text = (link ?? string.Empty).Trim();
-        if (text.Length == 0 || !text.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
+        string text = WireText.Trim(link ?? string.Empty);
+        if (text.Length == 0 || !WireText.StartsWithAsciiIgnoreCase(text, Prefix))
         {
             return string.Empty;
         }
 
-        string code = text[Prefix.Length..].Trim();
-        if (code.StartsWith(ParameterName + "=", StringComparison.OrdinalIgnoreCase))
+        string code = WireText.Trim(text[Prefix.Length..]);
+        if (WireText.StartsWithAsciiIgnoreCase(code, ParameterName + "="))
         {
-            code = code[(ParameterName.Length + 1)..].Trim();
+            code = WireText.Trim(code[(ParameterName.Length + 1)..]);
         }
 
         return code;
@@ -80,13 +80,13 @@ public static class PairingLink
     /// <summary>Reads a pasted link back into an invitation, refusing anything that is not one.</summary>
     public static PairingLinkResult Parse(string? link, long nowEpochMs)
     {
-        string text = (link ?? string.Empty).Trim();
+        string text = WireText.Trim(link ?? string.Empty);
         if (text.Length == 0)
         {
             return PairingLinkResult.Failure(PairingLinkReasons.Empty, "没有粘贴配对链接。");
         }
 
-        if (!text.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
+        if (!WireText.StartsWithAsciiIgnoreCase(text, Prefix))
         {
             return PairingLinkResult.Failure(PairingLinkReasons.NotALink, "这不是 MediaHub 配对链接。");
         }

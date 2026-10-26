@@ -160,7 +160,7 @@ public static class PairingAddressCandidates
 
         foreach (PairingAddressInput adapter in adapters)
         {
-            string name = (adapter.InterfaceName ?? string.Empty).Trim();
+            string name = WireText.Trim(adapter.InterfaceName ?? string.Empty);
             int priority = PriorityOf(adapter.Type);
             string reason = ReasonOf(adapter.Type);
 
@@ -186,12 +186,12 @@ public static class PairingAddressCandidates
             {
                 // A v6-only or unparseable entry can never be dialled over IPv4, so it is reported instead of dropped:
                 // the UI can then explain why an adapter contributed nothing rather than showing a bare empty list.
-                if (!IPAddress.TryParse((text ?? string.Empty).Trim(), out IPAddress? address)
+                if (!IPAddress.TryParse(WireText.Trim(text ?? string.Empty), out IPAddress? address)
                     || address.AddressFamily != AddressFamily.InterNetwork)
                 {
                     rejected.Add(new PairingAddressCandidate
                     {
-                        Address = (text ?? string.Empty).Trim(),
+                        Address = WireText.Trim(text ?? string.Empty),
                         InterfaceName = name,
                         Priority = priority,
                         Reason = PairingAddressReasons.NotIpv4,
@@ -267,7 +267,7 @@ public static class PairingAddressCandidates
                 return byAddress;
             }
 
-            return string.Compare(left.Candidate.InterfaceName, right.Candidate.InterfaceName, StringComparison.OrdinalIgnoreCase);
+            return WireText.CompareAsciiIgnoreCase(left.Candidate.InterfaceName, right.Candidate.InterfaceName);
         });
 
         return new PairingAddressReport
