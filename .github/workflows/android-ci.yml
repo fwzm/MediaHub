@@ -210,6 +210,7 @@ jobs:
             --required-suite com.mediahub.provider.api.ProviderExceptionTest \
             --required-suite com.mediahub.provider.api.ProviderHandleTest \
             --required-suite com.mediahub.provider.api.CredentialsRedactionTest \
+            --required-suite com.mediahub.feature.server.AddServerProviderSwitchTest \
             --required-suite com.mediahub.provider.base.DefaultProviderRegistryTest \
             --required-suite com.mediahub.feature.library.LibraryFilterViewModelTest \
             --required-suite com.mediahub.feature.library.LibrarySortViewModelTest \

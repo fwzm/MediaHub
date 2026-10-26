@@ -50,6 +50,7 @@ fun AddServerRoute(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val providers = viewModel.availableProviders
     val selected = providers.firstOrNull { it.id == state.selectedDescriptorId }
+    val inputsEnabled = !state.isLoadingExisting && !state.isLoggingIn && !state.isSaving
 
     Scaffold(
         topBar = {
@@ -84,6 +85,7 @@ fun AddServerRoute(
                 providers = providers,
                 selectedId = state.selectedDescriptorId,
                 onSelect = viewModel::selectProvider,
+                enabled = inputsEnabled && !state.isReauthorizing,
             )
 
             selected?.let { descriptor ->
@@ -95,11 +97,13 @@ fun AddServerRoute(
                         onHttpsChange = viewModel::toggleHttps,
                         resolvedUrl = state.resolvedUrl,
                         errorMessage = state.addressError,
+                        enabled = inputsEnabled,
                     )
                 }
 
                 OutlinedTextField(
                     value = state.name,
+                    enabled = inputsEnabled,
                     onValueChange = viewModel::updateName,
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("名称") },
@@ -112,6 +116,7 @@ fun AddServerRoute(
                 ) {
                     OutlinedTextField(
                         value = state.username,
+                        enabled = inputsEnabled,
                         onValueChange = viewModel::updateUsername,
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("用户名（可选）") },
@@ -123,6 +128,7 @@ fun AddServerRoute(
                     var passwordVisible by rememberSaveable { mutableStateOf(false) }
                     OutlinedTextField(
                         value = state.password,
+                        enabled = inputsEnabled,
                         onValueChange = viewModel::updatePassword,
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("密码") },
@@ -196,7 +202,7 @@ fun AddServerRoute(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(
                     onClick = viewModel::testConnection,
-                    enabled = !state.isTesting && !state.isLoggingIn,
+                    enabled = inputsEnabled && !state.isTesting && selected != null,
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(if (state.isTesting) "测试中…" else "测试连接")
@@ -204,7 +210,7 @@ fun AddServerRoute(
                 if (selected != null && selected.authMethod != com.mediahub.provider.api.AuthMethod.NONE) {
                     Button(
                         onClick = { viewModel.loginAndSave(onSaved = onDone) },
-                        enabled = !state.isLoggingIn && !state.isTesting,
+                        enabled = inputsEnabled && !state.isTesting,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(
@@ -216,7 +222,7 @@ fun AddServerRoute(
                 } else {
                     Button(
                         onClick = { viewModel.save(onSaved = onDone) },
-                        enabled = !state.isSaving,
+                        enabled = inputsEnabled && !state.isTesting && selected != null,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(if (state.isSaving) "保存中…" else "保存")
@@ -232,6 +238,7 @@ private fun ProviderTypeGrid(
     providers: List<ProviderDescriptor>,
     selectedId: String,
     onSelect: (ProviderDescriptor) -> Unit,
+    enabled: Boolean,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         providers.chunked(2).forEach { rowOptions ->
@@ -239,6 +246,7 @@ private fun ProviderTypeGrid(
                 rowOptions.forEach { descriptor ->
                     FilterChip(
                         selected = selectedId == descriptor.id,
+                        enabled = enabled,
                         onClick = { onSelect(descriptor) },
                         label = { Text(descriptor.displayName) },
                         modifier = Modifier.weight(1f),
