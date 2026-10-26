@@ -140,6 +140,17 @@ XML 汇总（`<testsuite>` 属性相加，非估算）：
 三模块合计 **1158** 例；`--required-suite` 49 → **50**；`androidTest` 仍 88 例、instrumentation 仍 112 例（本轮无 Compose 断言）。
 C# 侧由 1599 增至 **1604**（+5）；Android 侧唯一用例由 2278 增至 **2283**（+5）。
 
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 `completed / success`：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `7d0f055600ae20e8df1fcfa4892e6799478fa0ab`（主树） | `windows-ci` | 40389203079 | `MediaHub.Tests` 469 + 104 = 573；licence `projects=13 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40389203196 | `uniqueTests` **2283**；`--required-suite` **50** 条；两个 VI job 各 `19 unique mandatory` 命中 `7d0f0556…` |
+| `b08186be87c5d983c8628dfee852416fb534fdf9`（本树） | `windows-ci` | 40389300435 | `MediaHub.Tests` **1604** + 104 = **1708**；licence `projects=15 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40389300211 | `uniqueTests` **2283**（与主树同口径，本树已 merge 主树提交）；`--required-suite` 50 条；两个 VI job 各 `19 unique mandatory` 命中 `b08186be…` |
+
+W6 windows 由 1692 增至 **1708**（+5）；Android 侧由 2278 增至 **2283**（+5）。两条 Android CI 的 `uniqueTests` 相同，说明本树 merge 后与主树口径一致。
+
 ---
 
 ## 8 未覆盖（本节交付时必须如实保留）
