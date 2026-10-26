@@ -1,47 +1,61 @@
-# 数据源（Provider）设计文档
+# 数据源（Provider）设计
 
-## 统一接口
+## 装配与当前能力
 
-所有数据源实现 `com.mediahub.provider.api.MediaProvider`（组合认证/媒体库/浏览/播放/搜索/字幕/进度
-能力），通过 `MediaProviderFactory` 创建并经 Hilt `@IntoSet` 注册进 `MediaProviderRegistry`。
-UI 通过 `registry.create(server)` 获取实例，按 `ProviderCapability` 决定展示。
+最小 `MediaProvider`、可选能力接口与 `ProviderHandle` 的契约见 [内部 API](../api/README.md)。
+工厂经 Hilt `@IntoSet` 注册，描述用于展示规划能力，非空句柄字段用于判断当前可用能力。
+注册表仍按 `ServerType` 查找；新增开放 Provider ID 的数据库迁移尚未采用。
 
-数据流：`Remote Model → Mapper → Domain Model(core:model)`。
-禁止：UI 处理各源原始 JSON；Provider 特有 if/else 泄漏到 UI。
+以下是当前工厂实际装配的字段，不是所有服务版本或设备的兼容性承诺：
 
-## Emby（Phase 1 实现）
+| 工厂 | 当前非空能力字段 |
+|---|---|
+| [Emby](../../provider/emby/src/main/kotlin/com/mediahub/provider/emby/EmbyProviderFactory.kt) | auth、library、detail、playback、query、search、identityLookup、progress、favorite |
+| [Jellyfin](../../provider/jellyfin/src/main/kotlin/com/mediahub/provider/jellyfin/JellyfinProviderFactory.kt) | auth、library、detail、playback、search、progress、favorite |
+| [WebDAV](../../provider/webdav/src/main/kotlin/com/mediahub/provider/webdav/WebDavProviderFactory.kt) | auth、browse、detail、playback、subtitleDiscovery |
+| [Local](../../provider/local/src/main/kotlin/com/mediahub/provider/local/LocalProviderFactory.kt) | browse、detail、playback、subtitleDiscovery |
 
-待确认 endpoint（**必须查官方文档，禁止凭记忆虚构**）：
+没有出现在表中的字段保留为空。尤其 `subtitle` 列表接口为空不等于播放器没有内嵌字幕：
+后端轨道、播放源附带的字幕和同目录外挂发现分别走各自路径，不能用单个规划枚举推断全部字幕能力。
+其他计划中的 Provider 以描述的状态及实际句柄为准。
 
-- 认证：`POST /Users/AuthenticateByName`（Body: Username/Pw；Header: X-Emby-Token 需客户端标识）
-- 媒体库：`GET /Users/{userId}/Views`
-- 浏览/详情：`GET /Users/{userId}/Items?...`、`GET /Users/{userId}/Items/{itemId}`
-- 搜索：`GET /Search/Hints?...`
-- 播放源：`POST /Items/{itemId}/PlaybackInfo`（MediaSources → DirectPlay/DirectStream/Transcode 三态）
-- 进度：`POST /Sessions/Playing` / `POST /Sessions/Playing/Stopped`
-- 图片：`/Items/{itemId}/Images/{type}`（需带鉴权头，Coil 集成时注意）
+Remote DTO 与协议解析放在具体 Provider，输出统一 Domain Model。UI 不处理各源原始 JSON，
+也不通过判断具体 Provider class 来代替运行时能力检查。
 
-要点：默认直连（Direct Play），客户端能解码绝不请求转码；会话 Token 加密存储（core:security）。
+## 连接、认证与存储
 
-## Jellyfin（Phase 1 实现）
+UI 调用 `handle.provider.testConnection()`，具体实现负责探测协议：
 
-API 与 Emby 同源但**独立 Connector**：共享 `BaseMediaServerProvider`，协议差异各自实现。
-鉴权头格式（X-Emby-Authorization 构造）需以 Jellyfin 官方文档为准。
+- [Emby](../../provider/emby/src/main/kotlin/com/mediahub/provider/emby/EmbyProvider.kt) 与
+  [Jellyfin](../../provider/jellyfin/src/main/kotlin/com/mediahub/provider/jellyfin/JellyfinProvider.kt)
+  分别使用自己的公开信息接口和身份判定；端点解析、认证与响应映射不能混用。
+- [WebDAV](../../provider/webdav/src/main/kotlin/com/mediahub/provider/webdav/WebDavProvider.kt)
+  发 OPTIONS，当前成功分支按 2xx 判断，DAV 响应头用于诊断展示；认证另经受保护的 PROPFIND 验证。
+  旧分支要求非空 DAV 头的更严格协议识别尚未合入，作为独立契约差异继续核对，不能把任意 2xx 当作已证明 WebDAV 身份。
+- Local 检查配置的本地根目录；完整的系统文档树授权路径仍见下节的边界。
 
-## WebDAV（Phase 1 实现）
+Emby/Jellyfin 使用独立的 AuthProvider、TokenStore 与各自的非敏感 SessionStore；登录后不保存密码。
+恢复时核对远端身份与会话，确定失效与暂时不可用分别处理。具体行为由各 Provider 的连接、认证、恢复隔离测试约束。
 
-- 列目录：`PROPFIND`（Depth: 1），解析 multistatus XML。
-- 认证：Basic（用户名/密码走 Keystore 加密存储）。
-- 播放：直链 = baseUrl + 路径（支持 Range），无需临时 URL 概念。
+WebDAV 的 [`WebDavCredentialStore`](../../provider/webdav/src/main/kotlin/com/mediahub/provider/webdav/WebDavCredentials.kt)
+把身份和密码写进一条加密记录，按规范化地址、用户名及进程内世代限制旧 handle/旧认证结果。
+当前 Basic 头按 UTF-8 编码；旧分支的另一种字符集重试策略并未采用，不能声称已支持该兼容路径。
+禁止把 `user:password` 拼进 URL，禁止日志输出 Basic、Token 或密码原文。
 
-## 本地存储（已实现 ✅）
+## Local 与 SAF 边界
 
-- 目录 → MediaItem(FOLDER)；视频/音频按扩展名归类。
-- 播放：`file://` URI，DIRECT_PLAY。
-- 根目录：`LocalRootProvider`（当前为应用外部目录）；完整"本机存储"需 SAF 文档树（后续）。
+[`AppLocalRootProvider`](../../app/src/main/kotlin/com/mediahub/app/di/AppLocalRootProvider.kt)
+当前提供应用私有外部目录的 file 根，LocalProvider 通过现有根进行目录浏览、详情、播放及同目录字幕发现。
+[`LocalRootProvider.contentRoots()`](../../provider/local/src/main/kotlin/com/mediahub/provider/local/LocalRootProvider.kt)
+默认返回空列表。ADR-020 预留的系统目录选择、持久 URI 授权与完整 content 文档树接线仍属后续工作。
+仓库存在相关辅助类型不等于这条产品流程已完成；也不能因为旧分支文档写“已实现”就把它算作当前能力。
 
-## SMB / 云盘（规划）
+## 播放、分页与验证
 
-见 `provider/{smb,aliyun,baidu,quark,china-mobile,tianyi}/README.md`。
-核心原则：官方 API/OAuth 优先；临时签名 URL 播放时动态解析（ADR-003）；
-独立 Connector + Experimental 标记；凭据加密存储；不做绕过风控/会员/DRM 的实现。
+临时播放地址在实际播放时解析，来源认证、Header/Cookie 归属与重定向策略由 Provider/播放管线约束。
+不要把短期签名地址当成永久媒体地址写入数据库。
+列表、查询与搜索使用分页；服务端排序/筛选能力在分页前使用，不能仅对已返回的一页做本地排序冒充全库结果。
+
+变更协议行为前核对实现、相关 ADR、官方协议资料及 MockWebServer 契约测试。
+真实服务账号和媒体不作为自动扫描夹具；原始日志、凭据和 UI dump 不进入仓库。
+当前提交的单元、模拟器、实际 CLI 与真机验证结果分别登记，不能互相替代。

@@ -1,42 +1,57 @@
 # 播放器设计文档
 
-## 管线
+## 播放源、内核与会话
 
-```
-MediaItem + PlaybackOptions
-  → Provider.resolvePlayback()        // 临时 URL + 三态 mode
-  → PlaybackCompatibilityEvaluator    // 设备能力 + 偏好 → 决策（V0.1 接入）
-  → PlaybackEngine.play(PlaybackSession)
-      ├─ HeaderAwareDataSource（鉴权头/Cookie 注入，仅内存）
-      ├─ SimpleCache（LRU 512MB，播放缓存）
-      └─ 轨道选择 / 进度循环 / 结构化错误
-  → PlayerView + Compose 控制层
-```
+播放能力由 `ProviderHandle.playback` 提供，`resolvePlayback(item, options)` 返回当前使用的 `PlaybackSource`。
+[`SwitchablePlaybackEngine`](../../player/engine/src/main/kotlin/com/mediahub/player/engine/SwitchablePlaybackEngine.kt)
+负责将同一会话交给 Media3 或 mpv；
+[`PlaybackEngineSelector`](../../player/engine/src/main/kotlin/com/mediahub/player/engine/PlaybackEngineSelector.kt)
+综合用户内核选择、已记录的兼容性签名和设备能力证据进行路由。UNKNOWN 设备证据保留默认行为，
+不等于已确认不支持。
 
-## 播放决策（PlaybackCompatibilityEvaluator，纯逻辑）
+[`PlaybackCompatibilityEvaluator`](../../player/compatibility/src/main/kotlin/com/mediahub/player/compatibility/PlaybackCompatibilityEvaluator.kt)
+提供媒体信息、设备能力与偏好的纯逻辑评估，结果为 DIRECT_PLAY / DIRECT_STREAM / TRANSCODE / UNSUPPORTED。
+资源模式、内核路由与实际解码结果应分别判断；纯逻辑结果不能代替设备实片验收。
 
-- 输入：MediaInfo（容器/视频/音频/分辨率/码率/HDR）+ DeviceCapabilities + UserPreferences。
-- 输出：DIRECT_PLAY / DIRECT_STREAM（视频不转码，仅 remux/音频/限速）/ TRANSCODE / UNSUPPORTED。
-- 设备能力采集：MediaCodecList（编码/最大分辨率/10bit/HW）、Display（HDR）、
-  API 29+ isHardwareAccelerated。
-- 禁止在别处复制 codec 判断逻辑（单测 9 例兜底）。
+会话所有权贯穿解析、降级、轨道、字幕、媒体键和退出。
+[`ForegroundMediaSessionController`](../../feature/player/src/main/kotlin/com/mediahub/feature/player/ForegroundMediaSessionController.kt)
+把前台系统媒体键路由到当前引擎，离开前台或释放时撤下旧会话。
+播放意图与当前是否正在出帧分别记录；降级重播保留暂停意图。
 
-## 播放错误（PlaybackError）
+## 请求头与缓存
 
-分层 code：AUTH_EXPIRED / URL_EXPIRED / HTTP_403 / HTTP_404 / HTTP_429 / SERVER_ERROR /
-NETWORK_TIMEOUT / DNS_ERROR / TLS_ERROR / DECODER_ERROR / UNSUPPORTED_CODEC / DRM_ERROR /
-TRANSCODE_ERROR / UNKNOWN。UI 展示中文文案；日志保留脱敏详情。
+[`PlaybackEngineFactory`](../../player/engine/src/main/kotlin/com/mediahub/player/engine/PlaybackEngineFactory.kt)
+为每个引擎创建独立的请求头上下文；Media3 的
+[`SnapshotMediaSourceFactory`](../../player/engine/src/main/kotlin/com/mediahub/player/engine/SnapshotMediaSourceFactory.kt)
+在创建每个 MediaSource 时进一步固定不可变 Header 快照。
+延迟准备的 HLS/DASH 来源和已经创建的数据源不能被后一次播放的 Header 覆盖。
+mpv 使用其会话拥有的本地桥与原站请求上下文；Header/Cookie 不作为共享可变全局状态。
 
-## 播放缓存
+Media3 的 [`MediaCacheProvider`](../../player/engine/src/main/kotlin/com/mediahub/player/engine/MediaCacheProvider.kt)
+使用 SimpleCache/LRU，默认 512MiB，仅缓存媒体数据；元数据、图片和未来离线下载分别管理。
 
-- `MediaCacheProvider`：Media3 SimpleCache + LRU（512MB），仅缓存媒体分片。
-- 与元数据缓存（Room）/图片缓存（Coil）/离线下载（后续 DownloadManager）严格分离。
+## 进度、关键事件与退出
 
-## 播放器功能（当前 / 规划）
+UI 进度保持在引擎内存状态。生产控制事件可通过
+[`PlaybackEventSnapshot`](../../player/engine/src/main/kotlin/com/mediahub/player/engine/PlaybackEvent.kt)
+携带事件发生时的不可变进度，异步消费时不重新采样另一会话或较晚的 seek 位置。
 
-已实现：播放/暂停、Seek、倍速循环、音轨/字幕选择、音量、结构化错误、进度快照。
-V0.1：URL 过期重解析、外挂字幕、字幕/音频延迟、HDR/媒体信息显示、连播、片头/片尾跳过。
-V0.2+：画中画、后台播放、投屏（DLNA/Chromecast）、Android TV。
+[`ProgressSyncCoordinator`](../../player/engine/src/main/kotlin/com/mediahub/player/engine/ProgressSyncCoordinator.kt)
+独立采样本地快照（默认 5s）与远端上报（默认 10s，Provider 可覆写）。
+Pause/Seek/Ended 立即使用事件进度刷新，不重置两条周期时钟；Stopped 只通知状态。
+[`PlayerViewModel.stopAndFlush()`](../../feature/player/src/main/kotlin/com/mediahub/feature/player/PlayerViewModel.kt)
+幂等执行引擎 stop、停止周期工作、`flushFinal(finalProgress)` 和 release，最终远端操作带有限等待。
+
+## 轨道、字幕与错误
+
+Media3 的音轨/字幕选择使用当前快照中的 group/track 地址与所有权标识；过期选择被拒绝。
+mpv 使用自己的权威轨道属性。Off 与当前没有可选轨道分别表达，不能拿旧下标作用于新会话。
+字幕中心的外挂加载与选择按会话和操作世代作废旧结果，后端自报的外挂/偏移能力决定控件是否可用。
+
+音频输出状态以引擎观测为准，未知状态不应被当成已确认失败；编码名和设备枚举不能代替实际声音输出验收。
+[`PlaybackError`](../../core/network/src/main/kotlin/com/mediahub/core/network/PlaybackError.kt)
+保留认证、HTTP、网络、TLS、解码、DRM、转码等结构化分类；UI 使用用户文案，诊断详情脱敏。
+自动连播、降级及会话恢复的代码与测试不构成所有片源、设备或后台播放能力的普遍保证。
 
 ## 播放器视觉系统
 
@@ -97,11 +112,20 @@ mpv 的 native instance/bridge 由播放 generation 拥有；旧初始化、事�
 ### 验证入口与证据边界
 
 ```sh
-./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon --continue
-./gradlew assembleDebug lintDebug --no-daemon
-./gradlew :core:ui:connectedDebugAndroidTest :feature:player:connectedDebugAndroidTest :feature:settings:connectedDebugAndroidTest --no-daemon --continue --no-parallel
-python3 .github/scripts/verify-visual-tests.py --api 36
+./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --rerun-tasks --no-build-cache --no-daemon --continue --no-parallel --max-workers=1
+./gradlew assembleDebug lintDebug --no-daemon --no-parallel --max-workers=1
+
+# CI 在已启动的隔离模拟器上执行完整仪器测试、备份夹具和证据记录：
+bash .github/scripts/run-visual-validation.sh 36
+
+# 已有完整证据目录时，按这次真实运行的身份复核：
+python3 .github/scripts/verify-visual-tests.py --api 36 --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
 ```
+
+Windows 本机 Gradle 进程先按仓库指引设置 JDK21；大构建还应使用约定的堆上限与进程内 Kotlin 编译。
+完整仪器入口需要 CI 注入 `EXPECTED_HEAD`、`GITHUB_RUN_ID`、`GITHUB_RUN_ATTEMPT` 和已启动模拟器的
+`ANDROID_SERIAL`，不是独立的模拟器创建命令。仅手动执行 connected 测试不等于已经生成修订、API、
+报告哈希均绑定的证据；完整参数与门禁见 [Android CI](../../.github/workflows/android-ci.yml)。
 
 CI 对精确 PR head 分别运行 API 32 / 36 的硬件加速 Android Canvas 仪器测试，检查
 Renderer 实际像素、真实 Compose 主题与生命周期、Player/Settings 入口及 DataStore 重入。
