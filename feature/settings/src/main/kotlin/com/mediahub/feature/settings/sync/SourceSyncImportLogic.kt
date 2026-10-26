@@ -53,6 +53,17 @@ object SourceSyncImportCopy {
     /** 口令不对 / 归档被改坏时的说明（具体原因码由 blockedReason 原样带出）。 */
     const val UNLOCK_FAILED: String = "解密失败"
 
+    /**
+     * 选文件区上方的说明。扩展名只是提示：读端按前 8 字节 magic 嗅探，
+     * 明文信封与加密归档都可以是任意扩展名（W6-66 起两端统一写 .mharchive，
+     * 旧 Windows CLI 写出的 .mhsync 仍能读）。
+     */
+    const val PICK_HINT: String =
+        "选择另一台设备导出的信封文件（.json 的明文信封），" +
+            "或加密归档（.mharchive，需要导出时设置的口令）。" +
+            "扩展名只是提示，真正的依据是文件内容：旧的 .mhsync 归档同样能选。" +
+            "预览不会写入任何数据。"
+
     /** 桶标题（四桶固定顺序）。 */
     fun titleOf(bucket: SourceSyncImportBucket): String = when (bucket) {
         SourceSyncImportBucket.APPLY -> "可导入"

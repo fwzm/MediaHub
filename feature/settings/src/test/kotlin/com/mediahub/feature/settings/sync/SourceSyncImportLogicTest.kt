@@ -276,6 +276,14 @@ class SourceSyncImportLogicTest {
         assertEquals("{not json", SourceSyncImportLogic.filterEnvelope("{not json", setOf("sync-1")))
     }
 
+    @Test
+    fun thePickHintNamesTheCanonicalArchiveSuffixAndNeverCallsTheLegacySuffixPlaintext() {
+        assertTrue(SourceSyncImportCopy.PICK_HINT.contains(".mharchive"))
+        assertTrue(SourceSyncImportCopy.PICK_HINT.contains(".json"))
+        assertTrue(SourceSyncImportCopy.PICK_HINT.contains(".mhsync"))
+        assertFalse(SourceSyncImportCopy.PICK_HINT.contains(".mhsync 的明文信封"))
+    }
+
     private fun record(id: String) = SourceRecord(
         syncSourceId = id,
         sourceType = SyncSourceTypeValue.parse("emby"),
