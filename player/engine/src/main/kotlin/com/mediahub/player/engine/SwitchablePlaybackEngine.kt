@@ -106,6 +106,8 @@ class SwitchablePlaybackEngine(
     private var requestedPlayWhenReady: Boolean? = null // stateLock; retained across replacement gap
     /** UI 的采样需求意图；引擎切换后必须原样重施给新引擎。 */
     private var audioSpectrumEnabled = false
+    private var subtitleStyle = com.mediahub.model.SubtitleStyle()
+    private var subtitleSizeSp = 18
 
     override val kind: EngineKind
         get() = current?.kind ?: EngineKind.MEDIA3
@@ -202,6 +204,16 @@ class SwitchablePlaybackEngine(
         if (selection == null) return true
         return engine?.isTrackSelectionCurrent(selection) == true &&
             synchronized(stateLock) { !released && current === engine }
+    }
+
+    override fun setSubtitlePresentation(style: com.mediahub.model.SubtitleStyle, sizeSp: Int) {
+        val engine = synchronized(stateLock) {
+            if (released) return
+            subtitleStyle = style
+            subtitleSizeSp = sizeSp
+            current
+        }
+        engine?.setSubtitlePresentation(style, sizeSp)
     }
 
     override fun selectSubtitleTrack(selection: TrackSelection?) {
@@ -384,6 +396,7 @@ class SwitchablePlaybackEngine(
             audioForwardJob?.cancel()
             audioForwardJob = null
             engine.setAudioSpectrumEnabled(audioSpectrumEnabled)
+            engine.setSubtitlePresentation(subtitleStyle, subtitleSizeSp)
             if (audioSpectrumEnabled) startAudioBandForwarding(engine)
             if (kind == EngineKind.MEDIA3) {
                 media3WatchJob = scope.launch { watchMedia3Failure(engine) }

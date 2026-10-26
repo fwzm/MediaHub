@@ -173,6 +173,8 @@ jobs:
             --required-suite com.mediahub.feature.player.PlayerTrackSelectionTest \
             --required-suite com.mediahub.player.mpv.MpvPlaybackEngineTest \
             --required-suite com.mediahub.player.mpv.AndroidContentByteSourceTest \
+            --required-suite com.mediahub.player.mpv.MpvSubtitlePresentationTest \
+            --required-suite com.mediahub.player.mpv.MpvSubtitlePresentationLifecycleTest \
             --required-suite com.mediahub.core.network.MpvContentBridgeTest \
             --required-suite com.mediahub.core.network.MpvContentOwnershipTest \
             --required-suite com.mediahub.provider.local.LocalSafProviderTest \

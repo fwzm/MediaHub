@@ -50,8 +50,10 @@ class LocalSafProductionUiFlowTest {
         var scenario: ActivityScenario<MainActivity>? = null
 
         fun waitNode(matcher: SemanticsMatcher): SemanticsNodeInteraction {
-            compose.waitUntil(15_000) { compose.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
-            return compose.onAllNodes(matcher, useUnmergedTree = true).onFirst()
+            // FilterChip merges its label into the clickable parent; the unmerged label
+            // cannot satisfy hasText AND hasClickAction on a single semantics node.
+            compose.waitUntil(15_000) { compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
+            return compose.onAllNodes(matcher).onFirst()
         }
         fun addFile(name: String, mime: String, bytes: ByteArray) {
             val uri = checkNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, ContentValues().apply {
@@ -129,6 +131,7 @@ class LocalSafProductionUiFlowTest {
             assertEquals(sourceId, db.serverDao().observeAll().first().single { it.name == label }.id)
         } catch (failure: Throwable) {
             device.takeScreenshot(java.io.File(context.filesDir, "saf-ui-failure.png"))
+            device.dumpWindowHierarchy(java.io.File(context.filesDir, "saf-ui-failure.xml"))
             throw failure
         } finally {
             scenario?.close()

@@ -193,14 +193,14 @@ class BackupUserFlowNonOverwritingDeviceTest {
             try {
                 enterRestorePassword(wrong)
                 clickText("解密并预览")
-                waitForDecryption()
+                waitForDecryption("重新输入备份密码")
                 scrollTo(By.text("重新输入备份密码"))
             } finally { wrong.fill('\u0000') }
             assertUserDataUnchanged(before, snapshot(db, preferences), ownedId, "错误密码")
             clickText("重新输入备份密码")
             enterRestorePassword(password)
             clickText("解密并预览")
-            waitForDecryption()
+            waitForDecryption("恢复预览")
             scrollTo(By.text("恢复预览"))
             assertUserDataUnchanged(before, snapshot(db, preferences), ownedId, "预览")
 
@@ -406,9 +406,15 @@ class BackupUserFlowNonOverwritingDeviceTest {
         assertTrue("必须实际启动系统SAF", device.wait(Until.hasObject(By.pkg(documentPackages)), CRYPTO_TIMEOUT))
     }
 
-    private fun waitForDecryption() {
+    private fun waitForDecryption(expectedOutcome: String) {
         val working = By.text("正在解密并验证…")
-        if (device.wait(Until.hasObject(working), 1000)) {
+        // A busy emulator may not draw Working within one second. Require a positive
+        // transition before proceeding; a fast completion may already show the outcome.
+        val admittedOrFinished = By.text(Pattern.compile(
+            "^(正在解密并验证…|" + Pattern.quote(expectedOutcome) + ")$",
+        ))
+        assertTrue("必须观察到解密开始或预期终态", device.wait(Until.hasObject(admittedOrFinished), CRYPTO_TIMEOUT))
+        if (device.hasObject(working)) {
             assertTrue("解密必须在有限观察窗口完成", device.wait(Until.gone(working), CRYPTO_TIMEOUT))
         }
     }

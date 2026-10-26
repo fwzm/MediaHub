@@ -214,6 +214,7 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferencesRepository.flow.collect { stored ->
                 latestPreferences = stored
+                engine.setSubtitlePresentation(stored.subtitleStyle, stored.subtitleSizeSp)
                 _preferences.value = stored
             }
         }
@@ -686,6 +687,7 @@ class PlayerViewModel @Inject constructor(
                 _playbackSource.value = source
                 logger.i(LogTag.PLAYER, "StartupTrace " + trace.summary())
                 currentItem = item
+                engine.setSubtitlePresentation(latestPreferences.subtitleStyle, latestPreferences.subtitleSizeSp)
                 engine.play(
                     PlaybackSession(
                         serverId = serverId,

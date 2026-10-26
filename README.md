@@ -111,7 +111,9 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 
 本轮验证和仍待完成的系统撤权 UI 验收见 [SAF 接入记录](docs/reviews/saf-directory-content-2026-10-26.md)。
 
-设置页可改默认倍速、字幕大小等（DataStore 持久化）。
+设置页可改默认倍速、字幕大小等（DataStore 持久化）。mpv 同样接收字幕大小与字幕面板中的颜色、
+描边、背景、位置偏好，并在播放中更新、退出重进及内核降级时保留；默认尊重内嵌 ASS 样式。
+验证范围见 [字幕外观接线记录](docs/reviews/subtitle-presentation-and-local-audit-2026-10-27.md)。
 
 > 真机、真实 Emby/Jellyfin 服务器和旧版本数据库升级不属于上述 JVM 路径的自动保证范围；
 > 当前验证边界、尚未完成项和每个 Provider 的能力以 [TASKS.md](TASKS.md)、[ROADMAP.md](ROADMAP.md)
