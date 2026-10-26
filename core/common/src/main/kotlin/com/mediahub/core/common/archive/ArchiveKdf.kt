@@ -1,5 +1,6 @@
 package com.mediahub.core.common.archive
 
+import com.mediahub.core.common.sync.WireText
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
@@ -23,10 +24,17 @@ object ArchiveKdf {
     const val DEFAULT_ITERATIONS: Int = MIN_ITERATIONS
 
     /**
-     * 只认 `pbkdf2-sha256`（先 trim、再忽略大小写）。认不出来返回 false，**不回落默认值**：
-     * 回落会让「将来用新 kdf 写的文件」在旧读端上被当成口令错，比直接报 unknown-kdf 难查得多。
+     * 只认 `pbkdf2-sha256`（先按 [WireText.trim] 剥 Unicode White_Space、再只折叠 ASCII 大小写）。
+     * 认不出来返回 false，**不回落默认值**：回落会让「将来用新 kdf 写的文件」在旧读端上被当成口令错，
+     * 比直接报 unknown-kdf 难查得多。
+     *
+     * 不用 lowercase()：JVM 的 lowercase() 会把 U+212A（开尔文符号）折成 k，而 .NET 的
+     * OrdinalIgnoreCase 不会，同一份头部会在两端给出不同的 kdf 判定。
      */
-    fun tryParse(name: String?): Boolean = name?.trim()?.lowercase() == PBKDF2_SHA256_NAME
+    fun tryParse(name: String?): Boolean {
+        if (name == null) return false
+        return WireText.equalsAsciiIgnoreCase(WireText.trim(name), PBKDF2_SHA256_NAME)
+    }
 
     /**
      * 派生 32 字节密钥。参数不合法是编程错误（不是用户输入错误），故用 require 抛参数异常，

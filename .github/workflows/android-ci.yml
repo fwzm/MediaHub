@@ -154,6 +154,9 @@ jobs:
           #     导出 JSON 不重新编码；口令非空由 ArchiveWriter 包成 .mharchive，读回来与信封逐字段相等；
           #     归档头时间戳取信封自己的时间戳、迭代数 600000；弱口令/空白口令/自报携带凭据折成 ArchiveError
           #     稳定码且一个都不改写；空白口令绝不悄悄退化成明文导出）
+          #   core.common.archive.ArchiveEdgeContractTest —— 跨语言边界契约（W6-67：空白=Unicode White_Space
+          #     25 码点、大小写只折 ASCII、孤立代理项在口令策略与信封读写两侧都拒；黄金向量 edges 段由
+          #     Windows 实现生成，Kotlin 逐条比对，两端对同一坏输入必须给出同一个稳定码）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -203,6 +206,7 @@ jobs:
             --required-suite com.mediahub.core.common.archive.ArchiveRoundTripTest \
             --required-suite com.mediahub.core.database.sync.SourceSyncArchiveImportTest \
             --required-suite com.mediahub.core.database.sync.SourceSyncArchiveExportTest \
+            --required-suite com.mediahub.core.common.archive.ArchiveEdgeContractTest \
             --require-complete-suites
 
       - name: Lint
