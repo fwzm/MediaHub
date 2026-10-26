@@ -1,6 +1,7 @@
 package com.mediahub.core.common.pairing
 
 import com.mediahub.core.common.sync.SourceSyncTlsReasons
+import com.mediahub.core.common.sync.WireText
 
 /**
  * 配对传输层要不要走 TLS 1.3，以及钉住哪一枚公钥指纹（W6-59b）。
@@ -52,7 +53,7 @@ sealed class PairingTlsOptions {
     companion object {
         /** 有指纹就钉住它，空白给一个不可用的 Pinned（拨号前判 bad-fingerprint，不悄悄降级成明文）。 */
         fun pinned(pin: String?): PairingTlsOptions =
-            if (pin.isNullOrBlank()) Pinned("") else Pinned(pin)
+            if (pin == null || WireText.isBlank(pin)) Pinned("") else Pinned(pin)
     }
 }
 

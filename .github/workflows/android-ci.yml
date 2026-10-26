@@ -211,6 +211,7 @@ jobs:
             --required-suite com.mediahub.core.database.sync.SourceSyncArchiveExportTest \
             --required-suite com.mediahub.core.common.archive.ArchiveEdgeContractTest \
             --required-suite com.mediahub.core.common.archive.ArchiveNearLimitTest \
+            --required-suite com.mediahub.core.common.pairing.PairingEdgeContractTest \
             --require-complete-suites
 
       - name: Lint

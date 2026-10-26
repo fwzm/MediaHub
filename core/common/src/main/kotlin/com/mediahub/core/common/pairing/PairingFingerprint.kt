@@ -1,5 +1,6 @@
 package com.mediahub.core.common.pairing
 
+import com.mediahub.core.common.sync.WireText
 import java.security.MessageDigest
 
 /**
@@ -36,7 +37,7 @@ class PairingFingerprint private constructor(val hex: String) {
     val displayString: String
         get() {
             if (hex.isEmpty()) return ""
-            val upper = hex.uppercase()
+            val upper = WireText.uppercaseAscii(hex)
             val parts = ArrayList<String>(16)
             var index = 0
             while (index < upper.length) {
@@ -87,12 +88,12 @@ class PairingFingerprint private constructor(val hex: String) {
 
         /** 严格解析；不合规返回 null。 */
         fun tryParse(text: String?): PairingFingerprint? {
-            if (text == null || text.isBlank()) return null
+            if (text == null || WireText.isBlank(text)) return null
             if (text.length != HEX_LENGTH) return null
             for (character in text) {
                 if (!isAsciiHexDigit(character)) return null
             }
-            return PairingFingerprint(text.lowercase())
+            return PairingFingerprint(WireText.lowercaseAscii(text))
         }
 
         /** 解析；不合规抛 PairingContractException(bad-fingerprint)。 */
