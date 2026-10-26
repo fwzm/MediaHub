@@ -82,6 +82,58 @@ object WireText {
         is JsonPrimitive -> element.isString && hasLoneSurrogate(element.content)
     }
 
+    /** 只把 ASCII a–z 折成大写的 uppercase（配对指纹展示用；不碰非 ASCII）。 */
+    fun uppercaseAscii(value: String): String {
+        var changed = false
+        for (character in value) {
+            if (character in 'a'..'z') {
+                changed = true
+                break
+            }
+        }
+        if (!changed) return value
+        val builder = StringBuilder(value.length)
+        for (character in value) builder.append(foldAsciiUpper(character))
+        return builder.toString()
+    }
+
+    /** 只折叠 ASCII 的大小写不敏感「前缀」判定（配对链接前缀、code= 参数、localhost 特判共用）。 */
+    fun startsWithAsciiIgnoreCase(value: String, prefix: String): Boolean {
+        if (prefix.length > value.length) return false
+        for (index in prefix.indices) {
+            if (foldAscii(value[index]) != foldAscii(prefix[index])) return false
+        }
+        return true
+    }
+
+    /** 只把 ASCII A–Z 折成小写的 lowercase（接口名前缀分类用；不碰土耳其语 I、开尔文符号等）。 */
+    fun lowercaseAscii(value: String): String {
+        var changed = false
+        for (character in value) {
+            if (character in 'A'..'Z') {
+                changed = true
+                break
+            }
+        }
+        if (!changed) return value
+        val builder = StringBuilder(value.length)
+        for (character in value) builder.append(foldAscii(character))
+        return builder.toString()
+    }
+
+    /** 只折叠 ASCII 的字典序比较（排序用；返回负数/零/正数）。 */
+    fun compareAsciiIgnoreCase(left: String, right: String): Int {
+        val shared = minOf(left.length, right.length)
+        for (index in 0 until shared) {
+            val delta = foldAscii(left[index]).code - foldAscii(right[index]).code
+            if (delta != 0) return delta
+        }
+        return left.length - right.length
+    }
+
     private fun foldAscii(character: Char): Char =
         if (character >= 'A' && character <= 'Z') character + ('a' - 'A') else character
+
+    private fun foldAsciiUpper(character: Char): Char =
+        if (character >= 'a' && character <= 'z') character - ('a' - 'A') else character
 }

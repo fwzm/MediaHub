@@ -1,5 +1,6 @@
 package com.mediahub.core.common.pairing
 
+import com.mediahub.core.common.sync.WireText
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
@@ -69,7 +70,7 @@ class PairingChallenge private constructor(val base64: String) {
          * 严格解析；任何不合规返回 null（不抛）。
          */
         fun tryParse(text: String?): PairingChallenge? {
-            if (text == null || text.isBlank()) return null
+            if (text == null || WireText.isBlank(text)) return null
             val decoded: ByteArray = try {
                 Base64.getDecoder().decode(text)
             } catch (e: IllegalArgumentException) {

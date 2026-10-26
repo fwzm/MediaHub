@@ -1,5 +1,6 @@
 package com.mediahub.core.common.pairing
 
+import com.mediahub.core.common.sync.WireText
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -43,7 +44,7 @@ object PairingInterfaceKinds {
         pointToPoint: Boolean,
     ): PairingInterfaceKind {
         if (loopback) return PairingInterfaceKind.LOOPBACK
-        val name = interfaceName.trim().lowercase()
+        val name = WireText.lowercaseAscii(WireText.trim(interfaceName))
         if (virtual || pointToPoint || TUNNEL_PREFIXES.any { name.startsWith(it) }) {
             return PairingInterfaceKind.TUNNEL
         }

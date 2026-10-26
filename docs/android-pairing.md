@@ -657,3 +657,168 @@ androidTest APK 解包核对（不是看大小，是看内容）：20 个 dex，
 - **不读 IPv6**：与 Windows 对齐，只收 IPv4；要收必须两端同时收。
 - **不接二维码**：候选地址还没有变成二维码内容，仍只接受粘贴文本。
 - **真机网卡组合 NOT_RUN**：模拟器通常只有 `eth0`/`wlan0` 这一类；多网卡（Wi-Fi + 蜂窝 + VPN 同时在线）的真实排序只有真机才能验。
+
+## 14. 配对侧文本边界统一到共享 `WireText`（W6-69）
+
+### 14.1 缺的是什么
+
+W6-67 把 **归档** 侧（口令、kdf 名、头部、信封）的文本边界写成了跨语言契约，并给两端各加了一个 `WireText`
+（Kotlin `com.mediahub.core.common.sync.WireText` / C# `MediaHub.Sync.WireText`）。但 **配对** 侧是另一套代码：
+Kotlin 在 `core/common/.../pairing/*.kt`，C# 在 `windows/src/MediaHub.Sync/Pairing*.cs`，两边都在用各自语言自带的
+`isBlank()` / `trim()` / `ignoreCase` / `uppercase()` / `CASE_INSENSITIVE_ORDER`。这些「语言自带」的语义在两端并不一致：
+
+| 语言设施 | JVM 语义 | .NET 语义 | 后果 |
+| --- | --- | --- | --- |
+| `String.isBlank()` / `char.isWhitespace` | `Character.isWhitespace \|\| isSpaceChar`：**含 U+001C–U+001F、不含 U+0085** | `char.IsWhiteSpace` = Unicode White_Space 的 25 个 BMP 码点：**不含 U+001C–U+001F、含 U+0085** | 同一个 `deviceId` 两端一个判空一个不判空 |
+| `String.trim()` | 只剥 **≤ U+0020** 的字符（JVM 早期语义） | `string.Trim()` 剥 Unicode White_Space | 与上一行再差一层 |
+| `startsWith(..., ignoreCase)` / `equalsIgnoreCase` / `CASE_INSENSITIVE_ORDER` | 会把 **U+017F**（长 s）折成 `s`、**U+212A**（开尔文）折成 `k`、**U+0131**（无点 i）折成 `i` | `OrdinalIgnoreCase` 只折 ASCII A–Z | 前缀/主机名/接口名比较会在非 ASCII 上分叉 |
+| `uppercase()` / `lowercase()` | 全 Unicode 大小写映射 | `ToUpperInvariant()` / `ToLowerInvariant()` 全 Unicode | 指纹展示与规范化可能一多一少 |
+
+本轮把这套边界统一到 **同一个 `WireText`**：两端各扩展 4 个助手（`startsWithAsciiIgnoreCase` / `lowercaseAscii` /
+`uppercaseAscii` / `compareAsciiIgnoreCase`，加上 W6-67 已有的 `isBlank` / `trim` / `equalsAsciiIgnoreCase` /
+`hasLoneSurrogate` / `containsLoneSurrogate`），然后把配对侧所有**对外契约相关**的调用点换掉。
+判据不是「代码风格统一」，是：**同一份输入两端必须给出同一个 reason**。
+
+### 14.2 口径（三条，全部有向量钉住）
+
+1. **空白 = Unicode White_Space 的 25 个 BMP 码点**（显式表，不依赖语言自带属性）。
+   U+001C–U+001F 与 U+200B、U+FEFF、U+00AD **不是**空白；U+0085、U+00A0、U+3000 **是**。
+2. **大小写只折 ASCII A–Z**。长 s、开尔文、无点 i、带点大写 i **一律不折**。
+3. **孤立代理项一律拒**：口令走 `passphrase-too-weak`（W6-67 已定），
+   配对载荷里的孤立代理项走 `malformed-json`。
+
+### 14.3 真实缺陷（本轮修掉的两个 + 一个真分歧）
+
+**① .NET 读端对转义孤立代理项抛非契约异常（真缺陷）。**
+生成器先跑一遍探针：对 7 个含孤立代理项的载荷 JSON，Kotlin 侧 `Json.parseToJsonElement` 接受、
+`PairingPayloadCodec.decode` 一路读到 `deviceId` 也接受；C# 侧 `JsonDocument.Parse` 同样接受，
+但 `ReadRequiredString` 里的 `element.GetString()` 抛 **`InvalidOperationException`**（不是 `JsonException`），
+穿透 `Deserialize` 的 `catch (JsonException)` ⇒ 两端一个「成功」一个「未捕获异常」。
+修法：两端 `decode` 在 `root is JsonObject` 检查之后、读第一个字段之前，各加一次
+`WireText.containsLoneSurrogate(root)`（C# 为 `WireText.ContainsLoneSurrogate`），命中即 `malformed-json`。
+这条检查是**文档级**的：包括未知字段里的孤立代理项也拒（重序列化时会被静默改写成 U+FFFD）。
+
+**② URL 校验的两端分歧（真分歧）。**
+Kotlin 的 `validateEphemeralUrl` 先 `trim()` 再 `URI()`；C# 直接把**未 trim 的原串**交给 `Uri.TryCreate`。
+实测 `.NET Uri.TryCreate` 容忍 **U+0020 / U+0009** 前后缀（两端都能过），但**不容忍 U+0085 / U+00A0**；
+而 Kotlin 先 trim 会把它们剥掉 ⇒ 同一份 `ephemeralUrl` 在 Android 是 `ok`、在 Windows 是 `bad-url`。
+修法：C# 也先 `WireText.Trim` 再 `Uri.TryCreate`，并把主机判空从 `string.IsNullOrEmpty` 改成 `WireText.IsBlank`。
+现在两端对 ASCII 空格/制表、U+0085、U+00A0、U+3000 前后缀的结论完全一致（`ephemeral-url-ascii-padded` /
+`next-line-padded` / `ideographic-padded` = `ok`，`record-separator-padded` = `bad-url`、`zero-width-padded` = `ok`）。
+
+**③ 向量自身的缺陷：`expired` 用例从未真的过期。**
+C# 孪生用例首跑 9/10，红的正是 `expired`：向量里那条链接是按 `Now + LifetimeMilliseconds` 构造的
+（`expiresAtEpochMs = 1792800120000`），而测试用冻结的 `frozenNowEpochMs = 1792800000000` 去解析 ⇒ 根本没到期。
+修法不是把测试里的时间硬编码成另一个值（那样只是把缺陷藏进测试），而是 **让每条 link 向量自带 `nowEpochMs`**：
+生成器 `AddAt(name, link, nowEpochMs)` 为每条候选写一个 `nowEpochMs` 字段，两端用例都读它。
+教训：向量只存「输入 + 期望输出」不够，凡是依赖**外部时钟**的用例，时钟本身也必须进向量。
+
+### 14.4 落点
+
+| 端 | 文件 | 改动 |
+| --- | --- | --- |
+| Kotlin | `core/common/src/main/kotlin/com/mediahub/core/common/sync/WireText.kt` | 3360 → **6172 B**：新增 `startsWithAsciiIgnoreCase` / `lowercaseAscii` / `uppercaseAscii` / `compareAsciiIgnoreCase` + 两个私有折叠器 |
+| Kotlin | `core/common/.../pairing/PairingLink.kt` | `extractCode` 与 `parse` 的 trim / 前缀判定全改 `WireText` |
+| Kotlin | `core/common/.../pairing/PairingPayload.kt` | `deviceId` / `ephemeralUrl` / 载荷空文档 / `readRequiredString` 的判空；scheme 小写；**新增文档级孤立代理项检查** |
+| Kotlin | `core/common/.../pairing/PairingFingerprint.kt` | 判空、`lowercaseAscii` 规范化、`uppercaseAscii` 展示 |
+| Kotlin | `core/common/.../pairing/PairingChallenge.kt` | 判空 |
+| Kotlin | `core/common/.../pairing/PairingTls.kt` | 空 pin 判定 |
+| Kotlin | `core/common/.../pairing/PairingTransportSupport.kt` | `LoopbackOnly.addressOrNull` 的 trim 与 `localhost` 判定 |
+| Kotlin | `core/common/.../pairing/PairingAddressCandidates.kt` | 三处 `raw.trim()`、排序末级 `CASE_INSENSITIVE_ORDER` → `compareAsciiIgnoreCase` |
+| Kotlin | `core/common/.../pairing/PairingAddressEnumerator.kt` | 接口名 `trim().lowercase()` → `lowercaseAscii(trim(...))`（Android 独有，不进跨端向量） |
+| C# | `windows/src/MediaHub.Sync/WireText.cs` | 5749 → **8278 B**：同样四个助手 |
+| C# | `windows/src/MediaHub.Sync/PairingLink.cs` | `ExtractCode` / `Parse` 的 Trim 与前缀 |
+| C# | `windows/src/MediaHub.Sync/PairingPayload.cs` | `DeviceId` 判空、**URL 先 trim**、主机判空、空文档、`ReadRequiredString`；**新增文档级孤立代理项检查** |
+| C# | `windows/src/MediaHub.Sync/PairingFingerprint.cs` | 判空 |
+| C# | `windows/src/MediaHub.Sync/PairingChallenge.cs` | 判空 |
+| C# | `windows/src/MediaHub.Sync/PairingAddressCandidates.cs` | 接口名 trim、地址 trim、排序末级 `CompareAsciiIgnoreCase` |
+
+**刻意没改的地方**（写下来避免下一轮「顺手统一」把面铺大）：
+
+- `PairingCode.normalize` / `PairingCode.Normalize` **仍然只剥空格、Tab、CR、LF 四类**。配对码是 base64url，
+  非 ASCII 空白在逐字符校验时本来就会落 `not-base64url`，改成 `WireText.trim` 会让「粘贴带 U+00A0 的配对码」
+  从 `not-base64url` 变成 `ok`——那是行为变更，不是契约统一，本轮不做。
+- C# 侧 `PairingPresenter` / `PairingSelfIdentity` / `PairingSession` / `PairingPeerCard` / `PairingTransportServer` /
+  `PairingTransportResult` / `PairingCode`（reason 参数校验）/ `PairingCertificate` 里的 `IsNullOrWhiteSpace` 与 `Trim`
+  是 **Windows 内部输入校验**，Kotlin 侧没有对位代码，不在跨端契约里，本轮不动。
+- Kotlin `PairingAddressEnumerator`（网卡枚举）是 Android 独有，不进跨端向量。
+
+### 14.5 黄金向量新增 `textEdges` 段（老 11 段逐字节不变）
+
+生成器 `D:/mh-verify/pairing-vectors/Program.cs` 302 → ~640 行，在 `addressCandidates` 之后追加第 12 个根键
+`textEdges`，共 10 个子段：
+
+| 子段 | 条数 | 钉住什么 |
+| --- | --- | --- |
+| `whitespaceCodePoints` | 25 | 显式码点表本身 |
+| `blankCandidates` | 14 | `isBlank` / `trim` 的逐候选结论（含 U+001C、U+001F、U+200B、U+FEFF、U+00AD） |
+| `caseFoldPairs` | 8 | `equalsAsciiIgnoreCase`（长 s / 开尔文 / 无点 i 不折） |
+| `asciiCaseTransforms` | 9 | `uppercaseAscii` / `lowercaseAscii` 只动 ASCII |
+| `prefixPairs` | 8 | `startsWithAsciiIgnoreCase` |
+| `comparePairs` | 8 | `compareAsciiIgnoreCase` 是全序（`Math.signum` 语义） |
+| `loneSurrogateCandidates` | 7 | 孤立代理项判定 |
+| `linkCandidates` | 16 | `PairingLink.parse` 的 reason；每条自带 `nowEpochMs` |
+| `payloadCandidates` | 18 | `PairingPayloadCodec.decode` 的 reason；`ok` 时比 `afterRead` 值 |
+| `loneSurrogateDocuments` | 7 | 文档级孤立代理项 ⇒ `malformed-json` |
+
+产物 `vectors.json` 11260 → **128430 B**（sha256 `b9134675…642fa`），逐字节复制到两端资源：
+`core/common/src/test/resources/pairing/windows-pairing-vectors.json` 与
+`windows/tests/assets/windows-pairing-vectors.json`。生成器照惯例**不入库**。
+
+### 14.6 用例清单（两端各 10 例，逐条同名同义）
+
+| Kotlin（`PairingEdgeContractTest`） | C#（`PairingEdgeContractTests`） | 钉住什么 |
+| --- | --- | --- |
+| `whitespace_table_matches_the_vectors_and_excludes_the_jvm_extras` | `TheWhitespaceTableMatchesTheVectorsAndExcludesTheRuntimeExtras` | 25 个码点逐点相等，且 U+001C/U+001F/U+200B/U+FEFF/U+00AD 不在表里 |
+| `is_blank_and_trim_agree_with_every_candidate` | `IsBlankAndTrimAgreeWithEveryVectorCandidate` | 14 条空白候选 |
+| `ascii_case_folding_never_folds_a_non_ascii_lookalike` | `AsciiCaseFoldingNeverFoldsANonAsciiLookalike` | 8 组折叠对 |
+| `ascii_case_transforms_only_touch_ascii_letters` | `AsciiCaseTransformsOnlyTouchAsciiLetters` | 9 条大小写变换 |
+| `prefix_test_folds_ascii_only` | `PrefixTestFoldsAsciiOnly` | 8 组前缀 |
+| `comparison_is_a_total_order_that_folds_ascii_only` | `ComparisonIsATotalOrderThatFoldsAsciiOnly` | 8 组比较 + 反对称性 |
+| `lone_surrogate_detection_matches_every_candidate` | `LoneSurrogateDetectionMatchesEveryCandidate` | 7 条代理项候选 |
+| `link_parsing_reports_the_windows_reason_for_every_candidate` | `LinkParsingReportsTheVectorReasonForEveryCandidate` | 16 条链接 reason |
+| `payload_decoding_reports_the_windows_reason_and_reads_the_same_value` | `PayloadDecodingReportsTheVectorReasonAndReadsTheSameValue` | 18 条载荷 reason + `afterRead` |
+| `documents_with_a_lone_surrogate_are_refused_as_malformed_json` | `DocumentsWithALoneSurrogateAreRefusedAsMalformedJson` | 7 条文档级判定 |
+
+两端断言风格一致：**先比 reason 字符串，再比值**；`ok` 的条目还要比 `afterRead`（把「读到了但读错」也钉住）。
+C# 侧没有 `Assert.Equal(expected, actual, message)` 三参重载（xUnit v3），统一用 `Assert.True(expected == actual, …)`。
+
+### 14.7 实测记录
+
+本机串行实跑（**先 gradle 后 dotnet，不并发**；gradle 跑前 `gradlew --stop`、跑完再 `--stop`，
+`--max-workers=1`、`-Xmx1536m`、`-XX:MaxMetaspaceSize=768m`、`-Dkotlin.daemon.jvm.options=-Xmx1024m`；
+跑完 `hs_err_pid*.log` / `replay_pid*.log` 计数 0）：
+
+| 项 | 结果 |
+| --- | --- |
+| 命令 | `:core:common:testDebugUnitTest :core:database:testDebugUnitTest :feature:settings:testDebugUnitTest :feature:settings:assembleDebugAndroidTest` |
+| 构建 | **BUILD SUCCESSFUL in 2m 29s**、EXIT=0、`234 actionable tasks: 33 executed, 201 up-to-date` |
+| `core/common` JVM | **45 套件 / 622 例 / 0 失败 / 0 错误 / 11 跳过**（612 + 10；11 skip 仍是两个环境门控套件） |
+| `core/database` JVM | **20 套件 / 192 例 / 0 失败 / 0 错误 / 12 跳过**（未变；12 skip 是 `SourceSyncListenerInteropTest`） |
+| `feature/settings` JVM | **23 套件 / 354 例 / 0 失败 / 0 错误 / 0 跳过**（未变） |
+| `PairingEdgeContractTest` | **10/10** |
+| `PairingVectorsTest` | **21/21**（老向量段回归未破） |
+| `settings-debug-androidTest.apk` | **20785281 B**（2026-10-26 22:44 重打） |
+| C# `MediaHub.Tests`（W6 树） | **1614 通过 / 0 失败 / 0 跳过**（1604 + 10），`dotnet test … -p:Platform=x64` |
+
+第一轮 gradle 是红的：`core/common` 622 例里 1 例失败，`PairingEdgeContractTest` 的
+`documents_with_a_lone_surrogate_are_refused_as_malformed_json` 在 `device-id-valid-pair` 上期望 `malformed-json`、实得 `ok`。
+根因是**测试自己写错了**：`valid-pair` 与 `embedded-pair` 两条向量的期望就是 `ok`，Kotlin 侧那条附加断言却要求「所有条目都等于
+`malformed-json`」。C# 孪生用例写的是「仅当 expected 是 `malformed-json` 时才钉稳定码」，所以它一直是对的。
+修法是把 Kotlin 断言改成与 C# 同形（分支断言），重跑 622 例全绿。
+
+| 项 | 状态 |
+| --- | --- |
+| Kotlin 配对文本边界（本机实跑） | **EXECUTED_PASS**：622 例 / 0 失败 |
+| C# 配对文本边界（本机实跑） | **EXECUTED_PASS**：1614 例 / 0 失败 |
+| androidTest APK 构建 | **EXECUTED_PASS**：20785281 B |
+| 10 例 C# / 10 例 Kotlin 之外的真机行为 | **DEVICE_UNVERIFIED**（本机无设备；配对页 instrumentation 走 CI 模拟器） |
+| 真实两机配对 | **NOT_RUN**（需要第二台机器 + 用户同意开防火墙） |
+
+### 14.8 未做项
+
+- **不改配对码的空白集**：`PairingCode.normalize` 仍是「空格/Tab/CR/LF」四类，理由见 14.4。
+- **不统一 Windows 内部校验**：`PairingPresenter` 等九处 `IsNullOrWhiteSpace` 不与 Kotlin 对位，不进契约。
+- **不做大小写不敏感的接口名排序之外的本地化**：`compareAsciiIgnoreCase` 只折 ASCII，中文接口名按码元序，与既有一致。
+- **真实两机配对仍 NOT_RUN**：本轮所有证据都是同机两端各自实跑 + 同一份向量对照，没有第二台机器。
+- **真机 instrumentation DEVICE_UNVERIFIED**：本轮没有新增 instrumentation 用例（文本边界是纯 JVM/C# 层）。
