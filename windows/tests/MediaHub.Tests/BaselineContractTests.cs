@@ -70,6 +70,12 @@ public sealed class BaselineContractTests
         Endpoints = element.GetProperty("endpoints").EnumerateArray().Select(EndpointOf).ToArray(),
         RecordRevision = Long(element, "recordRevision"),
         FieldVersion = Int(element, "fieldVersion"),
+
+        // The opaque block is not part of the content hash, but the merger refuses to write a record that
+        // carries one: dropping it here would silently turn "secrets-require-approval" into a direct write.
+        Secrets = element.TryGetProperty("secrets", out JsonElement secrets) && secrets.ValueKind != JsonValueKind.Null
+            ? secrets.Clone()
+            : null,
     };
 
     private static SourceRecord[] RecordsOf(JsonElement? element) =>
@@ -109,23 +115,115 @@ public sealed class BaselineContractTests
         return BaselineOf(element.Value);
     }
 
+    // ------------------------------------------------------------- digest and round helpers
+
+    /// <summary>
+    /// Reads a digest from the vector. Older sections (<c>baselineCases</c>, <c>mergeCases</c>) carry only the
+    /// identity, the record and the tombstone of an item, so every optional member falls back to its default
+    /// instead of throwing; the sections that do pin the full shape are the ones that assert it.
+    /// </summary>
     private static SourceSyncDigest DigestOf(JsonElement element) => new()
     {
-        Items = element.GetProperty("items").EnumerateArray().Select(item => new SourceSyncDigestItem
-        {
-            SyncSourceId = Text(item, "syncSourceId"),
-            Kind = Enum.Parse<SourceSyncChangeKind>(Text(item, "kind"), ignoreCase: false),
-            Record = item.GetProperty("record") is { ValueKind: JsonValueKind.Object } record ? RecordOf(record) : null,
-            Tombstone = item.GetProperty("tombstone") is { ValueKind: JsonValueKind.Object } tombstone
-                ? new Tombstone
-                {
-                    SyncSourceId = Text(tombstone, "syncSourceId"),
-                    DeletedAtEpochMs = Long(tombstone, "deletedAtEpochMs"),
-                    RecordRevision = Long(tombstone, "recordRevision"),
-                }
-                : null,
-        }).ToArray(),
+        Items = ArrayOf(element, "items", DigestItemOf),
+        Issues = ArrayOf(element, "issues", IssueOf),
+        IsFullSnapshot = OptionalBool(element, "isFullSnapshot"),
     };
+
+    private static SourceSyncDigestItem DigestItemOf(JsonElement item) => new()
+    {
+        SyncSourceId = Text(item, "syncSourceId"),
+        Kind = Enum.Parse<SourceSyncChangeKind>(Text(item, "kind"), ignoreCase: false),
+        Record = OptionalObject(item, "record") is { } record ? RecordOf(record) : null,
+        Tombstone = OptionalObject(item, "tombstone") is { } tombstone ? TombstoneOf(tombstone) : null,
+        ChangedFields = Strings(item, "changedFields"),
+        ContentChanged = OptionalBool(item, "contentChanged"),
+        RecordRevision = OptionalLong(item, "recordRevision"),
+        FieldVersion = OptionalInt(item, "fieldVersion"),
+    };
+
+    private static SourceSyncDigestIssue IssueOf(JsonElement issue) => new()
+    {
+        SyncSourceId = issue.TryGetProperty("syncSourceId", out JsonElement id) && id.ValueKind == JsonValueKind.String
+            ? id.GetString()!
+            : "",
+        Reason = Text(issue, "reason"),
+    };
+
+    private static Tombstone TombstoneOf(JsonElement element) => new()
+    {
+        SyncSourceId = Text(element, "syncSourceId"),
+        DeletedAtEpochMs = Long(element, "deletedAtEpochMs"),
+        RecordRevision = Long(element, "recordRevision"),
+    };
+
+    private static Tombstone[] TombsOf(JsonElement entry) =>
+        entry.TryGetProperty("deletions", out JsonElement deletions) && deletions.ValueKind == JsonValueKind.Array
+            ? deletions.EnumerateArray().Select(TombstoneOf).ToArray()
+            : [];
+
+    private static SyncRoundEntry RoundEntryOf(JsonElement entry) => new()
+    {
+        SyncSourceId = Text(entry, "syncSourceId"),
+        Direction = Enum.Parse<SyncMergeDirection>(Text(entry, "direction"), ignoreCase: false),
+        Kind = Enum.Parse<SourceSyncChangeKind>(Text(entry, "kind"), ignoreCase: false),
+        Reason = Text(entry, "reason"),
+        Record = entry.GetProperty("record") is { ValueKind: JsonValueKind.Object } record ? RecordOf(record) : null,
+        Tombstone = entry.GetProperty("tombstone") is { ValueKind: JsonValueKind.Object } tombstone
+            ? TombstoneOf(tombstone)
+            : null,
+        ConflictingFields = Strings(entry, "conflictingFields"),
+        LocalRevision = Long(entry, "localRevision"),
+        RemoteRevision = Long(entry, "remoteRevision"),
+        RequiresApproval = Bool(entry, "requiresApproval"),
+    };
+
+    private static SyncRoundEntry[] RoundEntriesOf(JsonElement result, string bucket) =>
+        result.GetProperty(bucket).EnumerateArray().Select(RoundEntryOf).ToArray();
+
+    private static T[] ArrayOf<T>(JsonElement entry, string name, Func<JsonElement, T> read) =>
+        entry.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Array
+            ? value.EnumerateArray().Select(read).ToArray()
+            : [];
+
+    private static string[] Strings(JsonElement entry, string name) => ArrayOf(entry, name, Text);
+
+    private static JsonElement? OptionalObject(JsonElement entry, string name) =>
+        entry.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Object ? value : null;
+
+    private static bool OptionalBool(JsonElement entry, string name) =>
+        entry.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.True;
+
+    private static int OptionalInt(JsonElement entry, string name) =>
+        entry.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number ? value.GetInt32() : 0;
+
+    private static long OptionalLong(JsonElement entry, string name) =>
+        entry.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number ? value.GetInt64() : 0;
+
+    /// <summary>
+    /// Everything a digest entry claims, on one line, so a divergence prints as a readable diff instead of
+    /// "expected SourceSyncDigestItem, actual SourceSyncDigestItem".
+    /// </summary>
+    private static string Describe(SourceSyncDigestItem item)
+    {
+        string record = item.Record is { } value
+            ? $"{value.SyncSourceId}/{value.SourceType.Wire}/{value.DisplayName}/{value.RecordRevision}/{value.FieldVersion}/{(value.Secrets is null ? "no-secrets" : "secrets")}"
+            : "-";
+        string tombstone = item.Tombstone is { } deleted
+            ? $"{deleted.SyncSourceId}/{deleted.DeletedAtEpochMs}/{deleted.RecordRevision}"
+            : "-";
+        return $"{item.SyncSourceId}|{item.Kind}|{string.Join(",", item.ChangedFields)}|{item.ContentChanged}|{item.RecordRevision}|{item.FieldVersion}|{record}|{tombstone}";
+    }
+
+    private static string Describe(SyncRoundEntry entry)
+    {
+        string record = entry.Record is { } value
+            ? $"{value.SyncSourceId}/{value.SourceType.Wire}/{value.DisplayName}/{value.RecordRevision}/{value.FieldVersion}/{(value.Secrets is null ? "no-secrets" : "secrets")}"
+            : "-";
+        string tombstone = entry.Tombstone is { } deleted
+            ? $"{deleted.SyncSourceId}/{deleted.DeletedAtEpochMs}/{deleted.RecordRevision}"
+            : "-";
+        return $"{entry.SyncSourceId}|{entry.Direction}|{entry.Kind}|{entry.Reason}|{string.Join(",", entry.ConflictingFields)}|{entry.LocalRevision}|{entry.RemoteRevision}|{entry.RequiresApproval}|{record}|{tombstone}";
+    }
 
     private static string Sha256Hex(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
@@ -594,5 +692,107 @@ public sealed class BaselineContractTests
                 Assert.Equal(Bool(expected[index], "isPrimary"), summary.Items[index].IsPrimary);
             }
         }
+    }
+
+    // ------------------------------------------------------------- digest and round
+
+    /// <summary>
+    /// The change set a push would carry: what the peer does not know yet, given a baseline and the tombstones.
+    /// </summary>
+    /// <remarks>
+    /// The expectations pin three things a plausible implementation gets wrong: a record whose revision moved
+    /// but whose content did not is still sent (so the peer's revision catches up) yet claims no changed field;
+    /// a record behind the baseline is dropped rather than pushed; and a record that cannot be represented on
+    /// the wire becomes an issue instead of vanishing.
+    /// </remarks>
+    [Fact]
+    public void DigestCasesMatchTheWindowsContract()
+    {
+        int compared = 0;
+        foreach (JsonElement entry in Entries("digestCases"))
+        {
+            string name = Text(entry, "name");
+            SourceRecord[] records = RecordsOf(entry.GetProperty("records"));
+            SourceSyncBaseline? baseline = NullableBaselineOf(entry, "baseline");
+
+            SourceSyncDigest actual = SourceSyncDigest.Build(records, baseline, TombsOf(entry));
+            JsonElement expected = entry.GetProperty("digest");
+
+            Assert.Equal(Bool(expected, "isFullSnapshot"), actual.IsFullSnapshot);
+            Assert.Equal(Bool(expected, "isEmpty"), actual.IsEmpty);
+            Assert.Equal(Int(expected, "addedCount"), actual.Added.Count);
+            Assert.Equal(Int(expected, "updatedCount"), actual.Updated.Count);
+            Assert.Equal(Int(expected, "removedCount"), actual.Removed.Count);
+
+            JsonElement[] expectedItems = expected.GetProperty("items").EnumerateArray().ToArray();
+            Assert.Equal(expectedItems.Length, actual.Items.Count);
+            for (int index = 0; index < expectedItems.Length; index++)
+            {
+                string expectedLine = $"{name}|item {index}|{Describe(DigestItemOf(expectedItems[index]))}";
+                Assert.Equal(expectedLine, $"{name}|item {index}|{Describe(actual.Items[index])}");
+            }
+
+            string[] expectedIssues = expected.GetProperty("issues").EnumerateArray()
+                .Select(issue => $"{IssueOf(issue).SyncSourceId}:{IssueOf(issue).Reason}")
+                .ToArray();
+            Assert.Equal(
+                $"{name}|issues|{string.Join(";", expectedIssues)}",
+                $"{name}|issues|{string.Join(";", actual.Issues.Select(issue => $"{issue.SyncSourceId}:{issue.Reason}"))}");
+            compared++;
+        }
+
+        Assert.Equal(Entries("digestCases").Length, compared);
+    }
+
+    /// <summary>
+    /// The two-way round: which decisions may be written, which wait for the user, and which need nothing.
+    /// </summary>
+    /// <remarks>
+    /// This suite owns every case, including <c>windows-does-not-support-cloud-types</c>: the Android twin cannot
+    /// assert it (its type map knows the cloud types), while here it must produce a
+    /// <c>not-supported-on-windows</c> approval rather than a write. Skipping it would leave the one case that
+    /// protects the Windows provider list unasserted on Windows.
+    /// </remarks>
+    [Fact]
+    public void MergerCasesMatchTheWindowsContract()
+    {
+        int compared = 0;
+        foreach (JsonElement entry in Entries("mergerCases"))
+        {
+            string name = Text(entry, "name");
+            SourceSyncDigest local = DigestOf(entry.GetProperty("local"));
+            SourceSyncDigest remote = DigestOf(entry.GetProperty("remote"));
+            SourceSyncBaseline? baseline = NullableBaselineOf(entry, "baseline");
+
+            SyncRoundResult actual = SyncRoundMerger.Merge(local, remote, baseline);
+            JsonElement expected = entry.GetProperty("result");
+
+            foreach (string bucket in new[] { "apply", "requiresApproval", "ignored" })
+            {
+                SyncRoundEntry[] expectedEntries = RoundEntriesOf(expected, bucket);
+                IReadOnlyList<SyncRoundEntry> actualEntries = bucket switch
+                {
+                    "apply" => actual.Apply,
+                    "requiresApproval" => actual.RequiresApproval,
+                    _ => actual.Ignored,
+                };
+
+                Assert.Equal(expectedEntries.Length, actualEntries.Count);
+                for (int index = 0; index < expectedEntries.Length; index++)
+                {
+                    string expectedLine = $"{name}|{bucket}|{index}|{Describe(expectedEntries[index])}";
+                    Assert.Equal(expectedLine, $"{name}|{bucket}|{index}|{Describe(actualEntries[index])}");
+                }
+            }
+
+            Assert.Equal(Bool(expected, "hasWork"), actual.HasWork);
+
+            // The three buckets partition the round: an identity in two buckets is how a review screen
+            // silently applies a change it also offers to cancel.
+            Assert.Equal(actual.Entries.Count, actual.Apply.Count + actual.RequiresApproval.Count + actual.Ignored.Count);
+            compared++;
+        }
+
+        Assert.Equal(Entries("mergerCases").Length, compared);
     }
 }
