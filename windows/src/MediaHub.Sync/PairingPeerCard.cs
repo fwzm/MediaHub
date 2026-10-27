@@ -130,7 +130,18 @@ public static class PairingPeerCardCodec
                 return false;
             }
 
+            // 转义出来的孤立代理项会让 GetString() 抛 InvalidOperationException（不是契约异常），
+            // 所以在读任何字段之前按文档级判成 malformed-json。与 Kotlin 侧同一判定点（W6-71）。
+            if (WireText.ContainsLoneSurrogate(root))
+            {
+                error = PairingPeerCardReasons.MalformedJson;
+                return false;
+            }
+
+            // TryGetInt32 在 ValueKind 不是 Number 时抛 InvalidOperationException（不是返回 false），
+            // 所以必须先判类型；否则一张 {"schemaVersion":"1"} 的卡片会把读端打崩（W6-71 修掉的第三个 Windows 缺陷）。
             if (!root.TryGetProperty("schemaVersion", out JsonElement versionElement)
+                || versionElement.ValueKind != JsonValueKind.Number
                 || !versionElement.TryGetInt32(out int version))
             {
                 error = PairingPeerCardReasons.MalformedJson;
