@@ -26,6 +26,8 @@ import com.mediahub.player.engine.InMemoryEnginePreferenceHistory
 import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackEvent
+import com.mediahub.player.engine.PlaybackEventMessage
+import com.mediahub.player.engine.PlaybackEventSnapshot
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.PlaybackUiState
 import com.mediahub.player.engine.TrackSelection
@@ -50,6 +52,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -80,6 +83,37 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class PlayerAutoplayTest {
+    @Test fun initialCriticalSnapshotIsNotDroppedBeforeTheSyncSubscriberIsReady() = runTest(dispatcher) {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        val saved = mutableListOf<PlaybackProgress>()
+        val initial = PlaybackEventSnapshot(PlaybackEvent.Paused, PlaybackProgress(
+            serverId = "srv-1", itemId = "s1e1", positionMs = 20_000,
+            durationMs = 90_000, isPaused = true, updatedAtEpochMs = 100,
+        ))
+        val engine = FakeEngine(initialEvent = initial)
+        val vm = viewModel(twoEpisodeSeries(), engine, library(),
+            progressStore = FakeProgressStore(null) { saved += it })
+        try {
+            runCurrent()
+            assertEquals(listOf(20_000L), saved.map { it.positionMs })
+        } finally { vm.stopAndFlush(); runCurrent() }
+    }
+
+    @Test fun staleEndedSnapshotCannotAdvanceTheCurrentlyPlayingEpisode() = runTest(dispatcher) {
+        val engine = FakeEngine()
+        val vm = viewModel(twoEpisodeSeries(), engine, library())
+        try {
+            runCurrent()
+            engine.emitEvent(PlaybackEventSnapshot(PlaybackEvent.Ended, PlaybackProgress(
+                serverId = "srv-1", itemId = "previous-item", positionMs = 90_000,
+                durationMs = 90_000, isPaused = false, updatedAtEpochMs = 100,
+            )))
+            runCurrent()
+            assertEquals("s1e1", engine.playedSession?.itemId)
+            assertEquals(1, engine.playCalls)
+        } finally { vm.stopAndFlush(); runCurrent() }
+    }
+
     private val dispatcher = StandardTestDispatcher()
 
     @Before
@@ -122,7 +156,10 @@ class PlayerAutoplayTest {
             runCurrent()
             assertEquals("s1e1", engine.playedSession?.itemId)
 
-            engine.emitEvent(PlaybackEvent.Ended)
+            engine.emitEvent(PlaybackEventSnapshot(PlaybackEvent.Ended, PlaybackProgress(
+                serverId = "srv-1", itemId = "s1e1", positionMs = 90_000,
+                durationMs = 90_000, isPaused = false, updatedAtEpochMs = 100,
+            )))
             runCurrent()
 
             assertEquals("s1e2", engine.playedSession?.itemId)
@@ -479,7 +516,8 @@ class PlayerAutoplayTest {
             serverType = ServerType.EMBY,
             displayName = "Emby",
             category = ProviderCategory.MEDIA_SERVER,
-            declaredCapabilities = setOf(ProviderCapability.AUTH, ProviderCapability.LIBRARY),
+            declaredCapabilities = setOf(ProviderCapability.AUTH, ProviderCapability.LIBRARY,
+                ProviderCapability.DETAIL, ProviderCapability.PLAYBACK),
             authMethod = com.mediahub.provider.api.AuthMethod.USERNAME_PASSWORD,
             status = ProviderStatus.STABLE,
         )
@@ -504,13 +542,17 @@ class PlayerAutoplayTest {
 
     private class FakeEngine(
         private val finalProgress: PlaybackProgress? = null,
+        private val initialEvent: PlaybackEventMessage? = null,
     ) : PlaybackEnginePort {
         private val ui = MutableStateFlow(PlaybackUiState())
         override val uiState: StateFlow<PlaybackUiState> get() = ui
         private val progressFlow = MutableSharedFlow<PlaybackProgress>(extraBufferCapacity = 8)
         override val progress: SharedFlow<PlaybackProgress> get() = progressFlow
-        private val eventsFlow = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
-        override val events: Flow<PlaybackEvent> get() = eventsFlow
+        private val eventsFlow = MutableSharedFlow<PlaybackEventMessage>(extraBufferCapacity = 8)
+        override val events: Flow<PlaybackEventMessage> get() = kotlinx.coroutines.flow.flow {
+            initialEvent?.let { emit(it) }
+            eventsFlow.collect { emit(it) }
+        }
         var playedSession: PlaybackSession? = null
         var playCalls = 0
         override val kind: EngineKind = EngineKind.MEDIA3
@@ -527,7 +569,7 @@ class PlayerAutoplayTest {
         override fun selectAudioTrack(selection: TrackSelection?) = Unit
         override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
         fun emitProgress(value: PlaybackProgress) { progressFlow.tryEmit(value) }
-        fun emitEvent(event: PlaybackEvent) { eventsFlow.tryEmit(event) }
+        fun emitEvent(event: PlaybackEventMessage) { eventsFlow.tryEmit(event) }
         override fun stop(): PlaybackProgress? = finalProgress
         override fun release() = Unit
     }

@@ -34,10 +34,12 @@ fun ServerAddressField(
     modifier: Modifier = Modifier,
     placeholder: String = "media.example:8920",
     httpsSwitchEnabled: Boolean = true,
+    enabled: Boolean = true,
 ) {
     Column(modifier = modifier) {
         OutlinedTextField(
             value = value,
+            enabled = enabled,
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth(),
             label = { Text("服务器地址") },
@@ -63,7 +65,7 @@ fun ServerAddressField(
             Switch(
                 checked = preferHttps,
                 onCheckedChange = onHttpsChange,
-                enabled = httpsSwitchEnabled,
+                enabled = enabled && httpsSwitchEnabled,
             )
         }
         if (!preferHttps) {

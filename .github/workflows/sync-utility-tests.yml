@@ -1,0 +1,46 @@
+name: Sync utility safety
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/github-nightly-sync.ps1'
+      - 'scripts/tests/test_github_sync_safety.py'
+      - '.github/workflows/sync-utility-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-git-fixtures:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Record exact revision
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_HEAD) { throw 'Wrong checkout' }
+          New-Item -ItemType Directory -Force utility-evidence | Out-Null
+          $actual | Set-Content -Encoding utf8 utility-evidence/revision.txt
+      - name: Verify disposable Git fixtures
+        shell: pwsh
+        run: |
+          python -X utf8 -m unittest discover -s scripts/tests -p test_github_sync_safety.py -v *> utility-evidence/tests.log
+          $result = $LASTEXITCODE
+          Get-Content utility-evidence/tests.log
+          exit $result
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sync-utility-safety
+          path: utility-evidence/

@@ -773,3 +773,60 @@
 The current query contract uses MediaQueryCapabilities(sortFields, filterFields), container-scoped filter and session-wide sort. MediaFilter v1 accepts only MOVIE/SERIES/EPISODE or null; unsupported values fail before network dispatch. Failed query changes roll back to the last working selection, guarded by navigation generation. SearchRoute and its engine share a SavedStateHandle-backed query; multi-source expansion remains independent UI state.
 
 Preserve later cancellation identity, IOException type-preserving sanitation, asynchronous network/cooldown boundaries and shared pageWindow semantics. The shared internal Emby wire mapper retains nullable unsupported-type behavior for canonical lookup, which already rejects unsupported types explicitly; the MediaFilter constructor enforces the filter boundary. Keep current userinfo-without-password and diagnostic-prefix contracts. No new provider capability, protocol assertion or physical-device pass is introduced by this reconciliation.
+
+### 2026-10-25 ADR-018 clarification: bind headers at MediaSource creation
+
+A per-engine mutable holder alone does not isolate delayed requests from successive
+sources on the same engine. Controlled real HTTP reproduced the old A source sending
+B's fake credentials after a source switch. Publish immutable copied holder values
+and capture them when each MediaSource is created, before asynchronous loading.
+Keep cache/connections/UA/redirect stripping/record-only429 behavior shared through
+the existing base DataSource chain. Forward all factory configuration APIs without
+returning the unwrapped delegate. The real delayed-HLS and late-reader tests are
+mandatory CI contracts. This clarification ports a useful legacy architecture
+contract without adopting its incompatible provider IDs, storage model or progress
+pipeline. Physical playback remains a separate deferred gate.
+
+### 2026-10-25 ADR-017 clarification: immutable critical-event progress
+
+Critical Pause/Seek/Ended messages carry the owning PlaybackProgress captured before
+callbacks or later controls can change state. The coordinator flushes that snapshot
+instead of the last periodic sample. Keep existing periodic intervals and the single
+explicit final-flush authority; Stopped is still a notification, and preview seeks do
+not generate remote commits. Preserve the enum kinds through PlaybackEventMessage,
+with nullable progress only for legacy enum producers. In-repository consumers use
+kind and are rebuilt; no external binary API compatibility is inferred. The single
+engine channel is tapped once after multicast subscribers are ready. Autoplay checks
+the captured owner, and EOF/native state publication cannot rewrite old-event data.
+The old branch's reset-on-critical periodic-window policy is not adopted; existing
+independent sample clocks continue. This preserves current cadence while fixing
+critical payload correctness and ownership.
+
+### 2026-10-25 ADR-015/022 clarification: fail-fast registration invariants
+
+Registered factories must have unique ServerType keys and unique stable descriptor
+IDs. Validate and index the same captured descriptor values; duplicates must not be
+silently hidden by associateBy. ProviderHandle construction, including copy, requires
+runtime capabilities to be a subset of declaredCapabilities. Planned extra capabilities
+with null runtime fields remain valid. Preserve the current ServerType persistence
+and split credential stores; this invariant port does not adopt the old open-ID schema.
+Test doubles must declare their actual provided fields rather than bypassing validation.
+
+### 2026-10-26 ADR-019/026 clarification: protocol and restored-user identity
+
+Preserve the deployed public-probe compatibility for an absent/null/blank ProductName.
+The official Jellyfin generated SDK declares that field optional and nullable:
+https://typescript-sdk.jellyfin.org/interfaces/generated-client.PublicSystemInfo.html
+An explicit Jellyfin marker must not pass an Emby probe; an explicit non-Jellyfin
+product must not pass a Jellyfin probe. Keep Id/Version validation and structured
+401/403 guidance, and do not echo arbitrary product strings in failure messages.
+This ports the useful old product distinction without adopting its mandatory-field
+requirement, which would reject the existing missing-field compatibility fixtures.
+
+After the anonymous server-identity check and the current authentication-attempt
+guard, a restored user must have a nonblank ID equal to the stored user ID.
+An invalid response yields INVALID_RESPONSE and retains the stored session/token;
+only an actual 401 follows the existing expiration cleanup policy. Keep cancellation
+identity and lease/epoch ownership. Normalize the Emby root's outer whitespace and
+endpoint separator, and escape quoted identity-header fields while retaining
+X-Emby-Authorization and separate X-Emby-Token. No store/schema migration is involved.

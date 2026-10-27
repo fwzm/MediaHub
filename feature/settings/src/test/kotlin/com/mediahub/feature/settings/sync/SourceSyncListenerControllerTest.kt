@@ -1,6 +1,7 @@
 package com.mediahub.feature.settings.sync
 
 import com.mediahub.core.common.sync.SourceSyncAction
+import com.mediahub.core.common.sync.SourceSyncCancellation
 import com.mediahub.core.common.sync.SourceSyncCandidate
 import com.mediahub.core.common.sync.SourceSyncCodec
 import com.mediahub.core.common.sync.SourceSyncEnvelope
@@ -209,8 +210,14 @@ private class FakeSession(
 
     var gate: CompletableDeferred<Unit>? = null
 
-    override suspend fun receiveOnce(): SourceSyncTransferImportOutcome {
+    /** W6-61：控制器传给会话的取消把手（断言「界面层有没有把话传到」）。 */
+    var lastCancel: SourceSyncCancellation? = null
+
+    override suspend fun receiveOnce(): SourceSyncTransferImportOutcome = receiveOnce(null)
+
+    override suspend fun receiveOnce(cancel: SourceSyncCancellation?): SourceSyncTransferImportOutcome {
         receiveCalls++
+        lastCancel = cancel
         gate?.await()
         return outcome
     }
@@ -679,6 +686,82 @@ class SourceSyncListenerControllerTest {
 
         assertEquals(SourceSyncListenState.Listening(45_678, false, null), controller.state.value)
         assertTrue(controller.isListening)
+    }
+
+    @Test
+    fun aCancelledWaitGoesBackToListeningWithoutAnyCode() = runTest {
+        // W6-61：取消走的是把手（不是 close、也不是协程取消），界面语义与 W6-58 的接收端一致。
+        val gate = CompletableDeferred<Unit>()
+        val listener = FakeSession()
+        listener.gate = gate
+        val controller = SourceSyncListenerController(FakeFactory(opened = opened(listener))) { _, _ -> }
+        val cancellation = SourceSyncCancellation()
+
+        controller.start(SourceSyncListenForm())
+        val job = launch { controller.awaitOnce(cancellation) }
+        runCurrent()
+        assertEquals(45_678, (controller.state.value as SourceSyncListenState.Receiving).port)
+
+        // 把手置位就当成「这次被取消」：会话给出本地码，控制器把它折成「正在监听」。
+        cancellation.cancel()
+        listener.outcome = transferred(com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED)
+        gate.complete(Unit)
+        job.join()
+
+        assertEquals(
+            "取消不是失败：状态必须回到正在监听",
+            SourceSyncListenState.Listening(45_678, false, null),
+            controller.state.value,
+        )
+        assertNull("取消不许留下任何稳定码", SourceSyncListenCopy.codeOf(controller.state.value))
+        assertTrue("监听仍然开着，可以立刻再等一次", controller.isListening)
+        assertEquals("把手必须被送到会话那一层", cancellation, listener.lastCancel)
+        assertEquals(0, listener.closeCalls)
+    }
+
+    @Test
+    fun aCancelledWaitCanBeFollowedByAnotherOneThatSucceeds() = runTest {
+        val listener = FakeSession()
+        val delivered = mutableListOf<String>()
+        val controller = SourceSyncListenerController(FakeFactory(opened = opened(listener))) { json, _ ->
+            delivered.add(json)
+        }
+        val gate = CompletableDeferred<Unit>()
+        listener.gate = gate
+        val cancellation = SourceSyncCancellation()
+
+        controller.start(SourceSyncListenForm())
+        val first = launch { controller.awaitOnce(cancellation) }
+        runCurrent()
+        cancellation.cancel()
+        listener.outcome = transferred(com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED)
+        gate.complete(Unit)
+        first.join()
+        assertEquals(SourceSyncListenState.Listening(45_678, false, null), controller.state.value)
+
+        // 第二次：换一枚新把手，正常收下一封信封 —— 取消没有把监听弄坏。
+        listener.gate = null
+        listener.outcome = imported(envelopeText())
+        assertTrue(controller.awaitOnce(SourceSyncCancellation()))
+
+        assertTrue(controller.state.value is SourceSyncListenState.Received)
+        assertEquals(1, delivered.size)
+        assertEquals(2, listener.receiveCalls)
+        assertEquals(0, listener.closeCalls)
+    }
+
+    @Test
+    fun aRealFailureAfterACancelStillReportsItsCode() = runTest {
+        // 取消优先只覆盖「这次被取消」；取消之后真出的错仍要如实显示（不能把一切都当取消吞掉）。
+        val listener = FakeSession(outcome = transferred(SourceSyncTransferReasons.IO_FAILED))
+        val controller = SourceSyncListenerController(FakeFactory(opened = opened(listener))) { _, _ -> }
+
+        controller.start(SourceSyncListenForm())
+        assertTrue(controller.awaitOnce(SourceSyncCancellation()))
+
+        assertEquals(SourceSyncTransferReasons.IO_FAILED, SourceSyncListenCopy.codeOf(controller.state.value))
+        assertTrue(controller.state.value is SourceSyncListenState.Failed)
+        assertTrue("失败不该把监听关掉", controller.isListening)
     }
 
     @Test

@@ -431,29 +431,66 @@ public sealed class SourceSyncTlsTransportTests
         }
     }
 
-    // ---- 6. the timeout classification is deterministic, not a race ------------------------
+    // ---- 6. accept-budget wiring and established TLS classification are separate contracts --
 
     [Fact]
-    public async Task A_timeout_is_reported_as_a_timeout_even_when_the_accept_was_slow()
+    public async Task Slow_accept_passes_the_remaining_budget_and_only_the_operator_token_to_TLS()
     {
-        // W6-26 regression: the endpoint starts the transfer budget *before* it accepts, so a slow accept
-        // used to consume budget the handshake still counted on. The handshake then saw its own caller
-        // cancelled well before its own deadline and reported "the caller cancelled" for what was really a
-        // timeout - the windows-ci failure this test now pins down. The accept is delayed here on purpose,
-        // so the race is reproduced every time instead of one run in three.
-        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(null, 0, true);
-        Assert.True(start.Started, start.Detail);
-        await using SourceSyncTransferListener listener = start.Listener!;
-
-        Task<SourceSyncTransferResult> receiving =
-            listener.ReceiveOnceAsync(null, TimeSpan.FromMilliseconds(900));
-        await Task.Delay(TimeSpan.FromMilliseconds(400));
-
+        // The previous fixture slept400ms inside900ms. A delayed continuation could instead exhaust
+        // the accept phase and legitimately return transfer-timeout before any TLS handshake existed.
+        // Model25s spent accepting inside30s, then observe the arguments at the real endpoint boundary.
+        using var tcp = new TcpListener(IPAddress.Loopback, 0);
+        tcp.Start();
+        using SourceSyncTlsIdentity identity = SourceSyncTlsIdentity.Create();
+        using var operatorCancellation = new CancellationTokenSource();
+        TimeSpan? handedBudget = null;
+        CancellationToken? handedCancellation = null;
+        int calls = 0;
+        await using var listener = new SourceSyncTransferListener(
+            tcp, (IPEndPoint)tcp.LocalEndpoint, identity, _ => TimeSpan.FromSeconds(25),
+            (_, certificate, _, budget, cancellation) =>
+            {
+                Assert.Same(identity.Certificate, certificate);
+                handedBudget = budget;
+                handedCancellation = cancellation;
+                calls++;
+                return Task.FromResult(SourceSyncTlsHandshakeResult.Failed(
+                    SourceSyncTlsReasons.HandshakeFailed, "controlled boundary result"));
+            });
         using TcpClient silent = new();
         await silent.ConnectAsync(IPAddress.Loopback, listener.Port);
-        await using NetworkStream stream = silent.GetStream();
+        SourceSyncTransferResult received = await listener.ReceiveOnceAsync(
+            null, TimeSpan.FromSeconds(30), operatorCancellation.Token);
+        Assert.Equal(1, calls);
+        Assert.Equal(TimeSpan.FromSeconds(5), handedBudget);
+        Assert.Equal(operatorCancellation.Token, handedCancellation);
+        Assert.False(received.Succeeded);
+        Assert.Equal(SourceSyncTlsReasons.HandshakeFailed, received.Reason);
+        Assert.Equal("controlled boundary result", received.Detail);
+    }
 
-        SourceSyncTransferResult received = await receiving;
+    [Theory]
+    [InlineData(30000, 25000, 5000)]
+    [InlineData(30000, 30000, 1)]
+    [InlineData(30000, 35000, 1)]
+    public void Remaining_budget_includes_accept_time_and_never_restarts_the_default_deadline(
+        int totalMilliseconds, int elapsedMilliseconds, int remainingMilliseconds)
+    {
+        Assert.Equal(TimeSpan.FromMilliseconds(remainingMilliseconds), SourceSyncTransferListener.Remaining(
+            TimeSpan.FromMilliseconds(totalMilliseconds), TimeSpan.FromMilliseconds(elapsedMilliseconds)));
+    }
+
+    [Fact]
+    public async Task An_established_TLS_deadline_is_reported_as_a_timeout()
+    {
+        using var tcp = new TcpListener(IPAddress.Loopback, 0);
+        tcp.Start();
+        using TcpClient silent = new();
+        await silent.ConnectAsync((IPEndPoint)tcp.LocalEndpoint);
+        using TcpClient accepted = await tcp.AcceptTcpClientAsync();
+        using SourceSyncTlsIdentity identity = SourceSyncTlsIdentity.Create();
+        SourceSyncTlsHandshakeResult received = await SourceSyncTlsHandshake.AuthenticateServerAsync(
+            accepted.GetStream(), identity.Certificate, null, TimeSpan.FromMilliseconds(250));
         Assert.False(received.Succeeded);
         Assert.Equal(SourceSyncTlsReasons.HandshakeFailed, received.Reason);
         Assert.Contains("did not finish within", received.Detail, StringComparison.Ordinal);
@@ -463,21 +500,17 @@ public sealed class SourceSyncTlsTransportTests
     [Fact]
     public async Task A_caller_that_cancels_before_the_deadline_is_reported_as_a_cancellation()
     {
-        SourceSyncTransferStartResult start = SourceSyncTransferListener.Start(null, 0, true);
-        Assert.True(start.Started, start.Detail);
-        await using SourceSyncTransferListener listener = start.Listener!;
-
+        using var tcp = new TcpListener(IPAddress.Loopback, 0);
+        tcp.Start();
         using TcpClient silent = new();
-        await silent.ConnectAsync(IPAddress.Loopback, listener.Port);
-        await using NetworkStream stream = silent.GetStream();
-
-        // The budget is generous and the operator's token is the only thing that fires: this is the one
-        // case that must keep saying "the caller cancelled".
-        using CancellationTokenSource cancelled = new(TimeSpan.FromMilliseconds(250));
-        SourceSyncTransferResult received = await listener.ReceiveOnceAsync(
-            null,
-            TimeSpan.FromSeconds(10),
-            cancelled.Token);
+        await silent.ConnectAsync((IPEndPoint)tcp.LocalEndpoint);
+        using TcpClient accepted = await tcp.AcceptTcpClientAsync();
+        using SourceSyncTlsIdentity identity = SourceSyncTlsIdentity.Create();
+        using var cancelled = new CancellationTokenSource();
+        Task<SourceSyncTlsHandshakeResult> handshaking = SourceSyncTlsHandshake.AuthenticateServerAsync(
+            accepted.GetStream(), identity.Certificate, null, TimeSpan.FromSeconds(30), cancelled.Token);
+        cancelled.Cancel();
+        SourceSyncTlsHandshakeResult received = await handshaking;
         Assert.False(received.Succeeded);
         Assert.Equal(SourceSyncTlsReasons.HandshakeFailed, received.Reason);
         Assert.Contains("caller cancelled", received.Detail, StringComparison.Ordinal);

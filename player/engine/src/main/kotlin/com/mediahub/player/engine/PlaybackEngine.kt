@@ -74,10 +74,10 @@ class PlaybackEngine(
 
     // 关键事件通道：改 Channel(UNLIMITED)（review P2-3），保证 Pause/Seek/Resume 快速
     // 连续发生时逐条保留、严格保序、不被 conflate/drop。周期性 position 仍由 StateFlow conflate。
-    private val _events = Channel<PlaybackEvent>(Channel.UNLIMITED)
+    private val _events = Channel<PlaybackEventMessage>(Channel.UNLIMITED)
 
     /** 关键事件流（Pause/Seek/Ended/Stopped）。 */
-    override val events: Flow<PlaybackEvent> = _events.receiveAsFlow()
+    override val events: Flow<PlaybackEventMessage> = _events.receiveAsFlow()
 
     private val trackSelector: DefaultTrackSelector =
         requireNotNull(player.trackSelector as? DefaultTrackSelector) {
@@ -144,6 +144,7 @@ class PlaybackEngine(
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                val endedProgress = if (playbackState == Player.STATE_ENDED) currentProgress() else null
                 if (playbackState == Player.STATE_READY) {
                     session?.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_READY)
                 }
@@ -156,7 +157,7 @@ class PlaybackEngine(
                     )
                 }
                 if (playbackState == Player.STATE_ENDED) {
-                    _events.trySend(PlaybackEvent.Ended)
+                    emitEvent(PlaybackEvent.Ended, endedProgress)
                 }
             }
 
@@ -171,13 +172,16 @@ class PlaybackEngine(
             }
 
             override fun onTracksChanged(tracks: Tracks) {
+                if (released) return
                 val mapped = TrackMapper.mapTracks(tracks)
+                currentTrackSnapshotToken = mapped.snapshotToken
                 _uiState.update {
                     it.copy(
                         audioTracks = mapped.audioTracks,
                         subtitleTracks = mapped.subtitleTracks,
                         selectedAudio = mapped.selectedAudio,
                         selectedSubtitle = mapped.selectedSubtitle,
+                        trackRowMap = mapped.rowMap,
                         audioFormatMime = player.audioFormat?.sampleMimeType,
                     )
                 }
@@ -250,6 +254,7 @@ class PlaybackEngine(
     override fun play(session: PlaybackSession) {
         if (released) return
         playbackGeneration++
+        currentTrackSnapshotToken = 0L
         subtitleOperation++
         // 同一个 ExoPlayer 可复用 audio session；每次媒体会话仍先释放旧 capture，防止迟到回调串流。
         audioSpectrumController.clear()
@@ -299,23 +304,38 @@ class PlaybackEngine(
         if (player.playWhenReady && player.playbackState != Player.STATE_ENDED) pause() else resume()
     }
 
+    override fun setPlayWhenReady(play: Boolean) {
+        if (released) return
+        if (player.playWhenReady != play) {
+            if (play) resume() else pause()
+        } else {
+            _uiState.update { it.copy(playWhenReady = play) }
+        }
+    }
+
     fun pause() {
+        val generation = playbackGeneration
+        val progress = currentProgress()?.copy(isPaused = true)
         player.pause()
         // 立即同步意图，不等 onPlayWhenReadyChanged 回调（按钮图标必须立刻翻转）。
-        _uiState.update { it.copy(playWhenReady = false) }
-        _events.trySend(PlaybackEvent.Paused)
+        if (playbackGeneration == generation) _uiState.update { it.copy(playWhenReady = false) }
+        emitEvent(PlaybackEvent.Paused, progress)
     }
 
     fun resume() {
-        _events.trySend(PlaybackEvent.Resumed)
+        val generation = playbackGeneration
+        val progress = currentProgress()?.copy(isPaused = false)
         player.play()
-        _uiState.update { it.copy(playWhenReady = true) }
+        if (playbackGeneration == generation) _uiState.update { it.copy(playWhenReady = true) }
+        emitEvent(PlaybackEvent.Resumed, progress)
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) {
-        player.seekTo(positionMs.coerceAtLeast(0))
+        val target = positionMs.coerceAtLeast(0)
+        val progress = if (mode == SeekMode.COMMIT) currentProgress()?.copy(positionMs = target) else null
+        player.seekTo(target)
         // PREVIEW（手势拖动/连续快退节流）不发 Seeked，避免远端即时同步风暴（U3-B）
-        if (mode == SeekMode.COMMIT) _events.trySend(PlaybackEvent.Seeked)
+        if (mode == SeekMode.COMMIT) emitEvent(PlaybackEvent.Seeked, progress)
     }
 
     override fun setSpeed(speed: Float) {
@@ -335,9 +355,15 @@ class PlaybackEngine(
     }
 
     override fun selectSubtitleTrack(selection: TrackSelection?) {
+        if (!isTrackSelectionCurrent(selection)) return
         subtitleOperation++
         selectTrack(C.TRACK_TYPE_TEXT, selection)
     }
+
+    private var currentTrackSnapshotToken = 0L
+
+    override fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean =
+        !released && (selection?.snapshotToken?.let { it != 0L && it == currentTrackSnapshotToken } ?: true)
 
     // ---- 外挂字幕（P2 字幕中心切片一） ----
 
@@ -503,6 +529,7 @@ class PlaybackEngine(
     }
 
     private fun selectTrack(trackType: Int, selection: TrackSelection?) {
+        if (!isTrackSelectionCurrent(selection)) return
         val mapped = trackSelector.currentMappedTrackInfo
         val builder = trackSelector.buildUponParameters().clearOverridesOfType(trackType)
             .setTrackTypeDisabled(trackType, selection == null)
@@ -534,13 +561,15 @@ class PlaybackEngine(
             }
             if (renderer < 0) return
             val groups = mapped.getTrackGroups(renderer)
-            if (selection.trackIndex !in 0 until groups[groupIndex].length) return
+            val plan = TrackSelectionPlanner.plan(renderer, groups,
+                selection.copy(groupIndex = groupIndex), currentTrackSnapshotToken)
+                as? TrackSelectionPlanner.Plan.Override ?: return
             rendererIndices.forEach { index ->
                 builder.clearSelectionOverrides(index)
                 builder.setRendererDisabled(index, index != renderer)
             }
             builder.setOverrideForType(TrackSelectionOverride(groups[groupIndex], selection.trackIndex))
-            builder.setSelectionOverride(renderer, groups, DefaultTrackSelector.SelectionOverride(groupIndex, selection.trackIndex))
+            TrackSelectionPlanner.apply(builder, plan)
             if (trackType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = selection
         }
         trackSelector.setParameters(builder)
@@ -588,6 +617,10 @@ class PlaybackEngine(
     /**
      * 立即读取当前进度（不依赖每秒循环，退出瞬间取值用）。
      */
+    private fun emitEvent(kind: PlaybackEvent, progress: PlaybackProgress?) {
+        if (progress != null) _events.trySend(PlaybackEventSnapshot(kind, progress))
+    }
+
     fun currentProgress(): PlaybackProgress? = session?.let { s ->
         PlaybackProgress(
             serverId = s.serverId,

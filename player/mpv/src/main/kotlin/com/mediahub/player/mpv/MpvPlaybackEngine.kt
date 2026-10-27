@@ -15,6 +15,8 @@ import com.mediahub.player.engine.EngineKind
 import com.mediahub.player.engine.ExternalSubtitle
 import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackEvent
+import com.mediahub.player.engine.PlaybackEventMessage
+import com.mediahub.player.engine.PlaybackEventSnapshot
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.PlaybackStartupTrace
 import com.mediahub.player.engine.PlaybackUiState
@@ -118,8 +120,8 @@ class MpvPlaybackEngine internal constructor(
     override val uiState: StateFlow<PlaybackUiState> = _uiState.asStateFlow()
     private val _progress = MutableSharedFlow<PlaybackProgress>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val progress: SharedFlow<PlaybackProgress> = _progress.asSharedFlow()
-    private val _events = Channel<PlaybackEvent>(Channel.UNLIMITED)
-    override val events: Flow<PlaybackEvent> = _events.receiveAsFlow()
+    private val _events = Channel<PlaybackEventMessage>(Channel.UNLIMITED)
+    override val events: Flow<PlaybackEventMessage> = _events.receiveAsFlow()
     // mpv/libass renders subtitles directly; there are no external cues or audio-session samples.
     override val subtitleCues: StateFlow<CueGroup?> = MutableStateFlow(null)
     override val downloadSpeedBps: StateFlow<Long> = MutableStateFlow(0L)
@@ -137,6 +139,7 @@ class MpvPlaybackEngine internal constructor(
     private var activeResources: Resources? = null // nativeLock only
 
     private class Run(val generation: Long, val session: PlaybackSession) {
+        var requestedPlayWhenReady = session.startPaused?.not() // stateLock; null keeps native startup default
         var playJob: Job? = null // stateLock
         var progressJob: Job? = null // stateLock
         var acceptsUpdates = true // stateLock
@@ -147,7 +150,8 @@ class MpvPlaybackEngine internal constructor(
         @Volatile var resources: Resources? = null // published only after successful native initialization
     }
 
-    private class Resources(val owner: Run, val mpv: MpvInstance, val bridge: MpvBridge) {
+    private class Resources(val owner: Run, val mpv: MpvInstance, val bridge: MpvBridge,
+        val surfaces: MpvSurfaceBinding) {
         var closed = false // nativeLock
     }
 
@@ -254,7 +258,8 @@ class MpvPlaybackEngine internal constructor(
                     checkCurrent()
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_INIT_FINISHED)
                     val initialSurface = synchronized(stateLock) { attachedSurface }
-                    initialSurface?.let { m.attachSurface(it) }
+                    val surfaces = MpvSurfaceBinding(m)
+                    surfaces.replace(initialSurface)
                     m.observeProperty("time-pos", MpvInstance.Format.DOUBLE)
                     m.observeProperty("duration", MpvInstance.Format.DOUBLE)
                     m.observeProperty("pause", MpvInstance.Format.FLAG)
@@ -266,11 +271,7 @@ class MpvPlaybackEngine internal constructor(
                     checkCurrent()
                     // G3：降级重播必须尊重暂停意图（默认 null = 沿用既有「起播即播放」行为）。
                     // 必须在 loadfile 之后设置，否则会被 loadfile 重置为新文件默认的播放态。
-                    if (s.startPaused == true) {
-                        m.setPropertyBoolean("pause", true)
-                        withCurrent(run) { _uiState.update { it.copy(isPlaying = false, playWhenReady = false) } }
-                    }
-                    val resources = Resources(run, m, b)
+                    val resources = Resources(run, m, b, surfaces)
                     // Publication and invalidation are atomic; release cannot miss a newly published handle.
                     synchronized(stateLock) {
                         checkCurrent()
@@ -278,10 +279,19 @@ class MpvPlaybackEngine internal constructor(
                         run.resources = resources
                         published = true
                     }
+                    // An explicit command may arrive inside loadfile before publication. Read it
+                    // after publishing; later commands can now queue behind nativeLock safely.
+                    val desiredPlay = synchronized(stateLock) { run.requestedPlayWhenReady }
+                    if (desiredPlay != null) {
+                        m.setPropertyBoolean("pause", !desiredPlay)
+                        withCurrent(run) { _uiState.update {
+                            it.copy(isPlaying = it.isPlaying && desiredPlay, playWhenReady = desiredPlay)
+                        } }
+                    }
                     // Surface changes made while init was unpublished must not block Main or get lost.
                     val latestSurface = synchronized(stateLock) { attachedSurface }
                     if (latestSurface !== initialSurface) {
-                        if (latestSurface != null) m.attachSurface(latestSurface) else m.detachSurface()
+                        surfaces.replace(latestSurface)
                     }
                     startProgressLoop(run)
                     withCurrent(run) { logger.i(LogTag.PLAYER, "mpv 开始播放 serverId=${s.serverId} itemId=${s.itemId}") }
@@ -352,8 +362,10 @@ class MpvPlaybackEngine internal constructor(
                     // 修复：EOF 时同时置 isEnded = true、playWhenReady = false，
                     // 让 UI 的 `showPauseIcon = playWhenReady && !isEnded`（G3 已加）真正生效。
                     withCurrent(run) {
+                        val progress = progressSnapshot(run, null,
+                            _uiState.value.copy(isEnded = true, playWhenReady = false))
                         _uiState.update { it.copy(isEnded = true, playWhenReady = false) }
-                        _events.trySend(PlaybackEvent.Ended)
+                        _events.trySend(PlaybackEventSnapshot(PlaybackEvent.Ended, progress))
                     }
                 }
             }
@@ -389,9 +401,9 @@ class MpvPlaybackEngine internal constructor(
             if (released) return
             attachedSurface = surface
         }
-        withNative { _, m ->
+        withNative { run, _ ->
             val latest = synchronized(stateLock) { attachedSurface }
-            if (latest != null) m.attachSurface(latest) else m.detachSurface()
+            run.resources?.surfaces?.replace(latest)
         }
     }
 
@@ -406,21 +418,50 @@ class MpvPlaybackEngine internal constructor(
      * 现在直接读 **mpv 的权威属性 pause**：同步反映真实播放意图，不依赖回调时序。
      * 读失败（属性不可用）时不发控制指令或成功事件，避免用迟到的 UI 状态猜测播放意图。
      */
-    override fun togglePlayPause() = withNative { run, m ->
-        // Native observers are asynchronous; read the authoritative pause property under the native lock.
-        val paused = m.getPropertyBoolean("pause") ?: return@withNative
-        // 当前是暂停态 → 本次点击是继续（pause=false）；否则是暂停（pause=true）。
-        m.setPropertyBoolean("pause", !paused)
-        withCurrent(run) {
-            // 立即同步意图，不等 observer 回调（按钮图标必须立刻翻转）。
-            _uiState.update { it.copy(playWhenReady = paused) }
-            _events.trySend(if (paused) PlaybackEvent.Resumed else PlaybackEvent.Paused)
+    override fun togglePlayPause() {
+        val pending = synchronized(stateLock) { current?.takeIf { isCurrent(it) && it.resources == null } }
+        if (pending != null) {
+            setPlayWhenReady(!synchronized(stateLock) { pending.requestedPlayWhenReady ?: true })
+            return
+        }
+        withNative { run, m ->
+            // Native observers are asynchronous; read authoritative pause under nativeLock.
+            val paused = m.getPropertyBoolean("pause") ?: return@withNative
+            m.setPropertyBoolean("pause", !paused)
+            val progress = criticalProgress(run, m, _uiState.value.copy(playWhenReady = paused))
+            withCurrent(run) {
+                run.requestedPlayWhenReady = paused
+                _uiState.update { it.copy(playWhenReady = paused) }
+                _events.trySend(PlaybackEventSnapshot(if (paused) PlaybackEvent.Resumed else PlaybackEvent.Paused, progress))
+            }
+        }
+    }
+
+    override fun setPlayWhenReady(play: Boolean) {
+        val run = synchronized(stateLock) {
+            val owner = current?.takeIf { isCurrent(it) } ?: return
+            owner.requestedPlayWhenReady = play
+            _uiState.update { it.copy(playWhenReady = play) }
+            owner
+        }
+        withNative(run) { _, m ->
+            val previous = m.getPropertyBoolean("pause")
+            m.setPropertyBoolean("pause", !play)
+            val progress = criticalProgress(run, m, _uiState.value.copy(playWhenReady = play))
+            withCurrent(run) {
+                _uiState.update { it.copy(playWhenReady = play) }
+                if (previous != !play) _events.trySend(PlaybackEventSnapshot(if (play) PlaybackEvent.Resumed else PlaybackEvent.Paused, progress))
+            }
         }
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) = withNative { run, m ->
         m.command(arrayOf("seek", (positionMs / 1000.0).toString(), "absolute"))
-        if (mode == SeekMode.COMMIT) withCurrent(run) { _events.trySend(PlaybackEvent.Seeked) }
+        if (mode == SeekMode.COMMIT) {
+            val progress = criticalProgress(run, m, _uiState.value)
+                .copy(positionMs = positionMs.coerceAtLeast(0))
+            withCurrent(run) { _events.trySend(PlaybackEventSnapshot(PlaybackEvent.Seeked, progress)) }
+        }
     }
 
     override fun setSpeed(speed: Float) = withNative { run, m ->
@@ -435,6 +476,7 @@ class MpvPlaybackEngine internal constructor(
      * 选择无效时不下发命令，避免静默把 aid 设成错误值。
      */
     override fun selectAudioTrack(selection: TrackSelection?) {
+        if (!isTrackSelectionCurrent(selection)) return
         val run = synchronized(stateLock) { current } ?: return
         val trackList = synchronized(stateLock) { run.mpvTrackList.orEmpty() }
         val aid = MpvTrackMapper.nativeAudioId(trackList, selection) ?: run {
@@ -499,6 +541,7 @@ class MpvPlaybackEngine internal constructor(
         }
     }
     override fun selectSubtitleTrack(selection: TrackSelection?) {
+        if (!isTrackSelectionCurrent(selection)) return
         val run = synchronized(stateLock) { subtitleOperation++; current } ?: return
         val rows = synchronized(stateLock) { run.mpvTrackList }
         val sid = MpvTrackMapper.nativeSubtitleId(rows, selection) ?: run {
@@ -512,6 +555,11 @@ class MpvPlaybackEngine internal constructor(
     }
 
     // ---- 外挂字幕 / 偏移（P2 字幕中心切片一） ----
+
+    // Media3 row snapshots cannot be reinterpreted as mpv native ordinals after fallback.
+    override fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean = synchronized(stateLock) {
+        !released && current != null && selection?.snapshotToken == null
+    }
 
     /**
      * mpv 能力矩阵（如实自述）：
@@ -706,6 +754,12 @@ class MpvPlaybackEngine internal constructor(
         }
         job.start()
     }
+
+    // Called under nativeLock, before acquiring stateLock. A failed diagnostic read
+    // must not turn a successfully issued control into an exception.
+    private fun criticalProgress(run: Run, m: MpvInstance, fallback: PlaybackUiState): PlaybackProgress =
+        runCatching { progressSnapshot(run, m, fallback) }
+            .getOrElse { progressSnapshot(run, null, fallback) }
 
     private fun progressSnapshot(run: Run, m: MpvInstance?, fallback: PlaybackUiState): PlaybackProgress {
         val s = run.session

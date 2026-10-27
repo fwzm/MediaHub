@@ -11,6 +11,9 @@ import com.mediahub.core.database.sync.AppliedSourceChange
 import com.mediahub.core.database.sync.SourceSyncImportResult
 import com.mediahub.core.database.sync.SourceSyncPreview
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -25,6 +28,60 @@ import org.junit.Test
  * 测试钉住）。最要紧的一条：没有点允许的条目绝不会被交给写库服务。
  */
 class SourceSyncImportSessionTest {
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun selectingAnArchiveInvalidatesAnInFlightPlaintextPreview() = runTest {
+        val result = CompletableDeferred<SourceSyncPreview>()
+        val apply = FakeApplyPort(ok())
+        val session = SourceSyncImportSession({ result.await() }, apply)
+        session.loadEnvelope(envelopeJson(), "old.json")
+        val job = launch { session.preview() }
+        runCurrent()
+        session.requirePassphrase("passphrase-required", null, "new.mharchive")
+        result.complete(ready(planWithTwoCreateAndOneUnsupported()))
+        job.join()
+        assertEquals(SourceSyncImportStatus.BLOCKED, session.state.value.status)
+        assertEquals("new.mharchive", session.state.value.fileName)
+        assertNull(session.state.value.preview)
+        assertEquals(0, apply.calls)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun aLatePreviewFailureCannotBlockANewDocument() = runTest {
+        val result = CompletableDeferred<SourceSyncPreview>()
+        val session = SourceSyncImportSession({ result.await() }, FakeApplyPort(ok()))
+        session.loadEnvelope(envelopeJson(), "old.json")
+        val job = launch { session.preview() }
+        runCurrent()
+        session.loadEnvelope("new-envelope", "new.json")
+        result.complete(SourceSyncPreview.Rejected("old-failure", null))
+        job.join()
+        assertEquals(SourceSyncImportStatus.READY_TO_PREVIEW, session.state.value.status)
+        assertEquals("new-envelope", session.state.value.envelopeJson)
+        assertNull(session.state.value.blockedReason)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun repeatedApplyWhileSuspendedOnlyCallsTheWriterOnce() = runTest {
+        val result = CompletableDeferred<SourceSyncImportResult>()
+        var calls = 0
+        val session = SourceSyncImportSession(
+            { ready(planWithTwoCreateAndOneUnsupported()) }, { calls++; result.await() },
+        )
+        session.loadEnvelope(envelopeJson())
+        session.preview()
+        session.decide("sync-1", SourceSyncEntryDecision.ALLOW)
+        val first = launch { session.apply() }
+        runCurrent()
+        val second = launch { session.apply() }
+        runCurrent()
+        result.complete(ok())
+        first.join(); second.join()
+        assertEquals(1, calls)
+    }
 
     @Test
     fun previewWithoutAnEnvelopeIsBlocked() = runTest {

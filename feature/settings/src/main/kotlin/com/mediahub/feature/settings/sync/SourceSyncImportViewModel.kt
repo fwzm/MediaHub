@@ -6,15 +6,21 @@ import com.mediahub.core.common.ClientIdentity
 import com.mediahub.core.common.sync.AndroidSourceTypeMap
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.database.sync.AndroidSourceSyncService
+import com.mediahub.core.database.sync.SourceSyncArchiveArtifact
+import com.mediahub.core.database.sync.SourceSyncArchiveExport
+import com.mediahub.core.database.sync.SourceSyncDocumentInput
+import com.mediahub.feature.settings.backup.BackupFileStore
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.provider.api.MediaProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 跨设备来源导入页的 ViewModel（W6-F + W6-H）。
@@ -34,6 +40,7 @@ class SourceSyncImportViewModel @Inject constructor(
     clientIdentity: ClientIdentity,
     credentialVault: CredentialVault,
     providerRegistry: MediaProviderRegistry,
+    private val backupFileStore: BackupFileStore,
 ) : ViewModel() {
 
     private val session = SourceSyncImportSession.production(
@@ -57,7 +64,7 @@ class SourceSyncImportViewModel @Inject constructor(
      */
     private val receiveController = SourceSyncReceiveController(
         port = SourceSyncTransferReceivePort(),
-        onEnvelope = { envelopeJson, fileName -> session.loadEnvelope(envelopeJson, fileName) },
+        onEnvelope = { envelopeJson, fileName -> acceptIncomingEnvelope(envelopeJson, fileName) },
     )
 
     /** 接收区块的四态（Idle / Receiving / Received / Rejected / Failed）。 */
@@ -72,7 +79,7 @@ class SourceSyncImportViewModel @Inject constructor(
      */
     private val listenerController = SourceSyncListenerController(
         factory = SourceSyncListenerImportFactory(),
-        onEnvelope = { envelopeJson, fileName -> session.loadEnvelope(envelopeJson, fileName) },
+        onEnvelope = { envelopeJson, fileName -> acceptIncomingEnvelope(envelopeJson, fileName) },
     )
 
     /** 监听区块的六态（Idle / Listening / Receiving / Received / Rejected / Failed）。 */
@@ -128,6 +135,74 @@ class SourceSyncImportViewModel @Inject constructor(
         sendController.send(form)
     }
 
+    /**
+     * W6-58：把「一次接收 = 一个可取消的 Job + 一个取消把手」这层记账单独拿出来
+     * （见 [SourceSyncReceiveLauncher]）。
+     *
+     * 与发送那条的唯一区别是取消要**真的关连接**：分块收帧是阻塞 socket 读，
+     * 只 cancel() 协程会让界面停在「接收中」直到读超时（缺省 15 秒）。
+     */
+    private val receiveLauncher = SourceSyncReceiveLauncher(viewModelScope) { form, cancel ->
+        receiveController.receive(form, cancel)
+    }
+
+    /**
+     * W6-61：监听端「等一次发送」的记账薄壳（见 [SourceSyncListenLauncher]）。
+     *
+     * 与接收那条同形同理由：等 accept 与分块读帧都是阻塞调用，只 cancel() 协程会让界面停在「接收中」
+     * 直到 accept/读超时（缺省 15 秒）。取消要把手先解开阻塞，再把状态写回「正在监听」——
+     * **监听不关**，可以立刻再等一次。
+     */
+    private val listenLauncher = SourceSyncListenLauncher(viewModelScope) { cancel ->
+        listenerController.awaitOnce(cancel)
+    }
+
+    /**
+     * W6-63：离线加密归档（.mharchive）的口令流程（见 [SourceSyncArchiveController]）。
+     *
+     * 选中的文件先过这里：不是归档返回 false，界面继续走既有明文路径；是归档就停在"要口令"，
+     * 解开后把明文 JSON 交给同一个 [loadEnvelope]——预览与应用对归档和明文完全同路。
+     * 口令只在内存里用一次：解开即丢暂存字节，不落盘、不进日志。
+     */
+    private val archiveController = SourceSyncArchiveController(
+        port = SourceSyncArchiveUnlockPort { bytes, passphrase ->
+            SourceSyncDocumentInput.resolve(bytes, passphrase)
+        },
+        onUnlocked = { envelopeJson, fileName -> loadEnvelope(envelopeJson, fileName) },
+        onBlocked = { reason, message, fileName ->
+            receiveController.clear()
+            listenerController.clearResult()
+            session.requirePassphrase(reason, message, fileName)
+        },
+    )
+
+    /** 口令卡状态：只有选到归档时才可见。 */
+    val archivePrompt: StateFlow<SourceSyncArchivePrompt> = archiveController.prompt
+
+    /**
+     * W6-64：导出侧「另存为文件」的状态机（见 [SourceSyncArchiveExportController]）。
+     *
+     * 与发送卡共用同一份导出产物（[AndroidSourceSyncService.export]）：口令留空写明文 JSON，
+     * 口令非空由 [SourceSyncArchiveExport] 调 ArchiveWriter 包成归档。写盘走既有的 [BackupFileStore]
+     * （SAF 的 openOutputStream），本层不碰 Context，也不在磁盘上留中间副本。
+     */
+    private val archiveExportController = SourceSyncArchiveExportController(
+        exportPort = SourceSyncArchiveExportPort { passphrase ->
+            withContext(Dispatchers.Default) { SourceSyncArchiveExport.of(sourceSyncService.export(), passphrase) }
+        },
+        filePort = SourceSyncArchiveFilePort { uriString, bytes ->
+            when (val written = backupFileStore.write(uriString, bytes)) {
+                is BackupFileStore.WriteResult.Written -> SourceSyncArchiveWriteResult.Written
+                is BackupFileStore.WriteResult.StreamUnavailable -> SourceSyncArchiveWriteResult.StreamUnavailable
+                is BackupFileStore.WriteResult.WriteFailed ->
+                    SourceSyncArchiveWriteResult.WriteFailed(written.cause)
+            }
+        },
+    )
+
+    /** 导出卡片的状态（Idle / AwaitingPassphrase / Ready / Saving / Saved / Failed）。 */
+    val archiveExportState: StateFlow<SourceSyncArchiveExportState> = archiveExportController.state
+
     private val _verification = MutableStateFlow(SourceVerificationViewState())
 
     /** 结果页的逐源验证状态（三态 + 对话框 + 忙碌标记）。 */
@@ -141,10 +216,65 @@ class SourceSyncImportViewModel @Inject constructor(
         }
     }
 
+    /**
+     * W6-63：用户选中一个文件（字节 + 文件名）。
+     *
+     * 两条路：加密归档进口令流程（[SourceSyncArchiveController.offer] 返回 true，本方法到此为止）；
+     * 其余按 UTF-8 文本原样交给 [loadEnvelope]——与 W6-63 之前的明文路径逐字节一致。
+     */
+    private var documentGeneration = 0L
+
+    fun loadPickedDocument(documentBytes: ByteArray, fileName: String) {
+        documentGeneration++
+        session.reset()
+        if (archiveController.offer(documentBytes, fileName)) return
+        val text = documentBytes.toString(Charsets.UTF_8)
+        if (text.isBlank()) return
+        loadEnvelope(text, fileName)
+    }
+
+    /** Uses the existing bounded IO reader; an obsolete picker read cannot replace a newer input. */
+    fun readPickedDocument(uriString: String) {
+        val owner = ++documentGeneration
+        archiveController.clear()
+        session.reset()
+        viewModelScope.launch {
+            val limit = com.mediahub.core.common.archive.ArchiveHeader.MAX_PAYLOAD_BYTES +
+                com.mediahub.core.common.archive.ArchiveHeader.MAX_HEADER_BYTES + 64
+            val loaded = backupFileStore.readBounded(uriString, limit)
+            if (owner != documentGeneration) return@launch
+            when (loaded) {
+                is BackupFileStore.ReadResult.Read -> loadPickedDocument(loaded.bytes, loaded.fileName)
+                BackupFileStore.ReadResult.TooLarge -> session.requirePassphrase("document-too-large", "文件超过允许大小")
+                BackupFileStore.ReadResult.Empty -> session.requirePassphrase("document-empty", "文件为空")
+                is BackupFileStore.ReadResult.ReadFailed -> session.requirePassphrase("document-read-failed", "无法读取所选文件")
+            }
+        }
+    }
+
+    /**
+     * W6-63：用口令解开刚选中的归档。
+     *
+     * PBKDF2-SHA256 是刻意慢的（60 万轮），所以放 Dispatchers.Default 上算，主线程只收状态。
+     * 成功后走 [loadEnvelope]，失败把 ArchiveError 原码留在口令卡错误行。
+     */
+    fun unlockArchive(passphrase: String) {
+        if (passphrase.isBlank()) return
+        viewModelScope.launch {
+            archiveController.unlock(passphrase)
+        }
+    }
+
     /** 手动选文件：顺手清掉上一次的接收结论，避免界面上挂着"已收下信封"的旧回执。 */
     fun loadEnvelope(envelopeJson: String, fileName: String? = null) {
         receiveController.clear()
         listenerController.clearResult()
+        acceptIncomingEnvelope(envelopeJson, fileName)
+    }
+
+    private fun acceptIncomingEnvelope(envelopeJson: String, fileName: String?) {
+        documentGeneration++
+        archiveController.clear()
         session.loadEnvelope(envelopeJson, fileName)
     }
 
@@ -155,7 +285,17 @@ class SourceSyncImportViewModel @Inject constructor(
      * 已有一条在飞时同样返回 false，所以连点只会发一次。
      */
     fun receive(form: SourceSyncReceiveForm) {
-        viewModelScope.launch { receiveController.receive(form) }
+        receiveLauncher.launch(form)
+    }
+
+    /**
+     * W6-58：取消正在飞的那一次接收。
+     *
+     * 没在收时是 no-op（不伪造 Failed、不关任何连接）；正在收时先关连接（阻塞的读立刻返回），
+     * 再取消协程，控制器把状态写回 Idle——**取消是用户操作，不是失败，所以没有任何稳定码**。
+     */
+    fun cancelReceive() {
+        receiveLauncher.cancel()
     }
 
     fun preview() {
@@ -181,7 +321,18 @@ class SourceSyncImportViewModel @Inject constructor(
 
     /** 等一次发送：收到就交给导入页（只进预览，不写库），失败只更新监听区块的状态。 */
     fun awaitListenOnce() {
-        viewModelScope.launch { listenerController.awaitOnce() }
+        listenLauncher.launch()
+    }
+
+    /**
+     * W6-61：取消正在飞的那一次等待。
+     *
+     * 没在等时是 no-op（不伪造 Failed、不关监听）；正在等时先解开阻塞的 accept / 读，
+     * 再取消协程，控制器把状态写回「正在监听」——**取消是用户操作，不是失败，所以没有稳定码**，
+     * 监听端口仍然开着，可以立刻再等一次。
+     */
+    fun cancelListening() {
+        listenLauncher.cancel()
     }
 
     fun decide(key: String, decision: SourceSyncEntryDecision) {
@@ -223,11 +374,50 @@ class SourceSyncImportViewModel @Inject constructor(
         sendController.clearResult()
     }
 
+    // ---- W6-64：导出（另存为文件） ----
+
+    /** 展开「导出（另存为文件）」卡片（幂等：已展开或已有产物时不重置）。 */
+    fun requestArchiveExport() {
+        archiveExportController.request()
+    }
+
+    /**
+     * 生成产物：口令留空 = 明文信封（.json），非空 = 加密归档（.mharchive）。
+     *
+     * 口令策略与凭据拒绝都在 ArchiveWriter 里判，码原样留在卡片错误行；
+     * PBKDF2-SHA256 是刻意慢的（60 万轮），所以放 Dispatchers.Default 上算。
+     */
+    fun prepareArchiveExport(passphrase: String) {
+        viewModelScope.launch {
+            archiveExportController.prepare(passphrase)
+        }
+    }
+
+    /** 系统保存位置已选：把内存里的字节写过去（只写这一个文件，不留副本）。 */
+    fun saveArchiveExport(uriString: String) {
+        viewModelScope.launch { archiveExportController.save(uriString) }
+    }
+
+    /** 用户在保存器上点了取消：丢弃产物回 Idle，一个字节都没写。 */
+    fun cancelArchiveExportSave() {
+        archiveExportController.saveCancelled()
+    }
+
+    /** 收起导出卡片并丢弃暂存字节。 */
+    fun dismissArchiveExport() {
+        archiveExportController.dismiss()
+    }
+
     fun reset() {
+        documentGeneration++
         session.reset()
+        archiveController.clear()
+        archiveExportController.dismiss()
         receiveController.clear()
         listenerController.clearResult()
+        receiveLauncher.clear()
         sendLauncher.clear()
+        listenLauncher.clear()
         sendController.clearResult()
         _verification.value = SourceVerificationViewState()
     }
@@ -238,9 +428,14 @@ class SourceSyncImportViewModel @Inject constructor(
      * 发送端不占端口：连接随 viewModelScope 取消关闭，所以这里只清结论、不做别的。
      */
     override fun onCleared() {
+        documentGeneration++
+        archiveController.clear()
+        archiveExportController.dismiss()
         listenerController.stop()
-        // viewModelScope 取消时那条 Job 自己会收尾（控制器把状态写回 Idle），这里只丢引用。
+        // viewModelScope 取消时那两条 Job 自己会收尾（控制器把状态写回 Idle），这里只丢引用。
+        receiveLauncher.clear()
         sendLauncher.clear()
+        listenLauncher.clear()
         sendController.clearResult()
         super.onCleared()
     }

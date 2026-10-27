@@ -274,3 +274,386 @@ E2E 结论：黄金信封经回环帧搬运后，规划三桶 2 / 1 / 1 与 Wind
 - 与真机 / Windows 服务端的联调：本轮对端是 127.0.0.1 上的测试替身，验证的是帧与码，不是网络与握手。
 - 把客户端接进导入流程（拿到信封后自动预览/应用）——W6-C 的 AndroidSourceSyncService 已能导入，但两者尚未串成一条命令。
 
+## 11. 配对入口（W6-59：只核对链接）
+
+### 11.1 动机（缺口是真的）
+
+第 1-10 节把 Android 侧配对**契约**做齐了：载荷、帧、码、挑战、指纹、链接、候选地址、回环传输客户端，
+共 10 个测试套件。但 `feature/` 层对 `PairingLink` / `PairingPayload` / `PairingTransportClient` /
+`PairingAddressCandidates` **零引用**（在 app / core / feature / provider 的非测试代码里搜这四类名只命中 core:common 自身）。
+也就是说：契约能解析一段链接，可用户没有地方贴这段链接——目标书 ③「二维码安全配对」在 Android 侧
+等于没有入口。本轮补的就是这个入口的第一段。
+
+### 11.2 为什么本版只核对、不连接
+
+| 项 | Windows | Android 本版 | 结论 |
+| --- | --- | --- | --- |
+| 回环 TCP 帧交换 | 有（PairingTransportClient.cs） | 有（PairingTransportClient.kt，W6-G） | 可做 |
+| TLS 1.3 + 证书指纹钉扎 | 有 | **没有** | 连接邀请这一步得等 |
+| 二维码生成/扫码 | 有（PairingCode） | 无相机依赖、无扫码 | 本版只接受粘贴的文本 |
+| 凭据写入 | 有（配对后落库） | 无 | 本版不写任何凭据 |
+
+所以本版的边界写进界面常量（`PairingLinkCopy.NOT_YET`）：**只核对链接里写明的设备与公钥指纹，不会连接对端**。
+把「已实现」和「没做」分开写，是为了避免用户把「核对成功」当成「已经配好」。
+
+### 11.3 三条外部可观察语义
+
+| 输入 | 结果 | 稳定码来源 |
+| --- | --- | --- |
+| 合法链接（`mediahub://pair?...`） | 状态 `Parsed`，显示设备标识 / 公钥指纹（`displayString` 16 组 4 字符大写）/ 剩余秒数 / 对端 host:port | 无码（`codeOf` 为 null） |
+| 空白输入 | 状态 `Failed(pairing-link-empty)`，配一句人话 | 契约码 `PairingLinkReasons.EMPTY` |
+| 非配对链接前缀 | `Failed(not-a-pairing-link)` | `PairingLinkReasons.NOT_A_LINK` |
+| 超过 8192 字符 | `Failed(pairing-link-too-long)` | `PairingLinkReasons.TOO_LONG` |
+| 非法 base64url / 长度模 4 余 1 | `Failed(not-base64url)` | `PairingCodeReasons.NOT_BASE64URL` |
+| 不是合法配对载荷 / 版本不符 / 字段缺失 | `Failed(payload-invalid)` 等 | `PairingCode` 的映射（五个业务码透传） |
+| 已过期（expires <= now） | `Failed(expired)` | `PairingReasons.EXPIRED` |
+
+**没有新增任何 Android 专用码**：界面只显示 core:common 已有的码，本层唯一的补充是给 `pairing-link-empty`
+配一句人话（`EMPTY_HINT`），码本身仍是契约值。
+
+### 11.4 不泄漏挑战
+
+`challenge` 是这次邀请的一次性凭据。状态 `Parsed` 里**没有**它，结果行没有它，`PairingLinkState` 的任何字段也没有它；
+校验用 JVM 用例钉住（`theSuccessLineLeaksNeitherTheChallengeNorTheRawLink`）：结果行不含 `challenge.base64`、不含 `mediahub://`、
+不含 `PairingChallenge(<redacted>)`。链接原文也不进状态（只进输入框，输入框内容不随状态保存）。
+
+### 11.5 落点（文件与行号）
+
+| 文件 | 行号 | 内容 |
+| --- | --- | --- |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/pairing/PairingLinkController.kt` | `:19` / `:37` / `:62` / `:71` / `:90` / `:107` / `:133` / `:138` | `PairingLinkState`（Idle / Parsed / Failed）、`PairingLinkCopy`（含 `:62` `lineOf` 与 `:71` `codeOf`）、`:90` `PairingLinkController(now)`、`:107` `verify`、`:133` `clear`、`:138` `endpointOf`（https 缺省 443、其它 80） |
+| `.../pairing/PairingLinkScreen.kt` | `:39` / `:58` / `:78` | `PairingLinkTags`（`:41` `pairing.screen`、`:43` `pairing.link`、`:45` `pairing.action`、`:47` `pairing.state`、`:49` `pairing.clear`）、`:58` `PairingLinkRoute`（remember 控制器，无 Hilt）、`:78` 无状态 `PairingLinkScreen` |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/SettingsScreen.kt` | `:61` / `:78` / `:89` / `:130` | `:61` import、`:78` `var showPairing`、`:89` `if (showPairing) { PairingLinkRoute(...); return }`（与 W6-F 的导入页同一种页内托管，不改导航图）、`:130` 同步区块的「配对设备」按钮（testTag `pairing.entry` 在 `:133`） |
+
+### 11.6 用例清单
+
+JVM `feature/settings/src/test/kotlin/com/mediahub/feature/settings/pairing/PairingLinkControllerTest.kt`（13 例，全部用 `PairingPayload.create` + `PairingLink.create` 现场造链接、注入固定时钟，不写死 base64）：
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `aRealLinkYieldsTheDeviceFingerprintEndpointAndRemainingSeconds` | Parsed 三字段 + 剩余 90 秒 + 结果行含三项 + `codeOf` 为 null |
+| `anHttpsLinkWithoutAPortFallsBackToFourFortyThree` | 地址规范化（缺省端口 443） |
+| `aBlankLinkIsRefusedWithTheContractEmptyCode` | 空链接 = 契约 `pairing-link-empty`，不是自造码 |
+| `aBareCodeWithoutTheLinkPrefixIsNotAPairingLink` | 只有码没有前缀 → `not-a-pairing-link` |
+| `anExpiredLinkIsRefused` | 过期 → `expired` |
+| `anOverLongLinkIsRefusedByLength` | 超 8192 → `pairing-link-too-long` |
+| `textThatIsNotBase64UrlIsRefused` | 非 base64url → `not-base64url` |
+| `aPayloadThatIsNotAPairingPayloadIsPayloadInvalid` | 合法 base64 但不是载荷 → `payload-invalid` |
+| `aFailedVerifyAfterASuccessDropsThePreviousConclusion` | 不留半成品：失败后上一次成功结论被作废 |
+| `clearReturnsToIdle` | 清空回 Idle，结果行与码都为 null |
+| `theSuccessLineLeaksNeitherTheChallengeNorTheRawLink` | 不泄漏挑战/链接原文 |
+| `theFailureLineCarriesTheStableCode` | 失败行含稳定码与那句人话 |
+| `theCopyIsStableAndSaysTheVersionDoesNotConnect` | 固定文案（标题/按钮/tag）与「不会连接对端」 |
+
+instrumentation `feature/settings/src/androidTest/kotlin/com/mediahub/feature/settings/pairing/PairingLinkScreenTest.kt`（7 例）：
+空态按钮不可点、贴链接后按钮可点并把原文交给回调、Parsed 行显示设备/指纹/剩余秒、Failed 行显示稳定码、
+返回回调只调一次、「清空」把输入框与按钮一起复位、整页不打印挑战。
+
+### 11.7 实测记录
+
+本机串行实跑（跑前 `gradlew --stop`、跑完再 `--stop` 并确认 `Get-Process java` 为 0）：
+
+| 项 | 结果 |
+| --- | --- |
+| 命令 | `gradlew.bat --max-workers=2 --rerun-tasks :feature:settings:testDebugUnitTest :feature:settings:assembleDebugAndroidTest`（`JAVA_HOME`=Android Studio JBR、`ANDROID_HOME`=Sdk） |
+| 构建 | `BUILD SUCCESSFUL in 5m 17s`、`212 actionable tasks: 212 executed`、EXIT=0 |
+| `feature/settings` JVM | **18 套件 / 304 例 / 0 失败 / 0 错误 / 0 跳过**（291 + 13）；`PairingLinkControllerTest` **13/13** |
+| androidTest APK | `settings-debug-androidTest.apk` = **20476121 B**（2026-10-25 13:09 +08:00 重打） |
+| APK 解包核对 | 19 个 dex；7 个新用例名与 `PairingLinkScreenTest` 全在 `classes16.dex`（14248 B）；`pairing.link` / `pairing.action` / `pairing.state` / `pairing.clear` 在 `classes16.dex` 与 `classes8.dex`；入口 tag `pairing.entry` 在 `classes9.dex` ⇒ 不是陈旧包 |
+| 收尾 | `gradlew --stop`、`java-left=0`、仓库无 `hs_err_pid*.log` / `replay_pid*.log` |
+| 设备执行 | **DEVICE_UNVERIFIED**：7 例 instrumentation 本机无设备可跑，结论待 CI 的 visual-instrumentation 作业 |
+
+
+### 11.7.1 模拟器首红与修复（`c5f2d08` → `3400796`）
+
+本机 JVM 与 `assembleDebugAndroidTest` 都是绿的，但第一次真跑 instrumentation 时 `PairingLinkScreenTest` 红了 3 例：
+
+```
+PairingLinkScreenTest > theBackButtonCallsBackExactlyOnce FAILED
+  java.lang.AssertionError: Assert failed: The component is not displayed!
+PairingLinkScreenTest > aFailedStateShowsTheStableCode FAILED
+  java.lang.AssertionError: Failed to assert the following: (Text + EditableText contains 'not-base64url' (ignoreCase: false))
+PairingLinkScreenTest > aParsedStateShowsTheDeviceIdTheFingerprintAndTheRemainingSeconds FAILED
+  java.lang.AssertionError: Failed to assert the following: (Text + EditableText contains 'windows-a' (ignoreCase: false))
+```
+
+两条根因都不是产品代码的问题，是**测试自己的匹配器用错了**：
+
+1. `assertTextContains(text)` 的第二个参数 `substring` **缺省是 false**，即要求整段相等。结果行是
+   「已核对：windows-a，指纹 …，剩余 90 秒（本版本不连接对端）。」这一整句，所以三处断言都必须写成
+   `assertTextContains(..., substring = true)`。这一条本机永远发现不了——JVM 侧只断言 `lineOf()` 返回的字符串，
+   不经过 Compose 语义树。
+2. 返回按钮是 `IconButton { Icon(contentDescription = "返回") }`，它是**内容描述**不是文本：
+   `onNodeWithText("返回")` 匹配不到任何节点 ⇒ `The component is not displayed!`。改用 `onNodeWithContentDescription("返回")`。
+
+修完只重编 androidTest（`gradlew.bat --max-workers=2 :feature:settings:assembleDebugAndroidTest`）→
+`BUILD SUCCESSFUL in 2m 9s`、`155 actionable tasks: 6 executed, 149 up-to-date`、`java-left=0`，
+最终以 CI 的 visual-instrumentation 结论为准。
+
+### 11.8 未做项（本版明确不做）
+
+- ~~不连接对端~~：**已在第 12 节实现**（W6-59b：TLS 1.3 + 证书指纹钉扎，按链接里那一枚指纹钉）。第 11 节描述的版本确实只核对不连接。
+- **不扫码**：没有相机依赖，也不引入；本版只接受粘贴的链接文本。
+- **不写任何凭据/Token**：契约层也没有这类字段，配对成功后落库属于后续任务。
+- **不做候选地址枚举接入**：`PairingAddressCandidates` 仍是纯计算（W6-60）。
+- **真机未跑**：instrumentation 只在模拟器/CI 上跑，真机状态 DEVICE_UNVERIFIED。
+- **未做视觉回归**：只断言标签、文案与语义树，不比对像素。
+
+## 12. 配对入口第二段：真正拉一次邀请（W6-59b）
+
+### 12.1 为什么这一步必须现在就做
+
+第 11 节把「贴链接 → 核对」做完了，但两边能力表里那一行仍然空着：**Android 侧没有 TLS 1.3、没有证书指纹钉扎**，
+所以核对完只能显示「还没连对端」。而拉邀请是配对的第二个必需动作——不验证对端真的是链接里那一台，
+后面「写凭据 / 建同步」就无从谈起（谁都能冒充一个写着别人的链接）。本轮补齐的就是这一段：
+按链接里写明的地址与**那一枚**公钥指纹去拨一次，TLS 1.3 握手时钉扎它，再逐项校验对端回的邀请。
+
+### 12.2 两步刻意分开（第 11 节的边界规则不变）
+
+| 动作 | 发字节 | 失败码来源 | 结果态 |
+| --- | --- | --- | --- |
+| 核对链接（`verify`） | **一个字节都不发** | core:common 的载荷 / 码 / 链接三组码 | `Parsed` |
+| 拉取邀请（`fetchInvitation`） | 一次 TLS 1.3 连接 | core:common 的传输组码（四个）+ 本层两个前置条件码 | `Fetched` / `Failed` |
+
+也就是说：**核对成功仍然不代表配好了**。`PairingLinkCopy.NOT_YET` 仍在页面上，写的是
+「本页只做『核对链接 + 拉一次邀请』：不写任何凭据、不建立同步」，本轮没有放宽这句。
+
+### 12.3 钉扎的信任根只有一处
+
+`PairingTransportFetchPort` 把链接里的指纹同时当作两样东西：
+
+1. `expectedFingerprint`——用于校验对端回传载荷里写的指纹（core 的 `validate`：不符即 `fingerprint-mismatch`）；
+2. `PairingTlsOptions.Pinned(expectedFingerprint.hex)`——TLS 1.3 握手时钉住对端证书 SPKI。
+
+出口接口 `PairingFetchPort` 收的是 `(host, port, expectedChallenge, expectedFingerprint)` 四个值，
+**没有**第五个「另给的信任根」参数：链接就是唯一的根，多一个来源只多一个可被替换的地方。
+
+### 12.4 两个新增的本地前置条件码（不进 core 词汇表）
+
+| 码 | 什么时候 | 会不会拨号 |
+| --- | --- | --- |
+| `pairing-not-verified` | 没先核对链接（或核对失败后）就点「拉取邀请」 | 不会 |
+| `pairing-fetch-unavailable` | 本次构建没有注入拉取出口（预览态 / 未接线） | 不会 |
+
+两条都是**本层前置条件**，不进 `PairingError.kt` 的任何码集合，也不与跨机五套码冲突：
+它们描述的是「本页还没具备拨号的前提」，不是「对端怎么了」。跨机失败码仍然只有 core 的传输组那四个。
+
+### 12.5 外部可观察语义
+
+| 输入 / 时机 | 结果 |
+| --- | --- |
+| 核对后点「拉取邀请」，对端回的邀请逐项通过 | `Fetched`：显示对端设备标识、指纹、`host:port`、剩余秒数，结果行以「邀请已校验」开头 |
+| 指纹对不上 | `Failed(fingerprint-mismatch)`，界面原样显示这个码 |
+| 对端回传的挑战与本端不一致 | `Failed(challenge-mismatch)` |
+| 邀请已过期 | `Failed(lifetime-exceeded)` |
+| 握手超时 / 连接不上 | `Failed(peer-timeout)` 等传输组码 |
+| 拉取进行中再点一次 | 直接忽略（单飞），不拨第二次，状态仍是 `Fetching` |
+| 拉取进行中 | 输入框、核对、拉取、清空四个控件全部禁用，另显示「正在拉邀请」 |
+
+### 12.6 落点
+
+| 文件 | 内容 |
+| --- | --- |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/pairing/PairingFetchPort.kt` | `fun interface PairingFetchPort`（四参数的 `suspend fun fetch`）+ 生产实现 `PairingTransportFetchPort`（`Dispatchers.IO` 里调 `PairingTransportClient.fetchInvitation(..., tls = Pinned(...))`） |
+| `.../pairing/PairingLinkController.kt` | 状态加 `Fetching` / `Fetched`；`suspend fun fetchInvitation()`；`endpointOf` / `endpointText`（https 缺省 443、其它 80）；两个前置条件码常量 |
+| `.../pairing/PairingLinkScreen.kt` | 新 tag `pairing.fetch`；拉取按钮（只在 `Parsed` / `Fetched` 且不忙时可点）；`FETCH_HINT` / `FETCHING_HINT` / `FETCHED_HINT` 三段解释；`NOT_YET` 补回页面底部 |
+
+### 12.7 用例清单
+
+JVM `PairingLinkControllerTest`（**22 例**，原 13 例 + 新增 9 例；拨号一律走替身 `FakeFetchPort`，本类不建 socket）：
+
+| 新增用例 | 钉住什么 |
+| --- | --- |
+| `fetchingWithoutAVerifiedLinkIsRefusedBeforeAnyPort` | 没核对 → `pairing-not-verified`，替身调用 0 次 |
+| `fetchingWithoutAPortReportsTheUnavailableCode` | 没注入口 → `pairing-fetch-unavailable` |
+| `aSuccessfulFetchShowsTheValidatedInvitation` | `Fetched` 四字段 + 剩余秒数按固定时钟算 |
+| `thePortGetsTheHostPortChallengeAndFingerprintFromTheLink` | 交给出口的 host / port / challenge / fingerprint 逐项等于链接里那四项 |
+| `aFetchFailureKeepsTheCoreCodeVerbatim` | 出口的失败码与句子原样透出，不自造码 |
+| `aSecondFetchWhileOneIsInFlightIsIgnored` | 单飞：在飞时再点不拨第二次（替身调用数恒为 1） |
+| `theFetchedLineLeaksNeitherTheChallengeNorTheRawLink` | `Fetched` 结果行不含挑战、不含 `mediahub://`、不含 `PairingChallenge(...)` |
+| `clearAfterAFetchReturnsToIdle` | 拉成功后清空仍回 `Idle` |
+| `aFetchAfterAFailedVerifyIsRefusedBecauseNothingIsHeld` | 核对失败后拉取被拒且不拨号（不留半成品） |
+
+另把 `theCopyIsStableAndSaysTheVersionDoesNotConnect` 改成 `theCopyIsStableAndSaysTheVersionOnlyVerifiesAndFetches`：
+旧断言「不会连接对端」在本轮已经不成立（现在会连），改为断言「不写任何凭据」「不建立同步」，并追加
+`FETCH_HINT` 里三个失败码（`fingerprint-mismatch` / `challenge-mismatch` / `lifetime-exceeded`）。
+**这是一次故意的断言转向**：文案变了，钉的仍然是同一条边界——「连过」不等于「配好」。
+
+instrumentation `PairingLinkScreenTest`（**12 例**，原 7 例 + 新增 5 例）：
+
+| 新增用例 | 钉住什么 |
+| --- | --- |
+| `theFetchButtonIsDisabledUntilTheLinkIsVerified` | `Idle` 时拉取按钮在但不可点 |
+| `aParsedStateEnablesTheFetchButtonAndTheClickIsReported` | `Parsed` 时可点且回调被调一次 |
+| `aFetchingStateDisablesEverythingAndSaysItIsConnecting` | 忙时四个控件全禁 + 状态行含「正在连接」+ 显示 `FETCHING_HINT` |
+| `aFetchedStateShowsTheValidatedInvitationAndSaysSyncIsStillSeparate` | 结果行含「邀请已校验」+ `FETCHED_HINT` 在页面上 |
+| `aFetchFailureShowsTheCoreCodeInTheStateLine` | 失败行含 `fingerprint-mismatch`，且拉取按钮不可点 |
+
+### 12.8 实测记录
+
+本机串行实跑（每轮跑前 `gradlew --stop`、跑完再 `--stop`，两轮之间不并发；`--max-workers=1`、`-Xmx1536m`）：
+
+| 轮次 | 命令 | 结果 |
+| --- | --- | --- |
+| 1 | `:feature:settings:testDebugUnitTest` | **BUILD SUCCESSFUL in 5m 27s**、EXIT=0、`127 actionable tasks: 18 executed, 109 up-to-date`；**18 套件 / 313 例 / 0 失败 / 0 错误 / 0 跳过**（304 + 9），`PairingLinkControllerTest` **22/22** |
+| 2 | `:core:common:testDebugUnitTest :feature:settings:assembleDebugAndroidTest` | **BUILD SUCCESSFUL in 3m 44s**、EXIT=0、`160 actionable tasks: 11 executed, 149 up-to-date`；`core/common` **38 套件 / 542 例 / 0 失败 / 0 错误 / 11 跳过**（跳过的是两个环境门控套件 `SourceSyncTlsInteropTest` 与 `SourceSyncListenerInteropTest`，无 Windows CLI 时按 assumption 跳过，与既有口径一致）；`settings-debug-androidTest.apk` = **20587433 B**（2026-10-25 15:16:21 重打） |
+| 收尾 | — | `gradlew --stop` 两次、`java-left=0`、仓库根 `hs_err_pid*.log` 计数 0 |
+
+androidTest APK 解包核对（不是看大小，是看内容）：20 个 dex；`PairingLinkScreenTest` 与五个新用例名
+（`theFetchButtonIsDisabledUntilTheLinkIsVerified` / `aParsedStateEnablesTheFetchButtonAndTheClickIsReported` /
+`aFetchingStateDisablesEverythingAndSaysItIsConnecting` / `aFetchedStateShowsTheValidatedInvitationAndSaysSyncIsStillSeparate` /
+`aFetchFailureShowsTheCoreCodeInTheStateLine`）以及 tag `pairing.fetch` **全部命中 `classes16.dex`**（17628 B）。
+
+| 项 | 状态 |
+| --- | --- |
+| `feature/settings` JVM（本机实跑） | **EXECUTED_PASS**：313 例 / 0 失败 |
+| `core/common` JVM（本机实跑） | **EXECUTED_PASS**：542 例 / 0 失败（11 skip 全部是环境门控） |
+| androidTest APK 构建 + 内容核对 | **EXECUTED_PASS** |
+| 12 例 instrumentation 真跑 | **DEVICE_UNVERIFIED**（本机无设备；以 CI visual-instrumentation 为准） |
+| 与真实 Windows 对端的跨端拉取 | **NOT_RUN**（需要 Windows 侧起 TLS 1.3 监听 + 第二台机器/同机跨进程，目前只有回环 e2e） |
+
+### 12.9 未做项
+
+- **跨机拉取仍 NOT_RUN**：本轮 TLS 证据只到「core 层 13 例 `PairingTransportTlsTest` + 回环 e2e」，真实两台机器之间没跑。
+- **不写凭据**：`Fetched` 之后没有落库动作，配对完成态属于后续任务。
+- **不做候选地址枚举**：`PairingAddressCandidates` 仍未接 Android 网卡枚举（W6-60）。
+- **不扫码**：仍只接受粘贴文本。
+
+## 13. 配对入口第三段：把网卡枚举接进来（W6-60）
+
+### 13.1 缺的是什么
+
+`PairingAddressCandidates` 从 W6-59 起就在仓库里，但它**没有任何生产调用方**：类注释写得很清楚——「本类不监听端口、不发包、不枚举真实网卡：真实枚举由调用方完成，随后把结果交给这里排序」。第 12 节把「核对链接 + 拉一次邀请」做完了，但页面从来没告诉过用户**本机有哪些地址可以被对端连**。这一节补的正是这一段：谁去读网卡。
+
+### 13.2 与 Windows 侧同义：只产文本，绝不产 socket
+
+Windows 权威实现 `D:/mh-w6/windows/src/MediaHub.Sync/PairingAddressCandidates.cs` 的类注释是这一节的决策依据，逐字要点：
+
+> This is a display-only helper. The pairing listener always binds loopback: binding a real interface would make Windows show a firewall prompt, and a pairing listener that survives on a public interface is a liability, not a feature. Candidates therefore never become sockets here — they only become text in a link a person hands over.
+
+Android 侧照抄这个立场：本轮的产物是**一段只读文本**（「本机有 2 个可用地址，首选 192.168.1.20（Ethernet，有线）」+ 每地址一行），页面上**没有任何「开始监听」按钮**，也没有任何 bind / dial。理由是同一个：真正要开监听就得开防火墙、就得让一个服务活在外网口上，那是产品决策不是展示细节。所以这里只回答「我有哪些地址」，不回答「我准备好被连了」。
+
+这条边界有专门的证据：instrumentation `thePageOffersNoListenButtonAtAll` 直接断言页面上不存在「监听」与「开始监听」两个文本节点。
+
+### 13.3 落点：适配层与展示层分开
+
+| 文件 | 职责 |
+| --- | --- |
+| `core/common/.../pairing/PairingAddressEnumerator.kt`（新） | `fun interface PairingNetworkInterfaceSource { fun read(): List<PairingAddressInput> }`；`object PairingInterfaceKinds`（纯分类）；`class PairingAddressEnumerator`（异常 ⇒ 既有码）；`class JvmNetworkInterfaceSource`（真读 `java.net.NetworkInterface`） |
+| `feature/settings/.../pairing/PairingAddressSummary.kt`（新） | 纯展示：`lineOf` / `linesOf` / `codeOf` + 五条文案常量 |
+| `feature/settings/.../pairing/PairingLinkController.kt`（改） | 新增 `PairingAddressState{NotRead, Ready(report), Unavailable}` 与 `refreshAddresses()`，与既有五态**互不影响** |
+| `feature/settings/.../pairing/PairingLinkScreen.kt`（改） | 页尾新增「本机可被连的地址」区块，四个新 test tag |
+
+**为什么不改 `PairingAddressCandidates` 一个字节**：那一层有 9 例单测加 `PairingVectorsTest` 里的跨端黄金向量（6 个 Windows 形状网卡），钉的是「排序与拒绝原因」。这一轮要的是「怎么把网卡数据搬进来」，搬错和排错是两件事，分开才能各测各的。
+
+### 13.4 分类规则（顺序即优先级）
+
+`PairingInterfaceKinds.of(interfaceName, loopback, virtual, pointToPoint)`：
+
+| 序 | 条件 | 结果 |
+| --- | --- | --- |
+| 1 | `loopback` | `LOOPBACK`（回环最先判：哪怕它同时是虚拟接口、名字还像隧道） |
+| 2 | `virtual` 或 `pointToPoint` 或名字前缀命中 `tun/tap/ppp/ipsec/pptp/l2tp/wg` | `TUNNEL` |
+| 3 | 名字前缀命中 `wlan/wl/wifi/swlan` | `WIRELESS` |
+| 4 | 其余（含空名字） | `WIRED` |
+
+名字先 `trim().lowercase()`，所以 `WLAN0` 与 `Wlan1` 都落 `WIRELESS`。
+
+**地址只收 IPv4**（`Inet4Address`），与 Windows 的 `AddressFamily.InterNetwork` 过滤一致。IPv6 地址不进 `PairingAddressInput`——如果哪天要收，那两边必须同时收，否则同一份 link 在两端会给出不同的候选集合。
+
+### 13.5 失败语义：只用一个既有码
+
+| 情形 | 码 | 说明 |
+| --- | --- | --- |
+| `source.read()` 抛任何 `Exception` | `address-enumeration-failed` | 走 `PairingAddressCandidates.failed()`，**适配层从不抛出** |
+| 读到空表 / 全是不可用地址 | `no-usable-address` | 与上一行是**两个不同的码**：读成功但没地址 ≠ 读不到 |
+| 正常有候选 | `null` | `codeOf` 返回 null |
+
+单张网卡读属性失败（`inputOf` 内 try/catch）只让**那张网卡**贡献空，其余照算——与 Windows 对 `NetworkInformationException` 的逐网卡处理同义。不自造任何 Android 专用码：码表扩容要走 W6-47 结论 C 的三条门槛（两端同名同序 + 交集为空 + 两端各有用例），本轮够不着。
+
+### 13.6 外部可观察语义
+
+| 动作 | 效果 |
+| --- | --- |
+| 进入页面 | `LaunchedEffect` 读一次网卡属性（不发包、不需要用户点任何按钮）；读完置 `Ready(report)` |
+| 点「重新读取本机地址」 | 再读一次并整体替换 report（会重新读，不是缓存） |
+| 没有地址读取出口（预览态 / 未接线） | `Unavailable` + 明说「没有读网卡」，**不假装读到空** |
+| 拉邀请正在进行（`Fetching`） | 刷新按钮禁用（整页唯一的忙态仍然只由拉邀请决定） |
+| 地址流与链接流 | 两条独立 `StateFlow`：读地址不动 `PairingLinkState`，清空链接也不动地址 |
+
+### 13.7 用例清单
+
+JVM `core/common` `PairingAddressEnumeratorTest`（**8 例**）：
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `loopbackWinsBeforeEveryOtherFlag` | 回环优先级最高（含「回环 + 虚拟 + 点对点」同时成立） |
+| `virtualPointToPointAndTunnelPrefixesAllBecomeTunnel` | 虚拟标志、点对点标志、七个隧道前缀逐个断言 |
+| `wirelessPrefixesBecomeWirelessInAnyCase` | 四个无线前缀 + 大小写变体 |
+| `everythingElseIsWiredIncludingAnEmptyName` | 兜底成有线，空名字也不例外 |
+| `aReadFailureBecomesTheExistingEnumerationFailedCodeAndNeverThrows` | 异常 ⇒ 既有码，且只读了一次 |
+| `anEmptyReadIsNoUsableAddressNotAnEnumerationFailure` | 空表与读不到是两个码 |
+| `theAdapterPassesInterfacesThroughAndLetsTheCandidateLayerSortThem` | 适配层只搬运：排序、拒绝原因、`primary` 全由候选层给 |
+| `theProductionSourceIsTheDefaultSoTheCallerCannotForgetIt` | 默认构造即生产实现；**不假设 CI runner 有网卡**，只要求从不抛出且码在集合内 |
+
+JVM `feature/settings` `PairingAddressSummaryTest`（**5 例**）+ `PairingLinkAddressesTest`（**6 例**）：
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `theHeadlineSaysHowManyAndWhichIsPrimary` | 标题说清「几个」与「首选是谁」 |
+| `eachCandidateGetsOneLineWithItsInterfaceAndKind` | 逐字断言 `192.168.1.20（Ethernet，有线）` 与 `10.0.0.5（Wi-Fi，无线）` |
+| `theLinesCarryNeitherAPortNorAUrl` | 地址行不含端口、不含 URL（端口由发起同步那一页决定，这里不替它编） |
+| `noUsableAddressAndAnEnumerationFailureReadDifferently` | 两种失败读起来不一样，码也各自可查 |
+| `theBlockTextSaysItIsDisplayOnlyAndNeverSaysListen` | 文案含「只做展示」「不监听」；标题与按钮**不得**出现「监听」 |
+| `withoutAnEnumeratorTheBlockIsUnavailableAndNothingIsPretended` | 没接出口 ⇒ `Unavailable`，且刷新返回 false |
+| `aRefreshReadsTheInterfacesOnceAndShowsTheCandidates` | 读一次、候选按候选层顺序出现 |
+| `aReadFailureLandsOnTheExistingEnumerationFailedCode` | 读失败落既有码 |
+| `anEmptyReadIsNoUsableAddress` | 空读落 `no-usable-address` |
+| `addressesAndTheLinkStateAreTwoIndependentStreams` | 两条状态流互不覆盖（读地址后链接仍 `Idle`；清空链接后地址仍在） |
+| `aSecondRefreshReReadsAndReplacesTheReport` | 第二次刷新真的再读一遍并替换（不是缓存） |
+
+instrumentation `PairingLinkAddressScreenTest`（**7 例**）：
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `theAddressBlockIsShownWithItsDisplayOnlyHint` | 区块、标题、「只做展示」提示、未读态文案都在 |
+| `anUnavailableStateSaysThereIsNoReaderInsteadOfPretendingItIsEmpty` | 无出口时说明「没有出口」，不说「没有地址」 |
+| `aReadyStateShowsTheHeadlineAndOneLinePerCandidate` | 一行标题 + 每候选一行（按 tag 与逐字文本双查） |
+| `anEmptyReportShowsTheNoUsableAddressCode` | 空报告行的码是 `no-usable-address` |
+| `aFailedReportShowsTheEnumerationFailedCode` | 读不到的行码是 `address-enumeration-failed` |
+| `theRefreshButtonIsEnabledAndTheClickIsReported` | 刷新按钮可点且回调被调一次 |
+| `thePageOffersNoListenButtonAtAll` | **页面上不存在「监听」「开始监听」** |
+
+### 13.8 实测记录
+
+本机串行实跑（跑前 `gradlew --stop`、跑完再 `--stop`；`--max-workers=1`、`-Xmx1536m`、`-XX:MaxMetaspaceSize=768m`、`-Dkotlin.daemon.jvm.options=-Xmx1024m`；跑完 `java-left=0`、仓库根 `hs_err_pid*.log` 计数 0）：
+
+| 项 | 结果 |
+| --- | --- |
+| 命令 | `:core:common:testDebugUnitTest :feature:settings:testDebugUnitTest :feature:settings:assembleDebugAndroidTest` |
+| 构建 | **BUILD SUCCESSFUL in 6m 56s**、EXIT=0、`217 actionable tasks: 32 executed, 185 up-to-date` |
+| `core/common` JVM | **39 套件 / 550 例 / 0 失败 / 0 错误 / 11 跳过**（542 + 8；11 skip 仍是两个环境门控套件） |
+| `feature/settings` JVM | **20 套件 / 324 例 / 0 失败 / 0 错误 / 0 跳过**（313 + 11） |
+| `PairingAddressEnumeratorTest` | **8/8**、0.108 s |
+| `PairingAddressSummaryTest` | **5/5**、0.028 s |
+| `PairingLinkAddressesTest` | **6/6**、0.018 s |
+| `PairingLinkControllerTest` | **22/22**（回归未破） |
+| `PairingAddressCandidatesTest` | **9/9**（候选层一字未动） |
+| `settings-debug-androidTest.apk` | **20594218 B**（2026-10-25 16:32:36 重打） |
+
+androidTest APK 解包核对（不是看大小，是看内容）：20 个 dex，`PairingLinkAddressScreenTest`、`thePageOffersNoListenButtonAtAll`、`aReadyStateShowsTheHeadlineAndOneLinePerCandidate` 与 tag `pairing.addresses.refresh` / `pairing.addresses.line` **全部命中 `classes16.dex`** ⇒ 不是陈旧包。
+
+| 项 | 状态 |
+| --- | --- |
+| `core/common` JVM（本机实跑） | **EXECUTED_PASS**：550 例 / 0 失败 |
+| `feature/settings` JVM（本机实跑） | **EXECUTED_PASS**：324 例 / 0 失败 |
+| androidTest APK 构建 + 内容核对 | **EXECUTED_PASS** |
+| 7 例 instrumentation 真跑 | **DEVICE_UNVERIFIED**（本机无设备；以 CI visual-instrumentation 为准） |
+| 真机读到真实网卡后的展示 | **DEVICE_UNVERIFIED**（JVM 用假 source，真网卡路径只在 CI 模拟器上跑过） |
+
+### 13.9 未做项
+
+- **不做地址选择后的动作**：这一页只展示，选哪个地址、什么时候开监听仍是后续任务。
+- **不读 IPv6**：与 Windows 对齐，只收 IPv4；要收必须两端同时收。
+- **不接二维码**：候选地址还没有变成二维码内容，仍只接受粘贴文本。
+- **真机网卡组合 NOT_RUN**：模拟器通常只有 `eth0`/`wlan0` 这一类；多网卡（Wi-Fi + 蜂窝 + VPN 同时在线）的真实排序只有真机才能验。

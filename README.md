@@ -56,9 +56,9 @@
 
 ## 项目状态
 
-**当前界面美化代码只存在于 `feature/cinematic-ui` 分支，尚未合并进 `main`，也尚未形成独立 UI PR。**
+**当前界面美化代码只存在于 `feature/cinematic-ui` 分支，尚未合并进 `main`。**
 
-该分支基于未合并的 [Draft PR #59](https://github.com/fwzm/MediaHub/pull/59)（基线 `c18f6a61`）。PR #59 的既有能力与本分支的界面改动都不应被理解为已进入 `main`；功能与验证结论以对应 PR 的最新记录为准。
+该分支基于未合并的 [Draft PR #59](https://github.com/fwzm/MediaHub/pull/59)。PR #59 的既有能力与本分支的界面改动都不应被理解为已进入 `main`；功能与验证结论以对应 PR 的最新记录为准。
 
 <!-- MEDIAHUB:RECENT:START -->
 ## 最近更新
@@ -152,4 +152,5 @@ Debug APK 输出至 `app/build/outputs/apk/debug/app-debug.apk`。构建命令�
 - [架构设计](ARCHITECTURE.md) · [架构决策](DECISIONS.md)
 - [路线图](ROADMAP.md) · [任务与支持现状](TASKS.md)
 - [Provider 文档](docs/providers/README.md) · [播放器文档](docs/player/README.md)
+- [配对与来源同步](docs/android-pairing.md) · [加密归档互操作](docs/cross-device/W6-65-ANDROID-ARCHIVE-INTEROP.md)
 - [变更记录](CHANGELOG.md) · [开源许可](LICENSE)

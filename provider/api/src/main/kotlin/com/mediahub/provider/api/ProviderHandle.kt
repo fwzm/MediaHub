@@ -46,6 +46,13 @@ data class ProviderHandle(
         if (favorite != null) add(ProviderCapability.FAVORITE)
     }
 
+    init {
+        val undeclared = runtimeCapabilities - provider.descriptor.declaredCapabilities
+        require(undeclared.isEmpty()) {
+            "ProviderHandle exposes undeclared capabilities: ${undeclared.joinToString { it.name }}"
+        }
+    }
+
     /** 是否有任何实际可用的能力（骨架阶段为 false 时 UI 显示"未接入"）。 */
     val hasAnyCapability: Boolean
         get() = auth != null || library != null || detail != null || browse != null ||

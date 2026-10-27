@@ -91,15 +91,25 @@ class SourceSyncTransferImportService(
      * expectedChallenge 非空时，帧流里的挑战必须与之逐字相等，否则 challenge-mismatch。
      * @param allowExplicitHost 只有 true 时才允许拨一个显式的非回环单播字面量（W6-52b）；
      *   默认 false，与 W6-23 起的「只连回环」逐字同义（判定与诊断句都在 core:common 的 SourceSyncHostAddress）。
+     * @param cancel 可选的本地取消把手（W6-58）：取消会立刻关掉这条连接，本次调用随即以
+     *   [com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED] 返回 TransferFailed；
+     *   缺省 null 时行为与 W6-52b 逐字相同。
      */
     suspend fun receiveAndImport(
         host: String,
         port: Int,
         expectedChallenge: String? = null,
         allowExplicitHost: Boolean = false,
+        cancel: com.mediahub.core.common.sync.SourceSyncCancellation? = null,
     ): SourceSyncTransferImportOutcome {
         val received = withContext(Dispatchers.IO) {
-            client.receiveFrom(host, port, expectedChallenge, allowExplicitHost = allowExplicitHost)
+            client.receiveFrom(
+                host,
+                port,
+                expectedChallenge,
+                allowExplicitHost = allowExplicitHost,
+                cancel = cancel,
+            )
         }
         return when (received) {
             is SourceSyncTransferResult.Failed ->
@@ -113,17 +123,49 @@ class SourceSyncTransferImportService(
      * 已是内存字节的信封（不再拨号）：先按 UTF-8 解码成文本交给 codec。
      *
      * 非法 UTF-8 不会被替换成 U+FFFD 再往下走——它一定不是合法 JSON，codec 会报 malformed-json。
+     *
+     * W6-63：若字节其实是离线加密归档（.mharchive），本重载没有口令可用，会稳定拒绝为
+     * [SourceSyncDocumentInput.PASSPHRASE_REQUIRED]；要解归档请走带 [passphrase] 的重载。
      */
-    suspend fun importEnvelopeBytes(envelopeBytes: ByteArray): SourceSyncTransferImportOutcome {
-        val json = envelopeBytes.toString(Charsets.UTF_8)
-        return when (val decoded = SourceSyncCodec.tryDecode(json)) {
+    suspend fun importEnvelopeBytes(envelopeBytes: ByteArray): SourceSyncTransferImportOutcome =
+        importEnvelopeBytes(envelopeBytes, passphrase = null)
+
+    /**
+     * W6-63：导入入口的字节分流（对齐 Windows SyncCliRunner.TryResolveEnvelope）。
+     *
+     * - 明文：与 [importEnvelopeBytes] 逐字节相同的既有路径（宽松 UTF-8 → codec → 网关）；
+     * - 归档且无口令：[SourceSyncDocumentInput.PASSPHRASE_REQUIRED]；
+     * - 归档且口令错/结构坏：reason 原样透出 ArchiveError 的稳定码（两端同名同序）；
+     * - 归档解开后重新编码成明文 JSON，再走同一条 codec → 网关路径。
+     *
+     * 网关抛出的异常仍然不 catch —— 传输层没有资格把上层的稳定码换成兜底文案。
+     */
+    suspend fun importEnvelopeBytes(
+        envelopeBytes: ByteArray,
+        passphrase: String?,
+    ): SourceSyncTransferImportOutcome =
+        when (val resolution = SourceSyncDocumentInput.resolve(envelopeBytes, passphrase)) {
+            is SourceSyncDocumentResolution.Plaintext -> deliverText(resolution.text)
+
+            is SourceSyncDocumentResolution.Decrypted -> deliverText(resolution.json)
+
+            is SourceSyncDocumentResolution.PassphraseRequired -> SourceSyncTransferImportOutcome.EnvelopeRejected(
+                SourceSyncDocumentInput.PASSPHRASE_REQUIRED,
+                resolution.message,
+            )
+
+            is SourceSyncDocumentResolution.Rejected ->
+                SourceSyncTransferImportOutcome.EnvelopeRejected(resolution.reason, resolution.message)
+        }
+
+    private suspend fun deliverText(json: String): SourceSyncTransferImportOutcome =
+        when (val decoded = SourceSyncCodec.tryDecode(json)) {
             is SourceSyncCodec.DecodeResult.Failed ->
                 SourceSyncTransferImportOutcome.EnvelopeRejected(decoded.reason, decoded.message)
 
             is SourceSyncCodec.DecodeResult.Ok ->
                 SourceSyncTransferImportOutcome.Imported(gateway.importEnvelope(json), json)
         }
-    }
 }
 
 /**

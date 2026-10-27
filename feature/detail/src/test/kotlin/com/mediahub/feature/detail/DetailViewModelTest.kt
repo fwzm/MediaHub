@@ -65,7 +65,11 @@ class DetailViewModelTest {
     private val stubDescriptor = ProviderDescriptor(
         id = "emby", serverType = ServerType.EMBY, displayName = "Emby",
         category = com.mediahub.provider.api.ProviderCategory.MEDIA_SERVER,
-        declaredCapabilities = emptySet(),
+        declaredCapabilities = setOf(
+            com.mediahub.provider.api.ProviderCapability.DETAIL,
+            com.mediahub.provider.api.ProviderCapability.LIBRARY,
+            com.mediahub.provider.api.ProviderCapability.IDENTITY_LOOKUP,
+        ),
         authMethod = com.mediahub.provider.api.AuthMethod.USERNAME_PASSWORD,
         status = com.mediahub.provider.api.ProviderStatus.STABLE,
     )

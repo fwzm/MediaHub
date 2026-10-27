@@ -122,7 +122,10 @@ object AppModule {
         store: com.mediahub.app.image.ProviderImageAuthStore,
     ): com.mediahub.core.network.ServerIdResolver =
         com.mediahub.core.network.ServerIdResolver { url ->
-            urlIndex.serverIdFor(url) ?: store.serverIdForUrl(url)
+            val lookup = urlIndex.lookupAfterStartup(url)
+            // A matching ambiguous scope and an unavailable primary index are fail-closed.
+            // Only a ready index with no match may use a provider-derived image-auth scope.
+            if (!lookup.ready || lookup.matched) lookup.serverId else store.serverIdForUrl(url)
         }
 
     /** M0-A 闭环：接口 → DataStore 实现的绑定（实现类自身可注入，此处按接口暴露）。 */

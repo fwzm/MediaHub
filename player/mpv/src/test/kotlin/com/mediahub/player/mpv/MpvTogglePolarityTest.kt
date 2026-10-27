@@ -88,7 +88,7 @@ class MpvTogglePolarityTest {
             assertFalse("测试前提：UI 状态未被 observer 更新", engine.uiState.value.isPlaying)
 
             val events = mutableListOf<PlaybackEvent>()
-            val collector = scope.launch { engine.events.collect { events += it } }
+            val collector = scope.launch { engine.events.collect { events += it.kind } }
 
             // 阶段 1：引擎正在播放（pause=false）→ 点击必须是「暂停」
             instance.currentPause = false

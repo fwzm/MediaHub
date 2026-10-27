@@ -2265,7 +2265,7 @@ androidTest APK `feature/settings/build/outputs/apk/androidTest/debug/settings-d
 
 1. **真实两机 NOT_RUN**：本机一次都没有 bind / dial 任何非回环地址——那会让 Windows 弹出防火墙授权框并抢焦点，违反「GUI/自动化不得干扰使用者」的纪律。所以「两个单播地址之间真能传完一封信封」这件事，两端都还没有证据（Windows 侧 E1–E6 也仍是 NOT_RUN，见 `docs/cross-device/W6-51-EXPLICIT-HOST.md` §8）。
 2. **设备执行未做**：本节新增的 4 个 androidTest 只到「编译进 APK」为止，DEVICE_UNVERIFIED；设备结论要等 CI 的 visual-instrumentation 作业。
-3. **门禁未钉**：`SourceSyncSectionsScreenTest` 与 `SourceSyncTransferClientHostTest` 都还没进 `.github/workflows/android-ci.yml` 的 `--required-suite`（W6-55 钉的是另外三个；androidTest 那类本来就不在单元门禁里）。
+3. **单元门禁**：`SourceSyncTransferClientHostTest` 已由 W6-56 钉进 `--required-suite`（36 → 37 个套件，见 §31.10）；`SourceSyncSectionsScreenTest` 属 androidTest，本来就不在单元门禁里（由 visual-instrumentation 作业覆盖，见 §31.7）。
 4. **只有开关，没有发现机制**：不扫网段、不解析 mDNS、不记忆上次地址；地址要靠人抄。
 5. **没有「地址簿」**：抖动或换网后用户要重新填。
 6. **无视觉回归**：复选框位置与说明文字只有断言「存在且可点」，没有截图比对。
@@ -2275,3 +2275,1350 @@ androidTest APK `feature/settings/build/outputs/apk/androidTest/debug/settings-d
 
 - 真实两机取证（需要一台第二台机器 + 允许一次防火墙授权的窗口）：先在 Windows 用 `transfer serve --bind <IP> --allow-non-loopback` 起监听，Android 发送卡填同一 IP、点亮开关发一次；再反向（Android 监听端填 IP + 开关，Windows `transfer send --allow-non-loopback`）。两侧都要抓 `not-loopback` 之外的码。
 - 若将来要把「被策略拒绝」与「地址不是回环」在机器可辨层面分开，必须两端同时新开一个码集合、同名同序、各有用例（W6-47 结论 C），单端做不算。
+
+### 31.10 W6-56：把拨号侧地址判定钉进单元门禁
+
+**为什么钉**：`--required-suite` 的语义是「这个套件必须真的执行过」。没有这一行，套件整体消失（文件被误删、被 `@Ignore`、source set 变更导致整类不参与编译）时 gradle 依然打印 `BUILD SUCCESSFUL` —— 这正是 windows-ci 上 WebDav 套件踩过的坑。两个方向的地址判定此前只有一半受保护：监听端（绑定）的 `SourceSyncHostAddressTest` 已由 W6-55 钉住，拨号端（`sendTo` / `receiveFrom`）的 `SourceSyncTransferClientHostTest` 到本节才钉。
+
+**改动**（`.github/workflows/android-ci.yml`，+3 行）：两行注释 + 一行 `--required-suite com.mediahub.core.common.sync.SourceSyncTransferClientHostTest`，钉住套件数 **36 → 37**；`--require-complete-suites` 与其余 36 行一字未动。
+
+**口径回顾（一个判定、两个视角）**：地址判定仍然只有一处 `SourceSyncHostAddress.resolve(host, allowExplicitHost, verb)`，`verb` 只改「开关关着」那句里的动词（监听端缺省 `绑定`、拨号端传 `连`）。因此：
+
+- 拨号端开关关着 ⇒ 与 W6-23 起的原文逐字相同：`只允许连回环地址（127.0.0.1 / ::1 / localhost），实际 <text>`
+- 监听端开关关着 ⇒ 与 W6-52 逐字相同：`只允许绑定回环地址（127.0.0.1 / ::1 / localhost），实际 <text>`
+- 另外三条两端共用同一句、不含动词：
+  - `「<text>」不是 IP 字面量，本版本传输不做域名解析；请填 127.0.0.1、::1、localhost 或那台机器的单播 IP。`
+  - `「<text>」不是一个具体某台机器的地址（通配 / 广播 / 组播 / 保留地址），建 socket 之前就拒绝了；请填一个单播地址，例如 192.168.1.20。`
+  - `地址最多 256 个字符，这个没有去绑。`
+- 码始终是 `not-loopback`（W6-47 结论 B）；机器可辨的新码集合本轮不做（结论 C：要两端同时新开、同名同序、各有用例）。
+
+**本机核对**：
+
+1. 只跑该套件：`gradlew.bat --max-workers=2 :core:common:testDebugUnitTest --tests "com.mediahub.core.common.sync.SourceSyncTransferClientHostTest"` → 11 例全绿（W6-52b 的先导证据：`BUILD SUCCESSFUL in 2m 9s`、`17 actionable tasks: 5 executed`、XML `tests=11 failures=0 errors=0`）。
+2. 门禁自带单测（改 `.github/workflows/` 或 `.github/scripts/` 后必跑）：`python -m unittest discover -s .github/scripts/tests` → `Ran 54 tests in 104.789s` / `OK`。
+
+**未覆盖**：套件只验证闸门本身（一次都不真拨非回环地址，理由见 §31.8 第 1 条）；设备执行仍 DEVICE_UNVERIFIED；真实两机 NOT_RUN；CI 侧「37 条 `--required-suite` 都真跑过」的证据记在 PR #33 的 exact-SHA 表里，本节写就时该 head 的 run 尚未回执。
+
+## 32. W6-57：回环上的四维组合矩阵（TLS × 认证 × 回执 × 投递）
+
+### 32.1 动机
+
+`D:/mh-verify/android-w6-gap-table.md` 第 5 条：Windows 侧有 `windows/tools/acceptance/w6/transfer-tls-auth.ps1`（20 例，真进程）与 presenter-e2e（14 例），Android 侧只有**单维**套件——`SourceSyncTransferRoundTripTest`（分块/挑战/截断）、`SourceSyncTransferAuthTest`（五码 + tag 向量）、`SourceSyncTlsTest`（握手 + 指纹钉扎）、`SourceSyncReceiptTest`（0x04 四码）、`SourceSyncDeliveryTest`（`delivery-unconfirmed`）。每一维各自成立，但**没有一处把四个开关同时打开放在同一条真实回环 socket 上跑**：谁压掉谁（回执 vs 投递）、失败落在发送端还是监听端、TLS 之后的码是否与明文逐字相同，都没有断言钉住。
+
+W6-57 补的正是这一格：新增 `core/common/src/test/kotlin/com/mediahub/core/common/sync/SourceSyncTransferMatrixTest.kt`，20 个格子，每格起一枚真监听端、一枚真客户端，走真实 TCP（含真实 JSSE 握手），逐格断言外部可观察结果与稳定码。
+
+### 32.2 矩阵（20 格）
+
+| 格 | 开什么 | 发送端结果 | 监听端结果 | 钉住的外部语义 |
+| --- | --- | --- | --- | --- |
+| 1 | 全关 | `Ok`，`delivery = null` | `Received`，信封逐字节等于 golden | 基线：两个都不开会回任何字节 |
+| 2 | 只给挑战 | `Ok` | `Received.challenge` 回显同一挑战 | 挑战只是回显，不是认证 |
+| 3 | 两端认证（同口令） | `Ok` | `Received` | 认证单开可通过 |
+| 4 | 客户端口令错 | `Ok`（不读回话，看不见失败） | `auth-mismatch` | 失败只落在监听端——想确认必须开回执/投递 |
+| 5 | 监听端要认证、客户端不带 tag | `Ok` | `auth-missing` | 「没送 tag」与「没宣布挑战」不是一个码 |
+| 6 | 监听端开认证却无口令 | 写完即 `Ok` | `auth-secret-unavailable` | 配置错误在读帧时暴露，不自作主张跳过校验 |
+| 7 | 只开回执 | `Ok` | `receiptWritten = true` | 0x04 真写出来了 |
+| 8 | 客户端等回执、监听端沉默 | `receipt-missing` | `receiptWritten = false` | 没写回执的监听端不谎称写过 |
+| 9 | 只开投递 | `Ok(..., delivery = Confirmed(bytesRead = 0))` | `Received` | 对端只关连接、不回字节 |
+| 10 | 对端既不关也不说话（裸 ServerSocket） | `delivery-unconfirmed` | ——（本格刻意不用监听端） | 预算耗光即折码，不抛异常 |
+| 11 | 回执 + 投递 | `Ok`，`delivery = null` | `receiptWritten = true` | 回执优先，投递确认被忽略 |
+| 12 | 只开 TLS | `Ok` | `Received` | 握手指纹钉对即可通行 |
+| 13 | 指纹钉错 | `tls-fingerprint-mismatch` | 握手前就断 | 一个信封字节都不写 |
+| 14 | TLS + 认证 | `Ok` | `Received` | tag 帧走加密流 |
+| 15 | TLS + 口令错 | `Ok` | `auth-mismatch` | 加密后码与明文逐字相同 |
+| 16 | TLS + 回执 | `Ok` | `receiptWritten = true` | 0x04 写在 `TlsStream` 上 |
+| 17 | TLS + 投递 | `Ok(..., Confirmed)` | `Received` | graceful close 也能当 FIN |
+| 18 | TLS + 认证 + 回执 | `Ok` | `Received` + `receiptWritten` | 三维同时开不互相干扰 |
+| 19 | TLS + 认证 + 投递 | `Ok(..., Confirmed)` | `Received` | 认证成功后 graceful close 仍可判投递 |
+| 20 | 四维全开 | `Ok` | `Received` + `receiptWritten` | 四码集合互不污染 |
+
+### 32.3 一条协议事实：认证必须同时宣布挑战（首跑 6 红的根因）
+
+tag 的 MAC 输入是「挑战的 UTF-8 字节 ‖ 信封字节」，所以**没有挑战就没有可绑定的 nonce**：发送端在 `sendTo` 里本地就报 `auth-required` 并**一个字节都不写**（detail 原文 `Authentication is on but no challenge was announced; the challenge is the nonce the tag binds to, so nothing was sent.`）。对端只会看到一条空连接，因而报 `frame-truncated`。
+
+W6-57 首跑正是栽在这里：格 3 / 14 / 19 只开了认证没给挑战，于是发送端本地拒绝、监听端读到空流；格 4 / 15 期望 `auth-mismatch` 却拿到 `frame-truncated`（同上原因）；格 5 期望 `auth-required` 实际是 `auth-missing`——`auth-required` 只属于「本端要认证却没挑战」，不属于「对端没送 tag」。修法是每格开认证就同时给挑战，并把格 5 的期望改成 `auth-missing`；类 KDoc 里把这条协议事实写下来，后续任何人加格子都不会再踩。
+
+### 32.4 实现落点
+
+| 位置 | 内容 |
+| --- | --- |
+| `SourceSyncTransferMatrixTest.kt:374` | `private fun exchange(tls, challenge, listenerAuth, clientAuth, listenerReceipt, clientReceipt, delivery, clientPin): Outcome`——起监听（`port = 0` 由系统分配）→ 后台 `ReceiveCall` → 主线程 `SendCall` → 收两侧结果，`finally` 关监听 |
+| `:413` | `private fun silentPeer(server: ServerSocket): Thread`——裸 ServerSocket 读走帧流后挂住不关，只给格 10 用 |
+| `:433` / `:466` | `ReceiveCall` / `SendCall` 两个后台线程包装（`join(30_000)`，抛过异常就让测试红，不吞） |
+| `:68`–`:341` | 20 个 `cellNN_*` 用例（行号见 32.5） |
+| `:551` | `assertSentOk` / `assertReceived` / `failedReasonOf` / `listenerCodeOf` / `describeSent` / `describeListener` |
+
+纪律写在类 KDoc 里：**只碰 `127.0.0.1`**。非回环地址一格都不 bind、不拨——那会让 Windows 弹防火墙授权窗，违背 GUI 纪律；跨机证据仍记 NOT_RUN。
+
+### 32.5 用例清单（20 例，行号）
+
+| 行 | 用例 |
+| --- | --- |
+| `:68` | `cell01_nothingEnabledIsThePlainBaseline` |
+| `:82` | `cell02_challengeAloneIsEchoedVerbatim` |
+| `:94` | `cell03_authAloneWithTheSameSecretSucceeds` |
+| `:111` | `cell04_aWrongSecretIsMismatchOnTheListenerAndInvisibleToTheSender` |
+| `:128` | `cell05_aListenerThatRequiresAuthRefusesAPeerWithoutATagFrame` |
+| `:139` | `cell06_aListenerWithAuthButNoSecretSaysSecretUnavailable` |
+| `:155` | `cell07_receiptAloneIsWrittenAndAwaited` |
+| `:166` | `cell08_awaitingAReceiptFromASilentListenerIsReceiptMissing` |
+| `:176` | `cell09_deliveryAloneIsConfirmedByTheListenerClosing` |
+| `:194` | `cell10_aPeerThatNeverClosesLeavesDeliveryUnconfirmed` |
+| `:209` | `cell11_theReceiptWinsWhenBothAreEnabled` |
+| `:224` | `cell12_tlsAloneCarriesTheEnvelope` |
+| `:237` | `cell13_aWrongPinStopsBeforeAnyEnvelopeByte` |
+| `:257` | `cell14_tlsPlusAuthSucceeds` |
+| `:270` | `cell15_tlsPlusAWrongSecretFailsAtTheTagFrame` |
+| `:282` | `cell16_tlsPlusReceiptConfirmsOverTheEncryptedStream` |
+| `:294` | `cell17_tlsPlusDeliveryIsConfirmedByAGracefulClose` |
+| `:306` | `cell18_tlsPlusAuthPlusReceiptSucceeds` |
+| `:323` | `cell19_tlsPlusAuthPlusDeliverySucceeds` |
+| `:341` | `cell20_allFourDimensionsTogetherStillSucceed` |
+
+### 32.6 本机实跑证据（EXECUTED_PASS）
+
+- 单套件：`gradlew.bat --max-workers=2 :core:common:testDebugUnitTest --tests "com.mediahub.core.common.sync.SourceSyncTransferMatrixTest"` → `BUILD SUCCESSFUL in 1m 38s`；XML `<testsuite ... tests="20" skipped="0" failures="0" errors="0" ... time="2.408">`。日志 `D:/mh-verify/w6-57-matrix.log`。
+- 模块全量（`--rerun-tasks :core:common:testDebugUnitTest`）→ `BUILD SUCCESSFUL in 2m 43s`、`17 actionable tasks: 17 executed`；XML 合计 **36 套件 / 523 例 / 0 失败 / 0 错误 / 11 跳过**（503 + 20），矩阵套件在列。日志 `D:/mh-verify/w6-57-core-full.log`。
+- 首跑（未修前）：`BUILD FAILED in 1m 39s`，`20 tests completed, 6 failed`（格 3/4/5/14/15/19），原因见 32.3。
+
+### 32.7 门禁（W6-57 的一部分）
+
+`.github/workflows/android-ci.yml` 增加注释两行 + `--required-suite com.mediahub.core.common.sync.SourceSyncTransferMatrixTest`，`--required-suite` **37 → 38** 条；`yaml.safe_load` 自检通过（`jobs = 2`）。改门禁必须同步跑的门禁自带单测：`python -m unittest discover -s .github/scripts/tests` → `Ran 54 tests in 94.641s` / `OK`。日志 `D:/mh-verify/w6-57-gate-unittest.log`。
+
+矩阵只碰回环，CI runner 上不需要任何设备或额外服务，因此可以直接进单元门禁（与 androidTest 无关）。
+
+### 32.8 未覆盖
+
+1. **真实两机**：`cross-machine` 证据两端 NOT_RUN——需要第二台机器，且要让 Windows 弹一次防火墙授权（用户当面要求 GUI/网络类验证走空闲门禁，本轮不做）。
+2. **设备执行**：矩阵是 JVM 单元测试（跑在 CI 的 ubuntu runner 的 JVM 上），未在任何 Android 设备上执行过；`DEVICE_UNVERIFIED`。
+3. **跨进程重放**：`auth-replayed` 需要共享 `SourceSyncNonceCache` 跨两封信封，本矩阵每格只发一封，重放语义仍只由 `SourceSyncTransferAuthTest` 的流级用例覆盖（`:411` 起）。
+4. **客户端身份证书 / mTLS**：`SourceSyncTlsIdentity` 只用于监听端服务端证书，矩阵没有「客户端出示证书」这一维（协议不支持）。
+5. **大信封耗时**：矩阵用 `windows-envelope-device-a.json`（单块），分块与 `payload-too-large` 走 `SourceSyncTransferRoundTripTest`，矩阵不重复测吞吐。
+6. **视觉/界面**：矩阵不碰 Compose，界面侧的开关联动仍由 `SourceSyncSectionsScreenTest` 的 instrumentation 覆盖。
+7. **CI 实证**：本节的 38 条套件与 2098 唯一用例要到下一次 push 后的 Android CI 上才有 exact-SHA 证明（本节写就时只有本机 `unittest` + gradle）。
+
+### 32.9 下一步
+
+1. 监听端取消接收（缺口表 #8 的另一半：`SourceSyncReceiveController` 只有 `receive`/`clear`，没有 cancel，真实 Socket 中途取消 NOT_RUN）。
+2. W6-47 跨机契约在 Android 侧的引用点：把 `docs/cross-device/W6-47-CROSS-MACHINE.md` 的结论 A/B/C 写进 `docs/android-source-sync-transfer.md` 的索引，让两端文档互指。
+3. 真实两机取证（等用户授权与第二台机器）。
+
+## §33 Android 接收中「取消接收」（W6-58）
+
+> 本节记录拨号接收卡（「从 Windows 接收」）在传输途中可以被用户取消的实现与证据。
+> 与前几节一样：只写外部可观察语义、稳定码与可复核的行号，不写推测。
+
+### §33.1 动机：缺口表里唯一没有「退路」的卡
+
+W6-27 起「从 Windows 接收」是手机主动拨号收帧。它是页尾三张卡里**唯一没有停止/取消入口**的一张：
+监听卡有「停止监听」，发送卡有「取消发送」（W6-49），而接收卡一旦按下「接收」，用户能做的只有等。
+更要紧的是这个「等」不是抽象的：分块收帧是**阻塞** socket 读，缺省读超时 15 000 ms（`SourceSyncTransferListener.DEFAULT_READ_TIMEOUT_MS` / `SourceSyncTransferClient` 的同名常量），
+对端半开、路由器丢包、或对端进程卡死时，界面会一直停在「接收中…」。
+
+缺口表（`D:/mh-verify/android-w6-gap-table.md`）第 8 条把「真实 Socket 中途取消」记为 NOT_RUN，
+此前只到控制器层的`cancelSend`；本节补齐的正是**拨号接收**这一侧的取消入口与它的库层把手。
+
+### §33.2 设计取舍：取消必须真的关连接，光 cancel 协程不够
+
+第一版想法是「起一个 Job，取消时 `job.cancel()`」。这个做法在本项目**不成立**，原因是：
+
+- 分块收帧的每一次读都是 `input.read(...)`（阻塞 IO）。挂起点（suspend 函数的 return）不在读的中间，
+  所以 `job.cancel()` 只会在下一次真正走到挂起点时才生效——而那时已经读完一整帧或者超时了；
+- 于是界面会停在「接收中」最多 15 s 才回到 Idle，用户按了取消却看不到任何反应。
+
+结论：取消要么关 socket，要么无意义。实现上用一层很薄的把手把这两件事绑定：
+
+1. `SourceSyncCancellation`（`core/common/.../sync/SourceSyncCancellation.kt`，84 行）持一个 `AtomicBoolean` 与一个 `AtomicReference<Closeable?>` 槽；
+2. 客户端在 socket 建好之后 `cancel?.attach(socket)`（`SourceSyncTransferClient.kt:190`）；
+3. `cancel()` 先 `compareAndSet(false, true)` 置位，再取走槽里的 `Closeable` 并关掉；
+4. 阻塞读立刻抛 `SocketException`，三个 catch（`SocketTimeoutException` / `SocketException` / `IOException`）的**第一行**都先看 `cancel?.isCancelled`，是就返回本地码而不是 IO 码；
+5. `finally` 首行 `cancel?.detach(socket)`，把槽清干净，避免把手长期握着一个已关的 socket。
+
+先置位再关的顺序是必须的：如果先关 socket 再置位，catch 里可能还看不到 `isCancelled`，
+就会把一次用户取消报成 `io-failed`——那正是「取消被算成失败」的那类事故。
+
+`attach` 里还有一道「二次检查」：设进槽之后再看一眼 `isCancelled`，如果这期间已经被取消，
+就自己把刚放进去的 socket 关掉并清槽。这样「取消发生得比 attach 更早」也不会漏掉。
+
+### §33.3 本地码 `transfer-cancelled` 不进跨机词汇表
+
+取消是**本端**的事件，对端看不到任何「取消帧」——它只会看到连接断了。所以：
+
+- 不新增跨机码：五集（传输 10 / TLS 4 / 认证 5 / 回执 4 / 投递 1）一个字都没动，
+  这与 W6-47 ADR 结论 A「跨机不新开第 6 个码集合」一致；
+- `SourceSyncLocalReasons.CANCELLED = "transfer-cancelled"` 是新加的**本地码**对象，只在 core 与界面之间流转；
+- 用例 `theLocalCodeIsNeverPartOfTheCrossMachineVocabulary` 直接钉住 `SourceSyncTransferReasons.ALL.size == 10` 且集合里不含 `transfer-cancelled`；
+- 界面层把它咽掉：`SourceSyncReceiveController` 看到把手已取消就把状态置回 `Idle` 并 `return true`，不写失败行、不留码。
+
+### §33.4 三条外部可观察语义
+
+| # | 情形 | 可观察结果 | 由谁钉住 |
+| --- | --- | --- | --- |
+| 1 | 接收中按「取消接收」 | 状态回 `Idle`；**没有**失败行、**没有**稳定码；单飞标记释放 | `cancelDuringTheTransportClosesTheHandleAndReturnsToIdle`、`aCancelledReceiveGoesBackToIdleWithoutKeepingTheLocalCode` |
+| 2 | 取消之后立刻再按「接收」 | 可以再收（新把手是干净的，旧取消不泄漏） | `eachLaunchGetsAFreshHandleSoAnOldCancellationDoesNotLeak`、`cancelDuringTransportReturnsToIdleAndFreesTheSingleFlightGuard` |
+| 3 | 没在接收时点「取消接收」 | no-op：`cancel()` 返回 null，状态不变，端口一次都不调 | `cancelWhenNothingWasEverReceivedIsANoop`、`clearBetweenReceivesIsHarmlessAndCancelAfterItIsANoop` |
+
+第 1 条的「没有失败行」是刻意的：用户按的取消不是错误。这条与本项目另一处纪律同源——
+**码只用于对端/协议层面的失败**，用户自己的动作不该出现在失败列里。
+
+### §33.5 落点行号表
+
+| 文件 | 行号 | 内容 |
+| --- | --- | --- |
+| `core/common/.../sync/SourceSyncCancellation.kt` | :15 / :18 | `object SourceSyncLocalReasons` / `const val CANCELLED = "transfer-cancelled"` |
+| 同上 | :35 / :42 / :50 / :60 / :72 | `class SourceSyncCancellation` / `val isCancelled` / `fun cancel()` / `internal fun attach(closeable)` / `internal fun detach(closeable)` |
+| `core/common/.../sync/SourceSyncTransferClient.kt` | :51 | `fun receiveFrom(...)` 末位新增 `cancel: SourceSyncCancellation? = null` |
+| 同上 | :128 | `private fun cancelledResult()`（本地码 + 「连接在本地关闭，对端可能只看到断开」） |
+| 同上 | :163 | `private fun withConnection(...)` 新增 `cancel` 形参 |
+| 同上 | :190 / :233 | `cancel?.attach(opened)` / `finally` 首行 `cancel?.detach(it)` |
+| 同上 | :215 / :221 / :227 | 三个 catch 首行 `if (cancel?.isCancelled == true) return cancelledResult()` |
+| `core/database/.../sync/SourceSyncTransferImportService.kt` | :98 / :106 | `suspend fun receiveAndImport(...)` 新增 `cancel` / 转调 `client.receiveFrom(...)` |
+| `feature/.../sync/SourceSyncReceiveController.kt` | :57 | `SourceSyncReceiveCopy.CANCEL = "取消接收"` |
+| 同上 | :140 | `SourceSyncReceivePort` 的第 5 参默认重载（转调 4 参，既有替身零改动） |
+| 同上 | :191 | `suspend fun receive(form, cancel = null)` |
+| 同上 | :221 | 取消不是失败：置回 `Idle` 并 `return true` |
+| 同上 | :306 | 生产端口 5 参 override，把 `cancel` 交给 `service.receiveAndImport(...)` |
+| `feature/.../sync/SourceSyncReceiveLauncher.kt` | :27 / :37 / :41 / :62 / :71 | `class` / `val isActive` / `fun launch` / `fun cancel` / `fun clear`（76 行新文件） |
+| `feature/.../sync/SourceSyncImportViewModel.kt` | :138 / :168 / :178 / :251 / :265 | `receiveLauncher` / `fun receive` / `fun cancelReceive` / `reset()` 与 `onCleared()` 里的 `clear()` |
+| `feature/.../sync/SourceSyncImportScreen.kt` | :112 / :465 / :750 | tag `sync.receive.cancel` / `onCancel = onReceiveCancel` / 取消按钮（`enabled = receiving`） |
+
+### §33.6 用例清单
+
+#### core/common：`SourceSyncTransferCancelTest`（6 例）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :121 | `aBlockedReadEndsAsTheLocalCodeWithinMilliseconds` | 阻塞读在取消后 < 2 s 内结束，码是本地码 |
+| :147 | `cancellingBeforeTheDialStillYieldsTheLocalCode` | 还没拨号就取消也返回本地码 |
+| :158 | `cancelIsIdempotentAndSticky` | 取消幂等、粘滞 |
+| :168 | `aHandleThatWasNeverCancelledDoesNotDisturbANormalReceive` | 把手在场但没取消：正常收帧，逐字节一致 |
+| :187 | `aFreshHandleWorksRightAfterACancellation` | 取消之后换新把手立刻可用 |
+| :209 | `theLocalCodeIsNeverPartOfTheCrossMachineVocabulary` | 跨机码集合仍是 10 个、不含本地码 |
+
+#### feature/settings：`SourceSyncReceiveControllerTest`（+5 例）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :405 | `withoutAHandleThePortGetsNullAndNothingIsCancellable` | 不传把手时端口收到 null |
+| :417 | `theHandleTravelsVerbatimToThePort` | 把手原样到端口（同一实例） |
+| :433 | `aCancelledReceiveGoesBackToIdleWithoutKeepingTheLocalCode` | 取消回 Idle、码为 null、之后能再收 |
+| :453 | `aFreshHandleDoesNotSwallowARealFailureCode` | 没取消时真失败码原样透出 |
+| :468 | `theCancelButtonCopyIsStable` | 按钮文案稳定（取消接收） |
+
+#### feature/settings：`SourceSyncReceiveLauncherTest`（8 例，新文件 220 行）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :36 | `launchStartsTheReceiveAndMarksItInFlight` | 起一条 + 状态 Receiving + isActive |
+| :53 | `cancelDuringTheTransportClosesTheHandleAndReturnsToIdle` | **把手真的被置为已取消**（关连接）+ 回 Idle + 无码 |
+| :77 | `cancelWhenNothingWasEverReceivedIsANoop` | 没在收：cancel 返回 null |
+| :88 | `cancelAfterTheCancelledReceiveFinishedIsStillANoop` | 收尾之后再点取消仍是 no-op |
+| :102 | `aSecondLaunchWhileInFlightIsIgnored` | 在飞时第二次 launch 被忽略 |
+| :118 | `cancellingTwiceOnlyCancelsTheFirstTime` | 同一条只能取消一次 |
+| :133 | `clearBetweenReceivesIsHarmlessAndCancelAfterItIsANoop` | clear 只丢引用不取消 |
+| :154 | `eachLaunchGetsAFreshHandleSoAnOldCancellationDoesNotLeak` | 每次 launch 新把手、旧取消不泄漏 |
+
+#### androidTest：`SourceSyncSectionsScreenTest`（+4 例）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :149 | `theReceiveCardOffersACancelButtonThatIsDisabledWhenIdle` | 按钮在场、文案固定、空闲时禁用 |
+| :162 | `whileReceivingTheCancelButtonCallsBackAndTheReceiveButtonIsLocked` | 接收中可点、回调只来一次、接收按钮与输入框锁住 |
+| :178 | `onceTheEnvelopeIsInTheCancelButtonIsLockedAgain` | 收下之后取消又禁用（取消不是清空结果） |
+| :188 | `afterAFailureTheCancelButtonIsLockedAgain` | 失败之后同样禁用 |
+
+### §33.7 本机实跑
+
+全部为本机串行执行（同一台机器上不与 dotnet 大套件并发，避免 2026-10-24 那次 JVM OOM 重演）。
+
+| 步骤 | 命令/脚本 | 结果 |
+| --- | --- | --- |
+| 定向复验（core） | `gradlew.bat --max-workers=2 :core:common:testDebugUnitTest --tests "com.mediahub.core.common.sync.SourceSyncTransferCancelTest"` | 6/6 通过（XML 时间 `2026-10-24T20:41:16Z`） |
+| 定向复验（feature） | `--tests "com.mediahub.feature.settings.sync.SourceSyncReceiveLauncherTest"` | 8/8 通过（XML 时间 `2026-10-24T20:53:32Z`） |
+| 全量四任务 | `D:/mh-verify/w6-58-gradle5.ps1`（`--rerun-tasks`，先 `gradlew --stop`） | `BUILD SUCCESSFUL in 5m 20s`、`234 actionable tasks: 234 executed`、`EXIT=0` |
+| 门禁自带单测 | `python -m unittest discover -s .github/scripts/tests` | `Ran 54 tests in 100.481s` / `OK` / `EXIT=0` |
+
+XML 逐套件汇总（`<testsuite>` 属性相加，非估算）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `core/common` | 37 | **529** | 0 | 0 | 11 | 523 → 529（+6，`SourceSyncTransferCancelTest`） |
+| `core/database` | 18 | **172** | 0 | 0 | 12 | 不变 |
+| `feature/settings` | 17 | **291** | 0 | 0 | 0 | 278 → 291（+5 控制器 + +8 launcher） |
+
+androidTest APK：`feature/settings/build/outputs/apk/androidTest/debug/settings-debug-androidTest.apk` = **20443294 B**（`2026-10-25 12:03:05`）。
+解包核对（先复制成 `.zip` 再 `Expand-Archive`，共 19 个 dex）：四个新用例名
+`theReceiveCardOffersACancelButtonThatIsDisabledWhenIdle` / `whileReceivingTheCancelButtonCallsBackAndTheReceiveButtonIsLocked` /
+`onceTheEnvelopeIsInTheCancelButtonIsLockedAgain` / `afterAFailureTheCancelButtonIsLockedAgain` 全在 `classes17.dex`（106216 B），
+`sync.receive.cancel` 与「取消接收」在 `classes12.dex`（699116 B）与 `classes17.dex` —— 因此这个 APK 不是陈旧产物
+（该文件大小与 W6-49 / W6-53 / W6-54 三次巧合相同，每次都必须解包证伪）。
+
+清理：跑完 `gradlew --stop`；仓库内无 `hs_err_pid*.log` / `replay_pid*.log`。
+
+#### §33.7.1 断点记录：两次首红与真因（本节最值钱的部分）
+
+**红 1（编译期）**：`e: SourceSyncTransferCancelTest.kt:140:32 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'String?'`
+——`SourceSyncTransferResult.Failed.message` 是 `String?`，测试里直接 `.contains(...)` 不合法；改为 `failure.message?.contains("本地取消") == true`。
+
+**红 2（运行时，2 例）**：`aBlockedReadEndsAsTheLocalCodeWithinMilliseconds`（`SourceSyncTransferCancelTest.kt:136`）与
+`aFreshHandleWorksRightAfterACancellation`（`:195`）报 `org.junit.ComparisonFailure: expected:<[transfer-cancel]led> but was:<[io-fai]led>`。
+
+根因不是把手没关，而是**失败分类发生在把手检查之外**：取消关 socket 后，阻塞读抛的 `SocketException` 先被协议层
+`SourceSyncTransfer.receive(...)` 自己 catch 并折成 `SourceSyncTransferResult.Failed(io-failed)` 返回，
+`withConnection` 里那三个 catch 压根没被触发，所以「catch 首行先看 `isCancelled`」这一层防御是空的。
+
+修法：在 `withConnection` 里给 `body(...)` 的结果加一道**统一裁决**（`SourceSyncTransferClient.kt:211` 之后）——
+`if (cancel?.isCancelled == true && outcome is SourceSyncTransferResult.Failed) cancelledResult() else outcome`。
+两条约束写死在这里：①取消在任何失败分类之前胜出；②只改写失败结果，**成功收下的信封不会被晚到的取消抹掉**（否则会出现「收下了却报取消」）。
+
+**红 3（feature/settings 1 例）**：`eachLaunchGetsAFreshHandleSoAnOldCancellationDoesNotLeak` 报
+`java.lang.AssertionError: 每次 launch 都必须新建把手`（`:170`）。根因是测试自己的时序假设错：`launch` 只把协程排进 testScheduler，
+第二次 `launch` 之后立刻读 `port.cancel` 拿到的还是上一枚把手。修法：`FakeReceivePort` 加 `val handles = mutableListOf<SourceSyncCancellation?>()`
+记录每一枚，测试里 `advanceUntilIdle()` 之后再断言 `handles.size == 2` 与 `handles[1]`。定向复验 8/8 绿。
+
+### §33.8 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机**：取消的跨机表现（对端此刻收到 RST 还是只看到 FIN）未取证，因为需要第二台机器与用户同意打开防火墙；状态仍是 NOT_RUN。
+2. **TLS 握手中取消**：把手在 socket 建好后立刻 attach，握手阶段也被覆盖到，但**没有专门用例**去卡「TLS 1.3 握手进行中」这个窗口。
+3. **监听卡的取消**：`SourceSyncListenerController` 目前只有「停止监听」与「收一次」，没有「取消这一次接收」；本节只做拨号接收侧。
+4. **Hilt 注入与进程重建**：Launcher 由 ViewModel 持有，进程被杀后的恢复没有用例。
+5. **门禁已钉、证据待 CI**：`SourceSyncTransferCancelTest` 与 `SourceSyncReceiveLauncherTest` 本轮已进 `--required-suite`（38 → **40** 个套件），本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`；但「CI 上这两个套件确实被门禁跑过」只能由新 head 的 Android CI 日志证明，本节写就时该 head 尚未 push。
+6. **视觉回归**：取消按钮出现在真机首屏之外（页尾第三卡），布局本身没有像素级基线。
+7. **设备执行**：本机无连接设备，androidTest 的 4 例只到「APK 里确实编进了这些用例」这一层，设备结论由 CI 的 visual-instrumentation 提供。
+
+### §33.9 下一步
+
+- 监听卡补「取消这一次接收」（同一把手的复用：监听端的阻塞点在建连与读帧两处）；
+- ~~把 `SourceSyncTransferCancelTest` 与 `SourceSyncReceiveLauncherTest` 钉进 `--required-suite`（38 → 40）~~ —— 本轮已完成（见 §33.8 第 5 条），待新 head 的 CI 日志确认；
+- 真实两机取消取证（需第二台机器 + 防火墙同意），届时把 §33.8 第 1 条改成 EXECUTED_PASS。
+
+
+## §34 监听端「取消这一次接收」（W6-61）
+
+> 本节记录手机当接收端（监听卡）在等对端连上来、或已经连上但帧没收全时，
+> 用户可以**只取消这一次等待**而不关掉监听的实现与证据。
+> §33 做的是拨号侧（手机主动连 Windows），本节是对称的另一半：缺口表 #8 的后半条。
+
+### §34.1 动机：缺口表 #8 的后半条，以及 close() 为什么不能当取消用
+
+监听卡原先只有「停止监听」（`SourceSyncListenerController.stop()` → `session.close()`），
+没有「取消这一次接收」。用户按下「等一次发送」之后，界面会停在「接收中…」直到
+`acceptTimeoutMs`（缺省 15 000 ms）或读超时到点，中间没有任何退路。
+
+一个看似省事的做法是「取消就调 `close()`」。这条路在本项目**不成立**，两条原因都是硬约束：
+
+1. `close()` 关的是 `ServerSocket`，**监听从此作废**——端口没了，用户想再等一次必须重新「开始监听」，
+   界面上等于「取消」把整张卡拆了；
+2. 更糟的是 `close()` 让等待中的 `accept()` 抛 `SocketException`，被翻译成 `listener-failed`。
+   也就是说「用户按了取消」会显示成一行失败、带一个稳定码——把用户的动作算成了故障，
+   与 §33.4 那条纪律（码只用于对端/协议层面的失败）直接冲突。
+
+所以 W6-61 的目标定义得很窄：**取消只结束这一次等待，监听仍然开着、端口不变、不留码。**
+
+### §34.2 设计取舍：accept 必须切成小片轮询，否则取消只能等到超时
+
+`ServerSocket.accept()` 是阻塞调用，超时由 `soTimeout` 决定（原先一次设成 `acceptTimeoutMs` = 15 s）。
+只把取消把手接进来是不够的：阻塞在 `accept()` 里的线程要等 15 s 才会返回，
+用户按了取消界面纹丝不动——这正是 §33.2 在拨号侧记过的那类「取消看似无效」。
+
+实现上把一段 15 s 的等待拆成**以 `ACCEPT_SLICE_MS = 50` 为片长的轮询**
+（`core/common/.../sync/SourceSyncTransferListener.kt:348`），且**总 deadline 不变**：
+
+| 环节 | 做法 | 位置 |
+| --- | --- | --- |
+| deadline | `deadlineNanos = System.nanoTime() + acceptTimeoutMs * NANOS_PER_MILLI` | `SourceSyncTransferListener.kt:190` |
+| 每片先看取消 | `if (cancel?.isCancelled == true) return Refused(cancelledResult())` | 同上 :192 |
+| 到点 | 剩余 ≤ 0 ⇒ `acceptTimeoutResult()`（码仍是 `transfer-timeout`，文案不变） | 同上 :194 / :217 |
+| 片长 | `remainingMillis.coerceAtMost(ACCEPT_SLICE_MS).coerceAtLeast(1)` 写回 `server.soTimeout` | 同上 :195-197 |
+| 三处异常 | `SocketTimeoutException` 回循环；`SocketException`/`IOException` **先看取消**再分类 | 同上 :201 / :203 / :206 |
+
+两处刻意保留的语义：
+
+- `transfer-timeout` 的文案与触发条件一字未改——切片只是实现细节，外部看到的还是「在 N 毫秒内没有对端连上来」；
+- `listener-failed` 仍然存在，但**只剩「真的 close 过」一种来源**（用例 `closingTheListenerIsStillReportedAsListenerFailedNotAsACancellation` 钉住这一点）。
+
+连上之后的读阶段同理：socket 在 `accept` 成功那一刻就 `cancel?.attach(socket)`（:173），
+`receiveOver` 的 `finally` 首行 `cancel?.detach(socket)`（:313）把槽清干净；
+阻塞读抛异常时两个 catch（:294 `SocketTimeoutException` / :303 `IOException`）同样「取消优先」。
+
+### §34.3 仍然没有新码：`transfer-cancelled` 是本地码
+
+与 §33.3 完全同一条立场：取消是本端事件，对端只会看到连接断了，看不到任何「取消帧」。
+
+- 五集（传输 10 / TLS 4 / 认证 5 / 回执 4 / 投递 1）一字未动，符合 W6-47 ADR 结论 A；
+- 复用的是 W6-58 已存在的 `SourceSyncLocalReasons.CANCELLED = "transfer-cancelled"`，W6-61 没有新增任何码常量；
+- 用例 `theLocalCodeIsNeverPartOfTheCrossMachineVocabulary` 继续钉 `SourceSyncTransferReasons.ALL.size == 10` 且不含本地码；
+- 界面层咽掉：`SourceSyncListenerController.awaitOnce` 在 `apply(...)` 之前判断把手已取消，
+  把状态置回 `Listening` 并 `return true`（`SourceSyncListenerController.kt:583`）——不写失败行、不留码。
+
+一句话区别记在这里：**§33 的取消让状态回 `Idle`（没有在监听）；§34 的取消让状态回 `Listening`（监听还在，只是这次不收了）。**
+
+### §34.4 五条外部可观察语义
+
+| # | 情形 | 可观察结果 | 由谁钉住 |
+| --- | --- | --- | --- |
+| 1 | 等 accept 期间按「取消这一次接收」 | 毫秒级返回；码 `transfer-cancelled`；`listener.isClosed == false` | `cancellingWhileWaitingForAcceptReturnsTheLocalCodeWithinMilliseconds`（< 2 000 ms） |
+| 2 | 已连上、帧还没收全时取消 | 同样本地码（不是 `io-failed`） | `cancellingDuringABlockedReadAlsoYieldsTheLocalCode` |
+| 3 | 取消之后同一监听再等一次 | 能正常收到下一封信封（端口与监听都没坏） | `theListenerStillAcceptsAfterACancelledWait` |
+| 4 | 真的 `close()` 掉监听 | 仍是 `listener-failed`，不会被误认成取消 | `closingTheListenerIsStillReportedAsListenerFailedNotAsACancellation` |
+| 5 | 界面层取消 | 状态回 `Listening`；`codeOf == null`；`lineOf == null`；之后能再等一次 | `aCancelledWaitGoesBackToListeningWithoutAnyCode`、`aCancelledWaitCanBeFollowedByAnotherOneThatSucceeds` |
+
+把手没在场（`cancel == null`）时行为与 W6-61 之前**逐字相同**：`receiveOnce` 的第五参缺省为 null，
+既有全部监听用例、导入服务调用点、测试替身都不需要改动。
+用例 `aHandleThatWasNeverCancelledDoesNotDisturbANormalReceive` 钉住这一点。
+
+### §34.5 落点行号表
+
+| 文件 | 行号 | 内容 |
+| --- | --- | --- |
+| `core/common/.../sync/SourceSyncTransferListener.kt` | :127 | `fun receiveOnce(...)` 第五尾参 `cancel: SourceSyncCancellation? = null`（:132） |
+| 同上 | :149 | `override fun close()`（KDoc 补一段：取消不走 close，`listener-failed` 只剩真 close） |
+| 同上 | :173 | `cancel?.attach(socket)` —— accept 成功即挂把手 |
+| 同上 | :189 / :217 / :222 | `private fun acceptSocket` / `acceptTimeoutResult()` / `cancelledResult()` |
+| 同上 | :234 / :313 | `private fun receiveOver(..., cancel)` / `finally` 首行 `cancel?.detach(socket)` |
+| 同上 | :270 | `SourceSyncTransfer.receive(...)` 的 Failed 分支统一裁决：`if (cancel?.isCancelled) cancelledResult()` |
+| 同上 | :345 / :348 / :350 | `CANCELLED_DETAIL` / `ACCEPT_SLICE_MS = 50` / `NANOS_PER_MILLI = 1_000_000L` |
+| `core/database/.../sync/SourceSyncListenerImportService.kt` | :90 / :100 | `receiveAndImport(..., cancel = null)` / 透传给 `listener.receiveOnce(..., gate, cancel)` |
+| `feature/.../sync/SourceSyncListenerController.kt` | :109 | `SourceSyncListenCopy.CANCEL_RECEIVE = "取消这一次接收"` |
+| 同上 | :357 | `SourceSyncListenerSession` 的带缺省实现重载 `suspend fun receiveOnce(cancel)`（既有替身零改动） |
+| 同上 | :565 / :571 / :583 | `suspend fun awaitOnce(cancel = null)` / `active.receiveOnce(cancel)` / 取消 ⇒ 回 `Listening` 并 `return true` |
+| 同上 | :789 | `ImportSession` 覆盖带 cancel 版，透传给 `service.receiveAndImport` |
+| `feature/.../sync/SourceSyncListenLauncher.kt` | :27 / :41 / :62 / :71 | `class` / `fun launch()` / `fun cancel()` / `fun clear()`（新文件，与 `SourceSyncReceiveLauncher` 同形） |
+| `feature/.../sync/SourceSyncImportViewModel.kt` | :149 / :215-216 / :226-227 / :275 / :290 | `listenLauncher` / `awaitListenOnce()` / `cancelListening()` / `reset()` 与 `onCleared()` 各 `clear()` |
+| `feature/.../sync/SourceSyncImportScreen.kt` | :148 / :236 / :278 / :479 / :1002-1004 | tag `sync.listen.cancel` / Route 接线 / 尾参 / 调用处 / 按钮（`enabled = receiving`，常驻禁用而非隐藏） |
+
+### §34.6 用例清单
+
+#### core/common：`SourceSyncListenerCancelTest`（7 例，新文件）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :96 | `cancellingWhileWaitingForAcceptReturnsTheLocalCodeWithinMilliseconds` | 等 accept 期间取消，< 2 000 ms 返回，码是本地码，`isClosed == false` |
+| :122 | `cancellingDuringABlockedReadAlsoYieldsTheLocalCode` | 已连上但帧没发来，取消仍回本地码（不是 `io-failed`） |
+| :154 | `cancellingBeforeTheWaitStartsStillYieldsTheLocalCode` | 还没开始等就先取消，也回本地码 |
+| :169 | `theListenerStillAcceptsAfterACancelledWait` | 取消之后同一监听还能收下一封（端口没坏） |
+| :194 | `aHandleThatWasNeverCancelledDoesNotDisturbANormalReceive` | 把手在场但不取消：正常收帧 |
+| :212 | `closingTheListenerIsStillReportedAsListenerFailedNotAsACancellation` | 真 close 仍报 `listener-failed`，两个语义不混 |
+| :225 | `theLocalCodeIsNeverPartOfTheCrossMachineVocabulary` | 跨机码集合仍是 10 个、不含 `transfer-cancelled` |
+
+#### feature/settings：`SourceSyncListenerControllerTest`（+3 例）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :692 | `aCancelledWaitGoesBackToListeningWithoutAnyCode` | 把手原样送到会话层（:718）；状态回 `Listening`；`codeOf == null` |
+| :723 | `aCancelledWaitCanBeFollowedByAnotherOneThatSucceeds` | 取消后再等一次能成功，单飞标记已释放 |
+| :754 | `aRealFailureAfterACancelStillReportsItsCode` | 没取消时真失败码原样透出（取消优先不等于吞掉故障） |
+
+#### feature/settings：`SourceSyncListenLauncherTest`（7 例，新文件）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :55 | `launchStartsTheWaitAndMarksItInFlight` | 起一条 + `isActive` |
+| :69 | `aSecondLaunchWhileInFlightIsIgnored` | 在飞时第二次 launch 被忽略 |
+| :82 | `cancelClosesTheHandleAndEndsTheJob` | 取消真的把把手置为已取消（等价于关连接） |
+| :99 | `cancelWhenNothingWasEverStartedIsANoop` | 没在等：cancel 返回 null |
+| :109 | `cancelAfterTheWaitFinishedIsStillNoop` | 收尾之后再点取消仍是 no-op |
+| :125 | `eachLaunchGetsAFreshHandleSoAnOldCancellationDoesNotLeak` | 每次 launch 新把手，旧取消不泄漏 |
+| :146 | `clearBetweenWaitsIsHarmless` | clear 只丢引用、不取消 |
+
+#### androidTest：`SourceSyncListenCancelScreenTest`（6 例，新文件）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :43 | `theCancelButtonIsThereButDisabledWhenNothingIsBeingWaitedFor` | 常驻按钮、文案固定、空闲时禁用 |
+| :54 | `theCancelButtonBecomesUsableOnlyWhileReceiving` | 仅 `Receiving` 可点；同时「等一次发送」与「开始监听」被锁 |
+| :66 | `tappingCancelWhileReceivingCallsBackExactlyOnce` | 点击回调只来一次 |
+| :76 | `cancelStaysDisabledAfterAReceivedEnvelope` | 收下之后又禁用（取消不清结果） |
+| :92 | `cancelStaysDisabledAfterAFailedWait` | 失败之后同样禁用 |
+| :101 | `theCancelButtonSitsAtThePageTailAndTheMainFlowStaysOnTheFirstScreen` | 按钮在页尾、首屏主流程（选择文件/预览）不被挤走——W6-41 的回归守卫 |
+
+### §34.7 本机实跑（串行，低内存）
+
+| 步骤 | 命令/脚本 | 结果 |
+| --- | --- | --- |
+| 四任务全量 | `D:/mh-verify/run-w6-61d.bat`（`:core:common:testDebugUnitTest :feature:settings:testDebugUnitTest :feature:settings:assembleDebugAndroidTest`，`--max-workers=1 "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" "-Dkotlin.daemon.jvm.options=-Xmx1024m"`） | `BUILD SUCCESSFUL in 3m 21s`、`217 actionable tasks: 10 executed, 207 up-to-date`、`EXIT=0` |
+| 清理 | 跑完 `gradlew --stop` | `java-left=0`；仓库根 `hs_err_pid*.log` / `replay_pid*.log` 计数均 0 |
+
+XML 逐套件汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-61d.log`）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `core/common` | 40 | **557** | 0 | 0 | 11 | 550 → 557（+7 `SourceSyncListenerCancelTest`） |
+| `feature/settings` | 21 | **334** | 0 | 0 | 0 | 324 → 334（+3 控制器 +7 新 launcher 套件） |
+
+关键套件逐个：`SourceSyncListenerCancelTest` 7/7（1.248 s）、`SourceSyncListenerControllerTest` 46/46（0.324 s，回归未破）、
+`SourceSyncListenLauncherTest` 7/7（0.635 s）、`SourceSyncTransferCancelTest` 6/6（0.343 s，§33 的拨号侧未受影响）。
+11 个跳过仍是 `SourceSyncTlsInteropTest` + `SourceSyncListenerInteropTest` 两个环境门控套件，与既有口径一致。
+
+androidTest APK：`feature/settings/build/outputs/apk/androidTest/debug/settings-debug-androidTest.apk` = **20758198 B**（`2026-10-25 18:22:49`）。
+解包核对（先复制成 `.zip` 再 `Expand-Archive`，共 **20 个 dex**）：`SourceSyncListenCancelScreenTest`、
+`theCancelButtonIsThereButDisabledWhenNothingIsBeingWaitedFor`、`tappingCancelWhileReceivingCallsBackExactlyOnce`、
+`theCancelButtonSitsAtThePageTailAndTheMainFlowStaysOnTheFirstScreen` 全在 `classes18.dex`（117068 B），
+tag `sync.listen.cancel` 同时出现在 `classes12.dex`（706552 B）与 `classes18.dex` —— 因此这个 APK 不是陈旧产物。
+
+#### §34.7.1 断点记录：三次首红与真因（本节最值钱的部分）
+
+**红 1（core，1 例运行时）**：`cancellingDuringABlockedReadAlsoYieldsTheLocalCode` 报
+`org.junit.ComparisonFailure: expected:<[transfer-cancel]led> but was:<[io-fai]led>`（`SourceSyncListenerCancelTest.kt:137`）。
+
+根因与 §33.7.1 的「红 2」是**同一个坑，只是换了一侧**：取消关 socket 后阻塞读抛的 `SocketException`
+先被协议层 `SourceSyncTransfer.receive(...)` 自己 catch 并折成 `SourceSyncTransferResult.Failed(io-failed)` 返回，
+`receiveOver` 的那两个 catch 压根不会被触发，所以「catch 首行先看 `isCancelled`」那层防御对这条路径是空的。
+
+修法：在 `receiveOver` 里对 `receive(...)` 的 `is Failed` 分支加统一裁决
+（`SourceSyncTransferListener.kt:265-270`）：
+`if (cancel?.isCancelled == true) cancelledResult() else failed(received.reason, received.message)`。
+两条约束：①取消在任何失败分类之前胜出；②**只改写失败结果**，已收全的信封不会被晚到的取消抹掉。
+
+**红 2（feature/settings，3 例）**：`SourceSyncListenLauncherTest` 的 `launchStartsTheWaitAndMarksItInFlight` /
+`aSecondLaunchWhileInFlightIsIgnored` / `eachLaunchGetsAFreshHandleSoAnOldCancellationDoesNotLeak` 报
+`kotlinx.coroutines.test.UncompletedCoroutinesError: After waiting for 1m, there were active child jobs`。
+
+根因不是产品缺陷，是**测试的作用域挂错**：Launcher 挂在 `this`（测试体作用域）上，
+「故意挂着等取消」的 Job 成了测试体的子协程，`runTest` 收尾时判「还有活跃子协程」。
+修法：7 处 `SourceSyncListenLauncher(this)` → `SourceSyncListenLauncher(backgroundScope)`
+（`backgroundScope` 是 `TestScope` 成员，无需 import）。副作用是 `advanceUntilIdle()` 不再推进那边的活，
+所以 `cancelAfterTheWaitFinishedIsStillNoop` 改用 `runCurrent()`。
+
+**红 3（androidTest，编译期 1 例）**：`e: ...SourceSyncListenCancelScreenTest.kt:44:62 No value passed for parameter 'tls'`。
+`SourceSyncListenState.Listening(port, tls, ...)` 的 `tls` **没有缺省值**，而 androidTest 里只写了 `port = 45_678`。
+修法：`Listening(port = 45_678, tls = false)`。
+
+三次红各自的性质值得记一笔：红 1 是**产品缺陷**（防御层覆盖不到协议层自己折的码），
+红 2 是**测试脚手架缺陷**（作用域），红 3 是**编译期契约**（Kotlin 无缺省值参数）。
+只有红 1 改了生产代码；后两次都只动测试。
+
+### §34.8 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机**：取消时对端此刻看到 RST 还是 FIN 未取证，需要第二台机器与用户同意开防火墙 ⇒ NOT_RUN。
+2. **TLS 握手中取消**：把手在 `accept` 成功那一刻 attach，握手阶段理论上也被覆盖，但**没有专门用例**卡「TLS 1.3 握手进行中」这个窗口。
+3. **多连接并发**：`receiveOnce` 由 `acceptLock` 串行化，单次只能等一条连接；并发两路不在本里程碑范围。
+4. **Hilt 注入与进程重建**：`SourceSyncListenLauncher` 由 ViewModel 持有，进程被杀后的恢复没有用例。
+5. **设备执行**：本机无连接设备，androidTest 的 6 例只到「APK 里确实编进了这些用例」这一层 ⇒ DEVICE_UNVERIFIED；
+   设备结论由新 head 的 CI visual-instrumentation 提供。
+6. **视觉回归**：按钮在真机首屏之外（页尾第三卡），布局没有像素级基线。
+7. **门禁**：`SourceSyncListenerCancelTest` 本轮已进 `--required-suite`（43 → **44** 个套件），
+   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`；
+   「CI 上这个套件确实被门禁跑过」只能由新 head 的 Android CI 日志证明，本节写就时该 head 尚未 push。
+
+### §34.9 下一步
+
+- ~~监听卡补「取消这一次接收」~~ —— 本节已完成（W6-61），§33.8 第 3 条与 §33.9 第 1 条同时失效；
+- 配对页接二维码（W6-60 之后把「本机地址」直接生成二维码，省掉手抄）——NOT_RUN；
+- 真实两机取消取证（§34.8 第 1 条），届时把 §33.8 第 1 条与本处第 1 条一起改成 EXECUTED_PASS。
+
+## §35 Android 侧离线加密归档：读与写（W6-62）
+
+> 本节记录把 Windows 的 `.mharchive`（ADR-S005）契约移植到 Android `core/common` 的实现与证据：
+> 同一份归档，Windows 写的 Android 读得出来，Android 写的 Windows 也读得出来，十二个稳定码逐字一致。
+> 这是缺口表里「离线加密导入导出」那一项在 Android 侧的从零补齐。
+
+### §35.1 动机：Windows 早就有了，Android 侧一个文件都没有
+
+Windows 侧 ADR-S005 已经落地了一整套离线加密归档（`windows/src/MediaHub.Sync/` 下的
+`EncryptedArchiveWriter` / `EncryptedArchiveReader` / `ArchiveHeader` / `ArchiveKdf` /
+`ArchivePassphrase` / `ArchiveError` 六个文件），CLI 也已经接上（`transfer export --passphrase`、
+`transfer import --passphrase`，归档输入走 `ArchiveOrCredential = 4` 退出码）。
+
+Android 侧此前是**零**：`core/common/src/main/kotlin/com/mediahub/core/common/sync/` 下三十个生产文件里
+没有任何 `Archive*` 对等物，`grep -i "archive"` 在 sync 包零命中。
+需要说清楚的是，`core/common/.../backup/` 里那套 `.mhbackup`（magic `MHBK`）**不是**这个东西——
+它是整机灾难恢复格式，载荷是 manifest 加各 section 记录；而 `.mharchive` 的载荷是**双向同步信封**
+（`SourceSyncCodec` 编出来的 `SourceSyncEnvelope`），用途是把一次同步快照加密搬到另一台机器上导入。
+两套格式的差异在 §35.4 逐项列，代码里也分在两个包（`archive` / `backup`），不许混用。
+
+W6-62 的目标因此定得很窄：**只做 `core/common` 里的纯内存读与写**，不接 CLI、不接界面、不碰数据库。
+这个边界是从 Windows 侧照搬的——`EncryptedArchiveReader` 的类注释写明它是纯内存 API，不碰文件系统。
+
+### §35.2 文件布局与契约表
+
+归档的字节布局（与 `EncryptedArchiveWriter.cs:12` 的 remarks 逐字同构）：
+
+```
+magic(8) | headerLength(4, 大端) | headerJson | ciphertext | tag(16)
+```
+
+三个刻意的设计点，Android 侧一字不改地继承：
+
+1. **magic 与长度在最前面**：不解密、不解析 header 就能把「这不是本产品的归档」拒掉；
+2. **header 是明文 JSON**：回答「哪个版本 / 哪个 kdf / 迭代多少轮」不需要口令，
+   支持场景里首先要问的正是这三件事；
+3. **header 的精确字节就是 AAD**：想偷偷改迭代数、时间戳或 kdf 名字，tag 立刻对不上。
+
+契约常量（`ArchiveHeader` / `ArchiveKdf` / `ArchivePassphrase` 三个伴生对象）：
+
+| 项 | 值 | 定义位置 |
+| --- | --- | --- |
+| magic | `MHSYNCA1`（8 字节 ASCII） | `ArchiveHeader.kt:29` |
+| 归档版本 | `1` | `ArchiveHeader.kt:30` |
+| header 上限 | `4096` 字节 | `ArchiveHeader.kt:39` |
+| 载荷上限 | `8 * 1024 * 1024` 字节 | `ArchiveHeader.kt:42` |
+| GCM nonce | `12` 字节 | `ArchiveHeader.kt:33` |
+| GCM tag | `16` 字节 | `ArchiveHeader.kt:36` |
+| KDF 名 | `pbkdf2-sha256`（只认这一个，不回落） | `ArchiveKdf.kt:16` / `:29` |
+| salt | `16` 字节 | `ArchiveKdf.kt:18` |
+| 派生密钥 | `32` 字节 | `ArchiveKdf.kt:19` |
+| 迭代下限 / 缺省 | `600_000` / `600_000` | `ArchiveKdf.kt:22-23` |
+| 口令最短 | `12` 字符 | `ArchivePassphrase.kt:16` |
+| AAD | `magic + 大端 int32(headerJson.length) + headerJson` 原字节 | `ArchiveWriter.kt:106`（`buildPrefix`） |
+
+header 的 JSON 字段序固定、camelCase、无空白：
+`version, kdf, iterations, saltBase64, nonceBase64, createdAtEpochMs`
+（`ArchiveHeader.kt:53` 的 `serialize`）。Reader **不解码重排**——它认证的是盘上那些原字节，
+所以「Kotlin 先 parse 再 serialize 回来再当 AAD」这种做法是错的，必须取原切片。
+
+口令策略（`ArchivePassphrase.tryValidate`，:50）按序四条：
+空或全空白 ⇒ `passphrase-empty`；**原始长度** < 12 ⇒ `passphrase-too-weak`；
+trim 后命中 24 条弱口令表（忽略大小写）⇒ `passphrase-too-weak`；
+单字符重复或全 ASCII 数字 ⇒ `passphrase-too-weak`。
+弱表 24 条与 Windows `ArchivePassphrase.cs` 逐字同序（由用例 `the_passphrase_policy_is_identical_to_the_windows_twenty_four_word_deny_list` 钉住）。
+
+### §35.3 判定次序：框架错误优先于口令错误
+
+读侧的十步判定序（`ArchiveReader.layoutOf`，:84）。**这个顺序就是外部可观察的优先级**，
+改顺序会让同一份坏文件报出不同的码：
+
+| # | 条件 | 报的码 |
+| --- | --- | --- |
+| 1 | 长度 < 8 或前 8 字节不是 magic | `magic-mismatch` |
+| 2 | 长度 < 12（magic + 4 字节长度都不够） | `corrupt-header` |
+| 3 | headerLength ≤ 0、> 4096、或超出剩余字节 | `corrupt-header` |
+| 4 | header JSON 解析失败（含不是对象、字段缺失、类型不符） | `corrupt-header` |
+| 5 | 归档版本 ≠ 1 | `unsupported-version:<n>` |
+| 6 | kdf 名不认识 | `unknown-kdf:<kdf>` |
+| 7 | 迭代数 < 600 000 | `invalid-iterations` |
+| 8 | salt / nonce 的 base64 解不出，或解出长度不是 16 / 12 | `corrupt-header` |
+| 9 | 密文长度 ≤ 0 ⇒ `corrupt-ciphertext`；> 8 MiB ⇒ `payload-too-large` | 同左 |
+| 10 | 走到这里：`aad = archive[0 .. trailer)` 的拷贝，交给解密 | — |
+
+门禁式的两条：**先跑完 layout，再看口令**。Windows 的注释把这层意思写得很直白——
+「so "this file is from a newer version" wins over "you typed nothing"」：
+一个来自新版本的文件 + 空口令，用户更该看到的是「文件太新」，不是「你没输口令」。
+Android 侧 `decrypt`（:166）第一行就是这句注释的同义实现：口令策略在 `deriveKey` 之前。
+
+写侧五步（`ArchiveWriter.write`，:37）：
+
+| # | 条件 | 报的码 | 证据用例 |
+| --- | --- | --- | --- |
+| 1 | 口令策略不过 | `passphrase-empty` / `passphrase-too-weak` | `empty-passphrase-wins`、`weak-passphrase-wins` |
+| 2 | `capabilities.canSendSecrets` 或任一 source 带凭据块 | `secrets-not-allowed` | `secrets-flag-refused`、`secrets-block-refused` |
+| 3 | 迭代数 < 600 000 | `invalid-iterations` | `low-iterations-refused` |
+| 4 | 载荷序列化后 > 8 MiB | `payload-too-large` | `a_payload_that_is_not_an_envelope_is_malformed_payload`（读侧同源） |
+| 5 | 全过：新随机 salt(16) + nonce(12) → header → 加密 → `prefix + 密文 + tag` | — | `happy-path` |
+
+两条优先级是用例直接钉死的：`passphrase-before-secrets`（空口令 + 带凭据 ⇒ 报 `passphrase-empty`）与
+`secrets-before-iterations`（带凭据 + 1000 轮 ⇒ 报 `secrets-not-allowed`）。
+也就是说口令 → 凭据 → 迭代数这个次序不是实现巧合，是契约。
+写侧对凭据的态度是**拒绝而不是静默剥掉**：`secrets-not-allowed` 让用户知道「这份东西本来就不该进归档」，
+而不是悄悄改成一份缺凭据的信封让人以为搬成功了。
+
+### §35.4 与 `.mhbackup` 的区别：两套格式不许混
+
+`core/common/.../backup/` 里那套是本项目自己的整机备份格式，与本节的归档长得像但**没有一个字段可以互换**：
+
+| 维度 | `.mharchive`（本节，W6-62） | `.mhbackup`（`core/common/.../backup/`） |
+| --- | --- | --- |
+| magic | `MHSYNCA1`（二进制前缀） | `MHBK`（JSON 里的 `magic` 字段） |
+| 外层形态 | `magic + BE int32 + 明文 header + 密文 + tag` | 整份 JSON 信封（`ciphertextB64` 等字段） |
+| salt | 16 字节 | 32 字节 |
+| AAD | `magic + BE int32 + headerJson` 原字节 | 字符串 `"$magic|$formatVersion|$kdfAlgorithm|$kdfIterations"` |
+| 载荷 | `SourceSyncCodec` 编出的双向同步信封 | manifest + 各 section 记录 |
+| 用途 | 双向增量同步的离线搬运 | 整机备份 / 恢复 |
+| 迭代下限 | 600 000 | 10 000（`MIN_ITERATIONS`） |
+
+两套都用了 PBKDF2-HMAC-SHA256 + AES-GCM，但**参数与 AAD 形状完全不同**，所以
+「拿 `.mhbackup` 的代码改改变成 `.mharchive`」这条路是不通的：
+AAD 差一个字节，tag 就永远对不上。本节因此没有复用 `BackupCrypto` 的任何一行，只借了它的结论——
+`javax.crypto` 的 `PBKDF2WithHmacSHA256` + `AES/GCM/NoPadding` 在 Android 上零依赖可用，不需要引入任何新库。
+
+### §35.5 落点行号表
+
+生产代码六个文件（`core/common/src/main/kotlin/com/mediahub/core/common/archive/`）：
+
+| 文件 | 行 / 字节 | 内容 |
+| --- | --- | --- |
+| `ArchiveError.kt` | 82 / 3349 | `object ArchiveError` 十二个 const（:16 magic-mismatch、:19 corrupt-header、:22 unsupported-version、:25 unknown-kdf、:28 invalid-iterations、:31 passphrase-empty、:34 passphrase-too-weak、:37 secrets-not-allowed、:40 payload-too-large、:43 corrupt-ciphertext、:46 wrong-passphrase-or-tampered、:49 malformed-payload）、`ALL`（:52，十二项同序）、`unsupportedVersion(Int)`（:67）、`unknownKdf(String?)`（:69）、`ArchiveException(reason, message, cause?)`（:77） |
+| `ArchiveKdf.kt` | 49 / 2120 | `PBKDF2_SHA256_NAME`（:16）、`SALT_SIZE`（:18）、`KEY_SIZE`（:19）、`MIN_ITERATIONS`（:22）、`DEFAULT_ITERATIONS`（:23）、`tryParse`（:29，只认一个名字、不回落）、`deriveKey`（:35，`require` 校验 salt 与迭代下限，`PBEKeySpec` + `finally clearPassword()`） |
+| `ArchivePassphrase.kt` | 78 / 3159 | `MIN_LENGTH = 12`（:16）、`WEAK_PASSPHRASES` 二十四条（:22）、`tryValidate`（:50）、`validate`（:60）、`messageOf`（:66） |
+| `ArchiveHeader.kt` | 114 / 4676 | `data class ArchiveHeader`（:20，六个字段全带缺省值）、六个契约常量（:29-42）、`ArchiveHeaderCodec.serialize`（:53）、`tryParse`（:66）、`parse`（:90）、三个私有取值器（:96 / :102 / :108） |
+| `ArchiveReader.kt` | 253 / 11034 | `readHeader`（:31）、`tryReadHeader`（:38）、`read`（:41）、`tryRead`（:56）、`describe`（:64）、`Layout`（:77）、`layoutOf` 十步（:84）、`decrypt`（:166）、`decodePayload`（:203）、`decodeBase64`（:233）、`lastReason`（:249） |
+| `ArchiveWriter.kt` | 129 / 5940 | `write`（:37，五步判定序）、`buildPrefix`（:106，`internal`，供用例逐字节对照）、`carriesSecrets`（:123） |
+
+测试与资源：
+
+| 文件 | 规模 | 内容 |
+| --- | --- | --- |
+| `core/common/src/test/kotlin/.../archive/ArchiveVectorsTest.kt` | 419 行 / 21429 B / **15 例** | 与 Windows 黄金向量逐字节对照：常量、十二码、三条 PBKDF2 密钥、header 161 B、archive 1282 B、19 条错误向量、9 条 writerCases、四条有效口令 + 九条无效口令 |
+| `core/common/src/test/kotlin/.../archive/ArchiveRoundTripTest.kt` | 418 行 / 20056 B / **23 例** | 纯 Kotlin 回环与边界：逐字段往返、两次写不重复 salt/nonce/密文、篡改 tag/密文/header、双侧凭据拒绝、8 MiB 上限、口令 11 拒 12 收、中文口令、不泄露明文 |
+| `core/common/src/test/resources/archive/windows-archive-vectors.json` | 294 行 / **49950 B** | 由 `D:/mh-verify/archive-vectors`（临时 net10.0 生成器，`ProjectReference` 指向权威 `MediaHub.Sync.csproj`）生成，不入 git 的生成器本身不在仓库里 |
+
+### §35.6 用例清单
+
+#### `ArchiveVectorsTest`（15 例，跨端对照）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :95 | `the_kdf_and_header_constants_match_the_windows_contract` | 六个常量与 kdf 参数逐项等于 Windows |
+| :118 | `the_twelve_stable_codes_are_identical_and_in_the_same_order_as_windows` | 十二个码字符串与顺序 |
+| :145 | `the_three_frozen_pbkdf2_keys_reproduce_byte_for_byte` | 三条冻结密钥（英文 / 第二 salt / 中文口令）逐字节相同 |
+| :166 | `the_kdf_parser_rejects_everything_but_the_one_frozen_name` | `tryParse` 只认 `pbkdf2-sha256`，大小写与空格归一、其它一律 false |
+| :177 | `the_header_serializer_reproduces_the_windows_bytes_exactly` | header 161 B 逐字节相同（字段序 + 无空白） |
+| :200 | `kotlin_reproduces_the_windows_archive_byte_for_byte` | 用冻结 payload + salt + nonce，Kotlin 算出 1282 B / sha256 `17514e08…ee21` 与 Windows 完全相同 |
+| :243 | `the_frozen_archive_decrypts_back_to_the_same_envelope` | 读回的信封逐字段相等 |
+| :254 | `the_header_can_be_read_without_any_passphrase` | `readHeader` 不需要口令 |
+| :268 | `every_error_vector_reports_the_reason_windows_reports` | 19 条错误向量逐条同码 |
+| :291 | `every_error_vector_agrees_on_whether_the_header_parses` | 19 条逐条同 `headerParses` |
+| :305 | `the_error_vectors_cover_every_bucket_a_reader_can_report` | 向量覆盖读到得了的每一种码，没有漏桶 |
+| :331 | `every_writer_case_reports_the_reason_windows_reports` | 9 条写侧用例逐条同码 |
+| :359 | `the_writer_case_order_proves_the_passphrase_then_secrets_then_iterations_precedence` | 口令 → 凭据 → 迭代数 |
+| :378 | `the_passphrase_policy_agrees_with_every_frozen_candidate` | 四条有效 / 九条无效逐条判定一致 |
+| :395 | `the_passphrase_policy_is_identical_to_the_windows_twenty_four_word_deny_list` | 弱表二十四条逐字同序 |
+
+#### `ArchiveRoundTripTest`（23 例，纯 Kotlin）
+
+| 行号 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| :140 | `a_written_archive_reads_back_with_every_field_intact` | 逐字段往返（含 endpoint 三属性、accountScope、tombstone） |
+| :162 | `an_empty_envelope_also_round_trips` | 空信封也能往返 |
+| :168 | `writing_twice_never_repeats_salt_nonce_or_ciphertext` | 每次写新 salt / nonce，密文不同 |
+| :180 | `the_reader_is_pure_and_can_be_called_repeatedly` | 读是纯操作，同一份可重复读 |
+| :193 | `a_tampered_tag_byte_is_wrong_passphrase_or_tampered` | 改 tag 一个字节 ⇒ 同码 |
+| :200 | `a_tampered_ciphertext_byte_is_wrong_passphrase_or_tampered` | 改密文一个字节 ⇒ 同码 |
+| :208 | `a_tampered_header_timestamp_still_parses_but_never_decrypts` | 改 header 时间戳：header 仍可读，解密必失败（AAD 覆盖） |
+| :224 | `a_tampered_version_reports_unsupported_version_before_any_passphrase_work` | 改版本号 ⇒ 框架错误先于口令 |
+| :237 | `a_tampered_kdf_name_reports_unknown_kdf_with_the_name` | 改 kdf ⇒ 码里带原名字 |
+| :244 | `a_tampered_iteration_count_is_refused_at_the_structural_layer` | 改迭代数 ⇒ `invalid-iterations` |
+| :263 | `a_truncated_archive_never_reports_a_decryption_error` | 截断只报结构码，不冒充「口令错」 |
+| :283 | `writing_refuses_an_envelope_that_declares_can_send_secrets` | 写侧拒 `canSendSecrets` |
+| :288 | `writing_refuses_an_envelope_that_carries_a_secrets_block_even_when_the_flag_is_off` | 写侧拒凭据块（即使 flag 关） |
+| :308 | `a_json_null_secrets_block_is_not_credentials_on_either_side` | `"secrets": null` 不算凭据（见 §35.7.1） |
+| :318 | `reading_refuses_a_payload_that_declares_can_send_secrets` | 读侧拒 `canSendSecrets` |
+| :326 | `the_passphrase_boundary_is_eleven_refused_and_twelve_accepted` | 11 拒 12 收 |
+| :337 | `a_chinese_passphrase_round_trips_and_a_wrong_one_does_not` | 中文口令往返、错口令报同码 |
+| :349 | `a_low_iteration_count_is_refused_by_the_writer_and_the_boundary_is_allowed` | 999_999 拒、600_000 收 |
+| :363 | `a_wrong_passphrase_and_a_tampered_file_report_the_exact_same_code` | 错口令与篡改同码（不做攻击者 oracle） |
+| :373 | `the_describe_texts_never_quote_the_payload_or_the_passphrase` | `describe` 文案不含载荷 / 口令 |
+| :390 | `the_archive_bytes_never_contain_the_plaintext` | 归档字节里搜不到明文片段，但能找到 magic |
+| :402 | `a_payload_that_is_not_an_envelope_is_malformed_payload` | 载荷不是信封 ⇒ `malformed-payload` |
+| :409 | `a_payload_with_an_unknown_schema_version_stays_malformed_payload` | 载荷 schemaVersion 不是 1 ⇒ `malformed-payload` |
+
+### §35.7 本机实跑（串行，低内存）
+
+| 步骤 | 命令 / 脚本 | 结果 |
+| --- | --- | --- |
+| 单模块全量 | `D:/mh-verify/run-w6-62.bat`（`:core:common:testDebugUnitTest`，`--max-workers=1 "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" "-Dkotlin.daemon.jvm.options=-Xmx1024m"`） | `BUILD SUCCESSFUL in 3m 19s`、`17 actionable tasks: 7 executed, 10 up-to-date`、`EXIT=0` |
+| 清理 | 跑完 `gradlew --stop` | `java-left=0`；仓库根 `hs_err_pid*.log` / `replay_pid*.log` 计数均 0 |
+
+XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-62.log`）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `core/common` | 42 | **595** | 0 | 0 | 11 | 557 → 595（+2 套件 = 15 + 23） |
+
+关键套件逐个：`ArchiveRoundTripTest` **23/23**（22.89 s）、`ArchiveVectorsTest` **15/15**（6.138 s，
+其中 600 000 轮 PBKDF2 每个用例一次，时间主要花在这里）；
+11 个跳过仍是 `SourceSyncTlsInteropTest` + `SourceSyncListenerInteropTest` 两个环境门控套件，与既有口径一致。
+
+#### §35.7.1 断点记录：一个跨端契约上的真缺陷（`"secrets": null`）
+
+首跑之前自查出来的，不是跑挂的——但性质比跑挂更严重，因为它只在一条路径上显形：
+
+`ArchiveWriter.carriesSecrets` 第一版写的是 `envelope.sources.any { it.secrets != null }`。
+Windows 权威实现的判据是 `source.Secrets is { } secrets && secrets.ValueKind != JsonValueKind.Null`——
+也就是说，一个显式的 `"secrets": null` 块 **不算**携带凭据。
+可是在 Kotlin 里 `JsonNull` 是个非 null 的对象，`it.secrets != null` 对它是 true。
+后果是：同一份信封，Windows 说能写、Android 说 `secrets-not-allowed`——两端对「什么算凭据」判断不一致。
+
+修法（`ArchiveWriter.kt:123`）：
+
+```kotlin
+envelope.sources.any { source ->
+    val secrets = source.secrets;
+    secrets != null && secrets !is kotlinx.serialization.json.JsonNull
+}
+```
+
+为什么只有一条路径暴露：`SourceSyncCodec.readRecord` 已经把 `element["secrets"]?.takeIf { it !is JsonNull }`
+折成了 Kotlin 的 null（`SourceSyncCodec.kt:183`），所以从 JSON 解码进来的信封碰不到这个 bug；
+只有「用 Kotlin 对象直接构造信封再写」这条路才会踩到。用例
+`a_json_null_secrets_block_is_not_credentials_on_either_side` 现在钉住两端同判。
+
+### §35.8 未覆盖（本节交付时必须如实保留）
+
+1. **没有接 CLI / 界面 / 数据库**：`ArchiveReader` 与 `ArchiveWriter` 目前是 `core/common` 里的纯函数，
+   Android 侧还没有任何调用方。把它接到「导入信封」那条链上（`SourceSyncTransferImportService.importEnvelopeBytes`）
+   是下一个切片的活，本节不算完成端到端。
+2. **没有真实设备**：全部结论来自 JVM 单测；Android 上 `javax.crypto` 的实现（Conscrypt）与 JVM 的 SunJCE
+   在 AES-GCM 与 PBKDF2 上理应一致，但**没有在设备上跑过** ⇒ DEVICE_UNVERIFIED。
+3. **8 MiB 上限只测了写法没测真数据**：上限判定在两侧都有，但没有构造一份接近 8 MiB 的真实归档跑内存与耗时；
+   低内存设备上 600 000 轮 PBKDF2 与 8 MiB 明文的峰值内存没有测过。
+4. **跨端双向互操作只到「读 Windows 的向量」**：Kotlin 写出的归档由 C# 读这一半，本轮的证据是
+   「Kotlin 复算出的字节与 Windows 冻结字节完全相同」（`kotlin_reproduces_the_windows_archive_byte_for_byte`），
+   属于**等价证明**而非真的跑了一次 C# Reader 去读 Kotlin 的输出。生成器里没有做这一半，是因为
+   它要往 Windows 工程里加测试入口；等价证明在密码学上没有信息损失，但口径上要记成「互操作 = 逐字节等价」。
+5. **真实两机搬运**：把归档拷到另一台机器再导入的完整流程 NOT_RUN（与 §33.8 / §34.8 的跨机项同源，都需要第二台机器）。
+6. **口令策略的界外情况**：只有「11 拒 12 收」与中文口令；没有测超长口令（数千字符）与含 NUL / 代理对的字符串。
+7. **门禁**：本轮把两个套件都加进 `--required-suite`（44 → **46** 个套件），
+   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`；
+   「CI 上这两个套件确实被门禁跑过」只能由新 head 的 Android CI 日志证明，本节写就时该 head 尚未 push。
+
+### §35.9 下一步
+
+- 把 `ArchiveReader` 接到 Android 的导出 / 导入入口：导出侧给「另存为 .mharchive」，
+  导入侧在 `SourceSyncTransferImportService` 前面加一层「这是不是归档」的嗅探（`magic == MHSYNCA1`），
+  对齐 Windows `SyncCliRunner.TryResolveEnvelope` 的分支语义；
+- 设备侧取证：把 15 + 23 例里能在 androidTest 上跑的部分搬上模拟器（PBKDF2 600 000 轮在低端机上耗时是可观察项）；
+- 真实两机搬运取证（上面 §35.8 第 5 条），届时与 §33.8 / §34.8 的跨机项一起改成 EXECUTED_PASS；
+- 口令策略补超长口令与畸形 Unicode 用例。
+
+
+## §36 加密归档接进 Android 导入入口（W6-63）
+
+### §36.1 动机：读端交付了，但没有调用方
+
+§35.8 第 1 条如实记着：「`ArchiveReader` 与 `ArchiveWriter` 目前是 `core/common` 里的纯函数，
+Android 侧还没有任何调用方。把它接到『导入信封』那条链上是下一个切片的活。」
+本节补的就是这条缝：**不新造一条导入流程**，而是让既有那条（选文件 → 预览 → 逐条允许 → 应用）
+多认一种输入——离线加密归档 `.mharchive`。
+
+边界仍然照 W6-62 的写法：只做「读进来并交给既有网关」，不做导出侧的「另存为归档」、
+不给传输链路口令通道、不碰数据库。
+
+### §36.2 分支语义：对齐 Windows `SyncCliRunner.TryResolveEnvelope`
+
+Windows 的权威语义在 `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` L2159-2217：
+先看前 8 字节是不是 `MHSYNCA1`，是归档且没带 `--passphrase` 就报 `passphrase-required`；
+带了口令就走 `EncryptedArchiveReader.Read`，`ArchiveException` 的 `Reason` 原样当稳定码输出。
+Android 侧的分流是同一个顺序，落在一处纯函数 `SourceSyncDocumentInput.resolve` 里：
+
+| 输入 | 返回 | 外部可观察结果 |
+| --- | --- | --- |
+| 长度 < 8 或前 8 字节不是 `MHSYNCA1` | `Plaintext` | 走既有明文路径（宽松 UTF-8 → codec → 网关），与 W6-23 逐字节相同 |
+| 是归档，调用方没给口令 | `PassphraseRequired` | `passphrase-required`（本地闸，网关零调用） |
+| 是归档 + 口令，但结构坏 | `Rejected` | `magic-mismatch` / `corrupt-header` / `unsupported-version:<n>` / `unknown-kdf:<k>` / `invalid-iterations` / `corrupt-ciphertext` / `payload-too-large` |
+| 是归档 + 口令，口令本身不合策略 | `Rejected` | `passphrase-empty` / `passphrase-too-weak`（在建密钥之前就拒，白跑不了一次 PBKDF2） |
+| 是归档 + 口令，解密或认证失败 | `Rejected` | `wrong-passphrase-or-tampered`（错口令与密文被改同码，不做攻击者 oracle） |
+| 是归档 + 口令，解开了但载荷不是合法信封 | `Rejected` | `malformed-payload` |
+| 是归档 + 口令，信封宣称携带凭据 | `Rejected` | `secrets-not-allowed`（写侧 W6-62 也拒，两侧同义） |
+| 是归档 + 口令，成功 | `Decrypted` | 用 `SourceSyncCodec.encode` 重新编码成明文 JSON，再走同一条 codec → 网关路径 |
+
+两条与 Windows 的**有意差异**，都写在这里免得后人当成漏做：
+
+1. **没有退出码分类**：Windows 把归档失败归成 `CliExitCode.ArchiveOrCredential`（4）、把 `passphrase-required` 归成 `InputProblem`（2），
+   因为 CLI 的退出码是给脚本判断「换参数重试还是换文件」用的。Android 没有退出码，码本身就是分类；
+   `passphrase-required` 与 `malformed-json` 一样属于「这份输入还缺一步」的本地闸，不是归档结构码。
+2. **没有 `archive-not-supported-by-plan`**：Windows 的 `plan` 子命令只读明文信封，所以要专门拒一次归档。
+   Android 的导入页只有一条路，预览发生在解密**之后**，这条分支没有调用方，就不造一个没人报的码。
+
+### §36.3 三处落点的分工：为什么嗅探在 core:database、暂存在控制器、口令在卡片里
+
+**嗅探与解密放 `core:database`**（`SourceSyncDocumentInput`），因为两个入口都汇到这里：
+拨号路 `SourceSyncTransferImportService.receiveAndImport` 与监听路 `SourceSyncListenerImportService` 最终都调
+`importEnvelopeBytes`。加在它前面一处，两条路同时得到归档支持，不必改两遍。
+
+**暂存密文放 ViewModel 的控制器里**（`SourceSyncArchiveController`），不放 `SourceSyncImportState`。理由有三条：
+state 是 `StateFlow`，会被 Compose 反复重组、被测试整份比较、也可能被日志打印；
+密文留在控制器的私有字段里，对外只暴露 `pendingByteCount` 一个长度。
+第三条是生命周期：重选文件、点重置、离开页面都必须把暂存丢掉，控制器正好有 `clear()` 这个点。
+
+**口令只活在卡片分支的局部 `remember` 里**：不写 StateFlow、不落盘、不进日志。
+点「解密」时它被原样交给 ViewModel，ViewModel 在 `Dispatchers.Default` 上跑 PBKDF2（600 000 轮），
+用完即弃——卡片一消失（解开、重选、离开页面）那份字符串就随组合一起被丢弃。
+把关卡做成「常驻但按不动的按钮」而不是隐藏按钮，是为了避免用空口令白跑一次 600 000 轮密钥派生。
+
+### §36.4 三条外部可观察语义
+
+1. **没口令不猜**：归档 + 无口令 ⇒ `passphrase-required`，网关一次都不会被调（零写入的第一道闸）。
+   这条与 W6-30 的 `delivery-unconfirmed` 是同一种态度：宁可报「我缺东西」，不假装成功。
+2. **错口令与篡改同码**：`wrong-passphrase-or-tampered`。GCM 的 tag 校验天然分不出这两者，
+   伪造出区别就等于给攻击者一个 oracle；说法与 W6-62 §35.3 完全一致。
+3. **明文路径一个字节都没变**：`plaintextEnvelopeKeepsTheExactTextPath` 断言网关收到的是
+   `bytes.toString(Charsets.UTF_8)` 的同一个字符串（不是重新编码的等价物）。
+   既有 W6-23 的 19 例包括「0xB1 这类非法 UTF-8 ⇒ malformed-json」，全部仍然绿。
+
+### §36.5 落点行号表
+
+| 文件 | 行 | 内容 |
+| --- | --- | --- |
+| `core/database/.../sync/SourceSyncDocumentInput.kt` | :19 | `object SourceSyncDocumentInput`（新文件，74 行） |
+| 同上 | :22 | `PASSPHRASE_REQUIRED = "passphrase-required"` |
+| 同上 | :27 | `looksLikeArchive`：逐字节比 8 字节 magic，短于 8 字节直接 false |
+| 同上 | :36 | `resolve(bytes, passphrase)`：四分支 Plaintext / Decrypted / PassphraseRequired / Rejected |
+| 同上 | :45 | `ArchiveReader.tryRead`；:47 失败时 `reason ?: MALFORMED_PAYLOAD` |
+| 同上 | :50 | 成功时 `SourceSyncCodec.encode(envelope)`，runCatching 兜底 `malformed-payload` |
+| 同上 | :61 | `sealed interface SourceSyncDocumentResolution`（四个实现 :64/:67/:70/:73） |
+| `core/database/.../sync/SourceSyncTransferImportService.kt` | :130 | 原 `importEnvelopeBytes(bytes)` 保留签名，转调带口令重载（既有 5 处调用点零改动） |
+| 同上 | :143 | 新 `importEnvelopeBytes(bytes, passphrase: String?)`：按 resolve 四分支分派 |
+| 同上 | :161 | `private suspend fun deliverText(json)`：原来的 tryDecode → EnvelopeRejected / Imported 原样搬进来 |
+| `feature/settings/.../sync/SourceSyncArchiveController.kt` | :11 | `SourceSyncArchivePrompt(visible, fileName, error)`（新文件，126 行） |
+| 同上 | :18 | `SourceSyncArchiveCopy`：HINT / LABEL / ACTION / `errorOf(reason)` |
+| 同上 | :37 | `fun interface SourceSyncArchiveUnlockPort`（单方法，替身测试不跑 PBKDF2） |
+| 同上 | :53 | `class SourceSyncArchiveController`；:71 `offer`、:88 `unlock`、:120 `clear` |
+| `feature/settings/.../sync/SourceSyncImportViewModel.kt` | :163 | 控制器组装（port 直连 `SourceSyncDocumentInput.resolve`） |
+| 同上 | :176 | `val archivePrompt: StateFlow<SourceSyncArchivePrompt>` |
+| 同上 | :197 | `fun loadPickedDocument(bytes, fileName)`：非归档就直接当明文走既有 loadEnvelope |
+| 同上 | :210 | `fun unlockArchive(passphrase)`：`Dispatchers.Default` 上跑解密 |
+| 同上 | :322 / :338 | `reset()` / `onCleared()` 里 `archiveController.clear()` |
+| `feature/settings/.../sync/SourceSyncImportSession.kt` | :61 | `fun requirePassphrase(reason, message, fileName)`：整份置 BLOCKED，密文绝不进 envelopeJson |
+| `feature/settings/.../sync/SourceSyncImportLogic.kt` | :51 / :54 | `PASSPHRASE_REQUIRED` / `UNLOCK_FAILED` 两条中文文案；:76-77 `blockedText` 返回自身 |
+| `feature/settings/.../sync/SourceSyncImportScreen.kt` | :197-206 | 四个新 tag：`sync.import.passphrase.card` / `sync.import.passphrase` / `sync.import.unlock` / `sync.import.passphrase.error` |
+| 同上 | :220 / :224 | Route 收集 `archivePrompt`；picker 改调 `readPickedDocument` |
+| 同上 | :299-301 | 两个新形参都带缺省值 ⇒ 既有调用点与 11 个 androidTest 零改动 |
+| 同上 | :327 | 说明句补「或加密归档（.mharchive，需要导出时设置的口令）。」 |
+| 同上 | :368-418 | 口令卡：HINT + 密码遮罩输入框 + 「解密」按钮（空口令禁用）+ 错误行 |
+| 同上 | :1338 | `readPickedDocument` 改成 `stream.readBytes()`（原 `readEnvelope` 只读文本，二进制归档会被读坏，已删除） |
+
+### §36.6 用例清单
+
+**A. `SourceSyncArchiveImportTest`（core/database，12 例，进 `--required-suite`）**
+
+| 行 | 用例 | 断言 |
+| --- | --- | --- |
+| :28 | `looksLikeArchiveOnlyMatchesTheEightByteMagic` | 归档 true；空数组 / `"MHSYNC"` / 明文信封 false |
+| :36 | `windowsArchiveIsDecryptedAndHandedToTheGatewayAsPlainEnvelope` | Windows 写的 1282 B 归档解开后网关收到明文；解码结果与明文件**结构化相等**；`canSendSecrets == false`；3 条来源 + 1 条墓碑 |
+| :55 | `archiveWithoutAPassphraseIsRejectedWithTheStableCode` | `passphrase-required`；网关 0 调用 |
+| :69 | `wrongPassphraseReportsTheArchiveCodeAndNeverCallsTheGateway` | `wrong-passphrase-or-tampered`；0 调用 |
+| :81 | `aTamperedCiphertextReportsTheSameCode` | 翻掉最后一字节（tag 区）⇒ 同一个码 |
+| :97 | `aPassphraseBelowThePolicyIsRejectedBeforeAnyKeyIsDerived` | `"short"` ⇒ `passphrase-too-weak`；0 调用 |
+| :109 | `aTruncatedArchiveReportsItsStructuralCode` | 截到 20 B ⇒ `corrupt-header`（结构错不冒充口令错） |
+| :122 | `bytesThatOnlyStartWithTheMagicAreRejectedAsACorruptArchive` | 只有 magic 的 16 B ⇒ `corrupt-header` |
+| :136 | `bytesShorterThanTheMagicAreTreatedAsPlaintext` | `"MHSYNC"` 六字节 ⇒ 明文路径 ⇒ `malformed-json` |
+| :148 | `plaintextEnvelopeKeepsTheExactTextPath` | 网关收到 == `String(bytes, UTF_8)`，明文路径零变化 |
+| :162 | `aLocallyWrittenArchiveRoundTripsThroughTheSamePath` | 用 `ArchiveWriter.write` 现造归档 ⇒ 同一入口解开 ⇒ 信封结构相等 |
+| :180 | `acceptOnlyGatewayEchoesTheDecryptedIdentityWithoutWriting` | `acceptOnly` 网关回显 deviceId / snapshotId / 64 字符内容指纹；零写入 |
+
+**B. `SourceSyncArchiveControllerTest`（feature/settings，8 例）**
+
+| 用例 | 断言 |
+| --- | --- |
+| `plaintextIsNotOfferedAndLeavesNoPrompt` | 非归档 ⇒ `offer` false、卡片不可见、不碰端口 |
+| `anArchiveShowsThePromptAndAsksForThePassphrase` | 归档 ⇒ 卡片可见、带文件名、`onBlocked(passphrase-required)` |
+| `aCorrectPassphraseHandsBackTheEnvelopeAndDropsTheArchive` | 成功 ⇒ 回调解出信封、卡片收起、暂存清空 |
+| `aWrongPassphraseKeepsThePromptAndPutsTheArchiveCodeOnTheErrorLine` | 失败 ⇒ 卡片保持、错误行含 ArchiveError 原码、主文案是 UNLOCK_FAILED |
+| `aBlankPassphraseNeverReachesThePort` | 空白口令不调端口（不白跑 PBKDF2） |
+| `unlockWithoutAnOfferedArchiveDoesNothing` | 没暂存时 `unlock` 是 no-op |
+| `clearDropsTheStashedArchiveAndThePrompt` | `clear()` 同时丢密文与卡片 |
+| `pickingAnotherFileClearsThePreviousPrompt` | 重选明文文件 ⇒ 上一份归档的提示被清掉 |
+
+**C. `SourceSyncPassphraseScreenTest`（feature/settings androidTest，5 例）**
+
+| 用例 | 断言 |
+| --- | --- |
+| `noPassphraseCardIsRenderedWhenThePickerDidNotSeeAnArchive` | 明文路径不出现任何口令控件，首屏 PICK/PREVIEW 仍可见 |
+| `anArchiveShowsTheCardWithItsFileNameAndADisabledUnlockButton` | 卡片与输入框在；空口令时「解密」按不动；错误行不存在 |
+| `typingAPassphraseEnablesUnlockAndTappingItHandsTheTextBack` | 输字后按钮可用；点击把口令**原样**交回（`listOf("correct horse battery staple")`） |
+| `aRejectedPassphraseKeepsTheCardOpenAndShowsTheReasonCode` | 错误行显示 `wrong-passphrase-or-tampered` |
+| `thePassphraseCardSitsAboveThePreviewBlockAndKeepsTheMainFlowOnTheFirstScreen` | 不滚动：口令卡与首屏 PICK/PREVIEW 同时可见（W6-41 的首屏纪律没被破坏） |
+
+### §36.7 本机实跑（串行，低内存）
+
+| 步骤 | 命令 / 脚本 | 结果 |
+| --- | --- | --- |
+| 三模块单测 | `D:/mh-verify/run-w6-63.bat`（`:core:common:testDebugUnitTest :core:database:testDebugUnitTest :feature:settings:testDebugUnitTest`，`--max-workers=1 "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" "-Dkotlin.daemon.jvm.options=-Xmx1024m"`） | `BUILD SUCCESSFUL in 6m 53s`、`167 actionable tasks: 26 executed`、`EXIT=0` |
+| androidTest 编译 | `assembleDebugAndroidTest`（同一低内存参数） | `BUILD SUCCESSFUL in 3m 26s`、`EXIT=0` |
+| 门禁脚本自测 | `python -m unittest discover -s .github/scripts/tests` | `Ran 54 tests` / `OK` |
+| 清理 | 跑完 `gradlew --stop` | `java-left=0`；仓库根 `hs_err_pid*.log` / `replay_pid*.log` 计数均 0 |
+
+XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-63.log`）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `core/common` | 42 | 595 | 0 | 0 | 11 | 不变（11 个跳过仍是两个环境门控套件） |
+| `core/database` | 19 | **184** | 0 | 0 | 12 | 172 → 184（+12 = W6-63 的 `SourceSyncArchiveImportTest`） |
+| `feature/settings` | 22 | **342** | 0 | 0 | 0 | 334 → 342（+8 = W6-63 的 `SourceSyncArchiveControllerTest`） |
+
+关键套件逐个：`SourceSyncArchiveImportTest` **12/12**（14.60 s，主要花在 4 次真 PBKDF2 上：
+解开归档 2.25 s、错口令 2.91 s、篡改 2.48 s、本地写+读 4.70 s）、
+`SourceSyncArchiveControllerTest` **8/8**（0.043 s，端口是替身，不跑 PBKDF2）。
+
+### §36.8 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机搬运**：把归档拷到另一台机器再导入的完整流程 NOT_RUN（同 §33.8 / §34.8 / §35.8 第 5 条，都需要第二台机器）。
+2. **设备侧密码学**：全部结论来自 JVM；Android 上 `javax.crypto` 由 Conscrypt 实现，PBKDF2 600 000 轮在低端机上的耗时
+   与峰值内存未测 ⇒ DEVICE_UNVERIFIED。
+3. **传输路没有口令通道**：`receiveAndImport` 与监听路调的是单参重载（`passphrase = null`），
+   所以线上真收到一份归档只会得到 `passphrase-required` 而不是解开它。这是**有意**的：口令不过网。
+   要支持「对端发归档」就得在线协议里开口令通道，那是另一个安全评审的活，本轮不做。
+   也因此「归档在真实 socket 上跑过」这条证据不存在——归档的端到端只有文件选择器这一条路。
+4. **导出侧没有做**：「另存为 .mharchive」零实现，`ArchiveWriter.write` 目前只有测试调用方。
+   **（已由 §37 关闭：W6-64 把写端接到了导出卡的「另存为文件」，明文与加密共用同一次导出。）**
+5. **8 MiB 上限**：继承 §35.8 第 3 条，只测了判定写法没测接近上限的真数据。
+6. **口令的界外情况**：继承 §35.8 第 6 条（超长口令、NUL、代理对）。界面上也没有「显示口令」开关、
+   没有剪贴板粘贴的专项验证。
+7. **门禁**：本轮把 `SourceSyncArchiveImportTest` 加进 `--required-suite`（46 → **47** 个套件），
+   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`。
+   CI 侧已在 head `6857bdd` 上落实：Android CI run **40215577317** success，日志实计
+   `--required-suite com.` **47** 行（末两条 `ArchiveRoundTripTest` → `SourceSyncArchiveImportTest`，
+   紧接 `--require-complete-suites`），`uniqueTests 2246` 且 `core/database` 报 **184** 例。
+8. **instrumentation**：新增 5 例 Compose 断言本机无设备/模拟器可跑，设备侧证据来自 CI：
+   `6857bdd` 的 API 32 / API 36 两个作业里 `:feature:settings:connectedDebugAndroidTest`
+   **Starting 105 → Finished 105**、0 FAILED，作业末断言 `API 32/36: 19 unique mandatory visual/parser tests passed`
+   命中该 SHA；真机仍 DEVICE_UNVERIFIED。
+
+### §36.9 下一步
+
+- 导出侧：「另存为 .mharchive」（`ArchiveWriter.write` 已有写端，缺的是导出页与文件落盘）；
+  **（已由 §37 完成，见 W6-64；剩余缺口改为设备侧取证与扩展名统一。）**
+- 设备侧取证：把 PBKDF2 600 000 轮的耗时搬到模拟器上量一次（低端机是主要风险面）；
+- 真实两机搬运取证（§36.8 第 1 条），届时与 §33.8 / §34.8 / §35.8 的跨机项一起改成 EXECUTED_PASS；
+- 若产品上要「对端直接发归档」，先写一份安全评审：口令怎么进、超时多久、失败怎么告诉用户不泄露信息。
+
+## §37 导出侧「另存为文件」：明文信封与加密归档共用一次导出（W6-64）
+
+### §37.1 动机：读端与导入端都到位了，写端只剩测试调用方
+
+§36.8 第 4 条如实记着：「导出侧没有做：『另存为 .mharchive』零实现，`ArchiveWriter.write` 目前只有测试调用方。」
+§36.9 第一条也是它。本节把这条缝补上：**不新造一条导出管线**，而是把已有的那条
+（`AndroidSourceSyncService.export()` → 发送卡的 `SourceSyncExportPort`）多接一个出口——
+用户选一个保存位置，把同一份导出写成文件。口令留空是明文信封，填了口令是加密归档；
+两者的内容都来自同一次导出，差别只在有没有过 `ArchiveWriter.write`。
+
+边界：不碰传输链路（W6-42 的发送卡不动）、不读文件（导入侧是 W6-63 的活）、
+不给导出加 secrets 通道（归档层永不载凭据，见 W6-62）。
+
+### §37.2 对齐 Windows `SourceSyncSession.Export` 与 `SyncCliRunner.RunExport`
+
+Windows 的权威语义分两处：`windows/src/MediaHub.Sync/SourceSyncSession.cs` L92-176 决定
+「信封怎么来、要不要加密」，`windows/src/MediaHub.SyncCli/SyncCliRunner.cs` L73-166 决定
+「写哪个文件、写失败报什么」。Android 只做前者，后者由 SAF 顶替。
+
+| Windows 环节 | Android 对等物 | 语义是否等价 |
+| --- | --- | --- |
+| `Export(includeSecrets, passphrase, ...)`：passphrase == null ⇒ 明文 `EnvelopeJson` | `SourceSyncArchiveExport.of(export, null)` ⇒ `Plain(export.json)` | 等价；用的就是发送卡那一份文本，不重新编码 |
+| passphrase != null ⇒ `EncryptedArchiveWriter.Write(envelope, passphrase, DefaultIterations, now)` | passphrase != null ⇒ `ArchiveWriter.write(envelope, passphrase, DEFAULT_ITERATIONS, envelope.createdAtEpochMs)` | 等价；迭代数与「信封 / 归档头同一时间戳」都照抄 |
+| `includeSecrets && passphrase != null` ⇒ `secrets-not-supported`（`SourceSyncSessionReasons`） | 信封 `canSendSecrets == true` ⇒ `ArchiveWriter` 的 `secrets-not-allowed` | 同一态度（归档层永不载凭据），码名沿用 W6-62 的读侧集合 |
+| `includeSecrets && protector == null` ⇒ `secrets-require-protector`；给了 `secrets` 却 `includeSecrets == false` ⇒ `secrets-not-requested` | 不适用 | Android 的导出恒 `canSendSecrets = false`（`AndroidSourceSyncService.export()`），没有 secrets 通道 |
+| `EnsureSourceIds()` 的未分配项进 `Warnings`（`source-skipped:<serverId>:<reason>`） | `AndroidSourceSyncService.export()` 的 `skippedServerIds` | 部分等价：Android 只跳「没有可用端点 / 没有可写类型」的来源，identity 由 `SourceSyncLocalIds.derive` 确定性派生（不是 warning） |
+| `TryResolveExportPath` 的 `export-path-*` 码 + `File.WriteAllBytes` 的 `write-failed` | SAF `CreateDocument` 选位置 + `BackupFileStore.write` | 不等价，也不该等价：Android 没有路径（用户选 URI），失败折成本层两个码（见 §37.4） |
+| `DefaultEnvelopeFileName = "sync-envelope.json"` / `DefaultArchiveFileName = "sync-envelope.mhsync"` | `PLAIN_FILE_NAME = "sync-envelope.json"` / `SourceSyncArchiveExport.DEFAULT_FILE_NAME = "sync-envelope.mharchive"` | 明文同名；加密载体**同一字节格式、默认扩展名不同**（历史遗留，见 §37.8 第 4 条） |
+| `--json` 的十六个字段（command / root / path / encrypted / deviceId / snapshotId / sourceCount / deletionCount / canSendSecrets / sealedSecretCount / warningCount / warnings / bytes…） | 无对等物：成功行是「已导出<明文信封\|加密归档>（<文件名>，<字节数> 字节，<来源数> 个来源）」 | 不等价：Android 是 GUI，没有脚本消费方。计数只保留真实会变的三个（来源数、字节数、明文 / 加密） |
+
+一条容易误读的地方写在这里：Windows 的 `ExportSession.Archive` 与 `EnvelopeJson` 是二选一（`IsEncrypted => Archive.Length > 0`），
+Android 的 `SourceSyncArchiveArtifact` 也是二选一（`Plain` 或 `Sealed`），两边都没有「既给 JSON 又给归档」的中间态。
+
+### §37.3 三处落点的分工：策略在 core:database、状态机在控制器、字节只在内存
+
+**口令策略与打包放 `core:database`**（`SourceSyncArchiveExport.of`），因为写端判定只该有一处：
+`ArchiveWriter.write` 已经按「口令 → 凭据 → 迭代数 → 载荷上限」五步判过了（W6-62），
+这里不复制任何一条，只把 `ArchiveException` 折成 `Rejected(reason, message)`。
+两个出口（明文 / 加密）都由同一个 `SourceSyncExport` 产生，所以内容一定一致。
+
+**状态机放 `feature/settings` 的 `SourceSyncArchiveExportController`**：
+`Idle → AwaitingPassphrase → Ready → Saving → Saved | Failed`，
+另有两条退出路径 `saveCancelled()`（保存器上点取消）与 `dismiss()`（收起卡片 / 换页 / 销毁）。
+生成物（明文 JSON 字节或归档字节）只活在 `Ready` 状态里，对外只暴露 `pendingByteCount` 一个长度；
+`save` 只受理 `Ready`，避免连点两次时把两份不同字节写到同一个位置。
+
+**写盘复用既有的 SAF 设施**：`SourceSyncArchiveFilePort` 的生产实现包 `feature/settings/backup/BackupFileStore.write`
+（`ProductionBackupFileStore` 走 `openOutputStream` + 流式写 + 异常不展示原文），
+不新写一套 ContentResolver 代码。界面用 `ActivityResultContracts.CreateDocument("application/octet-stream")`
+在 `LaunchedEffect(archiveExportState)` 里、状态到 `Ready` 时拉起保存器——这套范式照 `backup/BackupScreen.kt` L84-112 抄的。
+
+导出卡放**页尾**（`SendSection` 之后），与 W6-41 起的首屏纪律一致：「选择文件 / 预览」仍是进来第一眼看到的东西。
+
+### §37.4 四条外部可观察语义
+
+1. **口令留空 = 明文，且不重新编码**：`Plain` 原样交出 `SourceSyncExport.json`（与 W6-42 发送卡发出去的同一份文本），
+   `plaintextExportKeepsTheExportedJsonWithoutReEncoding` 断言字符串逐字节相等。
+2. **空白口令不悄悄退化成明文**：界面层 `takeIf { it.isNotBlank() }` 把空串当「留空」下发 null（这是产品选择），
+   但核心层收到空白串照样报 `passphrase-empty`——`aBlankPassphraseIsRejectedInsteadOfFallingBackToPlaintext` 钉住这条，
+   免得以后有别的调用方把空串直接塞进 `of`。
+3. **归档头与信封同一时间戳**：`createdAtEpochMs = export.envelope.createdAtEpochMs`，与 Windows `ExportSession` 的 now 语义对齐；
+   迭代数固定 `ArchiveKdf.DEFAULT_ITERATIONS`（600 000），读侧照常接受 `>= MIN_ITERATIONS`。
+4. **写盘失败有独立本地码，不进跨机码表**：`archive-export-stream-unavailable`（目标流打不开，一个字节都没写）
+   与 `archive-export-write-failed`（写的时候抛异常）。`SourceSyncTransferReasons.ALL` 仍是 10 个，五集跨机码表一字未动。
+
+### §37.5 落点行号表
+
+| 文件 | 行 | 内容 |
+| --- | --- | --- |
+| `core/database/.../sync/SourceSyncArchiveExport.kt` | :14 | `sealed interface SourceSyncArchiveArtifact`：Plain / Sealed / Rejected 三态（新文件，82 行） |
+| 同上 | :51 | `object SourceSyncArchiveExport`；:54 `DEFAULT_FILE_NAME = "sync-envelope.mharchive"` |
+| 同上 | :56 | `fun of(export, passphrase)`：null ⇒ Plain，非 null ⇒ ArchiveWriter.write，ArchiveException ⇒ Rejected |
+| `feature/settings/.../sync/SourceSyncArchiveExportController.kt` | :10 | `sealed interface SourceSyncArchiveExportState`（新文件，204 行）；:16 AwaitingPassphrase、:19 Ready、:28 Saving、:31 Saved、:40 Failed |
+| 同上 | :44 | `SourceSyncArchiveExportCopy`：TITLE / HINT / ACTION / PASSPHRASE_LABEL / CANCEL / savedLineOf / failedLineOf |
+| 同上 | :69 / :84 | `SourceSyncArchiveExportPort`（生成）与 `SourceSyncArchiveFilePort`（写盘）两个单方法端口，替身测试不碰 PBKDF2 也不碰 ContentResolver |
+| 同上 | :99 | `class SourceSyncArchiveExportController`；:112 request、:123 prepare、:156 save、:181 saveCancelled、:189 dismiss |
+| 同上 | :131 / :171 / :175 | `PLAIN_FILE_NAME = "sync-envelope.json"` / `STREAM_UNAVAILABLE` / `WRITE_FAILED` |
+| `feature/settings/.../sync/SourceSyncImportViewModel.kt` | :43 | 构造器第 5 个注入 `backupFileStore: BackupFileStore`（Hilt 绑定见 `app/src/main/.../di/AppModule.kt:239`） |
+| 同上 | :189 / :204 | 控制器组装（exportPort 直连 `SourceSyncArchiveExport.of(sourceSyncService.export(), passphrase)`，filePort 包 `backupFileStore.write`）；`val archiveExportState` |
+| 同上 | :351 / :361 / :368 / :373 / :378 | `requestArchiveExport` / `prepareArchiveExport` / `saveArchiveExport` / `cancelArchiveExportSave` / `dismissArchiveExport` |
+| 同上 | :322 / :338 附近 | `reset()` 与 `onCleared()` 里 `archiveExportController.dismiss()`（随页面一起丢弃产物） |
+| `feature/settings/.../sync/SourceSyncImportScreen.kt` | :210-225 | 六个新 tag：`sync.export.card` / `sync.export.action` / `sync.export.passphrase` / `sync.export.submit` / `sync.export.state` / `sync.export.dismiss` |
+| 同上 | :240 / :252 / :257 | Route 收集 `archiveExportState`；`exportSaver`（CreateDocument）；`LaunchedEffect` 在 Ready 时拉起保存器 |
+| 同上 | :599 | 页尾调用 `ArchiveExportSection`（SendSection 之后，首屏不动） |
+| 同上 | :1390 | `@Composable private fun ArchiveExportSection`：卡片 / 口令框（密码遮罩）/ 导出按钮 / 状态行 / 收起按钮 |
+
+### §37.6 用例清单
+
+**A. `SourceSyncArchiveExportTest`（core/database，8 例，进 `--required-suite`）**
+
+| 行 | 用例 | 断言 |
+| --- | --- | --- |
+| :33 | `plaintextExportKeepsTheExportedJsonWithoutReEncoding` | null 口令 ⇒ Plain；`plain.json == export.json`（逐字节）；sourceCount 1、skippedCount 0 |
+| :44 | `aPassphraseProducesAnArchiveThatReadsBackAsTheSameEnvelope` | 头 8 字节 `MHSYNCA1`；`ArchiveReader.tryRead` 解得信封与原始信封**结构相等**；reason 为 null |
+| :57 | `theArchiveHeaderStampsTheEnvelopeTimestampAndTheDefaultIterations` | 头的时间戳 == 信封时间戳、迭代数 == 600 000、kdf == pbkdf2-sha256、version 1 |
+| :73 | `aPassphraseBelowThePolicyIsRejectedWithTheArchiveCode` | `"short"` ⇒ `passphrase-too-weak`（码原样，不包装） |
+| :81 | `aBlankPassphraseIsRejectedInsteadOfFallingBackToPlaintext` | `"   "` ⇒ `passphrase-empty`；绝不悄悄写明文 |
+| :89 | `anEnvelopeThatClaimsToCarryCredentialsIsRejected` | `canSendSecrets = true` ⇒ `secrets-not-allowed` |
+| :97 | `skippedSourcesAreCountedAndDoNotBlockEitherFlavour` | 两条 skipped 在明文与归档两条路上都计数，不阻断；sourceCount 仍是 1 |
+| :110 | `anExportWithNoSourcesStillProducesAReadableArchive` | 空导出也能写出可读归档；读回 sources 为空、`canSendSecrets == false` |
+
+**B. `SourceSyncArchiveExportControllerTest`（feature/settings，11 例）**
+
+| 行 | 用例 | 断言 |
+| --- | --- | --- |
+| :21 | `requestExpandsTheCardOnlyOnce` | Idle → AwaitingPassphrase；再 request 幂等 |
+| :33 | `aBlankPassphraseIsHandedToThePortAsNullAndYieldsPlaintext` | 空白口令以 null 进端口；Ready(`encrypted = false`, `sync-envelope.json`) |
+| :56 | `aSealedArtifactBecomesReadyWithTheArchiveFileName` | Sealed ⇒ Ready(`encrypted = true`, `sync-envelope.mharchive`) |
+| :75 | `aRejectedArtifactKeepsTheCardOpenWithItsStableCode` | Rejected ⇒ 回 AwaitingPassphrase，错误行含原码 |
+| :89 | `prepareIsIgnoredBeforeTheCardIsExpanded` | 卡片未展开时 prepare 不调端口 |
+| :100 | `aSuccessfulWriteReportsTheFileNameAndTheByteCount` | Written ⇒ Saved，文件名 / 字节数 / 来源数与产物一致 |
+| :119 | `anUnavailableStreamReportsItsOwnCode` | StreamUnavailable ⇒ Failed(`archive-export-stream-unavailable`) |
+| :135 | `aWriteFailureCarriesItsOwnCode` | WriteFailed ⇒ Failed(`archive-export-write-failed`, cause) |
+| :151 | `saveWithoutAReadyArtifactNeverTouchesTheFilePort` | 非 Ready 时 save 是 no-op、文件端口零调用 |
+| :163 | `theSavePickerBeingCancelledDropsTheArtifactAndReturnsToIdle` | 保存器取消 ⇒ 回 Idle、产物丢弃 |
+| :176 | `dismissDropsEverythingFromAnyState` | 任意态 dismiss ⇒ Idle |
+
+**C. `SourceSyncArchiveExportScreenTest`（feature/settings androidTest，7 例）**
+
+| 行 | 用例 | 断言 |
+| --- | --- | --- |
+| :36 | `theCollapsedCardShowsOnlyTheExportButton` | Idle 只有「导出」按钮，不出现口令框与提交按钮 |
+| :47 | `tappingExportOpensThePassphraseStep` | 点「导出」后口令框与提交按钮出现 |
+| :57 | `theExpandedCardOffersAnEmptyPassphraseFieldAndBothButtons` | 口令框为空、提交与收起都在 |
+| :68 | `typingAPassphraseAndTappingExportHandsTheTextBack` | 输入口令后点提交，回调收到**原样文本** |
+| :84 | `aSavedExportShowsTheFileNameAndTheByteCount` | Saved ⇒ 状态行含文件名、字节数与「已导出」 |
+| :105 | `aFailureShowsTheStableCodeAndKeepsTheCardOpen` | Failed ⇒ 状态行含稳定码，卡片保持展开 |
+| :117 | `tappingDismissReportsTheDismissCallback` | 点「收起」回调一次 |
+
+### §37.7 本机实跑（串行，低内存）
+
+| 步骤 | 命令 / 脚本 | 结果 |
+| --- | --- | --- |
+| 编译（生产 + 单测 + androidTest） | `:core:database:compileDebugKotlin :feature:settings:compileDebugKotlin`，再 `:core:database:compileDebugUnitTestKotlin :feature:settings:compileDebugUnitTestKotlin :feature:settings:compileDebugAndroidTestKotlin` | 两次均 `BUILD SUCCESSFUL`（2m 29s / 2m 39s）、`EXIT=0` |
+| 三模块单测 | `D:/mh-verify/run-w6-64.bat`（`:core:common:testDebugUnitTest :core:database:testDebugUnitTest :feature:settings:testDebugUnitTest`，`--max-workers=1 "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" "-Dkotlin.daemon.jvm.options=-Xmx1024m"`） | `BUILD SUCCESSFUL in 3m 32s`、`167 actionable tasks: 2 executed, 165 up-to-date`、`EXIT=0` |
+| 门禁脚本自测 | `python -m unittest discover -s .github/scripts/tests` | `Ran 54 tests in 107.171s` / `OK` |
+| 清理 | 跑完 `gradlew --stop` | 仓库根 `hs_err_pid*.log` / `replay_pid*.log` 计数均 0 |
+
+XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-64.log`）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `core/common` | 42 | 595 | 0 | 0 | 11 | 不变（11 个跳过仍是两个环境门控套件） |
+| `core/database` | 20 | **192** | 0 | 0 | 12 | 184 → 192（+8 = 本节 `SourceSyncArchiveExportTest`） |
+| `feature/settings` | 23 | **353** | 0 | 0 | 0 | 342 → 353（+11 = 本节 `SourceSyncArchiveExportControllerTest`） |
+
+关键套件逐个：`SourceSyncArchiveExportTest` **8/8** 0 失败 0 跳过；
+`SourceSyncArchiveExportControllerTest` **11/11** 0 失败 0 跳过（端口是替身，一次 PBKDF2 都不跑）。
+新增 androidTest `SourceSyncArchiveExportScreenTest` 7 例只到编译；本机无设备 / 模拟器，设备侧证据留给 CI（见 §37.8 第 3 条）。
+按文件数 `@Test`，`feature/settings` 的 androidTest 由 105 例增至 **112** 例。
+
+### §37.8 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机搬运**：把导出的 `.mharchive` 拷到另一台机器再导入的完整流程 NOT_RUN（同 §33.8 / §34.8 / §35.8 第 5 条 / §36.8 第 1 条，都需要第二台机器）。
+2. **设备侧密码学**：全部结论来自 JVM；写侧的 PBKDF2 600 000 轮在 Android（Conscrypt）上的耗时与峰值内存未测 ⇒ DEVICE_UNVERIFIED。
+   参考量级：W6-63 在 JVM 上单次解锁 2.2–4.7 s，写侧与读侧同量级。
+3. **androidTest 7 例已在 CI 上跑过，但没有真机**：`b3d0030` 与 `7cc68ac` 的 Android CI 里 `:feature:settings:connectedDebugAndroidTest` 都是 **Starting 112 → Finished 112**、0 FAILED（等于把 `SourceSyncArchiveExportScreenTest` 的 7 例连同既有 105 例全跑了一遍），两个作业末尾各有 `API 32/36: 19 unique mandatory visual/parser tests passed at <该 head>`。真机仍是 DEVICE_UNVERIFIED。
+4. **扩展名差异**：Windows CLI 的加密导出默认名是 `sync-envelope.mhsync`（`SyncCliRunner.DefaultArchiveFileName`），
+   Android 侧统一 `.mharchive`（W6-62 / W6-63 的文案与夹具已经定了）。两者是**同一字节格式**，只是默认名不同；
+   要统一得两边一起改（改 Windows 默认名会碰到既有 CLI 契约与验收脚本），本轮不动。
+5. **8 MiB 上限**：继承 §35.8 第 3 条 / §36.8 第 5 条，只测了判定写法没测接近上限的真数据。
+6. **口令的界外情况**：继承 §36.8 第 6 条（超长口令、NUL、代理对）。导出卡也没有「显示口令」开关、没有剪贴板粘贴的专项验证。
+7. **Windows 的 warnings 与 JSON 输出面没有对等物**：Android 是 GUI，没有 `--json` 消费方；
+   成功行只带来源数 / 字节数 / 明文或加密，逐条跳过原因（`skippedServerIds`）不进界面。
+8. **SAF 的可写性**：部分设备上 `CreateDocument` 可能返回不可写的 URI（`openOutputStream` 返回 null）⇒ 本地码 `archive-export-stream-unavailable`，真机上未验。
+9. **门禁**：本轮把 `SourceSyncArchiveExportTest` 加进 `--required-suite`（47 → **48** 个套件），
+   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`；`b3d0030` 与 `7cc68ac` 的 Android CI `build` 作业里 `--required-suite com.` 实计 **48** 行（末三条 `ArchiveVectorsTest` / `ArchiveRoundTripTest` / `SourceSyncArchiveExportTest`，紧接 `--require-complete-suites`），`uniqueTests` **2265**、`uniqueTestsPerModule` 报 `core/database` **192** 例与 `feature/settings` **353** 例，作业绿。
+
+### §37.9 下一步
+
+- 设备侧取证：把 PBKDF2 600 000 轮的耗时与峰值内存在模拟器 / 低端机上量一次（写读两侧都要），补 §37.8 第 2 条与 §36.8 第 2 条；
+- 真实两机搬运：Windows 导出 `.mharchive` → 拷到另一台机器 → Android 导入，两端各留 exact 证据（同时关闭 §36.8 第 1 条与 §37.8 第 1 条）；
+- 扩展名统一：若维护者希望与 Windows CLI 默认名一致，需在 CLI 加参数而不是单方面改 Android（否则既有文案与夹具不同步）；
+- 若产品上要「对端直接发归档」，先写一份安全评审：口令怎么进、超时多久、失败怎么告诉用户不泄露信息（与 §36.9 最后一条同一件事）。
+
+## §38 反向互操作：Android 写出的 `.mharchive` 由 Windows 读（W6-65）
+
+> 状态词按本项目口径：EXECUTED_PASS / IMPLEMENTED_UNVERIFIED / GUI_UNVERIFIED / SERVER_UNVERIFIED / DEVICE_UNVERIFIED / NOT_RUN / BLOCKED / FAILED / RELEASE_BLOCKED / SIGNING_BLOCKED。
+> 本轮边界：**只补反向证据**，两端生产实现一行不改。Windows 侧只加一个测试文件 + 一份测试资产；Android 侧只加一个测试方法。
+
+### §38.1 动机：§35–§37 三节都只有「Windows 权威 → Android 对照」一个方向
+
+W6-62 / W6-63 / W6-64 的方法论是：把 Windows 的 `EncryptedArchiveReader` / `EncryptedArchiveWriter` 当权威，
+用临时 net10.0 生成器产黄金向量（`windows-archive-vectors.json`，49950 B），再让 Kotlin 逐条复算。
+这套办法能证明「Android 复现了 Windows」，但证明不了**反方向**：
+
+- Kotlin 写端省略可选字段（`accountScope` / `secrets` 为 null 时整段不写）；
+- 未知 `sourceType`（`acme-nas` 这类）在 Kotlin 侧是原样本保留的；
+- 头部 JSON 由 kotlinx.serialization 产出，转义策略与 `System.Text.Json` 不同（见 §38.5）。
+
+这三件事全是「C# 读端能不能吃下」的问题，同语言回环永远测不到。而 W6-64 的导出卡已经能产出 `.mharchive`文件——
+用户把 Android 导出的文件拿到 Windows 上导入，是**已经存在的用户路径**，读端在这里挑剔一次，用户看到的就是「解密失败」。
+所以本轮反过来做：**字节由 Android 的 `ArchiveWriter` 产出，Windows 读端必须原样读懂**。
+
+### §38.2 方法：真实写端产出的黄金文件，不在 C# 侧重造
+
+归档的 salt（16 B）与 nonce（12 B）每次写都随机（W6-62），因此**不可能**在 C# 测试里「重新生成同一个文件」再比字节
+—— 能钉住的只有那份真实文件本身。三步：
+
+1. 在 Android `core/common` 测试源集写一个**临时** JUnit 用例（`AndroidArchiveGeneratorForWindows`），
+   用生产 `ArchiveWriter.write(envelope, passphrase, ArchiveKdf.DEFAULT_ITERATIONS, createdAtEpochMs)` 写出一份归档；
+2. 落到 W6 树的 `windows/tests/assets/android-written-archive.mharchive` 并入库；
+3. **立刻删掉生成器**——它只存在于本轮工作区，不进任何提交。
+   资产是唯一事实来源；测试套件里不允许出现「能重写资产」的代码，否则 golden 会自我实现。
+
+生成时另用 Node 独立解了一遍（`crypto.pbkdf2Sync` + `aes-256-gcm`，AAD = 前 12+161 字节），
+解出的载荷正是 §38.3 的信封 ⇒ 证明这份文件确实是 Android 生产写端产出，不是手工拼的字节。
+
+### §38.3 黄金资产规格（逐字节可断言）
+
+| 项 | 值 |
+| --- | --- |
+| 文件 | `windows/tests/assets/android-written-archive.mharchive` |
+| 长度 | **1164 B** |
+| sha256 | `72365f67b240b10aa20c3c5f867f53600199ac5eb9a834e0ebe672d8d6794a15` |
+| magic | `MHSYNCA1`（8 B ASCII） |
+| 头部长度（大端 int32 @8） | **161** |
+| 头部 JSON | `{"version":1,"kdf":"pbkdf2-sha256","iterations":600000,"saltBase64":"rk4gfF2NEFUQih+xagtPDQ==","nonceBase64":"Jnfcf+l0U161FUBq","createdAtEpochMs":1700000000000}` |
+| trailer（magic + 长度 + 头部） | 173 B |
+| 密文长度 | 975 B |
+| 明文（信封 JSON）长度 | **975 B** |
+| 明文 sha256 | `68957f0d6658058139b861d86c868b64364cf7011adb7189851d5ebd40e16b79` |
+| 口令 | `correct horse battery staple` |
+
+信封内容（C# 用例里的期望值就是这张表）：
+
+| 字段 | 值 |
+| --- | --- |
+| `schemaVersion` / `minimumReaderVersion` | 1 / 1 |
+| `deviceId` | `device-android-pixel` |
+| `snapshotId` | `0123456789abcdef0123456789abcdef` |
+| `createdAtEpochMs` | 1 700 000 000 000 |
+| `capabilities` | `canSendSecrets=false`、`sourceTypes=["emby","jellyfin","webdav"]` |
+| 源 1 | `0f9a1c2e-1111-4a2b-9c3d-000000000001` / `emby` / **家庭 NAS（客厅）** / **张三** / rev 42 / fv 3 |
+| 源 1 端点 | `http://192.168.1.20:8096/emby`（primary=true, enabled=true, order=0）与 `https://nas.example.invalid/emby`（false / **false** / 2） |
+| 源 2 | `0f9a1c2e-2222-4a2b-9c3d-000000000002` / **`acme-nas`（未知类型）** / `Backup shelf` / accountScope **缺省** / rev 7 / fv 1 |
+| 源 2 端点 | `acme://shelf-one`（true / true / 0） |
+| 墓碑 1 | `0f9a1c2e-3333-4a2b-9c3d-000000000003` / 1 760 000 000 000 / 5 |
+
+刻意选了四类跨语言最容易塌的输入：**中文与全角括号**、**未知 sourceType**、**可选字段缺省**（源 2 的 `accountScope`、两条源的 `secrets`）、**多端点且含非主用**。
+
+### §38.4 Windows 侧 8 个读端用例（`ArchiveAndroidInteropTests`）
+
+新文件 `windows/tests/MediaHub.Tests/ArchiveAndroidInteropTests.cs`（290 行），全部读同一份资产：
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `The_android_written_archive_is_read_field_by_field` | 逐字段：envelope 六个标量 + capabilities + 两条源的全部属性 + 端点数组 + 墓碑 |
+| `An_unknown_source_type_is_carried_through_untouched` | `acme-nas` 的 `Raw` / `Wire` 都原样，`IsKnown` 与 `SyncSourceTypes.IsKnown` 都是 false |
+| `The_android_written_archive_bytes_are_pinned` | 长度、sha256、magic、头部长度四个硬值 |
+| `The_android_header_matches_the_canonical_shape` | 头部六字段值 + 头部 JSON 逐字相等 + 重编码后**同值**（见 §38.5） |
+| `The_windows_serializer_reproduces_the_kotlin_document_semantically` | 先自己解密取明文（sha256 钉住），再 `JsonNode.DeepEquals` 比对 Windows 重序列化的文档；并验证 canonical form 是不动点 |
+| `A_wrong_passphrase_is_indistinguishable_from_tampering` | 错口令 / 改头部时间戳 / 翻密文一位，三者同码 `wrong-passphrase-or-tampered`、同一句文案 |
+| `A_layout_error_is_reported_before_the_passphrase_is_examined` | 只剩头部 ⇒ `corrupt-ciphertext`（框架错误优先于空口令）；null ⇒ `passphrase-empty`；`"short"` ⇒ `passphrase-too-weak` |
+| `The_android_written_archive_carries_no_plaintext` | 七个明文 token 在整份归档字节里一个都搜不到 |
+
+测试工程只加一条 Content（`windows/tests/MediaHub.Tests/MediaHub.Tests.csproj:28-29`），照既有 `sample-av.mp4` 的形状
+`CopyToOutputDirectory="PreserveNewest"`，测试用 `Path.Combine(AppContext.BaseDirectory, "assets", …)` 取；不引入任何新依赖。
+
+### §38.5 本轮唯一的新发现：头部「同值但不同字节」
+
+第一版用例按「重序列化必须逐字节相等」写，跑出来红了，位置在 salt 的 base64 里：
+
+```
+expected ... 105,104,43,120,97   (i h + x a)
+actual   ... 105,104,92,117,48  (i h \ u 0)
+```
+
+原因：**System.Text.Json 会把 `+` 转义成 `\u002B`**，kotlinx.serialization 原样写 `+`。
+本文件的 saltBase64 是 `rk4gfF2NEFUQih+xagtPDQ==`，C# 重编码后变成 `rk4gfF2NEFUQih\u002BxagtPDQ==`，一个字符换六个，
+两份头部 JSON 在字节上**不可能**相等。
+
+这是**无害**的，理由要写下来（否则以后有人会「修」它）：
+
+1. GCM 认证的是**磁盘上的头部原字节**：两端都把 `magic + BE int32 + headerJson` 的原字节当 AAD，
+   从来不认证「重编码结果」。写端与读端读的是同一份字节，转义差异不影响任何一步。
+2. 两端读端都能解析另一种形式：`ArchiveHeaderCodec.TryParse`（C# `JsonDocument` / Kotlin `Json.parseToJsonElement`）都按 JSON 语义取值，
+   `\u002B` 与 `+` 解析出同一个字符串。
+3. 契约因此定成「**同值**」而不是「同字节」：用例改成 `TryParse(Serialize(header))` 后 `Assert.Equal(header, reparsed)`；
+   注释里写明为什么不断言字节相等。
+
+教训（跨语言格式通用）：**不要用「重序列化后字节相等」当跨语言契约判据**——每种 JSON 库的转义策略都不同，
+这个判据会稳定地红，而红的原因与正确性无关。要在字节层钉，就钉**写端写在盘上的那份字节**（§38.3 的 sha256）。
+
+### §38.6 落点行号表
+
+| 文件 | 行 | 内容 |
+| --- | --- | --- |
+| `windows/tests/assets/android-written-archive.mharchive` | — | 新文件，1164 B，Kotlin `ArchiveWriter` 真实产出（只在 W6 分支） |
+| `windows/tests/MediaHub.Tests/MediaHub.Tests.csproj` | :28-29 | 新增一条 Content 挂该资产 |
+| `windows/tests/MediaHub.Tests/ArchiveAndroidInteropTests.cs` | :27 | `public sealed class ArchiveAndroidInteropTests`（新文件，290 行） |
+| 同上 | :29-54 | 全部硬值常量：`Passphrase` / `OtherPassphrase` / `Magic` / `ArchiveLength` / `ArchiveSha256` / `HeaderLength` / `TrailerLength` / `PayloadSha256` / `PayloadLength` / `HeaderJson` |
+| 同上 | :56-57 | `ArchivePath` → `AppContext.BaseDirectory/assets/android-written-archive.mharchive` |
+| 同上 | :59 / :113 / :124 / :135 / :162 / :189 / :215 / :234 | 八个 `[Fact]` |
+| 同上 | :256 / :258 / :275 | 三个辅助：`ReadArchive` / `DecryptPayload`（自有 AesGcm，AAD = 前 173 B）/ `WithHeaderText`（等长替换） |
+| `core/common/src/test/kotlin/com/mediahub/core/common/archive/ArchiveRoundTripTest.kt` | :360-371 | 新增 `writing_refuses_a_payload_that_is_larger_than_the_archive_limit`（见 §38.7） |
+
+### §38.7 顺带补的 Android 侧缺口：写端 8 MiB 真的走了一遍
+
+W6-62 的 `ArchiveWriter` 有「载荷 > 8 MiB ⇒ `PAYLOAD_TOO_LARGE`」这一步，但 Android 侧只断言过常量
+（`MAX_PAYLOAD_BYTES` 等于多少），**没有一例真的让写端走那条分支**；而 Windows 侧一直有
+`OversizedPayload_IsRejectedWhenWriting`（9 MB 载荷）。这条限在两端因此是「一边有行为证据、一边只有常量」——上限被改坏时 Android 那组用例一个都不会响。本轮补上：
+
+| 输入 | 期望 |
+| --- | --- |
+| 9 000 000 字符名的一条源（载荷 > 8 MiB） | `ArchiveError.PAYLOAD_TOO_LARGE` |
+| 4 000 000 字符名的一条源（明显更小） | 写成功、reason 为 null |
+
+第二行是反向对照：只断言「大的一定拒」的话，把上限改小或把别的错误当拒绝理由，用例照样绿。
+
+### §38.8 本机实跑（串行，防 OOM）
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| C# 全量 | `cd D:/mh-w6 && dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug` | **1585 通过 / 0 失败 / 0 跳过**（1577 → 1585，+8） |
+| C# 只看新例 | 同上加 `--filter FullyQualifiedName~ArchiveAndroidInteropTests` | **8/8 通过**（首跑红 1 例，见 §38.5，改断言后全绿） |
+| Android 三模块 | `D:/mh-verify/run-w6-65-gradle.bat`（低内存模板，`--max-workers=1`） | `BUILD SUCCESSFUL in 1m 6s`、`EXIT=0` |
+| 清理 | 跑完 `gradlew --stop` | 仓库根 `hs_err_pid*.log` 计数 0、残留 java 进程 0 |
+
+XML 汇总（`<testsuite>` 属性相加，非估算）：
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | 42 | **596** | 0 | 11 | 595 → 596（+1 = §38.7 那例） |
+| `core/database` | 20 | 192 | 0 | 12 | 不变 |
+| `feature/settings` | 23 | 353 | 0 | 0 | 不变 |
+
+`ArchiveRoundTripTest` 单套件由 23 例增至 **24 例**、0 失败。
+本轮**没有**新增套件，`--required-suite` 仍是 48 条；门禁用例数随 core/common +1。
+
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 `completed / success`：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `94b9432d1db3121aafecf5eb2a226734d904c822` | `windows-ci` | 40245159664 | `MediaHub.Tests` 469 + `MediaHub.WebDav.Tests` 104 = 573；licence `projects=13 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40245159540 | `uniqueTests` **2266**（`core/common` **596** / `core/database` 192 / `feature/settings` 353）；`--required-suite` 48 条；两个 visual-instrumentation job 各 112 例 `feature:settings` 全过，API 32/36 各 `19 unique mandatory` 命中该 SHA |
+| `bd71e3200a284c77e1fdfd8237fed7aa3e4e153a`（W6 树，已 merge 主树） | `windows-ci` | 40245165822 | `MediaHub.Tests` **1585** + `MediaHub.WebDav.Tests` 104 = **1689**；licence `projects=15 rows=47 packages=28`、`RESULT: PASS` |
+| 同上 | `android-ci` | 40245165765 | 与主树同口径（`uniqueTests` 2266、required-suite 48、instrumentation 112）：Kotlin 侧是同一份代码 |
+
+`uniqueTests` 由上一基线 2265 增至 **2266**（+1 = §38.7 新补的写端 8 MiB 用例，本机 XML 口径 `core/common` 595 → 596 与之一致）；`--required-suite` 仍 48 条、`androidTest` 仍 88 例，本轮都不新增套件。
+
+
+### §38.9 未覆盖（本节交付时必须如实保留）
+
+1. **设备侧**：C# 用例全部在 Windows 本机跑；Android 侧写端是纯 JVM 逻辑，但 PBKDF2 600 000 轮在真机（Conscrypt）上的耗时与峰值内存仍未测 ⇒ DEVICE_UNVERIFIED（同 §35.8 第 2 条 / §37.8 第 2 条）。
+2. **真实两机搬运**：把 Android 导出的 `.mharchive` 拷到另一台 Windows 机器再导入的完整流程 NOT_RUN（同 §33.8 / §34.8 / §35.8 / §36.8 / §37.8，都需要第二台机器）。
+3. **迭代数其他取值**：本资产只有 600 000 一档。Kotlin 侧接受 `>= MIN_ITERATIONS`、C# 读端同理，但「Android 用 700 000 写、Windows 读」这种跨端异值从未跑过。
+4. **未知 JSON 字段**：两端读端都忽略未知属性，但没有用例把「Android 将来新增一个字段」写进归档再让旧 Windows 读——这属于版本演进，需要 `minimumReaderVersion` 的独立评审。
+5. **载荷上限的反向**：§38.7 补的是写端拒绝；「塞一份接近 8 MiB 的真归档让 C# 读」仍只有既有 `OversizedCiphertext_IsRejectedBeforeDecryption` 的拒绝侧证据，正向的大文件读取未验（同 §37.8 第 5 条）。
+6. **转义差异的其他形态**：§38.5 只覆盖了 `+`。U+2028 / 控制字符 / 代理对在两端 JSON 库里的行为不同，未做矩阵。
+7. **不涉及 GUI**：两端都不改界面，无 GUI 证据需求；同步页四张卡的 GUI 证据仍按 W6-43 / W6-49 / W6-58 / W6-64 的既有口径记为 GUI_UNVERIFIED。
+8. **口令的界外情况**：继承 §36.8 第 6 条（超长口令、NUL、代理对）；本资产只有一条正常口令。
+
+### §38.10 下一步
+
+- 把 §38.3 的资产再加「异迭代数（如 700 000）」与「`minimumReaderVersion`=2」两份，做成跨端演进用例（候选 W6-66）；
+- 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条与 §37.8 第 1 条）；
+- 设备侧密码学：PBKDF2 600 000 轮在模拟器 / 低端机上的耗时与峰值内存，写读两侧都要；
+- 归档格式若要演进（新 KDF、新字段），先按 W6-47 ADR 的方法写契约，再两端同步加码——不要单边加。

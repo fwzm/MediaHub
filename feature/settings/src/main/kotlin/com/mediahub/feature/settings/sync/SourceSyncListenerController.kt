@@ -1,5 +1,6 @@
 package com.mediahub.feature.settings.sync
 
+import com.mediahub.core.common.sync.SourceSyncCancellation
 import com.mediahub.core.common.sync.SourceSyncReceiptOptions
 import com.mediahub.core.common.sync.SourceSyncTlsIdentity
 import com.mediahub.core.common.sync.SourceSyncTlsOptions
@@ -103,6 +104,9 @@ object SourceSyncListenCopy {
     const val STOP: String = "停止监听"
 
     const val RECEIVE_ONE: String = "等一次发送"
+
+    /** W6-61：只取消这一次等待，监听不关；取消不是失败，状态回到「正在监听」。 */
+    const val CANCEL_RECEIVE: String = "取消这一次接收"
 
     const val BUSY: String = "接收中…"
 
@@ -340,6 +344,18 @@ interface SourceSyncListenerSession : Closeable {
 
     /** 等一条连接并收一封信封；三段结果与 W6-23 相同。 */
     suspend fun receiveOnce(): SourceSyncTransferImportOutcome
+
+    /**
+     * W6-61：可取消的一次等待。
+     *
+     * [cancel] 非 null 时，等 accept / 读帧期间可以本地取消（阻塞的读被解开，结果给本地码
+     * transfer-cancelled），**监听不关**，界面能马上再等一次。
+     *
+     * 默认实现把把手丢掉、等价于 [receiveOnce]：既有测试替身不必改一行；
+     * 真实会话（[SourceSyncListenerImportFactory] 的 ImportSession）覆盖它并一路透传到监听端。
+     */
+    suspend fun receiveOnce(cancel: SourceSyncCancellation?): SourceSyncTransferImportOutcome =
+        receiveOnce()
 }
 
 /** 开监听的入口（生产实现见 [SourceSyncListenerImportFactory]）。 */
@@ -541,15 +557,18 @@ class SourceSyncListenerController(
     /**
      * 等一次发送并把它收下来。
      *
-     * @return true 表示这次真的等过并拿到了一个结果（含失败与拒收）；false 表示没开监听或已有一次在等。
+     * @param cancel W6-61 的可选取消把手：非 null 时这一次等待可被本地取消。取消走的是本地码
+     *   transfer-cancelled，并且**不是失败**：状态回到「正在监听」，监听仍然开着，可以立刻再等一次。
+     *   默认 null 与 W6-61 之前逐字同行为。
+     * @return true 表示这次真的等过并拿到了一个结果（含失败、拒收与本地取消）；false 表示没开监听或已有一次在等。
      */
-    suspend fun awaitOnce(): Boolean {
+    suspend fun awaitOnce(cancel: SourceSyncCancellation? = null): Boolean {
         val active = session ?: return false
         if (!receiving.compareAndSet(false, true)) return false
         try {
             _state.value = SourceSyncListenState.Receiving(active.port)
             val outcome = try {
-                active.receiveOnce()
+                active.receiveOnce(cancel)
             } catch (cancellation: CancellationException) {
                 _state.value = listeningStateOf(active)
                 throw cancellation
@@ -559,6 +578,11 @@ class SourceSyncListenerController(
                     code = RECEIVE_FAILED,
                     detail = unexpected::class.java.simpleName,
                 )
+                return true
+            }
+            if (cancel?.isCancelled == true) {
+                // 本地取消不是失败：不留码，回到「正在监听」，下一次还能接着等。
+                _state.value = listeningStateOf(active)
                 return true
             }
             apply(active, outcome)
@@ -760,6 +784,10 @@ class SourceSyncListenerImportFactory(
 
         override suspend fun receiveOnce(): SourceSyncTransferImportOutcome =
             service.receiveAndImport(auth = auth, receipt = receiptOptions)
+
+        /** W6-61：把手一路透传到监听端的 receiveOnce（那里负责切片轮询 accept 与关连接）。 */
+        override suspend fun receiveOnce(cancel: SourceSyncCancellation?): SourceSyncTransferImportOutcome =
+            service.receiveAndImport(auth = auth, receipt = receiptOptions, cancel = cancel)
 
         override fun close() {
             service.close()

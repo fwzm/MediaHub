@@ -1,6 +1,9 @@
 package com.mediahub.feature.player
 
 import android.Manifest
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.util.Log
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +92,132 @@ class PlayerRouteVisualEffectsTest {
     private var originalPreferences: UserPreferences? = null
     private var preferencesStore: UserPreferencesStore? = null
     private var lastEngine: FakeEngine? = null
+    private var mediaKeyAudioOutput: AudioTrack? = null
+
+    @Test
+    fun productionGroupedTrackRowsUseExactSnapshotAddresses() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        check(context.packageName == "com.mediahub.feature.player.test")
+        val preferences = UserPreferencesStore(context)
+        preferencesStore = preferences
+        originalPreferences = runBlocking { preferences.flow.first() }
+        runBlocking { preferences.update { UserPreferences(autoLandscape = false, immersiveBars = false,
+            playerVisualEffects = PlayerVisualEffectsPreferences.Default.copy(enabled = false)) } }
+        val vm = createViewModel(preferences)
+        routeVisible.value = true
+        composeRule.setContent { MaterialTheme { if (routeVisible.value) PlayerRoute(onBack = {}, viewModel = vm) } }
+        composeRule.waitUntil(10_000) { vm.resolveState.value is ResolveState.Ready }
+        val engine = checkNotNull(lastEngine)
+        composeRule.runOnIdle {
+            engine.uiState.value = engine.uiState.value.copy(
+                audioTracks = listOf(com.mediahub.model.AudioTrack(0, title = "audio-first"),
+                    com.mediahub.model.AudioTrack(1, title = "audio-second")),
+                subtitleTracks = listOf(com.mediahub.model.SubtitleTrack(0, title = "text-first"),
+                    com.mediahub.model.SubtitleTrack(1, title = "text-second")),
+                trackRowMap = com.mediahub.player.engine.TrackRowMap(
+                    audio = mapOf(0 to TrackSelection(0, 0, 777L), 1 to TrackSelection(0, 1, 777L)),
+                    subtitle = mapOf(0 to TrackSelection(0, 0, 777L), 1 to TrackSelection(0, 1, 777L)),
+                    snapshotToken = 777L))
+        }
+        composeRule.onNodeWithText(context.getString(R.string.player_audio_tracks)).performClick()
+        composeRule.onNodeWithText("audio-second", substring = true).performClick()
+        composeRule.runOnIdle { assertEquals(TrackSelection(0, 1, 777L), engine.audioSelection) }
+        composeRule.onNodeWithText(context.getString(R.string.player_subtitles)).performClick()
+        composeRule.onNodeWithText("text-second", substring = true).performClick()
+        composeRule.runOnIdle { assertEquals(TrackSelection(0, 1, 777L), engine.subtitleSelection) }
+        assertEquals(1, engine.playCount)
+    }
+
+    @Test
+    fun productionSystemMediaKeysPausePlayAndToggleExactlyOnce() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        check(context.packageName == "com.mediahub.feature.player.test")
+        val preferences = UserPreferencesStore(context)
+        preferencesStore = preferences
+        originalPreferences = runBlocking { preferences.flow.first() }
+        runBlocking { preferences.update { UserPreferences(autoLandscape = false, immersiveBars = false,
+            playerVisualEffects = PlayerVisualEffectsPreferences.Default.copy(enabled = false)) } }
+        val vm = createViewModel(preferences, playOnStart = true)
+        val routeOwner = object : androidx.lifecycle.LifecycleOwner {
+            val registry = androidx.lifecycle.LifecycleRegistry(this)
+            override val lifecycle: androidx.lifecycle.Lifecycle get() = registry
+        }
+        instrumentation.runOnMainSync {
+            routeOwner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
+        }
+        routeVisible.value = true
+        composeRule.setContent { MaterialTheme {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.lifecycle.compose.LocalLifecycleOwner provides routeOwner,
+            ) { if (routeVisible.value) PlayerRoute(onBack = {}, viewModel = vm) }
+        } }
+        composeRule.waitUntil(10_000) { vm.resolveState.value is ResolveState.Ready && vm.uiState.value.playWhenReady }
+        composeRule.waitForIdle()
+        val engine = checkNotNull(lastEngine)
+        fun sendKey(key: String) {
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                instrumentation.uiAutomation.executeShellCommand("input keyevent $key"),
+            ).use { it.readBytes() }
+            instrumentation.waitForIdleSync()
+        }
+        // A real STARTED audio UID is how Android selects the addressed media session.
+        // FakeEngine state alone never registers audio playback with the system service.
+        val output = startControlledMediaOutput()
+        assertEquals(AudioTrack.PLAYSTATE_PLAYING, output.playState)
+        var ownSessionPresent = false
+        var addressed = false
+        try {
+            composeRule.waitUntil(10_000) {
+                val dump = android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                    instrumentation.uiAutomation.executeShellCommand("dumpsys media_session"),
+                ).bufferedReader().use { it.readText() }
+                val owner = context.packageName + "/MediaHub.Foreground"
+                ownSessionPresent = dump.contains(owner)
+                addressed = dump.lineSequence().any {
+                    it.trim().startsWith("Media button session is ") && it.contains(owner)
+                }
+                addressed
+            }
+        } finally {
+            Log.i("SystemMediaKeyTest", "ownSession=$ownSessionPresent addressed=$addressed audioState=${output.playState}")
+        }
+        sendKey("KEYCODE_MEDIA_PAUSE")
+        composeRule.waitUntil(10_000) { !vm.uiState.value.playWhenReady }
+        val pausedPosition = vm.uiState.value.positionMs
+        val pausedCount = engine.toggleCount
+        sendKey("KEYCODE_MEDIA_PAUSE")
+        composeRule.runOnIdle { engine.advanceBy(5_000L) }
+        assertEquals(pausedPosition, engine.uiState.value.positionMs)
+        assertEquals("Explicit Pause is idempotent", pausedCount, engine.toggleCount)
+        composeRule.mainClock.autoAdvance = false
+        instrumentation.runOnMainSync {
+            routeOwner.registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED
+        }
+        sendKey("KEYCODE_MEDIA_PLAY")
+        assertFalse("ON_STOP must reject commands without waiting for another Compose frame", engine.uiState.value.playWhenReady)
+        assertEquals(pausedCount, engine.toggleCount)
+        instrumentation.runOnMainSync {
+            routeOwner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
+        }
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+        sendKey("KEYCODE_MEDIA_PLAY")
+        composeRule.waitUntil(10_000) { vm.uiState.value.playWhenReady }
+        composeRule.runOnIdle { engine.advanceBy(5_000L) }
+        assertEquals(pausedPosition + 5_000L, engine.uiState.value.positionMs)
+        val playingCount = engine.toggleCount
+        sendKey("KEYCODE_MEDIA_PLAY")
+        assertEquals("Explicit Play is idempotent", playingCount, engine.toggleCount)
+        sendKey("KEYCODE_MEDIA_PLAY_PAUSE")
+        composeRule.waitUntil(10_000) { !vm.uiState.value.playWhenReady }
+        assertEquals("Down/up must produce one toggle", playingCount + 1, engine.toggleCount)
+        composeRule.runOnIdle { routeVisible.value = false }
+        composeRule.waitForIdle()
+        sendKey("KEYCODE_MEDIA_PLAY")
+        assertEquals("Disposed route cannot receive media commands", playingCount + 1, engine.toggleCount)
+        assertEquals(1, engine.playCount)
+    }
 
     @Test
     fun productionPauseSeekAndResumeControlsPreserveControlledProgress() {
@@ -230,8 +359,30 @@ class PlayerRouteVisualEffectsTest {
         }
     }
 
+    private fun startControlledMediaOutput(): AudioTrack {
+        val frames = 48_000
+        val silence = ByteArray(frames * 2)
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+            .setAudioFormat(AudioFormat.Builder().setSampleRate(frames)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
+            .setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(silence.size).build()
+        mediaKeyAudioOutput = track
+        check(track.write(silence, 0, silence.size) == silence.size)
+        check(track.state == AudioTrack.STATE_INITIALIZED)
+        check(track.setLoopPoints(0, frames, -1) == AudioTrack.SUCCESS)
+        track.play()
+        return track
+    }
+
     @After
     fun restoreTestState() {
+        mediaKeyAudioOutput?.let { track ->
+            runCatching { track.stop() }
+            track.release()
+        }
+        mediaKeyAudioOutput = null
         composeRule.mainClock.autoAdvance = false
         composeRule.runOnUiThread {
             routeVisible.value = false
@@ -516,7 +667,8 @@ class PlayerRouteVisualEffectsTest {
             serverType = ServerType.EMBY,
             displayName = "Test",
             category = ProviderCategory.MEDIA_SERVER,
-            declaredCapabilities = setOf(ProviderCapability.AUTH, ProviderCapability.LIBRARY),
+            declaredCapabilities = setOf(ProviderCapability.AUTH, ProviderCapability.LIBRARY,
+                ProviderCapability.DETAIL, ProviderCapability.PLAYBACK, ProviderCapability.SUBTITLE_DISCOVERY),
             authMethod = com.mediahub.provider.api.AuthMethod.USERNAME_PASSWORD,
             status = ProviderStatus.STABLE,
         )
@@ -544,6 +696,8 @@ class PlayerRouteVisualEffectsTest {
         fun beginBuffering() { uiState.value = uiState.value.copy(isBuffering = true, isPlaying = false) }
         fun finishBuffering() { uiState.value = uiState.value.copy(isBuffering = false, isPlaying = uiState.value.playWhenReady) }
         var subtitleOff = false
+        var audioSelection: TrackSelection? = null
+        var subtitleSelection: TrackSelection? = null
         val loaded = mutableListOf<String>()
         override val subtitleCapabilities = com.mediahub.player.engine.SubtitleCapabilities(externalLoad = true, offsetAdjust = true)
         override suspend fun loadExternalSubtitle(subtitle: com.mediahub.player.engine.ExternalSubtitle): Boolean {
@@ -568,8 +722,8 @@ class PlayerRouteVisualEffectsTest {
             uiState.value = uiState.value.copy(positionMs = positionMs)
         }
         override fun setSpeed(speed: Float) = Unit
-        override fun selectAudioTrack(selection: TrackSelection?) = Unit
-        override fun selectSubtitleTrack(selection: TrackSelection?) { subtitleOff = selection == null }
+        override fun selectAudioTrack(selection: TrackSelection?) { audioSelection = selection }
+        override fun selectSubtitleTrack(selection: TrackSelection?) { subtitleSelection = selection; subtitleOff = selection == null }
         override fun stop(): PlaybackProgress? = null
         override fun release() = Unit
     }

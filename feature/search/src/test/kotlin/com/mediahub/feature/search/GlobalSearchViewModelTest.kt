@@ -107,7 +107,7 @@ class GlobalSearchViewModelTest {
             override val descriptor = ProviderDescriptor(
                 id = "emby", serverType = ServerType.EMBY, displayName = "Emby",
                 category = ProviderCategory.MEDIA_SERVER,
-                declaredCapabilities = emptySet(),
+                declaredCapabilities = setOf(com.mediahub.provider.api.ProviderCapability.SEARCH),
                 authMethod = AuthMethod.USERNAME_PASSWORD,
                 status = ProviderStatus.EXPERIMENTAL,
             )

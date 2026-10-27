@@ -14,6 +14,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 /**
@@ -46,6 +47,8 @@ class MpvAudioTrackSelectionTest {
         val sidWrites = mutableListOf<String>()
         val options = mutableMapOf<String, String>()
         var initialized = false
+        var paused = false
+        var loadHook: (() -> Unit)? = null
 
         override fun addObserver(observer: MpvInstance.Observer) { this.observer = observer }
         override fun setOptionString(name: String, value: String) { options[name] = value }
@@ -54,6 +57,7 @@ class MpvAudioTrackSelectionTest {
         override fun detachSurface() = Unit
         override fun observeProperty(name: String, format: MpvInstance.Format) = Unit
         override fun command(args: Array<String>) {
+            if (args.firstOrNull() == "loadfile") loadHook?.invoke()
             if (args.size == 3 && args[0] == "set" && args[1] == "sid") {
                 sidWrites += args[2]
                 tracks = tracks.map { row ->
@@ -71,9 +75,9 @@ class MpvAudioTrackSelectionTest {
                 }
             }
         }
-        override fun setPropertyBoolean(name: String, value: Boolean) = Unit
+        override fun setPropertyBoolean(name: String, value: Boolean) { if (name == "pause") paused = value }
         override fun setPropertyDouble(name: String, value: Double) = Unit
-        override fun getPropertyBoolean(name: String): Boolean? = null
+        override fun getPropertyBoolean(name: String): Boolean? = if (name == "pause") paused else null
         override fun getPropertyDouble(name: String): Double? =
             if (name == "track-list/count") tracks.size.toDouble() else null
         override fun getPropertyString(name: String): String? {
@@ -117,6 +121,69 @@ class MpvAudioTrackSelectionTest {
         currentTimeMillis = { 200L },
         deferNative = { it() },
     )
+
+    @Test
+    fun `foreign Media3 snapshots cannot become native aid or sid ordinals`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val instance = FakeInstance(); val engine = engineWith(instance, scope)
+        instance.tracks = listOf(audioTrack("7", "eng", true),
+            mapOf("id" to "5", "type" to "sub", "lang" to "eng", "selected" to "yes"))
+        try {
+            engine.play(session())
+            instance.observer!!.event(MpvInstance.Event.FILE_LOADED)
+            instance.aidWrites.clear(); instance.sidWrites.clear()
+            engine.selectAudioTrack(TrackSelection(0, 0, snapshotToken = 777L))
+            engine.selectSubtitleTrack(TrackSelection(0, 0, snapshotToken = 777L))
+            assertTrue(instance.aidWrites.isEmpty()); assertTrue(instance.sidWrites.isEmpty())
+            engine.selectAudioTrack(TrackSelection(0, 0))
+            engine.selectSubtitleTrack(TrackSelection(0, 0))
+            assertEquals(listOf("7"), instance.aidWrites)
+            assertEquals(listOf("5"), instance.sidWrites)
+        } finally { engine.release(); scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
+    }
+
+    @Test
+    fun `explicit pause stays paused when UI intent lags the native pause property`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val instance = FakeInstance();val engine = engineWith(instance, scope)
+        try {
+            engine.play(session())
+            withTimeout(5_000) { while (!instance.initialized) delay(10) }
+            instance.observer!!.property("pause", false)
+            instance.paused = true
+            engine.setPlayWhenReady(false)
+            assertTrue("Absolute Pause must not toggle an already-paused native player", instance.paused)
+            assertFalse(engine.uiState.value.playWhenReady)
+        } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
+    }
+
+    @Test
+    fun `pause requested while native load is unpublished is applied before playback starts`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val instance = FakeInstance();val engine = engineWith(instance, scope)
+        instance.loadHook = { engine.setPlayWhenReady(false) }
+        try {
+            engine.play(session())
+            withTimeout(5_000) { while (!instance.initialized) delay(10) }
+            assertTrue("A load-time Pause must not vanish before native resources publish", instance.paused)
+            assertFalse(engine.uiState.value.playWhenReady)
+        } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
+    }
+
+    @Test
+    fun `explicit play stays playing when UI intent lags native playback`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val instance = FakeInstance();val engine = engineWith(instance, scope)
+        try {
+            engine.play(session())
+            withTimeout(5_000) { while (!instance.initialized) delay(10) }
+            instance.observer!!.property("pause", true)
+            instance.paused = false
+            engine.setPlayWhenReady(true)
+            assertFalse("Absolute Play must not toggle a native player that already plays", instance.paused)
+            assertTrue(engine.uiState.value.playWhenReady)
+        } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
+    }
 
     @Test
     fun `Android subtitle default chooses a text font instead of a zero space clock font`() = runBlocking {

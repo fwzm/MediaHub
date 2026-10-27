@@ -62,6 +62,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -82,6 +84,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 import com.mediahub.model.AudioTrack
@@ -157,6 +160,41 @@ fun PlayerRoute(
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
     val lifecycleStarted = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+    val handleMediaAction by rememberUpdatedState<(MediaKeyAction) -> Unit> { action ->
+        when (action) {
+            MediaKeyAction.TOGGLE -> viewModel.engine.togglePlayPause()
+            MediaKeyAction.PLAY -> viewModel.engine.setPlayWhenReady(true)
+            MediaKeyAction.PAUSE -> viewModel.engine.setPlayWhenReady(false)
+        }
+    }
+    val mediaSession = remember(context, viewModel.engine) {
+        ForegroundMediaSessionController(AndroidForegroundMediaSessionPort(context)) { handleMediaAction(it) }
+    }
+    DisposableEffect(mediaSession, lifecycleOwner) {
+        // A stopped window may defer Compose frames. Deactivate synchronously instead of
+        // waiting for currentStateAsState to trigger a recomposition in that window.
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START, Lifecycle.Event.ON_STOP -> {
+                    val latest = viewModel.engine.uiState.value
+                    mediaSession.update(latest, latest.mediaTitle,
+                        lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
+                            viewModel.resolveState.value is ResolveState.Ready)
+                }
+                Lifecycle.Event.ON_DESTROY -> mediaSession.close()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            mediaSession.close()
+        }
+    }
+    SideEffect {
+        mediaSession.update(engineState, engineState.mediaTitle,
+            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && resolve is ResolveState.Ready)
+    }
     val powerSaveMode = rememberPowerSaveMode(context)
     val reduceMotion = rememberReduceMotion(context)
     var recordAudioPermissionGranted by remember(context) {
@@ -374,8 +412,7 @@ fun PlayerRoute(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black)
-                // V18-B：前台媒体键（耳机/蓝牙/车机/adb keyevent）。
-                // 仅播放器页面生效；后台/锁屏控制需要 MediaSession（未包含）。
+                // Directly focused keys share the same commands as the system media session.
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) {
                         false
@@ -384,9 +421,7 @@ fun PlayerRoute(
                         if (action == null) {
                             false
                         } else {
-                            if (MediaKeyMapper.shouldAct(action, viewModel.engine.uiState.value.playWhenReady)) {
-                                viewModel.engine.togglePlayPause()
-                            }
+                            if (event.nativeKeyEvent.repeatCount == 0) handleMediaAction(action)
                             true
                         }
                     }
@@ -692,28 +727,35 @@ fun PlayerRoute(
     }
 
     if (showAudioDialog) {
+        val selectionSnapshot = engineState
+        val selectionKind = engineKind
         PlayerVisualTheme(palette = visualState.chromePalette) {
             AudioTrackSheet(
-                tracks = engineState.audioTracks,
+                tracks = selectionSnapshot.audioTracks,
                 onDismiss = { showAudioDialog = false },
                 onSelect = { track: AudioTrack ->
-                    viewModel.engine.selectAudioTrack(TrackSelection(track.index, 0))
+                    PlayerTrackSelection.addressOf(selectionSnapshot, track, selectionKind)
+                        ?.let(viewModel.engine::selectAudioTrack)
                     showAudioDialog = false
                 },
             )
         }
     }
     if (showSubtitleDialog) {
+        val selectionSnapshot = engineState
+        val selectionKind = engineKind
         PlayerVisualTheme(palette = visualState.chromePalette) {
             SubtitleSheet(
-                tracks = engineState.subtitleTracks,
+                tracks = selectionSnapshot.subtitleTracks,
                 style = preferences.subtitleStyle,
                 subtitleCenter = subtitleCenter,
                 externalLoadSupported = viewModel.engine.subtitleCapabilities.externalLoad,
                 offsetSupported = viewModel.engine.subtitleCapabilities.offsetAdjust,
                 onDismiss = { showSubtitleDialog = false },
                 onSelect = { track: SubtitleTrack? ->
-                    viewModel.onEmbeddedSubtitleSelected(track?.let { TrackSelection(it.index, 0) })
+                    if (track == null) viewModel.onEmbeddedSubtitleSelected(null)
+                    else PlayerTrackSelection.addressOf(selectionSnapshot, track, selectionKind)
+                        ?.let(viewModel::onEmbeddedSubtitleSelected)
                 },
                 onStyleChange = { newStyle -> viewModel.updateSubtitleStyle { newStyle } },
                 onSelectExternal = viewModel::selectExternalSubtitle,
