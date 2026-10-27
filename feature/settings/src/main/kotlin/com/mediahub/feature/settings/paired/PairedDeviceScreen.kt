@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.common.pairing.PairedDeviceRow
+import com.mediahub.core.common.sync.ISourceSyncBaselineStore
 import kotlinx.coroutines.launch
 
 /** 配对设备页的测试标签（界面测试与文档共用）。 */
@@ -84,11 +85,13 @@ object PairedDeviceTags {
 fun PairedDeviceRoute(
     onBack: () -> Unit,
     controller: PairedDeviceController? = null,
+    baselineStore: ISourceSyncBaselineStore? = null,
 ) {
     val context = LocalContext.current
-    val active = controller ?: remember(context) {
+    val active = controller ?: remember(context, baselineStore) {
         PairedDeviceController(
             storeFactory = { PairedDeviceStorage.storeIn(context.applicationContext.filesDir) },
+            baselineStore = baselineStore,
         )
     }
     val state by active.state.collectAsStateWithLifecycle()

@@ -64,6 +64,18 @@ interface ISourceSyncBaselineStore {
 
     /** 合并一份新基线，拒绝让任何条目倒退；报告被拒的条目。 */
     fun save(peerDeviceId: String, baseline: SourceSyncBaseline): SourceSyncBaselineSaveResult
+
+    /**
+     * 忘掉这个对端的全部基线；真的删了返回 true，什么都不知道返回 false。
+     *
+     * 忘记是**显式删除**，不是合并：[save] 只能让基线上行，一个被用户解绑的对端会永远留在文档里，
+     * 让下一轮把重新配对回来的同一台设备当成「已经应用过」——用过期知识静默跳过真实变更。
+     *
+     * 这是本机的记账：不对对端说任何话，也不碰任何来源。空白身份是调用方的 bug（抛 [IllegalArgumentException]），
+     * 不是「没有」这个答案。存储写不动时必须抛，而不是返回 false：一次「忘记」之后基线还在盘上，
+     * 比一次失败的忘记更糟。
+     */
+    fun forget(peerDeviceId: String): Boolean
 }
 
 /** 把进来的基线合并进已存基线的结果。 */

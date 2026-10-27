@@ -8,6 +8,7 @@ import com.mediahub.core.common.pairing.PairedDeviceRegistry
 import com.mediahub.core.common.pairing.PairedDeviceRow
 import com.mediahub.core.common.pairing.PairedDeviceStore
 import com.mediahub.core.common.pairing.PairedDeviceStoreReasons
+import com.mediahub.core.common.sync.ISourceSyncBaselineStore
 import com.mediahub.core.common.sync.WireText
 import java.io.File
 import java.io.IOException
@@ -72,6 +73,8 @@ data class PairedDeviceForgetOutcome(
     val title: String,
     val message: String,
     val reason: String? = null,
+    /** 该对端的同步基线是否也一并清掉了（没有存储出口、或基线写不动时为 false）。 */
+    val baselineForgotten: Boolean = false,
 )
 
 /** 配对设备页的一份完整快照（列表 + 待确认的忘记 + 上一次回执）。 */
@@ -88,7 +91,7 @@ object PairedDeviceCopy {
     const val TITLE: String = "已配对设备"
 
     const val HINT: String = "这里列出本机记住的配对登记（设备标识、指纹、首次配对与最后相见的时间）。" +
-        "忘记一台只删除本机的登记：来源、凭据和对端设备都不会被改动。"
+        "忘记一台只删除本机的登记与该对端的同步基线：来源、凭据和对端设备都不会被改动。"
 
     const val LOADING: String = "正在读本机的配对登记…"
 
@@ -98,7 +101,7 @@ object PairedDeviceCopy {
 
     const val FORGET_TITLE: String = "忘记这台设备？"
 
-    const val FORGET_KEEPS_NOTE: String = "只删除本机的配对登记，来源、凭据和对端设备都不会被改动；" +
+    const val FORGET_KEEPS_NOTE: String = "只删除本机的配对登记与该对端的同步基线，来源、凭据和对端设备都不会被改动；" +
         "下次配对会重新按首次配对处理。"
 
     const val FORGET_CONFIRM_LABEL: String = "忘记"
@@ -107,8 +110,12 @@ object PairedDeviceCopy {
 
     const val FORGET_DONE_TITLE: String = "已忘记该设备"
 
-    const val FORGET_DONE_MESSAGE: String = "只删除了本机的配对登记：来源、凭据和对端设备都没有变化；" +
+    const val FORGET_DONE_MESSAGE: String = "只删除了本机的配对登记与该对端的同步基线：来源、凭据和对端设备都没有变化；" +
         "下次配对会重新按首次配对处理。"
+
+    /** 没有基线存储出口时的回执正文：登记删了，但基线可能还留在盘上。 */
+    const val FORGET_DONE_MESSAGE_WITHOUT_BASELINE: String =
+        "只删除了本机的配对登记：这个页面没有可用的同步基线存储，对端基线可能还留在盘上；来源、凭据和对端设备都没有变化。"
 
     const val FORGET_UNKNOWN_TITLE: String = "本机没有这台设备的登记"
 
@@ -155,6 +162,12 @@ class PairedDeviceController(
     private val capacity: Int = PairedDeviceRegistry.DEFAULT_CAPACITY,
     private val now: () -> Long = { System.currentTimeMillis() },
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /**
+     * 该页的同步基线存储出口（W6-80）：删登记的同时忘掉「对端到哪儿了」。
+     *
+     * 传 null 表示这一层没有接线（预览态/测试），回执里 [PairedDeviceForgetOutcome.baselineForgotten] 恒为 false。
+     */
+    private val baselineStore: ISourceSyncBaselineStore? = null,
 ) {
 
     private val _state = MutableStateFlow(PairedDeviceUiState())
@@ -275,16 +288,25 @@ class PairedDeviceController(
         }
         _state.update { it.copy(prompt = null, forgetting = true) }
         try {
-            val forgotten = withContext(io) {
+            // 先删登记、再清基线：顺序反过来会在中途留下「登记还在、基线没了」的假首轮状态。
+            val outcomePair = withContext(io) {
                 val active = registry
-                active != null && active.forget(pending.deviceId)
+                val deleted = active != null && active.forget(pending.deviceId)
+                deleted to (if (deleted) forgetBaseline(pending.deviceId) else false)
             }
+            val forgotten = outcomePair.first
+            val baselineForgotten = outcomePair.second
             val outcome = if (forgotten) {
                 PairedDeviceForgetOutcome(
                     forgotten = true,
                     title = PairedDeviceCopy.FORGET_DONE_TITLE,
-                    message = PairedDeviceCopy.FORGET_DONE_MESSAGE,
+                    message = if (baselineForgotten) {
+                        PairedDeviceCopy.FORGET_DONE_MESSAGE
+                    } else {
+                        PairedDeviceCopy.FORGET_DONE_MESSAGE_WITHOUT_BASELINE
+                    },
                     reason = PairedDeviceReasons.FORGOTTEN,
+                    baselineForgotten = baselineForgotten,
                 )
             } else {
                 PairedDeviceForgetOutcome(
@@ -302,6 +324,23 @@ class PairedDeviceController(
         } finally {
             forgetting.set(false)
             _state.update { it.copy(forgetting = false) }
+        }
+    }
+
+    /**
+     * 清掉本机记着的「这个对端同步到哪儿了」（W6-80）。
+     *
+     * 配对登记已经删掉之后才调用；清不动（没有存储出口、磁盘写失败、档案坏了）只返回 false，
+     * **不**把设备变回「还在」，也不吞协程取消。
+     */
+    private fun forgetBaseline(deviceId: String): Boolean {
+        val store = baselineStore ?: return false
+        return try {
+            store.forget(deviceId)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            false
         }
     }
 

@@ -20,6 +20,7 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.lifecycle.ViewModelStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.mediahub.core.common.sync.InMemorySourceSyncBaselineStore
 import com.mediahub.core.database.prefs.UserPreferencesStore
 import com.mediahub.core.ui.effects.PlayerVisualTestTags
 import com.mediahub.model.PlayerVisualEffectsPreferences
@@ -190,7 +191,7 @@ class VisualEffectsSettingsEntryTest {
     }
 
     private fun newViewModel(repository: UserPreferencesStore): SettingsViewModel =
-        SettingsViewModel(repository).also { viewModel ->
+        SettingsViewModel(repository, InMemorySourceSyncBaselineStore()).also { viewModel ->
             viewModelStores += ViewModelStore().apply { put("settings", viewModel) }
         }
 

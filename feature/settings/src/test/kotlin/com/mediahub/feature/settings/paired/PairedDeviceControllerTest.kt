@@ -8,6 +8,11 @@ import com.mediahub.core.common.pairing.PairedDeviceRegistry
 import com.mediahub.core.common.pairing.PairedDeviceStore
 import com.mediahub.core.common.pairing.PairedDeviceStoreException
 import com.mediahub.core.common.pairing.PairedDeviceStoreReasons
+import com.mediahub.core.common.sync.ISourceSyncBaselineStore
+import com.mediahub.core.common.sync.InMemorySourceSyncBaselineStore
+import com.mediahub.core.common.sync.SourceSyncBaseline
+import com.mediahub.core.common.sync.SourceSyncBaselineEntry
+import com.mediahub.core.common.sync.SourceSyncBaselineSaveResult
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -229,6 +234,111 @@ class PairedDeviceControllerTest {
     }
 
     @Test
+    fun forgetDropsThePeerBaselineAndSaysSo() = runTest {
+        val store = InMemoryPairedDeviceStore()
+        store.save(device("device-a", "客厅 NAS", FINGERPRINT_A))
+        store.save(device("device-b", "书房", FINGERPRINT_B))
+        val baselines = seededBaselines("device-a", "device-b")
+        val controller = controller(
+            storeFactory = { store },
+            io = StandardTestDispatcher(testScheduler),
+            baselineStore = baselines,
+        )
+        controller.refresh()
+        controller.askForget("device-a")
+
+        val outcome = controller.confirmForget()
+
+        assertTrue(outcome.forgotten)
+        assertTrue(outcome.baselineForgotten)
+        assertEquals(PairedDeviceCopy.FORGET_DONE_MESSAGE, outcome.message)
+        // 解绑同时是「忘掉知识」：同一 deviceId 重新配对后必须重新按首轮处理，而不是拿旧基线跳过真实变更。
+        assertEquals(listOf("device-b"), baselines.knownPeerDeviceIds)
+        assertTrue(baselines.load("device-a").isEmpty)
+        assertEquals(1, baselines.load("device-b").entries.size)
+    }
+
+    @Test
+    fun forgetWithoutABaselineStoreSaysTheBaselineStayed() = runTest {
+        val store = InMemoryPairedDeviceStore()
+        store.save(device("device-a", "客厅 NAS", FINGERPRINT_A))
+        val controller = controller(storeFactory = { store }, io = StandardTestDispatcher(testScheduler))
+        controller.refresh()
+        controller.askForget("device-a")
+
+        val outcome = controller.confirmForget()
+
+        assertTrue(outcome.forgotten)
+        assertFalse(outcome.baselineForgotten)
+        assertEquals(PairedDeviceCopy.FORGET_DONE_MESSAGE_WITHOUT_BASELINE, outcome.message)
+        assertTrue(store.knownDeviceIds.isEmpty())
+    }
+
+    @Test
+    fun aThrowingBaselineStoreStillForgetsTheDevice() = runTest {
+        val store = InMemoryPairedDeviceStore()
+        store.save(device("device-a", "客厅 NAS", FINGERPRINT_A))
+        var forgetCalls = 0
+        val broken = object : ISourceSyncBaselineStore {
+            override fun load(peerDeviceId: String): SourceSyncBaseline = SourceSyncBaseline.EMPTY
+            override fun save(
+                peerDeviceId: String,
+                baseline: SourceSyncBaseline,
+            ): SourceSyncBaselineSaveResult = throw IOException("基线盘掉了")
+            override fun forget(peerDeviceId: String): Boolean {
+                forgetCalls += 1
+                throw IOException("基线盘掉了")
+            }
+        }
+        val controller = controller(
+            storeFactory = { store },
+            io = StandardTestDispatcher(testScheduler),
+            baselineStore = broken,
+        )
+        controller.refresh()
+        controller.askForget("device-a")
+
+        val outcome = controller.confirmForget()
+
+        // 基线清不掉只损失知识，不把已经删掉的登记撤回；回执要如实说基线可能还在。
+        assertTrue(outcome.forgotten)
+        assertFalse(outcome.baselineForgotten)
+        assertEquals(PairedDeviceCopy.FORGET_DONE_MESSAGE_WITHOUT_BASELINE, outcome.message)
+        assertEquals(1, forgetCalls)
+        assertTrue(store.knownDeviceIds.isEmpty())
+    }
+
+    @Test
+    fun anUnknownDeviceNeverTouchesItsBaseline() = runTest {
+        val kept = device("device-a", "客厅 NAS", FINGERPRINT_A)
+        val stubborn = object : PairedDeviceStore {
+            override val loadError: String? get() = null
+            override fun getAll(): List<PairedDevice> = listOf(kept)
+            override fun save(device: PairedDevice) = Unit
+            override fun forget(deviceId: String): Boolean = false
+        }
+        val baselines = seededBaselines("device-a")
+        val controller = controller(
+            storeFactory = { stubborn },
+            io = StandardTestDispatcher(testScheduler),
+            baselineStore = baselines,
+        )
+        controller.refresh()
+        controller.askForget("device-a")
+        val writesBefore = baselines.writeCount
+
+        val outcome = controller.confirmForget()
+
+        assertFalse(outcome.forgotten)
+        assertFalse(outcome.baselineForgotten)
+        assertEquals(PairedDeviceReasons.UNKNOWN_DEVICE, outcome.reason)
+        // 先生效的是「登记删掉了没」：删不掉时清基线会留下相反状态（知识没了、设备还配着）。
+        assertEquals(writesBefore, baselines.writeCount)
+        assertEquals(listOf("device-a"), baselines.knownPeerDeviceIds)
+        assertEquals(1, baselines.load("device-a").entries.size)
+    }
+
+    @Test
     fun dismissAndClearDropThePreviousConclusions() = runTest {
         val store = InMemoryPairedDeviceStore()
         store.save(device("device-a", "客厅 NAS", FINGERPRINT_A))
@@ -275,10 +385,33 @@ class PairedDeviceControllerTest {
     private fun controller(
         storeFactory: (() -> PairedDeviceStore)?,
         io: kotlinx.coroutines.CoroutineDispatcher,
+        baselineStore: ISourceSyncBaselineStore? = null,
     ): PairedDeviceController = PairedDeviceController(
         storeFactory = storeFactory,
         now = { now },
         io = io,
+        baselineStore = baselineStore,
+    )
+
+    private fun seededBaselines(vararg peers: String): InMemorySourceSyncBaselineStore {
+        val store = InMemorySourceSyncBaselineStore()
+        peers.forEach { peer ->
+            assertTrue(store.save(peer, baseline("sync-1", 3)).saved)
+        }
+        return store
+    }
+
+    private fun baseline(syncSourceId: String, revision: Long): SourceSyncBaseline = SourceSyncBaseline(
+        deviceId = "device-a",
+        snapshotId = "snapshot-1",
+        entries = listOf(
+            SourceSyncBaselineEntry(
+                syncSourceId = syncSourceId,
+                recordRevision = revision,
+                contentHash = "hash",
+                fieldHashes = mapOf("displayName" to "h-hash"),
+            ),
+        ),
     )
 
     private fun device(deviceId: String, displayName: String, fingerprint: String): PairedDevice =

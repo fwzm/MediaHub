@@ -104,6 +104,8 @@ class SourceSyncBaselineWiringTest {
             ): SourceSyncBaselineSaveResult {
                 throw java.io.IOException("disk is gone")
             }
+
+            override fun forget(peerDeviceId: String): Boolean = throw java.io.IOException("disk is gone")
         }
 
         val result = runBlocking {
@@ -129,6 +131,8 @@ class SourceSyncBaselineWiringTest {
                 rejectedSyncSourceIds = listOf("sync-a"),
                 reason = SourceSyncBaselineStoreReasons.STALE_REVISION,
             )
+
+            override fun forget(peerDeviceId: String): Boolean = false
         }
 
         val result = runBlocking {

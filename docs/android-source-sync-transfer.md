@@ -4778,3 +4778,74 @@ W6-79 候选：①两端把对端基线喂进 `SourceSyncPlanner`（真正「读
 3. 两端把对端基线喂进 `SourceSyncPlanner`（「读基线 → 只请求变化」仍未实现）。
 4. 「忘记这台设备」（配对层）。
 5. 监听卡「取消接收」的可观测性。
+
+## §49 W6-80：忘记一台设备时同时忘记该对端的同步基线（③ 设备解绑）
+
+### 49.1 结论先行
+
+- 两端的「忘记这台设备」此前只删**配对登记**：对端基线（本机记账，记着「对端已经有什么」）原封不动留在盘上。
+- 后果不是报错而是**静默**：同一个 deviceId 重新配对后 `planRound` 读到的基线还在，判 `baselineKnown=true`，对端的真实改动会被当成 `already-applied` 跳过。本轮把这个现场钉成用例：旧基线（rev 9）+ 空本地 + 对端 rev 2 ⇒ 整轮 `round.isEmpty`，三个桶全空，界面一句话都不会说。
+- 本轮把 forget 提升成 `ISourceSyncBaselineStore` 的接口方法（两端同名语义），把两端「忘记」接到它上，并用 `baselineForgetCases` 9 例 + 两端契约测试钉住存储语义。
+- 仍然没有「重新配对时自动提示基线已过期」这种界面出口；本轮交付的是「忘记会真的忘干净」。
+
+### 49.2 缺的是什么
+
+| 能力 | Windows（权威） | Android 本轮之前 |
+| --- | --- | --- |
+| 存储接口能否删掉某个对端 | `ISourceSyncBaselineStore` 只有 `Load` / `Save` | 只有 `load` / `save` |
+| 具体类上的 forget | `FileSourceSyncBaselineStore.ForgetPeer`（:192），唯一生产调用方是 `SyncCliRunner` 的 `baseline forget` 命令 | `FileSourceSyncBaselineStore.forgetPeer`（:106）**零生产调用**（死代码） |
+| 忘记设备时清基线 | `SyncPairingPresenter.ConfirmForget` 只调 `_registry?.Forget` | `PairedDeviceController.confirmForget` 只调 `registry.forget` |
+| 重新配对后的判据 | `PlanRound` 读基线 ⇒ `baselineKnown=true` | 同 |
+| 文案 | 「只删除本机的配对登记，来源、凭据和对端设备都不会被改动」 | 同 |
+
+### 49.3 做法（五处改动）
+
+1. **接口方法 + 四个实现**：C# `ISourceSyncBaselineStore.Forget(string)` / Kotlin `ISourceSyncBaselineStore.forget(String): Boolean`，语义逐条对齐 —— 空白身份是调用方 bug（抛 `ArgumentException` / `IllegalArgumentException`）、文档写不动必须抛而不是返回 false、真的删掉了才 `WriteCount++`（File 与 InMemory 两个存储的计数口径一致，否则同一段逻辑换个存储就换个数字）。旧的 `ForgetPeer` / `forgetPeer` 保留成一行别名：`SyncCliRunner` 的 `baseline forget` 命令仍在用。
+2. **向量**：生成器新增 `Sections80.cs`（`BaselineForgetCases()`），9 例 —— 忘记已知对端、未知对端、大小写与空格不敏感（写 `"peer-A"`、忘 `"  peer-a  "`）、忘掉最后一个对端后文档留空、连忘两次（第二次 false）、空白身份抛错、重开进程后仍记得（reload）、文件不存在时不新建（且不被判定成「删掉了文档」）、文档损坏时一个都不忘（并留下 quarantined 副本）。每例输出 result / error / 文档 text+base64+sha256+字节数 / writeCount / peerDeviceIds / fileStillExists / documentUnchanged / loadError / quarantined / loadAfter 探针。生成期断言 `AssertForgetIntent` 先跑 Windows 权威实现再逐条比：expectError 场景必须抛且文档字节不变；成功场景必须文件还在、忘掉的对端不在 `peerDeviceIds`、文档真的被重写；false 场景要求「文件存在则字节不变；文件不存在且原本有文本时必须留了 quarantine」。产物 `vectors80.json` 353035 B / sha256 `61d4331a…161688`，与仓库现有向量**前 328396 字节逐字节相同**，只是尾部追加新段，可直接整文件覆盖。
+3. **三处副本逐字节同步**：Kotlin 侧读 `core/common/src/test/resources/sync/baseline-vectors.json`，Windows 侧读的是 `windows/tests/assets/baseline-vectors.json`（csproj 里 `CopyToOutputDirectory=PreserveNewest` 拷进 `assets/`）—— 漏拷第三份的症状是 `KeyNotFound: baselineForgetCases`。
+4. **两端契约测试各一条方法重放**：Kotlin `baseline_forget_cases_match_the_windows_authority()`（错误名要做映射 `ArgumentException → IllegalArgumentException`）与 C# `BaselineForgetCasesMatchTheWindowsContract()`，都完整重放 9 例并用**新建的 reader store** 强制懒加载，比 `loadErrorAfterReload` 与 `loadAfter.peerA|B|C`。
+5. **两端接线（先删登记、再清基线）**：顺序反过来会在中途留下「登记还在、基线没了」的假首轮状态，所以基线清理写在「登记真的删掉了」之后。Android `PairedDeviceController` 多一个 `baselineStore: ISourceSyncBaselineStore? = null`（放在 io 之后，保位置参数兼容），`PairedDeviceForgetOutcome` 多 `baselineForgotten`，成功回执按它选 `FORGET_DONE_MESSAGE` 或 `FORGET_DONE_MESSAGE_WITHOUT_BASELINE`（后者明说「这个页面没有可用的同步基线存储，对端基线可能还留在盘上」）；存储抛异常（`CancellationException` 除外）折成 `false`，不影响「设备已忘记」。存储实例从 `SettingsViewModel.syncBaselineStore`（Hilt 的 `AppModule.provideSyncBaselineStore`）经 `SettingsScreen` 传进 `PairedDeviceRoute`。Windows 侧 `SyncPairingPresenter` 多一个 `ISourceSyncBaselineStore?` 第三参、`SyncForgetOutcome.BaselineForgotten`，`SourceSyncService` 新增 `Baselines` 出口（必须与 session 用同一个实例，第二个 store 会和内存里的基线打架），`SyncPage.xaml.cs` 传 `App.Services.Sync.Baselines`。两端文案逐字一致。
+
+### 49.4 用例
+
+| 套件 | 例数 | 覆盖 |
+| --- | --- | --- |
+| `PairedDeviceControllerTest` | 13 → **17**（+4） | 基线被清且提示如实、没有存储时明说基线可能还在、存储抛异常仍算忘记、未知设备一个字节都不碰 |
+| `SyncPagePresenterTests` | 37 → **40**（+3，另 1 条改写） | 同上四条（C# 侧） |
+| `SourceSyncBaselineContractTest` | 17 → **18**（+1） | 9 个 forget 场景逐字节重放（文档 text/sha/字节数/WriteCount/peer 列表/quarantine） |
+| `SourceSyncRoundPreviewTest` | 15 → **16**（+1） | 旧基线让整轮变空 → forget 之后同一信封重新判为首轮：`baselineKnown=false`、`applyCount=1`、方向 `apply-remote-change`、预演仍然不写存储 |
+
+### 49.5 负向对照（三条，全红）
+
+| # | 变异 | 结果 |
+| --- | --- | --- |
+| A | Kotlin 把基线结果硬编码成 `deleted to false`（从不调 store） | `forgetDropsThePeerBaselineAndSaysSo` + `aThrowingBaselineStoreStillForgetsTheDevice` 红 |
+| B | Kotlin 失败分支也清基线（`deleted to forgetBaseline(...)`） | `anUnknownDeviceNeverTouchesItsBaseline` 红 |
+| C | C# 把 `ForgetBaseline` 挪到「登记是否真删掉」的判据之前 | `AskForget_UnknownDeviceLeavesItsBaselineAlone` 红 |
+
+### 49.6 本机实跑
+
+| 模块 | 套件 / 例数 | 变化 |
+| --- | --- | --- |
+| `core/common` | 48 / **660**（11 skipped） | 659 → +1 |
+| `core/database` | 24 / **237**（12 skipped） | 236 → +1 |
+| `feature/settings` | 26 / **388** | 384 → +4 |
+| 合计（三模块口径） | **1285** | 1279 → +6 |
+| C# `MediaHub.Tests` | **1656** / 0 失败 | 1652 → +4 |
+
+`--required-suite` 仍 **60**：四条用例都落在已钉住的套件里，本轮没有新套件。
+
+### 49.7 未覆盖（如实留着）
+
+1. 「重新配对」时**不会**提示「这台设备的基线被我忘过」——基线已经不在了，planRound 只是重新按首轮处理，界面没有任何标记。
+2. `applyRound` 仍未接进 `SourceSyncImportSession` 的写入口（口径同 §48.7）；被扣凭据 / 冲突 / 删除条目的逐条裁决仍没有界面出口。
+3. 基线仍未喂进 `SourceSyncPlanner`（「读基线 → 只请求变化」仍未实现）。
+4. 真实两机跑一轮「忘记后重新配对」仍 **NOT_RUN**；真机 instrumentation 仍 **DEVICE_UNVERIFIED**。
+
+### 49.8 下一步（W6-81 候选）
+
+1. 把 `SourceSyncImportSession` 的应用端口换成 `applyRound`（先给报告加身份 → serverId 映射）。
+2. 被扣凭据 / 冲突 / 删除条目的逐条裁决界面出口。
+3. 两端把对端基线喂进 `SourceSyncPlanner`。
+4. 监听卡「取消接收」的可观测性。
+5. 真 Room 级联（真实 `ServerRepository` + 真库）跑一遍删除链。

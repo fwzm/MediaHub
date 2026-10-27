@@ -102,8 +102,13 @@ class FileSourceSyncBaselineStore(directory: File) : ISourceSyncBaselineStore {
             }
         }
 
-    /** 忘掉文档里关于某个对端的一切；真的删了并重写返回 true，该对端不存在返回 false。 */
-    fun forgetPeer(peerDeviceId: String): Boolean {
+    /**
+     * 忘掉文档里关于某个对端的一切；真的删了并重写返回 true，该对端不存在返回 false。
+     *
+     * 与 [save] 的合并语义相反，这是唯一能把条目从文档里去掉的路径（对齐 Windows
+     * `FileSourceSyncBaselineStore.Forget`）：合并只能上行，解绑后的对端否则会永远留在文档里。
+     */
+    override fun forget(peerDeviceId: String): Boolean {
         require(!WireText.isBlank(peerDeviceId)) { "A peer device id is required." }
         synchronized(gate) {
             ensureLoadedLocked()
@@ -123,6 +128,9 @@ class FileSourceSyncBaselineStore(directory: File) : ISourceSyncBaselineStore {
             return true
         }
     }
+
+    /** [forget] 的旧名字：接口化之前 SyncCli 一类调用方是这么叫它的。 */
+    fun forgetPeer(peerDeviceId: String): Boolean = forget(peerDeviceId)
 
     /** 忘掉某个对端基线里的一条来源；没有匹配返回 false。删掉最后一条时整个对端节点一起消失。 */
     fun forgetEntry(peerDeviceId: String, syncSourceId: String): Boolean {
