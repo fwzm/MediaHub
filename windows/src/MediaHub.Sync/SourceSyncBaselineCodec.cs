@@ -153,16 +153,20 @@ public static class SourceSyncBaselineCodec
             return false;
         }
 
+        if (WireText.ExceedsDepth(json, MaxDepth))
+        {
+            error = SourceSyncBaselineCodecReasons.TooDeep;
+            return false;
+        }
+
         JsonDocument document;
         try
         {
             document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = MaxDepth });
         }
-        catch (JsonException exception)
+        catch (JsonException)
         {
-            error = exception.Message.Contains("depth", StringComparison.OrdinalIgnoreCase)
-                ? SourceSyncBaselineCodecReasons.TooDeep
-                : SourceSyncBaselineCodecReasons.MalformedJson;
+            error = SourceSyncBaselineCodecReasons.MalformedJson;
             return false;
         }
 

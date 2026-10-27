@@ -38,7 +38,7 @@ public static class WireText
     public static bool IsWhitespace(char character) => Array.BinarySearch(WhitespaceCodePoints, (int)character) >= 0;
 
     /// <summary>True when the value is null, empty, or only Unicode White_Space.</summary>
-    public static bool IsBlank(string? value)
+    public static bool IsBlank([System.Diagnostics.CodeAnalysis.NotNullWhen(false)] string? value)
     {
         if (string.IsNullOrEmpty(value))
         {
@@ -251,6 +251,72 @@ public static class WireText
         return left.Length - right.Length;
     }
 
+    /// <summary>
+    /// True when a JSON text nests deeper than <paramref name="maxDepth"/> containers; string content is ignored.
+    /// </summary>
+    /// <remarks>
+    /// Equivalent to <c>JsonDocumentOptions.MaxDepth</c> but decided before the parser runs, so a hostile or
+    /// truncated document produces the same reason on both ends: the JVM parser has no depth option, and
+    /// .NET reports a plain truncation as depth damage because its message happens to contain the word
+    /// "depth". Scanning first makes the classification depend on the bytes, not on a parser message.
+    /// </remarks>
+    public static bool ExceedsDepth(string? text, int maxDepth)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return false;
+        }
+
+        const char quote = (char)34;
+        const char escape = (char)92;
+        int depth = 0;
+        bool inString = false;
+        bool escaped = false;
+        foreach (char character in text)
+        {
+            if (inString)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (character == escape)
+                {
+                    escaped = true;
+                }
+                else if (character == quote)
+                {
+                    inString = false;
+                }
+
+                continue;
+            }
+
+            if (character == quote)
+            {
+                inString = true;
+                continue;
+            }
+
+            if (character is (char)123 or (char)91)
+            {
+                depth += 1;
+                if (depth > maxDepth)
+                {
+                    return true;
+                }
+            }
+            else if (character is (char)125 or (char)93)
+            {
+                if (depth > 0)
+                {
+                    depth -= 1;
+                }
+            }
+        }
+
+        return false;
+    }
     private static char FoldAscii(char character) =>
         character is >= 'A' and <= 'Z' ? (char)(character + ('a' - 'A')) : character;
 

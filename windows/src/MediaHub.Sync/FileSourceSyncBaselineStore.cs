@@ -374,6 +374,13 @@ public sealed class FileSourceSyncBaselineStore : ISourceSyncBaselineStore
                 "The sync baseline document is too large to read.");
         }
 
+        if (WireText.ExceedsDepth(text, SourceSyncBaselineCodec.MaxDepth))
+        {
+            throw new SyncContractException(
+                SourceSyncBaselineCodecReasons.TooDeep,
+                "The sync baseline document is nested too deeply to read.");
+        }
+
         JsonDocument document;
         try
         {
@@ -382,9 +389,7 @@ public sealed class FileSourceSyncBaselineStore : ISourceSyncBaselineStore
         catch (JsonException exception)
         {
             throw new SyncContractException(
-                exception.Message.Contains("depth", StringComparison.OrdinalIgnoreCase)
-                    ? SourceSyncBaselineCodecReasons.TooDeep
-                    : SourceSyncBaselineCodecReasons.MalformedJson,
+                SourceSyncBaselineCodecReasons.MalformedJson,
                 "The sync baseline document is not valid JSON: " + exception.Message);
         }
 

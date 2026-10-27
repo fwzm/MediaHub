@@ -152,10 +152,10 @@ public static class SourceSyncContentHash
             .ThenBy(endpoint => endpoint.Enabled ? 0 : 1);
 
     private static string? NormalizedScope(string? accountScope)
-        => string.IsNullOrWhiteSpace(accountScope) ? null : accountScope.Trim().ToLowerInvariant();
+        => WireText.IsBlank(accountScope) ? null : WireText.LowercaseAscii(WireText.Trim(accountScope));
 
     private static string NormalizedUrl(string? url)
-        => string.IsNullOrWhiteSpace(url) ? string.Empty : SyncUrlNormalizer.Normalize(url) ?? url.Trim();
+        => WireText.IsBlank(url) ? string.Empty : SyncUrlNormalizer.Normalize(url) ?? WireText.Trim(url);
 
     private static string Hash(string canonical)
         => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
