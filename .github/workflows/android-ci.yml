@@ -165,6 +165,9 @@ jobs:
           #     读不出来的档案宁可隔离也不覆盖、指纹不符绝不覆盖已钉指纹）
           #   feature.settings.paired.PairedDeviceControllerTest —— 已配对设备页状态机（W6-70：读不到存储如实报
           #     不可用、忘记必须两段（先问再删）、取消本身也是回执、写盘失败只算「本机没有登记」不抛）
+          #   feature.settings.pairing.PairingLinkPeerTest —— 配对页「对端身份」比对与登记（W6-71：卡片只读比对不写盘、
+          #     显式登记才写、写的是卡片里的稳定指纹而非邀请里的临时证书指纹、指纹不符绝不覆盖已钉指纹、
+          #     没卡片/没登记簿/拉取失败都只算「这次记不住对端」不把已校验的邀请变红、挑战与原始链接不外泄）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -219,6 +222,7 @@ jobs:
             --required-suite com.mediahub.core.common.pairing.PairingEdgeContractTest \
             --required-suite com.mediahub.core.common.pairing.PairedDeviceContractTest \
             --required-suite com.mediahub.feature.settings.paired.PairedDeviceControllerTest \
+            --required-suite com.mediahub.feature.settings.pairing.PairingLinkPeerTest \
             --require-complete-suites
 
       - name: Lint

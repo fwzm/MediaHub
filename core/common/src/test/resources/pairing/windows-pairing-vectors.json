@@ -6985,5 +6985,372 @@
         "reason": "malformed-json"
       }
     ]
+  },
+  "peerCard": {
+    "currentSchemaVersion": 1,
+    "maximumTextLength": 128,
+    "maximumLength": 2048,
+    "reasons": [
+      "card-malformed-json",
+      "card-too-long",
+      "card-unsupported-version",
+      "card-missing-device-id",
+      "card-missing-fingerprint",
+      "card-bad-fingerprint"
+    ],
+    "derivationPrefix": "mediahub-device:",
+    "rejectsBlankIdentity": true,
+    "serializationCases": [
+      {
+        "name": "golden",
+        "deviceId": "android-device-1",
+        "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+        "displayName": "\u5BA2\u5385\u5E73\u677F",
+        "sourceCount": 3,
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "utf8ByteLength": 193,
+        "sha256": "3e7d0eccdc73d27c2428a972c9b7898b58f0eec7fee4bd92383949d74ae20d17"
+      },
+      {
+        "name": "minimal",
+        "deviceId": "d",
+        "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+        "displayName": "",
+        "sourceCount": 0,
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022d\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\u0022,\u0022sourceCount\u0022:0}",
+        "utf8ByteLength": 154,
+        "sha256": "edd1a3783b250b083133540a8e134837dc11bc3d0f86e556a2f879c97247b142"
+      },
+      {
+        "name": "ascii-specials",
+        "deviceId": "\u0022\u0026\u0027\u002B\u003C\u003E\\\u0060",
+        "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+        "displayName": "\u0022\u0026\u0027\u002B\u003C\u003E\\\u0060",
+        "sourceCount": 1,
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022\\u0022\\u0026\\u0027\\u002B\\u003C\\u003E\\\\\\u0060\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u0022\\u0026\\u0027\\u002B\\u003C\\u003E\\\\\\u0060\u0022,\u0022sourceCount\u0022:1}",
+        "utf8ByteLength": 241,
+        "sha256": "fe7bf762f1938bcd5a1f0e57f7406d2ce3cf9e3ab9299c47e9fa571829a8a00f"
+      },
+      {
+        "name": "non-ascii",
+        "deviceId": "\u8BBE\u5907-\u7532",
+        "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+        "displayName": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09/\u5F20\u4E09 \u2014 \u7B2C\u4E8C\u53F0 \uD83D\uDE00",
+        "sourceCount": 2,
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022\\u8BBE\\u5907-\\u7532\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BB6\\u5EAD NAS\\uFF08\\u5BA2\\u5385\\uFF09/\\u5F20\\u4E09 \\u2014 \\u7B2C\\u4E8C\\u53F0 \\uD83D\\uDE00\u0022,\u0022sourceCount\u0022:2}",
+        "utf8ByteLength": 264,
+        "sha256": "fdd863bdcc797393ffd5aaa99fc0c0ba93715697d6b1ce58c70c9894374f3937"
+      },
+      {
+        "name": "control-characters",
+        "deviceId": "\b\t\n\f\r\u0001\u001F\u007F",
+        "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+        "displayName": "\b\t\n\f\r\u0001\u001F\u007F",
+        "sourceCount": 0,
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022\\b\\t\\n\\f\\r\\u0001\\u001F\\u007F\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\b\\t\\n\\f\\r\\u0001\\u001F\\u007F\u0022,\u0022sourceCount\u0022:0}",
+        "utf8ByteLength": 209,
+        "sha256": "5e80ded5cf8eec683af76b38af58aea17c121c38b728851cb12d021885c6d6b9"
+      },
+      {
+        "name": "maximum-name",
+        "deviceId": "d",
+        "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+        "displayName": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "sourceCount": 0,
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022d\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\u0022,\u0022sourceCount\u0022:0}",
+        "utf8ByteLength": 282,
+        "sha256": "9cd1b2820d0d58b2356cbb506bba458abe2d41a8a89ecb214a47fe002438a32b"
+      }
+    ],
+    "decodeCases": [
+      {
+        "name": "golden-roundtrip",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": true,
+        "reason": "ok",
+        "card": {
+          "deviceId": "android-device-1",
+          "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+          "displayName": "\u5BA2\u5385\u5E73\u677F",
+          "sourceCount": 3
+        }
+      },
+      {
+        "name": "minimal-defaults",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022d\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022}",
+        "accepted": true,
+        "reason": "ok",
+        "card": {
+          "deviceId": "d",
+          "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+          "displayName": "",
+          "sourceCount": 0
+        }
+      },
+      {
+        "name": "unknown-field-ignored",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3,\u0022futureField\u0022:\u0022ignored\u0022}",
+        "accepted": true,
+        "reason": "ok",
+        "card": {
+          "deviceId": "android-device-1",
+          "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+          "displayName": "\u5BA2\u5385\u5E73\u677F",
+          "sourceCount": 3
+        }
+      },
+      {
+        "name": "uppercase-fingerprint-normalized",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023CB0C08F6DD7480FD09B762DBC6C499DE57348409CEC8A7869D52CD05B48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": true,
+        "reason": "ok",
+        "card": {
+          "deviceId": "android-device-1",
+          "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+          "displayName": "\u5BA2\u5385\u5E73\u677F",
+          "sourceCount": 3
+        }
+      },
+      {
+        "name": "display-name-trimmed",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022  \\u7532  \u0022,\u0022sourceCount\u0022:3}",
+        "accepted": true,
+        "reason": "ok",
+        "card": {
+          "deviceId": "android-device-1",
+          "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+          "displayName": "\u7532",
+          "sourceCount": 3
+        }
+      },
+      {
+        "name": "display-name-truncated",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": true,
+        "reason": "ok",
+        "card": {
+          "deviceId": "android-device-1",
+          "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+          "displayName": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+          "sourceCount": 3
+        }
+      },
+      {
+        "name": "source-count-negative",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:-4}",
+        "accepted": true,
+        "reason": "ok",
+        "card": {
+          "deviceId": "android-device-1",
+          "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+          "displayName": "\u5BA2\u5385\u5E73\u677F",
+          "sourceCount": 0
+        }
+      },
+      {
+        "name": "source-count-string",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:\u00227\u0022}",
+        "accepted": true,
+        "reason": "ok",
+        "card": {
+          "deviceId": "android-device-1",
+          "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+          "displayName": "\u5BA2\u5385\u5E73\u677F",
+          "sourceCount": 0
+        }
+      },
+      {
+        "name": "source-count-fraction",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3.5}",
+        "accepted": true,
+        "reason": "ok",
+        "card": {
+          "deviceId": "android-device-1",
+          "deviceFingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+          "displayName": "\u5BA2\u5385\u5E73\u677F",
+          "sourceCount": 0
+        }
+      },
+      {
+        "name": "root-array",
+        "json": "[1,2,3]",
+        "accepted": false,
+        "reason": "card-malformed-json",
+        "card": null
+      },
+      {
+        "name": "malformed-json",
+        "json": "{",
+        "accepted": false,
+        "reason": "card-malformed-json",
+        "card": null
+      },
+      {
+        "name": "empty",
+        "json": "",
+        "accepted": false,
+        "reason": "card-malformed-json",
+        "card": null
+      },
+      {
+        "name": "blank",
+        "json": "   ",
+        "accepted": false,
+        "reason": "card-malformed-json",
+        "card": null
+      },
+      {
+        "name": "too-long",
+        "json": "{\u0022deviceId\u0022:\u0022aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u0022}",
+        "accepted": false,
+        "reason": "card-too-long",
+        "card": null
+      },
+      {
+        "name": "schema-version-missing",
+        "json": "{\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": false,
+        "reason": "card-malformed-json",
+        "card": null
+      },
+      {
+        "name": "schema-version-string",
+        "json": "{\u0022schemaVersion\u0022:\u00221\u0022,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": false,
+        "reason": "card-malformed-json",
+        "card": null
+      },
+      {
+        "name": "schema-version-2",
+        "json": "{\u0022schemaVersion\u0022:2,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": false,
+        "reason": "card-unsupported-version",
+        "card": null
+      },
+      {
+        "name": "device-id-missing",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": false,
+        "reason": "card-missing-device-id",
+        "card": null
+      },
+      {
+        "name": "device-id-number",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:7,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": false,
+        "reason": "card-missing-device-id",
+        "card": null
+      },
+      {
+        "name": "device-id-blank",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022   \u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": false,
+        "reason": "card-missing-device-id",
+        "card": null
+      },
+      {
+        "name": "device-id-too-long",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": false,
+        "reason": "card-missing-device-id",
+        "card": null
+      },
+      {
+        "name": "fingerprint-missing",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": false,
+        "reason": "card-missing-fingerprint",
+        "card": null
+      },
+      {
+        "name": "fingerprint-blank",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u0022 \u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": false,
+        "reason": "card-missing-fingerprint",
+        "card": null
+      },
+      {
+        "name": "fingerprint-non-hex",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u0022z0023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": false,
+        "reason": "card-bad-fingerprint",
+        "card": null
+      },
+      {
+        "name": "fingerprint-short",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": false,
+        "reason": "card-bad-fingerprint",
+        "card": null
+      },
+      {
+        "name": "lone-surrogate-display-name",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\uD800\u0022,\u0022sourceCount\u0022:3}",
+        "accepted": false,
+        "reason": "card-malformed-json",
+        "card": null
+      },
+      {
+        "name": "lone-surrogate-unknown-field",
+        "json": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:3,\u0022futureField\u0022:\u0022\\uDBFF\u0022}",
+        "accepted": false,
+        "reason": "card-malformed-json",
+        "card": null
+      }
+    ],
+    "selfIdentityCases": [
+      {
+        "name": "android-device",
+        "deviceId": "android-device-1",
+        "trimmedDeviceId": "android-device-1",
+        "fingerprintHex": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+        "displayName": "\u5B89\u5353\u5E73\u677F",
+        "sourceCount": 0,
+        "cardJson": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5B89\\u5353\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:0}"
+      },
+      {
+        "name": "padded",
+        "deviceId": "  android-device-1  ",
+        "trimmedDeviceId": "android-device-1",
+        "fingerprintHex": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+        "displayName": "\u5B89\u5353\u5E73\u677F",
+        "sourceCount": 0,
+        "cardJson": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022android-device-1\u0022,\u0022deviceFingerprint\u0022:\u002270023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48\u0022,\u0022displayName\u0022:\u0022\\u5B89\\u5353\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:0}"
+      },
+      {
+        "name": "windows-device",
+        "deviceId": "device-windows",
+        "trimmedDeviceId": "device-windows",
+        "fingerprintHex": "6d4fb78fad79f6c847504d7ac03ffedf07f928a8d27ea5e959a4b3795d5f10f4",
+        "displayName": "\u5B89\u5353\u5E73\u677F",
+        "sourceCount": 0,
+        "cardJson": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022device-windows\u0022,\u0022deviceFingerprint\u0022:\u00226d4fb78fad79f6c847504d7ac03ffedf07f928a8d27ea5e959a4b3795d5f10f4\u0022,\u0022displayName\u0022:\u0022\\u5B89\\u5353\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:0}"
+      },
+      {
+        "name": "non-ascii",
+        "deviceId": "\u8BBE\u5907-\u7532",
+        "trimmedDeviceId": "\u8BBE\u5907-\u7532",
+        "fingerprintHex": "03ff01b82e1f878edc8dc958df5b11630e0bf470d646e1c2ca1be7150dfe1bd2",
+        "displayName": "\u5B89\u5353\u5E73\u677F",
+        "sourceCount": 0,
+        "cardJson": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022\\u8BBE\\u5907-\\u7532\u0022,\u0022deviceFingerprint\u0022:\u002203ff01b82e1f878edc8dc958df5b11630e0bf470d646e1c2ca1be7150dfe1bd2\u0022,\u0022displayName\u0022:\u0022\\u5B89\\u5353\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:0}"
+      },
+      {
+        "name": "long",
+        "deviceId": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+        "trimmedDeviceId": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+        "fingerprintHex": "1ebb5d1fde6270ef4af5cee31ad264933cff44f03a1cf830b34c3b7d21e10684",
+        "displayName": "\u5B89\u5353\u5E73\u677F",
+        "sourceCount": 0,
+        "cardJson": "{\u0022schemaVersion\u0022:1,\u0022deviceId\u0022:\u0022kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\u0022,\u0022deviceFingerprint\u0022:\u00221ebb5d1fde6270ef4af5cee31ad264933cff44f03a1cf830b34c3b7d21e10684\u0022,\u0022displayName\u0022:\u0022\\u5B89\\u5353\\u5E73\\u677F\u0022,\u0022sourceCount\u0022:0}"
+      }
+    ],
+    "observationCase": {
+      "deviceId": "android-device-1",
+      "fingerprint": "70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48",
+      "displayName": "\u5BA2\u5385\u5E73\u677F",
+      "sourceCount": 3,
+      "nowEpochMs": 1792800000000
+    }
   }
 }

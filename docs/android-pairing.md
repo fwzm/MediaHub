@@ -985,3 +985,148 @@ Android 侧 `core/` 与 `feature/` 的生产代码里 `PairedDevice` / `pairedDe
 - **真实两机配对仍 NOT_RUN**：需要第二台机器 + 用户同意开防火墙。
 - **Windows 侧 GUI 未见**：`SyncPage` 的已配对清单在本轮没有新的 GUI 证据，仍是 `GUI_UNVERIFIED`。
 
+## 16. 配对页第四段：对端身份卡片与显式登记（W6-71）
+
+### 16.1 背景与范围
+
+W6-59 / W6-59b 做到「核对链接 → 拉一次邀请」，W6-70 做到「本机登记档案的读、列、忘记」。两段之间还缺一环：
+**拉完邀请之后，对端到底是谁、要不要把它记下来。** Windows 从 ADR-S005 起就有这条链路（`PairingPeerCard` + `PairingSelfIdentity` + guest/host 两侧的卡片交换与 `Register`），
+Android 侧此前 `PairingPeerCard` / `PairingSelfIdentity` 零命中，`fetchInvitation` 拉完只落一个 `Fetched` 就结束，
+**配对结果永远进不了登记簿** —— W6-70 的「已配对设备」页在真机上是永远空的。
+
+本轮补三件事：①把「身份卡片」这个线格式与它的 6 条稳定码搬到 Kotlin；②给传输客户端加一条「握手成功后才自报身份、再尽力读对端卡片」的路径；
+③把 `PairedDeviceRegistry.verify/register` 接进配对页控制器，并在界面上给一个**显式**登记按钮。
+**不做**自动登记：与 Windows 同一条边界 —— 指纹一致或首次见到时按钮才可点，用户点一次才写盘；指纹不一致时按钮恒不可点且**绝不覆盖已钉指纹**。
+
+### 16.2 交付物
+
+| 层 | 文件 | 说明 |
+| --- | --- | --- |
+| core/common | `pairing/PairingPeerCard.kt` | 身份卡片 record（5 字段）+ 6 条 `card-*` 稳定码 + codec（`MAXIMUM_LENGTH = 2048`，`serialize` 复用 `PairedDeviceDocument.quote`） |
+| core/common | `pairing/PairingSelfIdentity.kt` | 本机稳定身份：`deriveFingerprint = SHA-256(UTF8("mediahub-device:" + trim(deviceId)))` |
+| core/common | `pairing/PairingTransportClient.kt` | 新增 `fetchInvitationWithCard(...)` + 私有 `exchangeCards(...)` + `PairingCardExchangeResult`；既有 `exchange` / `fetchInvitation` / `validate` 逐字未动 |
+| feature/settings | `pairing/PairingFetchPort.kt` | `fun interface` 仍只有 `fetch` 一个抽象方法；新增**带默认实现**的 `fetchWithCard(...)`（缺省退化成单向拉取、`peerCard = null`） |
+| feature/settings | `pairing/PairingLinkController.kt` | 新增可选 `registry` / `selfCard` 两参数 + `PairingPeerState` 五态 + `PairingPeerCopy` + `registerPeer()` |
+| feature/settings | `pairing/PairingLinkScreen.kt` | 「对端身份」区块（4 个新 tag）+ 生产路径在 Route 内组装登记簿与本机卡片 |
+| 测试 | `core/common/.../PairingPeerCardContractTest.kt` | 7 例，逐条消费黄金向量 `peerCard` 段 |
+| 测试 | `feature/settings/.../PairingLinkPeerTest.kt` | 14 例（只读比对不写盘 / 显式登记 / 同指纹 / 异指纹不覆盖 / 无卡片 / 无登记簿 / 失败作废 / 泄漏） |
+| 测试 | `feature/settings/src/androidTest/.../PairingLinkPeerScreenTest.kt` | 7 例 Compose 断言（四个 tag 的可见性与可用性） |
+| 向量 | `core/common/src/test/resources/pairing/windows-pairing-vectors.json` | 128430 → **152051 B** / sha256 `b30d1f18`…`c6360cea`，老 12 段逐字节不变，尾部新增 `peerCard` 段 |
+
+### 16.3 身份卡片线格式（逐字节对齐 Windows）
+
+紧凑 JSON、固定键序、无空格：`schemaVersion`(number) → `deviceId` → `deviceFingerprint` → `displayName` → `sourceCount`(number)。
+`schemaVersion` 恒为 1；`deviceFingerprint` 是 **64 位小写 hex** 的稳定指纹；`deviceId` / `displayName` 上限 128 字符；`sourceCount` 只接受正数，其余一律归 0。
+
+`serialize` 的字符串转义**直接复用 `PairedDeviceDocument.quote`**（同一份复刻 `Utf8JsonWriter` 默认 encoder 的实现）：
+ASCII 只转义双引号、`&`、单引号、`+`、`<`、`>`、反斜杠与反引号这 8 个字符，控制字符用短转义，其余 <0x20 与全部 ≥0x7F 走大写 `\uXXXX`。
+这条复用不是巧合：卡片与配对设备档案在 Windows 侧都走 `Utf8JsonWriter`，两边必须同字节。
+
+### 16.4 6 条卡片稳定码（与 Windows 同名同序）
+
+| 码 | 触发条件 |
+| --- | --- |
+| `card-malformed-json` | 空白 / 不是合法 JSON / 根非对象 / `schemaVersion` 缺失或非整数 / 含**孤立代理项** |
+| `card-too-long` | 文本长度 > 2048 |
+| `card-unsupported-version` | `schemaVersion != 1` |
+| `card-missing-device-id` | `deviceId` 缺失 / 非字符串 / 空白 / 超 128 |
+| `card-missing-fingerprint` | `deviceFingerprint` 缺失 / 非字符串 / 空白 |
+| `card-bad-fingerprint` | 指纹不是 64 位 hex |
+
+这 6 条是**配对卡片自己的封闭集**，不进 `PairingReasons`（那 7 条是载荷契约），也不进跨机五码集合（W6-47 ADR 的边界）。
+读端**永不抛**：所有分支都折成上面 6 条之一，孤立代理项也在解码前拦掉。
+
+### 16.5 卡片交换的时序（两端必须同序）
+
+| 角色 | 顺序 |
+| --- | --- |
+| Windows 服务端 | ①写邀请帧 → ②读对端卡片（有 `PeerReplyTimeout` 时）→ ③读到才回写自己的卡片 → ④关连接 |
+| Android guest（本轮） | ①拨号 + TLS 1.3 钉扎 → ②读邀请帧并**逐项校验**（帧 / 载荷 / 时效 / 挑战 / 指纹）→ ③校验通过后才写本机卡片 → ④尽力读对端卡片 |
+
+两条顺序不冲突：服务端先发邀请再读卡片，guest 先读邀请再写卡片，谁都不会把对方晾在写阻塞上。
+**卡片是尽力而为**：写失败、读超时、对端是老构建（只有邀请没有卡片），都只让 `peerCard = null`，
+绝不把已经校验通过的邀请变成失败 —— 与 Windows `PairingTransportServer` 的注释同一条理由。
+
+### 16.6 为什么登记的必须是卡片指纹，不是邀请指纹
+
+邀请载荷里的 `publicKeyFingerprint` 在不同入口有**两种含义**：
+离线邀请（`SyncPagePresenter.CreateInvitation`）填的是稳定派生指纹，而 live 监听器（`PairingTransportServer.Start`）填的是**一次性自签证书的指纹**。
+把后者登记进档案，下一次配对必然误判成 `fingerprint-mismatch`。
+Windows guest 的权威注释写得很直白：
+
+> Remembering the host needs the host's own card. The invitation's fingerprint is the ephemeral certificate's and changes every pairing, so registering it would guarantee a false mismatch next time.
+
+所以 Android 侧 `registerPeer()` 只取 `heldPeerCard.deviceFingerprint`，邀请指纹只用于 TLS 钉扎与挑战校验。
+本机自己的卡片指纹同样由 `PairingSelfIdentity.deriveFingerprint(deviceId)` 稳定派生（`SHA-256(UTF8("mediahub-device:" + deviceId))`），每次都一样。
+
+### 16.7 状态机与界面
+
+`PairingPeerState` 五态：`NotChecked` / `NoCard` / `Unavailable` / `Reviewed(...)` / `Recorded(...)`。
+结果行与稳定码由 `PairingPeerCopy.lineOf` / `codeOf` 给，界面不自己拼码。
+
+- **NotChecked**：还没拉过邀请（或换过链接、清空过）—— 没有结果行。
+- **NoCard**：邀请校验通过但对端没回卡片 —— 结果行说明「这次配对成立，只是记不住对端」。
+- **Unavailable**：本机没有登记簿 —— 码 `registry-unavailable`（与 Windows 同值）。
+- **Reviewed**：卡片已与登记簿比对 —— 行文案给出「对端：名字（标识），指纹 …；新设备 / 指纹一致 / 指纹不一致」，Mismatch 再拼一句「本机不会覆盖已登记的指纹，请当面核对。」
+- **Recorded**：点过登记之后的回执 —— 接受时分「首次配对，指纹已钉住」与「本机记录已更新」，拒绝时给原因码。
+
+界面区块（`pairing.peer`）在「清空」之后、本机地址之前：标题 / 解释 / 结果行（`pairing.peer.state`）/ 登记说明（`pairing.peer.hint`）/ 按钮（`pairing.peer.register`）。
+按钮的可用条件只有一条：`!busy && state is Reviewed && state.canRegister` —— `canRegister` 由 `PairedDeviceRegistry.verify` 的 `canPin` 给（NEW 或 MATCH），Mismatch 恒 false。
+
+### 16.8 本机身份卡片的来源
+
+feature/settings 没有 Hilt ViewModel，`PairingLinkRoute` 在 Route 内组装：
+`ClientIdentityProvider(context.applicationContext, version = "").deviceId` → `PairingSelfIdentity.create(deviceId, displayName = "Android")` → `.toCard()`；
+登记簿落在 `PairedDeviceStorage.storeIn(filesDir)`（即 W6-70 的 `filesDir/paired_devices/paired-devices.json`）。
+**没有登记簿的一方不自报身份**（`registry == null` 时 `selfCard` 强制为 null）—— 与 Windows `Reply = _registry is null ? null : ...` 同一条边界。
+
+### 16.9 修掉的两个 Windows 真缺陷
+
+两条都是 Kotlin 侧按契约写用例时把 C# 读端逼出来的，症状都是**非契约异常**：
+
+1. **孤立代理项**：`PairingPeerCardCodec.TryDeserialize` 少了前置检查，`JsonElement.GetString()` 对转义孤立代理项抛 `InvalidOperationException`（不是 `JsonException`）。
+   修法：在「根非对象」判定之后加 `WireText.ContainsLoneSurrogate(root)` → `card-malformed-json`。
+2. **`TryGetInt32` 对非 Number 抛异常**：`schemaVersion` 写成字符串（`{"schemaVersion":"1"}`）时，`JsonElement.TryGetInt32` 抛
+   `InvalidOperationException: The requested operation requires an element of type Number, but the target element has type String.`（`PairingPeerCard.cs:141`）。
+   修法：加 `versionElement.ValueKind != JsonValueKind.Number` 前置判断 → `card-malformed-json`。
+
+两处都补进了黄金向量的拒绝清单（`decodeCases` 27 条里 18 条拒绝覆盖全部 6 码），两端逐条消费。
+
+### 16.10 黄金向量 `peerCard` 段
+
+生成器仍是 `D:/mh-verify/pairing-vectors/`（`net10.0`，`ProjectReference` 指向 W6 的权威 `MediaHub.Sync.csproj`），老 12 段保持逐字节不变（已实测：旧文件内容是新文件的前缀）。
+新增 10 个键：
+
+| 键 | 内容 |
+| --- | --- |
+| `currentSchemaVersion` / `maximumTextLength` / `maximumLength` / `derivationPrefix` / `rejectsBlankIdentity` | 常量与边界 |
+| `reasons` | 6 条 `card-*` 码（同名同序） |
+| `serializationCases` | 6 条（golden 193 B / minimal 154 B / ASCII 特殊字符 / 非 ASCII 中文 / 控制字符 / 128 字符名字），每条带 `utf8ByteLength` + `sha256` |
+| `decodeCases` | 27 条（接受 9 / 拒绝 18），拒绝覆盖全部 6 码 |
+| `selfIdentityCases` | 5 条（Android / 前后空格 / Windows / 非 ASCII / 200 字符长 id），带 `trimmedDeviceId` + `fingerprintHex` + `cardJson` |
+| `observationCase` | 卡片 → `PairedDeviceObservation` 的落点（时钟由调用方给） |
+
+`deriveFingerprint("android-device-1")` = `70023cb0c08f6dd7480fd09b762dbc6c499de57348409cec8a7869d52cd05b48`；
+`deriveFingerprint("device-windows")` = `6d4fb78fad79f6c847504d7ac03ffedf07f928a8d27ea5e959a4b3795d5f10f4`；
+`deriveFingerprint("设备-甲")` = `03ff01b82e1f878edc8dc958df5b11630e0bf470d646e1c2ca1be7150dfe1bd2`。
+
+### 16.11 本机实跑与门禁
+
+| 项 | 结果 |
+| --- | --- |
+| Kotlin 契约 `PairingPeerCardContractTest` | 7 / 7 通过（XML `tests="7" skipped="0" failures="0" errors="0"`） |
+| feature/settings `PairingLinkPeerTest` | 14 / 14 通过 |
+| 三模块全量 | `core/common` 47 套件 **643** 例 / `core/database` 20 套件 192 例 / `feature/settings` 25 套件 **381** 例，0 失败 |
+| `assembleDebugAndroidTest` | BUILD SUCCESSFUL（新增 7 例 Compose 断言可编译） |
+| C# 全量（W6 树） | **1635 通过 / 0 失败 / 0 跳过**（1628 → 1635，+7 契约用例） |
+| `--required-suite` | 53 → **54**（新增 `feature.settings.pairing.PairingLinkPeerTest`） |
+| `.github/scripts/tests` | `Ran 54 tests … OK` |
+
+### 16.12 未做项
+
+- **真实两机配对仍 NOT_RUN**：卡片交换只在回环替身与本地 JVM 层验证过，没有跨机证据（需第二台机器 + 用户同意开防火墙）。
+- **真机 instrumentation DEVICE_UNVERIFIED**：7 例 Compose 断言只到编译 + CI 模拟器（API 32 / 36）。
+- **只做 guest 方向**：Android 只作为「拉邀请的一方」自报身份并读对端卡片；Android 作为 host 的监听端目前不交换卡片，登记靠 Windows host 侧完成。
+- **不做自动登记**：登记必须用户点一次，产品上未做「记住这台设备」的一次性确认 UI。
+- **Windows 侧 GUI 未复验**：`SyncPage` 的已配对清单本轮没有新的 GUI 证据，仍是 `GUI_UNVERIFIED`。
+
