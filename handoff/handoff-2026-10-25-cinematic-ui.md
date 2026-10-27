@@ -35,6 +35,8 @@
 - `cdb16a67` Android `40525920124` 在 API32/36 各 30 分钟超时；每 API 的 138 个原有测试 +1 备份测试通过，新四页尚未启动。原因是每次 connected 调用都 `--rerun-tasks` 重建依赖。`fa40092d` 改为仅具体测试任务 `--rerun`，脚本回归 RED 1 → GREEN，65 tests / 0 failures，真实 Gradle dry-run exit 0；新 CI `40538420793` 等待结果。
 - 自建 API36 模拟器直接运行四页测试，四个用例都执行到截图阶段，但 `getExternalFilesDir` 目录创建失败，真实结果为 **4 tests / 4 failures**（`INSTRUMENTATION_CODE=-1`，不是 PASS）。改用 `targetContext.cacheDir/cinematic` 后重新构建并安装测试 APK，实际复跑为 **OK (4 tests)**，四个用例的 `INSTRUMENTATION_STATUS_CODE` 均为 0，Time 33.553s；测试 APK SHA-256 `f59d2f43c70198871b2cceea3773cc7a8f51f968aa84cab4fb722ef778fc992b`。原始 RED 日志 `cinematic-owned-api36-tests.log` 和 GREEN 日志 `cinematic-owned-api36-tests-green.log` 均保留。
 
+- `af003365` Android `40541138154` 未通过：API32 四页 4/4 通过，但独立 app 调用覆盖了备份报告；API36 模拟器断开（`device 'emulator-5554' not found`），详情用例未完成。原始 XML / UTP / logcat 已保存于 `ci-final-api32` / `ci-final-api36`。改为备份独立执行后保存 XML 快照，四页独立执行后恢复快照，再统一验证报告；保持原备份验收语义。脚本回归 RED 1 → GREEN，65 tests / 0 failures，并校验快照与最终报告真实内容。API36 模拟器断开作为环境问题单独保留，不改播放回调或隐藏失败。
+
 ## Rules and next steps
 
 - G7：DO_NOT_MERGE。只允许普通提交到 feature 分支并创建 Draft PR；不合并、不 close、不 mark-ready、不 force push。

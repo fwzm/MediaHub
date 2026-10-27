@@ -39,8 +39,16 @@ esac
                 scripts.mkdir(parents=True)
                 (scripts / "prepare-visual-emulator.sh").write_text(SCRIPT.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
                 script.write_text((SCRIPT.parent / "run-visual-validation.sh").read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
-                for fake, content in ((root / "gradlew", 'printf "GRADLE %s\\n" "$*" >> "$FIXTURE_COMMANDS"; exit "$FIXTURE_GRADLE_EXIT"'),
-                                      (fake_bin / "python3", 'echo RECORD >> "$FIXTURE_COMMANDS"; exit "$FIXTURE_RECORD_EXIT"')):
+                gradle = '''printf "GRADLE %s\\n" "$*" >> "$FIXTURE_COMMANDS"
+report_dir="app/build/outputs/androidTest-results/connected/debug"
+case "$*" in
+  *BackupUserFlow*) mkdir -p "$report_dir"; printf backup > "$report_dir/TEST-result.xml" ;;
+  *CinematicVisualTest*) mkdir -p "$report_dir"; printf cinematic > "$report_dir/TEST-result.xml" ;;
+esac
+exit "$FIXTURE_GRADLE_EXIT"'''
+                for fake, content in ((root / "gradlew", gradle),
+                                      (fake_bin / "python3", 'echo RECORD >> "$FIXTURE_COMMANDS"; exit "$FIXTURE_RECORD_EXIT"'),
+                                      (fake_bin / "cp", 'printf "cp %s\\n" "$*" >> "$FIXTURE_COMMANDS"; command -p cp "$@"')):
                     fake.write_text("#!/usr/bin/env bash\n" + content + "\n", encoding="utf-8", newline="\n")
                     fake.chmod(0o755)
             env = os.environ.copy()
@@ -54,6 +62,10 @@ esac
             self.assertIsNotNone(executable, "actual Bash required for CI bootstrap fixture")
             result = subprocess.run([executable, "prepare.sh"] + (["32"] if wrapper else []), cwd=root, env=env,
                                     capture_output=True, text=True, timeout=15)
+            report = root / "app/build/outputs/androidTest-results/connected/debug/TEST-result.xml"
+            result.report_text = report.read_text(encoding="utf-8") if report.exists() else ""
+            backup_report = root / "ci-evidence/backup-report/TEST-result.xml"
+            result.backup_report_text = backup_report.read_text(encoding="utf-8") if backup_report.exists() else ""
             return result, commands.read_text(encoding="utf-8") if commands.exists() else ""
 
     def test_setup_home_is_rejected_even_when_status_and_resumed_match(self):
@@ -107,6 +119,10 @@ esac
         self.assertNotIn("--rerun-tasks", commands)
         self.assertEqual(7, len(re.findall(r"(?<!\S)--rerun(?:\s|$)", commands)), commands)
         self.assertEqual(3, commands.count("GRADLE"), commands)
+        self.assertEqual(2, commands.count(":app:connectedDebugAndroidTest"), commands)
+        self.assertIn("class=com.mediahub.app.visual.CinematicVisualTest", commands)
+        self.assertEqual("backup", result.backup_report_text)
+        self.assertEqual("backup", result.report_text)
 
     def test_wrapper_setup_failure_prevents_gradle_and_record(self):
         result, commands = self.invoke(wrapper=True, home="com.google.android.sdksetup/.DefaultActivity")

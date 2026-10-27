@@ -14,10 +14,13 @@ backup_status=0
   -Pandroid.testInstrumentationRunnerArguments.class=com.mediahub.app.backup.BackupUserFlowNonOverwritingDeviceTest \
   -Pandroid.testInstrumentationRunnerArguments.backupAcceptance=isolated \
   --no-daemon --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process --no-build-cache || backup_status=$?
+mkdir -p ci-evidence/backup-report
+cp -p app/build/outputs/androidTest-results/connected/debug/TEST-*.xml ci-evidence/backup-report/
 cinematic_status=0
 ./gradlew :app:connectedDebugAndroidTest --rerun \
   -Pandroid.testInstrumentationRunnerArguments.class=com.mediahub.app.visual.CinematicVisualTest \
   --no-daemon --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process --no-build-cache || cinematic_status=$?
+cp -p ci-evidence/backup-report/TEST-*.xml app/build/outputs/androidTest-results/connected/debug/
 record_status=0
 python3 .github/scripts/verify-visual-tests.py --record --api "$api" --device-api "$(adb -s "$ANDROID_SERIAL" shell getprop ro.build.version.sdk | tr -d '\r')" --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" || record_status=$?
 printf 'gradleExit=%s\nbackupExit=%s\ncinematicExit=%s\nrecordExit=%s\n' "$test_status" "$backup_status" "$cinematic_status" "$record_status" > ci-evidence/visual-command-status.txt
