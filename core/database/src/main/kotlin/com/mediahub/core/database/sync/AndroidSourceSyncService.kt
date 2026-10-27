@@ -10,6 +10,7 @@ import com.mediahub.core.common.sync.SourceSyncBaselineSaveResult
 import com.mediahub.core.common.sync.SourceSyncBaselineStoreReasons
 import com.mediahub.core.common.sync.SourceSyncCandidate
 import com.mediahub.core.common.sync.SourceSyncCodec
+import com.mediahub.core.common.sync.SourceSyncDigest
 import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncEndpointPolicy
 import com.mediahub.core.common.sync.SourceSyncEndpointSummary
@@ -19,7 +20,10 @@ import com.mediahub.core.common.sync.SourceSyncPlanner
 import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SourceSyncSecrets
 import com.mediahub.core.common.sync.SyncCapabilities
+import com.mediahub.core.common.sync.SyncMergeDirection
+import com.mediahub.core.common.sync.SyncRoundMerger
 import com.mediahub.core.common.sync.SyncRoundReasons
+import com.mediahub.core.common.sync.SyncRoundResult
 import com.mediahub.core.common.sync.SyncSourceTypeValue
 import com.mediahub.core.common.sync.SyncSourceTypes
 import com.mediahub.core.common.sync.SyncUrlNormalizer
@@ -263,6 +267,21 @@ class AndroidSourceSyncService(
      *   信封里塞一条 url 为空的记录会被读端判 missing-field:url，等于整份信封作废。
      */
     suspend fun export(): SourceSyncExport {
+        val local = buildLocalEnvelope()
+        return SourceSyncExport(
+            envelope = local.envelope,
+            json = SourceSyncCodec.encode(local.envelope),
+            derivedIdentityServerIds = local.derivedIdentityServerIds,
+            skippedServerIds = local.skippedServerIds,
+        )
+    }
+
+    /**
+     * W6-76：把「本机服务器表 → 信封」这段构造成独立的一步，导出与轮次预演共用同一份记录集。
+     *
+     * 分成两处实现的后果是「补号 / 跳过无线路」的判据会慢慢分叉：预演说能推、导出却推不出去。
+     */
+    private suspend fun buildLocalEnvelope(): LocalEnvelopeBuild {
         val snapshots = store.listSourceSnapshots()
         val derived = ArrayList<String>()
         val skipped = ArrayList<String>()
@@ -317,11 +336,60 @@ class AndroidSourceSyncService(
             // 本端没有删除日志表：导出恒为空，绝不猜测"哪些来源被删过"。
             deletions = emptyList(),
         )
-        return SourceSyncExport(
+        return LocalEnvelopeBuild(
             envelope = envelope,
-            json = SourceSyncCodec.encode(envelope),
             derivedIdentityServerIds = derived,
             skippedServerIds = skipped,
+        )
+    }
+
+    // ---------------------------------------------------------------- 轮次预演
+
+    /**
+     * W6-76：一轮双向合并的**只读预演**（对齐 Windows `SourceSyncSession.PlanRound`）。
+     *
+     * 它回答「这一轮到底要搬什么」，而不是「已经搬了什么」：本机信封与对端信封各自相对**同一份**
+     * 基线算成摘要，再交给 [SyncRoundMerger] 分成 可执行 / 需确认 / 忽略 三个桶。
+     *
+     * 四条边界：
+     * - **不写来源**：只读 [SourceSyncStore.listSourceSnapshots]，不调用 createLocalSource /
+     *   updateLocalSource —— 「预演」若会落库，用户在界面上看到的就不再是计划；
+     * - **会补身份**：缺 syncSourceId 的来源按 deviceId + serverId 确定性派生（与导出、与 Windows
+     *   `SourceSyncLocalBridge.BuildEnvelope` 同口径）；不补号的话这些来源在摘要里只会变成
+     *   missing-sync-source-id 问题项，永远推不出去，预演会误报「没有工作」；
+     * - **基线只读不写**：基线由导入轮在真正写入之后推进，预演绝不推进 —— 否则「看一眼」就让下一轮
+     *   的 already-applied 提前成立，等于凭空吞掉一条待同步记录；
+     * - **解析失败不抛**：返回带 [SourceSyncRoundPreview.rejectedReason] 的空预演，调用方按稳定码分支。
+     */
+    suspend fun planRound(envelopeJson: String): SourceSyncRoundPreview {
+        val decoded = SourceSyncCodec.tryDecode(envelopeJson)
+        if (decoded is SourceSyncCodec.DecodeResult.Failed) {
+            return SourceSyncRoundPreview(
+                rejectedReason = decoded.reason,
+                rejectedMessage = decoded.message,
+            )
+        }
+        val envelope = (decoded as SourceSyncCodec.DecodeResult.Ok).envelope
+
+        // 基线为 null 时用 EMPTY 而不是空实现：摘要那边把「基线 null」当首次接触（全量），
+        // 把「基线空」也当全量 —— 两者结果一致，但传 null 会绕过 merge 的 known == null 判据。
+        val peerBaseline = loadPeerBaseline(envelope.deviceId)
+        val baseline = peerBaseline ?: SourceSyncBaseline.EMPTY
+        val local = buildLocalEnvelope()
+
+        val round = SyncRoundMerger.merge(
+            local = SourceSyncDigest.fromEnvelope(local.envelope, baseline),
+            remote = SourceSyncDigest.fromEnvelope(envelope, baseline),
+            baseline = baseline,
+        )
+
+        return SourceSyncRoundPreview(
+            peerDeviceId = envelope.deviceId,
+            baselineKnown = peerBaseline?.isEmpty == false,
+            baselineEntryCount = peerBaseline?.entries?.size ?: 0,
+            derivedIdentityServerIds = local.derivedIdentityServerIds,
+            skippedServerIds = local.skippedServerIds,
+            round = round,
         )
     }
 
@@ -550,3 +618,55 @@ data class SourceSyncExport(
     /** 无法进信封而被跳过的服务器 id（无线路 / 无类型）。 */
     val skippedServerIds: List<String> = emptyList(),
 )
+
+/** [buildLocalEnvelope] 的产出：信封本体 + 这次顺手补了哪些号、跳过了谁。 */
+private data class LocalEnvelopeBuild(
+    val envelope: SourceSyncEnvelope,
+    val derivedIdentityServerIds: List<String>,
+    val skippedServerIds: List<String>,
+)
+
+/**
+ * W6-76：一轮双向合并的只读预演结果。
+ *
+ * [round] 是决定本身；其余字段是「这份计划建立在什么之上」——基线知道多少、本机补了几个身份、
+ * 有几条来源因为没线路/没类型被跳过。三项计数都只描述 [round.apply]，需要人工确认的另算。
+ */
+data class SourceSyncRoundPreview(
+    /** 对端设备标识（解析失败时为空串）。 */
+    val peerDeviceId: String = "",
+    /** 对端基线是否非空（"以前跟这台设备收敛过"）。没有基线存储、读失败、从没同步过一律 false。 */
+    val baselineKnown: Boolean = false,
+    /** 对端基线里已有的来源条数（[baselineKnown] 为 false 时恒为 0）。 */
+    val baselineEntryCount: Int = 0,
+    /** 本次预演顺手补号的服务器 id（[SourceSyncStore.bindSyncIdentity] 成功才算）。 */
+    val derivedIdentityServerIds: List<String> = emptyList(),
+    /** 无法进信封的服务器 id（无线路 / 无类型），与导出同口径。 */
+    val skippedServerIds: List<String> = emptyList(),
+    /** 非空表示信封没被读入，此时 [round] 必为空。 */
+    val rejectedReason: String? = null,
+    val rejectedMessage: String? = null,
+    val round: SyncRoundResult = SyncRoundResult.EMPTY,
+) {
+    val isRejected: Boolean get() = !rejectedReason.isNullOrBlank()
+
+    /** 可以不经确认直接执行的条目数。 */
+    val applyCount: Int get() = round.apply.size
+
+    /** 必须等人回答的条目数（含未知类型、删本地、字段冲突）。 */
+    val approvalCount: Int get() = round.requiresApproval.size
+
+    /** 不需要任何动作的条目数（已同步、对端过旧、墓碑无本地对应…）。 */
+    val ignoredCount: Int get() = round.ignored.size
+
+    /** 本次要**推给对端**的可执行条目数（只数 apply 里的 PUSH）。 */
+    val pushCount: Int get() = round.apply.count { it.direction == SyncMergeDirection.PUSH }
+
+    /** 本次要从**对端拉下来**写入本机的可执行条目数（只数 apply 里的 PULL）。 */
+    val pullCount: Int get() = round.apply.count { it.direction == SyncMergeDirection.PULL }
+
+    /** 有没有可以不经确认直接做的工作；false 表示这一轮是空的（两端已收敛）。 */
+    val hasWork: Boolean get() = round.hasWork
+
+    val isEmpty: Boolean get() = round.isEmpty
+}
