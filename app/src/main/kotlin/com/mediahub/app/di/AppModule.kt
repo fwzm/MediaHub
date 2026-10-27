@@ -7,6 +7,9 @@ import androidx.room.Room
 import com.mediahub.core.common.AppDispatchers
 import com.mediahub.core.common.ClientIdentity
 import com.mediahub.core.common.ClientIdentityProvider
+import com.mediahub.core.common.sync.ISourceSyncBaselineStore
+import com.mediahub.core.common.sync.FileSourceSyncBaselineStore
+import java.io.File
 import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.database.Migrations
 import com.mediahub.core.logging.CompositeLogger
@@ -178,6 +181,17 @@ object AppModule {
     @Singleton
     fun provideLocalRootProvider(@ApplicationContext context: Context): LocalRootProvider =
         AppLocalRootProvider(context)
+
+    /**
+     * W6-72：对端同步基线（跨设备增量同步的「上一轮对端是什么样」）。
+     *
+     * 放在 filesDir/sync-baseline/，文件名与 Windows FileSourceSyncBaselineStore 逐字相同
+     * （sync-baseline.json），两端磁盘格式一致；读不出来时存储层会隔离坏文件而不是覆盖它。
+     */
+    @Provides
+    @Singleton
+    fun provideSyncBaselineStore(@ApplicationContext context: Context): ISourceSyncBaselineStore =
+        FileSourceSyncBaselineStore(File(context.filesDir, "sync-baseline"))
 
     /** 聚合搜索引擎（Phase 1C-1）：并发 4 / 单服超时 8s。 */
     @Provides

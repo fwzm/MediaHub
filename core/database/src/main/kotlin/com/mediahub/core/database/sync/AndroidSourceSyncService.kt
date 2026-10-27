@@ -1,12 +1,18 @@
 package com.mediahub.core.database.sync
 
 import com.mediahub.core.common.sync.AndroidSourceTypeMap
+import com.mediahub.core.common.sync.ISourceSyncBaselineStore
 import com.mediahub.core.common.sync.SourceEndpoint
 import com.mediahub.core.common.sync.SourceRecord
 import com.mediahub.core.common.sync.SourceSyncAction
+import com.mediahub.core.common.sync.SourceSyncBaseline
+import com.mediahub.core.common.sync.SourceSyncBaselineSaveResult
+import com.mediahub.core.common.sync.SourceSyncBaselineStoreReasons
 import com.mediahub.core.common.sync.SourceSyncCandidate
 import com.mediahub.core.common.sync.SourceSyncCodec
 import com.mediahub.core.common.sync.SourceSyncEnvelope
+import com.mediahub.core.common.sync.SourceSyncEndpointPolicy
+import com.mediahub.core.common.sync.SourceSyncEndpointSummary
 import com.mediahub.core.common.sync.SourceSyncFingerprints
 import com.mediahub.core.common.sync.SourceSyncLocalIds
 import com.mediahub.core.common.sync.SourceSyncPlanner
@@ -51,6 +57,7 @@ class AndroidSourceSyncService(
     private val deviceId: String,
     private val snapshotIdFactory: () -> String = { UUID.randomUUID().toString().replace("-", "") },
     private val clock: () -> Long = { System.currentTimeMillis() },
+    private val baselineStore: ISourceSyncBaselineStore? = null,
 ) {
 
     init {
@@ -96,6 +103,8 @@ class AndroidSourceSyncService(
 
         val applied = ArrayList<AppliedSourceChange>()
         val failed = ArrayList<SourceSyncCandidate>()
+        // W6-72：只有真正写进库的条目才进对端基线（Windows W6-10 同口径）。
+        val writtenRecords = ArrayList<SourceRecord>()
         val writtenIndexes = HashSet<Int>()
         val failedIndexes = HashSet<Int>()
 
@@ -128,6 +137,7 @@ class AndroidSourceSyncService(
                 if (candidate.action == SourceSyncAction.CREATE) {
                     val serverId = store.createLocalSource(snapshot)
                     applied.add(AppliedSourceChange(serverId, candidate, SourceSyncFingerprints.of(record)))
+                    writtenRecords.add(record)
                     writtenIndexes.add(index)
                     continue
                 }
@@ -145,6 +155,7 @@ class AndroidSourceSyncService(
                     continue
                 }
                 applied.add(AppliedSourceChange(serverId, candidate, SourceSyncFingerprints.of(record)))
+                writtenRecords.add(record)
                 writtenIndexes.add(index)
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -170,6 +181,7 @@ class AndroidSourceSyncService(
             }
         }
 
+        val baseline = recordBaseline(envelope, writtenRecords)
         return SourceSyncImportResult(
             deviceId = envelope.deviceId,
             snapshotId = envelope.snapshotId,
@@ -179,7 +191,41 @@ class AndroidSourceSyncService(
             ignored = ignored,
             unsupported = unsupported,
             failed = failed,
+            endpointSummary = SourceSyncEndpointPolicy.summarize(envelope),
+            baselineSaved = baseline?.saved == true,
+            baselineRejectedSyncSourceIds = baseline?.rejectedSyncSourceIds ?: emptyList(),
+            baselineRejectionReason = baseline?.reason,
         )
+    }
+
+    /**
+     * W6-72：把本轮真正写入的条目并进对端基线（合并不是替换，见 [ISourceSyncBaselineStore.save]）。
+     *
+     * - 没有基线存储（老调用方 / JVM 单测）时不写，返回 null；
+     * - 一件都没写时不碰磁盘：空基线合并只会产生一次无意义的 Unchanged；
+     * - 存储层抛异常（介质不可写）折成稳定码 baseline-write-failed，绝不让导入本身失败。
+     */
+    private fun recordBaseline(
+        envelope: SourceSyncEnvelope,
+        writtenRecords: List<SourceRecord>,
+    ): SourceSyncBaselineSaveResult? {
+        val store = baselineStore ?: return null
+        if (writtenRecords.isEmpty()) return null
+        val peerDeviceId = envelope.deviceId.takeIf { it.isNotBlank() } ?: return null
+        return try {
+            store.save(
+                peerDeviceId,
+                SourceSyncBaseline.fromRecords(
+                    records = writtenRecords,
+                    deviceId = peerDeviceId,
+                    snapshotId = envelope.snapshotId,
+                ),
+            )
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Exception) {
+            SourceSyncBaselineSaveResult(reason = SourceSyncBaselineStoreReasons.WRITE_FAILED)
+        }
     }
 
     // ---------------------------------------------------------------- 导出
@@ -369,6 +415,19 @@ data class SourceSyncImportResult(
     val ignored: List<SourceSyncCandidate> = emptyList(),
     val unsupported: List<SourceSyncCandidate> = emptyList(),
     val failed: List<SourceSyncCandidate> = emptyList(),
+    /**
+     * W6-72：信封里被「主端点优先」策略判为不导入的次要端点汇总（对齐 Windows SourceSyncEndpointPolicy）。
+     *
+     * Android 本端**不丢**其它端点（本机线路全部保留，见 [normalizedEndpoints]），
+     * 因此这份汇总是给用户对照用的信息（"对面还会看到哪些线路没同步"），不代表本端删了线路。
+     */
+    val endpointSummary: SourceSyncEndpointSummary? = null,
+    /** W6-72：本轮是否把真正写入的条目并进了对端基线。 */
+    val baselineSaved: Boolean = false,
+    /** W6-72：基线拒绝的条目（合并不让条目倒退）。 */
+    val baselineRejectedSyncSourceIds: List<String> = emptyList(),
+    /** W6-72：基线被拒/写失败时的稳定码。 */
+    val baselineRejectionReason: String? = null,
     /** 非空表示整份信封没被读入（解析或版本校验失败），四个桶必为 0。 */
     val rejectedReason: String? = null,
     val rejectedMessage: String? = null,

@@ -64,6 +64,22 @@ object SourceSyncImportCopy {
             "扩展名只是提示，真正的依据是文件内容：旧的 .mhsync 归档同样能选。" +
             "预览不会写入任何数据。"
 
+    /**
+     * W6-72：信封里有多个端点、但只有主端点会被对端按「主端点优先」策略采用时的说明。
+     *
+     * 本端不删线路（全量保留），这句话讲的是「对面这次只认了主地址」，避免用户以为同步丢了线路。
+     */
+    fun notImportedEndpoints(summary: SourceSyncApplySummary): String =
+        "另有 " + summary.notImportedEndpointCount + " 条次要线路未参与同步（" +
+            summary.recordsWithAlternativeEndpoints + " 个来源有多条线路；本机线路一条未删）。"
+
+    /** W6-72：本轮写进去的条目已并进该对端基线（下一轮只传差异）。 */
+    const val BASELINE_SAVED: String = "已记入该对端的同步基线：下一轮只传变化的来源。"
+
+    /** W6-72：基线拒绝的条目（合并不许让条目倒退，通常是本地/远端修订号交叉）。 */
+    fun baselineRejected(count: Int): String =
+        "有 " + count + " 条没能记入基线（修订号比已有记录旧或同号不同内容）；导入结果不受影响。"
+
     /** 桶标题（四桶固定顺序）。 */
     fun titleOf(bucket: SourceSyncImportBucket): String = when (bucket) {
         SourceSyncImportBucket.APPLY -> "可导入"

@@ -168,6 +168,14 @@ jobs:
           #   feature.settings.pairing.PairingLinkPeerTest —— 配对页「对端身份」比对与登记（W6-71：卡片只读比对不写盘、
           #     显式登记才写、写的是卡片里的稳定指纹而非邀请里的临时证书指纹、指纹不符绝不覆盖已钉指纹、
           #     没卡片/没登记簿/拉取失败都只算「这次记不住对端」不把已校验的邀请变红、挑战与原始链接不外泄）
+          #   core.common.sync.SourceSyncBaselineContractTest —— 同步基线的跨端契约（W6-72：内容哈希的规范 JSON 与 Windows
+          #        Utf8JsonWriter 逐字节相同、基线编解码字节逐字节相同、12 条读失败码同名同序、合并拒绝倒退且不改内容、
+          #        in-memory 与文件存储的文档字节/隔离行为一致；黄金向量由 Windows 实现生成，Kotlin 逐条比对）
+          #   core.database.sync.SourceSyncBaselineWiringTest —— 基线接进唯一写库入口（W6-72：只有真正写入本机的条目
+          #        才进对端基线、零写入的一轮不碰存储、坏存储只让 baselineSaved=false 绝不让导入失败、被拒的旧修订号
+          #        如实回报、次要线路只上报不删除、没有基线存储时行为退回 W6-71）
+          #   feature.settings.sync.SourceSyncImportSessionEndpointTest —— 导入结果里的两条事实（W6-72：未参与同步的次要
+          #        线路条数与涉及来源数、基线已记/被拒的计数与原因，都从服务结果如实透到结果摘要，不隐藏）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -223,6 +231,9 @@ jobs:
             --required-suite com.mediahub.core.common.pairing.PairedDeviceContractTest \
             --required-suite com.mediahub.feature.settings.paired.PairedDeviceControllerTest \
             --required-suite com.mediahub.feature.settings.pairing.PairingLinkPeerTest \
+          --required-suite com.mediahub.core.common.sync.SourceSyncBaselineContractTest \
+          --required-suite com.mediahub.core.database.sync.SourceSyncBaselineWiringTest \
+          --required-suite com.mediahub.feature.settings.sync.SourceSyncImportSessionEndpointTest \
             --require-complete-suites
 
       - name: Lint

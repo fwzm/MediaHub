@@ -1,0 +1,479 @@
+package com.mediahub.core.common.sync
+
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.File
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.security.MessageDigest
+import java.util.Base64
+
+/**
+ * 同步基线（W6-72）的跨语言契约：内容哈希的规范 JSON、基线序列化字节、编解码判定序、
+ * 合并语义、内存/文件存储、端点策略。
+ *
+ * 所有期望值都来自 Windows 权威实现跑出的黄金向量 baseline-vectors.json，不手写期望：
+ * 同一份 JSON 也由 C# 的 BaselineContractTests 消费，任一端偏离都会有一套红。
+ */
+class SourceSyncBaselineContractTest {
+
+    private val root: JsonObject = Json.parseToJsonElement(readResource()).jsonObject
+
+    private fun readResource(): String {
+        val stream = javaClass.getResourceAsStream(RESOURCE_PATH)
+        requireNotNull(stream) { "找不到同步基线黄金向量资源 " + RESOURCE_PATH }
+        return stream.use { String(it.readBytes(), StandardCharsets.UTF_8) }
+    }
+
+    private fun entries(name: String): List<JsonObject> = root.getValue(name).jsonArray.map { it.jsonObject }
+
+    private fun text(element: JsonElement): String = element.jsonPrimitive.content
+
+    private fun nullableText(element: JsonElement?): String? {
+        if (element == null) return null
+        if (element is JsonNull) return null
+        return element.jsonPrimitive.content
+    }
+
+    private fun text(entry: JsonObject, name: String): String = text(entry.getValue(name))
+
+    private fun nullableText(entry: JsonObject, name: String): String? = nullableText(entry[name])
+
+    private fun boolean(entry: JsonObject, name: String): Boolean = text(entry, name) == "true"
+
+    private fun int(entry: JsonObject, name: String): Int = text(entry, name).toInt()
+
+    private fun long(entry: JsonObject, name: String): Long = text(entry, name).toLong()
+
+    private fun endpointOf(element: JsonElement): SourceEndpoint {
+        val entry = element.jsonObject
+        return SourceEndpoint(
+            url = text(entry, "url"),
+            isPrimary = boolean(entry, "isPrimary"),
+            enabled = boolean(entry, "enabled"),
+            sortOrder = int(entry, "sortOrder"),
+        )
+    }
+
+    private fun recordOf(element: JsonElement): SourceRecord {
+        val entry = element.jsonObject
+        return SourceRecord(
+            syncSourceId = text(entry, "syncSourceId"),
+            sourceType = SyncSourceTypeValue.parse(text(entry, "sourceTypeRaw")),
+            displayName = text(entry, "displayName"),
+            accountScope = nullableText(entry, "accountScope"),
+            endpoints = entry.getValue("endpoints").jsonArray.map { endpointOf(it) },
+            recordRevision = long(entry, "recordRevision"),
+            fieldVersion = int(entry, "fieldVersion"),
+        )
+    }
+
+    private fun recordsOf(element: JsonElement?): List<SourceRecord> {
+        if (element == null || element is JsonNull) return emptyList()
+        return element.jsonArray.map { recordOf(it) }
+    }
+
+    private fun entryOf(element: JsonElement): SourceSyncBaselineEntry {
+        val entry = element.jsonObject
+        return SourceSyncBaselineEntry(
+            syncSourceId = text(entry, "syncSourceId"),
+            recordRevision = long(entry, "recordRevision"),
+            fieldVersion = int(entry, "fieldVersion"),
+            contentHash = text(entry, "contentHash"),
+            fieldHashes = entry.getValue("fieldHashes").jsonObject.mapValues { text(it.value) },
+        )
+    }
+
+    private fun baselineOf(element: JsonElement): SourceSyncBaseline {
+        val entry = element.jsonObject
+        return SourceSyncBaseline(
+            version = int(entry, "version"),
+            deviceId = nullableText(entry, "deviceId"),
+            snapshotId = nullableText(entry, "snapshotId"),
+            entries = entry.getValue("entries").jsonArray.map { entryOf(it) },
+        )
+    }
+
+    private fun sha256(bytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+        val builder = StringBuilder(digest.size * 2)
+        for (byte in digest) {
+            val value = byte.toInt() and 0xFF
+            builder.append(HEX_LOWER[value ushr 4]).append(HEX_LOWER[value and 0x0F])
+        }
+        return builder.toString()
+    }
+
+    private fun withTempDirectory(block: (File) -> Unit) {
+        val directory = Files.createTempDirectory("mh-sync-baseline-").toFile()
+        try {
+            block(directory)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    // ------------------------------------------------------------ 常量与码表
+
+    @Test
+    fun constants_and_reason_codes_match_the_windows_contract() {
+        val constants = root.getValue("constants").jsonObject
+        assertEquals(
+            "contentHashFields",
+            constants.getValue("contentHashFields").jsonArray.map { text(it) },
+            SourceSyncContentHash.FIELDS,
+        )
+        assertEquals("baselineCurrentVersion", int(constants, "baselineCurrentVersion"), SourceSyncBaseline.CURRENT_VERSION)
+        assertEquals("codecSchemaVersion", int(constants, "codecSchemaVersion"), SourceSyncBaselineCodec.CURRENT_SCHEMA_VERSION)
+        assertEquals("codecMaxEntries", int(constants, "codecMaxEntries"), SourceSyncBaselineCodec.MAX_ENTRIES)
+        assertEquals("codecMaxFieldHashes", int(constants, "codecMaxFieldHashes"), SourceSyncBaselineCodec.MAX_FIELD_HASHES)
+        assertEquals("codecMaxDepth", int(constants, "codecMaxDepth"), SourceSyncBaselineCodec.MAX_DEPTH)
+        assertEquals("codecMaxDocumentChars", long(constants, "codecMaxDocumentChars"), SourceSyncBaselineCodec.MAX_DOCUMENT_CHARS)
+        assertEquals("fileDocumentVersion", int(constants, "fileDocumentVersion"), FileSourceSyncBaselineStore.CURRENT_DOCUMENT_VERSION)
+        assertEquals("fileMaxPeers", int(constants, "fileMaxPeers"), FileSourceSyncBaselineStore.MAX_PEERS)
+        assertEquals("fileMaxDocumentChars", long(constants, "fileMaxDocumentChars"), FileSourceSyncBaselineStore.MAX_DOCUMENT_CHARS)
+        assertEquals("fileName", text(constants, "fileName"), FileSourceSyncBaselineStore.FILE_NAME)
+        assertEquals("corruptPrefix", text(constants, "corruptPrefix"), FileSourceSyncBaselineStore.CORRUPT_PREFIX)
+
+        val reasons = root.getValue("reasons").jsonObject
+        assertEquals(
+            "codec reasons",
+            reasons.getValue("codec").jsonArray.map { text(it) },
+            listOf(
+                SourceSyncBaselineCodecReasons.MALFORMED_JSON,
+                SourceSyncBaselineCodecReasons.TOO_LARGE,
+                SourceSyncBaselineCodecReasons.TOO_DEEP,
+            ),
+        )
+        assertEquals(
+            "store reasons",
+            reasons.getValue("store").jsonArray.map { text(it) },
+            listOf(
+                SourceSyncBaselineStoreReasons.STALE_REVISION,
+                SourceSyncBaselineStoreReasons.UNRESOLVED_CONFLICT,
+                SourceSyncBaselineStoreReasons.STORE_UNREADABLE,
+                SourceSyncBaselineStoreReasons.WRITE_FAILED,
+            ),
+        )
+        assertEquals(
+            "endpoint reasons",
+            reasons.getValue("endpoint").jsonArray.map { text(it) },
+            listOf(SourceSyncEndpointPolicyReasons.SECONDARY_NOT_IMPORTED),
+        )
+    }
+
+    // ------------------------------------------------------------ 内容哈希
+
+    @Test
+    fun content_hash_cases_match_the_windows_contract() {
+        val cases = entries("contentHashCases")
+        assertEquals("contentHashCases 条数", 11, cases.size)
+        for (entry in cases) {
+            val name = text(entry, "name")
+            val record = recordOf(entry.getValue("record"))
+            assertEquals(name + " (canonical)", text(entry, "canonical"), SourceSyncContentHash.canonicalize(record))
+            assertEquals(name + " (hash)", text(entry, "contentHash"), SourceSyncContentHash.compute(record))
+            val expectedFields = entry.getValue("fieldHashes").jsonObject.mapValues { text(it.value) }
+            assertEquals(name + " (field hashes)", expectedFields, SourceSyncContentHash.computeFields(record))
+        }
+    }
+
+    // ------------------------------------------------------------ 基线构造
+
+    @Test
+    fun baseline_from_records_and_envelope_cases_match_the_windows_contract() {
+        for (entry in entries("baselineCases")) {
+            val name = text(entry, "name")
+            val expectedJson = entry.getValue("baseline").jsonObject
+            val expected = baselineOf(expectedJson)
+            val expectedEmpty = boolean(expectedJson, "isEmpty")
+            when (text(entry, "source")) {
+                "records" -> {
+                    val produced = SourceSyncBaseline.fromRecords(
+                        recordsOf(entry["records"]),
+                        nullableText(entry, "deviceId"),
+                        nullableText(entry, "snapshotId"),
+                    )
+                    assertEquals(name, expected, produced)
+                    assertEquals(name + " (isEmpty)", expectedEmpty, produced.isEmpty)
+                }
+                "envelope" -> {
+                    val envelope = SourceSyncEnvelope(
+                        deviceId = nullableText(entry, "deviceId") ?: "",
+                        snapshotId = nullableText(entry, "snapshotId") ?: "",
+                        sources = recordsOf(entry["records"]),
+                    )
+                    val produced = SourceSyncBaseline.fromEnvelope(envelope)
+                    assertEquals(name, expected, produced)
+                    assertEquals(name + " (isEmpty)", expectedEmpty, produced.isEmpty)
+                }
+                "empty" -> {
+                    assertEquals(name, expected, SourceSyncBaseline.EMPTY)
+                    assertEquals(name + " (isEmpty)", expectedEmpty, SourceSyncBaseline.EMPTY.isEmpty)
+                }
+                "advance" -> Unit // advance 依赖 SourceSyncDigest，Android 侧没有该类型，由 C# 孪生用例覆盖
+                else -> error("未知来源 " + text(entry, "source"))
+            }
+        }
+    }
+
+    @Test
+    fun find_cases_match_the_windows_contract() {
+        val baseline = SourceSyncBaseline.fromRecords(
+            listOf(
+                record("find-a", "A", 1),
+                record("find-b", "B", 2),
+            ),
+        )
+        for (entry in entries("findCases")) {
+            val key = nullableText(entry, "key")
+            val found = baseline.find(key)
+            assertEquals(key ?: "null", boolean(entry, "found"), found != null)
+            if (boolean(entry, "found")) {
+                assertEquals(key ?: "null", text(entry, "syncSourceId"), found?.syncSourceId)
+                assertEquals(key ?: "null", long(entry, "recordRevision"), found?.recordRevision)
+            } else {
+                assertNull(key ?: "null", found)
+            }
+        }
+    }
+
+    private fun record(syncSourceId: String, displayName: String, recordRevision: Long): SourceRecord =
+        SourceRecord(
+            syncSourceId = syncSourceId,
+            sourceType = SyncSourceTypeValue.parse("webdav"),
+            displayName = displayName,
+            recordRevision = recordRevision,
+            fieldVersion = 1,
+        )
+
+    // ------------------------------------------------------------ 编解码：写
+
+    @Test
+    fun codec_write_cases_match_the_windows_contract_byte_for_byte() {
+        for (entry in entries("codecWriteCases")) {
+            val name = text(entry, "name")
+            val baseline = baselineOf(entry.getValue("baseline"))
+            val indented = SourceSyncBaselineCodec.serialize(baseline)
+            val indentedBytes = SourceSyncBaselineCodec.serializeToBytes(baseline)
+            val compact = SourceSyncBaselineCodec.serialize(baseline, indented = false)
+            val compactBytes = SourceSyncBaselineCodec.serializeToBytes(baseline, indented = false)
+            assertEquals(name + " (indented text)", text(entry, "indentedText"), indented)
+            assertEquals(name + " (indented base64)", text(entry, "indentedBase64"), Base64.getEncoder().encodeToString(indentedBytes))
+            assertEquals(name + " (indented bytes)", int(entry, "indentedByteLength"), indentedBytes.size)
+            assertEquals(name + " (indented sha256)", text(entry, "indentedSha256"), sha256(indentedBytes))
+            assertEquals(name + " (compact text)", text(entry, "compactText"), compact)
+            assertEquals(name + " (compact base64)", text(entry, "compactBase64"), Base64.getEncoder().encodeToString(compactBytes))
+            assertEquals(name + " (compact bytes)", int(entry, "compactByteLength"), compactBytes.size)
+            assertEquals(name + " (compact sha256)", text(entry, "compactSha256"), sha256(compactBytes))
+            assertEquals(name + " (has CR)", boolean(entry, "indentedHasCarriageReturn"), indented.contains(13.toChar()))
+            assertEquals(name + " (ends with newline)", boolean(entry, "indentedEndsWithNewline"), indented.endsWith(10.toChar()))
+        }
+    }
+
+    // ------------------------------------------------------------ 编解码：读
+
+    @Test
+    fun codec_load_cases_match_the_windows_contract() {
+        for (entry in entries("codecLoadCases")) {
+            val name = text(entry, "name")
+            val json = nullableText(entry, "json")
+            val expectedError = nullableText(entry, "error")
+            val result = SourceSyncBaselineCodec.tryDeserialize(json)
+            if (boolean(entry, "ok")) {
+                assertTrue(name + " 应成功", result is SourceSyncBaselineCodec.DecodeResult.Ok)
+                val ok = result as SourceSyncBaselineCodec.DecodeResult.Ok
+                assertEquals(name + " (ignored)", int(entry, "ignoredFieldCount"), ok.ignoredFieldCount)
+                assertEquals(name + " (baseline)", baselineOf(entry.getValue("baseline")), ok.baseline)
+            } else {
+                assertTrue(name + " 应失败", result is SourceSyncBaselineCodec.DecodeResult.Failed)
+                val failed = result as SourceSyncBaselineCodec.DecodeResult.Failed
+                assertEquals(name + " (reason)", expectedError, failed.reason)
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ 合并
+
+    @Test
+    fun merge_cases_match_the_windows_contract() {
+        for (entry in entries("mergeCases")) {
+            val name = text(entry, "name")
+            val existing = entry["existing"]?.takeIf { it !is JsonNull }?.let { baselineOf(it) }
+            val incoming = entry["incoming"]?.takeIf { it !is JsonNull }?.let { baselineOf(it) }
+            val result = SourceSyncBaselineMerge.merge(existing, incoming)
+            assertEquals(name + " (changed)", boolean(entry, "changed"), result.changed)
+            assertEquals(name + " (reason)", nullableText(entry, "reason"), result.reason)
+            assertEquals(
+                name + " (rejected)",
+                entry.getValue("rejectedSyncSourceIds").jsonArray.map { text(it) },
+                result.rejectedSyncSourceIds,
+            )
+            assertEquals(name + " (merged)", baselineOf(entry.getValue("merged")), result.merged)
+        }
+    }
+
+    // ------------------------------------------------------------ 内存存储
+
+    @Test
+    fun in_memory_store_cases_match_the_windows_contract() {
+        val store = InMemorySourceSyncBaselineStore()
+        for (entry in entries("inMemoryCases")) {
+            val name = text(entry, "name")
+            if (name == "final-state") {
+                assertEquals("final-state (writeCount)", int(entry, "writeCount"), store.writeCount)
+                assertEquals("final-state (knownPeers)", entry.getValue("knownPeers").jsonArray.map { text(it) }, store.knownPeerDeviceIds)
+                assertEquals("final-state (peerA)", baselineOf(entry.getValue("peerA")), store.load("peer-a"))
+                assertEquals("final-state (peerB)", baselineOf(entry.getValue("peerB")), store.load("peer-b"))
+                continue
+            }
+            if (name == "load-unknown") {
+                assertEquals("load-unknown (isEmpty)", boolean(entry, "isEmpty"), store.load(text(entry, "peerDeviceId")).isEmpty)
+                assertEquals("load-unknown (writeCount)", int(entry, "writeCount"), store.writeCount)
+                assertEquals("load-unknown (knownPeers)", entry.getValue("knownPeers").jsonArray.map { text(it) }, store.knownPeerDeviceIds)
+                continue
+            }
+            val result = store.save(text(entry, "peerDeviceId"), baselineOf(entry.getValue("baseline")))
+            assertEquals(name + " (saved)", boolean(entry, "saved"), result.saved)
+            assertEquals(name + " (unchanged)", boolean(entry, "unchanged"), result.unchanged)
+            assertEquals(
+                name + " (rejected)",
+                entry.getValue("rejectedSyncSourceIds").jsonArray.map { text(it) },
+                result.rejectedSyncSourceIds,
+            )
+            assertEquals(name + " (reason)", nullableText(entry, "reason"), result.reason)
+            assertEquals(name + " (writeCount)", int(entry, "writeCount"), store.writeCount)
+        }
+    }
+
+    // ------------------------------------------------------------ 文件存储：文档字节
+
+    @Test
+    fun file_store_document_cases_match_the_windows_contract_byte_for_byte() {
+        for (entry in entries("fileDocumentCases")) {
+            val name = text(entry, "name")
+            withTempDirectory { directory ->
+                val store = FileSourceSyncBaselineStore(directory)
+                for (write in entry.getValue("writes").jsonArray.map { it.jsonObject }) {
+                    store.save(text(write, "peerDeviceId"), baselineOf(write.getValue("baseline")))
+                }
+                val bytes = File(store.filePath).readBytes()
+                assertEquals(name + " (fileName)", text(entry, "fileName"), File(store.filePath).name)
+                assertEquals(name + " (base64)", text(entry, "base64"), Base64.getEncoder().encodeToString(bytes))
+                assertEquals(name + " (text)", text(entry, "text"), String(bytes, StandardCharsets.UTF_8))
+                assertEquals(name + " (bytes)", int(entry, "byteLength"), bytes.size)
+                assertEquals(name + " (sha256)", text(entry, "sha256"), sha256(bytes))
+                assertEquals(name + " (has CR)", boolean(entry, "hasCarriageReturn"), String(bytes, StandardCharsets.UTF_8).contains(13.toChar()))
+                assertEquals(name + " (writeCount)", int(entry, "writeCount"), store.writeCount)
+                assertEquals(name + " (peers)", entry.getValue("peerDeviceIds").jsonArray.map { text(it) }, store.peerDeviceIds)
+                assertEquals(name + " (backup)", boolean(entry, "backupExists"), File(store.backupPath).exists())
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ 文件存储：加载与隔离
+
+    @Test
+    fun file_store_load_cases_match_the_windows_contract() {
+        for (entry in entries("fileLoadCases")) {
+            val name = text(entry, "name")
+            val content = nullableText(entry, "content")
+            withTempDirectory { directory ->
+                if (content != null) {
+                    File(directory, FileSourceSyncBaselineStore.FILE_NAME).writeText(content, StandardCharsets.UTF_8)
+                }
+                val store = FileSourceSyncBaselineStore(directory)
+                val loaded = store.load("p-b")
+                val corrupt = directory.listFiles()?.filter {
+                    it.name.startsWith(FileSourceSyncBaselineStore.CORRUPT_PREFIX)
+                } ?: emptyList()
+                assertEquals(name + " (loadError)", nullableText(entry, "loadError"), store.loadError)
+                assertEquals(name + " (peers)", entry.getValue("peerDeviceIds").jsonArray.map { text(it) }, store.peerDeviceIds)
+                assertEquals(name + " (peerB)", baselineOf(entry.getValue("peerB")), loaded)
+                assertEquals(name + " (peerA)", baselineOf(entry.getValue("peerA")), store.load("p-a"))
+                assertEquals(name + " (corruptCount)", int(entry, "corruptFileCount"), corrupt.size)
+                assertEquals(name + " (quarantined)", boolean(entry, "quarantined"), store.lastQuarantinedPath != null)
+                assertEquals(name + " (fileExists)", boolean(entry, "fileStillExists"), File(store.filePath).exists())
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ 端点策略
+
+    @Test
+    fun endpoint_policy_cases_match_the_windows_contract() {
+        for (entry in entries("endpointPolicyCases")) {
+            val name = text(entry, "name")
+            val endpoints = entry.getValue("endpoints").jsonArray.map { endpointOf(it) }
+            val record = SourceRecord(
+                syncSourceId = "ep-" + name,
+                sourceType = SyncSourceTypeValue.parse("webdav"),
+                displayName = "Endpoints",
+                endpoints = endpoints,
+                recordRevision = 1,
+                fieldVersion = 1,
+            )
+            val primary = SourceSyncEndpointPolicy.selectPrimary(record)
+            assertEquals(name + " (primary url)", nullableText(entry, "primaryUrl"), primary?.url)
+            assertEquals(name + " (primary sortOrder)", nullableText(entry, "primarySortOrder")?.toInt(), primary?.sortOrder)
+            val notImported = SourceSyncEndpointPolicy.notImported(record)
+            val expectedCount = int(entry, "notImportedCount")
+            assertEquals(name + " (count)", expectedCount, notImported.size)
+            val expected = entry.getValue("notImported").jsonArray.map { it.jsonObject }
+            for (index in expected.indices) {
+                val want = expected[index]
+                val actual = notImported[index]
+                val label = name + "[" + index + "]"
+                assertEquals(label + " (id)", text(want, "syncSourceId"), actual.syncSourceId)
+                assertEquals(label + " (name)", text(want, "displayName"), actual.displayName)
+                assertEquals(label + " (url)", text(want, "url"), actual.url)
+                assertEquals(label + " (normalized)", nullableText(want, "normalizedUrl"), actual.normalizedUrl)
+                assertEquals(label + " (sortOrder)", int(want, "sortOrder"), actual.sortOrder)
+                assertEquals(label + " (isPrimary)", boolean(want, "isPrimary"), actual.isPrimary)
+                assertEquals(label + " (enabled)", boolean(want, "enabled"), actual.enabled)
+                assertEquals(label + " (reason)", text(want, "reason"), actual.reason)
+            }
+        }
+    }
+
+    @Test
+    fun endpoint_summary_cases_match_the_windows_contract() {
+        for (entry in entries("endpointSummaryCases")) {
+            val name = text(entry, "name")
+            val sources = recordsOf(entry["sources"])
+            val envelope = SourceSyncEnvelope(deviceId = "dev", snapshotId = "snap", sources = sources)
+            val summary = SourceSyncEndpointPolicy.summarize(envelope)
+            assertEquals(name + " (count)", int(entry, "notImportedCount"), summary.notImportedCount)
+            assertEquals(name + " (alternatives)", int(entry, "recordsWithAlternatives"), summary.recordsWithAlternatives)
+            assertEquals(name + " (without)", int(entry, "recordsWithoutEndpoint"), summary.recordsWithoutEndpoint)
+            assertEquals(name + " (isEmpty)", boolean(entry, "isEmpty"), summary.isEmpty)
+            val expected = entry.getValue("items").jsonArray.map { it.jsonObject }
+            assertEquals(name + " (items 条数)", expected.size, summary.items.size)
+            for (index in expected.indices) {
+                val want = expected[index]
+                val actual = summary.items[index]
+                val label = name + "[" + index + "]"
+                assertEquals(label + " (id)", text(want, "syncSourceId"), actual.syncSourceId)
+                assertEquals(label + " (url)", text(want, "url"), actual.url)
+                if (want.containsKey("normalizedUrl")) {
+                    assertEquals(label + " (normalized)", nullableText(want, "normalizedUrl"), actual.normalizedUrl)
+                }
+                assertEquals(label + " (isPrimary)", boolean(want, "isPrimary"), actual.isPrimary)
+            }
+        }
+    }
+
+    private companion object {
+        private const val RESOURCE_PATH = "/sync/baseline-vectors.json"
+        private const val HEX_LOWER = "0123456789abcdef"
+    }
+}

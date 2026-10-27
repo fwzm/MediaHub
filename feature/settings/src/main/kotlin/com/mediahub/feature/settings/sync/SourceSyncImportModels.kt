@@ -176,6 +176,18 @@ data class SourceSyncApplySummary(
 
     /** 真正写入的每一条来源（按结果顺序）；结果页据此渲染「补录并验证」入口。 */
     val appliedSources: List<SourceSyncAppliedSource> = emptyList(),
+
+    /** W6-72：信封里被判为「次要端点、不参与同步」的条数（0 表示没有多端点来源）。 */
+    val notImportedEndpointCount: Int = 0,
+
+    /** W6-72：有多个端点的来源条数（用来区分「没多端点」与「有多端点但一条都没漏」）。 */
+    val recordsWithAlternativeEndpoints: Int = 0,
+
+    /** W6-72：本轮是否把真正写入的条目并进了对端基线。 */
+    val baselineSaved: Boolean = false,
+
+    /** W6-72：基线拒绝的条目数（合并不让条目倒退）。 */
+    val baselineRejectedCount: Int = 0,
 ) {
     val totalCount: Int
         get() = appliedCount + requiresApprovalCount + ignoredCount + failedCount

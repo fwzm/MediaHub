@@ -3,6 +3,7 @@ package com.mediahub.feature.settings.sync
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.ClientIdentity
+import com.mediahub.core.common.sync.ISourceSyncBaselineStore
 import com.mediahub.core.common.sync.AndroidSourceTypeMap
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.database.sync.AndroidSourceSyncService
@@ -41,12 +42,14 @@ class SourceSyncImportViewModel @Inject constructor(
     credentialVault: CredentialVault,
     providerRegistry: MediaProviderRegistry,
     backupFileStore: BackupFileStore,
+    baselineStore: ISourceSyncBaselineStore,
 ) : ViewModel() {
 
     private val session = SourceSyncImportSession.production(
         localSources = serverRepository,
         sourceSyncStore = serverRepository,
         deviceId = clientIdentity.deviceId,
+        baselineStore = baselineStore,
     )
 
     private val verification = SourceVerificationCoordinator(
