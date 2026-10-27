@@ -31,7 +31,8 @@
 - 最终 `bash-kfb4v6ms` 完整强制门禁 exit 0 / BUILD SUCCESSFUL：1213 actionable tasks / 1213 executed / 47m8s；295 XML suites / **2734 tests / 0 failures / 0 errors / 23 skips**。
 - `assembleDebug`、`lintDebug`、`app:assembleDebugAndroidTest` 均在该次完整命令内成功；22 份 lint XML / 0 errors / 125 warnings（未宣称零警告）。
 - 最终 Debug APK SHA-256：`11dd22d4a717a9c6268dae2037016850149cedd59e45f45884213808ff1fd6f0`。日志：`D:/deepseek_test/mh-cinematic-evidence/cinematic-release-gate.log`。
-- 发布提交、Draft PR 与 exact-head CI 待下一步完成；本地 JVM/构建通过不等于真机 instrumentation 通过。
+- 发布提交：`eda3e525f5e47b3970f6c2b82dee54a28008a9d0`；已普通 push `feature/cinematic-ui` 并创建 [Draft PR #73](https://github.com/fwzm/MediaHub/pull/73)（base=main，未合并）。
+- 新 head 已触发 Android CI `40525066312`、windows-ci `40525066278`、Sync utility safety `40525066379`；当前 CI_PENDING，待实际结果。真机 instrumentation 仍 BLOCKED_ENV。
 
 ## Rules and next steps
 
