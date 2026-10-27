@@ -599,7 +599,7 @@
         "sourceCount": 3
       },
       "nowEpochMs": 1792800000000,
-      "describe": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09 \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u8FD1\u914D\u5BF9 2026-10-24 08:00 \u00B7 \u6765\u6E90 3 \u4E2A"
+      "describe": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09 \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u8FD1\u914D\u5BF9 {lastSeen} \u00B7 \u6765\u6E90 3 \u4E2A"
     },
     {
       "name": "peer-clock-ahead",
@@ -638,10 +638,10 @@
           "displayName": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09",
           "fingerprintLabel": "\u6307\u7EB9 \u2026aaaaaaaa",
           "pairedLabel": "\u9996\u6B21\u914D\u5BF9 \u672A\u77E5",
-          "lastSeenLabel": "\u6700\u540E\u76F8\u89C1 2026-10-24 08:00",
+          "lastSeenLabel": "\u6700\u540E\u76F8\u89C1 {lastSeen}",
           "sourceLabel": "3 \u4E2A\u6765\u6E90",
-          "summaryLine": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09 \u00B7 \u6307\u7EB9 \u2026aaaaaaaa \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 2026-10-24 08:00 \u00B7 3 \u4E2A\u6765\u6E90",
-          "detailLine": "\u6307\u7EB9 \u2026aaaaaaaa \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 2026-10-24 08:00 \u00B7 3 \u4E2A\u6765\u6E90",
+          "summaryLine": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09 \u00B7 \u6307\u7EB9 \u2026aaaaaaaa \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 3 \u4E2A\u6765\u6E90",
+          "detailLine": "\u6307\u7EB9 \u2026aaaaaaaa \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 3 \u4E2A\u6765\u6E90",
           "forgetLabel": "\u5FD8\u8BB0 \u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09",
           "lastSeenEpochMs": 1792800000000
         },
@@ -650,10 +650,10 @@
           "displayName": "abc",
           "fingerprintLabel": "\u6307\u7EB9 \u2026bbbbbbbb",
           "pairedLabel": "\u9996\u6B21\u914D\u5BF9 \u672A\u77E5",
-          "lastSeenLabel": "\u6700\u540E\u76F8\u89C1 2026-10-24 08:00",
+          "lastSeenLabel": "\u6700\u540E\u76F8\u89C1 {lastSeen}",
           "sourceLabel": "0 \u4E2A\u6765\u6E90",
-          "summaryLine": "abc \u00B7 \u6307\u7EB9 \u2026bbbbbbbb \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 2026-10-24 08:00 \u00B7 0 \u4E2A\u6765\u6E90",
-          "detailLine": "\u6307\u7EB9 \u2026bbbbbbbb \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 2026-10-24 08:00 \u00B7 0 \u4E2A\u6765\u6E90",
+          "summaryLine": "abc \u00B7 \u6307\u7EB9 \u2026bbbbbbbb \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 0 \u4E2A\u6765\u6E90",
+          "detailLine": "\u6307\u7EB9 \u2026bbbbbbbb \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 0 \u4E2A\u6765\u6E90",
           "forgetLabel": "\u5FD8\u8BB0 abc",
           "lastSeenEpochMs": 1792800000000
         }
@@ -675,10 +675,10 @@
           "displayName": "device-a",
           "fingerprintLabel": "\u6307\u7EB9 \u2026aaaaaaaa",
           "pairedLabel": "\u9996\u6B21\u914D\u5BF9 \u672A\u77E5",
-          "lastSeenLabel": "\u6700\u540E\u76F8\u89C1 2026-10-24 08:00",
+          "lastSeenLabel": "\u6700\u540E\u76F8\u89C1 {lastSeen}",
           "sourceLabel": "0 \u4E2A\u6765\u6E90",
-          "summaryLine": "device-a \u00B7 \u6307\u7EB9 \u2026aaaaaaaa \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 2026-10-24 08:00 \u00B7 0 \u4E2A\u6765\u6E90",
-          "detailLine": "\u6307\u7EB9 \u2026aaaaaaaa \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 2026-10-24 08:00 \u00B7 0 \u4E2A\u6765\u6E90",
+          "summaryLine": "device-a \u00B7 \u6307\u7EB9 \u2026aaaaaaaa \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 0 \u4E2A\u6765\u6E90",
+          "detailLine": "\u6307\u7EB9 \u2026aaaaaaaa \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 0 \u4E2A\u6765\u6E90",
           "forgetLabel": "\u5FD8\u8BB0 device-a",
           "lastSeenEpochMs": 1792800000000
         },
@@ -687,10 +687,10 @@
           "displayName": "device-b",
           "fingerprintLabel": "\u6307\u7EB9 \u2026bbbbbbbb",
           "pairedLabel": "\u9996\u6B21\u914D\u5BF9 \u672A\u77E5",
-          "lastSeenLabel": "\u6700\u540E\u76F8\u89C1 2026-10-24 08:00",
+          "lastSeenLabel": "\u6700\u540E\u76F8\u89C1 {lastSeen}",
           "sourceLabel": "0 \u4E2A\u6765\u6E90",
-          "summaryLine": "device-b \u00B7 \u6307\u7EB9 \u2026bbbbbbbb \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 2026-10-24 08:00 \u00B7 0 \u4E2A\u6765\u6E90",
-          "detailLine": "\u6307\u7EB9 \u2026bbbbbbbb \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 2026-10-24 08:00 \u00B7 0 \u4E2A\u6765\u6E90",
+          "summaryLine": "device-b \u00B7 \u6307\u7EB9 \u2026bbbbbbbb \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 0 \u4E2A\u6765\u6E90",
+          "detailLine": "\u6307\u7EB9 \u2026bbbbbbbb \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 0 \u4E2A\u6765\u6E90",
           "forgetLabel": "\u5FD8\u8BB0 device-b",
           "lastSeenEpochMs": 1792800000000
         }

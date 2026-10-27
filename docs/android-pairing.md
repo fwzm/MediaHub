@@ -851,7 +851,7 @@ Android 侧 `core/` 与 `feature/` 的生产代码里 `PairedDevice` / `pairedDe
 | 测试 | `core/common/.../PairedDeviceContractTest.kt` | 14 例，逐条消费黄金向量 |
 | 测试 | `feature/settings/.../PairedDeviceControllerTest.kt` | 13 例（含生产路径真写盘） |
 | 测试 | `feature/settings/src/androidTest/.../PairedDeviceScreenTest.kt` | 9 例 Compose 断言 |
-| 向量 | `core/common/src/test/resources/pairing/paired-device-vectors.json` | 36670 B / 17 根键 / sha256 `4afe2032`…`55db8b` |
+| 向量 | `core/common/src/test/resources/pairing/paired-device-vectors.json` | 36592 B / 17 根键 / sha256 `4adc50d7`…`0f0e04e3`（时间字段用 `{pairedAt}`/`{lastSeen}` 占位符，见 15.9） |
 
 ### 15.3 数据模型与规范序
 
@@ -938,7 +938,7 @@ Android 侧 `core/` 与 `feature/` 的生产代码里 `PairedDevice` / `pairedDe
 
 ### 15.9 跨端契约证据
 
-黄金向量 `paired-device-vectors.json`（36670 B / 17 根键）由临时 net10.0 生成器 `D:/mh-verify/paired-device-vectors/Program.cs`（520 行，`ProjectReference` 指向权威 `MediaHub.Sync.csproj`）产出，两边逐字节同一份：
+黄金向量 `paired-device-vectors.json`（36592 B / 17 根键）由临时 net10.0 生成器 `D:/mh-verify/paired-device-vectors/Program.cs`（520 行，`ProjectReference` 指向权威 `MediaHub.Sync.csproj`）产出，两边逐字节同一份：
 
 `generator` / `windowsSource` / `frozenNowEpochMs`（1792800000000）/ `reasonCodes` / `storeReasonCodes` / `stateLabels` / `describeReasonCases` / `createCases` / `verifyCases` / `registerCases` / `capacityCases` / `forgetCases` / `describeCases` / `presenterCases` / `documentCases` / `loadCases` / `writeRejects`。
 
@@ -950,6 +950,9 @@ Android 侧 `core/` 与 `feature/` 的生产代码里 `PairedDevice` / `pairedDe
 - `documentCases`：同一份设备清单在两端写出的字节**长度、sha256、base64 全等**；
 - `loadCases`：畸形 / 版本不符 / 容量满 / 只读各自的降级路径；
 - `writeRejects`：空 deviceId、容量满的写入拒绝。
+
+**时间字段不钉本地字符串**：`describeCases` 与 `presenterCases` 里的「首次配对 / 最后相见 / 最近配对」原本写死了生成器所在机器（Asia/Shanghai）渲染出的 `yyyy-MM-dd HH:mm`，而 CI runner 是 UTC —— 同一 epoch 1792800000000 渲染成 `2026-10-24 08:00` 与 `2026-10-24 00:00` 两个串，windows-ci 与 Android 单元门禁因此各红 2 例（本地全绿，正是「本地绿 CI 红」的时区耦合）。
+产品语义保留「本地时区」渲染（用户看自己的钟），所以修的是契约而不是实现：向量里把时间串换成 `{pairedAt}` / `{lastSeen}` 占位符（共 13 处），用例按**本进程时区**用两端同一份 `FormatEpoch` / `formatEpoch` 展开后再断言。契约钉的是「标签 + 平台自己的本地渲染」，不再是某个固定时区的渲染结果。
 
 三条用例暴露的真缺陷：
 
@@ -969,6 +972,7 @@ Android 侧 `core/` 与 `feature/` 的生产代码里 `PairedDevice` / `pairedDe
 | `feature/settings` JVM | **24 套件 / 367 例 / 0 失败 / 0 跳过**（354 → 367，+13 控制器用例） |
 | `:feature:settings:assembleDebugAndroidTest` | **BUILD SUCCESSFUL**（+9 例 androidTest） |
 | C# `MediaHub.Tests`（W6 树） | **1628 通过 / 0 失败 / 0 跳过**（1614 → 1628，+14 契约用例），`dotnet test … -p:Platform=x64` |
+| 时区无关复验 | `JAVA_TOOL_OPTIONS=-Duser.timezone=UTC` + `--rerun-tasks`：Kotlin 契约 14 例全绿（日志 `17 actionable tasks: 17 executed`，确认非 up-to-date 假绿） |
 | `--required-suite` | **51 → 53**（+`PairedDeviceContractTest`、+`PairedDeviceControllerTest`）；`.github/scripts/tests` 54 例 OK |
 
 三模块是一条 gradle 命令串行跑的（BUILD SUCCESSFUL in 1m46s），全程没有并发 dotnet —— 这是 W6-49 那次 HotSpot `arena.cpp:168` 崩溃留下的硬纪律。

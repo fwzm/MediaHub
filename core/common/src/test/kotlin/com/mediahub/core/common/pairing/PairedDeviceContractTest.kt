@@ -59,6 +59,21 @@ class PairedDeviceContractTest {
         return element.jsonPrimitive.content
     }
 
+    /**
+     * 把向量里的两个本地时间占位符换成本进程时区的渲染结果。同一个 epoch 在 UTC 的 CI runner 与
+     * 作者机上渲染不同，所以契约钉的是「这个标签 + 平台自己的本地渲染」，其余字节仍然逐字钉死。
+     */
+    private fun expandTokens(text: String, device: PairedDevice): String {
+        var expanded = text
+        if (expanded.contains(PAIRED_AT_TOKEN)) {
+            expanded = expanded.replace(PAIRED_AT_TOKEN, PairedDevice.formatEpoch(device.pairedAtEpochMs))
+        }
+        if (expanded.contains(LAST_SEEN_TOKEN)) {
+            expanded = expanded.replace(LAST_SEEN_TOKEN, PairedDevice.formatEpoch(device.lastSeenEpochMs))
+        }
+        return expanded
+    }
+
     private fun boolOf(entry: JsonObject, name: String): Boolean = textOf(entry, name) == "true"
 
     private fun deviceOf(element: JsonElement): PairedDevice {
@@ -293,7 +308,7 @@ class PairedDeviceContractTest {
             assertEquals(name + " (describe via registry)", actual, PairedDeviceRegistry.describe(device, now))
             val expected = nullableTextOf(entry, "describe")
             if (expected != null) {
-                assertEquals(name + " (describe)", expected, actual)
+                assertEquals(name + " (describe)", expandTokens(expected, device), actual)
             }
             val suffix = nullableTextOf(entry, "describeSuffix")
             if (suffix != null) {
@@ -312,24 +327,24 @@ class PairedDeviceContractTest {
 
     @Test
     fun presenter_cases_match_the_windows_contract() {
+        val two = listOf(
+            PairedDevice.create("device-android-01", fingerprintA, "家庭 NAS（客厅）", frozenNow, 3, pairedAtEpochMs = 0L),
+            PairedDevice.create("abc", fingerprintB, "", frozenNow, 0, pairedAtEpochMs = 0L),
+        )
+        val full = listOf(
+            PairedDevice.create("device-a", fingerprintA, "", frozenNow, 0, pairedAtEpochMs = 0L),
+            PairedDevice.create("device-b", fingerprintB, "", frozenNow, 0, pairedAtEpochMs = 0L),
+        )
+        val devices = linkedMapOf<String, List<PairedDevice>>(
+            "empty" to emptyList(),
+            "two-devices" to two,
+            "full-at-two" to full,
+            "null-is-empty" to emptyList(),
+        )
         val produced = linkedMapOf<String, PairedDeviceListView>(
             "empty" to PairedDeviceListPresenter.build(emptyList(), PairedDeviceRegistry.DEFAULT_CAPACITY, frozenNow),
-            "two-devices" to PairedDeviceListPresenter.build(
-                listOf(
-                    PairedDevice.create("device-android-01", fingerprintA, "家庭 NAS（客厅）", frozenNow, 3, pairedAtEpochMs = 0L),
-                    PairedDevice.create("abc", fingerprintB, "", frozenNow, 0, pairedAtEpochMs = 0L),
-                ),
-                PairedDeviceRegistry.DEFAULT_CAPACITY,
-                frozenNow,
-            ),
-            "full-at-two" to PairedDeviceListPresenter.build(
-                listOf(
-                    PairedDevice.create("device-a", fingerprintA, "", frozenNow, 0, pairedAtEpochMs = 0L),
-                    PairedDevice.create("device-b", fingerprintB, "", frozenNow, 0, pairedAtEpochMs = 0L),
-                ),
-                2,
-                frozenNow,
-            ),
+            "two-devices" to PairedDeviceListPresenter.build(two, PairedDeviceRegistry.DEFAULT_CAPACITY, frozenNow),
+            "full-at-two" to PairedDeviceListPresenter.build(full, 2, frozenNow),
             "null-is-empty" to PairedDeviceListPresenter.build(null, 0, frozenNow),
         )
         for (entry in entries("presenterCases").map { it.jsonObject }) {
@@ -348,15 +363,16 @@ class PairedDeviceContractTest {
             for (index in expectedRows.indices) {
                 val expected = expectedRows[index]
                 val row = actual.rows[index]
+                val device = requireNotNull(devices[name]) { "未构造用例设备 " + name }[index]
                 val label = name + " row " + index
                 assertEquals(label + " (deviceId)", textOf(expected, "deviceId"), row.deviceId)
                 assertEquals(label + " (displayName)", textOf(expected, "displayName"), row.displayName)
                 assertEquals(label + " (fingerprintLabel)", textOf(expected, "fingerprintLabel"), row.fingerprintLabel)
-                assertEquals(label + " (pairedLabel)", textOf(expected, "pairedLabel"), row.pairedLabel)
-                assertEquals(label + " (lastSeenLabel)", textOf(expected, "lastSeenLabel"), row.lastSeenLabel)
+                assertEquals(label + " (pairedLabel)", expandTokens(textOf(expected, "pairedLabel"), device), row.pairedLabel)
+                assertEquals(label + " (lastSeenLabel)", expandTokens(textOf(expected, "lastSeenLabel"), device), row.lastSeenLabel)
                 assertEquals(label + " (sourceLabel)", textOf(expected, "sourceLabel"), row.sourceLabel)
-                assertEquals(label + " (summaryLine)", textOf(expected, "summaryLine"), row.summaryLine)
-                assertEquals(label + " (detailLine)", textOf(expected, "detailLine"), row.detailLine)
+                assertEquals(label + " (summaryLine)", expandTokens(textOf(expected, "summaryLine"), device), row.summaryLine)
+                assertEquals(label + " (detailLine)", expandTokens(textOf(expected, "detailLine"), device), row.detailLine)
                 assertEquals(label + " (forgetLabel)", textOf(expected, "forgetLabel"), row.forgetLabel)
                 assertEquals(label + " (lastSeenEpochMs)", expected.getValue("lastSeenEpochMs").jsonPrimitive.long, row.lastSeenEpochMs)
             }
@@ -442,5 +458,9 @@ class PairedDeviceContractTest {
     private companion object {
         const val RESOURCE_PATH: String = "/pairing/paired-device-vectors.json"
         const val HEX_LOWER: String = "0123456789abcdef"
+
+        /** 向量里的本地时间占位符：由用例按当前进程时区展开。 */
+        const val PAIRED_AT_TOKEN: String = "{pairedAt}"
+        const val LAST_SEEN_TOKEN: String = "{lastSeen}"
     }
 }
