@@ -5,6 +5,7 @@ import com.mediahub.core.common.sync.SourceSyncCandidate
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.database.repository.SyncSourceStore
 import com.mediahub.core.database.sync.AndroidSourceSyncService
+import com.mediahub.core.database.sync.SourceSyncSourceRemover
 import com.mediahub.core.database.sync.SourceSyncImportResult
 import com.mediahub.core.database.sync.SourceSyncPreview
 import com.mediahub.core.database.sync.SourceSyncPreviewService
@@ -210,15 +211,22 @@ class SourceSyncImportSession(
          * 生产接线：只读预览 + 唯一写库入口，两个服务都用本机仓库实现。
          *
          * [baselineStore] 是 W6-72 的对端基线（缺省 null：不记录，行为与 W6-71 完全一致）。
+         * [sourceRemover] 是 W6-79 的跨端删除能力（缺省 null：删除类条目只能拒绝并上报，行为与 W6-78 一致）。
          */
         fun production(
             localSources: SyncSourceStore,
             sourceSyncStore: SourceSyncStore,
             deviceId: String,
             baselineStore: ISourceSyncBaselineStore? = null,
+            sourceRemover: SourceSyncSourceRemover? = null,
         ): SourceSyncImportSession {
             val previewService = SourceSyncPreviewService(localSources)
-            val applyService = AndroidSourceSyncService(sourceSyncStore, deviceId, baselineStore = baselineStore)
+            val applyService = AndroidSourceSyncService(
+                store = sourceSyncStore,
+                deviceId = deviceId,
+                baselineStore = baselineStore,
+                sourceRemover = sourceRemover,
+            )
             return SourceSyncImportSession(
                 previewPort = SourceSyncPreviewPort { json -> previewService.preview(json) },
                 applyPort = SourceSyncApplyPort { json -> applyService.importEnvelope(json) },

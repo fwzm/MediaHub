@@ -10,6 +10,7 @@ import com.mediahub.core.database.sync.AndroidSourceSyncService
 import com.mediahub.core.database.sync.SourceSyncArchiveArtifact
 import com.mediahub.core.database.sync.SourceSyncArchiveExport
 import com.mediahub.core.database.sync.SourceSyncDocumentInput
+import com.mediahub.core.database.sync.SourceSyncSourceRemover
 import com.mediahub.feature.settings.backup.BackupFileStore
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.provider.api.MediaProviderRegistry
@@ -43,6 +44,7 @@ class SourceSyncImportViewModel @Inject constructor(
     providerRegistry: MediaProviderRegistry,
     backupFileStore: BackupFileStore,
     baselineStore: ISourceSyncBaselineStore,
+    sourceRemover: SourceSyncSourceRemover,
 ) : ViewModel() {
 
     private val session = SourceSyncImportSession.production(
@@ -50,6 +52,7 @@ class SourceSyncImportViewModel @Inject constructor(
         sourceSyncStore = serverRepository,
         deviceId = clientIdentity.deviceId,
         baselineStore = baselineStore,
+        sourceRemover = sourceRemover,
     )
 
     private val verification = SourceVerificationCoordinator(

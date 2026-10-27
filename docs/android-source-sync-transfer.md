@@ -4709,3 +4709,72 @@ W6-76 给了预演（`planRound`，一笔不写），W6-77 给了闸门（`Sourc
 ### §47.9 下一步
 
 W6-79 候选：①两端把对端基线喂进 `SourceSyncPlanner`（真正「读基线 → 只请求变化」）；②被扣凭据 / 冲突条目的逐条裁决页（把 `SourceSyncApplyReport.refusedSyncSourceIds` 与 `blockingReasons` 变成可点的行）；③「忘记这台设备」；④监听卡「取消接收」的可观测性；⑤两机真实证据（需要用户给窗口/机器）。
+
+## §48 W6-79：Android 的跨端删除（对齐 Windows `ServerManager.RemoveRemoteSourceAsync`）
+
+### 48.1 结论先行
+
+- W6-78 的落库层（`applyRound`）遇到对端声明的删除只会**拒绝并上报** `local-delete-not-supported`，因为 `SourceSyncStore` 接口刻意没有删除方法（ADR-S001）。
+- 本轮把「删除」补成一条**能力接口** `SourceSyncSourceRemover`，判据逐条对齐 Windows `ServerManager.RemoveRemoteSourceAsync`，并把生产实现（完整删除链）接到 Hilt 图上。
+- 仍然没有界面出口：**用户点不到「删掉这条」**；`applyRound` 也**还没有**接进生产导入路径（写入口仍是 `importEnvelope`）。本轮交付的是「一旦接线，删除会做对」。
+
+### 48.2 缺的是什么
+
+| 能力 | Windows（权威） | Android 本轮之前 |
+| --- | --- | --- |
+| 存储层能否删 | `ILocalSourceStore.Delete(syncSourceId): bool`（「already gone」不算错） | `SourceSyncStore` 无删除方法 |
+| 删除是否清凭据 | `RemoveRemoteSourceAsync` → `DeleteAsync`，连 token 一起删 | 无删除路径 |
+| 落库层如何处理删除条目 | `record is null` → `RemoveRemoteSourceAsync` | 一律 refused（`local-delete-not-supported`） |
+| 本地媒体源 | `Type == Local` → 拒绝（「本地媒体源不参与跨设备删除」） | 无判据 |
+| 删除是否推进基线 | 不推进（只有真的写进非 null 记录才推进） | 不推进（尚无删除） |
+
+### 48.3 做法（四处改动）
+
+1. **新接口** `core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncSourceRemover.kt`（1156 B）：`suspend fun removeSource(serverId: String): Boolean`。为什么不塞进 `SourceSyncStore`：那会让八个测试假件都得实现一个多半用不上的方法，而「删除要连凭据一起删」这件事本来就不属于存储抽象。
+2. **服务层** `AndroidSourceSyncService` 多一个默认为 null 的第 6 个构造参数 `sourceRemover`（既有 fake 与既有用例零改动），`applyRound` 的删除判据**按 Windows 原文改成 `record == null || action == DELETE`** —— 墓碑与「本机存在」合并出来的条目 kind 是 UPDATED、reason 是 `update-vs-delete`，只看 action 会漏掉它（第一版就是这么写错的，五条用例同时红）。
+3. **判据四条**（`removeLocalSource`）：身份为空或本机没有 → `local-source-missing`；没有 remover → `local-delete-not-supported`；本地媒体源 → `local-media-source`；remover 返回 false 或抛异常 → `local-source-remove-failed`（取消继续向上抛）。成功才 `applied++`，并记进 `removedServerIds` / `removedSyncSourceIds`；`SourceSyncApplyReport` 另有 `removalFailures` 与 `removalFailureOf(id)`。
+4. **生产实现** `feature/server/src/main/kotlin/com/mediahub/feature/server/ServerSourceSyncRemover.kt`（1924 B）：`getServer(id)` → `ServerRemoveHandler.remove(server)`（即 `RemoveServerUseCase`：删行 → 账号 → token → 凭据柜 → 进度 → 字幕记忆 → 图标 → 会话）。Hilt 绑在 app 的 `RegistryModule`；`SourceSyncImportSession.production` 与 `SourceSyncImportViewModel` 各加一个透传参数（缺省 null）。
+
+### 48.4 用例
+
+| 套件 | 例数 | 覆盖 |
+| --- | --- | --- |
+| `SourceSyncApplyRoundTest` | 15 → **16**（+6） | 允许的删除真经 remover 删掉且基线不推进、本地媒体源拒绝、本机已无此来源拒绝、remover 失败折成拒绝、一轮里同时写一条删一条、对端墓碑与本机行拼写不同仍能删 |
+| `ServerSourceSyncRemoverTest`（新） | **5** | 真的走完整删除链、身份 trim、未知身份不碰删除链、空白身份、删除链抛异常返回 false |
+
+### 48.5 负向对照（四条，三条变红）
+
+| # | 变异 | 结果 |
+| --- | --- | --- |
+| A | 把 `ServerType.LOCAL` 判据换成 `PLEX`（等于取消本地媒体源保护） | `a_local_media_source_is_never_removed_across_devices` 红 |
+| B | `if (remover.removeSource(id))` → `|| true`（把 false 当成功） | `a_failing_remover_is_reported_as_refused_instead_of_thrown` 红 |
+| C | 没有 remover 时直接 `return ""`（当成已删除） | `a_deletion_is_refused_because_the_store_cannot_delete` 红 |
+| D | 身份查找改成拼写严格相等 | **保持绿** —— 跨端合并已在上游按 trim + 小写归并、发出来的就是本机拼写，这条守卫在 `applyRound` 路径上不可达。本轮把它写进文档，不假装被用例钉住 |
+
+### 48.6 本机实跑
+
+| 模块 | 套件 / 例数 | 变化 |
+| --- | --- | --- |
+| `core/common` | 48 / **659**（11 skipped） | 本轮未改 |
+| `core/database` | 24 / **236**（12 skipped） | 230 → +6 |
+| `feature/settings` | 26 / **384** | 本轮未改 |
+| `feature/server` | 6 / **34** | 29 → +5（新套件） |
+| 合计（三模块口径） | **1279** | 1273 → +6 |
+| C# `MediaHub.Tests` | **1652** / 0 失败 | Windows 侧本轮未改 |
+
+`--required-suite` 仍 **60**：新用例落在已钉住的 `SourceSyncApplyRoundTest` 里，`feature/server` 不在门禁名单内。
+
+### 48.7 未覆盖（如实留着）
+
+1. `applyRound` **没有**接进 `SourceSyncImportSession` 的写入口（仍是 `importEnvelope`）——结果页的「已应用」需要按身份映射到 `serverId`，而 `SyncRoundEntry` 没有这个字段，换过去要一起改结果页。
+2. 删除**没有界面出口**：没有任何按钮能触发「删掉这条」，本轮不做假界面。
+3. Room 级联（真实 `ServerRepository` + 真库）未在本轮用例里跑；`ServerSourceSyncRemover` 用的是假 `ServerStore` + 假 `ServerRemoveHandler`，级联本身由 `RemoveServerUseCase` 自己的用例负责。
+4. 真实两机跑一轮删除仍 **NOT_RUN**；真机 instrumentation 仍 **DEVICE_UNVERIFIED**。
+
+### 48.8 下一步（W6-80 候选）
+
+1. 把 `SourceSyncImportSession` 的应用端口换成 `applyRound`（先给 `SourceSyncApplyReport` 加身份 → serverId 映射，结果页一次性改完）。
+2. 被扣凭据 / 冲突 / 删除条目的逐条裁决界面出口。
+3. 两端把对端基线喂进 `SourceSyncPlanner`（「读基线 → 只请求变化」仍未实现）。
+4. 「忘记这台设备」（配对层）。
+5. 监听卡「取消接收」的可观测性。

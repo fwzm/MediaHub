@@ -216,6 +216,16 @@ abstract class RegistryModule {
     @Singleton
     abstract fun bindServerRemoveHandler(impl: com.mediahub.feature.server.RemoveServerUseCase): com.mediahub.feature.server.ServerRemoveHandler
 
+    /**
+     * W6-79：跨端删除的生产实现。同步落库层只认 [com.mediahub.core.database.sync.SourceSyncSourceRemover] 接口，
+     * 真实级联清理（凭据、账号、进度、字幕记忆、图标、会话）在本绑定指向的用例里。
+     */
+    @Binds
+    @Singleton
+    abstract fun bindSourceSyncSourceRemover(
+        impl: com.mediahub.feature.server.ServerSourceSyncRemover,
+    ): com.mediahub.core.database.sync.SourceSyncSourceRemover
+
     @Binds
     @Singleton
     abstract fun bindProgressStore(impl: ProgressRepository): ProgressStore

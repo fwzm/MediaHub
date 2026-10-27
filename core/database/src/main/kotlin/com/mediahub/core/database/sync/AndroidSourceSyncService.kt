@@ -59,7 +59,9 @@ import kotlinx.coroutines.ensureActive
  * - 墓碑**不删**本地来源（[SourceSyncStore] 根本没有删除方法），只进 requiresApproval 或 ignored；
  * - 未知 wire 类型**不落库**，原始串保留在候选里（D3），将来版本可接管；
  * - 带凭据块的记录**不落库**（W6-74，理由 secrets-require-approval）：本端用不了对端密文，
- *   静默写一条"没有凭据的来源"或静默剥掉凭据块，都是在替用户做他没有做的决定。
+ *   静默写一条"没有凭据的来源"或静默剥掉凭据块，都是在替用户做他没有做的决定；
+ * - 对端声明的删除只在 [applyRound] 里落地，且必须经 [SourceSyncSourceRemover]（W6-79）：
+ *   存储层没有删除方法，而"删了行但没删凭据"等于没删（Windows 同口径）。
  *
  * 幂等：第二次导入同一份信封时，来源记录的修订号相等、内容逐字段相等 → 规划器给出 NoChange，
  * 本服务一件也不写。内容同一性由 [SourceSyncFingerprints] 负责（内容摘要不含修订号），
@@ -72,6 +74,7 @@ class AndroidSourceSyncService(
     private val snapshotIdFactory: () -> String = { UUID.randomUUID().toString().replace("-", "") },
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val baselineStore: ISourceSyncBaselineStore? = null,
+    private val sourceRemover: SourceSyncSourceRemover? = null,
 ) {
 
     init {
@@ -402,7 +405,9 @@ class AndroidSourceSyncService(
      * 五条边界：
      * - 名单先放行后跳过：同一个 syncSourceId 同时出现在两处时以**跳过**为准（与 Windows Decisions 同序）；
      * - 永不许可三类（凭据 / 未知类型 / 本机不支持）即使显式放行也不写 —— 判据在闸门里，这里不重复判；
-     * - 删除类条目一律拒绝并记进 [SourceSyncApplyReport.refusedSyncSourceIds]：存储层没有删除方法；
+     * - 删除类条目只有在本实例拿到 [SourceSyncSourceRemover] 时才落地，且"本机没有这条来源"
+     *   或"本地媒体源不参与跨设备删除"一律拒绝（Windows ServerManager.RemoveRemoteSourceAsync 同判据）；
+     *   没有 remover 时仍按 W6-78 的口径拒绝并记进 [SourceSyncApplyReport.refusedSyncSourceIds]；
      * - 基线只在本轮**真的写进库**之后推进，且只收写入的记录（Windows 同口径）；
      * - 解析失败不抛：返回带 rejectedReason 的空报告，且不碰存储。
      */
@@ -427,20 +432,31 @@ class AndroidSourceSyncService(
 
         val writtenRecords = ArrayList<SourceRecord>()
         val wroteServerIds = ArrayList<String>()
+        val removedServerIds = ArrayList<String>()
+        val removedIds = ArrayList<String>()
         val refusedIds = ArrayList<String>()
+        val removalFailures = ArrayList<SourceSyncRemovalFailure>()
         var applied = 0
 
         for (item in gate.applied) {
             // 只在条目之间取消：写到一半被打断会让「已写入几条」这个回执失去意义。
             currentCoroutineContext().ensureActive()
-            if (item.action == SourceSyncAction.DELETE) {
-                // 存储层没有删除方法（ADR-S001：墓碑不删本地来源），只能如实拒绝并上报。
-                refusedIds.add(item.syncSourceId.trim())
+            val record = findRecord(envelope, item.syncSourceId)
+            // 信封里没有这条记录 = 对端声明删除（Windows 同判据：record is null → RemoveRemoteSourceAsync），
+            // 与「条目本身就是墓碑」等价；两者都要连凭据一起移除，只能经显式的 remover 落地（W6-79）。
+            if (record == null || item.action == SourceSyncAction.DELETE) {
+                val removed = removeLocalSource(item.syncSourceId, removalFailures)
+                if (removed == null) {
+                    refusedIds.add(item.syncSourceId.trim())
+                    continue
+                }
+                applied++
+                removedServerIds.add(removed)
+                removedIds.add(item.syncSourceId.trim())
                 continue
             }
-            val record = findRecord(envelope, item.syncSourceId)
-            val serverId = if (record == null) null else writeRecord(record)
-            if (record == null || serverId == null) {
+            val serverId = writeRecord(record)
+            if (serverId == null) {
                 refusedIds.add(item.syncSourceId.trim())
                 continue
             }
@@ -480,7 +496,10 @@ class AndroidSourceSyncService(
             baselineEntryCount = baselineEntries,
             warnings = warnings,
             wroteServerIds = wroteServerIds,
+            removedServerIds = removedServerIds,
+            removedSyncSourceIds = removedIds,
             refusedSyncSourceIds = refusedIds,
+            removalFailures = removalFailures,
         )
     }
 
@@ -557,6 +576,56 @@ class AndroidSourceSyncService(
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (failure: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 落一条跨端删除，返回被移除的 serverId；null 表示拒绝（调用方计入 refused 并留一条原因）。
+     *
+     * 四条判据逐条对齐 Windows `ServerManager.RemoveRemoteSourceAsync`：
+     * - 对端条目没有身份 → 拒绝；
+     * - 本实例没有 remover（存储层没有删除方法）→ 拒绝，原因 [DELETE_NOT_SUPPORTED]；
+     * - 本机没有这条来源 → 拒绝，原因 [REMOVE_MISSING]（「本来就没有」不是错误，但也不是「写过」）；
+     * - 本地媒体源（[ServerType.LOCAL]）不参与跨设备删除 → 拒绝，原因 [REMOVE_LOCAL_MEDIA]。
+     *
+     * 真正动手时调用方只经 [SourceSyncSourceRemover]：删行不删凭据等于没删，这条判断属于实现方。
+     */
+    private suspend fun removeLocalSource(
+        syncSourceId: String?,
+        failures: MutableList<SourceSyncRemovalFailure>,
+    ): String? {
+        val identity = identityOf(syncSourceId)
+        if (identity.isEmpty()) {
+            failures.add(SourceSyncRemovalFailure(syncSourceId.orEmpty(), REMOVE_MISSING))
+            return null
+        }
+        val remover = sourceRemover
+        if (remover == null) {
+            failures.add(SourceSyncRemovalFailure(identity, DELETE_NOT_SUPPORTED))
+            return null
+        }
+        return try {
+            val snapshot = store.listSourceSnapshots()
+                .firstOrNull { candidate -> identityOf(candidate.syncSourceId) == identity }
+            if (snapshot == null) {
+                failures.add(SourceSyncRemovalFailure(identity, REMOVE_MISSING))
+                return null
+            }
+            if (snapshot.serverType == ServerType.LOCAL) {
+                failures.add(SourceSyncRemovalFailure(identity, REMOVE_LOCAL_MEDIA))
+                return null
+            }
+            if (remover.removeSource(snapshot.serverId)) {
+                snapshot.serverId
+            } else {
+                failures.add(SourceSyncRemovalFailure(identity, REMOVE_FAILED))
+                null
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Exception) {
+            failures.add(SourceSyncRemovalFailure(identity, REMOVE_FAILED))
             null
         }
     }
@@ -713,11 +782,23 @@ class AndroidSourceSyncService(
         const val WRITE_FAILED: String = "local-source-write-failed"
 
         /**
-         * Android 侧新增的 reason 码（合同词汇之外）：一轮里被批准了的删除条目。
-         * 存储层**没有删除方法**（ADR-S001：墓碑不删本地来源），所以这类条目只能如实拒绝并上报，
+         * Android 侧新增的 reason 码（合同词汇之外）：一轮里被批准了的删除条目，但本实例没有
+         * [SourceSyncSourceRemover]（存储层**没有删除方法**，ADR-S001）。这类条目只能如实拒绝并上报，
          * 绝不能假装已应用 —— 否则对端会以为本机已经删了，两侧从此不一致。
          */
         const val DELETE_NOT_SUPPORTED: String = "local-delete-not-supported"
+
+        /**
+         * 删除被拒：本机没有这条来源（对端指着一条已经不在的行）。与 Windows
+         * `ServerManager` 的「本机没有这条来源，已跳过」同义，「本来就没有」不是错误，但也不是「写过」。
+         */
+        const val REMOVE_MISSING: String = "local-source-missing"
+
+        /** 删除被拒：本地媒体源不参与跨设备删除（Windows 同判据，避免对端删掉本机磁盘上的媒体）。 */
+        const val REMOVE_LOCAL_MEDIA: String = "local-media-source"
+
+        /** 删除被拒：remover 返 false 或抛异常（凭据没清干净也算失败，绝不当成已删除）。 */
+        const val REMOVE_FAILED: String = "local-source-remove-failed"
 
         /**
          * 与 Windows `SourceSyncSessionReasons.BaselineRejectedPrefix` 同值同构：基线合并拒收了几条。
@@ -910,8 +991,14 @@ data class SourceSyncApplyReport(
     val warnings: List<String> = emptyList(),
     /** 本轮写入所对应的服务器 id（顺序与写入顺序一致）。 */
     val wroteServerIds: List<String> = emptyList(),
-    /** 被批准却写不下去的 syncSourceId（删除类、记录缺失、存储层拒绝）。 */
+    /** 本轮真正移除的服务器 id（W6-79 的跨端删除，顺序与移除顺序一致）。 */
+    val removedServerIds: List<String> = emptyList(),
+    /** 本轮移除所对应的 syncSourceId（与 [removedServerIds] 同序同长）。 */
+    val removedSyncSourceIds: List<String> = emptyList(),
+    /** 被批准却写不下去的 syncSourceId（记录缺失、存储层拒绝、删除被拒）。 */
     val refusedSyncSourceIds: List<String> = emptyList(),
+    /** 删除被拒的逐条原因（稳定码），供界面区分「本机没有」与「本机不支持删」而不是笼统说失败。 */
+    val removalFailures: List<SourceSyncRemovalFailure> = emptyList(),
     /** 非空表示信封没被读入；此时四个桶全为 0，存储与基线都没被碰过。 */
     val rejectedReason: String? = null,
     val rejectedMessage: String? = null,
@@ -937,4 +1024,22 @@ data class SourceSyncApplyReport(
     /** 该身份是否被批准但没写下去。 */
     fun isRefused(syncSourceId: String): Boolean =
         refusedSyncSourceIds.any { it.trim().equals(syncSourceId.trim(), ignoreCase = true) }
+
+    /** 本轮移除了几条（跨端删除）。 */
+    val removedCount: Int get() = removedServerIds.size
+
+    /** 该身份是否在本轮被真的从本机移除。 */
+    fun isRemoved(syncSourceId: String): Boolean =
+        removedSyncSourceIds.any { it.trim().equals(syncSourceId.trim(), ignoreCase = true) }
+
+    /** 该身份被拒的原因码（没有拒绝记录时为 null）。 */
+    fun removalFailureOf(syncSourceId: String): String? = removalFailures
+        .firstOrNull { it.syncSourceId.trim().equals(syncSourceId.trim(), ignoreCase = true) }
+        ?.reason
 }
+
+/** 一条被拒绝的跨端删除：身份 + 稳定原因码（[AndroidSourceSyncService] 的 REMOVE_* 常量）。 */
+data class SourceSyncRemovalFailure(
+    val syncSourceId: String,
+    val reason: String,
+)
