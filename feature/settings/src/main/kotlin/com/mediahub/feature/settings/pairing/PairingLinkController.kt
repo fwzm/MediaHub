@@ -1,12 +1,17 @@
 package com.mediahub.feature.settings.pairing
 
+import com.mediahub.core.common.pairing.PairedDeviceRegistry
+import com.mediahub.core.common.pairing.PairedFingerprintState
 import com.mediahub.core.common.pairing.PairingAddressEnumerator
 import com.mediahub.core.common.pairing.PairingAddressReport
+import com.mediahub.core.common.pairing.PairingCardExchangeResult
 import com.mediahub.core.common.pairing.PairingCodeReasons
-import com.mediahub.core.common.pairing.PairingInvitationResult
+import com.mediahub.core.common.pairing.PairingFingerprint
 import com.mediahub.core.common.pairing.PairingLink
 import com.mediahub.core.common.pairing.PairingLinkReasons
 import com.mediahub.core.common.pairing.PairingPayload
+import com.mediahub.core.common.sync.WireText
+import com.mediahub.core.common.pairing.PairingPeerCard
 import java.net.URI
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,6 +73,104 @@ sealed interface PairingAddressState {
 
     /** 本次构建没有可用的枚举出口（界面预览态或未接线）：不读、不假装读到空。 */
     data object Unavailable : PairingAddressState
+}
+
+/**
+ * 对端身份核对与登记的状态（W6-71）。
+ *
+ * 与 [PairingLinkState] 分开：邀请校验管的是「对端确实是链接里那一台」，
+ * 这里管的是「拉完之后对端卡片上的稳定指纹与本机登记簿比得怎么样、要不要记住它」。
+ * 两步分开的理由与 Windows 一致：卡片可能根本拿不到（老构建只发邀请），
+ * 拿不到也不该把已经校验通过的邀请变红。
+ */
+sealed interface PairingPeerState {
+
+    /** 还没拉过邀请，没有可核对的东西。 */
+    data object NotChecked : PairingPeerState
+
+    /** 邀请校验通过了，但对端没有回身份卡片：配对成立，只是这次记不住对端。 */
+    data object NoCard : PairingPeerState
+
+    /** 本次构建没有可用的登记簿（预览态或未接线），没法比对指纹。 */
+    data object Unavailable : PairingPeerState
+
+    /** 拿到对端卡片并已与登记簿比对过：只读结论，**不会自动写盘**。 */
+    data class Reviewed(
+        val deviceId: String,
+        val displayName: String,
+        val fingerprint: String,
+        val state: PairedFingerprintState,
+        val reason: String,
+        val pinnedFingerprint: String?,
+        val canRegister: Boolean,
+    ) : PairingPeerState
+
+    /** 点过「登记这台设备」之后的回执：accepted=false 表示登记被拒（指纹不一致或存储不可用）。 */
+    data class Recorded(
+        val deviceId: String,
+        val displayName: String,
+        val fingerprint: String,
+        val state: PairedFingerprintState,
+        val reason: String,
+        val accepted: Boolean,
+        val added: Boolean,
+    ) : PairingPeerState
+}
+
+/** 对端身份区块的固定文案（界面与测试共用一份）。 */
+object PairingPeerCopy {
+
+    const val TITLE: String = "对端身份"
+
+    const val HINT: String = "拉邀请成功后，对端会回一张身份卡片。这张卡片里的指纹是**稳定指纹**，" +
+        "和邀请里那枚只有一次性的证书指纹不是一回事：只有卡片指纹才能登记，否则下次配对必然误判。"
+
+    const val NOT_CHECKED_HINT: String = "还没拉到邀请，没有可核对的对端身份。"
+
+    const val NO_CARD_HINT: String = "对端没有回身份卡片（可能是没有登记簿的老构建）：这次配对成立，只是记不住对端。"
+
+    const val UNAVAILABLE_HINT: String = "本机没有可用的已配对设备登记，无法比对指纹。"
+
+    const val REGISTER_ACTION: String = "登记这台设备"
+
+    const val REGISTER_HINT: String = "登记只写本机的配对登记簿：不写任何凭据、不改对端，也不建立同步。"
+
+    const val MISMATCH_NOTE: String = "本机不会覆盖已登记的指纹，请当面核对。"
+
+    /** 结果行（NotChecked 没有结果行）。 */
+    fun lineOf(state: PairingPeerState): String? = when (state) {
+        PairingPeerState.NotChecked -> null
+        PairingPeerState.NoCard -> NO_CARD_HINT
+        PairingPeerState.Unavailable -> UNAVAILABLE_HINT
+        is PairingPeerState.Reviewed -> {
+            val head = "对端：" + state.displayName + "（" + state.deviceId + "），指纹 " + state.fingerprint +
+                "；" + PairedDeviceRegistry.describeState(state.state) + "。"
+            val detail = PairedDeviceRegistry.describeReason(state.reason)
+            if (state.state == PairedFingerprintState.MISMATCH) {
+                head + detail + MISMATCH_NOTE
+            } else {
+                head + detail
+            }
+        }
+        is PairingPeerState.Recorded -> {
+            val who = state.displayName + "（" + state.deviceId + "）"
+            if (state.accepted) {
+                if (state.added) "已登记 " + who + "：首次配对，指纹已钉住。"
+                else "已登记 " + who + "：本机记录已更新。"
+            } else {
+                "没有登记 " + who + "：" + PairedDeviceRegistry.describeReason(state.reason)
+            }
+        }
+    }
+
+    /** 结果行的稳定码（无结果或成功态为空），供 UI 测试与排障直接断言。 */
+    fun codeOf(state: PairingPeerState): String? = when (state) {
+        PairingPeerState.NotChecked -> null
+        PairingPeerState.NoCard -> null
+        PairingPeerState.Unavailable -> PairingLinkController.REGISTRY_UNAVAILABLE
+        is PairingPeerState.Reviewed -> state.reason
+        is PairingPeerState.Recorded -> state.reason
+    }
 }
 
 /** 配对页的固定文案（界面、测试与文档共用一份）。 */
@@ -147,6 +250,10 @@ class PairingLinkController(
     private val now: () -> Long = { System.currentTimeMillis() },
     private val fetchPort: PairingFetchPort? = null,
     private val addressEnumerator: PairingAddressEnumerator? = null,
+    /** 本机的已配对设备登记簿（W6-71）；为 null 表示本次构建没有登记能力，只核对不登记。 */
+    private val registry: PairedDeviceRegistry? = null,
+    /** 本机身份卡片；只有 [registry] 存在时才会随拉邀请发给对端（与 Windows 同一条边界）。 */
+    private val selfCard: PairingPeerCard? = null,
 ) {
 
     private val _state = MutableStateFlow<PairingLinkState>(PairingLinkState.Idle)
@@ -160,6 +267,12 @@ class PairingLinkController(
     /** 本机可被连的地址（只读展示，见 [refreshAddresses]）。 */
     val addresses: StateFlow<PairingAddressState> = _addresses.asStateFlow()
 
+    private val _peer = MutableStateFlow<PairingPeerState>(PairingPeerState.NotChecked)
+
+    /** 对端身份核对与登记的状态（W6-71）。 */
+    val peer: StateFlow<PairingPeerState> = _peer.asStateFlow()
+
+
     private val readingAddresses = AtomicBoolean(false)
 
     /** 解析成功时留住的载荷：挑战与指纹都在这里，界面看不到。 */
@@ -169,6 +282,9 @@ class PairingLinkController(
 
     /** 上一次核对过的链接里写明的对端地址与端口，供 [fetchInvitation] 用。 */
     private var heldEndpoint: Endpoint? = null
+
+    /** 最近一次拉到的对端身份卡片；只有它才能被登记（W6-71）。 */
+    private var heldPeerCard: PairingPeerCard? = null
 
     /**
      * 核对一段链接：只解析，不发任何字节。
@@ -193,6 +309,10 @@ class PairingLinkController(
         }
         held = payload
         heldEndpoint = endpointOf(payload.ephemeralUrl)
+
+        // 换链接就作废上一次的对端核对结论（W6-71）。
+        heldPeerCard = null
+        _peer.value = PairingPeerState.NotChecked
         _state.value = PairingLinkState.Parsed(
             deviceId = payload.deviceId,
             fingerprint = payload.publicKeyFingerprint.displayString,
@@ -233,15 +353,18 @@ class PairingLinkController(
             fingerprint = fingerprint.displayString,
             endpoint = endpointText(payload.ephemeralUrl),
         )
+        // 只有有登记簿的一方才自报身份：没有登记簿时发卡片没有意义，也少一个对端可被跟踪的面。
+        val card = if (registry == null) null else selfCard
         try {
-            val outcome = port.fetch(
+            val outcome = port.fetchWithCard(
                 host = endpoint.host,
                 port = endpoint.port,
                 expectedChallenge = payload.challenge,
                 expectedFingerprint = fingerprint,
+                selfCard = card,
             )
             return when (outcome) {
-                is PairingInvitationResult.Ok -> {
+                is PairingCardExchangeResult.Ok -> {
                     val current = now()
                     _state.value = PairingLinkState.Fetched(
                         deviceId = outcome.payload.deviceId,
@@ -249,10 +372,15 @@ class PairingLinkController(
                         endpoint = endpointText(outcome.payload.ephemeralUrl),
                         remainingSeconds = outcome.payload.remainingMilliseconds(current) / MILLIS_PER_SECOND,
                     )
+                    // 邀请已经校验通过；卡片这一步只决定「记不记得住对端」，不影响上面的结论。
+                    heldPeerCard = outcome.peerCard
+                    _peer.value = reviewPeerCard(outcome.peerCard)
                     true
                 }
-                is PairingInvitationResult.Failed -> {
+                is PairingCardExchangeResult.Failed -> {
                     _state.value = PairingLinkState.Failed(outcome.reason, outcome.message)
+                    heldPeerCard = null
+                    _peer.value = PairingPeerState.NotChecked
                     false
                 }
             }
@@ -261,6 +389,91 @@ class PairingLinkController(
         }
     }
 
+    /**
+     * 把对端卡片与登记簿比一次（只读，不写盘）。
+     *
+     * 与 Windows `SyncPairingPresenter.VerifyReply` 同义：指纹不一致时绝不自动登记；
+     * 拿不到卡片、或本机没有登记簿，也都是「这次记不住对端」，不是错误。
+     */
+    private fun reviewPeerCard(card: PairingPeerCard?): PairingPeerState {
+        val store = registry ?: return PairingPeerState.Unavailable
+        if (card == null) {
+            return PairingPeerState.NoCard
+        }
+        val verification = store.verify(card.deviceId, card.deviceFingerprint)
+        return PairingPeerState.Reviewed(
+            deviceId = card.deviceId,
+            displayName = nameOf(card),
+            fingerprint = verification.presentedFingerprint,
+            state = verification.state,
+            reason = verification.reason,
+            pinnedFingerprint = verification.pinnedFingerprint,
+            canRegister = verification.canPin,
+        )
+    }
+
+    /**
+     * 显式把对端卡片登记进本机登记簿（W6-71 的登记动作）。
+     *
+     * 三条前置条件不满足就直接返回 false 并把稳定码写进 [peer]：
+     * 没有登记簿（unavailable）、没有卡片（no-card）、指纹与已登记的**不一致**（mismatch）。
+     * 指纹不一致时一个字节都不写：覆盖已钉住的指纹等于默默接受冒充者（与 Windows 同一条注释）。
+     *
+     * @return true 表示登记被接受（新增或更新）。
+     */
+    fun registerPeer(): Boolean {
+        val store = registry
+        if (store == null) {
+            _peer.value = PairingPeerState.Unavailable
+            return false
+        }
+        val card = heldPeerCard
+        if (card == null) {
+            _peer.value = PairingPeerState.NoCard
+            return false
+        }
+        val verification = store.verify(card.deviceId, card.deviceFingerprint)
+        if (verification.isMismatch) {
+            // 绝不覆盖：只把回执落在界面上，登记簿保持不变。
+            _peer.value = PairingPeerState.Recorded(
+                deviceId = card.deviceId,
+                displayName = nameOf(card),
+                fingerprint = verification.presentedFingerprint,
+                state = verification.state,
+                reason = verification.reason,
+                accepted = false,
+                added = false,
+            )
+            return false
+        }
+        if (!verification.canPin) {
+            _peer.value = PairingPeerState.Recorded(
+                deviceId = card.deviceId,
+                displayName = nameOf(card),
+                fingerprint = verification.presentedFingerprint,
+                state = verification.state,
+                reason = verification.reason,
+                accepted = false,
+                added = false,
+            )
+            return false
+        }
+        val registration = store.register(card.toObservation(now()))
+        _peer.value = PairingPeerState.Recorded(
+            deviceId = card.deviceId,
+            displayName = nameOf(card),
+            fingerprint = card.deviceFingerprint,
+            state = registration.state,
+            reason = registration.reason,
+            accepted = registration.accepted,
+            added = registration.added,
+        )
+        return registration.accepted
+    }
+
+    /** 卡片的展示名：没有名字就退回设备标识（与 PairedDeviceListPresenter 的兜底同义）。 */
+    private fun nameOf(card: PairingPeerCard): String =
+        if (WireText.isBlank(card.displayName)) card.deviceId else card.displayName
     /**
      * 读一次本机网卡，得到「可被连的地址」（W6-60）。
      *
@@ -296,6 +509,8 @@ class PairingLinkController(
     private fun clearHeld() {
         held = null
         heldEndpoint = null
+        heldPeerCard = null
+        _peer.value = PairingPeerState.NotChecked
     }
 
     private data class Endpoint(val host: String, val port: Int)
@@ -330,6 +545,9 @@ class PairingLinkController(
 
         /** 本次构建没有可用的拉取出口（界面预览态或未接线）。 */
         const val PAIRING_FETCH_UNAVAILABLE: String = "pairing-fetch-unavailable"
+
+        /** 本机没有可用的已配对设备登记（与 Windows 的 registry-unavailable 同义）。 */
+        const val REGISTRY_UNAVAILABLE: String = "registry-unavailable"
 
         private const val MILLIS_PER_SECOND: Long = 1_000L
 
