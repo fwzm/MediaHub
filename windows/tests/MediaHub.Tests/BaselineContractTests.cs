@@ -325,6 +325,150 @@ public sealed class BaselineContractTests
         Bool(item, "requiresUserApproval"),
         string.Join(",", Strings(item, "candidateServerIds")));
 
+    [Fact]
+    public void ApprovalCasesMatchTheWindowsContract()
+    {
+        JsonElement codes = Root.GetProperty("approvalCodes");
+        Assert.Equal(
+            new[] { "secrets-require-approval", "unknown-source-type", "not-supported-on-windows" },
+            Strings(codes, "neverAllowable"));
+        Assert.Equal(
+            new[] { "delete-vs-update", "update-vs-delete", "field-conflict", "same-revision-different-content" },
+            Strings(codes, "risky"));
+        Assert.Equal("ambiguous-", Text(codes, "ambiguousPrefix"));
+
+        int compared = 0;
+        foreach (JsonElement entry in Entries("approvalCases"))
+        {
+            string name = Text(entry, "name");
+            SourceSyncApprovalItem[] items = ArrayOf(entry, "items", ApprovalItemOf);
+            SourceSyncApprovalDecision[] decisions = ArrayOf(entry, "decisions", DecisionOf);
+
+            string? error = NullableText(entry, "error");
+            if (error is not null)
+            {
+                // Assert.Throws, not Record.Exception: this file has its own Record(...) helper, and the
+                // xUnit Record class is shadowed by it.
+                ArgumentException failure = Assert.Throws<ArgumentException>(() => SourceSyncApprovalGate.Decide(items, decisions));
+                string fragment = error == "blank-decision-identity"
+                    ? "decision needs a syncSourceId"
+                    : "item needs a syncSourceId";
+                Assert.Contains(fragment, failure.Message, StringComparison.Ordinal);
+                compared++;
+                continue;
+            }
+
+            SourceSyncApprovalResult result = SourceSyncApprovalGate.Decide(items, decisions);
+            AssertApproval(name, entry.GetProperty("expect"), result);
+            Assert.Equal(items.Length, result.AppliedCount + result.SkippedCount + result.WithheldCount);
+            compared++;
+        }
+
+        Assert.Equal(Entries("approvalCases").Length, compared);
+
+        int comparedRounds = 0;
+        foreach (JsonElement entry in Entries("approvalRoundCases"))
+        {
+            string name = Text(entry, "name");
+            JsonElement roundJson = entry.GetProperty("round");
+            SyncRoundResult round = new()
+            {
+                Apply = RoundEntriesOf(roundJson, "apply"),
+                RequiresApproval = RoundEntriesOf(roundJson, "requiresApproval"),
+                Ignored = RoundEntriesOf(roundJson, "ignored"),
+            };
+            SourceSyncApprovalDecision[] decisions = ArrayOf(entry, "decisions", DecisionOf);
+
+            // The adapter is what these cases really test: a round entry has kind + reason, not an action, and the
+            // row must show the primary endpoint verbatim instead of a normalised one.
+            SourceSyncApprovalItem[] rows = round.Apply
+                .Concat(round.RequiresApproval)
+                .Select(SourceSyncApprovalItem.FromRoundEntry)
+                .ToArray();
+            Assert.Equal(ArrayOf(entry, "items", DescribeApprovalItemJson), rows.Select(DescribeApprovalItem).ToArray());
+
+            SourceSyncApprovalResult result = SourceSyncApprovalGate.Decide(round, decisions);
+            AssertApproval(name, entry.GetProperty("expect"), result);
+            comparedRounds++;
+        }
+
+        Assert.Equal(Entries("approvalRoundCases").Length, comparedRounds);
+    }
+
+    private static void AssertApproval(string name, JsonElement expect, SourceSyncApprovalResult result)
+    {
+        Assert.Equal(Strings(expect, "applied"), result.Applied.Select(item => item.SyncSourceId).ToArray());
+        Assert.Equal(Strings(expect, "skipped"), result.Skipped.Select(item => item.SyncSourceId).ToArray());
+        Assert.Equal(Strings(expect, "withheld"), result.Withheld.Select(item => item.SyncSourceId).ToArray());
+        Assert.Equal(Strings(expect, "blockingReasons"), result.BlockingReasons.ToArray());
+        Assert.Equal(Bool(expect, "acknowledgedRisk"), result.AcknowledgedRisk);
+        Assert.Equal(Int(expect, "appliedWithRisk"), result.AppliedWithRisk);
+        Assert.Equal(Bool(expect, "canApply"), result.CanApply);
+        Assert.Equal(Bool(expect, "isBlocked"), result.IsBlocked);
+        Assert.Equal(result.AppliedCount + result.SkippedCount + result.WithheldCount == 0, result.IsEmpty);
+
+        SourceSyncApprovalItem? first = result.Applied.FirstOrDefault();
+        if (first is not null)
+        {
+            Assert.True(result.IsApplied(first.SyncSourceId), name + " should report " + first.SyncSourceId + " as applied");
+            Assert.Same(first, result.Find(first.SyncSourceId));
+        }
+
+        SourceSyncApprovalItem? blocked = result.Withheld.FirstOrDefault();
+        if (blocked is not null)
+        {
+            Assert.True(result.IsWithheld(blocked.SyncSourceId), name + " should report " + blocked.SyncSourceId + " as withheld");
+        }
+    }
+
+    private static SourceSyncApprovalItem ApprovalItemOf(JsonElement entry) => new()
+    {
+        SyncSourceId = Text(entry, "syncSourceId"),
+        Reason = Text(entry, "reason"),
+        Action = Enum.Parse<SourceSyncAction>(Text(entry, "action"), ignoreCase: false),
+        RequiresApproval = Bool(entry, "requiresApproval"),
+        DisplayName = NullableText(entry, "displayName"),
+        ServerId = NullableText(entry, "serverId"),
+        SourceType = NullableText(entry, "sourceType"),
+        NormalizedUrl = NullableText(entry, "normalizedUrl"),
+        LocalRevision = NumberOrNull(entry, "localRevision"),
+        RemoteRevision = NumberOrNull(entry, "remoteRevision"),
+    };
+
+    private static SourceSyncApprovalDecision DecisionOf(JsonElement entry) =>
+        Text(entry, "choice") == "Allow"
+            ? SourceSyncApprovalDecision.Allow(Text(entry, "syncSourceId"))
+            : SourceSyncApprovalDecision.Skip(Text(entry, "syncSourceId"));
+
+    private static long? NumberOrNull(JsonElement entry, string name) =>
+        entry.GetProperty(name) is { ValueKind: JsonValueKind.Number } value ? value.GetInt64() : null;
+
+    private static string DescribeApprovalItem(SourceSyncApprovalItem item) => string.Join(
+        "|",
+        item.SyncSourceId,
+        item.Action.ToString(),
+        item.Reason,
+        item.RequiresApproval,
+        item.DisplayName ?? "-",
+        item.ServerId ?? "-",
+        item.SourceType ?? "-",
+        item.NormalizedUrl ?? "-",
+        item.LocalRevision?.ToString() ?? "-",
+        item.RemoteRevision?.ToString() ?? "-");
+
+    private static string DescribeApprovalItemJson(JsonElement item) => string.Join(
+        "|",
+        Text(item, "syncSourceId"),
+        Text(item, "action"),
+        Text(item, "reason"),
+        Bool(item, "requiresApproval"),
+        NullableText(item, "displayName") ?? "-",
+        NullableText(item, "serverId") ?? "-",
+        NullableText(item, "sourceType") ?? "-",
+        NullableText(item, "normalizedUrl") ?? "-",
+        NumberOrNull(item, "localRevision")?.ToString() ?? "-",
+        NumberOrNull(item, "remoteRevision")?.ToString() ?? "-");
+
     private static string Sha256Hex(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
     // ------------------------------------------------------------- structural assertions
