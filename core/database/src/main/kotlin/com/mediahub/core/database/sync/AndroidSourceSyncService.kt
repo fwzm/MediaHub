@@ -17,7 +17,9 @@ import com.mediahub.core.common.sync.SourceSyncFingerprints
 import com.mediahub.core.common.sync.SourceSyncLocalIds
 import com.mediahub.core.common.sync.SourceSyncPlanner
 import com.mediahub.core.common.sync.SourceSyncReasons
+import com.mediahub.core.common.sync.SourceSyncSecrets
 import com.mediahub.core.common.sync.SyncCapabilities
+import com.mediahub.core.common.sync.SyncRoundReasons
 import com.mediahub.core.common.sync.SyncSourceTypeValue
 import com.mediahub.core.common.sync.SyncSourceTypes
 import com.mediahub.core.common.sync.SyncUrlNormalizer
@@ -43,9 +45,11 @@ import kotlin.coroutines.cancellation.CancellationException
  * 实测 apply=2 / requiresApproval=1 / ignored=1）。这里保留 unsupported 是为了让调用方能把
  * "已保存但暂不支持"单独展示给用户，同时仍能与 CLI 的计数逐项对照。
  *
- * 两条永不退让的规则：
+ * 三条永不退让的规则：
  * - 墓碑**不删**本地来源（[SourceSyncStore] 根本没有删除方法），只进 requiresApproval 或 ignored；
- * - 未知 wire 类型**不落库**，原始串保留在候选里（D3），将来版本可接管。
+ * - 未知 wire 类型**不落库**，原始串保留在候选里（D3），将来版本可接管；
+ * - 带凭据块的记录**不落库**（W6-74，理由 secrets-require-approval）：本端用不了对端密文，
+ *   静默写一条"没有凭据的来源"或静默剥掉凭据块，都是在替用户做他没有做的决定。
  *
  * 幂等：第二次导入同一份信封时，来源记录的修订号相等、内容逐字段相等 → 规划器给出 NoChange，
  * 本服务一件也不写。内容同一性由 [SourceSyncFingerprints] 负责（内容摘要不含修订号），
@@ -101,6 +105,16 @@ class AndroidSourceSyncService(
         val locals = store.listLocalSources()
         val plan = SourceSyncPlanner.plan(envelope, locals)
 
+        // W6-74：凭据闸门。对端记录只要带非 null 的 secrets 块，就一律不写、转人工确认，理由码
+        // 与 Windows SourceSyncImportRound.Preview 逐字一致（secrets-require-approval）。
+        // 覆盖是无条件的：Windows 也是不看规划器原来给什么理由，直接盖章要求确认。
+        val withheldIndexes = secretsWithheldIndexes(envelope)
+        val gated = gateSecrets(plan.items, withheldIndexes)
+
+        // W6-74：读上一轮基线。只用于汇报"上次跟这台设备收敛到第几条"，不参与规划——
+        // 两端都不拿基线改判，免得出现"基线坏了就换一种合并结果"的隐式分支。
+        val peerBaseline = loadPeerBaseline(envelope.deviceId)
+
         val applied = ArrayList<AppliedSourceChange>()
         val failed = ArrayList<SourceSyncCandidate>()
         // W6-72：只有真正写进库的条目才进对端基线（Windows W6-10 同口径）。
@@ -109,7 +123,7 @@ class AndroidSourceSyncService(
         val failedIndexes = HashSet<Int>()
 
         for (index in envelope.sources.indices) {
-            val candidate = plan.items[index]
+            val candidate = gated[index]
             if (!isWritable(candidate)) continue
             val record = envelope.sources[index]
 
@@ -169,12 +183,15 @@ class AndroidSourceSyncService(
         val ignored = ArrayList<SourceSyncCandidate>()
         val pending = ArrayList<SourceSyncCandidate>()
         val unsupported = ArrayList<SourceSyncCandidate>()
-        for (index in plan.items.indices) {
-            val candidate = plan.items[index]
+        for (index in gated.indices) {
+            val candidate = gated[index]
             when {
                 candidate.action == SourceSyncAction.UNSUPPORTED -> unsupported.add(candidate)
                 writtenIndexes.contains(index) -> Unit
                 failedIndexes.contains(index) -> Unit
+                // W6-74：带凭据的条目不论规划器怎么判（连 NoChange / IgnoreStale 也算）都要人看过，
+                // 与 Windows ApplyAsync 的 approval gate 一致——那里也是先看 RequiresApproval。
+                withheldIndexes.contains(index) -> pending.add(candidate)
                 candidate.action == SourceSyncAction.NO_CHANGE ||
                     candidate.action == SourceSyncAction.IGNORE_STALE -> ignored.add(candidate)
                 else -> pending.add(candidate)
@@ -195,6 +212,9 @@ class AndroidSourceSyncService(
             baselineSaved = baseline?.saved == true,
             baselineRejectedSyncSourceIds = baseline?.rejectedSyncSourceIds ?: emptyList(),
             baselineRejectionReason = baseline?.reason,
+            baselineKnown = peerBaseline?.isEmpty == false,
+            baselineEntryCount = peerBaseline?.entries?.size ?: 0,
+            secretsWithheldSyncSourceIds = withheldIndexes.sorted().map { envelope.sources[it].syncSourceId.trim() },
         )
     }
 
@@ -306,6 +326,65 @@ class AndroidSourceSyncService(
     }
 
     // ---------------------------------------------------------------- 内部
+
+    /**
+     * W6-74：信封里带真凭据的来源下标（规划器把来源排在墓碑之前，所以下标与 items 前 N 项一一对应）。
+     *
+     * 判据只有一条，统一在 [SourceSyncSecrets.carriesBlock]：secrets 存在且不是 JSON null。
+     */
+    private fun secretsWithheldIndexes(envelope: SourceSyncEnvelope): Set<Int> {
+        val indexes = HashSet<Int>()
+        for (index in envelope.sources.indices) {
+            if (SourceSyncSecrets.carriesBlock(envelope.sources[index])) indexes.add(index)
+        }
+        return indexes
+    }
+
+    /**
+     * W6-74：把带凭据的候选改判成"必须人工确认"。
+     *
+     * 只换理由与 requiresUserApproval，动作/修订号/候选 serverId 全部保留：审批界面要能显示
+     * "这是对哪一条的哪个动作要确认"，改动作会让审批结果对不上用户看到的描述。
+     */
+    private fun gateSecrets(
+        items: List<SourceSyncCandidate>,
+        withheldIndexes: Set<Int>,
+    ): List<SourceSyncCandidate> {
+        if (items.isEmpty() || withheldIndexes.isEmpty()) return items
+        val gated = ArrayList<SourceSyncCandidate>(items.size)
+        for (index in items.indices) {
+            val candidate = items[index]
+            gated.add(
+                if (withheldIndexes.contains(index)) {
+                    candidate.copy(
+                        reason = SyncRoundReasons.SECRETS_REQUIRE_APPROVAL,
+                        requiresUserApproval = true,
+                    )
+                } else {
+                    candidate
+                },
+            )
+        }
+        return gated
+    }
+
+    /**
+     * W6-74：读对端基线，读不出来就当不知道。
+     *
+     * [ISourceSyncBaselineStore.load] 本身约定不抛异常；这里再兜一层是防将来换成会抛的实现
+     * （例如读到半截文件）——读基线失败不该把整次导入变成失败。
+     */
+    private fun loadPeerBaseline(peerDeviceId: String): SourceSyncBaseline? {
+        val store = baselineStore ?: return null
+        if (peerDeviceId.isBlank()) return null
+        return try {
+            store.load(peerDeviceId)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Exception) {
+            null
+        }
+    }
 
     private fun isWritable(candidate: SourceSyncCandidate): Boolean =
         !candidate.requiresUserApproval &&
@@ -428,6 +507,16 @@ data class SourceSyncImportResult(
     val baselineRejectedSyncSourceIds: List<String> = emptyList(),
     /** W6-72：基线被拒/写失败时的稳定码。 */
     val baselineRejectionReason: String? = null,
+    /**
+     * W6-74：本轮读到的对端基线是否非空（"以前跟这台设备收敛过"）。
+     *
+     * 读文件失败、没有基线存储、或对端从没同步过，一律 false；导入本身不受影响。
+     */
+    val baselineKnown: Boolean = false,
+    /** W6-74：对端基线里已有的来源条数（[baselineKnown] 为 false 时恒为 0）。 */
+    val baselineEntryCount: Int = 0,
+    /** W6-74：因携带凭据块被扣下、转人工确认的 syncSourceId（按信封顺序，绝不带凭据内容）。 */
+    val secretsWithheldSyncSourceIds: List<String> = emptyList(),
     /** 非空表示整份信封没被读入（解析或版本校验失败），四个桶必为 0。 */
     val rejectedReason: String? = null,
     val rejectedMessage: String? = null,
@@ -437,6 +526,8 @@ data class SourceSyncImportResult(
     val ignoredCount: Int get() = ignored.size
     val unsupportedCount: Int get() = unsupported.size
     val failedCount: Int get() = failed.size
+    /** W6-74：被凭据闸门扣下、等用户确认的条数。 */
+    val secretsWithheldCount: Int get() = secretsWithheldSyncSourceIds.size
 
     /** 计划条目总数（与信封 sources + deletions 数量一致，除非被拒绝读入）。 */
     val totalCount: Int get() = applied.size + requiresApproval.size + ignored.size + failed.size
