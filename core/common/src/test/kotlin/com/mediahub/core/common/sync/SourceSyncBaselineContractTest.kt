@@ -733,6 +733,158 @@ class SourceSyncBaselineContractTest {
 
     private fun candidateField(entry: JsonObject, name: String): String = nullableText(entry, name) ?: "-"
 
+    // ------------------------------------------------------------ 批准闸门（W6-77）
+
+    @Test
+    fun approval_cases_match_the_windows_contract() {
+        val codes = root.getValue("approvalCodes").jsonObject
+        assertEquals(
+            "永不放行的原因码",
+            listOf("secrets-require-approval", "unknown-source-type", "not-supported-on-windows"),
+            codes.getValue("neverAllowable").jsonArray.map { text(it) },
+        )
+        assertEquals(
+            "放行即覆盖的风险原因码",
+            listOf("delete-vs-update", "update-vs-delete", "field-conflict", "same-revision-different-content"),
+            codes.getValue("risky").jsonArray.map { text(it) },
+        )
+        assertEquals("模糊前缀", "ambiguous-", text(codes.getValue("ambiguousPrefix")))
+
+        var compared = 0
+        for (case in entries("approvalCases")) {
+            val name = text(case, "name")
+            val items = case.getValue("items").jsonArray.map { approvalItemOf(it) }
+            val decisions = case.getValue("decisions").jsonArray.map { decisionOf(it) }
+            assertEquals(name + ".rows", case.getValue("items").jsonArray.size, items.size)
+
+            val error = nullableText(case, "error")
+            if (error != null) {
+                val thrown = runCatching { SourceSyncApprovalGate.decide(items, decisions) }.exceptionOrNull()
+                assertTrue(name + " 应当抛 IllegalArgumentException，实际是 " + thrown, thrown is IllegalArgumentException)
+                val message = (thrown as IllegalArgumentException).message ?: ""
+                val expectedFragment = when (error) {
+                    "blank-decision-identity" -> "decision needs a syncSourceId"
+                    "blank-item-identity" -> "item needs a syncSourceId"
+                    else -> throw IllegalArgumentException("未知的错误标签 " + error)
+                }
+                assertTrue(name + ".error 应提到 " + expectedFragment + "，实际是 " + message, message.contains(expectedFragment))
+                compared++
+                continue
+            }
+
+            val result = SourceSyncApprovalGate.decide(items, decisions)
+            assertApproval(name, case.getValue("expect"), result)
+            assertEquals(name + ".输入条数不变", items.size, result.appliedCount + result.skippedCount + result.withheldCount)
+            compared++
+        }
+        assertEquals("比过的用例数", entries("approvalCases").size, compared)
+
+        var comparedRounds = 0
+        for (case in entries("approvalRoundCases")) {
+            val name = text(case, "name")
+            val round = roundResultOf(case.getValue("round"))
+            val decisions = case.getValue("decisions").jsonArray.map { decisionOf(it) }
+
+            // 适配器是这一段的主角：一轮条目没有 action，只有 kind + reason；行里显示的主地址也不做归一化。
+            val rows = (round.apply + round.requiresApproval).map { SourceSyncApprovalItem.fromRoundEntry(it) }
+            assertEquals(
+                name + ".行投影",
+                case.getValue("items").jsonArray.map { describeApprovalItem(it.jsonObject) },
+                rows.map { describeApprovalItemRow(it) },
+            )
+
+            val result = SourceSyncApprovalGate.decide(round, decisions)
+            assertApproval(name, case.getValue("expect"), result)
+            assertEquals(
+                name + ".ignored 不进闸门",
+                round.ignored.size,
+                case.getValue("round").jsonObject.getValue("ignored").jsonArray.size,
+            )
+            comparedRounds++
+        }
+        assertEquals("比过的轮次用例数", entries("approvalRoundCases").size, comparedRounds)
+    }
+
+    private fun assertApproval(name: String, expect: JsonElement, result: SourceSyncApprovalResult) {
+        val entry = expect.jsonObject
+        assertEquals(name + ".applied", entry.getValue("applied").jsonArray.map { text(it) }, result.applied.map { it.syncSourceId })
+        assertEquals(name + ".skipped", entry.getValue("skipped").jsonArray.map { text(it) }, result.skipped.map { it.syncSourceId })
+        assertEquals(name + ".withheld", entry.getValue("withheld").jsonArray.map { text(it) }, result.withheld.map { it.syncSourceId })
+        assertEquals(
+            name + ".blockingReasons",
+            entry.getValue("blockingReasons").jsonArray.map { text(it) },
+            result.blockingReasons,
+        )
+        assertEquals(name + ".acknowledgedRisk", boolean(entry, "acknowledgedRisk"), result.acknowledgedRisk)
+        assertEquals(name + ".appliedWithRisk", int(entry, "appliedWithRisk"), result.appliedWithRisk)
+        assertEquals(name + ".canApply", boolean(entry, "canApply"), result.canApply)
+        assertEquals(name + ".isBlocked", boolean(entry, "isBlocked"), result.isBlocked)
+        assertEquals(name + ".isEmpty", result.appliedCount + result.skippedCount + result.withheldCount == 0, result.isEmpty)
+        val firstApplied = result.applied.firstOrNull()
+        if (firstApplied != null) {
+            assertTrue(name + ".isApplied(" + firstApplied.syncSourceId + ")", result.isApplied(firstApplied.syncSourceId))
+            assertTrue(name + ".find(" + firstApplied.syncSourceId + ")", result.find(firstApplied.syncSourceId) === firstApplied)
+        }
+        val firstWithheld = result.withheld.firstOrNull()
+        if (firstWithheld != null) {
+            assertTrue(name + ".isWithheld(" + firstWithheld.syncSourceId + ")", result.isWithheld(firstWithheld.syncSourceId))
+        }
+    }
+
+    private fun approvalItemOf(element: JsonElement): SourceSyncApprovalItem {
+        val entry = element.jsonObject
+        return SourceSyncApprovalItem(
+            syncSourceId = text(entry, "syncSourceId"),
+            reason = text(entry, "reason"),
+            action = actionOf(text(entry, "action")),
+            requiresApproval = boolean(entry, "requiresApproval"),
+            displayName = nullableText(entry, "displayName"),
+            serverId = nullableText(entry, "serverId"),
+            sourceType = nullableText(entry, "sourceType"),
+            normalizedUrl = nullableText(entry, "normalizedUrl"),
+            localRevision = nullableLong(entry, "localRevision"),
+            remoteRevision = nullableLong(entry, "remoteRevision"),
+        )
+    }
+
+    private fun decisionOf(element: JsonElement): SourceSyncApprovalDecision {
+        val entry = element.jsonObject
+        val choice = when (text(entry, "choice")) {
+            "Allow" -> SourceSyncApprovalChoice.ALLOW
+            "Skip" -> SourceSyncApprovalChoice.SKIP
+            else -> throw IllegalArgumentException("未知的选择 " + text(entry, "choice"))
+        }
+        return SourceSyncApprovalDecision(text(entry, "syncSourceId"), choice)
+    }
+
+    private fun nullableLong(entry: JsonObject, name: String): Long? = nullableText(entry, name)?.toLong()
+
+    private fun describeApprovalItem(entry: JsonObject): String = listOf(
+        text(entry, "syncSourceId"),
+        actionOf(text(entry, "action")).name,
+        text(entry, "reason"),
+        boolean(entry, "requiresApproval").toString(),
+        nullableText(entry, "displayName") ?: "-",
+        nullableText(entry, "serverId") ?: "-",
+        nullableText(entry, "sourceType") ?: "-",
+        nullableText(entry, "normalizedUrl") ?: "-",
+        nullableLong(entry, "localRevision")?.toString() ?: "-",
+        nullableLong(entry, "remoteRevision")?.toString() ?: "-",
+    ).joinToString("|")
+
+    private fun describeApprovalItemRow(item: SourceSyncApprovalItem): String = listOf(
+        item.syncSourceId,
+        item.action.name,
+        item.reason,
+        item.requiresApproval.toString(),
+        item.displayName ?: "-",
+        item.serverId ?: "-",
+        item.sourceType ?: "-",
+        item.normalizedUrl ?: "-",
+        item.localRevision?.toString() ?: "-",
+        item.remoteRevision?.toString() ?: "-",
+    ).joinToString("|")
+
     private companion object {
         private const val RESOURCE_PATH = "/sync/baseline-vectors.json"
         private const val HEX_LOWER = "0123456789abcdef"

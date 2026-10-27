@@ -8937,5 +8937,1512 @@
         ]
       }
     }
+  ],
+  "approvalCodes": {
+    "neverAllowable": [
+      "secrets-require-approval",
+      "unknown-source-type",
+      "not-supported-on-windows"
+    ],
+    "risky": [
+      "delete-vs-update",
+      "update-vs-delete",
+      "field-conflict",
+      "same-revision-different-content"
+    ],
+    "ambiguousPrefix": "ambiguous-"
+  },
+  "approvalCases": [
+    {
+      "name": "no-items",
+      "items": [],
+      "decisions": [],
+      "expect": {
+        "applied": [],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "plain-create-applies-without-a-decision",
+      "items": [
+        {
+          "syncSourceId": "m-1",
+          "action": "Create",
+          "reason": "new-source",
+          "requiresApproval": false,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [],
+      "expect": {
+        "applied": [
+          "m-1"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "approval-entry-defaults-to-skip",
+      "items": [
+        {
+          "syncSourceId": "m-2",
+          "action": "Update",
+          "reason": "field-conflict",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [],
+      "expect": {
+        "applied": [],
+        "skipped": [
+          "m-2"
+        ],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "explicit-allow-applies-with-acknowledged-risk",
+      "items": [
+        {
+          "syncSourceId": "m-2",
+          "action": "Update",
+          "reason": "field-conflict",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-2",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [
+          "m-2"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": true,
+        "appliedWithRisk": 1,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "explicit-skip-outranks-a-default-apply",
+      "items": [
+        {
+          "syncSourceId": "m-3",
+          "action": "Create",
+          "reason": "new-source",
+          "requiresApproval": false,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-3",
+          "choice": "Skip"
+        }
+      ],
+      "expect": {
+        "applied": [],
+        "skipped": [
+          "m-3"
+        ],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "skip-outranks-allow-for-the-same-identity",
+      "items": [
+        {
+          "syncSourceId": "m-4",
+          "action": "Update",
+          "reason": "field-conflict",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-4",
+          "choice": "Allow"
+        },
+        {
+          "syncSourceId": "m-4",
+          "choice": "Skip"
+        }
+      ],
+      "expect": {
+        "applied": [],
+        "skipped": [
+          "m-4"
+        ],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "last-decision-wins",
+      "items": [
+        {
+          "syncSourceId": "m-5",
+          "action": "Update",
+          "reason": "field-conflict",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-5",
+          "choice": "Skip"
+        },
+        {
+          "syncSourceId": "m-5",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [
+          "m-5"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": true,
+        "appliedWithRisk": 1,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "decisions-are-trimmed-and-case-insensitive",
+      "items": [
+        {
+          "syncSourceId": "M-6",
+          "action": "Update",
+          "reason": "tombstone-requires-approval",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "  m-6  ",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [
+          "M-6"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 1,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "a-decision-for-an-unknown-identity-changes-nothing",
+      "items": [
+        {
+          "syncSourceId": "m-7",
+          "action": "Create",
+          "reason": "new-source",
+          "requiresApproval": false,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-99",
+          "choice": "Allow"
+        },
+        {
+          "syncSourceId": "m-98",
+          "choice": "Skip"
+        }
+      ],
+      "expect": {
+        "applied": [
+          "m-7"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "secrets-are-never-allowable",
+      "items": [
+        {
+          "syncSourceId": "m-8",
+          "action": "Update",
+          "reason": "secrets-require-approval",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-8",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [],
+        "skipped": [],
+        "withheld": [
+          "m-8"
+        ],
+        "blockingReasons": [
+          "secrets-require-approval"
+        ],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": true
+      },
+      "error": null
+    },
+    {
+      "name": "unknown-source-type-is-never-allowable",
+      "items": [
+        {
+          "syncSourceId": "m-9",
+          "action": "Unsupported",
+          "reason": "unknown-source-type",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-9",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [],
+        "skipped": [],
+        "withheld": [
+          "m-9"
+        ],
+        "blockingReasons": [
+          "unknown-source-type"
+        ],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": true
+      },
+      "error": null
+    },
+    {
+      "name": "not-supported-on-windows-is-never-allowable",
+      "items": [
+        {
+          "syncSourceId": "m-10",
+          "action": "Unsupported",
+          "reason": "not-supported-on-windows",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-10",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [],
+        "skipped": [],
+        "withheld": [
+          "m-10"
+        ],
+        "blockingReasons": [
+          "not-supported-on-windows"
+        ],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": true
+      },
+      "error": null
+    },
+    {
+      "name": "stale-entries-are-skipped-not-applied",
+      "items": [
+        {
+          "syncSourceId": "m-11",
+          "action": "IgnoreStale",
+          "reason": "stale-revision",
+          "requiresApproval": false,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [],
+      "expect": {
+        "applied": [],
+        "skipped": [
+          "m-11"
+        ],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "no-change-is-skipped",
+      "items": [
+        {
+          "syncSourceId": "m-12",
+          "action": "NoChange",
+          "reason": "up-to-date",
+          "requiresApproval": false,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [],
+      "expect": {
+        "applied": [],
+        "skipped": [
+          "m-12"
+        ],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "unsupported-without-a-reason-is-skipped",
+      "items": [
+        {
+          "syncSourceId": "m-13",
+          "action": "Unsupported",
+          "reason": "",
+          "requiresApproval": false,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [],
+      "expect": {
+        "applied": [],
+        "skipped": [
+          "m-13"
+        ],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "ambiguous-legacy-identity-is-allowable-with-risk",
+      "items": [
+        {
+          "syncSourceId": "m-14",
+          "action": "Adopt",
+          "reason": "ambiguous-legacy-identity",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-14",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [
+          "m-14"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": true,
+        "appliedWithRisk": 1,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "legacy-identity-match-is-allowable-without-a-risk-mark",
+      "items": [
+        {
+          "syncSourceId": "m-15",
+          "action": "Adopt",
+          "reason": "legacy-identity-match",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-15",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [
+          "m-15"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 1,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "tombstone-approval-is-allowable-without-a-risk-mark",
+      "items": [
+        {
+          "syncSourceId": "m-16",
+          "action": "Delete",
+          "reason": "tombstone-requires-approval",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-16",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [
+          "m-16"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 1,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "all-four-risky-reasons-are-marked",
+      "items": [
+        {
+          "syncSourceId": "m-17",
+          "action": "Conflict",
+          "reason": "delete-vs-update",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        },
+        {
+          "syncSourceId": "m-18",
+          "action": "Conflict",
+          "reason": "update-vs-delete",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        },
+        {
+          "syncSourceId": "m-19",
+          "action": "Conflict",
+          "reason": "field-conflict",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        },
+        {
+          "syncSourceId": "m-20",
+          "action": "Conflict",
+          "reason": "same-revision-different-content",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-17",
+          "choice": "Allow"
+        },
+        {
+          "syncSourceId": "m-18",
+          "choice": "Allow"
+        },
+        {
+          "syncSourceId": "m-19",
+          "choice": "Allow"
+        },
+        {
+          "syncSourceId": "m-20",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [
+          "m-17",
+          "m-18",
+          "m-19",
+          "m-20"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": true,
+        "appliedWithRisk": 4,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null
+    },
+    {
+      "name": "blocking-reasons-are-deduped-in-first-appearance-order",
+      "items": [
+        {
+          "syncSourceId": "m-21",
+          "action": "Update",
+          "reason": "secrets-require-approval",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        },
+        {
+          "syncSourceId": "m-22",
+          "action": "Unsupported",
+          "reason": "unknown-source-type",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        },
+        {
+          "syncSourceId": "m-23",
+          "action": "Create",
+          "reason": "secrets-require-approval",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-21",
+          "choice": "Allow"
+        },
+        {
+          "syncSourceId": "m-22",
+          "choice": "Allow"
+        },
+        {
+          "syncSourceId": "m-23",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [],
+        "skipped": [],
+        "withheld": [
+          "m-21",
+          "m-22",
+          "m-23"
+        ],
+        "blockingReasons": [
+          "secrets-require-approval",
+          "unknown-source-type"
+        ],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": true
+      },
+      "error": null
+    },
+    {
+      "name": "the-three-buckets-partition-the-input",
+      "items": [
+        {
+          "syncSourceId": "m-24",
+          "action": "Create",
+          "reason": "new-source",
+          "requiresApproval": false,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        },
+        {
+          "syncSourceId": "m-25",
+          "action": "Conflict",
+          "reason": "field-conflict",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        },
+        {
+          "syncSourceId": "m-26",
+          "action": "Update",
+          "reason": "secrets-require-approval",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        },
+        {
+          "syncSourceId": "m-27",
+          "action": "IgnoreStale",
+          "reason": "stale-revision",
+          "requiresApproval": false,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        },
+        {
+          "syncSourceId": "m-28",
+          "action": "Update",
+          "reason": "tombstone-requires-approval",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "m-28",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [
+          "m-24",
+          "m-28"
+        ],
+        "skipped": [
+          "m-25",
+          "m-27"
+        ],
+        "withheld": [
+          "m-26"
+        ],
+        "blockingReasons": [
+          "secrets-require-approval"
+        ],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 1,
+        "canApply": true,
+        "isBlocked": true
+      },
+      "error": null
+    },
+    {
+      "name": "a-blank-decision-identity-is-rejected",
+      "items": [
+        {
+          "syncSourceId": "m-29",
+          "action": "Create",
+          "reason": "new-source",
+          "requiresApproval": false,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "   ",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": false
+      },
+      "error": "blank-decision-identity"
+    },
+    {
+      "name": "a-blank-item-identity-is-rejected",
+      "items": [
+        {
+          "syncSourceId": "  ",
+          "action": "Create",
+          "reason": "new-source",
+          "requiresApproval": false,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": null,
+          "remoteRevision": null
+        }
+      ],
+      "decisions": [],
+      "expect": {
+        "applied": [],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": false
+      },
+      "error": "blank-item-identity"
+    }
+  ],
+  "approvalRoundCases": [
+    {
+      "name": "round-apply-bucket-needs-no-decision",
+      "items": [
+        {
+          "syncSourceId": "r-1",
+          "action": "Create",
+          "reason": "apply-remote-change",
+          "requiresApproval": false,
+          "displayName": "NAS A",
+          "serverId": null,
+          "sourceType": "webdav",
+          "normalizedUrl": "https://nas-a.local/",
+          "localRevision": 0,
+          "remoteRevision": 3
+        }
+      ],
+      "decisions": [],
+      "expect": {
+        "applied": [
+          "r-1"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null,
+      "round": {
+        "apply": [
+          {
+            "syncSourceId": "r-1",
+            "direction": "Pull",
+            "kind": "Added",
+            "reason": "apply-remote-change",
+            "record": {
+              "syncSourceId": "r-1",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "NAS A",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://nas-a.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 3,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 3,
+            "requiresApproval": false
+          }
+        ],
+        "requiresApproval": [],
+        "ignored": []
+      }
+    },
+    {
+      "name": "round-approval-bucket-defaults-to-skip",
+      "items": [
+        {
+          "syncSourceId": "r-2",
+          "action": "Create",
+          "reason": "apply-remote-change",
+          "requiresApproval": false,
+          "displayName": "NAS B",
+          "serverId": null,
+          "sourceType": "webdav",
+          "normalizedUrl": "https://nas-b.local/",
+          "localRevision": 0,
+          "remoteRevision": 2
+        },
+        {
+          "syncSourceId": "r-3",
+          "action": "Update",
+          "reason": "field-conflict",
+          "requiresApproval": true,
+          "displayName": "NAS C",
+          "serverId": null,
+          "sourceType": "webdav",
+          "normalizedUrl": "https://nas-c.local/",
+          "localRevision": 5,
+          "remoteRevision": 6
+        }
+      ],
+      "decisions": [],
+      "expect": {
+        "applied": [
+          "r-2"
+        ],
+        "skipped": [
+          "r-3"
+        ],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null,
+      "round": {
+        "apply": [
+          {
+            "syncSourceId": "r-2",
+            "direction": "Pull",
+            "kind": "Added",
+            "reason": "apply-remote-change",
+            "record": {
+              "syncSourceId": "r-2",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "NAS B",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://nas-b.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 2,
+            "requiresApproval": false
+          }
+        ],
+        "requiresApproval": [
+          {
+            "syncSourceId": "r-3",
+            "direction": "Both",
+            "kind": "Updated",
+            "reason": "field-conflict",
+            "record": {
+              "syncSourceId": "r-3",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "NAS C",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://nas-c.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 6,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 5,
+            "remoteRevision": 6,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": [
+          {
+            "syncSourceId": "r-4",
+            "direction": "Pull",
+            "kind": "Updated",
+            "reason": "already-applied",
+            "record": {
+              "syncSourceId": "r-4",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "NAS D",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://nas-d.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 4,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 4,
+            "requiresApproval": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "round-approval-bucket-can-be-allowed",
+      "items": [
+        {
+          "syncSourceId": "r-5",
+          "action": "Update",
+          "reason": "field-conflict",
+          "requiresApproval": true,
+          "displayName": "NAS E",
+          "serverId": null,
+          "sourceType": "webdav",
+          "normalizedUrl": "https://nas-e.local/",
+          "localRevision": 7,
+          "remoteRevision": 8
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "r-5",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [
+          "r-5"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": true,
+        "appliedWithRisk": 1,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null,
+      "round": {
+        "apply": [],
+        "requiresApproval": [
+          {
+            "syncSourceId": "r-5",
+            "direction": "Both",
+            "kind": "Updated",
+            "reason": "field-conflict",
+            "record": {
+              "syncSourceId": "r-5",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "NAS E",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://nas-e.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 8,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 7,
+            "remoteRevision": 8,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": []
+      }
+    },
+    {
+      "name": "round-entry-row-shows-the-primary-endpoint",
+      "items": [
+        {
+          "syncSourceId": "r-6",
+          "action": "Create",
+          "reason": "apply-remote-change",
+          "requiresApproval": false,
+          "displayName": "NAS F",
+          "serverId": null,
+          "sourceType": "webdav",
+          "normalizedUrl": "https://primary.local/",
+          "localRevision": 0,
+          "remoteRevision": 3
+        }
+      ],
+      "decisions": [],
+      "expect": {
+        "applied": [
+          "r-6"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null,
+      "round": {
+        "apply": [
+          {
+            "syncSourceId": "r-6",
+            "direction": "Pull",
+            "kind": "Added",
+            "reason": "apply-remote-change",
+            "record": {
+              "syncSourceId": "r-6",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "NAS F",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://secondary.local:8443/x/",
+                  "isPrimary": false,
+                  "enabled": true,
+                  "sortOrder": 2
+                },
+                {
+                  "url": "https://primary.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 9
+                }
+              ],
+              "recordRevision": 3,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 3,
+            "requiresApproval": false
+          }
+        ],
+        "requiresApproval": [],
+        "ignored": []
+      }
+    },
+    {
+      "name": "round-tombstone-row-carries-no-record-fields",
+      "items": [
+        {
+          "syncSourceId": "r-7",
+          "action": "Delete",
+          "reason": "tombstone-requires-approval",
+          "requiresApproval": true,
+          "displayName": null,
+          "serverId": null,
+          "sourceType": null,
+          "normalizedUrl": null,
+          "localRevision": 4,
+          "remoteRevision": 4
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "r-7",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [
+          "r-7"
+        ],
+        "skipped": [],
+        "withheld": [],
+        "blockingReasons": [],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 1,
+        "canApply": true,
+        "isBlocked": false
+      },
+      "error": null,
+      "round": {
+        "apply": [],
+        "requiresApproval": [
+          {
+            "syncSourceId": "r-7",
+            "direction": "Pull",
+            "kind": "Removed",
+            "reason": "tombstone-requires-approval",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "r-7",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 4
+            },
+            "conflictingFields": [],
+            "localRevision": 4,
+            "remoteRevision": 4,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": []
+      }
+    },
+    {
+      "name": "round-secrets-entry-is-withheld",
+      "items": [
+        {
+          "syncSourceId": "r-8",
+          "action": "Create",
+          "reason": "secrets-require-approval",
+          "requiresApproval": true,
+          "displayName": "NAS G",
+          "serverId": null,
+          "sourceType": "webdav",
+          "normalizedUrl": "https://nas-g.local/",
+          "localRevision": 0,
+          "remoteRevision": 2
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "r-8",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [],
+        "skipped": [],
+        "withheld": [
+          "r-8"
+        ],
+        "blockingReasons": [
+          "secrets-require-approval"
+        ],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": true
+      },
+      "error": null,
+      "round": {
+        "apply": [],
+        "requiresApproval": [
+          {
+            "syncSourceId": "r-8",
+            "direction": "Pull",
+            "kind": "Added",
+            "reason": "secrets-require-approval",
+            "record": {
+              "syncSourceId": "r-8",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "NAS G",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://nas-g.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 2,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": []
+      }
+    },
+    {
+      "name": "round-unsupported-type-entry-is-withheld",
+      "items": [
+        {
+          "syncSourceId": "r-9",
+          "action": "Create",
+          "reason": "unknown-source-type",
+          "requiresApproval": true,
+          "displayName": "Odd",
+          "serverId": null,
+          "sourceType": "MyThing",
+          "normalizedUrl": "https://odd.local/",
+          "localRevision": 0,
+          "remoteRevision": 1
+        }
+      ],
+      "decisions": [
+        {
+          "syncSourceId": "r-9",
+          "choice": "Allow"
+        }
+      ],
+      "expect": {
+        "applied": [],
+        "skipped": [],
+        "withheld": [
+          "r-9"
+        ],
+        "blockingReasons": [
+          "unknown-source-type"
+        ],
+        "acknowledgedRisk": false,
+        "appliedWithRisk": 0,
+        "canApply": false,
+        "isBlocked": true
+      },
+      "error": null,
+      "round": {
+        "apply": [],
+        "requiresApproval": [
+          {
+            "syncSourceId": "r-9",
+            "direction": "Pull",
+            "kind": "Added",
+            "reason": "unknown-source-type",
+            "record": {
+              "syncSourceId": "r-9",
+              "sourceTypeRaw": "MyThing",
+              "sourceTypeWire": "mything",
+              "displayName": "Odd",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://odd.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 1,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": []
+      }
+    }
   ]
 }

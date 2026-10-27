@@ -8,6 +8,7 @@ import com.mediahub.core.common.sync.SourceSyncCodec
 import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncLocalIds
 import com.mediahub.core.common.sync.SourceTombstone
+import kotlinx.serialization.json.JsonPrimitive
 import com.mediahub.core.common.sync.SyncCapabilities
 import com.mediahub.core.common.sync.SyncMergeDirection
 import com.mediahub.core.common.sync.SyncRoundReasons
@@ -236,6 +237,79 @@ class SourceSyncRoundPreviewTest {
         assertEquals(0, baselines.writeCount)
     }
 
+    // ---------------------------------------------------------- W6-77 默认裁决
+
+    @Test
+    fun the_default_gate_lets_a_plain_pull_through() {
+        val store = FakeStore()
+        val baselines = InMemorySourceSyncBaselineStore()
+
+        val preview = runBlocking { service(store, baselines).planRound(SourceSyncCodec.encode(envelope(listOf(record("sync-a"))))) }
+
+        assertEquals(1, preview.pullCount)
+        assertEquals(1, preview.gateAppliedCount)
+        assertTrue(preview.canApply)
+        assertEquals(0, preview.withheldCount)
+        assertTrue(preview.blockingReasons.isEmpty())
+        assertEquals("sync-a", preview.gate.applied.single().syncSourceId)
+    }
+
+    @Test
+    fun an_unknown_source_type_is_withheld_instead_of_merely_skipped() {
+        val store = FakeStore()
+        val baselines = InMemorySourceSyncBaselineStore()
+
+        val preview = runBlocking {
+            service(store, baselines).planRound(SourceSyncCodec.encode(envelope(listOf(record("sync-a", wire = "MyThing")))))
+        }
+
+        assertEquals(SyncRoundReasons.UNKNOWN_SOURCE_TYPE, preview.round.requiresApproval.single().reason)
+        assertEquals(0, preview.gateAppliedCount)
+        assertFalse(preview.canApply)
+        assertEquals(1, preview.withheldCount)
+        assertEquals(listOf(SyncRoundReasons.UNKNOWN_SOURCE_TYPE), preview.blockingReasons)
+        assertEquals("sync-a", preview.gate.withheld.single().syncSourceId)
+    }
+
+    @Test
+    fun a_tombstone_for_a_known_source_is_only_skipped_by_the_default_gate() {
+        val store = FakeStore()
+        val baselines = InMemorySourceSyncBaselineStore()
+        val service = service(store, baselines)
+        runBlocking { service.importEnvelope(SourceSyncCodec.encode(envelope(listOf(record("sync-a", revision = 2L))))) }
+
+        // 墓碑认得基线：合并器要求人工确认，但「删除」属于允许范围，默认只是跳过，不是永久扣住。
+        val preview = runBlocking {
+            service.planRound(
+                SourceSyncCodec.encode(envelope(deletions = listOf(SourceTombstone("sync-a", 1_700_000_001_000L, 3L)))),
+            )
+        }
+
+        assertEquals(SyncRoundReasons.TOMBSTONE_REQUIRES_APPROVAL, preview.round.requiresApproval.single().reason)
+        assertFalse(preview.canApply)
+        assertEquals(0, preview.withheldCount)
+        assertEquals(listOf("sync-a"), preview.gate.skipped.map { it.syncSourceId })
+    }
+
+    @Test
+    fun a_source_carrying_credentials_is_withheld_by_the_gate() {
+        val store = FakeStore()
+        val baselines = InMemorySourceSyncBaselineStore()
+
+        val preview = runBlocking {
+            service(store, baselines).planRound(
+                SourceSyncCodec.encode(envelope(listOf(record("sync-a", secrets = JsonPrimitive("sealed-blob"))))),
+            )
+        }
+
+        assertEquals(SyncRoundReasons.SECRETS_REQUIRE_APPROVAL, preview.round.requiresApproval.single().reason)
+        assertEquals(0, preview.gateAppliedCount)
+        assertEquals(1, preview.withheldCount)
+        assertEquals(listOf(SyncRoundReasons.SECRETS_REQUIRE_APPROVAL), preview.blockingReasons)
+        assertEquals(0, store.createCalls)
+        assertEquals(0, baselines.writeCount)
+    }
+
     // ------------------------------------------------------------ 夹具
 
     private fun service(
@@ -253,6 +327,7 @@ class SourceSyncRoundPreviewTest {
         id: String,
         wire: String = "emby",
         revision: Long = 1L,
+        secrets: kotlinx.serialization.json.JsonElement? = null,
     ): SourceRecord = SourceRecord(
         syncSourceId = id,
         sourceType = SyncSourceTypeValue.parse(wire),
@@ -261,6 +336,7 @@ class SourceSyncRoundPreviewTest {
             SourceEndpoint(url = "http://nas-a:8096/emby", isPrimary = true, enabled = true, sortOrder = 0),
         ),
         recordRevision = revision,
+        secrets = secrets,
     )
 
     private fun snapshot(
