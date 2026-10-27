@@ -9,11 +9,11 @@ Windows 侧**早已有全部实现**（ADR-S005 起：`PairedDevice.cs` / `Paire
 
 1. **修一个真缺陷**：`FilePairedDeviceStore.LoadLocked()` 违反「读永不抛」；
 2. **加孪生契约用例**：`windows/tests/MediaHub.Tests/PairedDeviceContractTests.cs` 14 `[Fact]`，与 Kotlin `PairedDeviceContractTest` 同名同义、消费同一份黄金向量；
-3. **挂测试资源**：`windows/tests/assets/paired-device-vectors.json`（36670 B）进 `MediaHub.Tests.csproj` 的 `Content`。
+3. **挂测试资源**：`windows/tests/assets/paired-device-vectors.json`（36592 B）进 `MediaHub.Tests.csproj` 的 `Content`。
 
 生成器与向量都在仓库外：`D:/mh-verify/paired-device-vectors/`（`Program.cs` 520 行，`ProjectReference` 指向权威 `MediaHub.Sync.csproj`）。
 运行方式：`cd D:/mh-verify/paired-device-vectors && dotnet run -c Release`（必须用 `ops_bash`，`run_code` 的 `execFileSync` 会报 `NuGet.targets(780,5) Value cannot be null (Parameter 'path1')`）。
-跑完把 `vectors.json` 原样复制到两处：`D:/mh-w6/windows/tests/assets/paired-device-vectors.json` 与主树 `core/common/src/test/resources/pairing/paired-device-vectors.json`（逐字节相同，sha256 `4afe203293c57fa7e715d46d09e05117dd18ec49039db8cf2348c9737355db8b`）。
+跑完把 `vectors.json` 原样复制到两处：`D:/mh-w6/windows/tests/assets/paired-device-vectors.json` 与主树 `core/common/src/test/resources/pairing/paired-device-vectors.json`（逐字节相同，sha256 `4adc50d7f16b870d3cb9e5936edde11d18dee496709a5684b95dc9670f0e04e3`）。
 
 ## 2. 修掉的 Windows 缺陷：读路径会抛 InvalidOperationException
 
@@ -84,7 +84,29 @@ Kotlin 侧没有这个坑：`PairedDeviceDocument.decode` 第一层就判 `JsonP
 C# 写法：`devices.OrderBy(d => d.DeviceId, StringComparer.OrdinalIgnoreCase).ThenBy(d => d.DeviceId, StringComparer.Ordinal)`；
 Kotlin 写法要用显式类型参数：`devices.sortedWith(compareBy<PairedDevice, String>(String.CASE_INSENSITIVE_ORDER) { device -> device.deviceId }.thenBy { device -> device.deviceId })`（不显式会报 `Cannot infer type for this parameter`）。
 
-## 5. 本机实跑
+## 5. 时区耦合缺陷：本地绿、CI 红（本轮真修）
+
+首版黄金向量把「首次配对 / 最后相见 / 最近配对」的时间串按**生成机器的本地时区**（Asia/Shanghai, UTC+8）写死，
+例如 `describeCases[unknown-times].describe` 含 `2026-10-24 08:00`、`presenterCases[two-devices].rows[0].lastSeenLabel` 是 `最后相见 2026-10-24 08:00`。
+而两端实现都是「本地时区渲染」（C# `PairedDevice.FormatEpoch` / `PairedDeviceListView.FormatEpoch` 走 `ToLocalTime()`，Kotlin 走 `ZoneId.systemDefault()`）——
+CI runner 是 UTC，同一 epoch `1792800000000` 渲染成 `2026-10-24 00:00`，于是：
+
+| run | head | 红的位置 |
+| --- | --- | --- |
+| windows-ci `40438832196` | `09641c8d` | `PairedDeviceContractTests.DescribeCasesMatchTheWindowsContract`（CS:322）、`PresenterCasesMatchTheWindowsContract`（CS:391）；Failed 2 / Passed 1626 |
+| Android CI `40438831881` | `09641c8d` | `build` job 的 `PairedDeviceContractTest > describe_cases_match_the_windows_contract`（KT:296）、`presenter_cases_match_the_windows_contract`（KT:356） |
+| Android CI `40438579408` | `74dce9a9` | 与上一行同根因（同一份向量） |
+
+产品语义保留「本地时区」渲染（用户看自己的钟），所以**修契约、不修实现**：
+
+- 生成器加 `Tokenize(text, device)`，对 `PairedAtEpochMs > 0` 把「首次配对 + FormatEpoch(pairedAt)」换成「首次配对 `{pairedAt}`」，对 `LastSeenEpochMs > 0` 把「最后相见 / 最近配对 + FormatEpoch(lastSeen)」换成带 `{lastSeen}` 的标签串（**锚在标签上**，避免一句里两个相同渲染串互相混淆）；
+- 向量 36670 → **36592 B**、sha256 `4afe2032…55db8b` → `4adc50d7f16b870d3cb9e5936edde11d18dee496709a5684b95dc9670f0e04e3`，共 13 处占位符，已无任何 `\d{4}-\d{2}-\d{2} \d{2}:\d{2}` 字面时间；
+- 两端用例各加 `ExpandTokens` / `expandTokens`，按**本进程时区**用同一份 `FormatEpoch` / `formatEpoch(device.pairedAtEpochMs)` 展开后再断言；`describeCases` 与 `presenterCases` 的四个字段（`pairedLabel` / `lastSeenLabel` / `summaryLine` / `detailLine`）都过一遍。
+
+契约钉的是「标签 + 平台自己的本地渲染」，不再是某个固定时区的渲染结果。本地复验时额外用 `JAVA_TOOL_OPTIONS=-Duser.timezone=UTC` + `--rerun-tasks` 复跑一遍 Kotlin 契约用例（14/14 绿，`17 actionable tasks: 17 executed`），
+证明修复真的与时区无关 —— 这一步不能省：`--tests` 过滤下任务 `up-to-date` 会直接跳过执行，日志绿但等于没测。
+
+## 6. 本机实跑
 
 | 项 | 命令 | 结果 |
 | --- | --- | --- |
@@ -92,10 +114,11 @@ Kotlin 写法要用显式类型参数：`devices.sortedWith(compareBy<PairedDevi
 | C# 全量 | 同上、去掉 `--filter` | **1628 通过 / 0 失败 / 0 跳过**（1614 → 1628） |
 | Kotlin 契约用例 | 主树 `:core:common:testDebugUnitTest --tests "com.mediahub.core.common.pairing.PairedDeviceContractTest"` | **14/14 通过** |
 | Kotlin 三模块 | 主树 `:core:common:testDebugUnitTest :core:database:testDebugUnitTest :feature:settings:testDebugUnitTest` | **636 + 192 + 367 = 1195 例 / 0 失败** |
+| Kotlin 契约（UTC 复验） | 同契约用例，`set "JAVA_TOOL_OPTIONS=-Duser.timezone=UTC"` + `--rerun-tasks` | **14/14 通过**（`17 actionable tasks: 17 executed`，非 up-to-date 假绿） |
 
 `-p:Platform=x64` 不能省：`dotnet test --no-build` 不带它时会跑 `bin/Debug/net10.0-windows/win-x64/` 下的陈旧 DLL，新代码在 `bin/x64/…`。
 
-## 6. 未做项
+## 7. 未做项
 
 - **登记新设备**：Android 侧本轮只做清单 + 解绑；Windows 侧 `Register` 已有完整实现与用例，但两端都没有「握手完成后自动登记」的接线。
 - **跨端联跑**：本轮没有 Android 与 Windows 互相读写同一份 `paired-devices.json` 的实跑（两边各自读同一份字节向量，逐字节对照）。

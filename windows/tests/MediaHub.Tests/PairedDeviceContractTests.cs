@@ -61,6 +61,26 @@ public sealed class PairedDeviceContractTests
 
     private static long LongOf(JsonElement entry, string name) => entry.GetProperty(name).GetInt64();
 
+    /// <summary>
+    /// Fills the two local-time tokens the vector file uses instead of pinning a rendered local time.
+    /// The same epoch renders differently on a UTC CI runner than on the authoring machine, so the contract
+    /// is "this label followed by the platform's own local rendering", and every other byte stays pinned.
+    /// </summary>
+    private static string ExpandTokens(string text, PairedDevice device)
+    {
+        if (text.Contains("{pairedAt}", StringComparison.Ordinal))
+        {
+            text = text.Replace("{pairedAt}", PairedDeviceListPresenter.FormatEpoch(device.PairedAtEpochMs), StringComparison.Ordinal);
+        }
+
+        if (text.Contains("{lastSeen}", StringComparison.Ordinal))
+        {
+            text = text.Replace("{lastSeen}", PairedDeviceListPresenter.FormatEpoch(device.LastSeenEpochMs), StringComparison.Ordinal);
+        }
+
+        return text;
+    }
+
     private static PairedDevice DeviceOf(JsonElement element) => new()
     {
         DeviceId = TextOf(element, "deviceId"),
@@ -319,7 +339,7 @@ public sealed class PairedDeviceContractTests
             string? expected = NullableTextOf(entry, "describe");
             if (expected is not null)
             {
-                Assert.True(expected == actual, name + " describe");
+                Assert.True(ExpandTokens(expected, device) == actual, name + " describe");
             }
 
             string? suffix = NullableTextOf(entry, "describeSuffix");
@@ -343,25 +363,28 @@ public sealed class PairedDeviceContractTests
     [Fact]
     public void PresenterCasesMatchTheWindowsContract()
     {
+        PairedDevice[] two =
+        {
+            PairedDevice.Create("device-android-01", FingerprintA, "家庭 NAS（客厅）", FrozenNow, 3, pairedAtEpochMs: 0L),
+            PairedDevice.Create("abc", FingerprintB, "", FrozenNow, 0, pairedAtEpochMs: 0L),
+        };
+        PairedDevice[] full =
+        {
+            PairedDevice.Create("device-a", FingerprintA, "", FrozenNow, 0, pairedAtEpochMs: 0L),
+            PairedDevice.Create("device-b", FingerprintB, "", FrozenNow, 0, pairedAtEpochMs: 0L),
+        };
+        var devices = new Dictionary<string, PairedDevice[]>(StringComparer.Ordinal)
+        {
+            ["empty"] = Array.Empty<PairedDevice>(),
+            ["two-devices"] = two,
+            ["full-at-two"] = full,
+            ["null-is-empty"] = Array.Empty<PairedDevice>(),
+        };
         var produced = new Dictionary<string, PairedDeviceListView>(StringComparer.Ordinal)
         {
             ["empty"] = PairedDeviceListPresenter.Build(Array.Empty<PairedDevice>(), PairedDeviceRegistry.DefaultCapacity, FrozenNow),
-            ["two-devices"] = PairedDeviceListPresenter.Build(
-                new[]
-                {
-                    PairedDevice.Create("device-android-01", FingerprintA, "家庭 NAS（客厅）", FrozenNow, 3, pairedAtEpochMs: 0L),
-                    PairedDevice.Create("abc", FingerprintB, "", FrozenNow, 0, pairedAtEpochMs: 0L),
-                },
-                PairedDeviceRegistry.DefaultCapacity,
-                FrozenNow),
-            ["full-at-two"] = PairedDeviceListPresenter.Build(
-                new[]
-                {
-                    PairedDevice.Create("device-a", FingerprintA, "", FrozenNow, 0, pairedAtEpochMs: 0L),
-                    PairedDevice.Create("device-b", FingerprintB, "", FrozenNow, 0, pairedAtEpochMs: 0L),
-                },
-                2,
-                FrozenNow),
+            ["two-devices"] = PairedDeviceListPresenter.Build(two, PairedDeviceRegistry.DefaultCapacity, FrozenNow),
+            ["full-at-two"] = PairedDeviceListPresenter.Build(full, 2, FrozenNow),
             ["null-is-empty"] = PairedDeviceListPresenter.Build(null, 0, FrozenNow),
         };
 
@@ -383,15 +406,16 @@ public sealed class PairedDeviceContractTests
             {
                 JsonElement expected = expectedRows[index];
                 PairedDeviceRow row = actual.Rows[index];
+                PairedDevice device = devices[name][index];
                 string label = name + " row " + index;
                 Assert.True(TextOf(expected, "deviceId") == row.DeviceId, label + " deviceId");
                 Assert.True(TextOf(expected, "displayName") == row.DisplayName, label + " displayName");
                 Assert.True(TextOf(expected, "fingerprintLabel") == row.FingerprintLabel, label + " fingerprintLabel");
-                Assert.True(TextOf(expected, "pairedLabel") == row.PairedLabel, label + " pairedLabel");
-                Assert.True(TextOf(expected, "lastSeenLabel") == row.LastSeenLabel, label + " lastSeenLabel");
+                Assert.True(ExpandTokens(TextOf(expected, "pairedLabel"), device) == row.PairedLabel, label + " pairedLabel");
+                Assert.True(ExpandTokens(TextOf(expected, "lastSeenLabel"), device) == row.LastSeenLabel, label + " lastSeenLabel");
                 Assert.True(TextOf(expected, "sourceLabel") == row.SourceLabel, label + " sourceLabel");
-                Assert.True(TextOf(expected, "summaryLine") == row.SummaryLine, label + " summaryLine");
-                Assert.True(TextOf(expected, "detailLine") == row.DetailLine, label + " detailLine");
+                Assert.True(ExpandTokens(TextOf(expected, "summaryLine"), device) == row.SummaryLine, label + " summaryLine");
+                Assert.True(ExpandTokens(TextOf(expected, "detailLine"), device) == row.DetailLine, label + " detailLine");
                 Assert.True(TextOf(expected, "forgetLabel") == row.ForgetLabel, label + " forgetLabel");
                 Assert.True(LongOf(expected, "lastSeenEpochMs") == row.LastSeenEpochMs, label + " lastSeenEpochMs");
             }
