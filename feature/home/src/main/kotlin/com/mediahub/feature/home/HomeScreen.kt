@@ -1,43 +1,50 @@
 package com.mediahub.feature.home
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mediahub.core.ui.MediaHubAccentLine
+import com.mediahub.core.ui.MediaHubCard
+import com.mediahub.core.ui.MediaHubLabel
+import com.mediahub.core.ui.MediaHubSectionHeader
+import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.ThumbImageWithProgress
 import com.mediahub.feature.server.ServerCard
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
 
-/** 首页：媒体库（媒体源卡片）+ 继续观看。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeRoute(
@@ -57,7 +64,6 @@ fun HomeRoute(
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
     val authStates by viewModel.authStates.collectAsStateWithLifecycle()
 
-    // re-login 成功后强制刷新该服务器认证状态（评审 FINAL PATCH 3）；消费后清空
     val currentForceRestore = forceRestoreId
     if (currentForceRestore != null) {
         LaunchedEffect(currentForceRestore) {
@@ -66,10 +72,53 @@ fun HomeRoute(
         }
     }
 
+    HomeContent(
+        servers = servers,
+        loaded = loaded,
+        continueWatching = continueWatching,
+        needsRelogin = { server -> viewModel.needsRelogin(server, authStates[server.id]) },
+        authState = { server -> authStates[server.id] },
+        onOpenServer = onOpenServer,
+        onRelogin = onRelogin,
+        onEditServer = onEditServer,
+        onLogout = { server -> viewModel.logout(server.id) },
+        onAddServer = onAddServer,
+        onOpenSettings = onOpenSettings,
+        onOpenSearch = onOpenSearch,
+        onOpenItem = onOpenItem,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeContent(
+    servers: List<MediaServer>,
+    loaded: Boolean,
+    continueWatching: List<PlaybackProgress>,
+    needsRelogin: (MediaServer) -> Boolean,
+    authState: (MediaServer) -> com.mediahub.provider.api.AuthSessionState?,
+    onOpenServer: (MediaServer) -> Unit,
+    onRelogin: (MediaServer) -> Unit,
+    onEditServer: (MediaServer) -> Unit,
+    onLogout: (MediaServer) -> Unit,
+    onAddServer: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenSearch: () -> Unit,
+    onOpenItem: (PlaybackProgress) -> Unit,
+) {
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("媒体库") },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        MediaHubAccentLine()
+                        Text("MediaHub", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    }
+                },
                 actions = {
                     IconButton(onClick = onOpenSearch) {
                         Icon(Icons.Default.Search, contentDescription = "搜索")
@@ -78,67 +127,102 @@ fun HomeRoute(
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddServer) {
-                Icon(Icons.Default.Add, contentDescription = "添加媒体库")
+            androidx.compose.material3.FloatingActionButton(onClick = onAddServer) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "添加媒体库")
+                    Text("添加媒体库")
+                }
             }
         },
     ) { padding ->
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 100.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item {
-                Text("媒体源", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "你的媒体，尽在一处",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (continueWatching.isNotEmpty()) {
+                item {
+                    MediaHubSectionHeader(
+                        title = "继续观看",
+                        subtitle = "从上次离开的地方继续",
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        items(continueWatching, key = { "${it.serverId}/${it.itemId}" }) { progress ->
+                            ContinueWatchingCard(
+                                progress = progress,
+                                onClick = { onOpenItem(progress) },
+                                modifier = Modifier.width(276.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                MediaHubSectionHeader(
+                    title = "媒体源",
+                    subtitle = if (servers.isEmpty()) "连接你的媒体世界" else "${servers.size} 个媒体源",
+                    modifier = Modifier.padding(top = if (continueWatching.isEmpty()) 16.dp else 24.dp),
+                )
             }
             if (!loaded) {
-                // 首次装载完成前不得展示空态文案（避免"还没有媒体源"闪烁）
                 item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 24.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator()
-                    }
+                    MediaHubStatus(
+                        title = "正在整理媒体库",
+                        message = "片刻就好",
+                        loading = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             } else if (servers.isEmpty()) {
                 item {
-                    EmptyHint("还没有媒体源\n点击右下角 + 添加 Emby / Jellyfin / WebDAV / 本地存储")
+                    MediaHubStatus(
+                        title = "从添加媒体源开始",
+                        message = "支持 Emby、Jellyfin、WebDAV 和本地存储。连接后，在这里统一浏览与播放。",
+                        icon = Icons.Default.PlayArrow,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             } else {
                 items(servers, key = { it.id }) { server ->
-                    val needsRelogin = viewModel.needsRelogin(server, authStates[server.id])
                     ServerCard(
                         server = server,
                         onClick = {
-                            if (needsRelogin) onRelogin(server) else onOpenServer(server)
+                            if (needsRelogin(server)) onRelogin(server) else onOpenServer(server)
                         },
-                        authState = authStates[server.id],
-                        onLogout = { viewModel.logout(server.id) },
+                        authState = authState(server),
+                        onLogout = { onLogout(server) },
                         onEdit = { onEditServer(server) },
                     )
                 }
             }
 
-            item {
-                Text(
-                    "继续观看",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(top = 16.dp),
-                )
-            }
             if (continueWatching.isEmpty()) {
-                item { EmptyHint("暂无播放记录") }
-            } else {
-                items(continueWatching, key = { "${it.serverId}/${it.itemId}" }) { progress ->
-                    ContinueWatchingRow(progress = progress, onClick = { onOpenItem(progress) })
+                item {
+                    MediaHubStatus(
+                        title = "准备好看点什么？",
+                        message = "播放记录会出现在这里，随时继续。",
+                        icon = Icons.Default.PlayArrow,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }
@@ -146,56 +230,70 @@ fun HomeRoute(
 }
 
 @Composable
-private fun ContinueWatchingRow(
+private fun ContinueWatchingCard(
     progress: PlaybackProgress,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    // 16:9 缩略图 + 底部进度条（Phase 1B-2.3）；旧记录无 posterUrl 时显示占位图
     val fraction = if (progress.durationMs > 0) {
         (progress.positionMs.toFloat() / progress.durationMs).coerceIn(0f, 1f)
     } else {
         0f
     }
-    val percent = (fraction * 100).toInt()
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 6.dp),
+    val remainingMinutes = ((progress.durationMs - progress.positionMs).coerceAtLeast(0L) / 60_000).toInt()
+    MediaHubCard(
+        modifier = modifier,
+        onClick = onClick,
+        contentPadding = PaddingValues(10.dp),
     ) {
-        ThumbImageWithProgress(
-            url = progress.posterUrl,
-            contentDescription = progress.itemTitle,
-            progress = fraction,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text(
-            text = progress.itemTitle ?: "未命名",
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-        Text(
-            text = "进度 $percent%",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun EmptyHint(text: String) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 24.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        androidx.compose.foundation.layout.Box {
+            ThumbImageWithProgress(
+                url = progress.posterUrl,
+                contentDescription = progress.itemTitle,
+                progress = fraction,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            androidx.compose.foundation.layout.Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            listOf(
+                                androidx.compose.ui.graphics.Color.Transparent,
+                                androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.9f),
+                            ),
+                        ),
+                    )
+                    .padding(start = 12.dp, top = 32.dp, end = 12.dp, bottom = 14.dp),
+            ) {
+                Text(
+                    text = progress.itemTitle ?: "未命名",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = androidx.compose.ui.graphics.Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(
+                    modifier = Modifier.padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MediaHubLabel(text = "已看 ${(fraction * 100).toInt()}%", emphasized = true)
+                    if (remainingMinutes > 0) {
+                        Text(
+                            "剩余约 $remainingMinutes 分钟",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.8f),
+                        )
+                    }
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = androidx.compose.ui.graphics.Color.White,
+                    )
+                }
+            }
+        }
     }
 }

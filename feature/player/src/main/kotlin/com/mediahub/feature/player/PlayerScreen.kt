@@ -22,6 +22,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,8 +46,10 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderColors
@@ -982,13 +985,21 @@ private fun PlayerControls(
                             // 缓冲/音频焦点被抑制时 isPlaying=false 但用户并未暂停；
                             // 若按 isPlaying 显示，图标会闪成「播放」，用户点它反而变成继续播放。
                             val showPauseIcon = state.playWhenReady && !state.isEnded
-                            IconButton(onClick = onTogglePlayPause) {
+                            FilledIconButton(
+                                onClick = onTogglePlayPause,
+                                modifier = Modifier.size(48.dp),
+                                shape = CircleShape,
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                                ),
+                            ) {
                                 Icon(
                                     if (showPauseIcon) Icons.Default.Pause else Icons.Default.PlayArrow,
                                     contentDescription = stringResource(
                                         if (showPauseIcon) R.string.player_pause else R.string.player_play,
                                     ),
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(26.dp),
                                 )
                             }
                             TextButton(onClick = onCycleSpeed) {

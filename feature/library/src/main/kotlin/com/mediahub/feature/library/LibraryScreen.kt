@@ -4,18 +4,24 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
@@ -38,6 +44,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,14 +54,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
-import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -62,6 +62,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mediahub.core.ui.MediaHubAccentLine
+import com.mediahub.core.ui.MediaHubCard
+import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
 import com.mediahub.model.MediaFilter
@@ -71,6 +74,7 @@ import com.mediahub.model.MediaLibrary
 import com.mediahub.model.MediaSort
 import com.mediahub.model.MediaSortField
 import com.mediahub.model.MediaType
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** 媒体库浏览（本地文件树真实可用；服务端媒体库待 Provider 接入）。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -94,18 +98,61 @@ fun LibraryRoute(
     val filterEntryVisible = filterContent?.filterFields?.isNotEmpty() == true
     val filterActive = filterContent?.filter?.isDefault == false
 
+    LibraryContent(
+        state = state,
+        fallbackName = name,
+        onBack = onBack,
+        onOpenLibrary = onOpenLibrary,
+        onOpenItem = onOpenItem,
+        onOpenFavorites = onOpenFavorites,
+        onRefresh = viewModel::load,
+        onLoadMore = viewModel::loadMore,
+        onGoToParent = viewModel::goToParent,
+        onOpenFolder = viewModel::openFolder,
+        onSortSelected = viewModel::onSortSelected,
+        onFilterSelected = viewModel::onFilterSelected,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LibraryContent(
+    state: LibraryUiState,
+    fallbackName: String,
+    onBack: () -> Unit,
+    onOpenLibrary: (MediaLibrary) -> Unit,
+    onOpenItem: (MediaItem) -> Unit,
+    onOpenFavorites: (() -> Unit)?,
+    onRefresh: () -> Unit,
+    onLoadMore: () -> Unit,
+    onGoToParent: () -> Unit,
+    onOpenFolder: (MediaItem) -> Unit,
+    onSortSelected: (MediaSort) -> Unit,
+    onFilterSelected: (MediaFilter) -> Unit,
+) {
+    var showSortSheet by rememberSaveable { mutableStateOf(false) }
+    var showFilterSheet by rememberSaveable { mutableStateOf(false) }
+    val filterContent = state as? LibraryUiState.Content
+    val sortEntryVisible = filterContent?.sortFields?.isNotEmpty() == true
+    val filterEntryVisible = filterContent?.filterFields?.isNotEmpty() == true
+    val filterActive = filterContent?.filter?.isDefault == false
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = when (val s = state) {
-                            is LibraryUiState.Content -> s.libraryName
-                            else -> name.ifBlank { "媒体库" }
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(
+                            text = when (val s = state) {
+                                is LibraryUiState.Content -> s.libraryName
+                                else -> fallbackName.ifBlank { "媒体库" }
+                            },
+                            style = MaterialTheme.typography.titleLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        MediaHubAccentLine()
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -132,19 +179,24 @@ fun LibraryRoute(
                             Icon(Icons.Default.Sort, contentDescription = "排序")
                         }
                     }
-                    IconButton(onClick = viewModel::load) {
+                    IconButton(onClick = onRefresh) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                ),
             )
         },
+        containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         when (val s = state) {
             LibraryUiState.Loading -> Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator()
+                MediaHubStatus(title = "正在载入媒体库", loading = true)
             }
 
             is LibraryUiState.Libraries -> {
@@ -153,13 +205,17 @@ fun LibraryRoute(
                         modifier = Modifier.fillMaxSize().padding(padding),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("没有可用媒体库", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        MediaHubStatus(
+                            title = "没有可用媒体库",
+                            message = "连接的媒体源尚未提供可浏览的内容",
+                            icon = Icons.Default.Movie,
+                        )
                     }
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize().padding(padding),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         items(s.libraries, key = { it.id }) { library ->
                             LibraryRow(library = library, onClick = { onOpenLibrary(library) })
@@ -172,14 +228,13 @@ fun LibraryRoute(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        s.message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    TextButton(onClick = viewModel::load) { Text("重试") }
-                }
+                MediaHubStatus(
+                    title = "媒体库暂时无法载入",
+                    message = s.message,
+                    icon = Icons.Default.Refresh,
+                    retryLabel = "重试",
+                    onRetry = onRefresh,
+                )
             }
 
             is LibraryUiState.Content -> {
@@ -188,13 +243,14 @@ fun LibraryRoute(
                         modifier = Modifier.fillMaxSize().padding(padding),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("空目录", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        MediaHubStatus(
+                            title = "空目录",
+                            message = "这里还没有可显示的内容",
+                            icon = Icons.Default.Folder,
+                        )
                     }
                 } else {
-                    // 海报墙（Phase 1B-2.3）：媒体条目 3 列网格；文件夹保持行，可与网格混排
                     val gridState = rememberLazyGridState()
-
-                    // 滚动到底部自动 loadMore（rememberUpdatedState 避免 stale s 捕获）
                     val currentContent by rememberUpdatedState(s)
                     LaunchedEffect(Unit) {
                         snapshotFlow {
@@ -203,7 +259,7 @@ fun LibraryRoute(
                             val totalItems = gridState.layoutInfo.totalItemsCount
                             lastVisible >= totalItems - 3 && c.hasMore && !c.isLoadingMore && c.loadMoreError == null
                         }.distinctUntilChanged().collect { shouldLoad ->
-                            if (shouldLoad) viewModel.loadMore()
+                            if (shouldLoad) onLoadMore()
                         }
                     }
 
@@ -211,21 +267,18 @@ fun LibraryRoute(
                         state = gridState,
                         columns = GridCells.Fixed(3),
                         modifier = Modifier.fillMaxSize().padding(padding),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        // 返回上级：导航控件固定顶部，不参与排序（C2）
                         if (s.canGoUp) {
                             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                TextButton(onClick = viewModel::goToParent, modifier = Modifier.fillMaxWidth()) {
+                                TextButton(onClick = onGoToParent, modifier = Modifier.fillMaxWidth()) {
                                     Text("⬆ 返回上级")
                                 }
                             }
                         }
                         if (shouldPreserveProviderOrder(s.sort)) {
-                            // 用户主动选择排序后：Provider 返回顺序即权威顺序，
-                            // UI 不得再按目录/媒体拆分重排（那会覆盖服务端全局排序）
                             gridItems(
                                 s.items,
                                 key = { it.id },
@@ -238,25 +291,23 @@ fun LibraryRoute(
                                 },
                             ) { item ->
                                 if (item.type == MediaType.FOLDER) {
-                                    FolderRow(item = item, onClick = { viewModel.openFolder(item) })
+                                    FolderRow(item = item, onClick = { onOpenFolder(item) })
                                 } else {
-                                    PosterCell(item = item, onClick = { onItemClick(item, viewModel, onOpenItem) })
+                                    PosterCell(item = item, onClick = { onLibraryItemClick(item, onOpenFolder, onOpenItem) })
                                 }
                             }
                         } else {
-                            // SERVER_DEFAULT：保留既有"目录优先"展示策略
                             val folders = s.items.filter { it.type == MediaType.FOLDER }
                             val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
                             folders.forEach { folder ->
                                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                    FolderRow(item = folder, onClick = { viewModel.openFolder(folder) })
+                                    FolderRow(item = folder, onClick = { onOpenFolder(folder) })
                                 }
                             }
                             gridItems(mediaItems, key = { it.id }) { item ->
-                                PosterCell(item = item, onClick = { onItemClick(item, viewModel, onOpenItem) })
+                                PosterCell(item = item, onClick = { onLibraryItemClick(item, onOpenFolder, onOpenItem) })
                             }
                         }
-                        // 加载更多指示器
                         if (s.isLoadingMore) {
                             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
                                 Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
@@ -264,13 +315,15 @@ fun LibraryRoute(
                                 }
                             }
                         }
-                        // loadMore 错误 + 重试
                         if (s.loadMoreError != null) {
                             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                Column(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(s.loadMoreError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                                    TextButton(onClick = viewModel::loadMore) { Text("加载更多") }
-                                }
+                                MediaHubStatus(
+                                    title = "更多内容载入失败",
+                                    message = s.loadMoreError,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    retryLabel = "加载更多",
+                                    onRetry = onLoadMore,
+                                )
                             }
                         }
                     }
@@ -279,25 +332,23 @@ fun LibraryRoute(
         }
     }
 
-    // 排序面板（1C-2）：选项按 Provider 能力过滤；即时生效，不做本地排序
     val sortContent = state as? LibraryUiState.Content
     if (showSortSheet && sortContent != null) {
         ModalBottomSheet(onDismissRequest = { showSortSheet = false }) {
             SortSheetContent(
                 current = sortContent.sort,
                 fields = sortContent.sortFields,
-                onSelected = viewModel::onSortSelected,
+                onSelected = onSortSelected,
             )
         }
     }
 
-    // 筛选面板（1D）：container-scoped、即时生效；选项按 Provider 能力过滤
     if (showFilterSheet && filterContent != null) {
         ModalBottomSheet(onDismissRequest = { showFilterSheet = false }) {
             FilterSheetContent(
                 current = filterContent.filter,
                 fields = filterContent.filterFields,
-                onSelected = viewModel::onFilterSelected,
+                onSelected = onFilterSelected,
             )
         }
     }
@@ -439,14 +490,13 @@ private fun SortOptionRow(
     }
 }
 
-private fun onItemClick(
+private fun onLibraryItemClick(
     item: MediaItem,
-    viewModel: LibraryViewModel,
+    onOpenFolder: (MediaItem) -> Unit,
     onOpenItem: (MediaItem) -> Unit,
 ) {
-    // 容器类型（FOLDER/SERIES/SEASON）进入子级；其余（Movie/Episode/Video/Audio）交给播放/详情
     if (item.type.isContainer) {
-        viewModel.openFolder(item)
+        onOpenFolder(item)
     } else {
         onOpenItem(item)
     }
@@ -454,22 +504,33 @@ private fun onItemClick(
 
 @Composable
 private fun LibraryRow(library: MediaLibrary, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    MediaHubCard(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
     ) {
-        val icon = when (library.type) {
-            com.mediahub.model.LibraryType.MOVIES -> Icons.Default.Movie
-            com.mediahub.model.LibraryType.MUSIC -> Icons.Default.MusicNote
-            else -> Icons.Default.Folder
-        }
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Column(modifier = Modifier.weight(1f)) {
-            Text(library.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            val icon = when (library.type) {
+                com.mediahub.model.LibraryType.MOVIES -> Icons.Default.Movie
+                com.mediahub.model.LibraryType.MUSIC -> Icons.Default.MusicNote
+                else -> Icons.Default.Folder
+            }
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                library.name,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
@@ -477,16 +538,27 @@ private fun LibraryRow(library: MediaLibrary, onClick: () -> Unit) {
 /** 文件夹行（混排在海报墙网格中，占满整行）。 */
 @Composable
 private fun FolderRow(item: MediaItem, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    MediaHubCard(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
     ) {
-        Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(item.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                Icons.Default.Folder,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                item.title,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -499,31 +571,33 @@ private fun FolderRow(item: MediaItem, onClick: () -> Unit) {
 @Composable
 private fun PosterCell(item: MediaItem, onClick: () -> Unit) {
     val isThumbShape = item.type == MediaType.EPISODE || item.type == MediaType.VIDEO
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+    MediaHubCard(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        contentPadding = PaddingValues(bottom = 10.dp),
     ) {
-        if (isThumbShape) {
-            ThumbImage(
-                url = item.posterUrl,
-                contentDescription = item.title,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        } else {
-            PosterImage(
-                url = item.posterUrl,
-                contentDescription = item.title,
-                modifier = Modifier.fillMaxWidth(),
+        Column {
+            if (isThumbShape) {
+                ThumbImage(
+                    url = item.posterUrl,
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                PosterImage(
+                    url = item.posterUrl,
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Text(
+                item.title,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 8.dp).padding(top = 8.dp),
             )
         }
-        Text(
-            item.title,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp),
-        )
     }
 }
 

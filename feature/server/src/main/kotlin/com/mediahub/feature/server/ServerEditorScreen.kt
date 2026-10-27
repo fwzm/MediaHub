@@ -30,6 +30,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -95,11 +96,16 @@ fun ServerEditorRoute(
             }
 
             else -> Column(
-                modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 // 头部：图标 + 名称 + 类型
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     ServerIcon(
@@ -125,7 +131,6 @@ fun ServerEditorRoute(
                         it,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(horizontal = 16.dp),
                     )
                 }
                 state.message?.let {
@@ -133,150 +138,152 @@ fun ServerEditorRoute(
                         it,
                         color = MaterialTheme.colorScheme.primary,
                         style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(horizontal = 16.dp),
                     )
                 }
 
-                SectionHeader("基本信息")
-                OutlinedTextField(
-                    value = state.name,
-                    onValueChange = viewModel::updateName,
-                    label = { Text("名称") },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    singleLine = true,
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = state.note,
-                    onValueChange = viewModel::updateNote,
-                    label = { Text("备注") },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                )
+                EditorSection("基本信息") {
+                    OutlinedTextField(
+                        value = state.name,
+                        onValueChange = viewModel::updateName,
+                        label = { Text("名称") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = state.note,
+                        onValueChange = viewModel::updateNote,
+                        label = { Text("备注") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
 
                 // M0-A2：按服务器自定义 User-Agent（ADR-045）
-                SectionHeader("网络标识（User-Agent）")
-                OutlinedTextField(
-                    value = state.userAgent,
-                    onValueChange = viewModel::updateUserAgent,
-                    label = { Text("自定义 User-Agent") },
-                    placeholder = { Text(state.userAgentDefault) },
-                    isError = state.userAgentError != null,
-                    supportingText = {
+                EditorSection("网络标识（User-Agent）") {
+                    OutlinedTextField(
+                        value = state.userAgent,
+                        onValueChange = viewModel::updateUserAgent,
+                        label = { Text("自定义 User-Agent") },
+                        placeholder = { Text(state.userAgentDefault) },
+                        isError = state.userAgentError != null,
+                        supportingText = {
+                            Text(
+                                state.userAgentError
+                                    ?: "当前生效：${state.userAgentEffective}",
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(
-                            state.userAgentError
-                                ?: "当前生效：${state.userAgentEffective}",
+                            "默认值：${state.userAgentDefault}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
                         )
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    singleLine = true,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                        TextButton(
+                            onClick = { viewModel.resetUserAgent() },
+                            enabled = state.userAgent.isNotEmpty(),
+                        ) { Text("恢复默认") }
+                    }
                     Text(
-                        "默认值：${state.userAgentDefault}",
+                        "留空表示使用默认标识；填写服务器白名单要求的标识时需自行确认其合规性。",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.weight(1f))
-                    TextButton(
-                        onClick = { viewModel.resetUserAgent() },
-                        enabled = state.userAgent.isNotEmpty(),
-                    ) { Text("恢复默认") }
                 }
-                Text(
-                    "留空表示使用默认标识；填写服务器白名单要求的标识时需自行确认其合规性。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
 
                 // LOCAL 媒体源无网络地址语义：隐藏连接/线路质量区（Phase 1I review P1）
                 if (state.server?.type != ServerType.LOCAL) {
-                    SectionHeader("连接")
-                    ServerAddressField(
-                        value = state.baseUrl,
-                        onValueChange = viewModel::updateBaseUrl,
-                        preferHttps = state.preferHttps,
-                        onHttpsChange = viewModel::toggleHttps,
-                        resolvedUrl = state.resolvedUrl,
-                        errorMessage = state.addressError,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
+                    EditorSection("连接") {
+                        ServerAddressField(
+                            value = state.baseUrl,
+                            onValueChange = viewModel::updateBaseUrl,
+                            preferHttps = state.preferHttps,
+                            onHttpsChange = viewModel::toggleHttps,
+                            resolvedUrl = state.resolvedUrl,
+                            errorMessage = state.addressError,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            state.testResult?.let { r ->
+                                Text(
+                                    // P3：失败时补上按 errorCode 得出的可操作指引（此前该字段从未被消费）。
+                                    if (r.ok) {
+                                        "连接成功"
+                                    } else {
+                                        listOfNotNull(r.message, r.toActionableHint()).joinToString(String(charArrayOf(10.toChar())))
+                                    },
+                                    color = if (r.ok) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            Button(onClick = viewModel::testConnection, enabled = !state.isTesting) {
+                                if (state.isTesting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                else Text("测试连接")
+                            }
+                        }
+                    }
+
+                    EditorSection("线路质量测试") {
+                        Button(
+                            onClick = viewModel::testMediaQuality,
+                            enabled = !state.isMediaTesting,
+                        ) {
+                            if (state.isMediaTesting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                            else Text("测试线路质量")
+                        }
+                        state.mediaQualityResult?.let { qr ->
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                if (qr.error != null) {
+                                    Text("线路不可用", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleSmall)
+                                    val err = qr.error; InfoRow("错误", err ?: "未知")
+                                } else {
+                                    val score = qr.score()
+                                    val stars = "★".repeat(score / 20) + "☆".repeat(5 - score / 20)
+                                    Text("播放质量  $stars $score", style = MaterialTheme.typography.titleSmall)
+                                    Spacer(Modifier.height(4.dp))
+                                    qr.apiLatencyMs?.let { InfoRow("API 延迟", "${it}ms") }
+                                    qr.mediaFirstByteMs?.let { InfoRow("媒体首包", "${it}ms") }
+                                    qr.downloadSpeedBytesPerSec?.let {
+                                        InfoRow("下载速度", "%.1f MB/s".format(it / (1024.0 * 1024.0)))
+                                    }
+                                    InfoRow("Range", if (qr.supportsRange) "✓ 支持" else "✗ 不支持")
+                                    qr.httpStatus?.let { InfoRow("HTTP", "$it") }
+                                    qr.protocol?.let { InfoRow("协议", it) }
+                                }
+                                InfoRow("最后测试", java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(qr.testedAt)))
+                            }
+                        }
+                    }
+                }
+
+                EditorSection("账号") {
+                    InfoRow("用户名", server.username ?: "未设置")
+                    InfoRow("状态", if (state.loggedIn) "已登录" else "未登录")
+                    TextButton(onClick = { onRelogin(server) }) {
+                        Text("重新登录")
+                    }
+                }
+
+                EditorSection("偏好") {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        state.testResult?.let { r ->
-                            Text(
-                                // P3：失败时补上按 errorCode 得出的可操作指引（此前该字段从未被消费）。
-                                if (r.ok) {
-                                    "连接成功"
-                                } else {
-                                    listOfNotNull(r.message, r.toActionableHint()).joinToString(String(charArrayOf(10.toChar())))
-                                },
-                                color = if (r.ok) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                        Button(onClick = viewModel::testConnection, enabled = !state.isTesting) {
-                            if (state.isTesting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                            else Text("测试连接")
-                        }
-                    }
-
-                    SectionHeader("线路质量测试")
-                    Button(
-                        onClick = viewModel::testMediaQuality,
-                        enabled = !state.isMediaTesting,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    ) {
-                        if (state.isMediaTesting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                        else Text("测试线路质量")
-                    }
-                    state.mediaQualityResult?.let { qr ->
-                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                            if (qr.error != null) {
-                                Text("线路不可用", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleSmall)
-                                val err = qr.error; InfoRow("错误", err ?: "未知")
-                            } else {
-                                val score = qr.score()
-                                val stars = "★".repeat(score / 20) + "☆".repeat(5 - score / 20)
-                                Text("播放质量  $stars $score", style = MaterialTheme.typography.titleSmall)
-                                Spacer(Modifier.height(4.dp))
-                                qr.apiLatencyMs?.let { InfoRow("API 延迟", "${it}ms") }
-                                qr.mediaFirstByteMs?.let { InfoRow("媒体首包", "${it}ms") }
-                                qr.downloadSpeedBytesPerSec?.let {
-                                    InfoRow("下载速度", "%.1f MB/s".format(it / (1024.0 * 1024.0)))
-                                }
-                                InfoRow("Range", if (qr.supportsRange) "✓ 支持" else "✗ 不支持")
-                                qr.httpStatus?.let { InfoRow("HTTP", "$it") }
-                                qr.protocol?.let { InfoRow("协议", it) }
-                            }
-                            InfoRow("最后测试", java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(qr.testedAt)))
-                        }
+                        Text("设为默认媒体源", Modifier.weight(1f))
+                        Switch(checked = server.isDefault, onCheckedChange = { if (it) viewModel.setDefault() })
                     }
                 }
 
-                SectionHeader("账号")
-                InfoRow("用户名", server.username ?: "未设置")
-                InfoRow("状态", if (state.loggedIn) "已登录" else "未登录")
-                TextButton(onClick = { onRelogin(server) }, modifier = Modifier.padding(horizontal = 8.dp)) {
-                    Text("重新登录")
-                }
-
-                SectionHeader("偏好")
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("设为默认媒体源", Modifier.weight(1f))
-                    Switch(checked = server.isDefault, onCheckedChange = { if (it) viewModel.setDefault() })
-                }
-
-                HorizontalDivider(Modifier.padding(vertical = 24.dp))
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 TextButton(
                     onClick = { showDeleteDialog = true },
                     enabled = !state.isDeleting,
@@ -325,19 +332,29 @@ fun ServerEditorRoute(
 }
 
 @Composable
-private fun SectionHeader(title: String) {
-    Text(
-        title,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 8.dp),
-    )
+private fun EditorSection(
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            com.mediahub.core.ui.MediaHubSectionHeader(title = title)
+            content()
+        }
+    }
 }
 
 @Composable
 private fun InfoRow(label: String, value: String) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)

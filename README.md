@@ -1,11 +1,64 @@
-# MediaHub —— 多源统一媒体播放器
+# MediaHub
 
-> 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
+> **你的媒体，尽在一处。**
+>
+> 为 Android 打造的多源媒体库与播放器。以克制的深色界面，连接你的媒体服务器、网络存储与本地内容。
 
-当前状态：**A4 联合候选已并入 main**（2026-10-14，PR #24）：P1 播放专业信息面板、P2 字幕中心（同目录发现 / 导入 / 双内核加载 / mpv 偏移）、WebDAV 修复链路与私有恢复一致性已落地；对应候选的本地门禁为 1275 单测 / 0 失败 / 0 跳过，CI run `38491200869` 三个 job 全 SUCCESS。当前 Draft 增量为 [M0-A 服务器请求治理闭环](https://github.com/fwzm/MediaHub/pull/36)：按服务器作用域的 User-Agent、持久化、删除清理、并发写入保护、WebDAV 无图片鉴权 contributor 的 URL 归属和设置页已接入；该增量尚未合入 main。2026-10-23 已用受控本地 WebDAV + Xiaomi 14 Ultra 完成一条真机 UA 请求验证；真实 Emby/Jellyfin 服务器和更广的真机矩阵仍保持 `DEVICE UNVERIFIED`。
+[下载最新测试版 APK](https://github.com/fwzm/MediaHub/releases) · [浏览使用与开发文档](#文档) · [反馈问题](https://github.com/fwzm/MediaHub/issues)
 
 [![GitHub release](https://img.shields.io/github/v/release/fwzm/MediaHub?include_prereleases)](https://github.com/fwzm/MediaHub/releases)
+[![Android](https://img.shields.io/badge/Android-8.0%2B%20%C2%B7%20arm64-3DDC84?logo=android&logoColor=white)](https://github.com/fwzm/MediaHub/releases)
 [![License](https://img.shields.io/github/license/fwzm/MediaHub)](LICENSE)
+
+> **Alpha 测试阶段**：Release 当前仅提供 **arm64-v8a** APK，接口与体验仍可能调整。安装前需允许「安装未知应用」；同签名版本可覆盖升级。测试版不代表所有设备、服务端版本与媒体格式均已验证。
+
+## 界面预览
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/home.png" width="400" alt="MediaHub 首页：媒体源与继续观看"></td>
+    <td><img src="docs/screenshots/library.png" width="400" alt="MediaHub 媒体库：海报墙与筛选"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>首页 · 媒体源与继续观看</sub></td>
+    <td align="center"><sub>媒体库 · 海报、排序与筛选</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/search.png" width="400" alt="MediaHub 聚合搜索：跨来源结果"></td>
+    <td><img src="docs/screenshots/detail.png" width="400" alt="MediaHub 详情页：背景图与作品信息"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>搜索 · 跨来源发现内容</sub></td>
+    <td align="center"><sub>详情 · 作品信息与播放入口</sub></td>
+  </tr>
+</table>
+
+<sub>截图来自 Android 上实际渲染的生产 Compose 组件，使用虚构片名与本地生成的艺术图；**不展示真实账号、真实服务器或真实媒体库内容**。</sub>
+
+## 从浏览到播放
+
+- **连接你的内容**：接入 Emby、Jellyfin、WebDAV 与本地存储，以统一的媒体模型浏览不同来源；实际能力以各 Provider 声明为准。
+- **双内核播放**：Media3 / ExoPlayer 与 mpv 共用播放接口；AUTO 模式根据媒体特征与历史兼容结果选择引擎，并在支持的失败场景中尝试切换。也可在设置中手动指定。
+- **沉浸式媒体库**：海报墙、背景图、详情页、收藏、排序与筛选；聚合搜索带来源标注，同作品可按已识别身份汇集多个来源。
+- **接着看，按你的方式看**：本地续播与已接入服务端的进度回写、音轨与字幕选择、字幕样式、倍速、拖动定位与双击/长按手势。
+- **为画面增添氛围**：播放器提供可配置的视觉效果与基于 artwork 的配色；效果可用性取决于系统版本、渲染能力与设置。
+- **掌握自己的数据**：密码保护的本地备份支持预览后合并或替换恢复；备份不包含密码、Token 等登录凭据。来源同步提供导入预览与显式确认流程，**不宣称已完成真实双设备同步验收**。
+
+## 设计语言
+
+以「暗场影院」为方向，让内容成为视觉中心：
+
+- **深色蓝靛色板**：低亮度背景、分层表面与克制的强调色，保持文字和控件层次清晰。
+- **一致的形状与排版**：共享圆角、间距、标题与正文层级，减少页面间的视觉跳变。
+- **共享组件**：卡片、分区标题、标签，以及加载、空内容、错误与重试状态采用一致表达。
+- **Artwork 优先**：统一 2:3 海报、16:9 缩略图与详情背景图，并提供一致的加载和失败占位。
+- **从浏览延续到播放**：共享配色、状态与视觉语言；播放器效果独立配置，不干扰核心操作。
+
+## 项目状态
+
+**当前界面美化代码只存在于 `feature/cinematic-ui` 分支，尚未合并进 `main`，也尚未形成独立 UI PR。**
+
+该分支基于未合并的 [Draft PR #59](https://github.com/fwzm/MediaHub/pull/59)（基线 `c18f6a61`）。PR #59 的既有能力与本分支的界面改动都不应被理解为已进入 `main`；功能与验证结论以对应 PR 的最新记录为准。
 
 <!-- MEDIAHUB:RECENT:START -->
 ## 最近更新
@@ -23,264 +76,80 @@
 - 2026-10-14 Merge pull request #26 from fwzm/codex/pr18-review-docs-20260930
 <!-- MEDIAHUB:RECENT:END -->
 
-## 下载测试版
-
-前往 [GitHub Releases](https://github.com/fwzm/MediaHub/releases) 下载最新 APK。
-
-> 当前为 Alpha 阶段，仅提供 arm64-v8a 架构 APK。安装前请在系统设置中允许「安装未知应用」。
-> 每次更新使用相同签名，可直接覆盖安装，数据不丢失。
-
-**反馈问题：** [提交 Issue](https://github.com/fwzm/MediaHub/issues)
-
-## 项目简介
-
-不同媒体服务器与云存储通过统一 `MediaProvider` 抽象接入，UI 只消费统一领域模型
-（`core:model`），不感知任何数据源协议。播放核心基于 AndroidX Media3 / ExoPlayer。
-
-详细设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，进度见 [ROADMAP.md](ROADMAP.md) / [TASKS.md](TASKS.md)，
-重要决策见 [DECISIONS.md](DECISIONS.md)，交接信息见 [HANDOFF.md](HANDOFF.md)。
-
-> **另有 Windows 原生桌面客户端正在开发中**：代码位于 `windows/`，全部工作在未合并分支
-> `feature/windows-client`（Draft PR #33），**尚未发布任何安装包**。
-> 状态与限制见 [Windows 桌面客户端（开发中，未发布）](#windows-桌面客户端开发中未发布)。
-
 ## 模块结构
 
-```
-app/                 应用壳（Application / MainActivity / 导航 / DI）
-core/                核心层（无业务）
-  common/            通用工具（id、时间、调度器、Nav 编解码）
-  model/             统一领域模型（纯 Kotlin，无 Android 依赖）
-  network/           ApiClient（API）+ MediaHttpClient（媒体流）+ 结构化错误
-  database/          Room（服务器/账号/进度）+ DataStore（偏好）+ Repository
-  security/          Android Keystore 加密存储（SecretStorage / TokenStore）
-  logging/           统一日志（分类、脱敏、内存缓冲）
+```text
+app/                  应用壳、导航、依赖注入与全局主题
+core/
+  model/              统一媒体领域模型
+  ui/                 共享 artwork、卡片、状态组件与播放器视觉效果
+  network/            API、媒体网络与请求安全边界
+  database/           Room、DataStore 与本地仓库
+  security/           Android Keystore 加密存储与 Token 管理
+  common/ logging/    通用能力、结构化日志与脱敏
 player/
-  engine/            Media3/ExoPlayer 封装（PlaybackEngine、缓存、请求头注入）
-  compatibility/     设备能力 + 播放兼容性评估器（纯逻辑，可单测）
+  engine/             Media3 / ExoPlayer 引擎
+  mpv/                mpv 引擎与播放兼容路径
+  compatibility/      设备能力与播放兼容评估
 provider/
-  api/               MediaProvider 统一接口 + 能力声明 + 异常（纯 Kotlin）
-  base/              BaseMediaServerProvider + Provider 注册表
-  emby/ jellyfin/ webdav/ local/   具体数据源（emby、local 已实现；jellyfin/webdav 骨架）
-  smb/ aliyun/ baidu/ quark/ china-mobile/ tianyi/   规划占位（README）
-metadata/            媒体元数据（刮削）抽象
+  api/ base/          Provider 契约、能力声明与注册
+  emby/ jellyfin/ webdav/ local/
+metadata/             元数据抽象
 feature/
-  home/ server/ library/ detail/ search/ settings/ player/    UI 模块
-docs/                providers / player / api 设计文档
+  home/ library/ search/ detail/ player/ server/ settings/
 ```
 
-## 环境要求
+各数据源通过 `MediaProvider` 能力接口接入，UI 消费统一领域模型，不直接依赖服务端协议。架构说明见 [ARCHITECTURE.md](ARCHITECTURE.md)，重要取舍见 [DECISIONS.md](DECISIONS.md)。
 
-- JDK 21（仓库当前 Android / Kotlin 构建以此版本验证）
-- Android SDK（compileSdk 36，minSdk 26，build-tools 36.0.0）
-- Gradle Wrapper（仓库已带 wrapper；当前 wrapper 版本以 `gradle/wrapper/gradle-wrapper.properties` 为准）
+## 从源码构建
 
-## 构建
+需要 **JDK 21**、Android SDK（**compileSdk 36**，minSdk 26）和仓库内 Gradle Wrapper。Windows PowerShell 示例：
 
 ```powershell
-# Windows：先为当前进程指定 JDK 21；需要 local.properties 或 ANDROID_HOME 指向 SDK
 $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
+# 通过 local.properties 的 sdk.dir 或 ANDROID_HOME 配置 Android SDK
+
 .\gradlew.bat assembleDebug --no-daemon --console=plain --no-parallel --max-workers=1
 .\gradlew.bat testDebugUnitTest :core:model:test :provider:api:test :metadata:test `
   --no-daemon --console=plain --no-parallel --max-workers=1
 .\gradlew.bat lintDebug --no-daemon --console=plain --no-parallel --max-workers=1
 ```
 
-产物：`app/build/outputs/apk/debug/app-debug.apk`
+Debug APK 输出至 `app/build/outputs/apk/debug/app-debug.apk`。构建命令不代表测试已经执行或通过；结果请查看对应 PR 与 CI 记录。
 
-## 当前可用的端到端路径
+## 支持边界
 
-### Emby（Phase 1A–1B-2.4）
-1. 首页 → 添加媒体库 → Emby → 填服务器地址 / 用户名 / 密码 → 登录并添加。
-2. 点 Emby 服务器卡片 → 浏览 Views → 电影库 / 剧集库 → 海报墙（电影/剧集 2:3 海报，单集 16:9 剧照）。
-3. 点 Movie / Episode → 详情页（backdrop + 海报 + 元信息 + 简介）→ 播放。
-4. 播放（无转码 Direct Stream）：Token 只走请求头不进 URL（ADR-026）；
-   跨 origin 重定向剥离凭据（ADR-030）；图片加载同源注入鉴权、跨 origin 剥离（ADR-031）。
-5. 播放器：音轨/字幕 Bottom Sheet（codec / 声道 / 采样率 / 解码器诊断），
-   字幕默认白字透明背景（黑底关闭），字号/颜色/描边/位置可调并持久化；
-   全部音轨不被设备支持时显式提示而非静默无声。
-6. 播放进度自动写入本地快照 → 首页"继续观看"（缩略图 + 进度条）。
+- 当前是 Android Alpha 项目，不是稳定版；Release APK 仅面向 arm64-v8a，其他架构请自行评估源码构建。
+- Emby、Jellyfin、WebDAV 与本地源的支持范围并不相同；聚合、收藏、进度、详情与播放能力取决于具体 Provider 和服务端响应。
+- 播放以已实现的 Direct Stream / 直连路径与双内核能力为基础，**不等同于通用转码服务或任意格式保证**。设备、解码器、字幕和特效表现可能存在差异。
+- 本地备份与恢复不等同于云备份；跨端来源同步、传输及真实双设备场景不应仅凭代码或回环测试视为已验收。
+- 真机、真实服务端版本、旧数据库升级和跨设备矩阵的覆盖范围，以 [ROADMAP.md](ROADMAP.md)、[TASKS.md](TASKS.md)、[Provider 文档](docs/providers/README.md) 及 PR 验证记录为准。
 
-### 本地存储（Phase 0）
-1. 首页 → 添加媒体库 → 本地存储 → 保存。
-2. 点"本地存储"卡片 → 浏览文件树 → 点视频文件 → 播放。
+## Windows 客户端
 
-设置页可改默认倍速、字幕大小等（DataStore 持久化）。
+本分支包含 `windows/` 下的 Windows 原生客户端代码（C# / .NET 10、WinUI 3、libmpv），但它**尚未发布，也没有可下载安装包**。Windows 与 Android 独立构建，不共享运行时。
 
-> 真机、真实 Emby/Jellyfin 服务器和旧版本数据库升级不属于上述 JVM 路径的自动保证范围；
-> 当前验证边界、尚未完成项和每个 Provider 的能力以 [TASKS.md](TASKS.md)、[ROADMAP.md](ROADMAP.md)
-> 与 [Provider 文档](docs/providers/README.md) 为准。
+当前生产 libmpv 基线涉及 GPL 许可约束，在引擎切换与合规判定完成前不具备分发条件。构建方式、能力边界和第三方许可请直接查阅 [windows/README.md](windows/README.md)、[能力清单](windows/docs/CAPABILITY-MAP.md) 与 [第三方声明](windows/THIRD-PARTY-NOTICES.md)。
 
-## 当前分支已验证的 M0-A 能力
+## 安全与隐私
 
-- 默认 User-Agent 为可识别的 `MediaHub/... (Android)`，不会冒充其它播放器。
-- 自定义 User-Agent 按 `serverId` 隔离并持久化；删除服务器或确认的孤儿清理不会误删其它服务器配置。
-- 没有图片鉴权 contributor 的 Provider（例如 WebDAV）仍按基础 URL 解析 `serverId`，因此可以应用 UA 策略，但不会伪造图片认证头。
-- 重定向按每一跳重新解析服务器归属；跨 origin 时回落默认 User-Agent，凭据剥离仍由独立拦截器负责。
-- 自定义值拒绝控制字符、非 ASCII 和超长输入；非法值不会被静默改写成另一条配置。
-- 本轮对 `DataStoreServerUserAgentRepository` 的加载等待做了无忙等优化，并通过
-  `:core:database:testDebugUnitTest`（14 tests / 0 failures）复跑持久化、并发和首次加载回归。
-- 受控真机证据：WebDAV 编辑页保存的 `MediaHubTest99` 在进程重启后仍恢复；测试连接返回成功，
-  MockWebServer 实际收到 `OPTIONS` 的 `User-Agent: MediaHubTest99`。应用冷启动最早的后台请求可能发生在
-  server scope 快照建立前并使用默认 UA，该时序边界已登记，尚未宣称所有冷启动请求均覆盖。
+- 不在源码中硬编码 Token、Cookie 或密码；敏感凭据由 `core:security` 使用 Android Keystore 加密存储。
+- Token 通过请求头发送，不写入媒体 URL；临时播放 URL 不落库。
+- 跨 origin 重定向按边界剥离凭据；日志经过脱敏处理。
+- 本地备份不包含登录凭据。请妥善保管备份密码，遗忘后无法恢复加密备份。
+- 不要在 Issue、日志或截图中公开真实账号、服务器地址、Token、Cookie 或私人媒体信息。
 
-## Windows 桌面客户端（开发中，未发布）
+发现安全问题时，请先避免公开敏感细节，并通过 [GitHub Security Advisories](https://github.com/fwzm/MediaHub/security/advisories/new) 私下报告；无法使用该入口时，可在 Issue 中仅说明需要安全联系，不要附凭据或漏洞利用细节。
 
-MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一产品语义（领域契约、能力声明、
-安全红线），但不共享源码，也不互相依赖运行时。
+## 参与贡献
 
-- 技术栈：C# / .NET 10 + WinUI 3（Windows App SDK 1.8）+ libmpv（`--wid` 嵌入，D3D11 硬解），自包含部署
-- 代码位置：`windows/`；客户端自身说明见 [windows/README.md](windows/README.md)
-- 现状：本章状态取自 `feature/windows-client` 分支（Draft PR #33），**尚未合并进 `main`，未提供任何安装包**；
-  其他并行分支上的 Windows 工作不在本章范围内
+欢迎提交 Issue、文档修正与聚焦的 Pull Request。建议先阅读 [ARCHITECTURE.md](ARCHITECTURE.md)、[DECISIONS.md](DECISIONS.md) 和相关 Provider / Player 文档，再讨论较大改动。
 
-> **读法**：本章只写有执行证据的结论。完整逐项状态（含 `UNVERIFIED` / `NOT_RUN` 标记）见
-> [windows/docs/CAPABILITY-MAP.md](windows/docs/CAPABILITY-MAP.md) 与 `windows/docs/W*-EVIDENCE.md`；
-> 这些表格与路线图可能滞后于最新提交，冲突时以代码与证据文档为准。
+提交前请运行与改动对应的构建和测试，保留真实失败记录，并在 PR 中说明实际验证范围；不要把编译通过、单元测试或模拟环境结果表述为真机/真实双设备验收。UI 改动请同时检查加载、空内容、错误状态与不同屏幕尺寸，截图须使用可公开的原创或本地演示素材。
 
-### 已验证的能力（真实执行并观察通过）
+## 文档
 
-| 能力 | 证据 |
-| --- | --- |
-| libmpv 嵌入（`--wid`）+ D3D11 硬解播放真实视频 | `windows/docs/W1-EVIDENCE.md`（`hwdec=d3d11va`） |
-| 媒体源管理：添加（探测 → 登录 → 保存）/ 测试 / 重新登录 / 删除 | `windows/docs/W2-EVIDENCE.md`；DPAPI 凭据库 79 条测试 |
-| 库浏览（列表 / 海报墙 / 详情）、搜索、继续观看 | 同上 |
-| 引擎网络边界：改为经本地回环转发取流，**引擎不持有服务器凭据** | ADR-W006、`CAPABILITY-MAP` 网络边界表 |
-| 桌面集成：文件菜单、拖放、窗口状态恢复、文件类型关联（HKCU 登记，设置页可开关） | 提交 `5c232d6`（单测覆盖；GUI 逐项点击未单独验收） |
-| **官方 Emby 4.10.x 端到端（W8 S2，43/43）**：库浏览（库根为「每片一个文件夹」）→ 详情 → 600 s 真实播放 → 中断回写 304.33 s → 完全重启后从 306 s 恢复 → 自然结束才 `played=True` → 离线与令牌吊销（401，日志无令牌） | `windows/docs/W8-EVIDENCE.md`（验收途中官方实例自动升级到 4.10.2.0，如实记录） |
-| **Jellyfin 12.2 中断续播（W8 S1，29/29）**：中断 → 完全重启 → 引擎从 304 s 继续 → 自然结束才算看完；并更正 W4 的「中断恢复 FAILED」不是客户端缺陷 | 同上（S1.1 源码级确认：判据是片长是否达到 `MinResumeDurationSeconds`=300 s，180 s 夹具被服务端按「已看完且清零」处理） |
-| **无窗口真服续播闭环（W8-H，17 + 16×2 断言）**：零窗口即可复跑 —— 探针全程走产品 provider 栈（`IMediaProviderFactory` → `IProviderAuth` → `IProviderPlayback` → `IProviderProgress` 上报/回读），两服各 16 条断言：40% 往返（ticks 完全相等、新客户端实例在续播列表可见、详情同值、`played=false`）、1% 低于下限清零、2% 按服务器取值（Emby 保留 / Jellyfin 清零）、看完置 `Played` 且退出续播列表 | `windows/docs/W8-HEADLESS-RESUME.md`（`windows/tools/acceptance/w8/headless-resume.ps1`：`RESULT: 17 passed, 0 failed`，两服探针各 `16 passed, 0 failed`，收尾 `no-test-server-processes-left running=0`；实质发现 Emby 4.10.2 续播下限是片长 **2%**，Jellyfin 12.2 仍是 5% + 300 s） |
-| **WebDAV（Browse-only 来源）Gate A 全部项**：入口 → PROPFIND → 目录 → Range GET → 真实播放（R3）、播放中 Seek 与退出时回环释放（R4）、目录递进 / 返回上级 / 空目录 / 中文空格文件名（206 + `bytes=`）/ **关闭整个应用**释放回环（A3 第一部分 24/24）、子根挂载 / 404 / 403 / 500 / 401 / 慢服务器导航竞态 / 离线 → 重试（故障注入 54/54） | `windows/docs/W5-1-R3-GATE-A.md`、`W5-1-R4-GATE-A-SEEK-RELEASE.md`、`W7-EVIDENCE.md`（真实 WsgiDAV 4.3.3 + UI Automation） |
-| **多文件临时播放队列（B2）**：原生多选 → 队列 → 上一项 / 下一项 / 移除 / 清空、EOF 自动跳项、失败跳项与连续失败上限、`AutoPlayNext=false` 负向对照 | `windows/docs/W7-EVIDENCE.md`（`r7-b2-queue.ps1` 63/63、`r7-b2-failure.ps1` 18/18） |
-| **跨来源「继续观看」（U1）**：真实进度 → 跨来源列表 → 卡片续播 → 已看完消失 | `windows/docs/W9-EVIDENCE.md`（Emby 39/39、Jellyfin 39/39） |
-| **剧集自动连播，含跨季（U2）**：同季跨集、跨季、关闭开关的负向对照 | 同上（35/35 × 2 服；`queue:auto-advance` trace + 服务器回读） |
-| **收藏端到端（U3）**：详情页收藏 → 服务器回读 `UserData.IsFavorite` → 重启保持 → 取消 → 「我的收藏」页 | 同上（24/24 × 2 服；写端点是 `FavoriteItems`，`/Favorites/` 在真服不存在） |
-| **永久播放列表（U4）**：加入 / 命名 / 落盘 `%LOCALAPPDATA%\MediaHub\playlists.json` / 列表页播放不改写列表 / 移除与删除 | 同上（40/40 × 2 服；与临时队列解耦，共 276 条 GUI 断言全绿） |
-| 音频文件（`.aac`）真实播放，以及三条真实文件对话框路径：打开视频 / 打开文件夹 / 加载外挂字幕 | `windows/docs/W5-1-R6-AUDIO-PICKERS.md`（12/12、18/18；`PEAK=0.088583` 对齐 W3 基线，不是「静音也算通过」） |
-| GUI 验收：播放控制 / 全屏 / 生命周期（可观测断言 + 证据文件） | `windows/docs/W5-GUI-ACCEPTANCE.md` |
-| 便携版构建（331.6 MB，可启动） | `CAPABILITY-MAP` 测试与交付表；MSIX / 代码签名 / 干净机安装仍未做 |
-| LGPL libmpv 引擎候选已实际构建（**尚未切换到产品**） | `windows/engine/lgpl/dist/` |
-
-### 已知缺陷与未验证项
-
-- **进度回写的服务端语义**：中断位置写入与「完全重启后恢复」已在 Jellyfin 12.2 与 Emby 4.10.x 实测；
-  但多客户端并发、快进后未达阈值等服务端判定细节未测。W4 记录的「中断恢复 FAILED」已更正为
-  **夹具片长低于服务端阈值**（`MinResumeDurationSeconds`=300 s），不是客户端缺陷。
-  W8-H 的无窗口闭环补上了「低于下限怎么处理」这一半：Jellyfin 12.2 丢弃 5% 以下，Emby 4.10.2 丢弃 **2% 以下**，
-  且两者都是**清零并移出续播列表**而不是忽略；阈值是按片长百分比而非绝对秒数（600 s 夹具上 1.99% 丢弃、2.00% 保留）。
-- **真服覆盖面是单机单实例**：Emby 与 Jellyfin 各只在隔离实例上验证一次；服务端版本差异会改变行为
-  （W8 验收途中 Emby 自行从 4.10.1.0 升级到 4.10.2.0），未做多版本矩阵。
-- **搜索**：多源搜索仅有模拟服务器与单测，服务端搜索接口未接入，真服路径未测。
-- **体验缺口**：「继续观看」卡片海报未懒加载（行可点、海报位为占位图标，属已知缺口）；
-  永久播放列表内拖拽排序仅单测覆盖（`NOT_RUN`）。
-- **NOT_RUN / IMPLEMENTED_UNVERIFIED**：HDR 与色彩管理（不声称任何 HDR 能力；杜比视界 `NOT_SUPPORTED`）、
-  硬件解码故障回退、全屏切换的截图确认、字幕样式（字体 / 字号 / 颜色 / 描边 / 位置 / 延迟 / ASS 覆盖）、
-  季 / 集导航的专项断言（U2 已在真服按季 / 集选中并播出）、图片缓存上限与磁盘 TTL、
-  TUN / VPN / PAC 出口一致性与 SOCKS 代理、真实第二 Windows 账户下的凭据库行为、
-  Intel / AMD / NVIDIA 硬件兼容矩阵。
-- **尚未实现**：音频独占 / HDMI 直通 / 多声道 / 音画同步偏移；系统媒体按键、任务栏状态、多窗口；
-  Plex / SMB / 云盘媒体源。
-- **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39)，stacked 在 `feature/windows-client` 上，仍为 Draft）：
-  契约层、配对载荷/状态机/传输层（回环）、双向增量与设备注册表、凭据迁移（DPAPI 重封）、加密离线归档、同步 CLI、
-  同步页「预览 → 逐条审批 → 应用 → 推进基线」、基线落盘与重启幂等、已配对设备登记与指纹钉扎、
-  已配对设备清单与「忘记」、同步 CLI 的 `baseline` / `pair` 命令组（离线查询与预览，
-  不监听端口、写操作默认 dry-run）、回环传输与双向回环编排（导出 → 帧分块传输 → 对端导入轮，
-  往返幂等、墓碑需显式确认）、同步页/配对页的可判定逻辑（抽成无 WinUI 依赖的 presenter）、回环传输的可选对端认证
-  （W6-24：`transfer … --authenticate --secret-env NAME`，口令只从环境变量进、不进命令行与 JSON；
-  开启时在最后一个数据块之后追加一个 `0x03` tag 帧（33 字节 = 1 字节帧类型 + 32 字节 HMAC-SHA256），
-  关闭时线上字节与 W6-16 全等，重放按进程内 64 条 nonce 窗口拒绝）、来源同步传输的 TLS 1.3 与公钥指纹钉扎（W6-26：`transfer serve --tls` 在 stderr 打 `certificate fingerprint:`，`transfer send --tls --expect-fingerprint` 只信任钉住的那一枚，四个 `tls-*` 稳定码；默认关闭时线上字节与 W6-16 全等）、可选投递确认（W6-30：`--confirm-delivery` 要等到对端关闭连接才认定送达，否则 `delivery-unconfirmed` 而不是静默成功）、传输层恶意与畸形帧回归（W6-31：36 例、十类攻击面，接收端永不把异常抛给调用方）、同步页的传输卡片（W6-33：本机回环收/发、收到的信封只进预览绝不自动应用、20 个稳定码逐条文案，抽成无 WinUI 依赖的 `SyncTransferPresenter`）、同步页 presenter 与真实 `SyncCli` 子进程的 headless 端到端（W6-35：独立测试工程、不入 sln、9 例全部真起子进程，主套件例数不变）、反向回执帧（W6-37：`transfer serve --send-receipt` 只在信封解码成功后回一个裸 `0x04` 字节，`transfer send --await-receipt` 没等到就报 `receipt-missing`/`receipt-timeout`/`receipt-invalid`/`receipt-not-enabled`，不再把「对端关连接」当送达证据；默认关闭时线上字节仍与 W6-16 全等，同批修掉 W6-26 握手「超时 vs 调用方取消」的分类竞态）、回执帧接进同步页与双向编排（W6-39：接收侧解码成功才回 `0x04`、发送侧可等回执、roundtrip 内部默认交换回执，回执失败只作 advisory、不改轮结果）、同步页上的两个回执控件（W6-43：接收后写回执 / 等待对端回执各一个勾选框与一行回执结论，`receipt-*` 四码原样呈现，`receipt-missing` 不软化成「已发送」；GUI_UNVERIFIED）、TLS × 认证 × 回执的组合矩阵验收（W6-45：验收脚本 14 → 18 例、presenter-e2e 12 → 14 例，全开 / 口令不一致 / 错 pin + 认证 / 明文对 TLS 四种组合各自断言稳定码与接收端零信封写入；口令不一致时发送端只能观察到 `receipt-missing`（信封单向，不能凭缺失猜原因），serve 侧则必须不出现任何 `receipt-*`）、发送端投递确认（W6-46：Android 侧对齐 Windows W6-30，写完最后一帧后读对端直到 FIN 才算送达，`delivery-unconfirmed` 是独立单码封闭集，预算 2000 ms、最多排水 64 KiB、回执优先；默认关闭时不读一个字节、线上字节与 W6-22 向量逐字节相等；界面开关见 W6-48）、跨机（非回环）传输的契约 ADR（W6-47：现状硬边界、信任模型、十条实现约束、错误码归并结论与 DoD 证据表全 NOT_RUN，只在 W6 分支上的文档、不改代码）、同步页补上两个协议开关（W6-48：发送卡片可勾「等对端关闭连接（投递确认）」、监听卡片可勾「收下后回 0x04 回执」，回执优先所以勾着等回执时投递确认勾选框直接禁用；两者接进既有表单字段，8 例 androidTest 全部先滚动到页尾再断言、主流程仍在首屏）、
-  发送卡可以在途取消（W6-49：`SourceSyncSendLauncher` 只做 `Job` 记账、不持信封与口令，`sync.send.cancel` 按钮只在发送中可用，取消后状态回 Idle 且不产生失败码、释放单飞后可立刻重发、没在发时是 no-op；JVM 8 例 + androidTest 6 例）、`transfer serve` 的接收预算可调（W6-50：`--budget-ms` 默认仍是 15000 ms、取值 100..600000、只对 serve 生效，非法值报 `invalid-budget-ms:<值>`，`--json` 多一个 `budgetMs` 字段、文本模式多一行 `budget: N ms`；19 例单测 + 验收脚本 S1/S2 分别断言「预算到点报 `transfer-timeout`」与「命令值被原样回显」）、跨机（非回环）的第一个入口——显式单播主机（W6-51：`transfer serve --bind ADDR` 与 `transfer send|serve --allow-non-loopback`，同意后只接受一个单播字面量，通配 / 广播 / 组播 / 保留段 / 主机名仍在建 socket 之前就拒掉、因此不触发防火墙弹窗；复用冻结的 `not-loopback` 码、把诊断写进拒绝句子的取舍，已作为对 W6-47 ADR §4.5 第 2 条的显式偏差记进 `docs/cross-device/W6-51-EXPLICIT-HOST.md`；40 例单测；跨机证据 E1–E6 仍 NOT_RUN）、Android 监听端也可以绑一个显式单播地址（W6-52：监听卡的 `sync.listen.host` 输入框 + `sync.listen.allow-host` 复选框，与 Windows W6-51 同名同义——留空仍是 127.0.0.1，同意后只接受一个单播字面量，通配 / 广播 / 组播 / 保留段与主机名在建 socket 之前就拒，码仍是 `not-loopback` 并由四条 detail 句子承载诊断（与 W6-52 之前的拒绝句逐字相同的那条保留给「没开开关」）；地址判定收在一处 `SourceSyncHostAddress`，界面层只原样转交不 trim 不判；JVM 14 + 5 例、androidTest 3 例；发送端与拨号接收卡的同类开关见 W6-52b）、Android 监听端可以要求对端口令（W6-53：监听卡的 `sync.listen.auth` 开关 + `sync.listen.secret` 口令框（密码遮罩、只进内存、`toString` 打 `secret=<redacted>`），与 Windows `transfer serve` 的 `--authenticate --secret-env` 同名同义——四个线上码 `auth-required` / `auth-mismatch` / `auth-replayed` / `auth-secret-unavailable` 原样透传、界面不新增码；开了认证却没填口令时在**建 socket 之前**用本地码 `listen-secret-missing` 拒掉，工厂的 `open` 一次都不调；JVM 5 例 + androidTest 3 例）、Android 监听端的等待预算可调（W6-54：监听卡的 `sync.listen.budget` 输入框，一个框管两段等待——等第一条连接与连上之后每次读，范围 100..600000 毫秒、留空仍是 15000，与 Windows W6-50 的 `transfer serve --budget-ms` 同值同义；非法值在**建 socket 之前**用本地码 `listen-budget-invalid` 拒掉，工厂的 `open` 一次都不调；预算只决定本地等多久，不进信封、不进 tag 帧、不进回执；JVM 5 例 + androidTest 4 例）、门禁补钉三套件（W6-55：`SourceSyncReceiptTest` 33 例、`SourceSyncHostAddressTest` 14 例、`SourceSyncListenerControllerTest` 43 例进 `--required-suite`，33 → 36 个套件；改完同步跑了 `.github/scripts/tests` 的 54 个 unittest 全绿）、Android 拨号侧也有显式单播地址入口（W6-52b：发送卡的 `sync.send.allow-host` 与「接收」卡的 `sync.receive.allow-host` 两个复选框，把 W6-52 在监听端做过的同一件事补到拨号方向——判定仍只有一处 `SourceSyncHostAddress`，只是加了个 `verb` 参数（监听端说「绑定」、拨号端说「连」），所以「开关关着」时那句拒绝文案与 W6-23 起的原文逐字相同；同意后只接受单播字面量，通配 / 广播 / 组播 / 保留段与主机名在拨号之前就拒，码仍是 `not-loopback`、诊断由四条 detail 句子承载；控制器自己不判地址也不 trim，只把开关原样转交；JVM 3 + 3 例、androidTest 4 例；真实两机仍 NOT_RUN）、
-  审批门禁的「跳过即不写入」（同一身份 allow 与 skip 并存时 skip 胜）、同步 CLI 的 `--root` 误指已存在文件改为稳定拒绝
-  （`root-not-a-directory`，每份 JSON 带 `rootExisted` 区分「新建根」与「路径写错」）与导出路径规范化
-  （`../` 解析后再回显，`--out` 指向目录给 `output-is-directory`）均已实现，
-  `MediaHub.Tests` **1577 通过 / 0 失败**（其中 W6 新增 1108）；
-  W12b 对抗性安全回归 66 例（畸形配对载荷、设备登记表在损坏/容量满/独占/只读时必须拒绝而不是静默清空、
-  传输层声明长度不触发分配、`--json` 单文档、异常与 stderr 不含口令）；
-  **尚未做**：二维码与扫码、跨机（非回环）配对与真实局域网传输（Windows 端已有显式非回环入口 W6-51，但一次真实跨机传输都没跑过；Android 的监听端（W6-52）与拨号侧两张卡（W6-52b）也都有同形状的地址闸门开关）、设备持久化、同步页/配对页/已配对清单的 GUI 证据
-  （三者均为 `IMPLEMENTED_UNVERIFIED`，本机没人观看窗口时无法跑）、Android 端接收页的 GUI 证据与真实跨机（非回环）传输
-  （Android 侧的契约/规划/导入导出/配对契约/分块传输协议/「回环传输 → 导入闭环」已就位，
-  协议与 Windows 逐字节对齐，见 `docs/android-source-sync-transfer.md`；Windows 端已有可选的传输对端认证
-  （Windows W6-24 / Android W6-25，五个稳定码与帧格式两端同名同序）；TLS 1.3 与公钥指纹钉扎两端也都就位（Windows W6-26 / Android W6-29，四个 `tls-*` 码同名同序，Android 用 SPKI 而非整证书算指纹），并有与 Windows 真子进程的双向联调（W6-32，JSSE ↔ SslStream）；仍缺：跨机（非回环）的真实证据——Windows 的地址闸门已由 W6-51 显式放开（`--bind` 加 `--allow-non-loopback`，只接受单播字面量），但一台机器证明不了它，E1–E6 全 NOT_RUN，Android 的监听端也已有同形状的地址入口（W6-52：`sync.listen.host` + `sync.listen.allow-host`，只收单播字面量）；拨号侧（发送卡与「接收」卡）的同形状开关也在 W6-52b 里补齐（`sync.send.allow-host` / `sync.receive.allow-host`）（Android 发送端的投递确认已由 W6-46 补上、界面开关见 W6-48，但默认仍关闭）；Android 侧已有回环监听端（W6-34：`SourceSyncTransferListener` 只绑回环、可连续 accept，`SourceSyncListenerImportService` 把它接进导入闭环，Windows 的 `transfer send` 可以直接推到 Android 的监听端口，界面入口也已就位（W6-36：同步页的「接收（监听）」区块可以开一个回环监听、等一次发送，收到的信封只进预览、写入仍要逐条允许后再应用；今天 App 里没有证书下发通道，所以 TLS 开关如实禁用、只能明文）；Android 端也已对齐回执帧（W6-40：`receipt-*` 四码与 Windows 同名同序，监听端只在信封解码成功后回一个裸 `0x04` 字节、gate 在端点层，拨号端可等回执，默认关时线上字节与 W6-22 的冻结向量逐字节相等；界面还没有开关）；导入页的两张接收卡片按 W6-41 移到页面末尾，首屏保留「选择文件 → 预览 → 应用」主流程（此前它们被插在按钮行之前，把主流程挤出首屏，CI 的 visual-instrumentation 上两次 Android run 就红在这 6 例首屏可见性断言上）；Android 也已是发送端（W6-42：同步页末尾的「发送（Android → Windows）」区块把本机导出的信封推给 Windows 的 `transfer serve`，可选 TLS 指纹钉扎 / HMAC 认证 / 等回执，默认全关时线上字节与 W6-22 冻结向量逐字节相等；本层只补 5 个「还没拨号就拒」的码，其余码原样透传；在途发送可以取消（W6-49：新增 `SourceSyncSendLauncher` 只做 Job 记账、不持信封与口令，`sync.send.cancel` 按钮发送中才可用，取消后状态回到 Idle 且不产生任何失败码，释放单飞后可以立刻重发；真实 Socket 中途取消与真机按钮仍是 `NOT_RUN` / `DEVICE_UNVERIFIED`），Android → Windows 的发送方向也还没和真 CLI 对跑）；三张卡（接收 / 监听 / 发送）另有 47 例 instrumentation 证据（W6-44 的 19 例、W6-48 的 8 例、W6-49 的 6 例、W6-52 的 3 例、W6-53 的 3 例、W6-54 的 4 例与 W6-52b 的 4 例：W6-52 那 3 例钉住地址框与开关在树里可交互、表单逐字回传、监听中两者禁用且端口行写实际地址；这 3 例本机没有设备/模拟器可跑，设备结论待下一次 CI；W6-49 那 6 例钉住「发送中才启用取消按钮、点完回到 Idle、失败行不出现」；端口闸门与「TLS 无证书就禁用」、口令框的 Password 语义、失败行与成功行文案，以及「不滚动也看得见选择文件 / 预览」的首屏不变式；本机无设备，设备结论只来自 CI 的 API 32 / 36 模拟器；W6-48 的两个协议开关同样先 performScrollTo 再断言，关掉时不影响主流程首屏））。
-- **发布阻断**：见下节许可证；另有 MSIX / 代码签名 / 干净机安装 `NOT_RUN`（`SIGNING_BLOCKED`）。
-
-### 构建与测试
-
-```powershell
-pwsh -File windows/tools/fetch-libmpv.ps1    # 首次：拉取 libmpv（约 115 MB，不入库）
-cd windows
-dotnet build MediaHub.Windows.sln -c Debug -p:Platform=x64
-dotnet test  MediaHub.Windows.sln -c Debug
-```
-
-CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
-与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
-截至 `4238edc`：`MediaHub.Tests` **469** + `MediaHub.WebDav.Tests` **104** = **573 通过 / 0 失败 / 0 跳过**
-（469 = 438 既有 + 31 例续播下限契约；历史口径 542 = 438 + 104 曾在 PR #33 里写过）。
-这不是本地口径而是 CI 实测：`windows-ci` 现在把两个套件**分两步**跑并各自产出 trx，再按套件名断言下限
-（`MediaHub.Tests` ≥400、`MediaHub.WebDav.Tests` ≥100，`failed=0` 且 `notExecuted=0`）—— 此前 WebDav 套件虽然被构建、
-却从未被 `dotnet test` 指向，104 个用例在 CI 里长期空转（run 40019093231 起已修正，日志可见
-`MediaHub.Tests: total=438` / `MediaHub.WebDav.Tests: total=104` / `combined tests=542`；此后 `4238edc` 又给 `MediaHub.Tests`
-加了 31 例，CI 的 floor（≥400 / ≥100）因此仍有余量）。
-W6 分支上 `MediaHub.Tests` 为 **1577 通过 / 0 失败**（主线 469 = 438 基线 + 31 例续播下限契约，加 W6 新增 1108：
-W6-1…W6-14 合计 583（其中 W6-10 的接线 14、W6-13 的清单 UI 17），再加 W6-15 的 CLI 命令组 32、
-W6-16 的回环传输 34、W6-17 的双向编排 22，另加 W12b 的对抗性回归 66、W6-18 的 transfer 命令组 19、
-W6-19 的 presenter 35、W6-21 的 skip 语义 9、W6-20 的 `--root`/导出路径 18、W6-24 的传输对端认证 45、W6-26 的 TLS 与指纹钉扎 37、W6-30 的投递确认 19、W6-31 的恶意帧回归 36、W6-33 的传输卡片 presenter 29、W6-37 的回执帧与握手超时分类修正 35、W6-39 的同步页回执接线 27、W6-43 的回执控件与结果行 3、W6-50 的 `transfer serve` 预算 19、W6-51 的显式主机入口 40
-—— 583+32+34+22+66+19+35+9+18+45+37+19+36+29+35+27+3+19+40 = 1108，即 1306 + 45 + 121 + 35 + 27 + 3 + 40），
-`MediaHub.WebDav.Tests` 的 104 例同样适用于该分支（见 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 正文的验证表）。
-
-Android 侧（[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml)）的单元门禁同样按**名字**断言，
-不是「打印了 PASSED 就算过」：`verify-unit-tests.py` 除要求每个有测试源码的模块都真跑过之外，还用
-`--required-suite` 钉住 **36** 个套件（含跨端契约的 `PairingVectorsTest` / `PairingFrameTest` /
-`WindowsGoldenInteropTest` / `SourceSyncPlannerTest`、`AndroidSourceSyncServiceTest`、`Migration4to5Test`、
-`UpNextResolverTest` / `PlayerAutoplayTest`，W6-G 的 `PairingTransportClientTest` / `PairingTransportEndToEndTest`，
-W6-F/W6-H 的 `SourceSyncImportLogicTest` / `SourceSyncImportSessionTest` / `SourceVerificationCoordinatorTest`，
-以及 W6-J 的 `PairingMaliciousInputTest` / `PairingTransportSecurityTest` / `PairingCredentialLeakTest` /
-`AndroidSourceSyncSecurityTest`，和 W6-22 的 `SourceSyncTransferVectorsTest` / `SourceSyncTransferRoundTripTest` /
-`SourceSyncTransferLoopbackTest`，W6-25 的 `SourceSyncTransferAuthTest`、W6-29 的 `SourceSyncTlsTest`，W6-34 的 `SourceSyncTransferListenerTest`，W6-46 的 `SourceSyncDeliveryTest`，W6-49 的 `SourceSyncSendLauncherTest`，和 W6-55 补钉的 `SourceSyncReceiptTest` / `SourceSyncHostAddressTest` / `SourceSyncListenerControllerTest`），并用 `--require-complete-suites` 从源码里解析每个 `@Test`
-方法、要求逐个都真的执行过 —— 套件被删、改名，或只跑单个方法（`--tests Suite.oneMethod`）都会失败。
-W6-23 新增的 `core/database` 套件 `SourceSyncTransferImportTest`（19 例）不在 36 个钉住名单里，
-但由 `--require-complete-suites` 与其他套件一起逐个方法核对（`core/database` 该模块 172 例、`core/common` 503 例（含 W6-40 的 `SourceSyncReceiptTest` 33 例、W6-46 的 `SourceSyncDeliveryTest` 20 例、W6-52 的 `SourceSyncHostAddressTest` 14 例与 W6-52b 的 `SourceSyncTransferClientHostTest` 11 例）、`feature/settings` 278 例（W6-36 的 `SourceSyncListenerControllerTest` 43 例（W6-52 增 5 例、W6-53 增 5 例、W6-54 增 5 例）、W6-42 的 `SourceSyncSendControllerTest` 35 例（W6-52b 增 3 例）、W6-49 的 `SourceSyncSendLauncherTest` 8 例，另有 W6-52b 增 3 例的 `SourceSyncReceiveControllerTest` 28 例），门禁脚本本地口径合计 2078 个唯一用例（W6-52 的 19 例、W6-53 的 5 例、W6-54 的 5 例与 W6-52b 的 17 例已计入；上一 CI 基线为 2032）；以上只是 JVM 单测，同步页三张卡的 Compose 断言另有 47 例 `androidTest`（W6-44 的 19 例、W6-48 的 8 例、W6-49 的 6 例、W6-52 的 3 例、W6-53 的 3 例、W6-54 的 4 例与 W6-52b 的 4 例），走 CI 的 visual-instrumentation（API 32 / 36）而不计入这些数字）。
-唯一允许跳过的是两个环境门控套件：`SourceSyncTlsInteropTest`（core/common，W6-32 的客户端方向）与 `SourceSyncListenerInteropTest`（core/database，W6-38 的反向方向），两者都要真实 Windows `SyncCli` 的 DLL 才能跑，CI runner 上按 JUnit5 assumption 跳过：门禁脚本用 `ENVIRONMENT_GATED_SUITES` 逐个类点名放行，同时还要求这类套件必须出现在报告里（凭空消失同样报错），其他任何被跳过的用例仍然是硬失败。
-本地负向验证过这两条：把整套 XML 移走 → 22 条问题（1 条套件 + 21 条方法）；只删一个 `<testcase` →
-恰好 1 条 `PairingVectorsTest#rejected_addresses_match_windows`。
-
-> 历史记录：head `2757285` 时记录的 477（373 + 104）与当时 Android CI 的一处不稳定用例失败
-> （`core/network` 的 `MpvHttpBridgeLifecycleTest.stop cancels target upstream while response body cannot finish`）
-> 均已过时；`f5e4eb7` 的 Android CI 为 success，该用例是否彻底稳定未做专项反复复现。
-
-真服 GUI 验收脚本入库在 `windows/tools/acceptance/`（`r7-*`、`u1/`–`u4/`），可用 `pwsh` 7 重放；
-证据目录被 `.gitignore` 排除，可在本机重跑复现。
-
-### 引擎许可证（影响可发行性）
-
-- 生产基线 `windows/native/libmpv/libmpv-2.dll` 为 **GPL-3.0-or-later**（构建未传 `-Dgpl=false`）。
-- LGPL 候选已构建于 `windows/engine/lgpl/dist/libmpv-2.dll`（3,327,274 B，sha256 `20035902…3C0A`），
-  但**尚未切换到产品**。
-- 因此**在完成引擎切换与合规判定前，Windows 客户端不具备分发条件**。
-  详见 [windows/THIRD-PARTY-NOTICES.md](windows/THIRD-PARTY-NOTICES.md) 与 `windows/docs/licensing/`。
-
-### 最近更新（自动同步）
-
-<!-- WINDOWS-SYNC:START -->
-<!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
-- 1deccca 2026-10-24 ci(windows): 许可证面门禁接进流水线（先按现状生成报告，再校验 notices/SBOM/项目漂移）
-- ef5344d 2026-10-24 docs(licensing): W11b 许可证清单与 SBOM 按现状重跑（13 csproj / 49 行 / 29 包 + LGPL 33 DLL 许可族），新增 check-licence-surface.ps1 门禁
-- 4238edc 2026-10-24 test(w8): 把两服续播下限语义固化成离屏契约（mock 按 2%/5% 落实下限，31 例）
-- a4684a8 2026-10-24 feat(w8): 无窗口真服续播闭环（ResumeProbe 走产品 provider 栈 + 双服驱动，两服各 16 条断言全绿）
-- 214e048 2026-10-24 docs(engine): W13c Release/publish 两 flavour 自包含实测（10.1-10.7）
-- 97a0f8e 2026-10-24 feat(engine): W13b LGPL 引擎自包含打包与可选切换开关（默认仍 GPL 基线）
-- 1a38b06 2026-10-24 docs(windows): W10 登记第 6 次被打断并停用自动重试，GUI 证据改为人工授予窗口
-- dd0ff31 2026-10-24 feat(tools): W13 LGPL 引擎无头探针——按绝对路径加载两份 libmpv 实测解码等价性
-<!-- WINDOWS-SYNC:END -->
-
-## 安全约定（强制）
-
-- 禁止源码硬编码 Token / Cookie / 密码。
-- Token 走 `core:security`（Android Keystore AES/GCM 加密存储）。
-- 临时播放 URL 绝不落库（ADR-003），播放时由 Provider 动态解析。
-- 日志统一经 `Redactor` 脱敏（Authorization / Cookie / Token / 密码）。
-
-## 多 AI 协作
-
-开始任务前先读：README / ARCHITECTURE / ROADMAP / TASKS / DECISIONS / HANDOFF。
-完成任务后更新：TASKS / CHANGELOG / HANDOFF（重要决策同步 DECISIONS）。
+- [架构设计](ARCHITECTURE.md) · [架构决策](DECISIONS.md)
+- [路线图](ROADMAP.md) · [任务与支持现状](TASKS.md)
+- [Provider 文档](docs/providers/README.md) · [播放器文档](docs/player/README.md)
+- [变更记录](CHANGELOG.md) · [开源许可](LICENSE)
