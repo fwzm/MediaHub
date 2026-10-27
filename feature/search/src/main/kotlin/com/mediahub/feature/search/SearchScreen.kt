@@ -72,13 +72,31 @@ fun SearchRoute(
     val input by viewModel.query.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
 
+    SearchContent(
+        query = input,
+        state = state,
+        onQueryChange = viewModel::onQueryChange,
+        onBack = onBack,
+        onOpenItem = onOpenItem,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchContent(
+    query: String,
+    state: GlobalSearchState,
+    onQueryChange: (String) -> Unit,
+    onBack: () -> Unit,
+    onOpenItem: (MediaItem) -> Unit,
+) {
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     TextField(
-                        value = input,
-                        onValueChange = viewModel::onQueryChange,
+                        value = query,
+                        onValueChange = onQueryChange,
                         modifier = Modifier.fillMaxWidth().padding(end = 12.dp),
                         placeholder = {
                             Text(
@@ -92,10 +110,8 @@ fun SearchRoute(
                         shape = CircleShape,
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         trailingIcon = {
-                            if (input.isNotEmpty()) {
-                                IconButton(onClick = {
-                                    viewModel.onQueryChange("")
-                                }) {
+                            if (query.isNotEmpty()) {
+                                IconButton(onClick = { onQueryChange("") }) {
                                     Icon(Icons.Default.Close, contentDescription = "清空")
                                 }
                             }

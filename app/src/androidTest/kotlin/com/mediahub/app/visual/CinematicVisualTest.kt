@@ -2,22 +2,24 @@ package com.mediahub.app.visual
 
 import android.content.Context
 import android.graphics.Bitmap
-import androidx.compose.material3.MaterialTheme
+import androidx.activity.compose.setContent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.mediahub.app.ui.theme.MediaHubTheme
 import com.mediahub.feature.detail.DetailBody
 import com.mediahub.feature.detail.SeriesBrowseState
 import com.mediahub.feature.home.HomeContent
 import com.mediahub.feature.library.LibraryContent
 import com.mediahub.feature.library.LibraryUiState
-import com.mediahub.feature.search.SearchBody
+import com.mediahub.feature.search.SearchContent
 import com.mediahub.feature.search.engine.GlobalSearchState
 import com.mediahub.feature.search.engine.UnifiedSearchHit
 import com.mediahub.model.MediaDetail
@@ -105,9 +107,20 @@ class CinematicVisualTest {
         val hits = listOf("星际漫游", "午夜档案", "最后的灯塔").mapIndexed { index, title ->
             UnifiedSearchHit(item(index, title, MediaType.MOVIE), if (index == 0) "我的家庭影院" else "本地影片")
         }
+        var query = "星际"
         setContent {
-            SearchBody(state = GlobalSearchState(query = "星际", hits = hits), onOpenItem = {})
+            SearchContent(
+                query = query,
+                state = GlobalSearchState(query = query, hits = hits),
+                onQueryChange = { query = it },
+                onBack = {},
+                onOpenItem = {},
+            )
         }
+        composeRule.onNodeWithText("星际").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("清空").assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+        assertEquals("", query)
         composeRule.onNodeWithText("星际漫游").assertIsDisplayed()
         composeRule.onNodeWithText("我的家庭影院").assertIsDisplayed()
         composeRule.onNodeWithText("午夜档案").assertIsDisplayed()
@@ -149,7 +162,7 @@ class CinematicVisualTest {
     private fun setContent(content: @androidx.compose.runtime.Composable () -> Unit) {
         composeRule.activityRule.scenario.onActivity { activity ->
             activity.setContent {
-                MaterialTheme(content = content)
+                MediaHubTheme(content = content)
             }
         }
         composeRule.waitForIdle()

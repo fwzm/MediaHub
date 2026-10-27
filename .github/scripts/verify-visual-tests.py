@@ -148,6 +148,22 @@ COMMON_TESTS = {
         "com.mediahub.core.ui.effects.PlayerVisualChromeBoundsTest",
         "tallLandscapeControlsKeepAmbientOutsideSubtitleSafeBand",
     ),
+    (
+        "com.mediahub.app.visual.CinematicVisualTest",
+        "homeContinueWatchingUsesProductionCardAndDispatchesSelection",
+    ),
+    (
+        "com.mediahub.app.visual.CinematicVisualTest",
+        "libraryLongTitlesRemainVisibleAndPlayable",
+    ),
+    (
+        "com.mediahub.app.visual.CinematicVisualTest",
+        "searchProductionCardsKeepTitleAndSourceHierarchy",
+    ),
+    (
+        "com.mediahub.app.visual.CinematicVisualTest",
+        "cinematicDetailRetainsRealPlayCallback",
+    ),
     # A4：Android runtime 生产 parser 双验收门禁（缺失/跳过=失败，
     # 防回归"job success 但 webdav 测试缺失/被跳过"）
     (

@@ -211,6 +211,23 @@ class EvidenceGateTest(unittest.TestCase):
                 self.edit("app", remove, api=api)
                 self.assertTrue(any(key[1] in problem and "no passing execution" in problem for problem in self.problems(api)))
 
+    def test_cinematic_production_screens_require_every_actual_case(self):
+        root = Path(__file__).resolve().parents[3]
+        suite_name = "com.mediahub.app.visual.CinematicVisualTest"
+        source = root / "app/src/androidTest/kotlin" / Path(*suite_name.split("."))
+        methods = re.findall(r"@Test\s+fun\s+(\w+)\s*\(", source.with_suffix(".kt").read_text(encoding="utf-8-sig"))
+        self.assertEqual(len(methods), 4)
+        for api in (32, 36):
+            for method in methods:
+                with self.subTest(api=api, method=method):
+                    self.assertIn((suite_name, method), gate.required_tests(api))
+                    self.build(api)
+                    def remove(suite):
+                        suite.remove(next(c for c in suite if c.get("name") == method))
+                        suite.set("tests", str(len(suite)))
+                    self.edit("app", remove, api)
+                    self.assertTrue(any(method in p and "no passing execution" in p for p in self.problems(api)))
+
     def test_zero_tests_fails_even_with_valid_manifest(self):
         for module in gate.MODULES:
             ET.ElementTree(ET.Element("testsuite", tests="0", failures="0", errors="0", skipped="0")).write(self.paths[module])

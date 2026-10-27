@@ -1,8 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only demo surfaces; never merged into release builds. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
     <application>
         <activity
+            android:name="com.mediahub.app.debug.EffectsDemoActivity"
+            android:exported="true"
+            android:label="@string/effects_demo_label"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity
             android:name=".visual.CinematicVisualActivity"
-            android:exported="false"
+            android:exported="true"
             android:launchMode="standard"
             android:documentLaunchMode="intoExisting"
             android:theme="@android:style/Theme.Material.NoActionBar" />

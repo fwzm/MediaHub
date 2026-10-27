@@ -56,7 +56,7 @@
 
 ## 项目状态
 
-**当前界面美化代码只存在于 `feature/cinematic-ui` 分支，尚未合并进 `main`。**
+界面美化通过 `feature/cinematic-ui` 的 Draft PR 提交，**尚未合并进 `main`**。
 
 该分支基于未合并的 [Draft PR #59](https://github.com/fwzm/MediaHub/pull/59)。PR #59 的既有能力与本分支的界面改动都不应被理解为已进入 `main`；功能与验证结论以对应 PR 的最新记录为准。
 

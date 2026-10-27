@@ -3,19 +3,13 @@ package com.mediahub.app.visual
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Shapes
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
+import com.mediahub.app.ui.theme.MediaHubTheme
 import com.mediahub.feature.detail.DetailBody
 import com.mediahub.feature.detail.SeriesBrowseState
 import com.mediahub.feature.home.HomeContent
 import com.mediahub.feature.library.LibraryContent
 import com.mediahub.feature.library.LibraryUiState
-import com.mediahub.feature.search.SearchBody
+import com.mediahub.feature.search.SearchContent
 import com.mediahub.feature.search.engine.GlobalSearchState
 import com.mediahub.feature.search.engine.UnifiedSearchHit
 import com.mediahub.model.MediaDetail
@@ -40,21 +34,7 @@ class CinematicVisualActivity : ComponentActivity() {
     private fun renderScreen() {
         val screen = intent.getStringExtra("screen") ?: "home"
         setContent {
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    primary = Color(0xFFADC6FF), onPrimary = Color(0xFF0B1D42),
-                    primaryContainer = Color(0xFF263A68), onPrimaryContainer = Color(0xFFD9E2FF),
-                    background = Color(0xFF0A0D14), onBackground = Color(0xFFE4E8F2),
-                    surface = Color(0xFF0A0D14), onSurface = Color(0xFFE4E8F2),
-                    surfaceContainerLow = Color(0xFF111620), surfaceContainer = Color(0xFF161C28),
-                    surfaceContainerHigh = Color(0xFF1D2432), surfaceContainerHighest = Color(0xFF252D3C),
-                    surfaceVariant = Color(0xFF252D3C), onSurfaceVariant = Color(0xFFAFB9CE),
-                ),
-                shapes = Shapes(
-                    small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(18.dp),
-                    large = RoundedCornerShape(24.dp),
-                ),
-            ) {
+            MediaHubTheme {
                 when (screen) {
                     "library" -> LibraryContent(
                         state = LibraryUiState.Content(demoItems, "精选电影"), fallbackName = "精选电影",
@@ -62,11 +42,12 @@ class CinematicVisualActivity : ComponentActivity() {
                         onRefresh = {}, onLoadMore = {}, onGoToParent = {}, onOpenFolder = {},
                         onSortSelected = {}, onFilterSelected = {},
                     )
-                    "search" -> SearchBody(
+                    "search" -> SearchContent(
+                        query = "星际",
                         state = GlobalSearchState("星际", demoItems.map {
                             UnifiedSearchHit(it, if (it.id == "0") "我的家庭影院" else "本地影片")
                         }),
-                        onOpenItem = {},
+                        onQueryChange = {}, onBack = {}, onOpenItem = {},
                     )
                     "detail" -> DetailBody(
                         detail = MediaDetail(
