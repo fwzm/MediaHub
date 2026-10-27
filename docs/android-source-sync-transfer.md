@@ -4601,3 +4601,111 @@ C#：`MediaHub.Tests` **1652** 通过 / 0 失败（1651 → +1）。`--required-
 - 两端把对端基线喂进 `SourceSyncPlanner`；
 - 被扣凭据 / 冲突条目的逐条裁决页（含跳过出口）；
 - 「忘记这台设备」与取消接收 observability；真实两机搬运。
+
+
+## §47 W6-78：Android 的一轮落库（对齐 Windows `SourceSyncImportRound.ApplyAsync`）
+
+时间：2026-10-28（第 6 轮）。分支 `feature/windows-client`，权威树 `D:/mh-w6`（`feature/cross-device-source-sync`）。
+
+### §47.1 结论先行
+
+W6-76 给了预演（`planRound`，一笔不写），W6-77 给了闸门（`SourceSyncApprovalGate`，回答「点确认会执行哪几条」），但两者之间**没有落库层**：Android 只有「导入整封信封」（`importEnvelope`，按规划器默认结论写），没有「按逐条裁决写」。Windows 的那一层是 `SourceSyncImportRound.ApplyAsync`（432 行，跑在预览与写入之间）。本轮把它在 Android 侧补上：`applyRound` + 回执 `SourceSyncApplyReport`，共 10 例新用例与 3 条负向对照，本机 `core/database` 220 → **230** 例全绿。
+
+### §47.2 缺的是什么
+
+| Windows 能力（`ApplyAsync`） | Android W6-77 时的状态 |
+| --- | --- |
+| 把闸门的 `Applied` 逐条交给写入器 | 无（只有整封信封的 `importEnvelope`） |
+| 写入器拒绝（`Refused`）时如实上报，不假装已应用 | 无 |
+| 记录为 null（对端声明删除）单列一条路径 | 无（存储层本来就没有删除方法） |
+| 只在真的写进库之后推进对端基线 | 导入路径有，落库路径没有 |
+| 回执 `Summary`：已写入 / 跳过 / 保留未应用 | 只有预演的三桶计数 |
+
+### §47.3 做法
+
+主树 `core/database/src/main/kotlin/com/mediahub/core/database/sync/AndroidSourceSyncService.kt` **36375 → 48459 B / 941 行**，三处改动：
+
+1. 新增 `suspend fun applyRound(envelopeJson: String, allowedSyncSourceIds: List<String> = emptyList(), skippedSyncSourceIds: List<String> = emptyList()): SourceSyncApplyReport`；
+2. 把「读基线 → 构本端信封 → 合并」抽成 `private suspend fun mergeRound(envelope): RoundBuild`，预演与落库共用（两边判据一旦分叉，用户点确认后写下的东西就和他刚才在界面上看到的不是一回事）；
+3. 文件末尾新增顶层 `data class SourceSyncApplyReport`。
+
+回执字段（四桶互不相交，加起来等于闸门看过的条目数）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `applied` | 真的写进库的条数 |
+| `skipped` | 裁决结果是不做（对端过旧、已同步、没人放行的确认项） |
+| `withheld` | 永不许可（凭据 / 未知类型 / 本机不支持），显式放行也不写 |
+| `refused` | 批准了但写不下去（删除本地来源、信封里找不到记录、存储层拒绝） |
+| `notApplied` | skipped + withheld + refused（与 Windows `NotApplied` 同义） |
+| `summary` | 「已写入本地 N 条 / 跳过 N 条 / 保留未应用 N 条」，与 Windows 同格式 |
+| `warnings` | 基线拒收 `baseline-rejected:<count>:<reason>`（与 Windows 同值同构）或 `baseline-write-failed` |
+| `wroteServerIds` / `refusedSyncSourceIds` | 写成功与被拒的来源，供界面逐条显示 |
+
+五条边界（逐条对齐 Windows）：
+
+- **名单先允许后跳过**：闸门按「后写覆盖」建字典，同一身份同时出现在两张名单里时以**跳过**为准（Windows `Decisions(allowedIds, skippedIds)` 的顺序，别调换）；
+- **永不许可三类扣住**：凭据 / 未知类型 / 本机不支持即使显式允许也不写，判据只在闸门里，服务层不重复判；
+- **删除类一律拒绝**：存储层没有删除方法（ADR-S001：墓碑不删本地来源），落进 `refusedSyncSourceIds`，并新增 Android 本地码 `local-delete-not-supported`（不进跨机码表）；
+- **基线只在真写入之后推进**：写成与导入路径同一个 `recordBaseline(envelope, writtenRecords)`，只收真正写进库的记录；
+- **解析失败不抛**：返回带 `rejectedReason` 的空回执，存储与基线零调用。
+
+另有两处实现细节值得记：
+
+- 写库前按**身份**（trim + ASCII 小写）查已有行，而不是按原始拼写 —— 存储层的唯一索引是大小写敏感的，大小写不同的同一条来源若被当成新记录写入，库里会留下两条身份相同、永远收敛不了的重复来源；
+- 取消只在条目之间检查（`currentCoroutineContext().ensureActive()`），不在写入中途打断：写到一半被打断会让「已写入几条」这个回执本身失去意义。
+
+### §47.4 十条用例
+
+`core/database/src/test/kotlin/com/mediahub/core/database/sync/SourceSyncApplyRoundTest.kt`（**14864 B / 362 行**，10 个 `@Test`）：
+
+| # | 用例 | 钉住什么 |
+| --- | --- | --- |
+| 1 | `a_plain_pull_is_written_by_default_and_the_baseline_advances` | 默认放行 → 建行、`summary` 文案、基线推进且条数取保存后的真实值 |
+| 2 | `an_entry_that_needs_approval_is_skipped_until_it_is_allowed` | 要确认的默认跳过；显式放行后更新成功且 `acknowledgedRisk` 为真 |
+| 3 | `a_record_carrying_credentials_is_withheld_even_when_it_is_allowed` | 凭据条目显式放行也不写，`blockingReasons` 恰为该码 |
+| 4 | `an_unknown_source_type_is_withheld_even_when_it_is_allowed` | 未知类型同上 |
+| 5 | `a_deletion_is_refused_because_the_store_cannot_delete` | 删除被拒且库里那行原封不动、基线不推进 |
+| 6 | `skipping_an_identity_outranks_allowing_it` | 同一身份 allow + skip 时 skip 胜（名单顺序） |
+| 7 | `the_baseline_only_carries_the_records_that_were_actually_written` | 两条记录只写一条 → 基线只有一条 |
+| 8 | `a_storage_failure_is_reported_as_refused_instead_of_thrown` | 存储抛异常 → refused，不抛、基线零写入 |
+| 9 | `an_identity_matches_a_local_row_regardless_of_spelling` | 大小写不同也命中同一行，库里不许出现第二条 |
+| 10 | `an_undecodable_envelope_is_rejected_without_touching_the_store` | 坏 JSON → 三计数全零、存储与基线零调用 |
+
+第 9 条一开始是红的，但**不是产品错**：本地行与远端记录内容不同而 `fieldVersion` 相同，合并器按字段冲突判「要人裁决」，默认裁决自然不写。改成显式放行后同时验到两件事：冲突要人点头，点头之后按身份找到那一行去更新。
+
+### §47.5 三条负向对照
+
+| # | 改法 | 结果 |
+| --- | --- | --- |
+| A | 基线改从整封信封推进（`recordBaseline(envelope, envelope.sources)` 并去掉空判断） | **2 红**：`the_baseline_only_carries…`（:159）、`a_storage_failure…`（:188） |
+| B | `decisionsOf` 里跳过与允许的追加顺序对调 | **1 红**：`skipping_an_identity_outranks_allowing_it`（:142） |
+| C | 写库改用原始拼写查行 | **1 红**：`an_identity_matches_a_local_row_regardless_of_spelling`（:206） |
+
+三条都是「改回产品代码 → 先红 → 还原」的流程，还原后逐字节一致（48459 B）。日志：`D:/mh-verify/w678-neg-{A,B,C}.log`。
+
+### §47.6 本机实跑计数
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 |
+| --- | --- | --- | --- | --- |
+| `core/common` | 48 | **659** | 0 | 11 |
+| `core/database` | 24（220 → +1 套件） | **230**（+10） | 0 | 12 |
+| `feature/settings` | 26 | 384 | 0 | 0 |
+
+三模块合计 **659 + 230 + 384 = 1273**（上一轮 1263）。C# `MediaHub.Tests` 本轮未改动，仍是 **1652 通过 / 0 失败**。命令：`gradlew.bat :core:common:testDebugUnitTest :core:database:testDebugUnitTest --offline --console=plain`（日志 `D:/mh-verify/w678-green.log`）。
+
+### §47.7 门禁 59 → 60
+
+新套件 `com.mediahub.core.database.sync.SourceSyncApplyRoundTest` 进 `--required-suite`（`.github/workflows/android-ci.yml`，CRLF 文件，锚点必须带 `\r\n`；26562 → 26649 B，`--required-suite` 60 条）。理由与 W6-55 / W6-72 / W6-76 一致：套件被整体 `@Ignore` 或掉出编译时 gradle 仍会打印 BUILD SUCCESSFUL，只有钉住才算真的执行过。门禁自测 `py -m unittest discover -s .github/scripts/tests` → 54 例 OK。
+
+### §47.8 未覆盖
+
+1. **真实两机跑一轮落库**：NOT_RUN（一台机器证明不了）。
+2. **基线仍不进规划器**：两端都不拿基线改判，本轮只是把「写完之后推进基线」补齐。
+3. **逐条裁决的界面出口**：被扣条目（凭据 / 未知类型）与冲突条目在 Android 上仍只有数据，没有页面。
+4. **删除语义**：`SourceSyncStore` 没有删除方法，所以「对端删了、本机要不要删」这个产品问题仍未回答，本轮只是如实拒绝并上报。
+5. **真机 instrumentation**：DEVICE_UNVERIFIED（本轮未加 Compose 断言）。
+
+### §47.9 下一步
+
+W6-79 候选：①两端把对端基线喂进 `SourceSyncPlanner`（真正「读基线 → 只请求变化」）；②被扣凭据 / 冲突条目的逐条裁决页（把 `SourceSyncApplyReport.refusedSyncSourceIds` 与 `blockingReasons` 变成可点的行）；③「忘记这台设备」；④监听卡「取消接收」的可观测性；⑤两机真实证据（需要用户给窗口/机器）。

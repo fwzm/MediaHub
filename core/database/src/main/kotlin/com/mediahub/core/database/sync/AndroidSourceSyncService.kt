@@ -10,6 +10,7 @@ import com.mediahub.core.common.sync.SourceSyncBaselineSaveResult
 import com.mediahub.core.common.sync.SourceSyncBaselineStoreReasons
 import com.mediahub.core.common.sync.SourceSyncCandidate
 import com.mediahub.core.common.sync.SourceSyncCodec
+import com.mediahub.core.common.sync.SourceSyncApprovalDecision
 import com.mediahub.core.common.sync.SourceSyncApprovalGate
 import com.mediahub.core.common.sync.SourceSyncApprovalResult
 import com.mediahub.core.common.sync.SourceSyncDigest
@@ -29,9 +30,12 @@ import com.mediahub.core.common.sync.SyncRoundResult
 import com.mediahub.core.common.sync.SyncSourceTypeValue
 import com.mediahub.core.common.sync.SyncSourceTypes
 import com.mediahub.core.common.sync.SyncUrlNormalizer
+import com.mediahub.core.common.sync.WireText
 import com.mediahub.model.ServerType
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /**
  * Android 端的来源同步可用路径（W6-C）：导入应用 + 导出信封。
@@ -372,33 +376,197 @@ class AndroidSourceSyncService(
             )
         }
         val envelope = (decoded as SourceSyncCodec.DecodeResult.Ok).envelope
+        val build = mergeRound(envelope)
 
-        // 基线为 null 时用 EMPTY 而不是空实现：摘要那边把「基线 null」当首次接触（全量），
-        // 把「基线空」也当全量 —— 两者结果一致，但传 null 会绕过 merge 的 known == null 判据。
+        // 默认裁决（没有任何显式选择）：无需确认的条目放行，需要确认的先跳过，
+        // 永不许可的三类（凭据 / 未知类型 / 本机不支持）直接扣住。这正是「看一眼会做什么」。
+        val gate = SourceSyncApprovalGate.decide(build.round)
+
+        return SourceSyncRoundPreview(
+            peerDeviceId = envelope.deviceId,
+            baselineKnown = build.peerBaseline?.isEmpty == false,
+            baselineEntryCount = build.peerBaseline?.entries?.size ?: 0,
+            derivedIdentityServerIds = build.local.derivedIdentityServerIds,
+            skippedServerIds = build.local.skippedServerIds,
+            round = build.round,
+            gate = gate,
+        )
+    }
+
+    /**
+     * W6-78：把一轮预演真正落库（Windows \`SourceSyncImportRound.ApplyAsync\` 的对等物）。
+     *
+     * 与 [importEnvelope] 的区别是**谁做的决定**：导入按规划器的默认结论写，这里按调用方逐条给出的
+     * 放行 / 跳过名单写。与 [planRound] 的区别是它只算不写。
+     *
+     * 五条边界：
+     * - 名单先放行后跳过：同一个 syncSourceId 同时出现在两处时以**跳过**为准（与 Windows Decisions 同序）；
+     * - 永不许可三类（凭据 / 未知类型 / 本机不支持）即使显式放行也不写 —— 判据在闸门里，这里不重复判；
+     * - 删除类条目一律拒绝并记进 [SourceSyncApplyReport.refusedSyncSourceIds]：存储层没有删除方法；
+     * - 基线只在本轮**真的写进库**之后推进，且只收写入的记录（Windows 同口径）；
+     * - 解析失败不抛：返回带 rejectedReason 的空报告，且不碰存储。
+     */
+    suspend fun applyRound(
+        envelopeJson: String,
+        allowedSyncSourceIds: List<String> = emptyList(),
+        skippedSyncSourceIds: List<String> = emptyList(),
+    ): SourceSyncApplyReport {
+        val decoded = SourceSyncCodec.tryDecode(envelopeJson)
+        if (decoded is SourceSyncCodec.DecodeResult.Failed) {
+            return SourceSyncApplyReport(
+                rejectedReason = decoded.reason,
+                rejectedMessage = decoded.message,
+            )
+        }
+        val envelope = (decoded as SourceSyncCodec.DecodeResult.Ok).envelope
+        val build = mergeRound(envelope)
+        val gate = SourceSyncApprovalGate.decide(
+            build.round,
+            decisionsOf(allowedSyncSourceIds, skippedSyncSourceIds),
+        )
+
+        val writtenRecords = ArrayList<SourceRecord>()
+        val wroteServerIds = ArrayList<String>()
+        val refusedIds = ArrayList<String>()
+        var applied = 0
+
+        for (item in gate.applied) {
+            // 只在条目之间取消：写到一半被打断会让「已写入几条」这个回执失去意义。
+            currentCoroutineContext().ensureActive()
+            if (item.action == SourceSyncAction.DELETE) {
+                // 存储层没有删除方法（ADR-S001：墓碑不删本地来源），只能如实拒绝并上报。
+                refusedIds.add(item.syncSourceId.trim())
+                continue
+            }
+            val record = findRecord(envelope, item.syncSourceId)
+            val serverId = if (record == null) null else writeRecord(record)
+            if (record == null || serverId == null) {
+                refusedIds.add(item.syncSourceId.trim())
+                continue
+            }
+            applied++
+            wroteServerIds.add(serverId)
+            writtenRecords.add(record)
+        }
+
+        var baselineUpdated = false
+        var baselineEntries = build.peerBaseline?.entries?.size ?: 0
+        val warnings = ArrayList<String>()
+        if (writtenRecords.isNotEmpty()) {
+            val save = recordBaseline(envelope, writtenRecords)
+            if (save != null) {
+                baselineUpdated = save.saved
+                if (save.rejectedSyncSourceIds.isNotEmpty()) {
+                    warnings.add(
+                        BASELINE_REJECTED_PREFIX + ":" + save.rejectedSyncSourceIds.size + ":" +
+                            (save.reason ?: ""),
+                    )
+                } else if (!save.saved) {
+                    warnings.add(SourceSyncBaselineStoreReasons.WRITE_FAILED)
+                }
+            }
+            baselineEntries = loadPeerBaseline(envelope.deviceId)?.entries?.size ?: baselineEntries
+        }
+
+        return SourceSyncApplyReport(
+            peerDeviceId = envelope.deviceId,
+            applied = applied,
+            skipped = gate.skippedCount,
+            withheld = gate.withheldCount,
+            refused = refusedIds.size,
+            blockingReasons = gate.blockingReasons,
+            acknowledgedRisk = gate.acknowledgedRisk,
+            baselineUpdated = baselineUpdated,
+            baselineEntryCount = baselineEntries,
+            warnings = warnings,
+            wroteServerIds = wroteServerIds,
+            refusedSyncSourceIds = refusedIds,
+        )
+    }
+
+    /**
+     * 一轮双向合并的公共前半段：读基线、构本端信封、合并。
+     *
+     * 预演与落库共用，避免「预演算出来一套、落库再算一套」——两边判据一旦分叉，
+     * 用户点确认后写下的东西就和他刚才在界面上看到的不是一回事了。
+     */
+    private suspend fun mergeRound(envelope: SourceSyncEnvelope): RoundBuild {
+        // 基线为 null 时用 EMPTY 而不是空实现：摘要那边把「基线 null」与「基线空」都当首次接触，
+        // 但传 null 会绕过 merge 的 known == null 判据（墓碑会被当成从未见过）。
         val peerBaseline = loadPeerBaseline(envelope.deviceId)
         val baseline = peerBaseline ?: SourceSyncBaseline.EMPTY
         val local = buildLocalEnvelope()
-
         val round = SyncRoundMerger.merge(
             local = SourceSyncDigest.fromEnvelope(local.envelope, baseline),
             remote = SourceSyncDigest.fromEnvelope(envelope, baseline),
             baseline = baseline,
         )
-
-        // 默认裁决（没有任何显式选择）：无需确认的条目放行，需要确认的先跳过，
-        // 永不许可的三类（凭据 / 未知类型 / 本机不支持）直接扣住。这正是「看一眼会做什么」。
-        val gate = SourceSyncApprovalGate.decide(round)
-
-        return SourceSyncRoundPreview(
-            peerDeviceId = envelope.deviceId,
-            baselineKnown = peerBaseline?.isEmpty == false,
-            baselineEntryCount = peerBaseline?.entries?.size ?: 0,
-            derivedIdentityServerIds = local.derivedIdentityServerIds,
-            skippedServerIds = local.skippedServerIds,
-            round = round,
-            gate = gate,
-        )
+        return RoundBuild(round = round, peerBaseline = peerBaseline, local = local)
     }
+
+    /**
+     * 逐条名单转成闸门决策：放行在前、跳过追加在后。
+     *
+     * 闸门按「后写覆盖」建字典，所以同一身份同时出现在两张名单里时以跳过为准 —— 这正是
+     * Windows `Decisions(allowedIds, skippedIds)` 的顺序，别调换。
+     */
+    private fun decisionsOf(
+        allowedSyncSourceIds: List<String>,
+        skippedSyncSourceIds: List<String>,
+    ): List<SourceSyncApprovalDecision> {
+        val decisions = ArrayList<SourceSyncApprovalDecision>(
+            allowedSyncSourceIds.size + skippedSyncSourceIds.size,
+        )
+        for (id in allowedSyncSourceIds) decisions.add(SourceSyncApprovalDecision.allow(id))
+        for (id in skippedSyncSourceIds) decisions.add(SourceSyncApprovalDecision.skip(id))
+        return decisions
+    }
+
+    /** 按身份在信封里取记录；墓碑条目没有记录，返回 null。 */
+    private fun findRecord(envelope: SourceSyncEnvelope, syncSourceId: String?): SourceRecord? {
+        val identity = identityOf(syncSourceId)
+        if (identity.isEmpty()) return null
+        return envelope.sources.firstOrNull { candidate -> identityOf(candidate.syncSourceId) == identity }
+    }
+
+    /** 身份比较口径：trim + ASCII 大小写不敏感（与闸门、信封去重同一口径）。 */
+    private fun identityOf(syncSourceId: String?): String =
+        WireText.lowercaseAscii(WireText.trim(syncSourceId ?: ""))
+
+    /**
+     * 写一条来源：库里已有同身份的记录就更新，没有就新建。失败一律降级成 null（由调用方计入 refused）。
+     *
+     * 查库**必须**按身份而不是按拼写：存储层的唯一索引是大小写敏感的，大小写不同的同一条来源
+     * 若被当成新记录写入，库里会留下两条身份相同、永远收敛不了的重复来源。
+     */
+    private suspend fun writeRecord(record: SourceRecord): String? {
+        val serverType = AndroidSourceTypeMap.toServerType(record.sourceType.raw) ?: return null
+        val endpoints = normalizedEndpoints(record)
+        if (endpoints.isEmpty()) return null
+        val identity = identityOf(record.syncSourceId)
+        if (identity.isEmpty()) return null
+        return try {
+            val existing = store.listSourceSnapshots()
+                .firstOrNull { snapshot -> identityOf(snapshot.syncSourceId) == identity }
+            if (existing == null) {
+                store.createLocalSource(snapshotOf(record, serverType, endpoints, ""))
+            } else {
+                val snapshot = snapshotOf(record, serverType, endpoints, existing.serverId)
+                if (store.updateLocalSource(existing.serverId, snapshot)) existing.serverId else null
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Exception) {
+            null
+        }
+    }
+
+    /** 预演与落库共用的中间结果。 */
+    private data class RoundBuild(
+        val round: SyncRoundResult,
+        val peerBaseline: SourceSyncBaseline?,
+        val local: LocalEnvelopeBuild,
+    )
 
     // ---------------------------------------------------------------- 内部
 
@@ -543,6 +711,19 @@ class AndroidSourceSyncService(
          * 两者对用户的处置完全不同，但都不该以异常形式冒给调用方。
          */
         const val WRITE_FAILED: String = "local-source-write-failed"
+
+        /**
+         * Android 侧新增的 reason 码（合同词汇之外）：一轮里被批准了的删除条目。
+         * 存储层**没有删除方法**（ADR-S001：墓碑不删本地来源），所以这类条目只能如实拒绝并上报，
+         * 绝不能假装已应用 —— 否则对端会以为本机已经删了，两侧从此不一致。
+         */
+        const val DELETE_NOT_SUPPORTED: String = "local-delete-not-supported"
+
+        /**
+         * 与 Windows `SourceSyncSessionReasons.BaselineRejectedPrefix` 同值同构：基线合并拒收了几条。
+         * 警告串格式 `<prefix>:<count>:<reason>`，与 Windows 逐字一致，便于两端对照日志。
+         */
+        const val BASELINE_REJECTED_PREFIX: String = "baseline-rejected"
     }
 }
 
@@ -696,4 +877,64 @@ data class SourceSyncRoundPreview(
 
     /** 默认裁决下是否有可以直接执行的条目；false 表示光看不够，得先有人点确认。 */
     val canApply: Boolean get() = gate.canApply
+}
+
+
+/**
+ * W6-78：一轮落库的回执（Windows `SourceSyncApplyReport` 的对等物）。
+ *
+ * 四个计数桶互不相交、加起来等于闸门看过的条目数：
+ * - [applied] 真的写进库的条数；
+ * - [skipped] 裁决结果是不做（对端过旧、已同步、没人放行的确认项）；
+ * - [withheld] 永不许可（凭据 / 未知类型 / 本机不支持），显式放行也不写；
+ * - [refused] 批准了但写不下去（删除本地来源、记录在信封里找不到、存储层拒绝）。
+ *
+ * [notApplied] = skipped + withheld + refused，与 Windows 的 `NotApplied` 同义。
+ */
+data class SourceSyncApplyReport(
+    /** 对端设备标识（信封里的 deviceId），解析失败的报告里为空串。 */
+    val peerDeviceId: String = "",
+    val applied: Int = 0,
+    val skipped: Int = 0,
+    val withheld: Int = 0,
+    val refused: Int = 0,
+    /** 被永久扣住的原因码（首现顺序，去重）。非空即表示有人必须先处理这些，光放行没用。 */
+    val blockingReasons: List<String> = emptyList(),
+    /** 本轮是否有「要人确认之后才放行」的条目真的被放行了（与 Windows AcknowledgedRisk 同义）。 */
+    val acknowledgedRisk: Boolean = false,
+    /** 基线是否随本轮推进；false 表示没写（无写入、无基线存储或存储拒收）。 */
+    val baselineUpdated: Boolean = false,
+    /** 本轮结束时对端基线的条数（推进后重新读取的真实值，不是本轮写入条数）。 */
+    val baselineEntryCount: Int = 0,
+    /** 稳定码形式的告警（基线拒收 / 基线写失败），供调用方展示而不是丢弃。 */
+    val warnings: List<String> = emptyList(),
+    /** 本轮写入所对应的服务器 id（顺序与写入顺序一致）。 */
+    val wroteServerIds: List<String> = emptyList(),
+    /** 被批准却写不下去的 syncSourceId（删除类、记录缺失、存储层拒绝）。 */
+    val refusedSyncSourceIds: List<String> = emptyList(),
+    /** 非空表示信封没被读入；此时四个桶全为 0，存储与基线都没被碰过。 */
+    val rejectedReason: String? = null,
+    val rejectedMessage: String? = null,
+) {
+    val isRejected: Boolean get() = !rejectedReason.isNullOrBlank()
+
+    /** 没被写入的条数：跳过 + 扣住 + 拒绝。 */
+    val notApplied: Int get() = skipped + withheld + refused
+
+    /** 闸门看过的条目总数（四个桶之和）。 */
+    val total: Int get() = applied + notApplied
+
+    /** 有没有真的写过东西。 */
+    val hasWrites: Boolean get() = applied > 0
+
+    /** 一条都没做也没拒（解析失败或空轮）时为 true。 */
+    val isEmpty: Boolean get() = total == 0
+
+    /** 与 Windows `SourceSyncApplyReport.Summary` 同格式的一句话回执。 */
+    val summary: String
+        get() = "已写入本地 " + applied + " 条 / 跳过 " + skipped + " 条 / 保留未应用 " + notApplied + " 条"
+
+    /** 该身份是否被批准但没写下去。 */
+    fun isRefused(syncSourceId: String): Boolean =
+        refusedSyncSourceIds.any { it.trim().equals(syncSourceId.trim(), ignoreCase = true) }
 }
