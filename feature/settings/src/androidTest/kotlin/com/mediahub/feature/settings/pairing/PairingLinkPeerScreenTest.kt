@@ -23,6 +23,9 @@ import org.junit.runner.RunWith
  * 与 JVM 的 [PairingLinkPeerTest] 分工：那边钉比对与登记语义，这边只钉「用户能看见什么、什么时候能点」——
  * 没核对过 / 拿不到卡片 / 没有登记簿 / 指纹不一致，按钮都不可点；只有「已比对且可登记」时才点亮。
  * 断言只用 [PairingLinkTags] 与 [PairingPeerCopy] 的常量，不写死布局位置。
+ *
+ * 注意：一个测试方法里只能 setContent 一次（Compose 测试规则的限制，CI 上会报
+ * `Cannot call setContent twice per test!`），所以每个状态各用一个测试方法。
  */
 @RunWith(AndroidJUnit4::class)
 class PairingLinkPeerScreenTest {
@@ -159,13 +162,16 @@ class PairingLinkPeerScreenTest {
     }
 
     @Test
-    fun noCardAndUnavailableBothExplainThemselves() {
+    fun aMissingCardExplainsItself() {
         render(peerState = PairingPeerState.NoCard)
         composeRule.onNodeWithTag(PairingLinkTags.PEER_STATE)
             .performScrollTo()
             .assertTextContains(PairingPeerCopy.NO_CARD_HINT)
         composeRule.onNodeWithTag(PairingLinkTags.PEER_REGISTER).performScrollTo().assertIsNotEnabled()
+    }
 
+    @Test
+    fun aMissingRegistryExplainsItself() {
         render(peerState = PairingPeerState.Unavailable)
         composeRule.onNodeWithTag(PairingLinkTags.PEER_STATE)
             .performScrollTo()
