@@ -310,6 +310,49 @@ class SourceSyncRoundPreviewTest {
         assertEquals(0, baselines.writeCount)
     }
 
+    @Test
+    fun forgettingAPeerMakesTheNextRoundJudgeItsSourcesFromScratch() {
+        val baselines = InMemorySourceSyncBaselineStore()
+        val firstStore = FakeStore()
+        val imported = runBlocking {
+            service(firstStore, baselines).importEnvelope(
+                SourceSyncCodec.encode(envelope(sources = listOf(record("sync-a", revision = 9L)))),
+            )
+        }
+        assertEquals(1, imported.appliedCount)
+        assertEquals(1, baselines.load("device-windows").entries.size)
+
+        // 本机重装或换机后本地一条都没有，但盘上还留着对端旧基线（修订号 9）。
+        // 对端现在真实持有的是修订号 2：若拿旧基线去判，就会把它当「过时」跳过 —— 静默丢掉真实变更。
+        val emptyStore = FakeStore()
+        val staleEnvelope = SourceSyncCodec.encode(envelope(sources = listOf(record("sync-a", revision = 2L))))
+        val stale = runBlocking { service(emptyStore, baselines).planRound(staleEnvelope) }
+        assertTrue(stale.baselineKnown)
+        assertEquals(1, stale.baselineEntryCount)
+        assertEquals(0, stale.applyCount)
+        // 旧基线让整轮变成「无事可做」：不是报冲突，而是静默地什么都不做 ——
+        // 对端真实的修订号 2 永远上不来，用户也看不到任何提示。
+        assertTrue(stale.round.isEmpty)
+        assertEquals(0, stale.ignoredCount)
+        assertEquals(0, stale.approvalCount)
+        assertFalse(stale.hasWork)
+
+        // 解绑这台设备时必须连基线一起忘掉，否则同一 deviceId 重新配对会永远按「已知」处理。
+        assertTrue(baselines.forget("device-windows"))
+        assertTrue(baselines.knownPeerDeviceIds.isEmpty())
+
+        val fresh = runBlocking { service(emptyStore, baselines).planRound(staleEnvelope) }
+        assertFalse(fresh.baselineKnown)
+        assertEquals(0, fresh.baselineEntryCount)
+        assertEquals(1, fresh.applyCount)
+        assertEquals(SyncRoundReasons.APPLY_REMOTE_CHANGE, fresh.round.apply.single().reason)
+        assertEquals(2L, fresh.round.apply.single().remoteRevision)
+        assertTrue(fresh.hasWork)
+        // 预演仍然只读：两次都没写本地存储。
+        assertEquals(0, emptyStore.createCalls)
+        assertEquals(0, emptyStore.updateCalls)
+    }
+
     // ------------------------------------------------------------ 夹具
 
     private fun service(

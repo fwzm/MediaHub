@@ -10444,5 +10444,675 @@
         "ignored": []
       }
     }
+  ],
+  "baselineForgetCases": [
+    {
+      "name": "forget-known-peer",
+      "seedContent": null,
+      "reload": false,
+      "writes": [
+        {
+          "peerDeviceId": "peer-a",
+          "baseline": {
+            "version": 1,
+            "deviceId": "dev-m",
+            "snapshotId": "snap-m",
+            "entries": [
+              {
+                "syncSourceId": "a-1",
+                "recordRevision": 1,
+                "fieldVersion": 1,
+                "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "fieldHashes": {
+                  "displayName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "isEmpty": false
+          }
+        },
+        {
+          "peerDeviceId": "peer-b",
+          "baseline": {
+            "version": 1,
+            "deviceId": "dev-m",
+            "snapshotId": "snap-m",
+            "entries": [
+              {
+                "syncSourceId": "b-1",
+                "recordRevision": 2,
+                "fieldVersion": 1,
+                "contentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "fieldHashes": {
+                  "displayName": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                }
+              }
+            ],
+            "isEmpty": false
+          }
+        }
+      ],
+      "forgetId": "peer-a",
+      "expectedResult": true,
+      "secondForgetId": null,
+      "secondExpectedResult": null,
+      "expectError": null,
+      "result": true,
+      "secondResult": null,
+      "error": null,
+      "secondError": null,
+      "writeCount": 3,
+      "peerDeviceIds": [
+        "peer-b"
+      ],
+      "fileStillExists": true,
+      "documentText": "{\r\n  \u0022version\u0022: 1,\r\n  \u0022peers\u0022: [\r\n    {\r\n      \u0022deviceId\u0022: \u0022peer-b\u0022,\r\n      \u0022baseline\u0022: {\r\n        \u0022version\u0022: 1,\r\n        \u0022deviceId\u0022: \u0022dev-m\u0022,\r\n        \u0022snapshotId\u0022: \u0022snap-m\u0022,\r\n        \u0022entries\u0022: [\r\n          {\r\n            \u0022syncSourceId\u0022: \u0022b-1\u0022,\r\n            \u0022recordRevision\u0022: 2,\r\n            \u0022fieldVersion\u0022: 1,\r\n            \u0022contentHash\u0022: \u0022bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\u0022,\r\n            \u0022fieldHashes\u0022: {\r\n              \u0022displayName\u0022: \u0022bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\u0022\r\n            }\r\n          }\r\n        ]\r\n      }\r\n    }\r\n  ]\r\n}",
+      "documentBase64": "ew0KICAidmVyc2lvbiI6IDEsDQogICJwZWVycyI6IFsNCiAgICB7DQogICAgICAiZGV2aWNlSWQiOiAicGVlci1iIiwNCiAgICAgICJiYXNlbGluZSI6IHsNCiAgICAgICAgInZlcnNpb24iOiAxLA0KICAgICAgICAiZGV2aWNlSWQiOiAiZGV2LW0iLA0KICAgICAgICAic25hcHNob3RJZCI6ICJzbmFwLW0iLA0KICAgICAgICAiZW50cmllcyI6IFsNCiAgICAgICAgICB7DQogICAgICAgICAgICAic3luY1NvdXJjZUlkIjogImItMSIsDQogICAgICAgICAgICAicmVjb3JkUmV2aXNpb24iOiAyLA0KICAgICAgICAgICAgImZpZWxkVmVyc2lvbiI6IDEsDQogICAgICAgICAgICAiY29udGVudEhhc2giOiAiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYiIsDQogICAgICAgICAgICAiZmllbGRIYXNoZXMiOiB7DQogICAgICAgICAgICAgICJkaXNwbGF5TmFtZSI6ICJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIg0KICAgICAgICAgICAgfQ0KICAgICAgICAgIH0NCiAgICAgICAgXQ0KICAgICAgfQ0KICAgIH0NCiAgXQ0KfQ==",
+      "documentByteLength": 598,
+      "documentSha256": "0e95bc74b91ef717cc31611821ee165bec477ded83cb2118b22f066c63387eea",
+      "documentUnchanged": false,
+      "loadError": null,
+      "quarantined": false,
+      "loadErrorAfterReload": null,
+      "quarantinedAfterReload": false,
+      "loadAfter": {
+        "peerDeviceIds": [
+          "peer-b"
+        ],
+        "peerA": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerB": {
+          "version": 1,
+          "deviceId": "dev-m",
+          "snapshotId": "snap-m",
+          "entries": [
+            {
+              "syncSourceId": "b-1",
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "contentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "fieldHashes": {
+                "displayName": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              }
+            }
+          ],
+          "isEmpty": false
+        },
+        "peerC": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        }
+      }
+    },
+    {
+      "name": "forget-unknown-peer",
+      "seedContent": null,
+      "reload": false,
+      "writes": [
+        {
+          "peerDeviceId": "peer-a",
+          "baseline": {
+            "version": 1,
+            "deviceId": "dev-m",
+            "snapshotId": "snap-m",
+            "entries": [
+              {
+                "syncSourceId": "a-1",
+                "recordRevision": 1,
+                "fieldVersion": 1,
+                "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "fieldHashes": {
+                  "displayName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "isEmpty": false
+          }
+        }
+      ],
+      "forgetId": "peer-z",
+      "expectedResult": false,
+      "secondForgetId": null,
+      "secondExpectedResult": null,
+      "expectError": null,
+      "result": false,
+      "secondResult": null,
+      "error": null,
+      "secondError": null,
+      "writeCount": 1,
+      "peerDeviceIds": [
+        "peer-a"
+      ],
+      "fileStillExists": true,
+      "documentText": "{\r\n  \u0022version\u0022: 1,\r\n  \u0022peers\u0022: [\r\n    {\r\n      \u0022deviceId\u0022: \u0022peer-a\u0022,\r\n      \u0022baseline\u0022: {\r\n        \u0022version\u0022: 1,\r\n        \u0022deviceId\u0022: \u0022dev-m\u0022,\r\n        \u0022snapshotId\u0022: \u0022snap-m\u0022,\r\n        \u0022entries\u0022: [\r\n          {\r\n            \u0022syncSourceId\u0022: \u0022a-1\u0022,\r\n            \u0022recordRevision\u0022: 1,\r\n            \u0022fieldVersion\u0022: 1,\r\n            \u0022contentHash\u0022: \u0022aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u0022,\r\n            \u0022fieldHashes\u0022: {\r\n              \u0022displayName\u0022: \u0022aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u0022\r\n            }\r\n          }\r\n        ]\r\n      }\r\n    }\r\n  ]\r\n}",
+      "documentBase64": "ew0KICAidmVyc2lvbiI6IDEsDQogICJwZWVycyI6IFsNCiAgICB7DQogICAgICAiZGV2aWNlSWQiOiAicGVlci1hIiwNCiAgICAgICJiYXNlbGluZSI6IHsNCiAgICAgICAgInZlcnNpb24iOiAxLA0KICAgICAgICAiZGV2aWNlSWQiOiAiZGV2LW0iLA0KICAgICAgICAic25hcHNob3RJZCI6ICJzbmFwLW0iLA0KICAgICAgICAiZW50cmllcyI6IFsNCiAgICAgICAgICB7DQogICAgICAgICAgICAic3luY1NvdXJjZUlkIjogImEtMSIsDQogICAgICAgICAgICAicmVjb3JkUmV2aXNpb24iOiAxLA0KICAgICAgICAgICAgImZpZWxkVmVyc2lvbiI6IDEsDQogICAgICAgICAgICAiY29udGVudEhhc2giOiAiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsDQogICAgICAgICAgICAiZmllbGRIYXNoZXMiOiB7DQogICAgICAgICAgICAgICJkaXNwbGF5TmFtZSI6ICJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIg0KICAgICAgICAgICAgfQ0KICAgICAgICAgIH0NCiAgICAgICAgXQ0KICAgICAgfQ0KICAgIH0NCiAgXQ0KfQ==",
+      "documentByteLength": 598,
+      "documentSha256": "e03ce6405a2ad9dbbed881b660e64291976ba39f11690b300e691c65b25fe1ce",
+      "documentUnchanged": true,
+      "loadError": null,
+      "quarantined": false,
+      "loadErrorAfterReload": null,
+      "quarantinedAfterReload": false,
+      "loadAfter": {
+        "peerDeviceIds": [
+          "peer-a"
+        ],
+        "peerA": {
+          "version": 1,
+          "deviceId": "dev-m",
+          "snapshotId": "snap-m",
+          "entries": [
+            {
+              "syncSourceId": "a-1",
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "fieldHashes": {
+                "displayName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            }
+          ],
+          "isEmpty": false
+        },
+        "peerB": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerC": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        }
+      }
+    },
+    {
+      "name": "case-and-space-insensitive",
+      "seedContent": null,
+      "reload": false,
+      "writes": [
+        {
+          "peerDeviceId": "peer-A",
+          "baseline": {
+            "version": 1,
+            "deviceId": "dev-m",
+            "snapshotId": "snap-m",
+            "entries": [
+              {
+                "syncSourceId": "a-1",
+                "recordRevision": 1,
+                "fieldVersion": 1,
+                "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "fieldHashes": {
+                  "displayName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "isEmpty": false
+          }
+        }
+      ],
+      "forgetId": "  peer-a  ",
+      "expectedResult": true,
+      "secondForgetId": null,
+      "secondExpectedResult": null,
+      "expectError": null,
+      "result": true,
+      "secondResult": null,
+      "error": null,
+      "secondError": null,
+      "writeCount": 2,
+      "peerDeviceIds": [],
+      "fileStillExists": true,
+      "documentText": "{\r\n  \u0022version\u0022: 1,\r\n  \u0022peers\u0022: []\r\n}",
+      "documentBase64": "ew0KICAidmVyc2lvbiI6IDEsDQogICJwZWVycyI6IFtdDQp9",
+      "documentByteLength": 36,
+      "documentSha256": "fd9e53660793632b4b54ccce69264d46bd6fb5326e276297c0e3fe2727fffdfc",
+      "documentUnchanged": false,
+      "loadError": null,
+      "quarantined": false,
+      "loadErrorAfterReload": null,
+      "quarantinedAfterReload": false,
+      "loadAfter": {
+        "peerDeviceIds": [],
+        "peerA": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerB": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerC": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        }
+      }
+    },
+    {
+      "name": "forget-last-peer-leaves-empty-document",
+      "seedContent": null,
+      "reload": false,
+      "writes": [
+        {
+          "peerDeviceId": "peer-a",
+          "baseline": {
+            "version": 1,
+            "deviceId": "dev-m",
+            "snapshotId": "snap-m",
+            "entries": [
+              {
+                "syncSourceId": "a-1",
+                "recordRevision": 1,
+                "fieldVersion": 1,
+                "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "fieldHashes": {
+                  "displayName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "isEmpty": false
+          }
+        }
+      ],
+      "forgetId": "peer-a",
+      "expectedResult": true,
+      "secondForgetId": null,
+      "secondExpectedResult": null,
+      "expectError": null,
+      "result": true,
+      "secondResult": null,
+      "error": null,
+      "secondError": null,
+      "writeCount": 2,
+      "peerDeviceIds": [],
+      "fileStillExists": true,
+      "documentText": "{\r\n  \u0022version\u0022: 1,\r\n  \u0022peers\u0022: []\r\n}",
+      "documentBase64": "ew0KICAidmVyc2lvbiI6IDEsDQogICJwZWVycyI6IFtdDQp9",
+      "documentByteLength": 36,
+      "documentSha256": "fd9e53660793632b4b54ccce69264d46bd6fb5326e276297c0e3fe2727fffdfc",
+      "documentUnchanged": false,
+      "loadError": null,
+      "quarantined": false,
+      "loadErrorAfterReload": null,
+      "quarantinedAfterReload": false,
+      "loadAfter": {
+        "peerDeviceIds": [],
+        "peerA": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerB": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerC": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        }
+      }
+    },
+    {
+      "name": "forget-twice",
+      "seedContent": null,
+      "reload": false,
+      "writes": [
+        {
+          "peerDeviceId": "peer-a",
+          "baseline": {
+            "version": 1,
+            "deviceId": "dev-m",
+            "snapshotId": "snap-m",
+            "entries": [
+              {
+                "syncSourceId": "a-1",
+                "recordRevision": 1,
+                "fieldVersion": 1,
+                "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "fieldHashes": {
+                  "displayName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "isEmpty": false
+          }
+        }
+      ],
+      "forgetId": "peer-a",
+      "expectedResult": true,
+      "secondForgetId": "peer-a",
+      "secondExpectedResult": false,
+      "expectError": null,
+      "result": true,
+      "secondResult": false,
+      "error": null,
+      "secondError": null,
+      "writeCount": 2,
+      "peerDeviceIds": [],
+      "fileStillExists": true,
+      "documentText": "{\r\n  \u0022version\u0022: 1,\r\n  \u0022peers\u0022: []\r\n}",
+      "documentBase64": "ew0KICAidmVyc2lvbiI6IDEsDQogICJwZWVycyI6IFtdDQp9",
+      "documentByteLength": 36,
+      "documentSha256": "fd9e53660793632b4b54ccce69264d46bd6fb5326e276297c0e3fe2727fffdfc",
+      "documentUnchanged": false,
+      "loadError": null,
+      "quarantined": false,
+      "loadErrorAfterReload": null,
+      "quarantinedAfterReload": false,
+      "loadAfter": {
+        "peerDeviceIds": [],
+        "peerA": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerB": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerC": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        }
+      }
+    },
+    {
+      "name": "blank-id-throws",
+      "seedContent": null,
+      "reload": false,
+      "writes": [
+        {
+          "peerDeviceId": "peer-a",
+          "baseline": {
+            "version": 1,
+            "deviceId": "dev-m",
+            "snapshotId": "snap-m",
+            "entries": [
+              {
+                "syncSourceId": "a-1",
+                "recordRevision": 1,
+                "fieldVersion": 1,
+                "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "fieldHashes": {
+                  "displayName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "isEmpty": false
+          }
+        }
+      ],
+      "forgetId": "   ",
+      "expectedResult": null,
+      "secondForgetId": null,
+      "secondExpectedResult": null,
+      "expectError": "ArgumentException",
+      "result": null,
+      "secondResult": null,
+      "error": "ArgumentException",
+      "secondError": null,
+      "writeCount": 1,
+      "peerDeviceIds": [
+        "peer-a"
+      ],
+      "fileStillExists": true,
+      "documentText": "{\r\n  \u0022version\u0022: 1,\r\n  \u0022peers\u0022: [\r\n    {\r\n      \u0022deviceId\u0022: \u0022peer-a\u0022,\r\n      \u0022baseline\u0022: {\r\n        \u0022version\u0022: 1,\r\n        \u0022deviceId\u0022: \u0022dev-m\u0022,\r\n        \u0022snapshotId\u0022: \u0022snap-m\u0022,\r\n        \u0022entries\u0022: [\r\n          {\r\n            \u0022syncSourceId\u0022: \u0022a-1\u0022,\r\n            \u0022recordRevision\u0022: 1,\r\n            \u0022fieldVersion\u0022: 1,\r\n            \u0022contentHash\u0022: \u0022aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u0022,\r\n            \u0022fieldHashes\u0022: {\r\n              \u0022displayName\u0022: \u0022aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u0022\r\n            }\r\n          }\r\n        ]\r\n      }\r\n    }\r\n  ]\r\n}",
+      "documentBase64": "ew0KICAidmVyc2lvbiI6IDEsDQogICJwZWVycyI6IFsNCiAgICB7DQogICAgICAiZGV2aWNlSWQiOiAicGVlci1hIiwNCiAgICAgICJiYXNlbGluZSI6IHsNCiAgICAgICAgInZlcnNpb24iOiAxLA0KICAgICAgICAiZGV2aWNlSWQiOiAiZGV2LW0iLA0KICAgICAgICAic25hcHNob3RJZCI6ICJzbmFwLW0iLA0KICAgICAgICAiZW50cmllcyI6IFsNCiAgICAgICAgICB7DQogICAgICAgICAgICAic3luY1NvdXJjZUlkIjogImEtMSIsDQogICAgICAgICAgICAicmVjb3JkUmV2aXNpb24iOiAxLA0KICAgICAgICAgICAgImZpZWxkVmVyc2lvbiI6IDEsDQogICAgICAgICAgICAiY29udGVudEhhc2giOiAiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsDQogICAgICAgICAgICAiZmllbGRIYXNoZXMiOiB7DQogICAgICAgICAgICAgICJkaXNwbGF5TmFtZSI6ICJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIg0KICAgICAgICAgICAgfQ0KICAgICAgICAgIH0NCiAgICAgICAgXQ0KICAgICAgfQ0KICAgIH0NCiAgXQ0KfQ==",
+      "documentByteLength": 598,
+      "documentSha256": "e03ce6405a2ad9dbbed881b660e64291976ba39f11690b300e691c65b25fe1ce",
+      "documentUnchanged": true,
+      "loadError": null,
+      "quarantined": false,
+      "loadErrorAfterReload": null,
+      "quarantinedAfterReload": false,
+      "loadAfter": {
+        "peerDeviceIds": [
+          "peer-a"
+        ],
+        "peerA": {
+          "version": 1,
+          "deviceId": "dev-m",
+          "snapshotId": "snap-m",
+          "entries": [
+            {
+              "syncSourceId": "a-1",
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "fieldHashes": {
+                "displayName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            }
+          ],
+          "isEmpty": false
+        },
+        "peerB": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerC": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        }
+      }
+    },
+    {
+      "name": "after-reload",
+      "seedContent": null,
+      "reload": true,
+      "writes": [
+        {
+          "peerDeviceId": "peer-a",
+          "baseline": {
+            "version": 1,
+            "deviceId": "dev-m",
+            "snapshotId": "snap-m",
+            "entries": [
+              {
+                "syncSourceId": "a-1",
+                "recordRevision": 1,
+                "fieldVersion": 1,
+                "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "fieldHashes": {
+                  "displayName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            ],
+            "isEmpty": false
+          }
+        }
+      ],
+      "forgetId": "peer-a",
+      "expectedResult": true,
+      "secondForgetId": null,
+      "secondExpectedResult": null,
+      "expectError": null,
+      "result": true,
+      "secondResult": null,
+      "error": null,
+      "secondError": null,
+      "writeCount": 1,
+      "peerDeviceIds": [],
+      "fileStillExists": true,
+      "documentText": "{\r\n  \u0022version\u0022: 1,\r\n  \u0022peers\u0022: []\r\n}",
+      "documentBase64": "ew0KICAidmVyc2lvbiI6IDEsDQogICJwZWVycyI6IFtdDQp9",
+      "documentByteLength": 36,
+      "documentSha256": "fd9e53660793632b4b54ccce69264d46bd6fb5326e276297c0e3fe2727fffdfc",
+      "documentUnchanged": false,
+      "loadError": null,
+      "quarantined": false,
+      "loadErrorAfterReload": null,
+      "quarantinedAfterReload": false,
+      "loadAfter": {
+        "peerDeviceIds": [],
+        "peerA": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerB": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerC": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        }
+      }
+    },
+    {
+      "name": "missing-file-no-create",
+      "seedContent": null,
+      "reload": false,
+      "writes": [],
+      "forgetId": "peer-a",
+      "expectedResult": false,
+      "secondForgetId": null,
+      "secondExpectedResult": null,
+      "expectError": null,
+      "result": false,
+      "secondResult": null,
+      "error": null,
+      "secondError": null,
+      "writeCount": 0,
+      "peerDeviceIds": [],
+      "fileStillExists": false,
+      "documentText": null,
+      "documentBase64": null,
+      "documentByteLength": 0,
+      "documentSha256": null,
+      "documentUnchanged": false,
+      "loadError": null,
+      "quarantined": false,
+      "loadErrorAfterReload": null,
+      "quarantinedAfterReload": false,
+      "loadAfter": {
+        "peerDeviceIds": [],
+        "peerA": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerB": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerC": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        }
+      }
+    },
+    {
+      "name": "corrupt-document-forgets-nothing",
+      "seedContent": "{",
+      "reload": true,
+      "writes": [],
+      "forgetId": "peer-a",
+      "expectedResult": false,
+      "secondForgetId": null,
+      "secondExpectedResult": null,
+      "expectError": null,
+      "result": false,
+      "secondResult": null,
+      "error": null,
+      "secondError": null,
+      "writeCount": 0,
+      "peerDeviceIds": [],
+      "fileStillExists": false,
+      "documentText": null,
+      "documentBase64": null,
+      "documentByteLength": 0,
+      "documentSha256": null,
+      "documentUnchanged": false,
+      "loadError": "malformed-json",
+      "quarantined": true,
+      "loadErrorAfterReload": null,
+      "quarantinedAfterReload": false,
+      "loadAfter": {
+        "peerDeviceIds": [],
+        "peerA": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerB": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        },
+        "peerC": {
+          "version": 1,
+          "deviceId": null,
+          "snapshotId": null,
+          "entries": [],
+          "isEmpty": true
+        }
+      }
+    }
   ]
 }

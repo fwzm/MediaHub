@@ -1,5 +1,6 @@
 package com.mediahub.feature.settings
 
+import com.mediahub.core.common.sync.InMemorySourceSyncBaselineStore
 import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.UserPreferences
@@ -52,7 +53,7 @@ class SettingsViewModelTest {
     @Test
     fun `initial preferences expose the professional default (expert mode on)`() = runTest(dispatcher) {
         val repository = FakeUserPreferencesRepository()
-        val viewModel = SettingsViewModel(repository)
+        val viewModel = SettingsViewModel(repository, InMemorySourceSyncBaselineStore())
         backgroundScope.subscribePreferences(viewModel)
         runCurrent()
 
@@ -63,7 +64,7 @@ class SettingsViewModelTest {
     @Test
     fun `toggling professional info persists through the repository and reads back`() = runTest(dispatcher) {
         val repository = FakeUserPreferencesRepository()
-        val viewModel = SettingsViewModel(repository)
+        val viewModel = SettingsViewModel(repository, InMemorySourceSyncBaselineStore())
         backgroundScope.subscribePreferences(viewModel)
         runCurrent()
 
@@ -83,7 +84,7 @@ class SettingsViewModelTest {
     @Test
     fun `toggling back on restores expert density`() = runTest(dispatcher) {
         val repository = FakeUserPreferencesRepository()
-        val viewModel = SettingsViewModel(repository)
+        val viewModel = SettingsViewModel(repository, InMemorySourceSyncBaselineStore())
         backgroundScope.subscribePreferences(viewModel)
         runCurrent()
 

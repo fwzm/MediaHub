@@ -885,6 +885,114 @@ class SourceSyncBaselineContractTest {
         item.remoteRevision?.toString() ?: "-",
     ).joinToString("|")
 
+    // ------------------------------------------------------------ 文件存储：忘记一个对端
+
+    /**
+     * 忘了对端却把它的基线留在盘上，重新配对就会拿过期知识判 baselineKnown=true，
+     * 把对端的真实变更当成 already-applied 静默跳过。这一组用例就是那条路径的字节回放。
+     */
+    @Test
+    fun baseline_forget_cases_match_the_windows_authority() {
+        var compared = 0
+        for (entry in entries("baselineForgetCases")) {
+            val name = text(entry, "name")
+            withTempDirectory { directory ->
+                val writer = FileSourceSyncBaselineStore(directory)
+                val seed = nullableText(entry, "seedContent")
+                if (seed != null) {
+                    File(writer.filePath).writeText(seed, StandardCharsets.UTF_8)
+                }
+                for (write in entry.getValue("writes").jsonArray.map { it.jsonObject }) {
+                    writer.save(text(write, "peerDeviceId"), baselineOf(write.getValue("baseline")))
+                }
+
+                val store = if (boolean(entry, "reload")) FileSourceSyncBaselineStore(directory) else writer
+                val filePath = store.filePath
+                val textBefore = File(filePath).takeIf { it.exists() }?.readText(StandardCharsets.UTF_8)
+
+                var result: Boolean? = null
+                var error: String? = null
+                try {
+                    result = store.forget(text(entry, "forgetId"))
+                } catch (thrown: RuntimeException) {
+                    error = thrown.javaClass.simpleName
+                }
+
+                var secondResult: Boolean? = null
+                var secondError: String? = null
+                val secondForgetId = nullableText(entry, "secondForgetId")
+                if (secondForgetId != null) {
+                    try {
+                        secondResult = store.forget(secondForgetId)
+                    } catch (thrown: RuntimeException) {
+                        secondError = thrown.javaClass.simpleName
+                    }
+                }
+
+                assertEquals(name + " (result)", nullableBoolean(entry, "expectedResult"), result)
+                assertEquals(name + " (error)", kotlinErrorName(nullableText(entry, "error")), error)
+                assertEquals(name + " (secondResult)", nullableBoolean(entry, "secondExpectedResult"), secondResult)
+                assertEquals(name + " (secondError)", kotlinErrorName(nullableText(entry, "secondError")), secondError)
+
+                val file = File(filePath)
+                val exists = file.exists()
+                val bytes = if (exists) file.readBytes() else ByteArray(0)
+                val textAfter = if (exists) String(bytes, StandardCharsets.UTF_8) else null
+                assertEquals(name + " (fileStillExists)", boolean(entry, "fileStillExists"), exists)
+                assertEquals(name + " (documentText)", nullableText(entry, "documentText"), textAfter)
+                assertEquals(
+                    name + " (documentBase64)",
+                    nullableText(entry, "documentBase64"),
+                    if (exists) Base64.getEncoder().encodeToString(bytes) else null,
+                )
+                assertEquals(name + " (documentByteLength)", int(entry, "documentByteLength"), bytes.size)
+                assertEquals(name + " (documentSha256)", nullableText(entry, "documentSha256"), if (exists) sha256(bytes) else null)
+                assertEquals(
+                    name + " (documentUnchanged)",
+                    boolean(entry, "documentUnchanged"),
+                    exists && textBefore != null && textBefore == textAfter,
+                )
+                assertEquals(name + " (writeCount)", int(entry, "writeCount"), store.writeCount)
+                assertEquals(
+                    name + " (peerDeviceIds)",
+                    entry.getValue("peerDeviceIds").jsonArray.map { text(it) },
+                    store.peerDeviceIds,
+                )
+                assertEquals(name + " (loadError)", nullableText(entry, "loadError"), store.loadError)
+                assertEquals(name + " (quarantined)", boolean(entry, "quarantined"), store.lastQuarantinedPath != null)
+
+                // 新开一个 store 才走真实加载路径：懒加载下没触发 load 之前 loadError/隔离路径都是空的。
+                val reader = FileSourceSyncBaselineStore(directory)
+                reader.peerDeviceIds
+                assertEquals(name + " (loadErrorAfterReload)", nullableText(entry, "loadErrorAfterReload"), reader.loadError)
+                assertEquals(
+                    name + " (quarantinedAfterReload)",
+                    boolean(entry, "quarantinedAfterReload"),
+                    reader.lastQuarantinedPath != null,
+                )
+                val loadAfter = entry.getValue("loadAfter").jsonObject
+                assertEquals(
+                    name + " (peerDeviceIdsAfterReload)",
+                    loadAfter.getValue("peerDeviceIds").jsonArray.map { text(it) },
+                    reader.peerDeviceIds,
+                )
+                assertEquals(name + " (peerA)", baselineOf(loadAfter.getValue("peerA")), reader.load("peer-a"))
+                assertEquals(name + " (peerB)", baselineOf(loadAfter.getValue("peerB")), reader.load("peer-b"))
+                assertEquals(name + " (peerC)", baselineOf(loadAfter.getValue("peerC")), reader.load("peer-c"))
+                compared += 1
+            }
+        }
+        assertEquals(entries("baselineForgetCases").size, compared)
+    }
+
+    private fun nullableBoolean(entry: JsonObject, name: String): Boolean? = nullableText(entry, name)?.toBooleanStrict()
+
+    /** Windows 抛 ArgumentException 的地方，Kotlin 侧对应 IllegalArgumentException，两个名字都要认。 */
+    private fun kotlinErrorName(declared: String?): String? = when (declared) {
+        "ArgumentException" -> "IllegalArgumentException"
+        else -> declared
+    }
+
     private companion object {
         private const val RESOURCE_PATH = "/sync/baseline-vectors.json"
         private const val HEX_LOWER = "0123456789abcdef"

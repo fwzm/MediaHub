@@ -95,7 +95,10 @@ fun SettingsRoute(
 
     // W6-70：已配对设备页同样在本页内托管，返回即回到设置列表。
     if (showPairedDevices) {
-        PairedDeviceRoute(onBack = { showPairedDevices = false })
+        PairedDeviceRoute(
+            onBack = { showPairedDevices = false },
+            baselineStore = viewModel.syncBaselineStore,
+        )
         return
     }
 
