@@ -3881,5 +3881,3444 @@
       "recordsWithoutEndpoint": 0,
       "isEmpty": true
     }
+  ],
+  "digestCases": [
+    {
+      "name": "full-snapshot-null-baseline",
+      "records": [
+        {
+          "syncSourceId": "d-1",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "One",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://one.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 1,
+          "fieldVersion": 1,
+          "secrets": null
+        },
+        {
+          "syncSourceId": "d-2",
+          "sourceTypeRaw": "jellyfin",
+          "sourceTypeWire": "jellyfin",
+          "displayName": "Two",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://two.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 2,
+          "fieldVersion": 1,
+          "secrets": null
+        },
+        {
+          "syncSourceId": "d-3",
+          "sourceTypeRaw": "smb",
+          "sourceTypeWire": "smb",
+          "displayName": "Three",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "smb://host/share",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 3,
+          "fieldVersion": 2,
+          "secrets": null
+        }
+      ],
+      "baseline": null,
+      "deletions": [],
+      "digest": {
+        "items": [
+          {
+            "syncSourceId": "d-1",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "d-1",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "One",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://one.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 1,
+            "fieldVersion": 1
+          },
+          {
+            "syncSourceId": "d-2",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "d-2",
+              "sourceTypeRaw": "jellyfin",
+              "sourceTypeWire": "jellyfin",
+              "displayName": "Two",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://two.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 2,
+            "fieldVersion": 1
+          },
+          {
+            "syncSourceId": "d-3",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "d-3",
+              "sourceTypeRaw": "smb",
+              "sourceTypeWire": "smb",
+              "displayName": "Three",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "smb://host/share",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 3,
+              "fieldVersion": 2,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 3,
+            "fieldVersion": 2
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": true,
+        "isEmpty": false,
+        "addedCount": 3,
+        "updatedCount": 0,
+        "removedCount": 0
+      }
+    },
+    {
+      "name": "full-snapshot-empty-baseline",
+      "records": [
+        {
+          "syncSourceId": "d-1",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "One",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://one.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 1,
+          "fieldVersion": 1,
+          "secrets": null
+        },
+        {
+          "syncSourceId": "d-2",
+          "sourceTypeRaw": "jellyfin",
+          "sourceTypeWire": "jellyfin",
+          "displayName": "Two",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://two.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 2,
+          "fieldVersion": 1,
+          "secrets": null
+        },
+        {
+          "syncSourceId": "d-3",
+          "sourceTypeRaw": "smb",
+          "sourceTypeWire": "smb",
+          "displayName": "Three",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "smb://host/share",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 3,
+          "fieldVersion": 2,
+          "secrets": null
+        }
+      ],
+      "baseline": {
+        "version": 1,
+        "deviceId": null,
+        "snapshotId": null,
+        "entries": [],
+        "isEmpty": true
+      },
+      "deletions": [],
+      "digest": {
+        "items": [
+          {
+            "syncSourceId": "d-1",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "d-1",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "One",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://one.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 1,
+            "fieldVersion": 1
+          },
+          {
+            "syncSourceId": "d-2",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "d-2",
+              "sourceTypeRaw": "jellyfin",
+              "sourceTypeWire": "jellyfin",
+              "displayName": "Two",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://two.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 2,
+            "fieldVersion": 1
+          },
+          {
+            "syncSourceId": "d-3",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "d-3",
+              "sourceTypeRaw": "smb",
+              "sourceTypeWire": "smb",
+              "displayName": "Three",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "smb://host/share",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 3,
+              "fieldVersion": 2,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 3,
+            "fieldVersion": 2
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": true,
+        "isEmpty": false,
+        "addedCount": 3,
+        "updatedCount": 0,
+        "removedCount": 0
+      }
+    },
+    {
+      "name": "unchanged-records-are-skipped",
+      "records": [
+        {
+          "syncSourceId": "d-1",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "One",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://one.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 1,
+          "fieldVersion": 1,
+          "secrets": null
+        },
+        {
+          "syncSourceId": "d-2",
+          "sourceTypeRaw": "jellyfin",
+          "sourceTypeWire": "jellyfin",
+          "displayName": "Two",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://two.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 2,
+          "fieldVersion": 1,
+          "secrets": null
+        }
+      ],
+      "baseline": {
+        "version": 1,
+        "deviceId": null,
+        "snapshotId": null,
+        "entries": [
+          {
+            "syncSourceId": "d-1",
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "contentHash": "7f742e36247a4d67fcba5b026d13a573cb8be1ed79981e59112af73c522ed973",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "8d6ce0e764091b99c5f78244f31e139b50eee0bf0e96f2771a4c953b9433e9ab",
+              "endpoints": "307e3fd8ada01bda52559836e6506ddc33032196b890c25bad41f636f93c0823",
+              "sourceType": "174edbe01b0303b829f2e16a4488a72d522492ce01b6d3dd445d93fb494fe6a5"
+            }
+          },
+          {
+            "syncSourceId": "d-2",
+            "recordRevision": 2,
+            "fieldVersion": 1,
+            "contentHash": "56e463b398b962dc2f07424b748036b3748c6872cb92a1c9d01272dc21a27b41",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "f30881b7c79a165ffc13f69fb05668edcbbdf8d654cfaaaf650da1b4c85794fa",
+              "endpoints": "30546060d0d7f3c0d2eb76c7652ff3aa75ec916b6c5107f8c3e1ac23b65886c0",
+              "sourceType": "d69e176a837c24615af2133eb72e4ce32fb5e776673ab9e88d924cf0f2403be7"
+            }
+          }
+        ],
+        "isEmpty": false
+      },
+      "deletions": [],
+      "digest": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      }
+    },
+    {
+      "name": "changed-content-same-revision",
+      "records": [
+        {
+          "syncSourceId": "d-1",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "New name",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://one.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 1,
+          "fieldVersion": 1,
+          "secrets": null
+        }
+      ],
+      "baseline": {
+        "version": 1,
+        "deviceId": null,
+        "snapshotId": null,
+        "entries": [
+          {
+            "syncSourceId": "d-1",
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "contentHash": "7f742e36247a4d67fcba5b026d13a573cb8be1ed79981e59112af73c522ed973",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "8d6ce0e764091b99c5f78244f31e139b50eee0bf0e96f2771a4c953b9433e9ab",
+              "endpoints": "307e3fd8ada01bda52559836e6506ddc33032196b890c25bad41f636f93c0823",
+              "sourceType": "174edbe01b0303b829f2e16a4488a72d522492ce01b6d3dd445d93fb494fe6a5"
+            }
+          }
+        ],
+        "isEmpty": false
+      },
+      "deletions": [],
+      "digest": {
+        "items": [
+          {
+            "syncSourceId": "d-1",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "d-1",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "New name",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://one.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 1,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      }
+    },
+    {
+      "name": "newer-revision-same-content",
+      "records": [
+        {
+          "syncSourceId": "d-1",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "One",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://one.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 2,
+          "fieldVersion": 1,
+          "secrets": null
+        }
+      ],
+      "baseline": {
+        "version": 1,
+        "deviceId": null,
+        "snapshotId": null,
+        "entries": [
+          {
+            "syncSourceId": "d-1",
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "contentHash": "7f742e36247a4d67fcba5b026d13a573cb8be1ed79981e59112af73c522ed973",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "8d6ce0e764091b99c5f78244f31e139b50eee0bf0e96f2771a4c953b9433e9ab",
+              "endpoints": "307e3fd8ada01bda52559836e6506ddc33032196b890c25bad41f636f93c0823",
+              "sourceType": "174edbe01b0303b829f2e16a4488a72d522492ce01b6d3dd445d93fb494fe6a5"
+            }
+          }
+        ],
+        "isEmpty": false
+      },
+      "deletions": [],
+      "digest": {
+        "items": [
+          {
+            "syncSourceId": "d-1",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "d-1",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "One",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://one.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [],
+            "contentChanged": false,
+            "recordRevision": 2,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      }
+    },
+    {
+      "name": "peer-ahead-is-skipped",
+      "records": [
+        {
+          "syncSourceId": "d-1",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "Mine",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://one.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 3,
+          "fieldVersion": 1,
+          "secrets": null
+        }
+      ],
+      "baseline": {
+        "version": 1,
+        "deviceId": null,
+        "snapshotId": null,
+        "entries": [
+          {
+            "syncSourceId": "d-1",
+            "recordRevision": 5,
+            "fieldVersion": 1,
+            "contentHash": "42b6f589dabd169cd513079dbe306e989bd666eecb01c2ee375cfcf47e0020b4",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "c2b38ed0a480934090fdd2f4f35a03322b81c66cc2378dc2725a4ea450eb9b62",
+              "endpoints": "307e3fd8ada01bda52559836e6506ddc33032196b890c25bad41f636f93c0823",
+              "sourceType": "174edbe01b0303b829f2e16a4488a72d522492ce01b6d3dd445d93fb494fe6a5"
+            }
+          }
+        ],
+        "isEmpty": false
+      },
+      "deletions": [],
+      "digest": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      }
+    },
+    {
+      "name": "mixed-added-updated-unchanged-peer-ahead",
+      "records": [
+        {
+          "syncSourceId": "d-9",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "Fresh",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://nine.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 1,
+          "fieldVersion": 1,
+          "secrets": null
+        },
+        {
+          "syncSourceId": "d-1",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "New name",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://one.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 2,
+          "fieldVersion": 1,
+          "secrets": null
+        },
+        {
+          "syncSourceId": "d-2",
+          "sourceTypeRaw": "jellyfin",
+          "sourceTypeWire": "jellyfin",
+          "displayName": "Two",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://two.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 2,
+          "fieldVersion": 1,
+          "secrets": null
+        },
+        {
+          "syncSourceId": "d-3",
+          "sourceTypeRaw": "smb",
+          "sourceTypeWire": "smb",
+          "displayName": "Behind",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "smb://host/share",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 3,
+          "fieldVersion": 2,
+          "secrets": null
+        }
+      ],
+      "baseline": {
+        "version": 1,
+        "deviceId": null,
+        "snapshotId": null,
+        "entries": [
+          {
+            "syncSourceId": "d-1",
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "contentHash": "7f742e36247a4d67fcba5b026d13a573cb8be1ed79981e59112af73c522ed973",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "8d6ce0e764091b99c5f78244f31e139b50eee0bf0e96f2771a4c953b9433e9ab",
+              "endpoints": "307e3fd8ada01bda52559836e6506ddc33032196b890c25bad41f636f93c0823",
+              "sourceType": "174edbe01b0303b829f2e16a4488a72d522492ce01b6d3dd445d93fb494fe6a5"
+            }
+          },
+          {
+            "syncSourceId": "d-2",
+            "recordRevision": 2,
+            "fieldVersion": 1,
+            "contentHash": "56e463b398b962dc2f07424b748036b3748c6872cb92a1c9d01272dc21a27b41",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "f30881b7c79a165ffc13f69fb05668edcbbdf8d654cfaaaf650da1b4c85794fa",
+              "endpoints": "30546060d0d7f3c0d2eb76c7652ff3aa75ec916b6c5107f8c3e1ac23b65886c0",
+              "sourceType": "d69e176a837c24615af2133eb72e4ce32fb5e776673ab9e88d924cf0f2403be7"
+            }
+          },
+          {
+            "syncSourceId": "d-3",
+            "recordRevision": 7,
+            "fieldVersion": 2,
+            "contentHash": "c9dbf47472ff982660fe2dddcd097fda61aaede3bdc6e1e04c5a8b561de2a31b",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "5b2b4a23e46c92620874f7c03a3dc6bc6975d7bbae6ea7d1542e38df5fafbe60",
+              "endpoints": "bc801ceafb862303c90840180c81e2a05a10f752d11958b216510203d04c9bfe",
+              "sourceType": "6bc2c169c5d078e16cdd7b5a963ec493633373fb37961adf8b823ff60fc42930"
+            }
+          }
+        ],
+        "isEmpty": false
+      },
+      "deletions": [],
+      "digest": {
+        "items": [
+          {
+            "syncSourceId": "d-9",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "d-9",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Fresh",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://nine.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 1,
+            "fieldVersion": 1
+          },
+          {
+            "syncSourceId": "d-1",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "d-1",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "New name",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://one.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 2,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 1,
+        "updatedCount": 1,
+        "removedCount": 0
+      }
+    },
+    {
+      "name": "case-insensitive-baseline-lookup",
+      "records": [
+        {
+          "syncSourceId": "  case-id  ",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "New",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://case.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 2,
+          "fieldVersion": 1,
+          "secrets": null
+        }
+      ],
+      "baseline": {
+        "version": 1,
+        "deviceId": null,
+        "snapshotId": null,
+        "entries": [
+          {
+            "syncSourceId": "Case-Id",
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "contentHash": "a2e913e8e81f84b08a53460edddb811d0f4f2746ca678cdc6c3551120306a030",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "95884ac2d7005d8bcfba20fd09806c5c192eac569b1e62b2494e065009e77460",
+              "endpoints": "82477349adc61dd87c16f01f84681bae17e3d2223ee50d6e4a99416b1b109774",
+              "sourceType": "174edbe01b0303b829f2e16a4488a72d522492ce01b6d3dd445d93fb494fe6a5"
+            }
+          }
+        ],
+        "isEmpty": false
+      },
+      "deletions": [],
+      "digest": {
+        "items": [
+          {
+            "syncSourceId": "case-id",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "  case-id  ",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "New",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://case.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 2,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      }
+    },
+    {
+      "name": "issues-missing-and-duplicate",
+      "records": [
+        {
+          "syncSourceId": "",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "No id",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://x.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 1,
+          "fieldVersion": 1,
+          "secrets": null
+        },
+        {
+          "syncSourceId": "   ",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "Blank id",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://x.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 1,
+          "fieldVersion": 1,
+          "secrets": null
+        },
+        {
+          "syncSourceId": "dup-x",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "First",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://x.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 1,
+          "fieldVersion": 1,
+          "secrets": null
+        },
+        {
+          "syncSourceId": "DUP-X",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "Second",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://x.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 2,
+          "fieldVersion": 1,
+          "secrets": null
+        }
+      ],
+      "baseline": null,
+      "deletions": [],
+      "digest": {
+        "items": [
+          {
+            "syncSourceId": "dup-x",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "dup-x",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "First",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://x.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 1,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [
+          {
+            "syncSourceId": "",
+            "reason": "missing-sync-source-id"
+          },
+          {
+            "syncSourceId": "",
+            "reason": "missing-sync-source-id"
+          },
+          {
+            "syncSourceId": "DUP-X",
+            "reason": "duplicate-local-sync-id"
+          }
+        ],
+        "isFullSnapshot": true,
+        "isEmpty": false,
+        "addedCount": 1,
+        "updatedCount": 0,
+        "removedCount": 0
+      }
+    },
+    {
+      "name": "issues-no-wire-type",
+      "records": [
+        {
+          "syncSourceId": "no-wire",
+          "sourceTypeRaw": "",
+          "sourceTypeWire": "",
+          "displayName": "No type",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://x.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 1,
+          "fieldVersion": 1,
+          "secrets": null
+        }
+      ],
+      "baseline": null,
+      "deletions": [],
+      "digest": {
+        "items": [],
+        "issues": [
+          {
+            "syncSourceId": "no-wire",
+            "reason": "no-wire-type"
+          }
+        ],
+        "isFullSnapshot": true,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      }
+    },
+    {
+      "name": "deletions-with-issues",
+      "records": [
+        {
+          "syncSourceId": "keep-1",
+          "sourceTypeRaw": "webdav",
+          "sourceTypeWire": "webdav",
+          "displayName": "Keep",
+          "accountScope": null,
+          "endpoints": [
+            {
+              "url": "https://keep.local/",
+              "isPrimary": true,
+              "enabled": true,
+              "sortOrder": 0
+            }
+          ],
+          "recordRevision": 1,
+          "fieldVersion": 1,
+          "secrets": null
+        }
+      ],
+      "baseline": null,
+      "deletions": [
+        {
+          "syncSourceId": "keep-1",
+          "deletedAtEpochMs": 1792800000000,
+          "recordRevision": 2
+        },
+        {
+          "syncSourceId": "",
+          "deletedAtEpochMs": 1792800000000,
+          "recordRevision": 3
+        },
+        {
+          "syncSourceId": "gone-1",
+          "deletedAtEpochMs": 1792800000000,
+          "recordRevision": 4
+        }
+      ],
+      "digest": {
+        "items": [
+          {
+            "syncSourceId": "keep-1",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "keep-1",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Keep",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://keep.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 1,
+            "fieldVersion": 1
+          },
+          {
+            "syncSourceId": "gone-1",
+            "kind": "Removed",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "gone-1",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 4
+            },
+            "changedFields": [],
+            "contentChanged": false,
+            "recordRevision": 4,
+            "fieldVersion": 0
+          }
+        ],
+        "issues": [
+          {
+            "syncSourceId": "keep-1",
+            "reason": "tombstone-for-existing-record"
+          },
+          {
+            "syncSourceId": "",
+            "reason": "missing-sync-source-id"
+          }
+        ],
+        "isFullSnapshot": true,
+        "isEmpty": false,
+        "addedCount": 1,
+        "updatedCount": 0,
+        "removedCount": 1
+      }
+    },
+    {
+      "name": "empty-inputs",
+      "records": [],
+      "baseline": null,
+      "deletions": [],
+      "digest": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": true,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      }
+    }
+  ],
+  "mergerCases": [
+    {
+      "name": "both-empty",
+      "windowsOnly": false,
+      "local": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [],
+        "requiresApproval": [],
+        "ignored": [],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "remote-only-add",
+      "windowsOnly": false,
+      "local": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-1",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "m-1",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Remote",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://remote.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 2,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 1,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [
+          {
+            "syncSourceId": "m-1",
+            "direction": "Pull",
+            "kind": "Added",
+            "reason": "apply-remote-change",
+            "record": {
+              "syncSourceId": "m-1",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Remote",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://remote.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 2,
+            "requiresApproval": false
+          }
+        ],
+        "requiresApproval": [],
+        "ignored": [],
+        "hasWork": true
+      }
+    },
+    {
+      "name": "remote-only-unchanged-known",
+      "windowsOnly": false,
+      "local": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-1",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "m-1",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Remote",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://remote.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 2,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 1,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "baseline": {
+        "version": 1,
+        "deviceId": null,
+        "snapshotId": null,
+        "entries": [
+          {
+            "syncSourceId": "m-1",
+            "recordRevision": 2,
+            "fieldVersion": 1,
+            "contentHash": "c797ead55cc4ba1ad2d9af40632619072f8b0c55530521167953daed1b23440b",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "cb528c81b3768235815c71a331f6506b1a23fe9fc0d509ddceecb86d73c07849",
+              "endpoints": "7e6b622a6df4e76b67af91f9f51ad86acde3967435c5fca2e4dd8e17530fff40",
+              "sourceType": "174edbe01b0303b829f2e16a4488a72d522492ce01b6d3dd445d93fb494fe6a5"
+            }
+          }
+        ],
+        "isEmpty": false
+      },
+      "result": {
+        "apply": [],
+        "requiresApproval": [],
+        "ignored": [
+          {
+            "syncSourceId": "m-1",
+            "direction": "Pull",
+            "kind": "Added",
+            "reason": "already-applied",
+            "record": {
+              "syncSourceId": "m-1",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Remote",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://remote.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 2,
+            "requiresApproval": false
+          }
+        ],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "local-only-change",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "m-2",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-2",
+              "sourceTypeRaw": "jellyfin",
+              "sourceTypeWire": "jellyfin",
+              "displayName": "Local",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://local.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 3,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 3,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [
+          {
+            "syncSourceId": "m-2",
+            "direction": "Push",
+            "kind": "Updated",
+            "reason": "push-local-change",
+            "record": {
+              "syncSourceId": "m-2",
+              "sourceTypeRaw": "jellyfin",
+              "sourceTypeWire": "jellyfin",
+              "displayName": "Local",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://local.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 3,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 3,
+            "remoteRevision": 0,
+            "requiresApproval": false
+          }
+        ],
+        "requiresApproval": [],
+        "ignored": [],
+        "hasWork": true
+      }
+    },
+    {
+      "name": "local-only-delete",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "m-3",
+            "kind": "Removed",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-3",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 3
+            },
+            "changedFields": [],
+            "contentChanged": false,
+            "recordRevision": 3,
+            "fieldVersion": 0
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 1
+      },
+      "remote": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [
+          {
+            "syncSourceId": "m-3",
+            "direction": "Push",
+            "kind": "Removed",
+            "reason": "push-local-delete",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-3",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 3
+            },
+            "conflictingFields": [],
+            "localRevision": 3,
+            "remoteRevision": 0,
+            "requiresApproval": false
+          }
+        ],
+        "requiresApproval": [],
+        "ignored": [],
+        "hasWork": true
+      }
+    },
+    {
+      "name": "local-only-delete-stale",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "m-3",
+            "kind": "Removed",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-3",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 1
+            },
+            "changedFields": [],
+            "contentChanged": false,
+            "recordRevision": 1,
+            "fieldVersion": 0
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 1
+      },
+      "remote": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "baseline": {
+        "version": 1,
+        "deviceId": null,
+        "snapshotId": null,
+        "entries": [
+          {
+            "syncSourceId": "m-3",
+            "recordRevision": 5,
+            "fieldVersion": 1,
+            "contentHash": "0ff85457bf4ef868010e0c687e71e4a527420a53d5bc82ddec74a35d4b3aa104",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "c2b38ed0a480934090fdd2f4f35a03322b81c66cc2378dc2725a4ea450eb9b62",
+              "endpoints": "bc801ceafb862303c90840180c81e2a05a10f752d11958b216510203d04c9bfe",
+              "sourceType": "6bc2c169c5d078e16cdd7b5a963ec493633373fb37961adf8b823ff60fc42930"
+            }
+          }
+        ],
+        "isEmpty": false
+      },
+      "result": {
+        "apply": [],
+        "requiresApproval": [],
+        "ignored": [
+          {
+            "syncSourceId": "m-3",
+            "direction": "Push",
+            "kind": "Removed",
+            "reason": "stale-local",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-3",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 1
+            },
+            "conflictingFields": [],
+            "localRevision": 1,
+            "remoteRevision": 0,
+            "requiresApproval": false
+          }
+        ],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "remote-tombstone-unknown",
+      "windowsOnly": false,
+      "local": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-4",
+            "kind": "Removed",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-4",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 2
+            },
+            "changedFields": [],
+            "contentChanged": false,
+            "recordRevision": 2,
+            "fieldVersion": 0
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 1
+      },
+      "baseline": null,
+      "result": {
+        "apply": [],
+        "requiresApproval": [],
+        "ignored": [
+          {
+            "syncSourceId": "m-4",
+            "direction": "Pull",
+            "kind": "Removed",
+            "reason": "tombstone-unknown",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-4",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 2
+            },
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 2,
+            "requiresApproval": false
+          }
+        ],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "remote-tombstone-approved",
+      "windowsOnly": false,
+      "local": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-4",
+            "kind": "Removed",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-4",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 4
+            },
+            "changedFields": [],
+            "contentChanged": false,
+            "recordRevision": 4,
+            "fieldVersion": 0
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 1
+      },
+      "baseline": {
+        "version": 1,
+        "deviceId": null,
+        "snapshotId": null,
+        "entries": [
+          {
+            "syncSourceId": "m-4",
+            "recordRevision": 2,
+            "fieldVersion": 1,
+            "contentHash": "0ff85457bf4ef868010e0c687e71e4a527420a53d5bc82ddec74a35d4b3aa104",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "c2b38ed0a480934090fdd2f4f35a03322b81c66cc2378dc2725a4ea450eb9b62",
+              "endpoints": "bc801ceafb862303c90840180c81e2a05a10f752d11958b216510203d04c9bfe",
+              "sourceType": "6bc2c169c5d078e16cdd7b5a963ec493633373fb37961adf8b823ff60fc42930"
+            }
+          }
+        ],
+        "isEmpty": false
+      },
+      "result": {
+        "apply": [],
+        "requiresApproval": [
+          {
+            "syncSourceId": "m-4",
+            "direction": "Pull",
+            "kind": "Removed",
+            "reason": "tombstone-requires-approval",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-4",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 4
+            },
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 4,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": [],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "remote-tombstone-stale",
+      "windowsOnly": false,
+      "local": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-4",
+            "kind": "Removed",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-4",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 1
+            },
+            "changedFields": [],
+            "contentChanged": false,
+            "recordRevision": 1,
+            "fieldVersion": 0
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 1
+      },
+      "baseline": {
+        "version": 1,
+        "deviceId": null,
+        "snapshotId": null,
+        "entries": [
+          {
+            "syncSourceId": "m-4",
+            "recordRevision": 5,
+            "fieldVersion": 1,
+            "contentHash": "0ff85457bf4ef868010e0c687e71e4a527420a53d5bc82ddec74a35d4b3aa104",
+            "fieldHashes": {
+              "accountScope": "21aa376d2173cccbb7011190f7f6994726a7ff1822b8f67251d9e2117c431f0d",
+              "displayName": "c2b38ed0a480934090fdd2f4f35a03322b81c66cc2378dc2725a4ea450eb9b62",
+              "endpoints": "bc801ceafb862303c90840180c81e2a05a10f752d11958b216510203d04c9bfe",
+              "sourceType": "6bc2c169c5d078e16cdd7b5a963ec493633373fb37961adf8b823ff60fc42930"
+            }
+          }
+        ],
+        "isEmpty": false
+      },
+      "result": {
+        "apply": [],
+        "requiresApproval": [],
+        "ignored": [
+          {
+            "syncSourceId": "m-4",
+            "direction": "Pull",
+            "kind": "Removed",
+            "reason": "stale-remote",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-4",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 1
+            },
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 1,
+            "requiresApproval": false
+          }
+        ],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "both-deleted",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "m-5",
+            "kind": "Removed",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-5",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 2
+            },
+            "changedFields": [],
+            "contentChanged": false,
+            "recordRevision": 2,
+            "fieldVersion": 0
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 1
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-5",
+            "kind": "Removed",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-5",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 3
+            },
+            "changedFields": [],
+            "contentChanged": false,
+            "recordRevision": 3,
+            "fieldVersion": 0
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 1
+      },
+      "baseline": null,
+      "result": {
+        "apply": [],
+        "requiresApproval": [],
+        "ignored": [
+          {
+            "syncSourceId": "m-5",
+            "direction": "Both",
+            "kind": "Removed",
+            "reason": "both-deleted",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-5",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 2
+            },
+            "conflictingFields": [],
+            "localRevision": 2,
+            "remoteRevision": 3,
+            "requiresApproval": false
+          }
+        ],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "local-delete-vs-remote-update",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "m-6",
+            "kind": "Removed",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-6",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 2
+            },
+            "changedFields": [],
+            "contentChanged": false,
+            "recordRevision": 2,
+            "fieldVersion": 0
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 1
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-6",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-6",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Remote",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://six.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 5,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 5,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [],
+        "requiresApproval": [
+          {
+            "syncSourceId": "m-6",
+            "direction": "Both",
+            "kind": "Updated",
+            "reason": "delete-vs-update",
+            "record": {
+              "syncSourceId": "m-6",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Remote",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://six.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 5,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": {
+              "syncSourceId": "m-6",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 2
+            },
+            "conflictingFields": [],
+            "localRevision": 2,
+            "remoteRevision": 5,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": [],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "local-update-vs-remote-delete",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "m-7",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-7",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Local",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://seven.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 5,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 5,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-7",
+            "kind": "Removed",
+            "record": null,
+            "tombstone": {
+              "syncSourceId": "m-7",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 2
+            },
+            "changedFields": [],
+            "contentChanged": false,
+            "recordRevision": 2,
+            "fieldVersion": 0
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 1
+      },
+      "baseline": null,
+      "result": {
+        "apply": [],
+        "requiresApproval": [
+          {
+            "syncSourceId": "m-7",
+            "direction": "Both",
+            "kind": "Updated",
+            "reason": "update-vs-delete",
+            "record": {
+              "syncSourceId": "m-7",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Local",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://seven.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 5,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": {
+              "syncSourceId": "m-7",
+              "deletedAtEpochMs": 1792800000000,
+              "recordRevision": 2
+            },
+            "conflictingFields": [],
+            "localRevision": 5,
+            "remoteRevision": 2,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": [],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "same-content-remote-newer",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "m-8",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-8",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Same",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://eight.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 2,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-8",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-8",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Same",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://eight.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 3,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 3,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [
+          {
+            "syncSourceId": "m-8",
+            "direction": "Pull",
+            "kind": "Updated",
+            "reason": "remote-newer",
+            "record": {
+              "syncSourceId": "m-8",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Same",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://eight.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 3,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 2,
+            "remoteRevision": 3,
+            "requiresApproval": false
+          }
+        ],
+        "requiresApproval": [],
+        "ignored": [],
+        "hasWork": true
+      }
+    },
+    {
+      "name": "same-content-local-newer",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "m-9",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-9",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Same",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://nine.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 5,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 5,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-9",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-9",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Same",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://nine.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 3,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 3,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [
+          {
+            "syncSourceId": "m-9",
+            "direction": "Push",
+            "kind": "Updated",
+            "reason": "local-newer",
+            "record": {
+              "syncSourceId": "m-9",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Same",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://nine.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 5,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 5,
+            "remoteRevision": 3,
+            "requiresApproval": false
+          }
+        ],
+        "requiresApproval": [],
+        "ignored": [],
+        "hasWork": true
+      }
+    },
+    {
+      "name": "same-content-same-revision",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "m-10",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-10",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Same",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://ten.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 4,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 4,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-10",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-10",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Same",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://ten.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 4,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 4,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [],
+        "requiresApproval": [],
+        "ignored": [
+          {
+            "syncSourceId": "m-10",
+            "direction": "Both",
+            "kind": "Updated",
+            "reason": "already-applied",
+            "record": {
+              "syncSourceId": "m-10",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Same",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://ten.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 4,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 4,
+            "remoteRevision": 4,
+            "requiresApproval": false
+          }
+        ],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "field-conflict",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "m-11",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-11",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Alpha",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://eleven.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 5,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName",
+              "accountScope"
+            ],
+            "contentChanged": true,
+            "recordRevision": 5,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-11",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-11",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Beta",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://eleven.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 6,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 6,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [],
+        "requiresApproval": [
+          {
+            "syncSourceId": "m-11",
+            "direction": "Both",
+            "kind": "Updated",
+            "reason": "field-conflict",
+            "record": {
+              "syncSourceId": "m-11",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Beta",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://eleven.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 6,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [
+              "displayName"
+            ],
+            "localRevision": 5,
+            "remoteRevision": 6,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": [],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "disjoint-fields-revision-decides",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "m-12",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-12",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Alpha",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://twelve.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 5,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 5,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-12",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-12",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Beta",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://twelve.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 6,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope"
+            ],
+            "contentChanged": true,
+            "recordRevision": 6,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [
+          {
+            "syncSourceId": "m-12",
+            "direction": "Pull",
+            "kind": "Updated",
+            "reason": "remote-newer",
+            "record": {
+              "syncSourceId": "m-12",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Beta",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://twelve.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 6,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 5,
+            "remoteRevision": 6,
+            "requiresApproval": false
+          }
+        ],
+        "requiresApproval": [],
+        "ignored": [],
+        "hasWork": true
+      }
+    },
+    {
+      "name": "same-revision-different-content",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "m-13",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-13",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Alpha",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://thirteen.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 5,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "displayName"
+            ],
+            "contentChanged": true,
+            "recordRevision": 5,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-13",
+            "kind": "Updated",
+            "record": {
+              "syncSourceId": "m-13",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Beta",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://thirteen.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 5,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope"
+            ],
+            "contentChanged": true,
+            "recordRevision": 5,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 0,
+        "updatedCount": 1,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [],
+        "requiresApproval": [
+          {
+            "syncSourceId": "m-13",
+            "direction": "Both",
+            "kind": "Updated",
+            "reason": "same-revision-different-content",
+            "record": {
+              "syncSourceId": "m-13",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Beta",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://thirteen.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 5,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 5,
+            "remoteRevision": 5,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": [],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "unknown-source-type",
+      "windowsOnly": false,
+      "local": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-14",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "m-14",
+              "sourceTypeRaw": "",
+              "sourceTypeWire": "",
+              "displayName": "No type",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://x.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 2,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 1,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [],
+        "requiresApproval": [
+          {
+            "syncSourceId": "m-14",
+            "direction": "Pull",
+            "kind": "Added",
+            "reason": "unknown-source-type",
+            "record": {
+              "syncSourceId": "m-14",
+              "sourceTypeRaw": "",
+              "sourceTypeWire": "",
+              "displayName": "No type",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://x.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 2,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": [],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "secrets-require-approval",
+      "windowsOnly": false,
+      "local": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-15",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "m-15",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Secret",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://x.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": {
+                " canSendSecrets ": false
+              }
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 2,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 1,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [],
+        "requiresApproval": [
+          {
+            "syncSourceId": "m-15",
+            "direction": "Pull",
+            "kind": "Added",
+            "reason": "secrets-require-approval",
+            "record": {
+              "syncSourceId": "m-15",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "Secret",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://x.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": {
+                " canSendSecrets ": false
+              }
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 2,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": [],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "windows-does-not-support-cloud-types",
+      "windowsOnly": true,
+      "local": {
+        "items": [],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": true,
+        "addedCount": 0,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "m-16",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "m-16",
+              "sourceTypeRaw": "fn-nas",
+              "sourceTypeWire": "fn-nas",
+              "displayName": "NAS",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://nas.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 2,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 1,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [],
+        "requiresApproval": [
+          {
+            "syncSourceId": "m-16",
+            "direction": "Pull",
+            "kind": "Added",
+            "reason": "not-supported-on-windows",
+            "record": {
+              "syncSourceId": "m-16",
+              "sourceTypeRaw": "fn-nas",
+              "sourceTypeWire": "fn-nas",
+              "displayName": "NAS",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://nas.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 2,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 2,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": [],
+        "hasWork": false
+      }
+    },
+    {
+      "name": "ordinal-key-sort",
+      "windowsOnly": false,
+      "local": {
+        "items": [
+          {
+            "syncSourceId": "b",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "b",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "B",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://b.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 1,
+            "fieldVersion": 1
+          },
+          {
+            "syncSourceId": "A",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "A",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "A",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://a.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 1,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 2,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "remote": {
+        "items": [
+          {
+            "syncSourceId": "c",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "c",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "C",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://c.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 1,
+            "fieldVersion": 1
+          },
+          {
+            "syncSourceId": "a",
+            "kind": "Added",
+            "record": {
+              "syncSourceId": "a",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "a",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://aa.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "changedFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "contentChanged": true,
+            "recordRevision": 1,
+            "fieldVersion": 1
+          }
+        ],
+        "issues": [],
+        "isFullSnapshot": false,
+        "isEmpty": false,
+        "addedCount": 2,
+        "updatedCount": 0,
+        "removedCount": 0
+      },
+      "baseline": null,
+      "result": {
+        "apply": [
+          {
+            "syncSourceId": "b",
+            "direction": "Push",
+            "kind": "Added",
+            "reason": "push-local-change",
+            "record": {
+              "syncSourceId": "b",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "B",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://b.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 1,
+            "remoteRevision": 0,
+            "requiresApproval": false
+          },
+          {
+            "syncSourceId": "c",
+            "direction": "Pull",
+            "kind": "Added",
+            "reason": "apply-remote-change",
+            "record": {
+              "syncSourceId": "c",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "C",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://c.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [],
+            "localRevision": 0,
+            "remoteRevision": 1,
+            "requiresApproval": false
+          }
+        ],
+        "requiresApproval": [
+          {
+            "syncSourceId": "A",
+            "direction": "Both",
+            "kind": "Added",
+            "reason": "field-conflict",
+            "record": {
+              "syncSourceId": "a",
+              "sourceTypeRaw": "webdav",
+              "sourceTypeWire": "webdav",
+              "displayName": "a",
+              "accountScope": null,
+              "endpoints": [
+                {
+                  "url": "https://aa.local/",
+                  "isPrimary": true,
+                  "enabled": true,
+                  "sortOrder": 0
+                }
+              ],
+              "recordRevision": 1,
+              "fieldVersion": 1,
+              "secrets": null
+            },
+            "tombstone": null,
+            "conflictingFields": [
+              "accountScope",
+              "displayName",
+              "endpoints",
+              "sourceType"
+            ],
+            "localRevision": 1,
+            "remoteRevision": 1,
+            "requiresApproval": true
+          }
+        ],
+        "ignored": [],
+        "hasWork": true
+      }
+    }
   ]
 }
