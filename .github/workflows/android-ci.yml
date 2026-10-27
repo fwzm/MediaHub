@@ -234,6 +234,7 @@ jobs:
           --required-suite com.mediahub.core.common.sync.SourceSyncBaselineContractTest \
           --required-suite com.mediahub.core.database.sync.SourceSyncBaselineWiringTest \
           --required-suite com.mediahub.feature.settings.sync.SourceSyncImportSessionEndpointTest \
+          --required-suite com.mediahub.core.database.sync.SourceSyncSecretsGateTest \
             --require-complete-suites
 
       - name: Lint
