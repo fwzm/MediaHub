@@ -822,3 +822,162 @@ C# 侧没有 `Assert.Equal(expected, actual, message)` 三参重载（xUnit v3�
 - **不做大小写不敏感的接口名排序之外的本地化**：`compareAsciiIgnoreCase` 只折 ASCII，中文接口名按码元序，与既有一致。
 - **真实两机配对仍 NOT_RUN**：本轮所有证据都是同机两端各自实跑 + 同一份向量对照，没有第二台机器。
 - **真机 instrumentation DEVICE_UNVERIFIED**：本轮没有新增 instrumentation 用例（文本边界是纯 JVM/C# 层）。
+
+## 15. 配对设备登记与解绑（W6-70）
+
+### 15.1 背景与范围
+
+W6-59 / W6-59b / W6-60 把 Android 侧「核对配对链接 → 拉一次邀请 → 列出本机可被连的地址」做完了，但**配对结果没有落点**：
+Windows 从 ADR-S005 起就有完整的配对设备登记（`PairedDevice` / `PairedDeviceRegistry` / `FilePairedDeviceStore` / `PairedDeviceListView`，12 条原因码 + 5 条存储码），
+Android 侧 `core/` 与 `feature/` 的生产代码里 `PairedDevice` / `pairedDevice` / `PairingStore` 零命中 —— 配对一次，App 重启后什么都不记得。
+
+本轮补齐两件事，且**只补这两件**：①本机登记档案（读写同一份磁盘格式，与 Windows 逐字节相同）；②「忘记一台」解绑（两段式确认 + 回执）。
+**不做**「登记新设备」：那需要真的走完一次配对握手并拿到对端指纹，属后续里程碑；本页的写入路径只由「忘记」触发删除，不新增登记入口。
+
+### 15.2 交付物
+
+| 层 | 文件 | 说明 |
+| --- | --- | --- |
+| core/common | `pairing/PairedDevice.kt` | 六字段 record + `fingerprintDisplay` / `displayNameOrId` / `describe` / `create` / `formatEpoch` |
+| core/common | `pairing/PairedDeviceStore.kt` | 4 成员接口 + 5 条存储码 + `PairedDeviceStoreException` |
+| core/common | `pairing/InMemoryPairedDeviceStore.kt` | 测试替身（`writeCount` / `knownDeviceIds`，相等不写盘，满容量抛 `LIMIT_REACHED`） |
+| core/common | `pairing/PairedDeviceDocument.kt` | `internal object`：复刻 `Utf8JsonWriter{Indented=true}` 的字节（2 空格缩进、CRLF、无尾随换行、ASCII 转义表） |
+| core/common | `pairing/FilePairedDeviceStore.kt` | 原子写（`.tmp` → 复制 `.bak` → `Files.move`）、坏档隔离、读永不抛 |
+| core/common | `pairing/PairedDeviceRegistry.kt` | 12 条原因码、`verify` / `register` / `forget` / `describeState` / `describeReason` |
+| core/common | `pairing/PairedDeviceListPresenter.kt` | 纯展示：行文案、空态、豆腐块、容量提示 |
+| feature/settings | `paired/PairedDeviceController.kt` | 状态机 + 忘记两段式 + 存储入口 `PairedDeviceStorage` |
+| feature/settings | `paired/PairedDeviceScreen.kt` | 无状态 Compose 页 + `PairedDeviceRoute` + tags |
+| feature/settings | `SettingsScreen.kt` | 页内托管分支 + `paired.entry` 入口（在 `pairing.entry` 之后） |
+| 测试 | `core/common/.../PairedDeviceContractTest.kt` | 14 例，逐条消费黄金向量 |
+| 测试 | `feature/settings/.../PairedDeviceControllerTest.kt` | 13 例（含生产路径真写盘） |
+| 测试 | `feature/settings/src/androidTest/.../PairedDeviceScreenTest.kt` | 9 例 Compose 断言 |
+| 向量 | `core/common/src/test/resources/pairing/paired-device-vectors.json` | 36670 B / 17 根键 / sha256 `4afe2032`…`55db8b` |
+
+### 15.3 数据模型与规范序
+
+六字段与 Windows `PairedDevice` 逐字对应：`deviceId` / `displayName`（缺省空串）/ `fingerprint`（64 位小写 hex）/ `pairedAtEpochMs` / `lastSeenEpochMs` / `sourceCount`。
+
+规范序是 `deviceId` 先按 `WireText.compareAsciiIgnoreCase` 再按 `compareTo`（等价于 Windows 的 `StringComparer.OrdinalIgnoreCase` → `StringComparer.Ordinal`）。
+排序只在 `getAll()` 出口做一次：磁盘里的 `devices` 数组保持**写入顺序**，读回来再排序 —— 这一点在契约用例里被专门钉住（首版用例拿写入顺序去比 `GetAll()` 结果，红了一次）。
+
+`create()` 的归一化与 Windows 一致：`deviceId` / `displayName` 先 `WireText.trim`，指纹 `lowercaseAscii`，`displayName` 超 128 字符截断，`sourceCount` 负数归 0，`pairedAtEpochMs` 缺省取 `nowEpochMs`。
+
+### 15.4 12 条原因码 + 5 条存储码
+
+原因码顺序与 Windows `PairedDeviceReasons.All` 完全相同（声明顺序与 `ALL` 顺序不同这件事也照抄，因为 UI 只消费 `ALL`）：
+
+| # | 码 | 语义 |
+| --- | --- | --- |
+| 1 | `device-fingerprint-new` | 本机第一次见到这个设备 |
+| 2 | `device-fingerprint-match` | 指纹与本机记录一致 |
+| 3 | `device-fingerprint-mismatch` | 指纹不一致，**绝不覆盖已钉指纹** |
+| 4 | `device-identity-missing` | 设备标识为空 |
+| 5 | `device-fingerprint-missing` | 指纹为空或不是 64 位 hex |
+| 6 | `paired-device-registered` | 已记住该设备 |
+| 7 | `paired-device-updated` | 已更新已有登记 |
+| 8 | `paired-device-unchanged` | 没有任何变化，不写盘 |
+| 9 | `paired-device-limit-reached` | 容量（缺省 32）已满 |
+| 10 | `paired-store-unreadable` | 档案读不出来 |
+| 11 | `paired-device-forgotten` | 已移除该设备 |
+| 12 | `paired-device-unknown` | 本机没有这个设备的记录 |
+
+存储码 5 条：`paired-malformed-json` / `paired-unsupported-version` / `paired-store-unreadable` / `paired-device-limit-reached` / `paired-store-write-failed`。
+注意 `paired-device-limit-reached` 同时出现在两套里（原因码与存储码同名同义），`PairedDeviceRegistry.describeStoreFailure` 负责把存储异常折回原因码：`LIMIT_REACHED` 原样，其余一律 `STORE_UNREADABLE`。
+
+### 15.5 磁盘格式（逐字节复刻）
+
+文件名逐字同 Windows：`paired-devices.json`；Android 目录是 `filesDir/paired_devices`（下划线是 Android 惯例），Windows 是 `%LOCALAPPDATA%/MediaHub`。
+坏档隔离名也逐字同：`paired-devices.corrupt-yyyyMMddHHmmss[-n].json`。
+
+字节格式由 `PairedDeviceDocument` 手工复刻 `Utf8JsonWriter{Indented=true}` 的行为，与 Windows 逐字节相等：
+
+- 换行 CRLF、2 空格缩进、**无尾随换行**；
+- 根键序 `version` → `devices`，每 device 键序 `deviceId` / `displayName` / `fingerprint` / `pairedAtEpochMs` / `lastSeenEpochMs` / `sourceCount`；
+- ASCII 里只有 8 个字符被转义：双引号 → `\u0022`、`&` → `\u0026`、单引号 → `\u0027`、`+` → `\u002B`、`<` → `\u003C`、`>` → `\u003E`、反斜杠 → `\\`、反引号 → `\u0060`；
+- 控制字符 08/09/0A/0C/0D 用短转义，其余 < 0x20 与全部 ≥ 0x7F 用大写 `\uXXXX`；SMP 字符写代理对两段；
+- 空清单写 `"devices": []`（38 B）。
+
+写盘是原子三拍：写 `.tmp` → 目标已存在时先复制 `.bak` → `Files.move(REPLACE_EXISTING)`，`finally` 删 tmp；任何一步失败都把内存清单回滚到写前状态并重新抛出（与 Windows 的「写失败不留半份」同义）。
+
+### 15.6 读永不抛：隔离策略与一个 Windows 真缺陷
+
+读路径的契约是「永不抛」：文件不存在 → 空清单；解码拒绝 → 把坏文件改名隔离（`paired-devices.corrupt-*`）并降级空清单；IO 不可读 → `loadError = paired-store-unreadable` 且 `writable = false`，此后的 `save` / `forget` 直接抛 `IOException(loadError)` 而不是悄悄写坏。
+
+**本轮修掉的 Windows 真缺陷**：`FilePairedDeviceStore.LoadLocked()` 原本直接对 `version` 元素调 `JsonElement.TryGetInt32`，当 `value.ValueKind` 不是 `Number` 时该方法抛 `InvalidOperationException`（不是返回 false）—— 这违反「读永不抛」，一个 `"version": "1"` 的手改档案就能让整页崩掉。
+修法是先判 `versionElement.ValueKind != JsonValueKind.Number` 再走 `Quarantine(MalformedJson)`，与其它畸形分支同路。文件 14244 B。
+
+### 15.7 展示层文案
+
+展示层是纯函数 `PairedDeviceListPresenter`，与 Windows `PairedDeviceListView` 同形（行十个字段、视图六个字段 + `isEmpty` / `isFull` / `count`）：
+
+| 常量 / 方法 | 值 |
+| --- | --- |
+| `EMPTY_TEXT` | 还没有配对过的设备。 |
+| `TOFU_TEXT` | 首次配对时无法验证对方身份：指纹只用来识别「上次那台是不是同一台」，不代表对方可信。 |
+| `countText(n)` | 已配对 N 台 |
+| `capacityText(c)` | 已登记 C 台，已达上限：新的设备不会被登记，请先忘记一台不再使用的设备。 |
+| 行 `summaryLine` | name · 指纹 …尾8 · 首次配对 t · 最后相见 t · N 个来源 |
+| `forgetLabel` | 忘记 + name |
+
+行里的 `displayName` 是**解析后**名字（无名字退回 `deviceId` 前 8 字符）—— 这一点也是用例逼出来的：首版直接透传原始值，
+`two-devices` 的第 2 行在 Windows 是 `abc`、在 Kotlin 是空串，红在 `expected:<[abc]> but was:<[]>`。
+
+### 15.8 页面与「忘记」两段式
+
+页面结构照 `PairingLinkScreen` 的范式：`PairedDeviceRoute` 在 `remember` 里构造控制器（存储出口用 `LocalContext` 的 `filesDir`），无状态 `PairedDeviceScreen` 只吃 state + 回调。
+入口是设置页「同步与备份」区第 4 个按钮 `paired.entry`（「已配对设备」），页内托管、返回即回设置列表 —— 与 `pairing.entry` 同形。
+
+「忘记」是两段式，语义逐字对齐 Windows `SyncPairingPresenter`：
+
+1. `askForget(deviceId)` → 只**组提示**，一个字节都不删；提示文案 = `将忘记「name」（指纹 …尾8）。` + 不删除对端的说明；
+2. `confirmForget()` → 先清 pending 再删；删成功 → 「已忘记该设备」，删失败/不存在 → 「本机没有这台设备的登记」+ 原因码 `paired-device-unknown`；
+3. `cancelForget()` → **取消本身就是回执**（「取消」/「没有删除任何登记。」），不是静默关闭。
+
+控制器把「读不到存储」折成本层唯一一条前置码 `paired-device-storage-unavailable`（不是跨机五集码，也不进 core 的十二码），
+用于「没有存储出口（预览态/未接线）」与「读档案抛 IOException」两种情形，页面显示 `UNAVAILABLE` 区块而不是空白列表。
+
+### 15.9 跨端契约证据
+
+黄金向量 `paired-device-vectors.json`（36670 B / 17 根键）由临时 net10.0 生成器 `D:/mh-verify/paired-device-vectors/Program.cs`（520 行，`ProjectReference` 指向权威 `MediaHub.Sync.csproj`）产出，两边逐字节同一份：
+
+`generator` / `windowsSource` / `frozenNowEpochMs`（1792800000000）/ `reasonCodes` / `storeReasonCodes` / `stateLabels` / `describeReasonCases` / `createCases` / `verifyCases` / `registerCases` / `capacityCases` / `forgetCases` / `describeCases` / `presenterCases` / `documentCases` / `loadCases` / `writeRejects`。
+
+两端各 14 例孪生用例逐条消费它（Kotlin `PairedDeviceContractTest` 14 `@Test`、C# `PairedDeviceContractTests` 14 `[Fact]`，同名同义）：
+
+- 12 条原因码与 5 条存储码同名同序；12 条中文文案逐字；
+- `createCases` 的归一化（trim / lowercase / 截断 / 负数 / 缺省时间戳）；
+- `verifyCases` / `registerCases` / `capacityCases` / `forgetCases` 的判定与副作用（各自断言写盘次数）；
+- `documentCases`：同一份设备清单在两端写出的字节**长度、sha256、base64 全等**；
+- `loadCases`：畸形 / 版本不符 / 容量满 / 只读各自的降级路径；
+- `writeRejects`：空 deviceId、容量满的写入拒绝。
+
+三条用例暴露的真缺陷：
+
+1. Windows `LoadLocked()` 的 `TryGetInt32` 非 Number 抛异常（见 15.6，已修）；
+2. Kotlin `PairedDeviceListPresenter.buildRow` 的 `displayName` 用原始值而非解析后名字（见 15.7，已修）；
+3. 用例自身的两处断言错：
+   - `describeCases` 里 `describe` 与 `describeSuffix` **不同时存在**（`peer-clock-ahead` 只有 suffix），首版把它们当同一字段取 ⇒ `KeyNotFoundException`；
+   - suffix 必须用 `Contains` 而不是 `EndsWith`（时钟偏移提示位于尾部「 · 来源 N 个」之前）；
+   - `DocumentCasesAreWrittenByteIdentically` 拿写入顺序比 `GetAll()` 的规范序 ⇒ 重开比较前必须先排序。
+
+### 15.10 本机实跑与门禁
+
+| 项 | 结果 |
+| --- | --- |
+| `core/common` JVM | **46 套件 / 636 例 / 0 失败 / 11 跳过**（622 → 636，+14 契约用例） |
+| `core/database` JVM | **20 套件 / 192 例 / 0 失败 / 12 跳过**（未变） |
+| `feature/settings` JVM | **24 套件 / 367 例 / 0 失败 / 0 跳过**（354 → 367，+13 控制器用例） |
+| `:feature:settings:assembleDebugAndroidTest` | **BUILD SUCCESSFUL**（+9 例 androidTest） |
+| C# `MediaHub.Tests`（W6 树） | **1628 通过 / 0 失败 / 0 跳过**（1614 → 1628，+14 契约用例），`dotnet test … -p:Platform=x64` |
+| `--required-suite` | **51 → 53**（+`PairedDeviceContractTest`、+`PairedDeviceControllerTest`）；`.github/scripts/tests` 54 例 OK |
+
+三模块是一条 gradle 命令串行跑的（BUILD SUCCESSFUL in 1m46s），全程没有并发 dotnet —— 这是 W6-49 那次 HotSpot `arena.cpp:168` 崩溃留下的硬纪律。
+
+### 15.11 未做项
+
+- **登记新设备**：本页只读清单 + 解绑；真要登记得先有「走完握手拿到对端指纹」的路径（W6-59b 只拉邀请，没有配对完成态）。
+- **配对页与本页没有联动**：`pairing.entry` 拉回来的邀请不会自动落成登记，两页之间不共享状态。
+- **真机 instrumentation DEVICE_UNVERIFIED**：9 例 Compose 断言只到编译 + CI 模拟器（API 32 / 36）。
+- **真实两机配对仍 NOT_RUN**：需要第二台机器 + 用户同意开防火墙。
+- **Windows 侧 GUI 未见**：`SyncPage` 的已配对清单在本轮没有新的 GUI 证据，仍是 `GUI_UNVERIFIED`。
+

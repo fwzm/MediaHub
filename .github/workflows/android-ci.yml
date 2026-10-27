@@ -160,6 +160,11 @@ jobs:
           #   core.common.archive.ArchiveNearLimitTest —— 8 MiB 上限附近的真数据穿越 GCM（W6-68：载荷恰好
           #     8388608 B 时加密/写盘/读回整条路仍通；MAX+1 写端与读端都在解密前拒；黄金向量 nearLimit 段
           #     由 Windows 实现生成，只存配方与 sha256，不存 8 MB 字节）
+          #   core.common.pairing.PairedDeviceContractTest —— 配对设备登记档案的跨端契约（W6-70：12 条原因码
+          #     与 5 条存储码同名同序、档案字节由 Kotlin 侧复刻 Utf8JsonWriter 写出并与 Windows 逐字节相同、
+          #     读不出来的档案宁可隔离也不覆盖、指纹不符绝不覆盖已钉指纹）
+          #   feature.settings.paired.PairedDeviceControllerTest —— 已配对设备页状态机（W6-70：读不到存储如实报
+          #     不可用、忘记必须两段（先问再删）、取消本身也是回执、写盘失败只算「本机没有登记」不抛）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -212,6 +217,8 @@ jobs:
             --required-suite com.mediahub.core.common.archive.ArchiveEdgeContractTest \
             --required-suite com.mediahub.core.common.archive.ArchiveNearLimitTest \
             --required-suite com.mediahub.core.common.pairing.PairingEdgeContractTest \
+            --required-suite com.mediahub.core.common.pairing.PairedDeviceContractTest \
+            --required-suite com.mediahub.feature.settings.paired.PairedDeviceControllerTest \
             --require-complete-suites
 
       - name: Lint
