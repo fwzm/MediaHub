@@ -4395,5 +4395,109 @@ W6-73 / W6-74 之后 Android 有了摘要（`SourceSyncDigest`）、两轮合并
 
 - 把对端基线喂进规划器（两端同时改，才能保持跨端同义）：`plan(envelope, locals, baseline)` → 只有摘要判为变化的条目才进本轮；
 - 确认 UI：逐条列出「需要你裁决」的条目（冲突 / 认领 / 墓碑 / 被扣凭据），并给出跳过出口；
-「忘记这台设备」：清掉该对端基线并明确告知对端；
+- 「忘记这台设备」：清掉该对端基线并明确告知对端；
+- 真实两机搬运与 Windows 同步页真 GUI 证据（后者需要用户授权的空闲窗口）。
+
+## §45 W6-76：Android 的一轮双向合并预演（`planRound`）
+
+### §45.1 结论先行
+
+Windows 早就有「一轮合并只读预演」——`SourceSyncSession.PlanRound`（`windows/src/MediaHub.Sync/SourceSyncSession.cs:305`），Android 侧此前**零调用**：`SyncRoundMerger.merge`、`SourceSyncDigest.fromEnvelope` 连 W6-73 落地之后也只被测试调用（`git grep` 在 `core/` 的生产源码里命不中），也就是说「双向增量的判定层」在 Android 上一直是死代码。W6-76 给它补上 `AndroidSourceSyncService.planRound(envelopeJson)`，把判定层的公共入口接到服务层，语义按 Windows 逐条对齐：**只读、不写来源、不推进基线、解析失败不抛**。
+
+### §45.2 缺的是什么
+
+| 能力 | Windows | Android（W6-76 之前） |
+| --- | --- | --- |
+| 一轮合并预演 | `SourceSyncSession.PlanRound(remote, baseline)` → `SyncRoundResult` | 无入口；两个类型只有 JUnit 调用 |
+| 摘要构造 | `SourceSyncDigest.FromEnvelope` | `fromEnvelope` 存在、无生产调用方 |
+| 调用方 | 会话层 approval 桶（:233）、CLI（`SyncCliRunner.cs:245` / `:334`） | 无 |
+| 身份补号 | 导出与预演共用一条构造路径 | 只有 `export()` 内联的导出循环 |
+
+也就是说：**判定层已经有了，但没有「先看再决定」的入口**——Android 只能 `importEnvelope`（直接落库），看不到「这一轮会推什么、会拉什么、哪几条需要人裁决」。
+
+### §45.3 做法（三处改动，同一个文件）
+
+文件：`core/database/src/main/kotlin/com/mediahub/core/database/sync/AndroidSourceSyncService.kt`，28389 B / 462 行 → **34780 B / 673 行**。
+
+1. **`export()` 瘦身**：`val local = buildLocalEnvelope(); return SourceSyncExport(envelope = local.envelope, json = SourceSyncCodec.encode(local.envelope), derivedIdentityServerIds = local.derivedIdentityServerIds, skippedServerIds = local.skippedServerIds)`。
+2. **导出循环抽成 `private suspend fun buildLocalEnvelope(): LocalEnvelopeBuild`**：原样搬运导出逻辑（`SourceSyncLocalIds.derive(deviceId, serverId)` 补号 + `store.bindSyncIdentity(...)` 回写、无线路或无 wire 的跳过、`records.sortedWith(compareBy({ it.syncSourceId }, { it.displayName }))`、`SyncCapabilities(canSendSecrets = false, sourceTypes = declaredSourceTypes(sorted))`、`deletions` 恒 empty）。抽出来的理由只有一个：**导出与预演必须共用同一条构造路径**，否则两边的「本端摘要」会分叉——预演说「要推 A」，实际导出的信封里却没有 A。
+3. **新增 `suspend fun planRound(envelopeJson: String): SourceSyncRoundPreview`**：
+   - `SourceSyncCodec.tryDecode` 失败 → 返回只带 `rejectedReason` / `rejectedMessage` 的空预演，**不抛**（对齐 `importEnvelope` 的既有立场：坏输入是结果，不是异常）；
+   - 成功 → `loadPeerBaseline(envelope.deviceId)`；为 null 时用 `SourceSyncBaseline.EMPTY` 而不是把 null 传下去——传 null 会绕过 merger 的 `known == null` 判据（W6-76 的负向对照 A 就是靠这条红的）；
+   - `buildLocalEnvelope()` 得本端信封 → `SyncRoundMerger.merge(local = SourceSyncDigest.fromEnvelope(local.envelope, baseline), remote = SourceSyncDigest.fromEnvelope(envelope, baseline), baseline = baseline)`。
+
+预演结果的形状（顶层 `data class SourceSyncRoundPreview`）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `peerDeviceId` | 信封里的对端标识；解析失败时为空串 |
+| `baselineKnown` / `baselineEntryCount` | 这一轮**读到**的旧基线（不是保存后的条数——这个坑在本轮首跑红了一次，见 §45.5 的教训） |
+| `derivedIdentityServerIds` / `skippedServerIds` | 补号成功的来源、被跳过的来源（与导出同源） |
+| `rejectedReason` / `rejectedMessage` | 解析失败时的稳定码与原句 |
+| `round` | `SyncRoundResult`（apply / requiresApproval / ignored 三桶） |
+| `isRejected` · `applyCount` · `approvalCount` · `ignoredCount` · `pushCount` · `pullCount` · `hasWork` · `isEmpty` | 计算属性；`pushCount` / `pullCount` 数的是 apply 桶里的方向 |
+
+四条边界写在 KDoc 里：**不写来源**（只读 `listSourceSnapshots`）、**会补身份**（否则缺号来源永远推不出去）、**基线只读不写**（否则「已应用」会在预演之后提前成立）、**解析失败不抛**。
+
+### §45.4 十条用例（`SourceSyncRoundPreviewTest`，15066 B）
+
+夹具复刻 `SourceSyncSecretsGateTest` 的 `FakeStore` / `envelope` / `record`，另加 `seed(snapshot)`；基线用 `InMemorySourceSyncBaselineStore` 的真实 `load` / `writeCount`。
+
+| # | 用例 | 钉住的语义 |
+| --- | --- | --- |
+| 1 | `a_first_round_against_an_empty_baseline_pulls_the_remote_source` | 空基线 → PULL / `apply-remote-change`，`baselineKnown` false |
+| 2 | `a_round_after_importing_the_same_envelope_has_no_work` | 同一信封第二轮：`round.isEmpty`、`hasWork` false |
+| 3 | `only_the_changed_remote_source_is_pulled_on_the_next_round` | 只拉真正变了的那条（rev5 → rev6），未变的被跳过 |
+| 4 | `a_local_only_source_is_reported_as_a_push` | 本端独有 → PUSH / `push-local-change` |
+| 5 | `a_source_without_an_identity_is_pushed_under_a_derived_id` | 条目 id == `SourceSyncLocalIds.derive("device-android", "srv-abc")` |
+| 6 | `an_unknown_wire_type_asks_for_approval_instead_of_being_applied` | 未知 wire → approval / `unknown-source-type` |
+| 7 | `a_tombstone_without_a_baseline_entry_is_ignored` | 未知墓碑 → ignored / `tombstone-unknown` |
+| 8 | `a_tombstone_for_a_known_source_asks_for_approval` | 已知墓碑 → approval / `tombstone-requires-approval` |
+| 9 | `a_preview_never_writes_sources_or_advances_the_baseline` | `createCalls == 0`、`updateCalls == 0`、`writeCount == 0` |
+| 10 | `an_undecodable_envelope_is_rejected_without_touching_the_store` | 坏 JSON → `isRejected`，store 一次都没碰 |
+
+第 7、8 条是成对的：**同一枚墓碑，基线认不认识决定它落在 ignored 还是 approval**——只有这一对能把「基线真的参与了裁决」钉住（见 §45.5 的 A 对照）。
+
+### §45.5 先红后绿与三条负向对照
+
+**先红**：首跑第 3 条红在 `assertEquals(2, imported.baselineEntryCount)`，`expected:<2> but was:<0>`。查下来是**断言写错**，不是产品错：导入结果的 `baselineEntryCount` 是「这一轮读到的旧基线条数」，首轮恒为 0，不是保存后的条数。改成断言 `imported.baselineEntryCount == 0` 加 `baselines.load("device-windows").entries.size == 2`，两件事分开断言。
+
+三条负向对照（改前备份 `D:/mh-verify/w676-backup-service.kt`，改后逐字节还原 `restored identical: true`）：
+
+| 对照 | 改动 | 结果 |
+| --- | --- | --- |
+| A | `merge(..., baseline = null)` | **1 红**（第 8 条），216 例 1 failed |
+| A2 | 两端摘要都改成 `fromEnvelope(..., null)` | **3 红**（第 8、2、3 条） |
+| B | 在 `planRound` 返回前插一句 `store.updateLocalSource("srv-touch", SourceSyncSourceSnapshot())` | **1 红**（第 9 条），只读契约被钉住 |
+
+A 第一次只红一条是个教训：`merge` 的 `baseline` 参数在**摘要已经为空**时根本不起作用——真正让「第二轮无事可做」成立的是 `fromEnvelope(..., baseline)`。所以要覆盖 merger 层的基线，必须造一条「摘要有条目、但裁决要看基线」的用例，这就是后来补进去的第 8 条。
+
+### §45.6 本机实跑计数
+
+命令：`gradlew.bat :core:common:testDebugUnitTest :core:database:testDebugUnitTest --offline --console=plain`（env 取 `.local/build-env.json`），BUILD SUCCESSFUL 19 s，日志 `D:/mh-verify/w676-green.log`。
+
+| 模块 | 套件 | 用例 | 失败 | skipped | 变化 |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | 48 | 658 | 0 | 11 | 未变 |
+| `core/database` | **23** | **216** | 0 | 12 | 22 / 206 → +1 套件 +10 例 |
+| `feature/settings` | 26 | 384 | 0 | — | 未变 |
+| 合计 | 97 | **1258** | 0 | — | 1248 → 1258 |
+| C# `MediaHub.Tests` | — | 1651 | 0 | 0 | 本轮未改动 |
+
+### §45.7 门禁 58 → 59
+
+`com.mediahub.core.database.sync.SourceSyncRoundPreviewTest` 进 `--required-suite`（`.github/workflows/android-ci.yml`，CRLF 文件，只加一行），58 → **59**；`--require-complete-suites` 与其余 58 行一字未动。理由与 W6-55/W6-72/W6-74 同一条纪律：一个套件若被 @Ignore 或被挤出编译，gradle 仍然打印 BUILD SUCCESSFUL，只有钉住名字才能让「它必须真的跑过」成为门禁。
+
+### §45.8 未覆盖（如实留着）
+
+1. **仍不写库**：`planRound` 是预演，没有「逐条批准 → 应用」的那半条链（Android 侧没有 `SourceSyncImportRound / SourceSyncApprovalGate` 的对等物）。
+2. **基线仍不进规划器**：`SourceSyncPlanner.plan(envelope, locals)` 两边都不收基线入参——本轮只把「一轮合并」的判定接出来，不是「读基线 → 只请求变化」的完成。
+3. **真实两机**：两机搬运与跨端预演一致性 `NOT_RUN`，真机 instrumentation `DEVICE_UNVERIFIED`。
+4. **GUI 出口**：`approvalCount` 与三桶内容在界面上仍然只有计数与稳定码，没有逐条裁决页。
+
+### §45.9 下一步
+
+- 把 `SourceSyncApprovalGate.Decide` 与 `SourceSyncImportRound.Preview` 的对等物补到 Android（预演之后要能「逐条放行」）；
+- 两端把对端基线喂进规划器（`plan(envelope, locals, baseline)`），保持跨端同义；
+- 被扣凭据条目与冲突条目的逐条裁决 UI，含跳过出口；
 - 真实两机搬运与 Windows 同步页真 GUI 证据（后者需要用户授权的空闲窗口）。
