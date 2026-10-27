@@ -30,5 +30,6 @@
     <!-- Golden vectors shared with the Android ArchiveEdgeContractTest (W6-67); the bytes are the answer key. -->
     <Content Include="..\assets\windows-archive-vectors.json" Link="assets\windows-archive-vectors.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\assets\windows-pairing-vectors.json" Link="assets\windows-pairing-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\paired-device-vectors.json" Link="assets\paired-device-vectors.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
