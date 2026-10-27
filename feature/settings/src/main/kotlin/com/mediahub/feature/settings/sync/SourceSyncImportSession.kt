@@ -1,5 +1,6 @@
 package com.mediahub.feature.settings.sync
 
+import com.mediahub.core.common.sync.ISourceSyncBaselineStore
 import com.mediahub.core.common.sync.SourceSyncCandidate
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.database.repository.SyncSourceStore
@@ -182,6 +183,10 @@ class SourceSyncImportSession(
             appliedSources = result.applied.map { change ->
                 appliedSourceOf(change.serverId, change.candidate)
             },
+            notImportedEndpointCount = result.endpointSummary?.notImportedCount ?: 0,
+            recordsWithAlternativeEndpoints = result.endpointSummary?.recordsWithAlternatives ?: 0,
+            baselineSaved = result.baselineSaved,
+            baselineRejectedCount = result.baselineRejectedSyncSourceIds.size,
         )
 
     /** 一条落库来源：结果页据此渲染逐源「补录并验证」（W6-H）。 */
@@ -201,14 +206,19 @@ class SourceSyncImportSession(
             ?: candidate.syncSourceId.orEmpty()
 
     companion object {
-        /** 生产接线：只读预览 + 唯一写库入口，两个服务都用本机仓库实现。 */
+        /**
+         * 生产接线：只读预览 + 唯一写库入口，两个服务都用本机仓库实现。
+         *
+         * [baselineStore] 是 W6-72 的对端基线（缺省 null：不记录，行为与 W6-71 完全一致）。
+         */
         fun production(
             localSources: SyncSourceStore,
             sourceSyncStore: SourceSyncStore,
             deviceId: String,
+            baselineStore: ISourceSyncBaselineStore? = null,
         ): SourceSyncImportSession {
             val previewService = SourceSyncPreviewService(localSources)
-            val applyService = AndroidSourceSyncService(sourceSyncStore, deviceId)
+            val applyService = AndroidSourceSyncService(sourceSyncStore, deviceId, baselineStore = baselineStore)
             return SourceSyncImportSession(
                 previewPort = SourceSyncPreviewPort { json -> previewService.preview(json) },
                 applyPort = SourceSyncApplyPort { json -> applyService.importEnvelope(json) },

@@ -4020,3 +4020,200 @@ XML 汇总（`<testsuite>` 属性相加，非估算；三模块 mtime 均为当�
 - 备份（`.mhbackup`）与配对（pairing）两侧的文本判定是否也该收进 `WireText`（§40.7 第 3 条的遗留）；
 - Windows 同步页真 GUI UIA 证据（W10 U2/U3/U4 需要用户授权窗口）；
 - 归档格式若要演进（新 KDF、新字段），先写契约再两端同步加码——不要单边加。
+
+## §42 Android 同步基线持久化与多端点策略（W6-72）
+
+> 状态词：两端本机 **EXECUTED_PASS**；四条 CI 待本轮提交后取证。本机 C# **1648 通过 / 0 失败**（1635 → 1648）、Android 三模块 **655 + 199 + 384 = 1238** 例全绿；`--required-suite` 54 → **57**。
+> 边界：本轮是**跨端契约 + Android 侧第一次有持久化基线**；真实两机、真机 instrumentation 仍是 NOT_RUN / DEVICE_UNVERIFIED。
+
+### §42.1 动机（Android 每轮都在「失忆」地全量对账）
+
+到 W6-71 为止，Android 的同步链是：选文件 → 预览 → 逐条允许 → 应用，写库入口只有 `AndroidSourceSyncService.apply()` 一处。
+它每一轮都现算：`store.listLocalSources()` 拿本机现状，`SourceSyncPlanner.plan(envelope, locals)` 出候选。
+问题不在算法，而在**没有记忆**：Android 侧此前没有任何「上一轮对端是什么样」的持久化结构——
+`baseline` / `syncRound` / `BaselineStore` 这些词在 `core/` `feature/` 的生产代码里零命中，
+而 Windows 从 W6-9 / W6-10 起就有完整一层（`SourceSyncBaseline` / `SourceSyncBaselineCodec` /
+`SourceSyncDigest` / `FileSourceSyncBaselineStore` / `SourceSyncEndpointPolicy`，六个文件 1948 行）。
+
+失忆带来两个具体后果：
+
+1. **退化成全量快照**。没有基线就无法回答「哪些来源自上一轮变了」，下一轮只能把所有来源一次性交给对端；
+   `no-change` 只能靠本地修订号偶然命中，而不是靠「内容哈希与上一轮相同」。
+2. **次要端点被静默吞掉**。`normalizedEndpoints()` 会把坏地址丢掉、把主端点排最前，但**不会告诉用户**
+   「这个来源还有 2 条备用线路没有参与同步」。Windows 有 `SourceSyncEndpointPolicy` 明确上报
+   `secondary-endpoint-not-imported`，Android 侧此前一句提示都没有。
+
+本轮把这一层搬到 Android，并把「同一份磁盘格式、同一批码、同一套合并语义」写成跨语言契约。
+
+### §42.2 交付（core/common 八个新文件 + 唯一写库入口接线）
+
+| 文件（`core/common/src/main/kotlin/com/mediahub/core/common/sync/`） | 大小 | 职责 |
+| --- | --- | --- |
+| `WireJson.kt`（新） | 6720 B / 187 行 | 手工复刻 `Utf8JsonWriter` 的字节：`quote()` 的 8 个 ASCII 转义、控制字符短转义、其余 ≥0x7F 走大写 `\uXXXX`；`WireJsonTextWriter(indented)` 的 CRLF + 两空格缩进；`exceedsDepth()` 括号深度扫描 |
+| `SourceSyncContentHash.kt`（新） | 4860 B / 123 行 | 规范 JSON 与内容哈希：字段序 `accountScope`/`displayName`/`endpoints`/`sourceType`；端点按 `(sortOrder, url, isPrimary, enabled)` 排序、每项键序 `enabled`/`isPrimary`/`sortOrder`/`url`；`compute()` 64 位小写 hex，`computeFields()` 每字段一枚 |
+| `SourceSyncBaseline.kt`（新） | 4810 B / 104 行 | `SourceSyncBaselineEntry`（五字段）+ `SourceSyncBaseline`（version/deviceId/snapshotId/entries）+ `fromRecord` / `fromEnvelope` / `fromRecords` / `find` / `deduplicate` |
+| `SourceSyncBaselineCodec.kt`（新） | 15085 B / 344 行 | 序列化与读取：`CURRENT_SCHEMA_VERSION=1`、`MAX_ENTRIES=50000`、`MAX_FIELD_HASHES=64`、`MAX_DEPTH=16`、`MAX_DOCUMENT_CHARS=8 MiB`；读判定序逐条照抄 C# |
+| `ISourceSyncBaselineStore.kt`（新） | 8222 B / 187 行 | 4 条存储码 + `SourceSyncBaselineSaveResult` + 接口 + **`SourceSyncBaselineMerge`**（合并拒绝倒退、拒绝同号不同内容） |
+| `InMemorySourceSyncBaselineStore.kt`（新） | 2331 B / 57 行 | 进程内实现，`writeCount` 只计真正改变 |
+| `FileSourceSyncBaselineStore.kt`（新） | 15729 B / 363 行 | 磁盘实现：`sync-baseline.json`、`{version, peers:[{deviceId, baseline}]}`、坏档隔离、原子写 |
+| `SourceSyncEndpointPolicy.kt`（新） | 5513 B / 127 行 | `secondary-endpoint-not-imported` + `selectPrimary` / `notImported` / `summarize` |
+
+接线只改了**唯一写库入口**与它外面那一圈（5 个文件）：
+
+| 位置 | 改动 |
+| --- | --- |
+| `core/database/.../sync/AndroidSourceSyncService.kt` | 构造器第 5 参 `baselineStore: ISourceSyncBaselineStore? = null`；`apply()` 把**真正写入**的记录收进 `writtenRecords`，返回前 `recordBaseline()` 写基线；结果多四个字段 |
+| `feature/settings/.../sync/SourceSyncImportModels.kt` | `SourceSyncApplySummary` 加四个默认值字段：`notImportedEndpointCount` / `recordsWithAlternativeEndpoints` / `baselineSaved` / `baselineRejectedCount` |
+| `feature/settings/.../sync/SourceSyncImportSession.kt` | `summaryOf()` 透传四个事实；`production()` 加第 4 参 `baselineStore` |
+| `feature/settings/.../sync/SourceSyncImportViewModel.kt` | 构造器注入 `ISourceSyncBaselineStore`（Hilt） |
+| `feature/settings/.../sync/SourceSyncImportLogic.kt` | 三条文案：未参与同步的次要线路、基线已记、基线被拒 |
+| `feature/settings/.../sync/SourceSyncImportScreen.kt` | 结果卡片加两行事实（tags `sync.apply.endpoints` / `sync.apply.baseline`） |
+| `app/.../di/AppModule.kt` | `@Provides @Singleton provideSyncBaselineStore` → `FileSourceSyncBaselineStore(File(context.filesDir, "sync-baseline"))` |
+
+三条**语义边界**（都用测试钉住，不是靠注释）：
+
+1. **只有真正写入本机的条目才进对端基线**。`writtenRecords` 只在 `store.createLocalSource()` 与
+   `store.updateLocalSource()` 返回成功之后追加；被跳过、需要确认、写失败的条目一个都不进。
+   理由：基线是给对端算增量用的，记录一条没落地的条目会让下一轮错误地告诉对端「这条我已经有了」。
+2. **零写入的一轮不碰存储**。`writtenRecords.isEmpty()` 时 `recordBaseline()` 返回 null，
+   既不写盘也不返回「Unchanged」——否则每一轮空导入都会无意义地重写同一个文件。
+3. **坏存储绝不让导入失败**。`save()` 抛任何异常都折成 `baseline-write-failed` 只作提示，
+   `apply()` 的 applied/failed 计数不受影响；`CancellationException` 仍然重抛。
+
+### §42.3 跨语言契约：为什么必须逐字节对齐
+
+基线是**落盘格式**，同一份 `sync-baseline.json` 将来要能被两端互相读（这也是本轮做黄金向量的原因）。
+因此三件事必须逐字节相同，不能只说「语义一样」：
+
+| 契约点 | 规则 | 为什么不能用语言自带的 |
+| --- | --- | --- |
+| JSON 转义 | 8 个 ASCII 特殊字符写成 `\u0022` 等；控制字符用短转义；其余 <0x20 与全部 ≥0x7F 写大写 `\uXXXX`；代理对逐 char 写两段 | Kotlin `buildJsonObject{}.toString()` 原样输出中文与 `+`，`.NET` 会转义成 `\u002B`；同一份值两端得到不同字节 |
+| 缩进与行尾 | `Indented=true` 语义 = CRLF + 两空格、容器间换行、**无尾随换行** | 手写 `"  "` 与 `"\n"` 会得到 LF，两端哈希立刻不同 |
+| 空白与小写 | 一律走 `WireText`：空白 = 25 个 Unicode White_Space 码点；大小写**只折 ASCII A–Z** | `.NET` 的 `ToLowerInvariant` 对 U+0130 保持不变，JVM 的 `lowercase(Locale.ROOT)` 给 `i` + U+0307；希腊词尾 sigma 也不同（实测见 §42.5 第 1 条） |
+
+内容哈希的规范串**不是**给人看的 JSON，它是 AAD 式的输入：
+
+    {"accountScope":"family","displayName":"\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09","endpoints":[{"enabled":true,"isPrimary":true,"sortOrder":0,"url":"https://nas.local:5006/dav"}],"sourceType":"webdav"}
+
+（上面这行就是向量 `contentHashCases[typical]` 的 canonical 原文，sha256 见 §42.6。）
+
+`accountScope` 归一的三步是：`WireText.isBlank` → null；否则 `WireText.trim`；再 `WireText.lowercaseAscii`。
+**注意**：Windows 侧本轮把 `SourceSyncContentHash.NormalizedScope` 从 `Trim().ToLowerInvariant()` 改成了同一套 `WireText`
+（这是本轮唯一一处 Windows 生产行为变更），但 `SourceSyncLocalBridge.cs:373` 的派生 syncSourceId 种子串**刻意没改**——
+那串一旦变，已入库来源的 `syncSourceId` 全部漂移，代价远大于「非 ASCII 账号域的大小写归一一致」。取舍写在这里，不是漏改。
+
+### §42.4 读取判定序（两端逐条相同）
+
+`SourceSyncBaselineCodec.tryDeserialize` 与 `FileSourceSyncBaselineStore` 的文档读取共用一套判定序：
+
+| # | 输入 | 结果 |
+| --- | --- | --- |
+| 1 | null / 空白 | `malformed-json` |
+| 2 | 长度 > 8 MiB（文件存储 16 MiB） | `baseline-too-large` |
+| 3 | 括号深度 > 16 | `baseline-too-deep` |
+| 4 | JSON 解析失败（且未超深） | `malformed-json` |
+| 5 | 根不是对象 | `malformed-json` |
+| 6 | 缺 `version` | `missing-field:version` |
+| 7 | `version` 非数字 / 取 int 失败 | `invalid-field:version` |
+| 8 | `version != 1` | `unsupported-schema-version:<n>` |
+| 9 | `deviceId` / `snapshotId` 非 string（非 null） | `invalid-field:<name>` |
+| 10 | `entries` 非数组 | `invalid-field:entries` |
+| 11 | 条目数 > 50000 | `baseline-too-large` |
+| 12 | 条目非对象 | `invalid-field:entries` |
+| 13 | `syncSourceId` 缺失 / 非 string / 空白 | `invalid-field:syncSourceId` |
+| 14 | `recordRevision` / `fieldVersion` 非数字 | `invalid-field:<name>` |
+| 15 | `contentHash` 非 string | `invalid-field:contentHash` |
+| 16 | `fieldHashes` 非对象 / 值非 string / 条数 > 64 | `invalid-field:fieldHashes` / `baseline-too-large` |
+| 17 | 重复 `syncSourceId` | **后者胜**（不报错） |
+| 18 | 未知字段 | 忽略并计数（`ignoredFieldCount`） |
+
+**第 3 条是本轮改出来的契约**。原先两端都靠「JSON 解析器的异常消息里有没有 depth 这个词」分类，
+实测发现 .NET 对平凡截断的 `{` 报的是 `Expected depth to be zero at the end of the JSON payload`——消息里带 depth，
+于是 `{` 被判成 `baseline-too-deep`；而 JVM 侧没有 MaxDepth 选项，只能预扫描。
+两端做法不同 ⇒ 同一份坏输入会给出不同码。现在统一成**先扫括号深度再解析**：
+两端各加一个 `ExceedsDepth`（C# `WireText.ExceedsDepth`、Kotlin `WireJson.exceedsDepth`），
+解析器的 catch 只回 `malformed-json`。改完 `{` 恢复 `malformed-json`，真正 17 层嵌套仍是 `baseline-too-deep`。
+
+### §42.5 合并语义（拒绝倒退，拒绝同号不同内容）
+
+`SourceSyncBaselineMerge.merge(existing, incoming)` 是存储层 `save()` 的核心，语义与 Windows 逐条相同：
+
+- 已存在条目：`incoming.recordRevision > stored.recordRevision` → 替换；
+- **同号且内容相同** → 静默跳过（不算拒绝）；
+- 同号不同内容 → 拒绝，`reason = baseline-unresolved-conflict`；
+- 修订号更小 → 拒绝，`reason = baseline-stale-revision`（首次命中的原因胜出）；
+- **被拒的条目绝不改动已有内容**，并在 `rejectedSyncSourceIds` 里逐个列出。
+
+`Changed` 是按逐条内容比较算出来的（不是按条数），所以「合并后什么都没变」能可靠地折成 `Unchanged` 而不重写文件。
+
+### §42.6 黄金向量（Windows 权威实现产出，两树逐字节同一份）
+
+| 项 | 值 |
+| --- | --- |
+| 生成器 | `D:/mh-verify/baseline-vectors/`（临时 net10.0 工程，ProjectReference 指向 `MediaHub.Sync.csproj`，**不入库**） |
+| 向量文件 | `core/common/src/test/resources/sync/baseline-vectors.json`（主树）与 `windows/tests/assets/baseline-vectors.json`（W6 树） |
+| 大小 / sha256 | **143420 B** / `e7354c831c7a38c10a3200515c43d3af03568465861e5531952338aae22d4e0c` |
+| 根键（16 段） | `generator` / `windowsSource` / `frozenNowEpochMs` / `constants` / `reasons` / `contentHashCases`(11) / `baselineCases`(9) / `findCases`(7) / `codecWriteCases`(4) / `codecLoadCases`(35) / `mergeCases`(14) / `inMemoryCases`(7) / `fileDocumentCases`(3) / `fileLoadCases`(17) / `endpointPolicyCases`(7) / `endpointSummaryCases`(3) |
+
+向量不是「只存期望值」，而是**连输入一起存**：每条用例都带构造它所需的 record / baseline / digest / 待写入内容，
+所以两端用例是**从输入复算再比期望**，而不是把答案抄一遍。这一点是 W6-72 与早前几轮向量最大的不同，
+也是 Kotlin 侧能在没有 `SourceSyncDigest` 的情况下仍然逐条核对 `baselineCases` 里 `from-records` / `from-envelope` 系列的原因。
+
+### §42.7 用例清单
+
+| 套件 | 位置 | 例数 | 钉住什么 |
+| --- | --- | --- | --- |
+| `SourceSyncBaselineContractTest` | `core/common/src/test/kotlin/…/sync/`（新，480 行） | **12** | 内容哈希 canonical/hash/字段哈希、基线构造、find、编解码字节（base64/text/sha256 三项全等）、35 条读判定序、14 条合并、in-memory 七步、文件文档字节、17 条文件读取/隔离、端点策略与汇总 |
+| `BaselineContractTests` | `D:/mh-w6/windows/tests/MediaHub.Tests/`（新，599 行） | **13** | 同上，**外加 `advance` 系列**（依赖 `SourceSyncDigest`，Kotlin 侧没有对等物，由 C# 孪生覆盖） |
+| `SourceSyncBaselineWiringTest` | `core/database/src/test/kotlin/…/sync/`（新，285 行） | **7** | 只记真正写入的条目、零写入不碰存储、坏存储不失败、旧修订号被如实回报、次要线路只上报不删除、没有基线存储时行为退回 W6-71 |
+| `SourceSyncImportSessionEndpointTest` | `feature/settings/src/test/kotlin/…/sync/`（新，170 行） | **3** | 四个事实从服务结果如实透到结果摘要 |
+
+两端契约用例**同名同义**（Kotlin 12 `@Test` / C# 13 `[Fact]`），差异只有 C# 多一条 `BaselineCases` 覆盖 `advance`。
+
+### §42.8 本机实跑（串行，防 OOM）
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| Kotlin 编译 + 定向测试 | `D:/mh-verify/run-w6-72-wire-compile.bat` / `run-w6-72-wire-test.bat` | `BUILD SUCCESSFUL`、`EXIT=0`；`SourceSyncBaselineWiringTest` 7/7、`SourceSyncBaselineContractTest` 12/12 |
+| Android 三模块全量 | `D:/mh-verify/run-w6-72-full-gradle.bat`（低内存模板 + `--no-daemon` + `--rerun-tasks`） | `BUILD SUCCESSFUL in 4m 19s`、`167 actionable tasks: 167 executed`、`EXIT=0`；仓库根无 `hs_err_pid*.log` |
+| C# 全量 | `D:/mh-verify/run-w6-72-csharp-full.bat`（`dotnet test ... -c Debug -p:Platform=x64`，**必须带 Platform**） | `已通过! - 失败: 0，通过: 1648，已跳过: 0，总计: 1648`、`EXIT=0` |
+
+XML 汇总（`<testsuite>` 属性相加，非估算）：
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 | 变化（W6-71 末） |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | **48** | **655** | 0 | 11 | 47 → 48 套件（+1 = `SourceSyncBaselineContractTest`）、643 → 655（+12） |
+| `core/database` | **21** | **199** | 0 | 12 | 20 → 21 套件（+1 = `SourceSyncBaselineWiringTest`）、192 → 199（+7） |
+| `feature/settings` | **26** | **384** | 0 | 0 | 25 → 26 套件（+1 = `SourceSyncImportSessionEndpointTest`）、381 → 384（+3） |
+
+三模块合计 **1238** 例（1216 → +22）。`--required-suite` 由 54 条增至 **57 条**；
+`.github/scripts/tests` 的 54 个 unittest 全绿；`androidTest` 仍 104 例、instrumentation 仍 148 例/job（本轮无新增 Compose 断言）。
+
+### §42.9 真实坑三条
+
+1. **全 Unicode 小写在两端无法一致**。实测 .NET：`char.ToLowerInvariant(U+0130)` 保持不变，
+   `string.ToLowerInvariant` 对 U+0130 单独出现也不变；而 JVM `lowercase(Locale.ROOT)` 给 `i` + U+0307（两个字符）。
+   希腊 `Σ-A-Σ` 在 .NET 得到 `σ a σ`（无词尾形），JVM 得到 `σ a ς`（词尾 sigma）。
+   结论：不能用「同一张表」实现 full-Unicode 折叠，改成 ASCII-only（与 §40 的口径一致），并把 Windows 侧对齐。
+2. **解析器消息不能当分类依据**。见 §42.4 第 3 条——`{` 曾被 `Message.Contains("depth")` 误判成超深。
+   这类缺陷只会在「坏输入」路径上出现，正常路径永远测不到；只有把「同一份坏输入两端同码」写成契约才会暴露。
+3. **`data class` 的 map 字段不能直接比字节**。`SourceSyncBaselineEntry.fieldHashes` 是 `Map<String,String>`，
+   向量里是 JSON 对象；用例必须先把键按 ordinal 排序再逐条比，否则「同内容不同插入序」会被误判成不同。
+
+### §42.10 未覆盖（如实保留）
+
+1. **真实两机**：基线文件的跨机搬运（一台写、另一台读）仍 NOT_RUN，同 §33.8–§41.7，需要第二台机器。
+2. **Android 还没有「用基线算增量」**：本轮只做到「记基线」；`SourceSyncDigest` / `SourceSyncInbox` / `SyncRoundMerger`
+   这一层 Android 侧仍为零（Windows 侧有），所以下一轮导出时还不能按基线裁剪来源列表——这是 W6-73 的候选。
+3. **基线只在导入路径上写**：`AndroidSourceSyncService.export()` 尚未读基线；「零写入的一轮」不会更新 snapshotId，
+   因此同一份基线可能被连续两轮引用（对端若依赖 snapshotId 判新旧会看到同一个值）。
+4. **不涉及 GUI 与设备**：结果卡片两行事实已由 JVM 摘要用例与状态机覆盖，但 Compose 断言未加；真机 `DEVICE_UNVERIFIED` 口径不变。
+5. **`SyncSourceLocalBridge` 的派生 id 种子串未改**（见 §42.3 末尾的取舍），因此非 ASCII 账号域下
+   「内容哈希的折叠」与「派生 id 的折叠」仍有一处口径差；两者不参与同一个比较，暂不影响任何契约。
+
+### §42.11 下一步
+
+- 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条、§37.8 第 1 条、§39.6 第 1 条、§40.7 第 1 条、§41.7 第 1 条、§42.10 第 1 条）；
+- Android 侧 `SourceSyncDigest` / 增量导出（把基线真正用起来，而不是只记）；
+- Windows 同步页真 GUI UIA 证据（W10 U2/U3/U4 需要用户授权窗口）；
+- 归档格式若要演进（新 KDF、新字段），先写契约再两端同步加码——不要单边加。

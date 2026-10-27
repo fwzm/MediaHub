@@ -90,6 +90,14 @@ object SourceSyncImportTags {
     /** 每个来源的验证区块（同页多条时要能把状态行限定到某一条）。 */
     fun verifyRow(serverId: String): String = "sync.source.verify.row:" + serverId
 
+    // ---- W6-72：导入结果里的端点与基线两条事实 ----
+
+    /** 结果卡片里「未同步的次要端点 N 个」那一行。 */
+    const val ENDPOINT_SUMMARY = "sync.apply.endpoints"
+
+    /** 结果卡片里「已记入对端基线」/「基线拒绝 N 条」那一行。 */
+    const val BASELINE_STATE = "sync.apply.baseline"
+
     // ---- W6-27：从 Windows 接收 ----
 
     /** 接收区块本体（地址 / 端口 / 挑战 / 接收按钮）。 */
@@ -537,6 +545,28 @@ fun SourceSyncImportScreen(
                         )
                         applied.appliedTitles.forEach { title ->
                             Text("- " + title, style = MaterialTheme.typography.bodySmall)
+                        }
+                        // W6-72：多端点与基线两条事实，只有真的发生时出现（0 条时不占版面）。
+                        if (applied.notImportedEndpointCount > 0) {
+                            Text(
+                                SourceSyncImportCopy.notImportedEndpoints(applied),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.testTag(SourceSyncImportTags.ENDPOINT_SUMMARY),
+                            )
+                        }
+                        if (applied.baselineSaved) {
+                            Text(
+                                SourceSyncImportCopy.BASELINE_SAVED,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.testTag(SourceSyncImportTags.BASELINE_STATE),
+                            )
+                        } else if (applied.baselineRejectedCount > 0) {
+                            Text(
+                                SourceSyncImportCopy.baselineRejected(applied.baselineRejectedCount),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag(SourceSyncImportTags.BASELINE_STATE),
+                            )
                         }
                         if (verification.hasSources) {
                             Spacer(Modifier.height(8.dp))
