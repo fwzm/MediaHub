@@ -3,6 +3,7 @@ package com.mediahub.core.database.sync
 import com.mediahub.core.common.sync.InMemorySourceSyncBaselineStore
 import com.mediahub.core.common.sync.LocalSourceRecord
 import com.mediahub.core.common.sync.SourceEndpoint
+import com.mediahub.core.common.sync.SourceSyncBaseline
 import com.mediahub.core.common.sync.SourceRecord
 import com.mediahub.core.common.sync.SourceSyncCodec
 import com.mediahub.core.common.sync.SourceSyncEnvelope
@@ -132,7 +133,8 @@ class SourceSyncApplyRoundTest {
         assertEquals(1, report.refused)
         assertEquals(listOf("sync-del"), report.refusedSyncSourceIds)
         assertTrue(report.isRefused(" sync-del "))
-        // 库里那一行必须原封不动：墓碑不删本地来源（ADR-S001），拒绝就是拒绝，不能假装应用过。
+        // 没接 remover 时删除仍然只能拒绝：存储层没有删除方法，拒绝就是拒绝，不能假装应用过。
+        assertEquals(AndroidSourceSyncService.DELETE_NOT_SUPPORTED, report.removalFailureOf("sync-del"))
         assertEquals(1, store.snapshots.size)
         assertEquals(0, store.updateCalls)
         assertFalse(report.baselineUpdated)
@@ -237,18 +239,185 @@ class SourceSyncApplyRoundTest {
         assertEquals("", report.peerDeviceId)
     }
 
+    // ------------------------------------------------ W6-79 跨端删除（对齐 Windows RemoveRemoteSourceAsync）
+
+    @Test
+    fun an_allowed_deletion_removes_the_local_source_through_the_remover() = runBlocking {
+        val store = FakeStore()
+        store.seed(snapshot(serverId = "srv-local", syncSourceId = "sync-del", revision = 1L))
+        val baselines = InMemorySourceSyncBaselineStore()
+        val remover = FakeRemover(store)
+        val json = SourceSyncCodec.encode(
+            envelope(deletions = listOf(SourceTombstone(syncSourceId = "sync-del", deletedAtEpochMs = 1_700_000_100_000L, recordRevision = 2L))),
+        )
+
+        val report = service(store, baselines, remover)
+            .applyRound(json, allowedSyncSourceIds = listOf("sync-del"))
+
+        assertEquals(1, report.applied)
+        assertEquals(0, report.refused)
+        assertEquals(1, report.removedCount)
+        assertEquals(listOf("srv-local"), report.removedServerIds)
+        assertEquals(listOf("sync-del"), report.removedSyncSourceIds)
+        // 身份比较与闸门同口径：trim + 大小写不敏感。
+        assertTrue(report.isRemoved(" SYNC-DEL "))
+        assertTrue(store.snapshots.isEmpty())
+        assertEquals(listOf("srv-local"), remover.calls)
+        // 删除不是写入：基线不因删除而推进（Windows 只在有非 null 记录写入时推进）。
+        assertFalse(report.baselineUpdated)
+        assertEquals(0, baselines.writeCount)
+        assertEquals("已写入本地 1 条 / 跳过 0 条 / 保留未应用 0 条", report.summary)
+    }
+
+    @Test
+    fun a_local_media_source_is_never_removed_across_devices() = runBlocking {
+        val store = FakeStore()
+        store.seed(
+            snapshot(
+                serverId = "srv-local-media",
+                syncSourceId = "sync-media",
+                revision = 1L,
+                type = ServerType.LOCAL,
+            ),
+        )
+        val remover = FakeRemover(store)
+        val json = SourceSyncCodec.encode(
+            envelope(deletions = listOf(SourceTombstone(syncSourceId = "sync-media", deletedAtEpochMs = 1_700_000_100_000L, recordRevision = 2L))),
+        )
+
+        val report = service(store, null, remover)
+            .applyRound(json, allowedSyncSourceIds = listOf("sync-media"))
+
+        assertEquals(0, report.applied)
+        assertEquals(1, report.refused)
+        assertEquals(AndroidSourceSyncService.REMOVE_LOCAL_MEDIA, report.removalFailureOf("sync-media"))
+        // 本地媒体源是用户磁盘上的东西，对端说了不算：remover 一次都不该被调用。
+        assertTrue(remover.calls.isEmpty())
+        assertEquals(1, store.snapshots.size)
+    }
+
+    @Test
+    fun a_deletion_for_a_source_this_device_no_longer_has_is_refused() = runBlocking {
+        val store = FakeStore()
+        val baselines = InMemorySourceSyncBaselineStore()
+        // 基线认识它、库里没有它：对端指着一条已经不在本机的来源。
+        baselines.save(
+            "device-windows",
+            SourceSyncBaseline.fromRecords(
+                listOf(record("sync-gone", revision = 1L)),
+                "device-windows",
+                "snap-windows",
+            ),
+        )
+        val remover = FakeRemover(store)
+        val json = SourceSyncCodec.encode(
+            envelope(deletions = listOf(SourceTombstone(syncSourceId = "sync-gone", deletedAtEpochMs = 1_700_000_100_000L, recordRevision = 2L))),
+        )
+
+        val report = service(store, baselines, remover)
+            .applyRound(json, allowedSyncSourceIds = listOf("sync-gone"))
+
+        assertEquals(0, report.applied)
+        assertEquals(1, report.refused)
+        assertEquals(AndroidSourceSyncService.REMOVE_MISSING, report.removalFailureOf("sync-gone"))
+        assertTrue(remover.calls.isEmpty())
+    }
+
+    @Test
+    fun a_deletion_matches_the_local_source_regardless_of_spelling() = runBlocking {
+        // 对端墓碑写的是 sync-del，本机行存的是 Sync-Del：身份比对必须走 trim + ASCII 小写，
+        // 否则删除会以「本机没有这条来源」被拒绝，而那条来源其实还在（删不掉也报错，两处都错）。
+        val store = FakeStore()
+        store.seed(snapshot(serverId = "srv-local", syncSourceId = "Sync-Del", revision = 1L))
+        val baselines = InMemorySourceSyncBaselineStore()
+        val remover = FakeRemover(store)
+        val service = service(store, baselines, remover)
+        val json = SourceSyncCodec.encode(
+            envelope(
+                sources = emptyList(),
+                deletions = listOf(SourceTombstone("sync-del", 1_700_000_000_000L, recordRevision = 2L)),
+            ),
+        )
+
+        val report = service.applyRound(json, allowedSyncSourceIds = listOf("sync-del"))
+
+        assertEquals(1, report.applied)
+        assertEquals(listOf("srv-local"), remover.calls)
+        assertTrue(store.snapshots.isEmpty())
+    }
+
+    @Test
+    fun a_failing_remover_is_reported_as_refused_instead_of_thrown() = runBlocking {
+        val store = FakeStore()
+        store.seed(snapshot(serverId = "srv-local", syncSourceId = "sync-del", revision = 1L))
+        val remover = FakeRemover(store)
+        remover.fail = true
+        val json = SourceSyncCodec.encode(
+            envelope(deletions = listOf(SourceTombstone(syncSourceId = "sync-del", deletedAtEpochMs = 1_700_000_100_000L, recordRevision = 2L))),
+        )
+
+        val report = service(store, null, remover)
+            .applyRound(json, allowedSyncSourceIds = listOf("sync-del"))
+
+        assertEquals(0, report.applied)
+        assertEquals(1, report.refused)
+        assertEquals(AndroidSourceSyncService.REMOVE_FAILED, report.removalFailureOf("sync-del"))
+        // 删失败时行必须还在：凭据没清干净绝不能当成已删除。
+        assertEquals(1, store.snapshots.size)
+        assertEquals(listOf("srv-local"), remover.calls)
+    }
+
+    @Test
+    fun a_round_can_write_one_source_and_remove_another() = runBlocking {
+        val store = FakeStore()
+        store.seed(snapshot(serverId = "srv-local", syncSourceId = "sync-del", revision = 1L))
+        val baselines = InMemorySourceSyncBaselineStore()
+        val remover = FakeRemover(store)
+        val json = SourceSyncCodec.encode(
+            envelope(
+                sources = listOf(record("sync-a", revision = 3L)),
+                deletions = listOf(SourceTombstone(syncSourceId = "sync-del", deletedAtEpochMs = 1_700_000_100_000L, recordRevision = 2L)),
+            ),
+        )
+
+        val report = service(store, baselines, remover)
+            .applyRound(json, allowedSyncSourceIds = listOf("sync-del"))
+
+        assertEquals(2, report.applied)
+        assertEquals(1, report.removedCount)
+        assertEquals(listOf("srv-1"), report.wroteServerIds)
+        assertEquals(listOf("srv-local"), report.removedServerIds)
+        // 基线只收真正写入的记录，删除不进基线（与 Windows ApplyAsync 同口径）。
+        assertEquals(1, report.baselineEntryCount)
+        assertEquals(listOf("sync-a"), baselines.load("device-windows").entries.map { it.syncSourceId })
+    }
+
     // ------------------------------------------------------------ 夹具
 
     private fun service(
         store: FakeStore,
         baselineStore: InMemorySourceSyncBaselineStore? = null,
+        remover: SourceSyncSourceRemover? = null,
     ): AndroidSourceSyncService = AndroidSourceSyncService(
         store = store,
         deviceId = "device-android",
         snapshotIdFactory = { "snap-fixed" },
         clock = { 1_700_000_000_000L },
         baselineStore = baselineStore,
+        sourceRemover = remover,
     )
+
+    /** 假 remover：真的把行从内存 store 里删掉，好让「库里的行没了」与「回执说删了」互相印证。 */
+    private class FakeRemover(private val store: FakeStore) : SourceSyncSourceRemover {
+        val calls = ArrayList<String>()
+        var fail = false
+
+        override suspend fun removeSource(serverId: String): Boolean {
+            calls.add(serverId)
+            if (fail) return false
+            return store.snapshots.remove(serverId) != null
+        }
+    }
 
     private fun record(
         id: String,
@@ -270,10 +439,11 @@ class SourceSyncApplyRoundTest {
         serverId: String = "srv-local",
         syncSourceId: String? = "sync-local",
         revision: Long = 1L,
+        type: ServerType = ServerType.EMBY,
     ): SourceSyncSourceSnapshot = SourceSyncSourceSnapshot(
         serverId = serverId,
         name = "本地 " + serverId,
-        serverType = ServerType.EMBY,
+        serverType = type,
         sourceTypeRaw = "emby",
         syncSourceId = syncSourceId,
         recordRevision = revision,
