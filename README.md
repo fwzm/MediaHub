@@ -8,7 +8,6 @@
 
 [![GitHub release](https://img.shields.io/github/v/release/fwzm/MediaHub?include_prereleases)](https://github.com/fwzm/MediaHub/releases)
 [![Android](https://img.shields.io/badge/Android-8.0%2B%20%C2%B7%20arm64-3DDC84?logo=android&logoColor=white)](https://github.com/fwzm/MediaHub/releases)
-[![License](https://img.shields.io/github/license/fwzm/MediaHub)](LICENSE)
 
 > **Alpha 测试阶段**：Release 当前仅提供 **arm64-v8a** APK，接口与体验仍可能调整。安装前需允许「安装未知应用」；同签名版本可覆盖升级。测试版不代表所有设备、服务端版本与媒体格式均已验证。
 
@@ -153,4 +152,4 @@ Debug APK 输出至 `app/build/outputs/apk/debug/app-debug.apk`。构建命令�
 - [路线图](ROADMAP.md) · [任务与支持现状](TASKS.md)
 - [Provider 文档](docs/providers/README.md) · [播放器文档](docs/player/README.md)
 - [配对与来源同步](docs/android-pairing.md) · [加密归档互操作](docs/cross-device/W6-65-ANDROID-ARCHIVE-INTEROP.md)
-- [变更记录](CHANGELOG.md) · [开源许可](LICENSE)
+- [变更记录](CHANGELOG.md) · [第三方许可声明](windows/THIRD-PARTY-NOTICES.md)
