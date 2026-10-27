@@ -1039,4 +1039,110 @@ public sealed class BaselineContractTests
 
         Assert.Equal(Entries("mergerCases").Length, compared);
     }
+    // ------------------------------------------------------------- file store: forgetting a peer
+
+    /// <summary>
+    /// Forgetting a paired device has to forget that peer's sync baseline too: a baseline can only move forward
+    /// (Save never removes), so a re-paired device that keeps a stale one gets every real change it makes judged
+    /// "already applied" and quietly skipped. Each case replays the whole file-store lifecycle the generator ran.
+    /// </summary>
+    [Fact]
+    public void BaselineForgetCasesMatchTheWindowsContract()
+    {
+        foreach (JsonElement entry in Entries("baselineForgetCases"))
+        {
+            string name = Text(entry, "name");
+            string directory = NewTempDirectory();
+            try
+            {
+                FileSourceSyncBaselineStore writer = new(directory);
+                string? seed = NullableText(entry, "seedContent");
+                if (seed is not null)
+                {
+                    File.WriteAllText(writer.FilePath, seed, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                }
+
+                foreach (JsonElement write in entry.GetProperty("writes").EnumerateArray())
+                {
+                    writer.Save(Text(write, "peerDeviceId"), BaselineOf(write.GetProperty("baseline")));
+                }
+
+                FileSourceSyncBaselineStore store = Bool(entry, "reload")
+                    ? new FileSourceSyncBaselineStore(directory)
+                    : writer;
+                string? textBefore = File.Exists(store.FilePath) ? File.ReadAllText(store.FilePath) : null;
+
+                bool? result = null;
+                string? error = null;
+                try
+                {
+                    result = store.Forget(Text(entry, "forgetId"));
+                }
+                catch (Exception exception)
+                {
+                    error = exception.GetType().Name;
+                }
+
+                bool? secondResult = null;
+                string? secondError = null;
+                string? secondForgetId = NullableText(entry, "secondForgetId");
+                if (secondForgetId is not null)
+                {
+                    try
+                    {
+                        secondResult = store.Forget(secondForgetId);
+                    }
+                    catch (Exception exception)
+                    {
+                        secondError = exception.GetType().Name;
+                    }
+                }
+
+                Assert.Equal(NullableBool(entry, "expectedResult"), result);
+                Assert.Equal(NullableText(entry, "error"), error);
+                Assert.Equal(NullableBool(entry, "secondExpectedResult"), secondResult);
+                Assert.Equal(NullableText(entry, "secondError"), secondError);
+
+                bool exists = File.Exists(store.FilePath);
+                byte[] bytes = exists ? File.ReadAllBytes(store.FilePath) : Array.Empty<byte>();
+                string? textAfter = exists ? Encoding.UTF8.GetString(bytes) : null;
+                Assert.Equal(Bool(entry, "fileStillExists"), exists);
+                Assert.Equal(NullableText(entry, "documentText"), textAfter);
+                Assert.Equal(NullableText(entry, "documentBase64"), exists ? Convert.ToBase64String(bytes) : null);
+                Assert.Equal(Int(entry, "documentByteLength"), bytes.Length);
+                Assert.Equal(NullableText(entry, "documentSha256"), exists ? Sha256Hex(bytes) : null);
+                Assert.Equal(
+                    Bool(entry, "documentUnchanged"),
+                    exists && textBefore is not null && string.Equals(textBefore, textAfter, StringComparison.Ordinal));
+                Assert.Equal(Int(entry, "writeCount"), store.WriteCount);
+                Assert.Equal(entry.GetProperty("peerDeviceIds").EnumerateArray().Select(Text).ToArray(), store.PeerDeviceIds.ToArray());
+                Assert.Equal(NullableText(entry, "loadError"), store.LoadError);
+                Assert.Equal(Bool(entry, "quarantined"), store.LastQuarantinedPath is not null);
+
+                // A brand-new store is what proves the deletion reached the file: the acting store could still be
+                // answering from memory. Touching PeerDeviceIds forces the lazy load the same way the Kotlin twin does.
+                FileSourceSyncBaselineStore reader = new(directory);
+                _ = reader.PeerDeviceIds;
+                Assert.Equal(NullableText(entry, "loadErrorAfterReload"), reader.LoadError);
+                Assert.Equal(Bool(entry, "quarantinedAfterReload"), reader.LastQuarantinedPath is not null);
+                JsonElement loadAfter = entry.GetProperty("loadAfter");
+                Assert.Equal(
+                    loadAfter.GetProperty("peerDeviceIds").EnumerateArray().Select(Text).ToArray(),
+                    reader.PeerDeviceIds.ToArray());
+                AssertBaselineEqual(BaselineOf(loadAfter.GetProperty("peerA")), reader.Load("peer-a"), name + ":peerA");
+                AssertBaselineEqual(BaselineOf(loadAfter.GetProperty("peerB")), reader.Load("peer-b"), name + ":peerB");
+                AssertBaselineEqual(BaselineOf(loadAfter.GetProperty("peerC")), reader.Load("peer-c"), name + ":peerC");
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    private static bool? NullableBool(JsonElement entry, string name) =>
+        entry.TryGetProperty(name, out JsonElement value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean()
+            : null;
+
 }

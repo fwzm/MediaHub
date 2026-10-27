@@ -78,7 +78,7 @@ public sealed class FileSourceSyncBaselineStore : ISourceSyncBaselineStore
     /// <summary>Path the damaged document was moved to, when quarantine succeeded.</summary>
     public string? LastQuarantinedPath { get; private set; }
 
-    /// <summary>Number of saves that actually rewrote the document.</summary>
+    /// <summary>Number of saves or deletions that actually rewrote the document.</summary>
     public int WriteCount { get; private set; }
 
     /// <inheritdoc />
@@ -189,7 +189,7 @@ public sealed class FileSourceSyncBaselineStore : ISourceSyncBaselineStore
     /// a peer that should be forgotten would otherwise stay forever. Forgetting is local bookkeeping — it
     /// says nothing to the peer and touches no source.
     /// </remarks>
-    public bool ForgetPeer(string peerDeviceId)
+    public bool Forget(string peerDeviceId)
     {
         if (string.IsNullOrWhiteSpace(peerDeviceId))
         {
@@ -222,6 +222,9 @@ public sealed class FileSourceSyncBaselineStore : ISourceSyncBaselineStore
             return true;
         }
     }
+
+    /// <summary>Alias of <see cref="Forget"/> kept for callers written before forgetting was on the interface.</summary>
+    public bool ForgetPeer(string peerDeviceId) => Forget(peerDeviceId);
 
     /// <summary>Forgets one source inside one peer's baseline.</summary>
     /// <param name="peerDeviceId">Peer device id; compared trimmed and case-insensitively.</param>

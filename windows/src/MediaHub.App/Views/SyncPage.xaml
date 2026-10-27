@@ -288,7 +288,7 @@
                           VerticalAlignment="Center"
                           AutomationProperties.AutomationId="sync.paired.forget"
                           AutomationProperties.Name="{Binding ForgetLabel}"
-                          ToolTipService.ToolTip="只删除本机的配对登记，不影响来源、凭据与对端设备" />
+                          ToolTipService.ToolTip="只删除本机的配对登记与该对端的同步基线，不影响来源、凭据与对端设备" />
                 </Grid>
               </Border>
             </DataTemplate>

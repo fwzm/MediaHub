@@ -125,6 +125,12 @@ public sealed class SourceSyncService
     public SourceSyncEnvelope BuildEnvelope()
         => new SourceSyncLocalBridge(_store, _deviceId).BuildEnvelope(includeSecrets: false);
 
+    /// <summary>
+    /// The peer baselines themselves (W6-80). Forgetting a paired device has to clear its baseline through this same
+    /// instance: a second store over the same path would read the file once and then disagree with the session.
+    /// </summary>
+    public ISourceSyncBaselineStore Baselines => _baselines;
+
     /// <summary>The stored baseline that makes a repeated import a no-op.</summary>
     public string BaselinePath => _baselines.FilePath;
 

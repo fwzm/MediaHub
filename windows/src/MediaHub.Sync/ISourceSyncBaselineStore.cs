@@ -72,6 +72,23 @@ public interface ISourceSyncBaselineStore
 
     /// <summary>Merges a new baseline in, refusing to move any entry backwards; reports what was rejected.</summary>
     SourceSyncBaselineSaveResult Save(string peerDeviceId, SourceSyncBaseline baseline);
+
+    /// <summary>Drops everything the store knows about one peer; true when an entry was removed.</summary>
+    /// <param name="peerDeviceId">Peer device id; stores compare it trimmed and case-insensitively.</param>
+    /// <returns>True when a stored peer was dropped and the medium rewritten; false when nothing matched.</returns>
+    /// <remarks>
+    /// <para>
+    /// Forgetting is a deliberate deletion, not a merge: <see cref="Save"/> can only move a baseline forward, so a
+    /// peer the user unpaired would otherwise stay in the document forever and make the next round treat a
+    /// re-paired device as already applied — stale knowledge silently skipping real changes.
+    /// </para>
+    /// <para>
+    /// It is local bookkeeping: nothing is said to the peer, no source is touched, and a blank id is a caller bug
+    /// rather than an empty answer. A store that cannot persist the deletion must throw instead of returning
+    /// false, because a baseline that survived a user's "forget" is worse than a failed forget.
+    /// </para>
+    /// </remarks>
+    bool Forget(string peerDeviceId);
 }
 
 /// <summary>The outcome of merging an incoming baseline into the stored one.</summary>

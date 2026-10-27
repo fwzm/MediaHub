@@ -62,7 +62,8 @@ public sealed partial class SyncPage : Page
     /// </summary>
     private SyncPagePresenter Presenter => _presenter ??= new SyncPagePresenter(
         App.Services.Sync.DeviceId,
-        App.Services.Sync.PairedDevices);
+        App.Services.Sync.PairedDevices,
+        App.Services.Sync.Baselines);
 
     public SyncPage()
     {

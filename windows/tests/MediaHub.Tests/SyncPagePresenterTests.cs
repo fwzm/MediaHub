@@ -560,7 +560,8 @@ public sealed class SyncPagePresenterTests : IDisposable
     public void AskForget_ConfirmDeletesOnlyThatDevice()
     {
         PairedDeviceRegistry registry = NewRegistry();
-        var presenter = new SyncPairingPresenter("dev-local", registry);
+        InMemorySourceSyncBaselineStore baselines = SeededBaselines("peer-1", "peer-2");
+        var presenter = new SyncPairingPresenter("dev-local", registry, baselines);
         presenter.VerifyReply(LinkFor("peer-1", Fingerprint(31)), NowMs, register: true);
         presenter.VerifyReply(LinkFor("peer-2", Fingerprint(41)), NowMs, register: true);
         PairedDeviceRow row = presenter.BuildPairedDevices(NowMs).Rows.Single(r => r.DeviceId == "peer-1");
@@ -573,12 +574,77 @@ public sealed class SyncPagePresenterTests : IDisposable
         SyncForgetOutcome outcome = presenter.ConfirmForget();
 
         Assert.True(outcome.Forgotten);
+        Assert.True(outcome.BaselineForgotten);
         Assert.Equal(SyncPageCopy.ForgetDoneTitle, outcome.Title);
         Assert.Equal(SyncPageCopy.ForgetDoneMessage, outcome.Message);
         Assert.False(presenter.IsForgetPending);
         Assert.Equal(1, registry.Count);
         Assert.Null(registry.Find("peer-1"));
         Assert.NotNull(registry.Find("peer-2"));
+        // The forgotten peer keeps no knowledge; the one still paired keeps its own baseline untouched.
+        Assert.DoesNotContain("peer-1", baselines.KnownPeerDeviceIds);
+        Assert.Contains("peer-2", baselines.KnownPeerDeviceIds);
+        Assert.Empty(baselines.Load("peer-1").Entries);
+        Assert.Single(baselines.Load("peer-2").Entries);
+    }
+
+    /// <summary>A page with no baseline store still forgets the device, and says so instead of pretending.</summary>
+    [Fact]
+    public void AskForget_WithoutABaselineStoreSaysTheBaselineStayed()
+    {
+        PairedDeviceRegistry registry = NewRegistry();
+        var presenter = new SyncPairingPresenter("dev-local", registry);
+        presenter.VerifyReply(LinkFor("peer-1", Fingerprint(71)), NowMs, register: true);
+        presenter.AskForget(presenter.BuildPairedDevices(NowMs).Rows[0]);
+
+        SyncForgetOutcome outcome = presenter.ConfirmForget();
+
+        Assert.True(outcome.Forgotten);
+        Assert.False(outcome.BaselineForgotten);
+        Assert.Equal(SyncPageCopy.ForgetDoneMessageWithoutBaseline, outcome.Message);
+        Assert.Null(registry.Find("peer-1"));
+    }
+
+    /// <summary>A store whose medium is unreadable costs the baseline, never the forget itself.</summary>
+    [Fact]
+    public void AskForget_WithAThrowingBaselineStoreStillForgetsTheDevice()
+    {
+        PairedDeviceRegistry registry = NewRegistry();
+        var baselines = new ThrowingBaselineStore();
+        var presenter = new SyncPairingPresenter("dev-local", registry, baselines);
+        presenter.VerifyReply(LinkFor("peer-1", Fingerprint(81)), NowMs, register: true);
+        presenter.AskForget(presenter.BuildPairedDevices(NowMs).Rows[0]);
+
+        SyncForgetOutcome outcome = presenter.ConfirmForget();
+
+        Assert.True(outcome.Forgotten);
+        Assert.False(outcome.BaselineForgotten);
+        Assert.Equal(SyncPageCopy.ForgetDoneMessageWithoutBaseline, outcome.Message);
+        Assert.Equal(1, baselines.ForgetCalls);
+        Assert.Null(registry.Find("peer-1"));
+    }
+
+    /// <summary>Registration first, baseline second: a forget that deletes nothing must not clear knowledge.</summary>
+    [Fact]
+    public void AskForget_UnknownDeviceLeavesItsBaselineAlone()
+    {
+        PairedDeviceRegistry registry = NewRegistry();
+        InMemorySourceSyncBaselineStore baselines = SeededBaselines("peer-1");
+        var presenter = new SyncPairingPresenter("dev-local", registry, baselines);
+        presenter.VerifyReply(LinkFor("peer-1", Fingerprint(91)), NowMs, register: true);
+        PairedDeviceRow row = presenter.BuildPairedDevices(NowMs).Rows[0];
+        Assert.True(registry.Forget("peer-1"));
+        int writesBefore = baselines.WriteCount;
+        presenter.AskForget(row);
+
+        SyncForgetOutcome outcome = presenter.ConfirmForget();
+
+        Assert.False(outcome.Forgotten);
+        Assert.False(outcome.BaselineForgotten);
+        Assert.Equal(PairedDeviceReasons.UnknownDevice, outcome.Reason);
+        Assert.Equal(writesBefore, baselines.WriteCount);
+        Assert.Contains("peer-1", baselines.KnownPeerDeviceIds);
+        Assert.Single(baselines.Load("peer-1").Entries);
     }
 
     [Fact]
@@ -753,6 +819,50 @@ public sealed class SyncPagePresenterTests : IDisposable
     };
 
     private static PairedDeviceRegistry NewRegistry() => new(new InMemoryPairedDeviceStore());
+
+    private static InMemorySourceSyncBaselineStore SeededBaselines(params string[] peers)
+    {
+        var store = new InMemorySourceSyncBaselineStore();
+        foreach (string peer in peers)
+        {
+            Assert.True(store.Save(peer, Baseline("sync-1", 3)).Saved);
+        }
+
+        return store;
+    }
+
+    private static SourceSyncBaseline Baseline(string id, long revision) => new()
+    {
+        DeviceId = "dev-local",
+        SnapshotId = "snapshot-1",
+        Entries =
+        [
+            new SourceSyncBaselineEntry
+            {
+                SyncSourceId = id,
+                RecordRevision = revision,
+                ContentHash = "hash",
+                FieldHashes = new Dictionary<string, string>(StringComparer.Ordinal) { ["displayName"] = "h-hash" },
+            },
+        ],
+    };
+
+    /// <summary>A baseline store whose medium is gone: every write throws, which the presenter must survive.</summary>
+    private sealed class ThrowingBaselineStore : ISourceSyncBaselineStore
+    {
+        public int ForgetCalls { get; private set; }
+
+        public SourceSyncBaseline Load(string peerDeviceId) => SourceSyncBaseline.Empty;
+
+        public SourceSyncBaselineSaveResult Save(string peerDeviceId, SourceSyncBaseline baseline) =>
+            throw new IOException("baseline medium is gone");
+
+        public bool Forget(string peerDeviceId)
+        {
+            ForgetCalls++;
+            throw new IOException("baseline medium is gone");
+        }
+    }
 
     private static string Fingerprint(int seed)
     {
