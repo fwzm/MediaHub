@@ -225,6 +225,106 @@ public sealed class BaselineContractTests
         return $"{entry.SyncSourceId}|{entry.Direction}|{entry.Kind}|{entry.Reason}|{string.Join(",", entry.ConflictingFields)}|{entry.LocalRevision}|{entry.RemoteRevision}|{entry.RequiresApproval}|{record}|{tombstone}";
     }
 
+    // ------------------------------------------------------------- planner contract (W6-75)
+
+    /// <remarks>
+    /// The planner is what decides whether an import may write anything at all, and until W6-75 it was pinned
+    /// only by hand written tests on each side. This contract reads the same cases Android reads. Every case
+    /// also declares the intent it is supposed to prove, so a planner that quietly changes a rule fails here
+    /// even when the vector was regenerated from that same planner.
+    /// Windows deliberately does not skip the windowsOnly cases: they are the ones that must produce
+    /// "not-supported-on-windows". NotImportedEndpoints is out of scope, Android reads it on its own.
+    /// </remarks>
+    [Fact]
+    public void PlannerCasesMatchTheWindowsContract()
+    {
+        int compared = 0;
+        foreach (JsonElement entry in Entries("plannerCases"))
+        {
+            string name = Text(entry, "name");
+            LocalSourceRecord[] locals = ArrayOf(entry, "locals", LocalOf);
+            JsonElement envelopeElement = entry.GetProperty("envelope");
+            var envelope = new SourceSyncEnvelope
+            {
+                Sources = ArrayOf(envelopeElement, "sources", RecordOf),
+                Deletions = TombsOf(envelopeElement),
+            };
+
+            SourceSyncPlan plan = SourceSyncPlanner.Plan(envelope, locals);
+
+            // 1) the declared intent: which rule this case is supposed to exercise.
+            string[] expectedIntent = Strings(entry, "expect")
+                .Select((item, index) => $"{name}|intent {index}|{item}")
+                .ToArray();
+            string[] actualIntent = plan.Items
+                .Select((item, index) => $"{name}|intent {index}|{item.Action}/{item.Reason}")
+                .ToArray();
+            Assert.Equal(expectedIntent, actualIntent);
+
+            // 2) the whole candidate, so a change in serverId, revisions or approval also fails.
+            string[] expectedItems = ArrayOf(entry.GetProperty("plan"), "items", DescribeCandidate)
+                .Select((item, index) => $"{name}|item {index}|{item}")
+                .ToArray();
+            string[] actualItems = plan.Items
+                .Select((item, index) => $"{name}|item {index}|{Describe(item)}")
+                .ToArray();
+            Assert.Equal(expectedItems, actualItems);
+
+            compared++;
+        }
+
+        Assert.Equal(Entries("plannerCases").Length, compared);
+    }
+
+    private static LocalSourceRecord LocalOf(JsonElement element) => new()
+    {
+        ServerId = Text(element, "serverId"),
+        SyncSourceId = NullableText(element, "syncSourceId"),
+        Type = WindowsSourceTypeMap.ToServerType(NullableText(element, "typeWire")),
+        SourceTypeRaw = NullableText(element, "typeWire"),
+        Url = NullableText(element, "url"),
+        AccountScope = NullableText(element, "accountScope"),
+        DisplayName = NullableText(element, "displayName"),
+        RecordRevision = Long(element, "recordRevision"),
+    };
+
+    /// <summary>One candidate field as it prints in a diff: JSON null becomes a dash, empty string stays empty.</summary>
+    private static string CandidateField(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out JsonElement value) || value.ValueKind == JsonValueKind.Null)
+        {
+            return "-";
+        }
+
+        return value.ValueKind == JsonValueKind.String ? value.GetString()! : value.GetRawText();
+    }
+
+    private static string Describe(SourceSyncCandidate item) => string.Join("|",
+        item.SyncSourceId ?? "",
+        item.Action,
+        item.Reason,
+        item.ServerId ?? "-",
+        item.SourceType ?? "-",
+        item.IsKnownSourceType,
+        item.NormalizedUrl ?? "-",
+        item.LocalRevision?.ToString() ?? "-",
+        item.RemoteRevision?.ToString() ?? "-",
+        item.RequiresUserApproval,
+        string.Join(",", item.CandidateServerIds));
+
+    private static string DescribeCandidate(JsonElement item) => string.Join("|",
+        NullableText(item, "syncSourceId") ?? "",
+        Text(item, "action"),
+        Text(item, "reason"),
+        CandidateField(item, "serverId"),
+        CandidateField(item, "sourceType"),
+        Bool(item, "isKnownSourceType"),
+        CandidateField(item, "normalizedUrl"),
+        CandidateField(item, "localRevision"),
+        CandidateField(item, "remoteRevision"),
+        Bool(item, "requiresUserApproval"),
+        string.Join(",", Strings(item, "candidateServerIds")));
+
     private static string Sha256Hex(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
     // ------------------------------------------------------------- structural assertions

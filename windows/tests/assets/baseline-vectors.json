@@ -7320,5 +7320,1622 @@
         "hasWork": true
       }
     }
+  ],
+  "plannerCases": [
+    {
+      "name": "new-source",
+      "windowsOnly": false,
+      "locals": [],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-new",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS A",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://nas-a.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 3,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Create/new-source"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Create",
+            "reason": "new-source",
+            "syncSourceId": "src-new",
+            "serverId": null,
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS A",
+            "normalizedUrl": "https://nas-a.local:443",
+            "remoteRevision": 3,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "no-usable-endpoint",
+      "windowsOnly": false,
+      "locals": [],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-noep",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS B",
+            "accountScope": null,
+            "endpoints": [],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Create/no-usable-endpoint"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Create",
+            "reason": "no-usable-endpoint",
+            "syncSourceId": "src-noep",
+            "serverId": null,
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS B",
+            "normalizedUrl": null,
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": true,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "create-with-unnormalizable-endpoint",
+      "windowsOnly": false,
+      "locals": [],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-badep",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS C",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "mailto:someone@example.com",
+                "isPrimary": false,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Create/no-usable-endpoint"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Create",
+            "reason": "no-usable-endpoint",
+            "syncSourceId": "src-badep",
+            "serverId": null,
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS C",
+            "normalizedUrl": null,
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": true,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown-source-type",
+      "windowsOnly": false,
+      "locals": [],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-unknown",
+            "sourceTypeRaw": "MyThing",
+            "sourceTypeWire": "mything",
+            "displayName": "Mystery",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://mystery.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 4,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Unsupported/unknown-source-type"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Unsupported",
+            "reason": "unknown-source-type",
+            "syncSourceId": "src-unknown",
+            "serverId": null,
+            "sourceType": "MyThing",
+            "isKnownSourceType": false,
+            "displayName": "Mystery",
+            "normalizedUrl": "https://mystery.local:443",
+            "remoteRevision": 4,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "blank-source-type",
+      "windowsOnly": false,
+      "locals": [],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-blank",
+            "sourceTypeRaw": "",
+            "sourceTypeWire": "",
+            "displayName": "Unnamed",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://blank.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Unsupported/unknown-source-type"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Unsupported",
+            "reason": "unknown-source-type",
+            "syncSourceId": "src-blank",
+            "serverId": null,
+            "sourceType": "",
+            "isKnownSourceType": false,
+            "displayName": "Unnamed",
+            "normalizedUrl": "https://blank.local:443",
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "higher-revision",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-rev",
+          "syncSourceId": "src-rev",
+          "typeWire": "webdav",
+          "url": "https://nas-d.local/",
+          "accountScope": null,
+          "displayName": "NAS D",
+          "recordRevision": 4
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-rev",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS D",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://nas-d.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 7,
+            "fieldVersion": 2,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Update/higher-revision"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Update",
+            "reason": "higher-revision",
+            "syncSourceId": "src-rev",
+            "serverId": "srv-rev",
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS D",
+            "normalizedUrl": "https://nas-d.local:443",
+            "remoteRevision": 7,
+            "localRevision": 4,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "up-to-date",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-same",
+          "syncSourceId": "src-same",
+          "typeWire": "webdav",
+          "url": "https://nas-e.local/dav",
+          "accountScope": "USER",
+          "displayName": "NAS E",
+          "recordRevision": 5
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-same",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS E",
+            "accountScope": "user",
+            "endpoints": [
+              {
+                "url": "https://nas-e.local/dav/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 5,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "NoChange/up-to-date"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "NoChange",
+            "reason": "up-to-date",
+            "syncSourceId": "src-same",
+            "serverId": "srv-same",
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS E",
+            "normalizedUrl": "https://nas-e.local:443/dav",
+            "remoteRevision": 5,
+            "localRevision": 5,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "same-revision-different-content",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-fight",
+          "syncSourceId": "src-fight",
+          "typeWire": "webdav",
+          "url": "https://nas-f.local/",
+          "accountScope": null,
+          "displayName": "NAS F (old)",
+          "recordRevision": 5
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-fight",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS F",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://nas-f.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 5,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Conflict/same-revision-different-content"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Conflict",
+            "reason": "same-revision-different-content",
+            "syncSourceId": "src-fight",
+            "serverId": "srv-fight",
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS F",
+            "normalizedUrl": "https://nas-f.local:443",
+            "remoteRevision": 5,
+            "localRevision": 5,
+            "requiresUserApproval": true,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "stale-revision",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-stale",
+          "syncSourceId": "src-stale",
+          "typeWire": "webdav",
+          "url": "https://nas-g.local/",
+          "accountScope": null,
+          "displayName": "NAS G",
+          "recordRevision": 9
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-stale",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS G",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://nas-g.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 3,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "IgnoreStale/stale-revision"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "IgnoreStale",
+            "reason": "stale-revision",
+            "syncSourceId": "src-stale",
+            "serverId": "srv-stale",
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS G",
+            "normalizedUrl": "https://nas-g.local:443",
+            "remoteRevision": 3,
+            "localRevision": 9,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "identity-trim-and-case",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-ident",
+          "syncSourceId": "  ID-1  ",
+          "typeWire": "webdav",
+          "url": "https://nas-h.local/",
+          "accountScope": null,
+          "displayName": "NAS H",
+          "recordRevision": 2
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "id-1",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS H",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://nas-h.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 5,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Update/higher-revision"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Update",
+            "reason": "higher-revision",
+            "syncSourceId": "id-1",
+            "serverId": "srv-ident",
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS H",
+            "normalizedUrl": "https://nas-h.local:443",
+            "remoteRevision": 5,
+            "localRevision": 2,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate-local-sync-id",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-dup-a",
+          "syncSourceId": "dup-1",
+          "typeWire": "webdav",
+          "url": "https://nas-i.local/",
+          "accountScope": null,
+          "displayName": "NAS I",
+          "recordRevision": 1
+        },
+        {
+          "serverId": "srv-dup-b",
+          "syncSourceId": "DUP-1",
+          "typeWire": "webdav",
+          "url": "https://nas-i2.local/",
+          "accountScope": null,
+          "displayName": "NAS I two",
+          "recordRevision": 1
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "dup-1",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS I",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://nas-i.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Conflict/duplicate-local-sync-id"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Conflict",
+            "reason": "duplicate-local-sync-id",
+            "syncSourceId": "dup-1",
+            "serverId": null,
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS I",
+            "normalizedUrl": "https://nas-i.local:443",
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": true,
+            "candidateServerIds": [
+              "srv-dup-a",
+              "srv-dup-b"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "scope-null-versus-blank",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-scope",
+          "syncSourceId": "src-scope",
+          "typeWire": "webdav",
+          "url": "https://nas-j.local/",
+          "accountScope": null,
+          "displayName": "NAS J",
+          "recordRevision": 6
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-scope",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS J",
+            "accountScope": "   ",
+            "endpoints": [
+              {
+                "url": "https://nas-j.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 6,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "NoChange/up-to-date"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "NoChange",
+            "reason": "up-to-date",
+            "syncSourceId": "src-scope",
+            "serverId": "srv-scope",
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS J",
+            "normalizedUrl": "https://nas-j.local:443",
+            "remoteRevision": 6,
+            "localRevision": 6,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "display-name-case-sensitive",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-name",
+          "syncSourceId": "src-name",
+          "typeWire": "webdav",
+          "url": "https://nas-k.local/",
+          "accountScope": null,
+          "displayName": "Emby",
+          "recordRevision": 2
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-name",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "emby",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://nas-k.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 2,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Conflict/same-revision-different-content"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Conflict",
+            "reason": "same-revision-different-content",
+            "syncSourceId": "src-name",
+            "serverId": "srv-name",
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "emby",
+            "normalizedUrl": "https://nas-k.local:443",
+            "remoteRevision": 2,
+            "localRevision": 2,
+            "requiresUserApproval": true,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "endpoint-primary-tiebreak",
+      "windowsOnly": false,
+      "locals": [],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-tie",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS L",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://first.local/",
+                "isPrimary": false,
+                "enabled": true,
+                "sortOrder": 5
+              },
+              {
+                "url": "https://second.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 2
+              },
+              {
+                "url": "https://third.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 9
+              }
+            ],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Create/new-source"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Create",
+            "reason": "new-source",
+            "syncSourceId": "src-tie",
+            "serverId": null,
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS L",
+            "normalizedUrl": "https://second.local:443",
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "endpoint-first-by-sort-order",
+      "windowsOnly": false,
+      "locals": [],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-order",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS M",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://b.local/",
+                "isPrimary": false,
+                "enabled": true,
+                "sortOrder": 3
+              },
+              {
+                "url": "https://a.local/",
+                "isPrimary": false,
+                "enabled": true,
+                "sortOrder": 1
+              }
+            ],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Create/new-source"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Create",
+            "reason": "new-source",
+            "syncSourceId": "src-order",
+            "serverId": null,
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS M",
+            "normalizedUrl": "https://a.local:443",
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "endpoint-url-normalization",
+      "windowsOnly": false,
+      "locals": [],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-url",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS N",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "HTTPS://Host.Local:443/Path/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Create/new-source"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Create",
+            "reason": "new-source",
+            "syncSourceId": "src-url",
+            "serverId": null,
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS N",
+            "normalizedUrl": "https://host.local:443/Path",
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "legacy-identity-match",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-legacy",
+          "syncSourceId": null,
+          "typeWire": "webdav",
+          "url": "https://legacy.local/dav",
+          "accountScope": "USER",
+          "displayName": "Old NAS",
+          "recordRevision": 0
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-legacy",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS O",
+            "accountScope": "user",
+            "endpoints": [
+              {
+                "url": "https://legacy.local/dav/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Adopt/legacy-identity-match"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Adopt",
+            "reason": "legacy-identity-match",
+            "syncSourceId": "src-legacy",
+            "serverId": "srv-legacy",
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS O",
+            "normalizedUrl": "https://legacy.local:443/dav",
+            "remoteRevision": 1,
+            "localRevision": 0,
+            "requiresUserApproval": true,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "legacy-ambiguous",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-legacy2-a",
+          "syncSourceId": null,
+          "typeWire": "webdav",
+          "url": "https://legacy2.local/dav",
+          "accountScope": null,
+          "displayName": "Old P one",
+          "recordRevision": 0
+        },
+        {
+          "serverId": "srv-legacy2-b",
+          "syncSourceId": null,
+          "typeWire": "webdav",
+          "url": "https://legacy2.local/dav/",
+          "accountScope": null,
+          "displayName": "Old P two",
+          "recordRevision": 0
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-legacy2",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS P",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://legacy2.local/dav",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Conflict/ambiguous-legacy-identity"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Conflict",
+            "reason": "ambiguous-legacy-identity",
+            "syncSourceId": "src-legacy2",
+            "serverId": null,
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS P",
+            "normalizedUrl": "https://legacy2.local:443/dav",
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": true,
+            "candidateServerIds": [
+              "srv-legacy2-a",
+              "srv-legacy2-b"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "legacy-requires-address",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-legacy3",
+          "syncSourceId": null,
+          "typeWire": "webdav",
+          "url": "https://legacy3.local/dav",
+          "accountScope": null,
+          "displayName": "Old Q",
+          "recordRevision": 0
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-legacy3",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS Q",
+            "accountScope": null,
+            "endpoints": [],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Create/no-usable-endpoint"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Create",
+            "reason": "no-usable-endpoint",
+            "syncSourceId": "src-legacy3",
+            "serverId": null,
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS Q",
+            "normalizedUrl": null,
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": true,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "legacy-typeless-local-never-adopted",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-legacy4",
+          "syncSourceId": null,
+          "typeWire": null,
+          "url": "https://legacy4.local/dav",
+          "accountScope": null,
+          "displayName": "Old R",
+          "recordRevision": 0
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-legacy4",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS R",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://legacy4.local/dav",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Create/new-source"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Create",
+            "reason": "new-source",
+            "syncSourceId": "src-legacy4",
+            "serverId": null,
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS R",
+            "normalizedUrl": "https://legacy4.local:443/dav",
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "legacy-type-mismatch",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-legacy5",
+          "syncSourceId": null,
+          "typeWire": "smb",
+          "url": "https://legacy5.local/dav",
+          "accountScope": null,
+          "displayName": "Old S",
+          "recordRevision": 0
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-legacy5",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS S",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://legacy5.local/dav",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Create/new-source"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Create",
+            "reason": "new-source",
+            "syncSourceId": "src-legacy5",
+            "serverId": null,
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS S",
+            "normalizedUrl": "https://legacy5.local:443/dav",
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "tombstone-no-local-source",
+      "windowsOnly": false,
+      "locals": [],
+      "envelope": {
+        "sources": [],
+        "deletions": [
+          {
+            "syncSourceId": "src-ghost",
+            "deletedAtEpochMs": 1792800000000,
+            "recordRevision": 2
+          }
+        ]
+      },
+      "expect": [
+        "NoChange/no-local-source"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "NoChange",
+            "reason": "no-local-source",
+            "syncSourceId": "src-ghost",
+            "serverId": null,
+            "sourceType": null,
+            "isKnownSourceType": false,
+            "displayName": null,
+            "normalizedUrl": null,
+            "remoteRevision": 2,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "tombstone-delete",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-del",
+          "syncSourceId": "src-del",
+          "typeWire": "webdav",
+          "url": "https://nas-t.local/",
+          "accountScope": null,
+          "displayName": "NAS T",
+          "recordRevision": 5
+        }
+      ],
+      "envelope": {
+        "sources": [],
+        "deletions": [
+          {
+            "syncSourceId": "src-del",
+            "deletedAtEpochMs": 1792800000000,
+            "recordRevision": 5
+          }
+        ]
+      },
+      "expect": [
+        "Delete/tombstone"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Delete",
+            "reason": "tombstone",
+            "syncSourceId": "src-del",
+            "serverId": "srv-del",
+            "sourceType": null,
+            "isKnownSourceType": false,
+            "displayName": null,
+            "normalizedUrl": null,
+            "remoteRevision": 5,
+            "localRevision": 5,
+            "requiresUserApproval": true,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "tombstone-stale-revision",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-del2",
+          "syncSourceId": "src-del2",
+          "typeWire": "webdav",
+          "url": "https://nas-u.local/",
+          "accountScope": null,
+          "displayName": "NAS U",
+          "recordRevision": 6
+        }
+      ],
+      "envelope": {
+        "sources": [],
+        "deletions": [
+          {
+            "syncSourceId": "src-del2",
+            "deletedAtEpochMs": 1792800000000,
+            "recordRevision": 2
+          }
+        ]
+      },
+      "expect": [
+        "IgnoreStale/stale-revision"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "IgnoreStale",
+            "reason": "stale-revision",
+            "syncSourceId": "src-del2",
+            "serverId": "srv-del2",
+            "sourceType": null,
+            "isKnownSourceType": false,
+            "displayName": null,
+            "normalizedUrl": null,
+            "remoteRevision": 2,
+            "localRevision": 6,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "tombstone-duplicate-local-sync-id",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-dup2-a",
+          "syncSourceId": "dup-2",
+          "typeWire": "webdav",
+          "url": "https://nas-v.local/",
+          "accountScope": null,
+          "displayName": "NAS V one",
+          "recordRevision": 1
+        },
+        {
+          "serverId": "srv-dup2-b",
+          "syncSourceId": "DUP-2",
+          "typeWire": "webdav",
+          "url": "https://nas-v2.local/",
+          "accountScope": null,
+          "displayName": "NAS V two",
+          "recordRevision": 1
+        }
+      ],
+      "envelope": {
+        "sources": [],
+        "deletions": [
+          {
+            "syncSourceId": "dup-2",
+            "deletedAtEpochMs": 1792800000000,
+            "recordRevision": 9
+          }
+        ]
+      },
+      "expect": [
+        "Conflict/duplicate-local-sync-id"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Conflict",
+            "reason": "duplicate-local-sync-id",
+            "syncSourceId": "dup-2",
+            "serverId": null,
+            "sourceType": null,
+            "isKnownSourceType": false,
+            "displayName": null,
+            "normalizedUrl": null,
+            "remoteRevision": 9,
+            "localRevision": null,
+            "requiresUserApproval": true,
+            "candidateServerIds": [
+              "srv-dup2-a",
+              "srv-dup2-b"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "mixed-records-and-deletions",
+      "windowsOnly": false,
+      "locals": [
+        {
+          "serverId": "srv-mix-upd",
+          "syncSourceId": "src-mix-upd",
+          "typeWire": "webdav",
+          "url": "https://nas-w.local/",
+          "accountScope": null,
+          "displayName": "NAS W",
+          "recordRevision": 2
+        },
+        {
+          "serverId": "srv-mix-del",
+          "syncSourceId": "src-mix-del",
+          "typeWire": "webdav",
+          "url": "https://nas-w2.local/",
+          "accountScope": null,
+          "displayName": "NAS W two",
+          "recordRevision": 4
+        }
+      ],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-mix-upd",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS W",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://nas-w.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 5,
+            "fieldVersion": 1,
+            "secrets": null
+          },
+          {
+            "syncSourceId": "src-mix-new",
+            "sourceTypeRaw": "webdav",
+            "sourceTypeWire": "webdav",
+            "displayName": "NAS X",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://nas-x.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 1,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": [
+          {
+            "syncSourceId": "src-mix-del",
+            "deletedAtEpochMs": 1792800000000,
+            "recordRevision": 4
+          },
+          {
+            "syncSourceId": "src-mix-gone",
+            "deletedAtEpochMs": 1792800000000,
+            "recordRevision": 1
+          }
+        ]
+      },
+      "expect": [
+        "Update/higher-revision",
+        "Create/new-source",
+        "Delete/tombstone",
+        "NoChange/no-local-source"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Update",
+            "reason": "higher-revision",
+            "syncSourceId": "src-mix-upd",
+            "serverId": "srv-mix-upd",
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS W",
+            "normalizedUrl": "https://nas-w.local:443",
+            "remoteRevision": 5,
+            "localRevision": 2,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          },
+          {
+            "action": "Create",
+            "reason": "new-source",
+            "syncSourceId": "src-mix-new",
+            "serverId": null,
+            "sourceType": "webdav",
+            "isKnownSourceType": true,
+            "displayName": "NAS X",
+            "normalizedUrl": "https://nas-x.local:443",
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          },
+          {
+            "action": "Delete",
+            "reason": "tombstone",
+            "syncSourceId": "src-mix-del",
+            "serverId": "srv-mix-del",
+            "sourceType": null,
+            "isKnownSourceType": false,
+            "displayName": null,
+            "normalizedUrl": null,
+            "remoteRevision": 4,
+            "localRevision": 4,
+            "requiresUserApproval": true,
+            "candidateServerIds": []
+          },
+          {
+            "action": "NoChange",
+            "reason": "no-local-source",
+            "syncSourceId": "src-mix-gone",
+            "serverId": null,
+            "sourceType": null,
+            "isKnownSourceType": false,
+            "displayName": null,
+            "normalizedUrl": null,
+            "remoteRevision": 1,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "windows-does-not-support-cloud-types",
+      "windowsOnly": true,
+      "androidSupports": true,
+      "locals": [],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-cloud",
+            "sourceTypeRaw": "aliyun-drive",
+            "sourceTypeWire": "aliyun-drive",
+            "displayName": "Aliyun",
+            "accountScope": "user",
+            "endpoints": [
+              {
+                "url": "https://aliyun.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 2,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Unsupported/not-supported-on-windows"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Unsupported",
+            "reason": "not-supported-on-windows",
+            "syncSourceId": "src-cloud",
+            "serverId": null,
+            "sourceType": "aliyun-drive",
+            "isKnownSourceType": true,
+            "displayName": "Aliyun",
+            "normalizedUrl": "https://aliyun.local:443",
+            "remoteRevision": 2,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "windows-does-not-support-fn-nas",
+      "windowsOnly": true,
+      "androidSupports": true,
+      "locals": [],
+      "envelope": {
+        "sources": [
+          {
+            "syncSourceId": "src-fnnas",
+            "sourceTypeRaw": "fn-nas",
+            "sourceTypeWire": "fn-nas",
+            "displayName": "Feiniu",
+            "accountScope": null,
+            "endpoints": [
+              {
+                "url": "https://fn.local/",
+                "isPrimary": true,
+                "enabled": true,
+                "sortOrder": 0
+              }
+            ],
+            "recordRevision": 2,
+            "fieldVersion": 1,
+            "secrets": null
+          }
+        ],
+        "deletions": []
+      },
+      "expect": [
+        "Unsupported/not-supported-on-windows"
+      ],
+      "plan": {
+        "items": [
+          {
+            "action": "Unsupported",
+            "reason": "not-supported-on-windows",
+            "syncSourceId": "src-fnnas",
+            "serverId": null,
+            "sourceType": "fn-nas",
+            "isKnownSourceType": true,
+            "displayName": "Feiniu",
+            "normalizedUrl": "https://fn.local:443",
+            "remoteRevision": 2,
+            "localRevision": null,
+            "requiresUserApproval": false,
+            "candidateServerIds": []
+          }
+        ]
+      }
+    }
   ]
 }
