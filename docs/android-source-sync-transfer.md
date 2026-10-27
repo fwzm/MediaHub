@@ -4304,3 +4304,96 @@ XML 汇总（`<testsuite>` 属性相加，非估算）：
 
 1. **`SourceSyncSecretsGateTest` 已钉进 `--required-suite`（57 → 58）**。理由与 W6-55/W6-72 相同：`--required-suite` 的语义是「这个套件必须真的执行过」，新套件不钉的话，整类被 `@Ignore` 或被 source set 变更挤出编译时，gradle 仍然打印 `BUILD SUCCESSFUL`。改动只有一行（`--required-suite com.mediahub.core.database.sync.SourceSyncSecretsGateTest`），`--require-complete-suites` 与其余 57 行未动；README 的钉住套件数、`core/common` 与 `core/database` 的用例数同步改成 58 / 657 / 206，`uniqueTests` 口径 2363 → 2372。
 2. **本文档 §43 首次落盘时带了构建占位符**：写入脚本用 `{BT}` 表示反引号（避免模板字符串里出现裸反引号），§43 落盘时漏了替换，36 行里留下 230 处字面 `{BT}`。已全文替换为反引号并在同一次提交里修掉——记在这里是因为它本身也是「产物写完必须回读正文」的又一例：只看 `git diff --stat` 与提交成功，看不出正文里混着占位符。
+
+### §44 规划器黄金向量（W6-75）
+
+#### §44.1 结论先行
+
+- `SourceSyncPlanner` 是唯一决定「这次导入能不能落库」的地方，却一直是两端**唯一没有向量对照**的判定层：C# 与 Kotlin 各写各的手写用例，规则顺序一错，两边各自的用例都能自证合理。本轮把它变成第 15 个黄金向量段 `plannerCases`（28 组）。
+- 向量不是「让人抄一遍」：生成器每加一条用例，先跑 Windows 权威 `SourceSyncPlanner.Plan()`，再逐条比对 `Action/Reason`，不符就抛异常 —— 向量不可能悄悄失去它要证明的规则。
+- 两端各一条新契约用例逐条消费，本机 `core/common` **48 套件 / 658 例 / 0 失败 / 11 skipped**、C# `MediaHub.Tests` **1651 通过 / 0 失败**；两条负向对照（各自把产品代码里的内容比对取反）都按预期变红。
+
+#### §44.2 缺的是什么
+
+W6-73 / W6-74 之后 Android 有了摘要（`SourceSyncDigest`）、两轮合并（`SyncRoundMerger`）、凭据闸门与对端基线读数，但**「这一条到底该写还是该问」这一步仍然只有手写用例**。手写用例的问题不是覆盖少，而是两边可以各自合理：Windows 的规则顺序是「不认识类型 → 认识但用不了 → 本地重复身份 → 修订号三种走向 → 无匹配时认领/新建」，Kotlin 只要把其中两条换个顺序，绝大多数输入仍然给出同样的答案，只有边界输入才会分叉 —— 而边界输入正是没人手写到的那些。
+
+#### §44.3 生成器与断言纪律
+
+- 生成器（仓库外 `D:/mh-verify/baseline-vectors`）新增 `Sections75.cs`（17984 B / 352 行，`internal static partial class Program`），`Program.cs` 的 JsonObject 里只多一行 `["plannerCases"] = PlannerCases(),`。
+- 每条用例的构造入口是 `AddPlanner(array, name, envelope, locals, expect, windowsOnly = false, androidSupports = true)`：先 `SourceSyncPlanner.Plan(envelope, locals)`，再逐条比 `item.Action + "/" + item.Reason` 与 `expect`，不符抛 `InvalidOperationException`（带用例名与下标）。`expect` 里的字符串由权威常量 `E(SourceSyncAction.X, SourceSyncReasons.Y)` 拼出，不手打。
+- 用例形状：`{name, windowsOnly, [androidSupports 仅 windowsOnly], locals[{serverId, syncSourceId|null, typeWire|null, url, accountScope, displayName, recordRevision}], envelope{sources[信封记录形状], deletions[墓碑形状]}, expect[字符串], plan{items[...]}}`；候选的键序与 C# record 一致（action / reason / syncSourceId / serverId / sourceType / isKnownSourceType / displayName / normalizedUrl / remoteRevision / localRevision / requiresUserApproval / candidateServerIds）。
+- 产物：`baseline-vectors.json` **243491 → 288781 B**，sha256 `5544a58f`…`ed0b12d2`，两树逐字节同一份（`core/common/src/test/resources/sync/` 与 `windows/tests/assets/`）。
+
+#### §44.4 28 条用例（权威输出即向量里的 `expect`）
+
+| 用例 | 权威输出 | 钉住的是 |
+| --- | --- | --- |
+| `new-source` | Create/new-source | 本地没有这个身份、地址可归一化 → 建议新建，且不需要人工确认 |
+| `no-usable-endpoint` | Create/no-usable-endpoint（需确认） | 没有可用端点时不直接落库，交用户裁决 |
+| `create-with-unnormalizable-endpoint` | Create/no-usable-endpoint（需确认） | `mailto:` 这类非 http(s)/smb/file 的地址归一化为 null，因此按「没有可用端点」处理 |
+| `unknown-source-type` | Unsupported/unknown-source-type | 不认识的 wire 原文保留，绝不按已知类型写库 |
+| `blank-source-type` | Unsupported/unknown-source-type | 空串 wire 也是「不认识」，不是「默认 emby」 |
+| `higher-revision` | Update/higher-revision | 远端修订号更高 → 建议更新 |
+| `up-to-date` | NoChange/up-to-date | 同号同内容（账号作用域忽略大小写与空白、URL 去掉尾斜杠后一致）→ 什么都不做 |
+| `same-revision-different-content` | Conflict/same-revision-different-content（需确认） | 同号不同内容绝不覆盖 |
+| `stale-revision` | IgnoreStale/stale-revision | 「更旧」不等于「有分歧」 |
+| `identity-trim-and-case` | Update/higher-revision | 身份比较先 trim 再忽略大小写（本地 `  ID-1  ` 命中远端 `id-1`） |
+| `duplicate-local-sync-id` | Conflict/duplicate-local-sync-id（需确认，候选两条） | 本地同一身份多行 → 不猜，交用户裁决，候选 serverId 按本地顺序列出 |
+| `scope-null-versus-blank` | NoChange/up-to-date | null 与全空白是同一个「没有账号作用域」 |
+| `display-name-case-sensitive` | Conflict/same-revision-different-content（需确认） | **显示名大小写不同算内容不同**——与账号作用域规则相反，这是有意的 |
+| `endpoint-primary-tiebreak` | Update/higher-revision | 两个 primary 时，sortOrder 更小的那个参与比较 |
+| `endpoint-first-by-sort-order` | Update/higher-revision | 没有 primary 时，sortOrder 最小的那个参与比较 |
+| `endpoint-url-normalization` | Update/higher-revision | `HTTPS://Host.Local:443/Path/` → `https://host.local:443/Path`（scheme/host 小写、默认端口落成显式、尾斜杠去掉、路径大小写保留） |
+| `legacy-identity-match` | Adopt/legacy-identity-match（需确认） | pre-W6 的无身份来源：类型 + 地址 + 作用域三者全一致且答案唯一，才建议认领 |
+| `legacy-ambiguous` | Conflict/ambiguous-legacy-identity（需确认） | 匹配到多条历史来源 → 不认领 |
+| `legacy-requires-address` | Create/no-usable-endpoint（需确认） | 没有可用地址就无法确认身份 → 走新建，而不是认领 |
+| `legacy-typeless-local-never-adopted` | Create/new-source | 本地类型未知（没有 wire）永不认领 |
+| `legacy-type-mismatch` | Create/new-source | 类型不同（smb 本地 vs webdav 远端）永不认领 |
+| `tombstone-no-local-source` | NoChange/no-local-source | 墓碑指向本地没有的来源 → 什么都不做（也绝不删除） |
+| `tombstone-delete` | Delete/tombstone（需确认） | 墓碑确认删除必须用户点头 |
+| `tombstone-stale-revision` | IgnoreStale/stale-revision | 墓碑修订号比本地旧 → 不接受删除 |
+| `tombstone-duplicate-local-sync-id` | Conflict/duplicate-local-sync-id（需确认，候选两条） | 本地重复身份的墓碑同样交用户 |
+| `mixed-records-and-deletions` | Update / Create / Delete / NoChange（四条，顺序固定） | 顺序 = 先 records 再 deletions，与信封顺序一致；调用方可以按下标回映射 |
+| `windows-does-not-support-cloud-types` | Unsupported/not-supported-on-windows（windowsOnly） | Windows 认识但用不了的云类型：保存原文即停，不能当成「新建」 |
+| `windows-does-not-support-fn-nas` | Unsupported/not-supported-on-windows（windowsOnly） | 同上（家庭 NAS 类型） |
+
+#### §44.5 两端契约测试
+
+- Kotlin：`core/common/src/test/kotlin/com/mediahub/core/common/sync/SourceSyncBaselineContractTest.kt` 625 → **741 行**，`@Test` 14 → **15**。新增 `planner_cases_match_the_windows_contract` + `actionNames`（PascalCase → UPPER_SNAKE 8 行映射，Kotlin 侧枚举名与 C# 不同）+ `actionOf/vectorNameOf/localRecordOf/describe/describeCandidate/candidateField`。
+- C#：`windows/tests/MediaHub.Tests/BaselineContractTests.cs` 799 → **899 行**，`[Fact]` 15 → **16**。新增 `PlannerCasesMatchTheWindowsContract` + `LocalOf/CandidateField/Describe/DescribeCandidate`。
+- 断言分两层：①**意图** —— 逐条比 `expect` 与「动作/原因」，失败消息形如 `up-to-date|intent expected:<[intent 0|NoChange/up-to-date]> but was:<[intent 0|Conflict/same-revision-different-content]>`，一眼看出是哪条用例哪一步；②**整条候选** —— 11 个字段按 `|` 拼成一行逐条比（身份 / 动作 / 原因 / serverId / sourceType / 是否认识的类型 / 归一化地址 / 本地与远端修订号 / 是否需要确认 / 候选 serverId 列表）。只比动作会比出「两个都错得一样」的假绿。
+- `windowsOnly` 的两条在 C# 侧**不跳过**（`not-supported-on-windows` 只有 Windows 能产出）；Kotlin 侧不整段跳过，而是断言 `AndroidSourceTypeMap.resolve(...).isKnown && isSupported == androidSupports`，并断言「被跳过的正好是这两条、其余 26 条逐条比过」。
+- 边界观测（Kotlin 必须逐字对齐的两处）：墓碑类候选的 `sourceType` 是 `null` 且 `isKnownSourceType=false`；空 wire 的候选 `sourceType` 是**空串**而不是 `null`。
+
+#### §44.6 两条负向对照（先红后绿）
+
+| 对照 | 改了什么 | 结果 |
+| --- | --- | --- |
+| A（Kotlin） | 产品代码 `SourceSyncPlanner.kt` 里 `val sameContent = contentMatches(...)` 取反 | `15 tests completed, 1 failed`：`planner_cases_match_the_windows_contract` 报 `up-to-date|intent expected:<[intent 0|NoChange/up-to-date]> but was:<[intent 0|Conflict/same-revision-different-content]>` |
+| B（C#） | `SourceSyncPlanner.cs` 里 `bool sameContent = ContentMatches(...)` 取反 | `失败 1，通过 15`：`PlannerCasesMatchTheWindowsContract` 报同一条用例、同一段 Expected/Actual |
+
+改回后两棵树都恢复全绿（`restored identical: true`，Kotlin 11721 B / C# 13205 B 逐字节还原）。这一对对照说明的是：断言真的绑在产品规则上，而不是绑在测试自己造的数据上。
+
+#### §44.7 本机实跑计数
+
+| 模块 | 套件 | 用例 | 失败 | skipped | 说明 |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | 48 | **658** | 0 | 11 | 657 → +1（本轮重跑，`:core:common:testDebugUnitTest` BUILD SUCCESSFUL 53 s） |
+| `core/database` | 22 | 206 | 0 | 12 | 本轮未改动，沿用 W6-74 的实跑 |
+| `feature/settings` | 26 | 384 | 0 | — | 本轮未改动 |
+| 合计 | 96 | **1248** | 0 | — | 1247 → 1248 |
+| C# `MediaHub.Tests` | — | **1651** | 0 | 0 | 1650 → +1（6 s，`--no-restore`） |
+
+#### §44.8 未覆盖（如实留着）
+
+1. **规划器仍未吃上一轮基线**：两端都不吃（Windows 只把基线用于 `BaselineKnown/EntryCount/Error` 三件报告事实）。「读基线 → 只请求变化」依然是下一轮的事，向量里也没有 `baseline` 入参。
+2. **`NotImportedEndpoints` 不在本段范围**：Windows 的 `SourceSyncPlan` 带这个字段、Android 的 `SourceSyncPlan` 不带（Android 单独调 `SourceSyncEndpointPolicy`），那部分由既有 `endpointPolicyCases` 覆盖，本轮不重复。
+3. **真实两机与真机**：两机搬运 `NOT_RUN`、真机 instrumentation `DEVICE_UNVERIFIED`，向量与模拟器都不替代它们。
+4. **GUI 出口**：被扣下的凭据条目、需要确认的认领候选，界面上仍然只是计数与稳定码，没有逐条裁决页。
+
+#### §44.9 下一步
+
+- 把对端基线喂进规划器（两端同时改，才能保持跨端同义）：`plan(envelope, locals, baseline)` → 只有摘要判为变化的条目才进本轮；
+- 确认 UI：逐条列出「需要你裁决」的条目（冲突 / 认领 / 墓碑 / 被扣凭据），并给出跳过出口；
+「忘记这台设备」：清掉该对端基线并明确告知对端；
+- 真实两机搬运与 Windows 同步页真 GUI 证据（后者需要用户授权的空闲窗口）。

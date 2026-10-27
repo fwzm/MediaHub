@@ -617,6 +617,122 @@ class SourceSyncBaselineContractTest {
         assertEquals(listOf("windows-does-not-support-cloud-types"), skipped)
     }
 
+    // ------------------------------------------------------------ 规划器（W6-75）
+
+    /**
+     * 规划器决定每次导入能不能落库，W6-75 之前它只有两端各自手写的用例，没有跨语言黄金向量。
+     * 每个用例同时钉两件事：`expect` 是这条用例要证明的规则（生成向量时由 Windows 权威自证），
+     * `plan.items` 是权威算出的整条建议（含 serverId、修订号、是否需要人工确认）。
+     * windowsOnly 的用例不能整段跳过：Windows 产不出的动作在本端必须可用，跳过就等于放弃对照。
+     */
+    @Test
+    fun planner_cases_match_the_windows_contract() {
+        var compared = 0
+        val skipped = ArrayList<String>()
+        for (entry in entries("plannerCases")) {
+            val name = text(entry, "name")
+            val envelopeElement = entry.getValue("envelope").jsonObject
+            if (boolean(entry, "windowsOnly")) {
+                val supports = boolean(entry, "androidSupports")
+                for (record in recordsOf(envelopeElement["sources"])) {
+                    val resolution = AndroidSourceTypeMap.resolve(record.sourceType)
+                    assertEquals(
+                        "$name|android|${record.sourceType.wire}",
+                        supports,
+                        resolution.isKnown && resolution.isSupported,
+                    )
+                }
+                skipped.add(name)
+                continue
+            }
+
+            val locals = entry.getValue("locals").jsonArray.map { localRecordOf(it) }
+            val envelope = SourceSyncEnvelope(
+                sources = recordsOf(envelopeElement["sources"]),
+                deletions = tombstonesOf(envelopeElement["deletions"]),
+            )
+            val plan = SourceSyncPlanner.plan(envelope, locals)
+
+            val expect = entry.getValue("expect").jsonArray.map { text(it) }
+            assertEquals(
+                "$name|intent",
+                expect.mapIndexed { index, value -> "intent $index|$value" },
+                plan.items.mapIndexed { index, item -> "intent $index|${vectorNameOf(item.action)}/${item.reason}" },
+            )
+            assertEquals(
+                "$name|items",
+                entry.getValue("plan").jsonObject.getValue("items").jsonArray
+                    .mapIndexed { index, value -> "item $index|${describeCandidate(value.jsonObject)}" },
+                plan.items.mapIndexed { index, item -> "item $index|${describe(item)}" },
+            )
+            compared++
+        }
+
+        assertEquals("windowsOnly cases", listOf("windows-does-not-support-cloud-types", "windows-does-not-support-fn-nas"), skipped)
+        assertEquals("compared cases", entries("plannerCases").size - skipped.size, compared)
+    }
+
+    private val actionNames: List<Pair<String, SourceSyncAction>> = listOf(
+        "Create" to SourceSyncAction.CREATE,
+        "Update" to SourceSyncAction.UPDATE,
+        "NoChange" to SourceSyncAction.NO_CHANGE,
+        "Conflict" to SourceSyncAction.CONFLICT,
+        "IgnoreStale" to SourceSyncAction.IGNORE_STALE,
+        "Delete" to SourceSyncAction.DELETE,
+        "Adopt" to SourceSyncAction.ADOPT,
+        "Unsupported" to SourceSyncAction.UNSUPPORTED,
+    )
+
+    private fun actionOf(name: String): SourceSyncAction = actionNames.firstOrNull { it.first == name }?.second
+        ?: throw AssertionError("向量里出现未知动作 $name")
+
+    private fun vectorNameOf(action: SourceSyncAction): String = actionNames.first { it.second == action }.first
+
+    private fun localRecordOf(element: JsonElement): LocalSourceRecord {
+        val entry = element.jsonObject
+        val wire = nullableText(entry, "typeWire")
+        return LocalSourceRecord(
+            serverId = text(entry, "serverId"),
+            syncSourceId = nullableText(entry, "syncSourceId"),
+            type = AndroidSourceTypeMap.toServerType(wire),
+            url = nullableText(entry, "url"),
+            accountScope = nullableText(entry, "accountScope"),
+            displayName = nullableText(entry, "displayName"),
+            recordRevision = long(entry, "recordRevision"),
+            sourceTypeRaw = wire,
+        )
+    }
+
+    private fun describe(item: SourceSyncCandidate): String = listOf(
+        item.syncSourceId ?: "",
+        item.action.name,
+        item.reason,
+        item.serverId ?: "-",
+        item.sourceType ?: "-",
+        item.isKnownSourceType.toString(),
+        item.normalizedUrl ?: "-",
+        item.localRevision?.toString() ?: "-",
+        item.remoteRevision?.toString() ?: "-",
+        item.requiresUserApproval.toString(),
+        item.candidateServerIds.joinToString(","),
+    ).joinToString("|")
+
+    private fun describeCandidate(entry: JsonObject): String = listOf(
+        nullableText(entry, "syncSourceId") ?: "",
+        actionOf(text(entry, "action")).name,
+        text(entry, "reason"),
+        candidateField(entry, "serverId"),
+        candidateField(entry, "sourceType"),
+        boolean(entry, "isKnownSourceType").toString(),
+        candidateField(entry, "normalizedUrl"),
+        candidateField(entry, "localRevision"),
+        candidateField(entry, "remoteRevision"),
+        boolean(entry, "requiresUserApproval").toString(),
+        entry.getValue("candidateServerIds").jsonArray.map { text(it) }.joinToString(","),
+    ).joinToString("|")
+
+    private fun candidateField(entry: JsonObject, name: String): String = nullableText(entry, name) ?: "-"
+
     private companion object {
         private const val RESOURCE_PATH = "/sync/baseline-vectors.json"
         private const val HEX_LOWER = "0123456789abcdef"
