@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -38,7 +39,7 @@ esac
                 scripts.mkdir(parents=True)
                 (scripts / "prepare-visual-emulator.sh").write_text(SCRIPT.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
                 script.write_text((SCRIPT.parent / "run-visual-validation.sh").read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
-                for fake, content in ((root / "gradlew", 'echo GRADLE >> "$FIXTURE_COMMANDS"; exit "$FIXTURE_GRADLE_EXIT"'),
+                for fake, content in ((root / "gradlew", 'printf "GRADLE %s\\n" "$*" >> "$FIXTURE_COMMANDS"; exit "$FIXTURE_GRADLE_EXIT"'),
                                       (fake_bin / "python3", 'echo RECORD >> "$FIXTURE_COMMANDS"; exit "$FIXTURE_RECORD_EXIT"')):
                     fake.write_text("#!/usr/bin/env bash\n" + content + "\n", encoding="utf-8", newline="\n")
                     fake.chmod(0o755)
@@ -99,6 +100,13 @@ esac
     def test_wrapper_record_failure_cannot_be_hidden_by_green_gradle(self):
         result, _ = self.invoke(wrapper=True, record_exit="8")
         self.assertEqual(8, result.returncode, result.stdout + result.stderr)
+
+    def test_wrapper_forces_test_tasks_without_rebuilding_all_dependencies(self):
+        result, commands = self.invoke(wrapper=True)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotIn("--rerun-tasks", commands)
+        self.assertEqual(7, len(re.findall(r"(?<!\S)--rerun(?:\s|$)", commands)), commands)
+        self.assertEqual(3, commands.count("GRADLE"), commands)
 
     def test_wrapper_setup_failure_prevents_gradle_and_record(self):
         result, commands = self.invoke(wrapper=True, home="com.google.android.sdksetup/.DefaultActivity")
