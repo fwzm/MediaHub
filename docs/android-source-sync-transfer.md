@@ -4501,3 +4501,103 @@ A 第一次只红一条是个教训：`merge` 的 `baseline` 参数在**摘要�
 - 两端把对端基线喂进规划器（`plan(envelope, locals, baseline)`），保持跨端同义；
 - 被扣凭据条目与冲突条目的逐条裁决 UI，含跳过出口；
 - 真实两机搬运与 Windows 同步页真 GUI 证据（后者需要用户授权的空闲窗口）。
+
+## §46 W6-77：Android 的批准闸门（对齐 Windows `SourceSyncApprovalGate`）
+
+### §46.1 结论先行
+
+W6-76 只给了 Android「一轮合并预演」——看得到会推什么、会拉什么、哪几条要人裁决，但**没有任何东西能把裁决落下来**：Windows 有 `SourceSyncApprovalGate.Decide`（410 行）跑在 `SourceSyncImportRound.Preview` 与 `ApplyAsync` 之间，Android 侧连类型都没有。W6-77 把闸门按 Windows 逐条移植过来（`core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncApprovalGate.kt`，297 行），并给它补了三段跨语言黄金向量（`approvalCodes` / `approvalCases` 23 条 / `approvalRoundCases` 7 条），最后把默认裁决接进 W6-76 的预演（`SourceSyncRoundPreview.gate`）。
+
+### §46.2 缺的是什么
+
+| 能力 | Windows | Android（W6-77 之前） |
+| --- | --- | --- |
+| 逐条裁决 | `SourceSyncApprovalGate.Decide` 三个重载（Plan / SyncRoundResult / Item 列表） | 无 |
+| 永不许可三类 | `NeverAllowableReasons`：凭据 / 未知类型 / 本机不支持 | 无（W6-74 只在导入期单独拦凭据） |
+| 风险标记 | `RiskyReasons` 四条 + `ambiguous-` 前缀 | 无 |
+| 裁决结果 | `SourceSyncApprovalResult`：Applied / Skipped / Withheld / BlockingReasons / AcknowledgedRisk / AppliedWithRisk | 无 |
+| 预演出口 | `SourceSyncApplyPreview.CanApply => Gate.CanApply` | 只有三桶计数，没有「现在能不能执行」 |
+
+差的是**中间那层**：预演说「这 3 条要人裁决」，但没有东西回答「如果我什么都不点，会执行哪几条；哪些连点允许都不行」。
+
+### §46.3 做法
+
+新文件 `SourceSyncApprovalGate.kt`（**12816 B / 297 行**），逐个类型与 `SourceSyncApprovalGate.cs` 对齐：
+
+- `enum class SourceSyncApprovalChoice { SKIP, ALLOW }`；`data class SourceSyncApprovalDecision(syncSourceId, choice)` + `allow()/skip()`；
+- `data class SourceSyncApprovalItem(...)` 11 个字段与 C# 同名同义，加两个适配器：`fromCandidate`（导入规划器的候选）与 `fromRoundEntry`（一轮合并的条目）；
+- `data class SourceSyncApprovalResult(applied, skipped, withheld, blockingReasons, acknowledgedRisk, appliedWithRisk)` + `canApply / isBlocked / appliedCount / skippedCount / withheldCount / isEmpty / find / isWithheld / isApplied / EMPTY`，`toString` 与 C# 同格式（`Approval(applied=N, skipped=N, withheld=N, canApply=B, risk=B)`）；
+- `object SourceSyncApprovalGate`：`AMBIGUOUS_REASON_PREFIX = "ambiguous-"`、`NEVER_ALLOWABLE`（3 条）、`RISKY`（4 条）、`isNeverAllowable / isRisky / isApplicable`、三个 `decide` 重载。
+
+**判据顺序不许改**（与 C# 一致，负向对照专门钉过）：
+
+1. 先建 choices 字典：身份 trim + ASCII 大小写不敏感，**后写覆盖**（last decision wins）；决策身份为空 → `IllegalArgumentException("An approval decision needs a syncSourceId.")`；
+2. 逐条：身份为空 → `"An approval item needs a syncSourceId."`；
+3. **先判永不许可** → 进 withheld + blocking（去重、首现顺序），**即使显式允许也不放行**；
+4. 再判动作不可执行（`NoChange / IgnoreStale / Unsupported`）→ skipped；
+5. 再有决策按决策，**没有决策时 `allow = !requiresApproval`**（要人确认的默认跳过）；
+6. 允许 → applied；`requiresApproval` 的计入 appliedWithRisk，理由属风险集时置 acknowledgedRisk。
+
+`fromRoundEntry` 的两个坑（向量专门钉住）：`SyncRoundEntry` 只有 kind + reason，没有 action，映射是 `Added→Create / Updated→Update / Removed→Delete`，其余按 reason 落 `Unsupported` 或 `NoChange`；行里的 URL 取**首选端点原样**（`isPrimary` 优先、其次最小 `sortOrder`），**不做归一化**。另外 `decide(round)` 只吃 `apply + requiresApproval` 两桶，**ignored 根本不进闸门**。
+
+服务层：`AndroidSourceSyncService.planRound`（673 → **700 行 / 36375 B**）在合并完成后跑一次 `SourceSyncApprovalGate.decide(round)`，把结果放进 `SourceSyncRoundPreview.gate`，并暴露四个透视：`gateAppliedCount / withheldCount / blockingReasons / canApply`。默认裁决的语义写进 KDoc：**无需确认的放行，需要确认的先跳过，永不许可的三类直接扣住**。
+
+### §46.4 黄金向量（`approvalCodes` / `approvalCases` / `approvalRoundCases`）
+
+生成器在仓库外（`D:\mh-verify\baseline-vectors\Sections77.cs`，26257 B / 585 行），每条用例**先跑 Windows 权威实现再逐条比对声明值**，不符即抛 `InvalidOperationException`，所以向量不可能悄悄失去它要证明的规则。产物 288781 → **328400 B**，sha256 `7ea77cc5f3439d44712add732586775377910ad967e8238ab61888159bbcb694`，两树各一份（`core/common/src/test/resources/sync/` 与 `windows/tests/assets/`）。
+
+`approvalCodes` 把三张清单写成字面值，两端测试都先断言它们（不复用各自常量，避免自证）：
+
+| 键 | 值 |
+| --- | --- |
+| `neverAllowable` | `secrets-require-approval` / `unknown-source-type` / `not-supported-on-windows` |
+| `risky` | `delete-vs-update` / `update-vs-delete` / `field-conflict` / `same-revision-different-content` |
+| `ambiguousPrefix` | `ambiguous-` |
+
+`approvalCases` 23 条，覆盖：无需决策直接执行 / 审批条目默认跳过 / 显式允许带风险 / 显式跳过压过默认执行 / **跳过压过允许**（同身份）/ 后写覆盖 / 决策 trim + 大小写不敏感 / 陌生身份的决策不改变任何东西 / 三类永不许可 / 陈旧条目跳过 / `NoChange` 跳过 / 无理由的 `Unsupported` 跳过（不能用 unknown-source-type，否则被永不许可先截走）/ `ambiguous-` 允许但记风险 / `legacy-identity-match` 允许但不记风险 / 墓碑批准允许但不记风险 / 四条风险理由全部标记 / blocking 去重按首现顺序 / 三桶分区 / 两条空身份抛异常。
+
+`approvalRoundCases` 7 条专钉适配器：apply 桶免决策 / approval 桶默认跳过（**同一轮里的 ignored 条目根本不出现**）/ approval 桶可被允许 / 行里显示首选端点原样（`[{secondary,sort2},{primary,sort9}] → "https://primary.local/"`）/ 墓碑行不带 record 字段（`r-7|Delete|tombstone-requires-approval|true|-|-|-|-|4|4`）/ 凭据条目被扣 / 不支持类型条目被扣。
+
+### §46.5 两端契约用例
+
+| 侧 | 文件 | 用例 | 结果 |
+| --- | --- | --- | --- |
+| Kotlin | `core/common/src/test/kotlin/.../SourceSyncBaselineContractTest.kt` 741 → **893 行** | +`approval_cases_match_the_windows_contract`（@Test 15 → **16**） | 绿 |
+| C# | `windows/tests/MediaHub.Tests/BaselineContractTests.cs` 899 → **1042 行** | +`ApprovalCasesMatchTheWindowsContract`（[Fact] 16 → **17**） | 绿 |
+
+`approvalCases` 里没有 `windowsOnly` 用例，两端都全跑（23 + 7）：Kotlin 的 `error` 用例断言抛 `IllegalArgumentException` 且消息含稳定片段，C# 断言 `Assert.Throws<ArgumentException>`。
+
+### §46.6 负向对照（先红后绿，全部逐字节还原）
+
+| 编号 | 改动 | 结果 |
+| --- | --- | --- |
+| Kotlin A | 默认裁决 `?: !item.requiresApproval` → `?: true` | `approval_cases` 红（16 例 1 failed，`SourceSyncBaselineContractTest.kt:810`） |
+| Kotlin B | 永不许可判定挪到「动作可执行」之后 | 红（:811） |
+| Kotlin C | `primaryUrl` 改取 `endpoints.first()`（不认 primary） | 红（:790，行投影那条） |
+| Kotlin D | `planRound` 里 `gate = SourceSyncApprovalResult.EMPTY`（不跑闸门） | `core:database` 220 例 4 failed，四条 gate 用例全红 |
+| C# D | `allow = !item.RequiresApproval` → `allow = true` | 红：`Expected: [] Actual: ["m-2"]`（`BaselineContractTests.cs:362`） |
+
+### §46.7 本机实跑计数
+
+| 模块 | 套件 | 用例 | 失败 | skipped |
+| --- | --- | --- | --- | --- |
+| `core/common` | 48 | **659** | 0 | 11 |
+| `core/database` | 23 | **220** | 0 | 12 |
+| `feature/settings` | 26 | 384 | 0 | — |
+| 合计 | 97 | **1263** | 0 | — |
+
+C#：`MediaHub.Tests` **1652** 通过 / 0 失败（1651 → +1）。`--required-suite` 仍 **59**：新用例都落在已钉住的 `SourceSyncBaselineContractTest` 与 `SourceSyncRoundPreviewTest` 里，无需改 workflow。
+
+### §46.8 未覆盖（如实留着）
+
+1. **仍不落库**：闸门只算裁决，Android 没有 `SourceSyncImportRound.ApplyAsync` 的对等物——「批准之后真正写」还差 W6-78。
+2. **基线仍不进规划器**：`SourceSyncPlanner.plan` 两端都不收基线，跨端仍只到「一轮合并」这层。
+3. **逐条裁决 UI**：`blockingReasons` 与三桶只在服务层可见，界面仍只有计数。
+4. **真实两机**：`NOT_RUN`；真机 instrumentation `DEVICE_UNVERIFIED`。
+
+### §46.9 下一步
+
+- 给 Android 补 `SourceSyncImportRound` 的对等物（预演 → 逐条批准 → 应用，含基线只在写入后推进）；
+- 两端把对端基线喂进 `SourceSyncPlanner`；
+- 被扣凭据 / 冲突条目的逐条裁决页（含跳过出口）；
+- 「忘记这台设备」与取消接收 observability；真实两机搬运。

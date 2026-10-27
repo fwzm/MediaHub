@@ -10,6 +10,8 @@ import com.mediahub.core.common.sync.SourceSyncBaselineSaveResult
 import com.mediahub.core.common.sync.SourceSyncBaselineStoreReasons
 import com.mediahub.core.common.sync.SourceSyncCandidate
 import com.mediahub.core.common.sync.SourceSyncCodec
+import com.mediahub.core.common.sync.SourceSyncApprovalGate
+import com.mediahub.core.common.sync.SourceSyncApprovalResult
 import com.mediahub.core.common.sync.SourceSyncDigest
 import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncEndpointPolicy
@@ -383,6 +385,10 @@ class AndroidSourceSyncService(
             baseline = baseline,
         )
 
+        // 默认裁决（没有任何显式选择）：无需确认的条目放行，需要确认的先跳过，
+        // 永不许可的三类（凭据 / 未知类型 / 本机不支持）直接扣住。这正是「看一眼会做什么」。
+        val gate = SourceSyncApprovalGate.decide(round)
+
         return SourceSyncRoundPreview(
             peerDeviceId = envelope.deviceId,
             baselineKnown = peerBaseline?.isEmpty == false,
@@ -390,6 +396,7 @@ class AndroidSourceSyncService(
             derivedIdentityServerIds = local.derivedIdentityServerIds,
             skippedServerIds = local.skippedServerIds,
             round = round,
+            gate = gate,
         )
     }
 
@@ -647,6 +654,14 @@ data class SourceSyncRoundPreview(
     val rejectedReason: String? = null,
     val rejectedMessage: String? = null,
     val round: SyncRoundResult = SyncRoundResult.EMPTY,
+    /**
+     * W6-77：把 [round] 交给批准闸门后的默认裁决。
+     *
+     * 传进来的信封里没有任何显式选择，所以这里是「如果现在点确认，会做什么」：无需确认的直接放行，
+     * 需要确认的一律先跳过，凭据 / 未知类型 / 本机不支持直接扣住（[blockingReasons]）。
+     * 想真正执行，用 [SourceSyncApprovalGate.decide] 带显式决策再算一次。
+     */
+    val gate: SourceSyncApprovalResult = SourceSyncApprovalResult.EMPTY,
 ) {
     val isRejected: Boolean get() = !rejectedReason.isNullOrBlank()
 
@@ -669,4 +684,16 @@ data class SourceSyncRoundPreview(
     val hasWork: Boolean get() = round.hasWork
 
     val isEmpty: Boolean get() = round.isEmpty
+
+    /** 默认裁决下本轮会真正执行的条目数（可能小于 [applyCount]，因为要确认的默认被跳过）。 */
+    val gateAppliedCount: Int get() = gate.appliedCount
+
+    /** 默认裁决下被扣住、连「允许」都不放行的条目数。 */
+    val withheldCount: Int get() = gate.withheldCount
+
+    /** 被永久扣住的原因码（首现顺序，去重）。 */
+    val blockingReasons: List<String> get() = gate.blockingReasons
+
+    /** 默认裁决下是否有可以直接执行的条目；false 表示光看不够，得先有人点确认。 */
+    val canApply: Boolean get() = gate.canApply
 }
