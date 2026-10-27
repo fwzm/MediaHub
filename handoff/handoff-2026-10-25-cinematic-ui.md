@@ -32,7 +32,8 @@
 - `assembleDebug`、`lintDebug`、`app:assembleDebugAndroidTest` 均在该次完整命令内成功；22 份 lint XML / 0 errors / 125 warnings（未宣称零警告）。
 - 最终 Debug APK SHA-256：`11dd22d4a717a9c6268dae2037016850149cedd59e45f45884213808ff1fd6f0`。日志：`D:/deepseek_test/mh-cinematic-evidence/cinematic-release-gate.log`。
 - 发布提交：`eda3e525f5e47b3970f6c2b82dee54a28008a9d0`；已普通 push `feature/cinematic-ui` 并创建 [Draft PR #73](https://github.com/fwzm/MediaHub/pull/73)（base=main，未合并）。
-- 新 head 已触发 Android CI `40525066312`、windows-ci `40525066278`、Sync utility safety `40525066379`；当前 CI_PENDING，待实际结果。真机 instrumentation 仍 BLOCKED_ENV。
+- `cdb16a67` Android `40525920124` 在 API32/36 各 30 分钟超时；每 API 的 138 个原有测试 +1 备份测试通过，新四页尚未启动。原因是每次 connected 调用都 `--rerun-tasks` 重建依赖。`fa40092d` 改为仅具体测试任务 `--rerun`，脚本回归 RED 1 → GREEN，65 tests / 0 failures，真实 Gradle dry-run exit 0；新 CI `40538420793` 等待结果。
+- 自建 API36 模拟器直接运行四页测试，四个用例都执行到截图阶段，但 `getExternalFilesDir` 目录创建失败，真实结果为 **4 tests / 4 failures**（`INSTRUMENTATION_CODE=-1`，不是 PASS）。改用 `targetContext.cacheDir/cinematic` 后重新构建并安装测试 APK，实际复跑为 **OK (4 tests)**，四个用例的 `INSTRUMENTATION_STATUS_CODE` 均为 0，Time 33.553s；测试 APK SHA-256 `f59d2f43c70198871b2cceea3773cc7a8f51f968aa84cab4fb722ef778fc992b`。原始 RED 日志 `cinematic-owned-api36-tests.log` 和 GREEN 日志 `cinematic-owned-api36-tests-green.log` 均保留。
 
 ## Rules and next steps
 

@@ -184,7 +184,7 @@ class CinematicVisualTest {
         instrumentation.waitForIdleSync()
         Thread.sleep(400)
         val bitmap = composeRule.onRoot().captureToImage().asAndroidBitmap()
-        val directory = File(instrumentation.context.getExternalFilesDir(null), "cinematic")
+        val directory = File(instrumentation.targetContext.cacheDir, "cinematic")
         check(directory.isDirectory || directory.mkdirs())
         FileOutputStream(File(directory, "$name.png")).use {
             check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
