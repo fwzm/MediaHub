@@ -74,6 +74,9 @@ class SourceSyncBaselineContractTest {
             endpoints = entry.getValue("endpoints").jsonArray.map { endpointOf(it) },
             recordRevision = long(entry, "recordRevision"),
             fieldVersion = int(entry, "fieldVersion"),
+            // 不透明片段：原样带过来。合并语义要按它判「这条带秘密，必须人工确认」，
+            // 若在这里丢掉，secrets-require-approval 就会静默变成一次直接写入。
+            secrets = entry["secrets"]?.takeIf { it !is JsonNull },
         )
     }
 
@@ -470,6 +473,148 @@ class SourceSyncBaselineContractTest {
                 assertEquals(label + " (isPrimary)", boolean(want, "isPrimary"), actual.isPrimary)
             }
         }
+    }
+
+    // ------------------------------------------------------------ 摘要（W6-73）
+
+    private fun kindOf(name: String): SourceSyncChangeKind = when (name) {
+        "Added" -> SourceSyncChangeKind.ADDED
+        "Updated" -> SourceSyncChangeKind.UPDATED
+        "Removed" -> SourceSyncChangeKind.REMOVED
+        else -> throw IllegalArgumentException("未知的变化名 " + name)
+    }
+
+    private fun directionOf(name: String): SyncMergeDirection = when (name) {
+        "Push" -> SyncMergeDirection.PUSH
+        "Pull" -> SyncMergeDirection.PULL
+        "Both" -> SyncMergeDirection.BOTH
+        else -> throw IllegalArgumentException("未知的方向名 " + name)
+    }
+
+    private fun tombstoneOf(element: JsonElement): SourceTombstone {
+        val entry = element.jsonObject
+        return SourceTombstone(
+            syncSourceId = text(entry, "syncSourceId"),
+            deletedAtEpochMs = long(entry, "deletedAtEpochMs"),
+            recordRevision = long(entry, "recordRevision"),
+        )
+    }
+
+    private fun tombstonesOf(element: JsonElement?): List<SourceTombstone> {
+        if (element == null || element is JsonNull) return emptyList()
+        return element.jsonArray.map { tombstoneOf(it) }
+    }
+
+    private fun issueOf(element: JsonElement): SourceSyncDigestIssue {
+        val entry = element.jsonObject
+        return SourceSyncDigestIssue(
+            syncSourceId = nullableText(entry, "syncSourceId") ?: "",
+            reason = text(entry, "reason"),
+        )
+    }
+
+    private fun digestItemOf(element: JsonElement): SourceSyncDigestItem {
+        val entry = element.jsonObject
+        return SourceSyncDigestItem(
+            syncSourceId = text(entry, "syncSourceId"),
+            kind = kindOf(text(entry, "kind")),
+            record = entry["record"]?.takeIf { it !is JsonNull }?.let { recordOf(it) },
+            tombstone = entry["tombstone"]?.takeIf { it !is JsonNull }?.let { tombstoneOf(it) },
+            changedFields = entry.getValue("changedFields").jsonArray.map { text(it) },
+            contentChanged = boolean(entry, "contentChanged"),
+            recordRevision = long(entry, "recordRevision"),
+            fieldVersion = int(entry, "fieldVersion"),
+        )
+    }
+
+    private fun digestOf(element: JsonElement): SourceSyncDigest {
+        val entry = element.jsonObject
+        return SourceSyncDigest(
+            items = entry.getValue("items").jsonArray.map { digestItemOf(it) },
+            issues = entry.getValue("issues").jsonArray.map { issueOf(it) },
+            isFullSnapshot = boolean(entry, "isFullSnapshot"),
+        )
+    }
+
+    private fun roundEntryOf(element: JsonElement): SyncRoundEntry {
+        val entry = element.jsonObject
+        return SyncRoundEntry(
+            syncSourceId = text(entry, "syncSourceId"),
+            direction = directionOf(text(entry, "direction")),
+            kind = kindOf(text(entry, "kind")),
+            reason = text(entry, "reason"),
+            record = entry["record"]?.takeIf { it !is JsonNull }?.let { recordOf(it) },
+            tombstone = entry["tombstone"]?.takeIf { it !is JsonNull }?.let { tombstoneOf(it) },
+            conflictingFields = entry.getValue("conflictingFields").jsonArray.map { text(it) },
+            localRevision = long(entry, "localRevision"),
+            remoteRevision = long(entry, "remoteRevision"),
+            requiresApproval = boolean(entry, "requiresApproval"),
+        )
+    }
+
+    private fun roundResultOf(element: JsonElement): SyncRoundResult {
+        val entry = element.jsonObject
+        return SyncRoundResult.create(
+            apply = entry.getValue("apply").jsonArray.map { roundEntryOf(it) },
+            requiresApproval = entry.getValue("requiresApproval").jsonArray.map { roundEntryOf(it) },
+            ignored = entry.getValue("ignored").jsonArray.map { roundEntryOf(it) },
+        )
+    }
+
+    @Test
+    fun digest_cases_match_the_windows_contract() {
+        for (entry in entries("digestCases")) {
+            val name = text(entry, "name")
+            val baseline = entry["baseline"]?.takeIf { it !is JsonNull }?.let { baselineOf(it) }
+            val digest = SourceSyncDigest.build(
+                records = recordsOf(entry["records"]),
+                baseline = baseline,
+                deletions = tombstonesOf(entry["deletions"]),
+            )
+            val want = entry.getValue("digest").jsonObject
+            assertEquals(name + " (items)", digestOf(want).items, digest.items)
+            assertEquals(name + " (issues)", digestOf(want).issues, digest.issues)
+            assertEquals(name + " (isFullSnapshot)", boolean(want, "isFullSnapshot"), digest.isFullSnapshot)
+            assertEquals(name + " (isEmpty)", boolean(want, "isEmpty"), digest.isEmpty)
+            assertEquals(name + " (addedCount)", int(want, "addedCount"), digest.added.size)
+            assertEquals(name + " (updatedCount)", int(want, "updatedCount"), digest.updated.size)
+            assertEquals(name + " (removedCount)", int(want, "removedCount"), digest.removed.size)
+        }
+    }
+
+    @Test
+    fun merger_cases_match_the_windows_contract() {
+        var compared = 0
+        val skipped = ArrayList<String>()
+        for (entry in entries("mergerCases")) {
+            val name = text(entry, "name")
+            val local = digestOf(entry.getValue("local"))
+            val remote = digestOf(entry.getValue("remote"))
+            val baseline = entry["baseline"]?.takeIf { it !is JsonNull }?.let { baselineOf(it) }
+            if (boolean(entry, "windowsOnly")) {
+                // 这一条的期望值是「Windows 没有对应类型」。Android 的 ServerType 覆盖全部 12 个 wire 值，
+                // 所以必须能导入；跳过断言，但要证明跳过理由成立：类型在 Android 侧确实可解析。
+                skipped.add(name)
+                for (item in remote.items) {
+                    val record = item.record ?: continue
+                    val resolution = AndroidSourceTypeMap.resolve(record.sourceType)
+                    assertTrue(
+                        name + " (" + record.sourceType.wire + " 在 Android 侧应可解析)",
+                        resolution.isKnown && resolution.isSupported,
+                    )
+                }
+                continue
+            }
+            val want = entry.getValue("result").jsonObject
+            val actual = SyncRoundMerger.merge(local, remote, baseline)
+            assertEquals(name + " (apply)", roundResultOf(want).apply, actual.apply)
+            assertEquals(name + " (requiresApproval)", roundResultOf(want).requiresApproval, actual.requiresApproval)
+            assertEquals(name + " (ignored)", roundResultOf(want).ignored, actual.ignored)
+            assertEquals(name + " (hasWork)", boolean(want, "hasWork"), actual.hasWork)
+            compared++
+        }
+        assertEquals("只有 windowsOnly 的那一条跳过", entries("mergerCases").size - 1, compared)
+        assertEquals(listOf("windows-does-not-support-cloud-types"), skipped)
     }
 
     private companion object {

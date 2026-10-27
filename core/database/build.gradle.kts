@@ -64,6 +64,8 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.kotlinx.coroutines.test)
+    // W6-74：凭据闸门用例要造「带 secrets 块的信封」，需要能写下 JsonElement/JsonNull
+    testImplementation(libs.kotlinx.serialization.json)
     // A4：Room 3→4 迁移回归（MigrationTestHelper + schema JSON）
     testImplementation(libs.room.testing)
     testImplementation(libs.androidx.test.ext.junit)

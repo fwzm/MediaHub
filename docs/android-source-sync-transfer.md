@@ -4217,3 +4217,85 @@ XML 汇总（`<testsuite>` 属性相加，非估算）：
 - Android 侧 `SourceSyncDigest` / 增量导出（把基线真正用起来，而不是只记）；
 - Windows 同步页真 GUI UIA 证据（W10 U2/U3/U4 需要用户授权窗口）；
 - 归档格式若要演进（新 KDF、新字段），先写契约再两端同步加码——不要单边加。
+
+## §43 Android 侧同步摘要与两轮合并（W6-73）+ 凭据闸门与基线读数（W6-74）
+
+### §43.1 结论先行
+
+1. **W6-73**：Android 补齐了与 Windows 同名的三件东西——{BT}SourceSyncDigest{BT}（本地全量快照 → 增量摘要）、{BT}SyncRound{BT}（一轮合并的方向 / 桶 / 理由码）、{BT}SyncRoundMerger{BT}（本地与对端两轮合并）。三者都由 Windows 权威实现生成黄金向量、Kotlin 逐字段对照，向量文件 {BT}baseline-vectors.json{BT} 由 143420 B 增至 **243491 B**，两树 sha256 逐字节相等（{BT}b4dbd947…bea7eac6e5{BT}）。
+2. **W6-74**：Android 的导入路径过去对 {BT}SourceRecord.secrets{BT} **零处理**——对端带密封凭据的记录会被当成一条普通来源静默写库；Windows 拒绝这样做（理由码 {BT}secrets-require-approval{BT}）。本轮把这个闸门补上，**且覆盖是无条件的**：连规划器判「无变化」的条目也要人看过。
+3. **W6-74**：对端基线过去**只写不读**（W6-72 只做了 {BT}save{BT}）。本轮在写入之前读一次并如实汇报「上次跟这台设备收敛到第几条」，读取失败或没有基线存储一律折成「不知道」，绝不让导入本身失败。
+4. 判据只写一遍：新增 {BT}SourceSyncSecrets{BT}，归档写出（{BT}ArchiveWriter{BT}）与 Android 导入共用同一个「这条记录是否携带真凭据」判断，{BT}secrets: null{BT} 不算携带（两端同义）。
+
+### §43.2 W6-73：三个新类型（Android 对等物）
+
+| 文件 | 行数 | 职责 |
+| --- | --- | --- |
+| {BT}core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncDigest.kt{BT} | 260 | 由**本地**全量快照 + 上一轮基线算增量摘要：{BT}Added{BT} / {BT}Updated{BT} / {BT}Removed{BT}，附 4 个稳定 issue 码（缺 id、无可用线类型、本机 id 重复、墓碑指向仍存在的记录） |
+| {BT}…/SyncRound.kt{BT} | 121 | {BT}SyncMergeDirection{Push, Pull, Both}{BT}、{BT}SyncRoundEntry{BT}（方向 / 桶 / 理由 / 记录 / 墓碑 / 冲突字段 / 两端修订号 / 是否需确认）、{BT}SyncRoundReasons{BT} 18 个理由码、{BT}SyncRoundResult.create() 三桶互斥校验{BT} |
+| {BT}…/SyncRoundMerger.kt{BT} | 469 | 本地摘要 × 对端摘要 × 基线 → 三桶结果；含「同内容看修订号」「字段冲突」「墓碑 vs 更新」「未知线类型」「带凭据需确认」等 22 条判定 |
+
+**修掉一个真缺陷（先红后绿）**：合并键集合原先按**各自原始拼写**求并集，本机写 {BT}A{BT}、对端写 {BT}a{BT} 时会产出两条决策，{BT}SyncRoundResult.create(){BT} 随即抛
+{BT}java.lang.IllegalArgumentException: Sync round entry for a is in more than one bucket.{BT}
+改成先用 ASCII 小写身份去重、再按 ordinal 排序，并保留**本机拼写**：一条来源只出一条决策，黄金向量 {BT}ordinal-key-sort{BT} 期望的键就是本机那个 {BT}A{BT}。
+
+**另一处「测试自己会撒谎」**：Kotlin 与 C# 两侧的 {BT}recordOf{BT} 夹具原先都只取身份字段，把信封里的 {BT}secrets{BT} 块丢掉了，于是 {BT}secrets-require-approval{BT} 那条用例退化成了普通直写（首红就是 {BT}expected:<[]> but was:<[SyncRoundEntry(... reason=apply-remote-change ...)]{BT}）。两端的 {BT}recordOf{BT} 都改为原样携带该块。
+
+**用例**：Kotlin 契约 14 个 {BT}@Test{BT}（原 12 + {BT}digest_cases_match_the_windows_contract{BT} + {BT}merger_cases_match_the_windows_contract{BT}，消费 {BT}digestCases{BT} 12 条 / {BT}mergerCases{BT} 22 条）；C# 契约 15 个 {BT}[Fact]{BT}（Windows 侧不跳过 {BT}windows-does-not-support-cloud-types{BT}——那条只有 Windows 该产出 {BT}not-supported-on-windows{BT}）。C# 侧还做了一次**负向对照**：把 {BT}Merge(local, remote){BT} 交换成 {BT}Merge(remote, local){BT}，22 条用例全报 {BT}Pull/apply-remote-change{BT} vs {BT}Push/push-local-change{BT}，证明断言绑的是真实方向语义。
+
+### §43.3 W6-74 的缺口（改之前是什么样）
+
+- {BT}AndroidSourceSyncService.snapshotOf(){BT} 从头到尾没看过 {BT}record.secrets{BT}：对端带密封凭据的记录与普通记录走同一条写库路径。{BT}SourceSyncModels.kt{BT} 的 KDoc 早就写着「凭据必须经本机 SecretStorage 重新封装」，但一行实现都没有。
+- {BT}baselineStore.load(peerDeviceId){BT} 全仓无人调用（W6-72 只接了 {BT}save{BT}）：导入前不知道上次收敛到哪一条，导入后也不汇报。
+- Windows 的权威行为写在 {BT}windows/src/MediaHub.Sync/SourceSyncImportRound.cs{BT} 的 {BT}Preview(){BT}：{BT}if (FindRecord(peer, item.SyncSourceId)?.Secrets is not null) { item = item with { Reason = SecretsRequireApproval, RequiresApproval = true }; }{BT}——**不看规划器原来给什么理由**，直接盖章。基线在那里也只是读取并汇报 {BT}BaselineKnown{BT} / {BT}BaselineEntryCount{BT}，不参与规划。
+
+### §43.4 做法（四处改动）
+
+1. **新增** {BT}core/common/…/sync/SourceSyncSecrets.kt{BT}：唯一判据 {BT}carriesBlock(record){BT} / {BT}carriesBlock(envelope){BT}，只回答「有没有」，不解析、不校验、不搬运凭据内容，也不进日志。{BT}JsonNull{BT} 是 Kotlin 对象而非 Kotlin null，所以判据必须写成 {BT}secrets !is JsonNull{BT}。
+2. **{BT}ArchiveWriter{BT}** 的私有 {BT}carriesSecrets(envelope){BT} 改为调用同一判据（行为不变，仍由 {BT}ArchiveRoundTripTest.a_json_null_secrets_block_is_not_credentials_on_either_side{BT} 钉住）。
+3. **{BT}AndroidSourceSyncService.apply(){BT}**：
+   - {BT}val withheldIndexes = secretsWithheldIndexes(envelope){BT}；
+   - {BT}val gated = gateSecrets(plan.items, withheldIndexes){BT}——把命中条目的 {BT}reason{BT} 覆盖成 {BT}secrets-require-approval{BT}、{BT}requiresUserApproval = true{BT}，**保留** action / 两端修订号 / {BT}serverId{BT}，审批界面要靠它们说清「要对哪一条做什么」；
+   - 写库循环改读 {BT}gated[index]{BT}（{BT}requiresUserApproval{BT} 的条目天然不满足 {BT}isWritable{BT}）；
+   - 分桶循环里新增一支 {BT}withheldIndexes.contains(index) -> pending{BT}，位置在「已写 / 已失败」之后、在 {BT}NO_CHANGE || IGNORE_STALE -> ignored{BT} 之前——这样被扣下的条目永远不会落进 {BT}ignored{BT}；
+   - {BT}val peerBaseline = loadPeerBaseline(envelope.deviceId){BT} 在写入**之前**执行（没有存储 / 设备号为空 → `null`；读取抛异常 → `null`，{BT}CancellationException{BT} 照常上抛）；
+   - {BT}SourceSyncImportResult{BT} 新增 {BT}baselineKnown{BT} / {BT}baselineEntryCount{BT} / {BT}secretsWithheldSyncSourceIds{BT}（+ {BT}secretsWithheldCount{BT}），只带 {BT}syncSourceId{BT}，**绝不回显凭据字节**。
+4. {BT}core/database/build.gradle.kts{BT} 加一行 {BT}testImplementation(libs.kotlinx.serialization.json){BT}：造「带 secrets 块的信封」需要能写下 {BT}JsonElement{BT} / {BT}JsonNull{BT}（core:common 对它是 {BT}implementation{BT} 而非 {BT}api{BT}，不对外暴露）。
+
+### §43.5 先红后绿 + 两条负向对照（实测）
+
+新增 {BT}core/database/src/test/kotlin/com/mediahub/core/database/sync/SourceSyncSecretsGateTest.kt{BT} 7 例：凭据记录不落库且转人工；被扣下的条目不阻塞兄弟、也不进基线；**已认识的记录突然带上凭据时从 {BT}ignored{BT} 拉回 {BT}requiresApproval{BT}**（内容指纹不含 secrets，规划器判 NoChange，这一例专钉新加的那一支）；{BT}secrets: null{BT} 不算凭据（同时直接断言判据本身）；结果对象里不出现凭据字节；基线首轮「不知道」、次轮「已知 N 条」；没有基线存储时如实报「不知道」。
+
+两条负向对照都在本机实跑过，随后源文件已按备份还原（sha 一致）：
+
+| 对照 | 故意改坏的地方 | 结果 |
+| --- | --- | --- |
+| A | 删掉 {BT}withheldIndexes.contains(index) -> pending{BT} 这一支 | {BT}206 tests completed, 1 failed{BT}：{BT}an_already_known_record_that_suddenly_carries_credentials_is_held_instead_of_ignored{BT} → {BT}expected:<0> but was:<1>{BT}（ignoredCount 变 1） |
+| B | 把 {BT}gateSecrets{BT} 改成直通（{BT}val gated = plan.items{BT}） | {BT}206 tests completed, 3 failed{BT}：两条「凭据不落库」用例 {BT}expected:<1> but was:<2>{BT}（写了两条），NoChange 那例 {BT}expected:<[secrets-require-approval]> but was:<[up-to-date]>{BT} |
+
+### §43.6 实跑计数
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 | 变化（W6-73 末） |
+| --- | --- | --- | --- | --- | --- |
+| {BT}core/common{BT} | 48 | **657** | 0 | 11 | 不变（本轮只新增一个被共用的判据对象） |
+| {BT}core/database{BT} | **22** | **206** | 0 | 12 | 21 → 22 套件（+1 = {BT}SourceSyncSecretsGateTest{BT}）、199 → 206（+7） |
+| {BT}feature/settings{BT} | 26 | 384 | 0 | 0 | 本轮未动 |
+
+三模块合计 **1247** 例（1240 → +7）。命令：{BT}gradlew.bat :core:common:testDebugUnitTest :core:database:testDebugUnitTest --offline --console=plain{BT}，BUILD SUCCESSFUL in 48s，数字取自 {BT}build/test-results/testDebugUnitTest/*.xml{BT} 的 {BT}<testsuite>{BT} 属性相加。
+
+### §43.7 未覆盖（如实保留）
+
+1. **真实两机搬运仍 NOT_RUN**（同 §33–§42 的口径）：一台写基线、另一台读，需要第二台机器。
+2. **凭据仍是「一律不落地」**：确认之后的正确路径是「在本机重新输入凭据 → 经 SecretStorage 重新封装」，本轮的产出只是**不再静默信任对端密文**；确认 UI、重新封装、逐源验证三态都还没做。
+3. **基线读数只用于汇报**：{BT}export(){BT} 仍未读基线，「按基线只请求变化」的接线没做（两端都还没接，Windows 的 {BT}Preview{BT} 也只是汇报）。
+4. **缺一个「取消接收 / 忘记这台设备」的入口**：{BT}baselineKnown{BT} 已经能告诉界面「跟这台设备同步过」，但清空基线的动作没有出口。
+5. **不涉及 GUI 与设备**：本轮全是 JVM 单测；Compose 断言未加，真机 {BT}DEVICE_UNVERIFIED{BT} 口径不变。
+6. **Windows 侧本轮零改动**：闸门与基线读数在 Windows 早已存在（W6-10 / W6-40），本轮只是让 Android 对齐；C# 侧唯一相关动作是 W6-73 的契约用例。
+
+### §43.8 下一步
+
+- 把基线接进 {BT}export(){BT}：先读上一轮基线，只把 {BT}SourceSyncDigest{BT} 判为变化的部分放进信封（这才是「增量」）；
+- 「忘记这台设备」：清基线 + 明确告知对端；
+- 确认 UI：逐条列出被扣下的条目、说明「凭据必须在本机重输」，并给出「跳过」出口；
+- 真实两机搬运（同时关闭 §42.10 第 1 条等六处「待第二台机器」项）；
+- Windows 同步页真 GUI UIA 证据（W10 U2/U3/U4 需要用户授权窗口）。

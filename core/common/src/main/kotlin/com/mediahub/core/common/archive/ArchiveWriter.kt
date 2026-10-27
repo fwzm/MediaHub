@@ -2,6 +2,7 @@ package com.mediahub.core.common.archive
 
 import com.mediahub.core.common.sync.SourceSyncCodec
 import com.mediahub.core.common.sync.SourceSyncEnvelope
+import com.mediahub.core.common.sync.SourceSyncSecrets
 import java.nio.ByteBuffer
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
@@ -115,14 +116,9 @@ object ArchiveWriter {
     /**
      * 任一来源带**非 null 值**的 secrets 块即为「携带凭据」。
      *
-     * 判据必须排除 JSON null：Windows 的原话是 ValueKind != Null，即 secrets: null 不算携带。
-     * Kotlin 里 JsonNull 是一个对象而不是 Kotlin null，只写 != null 会把显式 null 误判成凭据，
-     * 于是两端对同一信封给出不同结论（Windows 允许写、Android 拒绝）——这是跨端契约上的真缺陷，
-     * 由 ArchiveRoundTripTest 的 a_json_null_secrets_block_is_not_credentials_on_either_side 钉住。
+     * 判据统一在 [SourceSyncSecrets.carriesBlock]：Android 导入路径用的是同一条，
+     * 两端由此不会对同一份信封给出不同结论（Windows 的原话是 ValueKind != Null）。
      */
     private fun carriesSecrets(envelope: SourceSyncEnvelope): Boolean =
-        envelope.sources.any { source ->
-            val secrets = source.secrets
-            secrets != null && secrets !is kotlinx.serialization.json.JsonNull
-        }
+        SourceSyncSecrets.carriesBlock(envelope)
 }
