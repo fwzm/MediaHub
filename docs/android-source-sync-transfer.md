@@ -5182,3 +5182,77 @@ C# 未动（`MediaHub.Tests` 1656 / 全仓 1760 口径）。instrumentation 的�
 3. 两端把对端基线喂进 `SourceSyncPlanner`（改签名要两端一起动）。
 4. 监听卡「取消接收」可观测（现在只有状态行）。
 5. 真 Room 级联：`ServerRemoveHandler` 删除后 playlist / 播放进度行是否随之清理，用真库跑一例。
+## §54 W6-85：预览页里「永远不允许」的条目也给出路（下一步 + 复制身份）
+
+### 54.1 结论先行
+
+- W6-84 只修了**结果页**：写失败（refused）与永久扣住（withheld）的条目各自多了「下一步」与「复制身份」。可**预览页**才是用户真正做决定的地方——那里 `allowable = false` 的条目（凭据、未知类型、内容冲突、历史身份歧义）同样是死路：按钮置灰、只有一句中文说明，既没说清「点多少次允许都没用」，也没法把身份抄出来去对端处理。
+- 预览页的判断依据是 `SourceSyncEntry.candidate.reason`（原因**码**），不是 `blockReason`（那是一句中文说明，`SourceSyncImportLogic.blockReason` 生成，仅供展示）。W6-84 的 `nextStepOf(withheld: SourceSyncWithheldEntry)` 吃的是结果页的 `reason` 字段，两者语义相同、来源不同。
+- 本轮把它拆出唯一出口 `nextStepOfCode(code: String): String?`：结果页、预览页都走同一张表，同一个码在两边**必然**同一句话。表里新增两条码：`same-revision-different-content`（内容冲突）与 `ambiguous-legacy-identity`（历史身份歧义）——它们在预览页最常出现，且都属于「本页一律不放行」。
+- 「复制身份」在预览页只复制 `candidate.syncSourceId`；身份缺失时键会退化成位置键（`entry-0`、`entry-3`），那种键抄出去对端无从对照 ⇒ 干脆不给按钮。
+- 与 Windows 的关系：`SourceSyncImportRound.Preview` 只在信封里找不到记录/带凭据时改 `RequiresApproval` 与原因码，从不提供「下一步」文案或复制动作。Android 这里仍是**超集**，不构成判定分叉——两边对「能不能写」的判断完全一致，多的只是说明与抄写。
+
+### 54.2 缺的是什么
+
+| 现象 | 代码位置 | 后果 |
+| --- | --- | --- |
+| 预览页不可允许条目只有一行 `stateText` | `EntryCard` 的 `if (!entry.allowable)` 块 | 用户不知道下一步该做什么，只能猜 |
+| 身份在预览卡片上只是个显示文本 | `entry.key` / `candidate.syncSourceId` | 想拿去对端对照，只能手抄一长串 id |
+| 下一步文案只对结果页的 withheld 开放 | `nextStepOf(entry: SourceSyncWithheldEntry)` | 预览页即便想复用也拿不到（类型不同） |
+| 冲突/歧义两类码没有任何文案 | `nextStepOfCode` 的 when 表 | 最常见、最需要解释的两类反而静默 |
+
+### 54.3 做法
+
+1. **唯一出口**：`fun nextStepOfCode(code: String): String?` 承接全部判定，`nextStepOf(withheld)` 与新增的 `nextStepOf(entry: SourceSyncEntry)` 都退化成一行委托（`nextStepOfCode(entry.reason)` / `nextStepOfCode(entry.candidate.reason)`）。表内五条已知码，其余（含 `WITHHELD_WITHOUT_REASON`、未知码、空串）返回 null —— 不编建议。
+2. **两条新文案**：`SAME_REVISION_DIFFERENT_CONTENT` →「下一步：这条两端内容不一致（版本号相同），本页一律不放行；请在来源页手工对齐后再导出。」；`AMBIGUOUS_LEGACY_IDENTITY` →「下一步：本机有多条来源指向同一身份，先在来源页删掉多余的再重新导出。」
+3. **载荷函数**：`fun copyPayloadOf(entry: SourceSyncEntry): String?` 返回 `entry.candidate.syncSourceId?.trim()?.takeIf { it.isNotEmpty() }`。返回 null 就不渲染按钮，页面无需自己判空。
+4. **组件复用**：`IdentityCopyButton(identity, tag, onCopyIdentity)`（W6-84 已存在）直接用在 `EntryCard` 里，tag 规则 `SourceSyncImportTags.entryCopy(key)` = `sync.entry.copy:<键>`。下一步文本的 tag 是 `ENTRY_NEXT_STEP` = `sync.entry.nextStep`。
+5. **回调链**：`SourceSyncImportScreen` 的 `onCopyIdentity` 参数（W6-84 加的，默认空实现）透传给 `BucketSection` 再透传给 `EntryCard`；route 层的剪贴板注入无需再改。
+
+### 54.4 用例
+
+| 位置 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| `SourceSyncImportLogicTest` | `aPreviewEntryBorrowsTheSameNextStepTableAsTheResultPage` | 同码两句逐字相等；conflict / ambiguous / unknown 三句各不相同；未知码与空码返回 null |
+| `SourceSyncImportLogicTest` | `copyingAPreviewEntryCarriesTheRemoteIdentityAndNeverAPositionalKey` | 去空白后取身份；只有位置键时返回 null |
+| `SourceSyncImportScreenTest`（instrumentation） | `aPreviewEntryThatCanNeverBeAllowedCarriesItsNextStepAndItsIdentity` | 下一步行可见；点 `sync.entry.copy:sync-conflict` 回调收到身份；可允许条目**没有**复制按钮 |
+
+### 54.5 负向对照（三条全红，逐字节还原）
+
+| 编号 | 破坏方式 | 结果 |
+| --- | --- | --- |
+| A | `nextStepOfCode` 的 `when (code.trim())` → `when (code.trim() + "-broken")`（所有码都落进 else） | `aPreviewEntryBorrowsTheSameNextStepTableAsTheResultPage` + `everyWithheldReasonThatHasAWayOutGetsItsOwnNextStep` 双红（23 tests / 2 failed） |
+| B | `copyPayloadOf(entry: SourceSyncEntry)` 返回 `entry.key` | `copyingAPreviewEntryCarriesTheRemoteIdentityAndNeverAPositionalKey` 红（23 / 1） |
+| C | `nextStepOf(entry: SourceSyncEntry)` 改用 `entry.blockReason.orEmpty()`（拿中文说明当码查表） | 同一预览用例红（23 / 1） |
+
+第一次写 A 时用的是 `when { true -> null`：when 失去 subject 后剩余分支语法非法 ⇒ **编译失败**。`status 1` 但没有 `N tests completed` 行、也没有 FAILED 用例名。判负向对照不能只看退出码：日志里必须出现真实用例名，否则「红」可能只是没编译。
+
+日志 `D:/mh-verify/w685-negA.log`、`w685-negB.log`、`w685-negC.log`。
+
+### 54.6 本机实跑
+
+| 模块 | 之前 | 之后 |
+| --- | --- | --- |
+| `core/common` | 660 | 660 |
+| `core/database` | 240 | 240 |
+| `feature/settings` | 398 | **400** |
+| 三模块合计 | 1298 | **1300** |
+| `feature/settings` androidTest | 132 例（只编译，不本机跑） | **133 例** |
+
+C# 未动（`MediaHub.Tests` 1656 / 全仓 1760 口径）。instrumentation 的执行证据只能由 CI 的 visual-instrumentation 提供；本机 `compileDebugAndroidTestKotlin` 只证明能编译。
+
+### 54.7 未覆盖
+
+- 「复制身份」只覆盖了身份；带凭据的条目最需要的其实是「把这条来源的凭据清空后重新导出」，本轮只给了文字，没有一次点击就能跳到来源页的动作。
+- 剪贴板写入本身仍无自动化证据（无状态页面只到回调那一层），route 的剪贴板接线属 GUI_UNVERIFIED。
+- 位置键条目（身份缺失）干脆不给按钮，但也没有任何提示说明「为什么没有按钮」；用户看到的只是条目少了一个按钮。
+- 预览页的下一步文案是静态的：它不知道对端此刻是否在线、也不知道本机版本能不能升级，所以 NOT_SUPPORTED 那句只能写「等本机版本支持」。
+- 结果页与预览页的「下一步」都只有一层纯文本，没有可点跳转（来源页 / 对端说明）——两处都还缺一个导航出口。
+
+### 54.8 下一步（W6-86 候选）
+
+1. 结果页「已导入」历史词收敛：计划行 / 结果行 / 端点句三处口径统一（现在第一行说计划、第二行说结果，历史词仍散落在验证区块）。
+2. 两端把对端基线喂进 `SourceSyncPlanner`（改签名要两端一起动，Android 的 planner 目前完全不知道自己有没有对端基线）。
+3. 监听卡「取消接收」可观测（现在只有一行状态，取消之后没有回执也没有账）。
+4. 真 Room 级联：用真库跑一例 `ServerRemoveHandler` 删除后 playlist / 播放进度行是否随之清理。
+5. `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（生产不可达，但读者会误以为那是第二条写入口）。

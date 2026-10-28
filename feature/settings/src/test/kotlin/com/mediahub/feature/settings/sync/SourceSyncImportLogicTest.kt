@@ -421,6 +421,61 @@ class SourceSyncImportLogicTest {
         assertFalse(SourceSyncImportCopy.copyPayloadOf(withheld).contains("客厅"))
     }
 
+    @Test
+    fun aPreviewEntryBorrowsTheSameNextStepTableAsTheResultPage() {
+        // 同一个码在两处必须说同一句话：否则用户先在预览里读到一句、应用后又读到另一句。
+        assertEquals(
+            SourceSyncImportCopy.nextStepOf(
+                SourceSyncWithheldEntry("sync-secret", "客厅 Emby", SyncRoundReasons.SECRETS_REQUIRE_APPROVAL),
+            ),
+            SourceSyncImportCopy.nextStepOf(previewEntry(SyncRoundReasons.SECRETS_REQUIRE_APPROVAL, "sync-secret")),
+        )
+        assertEquals(
+            "下一步：这条两端内容不一致（版本号相同），本页一律不放行；请在来源页手工对齐后再导出。",
+            SourceSyncImportCopy.nextStepOf(previewEntry(SourceSyncReasons.SAME_REVISION_DIFFERENT_CONTENT, "sync-conflict")),
+        )
+        assertEquals(
+            "下一步：本机有多条来源指向同一身份，先在来源页删掉多余的再重新导出。",
+            SourceSyncImportCopy.nextStepOf(previewEntry(SourceSyncReasons.AMBIGUOUS_LEGACY_IDENTITY, "sync-ambig")),
+        )
+        assertEquals(
+            "下一步：把两端升到同一版本后重新导出信封。",
+            SourceSyncImportCopy.nextStepOf(previewEntry(SourceSyncReasons.UNKNOWN_SOURCE_TYPE, "sync-quantum")),
+        )
+        // 码不认识、或压根没给码：不编建议。
+        assertNull(SourceSyncImportCopy.nextStepOf(previewEntry("something-new:42", "sync-x")))
+        assertNull(SourceSyncImportCopy.nextStepOf(previewEntry("", "sync-quiet")))
+    }
+
+    @Test
+    fun copyingAPreviewEntryCarriesTheRemoteIdentityAndNeverAPositionalKey() {
+        assertEquals("sync-secret", SourceSyncImportCopy.copyPayloadOf(previewEntry("", "  sync-secret  ")))
+        val noIdentity = SourceSyncEntry(
+            key = "entry-3",
+            bucket = SourceSyncImportBucket.UNSUPPORTED,
+            candidate = SourceSyncCandidate(action = SourceSyncAction.UNSUPPORTED, syncSourceId = null),
+            allowable = false,
+            blockReason = SourceSyncImportCopy.NEVER_ALLOW_UNSUPPORTED,
+            decision = SourceSyncEntryDecision.UNDECIDED,
+        )
+        // 位置键（entry-3）抄出去在对端检索不到任何东西 —— 宁可不给按钮。
+        assertNull(SourceSyncImportCopy.copyPayloadOf(noIdentity))
+    }
+
+    /** 预览页的一条不可允许条目：身份来自 candidate.syncSourceId，桶只是展示层。 */
+    private fun previewEntry(reason: String, id: String?) = SourceSyncEntry(
+        key = id ?: "entry-0",
+        bucket = SourceSyncImportBucket.REQUIRES_APPROVAL,
+        candidate = SourceSyncCandidate(
+            action = SourceSyncAction.UPDATE,
+            reason = reason,
+            syncSourceId = id,
+            requiresUserApproval = true,
+        ),
+        allowable = false,
+        blockReason = SourceSyncImportCopy.NEVER_ALLOW_APPROVAL,
+        decision = SourceSyncEntryDecision.UNDECIDED,
+    )
     private fun record(id: String) = SourceRecord(
         syncSourceId = id,
         sourceType = SyncSourceTypeValue.parse("emby"),

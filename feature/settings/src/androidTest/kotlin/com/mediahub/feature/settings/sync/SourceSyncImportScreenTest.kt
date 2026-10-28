@@ -384,6 +384,28 @@ class SourceSyncImportScreenTest {
         composeRule.onNodeWithTag(SourceSyncImportTags.PICK).performScrollTo().assertIsDisplayed()
     }
 
+    @Test
+    fun aPreviewEntryThatCanNeverBeAllowedCarriesItsNextStepAndItsIdentity() {
+        val copied = mutableListOf<String>()
+        render(state = previewedState(), onCopyIdentity = { copied += it })
+
+        // 冲突条目：本页一律不放行，但用户得知道还能做什么、并能把身份带走。
+        composeRule.onNodeWithText(
+            SourceSyncImportCopy.nextStepOfCode(SourceSyncReasons.SAME_REVISION_DIFFERENT_CONTENT)!!,
+        ).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag(SourceSyncImportTags.entryCopy("sync-conflict"))
+            .performScrollTo()
+            .performClick()
+        assertEquals(listOf("sync-conflict"), copied)
+
+        // 未知类型条目各有一句自己的下一步，句句不同。
+        composeRule.onNodeWithText(
+            SourceSyncImportCopy.nextStepOfCode(SourceSyncReasons.UNKNOWN_SOURCE_TYPE)!!,
+        ).performScrollTo().assertIsDisplayed()
+
+        // 可允许的条目不该出现复制按钮（它不需要绕路）。
+        composeRule.onNodeWithTag(SourceSyncImportTags.entryCopy("sync-1")).assertDoesNotExist()
+    }
     // ---------------------------------------------------------------- 夹具
 
     private fun render(

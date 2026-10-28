@@ -78,6 +78,12 @@ object SourceSyncImportTags {
     /** W6-84：逐条「复制身份」按钮（载荷是身份原文，不是标题；同页多条时必须能限定到某一条）。 */
     fun withheldCopy(syncSourceId: String): String = "sync.apply.copy:" + syncSourceId
 
+    /** W6-85：预览页条目自己的复制按钮（与结果页同页不同段，tag 不能复用）。 */
+    fun entryCopy(key: String): String = "sync.entry.copy:" + key
+
+    /** W6-85：预览页不可允许条目的「下一步」一行（每个条目各一条）。 */
+    const val ENTRY_NEXT_STEP = "sync.entry.nextStep"
+
     /** W6-82：逐条没写成的标题（每条原因各占一行，紧跟在下面）。 */
     const val APPLY_REFUSED = "sync.apply.refused"
     const val BLOCKED = "sync.apply.blocked"
@@ -511,6 +517,7 @@ fun SourceSyncImportScreen(
                             bucket = bucket,
                             interactive = state.status == SourceSyncImportStatus.PREVIEWED,
                             onDecide = onDecide,
+                            onCopyIdentity = onCopyIdentity,
                         )
                     }
                 }
@@ -718,6 +725,7 @@ private fun BucketSection(
     bucket: SourceSyncImportBucketView,
     interactive: Boolean,
     onDecide: (String, SourceSyncEntryDecision) -> Unit,
+    onCopyIdentity: (String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
@@ -733,7 +741,12 @@ private fun BucketSection(
             )
         }
         bucket.entries.forEach { entry ->
-            EntryCard(entry = entry, interactive = interactive, onDecide = onDecide)
+            EntryCard(
+                entry = entry,
+                interactive = interactive,
+                onDecide = onDecide,
+                onCopyIdentity = onCopyIdentity,
+            )
         }
     }
 }
@@ -763,6 +776,7 @@ private fun EntryCard(
     entry: SourceSyncEntry,
     interactive: Boolean,
     onDecide: (String, SourceSyncEntryDecision) -> Unit,
+    onCopyIdentity: (String) -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -791,6 +805,25 @@ private fun EntryCard(
                 },
                 modifier = Modifier.testTag(SourceSyncImportTags.ENTRY_STATE),
             )
+            // W6-85：预览阶段就把「为什么不行 + 下一步」摆出来。之前只有结果页有出口，
+            // 用户在预演里看见一条永不许可的条目，只能靠猜。
+            if (!entry.allowable) {
+                SourceSyncImportCopy.nextStepOf(entry)?.let { nextStep ->
+                    Text(
+                        nextStep,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag(SourceSyncImportTags.ENTRY_NEXT_STEP),
+                    )
+                }
+                SourceSyncImportCopy.copyPayloadOf(entry)?.let { identity ->
+                    IdentityCopyButton(
+                        identity = identity,
+                        tag = SourceSyncImportTags.entryCopy(entry.key),
+                        onCopyIdentity = onCopyIdentity,
+                    )
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { onDecide(entry.key, SourceSyncEntryDecision.ALLOW) },
