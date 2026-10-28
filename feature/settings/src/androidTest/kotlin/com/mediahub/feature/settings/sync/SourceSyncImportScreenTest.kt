@@ -180,26 +180,79 @@ class SourceSyncImportScreenTest {
     }
 
     @Test
-    fun theResultCardCarriesTheDisclaimerSentence() {
+    fun theResultCardSeparatesThePlanFromTheReceiptAndCarriesTheDisclaimer() {
+        // W6-82：第一行改成「计划」（来自预览的分桶），第二行才是「结果」（来自回执）。
+        // 旧断言钉的是被退役的「已导入 N · 需确认 N · …」那一行，CI 上一整轮假红。
+        val summary = SourceSyncApplySummary(
+            appliedCount = 1,
+            requiresApprovalCount = 1,
+            ignoredCount = 1,
+            unsupportedCount = 1,
+            failedCount = 0,
+            skippedCount = 1,
+            withheldCount = 1,
+            allowedCount = 1,
+            plannedCount = 4,
+            appliedTitles = listOf("客厅 Emby"),
+        )
         val state = previewedState().withAllow("sync-1").copy(
             status = SourceSyncImportStatus.APPLIED,
-            applied = SourceSyncApplySummary(
-                appliedCount = 1,
-                requiresApprovalCount = 1,
-                ignoredCount = 1,
-                unsupportedCount = 1,
-                failedCount = 0,
-                appliedTitles = listOf("客厅 Emby"),
-            ),
+            applied = summary,
         )
         render(state)
 
         composeRule.onNodeWithTag(SourceSyncImportTags.RESULT).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText(SourceSyncImportCopy.DISCLAIMER).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("已导入 1 · 需确认 1 · 已忽略 1 · 暂不支持 1 · 失败 0")
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_PLAN)
             .performScrollTo()
-            .assertIsDisplayed()
+            .assertTextEquals(SourceSyncImportCopy.planLine(summary))
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_VERDICT)
+            .performScrollTo()
+            .assertTextEquals(SourceSyncImportCopy.resultLine(summary))
         composeRule.onNodeWithText("- 客厅 Emby").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(SourceSyncImportCopy.DISCLAIMER).performScrollTo().assertIsDisplayed()
+        // 回执里没有失败条目 ⇒ 逐条失败区整块不出现（0 条不占版面）。
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_REFUSED).assertDoesNotExist()
+    }
+
+    @Test
+    fun everyRefusedEntryIsListedWithItsIdentityActionAndReason() {
+        val summary = SourceSyncApplySummary(
+            appliedCount = 0,
+            requiresApprovalCount = 0,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 2,
+            allowedCount = 2,
+            plannedCount = 2,
+            refusedEntries = listOf(
+                SourceSyncRefusedEntry(
+                    syncSourceId = "sync-1",
+                    title = "客厅 Emby",
+                    action = SourceSyncRefusedAction.WRITE,
+                    reason = SourceSyncReasons.UNKNOWN_SOURCE_TYPE,
+                ),
+                SourceSyncRefusedEntry(
+                    syncSourceId = "sync-2",
+                    title = "书房 Emby",
+                    action = SourceSyncRefusedAction.DELETE,
+                    reason = "something-new:42",
+                ),
+            ),
+        )
+        val state = previewedState().copy(
+            status = SourceSyncImportStatus.APPLIED,
+            applied = summary,
+        )
+        render(state)
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_REFUSED)
+            .performScrollTo()
+            .assertTextEquals("未写入 2 条（逐条原因）")
+        summary.refusedEntries.forEach { entry ->
+            composeRule.onNodeWithText(SourceSyncImportCopy.refusalLine(entry))
+                .performScrollTo()
+                .assertIsDisplayed()
+        }
     }
 
     @Test

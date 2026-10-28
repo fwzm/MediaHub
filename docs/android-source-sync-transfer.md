@@ -5006,3 +5006,28 @@ W6-79 候选：①两端把对端基线喂进 `SourceSyncPlanner`（真正「读
 - 两机实测：Android 发 → Windows 收 → Windows 改 → Android 拉，全链路状态词按 `EXECUTED_PASS` / `DEVICE_UNVERIFIED` 分层记账。
 - 真 Room 级联：`ServerRemoveHandler` 删除后的 playlist / 播放进度行是否随之清理，目前只在 fake 层验证。
 - 两端把「对端基线」喂进 `SourceSyncPlanner`：现在 planner 只看本机快照，不知道对端知道什么。
+
+### 51.9 CI 假红：退役文案把 androidTest 的断言钉在旧行上
+
+W6-82 的两条 Android CI（run `40615996486` @ `6dd9cff5`、run `40615999654` @ `7959465b`）都红了，唯一失败是模拟器上的 Compose 用例：
+
+```
+com.mediahub.feature.settings.sync.SourceSyncImportScreenTest > theResultCardCarriesTheDisclaimerSentence FAILED
+java.lang.AssertionError: Action performScrollTo() failed.
+Reason: Expected exactly '1' node but could not find any node that satisfies:
+  (Text + EditableText contains '已导入 1 · 需确认 1 · 已忽略 1 · 暂不支持 1 · 失败 0')
+```
+
+**根因不是「卡片变高、免责声明滚不到」。** 那句 `已导入 N · 需确认 N · …` 正是 W6-82 换掉的旧第一行——现在第一行是 `planLine`（计划），第二行是 `resultLine`（结果）。断言钉的是一句已经不存在的文案：`onNodeWithText` 找零个节点，`performScrollTo()` 就报 `Action performScrollTo() failed.`，把「文案没了」伪装成「滚不动」——这也是先怀疑布局会走偏的地方。
+
+**为什么本机没拦住。** 本机不跑模拟器（口径见 `docs/android-sync-ui.md`：androidTest 只做编译校验、执行证据由 CI 提供）。W6-82 退役 `applyVerdict` / `removedLine` 时只 grep 了 `src/main` 与 `src/test`，漏了 `src/androidTest`——那条断言就躺在那里。因此本机的 660/239/394 全绿与 Android CI 的绿不是同一件事。
+
+**修法。**
+
+- `theResultCardCarriesTheDisclaimerSentence` 重写为 `theResultCardSeparatesThePlanFromTheReceiptAndCarriesTheDisclaimer`：夹具补 `allowedCount=1` / `plannedCount=4` / `skippedCount=1` / `withheldCount=1`，断言改为按 testTag 取 `APPLY_PLAN` 与 `APPLY_VERDICT` 并逐字比对 `SourceSyncImportCopy.planLine(summary)` / `resultLine(summary)`；`- 客厅 Emby` 与 `DISCLAIMER` 仍先 `performScrollTo()`；末尾 `onNodeWithTag(APPLY_REFUSED).assertDoesNotExist()`（回执无失败条目时整块不占版面）。
+- 新增 `everyRefusedEntryIsListedWithItsIdentityActionAndReason`：两条拒绝（`sync-1` 写入 + 未知码、`sync-2` 删除 + `something-new:42`），断言 `APPLY_REFUSED` 标题「未写入 2 条（逐条原因）」并把 `refusalLine(entry)` 两条都滚到可见——这条是 W6-82 新 UI 路径在真模拟器上的唯一证据。
+- `assertDoesNotExist()` 是 `SemanticsNodeInteraction` 的成员方法，**不能 import**：写成 `import androidx.compose.ui.test.assertDoesNotExist` 会 `Unresolved reference`（第一次编译就这么失败的）。
+
+**本机编译验证**：`gradlew.bat :feature:settings:compileDebugAndroidTestKotlin --console=plain` → `BUILD SUCCESSFUL`（第二次；第一次败在多写的 import），日志 `D:/mh-verify/w682-androidtest-compile.log`。执行证据仍由 CI 提供，状态词：本机 `IMPLEMENTED_UNVERIFIED`，CI 通过后才可记 `EXECUTED_PASS(emulator)`。
+
+**可复用结论**：退役任何 `SourceSyncImportCopy` 文案 / testTag 时，`git grep` 的范围必须是全仓 `*.kt`（含 `src/androidTest`），而 `src/test` 全绿不能证明 instrumentation 侧没被钉死。
