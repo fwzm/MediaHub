@@ -72,9 +72,7 @@ class SourceSyncTransferImportServiceTest {
         assertEquals(64, first.envelopeContentHash!!.length)
         assertEquals(first.envelopeContentHash, second.envelopeContentHash)
         assertFalse(first.isRejected)
-        assertFalse(first.hasWrites)
-        assertEquals(0, first.appliedCount)
-        assertEquals(0, first.totalCount)
+        // W6-97：回执类型里没有写入计数字段；「不写」的 store 级证据在 SourceSyncReceiveWiringTest。
     }
 
     @Test
@@ -85,16 +83,15 @@ class SourceSyncTransferImportServiceTest {
         val badVersion = gateway.importEnvelope(goldenText().replace("\"schemaVersion\":1", "\"schemaVersion\":9"))
 
         assertEquals(SourceSyncContractException.MALFORMED_JSON, malformed.rejectedReason)
-        assertEquals(0, malformed.appliedCount)
-        assertFalse(malformed.hasWrites)
+        assertTrue(malformed.isRejected)
         assertTrue(badVersion.rejectedReason!!.startsWith("unsupported-schema-version"))
-        assertFalse(badVersion.hasWrites)
+        assertTrue(badVersion.isRejected)
     }
 
     // ---------------------------------------------------------------- 夹具
 
     private class RecordingGateway(
-        val returned: SourceSyncImportResult = SourceSyncImportResult(
+        val returned: SourceSyncReceiveEcho = SourceSyncReceiveEcho(
             deviceId = "device-a",
             snapshotId = "snap-incoming",
         ),
@@ -102,7 +99,7 @@ class SourceSyncTransferImportServiceTest {
         var calls = 0
         var lastEnvelopeJson: String? = null
 
-        override suspend fun importEnvelope(envelopeJson: String): SourceSyncImportResult {
+        override suspend fun importEnvelope(envelopeJson: String): SourceSyncReceiveEcho {
             calls++
             lastEnvelopeJson = envelopeJson
             return returned

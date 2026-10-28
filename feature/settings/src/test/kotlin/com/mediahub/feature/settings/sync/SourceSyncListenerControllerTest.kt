@@ -1,5 +1,6 @@
 package com.mediahub.feature.settings.sync
 
+import com.mediahub.core.common.sync.SourceRecord
 import com.mediahub.core.common.sync.SourceSyncAction
 import com.mediahub.core.common.sync.SourceSyncCancellation
 import com.mediahub.core.common.sync.SourceSyncCandidate
@@ -8,18 +9,17 @@ import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SourceSyncSummary
+import com.mediahub.core.common.sync.SourceSyncTlsReasons
 import com.mediahub.core.common.sync.SourceSyncTransferListener
 import com.mediahub.core.common.sync.SourceSyncTransferOptions
 import com.mediahub.core.common.sync.SourceSyncTransferReasons
-import com.mediahub.core.common.sync.SourceSyncTlsReasons
-import com.mediahub.core.common.sync.SourceRecord
 import com.mediahub.core.common.sync.SyncSourceTypeValue
 import com.mediahub.core.database.sync.AppliedSourceChange
 import com.mediahub.core.database.sync.SourceSyncApplyReport
-import com.mediahub.core.database.sync.SourceSyncImportResult
-import com.mediahub.core.database.sync.SourceSyncWrittenSource
 import com.mediahub.core.database.sync.SourceSyncPreview
+import com.mediahub.core.database.sync.SourceSyncReceiveEcho
 import com.mediahub.core.database.sync.SourceSyncTransferImportOutcome
+import com.mediahub.core.database.sync.SourceSyncWrittenSource
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -38,7 +38,7 @@ private fun imported(
     envelopeJson: String,
     deviceId: String? = "device-a",
 ): SourceSyncTransferImportOutcome.Imported = SourceSyncTransferImportOutcome.Imported(
-    result = SourceSyncImportResult(
+    result = SourceSyncReceiveEcho(
         deviceId = deviceId,
         snapshotId = "snap-1",
         envelopeContentHash = "hash-1",
@@ -443,7 +443,7 @@ class SourceSyncListenerControllerTest {
         val seeded = seededSession()
         val before = seeded.session.state.value
         val outcome = SourceSyncTransferImportOutcome.Imported(
-            result = SourceSyncImportResult(rejectedReason = "duplicate-sync-source-id"),
+            result = SourceSyncReceiveEcho(rejectedReason = "duplicate-sync-source-id"),
             envelopeJson = envelopeText(),
         )
         val controller = SourceSyncListenerController(
@@ -465,7 +465,7 @@ class SourceSyncListenerControllerTest {
     fun importedWithoutEnvelopeJsonIsALocalFailure() = runTest {
         val delivered = mutableListOf<Pair<String, String>>()
         val outcome = SourceSyncTransferImportOutcome.Imported(
-            result = SourceSyncImportResult(deviceId = "device-a", snapshotId = "snap-1"),
+            result = SourceSyncReceiveEcho(deviceId = "device-a", snapshotId = "snap-1"),
             envelopeJson = null,
         )
         val controller = SourceSyncListenerController(
@@ -957,7 +957,7 @@ class SourceSyncListenerControllerTest {
     fun receivedCarriesTheReceiptFlagIntoTheState() = runTest {
         val listener = FakeSession(
             outcome = SourceSyncTransferImportOutcome.Imported(
-                result = SourceSyncImportResult(
+                result = SourceSyncReceiveEcho(
                     deviceId = "device-a",
                     snapshotId = "snap-1",
                     envelopeContentHash = "hash-1",

@@ -11,8 +11,8 @@ import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SourceSyncSummary
 import com.mediahub.core.common.sync.SyncSourceTypeValue
 import com.mediahub.core.database.sync.SourceSyncApplyReport
-import com.mediahub.core.database.sync.SourceSyncImportResult
 import com.mediahub.core.database.sync.SourceSyncPreview
+import com.mediahub.core.database.sync.SourceSyncReceiveEcho
 import com.mediahub.core.database.sync.SourceSyncTransferImportOutcome
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -268,7 +268,7 @@ class SourceSyncReceiveControllerTest {
         val seeded = seededSession()
         val before = seeded.session.state.value
         val rejected = SourceSyncTransferImportOutcome.Imported(
-            SourceSyncImportResult(rejectedReason = "duplicate-sync-source-id", rejectedMessage = "same id twice"),
+            SourceSyncReceiveEcho(rejectedReason = "duplicate-sync-source-id", rejectedMessage = "same id twice"),
             envelopeJson(),
         )
         val controller = SourceSyncReceiveController(FakeReceivePort(rejected)) { json, name ->
@@ -285,7 +285,7 @@ class SourceSyncReceiveControllerTest {
     fun importedWithoutEnvelopeJsonIsALocalFailure() = runTest {
         val seeded = seededSession()
         val before = seeded.session.state.value
-        val noJson = SourceSyncTransferImportOutcome.Imported(SourceSyncImportResult(deviceId = "device-a"))
+        val noJson = SourceSyncTransferImportOutcome.Imported(SourceSyncReceiveEcho(deviceId = "device-a"))
         val controller = SourceSyncReceiveController(FakeReceivePort(noJson)) { json, name ->
             seeded.session.loadEnvelope(json, name)
         }
@@ -625,7 +625,7 @@ class SourceSyncReceiveControllerTest {
         json: String = envelopeJson(),
         deviceId: String = "device-a",
     ): SourceSyncTransferImportOutcome = SourceSyncTransferImportOutcome.Imported(
-        SourceSyncImportResult(deviceId = deviceId, snapshotId = "snap-1"),
+        SourceSyncReceiveEcho(deviceId = deviceId, snapshotId = "snap-1"),
         json,
     )
 

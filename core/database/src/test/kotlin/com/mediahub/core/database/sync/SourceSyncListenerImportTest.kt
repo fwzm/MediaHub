@@ -1,7 +1,7 @@
 package com.mediahub.core.database.sync
 
-import com.mediahub.core.common.sync.LocalSourceRecord
 import com.mediahub.core.common.sync.AndroidSourceTypeMap
+import com.mediahub.core.common.sync.LocalSourceRecord
 import com.mediahub.core.common.sync.SourceSyncListenerStart
 import com.mediahub.core.common.sync.SourceSyncNonceCache
 import com.mediahub.core.common.sync.SourceSyncReceiptOptions
@@ -10,8 +10,8 @@ import com.mediahub.core.common.sync.SourceSyncTransferAuthReasons
 import com.mediahub.core.common.sync.SourceSyncTransferClient
 import com.mediahub.core.common.sync.SourceSyncTransferListener
 import com.mediahub.core.common.sync.SourceSyncTransferOptions
-import com.mediahub.core.common.sync.SourceSyncTransferResult
 import com.mediahub.core.common.sync.SourceSyncTransferReasons
+import com.mediahub.core.common.sync.SourceSyncTransferResult
 import com.mediahub.model.MediaServer
 import java.io.InputStream
 import java.net.InetAddress
@@ -40,47 +40,53 @@ class SourceSyncListenerImportTest {
     @Test
     fun plaintextEnvelopeIsImportedAndAppliesTwoSources() = runBlocking {
         val store = ImportFakeStore()
-        val service = writeThroughServiceOver(store)
+        val fixture = writeThroughServiceOver(store)
         try {
-            val sent = SendCall(service.port, goldenEnvelope()).start()
-            val imported = assertImported(service.receiveAndImport())
+            val sent = SendCall(fixture.service.port, goldenEnvelope()).start()
+            val imported = assertImported(fixture.service.receiveAndImport())
             sent.await()
 
-            assertEquals("应写入两条来源", 2, imported.appliedCount)
-            assertEquals("quantum-nas 不在映射表里，必须走审批", 1, imported.requiresApprovalCount)
-            assertEquals(1, imported.ignoredCount)
-            assertEquals(0, imported.failedCount)
+            // W6-97：回执只回显身份；写入计数在写库网关留下的结果里（接收通道装不下计数）。
+            val written = fixture.gateway.lastResult!!
+            assertEquals("应写入两条来源", 2, written.appliedCount)
+            assertEquals("quantum-nas 不在映射表里，必须走审批", 1, written.requiresApprovalCount)
+            assertEquals(1, written.ignoredCount)
+            assertEquals(0, written.failedCount)
             assertEquals(2, store.createCalls)
             assertEquals(0, store.updateCalls)
             assertEquals(2, store.snapshots.size)
             assertEquals("device-a", imported.deviceId)
         } finally {
-            service.close()
+            fixture.service.close()
         }
     }
 
     @Test
     fun secondRunOfTheSameEnvelopeWritesNothingNew() = runBlocking {
         val store = ImportFakeStore()
-        val service = writeThroughServiceOver(store)
+        val fixture = writeThroughServiceOver(store)
         try {
-            val firstSend = SendCall(service.port, goldenEnvelope()).start()
-            val first = assertImported(service.receiveAndImport())
+            val firstSend = SendCall(fixture.service.port, goldenEnvelope()).start()
+            val first = assertImported(fixture.service.receiveAndImport())
             firstSend.await()
-            assertEquals(2, first.appliedCount)
+            assertEquals("device-a", first.deviceId)
+            assertEquals(2, fixture.gateway.results[0].appliedCount)
             val createAfterFirst = store.createCalls
 
-            val secondSend = SendCall(service.port, goldenEnvelope()).start()
-            val second = assertImported(service.receiveAndImport())
+            val secondSend = SendCall(fixture.service.port, goldenEnvelope()).start()
+            val second = assertImported(fixture.service.receiveAndImport())
             secondSend.await()
 
-            assertEquals("第二轮不应再写", 0, second.appliedCount)
-            assertEquals("同一个待审来源仍在桶里", 1, second.requiresApprovalCount)
-            assertEquals("两条已存在 + 墓碑未知 = 三条被忽略", 3, second.ignoredCount)
+            val written = fixture.gateway.results[1]
+            assertEquals("第二轮不应再写", 0, written.appliedCount)
+            assertEquals("同一个待审来源仍在桶里", 1, written.requiresApprovalCount)
+            assertEquals("两条已存在 + 墓碑未知 = 三条被忽略", 3, written.ignoredCount)
             assertEquals(createAfterFirst, store.createCalls)
             assertEquals(0, store.updateCalls)
+            // 两轮回执都只回显同一件事：都是同一台机器发的。
+            assertEquals(first.deviceId, second.deviceId)
         } finally {
-            service.close()
+            fixture.service.close()
         }
     }
 
@@ -225,24 +231,24 @@ class SourceSyncListenerImportTest {
     @Test
     fun successfulImportWritesTheReceiptOnlyAfterTheEnvelopeDecodes() = runBlocking {
         val store = ImportFakeStore()
-        val service = writeThroughServiceOver(store)
+        val fixture = writeThroughServiceOver(store)
         try {
             val sent = SendCall(
-                service.port,
+                fixture.service.port,
                 goldenEnvelope(),
                 receipt = SourceSyncReceiptOptions.awaiting(5_000),
             ).start()
-            val outcome = service.receiveAndImport(receipt = SourceSyncReceiptOptions.writing())
+            val outcome = fixture.service.receiveAndImport(receipt = SourceSyncReceiptOptions.writing())
             sent.await()
 
             assertTrue("期待导入成功，实际 " + describe(outcome), outcome is SourceSyncTransferImportOutcome.Imported)
             val imported = outcome as SourceSyncTransferImportOutcome.Imported
             assertTrue("解码成功之后才允许回执", imported.receiptWritten)
-            assertEquals(2, imported.result.appliedCount)
+            assertEquals(2, fixture.gateway.lastResult!!.appliedCount)
             assertEquals(2, store.snapshots.size)
             assertTrue("发送端必须收到 0x04 才算送达", sent.sent() is SourceSyncTransferResult.Ok)
         } finally {
-            service.close()
+            fixture.service.close()
         }
     }
 
@@ -280,14 +286,18 @@ class SourceSyncListenerImportTest {
     }
     // ---------------------------------------------------------------- 夹具
 
-    /** W6-96：手写的写库网关（旧次构造器对照）；零写入路径见 gatewayService。 */
-    private fun writeThroughServiceOver(store: ImportFakeStore): SourceSyncListenerImportService {
-        val service = AndroidSourceSyncService(store, ANDROID_DEVICE)
-        val imports = SourceSyncTransferImportService(
-            SourceSyncImportGateway { envelopeJson -> service.importEnvelope(envelopeJson) },
-        )
-        return serviceOverImports(imports)
+    /** W6-96/W6-97：手写的写库网关（旧次构造器对照）；零写入路径见 gatewayService。 */
+    private fun writeThroughServiceOver(store: ImportFakeStore): WriteThroughListenerService {
+        val gateway = WriteThroughGateway(AndroidSourceSyncService(store, ANDROID_DEVICE))
+        val imports = SourceSyncTransferImportService(gateway)
+        return WriteThroughListenerService(serviceOverImports(imports), gateway)
     }
+
+    /** W6-97：监听服务 + 它那条手写写库网关（回执收窄后，写入计数只能从网关这边读）。 */
+    private class WriteThroughListenerService(
+        val service: SourceSyncListenerImportService,
+        val gateway: WriteThroughGateway,
+    )
 
     private fun gatewayService(gateway: SourceSyncImportGateway): SourceSyncListenerImportService =
         serviceOverImports(SourceSyncTransferImportService(gateway))
@@ -298,7 +308,7 @@ class SourceSyncListenerImportTest {
         return SourceSyncListenerImportService(imports, (started as SourceSyncListenerStart.Started).listener)
     }
 
-    private fun assertImported(outcome: SourceSyncTransferImportOutcome): SourceSyncImportResult {
+    private fun assertImported(outcome: SourceSyncTransferImportOutcome): SourceSyncReceiveEcho {
         assertTrue("期待导入成功，实际 " + describe(outcome), outcome is SourceSyncTransferImportOutcome.Imported)
         return (outcome as SourceSyncTransferImportOutcome.Imported).result
     }
@@ -309,7 +319,7 @@ class SourceSyncListenerImportTest {
         is SourceSyncTransferImportOutcome.EnvelopeRejected ->
             "envelope-rejected " + outcome.reason + " / " + (outcome.message ?: "")
         is SourceSyncTransferImportOutcome.Imported ->
-            "imported applied=" + outcome.result.appliedCount
+            "imported device=" + outcome.result.deviceId
     }
 
     private fun describeStart(started: com.mediahub.core.common.sync.SourceSyncListenerStart): String = when (started) {
@@ -414,12 +424,12 @@ class SourceSyncListenerImportTest {
     }
 
     /** 只记账的网关：断言"网关没被调"是失败路径零写入的判据。 */
-    private class RecordingGateway(private val result: SourceSyncImportResult = SourceSyncImportResult()) :
+    private class RecordingGateway(private val result: SourceSyncReceiveEcho = SourceSyncReceiveEcho()) :
         SourceSyncImportGateway {
         val envelopes = ArrayList<String>()
         val calls: Int get() = envelopes.size
 
-        override suspend fun importEnvelope(envelopeJson: String): SourceSyncImportResult {
+        override suspend fun importEnvelope(envelopeJson: String): SourceSyncReceiveEcho {
             envelopes.add(envelopeJson)
             return result
         }
