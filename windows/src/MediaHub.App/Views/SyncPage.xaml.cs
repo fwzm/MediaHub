@@ -814,6 +814,13 @@ public sealed partial class SyncPage : Page
             ClearApplyPreview(keepResult: true);
             ApplyResultText.Text = applied.Message;
 
+            // Entries the gate will never write are part of 保留未应用 as well; the counts sentence folds them in,
+            // this list separates them again and says, per row, why an explicit 允许 cannot save them.
+            ApplyWithheldHeader.Text = applied.WithheldHeader;
+            ApplyWithheldHeader.Visibility = applied.WithheldHeader.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            ApplyWithheldList.ItemsSource = applied.WithheldRows;
+            ApplyWithheldList.Visibility = applied.WithheldRows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
             // The counts sentence says how many rows landed; this list lets the user check which ones became which
             // local source. Both come from the presenter, so the page spells no words of its own.
             ApplyWrittenHeader.Text = applied.WrittenHeader;
@@ -920,6 +927,10 @@ public sealed partial class SyncPage : Page
         if (!keepResult)
         {
             ApplyResultText.Text = string.Empty;
+            ApplyWithheldHeader.Text = string.Empty;
+            ApplyWithheldHeader.Visibility = Visibility.Collapsed;
+            ApplyWithheldList.ItemsSource = null;
+            ApplyWithheldList.Visibility = Visibility.Collapsed;
             ApplyWrittenHeader.Text = string.Empty;
             ApplyWrittenHeader.Visibility = Visibility.Collapsed;
             ApplyWrittenList.ItemsSource = null;

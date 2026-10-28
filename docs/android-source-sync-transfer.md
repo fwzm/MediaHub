@@ -5625,3 +5625,48 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 ### 60.6 状态
 
 - EXECUTED_PASS（本机 1669/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+## §61 W6-92：Windows 结果页给「扣住」逐条可见（对齐 Android W6-83）
+
+### 61.1 结论先行
+
+- W6-91 让「写入器拒写」逐条可见，但「保留未应用」还有另一半：被审批闸门**永久扣住**的条目（带凭据、未知来源类型、Windows 不支持）。它们点多少次「允许」都不会写，此前只出现在计数里。
+- 本轮把这一半也拆成行：区头沿用 Android W6-83 的原句「保留未应用 N 条（扣住，点允许也不会写）」，行是「- 标题（身份） · 原因句」。
+
+### 61.2 数据流（一个数、两份清单）
+
+- `SourceSyncApplyReport.Withheld` 的口径不变：**闸门扣住 + 写入器拒写**。新增 `WithheldEntries` 只收闸门扣住的那一半，`Refused`（W6-91）只收写入器拒写的那一半，两者**按构造互斥**，相加正好等于用户读到的那个数。
+- 收集点在 `ApplyAsync` 里 `SourceSyncApprovalGate.Decide` 之后：逐个 `gate.Withheld` 取 `SyncSourceId`（trim）、`DisplayName`、`Reason`（稳定码），顺序就是闸门的顺序。
+- 原因句不另造一套词：`SourceSyncWithheldText.Reason` 直接调 `SyncApplyPresenter.DescribeGateReason`，与结果行里的「不可应用：…」是同一句；空码回「对端没有说明原因」，未知码原样带出。这样同一个码不会在一轮里出现两种说法。
+- 页面：`sync.apply.withheld.header` / `sync.apply.withheld.list`（`SyncApplyResult.WithheldHeader` / `WithheldRows` 驱动），位置在「已写入」区之上、与 Android 结果页的顺序一致；`ClearApplyPreview(keepResult:false)` 一并清空。
+
+### 61.3 用例与计数
+
+- `SourceSyncImportRoundTests` +3：闸门扣住逐条（精确行「- 卧室 Emby（local-dddd） · 带凭据，需人工迁移（本次不会写入）」+ 计数 + 未写入任何行）；0 条 header 为 null + 缺一半不编造 + 空码整句 + 未知码原样；闸门扣住与写入器拒写**两清单互斥且相加等于计数**。
+- `SyncPagePresenterTests` +2：`DescribeResult` 逐条（身份 + 原因句）；空回执时两个字段皆空。
+- `MediaHub.Tests` 1669 → **1674**（0 失败）；App 工程 **0 警告 0 错误**（XAML 覆盖两个新标签，见 `D:/mh-verify/w692-app-build.log`）。
+
+### 61.4 四条负向对照
+
+| 变异 | 红 | 命中用例 |
+| --- | --- | --- |
+| 区头词「保留未应用」改成「已写入」 | 3 | 逐条（两端各一）+ 精确行 |
+| 回执 `WithheldEntries = []` | 3 | 逐条 + 互斥相加 |
+| `Line` 丢掉身份规则（只给标题） | 3 | 逐条 + 缺一半不编造 |
+| 原因不回退整句（空码返回空串 / 未知码不再翻译） | 3 | 逐条 + 精确行 |
+
+每个变异写入后按 5 条新用例的过滤器跑，均以预期条数失败；跑完从磁盘备份逐字节还原（sha256 比对 true）。日志 `D:/mh-verify/w692-neg-A-header-says-written.log` / `-B-report-drops-withheld.log` / `-C-line-drops-identity-rule.log` / `-D-blank-reason-stays-blank.log`；备份 `w692-backup-*.cs`。
+
+### 61.5 与 Android 的差异（如实记）
+
+- Android 的 `withheldLine` 直接拼「标题（身份）」，假定两端都在；Windows 沿用 W6-91 的「缺一半不编造」规则（标题或身份缺失只给另一半，都缺给「（未知身份）」）。
+- Android 的「下一步」出口（W6-84 复制身份 / W6-85 预览页出口）在 Windows 侧没有对等物，是本轮**未做**的部分。
+
+### 61.6 边界与仍未做
+
+- 扣住原因沿用闸门的稳定码，不含地址、不含凭据（原因文本会进日志与界面）。
+- `BlockingLabels`（结果行里那句「不可应用：…」）保持原样，本轮只是把同一批码逐条摊开；两处由同一个 `DescribeGateReason` 保证不漂移。
+- 结果页真实呈现仍 **GUI_UNVERIFIED**（本轮只到 XAML 编译通过 + presenter 纯逻辑用例）；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 61.7 状态
+
+- EXECUTED_PASS（本机 1674/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。

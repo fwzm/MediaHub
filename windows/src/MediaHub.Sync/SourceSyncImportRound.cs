@@ -106,6 +106,13 @@ public sealed record SourceSyncApplyReport
     /// </remarks>
     public IReadOnlyList<SourceSyncRefusedSource> Refused { get; init; } = [];
 
+    /// <summary>The entries the gate will never write, in gate order, each with the code it was held for.</summary>
+    /// <remarks>
+    /// <see cref="Withheld"/> counts gate-withheld entries and writer refusals together; this list is the first half
+    /// of that count and is disjoint from <see cref="Refused"/>, so the two lists add up to the number a user reads.
+    /// </remarks>
+    public IReadOnlyList<SourceSyncWithheldSource> WithheldEntries { get; init; } = [];
+
     /// <summary>Stable reason codes the gate refuses to apply, ever.</summary>
     public IReadOnlyList<string> BlockingReasons { get; init; } = [];
 
@@ -306,6 +313,17 @@ public sealed class SourceSyncImportRound
 
         List<SourceSyncApprovalDecision> decisions = Decisions(allowedIds, skippedIds);
         SourceSyncApprovalResult gate = SourceSyncApprovalGate.Decide(preview.Items, decisions);
+        var withheldSources = new List<SourceSyncWithheldSource>();
+        foreach (SourceSyncApprovalItem item in gate.Withheld)
+        {
+            withheldSources.Add(new SourceSyncWithheldSource
+            {
+                SyncSourceId = item.SyncSourceId.Trim(),
+                DisplayName = item.DisplayName,
+                Reason = item.Reason,
+            });
+        }
+
         var written = new List<SourceRecord>();
         var writtenSources = new List<SourceSyncWrittenSource>();
         var refusedSources = new List<SourceSyncRefusedSource>();
@@ -402,6 +420,7 @@ public sealed class SourceSyncImportRound
             NotApplied = gate.WithheldCount + failed + gate.SkippedCount,
             Written = writtenSources,
             Refused = refusedSources,
+            WithheldEntries = withheldSources,
             BlockingReasons = gate.BlockingReasons,
             AcknowledgedRisk = gate.AcknowledgedRisk,
             BaselineUpdated = baselineUpdated,

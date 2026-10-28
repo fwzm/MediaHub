@@ -207,6 +207,25 @@
                    AutomationProperties.AutomationId="sync.apply.result"
                    AutomationProperties.Name="应用结果" />
 
+        <!-- Entries the approval gate will never write, whatever the user allows: the counts line folds them into
+             保留未应用, and here is which one and why, row by row. -->
+        <TextBlock x:Name="ApplyWithheldHeader" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   AutomationProperties.AutomationId="sync.apply.withheld.header"
+                   AutomationProperties.Name="保留未应用条目" />
+
+        <ListView x:Name="ApplyWithheldList" SelectionMode="None" MaxHeight="120" Visibility="Collapsed"
+                  AutomationProperties.AutomationId="sync.apply.withheld.list"
+                  AutomationProperties.Name="保留未应用条目清单">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              <Setter Property="Padding" Value="0" />
+              <Setter Property="MinHeight" Value="0" />
+            </Style>
+          </ListView.ItemContainerStyle>
+        </ListView>
+
         <!-- What the round actually wrote, row by row: the counts line above is not the whole story. -->
         <TextBlock x:Name="ApplyWrittenHeader" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
                    Visibility="Collapsed"

@@ -869,6 +869,123 @@ public sealed class SourceSyncImportRoundTests
             Deletions = deletions,
         };
 
+
+    // ---------------------------------------------------------------- withheld list (W6-92)
+
+    [Fact]
+    public async Task WithheldEntriesAreListedWithTheirReasonRowByRow()
+    {
+        // 保留未应用 counts a gate-withheld entry but used to hide which one it was. These rows are the ones an
+        // explicit 允许 cannot save, so the list has to say which entry and why, in the words the page already uses.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            using JsonDocument document = JsonDocument.Parse("""{"token":"sealed-on-the-other-machine"}""");
+            var record = new SourceRecord
+            {
+                SyncSourceId = "local-dddd",
+                SourceType = SyncSourceTypeValue.Parse("emby"),
+                DisplayName = "卧室 Emby",
+                Endpoints = [new SourceEndpoint { Url = "http://emby.local:8096", IsPrimary = true }],
+                RecordRevision = 2,
+                Secrets = document.RootElement.Clone(),
+            };
+
+            SourceSyncApplyPreview preview = round.Preview(Envelope(record));
+            SourceSyncApplyReport result = await round.ApplyAsync(preview, ["local-dddd"], Writer(store));
+
+            SourceSyncWithheldSource entry = Assert.Single(result.WithheldEntries);
+            Assert.Equal("local-dddd", entry.SyncSourceId);
+            Assert.Equal("卧室 Emby", entry.DisplayName);
+            Assert.Equal(SyncRoundReasons.SecretsRequireApproval, entry.Reason);
+            Assert.Empty(result.Refused);
+            Assert.Empty(result.Written);
+            Assert.Equal(1, result.Withheld);
+            Assert.Equal("保留未应用 1 条（扣住，点允许也不会写）", SourceSyncWithheldText.Header(result.WithheldEntries.Count));
+            Assert.Equal("- 卧室 Emby（local-dddd） · 带凭据，需人工迁移（本次不会写入）", SourceSyncWithheldText.Line(entry));
+            Assert.Empty(store.GetAll());
+        });
+    }
+
+    [Fact]
+    public void TheWithheldHeadingStaysNullAtZeroAndALineNeverInventsTheHalfItDoesNotHave()
+    {
+        Assert.Null(SourceSyncWithheldText.Header(0));
+        Assert.Equal("保留未应用 2 条（扣住，点允许也不会写）", SourceSyncWithheldText.Header(2));
+
+        Assert.Equal(
+            "- local-x · 未知来源类型，Windows 无法应用",
+            SourceSyncWithheldText.Line(new SourceSyncWithheldSource
+            {
+                SyncSourceId = "local-x",
+                DisplayName = null,
+                Reason = SyncRoundReasons.UnknownSourceType,
+            }));
+
+        Assert.Equal(
+            "- 书房 Emby · Windows 暂不支持该来源类型",
+            SourceSyncWithheldText.Line(new SourceSyncWithheldSource
+            {
+                SyncSourceId = "  ",
+                DisplayName = " 书房 Emby ",
+                Reason = SyncRoundReasons.NotSupportedOnWindows,
+            }));
+
+        // A blank reason becomes an explicit sentence; an unknown code is shown verbatim, never replaced by one
+        // this build made up.
+        Assert.Equal(
+            "- （未知身份） · 对端没有说明原因",
+            SourceSyncWithheldText.Line(new SourceSyncWithheldSource { SyncSourceId = "", DisplayName = null, Reason = "  " }));
+        Assert.Equal(
+            "- （未知身份） · something-new",
+            SourceSyncWithheldText.Line(new SourceSyncWithheldSource { Reason = "something-new" }));
+    }
+
+    [Fact]
+    public async Task WithheldAndRefusedListsAddUpToTheKeptCountWithoutOverlapping()
+    {
+        // 保留未应用 is one number with two halves: what the gate held back and what the writer refused. An entry
+        // appears in exactly one list, and the two counts add up to the number the sentence shows.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            using JsonDocument document = JsonDocument.Parse("""{"token":"sealed"}""");
+            var secret = new SourceRecord
+            {
+                SyncSourceId = "local-secret",
+                SourceType = SyncSourceTypeValue.Parse("emby"),
+                DisplayName = "带凭据",
+                Endpoints = [new SourceEndpoint { Url = "http://emby.local:8096", IsPrimary = true }],
+                RecordRevision = 4,
+                Secrets = document.RootElement.Clone(),
+            };
+            var plain = new SourceRecord
+            {
+                SyncSourceId = "local-plain",
+                SourceType = SyncSourceTypeValue.Parse("emby"),
+                DisplayName = "普通来源",
+                Endpoints = [new SourceEndpoint { Url = "http://plain.local:8096", IsPrimary = true }],
+                RecordRevision = 2,
+            };
+
+            SourceSyncApplyPreview preview = round.Preview(Envelope(secret, plain));
+            SourceSyncApplyReport result = await round.ApplyAsync(
+                preview,
+                [],
+                (_, _) => Task.FromResult(SourceSyncWriteOutcome.Refused("本机存储只读")));
+
+            Assert.Equal(1, result.WithheldEntries.Count);
+            Assert.Equal("local-secret", result.WithheldEntries[0].SyncSourceId);
+            Assert.Equal(1, result.Refused.Count);
+            Assert.Equal("local-plain", result.Refused[0].SyncSourceId);
+            Assert.Equal(2, result.Withheld);
+            Assert.Empty(result.Written);
+            Assert.DoesNotContain(result.Refused, entry => entry.SyncSourceId == "local-secret");
+            Assert.DoesNotContain(result.WithheldEntries, entry => entry.SyncSourceId == "local-plain");
+        });
+    }
     private static void WithTempDirectory(Action<string> body)
     {
         string directory = NewTempDirectory();

@@ -414,6 +414,55 @@ public sealed class SyncPagePresenterTests : IDisposable
         Assert.Equal(string.Empty, result.RefusedHeader);
         Assert.Empty(result.RefusedRows);
     }
+
+    [Fact]
+    public async Task DescribeResultListsEveryWithheldEntryWithItsReason()
+    {
+        // The gate's own rows: the counts line folds them into 保留未应用, this list says which and why, and the
+        // sentence is the one the 不可应用 line already uses.
+        var local = new InMemoryLocalSourceStore();
+        var round = new SourceSyncImportRound(local, new InMemorySourceSyncBaselineStore());
+        using JsonDocument document = JsonDocument.Parse("""{"token":"sealed"}""");
+        var record = new SourceRecord
+        {
+            SyncSourceId = "local-dddd",
+            SourceType = SyncSourceTypes.Parse(SyncSourceTypes.Emby),
+            DisplayName = "卧室 Emby",
+            Endpoints = [new SourceEndpoint { Url = EmbyUrl, IsPrimary = true }],
+            RecordRevision = 2,
+            Secrets = document.RootElement.Clone(),
+        };
+        SourceSyncApplyPreview preview = round.Preview(Envelope(SenderId, record));
+
+        var presenter = new SyncApplyPresenter();
+        presenter.Load(preview);
+
+        SourceSyncApplyReport report = await round.ApplyAsync(
+            preview,
+            presenter.AllowedIds(),
+            (_, _) => Task.FromResult(SourceSyncWriteOutcome.Written("已写入")),
+            presenter.SkippedIds());
+
+        SyncApplyResult result = presenter.DescribeResult(report);
+
+        Assert.Equal(1, report.WithheldEntries.Count);
+        Assert.Equal("保留未应用 1 条（扣住，点允许也不会写）", result.WithheldHeader);
+        Assert.Single(result.WithheldRows);
+        Assert.Contains("local-dddd", result.WithheldRows[0], StringComparison.Ordinal);
+        Assert.Contains("带凭据，需人工迁移（本次不会写入）", result.WithheldRows[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DescribeResultKeepsTheWithheldListEmptyWhenNothingWasWithheld()
+    {
+        // An ordinary round withholds nothing; an empty list must leave no heading behind.
+        var presenter = new SyncApplyPresenter();
+
+        SyncApplyResult result = presenter.DescribeResult(new SourceSyncApplyReport { Applied = 1 });
+
+        Assert.Equal(string.Empty, result.WithheldHeader);
+        Assert.Empty(result.WithheldRows);
+    }
     [Fact]
     public async Task Apply_SkipThePageRecordedIsHonoured()
     {
