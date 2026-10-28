@@ -584,6 +584,8 @@ class SourceSyncListenerInteropTest {
     ): ListenerFixture {
         val pin = identity.certificateFingerprint
         assertTrue("TLS 监听必须有可用身份证书", !tls || pin != null)
+        // W6-96：这条手写网关就是「收到即写库」的旧接线（生产里对应的次构造器已删除）。本文件保留它是为了
+        // 断言帧流里那封信封确实被应用（appliedCount == 2）；生产接法是 acceptOnly() + 逐条允许后的 applyRound。
         val started = SourceSyncListenerImportService.start(
             gateway = SourceSyncImportGateway { envelopeJson -> service.importEnvelope(envelopeJson) },
             tls = if (tls) SourceSyncTlsOptions.pinned(pin) else SourceSyncTlsOptions.Off,
