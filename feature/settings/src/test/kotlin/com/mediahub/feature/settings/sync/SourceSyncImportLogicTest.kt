@@ -384,6 +384,43 @@ class SourceSyncImportLogicTest {
         assertFalse(SourceSyncImportCopy.PICK_HINT.contains(".mhsync 的明文信封"))
     }
 
+    @Test
+    fun everyWithheldReasonThatHasAWayOutGetsItsOwnNextStep() {
+        val secret = SourceSyncWithheldEntry("sync-secret", "客厅 Emby", SyncRoundReasons.SECRETS_REQUIRE_APPROVAL)
+        val unsupported = SourceSyncWithheldEntry("sync-odd", "书房 MyThing", SyncRoundReasons.NOT_SUPPORTED)
+        val unknownType = SourceSyncWithheldEntry("sync-quantum", "Quantum", SourceSyncReasons.UNKNOWN_SOURCE_TYPE)
+        val noReason = SourceSyncWithheldEntry("sync-blank", "Blank", AndroidSourceSyncService.WITHHELD_WITHOUT_REASON)
+
+        val steps = listOf(secret, unsupported, unknownType).map { SourceSyncImportCopy.nextStepOf(it) }
+        assertEquals(3, steps.filterNotNull().toSet().size)
+        assertEquals(
+            "下一步：在对端把这条来源的凭据清空后重新导出信封，或在本机手动新建一条同样的来源。",
+            steps[0],
+        )
+        assertEquals("下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。", steps[1])
+        assertEquals("下一步：把两端升到同一版本后重新导出信封。", steps[2])
+        // 没有确定出路的码不编建议：空话比不说话更害人。
+        assertNull(SourceSyncImportCopy.nextStepOf(noReason))
+        assertNull(SourceSyncImportCopy.nextStepOf(SourceSyncWithheldEntry("sync-x", "X", "something-new:42")))
+    }
+
+    @Test
+    fun copyingAStuckEntryCarriesTheIdentityNotTheTitle() {
+        val withheld = SourceSyncWithheldEntry("  sync-secret  ", "客厅 Emby", SyncRoundReasons.SECRETS_REQUIRE_APPROVAL)
+        val refused = SourceSyncRefusedEntry(
+            syncSourceId = " sync-vanished ",
+            title = "书房 Emby",
+            action = SourceSyncRefusedAction.WRITE,
+            reason = AndroidSourceSyncService.SOURCE_VANISHED,
+        )
+
+        assertEquals("sync-secret", SourceSyncImportCopy.copyPayloadOf(withheld))
+        assertEquals("sync-vanished", SourceSyncImportCopy.copyPayloadOf(refused))
+        assertEquals("复制身份", SourceSyncImportCopy.COPY_IDENTITY)
+        // 载荷里绝不能出现标题（标题本机可以重名，身份才是能拿去对端检索的钥匙）。
+        assertFalse(SourceSyncImportCopy.copyPayloadOf(withheld).contains("客厅"))
+    }
+
     private fun record(id: String) = SourceRecord(
         syncSourceId = id,
         sourceType = SyncSourceTypeValue.parse("emby"),

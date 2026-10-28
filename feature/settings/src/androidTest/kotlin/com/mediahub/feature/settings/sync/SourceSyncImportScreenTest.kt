@@ -301,6 +301,46 @@ class SourceSyncImportScreenTest {
     }
 
     @Test
+    fun aWithheldEntryOffersItsNextStepAndCopiesItsIdentity() {
+        // W6-84：扣住的条目只讲原因不够 —— 还得让用户看见「下一步」并把身份抄走。
+        val summary = SourceSyncApplySummary(
+            appliedCount = 0,
+            requiresApprovalCount = 1,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 0,
+            withheldCount = 1,
+            allowedCount = 1,
+            plannedCount = 1,
+            withheldEntries = listOf(
+                SourceSyncWithheldEntry(
+                    syncSourceId = "sync-1",
+                    title = "客厅 Emby",
+                    reason = SyncRoundReasons.SECRETS_REQUIRE_APPROVAL,
+                ),
+            ),
+        )
+        val state = previewedState().copy(
+            status = SourceSyncImportStatus.APPLIED,
+            applied = summary,
+        )
+        val copied = mutableListOf<String>()
+        render(state, onCopyIdentity = { copied.add(it) })
+
+        val entry = summary.withheldEntries.single()
+        composeRule.onNodeWithText(SourceSyncImportCopy.nextStepOf(entry)!!)
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag(SourceSyncImportTags.withheldCopy(entry.syncSourceId))
+            .performScrollTo()
+            .assertTextEquals(SourceSyncImportCopy.COPY_IDENTITY)
+            .performClick()
+        composeRule.waitForIdle()
+        // 载荷必须是身份原文（对端能检索的那把钥匙），不是标题。
+        org.junit.Assert.assertEquals(listOf("sync-1"), copied)
+    }
+
+    @Test
     fun theBlockedCardExplainsWhyNothingWasApplied() {
         val state = SourceSyncImportState(
             status = SourceSyncImportStatus.BLOCKED,
@@ -351,6 +391,8 @@ class SourceSyncImportScreenTest {
         onPick: () -> Unit = {},
         onPreview: () -> Unit = {},
         onApply: () -> Unit = {},
+        onCopyIdentity: (String) -> Unit = {},
+        // onDecide 必须留在最后：既有用例用尾随 lambda 传它。
         onDecide: (String, SourceSyncEntryDecision) -> Unit = { _, _ -> },
     ) {
         composeRule.setContent {
@@ -362,6 +404,7 @@ class SourceSyncImportScreenTest {
                     onDecide = onDecide,
                     onApply = onApply,
                     onBack = {},
+                    onCopyIdentity = onCopyIdentity,
                 )
             }
         }

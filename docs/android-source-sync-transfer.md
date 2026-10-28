@@ -5111,3 +5111,74 @@ C# 侧未动（`MediaHub.Tests` 1656 / 全仓 1760 口径不变）。androidTest
 - 两端把对端基线喂进 `SourceSyncPlanner`：planner 现在只看本机快照，不知道对端知道什么。
 - 真 Room 级联：`ServerRemoveHandler` 删除后的 playlist / 播放进度行是否随之清理，目前只在 fake 层验证。
 - `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（仅测试可达），要么改走 `applyRound`，要么删掉以防未然。
+
+## §53 W6-84：卡住的条目给了出路（下一步 + 复制身份）
+
+### 53.1 结论先行
+
+- W6-83 之后，被扣住（withheld）与没写成（refused）的条目都逐条可见了，但每条只有一句**它为什么没进来**。用户在结果页上读完，能做的动作是零：界面是纯文本，选不中、抄不走，想去对端机器上找到这条来源，只能靠肉眼从头翻。
+- 本轮补两样东西：①扣住条目按原因码给一句**下一步**（原因句说「发生了什么」，下一步说「还能做什么」；两件事分开写，缺一件都等于没给出路）；②每条卡住的行旁边一个**复制身份**按钮，载荷是 `syncSourceId` 原文（不是标题 —— 标题本机可以重名，身份才是能拿去对端检索的那把钥匙）。
+- 两个纯函数承担全部判定：`SourceSyncImportCopy.nextStepOf(entry)` 与 `SourceSyncImportCopy.copyPayloadOf(entry)`。界面只负责把它们渲染出来、把载荷交给回调，不拼字符串 —— 这样「复制了标题」「建议说错了」这类错在 JVM 单测里就红，不必等模拟器。
+- 不编建议：`withheld-without-reason` 与任何未知码的 `nextStepOf` 返回 null，那一条只显示原因句与复制按钮。空话比不说话更害人。
+
+### 53.2 缺的是什么
+
+| 位置 | 之前 | 之后 |
+| --- | --- | --- |
+| 扣住条目的文字 | - 标题（身份）· 原因句 | 同前，下面多一行「下一步：…」（该码有出路时才有） |
+| 扣住条目的动作 | 无（纯文本） | 「复制身份」按钮，载荷 = 身份原文 |
+| 拒写条目的动作 | 无（纯文本） | 「复制身份」按钮（同一条思路：先能把身份带走，再去查） |
+| testTag | 只有区块头 `sync.apply.withheld` | 每条另有 `sync.apply.copy:<身份>`，同页多条时可精确点某一条 |
+| 路由层 | 无剪贴板依赖 | `SourceSyncImportRoute` 用 LocalClipboardManager 写剪贴板；无状态页面只收回调 |
+
+### 53.3 做法
+
+1. **文案层**（`SourceSyncImportLogic.kt`）：新增 `COPY_IDENTITY = "复制身份"`、`nextStepOf(entry)`、`copyPayloadOf(entry)` 两个重载（withheld / refused）。三条已知出路的句子互不相同，逐字钉在单测里。
+2. **页面层**（`SourceSyncImportScreen.kt`）：扣住块与拒写块里每条从单个 `Text` 变成 `Column`（原因行 → 下一步行 → 复制按钮）；新增私有组件 `IdentityCopyButton(identity, tag, onCopyIdentity)`，按钮文案取 `COPY_IDENTITY`，点击直接把 identity 交给回调。
+3. **回调**：`SourceSyncImportScreen` 增加 `onCopyIdentity: (String) -> Unit = {}`（默认空实现 ⇒ 既有调用点与 UI 测试零改动）；`SourceSyncImportRoute` 注入 `clipboard.setText(AnnotatedString(identity))`。
+4. **顺序坑**：`SourceSyncImportScreenTest.render(...)` 的 `onDecide` 必须留在参数表**最后一位**，既有用例的尾随 lambda 都指向它；把 `onCopyIdentity` 插到末尾会让 8 条用例一起 `Argument type mismatch`。本轮就是这么红过一次的。
+
+### 53.4 用例
+
+| 位置 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| `SourceSyncImportLogicTest` | `everyWithheldReasonThatHasAWayOutGetsItsOwnNextStep` | 三条码三步各不相同、三句逐字相等；无原因码与未知码返回 null |
+| `SourceSyncImportLogicTest` | `copyingAStuckEntryCarriesTheIdentityNotTheTitle` | 载荷是去空白的身份原文；标题绝不进入载荷 |
+| `SourceSyncImportScreenTest`（instrumentation） | `aWithheldEntryOffersItsNextStepAndCopiesItsIdentity` | 下一步行可见；点 `sync.apply.copy:<身份>` 回调收到 `[ "sync-1" ]` |
+
+### 53.5 负向对照（三条全红，逐字节还原）
+
+| 编号 | 破坏方式 | 结果 |
+| --- | --- | --- |
+| A | `nextStepOf` 开头 `return null` | `everyWithheldReasonThatHasAWayOutGetsItsOwnNextStep` 红 |
+| B | `copyPayloadOf(withheld)` 返回 `entry.title` | `copyingAStuckEntryCarriesTheIdentityNotTheTitle` 红 |
+| C | 把 NOT_SUPPORTED 的句子替成凭据码那句（两句合一） | 「三条句子互不相同」这条断言红 |
+
+还原后 sha256 与原文一致（前缀 `d6b94a03dffd6374`），日志 `D:/mh-verify/w684-negA|negB|negC.log`。
+
+### 53.6 本机实跑
+
+| 模块 | 之前 | 之后 |
+| --- | --- | --- |
+| `core/common` | 660 | 660 |
+| `core/database` | 240 | 240 |
+| `feature/settings` | 396 | **398** |
+| 三模块合计 | 1296 | **1298** |
+| `feature/settings` androidTest | 131 例（只编译，不本机跑） | **132 例** |
+
+C# 未动（`MediaHub.Tests` 1656 / 全仓 1760 口径）。instrumentation 的执行证据只能由 CI 的 visual-instrumentation 提供，本机 `compileDebugAndroidTestKotlin` 只证明能编译。
+
+### 53.7 未覆盖
+
+- 预览页的 `EntryCard` 还没有「复制身份」：那里身份同样可抄（`entry.key`），但本轮只做了结果页；两处若都做，也得共用 `IdentityCopyButton` 与同一套 tag 规则。
+- 剪贴板写入本身没有自动化证据（无状态页面只到回调那一层）；route 的剪贴板接线属 GUI_UNVERIFIED，要真机点一次才算过。
+- `nextStepOf` 只覆盖三条已知码；`local-*` 那些拒写原因没有下一步文案（它们的下一步是「重现并看日志」，目前没有可指的位置）。
+- 复制出去的身份在对端机器上怎么用，本机没有任何引导（没有「去对端找这条来源」的文案闭环）。
+
+### 53.8 下一步（W6-85 候选）
+
+1. 预览页 `EntryCard` 补同一个「复制身份」，与结果页共用组件与 tag 规则。
+2. 结果页「已导入」历史词收敛：计划行 / 结果行 / 端点句三处口径统一。
+3. 两端把对端基线喂进 `SourceSyncPlanner`（改签名要两端一起动）。
+4. 监听卡「取消接收」可观测（现在只有状态行）。
+5. 真 Room 级联：`ServerRemoveHandler` 删除后 playlist / 播放进度行是否随之清理，用真库跑一例。

@@ -119,6 +119,38 @@ object SourceSyncImportCopy {
     fun withheldLine(entry: SourceSyncWithheldEntry): String =
         "- " + entry.title + "（" + entry.syncSourceId + "）· " + refusalReason(entry.reason)
 
+    /** W6-84：「复制身份」按钮的文案（两端同一句）。 */
+    const val COPY_IDENTITY: String = "复制身份"
+
+    /**
+     * W6-84：扣住条目的「下一步」。
+     *
+     * 原因句说的是**发生了什么**，这一句说的是**用户还能做什么**；两者不能合并，
+     * 否则用户读完只知道「被扣住」却不知道路在哪。码不认识时返回 null —— 编建议比不说更害人。
+     */
+    fun nextStepOf(entry: SourceSyncWithheldEntry): String? {
+        val raw = entry.reason.trim()
+        return when {
+            raw == SyncRoundReasons.SECRETS_REQUIRE_APPROVAL ->
+                "下一步：在对端把这条来源的凭据清空后重新导出信封，或在本机手动新建一条同样的来源。"
+            raw == SyncRoundReasons.NOT_SUPPORTED ->
+                "下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。"
+            raw == SourceSyncReasons.UNKNOWN_SOURCE_TYPE ->
+                "下一步：把两端升到同一版本后重新导出信封。"
+            else -> null
+        }
+    }
+
+    /**
+     * W6-84：复制扣住条目时写进剪贴板的载荷 —— 对端给的身份原文（去首尾空白）。
+     *
+     * 载荷必须是身份而不是标题：标题在本机可以重名，身份才是能拿去对端机器检索的那把钥匙。
+     */
+    fun copyPayloadOf(entry: SourceSyncWithheldEntry): String = entry.syncSourceId.trim()
+
+    /** W6-84：拒写条目同理 —— 复制的也是身份原文。 */
+    fun copyPayloadOf(entry: SourceSyncRefusedEntry): String = entry.syncSourceId.trim()
+
     /** W6-82：逐条失败区的标题；一条都没有时返回 null（0 条不该占版面）。 */
     fun refusedHeader(summary: SourceSyncApplySummary): String? =
         if (summary.refusedEntries.isEmpty()) {
