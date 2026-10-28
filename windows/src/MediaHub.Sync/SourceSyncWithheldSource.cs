@@ -86,6 +86,22 @@ public static class SourceSyncWithheldText
     public static string? NextStep(string? code) => SyncApplyPresenter.NextStep(code);
 
     /// <summary>
+    /// W6-105: one log line per withheld entry — the peer identity says which one, the gate reason says why.
+    /// </summary>
+    /// <remarks>
+    /// The title is left out on purpose, exactly as the refusal line leaves it out: a log is read next to the
+    /// peer's own log, and the identity is the key a person greps for. The reason is translated by the one table
+    /// the row already uses, so the page and the log never explain the same code in two different words.
+    /// </remarks>
+    public static string LogLine(SourceSyncWithheldSource entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        string identity = entry.SyncSourceId.Trim();
+        string subject = identity.Length == 0 ? "（未知身份）" : identity;
+        return "同步保留未应用：" + subject + " · " + Reason(entry.Reason);
+    }
+
+    /// <summary>
     /// W6-93: every withheld entry as the page needs it, in gate order — one list with three facts per row.
     /// </summary>
     /// <remarks>

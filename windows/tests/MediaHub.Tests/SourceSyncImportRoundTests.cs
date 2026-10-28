@@ -882,6 +882,91 @@ public sealed class SourceSyncImportRoundTests
         Assert.DoesNotContain("http://", withAddress);
     }
 
+    // ---------------------------------------------------------------- withheld log line (W6-105)
+
+    [Fact]
+    public async Task EveryWithheldEntryIsHandedToTheWithheldSinkTheMomentTheGateHoldsItBack()
+    {
+        // 保留未应用 counts a withheld entry; the page says which one and why, the round summary only counts them.
+        // The sink is where the round says it out loud, and it hands over the very row the report keeps, so the
+        // page, the report and the log cannot drift.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            using JsonDocument document = JsonDocument.Parse("""{"token":"sealed-on-the-other-machine"}""");
+            var record = new SourceRecord
+            {
+                SyncSourceId = "local-dddd",
+                SourceType = SyncSourceTypeValue.Parse("emby"),
+                DisplayName = "卧室 Emby",
+                Endpoints = [new SourceEndpoint { Url = "http://emby.local:8096", IsPrimary = true }],
+                RecordRevision = 2,
+                Secrets = document.RootElement.Clone(),
+            };
+            var sink = new List<SourceSyncWithheldSource>();
+
+            SourceSyncApplyReport result = await round.ApplyAsync(
+                round.Preview(Envelope(record)), ["local-dddd"], Writer(store), withheldSink: sink.Add);
+
+            SourceSyncWithheldSource watched = Assert.Single(sink);
+            Assert.Same(Assert.Single(result.WithheldEntries), watched);
+            Assert.Equal("local-dddd", watched.SyncSourceId);
+            Assert.Equal("卧室 Emby", watched.DisplayName);
+            Assert.Equal(SyncRoundReasons.SecretsRequireApproval, watched.Reason);
+            Assert.Equal(1, result.Withheld);
+            Assert.Empty(store.GetAll());
+        });
+    }
+
+    [Fact]
+    public async Task TheWithheldSinkStaysQuietWhenNothingIsHeldBack()
+    {
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncEnvelope peer = Envelope(Record("local-aaaa", "emby", "http://nas-a:8096/emby", "客厅 Emby"));
+            var sink = new List<SourceSyncWithheldSource>();
+
+            await round.ApplyAsync(round.Preview(peer), ["local-aaaa"], Writer(store), withheldSink: sink.Add);
+            await round.ApplyAsync(round.Preview(peer), [], Writer(store), withheldSink: sink.Add);
+
+            Assert.Empty(sink);
+        });
+    }
+
+    [Fact]
+    public void TheWithheldLogLineNamesTheIdentityAndTheReasonWithoutQuotingTheTitle()
+    {
+        // W6-105: the same discipline as the refusal line — identity, reason, never a title or an address. The
+        // gate's code is translated by the table the page already uses, so the row and the log read alike.
+        Assert.Equal(
+            "同步保留未应用：local-dddd · 带凭据，需人工迁移（本次不会写入）",
+            SourceSyncWithheldText.LogLine(new SourceSyncWithheldSource
+            {
+                SyncSourceId = " local-dddd ",
+                DisplayName = "卧室 Emby",
+                Reason = SyncRoundReasons.SecretsRequireApproval,
+            }));
+        Assert.Equal(
+            "同步保留未应用：（未知身份） · 对端没有说明原因",
+            SourceSyncWithheldText.LogLine(new SourceSyncWithheldSource
+            {
+                SyncSourceId = "  ",
+                DisplayName = "无身份来源",
+                Reason = "",
+            }));
+        string withAddress = SourceSyncWithheldText.LogLine(new SourceSyncWithheldSource
+        {
+            SyncSourceId = "local-dddd",
+            DisplayName = "http://emby.local:8096?api_key=AAAA",
+            Reason = SyncRoundReasons.UnknownSourceType,
+        });
+        Assert.Equal("同步保留未应用：local-dddd · 未知来源类型，Windows 无法应用", withAddress);
+        Assert.DoesNotContain("api_key", withAddress);
+        Assert.DoesNotContain("http://", withAddress);
+    }
     [Fact]
     public void EveryRefusedRowCarriesTheIdentityTheSameButtonCopiesAndInventsNoWayOut()
     {

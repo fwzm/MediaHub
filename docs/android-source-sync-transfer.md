@@ -6352,3 +6352,72 @@ App 工程 **0 警告 0 错误**（`D:/mh-verify/w6103-app-build.log`）。
 - **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与 Sync 层单测，端到端日志证据未取（见 72.6）；
   Android 侧本轮零改动，`uniqueTests` 2467 为未改动对照；
 - 提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+## §74 W6-105：被扣住的条目也各留一行日志（点允许也不会写，但至少要知道是哪一条）
+
+> 编号说明：§73 属于主树 W6-104（Android 侧逐条日志），本分支尚未合并到该提交，故本节按全局时间序用 §74。
+
+### 74.1 结论先行
+
+Windows 侧 W6-103 让每条**被拒写入**进了日志；但「**扣住**」（`gate.Withheld`：带凭据、未知来源类型、Windows 不支持的类型）此前只有结果页与 W6-102 的汇总计数：
+`SourceSyncImportRound.ApplyAsync` 的 `gate.Withheld` 循环只构造 `SourceSyncWithheldSource` 行，没有日志出口 —— 界面一关、内存一回收，事后无法回答「是哪一条、为什么扣住」。
+本轮把这一半补齐：**每一条被扣住的条目在被闸门扣住的那一刻写一行 `Warn`**，内容是对端身份与闸门原因的白话句。
+这与 Android 侧 W6-104 的 `sync-entry-withheld:` 行对等（Android 侧写原因码，Windows 侧写同一张表翻出的整句）。
+
+### 74.2 一处措辞、一处消费
+
+- 措辞仍在 `windows/src/MediaHub.Sync/SourceSyncWithheldSource.cs` 的 `SourceSyncWithheldText.LogLine(entry)`，固定句：
+  `同步保留未应用：<对端身份> · <原因>`；身份为空写「（未知身份）」，原因空白沿用 `Reason()` 的「对端没有说明原因」，
+  原因码由 `SyncApplyPresenter.DescribeGateReason` 翻成页面同一句 —— 页面与日志不会对同一个码说两种话。
+  **不出现标题、端点 URL 或任何凭据片段**（与 W6-103 的拒写行同一条纪律：日志按身份 grep，标题留在页面）。
+- App 侧 `SourceSyncService.ApplyApprovedAsync` 只把它接到 `_log.Warn(LogCategory, …)`，不自己造句 —— 措辞放 Sync 层，App 只决定何时写（W6-102 纪律）。
+- 触发点是 `ApplyAsync` 的新可选参数 `withheldSink`（放在 `refusedSink` 之后、`cancellationToken` 之前），在 `gate.Withheld` 循环内
+  `withheldSources.Add(withheld); withheldSink?.Invoke(withheld);` —— 回调拿到的正是报告 `WithheldEntries` 里那条实例
+  （用例用 `Assert.Same` 钉住，页面/报告/日志三份不可能漂移）。
+- 两类「保留未应用」现在各有一行且互不重复：**扣住**是闸门在任何写入之前就决定，**被拒**是写入器跑了才拒；两行同时出现时也能分别溯源。
+
+### 74.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.Sync/SourceSyncImportRound.cs` | 签名加 `Action<SourceSyncWithheldSource>? withheldSink = null`；`gate.Withheld` 循环里构造后同步回调 |
+| `windows/src/MediaHub.Sync/SourceSyncWithheldSource.cs` | 新增 `LogLine(entry)`（唯一句式） |
+| `windows/src/MediaHub.App/Services/SourceSyncService.cs` | `ApplyApprovedAsync` 传 `withheldSink: entry => _log.Warn(LogCategory, SourceSyncWithheldText.LogLine(entry))` |
+| `windows/tests/MediaHub.Tests/SourceSyncImportRoundTests.cs` | 新增 3 例 |
+
+`SourceSyncPeerRound.cs` 本轮未动：它本就像 W6-103 的 `refusedSink` 一样不透传 sink，App 侧走的是 `_round`（`SourceSyncImportRound`）；
+将来若有调用方从门面重试导入，再加参数并转发。
+
+### 74.4 用例与计数
+
+`MediaHub.Tests` 1691 → **1694**：
+
+1. `EveryWithheldEntryIsHandedToTheWithheldSinkTheMomentTheGateHoldsItBack` —— 带凭据记录被扣住，sink 恰好一条、`Assert.Same` 报告里那条（身份 trim 后为 `local-dddd`、原因 `secrets-require-approval`），且本机存储零写入；
+2. `TheWithheldSinkStaysQuietWhenNothingIsHeldBack` —— 全部写入或零放行时不发一行（避免「没事也报警」）；
+3. `TheWithheldLogLineNamesTheIdentityAndTheReasonWithoutQuotingTheTitle` —— 逐字整句、空白身份回退、空白原因回退，并断言行里不含 `api_key` / `http://`（标题带 URL 时也不泄漏）。
+
+App 工程 **0 警告 0 错误**（`D:/mh-verify/w6105-app-build.log`）。
+
+### 74.5 四条负向对照
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A 去掉 `withheldSink?.Invoke(withheld);`（只构造不上报） | 1693 / **1 红** | `EveryWithheldEntryIsHandedToTheWithheldSinkTheMomentTheGateHoldsItBack` |
+| B 已放行的条目也进 sink | 1693 / **1 红** | `TheWithheldSinkStaysQuietWhenNothingIsHeldBack` |
+| C `LogLine` 丢掉原因（只留身份与分隔符） | 1693 / **1 红** | `TheWithheldLogLineNamesTheIdentityAndTheReasonWithoutQuotingTheTitle` |
+| D `LogLine` 用标题当主语 | 1693 / **1 红** | 同上 |
+
+每轮跑完立即从实现态快照（`D:/mh-verify/w6105-impl-*.cs`）逐字节还原，四个文件 sha256 与实现态相等；
+日志留档 `D:/mh-verify/w6105-neg-A.log` … `w6105-neg-D.log`，复跑 1694 / 0（`w6105-test2-after-controls.log`）。
+
+### 74.6 边界
+
+- **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与 Sync 层单测，端到端日志证据未取（真机/真日志导出 **NOT_RUN**）；
+- Android 侧本轮零改动（Windows-only 轮），`uniqueTests` 2472 为未改动对照；真实两机联调 **NOT_RUN**、真机 instrumentation **DEVICE_UNVERIFIED**；
+- 另一处尚无日志出口的同类：接收侧「这一次接收被取消」已有计数（W6-86），但取消事件本身仍不进日志 —— 留作后续候选。
+
+### 74.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1694 / 0** 与 App 构建 **0 警告 0 错误**；四条负向对照全红（1 / 1 / 1 / 1）且逐字节还原到实现态；
+- **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与 Sync 层单测，端到端日志证据未取（见 74.6）；
+- 提交号以 PR #39 head 为准（docs 不自指 SHA）。

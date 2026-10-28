@@ -381,6 +381,8 @@ public sealed class SourceSyncService
         // W6-103: a refused write gets its own line the moment the round decides it, so "which entry and why" is in
         // the log and not only on the page. The words live in MediaHub.Sync (W6-102 discipline); this method only
         // decides when to write them.
+        // W6-105: the withheld half gets the same line, written the moment the gate holds the entry back. The page
+        // and the round summary already say how many; the log has to say which one and why.
         SourceSyncApplyReport result = await _round
             .ApplyAsync(
                 preview,
@@ -388,6 +390,7 @@ public sealed class SourceSyncService
                 WriteApprovedRecordAsync,
                 skippedIds,
                 refusedSink: entry => _log.Warn(LogCategory, SourceSyncRefusedText.LogLine(entry)),
+                withheldSink: entry => _log.Warn(LogCategory, SourceSyncWithheldText.LogLine(entry)),
                 cancellationToken: ct)
             .ConfigureAwait(true);
 

@@ -302,6 +302,8 @@ public sealed class SourceSyncImportRound
     /// <param name="skippedIds">Identities the user explicitly skipped; never written, even when their default verdict is "apply".</param>
     /// <param name="refusedSink">W6-103: called once per refused write, with the round's own row; the app turns it
     /// into a log line, and a test can watch it without a logger.</param>
+    /// <param name="withheldSink">W6-105: called once per entry the gate holds back, with the round's own row; the
+    /// same shape as <paramref name="refusedSink"/>, so both halves of 保留未应用 reach the log.</param>
     /// <param name="cancellationToken">Cancels between entries, never mid-write.</param>
     public async Task<SourceSyncApplyReport> ApplyAsync(
         SourceSyncApplyPreview preview,
@@ -309,6 +311,7 @@ public sealed class SourceSyncImportRound
         SourceSyncRecordWriter writer,
         IReadOnlyList<string>? skippedIds = null,
         Action<SourceSyncRefusedSource>? refusedSink = null,
+        Action<SourceSyncWithheldSource>? withheldSink = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(preview);
@@ -319,12 +322,14 @@ public sealed class SourceSyncImportRound
         var withheldSources = new List<SourceSyncWithheldSource>();
         foreach (SourceSyncApprovalItem item in gate.Withheld)
         {
-            withheldSources.Add(new SourceSyncWithheldSource
+            var withheld = new SourceSyncWithheldSource
             {
                 SyncSourceId = item.SyncSourceId.Trim(),
                 DisplayName = item.DisplayName,
                 Reason = item.Reason,
-            });
+            };
+            withheldSources.Add(withheld);
+            withheldSink?.Invoke(withheld);
         }
 
         var written = new List<SourceRecord>();
