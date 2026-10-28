@@ -5946,7 +5946,7 @@ W6-91 让结果页能逐条看到「哪条没写进去、为什么」，但那�
 
 - W6-88 让删除失败会说出「卡在哪一步」（`local-source-remove-failed:<step>`），但「那一步为什么失败」在 Android 侧被丢掉了：`ServerSourceSyncRemover` 的两个 catch 只交出步骤码，异常消息（「keystore 拒绝访问」这类唯一能行动的线索）没有任何出口。
 - Windows 权威从不丢这句话：`ServerManager.RemoveRemoteSourceAsync` 的 `DeleteAsync` 不 try/catch，异常一路冒到 `SourceSyncImportRound.ApplyAsync` 的 catch，折成 `SourceSyncWriteOutcome.Refused(message)`，结果页的「未写入」区逐条带着它（W6-91 的 `SourceSyncRefusedText`）。
-- W6-98 把这句话补回 Android：删除失败的行尾追加「（原因：…）」，与步骤码同一行；净化（折叠空白 / 160 字符截断 / 空白返 null / 不留半个代理对）的唯一权威放在 core:database 的 `SourceSyncRemovalCauses.describe`，界面只 trim 判空。
+- W6-98 把这句话补回 Android：删除失败的行尾追加「（原因：…）」，与步骤码同一行；净化（折叠空白 / 160 字符截断 / 空白返 null / 不留半个代理对）的唯一权威放在 core:database 的 `SourceSyncRemovalCauses.describe`（W6-99 起更名为 `SourceSyncFailureCauses`，同一套净化也服务写入失败，见 §68），界面只 trim 判空。
 
 ### 67.2 为什么原因句只进回执与界面
 
@@ -5958,7 +5958,7 @@ W6-91 让结果页能逐条看到「哪条没写进去、为什么」，但那�
 
 | 位置 | 改动 |
 | --- | --- |
-| `core/database/.../sync/SourceSyncRemovalCauses.kt`（新） | `describe(Throwable?)`：trim → 折叠 `\s+` → 空白返 null → 超 160 截断 + `…`（代理对安全） |
+| `core/database/.../sync/SourceSyncFailureCauses.kt`（W6-98 新，W6-99 更名） | `describe(Throwable?)`：trim → 折叠 `\s+` → 空白返 null → 超 160 截断 + `…`（代理对安全） |
 | `core/database/.../sync/SourceSyncSourceRemover.kt` | `Failed(reason, causeMessage = null)`：默认参数，既有实现零改动 |
 | `feature/server/.../ServerSourceSyncRemover.kt` | 两个 catch 分别传 `describe(failure.cause)` 与 `describe(failure)` |
 | `core/database/.../AndroidSourceSyncService.kt` | `SourceSyncRefusal` 与 `SourceSyncRemovalFailure` 各加 `causeMessage`；Failed 分支抄 `outcome.causeMessage`；本服务这一层漏出的异常走同一净化函数；删除类拒绝带上它（写入类恒 null） |
@@ -5968,7 +5968,7 @@ W6-91 让结果页能逐条看到「哪条没写进去、为什么」，但那�
 
 ### 67.4 用例与计数
 
-- `core/database` 246 → **251**：新 `SourceSyncRemovalCausesTest` 4 例（无消息/空白 → null、折叠成单行、160 边界与截断、代理对不被截断）；`SourceSyncApplyRoundTest` +1（失败条目的步骤码与原因句同源，`removalFailures` 与逐条拒绝清单的 `causeMessage` 一致）。
+- `core/database` 246 → **251**：新 `SourceSyncFailureCausesTest`（W6-99 更名，W6-98 时叫 SourceSyncRemovalCausesTest）4 例（无消息/空白 → null、折叠成单行、160 边界与截断、代理对不被截断）；`SourceSyncApplyRoundTest` +1（失败条目的步骤码与原因句同源，`removalFailures` 与逐条拒绝清单的 `causeMessage` 一致）。
 - `feature/settings` 408 → **409**：`SourceSyncImportLogicTest` +1（整行精确串含「（原因：keystore 拒绝访问）」、`causeMessage=null` 时与被改前逐字节一致、`refusalCauseSuffix(null)` 与纯空白都返空串）；`SourceSyncImportSessionTest` 既有两例补断言（删除类带原因、写入类不带；补漏路径同样带上）。
 - `feature/server` 40 → **42**：原有三处期望值补上异常消息；新增两例（步骤码与异常消息一起交出去；那一步什么都没说时是 null 而不是空串）。
 - 四模块本机口径：`core/common` 660 / `core/database` **251** / `feature/settings` **409** / `feature/server` **42** = **1362**（W6-97 是 1354）；`uniqueTests` 2450 → **2458**；`--required-suite` 仍 **60**。C# 与 Windows 侧本轮零改动。
@@ -5997,4 +5997,67 @@ W6-91 让结果页能逐条看到「哪条没写进去、为什么」，但那�
 
 ### 67.8 状态
 
-- EXECUTED_PASS（本机 `core:database` 251/0（12 skipped）、`feature:settings` 409/0、`feature/server` 42/0；四条负向对照全红并逐字节还原）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。
+- EXECUTED_PASS（本机 `core:database` 251/0（12 skipped）、`feature:settings` 409/0、`feature/server` 42/0；四条负向对照全红并逐字节还原）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。## §68 W6-99：写入失败也把异常那句话带上（对齐 Windows 的 Refused 异常消息）
+
+### 68.1 结论先行
+
+- W6-82 之后，写入失败在安卓侧的表述是 `local-source-write-failed:<异常类名>`：知道「谁拒绝的」，不知道「为什么拒绝」。
+- Windows 权威从不丢这句话：`windows/src/MediaHub.App/Services/ServerManager.cs` 的 `ApplyRemoteSource` 只对预检失败写整句，真正的写入（`AddEntry` + `_settings.Update`）没有 try/catch，异常冒到 `SourceSyncImportRound.ApplyAsync` 的 catch，折成 `Refused(ex.Message)` 进结果页。
+- 本轮让安卓对齐：`WriteAttempt.Refused` 带 `causeMessage`，`SourceSyncRefusal.causeMessage` 不再只服务删除类；文案层 `refusalCauseSuffix` 自动把「（原因：…）」挂在写入行尾。
+- 顺带更名：`SourceSyncRemovalCauses` → `SourceSyncFailureCauses`（同一条净化现在同时服务删除与写入，名字不该再限定删除）。旧名在文档与前几轮叙述里保持原样，只在本节写明对应关系。
+
+### 68.2 一处净化、两处消费
+
+| 环节 | 位置 | 规则 |
+| --- | --- | --- |
+| 写 | `SourceSyncFailureCauses.describe(Throwable?)`（core/database） | trim → 折叠 `\s+` 为单空格 → 空白返 **null** → 超过 160 字符截断加省略号且不留半个代理对 |
+| 消费（删除） | `ServerSourceSyncRemover` 两个 catch → `SourceSyncRemoveOutcome.Failed(reason, causeMessage)` | W6-98 起 |
+| 消费（写入） | `writeRecord` 的 catch → `WriteAttempt.Refused(reason, causeMessage)` | W6-99 起 |
+| 落行 | `SourceSyncImportLogic.refusalLine` 尾部 `refusalCauseSuffix(causeMessage)` | 空白 → 空串（不出现半句「（原因：）」） |
+
+- 原因句**不参与任何判定**：分桶、闸门、基线推进都只看动作与原因码。
+- 不是异常的拒绝仍是 null：类型不认识（`unknown-source-type`）、没有可拨号地址（`no-usable-endpoint`）、身份空白（`missing-sync-source-id`）、更新时行已消失（`source-vanished`）——它们没有异常可引，不编。
+- 旧路径 `apply()`（`importEnvelope` → 一把写全部，只被测试驱动）没有原因句槽，`SourceSyncCandidate` 也不带消息，异常消息在那里仍然丢掉；生产口径以 `applyRound` 为准，已在代码注释里写明。
+
+### 68.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `core/database/.../SourceSyncFailureCauses.kt`（W6-98 建，W6-99 更名） | 对象更名 + KDoc 写明删除与写入共用 |
+| `core/database/.../AndroidSourceSyncService.kt` | `WriteAttempt.Refused` 加 `causeMessage`；`writeRecord` 的 catch 交出净化后的消息；`applyRound` 写入分支传 `attempt.causeMessage`；`SourceSyncRefusal` KDoc 从「写入类一律 null」改为「不是异常的拒绝才是 null」 |
+| `feature/server/.../ServerSourceSyncRemover.kt` | import 更名 + 两处 catch 用新名字（行为不变） |
+| `feature/settings/.../SourceSyncImportLogic.kt` | `refusalCauseSuffix` KDoc 扩到写入类（行为不变，写入行自动获得后缀） |
+| 测试 | `SourceSyncApplyRoundTest` 加 2 例（FakeStore 多一个 `writeFailure` 槽）、`SourceSyncImportLogicTest` 加 1 例、`SourceSyncFailureCausesTest` 更名 |
+
+### 68.4 用例与计数
+
+- `core/database` **251 → 253**：`a_write_failure_carries_the_message_the_storage_layer_threw`（`IllegalStateException("disk full")` ⇒ 码仍是 `local-source-write-failed:IllegalStateException`、`causeMessage == "disk full"`）与 `a_write_failure_that_says_nothing_keeps_no_message_instead_of_an_empty_one`（无消息的异常 ⇒ `assertNull`）；既有「写失败与删失败各自留码」用例补了「有消息的那条带消息、没消息的那条是 null」。
+- `feature/settings` **409 → 410**：写入失败整行精确串 `- 客厅 Emby（sync-1）· 写入 · 本机存储拒绝了这次写入（IOException）。（原因：磁盘已满）`；`causeMessage = null` 时与改前逐字节一致。
+- `feature/server` **42** 不变（只换名字）。本机四模块 660 / 253 / 410 / 42 = **1365**；新例计入 `uniqueTests` 2458 → **2461**；`--required-suite` 仍 60。
+
+### 68.5 四条负向对照（实现态快照先行，跑完逐字节还原）
+
+| 变异 | 结果 | 说明 |
+| --- | --- | --- |
+| A `writeRecord` 的 catch 不再交 `SourceSyncFailureCauses.describe(failure)` | 253 / **2 红** | 新用例 + 既有混合用例 |
+| B `applyRound` 写入分支不再传 `attempt.causeMessage` | 253 / **2 红** | 同上两条 |
+| C 净化器把「没有消息」变成空串 | 253 / **3 红** | 会写出半句「（原因：）」 |
+| D 文案层只给删除行挂原因 | 410 / **1 红** | 写入行的原因句消失 |
+
+快照 `D:/mh-verify/w699-impl-{service,causes,logic}.kt`；日志 `D:/mh-verify/w699-neg-{A,B,C,D}-*.log`；四次变异后均以 sha256 确认还原到实现态。
+
+### 68.6 与 Windows 的差异
+
+- 两边都把「异常自己说的话」带给用户；Windows 原样透出，安卓过一层净化（单行、160 字符、代理对安全），保证原因句能安全摆在单行 UI 上。
+- Windows 的写入失败落在 `Refused` 行（与安卓的「未写入」区同义）；两边都不因此改变分桶或基线。
+
+### 68.7 边界与仍未做
+
+- 预检类拒绝的码表不变，也不给它们编原因句。
+- 旧 `apply()` 路径不含消息（测试专用），生产路径以 `applyRound` 为准。
+- 删除链内部日志（step + cause 进日志而不只进回执）仍未做；真实两机联调与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 68.8 状态
+
+- **EXECUTED_PASS**：本机 `core/database` 253 / 0、`feature/settings` 410 / 0、`feature/server` 42 / 0；四条负向对照全红且逐字节还原。
+- **IMPLEMENTED_UNVERIFIED**：Windows 侧本轮零改动（C# 仍 1683 通过 / 0 失败），exact-SHA CI 见 PR 正文。
