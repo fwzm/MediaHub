@@ -382,15 +382,17 @@ public sealed class SourceSyncService
             .ApplyAsync(preview, allowedIds, WriteApprovedRecordAsync, skippedIds, ct)
             .ConfigureAwait(true);
 
-        if (result.Withheld > 0)
+        // The words live in MediaHub.Sync (W6-102) so the log line is pinned by the same suite that pins the
+        // per-row lists; this method only decides when to write them.
+        string? warning = SourceSyncRoundSummaryText.WarnLine(result);
+        if (warning is not null)
         {
-            _log.Warn(LogCategory, "应用对端信封时有 " + result.Withheld + " 条保留未应用（含凭据或写入被拒）");
+            _log.Warn(LogCategory, warning);
         }
 
         _log.Info(
             LogCategory,
-            "已应用对端信封：写入 " + result.Applied + " 条，跳过 " + result.Skipped + " 条，保留未应用 "
-            + result.Withheld + " 条；本机基线" + (result.BaselineUpdated ? "已更新" : "未变化") + "（不含任何凭据）");
+            SourceSyncRoundSummaryText.InfoLine(preview.Envelope.DeviceId, preview.Envelope.SnapshotId, result));
 
         return result;
     }

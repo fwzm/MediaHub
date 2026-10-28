@@ -6221,3 +6221,66 @@ Hilt `Logger`（`CompositeLogger(LogcatLogger(), MemoryLogger(LogBuffer()))`）�
 - **IMPLEMENTED_UNVERIFIED**：exact-SHA CI 见 PR 正文；生产接线的端到端证据未取（见 §70.7）；
   Windows C# 1683 通过 / 0 失败，本轮零改动；
 - 主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+## §71 W6-102：Windows 的一轮汇总日志也说出是对端哪一轮（对齐 Android W6-101）
+
+### 71.1 结论先行
+
+- Windows 侧**原本就有一行汇总日志**（`SourceSyncService.ApplyApprovedAsync` 里的 `_log.Info("sync", …)`），
+  但它只说「写入 N 条，跳过 N 条，保留未应用 N 条」：**没有对端与快照身份、没有「扣住 vs 写入被拒」的拆分、没有移除条数**；
+  更关键的是这几行的措辞写在 App 层，而 `MediaHub.Tests` 不引用 `MediaHub.App`（csproj 只引 Domain/Net/Providers/Player/Mpv/Storage/Sync/SyncCli/TestSupport），
+  于是这段日志**零测试覆盖** —— 改坏了没有任何用例会红。
+- W6-102 把「一轮汇总该说什么」抽到 `windows/src/MediaHub.Sync/SourceSyncRoundSummary.cs` 的 `SourceSyncRoundSummaryText`
+  （`Identity` / `InfoLine` / `WarnLine` 三个静态方法），App 只决定「何时写」；于是同一句能被测试逐字钉住，且措辞里**不含任何来源名、地址与凭据**。
+- 汇总行现在是：
+  `已应用对端信封：对端 device-a · 快照 snap-1 · 写入 3 条 · 移除 1 条 · 跳过 1 条 · 保留未应用 3 条（扣住 2 · 写入被拒 1） · 本机基线已更新（不含任何凭据）`。
+
+### 71.2 一处措辞、两处消费
+
+- `InfoLine(deviceId, snapshotId, report)`：`移除` 由 `report.Written` 里 `Action == SourceSyncAction.Delete` 的条数算出，
+  **不做「写入 − 扣住」这类减法**；扣住与被拒分别读 `report.Withheld` 与 `report.Refused.Count` —— 两者相加才是 `Withheld` 计数，
+  这正是 Android W6-92/W6-95 定下的「一份计数、两份清单」分工（扣住清单进闸门，被拒清单进写入结果）。
+- `WarnLine(report)`：`Withheld <= 0` 返回 `null`（零条不占版面），否则一句 warn；`ApplyApprovedAsync` 只在返回值非 null 时写。
+- `Identity(deviceId, snapshotId)`：只给存在的那半边（「对端 device-a」或「快照 snap-1」），两边都没有时不编造，说「对端与快照未知」。
+- 与 Android 的对照：Android W6-101 的行是 `sync-round-applied:device=… snapshot=… applied=… skipped=… withheld=… refused=… removed=…`（机器可读的 key=value，供 logcat 与诊断导出检索），
+  Windows 是中文整句（面向 `LogService.Export()` 的人工报告）。两端都一样：一轮只写一行、只记计数与内部标识、来源名/端点/凭据一律不进。
+
+### 71.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.Sync/SourceSyncRoundSummary.cs`（新） | `SourceSyncRoundSummaryText`：`Identity` / `InfoLine` / `WarnLine`，本轮所有措辞的唯一权威 |
+| `windows/src/MediaHub.App/Services/SourceSyncService.cs` | `ApplyApprovedAsync` 的日志块改为 `WarnLine` + `InfoLine(preview.Envelope.DeviceId, preview.Envelope.SnapshotId, result)`，只决定何时写 |
+| `windows/tests/MediaHub.Tests/SourceSyncRoundSummaryTests.cs`（新） | 4 例：逐字整句、安全不变式、缺身份不编造、warn 只在扣住时出现 |
+
+### 71.4 用例与计数
+
+- `MediaHub.Tests` **1683 → 1687**（+4，全部是新文件里的纯文本用例）；App 工程 `dotnet build windows/src/MediaHub.App` 为 **0 警告 0 错误**（XAML 与 C# 都编译过，接线不是「只在源码里看起来对」）。
+- Android 侧零改动，`uniqueTests` 仍 **2467**、`--required-suite` 仍 **60**（本轮只改 `windows/**`，CI 的 Android 侧是未改动对照）。
+- 本机证据：`D:/mh-verify/w6102-test1.log`（`已通过 1687 / 失败 0`）、`D:/mh-verify/w6102-app-build.log`（0 警告 0 错误）。
+
+### 71.5 四条负向对照
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A `Identity(deviceId, snapshotId)` 恒返 `对端与快照未知` | 1684 / **3 红** | 逐字整句、缺身份不编造、安全不变式 |
+| B 扣住/被拒两个计数写死 0 | 1686 / **1 红** | 逐字整句 |
+| C `WarnLine` 恒返 null | 1686 / **1 红** | warn 只在扣住时出现 |
+| D 汇总行拼 `report.Written[0].DisplayName` | 1686 / **1 红** | 安全不变式 |
+
+实现态快照 `D:/mh-verify/w6102-impl-summary.cs`（sha256 `cff0bc078e11fe0f0fc75a49500840dc427d3f523bf09bae7cec0be4adc27f25`）；
+每条对照跑完都从快照逐字节写回并比对 sha256（`true`）；日志 `D:/mh-verify/w6102-neg-{A-identity-dropped,B-split-counts-zeroed,C-warning-never-fires,D-summary-quotes-a-name}.log`。
+
+### 71.6 边界与仍未做
+
+- **App 接线仍无自动化端到端证据**：`MediaHub.Tests` 引不到 `MediaHub.App`，所以「`ApplyApprovedAsync` 真的调了这两个方法」目前只有编译期保证与纯文本单测；
+  端到端（跑一次真同步、在 `LogService.Entries` 里看到那一行）属于 GUI/真机证据，本轮不取 ⇒ §71.7 记 IMPLEMENTED_UNVERIFIED。
+- 日志只写一行汇总，不逐条记（逐条原因已在结果页与 docs §56/§58/§60/§61/§64）；不记来源名、端点、凭据；warn 行只说「扣住 N 与写入被拒 N」，具体是哪条仍看结果页。
+- `SourceSyncRoundSummaryText` 目前只被 App 侧调用；CliRunner/headless 路径未接（不在本轮范围）。
+- 真实两机联调、真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 71.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` 1687 / 0 与 App 构建 0 警告 0 错误；四条负向对照全红（3 / 1 / 1 / 1）且逐字节还原到实现态；
+- **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与纯文本单测，端到端日志证据未取（见 §71.6）；
+  Android 侧本轮零改动，`uniqueTests` 2467 为未改动对照；
+- 提交号以 PR #39 head 为准（docs 不自指 SHA）。
