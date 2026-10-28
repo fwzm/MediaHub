@@ -5337,3 +5337,73 @@ C# 未动（`MediaHub.Tests` 1656 / 全仓 1760 口径）。`SourceSyncListenerC
 2. 预览页与结果页的「下一步」加导航出口（跳到来源页、或跳到对端说明）。
 3. 真 Room 级联：用真库跑一例 `ServerRemoveHandler` 删除后 playlist / 播放进度行是否随之清理。
 4. `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（生产不可达，但读者会误以为那是第二条写入口）。
+
+## §56 W6-87：对端声明删除时真的级联清理（真 Room 内存库 + 真 `RemoveServerUseCase`）
+
+### 56.1 结论先行
+
+- W6-79 把「对端声明删除」接进了写入口，但那条链**只在 fake 层被证明过**：`ServerSourceSyncRemoverTest` 用 fake handler 只验「调没调删除链」，`RemoveServerUseCase` 从引入起没有一个测试文件，`AndroidSourceSyncServiceRoomTest`（真 Room）只跑导入/幂等/导出、从没跑过删除。三处都不拦「删除链被换成只删 servers 一行」这种回归。
+- 本轮补的是**真库 + 真用例**这一段：Robolectric + `Room.inMemoryDatabaseBuilder` + 真 `RemoveServerUseCase`，一次删掉一台来源，然后按表逐处验收 servers / server_endpoints / accounts / playback_progress / subtitle_memory / 图标文件 / token / 凭据 / provider 会话。
+- 判据分层（写断言时最容易弄反的一点）：`accounts` 带 `ForeignKey(onDelete = CASCADE)` 指向 servers，删 servers 行就会跟着没 ⇒ 这条断言**没有鉴别力**，它只代表用户看得见的那一面。真正能被「只删一行」漏掉的是 playback_progress / subtitle_memory / 图标文件 / token / 凭据 / provider 会话六处，负向对照也正打这里。
+- 同步层同样要在真库上验一次：`AndroidSourceSyncService.applyRound` 拿到只有 `deletions` 的信封、`sourceRemover` 是真 remover 时，回执 `removedServerIds` 命中且库里那行真的没了 —— fake store 里「调了 remover」不足以证明「落库层真的删了」。
+- 本机记账：`feature/server` **34 → 36 例**（+2），全绿；Windows 侧本轮无变更（`MediaHub.Tests` 1656 / 全仓 1760 口径不变）。
+
+### 56.2 缺的是什么
+
+| 缺口 | 后果 |
+| --- | --- |
+| `RemoveServerUseCase` 零测试文件 | 八步清理链里任何一步被删/被调换都无人拦（`git grep -l RemoveServerUseCase -- */src/test/**` 只命中 `ServerSourceSyncRemoverTest`） |
+| `ServerSourceSyncRemoverTest` 用 fake `ServerRemoveHandler` | 只证明「remover 会调 handler」，handler 内部到底清了什么完全没验 |
+| 真 Room 测试没有删除用例 | 「墓碑 → 删来源」在真库上的表现（含端点行、默认重选）从未被观察过 |
+| 默认媒体源被删后的重选未验 | `deleteServer` 里 `wasDefault` 分支一旦写错，界面上会出现「零个默认」或「两个默认」 |
+
+### 56.3 做法
+
+1. 新增 `feature/server/src/test/kotlin/com/mediahub/feature/server/SourceSyncRemovalCascadeRoomTest.kt`（262 行 / 11621 B），仿 `AndroidSourceSyncServiceRoomTest` 的范式：`@RunWith(RobolectricTestRunner::class)` + `@Config(sdk = [34])` + 内存库 `allowMainThreadQueries()`。
+2. `seedSource(name, syncSourceId, revision)` 走真 `ServerRepository.addServer` + `bindSyncSourceId`（同步身份三列是后续断言「另一台没被动」的关键）；`seedLocalState(server)` 给一台来源铺满六处可漏状态：账号行、播放进度行、字幕记忆行、`icons.iconFile(id)` 真写一个文件、`TokenStore.saveTokens`、`CredentialVault.save(PASSWORD)`。两个测试替身：`MapSecretStorage`（Keystore 在 Robolectric 下不可用，`SecretStorage` 四个 suspend 方法用 `LinkedHashMap` 实现）与 `RecordingSessionCleaner`（`SessionStoreCleaner` 是 `fun interface`，记录被清的 serverId）。
+3. 用例一「删默认源，全链清、默认重选、另一台零改动」：注意 `addServer` 会让**第一台**自动成为默认，所以必须显式 `repository.setDefault(doomed.id)` 才验得到重选分支；删完断言 `serverDao.getById == null`、`count == 1`、端点行空且 `serverEndpointDao.getAll()` 只剩另一台、账号行 null、六处全清、`sessions.cleared == [doomed.id]`，然后反向断言另一台的 `syncSourceId` / `syncRecordRevision`（7L）/ `isDefault` / 端点 / 账号 / 进度 / 字幕 / 图标 / token / 凭据一个都没动，且全库 `isDefault` 恰好一条。
+4. 用例二「墓碑经同步层真的落库删除」：`AndroidSourceSyncService(store = repository, deviceId = "device-android", snapshotIdFactory = { "snap-del" }, clock = { 1_700_000_000_000L }, sourceRemover = remover)`（`sourceRemover` 是第 6 个构造参数）拿信封 `{"sources":[],"deletions":[{"syncSourceId":"local-aaa","deletedAtEpochMs":...,"recordRevision":4}]}`（本地绑定 revision 3，墓碑 4 才会判删除）跑 `applyRound(allowedSyncSourceIds = listOf("local-aaa"))`，断言 `applied == 1`、`refused == 0`、`removalFailures` 与 `refusals` 都空、`removedServerIds == [doomed.id]`、`removedSyncSourceIds == ["local-aaa"]`、`wrote` 空（删除不算写），再断言真库里七处都没了。
+
+### 56.4 用例表
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `removing_a_default_source_clears_every_piece_of_its_state_and_reselects_the_default` | 八步清理链每一步都真的发生 + 默认重选到剩下那台 + 另一台零改动（含同步身份三列） |
+| `a_peer_declared_deletion_runs_the_real_cascade_through_the_sync_layer` | 墓碑 → 闸门 → `removeLocalSource` → 真 remover → 真 Room；回执字段与库状态一致 |
+
+### 56.5 负向对照（两条全红，均逐字节还原 `readFileSync === original` 为 true）
+
+| 编号 | 破坏方式 | 结果 |
+| --- | --- | --- |
+| A | 把 `remover` 的 handler 换成只 `repository.deleteServer(server.id)` 的浅实现 | 两例全红（进度/字幕/图标/token/凭据/会话六处首先炸） |
+| B | 构造 `AndroidSourceSyncService` 时去掉 `sourceRemover = remover` | 只有第二例红，且失败在 `assertEquals(1, report.applied)` 实得 `0`（没有 remover ⇒ 删除被拒）⇒ 证明第二例钉的确实是**接线**而不是 Room 层 |
+
+日志：`D:/mh-verify/w687-negA.log` / `w687-negB.log`；还原后 `D:/mh-verify/w687-run1.log`（绿）与 `w687-kotlin-full.log`（四模块回归）。
+
+### 56.6 本机实跑
+
+| 模块 | 结果 |
+| --- | --- |
+| `core/common` | 48 文件 / **660** 例 / 0 失败 / 11 跳过（本轮未动） |
+| `core/database` | 24 文件 / **240** 例 / 0 失败 / 12 跳过（本轮未动） |
+| `feature/settings` | 26 文件 / **404** 例 / 0 失败（本轮未动） |
+| `feature/server` | 7 文件 / **34 → 36** 例 / 0 失败 |
+| 四模块合计 | **1340** 例（W6-86 时点 1338） |
+
+C# 未动（`MediaHub.Tests` 1656 / 全仓 1760 口径）。这两个用例跑在 JVM + Robolectric 上，不进 Android CI 的 visual-instrumentation；CI 能提供的证据是 `uniqueTests` 2434 → 2436 与 `feature/server` 模块用例数。
+
+### 56.7 未覆盖
+
+- Robolectric 的是**内存库**，不是设备上迁移后的库：schema v5 的真实迁移路径、`PRAGMA foreign_keys` 在真机上的行为都没被这套用例覆盖（`accounts` 的 CASCADE 断言在两种环境下都可能为真，这也是它没有鉴别力的原因之一）。
+- 本轮只动 Android 侧：Windows `RemoveRemoteSourceAsync` 那一侧沿用既有 C# 用例，未加真机/真库证据。
+- 库里只有五张表（servers / server_endpoints / accounts / playback_progress / subtitle_memory），**没有 playlist 表** —— §55.8 候选里那句「playlist 是否随之清理」无从验证，播放列表当前不在这个库里（该候选措辞就此更正）。
+- 图标只清 `server_icons/{serverId}.webp` 这一种后缀（`ServerIconStore.iconFile` 的定义），目录里若存在同 id 的其它后缀文件不会被清。
+- 真实两机与真机 instrumentation 仍 NOT_RUN / DEVICE_UNVERIFIED。
+
+### 56.8 下一步（W6-88 候选）
+
+1. 结果页「已导入」历史词收敛：计划行 / 结果行 / 端点句三处口径统一。
+2. `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（生产不可达，但读者会误以为那是第二条写入口）。
+3. 预览页与结果页的「下一步」加导航出口（跳到来源页、或跳到对端说明）。
+4. 设备解绑后的界面出口：`forget` 已同时清基线（W6-80），但界面上仍只有一句文案，没有「这台设备再也不会同步」的确认态。
+5. `ServerSourceSyncRemover` 的失败原因目前只有 `local-source-remove-failed` 一个码：删除链八步里哪一步失败，回执里看不出来。
