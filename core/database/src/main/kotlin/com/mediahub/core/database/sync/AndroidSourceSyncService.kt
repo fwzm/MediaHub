@@ -640,6 +640,8 @@ class AndroidSourceSyncService(
      * - 本地媒体源（[ServerType.LOCAL]）不参与跨设备删除 → 拒绝，原因 [REMOVE_LOCAL_MEDIA]。
      *
      * 真正动手时调用方只经 [SourceSyncSourceRemover]：删行不删凭据等于没删，这条判断属于实现方。
+     * 失败原因不是一刀切：remover 报 `Failed("local-source-remove-failed:<step>")` 时原样进
+     * [SourceSyncRemovalFailure]，结果页据此说出删除链卡在哪一步（W6-88）。
      */
     private suspend fun removeLocalSource(
         syncSourceId: String?,
@@ -666,11 +668,20 @@ class AndroidSourceSyncService(
                 failures.add(SourceSyncRemovalFailure(identity, REMOVE_LOCAL_MEDIA))
                 return null
             }
-            if (remover.removeSource(snapshot.serverId)) {
-                snapshot.serverId
-            } else {
-                failures.add(SourceSyncRemovalFailure(identity, REMOVE_FAILED))
-                null
+            // W6-88：remover 说的是三种落点，不再是 Boolean —— 「删到一半失败」要连步骤码一起上报。
+            when (val outcome = remover.removeSource(snapshot.serverId)) {
+                SourceSyncRemoveOutcome.Removed -> snapshot.serverId
+                SourceSyncRemoveOutcome.Missing -> {
+                    // 规划之后、动手之前那一行被别处删掉了：本机确实没有这条来源，不算故障。
+                    failures.add(SourceSyncRemovalFailure(identity, REMOVE_MISSING))
+                    null
+                }
+                is SourceSyncRemoveOutcome.Failed -> {
+                    failures.add(
+                        SourceSyncRemovalFailure(identity, outcome.reason.trim().ifEmpty { REMOVE_FAILED }),
+                    )
+                    null
+                }
             }
         } catch (cancellation: CancellationException) {
             throw cancellation
@@ -842,19 +853,23 @@ class AndroidSourceSyncService(
          * [SourceSyncSourceRemover]（存储层**没有删除方法**，ADR-S001）。这类条目只能如实拒绝并上报，
          * 绝不能假装已应用 —— 否则对端会以为本机已经删了，两侧从此不一致。
          */
-        const val DELETE_NOT_SUPPORTED: String = "local-delete-not-supported"
+        const val DELETE_NOT_SUPPORTED: String = SourceSyncRemovalCodes.NOT_SUPPORTED
 
         /**
          * 删除被拒：本机没有这条来源（对端指着一条已经不在的行）。与 Windows
          * `ServerManager` 的「本机没有这条来源，已跳过」同义，「本来就没有」不是错误，但也不是「写过」。
          */
-        const val REMOVE_MISSING: String = "local-source-missing"
+        const val REMOVE_MISSING: String = SourceSyncRemovalCodes.MISSING
 
         /** 删除被拒：本地媒体源不参与跨设备删除（Windows 同判据，避免对端删掉本机磁盘上的媒体）。 */
-        const val REMOVE_LOCAL_MEDIA: String = "local-media-source"
+        const val REMOVE_LOCAL_MEDIA: String = SourceSyncRemovalCodes.LOCAL_MEDIA
 
-        /** 删除被拒：remover 返 false 或抛异常（凭据没清干净也算失败，绝不当成已删除）。 */
-        const val REMOVE_FAILED: String = "local-source-remove-failed"
+        /**
+         * 删除被拒：remover 报 [SourceSyncRemoveOutcome.Failed]，或它自己抛了异常（凭据没清干净也算失败，
+         * 绝不当成已删除）。W6-88：remover 说得出步骤时会带后缀（`local-source-remove-failed:<step>`），
+         * 这条常量只是不带步骤时的兜底。
+         */
+        const val REMOVE_FAILED: String = SourceSyncRemovalCodes.FAILED
 
         /**
          * 与 Windows `SourceSyncSessionReasons.BaselineRejectedPrefix` 同值同构：基线合并拒收了几条。

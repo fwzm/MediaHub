@@ -10,6 +10,8 @@ import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SyncRoundReasons
 import com.mediahub.core.common.sync.SyncSourceTypeValue
 import com.mediahub.core.database.sync.AndroidSourceSyncService
+import com.mediahub.core.database.sync.SourceSyncRemovalCodes
+import com.mediahub.core.database.sync.SourceSyncRemovalStep
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -460,6 +462,56 @@ class SourceSyncImportLogicTest {
         )
         // 位置键（entry-3）抄出去在对端检索不到任何东西 —— 宁可不给按钮。
         assertNull(SourceSyncImportCopy.copyPayloadOf(noIdentity))
+    }
+
+    @Test
+    fun aFailedRemovalStepIsTranslatedIntoPlainWords() {
+        // 八步各有中文名：同一句「删除失败」对用户毫无用处，说的必须是哪一步。
+        assertEquals(
+            "删除本地来源时卡在「清播放会话」这一步，凭据可能还在；到来源页手动删一次即可。",
+            SourceSyncImportCopy.refusalReason(
+                SourceSyncRemovalCodes.failedAt(SourceSyncRemovalStep.SESSION_STORE),
+            ),
+        )
+        assertEquals(
+            "删除本地来源时卡在「清凭据」这一步，凭据可能还在；到来源页手动删一次即可。",
+            SourceSyncImportCopy.refusalReason(
+                SourceSyncRemovalCodes.failedAt(SourceSyncRemovalStep.CREDENTIALS),
+            ),
+        )
+        // 认不出的步骤码原样带出：宁可显示 servers-row-2，也不吞成半句话。
+        assertEquals(
+            "删除本地来源时卡在「something-new」这一步，凭据可能还在；到来源页手动删一次即可。",
+            SourceSyncImportCopy.refusalReason("local-source-remove-failed:something-new"),
+        )
+        // 不带步骤码的老码保持原句（既有回执可能还没升级）。
+        assertEquals(
+            "删除本地来源时存储层失败，凭据可能还在。",
+            SourceSyncImportCopy.refusalReason(AndroidSourceSyncService.REMOVE_FAILED),
+        )
+    }
+
+    @Test
+    fun everyRemovalStepHasItsOwnChineseName() {
+        val labels = mapOf(
+            SourceSyncRemovalStep.SERVERS to "删来源行",
+            SourceSyncRemovalStep.ACCOUNTS to "删账号",
+            SourceSyncRemovalStep.TOKENS to "清会话令牌",
+            SourceSyncRemovalStep.CREDENTIALS to "清凭据",
+            SourceSyncRemovalStep.PROGRESS to "删播放进度",
+            SourceSyncRemovalStep.SUBTITLE_MEMORY to "删字幕记忆",
+            SourceSyncRemovalStep.ICON to "删自定义图标",
+            SourceSyncRemovalStep.SESSION_STORE to "清播放会话",
+        )
+        // 八步一个不少、也不许共用一个名字（共用就等于没分辨）。
+        assertEquals(SourceSyncRemovalStep.values().size, labels.size)
+        labels.forEach { (step, label) ->
+            assertEquals(label, SourceSyncImportCopy.removalStepLabel(step.code))
+            assertEquals(label, SourceSyncImportCopy.removalStepLabel("  " + step.code + "  "))
+        }
+        assertEquals(labels.values.toSet().size, labels.size)
+        // 认不出的码原样返回（trim 过）。
+        assertEquals("something-new", SourceSyncImportCopy.removalStepLabel(" something-new "))
     }
 
     /** 预览页的一条不可允许条目：身份来自 candidate.syncSourceId，桶只是展示层。 */

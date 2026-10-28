@@ -472,6 +472,53 @@ class SourceSyncApplyRoundTest {
     }
 
     @Test
+    fun a_remover_failure_keeps_the_step_code_it_was_given() = runBlocking {
+        val store = FakeStore()
+        store.seed(snapshot(serverId = "srv-local", syncSourceId = "sync-del", revision = 1L))
+        val remover = FakeRemover(store)
+        remover.fail = true
+        remover.failureReason = SourceSyncRemovalCodes.failedAt(SourceSyncRemovalStep.SESSION_STORE)
+        val json = SourceSyncCodec.encode(
+            envelope(deletions = listOf(SourceTombstone("sync-del", 1_700_000_100_000L, recordRevision = 2L))),
+        )
+
+        val report = service(store, null, remover)
+            .applyRound(json, allowedSyncSourceIds = listOf("sync-del"))
+
+        assertEquals(0, report.applied)
+        assertEquals(1, report.refused)
+        // 步骤码必须原样进回执：只报 local-source-remove-failed 时用户不知道是重试还是手动清。
+        assertEquals(
+            "local-source-remove-failed:session-store",
+            report.removalFailureOf("sync-del"),
+        )
+        // 逐条拒绝清单与 removalFailures 用同一个码：界面两处不能一个说步骤、一个说兜底。
+        assertEquals(report.removalFailureOf("sync-del"), report.refusals.single().reason)
+        // 删失败时行必须还在。
+        assertEquals(1, store.snapshots.size)
+    }
+
+    @Test
+    fun a_source_that_vanished_before_the_remover_ran_is_reported_as_missing_not_failed() = runBlocking {
+        val store = FakeStore()
+        store.seed(snapshot(serverId = "srv-local", syncSourceId = "sync-del", revision = 1L))
+        val remover = FakeRemover(store)
+        remover.missing = true
+        val json = SourceSyncCodec.encode(
+            envelope(deletions = listOf(SourceTombstone("sync-del", 1_700_000_100_000L, recordRevision = 2L))),
+        )
+
+        val report = service(store, null, remover)
+            .applyRound(json, allowedSyncSourceIds = listOf("sync-del"))
+
+        assertEquals(0, report.applied)
+        assertEquals(1, report.refused)
+        // 「本来就没有」不是故障：码必须是 missing，不能被折成 remove-failed 骗人去重试。
+        assertEquals(AndroidSourceSyncService.REMOVE_MISSING, report.removalFailureOf("sync-del"))
+        assertEquals(listOf("srv-local"), remover.calls)
+    }
+
+    @Test
     fun a_round_can_write_one_source_and_remove_another() = runBlocking {
         val store = FakeStore()
         store.seed(snapshot(serverId = "srv-local", syncSourceId = "sync-del", revision = 1L))
@@ -511,15 +558,26 @@ class SourceSyncApplyRoundTest {
         sourceRemover = remover,
     )
 
-    /** 假 remover：真的把行从内存 store 里删掉，好让「库里的行没了」与「回执说删了」互相印证。 */
+    /**
+     * 假 remover：真的把行从内存 store 里删掉，好让「库里的行没了」与「回执说删了」互相印证。
+     *
+     * W6-88 起返回值是三种落点：`fail` 时上报 [failureReason]（可带步骤后缀），`missing` 时假装行已被别处删掉。
+     */
     private class FakeRemover(private val store: FakeStore) : SourceSyncSourceRemover {
         val calls = ArrayList<String>()
         var fail = false
+        var missing = false
+        var failureReason: String = AndroidSourceSyncService.REMOVE_FAILED
 
-        override suspend fun removeSource(serverId: String): Boolean {
+        override suspend fun removeSource(serverId: String): SourceSyncRemoveOutcome {
             calls.add(serverId)
-            if (fail) return false
-            return store.snapshots.remove(serverId) != null
+            if (fail) return SourceSyncRemoveOutcome.Failed(failureReason)
+            if (missing) return SourceSyncRemoveOutcome.Missing
+            return if (store.snapshots.remove(serverId) != null) {
+                SourceSyncRemoveOutcome.Removed
+            } else {
+                SourceSyncRemoveOutcome.Missing
+            }
         }
     }
 

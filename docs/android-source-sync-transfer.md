@@ -5407,3 +5407,79 @@ C# 未动（`MediaHub.Tests` 1656 / 全仓 1760 口径）。这两个用例跑�
 3. 预览页与结果页的「下一步」加导航出口（跳到来源页、或跳到对端说明）。
 4. 设备解绑后的界面出口：`forget` 已同时清基线（W6-80），但界面上仍只有一句文案，没有「这台设备再也不会同步」的确认态。
 5. `ServerSourceSyncRemover` 的失败原因目前只有 `local-source-remove-failed` 一个码：删除链八步里哪一步失败，回执里看不出来。
+
+## §57 W6-88：删到一半失败要说出卡在哪一步（删除链八步步骤码）
+
+### 57.1 结论先行
+
+- 改前 `SourceSyncSourceRemover.removeSource` 返回 **Boolean**。`ServerSourceSyncRemover` 把删除链上任何异常都折成 `false`，`AndroidSourceSyncService.removeLocalSource` 于是只能写一句 `local-source-remove-failed`。回执里「被拒的删除」这一条只有一个码：用户既不知道该重试、还是该去来源页手动删一次，也不知道凭据到底清没清。
+- Boolean 把三种处境压成同一个 `false`：①**本机根本没有这条来源**（规划之后被别处删了）；②链路**中途**失败；③失败在**第八步**。①不是故障，不该报警；②③必须说清失败在哪一步。这就是本轮把它换成 `sealed interface SourceSyncRemoveOutcome { Removed / Missing / Failed(reason) }` 的全部理由。
+- 八步各包一层 `runStep`，失败时抛 `RemoveServerFailedException(step, cause)`；remover 把 `step` 翻成 `local-source-remove-failed:<step>`；结果页再翻成中文步骤名（「清播放会话」这类）。三处各做一件事：**抛步骤** / **打卡码** / **说人话**。
+- 码表放在 core:database 的 `SourceSyncRemovalStep` / `SourceSyncRemovalCodes`：写码方（feature:server 的删除链）与翻译码方（feature:settings 的结果页）是两个 Gradle 模块，各存一份码表早晚会漂。`AndroidSourceSyncService` 里四个既有常量名（`REMOVE_FAILED` / `REMOVE_MISSING` / `REMOVE_LOCAL_MEDIA` / `DELETE_NOT_SUPPORTED`）改成引用这张表，名字不动、既有测试零改动。
+- 与 Windows 的关系：Windows 的写入器与删除链都在 App 层自己 catch，`SourceSyncApplyReport` 只有 `Withheld` 计数与去重后的 `Warnings`，**没有任何步骤粒度**。Android 这里再往下一步（超集），不改变任何判定结果，也不构成两端分叉；本轮不动任何 C# 文件。
+
+### 57.2 缺的是什么
+
+| 改动前的形状 | 后果 |
+| --- | --- |
+| `removeSource(serverId): Boolean` | 「本机没有」「链中途失败」「失败在第八步」三种处境是同一个 `false` |
+| `ServerSourceSyncRemover` 的 `catch (Exception) { false }` | 异常类型与失败位置全被吞掉，日志里连栈都没有 |
+| 回执只有 `local-source-remove-failed` | 用户拿不到下一步：重试？去来源页手动删？清凭据？ |
+| `RemoveServerUseCase` 八步各调各的，没有测试文件 | 失败停在第几步、前几步做没做，全凭读代码猜（W6-87 的 §56.7 已把这条记为未覆盖） |
+
+### 57.3 做法（五处）
+
+1. **新文件** core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncRemovalCodes.kt：`enum class SourceSyncRemovalStep(val code: String)` 八项 —— `servers-row` / `accounts` / `tokens` / `credentials` / `progress` / `subtitle-memory` / `icon` / `session-store`；`object SourceSyncRemovalCodes` 提供 `FAILED` / `MISSING` / `LOCAL_MEDIA` / `NOT_SUPPORTED` 四个既有码、`STEP_SEPARATOR = ':'`、`failedAt(step)`、`failedAtStep(code)`、`stepCodeOf(reason)`。`stepCodeOf` 只在 `local-source-remove-failed:` 前缀命中且尾部非空时返回值。
+2. **接口改造** core/database/.../SourceSyncSourceRemover.kt：方法改为返回 `SourceSyncRemoveOutcome`，同文件定义这个 sealed interface。KDoc 写明「Boolean 把三种处境压成同一个 false，回执就只能说『失败』」。
+3. **服务接线** `AndroidSourceSyncService.removeLocalSource`：`when (outcome)` 三分支 —— `Removed -> snapshot.serverId`；`Missing -> failures.add(REMOVE_MISSING)`（**不算故障**，只是本机确实没有）；`is Failed -> failures.add(outcome.reason.trim().ifEmpty { REMOVE_FAILED })`（空码兜底）。回执里逐条 `refusal` 仍从 `removalFailures` 取，所以两处码同源。
+4. **真使用例** `RemoveServerUseCase` 整体重写：八步各 `runStep(step) { … }`，`runStep` 只放行 `kotlin.coroutines.cancellation.CancellationException`，其余一律包成 `RemoveServerFailedException(step, failure)`。已做完的步骤不回滚（回滚一半比停住更难解释）。
+5. **结果页** `SourceSyncImportLogic.refusalReason(code)` 新增一条分支：`stepCodeOf(raw) != null -> "删除本地来源时卡在「<步骤中文名>」这一步，凭据可能还在；到来源页手动删一次即可。"`；`removalStepLabel(code)` 用 `REMOVAL_STEP_LABELS` 八项映射，认不出的码原样返回（与 `refusalReason` 的既有口径一致：宁可显示 `servers-row-2`，也不吞成半句话）。
+
+### 57.4 用例表
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `RemoveServerUseCaseStepsTest.a_broken_session_store_names_the_last_step_and_lets_the_first_seven_finish` | 第八步抛 `IOException` ⇒ 异常带 `SESSION_STORE`、message `remove-server-failed:session-store`；前七步的库行 / 账号 / token / 凭据 / 进度 / 字幕 / 图标**真的都没了**；会话清理只调了一次 |
+| `RemoveServerUseCaseStepsTest.a_credential_failure_stops_the_chain_at_the_fourth_step_and_leaves_the_rest_alone` | 凭据柜删除抛错 ⇒ `CREDENTIALS`；前三步已清、**后四步一个没动**（进度 / 字幕 / 图标还在，会话清理没被调用） |
+| `ServerSourceSyncRemoverTest`（7 例） | Removed / trim 后 Removed / 未知 ⇒ Missing / 空白 ⇒ Missing / 普通异常 ⇒ `Failed(FAILED)` / 带步骤的异常 ⇒ `Failed(local-source-remove-failed:session-store)` 且 `stepCodeOf` 回 `session-store` / 两个不同步骤码不共享 |
+| `SourceSyncApplyRoundTest.a_remover_failure_keeps_the_step_code_it_was_given` | 回执把步骤码原样带出：`removalFailureOf == refusalOf == local-source-remove-failed:session-store`，且这一轮一条都没写进库 |
+| `SourceSyncApplyRoundTest.a_source_that_vanished_before_the_remover_ran_is_reported_as_missing_not_failed` | `Missing` 与 `Failed` 不混：报 `local-source-missing`，remover 确实被调用过 |
+| `SourceSyncImportLogicTest.aFailedRemovalStepIsTranslatedIntoPlainWords` | 一句整话 + 未知步骤码原样 + 不带步骤码的老码仍是原句 |
+| `SourceSyncImportLogicTest.everyRemovalStepHasItsOwnChineseName` | 八步一个不少、八个名字互不相同（共用名字等于没分辨）、两侧空格被 trim、未知码原样 |
+
+### 57.5 三条负向对照
+
+| 编号 | 破坏 | 结果 |
+| --- | --- | --- |
+| A | `ServerSourceSyncRemover` 的 `Failed(failedAt(failure.step))` → `Failed(FAILED)` | `ServerSourceSyncRemoverTest` 2 红（`a_failed_step_names_itself_in_the_reason_code` / `two_different_steps_never_share_a_reason_code`），日志 w688-negA.log |
+| B | core `removeLocalSource` 的 `Failed` 分支改回固定 `REMOVE_FAILED` | `SourceSyncApplyRoundTest.a_remover_failure_keeps_the_step_code_it_was_given` 红（21 例 1 失败），日志 w688-negB.log |
+| C | `removalStepLabel` 直接 `return raw`（不查表） | `SourceSyncImportLogicTest` 2 红（两条新用例），日志 w688-negC.log |
+
+三条破坏都逐字节还原（`readFileSync === 原始内容` 为真），`git status` 无残留。
+
+### 57.6 本机实跑
+
+| 模块 | 改前 | 改后 | 说明 |
+| --- | --- | --- | --- |
+| core/common | 660（11 skipped） | 660（11 skipped） | 未动 |
+| core/database | 240（12 skipped） | **242**（12 skipped） | +2：步骤码原样带出、Missing 与 Failed 分开 |
+| feature/settings | 404 | **406** | +2：步骤码翻人话、八步中文名全覆盖 |
+| feature/server | 36 | **40** | +4：remover 七例重写（净 +2）、真库步骤用例 2 例 |
+| 四模块合计 | 1340 | **1348** | 日志 w688-kotlin-full.log / w688-run1.log |
+
+C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-suite` 仍 60）。本轮的用例全是 JVM + Robolectric，不进 instrumentation；VI 每 job 仍 135 例。
+
+### 57.7 未覆盖
+
+- Robolectric 用的是内存库，不是升级过的 v5 真库；迁移脚本本身仍无证据。
+- 步骤码只覆盖 `RemoveServerUseCase` 的八步。若某天删除链加第九步（比如清播放列表缓存），`SourceSyncRemovalStep` 与 `REMOVAL_STEP_LABELS` 必须同步加，否则新步骤会以「原样码」出现在界面上（这条已在 §57.3 第 5 条写明，但没有编译期强制）。
+- `RemoveServerFailedException` 的 `cause` 只用于日志，回执不带异常类名（带上去等于把实现细节漏给对端与界面）。
+- Windows 侧删除链仍无步骤粒度，两机端到端仍未跑（NOT_RUN）、真机 instrumentation 仍 DEVICE_UNVERIFIED。
+
+### 57.8 下一步（W6-89 候选）
+
+1. 结果页「已导入」历史词收敛：计划行 / 结果行 / 端点句三处口径统一（连续三轮都留着这条）。
+2. `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（生产不可达，但读者会误以为那是第二条写入口）。
+3. 预览页与结果页的「下一步」加导航出口（跳到来源页、或跳到对端说明）。
+4. 设备解绑后的界面出口：`forget` 已同时清基线（W6-80），但界面上仍只有一句文案，没有「这台设备再也不会同步」的确认态。
+5. Windows 侧删除链补真 SQLite 证据（对应 §56.7 的第二条未覆盖）。
