@@ -69,10 +69,11 @@ public static class SourceSyncWithheldText
     }
 
     /// <summary>W6-93: label on the row button that puts the peer's identity on the clipboard; the same sentence Android uses.</summary>
-    public const string CopyIdentity = "复制身份";
+    /// <remarks>W6-95: a delegate, because the refused list binds the same button and two labels would drift.</remarks>
+    public const string CopyIdentity = SourceSyncCopyText.CopyIdentity;
 
     /// <summary>Label a row shows when the peer stated no identity, so a disabled button explains itself.</summary>
-    public const string NoCopyableIdentity = "无身份可复制";
+    public const string NoCopyableIdentity = SourceSyncCopyText.NoCopyableIdentity;
 
     /// <summary>
     /// W6-93/W6-94: what a user can still do about a withheld entry. The reason sentence says what happened; this one
@@ -92,15 +93,15 @@ public static class SourceSyncWithheldText
     /// as a payload, not as text the user cannot select. Rather than keep a second parallel list (which drifts), the
     /// row now carries the sentence, the way out and the payload together — same reason Android retired appliedTitles.
     /// </remarks>
-    public static IReadOnlyList<SourceSyncWithheldRow> Rows(IReadOnlyList<SourceSyncWithheldSource> entries)
+    public static IReadOnlyList<SourceSyncCopyRow> Rows(IReadOnlyList<SourceSyncWithheldSource> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        var rows = new List<SourceSyncWithheldRow>(entries.Count);
+        var rows = new List<SourceSyncCopyRow>(entries.Count);
         foreach (SourceSyncWithheldSource entry in entries)
         {
             string identity = entry.SyncSourceId.Trim();
             bool canCopy = identity.Length > 0;
-            rows.Add(new SourceSyncWithheldRow
+            rows.Add(new SourceSyncCopyRow
             {
                 Text = Line(entry),
                 NextStep = NextStep(entry.Reason) ?? "",
@@ -111,25 +112,4 @@ public static class SourceSyncWithheldText
 
         return rows;
     }
-}
-
-/// <summary>One row of the withheld list, ready to bind: the sentence, the way out and the identity to copy.</summary>
-public sealed record SourceSyncWithheldRow
-{
-    /// <summary>The 「- 标题（身份） · 原因」 line.</summary>
-    public required string Text { get; init; }
-
-    /// <summary>Sentence shown under <see cref="Text"/>; empty when the code has no known way out.</summary>
-    public string NextStep { get; init; } = "";
-
-    /// <summary>Payload the copy button writes to the clipboard; empty when the peer stated no identity.</summary>
-    public string CopyText { get; init; } = "";
-
-    /// <summary>False when there is no identity, so the button is disabled rather than copying an invention.</summary>
-    public bool CanCopy { get; init; }
-
-    /// <summary>Button label; names why it cannot be used instead of leaving a dead button unexplained.</summary>
-    public string CopyLabel => CanCopy
-        ? SourceSyncWithheldText.CopyIdentity
-        : SourceSyncWithheldText.NoCopyableIdentity;
 }

@@ -266,10 +266,11 @@ public sealed record SyncApplyResult
     /// One row per gate-withheld entry, in gate order: the sentence, the way out and the identity to copy.
     /// </summary>
     /// <remarks>
-    /// W6-93: typed rather than a string list. A copy button needs the identity as a payload, and a parallel string
-    /// list would be a second source of truth for the same round — the drift Android retired appliedTitles over.
+    /// W6-93/W6-95: typed rather than a string list. A copy button needs the identity as a payload, and a parallel
+    /// string list would be a second source of truth for the same round — the drift Android retired appliedTitles
+    /// over. W6-95 moved the row shape to <see cref="SourceSyncCopyRow"/> so both kept-back lists bind one record.
     /// </remarks>
-    public IReadOnlyList<SourceSyncWithheldRow> WithheldRows { get; init; } = [];
+    public IReadOnlyList<SourceSyncCopyRow> WithheldRows { get; init; } = [];
 
     /// <summary>Sentence above the written list; empty when this round wrote nothing.</summary>
     public string WrittenHeader { get; init; } = "";
@@ -280,7 +281,11 @@ public sealed record SyncApplyResult
     public string RefusedHeader { get; init; } = "";
 
     /// <summary>One row per refused entry, in write order, each with the reason the writer gave.</summary>
-    public IReadOnlyList<string> RefusedRows { get; init; } = [];
+    /// <remarks>
+    /// W6-95: typed rather than a string list, for the same reason as <see cref="WithheldRows"/> — the shared copy
+    /// button needs the identity as a payload, and a parallel string list would be a second source of truth.
+    /// </remarks>
+    public IReadOnlyList<SourceSyncCopyRow> RefusedRows { get; init; } = [];
 }
 
 /// <summary>
@@ -501,7 +506,7 @@ public sealed class SyncApplyPresenter
             WrittenHeader = SourceSyncWrittenText.Header(report.Written.Count) ?? string.Empty,
             WrittenRows = SourceSyncWrittenText.Lines(report.Written),
             RefusedHeader = SourceSyncRefusedText.Header(report.Refused.Count) ?? string.Empty,
-            RefusedRows = SourceSyncRefusedText.Lines(report.Refused),
+            RefusedRows = SourceSyncRefusedText.Rows(report.Refused),
         };
     }
 

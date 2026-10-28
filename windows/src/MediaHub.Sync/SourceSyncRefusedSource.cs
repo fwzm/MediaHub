@@ -65,16 +65,31 @@ public static class SourceSyncRefusedText
         ? "写入器没有说明原因"
         : reason.Trim();
 
-    /// <summary>Every row, in the order the round was refused.</summary>
-    public static IReadOnlyList<string> Lines(IReadOnlyList<SourceSyncRefusedSource> entries)
+    /// <summary>
+    /// W6-95: every refused entry as the page needs it, in the order the round was refused — one shape for the row.
+    /// </summary>
+    /// <remarks>
+    /// The copy button needs the peer identity as a payload, and the withheld list binds the same button, so both
+    /// lists hand back <see cref="SourceSyncCopyRow"/> instead of strings. No way out is invented here: the reason is
+    /// already the writer's own whole sentence, and a refusal is not something a user can clear from this page.
+    /// </remarks>
+    public static IReadOnlyList<SourceSyncCopyRow> Rows(IReadOnlyList<SourceSyncRefusedSource> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        var lines = new List<string>(entries.Count);
+        var rows = new List<SourceSyncCopyRow>(entries.Count);
         foreach (SourceSyncRefusedSource entry in entries)
         {
-            lines.Add(Line(entry));
+            ArgumentNullException.ThrowIfNull(entry);
+            string identity = entry.SyncSourceId.Trim();
+            bool canCopy = identity.Length > 0;
+            rows.Add(new SourceSyncCopyRow
+            {
+                Text = Line(entry),
+                CopyText = canCopy ? identity : "",
+                CanCopy = canCopy,
+            });
         }
 
-        return lines;
+        return rows;
     }
 }

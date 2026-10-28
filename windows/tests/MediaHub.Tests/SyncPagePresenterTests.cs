@@ -398,9 +398,14 @@ public sealed class SyncPagePresenterTests : IDisposable
         Assert.Equal(2, report.Refused.Count);
         Assert.Equal("未写入 2 条（逐条原因）", result.RefusedHeader);
         Assert.Equal(2, result.RefusedRows.Count);
-        Assert.Contains("src-1", result.RefusedRows[0], StringComparison.Ordinal);
-        Assert.Contains("本机存储只读", result.RefusedRows[0], StringComparison.Ordinal);
-        Assert.Contains("src-2", result.RefusedRows[1], StringComparison.Ordinal);
+        Assert.Contains("src-1", result.RefusedRows[0].Text, StringComparison.Ordinal);
+        Assert.Contains("本机存储只读", result.RefusedRows[0].Text, StringComparison.Ordinal);
+        Assert.Contains("src-2", result.RefusedRows[1].Text, StringComparison.Ordinal);
+        // W6-95: the shared copy button reads the identity off the row; the refused list offers no way out to invent.
+        Assert.Equal("src-1", result.RefusedRows[0].CopyText);
+        Assert.True(result.RefusedRows[0].CanCopy);
+        Assert.Equal(SourceSyncCopyText.CopyIdentity, result.RefusedRows[0].CopyLabel);
+        Assert.Equal(string.Empty, result.RefusedRows[0].NextStep);
     }
 
     [Fact]
@@ -413,6 +418,48 @@ public sealed class SyncPagePresenterTests : IDisposable
 
         Assert.Equal(string.Empty, result.RefusedHeader);
         Assert.Empty(result.RefusedRows);
+    }
+
+    [Fact]
+    public void DescribeResultCarriesTheCopyableIdentityOnEveryRefusedRowEvenThoughItOffersNoWayOut()
+    {
+        // Both kept-back lists bind one row shape (W6-95), but only the withheld list offers a way out: a refused row
+        // reason is the writer own sentence, so inventing a next step here would be advice about a code nobody wrote.
+        var presenter = new SyncApplyPresenter();
+        var report = new SourceSyncApplyReport
+        {
+            Refused =
+            [
+                new SourceSyncRefusedSource
+                {
+                    SyncSourceId = " local-aaaa ",
+                    DisplayName = "Share",
+                    Action = SourceSyncAction.Create,
+                    Reason = "Windows 暂不支持该来源类型：smb",
+                },
+                new SourceSyncRefusedSource
+                {
+                    SyncSourceId = "  ",
+                    DisplayName = "无身份来源",
+                    Action = SourceSyncAction.Create,
+                    Reason = "本机存储只读",
+                },
+            ],
+        };
+
+        SyncApplyResult result = presenter.DescribeResult(report);
+
+        Assert.Equal("未写入 2 条（逐条原因）", result.RefusedHeader);
+        SourceSyncCopyRow first = result.RefusedRows[0];
+        Assert.Equal("local-aaaa", first.CopyText);
+        Assert.True(first.CanCopy);
+        Assert.Equal(SourceSyncCopyText.CopyIdentity, first.CopyLabel);
+        Assert.Equal(string.Empty, first.NextStep);
+        SourceSyncCopyRow second = result.RefusedRows[1];
+        Assert.Equal(string.Empty, second.CopyText);
+        Assert.False(second.CanCopy);
+        Assert.Equal(SourceSyncCopyText.NoCopyableIdentity, second.CopyLabel);
+        Assert.Contains("本机存储只读", second.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -447,7 +494,7 @@ public sealed class SyncPagePresenterTests : IDisposable
 
         Assert.Equal(1, report.WithheldEntries.Count);
         Assert.Equal("保留未应用 1 条（扣住，点允许也不会写）", result.WithheldHeader);
-        SourceSyncWithheldRow row = Assert.Single(result.WithheldRows);
+        SourceSyncCopyRow row = Assert.Single(result.WithheldRows);
         Assert.Contains("local-dddd", row.Text, StringComparison.Ordinal);
         Assert.Contains("带凭据，需人工迁移（本次不会写入）", row.Text, StringComparison.Ordinal);
         // W6-93: the row carries the way out and the payload, so the page never spells either of them itself.
@@ -493,12 +540,12 @@ public sealed class SyncPagePresenterTests : IDisposable
 
         Assert.Equal("保留未应用 2 条（扣住，点允许也不会写）", result.WithheldHeader);
         Assert.Equal(2, result.WithheldRows.Count);
-        SourceSyncWithheldRow first = result.WithheldRows[0];
+        SourceSyncCopyRow first = result.WithheldRows[0];
         Assert.Equal("- 客厅 Emby（local-aaaa） · Windows 暂不支持该来源类型", first.Text);
         Assert.Equal("下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。", first.NextStep);
         Assert.Equal("local-aaaa", first.CopyText);
         Assert.True(first.CanCopy);
-        SourceSyncWithheldRow second = result.WithheldRows[1];
+        SourceSyncCopyRow second = result.WithheldRows[1];
         Assert.Equal("- 无身份来源 · something-new", second.Text);
         Assert.Equal(string.Empty, second.NextStep);
         Assert.Equal(string.Empty, second.CopyText);

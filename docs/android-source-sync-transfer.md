@@ -5676,7 +5676,7 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 ### 62.1 结论先行
 
 - W6-92 把「被闸门扣住」的条目逐条摊开了，但只给了原因：用户看到「带凭据，需人工迁移（本次不会写入）」「Windows 暂不支持该来源类型」，知道**为什么**写不进去，却不知道**下一步干什么**，也没法把手上唯一的线索（对端身份）拿走。
-- 本轮把 Android W6-84 的「唯一出口 + 复制身份」搬到 Windows：`SyncApplyResult.WithheldRows` 从纯字符串清单升级为 `SourceSyncWithheldRow`（`Text` / `NextStep` / `CopyText` / `CanCopy` / `CopyLabel`），结果页每行右侧一个按钮。
+- 本轮把 Android W6-84 的「唯一出口 + 复制身份」搬到 Windows：`SyncApplyResult.WithheldRows` 从纯字符串清单升级为 `SourceSyncWithheldRow`（`Text` / `NextStep` / `CopyText` / `CanCopy` / `CopyLabel`）（W6-95 起该行形状提升为两条清单共用的 `SourceSyncCopyRow`，见 §64），结果页每行右侧一个按钮。
 - 出口只有一张码表（`SourceSyncWithheldText.NextStep`），和 Android 的 `nextStepOfCode` 逐句同文；**未知码返回 null 而不是编建议**——编一句听起来合理的做法，比不说更害人。
 - 按钮文案分两态：可复制时是「复制身份」，不可复制时是「无身份可复制」并且按钮**禁用**（`CanCopy=false`）。禁用而不是隐藏，是因为「这条没有身份可复制」本身是要说出来的事实。
 
@@ -5739,7 +5739,7 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 
 - 码表：`windows/src/MediaHub.Sync/SyncPagePresenter.cs` 的 `public static string? NextStep(string? code)`——先 `Trim`，空串返回 `null`；`SourceSyncApprovalGate.AmbiguousReasonPrefix`（`ambiguous-`）走前缀句；四条稳定码各一句（`secrets-require-approval` / `not-supported-on-windows` / `unknown-source-type` / `same-revision-different-content`）；`_ => null`。
 - 读点一（本轮新增）：预览行 `BuildRow` → `NextStep = NextStep(item.Reason) ?? string.Empty` → 视图层 `ApplyRow` 记录新增一个 `string NextStep` → `ReloadApplyRows()` 映射 → XAML 预览卡片里多一个 `TextBlock`（`Foreground=SystemFillColorCautionBrush`，与扣住清单同色）。
-- 读点二（W6-93 既有）：`SyncApplyResult.WithheldRows` → `SourceSyncWithheldText.Rows(...)` → 每行 `SourceSyncWithheldRow.NextStep`。
+- 读点二（W6-93 既有）：`SyncApplyResult.WithheldRows` → `SourceSyncWithheldText.Rows(...)` → 每行 `SourceSyncCopyRow.NextStep`（W6-95 起同一行形状）。
 - 这两个读点现在**必然一致**，因为第二处只是第一处的委托；委托方法体剩下的唯一一行是 `=> SyncApplyPresenter.NextStep(code);`。
 
 ### 63.3 用例与计数
@@ -5778,4 +5778,54 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 
 - EXECUTED_PASS（本机 1680/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
 
+- 提交：W6 树 `feature/cross-device-source-sync`（代码与文档同一提交；提交号以 PR #39 head 为准——docs 正文不自指 SHA）。四条 exact-SHA CI 按该 head 跑，run 号与计数见 PR 正文与本轮账本。
+## §64 W6-95：Windows「未写入」区也有复制身份，两条保留清单共用一个行形状（对齐 Android W6-82/W6-83）
+
+### 64.1 结论先行
+
+W6-91 让结果页能逐条看到「哪条没写进去、为什么」，但那一行**只有字**：对端身份混在标题后面的括号里，用户在几百条清单里无法拿它去对端检索（Android 在拒写清单上给的是「复制身份」按钮）。这一轮把 Android 的这一半补齐，并顺手拆掉一个即将出现的分叉：扣住清单（W6-93）与拒写清单现在绑定**同一个行形状**，复制按钮的载荷语义只有一处定义。
+
+### 64.2 一处形状、两条清单
+
+- 新文件 `SourceSyncCopyRow.cs`：行记录 `SourceSyncCopyRow { Text, NextStep, CopyText, CanCopy, CopyLabel }` 与两个标签常量 `SourceSyncCopyText.CopyIdentity = 复制身份` / `NoCopyableIdentity = 无身份可复制`。复制按钮的载荷与「没有身份时不编造」的判据只在这里定义一次。
+- `SourceSyncWithheldSource.cs`：W6-93 的 `SourceSyncWithheldRow` 记录整段搬进新文件，`Rows(...)` 改返回 `SourceSyncCopyRow`；`CopyIdentity` / `NoCopyableIdentity` 退化为指向共享常量的委托常量（C# 允许 const 引用 const），因此 W6-93 的旧用例一字未改仍全绿。
+- `SourceSyncRefusedSource.cs`：W6-91 的 `Lines(...) -> IReadOnlyList<string>` 换成 `Rows(...) -> IReadOnlyList<SourceSyncCopyRow>`：逐条 `identity = SyncSourceId.Trim()`、`canCopy = identity.Length > 0`，行里 `Text = Line(entry)`、载荷只在有身份时给。
+- 拒写行**故意不给「下一步」**：原因是写入器自己那句整话（类型不支持 / 地址不可用 / 存储失败），用户能拿它去行动的是对端身份，不是本页的按钮；Android 的拒写清单同样只有复制身份、没有 next-step（W6-82 与 W6-85 的分工），这一条在用例里被钉成 `Assert.Equal(string.Empty, row.NextStep)`。
+- 页面：`ApplyRefusedList`（`sync.apply.refused.list`）补上与扣住清单同构的 `ItemTemplate`（左列 `Text` + `NextStep` 取证色、右列按钮 `Content="{Binding CopyLabel}" IsEnabled="{Binding CanCopy}"`，AutomationId `sync.apply.refused.copy`）；两条清单各自的 AutomationId 保留，供后续 GUI 验收脚本定位。
+- 一个处理器服务两条清单：code-behind 的 `OnCopyWithheldIdentityClick` 改名 `OnCopyRowIdentityClick`、Tag 型别改 `SourceSyncCopyRow`——同一行为不可能只在一条清单上被改对。
+- presenter：`SyncApplyResult.RefusedRows` 与 `WithheldRows` 同为 `IReadOnlyList<SourceSyncCopyRow>`，由 `SourceSyncRefusedText.Rows(...)` / `SourceSyncWithheldText.Rows(...)` 填充；两处 KDoc 都写明「typed rather than a string list」的理由（按钮要的是可复制的载荷，不是用户选不中的文字）。
+
+### 64.3 用例与计数
+
+- `MediaHub.Tests` 1680 → **1683**（净增 3）。拒写侧 2 例：`EveryRefusedRowCarriesTheIdentityTheSameButtonCopiesAndInventsNoWayOut`（逐条精确串 + 载荷 = trim 后身份 + 无身份行是空载荷且 `CanCopy=false` + `NextStep` 为空）、`TheTwoKeptBackListsBindTheSameRowShapeSoTheCopyButtonCannotDiverge`（两条清单的 `CopyLabel` 与载荷在同一身份下必须相等，且都来自 `SourceSyncCopyText`）；presenter 侧 1 例：`DescribeResultCarriesTheCopyableIdentityOnEveryRefusedRowEvenThoughItOffersNoWayOut`。
+- App 工程 `dotnet build` **0 警告 0 错误**（XAML 编译通过，日志 `D:/mh-verify/w695-app-build.log`）。
+- Android 侧零改动：`uniqueTests` 2446 对照不变、`--required-suite` 60、VI 137×2 + 19 mandatory；主树与 PR #33 未动（Windows-only 轮）。
+
+### 64.4 四条负向对照（每条都真红，跑完逐字节还原）
+
+| 变异 | 红 |
+| --- | --- |
+| 拒写行的载荷改成标题（`CopyText = DisplayName`） | 4 |
+| 无身份也允许复制（`canCopy = true`） | 2 |
+| 拒写行编一句出路（`NextStep = 稍后再试`） | 3 |
+| 扣住清单的常量标签脱离共享常量（`CopyIdentity = 复制`） | 2 |
+
+日志 `D:/mh-verify/w695-neg-A-refused-copy-becomes-the-title.log` / `-B-refused-copy-never-disabled.log` / `-C-refused-row-invents-a-way-out.log` / `-D-withheld-alias-breaks-from-the-shared-home.log`；实现态快照 `D:/mh-verify/w695-impl-SourceSyncRefusedSource.cs` 与 `-SourceSyncWithheldSource.cs`（负向对照只许用这两份还原）。
+
+### 64.5 与 Android 的差异
+
+- 拒写清单两端都**没有** next-step，只有复制身份；扣住清单两端都有 next-step（Android W6-84、Windows W6-93）——分工一致。
+- Android 的行是一个 Composable 上的三个参数，Windows 的行是一个 record；两端都把「没有身份就不给按钮载荷」写成显式判据，而不是让按钮复制一个空串。
+- Android 的标签常量在 `SourceSyncImportCopy`，Windows 在 `SourceSyncCopyText`：分层不同，但都只有一处。
+
+### 64.6 边界与仍未做
+
+- 这一轮只补「可复制」：不改闸门、不改写入器、不改任何状态；被拒条目仍然进 `Withheld` 计数（`Withheld = 闸门扣住 + 写入失败`），两条清单相加等于它。
+- 界面仍 **GUI_UNVERIFIED**：只到 XAML 编译 + presenter 逻辑用例，没有在真窗口里点过那个按钮；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+- 仍未做：`SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（仅测试可达）；设备解绑后的界面确认态；Windows 删除链补真 SQLite 证据。
+
+### 64.7 状态
+
+- EXECUTED_PASS（本机 1683/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+- 本轮踩到的两件事（都写进教训）：①负向对照的「还原」第一次用了**改动前**备份，把两个源文件整个退回上一轮 ⇒ 立即重做改动，并改为先存「实现态快照」再变异；②本机 dotnet 的 env 必须用 Windows 原生反斜杠，正斜杠的 `LOCALAPPDATA` 会让凭据库目录用例红（与代码无关）。
 - 提交：W6 树 `feature/cross-device-source-sync`（代码与文档同一提交；提交号以 PR #39 head 为准——docs 正文不自指 SHA）。四条 exact-SHA CI 按该 head 跑，run 号与计数见 PR 正文与本轮账本。

@@ -417,13 +417,14 @@ public sealed partial class SyncPage : Page
     }
 
     /// <summary>
-    /// W6-93: the copy button on a withheld row puts the peer's identity on the clipboard. A withheld entry names an
-    /// identity the user has to look up on the machine that sent it, and on-screen text cannot be selected; the payload
-    /// is the identity the peer stated, never the title and never anything this page invented.
+    /// W6-93/W6-95: the copy button on a kept-back row (withheld or refused) puts the peer's identity on the clipboard.
+    /// Such an entry names an identity the user has to look up on the machine that sent it, and on-screen text cannot be
+    /// selected; the payload is the identity the peer stated, never the title and never anything this page invented.
+    /// One handler serves both lists because both bind the same row shape, so the button cannot mean two things.
     /// </summary>
-    private void OnCopyWithheldIdentityClick(object sender, RoutedEventArgs e)
+    private void OnCopyRowIdentityClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: SourceSyncWithheldRow row } || row.CopyText.Length == 0)
+        if (sender is not FrameworkElement { Tag: SourceSyncCopyRow row } || row.CopyText.Length == 0)
         {
             ShowStatus(InfoBarSeverity.Warning, "没有可复制的来源身份", "对端没有给这条来源身份，只能按标题核对。");
             return;

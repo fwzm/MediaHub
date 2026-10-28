@@ -766,12 +766,71 @@ public sealed class SourceSyncImportRoundTests
             Assert.Equal(SourceSyncAction.Create, refused.Action);
             Assert.Equal("Windows 暂不支持该来源类型：smb", refused.Reason);
             Assert.Equal(
-                ["- Share（local-aaaa） · 写入 · Windows 暂不支持该来源类型：smb"],
-                SourceSyncRefusedText.Lines(result.Refused));
+                new[] { "- Share（local-aaaa） · 写入 · Windows 暂不支持该来源类型：smb" },
+                SourceSyncRefusedText.Rows(result.Refused).Select(row => row.Text));
             Assert.Equal("未写入 1 条（逐条原因）", SourceSyncRefusedText.Header(result.Refused.Count));
             Assert.Empty(result.Written);
             Assert.Equal(1, result.Withheld);
         });
+    }
+
+    [Fact]
+    public void EveryRefusedRowCarriesTheIdentityTheSameButtonCopiesAndInventsNoWayOut()
+    {
+        // W6-95: the two kept-back lists bind one row shape, so the copy button means one thing. This is the list with
+        // no way out to offer: the reason is already the writer own sentence, and Android adds a next step only to the
+        // withheld rows.
+        IReadOnlyList<SourceSyncCopyRow> rows = SourceSyncRefusedText.Rows(
+        [
+            new SourceSyncRefusedSource
+            {
+                SyncSourceId = " local-aaaa ",
+                DisplayName = "Share",
+                Action = SourceSyncAction.Create,
+                Reason = "Windows 暂不支持该来源类型：smb",
+            },
+            new SourceSyncRefusedSource
+            {
+                SyncSourceId = "  ",
+                DisplayName = "无身份来源",
+                Action = SourceSyncAction.Delete,
+                Reason = "",
+            },
+        ]);
+
+        Assert.Equal(2, rows.Count);
+        SourceSyncCopyRow first = rows[0];
+        Assert.Equal("- Share（local-aaaa） · 写入 · Windows 暂不支持该来源类型：smb", first.Text);
+        Assert.Equal("local-aaaa", first.CopyText);
+        Assert.True(first.CanCopy);
+        Assert.Equal(SourceSyncCopyText.CopyIdentity, first.CopyLabel);
+        Assert.Equal(string.Empty, first.NextStep);
+        SourceSyncCopyRow second = rows[1];
+        Assert.Equal("- 无身份来源 · 删除 · 写入器没有说明原因", second.Text);
+        Assert.Equal(string.Empty, second.CopyText);
+        Assert.False(second.CanCopy);
+        Assert.Equal(SourceSyncCopyText.NoCopyableIdentity, second.CopyLabel);
+        Assert.Empty(SourceSyncRefusedText.Rows([]));
+    }
+
+    [Fact]
+    public void TheTwoKeptBackListsBindTheSameRowShapeSoTheCopyButtonCannotDiverge()
+    {
+        // One row type, one payload rule, one pair of captions. A second record that merely looked the same is exactly
+        // how the two lists would drift apart, and the button would then mean two different things.
+        SourceSyncCopyRow withheld = Assert.Single(SourceSyncWithheldText.Rows(
+            [new SourceSyncWithheldSource { SyncSourceId = " local-dddd ", DisplayName = "卧室 Emby", Reason = SyncRoundReasons.SecretsRequireApproval }]));
+        SourceSyncCopyRow refused = Assert.Single(SourceSyncRefusedText.Rows(
+            [new SourceSyncRefusedSource { SyncSourceId = " local-dddd ", DisplayName = "卧室 Emby", Action = SourceSyncAction.Create, Reason = "本机存储只读" }]));
+
+        Assert.Equal("local-dddd", withheld.CopyText);
+        Assert.Equal("local-dddd", refused.CopyText);
+        Assert.True(withheld.CanCopy);
+        Assert.True(refused.CanCopy);
+        Assert.Equal(withheld.CopyLabel, refused.CopyLabel);
+        Assert.Equal(SourceSyncCopyText.CopyIdentity, refused.CopyLabel);
+        Assert.Contains("带凭据，需人工迁移（本次不会写入）", withheld.Text, StringComparison.Ordinal);
+        Assert.Contains("本机存储只读", refused.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1036,8 +1095,8 @@ public sealed class SourceSyncImportRoundTests
             SourceSyncApplyPreview preview = round.Preview(Envelope(record));
             SourceSyncApplyReport result = await round.ApplyAsync(preview, ["local-dddd"], Writer(store));
 
-            IReadOnlyList<SourceSyncWithheldRow> rows = SourceSyncWithheldText.Rows(result.WithheldEntries);
-            SourceSyncWithheldRow row = Assert.Single(rows);
+            IReadOnlyList<SourceSyncCopyRow> rows = SourceSyncWithheldText.Rows(result.WithheldEntries);
+            SourceSyncCopyRow row = Assert.Single(rows);
             Assert.Equal("- 卧室 Emby（local-dddd） · 带凭据，需人工迁移（本次不会写入）", row.Text);
             Assert.Contains("凭据清空", row.NextStep, StringComparison.Ordinal);
             // The payload is the identity as the peer stated it, trimmed; a title would be useless on the other machine.
@@ -1050,7 +1109,7 @@ public sealed class SourceSyncImportRoundTests
     [Fact]
     public void ARowWithoutAnIdentitySaysSoOnItsButtonInsteadOfCopyingAnInvention()
     {
-        IReadOnlyList<SourceSyncWithheldRow> rows = SourceSyncWithheldText.Rows(
+        IReadOnlyList<SourceSyncCopyRow> rows = SourceSyncWithheldText.Rows(
         [
             new SourceSyncWithheldSource { SyncSourceId = "local-x", DisplayName = "有身份", Reason = "something-new" },
             new SourceSyncWithheldSource { SyncSourceId = "  ", DisplayName = "无身份", Reason = "something-new" },

@@ -235,7 +235,7 @@
                 </StackPanel>
                 <Button Grid.Column="1" VerticalAlignment="Center" Tag="{Binding}"
                         Content="{Binding CopyLabel}" IsEnabled="{Binding CanCopy}"
-                        Click="OnCopyWithheldIdentityClick"
+                        Click="OnCopyRowIdentityClick"
                         AutomationProperties.AutomationId="sync.apply.withheld.copy"
                         AutomationProperties.Name="{Binding CopyLabel}" />
               </Grid>
@@ -284,7 +284,26 @@
               <Setter Property="MinHeight" Value="0" />
             </Style>
           </ListView.ItemContainerStyle>
-        </ListView>
+          <ListView.ItemTemplate>
+            <DataTemplate>
+              <Grid ColumnSpacing="12" Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Spacing="2">
+                  <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" Text="{Binding Text}" />
+                  <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" Text="{Binding NextStep}"
+                             Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                </StackPanel>
+                <Button Grid.Column="1" VerticalAlignment="Center" Tag="{Binding}"
+                        Content="{Binding CopyLabel}" IsEnabled="{Binding CanCopy}"
+                        Click="OnCopyRowIdentityClick"
+                        AutomationProperties.AutomationId="sync.apply.refused.copy"
+                        AutomationProperties.Name="{Binding CopyLabel}" />
+              </Grid>
+            </DataTemplate>
+          </ListView.ItemTemplate>        </ListView>
 
         <!-- Addresses the peer offers that this client cannot store: counted and named, never silently dropped. -->
         <TextBlock x:Name="ApplyNotImportedCount" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
