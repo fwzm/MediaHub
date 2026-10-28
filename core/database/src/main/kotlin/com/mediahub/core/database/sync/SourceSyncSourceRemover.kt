@@ -15,6 +15,8 @@ package com.mediahub.core.database.sync
  * - [SourceSyncRemoveOutcome.Failed]：删到一半失败，`reason` 是稳定原因码。
  *   生产实现会把删除链的步骤码挂上去（`local-source-remove-failed:<step>`），因为「删了但不知道卡在哪一步」
  *   与「删了」在支持场景里是两件事：凭据没清干净时，用户需要知道该去重试删除还是去来源页手动清。
+ *   W6-98 起 [Failed.causeMessage] 再带上那一步自己说的话（由 [SourceSyncRemovalCauses] 净化），
+ *   与 Windows 把写入器异常消息折进 Refused 行原样显示同口径：「卡在哪一步」与「那一步为什么失败」是两句话。
  * - 抛异常视为失败（调用方折成 refused，不冒给用户）。
  *
  * 为什么不是 Boolean：Boolean 把「本机没有」「链中途失败」「失败在第八步」压成同一个 false，
@@ -32,6 +34,14 @@ sealed interface SourceSyncRemoveOutcome {
     /** 本机没有这条来源（空白身份、行已被别处删掉）。 */
     data object Missing : SourceSyncRemoveOutcome
 
-    /** 删到一半失败；[reason] 是稳定原因码，可能带步骤后缀。 */
-    data class Failed(val reason: String) : SourceSyncRemoveOutcome
+    /**
+     * 删到一半失败；[reason] 是稳定原因码，可能带步骤后缀。
+     *
+     * [causeMessage] 是那一步自己说的话（W6-98）：删除链抛出的异常消息经 [SourceSyncRemovalCauses]
+     * 净化后的单行文本，没有可用消息时为 null。它只进回执与界面，不参与任何判定。
+     */
+    data class Failed(
+        val reason: String,
+        val causeMessage: String? = null,
+    ) : SourceSyncRemoveOutcome
 }

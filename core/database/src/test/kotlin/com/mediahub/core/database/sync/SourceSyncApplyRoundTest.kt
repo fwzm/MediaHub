@@ -499,6 +499,31 @@ class SourceSyncApplyRoundTest {
     }
 
     @Test
+    fun a_remover_failure_carries_the_exception_message_the_step_gave() = runBlocking {
+        val store = FakeStore()
+        store.seed(snapshot(serverId = "srv-local", syncSourceId = "sync-del", revision = 1L))
+        val remover = FakeRemover(store)
+        remover.fail = true
+        remover.failureReason = SourceSyncRemovalCodes.failedAt(SourceSyncRemovalStep.CREDENTIALS)
+        remover.failureCause = "keystore 拒绝访问"
+        val json = SourceSyncCodec.encode(
+            envelope(deletions = listOf(SourceTombstone("sync-del", 1_700_000_100_000L, recordRevision = 2L))),
+        )
+
+        val report = service(store, null, remover)
+            .applyRound(json, allowedSyncSourceIds = listOf("sync-del"))
+
+        // W6-98：步骤码说「卡在哪一步」，causeMessage 说「那一步为什么失败」，两句一起进回执。
+        assertEquals(
+            "local-source-remove-failed:credentials",
+            report.removalFailureOf("sync-del"),
+        )
+        assertEquals("keystore 拒绝访问", report.removalFailures.single().causeMessage)
+        // 逐条拒绝清单与 removalFailures 同源：界面两处不能一个有一句、一个没有。
+        assertEquals(report.removalFailures.single().causeMessage, report.refusals.single().causeMessage)
+    }
+
+    @Test
     fun a_source_that_vanished_before_the_remover_ran_is_reported_as_missing_not_failed() = runBlocking {
         val store = FakeStore()
         store.seed(snapshot(serverId = "srv-local", syncSourceId = "sync-del", revision = 1L))
@@ -562,6 +587,7 @@ class SourceSyncApplyRoundTest {
      * 假 remover：真的把行从内存 store 里删掉，好让「库里的行没了」与「回执说删了」互相印证。
      *
      * W6-88 起返回值是三种落点：`fail` 时上报 [failureReason]（可带步骤后缀），`missing` 时假装行已被别处删掉。
+ * W6-98 起还可以带 [failureCause]：那一步自己说的话，用来钉「原因句不会在服务里被丢掉」。
      */
     private class FakeRemover(private val store: FakeStore) : SourceSyncSourceRemover {
         val calls = ArrayList<String>()
@@ -569,9 +595,12 @@ class SourceSyncApplyRoundTest {
         var missing = false
         var failureReason: String = AndroidSourceSyncService.REMOVE_FAILED
 
+        /** W6-98：失败时那一步自己说的话（回执要把它带到结果页）。 */
+        var failureCause: String? = null
+
         override suspend fun removeSource(serverId: String): SourceSyncRemoveOutcome {
             calls.add(serverId)
-            if (fail) return SourceSyncRemoveOutcome.Failed(failureReason)
+            if (fail) return SourceSyncRemoveOutcome.Failed(failureReason, failureCause)
             if (missing) return SourceSyncRemoveOutcome.Missing
             return if (store.snapshots.remove(serverId) != null) {
                 SourceSyncRemoveOutcome.Removed

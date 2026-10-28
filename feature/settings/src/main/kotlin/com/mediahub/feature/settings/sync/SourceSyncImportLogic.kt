@@ -215,7 +215,7 @@ object SourceSyncImportCopy {
             SourceSyncRefusedAction.DELETE -> "删除"
         }
         return "- " + entry.title + "（" + entry.syncSourceId + "）· " + action + " · " +
-            refusalReason(entry.reason)
+            refusalReason(entry.reason) + refusalCauseSuffix(entry.causeMessage)
     }
 
     /**
@@ -257,6 +257,18 @@ object SourceSyncImportCopy {
                         .ifEmpty { "未给异常类型" } + "）。"
             else -> "原因码：" + raw
         }
+    }
+
+    /**
+     * W6-98：删除失败时那一步自己说的话 → 行尾后缀；没有就返回空串。
+     *
+     * 与 Windows 对齐：那边的写入器把异常消息折进 Refused 行原样显示。净化（折叠空白、截断）
+     * 的权威在 core:database 的 [SourceSyncRemovalCauses]，这里只 trim 判空 —— 文案层不重复净化，
+     * 两处都净化迟早会分叉。空串时结果页那一行与改前逐字节一致。
+     */
+    fun refusalCauseSuffix(causeMessage: String?): String {
+        val raw = causeMessage?.trim().orEmpty()
+        return if (raw.isEmpty()) "" else "（原因：" + raw + "）"
     }
 
     /**

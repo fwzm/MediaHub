@@ -181,6 +181,12 @@ data class SourceSyncRefusedEntry(
     val title: String,
     val action: SourceSyncRefusedAction,
     val reason: String,
+    /**
+     * 删除链那一步自己说的话（W6-98，回执已净化）；写入类拒绝与老回执为 null。
+     *
+     * 只影响那一行的尾巴（[SourceSyncImportCopy.refusalLine] 补「（原因：…）」），不参与判定。
+     */
+    val causeMessage: String? = null,
 )
 
 /**

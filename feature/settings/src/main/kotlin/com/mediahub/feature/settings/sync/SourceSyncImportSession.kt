@@ -251,6 +251,8 @@ class SourceSyncImportSession(
      * 只补那些没进 refusals 的删除失败，宁可多报一条也不让界面少一条原因。
      *
      * 标题与 wire 类型从预览里取：回执只带身份，而结果页要说的是人能认出的那条来源。
+     * W6-98 起连删除链那一步的异常消息一起抄进条目（[SourceSyncRefusedEntry.causeMessage]），
+     * 结果页才能在同一行上说「卡在哪一步」与「那一步为什么失败」。
      */
     private fun refusedEntriesOf(
         report: SourceSyncApplyReport,
@@ -272,6 +274,7 @@ class SourceSyncImportSession(
                     SourceSyncRefusedAction.WRITE
                 },
                 reason = refusal.reason,
+                causeMessage = refusal.causeMessage,
             )
         }
         report.removalFailures.forEach { failure ->
@@ -283,6 +286,7 @@ class SourceSyncImportSession(
                         title = titleOf(failure.syncSourceId),
                         action = SourceSyncRefusedAction.DELETE,
                         reason = failure.reason,
+                        causeMessage = failure.causeMessage,
                     ),
                 )
             }

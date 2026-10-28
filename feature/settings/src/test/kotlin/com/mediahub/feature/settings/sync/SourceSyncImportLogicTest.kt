@@ -557,6 +557,33 @@ class SourceSyncImportLogicTest {
     }
 
     @Test
+    fun aFailedRemovalLineCarriesBothTheStepAndTheReasonTheStepItselfGave() {
+        // W6-98：同一行上「卡在哪一步」与「那一步为什么失败」是两句话，缺一句用户就得去猜。
+        val withCause = SourceSyncRefusedEntry(
+            syncSourceId = "sync-1",
+            title = "客厅 Emby",
+            action = SourceSyncRefusedAction.DELETE,
+            reason = SourceSyncRemovalCodes.failedAt(SourceSyncRemovalStep.CREDENTIALS),
+            causeMessage = "keystore 拒绝访问",
+        )
+        assertEquals(
+            "- 客厅 Emby（sync-1）· 删除 · 删除本地来源时卡在「清凭据」这一步，凭据可能还在；" +
+                "到来源页手动删一次即可。（原因：keystore 拒绝访问）",
+            SourceSyncImportCopy.refusalLine(withCause),
+        )
+
+        // 没有那句时（写入类拒绝、老回执）逐字节与改前一致：后缀只在真的有时出现。
+        val withoutCause = withCause.copy(causeMessage = null)
+        assertEquals(
+            "- 客厅 Emby（sync-1）· 删除 · 删除本地来源时卡在「清凭据」这一步，凭据可能还在；" +
+                "到来源页手动删一次即可。",
+            SourceSyncImportCopy.refusalLine(withoutCause),
+        )
+        assertEquals("", SourceSyncImportCopy.refusalCauseSuffix(null))
+        assertEquals("", SourceSyncImportCopy.refusalCauseSuffix("   "))
+    }
+
+    @Test
     fun everyRemovalStepHasItsOwnChineseName() {
         val labels = mapOf(
             SourceSyncRemovalStep.SERVERS to "删来源行",

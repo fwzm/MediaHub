@@ -465,6 +465,8 @@ class AndroidSourceSyncService(
                             // 走的是「record is null ⇒ 删除」这条判据，所以动作必须在这里钉死。
                             action = SourceSyncAction.DELETE,
                             reason = removalFailures.lastOrNull()?.reason ?: REMOVE_FAILED,
+                            // W6-98：删除链那一步自己说的话，与步骤码一路进结果页。
+                            causeMessage = removalFailures.lastOrNull()?.causeMessage,
                         ),
                     )
                     continue
@@ -678,7 +680,11 @@ class AndroidSourceSyncService(
                 }
                 is SourceSyncRemoveOutcome.Failed -> {
                     failures.add(
-                        SourceSyncRemovalFailure(identity, outcome.reason.trim().ifEmpty { REMOVE_FAILED }),
+                        SourceSyncRemovalFailure(
+                            identity,
+                            outcome.reason.trim().ifEmpty { REMOVE_FAILED },
+                            outcome.causeMessage,
+                        ),
                     )
                     null
                 }
@@ -686,7 +692,10 @@ class AndroidSourceSyncService(
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (failure: Exception) {
-            failures.add(SourceSyncRemovalFailure(identity, REMOVE_FAILED))
+            // 异常是从本服务这一层漏出来的：这里能直接拿到它，所以也把消息净化后带上（W6-98）。
+            failures.add(
+                SourceSyncRemovalFailure(identity, REMOVE_FAILED, SourceSyncRemovalCauses.describe(failure)),
+            )
             null
         }
     }
@@ -1054,11 +1063,15 @@ data class SourceSyncWrittenSource(
  *
  * [action] 保留闸门给的原始动作用来区分「写」与「删」：同一个身份在不同轮次可能先删后写，
  * 只按身份聚合会把两种处置混成一条。
+ *
+ * [causeMessage] 是 W6-98 加的：删除类拒绝带上删除链那一步的异常消息（由 remover 净化），
+ * 界面在原句尾巴补「（原因：…）」；写入类拒绝一律 null（写失败的原因码里已经有异常类名）。
  */
 data class SourceSyncRefusal(
     val syncSourceId: String,
     val action: SourceSyncAction,
     val reason: String,
+    val causeMessage: String? = null,
 )
 
 /**
@@ -1197,8 +1210,14 @@ data class SourceSyncApplyReport(
         ?.reason
 }
 
-/** 一条被拒绝的跨端删除：身份 + 稳定原因码（[AndroidSourceSyncService] 的 REMOVE_* 常量）。 */
+/**
+ * 一条被拒绝的跨端删除：身份 + 稳定原因码（[AndroidSourceSyncService] 的 REMOVE_* 常量）。
+ *
+ * [causeMessage] 是 W6-98 加的：删除链那一步抛出的异常消息（[SourceSyncRemovalCauses] 净化后的单行文本）。
+ * 净化由 remover 负责 —— 本服务只原样抄进回执，界面才敢把它与原因句摆在同一行上。
+ */
 data class SourceSyncRemovalFailure(
     val syncSourceId: String,
     val reason: String,
+    val causeMessage: String? = null,
 )

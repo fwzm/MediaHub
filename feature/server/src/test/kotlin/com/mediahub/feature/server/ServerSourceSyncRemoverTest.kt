@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
@@ -67,8 +68,9 @@ class ServerSourceSyncRemoverTest {
         val handler = FakeRemoveHandler().apply { failure = IllegalStateException("vault locked") }
         val remover = ServerSourceSyncRemover(FakeServerStore(listOf(serverOf("srv-1"))), handler)
 
+        // W6-98：链上异常的消息也一起交出去（这条用例的异常本来就带一句消息）。
         assertEquals(
-            SourceSyncRemoveOutcome.Failed(SourceSyncRemovalCodes.FAILED),
+            SourceSyncRemoveOutcome.Failed(SourceSyncRemovalCodes.FAILED, "vault locked"),
             remover.removeSource("srv-1"),
         )
     }
@@ -83,7 +85,7 @@ class ServerSourceSyncRemoverTest {
         val outcome = remover.removeSource("srv-1")
 
         assertEquals(
-            SourceSyncRemoveOutcome.Failed("local-source-remove-failed:session-store"),
+            SourceSyncRemoveOutcome.Failed("local-source-remove-failed:session-store", "socket closed"),
             outcome,
         )
         assertEquals(
@@ -108,13 +110,41 @@ class ServerSourceSyncRemoverTest {
         ).removeSource("srv-1")
 
         assertEquals(
-            SourceSyncRemoveOutcome.Failed("local-source-remove-failed:credentials"),
+            SourceSyncRemoveOutcome.Failed("local-source-remove-failed:credentials", "keyring"),
             credentials,
         )
         assertEquals(
-            SourceSyncRemoveOutcome.Failed("local-source-remove-failed:progress"),
+            SourceSyncRemoveOutcome.Failed("local-source-remove-failed:progress", "db busy"),
             progress,
         )
+    }
+
+    @Test
+    fun the_message_the_step_threw_travels_with_the_step_code() = runTest {
+        val handler = FakeRemoveHandler().apply {
+            failure = RemoveServerFailedException(SourceSyncRemovalStep.CREDENTIALS, IOException("keystore 拒绝访问"))
+        }
+        val remover = ServerSourceSyncRemover(FakeServerStore(listOf(serverOf("srv-1"))), handler)
+
+        // W6-98：步骤码说「卡在哪一步」，异常消息说「那一步为什么失败」，两句话一起给（与 Windows 同口径）。
+        assertEquals(
+            SourceSyncRemoveOutcome.Failed("local-source-remove-failed:credentials", "keystore 拒绝访问"),
+            remover.removeSource("srv-1"),
+        )
+    }
+
+    @Test
+    fun a_step_that_says_nothing_hands_over_no_reason_instead_of_an_empty_one() = runTest {
+        val handler = FakeRemoveHandler().apply {
+            failure = RemoveServerFailedException(SourceSyncRemovalStep.PROGRESS, IllegalStateException())
+        }
+        val remover = ServerSourceSyncRemover(FakeServerStore(listOf(serverOf("srv-1"))), handler)
+
+        val outcome = remover.removeSource("srv-1") as SourceSyncRemoveOutcome.Failed
+
+        assertEquals("local-source-remove-failed:progress", outcome.reason)
+        // 没有消息就是 null：界面只显示步骤，不出现「（原因：）」这种半句。
+        assertNull(outcome.causeMessage)
     }
 
     // ------------------------------------------------------------ 夹具
