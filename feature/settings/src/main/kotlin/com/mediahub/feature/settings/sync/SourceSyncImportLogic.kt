@@ -128,17 +128,30 @@ object SourceSyncImportCopy {
      * 原因句说的是**发生了什么**，这一句说的是**用户还能做什么**；两者不能合并，
      * 否则用户读完只知道「被扣住」却不知道路在哪。码不认识时返回 null —— 编建议比不说更害人。
      */
-    fun nextStepOf(entry: SourceSyncWithheldEntry): String? {
-        val raw = entry.reason.trim()
-        return when {
-            raw == SyncRoundReasons.SECRETS_REQUIRE_APPROVAL ->
-                "下一步：在对端把这条来源的凭据清空后重新导出信封，或在本机手动新建一条同样的来源。"
-            raw == SyncRoundReasons.NOT_SUPPORTED ->
-                "下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。"
-            raw == SourceSyncReasons.UNKNOWN_SOURCE_TYPE ->
-                "下一步：把两端升到同一版本后重新导出信封。"
-            else -> null
-        }
+    fun nextStepOf(entry: SourceSyncWithheldEntry): String? = nextStepOfCode(entry.reason)
+
+    /** W6-85：预览页条目也走同一张表 —— 码来自规划器的 candidate.reason，不是桶名。 */
+    fun nextStepOf(entry: SourceSyncEntry): String? = nextStepOfCode(entry.candidate.reason)
+
+    /**
+     * W6-84 / W6-85：原因码 → 「下一步」的**唯一**出口。
+     *
+     * 结果页（扣住 / 拒写）与预览页共用这张表：同一个码在两处说法必须一致，否则用户
+     * 先在预览里读到一句、应用后又读到另一句，会以为规则变了。码不认识时返回 null ——
+     * 编建议比不说更害人。
+     */
+    fun nextStepOfCode(code: String): String? = when (code.trim()) {
+        SyncRoundReasons.SECRETS_REQUIRE_APPROVAL ->
+            "下一步：在对端把这条来源的凭据清空后重新导出信封，或在本机手动新建一条同样的来源。"
+        SyncRoundReasons.NOT_SUPPORTED ->
+            "下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。"
+        SourceSyncReasons.UNKNOWN_SOURCE_TYPE ->
+            "下一步：把两端升到同一版本后重新导出信封。"
+        SourceSyncReasons.SAME_REVISION_DIFFERENT_CONTENT ->
+            "下一步：这条两端内容不一致（版本号相同），本页一律不放行；请在来源页手工对齐后再导出。"
+        SourceSyncReasons.AMBIGUOUS_LEGACY_IDENTITY ->
+            "下一步：本机有多条来源指向同一身份，先在来源页删掉多余的再重新导出。"
+        else -> null
     }
 
     /**
@@ -150,6 +163,15 @@ object SourceSyncImportCopy {
 
     /** W6-84：拒写条目同理 —— 复制的也是身份原文。 */
     fun copyPayloadOf(entry: SourceSyncRefusedEntry): String = entry.syncSourceId.trim()
+
+    /**
+     * W6-85：预览页条目复制的载荷。
+     *
+     * 只有真拿到对端身份（syncSourceId）才值得复制；缺身份的行用的是位置键（`entry-3`），
+     * 抄出去在对端检索不到任何东西，因此返回 null、界面不出现按钮。
+     */
+    fun copyPayloadOf(entry: SourceSyncEntry): String? =
+        entry.candidate.syncSourceId?.trim()?.takeIf { it.isNotEmpty() }
 
     /** W6-82：逐条失败区的标题；一条都没有时返回 null（0 条不该占版面）。 */
     fun refusedHeader(summary: SourceSyncApplySummary): String? =
