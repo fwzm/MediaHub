@@ -230,7 +230,7 @@ class SourceSyncImportScreenTest {
     }
 
     @Test
-    fun everyWrittenEntryIsListedWithItsRemoteIdentityAndTheBlockVanishesWhenNothingWasWritten() {
+    fun everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle() {
         // W6-89：写入区改前只是一串没身份、没区头的标题；这里钉住「区头由名单驱动」与身份原文。
         val summary = SourceSyncApplySummary(
             appliedCount = 2,
@@ -273,17 +273,29 @@ class SourceSyncImportScreenTest {
         // 没有身份的条目本来就只给标题 —— 不能拿它当反例（首次 CI 就是死在这里的 assertDoesNotExist）。
         composeRule.onNodeWithText("- 客厅 Emby").assertDoesNotExist()
         composeRule.onNodeWithText("- 书房 Jellyfin").assertIsDisplayed()
+    }
 
+    @Test
+    fun theWrittenBlockVanishesWhenNothingWasWritten() {
         // 一条都没写成（全是扣住 / 拒写）时，写入区整块不出现：0 条不占版面。
+        // 注意：Compose 测试规则每个用例只能 setContent 一次，所以「空名单」必须是独立用例
+        // （第二次红就是死在这里：IllegalStateException: Cannot call setContent twice per test!）。
+        val summary = SourceSyncApplySummary(
+            appliedCount = 0,
+            requiresApprovalCount = 0,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 2,
+            plannedCount = 2,
+            appliedSources = emptyList(),
+        )
         render(
-            state.copy(
-                applied = summary.copy(
-                    appliedCount = 0,
-                    failedCount = 2,
-                    appliedSources = emptyList(),
-                ),
+            previewedState().copy(
+                status = SourceSyncImportStatus.APPLIED,
+                applied = summary,
             ),
         )
+
         composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_WRITTEN).assertDoesNotExist()
     }
 
