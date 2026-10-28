@@ -210,7 +210,7 @@ class SourceSyncImportSession(
             removedCount = report.removedServerIds.size,
             allowedCount = preview.allowCount,
             plannedCount = preview.entries.size,
-            withheldEntries = withheldEntriesOf(report, preview),            appliedTitles = sources.map { it.title },
+            withheldEntries = withheldEntriesOf(report, preview),
             appliedSources = sources,
             refusedEntries = refusals,
             notImportedEndpointCount = report.endpointSummary?.notImportedCount ?: 0,

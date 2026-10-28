@@ -263,7 +263,7 @@ class SourceSyncImportLogicTest {
         )
 
         assertEquals(
-            "本次计划：放行 3 条 · 需确认 4 条 · 忽略 5 条 · 暂不支持 1 条 · 共 13 条",
+            "本次计划：可导入 3 条 · 需确认 4 条 · 已忽略 5 条 · 暂不支持 1 条 · 共 13 条",
             SourceSyncImportCopy.planLine(summary),
         )
         assertEquals(
@@ -295,7 +295,7 @@ class SourceSyncImportLogicTest {
         )
 
         assertEquals(
-            "本次计划：放行 0 条 · 需确认 0 条 · 忽略 0 条 · 暂不支持 0 条 · 共 0 条",
+            "本次计划：可导入 0 条 · 需确认 0 条 · 已忽略 0 条 · 暂不支持 0 条 · 共 0 条",
             SourceSyncImportCopy.planLine(summary),
         )
         assertEquals(
@@ -304,6 +304,71 @@ class SourceSyncImportLogicTest {
         )
         assertNull(SourceSyncImportCopy.refusedHeader(summary))
         assertNull(SourceSyncImportCopy.withheldHeader(summary))
+    }
+
+    @Test
+    fun theSameBucketWordIsUsedInThePlanLineAndInThePreviewLine() {
+        // W6-89：改前结果卡说「放行 / 忽略」，桶标题与预览顶部说「可导入 / 已忽略」，
+        // 同一个桶两套词。四个词现在只在 bucketWord 里定义一次。
+        val words = SourceSyncImportBucket.values().map { SourceSyncImportCopy.bucketWord(it) }
+        assertEquals(listOf("可导入", "需确认", "已忽略", "暂不支持"), words)
+        SourceSyncImportBucket.values().forEach { bucket ->
+            assertEquals(SourceSyncImportCopy.bucketWord(bucket), SourceSyncImportCopy.titleOf(bucket))
+        }
+
+        val summary = SourceSyncApplySummary(
+            appliedCount = 1,
+            requiresApprovalCount = 2,
+            ignoredCount = 3,
+            unsupportedCount = 4,
+            failedCount = 0,
+            allowedCount = 5,
+            plannedCount = 14,
+        )
+        val planLine = SourceSyncImportCopy.planLine(summary)
+        assertEquals("本次计划：可导入 5 条 · 需确认 2 条 · 已忽略 3 条 · 暂不支持 4 条 · 共 14 条", planLine)
+        // 旧词一个都不许留下：留着就说明有地方又绕过了词汇表。
+        assertFalse(planLine.contains("放行"))
+        assertFalse(planLine.contains("· 忽略"))
+
+        val plan = SourceSyncPlan(
+            listOf(
+                candidate(SourceSyncAction.CREATE, SourceSyncReasons.NEW_SOURCE),
+                candidate(SourceSyncAction.NO_CHANGE, SourceSyncReasons.UP_TO_DATE, id = "sync-2"),
+            ),
+        )
+        val previewLine = SourceSyncImportLogic.summaryLine(
+            SourceSyncImportLogic.previewView("device-a", "snap-1", plan),
+        )
+        assertTrue(previewLine.contains(SourceSyncImportCopy.bucketWord(SourceSyncImportBucket.APPLY) + " 1"))
+        assertTrue(previewLine.contains(SourceSyncImportCopy.bucketWord(SourceSyncImportBucket.IGNORED) + " 1"))
+    }
+
+    @Test
+    fun everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle() {
+        val empty = SourceSyncApplySummary(appliedCount = 0, requiresApprovalCount = 0, ignoredCount = 0, unsupportedCount = 0, failedCount = 0)
+        assertNull(SourceSyncImportCopy.writtenHeader(empty))
+
+        val summary = SourceSyncApplySummary(
+            appliedCount = 2,
+            requiresApprovalCount = 0,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 0,
+            appliedSources = listOf(
+                SourceSyncAppliedSource(serverId = "srv-1", title = "客厅 Emby", sourceTypeRaw = "emby", syncSourceId = "local-a"),
+                SourceSyncAppliedSource(serverId = "srv-2", title = "书房 Jellyfin", sourceTypeRaw = "jellyfin", syncSourceId = null),
+            ),
+        )
+
+        assertEquals("已写入 2 条（按对端身份，可逐条核对）", SourceSyncImportCopy.writtenHeader(summary))
+        assertEquals("- 客厅 Emby（local-a）", SourceSyncImportCopy.writtenLine(summary.appliedSources[0]))
+        // 身份缺失时只给标题：宁可少说一句，也不拿 serverId 或标题冒充身份。
+        assertEquals("- 书房 Jellyfin", SourceSyncImportCopy.writtenLine(summary.appliedSources[1]))
+        assertEquals(
+            "- 客厅 Emby（local-a）",
+            SourceSyncImportCopy.writtenLine(summary.appliedSources[0].copy(syncSourceId = "  local-a  ")),
+        )
     }
 
     @Test

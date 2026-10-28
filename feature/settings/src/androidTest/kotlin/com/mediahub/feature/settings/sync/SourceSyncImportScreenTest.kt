@@ -194,7 +194,14 @@ class SourceSyncImportScreenTest {
             withheldCount = 1,
             allowedCount = 1,
             plannedCount = 4,
-            appliedTitles = listOf("客厅 Emby"),
+            appliedSources = listOf(
+                SourceSyncAppliedSource(
+                    serverId = "srv-1",
+                    title = "客厅 Emby",
+                    sourceTypeRaw = "emby",
+                    syncSourceId = "sync-1",
+                ),
+            ),
         )
         val state = previewedState().withAllow("sync-1").copy(
             status = SourceSyncImportStatus.APPLIED,
@@ -209,12 +216,72 @@ class SourceSyncImportScreenTest {
         composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_VERDICT)
             .performScrollTo()
             .assertTextEquals(SourceSyncImportCopy.resultLine(summary))
-        composeRule.onNodeWithText("- 客厅 Emby").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_WRITTEN)
+            .performScrollTo()
+            .assertTextEquals(SourceSyncImportCopy.writtenHeader(summary)!!)
+        composeRule.onNodeWithText(SourceSyncImportCopy.writtenLine(summary.appliedSources.single()))
+            .performScrollTo()
+            .assertIsDisplayed()
         composeRule.onNodeWithText(SourceSyncImportCopy.DISCLAIMER).performScrollTo().assertIsDisplayed()
         // 回执里没有失败条目 ⇒ 逐条失败区整块不出现（0 条不占版面）。
         composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_REFUSED).assertDoesNotExist()
         // 计数里有 withheld，但没有逐条名单 ⇒ 扣住区也不出现：区头由名单驱动，不由计数驱动。
         composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_WITHHELD).assertDoesNotExist()
+    }
+
+    @Test
+    fun everyWrittenEntryIsListedWithItsRemoteIdentityAndTheBlockVanishesWhenNothingWasWritten() {
+        // W6-89：写入区改前只是一串没身份、没区头的标题；这里钉住「区头由名单驱动」与身份原文。
+        val summary = SourceSyncApplySummary(
+            appliedCount = 2,
+            requiresApprovalCount = 0,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 0,
+            plannedCount = 2,
+            appliedSources = listOf(
+                SourceSyncAppliedSource(
+                    serverId = "srv-1",
+                    title = "客厅 Emby",
+                    sourceTypeRaw = "emby",
+                    syncSourceId = "local-a",
+                ),
+                SourceSyncAppliedSource(
+                    serverId = "srv-2",
+                    title = "书房 Jellyfin",
+                    sourceTypeRaw = "jellyfin",
+                    syncSourceId = null,
+                ),
+            ),
+        )
+        val state = previewedState().copy(
+            status = SourceSyncImportStatus.APPLIED,
+            applied = summary,
+        )
+        render(state)
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_WRITTEN)
+            .performScrollTo()
+            .assertTextEquals(SourceSyncImportCopy.writtenHeader(summary)!!)
+        composeRule.onNodeWithText(SourceSyncImportCopy.writtenLine(summary.appliedSources[0]))
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(SourceSyncImportCopy.writtenLine(summary.appliedSources[1]))
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("- 书房 Jellyfin").assertDoesNotExist()
+
+        // 一条都没写成（全是扣住 / 拒写）时，写入区整块不出现：0 条不占版面。
+        render(
+            state.copy(
+                applied = summary.copy(
+                    appliedCount = 0,
+                    failedCount = 2,
+                    appliedSources = emptyList(),
+                ),
+            ),
+        )
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_WRITTEN).assertDoesNotExist()
     }
 
     @Test
