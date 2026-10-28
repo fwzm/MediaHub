@@ -39,6 +39,8 @@
 
 - `84729763` Android `40558780817` 未通过：两套 API 的四页测试和备份都实际执行成功，但 Gradle 每次生成的 app XML 仅含当前类，同名恢复快照把四页报告替换为备份内容。修正为按测试组用不同文件名保留原始 XML，再合并校验；缺报告立即失败。最终目录真实内容同时含备份和四页结果，缺报告场景也拒绝；全套 **66 tests / 0 failures**，`bash -n` 通过。
 
+- `170c188d` Android `40661147994` 未通过：API36 的四页与备份 XML 均通过，但原始 XML 与 `-cinematic.xml` 归档副本同时被校验，四个用例各计 2 次。改为把原始 XML 移到独立归档目录，校验目录仅保留备份与四页的去重副本；不删除测试原件，不改报告内容。最终报告每类用例恰出现一次，66 tests / 0 failures，`bash -n` 通过。
+
 ## Rules and next steps
 
 - G7：DO_NOT_MERGE。只允许普通提交到 feature 分支并创建 Draft PR；不合并、不 close、不 mark-ready、不 force push。

@@ -125,8 +125,8 @@ exit "$FIXTURE_GRADLE_EXIT"'''
         self.assertEqual(2, commands.count(":app:connectedDebugAndroidTest"), commands)
         self.assertIn("class=com.mediahub.app.visual.CinematicVisualTest", commands)
         self.assertEqual("backup", result.backup_report_text)
-        self.assertIn("backup", result.report_text)
-        self.assertIn("cinematic", result.report_text)
+        self.assertEqual(1, result.report_text.count("backup"))
+        self.assertEqual(1, result.report_text.count("cinematic"))
 
     def test_missing_reports_fail_even_when_gradle_succeeds(self):
         result, _ = self.invoke(wrapper=True, omit_reports=True)

@@ -26,6 +26,7 @@ cinematic_status=0
 for report in app/build/outputs/androidTest-results/connected/debug/TEST-*.xml; do
   test -f "$report"
   cp -p "$report" "ci-evidence/cinematic-report/$(basename "$report" .xml)-cinematic.xml"
+  mv "$report" "ci-evidence/cinematic-report/$(basename "$report")"
 done
 cp -p ci-evidence/backup-report/TEST-*-backup.xml app/build/outputs/androidTest-results/connected/debug/
 cp -p ci-evidence/cinematic-report/TEST-*-cinematic.xml app/build/outputs/androidTest-results/connected/debug/
