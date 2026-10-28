@@ -165,6 +165,23 @@ data class SourceSyncAppliedSource(
     val syncSourceId: String? = null,
 )
 
+/** 一条被拒的条目当时想做什么：写入还是删除。 */
+enum class SourceSyncRefusedAction { WRITE, DELETE }
+
+/**
+ * 一条没写成的条目（W6-82）。
+ *
+ * 回执从前只有 `refused` 一个计数：用户看到「拒写 1 条」，既不知道是哪条，也不知道该改什么。
+ * [reason] 是服务给的稳定码（`local-source-write-failed:IOException` 这种带异常类名的也在内），
+ * 界面按码查一句人话；码不在表里就原样显示，绝不吞成空串。
+ */
+data class SourceSyncRefusedEntry(
+    val syncSourceId: String,
+    /** 预览里的标题；回执里的身份在预览里找不到时退化成身份本身，而不是丢掉这条。 */
+    val title: String,
+    val action: SourceSyncRefusedAction,
+    val reason: String,
+)
 /**
  * 应用之后的摘要（只用于结果页，不再参与任何判定）。
  *
@@ -188,6 +205,12 @@ data class SourceSyncApplySummary(
     val withheldCount: Int = 0,
     /** 本轮连凭据一起移除的本地来源条数（对端声明删除）。 */
     val removedCount: Int = 0,
+
+    /** 预览里被放行的条数（计划数）；与 [appliedCount] 的差就是「放行了却没写成」。 */
+    val allowedCount: Int = 0,
+
+    /** 预览里的条目总数（四桶相加）：结果页用它说明这次到底看了多少条。 */
+    val plannedCount: Int = 0,
     /** 扣住的原因码（首现顺序，去重）；非空表示光点允许没用，得先去来源页处理。 */
     val blockingReasons: List<String> = emptyList(),
     val appliedTitles: List<String> = emptyList(),
@@ -195,6 +218,8 @@ data class SourceSyncApplySummary(
     /** 真正写入的每一条来源（按结果顺序）；结果页据此渲染「补录并验证」入口。 */
     val appliedSources: List<SourceSyncAppliedSource> = emptyList(),
 
+    /** 逐条没写成的条目（写入被拒 + 删除被拒，按回执顺序）；空表示这一轮没有失败。 */
+    val refusedEntries: List<SourceSyncRefusedEntry> = emptyList(),
     /** W6-72：信封里被判为「次要端点、不参与同步」的条数（0 表示没有多端点来源）。 */
     val notImportedEndpointCount: Int = 0,
 

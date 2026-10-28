@@ -2,8 +2,10 @@ package com.mediahub.feature.settings.sync
 
 import com.mediahub.core.common.sync.SourceSyncAction
 import com.mediahub.core.common.sync.SourceSyncCandidate
+import com.mediahub.core.common.sync.SourceSyncDigestReasons
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
+import com.mediahub.core.database.sync.AndroidSourceSyncService
 
 /** 页面上出现的固定文案。集中在这里，测试与文档引用同一份，避免"改了一句忘了另一处"。 */
 object SourceSyncImportCopy {
@@ -79,20 +81,28 @@ object SourceSyncImportCopy {
     fun baselineRejected(count: Int): String =
         "有 " + count + " 条没能记入基线（修订号比已有记录旧或同号不同内容）；导入结果不受影响。"
 
-    /**
-     * W6-81：本轮回执的一句话（写入 / 跳过 / 保留未应用）。
-     *
-     * 与上面那行「已导入 A · 需确认 B · 已忽略 C …」刻意分开：那行是预览里的桶，
-     * 这行是服务真正做了什么。合成一句会让「需确认 3 条」和「扣住 3 条」看起来像同一件事，
-     * 而实际上前者要用户去来源页处理、后者连闸门都没打算写。
-     */
-    fun applyVerdict(summary: SourceSyncApplySummary): String =
-        "已写入 " + summary.appliedCount +
-            " 条 · 跳过 " + summary.skippedCount +
-            " 条 · 保留未应用 " + summary.notAppliedCount +
-            " 条（扣住 " + summary.withheldCount + " · 拒写 " + summary.failedCount + "）"
+    /** W6-82：本轮的「计划」——预览里怎么分的桶。与下面那行「结果」不是同一件事。 */
+    fun planLine(summary: SourceSyncApplySummary): String =
+        "本次计划：放行 " + summary.allowedCount +
+            " 条 · 需确认 " + summary.requiresApprovalCount +
+            " 条 · 忽略 " + summary.ignoredCount +
+            " 条 · 暂不支持 " + summary.unsupportedCount +
+            " 条 · 共 " + summary.plannedCount + " 条"
 
-    /** W6-81：永久扣住的原因码；没有就返回 null（0 条时不该占版面）。 */
+    /**
+     * W6-82：本轮的「结果」——服务真正做了什么。
+     *
+     * 五个数各有出处、互不可推：写入与删除来自回执的 wrote / removedServerIds，
+     * 跳过 / 扣住 / 拒写来自闸门与写入器的三个桶。合成一句会让「放行 3 条」看起来等于「写入 3 条」。
+     */
+    fun resultLine(summary: SourceSyncApplySummary): String =
+        "本次结果：写入 " + summary.appliedCount +
+            " 条 · 删除 " + summary.removedCount +
+            " 条 · 跳过 " + summary.skippedCount +
+            " 条 · 扣住 " + summary.withheldCount +
+            " 条 · 拒写 " + summary.failedCount + " 条"
+
+    /** W6-82：永久扣住的原因码；没有就返回 null（0 条时不该占版面）。 */
     fun blockingReasons(summary: SourceSyncApplySummary): String? =
         if (summary.blockingReasons.isEmpty()) {
             null
@@ -100,13 +110,56 @@ object SourceSyncImportCopy {
             "永久扣住的原因：" + summary.blockingReasons.joinToString("、") + "。光点允许没用，需去来源页逐条处理。"
         }
 
-    /** W6-81：对端声明删除、本机连凭据一起移除的条数；没有就返回 null。 */
-    fun removedLine(summary: SourceSyncApplySummary): String? =
-        if (summary.removedCount > 0) {
-            "已删除 " + summary.removedCount + " 条本地来源（对端声明删除，凭据一并移除）。"
-        } else {
+    /** W6-82：逐条失败区的标题；一条都没有时返回 null（0 条不该占版面）。 */
+    fun refusedHeader(summary: SourceSyncApplySummary): String? =
+        if (summary.refusedEntries.isEmpty()) {
             null
+        } else {
+            "未写入 " + summary.refusedEntries.size + " 条（逐条原因）"
         }
+
+    /** W6-82：一条失败的可读句：「- 标题（身份）· 写入/删除 · 原因」。 */
+    fun refusalLine(entry: SourceSyncRefusedEntry): String {
+        val action = when (entry.action) {
+            SourceSyncRefusedAction.WRITE -> "写入"
+            SourceSyncRefusedAction.DELETE -> "删除"
+        }
+        return "- " + entry.title + "（" + entry.syncSourceId + "）· " + action + " · " +
+            refusalReason(entry.reason)
+    }
+
+    /**
+     * W6-82：原因码 → 人话。
+     *
+     * 码不认识就原样带出去（`原因码：xxx`），绝不返回空串：空串会让结果页出现
+     * 「- 标题（身份）· 写入 · 」这种半句话，看起来像界面坏了，也把真正的原因丢了。
+     */
+    fun refusalReason(code: String): String {
+        val raw = code.trim()
+        return when {
+            raw == SourceSyncReasons.UNKNOWN_SOURCE_TYPE ->
+                "本机不认识这个来源类型（版本差异），升级后再试。"
+            raw == SourceSyncReasons.NO_USABLE_ENDPOINT ->
+                "这条来源没有可拨号的地址，写进库也没法播放。"
+            raw == SourceSyncDigestReasons.MISSING_SYNC_SOURCE_ID ->
+                "对端没给这条来源身份，无法建立对应关系。"
+            raw == AndroidSourceSyncService.SOURCE_VANISHED ->
+                "要更新的本地记录在写入前消失了（可能刚被删掉）。"
+            raw == AndroidSourceSyncService.DELETE_NOT_SUPPORTED ->
+                "本机没有接删除能力，删除请求只能拒绝并上报。"
+            raw == AndroidSourceSyncService.REMOVE_MISSING ->
+                "对端说删除，但本机本来就没有这条来源。"
+            raw == AndroidSourceSyncService.REMOVE_LOCAL_MEDIA ->
+                "本地媒体源不参与跨端删除（避免删掉本机磁盘上的媒体）。"
+            raw == AndroidSourceSyncService.REMOVE_FAILED ->
+                "删除本地来源时存储层失败，凭据可能还在。"
+            raw.startsWith(AndroidSourceSyncService.WRITE_FAILED) ->
+                "本机存储拒绝了这次写入（" +
+                    raw.substring(AndroidSourceSyncService.WRITE_FAILED.length).trimStart(':').trim()
+                        .ifEmpty { "未给异常类型" } + "）。"
+            else -> "原因码：" + raw
+        }
+    }
 
     /** 桶标题（四桶固定顺序）。 */
     fun titleOf(bucket: SourceSyncImportBucket): String = when (bucket) {

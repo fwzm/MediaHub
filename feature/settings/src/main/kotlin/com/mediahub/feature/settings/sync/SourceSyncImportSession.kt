@@ -1,6 +1,7 @@
 package com.mediahub.feature.settings.sync
 
 import com.mediahub.core.common.sync.ISourceSyncBaselineStore
+import com.mediahub.core.common.sync.SourceSyncAction
 import com.mediahub.core.common.sync.SourceSyncCandidate
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.database.repository.SyncSourceStore
@@ -197,6 +198,7 @@ class SourceSyncImportSession(
         preview: SourceSyncImportPreviewView,
     ): SourceSyncApplySummary {
         val sources = writtenSourcesOf(report, preview)
+        val refusals = refusedEntriesOf(report, preview)
         return SourceSyncApplySummary(
             appliedCount = report.applied - report.removedServerIds.size,
             requiresApprovalCount = preview.countIn(SourceSyncImportBucket.REQUIRES_APPROVAL),
@@ -206,9 +208,11 @@ class SourceSyncImportSession(
             skippedCount = report.skipped,
             withheldCount = report.withheld,
             removedCount = report.removedServerIds.size,
-            blockingReasons = report.blockingReasons,
-            appliedTitles = sources.map { it.title },
+            allowedCount = preview.allowCount,
+            plannedCount = preview.entries.size,
+            blockingReasons = report.blockingReasons,            appliedTitles = sources.map { it.title },
             appliedSources = sources,
+            refusedEntries = refusals,
             notImportedEndpointCount = report.endpointSummary?.notImportedCount ?: 0,
             recordsWithAlternativeEndpoints = report.endpointSummary?.recordsWithAlternatives ?: 0,
             baselineSaved = report.baselineUpdated,
@@ -238,6 +242,53 @@ class SourceSyncImportSession(
         }
     }
 
+
+    /**
+     * 逐条没写成的条目（W6-82）。
+     *
+     * 主来源是回执的 [SourceSyncApplyReport.refusals]（写入被拒与删除被拒都在里面）；
+     * [SourceSyncApplyReport.removalFailures] 只作补漏 —— 同一身份同一原因已经报过的不再重复，
+     * 只补那些没进 refusals 的删除失败，宁可多报一条也不让界面少一条原因。
+     *
+     * 标题与 wire 类型从预览里取：回执只带身份，而结果页要说的是人能认出的那条来源。
+     */
+    private fun refusedEntriesOf(
+        report: SourceSyncApplyReport,
+        preview: SourceSyncImportPreviewView,
+    ): List<SourceSyncRefusedEntry> {
+        val byKey = preview.entries.associateBy { SourceSyncImportLogic.normalizeKey(it.key) }
+        fun titleOf(syncSourceId: String): String =
+            byKey[SourceSyncImportLogic.normalizeKey(syncSourceId)]?.title ?: syncSourceId
+        val seen = report.refusals
+            .map { SourceSyncImportLogic.normalizeKey(it.syncSourceId) to it.reason }
+            .toMutableSet()
+        val entries = report.refusals.mapTo(ArrayList()) { refusal ->
+            SourceSyncRefusedEntry(
+                syncSourceId = refusal.syncSourceId,
+                title = titleOf(refusal.syncSourceId),
+                action = if (refusal.action == SourceSyncAction.DELETE) {
+                    SourceSyncRefusedAction.DELETE
+                } else {
+                    SourceSyncRefusedAction.WRITE
+                },
+                reason = refusal.reason,
+            )
+        }
+        report.removalFailures.forEach { failure ->
+            val key = SourceSyncImportLogic.normalizeKey(failure.syncSourceId) to failure.reason
+            if (seen.add(key)) {
+                entries.add(
+                    SourceSyncRefusedEntry(
+                        syncSourceId = failure.syncSourceId,
+                        title = titleOf(failure.syncSourceId),
+                        action = SourceSyncRefusedAction.DELETE,
+                        reason = failure.reason,
+                    ),
+                )
+            }
+        }
+        return entries
+    }
 
     companion object {
         /**

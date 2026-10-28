@@ -14,6 +14,7 @@ import com.mediahub.core.common.sync.SourceSyncApprovalDecision
 import com.mediahub.core.common.sync.SourceSyncApprovalGate
 import com.mediahub.core.common.sync.SourceSyncApprovalResult
 import com.mediahub.core.common.sync.SourceSyncDigest
+import com.mediahub.core.common.sync.SourceSyncDigestReasons
 import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncEndpointPolicy
 import com.mediahub.core.common.sync.SourceSyncEndpointSummary
@@ -436,6 +437,7 @@ class AndroidSourceSyncService(
         val removedIds = ArrayList<String>()
         val refusedIds = ArrayList<String>()
         val removalFailures = ArrayList<SourceSyncRemovalFailure>()
+        val refusals = ArrayList<SourceSyncRefusal>()
         var applied = 0
 
         for (item in gate.applied) {
@@ -448,6 +450,15 @@ class AndroidSourceSyncService(
                 val removed = removeLocalSource(item.syncSourceId, removalFailures)
                 if (removed == null) {
                     refusedIds.add(item.syncSourceId.trim())
+                    refusals.add(
+                        SourceSyncRefusal(
+                            syncSourceId = item.syncSourceId.trim(),
+                            // 墓碑条目从合并器拿到的 action 可能是 CREATE（信封里没有对应记录），
+                            // 走的是「record is null ⇒ 删除」这条判据，所以动作必须在这里钉死。
+                            action = SourceSyncAction.DELETE,
+                            reason = removalFailures.lastOrNull()?.reason ?: REMOVE_FAILED,
+                        ),
+                    )
                     continue
                 }
                 applied++
@@ -455,14 +466,23 @@ class AndroidSourceSyncService(
                 removedIds.add(item.syncSourceId.trim())
                 continue
             }
-            val serverId = writeRecord(record)
-            if (serverId == null) {
-                refusedIds.add(item.syncSourceId.trim())
-                continue
+            when (val attempt = writeRecord(record)) {
+                is WriteAttempt.Written -> {
+                    applied++
+                    wrote.add(SourceSyncWrittenSource(item.syncSourceId.trim(), attempt.serverId))
+                    writtenRecords.add(record)
+                }
+                is WriteAttempt.Refused -> {
+                    refusedIds.add(item.syncSourceId.trim())
+                    refusals.add(
+                        SourceSyncRefusal(
+                            syncSourceId = item.syncSourceId.trim(),
+                            action = item.action,
+                            reason = attempt.reason,
+                        ),
+                    )
+                }
             }
-            applied++
-            wrote.add(SourceSyncWrittenSource(item.syncSourceId.trim(), serverId))
-            writtenRecords.add(record)
         }
 
         var baselineUpdated = false
@@ -504,6 +524,7 @@ class AndroidSourceSyncService(
             removedSyncSourceIds = removedIds,
             refusedSyncSourceIds = refusedIds,
             removalFailures = removalFailures,
+            refusals = refusals,
         )
     }
 
@@ -545,6 +566,12 @@ class AndroidSourceSyncService(
         return decisions
     }
 
+    /** 写一条来源的结果：要么落下一个 serverId，要么带一条稳定原因码被拒。 */
+    private sealed interface WriteAttempt {
+        data class Written(val serverId: String) : WriteAttempt
+        data class Refused(val reason: String) : WriteAttempt
+    }
+
     /** 按身份在信封里取记录；墓碑条目没有记录，返回 null。 */
     private fun findRecord(envelope: SourceSyncEnvelope, syncSourceId: String?): SourceRecord? {
         val identity = identityOf(syncSourceId)
@@ -557,30 +584,40 @@ class AndroidSourceSyncService(
         WireText.lowercaseAscii(WireText.trim(syncSourceId ?: ""))
 
     /**
-     * 写一条来源：库里已有同身份的记录就更新，没有就新建。失败一律降级成 null（由调用方计入 refused）。
+     * 写一条来源：库里已有同身份的记录就更新，没有就新建。
+     *
+     * 失败不再折成 null 而是带码拒绝（W6-82）：旧写法把「类型不认识」「没有可拨号地址」
+     * 「记录刚被删」「存储层抛异常」四种完全不同的处境压成同一个 null，界面只能说「拒写 1 条」，
+     * 用户既不知道该改哪条也猜不出该改什么。四条出路各有稳定码，异常类名留在码尾。
      *
      * 查库**必须**按身份而不是按拼写：存储层的唯一索引是大小写敏感的，大小写不同的同一条来源
      * 若被当成新记录写入，库里会留下两条身份相同、永远收敛不了的重复来源。
      */
-    private suspend fun writeRecord(record: SourceRecord): String? {
-        val serverType = AndroidSourceTypeMap.toServerType(record.sourceType.raw) ?: return null
+    private suspend fun writeRecord(record: SourceRecord): WriteAttempt {
+        val serverType = AndroidSourceTypeMap.toServerType(record.sourceType.raw)
+            ?: return WriteAttempt.Refused(SourceSyncReasons.UNKNOWN_SOURCE_TYPE)
         val endpoints = normalizedEndpoints(record)
-        if (endpoints.isEmpty()) return null
+        if (endpoints.isEmpty()) return WriteAttempt.Refused(SourceSyncReasons.NO_USABLE_ENDPOINT)
         val identity = identityOf(record.syncSourceId)
-        if (identity.isEmpty()) return null
+        if (identity.isEmpty()) return WriteAttempt.Refused(SourceSyncDigestReasons.MISSING_SYNC_SOURCE_ID)
         return try {
             val existing = store.listSourceSnapshots()
                 .firstOrNull { snapshot -> identityOf(snapshot.syncSourceId) == identity }
             if (existing == null) {
-                store.createLocalSource(snapshotOf(record, serverType, endpoints, ""))
+                WriteAttempt.Written(store.createLocalSource(snapshotOf(record, serverType, endpoints, "")))
             } else {
                 val snapshot = snapshotOf(record, serverType, endpoints, existing.serverId)
-                if (store.updateLocalSource(existing.serverId, snapshot)) existing.serverId else null
+                if (store.updateLocalSource(existing.serverId, snapshot)) {
+                    WriteAttempt.Written(existing.serverId)
+                } else {
+                    // 规划之后、写入之前本地记录被删了：报出来，不要让调用方以为已应用。
+                    WriteAttempt.Refused(SOURCE_VANISHED)
+                }
             }
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (failure: Exception) {
-            null
+            WriteAttempt.Refused(WRITE_FAILED + ":" + (failure::class.simpleName ?: "Exception"))
         }
     }
 
@@ -977,6 +1014,24 @@ data class SourceSyncWrittenSource(
 )
 
 /**
+ * W6-82：一条被拒的条目 —— 哪个身份、想做什么、为什么没做成。
+ *
+ * 只有计数时「拒写 2 条」对用户是死路：他不知道是哪两条、也不知道该去哪儿修。原因码一律是稳定码
+ * （写入类复用 [SourceSyncReasons.UNKNOWN_SOURCE_TYPE] / [SourceSyncReasons.NO_USABLE_ENDPOINT] /
+ * [AndroidSourceSyncService.SOURCE_VANISHED] / [AndroidSourceSyncService.WRITE_FAILED] +
+ * 异常类名，空白身份用 [SourceSyncDigestReasons.MISSING_SYNC_SOURCE_ID]；删除类复用
+ * [AndroidSourceSyncService.DELETE_NOT_SUPPORTED] 等），界面按码出人话，码不认识就原样显示。
+ *
+ * [action] 保留闸门给的原始动作用来区分「写」与「删」：同一个身份在不同轮次可能先删后写，
+ * 只按身份聚合会把两种处置混成一条。
+ */
+data class SourceSyncRefusal(
+    val syncSourceId: String,
+    val action: SourceSyncAction,
+    val reason: String,
+)
+
+/**
  * W6-78：一轮落库的回执（Windows `SourceSyncApplyReport` 的对等物）。
  *
  * 四个计数桶互不相交、加起来等于闸门看过的条目数：
@@ -1024,6 +1079,13 @@ data class SourceSyncApplyReport(
     val refusedSyncSourceIds: List<String> = emptyList(),
     /** 删除被拒的逐条原因（稳定码），供界面区分「本机没有」与「本机不支持删」而不是笼统说失败。 */
     val removalFailures: List<SourceSyncRemovalFailure> = emptyList(),
+    /**
+     * 本轮被拒的逐条原因（W6-82）：写入被拒与删除被拒同列，每条带身份、动作与稳定码。
+     *
+     * 与 [removalFailures] 的关系：删除类拒绝两边都在（前者是「删」这个动作的专用视图，
+     * 后者是界面用的统一清单）；写入类拒绝只在这里。顺序与拒绝顺序一致。
+     */
+    val refusals: List<SourceSyncRefusal> = emptyList(),
     /** 非空表示信封没被读入；此时四个桶全为 0，存储与基线都没被碰过。 */
     val rejectedReason: String? = null,
     val rejectedMessage: String? = null,
@@ -1065,6 +1127,16 @@ data class SourceSyncApplyReport(
 
     /** 该身份被拒的原因码（没有拒绝记录时为 null）。 */
     fun removalFailureOf(syncSourceId: String): String? = removalFailures
+        .firstOrNull { it.syncSourceId.trim().equals(syncSourceId.trim(), ignoreCase = true) }
+        ?.reason
+
+    /**
+     * 该身份被拒的原因码，写入与删除一视同仁（W6-82）。
+     *
+     * 与 [removalFailureOf] 的区别只在覆盖面：那个只看删除，这个看整条 [refusals] 清单。
+     * 按身份比（trim + ASCII 大小写不敏感），与闸门、信封去重同一口径。
+     */
+    fun refusalOf(syncSourceId: String): String? = refusals
         .firstOrNull { it.syncSourceId.trim().equals(syncSourceId.trim(), ignoreCase = true) }
         ?.reason
 }

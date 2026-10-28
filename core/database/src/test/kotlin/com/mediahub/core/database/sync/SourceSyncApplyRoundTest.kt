@@ -3,6 +3,7 @@ package com.mediahub.core.database.sync
 import com.mediahub.core.common.sync.InMemorySourceSyncBaselineStore
 import com.mediahub.core.common.sync.LocalSourceRecord
 import com.mediahub.core.common.sync.SourceEndpoint
+import com.mediahub.core.common.sync.SourceSyncAction
 import com.mediahub.core.common.sync.SourceSyncBaseline
 import com.mediahub.core.common.sync.SourceRecord
 import com.mediahub.core.common.sync.SourceSyncCodec
@@ -163,6 +164,41 @@ class SourceSyncApplyRoundTest {
     }
 
     @Test
+    fun a_write_failure_and_a_refused_deletion_each_keep_their_own_code_and_action() = runBlocking {
+        // 一份信封里同时出现「写不下去」与「删不了」：两条都得点名，动作不能混（写 ≠ 删）。
+        val store = FakeStore()
+        store.failWrites = true
+        store.seed(snapshot(serverId = "srv-del", syncSourceId = "sync-del", revision = 1L))
+        val json = SourceSyncCodec.encode(
+            envelope(
+                sources = listOf(record("sync-a", revision = 2L)),
+                deletions = listOf(
+                    SourceTombstone(
+                        syncSourceId = "sync-del",
+                        deletedAtEpochMs = 1_700_000_100_000L,
+                        recordRevision = 2L,
+                    ),
+                ),
+            ),
+        )
+
+        val report = service(store).applyRound(json, allowedSyncSourceIds = listOf("sync-a", "sync-del"))
+
+        assertEquals(2, report.refused)
+        assertEquals(listOf("sync-a", "sync-del"), report.refusals.map { it.syncSourceId })
+        assertEquals(
+            listOf(SourceSyncAction.CREATE, SourceSyncAction.DELETE),
+            report.refusals.map { it.action },
+        )
+        assertTrue(
+            report.refusals.first().reason.startsWith(AndroidSourceSyncService.WRITE_FAILED + ":"),
+        )
+        assertEquals(AndroidSourceSyncService.DELETE_NOT_SUPPORTED, report.refusals.last().reason)
+        // 删除那条同时留在 removalFailures 里（既有调用方仍在读它），两处口径必须一致。
+        assertEquals(AndroidSourceSyncService.DELETE_NOT_SUPPORTED, report.removalFailureOf("sync-del"))
+    }
+
+    @Test
     fun skipping_an_identity_outranks_allowing_it() = runBlocking {
         val store = FakeStore()
         store.seed(snapshot(serverId = "srv-local", syncSourceId = "sync-a", revision = 5L))
@@ -224,6 +260,12 @@ class SourceSyncApplyRoundTest {
         // 一条都没写进库 ⇒ 基线一个字都不许动。
         assertEquals(0, baselines.writeCount)
         assertEquals(1, report.total)
+        // W6-82：拒绝要带身份、动作与稳定码，光有计数用户无从下手。
+        val refusal = report.refusals.single()
+        assertEquals("sync-a", refusal.syncSourceId)
+        assertEquals(SourceSyncAction.CREATE, refusal.action)
+        assertTrue(refusal.reason.startsWith(AndroidSourceSyncService.WRITE_FAILED + ":"))
+        assertEquals(refusal.reason, report.refusalOf(" SYNC-A "))
     }
 
     @Test

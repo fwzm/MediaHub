@@ -8,6 +8,7 @@ import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SyncSourceTypeValue
+import com.mediahub.core.database.sync.AndroidSourceSyncService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -244,31 +245,39 @@ class SourceSyncImportLogicTest {
     }
 
     @Test
-    fun theVerdictLineKeepsReceiptCountsApartFromPlanningCounts() {
+    fun thePlanLineAndTheResultLineNeverShareACount() {
         val summary = SourceSyncApplySummary(
             appliedCount = 2,
-            requiresApprovalCount = 1,
-            ignoredCount = 0,
+            requiresApprovalCount = 4,
+            ignoredCount = 5,
             unsupportedCount = 1,
             failedCount = 1,
             skippedCount = 3,
             withheldCount = 4,
+            removedCount = 1,
+            allowedCount = 3,
+            plannedCount = 13,
         )
 
+        assertEquals(
+            "本次计划：放行 3 条 · 需确认 4 条 · 忽略 5 条 · 暂不支持 1 条 · 共 13 条",
+            SourceSyncImportCopy.planLine(summary),
+        )
+        assertEquals(
+            "本次结果：写入 2 条 · 删除 1 条 · 跳过 3 条 · 扣住 4 条 · 拒写 1 条",
+            SourceSyncImportCopy.resultLine(summary),
+        )
         assertEquals(8, summary.notAppliedCount)
         assertEquals(
-            "已写入 2 条 · 跳过 3 条 · 保留未应用 8 条（扣住 4 · 拒写 1）",
-            SourceSyncImportCopy.applyVerdict(summary),
-        )
-        assertEquals(
             "永久扣住的原因：secrets-require-approval、not-supported-on-windows。光点允许没用，需去来源页逐条处理。",
-            SourceSyncImportCopy.blockingReasons(summary.copy(blockingReasons = listOf("secrets-require-approval", "not-supported-on-windows"))),
+            SourceSyncImportCopy.blockingReasons(
+                summary.copy(blockingReasons = listOf("secrets-require-approval", "not-supported-on-windows")),
+            ),
         )
-        assertNull(SourceSyncImportCopy.removedLine(summary))
     }
 
     @Test
-    fun anEmptyReceiptAddsNoReasonLineAndNoRemovalLine() {
+    fun anEmptyReceiptStillSaysEveryCountAndHasNoFailureBlock() {
         val summary = SourceSyncApplySummary(
             appliedCount = 0,
             requiresApprovalCount = 0,
@@ -277,23 +286,63 @@ class SourceSyncImportLogicTest {
             failedCount = 0,
         )
 
-        assertEquals("已写入 0 条 · 跳过 0 条 · 保留未应用 0 条（扣住 0 · 拒写 0）", SourceSyncImportCopy.applyVerdict(summary))
+        assertEquals(
+            "本次计划：放行 0 条 · 需确认 0 条 · 忽略 0 条 · 暂不支持 0 条 · 共 0 条",
+            SourceSyncImportCopy.planLine(summary),
+        )
+        assertEquals(
+            "本次结果：写入 0 条 · 删除 0 条 · 跳过 0 条 · 扣住 0 条 · 拒写 0 条",
+            SourceSyncImportCopy.resultLine(summary),
+        )
+        assertNull(SourceSyncImportCopy.refusedHeader(summary))
         assertNull(SourceSyncImportCopy.blockingReasons(summary))
-        assertNull(SourceSyncImportCopy.removedLine(summary))
     }
 
     @Test
-    fun aRemovalIsReportedSeparatelyFromAWrite() {
+    fun aRefusalIsNamedWithItsIdentityItsActionAndAReasonSentence() {
         val summary = SourceSyncApplySummary(
-            appliedCount = 1,
+            appliedCount = 0,
             requiresApprovalCount = 0,
             ignoredCount = 0,
             unsupportedCount = 0,
-            failedCount = 0,
-            removedCount = 1,
+            failedCount = 2,
+            refusedEntries = listOf(
+                SourceSyncRefusedEntry(
+                    syncSourceId = "sync-a",
+                    title = "客厅 Emby",
+                    action = SourceSyncRefusedAction.WRITE,
+                    reason = SourceSyncReasons.UNKNOWN_SOURCE_TYPE,
+                ),
+                SourceSyncRefusedEntry(
+                    syncSourceId = "sync-b",
+                    title = "旧 NAS",
+                    action = SourceSyncRefusedAction.DELETE,
+                    reason = AndroidSourceSyncService.DELETE_NOT_SUPPORTED,
+                ),
+            ),
         )
 
-        assertEquals("已删除 1 条本地来源（对端声明删除，凭据一并移除）。", SourceSyncImportCopy.removedLine(summary))
+        assertEquals("未写入 2 条（逐条原因）", SourceSyncImportCopy.refusedHeader(summary))
+        assertEquals(
+            listOf(
+                "- 客厅 Emby（sync-a）· 写入 · 本机不认识这个来源类型（版本差异），升级后再试。",
+                "- 旧 NAS（sync-b）· 删除 · 本机没有接删除能力，删除请求只能拒绝并上报。",
+            ),
+            summary.refusedEntries.map { SourceSyncImportCopy.refusalLine(it) },
+        )
+    }
+
+    @Test
+    fun anUnknownReasonCodeIsShownVerbatimInsteadOfSwallowed() {
+        assertEquals("原因码：something-new:42", SourceSyncImportCopy.refusalReason("something-new:42"))
+        assertEquals(
+            "本机存储拒绝了这次写入（IOException）。",
+            SourceSyncImportCopy.refusalReason(AndroidSourceSyncService.WRITE_FAILED + ":IOException"),
+        )
+        assertEquals(
+            "本机存储拒绝了这次写入（未给异常类型）。",
+            SourceSyncImportCopy.refusalReason(AndroidSourceSyncService.WRITE_FAILED),
+        )
     }
 
     @Test

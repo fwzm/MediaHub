@@ -64,14 +64,17 @@ object SourceSyncImportTags {
     const val APPLY = "sync.apply"
     const val RESULT = "sync.apply.result"
 
-    /** W6-81：结果页的「本轮回执」一行（写入 / 跳过 / 保留未应用）。 */
+    /** W6-82：本轮的「计划」一行（预览里怎么分桶）。 */
+    const val APPLY_PLAN = "sync.apply.plan"
+
+    /** W6-82：本轮的「结果」一行（写入 / 删除 / 跳过 / 扣住 / 拒写）。 */
     const val APPLY_VERDICT = "sync.apply.verdict"
 
     /** W6-81：永久扣住的原因码（只在有扣住时出现）。 */
     const val APPLY_BLOCKING = "sync.apply.blocking"
 
-    /** W6-81：对端声明删除、本机连凭据一起移除的条数（只在 > 0 时出现）。 */
-    const val APPLY_REMOVED = "sync.apply.removed"
+    /** W6-82：逐条没写成的标题（每条原因各占一行，紧跟在下面）。 */
+    const val APPLY_REFUSED = "sync.apply.refused"
     const val BLOCKED = "sync.apply.blocked"
     const val ENTRY_ALLOW = "sync.entry.allow"
     const val ENTRY_SKIP = "sync.entry.skip"
@@ -544,17 +547,14 @@ fun SourceSyncImportScreen(
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text("导入结果", style = MaterialTheme.typography.titleSmall)
+                        // W6-82：这一行是预览里的桶（计划），下一行才是这一轮真正做了什么（结果）。
                         Text(
-                            "已导入 " + applied.appliedCount +
-                                " · 需确认 " + applied.requiresApprovalCount +
-                                " · 已忽略 " + applied.ignoredCount +
-                                " · 暂不支持 " + applied.unsupportedCount +
-                                " · 失败 " + applied.failedCount,
+                            SourceSyncImportCopy.planLine(applied),
                             style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.testTag(SourceSyncImportTags.APPLY_PLAN),
                         )
-                        // W6-81：上一行是预览里的桶，这一行是服务这一轮真正做了什么（写入/跳过/扣住/拒写）。
                         Text(
-                            SourceSyncImportCopy.applyVerdict(applied),
+                            SourceSyncImportCopy.resultLine(applied),
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.testTag(SourceSyncImportTags.APPLY_VERDICT),
                         )
@@ -566,15 +566,24 @@ fun SourceSyncImportScreen(
                                 modifier = Modifier.testTag(SourceSyncImportTags.APPLY_BLOCKING),
                             )
                         }
-                        SourceSyncImportCopy.removedLine(applied)?.let { line ->
-                            Text(
-                                line,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.testTag(SourceSyncImportTags.APPLY_REMOVED),
-                            )
-                        }
+
                         applied.appliedTitles.forEach { title ->
                             Text("- " + title, style = MaterialTheme.typography.bodySmall)
+                        }
+                        // W6-82：没写成的每一条都点名 + 给一句原因；只有计数时用户无从下手。
+                        SourceSyncImportCopy.refusedHeader(applied)?.let { header ->
+                            Text(
+                                header,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.testTag(SourceSyncImportTags.APPLY_REFUSED),
+                            )
+                            applied.refusedEntries.forEach { entry ->
+                                Text(
+                                    SourceSyncImportCopy.refusalLine(entry),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
                         // W6-72：多端点与基线两条事实，只有真的发生时出现（0 条时不占版面）。
                         if (applied.notImportedEndpointCount > 0) {
