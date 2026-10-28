@@ -9,11 +9,29 @@ package com.mediahub.core.database.sync
  * 把这条判断塞进存储接口会让八个测试假件都得实现一个多半用不上的方法，也会让「删行」与「删凭据」
  * 在同一个抽象里悄悄分叉；因此这里只声明能力，实现方（生产上是 feature:server 的完整删除链）负责清干净。
  *
- * 契约：
- * - 返回 true 表示这条来源（含它的凭据、进度、会话）已经不在本机；
- * - 返回 false 表示本机没有这条来源，或删到一半失败 —— 两者都不算「写过」，调用方会计入 refused；
+ * 契约（W6-88 起返回 [SourceSyncRemoveOutcome]，不再是 Boolean）：
+ * - [SourceSyncRemoveOutcome.Removed]：这条来源（含它的凭据、进度、会话）已经不在本机；
+ * - [SourceSyncRemoveOutcome.Missing]：本机没有这条来源 —— 不算「写过」，但也不是故障；
+ * - [SourceSyncRemoveOutcome.Failed]：删到一半失败，`reason` 是稳定原因码。
+ *   生产实现会把删除链的步骤码挂上去（`local-source-remove-failed:<step>`），因为「删了但不知道卡在哪一步」
+ *   与「删了」在支持场景里是两件事：凭据没清干净时，用户需要知道该去重试删除还是去来源页手动清。
  * - 抛异常视为失败（调用方折成 refused，不冒给用户）。
+ *
+ * 为什么不是 Boolean：Boolean 把「本机没有」「链中途失败」「失败在第八步」压成同一个 false，
+ * 回执里只剩一句 `local-source-remove-failed`，八处清理里哪一处断掉完全不可见。
  */
 interface SourceSyncSourceRemover {
-    suspend fun removeSource(serverId: String): Boolean
+    suspend fun removeSource(serverId: String): SourceSyncRemoveOutcome
+}
+
+/** [SourceSyncSourceRemover] 的三种落点。 */
+sealed interface SourceSyncRemoveOutcome {
+    /** 这条来源连它的凭据、进度、会话都不在本机了。 */
+    data object Removed : SourceSyncRemoveOutcome
+
+    /** 本机没有这条来源（空白身份、行已被别处删掉）。 */
+    data object Missing : SourceSyncRemoveOutcome
+
+    /** 删到一半失败；[reason] 是稳定原因码，可能带步骤后缀。 */
+    data class Failed(val reason: String) : SourceSyncRemoveOutcome
 }

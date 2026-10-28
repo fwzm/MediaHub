@@ -10,6 +10,7 @@ import com.mediahub.core.database.repository.ProgressRepository
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.database.repository.SubtitleMemoryRepository
 import com.mediahub.core.database.sync.AndroidSourceSyncService
+import com.mediahub.core.database.sync.SourceSyncRemoveOutcome
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.StoredToken
@@ -96,7 +97,7 @@ class SourceSyncRemovalCascadeRoomTest {
             repository.setDefault(doomed.id)
             assertTrue(db.serverDao().getById(doomed.id)!!.isDefault)
 
-            assertTrue(remover.removeSource(doomed.id))
+            assertEquals(SourceSyncRemoveOutcome.Removed, remover.removeSource(doomed.id))
 
             assertNull(db.serverDao().getById(doomed.id))
             assertEquals(1, db.serverDao().count())

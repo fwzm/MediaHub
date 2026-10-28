@@ -7,6 +7,8 @@ import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SyncRoundReasons
 import com.mediahub.core.database.sync.AndroidSourceSyncService
+import com.mediahub.core.database.sync.SourceSyncRemovalCodes
+import com.mediahub.core.database.sync.SourceSyncRemovalStep
 
 /** 页面上出现的固定文案。集中在这里，测试与文档引用同一份，避免"改了一句忘了另一处"。 */
 object SourceSyncImportCopy {
@@ -220,6 +222,10 @@ object SourceSyncImportCopy {
                 "本地媒体源不参与跨端删除（避免删掉本机磁盘上的媒体）。"
             raw == AndroidSourceSyncService.REMOVE_FAILED ->
                 "删除本地来源时存储层失败，凭据可能还在。"
+            SourceSyncRemovalCodes.stepCodeOf(raw) != null ->
+                "删除本地来源时卡在「" +
+                    removalStepLabel(SourceSyncRemovalCodes.stepCodeOf(raw).orEmpty()) +
+                    "」这一步，凭据可能还在；到来源页手动删一次即可。"
             raw.startsWith(AndroidSourceSyncService.WRITE_FAILED) ->
                 "本机存储拒绝了这次写入（" +
                     raw.substring(AndroidSourceSyncService.WRITE_FAILED.length).trimStart(':').trim()
@@ -227,6 +233,28 @@ object SourceSyncImportCopy {
             else -> "原因码：" + raw
         }
     }
+
+    /**
+     * W6-88：删除链步骤码 → 界面用的人话。
+     *
+     * 码表权威在 core:database 的 [SourceSyncRemovalStep]（写码与翻译码分属两个模块，步骤码只能有一处）。
+     * 认不出的步骤码原样带出，理由同 [refusalReason]：宁可显示 `servers-row`，也不能把原因吞成半句话。
+     */
+    fun removalStepLabel(code: String): String {
+        val raw = code.trim()
+        return REMOVAL_STEP_LABELS[raw] ?: raw
+    }
+
+    private val REMOVAL_STEP_LABELS: Map<String, String> = mapOf(
+        SourceSyncRemovalStep.SERVERS.code to "删来源行",
+        SourceSyncRemovalStep.ACCOUNTS.code to "删账号",
+        SourceSyncRemovalStep.TOKENS.code to "清会话令牌",
+        SourceSyncRemovalStep.CREDENTIALS.code to "清凭据",
+        SourceSyncRemovalStep.PROGRESS.code to "删播放进度",
+        SourceSyncRemovalStep.SUBTITLE_MEMORY.code to "删字幕记忆",
+        SourceSyncRemovalStep.ICON.code to "删自定义图标",
+        SourceSyncRemovalStep.SESSION_STORE.code to "清播放会话",
+    )
 
     /** 桶标题（四桶固定顺序）。 */
     fun titleOf(bucket: SourceSyncImportBucket): String = when (bucket) {
