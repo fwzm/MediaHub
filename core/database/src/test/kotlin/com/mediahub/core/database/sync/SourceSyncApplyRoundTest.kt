@@ -12,6 +12,10 @@ import com.mediahub.core.common.sync.SourceTombstone
 import com.mediahub.core.common.sync.SyncCapabilities
 import com.mediahub.core.common.sync.SyncRoundReasons
 import com.mediahub.core.common.sync.SyncSourceTypeValue
+import com.mediahub.core.logging.LogBuffer
+import com.mediahub.core.logging.Logger
+import com.mediahub.core.logging.MemoryLogger
+import com.mediahub.core.logging.StdoutLogger
 import com.mediahub.model.MediaServer
 import com.mediahub.model.ServerType
 import kotlinx.coroutines.flow.Flow
@@ -604,12 +608,79 @@ class SourceSyncApplyRoundTest {
         assertEquals(listOf("sync-a"), baselines.load("device-windows").entries.map { it.syncSourceId })
     }
 
+    // ------------------------------------------------ W6-101 一轮的汇总进日志（只记计数与内部 id）
+
+    @Test
+    fun a_round_that_writes_leaves_one_summary_line_with_the_counts() = runBlocking {
+        val store = FakeStore()
+        val logs = LogBuffer()
+        val json = SourceSyncCodec.encode(
+            envelope(
+                sources = listOf(
+                    record("sync-a"),
+                    record("sync-secret", secrets = JsonPrimitive("sealed-blob")),
+                ),
+            ),
+        )
+
+        val report = service(store, logger = MemoryLogger(logs)).applyRound(json)
+
+        assertEquals(1, report.applied)
+        assertEquals(1, report.withheld)
+        // 恰好一行、级别是 info、后面那一串就是回执上的同一批计数。
+        assertEquals(
+            listOf(
+                "[I][DATABASE] sync-round-applied:device=device-windows snapshot=snap-windows" +
+                    " applied=1 skipped=0 withheld=1 refused=0 removed=0",
+            ),
+            logs.snapshot(),
+        )
+    }
+
+    @Test
+    fun a_rejected_envelope_leaves_one_warning_naming_the_code_and_no_summary() = runBlocking {
+        val logs = LogBuffer()
+
+        val report = service(FakeStore(), logger = MemoryLogger(logs)).applyRound("这不是 JSON")
+
+        assertTrue(report.isRejected)
+        // 坏信封只有一条警告；没有「已应用」的假消息。
+        assertEquals(listOf("[W][DATABASE] sync-round-rejected:malformed-json"), logs.snapshot())
+    }
+
+    @Test
+    fun the_summary_line_never_quotes_a_name_an_endpoint_or_a_secret() = runBlocking {
+        val logs = LogBuffer()
+        val json = SourceSyncCodec.encode(
+            envelope(
+                sources = listOf(
+                    record("sync-a"),
+                    record("sync-secret", secrets = JsonPrimitive("token=Sup3rS3cret")),
+                ),
+            ),
+        )
+
+        service(FakeStore(), logger = MemoryLogger(logs)).applyRound(json)
+
+        val line = logs.snapshot().single()
+        // 内部标识与计数可以进日志；来源名字、端点地址、凭据片段一律不进（D6）。
+        assertTrue(line.contains("device=device-windows"))
+        assertTrue(line.contains("snapshot=snap-windows"))
+        assertFalse(line.contains("来源 sync-a"))
+        assertFalse(line.contains("来源 sync-secret"))
+        assertFalse(line.contains("http://nas-a:8096/emby"))
+        assertFalse(line.contains("sealed-blob"))
+        assertFalse(line.contains("Sup3rS3cret"))
+    }
+
     // ------------------------------------------------------------ 夹具
 
     private fun service(
         store: FakeStore,
         baselineStore: InMemorySourceSyncBaselineStore? = null,
         remover: SourceSyncSourceRemover? = null,
+        // W6-101：需要断言日志的用例传入 MemoryLogger(LogBuffer())；其余用例走缺省。
+        logger: Logger = StdoutLogger(),
     ): AndroidSourceSyncService = AndroidSourceSyncService(
         store = store,
         deviceId = "device-android",
@@ -617,6 +688,7 @@ class SourceSyncApplyRoundTest {
         clock = { 1_700_000_000_000L },
         baselineStore = baselineStore,
         sourceRemover = remover,
+        logger = logger,
     )
 
     /**

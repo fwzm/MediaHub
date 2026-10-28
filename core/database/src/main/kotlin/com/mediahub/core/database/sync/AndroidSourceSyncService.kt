@@ -32,6 +32,9 @@ import com.mediahub.core.common.sync.SyncSourceTypeValue
 import com.mediahub.core.common.sync.SyncSourceTypes
 import com.mediahub.core.common.sync.SyncUrlNormalizer
 import com.mediahub.core.common.sync.WireText
+import com.mediahub.core.logging.LogTag
+import com.mediahub.core.logging.Logger
+import com.mediahub.core.logging.StdoutLogger
 import com.mediahub.model.ServerType
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
@@ -76,6 +79,9 @@ class AndroidSourceSyncService(
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val baselineStore: ISourceSyncBaselineStore? = null,
     private val sourceRemover: SourceSyncSourceRemover? = null,
+    // W6-101：日志是内部诊断通道（logcat + 诊断导出里的 LogBuffer），只记计数与内部 id，
+    // 绝不记 displayName / endpoint / URL / secrets；缺省 StdoutLogger 让只看 logcat 的测试也有一行。
+    private val logger: Logger = StdoutLogger(),
 ) {
 
     init {
@@ -421,6 +427,8 @@ class AndroidSourceSyncService(
     ): SourceSyncApplyReport {
         val decoded = SourceSyncCodec.tryDecode(envelopeJson)
         if (decoded is SourceSyncCodec.DecodeResult.Failed) {
+            // 坏信封也算「这一轮发生了什么」：只记稳定原因码，不转载任何信封内容。
+            logger.w(LogTag.DATABASE, "sync-round-rejected:" + decoded.reason)
             return SourceSyncApplyReport(
                 rejectedReason = decoded.reason,
                 rejectedMessage = decoded.message,
@@ -520,7 +528,7 @@ class AndroidSourceSyncService(
             baselineEntries = loadPeerBaseline(envelope.deviceId)?.entries?.size ?: baselineEntries
         }
 
-        return SourceSyncApplyReport(
+        val report = SourceSyncApplyReport(
             peerDeviceId = envelope.deviceId,
             applied = applied,
             skipped = gate.skippedCount,
@@ -541,6 +549,19 @@ class AndroidSourceSyncService(
             refusals = refusals,
             withheldEntries = withheldEntries,
         )
+        // W6-101：一轮的台账落在日志里，排查「用户说同步了但没变化」时先看这一行。
+        // 只有计数与两个内部标识；displayName / endpoint / secrets 一律不进日志。
+        logger.i(
+            LogTag.DATABASE,
+            "sync-round-applied:device=" + report.peerDeviceId +
+                " snapshot=" + envelope.snapshotId +
+                " applied=" + report.applied +
+                " skipped=" + report.skipped +
+                " withheld=" + report.withheld +
+                " refused=" + report.refused +
+                " removed=" + report.removedServerIds.size,
+        )
+        return report
     }
 
     /**

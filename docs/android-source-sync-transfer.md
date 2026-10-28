@@ -6127,3 +6127,97 @@ W6-88 让删除链说得出「卡在哪一步」，W6-98 让结果页带上「�
 - **EXECUTED_PASS**：本机 `feature/server` 45 / 0（其余三模块 660 / 253 / 410 均未动）；四条负向对照全红且逐字节还原到实现态。
 - **IMPLEMENTED_UNVERIFIED**：exact-SHA CI 见 PR 正文；Windows 侧零改动（C# 仍 1683 通过 / 0 失败）。
 - 主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+## §70 W6-101：同步一轮的汇总进日志（只记计数与内部 id）
+
+### 70.1 结论先行
+
+W6-98/W6-99 让「哪一条为什么失败」进了结果页，但「这一轮同步到底发生了什么」只活在界面内存里：
+用户隔天说「我昨天同步过，那边没变化」，现场能拿到的只有当时那一屏，离开页面就没了。本轮把一轮的
+台账写进日志——成功一行 info、坏信封一行 warn，两者都只含计数与内部标识；displayName / endpoint /
+URL / 凭据片段一律不进（`SourceRecord.secrets` 的 D6 约定：不透明片段不记录日志）。日志实现由 App 的
+Hilt `Logger`（`CompositeLogger(LogcatLogger(), MemoryLogger(LogBuffer()))`）提供，于是 logcat 与
+「诊断报告导出」里的 LogBuffer 同时看得到这一行。
+
+### 70.2 一处出口、两行日志
+
+`AndroidSourceSyncService.applyRound` 是 Android 侧唯一写库入口（W6-81 起生产会话的写入口也只经它），
+所以两行日志都落在它的两个出口上，不散落在调用方：
+
+- 解码失败：`logger.w(LogTag.DATABASE, "sync-round-rejected:" + decoded.reason)` —— 只带稳定原因码
+  （如 `malformed-json`），信封内容一个字节都不转载；
+- 一轮走完：`logger.i(LogTag.DATABASE, "sync-round-applied:device=… snapshot=… applied=… skipped=…
+  withheld=… refused=… removed=…")` —— 六个计数与两个内部标识，与回执字段同源。
+
+实现顺序是先构 `val report = SourceSyncApplyReport(...)`、再记日志、再 `return report`：日志不改变返回值，
+也不参与任何判定。取消（`CancellationException`）仍直接上抛，两条日志都不会打。
+
+### 70.3 生产接线（四处，一处一行）
+
+| 文件 | 改动 |
+| --- | --- |
+| `core/database/.../AndroidSourceSyncService.kt` | 构造尾部加 `private val logger: Logger = StdoutLogger()`（默认值让测试与既有调用方零改动） |
+| `feature/settings/build.gradle.kts` | 依赖补 `implementation(project(":core:logging"))`（此前只有 `testImplementation`，主代码碰不到 Logger） |
+| `feature/settings/.../SourceSyncImportSession.kt` | `production(...)` 加 `logger: Logger = StdoutLogger()` 并透传给服务 |
+| `feature/settings/.../SourceSyncImportViewModel.kt` | `@HiltViewModel` 构造注入 `Logger`（App 的 `AppModule.provideLogger` 早已绑定），传入 `production` |
+
+于是 App 里这一行同时进 logcat 与 LogBuffer；测试里传 `MemoryLogger(LogBuffer())` 就能逐字断言。
+
+### 70.4 用例与计数
+
+- `core/database` 的 `SourceSyncApplyRoundTest` 253 → **256**，三条：
+  1. `a_round_that_writes_leaves_one_summary_line_with_the_counts`：恰好一行，整串等于
+     `[I][DATABASE] sync-round-applied:device=device-windows snapshot=snap-windows applied=1 skipped=0 withheld=1 refused=0 removed=0`，
+     计数与回执一致；
+  2. `a_rejected_envelope_leaves_one_warning_naming_the_code_and_no_summary`：坏 JSON 只有一行
+     `[W][DATABASE] sync-round-rejected:malformed-json`，没有「已应用」的假消息；
+  3. `the_summary_line_never_quotes_a_name_an_endpoint_or_a_secret`：信封里带来源名、端点 URL 与
+     `token=Sup3rS3cret` 时，日志行含两个内部标识但不含这些值。
+- `feature/settings` **410** 不变（接线只有编译期约束，没有新增用例）；`feature/server` 45 不变。
+- 本机四模块 `core/common` 660 / `core/database` **256** / `feature/settings` 410 / `feature/server` 45 = **1371**；
+  新例计入 CI `uniqueTests` 2464 → **2467**，`--required-suite` 仍 **60**（新用例落在已钉住的套件里）；
+  C# 与 Windows 侧本轮零改动（1683 通过 / 0 失败）。
+- 本机全绿日志：`D:/mh-verify/w6101-test1.log`（首轮）、`w6101-test2.log`（还原后复验）。
+
+### 70.5 四条负向对照
+
+实现态快照先行：`D:/mh-verify/w6101-impl-service.kt`（sha256
+`ca90787440835808fa97abbe9d8346f70342a61df120e75984055b199f2f9f7d`）。
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A 删掉成功的 `logger.i(...)` 整块 | 256 / **2 红** | 汇总行用例 + 安全不变式用例（`.single()` 拿不到行） |
+| B 删掉坏信封的 `logger.w(...)` | 256 / **1 红** | `a_rejected_envelope_leaves_one_warning_naming_the_code_and_no_summary` |
+| C 汇总行拼上 `envelope.sources.firstOrNull()?.displayName` | 256 / **2 红** | 汇总行用例（整串不等）+ 安全不变式用例（行里出现来源名） |
+| D 把 `applied=` 写死成 `0` | 256 / **1 红** | `a_round_that_writes_leaves_one_summary_line_with_the_counts` |
+
+日志 `D:/mh-verify/w6101-neg-{A,B,C,D}-*.log`（C 的第一版把名字拼成 `envelope.sources.first().displayName`，
+删除类用例的空 `sources` 触发 `NoSuchElementException` 带出 11 红，日志单独留在
+`w6101-neg-C-summary-quotes-a-name.log`；换成 `firstOrNull()` 后只剩预期的 2 红，见
+`w6101-neg-C2-summary-quotes-a-name.log`）。四次变异后都以 sha256 确认还原到实现态。
+
+### 70.6 工具教训
+
+- 字符串手术的替换串必须把锚点末尾的换行补回：本轮替换 `import …` 行时 `to` 少了结尾 `\n`，
+  两个 import 被粘成一行（`import com.mediahub.model.MediaServerimport com.mediahub.model.ServerType`），
+  本地 `git diff` 不明显、编译期才炸成「imports are only allowed in the beginning of file」；
+- 变异应只改断言关心的那一维：C 的第一版同时改了「行内容」与「空 sources 的健壮性」，
+  失败面被放大到 11 条，反而看不出是哪条用例在守日志内容；
+- 负向对照仍须实现态快照先行、跑完逐字节还原并以 sha256 比对。
+
+### 70.7 边界与仍未做
+
+- 生产接线（Hilt → ViewModel → `production` → 服务）目前只有**编译期保证**与 core 层用例：
+  没有「App 里注入的 Logger 真收到这一行」的端到端用例，因此这段标注 **IMPLEMENTED_UNVERIFIED**；
+- 旧 `importEnvelope`/`apply()` 路径（只被测试驱动、不是生产会话的写入口）不记日志：它没有回执原因句槽，
+  与本轮无关，已在代码注释里写明；
+- 日志只写一行汇总，不逐条记（逐条原因已在结果页与 docs §56/§58/§60/§61/§64）；也不记历史轮次；
+- 日志不是用户界面：结果页仍以回执为准，日志服务于现场排查与「诊断报告导出」；
+- 真实两机联调、真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**；Windows 侧本轮零改动。
+
+### 70.8 状态
+
+- **EXECUTED_PASS**：本机 `core/database` 256 / 0（12 skipped）与 `feature/settings` 410 / 0；
+  四条负向对照全红（2 / 1 / 2 / 1）且逐字节还原到实现态；
+- **IMPLEMENTED_UNVERIFIED**：exact-SHA CI 见 PR 正文；生产接线的端到端证据未取（见 §70.7）；
+  Windows C# 1683 通过 / 0 失败，本轮零改动；
+- 主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
