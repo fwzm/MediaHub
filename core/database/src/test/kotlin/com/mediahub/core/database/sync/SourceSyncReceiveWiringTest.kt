@@ -7,7 +7,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -18,9 +17,9 @@ import org.junit.Test
  *
  * 三条证据：
  * 1) 对照组：同一封黄金信封经**手写**的写库网关会落两条 —— 证明下面的零写入断言不是空信封或坏夹具造成的；
- * 2) 生产接法 SourceSyncImportGateways.acceptOnly() 收同一封信封：写入计数为 0，身份与信封原文都拿得到
- *    （界面正是靠信封原文进预览 → 逐条允许 → 应用）；
- * 3) 结构断言：两个接收服务都不再有任何能吃 AndroidSourceSyncService 的构造器。
+ * 2) 生产接法 SourceSyncImportGateways.acceptOnly() 收同一封信封：身份与信封原文都拿得到、store 一次也没被碰
+ *    （界面正是靠信封原文进预览 → 逐条允许 → 应用）；W6-97 起回执类型里已经没有写入计数；
+ * 3) 结构断言：两个接收服务都不再有任何能吃 AndroidSourceSyncService 的构造器，回执类型也不得有计数访问器。
  *
  * 第 3 条是三条里唯一不会随夹具腐化的：W6-96 删掉的那两个次构造器就是「一个参数就能绕过逐条审批」的载具，
  * 把它写在测试里，是为了让将来重新加回来的人先看到红灯。
@@ -30,14 +29,18 @@ class SourceSyncReceiveWiringTest {
     @Test
     fun theGoldenEnvelopeIsWritableSoTheZeroWriteChecksBelowHaveTeeth() = runBlocking {
         val store = ImportFakeStore()
-        val service = SourceSyncTransferImportService(writeThrough(AndroidSourceSyncService(store, DEVICE_ID)))
+        val gateway = WriteThroughGateway(AndroidSourceSyncService(store, DEVICE_ID))
 
-        val imported = imported(service.importEnvelopeBytes(goldenEnvelopeBytes()))
+        val imported = imported(SourceSyncTransferImportService(gateway).importEnvelopeBytes(goldenEnvelopeBytes()))
 
-        assertEquals("黄金信封里有两条可写来源", 2, imported.result.appliedCount)
-        assertTrue(imported.result.hasWrites)
+        val written = gateway.lastResult!!
+        assertEquals("黄金信封里有两条可写来源", 2, written.appliedCount)
+        assertTrue(written.hasWrites)
         assertEquals(2, store.createCalls)
         assertEquals(2, store.snapshots.size)
+        // W6-97：写入确实发生了，但回执只回显身份 —— 接收通道装不下计数。
+        assertEquals("device-a", imported.result.deviceId)
+        assertNull(imported.result.rejectedReason)
     }
 
     @Test
@@ -52,9 +55,6 @@ class SourceSyncReceiveWiringTest {
         assertNotNull(imported.result.snapshotId)
         assertNotNull("界面靠内容指纹判断这份信封收过没有", imported.result.envelopeContentHash)
         assertNotNull("信封原文必须回传，否则界面进不了预览", imported.envelopeJson)
-        assertFalse("接收口不得写入", imported.result.hasWrites)
-        assertEquals(0, imported.result.appliedCount)
-        assertEquals(0, imported.result.totalCount)
         // 这个断言之所以不是空转：store 根本拿不到这条路径（能拿到它的载具已删除，结构断言见下一条）。
         assertEquals(0, store.createCalls)
         assertEquals(0, store.updateCalls)
@@ -81,14 +81,23 @@ class SourceSyncReceiveWiringTest {
         }
     }
 
+    @Test
+    fun theReceiveReceiptTypeCarriesNoWriteCountsAtAll() {
+        val banned = listOf("applied", "requiresapproval", "ignored", "unsupported", "failed", "total", "haswrites")
+        val leaked = SourceSyncReceiveEcho::class.java.declaredMethods
+            .filter { method -> method.parameterCount == 0 }
+            .map { method -> method.name }
+            .filter { name -> banned.any { word -> name.contains(word, ignoreCase = true) } }
+        assertTrue(
+            "接收回执只能描述身份（W6-97）：写入计数属于 applyRound 的 SourceSyncApplyReport；实际命中的访问器：" + leaked,
+            leaked.isEmpty(),
+        )
+    }
+
     private fun imported(outcome: SourceSyncTransferImportOutcome): SourceSyncTransferImportOutcome.Imported {
         assertTrue("期待导入成功，实际 " + outcome.reasonOrNull, outcome.isImported)
         return outcome as SourceSyncTransferImportOutcome.Imported
     }
-
-    /** W6-96 之前由次构造器提供的那条写库接线；现在只在测试里手写出来当对照。 */
-    private fun writeThrough(service: AndroidSourceSyncService): SourceSyncImportGateway =
-        SourceSyncImportGateway { envelopeJson -> service.importEnvelope(envelopeJson) }
 
     private fun goldenEnvelopeBytes(): ByteArray {
         val stream = javaClass.getResourceAsStream("/" + GOLDEN_RESOURCE)

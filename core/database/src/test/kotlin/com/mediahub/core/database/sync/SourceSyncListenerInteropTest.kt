@@ -1,6 +1,8 @@
 package com.mediahub.core.database.sync
 
 import androidx.room.Room
+import com.mediahub.core.common.sync.SourceEndpoint
+import com.mediahub.core.common.sync.SourceRecord
 import com.mediahub.core.common.sync.SourceSyncCodec
 import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncNonceCache
@@ -14,12 +16,20 @@ import com.mediahub.core.common.sync.SourceSyncTransferClient
 import com.mediahub.core.common.sync.SourceSyncTransferOptions
 import com.mediahub.core.common.sync.SourceSyncTransferReasons
 import com.mediahub.core.common.sync.SourceSyncTransferResult
-import com.mediahub.core.common.sync.SourceEndpoint
-import com.mediahub.core.common.sync.SourceRecord
 import com.mediahub.core.common.sync.SyncCapabilities
 import com.mediahub.core.common.sync.SyncSourceTypeValue
 import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.database.repository.ServerRepository
+import java.io.ByteArrayOutputStream
+import java.io.Closeable
+import java.io.File
+import java.io.InputStream
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
+import java.security.KeyStore
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -35,16 +45,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import java.io.ByteArrayOutputStream
-import java.io.Closeable
-import java.io.File
-import java.io.InputStream
-import java.net.InetAddress
-import java.net.ServerSocket
-import java.net.Socket
-import java.security.KeyStore
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * W6-38：反向跨端联调 —— 真 Windows 的 `transfer send` 打进本端监听端（SourceSyncListenerImportService）。
@@ -110,7 +110,8 @@ class SourceSyncListenerInteropTest {
             assertNull("没要 --confirm-delivery 时不该有投递证据", jsonBool(json, "deliveryConfirmed"))
 
             val imported = outcome as SourceSyncTransferImportOutcome.Imported
-            assertEquals(2, imported.result.appliedCount)
+            assertEquals(2, listener.gateway.lastResult!!.appliedCount)
+            assertEquals(WINDOWS_DEVICE, imported.result.deviceId)
             assertEquals(WINDOWS_DEVICE, imported.result.deviceId)
             val envelopeBytes = (imported.envelopeJson ?: "").toByteArray(Charsets.UTF_8).size
             assertEquals(envelopeBytes, jsonInt(json, "bytes") ?: -1)
@@ -157,7 +158,8 @@ class SourceSyncListenerInteropTest {
             assertEquals(pin, listener.service.certificateFingerprint)
 
             val imported = outcome as SourceSyncTransferImportOutcome.Imported
-            assertEquals(2, imported.result.appliedCount)
+            assertEquals(2, listener.gateway.lastResult!!.appliedCount)
+            assertEquals(WINDOWS_DEVICE, imported.result.deviceId)
             assertEquals(2, runBlocking { db.serverDao().count() })
         } finally {
             listener.close()
@@ -216,7 +218,8 @@ class SourceSyncListenerInteropTest {
                 SourceSyncTransfer.chunkCount(envelopeBytes) + 2,
                 jsonInt(json, "frames") ?: -1,
             )
-            assertEquals(2, imported.result.appliedCount)
+            assertEquals(2, listener.gateway.lastResult!!.appliedCount)
+            assertEquals(WINDOWS_DEVICE, imported.result.deviceId)
             assertEquals(2, runBlocking { db.serverDao().count() })
         } finally {
             listener.close()
@@ -268,7 +271,8 @@ class SourceSyncListenerInteropTest {
 
             assertEquals(send.toString(), 0, send.exitCode)
             val imported = first as SourceSyncTransferImportOutcome.Imported
-            assertEquals(2, imported.result.appliedCount)
+            assertEquals(2, listener.gateway.lastResult!!.appliedCount)
+            assertEquals(WINDOWS_DEVICE, imported.result.deviceId)
             assertEquals(2, runBlocking { db.serverDao().count() })
             val before = baselineOf()
 
@@ -337,7 +341,8 @@ class SourceSyncListenerInteropTest {
             assertEquals(true, jsonBool(json, "authenticate") ?: false)
             assertEquals(pin, jsonText(json, "certificateFingerprint"))
             val imported = outcome as SourceSyncTransferImportOutcome.Imported
-            assertEquals(2, imported.result.appliedCount)
+            assertEquals(2, listener.gateway.lastResult!!.appliedCount)
+            assertEquals(WINDOWS_DEVICE, imported.result.deviceId)
             assertEquals(2, runBlocking { db.serverDao().count() })
         } finally {
             listener.close()
@@ -352,7 +357,8 @@ class SourceSyncListenerInteropTest {
             val firstSend = runSend(sendRoot(), listener.port)
             val first = firstPending.await()
             assertEquals(firstSend.toString(), 0, firstSend.exitCode)
-            assertEquals(2, (first as SourceSyncTransferImportOutcome.Imported).result.appliedCount)
+            assertEquals(2, listener.gateway.results[0].appliedCount)
+            assertEquals(WINDOWS_DEVICE, (first as SourceSyncTransferImportOutcome.Imported).result.deviceId)
             val before = baselineOf()
 
             val secondPending = listener.receiveAsync()
@@ -361,8 +367,9 @@ class SourceSyncListenerInteropTest {
             assertEquals(secondSend.toString(), 0, secondSend.exitCode)
 
             val imported = second as SourceSyncTransferImportOutcome.Imported
-            assertEquals(0, imported.result.appliedCount)
-            assertEquals(2, imported.result.ignoredCount)
+            assertEquals(WINDOWS_DEVICE, imported.result.deviceId)
+            assertEquals(0, listener.gateway.results[1].appliedCount)
+            assertEquals(2, listener.gateway.results[1].ignoredCount)
             assertEquals(before, baselineOf())
             assertEquals(2, runBlocking { db.serverDao().count() })
         } finally {
@@ -390,7 +397,8 @@ class SourceSyncListenerInteropTest {
             )
             val imported = outcome as SourceSyncTransferImportOutcome.Imported
             assertTrue("本端应记录已写回执", imported.receiptWritten)
-            assertEquals(2, imported.result.appliedCount)
+            assertEquals(2, listener.gateway.lastResult!!.appliedCount)
+            assertEquals(WINDOWS_DEVICE, imported.result.deviceId)
             assertEquals(2, runBlocking { db.serverDao().count() })
         } finally {
             listener.close()
@@ -586,8 +594,10 @@ class SourceSyncListenerInteropTest {
         assertTrue("TLS 监听必须有可用身份证书", !tls || pin != null)
         // W6-96：这条手写网关就是「收到即写库」的旧接线（生产里对应的次构造器已删除）。本文件保留它是为了
         // 断言帧流里那封信封确实被应用（appliedCount == 2）；生产接法是 acceptOnly() + 逐条允许后的 applyRound。
+        // W6-97：回执收窄成只描述身份，写入计数从网关自己留下的结果里读（见 [WriteThroughGateway]）。
+        val gateway = WriteThroughGateway(service)
         val started = SourceSyncListenerImportService.start(
-            gateway = SourceSyncImportGateway { envelopeJson -> service.importEnvelope(envelopeJson) },
+            gateway = gateway,
             tls = if (tls) SourceSyncTlsOptions.pinned(pin) else SourceSyncTlsOptions.Off,
             identity = identity,
             acceptTimeoutMs = 30_000,
@@ -607,11 +617,13 @@ class SourceSyncListenerInteropTest {
             )
         }
         val receiptOptions = SourceSyncReceiptOptions.writingOrOff(receipt)
-        return ListenerFixture(startedService, auth, receiptOptions)
+        return ListenerFixture(startedService, gateway, auth, receiptOptions)
     }
 
     private class ListenerFixture(
         val service: SourceSyncListenerImportService,
+        /** W6-97：写库结果留在这里（接收回执只描述身份）。 */
+        val gateway: WriteThroughGateway,
         private val auth: SourceSyncTransferOptions?,
         private val receipt: SourceSyncReceiptOptions = SourceSyncReceiptOptions.Off,
     ) : Closeable {

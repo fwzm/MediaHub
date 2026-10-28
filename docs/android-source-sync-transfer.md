@@ -5888,3 +5888,54 @@ W6-91 让结果页能逐条看到「哪条没写进去、为什么」，但那�
 ### 65.8 状态
 
 - EXECUTED_PASS（本机 `core:database` 245/0 + `feature:settings` 408/0；四条负向对照全红并逐字节还原）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。
+
+## §66 W6-97：接收口的回执收窄成只描述身份的类型（写入计数不在接收通道上）
+
+### 66.1 结论先行
+
+- 上一轮（§65）删掉了两个能写库的次构造器，把「接收口不要再接写库服务」做成了编译期约束；但**回执类型**仍是写库用的 `SourceSyncImportResult`：一个只收信、一个字节都不写的通道，返回值里却摆着 `appliedCount` / `hasWrites` / `requiresApprovalCount` / `ignoredCount` / `totalCount`。类型上「接收」与「写了几条」成了同一件事。
+- 本轮新增 `SourceSyncReceiveEcho`（1123 B）：只有 deviceId / snapshotId / envelopeContentHash / rejectedReason / rejectedMessage 五项 + `isRejected`。`SourceSyncImportGateway.importEnvelope`、`SourceSyncTransferImportOutcome.Imported.result` 与 `SourceSyncImportGateways.acceptOnly()` 全部改用它。
+- 写入计数只留在 `AndroidSourceSyncService.applyRound(...)` 的 `SourceSyncApplyReport` 里 —— 那是用户在预览页逐条允许之后才会发生的事。五项字段名与旧类型逐字一致，生产读取点零改动（生产只读 deviceId / rejectedReason / rejectedMessage）。
+
+### 66.2 为什么是回执窄化，而不是删掉旧实现
+
+- `AndroidSourceSyncService.importEnvelope(envelopeJson)`（→ 私有 `apply(envelope)`）生产零调用，但它**不是** `applyRound` 的别名：它一把写全部可写条目、不按逐条裁决、不处理删除、不推基线。语义不同，删它等于重写测试口径，超出单轮最小切片。要拆掉的是「接收通道能装下写入信息」这一条，不是写库实现本身。
+- 生产消费接收回执计数的代码为零：`SourceSyncReceiveController` 与 `SourceSyncListenerController` 只读 deviceId / rejectedReason / rejectedMessage；界面里的计数文案来自 `SourceSyncApplySummary`。所以窄化对生产是零行为变化的类型收紧。
+
+### 66.3 改动面
+
+- 生产：新 `core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncReceiveEcho.kt`；`SourceSyncTransferImportService.kt` 的网关签名、`Imported.result`、`acceptOnly()` 与三处 KDoc（10323 → 10643 B）。
+- 测试：新 `core/database/src/test/kotlin/com/mediahub/core/database/sync/SourceSyncWriteThroughGateway.kt`（`SourceSyncImportResult.toEcho()` + `WriteThroughGateway`：调用写库服务、把写库回执留在自己这边、只把 echo 交给接收层）；`core/database` 的 7 个测试文件把计数断言改读网关留下的结果（`gateway.lastResult` / `gateway.results[i]`），假网关改返回 echo；`feature/settings` 的 3 个测试把标识符换成 `SourceSyncReceiveEcho`。
+
+### 66.4 用例与计数
+
+- 新例：`SourceSyncReceiveWiringTest.theReceiveReceiptTypeCarriesNoWriteCountsAtAll` —— 反射 `SourceSyncReceiveEcho::class.java.declaredMethods`，任何无参访问器只要名字里带 applied / requiresapproval / ignored / unsupported / failed / total / haswrites 就红。
+- 本机：`core:database` **246**（245 → +1，12 skipped）、`feature:settings` **408**；四模块 660 / 246 / 408 / 40 = **1354**。C# 与 Windows 侧本轮零改动。CI `uniqueTests` 预期 2449 → **2450**。
+- 日志：`D:/mh-verify/w697-test3.log`。
+
+### 66.5 四条负向对照
+
+| 变异（文件） | 结果 |
+| --- | --- |
+| A `acceptOnly()` 的 Ok 分支把 `deviceId` 换成 null（SourceSyncTransferImportService.kt） | 246/**3 红**（archive / wiring / service 三处回显身份断言） |
+| B `SourceSyncReceiveEcho` 上加 `val appliedCount: Int = 0`（SourceSyncReceiveEcho.kt） | 246/**1 红**（本轮结构断言） |
+| C `toEcho()` 把 `deviceId` 换成 null（SourceSyncWriteThroughGateway.kt） | 246/**3 红**（监听导入两条往返 + 金信封对照） |
+| D 把写库次构造器加回 `SourceSyncTransferImportService` | 246/**1 红**（W6-96 的结构断言仍在生效） |
+
+- 四条各自跑完立刻从**实现态快照**逐字节还原（`D:/mh-verify/w697-impl-*.kt` + sha256 相等）；日志 `D:/mh-verify/w697-neg-A…D*.log`。
+- 对照 C 第一次跑成 `bundleLibCompileToJarDebug FAILED`：Windows 上 `classes.jar` 被另一个进程占用（`java.nio.file.FileSystemException: …另一个程序正在使用此文件`），不是代码问题；重跑得 3 红。
+
+### 66.6 工具教训
+
+- **不要用「`名字(`」判断导入是否被使用**：Kotlin 的 `runBlocking {` / `launch {` 没有括号，`@OptIn(ExperimentalCoroutinesApi::class)` 也没有 —— 本轮清理未用导入时因此把 9 个文件里仍在使用的 `kotlinx.coroutines.*` 导入删掉（编译报 52 行 `Unresolved reference 'runBlocking'`）。恢复方式是从 `git show HEAD:<path>` 取原始导入行（core/database 六个文件的 `runBlocking`、三个 feature 测试的 `CompletableDeferred` / `ExperimentalCoroutinesApi` / `launch`）按序合回。
+- gradle 偶发 `classes.jar` 占用属环境抖动：先看失败的是哪个 task；测试没跑起来时，XML 里留着的是上一轮的失败名。
+
+### 66.7 边界与仍未做
+
+- `SourceSyncImportResult` 的形状没动：它仍是写库回执；`applyRound` 的 `SourceSyncApplyReport` 是另一套更细的类型。
+- `AndroidSourceSyncService.importEnvelope` / 私有 `apply` 仍在（生产零调用、测试驱动），它与 `applyRound` 的语义差（删除、逐条裁决、基线）未被抹平。
+- 仍未做：真实两机联调与真机 instrumentation 仍 NOT_RUN / DEVICE_UNVERIFIED；Windows 侧接收路径本轮未动。
+
+### 66.8 状态
+
+- EXECUTED_PASS（本机 `core:database` 246/0 + `feature:settings` 408/0；四条负向对照全红并逐字节还原）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。

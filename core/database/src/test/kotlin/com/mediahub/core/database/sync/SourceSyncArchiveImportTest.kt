@@ -186,8 +186,9 @@ class SourceSyncArchiveImportTest {
         assertEquals("device-a", imported.result.deviceId)
         assertEquals("1b96e7eb417e4caeb27eb60f3d1acfc3", imported.result.snapshotId)
         assertEquals(64, imported.result.envelopeContentHash!!.length)
-        assertFalse(imported.result.hasWrites)
-        assertEquals(0, imported.result.totalCount)
+        assertFalse(imported.result.isRejected)
+        // W6-97：回执类型里已经没有写入计数（接收通道装不下计数）；「同一封信封走写库网关会写两条」
+        // 的对照在 SourceSyncReceiveWiringTest 里，这里只钉身份回显。
     }
 
     // ---------------------------------------------------------------- 夹具
@@ -196,10 +197,10 @@ class SourceSyncArchiveImportTest {
         var calls = 0
         var lastEnvelopeJson: String? = null
 
-        override suspend fun importEnvelope(envelopeJson: String): SourceSyncImportResult {
+        override suspend fun importEnvelope(envelopeJson: String): SourceSyncReceiveEcho {
             calls++
             lastEnvelopeJson = envelopeJson
-            return SourceSyncImportResult(deviceId = "device-a", snapshotId = "snap-incoming")
+            return SourceSyncReceiveEcho(deviceId = "device-a", snapshotId = "snap-incoming")
         }
     }
 

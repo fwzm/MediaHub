@@ -17,9 +17,12 @@ import kotlinx.coroutines.withContext
  * （界面一直走 acceptOnly() + 预览/逐条允许后的 applyRound）；那个次构造器在 W6-96 被删掉了，
  * 因为这个类型每多一个这种参数，就多一条「收到即写库」的载具 —— 逐条审批会被无声绕过。
  * 写库只发生在 SourceSyncImportSession.apply() / AndroidSourceSyncService.applyRound。
+ *
+ * W6-97：回执类型是 [SourceSyncReceiveEcho]（只描述身份与拒绝原因），不是写库回执
+ * [SourceSyncImportResult]。「接收 = 只读」因此在类型上成立：这里没有地方装写入计数。
  */
 fun interface SourceSyncImportGateway {
-    suspend fun importEnvelope(envelopeJson: String): SourceSyncImportResult
+    suspend fun importEnvelope(envelopeJson: String): SourceSyncReceiveEcho
 }
 
 /**
@@ -41,7 +44,7 @@ sealed interface SourceSyncTransferImportOutcome {
 
     /** 已交给导入服务（result.isRejected 仍可能为 true，例如信封内重复 syncSourceId）。 */
     data class Imported(
-        val result: SourceSyncImportResult,
+        val result: SourceSyncReceiveEcho,
         /**
          * 收到的信封原文（W6-27）。
          *
@@ -77,8 +80,8 @@ sealed interface SourceSyncTransferImportOutcome {
 /**
  * W6-23：把 SourceSyncTransferClient.receiveFrom 收到的帧流接进导入服务。
  *
- * 放在 core:database 而不是 core:common，是因为这条闭环要用同一模块的导入结果类型
- * （[SourceSyncImportResult]）与网关定义；反向依赖被禁止，core:common 不认识 core:database。
+ * 放在 core:database 而不是 core:common，是因为这条闭环要用同一模块的接收回执类型
+ * （[SourceSyncReceiveEcho]）与网关定义；反向依赖被禁止，core:common 不认识 core:database。
  * 顺序固定：先由客户端拨号收帧（IO 线程），再由 SourceSyncCodec 解码，只有解码成功才调网关。
  *
  * W6-96：本类只认识 [SourceSyncImportGateway]，不再提供以 AndroidSourceSyncService 为参数的次构造器 ——
@@ -180,17 +183,19 @@ class SourceSyncTransferImportService(
  * 真正的写入仍然只经 SourceSyncImportSession.apply()（内部才是 AndroidSourceSyncService）。
  *
  * W6-96 起这也是生产唯一的接收网关 —— 把 AndroidSourceSyncService 直接接进接收口的那条次构造器已删除。
+ *
+ * W6-97：回执类型收窄成 [SourceSyncReceiveEcho]，写入计数不在接收通道上。
  */
 object SourceSyncImportGateways {
 
     fun acceptOnly(): SourceSyncImportGateway = SourceSyncImportGateway { envelopeJson ->
         when (val decoded = SourceSyncCodec.tryDecode(envelopeJson)) {
-            is SourceSyncCodec.DecodeResult.Failed -> SourceSyncImportResult(
+            is SourceSyncCodec.DecodeResult.Failed -> SourceSyncReceiveEcho(
                 rejectedReason = decoded.reason,
                 rejectedMessage = decoded.message,
             )
 
-            is SourceSyncCodec.DecodeResult.Ok -> SourceSyncImportResult(
+            is SourceSyncCodec.DecodeResult.Ok -> SourceSyncReceiveEcho(
                 deviceId = decoded.envelope.deviceId,
                 snapshotId = decoded.envelope.snapshotId,
                 // 与 AndroidSourceSyncService 同一个指纹算法，界面据此判断"这份信封收过没有"。
