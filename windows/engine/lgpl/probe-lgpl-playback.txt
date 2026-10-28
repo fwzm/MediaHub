@@ -1,0 +1,61 @@
+engine: libmpv client API 0.131077
+media : D:/deepseek_test/MediaHub_Win/.tools/media/sample_av.mp4
+vo=gpu-next hwdec=auto-safe ctx=d3d11 ao=(default)
+  t= 0.4s state=Idle     pos=  0.000 dur=  0.000 size=?x? codec=? hwdec=? vo=? ctx=? evloop=True
+  t= 0.8s state=Idle     pos=  0.000 dur=  0.000 size=?x? codec=? hwdec=? vo=? ctx=? evloop=True
+  t= 1.2s state=Playing  pos=  0.280 dur= 12.000 size=1280x720 codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 hwdec=d3d11va vo=gpu-next ctx=d3d11 evloop=True
+  t= 1.6s state=Playing  pos=  0.680 dur= 12.000 size=1280x720 codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 hwdec=d3d11va vo=gpu-next ctx=d3d11 evloop=True
+  t= 2.0s state=Playing  pos=  1.080 dur= 12.000 size=1280x720 codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 hwdec=d3d11va vo=gpu-next ctx=d3d11 evloop=True
+  t= 2.4s state=Playing  pos=  1.480 dur= 12.000 size=1280x720 codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 hwdec=d3d11va vo=gpu-next ctx=d3d11 evloop=True
+  t= 2.8s state=Playing  pos=  1.840 dur= 12.000 size=1280x720 codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 hwdec=d3d11va vo=gpu-next ctx=d3d11 evloop=True
+  t= 3.2s state=Playing  pos=  2.240 dur= 12.000 size=1280x720 codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 hwdec=d3d11va vo=gpu-next ctx=d3d11 evloop=True
+  t= 3.6s state=Playing  pos=  2.680 dur= 12.000 size=1280x720 codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 hwdec=d3d11va vo=gpu-next ctx=d3d11 evloop=True
+  t= 4.0s state=Playing  pos=  3.040 dur= 12.000 size=1280x720 codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 hwdec=d3d11va vo=gpu-next ctx=d3d11 evloop=True
+  t= 4.4s state=Playing  pos=  3.440 dur= 12.000 size=1280x720 codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 hwdec=d3d11va vo=gpu-next ctx=d3d11 evloop=True
+  t= 4.8s state=Playing  pos=  3.840 dur= 12.000 size=1280x720 codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 hwdec=d3d11va vo=gpu-next ctx=d3d11 evloop=True
+  t= 5.2s state=Playing  pos=  4.280 dur= 12.000 size=1280x720 codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 hwdec=d3d11va vo=gpu-next ctx=d3d11 evloop=True
+
+---- engine log (last 40 lines) ----
+  [   5.226][v][lavf] EOF reached.
+  [   5.226][d][ffmpeg/video] h264: Reinit context to 1280x720, pix_fmt: d3d11
+  [   5.228][v][vd] Decoder format: 1280x720 d3d11[nv12] auto/auto/auto/auto/auto CL=mpeg2/4/h264 crop=1280x720+0+0 A=none
+  [   5.228][v][vd] Using container aspect ratio.
+  [   5.252][d][vo/gpu-next/libplacebo] First frame received with non-zero PTS 3.000000
+  [   5.252][v][cplayer] first video frame after restart shown
+  [   5.255][v][cplayer] audio ready
+  [   5.255][d][cplayer] starting video playback
+  [   5.255][v][cplayer] starting audio playback
+  [   5.255][v][cplayer] playback restart complete @ 3.000000, audio=playing, video=playing
+  [   5.255][d][ao/wasapi] Thread Resume
+  [   5.255][d][ao/wasapi] Thread Reset
+  [   5.255][d][ao/wasapi] Thread Pause
+  [   5.255][d][ao/wasapi] Thread Unpause
+  [   5.256][v][vo/gpu-next/libplacebo] Detected fps ratio 0.0000 below threshold 0.0100, disabling interpolation
+  [   5.392][v][vo/gpu-next/libplacebo] Estimated source FPS: 25.000, display FPS: 25.000
+  [   6.126][v][cplayer] Set property: pause="yes" -> 1
+  [   6.126][d][ao/wasapi] Thread Pause
+  [   7.627][v][cplayer] Set property: pause="no" -> 1
+  [   7.627][d][ao/wasapi] Thread Unpause
+  [   8.529][d][cplayer] Run command: quit, flags=73, args=[code="0"]
+  [   8.529][v][cplayer] EOF code: 5  
+  [   8.529][d][ao/wasapi] Thread Reset
+  [   8.529][d][ao/wasapi] Thread Pause
+  [   8.529][d][ad] Uninit decoder.
+  [   8.529][d][vd] Uninit decoder.
+  [   8.530][d][main] Destroying client handle...
+  [   8.534][d][cplayer] Terminating demuxers...
+  [   8.534][d][cplayer] Run command: quit, flags=64, args=[code="0"]
+  [   8.534][d][cplayer] Done terminating demuxers.
+  [   8.534][v][cplayer] finished playback, success (reason 3)
+  [   8.534][d][dnd] Destroying client handle...
+  [   8.534][d][ao/wasapi] Uninit wasapi
+  [   8.534][d][ao/wasapi] Thread Reset
+  [   8.534][d][ao/wasapi] Thread Pause
+  [   8.534][d][ao/wasapi] Thread shutdown
+  [   8.534][d][ao/wasapi] Thread uninit done
+  [   8.534][d][ao/wasapi] Thread return
+  [   8.535][d][ao/wasapi] Uninit wasapi done
+  [   8.543][v][vo/gpu-next/win32] uninit
+
+RESULT duration=12.000s reached=4.280s seeked=3.800s audioTracks=1 subTracks=1 snapshots=84
+MPV_PROBE PASS

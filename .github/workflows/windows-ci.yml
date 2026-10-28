@@ -1,0 +1,361 @@
+name: windows-ci
+
+# The Windows client is built and tested independently of the Android pipeline. This workflow is
+# scoped to windows/** so a Windows-only change cannot fail or delay Android verification, and an
+# Android-only change never spends Windows runner minutes.
+on:
+  push:
+    branches: ["feature/windows-*", "windows/**"]
+    paths: ["windows/**", ".github/workflows/windows-ci.yml"]
+  pull_request:
+    paths: ["windows/**", ".github/workflows/windows-ci.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+
+jobs:
+  build-test:
+    name: build / tests / playback probe / packaging
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          persist-credentials: false
+
+      - name: Verify and record validation revision
+        shell: pwsh
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_HEAD) {
+            throw "checkout does not match the expected validation head"
+          }
+          New-Item -ItemType Directory -Force -Path windows/artifacts | Out-Null
+          @{
+            checkoutSha = $actual
+            headSha = $env:EXPECTED_HEAD
+            baseSha = $env:PR_BASE
+            eventSha = $env:GITHUB_SHA
+            runId = $env:GITHUB_RUN_ID
+            runAttempt = $env:GITHUB_RUN_ATTEMPT
+          } | ConvertTo-Json | Set-Content -Encoding utf8 windows/artifacts/revision.json
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Cache libmpv
+        id: libmpv-cache
+        uses: actions/cache@v4
+        with:
+          path: windows/native/libmpv
+          key: libmpv-20261014-ec38361c56-win-x64
+
+      - name: Fetch libmpv
+        if: steps.libmpv-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./windows/tools/fetch-libmpv.ps1
+
+      - name: Verify libmpv is present
+        shell: pwsh
+        run: |
+          $dll = "windows/native/libmpv/libmpv-2.dll"
+          if (-not (Test-Path $dll)) { throw "libmpv-2.dll missing at $dll" }
+          "libmpv bytes: " + (Get-Item $dll).Length
+
+      - name: Restore
+        working-directory: windows
+        run: dotnet restore MediaHub.Windows.sln
+
+      - name: Build (Debug)
+        working-directory: windows
+        run: dotnet build MediaHub.Windows.sln -c Debug -p:Platform=x64 --no-restore
+
+      - name: Remove earlier test reports
+        shell: pwsh
+        working-directory: windows
+        run: |
+          foreach ($name in @("windows-tests.trx", "webdav-tests.trx")) {
+            $report = Join-Path ./artifacts/test-results $name
+            if (Test-Path -LiteralPath $report -PathType Leaf) {
+              Remove-Item -LiteralPath $report -Force
+            }
+          }
+
+      - name: Unit and contract tests (MediaHub.Tests)
+        working-directory: windows
+        run: >
+          dotnet test tests/MediaHub.Tests/MediaHub.Tests.csproj
+          -c Debug -p:Platform=x64 --no-build
+          --logger "trx;LogFileName=windows-tests.trx"
+          --results-directory ./artifacts/test-results
+
+      # The WebDAV provider suite used to be built here but never executed: `dotnet test` was pointed at
+      # MediaHub.Tests only, so its 104 tests were green "by construction" and never ran in CI. Two
+      # separate invocations keep the project filters explicit instead of relying on the solution layout.
+      # No -p:Platform=x64 here on purpose: the solution maps this project to "Any CPU"
+      # ({C2441453-...}.Debug|x64.ActiveCfg = Debug|Any CPU), so the sln build drops it in
+      # bin\Debug\net10.0. Passing Platform=x64 makes dotnet test look in bin\x64\Debug and fail
+      # with "The test source file ... was not found" - which is exactly what happened on 97a0f8e.
+      - name: Unit and contract tests (MediaHub.WebDav.Tests)
+        working-directory: windows
+        run: >
+          dotnet test tests/MediaHub.WebDav.Tests/MediaHub.WebDav.Tests.csproj
+          -c Debug --no-build
+          --logger "trx;LogFileName=webdav-tests.trx"
+          --results-directory ./artifacts/test-results
+
+      - name: Fail if a suite ran nothing or lost tests
+        shell: pwsh
+        working-directory: windows
+        run: |
+          # A test step that silently runs zero tests would otherwise be reported as success, and a
+          # suite that quietly loses half its cases still prints "Passed!". Assert each suite by name
+          # against the executed integration baseline (1518 + 104 on 2026-10-24).
+          # Raise these floors when the suites grow; do not lower them to hide missing coverage.
+          $expected = @(
+            @{ File = "windows-tests.trx"; Suite = "MediaHub.Tests";          Floor = 1518 },
+            @{ File = "webdav-tests.trx";  Suite = "MediaHub.WebDav.Tests";    Floor = 104 }
+          )
+          $all = 0
+          foreach ($e in $expected) {
+            $path = Join-Path ./artifacts/test-results $e.File
+            if (-not (Test-Path $path)) { throw "no test results for $($e.Suite): $($e.File) was not produced" }
+            $xml = [xml](Get-Content $path -Raw)
+            $total = [int]$xml.TestRun.ResultSummary.Counters.total
+            $failed = [int]$xml.TestRun.ResultSummary.Counters.failed
+            $skipped = [int]$xml.TestRun.ResultSummary.Counters.notExecuted
+            "$($e.Suite): total=$total failed=$failed notExecuted=$skipped"
+            if ($total -lt $e.Floor) { throw "$($e.Suite) ran $total tests, expected at least $($e.Floor) - cases were dropped or skipped" }
+            if ($failed -ne 0) { throw "$($e.Suite): $failed test(s) failed" }
+            if ($skipped -ne 0) { throw "$($e.Suite): $skipped test(s) were not executed" }
+            $all += $total
+          }
+          "combined tests=$all"
+
+      # The licence deliverable rots silently: a new csproj appears and the NuGet inventory is never
+      # regenerated, the generated notices lose the libmpv GPL conclusion, or the SBOM stops being a
+      # valid CycloneDX document. Regenerate the report here (evidence only - -SkipDocs keeps the
+      # committed documents untouched) and then assert the whole surface against it. The five LGPL
+      # dependency rows that cannot quote a licence stay warnings on purpose: the default flavour is
+      # GPL and does not ship those DLLs, so failing on them would be noise rather than a signal.
+      # MediaHub.EngineProbe and MediaHub.ResumeProbe are deliberately kept out of the solution (they are
+      # thin probe hosts, not shipped projects), so the `dotnet restore MediaHub.Windows.sln` earlier in
+      # this job never writes their obj/project.assets.json. license-report.ps1 treats a missing assets
+      # file as INCOMPLETE and exits non-zero, which is what turned run 40041056971 red on 4f8038f while
+      # the same command passed locally (a workstation has stale build output). Restore both projects
+      # explicitly first so the report is complete: 13 projects, 49 rows, 29 packages.
+      - name: Licence report (evidence only, no docs rewrite)
+        shell: pwsh
+        working-directory: windows
+        run: |
+          $ErrorActionPreference = "Stop"
+          dotnet restore src/MediaHub.EngineProbe/MediaHub.EngineProbe.csproj
+          dotnet restore src/MediaHub.ResumeProbe/MediaHub.ResumeProbe.csproj
+          pwsh -NoProfile -File tools/license-report.ps1 -OutDir artifacts/license-report -SkipDocs
+
+      - name: Licence surface guard (notices / SBOM / project drift)
+        shell: pwsh
+        working-directory: windows
+        run: pwsh -NoProfile -File tools/check-licence-surface.ps1 -JsonPath artifacts/license-report/license-report.json
+
+      - name: Engine integration probe (real playback against the committed fixture)
+        shell: pwsh
+        working-directory: windows
+        env:
+          # A hosted runner has no GPU, no audio endpoint and no desktop, so the probe runs with the
+          # decoder and clock exercised and the presentation/audio paths disabled. The assertions are
+          # unchanged: duration reported, position advancing, seek landing, pause holding, resume
+          # advancing, tracks enumerated.
+          MEDIAHUB_MPV_VO: "null"
+          MEDIAHUB_MPV_HWDEC: "no"
+          MEDIAHUB_MPV_AO: "null"
+        run: |
+          # Native stderr becomes a terminating error under the runner's ErrorActionPreference,
+          # which is what made an earlier revision of this step fail.
+          $ErrorActionPreference = "Continue"
+
+          $exe = "./tools/MpvProbe/bin/x64/Debug/net10.0-windows/win-x64/MpvProbe.exe"
+          if (-not (Test-Path $exe)) { throw "MpvProbe was not built" }
+
+          # The fixture is committed (27 KB) so this step is hermetic: no ffmpeg, no network.
+          $sample = "./tests/assets/sample-av.mp4"
+          if (-not (Test-Path $sample)) { throw "committed media fixture is missing: $sample" }
+          "fixture: " + (Get-Item $sample).Length + " bytes"
+
+          $output = & $exe $sample 3 2>&1 | Out-String
+          $output.Split([Environment]::NewLine) | Where-Object { $_ -match "^(vo=|engine:|media :|RESULT|MPV_PROBE|  t=)" } | ForEach-Object { $_ }
+          if ($LASTEXITCODE -ne 0) { throw "MPV_PROBE FAILED: the engine did not meet its assertions" }
+          "MPV_PROBE PASS in CI (decode path, clock and transport asserted; GPU/HDR/audio output NOT exercised -> UNVERIFIED)"
+
+      - name: Engine probe against the fetched libmpv (build guard + headless decode parity)
+        shell: pwsh
+        working-directory: windows
+        run: |
+          # MediaHub.EngineProbe is not in the solution on purpose (it is a diagnostic tool, not a
+          # product assembly), so this step is its compile guard: if the probe rots, CI goes red.
+          $ErrorActionPreference = "Continue"
+          dotnet build src/MediaHub.EngineProbe/MediaHub.EngineProbe.csproj -c Debug -nologo | Out-String | Write-Host
+          $exe = "./src/MediaHub.EngineProbe/bin/Debug/net10.0/MediaHub.EngineProbe.exe"
+          if (-not (Test-Path $exe)) { throw "MediaHub.EngineProbe was not built" }
+
+          $dll = (Resolve-Path "./native/libmpv/libmpv-2.dll").Path
+          New-Item -ItemType Directory -Force -Path ./artifacts | Out-Null
+          $json = "./artifacts/engine-probe-ci.json"
+
+          $log = & $exe --dll $dll --media ./tests/assets/sample-av.mp4 --seconds 3 --label ci-gpl --json $json 2>&1 | Out-String
+          Write-Host $log
+          if ($LASTEXITCODE -ne 0) { throw "ENGINE_PROBE FAILED against the shipped libmpv (exit $LASTEXITCODE)" }
+
+          # A green step is not evidence by itself: assert the probe really took the primary path and
+          # really decoded, because a degraded load path or an empty feature list can also exit 0.
+          $report = Get-Content $json -Raw | ConvertFrom-Json
+          if ($report.verdict -ne "PASS") { throw "engine probe verdict=$($report.verdict): $($report.reason)" }
+          if ($report.loadMode -ne "native-library") { throw "probe did not take the primary load path: loadMode=$($report.loadMode)" }
+          if ($report.featuresSource -ne "log") { throw "feature list came from '$($report.featuresSource)', not the runtime log" }
+          if (-not $report.featuresContainGpl) { throw "the shipped libmpv should advertise the gpl feature token (this is the GPL baseline, not the LGPL candidate)" }
+          if ($report.maxTimePos -lt 2) { throw "position only reached $($report.maxTimePos)s of a 3s target" }
+          "ENGINE_PROBE PASS in CI (absolute-path load, decode + clock asserted, gpl token present; GPU/HDR/audio output NOT exercised -> UNVERIFIED)"
+
+      - name: Portable publish (Release)
+        working-directory: windows
+        run: >
+          dotnet publish src/MediaHub.App/MediaHub.App.csproj
+          -c Release -p:Platform=x64
+          -o ./artifacts/portable
+
+      - name: Smoke-check the published output
+        shell: pwsh
+        working-directory: windows
+        run: |
+          # The published folder must be self-contained: the exe, the engine DLL and the app assemblies.
+          $required = @("MediaHub.exe", "libmpv-2.dll", "MediaHub.dll", "MediaHub.Net.dll", "MediaHub.Providers.dll")
+          $missing = $required | Where-Object { -not (Test-Path (Join-Path "./artifacts/portable" $_)) }
+          if ($missing) { throw "missing from publish output: " + ($missing -join ", ") }
+          "portable output size: " + [math]::Round((Get-ChildItem ./artifacts/portable -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1) + " MB"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mediahub-windows-${{ env.EXPECTED_HEAD }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            windows/artifacts/revision.json
+            windows/artifacts/test-results/**
+            windows/artifacts/engine-probe-ci.json
+            windows/artifacts/license-report/**
+            windows/artifacts/portable/**
+
+
+  interoperability:
+    name: Windows CLI / Kotlin interoperability (23 cases)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          persist-credentials: false
+
+      - name: Record exact interoperability checkout
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_HEAD) { throw "interop checkout mismatch" }
+          New-Item -ItemType Directory -Force windows/artifacts/interop | Out-Null
+          @{ checkoutSha=$actual; headSha=$env:EXPECTED_HEAD; runId=$env:GITHUB_RUN_ID; attempt=$env:GITHUB_RUN_ATTEMPT } |
+            ConvertTo-Json | Set-Content -Encoding utf8 windows/artifacts/interop/revision.json
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+        with:
+          packages: platform-tools
+
+      - name: Install Android compile components
+        shell: pwsh
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build this checkout's Windows peer
+        shell: pwsh
+        run: dotnet build windows/src/MediaHub.SyncCli/MediaHub.SyncCli.csproj -c Debug -p:Platform=x64 -m:1
+
+      - name: Execute both cross-end directions with real Windows peer
+        shell: pwsh
+        run: |
+          $peer = (Resolve-Path windows/src/MediaHub.SyncCli/bin/x64/Debug/net10.0/MediaHub.SyncCli.dll).Path
+          $env:MH_W632_SYNC_DLL = $peer
+          $env:MH_W638_SYNC_DLL = $peer
+          $env:MH_W632_DOTNET = (Get-Command dotnet).Source
+          $env:MH_W638_DOTNET = $env:MH_W632_DOTNET
+          foreach ($path in @(
+            'core/common/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.common.sync.SourceSyncTlsInteropTest.xml',
+            'core/database/build/test-results/testDebugUnitTest/TEST-com.mediahub.core.database.sync.SourceSyncListenerInteropTest.xml'
+          )) {
+            if (Test-Path -LiteralPath $path -PathType Leaf) { Remove-Item -LiteralPath $path -Force }
+          }
+          ./gradlew.bat '-Dorg.gradle.jvmargs=-Xmx2048m -XX:ActiveProcessorCount=4' '-Pkotlin.compiler.execution.strategy=in-process' `
+            :core:common:testDebugUnitTest --tests '*SourceSyncTlsInteropTest' `
+            :core:database:testDebugUnitTest --tests '*SourceSyncListenerInteropTest' `
+            --rerun-tasks --no-build-cache --no-daemon --no-parallel --max-workers=1 --console=plain --continue
+
+      - name: Require 23 actual interop assertions with no skips
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $expected = @(
+            @{ Module='core/common'; Suite='com.mediahub.core.common.sync.SourceSyncTlsInteropTest'; Floor=11 },
+            @{ Module='core/database'; Suite='com.mediahub.core.database.sync.SourceSyncListenerInteropTest'; Floor=12 }
+          )
+          $total = 0
+          foreach ($entry in $expected) {
+            $path = "$($entry.Module)/build/test-results/testDebugUnitTest/TEST-$($entry.Suite).xml"
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "interop report missing: $($entry.Suite)" }
+            $xml = [xml](Get-Content -LiteralPath $path -Raw)
+            $cases = @($xml.testsuite.testcase)
+            if ($xml.testsuite.name -ne $entry.Suite -or $cases.Count -lt $entry.Floor -or [int]$xml.testsuite.tests -ne $cases.Count) {
+              throw "interop suite missing cases or wrong identity: $($entry.Suite)"
+            }
+            foreach ($counter in @('failures','errors','skipped')) {
+              if ([int]$xml.testsuite.GetAttribute($counter) -ne 0) { throw "interop $counter must be zero" }
+            }
+            if ($xml.SelectNodes('//testcase[failure or error or skipped]').Count -ne 0) { throw 'interop did not execute successfully' }
+            "$($entry.Suite): $($cases.Count) executed, no failures/errors/skips"
+            $total += $cases.Count
+          }
+          "cross-end total=$total"
+
+      - name: Upload Windows interoperability evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-interop-${{ env.EXPECTED_HEAD }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            windows/artifacts/interop/revision.json
+            core/common/build/test-results/testDebugUnitTest/TEST-*InteropTest.xml
+            core/database/build/test-results/testDebugUnitTest/TEST-*InteropTest.xml

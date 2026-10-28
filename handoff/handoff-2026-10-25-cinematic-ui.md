@@ -1,0 +1,50 @@
+# Handoff — Cinematic UI refresh（更新于 2026-10-27）
+
+## Status
+
+- 分支：`feature/cinematic-ui`；独立工作区：`D:/deepseek_test/mh-cinematic-ui`。
+- UI 初始提交：`8f9650e78216fd58e9af6070237dd3bf2d3f8fec`；基线合并：`7f3c840330698e0d41ae0bc23f6f84f31387fb4f`。
+- 已合入未合并 Draft PR #59 @ `96f051f7cb718d3e9acf10711ef413adb1d916d7`；`origin/main` 仍为 `1246313c7a66d492258b5b4b20b51cbdcf2da9cc`，未写 main。
+- 深色影院主题、共享 artwork/card/status、Home / Library / Search / Detail / Server / Settings / Player 展示层与 README / CHANGELOG 已完成。
+- 保留媒体源切换清理、表单 operation/input 锁、配对入口、Provider 能力、聚合顺序、分页与播放/字幕/手势语义。
+- 原有 `EffectsDemoActivity` 的 Debug Manifest 声明保留，不因本预览组件而移除。
+- Debug-only `CinematicVisualActivity` 只在 `app/src/debug`，`exported=true` 仅用于显式预览与 Compose instrumentation；不进入 Release，也不接入正式导航。预览与测试均使用正式 `MediaHubTheme`。
+
+## Executed evidence
+
+- 旧 `:app:assembleDebug` 真实 exit 0；当时页面截图 APK SHA-256：`b22b9ad97cfd8589662d989486db320f6a5095e957fd59dc57ac04b9bd5837ab`。该哈希不背书最终合并/修订后的 APK。
+- Xiaomi 14 Ultra `123e243f` / API 36：同签名 `adb install -r` Success；未卸载、清用户数据、改系统旋转或访问真实媒体服务。
+- 四张 1080×2400 页面截图来自实际 Android Debug 生产 Compose 组件，使用虚构片名与本地生成素材。首页、海报墙、搜索结果、详情已人工复核；详情文字曾过暗，已修正并重新采集。
+- 最新截图复核发现搜索预览只有结果区，缺正式搜索框；已抽取 `SearchContent` 补全搜索页，并给清空操作补回调断言。最终四张 1080×2400 截图已重新采集并人工复核。
+- 最终截图构建 `bash-urqvgtz8`：BUILD SUCCESSFUL / exit 0，515 actionable tasks / 9 executed；截图 APK SHA-256 `7742dce27b829cf91dfc1434cadaff4e516ff5185c7a3e1ce03ef8fa34b2239c`。同签名覆盖安装成功；随后正式 MainActivity 冷启动成功。
+- 四页交互测试已加入 `verify-visual-tests.py` 的 API32/36 required_tests，并由 `run-visual-validation.sh` 单独执行。
+- 门禁测试先 RED：新增 coverage 用例 exit 1，8 failures（4 用例 × 2 API）；补齐后 exit 0。全套 `.github/scripts/tests`：64 tests / 0 failures。
+- 中断前累计 XML 已有 278 suites / 2600 tests / 0 failures / 0 errors / 23 skips，但包含中断构建产生的部分输出，**不是一次完整全量门禁通过证据**。
+
+## Blocked / not passed
+
+- 真机 `CinematicVisualTest` 曾开始 4 tests，但 OEM 将测试 Activity 切到桌面且 runner 未结束，最终超时：`BLOCKED_ENV`，不得写 PASS；API32/36 CI instrumentation 另证。
+- `bash-wuybx9f8` 旧门禁 1200 s runner timeout；`bash-v95t1i2f` 首次最终门禁误设 300 s runner timeout。两次都没有 BUILD SUCCESSFUL / 最终退出码，不算通过；原始日志已保留。
+- 早期 Windows JVM native-memory 失败在 emulator 与 Gradle 重叠时发生；`hs_err_*` / `replay_*` 已移到 `D:/deepseek_test/mh-cinematic-evidence/build-failures`，没有删除失败证据。自建空闲 AVD 已关闭释放内存，没有删除 AVD。
+- 后续 APK/testAPK 构建真实 exit 1：测试 helper 缺 `androidx.activity.compose.setContent` 扩展导入；已修复并重新编译。原始 `cinematic-apk.log` 保留，不将先前成功构建升级为最终 PASS。
+- `bash-bcuptkhc` 强制重跑约 1379 s 后 exit 1：`Gradle build daemon has been stopped: stop command received`。这是外部停止，不是测试断言失败；后续改用独立 `org.gradle.daemon.registry.base`，不终止他人构建。
+- 最终 `bash-kfb4v6ms` 完整强制门禁 exit 0 / BUILD SUCCESSFUL：1213 actionable tasks / 1213 executed / 47m8s；295 XML suites / **2734 tests / 0 failures / 0 errors / 23 skips**。
+- `assembleDebug`、`lintDebug`、`app:assembleDebugAndroidTest` 均在该次完整命令内成功；22 份 lint XML / 0 errors / 125 warnings（未宣称零警告）。
+- 最终 Debug APK SHA-256：`11dd22d4a717a9c6268dae2037016850149cedd59e45f45884213808ff1fd6f0`。日志：`D:/deepseek_test/mh-cinematic-evidence/cinematic-release-gate.log`。
+- 发布提交：`eda3e525f5e47b3970f6c2b82dee54a28008a9d0`；已普通 push `feature/cinematic-ui` 并创建 [Draft PR #73](https://github.com/fwzm/MediaHub/pull/73)（base=main，未合并）。
+- `cdb16a67` Android `40525920124` 在 API32/36 各 30 分钟超时；每 API 的 138 个原有测试 +1 备份测试通过，新四页尚未启动。原因是每次 connected 调用都 `--rerun-tasks` 重建依赖。`fa40092d` 改为仅具体测试任务 `--rerun`，脚本回归 RED 1 → GREEN，65 tests / 0 failures，真实 Gradle dry-run exit 0；新 CI `40538420793` 等待结果。
+- 自建 API36 模拟器直接运行四页测试，四个用例都执行到截图阶段，但 `getExternalFilesDir` 目录创建失败，真实结果为 **4 tests / 4 failures**（`INSTRUMENTATION_CODE=-1`，不是 PASS）。改用 `targetContext.cacheDir/cinematic` 后重新构建并安装测试 APK，实际复跑为 **OK (4 tests)**，四个用例的 `INSTRUMENTATION_STATUS_CODE` 均为 0，Time 33.553s；测试 APK SHA-256 `f59d2f43c70198871b2cceea3773cc7a8f51f968aa84cab4fb722ef778fc992b`。原始 RED 日志 `cinematic-owned-api36-tests.log` 和 GREEN 日志 `cinematic-owned-api36-tests-green.log` 均保留。
+
+- `af003365` Android `40541138154` 未通过：API32 四页 4/4 通过，但独立 app 调用覆盖了备份报告；API36 模拟器断开（`device 'emulator-5554' not found`），详情用例未完成。原始 XML / UTP / logcat 已保存于 `ci-final-api32` / `ci-final-api36`。改为备份独立执行后保存 XML 快照，四页独立执行后恢复快照，再统一验证报告；保持原备份验收语义。脚本回归 RED 1 → GREEN，65 tests / 0 failures，并校验快照与最终报告真实内容。API36 模拟器断开作为环境问题单独保留，不改播放回调或隐藏失败。
+
+- `84729763` Android `40558780817` 未通过：两套 API 的四页测试和备份都实际执行成功，但 Gradle 每次生成的 app XML 仅含当前类，同名恢复快照把四页报告替换为备份内容。修正为按测试组用不同文件名保留原始 XML，再合并校验；缺报告立即失败。最终目录真实内容同时含备份和四页结果，缺报告场景也拒绝；全套 **66 tests / 0 failures**，`bash -n` 通过。
+
+- `170c188d` Android `40661147994` 未通过：API36 的四页与备份 XML 均通过，但原始 XML 与 `-cinematic.xml` 归档副本同时被校验，四个用例各计 2 次。改为把原始 XML 移到独立归档目录，校验目录仅保留备份与四页的去重副本；不删除测试原件，不改报告内容。最终报告每类用例恰出现一次，66 tests / 0 failures，`bash -n` 通过。
+
+- `294b0160` Android `40674864698`：API32/36 的 `visual-instrumentation` 与 `Require executed visual assertions` 均 **success**。已下载原始产物核验：每 API 备份 1 项、四页 4 项，0 failures/0 errors；校验目录只含去重报告，manifest 绑定该 head SHA。总 build 正在执行单元测试/lint/APK，等待最终结果。Windows `40674864522` 与 Sync `40674864550` 均 success。
+
+## Rules and next steps
+
+- G7：DO_NOT_MERGE。只允许普通提交到 feature 分支并创建 Draft PR；不合并、不 close、不 mark-ready、不 force push。
+- 外部台账：`D:/deepseek_test/mh-dsh-longrun-20261014/{queue.json,RUNLOG.md,TEST_MATRIX.md}`，与其他任务并存，不覆盖他人的工作。
+- 任何后续代码改动都必须重新绑定测试、APK、截图和 CI；旧 head 证据不能给新 head 背书。

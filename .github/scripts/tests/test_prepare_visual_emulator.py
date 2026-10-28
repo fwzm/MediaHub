@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -11,7 +12,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "prepare-visual-emulator.sh"
 
 class VisualEmulatorPreparationTest(unittest.TestCase):
     def invoke(self, home="com.android.launcher3/.Launcher", serial="emulator-5554",
-               provisioned="1", has_setup="1", wrapper=False, gradle_exit="0", record_exit="0"):
+               provisioned="1", has_setup="1", wrapper=False, gradle_exit="0", record_exit="0", omit_reports=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fake_bin = root / "bin"
@@ -38,14 +39,23 @@ esac
                 scripts.mkdir(parents=True)
                 (scripts / "prepare-visual-emulator.sh").write_text(SCRIPT.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
                 script.write_text((SCRIPT.parent / "run-visual-validation.sh").read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
-                for fake, content in ((root / "gradlew", 'echo GRADLE >> "$FIXTURE_COMMANDS"; exit "$FIXTURE_GRADLE_EXIT"'),
-                                      (fake_bin / "python3", 'echo RECORD >> "$FIXTURE_COMMANDS"; exit "$FIXTURE_RECORD_EXIT"')):
+                gradle = '''printf "GRADLE %s\\n" "$*" >> "$FIXTURE_COMMANDS"
+report_dir="app/build/outputs/androidTest-results/connected/debug"
+case "$*" in
+  *BackupUserFlow*) if [[ "$FIXTURE_OMIT_REPORTS" != 1 ]]; then mkdir -p "$report_dir"; printf backup > "$report_dir/TEST-result.xml"; fi ;;
+  *CinematicVisualTest*) if [[ "$FIXTURE_OMIT_REPORTS" != 1 ]]; then mkdir -p "$report_dir"; printf cinematic > "$report_dir/TEST-result.xml"; fi ;;
+esac
+exit "$FIXTURE_GRADLE_EXIT"'''
+                for fake, content in ((root / "gradlew", gradle),
+                                      (fake_bin / "python3", 'echo RECORD >> "$FIXTURE_COMMANDS"; exit "$FIXTURE_RECORD_EXIT"'),
+                                      (fake_bin / "cp", 'printf "cp %s\\n" "$*" >> "$FIXTURE_COMMANDS"; command -p cp "$@"')):
                     fake.write_text("#!/usr/bin/env bash\n" + content + "\n", encoding="utf-8", newline="\n")
                     fake.chmod(0o755)
             env = os.environ.copy()
             env.update(ANDROID_SERIAL=serial, FIXTURE_HOME=home,
                        FIXTURE_PROVISIONED=provisioned, FIXTURE_HAS_SETUP=has_setup,
                        FIXTURE_GRADLE_EXIT=gradle_exit, FIXTURE_RECORD_EXIT=record_exit,
+                       FIXTURE_OMIT_REPORTS="1" if omit_reports else "0",
                        EXPECTED_HEAD="a" * 40, GITHUB_RUN_ID="fixture-run", GITHUB_RUN_ATTEMPT="1",
                        FIXTURE_COMMANDS=str(commands), PATH=str(fake_bin) + os.pathsep + env["PATH"])
             bash = Path(r"C:\Program Files\Git\bin\bash.exe") if os.name == "nt" else None
@@ -53,6 +63,12 @@ esac
             self.assertIsNotNone(executable, "actual Bash required for CI bootstrap fixture")
             result = subprocess.run([executable, "prepare.sh"] + (["32"] if wrapper else []), cwd=root, env=env,
                                     capture_output=True, text=True, timeout=15)
+            result.report_text = "".join(
+                path.read_text(encoding="utf-8")
+                for path in sorted((root / "app/build/outputs/androidTest-results/connected/debug").glob("TEST-*.xml"))
+            )
+            backup_report = root / "ci-evidence/backup-report/TEST-result-backup.xml"
+            result.backup_report_text = backup_report.read_text(encoding="utf-8") if backup_report.exists() else ""
             return result, commands.read_text(encoding="utf-8") if commands.exists() else ""
 
     def test_setup_home_is_rejected_even_when_status_and_resumed_match(self):
@@ -81,6 +97,11 @@ esac
         self.assertNotEqual(0, result.returncode)
         self.assertEqual("", commands)
 
+    def test_wrapper_rejects_physical_before_device_setup_or_test_install(self):
+        result, commands = self.invoke(serial="fixture-physical", wrapper=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual("", commands)
+
     def test_single_process_wrapper_preserves_success_exit(self):
         result, commands = self.invoke(wrapper=True)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
@@ -94,6 +115,23 @@ esac
     def test_wrapper_record_failure_cannot_be_hidden_by_green_gradle(self):
         result, _ = self.invoke(wrapper=True, record_exit="8")
         self.assertEqual(8, result.returncode, result.stdout + result.stderr)
+
+    def test_wrapper_forces_test_tasks_without_rebuilding_all_dependencies(self):
+        result, commands = self.invoke(wrapper=True)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotIn("--rerun-tasks", commands)
+        self.assertEqual(7, len(re.findall(r"(?<!\S)--rerun(?:\s|$)", commands)), commands)
+        self.assertEqual(3, commands.count("GRADLE"), commands)
+        self.assertEqual(2, commands.count(":app:connectedDebugAndroidTest"), commands)
+        self.assertIn("class=com.mediahub.app.visual.CinematicVisualTest", commands)
+        self.assertEqual("backup", result.backup_report_text)
+        self.assertEqual(1, result.report_text.count("backup"))
+        self.assertEqual(1, result.report_text.count("cinematic"))
+
+    def test_missing_reports_fail_even_when_gradle_succeeds(self):
+        result, _ = self.invoke(wrapper=True, omit_reports=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertNotIn("RECORD", _)
 
     def test_wrapper_setup_failure_prevents_gradle_and_record(self):
         result, commands = self.invoke(wrapper=True, home="com.google.android.sdksetup/.DefaultActivity")

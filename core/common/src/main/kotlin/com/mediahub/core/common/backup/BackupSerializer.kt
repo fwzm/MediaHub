@@ -24,9 +24,11 @@ object BackupSerializer {
     const val MAX_SERVERS = 1_000
     const val MAX_PROGRESS_RECORDS = 20_000
     const val MAX_ENDPOINTS_PER_SERVER = 64
+    const val MAX_FAVORITES = 5_000
+    const val MAX_FAVORITE_TITLE_CHARS = 512
 
     /** 内层白名单 section 名（manifest.includedSections / recordCounts 键域）。 */
-    val KNOWN_SECTIONS = setOf("servers", "progress", "preferences")
+    val KNOWN_SECTIONS = setOf("servers", "progress", "preferences", "favorites")
 
     /** 导出：加密并序列化为 `.mhbackup` 文件字节。 */
     fun export(
@@ -144,12 +146,15 @@ object BackupSerializer {
             "servers" to payload.servers.size,
             "progress" to payload.progress.size,
             "preferences" to if (payload.preferences != null) 1 else 0,
+            "favorites" to payload.favorites.size,
         )
         if (m.recordCounts.keys != m.includedSections.toSet() ||
             actualCounts.any { (section, count) -> count > 0 && section !in m.includedSections }) {
             return ImportResult.Corrupted("sections 与 recordCounts 或实际内容不一致")
         }
-        if (payload.servers.size > MAX_SERVERS || payload.progress.size > MAX_PROGRESS_RECORDS) {
+        if (payload.servers.size > MAX_SERVERS || payload.progress.size > MAX_PROGRESS_RECORDS ||
+            payload.favorites.size > MAX_FAVORITES
+        ) {
             return ImportResult.Corrupted("备份记录数量超过上限")
         }
         for ((key, declared) in m.recordCounts) {
@@ -186,6 +191,14 @@ object BackupSerializer {
             if (dto.serverBackupId.isBlank() || dto.itemId.isBlank()) return ImportResult.Corrupted("播放记录存在空 ID")
             if (dto.positionMs < 0 || dto.durationMs < 0) return ImportResult.Corrupted("播放记录时长字段为负")
             if (dto.updatedAtEpochMs < 0) return ImportResult.Corrupted("播放记录时间戳为负")
+        }
+        // 收藏：空 ID、重复键、时间戳与标题长度（收藏真源在服务端，这里只承载迁移记录）
+        val favoriteKeys = HashSet<Pair<String, String>>(payload.favorites.size)
+        for (dto in payload.favorites) {
+            if (dto.serverBackupId.isBlank() || dto.itemId.isBlank()) return ImportResult.Corrupted("收藏记录存在空 ID")
+            if (!favoriteKeys.add(dto.serverBackupId to dto.itemId)) return ImportResult.Corrupted("重复的收藏记录")
+            if (dto.addedAtEpochMs < 0) return ImportResult.Corrupted("收藏时间戳为负")
+            if ((dto.title?.length ?: 0) > MAX_FAVORITE_TITLE_CHARS) return ImportResult.Corrupted("收藏标题过长")
         }
         payload.preferences?.let { p ->
             val s = p.subtitleStyle

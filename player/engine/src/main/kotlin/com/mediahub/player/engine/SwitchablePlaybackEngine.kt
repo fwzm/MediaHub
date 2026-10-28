@@ -7,6 +7,8 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.PlaybackError
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlaybackProgress
+import com.mediahub.model.PlaybackSource
+import com.mediahub.player.compatibility.DevicePlaybackAssessment
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -50,6 +52,14 @@ class SwitchablePlaybackEngine(
     private val logger: Logger,
     /** 无声判据宽限期（ms）：音轨就绪后等待 audioFormatMime 出现的时间。 */
     private val audioSilentGraceMs: Long = 2_000L,
+    /**
+     * 设备能力评估（ADR-042）：把"设备能不能解这个流"作为**可执行的选路证据**。
+     *
+     * 实现必须是同步、无 I/O 的（只读设备能力缓存快照）——本回调在 play() 的同步路径上
+     * 调用，不得引入网络或磁盘访问；抛出的任何异常等价于 UNKNOWN，绝不阻断播放。
+     */
+    private val deviceAssessmentProvider: (PlaybackSource) -> DevicePlaybackAssessment =
+        { DevicePlaybackAssessment.UNKNOWN },
 ) : PlaybackEnginePort {
 
     private val _engineKind = MutableStateFlow(EngineKind.MEDIA3)
@@ -69,8 +79,8 @@ class SwitchablePlaybackEngine(
     )
     override val progress: SharedFlow<PlaybackProgress> = _progress.asSharedFlow()
 
-    private val _events = Channel<PlaybackEvent>(Channel.UNLIMITED)
-    override val events: Flow<PlaybackEvent> = _events.receiveAsFlow()
+    private val _events = Channel<PlaybackEventMessage>(Channel.UNLIMITED)
+    override val events: Flow<PlaybackEventMessage> = _events.receiveAsFlow()
 
     private val _subtitleCues = MutableStateFlow<CueGroup?>(null)
     override val subtitleCues: StateFlow<CueGroup?> = _subtitleCues.asStateFlow()
@@ -93,6 +103,7 @@ class SwitchablePlaybackEngine(
     private var attachedSurface: Surface? = null
     private var fellBackThisSession = false
     private var released = false
+    private var requestedPlayWhenReady: Boolean? = null // stateLock; retained across replacement gap
     /** UI 的采样需求意图；引擎切换后必须原样重施给新引擎。 */
     private var audioSpectrumEnabled = false
 
@@ -113,6 +124,7 @@ class SwitchablePlaybackEngine(
             fallbackJob = null
             sessionGeneration += 1
             this.session = session
+            requestedPlayWhenReady = session.startPaused?.not()
             fellBackThisSession = false
             // 新会话不携带上一会话的字幕状态（匹配记忆由 ViewModel 层重放）。
             subtitleOperation++
@@ -123,10 +135,14 @@ class SwitchablePlaybackEngine(
         }
         session.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_SELECTION_STARTED)
         val mode = modeProvider()
+        // ADR-042：设备证据评估为同步纯计算（读缓存快照）。异常 → UNKNOWN，不阻断播放。
+        val deviceAssessment = runCatching { deviceAssessmentProvider(session.source) }
+            .getOrDefault(DevicePlaybackAssessment.UNKNOWN)
         val selection = PlaybackEngineSelector.select(
             source = session.source,
             mode = mode,
             mpvPreferredSignatures = history.mpvPreferredSignatures(),
+            device = deviceAssessment,
         )
         logger.i(LogTag.PLAYER, "引擎选择 kind=${selection.kind} mode=$mode reason=${selection.reason}")
         session.trace?.let { t ->
@@ -134,12 +150,36 @@ class SwitchablePlaybackEngine(
             t.putMetadata("engine", selection.kind.name)
             t.putMetadata("signature", CompatibilitySignature.from(session.source).key)
             t.putMetadata("selectorReason", selection.reason)
+            deviceAssessment.traceMetadata().forEach { (key, value) -> t.putMetadata(key, value) }
         }
         startEngine(selection.kind, session, generation)
     }
 
     override fun togglePlayPause() {
-        current?.togglePlayPause()
+        val engine = synchronized(stateLock) {
+            if (released || session == null) return
+            val active = current
+            if (active == null) {
+                val play = !(requestedPlayWhenReady ?: _uiState.value.playWhenReady)
+                requestedPlayWhenReady = play
+                _uiState.value = _uiState.value.copy(playWhenReady = play)
+            } else requestedPlayWhenReady = null
+            active
+        }
+        engine?.togglePlayPause()
+        synchronized(stateLock) {
+            if (!released && current === engine && engine != null) requestedPlayWhenReady = engine.uiState.value.playWhenReady
+        }
+    }
+
+    override fun setPlayWhenReady(play: Boolean) {
+        val engine = synchronized(stateLock) {
+            if (released || session == null) return
+            requestedPlayWhenReady = play
+            _uiState.value = _uiState.value.copy(playWhenReady = play)
+            current
+        }
+        engine?.setPlayWhenReady(play)
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) {
@@ -151,11 +191,24 @@ class SwitchablePlaybackEngine(
     }
 
     override fun selectAudioTrack(selection: TrackSelection?) {
-        current?.selectAudioTrack(selection)
+        val engine = synchronized(stateLock) { if (released) return; current } ?: return
+        if (!engine.isTrackSelectionCurrent(selection)) return
+        if (synchronized(stateLock) { !released && current === engine }) engine.selectAudioTrack(selection)
+    }
+
+    override fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean {
+        val engine = synchronized(stateLock) { if (released) return false; current }
+        // Off is valid during a replacement gap and must still cancel pending subtitles.
+        if (selection == null) return true
+        return engine?.isTrackSelectionCurrent(selection) == true &&
+            synchronized(stateLock) { !released && current === engine }
     }
 
     override fun selectSubtitleTrack(selection: TrackSelection?) {
+        val expected = synchronized(stateLock) { if (released) return; current }
+        if (selection != null && expected?.isTrackSelectionCurrent(selection) != true) return
         val engine = synchronized(stateLock) {
+            if (released || (selection != null && current !== expected)) return
             subtitleOperation++
             activeExternalSubtitle = null
             current
@@ -338,7 +391,7 @@ class SwitchablePlaybackEngine(
                 media3WatchJob = null
             }
             attachedSurface?.let { engine.attachSurface(it) }
-            engine.play(session)
+            engine.play(requestedPlayWhenReady?.let { session.copy(startPaused = !it) } ?: session)
         }
         // 降级切换后的字幕会话状态重施（外挂字幕重载/偏移重放）；异步，不阻塞起播。
         started?.let { engine ->
@@ -416,6 +469,11 @@ class SwitchablePlaybackEngine(
                 history.recordMedia3Failure(CompatibilitySignature.from(s.source).key)
                 if (!isCurrentSession(s, fallbackGeneration, failedEngine)) return@launch
                 // 保存当前位置（先取 stop() 返回值，兜底 uiState）
+                // G3：**必须在 stop() 之前**读取暂停意图 —— stop() 会把引擎状态重置为
+                // 「已停止」，之后再读就永远是"未在播放"，降级会把暂停的会话重新播起来。
+                val wasPaused = synchronized(stateLock) {
+                    requestedPlayWhenReady?.not() ?: failedEngine.uiState.value.playWhenReady.not()
+                }
                 val position = failedEngine.stop()?.positionMs
                     ?: _uiState.value.positionMs
                 if (!isCurrentSession(s, fallbackGeneration, failedEngine)) {
@@ -440,7 +498,11 @@ class SwitchablePlaybackEngine(
                 )
                 startEngine(
                     EngineKind.MPV,
-                    s.copy(startPositionMs = position.takeIf { it > 0 }),
+                    s.copy(
+                        startPositionMs = position.takeIf { it > 0 },
+                        // G3：把暂停意图带给新引擎；不这么做，暂停中的会话会在降级后被重新起播。
+                        startPaused = wasPaused,
+                    ),
                     fallbackGeneration,
                     expectedSession = s,
                 )

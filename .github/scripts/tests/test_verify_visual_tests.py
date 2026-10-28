@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -14,6 +15,93 @@ SHA = "2f9032732fc8365d19b5badac90f66b10310f500"
 
 
 class EvidenceGateTest(unittest.TestCase):
+    def test_archive_routes_require_every_actual_case(self):
+        root = Path(__file__).resolve().parents[3]
+        for name, minimum in (("SourceSyncPassphraseScreenTest", 5), ("SourceSyncArchiveExportScreenTest", 7)):
+            suite_name = "com.mediahub.feature.settings.sync." + name
+            source = root / "feature/settings/src/androidTest/kotlin" / Path(*suite_name.split("."))
+            methods = re.findall(r"@Test\s+fun\s+(\w+)\s*\(", source.with_suffix(".kt").read_text(encoding="utf-8-sig"))
+            self.assertGreaterEqual(len(methods), minimum)
+            for api in (32, 36):
+                for method in methods:
+                    with self.subTest(api=api, suite=suite_name, method=method):
+                        self.assertIn((suite_name, method), gate.required_tests(api))
+                        self.build(api)
+                        def remove(suite):
+                            suite.remove(next(c for c in suite if c.get("name") == method))
+                            suite.set("tests", str(len(suite)))
+                        self.edit("feature/settings", remove, api)
+                        self.assertTrue(any(method in p and "no passing execution" in p for p in self.problems(api)))
+
+    def test_pairing_tls_address_and_listen_routes_require_every_actual_case(self):
+        root = Path(__file__).resolve().parents[3]
+        suites = (
+            ("com.mediahub.feature.settings.pairing.PairingLinkScreenTest", 12),
+            ("com.mediahub.feature.settings.pairing.PairingLinkAddressScreenTest", 7),
+            ("com.mediahub.feature.settings.sync.SourceSyncListenCancelScreenTest", 6),
+        )
+        for suite_name, minimum in suites:
+            source = root / "feature/settings/src/androidTest/kotlin" / Path(*suite_name.split("."))
+            methods = re.findall(r"@Test\s+fun\s+(\w+)\s*\(", source.with_suffix(".kt").read_text(encoding="utf-8-sig"))
+            self.assertGreaterEqual(len(methods), minimum)
+            for api in (32, 36):
+                for method in methods:
+                    key = (suite_name, method)
+                    with self.subTest(api=api, suite=suite_name, method=method):
+                        self.assertIn(key, gate.required_tests(api))
+                        self.build(api)
+                        def remove(suite):
+                            suite.remove(next(c for c in suite if c.get("name") == method))
+                            suite.set("tests", str(len(suite)))
+                        self.edit("feature/settings", remove, api)
+                        self.assertTrue(any(method in p and "no passing execution" in p for p in self.problems(api)))
+
+    def test_pairing_and_receive_cancel_routes_are_mandatory(self):
+        keys = [('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theEntryStartsEmptyAndTheVerifyButtonIsDisabled'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'typingALinkEnablesTheVerifyButtonAndHandsTheTextOver'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aParsedStateShowsTheDeviceIdTheFingerprintAndTheRemainingSeconds'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aFailedStateShowsTheStableCode'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theBackButtonCallsBackExactlyOnce'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theClearButtonWipesTheFieldAndReportsIt'), ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theWholePageNeverPrintsTheChallenge'), ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'theReceiveCardOffersACancelButtonThatIsDisabledWhenIdle'), ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'whileReceivingTheCancelButtonCallsBackAndTheReceiveButtonIsLocked'), ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'onceTheEnvelopeIsInTheCancelButtonIsLockedAgain'), ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'afterAFailureTheCancelButtonIsLockedAgain')]
+        for api in (32, 36):
+            for key in keys:
+                with self.subTest(api=api, name=key[1]):
+                    self.assertIn(key, gate.required_tests(api))
+                    self.build(api)
+                    def remove(suite):
+                        suite.remove(next(c for c in suite if c.get("name") == key[1]))
+                        suite.set("tests", str(len(suite)))
+                    self.edit("feature/settings", remove, api)
+                    self.assertTrue(any(key[1] in p and "no passing execution" in p for p in self.problems(api)))
+
+    def test_grouped_track_route_is_required_on_both_apis(self):
+        key = ("com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
+               "productionGroupedTrackRowsUseExactSnapshotAddresses")
+        for api in (32, 36):
+            with self.subTest(api=api):
+                self.assertIn(key, gate.required_tests(api))
+                self.build(api)
+                def remove(suite):
+                    suite.remove(next(c for c in suite if c.get("name") == key[1]))
+                    suite.set("tests", str(len(suite)))
+                self.edit("feature/player", remove, api)
+                self.assertTrue(any(key[1] in p and "no passing execution" in p for p in self.problems(api)))
+
+    def test_system_media_keys_are_required_on_both_apis(self):
+        key = ("com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
+               "productionSystemMediaKeysPausePlayAndToggleExactlyOnce")
+        for api in (32, 36):
+            with self.subTest(api=api):
+                self.assertIn(key, gate.required_tests(api))
+                self.build(api)
+                def remove(suite):
+                    suite.remove(next(c for c in suite if c.get("name") == key[1]))
+                    suite.set("tests", str(len(suite)))
+                self.edit("feature/player", remove, api)
+                self.assertTrue(any(key[1] in p and "no passing execution" in p for p in self.problems(api)))
+
+    def test_pause_seek_route_is_mandatory_on_both_apis(self):
+        key = ("com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
+               "productionPauseSeekAndResumeControlsPreserveControlledProgress")
+        for api in (32, 36):
+            with self.subTest(api=api):
+                self.assertIn(key, gate.required_tests(api))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -45,12 +133,12 @@ class EvidenceGateTest(unittest.TestCase):
     def problems(self, api=32):
         return gate.verify(self.root, api, SHA, "run-1", "1")
 
-    def edit(self, module, mutation):
+    def edit(self, module, mutation, api=32):
         path = self.paths[module]
         tree = ET.parse(path)
         mutation(tree.getroot())
         tree.write(path)
-        self.stamp()
+        self.stamp(api)
 
     def test_complete_reports_pass_both_apis(self):
         self.assertEqual([], self.problems())
@@ -78,6 +166,7 @@ class EvidenceGateTest(unittest.TestCase):
             ("core/database", "historicalSchemasMigrateAndReopenThroughActualRoom"),
             ("feature/settings", "productionSettingsInfoDensityPersistsAndBackupEntryDispatches"),
             ("feature/player", "productionPlayerInformationAndSubtitleActionsPreservePlaybackSession"),
+            ("feature/player", "productionPauseSeekAndResumeControlsPreserveControlledProgress"),
         ):
             with self.subTest(name=name):
                 self.build(32)
@@ -86,6 +175,58 @@ class EvidenceGateTest(unittest.TestCase):
                     suite.set("tests", str(len(suite)))
                 self.edit(module, remove)
                 self.assertTrue(any(name in p and "no passing execution" in p for p in self.problems()))
+
+    def test_sync_cancel_and_listener_controls_cannot_be_omitted(self):
+        names = (
+            "theCancelButtonIsThereButDisabledBeforeAnythingIsSent",
+            "tappingCancelWhileSendingCallsBackExactlyOnce",
+            "theListenFormCarriesTheTypedHostAndTheSwitchVerbatim",
+            "theListenFormCarriesTheAuthSwitchAndTheSecretVerbatim",
+            "whileListeningTheAuthSwitchAndTheSecretAreLocked",
+            "theListenFormCarriesTheTypedBudgetVerbatim",
+            "theReceiveFormCarriesTheCrossMachineSwitchVerbatim",
+            "theSendFormCarriesTheCrossMachineSwitchVerbatim",
+        )
+        for api in (32, 36):
+            for name in names:
+                with self.subTest(api=api, name=name):
+                    self.assertTrue(any(key[1] == name for key in gate.required_tests(api)), name)
+                    self.build(api)
+                    def remove(suite):
+                        suite.remove(next(c for c in suite if c.get("name") == name))
+                        suite.set("tests", str(len(suite)))
+                    self.edit("feature/settings", remove, api=api)
+                    self.assertTrue(any(name in p and "no passing execution" in p for p in self.problems(api)))
+
+    def test_non_overwriting_backup_flow_is_required_on_both_apis(self):
+        key = ("com.mediahub.app.backup.BackupUserFlowNonOverwritingDeviceTest",
+               "exportCancelSaveWrongPasswordAndUnconfirmedReplaceAreNonOverwriting")
+        for api in (32, 36):
+            with self.subTest(api=api):
+                self.assertIn(key, gate.required_tests(api))
+                self.build(api)
+                def remove(suite):
+                    suite.remove(next(case for case in suite if (case.get("classname"), case.get("name")) == key))
+                    suite.set("tests", str(len(suite)))
+                self.edit("app", remove, api=api)
+                self.assertTrue(any(key[1] in problem and "no passing execution" in problem for problem in self.problems(api)))
+
+    def test_cinematic_production_screens_require_every_actual_case(self):
+        root = Path(__file__).resolve().parents[3]
+        suite_name = "com.mediahub.app.visual.CinematicVisualTest"
+        source = root / "app/src/androidTest/kotlin" / Path(*suite_name.split("."))
+        methods = re.findall(r"@Test\s+fun\s+(\w+)\s*\(", source.with_suffix(".kt").read_text(encoding="utf-8-sig"))
+        self.assertEqual(len(methods), 4)
+        for api in (32, 36):
+            for method in methods:
+                with self.subTest(api=api, method=method):
+                    self.assertIn((suite_name, method), gate.required_tests(api))
+                    self.build(api)
+                    def remove(suite):
+                        suite.remove(next(c for c in suite if c.get("name") == method))
+                        suite.set("tests", str(len(suite)))
+                    self.edit("app", remove, api)
+                    self.assertTrue(any(method in p and "no passing execution" in p for p in self.problems(api)))
 
     def test_zero_tests_fails_even_with_valid_manifest(self):
         for module in gate.MODULES:

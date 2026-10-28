@@ -24,7 +24,7 @@ jobs:
     # 即使仪器测试失败也保留原来的 build/unit/lint 诊断，最后再断言总门禁。
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -84,7 +84,7 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug --no-daemon --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process
 
       - name: Validate emulator preparation guards
         run: python3 -m unittest discover -s .github/scripts/tests -p 'test_prepare_visual_emulator.py' -v
@@ -98,20 +98,167 @@ jobs:
           python3 .github/scripts/verify-unit-tests.py --begin --report-timezone UTC --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
 
       - name: Unit tests
-        timeout-minutes: 15
+        timeout-minutes: 30
         # testDebugUnitTest 不会运行独立 Kotlin/JVM 模块的 test task。
-        run: ./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon --continue --rerun-tasks --no-build-cache
+        run: ./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon --continue --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process --rerun-tasks --no-build-cache
 
       - name: Require fresh unit test evidence
         if: ${{ !cancelled() }}
         run: |
           python3 .github/scripts/verify-unit-tests.py --record --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
-          python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest --required-suite com.mediahub.app.WebDavJointChainTest --required-suite com.mediahub.player.mpv.MpvSubtitleTest --required-suite com.mediahub.core.database.repository.ServerRepositorySubtitleIdentityTest --required-suite com.mediahub.feature.player.PlayerViewModelSubtitleCenterTest --required-suite com.mediahub.player.engine.PlaybackEngineExternalSubtitleTest --required-suite com.mediahub.provider.webdav.WebDavParserPlatformCompatibilityTest --require-complete-suites
+          # 每个 required-suite 参数的语义是"这个套件必须真的执行过"。理由同 windows-ci 的
+          # WebDav 教训：套件整体消失时 gradle 仍会打印 BUILD SUCCESSFUL，
+          # 只有把跨端契约/互操作套件按名字钉住才能发现"测试还在文件里却没跑"。
+          #   pairing.*   —— 与 Windows 的配对载荷字节级互操作（黄金向量由真 API 生成）
+          #   sync.*      —— 与 Windows 的来源同步信封/规划器三桶口径
+          #   Migration4to5 —— servers 表加同步身份三列的迁移（真机开库前的唯一守卫）
+          #   UpNextResolver / PlayerAutoplay —— 跨季连播解析与 Ended 事件接线
+          #   pairing.PairingTransportClient / ...EndToEnd —— 只拨回环的 4 字节帧收发（W6-G）
+          #   feature.settings.sync.* —— 导入四桶分桶/失败关闭（W6-F 逻辑+会话）与补录验证协调器（W6-H）
+          #   pairing.* / AndroidSourceSyncSecurityTest —— 对抗性输入回归（W6-J：畸形载荷/帧、非回环拒绝、
+          #     凭据不回显、坏信封零写入、重复 syncSourceId 整封拒绝=W6J-1）
+          #   sync.SourceSyncTransfer* —— 分块帧传输与 Windows 逐字节互操作（W6-22：向量由真 API 生成，
+          #     19 条错误流的 reason 与 Windows 同名同序；收满即返、尾随帧不读）
+          #   sync.SourceSyncTransferAuthTest —— 传输对端认证（W6-25：五码 + 33 字节 tag 帧 0x03 +
+          #     HMAC-SHA256 over nonce‖envelope，金标向量由 Windows 实现生成；关闭认证时与 W6-22 向量全等）
+          #   sync.SourceSyncTlsTest —— TLS 1.3 + SPKI 指纹钉扎（W6-29：只协商 1.3、pin=SHA-256(publicKey.encoded)、
+          #     四码与 Windows 同名同序、接收端 5 字节嗅探、graceful close；夹具与期望指纹由 Windows 权威实现生成）
+          #   sync.SourceSyncTransferListenerTest —— 回环监听端（W6-34：只绑回环、端口 0 取实际值、单连接串行、
+          #     复用 SourceSyncTransfer.receive 解帧，TLS 走 handshakeServer / 明文走 5 字节嗅探，关闭 TLS 走 graceful close）
+          #   sync.SourceSyncDeliveryTest —— 发送端投递确认（W6-46：单码 delivery-unconfirmed 独立封闭集、
+          #     写完最后一帧后读对端直到 FIN，预算 2000 ms、最多排水 64 KiB，回执优先；Off 时不读一个字节）
+          #   feature.settings.sync.SourceSyncSendLauncherTest —— 发送取消的 Job 记账薄壳（W6-49：取消回 Idle
+          #     不产生失败码、释放单飞可立刻重发、没在发时 cancel 是 no-op、clear 后状态仍可用）
+          #   sync.SourceSyncReceiptTest —— 反向回执帧 0x04（W6-40：四码与 Windows 同名同序、回执只在信封解码成功后写、
+          #     没开回执的监听端一个字节都不发）
+          #   sync.SourceSyncHostAddressTest —— 监听卡绑定地址判定（W6-52：四类拒绝句、自己算 IPv4 字面量永不查 DNS、
+          #     只放行一个单播地址、建 socket 之前就拒）
+          #   feature.settings.sync.SourceSyncListenerControllerTest —— 监听卡控制器（W6-36 起；W6-52 地址、W6-53 对端
+          #     口令、W6-54 等待预算三段都在这里，界面本地码 listen-secret-missing / listen-budget-invalid 各有用例）
+          #   sync.SourceSyncTransferClientHostTest —— 拨号侧地址判定（W6-52b：sendTo / receiveFrom 的 allowExplicitHost
+          #     与 verb 参数，开关关着时拒绝句与 W6-23 逐字相同；通配/广播/组播/主机名在拨号之前就拒，本机不真拨非回环）
+          #   sync.SourceSyncTransferMatrixTest —— 真实回环 socket 上的四维组合矩阵（W6-57：TLS × 认证 × 回执 × 投递
+          #     20 格逐格钉住外部可观察结果与稳定码；认证格同时宣布挑战，回执压掉投递，只碰 127.0.0.1）
+          #   sync.SourceSyncTransferCancelTest —— 本地取消把手（W6-58：取消关连接让阻塞读立刻返回，
+          #     结果是本地码 transfer-cancelled 而非 io-failed；只覆盖失败结果，成功收下的信封不被晚到的取消抹掉）
+          #   feature.settings.sync.SourceSyncReceiveLauncherTest —— 接收卡的单飞与取消（W6-58：取消回 Idle 不留码、
+          #     未在收时是 no-op、每次启动一枚新把手，旧取消不泄漏到下一次接收）
+          #   feature.settings.pairing.PairingLinkControllerTest —— 配对链接核对（W6-59：合法链接解出设备 / 指纹 /
+          #     剩余秒，非法链接原样透出 core:common 的码（code-empty / not-a-pairing-link / code-too-long /
+          #     not-base64url / payload-invalid / expired），核对成功也不泄露挑战，失败作废上一次结论）
+          #   core.database.sync.SourceSyncArchiveImportTest —— 加密归档接进导入入口（W6-63：前 8 字节
+          #     magic == MHSYNCA1 才算归档；无口令报 passphrase-required 且网关零调用；错口令与篡改
+          #     同码 wrong-passphrase-or-tampered；弱口令在建密钥之前就拒；结构错只报结构码；明文信封
+          #     的文本路径逐字节不变；Windows 写出的 1282 B 归档解开后与明文件逐字段相等）
+          #   core.database.sync.SourceSyncArchiveExportTest —— 导出落成文件（W6-64：口令为 null 原样交出
+          #     导出 JSON 不重新编码；口令非空由 ArchiveWriter 包成 .mharchive，读回来与信封逐字段相等；
+          #     归档头时间戳取信封自己的时间戳、迭代数 600000；弱口令/空白口令/自报携带凭据折成 ArchiveError
+          #     稳定码且一个都不改写；空白口令绝不悄悄退化成明文导出）
+          python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
+            --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
+            --required-suite com.mediahub.app.WebDavJointChainTest \
+            --required-suite com.mediahub.player.mpv.MpvSubtitleTest \
+            --required-suite com.mediahub.core.database.repository.ServerRepositorySubtitleIdentityTest \
+            --required-suite com.mediahub.feature.player.PlayerViewModelSubtitleCenterTest \
+            --required-suite com.mediahub.player.engine.PlaybackEngineExternalSubtitleTest \
+            --required-suite com.mediahub.provider.webdav.WebDavParserPlatformCompatibilityTest \
+            --required-suite com.mediahub.player.engine.PlaybackEnginePlaybackControlTest \
+            --required-suite com.mediahub.player.engine.SwitchablePlaybackEngineTest \
+            --required-suite com.mediahub.player.engine.ProgressSyncCoordinatorTest \
+            --required-suite com.mediahub.player.engine.PlaybackEngineTrackSelectionTest \
+            --required-suite com.mediahub.player.engine.TrackSelectionPlannerContractTest \
+            --required-suite com.mediahub.player.engine.TrackMapperTest \
+            --required-suite com.mediahub.player.engine.MediaRequestSnapshotTest \
+            --required-suite com.mediahub.feature.player.PlayerTrackSelectionTest \
+            --required-suite com.mediahub.player.mpv.MpvPlaybackEngineTest \
+            --required-suite com.mediahub.player.mpv.MpvSurfaceBindingTest \
+            --required-suite com.mediahub.app.net.ColdUserAgentStartupTest \
+            --required-suite com.mediahub.app.net.ServerUrlIndexTest \
+            --required-suite com.mediahub.feature.player.ForegroundMediaSessionControllerTest \
+            --required-suite com.mediahub.core.common.pairing.PairingVectorsTest \
+            --required-suite com.mediahub.core.common.pairing.PairingFrameTest \
+            --required-suite com.mediahub.core.common.sync.WindowsGoldenInteropTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncPlannerTest \
+            --required-suite com.mediahub.core.database.sync.AndroidSourceSyncServiceTest \
+            --required-suite com.mediahub.core.database.Migration4to5Test \
+            --required-suite com.mediahub.model.UpNextResolverTest \
+            --required-suite com.mediahub.feature.player.PlayerAutoplayTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportClientTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportEndToEndTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncImportLogicTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncImportSessionTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceVerificationCoordinatorTest \
+            --required-suite com.mediahub.core.common.pairing.PairingMaliciousInputTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportSecurityTest \
+            --required-suite com.mediahub.core.common.pairing.PairingCredentialLeakTest \
+            --required-suite com.mediahub.core.database.sync.AndroidSourceSyncSecurityTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferVectorsTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferRoundTripTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferLoopbackTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferAuthTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTlsTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferListenerTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncDeliveryTest \
+            --required-suite com.mediahub.feature.player.PlayerSeekBarContractTest \
+            --required-suite com.mediahub.feature.player.PlayerSeekContractRobolectricTest \
+            --required-suite com.mediahub.core.logging.RedactorTest \
+            --required-suite com.mediahub.model.MediaQueryTest \
+            --required-suite com.mediahub.core.network.ApiClientCancellationTest \
+            --required-suite com.mediahub.core.network.ApiClientSecurityTest \
+            --required-suite com.mediahub.core.network.ApiExceptionTest \
+            --required-suite com.mediahub.provider.api.ProviderExceptionTest \
+            --required-suite com.mediahub.provider.api.ProviderHandleTest \
+            --required-suite com.mediahub.provider.api.CredentialsRedactionTest \
+            --required-suite com.mediahub.feature.server.AddServerProviderSwitchTest \
+            --required-suite com.mediahub.provider.base.DefaultProviderRegistryTest \
+            --required-suite com.mediahub.feature.library.LibraryFilterViewModelTest \
+            --required-suite com.mediahub.feature.library.LibrarySortViewModelTest \
+            --required-suite com.mediahub.feature.search.GlobalSearchViewModelTest \
+            --required-suite com.mediahub.feature.search.engine.GlobalSearchEngineTest \
+            --required-suite com.mediahub.provider.emby.EmbyLibraryProviderTest \
+            --required-suite com.mediahub.provider.emby.EmbySearchProviderTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncSendLauncherTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncHostAddressTest \
+            --required-suite com.mediahub.provider.emby.EmbyAuthenticationInterleavingStressTest \
+            --required-suite com.mediahub.provider.emby.api.EmbyEndpointResolverTest \
+            --required-suite com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilderTest \
+            --required-suite com.mediahub.provider.emby.EmbyAuthProviderTest \
+            --required-suite com.mediahub.provider.emby.EmbyProviderConnectionTest \
+            --required-suite com.mediahub.provider.jellyfin.JellyfinProviderConnectionTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncReceiptTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncListenerControllerTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferClientHostTest \
+            --required-suite com.mediahub.core.network.EndpointTestServiceRedactionTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferMatrixTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferCancelTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncReceiveLauncherTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncReceiveScopeCancellationTest \
+            --required-suite com.mediahub.feature.settings.pairing.PairingLinkControllerTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportTlsTest \
+            --required-suite com.mediahub.core.common.pairing.PairingAddressEnumeratorTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncListenerCancelTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncListenLauncherTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncListenScopeCancellationTest \
+            --required-suite com.mediahub.feature.settings.pairing.PairingLinkAddressesTest \
+            --required-suite com.mediahub.feature.settings.pairing.PairingAddressSummaryTest \
+            --required-suite com.mediahub.core.common.archive.ArchiveVectorsTest \
+            --required-suite com.mediahub.core.common.archive.ArchiveRoundTripTest \
+            --required-suite com.mediahub.core.common.archive.ArchiveConcurrencyTest \
+            --required-suite com.mediahub.core.database.sync.SourceSyncArchiveImportTest \
+            --required-suite com.mediahub.core.database.sync.SourceSyncArchiveExportTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncArchiveControllerTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncArchiveExportControllerTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncArchiveExportCancellationTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncArchiveSelectionTest \
+            --required-suite com.mediahub.provider.webdav.WebDavProtocolIdentityTest \
+            --required-suite com.mediahub.provider.webdav.WebDavAuthenticationEvidenceTest \
+            --require-complete-suites
 
       - name: Lint
         if: ${{ !cancelled() }}
         timeout-minutes: 15
-        run: ./gradlew lintDebug --no-daemon
+        run: ./gradlew lintDebug --no-daemon --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process
 
       # Preserve failures as well as passes; this does not retry or change any gate.
       - name: Upload validation reports
@@ -151,7 +298,7 @@ jobs:
   visual-instrumentation:
     name: visual-instrumentation (API ${{ matrix.api-level }})
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -192,14 +339,15 @@ jobs:
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null
 
       - name: Compile visual instrumentation APKs
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: >-
           ./gradlew :core:ui:assembleDebugAndroidTest
           :feature:player:assembleDebugAndroidTest
           :feature:settings:assembleDebugAndroidTest
           :provider:webdav:assembleDebugAndroidTest
           :core:database:assembleDebugAndroidTest
-          --no-daemon --continue --max-workers=2
+          :app:assembleDebug :app:assembleDebugAndroidTest
+          --no-daemon --continue --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process
 
       - name: Test instrumentation evidence gate
         run: python3 -m unittest discover -s .github/scripts/tests -v
@@ -208,7 +356,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import pathlib, shutil
-          for module in ('core/ui', 'feature/player', 'feature/settings', 'provider/webdav', 'core/database'):
+          for module in ('core/ui', 'feature/player', 'feature/settings', 'provider/webdav', 'core/database', 'app'):
               shutil.rmtree(pathlib.Path(module) / 'build/outputs/androidTest-results/connected', ignore_errors=True)
           pathlib.Path('ci-evidence/instrumentation-manifest.json').unlink(missing_ok=True)
           PY
@@ -229,7 +377,7 @@ jobs:
           test -r /dev/kvm && test -w /dev/kvm
 
       - name: Run production visual paths on emulator
-        timeout-minutes: 20
+        timeout-minutes: 30
         # v2.37.0 uses Node 24 + build-tools 36, matching this project's compile SDK.
         uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a
         with:
@@ -262,6 +410,8 @@ jobs:
           path: |
             ci-evidence/
             core/ui/build/outputs/androidTest-results/
+            app/build/outputs/androidTest-results/
+            app/build/reports/androidTests/
             core/ui/build/reports/androidTests/
             feature/player/build/outputs/androidTest-results/
             feature/player/build/reports/androidTests/

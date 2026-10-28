@@ -1,16 +1,18 @@
 package com.mediahub.feature.search
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -23,7 +25,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,10 +36,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mediahub.core.ui.MediaHubCard
+import com.mediahub.core.ui.MediaHubLabel
+import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
 import com.mediahub.feature.search.engine.GlobalSearchState
@@ -60,33 +68,61 @@ fun SearchRoute(
     onOpenItem: (MediaItem) -> Unit,
     viewModel: GlobalSearchViewModel = hiltViewModel(),
 ) {
-    // 输入框本地即时回显；去抖后的正式查询走 ViewModel
-    var input by rememberSaveable { mutableStateOf("") }
+    // The field and search engine share the same restorable query.
+    val input by viewModel.query.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
 
+    SearchContent(
+        query = input,
+        state = state,
+        onQueryChange = viewModel::onQueryChange,
+        onBack = onBack,
+        onOpenItem = onOpenItem,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchContent(
+    query: String,
+    state: GlobalSearchState,
+    onQueryChange: (String) -> Unit,
+    onBack: () -> Unit,
+    onOpenItem: (MediaItem) -> Unit,
+) {
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     TextField(
-                        value = input,
-                        onValueChange = {
-                            input = it
-                            viewModel.onQueryChange(it)
+                        value = query,
+                        onValueChange = onQueryChange,
+                        modifier = Modifier.fillMaxWidth().padding(end = 12.dp),
+                        placeholder = {
+                            Text(
+                                "搜索电影 / 剧集 / 单集",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         },
-                        placeholder = { Text("搜索电影 / 剧集 / 单集") },
+                        textStyle = MaterialTheme.typography.bodyLarge,
                         singleLine = true,
+                        shape = CircleShape,
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         trailingIcon = {
-                            if (input.isNotEmpty()) {
-                                IconButton(onClick = {
-                                    input = ""
-                                    viewModel.onQueryChange("")
-                                }) {
+                            if (query.isNotEmpty()) {
+                                IconButton(onClick = { onQueryChange("") }) {
                                     Icon(Icons.Default.Close, contentDescription = "清空")
                                 }
                             }
                         },
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                        ),
                     )
                 },
                 navigationIcon = {
@@ -94,8 +130,13 @@ fun SearchRoute(
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                ),
             )
         },
+        containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         SearchBody(
             state = state,
@@ -108,7 +149,7 @@ fun SearchRoute(
 }
 
 @Composable
-private fun SearchBody(
+fun SearchBody(
     state: GlobalSearchState,
     onOpenItem: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
@@ -117,14 +158,14 @@ private fun SearchBody(
     val entries = remember(state.hits) { SearchAggregator.group(state.hits) }
     if (state.query.isBlank()) {
         Column(
-            modifier = modifier.padding(24.dp),
+            modifier = modifier,
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Text(
-                "输入关键词，聚合搜索所有媒体源",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            MediaHubStatus(
+                title = "探索你的媒体世界",
+                message = "输入关键词，聚合搜索所有媒体源",
+                icon = Icons.Default.Search,
             )
         }
         return
@@ -135,8 +176,8 @@ private fun SearchBody(
 
     LazyColumn(
         modifier = modifier,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            horizontal = 16.dp, vertical = 12.dp,
+        contentPadding = PaddingValues(
+            horizontal = 16.dp, vertical = 16.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -172,11 +213,11 @@ private fun SearchBody(
 
         if (!state.isSearching && state.hits.isEmpty() && state.errors.isEmpty()) {
             item {
-                Text(
-                    "没有找到与「${state.query}」匹配的内容",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 24.dp),
+                MediaHubStatus(
+                    title = "没有找到匹配内容",
+                    message = "没有找到与「${state.query}」匹配的内容，试试其他关键词",
+                    icon = Icons.Default.Search,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -199,47 +240,46 @@ private fun MultiSourceCard(
 ) {
     val first = entry.occurrences.first().item
     val isThumbShape = first.type == MediaType.EPISODE || first.type == MediaType.VIDEO
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        verticalAlignment = Alignment.Top,
+    MediaHubCard(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
     ) {
-        if (isThumbShape) {
-            ThumbImage(
-                url = first.posterUrl,
-                contentDescription = first.title,
-                modifier = Modifier.width(120.dp),
-            )
-        } else {
-            PosterImage(
-                url = first.posterUrl,
-                contentDescription = first.title,
-                modifier = Modifier.width(96.dp),
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.padding(top = 4.dp)) {
-            Text(
-                first.title,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            val meta = buildList {
-                first.year?.let { add(it.toString()) }
-                add(typeLabel(first.type))
+        Row(verticalAlignment = Alignment.Top) {
+            if (isThumbShape) {
+                ThumbImage(
+                    url = first.posterUrl,
+                    contentDescription = first.title,
+                    modifier = Modifier.width(120.dp),
+                )
+            } else {
+                PosterImage(
+                    url = first.posterUrl,
+                    contentDescription = first.title,
+                    modifier = Modifier.width(96.dp),
+                )
             }
-            Text(
-                meta.joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                "${entry.sourceCount} 个来源",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            Spacer(Modifier.width(16.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    first.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val meta = buildList {
+                    first.year?.let { add(it.toString()) }
+                    add(typeLabel(first.type))
+                }
+                Text(
+                    meta.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                MediaHubLabel(text = "${entry.sourceCount} 个来源", emphasized = true)
+            }
         }
     }
 }
@@ -248,77 +288,77 @@ private fun MultiSourceCard(
 private fun SearchHitRow(hit: UnifiedSearchHit, onClick: () -> Unit) {
     val item = hit.item
     val isThumbShape = item.type == MediaType.EPISODE || item.type == MediaType.VIDEO
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        verticalAlignment = Alignment.Top,
+    MediaHubCard(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
     ) {
-        if (isThumbShape) {
-            ThumbImage(
-                url = item.posterUrl,
-                contentDescription = item.title,
-                modifier = Modifier.width(120.dp),
-            )
-        } else {
-            PosterImage(
-                url = item.posterUrl,
-                contentDescription = item.title,
-                modifier = Modifier.width(96.dp),
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.padding(top = 4.dp)) {
-            Text(
-                item.title,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            val meta = buildList {
-                item.year?.let { add(it.toString()) }
-                add(typeLabel(item.type))
-                item.communityRating?.let { add("★ ${"%.1f".format(it)}") }
+        Row(verticalAlignment = Alignment.Top) {
+            if (isThumbShape) {
+                ThumbImage(
+                    url = item.posterUrl,
+                    contentDescription = item.title,
+                    modifier = Modifier.width(120.dp),
+                )
+            } else {
+                PosterImage(
+                    url = item.posterUrl,
+                    contentDescription = item.title,
+                    modifier = Modifier.width(96.dp),
+                )
             }
-            Text(
-                meta.joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                hit.serverName,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            Spacer(Modifier.width(16.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    item.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val meta = buildList {
+                    item.year?.let { add(it.toString()) }
+                    add(typeLabel(item.type))
+                    item.communityRating?.let { add("★ ${"%.1f".format(it)}") }
+                }
+                Text(
+                    meta.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                MediaHubLabel(text = hit.serverName)
+            }
         }
     }
 }
 
 @Composable
 private fun ServerStatusLines(state: GlobalSearchState) {
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        // 进行中：统一一个 spinner 行（具体哪几台在跑对用户噪音过大，不逐台列名）
-        if (state.isSearching) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(
-                    modifier = Modifier.width(16.dp),
-                    strokeWidth = 2.dp,
-                )
-                Spacer(Modifier.width(8.dp))
+    MediaHubCard(modifier = Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 进行中：统一一个 spinner 行（具体哪几台在跑对用户噪音过大，不逐台列名）
+            if (state.isSearching) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "正在搜索更多媒体源…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            state.errors.forEach { (_, message) ->
                 Text(
-                    "正在搜索更多媒体源…",
+                    "部分来源失败：$message",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
-        }
-        state.errors.forEach { (_, message) ->
-            Text(
-                "部分来源失败：$message",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = 4.dp),
-            )
         }
     }
 }

@@ -6,6 +6,7 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
 import com.mediahub.player.engine.PlaybackEvent
+import com.mediahub.player.engine.PlaybackEventMessage
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.SeekMode
 import java.util.concurrent.CountDownLatch
@@ -32,6 +33,105 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MpvPlaybackEngineTest {
+    @Test fun endedSnapshotRetainsOwnedPositionBeforeStateObserverReentry() = runTest {
+        val f = Fixture(backgroundScope)
+        val events = mutableListOf<PlaybackEventMessage>()
+        var replaced = false
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.events.collect { events += it } }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            f.engine.uiState.collect { state ->
+                if (state.isEnded && !replaced) {
+                    replaced = true
+                    f.engine.play(session("new"))
+                }
+            }
+        }
+        try {
+            f.engine.play(session("old-eof")); runCurrent()
+            val native = f.instances.single()
+            native.position = 15.0
+            advanceTimeBy(1_000); runCurrent()
+            assertEquals(15_000L, f.engine.uiState.value.positionMs)
+            native.observer.event(MpvInstance.Event.END_FILE)
+            assertTrue(replaced)
+            val ended = events.single { it.kind == PlaybackEvent.Ended }
+            assertEquals("old-eof", ended.progress!!.itemId)
+            assertEquals(15_000L, ended.progress!!.positionMs)
+        } finally { f.flushDeferred(); f.engine.release() }
+    }
+
+    @Test
+    fun `critical snapshots retain native pause position and committed seek target while queued`() = runTest {
+        val f = Fixture(backgroundScope)
+        val events = mutableListOf<PlaybackEventMessage>()
+        try {
+            f.engine.play(session("critical-owner")); runCurrent()
+            backgroundScope.launch { f.engine.events.collect { events += it } }
+            val native = f.instances.single()
+            native.position = 15.0
+            f.engine.togglePlayPause()
+            f.engine.seekTo(40_000, SeekMode.COMMIT)
+            native.position = 80.0 // Neither queued event may read this later position.
+            runCurrent()
+            assertEquals(listOf(PlaybackEvent.Paused, PlaybackEvent.Seeked), events.map { it.kind })
+            assertEquals(listOf(15_000L, 40_000L), events.map { it.progress!!.positionMs })
+            assertTrue(events.all { it.progress!!.itemId == "critical-owner" && it.progress!!.isPaused })
+        } finally { f.engine.release() }
+    }
+
+    @Test
+    fun `pause uses native intent before the first observer callback`() = runTest {
+        val f = Fixture(backgroundScope)
+        val events = mutableListOf<PlaybackEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.events.collect { events += it.kind } }
+        try {
+            f.engine.play(session("fresh-pause")); runCurrent()
+            val native = f.instances.single()
+            assertFalse(f.engine.uiState.value.isPlaying)
+            native.position = 15.0
+            f.engine.togglePlayPause()
+            assertEquals(listOf(true), native.pauseWrites)
+            repeat(3) {
+                native.advanceBy(5.0)
+                advanceTimeBy(1_000); runCurrent()
+                assertEquals(15_000L, f.engine.uiState.value.positionMs)
+            }
+            assertEquals(listOf(PlaybackEvent.Paused), events)
+        } finally { f.engine.release() }
+    }
+
+    @Test
+    fun `pause and resume remain ordered while observer callbacks are delayed`() = runTest {
+        val f = Fixture(backgroundScope)
+        val events = mutableListOf<PlaybackEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.events.collect { events += it.kind } }
+        try {
+            f.engine.play(session("delayed-observer")); runCurrent()
+            val native = f.instances.single()
+            native.observer.property("pause", false)
+            f.engine.togglePlayPause()
+            assertTrue("observer deliberately still reports playing", f.engine.uiState.value.isPlaying)
+            f.engine.togglePlayPause()
+            assertEquals(listOf(true, false), native.pauseWrites)
+            assertEquals(listOf(PlaybackEvent.Paused, PlaybackEvent.Resumed), events)
+        } finally { f.engine.release() }
+    }
+
+    @Test
+    fun `missing native pause property does not invent a successful control event`() = runTest {
+        val f = Fixture(backgroundScope)
+        val events = mutableListOf<PlaybackEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.events.collect { events += it.kind } }
+        try {
+            f.engine.play(session("unknown-pause")); runCurrent()
+            val native = f.instances.single()
+            native.paused = null
+            f.engine.togglePlayPause()
+            assertTrue(native.pauseWrites.isEmpty())
+            assertTrue(events.isEmpty())
+        } finally { f.engine.release() }
+    }
+
     @Test
     fun `release cancels queued initialization and forbids later play`() = runTest {
         val f = Fixture(backgroundScope)
@@ -157,7 +257,7 @@ class MpvPlaybackEngineTest {
         val f = Fixture(backgroundScope)
         val events = mutableListOf<PlaybackEvent>()
         val progress = mutableListOf<PlaybackProgress>()
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.events.collect { events += it } }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.events.collect { events += it.kind } }
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.progress.collect { progress += it } }
         f.onInit = { f.engine.release() }
         f.engine.play(session("old"))
@@ -184,7 +284,7 @@ class MpvPlaybackEngineTest {
     fun `stop during init invalidates before teardown events and returns session snapshot`() = runTest {
         val f = Fixture(backgroundScope)
         val events = mutableListOf<PlaybackEvent>()
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.events.collect { events += it } }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.events.collect { events += it.kind } }
         f.onInit = { assertEquals("old", f.engine.stop()?.itemId) }
         f.engine.play(session("old"))
         runCurrent()
@@ -257,7 +357,7 @@ class MpvPlaybackEngineTest {
         val values = mutableListOf<PlaybackProgress>()
         val events = mutableListOf<PlaybackEvent>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.progress.collect { values += it } }
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.events.collect { events += it } }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { f.engine.events.collect { events += it.kind } }
         f.engine.play(session("old"))
         runCurrent()
         val old = f.instances.single()
@@ -412,7 +512,7 @@ class MpvPlaybackEngineTest {
         val f = Fixture(scope)
         var callbackReturnedDuringDestroy = false
         try {
-            scope.launch { f.engine.events.collect { if (it == PlaybackEvent.Stopped) f.engine.play(session("new")) } }
+            scope.launch { f.engine.events.collect { if (it.kind == PlaybackEvent.Stopped) f.engine.play(session("new")) } }
             f.engine.play(session("old"))
             val old = f.instances.single()
             f.onDestroy = {
@@ -601,9 +701,14 @@ class MpvPlaybackEngineTest {
             if (args.first() == "loadfile") { loads++; lastLoadedUrl = args[1]; titleOnLoad()?.let { emitTitle(it) } }
             if (args.first() == "seek") seeks++
         }
-        override fun setPropertyBoolean(name: String, value: Boolean) = Unit
+        var paused: Boolean? = false
+        val pauseWrites = mutableListOf<Boolean>()
+        fun advanceBy(seconds: Double) { if (paused == false) position += seconds }
+        override fun setPropertyBoolean(name: String, value: Boolean) {
+            if (name == "pause") { paused = value; pauseWrites += value }
+        }
         override fun setPropertyDouble(name: String, value: Double) = Unit
-        override fun getPropertyBoolean(name: String): Boolean { reads++; return false }
+        override fun getPropertyBoolean(name: String): Boolean? { reads++; return if (name == "pause") paused else false }
         override fun getPropertyDouble(name: String): Double { reads++; return if (name == "time-pos") position else 60.0 }
         override fun getPropertyString(name: String): String? { reads++; return null }
         override fun destroy() {

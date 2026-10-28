@@ -13,8 +13,81 @@ import sys
 import xml.etree.ElementTree as ET
 
 
-MODULES = ("core/ui", "feature/player", "feature/settings", "provider/webdav", "core/database")
+MODULES = ("core/ui", "feature/player", "feature/settings", "provider/webdav", "core/database", "app")
 COMMON_TESTS = {
+    ('com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest', 'documentRootMustBeDavMultistatus'),
+    ('com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest', 'directDavAncestryAndSuccessfulStatusRemainOwnedByTheirResponse'),
+    ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'selectingAnotherArchiveWithTheSameNameClearsThePassphrase'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'dismissingAndReopeningTheCardClearsThePassphrase'),
+    ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'noPassphraseCardIsRenderedWhenThePickerDidNotSeeAnArchive'),
+    ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'anArchiveShowsTheCardWithItsFileNameAndADisabledUnlockButton'),
+    ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'typingAPassphraseEnablesUnlockAndTappingItHandsTheTextBack'),
+    ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'aRejectedPassphraseKeepsTheCardOpenAndShowsTheReasonCode'),
+    ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'thePassphraseCardSitsAboveThePreviewBlockAndKeepsTheMainFlowOnTheFirstScreen'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'theCollapsedCardShowsOnlyTheExportButton'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'tappingExportOpensThePassphraseStep'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'theExpandedCardOffersAnEmptyPassphraseFieldAndBothButtons'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'typingAPassphraseAndTappingExportHandsTheTextBack'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'aSavedExportShowsTheFileNameAndTheByteCount'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'aFailureShowsTheStableCodeAndKeepsTheCardOpen'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'tappingDismissReportsTheDismissCallback'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theEntryStartsEmptyAndTheVerifyButtonIsDisabled'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'typingALinkEnablesTheVerifyButtonAndHandsTheTextOver'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aParsedStateShowsTheDeviceIdTheFingerprintAndTheRemainingSeconds'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aFailedStateShowsTheStableCode'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theBackButtonCallsBackExactlyOnce'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theClearButtonWipesTheFieldAndReportsIt'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theWholePageNeverPrintsTheChallenge'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theFetchButtonIsDisabledUntilTheLinkIsVerified'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aParsedStateEnablesTheFetchButtonAndTheClickIsReported'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aFetchingStateDisablesEverythingAndSaysItIsConnecting'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aFetchedStateShowsTheValidatedInvitationAndSaysSyncIsStillSeparate'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aFetchFailureShowsTheCoreCodeInTheStateLine'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkAddressScreenTest', 'theAddressBlockIsShownWithItsDisplayOnlyHint'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkAddressScreenTest', 'anUnavailableStateSaysThereIsNoReaderInsteadOfPretendingItIsEmpty'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkAddressScreenTest', 'aReadyStateShowsTheHeadlineAndOneLinePerCandidate'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkAddressScreenTest', 'anEmptyReportShowsTheNoUsableAddressCode'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkAddressScreenTest', 'aFailedReportShowsTheEnumerationFailedCode'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkAddressScreenTest', 'theRefreshButtonIsEnabledAndTheClickIsReported'),
+    ('com.mediahub.feature.settings.pairing.PairingLinkAddressScreenTest', 'thePageOffersNoListenButtonAtAll'),
+    ('com.mediahub.feature.settings.sync.SourceSyncListenCancelScreenTest', 'theCancelButtonIsThereButDisabledWhenNothingIsBeingWaitedFor'),
+    ('com.mediahub.feature.settings.sync.SourceSyncListenCancelScreenTest', 'theCancelButtonBecomesUsableOnlyWhileReceiving'),
+    ('com.mediahub.feature.settings.sync.SourceSyncListenCancelScreenTest', 'tappingCancelWhileReceivingCallsBackExactlyOnce'),
+    ('com.mediahub.feature.settings.sync.SourceSyncListenCancelScreenTest', 'cancelStaysDisabledAfterAReceivedEnvelope'),
+    ('com.mediahub.feature.settings.sync.SourceSyncListenCancelScreenTest', 'cancelStaysDisabledAfterAFailedWait'),
+    ('com.mediahub.feature.settings.sync.SourceSyncListenCancelScreenTest', 'theCancelButtonSitsAtThePageTailAndTheMainFlowStaysOnTheFirstScreen'),
+    ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'theReceiveCardOffersACancelButtonThatIsDisabledWhenIdle'),
+    ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'whileReceivingTheCancelButtonCallsBackAndTheReceiveButtonIsLocked'),
+    ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'onceTheEnvelopeIsInTheCancelButtonIsLockedAgain'),
+    ('com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest', 'afterAFailureTheCancelButtonIsLockedAgain'),
+    (
+        "com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
+        "productionGroupedTrackRowsUseExactSnapshotAddresses",
+    ),
+    (
+        "com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
+        "productionSystemMediaKeysPausePlayAndToggleExactlyOnce",
+    ),
+    (
+        "com.mediahub.app.backup.BackupUserFlowNonOverwritingDeviceTest",
+        "exportCancelSaveWrongPasswordAndUnconfirmedReplaceAreNonOverwriting",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest",
+        "theListenFormCarriesTheTypedBudgetVerbatim",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest",
+        "theReceiveFormCarriesTheCrossMachineSwitchVerbatim",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest",
+        "theSendFormCarriesTheCrossMachineSwitchVerbatim",
+    ),
+    (
+        "com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
+        "productionPauseSeekAndResumeControlsPreserveControlledProgress",
+    ),
     (
         "com.mediahub.feature.player.PlayerRouteVisualEffectsTest",
         "productionPlayerInformationAndSubtitleActionsPreservePlaybackSession",
@@ -26,6 +99,26 @@ COMMON_TESTS = {
     (
         "com.mediahub.feature.settings.VisualEffectsSettingsEntryTest",
         "productionSettingsInfoDensityPersistsAndBackupEntryDispatches",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSendCancelScreenTest",
+        "theCancelButtonIsThereButDisabledBeforeAnythingIsSent",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSendCancelScreenTest",
+        "tappingCancelWhileSendingCallsBackExactlyOnce",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest",
+        "theListenFormCarriesTheTypedHostAndTheSwitchVerbatim",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest",
+        "theListenFormCarriesTheAuthSwitchAndTheSecretVerbatim",
+    ),
+    (
+        "com.mediahub.feature.settings.sync.SourceSyncSectionsScreenTest",
+        "whileListeningTheAuthSwitchAndTheSecretAreLocked",
     ),
     (
         "com.mediahub.feature.player.PlayerVisualEffectsPathTest",
@@ -54,6 +147,22 @@ COMMON_TESTS = {
     (
         "com.mediahub.core.ui.effects.PlayerVisualChromeBoundsTest",
         "tallLandscapeControlsKeepAmbientOutsideSubtitleSafeBand",
+    ),
+    (
+        "com.mediahub.app.visual.CinematicVisualTest",
+        "homeContinueWatchingUsesProductionCardAndDispatchesSelection",
+    ),
+    (
+        "com.mediahub.app.visual.CinematicVisualTest",
+        "libraryLongTitlesRemainVisibleAndPlayable",
+    ),
+    (
+        "com.mediahub.app.visual.CinematicVisualTest",
+        "searchProductionCardsKeepTitleAndSourceHierarchy",
+    ),
+    (
+        "com.mediahub.app.visual.CinematicVisualTest",
+        "cinematicDetailRetainsRealPlayCallback",
     ),
     # A4：Android runtime 生产 parser 双验收门禁（缺失/跳过=失败，
     # 防回归"job success 但 webdav 测试缺失/被跳过"）

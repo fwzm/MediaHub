@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -33,66 +31,75 @@ fun ServerCard(
     onLogout: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
 ) {
-    Card(
+    com.mediahub.core.ui.MediaHubCard(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-        ),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Surface(
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.primaryContainer,
+        Column {
+            Row(
+                modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    text = server.type.label,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = server.displayName,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = server.baseUrl.ifBlank { "本地存储" },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                server.lastError?.let { error ->
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
                     Text(
-                        text = "上次错误：$error",
+                        text = server.type.label,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = server.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = server.baseUrl.ifBlank { "本地存储" },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                authState?.let { AuthStatusLine(it) }
+                Column(horizontalAlignment = Alignment.End) {
+                    if (server.isDefault) {
+                        Text(
+                            text = "默认",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    if (onEdit != null) {
+                        TextButton(onClick = onEdit) { Text("编辑", style = MaterialTheme.typography.labelMedium) }
+                    }
+                    if (onLogout != null && authState is AuthSessionState.Authenticated) {
+                        TextButton(onClick = onLogout) { Text("退出", style = MaterialTheme.typography.labelMedium) }
+                    }
+                }
             }
-            Column(horizontalAlignment = Alignment.End) {
-                if (server.isDefault) {
-                    Text(
-                        text = "默认",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                if (onEdit != null) {
-                    TextButton(onClick = onEdit) { Text("编辑", style = MaterialTheme.typography.labelMedium) }
-                }
-                if (onLogout != null && authState is AuthSessionState.Authenticated) {
-                    TextButton(onClick = onLogout) { Text("退出", style = MaterialTheme.typography.labelMedium) }
+            if (server.lastError != null || authState != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 12.dp),
+                ) {
+                    server.lastError?.let { error ->
+                        Text(
+                            text = "上次错误：$error",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    authState?.let { AuthStatusLine(it) }
                 }
             }
         }

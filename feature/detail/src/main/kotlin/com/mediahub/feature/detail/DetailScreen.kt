@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -44,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -77,6 +80,7 @@ fun DetailRoute(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val seriesState by viewModel.seriesState.collectAsStateWithLifecycle()
     val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
+    val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -88,6 +92,31 @@ fun DetailRoute(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    // 收藏开关（task-25 / A2）：只在该数据源具备 FAVORITE 能力时出现
+                    val favorite = favoriteState
+                    if (favorite != null) {
+                        IconButton(
+                            onClick = viewModel::toggleFavorite,
+                            enabled = !favorite.isUpdating,
+                        ) {
+                            Icon(
+                                imageVector = if (favorite.isFavorite) {
+                                    Icons.Default.Favorite
+                                } else {
+                                    Icons.Default.FavoriteBorder
+                                },
+                                contentDescription = stringResource(
+                                    if (favorite.isFavorite) {
+                                        R.string.detail_action_unfavorite
+                                    } else {
+                                        R.string.detail_action_favorite
+                                    },
+                                ),
+                            )
+                        }
                     }
                 },
             )
@@ -109,10 +138,21 @@ fun DetailRoute(
                 }
             }
 
-            is DetailUiState.Content -> DetailBody(
+            is DetailUiState.Content -> Column(
+                modifier = Modifier.fillMaxSize().padding(padding),
+            ) {
+                // 收藏失败只降级为可读提示：已展示的详情与收藏状态都不翻转
+                favoriteState?.error?.let { message ->
+                    Text(
+                        text = message,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                DetailBody(
                 detail = s.detail,
                 seriesState = seriesState,
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize().weight(1f, fill = true),
                 onPlay = { item ->
                     onPlay(
                         viewModel.serverId,
@@ -132,13 +172,14 @@ fun DetailRoute(
                 onOpenItem = onOpenItem,
                 sourceState = sourceState,
                 onSwitchSource = onSwitchSource,
-            )
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun DetailBody(
+fun DetailBody(
     detail: MediaDetail,
     seriesState: SeriesBrowseState,
     modifier: Modifier = Modifier,
@@ -151,66 +192,73 @@ private fun DetailBody(
 ) {
     val item = detail.item
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
-        // 顶部 backdrop，底部渐变过渡到内容区
         Box(modifier = Modifier.fillMaxWidth()) {
             BackdropImage(
                 url = item.backdropUrl ?: item.posterUrl,
                 contentDescription = "${item.title} 背景图",
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 10f).clip(RoundedCornerShape(0.dp)),
             )
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
-                    .align(Alignment.BottomCenter)
+                    .aspectRatio(16f / 10f)
                     .background(
-                        Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.surface)),
+                        Brush.verticalGradient(
+                            0.25f to Color.Transparent,
+                            0.7f to MaterialTheme.colorScheme.background.copy(alpha = 0.5f),
+                            1f to MaterialTheme.colorScheme.background,
+                        ),
                     ),
             )
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            PosterImage(
-                url = item.posterUrl,
-                contentDescription = item.title,
-                modifier = Modifier.width(110.dp),
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    item.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val meta = buildList {
-                    item.year?.let { add(it.toString()) }
-                    item.runtimeMs?.let { ms ->
-                        val minutes = ms / 60_000
-                        if (minutes > 0) add("${minutes}分钟")
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    PosterImage(
+                        url = item.posterUrl,
+                        contentDescription = item.title,
+                        modifier = Modifier.width(104.dp),
+                    )
+                    Column(modifier = Modifier.weight(1f).padding(top = 24.dp)) {
+                        Text(
+                            item.title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = Color.White,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val meta = buildList {
+                            item.year?.let { add(it.toString()) }
+                            item.runtimeMs?.let { ms ->
+                                val minutes = ms / 60_000
+                                if (minutes > 0) add("${minutes}分钟")
+                            }
+                            item.communityRating?.let { add("★ %.1f".format(it)) }
+                            item.container?.uppercase()?.let { add(it) }
+                        }
+                        if (meta.isNotEmpty()) {
+                            Text(
+                                meta.joinToString("  ·  "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.86f),
+                                modifier = Modifier.padding(top = 8.dp),
+                                maxLines = 2,
+                            )
+                        }
                     }
-                    item.communityRating?.let { add("★ %.1f".format(it)) }
-                    item.genres.take(3).let { if (it.isNotEmpty()) add(it.joinToString(" / ")) }
                 }
-                if (meta.isNotEmpty()) {
-                    Text(
-                        meta.joinToString(" · "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-                item.container?.uppercase()?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
+                if (item.genres.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.padding(top = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        item.genres.take(3).forEach { genre ->
+                            com.mediahub.core.ui.MediaHubLabel(genre)
+                        }
+                    }
                 }
             }
         }
@@ -219,11 +267,13 @@ private fun DetailBody(
             onClick = { onPlay(item) },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 20.dp, vertical = 20.dp)
+                .height(54.dp),
+            shape = MaterialTheme.shapes.medium,
         ) {
-            Icon(Icons.Default.PlayArrow, contentDescription = null)
-            Spacer(Modifier.width(4.dp))
-            Text("播放")
+            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(26.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("立即播放", style = MaterialTheme.typography.titleMedium)
         }
 
         // ---- 1F C2：跨服务器来源选择（ADR-038） ----
@@ -384,15 +434,17 @@ private fun DetailBody(
 
         item.overview?.takeIf(String::isNotBlank)?.let { overview ->
             var expanded by remember { mutableStateOf(false) }
-            Column(modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+                com.mediahub.core.ui.MediaHubSectionHeader("剧情简介", modifier = Modifier.padding(bottom = 10.dp))
                 Text(
                     overview,
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = if (expanded) Int.MAX_VALUE else 4,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (!expanded && overview.length > 120) {
-                    TextButton(onClick = { expanded = true }) { Text("展开") }
+                    TextButton(onClick = { expanded = true }) { Text("展开全部") }
                 }
             }
         }

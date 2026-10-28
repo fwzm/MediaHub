@@ -89,7 +89,7 @@ class LibraryViewModelTest {
         override val descriptor: ProviderDescriptor = ProviderDescriptor(
             id = "emby", serverType = ServerType.EMBY, displayName = "Emby",
             category = ProviderCategory.MEDIA_SERVER,
-            declaredCapabilities = setOf(ProviderCapability.LIBRARY),
+            declaredCapabilities = setOf(ProviderCapability.LIBRARY, ProviderCapability.BROWSE),
             authMethod = com.mediahub.provider.api.AuthMethod.USERNAME_PASSWORD,
             status = ProviderStatus.STABLE,
         )

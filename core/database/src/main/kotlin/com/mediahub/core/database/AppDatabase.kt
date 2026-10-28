@@ -21,7 +21,7 @@ import com.mediahub.core.database.entity.SubtitleMemoryEntity
         PlaybackProgressEntity::class,
         SubtitleMemoryEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {

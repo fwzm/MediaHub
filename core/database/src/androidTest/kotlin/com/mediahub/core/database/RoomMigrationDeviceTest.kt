@@ -33,15 +33,24 @@ class RoomMigrationDeviceTest {
                     if (version >= 2) db.execSQL("INSERT INTO server_endpoints (id,serverId,name,url,isPrimary,enabled,sortOrder) " +
                         "VALUES ('s1_ep0','s1','main','https://fixture.invalid',1,1,0)")
                 }
-                helper.runMigrationsAndValidate(name, 4, true, Migrations.MIGRATION_1_2,
-                    Migrations.MIGRATION_2_3, Migrations.MIGRATION_3_4).close()
+                helper.runMigrationsAndValidate(name, 5, true, Migrations.MIGRATION_1_2,
+                    Migrations.MIGRATION_2_3, Migrations.MIGRATION_3_4, Migrations.MIGRATION_4_5).close()
                 val room = Room.databaseBuilder(context, AppDatabase::class.java, name)
-                    .addMigrations(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3, Migrations.MIGRATION_3_4)
+                    .addMigrations(
+                        Migrations.MIGRATION_1_2,
+                        Migrations.MIGRATION_2_3,
+                        Migrations.MIGRATION_3_4,
+                        Migrations.MIGRATION_4_5,
+                    )
                     .allowMainThreadQueries().build()
                 try {
                         // Opening through the real generated database also verifies the stored identity hash.
                         val db = room.openHelper.writableDatabase
-                        assertEquals(4, db.version)
+                        assertEquals(5, db.version)
+                        // W6-B：同步身份三列由 MIGRATION_4_5 补齐，历史行取默认值
+                        db.query("SELECT sync_source_id,sync_record_revision FROM servers WHERE id='s1'").use { c ->
+                            assertTrue(c.moveToFirst()); assertTrue(c.isNull(0)); assertEquals(0L, c.getLong(1))
+                        }
                         db.query("SELECT name,createdAtEpochMs FROM servers WHERE id='s1'").use { c ->
                             assertTrue(c.moveToFirst()); assertEquals("Historical NAS", c.getString(0)); assertEquals(123L, c.getLong(1))
                         }
@@ -59,6 +68,11 @@ class RoomMigrationDeviceTest {
                             var found = false
                             while (c.moveToNext()) if (c.getString(c.getColumnIndexOrThrow("name")) == "index_subtitle_memory_serverId") found = true
                             assertTrue("serverId index on historical version $version", found)
+                        }
+                        db.query("PRAGMA index_list(servers)").use { c ->
+                            var found = false
+                            while (c.moveToNext()) if (c.getString(c.getColumnIndexOrThrow("name")) == "index_servers_sync_source_id") found = true
+                            assertTrue("sync identity unique index on historical version $version", found)
                         }
                 } finally {
                     room.close()

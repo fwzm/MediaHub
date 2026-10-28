@@ -1,6 +1,7 @@
 package com.mediahub.core.common.backup
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,8 +12,8 @@ class BackupSerializerTest {
 
     private fun samplePayload() = BackupDtos.BackupPayload(
         manifest = BackupFileFormat.Manifest(
-            formatVersion = 1,
-            minimumReaderVersion = 1,
+            formatVersion = BackupCrypto.FORMAT_VERSION,
+            minimumReaderVersion = BackupCrypto.MINIMUM_READER_VERSION,
             appVersion = "0.1.0-alpha.1",
             createdAtEpochMs = 1_700_000_000_000,
             includedSections = listOf("servers", "progress", "preferences"),
@@ -171,7 +172,7 @@ class BackupSerializerTest {
     @Test
     fun `minimumReaderVersion above reader returns VersionTooNew`() {
         val payload = withManifest {
-            it.copy(formatVersion = 1, minimumReaderVersion = BackupCrypto.FORMAT_VERSION + 1)
+            it.copy(formatVersion = BackupCrypto.FORMAT_VERSION, minimumReaderVersion = BackupCrypto.FORMAT_VERSION + 1)
         }
         val result = fastImport(fastExport(payload))
         assertTrue("读不了的时代应报版本过新", result is BackupSerializer.ImportResult.VersionTooNew)
@@ -267,7 +268,7 @@ class BackupSerializerTest {
             it.copy(recordCounts = mapOf("servers" to orphaned.servers.size, "progress" to orphaned.progress.size, "preferences" to 1))
         }
         val result = fastImport(fastExport(payload))
-        assertTrue("孤立引用属冲突披露，不是格式错误", result is BackupSerializer.ImportResult.Ok)
+        assertTrue("孤立引用属冲突披露，不是格式错误（实际 " + result + "）", result is BackupSerializer.ImportResult.Ok)
         assertEquals(2, (result as BackupSerializer.ImportResult.Ok).payload.progress.size)
     }
 
@@ -283,5 +284,95 @@ class BackupSerializerTest {
         assertThrows(IllegalStateException::class.java) {
             BackupSerializer.export(samplePayload(), password(), maxBytes = 64, testIterations = 10_000)
         }
+    }
+
+    // ---- 收藏段（task-25 / A2）：v2 新增 favorites，v1 旧备份必须仍可导入 ----
+
+    private fun favorite(itemId: String, addedAtEpochMs: Long = 1_700_000_000_000, title: String? = "条目") =
+        BackupDtos.FavoriteDto(serverBackupId = "srv-1", itemId = itemId, title = title, addedAtEpochMs = addedAtEpochMs)
+
+    /** 在样例载荷上挂 favorites 段，并同步 manifest 的 sections/recordCounts。 */
+    private fun payloadWithFavorites(favorites: List<BackupDtos.FavoriteDto>): BackupDtos.BackupPayload {
+        val base = samplePayload()
+        return base.copy(
+            favorites = favorites,
+            manifest = base.manifest.copy(
+                includedSections = base.manifest.includedSections + "favorites",
+                recordCounts = base.manifest.recordCounts + ("favorites" to favorites.size),
+            ),
+        )
+    }
+
+    @Test
+    fun `favorites roundtrip preserves identity and timestamp`() {
+        val original = payloadWithFavorites(listOf(favorite("item-1"), favorite("item-2", 1_700_000_000_100, null)))
+        val result = fastImport(fastExport(original))
+        assertTrue("带收藏段的备份应可导入（实际 " + result + "）", result is BackupSerializer.ImportResult.Ok)
+        val payload = (result as BackupSerializer.ImportResult.Ok).payload
+        assertEquals(2, payload.favorites.size)
+        assertEquals("item-1", payload.favorites[0].itemId)
+        assertEquals("srv-1", payload.favorites[0].serverBackupId)
+        assertEquals(1_700_000_000_100, payload.favorites[1].addedAtEpochMs)
+        assertNull(payload.favorites[1].title)
+    }
+
+    @Test
+    fun `legacy v1 file without favorites still imports`() {
+        // uncheckedBackup 独立构造 v1 信封（AAD 用文件自身版本），不经过当前导出器
+        val legacy = withManifest { it.copy(formatVersion = 1, minimumReaderVersion = 1) }
+        val result = BackupSerializer.import(uncheckedBackup(legacy, password()), password())
+        assertTrue("v1 旧备份必须仍可导入", result is BackupSerializer.ImportResult.Ok)
+        assertEquals(
+            "老备份无 favorites 段应得空列表",
+            0,
+            (result as BackupSerializer.ImportResult.Ok).payload.favorites.size,
+        )
+    }
+
+    @Test
+    fun `payload json without favorites section decodes to empty list`() {
+        val legacyJson = """
+            {"manifest":{"formatVersion":1,"minimumReaderVersion":1,"appVersion":"0.1.0","createdAtEpochMs":1,
+            "includedSections":["servers"],"recordCounts":{"servers":0}},"servers":[],"progress":[]}
+        """.trimIndent()
+        val payload = BackupDtos.decodePayload(legacyJson)
+        assertTrue("缺 favorites 键应默认空列表", payload.favorites.isEmpty())
+        assertEquals(1, payload.manifest.formatVersion)
+    }
+
+    @Test
+    fun `blank favorite item id returns Corrupted`() {
+        val payload = payloadWithFavorites(listOf(favorite("")))
+        val result = fastImport(fastExport(payload))
+        assertTrue("收藏空 ID 应拒绝", result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `duplicate favorites return Corrupted`() {
+        val payload = payloadWithFavorites(listOf(favorite("item-1"), favorite("item-1")))
+        val result = fastImport(fastExport(payload))
+        assertTrue("重复收藏记录应拒绝", result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `negative favorite timestamp returns Corrupted`() {
+        val payload = payloadWithFavorites(listOf(favorite("item-1", addedAtEpochMs = -1)))
+        val result = fastImport(fastExport(payload))
+        assertTrue("收藏时间戳为负应拒绝", result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `favorites section declared without record count returns Corrupted`() {
+        val base = payloadWithFavorites(listOf(favorite("item-1")))
+        val payload = base.copy(manifest = base.manifest.copy(recordCounts = base.manifest.recordCounts - "favorites"))
+        val result = fastImport(fastExport(payload))
+        assertTrue("sections 与 recordCounts 不一致应拒绝", result is BackupSerializer.ImportResult.Corrupted)
+    }
+
+    @Test
+    fun `favorites over the record cap return Corrupted`() {
+        val tooMany = List(BackupSerializer.MAX_FAVORITES + 1) { favorite("item-" + it) }
+        val result = fastImport(fastExport(payloadWithFavorites(tooMany)))
+        assertTrue("收藏数量超上限应拒绝", result is BackupSerializer.ImportResult.Corrupted)
     }
 }

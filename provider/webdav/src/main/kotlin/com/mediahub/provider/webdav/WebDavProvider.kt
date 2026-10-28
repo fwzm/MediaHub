@@ -64,9 +64,7 @@ internal val WEBDAV_PROVIDER_DESCRIPTOR = ProviderDescriptor(
  * - 播放 → [WebDavPlaybackProvider]
  * - 协议与解析 → [WebDavApi] / [WebDavMultistatusParser]
  *
- * 说明：`main` 上的 [TokenStore] 只有会话令牌存取，没有 PR #18 分支引入的
- * 身份世代 lease API；因此本 Provider **不**装配身份守卫（与 main 上的
- * Emby/Jellyfin 工厂保持一致），避免对外部未合并分支形成编译依赖。
+ * 协议探测不读取凭据；能力实例共用 [WebDavCredentialCoordinator]，按服务器身份与世代约束凭据。
  */
 class WebDavProvider(
     server: MediaServer,
@@ -120,16 +118,18 @@ class WebDavProvider(
             call.awaitCancellable { response ->
                 response.use {
                     val latencyMs = (System.nanoTime() - start) / 1_000_000
-                    val dav = it.header("DAV")
                     when {
-                        it.code in 200..299 -> ConnectionStatus(
+                        it.code in 200..299 && WebDavCompliance.advertisesClassOne(it.headers.values("DAV")) -> ConnectionStatus(
                             ok = true,
                             latencyMs = latencyMs,
-                            message = buildString {
-                                append("WebDAV 可用（HTTP ${it.code}")
-                                if (!dav.isNullOrBlank()) append(" · DAV $dav")
-                                append("）")
-                            },
+                            message = "WebDAV 可用（HTTP ${it.code} · DAV）",
+                        )
+
+                        it.code in 200..299 -> ConnectionStatus(
+                            ok = false,
+                            latencyMs = latencyMs,
+                            message = "未检测到 WebDAV 协议声明，请检查媒体源地址（HTTP ${it.code}）",
+                            errorCode = ProviderException.ErrorCode.CONNECTION,
                         )
 
                         it.code == 401 -> ConnectionStatus(
