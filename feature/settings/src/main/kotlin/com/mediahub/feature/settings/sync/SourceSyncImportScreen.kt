@@ -63,6 +63,15 @@ object SourceSyncImportTags {
     const val PREVIEW = "sync.import.preview"
     const val APPLY = "sync.apply"
     const val RESULT = "sync.apply.result"
+
+    /** W6-81：结果页的「本轮回执」一行（写入 / 跳过 / 保留未应用）。 */
+    const val APPLY_VERDICT = "sync.apply.verdict"
+
+    /** W6-81：永久扣住的原因码（只在有扣住时出现）。 */
+    const val APPLY_BLOCKING = "sync.apply.blocking"
+
+    /** W6-81：对端声明删除、本机连凭据一起移除的条数（只在 > 0 时出现）。 */
+    const val APPLY_REMOVED = "sync.apply.removed"
     const val BLOCKED = "sync.apply.blocked"
     const val ENTRY_ALLOW = "sync.entry.allow"
     const val ENTRY_SKIP = "sync.entry.skip"
@@ -543,6 +552,27 @@ fun SourceSyncImportScreen(
                                 " · 失败 " + applied.failedCount,
                             style = MaterialTheme.typography.bodyMedium,
                         )
+                        // W6-81：上一行是预览里的桶，这一行是服务这一轮真正做了什么（写入/跳过/扣住/拒写）。
+                        Text(
+                            SourceSyncImportCopy.applyVerdict(applied),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.testTag(SourceSyncImportTags.APPLY_VERDICT),
+                        )
+                        SourceSyncImportCopy.blockingReasons(applied)?.let { line ->
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag(SourceSyncImportTags.APPLY_BLOCKING),
+                            )
+                        }
+                        SourceSyncImportCopy.removedLine(applied)?.let { line ->
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.testTag(SourceSyncImportTags.APPLY_REMOVED),
+                            )
+                        }
                         applied.appliedTitles.forEach { title ->
                             Text("- " + title, style = MaterialTheme.typography.bodySmall)
                         }

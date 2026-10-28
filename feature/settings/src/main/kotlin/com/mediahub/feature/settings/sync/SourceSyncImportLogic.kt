@@ -2,7 +2,6 @@ package com.mediahub.feature.settings.sync
 
 import com.mediahub.core.common.sync.SourceSyncAction
 import com.mediahub.core.common.sync.SourceSyncCandidate
-import com.mediahub.core.common.sync.SourceSyncCodec
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
 
@@ -80,6 +79,35 @@ object SourceSyncImportCopy {
     fun baselineRejected(count: Int): String =
         "有 " + count + " 条没能记入基线（修订号比已有记录旧或同号不同内容）；导入结果不受影响。"
 
+    /**
+     * W6-81：本轮回执的一句话（写入 / 跳过 / 保留未应用）。
+     *
+     * 与上面那行「已导入 A · 需确认 B · 已忽略 C …」刻意分开：那行是预览里的桶，
+     * 这行是服务真正做了什么。合成一句会让「需确认 3 条」和「扣住 3 条」看起来像同一件事，
+     * 而实际上前者要用户去来源页处理、后者连闸门都没打算写。
+     */
+    fun applyVerdict(summary: SourceSyncApplySummary): String =
+        "已写入 " + summary.appliedCount +
+            " 条 · 跳过 " + summary.skippedCount +
+            " 条 · 保留未应用 " + summary.notAppliedCount +
+            " 条（扣住 " + summary.withheldCount + " · 拒写 " + summary.failedCount + "）"
+
+    /** W6-81：永久扣住的原因码；没有就返回 null（0 条时不该占版面）。 */
+    fun blockingReasons(summary: SourceSyncApplySummary): String? =
+        if (summary.blockingReasons.isEmpty()) {
+            null
+        } else {
+            "永久扣住的原因：" + summary.blockingReasons.joinToString("、") + "。光点允许没用，需去来源页逐条处理。"
+        }
+
+    /** W6-81：对端声明删除、本机连凭据一起移除的条数；没有就返回 null。 */
+    fun removedLine(summary: SourceSyncApplySummary): String? =
+        if (summary.removedCount > 0) {
+            "已删除 " + summary.removedCount + " 条本地来源（对端声明删除，凭据一并移除）。"
+        } else {
+            null
+        }
+
     /** 桶标题（四桶固定顺序）。 */
     fun titleOf(bucket: SourceSyncImportBucket): String = when (bucket) {
         SourceSyncImportBucket.APPLY -> "可导入"
@@ -108,7 +136,7 @@ object SourceSyncImportCopy {
 }
 
 /**
- * 四桶分组、可否允许、以及"跳过"如何生效 —— 全部纯函数，可在 JVM 单测里直接跑（不依赖 Compose）。
+ * 四桶分组、可否允许、以及"允许/跳过"如何变成名单 —— 全部纯函数，可在 JVM 单测里直接跑（不依赖 Compose）。
  *
  * 判定只依赖 [SourceSyncCandidate] 里的字段，规则与 [com.mediahub.core.database.sync.AndroidSourceSyncService]
  * 的写入条件完全一致：**只有 Create/Update 且 requiresUserApproval=false 的条目才可允许**。
@@ -202,29 +230,4 @@ object SourceSyncImportLogic {
 
     /** 键比较口径：去空白 + 忽略大小写（与同步层 syncSourceId 的比较一致）。 */
     fun normalizeKey(raw: String?): String = raw?.trim()?.lowercase().orEmpty()
-
-    /**
-     * 应用前把"未允许"的来源从信封里剔除，再交给 [com.mediahub.core.database.sync.AndroidSourceSyncService]。
-     *
-     * 为什么在信封上做而不是给服务加逐条参数：服务的公开契约是"一份信封 → 一次导入"，逐条决策
-     * 是 UI 层的事；过滤信封既不改服务签名，也能让结果页的计数如实反映"我批准了什么"。
-     *
-     * 信封解析失败、或过滤不产生变化时原样返回（宁可让服务自己报错，也不在这里制造第二种错误码）。
-     */
-    fun filterEnvelope(envelopeJson: String, skippedSyncSourceIds: Set<String>): String {
-        if (skippedSyncSourceIds.isEmpty()) return envelopeJson
-        val skipped = skippedSyncSourceIds.map(::normalizeKey).filter { it.isNotEmpty() }.toSet()
-        if (skipped.isEmpty()) return envelopeJson
-        val decoded = SourceSyncCodec.tryDecode(envelopeJson)
-        if (decoded !is SourceSyncCodec.DecodeResult.Ok) return envelopeJson
-        val envelope = decoded.envelope
-        val sources = envelope.sources.filterNot { normalizeKey(it.syncSourceId) in skipped }
-        val deletions = envelope.deletions.filterNot { normalizeKey(it.syncSourceId) in skipped }
-        if (sources.size == envelope.sources.size && deletions.size == envelope.deletions.size) {
-            return envelopeJson
-        }
-        return runCatching {
-            SourceSyncCodec.encode(envelope.copy(sources = sources, deletions = deletions))
-        }.getOrDefault(envelopeJson)
-    }
 }

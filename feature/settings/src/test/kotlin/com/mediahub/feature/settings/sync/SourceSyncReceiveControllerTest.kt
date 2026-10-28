@@ -10,6 +10,7 @@ import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SourceSyncSummary
 import com.mediahub.core.common.sync.SyncSourceTypeValue
+import com.mediahub.core.database.sync.SourceSyncApplyReport
 import com.mediahub.core.database.sync.SourceSyncImportResult
 import com.mediahub.core.database.sync.SourceSyncPreview
 import com.mediahub.core.database.sync.SourceSyncTransferImportOutcome
@@ -583,9 +584,13 @@ class SourceSyncReceiveControllerTest {
     private class FakeApplyPort : SourceSyncApplyPort {
         var calls = 0
 
-        override suspend fun apply(envelopeJson: String): SourceSyncImportResult {
+        override suspend fun apply(
+            envelopeJson: String,
+            allowedKeys: Set<String>,
+            skippedKeys: Set<String>,
+        ): SourceSyncApplyReport {
             calls++
-            return SourceSyncImportResult()
+            return SourceSyncApplyReport()
         }
     }
 

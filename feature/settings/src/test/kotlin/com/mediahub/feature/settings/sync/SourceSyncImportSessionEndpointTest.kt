@@ -9,9 +9,9 @@ import com.mediahub.core.common.sync.SourceSyncNotImportedEndpoint
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SourceSyncSummary
-import com.mediahub.core.database.sync.AppliedSourceChange
-import com.mediahub.core.database.sync.SourceSyncImportResult
+import com.mediahub.core.database.sync.SourceSyncApplyReport
 import com.mediahub.core.database.sync.SourceSyncPreview
+import com.mediahub.core.database.sync.SourceSyncWrittenSource
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -43,7 +43,7 @@ class SourceSyncImportSessionEndpointTest {
                 recordsWithAlternatives = 1,
                 recordsWithoutEndpoint = 0,
             ),
-            baselineSaved = true,
+            baselineUpdated = true,
         )
         val session = SourceSyncImportSession(
             FakePreviewPort(SourceSyncPreview.Ready(
@@ -71,9 +71,9 @@ class SourceSyncImportSessionEndpointTest {
     @Test
     fun baseline_rejections_are_counted_not_hidden() = runTest {
         val result = ok().copy(
-            baselineSaved = true,
-            baselineRejectedSyncSourceIds = listOf("sync-1"),
-            baselineRejectionReason = "baseline-stale-revision",
+            baselineUpdated = true,
+            baselineRejectedCount = 1,
+            warnings = listOf("baseline-rejected:1:baseline-stale-revision"),
         )
         val plan = SourceSyncPlan(listOf(createCandidate("sync-1")))
         val session = SourceSyncImportSession(
@@ -128,8 +128,12 @@ class SourceSyncImportSessionEndpointTest {
         override suspend fun preview(envelopeJson: String): SourceSyncPreview = result
     }
 
-    private class FakeApplyPort(private val result: SourceSyncImportResult) : SourceSyncApplyPort {
-        override suspend fun apply(envelopeJson: String): SourceSyncImportResult = result
+    private class FakeApplyPort(private val result: SourceSyncApplyReport) : SourceSyncApplyPort {
+        override suspend fun apply(
+            envelopeJson: String,
+            allowedKeys: Set<String>,
+            skippedKeys: Set<String>,
+        ): SourceSyncApplyReport = result
     }
 
     private fun createCandidate(id: String) = SourceSyncCandidate(
@@ -141,16 +145,10 @@ class SourceSyncImportSessionEndpointTest {
         displayName = "客厅 Emby",
     )
 
-    private fun ok() = SourceSyncImportResult(
-        deviceId = "device-a",
-        snapshotId = "snap-1",
-        applied = listOf(
-            AppliedSourceChange(
-                serverId = "srv-1",
-                candidate = createCandidate("sync-1"),
-                contentHash = "hash-1",
-            ),
-        ),
+    private fun ok() = SourceSyncApplyReport(
+        peerDeviceId = "device-a",
+        applied = 1,
+        wrote = listOf(SourceSyncWrittenSource(syncSourceId = "sync-1", serverId = "srv-1")),
     )
 
     private fun envelopeJson(): String = SourceSyncCodec.encode(

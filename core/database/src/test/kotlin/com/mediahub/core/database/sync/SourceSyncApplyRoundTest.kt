@@ -49,6 +49,8 @@ class SourceSyncApplyRoundTest {
         assertEquals(1, report.total)
         assertEquals(1, store.createCalls)
         assertEquals(listOf("srv-1"), report.wroteServerIds)
+        assertEquals("sync-a", report.wrote.single().syncSourceId)
+        assertEquals("srv-1", report.wrote.single().serverId)
         assertTrue(report.hasWrites)
         assertEquals("已写入本地 1 条 / 跳过 0 条 / 保留未应用 0 条", report.summary)
         // 基线只在这一轮真的写进去之后推进，且条数取自保存后的真实值。
@@ -56,6 +58,26 @@ class SourceSyncApplyRoundTest {
         assertEquals(1, report.baselineEntryCount)
         assertEquals(1, baselines.writeCount)
         assertEquals("sync-a", store.snapshots["srv-1"]?.syncSourceId)
+    }
+
+    @Test
+    fun every_written_record_keeps_its_identity_beside_the_new_server_id() = runBlocking {
+        // 结果页要靠这个配对把「补录并验证」对到具体来源：serverId 是本机新造的，身份只在对端信封里。
+        val store = FakeStore()
+        val service = service(store, InMemorySourceSyncBaselineStore())
+        val json = SourceSyncCodec.encode(
+            envelope(sources = listOf(record("sync-a", revision = 3L), record("sync-b", revision = 3L))),
+        )
+
+        val report = service.applyRound(json)
+
+        assertEquals(2, report.applied)
+        assertEquals(
+            listOf("sync-a" to "srv-1", "sync-b" to "srv-2"),
+            report.wrote.map { written -> written.syncSourceId to written.serverId },
+        )
+        assertEquals(listOf("srv-1", "srv-2"), report.wroteServerIds)
+        assertEquals(0, report.removedServerIds.size)
     }
 
     @Test

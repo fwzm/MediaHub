@@ -4849,3 +4849,80 @@ W6-79 候选：①两端把对端基线喂进 `SourceSyncPlanner`（真正「读
 3. 两端把对端基线喂进 `SourceSyncPlanner`。
 4. 监听卡「取消接收」的可观测性。
 5. 真 Room 级联（真实 `ServerRepository` + 真库）跑一遍删除链。
+
+## §50 W6-81：导入页的写入口换成 applyRound（逐条裁决真正生效 + 回执带身份映射）
+
+### 50.1 结论先行
+
+- 导入页此前是「预演在 `planRound`、写入在 `importEnvelope`」两条腿：`importEnvelope` 是 W6-78 之前的老入口，它自己重新合并一遍信封、不看用户在界面上点过什么，于是**逐条裁决（ALLOW / SKIP）到不了写盘那一层** —— 界面上的「跳过」只影响过滤后的信封文本，`applyRound` 里那套「闸门裁决 + 扣住凭据 + 删除分支」全都没参与。
+- 更糟的是回执形状不匹配：`importEnvelope` 返回的是 `AppliedSourceChange(serverId, candidate)`，而 `applyRound` 返回的 `SourceSyncApplyReport` 只有扁平的 `wroteServerIds`。结果页要靠「身份 → serverId」把每条来源渲染进「补录并验证」区块，扁平列表只能按顺序猜。
+- 本轮把写入口整条换成 `applyRound`：`SourceSyncApplyPort` 的签名从 `(envelopeJson)` 改成 `(envelopeJson, allowedKeys, skippedKeys)`，整份信封透传（不再剔除式过滤），两张名单就是界面上点过的裁决；`SourceSyncApplyReport` 补 `wrote: List<SourceSyncWrittenSource>` 让服务层自己记住「这个 syncSourceId 落成了哪个 serverId」。
+- 结果页同时开始显示**这一轮真实发生的事**：已写入 / 跳过 / 保留未应用（扣住 + 拒写）、永久扣住的原因码、删除了几条本地来源。这些数字以前一个都不显示，用户只能从「已导入 N」里猜。
+- `SourceSyncImportLogic.filterEnvelope` 就地退休（生产零调用），它原来承担的责任移交给了 `applyRound` 的名单参数。
+
+### 50.2 缺的是什么
+
+| 能力 | Windows（权威） | Android 本轮之前 |
+| --- | --- | --- |
+| 写入时是否看逐条裁决 | `ApplyAsync(preview, allowedIds, writer, skippedIds)`：`Decisions` 先 allow 后 skip，闸门取最后一条 | 写入口 `importEnvelope(json)` 收不到裁决；只有 `filterEnvelope` 把跳过的条目**从信封里删掉** |
+| 被扣住的条目在回执里留痕 | 回执有 `Withheld` / `NotApplied` / `BlockingReasons` | `SourceSyncImportResult` 只有 applied/requiresApproval/ignored/unsupported/failed 五个计数，且都是重新合并一遍信封算的，与「用户点了什么」无关 |
+| 身份 → serverId 配对 | App 层提供 `SourceSyncRecordWriter`，写入器自己知道落了哪一行 | 老入口靠 `AppliedSourceChange.candidate` 携带身份；`applyRound` 只有 `wroteServerIds` |
+| 删除是否计入「已写入」 | `Applied` 含删除，`TouchedRiskyChange` 另行标记 | 回执 `applied` 也含删除，但结果页把 `applied` 直接当「已写入」显示 ⇒ 删除被算成写入 |
+| 端点策略摘要 | `Preview()` 里算好 `NotImportedEndpointCount` | `applyRound` 没带 `SourceSyncEndpointSummary`，结果页的端点句永远不出现 |
+
+### 50.3 做法（六处改动）
+
+1. **服务层回执补配对**（`AndroidSourceSyncService`）：新增 `data class SourceSyncWrittenSource(syncSourceId, serverId)`，`SourceSyncApplyReport` 增 `wrote` / `endpointSummary` / `baselineRejectedCount` 三个带默认值的字段；`wroteServerIds` 从构造参数改成 `wrote.map { it.serverId }` 的派生属性（旧断言与旧调用方零改动）。写成功那一刻 `wrote.add(SourceSyncWrittenSource(item.syncSourceId.trim(), serverId))` —— 为什么不复用 `record.syncSourceId`：墓碑记录的 `record` 是 null，而写入成功只可能发生在非墓碑上，用闸门裁决里的身份才不会在「墓碑被放行」的将来分支上错位。
+2. **端口签名换成两张名单**（`SourceSyncImportSession`）：`SourceSyncApplyPort.apply(envelopeJson, allowedKeys: Set<String>, skippedKeys: Set<String>): SourceSyncApplyReport`。整份信封透传而不是过滤后的文本，理由是剔除式过滤让「被扣住的凭据」在回执里彻底消失，用户看不到「有几条没进来、为什么」。构造参数 `filterEnvelope` 删除。
+3. **摘要按「规划桶来自预览、回执桶来自回执」分工**（`summaryOf(report, preview)`）：`appliedCount = report.applied - report.removedServerIds.size`（删除不算写入）、`requiresApprovalCount/ignoredCount/unsupportedCount = preview.countIn(...)`（这三类是**规划期**的结论，回执里根本没有 ignored 桶）、`failedCount = report.refused`、`skippedCount = report.skipped`、`withheldCount = report.withheld`、`removedCount`、`blockingReasons`。KDoc 写明两者不可互推。
+4. **结果页加回执行**（`SourceSyncImportScreen` + `SourceSyncImportCopy`）：新增 `APPLY_VERDICT` / `APPLY_BLOCKING` / `APPLY_REMOVED` 三个 testTag 与三段文案 —— `applyVerdict(summary)` =「已写入 N 条 · 跳过 N 条 · 保留未应用 N 条（扣住 N · 拒写 N）」；`blockingReasons(summary)` =「永久扣住的原因：a、b。光点允许没用，需去来源页逐条处理。」；`removedLine(summary)` =「已删除 N 条本地来源（对端声明删除，凭据一并移除）。」，后两段为空时返回 null 不占行。
+5. **身份 → serverId 用在验证区块**：`writtenSourcesOf(report, preview)` 用 `normalizeKey(syncSourceId)` 去预览的条目里找候选，拿到标题与 `sourceTypeRaw`；找不到（理论上不该发生，比如对端在预演后改了信封）时标题退化成身份本身而不是丢掉这一条 —— 丢掉会让结果页少一行验证，用户以为没导入。
+6. **退休 `filterEnvelope`**：删掉 `SourceSyncImportLogic.filterEnvelope` 与它的 `SourceSyncCodec` import（生产零调用），`normalizeKey` 保留（Session 现在用它做配对）。三条 `filterEnvelope*` 单测换成三条回执行文案用例。
+
+### 50.4 用例表
+
+| 用例 | 钉住什么 | 位置 |
+| --- | --- | --- |
+| `theWholeEnvelopeTravelsWithBothDecisionLists` | 整份信封透传；allowed={sync-1}、skipped={sync-2} | SourceSyncImportSessionTest |
+| `anUndecidedAllowableEntryIsSkippedNotWritten` | 可放行但未点过的条目进 skipped，不进 allowed | 同上 |
+| `aRemovalCountsAsAppliedInTheReceiptButNotAsAWriteInTheSummary` | `applied=2` 且一条删除 ⇒ `appliedCount=1` / `removedCount=1` | 同上 |
+| `aWrittenEntryMissingFromThePreviewStillReachesTheVerificationList` | 回执里出现预览没有的身份时，标题退化成身份、`sourceTypeRaw=null`，条目仍在 | 同上 |
+| `successfulApplySummarisesEveryBucket` | 1/0/1/0/0/1 六个计数 + appliedSources 的 serverId/syncSourceId/sourceTypeRaw | 同上 |
+| `every_written_record_keeps_its_identity_beside_the_new_server_id` | 两条 record ⇒ `wrote == [sync-a→srv-1, sync-b→srv-2]`、`wroteServerIds` 同序 | SourceSyncApplyRoundTest（core/database） |
+| `theVerdictLineKeepsReceiptCountsApartFromPlanningCounts` | 回执行把 `notAppliedCount` 与规划计数分开，两段中文逐字 | SourceSyncImportLogicTest |
+| `aRemovalIsReportedSeparatelyFromAWrite` | 删除单独一行，不与写入混算 | 同上 |
+| `anEmptyReceiptAddsNoReasonLineAndNoRemovalLine` | 空回执不占行（null） | 同上 |
+
+### 50.5 三条负向对照
+
+| 编号 | 改法 | 结果 |
+| --- | --- | --- |
+| A | `Session` 里把 `preview.skippedKeys` 换成 `emptySet()` | `theWholeEnvelopeTravelsWithBothDecisionLists` + `anUndecidedAllowableEntryIsSkippedNotWritten` 双红（14 tests / 2 failed） |
+| B | `summaryOf` 的 `appliedCount` 去掉 `- report.removedServerIds.size` | `aRemovalCountsAsAppliedInTheReceiptButNotAsAWriteInTheSummary` 红（14 / 1） |
+| C | `applyRound` 的 `wrote.add(...)` 改成 `if (wrote.isEmpty()) wrote.add(...)` | core `every_written_record_keeps_its_identity_beside_the_new_server_id` 红（17 / 1） |
+
+三处均逐字节还原（`readFileSync === original` 为真），`git status` 只剩本轮真实改动。
+
+### 50.6 本机实跑
+
+| 套件 | 命令 | 结果 |
+| --- | --- | --- |
+| core/common | `:core:common:testDebugUnitTest` | 48 文件 / **660** 例 / 0 失败 / 11 跳过（与 W6-80 持平，本轮未动） |
+| core/database | `:core:database:testDebugUnitTest` | 24 文件 / **238** 例 / 0 失败 / 12 跳过（W6-80 的 237 +1） |
+| feature/settings | `:feature:settings:testDebugUnitTest` | 26 文件 / **391** 例 / 0 失败（W6-80 的 388：−3 条 `filterEnvelope*`、+3 条回执文案、+1 未决定、+1 预览里没有的身份、+1 删除计数） |
+| 三模块合计 | 一条命令 | **1289** |
+
+### 50.7 未覆盖
+
+1. 真实两机（Android ↔ Windows）跑一轮「界面上跳过两条、放行一条导入」仍 **NOT_RUN**；真机 instrumentation 仍 **DEVICE_UNVERIFIED**。
+2. 写入口换了，但「被扣住的凭据 / `same-revision-different-content` 冲突 / 删除失败」这三类条目**仍没有逐条处理的界面出口**（回执里有原因码与计数，用户能看见，但不能就地重试或改判）。
+3. 基线仍未喂进 `SourceSyncPlanner`；`applyRound` 只是「写完把本轮真的写进去的记录记进基线」，不读基线决定要不要拉。
+4. 结果页的「已导入」总数仍是 `totalCount = applied + requiresApproval + ignored + failed`（不含 unsupported），与回执行的「已写入」是两个口径 —— 前者是规划视角，后者是本轮实况，界面上分行显示，但没有合并成一句人话。
+
+### 50.8 下一步（W6-82 候选）
+
+1. 被扣凭据 / 冲突 / 删除失败条目的逐条裁决界面出口（回执已有原因码，缺的是「再试一次」「改判并覆盖」这类动作）。
+2. 两端把对端基线喂进 `SourceSyncPlanner`（「读基线 → 只请求变化」）。
+3. 监听卡「取消接收」的可观测性。
+4. 真 Room 级联（真实 `ServerRepository` + 真库）跑一遍删除链。
+5. `SourceSyncImportScreen` 结果页把「已导入」与「已写入」两个口径合成一句，避免用户对着两个数字发呆。
