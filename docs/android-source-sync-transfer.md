@@ -5724,4 +5724,4 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 
 - EXECUTED_PASS（本机 1678/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
 
-- 提交 `70329551`（仅 W6 树，PR #39 侧）；四条 exact-SHA CI 见 PR 正文与账本（windows-ci 与 Android CI 均按本提交 SHA 跑）。
+- 提交：W6 树 `feature/cross-device-source-sync`（代码与文档同一提交；提交号以 PR #39 head 为准——docs 正文不自指 SHA，否则每次改写提交都会让自己写下的哈希失效）。四条 exact-SHA CI 按该 head 跑，run 号与计数见 PR 正文与本轮账本。
