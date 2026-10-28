@@ -7,6 +7,7 @@ import com.mediahub.core.common.sync.SourceSyncCodec
 import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
+import com.mediahub.core.common.sync.SyncRoundReasons
 import com.mediahub.core.common.sync.SyncSourceTypeValue
 import com.mediahub.core.database.sync.AndroidSourceSyncService
 import org.junit.Assert.assertEquals
@@ -269,9 +270,14 @@ class SourceSyncImportLogicTest {
         )
         assertEquals(8, summary.notAppliedCount)
         assertEquals(
-            "永久扣住的原因：secrets-require-approval、not-supported-on-windows。光点允许没用，需去来源页逐条处理。",
-            SourceSyncImportCopy.blockingReasons(
-                summary.copy(blockingReasons = listOf("secrets-require-approval", "not-supported-on-windows")),
+            "保留未应用 2 条（扣住，点允许也不会写）",
+            SourceSyncImportCopy.withheldHeader(
+                summary.copy(
+                    withheldEntries = listOf(
+                        SourceSyncWithheldEntry("sync-a", "客厅 Emby", SyncRoundReasons.SECRETS_REQUIRE_APPROVAL),
+                        SourceSyncWithheldEntry("sync-b", "书房 Emby", SyncRoundReasons.NOT_SUPPORTED),
+                    ),
+                ),
             ),
         )
     }
@@ -295,7 +301,7 @@ class SourceSyncImportLogicTest {
             SourceSyncImportCopy.resultLine(summary),
         )
         assertNull(SourceSyncImportCopy.refusedHeader(summary))
-        assertNull(SourceSyncImportCopy.blockingReasons(summary))
+        assertNull(SourceSyncImportCopy.withheldHeader(summary))
     }
 
     @Test
@@ -342,6 +348,31 @@ class SourceSyncImportLogicTest {
         assertEquals(
             "本机存储拒绝了这次写入（未给异常类型）。",
             SourceSyncImportCopy.refusalReason(AndroidSourceSyncService.WRITE_FAILED),
+        )
+    }
+
+    @Test
+    fun aWithheldEntryIsNamedWithItsIdentityAndItsOwnReason() {
+        val summary = SourceSyncApplySummary(
+            appliedCount = 1,
+            requiresApprovalCount = 2,
+            ignoredCount = 0,
+            unsupportedCount = 1,
+            failedCount = 0,
+            withheldCount = 2,
+            withheldEntries = listOf(
+                SourceSyncWithheldEntry("sync-secret", "客厅 Emby", SyncRoundReasons.SECRETS_REQUIRE_APPROVAL),
+                SourceSyncWithheldEntry("sync-odd", "书房 MyThing", SyncRoundReasons.NOT_SUPPORTED),
+            ),
+        )
+
+        assertEquals("保留未应用 2 条（扣住，点允许也不会写）", SourceSyncImportCopy.withheldHeader(summary))
+        assertEquals(
+            listOf(
+                "- 客厅 Emby（sync-secret）· 对端带了凭据，本机不收对端凭据（能力声明 canSendSecrets=false）；要用这条来源，请在来源页手动补凭据。",
+                "- 书房 MyThing（sync-odd）· 本机没有能接住这条来源的类型（原因码沿用合同里的 not-supported-on-windows），只能等版本支持。",
+            ),
+            summary.withheldEntries.map { SourceSyncImportCopy.withheldLine(it) },
         )
     }
 

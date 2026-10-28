@@ -115,6 +115,12 @@ class SourceSyncApplyRoundTest {
         assertEquals(1, report.withheld)
         assertEquals(0, report.refused)
         assertEquals(listOf(SyncRoundReasons.SECRETS_REQUIRE_APPROVAL), report.blockingReasons)
+        // W6-83：只给码不给身份，界面就不知道被留下的是哪一条。
+        assertEquals(listOf("sync-a"), report.withheldEntries.map { it.syncSourceId })
+        assertEquals(
+            listOf(SyncRoundReasons.SECRETS_REQUIRE_APPROVAL),
+            report.withheldEntries.map { it.reason },
+        )
         assertEquals(0, store.createCalls)
         assertFalse(report.hasWrites)
     }
@@ -131,6 +137,40 @@ class SourceSyncApplyRoundTest {
         assertEquals(0, report.applied)
         assertEquals(1, report.withheld)
         assertEquals(listOf(SyncRoundReasons.UNKNOWN_SOURCE_TYPE), report.blockingReasons)
+        assertEquals(listOf("sync-a"), report.withheldEntries.map { it.syncSourceId })
+        assertEquals(0, store.createCalls)
+    }
+
+    @Test
+    fun every_withheld_source_keeps_its_identity_and_its_own_reason() = runBlocking {
+        // 「保留未应用 2 条」对用户是死路：不知道是哪两条、也不知道各自卡在哪一步。
+        // 回执要逐条带上身份与原因码。顺序是合并器排定的（按身份升序），不是信封顺序：
+        // 闸门只按传进来的先后追加，用户看到的列表因此两轮之间稳定。
+        val store = FakeStore()
+        val json = SourceSyncCodec.encode(
+            envelope(
+                sources = listOf(
+                    record("sync-secret", secrets = JsonPrimitive("sealed-blob")),
+                    record("sync-odd", wire = "MyThing"),
+                ),
+            ),
+        )
+
+        val report = service(store).applyRound(
+            json,
+            allowedSyncSourceIds = listOf("sync-secret", "sync-odd"),
+        )
+
+        assertEquals(2, report.withheld)
+        assertEquals(0, report.applied)
+        assertEquals(listOf("sync-odd", "sync-secret"), report.withheldEntries.map { it.syncSourceId })
+        assertEquals(
+            listOf(SyncRoundReasons.UNKNOWN_SOURCE_TYPE, SyncRoundReasons.SECRETS_REQUIRE_APPROVAL),
+            report.withheldEntries.map { it.reason },
+        )
+        // 查表口径与 refusedSyncSourceIds 一致：去空白 + ASCII 大小写不敏感。
+        assertEquals(SyncRoundReasons.SECRETS_REQUIRE_APPROVAL, report.withheldReasonOf(" SYNC-SECRET "))
+        assertEquals(null, report.withheldReasonOf("sync-absent"))
         assertEquals(0, store.createCalls)
     }
 

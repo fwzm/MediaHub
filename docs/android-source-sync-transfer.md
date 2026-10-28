@@ -5031,3 +5031,83 @@ Reason: Expected exactly '1' node but could not find any node that satisfies:
 **本机编译验证**：`gradlew.bat :feature:settings:compileDebugAndroidTestKotlin --console=plain` → `BUILD SUCCESSFUL`（第二次；第一次败在多写的 import），日志 `D:/mh-verify/w682-androidtest-compile.log`。执行证据仍由 CI 提供，状态词：本机 `IMPLEMENTED_UNVERIFIED`，CI 通过后才可记 `EXECUTED_PASS(emulator)`。
 
 **可复用结论**：退役任何 `SourceSyncImportCopy` 文案 / testTag 时，`git grep` 的范围必须是全仓 `*.kt`（含 `src/androidTest`），而 `src/test` 全绿不能证明 instrumentation 侧没被钉死。
+---
+
+## §52 W6-83：被永久扣住的条目也逐条可见（身份 + 各自原因）
+
+### 52.1 结论先行
+
+- W6-82 把「被拒（写了没写成）」从计数升级成清单，但「被扣住（闸门永不许可）」只剩一个数字加一行去重码：`保留未应用 4 条（扣住 1 · 拒写 1）` + `永久扣住的原因：secrets-require-approval、not-supported-on-windows。光点允许没用……`。用户拿到的信息是「有四条、有两个原因码」，既不知道哪几条中招，也不知道**每一条**各自卡在哪一步。
+- 更要紧的是这一区本来就没有第二条路：预览页把不可允许的行标成 `!allowable` 并把「允许」按钮置灰，但那是 apply 之前；apply 之后只剩这句去重码，用户回头找不到任何入口去处理它。
+- 本轮把这四类「点多少次允许都不会过」的判定逐条抄进回执：`SourceSyncWithheldSource(syncSourceId, reason)` → `SourceSyncApplyReport.withheldEntries` → `SourceSyncApplySummary.withheldEntries`（标题回预览里查）→ 结果卡「保留未应用 N 条（扣住，点允许也不会写）」+ 每行「- 标题（身份）· 原因句」。`blockingReasons` 那条去重行与摘要字段一并退役。
+- 两个原因码有了人话：`secrets-require-approval` →「对端带了凭据，本机不收对端凭据（能力声明 canSendSecrets=false）；要用这条来源，请在来源页手动补凭据。」、`not-supported-on-windows` →「本机没有能接住这条来源的类型（原因码沿用合同里的 not-supported-on-windows），只能等版本支持。」其余（未知类型、无可用地址等）沿用 W6-82 的映射表；不认识的码仍原样显示。
+- 与 Windows 的关系：`SourceSyncImportRound.ApplyAsync` 的回执只有 `Withheld` 计数与 `BlockingReasons` 去重串（逐条信息在 App 层写入器就被折掉了）。Android 多出来的仍是**同一次判定的解释**，判定由同一套闸门产出，不是行为分叉 —— 这条口径与 §51.1 一致。
+
+### 52.2 缺的是什么
+
+| 能力 | Windows（权威） | Android 本轮之前 |
+| --- | --- | --- |
+| 扣住条目的身份 | 无（`Withheld` 只是计数） | 无（`withheld = gate.withheldCount`） |
+| 每条扣住的原因 | 只有去重串 `BlockingReasons` | 只有去重串 `blockingReasons`，且被拼成一行中文 |
+| 原因码 → 人话 | 不适用（串只在日志与回执里） | `refusalReason` 已覆盖拒绝类码，但没有 `secrets-require-approval` / `not-supported-on-windows` |
+| 结果页版面 | 不适用 | 一行去重码，0 条与 4 条看起来一样长 |
+| 计数与名单的一致性 | 不适用 | 名单为空但计数非 0 时无法分辨（那是旧路径的回执） |
+
+### 52.3 做法（六处改动）
+
+1. **回执补逐条扣住清单**（`AndroidSourceSyncService`）：新增 `data class SourceSyncWithheldSource(syncSourceId, reason)`，`SourceSyncApplyReport` 增 `withheldEntries: List<SourceSyncWithheldSource> = emptyList()` 与 `fun withheldReasonOf(syncSourceId): String?`（trim + ASCII 大小写不敏感，与 `isRefused` / `removalFailureOf` 同口径）。`withheld` 计数保留：它是闸门自己算的，逐条清单是同一批数据的展开，两者都留便于核对。
+2. **空原因不吞行**：`it.reason.trim().ifEmpty { WITHHELD_WITHOUT_REASON }`，新增常量 `WITHHELD_WITHOUT_REASON = "withheld-without-reason"`。宁可显示一个「未给原因」的稳定码，也不要让这一行带着空串进界面（W6-82 已经踩过同类：空串会让列表出现半句话）。
+3. **feature 模型补扣住条目**（`SourceSyncImportModels`）：新增 `data class SourceSyncWithheldEntry(syncSourceId, title, reason)`；`SourceSyncApplySummary` 的 `blockingReasons` **整字段退役**，原位换成 `withheldEntries`。为什么退役而不是并存：去重码与逐条清单讲的是同一件事，两处都留必然出现「码里有、列表里没有」或相反的假象。
+4. **标题回预览里查**（`SourceSyncImportSession.withheldEntriesOf`）：`byKey` 用 `SourceSyncImportLogic.normalizeKey` 建索引，查不到就退化成身份本身 —— 与 W6-82 的 `refusedEntriesOf` 完全同构，绝不丢行。
+5. **文案两个函数**（`SourceSyncImportCopy`）：`withheldHeader(summary)` 空清单返回 null（0 条不占版面），否则「保留未应用 N 条（扣住，点允许也不会写）」；`withheldLine(entry)` =「- 标题（身份）· 原因句」。`blockingReasons(summary)` 退役。`refusalReason` 新增两条分支（`SECRETS_REQUIRE_APPROVAL` / `NOT_SUPPORTED`），放在最前面 —— 这两个码是闸门层的「永不许可」，比来源类型问题更该先讲。
+6. **结果卡换区**（`SourceSyncImportScreen`）：`APPLY_BLOCKING` → `APPLY_WITHHELD`；单行去重码换成「区头 + 逐条行」，位置仍在结果行之后、已写入标题列表之前。区头由**名单**驱动而不是计数驱动：计数非 0 但名单为空（旧回执）时整块不出现，避免出现「扣住 4 条」下面一条都列不出的残局。
+
+### 52.4 用例表（本机 5 条新增/改写 + 1 条 androidTest）
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `every_withheld_source_keeps_its_identity_and_its_own_reason`（core，新） | 同一信封里凭据条目与未知类型条目各成一条：`withheld` 2、`applied` 0、身份与原因码逐条对应、`withheldReasonOf(" SYNC-SECRET ")` 命中、未知身份返回 null、`createCalls == 0`（扣住即不写） |
+| `a_record_carrying_credentials_is_withheld_even_when_it_is_allowed`（core，加强） | 允许也写不进去的条目必须带身份与 `secrets-require-approval` |
+| `an_unknown_source_type_is_withheld_even_when_it_is_allowed`（core，加强） | 未知来源类型同样带身份 |
+| `everyWithheldEntryArrivesWithItsPreviewTitleAndItsOwnReason`（feature，新） | 回执 `withheldEntries` → 摘要逐条：身份顺序、标题来自预览（「客厅 Emby」/「Quantum」）、原因码原样且各不相同（即使回执里同时给了去重串也不用它） |
+| `aWithheldEntryIsNamedWithItsIdentityAndItsOwnReason`（feature，新） | 区头与逐条行逐字（含两条新原因句式） |
+| `thePlanLineAndTheResultLineNeverShareACount` / `anEmptyReceiptStillSaysEveryCountAndHasNoFailureBlock`（feature，改写） | 扣住区头由名单驱动：有名单时给出条数，空名单时为 null |
+| `everyWithheldEntryIsListedWithItsIdentityAndItsOwnReason`（androidTest，新） | 结果卡在真模拟器上把区头与两条 `withheldLine` 都滚到可见；同一文件里给「无名单」的结果卡补 `APPLY_WITHHELD.assertDoesNotExist()` |
+
+顺序这件事值得单记：扣住条目的顺序**不是信封顺序**，而是合并器排定的身份升序（`sync-odd` 在 `sync-secret` 之前）。第一版用例按信封顺序断言，直接红在 `expected:<[sync-secret, sync-odd]> but was:<[sync-odd, sync-secret]>`。闸门本身只按传入顺序追加，稳定排序来自 `SyncRoundMerger` —— 用户看到的列表因此两轮之间一致，这比「跟信封同序」更有价值。
+
+### 52.5 负向对照（三条全红，均已逐字节还原）
+
+| 编号 | 破坏方式 | 变的测试 |
+| --- | --- | --- |
+| A | core `reason = it.reason.trim().ifEmpty { WITHHELD_WITHOUT_REASON }` → 固定 `WITHHELD_WITHOUT_REASON`（把逐条原因压成同一个） | `every_withheld_source_keeps_its_identity_and_its_own_reason` + `a_record_carrying_credentials_is_withheld_even_when_it_is_allowed` 双红（19 例 / 2 失败） |
+| B | session `reason = withheld.reason` → 常量 `secrets-require-approval`（抄错原因） | `everyWithheldEntryArrivesWithItsPreviewTitleAndItsOwnReason` 红（17 例 / 1 失败） |
+| C | `withheldHeader` 的判据 `if (summary.withheldEntries.isEmpty())` → `if (true)`（区头永不出） | `aWithheldEntryIsNamedWithItsIdentityAndItsOwnReason` + `thePlanLineAndTheResultLineNeverShareACount` 双红（19 例 / 2 失败） |
+
+日志：`D:/mh-verify/w683-negA.log`、`w683-negB.log`、`w683-negC.log`；还原后 `readFileSync` 与原文逐字节相等，`git grep` 无残留。
+
+### 52.6 本机实跑
+
+| 模块 | 本轮之前 | 本轮之后 | 结果 |
+| --- | --- | --- | --- |
+| core/common | 660 | 660 | 0 失败 / 11 跳过（未改动） |
+| core/database | 239 | **240** | 0 失败 / 12 跳过（+1：逐条扣住） |
+| feature/settings | 394 | **396** | 0 失败（+2：session 映射 1 例、文案 1 例） |
+| 三模块合计 | 1293 | **1296** | 全绿 |
+
+C# 侧未动（`MediaHub.Tests` 1656 / 全仓 1760 口径不变）。androidTest 只做编译校验：`gradlew.bat :feature:settings:compileDebugAndroidTestKotlin --console=plain` → `BUILD SUCCESSFUL`（日志 `D:/mh-verify/w683-androidtest-compile.log`），instrumentation 用例数 130 → **131**；执行证据仍由 CI 的 visual-instrumentation 作业提供，状态词：本机 `IMPLEMENTED_UNVERIFIED`，CI 通过后才记 `EXECUTED_PASS(emulator)`。
+
+### 52.7 未覆盖（不声明完成）
+
+- 逐条只有文字，没有出口按钮：`secrets-require-approval` 的条目仍要用户自己回来源页手动补凭据，`not-supported-on-windows` 的条目没有任何处理路径（只能等版本）。
+- core 回执仍保留 `blockingReasons`（去重串）与 `withheld` 计数，只是 UI 不再读它：旧调用方（`SyncCliRunner` 一侧的同名概念、以及 W6-77 起的用例）还在用，统一退役要跨端改口径，不在本轮范围。
+- 扣住清单很长时的版面没实测：本机只跑单测与 Compose 编译，结果卡会不会被撑爆属 `DEVICE_UNVERIFIED`。
+- 真机 / 双机端到端未跑：Android 发 → Windows 收 → Windows 改 → Android 拉全链路仍是 `NOT_RUN`。
+
+### 52.8 下一步（W6-84 候选）
+
+- 给扣住的条目做出口：`secrets-require-approval` 直接跳「来源页 → 该条凭据」；`not-supported-on-windows` 在 Android 侧改成「对端能力不支持」，不要把用户引到无用的重试。
+- 结果页文案继续收敛：计划行 / 结果行 / 端点句三处仍在讲同一批数字（§51.8 遗留）。
+- 两端把对端基线喂进 `SourceSyncPlanner`：planner 现在只看本机快照，不知道对端知道什么。
+- 真 Room 级联：`ServerRemoveHandler` 删除后的 playlist / 播放进度行是否随之清理，目前只在 fake 层验证。
+- `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（仅测试可达），要么改走 `applyRound`，要么删掉以防未然。

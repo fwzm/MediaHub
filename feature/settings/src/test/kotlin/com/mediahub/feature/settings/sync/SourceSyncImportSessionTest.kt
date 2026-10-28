@@ -6,12 +6,14 @@ import com.mediahub.core.common.sync.SourceSyncCodec
 import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
+import com.mediahub.core.common.sync.SyncRoundReasons
 import com.mediahub.core.common.sync.SourceSyncSummary
 import com.mediahub.core.database.sync.AndroidSourceSyncService
 import com.mediahub.core.database.sync.SourceSyncApplyReport
 import com.mediahub.core.database.sync.SourceSyncPreview
 import com.mediahub.core.database.sync.SourceSyncRefusal
 import com.mediahub.core.database.sync.SourceSyncRemovalFailure
+import com.mediahub.core.database.sync.SourceSyncWithheldSource
 import com.mediahub.core.database.sync.SourceSyncWrittenSource
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -379,6 +381,44 @@ class SourceSyncImportSessionTest {
         assertEquals("sync-gone", refused.title)
         assertEquals(SourceSyncRefusedAction.DELETE, refused.action)
         assertEquals(AndroidSourceSyncService.REMOVE_MISSING, refused.reason)
+    }
+
+    @Test
+    fun everyWithheldEntryArrivesWithItsPreviewTitleAndItsOwnReason() = runTest {
+        // 扣住（withheld）与拒写（refused）不是一回事：前者是闸门永不许可，后者是写入时失败。
+        // 结果页要能说清「是哪几条、各自为什么」，所以回执的逐条名单必须一路传到摘要里。
+        val report = SourceSyncApplyReport(
+            applied = 0,
+            withheld = 2,
+            blockingReasons = listOf(
+                SyncRoundReasons.SECRETS_REQUIRE_APPROVAL,
+                SourceSyncReasons.UNKNOWN_SOURCE_TYPE,
+            ),
+            withheldEntries = listOf(
+                SourceSyncWithheldSource("sync-1", SyncRoundReasons.SECRETS_REQUIRE_APPROVAL),
+                SourceSyncWithheldSource("sync-quantum", SourceSyncReasons.UNKNOWN_SOURCE_TYPE),
+            ),
+        )
+        val session = SourceSyncImportSession(
+            FakePreviewPort(ready(planWithTwoCreateAndOneUnsupported())),
+            FakeApplyPort(report),
+        )
+        session.loadEnvelope(envelopeJson())
+        session.preview()
+        session.decide("sync-1", SourceSyncEntryDecision.ALLOW)
+
+        session.apply()
+
+        val applied = session.state.value.applied!!
+        assertEquals(2, applied.withheldCount)
+        assertEquals(listOf("sync-1", "sync-quantum"), applied.withheldEntries.map { it.syncSourceId })
+        // 标题取自预览：人能认出「客厅 Emby」，认不出一串 identity。
+        assertEquals(listOf("客厅 Emby", "Quantum"), applied.withheldEntries.map { it.title })
+        // 原因码原样保留，逐条各不相同（不是一行去重码）。
+        assertEquals(
+            listOf(SyncRoundReasons.SECRETS_REQUIRE_APPROVAL, SourceSyncReasons.UNKNOWN_SOURCE_TYPE),
+            applied.withheldEntries.map { it.reason },
+        )
     }
 
     // ---------------------------------------------------------------- 夹具
