@@ -7,8 +7,11 @@ import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SourceSyncSummary
+import com.mediahub.core.database.sync.AndroidSourceSyncService
 import com.mediahub.core.database.sync.SourceSyncApplyReport
 import com.mediahub.core.database.sync.SourceSyncPreview
+import com.mediahub.core.database.sync.SourceSyncRefusal
+import com.mediahub.core.database.sync.SourceSyncRemovalFailure
 import com.mediahub.core.database.sync.SourceSyncWrittenSource
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -218,6 +221,9 @@ class SourceSyncImportSessionTest {
         assertEquals(0, applied.failedCount)
         assertEquals(0, applied.removedCount)
         assertEquals(1, applied.notAppliedCount)
+        // 计划数：放行 1 条、预览里共 3 条（另外两条一条是没点过的可导入、一条暂不支持）。
+        assertEquals(1, applied.allowedCount)
+        assertEquals(3, applied.plannedCount)
         // 规划桶：预览里本来就有多少。这里必须是 0 —— 三份候选里没有一份需要确认，
         // 旧夹具却自称回执里带了一条 requiresApproval，于是这条断言在假数据上绿了很久。
         assertEquals(0, applied.requiresApprovalCount)
@@ -296,6 +302,83 @@ class SourceSyncImportSessionTest {
         assertNull(state.envelopeJson)
         assertNull(state.fileName)
         assertFalse(state.canPreview)
+    }
+
+    @Test
+    fun everyRefusalArrivesWithItsIdentityItsActionAndItsReason() = runTest {
+        // 回执的 refusals 是「哪条、想做什么、为什么」三类信息的唯一来源；结果页据此点名。
+        val report = SourceSyncApplyReport(
+            applied = 1,
+            refused = 2,
+            wrote = listOf(SourceSyncWrittenSource(syncSourceId = "sync-1", serverId = "srv-1")),
+            refusals = listOf(
+                SourceSyncRefusal(
+                    syncSourceId = "sync-1",
+                    action = SourceSyncAction.CREATE,
+                    reason = SourceSyncReasons.UNKNOWN_SOURCE_TYPE,
+                ),
+                SourceSyncRefusal(
+                    syncSourceId = "sync-2",
+                    action = SourceSyncAction.DELETE,
+                    reason = AndroidSourceSyncService.DELETE_NOT_SUPPORTED,
+                ),
+            ),
+        )
+        val session = SourceSyncImportSession(
+            FakePreviewPort(ready(planWithTwoCreateAndOneUnsupported())),
+            FakeApplyPort(report),
+        )
+        session.loadEnvelope(envelopeJson())
+        session.preview()
+        session.decide("sync-1", SourceSyncEntryDecision.ALLOW)
+
+        session.apply()
+
+        val applied = session.state.value.applied!!
+        assertEquals(2, applied.failedCount)
+        assertEquals(listOf("sync-1", "sync-2"), applied.refusedEntries.map { it.syncSourceId })
+        // 标题取自预览：结果页要说的是人能认出的那条来源，不是一串身份。
+        assertEquals(listOf("客厅 Emby", "书房 Emby"), applied.refusedEntries.map { it.title })
+        assertEquals(
+            listOf(SourceSyncRefusedAction.WRITE, SourceSyncRefusedAction.DELETE),
+            applied.refusedEntries.map { it.action },
+        )
+        // 原因码原样保留（不在这里改写成人话：文案层要用它查表，改了就对不上）。
+        assertEquals(
+            listOf(SourceSyncReasons.UNKNOWN_SOURCE_TYPE, AndroidSourceSyncService.DELETE_NOT_SUPPORTED),
+            applied.refusedEntries.map { it.reason },
+        )
+    }
+
+    @Test
+    fun aRemovalFailureWithoutARefusalStillShowsUp() = runTest {
+        // 补漏：万一某条删除失败没进 refusals，removalFailures 也得让它在结果页出现。
+        val report = SourceSyncApplyReport(
+            applied = 0,
+            refused = 1,
+            removalFailures = listOf(
+                SourceSyncRemovalFailure(
+                    syncSourceId = "sync-gone",
+                    reason = AndroidSourceSyncService.REMOVE_MISSING,
+                ),
+            ),
+        )
+        val session = SourceSyncImportSession(
+            FakePreviewPort(ready(planWithTwoCreateAndOneUnsupported())),
+            FakeApplyPort(report),
+        )
+        session.loadEnvelope(envelopeJson())
+        session.preview()
+        session.decide("sync-1", SourceSyncEntryDecision.ALLOW)
+
+        session.apply()
+
+        val refused = session.state.value.applied!!.refusedEntries.single()
+        assertEquals("sync-gone", refused.syncSourceId)
+        // 预览里没有这条：退化用身份当标题，而不是丢掉它。
+        assertEquals("sync-gone", refused.title)
+        assertEquals(SourceSyncRefusedAction.DELETE, refused.action)
+        assertEquals(AndroidSourceSyncService.REMOVE_MISSING, refused.reason)
     }
 
     // ---------------------------------------------------------------- 夹具

@@ -4926,3 +4926,83 @@ W6-79 候选：①两端把对端基线喂进 `SourceSyncPlanner`（真正「读
 3. 监听卡「取消接收」的可观测性。
 4. 真 Room 级联（真实 `ServerRepository` + 真库）跑一遍删除链。
 5. `SourceSyncImportScreen` 结果页把「已导入」与「已写入」两个口径合成一句，避免用户对着两个数字发呆。
+
+## §51 W6-82：导入结果说人话（每条被拒都带身份、动作与原因）
+
+### 51.1 结论先行
+
+- W6-81 把写入口换成 `applyRound` 之后，结果页能显示「已写入 / 跳过 / 保留未应用（扣住 + 拒写）」四类计数了。但计数是哑的：用户看到「拒写 2」既不知道是哪两条，也不知道为什么 —— 服务层的 `writeRecord` 把**四种完全不同的处境**（类型不认识 / 没有可拨号地址 / 身份空白 / 更新时行已消失 / 存储异常）统统压成 `null`，回执里只剩一个 `refused` 数字。
+- 删除那一侧同样：`removalFailures` 早在 W6-79 就有「身份 + 稳定码」，但生产代码零消费 —— 结果页只把 `report.refused` 当「失败 N」显示，删除为什么失败一个字都没有。
+- 结果卡还留着 W6-81 的重复：第一行「已导入 N · 失败 N」与第二行「已写入 N 条 …… 拒写 N 条」讲的是同一批数字的两套口径（`applied` 还含删除，于是「已导入」把删除算成导入）。用户要在两行之间做减法才知道到底写了几条。
+- 本轮把「被拒」从计数升级成清单：`SourceSyncRefusal(syncSourceId, action, reason)` 逐条进回执，`refusalOf(...)` 按身份查；结果页把第一行换成**计划行**（本次计划：放行/需确认/忽略/暂不支持/共几条）、第二行换成**结果行**（本次结果：写入/删除/跳过/扣住/拒写），再在下方列出「未写入 N 条（逐条原因）」—— 每条一行「- 标题（身份）· 写入/删除 · 原因句」。
+- 原因码全部是稳定码（英文短横线串），文案在 UI 层映射成中文；不认识的码**原样显示**（`原因码：<code>`），不吃掉也不编造。
+- 与 Windows 的关系：`windows/src/MediaHub.Sync/SourceSyncImportRound.cs` 的回执只有计数（`Withheld` / `NotApplied` / `BlockingReasons`），逐条原因在 App 层的写入器里就被吞掉了。Android 这一层是**超集**：多出的只是「同一次判定的解释文字」，判定本身仍由同一套闸门与合并器产出，不构成两端行为分叉。
+
+### 51.2 缺的是什么
+
+| 能力 | Windows（权威） | Android 本轮之前 |
+| --- | --- | --- |
+| 写入失败的种类 | `SourceSyncRecordWriter` 由 App 层实现，拒绝只折进 `Withheld` 计数 | `writeRecord(record): String?` 五种失败压成 `null`，`applyRound` 只 `refusedIds.add(identity)` |
+| 删除失败的原因 | `RemoveRemoteSourceAsync` 的四个判据各自成码，但只出现在服务端日志 | `removalFailures` 有码却零消费（UI 只有 `failedCount = report.refused`） |
+| 「哪一条被拒」 | 无（只有计数） | 无（只有计数） |
+| 计数口径 | `Summary` =「已写入 / 跳过 / 保留未应用」三段，不重复 | 两行重复：`applied` 含删除，与「已写入」不同义却并排显示 |
+| 未知原因码 | 不适用 | 无映射层，未来新码会直接消失 |
+
+### 51.3 做法（七处改动）
+
+1. **把返回值从 `String?` 换成密封结果**（`AndroidSourceSyncService`）：新增 `private sealed interface WriteAttempt { data class Written(val serverId); data class Refused(val reason) }`，`writeRecord(record): WriteAttempt`。五个分支各自成码：`SourceSyncReasons.UNKNOWN_SOURCE_TYPE`、`SourceSyncReasons.NO_USABLE_ENDPOINT`、`SourceSyncDigestReasons.MISSING_SYNC_SOURCE_ID`、`SOURCE_VANISHED`（= `local-source-vanished`）、`WRITE_FAILED + ":" + 异常类名`。为什么不用 `Result`：调用点只有一处，密封接口能把「写成了哪一行」和「为什么没写成」放进同一个 `when`，漏分支由编译器抓。
+2. **回执补逐条拒绝清单**：新增 `data class SourceSyncRefusal(syncSourceId, action: SourceSyncAction, reason: String)`，`SourceSyncApplyReport` 增 `refusals: List<SourceSyncRefusal> = emptyList()` 与 `fun refusalOf(syncSourceId): String?`（trim + ASCII 大小写不敏感，与既有 `removalFailureOf` 并列）。保留 `action` 的理由：同一条身份在「写不下去」与「删不掉」两侧的原因语义完全不同，UI 要分得开。
+3. **删除分支的动作必须钉死**（本轮真缺陷）：第一版写的是 `action = item.action`，测试立刻红 —— `expected:<[CREATE, DELETE]> but was:<[CREATE, CREATE]>`。原因是墓碑条目（信封里只有 `deletions`、没有 `sources` 记录）经合并器给出的 `action` 是 `CREATE`，真正判据是 `record == null`（Windows 同口径，`SourceSyncImportRound.ApplyAsync` 也是按 `record is null` 判删除）。改成固定 `SourceSyncAction.DELETE` 并在注释里写明这条判据。
+4. **feature 模型补拒绝条目**（`SourceSyncImportModels`）：`enum class SourceSyncRefusedAction { WRITE, DELETE }`（不用 core 的 `SourceSyncAction`：UI 只关心「这次是写还是删」，CREATE/UPDATE 的区别对用户没有意义）、`data class SourceSyncRefusedEntry(syncSourceId, title, action, reason)`、`SourceSyncApplySummary` 增 `allowedCount` / `plannedCount` / `refusedEntries`。
+5. **两份拒绝来源合并去重**（`SourceSyncImportSession.refusedEntriesOf`）：`report.refusals` 全量映射（标题回预览里按 `normalizeKey` 查，查不到就退化成身份本身）；再把 `report.removalFailures` 里未出现过的补进来（`seen` 以「规范化身份 + 原因码」为键）。为什么两处都要读：`removalFailures` 是 W6-79 的既有契约（旧调用方还在读），`refusals` 是本轮新契约；只读一处会漏，两处都读不去重会重复。
+6. **文案分层**（`SourceSyncImportCopy`）：`planLine`（计划行，来自预览）、`resultLine`（结果行，来自回执）、`refusedHeader`（0 条时返回 null，不占版面）、`refusalLine`（`- 标题（身份）· 写入/删除 · 原因`）、`refusalReason`（稳定码 → 中文句）。`applyVerdict` 与 `removedLine` 退役（删除数已进结果行）。未知码走 `else -> "原因码：" + raw`。
+7. **结果卡重排**（`SourceSyncImportScreen`）：testTag 从 `APPLY_REMOVED` 换成 `APPLY_PLAN` / `APPLY_REFUSED`；第一行 `planLine`、第二行 `resultLine`、逐条失败清单紧随其后（错误色、`bodySmall`），再往下才是端点句、基线句与逐源验证。
+
+### 51.4 用例表（本机 9 条新增/改写）
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `a_storage_failure_is_reported_as_refused_instead_of_thrown`（core，加强） | 存储异常 ⇒ `refusals.single()` 带身份 / `CREATE` / `WRITE_FAILED:` 前缀 / `refusalOf(" SYNC-A ")` 命中（大小写与空格不敏感） |
+| `a_write_failure_and_a_refused_deletion_each_keep_their_own_code_and_action`（core，新） | 同一份信封里写失败与删失败各成一条，动作 `[CREATE, DELETE]`，码各自保留，`removalFailureOf` 同码 |
+| `everyRefusalArrivesWithItsIdentityItsActionAndItsReason`（feature，新） | 两条拒绝 ⇒ `failedCount` 2、身份顺序、标题来自预览、`[WRITE, DELETE]`、原因码原样 |
+| `aRemovalFailureWithoutARefusalStillShowsUp`（feature，新） | 只有 `removalFailures` 时也要出现在清单里（标题退化为身份） |
+| `successfulApplySummarisesEveryBucket`（feature，加强） | `allowedCount` / `plannedCount` 进摘要 |
+| `thePlanLineAndTheResultLineNeverShareACount`（feature，新） | 两行文案逐字 + `notAppliedCount` 三段合一 + 扣住原因句 |
+| `anEmptyReceiptStillSaysEveryCountAndHasNoFailureBlock`（feature，新） | 空回执仍有两行、无失败区块 |
+| `aRefusalIsNamedWithItsIdentityItsActionAndAReasonSentence`（feature，新） | `refusalLine` 逐字段（标题「客厅 Emby」/「旧 NAS」） |
+| `anUnknownReasonCodeIsShownVerbatimInsteadOfSwallowed`（feature，新） | 未知码原样、`WRITE_FAILED:IOException` ⇒「（IOException）」、裸 `WRITE_FAILED` ⇒「（未给异常类型）」 |
+
+### 51.5 负向对照（三条全红，均已逐字节还原）
+
+| 编号 | 破坏方式 | 变的测试 |
+| --- | --- | --- |
+| A | core 写分支 `Refused(attempt.reason)` → `Refused(WRITE_FAILED)`（把具体原因泛化） | `a_storage_failure_is_reported_as_refused_instead_of_thrown` + `a_write_failure_and_a_refused_deletion_each_keep_their_own_code_and_action` 双红（18 例 / 2 失败） |
+| B | feature `refusedEntriesOf` 里 `if (seen.add(key))` → `if (seen.add(key) && false)`（丢掉 `removalFailures` 补漏） | `aRemovalFailureWithoutARefusalStillShowsUp` 红（16 例 / 1 失败） |
+| C | feature `refusalReason` 的 `else -> "原因码：" + raw` → `else -> ""`（吃掉未知码） | `anUnknownReasonCodeIsShownVerbatimInsteadOfSwallowed` 红（18 例 / 1 失败） |
+
+### 51.6 本机实跑
+
+| 套件 | 计数 | 结果 |
+| --- | --- | --- |
+| `core:common` | 660（11 skipped） | 0 失败（本轮未动） |
+| `core:database` | 239（12 skipped） | 0 失败（基线 238，+1） |
+| `feature:settings` | 394 | 0 失败（基线 391；退休 3 条 `filterEnvelope` 文案用例 → 新增 4 条文案 + 2 条拒绝条目） |
+| 三模块合计 | **1293** | 0 失败 |
+| `MediaHub.Tests`（C#） | 1656 | 0 失败（本轮未动，沿用 W6-80 口径） |
+
+日志：`D:/mh-verify/w682-kotlin-run1.log`（编译错 `blockingReasons` 被误删）、`w682-kotlin-run2.log`（1 红：删除动作被写成 `CREATE`）、`w682-kotlin-run3.log`（测试侧缺 `AndroidSourceSyncService` import）、`w682-kotlin-run4.log`（绿）、`w682-kotlin-full.log`（三模块回归）、`w682-negA.log` / `w682-negB.log` / `w682-negC.log`。
+
+### 51.7 未覆盖（不声明完成）
+
+- 拒绝清单只有文本，没有「重试」按钮：写失败（`local-source-write-failed:*`）目前要用户重新走一遍配对与导入。
+- 被永久扣住（`secrets-require-approval` / `unknown-source-type` / `not-supported-on-windows`）的条目仍只能整轮重来，没有逐条处理入口。
+- 两端回执形状仍不对等：Windows 只有计数，Android 多了逐条原因。要在 Windows 侧对齐，得把 App 层写入器的失败原因回传到 `SourceSyncApplyReport`（跨层改），不在本轮范围。
+- 真机 / 双机未跑：UX 侧「拒绝清单很长时会不会把结果卡撑爆」没有实测（本机只跑单测与 Compose 预览），状态 `DEVICE_UNVERIFIED`。
+
+### 51.8 下一步（W6-83 候选）
+
+- 把「被扣住的条目」做成可逐条处理：结果页给每条 `secrets-require-approval` 一个「去来源页确认凭据」的出口，并把 `not-supported-on-windows` 的条目在 Android 侧标成「对端能力不支持」而非「需确认」。
+- 结果页把「已导入」这个历史词清干净：现在结果卡三处文案仍并存（计划行 / 结果行 / 端点句），需要一次文案收敛。
+- 两机实测：Android 发 → Windows 收 → Windows 改 → Android 拉，全链路状态词按 `EXECUTED_PASS` / `DEVICE_UNVERIFIED` 分层记账。
+- 真 Room 级联：`ServerRemoveHandler` 删除后的 playlist / 播放进度行是否随之清理，目前只在 fake 层验证。
+- 两端把「对端基线」喂进 `SourceSyncPlanner`：现在 planner 只看本机快照，不知道对端知道什么。
