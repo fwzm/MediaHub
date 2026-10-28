@@ -5256,3 +5256,84 @@ C# 未动（`MediaHub.Tests` 1656 / 全仓 1760 口径）。instrumentation 的�
 3. 监听卡「取消接收」可观测（现在只有一行状态，取消之后没有回执也没有账）。
 4. 真 Room 级联：用真库跑一例 `ServerRemoveHandler` 删除后 playlist / 播放进度行是否随之清理。
 5. `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（生产不可达，但读者会误以为那是第二条写入口）。
+
+## §55 W6-86：监听卡里「取消这一次接收」也要有账（取消过几次 + 最近一次原因）
+
+### 55.1 结论先行
+
+- 改前点「取消这一次接收」，界面上唯一的变化是状态跳回「正在监听」。而「正在监听」既是点击前的状态、也是取消后的状态 ⇒ 用户无法区分「我取消了」与「点了没反应」。
+- 更糟的是控制器连对端给的原因码都没读：`awaitOnce(cancel)` 的取消分支只做 `_state.value = listeningStateOf(active); return true`，注释写着「本地取消不是失败：不留码」，于是 `SourceSyncTransferImportOutcome.TransferFailed.reason` 被丢掉，连 `transfer-cancelled` 这个稳定码都留不下。
+- 本轮的分工是：**失败码口径不动，另立一本账**。取消仍然不进 `Failed`、仍然没有稳定失败码（`SourceSyncListenCopy.codeOf(Listening)` 依旧恒 `null`），但 `Listening` 多两个字段：`cancelledReceives: Int` 与 `lastCancelledReason: String?`。
+- 链路是 `awaitOnce` 取消分支记账 → `listeningStateOf` 带进状态 → `SourceSyncListenCopy.cancelledLineOf(state)` 生成一句人话 → 监听卡在端口行下面渲染一行（tag `sync.listen.cancelled`）。
+- 与 Windows 的关系：Windows 侧取消走 `SourceSyncPeerRound` / `SourceSyncInbox` 的 `CancellationToken`，界面上同样只有一次状态回退，没有取消计数。Android 这一行是超集，不改任何协议与判定。
+
+### 55.2 缺的是什么
+
+| 缺口 | 改前的样子 | 后果 |
+| --- | --- | --- |
+| 状态无处承接取消 | 六个状态 Idle/Listening/Receiving/Received/Rejected/Failed 里没有「取消过」的空位 | 取消与「什么都没发生」在数据层完全同形 |
+| 原因码被丢掉 | 取消分支不读 `TransferFailed.reason` | 对端因超时/IO 失败先收手还是用户自己点的，事后无从分辨 |
+| 次数不可观测 | 没有计数器 | 反复点取消与点一次取消长得一样，排查「点了没反应」时没有证据 |
+| 账会跨场残留（潜在） | 若把计数挂在控制器上不清零 | 关掉监听再开一场，旧账会挂到新端口上，第二次看到「已取消 3 次」而这一场一次都没取消 |
+
+### 55.3 做法（四处）
+
+1. **状态承接**：`Listening` 末尾加 `cancelledReceives: Int = 0` 与 `lastCancelledReason: String? = null`（都有默认值 ⇒ 既有构造点零改动）。KDoc 写明为什么取消不另立状态：它没有稳定失败码、也不该让监听停下。
+2. **记账与取值优先级**：取消分支 `cancelledReceives++`，然后 `val reason = (outcome as? SourceSyncTransferImportOutcome.TransferFailed)?.reason?.trim()?.takeIf { it.isNotEmpty() }`，`lastCancelledReason = reason ?: SourceSyncLocalReasons.CANCELLED`。顺序是「对端先说话」：对端给了码就记对端的码，没给才落到本地 `transfer-cancelled`（常量在 `core/common/.../SourceSyncCancellation.kt`）。
+3. **一场一账**：`stop()` 在把 `session` 置空后把两个字段一起清零。理由是端口变了、对端也变了，旧账挂新端口比没账更误导。
+4. **文案与渲染**：`SourceSyncListenCopy.cancelledLineOf(state)` 非 `Listening` 或计数 ≤ 0 返回 `null`，否则「已取消 N 次等待（最近一次原因：<码>）；取消不是失败，监听仍然开着，可以接着等一次发送。」（码为空时括号段整段省略）。监听卡在端口行之后插一行 `Text(... testTag = LISTEN_CANCELLED)`，没有账时这行根本不存在。
+
+### 55.4 用例
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `aCancelledWaitLeavesAnAccountInsteadOfSilentlyResetting` | 取消后计数 1、码 `transfer-cancelled`、`codeOf` 仍 `null`、`cancelledLineOf` 整句逐字 |
+| `twoCancelledWaitsAddUpAndTheLastReasonWins` | 第二次取消时对端给 `IO_FAILED` ⇒ 计数 2、最近原因取对端的码（不是一律写本地码） |
+| `aCancelledWaitThatNeverProducedAFailureFallsBackToTheLocalCode` | 会话返回 `Imported` 但把手已置位（取消在完成之后到达）⇒ 仍算取消，码退回 `transfer-cancelled` |
+| `stoppingTheListenerClearsTheCancelAccount` | 取消 → `stop()` → 开新一场 ⇒ 新状态计数 0、原因 `null`、行消失 |
+| `aCancelledWaitGoesBackToListeningWithoutAnyCode`（改写） | 原有约束不变：取消仍回 `Listening`、仍无失败码，只是多了账 |
+| `aCancelledWaitCanBeFollowedByAnotherOneThatSucceeds`（改写） | 取消之后还能再等一次并成功；账不影响后续接收 |
+| `aCancelledWaitLeavesAVisibleAccountInTheListenCard`（instrumentation） | 计数 2 的状态在卡上渲染出那一行，文本等于 `cancelledLineOf` |
+| `withoutAnyCancelTheListenCardSaysNothingAboutCancelling`（instrumentation） | 没有账时 `LISTEN_CANCELLED` 节点不存在（行由计数驱动，不是永远挂着的空行） |
+
+### 55.5 负向对照
+
+| 编号 | 破坏方式 | 结果 |
+| --- | --- | --- |
+| A | 删掉取消分支里的 `cancelledReceives++` | 6 红：两条累计用例、两条既有取消用例、清零用例、回退码用例 |
+| B | `lastCancelledReason = reason ?: SourceSyncLocalReasons.CANCELLED` 改成恒定本地码 | `twoCancelledWaitsAddUpAndTheLastReasonWins` 红 |
+| C | `cancelledLineOf` 的 `if (state.cancelledReceives <= 0) return null` 改成恒不返回 | 2 红：累计用例 + 首次用例 |
+
+三条均逐字节还原。两个坑值得记：
+
+- 取消判据那行 `if (state !is SourceSyncListenState.Listening) return null` 在 `portLineOf` 与 `cancelledLineOf` 各有一份 ⇒ 单独拿它当锚点会命中两处，必须把紧随的 `if (state.cancelledReceives <= 0) return null` 一起写进锚点。
+- 破坏写法若破坏智能转换（写成 `if (state is Listening) return null` 之后还读 `state.cancelledReceives`），结果是**编译失败**：退出码 1、日志里只有 `compileDebugKotlin FAILED`、没有一条 FAILED 用例名。判负向对照不能只看退出码。
+
+### 55.6 本机实跑
+
+| 模块 | 之前 | 之后 |
+| --- | --- | --- |
+| `core/common` | 660 | 660 |
+| `core/database` | 240 | 240 |
+| `feature/settings` | 400 | **404** |
+| 三模块合计 | 1300 | **1304** |
+| `feature/settings` androidTest | 133 例（只编译，不本机跑） | **135 例** |
+
+C# 未动（`MediaHub.Tests` 1656 / 全仓 1760 口径）。`SourceSyncListenerControllerTest` 46 → 50 例。
+
+### 55.7 未覆盖
+
+- 这本账只活在内存里：不进导出、不进日志、也不写进任何收据，进程重启就没了。
+- 取消过的等待不影响导入页：结果页仍只讲「这一轮信封写了什么」，两边没有交叉引用。
+- 取消期间对端是否已经写完自己的回执，本机无从判断；`transfer-cancelled` 只说「本机不等了」。
+- 计数没有上限也没有历史（只留最近一次的码），反复取消与偶发取消在报表上同形。
+- 真实两机与真机 instrumentation 仍 NOT_RUN / DEVICE_UNVERIFIED。
+
+### 55.8 下一步（W6-87 候选）
+
+**先说一条作废**：§54.8 第 2 条「两端把对端基线喂进 `SourceSyncPlanner`」不再是候选 —— `AndroidSourceSyncService` 的注释与 Windows `SourceSyncPlanner.Plan` 的签名都表明「基线只用于汇报、不参与规划」是既定设计（免得出现「基线坏了就换一种合并结果」的隐式分支）。任何把基线塞进 planner 的改动都是推翻决策，不是补缺口。
+
+1. 结果页「已导入」历史词收敛：计划行 / 结果行 / 端点句三处口径统一。
+2. 预览页与结果页的「下一步」加导航出口（跳到来源页、或跳到对端说明）。
+3. 真 Room 级联：用真库跑一例 `ServerRemoveHandler` 删除后 playlist / 播放进度行是否随之清理。
+4. `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（生产不可达，但读者会误以为那是第二条写入口）。

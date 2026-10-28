@@ -713,8 +713,14 @@ class SourceSyncListenerControllerTest {
         job.join()
 
         assertEquals(
-            "取消不是失败：状态必须回到正在监听",
-            SourceSyncListenState.Listening(45_678, false, null),
+            "取消不是失败：状态必须回到正在监听（W6-86 起带取消账）",
+            SourceSyncListenState.Listening(
+                45_678,
+                false,
+                null,
+                cancelledReceives = 1,
+                lastCancelledReason = com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED,
+            ),
             controller.state.value,
         )
         assertNull("取消不许留下任何稳定码", SourceSyncListenCopy.codeOf(controller.state.value))
@@ -741,7 +747,16 @@ class SourceSyncListenerControllerTest {
         listener.outcome = transferred(com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED)
         gate.complete(Unit)
         first.join()
-        assertEquals(SourceSyncListenState.Listening(45_678, false, null), controller.state.value)
+        assertEquals(
+            SourceSyncListenState.Listening(
+                45_678,
+                false,
+                null,
+                cancelledReceives = 1,
+                lastCancelledReason = com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED,
+            ),
+            controller.state.value,
+        )
 
         // 第二次：换一枚新把手，正常收下一封信封 —— 取消没有把监听弄坏。
         listener.gate = null
@@ -766,6 +781,122 @@ class SourceSyncListenerControllerTest {
         assertEquals(SourceSyncTransferReasons.IO_FAILED, SourceSyncListenCopy.codeOf(controller.state.value))
         assertTrue(controller.state.value is SourceSyncListenState.Failed)
         assertTrue("失败不该把监听关掉", controller.isListening)
+    }
+
+
+    @Test
+    fun aCancelledWaitLeavesAnAccountInsteadOfSilentlyResetting() = runTest {
+        // W6-86：取消不是失败、也不留稳定码，但必须留账——只把状态跳回「正在监听」时，
+        // 用户分不清是「我取消了」还是「点了没反应」。
+        val gate = CompletableDeferred<Unit>()
+        val listener = FakeSession()
+        listener.gate = gate
+        val controller = SourceSyncListenerController(FakeFactory(opened = opened(listener))) { _, _ -> }
+        val cancellation = SourceSyncCancellation()
+
+        controller.start(SourceSyncListenForm())
+        val job = launch { controller.awaitOnce(cancellation) }
+        runCurrent()
+        cancellation.cancel()
+        listener.outcome = transferred(com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED)
+        gate.complete(Unit)
+        job.join()
+
+        val listening = controller.state.value as SourceSyncListenState.Listening
+        assertEquals("取消了一次就要记一次", 1, listening.cancelledReceives)
+        assertEquals("最近一次的码要留下来", com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED, listening.lastCancelledReason)
+        assertNull("取消仍然不许变成失败码", SourceSyncListenCopy.codeOf(listening))
+        assertEquals(
+            "已取消 1 次等待（最近一次原因：transfer-cancelled）；取消不是失败，监听仍然开着，可以接着等一次发送。",
+            SourceSyncListenCopy.cancelledLineOf(listening),
+        )
+    }
+
+    @Test
+    fun twoCancelledWaitsAddUpAndTheLastReasonWins() = runTest {
+        val listener = FakeSession()
+        val controller = SourceSyncListenerController(FakeFactory(opened = opened(listener))) { _, _ -> }
+        controller.start(SourceSyncListenForm())
+
+        listener.gate = CompletableDeferred<Unit>()
+        val first = SourceSyncCancellation()
+        val firstJob = launch { controller.awaitOnce(first) }
+        runCurrent()
+        first.cancel()
+        listener.outcome = transferred(com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED)
+        listener.gate!!.complete(Unit)
+        firstJob.join()
+
+        listener.gate = CompletableDeferred<Unit>()
+        val second = SourceSyncCancellation()
+        val secondJob = launch { controller.awaitOnce(second) }
+        runCurrent()
+        second.cancel()
+        // 第二次取消时对端恰好已经断了：原因是别的东西，控制器也必须照抄，不许一律写成本地码。
+        listener.outcome = transferred(SourceSyncTransferReasons.IO_FAILED)
+        listener.gate!!.complete(Unit)
+        secondJob.join()
+
+        val listening = controller.state.value as SourceSyncListenState.Listening
+        assertEquals(2, listening.cancelledReceives)
+        assertEquals(SourceSyncTransferReasons.IO_FAILED, listening.lastCancelledReason)
+        assertTrue(
+            SourceSyncListenCopy.cancelledLineOf(listening).orEmpty().contains("已取消 2 次等待"),
+        )
+    }
+
+    @Test
+    fun aCancelledWaitThatNeverProducedAFailureFallsBackToTheLocalCode() = runTest {
+        // 把手置位但会话恰好成功返回：仍然算「这次被取消」，码退回本地码而不是留空。
+        val gate = CompletableDeferred<Unit>()
+        val listener = FakeSession()
+        listener.gate = gate
+        val controller = SourceSyncListenerController(FakeFactory(opened = opened(listener))) { _, _ -> }
+        val cancellation = SourceSyncCancellation()
+
+        controller.start(SourceSyncListenForm())
+        val job = launch { controller.awaitOnce(cancellation) }
+        runCurrent()
+        cancellation.cancel()
+        listener.outcome = imported(envelopeText())
+        gate.complete(Unit)
+        job.join()
+
+        val listening = controller.state.value as SourceSyncListenState.Listening
+        assertEquals(1, listening.cancelledReceives)
+        assertEquals(com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED, listening.lastCancelledReason)
+        assertEquals("成功返回也不许被当成收到", 0, listener.closeCalls)
+    }
+
+    @Test
+    fun stoppingTheListenerClearsTheCancelAccount() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val first = FakeSession()
+        first.gate = gate
+        val second = FakeSession()
+        val factory = FakeFactory(opened = opened(first))
+        val controller = SourceSyncListenerController(factory) { _, _ -> }
+        val cancellation = SourceSyncCancellation()
+
+        controller.start(SourceSyncListenForm())
+        val job = launch { controller.awaitOnce(cancellation) }
+        runCurrent()
+        cancellation.cancel()
+        first.outcome = transferred(com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED)
+        gate.complete(Unit)
+        job.join()
+        assertEquals(1, (controller.state.value as SourceSyncListenState.Listening).cancelledReceives)
+
+        controller.stop()
+        assertNull("关掉监听时这一行必须消失", SourceSyncListenCopy.cancelledLineOf(controller.state.value))
+
+        // 再开一场：旧账不能挂到新端口上。
+        factory.opened = opened(second)
+        assertTrue(controller.start(SourceSyncListenForm()))
+        val fresh = controller.state.value as SourceSyncListenState.Listening
+        assertEquals(0, fresh.cancelledReceives)
+        assertNull(fresh.lastCancelledReason)
+        assertNull(SourceSyncListenCopy.cancelledLineOf(fresh))
     }
 
     @Test

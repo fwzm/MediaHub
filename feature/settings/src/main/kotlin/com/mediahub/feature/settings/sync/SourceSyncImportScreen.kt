@@ -185,6 +185,9 @@ object SourceSyncImportTags {
     /** 端口行：TLS 时带证书指纹，用户要抄给 Windows 的就是这行。 */
     const val LISTEN_PORT_LINE = "sync.listen.port-line"
 
+    /** W6-86：取消账（取消过几次、最近一次原因码）；只在真的取消过时出现。 */
+    const val LISTEN_CANCELLED = "sync.listen.cancelled"
+
     /** TLS 可用性那句实话（不可用时必须看得见，且开关点不动）。 */
     const val LISTEN_INFO = "sync.listen.info"
 
@@ -1101,6 +1104,8 @@ private fun ListenSection(
     val receiving = state is SourceSyncListenState.Receiving
     val statusLine = SourceSyncListenCopy.lineOf(state)
     val portLine = SourceSyncListenCopy.portLineOf(state)
+    // W6-86：取消不是失败，但要有账——否则点完「取消」只见状态跳回「正在监听」。
+    val cancelledLine = SourceSyncListenCopy.cancelledLineOf(state)
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1298,6 +1303,14 @@ private fun ListenSection(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_PORT_LINE),
+                )
+            }
+            if (cancelledLine != null) {
+                Text(
+                    cancelledLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_CANCELLED),
                 )
             }
             if (statusLine != null) {
