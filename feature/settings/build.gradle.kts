@@ -46,6 +46,7 @@ dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:security"))
     implementation(project(":core:ui"))
+    implementation(project(":core:logging"))
     implementation(project(":provider:api"))
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)

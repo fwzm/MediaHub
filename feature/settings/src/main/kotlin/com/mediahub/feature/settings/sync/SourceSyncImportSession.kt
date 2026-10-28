@@ -11,6 +11,8 @@ import com.mediahub.core.database.sync.SourceSyncPreview
 import com.mediahub.core.database.sync.SourceSyncSourceRemover
 import com.mediahub.core.database.sync.SourceSyncPreviewService
 import com.mediahub.core.database.sync.SourceSyncStore
+import com.mediahub.core.logging.Logger
+import com.mediahub.core.logging.StdoutLogger
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -322,6 +324,8 @@ class SourceSyncImportSession(
          *
          * [baselineStore] 是 W6-72 的对端基线（缺省 null：不记录，行为与 W6-71 完全一致）。
          * [sourceRemover] 是 W6-79 的跨端删除能力（缺省 null：删除类条目只能拒绝并上报，行为与 W6-78 一致）。
+     * [logger] 是 W6-101 的诊断通道（缺省 StdoutLogger；App 里由 Hilt 注入 CompositeLogger，
+     * 于是 logcat 与诊断导出都能看到「这一轮同步发生了什么」）。
          */
         fun production(
             localSources: SyncSourceStore,
@@ -329,6 +333,7 @@ class SourceSyncImportSession(
             deviceId: String,
             baselineStore: ISourceSyncBaselineStore? = null,
             sourceRemover: SourceSyncSourceRemover? = null,
+            logger: Logger = StdoutLogger(),
         ): SourceSyncImportSession {
             val previewService = SourceSyncPreviewService(localSources)
             val applyService = AndroidSourceSyncService(
@@ -336,6 +341,7 @@ class SourceSyncImportSession(
                 deviceId = deviceId,
                 baselineStore = baselineStore,
                 sourceRemover = sourceRemover,
+                logger = logger,
             )
             return SourceSyncImportSession(
                 previewPort = SourceSyncPreviewPort { json -> previewService.preview(json) },
