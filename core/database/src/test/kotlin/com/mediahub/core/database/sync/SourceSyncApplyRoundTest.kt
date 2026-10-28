@@ -627,13 +627,17 @@ class SourceSyncApplyRoundTest {
 
         assertEquals(1, report.applied)
         assertEquals(1, report.withheld)
-        // 恰好一行、级别是 info、后面那一串就是回执上的同一批计数。
+        // W6-104 起这轮还会多一行被扣住的逐条行，但汇总行仍然恰好一行、仍然压轴。
+        val lines = logs.snapshot()
+        assertEquals(1, lines.count { it.startsWith("[I][DATABASE]") })
         assertEquals(
-            listOf(
-                "[I][DATABASE] sync-round-applied:device=device-windows snapshot=snap-windows" +
-                    " applied=1 skipped=0 withheld=1 refused=0 removed=0",
-            ),
-            logs.snapshot(),
+            "[W][DATABASE] sync-entry-withheld:sync-secret:secrets-require-approval",
+            lines.first(),
+        )
+        assertEquals(
+            "[I][DATABASE] sync-round-applied:device=device-windows snapshot=snap-windows" +
+                " applied=1 skipped=0 withheld=1 refused=0 removed=0",
+            lines.last(),
         )
     }
 
@@ -662,15 +666,138 @@ class SourceSyncApplyRoundTest {
 
         service(FakeStore(), logger = MemoryLogger(logs)).applyRound(json)
 
-        val line = logs.snapshot().single()
+        // W6-104 起逐条行也进日志，D6 检查必须覆盖每一行，而不只是汇总那一行。
+        val lines = logs.snapshot()
+        val summary = lines.last()
         // 内部标识与计数可以进日志；来源名字、端点地址、凭据片段一律不进（D6）。
-        assertTrue(line.contains("device=device-windows"))
-        assertTrue(line.contains("snapshot=snap-windows"))
-        assertFalse(line.contains("来源 sync-a"))
-        assertFalse(line.contains("来源 sync-secret"))
-        assertFalse(line.contains("http://nas-a:8096/emby"))
-        assertFalse(line.contains("sealed-blob"))
-        assertFalse(line.contains("Sup3rS3cret"))
+        assertTrue(summary.contains("device=device-windows"))
+        assertTrue(summary.contains("snapshot=snap-windows"))
+        for (line in lines) {
+            assertFalse(line.contains("来源 sync-a"))
+            assertFalse(line.contains("来源 sync-secret"))
+            assertFalse(line.contains("http://nas-a:8096/emby"))
+            assertFalse(line.contains("sealed-blob"))
+            assertFalse(line.contains("Sup3rS3cret"))
+        }
+    }
+
+    // ------------------------- W6-104 每条被拒/被扣住各一行（哪一条、什么动作、为什么）
+
+    @Test
+    fun every_refused_write_gets_its_own_line_with_the_action_and_the_reason() = runBlocking {
+        // 汇总行只说「被拒 2 条」；这两条各是谁、写的时候出的什么事，只有逐条行说得清。
+        val store = FakeStore()
+        store.failWrites = true
+        val logs = LogBuffer()
+        val json = SourceSyncCodec.encode(
+            envelope(sources = listOf(record("sync-a"), record("sync-b"))),
+        )
+
+        val report = service(store, logger = MemoryLogger(logs)).applyRound(json)
+
+        assertEquals(2, report.refused)
+        // 逐条行按拒绝顺序排在前面，汇总行永远最后一行。
+        assertEquals(
+            listOf(
+                "[W][DATABASE] sync-entry-refused:sync-a:create:local-source-write-failed:IllegalStateException",
+                "[W][DATABASE] sync-entry-refused:sync-b:create:local-source-write-failed:IllegalStateException",
+                "[I][DATABASE] sync-round-applied:device=device-windows snapshot=snap-windows" +
+                    " applied=0 skipped=0 withheld=0 refused=2 removed=0",
+            ),
+            logs.snapshot(),
+        )
+    }
+
+    @Test
+    fun every_withheld_entry_gets_its_own_line_with_its_own_reason() = runBlocking {
+        // 凭据类与未知类型类的处置完全不同（去来源页补 vs 等版本更新），一行一个原因才分得开。
+        val logs = LogBuffer()
+        val json = SourceSyncCodec.encode(
+            envelope(
+                sources = listOf(
+                    record("sync-secret", secrets = JsonPrimitive("sealed-blob")),
+                    record("sync-unknown", wire = "totally-new-wire"),
+                ),
+            ),
+        )
+
+        val report = service(FakeStore(), logger = MemoryLogger(logs)).applyRound(json)
+
+        assertEquals(2, report.withheld)
+        assertEquals(
+            listOf(
+                "[W][DATABASE] sync-entry-withheld:sync-secret:secrets-require-approval",
+                "[W][DATABASE] sync-entry-withheld:sync-unknown:unknown-source-type",
+                "[I][DATABASE] sync-round-applied:device=device-windows snapshot=snap-windows" +
+                    " applied=0 skipped=0 withheld=2 refused=0 removed=0",
+            ),
+            logs.snapshot(),
+        )
+    }
+
+    @Test
+    fun an_identity_less_entry_is_logged_with_a_placeholder_not_a_blank() {
+        // 两个连续冒号既看不出「没身份」也容易被当成字段错位，占位符让日志可 grep。
+        val refusal = SourceSyncRefusal("   ", SourceSyncAction.CREATE, "missing-sync-source-id")
+        val withheld = SourceSyncWithheldSource("", "unknown-source-type")
+
+        assertEquals(
+            "sync-entry-refused:no-identity:create:missing-sync-source-id",
+            refusal.logLine(),
+        )
+        assertEquals("sync-entry-withheld:no-identity:unknown-source-type", withheld.logLine())
+    }
+
+    @Test
+    fun a_clean_round_leaves_only_the_summary_line() = runBlocking {
+        // 「没有拒绝也没有扣住时一行都不多写」：逐条行不许退化成每轮必刷的噪音。
+        val logs = LogBuffer()
+        val json = SourceSyncCodec.encode(envelope(sources = listOf(record("sync-a"))))
+
+        val report = service(FakeStore(), logger = MemoryLogger(logs)).applyRound(json)
+
+        assertEquals(1, report.applied)
+        assertEquals(1, logs.snapshot().size)
+        assertTrue(logs.snapshot().single().startsWith("[I][DATABASE] sync-round-applied:"))
+    }
+
+    @Test
+    fun the_per_entry_lines_never_quote_a_name_an_endpoint_or_a_secret() = runBlocking {
+        val store = FakeStore()
+        store.seed(snapshot(serverId = "srv-local", syncSourceId = "sync-del", revision = 1L))
+        val logs = LogBuffer()
+        val json = SourceSyncCodec.encode(
+            envelope(
+                sources = listOf(
+                    record("sync-a"),
+                    record("sync-secret", secrets = JsonPrimitive("token=Sup3rS3cret")),
+                ),
+                deletions = listOf(
+                    SourceTombstone(
+                        syncSourceId = "sync-del",
+                        deletedAtEpochMs = 1_700_000_100_000L,
+                        recordRevision = 2L,
+                    ),
+                ),
+            ),
+        )
+
+        // 一轮里三件事同时发生：写进去 1 条、扣住 1 条、删除被拒 1 条（本实例没有 remover）。
+        val report = service(store, logger = MemoryLogger(logs))
+            .applyRound(json, allowedSyncSourceIds = listOf("sync-del"))
+
+        assertEquals(1, report.applied)
+        assertEquals(1, report.withheld)
+        assertEquals(1, report.refused)
+        val joined = logs.snapshot().joinToString("\n")
+        assertTrue(joined.contains("sync-entry-refused:sync-del:delete:local-delete-not-supported"))
+        assertTrue(joined.contains("sync-entry-withheld:sync-secret:secrets-require-approval"))
+        // 内部标识与稳定码可以进日志；来源名字、端点地址、凭据片段一律不进（D6）。
+        assertFalse(joined.contains("来源 sync-a"))
+        assertFalse(joined.contains("来源 sync-secret"))
+        assertFalse(joined.contains("http://nas-a:8096/emby"))
+        assertFalse(joined.contains("sealed-blob"))
+        assertFalse(joined.contains("Sup3rS3cret"))
     }
 
     // ------------------------------------------------------------ 夹具
