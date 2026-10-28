@@ -5657,3 +5657,62 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 ### 66.8 状态
 
 - EXECUTED_PASS（本机 `core:database` 246/0 + `feature:settings` 408/0；四条负向对照全红并逐字节还原）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。
+
+## §67 W6-98：删除失败那一步为什么失败也进结果行（对齐 Windows 的 Refused 异常消息）
+
+### 67.1 结论先行
+
+- W6-88 让删除失败会说出「卡在哪一步」（`local-source-remove-failed:<step>`），但「那一步为什么失败」在 Android 侧被丢掉了：`ServerSourceSyncRemover` 的两个 catch 只交出步骤码，异常消息（「keystore 拒绝访问」这类唯一能行动的线索）没有任何出口。
+- Windows 权威从不丢这句话：`ServerManager.RemoveRemoteSourceAsync` 的 `DeleteAsync` 不 try/catch，异常一路冒到 `SourceSyncImportRound.ApplyAsync` 的 catch，折成 `SourceSyncWriteOutcome.Refused(message)`，结果页的「未写入」区逐条带着它（W6-91 的 `SourceSyncRefusedText`）。
+- W6-98 把这句话补回 Android：删除失败的行尾追加「（原因：…）」，与步骤码同一行；净化（折叠空白 / 160 字符截断 / 空白返 null / 不留半个代理对）的唯一权威放在 core:database 的 `SourceSyncRemovalCauses.describe`，界面只 trim 判空。
+
+### 67.2 为什么原因句只进回执与界面
+
+- **不参与判定**：步骤码负责「下一步给什么建议」（W6-88 的 `removalStepLabel`），原因句只是那一刻的事实。两者混进同一个字段会让码表查不出来，也会让建议随异常文案漂移。
+- **没有消息就是 null**：`refusalCauseSuffix` 对 null 与纯空白都返回空串，界面只在真的有一句时才拼接，不会出现「（原因：）」这种半句。
+- **要能安全地摆在界面行上**：异常消息常带换行与制表符（先折叠成单个空格），可能很长（超过 160 字符截断并加省略号），截断点可能落在代理对中间（避免行上出现乱码方块）。
+
+### 67.3 改动面（7 处）
+
+| 位置 | 改动 |
+| --- | --- |
+| `core/database/.../sync/SourceSyncRemovalCauses.kt`（新） | `describe(Throwable?)`：trim → 折叠 `\s+` → 空白返 null → 超 160 截断 + `…`（代理对安全） |
+| `core/database/.../sync/SourceSyncSourceRemover.kt` | `Failed(reason, causeMessage = null)`：默认参数，既有实现零改动 |
+| `feature/server/.../ServerSourceSyncRemover.kt` | 两个 catch 分别传 `describe(failure.cause)` 与 `describe(failure)` |
+| `core/database/.../AndroidSourceSyncService.kt` | `SourceSyncRefusal` 与 `SourceSyncRemovalFailure` 各加 `causeMessage`；Failed 分支抄 `outcome.causeMessage`；本服务这一层漏出的异常走同一净化函数；删除类拒绝带上它（写入类恒 null） |
+| `feature/settings/.../SourceSyncImportModels.kt` | `SourceSyncRefusedEntry` 加 `causeMessage`（只影响行尾，不参与判定） |
+| `feature/settings/.../SourceSyncImportLogic.kt` | `refusalLine` 尾部追加 `refusalCauseSuffix(...)`；新增该函数（core 净化函数的唯一消费方） |
+| `feature/settings/.../SourceSyncImportSession.kt` | 两条取拒绝条目的路径（refusals 与 removalFailures 补漏）都抄 `causeMessage` |
+
+### 67.4 用例与计数
+
+- `core/database` 246 → **251**：新 `SourceSyncRemovalCausesTest` 4 例（无消息/空白 → null、折叠成单行、160 边界与截断、代理对不被截断）；`SourceSyncApplyRoundTest` +1（失败条目的步骤码与原因句同源，`removalFailures` 与逐条拒绝清单的 `causeMessage` 一致）。
+- `feature/settings` 408 → **409**：`SourceSyncImportLogicTest` +1（整行精确串含「（原因：keystore 拒绝访问）」、`causeMessage=null` 时与被改前逐字节一致、`refusalCauseSuffix(null)` 与纯空白都返空串）；`SourceSyncImportSessionTest` 既有两例补断言（删除类带原因、写入类不带；补漏路径同样带上）。
+- `feature/server` 40 → **42**：原有三处期望值补上异常消息；新增两例（步骤码与异常消息一起交出去；那一步什么都没说时是 null 而不是空串）。
+- 四模块本机口径：`core/common` 660 / `core/database` **251** / `feature/settings` **409** / `feature/server` **42** = **1362**（W6-97 是 1354）；`uniqueTests` 2450 → **2458**；`--required-suite` 仍 **60**。C# 与 Windows 侧本轮零改动。
+
+### 67.5 四条负向对照
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A `describe` 把「没有消息」变成空串（`return null` → `return ""`） | 251/**2 红** | `the_message_is_trimmed_and_folded_into_one_line`、`a_missing_cause_or_a_message_that_says_nothing_becomes_null` |
+| B 文案层不再挂原因句（`+ refusalCauseSuffix(...)` → `+ ""`） | 409/**1 红** | `SourceSyncImportLogicTest.aFailedRemovalLineCarriesBothTheStepAndTheReasonTheStepItselfGave` |
+| C 服务层不抄 `outcome.causeMessage` | 251/**1 红** | `SourceSyncApplyRoundTest.a_remover_failure_carries_the_exception_message_the_step_gave` |
+| D 删除器不再交出异常消息（两处 catch → `null`） | 42/**4 红** | `a_failing_remove_chain_keeps_the_plain_failure_code_when_no_step_is_known`、`the_message_the_step_threw_travels_with_the_step_code`、`two_different_steps_never_share_a_reason_code`、`a_failed_step_names_itself_in_the_reason_code` |
+
+- 四条各自跑完立刻从**实现态快照**逐字节还原（`D:/mh-verify/w698-impl-{causes,logic,service,remover}.kt` + `.sha256` 相等）；日志 `D:/mh-verify/w698-neg-A-empty-cause-becomes-a-blank-sentence.log`、`w698-neg-B-line-drops-the-cause.log`、`w698-neg-C-service-drops-the-cause.log`、`w698-neg-D-remover-drops-the-cause.log`；还原后三模块复验 **251 / 409 / 42 全绿**（`D:/mh-verify/w698-test2.log`）。
+
+### 67.6 工具教训
+
+- **run_code 里不要写模板字面量**：Kotlin/文档内容里的反引号会把 JS 解析器打炸（`Expected , got string literal`）；改用单引号字符串数组 + 占位符，写盘时再还原。
+- 字符串手术的补丁助手必须**先还原占位符再做锚点匹配**，否则占位符原样进 `indexOf` 必然 0 命中；同时让锚点失败只记入 failures 并继续其余编辑，避免一条失手让整批改动半途而废。
+
+### 67.7 边界与仍未做
+
+- 原因句只在**删除类**拒绝上：写入类拒绝的原因码里已经有异常类名（W6-82 的码表），本轮没有把 message 也搬过去 —— 那是另一个口径决定，需要先看 Windows 侧写入失败给的是什么。
+- 界面不做二次净化：`refusalCauseSuffix` 只 trim 判空，折叠与截断都在 core:database。若将来出现第二个消费方（通知、日志导出），它必须走同一个函数，否则两处行文会漂移。
+- 仍未做：真实两机联调与真机 instrumentation 仍 NOT_RUN / DEVICE_UNVERIFIED；Windows 侧本轮零改动。
+
+### 67.8 状态
+
+- EXECUTED_PASS（本机 `core:database` 251/0（12 skipped）、`feature:settings` 409/0、`feature/server` 42/0；四条负向对照全红并逐字节还原）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。

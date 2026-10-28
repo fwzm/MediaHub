@@ -324,6 +324,8 @@ class SourceSyncImportSessionTest {
                     syncSourceId = "sync-2",
                     action = SourceSyncAction.DELETE,
                     reason = AndroidSourceSyncService.DELETE_NOT_SUPPORTED,
+                    // W6-98：删除类拒绝带上删除链那一步的异常消息。
+                    causeMessage = "keystore 拒绝访问",
                 ),
             ),
         )
@@ -351,6 +353,11 @@ class SourceSyncImportSessionTest {
             listOf(SourceSyncReasons.UNKNOWN_SOURCE_TYPE, AndroidSourceSyncService.DELETE_NOT_SUPPORTED),
             applied.refusedEntries.map { it.reason },
         )
+        // W6-98：删除类拒绝带原因句、写入类没有；这里钉的是「原因句一路抄到条目上」。
+        assertEquals(
+            listOf(null, "keystore 拒绝访问"),
+            applied.refusedEntries.map { it.causeMessage },
+        )
     }
 
     @Test
@@ -363,6 +370,7 @@ class SourceSyncImportSessionTest {
                 SourceSyncRemovalFailure(
                     syncSourceId = "sync-gone",
                     reason = AndroidSourceSyncService.REMOVE_MISSING,
+                    causeMessage = "keystore 拒绝访问",
                 ),
             ),
         )
@@ -382,6 +390,8 @@ class SourceSyncImportSessionTest {
         assertEquals("sync-gone", refused.title)
         assertEquals(SourceSyncRefusedAction.DELETE, refused.action)
         assertEquals(AndroidSourceSyncService.REMOVE_MISSING, refused.reason)
+        // 补漏路径也必须带上原因句：两条路径同源，不能一条有、一条没有（W6-98）。
+        assertEquals("keystore 拒绝访问", refused.causeMessage)
     }
 
     @Test
