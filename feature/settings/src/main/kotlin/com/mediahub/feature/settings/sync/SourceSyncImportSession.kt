@@ -210,7 +210,7 @@ class SourceSyncImportSession(
             removedCount = report.removedServerIds.size,
             allowedCount = preview.allowCount,
             plannedCount = preview.entries.size,
-            blockingReasons = report.blockingReasons,            appliedTitles = sources.map { it.title },
+            withheldEntries = withheldEntriesOf(report, preview),            appliedTitles = sources.map { it.title },
             appliedSources = sources,
             refusedEntries = refusals,
             notImportedEndpointCount = report.endpointSummary?.notImportedCount ?: 0,
@@ -288,6 +288,28 @@ class SourceSyncImportSession(
             }
         }
         return entries
+    }
+
+    /**
+     * 逐条被永久扣住的条目（W6-83）。
+     *
+     * 闸门把「永不许可」单独分桶，回执把身份与原因抄了回来；这里只补标题 —— 回执只带身份，
+     * 而用户在结果页认的是那条来源的名字。预览里找不到（例如信封里那条记录本身没有身份）时
+     * 退化成身份本身，绝不丢行。
+     */
+    private fun withheldEntriesOf(
+        report: SourceSyncApplyReport,
+        preview: SourceSyncImportPreviewView,
+    ): List<SourceSyncWithheldEntry> {
+        val byKey = preview.entries.associateBy { SourceSyncImportLogic.normalizeKey(it.key) }
+        return report.withheldEntries.map { withheld ->
+            SourceSyncWithheldEntry(
+                syncSourceId = withheld.syncSourceId,
+                title = byKey[SourceSyncImportLogic.normalizeKey(withheld.syncSourceId)]?.title
+                    ?: withheld.syncSourceId,
+                reason = withheld.reason,
+            )
+        }
     }
 
     companion object {

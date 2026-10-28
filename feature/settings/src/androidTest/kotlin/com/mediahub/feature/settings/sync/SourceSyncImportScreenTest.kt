@@ -17,6 +17,7 @@ import com.mediahub.core.common.sync.SourceSyncAction
 import com.mediahub.core.common.sync.SourceSyncCandidate
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
+import com.mediahub.core.common.sync.SyncRoundReasons
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -212,6 +213,8 @@ class SourceSyncImportScreenTest {
         composeRule.onNodeWithText(SourceSyncImportCopy.DISCLAIMER).performScrollTo().assertIsDisplayed()
         // 回执里没有失败条目 ⇒ 逐条失败区整块不出现（0 条不占版面）。
         composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_REFUSED).assertDoesNotExist()
+        // 计数里有 withheld，但没有逐条名单 ⇒ 扣住区也不出现：区头由名单驱动，不由计数驱动。
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_WITHHELD).assertDoesNotExist()
     }
 
     @Test
@@ -250,6 +253,48 @@ class SourceSyncImportScreenTest {
             .assertTextEquals("未写入 2 条（逐条原因）")
         summary.refusedEntries.forEach { entry ->
             composeRule.onNodeWithText(SourceSyncImportCopy.refusalLine(entry))
+                .performScrollTo()
+                .assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun everyWithheldEntryIsListedWithItsIdentityAndItsOwnReason() {
+        // W6-83：扣住的条目以前只剩一个计数和一行去重码，用户看不出是哪几条、也看不出
+        // 点多少次「允许」都不会过。这里钉住逐条身份 + 各自原因。
+        val summary = SourceSyncApplySummary(
+            appliedCount = 0,
+            requiresApprovalCount = 2,
+            ignoredCount = 0,
+            unsupportedCount = 1,
+            failedCount = 0,
+            withheldCount = 2,
+            allowedCount = 2,
+            plannedCount = 3,
+            withheldEntries = listOf(
+                SourceSyncWithheldEntry(
+                    syncSourceId = "sync-1",
+                    title = "客厅 Emby",
+                    reason = SyncRoundReasons.SECRETS_REQUIRE_APPROVAL,
+                ),
+                SourceSyncWithheldEntry(
+                    syncSourceId = "sync-quantum",
+                    title = "Quantum",
+                    reason = SourceSyncReasons.UNKNOWN_SOURCE_TYPE,
+                ),
+            ),
+        )
+        val state = previewedState().copy(
+            status = SourceSyncImportStatus.APPLIED,
+            applied = summary,
+        )
+        render(state)
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_WITHHELD)
+            .performScrollTo()
+            .assertTextEquals("保留未应用 2 条（扣住，点允许也不会写）")
+        summary.withheldEntries.forEach { entry ->
+            composeRule.onNodeWithText(SourceSyncImportCopy.withheldLine(entry))
                 .performScrollTo()
                 .assertIsDisplayed()
         }

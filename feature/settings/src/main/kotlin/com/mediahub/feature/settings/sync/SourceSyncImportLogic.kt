@@ -5,6 +5,7 @@ import com.mediahub.core.common.sync.SourceSyncCandidate
 import com.mediahub.core.common.sync.SourceSyncDigestReasons
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
+import com.mediahub.core.common.sync.SyncRoundReasons
 import com.mediahub.core.database.sync.AndroidSourceSyncService
 
 /** 页面上出现的固定文案。集中在这里，测试与文档引用同一份，避免"改了一句忘了另一处"。 */
@@ -102,13 +103,21 @@ object SourceSyncImportCopy {
             " 条 · 扣住 " + summary.withheldCount +
             " 条 · 拒写 " + summary.failedCount + " 条"
 
-    /** W6-82：永久扣住的原因码；没有就返回 null（0 条时不该占版面）。 */
-    fun blockingReasons(summary: SourceSyncApplySummary): String? =
-        if (summary.blockingReasons.isEmpty()) {
+    /**
+     * W6-83：被永久扣住的条目区标题；0 条时返回 null（0 条不该占版面）。
+     *
+     * 括号里那句是必要的：这一区的条目**点多少次允许都不会过**，不说清楚用户会以为按钮坏了。
+     */
+    fun withheldHeader(summary: SourceSyncApplySummary): String? =
+        if (summary.withheldEntries.isEmpty()) {
             null
         } else {
-            "永久扣住的原因：" + summary.blockingReasons.joinToString("、") + "。光点允许没用，需去来源页逐条处理。"
+            "保留未应用 " + summary.withheldEntries.size + " 条（扣住，点允许也不会写）"
         }
+
+    /** W6-83：一条扣住的可读句：「- 标题（身份）· 原因」。 */
+    fun withheldLine(entry: SourceSyncWithheldEntry): String =
+        "- " + entry.title + "（" + entry.syncSourceId + "）· " + refusalReason(entry.reason)
 
     /** W6-82：逐条失败区的标题；一条都没有时返回 null（0 条不该占版面）。 */
     fun refusedHeader(summary: SourceSyncApplySummary): String? =
@@ -137,6 +146,10 @@ object SourceSyncImportCopy {
     fun refusalReason(code: String): String {
         val raw = code.trim()
         return when {
+            raw == SyncRoundReasons.SECRETS_REQUIRE_APPROVAL ->
+                "对端带了凭据，本机不收对端凭据（能力声明 canSendSecrets=false）；要用这条来源，请在来源页手动补凭据。"
+            raw == SyncRoundReasons.NOT_SUPPORTED ->
+                "本机没有能接住这条来源的类型（原因码沿用合同里的 not-supported-on-windows），只能等版本支持。"
             raw == SourceSyncReasons.UNKNOWN_SOURCE_TYPE ->
                 "本机不认识这个来源类型（版本差异），升级后再试。"
             raw == SourceSyncReasons.NO_USABLE_ENDPOINT ->

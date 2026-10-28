@@ -70,8 +70,8 @@ object SourceSyncImportTags {
     /** W6-82：本轮的「结果」一行（写入 / 删除 / 跳过 / 扣住 / 拒写）。 */
     const val APPLY_VERDICT = "sync.apply.verdict"
 
-    /** W6-81：永久扣住的原因码（只在有扣住时出现）。 */
-    const val APPLY_BLOCKING = "sync.apply.blocking"
+    /** W6-83：逐条被永久扣住的条目（标题 + 每条原因；0 条时整块不出现）。 */
+    const val APPLY_WITHHELD = "sync.apply.withheld"
 
     /** W6-82：逐条没写成的标题（每条原因各占一行，紧跟在下面）。 */
     const val APPLY_REFUSED = "sync.apply.refused"
@@ -558,13 +558,20 @@ fun SourceSyncImportScreen(
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.testTag(SourceSyncImportTags.APPLY_VERDICT),
                         )
-                        SourceSyncImportCopy.blockingReasons(applied)?.let { line ->
+                        // W6-83：扣住的条目逐条点名 + 各自原因（W6-81 只给了一行去重原因码）。
+                        SourceSyncImportCopy.withheldHeader(applied)?.let { header ->
                             Text(
-                                line,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.testTag(SourceSyncImportTags.APPLY_BLOCKING),
+                                header,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.testTag(SourceSyncImportTags.APPLY_WITHHELD),
                             )
+                            applied.withheldEntries.forEach { entry ->
+                                Text(
+                                    SourceSyncImportCopy.withheldLine(entry),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
 
                         applied.appliedTitles.forEach { title ->

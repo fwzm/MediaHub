@@ -438,6 +438,14 @@ class AndroidSourceSyncService(
         val refusedIds = ArrayList<String>()
         val removalFailures = ArrayList<SourceSyncRemovalFailure>()
         val refusals = ArrayList<SourceSyncRefusal>()
+        // 扣住的条目不会进 applied/skipped：闸门已经把「永不许可」单独分桶，这里只把身份与原因抄进回执，
+        // 否则界面只能说「保留未应用 2 条」，用户既不知道是哪两条也不知道该去哪儿处理。
+        val withheldEntries = gate.withheld.map {
+            SourceSyncWithheldSource(
+                syncSourceId = it.syncSourceId.trim(),
+                reason = it.reason.trim().ifEmpty { WITHHELD_WITHOUT_REASON },
+            )
+        }
         var applied = 0
 
         for (item in gate.applied) {
@@ -525,6 +533,7 @@ class AndroidSourceSyncService(
             refusedSyncSourceIds = refusedIds,
             removalFailures = removalFailures,
             refusals = refusals,
+            withheldEntries = withheldEntries,
         )
     }
 
@@ -823,6 +832,12 @@ class AndroidSourceSyncService(
         const val WRITE_FAILED: String = "local-source-write-failed"
 
         /**
+         * 扣住但闸门没给原因时的兜底码（W6-83）。正常不会出现：闸门的每一类永不许可都带原因码；
+         * 出现即说明合同上层漏填，界面按「原因码：<码>」原样显示比显示空白更可查。
+         */
+        const val WITHHELD_WITHOUT_REASON: String = "withheld-without-reason"
+
+        /**
          * Android 侧新增的 reason 码（合同词汇之外）：一轮里被批准了的删除条目，但本实例没有
          * [SourceSyncSourceRemover]（存储层**没有删除方法**，ADR-S001）。这类条目只能如实拒绝并上报，
          * 绝不能假装已应用 —— 否则对端会以为本机已经删了，两侧从此不一致。
@@ -1032,6 +1047,19 @@ data class SourceSyncRefusal(
 )
 
 /**
+ * W6-83：一条被永久扣住的条目 —— 哪个身份、为什么连显式放行都不写。
+ *
+ * [SourceSyncApplyReport.withheld] 只给了条数。用户看到「保留未应用 2 条」时既不知道是哪两条，
+ * 也不知道该去哪儿处理（凭据要去来源页补、类型不支持只能等版本更新），只能整轮重来试运气。
+ * 原因码与 [SourceSyncRefusal] 同一套稳定码（[SyncRoundReasons.SECRETS_REQUIRE_APPROVAL] /
+ * [SyncRoundReasons.UNKNOWN_SOURCE_TYPE] / [SyncRoundReasons.NOT_SUPPORTED]），界面用同一张映射表出人话。
+ */
+data class SourceSyncWithheldSource(
+    val syncSourceId: String,
+    val reason: String,
+)
+
+/**
  * W6-78：一轮落库的回执（Windows `SourceSyncApplyReport` 的对等物）。
  *
  * 四个计数桶互不相交、加起来等于闸门看过的条目数：
@@ -1086,6 +1114,13 @@ data class SourceSyncApplyReport(
      * 后者是界面用的统一清单）；写入类拒绝只在这里。顺序与拒绝顺序一致。
      */
     val refusals: List<SourceSyncRefusal> = emptyList(),
+    /**
+     * 本轮被永久扣住的逐条原因（W6-83）：顺序与闸门一致，只含永不许可的条目。
+     *
+     * 与 [blockingReasons] 的关系：[blockingReasons] 是按首次出现去重的原因码清单（一句话概括），
+     * 这里是逐条身份 + 各自的原因码（界面逐条说人话用）。同一个码可能出现在多条上。
+     */
+    val withheldEntries: List<SourceSyncWithheldSource> = emptyList(),
     /** 非空表示信封没被读入；此时四个桶全为 0，存储与基线都没被碰过。 */
     val rejectedReason: String? = null,
     val rejectedMessage: String? = null,
@@ -1113,6 +1148,12 @@ data class SourceSyncApplyReport(
     /** 与 Windows `SourceSyncApplyReport.Summary` 同格式的一句话回执。 */
     val summary: String
         get() = "已写入本地 " + applied + " 条 / 跳过 " + skipped + " 条 / 保留未应用 " + notApplied + " 条"
+
+    /** 该身份被永久扣住的原因码；没被扣住返回 null。 */
+    fun withheldReasonOf(syncSourceId: String): String? =
+        withheldEntries
+            .firstOrNull { it.syncSourceId.trim().equals(syncSourceId.trim(), ignoreCase = true) }
+            ?.reason
 
     /** 该身份是否被批准但没写下去。 */
     fun isRefused(syncSourceId: String): Boolean =

@@ -182,6 +182,20 @@ data class SourceSyncRefusedEntry(
     val action: SourceSyncRefusedAction,
     val reason: String,
 )
+
+/**
+ * 一条被永久扣住的条目（W6-83）。
+ *
+ * 与 [SourceSyncRefusedEntry] 的区别是「谁做的决定」：拒绝是这一轮真去写了但没写下去；
+ * 扣住是闸门**根本没让写**（凭据 / 未知类型 / 本机不支持），点多少次允许都不会变。
+ * 结果页把两类分开列，就是为了不让用户以为再点一次就能过。
+ */
+data class SourceSyncWithheldEntry(
+    val syncSourceId: String,
+    /** 预览里的标题；找不到时退化成身份本身。 */
+    val title: String,
+    val reason: String,
+)
 /**
  * 应用之后的摘要（只用于结果页，不再参与任何判定）。
  *
@@ -211,8 +225,13 @@ data class SourceSyncApplySummary(
 
     /** 预览里的条目总数（四桶相加）：结果页用它说明这次到底看了多少条。 */
     val plannedCount: Int = 0,
-    /** 扣住的原因码（首现顺序，去重）；非空表示光点允许没用，得先去来源页处理。 */
-    val blockingReasons: List<String> = emptyList(),
+    /**
+     * 逐条被永久扣住的条目（W6-83，按闸门顺序）。
+     *
+     * W6-82 之前这里只有一个去重的原因码清单：同一个码盖住几条、分别是哪几条全看不到。
+     * 逐条带上身份与原因后，「保留未应用 N 条」才有了下文。
+     */
+    val withheldEntries: List<SourceSyncWithheldEntry> = emptyList(),
     val appliedTitles: List<String> = emptyList(),
 
     /** 真正写入的每一条来源（按结果顺序）；结果页据此渲染「补录并验证」入口。 */
