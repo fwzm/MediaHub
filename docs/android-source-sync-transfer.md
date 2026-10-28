@@ -6284,3 +6284,71 @@ Hilt `Logger`（`CompositeLogger(LogcatLogger(), MemoryLogger(LogBuffer()))`）�
 - **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与纯文本单测，端到端日志证据未取（见 §71.6）；
   Android 侧本轮零改动，`uniqueTests` 2467 为未改动对照；
 - 提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+## §72 W6-103：每条被拒写入都进日志（哪一条、为什么）
+
+### 72.1 结论先行
+
+Windows 侧一轮同步里，写入器拒绝某一条时，用户能在结果页看到「未写入 1 条（逐条原因）」和那一行，W6-102 的汇总行也说出「扣住 N · 写入被拒 N」——但**日志里没有这一条**：
+`SourceSyncImportRound.ApplyAsync` 把写入器的异常折成 `SourceSyncWriteOutcome.Refused(error.Message)` 之后，路径上没有任何一行日志，只剩计数。
+Android 侧早在 W6-99（写入失败带原因进回执）与 W6-100（删除链失败带步骤码进日志）就把「哪一条、为什么」落到了日志，本轮把 Windows 这一侧补齐：
+**每一条被拒写入在被拒的那一刻就写成一行 `Warn`**，内容是对端身份、动作和白话原因。
+
+### 72.2 一处措辞、一处消费
+
+- 措辞仍在 `windows/src/MediaHub.Sync/SourceSyncRefusedSource.cs` 的 `SourceSyncRefusedText.LogLine(entry)`，固定句：
+  `同步写入被拒：<对端身份> · <动作> · <原因>`；身份为空写「（未知身份）」，原因空白沿用 `Reason()` 的「写入器没有说明原因」。
+  **不出现标题、端点 URL 或任何凭据片段**：身份是对端给的 syncSourceId，日志按它 grep；标题留在结果页。
+- App 侧 `SourceSyncService.ApplyApprovedAsync` 只把它接到 `_log.Warn(LogCategory, …)`，不自己造句——与 W6-102 同一纪律：措辞放 Sync 层，App 只决定何时写。
+- 触发点是 `ApplyAsync` 的新可选参数 `refusedSink`（放在 `skippedIds` 之后、`cancellationToken` 之前）。
+  异常路径（`IOException` / `UnauthorizedAccessException` / `InvalidOperationException`）与「写入器主动返回 `Refused`」路径都汇入同一个 `else` 分支，
+  所以只有一处上报：回调拿到的正是报告里那条 `SourceSyncRefusedSource` 实例（用例用 `Assert.Same` 钉住，两份不可能漂移）。
+
+### 72.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.Sync/SourceSyncImportRound.cs` | 签名加 `Action<SourceSyncRefusedSource>? refusedSink = null`；`else` 分支构造后同步回调 |
+| `windows/src/MediaHub.Sync/SourceSyncRefusedSource.cs` | 新增 `LogLine(entry)`（唯一句式） |
+| `windows/src/MediaHub.Sync/SourceSyncPeerRound.cs` | 转发改命名实参 `cancellationToken:`（位置参数已不再是末位） |
+| `windows/src/MediaHub.App/Services/SourceSyncService.cs` | `ApplyApprovedAsync` 传 `refusedSink: entry => _log.Warn(LogCategory, SourceSyncRefusedText.LogLine(entry))` |
+| `windows/tests/MediaHub.Tests/SourceSyncImportRoundTests.cs` | 新增 4 例 |
+
+### 72.4 用例与计数
+
+`MediaHub.Tests` 1687 → **1691**：
+
+1. `EveryRefusedWriteIsHandedToTheFailureSinkTheMomentTheRoundRefusesIt`——Refused 返回值上报，且 `Assert.Same` 报告里的那条（动作 Create、身份 trim、原因保留）；
+2. `AWriterThatThrowsIsHandedToTheFailureSinkWithTheExceptionMessage`——抛 `IOException("本机存储只读")` 同样上报，原因就是异常消息；
+3. `TheFailureSinkStaysQuietWhenEverythingWroteOrNothingWasAllowed`——全部写入或零放行时不发一行（避免「没事也报警」）；
+4. `TheFailureLogLineNamesTheIdentityAndTheActionWithoutQuotingTheTitle`——逐字整句、空白身份回退、空白原因回退，并断言行里不含 `api_key` / `http://`（标题带 URL 时也不泄漏）。
+
+App 工程 **0 警告 0 错误**（`D:/mh-verify/w6103-app-build.log`）。
+
+### 72.5 四条负向对照
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A `refusedSink` 只在异常路径触发（Refused 返回值不上报） | 1689 / **2 红** | Refused 上报、抛异常上报 |
+| B 成功条目也进 sink | 1689 / **2 红** | Refused 上报（sink 里 2 条）、抛异常上报（sink 里 2 条） |
+| C `LogLine` 丢掉原因 | 1690 / **1 红** | 逐字整句 |
+| D `LogLine` 用标题当主语 | 1690 / **1 红** | 逐字整句（含 `api_key` 断言） |
+
+实现态快照 `D:/mh-verify/w6103-impl-round.cs`（sha256 `e9386448fb0eadc93b03ea703a125815f715fb6b92a73d9953f1489da57eaf59`）、
+`D:/mh-verify/w6103-impl-refused.cs`（sha256 `02ac505931e52cb2b9103447c0fd383ae452872f1ab748c0387bed8040b58511`）；
+每条对照跑完都从快照逐字节写回并比对 sha256（`true`）；日志 `D:/mh-verify/w6103-neg-{A-refused-outcome-not-reported,B-applied-entries-also-reported,C-logl-ine-drops-the-reason,D-logl-ine-quotes-the-title}.log`。
+
+### 72.6 边界与仍未做
+
+- sink 只覆盖「写入器拒绝」（`Refused` 返回值或三类异常）；**闸门扣住（withheld）不走这条路**——那些条目根本没写库，页面已有逐条出路（W6-93/94），日志侧只由汇总行的计数体现。
+- `MediaHub.Tests` 引不到 `MediaHub.App` ⇒「`ApplyApprovedAsync` 真的把 sink 接到 `LogService`」目前只有编译期保证与 Sync 层单测；
+  端到端（真跑一轮、在 `LogService.Entries` 里看到那一行）属 GUI/真机证据，本轮不取 ⇒ 72.7 记 IMPLEMENTED_UNVERIFIED。
+- `SyncCliRunner`/headless 路径未接 sink（它走 `SourceSyncInbox`），不在本轮范围。
+- 真实两机联调、真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 72.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` 1691 / 0 与 App 构建 0 警告 0 错误；四条负向对照全红（2 / 2 / 1 / 1）且逐字节还原到实现态；
+- **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与 Sync 层单测，端到端日志证据未取（见 72.6）；
+  Android 侧本轮零改动，`uniqueTests` 2467 为未改动对照；
+- 提交号以 PR #39 head 为准（docs 不自指 SHA）。

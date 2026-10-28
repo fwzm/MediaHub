@@ -378,8 +378,17 @@ public sealed class SourceSyncService
         // proven from the app layer and not only from a test double.
         // The skipped list is what makes "the user unticked this row" mean something: without it, a create that
         // needs no approval is applied even though the page showed it as skipped.
+        // W6-103: a refused write gets its own line the moment the round decides it, so "which entry and why" is in
+        // the log and not only on the page. The words live in MediaHub.Sync (W6-102 discipline); this method only
+        // decides when to write them.
         SourceSyncApplyReport result = await _round
-            .ApplyAsync(preview, allowedIds, WriteApprovedRecordAsync, skippedIds, ct)
+            .ApplyAsync(
+                preview,
+                allowedIds,
+                WriteApprovedRecordAsync,
+                skippedIds,
+                refusedSink: entry => _log.Warn(LogCategory, SourceSyncRefusedText.LogLine(entry)),
+                cancellationToken: ct)
             .ConfigureAwait(true);
 
         // The words live in MediaHub.Sync (W6-102) so the log line is pinned by the same suite that pins the

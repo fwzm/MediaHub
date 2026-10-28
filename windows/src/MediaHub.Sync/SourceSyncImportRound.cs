@@ -300,12 +300,15 @@ public sealed class SourceSyncImportRound
     /// <param name="allowedIds">Identities the user explicitly allowed; everything else keeps the default verdict.</param>
     /// <param name="writer">App-layer writer; a null record means the peer stated a deletion.</param>
     /// <param name="skippedIds">Identities the user explicitly skipped; never written, even when their default verdict is "apply".</param>
+    /// <param name="refusedSink">W6-103: called once per refused write, with the round's own row; the app turns it
+    /// into a log line, and a test can watch it without a logger.</param>
     /// <param name="cancellationToken">Cancels between entries, never mid-write.</param>
     public async Task<SourceSyncApplyReport> ApplyAsync(
         SourceSyncApplyPreview preview,
         IReadOnlyList<string>? allowedIds,
         SourceSyncRecordWriter writer,
         IReadOnlyList<string>? skippedIds = null,
+        Action<SourceSyncRefusedSource>? refusedSink = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(preview);
@@ -369,13 +372,18 @@ public sealed class SourceSyncImportRound
                 failed++;
                 // The reason text is the writer's own sentence; blank is preserved and rendered as an explicit
                 // sentence by SourceSyncRefusedText, because a row with an empty tail looks like a broken page.
-                refusedSources.Add(new SourceSyncRefusedSource
+                var refused = new SourceSyncRefusedSource
                 {
                     SyncSourceId = item.SyncSourceId.Trim(),
                     DisplayName = item.DisplayName,
                     Action = item.Action,
                     Reason = outcome.Message,
-                });
+                };
+                refusedSources.Add(refused);
+
+                // W6-103: the summary says how many were kept back; this says which one and why, one line per
+                // refusal, the moment the round decides it.
+                refusedSink?.Invoke(refused);
             }
         }
 

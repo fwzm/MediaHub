@@ -260,7 +260,7 @@ public sealed class SourceSyncPeerRound
     {
         ArgumentNullException.ThrowIfNull(preview);
         ArgumentNullException.ThrowIfNull(writer);
-        return _inbox.Round.ApplyAsync(preview, allowedIds, writer, skippedIds, cancellationToken);
+        return _inbox.Round.ApplyAsync(preview, allowedIds, writer, skippedIds, cancellationToken: cancellationToken);
     }
 
     /// <summary>Serializes an envelope and sends it to a loopback peer.</summary>

@@ -773,6 +773,114 @@ public sealed class SourceSyncImportRoundTests
             Assert.Equal(1, result.Withheld);
         });
     }
+    // ---------------------------------------------------------------- failure log line (W6-103)
+
+    [Fact]
+    public async Task EveryRefusedWriteIsHandedToTheFailureSinkTheMomentTheRoundRefusesIt()
+    {
+        // The page showed a refused row; the log only carried a count. The sink is where the round says which
+        // entry it refused, and it hands over the very row the report keeps, so the two cannot drift.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncEnvelope peer = Envelope(
+                Record("local-aaaa", "smb", "smb://share.local/media", "Share"),
+                Record("local-bbbb", "emby", "http://nas-b:8096/emby", "客厅 Emby"));
+            var sink = new List<SourceSyncRefusedSource>();
+
+            SourceSyncApplyReport result = await round.ApplyAsync(
+                round.Preview(peer),
+                ["local-aaaa", "local-bbbb"],
+                (item, _) => Task.FromResult(item.SyncSourceId == "local-aaaa"
+                    ? SourceSyncWriteOutcome.Refused("Windows 暂不支持该来源类型：smb")
+                    : SourceSyncWriteOutcome.Written("written")),
+                refusedSink: sink.Add);
+
+            SourceSyncRefusedSource watched = Assert.Single(sink);
+            Assert.Same(Assert.Single(result.Refused), watched);
+            Assert.Equal("local-aaaa", watched.SyncSourceId);
+            Assert.Equal("Share", watched.DisplayName);
+            Assert.Equal(SourceSyncAction.Create, watched.Action);
+            Assert.Equal("Windows 暂不支持该来源类型：smb", watched.Reason);
+            Assert.Equal(1, result.Applied);
+        });
+    }
+
+    [Fact]
+    public async Task AWriterThatThrowsIsHandedToTheFailureSinkWithTheExceptionMessage()
+    {
+        // A throw and a Refused outcome reach the page the same way; the log line must not depend on which one
+        // the writer used.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncEnvelope peer = Envelope(Record("local-aaaa", "emby", "http://nas-a:8096/emby", "客厅 Emby"));
+            var sink = new List<SourceSyncRefusedSource>();
+
+            SourceSyncApplyReport result = await round.ApplyAsync(
+                round.Preview(peer),
+                ["local-aaaa"],
+                (_, _) => throw new IOException("本机存储只读"),
+                refusedSink: sink.Add);
+
+            Assert.Equal("本机存储只读", Assert.Single(sink).Reason);
+            Assert.Same(Assert.Single(result.Refused), sink[0]);
+        });
+    }
+
+    [Fact]
+    public async Task TheFailureSinkStaysQuietWhenEverythingWroteOrNothingWasAllowed()
+    {
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncEnvelope peer = Envelope(Record("local-aaaa", "emby", "http://nas-a:8096/emby", "客厅 Emby"));
+            var sink = new List<SourceSyncRefusedSource>();
+
+            await round.ApplyAsync(round.Preview(peer), ["local-aaaa"], Writer(store), refusedSink: sink.Add);
+            await round.ApplyAsync(round.Preview(peer), [], Writer(store), refusedSink: sink.Add);
+
+            Assert.Empty(sink);
+        });
+    }
+
+    [Fact]
+    public void TheFailureLogLineNamesTheIdentityAndTheActionWithoutQuotingTheTitle()
+    {
+        // W6-103: the line is read next to the peer's log, so it carries the identity a person greps for, the
+        // action, and the writer's own sentence — never a title or an address, which can quote a credential.
+        Assert.Equal(
+            "同步写入被拒：local-aaaa · 写入 · Windows 暂不支持该来源类型：smb",
+            SourceSyncRefusedText.LogLine(new SourceSyncRefusedSource
+            {
+                SyncSourceId = " local-aaaa ",
+                DisplayName = "Share",
+                Action = SourceSyncAction.Create,
+                Reason = "Windows 暂不支持该来源类型：smb",
+            }));
+        Assert.Equal(
+            "同步写入被拒：（未知身份） · 删除 · 写入器没有说明原因",
+            SourceSyncRefusedText.LogLine(new SourceSyncRefusedSource
+            {
+                SyncSourceId = "  ",
+                DisplayName = "无身份来源",
+                Action = SourceSyncAction.Delete,
+                Reason = "",
+            }));
+        string withAddress = SourceSyncRefusedText.LogLine(new SourceSyncRefusedSource
+        {
+            SyncSourceId = "local-dddd",
+            DisplayName = "http://nas-a:8096/emby?api_key=AAAA",
+            Action = SourceSyncAction.Update,
+            Reason = "该来源没有可用地址，已跳过",
+        });
+        Assert.Equal("同步写入被拒：local-dddd · 更新 · 该来源没有可用地址，已跳过", withAddress);
+        Assert.DoesNotContain("api_key", withAddress);
+        Assert.DoesNotContain("http://", withAddress);
+    }
 
     [Fact]
     public void EveryRefusedRowCarriesTheIdentityTheSameButtonCopiesAndInventsNoWayOut()

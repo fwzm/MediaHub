@@ -66,6 +66,22 @@ public static class SourceSyncRefusedText
         : reason.Trim();
 
     /// <summary>
+    /// W6-103: one log line per refused write — the identity and the action say which entry, the reason says why.
+    /// </summary>
+    /// <remarks>
+    /// The title is left out on purpose: a log is read next to the peer's own log, and the peer identity is what a
+    /// person greps for. A writer that said nothing gets the explicit sentence rather than a dangling separator, so
+    /// the line never ends in mid-air.
+    /// </remarks>
+    public static string LogLine(SourceSyncRefusedSource entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        string identity = entry.SyncSourceId.Trim();
+        string subject = identity.Length == 0 ? "（未知身份）" : identity;
+        return "同步写入被拒：" + subject + " · " + DescribeAction(entry.Action) + " · " + Reason(entry.Reason);
+    }
+
+    /// <summary>
     /// W6-95: every refused entry as the page needs it, in the order the round was refused — one shape for the row.
     /// </summary>
     /// <remarks>
