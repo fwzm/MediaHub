@@ -5510,8 +5510,9 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 
 - `SourceSyncImportLogicTest`：新增 `theSameBucketWordIsUsedInThePlanLineAndInThePreviewLine`（四词表逐条 + `titleOf` 委托 + planLine 精确串 + 断言不含「放行」「· 忽略」+ 预览 `summaryLine` 含同词）与 `everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle`（空名单 → null、两条写入的精确串、身份两侧空格被 trim、缺身份只给标题）；两条 planLine 精确串用例改词。
 - `SourceSyncImportSessionTest`：删 `appliedTitles` 断言，改断言 `appliedSources.single().title`。
-- `androidTest/SourceSyncImportScreenTest`：fixture 改 `appliedSources`；断言区头文案与 `onNodeWithText(writtenLine(...))`；新增 `everyWrittenEntryIsListedWithItsRemoteIdentityAndTheBlockVanishesWhenNothingWasWritten`（有身份 / 无身份各一条、断言旧式「- 书房 Jellyfin」不存在、空名单渲染后 `APPLY_WRITTEN` 不存在）。`SourceSyncVerificationScreenTest` 去掉一行 `appliedTitles`。
+- `androidTest/SourceSyncImportScreenTest`：fixture 改 `appliedSources`；断言区头文案与 `onNodeWithText(writtenLine(...))`；新增两个用例 —— `everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle`（两条写入：有身份的那条必须带「（身份）」、无身份的那条只给标题，并断言有身份那条的旧式「- 客厅 Emby」不存在）与 `theWrittenBlockVanishesWhenNothingWasWritten`（空名单时 `APPLY_WRITTEN` 整块不出现；必须是独立用例，见 §58.7）。`SourceSyncVerificationScreenTest` 去掉一行 `appliedTitles`。
 - 计数：`feature/settings` 406 → 408（`testDebugUnitTest` 408/0），`compileDebugAndroidTestKotlin` 绿；本机四模块 `core/common` 660 / `core/database` 242 / `feature/settings` 408 / `feature/server` 40 = **1350**；CI `uniqueTests` 预期 2444 → 2446；`--required-suite` 仍 60（新增 2 例在门禁模块内，不改套件数）。
+- CI instrumentation 每 job **135 → 136 → 137**：W6-89 先加 1 例（136），第二次红→修把「双 `render`」那一例拆成两例（137）。JVM 单测数不受影响（拆的是 androidTest）。
 
 ### 58.5 三条负向对照（各自跑完立即逐字节还原，sha256 相同）
 
@@ -5526,14 +5527,22 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 - 改法：反例换成有身份的那一条 `onNodeWithText("- 客厅 Emby").assertDoesNotExist()`（证明身份确实被追加而不是被省略），并显式断言无身份条目 `- 书房 Jellyfin` 正在显示 —— 把它从「反例」改成「行为声明」。
 - 教训：本地只能跑 `compileDebugAndroidTestKotlin`，instrumentation 断言只有 CI 模拟器是裁判；凡是改 UI 文案或新加 instrumentation 断言，本轮必须按「可能红」对待，并把红→修全过程写进 PR 正文（W6-82 是同一个坑的另一面：那次是退役文案没人改）。
 - 三处口径一致：JVM 用例只钉 `writtenLine` 的字符串形态（无身份 → 只给标题），instrumentation 钉渲染节点（有身份必须带身份、无身份只给标题）。
-### 58.6 边界与仍未做
+### 58.7 红→修（二）：Compose 测试规则每个用例只能 setContent 一次
+
+- 第二轮 exact-SHA CI（`21d3157c` / `6ad12eb5`）的 visual-instrumentation 仍然红，且仍是同一个新用例 —— 但失败信息换成了 `java.lang.IllegalStateException: Cannot call setContent twice per test!`（API 32 日志 `D:/mh-verify/w689-fix-vi-api32-fail.log`，136 例 1 失败）。
+- 原因：那条用例为了同时钉「写入区逐条可见」与「0 条时整块消失」，在同一个 `@Test` 里调了两次 `render(...)`；模拟器上的 Compose 测试规则不允许第二次 `setContent`，而本机只做 `compileDebugAndroidTestKotlin` 编译校验，这类运行期约束编译期看不出来。
+- 改法：拆成两个用例 —— `everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle`（渲染一次，钉区头、两条写入行、旧式无身份行不存在、无身份条目按行为声明）与 `theWrittenBlockVanishesWhenNothingWasWritten`（渲染一次空名单，钉 `APPLY_WRITTEN` 不存在）。instrumentation 每 job 136 → **137**。
+- 顺手做了一次全量审计：把 `feature/settings/src/androidTest/**` 下每个函数体按花括号配对切开、逐个数 `render(`，真实「每例多次 setContent」为 **0 处**（首次那种按 `\n    @Test\n` 切块的粗略统计会把文件尾部的 helper 算进最后一个用例，属假阳性）。
+- 教训升级：本机可编译 ≠ 可运行。`setContent` 一例一次、`assertDoesNotExist` 的语义、旧文案残留三件事只有 CI 模拟器能判；凡新加或改动 instrumentation 用例，本轮一律按「可能红」写进 PR 正文，并把两次红→修都记账。
+
+### 58.8 边界与仍未做
 
 - Windows 侧对应物只有计数：写入器在 App 层 `SourceSyncRecordWriter`，回执里只有 Applied / Skipped / Withheld / NotApplied 四类计数、没有逐条身份区——Android 的回执是超集而非分叉（W6-81 起就是这个口径），文档与日志必须写明。
 - 身份缺失只省略、不报警；对端没给身份的写入仍然只显示标题。
 - 0 条写入时整块消失，用户只能从结果行数字知道「写了 0 条」。
 - 仍未做：跨设备真实核对、真机 instrumentation（NOT_RUN / DEVICE_UNVERIFIED）。
 
-### 58.8 状态
+### 58.9 状态
 
 - EXECUTED_PASS（本机 JVM 口径 408/0，androidTest 编译通过）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。
 - 三条负向对照全红并逐字节还原；Windows 侧零改动（C# 仍 1656/1760）。
