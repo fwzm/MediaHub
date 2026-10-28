@@ -10,8 +10,13 @@ import kotlinx.coroutines.withContext
 /**
  * 把一份已经收到的信封交给导入服务的最小口子（W6-23）。
  *
- * 抽成接口是为了让传输层的测试可以在不碰 Room 的情况下断言调用次数与拿到的 JSON 文本；
- * 生产实现由 AndroidSourceSyncService 提供（见 SourceSyncTransferImportService 的次构造器）。
+ * 抽成接口是为了让传输层的测试可以在不碰 Room 的情况下断言调用次数与拿到的 JSON 文本。
+ *
+ * W6-96：生产实现只有一个 —— [SourceSyncImportGateways.acceptOnly]（只解码、回显身份，一个字节都不写）。
+ * W6-23 起这条口子还能用 `constructor(AndroidSourceSyncService, …)` 把写库服务直接接进来，生产从未用过
+ * （界面一直走 acceptOnly() + 预览/逐条允许后的 applyRound）；那个次构造器在 W6-96 被删掉了，
+ * 因为这个类型每多一个这种参数，就多一条「收到即写库」的载具 —— 逐条审批会被无声绕过。
+ * 写库只发生在 SourceSyncImportSession.apply() / AndroidSourceSyncService.applyRound。
  */
 fun interface SourceSyncImportGateway {
     suspend fun importEnvelope(envelopeJson: String): SourceSyncImportResult
@@ -72,18 +77,17 @@ sealed interface SourceSyncTransferImportOutcome {
 /**
  * W6-23：把 SourceSyncTransferClient.receiveFrom 收到的帧流接进导入服务。
  *
- * 放在 core:database 而不是 core:common，是因为入口要调 AndroidSourceSyncService；反向依赖被禁止。
- * 顺序固定：先由客户端拨号收帧（IO 线程），再由 SourceSyncCodec 解码，只有解码成功才调导入服务。
+ * 放在 core:database 而不是 core:common，是因为这条闭环要用同一模块的导入结果类型
+ * （[SourceSyncImportResult]）与网关定义；反向依赖被禁止，core:common 不认识 core:database。
+ * 顺序固定：先由客户端拨号收帧（IO 线程），再由 SourceSyncCodec 解码，只有解码成功才调网关。
+ *
+ * W6-96：本类只认识 [SourceSyncImportGateway]，不再提供以 AndroidSourceSyncService 为参数的次构造器 ——
+ * 接收口在生产里必须只解码，写入必须发生在用户逐条允许之后的 applyRound。
  */
 class SourceSyncTransferImportService(
     private val gateway: SourceSyncImportGateway,
     private val client: SourceSyncTransferClient = SourceSyncTransferClient(),
 ) {
-
-    constructor(
-        service: AndroidSourceSyncService,
-        client: SourceSyncTransferClient = SourceSyncTransferClient(),
-    ) : this(SourceSyncImportGateway { envelopeJson -> service.importEnvelope(envelopeJson) }, client)
 
     /**
      * 连回环对端收一封信封并导入。
@@ -174,6 +178,8 @@ class SourceSyncTransferImportService(
  * 接收发生在用户预览与逐条允许**之前**：这里若接 [AndroidSourceSyncService]，收到的每一条可写来源
  * 都会被直接写库，逐条审批就形同虚设。acceptOnly 只解码、回显信封身份与内容指纹，一个字节都不写；
  * 真正的写入仍然只经 SourceSyncImportSession.apply()（内部才是 AndroidSourceSyncService）。
+ *
+ * W6-96 起这也是生产唯一的接收网关 —— 把 AndroidSourceSyncService 直接接进接收口的那条次构造器已删除。
  */
 object SourceSyncImportGateways {
 

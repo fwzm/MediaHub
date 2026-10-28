@@ -5829,3 +5829,62 @@ W6-91 让结果页能逐条看到「哪条没写进去、为什么」，但那�
 - EXECUTED_PASS（本机 1683/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
 - 本轮踩到的两件事（都写进教训）：①负向对照的「还原」第一次用了**改动前**备份，把两个源文件整个退回上一轮 ⇒ 立即重做改动，并改为先存「实现态快照」再变异；②本机 dotnet 的 env 必须用 Windows 原生反斜杠，正斜杠的 `LOCALAPPDATA` 会让凭据库目录用例红（与代码无关）。
 - 提交：W6 树 `feature/cross-device-source-sync`（代码与文档同一提交；提交号以 PR #39 head 为准——docs 正文不自指 SHA）。四条 exact-SHA CI 按该 head 跑，run 号与计数见 PR 正文与本轮账本。
+## §65 W6-96：接收口不再有「收到即写库」的构造器（结构上不给载具）
+
+- 编号说明：§59–§64 是 Windows 侧轮次（W6-90…W6-95），只落在跨设备分支；本节合并后紧随 §64。
+
+### 65.1 结论先行
+
+- 缺口不在生产接线，而在 API 形状：`SourceSyncTransferImportService` 与 `SourceSyncListenerImportService` 各留了一个以 `AndroidSourceSyncService` 为参数的次构造器，接口上等于写着「传一个服务进来就写库」。
+- 生产从未用过它：接收侧一直走 `SourceSyncImportGateways.acceptOnly()`（只解码、回显身份），写入发生在预览页逐条允许之后的 `applyRound`。
+- 一轮删掉两个次构造器：接收口现在只能拿 `SourceSyncImportGateway`；两个类的 KDoc 把契约写成「接收只解码 + 回显身份 + 回传信封原文，写入只发生在 `SourceSyncImportSession.apply()` / `AndroidSourceSyncService.applyRound`」。
+- 新增 3 个用例把这个形状钉住（含对照组与结构断言），本机 `core:database` 242 → **245** 全绿。
+
+### 65.2 为什么删而不是留注释
+
+- 「生产没用过」不等于「不会被用」：两个次构造器各是一个 `SourceSyncImportGateway` 的快捷方式。只要有人写 `SourceSyncTransferImportService(androidSourceSyncService)`，收到的每一条可写来源都会在用户看到预览之前落库，逐条审批变成装饰 —— 这条纪律从 W6-27 起在文档里写了六遍，但纪律不是编译期约束。
+- 反射断言比注释硬：新用例 `noReceiveEntryPointCanBeHandedAWriteCapableService` 逐个检查两个类的 `declaredConstructors`，只要参数表里出现 `AndroidSourceSyncService` 就红灯（对照见 §65.5 的 A / B 两条变异）。
+- 备选方案（把 `SourceSyncImportResult` 窄化成「只含身份回显」的新类型）未采纳：它被 5 个测试文件 40+ 处计数断言消费（`SourceSyncTransferImportTest` 17 处、`SourceSyncListenerInteropTest` 11 处、`SourceSyncArchiveImportTest` 6 处、两个 controller 测试余下），属跨模块大改，超出单轮最小切片。本轮先把载具从生产 API 上拆掉。
+
+### 65.3 三处改动
+
+- `core/database/.../sync/SourceSyncTransferImportService.kt`：删次构造器；`SourceSyncImportGateway` 与类的 KDoc 改写（生产实现只有 acceptOnly；接收口不认识写库服务）；`object SourceSyncImportGateways` 补一句「W6-96 起这是生产唯一的接收网关」。
+- `core/database/.../sync/SourceSyncListenerImportService.kt`：删次构造器；类 KDoc 与 `start(gateway = …)` 的参数说明改成「生产用 acceptOnly；写库不在接收口上」。
+- 测试：两处旧接线改成**手写网关**并注明来历 —— `SourceSyncTransferImportTest.writeThrough`（4 个调用点）、`SourceSyncListenerImportTest.writeThroughServiceOver`（3 个调用点）、`SourceSyncListenerInteropTest` 的 gateway 处加注释；新文件 `SourceSyncReceiveWiringTest`（3 例）。
+
+### 65.4 用例与计数
+
+- 新文件 `core/database/src/test/kotlin/com/mediahub/core/database/sync/SourceSyncReceiveWiringTest.kt` 三例：
+  1. `theGoldenEnvelopeIsWritableSoTheZeroWriteChecksBelowHaveTeeth`（对照组：同一封黄金信封经手写写库网关确实落两条，`createCalls == 2`）——它让下面那条零写入断言不是「空信封也绿」；
+  2. `theProductionGatewayEchoesTheSameEnvelopeIdentityWithoutWriting`（acceptOnly 收同一封信封：`deviceId` / `snapshotId` / `envelopeContentHash` 都在、信封原文回传、`hasWrites == false`、三个桶全 0、store 没被碰）；
+  3. `noReceiveEntryPointCanBeHandedAWriteCapableService`（结构断言，见 §65.2）。
+- 本机：`core:database` **245 / 0 失败**（242 → +3，12 skipped），`feature:settings` **408 / 0**（未变）；四模块口径 `core/common` 660 / `core/database` 245 / `feature:settings` 408 / `feature/server` 40 = **1353**；C# 与 Windows 侧本轮零改动（**1683 通过 / 0 失败**，W6-95 的 `087ca919`）。日志 `D:/mh-verify/w696-test1.log` / `w696-test2.log`。
+- `--required-suite` 仍 **60**（门禁按套件名录钉，新套件由 `--require-complete-suites` 逐个方法核对）；新例计入 `uniqueTests` 2446 → **2449**；instrumentation 不动（每 job 137）。
+
+### 65.5 四条负向对照
+
+| 变异（把 W6-96 拆掉的东西放回去 / 掏空） | 结果 | 失败用例 |
+| --- | --- | --- |
+| A 给 `SourceSyncTransferImportService` 加回以 `AndroidSourceSyncService` 为参数的次构造器 | 245 / **1 红** | `SourceSyncReceiveWiringTest.noReceiveEntryPointCanBeHandedAWriteCapableService` |
+| B 给 `SourceSyncListenerImportService` 加回同样的次构造器 | 245 / **1 红** | 同上（一个用例里两个类型逐个检查） |
+| C `acceptOnly()` 不再回显 `deviceId` | 245 / **3 红** | `SourceSyncArchiveImportTest.acceptOnlyGatewayEchoesTheDecryptedIdentityWithoutWriting`、`SourceSyncReceiveWiringTest.theProductionGatewayEchoesTheSameEnvelopeIdentityWithoutWriting`、`SourceSyncTransferImportServiceTest.acceptOnlyEchoesIdentityAndContentHashWithoutWriting` |
+| D 接收口不再回传信封原文（`Imported(gateway.importEnvelope(json), null)`） | 245 / **3 红** | `SourceSyncArchiveImportTest.plaintextEnvelopeKeepsTheExactTextPath`、`SourceSyncReceiveWiringTest.theProductionGatewayEchoesTheSameEnvelopeIdentityWithoutWriting`、`SourceSyncTransferImportServiceTest.acceptedEnvelopeIsHandedBackWithItsText` |
+
+- 四条各自跑完立刻从**实现态快照**逐字节还原（`D:/mh-verify/w696-impl-*.kt` + sha256 相等）；日志 `D:/mh-verify/w696-neg-A…D*.log`。
+
+### 65.6 工具教训：XML 里「哪条红了」会错位
+
+- 本轮第一次跑 A / B 对照时，报告的失败名是 `theGoldenEnvelopeIsWritable…`（对照组用例），而真正红的是 `noReceiveEntryPointCanBeHandedAWriteCapableService`（结构断言）—— 差点把「断言没牙」写成结论。
+- 原因：解析 xUnit XML 时用了 `/<testcase\b[^>]*>[\s\S]*?<\/testcase>/g`。通过的用例是自闭合标签 `<testcase … />`，它被当成开标签，非贪婪扫描一直走到后面某个真实 `</testcase>`，于是失败被记账到前面那个通过的用例名上。
+- 计数不受影响（`<testsuite tests=/failures=>` 属性是对的，只有名字错位）；改法：先匹配自闭合（`/<testcase\b[^>]*?(?:\/>|>[\s\S]*?<\/testcase>)/g`），或直接数文本日志里的「失败 <全限定类名>」行。
+- 次生教训：在 Windows 上按路径过滤要按分隔符来（`path.includes("src/test")` 在 `src\test` 上一个都不命中，本轮第一次找 `envelopeJson` 断言时因此误判「没有测试钉住它」）。
+
+### 65.7 边界与仍未做
+
+- 本轮拆掉的是**生产 API 上的载具**，不是「写库网关」这个概念：测试里仍能手写 `SourceSyncImportGateway { service.importEnvelope(it) }`（两处改动后的接线就是它），这是有意保留的对照组。
+- `SourceSyncImportResult` 的形状没动：它同时承担「接收回显」与「应用结果」两种语义，窄化留作后续候选。
+- 仍未做：真实两机联调与真机 instrumentation 仍 NOT_RUN / DEVICE_UNVERIFIED；Windows 侧接收路径本轮未动。
+
+### 65.8 状态
+
+- EXECUTED_PASS（本机 `core:database` 245/0 + `feature:settings` 408/0；四条负向对照全红并逐字节还原）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。

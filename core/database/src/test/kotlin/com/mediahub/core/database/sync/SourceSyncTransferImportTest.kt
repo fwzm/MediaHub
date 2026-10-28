@@ -30,6 +30,9 @@ import org.junit.Test
  *
  * 回环夹具是本文件私有的 LoopbackPeer（只绑 127.0.0.1:0，跑完必关），不复用其它模块的测试类：
  * core:common 的测试源码不在 core:database 的可见范围内。
+ *
+ * W6-96：本文件里真正写库的用例都经手写的 [writeThrough] 网关 —— 那个能直接吃 AndroidSourceSyncService
+ * 的次构造器已从生产 API 删除。保留对照是为了让「零写入」断言有牙：同一封信封经写库网关会落两条。
  */
 class SourceSyncTransferImportTest {
 
@@ -40,7 +43,7 @@ class SourceSyncTransferImportTest {
         val peer = LoopbackPeer(serving(framesOf(goldenEnvelopeBytes(), CHALLENGE)))
         try {
             val outcome = runBlocking {
-                SourceSyncTransferImportService(service).receiveAndImport(HOST, peer.port, CHALLENGE)
+                SourceSyncTransferImportService(writeThrough(service)).receiveAndImport(HOST, peer.port, CHALLENGE)
             }
             peer.await()
 
@@ -64,7 +67,7 @@ class SourceSyncTransferImportTest {
     @Test
     fun the_same_envelope_a_second_time_writes_nothing() {
         val store = ImportFakeStore()
-        val importer = SourceSyncTransferImportService(AndroidSourceSyncService(store, DEVICE_ID))
+        val importer = SourceSyncTransferImportService(writeThrough(AndroidSourceSyncService(store, DEVICE_ID)))
 
         val first = roundTrip(importer)
         val second = roundTrip(importer)
@@ -162,7 +165,7 @@ class SourceSyncTransferImportTest {
         val peer = LoopbackPeer(serving(withTrailingGarbage))
         try {
             val outcome = runBlocking {
-                SourceSyncTransferImportService(AndroidSourceSyncService(store, DEVICE_ID))
+                SourceSyncTransferImportService(writeThrough(AndroidSourceSyncService(store, DEVICE_ID)))
                     .receiveAndImport(HOST, peer.port, CHALLENGE)
             }
             peer.await()
@@ -329,7 +332,17 @@ class SourceSyncTransferImportTest {
         service: AndroidSourceSyncService,
         bytes: ByteArray,
     ): SourceSyncTransferImportOutcome =
-        runBlocking { SourceSyncTransferImportService(service).importEnvelopeBytes(bytes) }
+        runBlocking { SourceSyncTransferImportService(writeThrough(service)).importEnvelopeBytes(bytes) }
+
+    /**
+     * W6-96：把写库服务接进接收口的**手写**网关（旧次构造器的对照）。
+     *
+     * W6-96 之前这层接线由 SourceSyncTransferImportService 的次构造器提供；生产从未用过它（界面一直走
+     * SourceSyncImportGateways.acceptOnly() + 预览/逐条允许后的 applyRound），所以次构造器在 W6-96 被删除。
+     * 这里显式写出来的唯一目的，是保住「这条老路确实会写库」的对照证据：它证明本文件的零写入断言不是空转。
+     */
+    private fun writeThrough(service: AndroidSourceSyncService): SourceSyncImportGateway =
+        SourceSyncImportGateway { envelopeJson -> service.importEnvelope(envelopeJson) }
 
     private fun framesOf(envelope: ByteArray, challenge: String? = CHALLENGE): ByteArray =
         SourceSyncTransfer.encode(envelope, challenge)

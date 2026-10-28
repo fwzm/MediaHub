@@ -27,8 +27,8 @@ sealed interface SourceSyncListenerImportStart {
 /**
  * W6-34：把 SourceSyncTransferListener 收到的信封接进导入服务。
  *
- * 放在 core:database 而不是 core:common，是因为入口要调 AndroidSourceSyncService；反向依赖被禁止
- * （与 W6-23 的 SourceSyncTransferImportService 同一条理由）。
+ * 放在 core:database 而不是 core:common，是因为这条链路要复用同一模块的导入服务与结果类型；
+ * 反向依赖被禁止（与 W6-23 的 SourceSyncTransferImportService 同一条理由）。
  *
  * 两段职责分得很清：
  * - 监听端（core:common）只负责帧、TLS、认证，失败给的是传输层稳定码；
@@ -37,16 +37,15 @@ sealed interface SourceSyncListenerImportStart {
  *   解码成功才调导入服务，给出 Imported（result.rejectedReason 仍可能是整封拒绝）。
  *
  * 因此失败路径零写入是结构性的：帧层失败和解码失败都到不了导入服务那一步。
+ *
+ * W6-96：本类同样不再提供能直接吃 AndroidSourceSyncService 的次构造器。生产用
+ * [SourceSyncListenerImportService.start] + SourceSyncImportGateways.acceptOnly()：收帧只解码回显，
+ * 写入要等用户在预览页逐条允许。
  */
 class SourceSyncListenerImportService(
     private val imports: SourceSyncTransferImportService,
     private val listener: SourceSyncTransferListener,
 ) : Closeable {
-
-    constructor(
-        service: AndroidSourceSyncService,
-        listener: SourceSyncTransferListener,
-    ) : this(SourceSyncTransferImportService(service), listener)
 
     /** 监听的地址文本（缺省回环；W6-52 放宽后是调用方给的单播字面量）。 */
     val address: String get() = listener.address
@@ -126,8 +125,8 @@ class SourceSyncListenerImportService(
         /**
          * 打开一个回环监听并接上导入网关。
          *
-         * @param gateway 生产用 AndroidSourceSyncService 包出来的网关；只想解码不写库的场合用
-         *   SourceSyncImportGateways.acceptOnly()。
+         * @param gateway 生产用 SourceSyncImportGateways.acceptOnly()（只解码、回显身份）；
+         *   写库网关不在接收口上 —— 写入发生在预览与逐条允许之后的 applyRound（W6-96 删了那条次构造器）。
          * @param host null 或空白表示 127.0.0.1；非回环在创建 socket 之前就被拒绝，
          *   除非 [allowExplicitHost] 为 true 且它正是一个单播字面量（W6-52）。
          * @param port 0 表示让系统分配。

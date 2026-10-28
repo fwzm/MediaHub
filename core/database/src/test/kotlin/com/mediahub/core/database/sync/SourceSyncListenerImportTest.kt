@@ -31,13 +31,16 @@ import org.junit.Test
  *
  * 这里跑的是全链路：真回环 socket → SourceSyncTransferListener 解帧 → importEnvelopeBytes 解码 →
  * AndroidSourceSyncService 规划并写库。所以断言既有传输层的稳定码，也有库里的实体数与调用次数。
+ *
+ * W6-96：那条写库接线是本文件用手写网关拼出来的（`writeThroughServiceOver`）—— 能直接吃
+ * AndroidSourceSyncService 的次构造器已从生产 API 删除（生产走 acceptOnly() + 逐条允许后的 applyRound）。
  */
 class SourceSyncListenerImportTest {
 
     @Test
     fun plaintextEnvelopeIsImportedAndAppliesTwoSources() = runBlocking {
         val store = ImportFakeStore()
-        val service = serviceOver(store)
+        val service = writeThroughServiceOver(store)
         try {
             val sent = SendCall(service.port, goldenEnvelope()).start()
             val imported = assertImported(service.receiveAndImport())
@@ -59,7 +62,7 @@ class SourceSyncListenerImportTest {
     @Test
     fun secondRunOfTheSameEnvelopeWritesNothingNew() = runBlocking {
         val store = ImportFakeStore()
-        val service = serviceOver(store)
+        val service = writeThroughServiceOver(store)
         try {
             val firstSend = SendCall(service.port, goldenEnvelope()).start()
             val first = assertImported(service.receiveAndImport())
@@ -222,7 +225,7 @@ class SourceSyncListenerImportTest {
     @Test
     fun successfulImportWritesTheReceiptOnlyAfterTheEnvelopeDecodes() = runBlocking {
         val store = ImportFakeStore()
-        val service = serviceOver(store)
+        val service = writeThroughServiceOver(store)
         try {
             val sent = SendCall(
                 service.port,
@@ -277,8 +280,12 @@ class SourceSyncListenerImportTest {
     }
     // ---------------------------------------------------------------- 夹具
 
-    private fun serviceOver(store: ImportFakeStore): SourceSyncListenerImportService {
-        val imports = SourceSyncTransferImportService(AndroidSourceSyncService(store, ANDROID_DEVICE))
+    /** W6-96：手写的写库网关（旧次构造器对照）；零写入路径见 gatewayService。 */
+    private fun writeThroughServiceOver(store: ImportFakeStore): SourceSyncListenerImportService {
+        val service = AndroidSourceSyncService(store, ANDROID_DEVICE)
+        val imports = SourceSyncTransferImportService(
+            SourceSyncImportGateway { envelopeJson -> service.importEnvelope(envelopeJson) },
+        )
         return serviceOverImports(imports)
     }
 
