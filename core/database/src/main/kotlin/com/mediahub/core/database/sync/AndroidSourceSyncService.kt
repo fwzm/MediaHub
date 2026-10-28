@@ -549,6 +549,14 @@ class AndroidSourceSyncService(
             refusals = refusals,
             withheldEntries = withheldEntries,
         )
+        // W6-104：先逐条再说汇总。顺序固定为「被拒（写/删）」在前、「被扣住」在后，汇总行永远最后——
+        // 按前缀 grep 一次就能拿到本轮的所有拒绝；没有拒绝也没有扣住时这里一行都不多写。
+        for (refusal in report.refusals) {
+            logger.w(LogTag.DATABASE, refusal.logLine())
+        }
+        for (entry in report.withheldEntries) {
+            logger.w(LogTag.DATABASE, entry.logLine())
+        }
         // W6-101：一轮的台账落在日志里，排查「用户说同步了但没变化」时先看这一行。
         // 只有计数与两个内部标识；displayName / endpoint / secrets 一律不进日志。
         logger.i(
@@ -1107,12 +1115,37 @@ data class SourceSyncWrittenSource(
  * 不是异常的那几种拒绝（类型不认识、没有可拨号地址、记录刚被删、本机没有 remover）没有消息，仍是 null ——
  * 宁可不出现「（原因：）」半句，也不编一句空话。
  */
+/**
+ * W6-104：逐条日志。汇总那行只说「有几条被拒/被扣住」，事后追问「是哪一条、为什么」时
+ * 只能靠界面（会关）或内存（会回收）；日志是唯一留得住的通道，所以每条拒绝/扣住各留一行。
+ *
+ * 行内只放内部标识与稳定码：身份是 syncSourceId（不是 displayName），没有身份时用占位符，
+ * displayName / endpoint / URL / secrets 一律不进日志（与 W6-101 汇总行同一条 D6 口径）。
+ */
+private const val SYNC_REFUSED_LOG_PREFIX: String = "sync-entry-refused:"
+private const val SYNC_WITHHELD_LOG_PREFIX: String = "sync-entry-withheld:"
+
+/** 身份为空时的占位符：宁可在日志里看到「no-identity」，也不要一行两个连续冒号让人猜。 */
+private const val SYNC_LOG_NO_IDENTITY: String = "no-identity"
+
 data class SourceSyncRefusal(
     val syncSourceId: String,
     val action: SourceSyncAction,
     val reason: String,
     val causeMessage: String? = null,
-)
+) {
+
+    /**
+     * 一行的形状：`sync-entry-refused:<身份>:<动作>:<原因>`。
+     *
+     * 动作取闸门给的原始动作（[action]）：同一个身份在不同轮次可能先删后写，只按身份聚合会把
+     * 两种处置混成一条。[causeMessage] 有意不进日志 —— 它由 [SourceSyncFailureCauses] 净化过，
+     * 但仍是外部异常的措辞（可能带路径），结果页展示足够，日志只留稳定码。
+     */
+    fun logLine(): String =
+        SYNC_REFUSED_LOG_PREFIX + syncSourceId.trim().ifEmpty { SYNC_LOG_NO_IDENTITY } +
+            ":" + action.name.lowercase() + ":" + reason.trim()
+}
 
 /**
  * W6-83：一条被永久扣住的条目 —— 哪个身份、为什么连显式放行都不写。
@@ -1125,7 +1158,18 @@ data class SourceSyncRefusal(
 data class SourceSyncWithheldSource(
     val syncSourceId: String,
     val reason: String,
-)
+) {
+
+    /**
+     * 一行的形状：`sync-entry-withheld:<身份>:<原因>`。
+     *
+     * 扣住没有「动作」：它压根没走到写/删那一步，原因码自己就说明了该去哪儿处理
+     * （凭据要去来源页补、类型不支持只能等版本更新）。
+     */
+    fun logLine(): String =
+        SYNC_WITHHELD_LOG_PREFIX + syncSourceId.trim().ifEmpty { SYNC_LOG_NO_IDENTITY } +
+            ":" + reason.trim()
+}
 
 /**
  * W6-78：一轮落库的回执（Windows `SourceSyncApplyReport` 的对等物）。

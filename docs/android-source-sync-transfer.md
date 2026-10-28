@@ -6353,9 +6353,78 @@ App 工程 **0 警告 0 错误**（`D:/mh-verify/w6103-app-build.log`）。
   Android 侧本轮零改动，`uniqueTests` 2467 为未改动对照；
 - 提交号以 PR #39 head 为准（docs 不自指 SHA）。
 
-## §74 W6-105：被扣住的条目也各留一行日志（点允许也不会写，但至少要知道是哪一条）
+## §73 W6-104：每条被拒写入、每条被扣住的条目都各留一行日志
 
-> 编号说明：§73 属于主树 W6-104（Android 侧逐条日志），本分支尚未合并到该提交，故本节按全局时间序用 §74。
+### 73.1 结论先行
+
+W6-101 把「一轮同步」写进日志（汇总行：`applied`/`skipped`/`withheld`/`refused`/`removed` 计数），但**逐条**的两类条目仍然只在结果页上活着：**被拒**（写入失败、删除失败）只有界面上的 `SourceSyncRefusal`；**被扣住**（凭据需批准、未知来源类型）只有界面上的 `SourceSyncWithheldSource`。
+
+界面会关、内存会回收 ⇒ 事后无法回答「被拒的是哪一条、为什么」「扣住的是哪一条、为什么」。Windows 侧 W6-103 已给「被拒」逐条行（`refusedSink` + `SourceSyncRefusedSource.LogLine`），Android 侧两类都没有。本轮补齐 Android 侧两类，并保持 W6-101 的汇总行不变。
+
+### 73.2 措辞只写一处
+
+`AndroidSourceSyncService.kt` 顶层新增三个私有常量：`SYNC_REFUSED_LOG_PREFIX = "sync-entry-refused:"`、`SYNC_WITHHELD_LOG_PREFIX = "sync-entry-withheld:"`、`SYNC_LOG_NO_IDENTITY = "no-identity"`。两类条目各自带一个 `logLine()`：
+
+| 类型 | 固定句 | 例子 |
+| --- | --- | --- |
+| `SourceSyncRefusal` | `sync-entry-refused:<身份>:<动作小写>:<原因>` | `[W][DATABASE] sync-entry-refused:sync-a:create:local-source-write-failed:IllegalStateException` |
+| `SourceSyncWithheldSource` | `sync-entry-withheld:<身份>:<原因>` | `[W][DATABASE] sync-entry-withheld:sync-secret:secrets-require-approval` |
+
+- 身份取 `syncSourceId.trim()`，为空写占位符 `no-identity`（**不写空串**：空串在日志里分不清「没有身份」与「格式没拼上」）；
+- `SourceSyncRefusal.causeMessage`（W6-99 加的存储层异常消息）**有意不进日志**：它是外部异常措辞，可能带路径；结果页要给人看，日志只留可检索的稳定码；
+- 两条行都不含标题与端点地址（D6 口径，与汇总行同一条禁词检查）。
+
+### 73.3 一处出口、三条行序
+
+`applyRound` 的成功出口在汇总行之前插入两个循环（被拒在前、扣住在后），随后才是 `logger.i(... "sync-round-applied:…")`。固定语义（用例钉住）：**被拒在前、扣住在后、汇总行永远最后**；两类都空时一行都不多写（干净一轮仍然只有汇总那一行）。坏信封出口（`sync-round-rejected:`）仍只有一行 warn：那种情况下连条目都解不出来，没有「逐条」可言。
+
+### 73.4 用例与计数
+
+`SourceSyncApplyRoundTest.kt` 新增 5 例（文件 `@Test` 32 条）：
+
+| 用例 | 钉住的判据 |
+| --- | --- |
+| `every_refused_write_gets_its_own_line_with_the_action_and_the_reason` | 两条写入失败 ⇒ 两行逐条 + 行尾汇总（`refused=2`） |
+| `every_withheld_entry_gets_its_own_line_with_its_own_reason` | 凭据扣住与未知类型各一行、原因各异 |
+| `an_identity_less_entry_is_logged_with_a_placeholder_not_a_blank` | 身份空 ⇒ `no-identity`（纯单元，无 `runBlocking`） |
+| `a_clean_round_leaves_only_the_summary_line` | 全写入轮 ⇒ 日志恰好一行 |
+| `the_per_entry_lines_never_quote_a_name_an_endpoint_or_a_secret` | 一轮含写/扣/拒三类 ⇒ 每行都不含名字、端点、凭据片段 |
+
+W6-101 的两条老用例按新契约收口（**收口不是放宽**）：`a_round_that_writes_leaves_one_summary_line_with_the_counts` 仍断言汇总行恰好一行（`count { it.startsWith("[I][DATABASE]") } == 1`）但改成允许前面有逐条行，并钉住 `lines.first()` 就是那条扣住行；`the_summary_line_never_quotes_a_name_an_endpoint_or_a_secret` 从「只查唯一一行」改成「汇总行查内部标识、**每一行**都跑五条 D6 禁词断言」。
+
+本机：`core:database` **256 → 261 / 0 失败**（12 skipped），`core/common` 660、`feature/settings` 410、`feature/server` 45，四模块 **1376** 全绿；Windows 侧本轮零改动（W6-103 的 1691 通过 / 0 失败）。
+
+### 73.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | 删掉被拒循环 | **2 红**（被拒逐条 + D6 每行） |
+| B | 删掉扣住循环 | **3 红**（W6-101 汇总用例 + 扣住逐条 + D6 每行） |
+| C | `logLine()` 去掉 `ifEmpty { SYNC_LOG_NO_IDENTITY }` | **1 红**（身份空占位符） |
+| D | 汇总前额外逐条记「被写入」条目 | **2 红**（干净一轮 + W6-101 汇总用例） |
+
+四次对照都先存实现态快照（`D:/mh-verify/w6104-impl-service.kt`、`w6104-impl-tests.kt`），跑完写回并以 sha256 比对（四次 `restored true`）。
+
+### 73.6 工具教训
+
+- **解析测试结果前先清 `<module>/build/test-results/testDebugUnitTest/*.xml`**：四轮对照后的「复跑全绿」第一次拿到 `status=1` 与 2 条失败，看着像还原失败；实际是 `:core:database:bundleLibCompileToJarDebug` 因 `classes.jar: 另一个程序正在使用此文件` 失败（测试任务根本没跑），解析读到的是 D 那轮的陈旧 XML。清掉 XML 后复跑 `FROM-CACHE` / BUILD SUCCESSFUL、261 / 0。
+- 负向对照的「红」要按 XML 里的用例名逐块统计（`<testcase>` 块匹配），不能只看行尾 `FAILED`。
+
+### 73.7 边界与仍未做
+
+- Windows 侧的 **withheld** 逐条还没有日志（W6-103 只做了被拒）⇒ 留作后续候选，那时两端口径可以照抄这两条前缀；
+- 生产接线（Hilt → ViewModel → `production` → 服务）只有编译期保证与本层用例，没有「App 里注入的 Logger 真收到这一行」的端到端证据 ⇒ **IMPLEMENTED_UNVERIFIED**；
+- 日志只记身份/动作/原因，不记标题与端点；「导出诊断日志」出口（LogBuffer → 文件）仍 **NOT_RUN**；
+- 旧 `importEnvelope`/`apply()` 路径不记日志（不是生产会话的写入口，已在 W6-101 注释写明）；
+- 真实两机联调 **NOT_RUN**，真机 instrumentation **DEVICE_UNVERIFIED**。
+
+### 73.8 状态
+
+- **EXECUTED_PASS**：本机 `core:database` 261 / 0，四条对照 2 / 3 / 1 / 2 红且逐字节还原；
+- **IMPLEMENTED_UNVERIFIED**：exact-SHA CI 结果见 PR #33 正文；生产接线的端到端证据未取（见 73.7）；
+- Windows 侧本轮零改动（C# 1691 / 0，W6-103 的 `0b23830e`）；主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+
+## §74 W6-105：被扣住的条目也各留一行日志（点允许也不会写，但至少要知道是哪一条）
 
 ### 74.1 结论先行
 
