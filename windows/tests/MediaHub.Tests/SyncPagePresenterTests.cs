@@ -340,6 +340,43 @@ public sealed class SyncPagePresenterTests : IDisposable
     }
 
     [Fact]
+    public async Task DescribeResultListsEveryWrittenEntryWithItsIdentity()
+    {
+        // The result page shows one counts sentence; this list is what lets a user check a single row of it.
+        var local = new InMemoryLocalSourceStore();
+        var round = new SourceSyncImportRound(local, new InMemorySourceSyncBaselineStore());
+        SourceSyncApplyPreview preview = round.Preview(Envelope(SenderId, Record("src-1"), Record("src-2")));
+
+        var presenter = new SyncApplyPresenter();
+        presenter.Load(preview);
+
+        SourceSyncApplyReport report = await round.ApplyAsync(
+            preview,
+            presenter.AllowedIds(),
+            (_, _) => Task.FromResult(SourceSyncWriteOutcome.Written("written")),
+            presenter.SkippedIds());
+
+        SyncApplyResult result = presenter.DescribeResult(report);
+
+        Assert.Equal(2, report.Applied);
+        Assert.Equal("已写入 2 条（按对端身份，可逐条核对）", result.WrittenHeader);
+        Assert.Equal(2, result.WrittenRows.Count);
+        Assert.Contains("src-1", result.WrittenRows[0], StringComparison.Ordinal);
+        Assert.Contains("src-2", result.WrittenRows[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DescribeResultKeepsTheWrittenListEmptyWhenNothingWasWritten()
+    {
+        var presenter = new SyncApplyPresenter();
+
+        SyncApplyResult result = presenter.DescribeResult(new SourceSyncApplyReport());
+
+        Assert.Equal(string.Empty, result.WrittenHeader);
+        Assert.Empty(result.WrittenRows);
+    }
+
+    [Fact]
     public async Task Apply_SkipThePageRecordedIsHonoured()
     {
         // A create needs no approval, so its default verdict is "apply". If only the allow list travelled, a row the

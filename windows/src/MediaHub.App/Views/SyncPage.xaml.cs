@@ -813,6 +813,13 @@ public sealed partial class SyncPage : Page
             // against a stale plan, so it is retired while the result line and the endpoint sentence stay.
             ClearApplyPreview(keepResult: true);
             ApplyResultText.Text = applied.Message;
+
+            // The counts sentence says how many rows landed; this list lets the user check which ones became which
+            // local source. Both come from the presenter, so the page spells no words of its own.
+            ApplyWrittenHeader.Text = applied.WrittenHeader;
+            ApplyWrittenHeader.Visibility = applied.WrittenHeader.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            ApplyWrittenList.ItemsSource = applied.WrittenRows;
+            ApplyWrittenList.Visibility = applied.WrittenRows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             ApplyNotImportedCount.Text = applied.EndpointSentence;
             ApplyNotImportedCount.Visibility = Visibility.Visible;
             ReloadSources();
@@ -906,6 +913,10 @@ public sealed partial class SyncPage : Page
         if (!keepResult)
         {
             ApplyResultText.Text = string.Empty;
+            ApplyWrittenHeader.Text = string.Empty;
+            ApplyWrittenHeader.Visibility = Visibility.Collapsed;
+            ApplyWrittenList.ItemsSource = null;
+            ApplyWrittenList.Visibility = Visibility.Collapsed;
         }
     }
 

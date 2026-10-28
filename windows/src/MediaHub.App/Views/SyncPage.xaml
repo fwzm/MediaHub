@@ -207,6 +207,24 @@
                    AutomationProperties.AutomationId="sync.apply.result"
                    AutomationProperties.Name="应用结果" />
 
+        <!-- What the round actually wrote, row by row: the counts line above is not the whole story. -->
+        <TextBlock x:Name="ApplyWrittenHeader" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   AutomationProperties.AutomationId="sync.apply.written.header"
+                   AutomationProperties.Name="已写入条目" />
+
+        <ListView x:Name="ApplyWrittenList" SelectionMode="None" MaxHeight="120" Visibility="Collapsed"
+                  AutomationProperties.AutomationId="sync.apply.written.list"
+                  AutomationProperties.Name="已写入条目清单">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              <Setter Property="Padding" Value="0" />
+              <Setter Property="MinHeight" Value="0" />
+            </Style>
+          </ListView.ItemContainerStyle>
+        </ListView>
+
         <!-- Addresses the peer offers that this client cannot store: counted and named, never silently dropped. -->
         <TextBlock x:Name="ApplyNotImportedCount" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
                    Visibility="Collapsed"

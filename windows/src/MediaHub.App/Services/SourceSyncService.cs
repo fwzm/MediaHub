@@ -416,7 +416,7 @@ public sealed class SourceSyncService
 
     private static SourceSyncWriteOutcome Describe(ServerManager.RemoteSourceOutcome outcome)
         => outcome.Applied
-            ? SourceSyncWriteOutcome.Written(outcome.Message)
+            ? SourceSyncWriteOutcome.Written(outcome.Message, outcome.ServerId)
             : SourceSyncWriteOutcome.Refused(outcome.Message);
 }
 

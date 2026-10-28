@@ -5546,3 +5546,42 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 
 - EXECUTED_PASS（本机 JVM 口径 408/0，androidTest 编译通过）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。
 - 三条负向对照全红并逐字节还原；Windows 侧零改动（C# 仍 1656/1760）。
+
+## §59 W6-90：Windows 结果页也给「已写入」逐条身份（对齐 Android W6-89）
+
+### 59.1 结论先行
+
+- W6-89 只补了 Android：Windows 的 `SourceSyncApplyReport` 仍只有四个计数（Applied / Skipped / Withheld / NotApplied），结果页读到的是「已写入 2 条」，用户没有任何办法核对这 2 条各是哪一条对端来源、变成了本机哪个来源。
+- 同一份数据里 `SourceSyncImportEntry` 一直带着 SyncSourceId / ServerId / DisplayName（`SourceSyncSessionResult.cs`），断点在写入路径：`SourceSyncImportRound.ApplyAsync` 只累加计数与基线记录，没有把「哪条写了」带出来。
+- 本轮把写入路径的逐条记录带进回执：新 `SourceSyncWrittenSource(syncSourceId, serverId, displayName, action)`，`SourceSyncApplyReport.Written` 按写入顺序列条；`SourceSyncWriteOutcome.Written(message, serverId)` 让 App 层写入器交出本机 serverId（`ServerManager.RemoteSourceOutcome` 增第四字段，创建与接管两条成功路径都填）。
+- 文案只有一个来源：`SourceSyncWrittenText.Header(count)`（0 条返回 null，整块消失，不写「已写入 0 条」）与 `.Line(entry)`（「- 标题（身份）」；标题或身份缺失只给另一半，不编造）。删除动作后缀「 · 已从本机移除」——Windows 真的会执行删除，而 Android 明确拒绝（`local-delete-not-supported`），所以 Windows 的行必须读得出「这一条是移除」。
+- 结果页新增 `sync.apply.written.header` / `sync.apply.written.list`，页面只做 ItemsSource 与可见性切换，字全由 presenter 给。
+
+### 59.2 数据流（一处实现，三层消费）
+
+- `MediaHub.Sync`：`SourceSyncImportRound.ApplyAsync` 在每次 `outcome.Applied` 后往 `writtenSources` 追加一条；`Written = writtenSources` 进回执；被判 `Refused` 的写入不出现（保留未应用表示它没有发生）。
+- `MediaHub.App`：`ServerManager.ApplyRemoteSource` / `AdoptRemoteSource` 的成功回执带本机 serverId；删除路径不回传（行已不在，回传一个已消失的 id 会误导）。
+- `SyncPagePresenter`：`SyncApplyResult.WrittenHeader` / `WrittenRows` 由 `SourceSyncWrittenText` 生成；`SyncPage.xaml.cs` 只绑定。
+
+### 59.3 用例与计数
+
+- `SourceSyncImportRoundTests` +5：`AppliedEntriesAreListedWithTheirPeerIdentityAndTitle`（写入顺序 + 身份 + 标题 + 精确行文案）、`WrittenHeaderStaysNullWhenNothingWasWritten`、`WrittenLineNeverInventsTheHalfItDoesNotHave`（缺标题 / 缺身份 / 删除后缀）、`RefusedWritesStayOutOfTheWrittenList`（Withheld 仍计数 1）、`TheLocalIdTheWriterProducedTravelsIntoTheRow`（写入器给的 `sync:...` 覆盖计划里的 id）。
+- `SyncPagePresenterTests` +2：`DescribeResultListsEveryWrittenEntryWithItsIdentity`（header 精确串 + 两行按顺序）、`DescribeResultKeepsTheWrittenListEmptyWhenNothingWasWritten`。
+- 本机 `MediaHub.Tests` **1663 通过 / 0 失败**（1656 → +7）；App 工程 **0 警告 0 错误**（XAML 编译通过）。Android 侧零改动。
+
+### 59.4 四条负向对照（全红，逐字节还原 sha256 一致）
+
+- `Header` 恒 null ⇒ **2 红**（`DescribeResultListsEveryWrittenEntryWithItsIdentity` + `AppliedEntriesAreListedWithTheirPeerIdentityAndTitle`）。
+- 回执 `Written = []` ⇒ **3 红**（上述两条 + `TheLocalIdTheWriterProducedTravelsIntoTheRow`）。
+- `DisplayName = null`（标题丢）⇒ **1 红**。
+- `Line` 丢身份（只给标题）⇒ **4 红**（上述两条之一 + `WrittenLineNeverInventsTheHalfItDoesNotHave` + `WrittenHeaderStaysNullWhenNothingWasWritten`）。
+
+### 59.5 边界与仍未做
+
+- 删除行给对端身份 + 「已从本机移除」，不回传本机 serverId（来源已删）。
+- GUI 未人工验证：本轮只到 XAML 编译通过 + presenter 纯逻辑用例；结果页真实呈现记 **GUI_UNVERIFIED**（workstream ② 需要用户授予空闲窗口，不得自行排程）。
+- 仍未做：跨设备真实核对、真机 instrumentation（**NOT_RUN / DEVICE_UNVERIFIED**）。
+
+### 59.6 状态
+
+- EXECUTED_PASS（本机 1663/0 + App 0 警告 0 错误）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。

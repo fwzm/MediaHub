@@ -585,7 +585,117 @@ public sealed class SourceSyncImportRoundTests
         });
     }
 
+    // ---------------------------------------------------------------- written list (W6-90)
+
+    [Fact]
+    public async Task AppliedEntriesAreListedWithTheirPeerIdentityAndTitle()
+    {
+        // The counts say how many rows landed; the list says which ones, in write order, so 「已写入 2 条」 can be
+        // checked row by row. Without it the result page is a number nobody can verify.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncEnvelope peer = Envelope(
+                Record("local-aaaa", "webdav", "http://nas.local:5005", "NAS"),
+                Record("local-bbbb", "emby", "http://emby.local:8096", "Emby"));
+
+            SourceSyncApplyReport result = await round.ApplyAsync(
+                round.Preview(peer),
+                ["local-aaaa", "local-bbbb"],
+                Writer(store));
+
+            Assert.Equal(2, result.Applied);
+            Assert.Equal(2, result.Written.Count);
+            Assert.Equal(["local-aaaa", "local-bbbb"], result.Written.Select(entry => entry.SyncSourceId));
+            Assert.Equal(["NAS", "Emby"], result.Written.Select(entry => entry.DisplayName));
+            Assert.All(result.Written, entry => Assert.Equal(SourceSyncAction.Create, entry.Action));
+            Assert.Equal(
+                ["- NAS（local-aaaa）", "- Emby（local-bbbb）"],
+                SourceSyncWrittenText.Lines(result.Written));
+            Assert.Equal("已写入 2 条（按对端身份，可逐条核对）", SourceSyncWrittenText.Header(result.Written.Count));
+        });
+    }
+
+    [Fact]
+    public void WrittenHeaderStaysNullWhenNothingWasWritten()
+    {
+        // Zero rows must not leave a heading over an empty list.
+        Assert.Null(SourceSyncWrittenText.Header(0));
+        Assert.Equal(
+            "- NAS（local-aaaa）",
+            SourceSyncWrittenText.Line(new SourceSyncWrittenSource { SyncSourceId = "local-aaaa", DisplayName = "NAS" }));
+    }
+
+    [Fact]
+    public void WrittenLineNeverInventsTheHalfItDoesNotHave()
+    {
+        // A peer that states no title still writes: the row shows the identity alone, and vice versa.
+        Assert.Equal(
+            "- local-aaaa",
+            SourceSyncWrittenText.Line(new SourceSyncWrittenSource { SyncSourceId = " local-aaaa " }));
+        Assert.Equal(
+            "- NAS",
+            SourceSyncWrittenText.Line(new SourceSyncWrittenSource { SyncSourceId = "  ", DisplayName = " NAS " }));
+
+        // A deletion is a real local change; saying so keeps the row from reading like a create.
+        Assert.Equal(
+            "- NAS（local-aaaa） · 已从本机移除",
+            SourceSyncWrittenText.Line(new SourceSyncWrittenSource
+            {
+                SyncSourceId = "local-aaaa",
+                DisplayName = "NAS",
+                Action = SourceSyncAction.Delete,
+            }));
+    }
+
+    [Fact]
+    public async Task RefusedWritesStayOutOfTheWrittenList()
+    {
+        // 保留未应用 means the write did not happen, so it must not appear in a list of things that did.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncEnvelope peer = Envelope(Record("local-aaaa", "webdav", "http://nas.local:5005", "NAS"));
+
+            SourceSyncApplyReport result = await round.ApplyAsync(
+                round.Preview(peer),
+                ["local-aaaa"],
+                (_, _) => Task.FromResult(SourceSyncWriteOutcome.Refused("该来源已被其他窗口占用")));
+
+            Assert.Equal(0, result.Applied);
+            Assert.Empty(result.Written);
+            Assert.Null(SourceSyncWrittenText.Header(result.Written.Count));
+            Assert.Equal(1, result.Withheld);
+            Assert.Equal(1, result.NotApplied);
+        });
+    }
+
+    [Fact]
+    public async Task TheLocalIdTheWriterProducedTravelsIntoTheRow()
+    {
+        // The App layer mints a local id for a create; the row is the only place the user can see which local source
+        // the entry became, so the writer's id must win over the one the plan happened to carry.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncEnvelope peer = Envelope(Record("local-aaaa", "webdav", "http://nas.local:5005", "NAS"));
+
+            SourceSyncApplyReport result = await round.ApplyAsync(
+                round.Preview(peer),
+                ["local-aaaa"],
+                (item, _) => Task.FromResult(SourceSyncWriteOutcome.Written("written", "sync:" + item.SyncSourceId)));
+
+            SourceSyncWrittenSource written = Assert.Single(result.Written);
+            Assert.Equal("sync:local-aaaa", written.ServerId);
+            Assert.Equal("local-aaaa", written.SyncSourceId);
+        });
+    }
+
     // ---------------------------------------------------------------- helpers
+
 
     private static SourceSyncImportRound Round(ILocalSourceStore store, string directory)
     {

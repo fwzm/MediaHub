@@ -16,8 +16,12 @@ public sealed record SourceSyncWriteOutcome
     /// <summary>One sentence describing what happened, safe to log (never a credential).</summary>
     public string Message { get; init; } = "";
 
+    /// <summary>Local server id the write produced or matched, when the App layer knew it; null otherwise.</summary>
+    public string? ServerId { get; init; }
+
     /// <summary>The record was written.</summary>
-    public static SourceSyncWriteOutcome Written(string message) => new() { Applied = true, Message = message };
+    public static SourceSyncWriteOutcome Written(string message, string? serverId = null)
+        => new() { Applied = true, Message = message, ServerId = serverId };
 
     /// <summary>The record was deliberately not written; the round reports it as 保留未应用.</summary>
     public static SourceSyncWriteOutcome Refused(string message) => new() { Applied = false, Message = message };
@@ -88,6 +92,13 @@ public sealed record SourceSyncApplyReport
 
     /// <summary>Everything that did not take effect: skipped plus withheld. The task's 保留未应用.</summary>
     public int NotApplied { get; init; }
+
+    /// <summary>The entries that really landed, in write order, each with the identity the peer knows it by.</summary>
+    /// <remarks>
+    /// Counts alone cannot be checked: this list is what turns 「已写入 2 条」 into two rows a user can compare
+    /// against the preview. A refused write never appears here, because it never happened.
+    /// </remarks>
+    public IReadOnlyList<SourceSyncWrittenSource> Written { get; init; } = [];
 
     /// <summary>Stable reason codes the gate refuses to apply, ever.</summary>
     public IReadOnlyList<string> BlockingReasons { get; init; } = [];
@@ -290,6 +301,7 @@ public sealed class SourceSyncImportRound
         List<SourceSyncApprovalDecision> decisions = Decisions(allowedIds, skippedIds);
         SourceSyncApprovalResult gate = SourceSyncApprovalGate.Decide(preview.Items, decisions);
         var written = new List<SourceRecord>();
+        var writtenSources = new List<SourceSyncWrittenSource>();
         int applied = 0;
         int failed = 0;
 
@@ -316,6 +328,16 @@ public sealed class SourceSyncImportRound
                 {
                     written.Add(record);
                 }
+
+                // The count says how many rows landed; this says which ones. `item` carries the peer identity and
+                // the title the gate read, and the writer may add the local id it produced or matched.
+                writtenSources.Add(new SourceSyncWrittenSource
+                {
+                    SyncSourceId = item.SyncSourceId.Trim(),
+                    ServerId = outcome.ServerId ?? item.ServerId,
+                    DisplayName = item.DisplayName,
+                    Action = item.Action,
+                });
             }
             else
             {
@@ -362,6 +384,7 @@ public sealed class SourceSyncImportRound
             Skipped = gate.SkippedCount,
             Withheld = gate.WithheldCount + failed,
             NotApplied = gate.WithheldCount + failed + gate.SkippedCount,
+            Written = writtenSources,
             BlockingReasons = gate.BlockingReasons,
             AcknowledgedRisk = gate.AcknowledgedRisk,
             BaselineUpdated = baselineUpdated,

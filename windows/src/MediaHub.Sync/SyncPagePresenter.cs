@@ -255,6 +255,12 @@ public sealed record SyncApplyResult
 
     /// <summary>Localised baseline warnings, if any.</summary>
     public IReadOnlyList<string> WarningLabels { get; init; } = [];
+
+    /// <summary>Sentence above the written list; empty when this round wrote nothing.</summary>
+    public string WrittenHeader { get; init; } = "";
+
+    /// <summary>One row per written entry, in write order, so the counts line can be checked row by row.</summary>
+    public IReadOnlyList<string> WrittenRows { get; init; } = [];
 }
 
 /// <summary>
@@ -470,6 +476,8 @@ public sealed class SyncApplyPresenter
             InfoTitle = report.Applied > 0 ? "已写入远端变更" : "没有写入任何变更",
             BlockingLabels = blocking,
             WarningLabels = warnings,
+            WrittenHeader = SourceSyncWrittenText.Header(report.Written.Count) ?? string.Empty,
+            WrittenRows = SourceSyncWrittenText.Lines(report.Written),
         };
     }
 
