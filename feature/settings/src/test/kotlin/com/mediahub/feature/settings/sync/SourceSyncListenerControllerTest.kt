@@ -20,6 +20,8 @@ import com.mediahub.core.database.sync.SourceSyncPreview
 import com.mediahub.core.database.sync.SourceSyncReceiveEcho
 import com.mediahub.core.database.sync.SourceSyncTransferImportOutcome
 import com.mediahub.core.database.sync.SourceSyncWrittenSource
+import com.mediahub.core.logging.LogBuffer
+import com.mediahub.core.logging.MemoryLogger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -1229,6 +1231,195 @@ class SourceSyncListenerControllerTest {
         assertEquals("口令仍然打码", false, text.contains("s3cret"))
     }
 
+    // ------- W6-106 监听路径的固定日志（措辞见 SourceSyncListenLog） -------
+
+    private fun memoryLogs(): Pair<MemoryLogger, LogBuffer> {
+        val buffer = LogBuffer()
+        return MemoryLogger(buffer) to buffer
+    }
+
+    @Test
+    fun aStartedListenerLeavesExactlyOneInfoLine() = runTest {
+        val (logger, buffer) = memoryLogs()
+        val controller = SourceSyncListenerController(
+            FakeFactory(opened = opened(FakeSession(port = 45_678))),
+            logger,
+        ) { _, _ -> }
+
+        assertTrue(controller.start(SourceSyncListenForm()))
+
+        assertEquals(
+            listOf("[I][NETWORK] sync-listen-started:port=45678:tls=false"),
+            buffer.snapshot(),
+        )
+    }
+
+    @Test
+    fun theStartedLineSaysTlsWhenTheListenerPresentsTls() = runTest {
+        val (logger, buffer) = memoryLogs()
+        val factory = FakeFactory(
+            availability = SourceSyncListenTlsAvailability(available = true, note = "ok"),
+            opened = opened(FakeSession(port = 9_001, tlsEnabled = true, certificateFingerprint = LISTEN_PIN)),
+        )
+        val controller = SourceSyncListenerController(factory, logger) { _, _ -> }
+
+        assertTrue(controller.start(SourceSyncListenForm(port = "9001", tls = true)))
+
+        assertEquals(listOf("[I][NETWORK] sync-listen-started:port=9001:tls=true"), buffer.snapshot())
+    }
+
+    @Test
+    fun aReceivedEnvelopeLeavesOneLineWithThePeerAndTheReceiptFlag() = runTest {
+        val (logger, buffer) = memoryLogs()
+        val listener = FakeSession(
+            outcome = SourceSyncTransferImportOutcome.Imported(
+                result = SourceSyncReceiveEcho(
+                    deviceId = "device-a",
+                    snapshotId = "snap-1",
+                    envelopeContentHash = "hash-1",
+                ),
+                envelopeJson = envelopeText(),
+                receiptWritten = true,
+            ),
+        )
+        val controller = SourceSyncListenerController(
+            FakeFactory(opened = opened(listener)),
+            logger,
+        ) { _, _ -> }
+
+        controller.start(SourceSyncListenForm(receipt = true))
+        assertTrue(controller.awaitOnce())
+
+        assertEquals(
+            listOf(
+                "[I][NETWORK] sync-listen-started:port=45678:tls=false",
+                "[I][NETWORK] sync-listen-received:device=device-a:receipt=true",
+            ),
+            buffer.snapshot(),
+        )
+    }
+
+    @Test
+    fun anIdentityLessEnvelopeSaysUnknownDeviceInsteadOfABlank() = runTest {
+        val (logger, buffer) = memoryLogs()
+        val listener = FakeSession(outcome = imported(envelopeText(), deviceId = null))
+        val controller = SourceSyncListenerController(
+            FakeFactory(opened = opened(listener)),
+            logger,
+        ) { _, _ -> }
+
+        controller.start(SourceSyncListenForm())
+        assertTrue(controller.awaitOnce())
+
+        assertEquals(
+            listOf(
+                "[I][NETWORK] sync-listen-started:port=45678:tls=false",
+                "[I][NETWORK] sync-listen-received:device=unknown-device:receipt=false",
+            ),
+            buffer.snapshot(),
+        )
+    }
+
+    @Test
+    fun aRejectedEnvelopeAndAFailedWaitEachLeaveTheirCode() = runTest {
+        val (logger, buffer) = memoryLogs()
+        val listener = FakeSession(outcome = rejectedEnvelope("malformed-json", "文档不是 JSON。"))
+        val controller = SourceSyncListenerController(
+            FakeFactory(opened = opened(listener)),
+            logger,
+        ) { _, _ -> }
+
+        controller.start(SourceSyncListenForm())
+        assertTrue(controller.awaitOnce())
+        listener.outcome = transferred(SourceSyncTransferReasons.TRANSFER_TIMEOUT, "对端在超时前没有响应")
+        assertTrue(controller.awaitOnce())
+
+        assertEquals(
+            listOf(
+                "[I][NETWORK] sync-listen-started:port=45678:tls=false",
+                "[W][NETWORK] sync-listen-rejected:reason=malformed-json",
+                "[W][NETWORK] sync-listen-failed:code=" + SourceSyncTransferReasons.TRANSFER_TIMEOUT,
+            ),
+            buffer.snapshot(),
+        )
+        val joined = buffer.snapshot().joinToString("\n")
+        assertFalse("界面用的说明不进日志", joined.contains("文档不是 JSON。"))
+        assertFalse("异常措辞不进日志", joined.contains("对端在超时前没有响应"))
+    }
+
+    @Test
+    fun cancelledWaitsAddUpAndStopLeavesOneLine() = runTest {
+        val (logger, buffer) = memoryLogs()
+        val listener = FakeSession()
+        val controller = SourceSyncListenerController(
+            FakeFactory(opened = opened(listener)),
+            logger,
+        ) { _, _ -> }
+        controller.start(SourceSyncListenForm())
+
+        repeat(2) {
+            val gate = CompletableDeferred<Unit>()
+            listener.gate = gate
+            val cancellation = SourceSyncCancellation()
+            val job = launch { controller.awaitOnce(cancellation) }
+            runCurrent()
+            cancellation.cancel()
+            listener.outcome = transferred(com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED)
+            gate.complete(Unit)
+            job.join()
+        }
+        controller.stop()
+        controller.stop()
+
+        assertEquals(
+            listOf(
+                "[I][NETWORK] sync-listen-started:port=45678:tls=false",
+                "[I][NETWORK] sync-listen-cancelled:count=1:reason=" + com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED,
+                "[I][NETWORK] sync-listen-cancelled:count=2:reason=" + com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED,
+                "[I][NETWORK] sync-listen-stopped:port=45678",
+            ),
+            buffer.snapshot(),
+        )
+    }
+
+    @Test
+    fun aRefusedStartLeavesAFailedLineWithoutTheDetail() = runTest {
+        val (logger, buffer) = memoryLogs()
+        val controller = SourceSyncListenerController(
+            FakeFactory(opened = opened(FakeSession())),
+            logger,
+        ) { _, _ -> }
+
+        assertFalse(controller.start(SourceSyncListenForm(port = "0")))
+
+        assertEquals(
+            listOf("[W][NETWORK] sync-listen-failed:code=" + SourceSyncListenerController.PORT_INVALID),
+            buffer.snapshot(),
+        )
+    }
+
+    @Test
+    fun noLineEverQuotesASecretTheFingerprintOrTheBudget() = runTest {
+        val (logger, buffer) = memoryLogs()
+        val factory = FakeFactory(
+            availability = SourceSyncListenTlsAvailability(available = true, note = "ok"),
+            opened = opened(FakeSession(port = 9_100, tlsEnabled = true, certificateFingerprint = LISTEN_PIN)),
+        )
+        val controller = SourceSyncListenerController(factory, logger) { _, _ -> }
+
+        assertTrue(
+            controller.start(
+                SourceSyncListenForm(port = "9100", tls = true, auth = true, secret = "s3cret", budget = "30000"),
+            ),
+        )
+
+        val lines = buffer.snapshot()
+        val joined = lines.joinToString("\n")
+        assertEquals("这一场只有一行（开监听）", 1, lines.size)
+        assertFalse("口令不进日志", joined.contains("s3cret"))
+        assertFalse("证书指纹不进日志", joined.contains(LISTEN_PIN))
+        assertFalse("等待预算不进日志", joined.contains("30000"))
+    }
     private suspend fun seededSession(): Seeded {
         val preview = FakePreviewPort(readyPreview())
         val apply = FakeApplyPort(appliedResult())

@@ -6010,3 +6010,62 @@ W6-101 的两条老用例按新契约收口（**收口不是放宽**）：`a_rou
 - **EXECUTED_PASS**：本机 `core:database` 261 / 0，四条对照 2 / 3 / 1 / 2 红且逐字节还原；
 - **IMPLEMENTED_UNVERIFIED**：exact-SHA CI 结果见 PR #33 正文；生产接线的端到端证据未取（见 73.7）；
 - Windows 侧本轮零改动（C# 1691 / 0，W6-103 的 `0b23830e`）；主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+
+## §75 W6-106：监听（接收）路径的每一步都各留一行日志
+
+> 编号说明：§74 属于跨设备分支的 W6-105（Windows 侧被扣住条目逐条日志）；合并后 §74 紧随本节之后。本节在主树先占 §75，避免与另一分支抢号。
+
+### 75.1 结论先行
+
+`SourceSyncListenerController` 此前**零 logger**：开监听、收到谁的信封、为什么被拒、等一次连接是否被取消，全只活在 `SourceSyncListenState` 那一格 UI 状态里。卡片被下一条状态覆盖、进程被回收之后，事后无法回答「当时到底开到没有、收到的信封是谁的、为什么没写进去」。本轮给监听四步各留一行固定措辞：`sync-listen-started` / `sync-listen-received` / `sync-listen-rejected` / `sync-listen-failed` / `sync-listen-cancelled` / `sync-listen-stopped`。
+
+### 75.2 措辞只写一处
+
+新文件 `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncListenLog.kt`（object，固定句集中在此，1986 chars），控制器只决定「何时写」：
+
+| 时刻 | 固定句 |
+| --- | --- |
+| 监听开成 | `sync-listen-started:port=<n>:tls=<bool>` |
+| 收下一封信封 | `sync-listen-received:device=<身份|unknown-device>:receipt=<bool>` |
+| 帧层成功但载荷不是合法信封 | `sync-listen-rejected:reason=<码>` |
+| 任意一步失败 | `sync-listen-failed:code=<码>` |
+| 一次等待被本地取消 | `sync-listen-cancelled:count=<n>:reason=<码|transfer-cancelled>` |
+| 真的关掉监听 | `sync-listen-stopped:port=<n>` |
+
+口径与 W6-101/104 相同：只记本端稳定码与身份。**不记**口令、证书指纹、任务预算、信封正文、`Rejected.message`、`Failed.detail` 与异常措辞。对端没报身份时写占位符 `unknown-device`（不写 `device=` 这种半句）；取消没有原因码时回退本机码 `transfer-cancelled`。
+
+### 75.3 一处出口：状态与日志是同一步
+
+`SourceSyncListenerController` 新增两个私有助手 `setFailed(port, code, detail)` 与 `setRejected(port, reason, message)`：写状态与写日志在同一步里完成，**8 处 `Failed`、2 处 `Rejected` 赋值点全部改为经助手**（漏一处会被整行断言抓出来）。`start()` 的 `Opened` 分支加 `started`、`awaitOnce()` 的取消分支加 `cancelled`、`stop()` 的 `active != null` 分支加 `stopped`、`apply()` 的 `Imported` 成功分支在 `onEnvelope(...)` 之后加 `received`。
+
+有意**不记**：`session != null` 的「已在监听」与 `receiving` 单飞闸的「已有人在等」两个无操作分支（它们不改状态也不产生结果）；`Receiving` 状态本身（下一条 `received` / `rejected` / `failed` 会说明结局）。`stop()` 是幂等的，只有真的关掉那一次才写 `sync-listen-stopped`。
+
+落点说明：Logger 注入在 `feature/settings` 而非 `core/common` —— 监听控制器住在 feature 层，且 `core/common` 的 `build.gradle.kts` 不依赖 `core:logging`（`feature/settings` 早在 W6-101 就有 `implementation(project(":core:logging"))`）。
+
+### 75.4 用例与计数
+
+`SourceSyncListenerControllerTest` 50 → **58** 例（`feature/settings` 410 → **418 / 0 失败**）：开监听恰好一行、TLS 变体、收信带 `receipt=true`、身份空写 `unknown-device`、拒收与失败各一码且 message/detail 不进日志、取消两次累计 1/2 且幂等 `stop()` 只记一行、拒绝启动只记码、D6（口令/指纹/预算一行都不出现）。
+
+### 75.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | 删掉 `started` 那行 | **7 红** |
+| B | 删掉 `cancelled` 那行 | **1 红** |
+| C | `failed` 行把 `detail` 也带上 | **2 红** |
+| D | `received()` 去掉 `unknown-device` 占位 | **1 红** |
+
+四次对照前先存实现态快照（`D:/mh-verify/w6106-impl-controller.kt` 30836 chars / sha256 `305279e6…`、`w6106-impl-listenlog.kt` 1986 chars / sha256 `feeda8f1…`、`w6106-impl-tests.kt` 56542 chars / sha256 `57fdc64e…`），每轮跑完写回并比对 sha256（四次 `restored true`），最后复跑 **418 / 0**。解析前清 `feature/settings/build/test-results/testDebugUnitTest/*.xml`，避免读到上一轮的陈旧 XML（W6-104 的教训）。
+
+### 75.6 边界与仍未做
+
+- Windows 侧同路径（`windows/src/MediaHub.Sync/SyncTransferPresenter.cs`）仍无监听日志 ⇒ 后续候选；
+- 「导出诊断日志」出口（`LogBuffer` → 文件）仍 **NOT_RUN**，本轮日志只进内存缓冲；
+- 生产接线（Hilt → ViewModel → `production` → 控制器）只有编译期保证与本层用例 ⇒ **IMPLEMENTED_UNVERIFIED**；
+- 真实两机联调 **NOT_RUN**，真机 instrumentation **DEVICE_UNVERIFIED**。
+
+### 75.7 状态
+
+- **EXECUTED_PASS**：本机 `feature:settings` **418 / 0**，四条对照 7 / 1 / 2 / 1 红且逐字节还原；
+- **IMPLEMENTED_UNVERIFIED**：生产接线的端到端证据未取（见 75.6）；
+- Windows 侧本轮零改动（C# 1691 / 0 对照）；主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
