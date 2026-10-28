@@ -5725,3 +5725,57 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 - EXECUTED_PASS（本机 1678/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
 
 - 提交：W6 树 `feature/cross-device-source-sync`（代码与文档同一提交；提交号以 PR #39 head 为准——docs 正文不自指 SHA，否则每次改写提交都会让自己写下的哈希失效）。四条 exact-SHA CI 按该 head 跑，run 号与计数见 PR 正文与本轮账本。
+
+## §63 W6-94：Windows 预览页条目也给出路（对齐 Android W6-85）
+
+### 63.1 结论先行
+
+- W6-93 让「被扣住」的条目在**结果页**有了出路与复制身份，但用户是在**预览页**逐条做决定的：那一页的每一行只有 `BlockReason`（而且只对「永不允许」的行给原因句），看完原因仍然不知道下一步该干什么。Android W6-85 早已在预览条目上给出路，本轮补齐这个对等物。
+- 做法不是「再抄一份码表」，而是**把 W6-93 的码表搬到两处共用的位置**：`SyncApplyPresenter.NextStep`（与 `DescribeGateReason` / `DescribeBlockReason` 同处，presenter 是措辞的唯一出口），`SourceSyncWithheldText.NextStep` 退化成一层委托。
+- 预览行 `SyncApplyRow` 新增 `NextStep`，`BuildRow` 用 `item.Reason` 查同一张表；界面把一个只读 `TextBlock` 绑上去（AutomationId `sync.entry.next.step`），空串自然不渲染。
+- 仍然是「编建议比不说更害人」：未知码返回 `null` → 空串 → 不渲染；**没有任何一处为一个码写出两句话**，有硬保证（一条用例专门钉「表只有一处」）。
+
+### 63.2 数据流（一张码表、两处读）
+
+- 码表：`windows/src/MediaHub.Sync/SyncPagePresenter.cs` 的 `public static string? NextStep(string? code)`——先 `Trim`，空串返回 `null`；`SourceSyncApprovalGate.AmbiguousReasonPrefix`（`ambiguous-`）走前缀句；四条稳定码各一句（`secrets-require-approval` / `not-supported-on-windows` / `unknown-source-type` / `same-revision-different-content`）；`_ => null`。
+- 读点一（本轮新增）：预览行 `BuildRow` → `NextStep = NextStep(item.Reason) ?? string.Empty` → 视图层 `ApplyRow` 记录新增一个 `string NextStep` → `ReloadApplyRows()` 映射 → XAML 预览卡片里多一个 `TextBlock`（`Foreground=SystemFillColorCautionBrush`，与扣住清单同色）。
+- 读点二（W6-93 既有）：`SyncApplyResult.WithheldRows` → `SourceSyncWithheldText.Rows(...)` → 每行 `SourceSyncWithheldRow.NextStep`。
+- 这两个读点现在**必然一致**，因为第二处只是第一处的委托；委托方法体剩下的唯一一行是 `=> SyncApplyPresenter.NextStep(code);`。
+
+### 63.3 用例与计数
+
+- `windows/tests/MediaHub.Tests/SyncPagePresenterTests.cs` +2 例：
+  - `EveryPreviewRowCarriesTheWayOutItsCodeHasAndInventsNothingForTheOthers`：三条记录（带凭据、类型 `fn-nas`、普通）→ 前两条整句精确相等（判据是被测字符串里复制出来的），普通行断言 `Assert.Empty(row.NextStep)`。
+  - `TheWayOutTableHasOneHomeSoThePreviewAndTheWithheldListCannotDrift`：八个输入（四条 `SyncRoundReasons` 常量、歧义前缀拼出的码、`something-new`、空串、全空白）逐条断言两个入口返回值相等，并单独断言未知码与 `null` 都返回 `null`。
+- 本机 `MediaHub.Tests` **1678 → 1680 / 0**（日志 `D:/mh-verify/w694-test1.log`）；App 构建 0 警告 0 错误（XAML 编译通过，日志 `D:/mh-verify/w694-app-build.log`）。
+- Android 侧零改动：本轮只在 W6 树的 Windows 工程内动，`uniqueTests` 仍是 2446 的对照口径。
+
+### 63.4 四条负向对照（每条都真红，跑完逐字节还原）
+
+| 变异 | 红 |
+| --- | --- |
+| 预览行不查出路（`NextStep = string.Empty`） | 1 |
+| 未知码编一句建议（`_ => null` → `_ => "下一步：稍后再试。"`） | 5 |
+| 委托恒 `null`（`=> null;`） | 5 |
+| 预览行查错码（`item.SyncSourceId`） | 1 |
+
+日志 `D:/mh-verify/w694-neg-A-preview-drops-the-way-out.log` / `-B-unknown-code-gets-invented-advice.log` / `-C-delegate-always-null.log` / `-D-preview-reads-the-wrong-code.log`；备份 `D:/mh-verify/w694-backup-SyncPagePresenter.cs` 等 5 个文件。
+
+### 63.5 与 Android 的差异
+
+- 句子逐条同文（与 W6-93 一致），包括「再点几次允许也不会进来」这句略带口吻的实话。
+- Android 的 `nextStepOfCode` 在 `SourceSyncImportCopy`（feature 层）里，Windows 放在 presenter（Sync 层）：两端分层不同，但都只有一个出口；Windows 这一轮把「一个出口」从「同一个类」收紧到「同一个方法」。
+- Android 预览行的出路与结果页共用同一函数；Windows 现在同样如此，差别只在 Windows 的结果页那一支是 W6-93 已有的 `SourceSyncWithheldText` 委托。
+- Windows 的预览行不复制身份（Android W6-85 的预览卡片也没有复制按钮），复制身份仍只在结果页的扣住清单上。
+
+### 63.6 边界与仍未做
+
+- 出路只是文案：不改闸门判据、不改任何状态、不写库；预览页点「允许」的语义一字未动。
+- 界面呈现仍 **GUI_UNVERIFIED**：本轮只到 XAML 编译通过 + presenter 纯逻辑用例，没有在真窗口里看过那个 `TextBlock`；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+- 仍未做：`SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（仅测试可达）；设备解绑后的界面确认态；Windows 删除链补真 SQLite 证据。
+
+### 63.7 状态
+
+- EXECUTED_PASS（本机 1680/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+
+- 提交：W6 树 `feature/cross-device-source-sync`（代码与文档同一提交；提交号以 PR #39 head 为准——docs 正文不自指 SHA）。四条 exact-SHA CI 按该 head 跑，run 号与计数见 PR 正文与本轮账本。

@@ -907,6 +907,52 @@ public sealed class SyncPagePresenterTests : IDisposable
 
     // ---- helpers -----------------------------------------------------------------
 
+    [Fact]
+    public void EveryPreviewRowCarriesTheWayOutItsCodeHasAndInventsNothingForTheOthers()
+    {
+        SourceRecord secrets = Record("src-1") with { Secrets = JsonDocument.Parse("{}").RootElement.Clone() };
+        SourceRecord unsupported = Record("src-2", type: "fn-nas");
+        SourceRecord plain = Record("src-3");
+        var presenter = new SyncApplyPresenter();
+        presenter.Load(PreviewOf(Envelope(SenderId, secrets, unsupported, plain)));
+
+        IReadOnlyList<SyncApplyRow> rows = presenter.View().Rows;
+
+        SyncApplyRow gated = Assert.Single(rows, row => row.SyncSourceId == "src-1");
+        Assert.Equal(
+            "下一步：在对端把这条来源的凭据清空后重新导出信封，或在本机手动新建一条同样的来源。",
+            gated.NextStep);
+        Assert.True(gated.IsBlocked, "a row with a way out is still a blocked row");
+        Assert.Equal(
+            "下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。",
+            Assert.Single(rows, row => row.SyncSourceId == "src-2").NextStep);
+        Assert.Empty(Assert.Single(rows, row => row.SyncSourceId == "src-3").NextStep);
+    }
+
+    [Fact]
+    public void TheWayOutTableHasOneHomeSoThePreviewAndTheWithheldListCannotDrift()
+    {
+        string[] codes =
+        [
+            SyncRoundReasons.SecretsRequireApproval,
+            SyncRoundReasons.NotSupportedOnWindows,
+            SyncRoundReasons.UnknownSourceType,
+            SyncRoundReasons.SameRevisionDifferentContent,
+            SourceSyncApprovalGate.AmbiguousReasonPrefix + "legacy-identity",
+            "something-new",
+            "",
+            "   ",
+        ];
+
+        foreach (string code in codes)
+        {
+            Assert.Equal(SyncApplyPresenter.NextStep(code), SourceSyncWithheldText.NextStep(code));
+        }
+
+        Assert.Null(SyncApplyPresenter.NextStep("something-new"));
+        Assert.Null(SyncApplyPresenter.NextStep(null));
+    }
+
     private static SourceRecord Record(
         string syncSourceId,
         string name = "客厅 Emby",

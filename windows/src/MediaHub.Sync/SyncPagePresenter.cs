@@ -157,6 +157,9 @@ public sealed record SyncApplyRow
     /// <summary>True when <see cref="BlockReason"/> carries a sentence.</summary>
     public bool IsBlocked => BlockReason.Length > 0;
 
+    /// <summary>W6-94: what a user can still do about this row; empty when its code has no known way out.</summary>
+    public string NextStep { get; init; } = "";
+
     /// <summary>Accessible name of the allow button.</summary>
     public string AllowLabel { get; init; } = "";
 
@@ -615,6 +618,41 @@ public sealed class SyncApplyPresenter
             : warning;
     }
 
+    /// <summary>
+    /// W6-94: what a user can still do about an entry, or null when its code has no known way out.
+    /// </summary>
+    /// <remarks>
+    /// The preview row and the withheld list both read this one table, so a code is never explained in two different
+    /// words. Unknown codes return null: inventing advice is worse than saying nothing. The wording is the one
+    /// Android's SourceSyncImportCopy.nextStepOfCode already uses.
+    /// </remarks>
+    public static string? NextStep(string? code)
+    {
+        string value = (code ?? "").Trim();
+        if (value.Length == 0)
+        {
+            return null;
+        }
+
+        if (value.StartsWith(SourceSyncApprovalGate.AmbiguousReasonPrefix, StringComparison.Ordinal))
+        {
+            return "下一步：本机有多条来源指向同一身份，先在来源页删掉多余的再重新导出。";
+        }
+
+        return value switch
+        {
+            SyncRoundReasons.SecretsRequireApproval =>
+                "下一步：在对端把这条来源的凭据清空后重新导出信封，或在本机手动新建一条同样的来源。",
+            SyncRoundReasons.NotSupportedOnWindows =>
+                "下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。",
+            SyncRoundReasons.UnknownSourceType =>
+                "下一步：把两端升到同一版本后重新导出信封。",
+            SyncRoundReasons.SameRevisionDifferentContent =>
+                "下一步：这条两端内容不一致（版本号相同），本页一律不放行；请在来源页手工对齐后再导出。",
+            _ => null,
+        };
+    }
+
     /// <summary>Why one row can never be allowed, in a sentence that keeps the stable code.</summary>
     public static string DescribeBlockReason(string? reason)
     {
@@ -661,6 +699,7 @@ public sealed class SyncApplyPresenter
             Allowable = allowable,
             Allowed = allowable && allowed,
             BlockReason = allowable ? string.Empty : DescribeBlockReason(item.Reason),
+            NextStep = NextStep(item.Reason) ?? string.Empty,
             AllowLabel = allowable ? "允许 " + name : "不可允许 " + name,
             SkipLabel = "跳过 " + name,
         };
