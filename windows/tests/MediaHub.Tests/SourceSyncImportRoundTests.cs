@@ -743,6 +743,119 @@ public sealed class SourceSyncImportRoundTests
     private static SourceSyncEnvelope Envelope(params SourceRecord[] sources)
         => Envelope(sources, []);
 
+    // ---------------------------------------------------------------- refused list (W6-91)
+
+    [Fact]
+    public async Task RefusedWritesAreListedWithTheirReasonRowByRow()
+    {
+        // 保留未应用 used to be a number: a user could see that something was kept back, not which entry or why.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncEnvelope peer = Envelope(Record("local-aaaa", "smb", "smb://share.local/media", "Share"));
+
+            SourceSyncApplyReport result = await round.ApplyAsync(
+                round.Preview(peer),
+                ["local-aaaa"],
+                (_, _) => Task.FromResult(SourceSyncWriteOutcome.Refused("Windows 暂不支持该来源类型：smb")));
+
+            SourceSyncRefusedSource refused = Assert.Single(result.Refused);
+            Assert.Equal("local-aaaa", refused.SyncSourceId);
+            Assert.Equal("Share", refused.DisplayName);
+            Assert.Equal(SourceSyncAction.Create, refused.Action);
+            Assert.Equal("Windows 暂不支持该来源类型：smb", refused.Reason);
+            Assert.Equal(
+                ["- Share（local-aaaa） · 写入 · Windows 暂不支持该来源类型：smb"],
+                SourceSyncRefusedText.Lines(result.Refused));
+            Assert.Equal("未写入 1 条（逐条原因）", SourceSyncRefusedText.Header(result.Refused.Count));
+            Assert.Empty(result.Written);
+            Assert.Equal(1, result.Withheld);
+        });
+    }
+
+    [Fact]
+    public void RefusedHeaderStaysNullWhenNothingWasRefusedAndTheLineNeverInventsTheHalfItDoesNotHave()
+    {
+        // Zero rows must not leave a heading over an empty list.
+        Assert.Null(SourceSyncRefusedText.Header(0));
+
+        // A writer that says nothing still gets a whole sentence: a dangling separator reads like a broken page.
+        Assert.Equal(
+            "- Share · 写入 · 写入器没有说明原因",
+            SourceSyncRefusedText.Line(new SourceSyncRefusedSource
+            {
+                SyncSourceId = "  ",
+                DisplayName = " Share ",
+                Reason = "   ",
+            }));
+
+        // A refusal on a deletion is not the same change as a refused write, so the action is stated.
+        Assert.Equal(
+            "- Share（local-aaaa） · 删除 · 本地媒体源不参与跨设备删除",
+            SourceSyncRefusedText.Line(new SourceSyncRefusedSource
+            {
+                SyncSourceId = " local-aaaa ",
+                DisplayName = " Share ",
+                Action = SourceSyncAction.Delete,
+                Reason = " 本地媒体源不参与跨设备删除 ",
+            }));
+
+        // Neither title nor identity is still one row, never an empty line.
+        Assert.Equal(
+            "- （未知身份） · 写入 · 磁盘只读",
+            SourceSyncRefusedText.Line(new SourceSyncRefusedSource { Reason = "磁盘只读" }));
+    }
+
+    [Fact]
+    public async Task AWriterThatThrowsIsListedWithTheExceptionMessage()
+    {
+        // A refused write is a kept entry, not a crashed round: the thrown message reaches the same list as a Refused outcome.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncEnvelope peer = Envelope(Record("local-aaaa", "webdav", "http://nas.local:5005", "NAS"));
+
+            SourceSyncApplyReport result = await round.ApplyAsync(
+                round.Preview(peer),
+                ["local-aaaa"],
+                (_, _) => throw new IOException("本机存储只读"));
+
+            SourceSyncRefusedSource refused = Assert.Single(result.Refused);
+            Assert.Equal("本机存储只读", refused.Reason);
+            Assert.Equal(1, result.Refused.Count);
+            Assert.Equal(1, result.Withheld);
+            Assert.Equal(1, result.NotApplied);
+        });
+    }
+
+    [Fact]
+    public async Task WrittenAndRefusedListsStayDisjoint()
+    {
+        // The two lists answer different questions: what landed, and what was kept back. Neither may leak into the other.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            SourceSyncEnvelope peer = Envelope(
+                Record("local-aaaa", "webdav", "http://nas.local:5005", "NAS"),
+                Record("local-bbbb", "smb", "smb://share.local/media", "Share"));
+
+            SourceSyncApplyReport result = await round.ApplyAsync(
+                round.Preview(peer),
+                ["local-aaaa", "local-bbbb"],
+                (item, _) => Task.FromResult(item.SyncSourceId == "local-bbbb"
+                    ? SourceSyncWriteOutcome.Refused("Windows 暂不支持该来源类型：smb")
+                    : SourceSyncWriteOutcome.Written("written")));
+
+            Assert.Equal(1, result.Applied);
+            Assert.Equal(["local-aaaa"], result.Written.Select(entry => entry.SyncSourceId));
+            Assert.Equal(["local-bbbb"], result.Refused.Select(entry => entry.SyncSourceId));
+            Assert.Equal(1, result.Withheld);
+            Assert.Equal(1, result.NotApplied);
+        });
+    }
     private static SourceSyncEnvelope Envelope(SourceRecord[] sources, Tombstone[] deletions)
         => new()
         {

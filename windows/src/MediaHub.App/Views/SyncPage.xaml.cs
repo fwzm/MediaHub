@@ -820,6 +820,13 @@ public sealed partial class SyncPage : Page
             ApplyWrittenHeader.Visibility = applied.WrittenHeader.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             ApplyWrittenList.ItemsSource = applied.WrittenRows;
             ApplyWrittenList.Visibility = applied.WrittenRows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            // Refused entries are part of 保留未应用; the counts sentence folds them in, this list separates them
+            // again so the reason the writer gave is readable one row at a time.
+            ApplyRefusedHeader.Text = applied.RefusedHeader;
+            ApplyRefusedHeader.Visibility = applied.RefusedHeader.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            ApplyRefusedList.ItemsSource = applied.RefusedRows;
+            ApplyRefusedList.Visibility = applied.RefusedRows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             ApplyNotImportedCount.Text = applied.EndpointSentence;
             ApplyNotImportedCount.Visibility = Visibility.Visible;
             ReloadSources();
@@ -917,6 +924,10 @@ public sealed partial class SyncPage : Page
             ApplyWrittenHeader.Visibility = Visibility.Collapsed;
             ApplyWrittenList.ItemsSource = null;
             ApplyWrittenList.Visibility = Visibility.Collapsed;
+            ApplyRefusedHeader.Text = string.Empty;
+            ApplyRefusedHeader.Visibility = Visibility.Collapsed;
+            ApplyRefusedList.ItemsSource = null;
+            ApplyRefusedList.Visibility = Visibility.Collapsed;
         }
     }
 

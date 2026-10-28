@@ -261,6 +261,11 @@ public sealed record SyncApplyResult
 
     /// <summary>One row per written entry, in write order, so the counts line can be checked row by row.</summary>
     public IReadOnlyList<string> WrittenRows { get; init; } = [];
+    /// <summary>Sentence above the refused list; empty when this round refused nothing.</summary>
+    public string RefusedHeader { get; init; } = "";
+
+    /// <summary>One row per refused entry, in write order, each with the reason the writer gave.</summary>
+    public IReadOnlyList<string> RefusedRows { get; init; } = [];
 }
 
 /// <summary>
@@ -478,6 +483,8 @@ public sealed class SyncApplyPresenter
             WarningLabels = warnings,
             WrittenHeader = SourceSyncWrittenText.Header(report.Written.Count) ?? string.Empty,
             WrittenRows = SourceSyncWrittenText.Lines(report.Written),
+            RefusedHeader = SourceSyncRefusedText.Header(report.Refused.Count) ?? string.Empty,
+            RefusedRows = SourceSyncRefusedText.Lines(report.Refused),
         };
     }
 

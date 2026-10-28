@@ -377,6 +377,44 @@ public sealed class SyncPagePresenterTests : IDisposable
     }
 
     [Fact]
+    public async Task DescribeResultListsEveryRefusedEntryWithItsReason()
+    {
+        // The result line says how many were kept back; these rows say which ones and why, in write order.
+        var local = new InMemoryLocalSourceStore();
+        var round = new SourceSyncImportRound(local, new InMemorySourceSyncBaselineStore());
+        SourceSyncApplyPreview preview = round.Preview(Envelope(SenderId, Record("src-1"), Record("src-2")));
+
+        var presenter = new SyncApplyPresenter();
+        presenter.Load(preview);
+
+        SourceSyncApplyReport report = await round.ApplyAsync(
+            preview,
+            presenter.AllowedIds(),
+            (_, _) => Task.FromResult(SourceSyncWriteOutcome.Refused("本机存储只读")),
+            presenter.SkippedIds());
+
+        SyncApplyResult result = presenter.DescribeResult(report);
+
+        Assert.Equal(2, report.Refused.Count);
+        Assert.Equal("未写入 2 条（逐条原因）", result.RefusedHeader);
+        Assert.Equal(2, result.RefusedRows.Count);
+        Assert.Contains("src-1", result.RefusedRows[0], StringComparison.Ordinal);
+        Assert.Contains("本机存储只读", result.RefusedRows[0], StringComparison.Ordinal);
+        Assert.Contains("src-2", result.RefusedRows[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DescribeResultKeepsTheRefusedListEmptyWhenNothingWasRefused()
+    {
+        // A successful round writes rows and refuses none; an empty refused list must leave no heading.
+        var presenter = new SyncApplyPresenter();
+
+        SyncApplyResult result = presenter.DescribeResult(new SourceSyncApplyReport { Applied = 1 });
+
+        Assert.Equal(string.Empty, result.RefusedHeader);
+        Assert.Empty(result.RefusedRows);
+    }
+    [Fact]
     public async Task Apply_SkipThePageRecordedIsHonoured()
     {
         // A create needs no approval, so its default verdict is "apply". If only the allow list travelled, a row the

@@ -99,6 +99,12 @@ public sealed record SourceSyncApplyReport
     /// against the preview. A refused write never appears here, because it never happened.
     /// </remarks>
     public IReadOnlyList<SourceSyncWrittenSource> Written { get; init; } = [];
+    /// <summary>The entries the writer kept back, in write order, each with the reason it gave.</summary>
+    /// <remarks>
+    /// A refused write counts as 保留未应用, and this list is what turns that count into rows a user can act on.
+    /// It is disjoint from <see cref="Written"/> by construction: an entry is in exactly one of the two.
+    /// </remarks>
+    public IReadOnlyList<SourceSyncRefusedSource> Refused { get; init; } = [];
 
     /// <summary>Stable reason codes the gate refuses to apply, ever.</summary>
     public IReadOnlyList<string> BlockingReasons { get; init; } = [];
@@ -302,6 +308,7 @@ public sealed class SourceSyncImportRound
         SourceSyncApprovalResult gate = SourceSyncApprovalGate.Decide(preview.Items, decisions);
         var written = new List<SourceRecord>();
         var writtenSources = new List<SourceSyncWrittenSource>();
+        var refusedSources = new List<SourceSyncRefusedSource>();
         int applied = 0;
         int failed = 0;
 
@@ -342,6 +349,15 @@ public sealed class SourceSyncImportRound
             else
             {
                 failed++;
+                // The reason text is the writer's own sentence; blank is preserved and rendered as an explicit
+                // sentence by SourceSyncRefusedText, because a row with an empty tail looks like a broken page.
+                refusedSources.Add(new SourceSyncRefusedSource
+                {
+                    SyncSourceId = item.SyncSourceId.Trim(),
+                    DisplayName = item.DisplayName,
+                    Action = item.Action,
+                    Reason = outcome.Message,
+                });
             }
         }
 
@@ -385,6 +401,7 @@ public sealed class SourceSyncImportRound
             Withheld = gate.WithheldCount + failed,
             NotApplied = gate.WithheldCount + failed + gate.SkippedCount,
             Written = writtenSources,
+            Refused = refusedSources,
             BlockingReasons = gate.BlockingReasons,
             AcknowledgedRisk = gate.AcknowledgedRisk,
             BaselineUpdated = baselineUpdated,

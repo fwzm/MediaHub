@@ -225,6 +225,24 @@
           </ListView.ItemContainerStyle>
         </ListView>
 
+        <!-- Entries the writer refused: counted in 保留未应用, and here is which one and why, row by row. -->
+        <TextBlock x:Name="ApplyRefusedHeader" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   AutomationProperties.AutomationId="sync.apply.refused.header"
+                   AutomationProperties.Name="未写入条目" />
+
+        <ListView x:Name="ApplyRefusedList" SelectionMode="None" MaxHeight="120" Visibility="Collapsed"
+                  AutomationProperties.AutomationId="sync.apply.refused.list"
+                  AutomationProperties.Name="未写入条目清单">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              <Setter Property="Padding" Value="0" />
+              <Setter Property="MinHeight" Value="0" />
+            </Style>
+          </ListView.ItemContainerStyle>
+        </ListView>
+
         <!-- Addresses the peer offers that this client cannot store: counted and named, never silently dropped. -->
         <TextBlock x:Name="ApplyNotImportedCount" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
                    Visibility="Collapsed"

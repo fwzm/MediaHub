@@ -5585,3 +5585,43 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 ### 59.6 状态
 
 - EXECUTED_PASS（本机 1663/0 + App 0 警告 0 错误）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+## §60 W6-91：Windows 结果页给「未写入」逐条原因（对齐 Android W6-82）
+
+### 60.1 结论先行
+
+- 回执里的被拒写入此前只并进 `Withheld` 计数：用户读得到「保留未应用 1 条」，读不到是哪条、为什么。现在每次拒写落成一行「- 标题（身份） · 写入/删除 · 原因」，与写入区同形（W6-89 / W6-90）。
+- 与 Android 的差别：Android 的拒写原因是稳定码 + `refusalReason` 码表；Windows 的写入器（`ServerManager.ApplyRemoteSource` / `AdoptRemoteSource` / `RemoveRemoteSourceAsync`）本来就说人话（「Windows 暂不支持该来源类型：smb」「该来源没有可用地址，已跳过」「本机没有这条来源，已跳过」），所以这一侧不建码表——但保留 Android 那条硬规则：**绝不返回空串**。
+
+### 60.2 数据流（一处实现、三层消费）
+
+- `SourceSyncImportRound.ApplyAsync` 的 else 分支收集 `SourceSyncRefusedSource { SyncSourceId, DisplayName, Action, Reason }`：既覆盖写入器显式返回 `SourceSyncWriteOutcome.Refused(message)`，也覆盖写入器抛 `IOException` / `UnauthorizedAccessException` / `InvalidOperationException` 被折成 Refused 的情形（两者本来就是同一条路径，W6-58）。
+- `SourceSyncApplyReport.Refused` 与 `Written` 按构造互斥：同一条目只会在一个名单里，`Written` 说「真的发生了什么」，`Refused` 说「没发生、以及为什么」。被拒条目仍计入 `Withheld` / `NotApplied`（口径不变）。
+- `SyncApplyPresenter.DescribeResult` → `RefusedHeader` / `RefusedRows`；页面 `sync.apply.refused.header` / `sync.apply.refused.list` 只做 `ItemsSource`、可见性与清场，不拼字。
+- `SourceSyncRefusedText.Header/Line/Reason` 是唯一文案来源：`Header` 0 条返回 null（0 条不占版面）；`Line` 标题或身份缺一只给另一半，两者都缺给「（未知身份）」；动作词四种（写入/删除/接管/更新）；空原因回退成「写入器没有说明原因」，避免「- 标题（身份） · 写入 · 」这种半句话。
+
+### 60.3 用例与计数
+
+- `SourceSyncImportRoundTests` +4：逐条原因（含身份、标题、动作、精确行文案）1 例；`Header` 0 条为 null + 缺一半不编造 + 空原因整句 + 删除动作词 1 例；写入器抛异常也进同一名单且计数一致 1 例；写入/未写入两名单互斥 1 例。
+- `SyncPagePresenterTests` +2：`DescribeResult` 逐条（顺序、身份、原因）1 例；没有拒写时两个字段都为空 1 例。
+- `MediaHub.Tests` 1663 → **1669**（0 失败）；App 工程 **0 警告 0 错误**（XAML 编译覆盖两个新标签，见 `D:/mh-verify/w691-app-build.log`）。
+
+### 60.4 四条负向对照
+
+| 变异 | 红 | 命中用例 |
+| --- | --- | --- |
+| `SourceSyncRefusedText.Header` 的「未写入」改成「已写入」 | 2 | 逐条原因 + presenter 逐条 |
+| 回执 `Refused = []` | 4 | 上述两条 + 抛异常 + 两名单互斥 |
+| `Line` 丢掉原因段 | 3 | 逐条原因 + presenter 逐条 + 缺一半/整句 |
+| 空原因不回退整句（返回空串） | 1 | 缺一半/整句 |
+
+每个变异写入后 `dotnet test` 均以预期条数失败，跑完从磁盘备份逐字节还原（sha256 比对 true）；日志 `D:/mh-verify/w691-neg-A-header-says-written.log` / `-B-report-drops-refused.log` / `-C-line-drops-reason.log` / `-D-blank-reason-stays-blank.log`，备份 `w691-backup-*.cs`。
+
+### 60.5 边界与仍未做
+
+- 被审批闸门永久扣住（gate `Withheld`）的条目在 Windows 仍只在计数里——Android 有 `withheldEntries` / `withheldHeader`（W6-83）的对等物尚未移植；这是下一步候选。
+- 拒写原因沿用 `RemoteSourceOutcome` 的口径：不含地址、不含凭据（原因文本会进日志与界面）。
+- 结果页真实呈现仍 **GUI_UNVERIFIED**（本轮只到 XAML 编译通过 + presenter 纯逻辑用例）；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 60.6 状态
+
+- EXECUTED_PASS（本机 1669/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
