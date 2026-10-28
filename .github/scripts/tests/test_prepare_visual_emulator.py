@@ -12,7 +12,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "prepare-visual-emulator.sh"
 
 class VisualEmulatorPreparationTest(unittest.TestCase):
     def invoke(self, home="com.android.launcher3/.Launcher", serial="emulator-5554",
-               provisioned="1", has_setup="1", wrapper=False, gradle_exit="0", record_exit="0"):
+               provisioned="1", has_setup="1", wrapper=False, gradle_exit="0", record_exit="0", omit_reports=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fake_bin = root / "bin"
@@ -42,8 +42,8 @@ esac
                 gradle = '''printf "GRADLE %s\\n" "$*" >> "$FIXTURE_COMMANDS"
 report_dir="app/build/outputs/androidTest-results/connected/debug"
 case "$*" in
-  *BackupUserFlow*) mkdir -p "$report_dir"; printf backup > "$report_dir/TEST-result.xml" ;;
-  *CinematicVisualTest*) mkdir -p "$report_dir"; printf cinematic > "$report_dir/TEST-result.xml" ;;
+  *BackupUserFlow*) if [[ "$FIXTURE_OMIT_REPORTS" != 1 ]]; then mkdir -p "$report_dir"; printf backup > "$report_dir/TEST-result.xml"; fi ;;
+  *CinematicVisualTest*) if [[ "$FIXTURE_OMIT_REPORTS" != 1 ]]; then mkdir -p "$report_dir"; printf cinematic > "$report_dir/TEST-result.xml"; fi ;;
 esac
 exit "$FIXTURE_GRADLE_EXIT"'''
                 for fake, content in ((root / "gradlew", gradle),
@@ -55,6 +55,7 @@ exit "$FIXTURE_GRADLE_EXIT"'''
             env.update(ANDROID_SERIAL=serial, FIXTURE_HOME=home,
                        FIXTURE_PROVISIONED=provisioned, FIXTURE_HAS_SETUP=has_setup,
                        FIXTURE_GRADLE_EXIT=gradle_exit, FIXTURE_RECORD_EXIT=record_exit,
+                       FIXTURE_OMIT_REPORTS="1" if omit_reports else "0",
                        EXPECTED_HEAD="a" * 40, GITHUB_RUN_ID="fixture-run", GITHUB_RUN_ATTEMPT="1",
                        FIXTURE_COMMANDS=str(commands), PATH=str(fake_bin) + os.pathsep + env["PATH"])
             bash = Path(r"C:\Program Files\Git\bin\bash.exe") if os.name == "nt" else None
@@ -62,9 +63,11 @@ exit "$FIXTURE_GRADLE_EXIT"'''
             self.assertIsNotNone(executable, "actual Bash required for CI bootstrap fixture")
             result = subprocess.run([executable, "prepare.sh"] + (["32"] if wrapper else []), cwd=root, env=env,
                                     capture_output=True, text=True, timeout=15)
-            report = root / "app/build/outputs/androidTest-results/connected/debug/TEST-result.xml"
-            result.report_text = report.read_text(encoding="utf-8") if report.exists() else ""
-            backup_report = root / "ci-evidence/backup-report/TEST-result.xml"
+            result.report_text = "".join(
+                path.read_text(encoding="utf-8")
+                for path in sorted((root / "app/build/outputs/androidTest-results/connected/debug").glob("TEST-*.xml"))
+            )
+            backup_report = root / "ci-evidence/backup-report/TEST-result-backup.xml"
             result.backup_report_text = backup_report.read_text(encoding="utf-8") if backup_report.exists() else ""
             return result, commands.read_text(encoding="utf-8") if commands.exists() else ""
 
@@ -122,7 +125,13 @@ exit "$FIXTURE_GRADLE_EXIT"'''
         self.assertEqual(2, commands.count(":app:connectedDebugAndroidTest"), commands)
         self.assertIn("class=com.mediahub.app.visual.CinematicVisualTest", commands)
         self.assertEqual("backup", result.backup_report_text)
-        self.assertEqual("backup", result.report_text)
+        self.assertIn("backup", result.report_text)
+        self.assertIn("cinematic", result.report_text)
+
+    def test_missing_reports_fail_even_when_gradle_succeeds(self):
+        result, _ = self.invoke(wrapper=True, omit_reports=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertNotIn("RECORD", _)
 
     def test_wrapper_setup_failure_prevents_gradle_and_record(self):
         result, commands = self.invoke(wrapper=True, home="com.google.android.sdksetup/.DefaultActivity")

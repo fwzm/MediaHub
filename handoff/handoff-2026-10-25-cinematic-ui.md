@@ -37,6 +37,8 @@
 
 - `af003365` Android `40541138154` 未通过：API32 四页 4/4 通过，但独立 app 调用覆盖了备份报告；API36 模拟器断开（`device 'emulator-5554' not found`），详情用例未完成。原始 XML / UTP / logcat 已保存于 `ci-final-api32` / `ci-final-api36`。改为备份独立执行后保存 XML 快照，四页独立执行后恢复快照，再统一验证报告；保持原备份验收语义。脚本回归 RED 1 → GREEN，65 tests / 0 failures，并校验快照与最终报告真实内容。API36 模拟器断开作为环境问题单独保留，不改播放回调或隐藏失败。
 
+- `84729763` Android `40558780817` 未通过：两套 API 的四页测试和备份都实际执行成功，但 Gradle 每次生成的 app XML 仅含当前类，同名恢复快照把四页报告替换为备份内容。修正为按测试组用不同文件名保留原始 XML，再合并校验；缺报告立即失败。最终目录真实内容同时含备份和四页结果，缺报告场景也拒绝；全套 **66 tests / 0 failures**，`bash -n` 通过。
+
 ## Rules and next steps
 
 - G7：DO_NOT_MERGE。只允许普通提交到 feature 分支并创建 Draft PR；不合并、不 close、不 mark-ready、不 force push。
