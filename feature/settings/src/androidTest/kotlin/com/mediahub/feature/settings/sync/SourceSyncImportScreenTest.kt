@@ -406,6 +406,30 @@ class SourceSyncImportScreenTest {
         // 可允许的条目不该出现复制按钮（它不需要绕路）。
         composeRule.onNodeWithTag(SourceSyncImportTags.entryCopy("sync-1")).assertDoesNotExist()
     }
+    @Test
+    fun aCancelledWaitLeavesAVisibleAccountInTheListenCard() {
+        // W6-86：取消不是失败，但用户必须看得见「我取消过、监听还开着」。
+        val listening = SourceSyncListenState.Listening(
+            port = 45_678,
+            tls = false,
+            cancelledReceives = 2,
+            lastCancelledReason = com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED,
+        )
+        render(SourceSyncImportState(), listenState = listening)
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_CANCELLED)
+            .performScrollTo()
+            .assertTextEquals(SourceSyncListenCopy.cancelledLineOf(listening)!!)
+    }
+
+    @Test
+    fun withoutAnyCancelTheListenCardSaysNothingAboutCancelling() {
+        render(SourceSyncImportState(), listenState = SourceSyncListenState.Listening(45_678, false))
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_PORT_LINE).performScrollTo().assertExists()
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_CANCELLED).assertDoesNotExist()
+    }
+
     // ---------------------------------------------------------------- 夹具
 
     private fun render(
@@ -414,6 +438,8 @@ class SourceSyncImportScreenTest {
         onPreview: () -> Unit = {},
         onApply: () -> Unit = {},
         onCopyIdentity: (String) -> Unit = {},
+        // W6-86：监听区块的状态（取消账要画在这一块里）；默认 Idle。
+        listenState: SourceSyncListenState = SourceSyncListenState.Idle,
         // onDecide 必须留在最后：既有用例用尾随 lambda 传它。
         onDecide: (String, SourceSyncEntryDecision) -> Unit = { _, _ -> },
     ) {
@@ -427,6 +453,7 @@ class SourceSyncImportScreenTest {
                     onApply = onApply,
                     onBack = {},
                     onCopyIdentity = onCopyIdentity,
+                    listenState = listenState,
                 )
             }
         }
