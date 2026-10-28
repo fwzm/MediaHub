@@ -165,13 +165,31 @@ data class SourceSyncAppliedSource(
     val syncSourceId: String? = null,
 )
 
-/** 应用之后的摘要（只用于结果页，不再参与任何判定）。 */
+/**
+ * 应用之后的摘要（只用于结果页，不再参与任何判定）。
+ *
+ * W6-81 起它同时装两类数：
+ * - 规划桶（[requiresApprovalCount] / [ignoredCount] / [unsupportedCount]）来自预览，是「本来有多少」；
+ * - 回执桶（[appliedCount] / [skippedCount] / [withheldCount] / [failedCount] / [removedCount]）来自
+ *   这一轮真正发生的事，是「实际怎么处理了」。
+ * 两者不可互推：需确认的条目压根不进闸门，回执里当然数不到它们。
+ */
 data class SourceSyncApplySummary(
+    /** 真正写进库的条数（不含删除：删除走 [removedCount]，混在一起会让「已写入」撒谎）。 */
     val appliedCount: Int,
     val requiresApprovalCount: Int,
     val ignoredCount: Int,
     val unsupportedCount: Int,
+    /** 批准了却写不下去的条数（存储层拒绝、记录缺失、删除被拒）。 */
     val failedCount: Int,
+    /** 闸门裁掉、没打算写的条数（对端过旧、已同步、没人放行）。 */
+    val skippedCount: Int = 0,
+    /** 无条件扣住的条数（凭据、未知类型、本机不支持、需人工在来源页处理）。 */
+    val withheldCount: Int = 0,
+    /** 本轮连凭据一起移除的本地来源条数（对端声明删除）。 */
+    val removedCount: Int = 0,
+    /** 扣住的原因码（首现顺序，去重）；非空表示光点允许没用，得先去来源页处理。 */
+    val blockingReasons: List<String> = emptyList(),
     val appliedTitles: List<String> = emptyList(),
 
     /** 真正写入的每一条来源（按结果顺序）；结果页据此渲染「补录并验证」入口。 */
@@ -191,6 +209,9 @@ data class SourceSyncApplySummary(
 ) {
     val totalCount: Int
         get() = appliedCount + requiresApprovalCount + ignoredCount + failedCount
+
+    /** 没被写进去的条数：跳过 + 扣住 + 拒写（删除不算「没写」，它本来就是另一件事）。 */
+    val notAppliedCount: Int get() = skippedCount + withheldCount + failedCount
 }
 
 /**

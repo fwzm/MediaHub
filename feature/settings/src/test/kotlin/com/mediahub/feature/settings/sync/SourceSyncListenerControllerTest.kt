@@ -15,7 +15,9 @@ import com.mediahub.core.common.sync.SourceSyncTlsReasons
 import com.mediahub.core.common.sync.SourceRecord
 import com.mediahub.core.common.sync.SyncSourceTypeValue
 import com.mediahub.core.database.sync.AppliedSourceChange
+import com.mediahub.core.database.sync.SourceSyncApplyReport
 import com.mediahub.core.database.sync.SourceSyncImportResult
+import com.mediahub.core.database.sync.SourceSyncWrittenSource
 import com.mediahub.core.database.sync.SourceSyncPreview
 import com.mediahub.core.database.sync.SourceSyncTransferImportOutcome
 import kotlinx.coroutines.CompletableDeferred
@@ -88,16 +90,10 @@ private fun readyPreview(): SourceSyncPreview.Ready = SourceSyncPreview.Ready(
     snapshotId = "snap-1",
 )
 
-private fun appliedResult(): SourceSyncImportResult = SourceSyncImportResult(
-    deviceId = "device-a",
-    snapshotId = "snap-1",
-    applied = listOf(
-        AppliedSourceChange(
-            serverId = "srv-1",
-            candidate = createCandidate("sync-1"),
-            contentHash = "hash-1",
-        ),
-    ),
+private fun appliedResult(): SourceSyncApplyReport = SourceSyncApplyReport(
+    peerDeviceId = "device-a",
+    applied = 1,
+    wrote = listOf(SourceSyncWrittenSource(syncSourceId = "sync-1", serverId = "srv-1")),
 )
 
 private fun envelopeText(): String = SourceSyncCodec.encode(
@@ -237,12 +233,20 @@ private class FakePreviewPort(private val result: SourceSyncPreview) : SourceSyn
     }
 }
 
-private class FakeApplyPort(private val result: SourceSyncImportResult) : SourceSyncApplyPort {
+private class FakeApplyPort(private val result: SourceSyncApplyReport) : SourceSyncApplyPort {
 
     var calls = 0
+    var allowedKeys: Set<String> = emptySet()
+    var skippedKeys: Set<String> = emptySet()
 
-    override suspend fun apply(envelopeJson: String): SourceSyncImportResult {
+    override suspend fun apply(
+        envelopeJson: String,
+        allowedKeys: Set<String>,
+        skippedKeys: Set<String>,
+    ): SourceSyncApplyReport {
         calls++
+        this.allowedKeys = allowedKeys
+        this.skippedKeys = skippedKeys
         return result
     }
 }

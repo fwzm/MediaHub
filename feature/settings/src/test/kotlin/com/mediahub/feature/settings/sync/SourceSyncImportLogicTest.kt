@@ -244,36 +244,56 @@ class SourceSyncImportLogicTest {
     }
 
     @Test
-    fun filterEnvelopeDropsOnlyTheEntriesTheUserDidNotAllow() {
-        val json = SourceSyncCodec.encode(
-            SourceSyncEnvelope(
-                deviceId = "device-a",
-                snapshotId = "snap-1",
-                sources = listOf(record("sync-1"), record("sync-2")),
-            ),
+    fun theVerdictLineKeepsReceiptCountsApartFromPlanningCounts() {
+        val summary = SourceSyncApplySummary(
+            appliedCount = 2,
+            requiresApprovalCount = 1,
+            ignoredCount = 0,
+            unsupportedCount = 1,
+            failedCount = 1,
+            skippedCount = 3,
+            withheldCount = 4,
         )
 
-        val filtered = SourceSyncImportLogic.filterEnvelope(json, setOf("SYNC-2"))
-        val decoded = SourceSyncCodec.tryDecode(filtered)
-
-        assertTrue(decoded is SourceSyncCodec.DecodeResult.Ok)
-        val envelope = (decoded as SourceSyncCodec.DecodeResult.Ok).envelope
-        assertEquals(listOf("sync-1"), envelope.sources.map { it.syncSourceId })
+        assertEquals(8, summary.notAppliedCount)
+        assertEquals(
+            "已写入 2 条 · 跳过 3 条 · 保留未应用 8 条（扣住 4 · 拒写 1）",
+            SourceSyncImportCopy.applyVerdict(summary),
+        )
+        assertEquals(
+            "永久扣住的原因：secrets-require-approval、not-supported-on-windows。光点允许没用，需去来源页逐条处理。",
+            SourceSyncImportCopy.blockingReasons(summary.copy(blockingReasons = listOf("secrets-require-approval", "not-supported-on-windows"))),
+        )
+        assertNull(SourceSyncImportCopy.removedLine(summary))
     }
 
     @Test
-    fun filterEnvelopeReturnsTheSameTextWhenNothingMatches() {
-        val json = SourceSyncCodec.encode(
-            SourceSyncEnvelope(deviceId = "device-a", snapshotId = "snap-1", sources = listOf(record("sync-1"))),
+    fun anEmptyReceiptAddsNoReasonLineAndNoRemovalLine() {
+        val summary = SourceSyncApplySummary(
+            appliedCount = 0,
+            requiresApprovalCount = 0,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 0,
         )
 
-        assertEquals(json, SourceSyncImportLogic.filterEnvelope(json, setOf("sync-9")))
-        assertEquals(json, SourceSyncImportLogic.filterEnvelope(json, emptySet()))
+        assertEquals("已写入 0 条 · 跳过 0 条 · 保留未应用 0 条（扣住 0 · 拒写 0）", SourceSyncImportCopy.applyVerdict(summary))
+        assertNull(SourceSyncImportCopy.blockingReasons(summary))
+        assertNull(SourceSyncImportCopy.removedLine(summary))
     }
 
     @Test
-    fun filterEnvelopeLeavesBrokenJsonAlone() {
-        assertEquals("{not json", SourceSyncImportLogic.filterEnvelope("{not json", setOf("sync-1")))
+    fun aRemovalIsReportedSeparatelyFromAWrite() {
+        val summary = SourceSyncApplySummary(
+            appliedCount = 1,
+            requiresApprovalCount = 0,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 0,
+            removedCount = 1,
+        )
+
+        assertEquals("已删除 1 条本地来源（对端声明删除，凭据一并移除）。", SourceSyncImportCopy.removedLine(summary))
     }
 
     @Test

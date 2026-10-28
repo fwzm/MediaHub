@@ -7,22 +7,22 @@ import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
 import com.mediahub.core.common.sync.SourceSyncSummary
-import com.mediahub.core.database.sync.AppliedSourceChange
-import com.mediahub.core.database.sync.SourceSyncImportResult
+import com.mediahub.core.database.sync.SourceSyncApplyReport
 import com.mediahub.core.database.sync.SourceSyncPreview
+import com.mediahub.core.database.sync.SourceSyncWrittenSource
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * 导入页状态机（纯 JVM 证据）：预览零写入、失败关闭、结果如实汇报。
  *
  * 这里用假的端口替身，断言的是"界面层会做什么"，不是数据库行为（后者由 core:database 自己的
- * 测试钉住）。最要紧的一条：没有点允许的条目绝不会被交给写库服务。
+ * 测试钉住）。最要紧的一条：没有点允许的条目绝不会被写进库 —— 它要么进跳过名单（被闸门裁掉），
+ * 要么压根不在放行名单里，绝不靠"把信封改小"来变相实现。
  */
 class SourceSyncImportSessionTest {
 
@@ -120,7 +120,30 @@ class SourceSyncImportSessionTest {
     }
 
     @Test
-    fun onlyTheAllowedEntrySurvivesIntoTheAppliedEnvelope() = runTest {
+    fun theWholeEnvelopeTravelsWithBothDecisionLists() = runTest {
+        val apply = FakeApplyPort(ok())
+        val session = SourceSyncImportSession(
+            FakePreviewPort(ready(planWithTwoCreateAndOneUnsupported())),
+            apply,
+        )
+        val json = envelopeJson()
+        session.loadEnvelope(json)
+        session.preview()
+
+        session.decide("sync-1", SourceSyncEntryDecision.ALLOW)
+        session.decide("sync-2", SourceSyncEntryDecision.SKIP)
+        session.apply()
+
+        assertEquals(1, apply.calls)
+        // 信封整份透传：裁决只走名单。信封少一条，回执就没法解释为什么少。
+        assertEquals(json, apply.received)
+        assertEquals(setOf("sync-1"), apply.allowedKeys)
+        assertEquals(setOf("sync-2"), apply.skippedKeys)
+        assertEquals(SourceSyncImportStatus.APPLIED, session.state.value.status)
+    }
+
+    @Test
+    fun anUndecidedAllowableEntryIsSkippedNotWritten() = runTest {
         val apply = FakeApplyPort(ok())
         val session = SourceSyncImportSession(
             FakePreviewPort(ready(planWithTwoCreateAndOneUnsupported())),
@@ -130,17 +153,11 @@ class SourceSyncImportSessionTest {
         session.preview()
 
         session.decide("sync-1", SourceSyncEntryDecision.ALLOW)
-        session.decide("sync-2", SourceSyncEntryDecision.SKIP)
         session.apply()
 
-        assertEquals(1, apply.calls)
-        val decoded = SourceSyncCodec.tryDecode(apply.received!!)
-        assertTrue(decoded is SourceSyncCodec.DecodeResult.Ok)
-        val envelope = (decoded as SourceSyncCodec.DecodeResult.Ok).envelope
-        // 用户跳过的 sync-2 被剔除；不可允许的 sync-quantum 故意留在信封里，
-        // 这样结果页才能如实报出"暂不支持 1 条"，而不是让它凭空消失。
-        assertEquals(listOf("sync-1", "sync-quantum"), envelope.sources.map { it.syncSourceId })
-        assertEquals(SourceSyncImportStatus.APPLIED, session.state.value.status)
+        // sync-2 从没被点过：它必须进跳过名单（失败关闭），而不是被当成"默认允许"。
+        assertEquals(setOf("sync-1"), apply.allowedKeys)
+        assertEquals(setOf("sync-2"), apply.skippedKeys)
     }
 
     @Test
@@ -164,7 +181,7 @@ class SourceSyncImportSessionTest {
 
     @Test
     fun rejectedApplyResultBlocksWithItsOwnReason() = runTest {
-        val rejected = SourceSyncImportResult(rejectedReason = "unsupported-schema-version:2")
+        val rejected = SourceSyncApplyReport(rejectedReason = "unsupported-schema-version:2")
         val session = SourceSyncImportSession(
             FakePreviewPort(ready(planWithTwoCreateAndOneUnsupported())),
             FakeApplyPort(rejected),
@@ -194,12 +211,71 @@ class SourceSyncImportSessionTest {
 
         val applied = session.state.value.applied
         assertNotNull(applied)
+        // 回执桶：这一轮真正发生了什么。
         assertEquals(1, applied!!.appliedCount)
-        assertEquals(1, applied.requiresApprovalCount)
+        assertEquals(0, applied.skippedCount)
+        assertEquals(1, applied.withheldCount)
+        assertEquals(0, applied.failedCount)
+        assertEquals(0, applied.removedCount)
+        assertEquals(1, applied.notAppliedCount)
+        // 规划桶：预览里本来就有多少。这里必须是 0 —— 三份候选里没有一份需要确认，
+        // 旧夹具却自称回执里带了一条 requiresApproval，于是这条断言在假数据上绿了很久。
+        assertEquals(0, applied.requiresApprovalCount)
         assertEquals(0, applied.ignoredCount)
         assertEquals(1, applied.unsupportedCount)
-        assertEquals(0, applied.failedCount)
         assertEquals(listOf("客厅 Emby"), applied.appliedTitles)
+        assertEquals("srv-1", applied.appliedSources.single().serverId)
+        assertEquals("sync-1", applied.appliedSources.single().syncSourceId)
+        assertEquals("emby", applied.appliedSources.single().sourceTypeRaw)
+    }
+
+    @Test
+    fun aRemovalCountsAsAppliedInTheReceiptButNotAsAWriteInTheSummary() = runTest {
+        // 回执的 applied 含删除（对端删了就得连凭据一起移除），结果页说「已写入」时可不能把它算进去。
+        val report = SourceSyncApplyReport(
+            applied = 2,
+            wrote = listOf(SourceSyncWrittenSource(syncSourceId = "sync-1", serverId = "srv-1")),
+            removedServerIds = listOf("srv-old"),
+            removedSyncSourceIds = listOf("sync-gone"),
+        )
+        val session = SourceSyncImportSession(
+            FakePreviewPort(ready(planWithTwoCreateAndOneUnsupported())),
+            FakeApplyPort(report),
+        )
+        session.loadEnvelope(envelopeJson())
+        session.preview()
+        session.decide("sync-1", SourceSyncEntryDecision.ALLOW)
+
+        session.apply()
+
+        val applied = session.state.value.applied!!
+        assertEquals(1, applied.appliedCount)
+        assertEquals(1, applied.removedCount)
+        assertEquals(1, applied.appliedSources.size)
+    }
+
+    @Test
+    fun aWrittenEntryMissingFromThePreviewStillReachesTheVerificationList() = runTest {
+        // 回执与预览对不上时宁可退化展示，也不能把这条丢了 —— 丢了就永远补不了凭据。
+        val stray = SourceSyncApplyReport(
+            applied = 1,
+            wrote = listOf(SourceSyncWrittenSource(syncSourceId = "sync-ghost", serverId = "srv-9")),
+        )
+        val session = SourceSyncImportSession(
+            FakePreviewPort(ready(planWithTwoCreateAndOneUnsupported())),
+            FakeApplyPort(stray),
+        )
+        session.loadEnvelope(envelopeJson())
+        session.preview()
+        session.decide("sync-1", SourceSyncEntryDecision.ALLOW)
+
+        session.apply()
+
+        val source = session.state.value.applied!!.appliedSources.single()
+        assertEquals("srv-9", source.serverId)
+        assertEquals("sync-ghost", source.syncSourceId)
+        assertEquals("sync-ghost", source.title)
+        assertNull(source.sourceTypeRaw)
     }
 
     @Test
@@ -232,12 +308,20 @@ class SourceSyncImportSessionTest {
         }
     }
 
-    private class FakeApplyPort(private val result: SourceSyncImportResult) : SourceSyncApplyPort {
+    private class FakeApplyPort(private val result: SourceSyncApplyReport) : SourceSyncApplyPort {
         var calls = 0
         var received: String? = null
-        override suspend fun apply(envelopeJson: String): SourceSyncImportResult {
+        var allowedKeys: Set<String> = emptySet()
+        var skippedKeys: Set<String> = emptySet()
+        override suspend fun apply(
+            envelopeJson: String,
+            allowedKeys: Set<String>,
+            skippedKeys: Set<String>,
+        ): SourceSyncApplyReport {
             calls++
             received = envelopeJson
+            this.allowedKeys = allowedKeys
+            this.skippedKeys = skippedKeys
             return result
         }
     }
@@ -273,20 +357,14 @@ class SourceSyncImportSessionTest {
 
     private fun rejected(reason: String) = SourceSyncPreview.Rejected(reason, null)
 
-    private fun ok() = SourceSyncImportResult(
-        deviceId = "device-a",
-        snapshotId = "snap-1",
-        applied = listOf(
-            AppliedSourceChange(
-                serverId = "srv-1",
-                candidate = createCandidate("sync-1"),
-                contentHash = "hash-1",
-            ),
-        ),
-        requiresApproval = listOf(createCandidate("sync-2")),
-        ignored = emptyList(),
-        unsupported = listOf(unsupportedCandidate()),
-        failed = emptyList(),
+    /** 一份「写入一条、扣住一条」的回执：扣住的是不可允许的 sync-quantum。 */
+    private fun ok() = SourceSyncApplyReport(
+        peerDeviceId = "device-a",
+        applied = 1,
+        skipped = 0,
+        withheld = 1,
+        refused = 0,
+        wrote = listOf(SourceSyncWrittenSource(syncSourceId = "sync-1", serverId = "srv-1")),
     )
 
     private fun envelopeJson(): String = SourceSyncCodec.encode(

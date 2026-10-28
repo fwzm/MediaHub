@@ -431,7 +431,7 @@ class AndroidSourceSyncService(
         )
 
         val writtenRecords = ArrayList<SourceRecord>()
-        val wroteServerIds = ArrayList<String>()
+        val wrote = ArrayList<SourceSyncWrittenSource>()
         val removedServerIds = ArrayList<String>()
         val removedIds = ArrayList<String>()
         val refusedIds = ArrayList<String>()
@@ -461,17 +461,19 @@ class AndroidSourceSyncService(
                 continue
             }
             applied++
-            wroteServerIds.add(serverId)
+            wrote.add(SourceSyncWrittenSource(item.syncSourceId.trim(), serverId))
             writtenRecords.add(record)
         }
 
         var baselineUpdated = false
+        var baselineRejected = 0
         var baselineEntries = build.peerBaseline?.entries?.size ?: 0
         val warnings = ArrayList<String>()
         if (writtenRecords.isNotEmpty()) {
             val save = recordBaseline(envelope, writtenRecords)
             if (save != null) {
                 baselineUpdated = save.saved
+                baselineRejected = save.rejectedSyncSourceIds.size
                 if (save.rejectedSyncSourceIds.isNotEmpty()) {
                     warnings.add(
                         BASELINE_REJECTED_PREFIX + ":" + save.rejectedSyncSourceIds.size + ":" +
@@ -494,8 +496,10 @@ class AndroidSourceSyncService(
             acknowledgedRisk = gate.acknowledgedRisk,
             baselineUpdated = baselineUpdated,
             baselineEntryCount = baselineEntries,
+            baselineRejectedCount = baselineRejected,
             warnings = warnings,
-            wroteServerIds = wroteServerIds,
+            wrote = wrote,
+            endpointSummary = SourceSyncEndpointPolicy.summarize(envelope),
             removedServerIds = removedServerIds,
             removedSyncSourceIds = removedIds,
             refusedSyncSourceIds = refusedIds,
@@ -962,6 +966,17 @@ data class SourceSyncRoundPreview(
 
 
 /**
+ * W6-81：一条真正写进本机的来源配对：信封里的身份 + 本机这次分配的 serverId。
+ *
+ * 两者缺一不可：身份用于回填对端记录，serverId 用于本机「补录并验证」；
+ * 只给其中之一，界面就只能猜（猜错会把 A 来源的凭据写到 B 来源上）。
+ */
+data class SourceSyncWrittenSource(
+    val syncSourceId: String,
+    val serverId: String,
+)
+
+/**
  * W6-78：一轮落库的回执（Windows `SourceSyncApplyReport` 的对等物）。
  *
  * 四个计数桶互不相交、加起来等于闸门看过的条目数：
@@ -987,10 +1002,20 @@ data class SourceSyncApplyReport(
     val baselineUpdated: Boolean = false,
     /** 本轮结束时对端基线的条数（推进后重新读取的真实值，不是本轮写入条数）。 */
     val baselineEntryCount: Int = 0,
+    /** 基线拒收的条目数（合并不许让条目倒退）；与 warnings 里的字符串同源，供界面直接取数。 */
+    val baselineRejectedCount: Int = 0,
     /** 稳定码形式的告警（基线拒收 / 基线写失败），供调用方展示而不是丢弃。 */
     val warnings: List<String> = emptyList(),
-    /** 本轮写入所对应的服务器 id（顺序与写入顺序一致）。 */
-    val wroteServerIds: List<String> = emptyList(),
+    /**
+     * 本轮真正写进库的条目：信封身份 → 本机 serverId（顺序与写入顺序一致）。
+     *
+     * 只有扁平 serverId 时结果页对不上号：serverId 是本机新造的，身份只存在于对端信封里，
+     * 而「补录并验证」必须按身份逐条回填。Windows 把这份记账放在 App 层写入器里（写入器自己
+     * 知道落了哪个 serverId），Android 的写入器就在本服务内，所以配对只能由这里给出（W6-81）。
+     */
+    val wrote: List<SourceSyncWrittenSource> = emptyList(),
+    /** 信封里的次要端点汇总（与 [SourceSyncImportResult.endpointSummary] 同口径，W6-81 起也在这条回执上）。 */
+    val endpointSummary: SourceSyncEndpointSummary? = null,
     /** 本轮真正移除的服务器 id（W6-79 的跨端删除，顺序与移除顺序一致）。 */
     val removedServerIds: List<String> = emptyList(),
     /** 本轮移除所对应的 syncSourceId（与 [removedServerIds] 同序同长）。 */
@@ -1003,6 +1028,12 @@ data class SourceSyncApplyReport(
     val rejectedReason: String? = null,
     val rejectedMessage: String? = null,
 ) {
+    /** [wrote] 的投影：只要服务器 id，方便只关心「写了哪几行」的调用方。 */
+    val wroteServerIds: List<String> get() = wrote.map { it.serverId }
+
+    /** 信封里的次要端点汇总（与 [SourceSyncImportResult.endpointSummary] 同口径）。 */
+    val notImportedEndpointCount: Int get() = endpointSummary?.notImportedCount ?: 0
+
     val isRejected: Boolean get() = !rejectedReason.isNullOrBlank()
 
     /** 没被写入的条数：跳过 + 扣住 + 拒绝。 */
