@@ -986,6 +986,85 @@ public sealed class SourceSyncImportRoundTests
             Assert.DoesNotContain(result.WithheldEntries, entry => entry.SyncSourceId == "local-plain");
         });
     }
+    [Fact]
+    public void TheWayOutTableCoversEveryCodeTheGateCanWithholdWithAndInventsNothing()
+    {
+        // W6-93: the reason sentence says what happened, this one says where the way out is. The words are the ones
+        // Android already uses for the same codes, so one code is never explained differently on the two clients.
+        Assert.Equal(
+            "下一步：在对端把这条来源的凭据清空后重新导出信封，或在本机手动新建一条同样的来源。",
+            SourceSyncWithheldText.NextStep(SyncRoundReasons.SecretsRequireApproval));
+        Assert.Equal(
+            "下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。",
+            SourceSyncWithheldText.NextStep(SyncRoundReasons.NotSupportedOnWindows));
+        Assert.Equal(
+            "下一步：把两端升到同一版本后重新导出信封。",
+            SourceSyncWithheldText.NextStep(SyncRoundReasons.UnknownSourceType));
+        Assert.Equal(
+            "下一步：这条两端内容不一致（版本号相同），本页一律不放行；请在来源页手工对齐后再导出。",
+            SourceSyncWithheldText.NextStep(SyncRoundReasons.SameRevisionDifferentContent));
+        Assert.Equal(
+            "下一步：本机有多条来源指向同一身份，先在来源页删掉多余的再重新导出。",
+            SourceSyncWithheldText.NextStep(SourceSyncApprovalGate.AmbiguousReasonPrefix + "legacy-identity"));
+
+        // A code this build does not know gets no invented advice, and neither does a blank one.
+        Assert.Null(SourceSyncWithheldText.NextStep("something-new"));
+        Assert.Null(SourceSyncWithheldText.NextStep(""));
+        Assert.Null(SourceSyncWithheldText.NextStep("   "));
+        Assert.Null(SourceSyncWithheldText.NextStep(null));
+    }
+
+    [Fact]
+    public async Task EveryWithheldRowCarriesTheWayOutAndTheIdentityTheButtonCopies()
+    {
+        // The row is one record with three facts; the page binds it directly and spells none of them.
+        await WithTempDirectoryAsync(async dir =>
+        {
+            var store = new InMemoryLocalSourceStore();
+            var round = Round(store, dir);
+            using JsonDocument document = JsonDocument.Parse("""{"token":"sealed-on-the-other-machine"}""");
+            var record = new SourceRecord
+            {
+                SyncSourceId = " local-dddd ",
+                SourceType = SyncSourceTypeValue.Parse("emby"),
+                DisplayName = " 卧室 Emby ",
+                Endpoints = [new SourceEndpoint { Url = "http://emby.local:8096", IsPrimary = true }],
+                RecordRevision = 2,
+                Secrets = document.RootElement.Clone(),
+            };
+
+            SourceSyncApplyPreview preview = round.Preview(Envelope(record));
+            SourceSyncApplyReport result = await round.ApplyAsync(preview, ["local-dddd"], Writer(store));
+
+            IReadOnlyList<SourceSyncWithheldRow> rows = SourceSyncWithheldText.Rows(result.WithheldEntries);
+            SourceSyncWithheldRow row = Assert.Single(rows);
+            Assert.Equal("- 卧室 Emby（local-dddd） · 带凭据，需人工迁移（本次不会写入）", row.Text);
+            Assert.Contains("凭据清空", row.NextStep, StringComparison.Ordinal);
+            // The payload is the identity as the peer stated it, trimmed; a title would be useless on the other machine.
+            Assert.Equal("local-dddd", row.CopyText);
+            Assert.True(row.CanCopy);
+            Assert.Equal(SourceSyncWithheldText.CopyIdentity, row.CopyLabel);
+        });
+    }
+
+    [Fact]
+    public void ARowWithoutAnIdentitySaysSoOnItsButtonInsteadOfCopyingAnInvention()
+    {
+        IReadOnlyList<SourceSyncWithheldRow> rows = SourceSyncWithheldText.Rows(
+        [
+            new SourceSyncWithheldSource { SyncSourceId = "local-x", DisplayName = "有身份", Reason = "something-new" },
+            new SourceSyncWithheldSource { SyncSourceId = "  ", DisplayName = "无身份", Reason = "something-new" },
+        ]);
+
+        Assert.Equal(2, rows.Count);
+        Assert.True(rows[0].CanCopy);
+        Assert.Equal("local-x", rows[0].CopyText);
+        Assert.Equal(string.Empty, rows[0].NextStep);
+        Assert.False(rows[1].CanCopy);
+        Assert.Equal(string.Empty, rows[1].CopyText);
+        Assert.Equal(SourceSyncWithheldText.NoCopyableIdentity, rows[1].CopyLabel);
+        Assert.Empty(SourceSyncWithheldText.Rows([]));
+    }
     private static void WithTempDirectory(Action<string> body)
     {
         string directory = NewTempDirectory();

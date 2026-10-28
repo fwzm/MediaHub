@@ -447,9 +447,14 @@ public sealed class SyncPagePresenterTests : IDisposable
 
         Assert.Equal(1, report.WithheldEntries.Count);
         Assert.Equal("保留未应用 1 条（扣住，点允许也不会写）", result.WithheldHeader);
-        Assert.Single(result.WithheldRows);
-        Assert.Contains("local-dddd", result.WithheldRows[0], StringComparison.Ordinal);
-        Assert.Contains("带凭据，需人工迁移（本次不会写入）", result.WithheldRows[0], StringComparison.Ordinal);
+        SourceSyncWithheldRow row = Assert.Single(result.WithheldRows);
+        Assert.Contains("local-dddd", row.Text, StringComparison.Ordinal);
+        Assert.Contains("带凭据，需人工迁移（本次不会写入）", row.Text, StringComparison.Ordinal);
+        // W6-93: the row carries the way out and the payload, so the page never spells either of them itself.
+        Assert.Equal(SourceSyncWithheldText.CopyIdentity, row.CopyLabel);
+        Assert.Equal("local-dddd", row.CopyText);
+        Assert.True(row.CanCopy);
+        Assert.Contains("凭据清空", row.NextStep, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -462,6 +467,43 @@ public sealed class SyncPagePresenterTests : IDisposable
 
         Assert.Equal(string.Empty, result.WithheldHeader);
         Assert.Empty(result.WithheldRows);
+    }
+    [Fact]
+    public void DescribeResultCarriesTheWayOutAndTheCopyableIdentityOnEveryWithheldRow()
+    {
+        // A reason without a way out leaves the user staring at a button that never works; a payload that is not the
+        // identity is useless on the other machine. Both travel with the row, one per withheld entry.
+        var presenter = new SyncApplyPresenter();
+        var report = new SourceSyncApplyReport
+        {
+            Withheld = 2,
+            WithheldEntries =
+            [
+                new SourceSyncWithheldSource
+                {
+                    SyncSourceId = " local-aaaa ",
+                    DisplayName = "客厅 Emby",
+                    Reason = SyncRoundReasons.NotSupportedOnWindows,
+                },
+                new SourceSyncWithheldSource { SyncSourceId = "  ", DisplayName = "无身份来源", Reason = "something-new" },
+            ],
+        };
+
+        SyncApplyResult result = presenter.DescribeResult(report);
+
+        Assert.Equal("保留未应用 2 条（扣住，点允许也不会写）", result.WithheldHeader);
+        Assert.Equal(2, result.WithheldRows.Count);
+        SourceSyncWithheldRow first = result.WithheldRows[0];
+        Assert.Equal("- 客厅 Emby（local-aaaa） · Windows 暂不支持该来源类型", first.Text);
+        Assert.Equal("下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。", first.NextStep);
+        Assert.Equal("local-aaaa", first.CopyText);
+        Assert.True(first.CanCopy);
+        SourceSyncWithheldRow second = result.WithheldRows[1];
+        Assert.Equal("- 无身份来源 · something-new", second.Text);
+        Assert.Equal(string.Empty, second.NextStep);
+        Assert.Equal(string.Empty, second.CopyText);
+        Assert.False(second.CanCopy);
+        Assert.Equal(SourceSyncWithheldText.NoCopyableIdentity, second.CopyLabel);
     }
     [Fact]
     public async Task Apply_SkipThePageRecordedIsHonoured()

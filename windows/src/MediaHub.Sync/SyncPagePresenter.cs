@@ -259,8 +259,14 @@ public sealed record SyncApplyResult
     /// <summary>Sentence above the withheld list; empty when the gate withheld nothing.</summary>
     public string WithheldHeader { get; init; } = "";
 
-    /// <summary>One row per gate-withheld entry, in gate order, with the reason an explicit 允许 cannot save it.</summary>
-    public IReadOnlyList<string> WithheldRows { get; init; } = [];
+    /// <summary>
+    /// One row per gate-withheld entry, in gate order: the sentence, the way out and the identity to copy.
+    /// </summary>
+    /// <remarks>
+    /// W6-93: typed rather than a string list. A copy button needs the identity as a payload, and a parallel string
+    /// list would be a second source of truth for the same round — the drift Android retired appliedTitles over.
+    /// </remarks>
+    public IReadOnlyList<SourceSyncWithheldRow> WithheldRows { get; init; } = [];
 
     /// <summary>Sentence above the written list; empty when this round wrote nothing.</summary>
     public string WrittenHeader { get; init; } = "";
@@ -488,7 +494,7 @@ public sealed class SyncApplyPresenter
             BlockingLabels = blocking,
             WarningLabels = warnings,
             WithheldHeader = SourceSyncWithheldText.Header(report.WithheldEntries.Count) ?? string.Empty,
-            WithheldRows = SourceSyncWithheldText.Lines(report.WithheldEntries),
+            WithheldRows = SourceSyncWithheldText.Rows(report.WithheldEntries),
             WrittenHeader = SourceSyncWrittenText.Header(report.Written.Count) ?? string.Empty,
             WrittenRows = SourceSyncWrittenText.Lines(report.Written),
             RefusedHeader = SourceSyncRefusedText.Header(report.Refused.Count) ?? string.Empty,

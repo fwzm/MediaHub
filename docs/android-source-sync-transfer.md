@@ -5670,3 +5670,58 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 ### 61.7 状态
 
 - EXECUTED_PASS（本机 1674/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+
+## §62 W6-93：Windows 扣住条目也有出路与复制身份（对齐 Android W6-84/W6-85）
+
+### 62.1 结论先行
+
+- W6-92 把「被闸门扣住」的条目逐条摊开了，但只给了原因：用户看到「带凭据，需人工迁移（本次不会写入）」「Windows 暂不支持该来源类型」，知道**为什么**写不进去，却不知道**下一步干什么**，也没法把手上唯一的线索（对端身份）拿走。
+- 本轮把 Android W6-84 的「唯一出口 + 复制身份」搬到 Windows：`SyncApplyResult.WithheldRows` 从纯字符串清单升级为 `SourceSyncWithheldRow`（`Text` / `NextStep` / `CopyText` / `CanCopy` / `CopyLabel`），结果页每行右侧一个按钮。
+- 出口只有一张码表（`SourceSyncWithheldText.NextStep`），和 Android 的 `nextStepOfCode` 逐句同文；**未知码返回 null 而不是编建议**——编一句听起来合理的做法，比不说更害人。
+- 按钮文案分两态：可复制时是「复制身份」，不可复制时是「无身份可复制」并且按钮**禁用**（`CanCopy=false`）。禁用而不是隐藏，是因为「这条没有身份可复制」本身是要说出来的事实。
+
+### 62.2 数据流（一张码表、两种出口）
+
+- 码表（`windows/src/MediaHub.Sync/SourceSyncWithheldSource.cs`）：`NextStep(code)` 先 trim，空码返回 null；`ambiguous-` 前缀（`SourceSyncApprovalGate.AmbiguousReasonPrefix`）走歧义句；四条显式码与 Android 同句——`secrets-require-approval`（在对端清空凭据后重新导出信封，或在本机手动新建同样的来源）、`not-supported-on-windows`（等本机版本支持这种来源类型；再点几次允许也不会进来）、`unknown-source-type`（把两端升到同一版本后重新导出信封）、`same-revision-different-content`（两端内容版本号相同但不一致，本页一律不放行，先手工对齐再导出）；`_ => null`。
+- 行组装（`Rows(entries)`）：`Text` 复用 W6-92 的「标题（身份）· 原因」；`NextStep = NextStep(entry.Reason) ?? ""`（空串在下标层面表示「没有出口」，XAML 里空 TextBlock 自然不渲染）；`identity = entry.SyncSourceId.Trim()`；`CopyText = canCopy ? identity : ""`，`canCopy = identity.Length > 0`；`CopyLabel` 由 `CanCopy` 派生。**CopyText 只可能是对端身份，不会拿标题充数**（拿标题当身份去对端检索是死路）。
+- 页面（`windows/src/MediaHub.App/Views/SyncPage.xaml` / `.xaml.cs`）：`ApplyWithheldList` 加 `ItemTemplate`——左列两个 `TextBlock`（`Text`；`NextStep` 用 `SystemFillColorCautionBrush` 提色），右列 `Button Content="{Binding CopyLabel}" IsEnabled="{Binding CanCopy}" Tag="{Binding}" Click="OnCopyWithheldIdentityClick"`，AutomationId `sync.apply.withheld.copy`。点击处理与既有的 `OnCopyCodeClick` 同一套：`DataPackage.SetText` + `Clipboard.SetContent`，成功给「来源身份已复制」提示（并说明拿去对端怎么用），`COMException` / `InvalidOperationException` 折成警告条；`CanCopy=false` 时若仍被点到（键盘可达）给「没有可复制的来源身份」。
+- App 工程里没有任何 `IValueConverter`（全项目 grep 命中 0），所以按钮的禁用态用 `IsEnabled` 绑定布尔，而不是靠转换器算 Visibility——这是 App 既有范式（`AllowLabel` 也是把解释写进按钮文案）。
+
+### 62.3 用例与计数
+
+- `windows/tests/MediaHub.Tests` 新增 4 例（1674 → **1678**）：
+- 码表完全覆盖闸门可能给出的码且不外推：四条码逐一钉**整句**、`ambiguous-legacy-identity` 走歧义句、`something-new` / 空串 / 全空白 / null 一律 null。
+- 每一行都同时带上出路与可复制身份：身份与标题带空格时两侧都要 trim（行是「- 卧室 Emby（local-dddd） · 带凭据，需人工迁移（本次不会写入）」、`CopyText="local-dddd"`、`CanCopy=true`、`CopyLabel="复制身份"`、`NextStep` 含「凭据清空」）。
+- 没有身份的行要说出来而不是编：`CopyText=""`、`CanCopy=false`、`CopyLabel="无身份可复制"`；`Rows([])` 返回空清单。
+- presenter 侧两例：`WithheldRows` 逐条的 Text/NextStep/CopyText/CanCopy/CopyLabel 都钉死；空回执时清单为空。
+- 本机：`dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj --no-restore`（cwd `D:/mh-w6`）→ **1678 / 0**（1674 → +4），日志 `D:/mh-verify/w693-test2.log`；App 构建 `dotnet build windows/src/MediaHub.App/MediaHub.App.csproj -c Debug -p:Platform=x64 -p:MediaHubBinRoot=D:/mh-out-w6/ --no-restore` → **0 警告 0 错误**（XAML 编译通过），日志 `D:/mh-verify/w693-app-build.log`。
+
+### 62.4 四条负向对照（每条都是「改了就该红」，跑完逐字节还原，sha256 相等）
+
+| 变异 | 红 |
+| --- | --- |
+| 未知码编一句「下一步：稍后再试。」（`_ => null` → `_ => "下一步：稍后再试。"`） | 3 |
+| 复制内容改成标题（`CopyText = canCopy ? identity : ""` → `entry.DisplayName?.Trim() ?? ""`） | 4 |
+| 行丢掉出路（`NextStep = ...` → `NextStep = ""`） | 3 |
+| 按钮永不禁用（`bool canCopy = identity.Length > 0` → `= true`） | 2 |
+
+日志 `D:/mh-verify/w693-neg-A-unknown-code-gets-invented-advice.log` / `-B-payload-becomes-the-title.log` / `-C-row-drops-the-way-out.log` / `-D-copy-button-never-disabled.log`；备份 `D:/mh-verify/w693-backup-withheld.cs`（+ `.sha256`）。
+
+### 62.5 与 Android 的差异（如实记）
+
+- 码表与句子是同一张（含歧义前缀句），这是刻意的：两端对同一个码说同一句，用户在两台机器上看到的建议不会打架。
+- Android 的「复制身份」按钮在结果页与预览页都有出口；Windows 本轮只落到**结果页**——预览页条目（`SyncApplyRow`）仍只有 `BlockReason`，没有出路。
+- Android 的 `withheldLine` 直接拼「标题（身份）」，Windows 沿用 W6-91/W6-92 的「缺一半不编造」规则；因此 Windows 的按钮还可能显示「无身份可复制」，Android 无此态。
+
+### 62.6 边界与仍未做
+
+- 出口只是文案，不改任何状态：不写库、不放行、不改闸门判据；复制的也只是对端身份字符串。
+- 码表内容进日志与界面，**不含地址、不含凭据**（原因码本身是稳定码，不含隐私）。
+- 结果页真实呈现仍 **GUI_UNVERIFIED**（本轮只到 XAML 编译通过 + presenter/round 纯逻辑用例，没有在真窗口里点过那个按钮）；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+- 仍未做：预览页条目的出路（Android W6-85 对等物）。
+
+### 62.7 状态
+
+- EXECUTED_PASS（本机 1678/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+
+- 提交 `70329551`（仅 W6 树，PR #39 侧）；四条 exact-SHA CI 见 PR 正文与账本（windows-ci 与 Android CI 均按本提交 SHA 跑）。

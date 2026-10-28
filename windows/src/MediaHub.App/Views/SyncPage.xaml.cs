@@ -416,6 +416,34 @@ public sealed partial class SyncPage : Page
         }
     }
 
+    /// <summary>
+    /// W6-93: the copy button on a withheld row puts the peer's identity on the clipboard. A withheld entry names an
+    /// identity the user has to look up on the machine that sent it, and on-screen text cannot be selected; the payload
+    /// is the identity the peer stated, never the title and never anything this page invented.
+    /// </summary>
+    private void OnCopyWithheldIdentityClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: SourceSyncWithheldRow row } || row.CopyText.Length == 0)
+        {
+            ShowStatus(InfoBarSeverity.Warning, "没有可复制的来源身份", "对端没有给这条来源身份，只能按标题核对。");
+            return;
+        }
+
+        try
+        {
+            DataPackage package = new();
+            package.SetText(row.CopyText);
+            Clipboard.SetContent(package);
+            ShowStatus(
+                InfoBarSeverity.Informational,
+                "来源身份已复制",
+                "把 " + row.CopyText + " 拿到来源那台机器上检索，或在来源页按它核对。");
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
+        {
+            ShowStatus(InfoBarSeverity.Warning, "无法复制来源身份", "剪贴板不可用：" + ex.Message);
+        }
+    }
     private void OnPairTick(object? sender, object e)
     {
         PairingHostSnapshot snapshot = HostPresenter.PollHost(NowMilliseconds());
