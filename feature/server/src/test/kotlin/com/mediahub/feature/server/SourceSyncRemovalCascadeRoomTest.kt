@@ -11,6 +11,8 @@ import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.database.repository.SubtitleMemoryRepository
 import com.mediahub.core.database.sync.AndroidSourceSyncService
 import com.mediahub.core.database.sync.SourceSyncRemoveOutcome
+import com.mediahub.core.logging.LogBuffer
+import com.mediahub.core.logging.MemoryLogger
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.StoredToken
@@ -77,6 +79,7 @@ class SourceSyncRemovalCascadeRoomTest {
             credentialVault = vault,
             serverIconStore = icons,
             sessionStoreCleaner = sessions,
+            logger = MemoryLogger(LogBuffer()),
         )
         remover = ServerSourceSyncRemover(repository, useCase)
     }

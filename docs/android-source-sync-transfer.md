@@ -5779,3 +5779,69 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 
 - **EXECUTED_PASS**：本机 `core/database` 253 / 0、`feature/settings` 410 / 0、`feature/server` 42 / 0；四条负向对照全红且逐字节还原。
 - **IMPLEMENTED_UNVERIFIED**：Windows 侧本轮零改动（C# 仍 1683 通过 / 0 失败），exact-SHA CI 见 PR 正文。
+
+## §69 W6-100：删除链失败也进日志（步骤码 + 脱敏后的原始原因）
+
+### 69.1 结论先行
+
+W6-88 让删除链说得出「卡在哪一步」，W6-98 让结果页带上「为什么」。这两句都只出现在**跨设备同步的结果页**上；
+用户直接点「删除媒体源」（Server Editor 危险区）走的是**同一个** `RemoveServerUseCase`，而那条路径上只有 ViewModel 打的一句「删除媒体源失败」
+（`ServerEditorViewModel` 的 `logger.e(LogTag.UI, "删除媒体源失败", e)`），既没有步骤码，也没有「诊断报告导出」里能翻到的那一行。
+
+本轮把步骤码与原始异常交进统一日志（logcat + 内存 `LogBuffer`）：失败一行 `remove-server-failed:<step>`（带 throwable）、
+成功一行 `remove-server-completed:<id>`。调用方**只交 Throwable、不拼字符串**——脱敏由 `Logger` 实现统一完成
+（`LogcatLogger` 走 `safeLogText` 的脱敏堆栈，`MemoryLogger` 走 `Redactor.redact`），
+任何 Token / Cookie / 密码都不会因为这条诊断进日志。
+
+### 69.2 改动面
+
+| 位置 | 改动 |
+| --- | --- |
+| `feature/server/src/main/kotlin/com/mediahub/feature/server/RemoveServerUseCase.kt` | 构造注入 `Logger`（app 的 `AppModule` 早已绑定 `CompositeLogger(LogcatLogger(), MemoryLogger(LogBuffer()))`）；`runStep` 的 catch 先打 `logger.w(LogTag.DATABASE, "remove-server-failed:" + step.code, failure)` 再抛；八步都走完打 `logger.i(LogTag.DATABASE, "remove-server-completed:" + id)` |
+| `feature/server/src/test/.../RemoveServerUseCaseStepsTest.kt` | `harness()` 造 `LogBuffer` + `MemoryLogger` 并透出 `Harness.logs`；新增三例 |
+| `feature/server/src/test/.../SourceSyncRemovalCascadeRoomTest.kt` | 构造点补 `logger = MemoryLogger(LogBuffer())`（该测试不读日志，只补参数） |
+
+为什么不是「自己把 cause.message 拼进 message」：那样会绕过 `LogcatLogger` 的堆栈脱敏路径；
+`Logger` 的契约写明「所有实现必须对内容调用 `Redactor.redact`」，只在它这一层交 `Throwable` 才是唯一入口。
+
+### 69.3 用例与计数
+
+- `feature/server` **42 → 45**（`RemoveServerUseCaseStepsTest` 新增三例）：
+  1. 第 4 步失败 ⇒ 恰好一行 `[W][DATABASE] remove-server-failed:credentials | IOException: keyring unavailable`；
+  2. 八步全部走完 ⇒ 恰好一行 `[I][DATABASE] remove-server-completed:<id>`，且没有任何 W 行；
+  3. 安全不变式：异常消息里恰好带着 `token=Sup3rS3cret` ⇒ 该行含 `token=****`、不含明文（脱敏真的发生了）。
+- 本机四模块 `core/common` 660 / `core/database` 253 / `feature/settings` 410 / `feature/server` **45** = **1368** 例全绿；
+  新例计入 `uniqueTests` 2461 → **2464**；`--required-suite` 仍 **60**（`feature/server` 不在门禁名单内）。
+
+### 69.4 四条负向对照（实现态快照先行，跑完逐字节还原）
+
+| 变异 | 结果 | 说明 |
+| --- | --- | --- |
+| A 删掉 `logger.w` 那一行 | 45 / **2 红** | 失败行用例 + 安全不变式用例 |
+| B 只交步骤码、不交 `failure` | 45 / **2 红** | 同上两条（原因句没了） |
+| C `w` 降成 `d` | 45 / **2 红** | 级别断言 [W] 变 [D] |
+| D 删掉成功的 `logger.i` | 45 / **1 红** | 成功行用例 |
+
+快照 `D:/mh-verify/w6100-impl-use.kt`（sha256 `ae43b1f2b4d92ff691e06cd7af50cdd868c4f945063bb3e0b5178ce2b8aeedfd`）；
+日志 `D:/mh-verify/w6100-neg-{A,B,C,D}-*.log`；四次变异后都以 sha256 确认还原到实现态。
+
+### 69.5 边界与仍未做
+
+- 日志不是用户界面：结果页仍只多「（原因：…）」那一句，用户不需要翻日志；日志是给「诊断报告导出」与现场排查的。
+- 日志里只带媒体源的内部 id（uuid，不是凭据），不带 server 名字（用户数据）；
+- 取消（`CancellationException`）仍然直接上抛、**不记 warn**——取消不是失败，这与 W6-88 的取消口径一致；
+- 成功行是 info 级：八步全部做完才打，删除链半途失败时不会有它；
+- 仍未做：真实两机联调与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**；Windows 侧本轮零改动。
+
+### 69.6 工具教训
+
+- 读 JUnit XML 统计失败用例名必须用 `/<testcase\b[^>]*?(?:\/>|>[\s\S]*?<\/testcase>)/g`——通过的用例是自闭合标签，
+  用 `/<testcase\b[^>]*>[\s\S]*?<\/testcase>/g` 会把失败算到前一个通过的用例头上；
+- 四条负向对照必须先存实现态快照再变异，还原只许用快照（用实现前备份还原会把功能整个抹掉——W6-95 轮已踩过）；
+- Kotlin 文件是 LF；文档与 README 的换行风格每轮先判（本仓库 docs 为 LF、README 为 CRLF）。
+
+### 69.7 状态
+
+- **EXECUTED_PASS**：本机 `feature/server` 45 / 0（其余三模块 660 / 253 / 410 均未动）；四条负向对照全红且逐字节还原到实现态。
+- **IMPLEMENTED_UNVERIFIED**：exact-SHA CI 见 PR 正文；Windows 侧零改动（C# 仍 1683 通过 / 0 失败）。
+- 主树提交号以 PR #33 head 为准（docs 不自指 SHA）。

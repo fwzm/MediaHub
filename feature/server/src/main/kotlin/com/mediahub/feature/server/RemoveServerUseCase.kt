@@ -5,6 +5,8 @@ import com.mediahub.core.database.repository.ProgressRepository
 import com.mediahub.core.database.repository.SubtitleMemoryRepository
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.database.sync.SourceSyncRemovalStep
+import com.mediahub.core.logging.LogTag
+import com.mediahub.core.logging.Logger
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.core.security.TokenStore
 import com.mediahub.model.MediaServer
@@ -43,6 +45,10 @@ class RemoveServerFailedException(
  *
  * 每一步都通过 [runStep] 包一层：失败时抛 [RemoveServerFailedException] 并带上步骤，步骤码表在
  * `core:database` 的 [SourceSyncRemovalStep]（结果页与日志共用同一份权威）。
+ *
+ * W6-100：失败时把步骤码与原始原因写进日志（logcat 与诊断导出的内存缓冲），与结果页用的是同一份权威；
+ * 用户点删除（Server Editor）与跨设备同步触发的删除走的是同一个用例，因此两条路径都有这行诊断。
+ * 日志内容一律经 [Logger] 实现脱敏（Token / Cookie / 密码不会进日志），这里只交原始异常，不做字符串拼接。
  */
 @Singleton
 class RemoveServerUseCase @Inject constructor(
@@ -54,6 +60,7 @@ class RemoveServerUseCase @Inject constructor(
     private val credentialVault: CredentialVault,
     private val serverIconStore: ServerIconStore,
     private val sessionStoreCleaner: SessionStoreCleaner,
+    private val logger: Logger,
 ) : ServerRemoveHandler {
     override suspend fun remove(server: MediaServer) {
         val id = server.id
@@ -65,6 +72,7 @@ class RemoveServerUseCase @Inject constructor(
         runStep(SourceSyncRemovalStep.SUBTITLE_MEMORY) { subtitleMemoryRepository.deleteByServer(id) }
         runStep(SourceSyncRemovalStep.ICON) { serverIconStore.remove(id) }
         runStep(SourceSyncRemovalStep.SESSION_STORE) { sessionStoreCleaner.clear(id) }
+        logger.i(LogTag.DATABASE, "remove-server-completed:" + id)
     }
 
     private suspend fun runStep(step: SourceSyncRemovalStep, block: suspend () -> Unit) {
@@ -73,6 +81,7 @@ class RemoveServerUseCase @Inject constructor(
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (failure: Exception) {
+            logger.w(LogTag.DATABASE, "remove-server-failed:" + step.code, failure)
             throw RemoveServerFailedException(step, failure)
         }
     }
