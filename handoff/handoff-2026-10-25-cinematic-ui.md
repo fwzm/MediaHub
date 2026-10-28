@@ -41,6 +41,8 @@
 
 - `170c188d` Android `40661147994` 未通过：API36 的四页与备份 XML 均通过，但原始 XML 与 `-cinematic.xml` 归档副本同时被校验，四个用例各计 2 次。改为把原始 XML 移到独立归档目录，校验目录仅保留备份与四页的去重副本；不删除测试原件，不改报告内容。最终报告每类用例恰出现一次，66 tests / 0 failures，`bash -n` 通过。
 
+- `294b0160` Android `40674864698`：API32/36 的 `visual-instrumentation` 与 `Require executed visual assertions` 均 **success**。已下载原始产物核验：每 API 备份 1 项、四页 4 项，0 failures/0 errors；校验目录只含去重报告，manifest 绑定该 head SHA。总 build 正在执行单元测试/lint/APK，等待最终结果。Windows `40674864522` 与 Sync `40674864550` 均 success。
+
 ## Rules and next steps
 
 - G7：DO_NOT_MERGE。只允许普通提交到 feature 分支并创建 Draft PR；不合并、不 close、不 mark-ready、不 force push。
