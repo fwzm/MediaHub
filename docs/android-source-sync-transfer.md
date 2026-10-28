@@ -5519,6 +5519,13 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 - B `writtenLine` 丢掉身份（`return "- " + entry.title`）⇒ 408 / 1 红（同一用例）。
 - C `planLine` 改回「放行 / 忽略」旧词 ⇒ 408 / 3 红（词汇用例 + 两条精确串用例）。
 
+### 58.6 红→修：instrumentation 新用例的「旧样式不存在」断言撞到无身份条目
+
+- 首次 exact-SHA CI（`db63b2e3`）的 visual-instrumentation 两个作业（API 32 / API 36）都红，唯一失败用例就是本轮新加的 `everyWrittenEntryIsListedWithItsRemoteIdentityAndTheBlockVanishesWhenNothingWasWritten`：`java.lang.AssertionError: Failed: assertDoesNotExist.`（136 例里 1 失败，其余全过）。
+- 原因在用例自己：fixture 里两条写入 —— 第一条「客厅 Emby」有身份、`syncSourceId = "local-a"`；第二条「书房 Jellyfin」身份为 null。第二条按设计就渲染成只有标题的 `- 书房 Jellyfin`，而用例随后用 `onNodeWithText("- 书房 Jellyfin").assertDoesNotExist()` 想钉「旧样式（只有标题、没有身份）已消失」——把「无身份条目本来就只有标题」这个合法形态当成了反例。
+- 改法：反例换成有身份的那一条 `onNodeWithText("- 客厅 Emby").assertDoesNotExist()`（证明身份确实被追加而不是被省略），并显式断言无身份条目 `- 书房 Jellyfin` 正在显示 —— 把它从「反例」改成「行为声明」。
+- 教训：本地只能跑 `compileDebugAndroidTestKotlin`，instrumentation 断言只有 CI 模拟器是裁判；凡是改 UI 文案或新加 instrumentation 断言，本轮必须按「可能红」对待，并把红→修全过程写进 PR 正文（W6-82 是同一个坑的另一面：那次是退役文案没人改）。
+- 三处口径一致：JVM 用例只钉 `writtenLine` 的字符串形态（无身份 → 只给标题），instrumentation 钉渲染节点（有身份必须带身份、无身份只给标题）。
 ### 58.6 边界与仍未做
 
 - Windows 侧对应物只有计数：写入器在 App 层 `SourceSyncRecordWriter`，回执里只有 Applied / Skipped / Withheld / NotApplied 四类计数、没有逐条身份区——Android 的回执是超集而非分叉（W6-81 起就是这个口径），文档与日志必须写明。
@@ -5526,7 +5533,7 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 - 0 条写入时整块消失，用户只能从结果行数字知道「写了 0 条」。
 - 仍未做：跨设备真实核对、真机 instrumentation（NOT_RUN / DEVICE_UNVERIFIED）。
 
-### 58.7 状态
+### 58.8 状态
 
 - EXECUTED_PASS（本机 JVM 口径 408/0，androidTest 编译通过）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。
 - 三条负向对照全红并逐字节还原；Windows 侧零改动（C# 仍 1656/1760）。
