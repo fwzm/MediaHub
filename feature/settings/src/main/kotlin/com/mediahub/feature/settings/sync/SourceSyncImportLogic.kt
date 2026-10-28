@@ -84,12 +84,18 @@ object SourceSyncImportCopy {
     fun baselineRejected(count: Int): String =
         "有 " + count + " 条没能记入基线（修订号比已有记录旧或同号不同内容）；导入结果不受影响。"
 
-    /** W6-82：本轮的「计划」——预览里怎么分的桶。与下面那行「结果」不是同一件事。 */
+    /**
+     * W6-82：本轮的「计划」——预览里怎么分的桶。与下面那行「结果」不是同一件事。
+     *
+     * W6-89：四个词改用 [bucketWord]，与桶标题和预览顶部那句逐字一致（旧文案写「放行 / 忽略」）。
+     */
     fun planLine(summary: SourceSyncApplySummary): String =
-        "本次计划：放行 " + summary.allowedCount +
-            " 条 · 需确认 " + summary.requiresApprovalCount +
-            " 条 · 忽略 " + summary.ignoredCount +
-            " 条 · 暂不支持 " + summary.unsupportedCount +
+        "本次计划：" + bucketWord(SourceSyncImportBucket.APPLY) + " " + summary.allowedCount +
+            " 条 · " + bucketWord(SourceSyncImportBucket.REQUIRES_APPROVAL) + " " +
+            summary.requiresApprovalCount +
+            " 条 · " + bucketWord(SourceSyncImportBucket.IGNORED) + " " + summary.ignoredCount +
+            " 条 · " + bucketWord(SourceSyncImportBucket.UNSUPPORTED) + " " +
+            summary.unsupportedCount +
             " 条 · 共 " + summary.plannedCount + " 条"
 
     /**
@@ -175,6 +181,25 @@ object SourceSyncImportCopy {
     fun copyPayloadOf(entry: SourceSyncEntry): String? =
         entry.candidate.syncSourceId?.trim()?.takeIf { it.isNotEmpty() }
 
+    /**
+     * W6-89：写入区的标题；一条都没写成时返回 null（0 条不该占版面）。
+     *
+     * 改前这里只有一串「- 标题」：[SourceSyncAppliedSource] 里明明跟着对端身份与本机 serverId，
+     * 界面却什么都不说，用户没法把「这次写进去的」和自己来源页里的那条对上号。
+     */
+    fun writtenHeader(summary: SourceSyncApplySummary): String? =
+        if (summary.appliedSources.isEmpty()) {
+            null
+        } else {
+            "已写入 " + summary.appliedSources.size + " 条（按对端身份，可逐条核对）"
+        }
+
+    /** W6-89：一条写入的可读句：「- 标题（身份）」；身份缺失时只给标题，不编假身份。 */
+    fun writtenLine(entry: SourceSyncAppliedSource): String {
+        val identity = entry.syncSourceId?.trim()?.takeIf { it.isNotEmpty() }
+        return if (identity == null) "- " + entry.title else "- " + entry.title + "（" + identity + "）"
+    }
+
     /** W6-82：逐条失败区的标题；一条都没有时返回 null（0 条不该占版面）。 */
     fun refusedHeader(summary: SourceSyncApplySummary): String? =
         if (summary.refusedEntries.isEmpty()) {
@@ -256,13 +281,22 @@ object SourceSyncImportCopy {
         SourceSyncRemovalStep.SESSION_STORE.code to "清播放会话",
     )
 
-    /** 桶标题（四桶固定顺序）。 */
-    fun titleOf(bucket: SourceSyncImportBucket): String = when (bucket) {
+    /**
+     * W6-89：四桶的唯一词汇表。
+     *
+     * 改前同一个概念有两套词：桶标题与预览顶部说「可导入 / 已忽略」，结果卡的「计划」行说
+     * 「放行 / 忽略」。用户在上下两处看到不同的词，会以为说的是两件事。四个词只在这里定义一次，
+     * [titleOf] 与 [planLine]、[summaryLine] 都从这里取。
+     */
+    fun bucketWord(bucket: SourceSyncImportBucket): String = when (bucket) {
         SourceSyncImportBucket.APPLY -> "可导入"
         SourceSyncImportBucket.REQUIRES_APPROVAL -> "需确认"
         SourceSyncImportBucket.IGNORED -> "已忽略"
         SourceSyncImportBucket.UNSUPPORTED -> "暂不支持"
     }
+
+    /** 桶标题（四桶固定顺序），词取自 [bucketWord]。 */
+    fun titleOf(bucket: SourceSyncImportBucket): String = bucketWord(bucket)
 
     fun noteOf(bucket: SourceSyncImportBucket): String? = when (bucket) {
         SourceSyncImportBucket.APPLY -> ALLOW_RISK
@@ -368,13 +402,21 @@ object SourceSyncImportLogic {
             buckets = group(plan),
         )
 
-    /** 摘要行（界面顶部一句话）。计数与四桶一一对应，便于和 Windows CLI 的 counts 对照。 */
+    /**
+     * 摘要行（界面顶部一句话）。计数与四桶一一对应，便于和 Windows CLI 的 counts 对照。
+     *
+     * W6-89：词同样取自 [bucketWord]，和结果卡的「计划」行只差「共」字的位置。
+     */
     fun summaryLine(view: SourceSyncImportPreviewView): String =
         "共 " + view.summary.total + " 条：" +
-            "可导入 " + view.countIn(SourceSyncImportBucket.APPLY) +
-            " · 需确认 " + view.countIn(SourceSyncImportBucket.REQUIRES_APPROVAL) +
-            " · 已忽略 " + view.countIn(SourceSyncImportBucket.IGNORED) +
-            " · 暂不支持 " + view.countIn(SourceSyncImportBucket.UNSUPPORTED)
+            SourceSyncImportCopy.bucketWord(SourceSyncImportBucket.APPLY) + " " +
+            view.countIn(SourceSyncImportBucket.APPLY) +
+            " · " + SourceSyncImportCopy.bucketWord(SourceSyncImportBucket.REQUIRES_APPROVAL) + " " +
+            view.countIn(SourceSyncImportBucket.REQUIRES_APPROVAL) +
+            " · " + SourceSyncImportCopy.bucketWord(SourceSyncImportBucket.IGNORED) + " " +
+            view.countIn(SourceSyncImportBucket.IGNORED) +
+            " · " + SourceSyncImportCopy.bucketWord(SourceSyncImportBucket.UNSUPPORTED) + " " +
+            view.countIn(SourceSyncImportBucket.UNSUPPORTED)
 
     /** 键比较口径：去空白 + 忽略大小写（与同步层 syncSourceId 的比较一致）。 */
     fun normalizeKey(raw: String?): String = raw?.trim()?.lowercase().orEmpty()

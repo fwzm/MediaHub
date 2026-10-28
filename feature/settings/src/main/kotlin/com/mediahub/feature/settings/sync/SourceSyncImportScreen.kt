@@ -75,6 +75,9 @@ object SourceSyncImportTags {
     /** W6-83：逐条被永久扣住的条目（标题 + 每条原因；0 条时整块不出现）。 */
     const val APPLY_WITHHELD = "sync.apply.withheld"
 
+    /** W6-89：逐条真正写进去的条目（标题 + 对端身份；0 条时整块不出现）。 */
+    const val APPLY_WRITTEN = "sync.apply.written"
+
     /** W6-84：逐条「复制身份」按钮（载荷是身份原文，不是标题；同页多条时必须能限定到某一条）。 */
     fun withheldCopy(syncSourceId: String): String = "sync.apply.copy:" + syncSourceId
 
@@ -610,8 +613,19 @@ fun SourceSyncImportScreen(
                             }
                         }
 
-                        applied.appliedTitles.forEach { title ->
-                            Text("- " + title, style = MaterialTheme.typography.bodySmall)
+                        // W6-89：写进去的也逐条点名并带上对端身份（改前只有一串没头没尾的标题）。
+                        SourceSyncImportCopy.writtenHeader(applied)?.let { header ->
+                            Text(
+                                header,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.testTag(SourceSyncImportTags.APPLY_WRITTEN),
+                            )
+                            applied.appliedSources.forEach { written ->
+                                Text(
+                                    SourceSyncImportCopy.writtenLine(written),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
                         }
                         // W6-82：没写成的每一条都点名 + 给一句原因；只有计数时用户无从下手。
                         SourceSyncImportCopy.refusedHeader(applied)?.let { header ->

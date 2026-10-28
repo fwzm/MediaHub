@@ -231,7 +231,8 @@ class SourceSyncImportSessionTest {
         assertEquals(0, applied.requiresApprovalCount)
         assertEquals(0, applied.ignoredCount)
         assertEquals(1, applied.unsupportedCount)
-        assertEquals(listOf("客厅 Emby"), applied.appliedTitles)
+        // W6-89：appliedTitles 已退役；标题与身份都从 appliedSources 取（结果页渲染同一份数据）。
+        assertEquals("客厅 Emby", applied.appliedSources.single().title)
         assertEquals("srv-1", applied.appliedSources.single().serverId)
         assertEquals("sync-1", applied.appliedSources.single().syncSourceId)
         assertEquals("emby", applied.appliedSources.single().sourceTypeRaw)

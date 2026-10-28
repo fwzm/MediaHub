@@ -232,9 +232,14 @@ data class SourceSyncApplySummary(
      * 逐条带上身份与原因后，「保留未应用 N 条」才有了下文。
      */
     val withheldEntries: List<SourceSyncWithheldEntry> = emptyList(),
-    val appliedTitles: List<String> = emptyList(),
 
-    /** 真正写入的每一条来源（按结果顺序）；结果页据此渲染「补录并验证」入口。 */
+    /**
+     * 真正写入的每一条来源（按结果顺序）。
+     *
+     * W6-89：这里同时承载结果页「已写入 N 条」那一区与「补录并验证」入口。改前另有一个
+     * `appliedTitles: List<String>` 只装标题，界面直接把它当列表渲染，身份丢了、也跟
+     * 验证入口用的不是同一份数据；两份数据同源却分开存，迟早对不上，故整字段退役。
+     */
     val appliedSources: List<SourceSyncAppliedSource> = emptyList(),
 
     /** 逐条没写成的条目（写入被拒 + 删除被拒，按回执顺序）；空表示这一轮没有失败。 */

@@ -5483,3 +5483,50 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 3. 预览页与结果页的「下一步」加导航出口（跳到来源页、或跳到对端说明）。
 4. 设备解绑后的界面出口：`forget` 已同时清基线（W6-80），但界面上仍只有一句文案，没有「这台设备再也不会同步」的确认态。
 5. Windows 侧删除链补真 SQLite 证据（对应 §56.7 的第二条未覆盖）。
+
+## §58 W6-89：结果页「已写入」逐条可见，四桶只有一个词汇表
+
+### 58.1 结论先行
+
+- 结果页上有三块名单，只有一块说不清：写入区渲染的是 `applied.appliedTitles`（只列标题），而「保留未应用」区（W6-83）与「被拒」区（W6-82）都是「- 标题（身份）· 原因」。用户看得到「写进了 3 条」，却核对不了这 3 条对应对端的哪条来源。W6-81 就已经把 `appliedSources`（远端身份 → serverId）放进了回执，界面一直没用。
+- 同一个桶在同一屏上有两套词：结果卡 `planLine` 说「放行 N 条 · 忽略 N 条」，桶标题 `titleOf` 与预览页 `summaryLine` 说「可导入 / 需确认 / 已忽略 / 暂不支持」。用户要自己把「放行」翻译成「可导入」。
+- 两处一起收：`SourceSyncImportCopy.bucketWord(bucket)` 成为唯一词表，`titleOf` 直接委托它、`planLine` 四段也改用它；写入区改用 `appliedSources` 逐条渲染 `writtenLine`（「- 标题（身份）」）。「放行」「忽略」两个词在界面词汇里退役。
+- 空名单不占版面：`writtenHeader` 在 0 条时返回 null，整块（含区头）不渲染，不写「已写入 0 条」。
+- 身份缺失不编造：`writtenLine` 对身份 trim 后为空只输出标题。
+
+### 58.2 四桶唯一词汇表
+
+- `bucketWord` 的四个词与桶一一对应：APPLY→「可导入」、REQUIRES_APPROVAL→「需确认」、IGNORED→「已忽略」、UNSUPPORTED→「暂不支持」。
+- 三处调用点：`titleOf`（桶标题，委托）、`planLine`（结果卡计划行，与 `bucketWord` 同在 `object SourceSyncImportCopy` 内，可裸调）、`summaryLine`（预览页顶部，**在 `object SourceSyncImportLogic` 里，必须写 `SourceSyncImportCopy.bucketWord(...)`**，裸调是 Unresolved reference）。
+- 计划行与结果行刻意不同槽位（计划=四桶计数 + 总数；结果=写入 / 跳过 / 保留 计数），W6-84 起归一；用例 `thePlanLineAndTheResultLineNeverShareACount` 钉住这一点。
+
+### 58.3 写入区逐条可见
+
+- `SourceSyncApplySummary.appliedTitles` 整字段退役；`appliedSources` 保留原义，KDoc 写明「结果页写入区与『补录并验证』入口共用同一份数据」。
+- 界面：新增 tag `APPLY_WRITTEN = "sync.apply.written"`（区头容器，用于断言整块在 / 不在）；区头文案 `writtenHeader`，逐条 `writtenLine`。
+- Compose 细节：`Text` 没有 `testTag` 形参，必须写 `modifier = Modifier.testTag(...)`（写成 `testTag =` 会得到 “None of the following candidates is applicable”）。
+
+### 58.4 用例与计数
+
+- `SourceSyncImportLogicTest`：新增 `theSameBucketWordIsUsedInThePlanLineAndInThePreviewLine`（四词表逐条 + `titleOf` 委托 + planLine 精确串 + 断言不含「放行」「· 忽略」+ 预览 `summaryLine` 含同词）与 `everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle`（空名单 → null、两条写入的精确串、身份两侧空格被 trim、缺身份只给标题）；两条 planLine 精确串用例改词。
+- `SourceSyncImportSessionTest`：删 `appliedTitles` 断言，改断言 `appliedSources.single().title`。
+- `androidTest/SourceSyncImportScreenTest`：fixture 改 `appliedSources`；断言区头文案与 `onNodeWithText(writtenLine(...))`；新增 `everyWrittenEntryIsListedWithItsRemoteIdentityAndTheBlockVanishesWhenNothingWasWritten`（有身份 / 无身份各一条、断言旧式「- 书房 Jellyfin」不存在、空名单渲染后 `APPLY_WRITTEN` 不存在）。`SourceSyncVerificationScreenTest` 去掉一行 `appliedTitles`。
+- 计数：`feature/settings` 406 → 408（`testDebugUnitTest` 408/0），`compileDebugAndroidTestKotlin` 绿；本机四模块 `core/common` 660 / `core/database` 242 / `feature/settings` 408 / `feature/server` 40 = **1350**；CI `uniqueTests` 预期 2444 → 2446；`--required-suite` 仍 60（新增 2 例在门禁模块内，不改套件数）。
+
+### 58.5 三条负向对照（各自跑完立即逐字节还原，sha256 相同）
+
+- A `writtenHeader` 恒返回 null ⇒ 408 / 1 红（`everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle`）。
+- B `writtenLine` 丢掉身份（`return "- " + entry.title`）⇒ 408 / 1 红（同一用例）。
+- C `planLine` 改回「放行 / 忽略」旧词 ⇒ 408 / 3 红（词汇用例 + 两条精确串用例）。
+
+### 58.6 边界与仍未做
+
+- Windows 侧对应物只有计数：写入器在 App 层 `SourceSyncRecordWriter`，回执里只有 Applied / Skipped / Withheld / NotApplied 四类计数、没有逐条身份区——Android 的回执是超集而非分叉（W6-81 起就是这个口径），文档与日志必须写明。
+- 身份缺失只省略、不报警；对端没给身份的写入仍然只显示标题。
+- 0 条写入时整块消失，用户只能从结果行数字知道「写了 0 条」。
+- 仍未做：跨设备真实核对、真机 instrumentation（NOT_RUN / DEVICE_UNVERIFIED）。
+
+### 58.7 状态
+
+- EXECUTED_PASS（本机 JVM 口径 408/0，androidTest 编译通过）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。
+- 三条负向对照全红并逐字节还原；Windows 侧零改动（C# 仍 1656/1760）。
