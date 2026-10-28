@@ -189,6 +189,8 @@ class AndroidSourceSyncService(
                 throw cancellation
             } catch (failure: Exception) {
                 // 存储层拒绝（唯一索引 / IO / 权限）统一降级成 failed 桶，四桶不变式仍然成立。
+                // W6-99：这条旧路径只被测试驱动（写入在 applyRound），SourceSyncCandidate 没有原因句槽，
+                // 异常消息在这里丢掉；生产口径以 writeRecord 为准。
                 failed.add(candidate.copy(reason = WRITE_FAILED + ":" + (failure::class.simpleName ?: "Exception")))
                 failedIndexes.add(index)
             }
@@ -489,6 +491,8 @@ class AndroidSourceSyncService(
                             syncSourceId = item.syncSourceId.trim(),
                             action = item.action,
                             reason = attempt.reason,
+                            // W6-99：写入失败那一条异常自己说的话，与原因码同一路进结果行。
+                            causeMessage = attempt.causeMessage,
                         ),
                     )
                 }
@@ -580,7 +584,13 @@ class AndroidSourceSyncService(
     /** 写一条来源的结果：要么落下一个 serverId，要么带一条稳定原因码被拒。 */
     private sealed interface WriteAttempt {
         data class Written(val serverId: String) : WriteAttempt
-        data class Refused(val reason: String) : WriteAttempt
+
+        /**
+         * 拒绝落这条：稳定码说哪条路走不通，[causeMessage] 是存储层/NPE 那条异常自己说的话（W6-99）。
+         *
+         * 预检类拒绝（类型不认识、没有可拨号地址、记录刚被删）不是异常 ⇒ 没有消息，保持 null。
+         */
+        data class Refused(val reason: String, val causeMessage: String? = null) : WriteAttempt
     }
 
     /** 按身份在信封里取记录；墓碑条目没有记录，返回 null。 */
@@ -603,6 +613,10 @@ class AndroidSourceSyncService(
      *
      * 查库**必须**按身份而不是按拼写：存储层的唯一索引是大小写敏感的，大小写不同的同一条来源
      * 若被当成新记录写入，库里会留下两条身份相同、永远收敛不了的重复来源。
+     *
+     * W6-99：存储层抛出的异常除了类名，还把它自己那句消息（净化过的单行）一起交出去 ——
+     * Windows 的写入器抛异常时会把 message 折进 Refused 行，Android 这边此前只剩类名，
+     * 用户知道「本机存储拒绝了」却不知道「为什么拒绝」，只能重试碰运气。
      */
     private suspend fun writeRecord(record: SourceRecord): WriteAttempt {
         val serverType = AndroidSourceTypeMap.toServerType(record.sourceType.raw)
@@ -628,7 +642,10 @@ class AndroidSourceSyncService(
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (failure: Exception) {
-            WriteAttempt.Refused(WRITE_FAILED + ":" + (failure::class.simpleName ?: "Exception"))
+            WriteAttempt.Refused(
+                WRITE_FAILED + ":" + (failure::class.simpleName ?: "Exception"),
+                SourceSyncFailureCauses.describe(failure),
+            )
         }
     }
 
@@ -694,7 +711,7 @@ class AndroidSourceSyncService(
         } catch (failure: Exception) {
             // 异常是从本服务这一层漏出来的：这里能直接拿到它，所以也把消息净化后带上（W6-98）。
             failures.add(
-                SourceSyncRemovalFailure(identity, REMOVE_FAILED, SourceSyncRemovalCauses.describe(failure)),
+                SourceSyncRemovalFailure(identity, REMOVE_FAILED, SourceSyncFailureCauses.describe(failure)),
             )
             null
         }
@@ -1064,8 +1081,10 @@ data class SourceSyncWrittenSource(
  * [action] 保留闸门给的原始动作用来区分「写」与「删」：同一个身份在不同轮次可能先删后写，
  * 只按身份聚合会把两种处置混成一条。
  *
- * [causeMessage] 是 W6-98 加的：删除类拒绝带上删除链那一步的异常消息（由 remover 净化），
- * 界面在原句尾巴补「（原因：…）」；写入类拒绝一律 null（写失败的原因码里已经有异常类名）。
+ * [causeMessage] 是 W6-98 加的、W6-99 扩到写入类：删除类带删除链那一步的异常消息（由 remover 净化），
+ * 写入类带存储层抛出的消息（由 [SourceSyncFailureCauses.describe] 净化），界面在原句尾巴补「（原因：…）」。
+ * 不是异常的那几种拒绝（类型不认识、没有可拨号地址、记录刚被删、本机没有 remover）没有消息，仍是 null ——
+ * 宁可不出现「（原因：）」半句，也不编一句空话。
  */
 data class SourceSyncRefusal(
     val syncSourceId: String,
@@ -1213,7 +1232,7 @@ data class SourceSyncApplyReport(
 /**
  * 一条被拒绝的跨端删除：身份 + 稳定原因码（[AndroidSourceSyncService] 的 REMOVE_* 常量）。
  *
- * [causeMessage] 是 W6-98 加的：删除链那一步抛出的异常消息（[SourceSyncRemovalCauses] 净化后的单行文本）。
+ * [causeMessage] 是 W6-98 加的：删除链那一步抛出的异常消息（[SourceSyncFailureCauses] 净化后的单行文本）。
  * 净化由 remover 负责 —— 本服务只原样抄进回执，界面才敢把它与原因句摆在同一行上。
  */
 data class SourceSyncRemovalFailure(

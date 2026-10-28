@@ -260,11 +260,12 @@ object SourceSyncImportCopy {
     }
 
     /**
-     * W6-98：删除失败时那一步自己说的话 → 行尾后缀；没有就返回空串。
+     * W6-98/W6-99：失败条目那一步自己说的话 → 行尾后缀；没有就返回空串。
      *
-     * 与 Windows 对齐：那边的写入器把异常消息折进 Refused 行原样显示。净化（折叠空白、截断）
-     * 的权威在 core:database 的 [SourceSyncRemovalCauses]，这里只 trim 判空 —— 文案层不重复净化，
-     * 两处都净化迟早会分叉。空串时结果页那一行与改前逐字节一致。
+     * 删除失败与写入失败共用这一句：与 Windows 对齐 —— 那边把写入器抛出的异常消息原样折进
+     * Refused 行，两边都是「稳定码说卡在哪里、原因句说为什么」。净化（折叠空白、截断）的权威
+     * 在 core:database 的 [SourceSyncFailureCauses]（W6-98 时叫 SourceSyncRemovalCauses），
+     * 这里只 trim 判空 —— 文案层不重复净化，两处都净化迟早会分叉。空串时结果页那一行与改前逐字节一致。
      */
     fun refusalCauseSuffix(causeMessage: String?): String {
         val raw = causeMessage?.trim().orEmpty()

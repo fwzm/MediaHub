@@ -1,7 +1,11 @@
 package com.mediahub.core.database.sync
 
 /**
- * W6-98：删除链失败时，异常里那句人能读的话怎么进回执。
+ * W6-98/W6-99：失败链上异常里那句人能读的话怎么进回执。
+ *
+ * W6-98 起服务删除链（`local-source-remove-failed:<step>`），W6-99 起写入失败
+ * （`local-source-write-failed:<ClassName>`）也走同一套净化：两处都是「稳定码说卡在哪一步、原因句说那一步
+ * 为什么失败」，规则只有一份，所以对象的名字不再限定删除。
  *
  * 权威行为在 Windows [SourceSyncImportRound] 的写入器回调：写入器抛出的异常消息会被折进
  * Refused(异常 message)，结果页逐条显示。Android 侧此前只报步骤码（local-source-remove-failed:`step`），
@@ -16,7 +20,7 @@ package com.mediahub.core.database.sync
  * - 换行、制表符等空白折叠成单个空格（底层异常常带多行文本，直接进单行文案会破版）；
  * - 超过 [MAXIMUM_MESSAGE_CHARS] 截断并加省略号（凭据柜等底层异常可能带整段 SQL 或 URL）。
  */
-object SourceSyncRemovalCauses {
+object SourceSyncFailureCauses {
     /** 单行原因句的最大字符数（截断时另加一个省略号）。 */
     const val MAXIMUM_MESSAGE_CHARS: Int = 160
 

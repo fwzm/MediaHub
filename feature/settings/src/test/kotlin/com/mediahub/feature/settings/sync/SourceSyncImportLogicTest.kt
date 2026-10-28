@@ -572,7 +572,7 @@ class SourceSyncImportLogicTest {
             SourceSyncImportCopy.refusalLine(withCause),
         )
 
-        // 没有那句时（写入类拒绝、老回执）逐字节与改前一致：后缀只在真的有时出现。
+        // 没有那句时（预检类拒绝、老回执）逐字节与改前一致：后缀只在真的有时出现。
         val withoutCause = withCause.copy(causeMessage = null)
         assertEquals(
             "- 客厅 Emby（sync-1）· 删除 · 删除本地来源时卡在「清凭据」这一步，凭据可能还在；" +
@@ -581,6 +581,28 @@ class SourceSyncImportLogicTest {
         )
         assertEquals("", SourceSyncImportCopy.refusalCauseSuffix(null))
         assertEquals("", SourceSyncImportCopy.refusalCauseSuffix("   "))
+    }
+
+    @Test
+    fun aWriteFailureLineAlsoCarriesTheReasonTheStorageLayerGave() {
+        // W6-99：写入失败与删除失败现在都有行尾原因句；此前这一行只有异常类名，用户仍然不知道为什么。
+        val withCause = SourceSyncRefusedEntry(
+            syncSourceId = "sync-1",
+            title = "客厅 Emby",
+            action = SourceSyncRefusedAction.WRITE,
+            reason = AndroidSourceSyncService.WRITE_FAILED + ":IOException",
+            causeMessage = "磁盘已满",
+        )
+        assertEquals(
+            "- 客厅 Emby（sync-1）· 写入 · 本机存储拒绝了这次写入（IOException）。（原因：磁盘已满）",
+            SourceSyncImportCopy.refusalLine(withCause),
+        )
+
+        // 没有消息（类型不认识 / 没有可拨号地址这类预检拒绝）时逐字节与改前一致。
+        assertEquals(
+            "- 客厅 Emby（sync-1）· 写入 · 本机存储拒绝了这次写入（IOException）。",
+            SourceSyncImportCopy.refusalLine(withCause.copy(causeMessage = null)),
+        )
     }
 
     @Test

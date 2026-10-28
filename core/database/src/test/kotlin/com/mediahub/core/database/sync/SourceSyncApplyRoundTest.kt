@@ -20,6 +20,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -234,6 +235,9 @@ class SourceSyncApplyRoundTest {
             report.refusals.first().reason.startsWith(AndroidSourceSyncService.WRITE_FAILED + ":"),
         )
         assertEquals(AndroidSourceSyncService.DELETE_NOT_SUPPORTED, report.refusals.last().reason)
+        // W6-99：写入失败带存储层自己抛出的那句消息；删除那条不是异常（本机没有 remover）⇒ 不许编空串。
+        assertEquals("disk full", report.refusals.first().causeMessage)
+        assertNull(report.refusals.last().causeMessage)
         // 删除那条同时留在 removalFailures 里（既有调用方仍在读它），两处口径必须一致。
         assertEquals(AndroidSourceSyncService.DELETE_NOT_SUPPORTED, report.removalFailureOf("sync-del"))
     }
@@ -306,6 +310,38 @@ class SourceSyncApplyRoundTest {
         assertEquals(SourceSyncAction.CREATE, refusal.action)
         assertTrue(refusal.reason.startsWith(AndroidSourceSyncService.WRITE_FAILED + ":"))
         assertEquals(refusal.reason, report.refusalOf(" SYNC-A "))
+    }
+
+    @Test
+    fun a_write_failure_carries_the_message_the_storage_layer_threw() = runBlocking {
+        // W6-99：与 Windows 对齐 —— 那边写入器抛的异常消息会进 Refused 行，这边也不能只剩异常类名。
+        val store = FakeStore()
+        store.failWrites = true
+        val json = SourceSyncCodec.encode(envelope(sources = listOf(record("sync-a", revision = 2L))))
+
+        val report = service(store).applyRound(json)
+
+        val refusal = report.refusals.single()
+        assertEquals(SourceSyncAction.CREATE, refusal.action)
+        assertEquals(
+            AndroidSourceSyncService.WRITE_FAILED + ":IllegalStateException",
+            refusal.reason,
+        )
+        assertEquals("disk full", refusal.causeMessage)
+    }
+
+    @Test
+    fun a_write_failure_that_says_nothing_keeps_no_message_instead_of_an_empty_one() = runBlocking {
+        // W6-99：异常不带消息时回执仍是 null —— 空串会让结果行多出一句「（原因：）」半话。
+        val store = FakeStore()
+        store.failWrites = true
+        store.writeFailure = IllegalStateException()
+        val json = SourceSyncCodec.encode(envelope(sources = listOf(record("sync-a", revision = 2L))))
+
+        val refusal = service(store).applyRound(json).refusals.single()
+
+        assertEquals(AndroidSourceSyncService.WRITE_FAILED + ":IllegalStateException", refusal.reason)
+        assertNull(refusal.causeMessage)
     }
 
     @Test
@@ -667,6 +703,9 @@ class SourceSyncApplyRoundTest {
         var createCalls = 0
         var updateCalls = 0
         var failWrites = false
+
+        /** W6-99：写入时抛出的异常（默认带消息，换成无消息的异常就能钉「不许编空串」）。 */
+        var writeFailure: Exception = IllegalStateException("disk full")
         private var sequence = 0
 
         fun seed(snapshot: SourceSyncSourceSnapshot) {
@@ -677,7 +716,7 @@ class SourceSyncApplyRoundTest {
             snapshots.values.toList()
 
         override suspend fun createLocalSource(snapshot: SourceSyncSourceSnapshot): String {
-            if (failWrites) throw IllegalStateException("disk full")
+            if (failWrites) throw writeFailure
             createCalls++
             val id = "srv-" + (++sequence)
             snapshots[id] = snapshot.copy(serverId = id)
@@ -688,7 +727,7 @@ class SourceSyncApplyRoundTest {
             serverId: String,
             snapshot: SourceSyncSourceSnapshot,
         ): Boolean {
-            if (failWrites) throw IllegalStateException("disk full")
+            if (failWrites) throw writeFailure
             updateCalls++
             return snapshots.put(serverId, snapshot.copy(serverId = serverId)) != null
         }
