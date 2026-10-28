@@ -10,6 +10,8 @@ import com.mediahub.core.database.repository.ProgressRepository
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.database.repository.SubtitleMemoryRepository
 import com.mediahub.core.database.sync.SourceSyncRemovalStep
+import com.mediahub.core.logging.LogBuffer
+import com.mediahub.core.logging.MemoryLogger
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.StoredToken
@@ -98,6 +100,47 @@ class RemoveServerUseCaseStepsTest {
         assertEquals(emptyList<String>(), (harness.cleaner as RecordingSessionCleaner).cleared)
     }
 
+
+    // ------------------------------------------------------------ W6-100：删除链也进日志
+
+    @Test
+    fun a_failing_step_leaves_one_warning_line_naming_the_step_and_the_reason() = runBlocking {
+        val harness = harness(storage = CredentialBreakingStorage(), cleaner = RecordingSessionCleaner())
+        val server = seedSource(harness.repository, "A")
+        seedLocalState(harness, server)
+
+        removeFailingWith(harness.useCase, server)
+
+        assertEquals(
+            listOf("[W][DATABASE] remove-server-failed:credentials | IOException: keyring unavailable"),
+            harness.logs.snapshot(),
+        )
+    }
+
+    @Test
+    fun a_chain_that_runs_to_the_end_leaves_an_info_line_and_no_warning() = runBlocking {
+        val harness = harness(storage = MapSecretStorage(), cleaner = RecordingSessionCleaner())
+        val server = seedSource(harness.repository, "A")
+        seedLocalState(harness, server)
+
+        harness.useCase.remove(server)
+
+        assertEquals(listOf("[I][DATABASE] remove-server-completed:" + server.id), harness.logs.snapshot())
+    }
+
+    @Test
+    fun the_log_line_never_keeps_a_secret_the_exception_happened_to_quote() = runBlocking {
+        val harness = harness(storage = SecretQuotingStorage(), cleaner = RecordingSessionCleaner())
+        val server = seedSource(harness.repository, "A")
+        seedLocalState(harness, server)
+
+        removeFailingWith(harness.useCase, server)
+
+        val line = harness.logs.snapshot().single()
+        assertTrue(line.contains("remove-server-failed:credentials"))
+        assertTrue(line.contains("token=****"))
+        assertFalse(line.contains("Sup3rS3cret"))
+    }
     // ------------------------------------------------------------ 夹具
 
     private class Harness(
@@ -108,6 +151,8 @@ class RemoveServerUseCaseStepsTest {
         val vault: CredentialVault,
         val useCase: RemoveServerUseCase,
         val cleaner: SessionStoreCleaner,
+        /** W6-100：诊断日志的落点（真实现里由 Hilt 注入 CompositeLogger(logcat + 这份缓冲)）。 */
+        val logs: LogBuffer,
     )
 
     private fun harness(
@@ -123,6 +168,7 @@ class RemoveServerUseCaseStepsTest {
         val icons = ServerIconStore(RuntimeEnvironment.getApplication())
         val tokens = TokenStore(storage)
         val vault = CredentialVault(storage)
+        val logs = LogBuffer()
         val useCase = RemoveServerUseCase(
             serverRepository = repository,
             progressRepository = ProgressRepository(database),
@@ -132,8 +178,9 @@ class RemoveServerUseCaseStepsTest {
             credentialVault = vault,
             serverIconStore = icons,
             sessionStoreCleaner = cleaner,
+            logger = MemoryLogger(logs),
         )
-        return Harness(database, repository, icons, tokens, vault, useCase, cleaner)
+        return Harness(database, repository, icons, tokens, vault, useCase, cleaner, logs)
     }
 
     private suspend fun removeFailingWith(
@@ -241,6 +288,24 @@ class RemoveServerUseCaseStepsTest {
 
         override suspend fun remove(key: String) {
             if (key.startsWith("cred:")) throw IOException("keyring unavailable")
+            values.remove(key)
+        }
+
+        override suspend fun contains(key: String): Boolean = values.containsKey(key)
+    }
+
+    /** 凭据删除失败时，异常消息里恰好带着一个 token（日志必须脱敏）。 */
+    private class SecretQuotingStorage : SecretStorage {
+        private val values = LinkedHashMap<String, String>()
+
+        override suspend fun put(key: String, value: String) {
+            values[key] = value
+        }
+
+        override suspend fun get(key: String): String? = values[key]
+
+        override suspend fun remove(key: String) {
+            if (key.startsWith("cred:")) throw IOException("token=Sup3rS3cret")
             values.remove(key)
         }
 
