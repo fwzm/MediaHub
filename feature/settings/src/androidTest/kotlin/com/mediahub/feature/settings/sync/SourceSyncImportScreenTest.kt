@@ -269,7 +269,10 @@ class SourceSyncImportScreenTest {
         composeRule.onNodeWithText(SourceSyncImportCopy.writtenLine(summary.appliedSources[1]))
             .performScrollTo()
             .assertIsDisplayed()
-        composeRule.onNodeWithText("- 书房 Jellyfin").assertDoesNotExist()
+        // 旧样式（只有标题、没有身份）对「有身份」的那一条必须不存在；
+        // 没有身份的条目本来就只给标题 —— 不能拿它当反例（首次 CI 就是死在这里的 assertDoesNotExist）。
+        composeRule.onNodeWithText("- 客厅 Emby").assertDoesNotExist()
+        composeRule.onNodeWithText("- 书房 Jellyfin").assertIsDisplayed()
 
         // 一条都没写成（全是扣住 / 拒写）时，写入区整块不出现：0 条不占版面。
         render(
