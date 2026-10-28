@@ -34,6 +34,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
@@ -72,6 +74,9 @@ object SourceSyncImportTags {
 
     /** W6-83：逐条被永久扣住的条目（标题 + 每条原因；0 条时整块不出现）。 */
     const val APPLY_WITHHELD = "sync.apply.withheld"
+
+    /** W6-84：逐条「复制身份」按钮（载荷是身份原文，不是标题；同页多条时必须能限定到某一条）。 */
+    fun withheldCopy(syncSourceId: String): String = "sync.apply.copy:" + syncSourceId
 
     /** W6-82：逐条没写成的标题（每条原因各占一行，紧跟在下面）。 */
     const val APPLY_REFUSED = "sync.apply.refused"
@@ -259,6 +264,9 @@ fun SourceSyncImportRoute(
     val archivePrompt by viewModel.archivePrompt.collectAsStateWithLifecycle()
     val archiveExportState by viewModel.archiveExportState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    // W6-84：扣住/拒写条目旁边的「复制身份」把对端给的身份原文放进剪贴板，
+    // 用户要拿它去对端机器上找这条来源 —— 界面上是纯文本，选不中、抄不走。
+    val clipboard = LocalClipboardManager.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val loaded = readPickedDocument(context, uri)
@@ -307,6 +315,7 @@ fun SourceSyncImportRoute(
         onExportRequest = viewModel::requestArchiveExport,
         onExportPrepare = viewModel::prepareArchiveExport,
         onExportDismiss = viewModel::dismissArchiveExport,
+        onCopyIdentity = { identity -> clipboard.setText(AnnotatedString(identity)) },
     )
 }
 
@@ -362,6 +371,8 @@ fun SourceSyncImportScreen(
     /** W6-64：提交口令生成产物（留空 = 明文）；默认空实现。 */
     onExportPrepare: (String) -> Unit = {},
     /** W6-64：收起导出卡片并丢弃暂存字节；默认空实现。 */
+    /** W6-84：把一条条目的身份原文交给剪贴板（默认空实现，既有调用点与 UI 测试无需改动）。 */
+    onCopyIdentity: (String) -> Unit = {},
     onExportDismiss: () -> Unit = {},
 ) {
     Scaffold(
@@ -566,11 +577,26 @@ fun SourceSyncImportScreen(
                                 modifier = Modifier.testTag(SourceSyncImportTags.APPLY_WITHHELD),
                             )
                             applied.withheldEntries.forEach { entry ->
-                                Text(
-                                    SourceSyncImportCopy.withheldLine(entry),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
+                                // W6-84：原因句之后补一句「下一步」，右侧把身份抄进剪贴板。
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        SourceSyncImportCopy.withheldLine(entry),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                    SourceSyncImportCopy.nextStepOf(entry)?.let { nextStep ->
+                                        Text(
+                                            nextStep,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    IdentityCopyButton(
+                                        identity = SourceSyncImportCopy.copyPayloadOf(entry),
+                                        tag = SourceSyncImportTags.withheldCopy(entry.syncSourceId),
+                                        onCopyIdentity = onCopyIdentity,
+                                    )
+                                }
                             }
                         }
 
@@ -585,11 +611,18 @@ fun SourceSyncImportScreen(
                                 modifier = Modifier.testTag(SourceSyncImportTags.APPLY_REFUSED),
                             )
                             applied.refusedEntries.forEach { entry ->
-                                Text(
-                                    SourceSyncImportCopy.refusalLine(entry),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        SourceSyncImportCopy.refusalLine(entry),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                    IdentityCopyButton(
+                                        identity = SourceSyncImportCopy.copyPayloadOf(entry),
+                                        tag = SourceSyncImportTags.withheldCopy(entry.syncSourceId),
+                                        onCopyIdentity = onCopyIdentity,
+                                    )
+                                }
                             }
                         }
                         // W6-72：多端点与基线两条事实，只有真的发生时出现（0 条时不占版面）。
@@ -702,6 +735,26 @@ private fun BucketSection(
         bucket.entries.forEach { entry ->
             EntryCard(entry = entry, interactive = interactive, onDecide = onDecide)
         }
+    }
+}
+
+/**
+ * W6-84：一条「复制身份」按钮。
+ *
+ * 载荷只由 Copy 层决定（[SourceSyncImportCopy.copyPayloadOf]），这里不碰身份拼装 ——
+ * 否则「复制了标题」这种错要让模拟器测试才发现。
+ */
+@Composable
+private fun IdentityCopyButton(
+    identity: String,
+    tag: String,
+    onCopyIdentity: (String) -> Unit,
+) {
+    TextButton(
+        onClick = { onCopyIdentity(identity) },
+        modifier = Modifier.testTag(tag),
+    ) {
+        Text(SourceSyncImportCopy.COPY_IDENTITY, style = MaterialTheme.typography.labelMedium)
     }
 }
 
