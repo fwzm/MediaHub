@@ -611,6 +611,174 @@ public sealed class SyncTransferPresenterTests : IDisposable
         Assert.Contains("清零", SyncTransferCopy.SecretNote);
     }
 
+    /// <summary>A presenter that records the two log levels into one list each (W6-107).</summary>
+    private SyncTransferPresenter NewLoggedPresenter(
+        out List<string> info,
+        out List<string> warn,
+        bool withEnvelope = true,
+        string deviceId = LocalDeviceId)
+    {
+        List<string> infoLines = [];
+        List<string> warnLines = [];
+        SyncTransferPresenter presenter = withEnvelope
+            ? new SyncTransferPresenter(
+                deviceId,
+                () => EnvelopeOf(deviceId, Source("sync-1", "Living Room Emby")),
+                infoLine: infoLines.Add,
+                warnLine: warnLines.Add)
+            : new SyncTransferPresenter(deviceId, null, infoLines.Add, warnLines.Add);
+        _presenters.Add(presenter);
+        info = infoLines;
+        warn = warnLines;
+        return presenter;
+    }
+
+    /// <summary>Opening a listener and closing it each leave one line; a second stop is a no-op and stays quiet.</summary>
+    [Fact]
+    public async Task A_prepared_listener_and_a_stop_each_leave_one_information_line()
+    {
+        SyncTransferPresenter presenter = NewLoggedPresenter(out List<string> info, out List<string> warn);
+        SyncTransferOutcome prepared = presenter.PrepareReceive(new SyncTransferReceiveForm());
+        Assert.True(prepared.Succeeded, prepared.Summary);
+        int port = prepared.BoundPort ?? 0;
+
+        SyncTransferOutcome stopped = await presenter.StopReceiveAsync();
+        Assert.True(stopped.Succeeded, stopped.Summary);
+        SyncTransferOutcome again = await presenter.StopReceiveAsync();
+        Assert.True(again.Succeeded, again.Summary);
+
+        Assert.Equal(
+            new[] { SyncTransferLog.Listening(port, tls: false), SyncTransferLog.Stopped(port) },
+            info);
+        Assert.Empty(warn);
+    }
+
+    /// <summary>An arriving envelope leaves one line with the byte and frame counts, never the body.</summary>
+    [Fact]
+    public async Task A_received_envelope_leaves_one_line_with_the_byte_and_frame_counts()
+    {
+        SyncTransferPresenter presenter = NewLoggedPresenter(out List<string> info, out List<string> warn, withEnvelope: false);
+        SyncTransferOutcome prepared = presenter.PrepareReceive(new SyncTransferReceiveForm());
+        int port = prepared.BoundPort ?? 0;
+        Task<SyncTransferOutcome> waiting = presenter.ReceiveOnceAsync(TimeSpan.FromSeconds(10));
+        SourceSyncEnvelope expected = EnvelopeOf(PeerDeviceId, Source("sync-1", "Living Room Emby"));
+        byte[] payload = Encoding.UTF8.GetBytes(SourceSyncCodec.Serialize(expected));
+        SourceSyncTransferResult sent = await SourceSyncTransferClient.SendAsync("127.0.0.1", port, payload);
+        Assert.True(sent.Succeeded, sent.Reason);
+
+        SyncTransferOutcome received = await waiting;
+        Assert.True(received.Succeeded, received.Summary);
+
+        Assert.Equal(
+            new[] { SyncTransferLog.Listening(port, tls: false), SyncTransferLog.Received(payload.Length, 1) },
+            info);
+        Assert.Empty(warn);
+    }
+
+    /// <summary>A cancelled wait is not a failure: one line says so, and the warning level stays empty.</summary>
+    [Fact]
+    public async Task A_cancelled_wait_says_so_without_a_failure_line()
+    {
+        SyncTransferPresenter presenter = NewLoggedPresenter(out List<string> info, out List<string> warn, withEnvelope: false);
+        SyncTransferOutcome prepared = presenter.PrepareReceive(new SyncTransferReceiveForm());
+        int port = prepared.BoundPort ?? 0;
+        using CancellationTokenSource cancellation = new();
+        Task<SyncTransferOutcome> waiting = presenter.ReceiveOnceAsync(TimeSpan.FromSeconds(10), cancellation.Token);
+        cancellation.Cancel();
+
+        SyncTransferOutcome received = await waiting;
+
+        Assert.True(received.Cancelled, received.Summary);
+        Assert.Equal(
+            new[] { SyncTransferLog.Listening(port, tls: false), SyncTransferLog.ReceiveCancelledText },
+            info);
+        Assert.Empty(warn);
+    }
+
+    /// <summary>A failed send carries the stable code on the warning line and leaves the information level empty.</summary>
+    [Fact]
+    public async Task A_failed_send_puts_the_code_on_the_warning_line_only()
+    {
+        SyncTransferPresenter presenter = NewLoggedPresenter(out List<string> info, out List<string> warn);
+        SilentPeer peer = NewPeer();
+        SyncTransferOutcome sent = await presenter.SendAsync(
+            SendForm(peer.Port) with { ConfirmDelivery = true },
+            TimeSpan.FromSeconds(2));
+
+        Assert.False(sent.Succeeded, sent.Summary);
+        string line = Assert.Single(warn);
+        Assert.StartsWith(SyncTransferLog.SendFailedPrefix, line, StringComparison.Ordinal);
+        Assert.Contains(sent.Reason ?? string.Empty, line, StringComparison.Ordinal);
+        Assert.Empty(info);
+    }
+
+    /// <summary>A whole send and receive leave one line each, and neither line quotes the host or the endpoint.</summary>
+    [Fact]
+    public async Task A_successful_send_and_receive_leave_one_line_each_without_the_host()
+    {
+        SyncTransferPresenter receiver = NewLoggedPresenter(
+            out List<string> receiverInfo,
+            out List<string> receiverWarn,
+            withEnvelope: false,
+            deviceId: "logged-receiver-1");
+        SyncTransferPresenter sender = NewLoggedPresenter(
+            out List<string> senderInfo,
+            out List<string> senderWarn,
+            deviceId: "logged-sender-1");
+        SyncTransferOutcome prepared = receiver.PrepareReceive(new SyncTransferReceiveForm());
+        int port = prepared.BoundPort ?? 0;
+        Task<SyncTransferOutcome> waiting = receiver.ReceiveOnceAsync(TimeSpan.FromSeconds(10));
+
+        SyncTransferOutcome sent = await sender.SendAsync(SendForm(port), TimeSpan.FromSeconds(10));
+        SyncTransferOutcome received = await waiting;
+
+        Assert.True(sent.Succeeded, sent.Summary);
+        Assert.True(received.Succeeded, received.Summary);
+        Assert.Equal(
+            new[] { SyncTransferLog.Listening(port, tls: false), SyncTransferLog.Received(received.Bytes, received.Frames) },
+            receiverInfo);
+        Assert.Equal(new[] { SyncTransferLog.Sent(sent.Bytes, sent.Frames) }, senderInfo);
+        Assert.Empty(receiverWarn);
+        Assert.Empty(senderWarn);
+        foreach (string line in receiverInfo.Concat(senderInfo))
+        {
+            Assert.DoesNotContain(EmbyUrl, line, StringComparison.Ordinal);
+            Assert.DoesNotContain("192.168.5.20", line, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>An authenticated transfer logs its two lines and neither quotes the shared secret.</summary>
+    [Fact]
+    public async Task An_authenticated_transfer_never_puts_the_secret_in_a_line()
+    {
+        SyncTransferPresenter receiver = NewLoggedPresenter(
+            out List<string> receiverInfo,
+            out List<string> receiverWarn,
+            withEnvelope: false,
+            deviceId: "logged-secret-receiver-1");
+        SyncTransferPresenter sender = NewLoggedPresenter(
+            out List<string> senderInfo,
+            out List<string> senderWarn,
+            deviceId: "logged-secret-sender-1");
+        SyncTransferOutcome prepared = receiver.PrepareReceive(new SyncTransferReceiveForm { Secret = Secret });
+        int port = prepared.BoundPort ?? 0;
+        Task<SyncTransferOutcome> waiting = receiver.ReceiveOnceAsync(TimeSpan.FromSeconds(10));
+
+        SyncTransferOutcome sent = await sender.SendAsync(SendForm(port) with { Secret = Secret }, TimeSpan.FromSeconds(10));
+        SyncTransferOutcome received = await waiting;
+
+        Assert.True(sent.Succeeded, sent.Summary);
+        Assert.True(received.Succeeded, received.Summary);
+        Assert.NotEmpty(receiverInfo);
+        Assert.NotEmpty(senderInfo);
+        foreach (string line in receiverInfo.Concat(senderInfo).Concat(receiverWarn).Concat(senderWarn))
+        {
+            Assert.DoesNotContain(Secret, line, StringComparison.Ordinal);
+            Assert.DoesNotContain(WrongPin, line, StringComparison.Ordinal);
+            Assert.DoesNotContain("192.168.5.20", line, StringComparison.Ordinal);
+        }
+    }
+
     /// <summary>Releases every presenter, silent peer, and temporary directory this test created.</summary>
     public void Dispose()
     {

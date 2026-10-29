@@ -6490,3 +6490,69 @@ App 工程 **0 警告 0 错误**（`D:/mh-verify/w6105-app-build.log`）。
 - **EXECUTED_PASS**：本机 `MediaHub.Tests` **1694 / 0** 与 App 构建 **0 警告 0 错误**；四条负向对照全红（1 / 1 / 1 / 1）且逐字节还原到实现态；
 - **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与 Sync 层单测，端到端日志证据未取（见 74.6）；
 - 提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+## §76 W6-107：传输（接收/发送）路径的每一步都各留一行日志
+
+> 编号说明：§75 属于主树 W6-106（Android 监听路径逐条日志）；合并后 §75 紧随本节之前。本节在跨设备分支先占 §76，避免与另一分支抢号。
+
+### 76.1 结论先行
+
+`SyncTransferPresenter` 此前**零 logger**：监听开了没有、收到谁的信封、等一次连接是否被取消、发出去多少字节，全只活在 `SyncTransferReceiveState` 与 `SyncTransferOutcome` 里——界面一刷新、进程一退出，事后无法回答「当时到底开到没有、收到没有、为什么失败」。本轮给传输四步各留一行固定措辞，并让「写结局」与「写日志」成为同一步。
+
+### 76.2 措辞只写一处
+
+新文件 `windows/src/MediaHub.Sync/SyncTransferLog.cs`（`public static class`，3615 chars），presenter 只决定「何时写」：
+
+| 时刻 | 固定句 |
+| --- | --- |
+| 监听绑定 | `传输监听已开启：端口 <n> · TLS 1.3`（或 ` · 明文`） |
+| 监听关闭 | `传输监听已关闭：端口 <n>` |
+| 收到信封 | `传输收到信封：<字节> 字节 · <帧> 帧` |
+| 发出信封 | `传输已发出信封：<字节> 字节 · <帧> 帧` |
+| 接收失败 | `传输接收失败：<原因码>`（没有码时 `未说明原因`） |
+| 发送失败 | `传输发送失败：<原因码>` |
+| 等待被取消 | `传输等待被取消：没有收到信封。` |
+| 发送被取消 | `传输发送被取消：对端是否收到无法确定。` |
+
+口径：只记稳定码与字节/帧计数。**不记**口令、证书指纹、host、端点 URL、信封正文与任何 detail 文本。
+
+### 76.3 一处出口：结局与日志是同一步
+
+`SyncTransferPresenter` 构造器新增 `Action<string>? infoLine` 与 `Action<string>? warnLine`（可选参数，App 与测试按需注入），并新增两个私有助手：
+
+- `Receive(outcome)`：`Cancelled → info 取消句`；失败 `→ warn ReceiveFailed(Reason)`；成功且 `Envelope != null → info Received(Bytes, Frames)`；
+- `Send(outcome)`：同构（取消 → info；失败 → warn `SendFailed(Reason)`；成功 → info `Sent(Bytes, Frames)`）。
+
+落点：`PrepareReceive` 启动失败 → warn 行、启动成功 → 在 `ReceiveState` 赋值之后 info 行；`ReceiveOnceAsync` 三处结局（含 catch 里的取消）全部经 `Receive(...)`；`SendAsync` 三处结局全部经 `Send(...)`（成功对象字面量包成 `Send(new SyncTransferOutcome { … })`）；`StopReceiveAsync` 只在 `listener is not null` 时写关闭行。
+
+**有意不记**：`AlreadyListening` / `AlreadyReceiving` / `NotListening` 三个无操作守卫；表单问题（含 `NoLocalEnvelope`）经 `RememberSend(FormFailure(...))` 早返回，没有发生传输；`Dispose()`（卸载不是用户动作）。助手在 present 的锁内调用 sink，因此 sink 不得回调 presenter（App 传 `LogService.Info/Warn`，测试往列表里加）。
+
+App 接线：`SyncPage.xaml.cs` 的 `Transfer` 属性传 `infoLine: line => App.Services.Log.Info("sync", line)`、`warnLine: line => App.Services.Log.Warn("sync", line)`（类别与新加的 `TransferLogCategory` 常量同值）。
+
+### 76.4 用例与计数
+
+`SyncTransferPresenterTests` 新增 6 例（`MediaHub.Tests` 1694 → **1700 / 0 失败**，App 构建 **0 警告 0 错误**）：开监听 + 关闭各一行且第二次 `StopReceiveAsync` 保持安静、收到信封一行且字节/帧与 payload 一致、取消只写取消行不写失败行、真 `SilentPeer` + `ConfirmDelivery` 造出 `delivery-unconfirmed` 只落 warn 行、两个 presenter 真实收发各一行且行内不含 host/URL、带密钥传输的两行不含口令与指纹。
+
+### 76.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | `Receive` 成功分支去掉 info 行 | **2 红** |
+| B | `PrepareReceive` 去掉监听行 | **4 红** |
+| C | `Received()` 行尾拼上端点 URL | **2 红** |
+| D | `StopReceiveAsync` 无条件写关闭行 | **1 红** |
+
+四次对照前先存实现态快照（`D:/mh-verify/w6107-impl-presenter.cs` 45464 chars / sha256 `08e2a0251…`、`w6107-impl-log.cs` 3615 chars / sha256 `2930257a…`、`w6107-impl-tests.cs` 43171 chars / sha256 `6f037960…`、`w6107-impl-page.cs` 53275 chars / sha256 `ac501f7b…`），每轮跑完写回并比对四份 sha256（四次全 `true`），最后复跑 **1700 / 0**。
+
+### 76.6 边界与仍未做
+
+- 页面到 presenter 的接线只有**编译期保证**（App 0/0）⇒ 生产端到端 **IMPLEMENTED_UNVERIFIED**；
+- `SyncCliRunner` 与命令行工具不接这两个 sink（与 W6-105 的 `withheldSink` 同一口径）；
+- 同步页的真实 GUI/UIA 证据仍 **GUI_UNVERIFIED**（需用户授权空闲窗口）；
+- 真实两机跨机联调 **NOT_RUN**；真机 instrumentation **DEVICE_UNVERIFIED**。
+
+### 76.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1700 / 0**、App 构建 0/0，四条对照 2 / 4 / 2 / 1 红且四份快照逐字节还原；
+- **IMPLEMENTED_UNVERIFIED**：页面接线的端到端证据未取（见 76.6）；
+- 主树本轮零改动；提交号以 PR #39 head 为准（docs 不自指 SHA）。

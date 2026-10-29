@@ -53,6 +53,9 @@ public sealed partial class SyncPage : Page
     // Transport state (W6-33). SyncTransferPresenter owns the listener, the pending receive and the in-memory secret;
     // this page only renders what it returns, so a secret never lands in a field that could outlive the click.
     private SyncTransferPresenter? _transfer;
+
+    /// <summary>The log category the transport lines land in, next to the sync service's own category.</summary>
+    private const string TransferLogCategory = "sync";
     private bool _transferReceiving;
     private bool _transferSending;
 
@@ -1063,9 +1066,15 @@ public sealed partial class SyncPage : Page
     // never write a source: the 应用 click above is still the only writer on this page.
 
     /// <summary>The transport presenter: one per page, so a half-finished receive cannot outlive it.</summary>
+    /// <remarks>
+    /// W6-107: the page hands the presenter the log's two levels; the sentences themselves live in
+    /// <see cref="SyncTransferLog"/> so a later reader of the log sees the same words the UI showed.
+    /// </remarks>
     private SyncTransferPresenter Transfer => _transfer ??= new SyncTransferPresenter(
         App.Services.Sync.DeviceId,
-        () => App.Services.Sync.BuildEnvelope());
+        () => App.Services.Sync.BuildEnvelope(),
+        infoLine: line => App.Services.Log.Info(TransferLogCategory, line),
+        warnLine: line => App.Services.Log.Warn(TransferLogCategory, line));
 
     private async void OnTransferStartReceiveClick(object sender, RoutedEventArgs e)
     {
