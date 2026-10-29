@@ -129,7 +129,7 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 | 便携版构建（331.6 MB，可启动） | `CAPABILITY-MAP` 测试与交付表；MSIX / 代码签名 / 干净机安装仍未做 |
 | LGPL libmpv 引擎候选已实际构建（**尚未切换到产品**） | `windows/engine/lgpl/dist/` |
 | **诊断日志滚动落盘（W14）**：内存环之外，每条日志同时追加到 `%LOCALAPPDATA%\MediaHub\logs` 的 `mediahub-0.log`（最新）…`mediahub-4.log`；每文件 1 MiB、最多 5 个，轮转只发生在条目之间（一条日志永不跨文件），磁盘写失败只记 `LastError` 而不让应用崩；写入前统一经 `LogService.Redact`，`Export()` 头部多一行滚动目录 | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md`（9 例 + 四条负向对照 3/1/1/1 红、逐字节还原；本机 478/0；App 构建 0 警告 0 错误） |
-| **跨平台备份容器（W15）**：Windows 能写出 Android 能解的 `.mhbackup`（反向亦然）—— `MHBK` v2、PBKDF2-HMAC-SHA256 60 万次、AES-256-GCM（AAD 绑头参数）、`ciphertext‖tag` 与 Java `doFinal` 逐字节一致；来源/进度/收藏/偏好白名单，不含凭据；跨语言向量两份副本同哈希（8 条分类用例 + 双向密文复算） | `windows/docs/W15-CROSS-PLATFORM-BACKUP.md` |
+| **跨平台备份容器（W15）**：Windows 能写出 Android 能解的 `.mhbackup`（反向亦然）—— `MHBK` v2、PBKDF2-HMAC-SHA256 60 万次、AES-256-GCM（AAD 绑头参数）、`ciphertext‖tag` 与 Java `doFinal` 逐字节一致；来源/进度/收藏/偏好白名单，不含凭据；跨语言向量两份副本同哈希（8 条分类用例 + 双向密文复算）；**还原预览层（W16）**为纯函数零写入计划器（new / identical / conflict / orphan 四类裁决 + 中文逐行预览，冲突来源在 id 映射里给 null 防止越权写入） | `windows/docs/W15-CROSS-PLATFORM-BACKUP.md` |
 
 ### 已知缺陷与未验证项
 
@@ -364,6 +364,8 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
   用例：`MediaHub.Tests` 1708 → **1717**（行序/二次脱敏/头部脱敏/文件名/写盘自洽/占位失败净化/空日志/Describe/导出同源 共 9 例），App 工程 0 警告 0 错误；四条负向对照 1 / 2 / 1 / 1 红。仍未做：界面人工确认与真实两机对跑仍 **NOT_RUN**。
  W15：跨平台备份容器（Windows ↔ Android `.mhbackup` 互通）。用户口径变更：两机联调暂不做，同步改为本地/WebDAV 备份还原，且电脑与手机导出的文件必须互通。本轮先做容器层：新增零依赖工程 `windows/src/MediaHub.Backup`（crypto/envelope/DTO/URL 守卫/serializer 五文件），把 Android 的 `MHBK` v2 容器逐字节复刻 —— 关键是 Java `Cipher.doFinal` 的 `ciphertext‖tag` 布局与 .NET `AesGcm` 分开输出必须缝合，AAD 是 `magic|版本|算法|迭代数` 的稳定编码（头参数被改即解密失败）。跨语言向量由仓库外生成器产出（两份副本同 sha256，31 617 B），Windows 5 例 + Android 6 例互相解对方写的容器；三条负向对照 5 / 5 / 2 红，还原后逐字节相同。
    用例：`MediaHub.Tests` 1726 → **1754**（备份容器 23 例 + 跨语言向量 5 例）、`core/common` 660 → **666**（对照 6 例）；仍未做：备份 CLI、设置页入口、还原计划器接线、WebDAV 上传（当前只读）。
+ W16：还原预览层（恢复计划器）。容器解出载荷之后，「里面的来源/进度/收藏落到本机时会发生什么」必须有可审阅的答案，而不是一按还原就写盘。新增 `windows/src/MediaHub.Backup/MhBackupRestorePlanner.cs`（387 行）：纯静态 `Plan(payload, localSources, strategy, localProgress)`，不读磁盘、不写字典、不改输入；身份判据对齐 Android `BackupRepository.compareIdentity` —— 类型只归大小写与首尾空白（不做别名猜测）、地址走 `NormalizeForIdentity`（保留显式默认端口、保留 query、丢 fragment）、`username` 序数比较（null ≠ ""）；合并模式下同身份 ⇒ `Identical` 且本机不旧于备份的进度/收藏走 newer-wins，身份不全等 ⇒ `Conflict` 且其下记录一律跳过，引用不存在来源的进度 ⇒ `Orphan` 并披露；替换模式覆盖已有且不做 newer-wins。与 Android 的唯一显式差异：冲突来源在 `IdRemapping` 里映射为 `null`（Android 恒等映射自身 id），防止调用方绕过裁决去写该来源。
+   用例：`MediaHub.Tests` 1754 → 预期 **1776**（计划器 22 例：19 Fact + 1 Theory 2 行）；四条负向对照 A 账号比较写死 2 红 / B 冲突映射回自身 id 4 红 / C 关掉 newer-wins 2 红 / D 可覆盖集合只取 Identical 1 红，快照 sha256 逐字节还原。仍未做：真正落库（settings.json / history.json / 服务端收藏）、备份 CLI、设置页入口、WebDAV 上传。
 唯一允许跳过的是两个环境门控套件：`SourceSyncTlsInteropTest`（core/common，W6-32 的客户端方向）与 `SourceSyncListenerInteropTest`（core/database，W6-38 的反向方向），两者都要真实 Windows `SyncCli` 的 DLL 才能跑，CI runner 上按 JUnit5 assumption 跳过：门禁脚本用 `ENVIRONMENT_GATED_SUITES` 逐个类点名放行，同时还要求这类套件必须出现在报告里（凭空消失同样报错），其他任何被跳过的用例仍然是硬失败。
 本地负向验证过这两条：把整套 XML 移走 → 22 条问题（1 条套件 + 21 条方法）；只删一个 `<testcase` →
 恰好 1 条 `PairingVectorsTest#rejected_addresses_match_windows`。
