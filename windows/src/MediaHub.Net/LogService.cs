@@ -27,7 +27,18 @@ public sealed class LogService
 
     public ReadOnlyObservableCollection<LogEntry> Entries { get; }
 
-    public LogService() => Entries = new ReadOnlyObservableCollection<LogEntry>(_entries);
+    /// <summary>
+    /// Optional bounded rolling-file trail. Null for callers that only want the memory buffer; the
+    /// app passes one so the earliest lines survive a restart. The sink receives entries already
+    /// redacted here, never raw text.
+    /// </summary>
+    public LogFileSink? FileSink { get; }
+
+    public LogService(LogFileSink? fileSink = null)
+    {
+        FileSink = fileSink;
+        Entries = new ReadOnlyObservableCollection<LogEntry>(_entries);
+    }
 
     public event EventHandler<LogEntry>? EntryAdded;
 
@@ -51,6 +62,9 @@ public sealed class LogService
             _entries.Add(entry);
             while (_entries.Count > MaxEntries) _entries.RemoveAt(0);
         }
+        // Durable trail first: it is the only copy that outlives the process, and a UI subscriber
+        // must not be able to prevent it. The sink swallows disk failures by design.
+        FileSink?.Append(entry);
         EntryAdded?.Invoke(this, entry);
     }
 
@@ -59,6 +73,12 @@ public sealed class LogService
     {
         var sb = new StringBuilder();
         sb.AppendLine("# MediaHub Windows 诊断日志（已脱敏）");
+        if (FileSink is not null)
+        {
+            // The export is the in-memory transcript. The rolling files hold the lines this buffer
+            // has already pushed out, so point at them instead of pretending the export is complete.
+            sb.AppendLine("# 滚动文件目录：" + FileSink.DirectoryPath);
+        }
         sb.AppendLine();
         List<LogEntry> snapshot;
         lock (_gate) snapshot = _entries.ToList();

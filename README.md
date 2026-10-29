@@ -128,6 +128,7 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 | GUI 验收：播放控制 / 全屏 / 生命周期（可观测断言 + 证据文件） | `windows/docs/W5-GUI-ACCEPTANCE.md` |
 | 便携版构建（331.6 MB，可启动） | `CAPABILITY-MAP` 测试与交付表；MSIX / 代码签名 / 干净机安装仍未做 |
 | LGPL libmpv 引擎候选已实际构建（**尚未切换到产品**） | `windows/engine/lgpl/dist/` |
+| **诊断日志滚动落盘（W14）**：内存环之外，每条日志同时追加到 `%LOCALAPPDATA%\MediaHub\logs` 的 `mediahub-0.log`（最新）…`mediahub-4.log`；每文件 1 MiB、最多 5 个，轮转只发生在条目之间（一条日志永不跨文件），磁盘写失败只记 `LastError` 而不让应用崩；写入前统一经 `LogService.Redact`，`Export()` 头部多一行滚动目录 | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md`（9 例 + 四条负向对照 3/1/1/1 红、逐字节还原；本机 478/0；App 构建 0 警告 0 错误） |
 
 ### 已知缺陷与未验证项
 
