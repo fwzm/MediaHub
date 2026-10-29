@@ -1,7 +1,8 @@
 # W15 跨平台备份容器（Windows ↔ Android `.mhbackup` 互通）
 
-> 状态：容器层 **EXECUTED_PASS**（Windows 1754/0、Android core/common 666/0、双向跨语言向量全绿）；
+> 状态：容器层 **EXECUTED_PASS**（Windows 1793/0、Android core/common 666/0、双向跨语言向量全绿）；
 > 还原预览层（恢复计划器，纯函数零写入）**EXECUTED_PASS**（22 例 + 四条负向对照）；
+> 导出采集层（本机来源/偏好 → 备份载荷，纯函数）**EXECUTED_PASS**（17 例 + 四条负向对照）；
 > 真正落库、备份 CLI、设置页入口、WebDAV 上传仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
 
 ## 1 动机与范围
@@ -145,7 +146,44 @@ UI 与 CLI 都只能拿这份预览去征求确认，写入是下一层的事。
 - 真正落库：把 `MhBackupRestorePlan` 变成 settings.json 的新来源、history.json 的进度、服务端的收藏 —— **NOT_IMPLEMENTED**
 - `MediaHub.BackupCli`（`export` / `import` 默认 dry-run、`--json`、退出码）与设置页「备份与还原」入口 —— **NOT_IMPLEMENTED**
 - 收藏在 Windows 只能登录后写服务端（本机无收藏表），未登录时的出路尚未定 —— **IMPLEMENTED_UNVERIFIED**
-## 7 仍未做（如实）
+## 7 Windows 导出采集层（W17）
+
+### 7.1 缺口
+
+手机 → 电脑这条路此前只能「解密 + 预览」，电脑 → 手机仍缺最后一层：把本机来源写成 `.mhbackup` 载荷。
+没有这一层时，Windows 只能还原别人写的备份，自己导不出对端可用的文件。
+
+### 7.2 输入与输出
+
+- 输入 `MhBackupLocalServer`：与 `settings.json` 的 `PersistedServer` 一一对应（ServerId / Type / DisplayName / Url / UserName / SyncSourceId），**不含任何凭据**。
+- 输入 `MhBackupLocalPreferences`：只收三个有明确等价关系的字段（DefaultSpeed / AutoPlayNext / ShowDetailedMediaInfo）。
+- 输出 `MhBackupExportCollectResult`：`Payload`（可直接交给 `MhBackupSerializer.Export`）、`SkippedServers`（名称 + 中文原因）、`SkippedHistoryEntries`、`Notes`（中文逐条说明）。
+- `MhBackupExportCollector.Collect(servers, preferences, skippedHistoryEntries, nowEpochMs, appVersion)` 是纯函数：不读文件、不碰凭据、不加密。
+
+### 7.3 映射与拒绝规则
+
+- 类型只认已知表：`Emby→EMBY`、`Jellyfin→JELLYFIN`、`Plex→PLEX`、`FnNas / Fn-Nas→FN_NAS`、`WebDAV→WEBDAV`、`SMB→SMB`、`Local / LocalFolder→LOCAL`；未知类型**跳过并给原因**，不猜。
+- `backupId` 优先取 `SyncSourceId`；缺失时按 `TYPE|规范化地址|账号` 的 SHA-256 前 8 字节派生 `win-<16 hex>`，同一来源跨次导出一致；重复 `backupId` 只保留第一个。
+- 网络来源必须有地址，且必须通过 `MhBackupUrlGuard`：userinfo 或查询参数里的 `token` / `api_key` 等一律**拒绝而不是脱敏**，避免把看起来像凭据的地址写进备份。
+- `LOCAL` 来源不带端点（与 Android 一致）；名称为空回退到地址 host，既无名称也无地址则跳过。
+- 偏好只导出三个等价字段；字幕字号等因两端单位不同不导出，对端保持自身默认值 —— 填一个数字看起来像映射成功、实际会得到错误字号。
+- 本机观看进度**不导出**：`history.json` 以文件路径为键，备份格式以（来源 backupId、条目 id）为键，没有可靠对应关系；宁可报告 `skippedHistoryEntries` 也不猜测。
+- 成功来源数超过 1000 时抛 `MhBackupExportException`（不静默截断）。
+
+### 7.4 验证
+
+- `windows/tests/MediaHub.Tests/BackupExportCollectorTests.cs` 17 例：字段映射与默认标记、派生 id 稳定性、凭据地址拒绝、userinfo 拒绝、LOCAL 无端点、未知类型、重复 id、空名称回退 host、空地址、偏好映射、非法倍速回退、无偏好即无 preferences 段、容器往返（导出 → 导入 → 字段一致）、进度只计数不入载荷、超限拒绝、载荷不含 deviceId / password / token / cookie。
+- 本机：`dotnet test ... --filter FullyQualifiedName~BackupExportCollectorTests` ⇒ 17 / 0；全量 `MediaHub.Tests` ⇒ **1793 / 0**。
+- 四条负向对照（快照 sha256 `d0beb80a…c6d5`）：A 跳过 URL 守卫 2 红 / B 不查重复 id 1 红 / C 不限倍速 1 红（两条断言在同一用例里）/ D 声明未知分区 2 红；每次还原后 sha256 相等。
+- **环境陷阱（本轮实际踩到）**：负向对照用 `fs.copyFileSync` 还原时，Windows 会保留快照的旧 mtime；MSBuild 因此认为 DLL 仍最新而跳过重编译，后续测试打的是旧二进制 —— 先出现 2 条假红。还原后必须 `utimesSync` 触碰文件（或清理 `obj/bin`）再跑。
+
+### 7.5 仍未做（本层之外）
+
+- `MediaHub.BackupCli`（`export` / `import` 默认 dry-run、`--json`、退出码）与设置页「备份与还原」入口。
+- 把采集结果真正写成 `settings.json` 的来源、`history.json` 的进度。
+- WebDAV 上传与 Android 反向对照。
+
+## 8 仍未做（如实）
 
 - 备份 CLI（`export` / `import` dry-run、`--json`、退出码）—— NOT_IMPLEMENTED
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
