@@ -129,6 +129,7 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 | 便携版构建（331.6 MB，可启动） | `CAPABILITY-MAP` 测试与交付表；MSIX / 代码签名 / 干净机安装仍未做 |
 | LGPL libmpv 引擎候选已实际构建（**尚未切换到产品**） | `windows/engine/lgpl/dist/` |
 | **诊断日志滚动落盘（W14）**：内存环之外，每条日志同时追加到 `%LOCALAPPDATA%\MediaHub\logs` 的 `mediahub-0.log`（最新）…`mediahub-4.log`；每文件 1 MiB、最多 5 个，轮转只发生在条目之间（一条日志永不跨文件），磁盘写失败只记 `LastError` 而不让应用崩；写入前统一经 `LogService.Redact`，`Export()` 头部多一行滚动目录 | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md`（9 例 + 四条负向对照 3/1/1/1 红、逐字节还原；本机 478/0；App 构建 0 警告 0 错误） |
+| **跨平台备份容器（W15）**：Windows 能写出 Android 能解的 `.mhbackup`（反向亦然）—— `MHBK` v2、PBKDF2-HMAC-SHA256 60 万次、AES-256-GCM（AAD 绑头参数）、`ciphertext‖tag` 与 Java `doFinal` 逐字节一致；来源/进度/收藏/偏好白名单，不含凭据；跨语言向量两份副本同哈希（8 条分类用例 + 双向密文复算） | `windows/docs/W15-CROSS-PLATFORM-BACKUP.md` |
 
 ### 已知缺陷与未验证项
 
@@ -361,6 +362,8 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
    用例：`core/logging` 24 → **32**、`feature/settings` 418 → **425**（4 条出口用例 + 3 条 ViewModel 用例）；四条负向对照 1 / 1 / 1 / 1 红（日志行不再二次脱敏 / 文件名忽略 zone / 日志行拼上路径 / describe 不脱敏）。本机两模块 **32 / 0** 与 **425 / 0**；`assembleDebugAndroidTest` 与 `:app:compileDebugKotlin` 均 BUILD SUCCESSFUL（本轮发现并修好：androidTest 也直接构造 `SettingsViewModel`，加构造参数要给它一个不点按钮的出口）。
  W6-111：导出诊断日志的写盘路径搬进可测工程。Windows 侧按钮早有（`SettingsPage.xaml:93`），但渲染、命名与失败措辞全在 code-behind 里，而 `MediaHub.Tests` 不引用 `MediaHub.App`（WinUI 工程）⇒ 这条路 0 覆盖：报告没有应用版本/设备/条目数，失败还把异常原文贴到界面上；本轮新增 `windows/src/MediaHub.Net/DiagnosticsReport.cs`（`Render` / `Write` / `FileName` / `Describe` / `SuccessLine` / `FailureLine` + `WriteResult`），`LogService.Export()` 改为同一渲染器的薄壳并加 `Snapshot()`（锁内取副本），`OnExportLogClick` 只选目录与显示结果句；每条日志行与头部字段再过一遍 `LogService.Redact`，`bytes` 按 UTF-8 字节数记。
   用例：`MediaHub.Tests` 1708 → **1717**（行序/二次脱敏/头部脱敏/文件名/写盘自洽/占位失败净化/空日志/Describe/导出同源 共 9 例），App 工程 0 警告 0 错误；四条负向对照 1 / 2 / 1 / 1 红。仍未做：界面人工确认与真实两机对跑仍 **NOT_RUN**。
+ W15：跨平台备份容器（Windows ↔ Android `.mhbackup` 互通）。用户口径变更：两机联调暂不做，同步改为本地/WebDAV 备份还原，且电脑与手机导出的文件必须互通。本轮先做容器层：新增零依赖工程 `windows/src/MediaHub.Backup`（crypto/envelope/DTO/URL 守卫/serializer 五文件），把 Android 的 `MHBK` v2 容器逐字节复刻 —— 关键是 Java `Cipher.doFinal` 的 `ciphertext‖tag` 布局与 .NET `AesGcm` 分开输出必须缝合，AAD 是 `magic|版本|算法|迭代数` 的稳定编码（头参数被改即解密失败）。跨语言向量由仓库外生成器产出（两份副本同 sha256，31 617 B），Windows 5 例 + Android 6 例互相解对方写的容器；三条负向对照 5 / 5 / 2 红，还原后逐字节相同。
+   用例：`MediaHub.Tests` 1726 → **1754**（备份容器 23 例 + 跨语言向量 5 例）、`core/common` 660 → **666**（对照 6 例）；仍未做：备份 CLI、设置页入口、还原计划器接线、WebDAV 上传（当前只读）。
 唯一允许跳过的是两个环境门控套件：`SourceSyncTlsInteropTest`（core/common，W6-32 的客户端方向）与 `SourceSyncListenerInteropTest`（core/database，W6-38 的反向方向），两者都要真实 Windows `SyncCli` 的 DLL 才能跑，CI runner 上按 JUnit5 assumption 跳过：门禁脚本用 `ENVIRONMENT_GATED_SUITES` 逐个类点名放行，同时还要求这类套件必须出现在报告里（凭空消失同样报错），其他任何被跳过的用例仍然是硬失败。
 本地负向验证过这两条：把整套 XML 移走 → 22 条问题（1 条套件 + 21 条方法）；只删一个 `<testcase` →
 恰好 1 条 `PairingVectorsTest#rejected_addresses_match_windows`。
