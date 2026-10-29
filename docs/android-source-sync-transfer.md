@@ -6611,3 +6611,61 @@ App 接线：`SyncPage.xaml.cs` 的 `Transfer` 属性传 `infoLine: line => App.
 - **EXECUTED_PASS**：本机 `MediaHub.Tests` **1700 / 0**、App 构建 0/0，四条对照 2 / 4 / 2 / 1 红且四份快照逐字节还原；
 - **IMPLEMENTED_UNVERIFIED**：页面接线的端到端证据未取（见 76.6）；
 - 主树本轮零改动；提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+## §77 W6-108：命令行 apply 也把「哪一条被拒、哪一条被扣住」报到 stderr
+
+### 77.1 结论先行
+
+`transfer serve --apply` 与 `transfer roundtrip --apply` 走同一条 `SourceSyncImportRound.ApplyAsync`，但命令行路径一直只交回计数：`--json` 的 `report` 段只有 applied / skipped / withheld / notApplied / baselineUpdated / baselineEntries / summary，`items` 段只有每条的 action、reason 与 `withheld` 布尔 ——「写入被拒」的**原因**（写入器的异常消息，往往就是唯一能行动的线索）根本没有出口；扣住的条目虽然在 `items.reason` 里有一码，也要回翻整份文档才知道是哪一条。
+
+W6-103 / W6-105 已经给 App 层接好两个 sink（`refusedSink` / `withheldSink`），但那些调用点在 `ApplyApprovedAsync`（App 进程里）；本轮 recon 还发现 `SourceSyncPeerRound.ApplyAsync` 这一层转发只补了 `cancellationToken`，两个 sink 在这里被吞掉 —— 命令行走完只看到「保留未应用 1 条」，不知道是哪一条、为什么。本轮把这条链接上，并把命令行的出口定在 **stderr**：`warning: <整句>`，与 `export` 命令既有的 warning 形状一致。
+
+### 77.2 一处措辞一处消费
+
+措辞不新写：`SourceSyncRefusedText.LogLine(entry)`（`同步写入被拒：<身份> · <动作> · <原因>`）与 `SourceSyncWithheldText.LogLine(entry)`（`同步保留未应用：<身份> · <原因>`）就是 App 结果页与日志用的那两句，命令行直接复用 —— 同一个事件在 GUI 与命令行是同一种说法。
+
+出口为什么是 stderr：`--json` 的契约是「stdout 恰好一个文档」，把逐条行写进 stdout 会让每个解析 JSON 的脚本当场失败（用例 D 就把这件事本身当作对照）。因此 CLI 新增一个 `Warn(string)` 助手（`_err.WriteLine("warning: " + line)`），`export` 的警告循环改为复用同一助手。
+
+### 77.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.Sync/SourceSyncPeerRound.cs` | `ApplyAsync` 在 `skippedIds` 之后、`cancellationToken` 之前加 `Action<SourceSyncRefusedSource>? refusedSink = null, Action<SourceSyncWithheldSource>? withheldSink = null`，并**逐字转发**给 `_inbox.Round.ApplyAsync(...)`（原来这一层把两个 sink 吞掉，是本轮 recon 找到的第二个断点） |
+| `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` | 新增 `Warn(string)`；`export` 警告循环改用它；`RunTransferServeAsync` 与 `TransferOnceAsync` 的 apply 调用各传 `refusedSink: entry => Warn(SourceSyncRefusedText.LogLine(entry))`、`withheldSink: entry => Warn(SourceSyncWithheldText.LogLine(entry))` |
+
+措辞层零改动：两句 `LogLine` 仍在 `MediaHub.Sync`，CLI 只选出口。
+
+### 77.4 用例与计数
+
+`SyncCliTransferTests` 新增 4 例（`MediaHub.Tests` 1700 → **1704 / 0 失败**，App 构建 **0 警告 0 错误**）：
+
+- `Serve_ReportsEveryRefusedWriteOnStandardError`：在设备目录里预建一个名为 `sync-sources.json.tmp` 的**目录**，让 `FileLocalSourceStore.Persist` 的 `File.WriteAllText` 真实抛 `UnauthorizedAccessException`（不是 mock）；断言 `report.applied == 0`、`report.withheld == 1`，stderr 恰一行 `同步写入被拒：src-refused · 写入 · …`；
+- `Serve_ReportsEveryWithheldEntryOnStandardError`：未知来源类型（`mystery`）被闸门扣住，stderr 恰一行且以 `warning: 同步保留未应用：src-mystery · ` 起头、冒号后还有原因（不只要身份）；
+- `Roundtrip_ReportsTheReceiversWithheldEntryOnStandardError`：真 `transfer roundtrip --apply`，对端（B）的存储里留下没写进去的条目，stderr 上有同一句（roundtrip 是「没人看着的 serve」，更需要这句话）；
+- `Serve_LeavesNoEntryLineWhenEveryEntryIsWritten`：干净一轮 stderr 里没有任何逐条行、也没有 `warning:`（防 sink 对成功条目误触）。
+
+断言同时钉住 stdout 契约：`ParseSingleDocument` 要求 stdout 去尾后不含换行（`--json` 下恰好一个文档），逐条行只允许出现在 stderr。
+
+### 77.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | serve 侧不传 `refusedSink` | **1 红**（`Serve_ReportsEveryRefusedWriteOnStandardError`） |
+| B | serve 侧不传 `withheldSink` | **1 红**（`Serve_ReportsEveryWithheldEntryOnStandardError`） |
+| C | `SourceSyncPeerRound.ApplyAsync` 不转发两个 sink | **3 红**（serve 的 refused / withheld 与 roundtrip 的 withheld） |
+| D | `Warn` 写 `_out` 而不是 `_err` | **4 红**（三条新例 + 既有的 `Serve_KeepsAnUnknownSourceTypeWithheldEvenWithApply`：stdout 多了一行，JSON 契约当场破） |
+
+四次对照前先存实现态快照（`w6108-impl-peer.cs` 32289 B / sha256 `e7a38e8d…`、`w6108-impl-cli.cs` 104572 B / sha256 `c13a883f…`、`w6108-impl-tests.cs` 32942 B / sha256 `9bd951e5…`），每轮跑完写回并比对 sha256（四次全 `true`），最后复跑 **1704 / 0**。
+
+### 77.6 边界与仍未做
+
+- 只覆盖 `transfer serve --apply` 与 `transfer roundtrip --apply`；`import`（`RunImport` → `ImportResult`）不走 `ApplyAsync`，不在本轮范围；
+- `--json` 的 `report` 段仍是计数：本轮没有给契约加逐条字段（那会改动现有读者），逐条信息只走 stderr；
+- 命令行的端到端证据是进程内真跑（真 loopback 套接字 + 真文件存储 + 真异常），但没有在两台真实机器上对跑 ⇒ 与 W6-105 同口径；
+- 同步页的真实 GUI/UIA 证据仍 **GUI_UNVERIFIED**；真实两机跨机联调 **NOT_RUN**；真机 instrumentation **DEVICE_UNVERIFIED**。
+
+### 77.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1704 / 0**、App 构建 **0 警告 0 错误**，四条对照 1 / 1 / 3 / 4 红且三份快照逐字节还原；
+- **IMPLEMENTED_UNVERIFIED**：真实两机命令行对跑未做（见 77.6）；
+- 主树本轮零改动；提交号以 PR #39 head 为准（docs 不自指 SHA）。

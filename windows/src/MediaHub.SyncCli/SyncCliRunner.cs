@@ -174,7 +174,7 @@ public sealed class SyncCliRunner
 
         foreach (string warning in export.Warnings)
         {
-            _err.WriteLine("warning: " + warning);
+            Warn(warning);
         }
 
         if (invocation.Json)
@@ -939,8 +939,19 @@ public sealed class SyncCliRunner
         // so a dry run must never hold the real store.
         SourceSyncPeerRound receiver = new(DeviceIdOf(invocation), invocation.Apply ? sources : ReadOnlyCopy(sources), baselines);
         SourceSyncApplyPreview preview = receiver.Preview(envelope);
+
+        // W6-108: a command line run has no page to look at afterwards, so each entry the round keeps back leaves
+        // one line the moment the round decides it. The line goes to stderr, the progress channel, because in --json
+        // mode stdout must stay exactly one document; the report keeps its counts, the entries stay out of it.
         SourceSyncApplyReport? report = invocation.Apply
-            ? await receiver.ApplyAsync(preview, TransferWriter(sources), null, cancellationToken: CancellationToken.None).ConfigureAwait(false)
+            ? await receiver
+                .ApplyAsync(
+                    preview,
+                    TransferWriter(sources),
+                    refusedSink: entry => Warn(SourceSyncRefusedText.LogLine(entry)),
+                    withheldSink: entry => Warn(SourceSyncWithheldText.LogLine(entry)),
+                    cancellationToken: CancellationToken.None)
+                .ConfigureAwait(false)
             : null;
 
         TransferOutcome outcome = new(envelope.DeviceId, receiver.DeviceId, received.Bytes, received.FrameCount, preview, report, null, null, received.ReceiptWritten);
@@ -1177,8 +1188,18 @@ public sealed class SyncCliRunner
         }
 
         SourceSyncApplyPreview preview = receiver.Preview(envelope);
+
+        // W6-108: the same two sinks as the one-shot serve, because a roundtrip is a serve the operator never sees
+        // a window for: without these lines a round that kept an entry back ends with only a count.
         SourceSyncApplyReport? report = apply
-            ? await receiver.ApplyAsync(preview, writer, null, cancellationToken: CancellationToken.None).ConfigureAwait(false)
+            ? await receiver
+                .ApplyAsync(
+                    preview,
+                    writer,
+                    refusedSink: entry => Warn(SourceSyncRefusedText.LogLine(entry)),
+                    withheldSink: entry => Warn(SourceSyncWithheldText.LogLine(entry)),
+                    cancellationToken: CancellationToken.None)
+                .ConfigureAwait(false)
             : null;
         return new TransferOutcome(
             envelope.DeviceId,
@@ -2468,6 +2489,13 @@ public sealed class SyncCliRunner
         return value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long number) ? number : 0;
     }
 
+    /// <summary>
+    /// W6-108: the command line's progress channel. Export warnings have always been written here as
+    /// 「warning: ...」; an apply round's per-entry refusals and withholdings now use the same shape, so a script
+    /// that keeps only stderr still learns which entry was kept back and why. Never stdout: in --json mode that is
+    /// one document, and a second line there would break every reader that parses it.
+    /// </summary>
+    private void Warn(string line) => _err.WriteLine("warning: " + line);
     private int Fail(CliInvocation invocation, int exitCode, string code, string message)
     {
         CliOutput.WriteError(_out, _err, invocation.Json, code, message);

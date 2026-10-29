@@ -251,16 +251,31 @@ public sealed class SourceSyncPeerRound
 
     /// <summary>Applies a preview through the gate; only <paramref name="allowedIds"/> can turn a proposal into a write.</summary>
     /// <param name="skippedIds">Identities the caller explicitly skipped; a skip outranks an allow for the same id.</param>
+    /// <param name="refusedSink">W6-108: called once per refused write, so a caller that is not the App can report it.
+    /// A caller outside the App has no page to look at afterwards, and the command line has no other channel for it.</param>
+    /// <param name="withheldSink">W6-108: called once per entry the gate holds back; the same shape as
+    /// <paramref name="refusedSink"/>, because both halves of 保留未应用 are equally invisible to a headless caller.</param>
     public Task<SourceSyncApplyReport> ApplyAsync(
         SourceSyncApplyPreview preview,
         SourceSyncRecordWriter writer,
         IReadOnlyList<string>? allowedIds = null,
         IReadOnlyList<string>? skippedIds = null,
+        Action<SourceSyncRefusedSource>? refusedSink = null,
+        Action<SourceSyncWithheldSource>? withheldSink = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(preview);
         ArgumentNullException.ThrowIfNull(writer);
-        return _inbox.Round.ApplyAsync(preview, allowedIds, writer, skippedIds, cancellationToken: cancellationToken);
+        // W6-108: forwarded verbatim. Dropping them here would leave every non-App caller silent while the round
+        // kept entries back, and that is exactly the gap this overload exists to close.
+        return _inbox.Round.ApplyAsync(
+            preview,
+            allowedIds,
+            writer,
+            skippedIds,
+            refusedSink,
+            withheldSink,
+            cancellationToken);
     }
 
     /// <summary>Serializes an envelope and sends it to a loopback peer.</summary>
