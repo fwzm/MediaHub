@@ -19,26 +19,27 @@ import com.mediahub.player.engine.TrackSelection
 object MpvTrackMapper {
 
     /** 一行 track-list 快照所需属性（顺序见 [TRACK_PROPERTIES]）。 */
-    val TRACK_PROPERTIES: List<String> = listOf("id", "type", "lang", "title", "codec", "selected", "default", "forced", "external")
+    val TRACK_PROPERTIES: List<String> = listOf("id", "type", "lang", "title", "codec", "selected", "default", "forced", "external", "demux-channel-count", "demux-samplerate")
 
     /**
      * 把 mpv 的 track-list 行映射为音频轨列表。
      *
      * @param trackList 每行是属性名→属性值（值可为 null，代表该属性不可读）
      */
-    fun mapAudioTracks(trackList: List<Map<String, String?>>): List<AudioTrack> {
+    fun mapAudioTracks(trackList: List<Map<String, String?>>, nativeAid: String? = null): List<AudioTrack> {
         val result = mutableListOf<AudioTrack>()
         for (row in trackList) {
             if (row["type"] != "audio") continue
-            val selected = row["selected"] == "yes"
+            val selected = row["selected"] == "yes" &&
+                (nativeAid == null || nativeAid == "auto" || row["id"] == nativeAid)
             result += AudioTrack(
                 index = result.size,
                 language = row["lang"]?.takeIf { it.isNotBlank() },
                 title = row["title"]?.takeIf { it.isNotBlank() },
                 codec = row["codec"]?.takeIf { it.isNotBlank() },
-                channels = null,
-                sampleRate = null,
-                isDefault = selected,
+                channels = row["demux-channel-count"]?.toIntOrNull()?.takeIf { it > 0 },
+                sampleRate = row["demux-samplerate"]?.toIntOrNull()?.takeIf { it > 0 },
+                isDefault = row["default"] == "yes",
                 isSelected = selected,
                 isSupported = true,
             )

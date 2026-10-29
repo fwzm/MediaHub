@@ -546,7 +546,8 @@ class MpvPlaybackEngine internal constructor(
             if (!isCurrent(run)) return
             run.mpvTrackList = rows
         }
-        val audio = MpvTrackMapper.mapAudioTracks(rows)
+        val nativeAid = m.getPropertyString("aid")
+        val audio = MpvTrackMapper.mapAudioTracks(rows, nativeAid)
         val primarySid = m.getPropertyString("sid")
         val subtitleRows = rows.filter { it["type"] == "sub" }
         val subtitles = MpvTrackMapper.mapSubtitleTracks(rows).mapIndexed { index, track ->
