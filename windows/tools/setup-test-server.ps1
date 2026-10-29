@@ -30,7 +30,8 @@ param(
     [int]    $Port = 0,
     [string] $UserName = 'mediahub-test',
     [string] $Password = 'mediahub-test-password',
-    [switch] $Force
+    [switch] $Force,
+    [switch] $DisableAutoUpdate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,31 +52,40 @@ New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
 function Wait-Http {
     param([string] $Url, [int] $TimeoutSeconds = 180, [string] $What = 'server')
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    # 2xx, not "any answer". A warming server answers 503 before it serves, and treating that as
+    # readiness makes the next call fail with the server's own error instead of waiting it out.
+    $lastStatus = 'no-response'
     while ((Get-Date) -lt $deadline) {
         try {
             $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5
-            if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { return $r }
+            if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300) { return $r }
         }
         catch {
             # A connection refusal is not a WebException and has no Response property at all, which
-            # under StrictMode is an error rather than a null. The distinction between "answered with
-            # an error" and "not listening yet" is made on the exception's own shape.
+            # under StrictMode is an error rather than a null. "Answered with an error" and "not
+            # listening yet" are told apart on the exception's own shape, but neither is readiness:
+            # an error response is remembered only so the eventual failure names it.
             $response = $null
             try { $response = $_.Exception.PSObject.Properties['Response'].Value } catch { }
-            if ($null -ne $response) { return $null }
+            if ($null -ne $response) {
+                try { $lastStatus = '' + [int]$response.StatusCode } catch { $lastStatus = 'error-response' }
+            }
         }
         Start-Sleep -Milliseconds 800
     }
-    throw "$What did not answer $Url within $TimeoutSeconds s"
+    throw "$What did not answer $Url within $TimeoutSeconds s (last status: $lastStatus)"
 }
 
 function Invoke-Api {
-    param([string] $Method, [string] $Path, $Body, [hashtable] $Headers = @{}, [switch] $AllowFailure)
+    param([string] $Method, [string] $Path, $Body, [hashtable] $Headers = @{}, [switch] $AllowFailure, [switch] $RawBody)
     $uri = $base + $Path
     $params = @{ Method = $Method; Uri = $uri; UseBasicParsing = $true; TimeoutSec = 120; Headers = $Headers }
     if ($null -ne $Body) {
         $params.ContentType = 'application/json'
-        $params.Body = ($Body | ConvertTo-Json -Depth 8 -Compress)
+        # -Depth 8 is right for the small bodies this script sends, but the auto-update pin posts a
+        # whole configuration object back: that one is passed as raw JSON so no nested collection in
+        # it is silently flattened into a string.
+        $params.Body = if ($RawBody) { [string]$Body } else { ($Body | ConvertTo-Json -Depth 8 -Compress) }
     }
     try {
         return Invoke-WebRequest @params
@@ -113,6 +123,29 @@ function Invoke-Api {
     }
 }
 
+# Emby reads its listening port from its own data directory, never from the command line. Two small
+# helpers keep that fact in one place instead of scattering XPath strings through the start-up path.
+function Get-EmbyConfiguredPort {
+    param([string] $ConfigPath)
+    # 8096 is Emby's own default for a data directory that has never run: measured, not assumed.
+    if (-not (Test-Path $ConfigPath)) { return 8096 }
+    $doc = New-Object System.Xml.XmlDocument
+    $doc.Load($ConfigPath)
+    $node = $doc.DocumentElement.SelectSingleNode('HttpServerPortNumber')
+    if (-not $node) { return 8096 }
+    return [int]$node.InnerText
+}
+
+function Set-EmbyXmlValue {
+    param([System.Xml.XmlDocument] $Doc, [string] $Name, [string] $Value)
+    $node = $Doc.DocumentElement.SelectSingleNode($Name)
+    if (-not $node) {
+        $node = $Doc.CreateElement($Name)
+        $Doc.DocumentElement.AppendChild($node) | Out-Null
+    }
+    if ($node.InnerText -ne $Value) { $node.InnerText = $Value }
+}
+
 # ---------------------------------------------------------------- start
 
 # Located rather than assumed: the Jellyfin zip nests its payload under a versioned directory,
@@ -144,9 +177,12 @@ if ($Server -eq 'jellyfin') {
     }
 }
 else {
+    # -programdata, not -datadir: Emby 4.10 silently ignores the latter, falls back to its own
+    # default data directory and then competes with the Jellyfin fixture for port 8096. Measured
+    # on this machine; headless-resume.ps1 already starts Emby this way.
     $startArgs = @{
         FilePath = $exe
-        ArgumentList = @('-datadir', $DataRoot, '-nointerface')
+        ArgumentList = @('-programdata', $DataRoot, '-nointerface')
         PassThru = $true
         WindowStyle = 'Hidden'
         RedirectStandardOutput = $stdout
@@ -156,6 +192,39 @@ else {
 $process = Start-Process @startArgs
 
 Write-Host "  pid $($process.Id); waiting for HTTP"
+
+# A data root that has never run comes up on Emby's default 8096 - the very port the Jellyfin fixture
+# uses - so -Port has to be pinned in the configuration before the rest of this script can talk to it.
+# Two starts, not one: the first creates the configuration file, the second listens where we asked.
+if ($Server -eq 'emby') {
+    $configPath = Join-Path $DataRoot 'config\system.xml'
+    $coldPort = Get-EmbyConfiguredPort -ConfigPath $configPath
+    if ($coldPort -ne $Port) {
+        Write-Host ("  configured port is " + $coldPort + "; pinning " + $Port)
+        Wait-Http -Url ("http://127.0.0.1:" + $coldPort + "/System/Info/Public") -TimeoutSeconds 240 -What $Server | Out-Null
+        $configDeadline = (Get-Date).AddSeconds(90)
+        while (-not (Test-Path $configPath) -and (Get-Date) -lt $configDeadline) { Start-Sleep -Seconds 2 }
+        if (-not (Test-Path $configPath)) { throw ("the server never wrote " + $configPath) }
+        Stop-Process -Id $process.Id -Force
+        $downDeadline = (Get-Date).AddSeconds(90)
+        while ((Get-Date) -lt $downDeadline) {
+            $stillUp = $true
+            try { Invoke-WebRequest -Uri ("http://127.0.0.1:" + $coldPort + "/System/Info/Public") -UseBasicParsing -TimeoutSec 3 | Out-Null } catch { $stillUp = $false }
+            if (-not $stillUp) { break }
+            Start-Sleep -Seconds 1
+        }
+        $doc = New-Object System.Xml.XmlDocument
+        $doc.Load($configPath)
+        Set-EmbyXmlValue -Doc $doc -Name 'HttpServerPortNumber' -Value ([string]$Port)
+        Set-EmbyXmlValue -Doc $doc -Name 'PublicPort' -Value ([string]$Port)
+        $doc.Save($configPath)
+        $readBack = Get-EmbyConfiguredPort -ConfigPath $configPath
+        if ($readBack -ne $Port) { throw ("the pinned port did not stick: " + $readBack) }
+        $process = Start-Process @startArgs
+        Write-Host ("  pid " + $process.Id + "; waiting for HTTP on " + $Port)
+    }
+}
+
 Wait-Http -Url "$base/System/Info/Public" -TimeoutSeconds 240 -What $Server | Out-Null
 $info = (Invoke-Api -Method GET -Path '/System/Info/Public').Content | ConvertFrom-Json
 Write-Host ("  version: " + $info.Version + "   name: " + $info.ServerName + "   id: " + $info.Id)
@@ -206,6 +275,21 @@ $token = $auth.AccessToken
 $userId = $auth.User.Id
 $tokenHeaders = @{ 'X-Emby-Token' = $token }
 Write-Host ("  authenticated as " + $auth.User.Name + " (userId " + $userId + ")")
+
+# ---------------------------------------------------------------- auto update
+
+# A test server that upgrades itself mid-run is not the version the run claims to prove: an earlier
+# Emby acceptance run started on 4.10.1.0 and finished on 4.10.2.0. Opt-in, and verified by reading
+# the setting back instead of trusting the write.
+if ($Server -eq 'emby' -and $DisableAutoUpdate) {
+    $config = (Invoke-Api -Method GET -Path '/System/Configuration' -Headers $tokenHeaders).Content | ConvertFrom-Json
+    $config.EnableAutoUpdate = $false
+    $configJson = $config | ConvertTo-Json -Depth 64 -Compress
+    Invoke-Api -Method POST -Path '/System/Configuration' -Headers $tokenHeaders -Body $configJson -RawBody | Out-Null
+    $pinned = (Invoke-Api -Method GET -Path '/System/Configuration' -Headers $tokenHeaders).Content | ConvertFrom-Json
+    if ($pinned.EnableAutoUpdate) { throw 'auto update is still enabled after the write' }
+    Write-Host '  auto update disabled (read back as false)'
+}
 
 # ---------------------------------------------------------------- libraries
 
