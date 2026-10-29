@@ -217,7 +217,11 @@ class BackupUserFlowNonOverwritingDeviceTest {
             // INTENTIONAL STOP: the confirmed replace is destructive and stays NOT_RUN_POLICY.
         } catch (failure: Throwable) {
             runCatching {
-                val evidence = File(context.getExternalFilesDir(null), "backup-ui-nonoverwriting-failure.xml")
+                val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")
+                    ?.let(::File) ?: context.getExternalFilesDir(null)
+                checkNotNull(directory)
+                check(directory.isDirectory || directory.mkdirs())
+                val evidence = File(directory, "backup-ui-nonoverwriting-failure.xml")
                 device.dumpWindowHierarchy(evidence)
             }
             throw failure

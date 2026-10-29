@@ -14,15 +14,8 @@ backup_status=0
   -Pandroid.testInstrumentationRunnerArguments.class=com.mediahub.app.backup.BackupUserFlowNonOverwritingDeviceTest,com.mediahub.app.player.LocalSafProductionUiFlowTest \
   -Pandroid.testInstrumentationRunnerArguments.backupAcceptance=isolated \
   --no-daemon --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process --rerun-tasks --no-build-cache || backup_status=$?
-# Preserve the exact controlled app UI state before emulator teardown on failures.
-if [[ "$backup_status" -ne 0 ]]; then
-  mkdir -p ci-evidence
-  for diagnostic in files/saf-ui-failure.png files/saf-ui-failure.xml /sdcard/Android/data/com.mediahub.app/files/backup-ui-nonoverwriting-failure.xml; do
-    if adb -s "$ANDROID_SERIAL" exec-out run-as com.mediahub.app test -f "$diagnostic"; then
-      adb -s "$ANDROID_SERIAL" exec-out run-as com.mediahub.app cat "$diagnostic" > "ci-evidence/$(basename "$diagnostic")"
-    fi
-  done
-fi
+# App tests write failure UI into UTP's additionalTestOutputDir while installed;
+# UTP pulls it before package cleanup. Post-run run-as cannot read an uninstalled target.
 record_status=0
 python3 .github/scripts/verify-visual-tests.py --record --api "$api" --device-api "$(adb -s "$ANDROID_SERIAL" shell getprop ro.build.version.sdk | tr -d '\r')" --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" || record_status=$?
 printf 'gradleExit=%s\nbackupExit=%s\nrecordExit=%s\n' "$test_status" "$backup_status" "$record_status" > ci-evidence/visual-command-status.txt

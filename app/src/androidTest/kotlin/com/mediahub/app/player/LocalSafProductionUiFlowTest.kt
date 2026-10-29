@@ -68,10 +68,29 @@ class LocalSafProductionUiFlowTest {
             waitNode(hasText("选择本地目录", substring = true)).performScrollTo().performClick()
             val documents = By.pkg(Pattern.compile("com\\.(android|google\\.android)\\.documentsui"))
             assertTrue(device.wait(Until.hasObject(documents), 10_000))
-            val roots = By.res(Pattern.compile(".*:id/roots_list"))
-            if (!device.hasObject(roots)) checkNotNull(device.wait(Until.findObject(
-                By.desc(Pattern.compile("(?i)show roots|显示根目录|显示位置"))), 10_000)).click()
-            checkNotNull(device.wait(Until.findObject(By.text(Pattern.compile("(?i)^(downloads|下载)$")).hasAncestor(roots)), 10_000)).click()
+            // The prior backup picker may already leave DocumentsUI in Downloads, with
+            // no roots drawer button. Use the same observed-location adapter as backup.
+            val downloads = Pattern.compile("(?i)^(downloads|下载内容|下载)$")
+            fun header() = device.findObject(By.res(Pattern.compile(".*:id/header_title")))?.text
+                ?: device.findObject(By.res(Pattern.compile(".*:id/breadcrumb_text")))?.text.orEmpty()
+            device.waitForIdle(10_000)
+            if (!header().contains("Download", ignoreCase = true) && !header().contains("下载")) {
+                device.findObject(By.desc(Pattern.compile("(?i)show roots|显示根目录|显示位置")))?.let {
+                    it.click(); device.waitForIdle(10_000)
+                }
+                var selectedDownloads = false
+                for (container in listOf("roots_list", "dir_list")) {
+                    val entry = device.wait(Until.findObject(By.text(downloads).hasAncestor(
+                        By.res(Pattern.compile(".*:id/" + container)))), 2_000)
+                    if (entry != null) { entry.click(); selectedDownloads = true; break }
+                }
+                if (!selectedDownloads) {
+                    val visible = device.findObjects(By.text(downloads))
+                    assertTrue("Downloads location must be visible", visible.isNotEmpty())
+                    visible.first().click()
+                }
+                device.waitForIdle(10_000)
+            }
             checkNotNull(device.wait(Until.findObject(By.text(label)), 10_000)).click()
             checkNotNull(device.wait(Until.findObject(By.res(Pattern.compile(".*:id/action_menu_select"))), 10_000)).click()
             device.wait(Until.findObject(By.res("android:id/button1")), 3_000)?.click()
@@ -130,8 +149,13 @@ class LocalSafProductionUiFlowTest {
             assertEquals(1, db.serverDao().observeAll().first().count { it.name == label })
             assertEquals(sourceId, db.serverDao().observeAll().first().single { it.name == label }.id)
         } catch (failure: Throwable) {
-            device.takeScreenshot(java.io.File(context.filesDir, "saf-ui-failure.png"))
-            device.dumpWindowHierarchy(java.io.File(context.filesDir, "saf-ui-failure.xml"))
+            runCatching {
+                val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")
+                    ?.let { java.io.File(it) } ?: context.filesDir
+                check(directory.isDirectory || directory.mkdirs())
+                device.takeScreenshot(java.io.File(directory, "saf-ui-failure.png"))
+                device.dumpWindowHierarchy(java.io.File(directory, "saf-ui-failure.xml"))
+            }
             throw failure
         } finally {
             scenario?.close()

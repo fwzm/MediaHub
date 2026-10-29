@@ -61,7 +61,7 @@ player/
 provider/
   api/               MediaProvider 统一接口 + 能力声明 + 异常（纯 Kotlin）
   base/              BaseMediaServerProvider + Provider 注册表
-  emby/ jellyfin/ webdav/ local/   具体数据源（emby、local 已实现；jellyfin/webdav 骨架）
+  emby/ jellyfin/ webdav/ local/   具体数据源；真实能力以各 Provider 的声明与验证记录为准
   smb/ aliyun/ baidu/ quark/ china-mobile/ tianyi/   规划占位（README）
 metadata/            媒体元数据（刮削）抽象
 feature/
@@ -110,6 +110,11 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 4. 目录绑定和系统授权不能通过可迁移备份带到另一台设备；导入后需要在新设备重新选择目录。
 
 本轮验证和仍待完成的系统撤权 UI 验收见 [SAF 接入记录](docs/reviews/saf-directory-content-2026-10-26.md)。
+
+### Jellyfin 静态播放
+
+本分支仍只交付无需转码的静态媒体流，ISO 不支持。字幕策略阻止播放时的协商、显式字幕偏好保护和
+验证范围见 [Jellyfin 协商记录](docs/reviews/jellyfin-static-negotiation-2026-10-27.md)。
 
 设置页可改默认倍速、字幕大小等（DataStore 持久化）。mpv 同样接收字幕大小与字幕面板中的颜色、
 描边、背景、位置偏好，并在播放中更新、退出重进及内核降级时保留；默认尊重内嵌 ASS 样式。

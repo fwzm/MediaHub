@@ -418,6 +418,7 @@ jobs:
             ci-evidence/
             core/ui/build/outputs/androidTest-results/
             app/build/outputs/androidTest-results/
+            app/build/outputs/connected_android_test_additional_output/
             app/build/reports/androidTests/
             core/ui/build/reports/androidTests/
             feature/player/build/outputs/androidTest-results/
