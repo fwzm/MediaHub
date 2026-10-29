@@ -6669,3 +6669,47 @@ W6-103 / W6-105 已经给 App 层接好两个 sink（`refusedSink` / `withheldSi
 - **EXECUTED_PASS**：本机 `MediaHub.Tests` **1704 / 0**、App 构建 **0 警告 0 错误**，四条对照 1 / 1 / 3 / 4 红且三份快照逐字节还原；
 - **IMPLEMENTED_UNVERIFIED**：真实两机命令行对跑未做（见 77.6）；
 - 主树本轮零改动；提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+## §78 W6-109：命令行 JSON 的 report 段也说出「哪一条被拒、哪一条被扣住」
+
+### 78.1 结论先行
+
+W6-108 把逐条行放到了 stderr（给人看），但脚本读的是 `--json`：`report` 段仍只有计数（applied / skipped / withheld / notApplied），被拒的那条**为什么**被拒、被扣住的是哪一条，要么回翻 `items[]` 靠身份猜，要么只能去解析给人看的 stderr。本轮给 `report` 加两个数组：`refused[]`（`syncSourceId` / `action` / `reason`，reason 是写入器自己的那句话）与 `withheldEntries[]`（`syncSourceId` / `reason`，原因是闸门原因码）。两个数组**恒在**（干净一轮是空数组），且**只带身份、不带 `displayName`** —— 与 stderr 行同一口径，JSON 日志不会比 stderr 多泄漏一个标题。
+
+### 78.2 一处措辞一处消费（沿用 W6-108 的边界）
+
+数组的数据源就是 App 结果页、App 日志与 stderr 已经用的 `SourceSyncApplyReport.Refused` / `WithheldEntries`：没有新类型、没有新文案，JSON 只是把同一批行按字段拆开。`items[].reason`（预览口径的原因码）与 `withheldEntries[].reason` 同值，脚本可按 `syncSourceId` 连接两份视图。
+
+### 78.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` | `WriteTransferFieldsJson` 的 `report` 对象末尾加 `refused[]` / `withheldEntries[]` 两个数组（各自恒写，空则空数组） |
+| `docs/cross-device/W6-18-TRANSFER-CLI.md` | `report` 字段表补上两个数组，并写清「只带身份、不带标题」 |
+
+### 78.4 用例与计数
+
+`SyncCliTransferTests` 新增 4 例（`MediaHub.Tests` 1704 → **1708 / 0 失败**，App 构建 **0 警告 0 错误**）：被拒一条时有 `refused[]` 一行且动作与 `items[]` 一致、被扣住一条时有 `withheldEntries[]` 一行且原因码与 `items[].reason` 一致、干净一轮两个数组都在且为空、真 roundtrip 的第一轮带着对端被扣条目（第二轮为空数组）。
+
+### 78.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | 删掉 `refused[]` 数组 | **2 红**（被拒例 + 空数组形状例） |
+| B | 删掉 `withheldEntries[]` 数组 | **3 红**（被扣例 + roundtrip + 空数组形状例） |
+| C | `refused[]` 里加 `displayName` | **1 红**（标题泄漏断言） |
+| D | `withheldEntries[].reason` 写成身份 | **1 红**（与 `items[].reason` 不能对上） |
+
+四轮均逐字节还原（快照 `D:/mh-verify/w6109-impl-cli.cs` / `w6109-impl-tests.cs`，日志 `w6109-neg-A..D.log`），还原后全量复跑 **1708 / 0**。
+
+### 78.6 边界
+
+- 只加字段、不改既有字段；`--json` 的「stdout 恰好一个文档」契约不变；
+- `refused[].reason` 是本地写入器的异常消息（可能含本机路径），与结果页、stderr 完全一致；不含凭据、不含 `displayName`；
+- 干跑（不带 `--apply`）仍然没有 `report` 对象，因此也没有两个数组（既有用例仍钉住这一点）；
+- 真实两机命令行对跑未做 ⇒ **IMPLEMENTED_UNVERIFIED**。
+
+### 78.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1708 / 0**、App 构建 **0 警告 0 错误**，四条对照 2 / 3 / 1 / 1 红且快照逐字节还原；
+- Android 未改动（对照 `uniqueTests` 2480）；主树本轮零改动；提交号以 PR #39 head 为准。

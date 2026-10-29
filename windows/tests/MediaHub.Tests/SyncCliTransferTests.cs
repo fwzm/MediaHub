@@ -222,6 +222,88 @@ public sealed class SyncCliTransferTests : IDisposable
     }
 
     [Fact]
+    public async Task ApplyJsonNamesEveryRefusedWriteAlongsideTheOtherReportFields()
+    {
+        string root = DeviceRoot("b");
+        Directory.CreateDirectory(Path.Combine(root, FileLocalSourceStore.FileName + ".tmp"));
+
+        (int exitCode, string stdout, string stderr) = await ServeOnceAsync(
+            ["transfer", "serve", "--root", root, "--device", "dev-b", "--apply", "--json"],
+            Payload("dev-a", Source("src-refused", "Refused")));
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        using JsonDocument document = ParseSingleDocument(stdout);
+        JsonElement report = document.RootElement.GetProperty("report");
+        Assert.Equal(0, report.GetProperty("applied").GetInt32());
+
+        // W6-109: the count said one write was refused; the array says which one and in the writer own words.
+        JsonElement refused = report.GetProperty("refused");
+        Assert.Equal(JsonValueKind.Array, refused.ValueKind);
+        Assert.Equal(1, refused.GetArrayLength());
+        JsonElement entry = refused[0];
+        Assert.Equal("src-refused", entry.GetProperty("syncSourceId").GetString());
+        Assert.Equal(
+            document.RootElement.GetProperty("items")[0].GetProperty("action").GetString(),
+            entry.GetProperty("action").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(entry.GetProperty("reason").GetString()));
+
+        // Identity and reason only: a JSON log must not start carrying the source title.
+        Assert.DoesNotContain("\"Refused\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("displayName", stdout, StringComparison.Ordinal);
+    }
+    [Fact]
+    public async Task ApplyJsonNamesEveryWithheldEntryWithItsGateReason()
+    {
+        string root = DeviceRoot("b");
+        SourceRecord mystery = new()
+        {
+            SyncSourceId = "src-mystery",
+            SourceType = SyncSourceTypeValue.Parse("mystery"),
+            DisplayName = "Mystery",
+            RecordRevision = 1,
+            Endpoints = [new SourceEndpoint { Url = EmbyUrl, IsPrimary = true }],
+        };
+
+        (int exitCode, string stdout, string stderr) = await ServeOnceAsync(
+            ["transfer", "serve", "--root", root, "--device", "dev-b", "--apply", "--json"],
+            EnvelopeOf("dev-a", mystery));
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        using JsonDocument document = ParseSingleDocument(stdout);
+        JsonElement report = document.RootElement.GetProperty("report");
+        JsonElement heldBack = report.GetProperty("withheldEntries");
+        Assert.Equal(1, heldBack.GetArrayLength());
+        JsonElement entry = heldBack[0];
+        Assert.Equal("src-mystery", entry.GetProperty("syncSourceId").GetString());
+
+        // The array and the per-item preview must carry the same code, so a script can join them.
+        Assert.Equal(
+            document.RootElement.GetProperty("items")[0].GetProperty("reason").GetString(),
+            entry.GetProperty("reason").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(entry.GetProperty("reason").GetString()));
+        Assert.DoesNotContain("\"Mystery\"", stdout, StringComparison.Ordinal);
+    }
+    [Fact]
+    public async Task ApplyJsonKeepsEmptyEntryArraysSoScriptsSeeOneShape()
+    {
+        string root = DeviceRoot("b");
+
+        (int exitCode, string stdout, string stderr) = await ServeOnceAsync(
+            ["transfer", "serve", "--root", root, "--device", "dev-b", "--apply", "--json"],
+            Payload("dev-a", Source("src-1", "Home"), Source("src-2", "Work")));
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        using JsonDocument document = ParseSingleDocument(stdout);
+        JsonElement report = document.RootElement.GetProperty("report");
+        Assert.Equal(2, report.GetProperty("applied").GetInt32());
+
+        // A clean round still ships both arrays: scripts should never have to guess whether they exist.
+        Assert.Equal(JsonValueKind.Array, report.GetProperty("refused").ValueKind);
+        Assert.Equal(0, report.GetProperty("refused").GetArrayLength());
+        Assert.Equal(JsonValueKind.Array, report.GetProperty("withheldEntries").ValueKind);
+        Assert.Equal(0, report.GetProperty("withheldEntries").GetArrayLength());
+    }
+    [Fact]
     public async Task Serve_ReportsAnInvalidEnvelopeAndWritesNothing()
     {
         string root = DeviceRoot("b");
@@ -489,6 +571,37 @@ public sealed class SyncCliTransferTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task RoundtripJsonCarriesTheReceiversWithheldEntry()
+    {
+        string root = _root;
+        Seed(
+            Path.Combine(root, "a"),
+            Source("src-known", "Known"),
+            new LocalSourceRecord
+            {
+                ServerId = "srv-mystery",
+                SyncSourceId = "src-mystery",
+                Type = ServerType.Unknown,
+                SourceTypeRaw = "mystery",
+                Url = EmbyUrl,
+                DisplayName = "Mystery",
+                RecordRevision = 1,
+            });
+
+        (int exitCode, string stdout, string stderr) = await Task.Run(() => Run(
+            "transfer", "roundtrip", "--root", root, "--device-a", "dev-a", "--device-b", "dev-b", "--apply", "--json"));
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        using JsonDocument document = ParseSingleDocument(stdout);
+        JsonElement rounds = document.RootElement.GetProperty("rounds");
+        JsonElement firstRound = rounds[0].GetProperty("report").GetProperty("withheldEntries");
+        Assert.Equal(1, firstRound.GetArrayLength());
+        Assert.Equal("src-mystery", firstRound[0].GetProperty("syncSourceId").GetString());
+
+        // The second direction had nothing to hold back, but the shape must not change between rounds.
+        Assert.Equal(0, rounds[1].GetProperty("report").GetProperty("withheldEntries").GetArrayLength());
+    }
     // ---- 3. parser surface -------------------------------------------------------------------
 
     [Fact]

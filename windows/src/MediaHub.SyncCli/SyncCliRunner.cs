@@ -1784,6 +1784,31 @@ public sealed class SyncCliRunner
             writer.WriteNumber("baselineEntries", outcome.Report.BaselineEntryCount);
             writer.WriteString("summary", outcome.Report.Summary);
             writer.WriteString("baseline", outcome.Report.BaselineLabel);
+
+            // W6-109: the counts above say how many entries were refused or held back; these two arrays say
+            // which ones. Only the identity and the writer own words travel here, never the display name, so a
+            // JSON log of a round cannot leak a source title any more than the matching stderr line can.
+            writer.WriteStartArray("refused");
+            foreach (SourceSyncRefusedSource refusedEntry in outcome.Report.Refused)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("syncSourceId", refusedEntry.SyncSourceId);
+                writer.WriteString("action", refusedEntry.Action.ToString());
+                writer.WriteString("reason", refusedEntry.Reason);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+            writer.WriteStartArray("withheldEntries");
+            foreach (SourceSyncWithheldSource heldBack in outcome.Report.WithheldEntries)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("syncSourceId", heldBack.SyncSourceId);
+                writer.WriteString("reason", heldBack.Reason);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
             writer.WriteEndObject();
         }
     }
