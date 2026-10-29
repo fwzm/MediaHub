@@ -348,7 +348,7 @@ jobs:
       - name: Compile visual instrumentation APKs
         timeout-minutes: 25
         run: >-
-          ./gradlew :core:ui:assembleDebugAndroidTest
+          timeout 20m ./gradlew :core:ui:assembleDebugAndroidTest
           :feature:player:assembleDebugAndroidTest
           :feature:settings:assembleDebugAndroidTest
           :provider:webdav:assembleDebugAndroidTest

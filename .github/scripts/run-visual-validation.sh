@@ -6,11 +6,11 @@ case "$api" in 32|36) ;; *) echo "Unexpected API: $api" >&2; exit 1 ;; esac
 : "${EXPECTED_HEAD:?}" "${GITHUB_RUN_ID:?}" "${GITHUB_RUN_ATTEMPT:?}"
 bash .github/scripts/prepare-visual-emulator.sh
 test_status=0
-./gradlew :core:ui:connectedDebugAndroidTest :feature:player:connectedDebugAndroidTest :feature:settings:connectedDebugAndroidTest :provider:webdav:connectedDebugAndroidTest :core:database:connectedDebugAndroidTest --no-daemon --continue --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process --rerun-tasks --no-build-cache || test_status=$?
+timeout 25m ./gradlew :core:ui:connectedDebugAndroidTest :feature:player:connectedDebugAndroidTest :feature:settings:connectedDebugAndroidTest :provider:webdav:connectedDebugAndroidTest :core:database:connectedDebugAndroidTest --no-daemon --continue --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process --rerun-tasks --no-build-cache || test_status=$?
 backup_status=0
 # Production backup and directory-picker flows with owned fixtures on an isolated emulator.
 # Neither class clears existing sources to satisfy preflight.
-./gradlew :app:connectedDebugAndroidTest \
+timeout 25m ./gradlew :app:connectedDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=com.mediahub.app.backup.BackupUserFlowNonOverwritingDeviceTest,com.mediahub.app.player.LocalSafProductionUiFlowTest \
   -Pandroid.testInstrumentationRunnerArguments.backupAcceptance=isolated \
   --no-daemon --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process --rerun-tasks --no-build-cache || backup_status=$?
