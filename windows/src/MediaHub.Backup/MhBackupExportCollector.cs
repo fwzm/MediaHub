@@ -239,15 +239,38 @@ public static class MhBackupExportCollector
         };
     }
 
-    private static string ResolveBackupId(MhBackupLocalServer server, string type, string url, string? username)
+    /// <summary>
+    /// 本机来源在备份里的身份 id：优先 SyncSourceId，否则按（类型|规范化地址|账号）派生。
+    /// </summary>
+    /// <remarks>
+    /// 导出与还原预览必须用同一个函数算 id：同一台机器导出再还原时，没有 SyncSourceId 的来源若在备份里叫
+    /// win-xxxx、在本机叫 serverId，就会被判成「新增」并重复写入。
+    /// </remarks>
+    public static string DeriveBackupId(MhBackupLocalServer server)
     {
-        string? syncSourceId = (server.SyncSourceId ?? string.Empty).Trim();
+        ArgumentNullException.ThrowIfNull(server);
+        string syncSourceId = (server.SyncSourceId ?? string.Empty).Trim();
         if (syncSourceId.Length > 0) return syncSourceId;
+
+        string typeName = (server.Type ?? string.Empty).Trim();
+        string type = TypeNames.TryGetValue(typeName, out string? mapped) ? mapped : typeName.ToUpperInvariant();
+        string url = (server.Url ?? string.Empty).Trim();
+        string? username = (server.UserName ?? string.Empty).Trim();
+        if (username.Length == 0) username = null;
 
         string identity = type + "|" + MhBackupUrlGuard.NormalizeForIdentity(url) + "|" + (username ?? string.Empty);
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
         return "win-" + Convert.ToHexStringLower(hash, 0, BackupIdHashBytes);
     }
+
+    private static string ResolveBackupId(MhBackupLocalServer server, string type, string url, string? username)
+        => DeriveBackupId(new MhBackupLocalServer
+        {
+            SyncSourceId = server.SyncSourceId,
+            Type = type,
+            Url = url,
+            UserName = username,
+        });
 
     private static string? HostOf(string? url)
     {

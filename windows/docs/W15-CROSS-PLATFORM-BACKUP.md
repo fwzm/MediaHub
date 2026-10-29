@@ -3,7 +3,8 @@
 > 状态：容器层 **EXECUTED_PASS**（Windows 1793/0、Android core/common 666/0、双向跨语言向量全绿）；
 > 还原预览层（恢复计划器，纯函数零写入）**EXECUTED_PASS**（22 例 + 四条负向对照）；
 > 导出采集层（本机来源/偏好 → 备份载荷，纯函数）**EXECUTED_PASS**（17 例 + 四条负向对照）；
-> 真正落库、备份 CLI、设置页入口、WebDAV 上传仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
+> 备份命令行（`export` / `import` 预览）**EXECUTED_PASS**（13 例 + 四条负向对照，全量 MediaHub.Tests 1806/0）；
+> 真正落库、设置页入口、WebDAV 上传仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
 
 ## 1 动机与范围
 
@@ -179,13 +180,63 @@ UI 与 CLI 都只能拿这份预览去征求确认，写入是下一层的事。
 
 ### 7.5 仍未做（本层之外）
 
-- `MediaHub.BackupCli`（`export` / `import` 默认 dry-run、`--json`、退出码）与设置页「备份与还原」入口。
+- 设置页「备份与还原」入口（`MediaHub.BackupCli` 已在 W18 完成，见 §8）。
 - 把采集结果真正写成 `settings.json` 的来源、`history.json` 的进度。
 - WebDAV 上传与 Android 反向对照。
 
-## 8 仍未做（如实）
+## 8 备份命令行（W18）
 
-- 备份 CLI（`export` / `import` dry-run、`--json`、退出码）—— NOT_IMPLEMENTED
+### 8.1 缺口
+
+容器、采集层、恢复预览都已就位，但用户没有办法**真的**导出一次、也没有办法在不改动的本机的前提下看一遍还原会做什么。
+设置页入口属于 GUI 层（需空闲窗口），命令行是没有窗口时唯一可执行的出口。
+
+### 8.2 命令
+
+- `MediaHub.BackupCli export --settings <settings.json> [--history <history.json>] --out <备份文件> [--password-env <NAME>] [--json]`
+  - 读 settings.json → `MhBackupLocalData` → `MhBackupExportCollector` → `MhBackupSerializer.Export` → 写文件；
+  - 一个来源都导不出时拒绝导出（不是写一个空备份）；
+  - 输出含来源数、被跳过的来源与原因、说明行、字节数、SHA-256、包含段，以及「备份不含密码或令牌，还原后需要重新登录」。
+- `MediaHub.BackupCli import --file <备份文件> [--settings <settings.json>] [--strategy merge|replace] [--password-env <NAME>] [--json]`
+  - 解密 + `MhBackupRestorePlanner.Plan`，只打印「新增 / 已有同源 / 冲突 / 孤立引用 / 设置是否会恢复」，**不写任何文件**；
+  - 没有 `--settings` 时按「本机没有任何来源」预览，并在输出里说明这一点，不假装知道本机现状。
+- 退出码：`0` 成功、`2` 用法错误、`3` 不是备份文件、`4` 口令错/被篡改、`5` 版本过新、`6` 内容损坏、`7` 导出被拒、`8` 读写失败。
+
+### 8.3 三条硬约束
+
+1. **口令只从环境变量读**（缺省 `MH_BACKUP_PASSWORD`，可用 `--password-env` 换名）。命令行参数会进 shell 历史与进程列表，不接受。
+2. **`import` 默认只预览**，这是本版的全部能力；`--apply` 被明确拒绝并报用法错误，而不是接受参数后什么都不做。
+3. **JSON 输出不含口令、也不含备份里的明文**；测试用字符串包含关系钉住这一点。
+
+### 8.4 身份 id 一致性（本轮修掉的真缺陷）
+
+导出侧对没有 `SyncSourceId` 的来源派生 `win-<16 hex>`；预览侧最初却用 `SyncSourceId ?? ServerId` 当本机 id。
+结果是：同一台机器导出再预览，同一个来源在备份里叫 `win-…`、在本机叫 `srv-1`，被判成「新增」，真还原会重复写入。
+
+修法：把派生逻辑提升为 `MhBackupExportCollector.DeriveBackupId(MhBackupLocalServer)` 单一入口，导出与预览都调它；
+预览侧同时对 Url / UserName 做 trim（空账号归 null），与导出侧的规范化一致。
+
+### 8.5 验证
+
+- `windows/tests/MediaHub.Tests/BackupCliTests.cs` 13 例：往返可预览、导出无口令拒绝且不落盘、无来源可导拒绝、JSON 可解析且不含口令、凭据地址跳过、非备份文件退出码 3、口令错退出码 4、篡改容器退出码 6、版本过新退出码 5、`--apply` 拒绝、预览不动 settings/目录、无 `--settings` 全判新增、未知命令与缺参数报用法。
+- 本机：`--filter FullyQualifiedName~BackupCliTests` ⇒ **13 / 0**；全量 `MediaHub.Tests` ⇒ **1806 / 0**（W17 的 1793 + 13）。
+- 四条负向对照各**恰好 1 红**、恢复后 13/0：
+  - A 接受 `--apply` 却不报错 ⇒ `ImportApplyIsExplicitlyUnsupported`；
+  - B 去掉 `NotABackupFile` 的退出码 ⇒ `ImportOfAPlainTextFileIsNotABackup`；
+  - C 预览退回 `SyncSourceId ?? ServerId` ⇒ `ExportWritesAContainerThatImportCanPreview`（重现重复新增）；
+  - D 口令错映射成 Corrupted ⇒ `ImportWithAWrongPasswordFailsWithItsOwnExitCode`。
+- 两个新工程已加入 `windows/MediaHub.Windows.sln`（`MediaHub.Backup` 与 `MediaHub.BackupCli`）：不进 sln 的工程 CI 不会还原/编译。
+- 复跑环境说明：本会话里 `dotnet restore` 对任何工程都报 `Value cannot be null. (Parameter path1)`，因此本机用 `--no-restore` + 引导好的 `obj/project.assets.json` 构建（`dotnet build MediaHub.Windows.sln -c Debug -p:Platform=x64 --no-restore` 成功、0 错误）；CI 上真 restore 会覆盖这一点。
+
+### 8.6 仍未做（本层之外）
+
+- 真正落库：新来源写进 `settings.json`（还原后需重新登录的 AuthRequired 语义）、进度写进 `history.json` 的映射、收藏登录后写服务端。
+- 设置页「备份与还原」入口（口令框 → 预览 → 确认）。
+- WebDAV 上传（当前 WebDAV 只读）与 Android 反向对照。
+
+## 9 仍未做（如实）
+
+- 备份 CLI 的真正落库分支（`export` 已可导出、`import` 只预览；`--apply` 未实现）—— NOT_IMPLEMENTED
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
 - Windows 侧真正读写本机来源/进度/收藏（计划器已给出 `new` / `identical` / `conflict` / `orphan` 预览，落库尚未接线）—— NOT_IMPLEMENTED
 - WebDAV 上传（当前 WebDAV 只**读**）—— NOT_IMPLEMENTED
