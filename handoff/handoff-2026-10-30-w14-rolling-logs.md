@@ -2,11 +2,11 @@
 
 ## 状态
 
-- 分支 `codex/integrate-archive-ui-20261026`，HEAD `69f71f01f9078636d5739d16367d1a67c162c6db`，已推送。
+- 分支 `codex/integrate-archive-ui-20261026`，当前 HEAD `3ac7a9c4777aa782fbf73d3633b620f376356dce`，W14 代码提交为 `69f71f01f9078636d5739d16367d1a67c162c6db`，均已推送。
 - Draft PR #72 仍 OPEN，base `codex/integrate-offline-archive-20261025`；G7 `DO_NOT_MERGE`。
 - 新增 `LogFileSink`：默认 1 MiB × 5 滚动文件，写入前复用 `LogService.Redact`，磁盘失败降级为内存日志；AppServices 保留现有 `SyncSources`/`SourceSyncService` 接线。
 - 本地证据：先红（无实现时新增测试编译失败）；后绿 `LogFileSinkTests` 9/9、Windows `MediaHub.Tests` 1601/1601、`MediaHub.App` 0 警告/0 错误；`git diff --check` clean。
-- 新 head CI 已触发：Windows run `40976275587`、Android run `40976275493`，当前 `in_progress`。
+- 文档提交后的新 head CI 已触发：等待 exact head `3ac7a9c4` 的 Windows/Android run。
 
 ## 目标
 
