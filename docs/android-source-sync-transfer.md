@@ -6713,3 +6713,53 @@ W6-108 把逐条行放到了 stderr（给人看），但脚本读的是 `--json`
 
 - **EXECUTED_PASS**：本机 `MediaHub.Tests` **1708 / 0**、App 构建 **0 警告 0 错误**，四条对照 2 / 3 / 1 / 1 红且快照逐字节还原；
 - Android 未改动（对照 `uniqueTests` 2480）；主树本轮零改动；提交号以 PR #39 head 为准。
+
+## §80 W6-111：导出诊断日志的写盘路径（Windows 侧也有一份可交出去的报告）
+> 编号说明：§79 属主树 W6-110 轮（Android 侧的同一个出口），合并后紧随本节之前。
+
+### 80.1 结论先行
+- Windows 侧「导出已脱敏日志」按钮**早就有了**（SettingsPage.xaml:93），但它背后的渲染、文件命名与失败措辞全在 code-behind 里；测试工程 MediaHub.Tests **不引用 MediaHub.App**（WinUI 工程），所以这条路 0 覆盖：报告里没有应用版本/设备/条目数，失败时还把**异常的原文**贴到界面上。
+- 本轮把渲染与写盘搬到 `windows/src/MediaHub.Net/DiagnosticsReport.cs`（可测工程），`LogService.Export()` 变成同一渲染器的薄壳，`OnExportLogClick` 只负责选目录、写文件、显示结果句。
+- 顺带把「导出也再脱敏一次」补上：`LogService.Write` 写入前已脱敏，但 `Render` 面向任意调用方（测试里直造 `LogEntry`），所以每条日志行与头部字段都再过一遍 `LogService.Redact`。
+
+### 80.2 一份报告长什么样（固定句表）
+| 位置 | 固定句 |
+| --- | --- |
+| 第 1 行 | `# MediaHub Windows 诊断日志（已脱敏）` |
+| 头部 | `生成时间：yyyy-MM-dd HH:mm:ss` / `应用版本：<已脱敏>`（有才写）/ `设备：<已脱敏>`（有才写）/ `日志条目：<n>` |
+| 分隔 | `---- 日志 ----` |
+| 每条 | `yyyy-MM-dd HH:mm:ss.fff [Level] Category <已脱敏正文>` |
+| 分隔 | `---- 说明 ----` + 说明句（写入时已脱敏、导出时再逐行脱敏一次；密码、令牌与 Cookie 不会出现在这里。） |
+| 文件名 | `mediahub-diagnostics-yyyyMMdd-HHmmss.log`（本机时钟直接格式化） |
+| 界面成功句 | `已导出（已脱敏）：<绝对路径>` |
+| 界面失败句 | `导出失败：diagnostics-write-failed（原因：<已净化，≤160 字符>）` |
+
+### 80.3 一处渲染一处写盘
+- `DiagnosticsReport.Render(entries, now, appVersion, device)` 是唯一正文生产者；`LogService.Export()` = `Render(Snapshot(), DateTime.Now)`，`Snapshot()` 在 `_gate` 锁内取副本。
+- `DiagnosticsReport.Write(...)` 在 Render 之后只做三件事：`Directory.CreateDirectory`、`File.WriteAllText`（UTF-8 无 BOM）、返回 `WriteResult.Written(path, bytes, entries)`；`bytes` 是 **UTF-8 字节数**（不是字符数），`entries` 是写进去的条数。
+- 任何异常折成 `WriteResult.Failed("diagnostics-write-failed", Describe(exception))`；`Describe` 先脱敏、再把空白折成单空格、trim、截到 160 字符（末位若是高代理就再退一个字符，避免切出半个字符）。
+- 界面只认这两种结果，失败句里的原因已经过 `Describe`，异常原文不再直接上屏。
+
+### 80.4 用例与计数
+- 新增 `windows/tests/MediaHub.Tests/DiagnosticsReportTests.cs` **9 例**：行序与计数、每行二次脱敏（直造 `LogEntry`，消息含 `password=hunter2` 与 `api_key=abc123`）、头部字段也脱敏、文件名跟随时间戳、写盘建目录且 bytes/entries 与内容自洽、目标被同名文件占住报稳定码且原因净化、空日志仍出报告带说明、`Describe` 的脱敏/折叠/截断/空消息、`LogService.Export()` 与文件报告同一渲染器。
+- 本机：`MediaHub.Tests` 1708 → **1717 / 0**；App 构建 **0 警告 0 错误**。
+
+### 80.5 四条负向对照
+| 对照 | 改动 | 红 |
+| --- | --- | --- |
+| A | `Render` 不再逐行 `Redact` | 1（二次脱敏例） |
+| B | `FileName` 固定成 `20260101-000000` | 2（文件名例 + 写盘自洽例，后者断言路径以同一个 `FileName` 结尾） |
+| C | `Describe` 跳过 `Redact` | 1（净化例） |
+| D | `Write` 的 `bytes` 改用 `text.Length` | 1（写盘自洽例，证据文本含中文 ⇒ 字符数 ≠ 字节数） |
+
+四条都在实现态快照上跑（`D:/mh-verify/w6111-impl-report.cs` / `w6111-impl-tests.cs`，sha256 `a99f4216ce71…` / `0d6f5fc4cf02…`），每轮跑完逐字节还原、sha256 相等；还原后复跑全量 1717 / 0。
+
+### 80.6 边界
+- 界面按钮与文案不变（按钮仍是「导出已脱敏日志」，仍在设置页），本轮只换报告内容与失败措辞；没有新增「另存为」或剪贴板出口。
+- 写盘目录仍是 `%LocalAppData%\MediaHub`；文件名前缀由 `diagnostics-` 变为 `mediahub-diagnostics-`（旧文件不删、不改写）。
+- 报告正文来自内存环形缓冲（上限 2000 条）的**快照**，不是滚动日志文件；「打开日志文件夹」按钮未改。
+- 真实两机对跑不在本切片范围（这条路径与本机桌面有关，不涉及对端）⇒ 界面人工确认仍 **NOT_RUN**。
+
+### 80.7 状态
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1717 / 0**、App 构建 **0 警告 0 错误**，四条对照 1 / 2 / 1 / 1 红且快照逐字节还原；
+- Android 未改动（对照 `uniqueTests` 2480）；主树本轮零改动；提交号以 PR #39 head 为准。
