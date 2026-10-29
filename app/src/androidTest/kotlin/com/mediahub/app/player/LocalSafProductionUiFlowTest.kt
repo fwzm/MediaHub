@@ -70,7 +70,7 @@ class LocalSafProductionUiFlowTest {
             assertTrue(device.wait(Until.hasObject(documents), 10_000))
             // The prior backup picker may already leave DocumentsUI in Downloads, with
             // no roots drawer button. Use the same observed-location adapter as backup.
-            val downloads = Pattern.compile("(?i)^(downloads|下载内容|下载)$")
+            val downloads = Pattern.compile("(?i)^(downloads?|下载内容|下载)$")
             fun header() = device.findObject(By.res(Pattern.compile(".*:id/header_title")))?.text
                 ?: device.findObject(By.res(Pattern.compile(".*:id/breadcrumb_text")))?.text.orEmpty()
             device.waitForIdle(10_000)
