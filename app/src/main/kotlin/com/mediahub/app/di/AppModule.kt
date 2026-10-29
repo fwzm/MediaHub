@@ -198,6 +198,27 @@ object AppModule {
     @Singleton
     fun provideGlobalSearchEngine(): com.mediahub.feature.search.engine.GlobalSearchEngine =
         com.mediahub.feature.search.engine.GlobalSearchEngine(perServerTimeoutMs = 8_000, maxConcurrency = 4)
+
+    /**
+     * W6-110：诊断日志导出出口（LogBuffer → 文件）。
+     *
+     * 目录用 cacheDir/diagnostics：可被系统清理、不占用户存储；导出时逐行再脱敏一次（见 DiagnosticsReport）。
+     * 文件名带时间戳，不覆盖上一次导出。
+     */
+    @Provides
+    @Singleton
+    fun provideDiagnosticsExportPort(
+        @ApplicationContext context: Context,
+        logBuffer: LogBuffer,
+        logger: Logger,
+    ): com.mediahub.feature.settings.DiagnosticsExportPort =
+        com.mediahub.feature.settings.FileDiagnosticsExportPort(
+            buffer = logBuffer,
+            directory = File(context.cacheDir, "diagnostics"),
+            appVersion = BuildConfig.VERSION_NAME,
+            device = android.os.Build.MODEL ?: "unknown",
+            logger = logger,
+        )
 }
 
 @Module

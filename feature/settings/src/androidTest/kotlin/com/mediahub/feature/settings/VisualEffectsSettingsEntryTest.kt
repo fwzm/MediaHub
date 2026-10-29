@@ -190,8 +190,14 @@ class VisualEffectsSettingsEntryTest {
         assertFalse(runBlocking { repository.flow.first() }.immersiveBars)
     }
 
+    /** W6-110：设置页多了一个诊断导出出口；本用例不点它，给一个固定结果的实现即可。 */
+    private class UnusedDiagnosticsExportPort : DiagnosticsExportPort {
+        override suspend fun export(): DiagnosticsExportOutcome =
+            DiagnosticsExportOutcome.Exported("unused.txt", 0, 0)
+    }
+
     private fun newViewModel(repository: UserPreferencesStore): SettingsViewModel =
-        SettingsViewModel(repository, InMemorySourceSyncBaselineStore()).also { viewModel ->
+        SettingsViewModel(repository, InMemorySourceSyncBaselineStore(), UnusedDiagnosticsExportPort()).also { viewModel ->
             viewModelStores += ViewModelStore().apply { put("settings", viewModel) }
         }
 

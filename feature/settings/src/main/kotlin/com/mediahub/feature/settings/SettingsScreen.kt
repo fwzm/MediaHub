@@ -153,6 +153,25 @@ fun SettingsRoute(
             ) {
                 Text("已配对设备")
             }
+            // W6-110：诊断日志导出 —— 内存里的日志环形缓冲写成一份文件，导出时再逐行脱敏。
+            // 这里不新建 ViewModel（SettingsRoute 会在非 Hilt 的 instrumentation 测试里被直接调用）；
+            // 状态与动作都来自传入的 viewModel。
+            val diagnosticsState by viewModel.diagnosticsState.collectAsStateWithLifecycle()
+            androidx.compose.material3.OutlinedButton(
+                onClick = { viewModel.exportDiagnostics() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("diagnostics.export"),
+            ) {
+                Text(DiagnosticsExportText.BUTTON)
+            }
+            DiagnosticsExportText.line(diagnosticsState)?.let { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("diagnostics.result"),
+                )
+            }
 
             Spacer(Modifier.height(8.dp))
             Text(stringResource(R.string.settings_playback), style = MaterialTheme.typography.titleMedium)
