@@ -6830,3 +6830,35 @@ W6-108 把逐条行放到了 stderr（给人看），但脚本读的是 `--json`
 ### 80.7 状态
 - **EXECUTED_PASS**：本机 `MediaHub.Tests` **1717 / 0**、App 构建 **0 警告 0 错误**，四条对照 1 / 2 / 1 / 1 红且快照逐字节还原；
 - Android 未改动（对照 `uniqueTests` 2480）；主树本轮零改动；提交号以 PR #39 head 为准。
+
+## §81 W6-112：把主树 W14 合回本分支（PR #39 从 CONFLICTING 恢复可合并）
+
+### 81.1 起因与真实依赖
+base `feature/windows-client` 在本分支之后又前进 3 个提交（`f484dd8e`、`ab9d66bf`、`b586b001`）。`b586b001`（W14 诊断日志滚动落盘）把 `LogService.Export()` 改成**内联渲染**并在标题后加一行「滚动文件目录」；而 W6-111 早已把同一方法改成 `DiagnosticsReport.Render(Snapshot(), DateTime.Now)`。两侧对同一方法各重构一次、互不相知 ⇒ #39 变 `CONFLICTING` / `DIRTY`。GitHub 在 CONFLICTING 时不生成 `refs/pull/39/merge`，工作流一条都不触发（「推送后 0 新 run」就是信号），所以这不只是显示问题，而是**CI 证据链断掉**。
+
+### 81.2 冲突面与并集解法
+冲突仅 `windows/src/MediaHub.Net/LogService.cs` 一处。**任取一侧都会功能回退**：取本分支侧丢「滚动文件目录」行，取主树侧丢 `DiagnosticsReport` 可测渲染层与 W6-111 的 9 条 `DiagnosticsReportTests`。并集落法：
+
+- `Snapshot()` 保留（`lock (_gate) return _entries.ToList();`），W6-111 的结构不动；
+- `Export()` 仍委托可测渲染层，并补传滚动目录：`DiagnosticsReport.Render(Snapshot(), DateTime.Now, rollingDirectory: FileSink?.DirectoryPath)`；
+- `DiagnosticsReport.Render` / `Write` 增**尾随可选参数** `string? rollingDirectory = null`（现有 2/3/4 参调用零改动）；非空时在 `Title` 之后插入一行 `滚动文件目录：<dir>`；
+- `Write(string, LogService, …)` 透传 `log.FileSink?.DirectoryPath`，让「导出到文件」与 `Export()` 口径一致。
+
+### 81.3 该行不过脱敏（有测试钉住）
+滚动目录行**不做** `LogService.Redact`。它不是请求 URL，而是本机日志目录（`%LOCALAPPDATA%\MediaHub\logs`）；脱敏会把目录名里的十六进制段打码，指针随之失效、报告失去可用性。这条不是口味问题：W14 带入的 `LogFileSinkTests.The_export_points_at_the_rolling_directory_only_when_one_is_configured` 直接钉住「导出必须包含 `滚动文件目录：<原样目录>`」——按「也脱敏」实现时该例红过一次（`D:/mh-verify/w6-merge-s0-tests.log`：1725 通过 / 1 失败，报 `Assert.Contains` 找不到该串），改回后 `w6-merge-s0-tests2.log` 1726 / 0。`rollingDirectory == null` 时输出与 W6-111 逐字相同，`DiagnosticsReportTests` 的绝对行下标断言不受影响。
+
+### 81.4 合并提交与「没丢东西」的判据
+合并提交 **`7c2f96ca`**（parents `51776182` + `b586b001`，保留 Git 默认合并提交，不 rebase、不 amend 共享历史）。
+
+- `git diff --diff-filter=D 51776182 7c2f96ca` 为**空**（零删除）——这是「并集而非取一侧」的硬判据；
+- 两侧文件均在：`DiagnosticsReport.cs` / `DiagnosticsReportTests.cs`（W6-111）与 `LogFileSink.cs` / `LogFileSinkTests.cs` / `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md`（W14）；
+- `git grep -n -E '^(<<<<<<<|>>>>>>>) '` 无命中。
+
+### 81.5 验收（全部真跑）
+- **隔离副本自测**（不信任工作树）：`git archive 7c2f96ca` 解到 `D:/mh-verify/w6-7c2f96ca-src`，补入本机 `windows/native/libmpv` 后 `dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug -p:Platform=x64` ⇒ **1726 通过 / 0 失败 / 0 跳过**（合并前 `51776182` 为 1717，+9 即 W14 带入的 `LogFileSinkTests`）。
+- **exact-SHA CI @`7c2f96ca`**：`windows-ci` **40945269315** success（`MediaHub.Tests` **1726 / 0**、`MediaHub.WebDav.Tests` **104 / 0**）；`Android CI` **40945269145** success（`uniqueTests` **2495**、`--required-suite` 组 `required-suite` 门禁照常、两个 VI 作业各 **19 unique mandatory**、FAILED 行 0）。
+- Android 侧**零代码改动**，故 `uniqueTests` 与合并前同值（2495）；数值变化才说明合并带入了意外内容。
+
+### 81.6 边界
+- 本切片只做合并收口，**没有新增产品能力**；WinUI 界面人工确认仍 **GUI_UNVERIFIED**，真实两机对跑仍 **NOT_RUN**。
+- 同一工作区存在并行执行者时，同分支连续 push 会让后一次 push 取消前一次仍在跑的 run——要 exact-SHA 证据必须等最新 head 的 run 跑完再推。
