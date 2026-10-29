@@ -92,7 +92,9 @@ class LocalSafProductionUiFlowTest {
                 device.waitForIdle(10_000)
             }
             checkNotNull(device.wait(Until.findObject(By.text(label)), 10_000)).click()
-            checkNotNull(device.wait(Until.findObject(By.res(Pattern.compile(".*:id/action_menu_select"))), 10_000)).click()
+            val selectFolder = device.wait(Until.findObject(By.res(Pattern.compile(".*:id/action_menu_select"))), 3_000)
+                ?: device.wait(Until.findObject(By.res("android:id/button1")), 10_000)
+            checkNotNull(selectFolder).click()
             device.wait(Until.findObject(By.res("android:id/button1")), 3_000)?.click()
             waitNode(hasText("已选择目录"))
         }
