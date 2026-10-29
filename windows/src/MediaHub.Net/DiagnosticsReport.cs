@@ -35,7 +35,8 @@ public static class DiagnosticsReport
         => FilePrefix + now.ToString("yyyyMMdd-HHmmss") + FileSuffix;
 
     public static string Render(
-        IReadOnlyList<LogEntry> entries, DateTime now, string? appVersion = null, string? device = null)
+        IReadOnlyList<LogEntry> entries, DateTime now, string? appVersion = null, string? device = null,
+        string? rollingDirectory = null)
     {
         var lines = new List<string>
         {
@@ -44,6 +45,12 @@ public static class DiagnosticsReport
         };
         if (!string.IsNullOrWhiteSpace(appVersion)) lines.Add("应用版本：" + LogService.Redact(appVersion));
         if (!string.IsNullOrWhiteSpace(device)) lines.Add("设备：" + LogService.Redact(device));
+        // The memory buffer keeps the newest lines only; the rolling files keep the ones it pushed
+        // out. Point at them rather than implying the export is the complete history.
+        if (!string.IsNullOrWhiteSpace(rollingDirectory))
+            // Not redacted: this is the local log folder the operator chose, not a request URL. Redaction
+            // here would also mangle 32-hex directory names and make the pointer un-followable.
+            lines.Add("滚动文件目录：" + rollingDirectory);
         lines.Add("日志条目：" + entries.Count);
         lines.Add(LogSeparator);
         foreach (LogEntry entry in entries)
@@ -58,11 +65,11 @@ public static class DiagnosticsReport
 
     public static WriteResult Write(
         string directory, IReadOnlyList<LogEntry> entries, DateTime now,
-        string? appVersion = null, string? device = null)
+        string? appVersion = null, string? device = null, string? rollingDirectory = null)
     {
         try
         {
-            string text = Render(entries, now, appVersion, device);
+            string text = Render(entries, now, appVersion, device, rollingDirectory);
             Directory.CreateDirectory(directory);
             string path = Path.Combine(directory, FileName(now));
             File.WriteAllText(path, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -76,7 +83,7 @@ public static class DiagnosticsReport
 
     public static WriteResult Write(
         string directory, LogService log, DateTime now, string? appVersion = null, string? device = null)
-        => Write(directory, log.Snapshot(), now, appVersion, device);
+        => Write(directory, log.Snapshot(), now, appVersion, device, log.FileSink?.DirectoryPath);
 
     public static string SuccessLine(string path) => "已导出（已脱敏）：" + path;
 

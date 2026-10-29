@@ -26,7 +26,18 @@ public sealed class LogService
 
     public ReadOnlyObservableCollection<LogEntry> Entries { get; }
 
-    public LogService() => Entries = new ReadOnlyObservableCollection<LogEntry>(_entries);
+    /// <summary>
+    /// Optional bounded rolling-file trail. Null for callers that only want the memory buffer; the
+    /// app passes one so the earliest lines survive a restart. The sink receives entries already
+    /// redacted here, never raw text.
+    /// </summary>
+    public LogFileSink? FileSink { get; }
+
+    public LogService(LogFileSink? fileSink = null)
+    {
+        FileSink = fileSink;
+        Entries = new ReadOnlyObservableCollection<LogEntry>(_entries);
+    }
 
     public event EventHandler<LogEntry>? EntryAdded;
 
@@ -50,11 +61,14 @@ public sealed class LogService
             _entries.Add(entry);
             while (_entries.Count > MaxEntries) _entries.RemoveAt(0);
         }
+        // Durable trail first: it is the only copy that outlives the process, and a UI subscriber
+        // must not be able to prevent it. The sink swallows disk failures by design.
+        FileSink?.Append(entry);
         EntryAdded?.Invoke(this, entry);
     }
 
     /// <summary>Builds a redacted diagnostic report suitable for attaching to a bug report.</summary>
-    public string Export() => DiagnosticsReport.Render(Snapshot(), DateTime.Now);
+    public string Export() => DiagnosticsReport.Render(Snapshot(), DateTime.Now, rollingDirectory: FileSink?.DirectoryPath);
 
     /// <summary>A copy of the entries, taken under the write lock.</summary>
     public List<LogEntry> Snapshot()

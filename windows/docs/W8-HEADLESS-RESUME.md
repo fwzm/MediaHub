@@ -198,3 +198,78 @@ dotnet windows/src/MediaHub.ResumeProbe/bin/Debug/net10.0/MediaHub.ResumeProbe.d
 - `windows/src/MediaHub.ResumeProbe/Program.cs` —— 探针实现（参数、四阶段、断言、报告）
 - `windows/tools/acceptance/w8/headless-resume.ps1` —— 驱动脚本（起服、登录、复位、跑探针、收尾）
 - `windows/tools/acceptance/w8/s1-resume-gui.ps1`、`s2-emby-gui.ps1` —— GUI 侧续播验收（本文件的补充，不是替代）
+
+## 10 版本可钉住的复跑（2026-10-29 · 第 43 轮）
+
+> 状态：三次真服闭环全绿 —— 官方 Emby **4.10.1.0**（任务书指定版本）+ Jellyfin 12.2.0 的钉住运行 `RESULT: 19 passed, 0 failed`；默认路径（本机既有 Emby 4.10.2.0）`RESULT: 19 passed, 0 failed`。两条版本断言各比对 `GET /System/Info/Public` 的 `Version` 字符串。
+
+### 10.1 为什么需要这一节
+
+§1 的表格只钉住「跑过的那两台实例」，而 `windows/tools/acceptance/w8/headless-resume.ps1` 原先只有一个 `-InstallRoot`：换一台服务器没有入口，版本只写进报告、不在断言里。任务书要求的是**官方 Emby 4.10.1.0**，所以本轮把 harness 拆成「安装根 / 数据根 / 期望版本」三个可传参数，并把版本做成断言 —— 报告里记的版本号必须由断言复核，否则「这一轮跑的是哪个版本」永远只是回忆。
+
+### 10.2 三次运行（本轮证据）
+
+| 运行 | Jellyfin | Emby | 结果 |
+| --- | --- | --- | --- |
+| 钉住版本 | 12.2.0 @8096（`D:\mh-servers`） | **4.10.1.0** @8098（`D:\mh-servers410`，官方 4.10.1.0 归档） | `RESULT: 19 passed, 0 failed` |
+| 默认路径 | 12.2.0 @8096 | 4.10.2.0 @8097（`D:\mh-servers\emby-install\app\system.old`） | `RESULT: 19 passed, 0 failed` |
+| 负向 N1 | 12.2.0 | 4.10.1.0，但期望故意写成 4.10.2.0 | **17 passed, 1 failed** —— `FAIL emby-is-the-expected-version :: expected=4.10.2.0 actual=4.10.1.0` |
+| 负向 N2 | 12.2.0 | 安装根故意写成 `D:\mh-servers410-missing` | 具名失败：`FATAL EmbyServer.exe not found under D:\mh-servers410-missing\emby-install or D:\mh-servers410-missing\emby (run get-test-servers.ps1)`，退出码 1 |
+
+钉住运行里的两条版本断言原文：`PASS jellyfin-is-the-expected-version :: expected=12.2.0 actual=12.2.0`、`PASS emby-is-the-expected-version :: expected=4.10.1.0 actual=4.10.1.0`。两服探针各 `RESULT: 16 passed, 0 failed`（`clientInstances=10`），收尾 `PASS no-test-server-processes-left :: running=0`。
+
+与 §5.3 有关的一条**新实测**：官方 Emby 4.10.1.0 在 600 s 夹具上停止于 12.0 s（片长 2%）时位置被**保留**（`PASS two-percent-floor-is-per-server expected=120000000 actual=120000000`，且出现在续播列表里），与 4.10.2.0 结论一致 ⇒「Emby 的下限是片长 2%」不是 4.10.2 独有的行为。同一次运行里 Jellyfin 12.2.0 对同样 12.0 s 的上报仍是清零（5% + 300 s），两服差异在同一次运行内被同时钉住。
+
+### 10.3 复跑命令
+
+```powershell
+# 1) 官方 Emby 4.10.1.0 装到隔离根（仓库外），并关掉自动更新
+pwsh -NoProfile -File windows/tools/setup-test-server.ps1 -Server emby `
+    -InstallRoot D:\mh-servers410 -DataRoot D:\mh-servers410\data\emby -Port 8098 `
+    -UserName mh -Password mh-test-pass -DisableAutoUpdate
+
+# 2) 版本钉住的闭环（Jellyfin 仍用 D:\mh-servers 的 12.2.0）
+pwsh -NoProfile -File windows/tools/acceptance/w8/headless-resume.ps1 `
+    -InstallRoot D:\mh-servers -EmbyInstallRoot D:\mh-servers410 `
+    -EmbyDataRoot D:\mh-servers410\data\emby -EmbyPort 8098 `
+    -ExpectJellyfinVersion 12.2.0 -ExpectEmbyVersion 4.10.1.0
+```
+
+`windows/tools/get-test-servers.ps1` 负责把两个官方归档下到 `<Destination>\_downloads`（解压到 `<Destination>\{jellyfin,emby}`），并把版本与每个归档的 SHA-256 写进 `<Destination>\SERVER-VERSIONS.json`。`setup-test-server.ps1` 仍然会在开头强杀机器上所有 `jellyfin`/`EmbyServer` 进程（该文件 `:125-127`），所以不要与其他人的并行取证同时跑。
+
+### 10.4 本轮修掉的两个工具缺陷
+
+1. **缓存归档只查「存在」不查「可用」**（`windows/tools/get-test-servers.ps1`）：本机 `_downloads\embyserver-win-x64-4.10.1.0.7z` 只有 90,730,496 B，而官方资产是 133,879,144 B —— 一次中断的下载把截断文件留在缓存里，之后每次运行都拿它去解压（`7zr x` 报 `Unexpected end of archive`，`Files: 0`）。现在 `Test-Artifact` 会真的打开容器（`.7z` 走 `7zr t`，zip 走 `[System.IO.Compression.ZipFile]::OpenRead`），打不开就打印 `refetching <名称> (the cached copy cannot be opened)` 并重下。
+2. **Emby 的监听端口不随 `-Port`**（`windows/tools/setup-test-server.ps1`）：Emby 4.10 忽略 `-datadir`，端口只来自数据根的 `config\system.xml`（从未运行过的新根默认 8096）—— 本轮实测打印 `configured port is 8096; pinning 8098`。脚本现在先冷启动探到真实端口，停服、写 `HttpServerPortNumber`/`PublicPort`、读回校验（不等即抛）后重启；并新增 `-DisableAutoUpdate`（鉴权后经 `/System/Configuration` 关掉自动更新并回读，实测 `auto update disabled (read back as false)`），避免验收途中服务器自动升级把版本证据改掉。同一次改动把 `Wait-Http` 从「有响应即就绪」收紧为「只认 2xx」，超时消息带最后状态码。
+
+### 10.5 负向对照 N3：缓存校验不是空转
+
+在 scratch 目录 `D:\mh-control` 放两个**小号**真实归档（一个 132 B 的 zip + 一个 183 B 的 7z，7z 内含 `system\EmbyServer.exe` 占位），然后：
+
+| 步骤 | 动作 | 观测 |
+| --- | --- | --- |
+| A | 把 7z 截断成一半（91 B）后运行 `get-test-servers.ps1 -Destination D:\mh-control` | `cached  jellyfin_12.2-amd64.zip` + `refetching embyserver-win-x64-4.10.1.0.7z (the cached copy cannot be opened)`；并且重下真的发生了（15 s 内文件长到 32,715,492 B，随后由对照自身终止进程） |
+| B | 恢复完好的 7z 后再跑一次 | `cached  jellyfin_12.2-amd64.zip` + `cached  embyserver-win-x64-4.10.1.0.7z` → 解压 → `versions recorded: D:\mh-control\SERVER-VERSIONS.json` → 两个 exe 都定位到，**退出码 0** |
+
+### 10.6 本机环境事实（复跑前必读）
+
+**`PATHEXT=.CPL` 会让 `& dotnet` 变成「无法将 'dotnet' 项识别为 cmdlet」**：本会话的 shell 环境里 `$env:PATHEXT` 是 `.CPL`，PowerShell 因此不会把 `dotnet` 补成 `dotnet.exe`。而驱动脚本正是用 `& dotnet $ProbeDll …` 启动探针（该文件 `:240`），所以任何用自定义环境变量起 harness 的调用方都必须显式带上正常的 `PATHEXT`（`.COM;.EXE;.BAT;.CMD;…`）。本轮为此真实失败了两次：版本断言全部通过、探针却一步没跑。这不是脚本缺陷，但会伪装成「服务器/探针有问题」。
+
+### 10.7 证据文件
+
+| 文件 | 内容 |
+| --- | --- |
+| `D:\mh-verify\w8-emby410-pinned-run.log` | 钉住运行完整 stdout（`RESULT: 19 passed, 0 failed`） |
+| `D:\mh-verify\w8-evidence-emby410\`（4 文件） | 该次运行的 summary + 两服探针 JSON/日志 |
+| `D:\mh-verify\w8-default-path-run.log` + `w8-evidence-emby410-default\` | 默认路径复跑（19/0，Emby 4.10.2.0） |
+| `D:\mh-verify\w8-neg-N1.log`、`w8-neg-N2.log` | 两条负向对照 |
+| `D:\mh-verify\w8-neg-N3-A.log`、`w8-neg-N3-B.log` | 缓存校验 A/B |
+| `D:\mh-verify\w8-emby410-setup.log` | 隔离根一次性向导 + 建库 + 扫描 + 关自动更新 |
+
+这些目录都在仓库外（`D:\mh-verify`）或 `.gitignore` 覆盖的 `windows/tools/acceptance/evidence/`，所以只留路径、不入库；报告里的数字都能由上面的日志复算。
+
+### 10.8 残余风险
+
+1. **版本断言只比字符串**：`Version` 来自 `GET /System/Info/Public`，不校验二进制哈希。归档哈希由 `get-test-servers.ps1` 记进 `<Destination>\SERVER-VERSIONS.json`（本轮已实测该文件内容与官方资产一致）。
+2. **默认路径跑的是 4.10.2.0**：本机 `D:\mh-servers` 树下唯一的 `EmbyServer.exe` 位于 `emby-install\app\system.old`（FileVersion 4.10.2.0），这是安装事实而非脚本选择；`-ExpectEmbyVersion` 让它至少不会静默漂移。
+3. **2% 结论仍只来自两个 Emby 小版本**（4.10.1.0 / 4.10.2.0）：更大范围的版本漂移仍需逐版本重跑。
