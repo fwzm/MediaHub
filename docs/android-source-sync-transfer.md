@@ -6069,3 +6069,71 @@ W6-101 的两条老用例按新契约收口（**收口不是放宽**）：`a_rou
 - **EXECUTED_PASS**：本机 `feature:settings` **418 / 0**，四条对照 7 / 1 / 2 / 1 红且逐字节还原；
 - **IMPLEMENTED_UNVERIFIED**：生产接线的端到端证据未取（见 75.6）；
 - Windows 侧本轮零改动（C# 1691 / 0 对照）；主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+
+## §79 W6-110：「导出诊断日志」出口（内存日志 → 一份可以交给别人看的文件）
+
+> 编号说明：§76–§78 属跨设备分支的 W6-107 / W6-108 / W6-109 三轮，合并后紧随本节之前；本节是主树 W6-110。
+
+### 79.1 结论先行
+
+在此之前，「日志」只活在内存里的环形缓冲（`LogBuffer`）与 logcat 里：用户遇到问题时，除了口头描述与截图，没有可交出来的东西。本轮把这条出口接上——设置页多一个「导出诊断日志」按钮，导出一份纯文本报告，**导出时对每一行再过一次脱敏**，于是即便有代码绕过 `MemoryLogger` 把原文塞进缓冲，报告里也不会带出秘密。
+
+### 79.2 一处措辞一处消费（固定句）
+
+| 位置 | 固定句 |
+| --- | --- |
+| 按钮 | `导出诊断日志` |
+| 进行中 | `正在导出诊断日志…` |
+| 成功行 | `已导出 N 条日志（N 字节）：<绝对路径>` |
+| 失败行 | `导出失败：<稳定码>`，有原因时追加 `（原因：…）` |
+| 日志行（成功） | `[I][UI] diagnostics-exported:entries=N:bytes=N` —— 只记计数，**不记目录路径** |
+| 日志行（失败） | `[W][UI] diagnostics-export-failed:<稳定码>` |
+| 报告首行 | `MediaHub 诊断报告`，随后 生成时间 / 应用版本 / 设备 / 日志条目 N |
+| 报告分段 | `---- 日志 ----` 与 `---- 说明 ----`，末行是脱敏说明 |
+| 文件名 | `mediahub-diagnostics-yyyyMMdd-HHmmss.txt`（随 instant 与 zone 变） |
+
+措辞只有一处权威：按钮/进度/结果句在 `DiagnosticsExportText`，报告结构与写盘在 `core/logging` 的 `DiagnosticsReport`，设置页只决定何时调用。
+
+### 79.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `core/logging/.../DiagnosticsReport.kt`（新） | 渲染（头部 + 日志 + 说明）、`fileName`、`write`（mkdirs + UTF-8）、`describe`（脱敏 + 空白折叠 + 160 字符截断，代理对安全） |
+| `feature/settings/.../DiagnosticsExportPort.kt`（新） | `DiagnosticsExportPort.export()` 与 `Exported` / `Failed`；`FileDiagnosticsExportPort` 读 `LogBuffer.snapshot()` 后交给报告层 |
+| `feature/settings/.../DiagnosticsExportText.kt`（新） | 按钮、进度、成功/失败句、按状态取行 |
+| `feature/settings/.../SettingsViewModel.kt` | 第三个构造参数（出口）、`DiagnosticsExportState` 四态、`exportDiagnostics()` 单飞（上一次还在跑时再点不叠加） |
+| `feature/settings/.../SettingsScreen.kt` | 「已配对设备」下方加按钮（`diagnostics.export`）与结果行（`diagnostics.result`）；**不新建 ViewModel**，因为该页会在非 Hilt 的 instrumentation 测试里被直接调用 |
+| `app/.../di/AppModule.kt` | `@Provides @Singleton` 提供出口：`cacheDir/diagnostics` + `BuildConfig.VERSION_NAME` + `Build.MODEL` |
+
+### 79.4 用例与计数
+
+- `core/logging` 24 → **32**（新增 8 例：报告顺序与行数、每行二次脱敏、头部字段也脱敏、文件名随 zone、写盘建目录并回报字节/条目、目标被同名文件占住回稳定码 + 净化原因、空缓冲仍有说明、`describe` 的脱敏/折叠/截断/空值）；
+- `feature/settings` 418 → **425**（新增 7 例：4 条出口用例 —— 写盘、日志行只记计数不记目录、目录被文件占住回稳定码 + 一条警告、两次导出两秒两个文件名；3 条 ViewModel 用例 —— Exporting → Exported、连点只导一次、失败句与净化原因）；
+- 本机：`gradlew.bat :core:logging:testDebugUnitTest :feature:settings:testDebugUnitTest` ⇒ **32 / 0** 与 **425 / 0**；
+- 编译证据：`:feature:settings:assembleDebugAndroidTest`（产出 `settings-debug-androidTest.apk`）与 `:app:compileDebugKotlin`（Hilt 处理新增 `@Provides`）均 BUILD SUCCESSFUL。
+
+### 79.5 四条负向对照（各 1 红，逐字节还原）
+
+| 对照 | 变异 | 结果 |
+| --- | --- | --- |
+| A | 报告正文不再二次脱敏（`lines.map { redact(it) }` → `lines`） | 1 红 `every_line_is_redacted_again_even_when_it_never_passed_the_memory_logger` |
+| B | 文件名忽略 zone（固定 UTC） | 1 红 `the_file_name_follows_the_instant_and_the_zone` |
+| C | 导出日志行拼上绝对路径 | 1 红 `the_information_line_carries_the_counts_and_never_the_directory` |
+| D | `describe` 跳过脱敏 | 1 红 `describe_cleans_secrets_whitespace_and_length` |
+
+实现态快照 `D:/mh-verify/w6110-impl-report.kt`（sha256 以字节为准）与 `D:/mh-verify/w6110-impl-port.kt`；每轮跑完写回并比对 sha256（四次全 true），随后复跑 32 / 0 与 425 / 0。日志留档 `D:/mh-verify/w6110-neg-A..D.log`。
+
+### 79.6 边界与本轮真问题
+
+- 导出目录是 `cacheDir/diagnostics`（系统可清理、不占用户存储）；同一秒导两次会同名，由文件名时间戳与调用时机避免；
+- 报告在导出时再过一次 `Redactor`（幂等），这是**防绕过**而不是重复劳动：日志写缓冲时已脱敏一次；
+- 本轮踩到的真问题：`feature/settings/src/androidTest/.../VisualEffectsSettingsEntryTest.kt` 也**直接构造** `SettingsViewModel(repository, InMemorySourceSyncBaselineStore())` ⇒ 加构造参数后 androidTest 编译失败（`No value passed for parameter diagnosticsExport`）。修法是给它一个不点按钮的出口实现。教训：**加构造参数必须跑 `assembleDebugAndroidTest`，:test 全绿不代表 instrumentation 能编译**；
+- 另一条 Kotlin 教训：`assertTrue(x is T)` 不做智能转换，`x.path` 会报 Unresolved reference，需显式 `val y = x as T`；
+- 「导出诊断日志」目前只有设置页按钮入口（不弹分享面板、不需要运行时权限）；
+- 真实两机联调 **NOT_RUN**，真机 instrumentation **DEVICE_UNVERIFIED**。
+
+### 79.7 状态
+
+- **EXECUTED_PASS**：本机 32 / 0 与 425 / 0、四条对照各 1 红且逐字节还原、androidTest 与 app 编译通过；
+- **IMPLEMENTED_UNVERIFIED**：按钮 → 报告文件的端到端证据只在 JVM 测试与编译期，未在真机点过；
+- 主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
