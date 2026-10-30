@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-30T20:15:00+08:00",
+  "updated_at": "2026-10-30T20:30:00+08:00",
   "updated_by": "lead-W6-113-r7",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -57,9 +57,11 @@
       "evidence": [
         "d6331139",
         "docs/pr-archive/PR39-BODY-ARCHIVE-20261030.md",
-        "body 257915 -> 224584 B"
+        "body 257915 -> 224584 B",
+        "round 8: body 259740 -> 192381 B；W6-86..W6-109 共 21 节（69,288 B）原文归档 docs/pr-archive/PR39-W6-86-to-W6-109-20261030.md（70,177 B）",
+        "余量 2,404 -> 69,763 B，未来约 20 节追加无需再折"
       ],
-      "notes": "原文一字未删；折叠前全文 D:/mh-goal/pr39-body-before-w6113.md。"
+      "notes": "原文一字未删；折叠以远端回读为唯一输入，边界用 `^## ` 标题精确匹配，字节守卫 + 回读 trimEnd 比对。历史归档 docs/pr-archive/PR39-BODY-ARCHIVE-20261030.md（W6-68..71）。"
     },
     {
       "id": "W6-113d",

@@ -90,5 +90,10 @@
 - **CI 验收（EXECUTED，head `0cef5d79`，push `52cda428..0cef5d79`）**：windows-ci run `41051026115` success，四作业全 success。台阶日志：`MediaHub.Tests: total=1943 baseline=1943 failed=0 notExecuted=0`、`MediaHub.Tests: classes=112 baseline=class table 112 entries`、`MediaHub.WebDav.Tests: total=104 baseline=104`、`WebDav classes=4 baseline=class table 4 entries`；套件实跑 `Passed: 1943` / `Passed: 104`。日志留存 `D:/mh-verify/r7-nc/ci-0cef5d79-windows.log`（109,235 B）。Android CI run `41051026121`（同 head）入账时 in_progress → 本轮**不作结论**（本轮零 Android 代码改动）。
 - **第三方再次采纳（EXECUTED，第二个非本次作者）**：并行写者 W31（`06b6890d`，作者 墨崔）新增 9 例并同步把基线 1943 → **1952**、类表 112 → **113**（`MhBackupHandleLocatorTests: 9`）；同 head 的 windows-ci run `41053179818` success，台阶日志 `MediaHub.Tests: total=1952 baseline=1952` / `classes=113 baseline=class table 113 entries`。与 W28 那次不同，这次连类表也一起改了 —— 说明 per-class 口径已被第二个使用者按设计跟上，而不是只把总数刷到绿。
 - **note**：CI run `41053031684`（head `5f253c50`）在跑时被 W31 的 push 取代；Android CI `41053032168`（同 head）因 `cancel-in-progress` 被取消 —— 与 ADR-AUTO-001 描述一致，不作失败判定。
+## 2026-10-30 20:2x — lead（W6-113 round 8）— PR #39 正文治理：21 节历史明细归档，正文回到 69 KB 余量
 
-
+- **触发**：round 7 结束时正文 **259,740 B**，硬上限 262,144 B ⇒ 只剩 **2,404 B**，新章节追加会被 GitHub 静默截断（不是报错）。
+- **动作**：把 2026-10-28 ~ 10-29 的 **21 个小节**（W6-86 … W6-109，合计 **69,288 B**）整体移出正文，**原文逐字**存入 `docs/pr-archive/PR39-W6-86-to-W6-109-20261030.md`（70,177 B，含归档说明头）；正文原位换成一节索引（21 行表：小节 id + 主题）。
+- **结果**：正文 **259,740 → 192,381 B**，余量 **69,763 B**（未来约 20 节追加不用再折）。折叠区段以远端当次回读为唯一输入，边界用 `^## ` 标题精确匹配（起点 `W6-86`、终点 `W6-111` 前一节），折叠前后都做 `Buffer.byteLength` 守卫与回读 `trimEnd` 比对。
+- **口径与证据级别**：折叠 = 原文搬家，不是删除（EXECUTED：归档文件字节数 70,177 B、正文 192,381 B 均由脚本实测；正文回读校验见下轮推送记录）。
+- **并发风险（round 7 已实测的同类问题）**：PR 正文是多个执行者共享的可变产物 —— 8 分钟内我方小节曾被对方用本地快照整体重写掉。本轮折叠同样以「读远端 → 变换 → PATCH → 回读 equal」四步执行，且权威证据仍先落仓库 docs。
