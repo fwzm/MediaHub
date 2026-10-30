@@ -365,6 +365,77 @@ else {
     }
 }
 
+# --- 8. notices inventory vs the resolved graph and the declared packages ----------------------
+$noticesRaw = ''
+if (Test-Path -LiteralPath $noticesFile) { $noticesRaw = Get-Content -LiteralPath $noticesFile -Raw }
+$noticesTable = @()
+if (Test-Path -LiteralPath $noticesFile) {
+    $noticesTable = @(Get-Content -LiteralPath $noticesFile | Where-Object { $_.TrimStart().StartsWith('|') })
+}
+
+function Format-NameList {
+    param([object[]] $Names)
+    $list = @($Names)
+    if ($list.Count -le 3) { return ($list -join ', ') }
+    return ((@($list) | Select-Object -First 3) -join ', ') + ' (+' + ($list.Count - 3).ToString() + ' more)'
+}
+
+if (-not $report) {
+    Add-Check 'notices-inventory' 'SKIP' 'the licence report did not parse, so the resolved graph has nothing to compare against'
+}
+elseif ($noticesTable.Count -eq 0) {
+    Add-Check 'notices-inventory' 'SKIP' ('no table rows in ' + $noticesFile + ' - see the notices-exist check above')
+}
+else {
+    $unrecorded = @()
+    $versionDrift = @()
+    $licenceGaps = @()
+    foreach ($pkgRow in @($report.packages)) {
+        $pkgId = [string]$pkgRow.id
+        $pkgVersion = [string]$pkgRow.version
+        $pkgLicence = [string]$pkgRow.license
+        $pkgLabel = $pkgId + '@' + $pkgVersion
+        $rowMatches = @($noticesTable | Where-Object { $_.Contains('| ' + $pkgId + ' |') })
+        if ($rowMatches.Count -eq 0) { $unrecorded += $pkgLabel; continue }
+        $withVersion = $rowMatches
+        if ($pkgVersion -ne '') {
+            $withVersion = @($rowMatches | Where-Object { $_.Contains($pkgVersion) })
+            if ($withVersion.Count -eq 0) { $versionDrift += $pkgLabel; continue }
+        }
+        if (($pkgLicence -ne '') -and (-not (@($withVersion | Where-Object { $_.Contains($pkgLicence) }).Count -gt 0))) {
+            $licenceGaps += ($pkgLabel + ' has no ' + $pkgLicence)
+        }
+    }
+    if (($unrecorded.Count -eq 0) -and ($versionDrift.Count -eq 0) -and ($licenceGaps.Count -eq 0)) {
+        Add-Check 'notices-inventory' 'PASS' (@($report.packages).Count.ToString() + ' resolved package(s) each have a notices row with the resolved version and licence (' + $noticesTable.Count.ToString() + ' table rows)')
+    }
+    else {
+        $detail = 'the notices doc is stale: ' + $unrecorded.Count.ToString() + ' package(s) missing [' + (Format-NameList $unrecorded) + '], ' + $versionDrift.Count.ToString() + ' with a drifted version [' + (Format-NameList $versionDrift) + '], ' + $licenceGaps.Count.ToString() + ' with a drifted licence [' + (Format-NameList $licenceGaps) + '] - regenerate: pwsh -NoProfile -File windows/tools/license-report.ps1 -Docs'
+        Add-Check 'notices-inventory' 'FAIL' $detail
+    }
+}
+
+$declaredNames = @()
+foreach ($projectFile in @($projectFiles)) {
+    $projectText = Get-Content -LiteralPath $projectFile.FullName -Raw
+    foreach ($m in [regex]::Matches($projectText, '<PackageReference\s+Include="([^"]+)"')) {
+        $declaredNames += [string]$m.Groups[1].Value
+    }
+}
+$declaredNames = @($declaredNames | Sort-Object -Unique)
+if ($declaredNames.Count -eq 0) {
+    Add-Check 'notices-declarations' 'WARN' 'no PackageReference Include=... found under windows/src and windows/tests'
+}
+else {
+    $notDeclared = @($declaredNames | Where-Object { -not $noticesRaw.Contains($_) })
+    if ($notDeclared.Count -eq 0) {
+        Add-Check 'notices-declarations' 'PASS' ($declaredNames.Count.ToString() + ' directly declared package(s) are each named in the notices doc')
+    }
+    else {
+        Add-Check 'notices-declarations' 'FAIL' ($notDeclared.Count.ToString() + ' directly declared package(s) are absent from the notices doc: ' + (Format-NameList $notDeclared) + ' - the legal document must name every dependency the build resolves')
+    }
+}
+
 # --- summary ----------------------------------------------------------------------------------
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })

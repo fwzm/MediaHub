@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-25 项检查分七组：
+27 项检查分八组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -54,6 +54,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 报告一致性 | `report-exists`、`report-no-violations`、`report-project-count`、`report-engine-pin`、`report-lgpl-dependency-count`、`lgpl-licence-gaps` | 报告过期（csproj 数变了）、出现策略违规、引擎哈希与固定值不符、LGPL 依赖数变了 |
 | SBOM 库存（W32 起） | `sbom-inventory`、`sbom-inventory-licences`、`sbom-source-revision` | 入库的 SBOM 与「当场重新解析依赖图得到的报告」不再一一对应（包升级/新增/移除、许可表达式变了），或 SBOM 记录的本机来源提交不落在当前分支历史上 |
 | 工具链（W33 + W34 起） | `sdk-pin-matches-report` | 报告不是由仓库根 `global.json` 钉住的 SDK 生成的——SBOM 与全部实测证据必须出自同一条工具链；另见 §3.2（关修剪使还原图在任何机器上一致） |
+| 通告文档（W35 起） | `notices-inventory`、`notices-declarations` | 入库的 `THIRD-PARTY-NOTICES.md` 与「当场解析出的依赖图」或「csproj 里直接声明的包」不再对得上（漏包、版本/许可漂移、新增依赖没写进法律文档） |
 
 `lgpl-licence-gaps` 默认是 **WARN**：`component-licences.txt` 里没有声明的 5 个 MSYS2 包（`libwinpthread-1`、`libpcre2-8-0`、`libintl-8`、`libexpat-1`、`libbz2-1`）是**已知缺口**，默认 flavour 不随包分发它们。要在「切 LGPL 发布前」把缺口当硬门，加 `-FailOnLicenceGaps`。
 
@@ -91,6 +92,23 @@ W32 的三检首次随 CI 跑就抓到两件事，都不是「SBOM 写错了」�
 `sbom-source-revision` 同时改成四分支：属性缺失 / 值里读不出提交 / 机器上没有 git → WARN；`git cat-file -e <sha>^{commit}` 失败时再看 `git rev-parse --is-shallow-repository`，为 true（浅克隆，对象根本没取回来）→ WARN 并提示 `fetch-depth: 0`，为 false（对象确实不在克隆里）→ FAIL；对象存在但 `merge-base --is-ancestor` 为假 → FAIL（记录的是另一条血统）；可达 → PASS。
 
 负向对照：把 `global.json` 的 pin 改成 10.0.403 → 恰好 1 红（`sdk-pin-matches-report`）；报告副本的 `tooling.dotnet` 改成 10.0.403 → 恰好 1 红；改成 `unknown` → 0 红 2 警；SBOM 副本的来源提交改成用 `git commit-tree` 造出来的悬空提交（对象存在但不在 HEAD 谱系）→ 恰好 1 红（`sbom-source-revision`）；浅克隆（`git clone --depth 1` 后跑核对器）→ 同一检查 WARN、退出码 0，`git fetch --unshallow` 后回到 PASS。
+
+### 3.3 通告文档库存两检（W35，2026-10-31）
+
+生成的 `windows/docs/THIRD-PARTY-NOTICES.md` 是随包附带、给外部看的那份法律文档；它此前只有「形状检查」（关键段落还在不在），没有任何一项比对**依赖清单**，于是新增一个包、或包升级/许可变了而不重生成 notices，都会静默漂移。新增两项：
+
+| 检查 | 判据 | 失败含义 |
+| --- | --- | --- |
+| `notices-inventory` | 报告 `packages[]` 每一项都必须在 notices 表格行里找到 `| 包名 |`，且同一行含解析版本与许可串 | notices 与「当场重新解析的依赖图」不再一致：漏包、版本漂移、许可漂移 |
+| `notices-declarations` | `windows/src`、`windows/tests` 里每个 `<PackageReference Include="…">` 的包名都必须出现在 notices 文本里 | 新增直接依赖却没写进法律文档（不依赖报告，报告缺失时仍在跑） |
+
+报告缺失时按既有语义处理：`notices-inventory` SKIP（退出码仍 0），`notices-declarations` 继续跑。负向对照用 `-NoticesPath` 指向副本，不动仓库文件：
+
+- 删掉 `Microsoft.CodeCoverage` 那一行 → 恰好 1 红（`notices-inventory`，1 package(s) missing）。
+- 把该行版本 17.13.0 改成 17.99.0 → 恰好 1 红（1 with a drifted version）。
+- 把该行许可 MIT 改成 Apache-2.0 → 恰好 1 红（1 with a drifted licence）。
+- 临时往 `MediaHub.Tests.csproj` 加一个不存在的 `Phantom.Package` → 恰好 1 红（`notices-declarations`）；随后把 csproj 逐字节还原（sha256 相等）。
+- `-JsonPath` 指向不存在的报告 → 22 项、6 项 SKIP、0 红 0 警，`notices-declarations` 仍 PASS（不因缺报告而假警）。
 
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
@@ -138,6 +156,17 @@ check-licence-surface  RESULT: PASS
 CI 侧的第一手证据（`16f40a46`，run 41079426815，step「Licence surface guard」）：`FAIL sbom-inventory the SBOM is stale: 0 resolved package(s) missing [], 1 recorded but no longer resolved [pkg:nuget/System.Reflection.Metadata@1.6.0]`，同时 `PASS sbom-source-revision`（`fetch-depth: 0` 生效）与 `PASS sdk-pin-matches-report the report was produced by the pinned SDK 10.0.113`——这组行正是上面诊断的现场。
 
 有一条强度差异必须写明：CI 的 checkout 是完整克隆（`fetch-depth: 0`）时，来源提交判定是硬门（FAIL）；浅克隆里该对象不存在，同一检查只给 WARN。这条检查的强度取决于克隆深度，仓库 CI 已把它设成硬门形态。
+
+### 4.3 实测（2026-10-31，W35，本机，HEAD a517e663）
+
+```text
+check-licence-surface  checks=27 failed=0 warnings=1 skipped=0
+check-licence-surface  PASS  notices-inventory  29 resolved package(s) each have a notices row with the resolved version and licence (84 table rows)
+check-licence-surface  PASS  notices-declarations  5 directly declared package(s) are each named in the notices doc
+RESULT: PASS
+```
+
+（`warnings=1` 仍是既有的 `lgpl-licence-gaps` 五行：默认 flavour 不分发那五个 DLL。29 个解析包与 5 个直接声明包此刻都对得上 ⇒ 入库 notices 是新鲜的；W35 的价值是让将来的漂移在 CI 里红掉。）
 
 ## 5. 这个工具**不**覆盖什么
 
