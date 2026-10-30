@@ -330,3 +330,53 @@ W6-113 round 10 按指令复验 W14 口径与 Android 端口的一致性，**结
 > 刻意**不过** `LogService.Redact`；Android 端口的 `the_information_line_carries_the_counts_and_never_the_directory` 管的是
 > **日志信息行**不含目录，二者不冲突。若未来改口径，须同步 `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md`、
 > `docs/android-source-sync-transfer.md` 与两侧用例，并重跑本组 25 例。
+
+## 6.7 第四层口径：per-method 用例数（W6-113p）
+
+§6.5 把口径推到「总数 → 每类计数 → 方法集合」三层，但第三层只钉**方法名**。xUnit 的 `[Theory]` 是「一个方法 + N 行数据」，同类的两个 theory 之间挪走一行数据（A−1、B+1）时，总数、每类计数、方法集合**三层全都看不到** —— 这正是 §6.5 的 NC16 写明的残留限制。本轮把 `methods` 由「类 → 方法名数组」升级为「类 → { 方法: 用例数 }」，并给新结构配自洽校验。
+
+### 基线字段（2026-10-31 起）
+
+| 字段 | 含义 | 校验 |
+|---|---|---|
+| `expected` | 套件用例总数 | 实际 total < 基线 → RED |
+| `classes` | 类名 → 该类的用例数 | 类缺失/缩减 → RED；新增/变大 → GREEN + warning |
+| `methods` | 类名 → { 方法名 → 该方法的用例数 } | 方法缺失或**用例数下降** → RED；新增/变大 → GREEN + warning |
+| 结构自洽 | —— | 两表类集合一致；每方法用例数 ≥ 1；类内各方法用例数之和 == `classes` 里该类计数；否则 RED |
+| 旧格式 | 2026-10-30 的「方法名数组」 | 明确 throw 并提示用 `update-test-suite-baseline.ps1` 刷新，不静默放行 |
+
+`check-test-suite-baseline.ps1` 日志新增一行 `methodCases=N baseline=method case table N cases`（原 `methods=` 行保留）；TRX 的 definition 数 ≠ result 数时打 `::warning::` 而非静默。`update-test-suite-baseline.ps1` 把旧数组格式按 −1（未知）读，使迁移时旧格式不会被误判成「用例数下降」，移除判定扩展为「类消失 / 方法消失 / 方法用例数下降 / total 下降」，只有显式 `-AcceptRemoval` 才允许降。
+
+### 负向对照（23 例，两代 PowerShell 逐例判定一致）
+
+| 例 | 输入 | 期望 | 观测 |
+|---|---|---|---|
+| NC28 | 同类内挪一行 theory 数据（三层可见量全不变） | RED | 新闸门 RED，消息 `G_alpha (baseline 2 cases, now 1)` |
+| NC29 | 同 NC28 的输入交给 round 9 门禁 | GREEN | GREEN ⇒ NC28 的红确为本轮收口所得 |
+| NC30 | 某方法用例数 +1 | PASS + warning | `G_beta (+1 cases)` |
+| NC31 | 旧「方法名数组」格式基线 | RED | 提示 2026-10-30 format，要求刷新 |
+| NC32 | 类内方法用例数之和 ≠ `classes` 计数 | RED | 配置自洽失败 |
+| NC33 | 某方法用例数 = 0 | RED | 配置自洽失败 |
+| NC34 | 某类只在 `methods` 里、`classes` 没有 | RED | 两表类集合不一致 |
+| NC35 | TRX definition 数 6 ≠ result 数 5 | PASS + `::warning::` | `6 test definition(s) against 5 result(s)` |
+| R1–R7 | round 9 回归：total 降 / 类增长 / failed≠0 / 同类换方法 / 缺 methods 表 / 方法跨类搬 / 数据行参数值变化 | RED×5 + PASS×2 | 与 §6.5 判定一致 |
+| NC38 | 无 `-AcceptRemoval` 时刷新脚本遇到下调 | 拒绝 | 消息含 `G_alpha (cases 2 -> 1)` |
+| NC39 | 带 `-AcceptRemoval` 刷新 | 写入降后计数 | `G_alpha 1 / G_beta 2`，sum == classes |
+| NC40 | 旧格式基线直接刷新 | 升级为计数格式 | 通过 |
+| NC41 | round 9 旧格式基线（122,204 B）× 真实 TRX | RED | 要求迁移 |
+| NC43 | 同 NC41 输入交给 round 9 门禁 | GREEN | 迁移闸门只在新版生效 |
+| NC36 | 真实 TRX × 已提交基线 | PASS | 含 `methodCases=1952 baseline=method case table 1952 cases`、`combined tests=2056` |
+| NC37 | 真实 TRX 重生成基线 | 逐字节一致 | 与提交版 sha256 相等 |
+| NC42 | 缺省相对路径冒烟 | PASS | `-BaselinePath`/`-ResultsDir` 省略时按脚本目录解析 |
+
+### 数据源与规模
+
+数据源取自 CI run `41095080796`（head `701bb547`，与 round 11 验收同一 merge commit `47fb6f5075d21ee70a568a8cb460256b60d200bf` 对应的 TRX）：`windows-tests.trx` 2,719,155 B、`webdav-tests.trx` 145,266 B。基线由新刷新脚本重生成后为 **127,587 B**（原 122,204 B，+5,383 B），规模换取的是「方法用例数下降即点名到 `Class.Method` 与两侧计数」。
+
+### 残留限制
+
+- **数据行的参数值不钉**：只钉「某方法有几行」。行内容互换（例如 theory 的 InlineData 参数值被改写但行数不变）仍为 PASS（R7 / round 9 NC16）。要收掉这一层需要把数据行参数纳入基线，代价与噪声都显著上升，暂不做。
+- **测试重命名等同移除+新增**，表现为 RED + warning，需人工确认后刷新，这与 §6.5 的口径一致。
+- **口径依赖 TRX 的 TestDefinitions**：若 runner 输出结构变化导致 definition 无法解析，会走 `::warning::` 与配置校验，而不是静默判绿。
+
+**exact-head CI 验收（EXECUTED）**：head `8ec0d890`（merge commit `e79957c5c903…`）的 windows-ci **`41099478575` completed/success**（`pull_request`）：日志 `D:/mh-verify/r12/ci-41099478575-windows.log` 逐行命中 `MediaHub.Tests: total=1952 baseline=1952 failed=0 notExecuted=0` / `classes=113 baseline=class table 113 entries` / `methods=1637 baseline=method table 1637 methods` / **`methodCases=1952 baseline=method case table 1952 cases`** / `MediaHub.WebDav.Tests: total=104 baseline=104` / `classes=4 ... 4 entries` / `methods=95 ... 95 methods` / `methodCases=104 ... 104 cases` / `combined tests=2056`；licence `check-licence-surface  checks=27 failed=0 warnings=1 skipped=0`，`sbom-inventory` / `sbom-source-revision`（对 merge commit `e79957c5c903` 判祖先）/ `sdk-pin-matches-report 10.0.113` 全 PASS；探针 `MPV_PROBE PASS … GPU/HDR/audio output NOT exercised -> UNVERIFIED` 与 `ENGINE_PROBE PASS …` 口径不变。同 head Android CI `41099478811` 取证时 in_progress（本轮无 Android 代码改动）。 ⇒ 新的第四层口径在 CI 上确实打印了自己的台阶行，不是只在本机绿。

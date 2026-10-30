@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T00:56:00+08:00",
-  "updated_by": "lead-W6-113-r11",
+  "updated_at": "2026-10-31T01:39:18+08:00",
+  "updated_by": "lead-W6-113-r12",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -150,7 +150,8 @@
         "docs/automation/ADR-AUTO-001-android-ci-concurrency.md",
         "docs/automation/PATCH-PROPOSAL-android-ci-concurrency.md",
         "cancelled runs: 40993937937 41003347784 41008280281 40991293954",
-        "same heads windows-ci: success 41003347790 41000771112 41005235521"
+        "same heads windows-ci: success 41003347790 41000771112 41005235521",
+        "cancelled runs (追加): 41093847372 (head 58bb304b, 2026-10-31)"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -307,6 +308,28 @@
       ],
       "notes": "折叠口径：小节标题（含结论）与证据路径留在正文，细节正文入版本化 docs；原文逐字保存，不丢历史。并发写者风险仍在——本次 PATCH 前重读比对无漂移，但「最后写者胜」的规则未变。round 10 收尾报告曾声称 exact-head CI 验收已写入 RUNLOG，实测不准确（997a91ee 只写了 5091fa74 的 run），本轮已在 RUNLOG 更正并补记 41091035445。",
       "next_action": "正文余量 122,556 B（约 2 轮）；下次正文超过约 180 KB 时折叠 2026-10-30 的旧小节（W6-111 ~ W30 区段）。"
+    },
+    {
+      "id": "W6-113p",
+      "title": "套件基线第四层口径：per-method 用例数（关闭同类内挪数据行）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r12",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (15,828 B) + update-test-suite-baseline.ps1 (11,749 B) + test-suite-baseline.json (127,587 B); methods upgraded to class -> {method: case count}",
+        "commit 8ec0d890 (3 files, +2135 -2029); the three blobs are sha256-equal to the working tree bytes the 23 negative controls exercised",
+        "negative controls 23/23 pass, pwsh 7 and Windows PowerShell 5.1 identical (D:/mh-verify/r12/nc-run.log)",
+        "NC28 row move inside one class RED (G_alpha baseline 2 cases, now 1); NC29 the same input on the round 9 gate GREEN -> the closure is this round's",
+        "regressions R1-R7 unchanged (total drop / class growth / failed != 0 / method swap / no methods table / cross-class move / theory arguments changed); R7 is the limit still not closed",
+        "NC41 real round 9 name-list baseline against the real TRX RED (migration demanded); NC43 the same on the round 9 gate GREEN",
+        "NC37 regenerating from the real CI TRX reproduces the committed baseline byte for byte",
+        "data source: CI run 41095080796 @701bb547, windows-tests.trx 2,719,155 B / webdav-tests.trx 145,266 B",
+        "CI: run 41099478575 @8ec0d890 success - methodCases=1952 baseline=method case table 1952 cases, methods=1637 ... 1637, combined tests=2056, licence checks=27 failed=0"
+      ],
+      "notes": "methods is now class -> {method -> case count}; per-method case-count drops are RED naming Class.Method with both counts; old 2026-10-30 name-list baselines throw with a refresh hint instead of passing silently; class-to-method sums must equal the classes table. Residual limit: theory data-row argument values are still not pinned (R7 / round 9 NC16).",
+      "next_action": "无；若要收掉数据行参数值需把 InlineData 纳入基线（代价与噪声显著上升），另立切片。",
+      "closed_at": "2026-10-31T01:39:18+08:00"
     }
   ]
 }
