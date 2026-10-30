@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-30T12:05:00+08:00",
+  "updated_at": "2026-10-30T14:2x:00+08:00",
   "updated_by": "lead-W6-113-r2",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -136,6 +136,25 @@
         "Fact=1475 Theory=100 required-suite=60 实测复核"
       ],
       "notes": "上午写入的静态计数 1459/99 在一小时内漂成 1475/100（并行执行者新增 BackupListTests.cs），required-suite 误记 61 实际 60。除改数外补了 §5 测量命令与 grep 选项解析的坑。"
+    },
+    {
+      "id": "W6-113g",
+      "title": "Android CI concurrency 摧毁 exact-SHA 证据（ADR + 补丁提案）",
+      "priority": "P0",
+      "status": "WAITING_FOR_APPROVAL",
+      "owner": "lead-W6-113-r2",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "docs/automation/ADR-AUTO-001-android-ci-concurrency.md",
+        "docs/automation/PATCH-PROPOSAL-android-ci-concurrency.md",
+        "cancelled runs: 40993937937 41003347784 41008280281 40991293954",
+        "same heads windows-ci: success 41003347790 41000771112 41005235521"
+      ],
+      "blocked_by": [
+        "维护者裁决（改共享 CI 会影响他人验证节奏）"
+      ],
+      "next_action": "维护者确认方案 A 后，把 .github/workflows/android-ci.yml 的 concurrency.group 改为 ci-${{ github.ref }}-${{ github.sha }}，并按提案 §验收 的四条验证（第 3 条为负向对照）。",
+      "notes": "根因是配置而非纪律：android-ci 有 cancel-in-progress:true 且 group 只按 ref 分组；windows-ci 无 concurrency 块。本轮两次按规程等对方跑完再推仍被取消。"
     }
   ]
 }

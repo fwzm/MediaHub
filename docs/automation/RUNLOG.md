@@ -56,3 +56,13 @@
 - **WIP 保护实测**：提交时工作树里有另一执行者的 4 个未提交文件（`MhBackupCliCommand.cs`、`MhBackupWebDavLister.cs` 修改 + `MhBackupWebDavDeleter.cs`、`BackupDeleteTests.cs` 新增）。全程只 `git add` 自己的文件，两次提交后那 4 个文件原样留在工作树，未被误提交。
 - **推送时的漂移处置**：推送前三验（锁 / 远端 head / 在跑的 run）发现 `HEAD~2 != origin` —— 对方在我之后完成 W23（`00a6dfa8`）并一并推送，我的两个提交已随之进入远端。按纪律停下重新评估，未强推；确认 `4ff648e1`/`14f7fa39` 均在 `origin` 历史、且 diff 未被外部内容污染后释放锁。
 - 观察：本轮两次「等对方 CI 跑完再推」都是正确决策 —— W22 的 Android build 跑了约 28 分钟，若我中途推送会像上一轮那样取消它。
+
+### 13:2x–14:3x — lead（W6-113 round 2，续）— 定位并记录 Android CI 证据链的结构性缺陷
+
+- **发现**：`android-ci.yml` L15-17 有 `concurrency: group: ci-${{ github.ref }}` + `cancel-in-progress: true`；`windows-ci.yml` **没有 concurrency 块**。这解释了两者行为相反：同分支连续 push 时 Android 必被取消、Windows 从不被取消。
+- **实证**：今天 4 次 Android cancelled（`40993937937` @`055c85c3`、`41003347784` @`e7779b7f`、`41008280281` @`74548803`、`40991293954` @`6c28866f`），同期 windows-ci 在同一批 head 上全部 success。
+- **判定**：不是执行者纪律问题。本轮两次按规程「等对方 run 跑完再 push」，仍被对方的下一次 push 取消 —— Android 一次 28–30 分钟，对方每 20–60 分钟一次提交，窗口几乎必然重叠。
+- **产出（均未改任何工作流）**：`ADR-AUTO-001-android-ci-concurrency.md`（现象/根因/代价/三方案/为何不直接改/过渡做法）、`PATCH-PROPOSAL-android-ci-concurrency.md`（一行改动 + 四条验收，含负向对照）。
+- **提交**：`446b252c`（ADR）、`9e37d9b1`（补丁提案）。
+- **过渡纪律**：`cancelled` 在账本中单列，不并入 pass/fail；用树哈希作辅助论证必须标注为推理。
+- **正向对照**：`2ef01647`（他执行者 W25）的 Android CI **完整跑完 success** —— 证明只要没有新 push 插入，流程本身是健康的，问题只在 concurrency 策略。
