@@ -276,7 +276,7 @@ W6-1…W6-14 合计 583（其中 W6-10 的接线 14、W6-13 的清单 UI 17）�
 W6-16 的回环传输 34、W6-17 的双向编排 22，另加 W12b 的对抗性回归 66、W6-18 的 transfer 命令组 19、
 W6-19 的 presenter 35、W6-21 的 skip 语义 9、W6-20 的 `--root`/导出路径 18、W6-24 的传输对端认证 45、W6-26 的 TLS 与指纹钉扎 37、W6-30 的投递确认 19、W6-31 的恶意帧回归 36、W6-33 的传输卡片 presenter 29、W6-37 的回执帧与握手超时分类修正 35、W6-39 的同步页回执接线 27、W6-43 的回执控件与结果行 3、W6-50 的 `transfer serve` 预算 19、W6-51 的显式主机入口 40、W6-66 的归档默认名 3、W6-67 的跨语言文本边界 11、W6-68 的 8 MiB 上限 5、W6-69 的配对文本边界 10、W6-70 的配对设备登记 14、W6-71 的配对卡片与登记 21、W6-72 的同步基线契约与接线 22
 —— 上列明细是历史累计口径，逐项相加与总数有出入，勿据此反推；总数以 CI 实测为准（W6 分支 `4c88195c` 的 windows-ci run 40805857922：`MediaHub.Tests: total=1708` + WebDav `104` = **1812**；主线 `95fff582` 的 windows-ci run **41081700166**：`MediaHub.Tests: total=478 failed=0 notExecuted=0` + `MediaHub.WebDav.Tests: total=104` = **582**）。
-> **CI 现状（截至 `5cce2262`）**：主干 `windows-ci` 为 success，但**主干 Android CI 在 `95fff582` 上是失败**（visual-instrumentation API 32 两个步骤红：`Run production visual paths on emulator` 报 `Error on ZipFile unknown archive`（装 Android Emulator 时下载包损坏）→ `Require executed visual assertions` 退出码 1；API 36 同 run 为 success）——这是**CI 基础设施侧失败，不是产品回归**，待重跑确认；详见 PR #33 同日记录。
+> **CI 现状（截至 `8d11eee1`）**：主干 `windows-ci` 全覆盖 success；主干 Android CI 在 `95fff582` 上首跑失败（visual-instrumentation API 32 的 `Run production visual paths on emulator` 报 `Error on ZipFile unknown archive`——装 Android Emulator 时下载包损坏，模拟器未起来 → `Require executed visual assertions` 退出码 1；同 run 的 API 36 为 success）——**已用重跑（attempt 2）证实为 CI 基础设施偶发失败：三个 job 全部 success，不是产品回归**。
 `MediaHub.WebDav.Tests` 的 104 例同样适用于该分支（见 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 正文的验证表）。
 
 Android 侧（[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml)）的单元门禁同样按**名字**断言，
