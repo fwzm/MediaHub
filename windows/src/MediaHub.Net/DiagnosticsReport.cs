@@ -26,6 +26,9 @@ public static class DiagnosticsReport
     public const string LogSeparator = "---- 日志 ----";
     public const string NoteSeparator = "---- 说明 ----";
 
+    /// <summary>Header line prefix for the rolling-directory pointer, as shipped by W14.</summary>
+    public const string RollingDirectoryPrefix = "# 滚动文件目录：";
+
     public const string Disclaimer =
         "本报告在写入日志时已脱敏，导出时再逐行脱敏一次；密码、令牌与 Cookie 不会出现在这里。";
 
@@ -38,19 +41,20 @@ public static class DiagnosticsReport
         IReadOnlyList<LogEntry> entries, DateTime now, string? appVersion = null, string? device = null,
         string? rollingDirectory = null)
     {
-        var lines = new List<string>
-        {
-            Title,
-            "生成时间：" + now.ToString("yyyy-MM-dd HH:mm:ss"),
-        };
+        var lines = new List<string> { Title };
+        // Position and shape come straight from W14 (windows/docs/W14-DIAGNOSTIC-LOG-FILES.md §3):
+        // the pointer sits directly under the title, before the generation timestamp. The W6-112 merge
+        // would otherwise have changed the header format without anyone noticing.
+        // The memory buffer keeps the newest lines only; the rolling files keep the ones it pushed out,
+        // so point at them rather than implying the export is the complete history.
+        if (!string.IsNullOrWhiteSpace(rollingDirectory))
+            // Not redacted: this is the local log folder the operator chose, not a request URL. Running
+            // LogService.Redact over it would eat a 32-hex segment (LongHexRegex) and leave a pointer
+            // nobody can follow. Nothing secret can hide in a directory path we wrote ourselves.
+            lines.Add(RollingDirectoryPrefix + rollingDirectory);
+        lines.Add("生成时间：" + now.ToString("yyyy-MM-dd HH:mm:ss"));
         if (!string.IsNullOrWhiteSpace(appVersion)) lines.Add("应用版本：" + LogService.Redact(appVersion));
         if (!string.IsNullOrWhiteSpace(device)) lines.Add("设备：" + LogService.Redact(device));
-        // The memory buffer keeps the newest lines only; the rolling files keep the ones it pushed
-        // out. Point at them rather than implying the export is the complete history.
-        if (!string.IsNullOrWhiteSpace(rollingDirectory))
-            // Not redacted: this is the local log folder the operator chose, not a request URL. Redaction
-            // here would also mangle 32-hex directory names and make the pointer un-followable.
-            lines.Add("滚动文件目录：" + rollingDirectory);
         lines.Add("日志条目：" + entries.Count);
         lines.Add(LogSeparator);
         foreach (LogEntry entry in entries)

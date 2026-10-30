@@ -141,6 +141,122 @@ public sealed class DiagnosticsReportTests
             DiagnosticsReport.Describe(new InvalidOperationException(new string((char)120, 400)))!.Length);
     }
 
+    // ---- W6-113: the rolling-directory contract (memory snapshot + a pointer, not the file text) ----
+
+    private const string HexDir =
+        "C:/Users/x/AppData/Local/Temp/mh-log-sink-7390dd42d33640f085f3e88e26f4fecb/export";
+
+    [Fact]
+    public void The_rolling_directory_line_keeps_the_prefix_w14_shipped()
+    {
+        // W14 shipped "# 滚动文件目录：<目录>" (windows/docs/W14-DIAGNOSTIC-LOG-FILES.md §3).
+        // The W6-111 renderer must not quietly change that shape while both live in one tree.
+        string[] lines = DiagnosticsReport.Render(
+            Array.Empty<LogEntry>(), Now, rollingDirectory: HexDir).Split(Environment.NewLine);
+
+        Assert.Equal(DiagnosticsReport.Title, lines[0]);
+        Assert.Equal("# 滚动文件目录：" + HexDir, lines[1]);
+        Assert.Equal("生成时间：2026-10-29 11:45:09", lines[2]);
+    }
+
+    [Fact]
+    public void A_missing_rolling_directory_leaves_the_header_byte_for_byte_as_before()
+    {
+        // Legacy call shapes (2 / 3 / 4 arguments) must keep producing exactly what they produced
+        // before the parameter existed -- otherwise every existing caller's report changes silently.
+        string[] lines = DiagnosticsReport.Render(
+            Array.Empty<LogEntry>(), Now, "1.7.0", "Pixel").Split(Environment.NewLine);
+
+        Assert.Equal(DiagnosticsReport.Title, lines[0]);
+        Assert.Equal("生成时间：2026-10-29 11:45:09", lines[1]);
+        Assert.Equal("应用版本：1.7.0", lines[2]);
+        Assert.Equal("设备：Pixel", lines[3]);
+        Assert.Equal("日志条目：0", lines[4]);
+        Assert.DoesNotContain("滚动文件目录", string.Join(Environment.NewLine, lines));
+    }
+
+    [Fact]
+    public void An_empty_rolling_directory_is_treated_as_absent()
+    {
+        Assert.DoesNotContain("滚动文件目录", DiagnosticsReport.Render(Array.Empty<LogEntry>(), Now, rollingDirectory: ""));
+        Assert.DoesNotContain("滚动文件目录", DiagnosticsReport.Render(Array.Empty<LogEntry>(), Now, rollingDirectory: "   "));
+        Assert.DoesNotContain("滚动文件目录", DiagnosticsReport.Render(Array.Empty<LogEntry>(), Now, rollingDirectory: null));
+    }
+
+    [Fact]
+    public void The_hexadecimal_segment_of_the_directory_survives_redaction_untouched()
+    {
+        // LogService scrubs 32+ hex characters. A temp directory carries a 32-hex GUID, so redacting
+        // this line would turn the pointer into ".../mh-log-sink-***" -- un-followable.
+        string text = DiagnosticsReport.Render(Array.Empty<LogEntry>(), Now, rollingDirectory: HexDir);
+
+        Assert.Contains(HexDir, text);
+        Assert.DoesNotContain("***", text);
+    }
+
+    [Fact]
+    public void The_directory_is_echoed_verbatim_while_entries_in_the_same_report_are_still_redacted()
+    {
+        // The directory is a local pointer: whatever a caller passes is echoed as-is. Entries in the
+        // same report still go through redaction -- the two rules must not blur into each other.
+        var entries = new[] { Entry("登录 https://nas-a:8096/emby?api_key=abc123&u=bob") };
+        string text = DiagnosticsReport.Render(entries, Now, rollingDirectory: "C:/logs/token=abc123");
+
+        Assert.Contains("滚动文件目录：C:/logs/token=abc123", text);
+        Assert.DoesNotContain("api_key=abc123", text);
+        Assert.Contains("api_key=***", text);
+    }
+
+    [Fact]
+    public void The_report_points_at_the_rolling_directory_instead_of_inlining_the_file()
+    {
+        // Contract: the export is the in-memory transcript plus a pointer. The rolling file lives on
+        // disk; its text must not be pasted into the report (that would duplicate every line).
+        string directory = Path.Combine(Path.GetTempPath(), "mh-roll-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "mediahub-0.log"), "ON-DISK-ONLY-LINE" + Environment.NewLine);
+            var log = new LogService(new LogFileSink(directory));
+            log.Info("net", "in-memory-line");
+
+            string exported = log.Export();
+
+            Assert.Contains("滚动文件目录：" + directory, exported);
+            Assert.Contains("in-memory-line", exported);
+            Assert.DoesNotContain("ON-DISK-ONLY-LINE", exported);
+            Assert.Contains("已脱敏", exported);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Write_carries_the_rolling_directory_into_the_file_it_writes()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "mh-diagnostics-" + Guid.NewGuid().ToString("N"));
+        string target = Path.Combine(root, "out");
+        try
+        {
+            var log = new LogService(new LogFileSink(Path.Combine(root, "logs")));
+            log.Info("sync", "已应用对端信封");
+
+            DiagnosticsReport.WriteResult result = DiagnosticsReport.Write(target, log, Now);
+
+            var written = Assert.IsType<DiagnosticsReport.WriteResult.Written>(result);
+            string content = File.ReadAllText(written.Path);
+            Assert.Contains("滚动文件目录：" + log.FileSink!.DirectoryPath, content);
+            Assert.Equal(
+                DiagnosticsReport.Render(log.Snapshot(), Now, rollingDirectory: log.FileSink.DirectoryPath), content);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void Export_and_the_file_report_share_one_renderer()
     {
