@@ -210,14 +210,25 @@ jobs:
           -c Release -p:Platform=x64
           -o ./artifacts/portable
 
+      - name: Stage licence/notice files into the portable output
+        shell: pwsh
+        working-directory: windows
+        run: ./tools/stage-licence-files.ps1 -RepoRoot .. -TargetDir windows/artifacts/portable
+
       - name: Smoke-check the published output
         shell: pwsh
         working-directory: windows
         run: |
           # The published folder must be self-contained: the exe, the engine DLL and the app assemblies.
-          $required = @("MediaHub.exe", "libmpv-2.dll", "MediaHub.dll", "MediaHub.Net.dll", "MediaHub.Providers.dll")
+          $required = @(
+            "MediaHub.exe", "libmpv-2.dll", "MediaHub.dll", "MediaHub.Net.dll", "MediaHub.Providers.dll",
+            "licences/MANIFEST.txt", "licences/THIRD-PARTY-NOTICES.md", "licences/THIRD-PARTY-NOTICES-FULL.md",
+            "licences/LGPL-COMPLIANCE.md", "licences/LGPL-ENGINE-SWITCH.md", "licences/component-licences.txt",
+            "licences/sbom.cdx.json"
+          )
           $missing = $required | Where-Object { -not (Test-Path (Join-Path "./artifacts/portable" $_)) }
           if ($missing) { throw "missing from publish output: " + ($missing -join ", ") }
+          "licence/notice files in the package: " + (Get-ChildItem ./artifacts/portable/licences -File | Measure-Object).Count
           "portable output size: " + [math]::Round((Get-ChildItem ./artifacts/portable -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1) + " MB"
 
       - name: Upload artifacts

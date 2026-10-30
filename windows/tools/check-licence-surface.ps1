@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Ten things rot silently in a licence deliverable:
+    Eleven things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -21,8 +21,11 @@
      10. the shipping state in windows/docs/licensing/PACKAGING.md drifts: CI starts signing, an
           app manifest or installer project appears, or the app stops being an unpackaged
           self-contained portable build - the document keeps claiming SIGNING_BLOCKED and green CI.
+     11. the published package stops carrying licence text: the staging step is dropped from
+          windows-ci.yml, the set shrinks, or a digest in the generated manifest stops matching the
+          bytes - PACKAGING.md section 1 and SBOM.md section 4.1 both recorded zero licence files.
 
-    This script checks those ten surfaces without touching the network, the build, or the
+    This script checks those eleven surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -33,6 +36,11 @@
     The license-report.json written by license-report.ps1 -Json. When omitted, the script looks
     for windows/artifacts/license-report/license-report.json (the path the docs use) and, if that is absent too,
     the report-dependent checks are reported as SKIP instead of failing.
+
+.PARAMETER StageScriptPath
+    The script that stages licence/notice files into a published tree. Default:
+    windows/tools/stage-licence-files.ps1. The package-licence-staging check re-runs it into a
+    temporary tree rather than trusting the document.
 
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
@@ -65,6 +73,7 @@ param(
     [string] $WorkflowsPath,
     [string] $WindowsRootPath,
     [string] $AppProjectPath,
+    [string] $StageScriptPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -723,7 +732,8 @@ else {
         @{ line = 'msix: not-implemented'; what = 'MSIX state' },
         @{ line = 'installer: not-implemented'; what = 'installer state' },
         @{ line = 'clean-machine-install: not-run'; what = 'clean-machine install state' },
-        @{ line = 'release-status: blocked-gpl-obligation'; what = 'release status' }
+        @{ line = 'release-status: blocked-gpl-obligation'; what = 'release status' },
+        @{ line = 'licence-files-in-package: staged-by-ci'; what = 'in-package licence file state' }
     )
     foreach ($fact in $packagingFacts) {
         if (-not $packagingDoc.Contains([string]$fact['line'])) { $packagingProblems += ('the machine-readable ' + $fact['what'] + ' line is missing (expected "' + $fact['line'] + '")') }
@@ -776,10 +786,80 @@ else {
         }
     }
     if (@($packagingProblems).Count -eq 0) {
-        Add-Check 'packaging-claims' 'PASS' 'the shipping state in PACKAGING.md still matches the repository: portable self-contained publish, no signing step, no MSIX manifest, no installer project outside build output (6 machine-readable lines)'
+        Add-Check 'packaging-claims' 'PASS' 'the shipping state in PACKAGING.md still matches the repository: portable self-contained publish, no signing step, no MSIX manifest, no installer project outside build output (7 machine-readable lines)'
     }
     else {
         Add-Check 'packaging-claims' 'FAIL' ((@($packagingProblems) -join '; ') + ' - update PACKAGING.md section 0 and section 1 with the change')
+    }
+}
+
+# --- 11. the published package must carry licence and notice text -------------------------------
+# PACKAGING.md section 1 and SBOM.md section 4.1 both recorded that the portable package shipped
+# zero licence/notice files. windows/tools/stage-licence-files.ps1 now copies a fixed set into
+# <tree>/licences/ with a digest manifest, windows-ci.yml runs it right after publish, and the
+# smoke check asserts the result. This check re-runs the staging script into a temporary tree, so
+# the gate fails if the set shrinks, a digest stops matching the bytes, the script disappears or
+# CI stops calling it.
+$stagingScript = Resolve-ClaimPath -Path $StageScriptPath -Default 'windows/tools/stage-licence-files.ps1'
+$stagingNames = @(
+    'THIRD-PARTY-NOTICES.md',
+    'THIRD-PARTY-NOTICES-FULL.md',
+    'LGPL-COMPLIANCE.md',
+    'LGPL-ENGINE-SWITCH.md',
+    'component-licences.txt',
+    'sbom.cdx.json'
+)
+$stagingExpected = @($stagingNames + 'MANIFEST.txt')
+if (-not (Test-Path -LiteralPath $stagingScript)) {
+    Add-Check 'package-licence-staging' 'FAIL' ('the staging script is absent at ' + $stagingScript + ' - the publish output ships with no licence or notice text without it')
+}
+else {
+    $stagingProblems = @()
+    $stagingTmp = Join-Path ([System.IO.Path]::GetTempPath()) ('mh-licence-stage-' + [System.Guid]::NewGuid().ToString('N'))
+    $stagingTree = Join-Path $stagingTmp 'portable'
+    try {
+        [System.IO.Directory]::CreateDirectory($stagingTree) | Out-Null
+        try { $stagingOutput = & $stagingScript -RepoRoot $RepoRoot -TargetDir $stagingTree 2>&1 }
+        catch { $stagingProblems += ('the staging script failed: ' + $_.Exception.Message) }
+        $stagingDir = Join-Path $stagingTree 'licences'
+        foreach ($name in $stagingExpected) {
+            if (-not (Test-Path -LiteralPath (Join-Path $stagingDir $name))) { $stagingProblems += ('the package would not carry licences/' + $name) }
+        }
+        if (Test-Path -LiteralPath $stagingDir) {
+            foreach ($item in @(Get-ChildItem -LiteralPath $stagingDir -File)) {
+                if ($stagingExpected -notcontains $item.Name) { $stagingProblems += ('licences/' + $item.Name + ' is staged but not part of the recorded set') }
+            }
+        }
+        $stagingManifest = Join-Path $stagingDir 'MANIFEST.txt'
+        if (Test-Path -LiteralPath $stagingManifest) {
+            $manifestLines = @(Get-Content -LiteralPath $stagingManifest)
+            $digestLines = @($manifestLines | Where-Object { $_ -match '^[0-9a-f]{64} ' })
+            if (@($digestLines).Count -ne @($stagingNames).Count) { $stagingProblems += ('MANIFEST.txt has ' + @($digestLines).Count + ' digest line(s), expected ' + @($stagingNames).Count) }
+            foreach ($name in $stagingNames) {
+                $recorded = @($manifestLines | Where-Object { $_.EndsWith('/' + $name) })
+                if (@($recorded).Count -eq 0) { $stagingProblems += ('MANIFEST.txt does not record licences/' + $name); continue }
+                $expectedHash = ([regex]::Match([string]@($recorded)[0], '^[0-9a-f]{64}')).Value
+                $actualHash = (Get-FileHash -LiteralPath (Join-Path $stagingDir $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($expectedHash -ne $actualHash) { $stagingProblems += ('MANIFEST.txt records ' + $expectedHash + ' for licences/' + $name + ', but the staged bytes hash to ' + $actualHash) }
+            }
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $stagingTmp) { Remove-Item -LiteralPath $stagingTmp -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    $stagingCi = Join-Path $packagingWorkflows 'windows-ci.yml'
+    if (-not (Test-Path -LiteralPath $stagingCi)) { $stagingProblems += 'windows-ci.yml is absent, so the staging step cannot be verified' }
+    else {
+        $stagingCiText = [string](Get-Content -LiteralPath $stagingCi -Raw)
+        foreach ($expectedToken in @('stage-licence-files.ps1', 'licences/MANIFEST.txt')) {
+            if ($stagingCiText.IndexOf($expectedToken, [System.StringComparison]::Ordinal) -lt 0) { $stagingProblems += ('windows-ci.yml no longer carries "' + $expectedToken + '", so the publish output is not guaranteed to stage or assert the licence files') }
+        }
+    }
+    if (@($stagingProblems).Count -eq 0) {
+        Add-Check 'package-licence-staging' 'PASS' ('the staging script puts ' + $stagingExpected.Count + ' licence/notice file(s) into the published tree with a matching digest manifest, and windows-ci.yml runs it before the smoke check')
+    }
+    else {
+        Add-Check 'package-licence-staging' 'FAIL' ((@($stagingProblems) -join '; ') + ' - fix windows/tools/stage-licence-files.ps1 or the publish job together with PACKAGING.md section 0 and SBOM.md section 4.1')
     }
 }
 

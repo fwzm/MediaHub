@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-32 项检查分十二组：
+33 项检查分十三组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -58,7 +58,8 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 引擎候选身份（W36 起） | `lgpl-candidate-hashes`、`lgpl-candidate-claims` | 入库的 LGPL 候选 DLL 与 `windows/engine/lgpl/dist/dist-hashes.txt` 的记录不符；或十一个引用候选身份的文档/常量写着别的构建（字节数或 sha256 对不上） |
 | 引擎能力（W37 起） | `vulkan-claims` | 候选件忽然带上 Vulkan、`MpvPlayer` 不再把 `gpu-api` 钉成 `d3d11`、`windows/src` 下出现 vulkan 字样，或 `VULKAN-NECESSITY.md` 丢了 verdict 行——许可证决策依赖的「Vulkan 非必需」结论不能悄悄过期 |
 | 引擎许可声明（W38 起） | `lgpl-licence-table` | LGPL flavour 的 33 个 DLL 与 `component-licences.txt` 的逐行声明对不上（表被改坏、缺行、证据行号指到别处），或装出来的文件清单与报告行数不符 |
-| 分发与签名（W39 起） | `packaging-claims` | 发布形态、签名、安装方式与 `PACKAGING.md` §0 六行不符：CI 开始签名、仓库出现 `*.appxmanifest` 或 WiX/Inno/NSIS 工程、App 不再是 unpackaged self-contained portable、`windows-ci.yml` 丢了 portable publish/上传步骤（构建输出 `obj/`、`bin/`、`artifacts/` 不计） |
+| 分发与签名（W39 起） | `packaging-claims` | 发布形态、签名、安装方式与 `PACKAGING.md` §0 七行不符：CI 开始签名、仓库出现 `*.appxmanifest` 或 WiX/Inno/NSIS 工程、App 不再是 unpackaged self-contained portable、`windows-ci.yml` 丢了 portable publish/上传步骤（构建输出 `obj/`、`bin/`、`artifacts/` 不计） |
+| 包内许可文件（W40 起） | `package-licence-staging` | 发布树不再真的带 `licences/` 的六个文档 + digest manifest：暂存脚本被删、清单缩水、manifest 摘要与字节不符、或 CI 不再调用它（该检查把脚本重跑到临时树，不读文档） |
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
 
@@ -172,15 +173,43 @@ W32 的三检首次随 CI 跑就抓到两件事，都不是「SBOM 写错了」�
 
 `windows/docs/licensing/PACKAGING.md` 是唯一写清「今天到底发布什么」的文档：portable、self-contained、未签名（SIGNING_BLOCKED）、无 MSIX、无安装器、未在干净机装过、因 GPL 义务被阻止发布。它逐条记了实测值，但没有任何检查对照仓库 ⇒ 只要 CI 加了签名步骤、仓库里出现 `.appxmanifest` 或安装器工程、或 App 不再是 unpackaged self-contained portable，文档会继续宣称旧状态而 CI 全绿。
 
-W39 给该文档加了 §0 机器可读状态块（六行），并新增一项：
+W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新增一项：
 
 | 检查 | 判据 | 失败含义 |
 | --- | --- | --- |
 | `packaging-claims` | ① `PACKAGING.md` 必须含 §0 的六行且值逐字相符：`signing-status: blocked-no-certificate`、`packaging-form: portable-zip-self-contained`、`msix: not-implemented`、`installer: not-implemented`、`clean-machine-install: not-run`、`release-status: blocked-gpl-obligation`；② App csproj 必须仍有 `<WindowsPackageType>None</WindowsPackageType>`、`<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>`、`<SelfContained>true</SelfContained>`、`<RuntimeIdentifier>win-x64</RuntimeIdentifier>`；③ `.github/workflows` 下不得出现签名令牌（`signtool` / `AzureSignTool` / `CertificateThumbprint` / `signingCertificate` / `-p:SignPackage` / `codesign`）；④ `windows/` 下（排除 `obj/`、`bin/`、`artifacts/` 构建输出）不得有 `*.appxmanifest` 或 `*.wixproj`/`*.wxs`/`*.iss`/`*.nsi`/`*.msix`；⑤ `windows-ci.yml` 必须仍含 `-o ./artifacts/portable` 与 `mediahub-windows-` | 发布形态/签名/安装状态与文档不符——「证书还没签、MSIX 还没做」这类如实状态被悄悄改写，或反过来签名做完了文档没更新 |
 
-`## 0` 六行由人工与 §1 一起维护；文档缺失时该项 SKIP（退出码仍 0）。负向对照见 §4.7。
+`## 0` 七行由人工与 §1 一起维护；文档缺失时该项 SKIP（退出码仍 0）。负向对照见 §4.7。
 
-## 4. 当前实测（2026-10-23，HEAD baac30c）## 4. 当前实测（2026-10-23，HEAD baac30c）
+### 3.8 包内许可文件（W40，2026-10-31）
+
+`PACKAGING.md` §1 与 `SBOM.md` §4.1 曾同时记录「发布包里 licence/notice 文件 = 0」——这是一条
+独立于 GPL 的合规缺口。W40 让发布过程真的把它们放进去：`windows/tools/stage-licence-files.ps1`
+把六个已在仓库里的文档/清单复制进 `<发布树>/licences/`，并生成 `MANIFEST.txt`（每行 sha256、字节数、
+仓库内来源与包内名字）；`windows-ci.yml` 在 `Portable publish (Release)` 之后立刻调用它，smoke check 把
+七个路径都列为必需，因此没有它们的包上不了 artifact。
+
+| 包内文件 | 仓库内来源 | 作用 |
+| --- | --- | --- |
+| `THIRD-PARTY-NOTICES.md` | `windows/THIRD-PARTY-NOTICES.md` | 人读摘要：GPL 引擎结论 + LGPL 依赖族 |
+| `THIRD-PARTY-NOTICES-FULL.md` | `windows/docs/THIRD-PARTY-NOTICES.md` | 生成的逐包表（84 行） |
+| `LGPL-COMPLIANCE.md` | `windows/docs/LGPL-COMPLIANCE.md` | 动态链接事实、可替换 `libmpv-2.dll`、书面提供源码 |
+| `LGPL-ENGINE-SWITCH.md` | `windows/docs/LGPL-ENGINE-SWITCH.md` | 用户如何自行更换 LGPL 引擎 |
+| `component-licences.txt` | `windows/engine/lgpl/component-licences.txt` | 随包 33 个 DLL 的声明行（40 行） |
+| `sbom.cdx.json` | `windows/docs/sbom-windows.cdx.json` | CycloneDX 1.5 依赖清单 |
+| `MANIFEST.txt` | 暂存脚本生成 | 上述每个文件的摘要与大小 |
+
+`package-licence-staging` 不读文档，而是把暂存脚本真跑一遍（写进临时树）：① 七个路径都出现；② 目录里
+没有清单之外的文件；③ `MANIFEST.txt` 每个摘要行都能在前 64 位十六进制处与文件实际 sha256 对上，且摘要行数
+恰为 6；④ `windows-ci.yml` 仍含 `stage-licence-files.ps1` 与 `licences/MANIFEST.txt`。任一不成立即 FAIL，
+提示「改暂存脚本、publish 作业与 `PACKAGING.md` §0/§1、`SBOM.md` §4.1 要一起动」。脚本缺失时该项 FAIL
+（它本身就是被钉的对象），不比 SKIP。负向对照见 §4.8。
+
+仍未做的：licence 正文（LGPL-2.1-or-later、GPL-3.0-or-later、MIT、Apache-2.0、微软软件许可条款）没有
+随包，仓库自身也没有 `LICENSE` 文件；两者属于许可证决策（`LICENCE-DECISION.md`），不由暂存步骤决定，
+`MANIFEST.txt` 的表头已把这一点写进包内。
+
+## 4. 当前实测（2026-10-23，HEAD baac30c）
 
 ```text
 license-report  projects=13  rows=49  packages=29
@@ -297,7 +326,25 @@ W39 首跑该项 FAIL，库里的报错点出了 `windows/src/MediaHub.App/obj/*
 - `-PackagingDocPath` 指向不存在的文件 → 该项 SKIP、退出码 0。
 - 临时 workflows 里放缺 `-o ./artifacts/portable` 的 `windows-ci.yml` → 1 红（发布/上传步骤漂移）。
 
-## 5. 这个工具**不**覆盖什么
+### 4.8 实测（2026-10-31，W40，本机，HEAD 1cb89525）
+
+```text
+stage-licence-files.ps1: 6 files + MANIFEST.txt written into a temp tree (exit 0)
+check-licence-surface  checks=33 failed=0 warnings=0 skipped=0
+check-licence-surface  PASS  packaging-claims  the shipping state in PACKAGING.md still matches the repository: ... (7 machine-readable lines)
+check-licence-surface  PASS  package-licence-staging  the staging script puts 7 licence/notice file(s) into the published tree with a matching digest manifest, and windows-ci.yml runs it before the smoke check
+RESULT: PASS
+```
+
+六条负向对照各恰好 1 红（全部临时副本/临时目录，不改仓库文件）：
+
+- 暂存脚本副本删掉 `component-licences.txt` 一项 → 1 红（该文件不会出现在包里）。
+- 暂存脚本副本把 `MANIFEST.txt` 某行摘要写成假的 → 1 红（摘要与字节不符）。
+- 暂存脚本副本额外暂存一份 `extra.txt` → 1 红（清单之外的文件）。
+- `-StageScriptPath` 指向不存在的文件 → 1 红（暂存脚本不在）。
+- `-WorkflowsPath` 指向缺 `stage-licence-files.ps1` 的 `windows-ci.yml` → 1 红（CI 不再暂存）。
+- `PACKAGING.md` 副本少了 `licence-files-in-package: staged-by-ci` 行 → 1 红（`packaging-claims`）。
+
 ## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。

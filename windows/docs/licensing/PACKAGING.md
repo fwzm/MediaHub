@@ -21,6 +21,7 @@ msix: not-implemented
 installer: not-implemented
 clean-machine-install: not-run
 release-status: blocked-gpl-obligation
+licence-files-in-package: staged-by-ci
 ```
 
 The same six facts are described in prose in section 1; section 1 is the human reading of this
@@ -44,7 +45,7 @@ block, not a second source of truth.
 | Measured portable package | **522 files, 347,972,263 bytes = 331.9 MB** | `dotnet publish` + `Measure-Object` |
 | Measured zip of that tree | `MediaHub-portable-win-x64.zip` = 139,338,968 bytes (132.9 MB) | `Compress-Archive -CompressionLevel Optimal` |
 | Zip SHA-256 | `002daf3559f5bdd37d172fe725ce38b6be203a56192a6fcbdf3ff7e75f92618e` | `Get-FileHash` |
-| Licence/notice files in the package | **0** | see [SBOM.md](SBOM.md) §4.1 |
+| Licence/notice files in the package | **7** — six licence/notice/inventory documents plus a digest manifest, staged into `licences/` by `windows/tools/stage-licence-files.ps1` (W40; CI runs it right after publish and the smoke check asserts them) | see [SBOM.md](SBOM.md) §4.1 |
 
 Size composition (measured; full table in [SBOM.md](SBOM.md)): engine 115.4 MB, Windows App SDK
 natives incl. Windows ML ~93 MB, .NET 10 runtime 76.7 MB, SDK projections 25.6 MB, app 2.5 MB.
@@ -60,7 +61,7 @@ natives incl. Windows ML ~93 MB, .NET 10 runtime 76.7 MB, SDK projections 25.6 M
 | Uninstall | "delete the folder" — leaves user data | installer removes its files/keys; user data handling is a design choice | OS removal; app's virtualised data is removed with the package |
 | Update | re-download and replace the folder | installer re-run / custom updater | App Installer or Store auto-update (still needs a signed, versioned package) |
 | Signing | not strictly required (but SmartScreen will warn) | **required** for a reasonable user experience | **required** — a package must be signed to install |
-| Blockers today | GPL (§ LICENCE-DECISION); no notices; ~40 MB of unused ML runtime | everything in A **plus** no installer authored **plus** no certificate | everything in A/B **plus** no manifest **plus** identity/versioning work |
+| Blockers today | GPL (§ LICENCE-DECISION); ~40 MB of unused ML runtime (the notices ship in the package since W40) | everything in A **plus** no installer authored **plus** no certificate | everything in A/B **plus** no manifest **plus** identity/versioning work |
 | Effort | done | medium (authoring + install/uninstall test on a clean machine) | medium-high (manifest, identity, versioning, signing, clean-machine test) |
 
 None of the three is *available for release* today, because the licence blocker is independent of the
@@ -215,7 +216,7 @@ decision, not with packaging. Today it is simply left unsigned.
 | # | Gap | Severity | Owner |
 | --- | --- | --- | --- |
 | 1 | **GPL engine** — blocks release in every packaging form | **BLOCKER** | licence decision ([LICENCE-DECISION.md](LICENCE-DECISION.md)) → then the build |
-| 2 | No licence/notice files in the package | **BLOCKER** (any distribution) | packaging + licence |
+| 2 | No licence/notice files in the package — **addressed (W40)**: `licences/` now carries six licence/notice/inventory documents plus a digest manifest, and a gate re-runs the staging script | resolved (W40); verbatim LGPL/GPL texts remain a licence decision | packaging + licence |
 | 3 | No code-signing certificate — `SIGNING_BLOCKED` | **BLOCKER** for installer/MSIX; high for portable | product owner (procurement), then CI |
 | 4 | No file associations | feature | app (W3) or a sparse/MSIX package |
 | 5 | No uninstall/data story | high (user trust) | packaging + app |
