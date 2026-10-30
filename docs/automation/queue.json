@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T02:12:00+08:00",
-  "updated_by": "lead-W6-113-r12",
+  "updated_at": "2026-10-31T03:10:00+08:00",
+  "updated_by": "lead-W6-113-r13",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -152,7 +152,8 @@
         "cancelled runs: 40993937937 41003347784 41008280281 40991293954",
         "same heads windows-ci: success 41003347790 41000771112 41005235521",
         "cancelled runs (追加): 41093847372 (head 58bb304b, 2026-10-31)",
-        "cancelled runs (追加): 41099478811 (head 8ec0d890) and 41100655793 (head 4461140b), 2026-10-31 - the same heads' windows-ci succeeded as 41099478575 / 41100655895"
+        "cancelled runs (追加): 41099478811 (head 8ec0d890) and 41100655793 (head 4461140b), 2026-10-31 - the same heads' windows-ci succeeded as 41099478575 / 41100655895",
+        "cancelled runs (追加): 41111613255 (head a0b46f6e, 2026-10-31) - the same head's windows-ci succeeded as 41111613263"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -333,6 +334,32 @@
       "notes": "methods is now class -> {method -> case count}; per-method case-count drops are RED naming Class.Method with both counts; old 2026-10-30 name-list baselines throw with a refresh hint instead of passing silently; class-to-method sums must equal the classes table. Residual limit: theory data-row argument values are still not pinned (R7 / round 9 NC16).",
       "next_action": "无；若要收掉数据行参数值需把 InlineData 纳入基线（代价与噪声显著上升），另立切片。",
       "closed_at": "2026-10-31T01:39:18+08:00"
+    },
+    {
+      "id": "W6-113q",
+      "title": "套件基线第五层口径：per-argument-row 数据行 digest（关闭 theory 参数值替换）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r13",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (23,063 B) + update-test-suite-baseline.ps1 (16,197 B) + test-suite-baseline.json (140,085 B); suites gain a data table Class.Method -> 16-hex digest of that method's argument-row suffixes",
+        "commit a0b46f6e (3 files, +359 -15); the three blobs are sha256-equal to the working tree bytes the 38 negative controls exercised",
+        "negative controls 38/38 pass, pwsh 7 and Windows PowerShell 5.1 identical (D:/mh-verify/r13/nc-run.log)",
+        "D1 one row value replaced (total, per-class counts, method list and per-method case counts all unchanged) RED naming ToyTests.M_a; D1x the same input on the round 12 gate GREEN -> the closure is this round's",
+        "D2 {p,p,q} -> {p,q,q} RED (digest keeps duplicates); D3 row identity swap GREEN (order independent); D4 argument text gone RED; D5 fact turns theory PASS + ::warning::new test method argument text",
+        "D6 r12 name-list baseline: new gate RED 'has no data table' / r12 gate GREEN; D7 refreshing it without -AcceptRemoval GREEN (expected=6, classes unchanged, data 2 keys)",
+        "D8 substituted value refused without -AcceptRemoval (message contains 'argument text changed', baseline bytes untouched) and accepted with it; D9 argument text gone is refused as well",
+        "G1 theory row added PASS + 'argument text grew: 2 -> 3 rows' + 'M_b (+1 cases)'; G3 add-row-and-change-value in one theory still reported as growth (documented residual limit)",
+        "C1-C5 config negatives all RED (missing / empty / unknown key / bad digest / array); the empty-table case exposed a gate defect (member enumeration on an empty object) fixed by enumerating PSObject.Properties explicitly",
+        "RE1 real TRX PASS printing methodData=100 baseline=method data table 100 digests / methodData=3 ... 3 digests / combined tests=2056; RE2 r12 baseline x real TRX RED on the new gate and GREEN on r12; RE3 real migration writes data=100 / data=3",
+        "RE4 both shells write the same bytes and the r9-art and r12-art digests are identical (windows 100/100, webdav 3/3) - digests are stable across CI runs",
+        "data source: CI run 41095080796 @701bb547, windows-tests.trx 2,719,155 B / webdav-tests.trx 145,266 B (415 parameterized rows over 100 methods; 6 rows truncated by the framework with '...')",
+        "CI: run 41111613263 @a0b46f6e success - methodData=100 baseline=method data table 100 digests, methodData=3 ... 3 digests, methodCases=1952 ... 1952 cases, methods=1637 ... 1637, combined tests=2056, licence checks=30 failed=0 warnings=1"
+      ],
+      "notes": "digest = SHA-256 over Ordinal-sorted, LF-joined argument suffixes with duplicates kept, first 8 bytes as lowercase hex, only for methods that actually carry parameters. Row counts are compared first, so a theory that gains rows stays a warning (argument text grew: N -> M rows) instead of a hard fail. Residual limits: the framework truncates 6 display names with '...', a theory that adds a row and changes a value in one step stays a growth warning, and class/method names are not part of the digest (renames stay the methods table's business).",
+      "next_action": "无；下一层候选是把运行期生成的 Theory 值或截断前原文纳入基线，代价更高，需另立切片。",
+      "closed_at": "2026-10-31T03:10:00+08:00"
     }
   ]
 }

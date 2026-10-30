@@ -375,7 +375,7 @@ W6-113 round 10 按指令复验 W14 口径与 Android 端口的一致性，**结
 
 ### 残留限制
 
-- **数据行的参数值不钉**：只钉「某方法有几行」。行内容互换（例如 theory 的 InlineData 参数值被改写但行数不变）仍为 PASS（R7 / round 9 NC16）。要收掉这一层需要把数据行参数纳入基线，代价与噪声都显著上升，暂不做。
+- **数据行的参数值**：只钉「某方法有几行」时，行内容被改写（行数不变）仍为 PASS（R7 / round 9 NC16）。**该条已由 §6.8（W6-113q，2026-10-31）收口** —— `data` 表钉住每个方法的参数行指纹，代价是基线 127,587 B → 140,085 B。
 - **测试重命名等同移除+新增**，表现为 RED + warning，需人工确认后刷新，这与 §6.5 的口径一致。
 - **口径依赖 TRX 的 TestDefinitions**：若 runner 输出结构变化导致 definition 无法解析，会走 `::warning::` 与配置校验，而不是静默判绿。
 
@@ -384,3 +384,59 @@ W6-113 round 10 按指令复验 W14 口径与 Android 端口的一致性，**结
 **文档提交的 exact-head CI 验收（EXECUTED）**：head `4461140b`（docs 三文件）的 windows-ci **`41100655895` completed/success**，台阶行与 `8ec0d890` 完全一致（`methodCases=1952 baseline=method case table 1952 cases` / WebDav `104 … 104 cases` / `methods=1637 … 1637 methods` / `combined tests=2056`）、licence `check-licence-surface  checks=27 failed=0 warnings=1 skipped=0` 且 `sbom-source-revision` / `sdk-pin-matches-report` PASS、探针 `MPV_PROBE`/`ENGINE_PROBE` PASS 且 GPU/HDR/audio 未跑口径不变；同 head Android CI `41100655793` 取证时 in_progress，而 core/feature/app 三棵树哈希与 `701bb547`/`8ec0d890` 全同（`ff4eed826cbc` / `e983feb08237` / `70c541457cae`）⇒ 按 ADR-AUTO-001 继承、不作独立结论。
 
 **最终 head 的 exact-head CI 验收（EXECUTED）**：head `3eafac91`（PR merge commit `a3e5adf14d13`，parents `69a454a7` + `3eafac91`；base 已前进到 `69a454a7`）的 windows-ci **`41102903873` completed/success**，台阶行与前面两个 head 一致（`methodCases=1952 baseline=method case table 1952 cases` / WebDav `104 … 104 cases` / `methods=1637 … 1637 methods` / `combined tests=2056`）；licence **`checks=29 failed=0 warnings=1`**（base 前进新增的 W35 `notices-inventory` / `notices-declarations` 两项，`sbom-source-revision` 对 merge commit `a3e5adf14d13` 判祖先，`sdk-pin-matches-report 10.0.113` PASS，唯一 WARN `lgpl-licence-gaps 5 row`）；探针口径不变。同 head Android CI `41102903866` 取证时 in_progress；`41099478811`（@`8ec0d890`）与 `41100655793`（@`4461140b`）被 concurrency 取消，而三 head 的 core/feature/app 树哈希全同 ⇒ 按 ADR-AUTO-001 继承。
+
+## 6.8 第五层口径：per-argument-row 数据行 digest（W6-113q）
+
+§6.7 把口径推到「总数 → 每类计数 → 方法集合 → 每方法用例数」四层，但第四层只钉「某方法有几行」。把某方法某一行数据的**参数值**替换成活着的另一行的值 / 新值（行数不变）时，四层可见量全部不变 ⇒ 判绿 —— 这正是 §6.7「残留限制」的第 1 条。本轮给每套件加 `data` 表：`Class.Method → 16 位十六进制 digest`。
+
+**要点：只有「值被改写」才是漏洞，「两行互换」不是。** 互换只是重新分配同一个 multiset，语义等价（D3 判 GREEN）；被替换成活着的另一行的值、或替换成新值，才会让某一行「本来测的东西」不再被测（D1）；`{p,p,q} → {p,q,q}` 这种「去重集合与总行数都不变、只有重数变」也属漏洞（D2）。因此 digest 必须**保留重复行**（排序后逐行 join 再哈希，而不是先 set 去重）。
+
+### 口径（2026-10-31 起）
+
+| 字段 | 含义 | 校验 |
+|---|---|---|
+| `data` | `类.方法` → 该方法全部参数行的指纹 | 行值被替换而计数不变 → RED（点名 `Class.Method (baseline <want>, now <got>)`）；条目消失 → RED（`argument text gone`）；新方法带参数 → GREEN + warning |
+| digest 输入 | 按 `[System.StringComparer]::Ordinal` 排序、以 LF join 的参数后缀（**保留重复行**），SHA-256 取前 8 字节小写十六进制 | 只对**带参数**的方法写条目（windows 100 / webdav 3），否则规模再涨数倍而收益不变 |
+| 行数先比 | 同方法实际行数 > 基线的 → warning（`argument text grew: N -> M rows`） | 若不分行数，新增一行 `[InlineData]` 会从「增长=warning」被误判成硬失败 |
+| 结构自洽 | —— | 缺 / 空 `data` 表、`data` key 不在 `methods` 表、digest 非 16 位小写 hex、旧（2026-10-30）方法名数组格式 → 一律 throw |
+
+TRX 事实（EXECUTED）：每个 `[Theory]` 数据行是独立的 `<UnitTest name="Class.Method(<args>)">`，`TestMethod.name` 只给裸方法名 ⇒ 参数文本仅存在于显示名里，类的归属仍由 `TestMethod.className` 决定（§6.1 起沿用）。真实语料 `windows-tests.trx` 2,719,155 B：defs 1952 / 带参数显示名 415 行 / 有参数的方法 100 个，其中 **6 行被框架用 `···` 截断**（截断点之后的差异不可见）；`webdav-tests.trx` 145,266 B：3 方法 / 12 行 / 无截断。跨运行确定性：`D:/mh-verify/r9-art`（run `41055690826` @48d5feb7）与 r12-art（run `41095080796` @701bb547）的同方法 digest windows 100/100、webdav 3/3 完全一致，无 GUID / runner 名 / 时间戳等非确定性参数。
+
+`check-test-suite-baseline.ps1`（23,063 B）新增台阶行 `methodData=N baseline=method data table N digests`；`update-test-suite-baseline.ps1`（16,197 B）写出 `data` 表、summary 行尾 `data=<n>`，并把「argument text gone / argument text changed」纳入 `-AcceptRemoval` 守卫。
+
+### 负向对照（38 例，两代 PowerShell 逐例判定一致）
+
+| 例 | 输入 | 期望 | 观测 |
+|---|---|---|---|
+| D1 | 某方法一行参数值被替换成活着的另一行的值（四层可见量全同） | RED | RED，点名 `ToyTests.M_a (baseline …)` |
+| D1x | 同 D1 输入交给 round 12 门禁 | GREEN | GREEN ⇒ D1 的红确为本轮收口所得 |
+| D2 | `{p,p,q} → {p,q,q}`（去重集合与总行数都不变，只有重数变） | RED | RED（digest 保留重复行才看得到） |
+| D3 | 两行身份互换（同一 multiset） | GREEN | GREEN（排序后哈希，顺序无关） |
+| D4 | 某方法的参数文本整体消失（Fact 化） | RED | `M_a (argument text gone)` |
+| D5 | Fact 长出参数（变 Theory） | PASS + warning | `::warning::new test method argument text` |
+| D6 | r12 旧格式基线（无 `data` 表） | 新门禁 RED | `has no data table`；同一输入在 r12 门禁 GREEN |
+| D7 | 旧格式基线用新刷新脚本、且无 `-AcceptRemoval` | GREEN（迁移不降级） | expected=6、classes 不变、data 2 键 |
+| D8 | 替换参数值后刷新：先无开关、再带 `-AcceptRemoval` | 先拒绝、后写入 | 拒绝消息含 `argument text changed` 且基线字节未动；带开关后 GREEN |
+| D9 | 参数文本消失后刷新 | 拒绝 | 与 D8 同守卫 |
+| G1 | 某 theory 增加一行数据 | PASS + warning | `argument text grew: 2 -> 3 rows` + `M_b (+1 cases)` |
+| G3 | 同一 theory 同时「加一行 + 改一行值」 | PASS + warning | 仍按增长报（见残留限制） |
+| C1–C5 | 缺 / 空 / 幽灵 key（不在 `methods`）/ 坏 digest / `data` 是数组 | RED | 全 RED；空表一例在首轮暴露出实现缺陷（见下） |
+| R1–R6 | 回归：total 降 / 类缩减 / 方法缩减 / failed≠0 / notExecuted≠0 / definition≠result | RED×5 + warning | 与 §6.5/§6.7 判定一致 |
+| RE1 | 真实 TRX × 已提交基线 | PASS | 含 `methodData=100 baseline=method data table 100 digests`、`methodData=3 … 3 digests`、`combined tests=2056` |
+| RE2 | r12 基线 × 真实 TRX：新门禁 vs r12 门禁 | RED / GREEN | 迁移闸门只在新版生效 |
+| RE3 | 真实语料迁移刷新 | 写入 | `data=100` / `data=3` |
+| RE4 | 两代 PowerShell 各写一遍；两代语料各算一遍 digest | 一致 | 写出的字节相同；r9-art 与 r12-art digest 全等 |
+
+**首轮暴露的两处问题（EXECUTED）**：① **实现缺陷**：C2（`data` = `{}`）走错分支 —— `@($e.data.PSObject.Properties.Name)` 在空对象上退化成「一个空名属性」，报 `has a blank data key` 而非专用消息；改为显式枚举 `@($e.data.PSObject.Properties)` 后两代 PowerShell 都给出 `has an empty data table - the per-argument-row check would be vacuous`。② **台账笔误**：D7 断言写成 `before.expected === 0`（该处应为 6 且 `before.data === undefined`）。两处修完后 38/38 pass（`D:/mh-verify/r13/nc-run.log`）。
+
+### 数据源与规模
+
+数据源沿用 CI run `41095080796`（head `701bb547`）的 TRX（`windows-tests.trx` 2,719,155 B / `webdav-tests.trx` 145,266 B）。基线 **127,587 B → 140,085 B**（+12,498 B），其中 `data` 只覆盖 100 + 3 个带参数方法；被钉住的是 415 + 12 行参数文本的指纹。
+
+### 残留限制
+
+- **框架截断**：6 行显示名以 `···` 结尾（如 `ServerUrlNormalizerSecurityTests.Query_and_fragment_are_refused_without_echoing_them`），截断点之后的差异不可见；这些方法的 digest 仍会随前缀变化而变，但前缀内的改动看不到。
+- **同一 theory「加行 + 改值」**：因为数据层先比行数，「增加了行」会把它归入 warning（G3）；要区分「加了一行且改了另一行的值」需要逐行身份，代价更高。
+- **digest 不含类名与方法名**（改名由 `methods` 表管），也不含运行期生成的值（Theory 参数只有字面量才进 TRX 显示名）。
+
+**exact-head CI 验收（EXECUTED）**：head `a0b46f6e` 的 windows-ci **`41111613263` completed/success**（`pull_request`）：日志 `D:/mh-verify/r13c/ci-41111613263-windows.log` 逐行命中 `total=1952 baseline=1952` / `classes=113 … 113 entries` / `methods=1637 … 1637 methods` / `methodCases=1952 … 1952 cases` / **`methodData=100 baseline=method data table 100 digests`**，WebDav `104 / 4 / 95 / 104` / **`methodData=3 … 3 digests`**，`combined tests=2056`；licence **`check-licence-surface  checks=30 failed=0 warnings=1 skipped=0`**（base 前进到 `faff3927`，`sbom-source-revision` 对 merge commit `d7fa04aa5d8b` 判祖先，`sdk-pin-matches-report 10.0.113` PASS，唯一 WARN `lgpl-licence-gaps 5 row(s)`）；探针 `MPV_PROBE PASS` / `ENGINE_PROBE PASS`（GPU/HDR/audio output NOT exercised → UNVERIFIED）。同 head Android CI `41111613255` 取证时 in_progress，而 `a0b46f6e` 与 `92c93e51` 的 core/feature/app 树哈希全同（`ff4eed826cbc` / `e983feb08237` / `70c541457cae`）⇒ 按 ADR-AUTO-001 继承、不作独立结论。
