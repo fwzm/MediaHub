@@ -14,6 +14,7 @@
 | 41003347784 | `e7779b7f` | cancelled | 对方 12:51 的 `0ae7757f` |
 | 41008280281 | `74548803` | cancelled | 对方 13:48 的 `2ef01647` |
 | 40991293954 | `6c28866f` | cancelled | 我 10:49 的 `055c85c3` |
+| （见 §7） | `9cca3880` | cancelled | 第 5 次，head 已被后续 `36255bdb` 取代 |
 
 同期 windows-ci 在同一批 head 上**全部 success**（`41003347790` @ `e7779b7f`：1890 + 104；`41000771112` @ `00a6dfa8`；`41005235521` @ `0ae7757f`）。
 
@@ -77,3 +78,15 @@ concurrency:
 1. 账本中 `cancelled` 单列，不并入 pass/fail（已在 `TEST_MATRIX.md` §2 与 §4 写入）。
 2. 需要 Android exact-SHA 证据时，**在推送后等待那条 run 完成再推下一个提交**，并把该 run id 立刻记进账本；下一轮若发现对方又推，接受「本条已被取消」的事实并注明。
 3. 用「树哈希未变」作辅助论证时必须标明它是推理（`git rev-parse <sha>:core` 相同 + `git diff --name-only <a> <b> -- core feature app` 为空），不得写成「Android 已验证通过」。
+
+## 7. 计数（2026-10-30 当天，截至 15:0x）
+
+`feature/cross-device-source-sync` 上最近 14 条 Android CI 结局分布：
+
+```
+cancelled: 5    success: 8    in_progress: 1
+```
+
+**约 36% 的 Android 验证被取消**。同期 windows-ci 在该分支上**零取消**（无 concurrency 块）。
+
+第 5 次就在我写这份 ADR 的过程中发生：我的文档提交 `9cca3880` 的 Android CI 被对方 14:59 的 `36255bdb`（W26）取消。这恰好说明问题不在任何一方的纪律 —— 双方都在按各自的节奏正常提交，是 `cancel-in-progress` 让「并行」必然等于「互相踩」。
