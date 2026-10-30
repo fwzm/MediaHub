@@ -6847,6 +6847,8 @@ base `feature/windows-client` 在本分支之后又前进 3 个提交（`f484dd8
 ### 81.3 该行不过脱敏（有测试钉住）
 滚动目录行**不做** `LogService.Redact`。它不是请求 URL，而是本机日志目录（`%LOCALAPPDATA%\MediaHub\logs`）；脱敏会把目录名里的十六进制段打码，指针随之失效、报告失去可用性。这条不是口味问题：W14 带入的 `LogFileSinkTests.The_export_points_at_the_rolling_directory_only_when_one_is_configured` 直接钉住「导出必须包含 `滚动文件目录：<原样目录>`」——按「也脱敏」实现时该例红过一次（`D:/mh-verify/w6-merge-s0-tests.log`：1725 通过 / 1 失败，报 `Assert.Contains` 找不到该串），改回后 `w6-merge-s0-tests2.log` 1726 / 0。`rollingDirectory == null` 时输出与 W6-111 逐字相同，`DiagnosticsReportTests` 的绝对行下标断言不受影响。
 
+**补记（W6-113）**：合并时的并集解法漏了一处形状 —— 产出的那一行少了 W14 的 `# ` 前缀，位置也掉到「生成时间/版本/设备」之后。两侧测试都没抓到（`LogFileSinkTests` 只断言 `Contains("滚动文件目录：" + dir)`，带不带前缀、在前在后都通过）。已由提交 `055c85c3` 修正：新增 `DiagnosticsReport.RollingDirectoryPrefix` 常量，渲染顺序改为 `Title → 滚动目录 → 生成时间 → 应用版本 → 设备 → 日志条目`，并补 7 条用例（`DiagnosticsReportTests` 9 → 16）逐项钉住前缀、位置、空/缺省、十六进制段不被吃、目录原样回显而同报告内 URL 仍脱敏、只给指针不内联磁盘全文。三条负向对照恰好 1 / 1 / 4 红。
+
 ### 81.4 合并提交与「没丢东西」的判据
 合并提交 **`7c2f96ca`**（parents `51776182` + `b586b001`，保留 Git 默认合并提交，不 rebase、不 amend 共享历史）。
 

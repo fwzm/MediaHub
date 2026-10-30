@@ -1,0 +1,96 @@
+{
+  "schema": "mediahub-queue/1",
+  "updated_at": "2026-10-30T11:45:00+08:00",
+  "updated_by": "lead-W6-113-r2",
+  "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
+  "tasks": [
+    {
+      "id": "W6-112",
+      "title": "合回主树 W14，恢复 PR #39 可合并",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": ["7c2f96ca", "e6e5d534", "windows-ci:40950218318", "android-ci:40950218275"],
+      "closed_at": "2026-10-30T04:34:00+08:00"
+    },
+    {
+      "id": "W6-113a",
+      "title": "跨进程写锁 + 并发碰撞测试",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead",
+      "artifact": "D:/mh-goal/lock.mjs",
+      "evidence": ["D:/mh-goal/lock-collision-test-result.json", "17/17 checks passed"],
+      "notes": "资源粒度 worktree / branch / ref:origin；跨 worktree 写同一远端分支仍互斥。工具在仓库外，不污染任何 worktree。"
+    },
+    {
+      "id": "W6-113b",
+      "title": "诊断导出契约核验与修复（对齐 W14）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": ["055c85c3", "windows-ci:40993937874", "MediaHub.Tests 1858/0", "negative controls 1/1/4 red, snapshot restored byte-identical"],
+      "notes": "该行不过 Redact：LongHexRegex 会吃掉临时目录的 32 位十六进制段，指针不可跟随。"
+    },
+    {
+      "id": "W6-113c",
+      "title": "PR #39 正文内容治理（折叠 + 归档）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": ["d6331139", "docs/pr-archive/PR39-BODY-ARCHIVE-20261030.md", "body 257915 -> 224584 B"],
+      "notes": "原文一字未删；折叠前全文 D:/mh-goal/pr39-body-before-w6113.md。"
+    },
+    {
+      "id": "W6-113d",
+      "title": "自动化账本（queue / RUNLOG / TEST_MATRIX）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": ["docs/automation/TEST_MATRIX.md", "docs/automation/RUNLOG.md", "docs/automation/queue.json"],
+      "notes": "指令要求复用既有账本；实测仓库此前没有 queue.json / TEST_MATRIX / RUNLOG，故新建。"
+    },
+    {
+      "id": "W6-113e",
+      "title": "两棵树文档口径钉住（RollingDirectoryPrefix 与测试引用）",
+      "priority": "P1",
+      "status": "NOT_RUN",
+      "owner": "unassigned",
+      "blocked_by": [],
+      "next_action": "cd D:/mh-w6 && grep -n 'RollingDirectoryPrefix' windows/src/MediaHub.Net/DiagnosticsReport.cs 确认常量在位后，在 windows/docs/W14-DIAGNOSTIC-LOG-FILES.md 与 docs/android-source-sync-transfer.md §81 各补一句「该行形状由 RollingDirectoryPrefix 常量与 DiagnosticsReportTests 7 例共同钉住」。",
+      "notes": "两个文档都在另一执行者频繁改动的路径上，需先取锁再动。"
+    },
+    {
+      "id": "W6-P1-E2E",
+      "title": "W6 双端真实导入导出与 GUI 验收",
+      "priority": "P1",
+      "status": "BLOCKED",
+      "owner": "unassigned",
+      "blocked_by": ["phone_gate", "idle_gate >= 1200s"],
+      "next_action": "等维护者授予 >=1200 s 空闲窗口并明确 phone_gate 窗口后，跑 windows/tools/acceptance 下的同步页 GUI 用例与真机双端对跑。",
+      "notes": "GUI_UNVERIFIED + DEVICE_UNVERIFIED。禁止自行排程，禁止用模拟器结果替代真机状态。"
+    },
+    {
+      "id": "REL-SIGN",
+      "title": "代码签名 / MSIX / 干净机安装",
+      "priority": "P2",
+      "status": "SIGNING_BLOCKED",
+      "owner": "unassigned",
+      "blocked_by": ["维护者签名决定"],
+      "notes": "未经维护者决定不得声称可正式分发。"
+    },
+    {
+      "id": "REL-LGPL",
+      "title": "libmpv GPL 义务处理（切 LGPL 引擎或按 GPL 提供对应源码）",
+      "priority": "P2",
+      "status": "RELEASE_BLOCKED",
+      "owner": "unassigned",
+      "blocked_by": ["维护者法务/许可决定"],
+      "notes": "当前 libmpv-2.dll 为 GPL-3.0-or-later，未切产品。"
+    }
+  ]
+}

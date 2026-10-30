@@ -29,6 +29,7 @@
 - `LogService` 构造改为 `LogService(LogFileSink? fileSink = null)`，暴露 `FileSink`。
 - `Write` 顺序：先入内存环 → 再 `FileSink?.Append(entry)` → 最后 `EntryAdded`。先写盘的理由是它是唯一能活过进程的副本，且 UI 订阅者不应能阻止它。
 - `Export()` 在有 sink 时于头部多一行 `# 滚动文件目录：<目录>`，让读报告的人知道完整历史在哪；没有 sink 时输出与之前逐字相同。
+- 这一行的**形状与位置**（`# ` 前缀、紧跟标题之下）由 `DiagnosticsReport.RollingDirectoryPrefix` 常量与 `DiagnosticsReportTests` 的 7 条用例共同钉住（W6-113）；它**不过** `LogService.Redact` —— 脱敏会吃掉临时目录里的 32 位十六进制段，让指针不可跟随。
 - 组合根 `windows/src/MediaHub.App/AppServices.cs` 构造 `new LogService(new LogFileSink(<LocalAppData>\MediaHub\logs))`。
 
 ## 4. 测试

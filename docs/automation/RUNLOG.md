@@ -1,0 +1,47 @@
+# RUNLOG — MediaHub 执行日志（追加式）
+
+**只追加，不改写历史。** 发现旧结论错误时追加更正行并写明归因，不静默改写。
+
+字段口径：`时间 | 执行者 | 动作 | 结果 | 证据`。`证据` 必须是路径、SHA 或 run id；写不出来的行不写。
+
+---
+
+## 2026-10-30
+
+### 04:0x — lead（W6-112）— 收口 W6 树半途合并
+
+- 动作：把 `origin/feature/windows-client`（W14 `b586b001`）合回 `feature/cross-device-source-sync`，冲突仅 `LogService.cs`，按并集解（保留 `Snapshot()` + `DiagnosticsReport` 渲染层 + 补传 `rollingDirectory`）。
+- 结果：合并提交 `7c2f96ca`；PR #39 从 `CONFLICTING/DIRTY` 恢复 `MERGEABLE`。
+- 证据：`git diff --diff-filter=D 51776182 7c2f96ca` 为空；CI `40945269315`（windows 1726+104）、`40945269145`（Android 2495）。
+
+### 04:34 — lead — §81 文档补记
+
+- 动作：`docs/android-source-sync-transfer.md` 追加 §81（冲突面、并集解法、该行不过脱敏的理由、零删除判据）。
+- 结果：提交 `e6e5d534`；exact-SHA CI `40950218318`（windows 1726+104）、`40950218275`（Android 2495，VI 19×2）。
+- 说明：`7c2f96ca` 那次 push 取消了同分支仍在跑的 Android run —— 同分支连续 push 会取消进行中 run，这是已知坑。
+
+### 10:39–11:00 — lead（W6-113）— 写出锁 + 诊断导出契约修复
+
+- 动作：仓库外实现跨进程写锁 `D:/mh-goal/lock.mjs`（资源粒度 worktree / branch / ref:origin，O_EXCL 原子创建 + token + 心跳 TTL + 字典序批量取锁失败回滚 + --take-stale 显式闸门），碰撞测试入库 `D:/mh-goal/lock-collision-test.mjs`。
+- 结果：碰撞测试 **17/17 PASS**；WIP 保护快照 `head 6c28866f`、`porcelain=0`，他人 6 个 backup 相关文件一个未碰。
+- 动作：核验诊断导出契约，发现**真缺陷** —— W6-112 合并丢了 W14 的 `# ` 前缀且位置错位；修复提交 `055c85c3`（新增 `RollingDirectoryPrefix`、渲染顺序 Title → 滚动目录 → 生成时间 → 版本 → 设备 → 条目、该行仍不过 Redact）。
+- 结果：`DiagnosticsReportTests` 9 → 16，本机 `MediaHub.Tests` **1858 / 0**；三条负向对照恰好 1 / 1 / 4 红，快照 `sha256 7ad4ed85…` 逐字节还原后复绿。
+- 证据：windows-ci `40993937874`（1858 + 104）；其 Android run `40993937937` = **cancelled**（我随后 push 所致，非产品缺陷）。
+
+### 11:00 — lead（W6-113）— PR #39 正文治理
+
+- 动作：W6-68/69/70/71 四节（37,565 B）折叠为 838 B 索引，原文移入 `docs/pr-archive/PR39-BODY-ARCHIVE-20261030.md`（38,250 B，提交 `d6331139`）。
+- 结果：正文 257,915 → **224,584 B**（余 37,560 B），远端回读 `trimEnd` 相等。
+- 证据：exact-SHA CI `40995411695`（windows 1858+104）、`40995411720`（Android `uniqueTests` 2501、VI 19×2、FAILED 0）。
+
+### 11:1x — 另一执行者（W21/W22，backup 系列）— 与本次并行
+
+- 动作：W21 WebDAV 下载（`6c28866f`）、W22 WebDAV 列目录（`5a3b8ba6`）。
+- 归因：`uniqueTests` 2495 → 2501 来自该系列的 W15 Kotlin 用例，**不是** W6-113 的 Windows 侧改动。
+- 并发事实：两个执行者同时向同一分支提交；我持锁期间对方未取锁（其提交时间在我锁心跳过期之后）。
+
+### 11:4x — lead（W6-113 round 2）— 建立自动化账本
+
+- 动作：新建 `docs/automation/`（本文件 + `TEST_MATRIX.md` + `queue.json`）；此前仓库只有 `HANDOFF.md`/`TASKS.md` 等叙述性文档，无机器可读队列与门禁矩阵。
+- 结果：见提交；`TEST_MATRIX.md` 每条标注 `EXECUTED` / `SOURCE_REVIEWED` / `NOT_RUN`，`queue.json` 记录任务 DAG。
+- 边界：本轮不并行改 Windows 生产代码 —— 共享 `MediaHub.Tests` 与 docs 已被另一执行者占用，并行改同文件会互相盖掉。
