@@ -9,6 +9,7 @@
 > WebDAV 下载（`download`：一次 GET + 声明长度预检 + 流式上限 + 原子落盘，远端失败同样退出码 9）**EXECUTED_PASS**（下载器 12 例 + CLI 3 例 + 四条负向对照，全量 MediaHub.Tests **1851/0**）；
 > WebDAV 列目录（`list`：一次 PROPFIND Depth: 1、只读只列一层、默认只列 `.mhbackup`）**EXECUTED_PASS**（14 例 + 四条负向对照各恰好 1 红，全量 MediaHub.Tests **1872/0**）；
 > WebDAV 删除（`delete`：默认只预览、零请求；`--confirm` 才先 HEAD / PROPFIND 确认存在再 DELETE；只删 `.mhbackup`）**EXECUTED_PASS**（18 例 + 四条负向对照各恰好 1 红，全量 MediaHub.Tests **1890/0**）；
+> WebDAV 上传覆盖保护（`upload --no-overwrite`：`If-None-Match: *` 条件写，412 两种口径分开）**EXECUTED_PASS**（`BackupUploadTests` 21 例 = 原 14 + 7，四条负向对照各恰好 1 红，全量 MediaHub.Tests **1897/0**）；
 > 设置页入口、播放进度/收藏落库仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
 
 ## 1 动机与范围
@@ -444,11 +445,54 @@ download --url <WebDAV 地址> --out <备份文件> [--user <账号>] [--passwor
 - 批量 / 递归删除、保留策略（N 份 / N 天）—— 不做：不可逆动作不做自动清理
 - 设置页里的删除按钮与二次确认 —— GUI_UNVERIFIED
 
-## 14 仍未做（如实）
+## 14 WebDAV 上传覆盖保护（W24）
+
+### 14.1 缺口
+
+上传（§10）成功即写远端：同名文件默认被覆盖，而命令行的目标文件名常被复用（带时间戳也可能撞），一旦传错口令或错载荷，就把上一份好备份盖掉了。删除不可逆，覆盖也近似不可逆。
+本轮只加一个**显式**刹车，不改默认行为：不加 `--no-overwrite` 时仍然同名覆盖（用户常常就是要更新同一份备份）。
+
+### 14.2 `If-None-Match: *` 与 412 语义
+
+- **不用「先 PROPFIND 再 PUT」**：两次往返之间目标可能被别人创建（TOCTOU），改用条件写。
+- `noOverwrite=true` 时请求带 `If-None-Match: *`（RFC 7232：仅在目标不存在时写入）；远端已有同名文件回 **412**，本端映射为 `Reasons.AlreadyExists`「远端已有同名文件，这次上传被拒绝（412）」，**不改远端**。
+- 未开保护时收到 412（例如中间层强加前置条件）映射为 `Reasons.PreconditionFailed`；两种口径分开，不把「被保护住」说成「前置条件无缘无故失败」。
+- 412 在 `ReasonFor` 之外单独分支；其余状态映射（认证 / 目录缺失 / 不接受 / 配额 / 服务端 / 超时 / 连不上）与 60 秒超时完全不变。
+- `--mkdir` 建目录后的**重试 PUT 同样带条件头**，避免「第一次 409、建完目录第二次就无条件覆盖」。
+
+### 14.3 命令行（`upload … [--no-overwrite]`）
+
+- 默认仍是同名覆盖；`--no-overwrite` 才开启保护。
+- 成功文本在 SHA-256 行后加「覆盖保护：已开启（远端已有同名文件时本次上传会被拒绝，不改远端）。」；`--json` 的成功与失败回执都带 `noOverwrite` 布尔。
+- 失败退出码不变：远端拒绝 **9**（`ExitRemote`）、本地读文件失败 8、本地用法错误 2；口令仍只从 `MH_WEBDAV_PASSWORD` 读，不接受命令行口令。
+
+### 14.4 验证
+
+| 对照 | 改动 | 红 |
+| --- | --- | --- |
+| A | 用法文本与说明行同时去掉 `--no-overwrite`（首版只删用法行**无效**：说明行里还有同一 token） | 1（`UsageTextMentionsTheNoOverwriteSwitch`） |
+| B | 成功文案改字（「覆盖保护：开启。」） | 1（`CommandLineNoOverwriteSaysSoOnSuccessAndInJson`） |
+| C | 命令行把 `noOverwrite` 写成常量 `false` | 1（`CommandLineNoOverwriteSendsTheHeaderAndReportsTheExistingFile`） |
+| D | 无条件发送 `If-None-Match: *` | 1（`APlainUploadSendsNoConditionalHeader`） |
+
+- `BackupUploadTests` 21 例（原 14 + 7：条件头有无、412 两种口径、命令行头部与回执、用法文本）；全量 `MediaHub.Tests` **1897/0**（1890 + 7）。
+- 四条对照每次从实现态快照（`D:/mh-verify/w24-snap/`）逐字节还原并复验：uploader sha256 `8820cbba0fc93a5b5f5c9af2bd9cf1aab5466b82b434d8291119032191617755`（8318 B）、
+  cli sha256 `dfe02d51e5b5c7e5a7c77ebd0ded29cf25fdbc7ab2beca77083a30c1522867d9`（44502 B）；还原后复跑 21/0。
+- 全部走桩 handler（`StubHandler`）零联网：只钉「带/不带条件头」「412 的两种说法」「回执与退出码」，**不证明真实服务端支持条件写**。
+- 另一条测试自身的坑：`upload --help` 不是帮助路径（`Run` 只把第一个参数当命令），要断言用法文本得用顶层 `--help`，否则拿到的是「缺 `--file`」的退出码 2。
+
+### 14.5 仍未做（本层之外）
+
+- 真实 WebDAV 服务端是否支持条件写、412 回包是否规范 —— SERVER_UNVERIFIED（有的实现忽略条件头或换码，未经实测不假设）
+- 「远端已有则改名另存」与「保留最近 N 份」策略 —— 不做：命名与保留交给调用方
+- 上传前的预览与确认（大小 / 来源数 / SHA-256 / 覆盖提示）—— GUI_UNVERIFIED
+
+
+## 15 仍未做（如实）
 
 - 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏仍不落库 —— NOT_IMPLEMENTED
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
 - 本机进度/收藏的写入（来源与偏好已随 `--apply` 落库）—— NOT_IMPLEMENTED
-- WebDAV 上传（§10）、下载（§11）、列目录（§12）、删除（§13）均已实现；**真实服务端联调未做** —— SERVER_UNVERIFIED
+- WebDAV 上传（§10，含覆盖保护 §14）、下载（§11）、列目录（§12）、删除（§13）均已实现；**真实服务端联调未做** —— SERVER_UNVERIFIED
 - Android 恢复计划器与 Windows 反向对照、真机与真 GUI —— DEVICE_UNVERIFIED / GUI_UNVERIFIED
 - 口令强度无最小长度约束（沿用 Android 口径）；容器未做外部安全审计

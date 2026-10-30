@@ -21,6 +21,8 @@ public static class MhBackupWebDavUploader
         public const string MissingPath = "上传地址必须带文件路径";
         public const string AuthenticationFailed = "远端拒绝这次上传：账号或口令不对（401/403）";
         public const string CollectionMissing = "远端没有这个目录，且没有允许创建（409）";
+        public const string AlreadyExists = "远端已有同名文件，这次上传被拒绝（412）";
+        public const string PreconditionFailed = "远端拒绝了这次上传的前置条件（412）";
         public const string NotAcceptable = "远端不接受这个文件（415 或 400）";
         public const string QuotaExceeded = "远端空间不足（507）";
         public const string ServerError = "远端出错";
@@ -40,6 +42,7 @@ public static class MhBackupWebDavUploader
         string? password = null,
         bool createCollection = false,
         HttpMessageHandler? handler = null,
+        bool noOverwrite = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(content);
@@ -52,7 +55,7 @@ public static class MhBackupWebDavUploader
         using var client = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
         client.Timeout = TimeSpan.FromSeconds(DefaultTimeoutSeconds);
 
-        Result first = await PutAsync(client, content, target, userName, password, cancellationToken).ConfigureAwait(false);
+        Result first = await PutAsync(client, content, target, userName, password, noOverwrite, cancellationToken).ConfigureAwait(false);
         if (first.Ok || !createCollection) return first;
         if (first.StatusCode != 409) return first;
 
@@ -60,7 +63,7 @@ public static class MhBackupWebDavUploader
         if (parent is null) return first;
         int mkcol = await MkColAsync(client, parent, userName, password, cancellationToken).ConfigureAwait(false);
         if (mkcol is not (201 or 200 or 204 or 405)) return new Result(false, mkcol, Reasons.CollectionMissing, parent);
-        return await PutAsync(client, content, target, userName, password, cancellationToken).ConfigureAwait(false);
+        return await PutAsync(client, content, target, userName, password, noOverwrite, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>只建最后一级集合；父级不存在时远端回 409，交给调用方如实报告。</summary>
@@ -106,6 +109,7 @@ public static class MhBackupWebDavUploader
         Uri target,
         string? userName,
         string? password,
+        bool noOverwrite,
         CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Put, target)
@@ -114,10 +118,19 @@ public static class MhBackupWebDavUploader
         };
         request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
         AddAuthorization(request, userName, password);
+        if (noOverwrite)
+        {
+            // RFC 7232：If-None-Match: * 表示「只在目标不存在时写入」，已存在时服务端回 412。
+            request.Headers.TryAddWithoutValidation("If-None-Match", "*");
+        }
         try
         {
             using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
             int code = (int)response.StatusCode;
+            if (code == 412)
+            {
+                return new Result(false, code, noOverwrite ? Reasons.AlreadyExists : Reasons.PreconditionFailed, target);
+            }
             if (code is 200 or 201 or 204)
             {
                 Uri? location = response.Headers.Location is null ? target : new Uri(target, response.Headers.Location);

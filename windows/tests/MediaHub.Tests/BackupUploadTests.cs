@@ -237,6 +237,91 @@ public sealed class BackupUploadTests : IDisposable
         Assert.Empty(stub.Requests);
     }
 
+
+    [Fact]
+    public async Task NoOverwriteSendsIfNoneMatchStar()
+    {
+        var stub = new StubHandler().Then(HttpStatusCode.Created);
+
+        MhBackupWebDavUploader.Result result = await MhBackupWebDavUploader.UploadAsync(
+            Encoding.UTF8.GetBytes("x"), Target, "user-A", "p", createCollection: false, handler: stub, noOverwrite: true);
+
+        Assert.True(result.Ok);
+        Assert.Equal("*", Assert.Single(stub.Requests).IfNoneMatch);
+    }
+
+    [Fact]
+    public async Task APlainUploadSendsNoConditionalHeader()
+    {
+        var stub = new StubHandler().Then(HttpStatusCode.Created);
+
+        MhBackupWebDavUploader.Result result = await MhBackupWebDavUploader.UploadAsync(
+            Encoding.UTF8.GetBytes("x"), Target, "user-A", "p", createCollection: false, handler: stub);
+
+        Assert.True(result.Ok);
+        Assert.Null(Assert.Single(stub.Requests).IfNoneMatch);
+    }
+
+    [Fact]
+    public async Task ARefusedConditionalWriteSaysTheRemoteFileAlreadyExists()
+    {
+        var stub = new StubHandler().Then(HttpStatusCode.PreconditionFailed);
+
+        MhBackupWebDavUploader.Result result = await MhBackupWebDavUploader.UploadAsync(
+            Encoding.UTF8.GetBytes("x"), Target, "user-A", "p", createCollection: false, handler: stub, noOverwrite: true);
+
+        Assert.False(result.Ok);
+        Assert.Equal(412, result.StatusCode);
+        Assert.Equal(MhBackupWebDavUploader.Reasons.AlreadyExists, result.Reason);
+    }
+
+    [Fact]
+    public async Task AnUnconditionalWriteThatHitsPreconditionFailedSaysSomethingElse()
+    {
+        var stub = new StubHandler().Then(HttpStatusCode.PreconditionFailed);
+
+        MhBackupWebDavUploader.Result result = await MhBackupWebDavUploader.UploadAsync(
+            Encoding.UTF8.GetBytes("x"), Target, "user-A", "p", createCollection: false, handler: stub);
+
+        Assert.False(result.Ok);
+        Assert.Equal(MhBackupWebDavUploader.Reasons.PreconditionFailed, result.Reason);
+    }
+
+    [Fact]
+    public void CommandLineNoOverwriteSendsTheHeaderAndReportsTheExistingFile()
+    {
+        var stub = new StubHandler().Then(HttpStatusCode.PreconditionFailed);
+
+        int exit = Run(stub, out _, out string error, "upload", "--file", WriteBackupFile(), "--url", Target.AbsoluteUri, "--no-overwrite");
+
+        Assert.Equal(MhBackupCliCommand.ExitRemote, exit);
+        Assert.Contains("已有同名文件", error);
+        Assert.Equal("*", Assert.Single(stub.Requests).IfNoneMatch);
+    }
+
+    [Fact]
+    public void CommandLineNoOverwriteSaysSoOnSuccessAndInJson()
+    {
+        var stub = new StubHandler().Then(HttpStatusCode.Created);
+
+        int exit = Run(stub, out string output, out _, "upload", "--file", WriteBackupFile(), "--url", Target.AbsoluteUri, "--no-overwrite");
+
+        Assert.Equal(MhBackupCliCommand.ExitOk, exit);
+        Assert.Contains("覆盖保护：已开启", output);
+    }
+
+    [Fact]
+    public void UsageTextMentionsTheNoOverwriteSwitch()
+    {
+        var stub = new StubHandler();
+
+        int exit = Run(stub, out string help, out _, "--help");
+
+        Assert.Equal(MhBackupCliCommand.ExitOk, exit);
+        Assert.Contains("--no-overwrite", help);
+        Assert.Contains("If-None-Match", help);
+        Assert.Empty(stub.Requests);
+    }
     private string WriteBackupFile()
     {
         string path = Path.Combine(_directory, "windows.mhbackup");
@@ -260,7 +345,7 @@ public sealed class BackupUploadTests : IDisposable
         return exit;
     }
 
-    private sealed record CapturedRequest(string Method, Uri Uri, string? Authorization, string? ContentType, byte[]? Body);
+    private sealed record CapturedRequest(string Method, Uri Uri, string? Authorization, string? ContentType, byte[]? Body, string? IfNoneMatch);
 
     /// <summary>按顺序回放预设响应，并记录真正发出的请求。</summary>
     private sealed class StubHandler : HttpMessageHandler
@@ -285,12 +370,16 @@ public sealed class BackupUploadTests : IDisposable
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             byte[]? body = request.Content is null ? null : await request.Content.ReadAsByteArrayAsync(cancellationToken);
+            string? ifNoneMatch = request.Headers.TryGetValues("If-None-Match", out IEnumerable<string>? values)
+                ? string.Join(",", values)
+                : null;
             Requests.Add(new CapturedRequest(
                 request.Method.Method,
                 request.RequestUri!,
                 request.Headers.Authorization?.ToString(),
                 request.Content?.Headers.ContentType?.MediaType,
-                body));
+                body,
+                ifNoneMatch));
 
             if (_throws.Count > 0) throw _throws.Dequeue();
             if (_steps.Count == 0) throw new InvalidOperationException("unexpected " + request.Method.Method + " " + request.RequestUri);

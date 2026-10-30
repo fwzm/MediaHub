@@ -543,11 +543,12 @@ public static class MhBackupCliCommand
         string? userName = Value(options, "user");
         string? password = ResolveRemotePassword(options, environment);
         bool createCollection = Has(options, "mkdir");
+        bool noOverwrite = Has(options, "no-overwrite");
 
         MhBackupWebDavUploader.Result result;
         try
         {
-            result = MhBackupWebDavUploader.UploadAsync(content, target, userName, password, createCollection, httpHandler)
+            result = MhBackupWebDavUploader.UploadAsync(content, target, userName, password, createCollection, httpHandler, noOverwrite)
                 .GetAwaiter()
                 .GetResult();
         }
@@ -570,6 +571,7 @@ public static class MhBackupCliCommand
                     ["url"] = target.AbsoluteUri,
                     ["bytes"] = content.LongLength,
                     ["sha256"] = sha256,
+                    ["noOverwrite"] = noOverwrite,
                 };
                 WriteJson(output, failed);
             }
@@ -587,6 +589,7 @@ public static class MhBackupCliCommand
                 ["bytes"] = content.LongLength,
                 ["sha256"] = sha256,
                 ["createdCollection"] = createCollection && result.StatusCode == 201,
+                ["noOverwrite"] = noOverwrite,
             };
             WriteJson(output, payload);
             return ExitOk;
@@ -597,6 +600,7 @@ public static class MhBackupCliCommand
         output.WriteLine("HTTP 状态：" + result.StatusCode);
         output.WriteLine("文件大小：" + content.Length + " 字节");
         output.WriteLine("SHA-256：" + sha256);
+        if (noOverwrite) output.WriteLine("覆盖保护：已开启（远端已有同名文件时本次上传会被拒绝，不改远端）。");
         output.WriteLine("提醒：备份不含密码或令牌；从远端取回后仍需本机口令才能解开。");
         return ExitOk;
     }
@@ -1010,7 +1014,7 @@ public static class MhBackupCliCommand
         output.WriteLine("用法：");
         output.WriteLine("  export --settings <settings.json> --out <备份文件> [--history <history.json>] [--password-env <变量名>] [--json]");
         output.WriteLine("  import --file <备份文件> [--settings <settings.json>] [--apply] [--strategy merge|replace] [--password-env <变量名>] [--json]");
-        output.WriteLine("  upload --file <备份文件> --url <WebDAV 地址> [--user <账号>] [--password-env <变量名>] [--mkdir] [--json]");
+        output.WriteLine("  upload --file <备份文件> --url <WebDAV 地址> [--user <账号>] [--password-env <变量名>] [--mkdir] [--no-overwrite] [--json]");
         output.WriteLine("  download --url <WebDAV 地址> --out <备份文件> [--user <账号>] [--password-env <变量名>] [--max-bytes <字节>] [--json]");
         output.WriteLine("  list --url <WebDAV 目录地址> [--user <账号>] [--password-env <变量名>] [--all] [--json]");
         output.WriteLine("  delete --url <WebDAV 文件地址> [--user <账号>] [--password-env <变量名>] [--confirm] [--any] [--json]");
@@ -1019,6 +1023,7 @@ public static class MhBackupCliCommand
         output.WriteLine("  import 默认只输出预览；--apply 才写入 settings.json（必须同时给 --settings）。");
         output.WriteLine("  --apply 只写本机能表达的来源与有等价的偏好；播放进度与收藏不落库，回执会给出原因。");
         output.WriteLine("  upload 只做 PUT；远端目录不存在时加 --mkdir 尝试创建最后一级集合，多级创建不做猜测。");
+        output.WriteLine("  加 --no-overwrite 时带 If-None-Match: *，远端已有同名文件就回 412 并且不改远端；不加则同名覆盖。");
         output.WriteLine("  download 只做一次 GET 并写成 --out 指定的文件；不列目录、不删远端文件，取回后仍要 import 才会落地。");
         output.WriteLine("  list 只做一次 PROPFIND（Depth: 1），默认只列 .mhbackup，加 --all 列全部；不递归、不删除。");
         output.WriteLine("  delete 默认只做预览（零请求）；加 --confirm 才先确认文件存在再发 DELETE，只删 .mhbackup，删别的文件要再给 --any；不删集合、不递归。");
