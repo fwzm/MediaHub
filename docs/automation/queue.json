@@ -245,6 +245,28 @@
       ],
       "notes": "方法名取 TRX TestDefinitions 的 TestMethod.className + name，剥掉第一个 ( 起的 Theory 参数后去重；数据行仍由 classes 的用例数管。刷新脚本 update-test-suite-baseline.ps1 同步写 methods 表，且 _comment 由脚本拥有、每次刷新归一化。",
       "next_action": "无；若 CI 判 RED 并点名方法消失，需人工确认后以 -AcceptRemoval 刷新基线。"
+    },
+    {
+      "id": "W6-113m",
+      "title": "W32 的 SBOM 库存门禁上线即在 PR #39 全线红：SBOM 过期 + 祖先检查在浅克隆下不可证",
+      "priority": "P0",
+      "status": "BLOCKED",
+      "owner": "unassigned",
+      "branch": "feature/windows-client",
+      "blocked_by": [
+        "W32 作者重生成 SBOM/notices",
+        "守卫祖先检查改浅克隆安全或 checkout fetch-depth: 0"
+      ],
+      "evidence": [
+        "base head 13fad6b8（W32 SBOM 三检）自身红两次：push run 41072548134 / pull_request run 41072562787，失败步骤同为 Licence surface guard（notices / SBOM / project drift）",
+        "日志 check-licence-surface checks=24 failed=2；FAIL sbom-inventory 与 FAIL sbom-source-revision；sbom-inventory-licences PASS",
+        "W32 之前 base 的 licence 行为 checks=21 failed=0（head f045d34c 的 windows-ci 41072599036）-> 21/24 之差正是 W32 新加三检，归因外部",
+        "sbom-inventory 根因：windows/docs/sbom-windows.cdx.json 仍记 pkg:nuget/System.Reflection.Metadata@1.6.0，但当前树已无 csproj 解析它（git grep 只命中 THIRD-PARTY-NOTICES.md 与 SBOM 自身）-> 需 pwsh -NoProfile -File windows/tools/license-report.ps1 -Sbom",
+        "sbom-source-revision 根因：守卫 check-licence-surface.ps1 用 git merge-base --is-ancestor 1c30471 HEAD；本机 1c30471 确是 388cde7d 与 origin/feature/windows-client 的祖先，但 actions/checkout@v4 默认 fetch-depth 1（浅克隆）拿不到祖先对象 -> 不可证即 FAIL",
+        "docs 提交 388cde7d 触发的 windows-ci 41073668366 也红在同一步骤，但台阶行（total/classes/methods/combined）全绿，证明失败与本轮门禁改动无关"
+      ],
+      "notes": "PR #39 现在的 head 不再是绿：windows-ci 因 W32 新守卫红。不要把该红记到本轮 W6-113l 头上；也不要为消红去改 SBOM 大文件（属 W32 自有校验面）。",
+      "next_action": "交回 W32 作者：①在 windows/ 下跑 pwsh -NoProfile -File windows/tools/license-report.ps1 -Sbom 重生成 SBOM/notices；②把祖先检查改为浅克隆安全（或 workflow checkout 设 fetch-depth: 0）；③复跑 windows-ci 至 Licence surface guard 全 PASS。"
     }
   ]
 }
