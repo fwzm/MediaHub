@@ -568,9 +568,57 @@ dotnet windows/src/MediaHub.BackupCli/bin/Debug/net10.0/MediaHub.BackupCli.dll e
 3. 更新本节的字节数/sha256/`sections`/`counts` 与两侧期望值；
 4. 跑 §15.3 与 §15.4 的测试；两份文件是**被读的权威字节**，测试不会重新生成它们。
 
-## 16 仍未做（如实）
+## 16 播放进度与收藏的写回去向（W26）
 
-- 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏仍不落库 —— NOT_IMPLEMENTED
+`import` 早先只给一句「播放进度与收藏没有落库」，用户无法判断每条记录是**没人能写**、**需要登录**、还是**根本没被选中**。本轮先把这层判断做出来并可核对，而不是直接声称「已经写回」。
+
+### 16.1 为什么不能「直接写本机」
+
+- Windows 的观看记录是 `PlaybackHistoryStore`，**按本机文件路径**记账；备份里的进度是**（来源, 条目）**键（`MhBackupProgressDto.serverBackupId + itemId`）。两者没有可靠映射，猜一个路径等于写错行。
+- `MhBackupExportCollector` 因此**不导出**播放进度（只把 `SkippedHistoryEntries` 计数）；电脑导出的备份里 `Progress` 恒空。
+- 服务端进度的权威在服务端：Emby / Jellyfin 的恢复位置要登录后经 provider API 写（`POST /Users/{uid}/Items/{id}/UserData`），本命令**不执行**任何网络写回。
+
+### 16.2 五类去向与稳定码
+
+`windows/src/MediaHub.Backup/MhBackupWriteOutlook.cs`（纯函数、零 IO、零网络）：
+
+| `KindCode` | 含义 | 判据顺序 |
+| --- | --- | --- |
+| `orphan` | 记录指向的来源不在备份里 | 计划裁决 `Orphan`（先于其它） |
+| `not-selected` | 来源冲突 / 本机更新等，计划已跳过 | 裁决不是 `Apply`，原因沿用计划器的原话 |
+| `local-path-key` | 本地文件夹条目：条目 id 不是本机文件路径 | 进度且类型 `LOCAL` |
+| `server-api` | 该类型有服务端接口，需登录后写回 | `EMBY` / `JELLYFIN` |
+| `unsupported-type` | 该类型没有写回接口 | 其余（含类型未知） |
+
+来源类型先 `Trim()` 再 `ToUpperInvariant()`；类型表取自 `payload.Servers` 的 `BackupId → Type`，查不到就是「（类型未知）」。收藏没有 `local-path-key`：`LOCAL` 收藏同样归 `unsupported-type`（收藏从来不在路径上记账）。
+
+### 16.3 命令行输出
+
+`import` 的预览与 `--apply` 回执都多出两行（只在对应总数 > 0 时出现，分隔符固定为 ` · `）：
+
+```
+播放记录 N 条写回方式：服务端接口 a 条（需登录）· 本机路径键无法映射 b 条 · 该类型没有接口 c 条 · 未选中 d 条 · 孤立引用 e 条
+收藏 N 条写回方式：服务端接口 a 条（需登录）· 该类型没有接口 c 条 · 未选中 d 条 · 孤立引用 e 条
+```
+
+`--json` 的两条回执都带 `writeOutlook`（`progressTotal` / `progressServerApi` / `progressLocalPathKey` / `progressUnsupportedType` / `favoriteTotal` / `favoriteServerApi` / `favoriteUnsupportedType` / `notSelected` / `orphan`）与 `writeOutlookLines`。末句从「播放进度与收藏没有落库」改为「播放进度与收藏本命令不写（上面的方式说明写清了各自去向）」——**不把「没写」说成「已写」**。
+
+### 16.4 验证
+
+- 新 `MhBackupWriteOutlookTests` 9 例：类型映射（含小写 `jellyfin`）、`LOCAL` 进度、五种无接口类型、收藏两种口径、冲突沿用计划原因、本机更新跳过、缺失来源为孤立、两行文案逐字、空载荷不出行。
+- `BackupCliTests` +1 例 `ImportPreviewReportsWherePlaybackAndFavoritesWouldGo`：手工构造带 manifest 的载荷（`MhBackupSerializer.Export` 要求 `manifest` 与 `includedSections` / `recordCounts` 一致）导出真实容器，再跑 `import --json` 与文本两条路径。
+- 全量：`MediaHub.Tests` **1914 / 0**（基线 1904 + 10）；`dotnet build windows/MediaHub.Windows.sln -p:Platform=x64 --no-restore` **0 错误**（21 条警告均为既有测试工程告警）。
+- 负向对照（实现态快照 `D:/mh-verify/w26-impl-outlook.cs`，sha256 `0d0430852c9592fad4c0afac67453a6b71a07a9c10767e3090b8bee874784bfa`，逐字节还原后相等）：A `LOCAL` 进度改判 `server-api` ⇒ **2 红**（该单例 + 文案行）；B `WEBDAV` 也当 `server-api` ⇒ **3 红**（两类无接口单例 + 文案行）；C 去掉孤立分支 ⇒ **2 红**（孤立单例 + 文案行）。三处都同时打到逐条与汇总两层。
+
+### 16.5 仍未做（如实）
+
+- **真正的写回还没做**：`POST /Users/{uid}/Items/{id}/UserData` 与 `SetFavoriteAsync` 的登录后调用 **NOT_IMPLEMENTED**，所以 `server-api` 只是「知道该走哪条路」，不是「已经写成功」；`IMPLEMENTED_UNVERIFIED` 仅指这一层分类与文案。
+- 进度 / 收藏的**本机**落库仍不做（无可靠键，见 §16.1）。
+- 设置页「备份与还原」入口仍是 GUI_UNVERIFIED。
+
+## 17 仍未做（如实）
+
+- 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏的**去向**已逐条说明（§16），但**真正的写回未做** —— NOT_IMPLEMENTED
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
 - 本机进度/收藏的写入（来源与偏好已随 `--apply` 落库）—— NOT_IMPLEMENTED
 - WebDAV 上传（§10，含覆盖保护 §14）、下载（§11）、列目录（§12）、删除（§13）均已实现；**真实服务端联调未做** —— SERVER_UNVERIFIED

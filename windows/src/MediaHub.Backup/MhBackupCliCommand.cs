@@ -13,7 +13,8 @@ namespace MediaHub.Backup;
 /// 4 口令错误、5 版本过新、6 内容损坏、7 导出被拒、8 读写文件失败。
 /// 口令只从环境变量取，不接受命令行参数：命令行会进进程列表、命令历史和日志。
 /// import 默认只输出预览计划；带 --apply 时才把「本机能表达的来源」与「有明确等价的偏好」写进
-/// settings.json，写前留一份 .bak-<时间戳>。播放进度与收藏不落库，理由随回执给出。
+/// settings.json，写前留一份 .bak-<时间戳>。播放进度与收藏不落库，但每条的去向（服务端接口 /
+/// 本机路径键无法映射 / 该类型没有接口 / 未选中 / 孤立引用）与理由随回执逐项给出。
 /// upload/download/list 只碰远端那一个地址：upload 只做 PUT、download 只做一次 GET、list 只做一次
 /// PROPFIND（Depth: 1），都不递归、不删除。
 /// </remarks>
@@ -344,6 +345,7 @@ public static class MhBackupCliCommand
         }
 
         MhBackupRestorePlan plan = MhBackupRestorePlanner.Plan(payload, localSources, strategy);
+        MhBackupWriteOutlook outlook = MhBackupWriteOutlooks.Classify(payload, plan);
         if (apply)
         {
             return ApplyImport(payload, plan, manifest, settingsText, settingsPath!, asJson, output, error);
@@ -366,6 +368,8 @@ public static class MhBackupCliCommand
                 ["orphanProgress"] = plan.OrphanProgressCount,
                 ["favoritesToWrite"] = plan.FavoritesToWriteCount,
                 ["orphanFavorites"] = plan.OrphanFavoriteCount,
+                ["writeOutlook"] = WriteOutlookJson(outlook),
+                ["writeOutlookLines"] = new JsonArray(outlook.Lines.Select(line => (JsonNode?)JsonValue.Create(line)).ToArray()),
                 ["preferencesContained"] = plan.PreferencesContained,
                 ["preferencesWillRestore"] = plan.PreferencesWillRestore,
                 ["hasWrites"] = plan.HasWrites,
@@ -392,6 +396,11 @@ public static class MhBackupCliCommand
             output.WriteLine(line);
         }
 
+        foreach (string line in outlook.Lines)
+        {
+            output.WriteLine(line);
+        }
+
         output.WriteLine("结论：" + (plan.HasWrites ? "有内容可恢复" : "本次预览没有会写入的内容"));
         return ExitOk;
     }
@@ -407,6 +416,8 @@ public static class MhBackupCliCommand
         TextWriter output,
         TextWriter error)
     {
+        MhBackupWriteOutlook outlook = MhBackupWriteOutlooks.Classify(payload, plan);
+
         MhBackupRestoreApplyResult result;
         try
         {
@@ -468,6 +479,8 @@ public static class MhBackupCliCommand
                 ["newServers"] = plan.NewCount,
                 ["identicalServers"] = plan.IdenticalCount,
                 ["conflictingServers"] = plan.ConflictCount,
+                ["writeOutlook"] = WriteOutlookJson(outlook),
+                ["writeOutlookLines"] = new JsonArray(outlook.Lines.Select(line => (JsonNode?)JsonValue.Create(line)).ToArray()),
             });
             return ExitOk;
         }
@@ -479,6 +492,11 @@ public static class MhBackupCliCommand
             foreach (string note in result.Notes)
             {
                 output.WriteLine("说明：" + note);
+            }
+
+            foreach (string line in outlook.Lines)
+            {
+                output.WriteLine(line);
             }
 
             return ExitOk;
@@ -506,9 +524,28 @@ public static class MhBackupCliCommand
             output.WriteLine("说明：" + note);
         }
 
-        output.WriteLine("提醒：备份不含密码或令牌，写入的来源需要登录后才能使用；播放进度与收藏没有落库。");
+        foreach (string line in outlook.Lines)
+        {
+            output.WriteLine(line);
+        }
+
+        output.WriteLine("提醒：备份不含密码或令牌，写入的来源需要登录后才能使用；播放进度与收藏本命令不写（上面的方式说明写清了各自去向）。");
         return ExitOk;
     }
+
+    /// <summary>写回去向的分类计数（JSON 回执用，键名稳定）。</summary>
+    private static JsonObject WriteOutlookJson(MhBackupWriteOutlook outlook) => new()
+    {
+        ["progressTotal"] = outlook.ProgressTotal,
+        ["progressServerApi"] = outlook.ProgressServerApi,
+        ["progressLocalPathKey"] = outlook.ProgressLocalPathKey,
+        ["progressUnsupportedType"] = outlook.ProgressUnsupportedType,
+        ["favoriteTotal"] = outlook.FavoriteTotal,
+        ["favoriteServerApi"] = outlook.FavoriteServerApi,
+        ["favoriteUnsupportedType"] = outlook.FavoriteUnsupportedType,
+        ["notSelected"] = outlook.NotSelected,
+        ["orphan"] = outlook.Orphan,
+    };
 
     private static int RunUpload(
         Dictionary<string, string?> options,
@@ -1021,7 +1058,7 @@ public static class MhBackupCliCommand
         output.WriteLine("说明：");
         output.WriteLine("  口令只从环境变量读取（缺省 " + DefaultPasswordVariable + "），不接受命令行参数。");
         output.WriteLine("  import 默认只输出预览；--apply 才写入 settings.json（必须同时给 --settings）。");
-        output.WriteLine("  --apply 只写本机能表达的来源与有等价的偏好；播放进度与收藏不落库，回执会给出原因。");
+        output.WriteLine("  --apply 只写本机能表达的来源与有等价的偏好；播放进度与收藏本命令不写，回执逐项说明去向。");
         output.WriteLine("  upload 只做 PUT；远端目录不存在时加 --mkdir 尝试创建最后一级集合，多级创建不做猜测。");
         output.WriteLine("  加 --no-overwrite 时带 If-None-Match: *，远端已有同名文件就回 412 并且不改远端；不加则同名覆盖。");
         output.WriteLine("  download 只做一次 GET 并写成 --out 指定的文件；不列目录、不删远端文件，取回后仍要 import 才会落地。");

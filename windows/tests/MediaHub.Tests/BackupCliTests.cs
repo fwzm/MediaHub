@@ -209,7 +209,7 @@ public sealed class BackupCliTests : IDisposable
         Assert.Contains("已写入本机设置", output);
         Assert.Contains("新增 客厅", output);
         Assert.Contains("写前备份", output);
-        Assert.Contains("播放进度与收藏没有落库", output);
+        Assert.Contains("播放进度与收藏本命令不写", output);
         string written = File.ReadAllText(settings);
         Assert.Contains("media.example", written);
         Assert.Contains("SyncSourceId", written);
@@ -310,6 +310,59 @@ public sealed class BackupCliTests : IDisposable
         Assert.Contains("--password-env", help);
         Assert.Contains("不接受命令行参数", help);
         Assert.Contains("--apply 才写入 settings.json", help);
+    }
+
+    [Fact]
+    public void ImportPreviewReportsWherePlaybackAndFavoritesWouldGo()
+    {
+        var payload = new MhBackupPayload
+        {
+            Manifest = new MhBackupManifest(
+                MhBackupCrypto.FormatVersion,
+                MhBackupCrypto.MinimumReaderVersion,
+                "android-0.1.0",
+                1_790_000_000_000,
+                new List<string> { "servers", "progress" },
+                new Dictionary<string, int> { ["servers"] = 1, ["progress"] = 1 }),
+            Servers =
+            {
+                new MhBackupServerDto
+                {
+                    BackupId = "srv-1",
+                    Name = "客厅",
+                    Type = "EMBY",
+                    Username = "mh",
+                    IsDefault = true,
+                    Endpoints =
+                    {
+                        new MhBackupEndpointDto { Name = "主线路", Url = "https://media.example:8920", IsPrimary = true, Enabled = true },
+                    },
+                },
+            },
+            Progress =
+            {
+                new MhBackupProgressDto { ServerBackupId = "srv-1", ItemId = "item-1", PositionMs = 1, DurationMs = 2, UpdatedAtEpochMs = 3 },
+            },
+        };
+        string file = Path.Combine(_directory, "android-like.mhbackup");
+        File.WriteAllBytes(file, MhBackupSerializer.Export(payload, Password));
+
+        int exit = Run(out string output, out _, "import", "--file", file, "--json");
+
+        Assert.Equal(0, exit);
+        JsonNode report = JsonNode.Parse(output.Trim())!;
+        JsonNode outlook = report["writeOutlook"]!;
+        Assert.Equal(1, outlook["progressTotal"]!.GetValue<int>());
+        Assert.Equal(1, outlook["progressServerApi"]!.GetValue<int>());
+        Assert.Equal(0, outlook["orphan"]!.GetValue<int>());
+        JsonArray lines = report["writeOutlookLines"]!.AsArray();
+        Assert.Contains(lines, node => node!.GetValue<string>().Contains("服务端接口 1 条（需登录）"));
+
+        int textExit = Run(out string text, out _, "import", "--file", file);
+
+        Assert.Equal(0, textExit);
+        Assert.Contains("播放记录 1 条写回方式：服务端接口 1 条（需登录）· 本机路径键无法映射 0 条", text);
+        Assert.Contains("需登录", text);
     }
 
     private string ExportDefault()
