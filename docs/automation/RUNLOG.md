@@ -76,3 +76,14 @@
 - **真实 CI 验证**：`ffe5a9fb` 的 windows-ci run `41025538206` success，日志含 `MediaHub.Tests: total=1920 baseline=1920`、`MediaHub.WebDav.Tests: total=104 baseline=104`、`combined tests=2024`。
 - **踩到的陷阱**：基线最初含中文注释，PowerShell 5.1 的 `Get-Content -Raw` 把无 BOM UTF-8 当 ANSI 解码 ⇒ 中文损坏、字符串截断、`ConvertFrom-Json` 报 `Invalid array passed in`（文件本身合法 UTF-8，node `JSON.parse` 通过）。⇒ 基线刻意保持纯 ASCII。
 - **如实记录一次自己的失误**：推送 `ffe5a9fb` 时 `in_flight=1`，取消了另一执行者 `4cd51deb` 的 Android CI —— 这正是我上一轮写进 ADR 的那个坑，本轮又犯。`4cd51deb` 的 windows-ci 已 success，Android 侧有更早 `6cff25d3` 的绿。纪律上应等 in-flight 归零再推。
+
+### 19:2x–19:5x — lead（W6-113 round 7）— 基线只比总数仍可被「等量替换」绕过
+
+- **侦察**：W6 树 head `52cda428`（并行执行者 W29/W30 已入）、锁 held=0、工作树干净；PR #39 Draft / MERGEABLE / UNSTABLE、body 166,859 字符；windows-ci `41048006881` success；Android CI `41048006754` in_progress。
+- **缺口（P0，CI 真回归）**：`ffe5a9fb` 落的基线只比 **total**。删 N 例再新增 N 个新例 ⇒ total 不变 ⇒ 门禁判绿，而这正是该门禁自述要挡的那类事（“a suite that quietly loses half its cases”）。
+- **修法三步**：
+  1. 闸门从 `windows-ci.yml` 内联脚本抽成 `windows/tools/check-test-suite-baseline.ps1` —— 内联脚本无法被负向对照直接调用，只能复制粘贴，而副本迟早与 CI 真实行为漂移；
+  2. 基线新增 per-suite `classes` 表（MediaHub.Tests 112 类 / WebDav 4 类）。类归属取自 TRX `TestDefinitions` 的 `TestMethod.className`，**不取结果名**：xUnit 会把 Theory 的数据参数拼进结果名，参数里可能含点号（如 `(1.5, 2026.10.30)`），按结果名切类会切错；
+  3. 新增 `windows/tools/update-test-suite-baseline.ps1`：按真实 TRX 一条命令重算总数与类表；**无 `-AcceptRemoval` 时拒绝下调任何计数** —— 堵住「用刷新基线的方式把红改绿」。
+- **负向对照 18/18（NC0–NC17）**，pwsh 7.6.9 与 Windows PowerShell 5.1 逐例判定一致：NC0 真实匹配 GREEN；NC1 总数少 1 RED；**NC2 总数 5==5 但类分布不同 RED**；NC3 整类消失 RED；NC4 新类 GREEN+warning；NC5 类增大 GREEN+warning；NC6 failed RED；NC7 notExecuted RED；NC8 缺 `classes` 表 RED；NC9 空 `classes` 表 RED；NC10 `expected=0` RED；NC11 负数 RED；NC12 类计数 0 RED；NC13 刷新脚本拒绝下调且文件逐字节未变；NC14 `-AcceptRemoval` 后写入 total=5/AlphaTests=2；NC15 **由真实 CI TRX 重生成基线与提交版本逐字节一致**；NC16 **同一输入在 HEAD 旧 total-only 门禁下 GREEN**（证明 NC2 的红是本次收口带来的，不是巧合）；NC17 真实 1943+104 → PASS。
+- **数据来源**：CI run `41048006881` 产物（139,659,367 B）里的 `test-results/*.trx`（windows 2,706,486 B / webdav 145,266 B），不是本机重跑 —— 保证基线钉住的是**同一 commit 的 CI 行为**。

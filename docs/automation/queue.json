@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-30T16:3x:00+08:00",
-  "updated_by": "lead-W6-113-r3",
+  "updated_at": "2026-10-30T19:55:00+08:00",
+  "updated_by": "lead-W6-113-r7",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -176,11 +176,16 @@
       "id": "W6-113i",
       "title": "基线数字随并行执行者的新增用例漂移，需要定期校准",
       "priority": "P2",
-      "status": "NOT_RUN",
-      "owner": "unassigned",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r7",
       "blocked_by": [],
       "next_action": "下轮若 windows-ci 出现 `::warning::suite grew beyond the baseline`，按提示把 windows/tools/test-suite-baseline.json 的 expected 改成日志里的 total，单独提交。",
-      "notes": "这是设计上的预期行为（增长不阻断，只提示），但意味着基线会周期性偏小；偏小不会造成漏检（只会让门禁更严），所以可以晚一步更新。"
+      "notes": "原缺口：数字靠人肉跟随并行开发漂移。现由 per-class 基线表 + 刷新脚本承担；漂移仍会 ::warning，但刷新是一条命令。",
+      "evidence": [
+        "基线按设计被并行执行者刷新：1920 -> 1927 (2adb207f, W28) -> 1943 (fa2900d7/52cda428, W29/W30)",
+        "windows-ci run 41048006881 (head 52cda428) 日志: MediaHub.Tests total=1943 baseline=1943 / WebDav 104/104",
+        "校准动作已脚本化: windows/tools/update-test-suite-baseline.ps1（无 -AcceptRemoval 时拒绝下调）"
+      ]
     },
     {
       "id": "W6-113j",
@@ -196,6 +201,22 @@
         "10 boundary cases: E0 GREEN, E1-E5/E7-E9 RED, E6 GREEN"
       ],
       "notes": "缺口：expected=0 或负数时 total>=0 恒成立 ⇒ 门禁静默失效。PowerShell 陷阱：\"$var: ...\" 被解析成驱动器限定符，必须 ${var}:。"
+    },
+    {
+      "id": "W6-113k",
+      "title": "套件基线加入 per-class 用例数：堵住「删 N 加 N、总数不变」的替换漏洞",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r7",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "闸门从 YAML 抽成 windows/tools/check-test-suite-baseline.ps1（负向对照跑同一代码路径）",
+        "基线新增 classes 表（MediaHub.Tests 112 类 / WebDav 4 类），源数据取自 CI run 41048006881 的真实 TRX",
+        "负向对照 18/18 通过（NC0-NC17），pwsh7 与 PS5.1 判定逐例一致",
+        "NC2 关键：总数相同、类分布不同 -> 新门禁 RED；同一输入在 HEAD 旧 total-only 门禁下 GREEN (NC16)",
+        "NC15：从真实 CI TRX 重新生成基线与提交版本逐字节一致；NC17：真实数据 1943+104 -> PASS"
+      ],
+      "notes": "替换漏洞：删 1514 例再加 1514 个新例，旧门禁（仅总数）判绿，新门禁判红。刷新路径 update-test-suite-baseline.ps1。"
     }
   ]
 }

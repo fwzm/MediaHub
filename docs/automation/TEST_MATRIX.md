@@ -202,3 +202,41 @@ MediaHub.Tests: total=1927 baseline=1927
 > bash 无法解析 `C:\Program Files\...` 这类路径，两边都只拿到 WSL 的报错文本 —— 于是**所有用例都被判成 GREEN**，
 > 看起来像「5 处行为不一致」。改用 `spawnSync(exe, args)` 直接起进程后结果才正常。
 > 教训：**对比两种 shell 时，调用方式本身不能引入第三个 shell**。
+
+### 6.4 只比总场数仍可被「等量替换」绕过（2026-10-30 19:5x 追加，W6-113k）
+
+上一版（`ffe5a9fb` + `d6cdc7ee`）只校验**每套件的用例总数**。它挡住「少跑」和「配置写成 0」，但挡不住
+**删 N 例 + 新增 N 个新例**：总数不变 ⇒ 判绿。而这正是该门禁自述要挡的场景。
+
+- **补法**：基线每套件多带一张 `classes` 表（类名 → 用例数）。类归属取自 TRX `TestDefinitions` 的
+  `TestMethod.className`，**不取 `UnitTestResult.testName`**：xUnit 把 Theory 的数据参数拼进结果名，
+  参数里可能含点号（`(1.5, 2026.10.30)`），按结果名切类会切出错位的「类」。
+- **判定**：基线里的类必须仍存在且用例数 `>=` 基线值，否则 RED（提示「总数相同不代表跑的是同一批用例」）；
+  新类或类内变多 → GREEN + `::warning`，让漂移可见而不阻塞别人。
+- **刷新路径**：`windows/tools/update-test-suite-baseline.ps1`，按真实 TRX 重算；无 `-AcceptRemoval` 时
+  拒绝下调 → 「刷新基线」不能当作把红改绿的手段。
+- **闸门搬出 YAML**：`windows/tools/check-test-suite-baseline.ps1`，负向对照跑的就是 CI 跑的同一份代码。
+
+| 对照 | 输入 | 预期 | 实测（pwsh7 / PS5.1） |
+|---|---|---|---|
+| NC0 | 基线与真实结果一致 | PASS | PASS / PASS |
+| NC1 | 总数少 1 | RED | RED / RED |
+| **NC2** | **总数相同、类分布不同（删除 1 类、另一类减少、新增 1 类）** | **RED** | **RED / RED** |
+| NC3 | 整类消失 | RED | RED / RED |
+| NC4 | 出现新类 | GREEN+warning | GREEN+warning ×2 |
+| NC5 | 某类用例数变大 | GREEN+warning | GREEN+warning ×2 |
+| NC6 | 有 failed | RED | RED / RED |
+| NC7 | 有 notExecuted | RED | RED / RED |
+| NC8 | 基线缺 classes 表 | RED | RED / RED |
+| NC9 | classes 表为空 | RED | RED / RED |
+| NC10 | expected=0 | RED | RED / RED |
+| NC11 | expected<0 | RED | RED / RED |
+| NC12 | 类计数<1 | RED | RED / RED |
+| NC13 | 刷新脚本遇缩减，无 -AcceptRemoval | RED 且文件不变 | RED / 文件逐字节不变 |
+| NC14 | 同上 + -AcceptRemoval | 写入 5 / 2 | PASS |
+| NC15 | 真实 CI TRX 重生成基线 | 逐字节一致 | 一致 |
+| **NC16** | **NC2 的输入交给 HEAD 旧 total-only 闸门** | **GREEN** | **GREEN**（旧闸门确实放行 → NC2 的红是本次收口所得） |
+| NC17 | 真实数据 1943 + 104 | PASS | PASS |
+
+> 数据源：CI run `41048006881`（head `52cda428`）的 `test-results/*.trx`，因此基线钉的是该 commit 的 CI 真实行为。
+> 台账位置：`D:/mh-verify/r7-nc/run-nc.cjs`（18 条对照一次跑完，两代 PowerShell 各跑一遍）。
