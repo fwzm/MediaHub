@@ -14,6 +14,8 @@ import com.mediahub.core.logging.LogBuffer
 import com.mediahub.core.logging.LogcatLogger
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.MemoryLogger
+import com.mediahub.feature.settings.DiagnosticsExportPort
+import com.mediahub.feature.settings.FileDiagnosticsExportPort
 import com.mediahub.core.network.ApiClient
 import com.mediahub.core.network.HttpClientFactory
 import com.mediahub.core.network.MediaHttpClient
@@ -58,6 +60,18 @@ object AppModule {
     @Singleton
     fun provideLogger(logBuffer: LogBuffer): Logger =
         CompositeLogger(listOf(LogcatLogger(), MemoryLogger(logBuffer)))
+
+    @Provides
+    @Singleton
+    fun provideDiagnosticsExportPort(
+        @ApplicationContext context: Context,
+        logBuffer: LogBuffer,
+    ): DiagnosticsExportPort = FileDiagnosticsExportPort(
+        buffer = logBuffer,
+        directory = context.filesDir.resolve("diagnostics"),
+        appVersion = BuildConfig.VERSION_NAME,
+        device = android.os.Build.MODEL,
+    )
 
     @Provides
     @Singleton

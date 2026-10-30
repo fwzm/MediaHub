@@ -44,6 +44,7 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:database"))
     implementation(project(":core:common"))
+    implementation(project(":core:logging"))
     implementation(project(":core:security"))
     implementation(project(":core:ui"))
     implementation(project(":provider:api"))

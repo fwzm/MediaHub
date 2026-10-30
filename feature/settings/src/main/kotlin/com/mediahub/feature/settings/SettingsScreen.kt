@@ -73,6 +73,7 @@ fun SettingsRoute(
     visualPreviewRunningOverride: Boolean? = null,
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
+    val diagnosticsState by viewModel.diagnosticsState.collectAsStateWithLifecycle()
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
     var showSourceSyncImport by remember { mutableStateOf(false) }
     var showPairing by remember { mutableStateOf(false) }
@@ -133,6 +134,21 @@ fun SettingsRoute(
                     .testTag("pairing.entry"),
             ) {
                 Text("配对设备")
+            }
+            androidx.compose.material3.OutlinedButton(
+                onClick = { viewModel.exportDiagnostics() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("diagnostics.export"),
+            ) {
+                Text(DiagnosticsExportText.BUTTON)
+            }
+            DiagnosticsExportText.line(diagnosticsState)?.let { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("diagnostics.result"),
+                )
             }
 
             Spacer(Modifier.height(8.dp))
