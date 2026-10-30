@@ -18,9 +18,16 @@
 #   another one to the SAME class keeps the total and every class count
 #   identical, which is the same substitution one level down. Each suite entry
 #   therefore also carries the method names that existed in each class
-#   ("methods"), and every method that existed must still be reported by the
-#   run. Theory data rows collapse to their method name, because data rows are
-#   counted by the classes table, not by the method table.
+#   ("methods"), and every method that existed must still be reported by the run.
+#
+#   A method list is still not enough. A [Theory] reports one method with many
+#   data rows, so deleting a data row from one theory and adding one to another
+#   theory of the SAME class keeps the total, every class count and the method
+#   set identical. Each entry therefore pins a case count per method
+#   (methods: { class: { method: cases } }), and every method must still report
+#   at least its baseline case count. What that still cannot see: the data
+#   values behind the remaining rows, because the baseline stores counts, not
+#   the argument text of each row.
 #
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
@@ -29,14 +36,17 @@
 #   class new, or class count > baseline     -> green + warning
 #   method in the baseline missing from the run (or moved to another class)
 #     -> red, even when the total and every class count match
-#   method new, or method added to a class -> green + warning
+#   method reporting fewer cases than the baseline -> red (a theory lost rows)
+#   method new, or method reporting more cases -> green + warning
 #   failed != 0 or notExecuted != 0 -> red
 #
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
 #   expected <= 0, empty file/suite, missing/empty classes object, missing/empty
-#   methods object, a class in classes without a methods entry, a class with no
-#   methods, a blank or duplicated method name all throw. Otherwise the gate
-#   would be vacuous and un-failable.
+#   methods object, a class listed in one table but not the other, a class with
+#   no methods, a method case count below 1, a method table whose case counts do
+#   not add up to the class count, and a baseline still in the 2026-10-30
+#   method-name list format all throw. Otherwise the gate would be vacuous and
+#   un-failable.
 #
 # ASCII ONLY on purpose: Windows PowerShell 5.1 decodes BOM-less UTF-8 as ANSI
 # and corrupts non-ASCII text, which then breaks ConvertFrom-Json parsing.
@@ -48,6 +58,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Test-MethodCaseMap($node) {
+  if ($null -eq $node) { return $false }
+  if ($node -is [string]) { return $false }
+  if ($node -is [System.Array]) { return $false }
+  if ($node -is [System.Collections.IList]) { return $false }
+  return $true
+}
 
 if (-not (Test-Path -LiteralPath $BaselinePath)) {
   throw "missing $BaselinePath - the suite baseline is required"
@@ -86,15 +104,28 @@ foreach ($e in $baseline.suites) {
     }
   }
   foreach ($name in $methodClasses) {
-    $list = @($e.methods.$name)
-    if ($list.Count -lt 1) {
+    if (-not ($classNames -contains $name)) {
+      throw "$BaselinePath : entry for $($e.suite) declares class $name in methods but not in classes - the two tables must describe the same classes"
+    }
+    $inner = $e.methods.$name
+    if (-not (Test-MethodCaseMap $inner)) {
+      throw "$BaselinePath : entry for $($e.suite) lists method names for class $name without case counts - that is the 2026-10-30 format, which cannot see a data row moving between two theories of one class. Refresh it with windows/tools/update-test-suite-baseline.ps1."
+    }
+    $methodNames = @($inner.PSObject.Properties.Name)
+    if ($methodNames.Count -lt 1) {
       throw "$BaselinePath : entry for $($e.suite) lists no methods for class $name - the per-method check would be vacuous for it"
     }
-    $seen = @{}
-    foreach ($m in $list) {
+    $sum = 0
+    foreach ($m in $methodNames) {
       if ([string]::IsNullOrWhiteSpace($m)) { throw "$BaselinePath : entry for $($e.suite) class $name has a blank method name" }
-      if ($seen.ContainsKey($m)) { throw "$BaselinePath : entry for $($e.suite) class $name lists method $m twice" }
-      $seen[$m] = $true
+      $want = [int]$inner.$m
+      if ($want -lt 1) {
+        throw "$BaselinePath : entry for $($e.suite) declares $name.$m with $want case(s) - must be a positive integer, otherwise losing its rows cannot be seen"
+      }
+      $sum += $want
+    }
+    if ($sum -ne [int]$e.classes.$name) {
+      throw "$BaselinePath : entry for $($e.suite) gives class $name $($e.classes.$name) case(s) in classes but $sum case(s) in methods - the two tables must agree"
     }
   }
 }
@@ -119,10 +150,12 @@ foreach ($e in $baseline.suites) {
   # Class membership comes from TestDefinitions (UnitTest.id -> TestMethod.className),
   # never from the result name: xUnit appends the data arguments of a [Theory] to the
   # result name, and argument text may itself contain dots (dates, decimal numbers).
-  # The same definitions carry the method name; data arguments are stripped so that
-  # every row of a [Theory] maps to the one method it exercises.
+  # The same definitions carry the method name; the arguments are stripped so that
+  # every row of a [Theory] maps to the method it exercises, and the rows are counted
+  # per method so that a row moving between two theories of one class is visible.
   $idToClass = @{}
   $actualMethods = @{}
+  $actualMethodCases = 0
   $defsWithoutClass = 0
   foreach ($ut in @($xml.TestRun.TestDefinitions.UnitTest)) {
     if ($null -eq $ut) { continue }
@@ -140,10 +173,13 @@ foreach ($e in $baseline.suites) {
     $base = $raw
     $paren = $raw.IndexOf('(')
     if ($paren -ge 0) { $base = $raw.Substring(0, $paren) }
-    if (-not $actualMethods.ContainsKey($cls)) {
-      $actualMethods[$cls] = New-Object System.Collections.Generic.HashSet[string]
+    if (-not $actualMethods.ContainsKey($cls)) { $actualMethods[$cls] = @{} }
+    if ($actualMethods[$cls].ContainsKey($base)) {
+      $actualMethods[$cls][$base] = $actualMethods[$cls][$base] + 1
+    } else {
+      $actualMethods[$cls][$base] = 1
     }
-    [void]$actualMethods[$cls].Add($base)
+    $actualMethodCases++
     $idToClass[[string]$ut.id] = $cls
   }
   if ($defsWithoutClass -gt 0) {
@@ -163,14 +199,21 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): $unmapped result(s) in $($e.file) have no TestMethod.className - the per-class check cannot be trusted"
   }
 
-  $actualMethodNames = 0
-  foreach ($k in @($actualMethods.Keys)) { $actualMethodNames += @($actualMethods[$k]).Count }
-  $baselineMethodNames = 0
-  foreach ($k in @($e.methods.PSObject.Properties.Name)) { $baselineMethodNames += @($e.methods.$k).Count }
+  $actualMethodCount = 0
+  foreach ($k in @($actualMethods.Keys)) { $actualMethodCount += @($actualMethods[$k].Keys).Count }
+  $baselineMethodCount = 0
+  $baselineCaseCount = 0
+  foreach ($k in @($e.methods.PSObject.Properties.Name)) {
+    foreach ($m in @($e.methods.$k.PSObject.Properties.Name)) {
+      $baselineMethodCount++
+      $baselineCaseCount += [int]$e.methods.$k.$m
+    }
+  }
 
   "$($e.suite): total=$total baseline=$($e.expected) failed=$failed notExecuted=$skipped"
   "$($e.suite): classes=$(($actual.Keys | Sort-Object).Count) baseline=class table $(@($e.classes.PSObject.Properties.Name).Count) entries"
-  "$($e.suite): methods=$actualMethodNames baseline=method table $baselineMethodNames names"
+  "$($e.suite): methods=$actualMethodCount baseline=method table $baselineMethodCount methods"
+  "$($e.suite): methodCases=$actualMethodCases baseline=method case table $baselineCaseCount cases"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
   if ($skipped -ne 0) { throw "$($e.suite): $skipped test(s) were not executed" }
@@ -199,20 +242,28 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): test classes lost cases while the total was $total (baseline $($e.expected)) - equal totals do not prove the same cases ran. $($detail -join '; '). If the removal was intentional, refresh the baseline in windows/tools/test-suite-baseline.json in the same commit."
   }
 
-  # Per-method check: a method that existed must still be reported by the run.
-  # This is the substitution hole the per-class check could not see: deleting one
-  # method and adding another to the same class keeps every count identical.
+  # Per-method check: a method that existed must still be reported, with at least
+  # its baseline case count. This is the substitution hole the per-class check
+  # could not see: deleting one method and adding another to the same class keeps
+  # every count identical, and moving one [Theory] row between methods of a class
+  # keeps the method list identical too.
   $lostMethods = @()
   foreach ($name in @($e.methods.PSObject.Properties.Name)) {
     if (-not $actualMethods.ContainsKey($name)) { continue }
-    foreach ($m in @($e.methods.$name)) {
-      if (-not $actualMethods[$name].Contains($m)) { $lostMethods += "$name.$m" }
+    $inner = $e.methods.$name
+    foreach ($m in @($inner.PSObject.Properties.Name)) {
+      $want = [int]$inner.$m
+      if (-not $actualMethods[$name].ContainsKey($m)) {
+        $lostMethods += "$name.$m (gone)"
+      } elseif ([int]$actualMethods[$name][$m] -lt $want) {
+        $lostMethods += "$name.$m (baseline $want cases, now $([int]$actualMethods[$name][$m]))"
+      }
     }
   }
   if ($lostMethods.Count -gt 0) {
     $shown = $lostMethods
     if ($shown.Count -gt 12) { $shown = $shown[0..11] + "... ($($lostMethods.Count - 12) more)" }
-    throw "$($e.suite): test methods disappeared while the total was $total (baseline $($e.expected)) - equal totals and equal per-class counts do not prove the same methods ran. gone: $($shown -join ', '). If the removal was intentional, refresh the baseline in windows/tools/test-suite-baseline.json in the same commit."
+    throw "$($e.suite): test methods lost cases while the total was $total (baseline $($e.expected)) - equal totals, equal per-class counts and an unchanged method list do not prove the same cases ran. gone or shrunk: $($shown -join ', '). If the removal was intentional, refresh the baseline in windows/tools/test-suite-baseline.json in the same commit."
   }
 
   foreach ($name in @($actual.Keys | Sort-Object)) {
@@ -224,12 +275,20 @@ foreach ($e in $baseline.suites) {
   }
   foreach ($name in @($actualMethods.Keys | Sort-Object)) {
     if (-not (@($e.methods.PSObject.Properties.Name) -contains $name)) {
-      $newMethods += "$($e.suite):$name (new class, $(@($actualMethods[$name]).Count) methods)"
+      $newMethods += "$($e.suite):$name (new class, $(@($actualMethods[$name].Keys).Count) methods)"
     } else {
-      foreach ($m in @($actualMethods[$name] | Sort-Object)) {
-        if (-not (@($e.methods.$name) -contains $m)) { $newMethods += "$($e.suite):$name.$m" }
+      $inner = $e.methods.$name
+      foreach ($m in @($actualMethods[$name].Keys | Sort-Object)) {
+        if (-not (@($inner.PSObject.Properties.Name) -contains $m)) {
+          $newMethods += "$($e.suite):$name.$m (+$([int]$actualMethods[$name][$m]) cases)"
+        } elseif ([int]$actualMethods[$name][$m] -gt [int]$inner.$m) {
+          $newMethods += "$($e.suite):$name.$m (+$([int]$actualMethods[$name][$m] - [int]$inner.$m) cases)"
+        }
       }
     }
+  }
+  if ($actualMethodCases -ne $total) {
+    Write-Host "::warning::$($e.suite): $actualMethodCases test definition(s) against $total result(s) - the per-method case counts and the per-class counts disagree; check how the TRX was produced"
   }
   $all += $total
 }

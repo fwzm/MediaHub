@@ -3,18 +3,22 @@
 # Run this after a test run when CI says "suite grew beyond the baseline",
 # "new or larger test classes" or "new test methods". Do NOT run it to make a red
 # gate green: a green by baseline surgery is the exact failure this file exists
-# to prevent, which is why shrinking a suite (a case count, a class, or a method)
-# requires the explicit -AcceptRemoval switch and shows up as a diff in the same
-# commit as the removal.
+# to prevent, which is why shrinking a suite (a case count, a class, a method or
+# a method's own case count) requires the explicit -AcceptRemoval switch and
+# shows up as a diff in the same commit as the removal.
 #
-# The written file carries three levels, each one closing a substitution the
+# The written file carries four levels, each one closing a substitution the
 # level above cannot see:
 #   expected : total case count (deleting and adding cases keeps it equal)
 #   classes  : cases per class   (deleting and adding inside one class keeps it)
 #   methods  : method names per class (deleting one method and adding another to
 #              the same class keeps every count above identical)
-# Theory data rows collapse to their method name; data rows are covered by the
-# per-class case counts.
+#   methods  : cases per method (a [Theory] reports one method with many data
+#              rows, so moving a row between two theories of one class keeps the
+#              total, the class count and the method set identical)
+# The argument text of a data row is deliberately not stored: it is produced by
+# the test framework, is not stable text, and would turn every data table edit
+# into a baseline diff. Counts are stable and pin "how many rows ran".
 #
 # Typical local use (after the two dotnet test steps, from the windows directory):
 #   powershell -NoProfile -File tools/update-test-suite-baseline.ps1
@@ -43,8 +47,10 @@ $comment = @(
   "  different classes are red, because deleting N cases and adding N others keeps the total.",
   "  a method listed here for a class must still be reported by the run; equal totals and",
   "  equal per-class counts with different methods are red, because deleting one method and",
-  "  adding another to the same class keeps every count identical. Theory data rows collapse",
-  "  to their method name and are counted by the classes table, not here.",
+  "  adding another to the same class keeps every count identical.",
+  "  a method must also still report at least this many cases; equal totals, equal class counts",
+  "  and an unchanged method list are red when a data row moved between two theories of one",
+  "  class. The argument text of a row is not stored, only how many rows the method ran.",
   "Why not just raise a hard-coded floor: that only moves the same rot to the next person.",
   "A committed baseline shows up in review as a diff and can be git-blamed.",
   "Refresh (never to turn a red gate green): windows/tools/update-test-suite-baseline.ps1",
@@ -73,10 +79,12 @@ function Read-Suite([string]$Path) {
     $base = $raw
     $paren = $raw.IndexOf('(')
     if ($paren -ge 0) { $base = $raw.Substring(0, $paren) }
-    if (-not $methods.ContainsKey($cls)) {
-      $methods[$cls] = New-Object System.Collections.Generic.HashSet[string]
+    if (-not $methods.ContainsKey($cls)) { $methods[$cls] = @{} }
+    if ($methods[$cls].ContainsKey($base)) {
+      $methods[$cls][$base] = $methods[$cls][$base] + 1
+    } else {
+      $methods[$cls][$base] = 1
     }
-    [void]$methods[$cls].Add($base)
     $idToClass[[string]$ut.id] = $cls
   }
   $classes = @{}
@@ -88,6 +96,31 @@ function Read-Suite([string]$Path) {
     if ($classes.ContainsKey($cls)) { $classes[$cls] = $classes[$cls] + 1 } else { $classes[$cls] = 1 }
   }
   return @{ total = $total; classes = $classes; methods = $methods }
+}
+
+# Only used to read the file being refreshed. Older entries stored method names as
+# a bare list (the 2026-10-30 format); their case counts are unknown, so they are
+# read as -1 and never make the run look smaller by themselves. Any other shape is
+# treated as the case-count form.
+function Convert-OldMethods($node) {
+  $out = @{}
+  if ($null -eq $node) { return $out }
+  foreach ($cp in $node.PSObject.Properties) {
+    $cls = [string]$cp.Name
+    $inner = $cp.Value
+    $map = @{}
+    if ($null -ne $inner) {
+      if ($inner -is [string] -or $inner -is [System.Array] -or $inner -is [System.Collections.IList]) {
+        foreach ($m in @($inner)) {
+          if (-not [string]::IsNullOrWhiteSpace([string]$m)) { $map[[string]$m] = -1 }
+        }
+      } else {
+        foreach ($mp in $inner.PSObject.Properties) { $map[[string]$mp.Name] = [int]$mp.Value }
+      }
+    }
+    $out[$cls] = $map
+  }
+  return $out
 }
 
 function Json-String([string]$s) {
@@ -117,10 +150,7 @@ foreach ($e in $baseline.suites) {
   if ($null -ne $e.classes) {
     foreach ($p in $e.classes.PSObject.Properties) { $oldClasses[$p.Name] = [int]$p.Value }
   }
-  $oldMethods = @{}
-  if ($null -ne $e.methods) {
-    foreach ($p in $e.methods.PSObject.Properties) { $oldMethods[$p.Name] = @($p.Value) }
-  }
+  $oldMethods = Convert-OldMethods $e.methods
   $removed = @()
   foreach ($name in @($oldClasses.Keys | Sort-Object)) {
     $before = $oldClasses[$name]
@@ -129,10 +159,15 @@ foreach ($e in $baseline.suites) {
     if ($now -lt $before) { $removed += "$name ($before -> $now)" }
   }
   foreach ($name in @($oldMethods.Keys | Sort-Object)) {
-    $now = @()
-    if ($read.methods.ContainsKey($name)) { $now = @($read.methods[$name]) }
-    foreach ($m in $oldMethods[$name]) {
-      if (-not ($now -contains $m)) { $removed += "$name.$m (method gone)" }
+    if (-not $read.methods.ContainsKey($name)) {
+      $removed += "$name (class gone)"
+      continue
+    }
+    foreach ($m in @($oldMethods[$name].Keys | Sort-Object)) {
+      if (-not $read.methods[$name].ContainsKey($m)) { $removed += "$name.$m (method gone)"; continue }
+      $before = [int]$oldMethods[$name][$m]
+      $now = [int]$read.methods[$name][$m]
+      if ($before -ge 0 -and $now -lt $before) { $removed += "$name.$m (cases $before -> $now)" }
     }
   }
   if ([int]$e.expected -gt $read.total) { $removed += "total ($($e.expected) -> $($read.total))" }
@@ -140,7 +175,11 @@ foreach ($e in $baseline.suites) {
     $shrunk += "$($e.suite): " + ($removed -join ", ")
   }
   $entryMethods = @{}
-  foreach ($name in $read.methods.Keys) { $entryMethods[$name] = @($read.methods[$name] | Sort-Object) }
+  foreach ($name in $read.methods.Keys) {
+    $inner = @{}
+    foreach ($m in $read.methods[$name].Keys) { $inner[$m] = [int]$read.methods[$name][$m] }
+    $entryMethods[$name] = $inner
+  }
   $entries += @{ file = [string]$e.file; suite = [string]$e.suite; expected = $read.total; classes = $read.classes; methods = $entryMethods }
 }
 if ($shrunk.Count -gt 0) {
@@ -175,16 +214,16 @@ for ($i = 0; $i -lt $entries.Count; $i++) {
   $mnames = @($entry.methods.Keys | Sort-Object)
   for ($k = 0; $k -lt $mnames.Count; $k++) {
     $clsName = $mnames[$k]
-    [void]$text.Append("        " + (Json-String $clsName) + ": [" + $nl)
-    $list = @($entry.methods[$clsName])
-    for ($j = 0; $j -lt $list.Count; $j++) {
+    $comma0 = [string][char]44
+    if ($k -eq $mnames.Count - 1) { $comma0 = "" }
+    [void]$text.Append("        " + (Json-String $clsName) + ": {" + $nl)
+    $methods = @($entry.methods[$clsName].Keys | Sort-Object)
+    for ($j = 0; $j -lt $methods.Count; $j++) {
       $comma = [string][char]44
-      if ($j -eq $list.Count - 1) { $comma = "" }
-      [void]$text.Append("          " + (Json-String $list[$j]) + $comma + $nl)
+      if ($j -eq $methods.Count - 1) { $comma = "" }
+      [void]$text.Append("          " + (Json-String $methods[$j]) + ": " + [int]$entry.methods[$clsName][$methods[$j]] + $comma + $nl)
     }
-    $comma2 = [string][char]44
-    if ($k -eq $mnames.Count - 1) { $comma2 = "" }
-    [void]$text.Append("        ]" + $comma2 + $nl)
+    [void]$text.Append("        }" + $comma0 + $nl)
   }
   [void]$text.Append("      }" + $nl)
   [void]$text.Append("    }")
@@ -201,5 +240,11 @@ try {
 }
 "wrote $BaselinePath"
 foreach ($entry in $entries) {
-  "$($entry.suite): total=$($entry.expected) classes=$(@($entry.classes.Keys).Count) methods=$(@($entry.methods.Values | ForEach-Object { @($_).Count } | Measure-Object -Sum).Sum)"
+  $methodCount = 0
+  $caseCount = 0
+  foreach ($cls in $entry.methods.Keys) {
+    $methodCount += @($entry.methods[$cls].Keys).Count
+    foreach ($m in $entry.methods[$cls].Keys) { $caseCount += [int]$entry.methods[$cls][$m] }
+  }
+  "$($entry.suite): total=$($entry.expected) classes=$(@($entry.classes.Keys).Count) methods=$methodCount cases=$caseCount"
 }
