@@ -25,7 +25,7 @@
 
 | 步骤 | 作用 | 失败即红的理由 |
 | --- | --- | --- |
-| Fail if a suite ran nothing or lost tests | 解析 TRX，按下限表比对（MediaHub.Tests floor 400、MediaHub.WebDav.Tests floor 100） | 套件整体消失或大幅缩水时 dotnet test 仍打印 Passed，这条把「跑了个空」变成红 |
+| Fail if a suite ran nothing or lost tests | 解析 TRX，与**提交基线** `windows/tools/test-suite-baseline.json` 比对：`actual < baseline` 判红、`actual > baseline` 判绿并 `::warning` 提示更新 | 套件整体消失或缩水时 dotnet test 仍打印 Passed，这条把「跑了个空」变成红。**2026-10-30 起改用基线**：此前是硬编码 floor 400/100，而套件已涨到 1920 例，丢 79% 用例仍判绿（见 §6） |
 | Licence report | 先 dotnet restore 两个**故意不入 sln** 的探针工程（EngineProbe / ResumeProbe） | 不 restore 探针工程时 CI 必红，而本机有历史产物会假绿 |
 | Licence surface guard | `tools/check-licence-surface.ps1` 比对 notices / SBOM / 工程漂移 | 新增工程未进 SBOM 或 sln 时拦下 |
 | Engine integration probe | 真实 libmpv 无窗口解码对拍 | 打包与引擎回归的护栏 |
@@ -84,3 +84,40 @@ grep -n 'Floor = ' .github/workflows/windows-ci.yml
 ```
 
 **grep 的坑**：`grep -c '--required-suite '` 会被当成选项解析，必须写 `grep -c -- '--required-suite '`。
+
+## 6. 门禁失效的一次真实案例（2026-10-30）
+
+**现象**：`windows-ci` 的套件门禁自述意图是「a suite that quietly loses half its cases still prints Passed!」，
+但下限是硬编码的 `Floor = 400`（MediaHub.Tests）/ `100`（WebDav），取自 2026-10-24 的 438 / 104。
+到 10-30 套件实际执行 **1920** 例 ⇒ 删掉 **1520 个用例（79%）** 仍然判绿。
+门禁防的是「腰斩」，实际只防「砍到 20% 以下」。
+
+**为什么不是「把 400 改成 1920」**：下次用例再涨，同样的洞原样重现。数字写死在 YAML 里就一定会腐坏，
+因为它没有任何东西提醒你去改。
+
+**修法**：`windows/tools/test-suite-baseline.json` 进仓库，CI 与它比对：
+
+| 情况 | 结果 |
+| --- | --- |
+| actual < baseline | 红（用例被删除或静默跳过），报错里写明「若确实要删，在同一次提交里下调基线」 |
+| actual > baseline | 绿 + `::warning`（新增用例不是失败，但提示更新基线） |
+
+**验证**（把 CI 里那段 PowerShell 原样抽出，用真实 TRX 夹具跑）：
+
+| 对照 | 场景 | 期望 | 实测 |
+| --- | --- | --- | --- |
+| NC0 | 1920 / 1920 | 绿 | GREEN |
+| NC1 | 1919（少 1 例） | 红 | RED |
+| NC2 | 400（丢 1520 例） | 红 | RED ← 旧 `Floor=400` 在此会判绿 |
+| NC3 | 1921（涨 1 例） | 绿 + warning | GREEN + ::warning |
+| NC4 | 1 个 failed | 红 | RED |
+| NC5 | 基线文件缺失 | 红 | RED |
+| NC6 | 还原后 | 绿 | GREEN |
+
+真实 CI：`ffe5a9fb` 的 windows-ci run `41025538206` success，日志含
+`MediaHub.Tests: total=1920 baseline=1920`、`MediaHub.WebDav.Tests: total=104 baseline=104`、`combined tests=2024`。
+
+**附带踩到的陷阱**：基线最初写成含中文注释的 JSON，`PowerShell 5.1` 的 `Get-Content -Raw`
+把无 BOM 的 UTF-8 当 ANSI 解码，中文损坏、字符串截断，`ConvertFrom-Json` 报 `Invalid array passed in`。
+文件本身是合法 UTF-8（node 的 `JSON.parse` 通过），坏的只是 PS 5.1 的读取路径。
+⇒ **基线文件刻意保持纯 ASCII**，理由写在 `_comment` 里。

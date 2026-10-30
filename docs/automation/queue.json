@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-30T14:2x:00+08:00",
-  "updated_by": "lead-W6-113-r2",
+  "updated_at": "2026-10-30T16:3x:00+08:00",
+  "updated_by": "lead-W6-113-r3",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -155,6 +155,32 @@
       ],
       "next_action": "维护者确认方案 A 后，把 .github/workflows/android-ci.yml 的 concurrency.group 改为 ci-${{ github.ref }}-${{ github.sha }}，并按提案 §验收 的四条验证（第 3 条为负向对照）。",
       "notes": "根因是配置而非纪律：android-ci 有 cancel-in-progress:true 且 group 只按 ref 分组；windows-ci 无 concurrency 块。本轮两次按规程等对方跑完再推仍被取消。"
+    },
+    {
+      "id": "W6-113h",
+      "title": "windows-ci 套件门禁改用提交基线（堵 79% 用例可静默丢失的洞）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r3",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "ffe5a9fb",
+        "windows/tools/test-suite-baseline.json",
+        "windows-ci run 41025538206 success",
+        "log: MediaHub.Tests total=1920 baseline=1920 / WebDav total=104 baseline=104 / combined 2024",
+        "negative controls NC0-NC6: GREEN / RED / RED / GREEN+warning / RED / RED / GREEN"
+      ],
+      "notes": "缺陷：旧下限 Floor=400/100 源自 2026-10-24 的 438/104，而套件已涨到 1920 ⇒ 丢 1520 例(79%)仍判绿，与其自述意图「挡住丢一半用例」脱节。修法不是调大常量（漂移会重现），而是把基线做成提交文件。NC2（丢 1520 例）是这次修复的关键对照：旧门禁在此判绿，新基线判红。"
+    },
+    {
+      "id": "W6-113i",
+      "title": "基线数字随并行执行者的新增用例漂移，需要定期校准",
+      "priority": "P2",
+      "status": "NOT_RUN",
+      "owner": "unassigned",
+      "blocked_by": [],
+      "next_action": "下轮若 windows-ci 出现 `::warning::suite grew beyond the baseline`，按提示把 windows/tools/test-suite-baseline.json 的 expected 改成日志里的 total，单独提交。",
+      "notes": "这是设计上的预期行为（增长不阻断，只提示），但意味着基线会周期性偏小；偏小不会造成漏检（只会让门禁更严），所以可以晚一步更新。"
     }
   ]
 }

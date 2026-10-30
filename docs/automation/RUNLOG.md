@@ -66,3 +66,13 @@
 - **提交**：`446b252c`（ADR）、`9e37d9b1`（补丁提案）。
 - **过渡纪律**：`cancelled` 在账本中单列，不并入 pass/fail；用树哈希作辅助论证必须标注为推理。
 - **正向对照**：`2ef01647`（他执行者 W25）的 Android CI **完整跑完 success** —— 证明只要没有新 push 插入，流程本身是健康的，问题只在 concurrency 策略。
+
+### 16:0x–16:3x — lead（W6-113 round 3）— 修掉 windows-ci 套件门禁的失效漏洞
+
+- **只读侦察**：W6 树被另一执行者的 W27 占用中（15:58 仍有文件变动），故先做只读核验；确认 `android-ci.yml` 的 concurrency 未被采纳改动（ADR-AUTO-001 仍待裁决），也确认我的导出契约修复 `RollingDirectoryPrefix` 与 16 条 `DiagnosticsReportTests` 仍完好。
+- **发现真缺陷**：`windows-ci` 的「Fail if a suite ran nothing or lost tests」自述意图是挡住「丢一半用例仍打印 Passed」，但下限硬编码 `Floor = 400` / `100`（源自 2026-10-24 的 438 / 104）。到 10-30 实际执行已达 **1920** 例 ⇒ 删掉 **1520 例（79%）** 仍判绿。
+- **修法**：新增 `windows/tools/test-suite-baseline.json`（提交基线）。`actual < baseline` 判红、`actual > baseline` 判绿 + `::warning`。不把 400 改成 1920 —— 那只是把同一漂移问题推给下一个人。
+- **验证（实跑，非纸面）**：把 CI 里那段 PowerShell 原样抽出、用真实 TRX 夹具跑六条对照 —— NC0 GREEN、NC1 少 1 例 RED、**NC2 丢 1520 例 RED（旧 Floor=400 在此会绿）**、NC3 涨 1 例 GREEN+warning、NC4 failed RED、NC5 基线缺失 RED、NC6 还原 GREEN。
+- **真实 CI 验证**：`ffe5a9fb` 的 windows-ci run `41025538206` success，日志含 `MediaHub.Tests: total=1920 baseline=1920`、`MediaHub.WebDav.Tests: total=104 baseline=104`、`combined tests=2024`。
+- **踩到的陷阱**：基线最初含中文注释，PowerShell 5.1 的 `Get-Content -Raw` 把无 BOM UTF-8 当 ANSI 解码 ⇒ 中文损坏、字符串截断、`ConvertFrom-Json` 报 `Invalid array passed in`（文件本身合法 UTF-8，node `JSON.parse` 通过）。⇒ 基线刻意保持纯 ASCII。
+- **如实记录一次自己的失误**：推送 `ffe5a9fb` 时 `in_flight=1`，取消了另一执行者 `4cd51deb` 的 Android CI —— 这正是我上一轮写进 ADR 的那个坑，本轮又犯。`4cd51deb` 的 windows-ci 已 success，Android 侧有更早 `6cff25d3` 的绿。纪律上应等 in-flight 归零再推。
