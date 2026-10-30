@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Twelve things rot silently in a licence deliverable:
+    Thirteen things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -25,9 +25,10 @@
           windows-ci.yml, the set shrinks, or a digest in the generated manifest stops matching the
           bytes - PACKAGING.md section 1 and SBOM.md section 4.1 both recorded zero licence files.
      12. the LGPL compliance note rots: its component-licence table stops matching the resolved
-         dependency graph, or section 1 keeps quoting an engine baseline the pin moved away from.
+     13. the guard's own inventory drifts: a check is added and never listed, the document or the
+         README keeps claiming the old number, or a declared check id is dropped from the document.
 
-    This script checks those twelve surfaces without touching the network, the build, or the
+    This script checks those thirteen surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -43,6 +44,14 @@
     The script that stages licence/notice files into a published tree. Default:
     windows/tools/stage-licence-files.ps1. The package-licence-staging check re-runs it into a
     temporary tree rather than trusting the document.
+
+.PARAMETER LicenceDocPath
+    The document that lists the checks and how many of them there are. Default:
+    windows/docs/licensing/LICENSE-SURFACE-CHECK.md. The check-inventory check compares its count
+    claim (and the README one) with the inventory declared in this script.
+
+.PARAMETER ReadmePath
+    The README whose licence-surface paragraph states how many checks run. Default: README.md.
 
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
@@ -76,6 +85,8 @@ param(
     [string] $WindowsRootPath,
     [string] $AppProjectPath,
     [string] $StageScriptPath,
+    [string] $LicenceDocPath,
+    [string] $ReadmePath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -102,6 +113,9 @@ $sbomFile = Resolve-RepoPath -Path $SbomPath -Default 'windows/docs/sbom-windows
 $complianceFile = Resolve-RepoPath -Path $LgplCompliancePath -Default 'windows/docs/LGPL-COMPLIANCE.md'
 $reportFile = if ($JsonPath) { $JsonPath } else { Join-Path $RepoRoot ('windows' + $pathSeparator + 'artifacts' + $pathSeparator + 'license-report' + $pathSeparator + 'license-report.json') }
 $collectedListFile = Resolve-RepoPath -Path '' -Default 'windows/engine/lgpl/dist/runtime-dependencies-collected.txt'
+
+$licenceDocFile = Resolve-RepoPath -Path $LicenceDocPath -Default 'windows/docs/licensing/LICENSE-SURFACE-CHECK.md'
+$readmeFile = Resolve-RepoPath -Path $ReadmePath -Default 'README.md'
 
 $checks = [System.Collections.Generic.List[object]]::new()
 function Add-Check {
@@ -987,6 +1001,94 @@ else {
         }
     }
 }
+# --- 13. the guard's own inventory must match what it emitted and what the documents claim ---
+# The check count in LICENSE-SURFACE-CHECK.md and in README.md is a number a human had to bump by
+# hand eight times (W32 through W41). The explicit inventory below is compared against both of them,
+# against this run's emitted ids, and against the document text, so forgetting one of the three is a FAIL.
+$declaredCheckIds = @(
+    'projects-discovered',
+    'notices-exist',
+    'notices-libmpv-engine',
+    'notices-engine-licence',
+    'notices-lgpl-dependency-section',
+    'notices-lgpl-evidence',
+    'notices-reproduce-command',
+    'notices-points-here',
+    'lgpl-compliance-exists',
+    'lgpl-compliance-dynamic-linking',
+    'lgpl-compliance-replaceable-dll',
+    'lgpl-compliance-source-offer',
+    'sbom-shape',
+    'sbom-engine-component',
+    'sbom-lgpl-flavour-property',
+    'report-exists',
+    'report-no-violations',
+    'report-project-count',
+    'report-engine-pin',
+    'report-lgpl-dependency-count',
+    'lgpl-licence-gaps',
+    'sbom-inventory',
+    'sbom-inventory-licences',
+    'sbom-source-revision',
+    'sdk-pin-matches-report',
+    'notices-inventory',
+    'notices-declarations',
+    'lgpl-candidate-hashes',
+    'lgpl-candidate-claims',
+    'vulkan-claims',
+    'lgpl-licence-table',
+    'packaging-claims',
+    'package-licence-staging',
+    'lgpl-compliance-block',
+    'lgpl-compliance-baseline',
+    'check-inventory'
+)
+if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
+    $inventoryMissing = @()
+    if (-not (Test-Path -LiteralPath $licenceDocFile)) { $inventoryMissing += $licenceDocFile }
+    if (-not (Test-Path -LiteralPath $readmeFile)) { $inventoryMissing += $readmeFile }
+    Add-Check 'check-inventory' 'SKIP' ('cannot read ' + (Format-NameList $inventoryMissing) + ', so the declared inventory has nothing to compare against')
+}
+else {
+    $inventoryDocText = [string](Get-Content -LiteralPath $licenceDocFile -Raw)
+    $inventoryReadmeText = [string](Get-Content -LiteralPath $readmeFile -Raw)
+    $declaredList = @($declaredCheckIds)
+    $declaredCount = $declaredList.Count
+    $inventoryProblems = @()
+    $inventoryDuplicates = @($declaredList | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
+    if ($inventoryDuplicates.Count -gt 0) {
+        $inventoryProblems += ('the declared inventory lists ' + (Format-NameList $inventoryDuplicates) + ' more than once')
+    }
+    $docCountMatch = [regex]::Match($inventoryDocText, '(\d+)\s*\u9879\u68c0\u67e5\u5206')
+    if (-not $docCountMatch.Success) {
+        $inventoryProblems += 'LICENSE-SURFACE-CHECK.md no longer states how many checks it documents'
+    }
+    elseif ([int]$docCountMatch.Groups[1].Value -ne $declaredCount) {
+        $inventoryProblems += ('LICENSE-SURFACE-CHECK.md claims ' + $docCountMatch.Groups[1].Value + ' check(s) but the guard declares ' + $declaredCount)
+    }
+    $readmeCountMatch = [regex]::Match($inventoryReadmeText, '\u73b0\u4e3a\s*\*\*(\d+)\s*\u9879\*\*')
+    if (-not $readmeCountMatch.Success) {
+        $inventoryProblems += 'README.md no longer states how many checks the licence surface guard runs'
+    }
+    elseif ([int]$readmeCountMatch.Groups[1].Value -ne $declaredCount) {
+        $inventoryProblems += ('README.md claims ' + $readmeCountMatch.Groups[1].Value + ' check(s) but the guard declares ' + $declaredCount)
+    }
+    $inventoryUndocumented = @($declaredList | Where-Object { -not [regex]::IsMatch($inventoryDocText, '(?<![A-Za-z0-9\-])' + [regex]::Escape($_) + '(?![A-Za-z0-9\-])') })
+    if ($inventoryUndocumented.Count -gt 0) {
+        $inventoryProblems += ('LICENSE-SURFACE-CHECK.md never names ' + (Format-NameList $inventoryUndocumented))
+    }
+    $inventoryUndeclared = @($checks | ForEach-Object { $_.id } | Where-Object { $declaredList -notcontains $_ } | Sort-Object -Unique)
+    if ($inventoryUndeclared.Count -gt 0) {
+        $inventoryProblems += ('this run emitted ' + (Format-NameList $inventoryUndeclared) + ', which the declared inventory does not list')
+    }
+    if ($inventoryProblems.Count -eq 0) {
+        Add-Check 'check-inventory' 'PASS' ($declaredCount.ToString() + ' declared check(s): this run emitted nothing undeclared, LICENSE-SURFACE-CHECK.md names every id on its own, and both it and README.md claim the same count')
+    }
+    else {
+        Add-Check 'check-inventory' 'FAIL' ($inventoryProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $inventoryProblems) + ' - add the new check to $declaredCheckIds in windows/tools/check-licence-surface.ps1 and move the count in LICENSE-SURFACE-CHECK.md and README.md with it')
+    }
+}
+
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })
 $skipped = @($checks | Where-Object { $_.outcome -eq 'SKIP' })

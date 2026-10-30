@@ -43,13 +43,13 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-35 项检查分十四组：
+36 项检查分十五组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
 | 项目面 | `projects-discovered` | `windows/src` 或 `windows/tests` 下找不到 csproj（多半 `-RepoRoot` 传错） |
 | 生成的 notices | `notices-exist`、`notices-libmpv-engine`、`notices-engine-licence`、`notices-lgpl-dependency-section`、`notices-lgpl-evidence`、`notices-reproduce-command`、`notices-points-here` | notices 被手改坏、或生成器改版后丢了关键段落 |
-| LGPL 说明 | `lgpl-compliance-exists` 及三条标记（`P/Invoke`、`libmpv-2.dll`、`written offer`） | 动态链接事实、可替换性、源码提供方式被删掉 |
+| LGPL 说明 | `lgpl-compliance-exists`、`lgpl-compliance-dynamic-linking`、`lgpl-compliance-replaceable-dll`、`lgpl-compliance-source-offer`（三条标记：`P/Invoke`、`libmpv-2.dll`、`written offer`） | 动态链接事实、可替换性、源码提供方式被删掉 |
 | SBOM | `sbom-shape`（CycloneDX 1.5）、`sbom-engine-component`（libmpv + GPL-3.0-or-later）、`sbom-lgpl-flavour-property` | SBOM 不是合法文档或丢了引擎记录 ⇒ 随包引擎变成「无记录」 |
 | 报告一致性 | `report-exists`、`report-no-violations`、`report-project-count`、`report-engine-pin`、`report-lgpl-dependency-count`、`lgpl-licence-gaps` | 报告过期（csproj 数变了）、出现策略违规、引擎哈希与固定值不符、LGPL 依赖数变了 |
 | SBOM 库存（W32 起） | `sbom-inventory`、`sbom-inventory-licences`、`sbom-source-revision` | 入库的 SBOM 与「当场重新解析依赖图得到的报告」不再一一对应（包升级/新增/移除、许可表达式变了），或 SBOM 记录的本机来源提交不落在当前分支历史上 |
@@ -60,6 +60,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 引擎许可声明（W38 起） | `lgpl-licence-table` | LGPL flavour 的 33 个 DLL 与 `component-licences.txt` 的逐行声明对不上（表被改坏、缺行、证据行号指到别处），或装出来的文件清单与报告行数不符 |
 | LGPL 合规声明（W41 起） | `lgpl-compliance-block`、`lgpl-compliance-baseline` | 文档 §5.1 的机器可读组件表与解析图不再一一对应（漏包/多包/许可漂移），或 §1 的 GPL 基线摘要与报告解析值分叉（pin 换引擎后文档没跟上） |
 | 分发与签名（W39 起） | `packaging-claims` | 发布形态、签名、安装方式与 `PACKAGING.md` §0 七行不符：CI 开始签名、仓库出现 `*.appxmanifest` 或 WiX/Inno/NSIS 工程、App 不再是 unpackaged self-contained portable、`windows-ci.yml` 丢了 portable publish/上传步骤（构建输出 `obj/`、`bin/`、`artifacts/` 不计） |
+| 门禁自证（W42 起） | `check-inventory` | 脚本里声明的检查清单与「本次运行发出的 id」「`LICENSE-SURFACE-CHECK.md` 点名的 id」「该文档与 README 声明的数量」任一分叉——新增检查忘了登记，或数量没跟着改 |
 | 包内许可文件（W40 起） | `package-licence-staging` | 发布树不再真的带 `licences/` 的六个文档 + digest manifest：暂存脚本被删、清单缩水、manifest 摘要与字节不符、或 CI 不再调用它（该检查把脚本重跑到临时树，不读文档） |
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
@@ -224,6 +225,23 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 - 候选件本身不走这两项：它的字节与十一个引用点由 §3.4 的 `lgpl-candidate-hashes` / `lgpl-candidate-claims` 负责。
 - 负向对照六条（各恰好 1 红，均用临时文档/报告副本，不改仓库文件）：① 块里把 `libiconv` 许可改回 `GPL-3.0-or-later`；② 删 `pcre2` 行；③ 加 `phantom-package` 幻影行；④ §1 的 sha256 换成 40 位悬空值；⑤ §1 的字节数改成 `120,989,700`；⑥ 报告副本删掉 `nativeEngine` ⇒ 该项 SKIP，但既有的 `report-engine-pin` 仍会红，故整次退出码仍为 1。
 
+### 3.10 门禁自证：数量与 id 清单（W42，2026-10-31）
+
+核对器「N 项检查」这个数字，从 W32 到 W41 一共手工改过八次；`LICENSE-SURFACE-CHECK.md` 与 `README.md` 里的那句话是全套工具中唯一没有任何机器校验的声明。第 36 项补上：
+
+| 判据 | 内容 | 失败含义 |
+| --- | --- | --- |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 36） | 加了检查，但文档或 README 的数量没跟着改 |
+| B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
+| C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
+
+三条任一出问题即 FAIL，detail 分别点名；清单里重复 id 也算 FAIL。清单写在脚本第 13 段（36 行），是「检查 id → 文档」的双向核对点：漏登记在 C 红，漏写文档在 B 红，漏改数字在 A 红。
+
+两个新参数（都经 `Resolve-RepoPath`，相对路径按仓库根解析，跨出仓库要写 `../../`）：`-LicenceDocPath`（默认 `windows/docs/licensing/LICENSE-SURFACE-CHECK.md`）、`-ReadmePath`（默认 `README.md`）。任一文档读不到 → 该项 SKIP（退出码不变），因为此时无从比较。
+
+负向对照见 §4.10。
+
+
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
 ```text
@@ -372,6 +390,19 @@ RESULT: PASS
 
 - 文档侧同步补齐的真实漂移：§5 的逐组件清单还停在 W38 之前——缺 5 个包（libwinpthread-git、pcre2、expat、bzip2、gettext-runtime），且把 `libiconv` 写成 GPL-3.0-or-later；§5「两处需要人工确认」第 1 条已改写为 W38 已核实。新的 §5.1 把 26 个随包组件的「组件 → 许可」做成机器可读块，交由 `lgpl-compliance-block` 钉住。
 - 六条负向对照见 §3.9。
+
+### 4.10 实测（2026-10-31，W42，本机，HEAD 752c9b99）
+
+```text
+pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath D:/mh-verify/w38-license/license-report.json
+check-licence-surface  PASS  check-inventory  36 declared check(s): this run emitted nothing undeclared, LICENSE-SURFACE-CHECK.md names every id on its own, and both it and README.md claim the same count
+check-licence-surface  checks=36 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+- 本轮新增的真实发现（由负向对照逼出来）：判据 B 最初用 `IndexOf` 做子串匹配，于是把某个 id 改名成 `lgpl-compliance-baseline-X` 时它仍算「文档写到了」——对照 NC3 因此不红。改成边界正则（id 两侧不得是 `[A-Za-z0-9-]`）后才真正红；§3.10 的判据表与 PASS 文案据此改写。证据日志 `D:/mh-verify/w42-nc3.log`。
+- 六条负向对照（各恰好 1 个 FAIL 检查，均用临时副本，不改仓库文件）：① `LICENSE-SURFACE-CHECK.md` 副本把数量改成 35 → 1 红；② `README.md` 副本数量改 35 → 1 红；③ 文档副本把 `lgpl-compliance-baseline` 改名 → 1 红（边界匹配生效）；④ 脚本副本改掉 `vulkan-claims` 的发射名 → 1 红（未申报发射）；⑤ 脚本副本从清单删掉 `lgpl-licence-table` 一行 → 1 红（该 detail 列出数量漂移与未申报发射共 3 条）；⑥ `-LicenceDocPath` 指向不存在的文件 → SKIP、退出码 0。日志 `D:/mh-verify/w42-nc1.log` … `w42-nc6.log`。
+- 复现命令（两个参数都按仓库根解析，跨出仓库要写 `../../`）：`pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -LicenceDocPath ../../mh-verify/w42-neg/nc1-doc.md`。
 
 ## 5. 这个工具**不**覆盖什么
 
