@@ -311,4 +311,22 @@ per-class 版（`W6-113k`）挡的是「跨类搬用例」，挡不住**同一�
 `entry for MediaHub.Tests has no methods table - the per-method check would be vacuous`。即旧基线不会在新闸门下**静默变绿**，
 而是当场失败并指明缺哪张表 —— 这是本轮新校验的直接可用性证据。
 
+## 6.6 诊断导出契约复验（W6-113n，no-op）：25 例钉住「内存快照 + 滚动目录指针」
 
+W6-113 round 10 按指令复验 W14 口径与 Android 端口的一致性，**结论一致，不改代码**；此节记录该契约由哪组用例钉住，
+便于以后改导出格式时对照（本轮实测 `dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj
+--filter "FullyQualifiedName~DiagnosticsReportTests|FullyQualifiedName~LogFileSinkTests"` ⇒ exit 0、`通过数: 25`，
+16 `DiagnosticsReportTests` + 9 `LogFileSinkTests`）。
+
+| 契约面 | 点名要求 | 钉住它的用例 |
+|---|---|---|
+| 旧签名兼容 | 2/3/4 参旧调用输出逐字不变 | `A_missing_rolling_directory_leaves_the_header_byte_for_byte_as_before` |
+| 目录缺省与存在 | `""`/空白/null 视为缺省；缺目录自动创建；有目录写进文件 | `An_empty_rolling_directory_is_treated_as_absent`、`Write_creates_a_missing_directory_and_reports_bytes_and_entries`、`Write_carries_the_rolling_directory_into_the_file_it_writes` |
+| 路径含十六进制 | 指针行不含 `***`（`LongHexRegex` 不得吃掉临时目录的 32 位十六进制段） | `The_hexadecimal_segment_of_the_directory_survives_redaction_untouched` |
+| 敏感 URL | 目录行原样回显，同报告内条目仍脱敏（`api_key=abc123 → ***`） | `The_directory_is_echoed_verbatim_while_entries_in_the_same_report_are_still_redacted` |
+| 日志正文不内嵌 | 只给目录指针，不内联滚动文件内容 | `The_report_points_at_the_rolling_directory_instead_of_inlining_the_file` |
+
+> 两处「不同表面」的边界（勿混）：Windows 的指针行位于**报告头**（`DiagnosticsReport.RollingDirectoryPrefix`，L30/L50-54），
+> 刻意**不过** `LogService.Redact`；Android 端口的 `the_information_line_carries_the_counts_and_never_the_directory` 管的是
+> **日志信息行**不含目录，二者不冲突。若未来改口径，须同步 `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md`、
+> `docs/android-source-sync-transfer.md` 与两侧用例，并重跑本组 25 例。

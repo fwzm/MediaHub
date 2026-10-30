@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-30T20:30:00+08:00",
-  "updated_by": "lead-W6-113-r7",
+  "updated_at": "2026-10-31T00:19:52+08:00",
+  "updated_by": "lead-W6-113-r10",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -250,7 +250,7 @@
       "id": "W6-113m",
       "title": "W32 的 SBOM 库存门禁上线即在 PR #39 全线红：SBOM 过期 + 祖先检查在浅克隆下不可证",
       "priority": "P0",
-      "status": "BLOCKED",
+      "status": "RESOLVED",
       "owner": "unassigned",
       "branch": "feature/windows-client",
       "blocked_by": [
@@ -263,10 +263,30 @@
         "W32 之前 base 的 licence 行为 checks=21 failed=0（head f045d34c 的 windows-ci 41072599036）-> 21/24 之差正是 W32 新加三检，归因外部",
         "sbom-inventory 根因：windows/docs/sbom-windows.cdx.json 仍记 pkg:nuget/System.Reflection.Metadata@1.6.0，但当前树已无 csproj 解析它（git grep 只命中 THIRD-PARTY-NOTICES.md 与 SBOM 自身）-> 需 pwsh -NoProfile -File windows/tools/license-report.ps1 -Sbom",
         "sbom-source-revision 根因：守卫 check-licence-surface.ps1 用 git merge-base --is-ancestor 1c30471 HEAD；本机 1c30471 确是 388cde7d 与 origin/feature/windows-client 的祖先，但 actions/checkout@v4 默认 fetch-depth 1（浅克隆）拿不到祖先对象 -> 不可证即 FAIL",
-        "docs 提交 388cde7d 触发的 windows-ci 41073668366 也红在同一步骤，但台阶行（total/classes/methods/combined）全绿，证明失败与本轮门禁改动无关"
+        "docs 提交 388cde7d 触发的 windows-ci 41073668366 也红在同一步骤，但台阶行（total/classes/methods/combined）全绿，证明失败与本轮门禁改动无关",
+        "上游已修复：base 前进到 8d11eee1（2026-10-30T16:05:15Z），其 windows-ci run 41086696926 = completed/success，licence 行 check-licence-surface checks=25 failed=0 warnings=1",
+        "对照：修复前 base 13fad6b8 为 checks=24 failed=2；我方 head 98defcbd 的 run 41075847038 亦为 24/2（同因），均随本次 base 前进而消失"
       ],
-      "notes": "PR #39 现在的 head 不再是绿：windows-ci 因 W32 新守卫红。不要把该红记到本轮 W6-113l 头上；也不要为消红去改 SBOM 大文件（属 W32 自有校验面）。",
-      "next_action": "交回 W32 作者：①在 windows/ 下跑 pwsh -NoProfile -File windows/tools/license-report.ps1 -Sbom 重生成 SBOM/notices；②把祖先检查改为浅克隆安全（或 workflow checkout 设 fetch-depth: 0）；③复跑 windows-ci 至 Licence surface guard 全 PASS。"
+      "notes": "PR #39 现在的 head 不再是绿：windows-ci 因 W32 新守卫红。不要把该红记到本轮 W6-113l 头上；也不要为消红去改 SBOM 大文件（属 W32 自有校验面）。 2026-10-31 复核：上游 W32 作者已重生成 SBOM 并把祖先检查做成浅克隆安全（checks 24->25，无 FAIL）=> 两条阻塞条件均已消化，转 RESOLVED。",
+      "next_action": "无需我方动作；PR #39 在 base 8d11eee1 上的下一次 exact-head run 应回到 licence PASS（若仍红则重开本条目）"
+    },
+    {
+      "id": "W6-113n",
+      "title": "诊断导出契约复验（W14 指针口径 vs Android 端口）：与两棵树文档一致，记 no-op",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r10",
+      "branch": "feature/cross-device-source-sync",
+      "blocked_by": [],
+      "evidence": [
+        "dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj --filter FullyQualifiedName~DiagnosticsReportTests|FullyQualifiedName~LogFileSinkTests => exit 0 / 通过数 25（16 DiagnosticsReportTests + 9 LogFileSinkTests），日志 D:/mh-verify/r10-diag-tests.log",
+        "五类点名用例落点：旧签名兼容 A_missing_rolling_directory_leaves_the_header_byte_for_byte_as_before；目录缺省与存在 An_empty_rolling_directory_is_treated_as_absent + Write_creates_a_missing_directory_and_reports_bytes_and_entries + Write_carries_the_rolling_directory_into_the_file_it_writes；十六进制路径 The_hexadecimal_segment_of_the_directory_survives_redaction_untouched；敏感 URL The_directory_is_echoed_verbatim_while_entries_in_the_same_report_are_still_redacted；日志正文不内嵌 The_report_points_at_the_rolling_directory_instead_of_inlining_the_file；另有 The_rolling_directory_line_keeps_the_prefix_w14_shipped",
+        "源码 SOURCE_REVIEWED：DiagnosticsReport.cs:30 RollingDirectoryPrefix=\"# 滚动文件目录：\"；Render 的 rollingDirectory 尾随可选参数 L40-42、指针行 L50-54 不过 Redact（LongHexRegex 会吃 32 位十六进制段）、L56-57 appVersion/device 仍脱敏；LogService.cs:71 Export() 传 FileSink?.DirectoryPath、L74-77 Snapshot 在写锁内、L23 MaxEntries=2000",
+        "文档：windows/docs/W14-DIAGNOSTIC-LOG-FILES.md:31-32 指针行不过 Redact、:69 Export 仍只是内存快照；docs/android-source-sync-transfer.md:6837-6850 W6-112 合并冲突记录（rollingDirectory 尾随可选参数、W6-113 补记 055c85c3 9->16 用例、3 条负向对照 1/1/4 红）",
+        "Android 对照（只读 head 8d11eee1）：AppModule.kt:202-221 FileDiagnosticsExportPort(directory=File(context.cacheDir,\"diagnostics\"))；feature/settings/.../DiagnosticsExportPortTest.kt 4 例含 the_information_line_carries_the_counts_and_never_the_directory => 日志信息行不带目录，与 Windows 报告头指针行属不同表面，无冲突"
+      ],
+      "notes": "契约冻结为「内存快照 + 滚动文件目录指针（Windows 报告头，不过 Redact）」+「Android 端口写自身目录且日志信息行不含目录」。本轮按指令不新增用例、不做提交（no-op）；若未来改口径，需同步两棵树文档与这两组用例。",
+      "next_action": "无；后续任何改导出格式的提交，须同时更新 W14 文档与两侧用例，并重跑本组 25 例"
     }
   ]
 }
