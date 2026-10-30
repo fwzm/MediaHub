@@ -1,0 +1,24 @@
+{
+  "_comment": [
+    "Windows CI test-suite baseline. Consumed by the 'Fail if a suite ran nothing or lost tests' step.",
+    "  actual < expected -> red   (cases were deleted or silently skipped)",
+    "  actual > expected -> green (new cases are not a failure) with a 'please update' warning",
+    "Why not just raise a hard-coded floor: that only moves the same rot to the next person.",
+    "A committed baseline shows up in review as a diff and can be git-blamed.",
+    "Update: run windows-ci once, read the 'MediaHub.Tests: total=N' line, write N into expected.",
+    "ASCII only on purpose: PowerShell 5.1 Get-Content decodes BOM-less UTF-8 as ANSI and corrupts",
+    "non-ASCII text, which breaks ConvertFrom-Json. Keep this file pure ASCII."
+  ],
+  "suites": [
+    {
+      "file": "windows-tests.trx",
+      "suite": "MediaHub.Tests",
+      "expected": 1920
+    },
+    {
+      "file": "webdav-tests.trx",
+      "suite": "MediaHub.WebDav.Tests",
+      "expected": 104
+    }
+  ]
+}

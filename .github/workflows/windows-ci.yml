@@ -88,26 +88,41 @@ jobs:
         working-directory: windows
         run: |
           # A test step that silently runs zero tests would otherwise be reported as success, and a
-          # suite that quietly loses half its cases still prints "Passed!". Assert each suite by name
-          # with a floor just under its known size (MediaHub.Tests 438, MediaHub.WebDav.Tests 104 as of
-          # 2026-10-24); raise the floors when the suites grow.
-          $expected = @(
-            @{ File = "windows-tests.trx"; Suite = "MediaHub.Tests";          Floor = 400 },
-            @{ File = "webdav-tests.trx";  Suite = "MediaHub.WebDav.Tests";    Floor = 100 }
-          )
+          # suite that quietly loses half its cases still prints "Passed!".
+          #
+          # The expected counts live in tools/test-suite-baseline.json, not in this file. They used to be
+          # hard-coded floors (400 / 100 against 438 / 104 as of 2026-10-24) and rotted: by 2026-10-30
+          # MediaHub.Tests had grown to 1914, so dropping 1514 cases -- 79% of the suite -- still passed
+          # this gate. "Raise the floors when the suites grow" relies on someone remembering; a committed
+          # baseline shows up in review as a diff instead.
+          #
+          #   actual < baseline -> red   (cases were deleted or silently skipped)
+          #   actual > baseline -> green (new cases are not a failure) with a "please update" warning
+          $baselinePath = "./tools/test-suite-baseline.json"
+          if (-not (Test-Path $baselinePath)) { throw "missing $baselinePath - the suite baseline is required" }
+          $baseline = Get-Content $baselinePath -Raw | ConvertFrom-Json
+          if (-not $baseline.suites -or @($baseline.suites).Count -eq 0) { throw "$baselinePath lists no suites" }
+
           $all = 0
-          foreach ($e in $expected) {
-            $path = Join-Path ./artifacts/test-results $e.File
-            if (-not (Test-Path $path)) { throw "no test results for $($e.Suite): $($e.File) was not produced" }
+          $stale = @()
+          foreach ($e in $baseline.suites) {
+            $path = Join-Path ./artifacts/test-results $e.file
+            if (-not (Test-Path $path)) { throw "no test results for $($e.suite): $($e.file) was not produced" }
             $xml = [xml](Get-Content $path -Raw)
             $total = [int]$xml.TestRun.ResultSummary.Counters.total
             $failed = [int]$xml.TestRun.ResultSummary.Counters.failed
             $skipped = [int]$xml.TestRun.ResultSummary.Counters.notExecuted
-            "$($e.Suite): total=$total failed=$failed notExecuted=$skipped"
-            if ($total -lt $e.Floor) { throw "$($e.Suite) ran $total tests, expected at least $($e.Floor) - cases were dropped or skipped" }
-            if ($failed -ne 0) { throw "$($e.Suite): $failed test(s) failed" }
-            if ($skipped -ne 0) { throw "$($e.Suite): $skipped test(s) were not executed" }
+            "$($e.suite): total=$total baseline=$($e.expected) failed=$failed notExecuted=$skipped"
+            if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
+            if ($skipped -ne 0) { throw "$($e.suite): $skipped test(s) were not executed" }
+            if ($total -lt [int]$e.expected) {
+              throw "$($e.suite) ran $total tests but the baseline says $($e.expected) - cases were dropped or skipped. If the removal was intentional, lower the baseline in windows/tools/test-suite-baseline.json in the same commit."
+            }
+            if ($total -gt [int]$e.expected) { $stale += "$($e.suite): $total > $($e.expected)" }
             $all += $total
+          }
+          if ($stale.Count -gt 0) {
+            "::warning::suite grew beyond the baseline - update windows/tools/test-suite-baseline.json: $($stale -join '; ')"
           }
           "combined tests=$all"
 
