@@ -201,21 +201,22 @@ Do not confuse the two: **being able to rebuild the .NET half does not help the 
 pinning the engine's digest does not make the engine LGPL.** The digests prove *which* GPL binary we
 ship; only a different build (LICENCE-DECISION §2) changes *what* we ship.
 
-## 8. SDK pinning and the licence gate (W33, 2026-10-30)
+## 8. SDK pinning, package pruning and the licence gate (W33 + W34, 2026-10-30)
 
-The SDK version is no longer a private choice of whoever runs the build. The first CI run of the W32 SBOM
-inventory checks failed because CI installed SDK 10.0.403 while the committed SBOM was generated with
-10.0.113: .NET feature bands ship prune data (`PrunePackageData`) that removes framework-provided
-packages from the resolved graph, and 10.0.403 pruned `System.Reflection.Metadata@1.6.0` (transitive from
-`Microsoft.TestPlatform.ObjectModel@17.13.0`), turning 29 packages into 28. Two consequences:
+The SDK version is no longer a private choice of whoever runs the build: the repository pins it in
+`global.json` (`10.0.113`, `rollForward: disable`) and `windows-ci.yml` installs that exact version
+rather than `10.0.x`. `windows/tools/check-licence-surface.ps1` gained `sdk-pin-matches-report`, which fails
+when `tooling.dotnet` in the report differs from the pin, and CI checks out with `fetch-depth: 0` so the
+revision recorded in the SBOM can be proven to sit on the history of this branch (shallow clones only warn).
 
-- the repository now pins the toolchain in `global.json` (`10.0.113`, `rollForward: disable`), and
-  `windows-ci.yml` installs that exact version rather than `10.0.x`;
-- `windows/tools/check-licence-surface.ps1` gained `sdk-pin-matches-report`, which fails when
-  `tooling.dotnet` in the report differs from the pin, and warns when the report was not produced on a
-  machine with `dotnet` on `PATH` (the report records `unknown` there). CI also checks out with
-  `fetch-depth: 0`, so the revision recorded in the SBOM can be proven to sit on the history of this branch.
+Pinning the SDK was not enough on its own. The first CI run after W32 still failed `sbom-inventory`:
+whether a framework-provided package is pruned out of the restore graph depends on package-prune data
+shipping with the installed targeting packs. The CI image has it and pruned `System.Reflection.Metadata@1.6.0`
+(28 packages), while the machine that generated the SBOM has no `packs/` directory and kept it (29) - with the
+same SDK version on both sides. `windows/Directory.Build.props` therefore sets
+`RestoreEnablePackagePruning=false`: pruning is a publish-size optimisation, and turning it off makes the
+resolved graph - and with it the SBOM and this report - the same everywhere.
 
-If a newer SDK is wanted, move `global.json` and the regenerated SBOM (`license-report.ps1 -Sbom`) in the same
-commit; the guard then keeps them from drifting apart again. The measurements in §3 were taken under 10.0.113
-and remain valid only for that toolchain.
+If a newer SDK is wanted, move `global.json` and the regenerated SBOM (`license-report.ps1 -Sbom`) in the
+same commit; the guard then keeps them from drifting apart again. The measurements in §3 were taken under
+10.0.113 with pruning off and remain valid only for that toolchain.

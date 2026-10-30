@@ -359,7 +359,7 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
   但**尚未切换到产品**。
 - 因此**在完成引擎切换与合规判定前，Windows 客户端不具备分发条件**。
   详见 [windows/THIRD-PARTY-NOTICES.md](windows/THIRD-PARTY-NOTICES.md) 与 `windows/docs/licensing/`。
-- 许可证面核对器 `windows/tools/check-licence-surface.ps1` 现为 **25 项**：W32 起新增 `sbom-inventory`（比对本仓库 SBOM 与「当场重新解析出的依赖图」）、`sbom-inventory-licences`（比对许可表达式）、`sbom-source-revision`（SBOM 记录的本机提交须在当前分支历史上）、`sdk-pin-matches-report`（W33：报告须由仓库根 `global.json` 钉住的 SDK 10.0.113 生成，`windows-ci.yml` 已同步钉住该 SDK 与 `fetch-depth: 0`，浅克隆下来源提交判定降为 WARN）；CI 随 `windows-ci.yml` 的 Licence report 步骤自动跑，细则见 `windows/docs/licensing/LICENSE-SURFACE-CHECK.md` §3.1。
+- 许可证面核对器 `windows/tools/check-licence-surface.ps1` 现为 **25 项**：W32 起新增 `sbom-inventory`（比对本仓库 SBOM 与「当场重新解析出的依赖图」）、`sbom-inventory-licences`（比对许可表达式）、`sbom-source-revision`（SBOM 记录的本机提交须在当前分支历史上）、`sdk-pin-matches-report`（W33+W34：报告须由仓库根 `global.json` 钉住的 SDK 10.0.113 生成；`windows-ci.yml` 已同步钉住该 SDK 与 `fetch-depth: 0`，浅克隆下来源提交判定降为 WARN；`windows/Directory.Build.props` 关闭 NuGet 包修剪（`RestoreEnablePackagePruning=false`）让还原图在任何机器上一致）；CI 随 `windows-ci.yml` 的 Licence report 步骤自动跑，细则见 `windows/docs/licensing/LICENSE-SURFACE-CHECK.md` §3.1。
 
 ### 最近更新（自动同步）
 

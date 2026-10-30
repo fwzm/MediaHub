@@ -357,7 +357,7 @@ else {
             Add-Check "sdk-pin-matches-report" "PASS" ("the report was produced by the pinned SDK " + $pinned)
         }
         else {
-            Add-Check "sdk-pin-matches-report" "FAIL" ("the report was produced with SDK " + $observed + " but global.json pins " + $pinned + " - SDK feature bands prune framework-provided packages differently, so the SBOM would describe a different graph; build with the pinned SDK or move the pin and the regenerated SBOM together")
+            Add-Check "sdk-pin-matches-report" "FAIL" ("the report was produced with SDK " + $observed + " but global.json pins " + $pinned + " - one toolchain must produce the SBOM and every local measurement; build with the pinned SDK or move the pin and the regenerated SBOM together")
         }
     }
     catch {

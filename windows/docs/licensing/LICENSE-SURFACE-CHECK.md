@@ -53,7 +53,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | SBOM | `sbom-shape`（CycloneDX 1.5）、`sbom-engine-component`（libmpv + GPL-3.0-or-later）、`sbom-lgpl-flavour-property` | SBOM 不是合法文档或丢了引擎记录 ⇒ 随包引擎变成「无记录」 |
 | 报告一致性 | `report-exists`、`report-no-violations`、`report-project-count`、`report-engine-pin`、`report-lgpl-dependency-count`、`lgpl-licence-gaps` | 报告过期（csproj 数变了）、出现策略违规、引擎哈希与固定值不符、LGPL 依赖数变了 |
 | SBOM 库存（W32 起） | `sbom-inventory`、`sbom-inventory-licences`、`sbom-source-revision` | 入库的 SBOM 与「当场重新解析依赖图得到的报告」不再一一对应（包升级/新增/移除、许可表达式变了），或 SBOM 记录的本机来源提交不落在当前分支历史上 |
-| 工具链（W33 起） | `sdk-pin-matches-report` | 报告不是由仓库根 `global.json` 钉住的 SDK 生成的——SDK 特性带会修剪框架自带的包，SBOM 会描述另一张图 |
+| 工具链（W33 + W34 起） | `sdk-pin-matches-report` | 报告不是由仓库根 `global.json` 钉住的 SDK 生成的——SBOM 与全部实测证据必须出自同一条工具链；另见 §3.2（关修剪使还原图在任何机器上一致） |
 
 `lgpl-licence-gaps` 默认是 **WARN**：`component-licences.txt` 里没有声明的 5 个 MSYS2 包（`libwinpthread-1`、`libpcre2-8-0`、`libintl-8`、`libexpat-1`、`libbz2-1`）是**已知缺口**，默认 flavour 不随包分发它们。要在「切 LGPL 发布前」把缺口当硬门，加 `-FailOnLicenceGaps`。
 
@@ -69,24 +69,28 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 
 两个使用细节：`-SbomPath` 会被拼到仓库根下（`Resolve-RepoPath`），**绝对路径拼起来找不到文件**，要传仓库相对路径；`-JsonPath` 则原样使用，绝对路径可以。CI 无需改 YAML：`windows-ci.yml` 的 Licence report 步骤本来就带 `-JsonPath` 调这个脚本，三项新检查自动生效。
 
-负向对照（用临时 SBOM 副本 + `-SbomPath` 指过去，不改仓库文件；每处**恰好 1 红**）：删一个组件 → `sbom-inventory` FAIL；改一个版本 → FAIL（一增一减）；加一个幻影组件 → FAIL；改一条许可表达式（`Microsoft.CodeCoverage@17.13.0`: `MIT` → `Apache-2.0`）→ `sbom-inventory-licences` FAIL；把来源提交改成 40 位悬空提交（用 `git commit-tree` 造，对象存在但不在 HEAD 谱系）→ `sbom-source-revision` FAIL；浅克隆里该对象根本没取回来 → 同一检查 WARN（提示 `fetch-depth: 0`）；L；删掉报告 → 三检全部 `SKIP`、退出码仍为 0。
+负向对照（用临时 SBOM 副本 + `-SbomPath` 指过去，不改仓库文件；每处**恰好 1 红**）：删一个组件 → `sbom-inventory` FAIL；改一个版本 → FAIL（一增一减）；加一个幻影组件 → FAIL；改一条许可表达式（`Microsoft.CodeCoverage@17.13.0`: `MIT` → `Apache-2.0`）→ `sbom-inventory-licences` FAIL；把来源提交改成 40 位悬空提交（用 `git commit-tree` 造，对象存在但不在 HEAD 谱系）→ `sbom-source-revision` FAIL；浅克隆里该对象根本没取回来 → 同一检查 WARN（提示 `fetch-depth: 0`）；删掉报告 → 三检全部 `SKIP`、退出码仍为 0。
 
-### 3.2 SDK 钉住：CI 必须用与生成 SBOM 相同的 SDK（W33，2026-10-30）
+### 3.2 工具链钉住：同一条工具链产出 SBOM 与实测（W33 + W34，2026-10-30）
 
 W32 的三检首次随 CI 跑就抓到两件事，都不是「SBOM 写错了」：
 
-1. ~BT~sbom-inventory~BT~ FAIL：CI 报告 ~BT~packages=28~BT~、入库 SBOM 与本机都是 29，差的是 ~BT~pkg:nuget/System.Reflection.Metadata@1.6.0~BT~。它不是任何 csproj 的直接引用，而是 ~BT~Microsoft.TestPlatform.ObjectModel@17.13.0~BT~ 的传递依赖；差别来自 SDK 特性带（feature band）——10.0.403 带修剪数据（~BT~PrunePackageData~BT~），会把框架自带的这个包剪掉，10.0.113 没有这份数据，于是保留。也就是说：**同一个仓库在不同 SDK 下还原出的依赖图不一样**。
-2. ~BT~sbom-source-revision~BT~ FAIL：~BT~actions/checkout@v4~BT~ 默认 ~BT~fetch-depth: 1~BT~，克隆里根本没有 SBOM 记录的那次提交，~BT~git merge-base --is-ancestor~BT~ 无从判定。
+1. `sbom-inventory` FAIL：CI 报告 `packages=28`、入库 SBOM 与本机都是 29，差的是 `pkg:nuget/System.Reflection.Metadata@1.6.0`。它不是任何 csproj 的直接引用，而是 `Microsoft.TestPlatform.ObjectModel@17.13.0` 的传递依赖。
+2. `sbom-source-revision` FAIL：`actions/checkout@v4` 默认 `fetch-depth: 1`，克隆里根本没有 SBOM 记录的那次提交，`git merge-base --is-ancestor` 无从判定。
 
-据此仓库做了三件事：
+据此先做了三件事：
 
-- 仓库根新增 ~BT~global.json~BT~：~BT~{"sdk":{"version":"10.0.113","rollForward":"disable"}}~BT~——钉住生成入库 SBOM 与全部实测证据的那一版 SDK（不是「最新的 10.0.x」）。要让 SBOM 描述新 SDK 的图，应当连同 ~BT~global.json~BT~ 与重新生成的 SBOM 一起改。
-- ~BT~windows-ci.yml~BT~：~BT~actions/checkout@v4~BT~ 加 ~BT~fetch-depth: 0~BT~（本流水线不读 tags，代价只是一次完整 fetch；仓库 pack 约 27 MiB / 500 提交），~BT~actions/setup-dotnet@v4~BT~ 的 ~BT~dotnet-version~BT~ 由 ~BT~"10.0.x"~BT~ 改为 ~BT~"10.0.113"~BT~。
-- 核对器新增第 25 项 ~BT~sdk-pin-matches-report~BT~：读仓库根 ~BT~global.json~BT~ 的 ~BT~sdk.version~BT~，与报告的 ~BT~tooling.dotnet~BT~ 比对。相等 PASS；不等 FAIL（同时点名两个版本，并说明「SDK 特性带对框架自带包的修剪不同，SBOM 会描述另一张图」）；没有 ~BT~global.json~BT~、~BT~sdk.version~BT~ 为空、报告里 ~BT~tooling.dotnet~BT~ 为空或 ~BT~unknown~BT~（多半是生成报告时机器 ~BT~PATH~BT~ 上没有 dotnet）一律 WARN；报告不存在时 SKIP。
+- 仓库根新增 `global.json`：`{"sdk":{"version":"10.0.113","rollForward":"disable"}}`——钉住生成入库 SBOM 与全部实测证据的那一版 SDK（不是「最新的 10.0.x」）。要让 SBOM 描述新 SDK 的图，应当连同 `global.json` 与重新生成的 SBOM 一起改。
+- `windows-ci.yml`：`actions/checkout@v4` 加 `fetch-depth: 0`（本流水线不读 tags，代价只是一次完整 fetch；仓库 pack 约 27 MiB / 500 提交），`actions/setup-dotnet@v4` 的 `dotnet-version` 由 `"10.0.x"` 改为 `"10.0.113"`。
+- 核对器新增第 25 项 `sdk-pin-matches-report`：读仓库根 `global.json` 的 `sdk.version`，与报告的 `tooling.dotnet` 比对。相等 PASS；不等 FAIL（同时点名两个版本）；没有 `global.json`、`sdk.version` 为空、报告里 `tooling.dotnet` 为空或 `unknown` 一律 WARN；报告不存在时 SKIP。
 
-~BT~sbom-source-revision~BT~ 同时改成四分支：属性缺失 / 值里读不出提交 / 机器上没有 git → WARN；~BT~git cat-file -e <sha>^{commit}~BT~ 失败时再看 ~BT~git rev-parse --is-shallow-repository~BT~，为 true（浅克隆，对象根本没取回来）→ WARN 并提示 ~BT~fetch-depth: 0~BT~，为 false（对象确实不在克隆里）→ FAIL；对象存在但 ~BT~merge-base --is-ancestor~BT~ 为假 → FAIL（记录的是另一条血统）；可达 → PASS。
+这条 SDK pin 并没能单独修好第一件事：钉住后的首次 CI（`16f40a46`，run 41079426815）里 `sdk-pin-matches-report` 与 `sbom-source-revision` 都 PASS，`sbom-inventory` 仍 FAIL（CI 28 / SBOM 29，差 `System.Reflection.Metadata@1.6.0`）。真正决定这个包在不在图里的是**机器上有没有修剪数据**：CI 的 .NET 安装带 `PrunePackageData`（随 targeting pack 提供）而会剪掉框架自带的包；本机安装没有 `packs/` 目录、框架引用改经 NuGet 解析、没有这份数据因而不剪；两边 SDK 版本相同也照样分叉。
 
-负向对照：把 ~BT~global.json~BT~ 的 pin 改成 10.0.403 → 恰好 1 红（~BT~sdk-pin-matches-report~BT~）；报告副本的 ~BT~tooling.dotnet~BT~ 改成 10.0.403 → 恰好 1 红；改成 ~BT~unknown~BT~ → 0 红 2 警；SBOM 副本的来源提交改成一个用 ~BT~git commit-tree~BT~ 造出来的悬空提交（对象存在但不在 HEAD 谱系）→ 恰好 1 红（~BT~sbom-source-revision~BT~）。
+因此 W34 在 `windows/Directory.Build.props` 直接关掉修剪：`<RestoreEnablePackagePruning>false</RestoreEnablePackagePruning>`。修剪只是发布体积优化，关掉之后还原图（以及由它派生的 SBOM 与许可报告）在任何机器上都相同；原先的 `AllowMissingPrunePackageData` 保留。
+
+`sbom-source-revision` 同时改成四分支：属性缺失 / 值里读不出提交 / 机器上没有 git → WARN；`git cat-file -e <sha>^{commit}` 失败时再看 `git rev-parse --is-shallow-repository`，为 true（浅克隆，对象根本没取回来）→ WARN 并提示 `fetch-depth: 0`，为 false（对象确实不在克隆里）→ FAIL；对象存在但 `merge-base --is-ancestor` 为假 → FAIL（记录的是另一条血统）；可达 → PASS。
+
+负向对照：把 `global.json` 的 pin 改成 10.0.403 → 恰好 1 红（`sdk-pin-matches-report`）；报告副本的 `tooling.dotnet` 改成 10.0.403 → 恰好 1 红；改成 `unknown` → 0 红 2 警；SBOM 副本的来源提交改成用 `git commit-tree` 造出来的悬空提交（对象存在但不在 HEAD 谱系）→ 恰好 1 红（`sbom-source-revision`）；浅克隆（`git clone --depth 1` 后跑核对器）→ 同一检查 WARN、退出码 0，`git fetch --unshallow` 后回到 PASS。
 
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
@@ -115,23 +119,25 @@ check-licence-surface  RESULT: PASS
 
 报告由 `license-report.ps1 -OutDir D:/mh-verify/w32m-license -SkipDocs` 当场跑出（`projects=13 rows=49 packages=29 violations=0 warnings=4`）；本机 sln 级 `dotnet restore` 不可用（`NuGet.targets(780,5) Value cannot be null`），按 CI 的做法单工程 restore `MediaHub.EngineProbe` / `MediaHub.ResumeProbe` 补齐 `project.assets.json` 后报告才是完整的 13 工程（否则 `projects` 偏少并自判 INCOMPLETE）。
 
-### 4.2 实测（2026-10-30，W33，本机改动 + HEAD 13fad6b8）
+### 4.2 实测（2026-10-30，W33 + W34，本机）
 
-~BT~~BT~~BT~text
+```text
 license-report  dotnet=10.0.113  pwsh=7.6.9
 license-report  projects=13  rows=49  packages=29  violations=0  warnings=3
 
 check-licence-surface  checks=25 failed=0 warnings=1 skipped=0
 check-licence-surface  PASS  sbom-inventory  29 resolved package(s) recorded one for one in the SBOM (29 pkg:nuget components)
 check-licence-surface  PASS  sbom-inventory-licences  every recorded licence expression still matches the resolved graph (29 rows)
-check-licence-surface  PASS  sbom-source-revision  generated from feature/windows-client@1c30471, an ancestor of HEAD (13fad6b84352) - ...
+check-licence-surface  PASS  sbom-source-revision  generated from feature/windows-client@1c30471, an ancestor of HEAD (16f40a46df56) - the inventory above is what matters; regenerate to refresh the recorded revision
 check-licence-surface  PASS  sdk-pin-matches-report  the report was produced by the pinned SDK 10.0.113
 check-licence-surface  RESULT: PASS
-~BT~~BT~~BT~
+```
 
-~BT~warnings=3~BT~ 比 §4 多，是因为这一版报告把 ~BT~Microsoft.Windows.SDK.BuildTools@10.0.26100.4654~BT~ 与 ~BT~xunit.abstractions@2.0.3~BT~ 只拿到 ~BT~licenseUrl~BT~（另有一条同类记录），属许可来源缺口而非库存漂移。报告由本机 10.0.113 生成，与 ~BT~global.json~BT~ 的 pin 一致；~BT~sbom-inventory~BT~ 的 29 对 29 说明入库 SBOM 无需重新生成——W33 让「它必须继续新鲜」这件事在 CI 里可判定。
+`warnings=3` 比 §4 多，是因为这一版报告把 `Microsoft.Windows.SDK.BuildTools@10.0.26100.4654` 与 `xunit.abstractions@2.0.3` 只拿到 `licenseUrl`（另有一条同类记录），属许可来源缺口而非库存漂移。`packages=29` 正是关闭修剪后的图；入库 SBOM 与之逐条相同，因此无需重新生成——W32 的库存检查、W33 的 pin 检查与 W34 的关修剪合起来，让「它必须继续新鲜」这件事在 CI 里可判定。
 
-有一条强度差异必须写明：CI 的 checkout 是完整克隆（~BT~fetch-depth: 0~BT~）时，来源提交判定是硬门（FAIL）；浅克隆里该对象不存在，同一检查只给 WARN。这条检查的强度取决于克隆深度，仓库 CI 已把它设成硬门形态。
+CI 侧的第一手证据（`16f40a46`，run 41079426815，step「Licence surface guard」）：`FAIL sbom-inventory the SBOM is stale: 0 resolved package(s) missing [], 1 recorded but no longer resolved [pkg:nuget/System.Reflection.Metadata@1.6.0]`，同时 `PASS sbom-source-revision`（`fetch-depth: 0` 生效）与 `PASS sdk-pin-matches-report the report was produced by the pinned SDK 10.0.113`——这组行正是上面诊断的现场。
+
+有一条强度差异必须写明：CI 的 checkout 是完整克隆（`fetch-depth: 0`）时，来源提交判定是硬门（FAIL）；浅克隆里该对象不存在，同一检查只给 WARN。这条检查的强度取决于克隆深度，仓库 CI 已把它设成硬门形态。
 
 ## 5. 这个工具**不**覆盖什么
 
