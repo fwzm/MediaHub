@@ -11,14 +11,15 @@
     "  a method must also still report at least this many cases; equal totals, equal class counts",
     "  and an unchanged method list are red when a data row moved between two theories of one",
     "  class.",
-    "  a method that carries argument text in its display name also pins a digest of those rows:",
-    "  equal totals, class counts, method lists and case counts are red when two rows swapped",
-    "  values or one row's values were replaced. Only the digest is stored, never the text.",
+    "  a method that carries argument text in its display name also pins those rows: equal totals,",
+    "  class counts, method lists and case counts are red when one row's values were replaced, even",
+    "  when a new row was added in the same edit. Rows are stored sorted, duplicates kept.",
     "Why not just raise a hard-coded floor: that only moves the same rot to the next person.",
     "A committed baseline shows up in review as a diff and can be git-blamed.",
     "Refresh (never to turn a red gate green): windows/tools/update-test-suite-baseline.ps1",
     "ASCII only on purpose: PowerShell 5.1 Get-Content decodes BOM-less UTF-8 as ANSI and corrupts",
-    "non-ASCII text, which breaks ConvertFrom-Json. Keep this file pure ASCII."
+    "non-ASCII text, which breaks ConvertFrom-Json. Keep this file pure ASCII; non-ASCII argument",
+    "rows are stored as \\\\uXXXX escapes, which ConvertFrom-Json turns back into the original text."
   ],
   "suites": [
     {
@@ -2006,106 +2007,621 @@
         }
       },
       "data": {
-        "MediaHub.Tests.ArchiveEncryptionTests.EmptyPassphrases_AreRejected": "2e9c36e195fcbedd",
-        "MediaHub.Tests.ArchiveEncryptionTests.WeakPassphrases_AreRejected": "f820a2b0c39aee27",
-        "MediaHub.Tests.BackupContainerTests.The_url_guard_rejects_credentials_and_malformed_addresses": "66694be42718d434",
-        "MediaHub.Tests.BackupDeleteTests.DestinationsThatAreNotASingleHttpFileAreRefusedBeforeAnyRequest": "b8208dbe8ee8cf06",
-        "MediaHub.Tests.BackupRestorePlannerTests.A_local_progress_row_at_least_as_new_as_the_backup_row_wins": "29af6e2b89ea0aea",
-        "MediaHub.Tests.ContinueWatchingMockFidelityTests.A_non_recursive_query_with_no_parent_answers_with_the_library_folders": "8899193cfcd6b660",
-        "MediaHub.Tests.ContinueWatchingWireTests.A_non_positive_limit_returns_nothing_and_asks_nothing": "c2eac0555e14c87b",
-        "MediaHub.Tests.ContinueWatchingWireTests.Continue_watching_asks_for_resumable_items_recursively": "8899193cfcd6b660",
-        "MediaHub.Tests.CredentialVaultTests.A_vault_without_the_required_structure_is_corrupt": "5c3afc878b76f719",
-        "MediaHub.Tests.EpisodeAutoAdvanceTests.The_episode_after_a_season_finale_is_the_first_episode_of_the_next_season": "8899193cfcd6b660",
-        "MediaHub.Tests.EpisodeRouteFidelityTests.The_episode_route_is_authenticated_like_every_other_route": "8899193cfcd6b660",
-        "MediaHub.Tests.FavoriteMappingTests.IsFavorite_maps_onto_the_domain_flag": "8a865d435e2cfe2f",
-        "MediaHub.Tests.FavoriteMockFidelityTests.The_Favorites_spelling_is_404_because_both_servers_answer_it_alone": "8899193cfcd6b660",
-        "MediaHub.Tests.FileLocalSourceStoreTests.Load_CorruptFileIsReportedAndNeverOverwritten": "0b5ced7518e1e535",
-        "MediaHub.Tests.FileLocalSourceStoreTests.Save_BlankServerIdIsRejected": "45e36f6429f14e87",
-        "MediaHub.Tests.LocalProviderTests.Language_suffix_parsing": "45b4a41d5d25959c",
-        "MediaHub.Tests.LocalProviderTests.Unc_paths_are_detected_as_remote": "5b74fad446f3c7ea",
-        "MediaHub.Tests.LoggingDisclosureTests.Provider_requests_are_not_written_to_the_log_service": "8899193cfcd6b660",
-        "MediaHub.Tests.MediaBrowserMapperTests.Bluray_iso_items_are_skipped": "e01242f6c7d7b9e2",
-        "MediaHub.Tests.MediaBrowserMapperTests.Server_type_names_map_to_unified_types": "d2b341f4c04cabf9",
-        "MediaHub.Tests.MediaBrowserTokenPlacementTests.Built_media_urls_never_embed_the_token_or_the_user_id": "8899193cfcd6b660",
-        "MediaHub.Tests.MediaBrowserTokenPlacementTests.No_provider_request_carries_the_token_in_the_query_string": "8899193cfcd6b660",
-        "MediaHub.Tests.MediaBrowserTokenPlacementTests.The_token_does_travel_in_a_header_so_the_assertion_is_not_vacuous": "8899193cfcd6b660",
-        "MediaHub.Tests.MediaPathInputTests.A_relative_path_is_rejected": "a561ebacc087cdf5",
-        "MediaHub.Tests.MediaPathInputTests.Empty_input_is_rejected": "b301d3a1541eeffc",
-        "MediaHub.Tests.MediaPathInputTests.Only_media_extensions_are_accepted": "187dbe9f7a93c020",
-        "MediaHub.Tests.OriginScopedCredentialHandlerTests.A_cross_origin_hop_drops_every_identity_header": "cc58422215afa26d",
-        "MediaHub.Tests.OriginScopedCredentialHandlerTests.Downgrade_detection_is_exactly_https_to_http": "27c111746e33e3e4",
-        "MediaHub.Tests.OriginScopedCredentialHandlerTests.Every_provider_token_header_is_sensitive": "de47ece9c5ba559b",
-        "MediaHub.Tests.OriginScopedCredentialHandlerTests.Non_identity_headers_are_not_treated_as_sensitive": "a331d61bd7ebf62a",
-        "MediaHub.Tests.PairingCodeAndPresenterTests.Code_RefusesAnEmptyPaste": "e809a483f4db29c0",
-        "MediaHub.Tests.PairingContractTests.PairingPayloadCodec_AcceptsPlainPrivateAddresses": "69d401c4fe1510a0",
-        "MediaHub.Tests.PairingContractTests.PairingPayloadCodec_RejectsBadUrl": "712e9e7ee1376b98",
-        "MediaHub.Tests.PairingContractTests.PairingPayloadCodec_RejectsMalformedJson": "e451474e03b73e57",
-        "MediaHub.Tests.PairingContractTests.PairingPayloadCodec_RejectsMissingRequiredField": "080f58deeda2d935",
-        "MediaHub.Tests.PairingContractTests.PairingPayloadCodec_RejectsUnsupportedVersion": "c451f1b91435a056",
-        "MediaHub.Tests.PairingContractTests.PairingSession_Fail_KeepsTheStableReason": "f00c837d87462f8d",
-        "MediaHub.Tests.PairingLinkAdversarialTests.A_malformed_code_is_refused_with_a_stable_reason": "bf597b25f942132e",
-        "MediaHub.Tests.PairingLinkAdversarialTests.A_payload_missing_a_required_field_is_refused": "a2b0f68382c79bf5",
-        "MediaHub.Tests.PairingLinkAdversarialTests.A_payload_whose_address_is_not_a_bare_http_url_is_refused": "b99c47db2c7e1353",
-        "MediaHub.Tests.PlaybackInfoShapeTests.PlaybackInfo_carries_the_session_id_at_the_root": "8899193cfcd6b660",
-        "MediaHub.Tests.PlaybackSessionPolicyTests.Illegal_transitions_are_refused": "2c139e7fe05babd4",
-        "MediaHub.Tests.PlaybackSessionPolicyTests.Legal_transitions_are_allowed": "0f9745e7ce927c69",
-        "MediaHub.Tests.PlaybackSessionPolicyTests.Only_transient_failures_are_retried": "1d67886d686517df",
-        "MediaHub.Tests.RedactionTests.Credential_query_values_are_masked": "744c26412ef3d0ed",
-        "MediaHub.Tests.RedactionTests.Header_values_are_masked": "037eaf5b836b7927",
-        "MediaHub.Tests.RedirectCredentialTests.Downgrade_detection": "a6a17f22731975e9",
-        "MediaHub.Tests.ResumeFloorClientViewTests.A_below_floor_stop_leaves_the_client_with_no_resume_row": "8899193cfcd6b660",
-        "MediaHub.Tests.ResumeFloorClientViewTests.A_finished_title_leaves_the_client_resume_list": "8899193cfcd6b660",
-        "MediaHub.Tests.ResumeFloorClientViewTests.A_server_that_holds_no_position_gives_the_client_no_rows": "8899193cfcd6b660",
-        "MediaHub.Tests.ResumeFloorClientViewTests.The_client_reads_back_exactly_the_position_it_reported": "8899193cfcd6b660",
-        "MediaHub.Tests.ResumeFloorMockFidelityTests.A_below_floor_report_erases_a_position_the_server_already_held": "8899193cfcd6b660",
-        "MediaHub.Tests.ResumeFloorMockFidelityTests.A_position_at_the_floor_is_stored_exactly": "fbd887535257ffa4",
-        "MediaHub.Tests.ResumeFloorMockFidelityTests.A_position_below_the_floor_clears_the_position_without_marking_it_watched": "8899193cfcd6b660",
-        "MediaHub.Tests.ResumeFloorMockFidelityTests.A_position_within_ten_seconds_of_the_end_counts_as_finished": "8899193cfcd6b660",
-        "MediaHub.Tests.ResumeFloorMockFidelityTests.A_stop_without_a_position_is_read_as_watched_to_the_end": "8899193cfcd6b660",
-        "MediaHub.Tests.ResumeFloorMockFidelityTests.A_title_shorter_than_the_minimum_duration_never_keeps_a_resume_point": "8899193cfcd6b660",
-        "MediaHub.Tests.ResumeFloorMockFidelityTests.Finishing_a_title_clears_the_position_and_marks_it_watched": "8899193cfcd6b660",
-        "MediaHub.Tests.ResumeFloorMockFidelityTests.Starting_playback_does_not_erase_the_resume_point_it_is_about_to_use": "8899193cfcd6b660",
-        "MediaHub.Tests.ResumeFloorMockFidelityTests.The_floor_applies_to_reports_only_not_to_the_state_a_test_seeds": "8899193cfcd6b660",
-        "MediaHub.Tests.ResumeFloorMockFidelityTests.The_played_items_reset_route_puts_a_title_back_to_never_played": "8899193cfcd6b660",
-        "MediaHub.Tests.ServerUrlNormalizerSecurityTests.A_non_http_scheme_is_refused_and_only_the_scheme_is_echoed": "4967650f988b4951",
-        "MediaHub.Tests.ServerUrlNormalizerSecurityTests.An_accepted_address_carries_no_user_info_query_or_fragment": "fdd4069436cbd4db",
-        "MediaHub.Tests.ServerUrlNormalizerSecurityTests.An_address_with_user_info_is_refused_without_echoing_it": "101ce28b73979d03",
-        "MediaHub.Tests.ServerUrlNormalizerSecurityTests.Query_and_fragment_are_refused_without_echoing_them": "d79a40600c13c298",
-        "MediaHub.Tests.ServerUrlNormalizerTests.Emby_addresses_normalise": "a842f801dad32f81",
-        "MediaHub.Tests.ServerUrlNormalizerTests.Jellyfin_addresses_normalise": "a852fd98d67f1afd",
-        "MediaHub.Tests.ServerUrlNormalizerTests.Missing_input_is_refused_with_its_own_reason": "ff08fb730a2ca107",
-        "MediaHub.Tests.ServerUrlNormalizerTests.Normalising_a_display_text_again_is_stable": "52ec2fc01620d4a2",
-        "MediaHub.Tests.ServerUrlNormalizerTests.Unusable_input_is_refused_with_a_specific_reason": "ce0aa93ff1eeb776",
-        "MediaHub.Tests.SourceSyncApprovalGateTests.ActionsThatWriteNothingStaySkippedEvenWhenAllowed": "065e1733a25bcf0e",
-        "MediaHub.Tests.SourceSyncApprovalGateTests.NeverAllowableReasonsAreWithheldEvenWhenAllowed": "3d4477375da4b54c",
-        "MediaHub.Tests.SourceSyncApprovalGateTests.RiskyReasonsAreAllowableWithAnAcknowledgedRisk": "606aa4f4f2ac3339",
-        "MediaHub.Tests.SourceSyncBaselineCodecTests.Deserialize_RejectsUnusableDocuments": "aadc7b447c65659a",
-        "MediaHub.Tests.SourceSyncContractTests.Planner_KeepsUnsupportedTypes": "a4e4e7cfe93ef6ac",
-        "MediaHub.Tests.SourceSyncContractTests.SourceSyncCodec_ReportsMissingSourceField": "145f12ba1aeff329",
-        "MediaHub.Tests.SourceSyncContractTests.SourceSyncCodec_ReportsMissingTopLevelField": "f6cad0d4845e7537",
-        "MediaHub.Tests.SourceSyncContractTests.SyncSourceTypes_IsKnown_TrimsAndIgnoresCase": "e9649b14de2a587e",
-        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_AddsDefaultPorts": "602938d2828a23b0",
-        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_DropsQueryFragmentAndUserInfo": "ac1e8f72c3d47da5",
-        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_IsIdempotent": "99dfe07ad839308f",
-        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_KeepsNonHttpSchemesWithoutInventingPorts": "fd418591f9d0768e",
-        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_LowercasesSchemeAndHostButKeepsPath": "178446ebafdad25e",
-        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_RejectsWhatItCannotDial": "55c349e75995ca44",
-        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_StripsTrailingSlashes": "58810058608fbafc",
-        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_UnifiesWindowsAndAndroidSpellings": "1e0e1fdc258a360f",
-        "MediaHub.Tests.SourceSyncContractTests.WindowsSourceTypeMap_AndroidOnlyValues_AreKnownButNotSupported": "ca342ed870a9a706",
-        "MediaHub.Tests.SourceSyncExplicitHostTests.Consent_DoesNotChangeAnyLoopbackSpelling": "c8b7d5d6c1277863",
-        "MediaHub.Tests.SourceSyncExplicitHostTests.WithConsent_AHostNameIsStillRefusedBecauseNothingResolvesIt": "9b1213e46f8b69a9",
-        "MediaHub.Tests.SourceSyncExplicitHostTests.WithConsent_AWildcardIsStillRefusedAndTheSentenceSaysSo": "c25188adc8398739",
-        "MediaHub.Tests.SourceSyncExplicitHostTests.WithConsent_MulticastIsStillRefused": "2a27a4dc19fc48d6",
-        "MediaHub.Tests.SourceSyncExplicitHostTests.WithConsent_OneUnicastLiteralIsAccepted": "e1601231fd7649e5",
-        "MediaHub.Tests.SourceSyncExplicitHostTests.WithConsent_TheReservedRangesAreStillRefused": "49f3ad4681e96872",
-        "MediaHub.Tests.SourceSyncTransferAdversarialTests.A_frame_that_declares_an_unusable_length_is_refused_without_buffering": "974512e410993b7d",
-        "MediaHub.Tests.SyncCliBudgetTests.Out_of_range_and_non_numeric_budgets_are_usage_errors": "bc660e677c8721ce",
-        "MediaHub.Tests.SyncCliRootAdversarialTests.Every_read_command_is_happy_with_a_root_that_does_not_exist": "13e4b22989673058",
-        "MediaHub.Tests.SyncCliTests.ClassifyReason_MapsFailuresToDocumentedExitCodes": "d195757f964f08c9",
-        "MediaHub.Tests.SyncCliTests.Parse_RejectsMalformedCommandLinesWithStableCodes": "f5c188d4a82b833e",
-        "MediaHub.Tests.SyncDeviceRegistryTests.Register_RejectsABlankDeviceId": "6bddf1fcfdba0483",
-        "MediaHub.Tests.SyncTransferReceiptPresenterTests.Describe_reason_explains_each_receipt_code": "7853d53d21e5f6e7"
+        "MediaHub.Tests.ArchiveEncryptionTests.EmptyPassphrases_AreRejected": [
+          "(passphrase: \"            \")",
+          "(passphrase: \"\")",
+          "(passphrase: null)"
+        ],
+        "MediaHub.Tests.ArchiveEncryptionTests.WeakPassphrases_AreRejected": [
+          "(passphrase: \"123456789012\")",
+          "(passphrase: \"Qwertyuiop123\")",
+          "(passphrase: \"aaaaaaaaaaaa\")",
+          "(passphrase: \"password1234\")"
+        ],
+        "MediaHub.Tests.BackupContainerTests.The_url_guard_rejects_credentials_and_malformed_addresses": [
+          "(url: \"   \", expected: \"(URL \u683c\u5f0f)\")",
+          "(url: \"ftp://host/base\", expected: \"(URL \u683c\u5f0f)\")",
+          "(url: \"https://host/base?%61pi_key=abc\", expected: \"api_key\")",
+          "(url: \"https://host/base?X-Emby-Token=abc\", expected: \"x-emby-token\")",
+          "(url: \"https://host/base?token=abc\", expected: \"token\")",
+          "(url: \"https://user:pass@host/base?x=1\", expected: \"userinfo\")"
+        ],
+        "MediaHub.Tests.BackupDeleteTests.DestinationsThatAreNotASingleHttpFileAreRefusedBeforeAnyRequest": [
+          "(url: \"file:///D:/backups/media.mhbackup\", expected: \"\u5220\u9664\u5730\u5740\u5fc5\u987b\u662f http \u6216 https\")",
+          "(url: \"https://dav.example/backups/\", expected: \"\u5220\u9664\u5730\u5740\u6307\u5411\u7684\u662f\u76ee\u5f55\uff1a\u672c\u5de5\u5177\u4e0d\u5220\u96c6\u5408\")"
+        ],
+        "MediaHub.Tests.BackupRestorePlannerTests.A_local_progress_row_at_least_as_new_as_the_backup_row_wins": [
+          "(localUpdated: 2000)",
+          "(localUpdated: 3000)"
+        ],
+        "MediaHub.Tests.ContinueWatchingMockFidelityTests.A_non_recursive_query_with_no_parent_answers_with_the_library_folders": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ContinueWatchingWireTests.A_non_positive_limit_returns_nothing_and_asks_nothing": [
+          "(limit: -1)",
+          "(limit: 0)"
+        ],
+        "MediaHub.Tests.ContinueWatchingWireTests.Continue_watching_asks_for_resumable_items_recursively": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.CredentialVaultTests.A_vault_without_the_required_structure_is_corrupt": [
+          "(content: \"{\\\"entries\\\":[]}\")",
+          "(content: \"{\\\"version\\\":0,\\\"entries\\\":[]}\")",
+          "(content: \"{\\\"version\\\":1,\\\"entries\\\":null}\")",
+          "(content: \"{\\\"version\\\":1}\")"
+        ],
+        "MediaHub.Tests.EpisodeAutoAdvanceTests.The_episode_after_a_season_finale_is_the_first_episode_of_the_next_season": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.EpisodeRouteFidelityTests.The_episode_route_is_authenticated_like_every_other_route": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.FavoriteMappingTests.IsFavorite_maps_onto_the_domain_flag": [
+          "(json: \"{ \\\"Id\\\": \\\"x\\\", \\\"UserData\\\": { \\\"IsFavorite\\\": f\"\u00b7\u00b7\u00b7, expected: False)",
+          "(json: \"{ \\\"Id\\\": \\\"x\\\", \\\"UserData\\\": { \\\"IsFavorite\\\": t\"\u00b7\u00b7\u00b7, expected: True)"
+        ],
+        "MediaHub.Tests.FavoriteMockFidelityTests.The_Favorites_spelling_is_404_because_both_servers_answer_it_alone": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.FileLocalSourceStoreTests.Load_CorruptFileIsReportedAndNeverOverwritten": [
+          "(payload: \"\")",
+          "(payload: \"[ { \\\"serverId\\\": 3 } ]\")",
+          "(payload: \"null\")",
+          "(payload: \"{ \\\"sources\\\": [\")"
+        ],
+        "MediaHub.Tests.FileLocalSourceStoreTests.Save_BlankServerIdIsRejected": [
+          "(serverId: \"   \")",
+          "(serverId: \"\")"
+        ],
+        "MediaHub.Tests.LocalProviderTests.Language_suffix_parsing": [
+          "(fileNameWithoutExtension: \"alpha\", stem: \"alpha\", expected: null)",
+          "(fileNameWithoutExtension: \"alpha.chi\", stem: \"alpha\", expected: \"chi\")",
+          "(fileNameWithoutExtension: \"alpha.eng.forced\", stem: \"alpha\", expected: \"eng\")",
+          "(fileNameWithoutExtension: \"alpha.forced\", stem: \"alpha\", expected: null)",
+          "(fileNameWithoutExtension: \"alpha.sdh\", stem: \"alpha\", expected: null)",
+          "(fileNameWithoutExtension: \"alpha_zh-Hans\", stem: \"alpha\", expected: \"zh-Hans\")"
+        ],
+        "MediaHub.Tests.LocalProviderTests.Unc_paths_are_detected_as_remote": [
+          "(path: \"D:\\\\media\\\\movie.mkv\", expected: False)",
+          "(path: \"\\\\\\\\server\\\\share\\\\movie.mkv\", expected: True)"
+        ],
+        "MediaHub.Tests.LoggingDisclosureTests.Provider_requests_are_not_written_to_the_log_service": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.MediaBrowserMapperTests.Bluray_iso_items_are_skipped": [
+          "(path: \"/media/x.ISO\", expected: True)",
+          "(path: \"/media/x.iso\", expected: True)",
+          "(path: \"/media/x.iso?api_key=zzz\", expected: True)",
+          "(path: \"/media/x.mkv\", expected: False)",
+          "(path: \"/media/x.mp4\", expected: False)"
+        ],
+        "MediaHub.Tests.MediaBrowserMapperTests.Server_type_names_map_to_unified_types": [
+          "(wire: \"Audio\", expected: Audio)",
+          "(wire: \"CollectionFolder\", expected: Folder)",
+          "(wire: \"Episode\", expected: Episode)",
+          "(wire: \"Folder\", expected: Folder)",
+          "(wire: \"Movie\", expected: Movie)",
+          "(wire: \"Season\", expected: Season)",
+          "(wire: \"Series\", expected: Series)",
+          "(wire: \"SomethingNew\", expected: Other)",
+          "(wire: \"Video\", expected: Video)"
+        ],
+        "MediaHub.Tests.MediaBrowserTokenPlacementTests.Built_media_urls_never_embed_the_token_or_the_user_id": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.MediaBrowserTokenPlacementTests.No_provider_request_carries_the_token_in_the_query_string": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.MediaBrowserTokenPlacementTests.The_token_does_travel_in_a_header_so_the_assertion_is_not_vacuous": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.MediaPathInputTests.A_relative_path_is_rejected": [
+          "(input: \"..\\\\movie.mp4\")",
+          "(input: \"./movie.mp4\")",
+          "(input: \"movie.mp4\")",
+          "(input: \"videos\\\\movie.mp4\")"
+        ],
+        "MediaHub.Tests.MediaPathInputTests.Empty_input_is_rejected": [
+          "(input: \"   \")",
+          "(input: \"\")",
+          "(input: \"\\\"\\\"\")",
+          "(input: null)"
+        ],
+        "MediaHub.Tests.MediaPathInputTests.Only_media_extensions_are_accepted": [
+          "(name: \"a\", expected: False)",
+          "(name: \"a.MKV\", expected: True)",
+          "(name: \"a.dll\", expected: False)",
+          "(name: \"a.exe\", expected: False)",
+          "(name: \"a.flac\", expected: True)",
+          "(name: \"a.mkv\", expected: True)",
+          "(name: \"a.mp4\", expected: True)",
+          "(name: \"a.mp4.exe\", expected: False)",
+          "(name: \"a.txt\", expected: False)"
+        ],
+        "MediaHub.Tests.OriginScopedCredentialHandlerTests.A_cross_origin_hop_drops_every_identity_header": [
+          "(target: \"http://127.0.0.1:5000:5001/b\")",
+          "(target: \"http://127.0.0.1:5001/b\")",
+          "(target: \"http://b.a.example/b\")",
+          "(target: \"http://localhost:5000/b\")",
+          "(target: \"http://user:pass@127.0.0.1:5001/b\")",
+          "(target: \"https://127.0.0.1:5000/b\")"
+        ],
+        "MediaHub.Tests.OriginScopedCredentialHandlerTests.Downgrade_detection_is_exactly_https_to_http": [
+          "(from: \"http://example.com/a\", to: \"http://example.com/b\", expected: False)",
+          "(from: \"http://example.com/a\", to: \"https://example.com/a\", expected: False)",
+          "(from: \"https://example.com/a\", to: \"http://example.com/a\", expected: True)",
+          "(from: \"https://example.com/a\", to: \"https://example.com/b\", expected: False)"
+        ],
+        "MediaHub.Tests.OriginScopedCredentialHandlerTests.Every_provider_token_header_is_sensitive": [
+          "(name: \"AUTHORIZATION\")",
+          "(name: \"Authorization\")",
+          "(name: \"Cookie\")",
+          "(name: \"Proxy-Authorization\")",
+          "(name: \"X-Emby-Authorization\")",
+          "(name: \"X-Emby-Token\")",
+          "(name: \"X-MediaBrowser-Authorization\")",
+          "(name: \"X-MediaBrowser-Token\")",
+          "(name: \"authorization\")"
+        ],
+        "MediaHub.Tests.OriginScopedCredentialHandlerTests.Non_identity_headers_are_not_treated_as_sensitive": [
+          "(name: \"Accept\")",
+          "(name: \"Range\")",
+          "(name: \"User-Agent\")",
+          "(name: \"X-PlaySessionId\")"
+        ],
+        "MediaHub.Tests.PairingCodeAndPresenterTests.Code_RefusesAnEmptyPaste": [
+          "(code: \"   \")",
+          "(code: \"\")",
+          "(code: \"\\r\\n\\t\")"
+        ],
+        "MediaHub.Tests.PairingContractTests.PairingPayloadCodec_AcceptsPlainPrivateAddresses": [
+          "(url: \"http://127.0.0.1:51234/\")",
+          "(url: \"http://192.168.1.20:51234/\")",
+          "(url: \"https://10.0.0.5:51234/pairing\")"
+        ],
+        "MediaHub.Tests.PairingContractTests.PairingPayloadCodec_RejectsBadUrl": [
+          "(url: \"/pairing\")",
+          "(url: \"127.0.0.1:51234\")",
+          "(url: \"file:///C:/pairing\")",
+          "(url: \"ftp://127.0.0.1:51234/\")",
+          "(url: \"http:///pairing\")",
+          "(url: \"http://127.0.0.1:51234/#token\")",
+          "(url: \"http://127.0.0.1:51234/?token=abc\")",
+          "(url: \"http://user:password@127.0.0.1:51234/\")"
+        ],
+        "MediaHub.Tests.PairingContractTests.PairingPayloadCodec_RejectsMalformedJson": [
+          "(json: \"   \")",
+          "(json: \"\")",
+          "(json: \"[]\")",
+          "(json: \"\\\"device-a\\\"\")",
+          "(json: \"null\")",
+          "(json: \"{\")"
+        ],
+        "MediaHub.Tests.PairingContractTests.PairingPayloadCodec_RejectsMissingRequiredField": [
+          "(field: \"challenge\")",
+          "(field: \"deviceId\")",
+          "(field: \"ephemeralUrl\")",
+          "(field: \"expiresAtEpochMs\")",
+          "(field: \"publicKeyFingerprint\")",
+          "(field: \"schemaVersion\")"
+        ],
+        "MediaHub.Tests.PairingContractTests.PairingPayloadCodec_RejectsUnsupportedVersion": [
+          "(schemaVersion: 0)",
+          "(schemaVersion: 2)",
+          "(schemaVersion: 99)"
+        ],
+        "MediaHub.Tests.PairingContractTests.PairingSession_Fail_KeepsTheStableReason": [
+          "(code: \"bad-challenge\")",
+          "(code: \"bad-fingerprint\")",
+          "(code: \"bad-url\")",
+          "(code: \"challenge-mismatch\")",
+          "(code: \"challenge-replayed\")",
+          "(code: \"expired\")",
+          "(code: \"unsupported-version\")"
+        ],
+        "MediaHub.Tests.PairingLinkAdversarialTests.A_malformed_code_is_refused_with_a_stable_reason": [
+          "(code: \"!!!!\", expectedReason: \"not-base64url\")",
+          "(code: \"\", expectedReason: \"code-empty\")",
+          "(code: \"A\", expectedReason: \"not-base64url\")",
+          "(code: \"AAAA\", expectedReason: \"payload-invalid\")"
+        ],
+        "MediaHub.Tests.PairingLinkAdversarialTests.A_payload_missing_a_required_field_is_refused": [
+          "(removed: \"challenge\")",
+          "(removed: \"deviceId\")",
+          "(removed: \"ephemeralUrl\")",
+          "(removed: \"expiresAtEpochMs\")",
+          "(removed: \"publicKeyFingerprint\")",
+          "(removed: \"schemaVersion\")"
+        ],
+        "MediaHub.Tests.PairingLinkAdversarialTests.A_payload_whose_address_is_not_a_bare_http_url_is_refused": [
+          "(address: \"127.0.0.1:52000\")",
+          "(address: \"ftp://127.0.0.1:52000/\")",
+          "(address: \"http:///no-host\")",
+          "(address: \"http://127.0.0.1:52000/#frag\")",
+          "(address: \"http://127.0.0.1:52000/?token=abc\")",
+          "(address: \"ws://127.0.0.1:52000/pair\")"
+        ],
+        "MediaHub.Tests.PlaybackInfoShapeTests.PlaybackInfo_carries_the_session_id_at_the_root": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.PlaybackSessionPolicyTests.Illegal_transitions_are_refused": [
+          "(from: Ended, to: Paused)",
+          "(from: Ended, to: Playing)",
+          "(from: Error, to: Buffering)",
+          "(from: Error, to: Playing)",
+          "(from: Idle, to: Buffering)",
+          "(from: Idle, to: Paused)",
+          "(from: Idle, to: Playing)"
+        ],
+        "MediaHub.Tests.PlaybackSessionPolicyTests.Legal_transitions_are_allowed": [
+          "(from: Buffering, to: Playing)",
+          "(from: Idle, to: Preparing)",
+          "(from: Paused, to: Playing)",
+          "(from: Playing, to: Ended)",
+          "(from: Playing, to: Error)",
+          "(from: Playing, to: Paused)",
+          "(from: Playing, to: Seeking)",
+          "(from: Preparing, to: Buffering)",
+          "(from: Seeking, to: Playing)"
+        ],
+        "MediaHub.Tests.PlaybackSessionPolicyTests.Only_transient_failures_are_retried": [
+          "(code: AuthExpired, expected: False)",
+          "(code: AuthFailed, expected: False)",
+          "(code: Connection, expected: True)",
+          "(code: Network, expected: True)",
+          "(code: NotFound, expected: False)",
+          "(code: Parse, expected: False)",
+          "(code: RateLimited, expected: True)"
+        ],
+        "MediaHub.Tests.RedactionTests.Credential_query_values_are_masked": [
+          "(input: \"https://media.example.com/Items?api_key=SECRET123\", secret: \"SECRET123\")",
+          "(input: \"https://media.example.com/Videos/1/stream?static=t\"\u00b7\u00b7\u00b7, secret: \"PSID999\")",
+          "(input: \"https://media.example.com/x?access_token=TOK456\", secret: \"TOK456\")",
+          "(input: \"https://media.example.com/x?password=hunter2\", secret: \"hunter2\")",
+          "(input: \"https://media.example.com/x?token=abc\", secret: \"abc\")"
+        ],
+        "MediaHub.Tests.RedactionTests.Header_values_are_masked": [
+          "(input: \"Authorization: Bearer abc123def456\", secret: \"abc123def456\")",
+          "(input: \"Cookie: sessionid=abcdef123456\", secret: \"abcdef123456\")",
+          "(input: \"Proxy-Authorization: Basic dXNlcjpwYXNz\", secret: \"dXNlcjpwYXNz\")",
+          "(input: \"X-Emby-Token: 9f8e7d6c5b4a\", secret: \"9f8e7d6c5b4a\")",
+          "(input: \"X-MediaBrowser-Token: deadbeefcafe\", secret: \"deadbeefcafe\")"
+        ],
+        "MediaHub.Tests.RedirectCredentialTests.Downgrade_detection": [
+          "(from: \"http://a.example.com/x\", to: \"https://a.example.com/y\", expected: False)",
+          "(from: \"https://a.example.com/x\", to: \"http://a.example.com/y\", expected: True)",
+          "(from: \"https://a.example.com/x\", to: \"https://b.example.com/y\", expected: False)"
+        ],
+        "MediaHub.Tests.ResumeFloorClientViewTests.A_below_floor_stop_leaves_the_client_with_no_resume_row": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ResumeFloorClientViewTests.A_finished_title_leaves_the_client_resume_list": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ResumeFloorClientViewTests.A_server_that_holds_no_position_gives_the_client_no_rows": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ResumeFloorClientViewTests.The_client_reads_back_exactly_the_position_it_reported": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ResumeFloorMockFidelityTests.A_below_floor_report_erases_a_position_the_server_already_held": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ResumeFloorMockFidelityTests.A_position_at_the_floor_is_stored_exactly": [
+          "(type: Emby, minimumPercent: 2)",
+          "(type: Jellyfin, minimumPercent: 5)"
+        ],
+        "MediaHub.Tests.ResumeFloorMockFidelityTests.A_position_below_the_floor_clears_the_position_without_marking_it_watched": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ResumeFloorMockFidelityTests.A_position_within_ten_seconds_of_the_end_counts_as_finished": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ResumeFloorMockFidelityTests.A_stop_without_a_position_is_read_as_watched_to_the_end": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ResumeFloorMockFidelityTests.A_title_shorter_than_the_minimum_duration_never_keeps_a_resume_point": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ResumeFloorMockFidelityTests.Finishing_a_title_clears_the_position_and_marks_it_watched": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ResumeFloorMockFidelityTests.Starting_playback_does_not_erase_the_resume_point_it_is_about_to_use": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ResumeFloorMockFidelityTests.The_floor_applies_to_reports_only_not_to_the_state_a_test_seeds": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ResumeFloorMockFidelityTests.The_played_items_reset_route_puts_a_title_back_to_never_played": [
+          "(type: Emby)",
+          "(type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ServerUrlNormalizerSecurityTests.A_non_http_scheme_is_refused_and_only_the_scheme_is_echoed": [
+          "(input: \"file:///C:/media\", scheme: \"file\")",
+          "(input: \"ftp://example.com/media\", scheme: \"ftp\")",
+          "(input: \"ws://example.com\", scheme: \"ws\")"
+        ],
+        "MediaHub.Tests.ServerUrlNormalizerSecurityTests.An_accepted_address_carries_no_user_info_query_or_fragment": [
+          "(input: \"127.0.0.1:8096\", type: Emby)",
+          "(input: \"http://127.0.0.1:8096\", type: Emby)",
+          "(input: \"https://media.example.com/jellyfin\", type: Jellyfin)"
+        ],
+        "MediaHub.Tests.ServerUrlNormalizerSecurityTests.An_address_with_user_info_is_refused_without_echoing_it": [
+          "(input: \"http://user:pass@127.0.0.1:8096/\", echo: \"user:pass\")",
+          "(input: \"http://user@127.0.0.1:8096/\", echo: \"user@\")",
+          "(input: \"https://token-value@example.com/emby\", echo: \"token-value\")",
+          "(input: \"user:pass@127.0.0.1:8096\", echo: \"user:pass\")"
+        ],
+        "MediaHub.Tests.ServerUrlNormalizerSecurityTests.Query_and_fragment_are_refused_without_echoing_them": [
+          "(input: \"http://127.0.0.1:8096/?X-Emby-Token=SECRET-VALUE\", echo: \"SECRET-VALUE\", expected: \"\u67e5\u8be2\u53c2\u6570\")",
+          "(input: \"http://127.0.0.1:8096/?api_key=SECRET-VALUE\", echo: \"SECRET-VALUE\", expected: \"\u67e5\u8be2\u53c2\u6570\")",
+          "(input: \"http://127.0.0.1:8096/emby#access_token=SECRET-VAL\"\u00b7\u00b7\u00b7, echo: \"SECRET-VALUE\", expected: \"\u7247\u6bb5\")"
+        ],
+        "MediaHub.Tests.ServerUrlNormalizerTests.Emby_addresses_normalise": [
+          "(input: \"  HTTPS://Media.Example.COM  \", display: \"https://media.example.com\", apiRoot: \"https://media.example.com/emby\", explicitPort: False, subPath: False)",
+          "(input: \"http://h\", display: \"http://h\", apiRoot: \"http://h/emby\", explicitPort: False, subPath: False)",
+          "(input: \"http://h:443\", display: \"http://h:443\", apiRoot: \"http://h:443/emby\", explicitPort: True, subPath: False)",
+          "(input: \"http://h:80\", display: \"http://h\", apiRoot: \"http://h/emby\", explicitPort: True, subPath: False)",
+          "(input: \"https://h\", display: \"https://h\", apiRoot: \"https://h/emby\", explicitPort: False, subPath: False)",
+          "(input: \"https://h/\", display: \"https://h\", apiRoot: \"https://h/emby\", explicitPort: False, subPath: False)",
+          "(input: \"https://h/Emby\", display: \"https://h/Emby\", apiRoot: \"https://h/Emby\", explicitPort: False, subPath: True)",
+          "(input: \"https://h/emby\", display: \"https://h/emby\", apiRoot: \"https://h/emby\", explicitPort: False, subPath: True)",
+          "(input: \"https://h/emby/\", display: \"https://h/emby\", apiRoot: \"https://h/emby\", explicitPort: False, subPath: True)",
+          "(input: \"https://h/media\", display: \"https://h/media\", apiRoot: \"https://h/media/emby\", explicitPort: False, subPath: True)",
+          "(input: \"https://h/media/\", display: \"https://h/media\", apiRoot: \"https://h/media/emby\", explicitPort: False, subPath: True)",
+          "(input: \"https://h:443\", display: \"https://h\", apiRoot: \"https://h/emby\", explicitPort: True, subPath: False)",
+          "(input: \"https://h:8920\", display: \"https://h:8920\", apiRoot: \"https://h:8920/emby\", explicitPort: True, subPath: False)",
+          "(input: \"media.example.com\", display: \"http://media.example.com\", apiRoot: \"http://media.example.com/emby\", explicitPort: False, subPath: False)",
+          "(input: \"media.example.com:8096\", display: \"http://media.example.com:8096\", apiRoot: \"http://media.example.com:8096/emby\", explicitPort: True, subPath: False)",
+          "(input: \"nas\", display: \"http://nas\", apiRoot: \"http://nas/emby\", explicitPort: False, subPath: False)"
+        ],
+        "MediaHub.Tests.ServerUrlNormalizerTests.Jellyfin_addresses_normalise": [
+          "(input: \"h\", display: \"http://h\", explicitPort: False, subPath: False)",
+          "(input: \"h/jellyfin\", display: \"http://h/jellyfin\", explicitPort: False, subPath: True)",
+          "(input: \"http://h:8096\", display: \"http://h:8096\", explicitPort: True, subPath: False)",
+          "(input: \"https://h\", display: \"https://h\", explicitPort: False, subPath: False)",
+          "(input: \"https://h/\", display: \"https://h\", explicitPort: False, subPath: False)",
+          "(input: \"https://h/jellyfin\", display: \"https://h/jellyfin\", explicitPort: False, subPath: True)",
+          "(input: \"https://h/jellyfin/\", display: \"https://h/jellyfin\", explicitPort: False, subPath: True)",
+          "(input: \"https://h:8920/jellyfin/\", display: \"https://h:8920/jellyfin\", explicitPort: True, subPath: True)"
+        ],
+        "MediaHub.Tests.ServerUrlNormalizerTests.Missing_input_is_refused_with_its_own_reason": [
+          "(input: \"   \")",
+          "(input: \"\")",
+          "(input: null)"
+        ],
+        "MediaHub.Tests.ServerUrlNormalizerTests.Normalising_a_display_text_again_is_stable": [
+          "(input: \"http://h:80\", type: Emby)",
+          "(input: \"https://h/emby/\", type: Emby)",
+          "(input: \"https://h:8920/jellyfin/\", type: Jellyfin)",
+          "(input: \"media.example.com\", type: Emby)",
+          "(input: \"media.example.com:8096\", type: Emby)"
+        ],
+        "MediaHub.Tests.ServerUrlNormalizerTests.Unusable_input_is_refused_with_a_specific_reason": [
+          "(input: \"file:///C:/media\", expectedFragment: \"http\")",
+          "(input: \"ftp://host\", expectedFragment: \"http\")",
+          "(input: \"http://\", expectedFragment: \"\u65e0\u6cd5\u89e3\u6790\")",
+          "(input: \"http:///path\", expectedFragment: \"\u65e0\u6cd5\u89e3\u6790\")",
+          "(input: \"http://host:99999\", expectedFragment: \"\u65e0\u6cd5\u89e3\u6790\")",
+          "(input: \"https://alice:hunter2@host\", expectedFragment: \"\u7528\u6237\u540d\u6216\u5bc6\u7801\")",
+          "(input: \"https://host/x#frag\", expectedFragment: \"\u7247\u6bb5\")",
+          "(input: \"https://host/x?y=1\", expectedFragment: \"\u67e5\u8be2\u53c2\u6570\")",
+          "(input: \"https://host?\", expectedFragment: \"\u67e5\u8be2\u53c2\u6570\")",
+          "(input: \"not a url\", expectedFragment: \"\u65e0\u6cd5\u89e3\u6790\")",
+          "(input: \"ws://host\", expectedFragment: \"http\")"
+        ],
+        "MediaHub.Tests.SourceSyncApprovalGateTests.ActionsThatWriteNothingStaySkippedEvenWhenAllowed": [
+          "(action: IgnoreStale)",
+          "(action: NoChange)"
+        ],
+        "MediaHub.Tests.SourceSyncApprovalGateTests.NeverAllowableReasonsAreWithheldEvenWhenAllowed": [
+          "(reason: \"not-supported-on-windows\")",
+          "(reason: \"secrets-require-approval\")",
+          "(reason: \"unknown-source-type\")"
+        ],
+        "MediaHub.Tests.SourceSyncApprovalGateTests.RiskyReasonsAreAllowableWithAnAcknowledgedRisk": [
+          "(reason: \"ambiguous-legacy-identity\")",
+          "(reason: \"ambiguous-something-new\")",
+          "(reason: \"delete-vs-update\")",
+          "(reason: \"field-conflict\")",
+          "(reason: \"same-revision-different-content\")",
+          "(reason: \"update-vs-delete\")"
+        ],
+        "MediaHub.Tests.SourceSyncBaselineCodecTests.Deserialize_RejectsUnusableDocuments": [
+          "(json: \"   \")",
+          "(json: \"\")",
+          "(json: \"[]\")",
+          "(json: \"{\")",
+          "(json: \"{\\\"entries\\\":[]}\")",
+          "(json: \"{\\\"version\\\":1,\\\"entries\\\":[{\\\"recordRevision\\\":1}\"\u00b7\u00b7\u00b7)",
+          "(json: \"{\\\"version\\\":1,\\\"entries\\\":{}}\")"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.Planner_KeepsUnsupportedTypes": [
+          "(wire: \"Contoso-Drive\", known: False)",
+          "(wire: \"fn-nas\", known: True)"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.SourceSyncCodec_ReportsMissingSourceField": [
+          "(field: \"recordRevision\")",
+          "(field: \"sourceType\")",
+          "(field: \"syncSourceId\")"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.SourceSyncCodec_ReportsMissingTopLevelField": [
+          "(field: \"createdAtEpochMs\")",
+          "(field: \"deviceId\")",
+          "(field: \"minimumReaderVersion\")",
+          "(field: \"schemaVersion\")",
+          "(field: \"snapshotId\")"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.SyncSourceTypes_IsKnown_TrimsAndIgnoresCase": [
+          "(wire: \"  EMBY  \", expected: True)",
+          "(wire: \"\", expected: False)",
+          "(wire: \"contoso-drive\", expected: False)",
+          "(wire: \"emby\", expected: True)",
+          "(wire: \"unknown\", expected: False)",
+          "(wire: \"webdav\", expected: True)",
+          "(wire: null, expected: False)"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_AddsDefaultPorts": [
+          "(input: \"//host/path\", expected: \"http://host:80/path\")",
+          "(input: \"host:8096/emby\", expected: \"http://host:8096/emby\")",
+          "(input: \"http://host/x\", expected: \"http://host:80/x\")",
+          "(input: \"https://host\", expected: \"https://host:443\")",
+          "(input: \"https://host/x\", expected: \"https://host:443/x\")"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_DropsQueryFragmentAndUserInfo": [
+          "(input: \"http://host:8096/emby?api_key=abc\", expected: \"http://host:8096/emby\")",
+          "(input: \"https://alice:secret@host:8920/a/?token=1#frag\", expected: \"https://host:8920/a\")"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_IsIdempotent": [
+          "(input: \"http://host\")",
+          "(input: \"http://host:8096/emby\")",
+          "(input: \"https://HOST/emby/\")",
+          "(input: \"smb://nas/share\")"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_KeepsNonHttpSchemesWithoutInventingPorts": [
+          "(input: \"smb://NAS/share/\", expected: \"smb://nas/share\")",
+          "(input: \"smb://nas:445/share\", expected: \"smb://nas:445/share\")"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_LowercasesSchemeAndHostButKeepsPath": [
+          "(input: \"HTTP://HOST:8096\", expected: \"http://host:8096\")",
+          "(input: \"HTTPS://Example.COM/Emby/Library\", expected: \"https://example.com:443/Emby/Library\")"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_RejectsWhatItCannotDial": [
+          "(input: \"   \")",
+          "(input: \"\")",
+          "(input: \"alice:hunter2@host:8096\")",
+          "(input: \"ftp://host/share\")",
+          "(input: \"https://\")",
+          "(input: \"mailto:alice@example.com\")",
+          "(input: \"not a url\")",
+          "(input: null)"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_StripsTrailingSlashes": [
+          "(input: \"http://host/emby/\", expected: \"http://host:80/emby\")",
+          "(input: \"https://host/\", expected: \"https://host:443\")",
+          "(input: \"https://host/a/b/\", expected: \"https://host:443/a/b\")"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.SyncUrlNormalizer_UnifiesWindowsAndAndroidSpellings": [
+          "(left: \"http://host:80/\", right: \"http://host\")",
+          "(left: \"http://host:80/?x=1\", right: \"http://host:80\")",
+          "(left: \"http://host:8096/emby/\", right: \"http://host:8096/emby\")",
+          "(left: \"https://host:443\", right: \"https://HOST/\")"
+        ],
+        "MediaHub.Tests.SourceSyncContractTests.WindowsSourceTypeMap_AndroidOnlyValues_AreKnownButNotSupported": [
+          "(wire: \"aliyun-drive\")",
+          "(wire: \"baidu-drive\")",
+          "(wire: \"china-mobile-cloud\")",
+          "(wire: \"fn-nas\")",
+          "(wire: \"quark-drive\")",
+          "(wire: \"tianyi-cloud\")"
+        ],
+        "MediaHub.Tests.SourceSyncExplicitHostTests.Consent_DoesNotChangeAnyLoopbackSpelling": [
+          "(address: \" 127.0.0.1 \")",
+          "(address: \"\")",
+          "(address: \"127.0.0.1\")",
+          "(address: \"127.0.0.2\")",
+          "(address: \"::1\")",
+          "(address: \"LOCALHOST\")",
+          "(address: \"localhost\")",
+          "(address: null)"
+        ],
+        "MediaHub.Tests.SourceSyncExplicitHostTests.WithConsent_AHostNameIsStillRefusedBecauseNothingResolvesIt": [
+          "(address: \"example.com\")",
+          "(address: \"mediahub-lan.local\")",
+          "(address: \"nas\")"
+        ],
+        "MediaHub.Tests.SourceSyncExplicitHostTests.WithConsent_AWildcardIsStillRefusedAndTheSentenceSaysSo": [
+          "(address: \"0.0.0.0\")",
+          "(address: \"0.1.2.3\")",
+          "(address: \"::\")"
+        ],
+        "MediaHub.Tests.SourceSyncExplicitHostTests.WithConsent_MulticastIsStillRefused": [
+          "(address: \"224.0.0.1\")",
+          "(address: \"239.1.2.3\")",
+          "(address: \"ff02::1\")"
+        ],
+        "MediaHub.Tests.SourceSyncExplicitHostTests.WithConsent_OneUnicastLiteralIsAccepted": [
+          "(address: \"10.0.0.7\", expectedText: \"10.0.0.7\")",
+          "(address: \"172.16.30.4\", expectedText: \"172.16.30.4\")",
+          "(address: \"192.168.1.5\", expectedText: \"192.168.1.5\")",
+          "(address: \"fd00::1\", expectedText: \"fd00::1\")"
+        ],
+        "MediaHub.Tests.SourceSyncExplicitHostTests.WithConsent_TheReservedRangesAreStillRefused": [
+          "(address: \"240.0.0.1\")",
+          "(address: \"255.255.255.254\")"
+        ],
+        "MediaHub.Tests.SourceSyncTransferAdversarialTests.A_frame_that_declares_an_unusable_length_is_refused_without_buffering": [
+          "(declaredLength: -1)",
+          "(declaredLength: 0)",
+          "(declaredLength: 2147483647)",
+          "(declaredLength: 8193)"
+        ],
+        "MediaHub.Tests.SyncCliBudgetTests.Out_of_range_and_non_numeric_budgets_are_usage_errors": [
+          "(value: \"-1\", expected: \"invalid-budget-ms:-1\")",
+          "(value: \"0\", expected: \"invalid-budget-ms:0\")",
+          "(value: \"15s\", expected: \"invalid-budget-ms:15s\")",
+          "(value: \"600001\", expected: \"invalid-budget-ms:600001\")",
+          "(value: \"99\", expected: \"invalid-budget-ms:99\")",
+          "(value: \"abc\", expected: \"invalid-budget-ms:abc\")"
+        ],
+        "MediaHub.Tests.SyncCliRootAdversarialTests.Every_read_command_is_happy_with_a_root_that_does_not_exist": [
+          "(group: \"baseline\", subcommand: \"show\")",
+          "(group: \"pair\", subcommand: \"list\")"
+        ],
+        "MediaHub.Tests.SyncCliTests.ClassifyReason_MapsFailuresToDocumentedExitCodes": [
+          "(reason: \"\", expected: 2)",
+          "(reason: \"corrupt-header\", expected: 4)",
+          "(reason: \"dpapi-unprotect-failed\", expected: 4)",
+          "(reason: \"missing-field:deviceId\", expected: 2)",
+          "(reason: \"new-source\", expected: 2)",
+          "(reason: \"secrets-require-protector\", expected: 4)",
+          "(reason: \"unknown-kdf:argon2id\", expected: 4)",
+          "(reason: \"unsupported-version:2\", expected: 4)",
+          "(reason: \"wrong-passphrase-or-tampered\", expected: 4)"
+        ],
+        "MediaHub.Tests.SyncCliTests.Parse_RejectsMalformedCommandLinesWithStableCodes": [
+          "(args: [\"export\", \"--root\", \"D:/tmp/r\", \"--bogus\"], expectedCode: \"unknown-option:--bogus\")",
+          "(args: [\"export\", \"--root\", \"D:/tmp/r\", \"--json=true\"], expectedCode: \"flag-takes-no-value:--json\")",
+          "(args: [\"export\", \"--root\", \"D:/tmp/r\", \"--out\"], expectedCode: \"missing-value:--out\")",
+          "(args: [\"export\", \"--root\", \"a\", \"--root\", \"b\"], expectedCode: \"duplicate-option:--root\")",
+          "(args: [\"export\"], expectedCode: \"missing-required-option:--root\")",
+          "(args: [\"frobnicate\"], expectedCode: \"unknown-command:frobnicate\")",
+          "(args: [\"plan\", \"--root\", \"D:/tmp/r\", \"--in\", \"x\", \u00b7\u00b7\u00b7], expectedCode: \"option-not-allowed-for-command:--passphrase:plan\")",
+          "(args: [\"secret-check\", \"--root\", \"D:/tmp/r\", \"--id\", \"a\"], expectedCode: \"missing-required-option:--expect\")",
+          "(args: [], expectedCode: \"missing-command\")"
+        ],
+        "MediaHub.Tests.SyncDeviceRegistryTests.Register_RejectsABlankDeviceId": [
+          "(deviceId: \"   \")",
+          "(deviceId: \"\")"
+        ],
+        "MediaHub.Tests.SyncTransferReceiptPresenterTests.Describe_reason_explains_each_receipt_code": [
+          "(code: \"receipt-invalid\")",
+          "(code: \"receipt-missing\")",
+          "(code: \"receipt-not-enabled\")",
+          "(code: \"receipt-timeout\")"
+        ]
       }
     },
     {
@@ -2224,9 +2740,24 @@
         }
       },
       "data": {
-        "MediaHub.WebDav.Tests.WebDavMultistatusParserTests.Namespace_prefix_is_irrelevant": "749c48053f123b28",
-        "MediaHub.WebDav.Tests.WebDavUrlTests.Base_normalisation_rejects_unusable_addresses": "3ca533cb6207b079",
-        "MediaHub.WebDav.Tests.WebDavUrlTests.Href_with_a_non_http_scheme_is_rejected": "cca7e34d6cb09804"
+        "MediaHub.WebDav.Tests.WebDavMultistatusParserTests.Namespace_prefix_is_irrelevant": [
+          "(prefix: \"D\")",
+          "(prefix: \"d\")",
+          "(prefix: \"lp1\")"
+        ],
+        "MediaHub.WebDav.Tests.WebDavUrlTests.Base_normalisation_rejects_unusable_addresses": [
+          "(raw: \"\")",
+          "(raw: \"file:///C:/dav\")",
+          "(raw: \"ftp://nas.local/dav\")",
+          "(raw: \"http://user:pass@nas.local/dav\")",
+          "(raw: \"not a url\")"
+        ],
+        "MediaHub.WebDav.Tests.WebDavUrlTests.Href_with_a_non_http_scheme_is_rejected": [
+          "(href: \"data:text/plain,hi\")",
+          "(href: \"file:///C:/Windows/win.ini\")",
+          "(href: \"ftp://127.0.0.1/dav/x.mkv\")",
+          "(href: \"javascript:alert(1)\")"
+        ]
       }
     }
   ]

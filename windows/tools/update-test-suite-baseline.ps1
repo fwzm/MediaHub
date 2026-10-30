@@ -4,8 +4,9 @@
 # "new or larger test classes" or "new test methods". Do NOT run it to make a red
 # gate green: a green by baseline surgery is the exact failure this file exists
 # to prevent, which is why shrinking a suite (a case count, a class, a method or
-# a method's own case count) requires the explicit -AcceptRemoval switch and
-# shows up as a diff in the same commit as the removal.
+# a method's own case count, or one of a method's argument rows) requires the
+# explicit -AcceptRemoval switch and shows up as a diff in the same commit as
+# the removal.
 #
 # The written file carries five levels, each one closing a substitution the
 # level above cannot see:
@@ -16,24 +17,28 @@
 #   methods  : cases per method (a [Theory] reports one method with many data
 #              rows, so moving a row between two theories of one class keeps the
 #              total, the class count and the method set identical)
-#   data     : one digest per method that carries argument text: a [Theory] row
-#              reports its arguments in its display name, so swapping two rows'
-#              values, or replacing one row's values, keeps every count above
-#              identical. The digest covers the sorted argument suffixes with
-#              duplicates included, so a value swap, a parameter rename and a
-#              replaced row all show up as a diff. Only methods that actually
-#              carry argument text get an entry.
-# The raw argument text is not stored, only its 64-bit digest: the text is long,
-# may embed machine paths or secrets, and is not meant to be git-blamed. The
-# digest is stable across runs (it was compared between two CI runs of the same
-# tree and matched); it cannot see a difference that the framework truncated.
+#   data     : the argument rows themselves, one sorted list per method that
+#              carries argument text: a [Theory] row reports its arguments in
+#              its display name, so replacing one row's values keeps every count
+#              above identical. Row lists and not a digest, because a digest
+#              cannot separate "one row was added" (the documented growth
+#              warning) from "one row was added and another was replaced" (a
+#              loss that would otherwise pass with a warning). Only methods that
+#              actually carry argument text get an entry.
+# Rows are stored verbatim, sorted ordinally, duplicates kept: a replacement
+# shows up in review as a changed line instead of an opaque hash. They are
+# stable across runs (two CI runs of one tree produced identical rows); a
+# difference the framework already truncated cannot be seen.
 #
 # Typical local use (after the two dotnet test steps, from the windows directory):
 #   powershell -NoProfile -File tools/update-test-suite-baseline.ps1
 #   powershell -NoProfile -File tools/update-test-suite-baseline.ps1 -ResultsDir D:\ci\test-results
 #
 # Output is ASCII on purpose: Windows PowerShell 5.1 decodes BOM-less UTF-8 as
-# ANSI, so a non-ASCII baseline corrupts on read. Non-ASCII names fail the write
+# ANSI, so a non-ASCII baseline corrupts on read. Argument rows may carry any
+# text (a test message can be non-ASCII), so Json-String escapes every code unit
+# outside printable ASCII as \uXXXX: the file stays pure ASCII and the escape
+# round-trips through ConvertFrom-Json exactly. Non-ASCII names fail the write
 # instead of being silently mangled.
 
 [CmdletBinding()]
@@ -59,40 +64,50 @@ $comment = @(
   "  a method must also still report at least this many cases; equal totals, equal class counts",
   "  and an unchanged method list are red when a data row moved between two theories of one",
   "  class.",
-  "  a method that carries argument text in its display name also pins a digest of those rows:",
-  "  equal totals, class counts, method lists and case counts are red when two rows swapped",
-  "  values or one row's values were replaced. Only the digest is stored, never the text.",
+  "  a method that carries argument text in its display name also pins those rows: equal totals,",
+  "  class counts, method lists and case counts are red when one row's values were replaced, even",
+  "  when a new row was added in the same edit. Rows are stored sorted, duplicates kept.",
   "Why not just raise a hard-coded floor: that only moves the same rot to the next person.",
   "A committed baseline shows up in review as a diff and can be git-blamed.",
   "Refresh (never to turn a red gate green): windows/tools/update-test-suite-baseline.ps1",
   "ASCII only on purpose: PowerShell 5.1 Get-Content decodes BOM-less UTF-8 as ANSI and corrupts",
-  "non-ASCII text, which breaks ConvertFrom-Json. Keep this file pure ASCII."
+  "non-ASCII text, which breaks ConvertFrom-Json. Keep this file pure ASCII; non-ASCII argument",
+  "rows are stored as \\uXXXX escapes, which ConvertFrom-Json turns back into the original text."
 )
 
-# Digest of the argument text of one method's rows. Every row of a [Theory] is a
-# separate test definition whose display name is "Class.Method(<arguments>)", so
-# the arguments are the suffix from the first "(". They are sorted with the
-# ordinal comparer and joined with LF before hashing, which makes the digest
-# independent of row order and of the culture of the machine that computes it.
-# Duplicates are kept: a duplicated row swapped for a deleted one would
-# otherwise leave the digest unchanged. This function must stay identical to the
-# one in check-test-suite-baseline.ps1.
-function Get-DataSignature {
+# Sorted copy of one method's argument rows, duplicates kept. A row is the
+# display-name suffix from the first "(", i.e. the argument text of one
+# [Theory] row. Sorting with the ordinal comparer makes the list independent of
+# row order and of the culture of the machine that computes it. This function
+# must stay identical to the one in check-test-suite-baseline.ps1.
+function Sort-Rows {
   param([string[]]$Rows)
   $sorted = New-Object System.Collections.Generic.List[string]
   foreach ($r in $Rows) { [void]$sorted.Add([string]$r) }
   $sorted.Sort([System.StringComparer]::Ordinal)
-  $joined = [string]::Join([string][char]10, $sorted.ToArray())
-  $sha = [System.Security.Cryptography.SHA256]::Create()
-  try {
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($joined)
-    $hash = $sha.ComputeHash($bytes)
-    $sb = New-Object System.Text.StringBuilder
-    for ($i = 0; $i -lt 8; $i++) { [void]$sb.Append($hash[$i].ToString("x2")) }
-    return $sb.ToString()
-  } finally {
-    $sha.Dispose()
+  return $sorted
+}
+
+# Multiset difference of two sorted row lists, identical to the copy in
+# check-test-suite-baseline.ps1: rows the baseline had that the run no longer
+# reports, and rows the run reports that the baseline never had. Compared with
+# String.CompareOrdinal, so neither culture nor a hashtable's case folding can
+# make two different argument rows look equal.
+function Get-RowDifference {
+  param([string[]]$Baseline, [string[]]$Live)
+  $missing = @()
+  $extra = @()
+  $i = 0
+  $j = 0
+  while ($i -lt $Baseline.Count -or $j -lt $Live.Count) {
+    if ($i -ge $Baseline.Count) { $extra += $Live[$j]; $j++; continue }
+    if ($j -ge $Live.Count) { $missing += $Baseline[$i]; $i++; continue }
+    $cmp = [System.String]::CompareOrdinal($Baseline[$i], $Live[$j])
+    if ($cmp -eq 0) { $i++; $j++ }
+    elseif ($cmp -lt 0) { $missing += $Baseline[$i]; $i++ }
+    else { $extra += $Live[$j]; $j++ }
   }
+  return @{ missing = $missing; extra = $extra }
 }
 
 function Read-Suite([string]$Path) {
@@ -146,7 +161,7 @@ function Read-Suite([string]$Path) {
   foreach ($dcls in @($rowArgs.Keys)) {
     foreach ($dm in @($rowArgs[$dcls].Keys)) {
       $rows = $rowArgs[$dcls][$dm]
-      $data["$dcls.$dm"] = Get-DataSignature -Rows $rows
+      $data["$dcls.$dm"] = @(Sort-Rows $rows)
     }
   }
   $classes = @{}
@@ -190,9 +205,9 @@ function Json-String([string]$s) {
   [void]$sb.Append($q)
   foreach ($ch in $s.ToCharArray()) {
     $code = [int]$ch
-    if ($code -eq 34) { [void]$sb.Append($q + [char]92 + $q) }
+    if ($code -eq 34) { [void]$sb.Append([char]92 + $q) }
     elseif ($code -eq 92) { [void]$sb.Append([char]92 + [char]92) }
-    elseif ($code -lt 32) { [void]$sb.Append([char]92 + "u" + ("{0:x4}" -f $code)) }
+    elseif ($code -lt 32 -or $code -gt 126) { [void]$sb.Append([char]92 + "u" + ("{0:x4}" -f $code)) }
     else { [void]$sb.Append($ch) }
   }
   [void]$sb.Append($q)
@@ -234,27 +249,32 @@ foreach ($e in $baseline.suites) {
   }
   $oldData = @{}
   if ($null -ne $e.data) {
-    foreach ($dp in @($e.data.PSObject.Properties)) { $oldData[[string]$dp.Name] = [string]$dp.Value }
+    foreach ($dp in @($e.data.PSObject.Properties)) {
+      $dk = [string]$dp.Name
+      if ($dp.Value -is [string]) {
+        # The 2026-10-31 format stored one digest per method. It cannot be
+        # compared with row lists, so it never counts as a removal by itself
+        # (check-test-suite-baseline.ps1 still refuses it until this refresh
+        # upgrades the file).
+        continue
+      }
+      $oldData[$dk] = @($dp.Value)
+    }
   }
   foreach ($k in @($oldData.Keys | Sort-Object)) {
     if (-not $read.data.ContainsKey($k)) {
-      $removed += "$k (argument text gone)"
-    } elseif ([string]$read.data[$k] -ne $oldData[$k]) {
-      # Growth changes the digest too; it is not a loss, so only a same-or-smaller
-      # row count is refused.
-      $beforeCases = 0
-      $nowCases = 0
-      $adot = $k.LastIndexOf(".")
-      if ($adot -gt 0) {
-        $acls = $k.Substring(0, $adot)
-        $aname = $k.Substring($adot + 1)
-        if ($oldMethods.ContainsKey($acls) -and $oldMethods[$acls].ContainsKey($aname)) { $beforeCases = [int]$oldMethods[$acls][$aname] }
-        if ($read.methods.ContainsKey($acls) -and $read.methods[$acls].ContainsKey($aname)) { $nowCases = [int]$read.methods[$acls][$aname] }
-      }
-      if ($beforeCases -ge 0 -and $nowCases -le $beforeCases) {
-        $removed += "$k (argument text changed)"
-      }
+      $removed += "$k (argument rows gone)"
+      continue
     }
+    $diff = Get-RowDifference -Baseline $oldData[$k] -Live $read.data[$k]
+    if (@($diff.missing).Count -eq 0) { continue }
+    $miss = @($diff.missing)
+    $shownMiss = @($miss)
+    if ($shownMiss.Count -gt 4) { $shownMiss = $shownMiss[0..3] + "... ($($miss.Count) total)" }
+    $ext = @($diff.extra)
+    $note = "argument row(s) gone"
+    if ($ext.Count -gt 0) { $note = "argument row(s) changed" }
+    $removed += "$k (${note}: $($shownMiss -join ' | '))"
   }
   if ([int]$e.expected -gt $read.total) { $removed += "total ($($e.expected) -> $($read.total))" }
   if ($removed.Count -gt 0 -and -not $AcceptRemoval) {
@@ -317,7 +337,14 @@ for ($i = 0; $i -lt $entries.Count; $i++) {
   for ($j = 0; $j -lt $dkeys.Count; $j++) {
     $comma = [string][char]44
     if ($j -eq $dkeys.Count - 1) { $comma = "" }
-    [void]$text.Append("        " + (Json-String $dkeys[$j]) + ": " + (Json-String $entry.data[$dkeys[$j]]) + $comma + $nl)
+    $rows = @($entry.data[$dkeys[$j]])
+    [void]$text.Append("        " + (Json-String $dkeys[$j]) + ": [" + $nl)
+    for ($r = 0; $r -lt $rows.Count; $r++) {
+      $rcomma = [string][char]44
+      if ($r -eq $rows.Count - 1) { $rcomma = "" }
+      [void]$text.Append("          " + (Json-String ([string]$rows[$r])) + $rcomma + $nl)
+    }
+    [void]$text.Append("        ]" + $comma + $nl)
   }
   [void]$text.Append("      }" + $nl)
   [void]$text.Append("    }")
@@ -340,5 +367,7 @@ foreach ($entry in $entries) {
     $methodCount += @($entry.methods[$cls].Keys).Count
     foreach ($m in $entry.methods[$cls].Keys) { $caseCount += [int]$entry.methods[$cls][$m] }
   }
-  "$($entry.suite): total=$($entry.expected) classes=$(@($entry.classes.Keys).Count) methods=$methodCount cases=$caseCount data=$(@($entry.data.Keys).Count)"
+  $rowCount = 0
+  foreach ($dk in $entry.data.Keys) { $rowCount += @($entry.data[$dk]).Count }
+  "$($entry.suite): total=$($entry.expected) classes=$(@($entry.classes.Keys).Count) methods=$methodCount cases=$caseCount data=$(@($entry.data.Keys).Count) argumentRows=$rowCount"
 }

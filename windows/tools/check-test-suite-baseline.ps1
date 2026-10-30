@@ -28,12 +28,19 @@
 #   at least its baseline case count.
 #
 #   Per-method counts are still not enough. A [Theory] row carries its argument
-#   text in the display name, so swapping the values of two rows (or replacing
-#   one row's values) keeps every count identical while changing what the test
-#   actually exercises. Each entry therefore also pins one digest per method
-#   that HAS argument text ("data": { "Class.Method": "<16 hex>" }), computed
-#   over the sorted list of every row's argument suffix with duplicates included,
-#   and a method that carried argument text must still produce the same digest.
+#   text in the display name, so replacing one row's values keeps every count
+#   identical while changing what the test actually exercises. Each entry
+#   therefore also pins the argument rows themselves, one sorted list per method
+#   that HAS argument text ("data": { "Class.Method": [ "(args)", ... ] }), with
+#   duplicates kept, and a baseline row the run no longer reports is red.
+#
+#   A digest would not have been enough either, which is why the rows are stored
+#   verbatim: a digest cannot separate "one row was added" (the documented
+#   growth warning) from "one row was added AND another row's values were
+#   replaced" (a hidden loss that would otherwise pass with a warning). The gate
+#   compares multisets: identical -> pass, baseline a strict subset of the run ->
+#   warning, anything else including a simultaneous add and replace -> red.
+#
 #   What that still cannot see: argument text the test framework already
 #   truncated (xUnit shortens long arguments), where a difference past the
 #   truncation point yields the same display text.
@@ -47,9 +54,10 @@
 #     -> red, even when the total and every class count match
 #   method reporting fewer cases than the baseline -> red (a theory lost rows)
 #   method new, or method reporting more cases -> green + warning
-#   a method's argument-text digest changed, or its argument text went away
-#     -> red (the rows that ran are not the rows the baseline was reviewed with)
-#   a method reporting argument text the baseline did not have -> warning
+#   a baseline argument row is no longer reported, or its text changed
+#     -> red (the rows that ran are not the rows the baseline was reviewed with),
+#        even when the row count grew in the same edit
+#   a method reporting only argument rows the baseline did not have -> warning
 #   failed != 0 or notExecuted != 0 -> red
 #
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
@@ -57,9 +65,11 @@
 #   methods object, a class listed in one table but not the other, a class with
 #   no methods, a method case count below 1, a method table whose case counts do
 #   not add up to the class count, a baseline still in the 2026-10-30
-#   method-name list format, a baseline with no data table, a data key that
-#   names no method in the methods table, and a digest that is not 16 lowercase
-#   hex digits all throw. Otherwise the gate would be vacuous and un-failable.
+#   method-name list format, a baseline with no data table, an empty data table,
+#   a data key that names no method in the methods table, a blank row, a row
+#   list that disagrees with the method's case count, and a baseline still in
+#   the 2026-10-31 digest format all throw. Otherwise the gate would be vacuous
+#   and un-failable.
 #
 # ASCII ONLY on purpose: Windows PowerShell 5.1 decodes BOM-less UTF-8 as ANSI
 # and corrupts non-ASCII text, which then breaks ConvertFrom-Json parsing.
@@ -80,29 +90,37 @@ function Test-MethodCaseMap($node) {
   return $true
 }
 
-# Digest of the argument text of one method's rows. Every row of a [Theory] is a
-# separate test definition whose display name is "Class.Method(<arguments>)", so
-# the arguments are the suffix from the first "(". They are sorted with the
-# ordinal comparer and joined with LF before hashing, which makes the digest
-# independent of row order and of the culture of the machine that computes it.
-# Duplicates are kept: a duplicated row swapped for a deleted one would
-# otherwise leave the digest unchanged.
-function Get-DataSignature {
+# Sorted copy of one method's argument rows, duplicates kept. A row is the
+# display-name suffix from the first "(", i.e. the argument text of one
+# [Theory] row. Sorting with the ordinal comparer makes the list independent of
+# row order and of the culture of the machine that computes it.
+function Sort-Rows {
   param([string[]]$Rows)
   $sorted = New-Object System.Collections.Generic.List[string]
   foreach ($r in $Rows) { [void]$sorted.Add([string]$r) }
   $sorted.Sort([System.StringComparer]::Ordinal)
-  $joined = [string]::Join([string][char]10, $sorted.ToArray())
-  $sha = [System.Security.Cryptography.SHA256]::Create()
-  try {
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($joined)
-    $hash = $sha.ComputeHash($bytes)
-    $sb = New-Object System.Text.StringBuilder
-    for ($i = 0; $i -lt 8; $i++) { [void]$sb.Append($hash[$i].ToString("x2")) }
-    return $sb.ToString()
-  } finally {
-    $sha.Dispose()
+  return $sorted
+}
+
+# Multiset difference of two sorted row lists: baseline rows the run no longer
+# reports, and rows the run reports that the baseline never had. Compared with
+# String.CompareOrdinal, so neither culture nor a hashtable's case folding can
+# make two different argument rows look equal.
+function Get-RowDifference {
+  param([string[]]$Baseline, [string[]]$Live)
+  $missing = @()
+  $extra = @()
+  $i = 0
+  $j = 0
+  while ($i -lt $Baseline.Count -or $j -lt $Live.Count) {
+    if ($i -ge $Baseline.Count) { $extra += $Live[$j]; $j++; continue }
+    if ($j -ge $Live.Count) { $missing += $Baseline[$i]; $i++; continue }
+    $cmp = [System.String]::CompareOrdinal($Baseline[$i], $Live[$j])
+    if ($cmp -eq 0) { $i++; $j++ }
+    elseif ($cmp -lt 0) { $missing += $Baseline[$i]; $i++ }
+    else { $extra += $Live[$j]; $j++ }
   }
+  return @{ missing = $missing; extra = $extra }
 }
 
 if (-not (Test-Path -LiteralPath $BaselinePath)) {
@@ -181,10 +199,29 @@ foreach ($e in $baseline.suites) {
   foreach ($k in $dataKeys) {
     if ([string]::IsNullOrWhiteSpace($k)) { throw "$BaselinePath : entry for $($e.suite) has a blank data key" }
     if (-not $knownMethods.ContainsKey($k)) {
-      throw "$BaselinePath : entry for $($e.suite) pins argument text for $k, which is not a method of the methods table"
+      throw "$BaselinePath : entry for $($e.suite) pins argument rows for $k, which is not a method of the methods table"
     }
-    if ([string]$e.data.$k -notmatch '^[0-9a-f]{16}$') {
-      throw "$BaselinePath : entry for $($e.suite) pins argument text for $k with a digest that is not 16 lowercase hex digits"
+    $rows = $e.data.$k
+    if ($rows -is [string]) {
+      throw "$BaselinePath : entry for $($e.suite) pins argument rows for $k as a digest - that is the 2026-10-31 format, which cannot see a data row added in the same edit as a replaced value. Refresh it with windows/tools/update-test-suite-baseline.ps1."
+    }
+    if (-not ($rows -is [System.Array])) {
+      throw "$BaselinePath : entry for $($e.suite) pins argument rows for $k as something other than a list"
+    }
+    if (@($rows).Count -lt 1) {
+      throw "$BaselinePath : entry for $($e.suite) pins no argument rows for $k - the check would be vacuous for it"
+    }
+    foreach ($r in @($rows)) {
+      if ($null -eq $r -or [string]::IsNullOrWhiteSpace([string]$r)) {
+        throw "$BaselinePath : entry for $($e.suite) pins a blank argument row for $k"
+      }
+    }
+    $dot = $k.LastIndexOf(".")
+    $mcls = $k.Substring(0, $dot)
+    $mname = $k.Substring($dot + 1)
+    $cases = [int]$e.methods.$mcls.$mname
+    if (@($rows).Count -ne $cases) {
+      throw "$BaselinePath : entry for $($e.suite) pins $(@($rows).Count) argument row(s) for $k but the methods table gives it $cases case(s) - the two layers must agree"
     }
   }
 }
@@ -263,11 +300,13 @@ foreach ($e in $baseline.suites) {
   if ($defsWithoutClass -gt 0) {
     throw "$($e.suite): $defsWithoutClass test definition(s) in $($e.file) have no TestMethod.className - the per-method check cannot be trusted"
   }
-  $actualDataSigs = @{}
+  $actualDataRows = @{}
+  $actualRowTotal = 0
   foreach ($dcls in @($actualData.Keys)) {
     foreach ($dm in @($actualData[$dcls].Keys)) {
-      $rows = $actualData[$dcls][$dm]
-      $actualDataSigs["$dcls.$dm"] = Get-DataSignature -Rows $rows
+      $rows = @(Sort-Rows $actualData[$dcls][$dm])
+      $actualDataRows["$dcls.$dm"] = $rows
+      $actualRowTotal += $rows.Count
     }
   }
 
@@ -299,8 +338,11 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): classes=$(($actual.Keys | Sort-Object).Count) baseline=class table $(@($e.classes.PSObject.Properties.Name).Count) entries"
   "$($e.suite): methods=$actualMethodCount baseline=method table $baselineMethodCount methods"
   $baselineDataCount = @($e.data.PSObject.Properties.Name).Count
+  $baselineRowTotal = 0
+  foreach ($dk in @($e.data.PSObject.Properties.Name)) { $baselineRowTotal += @($e.data.$dk).Count }
   "$($e.suite): methodCases=$actualMethodCases baseline=method case table $baselineCaseCount cases"
-  "$($e.suite): methodData=$($actualDataSigs.Count) baseline=method data table $baselineDataCount digests"
+  "$($e.suite): methodData=$($actualDataRows.Count) baseline=method data table $baselineDataCount row sets"
+  "$($e.suite): argumentRows=$actualRowTotal baseline=argument row table $baselineRowTotal rows"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
   if ($skipped -ne 0) { throw "$($e.suite): $skipped test(s) were not executed" }
@@ -353,45 +395,40 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): test methods lost cases while the total was $total (baseline $($e.expected)) - equal totals, equal per-class counts and an unchanged method list do not prove the same cases ran. gone or shrunk: $($shown -join ', '). If the removal was intentional, refresh the baseline in windows/tools/test-suite-baseline.json in the same commit."
   }
 
-  # Per-argument-row check: a method that carried argument text must still carry
-  # the same rows. This is the substitution the per-method counts cannot see:
-  # swapping the values of two rows, or replacing one row's values, keeps the
-  # total, every class count, the method set and every per-method case count
-  # identical. The digest is over the sorted argument suffixes, so row order does
-  # not matter, but the values themselves do.
+  # Per-argument-row check: every baseline argument row of a method must still be
+  # reported. This is the substitution the per-method counts cannot see:
+  # replacing one row's values keeps the total, every class count, the method set
+  # and every per-method case count identical. Row lists rather than a digest,
+  # because a digest cannot separate "a row was added" (the documented growth
+  # warning) from "a row was added and another was replaced" (a loss).
   $dataLost = @()
   foreach ($k in @($e.data.PSObject.Properties.Name)) {
-    $want = [string]$e.data.$k
-    if (-not $actualDataSigs.ContainsKey($k)) {
-      $dataLost += "$k (argument text gone)"
-    } elseif ([string]$actualDataSigs[$k] -ne $want) {
-      # A newly added data row changes the digest as well, so compare the row
-      # counts first: growth is what the per-method layer already reports as a
-      # warning, and only a substitution at the same or a smaller row count is a
-      # loss. Without this, adding an [InlineData] row would turn a documented
-      # "refresh the baseline" warning into a hard failure.
-      $before = 0
-      $now = 0
-      $dot = $k.LastIndexOf(".")
-      if ($dot -gt 0) {
-        $bcls = $k.Substring(0, $dot)
-        $bname = $k.Substring($dot + 1)
-        if ((@($e.methods.PSObject.Properties.Name) -contains $bcls) -and (@($e.methods.$bcls.PSObject.Properties.Name) -contains $bname)) {
-          $before = [int]$e.methods.$bcls.$bname
-        }
-        if ($actualMethods.ContainsKey($bcls)) { $now = [int]$actualMethods[$bcls][$bname] }
-      }
-      if ($now -gt $before) {
-        $newData += "$($e.suite):$k (argument text grew: $before -> $now rows)"
-      } else {
-        $dataLost += "$k (baseline $want, now $($actualDataSigs[$k]))"
-      }
+    $wantRows = @($e.data.$k)
+    if (-not $actualDataRows.ContainsKey($k)) {
+      $dataLost += "$k (argument rows gone)"
+      continue
+    }
+    $diff = Get-RowDifference -Baseline $wantRows -Live $actualDataRows[$k]
+    if (@($diff.missing).Count -eq 0 -and @($diff.extra).Count -eq 0) { continue }
+    if (@($diff.missing).Count -eq 0) {
+      $newData += "$($e.suite):$k (argument rows grew: $($wantRows.Count) -> $(@($actualDataRows[$k]).Count) rows)"
+      continue
+    }
+    $miss = @($diff.missing)
+    $shownMiss = @($miss)
+    if ($shownMiss.Count -gt 6) { $shownMiss = $shownMiss[0..5] + "... ($($miss.Count) total)" }
+    $dataLost += "$k (baseline row(s) no longer reported: $($shownMiss -join ' | '))"
+    $ext = @($diff.extra)
+    if ($ext.Count -gt 0) {
+      $shownExt = @($ext)
+      if ($shownExt.Count -gt 3) { $shownExt = $shownExt[0..2] + "... ($($ext.Count) total)" }
+      $dataLost += "$k (new row(s) in the same method: $($shownExt -join ' | '))"
     }
   }
   if ($dataLost.Count -gt 0) {
     $shown = $dataLost
     if ($shown.Count -gt 12) { $shown = $shown[0..11] + "... ($($dataLost.Count - 12) more)" }
-    throw "$($e.suite): test method argument rows changed while the total was $total (baseline $($e.expected)) - equal totals, equal per-class counts, an unchanged method list and unchanged per-method case counts do not prove the same argument values ran. changed: $($shown -join ', '). If the change was intentional, refresh the baseline in windows/tools/test-suite-baseline.json in the same commit."
+    throw "$($e.suite): test method argument rows changed while the total was $total (baseline $($e.expected)) - equal totals, equal per-class counts, an unchanged method list and unchanged per-method case counts do not prove the same argument values ran, and a row added in the same edit as a replaced row does not excuse it. changed: $($shown -join ', '). If the change was intentional, refresh the baseline in windows/tools/test-suite-baseline.json in the same commit."
   }
 
   foreach ($name in @($actual.Keys | Sort-Object)) {
@@ -415,9 +452,9 @@ foreach ($e in $baseline.suites) {
       }
     }
   }
-  foreach ($k in @($actualDataSigs.Keys | Sort-Object)) {
+  foreach ($k in @($actualDataRows.Keys | Sort-Object)) {
     if (-not (@($e.data.PSObject.Properties.Name) -contains $k)) {
-      $newData += "$($e.suite):$k (new argument text)"
+      $newData += "$($e.suite):$k (new argument rows)"
     }
   }
   if ($actualMethodCases -ne $total) {
@@ -448,6 +485,6 @@ if ($newData.Count -gt 0) {
   if ($shown.Count -gt 12) {
     $shown = $shown[0..11] + "... ($($newData.Count - 12) more)"
   }
-  Write-Host "::warning::new test method argument text - refresh windows/tools/test-suite-baseline.json (see windows/tools/update-test-suite-baseline.ps1): $($shown -join '; ')"
+  Write-Host "::warning::new test method argument rows - refresh windows/tools/test-suite-baseline.json (see windows/tools/update-test-suite-baseline.ps1): $($shown -join '; ')"
 }
 "combined tests=$all"
