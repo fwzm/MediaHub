@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T00:19:52+08:00",
+  "updated_at": "2026-10-31T00:34:00+08:00",
   "updated_by": "lead-W6-113-r10",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -241,7 +241,8 @@
         "NC16 明示残留限制：Theory 数据行（参数值）不钉，只钉方法名",
         "迁移验证：旧格式基线（无 methods 表）在新闸门下两代 PowerShell 均 exit 1，报 has no methods table - the per-method check would be vacuous",
         "CI 实测 head f045d34c: windows-ci run 41072599036 success，日志 methods=1637 baseline=method table 1637 names / WebDav methods=95 ... 95 names / combined tests=2056",
-        "Android CI run 41072599413（同 head）入账时 in_progress -> 未作结论（本轮零 Android 代码改动）"
+        "Android CI run 41072599413（同 head）入账时 in_progress -> 未作结论（本轮零 Android 代码改动）",
+        "windows-ci:41089267971 (head 5091fa74, merge 6a4018c6f589, base 8d11eee1) - ladder re-confirmed on the new base: methods=1637, combined tests=2056, licence checks=25 failed=0"
       ],
       "notes": "方法名取 TRX TestDefinitions 的 TestMethod.className + name，剥掉第一个 ( 起的 Theory 参数后去重；数据行仍由 classes 的用例数管。刷新脚本 update-test-suite-baseline.ps1 同步写 methods 表，且 _comment 由脚本拥有、每次刷新归一化。",
       "next_action": "无；若 CI 判 RED 并点名方法消失，需人工确认后以 -AcceptRemoval 刷新基线。"
