@@ -8,7 +8,8 @@
 > WebDAV 上传（`upload`：PUT + `--mkdir`，远端失败独立退出码 9）**EXECUTED_PASS**（上传器 11 例 + CLI 3 例 + 四条负向对照，全量 MediaHub.Tests **1836/0**）；
 > WebDAV 下载（`download`：一次 GET + 声明长度预检 + 流式上限 + 原子落盘，远端失败同样退出码 9）**EXECUTED_PASS**（下载器 12 例 + CLI 3 例 + 四条负向对照，全量 MediaHub.Tests **1851/0**）；
 > WebDAV 列目录（`list`：一次 PROPFIND Depth: 1、只读只列一层、默认只列 `.mhbackup`）**EXECUTED_PASS**（14 例 + 四条负向对照各恰好 1 红，全量 MediaHub.Tests **1872/0**）；
-> 设置页入口、播放进度/收藏落库、WebDAV 删除仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
+> WebDAV 删除（`delete`：默认只预览、零请求；`--confirm` 才先 HEAD / PROPFIND 确认存在再 DELETE；只删 `.mhbackup`）**EXECUTED_PASS**（18 例 + 四条负向对照各恰好 1 红，全量 MediaHub.Tests **1890/0**）；
+> 设置页入口、播放进度/收藏落库仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
 
 ## 1 动机与范围
 
@@ -400,11 +401,54 @@ download --url <WebDAV 地址> --out <备份文件> [--user <账号>] [--passwor
 - 真实 WebDAV 服务端联调 —— 本地只有桩 Handler，`SERVER_UNVERIFIED`。
 - 设置页「备份与还原」入口（列表 + 下载 + 还原串起来）—— 属 GUI，`GUI_UNVERIFIED`。
 
-## 13 仍未做（如实）
+## 13 WebDAV 删除（W23）
+
+### 13.1 缺口
+
+上传（§10）、下载（§11）、列目录（§12）之后，远端备份会越攒越多；而删除是**不可逆**动作，缺一个「默认什么都不删」的入口。
+本轮不加批量、不加递归，只做「指名一个文件、默认先预览」的删除。
+
+### 13.2 删除器（`windows/src/MediaHub.Backup/MhBackupWebDavDeleter.cs`，零 NuGet 依赖）
+
+- **预览是默认**：`confirm=false` 时直接返回 `ConfirmRequired`，**一个请求都不发**（用例断言桩 handler 零调用）。
+- **只删备份文件**：非 `.mhbackup` 需要显式 `allowNonBackupFile`；集合地址（路径以 `/` 结尾）、空路径、非 http(s) 在联网前就拒。
+- **先确认再删**：先 `HEAD`；服务端不支持 HEAD（405/501）时退回 `PROPFIND` + `Depth: 0`（207/200 视为存在）；确认存在才发 `DELETE`。
+  确认阶段 404 一律报缺失，不把「没删到」说成删除成功。
+- **状态映射稳定**：401/403 ⇒ 认证、404 ⇒ 缺失、405/501 ⇒ 远端不支持删除、≥500 ⇒ 服务端出错、其余「远端拒绝这次删除（HTTP n）」；超时 60 秒，超时与连不上各有独立原因。
+
+### 13.3 命令行（`delete`）
+
+- `delete --url <WebDAV 文件地址> [--confirm] [--any] [--user <账号>] [--password-env <变量名>] [--json]`。
+- 默认预览：文本「预览：不会删除任何东西 / 将删除：<url> / （只删 `.mhbackup`；其它文件需要 `--any`）/ 加 `--confirm` 才会先确认文件存在、再发 DELETE。」，退出码 **0**；JSON `mode:"preview"`、`deleted:false`。
+- 只有 `--confirm` 才真的发请求；成功后文本「已删除远端备份 / HTTP 状态 / 提醒：远端删除不可逆；本机备份文件与备份容器口令不受影响。」，JSON 带 `checkedExistence`。
+- 本地用法错误（缺 `--url`、非 http(s)、目录地址、非 `.mhbackup` 且未给 `--any`）由 `PreflightDeleteReason` 在联网前拦下，退出码 **2**，不落到远端失败码；远端失败仍是 **9**；口令同样只从 `MH_WEBDAV_PASSWORD` 读。
+
+### 13.4 验证
+
+| 对照 | 改动 | 红 |
+| --- | --- | --- |
+| A | 删掉「只删 `.mhbackup`」守卫 | 1（`OnlyBackupFilesAreDeletedWithoutTheAnyFlag`） |
+| B | 把确认阶段的 404 当作存在、继续 DELETE | 1（`AMissingFileIsNotReportedAsDeleted`） |
+| C | DELETE 返回 405 不再映射成「远端不支持删除」 | 1（`AServerThatRefusesDeleteIsReportedAsNotSupported`） |
+| D | 删掉命令行预览里的「加 `--confirm` …」提示行 | 1（`TheCommandLinePreviewDoesNotTouchTheRemote`） |
+
+- `BackupDeleteTests` 18 例（含 `Theory` 两行：目录地址、`file://` 地址）；全量 `MediaHub.Tests` **1890/0**（1872 + 18）。
+- 四条对照每次从实现态快照（`D:/mh-verify/w23-snap/`）逐字节还原并复验：deleter sha256 `9be7daa1debfe5f08e96b5e248001f7471254d1393555ee219d2d11d8517c3d1`（7912 B）、
+  cli sha256 `4690480b4f4721fac0e5c1646c8ef88568663358e5383c727f182dba24b8dfc3`（44014 B）；还原后复跑 18/0。
+- 全部用例走桩 handler（`DeleteStubHandler`）零联网：只钉请求方法序列、`Depth`、鉴权头、状态映射与回执，**不证明真实服务端允许删除**。
+- 已知未覆盖：真实 WebDAV 上的删除（`SERVER_UNVERIFIED`）、并发双端同删的竞态（只测了「确认后、DELETE 前被别人删掉 ⇒ 报缺失」这一种）。
+
+### 13.5 仍未做（本层之外）
+
+- 真实 WebDAV 端到端（上传 → 列目录 → 下载 → 删除）—— SERVER_UNVERIFIED
+- 批量 / 递归删除、保留策略（N 份 / N 天）—— 不做：不可逆动作不做自动清理
+- 设置页里的删除按钮与二次确认 —— GUI_UNVERIFIED
+
+## 14 仍未做（如实）
 
 - 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏仍不落库 —— NOT_IMPLEMENTED
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
 - 本机进度/收藏的写入（来源与偏好已随 `--apply` 落库）—— NOT_IMPLEMENTED
-- WebDAV 上传（§10）、下载（§11）、列目录（§12）已实现；删除仍 NOT_IMPLEMENTED（不可逆，留待单独策略）
+- WebDAV 上传（§10）、下载（§11）、列目录（§12）、删除（§13）均已实现；**真实服务端联调未做** —— SERVER_UNVERIFIED
 - Android 恢复计划器与 Windows 反向对照、真机与真 GUI —— DEVICE_UNVERIFIED / GUI_UNVERIFIED
 - 口令强度无最小长度约束（沿用 Android 口径）；容器未做外部安全审计

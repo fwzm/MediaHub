@@ -93,6 +93,7 @@ public static class MhBackupCliCommand
             "upload" => RunUpload(options, output, error, environment, httpHandler),
             "download" => RunDownload(options, output, error, environment, httpHandler),
             "list" => RunList(options, output, error, environment, httpHandler),
+            "delete" => RunDelete(options, output, error, environment, httpHandler),
             _ => UnknownCommand(command, output, error),
         };
     }
@@ -892,6 +893,117 @@ public static class MhBackupCliCommand
         return ExitOk;
     }
 
+    private static int RunDelete(
+        Dictionary<string, string?> options,
+        TextWriter output,
+        TextWriter error,
+        Func<string, string?> environment,
+        HttpMessageHandler? httpHandler)
+    {
+        if (IsHelp(Value(options, "help") ?? string.Empty))
+        {
+            WriteUsage(output);
+            return ExitOk;
+        }
+
+        string? rawUrl = Value(options, "url");
+        if (string.IsNullOrWhiteSpace(rawUrl)) return UsageFailure(error, "delete 需要 --url <WebDAV 文件地址>");
+        if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out Uri? target))
+            return UsageFailure(error, "删除的地址不是合法 URI：" + rawUrl);
+
+        bool asJson = Has(options, "json");
+        bool confirm = Has(options, "confirm");
+        bool any = Has(options, "any");
+        string? refused = PreflightDeleteReason(target, any);
+        if (refused is not null) return UsageFailure(error, refused);
+
+        string? userName = Value(options, "user");
+        string? password = ResolveRemotePassword(options, environment);
+
+        MhBackupWebDavDeleter.Result result = MhBackupWebDavDeleter
+            .DeleteAsync(target, userName, password, confirm, any, httpHandler)
+            .GetAwaiter()
+            .GetResult();
+
+        if (!result.Deleted)
+        {
+            if (result.Reason == MhBackupWebDavDeleter.Reasons.ConfirmRequired)
+            {
+                if (asJson)
+                {
+                    WriteJson(output, new JsonObject
+                    {
+                        ["command"] = "delete",
+                        ["mode"] = "preview",
+                        ["ok"] = true,
+                        ["deleted"] = false,
+                        ["status"] = 0,
+                        ["reason"] = result.Reason,
+                        ["url"] = target.ToString(),
+                    });
+                    return ExitOk;
+                }
+
+                output.WriteLine("预览：不会删除任何东西");
+                output.WriteLine("将删除：" + target);
+                output.WriteLine(any ? "（--any：允许删非 .mhbackup 文件）" : "（只删 .mhbackup；其它文件需要 --any）");
+                output.WriteLine("加 --confirm 才会先确认文件存在、再发 DELETE。");
+                return ExitOk;
+            }
+
+            if (asJson)
+            {
+                WriteJson(output, new JsonObject
+                {
+                    ["command"] = "delete",
+                    ["mode"] = "delete",
+                    ["ok"] = false,
+                    ["deleted"] = false,
+                    ["status"] = result.StatusCode,
+                    ["reason"] = result.Reason,
+                    ["url"] = target.ToString(),
+                });
+            }
+
+            string label = result.StatusCode > 0 ? "（HTTP " + result.StatusCode + "）" : string.Empty;
+            return Fail(error, "删除失败" + label + "：" + result.Reason, ExitRemote);
+        }
+
+        if (asJson)
+        {
+            WriteJson(output, new JsonObject
+            {
+                ["command"] = "delete",
+                ["mode"] = "delete",
+                ["ok"] = true,
+                ["deleted"] = true,
+                ["status"] = result.StatusCode,
+                ["url"] = target.ToString(),
+                ["checkedExistence"] = result.CheckedExistence,
+            });
+            return ExitOk;
+        }
+
+        output.WriteLine("已删除远端备份：" + target);
+        output.WriteLine("HTTP 状态：" + result.StatusCode);
+        output.WriteLine("提醒：远端删除不可逆；本机备份文件与备份容器口令不受影响。");
+        return ExitOk;
+    }
+
+    /// <summary>命令行先做同一套本地预检，让用法错误拿到 2 而不是远端失败 9。</summary>
+    internal static string? PreflightDeleteReason(Uri target, bool allowNonBackupFile)
+    {
+        if (target.Scheme != Uri.UriSchemeHttp && target.Scheme != Uri.UriSchemeHttps)
+            return MhBackupWebDavDeleter.Reasons.NotHttp;
+        if (string.IsNullOrEmpty(target.AbsolutePath) || target.AbsolutePath == "/")
+            return MhBackupWebDavDeleter.Reasons.DirectoryTarget;
+        if (target.AbsolutePath.EndsWith("/", StringComparison.Ordinal))
+            return MhBackupWebDavDeleter.Reasons.DirectoryTarget;
+        if (!allowNonBackupFile && !target.AbsolutePath.EndsWith(".mhbackup", StringComparison.OrdinalIgnoreCase))
+            return MhBackupWebDavDeleter.Reasons.NotABackupFile;
+        return null;
+    }
+
     private static void WriteUsage(TextWriter output)
     {
         output.WriteLine("MediaHub 备份工具（Windows 端）");
@@ -901,6 +1013,7 @@ public static class MhBackupCliCommand
         output.WriteLine("  upload --file <备份文件> --url <WebDAV 地址> [--user <账号>] [--password-env <变量名>] [--mkdir] [--json]");
         output.WriteLine("  download --url <WebDAV 地址> --out <备份文件> [--user <账号>] [--password-env <变量名>] [--max-bytes <字节>] [--json]");
         output.WriteLine("  list --url <WebDAV 目录地址> [--user <账号>] [--password-env <变量名>] [--all] [--json]");
+        output.WriteLine("  delete --url <WebDAV 文件地址> [--user <账号>] [--password-env <变量名>] [--confirm] [--any] [--json]");
         output.WriteLine("说明：");
         output.WriteLine("  口令只从环境变量读取（缺省 " + DefaultPasswordVariable + "），不接受命令行参数。");
         output.WriteLine("  import 默认只输出预览；--apply 才写入 settings.json（必须同时给 --settings）。");
@@ -908,6 +1021,7 @@ public static class MhBackupCliCommand
         output.WriteLine("  upload 只做 PUT；远端目录不存在时加 --mkdir 尝试创建最后一级集合，多级创建不做猜测。");
         output.WriteLine("  download 只做一次 GET 并写成 --out 指定的文件；不列目录、不删远端文件，取回后仍要 import 才会落地。");
         output.WriteLine("  list 只做一次 PROPFIND（Depth: 1），默认只列 .mhbackup，加 --all 列全部；不递归、不删除。");
+        output.WriteLine("  delete 默认只做预览（零请求）；加 --confirm 才先确认文件存在再发 DELETE，只删 .mhbackup，删别的文件要再给 --any；不删集合、不递归。");
         output.WriteLine("  退出码：0 成功 / 2 参数错误 / 3 不是备份文件 / 4 口令错误 / 5 版本过新 / 6 内容损坏 / 7 导出被拒 / 8 读写失败 / 9 远端失败。");
     }
 }

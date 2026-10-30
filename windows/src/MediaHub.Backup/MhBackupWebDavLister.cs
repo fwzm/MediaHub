@@ -18,7 +18,8 @@ public static class MhBackupWebDavLister
 {
     public const int DefaultTimeoutSeconds = 60;
 
-    private const string PropfindBody =
+    /// <summary>Depth: 1 的 PROPFIND 请求体；删除前的存在性检查用同一个（Depth 由调用方改成 0）。</summary>
+    public const string PropfindBody =
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
         "<d:propfind xmlns:d=\"DAV:\"><d:prop>" +
         "<d:displayname/><d:resourcetype/><d:getcontentlength/><d:getlastmodified/>" +
