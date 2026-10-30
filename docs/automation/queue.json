@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T01:58:24+08:00",
+  "updated_at": "2026-10-31T02:12:00+08:00",
   "updated_by": "lead-W6-113-r12",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -151,7 +151,8 @@
         "docs/automation/PATCH-PROPOSAL-android-ci-concurrency.md",
         "cancelled runs: 40993937937 41003347784 41008280281 40991293954",
         "same heads windows-ci: success 41003347790 41000771112 41005235521",
-        "cancelled runs (追加): 41093847372 (head 58bb304b, 2026-10-31)"
+        "cancelled runs (追加): 41093847372 (head 58bb304b, 2026-10-31)",
+        "cancelled runs (追加): 41099478811 (head 8ec0d890) and 41100655793 (head 4461140b), 2026-10-31 - the same heads' windows-ci succeeded as 41099478575 / 41100655895"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -326,7 +327,8 @@
         "NC37 regenerating from the real CI TRX reproduces the committed baseline byte for byte",
         "data source: CI run 41095080796 @701bb547, windows-tests.trx 2,719,155 B / webdav-tests.trx 145,266 B",
         "CI: run 41099478575 @8ec0d890 success - methodCases=1952 baseline=method case table 1952 cases, methods=1637 ... 1637, combined tests=2056, licence checks=27 failed=0",
-        "CI: run 41100655895 @4461140b success - the docs head prints the same ladder lines (methodCases=1952 / 104, combined tests=2056, licence checks=27 failed=0)"
+        "CI: run 41100655895 @4461140b success - the docs head prints the same ladder lines (methodCases=1952 / 104, combined tests=2056, licence checks=27 failed=0)",
+        "CI: run 41102903873 @3eafac91 success - final head prints the same ladder lines (methodCases=1952 baseline=method case table 1952 cases / WebDav 104 cases / combined tests=2056); licence checks=29 failed=0 warnings=1 after the base advanced to 69a454a7 (PR merge commit a3e5adf14d13)"
       ],
       "notes": "methods is now class -> {method -> case count}; per-method case-count drops are RED naming Class.Method with both counts; old 2026-10-30 name-list baselines throw with a refresh hint instead of passing silently; class-to-method sums must equal the classes table. Residual limit: theory data-row argument values are still not pinned (R7 / round 9 NC16).",
       "next_action": "无；若要收掉数据行参数值需把 InlineData 纳入基线（代价与噪声显著上升），另立切片。",
