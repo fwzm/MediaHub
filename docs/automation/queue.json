@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T03:10:00+08:00",
+  "updated_at": "2026-10-31T03:22:00+08:00",
   "updated_by": "lead-W6-113-r13",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -355,7 +355,8 @@
         "RE1 real TRX PASS printing methodData=100 baseline=method data table 100 digests / methodData=3 ... 3 digests / combined tests=2056; RE2 r12 baseline x real TRX RED on the new gate and GREEN on r12; RE3 real migration writes data=100 / data=3",
         "RE4 both shells write the same bytes and the r9-art and r12-art digests are identical (windows 100/100, webdav 3/3) - digests are stable across CI runs",
         "data source: CI run 41095080796 @701bb547, windows-tests.trx 2,719,155 B / webdav-tests.trx 145,266 B (415 parameterized rows over 100 methods; 6 rows truncated by the framework with '...')",
-        "CI: run 41111613263 @a0b46f6e success - methodData=100 baseline=method data table 100 digests, methodData=3 ... 3 digests, methodCases=1952 ... 1952 cases, methods=1637 ... 1637, combined tests=2056, licence checks=30 failed=0 warnings=1"
+        "CI: run 41111613263 @a0b46f6e success - methodData=100 baseline=method data table 100 digests, methodData=3 ... 3 digests, methodCases=1952 ... 1952 cases, methods=1637 ... 1637, combined tests=2056, licence checks=30 failed=0 warnings=1",
+        "docs head CI: run 41113224063 @cb2f0b14 success - methodData=100 baseline=method data table 100 digests, methodData=3 ... 3 digests, methodCases=1952 ... 1952 cases, methods=1637 ... 1637 methods, combined tests=2056, licence checks=30 failed=0 warnings=1"
       ],
       "notes": "digest = SHA-256 over Ordinal-sorted, LF-joined argument suffixes with duplicates kept, first 8 bytes as lowercase hex, only for methods that actually carry parameters. Row counts are compared first, so a theory that gains rows stays a warning (argument text grew: N -> M rows) instead of a hard fail. Residual limits: the framework truncates 6 display names with '...', a theory that adds a row and changes a value in one step stays a growth warning, and class/method names are not part of the digest (renames stay the methods table's business).",
       "next_action": "无；下一层候选是把运行期生成的 Theory 值或截断前原文纳入基线，代价更高，需另立切片。",
