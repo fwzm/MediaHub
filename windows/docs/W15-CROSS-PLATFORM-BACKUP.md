@@ -10,6 +10,7 @@
 > WebDAV 列目录（`list`：一次 PROPFIND Depth: 1、只读只列一层、默认只列 `.mhbackup`）**EXECUTED_PASS**（14 例 + 四条负向对照各恰好 1 红，全量 MediaHub.Tests **1872/0**）；
 > WebDAV 删除（`delete`：默认只预览、零请求；`--confirm` 才先 HEAD / PROPFIND 确认存在再 DELETE；只删 `.mhbackup`）**EXECUTED_PASS**（18 例 + 四条负向对照各恰好 1 红，全量 MediaHub.Tests **1890/0**）；
 > WebDAV 上传覆盖保护（`upload --no-overwrite`：`If-None-Match: *` 条件写，412 两种口径分开）**EXECUTED_PASS**（`BackupUploadTests` 21 例 = 原 14 + 7，四条负向对照各恰好 1 红，全量 MediaHub.Tests **1897/0**）；
+> 跨语言实文件（电脑 `export` 真写出的 `.mhbackup` 由 Android 读、同一份字节由 Windows 再读；顺带修掉命令行 stdout 用系统代码页 936 的缺陷）**EXECUTED_PASS**（Android 6 例 / core:common **672** 例 0 失败 11 跳过；Windows 7 例 / MediaHub.Tests **1904/0**；1 条负向对照恰好 1 红）；
 > 设置页入口、播放进度/收藏落库仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
 
 ## 1 动机与范围
@@ -488,7 +489,86 @@ download --url <WebDAV 地址> --out <备份文件> [--user <账号>] [--passwor
 - 上传前的预览与确认（大小 / 来源数 / SHA-256 / 覆盖提示）—— GUI_UNVERIFIED
 
 
-## 15 仍未做（如实）
+## 15 跨语言实文件：电脑导出 → 手机导入（W25）
+
+### 15.1 缺口
+
+§4 的向量是仓库外生成器用固定 salt/nonce 拼出来的容器，证明的是「同样的输入产生同样的字节」；
+用户要的是**电脑真导出的那一份文件，手机打开就能用**。两者差在：生成器不走 CLI、不读真实的 `settings.json`、不经过采集层的类型/身份/偏好映射。
+本轮用命令行真导出一份文件，把这两端都钉住。
+
+### 15.2 被测文件的来历（不是测试自己拼的）
+
+输入 `settings.json`（仓库外 `D:/mh-verify/w25/settings.json`）四行来源：
+
+| # | Type | 显示名 | 地址 | 账号 | SyncSourceId |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `Emby` | Home Emby | `https://media.example:8920/emby/` | `user-A` | `sync-abc` |
+| 2 | `Jellyfin` | Jelly | `http://jelly.example:8096` | （空串） | — |
+| 3 | `WebDav` | Team DAV | `https://dav.example/dav/films` | （null） | — |
+| 4 | `Local` | 我的本地文件夹 | `C:\Media` | （null） | — |
+
+另给 `history.json` 两条（一条有进度、一条位置 0），命令行因此报 `skippedHistoryEntries: 1`。
+导出命令（口令只走环境变量）：
+
+```powershell
+$env:MH_BACKUP_PASSWORD = "跨平台备份-测试口令-2026"
+dotnet windows/src/MediaHub.BackupCli/bin/Debug/net10.0/MediaHub.BackupCli.dll export `
+  --settings D:/mh-verify/w25/settings.json --history D:/mh-verify/w25/history.json `
+  --out D:/mh-verify/w25/windows-export.mhbackup --json
+```
+
+产物：`2743` B，sha256 `0225ab7c794e7f5f74714d2adb3ca38d0fc297b59c3dbcee8eb6824206c62666`，
+`sections=["servers","preferences"]`、`servers=4`、`skipped=[]`。**同一份字节**落到两处（逐字节相同）：
+
+- Android 读取：`core/common/src/test/resources/backup/windows-cli-export.mhbackup`
+- Windows 复读：`windows/tests/assets/windows-cli-export.mhbackup`
+
+### 15.3 Android 侧断言（`BackupWindowsCliFileTest`，6 例）
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `theWindowsCliExportOpensOnAndroidWithItsManifestIntact` | 用口令解开 Windows 产物 ⇒ `Ok`；`appVersion=windows-0.1.0`、`minimumReaderVersion=2`、`includedSections=[servers,preferences]`、`recordCounts={servers:4,preferences:1}`、`createdAtEpochMs>0` |
+| `theServersKeepTheirIdentitiesAndTheBlankAccountStaysNoAccount` | 四行来源按类型取到；`sync-abc` 原样保留、空白账号导出为 **null**（Android 身份比较里 null ≠ 空串）、无 `SyncSourceId` 的两行是 `win-` + 16 位十六进制（20 字符）、WebDAV 端点 URL 原样 |
+| `theLocalFolderSourceCarriesNoEndpointAndNoAccount` | `LOCAL` 来源端点为空（本地路径在别的设备上没有意义） |
+| `thePreferencesKeepOnlyTheFieldsWithRealEquivalents` | 偏好只带三对有等价物的字段：`1.5f` / `autoPlayNextEpisode=false` / `showPlayerInfoOverlay=true`，`subtitleSizeSp` 保持格式默认 18 |
+| `theComputerExportDoesNotSmugglePlaybackProgressOrFavorites` | `progress` 与 `favorites` 都为空 —— Windows 按文件路径记账、备份按「来源+条目」记账，没有可靠映射就不导出 |
+| `theSameFileWithAnotherPasswordDoesNotOpen` | 同一份文件换口令 ⇒ `AuthenticationFailed`（不是「解析失败」） |
+
+跑法：`gradlew.bat :core:common:testDebugUnitTest`；本轮 core:common **672 例 / 0 失败 / 11 跳过**。
+
+### 15.4 Windows 侧断言（`BackupWindowsCliArtifactTests`，7 例）
+
+前 6 例用 `MhBackupSerializer.Import` 读同一份文件，字段期望与 §15.3 完全一致（两棵树各读一遍，任一侧语义漂移都会红）；
+第 7 例是**进程级**断言：`dotnet <MediaHub.BackupCli.dll> --help` 把 stdout 重定向后按 UTF-8 解码，必须没有替换字符 `U+FFFD`，且含「用法：」「export --settings」。
+
+跑法：`dotnet test windows/tests/MediaHub.Tests --no-restore`；本轮 **1904/0**（上一轮 1897 + 7）。
+
+### 15.5 本轮修掉的真缺陷：命令行 stdout 不是 UTF-8
+
+被重定向时（脚本 / CI / 管道），`MediaHub.BackupCli --json` 的中文与 JSON 都按**系统代码页 936** 输出：
+原样字节开头是 `MediaHub ±¸·Ý¹¤¾ß£¨Windows ¶Ë£©`，按 UTF-8 解出来整段是替换字符 —— 任何解析 `--json` 的脚本都会失败。
+修法：`windows/src/MediaHub.BackupCli/Program.cs` 在调用命令层之前设 `Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)`（无 BOM），
+设置编码会同步替换 `Console.Out`，命令层仍用注入的 `TextWriter`，单元测试不受影响。
+
+**负向对照 A**：把这一行删掉再跑同一套件 ⇒ **恰好 1 红** `The_command_line_writes_utf8_when_its_output_is_redirected`（6 通过 / 1 失败）；
+从实现态快照 `D:/mh-verify/w25-snap/Program.cs` 逐字节还原（sha256 `0ec4c000c66023d40c22884d618171b0f4da35f8cf25588d8484796cd46ec477`，比较相等）后复跑 **7/7**。
+
+### 15.6 仍未做（如实）
+
+- Android 的**还原**只到「容器 + 载荷能读」，没有走 `BackupRepository.prepareRestore/buildPreview/restore` 落库 —— 本层之外 **NOT_RUN**；
+- 设置页「备份与还原」入口 **NOT_IMPLEMENTED**（需要 GUI 窗口）；
+- 播放进度与收藏仍不落库（原因见 §9.2 / §15.3）；
+- 真实 WebDAV 服务端只做过桩断言，**SERVER_UNVERIFIED**。
+
+### 15.7 重做这份证据的步骤
+
+1. 改 Windows 采集层或命令行后，按 §15.2 的命令重新导出（口令自行设定，不写进仓库）；
+2. 把新产物同时覆盖到 §15.2 的两个路径，确认两处 sha256 相同；
+3. 更新本节的字节数/sha256/`sections`/`counts` 与两侧期望值；
+4. 跑 §15.3 与 §15.4 的测试；两份文件是**被读的权威字节**，测试不会重新生成它们。
+
+## 16 仍未做（如实）
 
 - 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏仍不落库 —— NOT_IMPLEMENTED
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED

@@ -21,6 +21,7 @@
     <ProjectReference Include="..\..\src\MediaHub.Storage\MediaHub.Storage.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Sync\MediaHub.Sync.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.SyncCli\MediaHub.SyncCli.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.BackupCli\MediaHub.BackupCli.csproj" />
     <ProjectReference Include="..\MediaHub.TestSupport\MediaHub.TestSupport.csproj" />
   </ItemGroup>
   <ItemGroup>
@@ -36,5 +37,6 @@
     <Content Include="..\assets\baseline-vectors.json" Link="assets\baseline-vectors.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- Golden vectors for the cross-platform .mhbackup container (W15); Windows wrote them, the Kotlin twin must match. -->
     <Content Include="..\assets\backup-vectors.json" Link="assets\backup-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\windows-cli-export.mhbackup" Link="assets\windows-cli-export.mhbackup" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
