@@ -9,9 +9,11 @@
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
       4. a regenerated report suddenly contains a policy violation;
-      5. the LGPL runtime dependency set changes and nobody notices the licence gap count moved.
+      5. the LGPL runtime dependency set changes and nobody notices the licence gap count moved;
+      6. the committed SBOM drifts from the freshly resolved graph - a package is bumped or added,
+         the report moves with it, and docs/sbom-windows.cdx.json keeps describing the old set.
 
-    This script checks those five surfaces without touching the network, the build, or the
+    This script checks those six surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -203,6 +205,110 @@ if (Test-Path -LiteralPath $reportFile) {
 }
 else {
     Add-Check 'report-exists' 'SKIP' ('no report at ' + $reportFile + ' - pass -JsonPath, or run: pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir <dir> -Json <dir>/license-report.json -Sbom')
+}
+
+# --- 6. SBOM inventory vs the regenerated report -----------------------------------------------
+function Get-SbomLicenceExpression {
+    param($Component)
+    $entry = @($Component.licenses) | Select-Object -First 1
+    if ($null -eq $entry) { return "" }
+    if ($entry.expression) { return [string]$entry.expression }
+    if ($entry.license -and $entry.license.name) { return [string]$entry.license.name }
+    return ""
+}
+
+function Format-PurlList {
+    param([object[]] $Purls)
+    $list = @($Purls)
+    if ($list.Count -le 3) { return ($list -join ", ") }
+    return ((@($list) | Select-Object -First 3) -join ", ") + " (+" + ($list.Count - 3).ToString() + " more)"
+}
+
+$reportPackages = @()
+$sbomNuget = @()
+if ($report) { $reportPackages = @(@($report.packages) | Where-Object { $_.purl -like "pkg:nuget/*" }) }
+if ($bom) { $sbomNuget = @(@($bom.components) | Where-Object { $_.purl -like "pkg:nuget/*" }) }
+
+if (-not $report) {
+    $reason = "no licence report to compare against - pass -JsonPath, or run: pwsh -NoProfile -File windows/tools/license-report.ps1 -Sbom"
+    Add-Check "sbom-inventory" "SKIP" $reason
+    Add-Check "sbom-inventory-licences" "SKIP" $reason
+    Add-Check "sbom-source-revision" "SKIP" $reason
+}
+elseif (-not $bom) {
+    $reason = "the SBOM did not parse, so its inventory cannot be compared - see the sbom-shape check above"
+    Add-Check "sbom-inventory" "SKIP" $reason
+    Add-Check "sbom-inventory-licences" "SKIP" $reason
+    Add-Check "sbom-source-revision" "SKIP" $reason
+}
+else {
+    $reportByPurl = @{}
+    foreach ($row in $reportPackages) { $reportByPurl[([string]$row.purl)] = $row }
+    $sbomByPurl = @{}
+    foreach ($component in $sbomNuget) { $sbomByPurl[([string]$component.purl)] = $component }
+    $missing = @($reportByPurl.Keys | Where-Object { -not $sbomByPurl.ContainsKey($_) } | Sort-Object)
+    $extra = @($sbomByPurl.Keys | Where-Object { -not $reportByPurl.ContainsKey($_) } | Sort-Object)
+    if (($missing.Count -eq 0) -and ($extra.Count -eq 0)) {
+        Add-Check "sbom-inventory" "PASS" ($reportByPurl.Count.ToString() + " resolved package(s) recorded one for one in the SBOM (" + $sbomByPurl.Count.ToString() + " pkg:nuget components)")
+    }
+    else {
+        $detail = "the SBOM is stale: " + $missing.Count.ToString() + " resolved package(s) missing [" + (Format-PurlList $missing) + "], " + $extra.Count.ToString() + " recorded but no longer resolved [" + (Format-PurlList $extra) + "] - regenerate: pwsh -NoProfile -File windows/tools/license-report.ps1 -Sbom"
+        Add-Check "sbom-inventory" "FAIL" $detail
+    }
+
+    $licenceDrift = @()
+    foreach ($purl in @($reportByPurl.Keys | Sort-Object)) {
+        if ($sbomByPurl.ContainsKey($purl)) {
+            $recorded = Get-SbomLicenceExpression -Component $sbomByPurl[$purl]
+            $resolved = [string]$reportByPurl[$purl].license
+            if ($recorded -ne $resolved) { $licenceDrift += ($purl + ": sbom=" + $recorded + " report=" + $resolved) }
+        }
+    }
+    if ($licenceDrift.Count -eq 0) {
+        Add-Check "sbom-inventory-licences" "PASS" ("every recorded licence expression still matches the resolved graph (" + @($reportByPurl.Keys).Count.ToString() + " rows)")
+    }
+    else {
+        Add-Check "sbom-inventory-licences" "FAIL" ($licenceDrift.Count.ToString() + " licence expression(s) drifted: " + ((@($licenceDrift) | Select-Object -First 3) -join " ; ") + " - regenerate: pwsh -NoProfile -File windows/tools/license-report.ps1 -Sbom")
+    }
+
+    $revisionProp = @($bom.metadata.properties) | Where-Object { $_.name -eq "mediahub:source-revision" } | Select-Object -First 1
+    if (-not $revisionProp) {
+        Add-Check "sbom-source-revision" "WARN" "the SBOM records no mediahub:source-revision property, so its lineage cannot be checked"
+    }
+    else {
+        $recordedRevision = [string]$revisionProp.value
+        $sha = if ($recordedRevision.Contains("@")) { $recordedRevision.Substring($recordedRevision.LastIndexOf("@") + 1) } else { "" }
+        if (-not $sha) {
+            Add-Check "sbom-source-revision" "WARN" ("cannot read a commit out of mediahub:source-revision=" + $recordedRevision)
+        }
+        else {
+            $git = Get-Command git -ErrorAction SilentlyContinue
+            if (-not $git) {
+                Add-Check "sbom-source-revision" "WARN" ("git is not on PATH, so " + $sha + " cannot be checked against this branch")
+            }
+            else {
+                $head = ""
+                $reachable = $false
+                try {
+                    $head = [string](@(& git -C $RepoRoot rev-parse HEAD 2>$null) | Select-Object -First 1)
+                    & git -C $RepoRoot merge-base --is-ancestor $sha HEAD 2>$null | Out-Null
+                    $reachable = ($LASTEXITCODE -eq 0)
+                }
+                catch {
+                    $reachable = $false
+                }
+                if (-not $reachable) {
+                    Add-Check "sbom-source-revision" "FAIL" ("the SBOM says it was generated from " + $recordedRevision + ", which is not an ancestor of HEAD (" + $head + ") - it came from another lineage; regenerate it on this branch")
+                }
+                elseif ($head -and ([string]$head).StartsWith($sha)) {
+                    Add-Check "sbom-source-revision" "PASS" ("generated from " + $recordedRevision + ", which is HEAD")
+                }
+                else {
+                    Add-Check "sbom-source-revision" "PASS" ("generated from " + $recordedRevision + ", an ancestor of HEAD (" + ([string]$head).Substring(0, 12) + ") - the inventory above is what matters; regenerate to refresh the recorded revision")
+                }
+            }
+        }
+    }
 }
 
 # --- summary ----------------------------------------------------------------------------------

@@ -359,6 +359,7 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
   但**尚未切换到产品**。
 - 因此**在完成引擎切换与合规判定前，Windows 客户端不具备分发条件**。
   详见 [windows/THIRD-PARTY-NOTICES.md](windows/THIRD-PARTY-NOTICES.md) 与 `windows/docs/licensing/`。
+- 许可证面核对器 `windows/tools/check-licence-surface.ps1` 现为 **24 项**：W32 起新增 `sbom-inventory`（比对本仓库 SBOM 与「当场重新解析出的依赖图」）、`sbom-inventory-licences`（比对许可表达式）、`sbom-source-revision`（SBOM 记录的本机提交须在当前分支历史上）；CI 随 `windows-ci.yml` 的 Licence report 步骤自动跑，细则见 `windows/docs/licensing/LICENSE-SURFACE-CHECK.md` §3.1。
 
 ### 最近更新（自动同步）
 

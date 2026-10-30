@@ -260,3 +260,45 @@ Then re-measure the two publish trees (the commands in §0 and `windows/docs/LGP
 and update the table above; the machine-readable copy lives in
 `windows/engine/lgpl/dist/flavour-builds.txt`. How the scripts work:
 [LICENSE-SURFACE-CHECK.md](LICENSE-SURFACE-CHECK.md).
+
+## 8. Keeping this inventory honest (W32, 2026-10-30)
+
+This document is hand-maintained, but the machine-readable copy (`windows/docs/sbom-windows.cdx.json`) is
+generated and **can go stale without anyone noticing**: bump or add a NuGet package, regenerate only the
+report, and the SBOM keeps describing the old set while every existing gate stays green - those gates
+check the document shape, not whether it still describes the graph that was resolved.
+
+Three checks now compare the committed SBOM against a freshly resolved report
+(`windows/tools/check-licence-surface.ps1`, see [LICENSE-SURFACE-CHECK.md](LICENSE-SURFACE-CHECK.md) §3.1):
+
+| Check | Compares | Fails when |
+| --- | --- | --- |
+| `sbom-inventory` | report `packages[].purl` vs SBOM `components[].purl` (`pkg:nuget/` only) | a package was added, removed, or upgraded and the SBOM was not regenerated |
+| `sbom-inventory-licences` | report `license` vs SBOM `licenses[0].expression` | a licence expression changed for a package that is still recorded |
+| `sbom-source-revision` | `mediahub:source-revision` (`<branch>@<sha>`) vs `git merge-base --is-ancestor` | the recorded commit is not on the history of this branch |
+
+Measured 2026-10-30 (report from `license-report.ps1 -OutDir <dir> -SkipDocs`):
+`checks=24 failed=0 warnings=1 skipped=0`, with `29 resolved package(s) recorded one for one in the SBOM
+(29 pkg:nuget components)` and `every recorded licence expression still matches the resolved graph
+(29 rows)`. The committed SBOM was **already fresh** (its recorded revision `feature/windows-client@1c30471`
+is an ancestor of HEAD `b586b001bb8f`, and the resolving report reproduces the same 29 purls and licence
+expressions), so nothing had to be regenerated: what W32 adds is that a future drift fails CI instead of
+shipping silently. Six negative controls (temporary SBOM copies passed through `-SbomPath`, repository
+files untouched) each produced **exactly one** failure; deleting the report leaves the three checks at
+`SKIP` and the script still exits 0.
+
+Two details worth knowing before you use `-SbomPath`: it is joined onto the repository root, so pass a
+repository-relative path (an absolute one is concatenated and silently not found), and running locally
+needs the two probe projects restored one by one - the solution-level `dotnet restore` does not write
+`MediaHub.EngineProbe` / `MediaHub.ResumeProbe` assets, and without them the report is INCOMPLETE
+(`projects=11` instead of 13):
+
+```powershell
+dotnet restore src/MediaHub.EngineProbe/MediaHub.EngineProbe.csproj
+dotnet restore src/MediaHub.ResumeProbe/MediaHub.ResumeProbe.csproj
+pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts/license-report -SkipDocs
+pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
+```
+
+If `sbom-inventory` fails, regenerate the SBOM (`license-report.ps1 -Sbom`) and commit it together with
+the dependency change that moved the graph.
