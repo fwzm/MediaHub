@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T04:47:00+08:00",
+  "updated_at": "2026-10-31T04:56:00+08:00",
   "updated_by": "lead-W6-113-r14",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -379,7 +379,8 @@
         "round 13 digest baseline throws on the new gate (\"as a digest - that is the 2026-10-31 format\") and the new update script upgrades it to row lists without -AcceptRemoval; E11 refuses a value substitution without the switch and leaves the baseline untouched",
         "real corpus: baseline regenerated from the CI TRX of run 41095080796 (windows 2,719,155 B / webdav 145,266 B) 127,587 B -> 163,501 B; MediaHub.Tests 100 row sets / 415 rows, WebDav 3 / 12; RE4 the earlier run 41055690826 gives the same rows (cross-run determinism)",
         "exact-head windows-ci 41124244650 success: methodData=100 baseline=method data table 100 row sets + argumentRows=415 baseline=argument row table 415 rows (WebDav 3 / 12), methodCases=1952 ... 1952 cases, combined tests=2056; licence checks=31 failed=0 warnings=0 skipped=0; MPV_PROBE/ENGINE_PROBE PASS (GPU/HDR/audio NOT exercised)",
-        "latent defect fixed: Json-String escaped a quote as \"\\\" instead of \\\" - invisible while the baseline only held 16-hex digests, illegal JSON once row text was stored; >126 code units are now \\uXXXX escaped so the baseline stays pure ASCII"
+        "latent defect fixed: Json-String escaped a quote as \"\\\" instead of \\\" - invisible while the baseline only held 16-hex digests, illegal JSON once row text was stored; >126 code units are now \\uXXXX escaped so the baseline stays pure ASCII",
+        "docs-head windows-ci 41125371678 success (head 49911e49): the same ladder lines as the code head, including argumentRows=415 baseline=argument row table 415 rows and WebDav 12 rows, licence checks=31 failed=0 warnings=0 skipped=0"
       ],
       "notes": "Residual limits recorded in TEST_MATRIX 6.9: the framework truncates display names (6 of the 415 windows rows carry the ellipsis marker); replacing one row while adding a row whose text equals the replaced one restores the multiset exactly, so that last case still passes.",
       "next_action": "No action required unless the gate reds; any further level (semantic/signature hashing) must be scoped with its own cost analysis first.",

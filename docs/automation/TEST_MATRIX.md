@@ -520,3 +520,12 @@ TRX 事实（EXECUTED）：每个 `[Theory]` 数据行是独立的 `<UnitTest na
 ### exact-head CI 验收（EXECUTED）
 
 head `1e2cf9ed5de87abe4e3da6691cbacc6a50167cc3` 的 windows-ci **`41124244650` completed/success**：台阶行逐行命中 `total=1952 baseline=1952` / `classes=113 baseline=class table 113 entries` / `methods=1637 baseline=method table 1637 methods` / `methodCases=1952 baseline=method case table 1952 cases` / **`methodData=100 baseline=method data table 100 row sets`** / **`argumentRows=415 baseline=argument row table 415 rows`**，WebDav `104` / `4 entries` / `95 methods` / `104 cases` / `3 row sets` / `12 rows`，`combined tests=2056`；licence `check-licence-surface  checks=31 failed=0 warnings=0 skipped=0`；探针 `MPV_PROBE PASS` / `ENGINE_PROBE PASS`。同 head 的 Android CI `41124244565` 取证时 in_progress；`a0b46f6e` / `cb2f0b14` / `825f46f4` / `1e2cf9ed5de87abe4e3da6691cbacc6a50167cc3` 的 `core` / `feature` / `app` 树哈希相同 ⇒ 按 ADR-AUTO-001 继承。
+
+### docs head 的 exact-head CI 验收（第 42 例之后）
+
+| run | head | 结果 |
+| --- | --- | --- |
+| windows-ci `41124244650` | `1e2cf9ed`（代码） | success：台阶行含 `methodData=100 ... 100 row sets` 与 `argumentRows=415 ... 415 rows`，WebDav `3` / `12`，`combined tests=2056`，licence `checks=31 failed=0 warnings=0 skipped=0` |
+| windows-ci `41125371678` | `49911e49`（docs） | success：所有台阶行与代码 head 逐字一致（含 `argumentRows=415 ... 415 rows`），licence `checks=31 failed=0 warnings=0 skipped=0`，两个探针 PASS |
+
+- 两个 head 的 Android CI（`41124244565` / `41125371452`）在本轮取证时均未结束（concurrency 取消或 in_progress）；两个 head 与 `825f46f4` 的 `core` / `feature` / `app` 树哈希完全相同 ⇒ 按 ADR-AUTO-001 继承，不作为独立结论。
