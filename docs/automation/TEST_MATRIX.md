@@ -245,4 +245,70 @@ MediaHub.Tests: total=1927 baseline=1927
 
 **第三方采纳实证（EXECUTED，2026-10-30 20:08）**：并行写者 W31 `06b6890d` 新增 9 例后把基线 1943 → 1952、类表 112 → 113；同 head windows-ci `41053179818` success，日志 `total=1952 baseline=1952` / `classes=113 baseline=class table 113 entries`。相对 W28 只刷总数，这次连类表一起改 —— per-class 口径被第二个使用者按设计跟上。
 
+### 6.5 只比「每类用例数」仍可被「类内换方法」绕过（2026-10-30 22:3x 追加，W6-113l）
+
+per-class 版（`W6-113k`）挡的是「跨类搬用例」，挡不住**同一个类里删掉一个方法、再加一个新方法**：
+类内计数不变、总数也不变 ⇒ 判绿。这与该门禁自述要挡的 *equal totals do not prove the same cases ran*
+是同一个洞的再下一层。
+
+- **补法**：基线每套件再带一张 `methods` 表（类名 → 方法名数组）。方法名取 TRX `TestDefinitions` 的
+  `TestMethod.className` + `TestMethod.name`，**剥掉第一个 `(` 起的 Theory 参数**后去重 —— 数据行由
+  `classes` 的用例数管，方法表只管「这个方法还在不在」。
+- **判定**：基线里的方法必须仍由其所属类上报，否则 RED，失败消息直接点名（`gone: <Class>.<Method>`）；
+  方法新增或类内变多 → GREEN + `::warning`（与类表同口径：漂移可见，但不阻塞别人）。
+- **配置校验**：缺/空 `methods` 表、`classes` 里有而 `methods` 里无的类、空方法名、类内重名，一律 throw。
+- **明示残留限制**：Theory 的**数据行（参数值）不钉**，只钉方法名 —— 只改 Theory 数据仍判绿（NC16）。
+- **刷新脚本**：`update-test-suite-baseline.ps1` 同步重写 `methods` 表；`_comment` 由脚本拥有（每次刷新
+  归一化为脚本内置文本，NC24 显式验证），下调仍需 `-AcceptRemoval`。
+- **规模取舍**：基线 **7,659 B → 122,204 B**，`file` / `expected` / `classes` 三栏与上一版逐字段比对
+  **全部不变**，只多出 `methods`。用 100+ KB 换「点名缺失方法」的可诊断性与 review 里逐行可见的 diff。
+
+| 对照 | 输入 | 预期 | 实测（pwsh7 / PS5.1） |
+|---|---|---|---|
+| NC0 | 基线与真实结果一致 | PASS | PASS / PASS |
+| NC1 | 总数少 1 | RED | RED / RED |
+| NC2 | 总数相同、类分布不同 | RED | RED / RED |
+| NC3 | 整类消失（计数搬到别类以保持总数） | RED | RED / RED |
+| NC4 | 出现新类 | GREEN+warning | GREEN+warning ×2 |
+| NC5 | 某类用例数变大 | GREEN+warning | GREEN+warning ×2 |
+| NC6 | 有 failed | RED | RED / RED |
+| NC7 | 有 notExecuted | RED | RED / RED |
+| NC8 | 基线缺 `classes` 表 | RED | RED / RED |
+| NC9 | `classes` 表为空 | RED | RED / RED |
+| NC10 | `expected=0` | RED | RED / RED |
+| NC11 | `expected<0` | RED | RED / RED |
+| NC12 | 类计数<1 | RED | RED / RED |
+| **NC13** | **同类内换方法：total 与每个类计数都不变** | **RED** | **RED / RED** |
+| **NC14** | **NC13 的同一输入交给 round 7 的 per-class 门禁** | **GREEN** | **GREEN**（旧门禁确实放行 ⇒ NC13 的红是本轮收口所得） |
+| NC15 | 方法跨类搬移、两侧计数不变 | RED | RED / RED |
+| NC16 | 只改 Theory 数据参数 | PASS（明示限制） | PASS / PASS |
+| NC17 | 基线缺 `methods` 表 | RED | RED / RED |
+| NC18 | `methods` 表为空 | RED | RED / RED |
+| NC19 | `classes` 有而 `methods` 无的类 | RED | RED / RED |
+| NC20 | 类内方法重名 | RED | RED / RED |
+| NC21 | 失败消息点名缺失方法 | 含 `MediaHub.Tests.AlphaTests.A_one` | 命中 |
+| NC22 | 刷新脚本遇方法消失、无 `-AcceptRemoval` | RED 且文件不变 | RED / RED，文件未变 |
+| NC23 | 同上 + `-AcceptRemoval` | 写入新方法集 | PASS（`A_gone` 被移除） |
+| NC24 | 刷新脚本二次运行 | 逐字节稳定 + `suites` 数据不变 | 稳定；`_comment` 归一化为脚本内置文本 |
+| NC25 | 真实 CI TRX 重生成基线 | 逐字节一致 | 一致 |
+| NC26 | 真实 1952 + 104 对已提交基线 | PASS | PASS，含 `methods=1637` / `methods=95`、`combined tests=2056` |
+| NC27 | 默认相对路径冒烟 | PASS | PASS |
+
+> 数据源：CI run `41055690826`（head `48d5feb7`）的 `test-results/*.trx`（windows 2,719,155 B / webdav 145,266 B），
+> 因此基线钉的是该 commit 的 CI 真实行为。
+> 台账位置：`D:/mh-verify/r9/run-nc.cjs`（28 条对照一次跑完，两代 PowerShell 各跑一遍）。
+
+**CI 实测验收（EXECUTED_PASS）**：head `f045d34c` 的 windows-ci run `41072599036` **completed/success**（`pull_request` 事件），
+日志逐行命中台阶：
+
+- `MediaHub.Tests: total=1952 baseline=1952 failed=0 notExecuted=0`
+- `MediaHub.Tests: classes=113 baseline=class table 113 entries`
+- `MediaHub.Tests: methods=1637 baseline=method table 1637 names`
+- `MediaHub.WebDav.Tests: total=104 baseline=104 ... classes=4 ... 4 entries ... methods=95 baseline=method table 95 names`
+- `combined tests=2056`
+
+**迁移验证（EXECUTED，第 29 例）**：把 head `48d5feb7` 上的**旧格式基线**（无 `methods` 表）交给新闸门 ⇒ 两代 PowerShell 均 **exit 1** 并抛出
+`entry for MediaHub.Tests has no methods table - the per-method check would be vacuous`。即旧基线不会在新闸门下**静默变绿**，
+而是当场失败并指明缺哪张表 —— 这是本轮新校验的直接可用性证据。
+
 

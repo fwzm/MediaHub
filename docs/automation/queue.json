@@ -224,6 +224,27 @@
       ],
       "notes": "替换漏洞：删 1514 例再加 1514 个新例，旧门禁（仅总数）判绿，新门禁判红。刷新路径 update-test-suite-baseline.ps1。",
       "next_action": "无；若后续新增/删除用例，按 windows-ci 的 ::warning 提示运行 update-test-suite-baseline.ps1（下调需 -AcceptRemoval 且需人工理由）。"
+    },
+    {
+      "id": "W6-113l",
+      "title": "套件基线加入 per-method 表：堵住「同类内删一个方法、再加一个新方法」的替换漏洞",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r9",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "闸门仍在 windows/tools/check-test-suite-baseline.ps1 单点，负向对照跑同一代码路径",
+        "基线新增 methods 表（MediaHub.Tests 113 类 / 1637 方法，WebDav 4 类 / 95 方法），源数据取自 CI run 41055690826（head 48d5feb7）的真实 TRX",
+        "基线 7,659 B -> 122,204 B；file/expected/classes 三栏与 HEAD 逐字段比对全部不变，仅新增 methods",
+        "负向对照 29 例（NC0-NC27 + 迁移验证）通过，pwsh7 与 PS5.1 判定逐例一致",
+        "NC13 关键：同类内换方法（total 与每类计数全不变）-> 新门禁 RED；同一输入在 round 7 per-class 门禁下 GREEN（NC14）",
+        "NC16 明示残留限制：Theory 数据行（参数值）不钉，只钉方法名",
+        "迁移验证：旧格式基线（无 methods 表）在新闸门下两代 PowerShell 均 exit 1，报 has no methods table - the per-method check would be vacuous",
+        "CI 实测 head f045d34c: windows-ci run 41072599036 success，日志 methods=1637 baseline=method table 1637 names / WebDav methods=95 ... 95 names / combined tests=2056",
+        "Android CI run 41072599413（同 head）入账时 in_progress -> 未作结论（本轮零 Android 代码改动）"
+      ],
+      "notes": "方法名取 TRX TestDefinitions 的 TestMethod.className + name，剥掉第一个 ( 起的 Theory 参数后去重；数据行仍由 classes 的用例数管。刷新脚本 update-test-suite-baseline.ps1 同步写 methods 表，且 _comment 由脚本拥有、每次刷新归一化。",
+      "next_action": "无；若 CI 判 RED 并点名方法消失，需人工确认后以 -AcceptRemoval 刷新基线。"
     }
   ]
 }
