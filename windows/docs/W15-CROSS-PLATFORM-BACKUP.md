@@ -5,7 +5,8 @@
 > 导出采集层（本机来源/偏好 → 备份载荷，纯函数）**EXECUTED_PASS**（17 例 + 四条负向对照）；
 > 备份命令行（`export` / `import` 预览）**EXECUTED_PASS**（13 例 + 四条负向对照，全量 MediaHub.Tests 1806/0）；
 > 还原落库（`import --apply`：来源与偏好写 `settings.json`）**EXECUTED_PASS**（applier 12 例 + CLI 用例 17 例 + 四条负向对照，全量 MediaHub.Tests **1822/0**）；
-> 设置页入口、播放进度/收藏落库、WebDAV 上传仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
+> WebDAV 上传（`upload`：PUT + `--mkdir`，远端失败独立退出码 9）**EXECUTED_PASS**（上传器 11 例 + CLI 3 例 + 四条负向对照，全量 MediaHub.Tests **1836/0**）；
+> 设置页入口、播放进度/收藏落库、WebDAV 下载/删除仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
 
 ## 1 动机与范围
 
@@ -273,12 +274,47 @@ W19 让 `import --apply` 落库，同时**不扩大**能写的东西——只写
 
 - 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED；目前只能用命令行。
 - 播放进度与收藏落库—— NOT_IMPLEMENTED（上面已给原因；进度需要条目→文件映射，收藏需要登录后的服务端写）。
-- WebDAV 上传、Android 反向对照—— NOT_IMPLEMENTED / NOT_RUN。
-## 10 仍未做（如实）
+- WebDAV 上传已在 §10 实现（`upload`）；Android 反向对照 —— NOT_RUN。
+## 10 WebDAV 上传（W20）
+
+### 10.1 缺口
+
+备份此前只能落在本地盘。仓库里的 WebDAV 客户端（`windows/src/MediaHub.Providers.WebDav/WebDavApi.cs`）是**只读**的：只有 PROPFIND / OPTIONS / range GET，零 PUT / MKCOL / DELETE，也没有任何写入口。
+要满足用户口径「本地备份 / 还原，或 WebDAV 备份 / 还原」，至少得能把容器文件放上远端。
+
+### 10.2 上传器（`windows/src/MediaHub.Backup/MhBackupWebDavUploader.cs`）
+
+- 一个动作：`PUT`（`application/octet-stream`，字节原样）。账号口令由调用方传入，有账号就发 `Basic`，没账号就不发认证头（不猜匿名之外的语义）。
+- 超时 60 s；失败一律折成稳定原因串，不把异常原文抛给调用方：`401/403` 认证、`409` 目录缺失、`400/415` 不接受、`507` 空间不足、`5xx` 服务端出错、超时、连不上。
+- `--mkdir` 语义克制：只在远端返回 `409` 时创建**最后一级**父集合（`MKCOL`，201/200/204/405 都算已存在），然后重试一次 `PUT`；多级路径不做猜测式逐级创建。
+- 字节与状态一起回：`Result(Ok, StatusCode, Reason, Location)`；CLI 再用 SHA-256 自己算一遍摘要给用户对账。
+
+### 10.3 命令行（`upload`）
+
+```
+MediaHub.BackupCli upload --file <备份文件> --url <WebDAV 地址> [--user <账号>] [--password-env <变量名>] [--mkdir] [--json]
+```
+
+- **口令只从环境变量取**：远端口令默认读 `MH_WEBDAV_PASSWORD`，与备份口令的 `MH_BACKUP_PASSWORD` 分开——一个变量传两种凭据会让「谁的口令」变得含糊，命令行参数则会进历史记录。
+- 退出码沿用 W18 的编号表，新增 **9（远端失败）**：本地读不出文件仍是 8，不会被误当成远端问题。
+- 成功文本给「已上传备份 / 远端地址 / HTTP 状态 / 文件大小 / SHA-256」，并提醒备份不含密码或令牌、从远端取回仍需本机口令。`--json` 给同义的机器可读字段。
+
+### 10.4 验证
+
+- `BackupUploadTests` 14 例（11 上传器 + 3 CLI）：字节与 `Basic` 头精确、无账号不发认证、401/409/507/415 各自的原因、`--mkdir` 的请求顺序是 `PUT,MKCOL,PUT` 且 `MKCOL` 只打最后一级父集合、`MKCOL` 403 只重试失败一次、空内容与非 http 不发送、超时映射、CLI 成功文本与 JSON 字段、CLI 远端 401 退出码 9、用法错误零请求、本地文件缺失退出码 8。
+- 四条负向对照（快照 → 改坏 → 跑 → 逐字节还原，`sha256` 相等）：A `PUT` 不发认证头 ⇒ 2 红；B 把 `409` 也算成功 ⇒ 3 红；C 上传路径的本地 IO 失败改报远端 ⇒ 1 红（该行在 `export` 与 `upload` 各有一处，按方法段切片才改对位置）；D 去掉 `--url` 必填校验 ⇒ 1 红。日志 `D:/mh-verify/w20-neg-{A,B,C,D}.log`。
+- 全量 `MediaHub.Tests` **1836 / 0**（W19 的 1822 + 14）；日志 `D:/mh-verify/w20-full-tests1.log`。
+
+### 10.5 仍未做（本层之外）
+
+- WebDAV **下载 / 列目录 / 删除**、远端覆盖策略与冲突提示 —— NOT_IMPLEMENTED（本轮只有上传）。
+- 用真实 WebDAV 服务器做一次「上传 → 取回 → 本机还原」端到端 —— NOT_RUN（本机无可用远端，也不在无授权时启停外部服务）。
+- 设置页「备份与还原」入口里的「传到 WebDAV」按钮 —— NOT_IMPLEMENTED（当前只有命令行）。
+## 11 仍未做（如实）
 
 - 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏仍不落库 —— NOT_IMPLEMENTED
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
 - 本机进度/收藏的写入（来源与偏好已随 `--apply` 落库）—— NOT_IMPLEMENTED
-- WebDAV 上传（当前 WebDAV 只**读**）—— NOT_IMPLEMENTED
+- WebDAV 上传已实现（§10）；下载 / 列目录 / 删除仍 NOT_IMPLEMENTED
 - Android 恢复计划器与 Windows 反向对照、真机与真 GUI —— DEVICE_UNVERIFIED / GUI_UNVERIFIED
 - 口令强度无最小长度约束（沿用 Android 口径）；容器未做外部安全审计

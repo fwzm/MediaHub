@@ -25,8 +25,12 @@ public static class MhBackupCliCommand
     public const int ExitCorrupted = 6;
     public const int ExitExportRejected = 7;
     public const int ExitIo = 8;
+    public const int ExitRemote = 9;
 
     public const string DefaultPasswordVariable = "MH_BACKUP_PASSWORD";
+
+    /// <summary>WebDAV 口令的缺省环境变量名。备份口令与远端口令分开，避免用一个变量传两种凭据。</summary>
+    public const string DefaultRemotePasswordVariable = "MH_WEBDAV_PASSWORD";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -40,7 +44,8 @@ public static class MhBackupCliCommand
         string[] args,
         TextWriter output,
         TextWriter error,
-        Func<string, string?>? environment = null)
+        Func<string, string?>? environment = null,
+        HttpMessageHandler? httpHandler = null)
     {
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
@@ -83,6 +88,7 @@ public static class MhBackupCliCommand
         {
             "export" => RunExport(options, output, error, environment),
             "import" => RunImport(options, output, error, environment),
+            "upload" => RunUpload(options, output, error, environment, httpHandler),
             _ => UnknownCommand(command, output, error),
         };
     }
@@ -499,6 +505,107 @@ public static class MhBackupCliCommand
         return ExitOk;
     }
 
+    private static int RunUpload(
+        Dictionary<string, string?> options,
+        TextWriter output,
+        TextWriter error,
+        Func<string, string?> environment,
+        HttpMessageHandler? httpHandler)
+    {
+        if (IsHelp(Value(options, "help") ?? string.Empty))
+        {
+            WriteUsage(output);
+            return ExitOk;
+        }
+
+        string? filePath = Value(options, "file");
+        if (string.IsNullOrWhiteSpace(filePath)) return UsageFailure(error, "upload 需要 --file <备份文件>");
+        string? rawUrl = Value(options, "url");
+        if (string.IsNullOrWhiteSpace(rawUrl)) return UsageFailure(error, "upload 需要 --url <WebDAV 地址>");
+        if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out Uri? target))
+            return UsageFailure(error, "上传地址不是合法 URI：" + rawUrl);
+
+        byte[] content;
+        try
+        {
+            content = File.ReadAllBytes(filePath);
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return IoFailure(error, filePath, failure);
+        }
+
+        string? userName = Value(options, "user");
+        string? password = ResolveRemotePassword(options, environment);
+        bool createCollection = Has(options, "mkdir");
+
+        MhBackupWebDavUploader.Result result;
+        try
+        {
+            result = MhBackupWebDavUploader.UploadAsync(content, target, userName, password, createCollection, httpHandler)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (Exception failure) when (failure is HttpRequestException or TaskCanceledException)
+        {
+            return Fail(error, "上传失败：" + failure.Message, ExitRemote);
+        }
+
+        string sha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(content));
+        if (!result.Ok)
+        {
+            if (Has(options, "json"))
+            {
+                var failed = new JsonObject
+                {
+                    ["command"] = "upload",
+                    ["ok"] = false,
+                    ["status"] = result.StatusCode,
+                    ["reason"] = result.Reason,
+                    ["url"] = target.AbsoluteUri,
+                    ["bytes"] = content.LongLength,
+                    ["sha256"] = sha256,
+                };
+                WriteJson(output, failed);
+            }
+            return Fail(error, "上传失败（HTTP " + result.StatusCode + "）：" + (result.Reason ?? "远端拒绝"), ExitRemote);
+        }
+
+        if (Has(options, "json"))
+        {
+            var payload = new JsonObject
+            {
+                ["command"] = "upload",
+                ["ok"] = true,
+                ["status"] = result.StatusCode,
+                ["url"] = (result.Location ?? target).AbsoluteUri,
+                ["bytes"] = content.LongLength,
+                ["sha256"] = sha256,
+                ["createdCollection"] = createCollection && result.StatusCode == 201,
+            };
+            WriteJson(output, payload);
+            return ExitOk;
+        }
+
+        output.WriteLine("已上传备份：" + filePath);
+        output.WriteLine("远端地址：" + (result.Location ?? target).AbsoluteUri);
+        output.WriteLine("HTTP 状态：" + result.StatusCode);
+        output.WriteLine("文件大小：" + content.Length + " 字节");
+        output.WriteLine("SHA-256：" + sha256);
+        output.WriteLine("提醒：备份不含密码或令牌；从远端取回后仍需本机口令才能解开。");
+        return ExitOk;
+    }
+
+    private static string? ResolveRemotePassword(Dictionary<string, string?> options, Func<string, string?> environment)
+    {
+        string variable = Value(options, "password-env") ?? DefaultRemotePasswordVariable;
+        return environment(variable);
+    }
+
+    /// <summary>上传只接受「最后一个路径段像文件」的地址；以 / 结尾说明调用方给的是目录。</summary>
+    internal static bool LooksLikeFileTarget(Uri target)
+        => !target.AbsolutePath.EndsWith("/", StringComparison.Ordinal);
+
     private static string NextBackupPath(string settingsPath)
     {
         string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
@@ -567,10 +674,12 @@ public static class MhBackupCliCommand
         output.WriteLine("用法：");
         output.WriteLine("  export --settings <settings.json> --out <备份文件> [--history <history.json>] [--password-env <变量名>] [--json]");
         output.WriteLine("  import --file <备份文件> [--settings <settings.json>] [--apply] [--strategy merge|replace] [--password-env <变量名>] [--json]");
+        output.WriteLine("  upload --file <备份文件> --url <WebDAV 地址> [--user <账号>] [--password-env <变量名>] [--mkdir] [--json]");
         output.WriteLine("说明：");
         output.WriteLine("  口令只从环境变量读取（缺省 " + DefaultPasswordVariable + "），不接受命令行参数。");
         output.WriteLine("  import 默认只输出预览；--apply 才写入 settings.json（必须同时给 --settings）。");
         output.WriteLine("  --apply 只写本机能表达的来源与有等价的偏好；播放进度与收藏不落库，回执会给出原因。");
-        output.WriteLine("  退出码：0 成功 / 2 参数错误 / 3 不是备份文件 / 4 口令错误 / 5 版本过新 / 6 内容损坏 / 7 导出被拒 / 8 读写失败。");
+        output.WriteLine("  upload 只做 PUT；远端目录不存在时加 --mkdir 尝试创建最后一级集合，多级创建不做猜测。");
+        output.WriteLine("  退出码：0 成功 / 2 参数错误 / 3 不是备份文件 / 4 口令错误 / 5 版本过新 / 6 内容损坏 / 7 导出被拒 / 8 读写失败 / 9 远端失败。");
     }
 }
