@@ -11,7 +11,7 @@ import kotlinx.serialization.Serializable
 /**
  * POST /Items/{itemId}/PlaybackInfo 请求体（PlaybackInfoRequest）。
  * 无转码红线（与 Emby 1B-2.1 同一策略）：EnableDirectStream=true / EnableTranscoding=false，
- * 只询问服务端能否 Direct Stream，绝不申请转码会话。
+ * 允许原字节 DirectPlay 协商，最终只交付同源静态流，绝不申请转码会话。
  */
 /**
  * PlaybackInfoRequest 精确 contract（v10.9.0 源模型核对，ADR-039 review 修正）：
@@ -21,11 +21,14 @@ import kotlinx.serialization.Serializable
 data class JellyfinPlaybackInfoRequestDto(
     @SerialName("UserId") val userId: String,
     @SerialName("AutoOpenLiveStream") val autoOpenLiveStream: Boolean = false,
-    @SerialName("EnableDirectPlay") val enableDirectPlay: Boolean = false,
+    @SerialName("EnableDirectPlay") val enableDirectPlay: Boolean = true,
     @SerialName("EnableDirectStream") val enableDirectStream: Boolean = true,
     @SerialName("EnableTranscoding") val enableTranscoding: Boolean = false,
     @SerialName("StartTimeTicks") val startTimeTicks: Long? = null,
     @SerialName("MaxStreamingBitrate") val maxStreamingBitrate: Int? = null,
+    @SerialName("MediaSourceId") val mediaSourceId: String? = null,
+    /** -1 suppresses server subtitle processing; static media retains embedded streams. */
+    @SerialName("SubtitleStreamIndex") val subtitleStreamIndex: Int? = null,
     @SerialName("DeviceProfile") val deviceProfile: JellyfinDeviceProfileDto = JellyfinDeviceProfileDto(),
 )
 

@@ -148,6 +148,12 @@ class EmbyAuthProvider(
         return try {
             val user = api.getCurrentUser(tokens.accessToken, session.userId)
             if (!tokenStore.isAuthenticationCurrent(attempt)) return AuthSessionState.SignedOut
+            if (user.id.isNullOrBlank() || user.id != session.userId) {
+                return AuthSessionState.Error(
+                    AuthSessionErrorKind.INVALID_RESPONSE,
+                    "服务器返回的用户身份与当前会话不一致",
+                )
+            }
             AuthSessionState.Authenticated(EmbyUserMapper.map(user, server.id))
         } catch (e: CancellationException) {
             throw e

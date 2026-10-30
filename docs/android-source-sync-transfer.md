@@ -3070,3 +3070,555 @@ envelope.sources.any { source ->
 - 设备侧取证：把 15 + 23 例里能在 androidTest 上跑的部分搬上模拟器（PBKDF2 600 000 轮在低端机上耗时是可观察项）；
 - 真实两机搬运取证（上面 §35.8 第 5 条），届时与 §33.8 / §34.8 的跨机项一起改成 EXECUTED_PASS；
 - 口令策略补超长口令与畸形 Unicode 用例。
+
+
+## §36 加密归档接进 Android 导入入口（W6-63）
+
+### §36.1 动机：读端交付了，但没有调用方
+
+§35.8 第 1 条如实记着：「`ArchiveReader` 与 `ArchiveWriter` 目前是 `core/common` 里的纯函数，
+Android 侧还没有任何调用方。把它接到『导入信封』那条链上是下一个切片的活。」
+本节补的就是这条缝：**不新造一条导入流程**，而是让既有那条（选文件 → 预览 → 逐条允许 → 应用）
+多认一种输入——离线加密归档 `.mharchive`。
+
+边界仍然照 W6-62 的写法：只做「读进来并交给既有网关」，不做导出侧的「另存为归档」、
+不给传输链路口令通道、不碰数据库。
+
+### §36.2 分支语义：对齐 Windows `SyncCliRunner.TryResolveEnvelope`
+
+Windows 的权威语义在 `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` L2159-2217：
+先看前 8 字节是不是 `MHSYNCA1`，是归档且没带 `--passphrase` 就报 `passphrase-required`；
+带了口令就走 `EncryptedArchiveReader.Read`，`ArchiveException` 的 `Reason` 原样当稳定码输出。
+Android 侧的分流是同一个顺序，落在一处纯函数 `SourceSyncDocumentInput.resolve` 里：
+
+| 输入 | 返回 | 外部可观察结果 |
+| --- | --- | --- |
+| 长度 < 8 或前 8 字节不是 `MHSYNCA1` | `Plaintext` | 走既有明文路径（宽松 UTF-8 → codec → 网关），与 W6-23 逐字节相同 |
+| 是归档，调用方没给口令 | `PassphraseRequired` | `passphrase-required`（本地闸，网关零调用） |
+| 是归档 + 口令，但结构坏 | `Rejected` | `magic-mismatch` / `corrupt-header` / `unsupported-version:<n>` / `unknown-kdf:<k>` / `invalid-iterations` / `corrupt-ciphertext` / `payload-too-large` |
+| 是归档 + 口令，口令本身不合策略 | `Rejected` | `passphrase-empty` / `passphrase-too-weak`（在建密钥之前就拒，白跑不了一次 PBKDF2） |
+| 是归档 + 口令，解密或认证失败 | `Rejected` | `wrong-passphrase-or-tampered`（错口令与密文被改同码，不做攻击者 oracle） |
+| 是归档 + 口令，解开了但载荷不是合法信封 | `Rejected` | `malformed-payload` |
+| 是归档 + 口令，信封宣称携带凭据 | `Rejected` | `secrets-not-allowed`（写侧 W6-62 也拒，两侧同义） |
+| 是归档 + 口令，成功 | `Decrypted` | 用 `SourceSyncCodec.encode` 重新编码成明文 JSON，再走同一条 codec → 网关路径 |
+
+两条与 Windows 的**有意差异**，都写在这里免得后人当成漏做：
+
+1. **没有退出码分类**：Windows 把归档失败归成 `CliExitCode.ArchiveOrCredential`（4）、把 `passphrase-required` 归成 `InputProblem`（2），
+   因为 CLI 的退出码是给脚本判断「换参数重试还是换文件」用的。Android 没有退出码，码本身就是分类；
+   `passphrase-required` 与 `malformed-json` 一样属于「这份输入还缺一步」的本地闸，不是归档结构码。
+2. **没有 `archive-not-supported-by-plan`**：Windows 的 `plan` 子命令只读明文信封，所以要专门拒一次归档。
+   Android 的导入页只有一条路，预览发生在解密**之后**，这条分支没有调用方，就不造一个没人报的码。
+
+### §36.3 三处落点的分工：为什么嗅探在 core:database、暂存在控制器、口令在卡片里
+
+**嗅探与解密放 `core:database`**（`SourceSyncDocumentInput`），因为两个入口都汇到这里：
+拨号路 `SourceSyncTransferImportService.receiveAndImport` 与监听路 `SourceSyncListenerImportService` 最终都调
+`importEnvelopeBytes`。加在它前面一处，两条路同时得到归档支持，不必改两遍。
+
+**暂存密文放 ViewModel 的控制器里**（`SourceSyncArchiveController`），不放 `SourceSyncImportState`。理由有三条：
+state 是 `StateFlow`，会被 Compose 反复重组、被测试整份比较、也可能被日志打印；
+密文留在控制器的私有字段里，对外只暴露 `pendingByteCount` 一个长度。
+第三条是生命周期：重选文件、点重置、离开页面都必须把暂存丢掉，控制器正好有 `clear()` 这个点。
+
+**口令只活在卡片分支的局部 `remember` 里**：不写 StateFlow、不落盘、不进日志。
+点「解密」时它被原样交给 ViewModel，ViewModel 在 `Dispatchers.Default` 上跑 PBKDF2（600 000 轮），
+用完即弃——卡片一消失（解开、重选、离开页面）那份字符串就随组合一起被丢弃。
+把关卡做成「常驻但按不动的按钮」而不是隐藏按钮，是为了避免用空口令白跑一次 600 000 轮密钥派生。
+
+### §36.4 三条外部可观察语义
+
+1. **没口令不猜**：归档 + 无口令 ⇒ `passphrase-required`，网关一次都不会被调（零写入的第一道闸）。
+   这条与 W6-30 的 `delivery-unconfirmed` 是同一种态度：宁可报「我缺东西」，不假装成功。
+2. **错口令与篡改同码**：`wrong-passphrase-or-tampered`。GCM 的 tag 校验天然分不出这两者，
+   伪造出区别就等于给攻击者一个 oracle；说法与 W6-62 §35.3 完全一致。
+3. **明文路径一个字节都没变**：`plaintextEnvelopeKeepsTheExactTextPath` 断言网关收到的是
+   `bytes.toString(Charsets.UTF_8)` 的同一个字符串（不是重新编码的等价物）。
+   既有 W6-23 的 19 例包括「0xB1 这类非法 UTF-8 ⇒ malformed-json」，全部仍然绿。
+
+### §36.5 落点行号表
+
+| 文件 | 行 | 内容 |
+| --- | --- | --- |
+| `core/database/.../sync/SourceSyncDocumentInput.kt` | :19 | `object SourceSyncDocumentInput`（新文件，74 行） |
+| 同上 | :22 | `PASSPHRASE_REQUIRED = "passphrase-required"` |
+| 同上 | :27 | `looksLikeArchive`：逐字节比 8 字节 magic，短于 8 字节直接 false |
+| 同上 | :36 | `resolve(bytes, passphrase)`：四分支 Plaintext / Decrypted / PassphraseRequired / Rejected |
+| 同上 | :45 | `ArchiveReader.tryRead`；:47 失败时 `reason ?: MALFORMED_PAYLOAD` |
+| 同上 | :50 | 成功时 `SourceSyncCodec.encode(envelope)`，runCatching 兜底 `malformed-payload` |
+| 同上 | :61 | `sealed interface SourceSyncDocumentResolution`（四个实现 :64/:67/:70/:73） |
+| `core/database/.../sync/SourceSyncTransferImportService.kt` | :130 | 原 `importEnvelopeBytes(bytes)` 保留签名，转调带口令重载（既有 5 处调用点零改动） |
+| 同上 | :143 | 新 `importEnvelopeBytes(bytes, passphrase: String?)`：按 resolve 四分支分派 |
+| 同上 | :161 | `private suspend fun deliverText(json)`：原来的 tryDecode → EnvelopeRejected / Imported 原样搬进来 |
+| `feature/settings/.../sync/SourceSyncArchiveController.kt` | :11 | `SourceSyncArchivePrompt(visible, fileName, error)`（新文件，126 行） |
+| 同上 | :18 | `SourceSyncArchiveCopy`：HINT / LABEL / ACTION / `errorOf(reason)` |
+| 同上 | :37 | `fun interface SourceSyncArchiveUnlockPort`（单方法，替身测试不跑 PBKDF2） |
+| 同上 | :53 | `class SourceSyncArchiveController`；:71 `offer`、:88 `unlock`、:120 `clear` |
+| `feature/settings/.../sync/SourceSyncImportViewModel.kt` | :163 | 控制器组装（port 直连 `SourceSyncDocumentInput.resolve`） |
+| 同上 | :176 | `val archivePrompt: StateFlow<SourceSyncArchivePrompt>` |
+| 同上 | :197 | `fun loadPickedDocument(bytes, fileName)`：非归档就直接当明文走既有 loadEnvelope |
+| 同上 | :210 | `fun unlockArchive(passphrase)`：`Dispatchers.Default` 上跑解密 |
+| 同上 | :322 / :338 | `reset()` / `onCleared()` 里 `archiveController.clear()` |
+| `feature/settings/.../sync/SourceSyncImportSession.kt` | :61 | `fun requirePassphrase(reason, message, fileName)`：整份置 BLOCKED，密文绝不进 envelopeJson |
+| `feature/settings/.../sync/SourceSyncImportLogic.kt` | :51 / :54 | `PASSPHRASE_REQUIRED` / `UNLOCK_FAILED` 两条中文文案；:76-77 `blockedText` 返回自身 |
+| `feature/settings/.../sync/SourceSyncImportScreen.kt` | :197-206 | 四个新 tag：`sync.import.passphrase.card` / `sync.import.passphrase` / `sync.import.unlock` / `sync.import.passphrase.error` |
+| 同上 | :220 / :224 | Route 收集 `archivePrompt`；picker 改调 `readPickedDocument` |
+| 同上 | :299-301 | 两个新形参都带缺省值 ⇒ 既有调用点与 11 个 androidTest 零改动 |
+| 同上 | :327 | 说明句补「或加密归档（.mharchive，需要导出时设置的口令）。」 |
+| 同上 | :368-418 | 口令卡：HINT + 密码遮罩输入框 + 「解密」按钮（空口令禁用）+ 错误行 |
+| 同上 | :1338 | `readPickedDocument` 改成 `stream.readBytes()`（原 `readEnvelope` 只读文本，二进制归档会被读坏，已删除） |
+
+### §36.6 用例清单
+
+**A. `SourceSyncArchiveImportTest`（core/database，12 例，进 `--required-suite`）**
+
+| 行 | 用例 | 断言 |
+| --- | --- | --- |
+| :28 | `looksLikeArchiveOnlyMatchesTheEightByteMagic` | 归档 true；空数组 / `"MHSYNC"` / 明文信封 false |
+| :36 | `windowsArchiveIsDecryptedAndHandedToTheGatewayAsPlainEnvelope` | Windows 写的 1282 B 归档解开后网关收到明文；解码结果与明文件**结构化相等**；`canSendSecrets == false`；3 条来源 + 1 条墓碑 |
+| :55 | `archiveWithoutAPassphraseIsRejectedWithTheStableCode` | `passphrase-required`；网关 0 调用 |
+| :69 | `wrongPassphraseReportsTheArchiveCodeAndNeverCallsTheGateway` | `wrong-passphrase-or-tampered`；0 调用 |
+| :81 | `aTamperedCiphertextReportsTheSameCode` | 翻掉最后一字节（tag 区）⇒ 同一个码 |
+| :97 | `aPassphraseBelowThePolicyIsRejectedBeforeAnyKeyIsDerived` | `"short"` ⇒ `passphrase-too-weak`；0 调用 |
+| :109 | `aTruncatedArchiveReportsItsStructuralCode` | 截到 20 B ⇒ `corrupt-header`（结构错不冒充口令错） |
+| :122 | `bytesThatOnlyStartWithTheMagicAreRejectedAsACorruptArchive` | 只有 magic 的 16 B ⇒ `corrupt-header` |
+| :136 | `bytesShorterThanTheMagicAreTreatedAsPlaintext` | `"MHSYNC"` 六字节 ⇒ 明文路径 ⇒ `malformed-json` |
+| :148 | `plaintextEnvelopeKeepsTheExactTextPath` | 网关收到 == `String(bytes, UTF_8)`，明文路径零变化 |
+| :162 | `aLocallyWrittenArchiveRoundTripsThroughTheSamePath` | 用 `ArchiveWriter.write` 现造归档 ⇒ 同一入口解开 ⇒ 信封结构相等 |
+| :180 | `acceptOnlyGatewayEchoesTheDecryptedIdentityWithoutWriting` | `acceptOnly` 网关回显 deviceId / snapshotId / 64 字符内容指纹；零写入 |
+
+**B. `SourceSyncArchiveControllerTest`（feature/settings，8 例）**
+
+| 用例 | 断言 |
+| --- | --- |
+| `plaintextIsNotOfferedAndLeavesNoPrompt` | 非归档 ⇒ `offer` false、卡片不可见、不碰端口 |
+| `anArchiveShowsThePromptAndAsksForThePassphrase` | 归档 ⇒ 卡片可见、带文件名、`onBlocked(passphrase-required)` |
+| `aCorrectPassphraseHandsBackTheEnvelopeAndDropsTheArchive` | 成功 ⇒ 回调解出信封、卡片收起、暂存清空 |
+| `aWrongPassphraseKeepsThePromptAndPutsTheArchiveCodeOnTheErrorLine` | 失败 ⇒ 卡片保持、错误行含 ArchiveError 原码、主文案是 UNLOCK_FAILED |
+| `aBlankPassphraseNeverReachesThePort` | 空白口令不调端口（不白跑 PBKDF2） |
+| `unlockWithoutAnOfferedArchiveDoesNothing` | 没暂存时 `unlock` 是 no-op |
+| `clearDropsTheStashedArchiveAndThePrompt` | `clear()` 同时丢密文与卡片 |
+| `pickingAnotherFileClearsThePreviousPrompt` | 重选明文文件 ⇒ 上一份归档的提示被清掉 |
+
+**C. `SourceSyncPassphraseScreenTest`（feature/settings androidTest，5 例）**
+
+| 用例 | 断言 |
+| --- | --- |
+| `noPassphraseCardIsRenderedWhenThePickerDidNotSeeAnArchive` | 明文路径不出现任何口令控件，首屏 PICK/PREVIEW 仍可见 |
+| `anArchiveShowsTheCardWithItsFileNameAndADisabledUnlockButton` | 卡片与输入框在；空口令时「解密」按不动；错误行不存在 |
+| `typingAPassphraseEnablesUnlockAndTappingItHandsTheTextBack` | 输字后按钮可用；点击把口令**原样**交回（`listOf("correct horse battery staple")`） |
+| `aRejectedPassphraseKeepsTheCardOpenAndShowsTheReasonCode` | 错误行显示 `wrong-passphrase-or-tampered` |
+| `thePassphraseCardSitsAboveThePreviewBlockAndKeepsTheMainFlowOnTheFirstScreen` | 不滚动：口令卡与首屏 PICK/PREVIEW 同时可见（W6-41 的首屏纪律没被破坏） |
+
+### §36.7 本机实跑（串行，低内存）
+
+| 步骤 | 命令 / 脚本 | 结果 |
+| --- | --- | --- |
+| 三模块单测 | `D:/mh-verify/run-w6-63.bat`（`:core:common:testDebugUnitTest :core:database:testDebugUnitTest :feature:settings:testDebugUnitTest`，`--max-workers=1 "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" "-Dkotlin.daemon.jvm.options=-Xmx1024m"`） | `BUILD SUCCESSFUL in 6m 53s`、`167 actionable tasks: 26 executed`、`EXIT=0` |
+| androidTest 编译 | `assembleDebugAndroidTest`（同一低内存参数） | `BUILD SUCCESSFUL in 3m 26s`、`EXIT=0` |
+| 门禁脚本自测 | `python -m unittest discover -s .github/scripts/tests` | `Ran 54 tests` / `OK` |
+| 清理 | 跑完 `gradlew --stop` | `java-left=0`；仓库根 `hs_err_pid*.log` / `replay_pid*.log` 计数均 0 |
+
+XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-63.log`）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `core/common` | 42 | 595 | 0 | 0 | 11 | 不变（11 个跳过仍是两个环境门控套件） |
+| `core/database` | 19 | **184** | 0 | 0 | 12 | 172 → 184（+12 = W6-63 的 `SourceSyncArchiveImportTest`） |
+| `feature/settings` | 22 | **342** | 0 | 0 | 0 | 334 → 342（+8 = W6-63 的 `SourceSyncArchiveControllerTest`） |
+
+关键套件逐个：`SourceSyncArchiveImportTest` **12/12**（14.60 s，主要花在 4 次真 PBKDF2 上：
+解开归档 2.25 s、错口令 2.91 s、篡改 2.48 s、本地写+读 4.70 s）、
+`SourceSyncArchiveControllerTest` **8/8**（0.043 s，端口是替身，不跑 PBKDF2）。
+
+### §36.8 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机搬运**：把归档拷到另一台机器再导入的完整流程 NOT_RUN（同 §33.8 / §34.8 / §35.8 第 5 条，都需要第二台机器）。
+2. **设备侧密码学**：全部结论来自 JVM；Android 上 `javax.crypto` 由 Conscrypt 实现，PBKDF2 600 000 轮在低端机上的耗时
+   与峰值内存未测 ⇒ DEVICE_UNVERIFIED。
+3. **传输路没有口令通道**：`receiveAndImport` 与监听路调的是单参重载（`passphrase = null`），
+   所以线上真收到一份归档只会得到 `passphrase-required` 而不是解开它。这是**有意**的：口令不过网。
+   要支持「对端发归档」就得在线协议里开口令通道，那是另一个安全评审的活，本轮不做。
+   也因此「归档在真实 socket 上跑过」这条证据不存在——归档的端到端只有文件选择器这一条路。
+4. **导出侧没有做**：「另存为 .mharchive」零实现，`ArchiveWriter.write` 目前只有测试调用方。
+   **（已由 §37 关闭：W6-64 把写端接到了导出卡的「另存为文件」，明文与加密共用同一次导出。）**
+5. **8 MiB 上限**：继承 §35.8 第 3 条，只测了判定写法没测接近上限的真数据。
+6. **口令的界外情况**：继承 §35.8 第 6 条（超长口令、NUL、代理对）。界面上也没有「显示口令」开关、
+   没有剪贴板粘贴的专项验证。
+7. **门禁**：本轮把 `SourceSyncArchiveImportTest` 加进 `--required-suite`（46 → **47** 个套件），
+   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`。
+   CI 侧已在 head `6857bdd` 上落实：Android CI run **40215577317** success，日志实计
+   `--required-suite com.` **47** 行（末两条 `ArchiveRoundTripTest` → `SourceSyncArchiveImportTest`，
+   紧接 `--require-complete-suites`），`uniqueTests 2246` 且 `core/database` 报 **184** 例。
+8. **instrumentation**：新增 5 例 Compose 断言本机无设备/模拟器可跑，设备侧证据来自 CI：
+   `6857bdd` 的 API 32 / API 36 两个作业里 `:feature:settings:connectedDebugAndroidTest`
+   **Starting 105 → Finished 105**、0 FAILED，作业末断言 `API 32/36: 19 unique mandatory visual/parser tests passed`
+   命中该 SHA；真机仍 DEVICE_UNVERIFIED。
+
+### §36.9 下一步
+
+- 导出侧：「另存为 .mharchive」（`ArchiveWriter.write` 已有写端，缺的是导出页与文件落盘）；
+  **（已由 §37 完成，见 W6-64；剩余缺口改为设备侧取证与扩展名统一。）**
+- 设备侧取证：把 PBKDF2 600 000 轮的耗时搬到模拟器上量一次（低端机是主要风险面）；
+- 真实两机搬运取证（§36.8 第 1 条），届时与 §33.8 / §34.8 / §35.8 的跨机项一起改成 EXECUTED_PASS；
+- 若产品上要「对端直接发归档」，先写一份安全评审：口令怎么进、超时多久、失败怎么告诉用户不泄露信息。
+
+## §37 导出侧「另存为文件」：明文信封与加密归档共用一次导出（W6-64）
+
+### §37.1 动机：读端与导入端都到位了，写端只剩测试调用方
+
+§36.8 第 4 条如实记着：「导出侧没有做：『另存为 .mharchive』零实现，`ArchiveWriter.write` 目前只有测试调用方。」
+§36.9 第一条也是它。本节把这条缝补上：**不新造一条导出管线**，而是把已有的那条
+（`AndroidSourceSyncService.export()` → 发送卡的 `SourceSyncExportPort`）多接一个出口——
+用户选一个保存位置，把同一份导出写成文件。口令留空是明文信封，填了口令是加密归档；
+两者的内容都来自同一次导出，差别只在有没有过 `ArchiveWriter.write`。
+
+边界：不碰传输链路（W6-42 的发送卡不动）、不读文件（导入侧是 W6-63 的活）、
+不给导出加 secrets 通道（归档层永不载凭据，见 W6-62）。
+
+### §37.2 对齐 Windows `SourceSyncSession.Export` 与 `SyncCliRunner.RunExport`
+
+Windows 的权威语义分两处：`windows/src/MediaHub.Sync/SourceSyncSession.cs` L92-176 决定
+「信封怎么来、要不要加密」，`windows/src/MediaHub.SyncCli/SyncCliRunner.cs` L73-166 决定
+「写哪个文件、写失败报什么」。Android 只做前者，后者由 SAF 顶替。
+
+| Windows 环节 | Android 对等物 | 语义是否等价 |
+| --- | --- | --- |
+| `Export(includeSecrets, passphrase, ...)`：passphrase == null ⇒ 明文 `EnvelopeJson` | `SourceSyncArchiveExport.of(export, null)` ⇒ `Plain(export.json)` | 等价；用的就是发送卡那一份文本，不重新编码 |
+| passphrase != null ⇒ `EncryptedArchiveWriter.Write(envelope, passphrase, DefaultIterations, now)` | passphrase != null ⇒ `ArchiveWriter.write(envelope, passphrase, DEFAULT_ITERATIONS, envelope.createdAtEpochMs)` | 等价；迭代数与「信封 / 归档头同一时间戳」都照抄 |
+| `includeSecrets && passphrase != null` ⇒ `secrets-not-supported`（`SourceSyncSessionReasons`） | 信封 `canSendSecrets == true` ⇒ `ArchiveWriter` 的 `secrets-not-allowed` | 同一态度（归档层永不载凭据），码名沿用 W6-62 的读侧集合 |
+| `includeSecrets && protector == null` ⇒ `secrets-require-protector`；给了 `secrets` 却 `includeSecrets == false` ⇒ `secrets-not-requested` | 不适用 | Android 的导出恒 `canSendSecrets = false`（`AndroidSourceSyncService.export()`），没有 secrets 通道 |
+| `EnsureSourceIds()` 的未分配项进 `Warnings`（`source-skipped:<serverId>:<reason>`） | `AndroidSourceSyncService.export()` 的 `skippedServerIds` | 部分等价：Android 只跳「没有可用端点 / 没有可写类型」的来源，identity 由 `SourceSyncLocalIds.derive` 确定性派生（不是 warning） |
+| `TryResolveExportPath` 的 `export-path-*` 码 + `File.WriteAllBytes` 的 `write-failed` | SAF `CreateDocument` 选位置 + `BackupFileStore.write` | 不等价，也不该等价：Android 没有路径（用户选 URI），失败折成本层两个码（见 §37.4） |
+| `DefaultEnvelopeFileName = "sync-envelope.json"` / `DefaultArchiveFileName = "sync-envelope.mhsync"` | `PLAIN_FILE_NAME = "sync-envelope.json"` / `SourceSyncArchiveExport.DEFAULT_FILE_NAME = "sync-envelope.mharchive"` | 明文同名；加密载体**同一字节格式、默认扩展名不同**（历史遗留，见 §37.8 第 4 条） |
+| `--json` 的十六个字段（command / root / path / encrypted / deviceId / snapshotId / sourceCount / deletionCount / canSendSecrets / sealedSecretCount / warningCount / warnings / bytes…） | 无对等物：成功行是「已导出<明文信封\|加密归档>（<文件名>，<字节数> 字节，<来源数> 个来源）」 | 不等价：Android 是 GUI，没有脚本消费方。计数只保留真实会变的三个（来源数、字节数、明文 / 加密） |
+
+一条容易误读的地方写在这里：Windows 的 `ExportSession.Archive` 与 `EnvelopeJson` 是二选一（`IsEncrypted => Archive.Length > 0`），
+Android 的 `SourceSyncArchiveArtifact` 也是二选一（`Plain` 或 `Sealed`），两边都没有「既给 JSON 又给归档」的中间态。
+
+### §37.3 三处落点的分工：策略在 core:database、状态机在控制器、字节只在内存
+
+**口令策略与打包放 `core:database`**（`SourceSyncArchiveExport.of`），因为写端判定只该有一处：
+`ArchiveWriter.write` 已经按「口令 → 凭据 → 迭代数 → 载荷上限」五步判过了（W6-62），
+这里不复制任何一条，只把 `ArchiveException` 折成 `Rejected(reason, message)`。
+两个出口（明文 / 加密）都由同一个 `SourceSyncExport` 产生，所以内容一定一致。
+
+**状态机放 `feature/settings` 的 `SourceSyncArchiveExportController`**：
+`Idle → AwaitingPassphrase → Ready → Saving → Saved | Failed`，
+另有两条退出路径 `saveCancelled()`（保存器上点取消）与 `dismiss()`（收起卡片 / 换页 / 销毁）。
+生成物（明文 JSON 字节或归档字节）只活在 `Ready` 状态里，对外只暴露 `pendingByteCount` 一个长度；
+`save` 只受理 `Ready`，避免连点两次时把两份不同字节写到同一个位置。
+
+**写盘复用既有的 SAF 设施**：`SourceSyncArchiveFilePort` 的生产实现包 `feature/settings/backup/BackupFileStore.write`
+（`ProductionBackupFileStore` 走 `openOutputStream` + 流式写 + 异常不展示原文），
+不新写一套 ContentResolver 代码。界面用 `ActivityResultContracts.CreateDocument("application/octet-stream")`
+在 `LaunchedEffect(archiveExportState)` 里、状态到 `Ready` 时拉起保存器——这套范式照 `backup/BackupScreen.kt` L84-112 抄的。
+
+导出卡放**页尾**（`SendSection` 之后），与 W6-41 起的首屏纪律一致：「选择文件 / 预览」仍是进来第一眼看到的东西。
+
+### §37.4 四条外部可观察语义
+
+1. **口令留空 = 明文，且不重新编码**：`Plain` 原样交出 `SourceSyncExport.json`（与 W6-42 发送卡发出去的同一份文本），
+   `plaintextExportKeepsTheExportedJsonWithoutReEncoding` 断言字符串逐字节相等。
+2. **空白口令不悄悄退化成明文**：界面层 `takeIf { it.isNotBlank() }` 把空串当「留空」下发 null（这是产品选择），
+   但核心层收到空白串照样报 `passphrase-empty`——`aBlankPassphraseIsRejectedInsteadOfFallingBackToPlaintext` 钉住这条，
+   免得以后有别的调用方把空串直接塞进 `of`。
+3. **归档头与信封同一时间戳**：`createdAtEpochMs = export.envelope.createdAtEpochMs`，与 Windows `ExportSession` 的 now 语义对齐；
+   迭代数固定 `ArchiveKdf.DEFAULT_ITERATIONS`（600 000），读侧照常接受 `>= MIN_ITERATIONS`。
+4. **写盘失败有独立本地码，不进跨机码表**：`archive-export-stream-unavailable`（目标流打不开，一个字节都没写）
+   与 `archive-export-write-failed`（写的时候抛异常）。`SourceSyncTransferReasons.ALL` 仍是 10 个，五集跨机码表一字未动。
+
+### §37.5 落点行号表
+
+| 文件 | 行 | 内容 |
+| --- | --- | --- |
+| `core/database/.../sync/SourceSyncArchiveExport.kt` | :14 | `sealed interface SourceSyncArchiveArtifact`：Plain / Sealed / Rejected 三态（新文件，82 行） |
+| 同上 | :51 | `object SourceSyncArchiveExport`；:54 `DEFAULT_FILE_NAME = "sync-envelope.mharchive"` |
+| 同上 | :56 | `fun of(export, passphrase)`：null ⇒ Plain，非 null ⇒ ArchiveWriter.write，ArchiveException ⇒ Rejected |
+| `feature/settings/.../sync/SourceSyncArchiveExportController.kt` | :10 | `sealed interface SourceSyncArchiveExportState`（新文件，204 行）；:16 AwaitingPassphrase、:19 Ready、:28 Saving、:31 Saved、:40 Failed |
+| 同上 | :44 | `SourceSyncArchiveExportCopy`：TITLE / HINT / ACTION / PASSPHRASE_LABEL / CANCEL / savedLineOf / failedLineOf |
+| 同上 | :69 / :84 | `SourceSyncArchiveExportPort`（生成）与 `SourceSyncArchiveFilePort`（写盘）两个单方法端口，替身测试不碰 PBKDF2 也不碰 ContentResolver |
+| 同上 | :99 | `class SourceSyncArchiveExportController`；:112 request、:123 prepare、:156 save、:181 saveCancelled、:189 dismiss |
+| 同上 | :131 / :171 / :175 | `PLAIN_FILE_NAME = "sync-envelope.json"` / `STREAM_UNAVAILABLE` / `WRITE_FAILED` |
+| `feature/settings/.../sync/SourceSyncImportViewModel.kt` | :43 | 构造器第 5 个注入 `backupFileStore: BackupFileStore`（Hilt 绑定见 `app/src/main/.../di/AppModule.kt:239`） |
+| 同上 | :189 / :204 | 控制器组装（exportPort 直连 `SourceSyncArchiveExport.of(sourceSyncService.export(), passphrase)`，filePort 包 `backupFileStore.write`）；`val archiveExportState` |
+| 同上 | :351 / :361 / :368 / :373 / :378 | `requestArchiveExport` / `prepareArchiveExport` / `saveArchiveExport` / `cancelArchiveExportSave` / `dismissArchiveExport` |
+| 同上 | :322 / :338 附近 | `reset()` 与 `onCleared()` 里 `archiveExportController.dismiss()`（随页面一起丢弃产物） |
+| `feature/settings/.../sync/SourceSyncImportScreen.kt` | :210-225 | 六个新 tag：`sync.export.card` / `sync.export.action` / `sync.export.passphrase` / `sync.export.submit` / `sync.export.state` / `sync.export.dismiss` |
+| 同上 | :240 / :252 / :257 | Route 收集 `archiveExportState`；`exportSaver`（CreateDocument）；`LaunchedEffect` 在 Ready 时拉起保存器 |
+| 同上 | :599 | 页尾调用 `ArchiveExportSection`（SendSection 之后，首屏不动） |
+| 同上 | :1390 | `@Composable private fun ArchiveExportSection`：卡片 / 口令框（密码遮罩）/ 导出按钮 / 状态行 / 收起按钮 |
+
+### §37.6 用例清单
+
+**A. `SourceSyncArchiveExportTest`（core/database，8 例，进 `--required-suite`）**
+
+| 行 | 用例 | 断言 |
+| --- | --- | --- |
+| :33 | `plaintextExportKeepsTheExportedJsonWithoutReEncoding` | null 口令 ⇒ Plain；`plain.json == export.json`（逐字节）；sourceCount 1、skippedCount 0 |
+| :44 | `aPassphraseProducesAnArchiveThatReadsBackAsTheSameEnvelope` | 头 8 字节 `MHSYNCA1`；`ArchiveReader.tryRead` 解得信封与原始信封**结构相等**；reason 为 null |
+| :57 | `theArchiveHeaderStampsTheEnvelopeTimestampAndTheDefaultIterations` | 头的时间戳 == 信封时间戳、迭代数 == 600 000、kdf == pbkdf2-sha256、version 1 |
+| :73 | `aPassphraseBelowThePolicyIsRejectedWithTheArchiveCode` | `"short"` ⇒ `passphrase-too-weak`（码原样，不包装） |
+| :81 | `aBlankPassphraseIsRejectedInsteadOfFallingBackToPlaintext` | `"   "` ⇒ `passphrase-empty`；绝不悄悄写明文 |
+| :89 | `anEnvelopeThatClaimsToCarryCredentialsIsRejected` | `canSendSecrets = true` ⇒ `secrets-not-allowed` |
+| :97 | `skippedSourcesAreCountedAndDoNotBlockEitherFlavour` | 两条 skipped 在明文与归档两条路上都计数，不阻断；sourceCount 仍是 1 |
+| :110 | `anExportWithNoSourcesStillProducesAReadableArchive` | 空导出也能写出可读归档；读回 sources 为空、`canSendSecrets == false` |
+
+**B. `SourceSyncArchiveExportControllerTest`（feature/settings，11 例）**
+
+| 行 | 用例 | 断言 |
+| --- | --- | --- |
+| :21 | `requestExpandsTheCardOnlyOnce` | Idle → AwaitingPassphrase；再 request 幂等 |
+| :33 | `aBlankPassphraseIsHandedToThePortAsNullAndYieldsPlaintext` | 空白口令以 null 进端口；Ready(`encrypted = false`, `sync-envelope.json`) |
+| :56 | `aSealedArtifactBecomesReadyWithTheArchiveFileName` | Sealed ⇒ Ready(`encrypted = true`, `sync-envelope.mharchive`) |
+| :75 | `aRejectedArtifactKeepsTheCardOpenWithItsStableCode` | Rejected ⇒ 回 AwaitingPassphrase，错误行含原码 |
+| :89 | `prepareIsIgnoredBeforeTheCardIsExpanded` | 卡片未展开时 prepare 不调端口 |
+| :100 | `aSuccessfulWriteReportsTheFileNameAndTheByteCount` | Written ⇒ Saved，文件名 / 字节数 / 来源数与产物一致 |
+| :119 | `anUnavailableStreamReportsItsOwnCode` | StreamUnavailable ⇒ Failed(`archive-export-stream-unavailable`) |
+| :135 | `aWriteFailureCarriesItsOwnCode` | WriteFailed ⇒ Failed(`archive-export-write-failed`, cause) |
+| :151 | `saveWithoutAReadyArtifactNeverTouchesTheFilePort` | 非 Ready 时 save 是 no-op、文件端口零调用 |
+| :163 | `theSavePickerBeingCancelledDropsTheArtifactAndReturnsToIdle` | 保存器取消 ⇒ 回 Idle、产物丢弃 |
+| :176 | `dismissDropsEverythingFromAnyState` | 任意态 dismiss ⇒ Idle |
+
+**C. `SourceSyncArchiveExportScreenTest`（feature/settings androidTest，7 例）**
+
+| 行 | 用例 | 断言 |
+| --- | --- | --- |
+| :36 | `theCollapsedCardShowsOnlyTheExportButton` | Idle 只有「导出」按钮，不出现口令框与提交按钮 |
+| :47 | `tappingExportOpensThePassphraseStep` | 点「导出」后口令框与提交按钮出现 |
+| :57 | `theExpandedCardOffersAnEmptyPassphraseFieldAndBothButtons` | 口令框为空、提交与收起都在 |
+| :68 | `typingAPassphraseAndTappingExportHandsTheTextBack` | 输入口令后点提交，回调收到**原样文本** |
+| :84 | `aSavedExportShowsTheFileNameAndTheByteCount` | Saved ⇒ 状态行含文件名、字节数与「已导出」 |
+| :105 | `aFailureShowsTheStableCodeAndKeepsTheCardOpen` | Failed ⇒ 状态行含稳定码，卡片保持展开 |
+| :117 | `tappingDismissReportsTheDismissCallback` | 点「收起」回调一次 |
+
+### §37.7 本机实跑（串行，低内存）
+
+| 步骤 | 命令 / 脚本 | 结果 |
+| --- | --- | --- |
+| 编译（生产 + 单测 + androidTest） | `:core:database:compileDebugKotlin :feature:settings:compileDebugKotlin`，再 `:core:database:compileDebugUnitTestKotlin :feature:settings:compileDebugUnitTestKotlin :feature:settings:compileDebugAndroidTestKotlin` | 两次均 `BUILD SUCCESSFUL`（2m 29s / 2m 39s）、`EXIT=0` |
+| 三模块单测 | `D:/mh-verify/run-w6-64.bat`（`:core:common:testDebugUnitTest :core:database:testDebugUnitTest :feature:settings:testDebugUnitTest`，`--max-workers=1 "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" "-Dkotlin.daemon.jvm.options=-Xmx1024m"`） | `BUILD SUCCESSFUL in 3m 32s`、`167 actionable tasks: 2 executed, 165 up-to-date`、`EXIT=0` |
+| 门禁脚本自测 | `python -m unittest discover -s .github/scripts/tests` | `Ran 54 tests in 107.171s` / `OK` |
+| 清理 | 跑完 `gradlew --stop` | 仓库根 `hs_err_pid*.log` / `replay_pid*.log` 计数均 0 |
+
+XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-64.log`）：
+
+| 模块 | 套件 | 用例 | 失败 | 错误 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `core/common` | 42 | 595 | 0 | 0 | 11 | 不变（11 个跳过仍是两个环境门控套件） |
+| `core/database` | 20 | **192** | 0 | 0 | 12 | 184 → 192（+8 = 本节 `SourceSyncArchiveExportTest`） |
+| `feature/settings` | 23 | **353** | 0 | 0 | 0 | 342 → 353（+11 = 本节 `SourceSyncArchiveExportControllerTest`） |
+
+关键套件逐个：`SourceSyncArchiveExportTest` **8/8** 0 失败 0 跳过；
+`SourceSyncArchiveExportControllerTest` **11/11** 0 失败 0 跳过（端口是替身，一次 PBKDF2 都不跑）。
+新增 androidTest `SourceSyncArchiveExportScreenTest` 7 例只到编译；本机无设备 / 模拟器，设备侧证据留给 CI（见 §37.8 第 3 条）。
+按文件数 `@Test`，`feature/settings` 的 androidTest 由 105 例增至 **112** 例。
+
+### §37.8 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机搬运**：把导出的 `.mharchive` 拷到另一台机器再导入的完整流程 NOT_RUN（同 §33.8 / §34.8 / §35.8 第 5 条 / §36.8 第 1 条，都需要第二台机器）。
+2. **设备侧密码学**：全部结论来自 JVM；写侧的 PBKDF2 600 000 轮在 Android（Conscrypt）上的耗时与峰值内存未测 ⇒ DEVICE_UNVERIFIED。
+   参考量级：W6-63 在 JVM 上单次解锁 2.2–4.7 s，写侧与读侧同量级。
+3. **androidTest 7 例已在 CI 上跑过，但没有真机**：`b3d0030` 与 `7cc68ac` 的 Android CI 里 `:feature:settings:connectedDebugAndroidTest` 都是 **Starting 112 → Finished 112**、0 FAILED（等于把 `SourceSyncArchiveExportScreenTest` 的 7 例连同既有 105 例全跑了一遍），两个作业末尾各有 `API 32/36: 19 unique mandatory visual/parser tests passed at <该 head>`。真机仍是 DEVICE_UNVERIFIED。
+4. **扩展名差异**：Windows CLI 的加密导出默认名是 `sync-envelope.mhsync`（`SyncCliRunner.DefaultArchiveFileName`），
+   Android 侧统一 `.mharchive`（W6-62 / W6-63 的文案与夹具已经定了）。两者是**同一字节格式**，只是默认名不同；
+   要统一得两边一起改（改 Windows 默认名会碰到既有 CLI 契约与验收脚本），本轮不动。
+5. **8 MiB 上限**：继承 §35.8 第 3 条 / §36.8 第 5 条，只测了判定写法没测接近上限的真数据。
+6. **口令的界外情况**：继承 §36.8 第 6 条（超长口令、NUL、代理对）。导出卡也没有「显示口令」开关、没有剪贴板粘贴的专项验证。
+7. **Windows 的 warnings 与 JSON 输出面没有对等物**：Android 是 GUI，没有 `--json` 消费方；
+   成功行只带来源数 / 字节数 / 明文或加密，逐条跳过原因（`skippedServerIds`）不进界面。
+8. **SAF 的可写性**：部分设备上 `CreateDocument` 可能返回不可写的 URI（`openOutputStream` 返回 null）⇒ 本地码 `archive-export-stream-unavailable`，真机上未验。
+9. **门禁**：本轮把 `SourceSyncArchiveExportTest` 加进 `--required-suite`（47 → **48** 个套件），
+   本机 `python -m unittest discover -s .github/scripts/tests` 为 `Ran 54 tests` / `OK`；`b3d0030` 与 `7cc68ac` 的 Android CI `build` 作业里 `--required-suite com.` 实计 **48** 行（末三条 `ArchiveVectorsTest` / `ArchiveRoundTripTest` / `SourceSyncArchiveExportTest`，紧接 `--require-complete-suites`），`uniqueTests` **2265**、`uniqueTestsPerModule` 报 `core/database` **192** 例与 `feature/settings` **353** 例，作业绿。
+
+### §37.9 下一步
+
+- 设备侧取证：把 PBKDF2 600 000 轮的耗时与峰值内存在模拟器 / 低端机上量一次（写读两侧都要），补 §37.8 第 2 条与 §36.8 第 2 条；
+- 真实两机搬运：Windows 导出 `.mharchive` → 拷到另一台机器 → Android 导入，两端各留 exact 证据（同时关闭 §36.8 第 1 条与 §37.8 第 1 条）；
+- 扩展名统一：若维护者希望与 Windows CLI 默认名一致，需在 CLI 加参数而不是单方面改 Android（否则既有文案与夹具不同步）；
+- 若产品上要「对端直接发归档」，先写一份安全评审：口令怎么进、超时多久、失败怎么告诉用户不泄露信息（与 §36.9 最后一条同一件事）。
+
+## §38 反向互操作：Android 写出的 `.mharchive` 由 Windows 读（W6-65）
+
+> 状态词按本项目口径：EXECUTED_PASS / IMPLEMENTED_UNVERIFIED / GUI_UNVERIFIED / SERVER_UNVERIFIED / DEVICE_UNVERIFIED / NOT_RUN / BLOCKED / FAILED / RELEASE_BLOCKED / SIGNING_BLOCKED。
+> 本轮边界：**只补反向证据**，两端生产实现一行不改。Windows 侧只加一个测试文件 + 一份测试资产；Android 侧只加一个测试方法。
+
+### §38.1 动机：§35–§37 三节都只有「Windows 权威 → Android 对照」一个方向
+
+W6-62 / W6-63 / W6-64 的方法论是：把 Windows 的 `EncryptedArchiveReader` / `EncryptedArchiveWriter` 当权威，
+用临时 net10.0 生成器产黄金向量（`windows-archive-vectors.json`，49950 B），再让 Kotlin 逐条复算。
+这套办法能证明「Android 复现了 Windows」，但证明不了**反方向**：
+
+- Kotlin 写端省略可选字段（`accountScope` / `secrets` 为 null 时整段不写）；
+- 未知 `sourceType`（`acme-nas` 这类）在 Kotlin 侧是原样本保留的；
+- 头部 JSON 由 kotlinx.serialization 产出，转义策略与 `System.Text.Json` 不同（见 §38.5）。
+
+这三件事全是「C# 读端能不能吃下」的问题，同语言回环永远测不到。而 W6-64 的导出卡已经能产出 `.mharchive`文件——
+用户把 Android 导出的文件拿到 Windows 上导入，是**已经存在的用户路径**，读端在这里挑剔一次，用户看到的就是「解密失败」。
+所以本轮反过来做：**字节由 Android 的 `ArchiveWriter` 产出，Windows 读端必须原样读懂**。
+
+### §38.2 方法：真实写端产出的黄金文件，不在 C# 侧重造
+
+归档的 salt（16 B）与 nonce（12 B）每次写都随机（W6-62），因此**不可能**在 C# 测试里「重新生成同一个文件」再比字节
+—— 能钉住的只有那份真实文件本身。三步：
+
+1. 在 Android `core/common` 测试源集写一个**临时** JUnit 用例（`AndroidArchiveGeneratorForWindows`），
+   用生产 `ArchiveWriter.write(envelope, passphrase, ArchiveKdf.DEFAULT_ITERATIONS, createdAtEpochMs)` 写出一份归档；
+2. 落到 W6 树的 `windows/tests/assets/android-written-archive.mharchive` 并入库；
+3. **立刻删掉生成器**——它只存在于本轮工作区，不进任何提交。
+   资产是唯一事实来源；测试套件里不允许出现「能重写资产」的代码，否则 golden 会自我实现。
+
+生成时另用 Node 独立解了一遍（`crypto.pbkdf2Sync` + `aes-256-gcm`，AAD = 前 12+161 字节），
+解出的载荷正是 §38.3 的信封 ⇒ 证明这份文件确实是 Android 生产写端产出，不是手工拼的字节。
+
+### §38.3 黄金资产规格（逐字节可断言）
+
+| 项 | 值 |
+| --- | --- |
+| 文件 | `windows/tests/assets/android-written-archive.mharchive` |
+| 长度 | **1164 B** |
+| sha256 | `72365f67b240b10aa20c3c5f867f53600199ac5eb9a834e0ebe672d8d6794a15` |
+| magic | `MHSYNCA1`（8 B ASCII） |
+| 头部长度（大端 int32 @8） | **161** |
+| 头部 JSON | `{"version":1,"kdf":"pbkdf2-sha256","iterations":600000,"saltBase64":"rk4gfF2NEFUQih+xagtPDQ==","nonceBase64":"Jnfcf+l0U161FUBq","createdAtEpochMs":1700000000000}` |
+| trailer（magic + 长度 + 头部） | 173 B |
+| 密文长度 | 975 B |
+| 明文（信封 JSON）长度 | **975 B** |
+| 明文 sha256 | `68957f0d6658058139b861d86c868b64364cf7011adb7189851d5ebd40e16b79` |
+| 口令 | `correct horse battery staple` |
+
+信封内容（C# 用例里的期望值就是这张表）：
+
+| 字段 | 值 |
+| --- | --- |
+| `schemaVersion` / `minimumReaderVersion` | 1 / 1 |
+| `deviceId` | `device-android-pixel` |
+| `snapshotId` | `0123456789abcdef0123456789abcdef` |
+| `createdAtEpochMs` | 1 700 000 000 000 |
+| `capabilities` | `canSendSecrets=false`、`sourceTypes=["emby","jellyfin","webdav"]` |
+| 源 1 | `0f9a1c2e-1111-4a2b-9c3d-000000000001` / `emby` / **家庭 NAS（客厅）** / **张三** / rev 42 / fv 3 |
+| 源 1 端点 | `http://192.168.1.20:8096/emby`（primary=true, enabled=true, order=0）与 `https://nas.example.invalid/emby`（false / **false** / 2） |
+| 源 2 | `0f9a1c2e-2222-4a2b-9c3d-000000000002` / **`acme-nas`（未知类型）** / `Backup shelf` / accountScope **缺省** / rev 7 / fv 1 |
+| 源 2 端点 | `acme://shelf-one`（true / true / 0） |
+| 墓碑 1 | `0f9a1c2e-3333-4a2b-9c3d-000000000003` / 1 760 000 000 000 / 5 |
+
+刻意选了四类跨语言最容易塌的输入：**中文与全角括号**、**未知 sourceType**、**可选字段缺省**（源 2 的 `accountScope`、两条源的 `secrets`）、**多端点且含非主用**。
+
+### §38.4 Windows 侧 8 个读端用例（`ArchiveAndroidInteropTests`）
+
+新文件 `windows/tests/MediaHub.Tests/ArchiveAndroidInteropTests.cs`（290 行），全部读同一份资产：
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `The_android_written_archive_is_read_field_by_field` | 逐字段：envelope 六个标量 + capabilities + 两条源的全部属性 + 端点数组 + 墓碑 |
+| `An_unknown_source_type_is_carried_through_untouched` | `acme-nas` 的 `Raw` / `Wire` 都原样，`IsKnown` 与 `SyncSourceTypes.IsKnown` 都是 false |
+| `The_android_written_archive_bytes_are_pinned` | 长度、sha256、magic、头部长度四个硬值 |
+| `The_android_header_matches_the_canonical_shape` | 头部六字段值 + 头部 JSON 逐字相等 + 重编码后**同值**（见 §38.5） |
+| `The_windows_serializer_reproduces_the_kotlin_document_semantically` | 先自己解密取明文（sha256 钉住），再 `JsonNode.DeepEquals` 比对 Windows 重序列化的文档；并验证 canonical form 是不动点 |
+| `A_wrong_passphrase_is_indistinguishable_from_tampering` | 错口令 / 改头部时间戳 / 翻密文一位，三者同码 `wrong-passphrase-or-tampered`、同一句文案 |
+| `A_layout_error_is_reported_before_the_passphrase_is_examined` | 只剩头部 ⇒ `corrupt-ciphertext`（框架错误优先于空口令）；null ⇒ `passphrase-empty`；`"short"` ⇒ `passphrase-too-weak` |
+| `The_android_written_archive_carries_no_plaintext` | 七个明文 token 在整份归档字节里一个都搜不到 |
+
+测试工程只加一条 Content（`windows/tests/MediaHub.Tests/MediaHub.Tests.csproj:28-29`），照既有 `sample-av.mp4` 的形状
+`CopyToOutputDirectory="PreserveNewest"`，测试用 `Path.Combine(AppContext.BaseDirectory, "assets", …)` 取；不引入任何新依赖。
+
+### §38.5 本轮唯一的新发现：头部「同值但不同字节」
+
+第一版用例按「重序列化必须逐字节相等」写，跑出来红了，位置在 salt 的 base64 里：
+
+```
+expected ... 105,104,43,120,97   (i h + x a)
+actual   ... 105,104,92,117,48  (i h \ u 0)
+```
+
+原因：**System.Text.Json 会把 `+` 转义成 `\u002B`**，kotlinx.serialization 原样写 `+`。
+本文件的 saltBase64 是 `rk4gfF2NEFUQih+xagtPDQ==`，C# 重编码后变成 `rk4gfF2NEFUQih\u002BxagtPDQ==`，一个字符换六个，
+两份头部 JSON 在字节上**不可能**相等。
+
+这是**无害**的，理由要写下来（否则以后有人会「修」它）：
+
+1. GCM 认证的是**磁盘上的头部原字节**：两端都把 `magic + BE int32 + headerJson` 的原字节当 AAD，
+   从来不认证「重编码结果」。写端与读端读的是同一份字节，转义差异不影响任何一步。
+2. 两端读端都能解析另一种形式：`ArchiveHeaderCodec.TryParse`（C# `JsonDocument` / Kotlin `Json.parseToJsonElement`）都按 JSON 语义取值，
+   `\u002B` 与 `+` 解析出同一个字符串。
+3. 契约因此定成「**同值**」而不是「同字节」：用例改成 `TryParse(Serialize(header))` 后 `Assert.Equal(header, reparsed)`；
+   注释里写明为什么不断言字节相等。
+
+教训（跨语言格式通用）：**不要用「重序列化后字节相等」当跨语言契约判据**——每种 JSON 库的转义策略都不同，
+这个判据会稳定地红，而红的原因与正确性无关。要在字节层钉，就钉**写端写在盘上的那份字节**（§38.3 的 sha256）。
+
+### §38.6 落点行号表
+
+| 文件 | 行 | 内容 |
+| --- | --- | --- |
+| `windows/tests/assets/android-written-archive.mharchive` | — | 新文件，1164 B，Kotlin `ArchiveWriter` 真实产出（只在 W6 分支） |
+| `windows/tests/MediaHub.Tests/MediaHub.Tests.csproj` | :28-29 | 新增一条 Content 挂该资产 |
+| `windows/tests/MediaHub.Tests/ArchiveAndroidInteropTests.cs` | :27 | `public sealed class ArchiveAndroidInteropTests`（新文件，290 行） |
+| 同上 | :29-54 | 全部硬值常量：`Passphrase` / `OtherPassphrase` / `Magic` / `ArchiveLength` / `ArchiveSha256` / `HeaderLength` / `TrailerLength` / `PayloadSha256` / `PayloadLength` / `HeaderJson` |
+| 同上 | :56-57 | `ArchivePath` → `AppContext.BaseDirectory/assets/android-written-archive.mharchive` |
+| 同上 | :59 / :113 / :124 / :135 / :162 / :189 / :215 / :234 | 八个 `[Fact]` |
+| 同上 | :256 / :258 / :275 | 三个辅助：`ReadArchive` / `DecryptPayload`（自有 AesGcm，AAD = 前 173 B）/ `WithHeaderText`（等长替换） |
+| `core/common/src/test/kotlin/com/mediahub/core/common/archive/ArchiveRoundTripTest.kt` | :360-371 | 新增 `writing_refuses_a_payload_that_is_larger_than_the_archive_limit`（见 §38.7） |
+
+### §38.7 顺带补的 Android 侧缺口：写端 8 MiB 真的走了一遍
+
+W6-62 的 `ArchiveWriter` 有「载荷 > 8 MiB ⇒ `PAYLOAD_TOO_LARGE`」这一步，但 Android 侧只断言过常量
+（`MAX_PAYLOAD_BYTES` 等于多少），**没有一例真的让写端走那条分支**；而 Windows 侧一直有
+`OversizedPayload_IsRejectedWhenWriting`（9 MB 载荷）。这条限在两端因此是「一边有行为证据、一边只有常量」——上限被改坏时 Android 那组用例一个都不会响。本轮补上：
+
+| 输入 | 期望 |
+| --- | --- |
+| 9 000 000 字符名的一条源（载荷 > 8 MiB） | `ArchiveError.PAYLOAD_TOO_LARGE` |
+| 4 000 000 字符名的一条源（明显更小） | 写成功、reason 为 null |
+
+第二行是反向对照：只断言「大的一定拒」的话，把上限改小或把别的错误当拒绝理由，用例照样绿。
+
+### §38.8 本机实跑（串行，防 OOM）
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| C# 全量 | `cd D:/mh-w6 && dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug` | **1585 通过 / 0 失败 / 0 跳过**（1577 → 1585，+8） |
+| C# 只看新例 | 同上加 `--filter FullyQualifiedName~ArchiveAndroidInteropTests` | **8/8 通过**（首跑红 1 例，见 §38.5，改断言后全绿） |
+| Android 三模块 | `D:/mh-verify/run-w6-65-gradle.bat`（低内存模板，`--max-workers=1`） | `BUILD SUCCESSFUL in 1m 6s`、`EXIT=0` |
+| 清理 | 跑完 `gradlew --stop` | 仓库根 `hs_err_pid*.log` 计数 0、残留 java 进程 0 |
+
+XML 汇总（`<testsuite>` 属性相加，非估算）：
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | 42 | **596** | 0 | 11 | 595 → 596（+1 = §38.7 那例） |
+| `core/database` | 20 | 192 | 0 | 12 | 不变 |
+| `feature/settings` | 23 | 353 | 0 | 0 | 不变 |
+
+`ArchiveRoundTripTest` 单套件由 23 例增至 **24 例**、0 失败。
+本轮**没有**新增套件，`--required-suite` 仍是 48 条；门禁用例数随 core/common +1。
+
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 `completed / success`：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `94b9432d1db3121aafecf5eb2a226734d904c822` | `windows-ci` | 40245159664 | `MediaHub.Tests` 469 + `MediaHub.WebDav.Tests` 104 = 573；licence `projects=13 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40245159540 | `uniqueTests` **2266**（`core/common` **596** / `core/database` 192 / `feature/settings` 353）；`--required-suite` 48 条；两个 visual-instrumentation job 各 112 例 `feature:settings` 全过，API 32/36 各 `19 unique mandatory` 命中该 SHA |
+| `bd71e3200a284c77e1fdfd8237fed7aa3e4e153a`（W6 树，已 merge 主树） | `windows-ci` | 40245165822 | `MediaHub.Tests` **1585** + `MediaHub.WebDav.Tests` 104 = **1689**；licence `projects=15 rows=47 packages=28`、`RESULT: PASS` |
+| 同上 | `android-ci` | 40245165765 | 与主树同口径（`uniqueTests` 2266、required-suite 48、instrumentation 112）：Kotlin 侧是同一份代码 |
+
+`uniqueTests` 由上一基线 2265 增至 **2266**（+1 = §38.7 新补的写端 8 MiB 用例，本机 XML 口径 `core/common` 595 → 596 与之一致）；`--required-suite` 仍 48 条、`androidTest` 仍 88 例，本轮都不新增套件。
+
+
+### §38.9 未覆盖（本节交付时必须如实保留）
+
+1. **设备侧**：C# 用例全部在 Windows 本机跑；Android 侧写端是纯 JVM 逻辑，但 PBKDF2 600 000 轮在真机（Conscrypt）上的耗时与峰值内存仍未测 ⇒ DEVICE_UNVERIFIED（同 §35.8 第 2 条 / §37.8 第 2 条）。
+2. **真实两机搬运**：把 Android 导出的 `.mharchive` 拷到另一台 Windows 机器再导入的完整流程 NOT_RUN（同 §33.8 / §34.8 / §35.8 / §36.8 / §37.8，都需要第二台机器）。
+3. **迭代数其他取值**：本资产只有 600 000 一档。Kotlin 侧接受 `>= MIN_ITERATIONS`、C# 读端同理，但「Android 用 700 000 写、Windows 读」这种跨端异值从未跑过。
+4. **未知 JSON 字段**：两端读端都忽略未知属性，但没有用例把「Android 将来新增一个字段」写进归档再让旧 Windows 读——这属于版本演进，需要 `minimumReaderVersion` 的独立评审。
+5. **载荷上限的反向**：§38.7 补的是写端拒绝；「塞一份接近 8 MiB 的真归档让 C# 读」仍只有既有 `OversizedCiphertext_IsRejectedBeforeDecryption` 的拒绝侧证据，正向的大文件读取未验（同 §37.8 第 5 条）。
+6. **转义差异的其他形态**：§38.5 只覆盖了 `+`。U+2028 / 控制字符 / 代理对在两端 JSON 库里的行为不同，未做矩阵。
+7. **不涉及 GUI**：两端都不改界面，无 GUI 证据需求；同步页四张卡的 GUI 证据仍按 W6-43 / W6-49 / W6-58 / W6-64 的既有口径记为 GUI_UNVERIFIED。
+8. **口令的界外情况**：继承 §36.8 第 6 条（超长口令、NUL、代理对）；本资产只有一条正常口令。
+
+### §38.10 下一步
+
+- 把 §38.3 的资产再加「异迭代数（如 700 000）」与「`minimumReaderVersion`=2」两份，做成跨端演进用例（候选 W6-66）；
+- 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条与 §37.8 第 1 条）；
+- 设备侧密码学：PBKDF2 600 000 轮在模拟器 / 低端机上的耗时与峰值内存，写读两侧都要；
+- 归档格式若要演进（新 KDF、新字段），先按 W6-47 ADR 的方法写契约，再两端同步加码——不要单边加。

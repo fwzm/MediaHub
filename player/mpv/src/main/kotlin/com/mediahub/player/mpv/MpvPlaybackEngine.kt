@@ -11,6 +11,7 @@ import com.mediahub.core.network.OriginScopedCredentialInterceptor
 import com.mediahub.core.network.PlaybackError
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
+import com.mediahub.model.SubtitleStyle
 import com.mediahub.player.engine.EngineKind
 import com.mediahub.player.engine.ExternalSubtitle
 import com.mediahub.player.engine.PlaybackEnginePort
@@ -79,7 +80,7 @@ class MpvPlaybackEngine internal constructor(
     ) : this(
         logger,
         scope,
-        { createMpvBridge(httpClientFactory, ledger) },
+        { createMpvBridge(httpClientFactory, ledger, context.applicationContext) },
         { createMpvInstance(context) },
         SystemClock::elapsedRealtime,
         System::currentTimeMillis,
@@ -127,6 +128,8 @@ class MpvPlaybackEngine internal constructor(
     override val downloadSpeedBps: StateFlow<Long> = MutableStateFlow(0L)
 
     private val stateLock = Any()
+    private var presentationOptions = MpvSubtitlePresentation.options(SubtitleStyle(), 18)
+    private var presentationRevision = 0L // stateLock; a newer preference supersedes an in-flight write
     // Never acquire this lock while holding stateLock: JNI may wait for an observer callback.
     private val nativeLock = Any()
     // Unlike a monitor, this also serializes reentrant play() with Main.immediate/Unconfined.
@@ -207,9 +210,11 @@ class MpvPlaybackEngine internal constructor(
                     // M9-P0：本地媒体走本地字节源分支。判定基于**真实文件存在性**，
                     // 不依赖 "/storage" 之类前缀猜测（避免把 URL 误判/漏判）。
                     val localPath = src.url.takeIf {
-                        it.startsWith("file://") || (it.startsWith("/") && java.io.File(it).isFile)
+                        it.startsWith("file:", ignoreCase = true) || (it.startsWith("/") && java.io.File(it).isFile)
                     }
-                    val bridgeUrl = if (localPath != null) {
+                    val bridgeUrl = if (src.url.startsWith("content:", ignoreCase = true)) {
+                        b.startContentUri(src.url)
+                    } else if (localPath != null) {
                         b.startLocalFile(localPath)
                     } else {
                         b.start(src.url, buildHeaders(src))
@@ -226,6 +231,11 @@ class MpvPlaybackEngine internal constructor(
                     // Android fontconfig fallback can select an OEM clock font whose space
                     // advance is zero. Use the platform text family; CJK still uses fallback.
                     m.setOptionString("sub-font", "Roboto")
+                    val initialPresentation = synchronized(stateLock) { presentationOptions }
+                    initialPresentation.forEach { (name, value) ->
+                        checkCurrent()
+                        m.setOptionString(name, value)
+                    }
                     m.setOptionString("hwdec", "mediacodec")
                     // M6 真机缺陷修复（P1）：关闭 mpv 的 ytdl 钩子。
                     // MediaHub 的媒体**一律经回放环桥**（http://127.0.0.1:<port>/media/<random>）
@@ -279,6 +289,10 @@ class MpvPlaybackEngine internal constructor(
                         run.resources = resources
                         published = true
                     }
+                    // Preferences can change while native init is unpublished. Apply the latest
+                    // revision through runtime properties, not the pre-init option API.
+                    applySubtitlePresentation(run, m)
+                    checkCurrent()
                     // An explicit command may arrive inside loadfile before publication. Read it
                     // after publishing; later commands can now queue behind nativeLock safely.
                     val desiredPlay = synchronized(stateLock) { run.requestedPlayWhenReady }
@@ -377,6 +391,27 @@ class MpvPlaybackEngine internal constructor(
 
     private inline fun withCurrent(run: Run, action: () -> Unit) {
         synchronized(stateLock) { if (isCurrent(run)) action() }
+    }
+
+    override fun setSubtitlePresentation(style: SubtitleStyle, sizeSp: Int) {
+        val options = MpvSubtitlePresentation.options(style, sizeSp)
+        val run = synchronized(stateLock) {
+            if (released || presentationOptions == options) return
+            presentationOptions = options
+            presentationRevision++
+            current
+        } ?: return
+        // withNative does not wait for an unpublished init; publication replays the latest revision.
+        withNative(run) { owner, native -> applySubtitlePresentation(owner, native) }
+    }
+
+    private fun applySubtitlePresentation(run: Run, native: MpvInstance) {
+        val (revision, options) = synchronized(stateLock) { presentationRevision to presentationOptions }
+        for ((name, value) in options) {
+            // A native callback can synchronously stop/release or apply newer preferences.
+            if (synchronized(stateLock) { !isCurrent(run) || presentationRevision != revision }) return
+            native.command(arrayOf("set", name, value))
+        }
     }
 
     private fun withNative(action: (Run, MpvInstance) -> Unit) {
@@ -511,7 +546,8 @@ class MpvPlaybackEngine internal constructor(
             if (!isCurrent(run)) return
             run.mpvTrackList = rows
         }
-        val audio = MpvTrackMapper.mapAudioTracks(rows)
+        val nativeAid = m.getPropertyString("aid")
+        val audio = MpvTrackMapper.mapAudioTracks(rows, nativeAid)
         val primarySid = m.getPropertyString("sid")
         val subtitleRows = rows.filter { it["type"] == "sub" }
         val subtitles = MpvTrackMapper.mapSubtitleTracks(rows).mapIndexed { index, track ->

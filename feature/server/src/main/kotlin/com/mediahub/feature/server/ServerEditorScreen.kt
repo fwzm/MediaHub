@@ -260,11 +260,15 @@ fun ServerEditorRoute(
                     }
                 }
 
-                SectionHeader("账号")
-                InfoRow("用户名", server.username ?: "未设置")
-                InfoRow("状态", if (state.loggedIn) "已登录" else "未登录")
+                SectionHeader(if (server.type == ServerType.LOCAL) "本地目录" else "账号")
+                if (server.type == ServerType.LOCAL) {
+                    InfoRow("目录", if (server.baseUrl.startsWith("content:")) "已选择目录" else "应用私有目录")
+                } else {
+                    InfoRow("用户名", server.username ?: "未设置")
+                    InfoRow("状态", if (state.loggedIn) "已登录" else "未登录")
+                }
                 TextButton(onClick = { onRelogin(server) }, modifier = Modifier.padding(horizontal = 8.dp)) {
-                    Text("重新登录")
+                    Text(if (server.type == ServerType.LOCAL) "重新授权目录" else "重新登录")
                 }
 
                 SectionHeader("偏好")

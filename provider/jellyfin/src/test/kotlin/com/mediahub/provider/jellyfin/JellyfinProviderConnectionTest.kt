@@ -72,6 +72,30 @@ class JellyfinProviderConnectionTest {
     }
 
     @Test
+    fun explicitOtherProductIsRejectedWithoutEchoingItsName() = runBlocking {
+        val untrustedName = "fixture-other-product-private-label"
+        server.enqueue(MockResponse().setBody("""{"Id":"fixture-id","Version":"1","ProductName":"$untrustedName"}"""))
+        val result = provider().testConnection()
+        assertFalse("Explicit other product must not be accepted as Jellyfin", result.ok)
+        assertEquals(com.mediahub.provider.api.ProviderException.ErrorCode.PARSE, result.errorCode)
+        assertFalse(result.message.orEmpty().contains(untrustedName))
+    }
+
+    @Test
+    fun matchingJellyfinProductIsAcceptedCaseInsensitively() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"Id":"fixture-id","Version":"1","ProductName":"jELlYfIn Server"}"""))
+        assertTrue(provider().testConnection().ok)
+    }
+
+    @Test
+    fun missingNullOrBlankProductRetainsExistingCompatibility() = runBlocking {
+        for (product in listOf("null", "\"\"", "\"   \"")) {
+            server.enqueue(MockResponse().setBody("""{"Id":"fixture-id","Version":"1","ProductName":$product}"""))
+            assertTrue(provider().testConnection().ok)
+        }
+    }
+
+    @Test
     fun `http 200 but wrong json fails`() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"hello":"world"}"""))
         val result = provider().testConnection()

@@ -139,6 +139,15 @@
 - 决策：`LocalRootProvider.contentRoots()` 预留 content:// 树根；Phase 0.6 接入
   ACTION_OPEN_DOCUMENT_TREE + takePersistableUriPermission + DocumentFile 树导航，
   长期本地媒体以 content:// 为准，不围绕 file:// 扩展。
+- 2026-10-26 接线：每个 LOCAL 媒体源用既有主线路 URL 保存一个 tree URI，
+  不增加数据库列；系统持久读授权通过 `contentRoots()` 核验。无 tree 的历史媒体源
+  保留应用外部私有目录。树导航使用 DocumentsContract 的 tree-backed URI，文档 ID
+  按不透明标识处理；不得把所有系统授权目录自动并入一个来源。
+- Media3 使用 ContentResolver 数据源；mpv 使用会话独占的文档字节源回环桥。
+  已知长度支持单段范围读取，未知长度只提供顺序流，不复制整部影片。
+  停止/切源撤销旧回环能力并关闭文档流；文档 URI 不经过 HTTP 凭据栈。
+- 可迁移备份继续排除 LOCAL 的设备目录绑定与系统授权；本机加密回滚快照保留
+  原目录绑定但不创建/恢复 OS 授权。授权失效通过目录选择器重新授权原媒体源。
 
 ## ADR-021 保留 23 模块结构（不合并）
 - 状态：已采纳（2026-08-12，Phase 0.5）
@@ -811,3 +820,22 @@ runtime capabilities to be a subset of declaredCapabilities. Planned extra capab
 with null runtime fields remain valid. Preserve the current ServerType persistence
 and split credential stores; this invariant port does not adopt the old open-ID schema.
 Test doubles must declare their actual provided fields rather than bypassing validation.
+
+### 2026-10-26 ADR-019/026 clarification: protocol and restored-user identity
+
+Preserve the deployed public-probe compatibility for an absent/null/blank ProductName.
+The official Jellyfin generated SDK declares that field optional and nullable:
+https://typescript-sdk.jellyfin.org/interfaces/generated-client.PublicSystemInfo.html
+An explicit Jellyfin marker must not pass an Emby probe; an explicit non-Jellyfin
+product must not pass a Jellyfin probe. Keep Id/Version validation and structured
+401/403 guidance, and do not echo arbitrary product strings in failure messages.
+This ports the useful old product distinction without adopting its mandatory-field
+requirement, which would reject the existing missing-field compatibility fixtures.
+
+After the anonymous server-identity check and the current authentication-attempt
+guard, a restored user must have a nonblank ID equal to the stored user ID.
+An invalid response yields INVALID_RESPONSE and retains the stored session/token;
+only an actual 401 follows the existing expiration cleanup policy. Keep cancellation
+identity and lease/epoch ownership. Normalize the Emby root's outer whitespace and
+endpoint separator, and escape quoted identity-header fields while retaining
+X-Emby-Authorization and separate X-Emby-Token. No store/schema migration is involved.

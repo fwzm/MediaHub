@@ -12,6 +12,7 @@ android {
     defaultConfig {
         minSdk = 26
     }
+    testOptions { unitTests.isIncludeAndroidResources = true }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -29,9 +30,11 @@ dependencies {
     implementation(project(":provider:api"))
     implementation(project(":core:model"))
     implementation(project(":core:logging"))
+    implementation(libs.kotlinx.coroutines.core)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
 }

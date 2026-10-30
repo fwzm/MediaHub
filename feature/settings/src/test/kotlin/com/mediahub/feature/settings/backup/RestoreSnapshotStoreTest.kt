@@ -64,6 +64,19 @@ class RestoreSnapshotStoreTest {
         assertTrue(runCatching { RestoreSnapshotStore(temporary.root, secret).read(id) }.isFailure)
     }
 
+    @Test fun `private rollback preserves the original device tree binding`() {
+        val uri = "content://fixture.documents/tree/root%3Amedia"
+        val local = server("fixture-saf", uri).copy(type = ServerType.LOCAL)
+        val expected = images().copy(before = BackupSnapshot(listOf(local), emptyList()))
+        val id = "restore-${UUID.randomUUID()}"
+        val secret = key()
+        RestoreSnapshotStore(temporary.root, secret).save(id, expected)
+        val recovered = RestoreSnapshotStore(temporary.root, secret).read(id)
+        assertEquals(uri, recovered.before.servers.single().baseUrl)
+        assertEquals(expected, recovered)
+        assertFalse(File(temporary.root, "$id.bin").readBytes().toString(Charsets.ISO_8859_1).contains(uri))
+    }
+
     @Test fun `private codec roundtrips every persistent field and nullable defaults`() {
         val endpoint = ServerEndpoint("endpoint-id", "local", "endpoint name", "https://local.example", true, false, 7,
             1, "local diagnostic", 2, 3, 4, 5.25, "h2", false, 206)

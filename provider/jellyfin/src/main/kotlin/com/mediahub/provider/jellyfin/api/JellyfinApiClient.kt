@@ -69,11 +69,17 @@ open class JellyfinApiClient(
         itemId: String,
         startTimeTicks: Long?,
         maxStreamingBitrate: Int?,
+        enableDirectPlay: Boolean = true,
+        mediaSourceId: String? = null,
+        subtitleStreamIndex: Int? = null,
     ): JellyfinPlaybackInfoResultDto {
         val request = JellyfinPlaybackInfoRequestDto(
             userId = userId,
             startTimeTicks = startTimeTicks?.takeIf { it > 0 },
             maxStreamingBitrate = maxStreamingBitrate,
+            enableDirectPlay = enableDirectPlay,
+            mediaSourceId = mediaSourceId,
+            subtitleStreamIndex = subtitleStreamIndex,
         )
         return apiClient.postJson(
             url = endpointResolver.endpoint("/Items").toHttpUrl().newBuilder()

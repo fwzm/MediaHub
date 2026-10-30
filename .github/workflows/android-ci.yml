@@ -146,6 +146,14 @@ jobs:
           #   feature.settings.pairing.PairingLinkControllerTest —— 配对链接核对（W6-59：合法链接解出设备 / 指纹 /
           #     剩余秒，非法链接原样透出 core:common 的码（code-empty / not-a-pairing-link / code-too-long /
           #     not-base64url / payload-invalid / expired），核对成功也不泄露挑战，失败作废上一次结论）
+          #   core.database.sync.SourceSyncArchiveImportTest —— 加密归档接进导入入口（W6-63：前 8 字节
+          #     magic == MHSYNCA1 才算归档；无口令报 passphrase-required 且网关零调用；错口令与篡改
+          #     同码 wrong-passphrase-or-tampered；弱口令在建密钥之前就拒；结构错只报结构码；明文信封
+          #     的文本路径逐字节不变；Windows 写出的 1282 B 归档解开后与明文件逐字段相等）
+          #   core.database.sync.SourceSyncArchiveExportTest —— 导出落成文件（W6-64：口令为 null 原样交出
+          #     导出 JSON 不重新编码；口令非空由 ArchiveWriter 包成 .mharchive，读回来与信封逐字段相等；
+          #     归档头时间戳取信封自己的时间戳、迭代数 600000；弱口令/空白口令/自报携带凭据折成 ArchiveError
+          #     稳定码且一个都不改写；空白口令绝不悄悄退化成明文导出）
           python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
             --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
@@ -164,6 +172,12 @@ jobs:
             --required-suite com.mediahub.player.engine.MediaRequestSnapshotTest \
             --required-suite com.mediahub.feature.player.PlayerTrackSelectionTest \
             --required-suite com.mediahub.player.mpv.MpvPlaybackEngineTest \
+            --required-suite com.mediahub.player.mpv.AndroidContentByteSourceTest \
+            --required-suite com.mediahub.player.mpv.MpvSubtitlePresentationTest \
+            --required-suite com.mediahub.player.mpv.MpvSubtitlePresentationLifecycleTest \
+            --required-suite com.mediahub.core.network.MpvContentBridgeTest \
+            --required-suite com.mediahub.core.network.MpvContentOwnershipTest \
+            --required-suite com.mediahub.provider.local.LocalSafProviderTest \
             --required-suite com.mediahub.player.mpv.MpvSurfaceBindingTest \
             --required-suite com.mediahub.app.net.ColdUserAgentStartupTest \
             --required-suite com.mediahub.app.net.ServerUrlIndexTest \
@@ -201,9 +215,12 @@ jobs:
             --required-suite com.mediahub.core.network.ApiExceptionTest \
             --required-suite com.mediahub.provider.api.ProviderExceptionTest \
             --required-suite com.mediahub.provider.api.ProviderHandleTest \
+            --required-suite com.mediahub.provider.api.CredentialsRedactionTest \
+            --required-suite com.mediahub.feature.server.AddServerProviderSwitchTest \
             --required-suite com.mediahub.provider.base.DefaultProviderRegistryTest \
             --required-suite com.mediahub.feature.library.LibraryFilterViewModelTest \
             --required-suite com.mediahub.feature.library.LibrarySortViewModelTest \
+            --required-suite com.mediahub.feature.library.LibraryMixedCapabilitiesTest \
             --required-suite com.mediahub.feature.search.GlobalSearchViewModelTest \
             --required-suite com.mediahub.feature.search.engine.GlobalSearchEngineTest \
             --required-suite com.mediahub.provider.emby.EmbyLibraryProviderTest \
@@ -211,6 +228,11 @@ jobs:
             --required-suite com.mediahub.feature.settings.sync.SourceSyncSendLauncherTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncHostAddressTest \
             --required-suite com.mediahub.provider.emby.EmbyAuthenticationInterleavingStressTest \
+            --required-suite com.mediahub.provider.emby.api.EmbyEndpointResolverTest \
+            --required-suite com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilderTest \
+            --required-suite com.mediahub.provider.emby.EmbyAuthProviderTest \
+            --required-suite com.mediahub.provider.emby.EmbyProviderConnectionTest \
+            --required-suite com.mediahub.provider.jellyfin.JellyfinProviderConnectionTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncReceiptTest \
             --required-suite com.mediahub.feature.settings.sync.SourceSyncListenerControllerTest \
             --required-suite com.mediahub.core.common.sync.SourceSyncTransferClientHostTest \
@@ -230,6 +252,14 @@ jobs:
             --required-suite com.mediahub.core.common.archive.ArchiveVectorsTest \
             --required-suite com.mediahub.core.common.archive.ArchiveRoundTripTest \
             --required-suite com.mediahub.core.common.archive.ArchiveConcurrencyTest \
+            --required-suite com.mediahub.core.database.sync.SourceSyncArchiveImportTest \
+            --required-suite com.mediahub.core.database.sync.SourceSyncArchiveExportTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncArchiveControllerTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncArchiveExportControllerTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncArchiveExportCancellationTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncArchiveSelectionTest \
+            --required-suite com.mediahub.provider.webdav.WebDavProtocolIdentityTest \
+            --required-suite com.mediahub.provider.webdav.WebDavAuthenticationEvidenceTest \
             --require-complete-suites
 
       - name: Lint
@@ -318,7 +348,7 @@ jobs:
       - name: Compile visual instrumentation APKs
         timeout-minutes: 25
         run: >-
-          ./gradlew :core:ui:assembleDebugAndroidTest
+          timeout 20m ./gradlew :core:ui:assembleDebugAndroidTest
           :feature:player:assembleDebugAndroidTest
           :feature:settings:assembleDebugAndroidTest
           :provider:webdav:assembleDebugAndroidTest
@@ -388,6 +418,7 @@ jobs:
             ci-evidence/
             core/ui/build/outputs/androidTest-results/
             app/build/outputs/androidTest-results/
+            app/build/outputs/connected_android_test_additional_output/
             app/build/reports/androidTests/
             core/ui/build/reports/androidTests/
             feature/player/build/outputs/androidTest-results/

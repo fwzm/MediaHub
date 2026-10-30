@@ -635,6 +635,40 @@ class MpvPlaybackEngineTest {
         }
     }
 
+    @Test
+    fun contentUriUsesOnlyTheDocumentBridgeAndLoadsItsLoopbackUrl() = runTest {
+        val f = Fixture(backgroundScope)
+        val uri = "content://fixture.documents/tree/root/document/opaque-video"
+        try {
+            val s = session("fixture-content").copy(source = PlaybackSource(url = uri,
+                headers = mapOf("Authorization" to "fixture-must-not-be-forwarded")))
+            f.engine.play(s)
+            runCurrent()
+            val bridge = f.bridges.single()
+            assertEquals(1, bridge.contentStarts)
+            assertEquals(0, bridge.httpStarts)
+            assertEquals(uri, bridge.contentUri)
+            assertEquals(f.bridgeTransportUrl, f.instances.single().lastLoadedUrl)
+            assertNull(bridge.url)
+        } finally { f.engine.release(); f.flushDeferred() }
+    }
+
+    @Test
+    fun contentBridgeOwnershipEndsWhenTheSourceIsReplacedOrReleased() = runTest {
+        val f = Fixture(backgroundScope)
+        try {
+            f.engine.play(session("a").copy(source = PlaybackSource(url = "content://fixture.documents/tree/root/document/a")))
+            runCurrent()
+            assertEquals(1, f.bridges.single().contentStarts)
+            f.engine.play(session("b").copy(source = PlaybackSource(url = "content://fixture.documents/tree/root/document/b")))
+            runCurrent()
+            assertEquals(1, f.bridges[0].stops)
+            assertEquals(1, f.bridges[1].contentStarts)
+            f.engine.release(); f.flushDeferred()
+            assertEquals(1, f.bridges[1].stops)
+        } finally { f.engine.release(); f.flushDeferred() }
+    }
+
     private class Fixture(scope: CoroutineScope) {
         val bridges = mutableListOf<FakeBridge>()
         val instances = mutableListOf<FakeInstance>()
@@ -672,7 +706,17 @@ class MpvPlaybackEngineTest {
     private class FakeBridge(val onStart: () -> Unit, val onStop: () -> Unit, val transportUrl: () -> String) : MpvBridge {
         var url: String? = null
         var stops = 0
+        var httpStarts = 0
+        var contentStarts = 0
+        var contentUri: String? = null
+        override fun startContentUri(uri: String): String {
+            contentStarts++
+            contentUri = uri
+            onStart()
+            return transportUrl()
+        }
         override fun start(url: String, headers: Map<String, String>): String {
+            httpStarts++
             this.url = url
             onStart()
             return transportUrl()

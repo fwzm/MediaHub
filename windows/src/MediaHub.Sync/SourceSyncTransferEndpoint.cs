@@ -3,10 +3,15 @@ using System.Globalization;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace MediaHub.Sync;
+
+internal delegate Task<SourceSyncTlsHandshakeResult> SourceSyncServerHandshake(
+    Stream transport, X509Certificate2? certificate, string? fingerprint,
+    TimeSpan timeout, CancellationToken cancellationToken);
 
 /// <summary>
 /// Decides whether an address is a loopback address, before any socket is created.
@@ -209,13 +214,27 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
 
     private readonly TcpListener _listener;
     private readonly SourceSyncTlsIdentity? _identity;
+    private readonly Func<Stopwatch, TimeSpan> _elapsedTime;
+    private readonly SourceSyncServerHandshake _serverHandshake;
     private int _disposed;
 
     private SourceSyncTransferListener(TcpListener listener, IPEndPoint endpoint, SourceSyncTlsIdentity? identity)
+        : this(listener, endpoint, identity, elapsed => elapsed.Elapsed, SourceSyncTlsHandshake.AuthenticateServerAsync)
     {
+    }
+
+    // Instance-scoped dependencies let tests control elapsed accept time without sleeping or replacing TLS globally.
+    internal SourceSyncTransferListener(
+        TcpListener listener, IPEndPoint endpoint, SourceSyncTlsIdentity? identity,
+        Func<Stopwatch, TimeSpan> elapsedTime, SourceSyncServerHandshake serverHandshake)
+    {
+        ArgumentNullException.ThrowIfNull(elapsedTime);
+        ArgumentNullException.ThrowIfNull(serverHandshake);
         _listener = listener;
         LocalEndPoint = endpoint;
         _identity = identity;
+        _elapsedTime = elapsedTime;
+        _serverHandshake = serverHandshake;
     }
 
     /// <summary>The endpoint actually bound; the port is real even when 0 was requested.</summary>
@@ -323,8 +342,8 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
                 // W6-26 fix: the handshake gets the budget that is genuinely left after the accept, and only the
                 // caller's own token as "cancel". Handing it this method's budget token made a timeout look like a
                 // caller cancel whenever the accept was slow, because the handshake's own deadline started late.
-                SourceSyncTlsHandshakeResult handshake = await SourceSyncTlsHandshake
-                    .AuthenticateServerAsync(stream, _identity.Certificate, null, Remaining(budget, elapsed), cancellationToken)
+                SourceSyncTlsHandshakeResult handshake = await _serverHandshake(
+                    stream, _identity.Certificate, null, Remaining(budget, _elapsedTime(elapsed)), cancellationToken)
                     .ConfigureAwait(false);
                 if (!handshake.Succeeded || handshake.Stream is null)
                 {
@@ -486,8 +505,11 @@ public sealed class SourceSyncTransferListener : IAsyncDisposable
     /// The floor keeps the value legal for a cancellation timer when nothing is left.
     /// </remarks>
     internal static TimeSpan Remaining(TimeSpan budget, Stopwatch elapsed)
+        => Remaining(budget, elapsed.Elapsed);
+
+    internal static TimeSpan Remaining(TimeSpan budget, TimeSpan elapsed)
     {
-        TimeSpan left = budget - elapsed.Elapsed;
+        TimeSpan left = budget - elapsed;
         return left > TimeSpan.Zero ? left : TimeSpan.FromMilliseconds(1);
     }
 

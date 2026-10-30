@@ -15,6 +15,7 @@ import com.mediahub.model.MediaType
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
+import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.ServerType
 import com.mediahub.model.UserPreferences
 import com.mediahub.player.engine.InMemoryEnginePreferenceHistory
@@ -430,6 +431,27 @@ class PlayerViewModelTest {
         }
     }
 
+    @Test fun persistedAndLiveSubtitlePreferencesReachTheEngine() = runTest(dispatcher) {
+        val prefs = FakeUserPreferences()
+        val initial = UserPreferences(playbackEngineMode = PlaybackEngineMode.MEDIA3,
+            subtitleSizeSp = 24, subtitleStyle = com.mediahub.model.SubtitleStyle(textScale = 1.5f))
+        prefs.state.value = initial
+        val native = FakeEngine()
+        val vm = PlayerViewModel(savedState("m1"), FakeServerStore(embyServer()), FakeProgressStore(null),
+            FakeSubtitleMemoryStore(), FakeRegistry(detail = FakeDetail(mediaItemWithPoster("https://fixture.invalid/poster")),
+                playback = FakePlayback(PlaybackSource("https://fixture.invalid/video.mp4"))),
+            PlaybackEngineCreator { native }, PlaybackEngineCreator { FakeEngine() },
+            InMemoryEnginePreferenceHistory(), prefs, NoArtworkPalette, noOpLogger)
+        try {
+            runCurrent()
+            assertEquals(initial.subtitleStyle to 24, native.presentationOnPlay)
+            vm.updateSubtitleStyle { it.copy(textColor = 0xFFFFFF00.toInt()) }; runCurrent()
+            assertEquals(initial.subtitleStyle.copy(textColor = 0xFFFFFF00.toInt()) to 24, native.presentation)
+            prefs.update { it.copy(subtitleSizeSp = 36) }; runCurrent()
+            assertEquals(initial.subtitleStyle.copy(textColor = 0xFFFFFF00.toInt()) to 36, native.presentation)
+        } finally { vm.stopAndFlush(); runCurrent() }
+    }
+
     // ---- fakes ----
     private val NoArtworkPalette = ArtworkPaletteLoader { _, _ -> null }
 
@@ -549,11 +571,16 @@ class PlayerViewModelTest {
         private val eventsFlow = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
         override val events: Flow<PlaybackEvent> get() = eventsFlow
         var playedSession: PlaybackSession? = null
+        var presentation: Pair<com.mediahub.model.SubtitleStyle, Int>? = null
+        var presentationOnPlay: Pair<com.mediahub.model.SubtitleStyle, Int>? = null
+        override fun setSubtitlePresentation(style: com.mediahub.model.SubtitleStyle, sizeSp: Int) {
+            presentation = style to sizeSp
+        }
         override val kind: EngineKind = EngineKind.MEDIA3
         override val subtitleCues: StateFlow<androidx.media3.common.text.CueGroup?> = MutableStateFlow(null)
         override val downloadSpeedBps: StateFlow<Long> = MutableStateFlow(0L)
         override fun attachSurface(surface: android.view.Surface?) = Unit
-        override fun play(session: PlaybackSession) { playedSession = session }
+        override fun play(session: PlaybackSession) { presentationOnPlay = presentation; playedSession = session }
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: com.mediahub.player.engine.SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit

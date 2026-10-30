@@ -3,6 +3,7 @@ package com.mediahub.player.engine
 import android.view.Surface
 import androidx.media3.common.text.CueGroup
 import com.mediahub.model.PlaybackProgress
+import com.mediahub.model.SubtitleStyle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,6 +67,8 @@ interface PlaybackEnginePort {
         selection?.snapshotToken?.let { uiState.value.trackRowMap.matches(it) } ?: true
     fun selectAudioTrack(selection: TrackSelection?)
     fun selectSubtitleTrack(selection: TrackSelection?)
+    /** Native subtitle renderers consume persisted presentation; Media3 uses its SubtitleView. */
+    fun setSubtitlePresentation(style: SubtitleStyle, sizeSp: Int) = Unit
     /**
      * 控制是否需要音频频谱采样。默认关闭；关闭必须立即释放采样资源并把
      * [audioBands] 恢复为 null。不支持采样的引擎（包括 mpv）保持默认 no-op。

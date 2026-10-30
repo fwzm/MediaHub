@@ -15,6 +15,23 @@ import xml.etree.ElementTree as ET
 
 MODULES = ("core/ui", "feature/player", "feature/settings", "provider/webdav", "core/database", "app")
 COMMON_TESTS = {
+    ('com.mediahub.app.player.LocalSafProductionUiFlowTest', 'selectedDirectorySurvivesNavigationPlaysAndReauthorizesTheSameSource'),
+    ('com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest', 'documentRootMustBeDavMultistatus'),
+    ('com.mediahub.provider.webdav.WebDavMultistatusParserDeviceTest', 'directDavAncestryAndSuccessfulStatusRemainOwnedByTheirResponse'),
+    ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'selectingAnotherArchiveWithTheSameNameClearsThePassphrase'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'dismissingAndReopeningTheCardClearsThePassphrase'),
+    ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'noPassphraseCardIsRenderedWhenThePickerDidNotSeeAnArchive'),
+    ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'anArchiveShowsTheCardWithItsFileNameAndADisabledUnlockButton'),
+    ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'typingAPassphraseEnablesUnlockAndTappingItHandsTheTextBack'),
+    ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'aRejectedPassphraseKeepsTheCardOpenAndShowsTheReasonCode'),
+    ('com.mediahub.feature.settings.sync.SourceSyncPassphraseScreenTest', 'thePassphraseCardSitsAboveThePreviewBlockAndKeepsTheMainFlowOnTheFirstScreen'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'theCollapsedCardShowsOnlyTheExportButton'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'tappingExportOpensThePassphraseStep'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'theExpandedCardOffersAnEmptyPassphraseFieldAndBothButtons'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'typingAPassphraseAndTappingExportHandsTheTextBack'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'aSavedExportShowsTheFileNameAndTheByteCount'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'aFailureShowsTheStableCodeAndKeepsTheCardOpen'),
+    ('com.mediahub.feature.settings.sync.SourceSyncArchiveExportScreenTest', 'tappingDismissReportsTheDismissCallback'),
     ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'theEntryStartsEmptyAndTheVerifyButtonIsDisabled'),
     ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'typingALinkEnablesTheVerifyButtonAndHandsTheTextOver'),
     ('com.mediahub.feature.settings.pairing.PairingLinkScreenTest', 'aParsedStateShowsTheDeviceIdTheFingerprintAndTheRemainingSeconds'),

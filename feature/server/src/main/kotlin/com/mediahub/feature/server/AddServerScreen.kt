@@ -1,5 +1,8 @@
 package com.mediahub.feature.server
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,6 +32,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -50,6 +54,22 @@ fun AddServerRoute(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val providers = viewModel.availableProviders
     val selected = providers.firstOrNull { it.id == state.selectedDescriptorId }
+    val inputsEnabled = !state.isLoadingExisting && !state.isLoggingIn && !state.isSaving
+    val context = LocalContext.current
+    var directoryError by rememberSaveable { mutableStateOf<String?>(null) }
+    val directoryPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            val current = viewModel.uiState.value
+            val local = providers.firstOrNull { it.id == current.selectedDescriptorId }?.serverType == ServerType.LOCAL
+            if (local && !current.isLoadingExisting && !current.isLoggingIn && !current.isSaving) {
+                directoryError = try {
+                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    viewModel.updateBaseUrl(uri.toString())
+                    null
+                } catch (_: Exception) { "无法保留目录读取授权，请重新选择" }
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -57,7 +77,8 @@ fun AddServerRoute(
                 title = {
                     Text(
                         if (viewModel.isReauthorizing()) {
-                            if (viewModel.isLoadingExisting()) "加载中…" else "重新登录"
+                            if (viewModel.isLoadingExisting()) "加载中…"
+                            else if (selected?.serverType == ServerType.LOCAL) "重新授权目录" else "重新登录"
                         } else {
                             "添加媒体库"
                         }
@@ -84,6 +105,7 @@ fun AddServerRoute(
                 providers = providers,
                 selectedId = state.selectedDescriptorId,
                 onSelect = viewModel::selectProvider,
+                enabled = inputsEnabled && !state.isReauthorizing,
             )
 
             selected?.let { descriptor ->
@@ -95,11 +117,23 @@ fun AddServerRoute(
                         onHttpsChange = viewModel::toggleHttps,
                         resolvedUrl = state.resolvedUrl,
                         errorMessage = state.addressError,
+                        enabled = inputsEnabled,
                     )
+                } else {
+                    OutlinedButton(
+                        onClick = { directoryError = null; directoryPicker.launch(null) },
+                        enabled = inputsEnabled && !state.isTesting,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("选择本地目录") }
+                    Text(if (state.resolvedUrl != null) "已选择目录" else "请选择一个媒体目录并允许读取")
+                    (directoryError ?: state.addressError)?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
                 }
 
                 OutlinedTextField(
                     value = state.name,
+                    enabled = inputsEnabled,
                     onValueChange = viewModel::updateName,
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("名称") },
@@ -112,6 +146,7 @@ fun AddServerRoute(
                 ) {
                     OutlinedTextField(
                         value = state.username,
+                        enabled = inputsEnabled,
                         onValueChange = viewModel::updateUsername,
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("用户名（可选）") },
@@ -123,6 +158,7 @@ fun AddServerRoute(
                     var passwordVisible by rememberSaveable { mutableStateOf(false) }
                     OutlinedTextField(
                         value = state.password,
+                        enabled = inputsEnabled,
                         onValueChange = viewModel::updatePassword,
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("密码") },
@@ -196,15 +232,15 @@ fun AddServerRoute(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(
                     onClick = viewModel::testConnection,
-                    enabled = !state.isTesting && !state.isLoggingIn,
+                    enabled = inputsEnabled && !state.isTesting && selected != null,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(if (state.isTesting) "测试中…" else "测试连接")
+                    Text(if (state.isTesting) "测试中…" else if (selected?.serverType == ServerType.LOCAL) "检查目录" else "测试连接")
                 }
                 if (selected != null && selected.authMethod != com.mediahub.provider.api.AuthMethod.NONE) {
                     Button(
                         onClick = { viewModel.loginAndSave(onSaved = onDone) },
-                        enabled = !state.isLoggingIn && !state.isTesting,
+                        enabled = inputsEnabled && !state.isTesting,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(
@@ -216,10 +252,13 @@ fun AddServerRoute(
                 } else {
                     Button(
                         onClick = { viewModel.save(onSaved = onDone) },
-                        enabled = !state.isSaving,
+                        enabled = inputsEnabled && !state.isTesting && selected != null,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text(if (state.isSaving) "保存中…" else "保存")
+                        Text(if (state.isSaving) "保存中…"
+                            else if (selected?.serverType == ServerType.LOCAL) {
+                                if (state.isReauthorizing) "保存授权" else "保存目录"
+                            } else "保存")
                     }
                 }
             }
@@ -232,6 +271,7 @@ private fun ProviderTypeGrid(
     providers: List<ProviderDescriptor>,
     selectedId: String,
     onSelect: (ProviderDescriptor) -> Unit,
+    enabled: Boolean,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         providers.chunked(2).forEach { rowOptions ->
@@ -239,6 +279,7 @@ private fun ProviderTypeGrid(
                 rowOptions.forEach { descriptor ->
                     FilterChip(
                         selected = selectedId == descriptor.id,
+                        enabled = enabled,
                         onClick = { onSelect(descriptor) },
                         label = { Text(descriptor.displayName) },
                         modifier = Modifier.weight(1f),

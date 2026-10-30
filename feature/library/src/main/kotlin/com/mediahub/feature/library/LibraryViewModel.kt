@@ -78,7 +78,7 @@ sealed interface LibraryUiState {
         val filterFields: List<MediaFilterField> = emptyList(),
     ) : LibraryUiState
 
-    data class Error(val message: String) : LibraryUiState
+    data class Error(val message: String, val reauthorizeDirectory: Boolean = false) : LibraryUiState
 }
 
 @HiltViewModel
@@ -191,7 +191,11 @@ class LibraryViewModel @Inject constructor(
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 val page = PageRequest(offset = snapshotOffset, limit = 200)
                 val queryProvider = handle.query
-                val result = if (queryProvider != null) {
+                val browse = handle.browse
+                val result = if (browse != null && (snapshotFolder != null || handle.library == null)) {
+                    // Continue on the same browsing API chosen by the initial folder/root listing.
+                    browse.listFolder(snapshotFolder, page)
+                } else if (queryProvider != null) {
                     // 排序与筛选都下沉服务器；续页沿用同一快照（RANDOM 除外，见 Provider 快照语义）
                     queryProvider.getItems(
                         snapshotParent,
@@ -280,15 +284,17 @@ class LibraryViewModel @Inject constructor(
                 val library = handle.library
                 val browse = handle.browse
                 when {
-                    library != null && libraryId == "root" -> {
+                    library != null && libraryId == "root" && snapshotFolder == null -> {
                         val libraries = library.getLibraries()
+                        if (snapshotGen != navigationGeneration ||
+                            (currentFolder?.id ?: libraryId) != snapshotParent) return@launch
                         _uiState.value = LibraryUiState.Libraries(
                             libraries = libraries,
                             libraryName = libraryName.ifBlank { server.displayName },
                         )
                     }
 
-                    library != null -> {
+                    library != null && (snapshotFolder == null || browse == null) -> {
                         val queryProvider = handle.query
                         val result = if (queryProvider != null) {
                             // 排序与筛选都下沉服务器（分页前执行）；无 Query 能力回退旧接口
@@ -348,7 +354,7 @@ class LibraryViewModel @Inject constructor(
                 sortRollbackOnFailure = null
                 filterRollbackOnFailure = null
                 logger.w(LogTag.UI, "加载媒体库失败 serverId=$serverId", e)
-                _uiState.value = LibraryUiState.Error(userMessage(e))
+                _uiState.value = LibraryUiState.Error(userMessage(e), e is ProviderException.DirectoryAccessRequired)
             }
         }
     }

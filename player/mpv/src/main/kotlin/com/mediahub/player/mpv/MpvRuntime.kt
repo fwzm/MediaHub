@@ -19,6 +19,9 @@ internal interface MpvBridge {
     fun startLocalFile(path: String): String =
         throw UnsupportedOperationException("MpvBridge 未实现本地文件上游")
 
+    fun startContentUri(uri: String): String =
+        throw UnsupportedOperationException("MpvBridge 未实现文档上游")
+
     fun stop()
 }
 
@@ -60,10 +63,14 @@ internal interface MpvInstance {
 internal fun createMpvBridge(
     factory: HttpClientFactory,
     ledger: com.mediahub.core.network.NetworkExchangeLedger? = null,
+    context: Context? = null,
 ): MpvBridge = object : MpvBridge {
     private val delegate = MpvHttpBridge(factory, ledger)
     override fun start(url: String, headers: Map<String, String>) = delegate.start(url, headers)
     override fun startLocalFile(path: String) = delegate.startLocalFile(path)
+    override fun startContentUri(uri: String) = delegate.startContent(
+        AndroidContentByteSource(checkNotNull(context).contentResolver, android.net.Uri.parse(uri))
+    )
     override fun stop() = delegate.stop()
 }
 

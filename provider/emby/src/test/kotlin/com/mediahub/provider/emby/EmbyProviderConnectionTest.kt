@@ -15,6 +15,8 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -70,6 +72,31 @@ class EmbyProviderConnectionTest {
         val result = provider().testConnection()
         assertTrue("ok=$result", result.ok)
         assertTrue(result.message!!.contains("4.8.1.0"))
+    }
+
+    @Test
+    fun explicitJellyfinProductIsRejected() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"Id":"fixture-id","Version":"1","ProductName":"jELlYfIn Server"}"""))
+        val result = provider().testConnection()
+        assertFalse("Explicit Jellyfin identity must not be accepted as Emby", result.ok)
+        assertEquals(com.mediahub.provider.api.ProviderException.ErrorCode.PARSE, result.errorCode)
+        assertTrue(result.message.orEmpty().contains("Jellyfin"))
+        val request = server.takeRequest()
+        assertNull(request.getHeader("X-Emby-Token"))
+    }
+
+    @Test
+    fun matchingEmbyProductIsAccepted() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"Id":"fixture-id","Version":"1","ProductName":"Emby Server"}"""))
+        assertTrue(provider().testConnection().ok)
+    }
+
+    @Test
+    fun missingNullOrBlankProductRetainsExistingCompatibility() = runBlocking {
+        for (product in listOf("null", "\"\"", "\"   \"")) {
+            server.enqueue(MockResponse().setBody("""{"Id":"fixture-id","Version":"1","ProductName":$product}"""))
+            assertTrue(provider().testConnection().ok)
+        }
     }
 
     @Test

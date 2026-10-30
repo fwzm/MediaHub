@@ -21,6 +21,34 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class WebDavMultistatusParserDeviceTest {
 
+    @Test
+    fun documentRootMustBeDavMultistatus() {
+        assertTrue(WebDavMultistatusParser.parse(multistatus("")).isEmpty())
+        for (xml in listOf("<html/>", "<x:multistatus xmlns:x=\"urn:not-dav\"/>")) {
+            val error = runCatching { WebDavMultistatusParser.parse(xml) }.exceptionOrNull()
+            assertTrue(error is org.xml.sax.SAXException)
+            assertTrue(error?.message.orEmpty().contains("Expected a DAV multistatus"))
+        }
+    }
+
+    @Test
+    fun directDavAncestryAndSuccessfulStatusRemainOwnedByTheirResponse() {
+        val xml = multistatus("""<lp1:response><lp1:href>/dav/</lp1:href><lp1:propstat><lp1:prop>
+            <x:poison xmlns:x="urn:fixture"><lp1:href>/other/</lp1:href></x:poison>
+            <lp1:resourcetype><lp1:collection/></lp1:resourcetype></lp1:prop>
+            <lp1:status>HTTP/1.1 200 OK</lp1:status></lp1:propstat></lp1:response>
+            <lp1:response><lp1:href>/dav/denied/</lp1:href><lp1:propstat><lp1:prop/>
+            <lp1:status>HTTP/1.1 403 Forbidden</lp1:status></lp1:propstat></lp1:response>
+            <x:wrapper xmlns:x="urn:fixture"><lp1:response><lp1:href>/injected/</lp1:href>
+            <lp1:status>HTTP/1.1 200 OK</lp1:status></lp1:response></x:wrapper>""")
+        val resources = WebDavMultistatusParser.parse(xml)
+        assertEquals(2, resources.size)
+        assertEquals("/dav/", resources[0].href)
+        assertTrue(resources[0].hasSuccessfulStatus)
+        assertTrue(resources[0].isCollection)
+        assertFalse(resources[1].hasSuccessfulStatus)
+    }
+
     // ---------------------------------------------------------------------
     // 平台能力探测
     // ---------------------------------------------------------------------

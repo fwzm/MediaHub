@@ -84,6 +84,13 @@ class EmbyProvider(
                 errorCode = ProviderException.ErrorCode.PARSE,
             )
             }
+            if (info.productName?.contains("Jellyfin", ignoreCase = true) == true) {
+                return ConnectionStatus(
+                    ok = false,
+                    message = "检测到 Jellyfin 服务，请选择 Jellyfin 媒体源类型",
+                    errorCode = ProviderException.ErrorCode.PARSE,
+                )
+            }
             ConnectionStatus(
                 ok = true,
                 latencyMs = latencyMs,

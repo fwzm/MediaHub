@@ -37,6 +37,34 @@ import org.junit.Test
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SwitchablePlaybackEngineTest {
+    @Test fun subtitlePresentationPrecedesPlayAndFollowsFallback() = runTest(dispatcher) {
+        val a = FakeEngine(EngineKind.MEDIA3); val b = FakeEngine(EngineKind.MPV)
+        val outer = facade(backgroundScope, a, b)
+        val style = com.mediahub.model.SubtitleStyle(textScale = 1.5f, applyEmbeddedStyles = false)
+        try {
+            outer.setSubtitlePresentation(style, 24)
+            outer.play(session(source())); runCurrent()
+            assertEquals(style to 24, a.presentationOnPlay)
+            a.updateState { it.copy(error = PlaybackError(PlaybackError.Code.DECODER_ERROR)) }
+            runCurrent()
+            assertEquals(EngineKind.MPV, outer.kind)
+            assertEquals(style to 24, b.presentationOnPlay)
+            outer.setSubtitlePresentation(style.copy(textScale = 2f), 36)
+            assertEquals(style.copy(textScale = 2f) to 36, b.presentation)
+        } finally { outer.release() }
+    }
+
+    @Test fun presentationChangedWhileStoppedIsAppliedBeforeReentry() = runTest(dispatcher) {
+        val a = FakeEngine(EngineKind.MEDIA3); val b = FakeEngine(EngineKind.MPV)
+        val outer = facade(backgroundScope, a, b, mode = PlaybackEngineMode.MEDIA3)
+        try {
+            outer.play(session(source())); runCurrent(); outer.stop()
+            val style = com.mediahub.model.SubtitleStyle(textColor = 0xFFFFFF00.toInt())
+            outer.setSubtitlePresentation(style, 27)
+            outer.play(session(source())); runCurrent()
+            assertEquals(style to 27, a.presentationOnPlay)
+        } finally { outer.release() }
+    }
     @Test
     fun `facade forwards the exact critical progress envelope without resampling`() = runTest(dispatcher) {
         val media3 = FakeEngine(EngineKind.MEDIA3)
@@ -761,6 +789,11 @@ class SwitchablePlaybackEngineTest {
         fun emitEvent(event: PlaybackEventMessage) { eventsFlow.tryEmit(event) }
 
         var playedSession: PlaybackSession? = null
+        var presentation: Pair<com.mediahub.model.SubtitleStyle, Int>? = null
+        var presentationOnPlay: Pair<com.mediahub.model.SubtitleStyle, Int>? = null
+        override fun setSubtitlePresentation(style: com.mediahub.model.SubtitleStyle, sizeSp: Int) {
+            presentation = style to sizeSp
+        }
         var seekedTo: Long = -1
         var speedSet = 1f
         var toggled = false
@@ -781,6 +814,7 @@ class SwitchablePlaybackEngineTest {
         override val audioBands: StateFlow<AudioBandLevels?> = audio
         override fun attachSurface(surface: android.view.Surface?) = Unit
         override fun play(session: PlaybackSession) {
+            presentationOnPlay = presentation
             playedSession = session
         }
         override fun togglePlayPause() { toggled = true }

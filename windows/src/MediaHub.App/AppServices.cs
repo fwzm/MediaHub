@@ -16,7 +16,8 @@ public sealed class AppServices : IDisposable
 {
     public AppServices()
     {
-        Log = new LogService();
+        Log = new LogService(new LogFileSink(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MediaHub", "logs")));
         Settings = new SettingsStore();
         PlaybackHistory = new PlaybackHistoryStore();
         // Saved playlists are local user data: no credentials, no network, no UI thread needed.

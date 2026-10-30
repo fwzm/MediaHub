@@ -8,6 +8,7 @@ import com.mediahub.core.database.sync.SourceSyncImportResult
 import com.mediahub.core.database.sync.SourceSyncPreview
 import com.mediahub.core.database.sync.SourceSyncPreviewService
 import com.mediahub.core.database.sync.SourceSyncStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,8 +45,11 @@ class SourceSyncImportSession(
     private val _state = MutableStateFlow(SourceSyncImportState())
     val state: StateFlow<SourceSyncImportState> = _state.asStateFlow()
 
+    private var generation = 0L
+
     /** 选好一份信封（还没预览）。 */
     fun loadEnvelope(envelopeJson: String, fileName: String? = null) {
+        generation++
         _state.value = SourceSyncImportState(
             status = SourceSyncImportStatus.READY_TO_PREVIEW,
             fileName = fileName,
@@ -53,15 +57,39 @@ class SourceSyncImportSession(
         )
     }
 
+    /**
+     * 选到的是加密归档、但口令还没给（或给错了）：停在"要口令"的位置。
+     *
+     * 刻意不把密文写进 envelopeJson：状态里躺着二进制密文既没有用，也会让 canPreview 误判为可预览。
+     */
+    fun requirePassphrase(reason: String, message: String?, fileName: String? = null) {
+        generation++
+        _state.value = SourceSyncImportState(
+            status = SourceSyncImportStatus.BLOCKED,
+            fileName = fileName,
+            blockedReason = reason,
+            blockedMessage = message,
+        )
+    }
+
     /** 预演：把信封交给只读的规划服务，得到四桶。 */
     suspend fun preview() {
-        val json = _state.value.envelopeJson
+        val current = _state.value
+        if (current.isBusy) return
+        val owner = generation
+        val json = current.envelopeJson
         if (json.isNullOrBlank()) {
             block(SourceSyncImportCopy.NO_ENVELOPE, null)
             return
         }
         _state.update { it.copy(status = SourceSyncImportStatus.READY_TO_PREVIEW, isBusy = true) }
-        val result = runCatching { previewPort.preview(json) }
+        val result = runCatching { previewPort.preview(json) }.onFailure {
+            if (it is CancellationException) {
+                if (generation == owner) _state.value = current
+                throw it
+            }
+        }
+        if (generation != owner) return
         result.fold(
             onSuccess = { preview ->
                 when (preview) {
@@ -94,6 +122,8 @@ class SourceSyncImportSession(
     /** 应用：剔除未允许的条目后交给写库服务。 */
     suspend fun apply() {
         val current = _state.value
+        if (current.isBusy || current.status == SourceSyncImportStatus.APPLIED) return
+        val owner = generation
         val preview = current.preview
         val json = current.envelopeJson
         if (preview == null || json.isNullOrBlank()) {
@@ -113,7 +143,13 @@ class SourceSyncImportSession(
             )
         }
         val filtered = filterEnvelope(json, preview.skippedKeys)
-        val result = runCatching { applyPort.apply(filtered) }
+        val result = runCatching { applyPort.apply(filtered) }.onFailure {
+            if (it is CancellationException) {
+                if (generation == owner) _state.value = current
+                throw it
+            }
+        }
+        if (generation != owner) return
         result.fold(
             onSuccess = { applied ->
                 if (applied.isRejected) {
@@ -136,6 +172,7 @@ class SourceSyncImportSession(
 
     /** 回到"选文件"位置（重新选一份信封时用）。 */
     fun reset() {
+        generation++
         _state.value = SourceSyncImportState()
     }
 
