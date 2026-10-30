@@ -15,7 +15,7 @@
     {
       "file": "windows-tests.trx",
       "suite": "MediaHub.Tests",
-      "expected": 1943,
+      "expected": 1952,
       "classes": {
         "MediaHub.Tests.ArchiveAndroidInteropTests": 8,
         "MediaHub.Tests.ArchiveEdgeContractTests": 11,
@@ -56,6 +56,7 @@
         "MediaHub.Tests.MediaBrowserTokenPlacementTests": 6,
         "MediaHub.Tests.MediaPathInputTests": 29,
         "MediaHub.Tests.MediaStreamBoundaryTests": 9,
+        "MediaHub.Tests.MhBackupHandleLocatorTests": 9,
         "MediaHub.Tests.MhBackupProviderWritebackTests": 6,
         "MediaHub.Tests.MhBackupWritebackTests": 9,
         "MediaHub.Tests.MhBackupWriteOutlookTests": 9,

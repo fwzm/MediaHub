@@ -777,9 +777,49 @@ W29 的执行层只认 IMhBackupServerWriters，完全不认识 provider。把 `
 - 真实登录态下的写回没有跑过（需要真实服务器与凭据）—— SERVER_UNVERIFIED；
 - 只覆盖 MediaBrowser 系（Emby / Jellyfin）。WebDAV 没有 userData 写口，所以它的记录仍归 `unsupported-type`；PLEX / SMB / FN_NAS / LOCAL 同理。
 
-## 21 仍未做（如实）
+## 21 句柄配对：备份来源怎么对上本机已登录来源（W31）
 
-- 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏的**去向**已逐条说明（§16），provider 层写口已实现（§17），写回执行层已实现并接进命令行回执（§19，W29），适配器已把抽象接到真实 provider 句柄（§20，W30）；但 App 侧没有接线与设置页入口，生产路径不写 —— IMPLEMENTED_UNVERIFIED（真服 SERVER_UNVERIFIED）
+### 21.1 为什么按地址配对，而不是按 id
+
+备份里的来源 id（`BackupId`）是导出方自制的，本机句柄的 `ServerId` 是添加来源时按 `类型:远端标识` 生成的（例如 `emby:<remoteId>`）。两者在新机器上必然不同名，按 id 相等去配只会一条都配不上。所以配对判据是：**类型相同 + 端点地址相同**。
+
+唯一遗憾的是「类型相同、地址却不同」时不能猜：把续播位置写进另一台同名库，比不写更糟。因此这一层宁可给出可解释的拒绝，也不退化成「随便取第一个」。
+
+### 21.2 四个出口，四种说法
+
+`MhBackupHandleLocator.Create(payload, handles)` 对备份里的每个来源算一次配对，`Match(id)` 返回 Kind + 原因；`ForServer(id)` 把它翻译成写回执行层要的通道：
+
+| Kind | `KindCode` | `ForServer` 给出什么 | 用户在回执里看到什么 |
+| --- | --- | --- | --- |
+| Matched | `matched` | 基于该句柄的真实写通道 | 写入（或服务端未存） |
+| NoHandle | `no-handle` | `null` ⇒ 执行层记 `needs-login`，**请求不发** | 「需要先添加来源并登录」 |
+| AddressMismatch | `address-mismatch` | 固定拒绝通道 | `failed` +「地址不一致时不猜」 |
+| Ambiguous | `ambiguous` | 固定拒绝通道 | `failed` +「无法确定写哪一个（不猜）」 |
+
+刻意区分 NoHandle 与后两者：本机**没有**这个来源，让用户去添加并登录是正确建议；本机**有**同类型来源但地址不一致或有多个候选，让用户去重登只会掩盖问题，所以给的是失败原因而不是登录提示。
+
+### 21.3 地址归一化
+
+只认 `http` / `https`：scheme 与 host 小写、默认端口（80/443）不写、路径去掉末尾斜杠。于是 `https://Media.Example:443/emby/` 与 `https://media.example/emby` 视为同一端点。端口非默认时保留（`http://host:8920/emby` 与 `http://host/emby` 是两个端点）。
+
+备份里没有地址时（例如 LOCAL 类型，或老备份没写端点）：同类型候选恰好一个 ⇒ 配对成功并在原因里说明「备份里没有来源地址，本机只有一个同类型来源」；两个以上 ⇒ Ambiguous。
+
+### 21.4 验证与证据
+
+- `MediaHub.Tests` 1937 → **1952/0**（新增 `MhBackupHandleLocatorTests` 9 例）；sln `-p:Platform=x64 --no-restore` 构建 0 错误。
+- 9 例中有一例是端到端：`MockMediaServer` + 真 `EmbyProviderFactory`，locator 找到句柄后由 `MhBackupWritebacks` 真发 HTTP，断言语义是「服务端存住了 1200000000 ticks」而不是「回执说写成功」。
+- 其余覆盖：拼写不同（大小写/默认端口/末尾斜杠）仍能配对、两个句柄里按地址选对那个、无地址回退唯一同类型、无句柄 ⇒ `needs-login` 而非拒绝、地址不一致 ⇒ `failed` 且 `needs-login` 计数为 0、两个同地址 ⇒ Ambiguous 且一条都不写、两个同类型无地址 ⇒ Ambiguous、LOCAL/WEBDAV/PLEX/未知 id/空 id ⇒ NoHandle。
+- 三条负向对照（实现态快照 `w31-impl-locator.cs` sha256 `4f7d0442…e6ca`，逐字节还原后复验全绿）：A 地址不一致改成「取第一个同类型候选」⇒ 1 红 `ADifferentAddressIsRefusedInsteadOfPairingTheWrongServer`；B 多候选取第一 ⇒ 1 红 `TwoHandlesOnTheSameAddressAreAmbiguousAndNothingIsWritten`；C 把 NoHandle 也改成拒绝通道（冒充配不上）⇒ 1 红 `WithoutAHandleOfThatKindTheRecordNeedsLoginInsteadOfBeingRefused`。
+
+### 21.5 仍未做（如实）
+
+- App 侧还没有引用 `MediaHub.Backup.Providers`，也没有把 `SourceRegistry.Handles` 交给 locator，更没有设置页「备份与还原」入口 ⇒ 生产路径仍不写（IMPLEMENTED_UNVERIFIED；入口 GUI_UNVERIFIED）；
+- 真实登录态下按地址配对的现场证据没有（需要真实服务器）—— SERVER_UNVERIFIED；
+- 只对 MediaBrowser 系（Emby / Jellyfin）配对，其它类型如实报「没有可写的服务端接口」。
+
+## 22 仍未做（如实）
+
+- 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏的**去向**已逐条说明（§16），provider 层写口已实现（§17），写回执行层已实现并接进命令行回执（§19，W29），适配器已把抽象接到真实 provider 句柄（§20，W30），句柄配对层已实现（§21，W31）；但 App 侧没有接线与设置页入口，生产路径不写 —— IMPLEMENTED_UNVERIFIED（真服 SERVER_UNVERIFIED）
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
 - 本机进度/收藏的写入（来源与偏好已随 `--apply` 落库）—— NOT_IMPLEMENTED
 - WebDAV 上传（§10，含覆盖保护 §14）、下载（§11）、列目录（§12）、删除（§13）均已实现；**真实服务端联调未做** —— SERVER_UNVERIFIED
