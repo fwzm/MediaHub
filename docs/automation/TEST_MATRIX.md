@@ -155,3 +155,23 @@ grep -n 'Floor = ' .github/workflows/windows-ci.yml
 | 有 failed | 红 | RED |
 | 少 1 例 1919 | 红 | RED |
 | 丢 1520 例 400 | 红 | RED |
+
+### 6.2 基线机制被第二个使用者正确使用的实证（2026-10-30 17:35）
+
+`ffe5a9fb` 引入基线后不到 1.5 小时，另一个执行者的 `2adb207f`（W28）就新增了 7 个 C# 用例，
+并在同一次提交里把 `test-suite-baseline.json` 的 `expected` 从 **1920 改成 1927**。
+
+它的 CI 日志（run `41034588485`）证实两者吻合：
+
+```
+Passed!  - Failed: 0, Passed: 1927
+MediaHub.Tests: total=1927 baseline=1927
+```
+
+**这是本轮最有价值的验证**：基线不只是一个「我写的更严的检查」，它对**第二个使用者**也是可理解、
+可按提示动作的 —— 看到 `::warning::suite grew beyond the baseline` 就去改基线，一次做对。
+如果当初选择的是「把 Floor 从 400 改成 1920」，对方加 7 个用例时不会有人去动那个常量，
+下次再有人删用例就又回到静默放行。
+
+**附带结论**：基线数字会随并行开发频繁变动。这不是缺陷，是设计意图 —— 变动以一条独立 diff
+出现在 review 里，比藏在 YAML 常量里可见得多。
