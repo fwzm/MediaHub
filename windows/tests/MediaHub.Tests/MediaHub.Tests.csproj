@@ -13,6 +13,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\MediaHub.Backup\MediaHub.Backup.csproj" />
+    <!-- W30: the backup writeback adapter lives in its own assembly; tests exercise it end to end. -->
+    <ProjectReference Include="..\..\src\MediaHub.Backup.Providers\MediaHub.Backup.Providers.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Domain\MediaHub.Domain.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Net\MediaHub.Net.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Providers\MediaHub.Providers.csproj" />

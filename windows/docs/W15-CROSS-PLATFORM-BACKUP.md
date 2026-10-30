@@ -742,13 +742,44 @@ JSON 回执新增 writeback 对象：written / serverDidNotStore / needsLogin / 
 
 ### 19.6 仍未做（如实）
 
-- App 侧适配器（ProviderHandle.ProgressWrite / IProviderFavorites → IMhBackupServerWriter）与设置页「备份与还原」入口还没有 —— 生产路径目前没有调用方；
+- 适配器已由 §20（W30）补上（ProviderHandle.ProgressWrite / IProviderFavorites → IMhBackupServerWriter）；App 侧接线与设置页「备份与还原」入口还没有 —— 生产路径目前没有调用方；
 - 真实登录态下的写回没有跑过（需要真实服务器与凭据）—— SERVER_UNVERIFIED；
 - Android 侧没有对等的写回执行层（Android 的恢复直接写库，服务端进度由服务端自己维护）。
 
-## 20 仍未做（如实）
+## 20 写回适配器：把抽象接到 provider 句柄（W30）
 
-- 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏的**去向**已逐条说明（§16），provider 层写口已实现（§17），写回执行层已实现并接进命令行回执（§19，W29）；但 App 侧没有适配器与入口，生产路径不写 —— IMPLEMENTED_UNVERIFIED（真服 SERVER_UNVERIFIED）
+### 20.1 为什么单独一个程序集
+
+W29 的执行层只认 IMhBackupServerWriters，完全不认识 provider。把 `ProviderHandle` 直接塞进 `MediaHub.Backup` 会破坏那个工程的分层（零 ProjectReference、BCL-only）；放进 `MediaHub.App` 又无法单测（WPF exe，`MediaHub.Tests` 不引用它）。
+
+所以新增 `windows/src/MediaHub.Backup.Providers/`（net10.0）：只引用 `MediaHub.Backup` 与 `MediaHub.Providers`。它能被测试直接引用，用真 provider 与 loopback mock 走完 HTTP；将来设置页入口直接引用同一个程序集接线，执行层不用改。
+
+### 20.2 两个类
+
+- `MhBackupProviderWriters : IMhBackupServerWriters`：构造参数是 `Func<string, ProviderHandle?> resolve`。`ForServer(serverBackupId)` 先校验 id 非空再解析；解析不到就返回 null（执行层记 `needs-login`，请求根本不会发出），解析到就把句柄包成通道。显式传函数而不是字典，是因为备份里的来源 id 与 provider 句柄 id 未必同名，映射只能由调用方负责。
+- `MhBackupProviderServerWriter : IMhBackupServerWriter`（internal）：`ProgressWrite` 缺失 ⇒ `MhBackupWriteAnswer.Fail("这个来源没有保存播放位置的接口（provider 没有声明 ProgressWrite）")`；`Favorites` 缺失 ⇒ 同形的「没有收藏接口」；否则调用并把服务端答案原样上交（`Position(reported)` / `Favorite(reported)`），绝不回声。
+
+### 20.3 一条刻意边界
+
+合成句柄（有 `ProviderHandle`、但没有写口）**不算** `needs-login`。把「这个来源没有接口」说成「还没登录」，会让人去重登一个本来就没有该能力的来源，然后还是失败。所以这种句柄照旧交出通道，由写口缺失回 `failed` 的明确原因；`needs-login` 只留给「真的没有会话」。
+
+### 20.4 验证与证据
+
+- 新增 6 例 `windows/tests/MediaHub.Tests/MhBackupProviderWritebackTests.cs`，全部用 loopback `MockMediaServer` + 真的 `EmbyProviderFactory`/`JellyfinProviderFactory` 走完 HTTP：①备份里的 120000 ms 变成 `1200000000` ticks 真写进 mock、结果 `written`、路由 `POST /emby/Users/user-1/Items/item-003/UserData`；②`SetUserDataWritesIgnored(true)` ⇒ 适配器上交服务端的旧值 `300000000` ⇒ `server-did-not-store`，原因含「与请求的 1200000000 ticks 不同」；③收藏走 `/FavoriteItems/` 且 `mock.IsFavorite` 为 true ⇒ `written`；④`SetFavoriteWritesIgnored(true)` ⇒ `server-did-not-store`；⑤解析器恒 null ⇒ `needs-login` 且 mock 零请求；⑥无写口句柄 ⇒ 进度与收藏都 `failed`，原因分别含「没有保存播放位置的接口」与「没有收藏接口」，且 `needs-login` 计数 0、mock 零请求。
+- `MediaHub.Tests` 1943 / 0（W29 后 1937，本轮 +6）；`windows/tools/test-suite-baseline.json` 的 `MediaHub.Tests` expected 1937 → 1943（`MediaHub.WebDav.Tests` 仍 104）。
+- sln 级构建（`-p:Platform=x64 --no-restore`）0 错误、21 警告（全部是既有的 xUnit2000/2013 与 BackupRestoreApplierTests CS8601）；新工程已并入 `MediaHub.Windows.sln`（映射 Any CPU，挂在 src 下）。
+- 负向对照（实现态快照 `w30-impl-writers.cs`，3451 B，sha256 `bf673eb260b3b490cd205c23da18b0c4f538d8c4bd790f1ea29a70c5eec6ef5e`；三处还原后 sha 相同，并复跑全量 1943/0）：A 进度回报改回声 ⇒ 恰好 1 红（`AWriteTheServerDropsIsReportedAsNotStoredInsteadOfWritten`）；B 无写口当成写入成功 ⇒ 恰好 1 红（`AHandleWithoutWriteCapabilitiesSaysSoInsteadOfClaimingALoginProblem`）；C 收藏回报改成恒 true ⇒ 恰好 1 红（`AFavoriteTheServerIgnoresIsReportedAsNotStored`）。三条各打一处，因为每条用例只钉一种处境。
+- 本轮的写入是真的：mock 是进程内 HTTP 服务，provider 是真的 MediaBrowser 实现，请求体、路由、回读都按协议走。但服务端是 mock，所以真服仍 SERVER_UNVERIFIED。
+
+### 20.5 仍未做（如实）
+
+- App 侧还没有接线：没有把「备份来源 id → 已登录 ProviderHandle」的映射接进 `MediaHub.App`，也没有设置页「备份与还原」入口 ⇒ 生产路径仍不写（IMPLEMENTED_UNVERIFIED；入口本身 GUI_UNVERIFIED）；
+- 真实登录态下的写回没有跑过（需要真实服务器与凭据）—— SERVER_UNVERIFIED；
+- 只覆盖 MediaBrowser 系（Emby / Jellyfin）。WebDAV 没有 userData 写口，所以它的记录仍归 `unsupported-type`；PLEX / SMB / FN_NAS / LOCAL 同理。
+
+## 21 仍未做（如实）
+
+- 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏的**去向**已逐条说明（§16），provider 层写口已实现（§17），写回执行层已实现并接进命令行回执（§19，W29），适配器已把抽象接到真实 provider 句柄（§20，W30）；但 App 侧没有接线与设置页入口，生产路径不写 —— IMPLEMENTED_UNVERIFIED（真服 SERVER_UNVERIFIED）
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
 - 本机进度/收藏的写入（来源与偏好已随 `--apply` 落库）—— NOT_IMPLEMENTED
 - WebDAV 上传（§10，含覆盖保护 §14）、下载（§11）、列目录（§12）、删除（§13）均已实现；**真实服务端联调未做** —— SERVER_UNVERIFIED

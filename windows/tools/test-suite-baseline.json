@@ -13,7 +13,7 @@
     {
       "file": "windows-tests.trx",
       "suite": "MediaHub.Tests",
-      "expected": 1937
+      "expected": 1943
     },
     {
       "file": "webdav-tests.trx",
