@@ -181,6 +181,21 @@
       "blocked_by": [],
       "next_action": "下轮若 windows-ci 出现 `::warning::suite grew beyond the baseline`，按提示把 windows/tools/test-suite-baseline.json 的 expected 改成日志里的 total，单独提交。",
       "notes": "这是设计上的预期行为（增长不阻断，只提示），但意味着基线会周期性偏小；偏小不会造成漏检（只会让门禁更严），所以可以晚一步更新。"
+    },
+    {
+      "id": "W6-113j",
+      "title": "套件基线自身校验（expected 必须正整数等）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r4",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "d6cdc7ee",
+        "windows-ci run 41032068612 success",
+        "log: MediaHub.Tests total=1920 baseline=1920 / WebDav 104/104",
+        "10 boundary cases: E0 GREEN, E1-E5/E7-E9 RED, E6 GREEN"
+      ],
+      "notes": "缺口：expected=0 或负数时 total>=0 恒成立 ⇒ 门禁静默失效。PowerShell 陷阱：\"$var: ...\" 被解析成驱动器限定符，必须 ${var}:。"
     }
   ]
 }
