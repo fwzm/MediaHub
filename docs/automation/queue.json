@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T01:39:18+08:00",
+  "updated_at": "2026-10-31T01:58:24+08:00",
   "updated_by": "lead-W6-113-r12",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -325,7 +325,8 @@
         "NC41 real round 9 name-list baseline against the real TRX RED (migration demanded); NC43 the same on the round 9 gate GREEN",
         "NC37 regenerating from the real CI TRX reproduces the committed baseline byte for byte",
         "data source: CI run 41095080796 @701bb547, windows-tests.trx 2,719,155 B / webdav-tests.trx 145,266 B",
-        "CI: run 41099478575 @8ec0d890 success - methodCases=1952 baseline=method case table 1952 cases, methods=1637 ... 1637, combined tests=2056, licence checks=27 failed=0"
+        "CI: run 41099478575 @8ec0d890 success - methodCases=1952 baseline=method case table 1952 cases, methods=1637 ... 1637, combined tests=2056, licence checks=27 failed=0",
+        "CI: run 41100655895 @4461140b success - the docs head prints the same ladder lines (methodCases=1952 / 104, combined tests=2056, licence checks=27 failed=0)"
       ],
       "notes": "methods is now class -> {method -> case count}; per-method case-count drops are RED naming Class.Method with both counts; old 2026-10-30 name-list baselines throw with a refresh hint instead of passing silently; class-to-method sums must equal the classes table. Residual limit: theory data-row argument values are still not pinned (R7 / round 9 NC16).",
       "next_action": "无；若要收掉数据行参数值需把 InlineData 纳入基线（代价与噪声显著上升），另立切片。",
