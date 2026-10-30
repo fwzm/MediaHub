@@ -55,8 +55,17 @@ $suitePaths = @{
 if ($Suites -contains 'all') { $Suites = @('u1', 'u2', 'u3', 'u4') }
 
 $serverPorts = @{ emby = 8097; jellyfin = 8096 }
+# Emby keeps the full install layout in app\system once it is updated in place; an offline lab copy
+# can legitimately leave the runnable binary in app\system.old (the updater moved it). Resolve rather
+# than hardcode one of the two, and let a missing install fail with the path we actually tried.
+$embyExeCandidates = @(
+    'D:\mh-servers\emby-install\app\system\EmbyServer.exe'
+    'D:\mh-servers\emby-install\app\system.old\EmbyServer.exe'
+)
+$embyExe = $embyExeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $embyExe) { $embyExe = $embyExeCandidates[0] }
 $serverExe = @{
-    emby     = 'D:\mh-servers\emby-install\app\system\EmbyServer.exe'
+    emby     = $embyExe
     jellyfin = 'D:\mh-servers\jellyfin\jellyfin\jellyfin.exe'
 }
 $serverArgs = @{
@@ -99,7 +108,10 @@ function Start-QuietServer([string]$Name) {
             RedirectStandardError = ($log + '.err')
         }
         $proc = Start-Process @startArgs
-        Add-Line ('server ' + $Name + ': launch attempt ' + $attempt + ' pid=' + $proc.Id)
+        Add-Line ('server ' + $Name + ': launch attempt ' + $attempt + ' exe=' + $serverExe[$Name] + ' pid=' + $proc.Id)
+        if ($Name -eq 'emby' -and $serverExe[$Name] -like '*system.old*') {
+            Add-Line 'server emby: app\system has no EmbyServer.exe, using app\system.old (the lab install was updated in place)'
+        }
 
         $deadline = (Get-Date).AddSeconds(150)
         $exitNote = $null

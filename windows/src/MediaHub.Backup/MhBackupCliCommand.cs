@@ -89,6 +89,7 @@ public static class MhBackupCliCommand
             "export" => RunExport(options, output, error, environment),
             "import" => RunImport(options, output, error, environment),
             "upload" => RunUpload(options, output, error, environment, httpHandler),
+            "download" => RunDownload(options, output, error, environment, httpHandler),
             _ => UnknownCommand(command, output, error),
         };
     }
@@ -596,6 +597,119 @@ public static class MhBackupCliCommand
         return ExitOk;
     }
 
+    private static int RunDownload(
+        Dictionary<string, string?> options,
+        TextWriter output,
+        TextWriter error,
+        Func<string, string?> environment,
+        HttpMessageHandler? httpHandler)
+    {
+        if (IsHelp(Value(options, "help") ?? string.Empty))
+        {
+            WriteUsage(output);
+            return ExitOk;
+        }
+
+        string? rawUrl = Value(options, "url");
+        if (string.IsNullOrWhiteSpace(rawUrl)) return UsageFailure(error, "download 需要 --url <WebDAV 地址>");
+        string? outPath = Value(options, "out");
+        if (string.IsNullOrWhiteSpace(outPath)) return UsageFailure(error, "download 需要 --out <落到本机的文件>");
+        if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out Uri? source))
+            return UsageFailure(error, "下载地址不是合法 URI：" + rawUrl);
+
+        long maxBytes = 0;
+        string? rawMax = Value(options, "max-bytes");
+        if (rawMax is not null && (!long.TryParse(rawMax, out maxBytes) || maxBytes <= 0))
+            return UsageFailure(error, "--max-bytes 需要一个正整数");
+
+        string? userName = Value(options, "user");
+        string? password = ResolveRemotePassword(options, environment);
+
+        MhBackupWebDavDownloader.Result result;
+        try
+        {
+            result = MhBackupWebDavDownloader
+                .DownloadAsync(source, userName, password, maxBytes, httpHandler)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (Exception failure) when (failure is HttpRequestException or TaskCanceledException)
+        {
+            return Fail(error, "下载失败：" + failure.Message, ExitRemote);
+        }
+
+        if (!result.Ok || result.Content is null)
+        {
+            if (Has(options, "json"))
+            {
+                var failed = new JsonObject
+                {
+                    ["command"] = "download",
+                    ["ok"] = false,
+                    ["status"] = result.StatusCode,
+                    ["reason"] = result.Reason,
+                    ["url"] = source.AbsoluteUri,
+                };
+                WriteJson(output, failed);
+            }
+            return Fail(error, "下载失败（HTTP " + result.StatusCode + "）：" + (result.Reason ?? "远端拒绝"), ExitRemote);
+        }
+
+        byte[] content = result.Content;
+        string sha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(content));
+        try
+        {
+            WriteBytesAtomically(outPath, content);
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return IoFailure(error, outPath, failure);
+        }
+
+        if (Has(options, "json"))
+        {
+            var payload = new JsonObject
+            {
+                ["command"] = "download",
+                ["ok"] = true,
+                ["status"] = result.StatusCode,
+                ["url"] = source.AbsoluteUri,
+                ["path"] = outPath,
+                ["bytes"] = content.LongLength,
+                ["sha256"] = sha256,
+                ["declaredBytes"] = result.DeclaredLength is long declared ? declared : null,
+            };
+            WriteJson(output, payload);
+            return ExitOk;
+        }
+
+        output.WriteLine("已下载备份：" + outPath);
+        output.WriteLine("远端地址：" + source.AbsoluteUri);
+        output.WriteLine("HTTP 状态：" + result.StatusCode);
+        output.WriteLine("文件大小：" + content.Length + " 字节");
+        output.WriteLine("SHA-256：" + sha256);
+        output.WriteLine("提醒：这是加密容器，导入需要同一口令：import --file <文件> --password-env " + (Value(options, "password-env") ?? DefaultRemotePasswordVariable) + "。");
+        return ExitOk;
+    }
+
+    /// <summary>先写同目录临时文件再原子替换：下载中断不会留下半个备份文件。</summary>
+    private static void WriteBytesAtomically(string path, byte[] bytes)
+    {
+        string temp = path + ".tmp-" + Guid.NewGuid().ToString("N")[..8];
+        try
+        {
+            File.WriteAllBytes(temp, bytes);
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                try { File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
+        }
+    }
+
     private static string? ResolveRemotePassword(Dictionary<string, string?> options, Func<string, string?> environment)
     {
         string variable = Value(options, "password-env") ?? DefaultRemotePasswordVariable;
@@ -675,11 +789,13 @@ public static class MhBackupCliCommand
         output.WriteLine("  export --settings <settings.json> --out <备份文件> [--history <history.json>] [--password-env <变量名>] [--json]");
         output.WriteLine("  import --file <备份文件> [--settings <settings.json>] [--apply] [--strategy merge|replace] [--password-env <变量名>] [--json]");
         output.WriteLine("  upload --file <备份文件> --url <WebDAV 地址> [--user <账号>] [--password-env <变量名>] [--mkdir] [--json]");
+        output.WriteLine("  download --url <WebDAV 地址> --out <备份文件> [--user <账号>] [--password-env <变量名>] [--max-bytes <字节>] [--json]");
         output.WriteLine("说明：");
         output.WriteLine("  口令只从环境变量读取（缺省 " + DefaultPasswordVariable + "），不接受命令行参数。");
         output.WriteLine("  import 默认只输出预览；--apply 才写入 settings.json（必须同时给 --settings）。");
         output.WriteLine("  --apply 只写本机能表达的来源与有等价的偏好；播放进度与收藏不落库，回执会给出原因。");
         output.WriteLine("  upload 只做 PUT；远端目录不存在时加 --mkdir 尝试创建最后一级集合，多级创建不做猜测。");
+        output.WriteLine("  download 只做一次 GET 并写成 --out 指定的文件；不列目录、不删远端文件，取回后仍要 import 才会落地。");
         output.WriteLine("  退出码：0 成功 / 2 参数错误 / 3 不是备份文件 / 4 口令错误 / 5 版本过新 / 6 内容损坏 / 7 导出被拒 / 8 读写失败 / 9 远端失败。");
     }
 }

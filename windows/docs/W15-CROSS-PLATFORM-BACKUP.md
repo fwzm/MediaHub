@@ -6,7 +6,8 @@
 > 备份命令行（`export` / `import` 预览）**EXECUTED_PASS**（13 例 + 四条负向对照，全量 MediaHub.Tests 1806/0）；
 > 还原落库（`import --apply`：来源与偏好写 `settings.json`）**EXECUTED_PASS**（applier 12 例 + CLI 用例 17 例 + 四条负向对照，全量 MediaHub.Tests **1822/0**）；
 > WebDAV 上传（`upload`：PUT + `--mkdir`，远端失败独立退出码 9）**EXECUTED_PASS**（上传器 11 例 + CLI 3 例 + 四条负向对照，全量 MediaHub.Tests **1836/0**）；
-> 设置页入口、播放进度/收藏落库、WebDAV 下载/删除仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
+> WebDAV 下载（`download`：一次 GET + 声明长度预检 + 流式上限 + 原子落盘，远端失败同样退出码 9）**EXECUTED_PASS**（下载器 12 例 + CLI 3 例 + 四条负向对照，全量 MediaHub.Tests **1851/0**）；
+> 设置页入口、播放进度/收藏落库、WebDAV 列目录/删除仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
 
 ## 1 动机与范围
 
@@ -307,14 +308,55 @@ MediaHub.BackupCli upload --file <备份文件> --url <WebDAV 地址> [--user <�
 
 ### 10.5 仍未做（本层之外）
 
-- WebDAV **下载 / 列目录 / 删除**、远端覆盖策略与冲突提示 —— NOT_IMPLEMENTED（本轮只有上传）。
+- WebDAV **列目录 / 删除**、远端覆盖策略与冲突提示 —— NOT_IMPLEMENTED（下载已在 §11 实现，仍不做覆盖与删除）。
 - 用真实 WebDAV 服务器做一次「上传 → 取回 → 本机还原」端到端 —— NOT_RUN（本机无可用远端，也不在无授权时启停外部服务）。
 - 设置页「备份与还原」入口里的「传到 WebDAV」按钮 —— NOT_IMPLEMENTED（当前只有命令行）。
-## 11 仍未做（如实）
+## 11 WebDAV 下载（W21）
+
+### 11.1 缺口
+
+§10 只解决了「把备份放到远端」。取回来仍要靠用户手动把文件从 WebDAV 客户端拖回本机，再 `import --file`；服务器上的文件名、大小与摘要对不对，命令行也给不出证据。同时 `windows/src/MediaHub.Providers.WebDav/WebDavApi.cs` 仍是**只读播放器客户端**（只发 `PROPFIND` / `OPTIONS` / range `GET`），没有可复用的「取整个文件」能力，也不该把播放器的凭据库与认证弹窗拖进命令行。
+
+### 11.2 下载器（`windows/src/MediaHub.Backup/MhBackupWebDavDownloader.cs`）
+
+- `DownloadAsync(source, userName, password, maxBytes = 0, handler = null, cancellationToken = default)`；`maxBytes == 0` 时用容器上限（`MhBackupSerializer.MaxFileBytes`，10 MiB）。
+- **先判地址再联网**：非 http(s) ⇒ `NotHttp`；路径为空 ⇒ `MissingPath`；路径以 `/` 结尾 ⇒ `DirectoryTarget`（这三种都零请求，测试直接断言桩 handler 没被调用）。
+- `GET` + `HttpCompletionOption.ResponseHeadersRead`：不把远端内容先读进内存再判大小。
+- **声明长度预检**：`Content-Length > maxBytes` 立即 `TooLarge`，不读正文（`Content` 为 null，`DeclaredLength` 仍回原始声明值，便于用户知道差多少）。
+- **读中计数**：按 81920 字节分块累计，累计超过 `maxBytes` 立刻 `TooLarge`（防「无 Content-Length 的流式响应」把磁盘/内存撑爆）。
+- 读到 0 字节 ⇒ `Empty`；实际总长与声明不等 ⇒ `Truncated`（不静默接受半截文件）。
+- 状态映射 `ReasonFor`：401/403 ⇒ `AuthenticationFailed`、404 ⇒ `NotFound`、413 ⇒ `TooLarge`、≥500 ⇒ `ServerError`、其余「远端拒绝这次下载（HTTP n）」。401/403 的文案是「账号或口令不对」，与 §10 上传侧同口径。
+- 认证只在给了账号时发（`Basic base64(user:password)`）；不给账号就不带 `Authorization`，避免把匿名请求伪装成已登录。
+
+### 11.3 命令行（`download`）
+
+```
+download --url <WebDAV 地址> --out <备份文件> [--user <账号>] [--password-env <变量名>] [--max-bytes <字节>] [--json]
+```
+
+- 口令只从环境变量读（缺省 `MH_WEBDAV_PASSWORD`，与备份容器口令 `MH_BACKUP_PASSWORD` 分开，一个变量只承载一种凭据）。
+- 只做一次 `GET` 并写成 `--out` 指定的文件：**不列目录、不删远端文件**，取回后仍要 `import` 才会落地。
+- 落盘是**原子写**：同目录 `*.tmp-<8 hex>` + `File.Move(..., overwrite: true)`，失败时不留半截文件（测试用 401 与超限两条路径断言目录里零文件）。
+- 退出码沿用 §8：成功 `0`、用法 `2`、本地 IO `8`、**远端失败 `9`**；`--json` 给 `{command, ok, status, url, path, bytes, sha256, declaredBytes}`，失败时也给机器可读的 `status` 与 `reason`。
+- 成功文本给「已下载备份 / 远端地址 / HTTP 状态 / 文件大小 / SHA-256」，并提醒这是加密容器、导入需要同一口令。
+
+### 11.4 验证
+
+- `BackupDownloadTests` **15 例**（下载器 12 + CLI 3）：带账号发 `Basic` 且回原字节、无账号不发认证、401/404/503 各自的原因、声明长度超限**在读取前**被拒、无声明长度的流式超限在读取中被截断、声明 100 实收 20 ⇒ `Truncated`、空 body ⇒ `Empty`、目录地址与非 http 地址零请求、CLI 写文件并回 `bytes`/`sha256`/`path`、CLI 401 ⇒ 退出码 9 且零文件、三种用法错误 ⇒ 2 且零请求、CLI `--max-bytes 1024` 对 4096 声明 ⇒ 9 且无半截文件。
+- 四条负向对照（快照 `D:/mh-verify/w21-snap/`，每次从快照还原并 `sha256` 复核，日志 `D:/mh-verify/w21-neg-*.log`）：A 去掉声明长度预检 ⇒ **2 红**（下载器与被 CLI 路径共用的那条上限用例都退化成 `Truncated`）；B 把 `total != promised` 放宽成 `total > promised` ⇒ **1 红**；C 去掉目录地址预检 ⇒ **1 红**（会真的发请求）；D CLI 忽略 `--max-bytes` ⇒ **1 红**（超限用例变成成功下载）。
+- 全量 `MediaHub.Tests`：**1851 / 0**（W20 的 1836 + 15），日志 `D:/mh-verify/w21-full-tests1.log`。
+
+### 11.5 仍未做（本层之外）
+
+- WebDAV **列目录 / 删除 / 覆盖策略** —— NOT_IMPLEMENTED（本轮只有一次 GET）。
+- 用真实 WebDAV 服务器做「上传 → 取回 → 本机还原」端到端 —— NOT_RUN（本机无可用远端，也不在无授权时启停外部服务）。
+- 设置页「备份与还原」入口里的「从 WebDAV 取回」按钮 —— NOT_IMPLEMENTED（当前只有命令行）。
+
+## 12 仍未做（如实）
 
 - 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏仍不落库 —— NOT_IMPLEMENTED
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
 - 本机进度/收藏的写入（来源与偏好已随 `--apply` 落库）—— NOT_IMPLEMENTED
-- WebDAV 上传已实现（§10）；下载 / 列目录 / 删除仍 NOT_IMPLEMENTED
+- WebDAV 上传（§10）与下载（§11）已实现；列目录 / 删除仍 NOT_IMPLEMENTED
 - Android 恢复计划器与 Windows 反向对照、真机与真 GUI —— DEVICE_UNVERIFIED / GUI_UNVERIFIED
 - 口令强度无最小长度约束（沿用 Android 口径）；容器未做外部安全审计
