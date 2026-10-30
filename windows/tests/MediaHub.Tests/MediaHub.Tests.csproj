@@ -38,5 +38,6 @@
     <!-- Golden vectors for the cross-platform .mhbackup container (W15); Windows wrote them, the Kotlin twin must match. -->
     <Content Include="..\assets\backup-vectors.json" Link="assets\backup-vectors.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\assets\windows-cli-export.mhbackup" Link="assets\windows-cli-export.mhbackup" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\android-export.mhbackup" Link="assets\android-export.mhbackup" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -658,11 +658,49 @@ dotnet windows/src/MediaHub.BackupCli/bin/Debug/net10.0/MediaHub.BackupCli.dll e
 - **真服未验证**：以上全部是 loopback mock 证据，真实 Emby / Jellyfin 写回 —— SERVER_UNVERIFIED；
 - 登录态、令牌过期重登、服务端拒绝写的用户提示均未接。
 
-## 18 仍未做（如实）
+## 18 跨语言实文件：手机导出 → 电脑与手机都读得懂（W28）
+
+### 18.1 为什么补这条
+
+§15（W25）只钉了「电脑导出 → 手机导入」。反方向没有任何真文件证据：Android 的 `prepareRestore` / `restore` 虽然早就实现了落库，但此前只用内存里的假数据源测过，「生产导出 → 真实 Room 清空 → 生产恢复 → 从库里读回」这条链没有一条端到端用例。另外确认过收藏两端都不导出（Windows 的 `MhBackupExportCollector.cs:229` 写空列表，Android 的 `buildPayload` 里 `favoriteDtos = emptyList()`），所以可携数据 = 来源 + 偏好（Android 另带播放进度）。
+
+### 18.2 样本怎么来、落在哪
+
+`feature/settings/src/test/kotlin/com/mediahub/feature/settings/backup/BackupAndroidExportRoundTripTest.kt`（Robolectric `@Config(sdk=[34])`，真 `AppDatabase` in-memory + 真 `ProductionBackupDataSource` + 真 `BackupRepository`）先种 4 个来源、2 条播放进度、一套偏好，再调生产 `exportBackup`，把字节写到 `feature/settings/build/cross-platform/android-export.mhbackup`：**3271 B**，sha256 **d6612bc201466cd1ec5df408eaec2d5838e87d45053291f85c690a55264c68b7**。
+
+同一份字节落三处：模块产物目录、`core/common/src/test/resources/backup/android-export.mhbackup`、`windows/tests/assets/android-export.mhbackup`（`MediaHub.Tests.csproj` 用 `Content` + `CopyToOutputDirectory=PreserveNewest` 拷到输出）。三处逐字节相同；任一漏拷在 CI 上是找不到资产（KeyNotFound），不是静默跳过。
+
+### 18.3 两侧各读一遍
+
+Android 6 例 `core/common/src/test/kotlin/com/mediahub/core/common/backup/BackupAndroidExportFileTest.kt`：manifest 的格式/读取版本、`appVersion = android-0.1.0`、sections = servers/progress/preferences、counts 4/2/1、created>0；4 个来源身份（EMBY 通用账号 + 默认标记 + 端点 `https://media.example:8920/emby/`；JELLYFIN 的 `username` 为 null、sortOrder 1；WEBDAV；LOCAL 端点空）；2 条进度（item-001 540000/1440000、暂停、标题「第一集」、EPISODE）；偏好（MEDIA3、1.5f、22sp、自动连播关、播放器信息浮层开、字幕颜色 0xFF00FF00）；`favorites` 空且 sections 无 favorites；换口令得到 `AuthenticationFailed`。
+
+Windows 7 例 `windows/tests/MediaHub.Tests/BackupAndroidExportArtifactTests.cs`：同样断言 manifest、4 个来源、2 条进度、偏好，另加两层语义 —— `MhBackupRestorePlanner.Plan(payload, 空本机来源, ReplaceSelected)` 给出 4 个 New、2 条进度 Apply、orphan 0、`IdRemapping` 恒等；`MhBackupWriteOutlooks.Classify` 给出 2 条进度全 `server-api`（理由含「需要登录后调用服务端接口」）、`local-path-key` 为 0、`FavoriteTotal` 为 0。
+
+真 Room 往返 2 例（同一个 `BackupAndroidExportRoundTripTest.kt`）：导出 → `db.clearAllTables()` + 偏好 reset 回默认 → `prepareRestore`（能解开、2 条进度、无孤立）→ `buildPreview(REPLACE_SELECTED)`（4 个新来源、2 条进度待写、偏好将还原）→ `restore(replaceConfirmed = true)` → `readSnapshot()` 断言 4 个来源（别名/账号/note「客厅」/默认标记/sortOrder/端点）、2 条进度、偏好逐项等于导出值，并断言白名单外两段（`playerVisualEffects`、`professionalInfo`）保留本机默认（依据 `BackupRepository.kt:330-333`：还原时只 copy 这两段本机值）。第二例从同一个真库再导出一次，并断言能重新解开（4 sources / 2 progress / 偏好非空、sections 三键）。
+
+### 18.4 结论（planner 与 writeOutlook 侧）
+
+Android 导出的进度在 Windows 计划里全部 Apply、且全部归 `server-api`：备份里只有服务器类型（EMBY/JELLYFIN）的进度，没有 LOCAL 进度的可携样本，所以 `local-path-key` 为 0。这条断言同时钉住「Windows 不会把服务端进度假写成自己的本机路径键」。收藏两侧都空，`FavoriteTotal` 为 0。
+
+### 18.5 验证与证据
+
+- `:feature:settings:testDebugUnitTest` **427 / 0**（原 425 + 2）；
+- `:core:common:testDebugUnitTest` **678 / 0 / 11 skipped**（672 + 6）；
+- `MediaHub.Tests` **1927 / 0**（1920 + 7）。
+- 本轮**零生产代码改动**（只加测试、样本与 csproj 资产行），故不适用「每处行为改动配恰好 1 红」；新用例钉住的是 W19/W25 既有行为。要让它们变红必须改生产导出/恢复/容器代码，那属于另一轮。
+- 真机（on-device DB）与真 GUI 未跑：DEVICE_UNVERIFIED / GUI_UNVERIFIED。
+
+### 18.6 仍未做（如实）
+
+- 收藏跨端仍不可携（两端导出都写空列表）；
+- 真 Room 往返用的是 in-memory DB，设备上的磁盘库与真实账户切换未跑 —— DEVICE_UNVERIFIED；
+- 进度/收藏的真正服务端写回仍要 GUI 入口 + 登录态（§17 的写口已就绪，还原层未接线）。
+
+## 19 仍未做（如实）
 
 - 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏的**去向**已逐条说明（§16），provider 层写口已实现（§17），但**还原层仍未接线** —— IMPLEMENTED_UNVERIFIED（真服 SERVER_UNVERIFIED）
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
 - 本机进度/收藏的写入（来源与偏好已随 `--apply` 落库）—— NOT_IMPLEMENTED
 - WebDAV 上传（§10，含覆盖保护 §14）、下载（§11）、列目录（§12）、删除（§13）均已实现；**真实服务端联调未做** —— SERVER_UNVERIFIED
-- Android 恢复计划器与 Windows 反向对照、真机与真 GUI —— DEVICE_UNVERIFIED / GUI_UNVERIFIED
+- Android 恢复计划器与 Windows 反向对照已由 §18（W28）补上：同一份手机导出字节，Android 真 Room 往返 + Windows 计划器各读一遍；真机与真 GUI 仍未跑 —— DEVICE_UNVERIFIED / GUI_UNVERIFIED
 - 口令强度无最小长度约束（沿用 Android 口径）；容器未做外部安全审计
