@@ -12,7 +12,8 @@ namespace MediaHub.Backup;
 /// 与 MediaHub.SyncCli 一样按退出码区分处境，方便脚本判断：0 成功、2 参数错误、3 不是备份文件、
 /// 4 口令错误、5 版本过新、6 内容损坏、7 导出被拒、8 读写文件失败。
 /// 口令只从环境变量取，不接受命令行参数：命令行会进进程列表、命令历史和日志。
-/// import 本版只输出预览计划，绝不动本机文件；--apply 明确拒绝而不是假装支持。
+/// import 默认只输出预览计划；带 --apply 时才把「本机能表达的来源」与「有明确等价的偏好」写进
+/// settings.json，写前留一份 .bak-<时间戳>。播放进度与收藏不落库，理由随回执给出。
 /// </remarks>
 public static class MhBackupCliCommand
 {
@@ -236,17 +237,18 @@ public static class MhBackupCliCommand
         TextWriter error,
         Func<string, string?> environment)
     {
-        if (Has(options, "apply"))
-        {
-            return UsageFailure(error, "本版 import 只输出预览，不会改动本机数据；--apply 尚未实现");
-        }
-
+        bool apply = Has(options, "apply");
         bool asJson = Has(options, "json");
         string? filePath = Value(options, "file");
         string? settingsPath = Value(options, "settings");
         if (filePath is null)
         {
-            return Fail(error, "import 需要 --file <备份文件>；--settings 可选（缺省按本机没有任何来源预览）");
+            return Fail(error, "import 需要 --file <备份文件>；--settings 可选（预览时缺省按本机没有任何来源）");
+        }
+
+        if (apply && settingsPath is null)
+        {
+            return UsageFailure(error, "写库必须给 --settings <settings.json>，否则不知道该改哪一份本机设置");
         }
 
         string strategyName = (Value(options, "strategy") ?? "merge").ToLowerInvariant();
@@ -300,6 +302,7 @@ public static class MhBackupCliCommand
         MhBackupManifest manifest = payload.Manifest!;
         IReadOnlyList<MhBackupLocalSource> localSources;
         string? settingsWarning = null;
+        string? settingsText = null;
         if (settingsPath is null)
         {
             localSources = Array.Empty<MhBackupLocalSource>();
@@ -309,7 +312,8 @@ public static class MhBackupCliCommand
         {
             try
             {
-                localSources = MhBackupLocalData.ReadServers(File.ReadAllText(settingsPath))
+                settingsText = File.ReadAllText(settingsPath);
+                localSources = MhBackupLocalData.ReadServers(settingsText)
                     .Select(server => new MhBackupLocalSource
                     {
                         // 必须与导出用同一个身份函数，否则本机导出再本机预览会把自己判成新增。
@@ -329,6 +333,11 @@ public static class MhBackupCliCommand
         }
 
         MhBackupRestorePlan plan = MhBackupRestorePlanner.Plan(payload, localSources, strategy);
+        if (apply)
+        {
+            return ApplyImport(payload, plan, manifest, settingsText, settingsPath!, asJson, output, error);
+        }
+
         if (asJson)
         {
             WriteJson(output, new JsonObject
@@ -376,6 +385,148 @@ public static class MhBackupCliCommand
         return ExitOk;
     }
 
+
+    private static int ApplyImport(
+        MhBackupPayload payload,
+        MhBackupRestorePlan plan,
+        MhBackupManifest manifest,
+        string? settingsText,
+        string settingsPath,
+        bool asJson,
+        TextWriter output,
+        TextWriter error)
+    {
+        MhBackupRestoreApplyResult result;
+        try
+        {
+            result = MhBackupRestoreApplier.Apply(payload, plan, settingsText);
+        }
+        catch (FormatException failure)
+        {
+            return Fail(error, "settings.json 结构不对，没有写入：" + failure.Message, ExitIo);
+        }
+
+        string? backupPath = null;
+        if (result.Changed)
+        {
+            try
+            {
+                if (File.Exists(settingsPath))
+                {
+                    backupPath = NextBackupPath(settingsPath);
+                    File.Copy(settingsPath, backupPath, overwrite: false);
+                }
+
+                WriteSettingsAtomically(settingsPath, result.SettingsJson);
+            }
+            catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                return IoFailure(error, settingsPath, failure);
+            }
+        }
+
+        if (asJson)
+        {
+            WriteJson(output, new JsonObject
+            {
+                ["command"] = "import",
+                ["mode"] = "apply",
+                ["ok"] = true,
+                ["applied"] = true,
+                ["changed"] = result.Changed,
+                ["strategy"] = plan.Strategy == MhBackupRestoreStrategy.Merge ? "MERGE" : "REPLACE_SELECTED",
+                ["appVersion"] = manifest.AppVersion,
+                ["settings"] = settingsPath,
+                ["backupPath"] = backupPath,
+                ["added"] = new JsonArray(result.AddedServers.Select(server => (JsonNode?)new JsonObject
+                {
+                    ["backupId"] = server.BackupId,
+                    ["serverId"] = server.ServerId,
+                    ["displayName"] = server.DisplayName,
+                    ["type"] = server.Type,
+                    ["replaced"] = server.Replaced,
+                }).ToArray()),
+                ["skipped"] = new JsonArray(result.SkippedServers.Select(server => (JsonNode?)new JsonObject
+                {
+                    ["backupId"] = server.BackupId,
+                    ["displayName"] = server.DisplayName,
+                    ["reason"] = server.Reason,
+                }).ToArray()),
+                ["preferencesRestored"] = result.PreferencesRestored,
+                ["notes"] = new JsonArray(result.Notes.Select(note => (JsonNode?)JsonValue.Create(note)).ToArray()),
+                ["newServers"] = plan.NewCount,
+                ["identicalServers"] = plan.IdenticalCount,
+                ["conflictingServers"] = plan.ConflictCount,
+            });
+            return ExitOk;
+        }
+
+        if (!result.Changed)
+        {
+            output.WriteLine("没有需要写入的变更：settings.json 逐字节未动");
+            output.WriteLine("本机设置：" + settingsPath);
+            foreach (string note in result.Notes)
+            {
+                output.WriteLine("说明：" + note);
+            }
+
+            return ExitOk;
+        }
+
+        output.WriteLine("已写入本机设置：" + settingsPath + "（容器版本 " + MhBackupCrypto.FormatVersion + "）");
+        if (backupPath is not null) output.WriteLine("写前备份：" + backupPath);
+        foreach (MhBackupAppliedServer server in result.AddedServers)
+        {
+            output.WriteLine((server.Replaced ? "  替换 " : "  新增 ") + server.DisplayName + "（ServerId " + server.ServerId + " · " + server.Type + "）");
+        }
+
+        if (result.SkippedCount > 0)
+        {
+            output.WriteLine("未写入 " + result.SkippedCount + " 条（逐条原因）：");
+            foreach (MhBackupApplySkippedServer server in result.SkippedServers)
+            {
+                output.WriteLine("  - " + server.DisplayName + "（" + server.BackupId + "）· " + server.Reason);
+            }
+        }
+
+        output.WriteLine(result.PreferencesRestored ? "偏好：已恢复到本机设置" : "偏好：没有改动");
+        foreach (string note in result.Notes)
+        {
+            output.WriteLine("说明：" + note);
+        }
+
+        output.WriteLine("提醒：备份不含密码或令牌，写入的来源需要登录后才能使用；播放进度与收藏没有落库。");
+        return ExitOk;
+    }
+
+    private static string NextBackupPath(string settingsPath)
+    {
+        string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        string candidate = settingsPath + ".bak-" + stamp;
+        int suffix = 1;
+        while (File.Exists(candidate))
+        {
+            suffix++;
+            candidate = settingsPath + ".bak-" + stamp + "-" + suffix;
+        }
+
+        return candidate;
+    }
+
+    private static void WriteSettingsAtomically(string settingsPath, string text)
+    {
+        string directory = Path.GetDirectoryName(Path.GetFullPath(settingsPath)) ?? ".";
+        string temporary = Path.Combine(directory, Path.GetFileName(settingsPath) + ".tmp-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            File.WriteAllText(temporary, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.Move(temporary, settingsPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
     private static string? ResolvePassword(Dictionary<string, string?> options, Func<string, string?> environment)
     {
         string? value = environment(PasswordVariable(options));
@@ -415,10 +566,11 @@ public static class MhBackupCliCommand
         output.WriteLine("MediaHub 备份工具（Windows 端）");
         output.WriteLine("用法：");
         output.WriteLine("  export --settings <settings.json> --out <备份文件> [--history <history.json>] [--password-env <变量名>] [--json]");
-        output.WriteLine("  import --file <备份文件> [--settings <settings.json>] [--strategy merge|replace] [--password-env <变量名>] [--json]");
+        output.WriteLine("  import --file <备份文件> [--settings <settings.json>] [--apply] [--strategy merge|replace] [--password-env <变量名>] [--json]");
         output.WriteLine("说明：");
         output.WriteLine("  口令只从环境变量读取（缺省 " + DefaultPasswordVariable + "），不接受命令行参数。");
-        output.WriteLine("  import 只输出预览，不会改动本机数据。");
+        output.WriteLine("  import 默认只输出预览；--apply 才写入 settings.json（必须同时给 --settings）。");
+        output.WriteLine("  --apply 只写本机能表达的来源与有等价的偏好；播放进度与收藏不落库，回执会给出原因。");
         output.WriteLine("  退出码：0 成功 / 2 参数错误 / 3 不是备份文件 / 4 口令错误 / 5 版本过新 / 6 内容损坏 / 7 导出被拒 / 8 读写失败。");
     }
 }

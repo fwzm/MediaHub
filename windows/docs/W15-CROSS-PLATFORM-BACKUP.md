@@ -4,7 +4,8 @@
 > 还原预览层（恢复计划器，纯函数零写入）**EXECUTED_PASS**（22 例 + 四条负向对照）；
 > 导出采集层（本机来源/偏好 → 备份载荷，纯函数）**EXECUTED_PASS**（17 例 + 四条负向对照）；
 > 备份命令行（`export` / `import` 预览）**EXECUTED_PASS**（13 例 + 四条负向对照，全量 MediaHub.Tests 1806/0）；
-> 真正落库、设置页入口、WebDAV 上传仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
+> 还原落库（`import --apply`：来源与偏好写 `settings.json`）**EXECUTED_PASS**（applier 12 例 + CLI 用例 17 例 + 四条负向对照，全量 MediaHub.Tests **1822/0**）；
+> 设置页入口、播放进度/收藏落库、WebDAV 上传仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
 
 ## 1 动机与范围
 
@@ -234,11 +235,50 @@ UI 与 CLI 都只能拿这份预览去征求确认，写入是下一层的事。
 - 设置页「备份与还原」入口（口令框 → 预览 → 确认）。
 - WebDAV 上传（当前 WebDAV 只读）与 Android 反向对照。
 
-## 9 仍未做（如实）
+## 9 还原落库（W19）
 
-- 备份 CLI 的真正落库分支（`export` 已可导出、`import` 只预览；`--apply` 未实现）—— NOT_IMPLEMENTED
+### 9.1 缺口
+
+W18 的 `import` 只会打印预览：用户看到「新增 3 个来源」，却没有任何命令把它们真正写进本机。
+W19 让 `import --apply` 落库，同时**不扩大**能写的东西——只写本机能表达的来源和有明确等价的偏好。
+
+### 9.2 落库边界（写什么、为什么不写其余）
+
+| 备份里的段 | Windows 处理 | 原因 |
+| --- | --- | --- |
+| `servers` | 写 `settings.json` 的 `Servers`（`New` 追加；`Identical` 合并模式保本机、替换模式原地更新并保留 `ServerId`；`Conflict` 合并模式跳过、替换模式原地更新） | 与 `ServerManager.ApplyRemoteSource` 同口径：`Status = AuthRequired`，写入后需要登录；**备份里没有密码/令牌，也没有 `Status` 字段** |
+| `preferences` | 仅替换模式写三对有明确等价的项：`DefaultPlaybackSpeed → DefaultSpeed`、`AutoPlayNextEpisode → AutoPlayNext`、`ShowPlayerInfoOverlay → ShowDetailedMediaInfo` | 字幕单位、手势阈值等两端语义不同，猜测映射比不写更糟 |
+| `progress` | **不写**，只在回执里给原因 | Windows 按本地文件路径记账，备份按（来源、条目）记账；缺少条目→文件映射 |
+| `favorites` | **不写**，只在回执里给原因 | 收藏是服务端能力，必须登录之后写回服务器 |
+
+本机表达不了的来源逐条跳过并给原因：`PLEX`/`SMB`/`FN_NAS` 这一版没有提供方，`LOCAL` 是那台机器上的路径，未知类型直说「本机无法表达」。
+地址缺失或没有可用线路同样跳过，不写一个打不开的来源。
+
+### 9.3 写入安全
+
+- **写前留底**：`settings.json.bak-<yyyyMMdd-HHmmss>`（同一秒冲突追加 `-2`）；留的是写入前的原字节。
+- **原子写**：同目录 `settings.json.tmp-<8hex>` → `File.Move(overwrite: true)`，失败清理临时文件，不出现半个文件。
+- **逐字节幂等**：同一份备份第二次 `--apply` 输出「没有需要写入的变更：settings.json 逐字节未动」，也不会再生成 `.bak`。
+- **不猜结构**：`settings.json` 不是对象、`Servers` 不是数组、JSON 坏了 ⇒ 退出码 8，原文件保持不动。
+- **未知键保留**：只改 `Servers` 节点与三对偏好，其余键原样带回。
+
+### 9.4 验证
+
+- `MhBackupRestoreApplier` 12 例：新来源落库、未知键与已有来源保留、id 被占用时让位（`sync:<id>#2`）、合并模式不动同源、合并模式跳过冲突、替换模式原地更新且保留 `ServerId`、PLEX/LOCAL 跳过并给原因、偏好只在替换模式写、无变更逐字节返回、第二次 apply 零写入、坏 `settings.json` 抛 `FormatException`。
+- CLI 17 例（W18 13 例 + W19 增删）：`--apply` 缺 `--settings` ⇒ 退出码 2；空 settings 落库并输出「已写入本机设置」「新增 …」且生成 `.bak-*`；第二次 apply 零写入；不带 `--apply` 逐字节不动、不生成 `.bak`；坏 JSON ⇒ 退出码 8；用法文本说明 `--apply` 语义。W18 记录的 `ImportApplyIsExplicitlyUnsupported` 已被 `ImportApplyWithoutSettingsIsAUsageError` 等替代。
+- 四条负向对照（快照 → 改坏 → 跑 → 逐字节还原，`sha256` 相等）：A applier 跳过 `New` ⇒ 1 红；B `--apply` 不留底直接写 ⇒ 1 红；C 同源不跳过、重复追加 ⇒ 1 红；D 用法去掉 `--apply` 说明 ⇒ 1 红。
+- 全量 `MediaHub.Tests` **1822 / 0**（W18 的 1806 + applier 12 + CLI 净增 4）；日志 `D:/mh-verify/w19-full-tests2.log`、`w19-neg-{A,B,C,D}.log`。
+
+### 9.5 仍未做（本层之外）
+
+- 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED；目前只能用命令行。
+- 播放进度与收藏落库—— NOT_IMPLEMENTED（上面已给原因；进度需要条目→文件映射，收藏需要登录后的服务端写）。
+- WebDAV 上传、Android 反向对照—— NOT_IMPLEMENTED / NOT_RUN。
+## 10 仍未做（如实）
+
+- 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏仍不落库 —— NOT_IMPLEMENTED
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
-- Windows 侧真正读写本机来源/进度/收藏（计划器已给出 `new` / `identical` / `conflict` / `orphan` 预览，落库尚未接线）—— NOT_IMPLEMENTED
+- 本机进度/收藏的写入（来源与偏好已随 `--apply` 落库）—— NOT_IMPLEMENTED
 - WebDAV 上传（当前 WebDAV 只**读**）—— NOT_IMPLEMENTED
 - Android 恢复计划器与 Windows 反向对照、真机与真 GUI —— DEVICE_UNVERIFIED / GUI_UNVERIFIED
 - 口令强度无最小长度约束（沿用 Android 口径）；容器未做外部安全审计

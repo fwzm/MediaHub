@@ -6,7 +6,7 @@ using Xunit;
 namespace MediaHub.Tests;
 
 /// <summary>
-/// 备份命令行（export / import 预览）的契约测试。
+/// 备份命令行（export / import 预览与落库）的契约测试。
 /// </summary>
 /// <remarks>
 /// 直接调用 MhBackupCliCommand.Run，用 StringWriter 收输出、用字典当环境变量，因此不需要真起进程；
@@ -184,14 +184,85 @@ public sealed class BackupCliTests : IDisposable
     }
 
     [Fact]
-    public void ImportApplyIsExplicitlyUnsupported()
+    public void ImportApplyWithoutSettingsIsAUsageError()
     {
         string backup = ExportDefault();
 
         int exit = Run(out _, out string error, "import", "--file", backup, "--apply");
 
         Assert.Equal(MhBackupCliCommand.ExitUsage, exit);
-        Assert.Contains("--apply 尚未实现", error);
+        Assert.Contains("--settings", error);
+    }
+
+    [Fact]
+    public void ImportApplyWritesTheSourceIntoAnEmptySettingsAndKeepsTheOldBytesAside()
+    {
+        string backup = ExportDefault();
+        string settings = Path.Combine(_directory, "settings.json");
+        const string empty = "{\n  \"Servers\": []\n}\n";
+        File.WriteAllText(settings, empty);
+
+        int exit = Run(out string output, out string error, "import", "--file", backup, "--settings", settings, "--apply");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, error);
+        Assert.Contains("已写入本机设置", output);
+        Assert.Contains("新增 客厅", output);
+        Assert.Contains("写前备份", output);
+        Assert.Contains("播放进度与收藏没有落库", output);
+        string written = File.ReadAllText(settings);
+        Assert.Contains("media.example", written);
+        Assert.Contains("SyncSourceId", written);
+        string[] backups = Directory.GetFiles(_directory, "settings.json.bak-*");
+        Assert.Single(backups);
+        Assert.Equal(empty, File.ReadAllText(backups[0]));
+    }
+
+    [Fact]
+    public void ApplyingTheSameBackupTwiceWritesNothingTheSecondTime()
+    {
+        string backup = ExportDefault();
+        string settings = Path.Combine(_directory, "settings.json");
+        File.WriteAllText(settings, "{\"Servers\":[]}");
+        Assert.Equal(0, Run(out _, out _, "import", "--file", backup, "--settings", settings, "--apply"));
+        string afterFirst = File.ReadAllText(settings);
+
+        int exit = Run(out string output, out _, "import", "--file", backup, "--settings", settings, "--apply");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("没有需要写入的变更", output);
+        Assert.Equal(afterFirst, File.ReadAllText(settings));
+        Assert.Single(Directory.GetFiles(_directory, "settings.json.bak-*"));
+    }
+
+    [Fact]
+    public void APreviewNeverTouchesTheSettingsFile()
+    {
+        string backup = ExportDefault();
+        string settings = Path.Combine(_directory, "settings.json");
+        string before = File.ReadAllText(settings);
+
+        int exit = Run(out string output, out _, "import", "--file", backup, "--settings", settings);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("预览：不会写入任何数据", output);
+        Assert.Equal(before, File.ReadAllText(settings));
+        Assert.Empty(Directory.GetFiles(_directory, "settings.json.bak-*"));
+    }
+
+    [Fact]
+    public void ApplyRefusesSettingsThatAreNotJsonInsteadOfOverwritingThem()
+    {
+        string backup = ExportDefault();
+        string settings = Path.Combine(_directory, "settings.json");
+        const string broken = "{ this is not json";
+        File.WriteAllText(settings, broken);
+
+        int exit = Run(out _, out string error, "import", "--file", backup, "--settings", settings, "--apply");
+
+        Assert.Equal(MhBackupCliCommand.ExitIo, exit);
+        Assert.Contains("结构不对", error);
+        Assert.Equal(broken, File.ReadAllText(settings));
     }
 
     [Fact]
@@ -238,6 +309,7 @@ public sealed class BackupCliTests : IDisposable
         Assert.Equal(0, Run(out string help, out _, "--help"));
         Assert.Contains("--password-env", help);
         Assert.Contains("不接受命令行参数", help);
+        Assert.Contains("--apply 才写入 settings.json", help);
     }
 
     private string ExportDefault()
