@@ -14,10 +14,12 @@
 
 | 套件 | 工程 | 计数来源 | 本机最近实测 | CI 门禁位置 |
 | --- | --- | --- | --- | --- |
-| `MediaHub.Tests` | `windows/tests/MediaHub.Tests` | xUnit `[Fact]` 1459 + `[Theory]` 99（**源码静态计数，SOURCE_REVIEWED**，不等于执行数） | **1858 / 0 / 0**（EXECUTED，2026-10-30 @ `055c85c3`） | `windows-ci.yml` → Unit and contract tests (MediaHub.Tests) |
+| `MediaHub.Tests` | `windows/tests/MediaHub.Tests` | xUnit `[Fact]` **1475** + `[Theory]` **100**，83 个文件（**源码静态计数，SOURCE_REVIEWED**；不等于执行数，且随提交漂移） | **1858 / 0 / 0**（EXECUTED，2026-10-30 @ `055c85c3`） | `windows-ci.yml` → Unit and contract tests (MediaHub.Tests) |
 | `MediaHub.WebDav.Tests` | `windows/tests/MediaHub.WebDav.Tests` | 5 个文件，`[Fact]` 92 + `[Theory]` 3（SOURCE_REVIEWED） | **104 / 0 / 0**（EXECUTED，同上） | 同文件 → Unit and contract tests (MediaHub.WebDav.Tests) |
 
 **为什么静态计数与执行数不等**：`[Theory]` 的每行 `InlineData` 独立计一例。静态计数只能当量级参考，**任何门禁比较都必须用执行数**。
+
+**本文件自身的教训（2026-10-30）**：首次写入时静态计数记的是 1459 / 99，同一小时复核已变成 **1475 / 100** —— 并行执行者新增了 `BackupListTests.cs`；`--required-suite` 也曾被我误记成 61 处，实测是 **60**。⇒ 写入任何计数前必须当场重新测量，并把测量命令一起写进本文件（见 §5）。
 
 ### windows-ci 的额外门禁（SOURCE_REVIEWED，来自 `.github/workflows/windows-ci.yml`）
 
@@ -34,7 +36,7 @@
 
 | 门禁 | 机制 | 最近实测 |
 | --- | --- | --- |
-| 单元测试 | `./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon --continue --rerun-tasks --no-build-cache` | `uniqueTests` **2501**、`--required-suite` 列举 **61** 处（EXECUTED，2026-10-30 @ `d6331139`，run `40995411720`） |
+| 单元测试 | `./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon --continue --rerun-tasks --no-build-cache` | `uniqueTests` **2501**、`--required-suite` **60 条**（EXECUTED，2026-10-30 @ `d6331139`，run `40995411720`） |
 | 套件必须在场 | `--required-suite <FQCN>` 逐个声明 | 套件整类消失时门禁必红；**新建测试类不登记就等于没有门禁** |
 | 新鲜证据 | 先清早前单元测试报告目录 | 复用旧报告会被这条挡住 |
 | VI（visual-instrumentation） | API 32 / API 36 双作业 | 各 **19 unique mandatory**（EXECUTED，同上） |
@@ -59,3 +61,26 @@
 - 不记录「计划要跑」的东西；只记跑过的或源码可查的。
 - 执行数会随提交漂移（同一分支上多个执行者并行提交时尤其明显）。**引用数字必须连 SHA 一起引**，例如「1858 @ 055c85c3」，而不是「现在是 1858」。
 - `uniqueTests` 从 2495 到 2501 是 W15 Kotlin 用例带进来的，不是 Windows 侧改动所致；跨执行者协作时这类变化必须在账本里归因。
+
+## 5. 测量命令（复用这些，别手数）
+
+```bash
+cd D:/mh-w6
+
+# Windows 静态计数（会漂，只作量级参考）
+echo "Fact=$(grep -h '\[Fact\]'   windows/tests/MediaHub.Tests/*.cs | wc -l)"
+echo "Theory=$(grep -h '\[Theory\]' windows/tests/MediaHub.Tests/*.cs | wc -l)"
+echo "files=$(ls windows/tests/MediaHub.Tests/*.cs | wc -l)"
+
+# Android required-suite 条数（-- 分隔符不可省）
+grep -c -- '--required-suite ' .github/workflows/android-ci.yml
+
+# windows-ci 的套件下限表
+grep -n 'Floor = ' .github/workflows/windows-ci.yml
+
+# 执行数：只认 CI 日志的 Passed! 行或本机 dotnet test 汇总行
+#   gh api "repos/fwzm/MediaHub/actions/runs/<run_id>/jobs" --jq '.jobs[0].id'
+#   gh api "repos/fwzm/MediaHub/actions/jobs/<job_id>/logs" | grep -a 'Passed!  - Failed:'
+```
+
+**grep 的坑**：`grep -c '--required-suite '` 会被当成选项解析，必须写 `grep -c -- '--required-suite '`。
