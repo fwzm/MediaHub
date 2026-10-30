@@ -87,6 +87,9 @@ concurrency:
 cancelled: 5    success: 8    in_progress: 1
 ```
 
-**约 36% 的 Android 验证被取消**。同期 windows-ci 在该分支上**零取消**（无 concurrency 块）。
+**约 31–36% 的 Android 验证被取消**（10-30 15:0x 快照 14 条：cancelled 5 / success 8 / in_progress 1；17:40 快照 16 条：cancelled 5 / success 10 / in_progress 1）。同期 windows-ci 在该分支上**零取消**（无 concurrency 块）。
 
 第 5 次就在我写这份 ADR 的过程中发生：我的文档提交 `9cca3880` 的 Android CI 被对方 14:59 的 `36255bdb`（W26）取消。这恰好说明问题不在任何一方的纪律 —— 双方都在按各自的节奏正常提交，是 `cancel-in-progress` 让「并行」必然等于「互相踩」。
+第 6 次（17:38）：`ea539927`（我的门禁修复）的 Android CI 被对方 17:35 的 `2adb207f`（W28）取消。**这一次我确实等到了 `in-flight=0` 才推**，但对方在我推完之后几分钟又推 —— 说明「等对方跑完」这个策略在双方都以 20–40 分钟节奏提交时依然无效。
+
+**佐证**：`ea539927` 相对 `dd9bd050` 的 Android 侧改动为**零**（`git diff --stat -- core feature app` 为空），所以这次取消不影响该切片的正确性；但这恰好说明，未来任何**真正改了 Android 代码**的提交都会同样拿不到证据。
