@@ -227,29 +227,42 @@ All 33 come from the same two build roots the engine probe uses (`D:\mh-servers\
 
 | Licence family | Files | Bytes | Examples |
 | --- | --- | --- | --- |
-| LGPL-2.1-or-later / LGPL2.1 (incl. the LGPL FFmpeg build) | 11 | 33,273,735 | `avcodec-62`, `avfilter-11`, `libplacebo-360`, `glib-2.0-0` |
-| GPL family (GPL-3.0-or-later / GPL-2.0-or-later / MIT AND GPL) | 5 | 4,949,153 | `libiconv-2`, `libstdc++-6`, `lcms2`, `libfreetype-6` |
+| LGPL-2.1-or-later / LGPL2.1 (incl. the LGPL FFmpeg build, and `libiconv` re-declared LGPL on 2026-10-31) | 12 | 34,409,604 | `avcodec-62`, `avfilter-11`, `libplacebo-360`, `glib-2.0-0`, `libiconv-2` |
+| GPL family (`GPL-3.0-or-later …` / `GPL-2.0-or-later OR FTL` / `GPL-3.0-or-later AND LGPL-2.1-or-later`) | 4 | 3,577,518 | `libstdc++-6`, `libgcc_s_seh-1`, `libfreetype-6`, `libintl-8` |
 | Apache-2.0 | 3 | 14,815,073 | `libshaderc_shared`, `libspirv-cross-c-shared`, `vulkan-1` |
-| MIT / ISC / Zlib | 7 | 3,777,412 | `libharfbuzz-0`, `libdovi`, `libbrotli*`, `libass-9`, `zlib1`, `libunibreak-7` |
-| custom upstream text | 2 | 760,610 | `libpng16-16`, `fontconfig` |
-| **未记录** (no declaration line in `component-licences.txt`) | 5 | 1,250,593 | `libwinpthread-1`, `libpcre2-8-0`, `libintl-8`, `libexpat-1`, `libbz2-1` |
+| MIT / ISC / Zlib / BSD (permissive) | 11 | 5,184,997 | `libass-9`, `libharfbuzz-0`, `lcms2`, `zlib1`, `libpcre2-8-0`, `libexpat-1`, `libwinpthread-1` |
+| custom upstream text (`custom`) | 3 | 839,384 | `libpng16-16`, `fontconfig`, `libbz2-1` |
 | **Total** | **33** | **58,826,576** | |
+
+Families are grouped by the **first term** of the licence string the packager declares (the licence that
+governs the shipped library); a changed declaration moves a row, which is what happened to `libiconv` on
+2026-10-31 (MSYS2 now declares `LGPL-2.1-or-later`, with `documentation:GPL-3.0-or-later` scoped to the package's docs).
 
 ### 7.3 What that means for compliance
 
 - The default flavour is unchanged: it ships one GPL-3.0-or-later engine and none of these DLLs.
-- Switching to the LGPL flavour **does not** mean "no GPL obligations": `libiconv`, `lcms2`,
-  `libfreetype`, `libgcc_s_seh` and `libstdc++` carry GPL-family terms (see
-  `windows/docs/licensing/W5-LGPL-BUILD.md:222-252` for the outstanding obligations).
-- Five DLLs have no licence declaration in the packager's own list; they are printed as 未记录 in the
-  notices rather than guessed. `windows/tools/check-licence-surface.ps1 -FailOnLicenceGaps` turns that gap
-  into a hard failure, which is the gate to use before publishing the LGPL flavour.
+- Switching to the LGPL flavour **does not** mean "no GPL obligations": `lcms2`, `libfreetype`,
+  `libgcc_s_seh` and `libstdc++` carry GPL-family terms (see
+  `windows/docs/licensing/W5-LGPL-BUILD.md:222-252` for the outstanding obligations). `libiconv` is no longer
+  one of them: MSYS2 now declares `LGPL-2.1-or-later` for the library, with `documentation:GPL-3.0-or-later`
+  scoped to the package's documentation.
+- **No DLL is printed as 未记录 any more** (W38, 2026-10-31). The five rows that used to be listed that way
+  were a collector defect, not an unknown licence: `collect-licences.sh` had never asked bzip2, expat,
+  gettext-runtime and pcre2, and silently dropped `libwinpthread-git` when `pacman -Si` knew no such package.
+  All 33 rows now carry a declaration (`libwinpthread-git` = `MIT AND BSD-3-Clause-Clear`, `libpcre2-8-0` =
+  `BSD-3-Clause`, `libexpat-1` = `MIT`, `libbz2-1` = `custom`, `libintl-8` = `GPL-3.0-or-later AND LGPL-2.1-or-later`),
+  and the collector now exits non-zero when a package yields no licence.
+- The gate is `lgpl-licence-table` in `windows/tools/check-licence-surface.ps1` (W38): it re-reads
+  `component-licences.txt` and fails when a shipped file has no row, a row's line pointer no longer holds
+  the quoted licence, or the shipped list and the report disagree. `-FailOnLicenceGaps` is kept only for
+  reproducing the pre-W38 behaviour.
 - `RELEASE BLOCKER` in [LICENCE-DECISION.md](LICENCE-DECISION.md) and in
   [windows/THIRD-PARTY-NOTICES.md](../../THIRD-PARTY-NOTICES.md) is **not** cleared by having a second flavour.
 
 ### 7.4 Refreshing this section
 
 ```powershell
+bash windows/engine/lgpl/collect-licences.sh                   # refresh component-licences.txt (33 rows; now fails loudly)
 pwsh -NoProfile -File windows/tools/collect-lgpl-runtime.ps1      # refresh the 33-DLL manifest from the build roots
 dotnet restore windows/MediaHub.Windows.sln                       # keep project.assets.json current
 pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts/license-report -Sbom

@@ -75,22 +75,27 @@ mpv 自身的代码是 LGPL-2.1+，但**与 GPL 组件链接后的整体按 GPL 
 
 | 许可族 | 文件数 | 字节 | 代表文件 |
 | --- | --- | --- | --- |
-| LGPL-2.1-or-later / LGPL2.1（含 LGPL 配置的 FFmpeg） | 11 | 33,273,735 | `avcodec-62`、`avfilter-11`、`libplacebo-360`、`libglib-2.0-0` |
-| GPL 家族（GPL-3.0-or-later / GPL-2.0-or-later / MIT AND GPL-3.0-or-later） | 5 | 4,949,153 | `libiconv-2`、`libstdc++-6`、`liblcms2-2`、`libfreetype-6`、`libgcc_s_seh-1` |
+| LGPL-2.1-or-later / LGPL2.1（含 LGPL 配置的 FFmpeg，以及 2026-10-31 起重新声明为 LGPL 的 `libiconv`） | 12 | 34,409,604 | `avcodec-62`、`avfilter-11`、`libplacebo-360`、`libglib-2.0-0`、`libiconv-2` |
+| GPL 家族（`GPL-3.0-or-later …` / `GPL-2.0-or-later OR FTL` / `GPL-3.0-or-later AND LGPL-2.1-or-later`） | 4 | 3,577,518 | `libstdc++-6`、`libgcc_s_seh-1`、`libfreetype-6`、`libintl-8` |
 | Apache-2.0 | 3 | 14,815,073 | `libshaderc_shared`、`libspirv-cross-c-shared`、`vulkan-1` |
-| MIT / ISC / Zlib | 7 | 3,777,412 | `libharfbuzz-0`、`libdovi`、`libbrotli*`、`libass-9`、`zlib1` |
-| 自定义上游文本 | 2 | 760,610 | `libpng16-16`、`libfontconfig-1` |
-| **未记录**（`component-licences.txt` 无声明行） | 5 | 1,250,593 | `libwinpthread-1`、`libpcre2-8-0`、`libintl-8`、`libexpat-1`、`libbz2-1` |
+| MIT / ISC / Zlib / BSD（宽松） | 11 | 5,184,997 | `libass-9`、`libharfbuzz-0`、`liblcms2-2`、`zlib1`、`libpcre2-8-0`、`libexpat-1`、`libwinpthread-1` |
+| 自定义上游文本（`custom`） | 3 | 839,384 | `libpng16-16`、`libfontconfig-1`、`libbz2-1` |
 | **合计** | **33** | **58,826,576** | |
+
+- 归类按 packager 声明的许可串**首项**（约束随附库的那一项）；声明变了行就跟着挪——`libiconv` 自 2026-10-31 起被声明为 `LGPL-2.1-or-later`（文档部分 `documentation:GPL-3.0-or-later`），因此从 GPL 族移入 LGPL 族。
 
 两点必须写清楚：
 
-1. **切到 LGPL flavour 不等于零 GPL 义务。** 上表 GPL 家族的 5 个文件（以及 FFmpeg 之外仍然 GPL 的
-   `libiconv`、GPL 双许可的 `lcms2`/`libfreetype`）本身就带 GPL 条款；残余义务见
+1. **切到 LGPL flavour 不等于零 GPL 义务。** 上表 GPL 家族的 4 个文件，以及 GPL 双许可的 `lcms2`、
+   `GPL-2.0-or-later OR FTL` 的 `libfreetype`，本身就带 GPL 条款；`libiconv` 自 2026-10-31 起声明为
+   `LGPL-2.1-or-later`（文档部分 `documentation:GPL-3.0-or-later`），库本体已不再是 GPL。残余义务见
    `windows/docs/licensing/W5-LGPL-BUILD.md`。
-2. **5 个未记录项的许可尚未核实**，本文件不猜。逐行证据（文件名/字节/SHA-256/来源路径/许可/证据行号）
-   见 `windows/docs/THIRD-PARTY-NOTICES.md` §3.3；核对脚本 `windows/tools/check-licence-surface.ps1 -FailOnLicenceGaps` 会把该缺口判为失败，
-   作为「发布 LGPL flavour 之前」的硬门。
+2. **W38 起不再有「未记录」的行**（2026-10-31）：此前 `component-licences.txt` 少 5 个包，是因为收集脚本从没问过
+   bzip2/expat/gettext-runtime/pcre2 四个包，并在 `pacman -Si` 查不到时静默跳过 `libwinpthread-git`。重收集后 33 行齐全：
+   `libwinpthread-git` = `MIT AND BSD-3-Clause-Clear`、`libpcre2-8-0` = `BSD-3-Clause`、`libexpat-1` = `MIT`、
+   `libbz2-1` = `custom`、`libintl-8` = `GPL-3.0-or-later AND LGPL-2.1-or-later`；收集脚本现在缺一行就报错退出。
+   逐行证据（文件名/字节/SHA-256/来源路径/许可/证据行号）见 `windows/docs/THIRD-PARTY-NOTICES.md` §3.3；核对器的 `lgpl-licence-table`（W38）
+   会回到 `component-licences.txt` 逐行核对：行被改写、行号指针失效、清单与报告行数不符都判 FAIL，`-FailOnLicenceGaps` 只保留旧行为。
 
 上述任何一项都不改变本文件开头的结论：在维护者拍板之前，`libmpv-2.dll` 的 GPL 问题仍是 **RELEASE BLOCKER**，
 默认 flavour 仍随包分发 GPL 构建。

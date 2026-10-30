@@ -5,12 +5,12 @@
 
 | 生成信息 | 值 |
 | --- | --- |
-| 生成时间（UTC） | 2026-10-24T00:00:00Z |
-| 生成命令 | pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir "windows/artifacts/license-report" -Sbom -TimestampUtc "2026-10-24T00:00:00Z" |
-| dotnet SDK / PowerShell | 10.0.113 / 7.6.7 |
+| 生成时间（UTC） | 2026-10-30T19:55:05Z |
+| 生成命令 | pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir "D:/mh-verify/w38-license" -Sbom |
+| dotnet SDK / PowerShell | 10.0.113 / 7.6.9 |
 | 仓库 | D:\deepseek_test\MediaHub_Win |
-| 分支 / HEAD | feature/windows-client / 1c30471 |
-| git describe | v0.1.0-alpha.1-317-g1c30471-dirty |
+| 分支 / HEAD | feature/windows-client / faff3927 |
+| git describe | v0.1.0-alpha.1-438-gfaff3927-dirty |
 | 数据来源 | 13 个 csproj 的 obj/project.assets.json + 本机 NuGet 缓存中的 .nuspec |
 
 ## 0. 覆盖范围与边界
@@ -90,42 +90,42 @@
 
 | 文件 | 组件 | 许可 | 证据 |
 | --- | --- | --- | --- |
-| `avcodec-62.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (built by windows/engine/lgpl/build-ffmpeg-lgpl.sh; its configure reports "LGPL version 2.1 or later") |
-| `swscale-9.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (same FFmpeg build) |
-| `swresample-6.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (same FFmpeg build) |
-| `libwinpthread-1.dll` | mingw-w64 runtime | 未记录（component-licences.txt 无此包） | component-licences.txt 无行 - 待核实 |
-| `libunibreak-7.dll` | libunibreak | Zlib | component-licences.txt:18 |
-| `libstdc++-6.dll` | libstdc++ | GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later | component-licences.txt:26 |
-| `libspirv-cross-c-shared.dll` | spirv-cross | Apache-2.0 | component-licences.txt:9 |
-| `libshaderc_shared.dll` | shaderc | Apache-2.0 | component-licences.txt:8 |
-| `libpng16-16.dll` | libpng | custom (see upstream LICENSE) | component-licences.txt:20 |
-| `libplacebo-360.dll` | libplacebo | LGPL2.1 | component-licences.txt:7 |
-| `libpcre2-8-0.dll` | pcre2 | 未记录（component-licences.txt 无此包） | component-licences.txt 无行 - 待核实 |
-| `liblcms2-2.dll` | lcms2 | MIT AND GPL-3.0-or-later | component-licences.txt:16 |
-| `libintl-8.dll` | gettext | 未记录（component-licences.txt 无此包） | component-licences.txt 无行 - 待核实 |
-| `libiconv-2.dll` | libiconv | GPL-3.0-or-later | component-licences.txt:23 |
-| `libharfbuzz-0.dll` | harfbuzz | MIT | component-licences.txt:13 |
-| `vulkan-1.dll` | vulkan-loader | Apache-2.0 | component-licences.txt:10 |
-| `libgraphite2.dll` | graphite2 | LGPL-2.1-or-later | component-licences.txt:24 |
-| `libgcc_s_seh-1.dll` | libgcc | GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later | component-licences.txt:25 |
-| `libfribidi-0.dll` | fribidi | LGPL-2.1-or-later | component-licences.txt:14 |
-| `libfreetype-6.dll` | freetype | GPL-2.0-or-later OR FTL | component-licences.txt:12 |
-| `libfontconfig-1.dll` | fontconfig | custom (see upstream COPYING) | component-licences.txt:15 |
-| `libexpat-1.dll` | expat | 未记录（component-licences.txt 无此包） | component-licences.txt 无行 - 待核实 |
-| `libdovi.dll` | libdovi | MIT | component-licences.txt:17 |
-| `libbz2-1.dll` | bzip2 | 未记录（component-licences.txt 无此包） | component-licences.txt 无行 - 待核实 |
-| `libbrotlidec.dll` | brotli | MIT | component-licences.txt:21 |
-| `libbrotlicommon.dll` | brotli | MIT | component-licences.txt:21 |
-| `libass-9.dll` | libass | ISC | component-licences.txt:6 |
-| `avutil-60.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (same FFmpeg build) |
-| `avformat-62.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (same FFmpeg build) |
-| `avfilter-11.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (same FFmpeg build) |
-| `avdevice-62.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:3-4 (same FFmpeg build) |
-| `libglib-2.0-0.dll` | glib2 | LGPL-2.1-or-later | component-licences.txt:19 |
-| `zlib1.dll` | zlib | Zlib | component-licences.txt:22 |
+| `avcodec-62.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:5-6 (built by windows/engine/lgpl/build-ffmpeg-lgpl.sh; its configure reports "LGPL version 2.1 or later") |
+| `swscale-9.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:5-6 (same FFmpeg build) |
+| `swresample-6.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:5-6 (same FFmpeg build) |
+| `libwinpthread-1.dll` | libwinpthread-git | MIT AND BSD-3-Clause-Clear | component-licences.txt:29 |
+| `libunibreak-7.dll` | libunibreak | Zlib | component-licences.txt:20 |
+| `libstdc++-6.dll` | libstdc++ | GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later | component-licences.txt:28 |
+| `libspirv-cross-c-shared.dll` | spirv-cross | Apache-2.0 | component-licences.txt:11 |
+| `libshaderc_shared.dll` | shaderc | Apache-2.0 | component-licences.txt:10 |
+| `libpng16-16.dll` | libpng | custom | component-licences.txt:22 (packager declares "custom"; the upstream LICENSE text governs) |
+| `libplacebo-360.dll` | libplacebo | LGPL2.1 | component-licences.txt:9 |
+| `libpcre2-8-0.dll` | pcre2 | BSD-3-Clause | component-licences.txt:40 |
+| `liblcms2-2.dll` | lcms2 | MIT AND GPL-3.0-or-later | component-licences.txt:18 |
+| `libintl-8.dll` | gettext-runtime | GPL-3.0-or-later AND LGPL-2.1-or-later | component-licences.txt:39 |
+| `libiconv-2.dll` | libiconv | LGPL-2.1-or-later  documentation:GPL-3.0-or-later | component-licences.txt:25 |
+| `libharfbuzz-0.dll` | harfbuzz | MIT | component-licences.txt:15 |
+| `vulkan-1.dll` | vulkan-loader | Apache-2.0 | component-licences.txt:12 |
+| `libgraphite2.dll` | graphite2 | LGPL-2.1-or-later | component-licences.txt:26 |
+| `libgcc_s_seh-1.dll` | libgcc | GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later | component-licences.txt:27 |
+| `libfribidi-0.dll` | fribidi | LGPL-2.1-or-later | component-licences.txt:16 |
+| `libfreetype-6.dll` | freetype | GPL-2.0-or-later OR FTL | component-licences.txt:14 |
+| `libfontconfig-1.dll` | fontconfig | custom | component-licences.txt:17 (packager declares "custom"; the upstream COPYING text governs) |
+| `libexpat-1.dll` | expat | MIT | component-licences.txt:38 |
+| `libdovi.dll` | libdovi | MIT | component-licences.txt:19 |
+| `libbz2-1.dll` | bzip2 | custom | component-licences.txt:37 (packager declares "custom"; the upstream LICENSE text governs) |
+| `libbrotlidec.dll` | brotli | MIT | component-licences.txt:23 |
+| `libbrotlicommon.dll` | brotli | MIT | component-licences.txt:23 |
+| `libass-9.dll` | libass | ISC | component-licences.txt:8 |
+| `avutil-60.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:5-6 (same FFmpeg build) |
+| `avformat-62.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:5-6 (same FFmpeg build) |
+| `avfilter-11.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:5-6 (same FFmpeg build) |
+| `avdevice-62.dll` | FFmpeg (libav*) | LGPL-2.1-or-later | component-licences.txt:5-6 (same FFmpeg build) |
+| `libglib-2.0-0.dll` | glib2 | LGPL-2.1-or-later | component-licences.txt:21 |
+| `zlib1.dll` | zlib | Zlib | component-licences.txt:24 |
 
 - 合计 **33** 个 DLL，总字节 58,826,576。其中 libiconv-2.dll（GPL-3.0-or-later）、liblcms2-2.dll（MIT AND GPL-3.0-or-later）、libfreetype-6.dll（GPL-2.0-or-later OR FTL）、libgcc_s_seh-1.dll 与 libstdc++-6.dll（GPL-3.0-or-later WITH GCC-exception-3.1）携带 GPL 家族条款 ⇒ **切到 LGPL flavour 并不等于零 GPL 义务**，与 `windows/docs/licensing/W5-LGPL-BUILD.md:228-235` 记录的残留义务一致。
-- 缺口：libwinpthread-1.dll、libpcre2-8-0.dll、libintl-8.dll、libexpat-1.dll、libbz2-1.dll 在 `windows/engine/lgpl/component-licences.txt` 里**没有声明行**，本表只能标「未记录」。发布 LGPL flavour 前必须补齐这些包的许可证据（pacman -Si 的 License 字段）。
+- 本表 33 行都有 `windows/engine/lgpl/component-licences.txt` 的声明行可引；没有任何一行靠猜测填写。
 
 ## 4. 仓库自身的许可
 
@@ -139,7 +139,7 @@
 
 - 违规：**0**。
 - 警告：**4**
-  - MediaHub.Player.Mpv: project.assets.json is older than the .csproj - the resolved graph may be stale (dotnet restore windows/MediaHub.Windows.sln)
+  - MediaHub.Tests: project.assets.json is older than the .csproj - the resolved graph may be stale (dotnet restore windows/MediaHub.Windows.sln)
   - Microsoft.Windows.SDK.BuildTools/10.0.26100.4654: only the deprecated licenseUrl is published - no SPDX expression (a violation under -RequireExact)
   - System.Reflection.Metadata/1.6.0: only the deprecated licenseUrl is published - no SPDX expression (a violation under -RequireExact)
   - xunit.abstractions/2.0.3: only the deprecated licenseUrl is published - no SPDX expression (a violation under -RequireExact)

@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Eight things rot silently in a licence deliverable:
+    Nine things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -16,8 +16,10 @@
          the report generator goes stale - nothing compared those quotes with the bytes on disk.
       8. the engine capability assessment drifts: the candidate starts advertising Vulkan, the player stops
          pinning gpu-api=d3d11, or the verdict in windows/docs/licensing/VULKAN-NECESSITY.md is lost.
+      9. the LGPL flavour ships a DLL whose licence declaration is missing, or whose row in
+         component-licences.txt was rewritten and the report kept quoting the old transcription.
 
-    This script checks those eight surfaces without touching the network, the build, or the
+    This script checks those nine surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -31,8 +33,9 @@
 
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
-    errors. Off by default because those five rows are a known, documented gap: the default
-    flavour does not ship those DLLs.
+    errors as well. Off by default, but as of W38 no such row is expected: every shipped DLL has a
+    declaration line, and the separate lgpl-licence-table check fails if one goes missing again.
+    The switch stays so the older behaviour can still be reproduced.
 
 .EXAMPLE
     pwsh -NoProfile -File windows/tools/check-licence-surface.ps1
@@ -597,6 +600,92 @@ else {
         Add-Check 'vulkan-claims' 'FAIL' ($vulkanProblems.Count.ToString() + ' claim(s) drifted: ' + (Format-NameList $vulkanProblems) + ' - update windows/docs/licensing/VULKAN-NECESSITY.md and the measurement together')
     }
 }
+
+# The LGPL flavour ships 33 extra DLLs and every one of them must carry a licence declaration the
+# table really holds. The report transcribes the packager's line; this check goes back to the bytes,
+# and it also compares the shipped file list with the report row by row so a name that silently lost
+# its map entry cannot disappear from the notices.
+$lgplFlavour = $null
+if ($null -ne $report) { $lgplFlavour = $report['lgplFlavour'] }
+$licenceRows = @()
+$lgplPresent = $false
+if ($null -ne $lgplFlavour) {
+    $licenceRows = @($lgplFlavour['dependencies'])
+    $lgplPresent = [bool]$lgplFlavour['present']
+}
+if ((-not $lgplPresent) -or ($licenceRows.Count -eq 0)) {
+    Add-Check 'lgpl-licence-table' 'SKIP' 'the report carries no LGPL-flavour dependency list here, so its licence declarations cannot be compared with windows/engine/lgpl/component-licences.txt'
+}
+else {
+    $licenceTableFile = Resolve-RepoPath -Path ([string]$lgplFlavour['licenceTable']) -Default 'windows/engine/lgpl/component-licences.txt'
+    $licenceTableLines = @()
+    if (Test-Path -LiteralPath $licenceTableFile) { $licenceTableLines = @(Get-Content -LiteralPath $licenceTableFile) }
+    $collectedFile = Resolve-RepoPath -Path ([string]$lgplFlavour['collectedList']) -Default 'windows/engine/lgpl/dist/runtime-dependencies-collected.txt'
+    $collectedNames = @()
+    if (Test-Path -LiteralPath $collectedFile) {
+        $collectedNames = @(Get-Content -LiteralPath $collectedFile | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } | ForEach-Object { $_.Trim() -split '\s+' | Select-Object -First 1 })
+    }
+    $licenceUnrecorded = @()
+    $licenceNoSource = @()
+    $licenceBroken = @()
+    $licenceMissing = @()
+    foreach ($row in $licenceRows) {
+        $name = [string]$row['name']
+        $licence = [string]$row['license']
+        $evidence = [string]$row['evidence']
+        if ($licence.StartsWith('未记录')) { $licenceUnrecorded += ($name + ' (' + $licence + ')'); continue }
+        if (-not $evidence.Contains('component-licences.txt')) { $licenceNoSource += ($name + ' -> ' + $evidence); continue }
+        $single = [regex]::Match($evidence, 'component-licences\.txt:(\d+)(\s+\(.*\))?\z')
+        $rng = [regex]::Match($evidence, 'component-licences\.txt:(\d+)-(\d+)')
+        if ($single.Success) {
+            $lineNo = [int]$single.Groups[1].Value
+            if (($lineNo -lt 1) -or ($lineNo -gt $licenceTableLines.Count)) {
+                $licenceBroken += ($name + ' points at component-licences.txt:' + $lineNo + ', but the table has ' + $licenceTableLines.Count + ' line(s)')
+            }
+            elseif (-not $licenceTableLines[$lineNo - 1].Contains($licence)) {
+                $licenceBroken += ($name + ' quotes ' + $licence + ' from component-licences.txt:' + $lineNo + ', which reads: ' + $licenceTableLines[$lineNo - 1].Trim())
+            }
+        }
+        elseif ($rng.Success) {
+            $from = [int]$rng.Groups[1].Value
+            $to = [int]$rng.Groups[2].Value
+            $component = [string]$row['component']
+            $flat = $component
+            $paren = $component.IndexOf(' (')
+            if ($paren -gt 0) { $flat = $component.Substring(0, $paren) }
+            if (($from -lt 1) -or ($to -gt $licenceTableLines.Count) -or ($from -gt $to)) {
+                $licenceBroken += ($name + ' points at component-licences.txt:' + $from + '-' + $to + ', outside the ' + $licenceTableLines.Count + '-line table')
+            }
+            else {
+                $joined = ($licenceTableLines[($from - 1)..($to - 1)] -join ' ')
+                if (-not $joined.Contains($flat)) { $licenceBroken += ($name + ' cites comments ' + $from + '-' + $to + ' that never name ' + $flat) }
+                elseif (-not ($evidence -match '\(.+\)')) { $licenceBroken += ($name + ' cites those comments without saying which build produced the licence') }
+            }
+        }
+        else {
+            $licenceBroken += ($name + ' cites component-licences.txt without a line number')
+        }
+    }
+    if ($collectedNames.Count -gt 0) {
+        $rowNames = @($licenceRows | ForEach-Object { [string]$_['name'] })
+        $licenceMissing = @($collectedNames | Where-Object { $rowNames -notcontains $_ })
+        if (($licenceMissing.Count -eq 0) -and ($rowNames.Count -ne $collectedNames.Count)) {
+            $licenceMissing += ('the shipped list has ' + $collectedNames.Count + ' file(s) but the report carries ' + $rowNames.Count + ' row(s)')
+        }
+    }
+    $licenceProblems = @()
+    if ($licenceUnrecorded.Count -gt 0) { $licenceProblems += ($licenceUnrecorded.Count.ToString() + ' shipped file(s) still have no licence declaration [' + (Format-NameList $licenceUnrecorded) + ']') }
+    if ($licenceNoSource.Count -gt 0) { $licenceProblems += ($licenceNoSource.Count.ToString() + ' row(s) cite no source in component-licences.txt [' + (Format-NameList $licenceNoSource) + ']') }
+    if ($licenceBroken.Count -gt 0) { $licenceProblems += ($licenceBroken.Count.ToString() + ' row(s) cite a table line that does not hold their licence [' + (Format-NameList $licenceBroken) + ']') }
+    if ($licenceMissing.Count -gt 0) { $licenceProblems += ('the shipped list and the report disagree: ' + (Format-NameList @($licenceMissing))) }
+    if ($licenceProblems.Count -eq 0) {
+        Add-Check 'lgpl-licence-table' 'PASS' ($licenceRows.Count.ToString() + ' shipped LGPL-flavour DLL(s) each quote a licence declaration that component-licences.txt really holds (' + $licenceTableLines.Count + ' table line(s), shipped list ' + $collectedNames.Count.ToString() + ' file(s))')
+    }
+    else {
+        Add-Check 'lgpl-licence-table' 'FAIL' (($licenceProblems -join '; ') + ' - re-collect the table with windows/engine/lgpl/collect-licences.sh and re-map the new package in windows/tools/license-report.ps1')
+    }
+}
+
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })
 $skipped = @($checks | Where-Object { $_.outcome -eq 'SKIP' })

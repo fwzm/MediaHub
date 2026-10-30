@@ -223,16 +223,21 @@ Outputs land in windows/engine/lgpl/; the artifact is windows/engine/lgpl/dist/l
 
 **This section is the honest one. Nothing here is satisfied by the build above.**
 
-1. **Two components carry a GPL option in the packager's own declaration and need review before
+1. **One component still carries a GPL option in the packager's own declaration and needs review before
    distribution:**
-   - libiconv-2.dll — MSYS2 declares GPL-3.0-or-later for the package. GNU libiconv's *library* is
-     LGPL-2.1-or-later and only the iconv *program* is GPL, and only the DLL would ship — but that
-     is a claim to **verify**, not to assume.
-   - liblcms2-2.dll — MSYS2 declares 'MIT AND GPL-3.0-or-later'. lcms2 upstream is MIT.
-   Everything else in the 33-DLL closure is LGPL, MIT, ISC, BSD, Apache-2.0, Zlib, or
-   GPL-with-GCC-exception. Notably jbigkit (GPL-2.0) is in the pacman closure but **not** in the
-   runtime closure, so it does not ship. freetype is 'GPL-2.0-or-later OR FTL' — the FTL option is
-   the permissive one and is what is relied on here.
+   - liblcms2-2.dll — MSYS2 declares 'MIT AND GPL-3.0-or-later'. lcms2 upstream is MIT, but the declared
+     combination still needs review before distribution.
+   libiconv-2.dll used to head this list. W38 (2026-10-31) settled the open question by re-reading the
+   packager's own metadata instead of reasoning about upstream: MSYS2 now declares `LGPL-2.1-or-later`
+   for the package, with `documentation:GPL-3.0-or-later` scoped to the package's documentation, so the
+   shipped *library* is LGPL and the GPL terms ride on documentation that is not distributed (recorded in
+   `windows/engine/lgpl/component-licences.txt`). Re-collecting that table also turned three rows that
+   were previously inferred into explicit records: `libintl-8` (`GPL-3.0-or-later AND LGPL-2.1-or-later`,
+   from gettext-runtime), and `libstdc++-6` / `libgcc_s_seh-1` (`GPL-3.0-or-later WITH
+   GCC-exception-3.1 AND GFDL-1.3-or-later`). Everything else in the 33-DLL closure is LGPL, MIT, ISC,
+   BSD, Apache-2.0, Zlib, or GPL-with-GCC-exception. Notably jbigkit (GPL-2.0) is in the pacman closure
+   but **not** in the runtime closure, so it does not ship. freetype is 'GPL-2.0-or-later OR FTL' — the
+   FTL option is the permissive one and is what is relied on here.
 2. **-Dgpl=false is still not a licence grant.** mpv's own Copyright says so. The build is now
    *configured* to be LGPL-compatible and no GPL-family component is linked — but whether the
    assembled distribution satisfies LGPL §6 (and what MediaHub's own licence is) remains a

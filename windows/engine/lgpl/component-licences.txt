@@ -1,5 +1,7 @@
 # Licence of each redistributable component, as declared by the MSYS2 packager
-# (pacman -Si <pkg> -> 'License'), collected 2026-10-14T16:10:01+08:00
+# (pacman -Si <pkg> -> 'Licenses'), collected 2026-10-31T03:50:25+08:00
+# Packages with no repo entry fall back to the installed package metadata (pacman -Qi <pkg>).
+# 'spdx:' namespace prefixes are stripped; everything else is verbatim. One row per package.
 # FFmpeg itself is not here: it is built from source by build-ffmpeg-lgpl.sh and reports
 # 'License: LGPL version 2.1 or later' from its own configure output.
 PACKAGE                                        LICENSE
@@ -20,14 +22,19 @@ glib2                                          LGPL-2.1-or-later  (2.90.1-1)
 libpng                                         custom  (1.6.59-1)
 brotli                                         MIT  (1.2.0-1)
 zlib                                           Zlib  (1.3.2-2)
-libiconv                                       GPL-3.0-or-later  (1.19-1)
+libiconv                                       LGPL-2.1-or-later  documentation:GPL-3.0-or-later  (1.19-1)
 graphite2                                      LGPL-2.1-or-later  (1.3.15-1)
 libgcc                                         GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later  (16.2.0-6)
 libstdc++                                      GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later  (16.2.0-6)
-libjpeg-turbo                                  BSD-like  (3.2.0-1)
+libwinpthread-git                              MIT AND BSD-3-Clause-Clear  (12.0.0.r509.g079e6092b-1)
+libjpeg-turbo                                  custom:BSD-like  (3.2.0-1)
 libtiff                                        MIT  (4.7.2-1)
 libwebp                                        BSD-3-Clause  (1.6.0-1)
 giflib                                         MIT  (6.1.3-1)
 lerc                                           Apache-2.0  (4.1.1-1)
 libdeflate                                     MIT  (1.26-1)
 jbigkit                                        GPL-2.0  (2.1-6)
+bzip2                                          custom  (1.0.8-4)
+expat                                          MIT  (2.9.0-1)
+gettext-runtime                                GPL-3.0-or-later AND LGPL-2.1-or-later  (1.0-1)
+pcre2                                          BSD-3-Clause  (10.49-1)

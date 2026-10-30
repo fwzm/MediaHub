@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-30 项检查分十组：
+31 项检查分十一组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -57,8 +57,9 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 通告文档（W35 起） | `notices-inventory`、`notices-declarations` | 入库的 `THIRD-PARTY-NOTICES.md` 与「当场解析出的依赖图」或「csproj 里直接声明的包」不再对得上（漏包、版本/许可漂移、新增依赖没写进法律文档） |
 | 引擎候选身份（W36 起） | `lgpl-candidate-hashes`、`lgpl-candidate-claims` | 入库的 LGPL 候选 DLL 与 `windows/engine/lgpl/dist/dist-hashes.txt` 的记录不符；或十一个引用候选身份的文档/常量写着别的构建（字节数或 sha256 对不上） |
 | 引擎能力（W37 起） | `vulkan-claims` | 候选件忽然带上 Vulkan、`MpvPlayer` 不再把 `gpu-api` 钉成 `d3d11`、`windows/src` 下出现 vulkan 字样，或 `VULKAN-NECESSITY.md` 丢了 verdict 行——许可证决策依赖的「Vulkan 非必需」结论不能悄悄过期 |
+| 引擎许可声明（W38 起） | `lgpl-licence-table` | LGPL flavour 的 33 个 DLL 与 `component-licences.txt` 的逐行声明对不上（表被改坏、缺行、证据行号指到别处），或装出来的文件清单与报告行数不符 |
 
-`lgpl-licence-gaps` 默认是 **WARN**：`component-licences.txt` 里没有声明的 5 个 MSYS2 包（`libwinpthread-1`、`libpcre2-8-0`、`libintl-8`、`libexpat-1`、`libbz2-1`）是**已知缺口**，默认 flavour 不随包分发它们。要在「切 LGPL 发布前」把缺口当硬门，加 `-FailOnLicenceGaps`。
+`lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
 
 报告不存在时，相关检查输出 `SKIP` 而不是失败——没跑过生成器的机器也能用核对器查文档面。
 
@@ -146,6 +147,25 @@ W32 的三检首次随 CI 跑就抓到两件事，都不是「SBOM 写错了」�
 
 两半的来源、GPL 基线对照与维护者决策清单（A 接受并记录 / B 修 meson 探测重建 / C 保持 GPL 基线默认）见 [VULKAN-NECESSITY.md](VULKAN-NECESSITY.md)；当场复测用 `windows/tools/probe-engine-capabilities.ps1`。
 
+### 3.6 LGPL flavour 的许可声明表（W38，2026-10-31）
+
+`windows/engine/lgpl/component-licences.txt` 是 LGPL flavour 那 33 个 DLL 的逐行许可声明（哪一行属于哪个包、声明了什么许可）。此前它只有 28 行，而 `license-report.ps1` 的 `$LgplComponentMap` 对缺的 5 个包写死「未记录」，核对器只把缺口当 WARN ⇒ 表被改坏、行号指针失效都不会红。W38 补齐 33 行（收集脚本现在缺一行就报错退出）并新增一项：
+
+| 检查 | 判据 | 失败含义 |
+| --- | --- | --- |
+| `lgpl-licence-table` | ① 报告每行的 `license` 不得以 `未记录` 开头；② 每行的 `evidence` 必须含 `component-licences.txt`；③ `component-licences.txt:<N>` 形式的指针，第 N 行必须存在且真的含该许可串；④ `component-licences.txt:<A>-<B>` 范围指针（FFmpeg 用的注释行）必须落在表内、合并文本里出现该组件名、且带括号注记；⑤ 其它没有行号的写法直接 FAIL；⑥ 用 `collectedList`（`runtime-dependencies-collected.txt`）的文件名集合与报告行集合比对，缺名字或行数不符 FAIL | 声明表被改写/删行、证据行号指到别处、装出来的 DLL 与表不再一一对应——「33 个 DLL 的许可都已记录」这句话不再成立 |
+
+报告缺 `lgplFlavour` 或 `dependencies` 为空时该项 SKIP（退出码仍 0）；`-FailOnLicenceGaps` 只保留 W38 之前的旧行为，硬门交给本项。
+
+负向对照（§4.6 的实测，全部恰好 1 红，且都不改仓库文件）：
+
+- 报告副本把某行许可改回 `未记录…` → 1 红（仍有文件没有声明）。
+- 报告副本把 `libass-9.dll` 的许可从 `ISC` 改成 `MIT`（指针仍指第 8 行）→ 1 红（detail 回显该行原文）。
+- 报告副本把 `zlib1.dll` 的证据改成 `component-licences.txt:99` → 1 红（表只有 40 行）。
+- 报告副本删掉 `zlib1.dll` 那一行 → 1 红（装出来的清单与报告不一致）。
+- 报告副本把 `avcodec-62.dll` 的证据改成 `component-licences.txt:1-2 (…)` → 1 红（注释行 1-2 从未出现 FFmpeg）。
+- 报告副本把 `libexpat-1.dll` 的证据改成 `see component-licences.txt` → 1 红（没有任何行号）。
+- `-JsonPath` 指向不存在的报告 → 该项 SKIP、退出码 0（与 §3.3 同口径）。
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
 ```text
@@ -224,6 +244,23 @@ RESULT: PASS
 `BT`
 
 （`warnings=2` 是本机这一跑里 `git` 不在进程 PATH 上，`sbom-source-revision` 因此降为 WARN；CI 的完整克隆里它是硬门。候选件的能力面另由 `windows/tools/probe-engine-capabilities.ps1` 当场探测：`gpu-api` 只列 `auto, d3d11, opengl`，`gpu-context` 只列 `auto, d3d11, win, dxinterop`，`vo` 含 `gpu-next`，特性表 28 项不含 `vulkan` ⇒ 产品要的每一项都在，Vulkan 确实缺，结论与实现一致。）
+
+### 4.6 实测（2026-10-31，W38，本机）
+
+```text
+license-report  dotnet=10.0.113  pwsh=7.6.9  generated=2026-10-30T19:55:05Z
+license-report  projects=13  rows=49  packages=29
+license-report  lgpl-flavour dependencies: present=True count=33 unrecorded=0 (windows/engine/lgpl/dist/runtime-dependencies-collected.txt)
+license-report  violations=0  warnings=4
+license-report  RESULT: PASS (no policy violations)
+
+check-licence-surface  checks=31 failed=0 warnings=0 skipped=0
+check-licence-surface  PASS  lgpl-licence-gaps  every row has a declaration line
+check-licence-surface  PASS  lgpl-licence-table  33 shipped LGPL-flavour DLL(s) each quote a licence declaration that component-licences.txt really holds (40 table line(s), shipped list 33 file(s))
+RESULT: PASS
+```
+
+`warnings=0` 是本轮起 33 个 DLL 全部有声明行；`warnings=4` 里多出的那条是 `MediaHub.Tests: project.assets.json is older than the .csproj` 的本机陈旧警告，与库存无关。`component-licences.txt` 共 40 行、数据行 8..40（33 行）；`libiconv` 现声明为 `LGPL-2.1-or-later`（文档部分 `documentation:GPL-3.0-or-later`），因此许可族归类把它从 GPL 族移入 LGPL 族，见 [SBOM.md](SBOM.md) §7.2 与 [windows/THIRD-PARTY-NOTICES.md](../../THIRD-PARTY-NOTICES.md)。缺报告时该检查 SKIP、退出码 0（§3.6）。
 
 ## 5. 这个工具**不**覆盖什么
 
