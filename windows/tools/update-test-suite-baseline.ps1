@@ -7,7 +7,7 @@
 # a method's own case count) requires the explicit -AcceptRemoval switch and
 # shows up as a diff in the same commit as the removal.
 #
-# The written file carries four levels, each one closing a substitution the
+# The written file carries five levels, each one closing a substitution the
 # level above cannot see:
 #   expected : total case count (deleting and adding cases keeps it equal)
 #   classes  : cases per class   (deleting and adding inside one class keeps it)
@@ -16,9 +16,17 @@
 #   methods  : cases per method (a [Theory] reports one method with many data
 #              rows, so moving a row between two theories of one class keeps the
 #              total, the class count and the method set identical)
-# The argument text of a data row is deliberately not stored: it is produced by
-# the test framework, is not stable text, and would turn every data table edit
-# into a baseline diff. Counts are stable and pin "how many rows ran".
+#   data     : one digest per method that carries argument text: a [Theory] row
+#              reports its arguments in its display name, so swapping two rows'
+#              values, or replacing one row's values, keeps every count above
+#              identical. The digest covers the sorted argument suffixes with
+#              duplicates included, so a value swap, a parameter rename and a
+#              replaced row all show up as a diff. Only methods that actually
+#              carry argument text get an entry.
+# The raw argument text is not stored, only its 64-bit digest: the text is long,
+# may embed machine paths or secrets, and is not meant to be git-blamed. The
+# digest is stable across runs (it was compared between two CI runs of the same
+# tree and matched); it cannot see a difference that the framework truncated.
 #
 # Typical local use (after the two dotnet test steps, from the windows directory):
 #   powershell -NoProfile -File tools/update-test-suite-baseline.ps1
@@ -50,13 +58,42 @@ $comment = @(
   "  adding another to the same class keeps every count identical.",
   "  a method must also still report at least this many cases; equal totals, equal class counts",
   "  and an unchanged method list are red when a data row moved between two theories of one",
-  "  class. The argument text of a row is not stored, only how many rows the method ran.",
+  "  class.",
+  "  a method that carries argument text in its display name also pins a digest of those rows:",
+  "  equal totals, class counts, method lists and case counts are red when two rows swapped",
+  "  values or one row's values were replaced. Only the digest is stored, never the text.",
   "Why not just raise a hard-coded floor: that only moves the same rot to the next person.",
   "A committed baseline shows up in review as a diff and can be git-blamed.",
   "Refresh (never to turn a red gate green): windows/tools/update-test-suite-baseline.ps1",
   "ASCII only on purpose: PowerShell 5.1 Get-Content decodes BOM-less UTF-8 as ANSI and corrupts",
   "non-ASCII text, which breaks ConvertFrom-Json. Keep this file pure ASCII."
 )
+
+# Digest of the argument text of one method's rows. Every row of a [Theory] is a
+# separate test definition whose display name is "Class.Method(<arguments>)", so
+# the arguments are the suffix from the first "(". They are sorted with the
+# ordinal comparer and joined with LF before hashing, which makes the digest
+# independent of row order and of the culture of the machine that computes it.
+# Duplicates are kept: a duplicated row swapped for a deleted one would
+# otherwise leave the digest unchanged. This function must stay identical to the
+# one in check-test-suite-baseline.ps1.
+function Get-DataSignature {
+  param([string[]]$Rows)
+  $sorted = New-Object System.Collections.Generic.List[string]
+  foreach ($r in $Rows) { [void]$sorted.Add([string]$r) }
+  $sorted.Sort([System.StringComparer]::Ordinal)
+  $joined = [string]::Join([string][char]10, $sorted.ToArray())
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($joined)
+    $hash = $sha.ComputeHash($bytes)
+    $sb = New-Object System.Text.StringBuilder
+    for ($i = 0; $i -lt 8; $i++) { [void]$sb.Append($hash[$i].ToString("x2")) }
+    return $sb.ToString()
+  } finally {
+    $sha.Dispose()
+  }
+}
 
 function Read-Suite([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path)) { throw "missing test results: $Path" }
@@ -65,6 +102,7 @@ function Read-Suite([string]$Path) {
   $total = [int]$xml.TestRun.ResultSummary.Counters.total
   $idToClass = @{}
   $methods = @{}
+  $rowArgs = @{}
   foreach ($ut in @($xml.TestRun.TestDefinitions.UnitTest)) {
     if ($null -eq $ut) { continue }
     $cls = $null
@@ -79,6 +117,23 @@ function Read-Suite([string]$Path) {
     $base = $raw
     $paren = $raw.IndexOf('(')
     if ($paren -ge 0) { $base = $raw.Substring(0, $paren) }
+    # The arguments live in the definition display name, not in the method name:
+    # the method name is the bare identifier, the display name is
+    # "Class.Method(<arguments>)".
+    $suffix = ""
+    $display = [string]$ut.name
+    if (-not [string]::IsNullOrWhiteSpace($display)) {
+      $dparen = $display.IndexOf('(')
+      if ($dparen -ge 0) { $suffix = $display.Substring($dparen) }
+    }
+    if ($suffix.Length -gt 0) {
+      if (-not $rowArgs.ContainsKey($cls)) { $rowArgs[$cls] = @{} }
+      if ($rowArgs[$cls].ContainsKey($base)) {
+        $rowArgs[$cls][$base] += ,$suffix
+      } else {
+        $rowArgs[$cls][$base] = @($suffix)
+      }
+    }
     if (-not $methods.ContainsKey($cls)) { $methods[$cls] = @{} }
     if ($methods[$cls].ContainsKey($base)) {
       $methods[$cls][$base] = $methods[$cls][$base] + 1
@@ -86,6 +141,13 @@ function Read-Suite([string]$Path) {
       $methods[$cls][$base] = 1
     }
     $idToClass[[string]$ut.id] = $cls
+  }
+  $data = @{}
+  foreach ($dcls in @($rowArgs.Keys)) {
+    foreach ($dm in @($rowArgs[$dcls].Keys)) {
+      $rows = $rowArgs[$dcls][$dm]
+      $data["$dcls.$dm"] = Get-DataSignature -Rows $rows
+    }
   }
   $classes = @{}
   foreach ($res in @($xml.TestRun.Results.UnitTestResult)) {
@@ -95,7 +157,7 @@ function Read-Suite([string]$Path) {
     if ($null -eq $cls) { throw "$Path : a result has no TestMethod.className" }
     if ($classes.ContainsKey($cls)) { $classes[$cls] = $classes[$cls] + 1 } else { $classes[$cls] = 1 }
   }
-  return @{ total = $total; classes = $classes; methods = $methods }
+  return @{ total = $total; classes = $classes; methods = $methods; data = $data }
 }
 
 # Only used to read the file being refreshed. Older entries stored method names as
@@ -170,6 +232,30 @@ foreach ($e in $baseline.suites) {
       if ($before -ge 0 -and $now -lt $before) { $removed += "$name.$m (cases $before -> $now)" }
     }
   }
+  $oldData = @{}
+  if ($null -ne $e.data) {
+    foreach ($dp in @($e.data.PSObject.Properties)) { $oldData[[string]$dp.Name] = [string]$dp.Value }
+  }
+  foreach ($k in @($oldData.Keys | Sort-Object)) {
+    if (-not $read.data.ContainsKey($k)) {
+      $removed += "$k (argument text gone)"
+    } elseif ([string]$read.data[$k] -ne $oldData[$k]) {
+      # Growth changes the digest too; it is not a loss, so only a same-or-smaller
+      # row count is refused.
+      $beforeCases = 0
+      $nowCases = 0
+      $adot = $k.LastIndexOf(".")
+      if ($adot -gt 0) {
+        $acls = $k.Substring(0, $adot)
+        $aname = $k.Substring($adot + 1)
+        if ($oldMethods.ContainsKey($acls) -and $oldMethods[$acls].ContainsKey($aname)) { $beforeCases = [int]$oldMethods[$acls][$aname] }
+        if ($read.methods.ContainsKey($acls) -and $read.methods[$acls].ContainsKey($aname)) { $nowCases = [int]$read.methods[$acls][$aname] }
+      }
+      if ($beforeCases -ge 0 -and $nowCases -le $beforeCases) {
+        $removed += "$k (argument text changed)"
+      }
+    }
+  }
   if ([int]$e.expected -gt $read.total) { $removed += "total ($($e.expected) -> $($read.total))" }
   if ($removed.Count -gt 0 -and -not $AcceptRemoval) {
     $shrunk += "$($e.suite): " + ($removed -join ", ")
@@ -180,7 +266,7 @@ foreach ($e in $baseline.suites) {
     foreach ($m in $read.methods[$name].Keys) { $inner[$m] = [int]$read.methods[$name][$m] }
     $entryMethods[$name] = $inner
   }
-  $entries += @{ file = [string]$e.file; suite = [string]$e.suite; expected = $read.total; classes = $read.classes; methods = $entryMethods }
+  $entries += @{ file = [string]$e.file; suite = [string]$e.suite; expected = $read.total; classes = $read.classes; methods = $entryMethods; data = $read.data }
 }
 if ($shrunk.Count -gt 0) {
   throw ("refusing to lower the baseline without -AcceptRemoval - a smaller suite must be an explicit, reviewed change: " + ($shrunk -join " | "))
@@ -225,6 +311,14 @@ for ($i = 0; $i -lt $entries.Count; $i++) {
     }
     [void]$text.Append("        }" + $comma0 + $nl)
   }
+  [void]$text.Append("      }," + $nl)
+  [void]$text.Append("      " + $q + "data" + $q + ": {" + $nl)
+  $dkeys = @($entry.data.Keys | Sort-Object)
+  for ($j = 0; $j -lt $dkeys.Count; $j++) {
+    $comma = [string][char]44
+    if ($j -eq $dkeys.Count - 1) { $comma = "" }
+    [void]$text.Append("        " + (Json-String $dkeys[$j]) + ": " + (Json-String $entry.data[$dkeys[$j]]) + $comma + $nl)
+  }
   [void]$text.Append("      }" + $nl)
   [void]$text.Append("    }")
   if ($i -lt $entries.Count - 1) { [void]$text.Append(",") }
@@ -246,5 +340,5 @@ foreach ($entry in $entries) {
     $methodCount += @($entry.methods[$cls].Keys).Count
     foreach ($m in $entry.methods[$cls].Keys) { $caseCount += [int]$entry.methods[$cls][$m] }
   }
-  "$($entry.suite): total=$($entry.expected) classes=$(@($entry.classes.Keys).Count) methods=$methodCount cases=$caseCount"
+  "$($entry.suite): total=$($entry.expected) classes=$(@($entry.classes.Keys).Count) methods=$methodCount cases=$caseCount data=$(@($entry.data.Keys).Count)"
 }
