@@ -121,3 +121,37 @@ grep -n 'Floor = ' .github/workflows/windows-ci.yml
 把无 BOM 的 UTF-8 当 ANSI 解码，中文损坏、字符串截断，`ConvertFrom-Json` 报 `Invalid array passed in`。
 文件本身是合法 UTF-8（node 的 `JSON.parse` 通过），坏的只是 PS 5.1 的读取路径。
 ⇒ **基线文件刻意保持纯 ASCII**，理由写在 `_comment` 里。
+
+### 6.1 基线自身的校验（2026-10-30 追加）
+
+第一版基线只做「实际数 vs 期望数」比较，`expected` 字段没有任何约束。实测发现：
+
+| baseline expected | 实际执行 | 结果 |
+| --- | --- | --- |
+| 0 | 5 例 | **绿**（`total >= 0` 恒成立） |
+| -5 | 1 例 | **绿** |
+
+也就是说：只要有人把基线写成 0（复制粘贴、误删、脚本生成），门禁就退回形同虚设且无提示。
+**保护机制的配置本身也需要被保护。**
+
+现在 `expected` 必须是正整数，`file` / `suite` 不能为空，TRX 缺 `ResultSummary/Counters` 会报明确错误
+（而不是让 `[int]$null` 变成 0 再报一个误导性的 dropped-cases）。
+
+**一个只有真跑 PowerShell 才暴露的坑**：`"$baselinePath: ..."` 里的 `$baselinePath:` 会被解析成
+驱动器限定符（像 `D:`），报 `Variable reference is not valid` 并让整个脚本解析失败 —— 必须写 `${baselinePath}:`。
+光看 YAML 完全看不出来。
+
+完整边界矩阵（全部实跑）：
+
+| 场景 | 期望 | 实测 |
+| --- | --- | --- |
+| 1920 / 104 正常 | 绿 | GREEN |
+| total = 0（跑了个空） | 红 | RED |
+| baseline expected = 0 | 红 | RED |
+| baseline expected = -5 | 红 | RED |
+| TRX 缺 Counters | 红 | RED |
+| 基线文件缺失 | 红 | RED |
+| 增长 1921 | 绿 + warning | GREEN |
+| 有 failed | 红 | RED |
+| 少 1 例 1919 | 红 | RED |
+| 丢 1520 例 400 | 红 | RED |
