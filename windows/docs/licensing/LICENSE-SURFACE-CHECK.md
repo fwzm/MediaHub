@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-29 项检查分九组：
+30 项检查分十组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -56,6 +56,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 工具链（W33 + W34 起） | `sdk-pin-matches-report` | 报告不是由仓库根 `global.json` 钉住的 SDK 生成的——SBOM 与全部实测证据必须出自同一条工具链；另见 §3.2（关修剪使还原图在任何机器上一致） |
 | 通告文档（W35 起） | `notices-inventory`、`notices-declarations` | 入库的 `THIRD-PARTY-NOTICES.md` 与「当场解析出的依赖图」或「csproj 里直接声明的包」不再对得上（漏包、版本/许可漂移、新增依赖没写进法律文档） |
 | 引擎候选身份（W36 起） | `lgpl-candidate-hashes`、`lgpl-candidate-claims` | 入库的 LGPL 候选 DLL 与 `windows/engine/lgpl/dist/dist-hashes.txt` 的记录不符；或十一个引用候选身份的文档/常量写着别的构建（字节数或 sha256 对不上） |
+| 引擎能力（W37 起） | `vulkan-claims` | 候选件忽然带上 Vulkan、`MpvPlayer` 不再把 `gpu-api` 钉成 `d3d11`、`windows/src` 下出现 vulkan 字样，或 `VULKAN-NECESSITY.md` 丢了 verdict 行——许可证决策依赖的「Vulkan 非必需」结论不能悄悄过期 |
 
 `lgpl-licence-gaps` 默认是 **WARN**：`component-licences.txt` 里没有声明的 5 个 MSYS2 包（`libwinpthread-1`、`libpcre2-8-0`、`libintl-8`、`libexpat-1`、`libbz2-1`）是**已知缺口**，默认 flavour 不随包分发它们。要在「切 LGPL 发布前」把缺口当硬门，加 `-FailOnLicenceGaps`。
 
@@ -126,6 +127,25 @@ W32 的三检首次随 CI 跑就抓到两件事，都不是「SBOM 写错了」�
 - 记录里多写一个不存在的 `ghost.dll` → 恰好 1 红（absent）；同一检查对 `libmpv-2.dll` 自身仍 PASS。
 - 改动一份 DLL 副本、并把记录同步改成新 sha（哈希检查过）→ 恰好 1 红（`lgpl-candidate-claims`，十一处引用全部对不上）。
 
+### 3.5 引擎能力与 Vulkan 结论（W37，2026-10-31）
+
+许可证决策依赖一条能力判断：**产品不请求 Vulkan，候选件也不提供 Vulkan**。这条判断的两半都可能悄悄变（默认设置改了、候选件重建时把 Vulkan 编进去、结论文件被删），因此把它钉住：
+
+| 检查 | 判据 | 失败含义 |
+| --- | --- | --- |
+| `vulkan-claims` | ① `windows/engine/lgpl/mpv-lgpl-features.txt` 记录的特性表必须仍含 `d3d11`、`d3d-hwaccel`、`libplacebo`，且**不含** `vulkan`；② `windows/src/MediaHub.Player.Mpv/MpvPlayer.cs` 必须仍把 `gpu-api` 钉成 `d3d11`；③ `windows/src` 下任何 `.cs` 不得出现 vulkan 字样；④ `windows/docs/licensing/VULKAN-NECESSITY.md` 必须存在且保留 `verdict:` / `capability-delta:` 两行 | 候选件忽然带上 Vulkan、产品改为请求 Vulkan、或结论文件丢了——许可证面上「Vulkan 非必需」的说法不再成立，需要重新评估 |
+
+`-EngineFeaturePath` / `-PlayerSourcePath` / `-VulkanDocPath` / `-SourceRootPath` 各自把上述输入指到别处（相对路径按仓库根解析，跨出仓库要写 `../../`；绝对路径会被拼到仓库根下，是上一轮踩过的坑），负向对照用它指向临时副本：
+
+- 特性表副本里加一个 `vulkan` token → 恰好 1 红（候选件现在自称有 Vulkan）。
+- 特性表副本里删掉 `d3d11`（或 `libplacebo`）token → 恰好 1 红（候选件不再提供产品要用的能力）。
+- `MpvPlayer.cs` 副本把 `gpu-api` 改成 `vulkan` → 恰好 1 红（产品改为请求 Vulkan）。
+- 独立源码目录里放一个含 vulkan 字样的 `.cs` → 恰好 1 红（源码面出现 Vulkan 依赖）。
+- 结论文件副本删掉 `verdict:` 行 → 恰好 1 红（结论行丢失）。
+- 特性表路径不存在 → 该项 SKIP、退出码 0（「记录缺失」不等于「结论错」）。
+
+两半的来源、GPL 基线对照与维护者决策清单（A 接受并记录 / B 修 meson 探测重建 / C 保持 GPL 基线默认）见 [VULKAN-NECESSITY.md](VULKAN-NECESSITY.md)；当场复测用 `windows/tools/probe-engine-capabilities.ps1`。
+
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
 ```text
@@ -194,6 +214,16 @@ RESULT: PASS
 ```
 
 （入库候选件 `libmpv-2.dll` 与 `mpv.exe` 都与 `dist-hashes.txt` 一致，十一处引用也都写着同一个构建 ⇒ 此刻是新鲜的；W36 的价值是让「换包/改文档」在未来红掉。报告用 W34 生成的那份：`projects=13 rows=49 packages=29 violations=0 warnings=3`。缺报告时这两项不 SKIP，照常 PASS，见 §3.3 的 `-JsonPath` 对照。）
+
+### 4.5 实测（2026-10-31，W37，本机）
+
+`BT`text
+check-licence-surface  checks=30 failed=0 warnings=2 skipped=0
+check-licence-surface  PASS  vulkan-claims  the candidate still advertises d3d11/d3d-hwaccel/libplacebo without vulkan (28 features), the player still pins gpu-api=d3d11, and no .cs under windows/src mentions vulkan
+RESULT: PASS
+`BT`
+
+（`warnings=2` 是本机这一跑里 `git` 不在进程 PATH 上，`sbom-source-revision` 因此降为 WARN；CI 的完整克隆里它是硬门。候选件的能力面另由 `windows/tools/probe-engine-capabilities.ps1` 当场探测：`gpu-api` 只列 `auto, d3d11, opengl`，`gpu-context` 只列 `auto, d3d11, win, dxinterop`，`vo` 含 `gpu-next`，特性表 28 项不含 `vulkan` ⇒ 产品要的每一项都在，Vulkan 确实缺，结论与实现一致。）
 
 ## 5. 这个工具**不**覆盖什么
 

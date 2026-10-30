@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Five things rot silently in a licence deliverable:
+    Eight things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -14,8 +14,10 @@
          the report moves with it, and docs/sbom-windows.cdx.json keeps describing the old set.
       7. the tracked LGPL candidate binary is replaced, or the digest quoted in ten documents and in
          the report generator goes stale - nothing compared those quotes with the bytes on disk.
+      8. the engine capability assessment drifts: the candidate starts advertising Vulkan, the player stops
+         pinning gpu-api=d3d11, or the verdict in windows/docs/licensing/VULKAN-NECESSITY.md is lost.
 
-    This script checks those seven surfaces without touching the network, the build, or the
+    This script checks those eight surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -49,6 +51,10 @@ param(
     [string] $SbomPath,
     [string] $LgplCompliancePath,
     [string] $EngineDistPath,
+    [string] $EngineFeaturePath,
+    [string] $PlayerSourcePath,
+    [string] $VulkanDocPath,
+    [string] $SourceRootPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -542,6 +548,55 @@ else {
     }
 }
 # --- summary ----------------------------------------------------------------------------------
+# The licence decision for the LGPL engine rests on one capability claim: the product never asks for a
+# Vulkan surface and the candidate build does not advertise one. Both halves can rot - a settings
+# default changes, the candidate is rebuilt with Vulkan, or the verdict file disappears - so the claim
+# is pinned to the artefacts that carry it. See windows/docs/licensing/VULKAN-NECESSITY.md.
+$vulkanDocFile = Resolve-RepoPath -Path $VulkanDocPath -Default 'windows/docs/licensing/VULKAN-NECESSITY.md'
+$engineFeatureFile = Resolve-RepoPath -Path $EngineFeaturePath -Default 'windows/engine/lgpl/mpv-lgpl-features.txt'
+$playerSourceFile = Resolve-RepoPath -Path $PlayerSourcePath -Default 'windows/src/MediaHub.Player.Mpv/MpvPlayer.cs'
+$vulkanProblems = @()
+if (-not (Test-Path -LiteralPath $engineFeatureFile)) {
+    Add-Check 'vulkan-claims' 'SKIP' ('the recorded engine feature list is absent (' + $engineFeatureFile + '), so the candidate side of the Vulkan claim cannot be checked here')
+}
+else {
+    $engineFeatureText = [string](Get-Content -LiteralPath $engineFeatureFile -Raw)
+    $featureMatch = [regex]::Match($engineFeatureText, 'List of enabled features:\s*(?<list>[^\r\n]+)')
+    $engineFeatures = @()
+    if ($featureMatch.Success) {
+        $engineFeatures = @($featureMatch.Groups['list'].Value.Trim() -split '\s+' | Where-Object { $_.Length -gt 0 })
+    }
+    if ($engineFeatures.Count -eq 0) { $vulkanProblems += 'the recorded feature list could not be parsed' }
+    foreach ($needed in @('d3d11', 'd3d-hwaccel', 'libplacebo')) {
+        if ($engineFeatures -notcontains $needed) { $vulkanProblems += ('the candidate no longer advertises ' + $needed) }
+    }
+    if ($engineFeatures -contains 'vulkan') { $vulkanProblems += 'the candidate now advertises vulkan, so the capability delta recorded in VULKAN-NECESSITY.md no longer holds' }
+    $sourceRoot = Resolve-RepoPath -Path $SourceRootPath -Default 'windows/src'
+    $sourceMentions = @()
+    if (Test-Path -LiteralPath $sourceRoot) {
+        $sourceMentions = @(Get-ChildItem -LiteralPath $sourceRoot -Recurse -Filter '*.cs' -File | Where-Object {
+            ([string](Get-Content -LiteralPath $_.FullName -Raw)).ToLowerInvariant().Contains('vulkan')
+        } | ForEach-Object { $_.FullName.Substring($RepoRoot.Length + 1) })
+    }
+    if ($sourceMentions.Count -gt 0) { $vulkanProblems += ('the product source now mentions vulkan [' + (Format-NameList $sourceMentions) + ']') }
+    $playerText = ''
+    if (Test-Path -LiteralPath $playerSourceFile) { $playerText = [string](Get-Content -LiteralPath $playerSourceFile -Raw) }
+    if (-not ([regex]::IsMatch($playerText, 'Opt\(\s*"gpu-api"\s*,\s*"d3d11"\s*\)'))) { $vulkanProblems += 'MpvPlayer no longer pins gpu-api=d3d11' }
+    $docText = ''
+    if (Test-Path -LiteralPath $vulkanDocFile) { $docText = [string](Get-Content -LiteralPath $vulkanDocFile -Raw) }
+    if ($null -eq $docText) { $docText = '' }
+    if ($docText -eq '') { $vulkanProblems += 'windows/docs/licensing/VULKAN-NECESSITY.md is missing' }
+    else {
+        if (-not ([regex]::IsMatch($docText, '(?m)^\s*verdict:\s*not-required-by-the-product-path\s*$'))) { $vulkanProblems += 'VULKAN-NECESSITY.md lost its verdict line' }
+        if (-not ([regex]::IsMatch($docText, '(?m)^\s*capability-delta:\s*lgpl-candidate-lacks-vulkan\s*$'))) { $vulkanProblems += 'VULKAN-NECESSITY.md lost its capability-delta line' }
+    }
+    if ($vulkanProblems.Count -eq 0) {
+        Add-Check 'vulkan-claims' 'PASS' ('the candidate still advertises d3d11/d3d-hwaccel/libplacebo without vulkan (' + $engineFeatures.Count.ToString() + ' features), the player still pins gpu-api=d3d11, and no .cs under windows/src mentions vulkan')
+    }
+    else {
+        Add-Check 'vulkan-claims' 'FAIL' ($vulkanProblems.Count.ToString() + ' claim(s) drifted: ' + (Format-NameList $vulkanProblems) + ' - update windows/docs/licensing/VULKAN-NECESSITY.md and the measurement together')
+    }
+}
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })
 $skipped = @($checks | Where-Object { $_.outcome -eq 'SKIP' })

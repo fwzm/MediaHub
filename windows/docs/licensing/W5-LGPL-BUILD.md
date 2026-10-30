@@ -178,14 +178,14 @@ shaders through SPIRV-Cross for D3D11 (visible in the log as generated HLSL).
 | x264/x265 **encoders** | yes | **no** | GPL-only; not used by MediaHub |
 | DVD-Video/DVD-Audio, audio CD, DVB | yes | **no** | GPL-only; not used |
 | d3d9 (vo=direct3d) | yes | **no** | GPL-gated; MediaHub uses gpu-next |
-| Vulkan context | yes | **no** | *not* a licence issue — see below |
+| Vulkan context | yes | **no** | *not* a licence issue — see below and [VULKAN-NECESSITY.md](VULKAN-NECESSITY.md) |
 | lua/js scripting, rubberband, libarchive, bluray, sixel, vapoursynth, zimg | yes | no | unused |
 
 **Vulkan is missing for a mundane build reason, not a licence one:** meson found the loader
 (vulkan 1.4.363) but the header probe 'symbol VK_VERSION_1_3 in vulkan/vulkan_core.h' returned
 **NO**, so mpv compiled the feature out. MediaHub drives gpu-context=d3d11, which is verified
 working, so this is not currently a product regression — but 'vulkan' is a capability the GPL build
-had and the LGPL build does not, and it should be closed before this engine replaces the baseline.
+had and the LGPL build does not, and it should be closed before this engine replaces the baseline. That assessment now exists (W37, 2026-10-31): MediaHub hard-wires gpu-api=d3d11 and defaults gpu-context=d3d11, so Vulkan is on no shipped path and the candidate is not degraded there; whether to close the delta before a switch is decision B in VULKAN-NECESSITY.md section 5, and the default flavour stays unchanged.
 
 ---
 
