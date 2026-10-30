@@ -102,6 +102,14 @@ jobs:
           if (-not (Test-Path $baselinePath)) { throw "missing $baselinePath - the suite baseline is required" }
           $baseline = Get-Content $baselinePath -Raw | ConvertFrom-Json
           if (-not $baseline.suites -or @($baseline.suites).Count -eq 0) { throw "$baselinePath lists no suites" }
+          # A baseline of 0 (or a negative/garbage value) would make this gate vacuous: total >= 0 always holds,
+          # so a suite that lost everything would still pass. Validate the configuration itself before trusting it.
+          foreach ($e in $baseline.suites) {
+            $declared = [int]$e.expected
+            if ($declared -lt 1) { throw "${baselinePath}: expected for $($e.suite) is $declared - must be a positive integer, otherwise the gate cannot fail" }
+            if ([string]::IsNullOrWhiteSpace($e.file)) { throw "${baselinePath}: an entry has no file" }
+            if ([string]::IsNullOrWhiteSpace($e.suite)) { throw "${baselinePath}: an entry has no suite name" }
+          }
 
           $all = 0
           $stale = @()
@@ -109,6 +117,7 @@ jobs:
             $path = Join-Path ./artifacts/test-results $e.file
             if (-not (Test-Path $path)) { throw "no test results for $($e.suite): $($e.file) was not produced" }
             $xml = [xml](Get-Content $path -Raw)
+            if (-not $xml.TestRun.ResultSummary.Counters) { throw "$($e.file) has no ResultSummary/Counters - the test run may not have completed" }
             $total = [int]$xml.TestRun.ResultSummary.Counters.total
             $failed = [int]$xml.TestRun.ResultSummary.Counters.failed
             $skipped = [int]$xml.TestRun.ResultSummary.Counters.notExecuted
