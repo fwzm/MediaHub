@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-33 项检查分十三组：
+35 项检查分十四组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -58,6 +58,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 引擎候选身份（W36 起） | `lgpl-candidate-hashes`、`lgpl-candidate-claims` | 入库的 LGPL 候选 DLL 与 `windows/engine/lgpl/dist/dist-hashes.txt` 的记录不符；或十一个引用候选身份的文档/常量写着别的构建（字节数或 sha256 对不上） |
 | 引擎能力（W37 起） | `vulkan-claims` | 候选件忽然带上 Vulkan、`MpvPlayer` 不再把 `gpu-api` 钉成 `d3d11`、`windows/src` 下出现 vulkan 字样，或 `VULKAN-NECESSITY.md` 丢了 verdict 行——许可证决策依赖的「Vulkan 非必需」结论不能悄悄过期 |
 | 引擎许可声明（W38 起） | `lgpl-licence-table` | LGPL flavour 的 33 个 DLL 与 `component-licences.txt` 的逐行声明对不上（表被改坏、缺行、证据行号指到别处），或装出来的文件清单与报告行数不符 |
+| LGPL 合规声明（W41 起） | `lgpl-compliance-block`、`lgpl-compliance-baseline` | 文档 §5.1 的机器可读组件表与解析图不再一一对应（漏包/多包/许可漂移），或 §1 的 GPL 基线摘要与报告解析值分叉（pin 换引擎后文档没跟上） |
 | 分发与签名（W39 起） | `packaging-claims` | 发布形态、签名、安装方式与 `PACKAGING.md` §0 七行不符：CI 开始签名、仓库出现 `*.appxmanifest` 或 WiX/Inno/NSIS 工程、App 不再是 unpackaged self-contained portable、`windows-ci.yml` 丢了 portable publish/上传步骤（构建输出 `obj/`、`bin/`、`artifacts/` 不计） |
 | 包内许可文件（W40 起） | `package-licence-staging` | 发布树不再真的带 `licences/` 的六个文档 + digest manifest：暂存脚本被删、清单缩水、manifest 摘要与字节不符、或 CI 不再调用它（该检查把脚本重跑到临时树，不读文档） |
 
@@ -209,6 +210,20 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 随包，仓库自身也没有 `LICENSE` 文件；两者属于许可证决策（`LICENCE-DECISION.md`），不由暂存步骤决定，
 `MANIFEST.txt` 的表头已把这一点写进包内。
 
+### 3.9 LGPL 合规说明的组件与基线（W41，2026-10-31）
+
+`windows/docs/LGPL-COMPLIANCE.md` 是分发前必读的那份文档：它同时描述 GPL 基线与 LGPL 候选、引引擎摘要、列第三方许可。W38 修好了底表、W36 钉住了候选摘要，但没人比对该文档自己的组件清单与解析图，也没人复查 GPL 基线声明会在 pin 更新后失效。两项新检查补上：
+
+| 检查 | 判据 | 失败含义 |
+| --- | --- | --- |
+| `lgpl-compliance-block` | 该文档 §5.1 的机器可读块（`<!-- BEGIN component-licence-table` … `<!-- END component-licence-table`，26 行「组件 → 许可」）必须与 `license-report.json` 的依赖行一一对应：少一个组件、多一个组件、或任一许可串不同即 FAIL | 随包组件清单与真实解析图分叉 ⇒ 分发前读的许可清单是错的 |
+| `lgpl-compliance-baseline` | §1 必须仍引用报告解析出的 GPL 基线：`windows/native/libmpv/libmpv-2.dll`、千分位字节数、`pinnedSha256`、引擎版本串；报告带 `nativeEngine` 时逐项比对，报告缺该记录 ⇒ SKIP | pin 换引擎后文档继续宣称旧摘要 ⇒ 用户看到的二进制身份是过期的 |
+
+说明：
+- 比对前把许可串归一化（合并空白、大小写不敏感），因为表格里的作用域写法（如 `documentation:`）与大小写各不相同。
+- 候选件本身不走这两项：它的字节与十一个引用点由 §3.4 的 `lgpl-candidate-hashes` / `lgpl-candidate-claims` 负责。
+- 负向对照六条（各恰好 1 红，均用临时文档/报告副本，不改仓库文件）：① 块里把 `libiconv` 许可改回 `GPL-3.0-or-later`；② 删 `pcre2` 行；③ 加 `phantom-package` 幻影行；④ §1 的 sha256 换成 40 位悬空值；⑤ §1 的字节数改成 `120,989,700`；⑥ 报告副本删掉 `nativeEngine` ⇒ 该项 SKIP，但既有的 `report-engine-pin` 仍会红，故整次退出码仍为 1。
+
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
 ```text
@@ -344,6 +359,19 @@ RESULT: PASS
 - `-StageScriptPath` 指向不存在的文件 → 1 红（暂存脚本不在）。
 - `-WorkflowsPath` 指向缺 `stage-licence-files.ps1` 的 `windows-ci.yml` → 1 红（CI 不再暂存）。
 - `PACKAGING.md` 副本少了 `licence-files-in-package: staged-by-ci` 行 → 1 红（`packaging-claims`）。
+
+### 4.9 实测（2026-10-31，W41，本机，HEAD 893f510d）
+
+```
+pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath D:/mh-verify/w38-license/license-report.json
+check-licence-surface  PASS  lgpl-compliance-block  the machine-readable component table in LGPL-COMPLIANCE.md matches the resolved dependency graph (26 component row(s), 26 resolved component(s))
+check-licence-surface  PASS  lgpl-compliance-baseline  section 1 still quotes the GPL baseline the report resolved (windows/native/libmpv/libmpv-2.dll, 120,989,696 B, 6a48faec..., v0.41.0-1154-gec38361c5)
+check-licence-surface  checks=35 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+- 文档侧同步补齐的真实漂移：§5 的逐组件清单还停在 W38 之前——缺 5 个包（libwinpthread-git、pcre2、expat、bzip2、gettext-runtime），且把 `libiconv` 写成 GPL-3.0-or-later；§5「两处需要人工确认」第 1 条已改写为 W38 已核实。新的 §5.1 把 26 个随包组件的「组件 → 许可」做成机器可读块，交由 `lgpl-compliance-block` 钉住。
+- 六条负向对照见 §3.9。
 
 ## 5. 这个工具**不**覆盖什么
 

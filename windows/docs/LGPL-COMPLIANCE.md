@@ -86,12 +86,48 @@ libmpv 及其依赖组件的完整源码、以及生成随包二进制的构建�
 
 ## 5. 第三方组件许可与残留风险
 
-- 逐组件清单：`windows/engine/lgpl/component-licences.txt`（libass ISC、libplacebo LGPL-2.1、shaderc/spirv-cross/vulkan-loader Apache-2.0、glslang BSD-3-Clause、freetype GPL-2.0-or-later OR FTL、harfbuzz MIT、fribidi/glib2/graphite2 LGPL-2.1-or-later、lcms2 MIT AND GPL-3.0-or-later、libdovi MIT、libunibreak Zlib、libpng custom、brotli MIT、zlib Zlib、libiconv GPL-3.0-or-later、libgcc/libstdc++ GPL-3.0-or-later WITH GCC-exception-3.1、libjpeg-turbo BSD-like、libtiff MIT、libwebp BSD-3-Clause、giflib MIT、lerc Apache-2.0、libdeflate MIT、jbigkit GPL-2.0）。
-- **两处需要人工确认**（W5-LGPL-BUILD.md:226-235）：
-  - `libiconv-2.dll`：MSYS2 对**包**声明 GPL-3.0-or-later，而 GNU libiconv 的**库**是 LGPL-2.1-or-later（GPL 只覆盖 `iconv` 程序）。随包的是 DLL，主张成立但**必须核实**并留证。
+- 逐组件清单：`windows/engine/lgpl/component-licences.txt`（33 个包的许可声明；归到随包的 26 个组件：FFmpeg（自建，LGPL-2.1-or-later）、libass ISC、libplacebo LGPL2.1、shaderc/spirv-cross/vulkan-loader Apache-2.0、freetype GPL-2.0-or-later OR FTL、harfbuzz MIT、fribidi/glib2/graphite2 LGPL-2.1-or-later、lcms2 MIT AND GPL-3.0-or-later、libdovi MIT、libunibreak Zlib、libpng custom、brotli MIT、zlib Zlib、libiconv LGPL-2.1-or-later documentation:GPL-3.0-or-later、libgcc/libstdc++ GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later、libwinpthread-git MIT AND BSD-3-Clause-Clear、bzip2 custom、expat MIT、gettext-runtime GPL-3.0-or-later AND LGPL-2.1-or-later、pcre2 BSD-3-Clause）。另有 8 个包（glslang、libjpeg-turbo、libtiff、libwebp、giflib、lerc、libdeflate、jbigkit）只在 pacman 依赖闭包内、不随包，仅作上游参考。
+- **两处曾需人工确认**（W5-LGPL-BUILD.md:226-235；其一已由 W38 重收集解决）：
+  - `libiconv-2.dll`：**已核实（W38，2026-10-31）**——重收集后 MSYS2 对包的声明是 `LGPL-2.1-or-later  documentation:GPL-3.0-or-later`（库为 LGPL-2.1-or-later，GPL 只覆盖文档与 `iconv` 程序），与 GNU libiconv 的库许可一致；原「包声明 GPL」的说法来自旧表，已不再成立。
   - `liblcms2-2.dll`：MSYS2 声明 `MIT AND GPL-3.0-or-later`，lcms2 上游是 MIT。需确认随包 DLL 对应的上游许可，不能默认「MIT 就够」。
 - `jbigkit`（GPL-2.0）在 pacman 依赖闭包里但**不在运行时闭包**，不随包；一旦打包方式变化必须重新核对。
 - `freetype` 走 FTL 选项（宽松分支），不是 GPL 分支。
+### 5.1 机器可读组件许可（CI 核对）
+
+下表是**随包**组件（33 个 DLL 归到 26 个组件；FFmpeg 由 `build-ffmpeg-lgpl.sh` 自建，许可取其 configure 自报的 LGPL-2.1-or-later）与 `windows/engine/lgpl/component-licences.txt` 的现行声明。`check-licence-surface.ps1` 的 `lgpl-compliance-block` 检查把这个表与 `license-report.json` 的依赖行逐条比对：少一个组件、多一个组件、或任一许可串与解析图不同即 FAIL；同一脚本的 `lgpl-compliance-baseline` 检查本文件 §1 引的 GPL 基线（文件、大小、sha256、版本）是否仍等于报告解析出的值。
+
+`component-licences.txt` 里另有 8 个包（glslang、libjpeg-turbo、libtiff、libwebp、giflib、lerc、libdeflate、jbigkit）只在 pacman 依赖闭包内、不随包，故**不在下表**。
+
+<!-- BEGIN component-licence-table (checked by check-licence-surface.ps1) -->
+component | licence
+brotli | MIT
+bzip2 | custom
+expat | MIT
+FFmpeg (libav*) | LGPL-2.1-or-later
+fontconfig | custom
+freetype | GPL-2.0-or-later OR FTL
+fribidi | LGPL-2.1-or-later
+gettext-runtime | GPL-3.0-or-later AND LGPL-2.1-or-later
+glib2 | LGPL-2.1-or-later
+graphite2 | LGPL-2.1-or-later
+harfbuzz | MIT
+lcms2 | MIT AND GPL-3.0-or-later
+libass | ISC
+libdovi | MIT
+libgcc | GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later
+libiconv | LGPL-2.1-or-later  documentation:GPL-3.0-or-later
+libplacebo | LGPL2.1
+libpng | custom
+libstdc++ | GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later
+libunibreak | Zlib
+libwinpthread-git | MIT AND BSD-3-Clause-Clear
+pcre2 | BSD-3-Clause
+shaderc | Apache-2.0
+spirv-cross | Apache-2.0
+vulkan-loader | Apache-2.0
+zlib | Zlib
+<!-- END component-licence-table -->
+
 
 ---
 

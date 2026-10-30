@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Eleven things rot silently in a licence deliverable:
+    Twelve things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -24,8 +24,10 @@
      11. the published package stops carrying licence text: the staging step is dropped from
           windows-ci.yml, the set shrinks, or a digest in the generated manifest stops matching the
           bytes - PACKAGING.md section 1 and SBOM.md section 4.1 both recorded zero licence files.
+     12. the LGPL compliance note rots: its component-licence table stops matching the resolved
+         dependency graph, or section 1 keeps quoting an engine baseline the pin moved away from.
 
-    This script checks those eleven surfaces without touching the network, the build, or the
+    This script checks those twelve surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -863,6 +865,128 @@ else {
     }
 }
 
+# --- 12. the LGPL compliance note component table and engine baseline --------------------------
+# windows/docs/LGPL-COMPLIANCE.md is the document a distributor reads before shipping: it names both
+# engines, quotes the GPL baseline digest, and lists the third-party licences. W38 fixed the
+# underlying table and W36 pinned the candidate digest, but nothing compared the compliance note own
+# component list with the resolved dependency graph, and nothing re-checked the GPL baseline claim
+# after a pin update. Two checks close that.
+function Get-NormalizedText {
+    param([string] $Value)
+    return (($Value -replace '\s+', ' ').Trim().ToLowerInvariant())
+}
+if (-not (Test-Path -LiteralPath $complianceFile)) {
+    Add-Check 'lgpl-compliance-block' 'SKIP' ('the compliance note is absent at ' + $complianceFile)
+    Add-Check 'lgpl-compliance-baseline' 'SKIP' ('the compliance note is absent at ' + $complianceFile)
+}
+else {
+    $complianceText = [string](Get-Content -LiteralPath $complianceFile -Raw)
+
+    # 12a. the machine-readable component table must describe exactly the resolved shipped set
+    if (-not $report -or -not $report.lgplFlavour) {
+        Add-Check 'lgpl-compliance-block' 'SKIP' 'no parsed report, so the component table cannot be compared with the resolved graph'
+    }
+    else {
+        $resolvedComponents = [ordered]@{}
+        $resolvedConflicts = @()
+        foreach ($dependency in @($report.lgplFlavour.dependencies)) {
+            if (-not $dependency) { continue }
+            $componentName = [string]$dependency.component
+            $componentLicence = [string]$dependency.license
+            if ($componentName -eq '') { continue }
+            if (-not $resolvedComponents.Contains($componentName)) { $resolvedComponents[$componentName] = $componentLicence }
+            elseif ((Get-NormalizedText $resolvedComponents[$componentName]) -ne (Get-NormalizedText $componentLicence)) {
+                $resolvedConflicts += ($componentName + ' resolves to two different licences: ' + $resolvedComponents[$componentName] + ' / ' + $componentLicence)
+            }
+        }
+        $complianceBlockProblems = @()
+        $blockBeginMarker = '<!-- BEGIN component-licence-table'
+        $blockEndMarker = '<!-- END component-licence-table'
+        $blockBeginIndex = $complianceText.IndexOf($blockBeginMarker, [System.StringComparison]::Ordinal)
+        $blockEndIndex = $complianceText.IndexOf($blockEndMarker, [System.StringComparison]::Ordinal)
+        $blockRowCount = 0
+        if ($blockBeginIndex -lt 0 -or $blockEndIndex -lt $blockBeginIndex) {
+            $complianceBlockProblems += 'the component-licence-table markers were not found (add the machine-readable block to section 5 of the compliance note)'
+        }
+        else {
+            $blockBody = $complianceText.Substring($blockBeginIndex + $blockBeginMarker.Length, $blockEndIndex - ($blockBeginIndex + $blockBeginMarker.Length))
+            $blockRows = [ordered]@{}
+            foreach ($blockLine in @($blockBody -split '\r?\n')) {
+                $trimmedLine = ([string]$blockLine).Trim()
+                if ($trimmedLine -eq '') { continue }
+                if ($trimmedLine.Contains('-->')) { continue }
+                if ($trimmedLine -eq 'component | licence') { continue }
+                $cells = @($trimmedLine -split '\s*\|\s*')
+                if ($cells.Count -lt 2) { $complianceBlockProblems += ('the block line [' + $trimmedLine + '] is not a component-or-licence row'); continue }
+                $rowName = ([string]$cells[0]).Trim()
+                $rowLicence = ([string](@($cells[1..($cells.Count - 1)]) -join ' | ')).Trim()
+                if ($blockRows.Contains($rowName)) { $complianceBlockProblems += ('the block lists ' + $rowName + ' twice') }
+                $blockRows[$rowName] = $rowLicence
+            }
+            $blockRowCount = $blockRows.Count
+            foreach ($componentName in @($resolvedComponents.Keys)) {
+                if (-not $blockRows.Contains($componentName)) { $complianceBlockProblems += ('the block does not list ' + $componentName); continue }
+                if ((Get-NormalizedText $blockRows[$componentName]) -ne (Get-NormalizedText $resolvedComponents[$componentName])) {
+                    $complianceBlockProblems += ($componentName + ' is listed as [' + $blockRows[$componentName] + '] but the resolved graph says [' + $resolvedComponents[$componentName] + ']')
+                }
+            }
+            foreach ($rowName in @($blockRows.Keys)) {
+                if (-not $resolvedComponents.Contains($rowName)) { $complianceBlockProblems += ('the block lists ' + $rowName + ', which is not a shipped LGPL-flavour component') }
+            }
+            foreach ($conflict in $resolvedConflicts) { $complianceBlockProblems += $conflict }
+        }
+        if ($complianceBlockProblems.Count -eq 0) {
+            Add-Check 'lgpl-compliance-block' 'PASS' ('the machine-readable component table in LGPL-COMPLIANCE.md matches the resolved dependency graph (' + $blockRowCount.ToString() + ' component row(s), ' + $resolvedComponents.Count.ToString() + ' resolved component(s))')
+        }
+        else {
+            Add-Check 'lgpl-compliance-block' 'FAIL' ($complianceBlockProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $complianceBlockProblems) + ' - update the component-licence-table block in windows/docs/LGPL-COMPLIANCE.md section 5')
+        }
+    }
+
+    # 12b. section 1 must still quote the GPL baseline the report resolved
+    $baselineBeginIndex = $complianceText.IndexOf('## 1. ', [System.StringComparison]::Ordinal)
+    $baselineEndIndex = $complianceText.IndexOf('## 2. ', [System.StringComparison]::Ordinal)
+    if (-not $report -or -not $report.nativeEngine) {
+        Add-Check 'lgpl-compliance-baseline' 'SKIP' 'the report carries no nativeEngine record, so the GPL baseline claim cannot be compared'
+    }
+    elseif ($baselineBeginIndex -lt 0 -or $baselineEndIndex -le $baselineBeginIndex) {
+        Add-Check 'lgpl-compliance-baseline' 'FAIL' 'the compliance note has no section 1 to quote the GPL baseline in'
+    }
+    else {
+        $baselineText = $complianceText.Substring($baselineBeginIndex, $baselineEndIndex - $baselineBeginIndex)
+        $engine = $report.nativeEngine
+        $complianceBaselineProblems = @()
+        $enginePath = [string]$engine.path
+        $engineSha = [string]$engine.pinnedSha256
+        $engineVersion = [string]$engine.version
+        $enginePresent = [bool]$engine.observed.present
+        $engineFormatted = ''
+        foreach ($expectedToken in @($enginePath, $engineSha)) {
+            if ($expectedToken -eq '') { continue }
+            if ($baselineText.IndexOf($expectedToken, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                $complianceBaselineProblems += ('section 1 does not quote ' + $expectedToken)
+            }
+        }
+        if ($enginePresent) {
+            $engineBytes = [int64]$engine.observed.bytes
+            $engineFormatted = $engineBytes.ToString('N0', [System.Globalization.CultureInfo]::InvariantCulture)
+            if ($baselineText.IndexOf($engineFormatted, [System.StringComparison]::Ordinal) -lt 0) {
+                $complianceBaselineProblems += ('section 1 does not quote the resolved size ' + $engineFormatted + ' B')
+            }
+        }
+        if ($engineVersion -ne '' -and $baselineText.IndexOf($engineVersion, [System.StringComparison]::Ordinal) -lt 0) {
+            $complianceBaselineProblems += ('section 1 does not quote the pinned engine version ' + $engineVersion)
+        }
+        if ($complianceBaselineProblems.Count -eq 0) {
+            $baselineDetail = $enginePath + ', ' + $engineSha.Substring(0, 8) + '... , ' + $engineVersion
+            if ($engineFormatted -ne '') { $baselineDetail = $enginePath + ', ' + $engineFormatted + ' B, ' + $engineSha.Substring(0, 8) + '..., ' + $engineVersion }
+            Add-Check 'lgpl-compliance-baseline' 'PASS' ('section 1 still quotes the GPL baseline the report resolved (' + $baselineDetail + ')')
+        }
+        else {
+            Add-Check 'lgpl-compliance-baseline' 'FAIL' ($complianceBaselineProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $complianceBaselineProblems) + ' - update windows/docs/LGPL-COMPLIANCE.md section 1 with the change')
+        }
+    }
+}
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })
 $skipped = @($checks | Where-Object { $_.outcome -eq 'SKIP' })
