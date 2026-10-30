@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-30T11:45:00+08:00",
+  "updated_at": "2026-10-30T12:05:00+08:00",
   "updated_by": "lead-W6-113-r2",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -11,7 +11,12 @@
       "status": "EXECUTED_PASS",
       "owner": "lead",
       "branch": "feature/cross-device-source-sync",
-      "evidence": ["7c2f96ca", "e6e5d534", "windows-ci:40950218318", "android-ci:40950218275"],
+      "evidence": [
+        "7c2f96ca",
+        "e6e5d534",
+        "windows-ci:40950218318",
+        "android-ci:40950218275"
+      ],
       "closed_at": "2026-10-30T04:34:00+08:00"
     },
     {
@@ -21,7 +26,10 @@
       "status": "EXECUTED_PASS",
       "owner": "lead",
       "artifact": "D:/mh-goal/lock.mjs",
-      "evidence": ["D:/mh-goal/lock-collision-test-result.json", "17/17 checks passed"],
+      "evidence": [
+        "D:/mh-goal/lock-collision-test-result.json",
+        "17/17 checks passed"
+      ],
       "notes": "资源粒度 worktree / branch / ref:origin；跨 worktree 写同一远端分支仍互斥。工具在仓库外，不污染任何 worktree。"
     },
     {
@@ -31,7 +39,12 @@
       "status": "EXECUTED_PASS",
       "owner": "lead",
       "branch": "feature/cross-device-source-sync",
-      "evidence": ["055c85c3", "windows-ci:40993937874", "MediaHub.Tests 1858/0", "negative controls 1/1/4 red, snapshot restored byte-identical"],
+      "evidence": [
+        "055c85c3",
+        "windows-ci:40993937874",
+        "MediaHub.Tests 1858/0",
+        "negative controls 1/1/4 red, snapshot restored byte-identical"
+      ],
       "notes": "该行不过 Redact：LongHexRegex 会吃掉临时目录的 32 位十六进制段，指针不可跟随。"
     },
     {
@@ -41,7 +54,11 @@
       "status": "EXECUTED_PASS",
       "owner": "lead",
       "branch": "feature/cross-device-source-sync",
-      "evidence": ["d6331139", "docs/pr-archive/PR39-BODY-ARCHIVE-20261030.md", "body 257915 -> 224584 B"],
+      "evidence": [
+        "d6331139",
+        "docs/pr-archive/PR39-BODY-ARCHIVE-20261030.md",
+        "body 257915 -> 224584 B"
+      ],
       "notes": "原文一字未删；折叠前全文 D:/mh-goal/pr39-body-before-w6113.md。"
     },
     {
@@ -51,18 +68,26 @@
       "status": "EXECUTED_PASS",
       "owner": "lead",
       "branch": "feature/cross-device-source-sync",
-      "evidence": ["docs/automation/TEST_MATRIX.md", "docs/automation/RUNLOG.md", "docs/automation/queue.json"],
-      "notes": "指令要求复用既有账本；实测仓库此前没有 queue.json / TEST_MATRIX / RUNLOG，故新建。"
+      "evidence": [
+        "4ff648e1",
+        "docs/automation/TEST_MATRIX.md",
+        "docs/automation/RUNLOG.md",
+        "docs/automation/queue.json"
+      ],
+      "notes": "仓库此前无 queue.json / TEST_MATRIX / RUNLOG，故按指令的「若不存在再建立」新建 docs/automation/。"
     },
     {
       "id": "W6-113e",
       "title": "两棵树文档口径钉住（RollingDirectoryPrefix 与测试引用）",
       "priority": "P1",
-      "status": "NOT_RUN",
-      "owner": "unassigned",
-      "blocked_by": [],
-      "next_action": "cd D:/mh-w6 && grep -n 'RollingDirectoryPrefix' windows/src/MediaHub.Net/DiagnosticsReport.cs 确认常量在位后，在 windows/docs/W14-DIAGNOSTIC-LOG-FILES.md 与 docs/android-source-sync-transfer.md §81 各补一句「该行形状由 RollingDirectoryPrefix 常量与 DiagnosticsReportTests 7 例共同钉住」。",
-      "notes": "两个文档都在另一执行者频繁改动的路径上，需先取锁再动。"
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r2",
+      "notes": "两棵树各自补一句「该行形状由 RollingDirectoryPrefix 与 7 条用例钉住」，并把 §81.3 的补记写进 W6-113 的修正与负向对照数字。",
+      "evidence": [
+        "4ff648e1",
+        "windows/docs/W14-DIAGNOSTIC-LOG-FILES.md",
+        "docs/android-source-sync-transfer.md §81.3"
+      ]
     },
     {
       "id": "W6-P1-E2E",
@@ -70,7 +95,10 @@
       "priority": "P1",
       "status": "BLOCKED",
       "owner": "unassigned",
-      "blocked_by": ["phone_gate", "idle_gate >= 1200s"],
+      "blocked_by": [
+        "phone_gate",
+        "idle_gate >= 1200s"
+      ],
       "next_action": "等维护者授予 >=1200 s 空闲窗口并明确 phone_gate 窗口后，跑 windows/tools/acceptance 下的同步页 GUI 用例与真机双端对跑。",
       "notes": "GUI_UNVERIFIED + DEVICE_UNVERIFIED。禁止自行排程，禁止用模拟器结果替代真机状态。"
     },
@@ -80,7 +108,9 @@
       "priority": "P2",
       "status": "SIGNING_BLOCKED",
       "owner": "unassigned",
-      "blocked_by": ["维护者签名决定"],
+      "blocked_by": [
+        "维护者签名决定"
+      ],
       "notes": "未经维护者决定不得声称可正式分发。"
     },
     {
@@ -89,8 +119,23 @@
       "priority": "P2",
       "status": "RELEASE_BLOCKED",
       "owner": "unassigned",
-      "blocked_by": ["维护者法务/许可决定"],
+      "blocked_by": [
+        "维护者法务/许可决定"
+      ],
       "notes": "当前 libmpv-2.dll 为 GPL-3.0-or-later，未切产品。"
+    },
+    {
+      "id": "W6-113f",
+      "title": "TEST_MATRIX 计数自纠",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r2",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "14f7fa39",
+        "Fact=1475 Theory=100 required-suite=60 实测复核"
+      ],
+      "notes": "上午写入的静态计数 1459/99 在一小时内漂成 1475/100（并行执行者新增 BackupListTests.cs），required-suite 误记 61 实际 60。除改数外补了 §5 测量命令与 grep 选项解析的坑。"
     }
   ]
 }

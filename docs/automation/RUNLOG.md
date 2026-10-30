@@ -45,3 +45,14 @@
 - 动作：新建 `docs/automation/`（本文件 + `TEST_MATRIX.md` + `queue.json`）；此前仓库只有 `HANDOFF.md`/`TASKS.md` 等叙述性文档，无机器可读队列与门禁矩阵。
 - 结果：见提交；`TEST_MATRIX.md` 每条标注 `EXECUTED` / `SOURCE_REVIEWED` / `NOT_RUN`，`queue.json` 记录任务 DAG。
 - 边界：本轮不并行改 Windows 生产代码 —— 共享 `MediaHub.Tests` 与 docs 已被另一执行者占用，并行改同文件会互相盖掉。
+
+### 11:4x–12:0x — lead（W6-113 round 2）— 账本落地与自纠
+
+- 动作：新建 `docs/automation/`（`TEST_MATRIX.md` / `RUNLOG.md` / `queue.json`）。此前后两者不存在，按指令「若不存在再建立」执行。
+- 动作：把导出契约钉回两棵树各自的文档（`W14-DIAGNOSTIC-LOG-FILES.md` 与 `docs/android-source-sync-transfer.md` §81.3）。
+- 结果：提交 `4ff648e1`（5 文件 +207）。
+- **自纠**：`TEST_MATRIX` 里我上午写的静态计数 `[Fact]` 1459 / `[Theory]` 99，同一小时复核已是 **1475 / 100**（另一执行者新增 `BackupListTests.cs`）；`--required-suite` 我记成 61 处，实测 **60**。除改正数字外，补了 §5「测量命令」与 `grep -c -- '...'` 的选项解析坑，并把这次自证写进文件本身。
+- 结果：提交 `14f7fa39`（1 文件 +27/−2）。
+- **WIP 保护实测**：提交时工作树里有另一执行者的 4 个未提交文件（`MhBackupCliCommand.cs`、`MhBackupWebDavLister.cs` 修改 + `MhBackupWebDavDeleter.cs`、`BackupDeleteTests.cs` 新增）。全程只 `git add` 自己的文件，两次提交后那 4 个文件原样留在工作树，未被误提交。
+- **推送时的漂移处置**：推送前三验（锁 / 远端 head / 在跑的 run）发现 `HEAD~2 != origin` —— 对方在我之后完成 W23（`00a6dfa8`）并一并推送，我的两个提交已随之进入远端。按纪律停下重新评估，未强推；确认 `4ff648e1`/`14f7fa39` 均在 `origin` 历史、且 diff 未被外部内容污染后释放锁。
+- 观察：本轮两次「等对方 CI 跑完再推」都是正确决策 —— W22 的 Android build 跑了约 28 分钟，若我中途推送会像上一轮那样取消它。
