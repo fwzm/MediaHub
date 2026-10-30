@@ -7,7 +7,8 @@
 > 还原落库（`import --apply`：来源与偏好写 `settings.json`）**EXECUTED_PASS**（applier 12 例 + CLI 用例 17 例 + 四条负向对照，全量 MediaHub.Tests **1822/0**）；
 > WebDAV 上传（`upload`：PUT + `--mkdir`，远端失败独立退出码 9）**EXECUTED_PASS**（上传器 11 例 + CLI 3 例 + 四条负向对照，全量 MediaHub.Tests **1836/0**）；
 > WebDAV 下载（`download`：一次 GET + 声明长度预检 + 流式上限 + 原子落盘，远端失败同样退出码 9）**EXECUTED_PASS**（下载器 12 例 + CLI 3 例 + 四条负向对照，全量 MediaHub.Tests **1851/0**）；
-> 设置页入口、播放进度/收藏落库、WebDAV 列目录/删除仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
+> WebDAV 列目录（`list`：一次 PROPFIND Depth: 1、只读只列一层、默认只列 `.mhbackup`）**EXECUTED_PASS**（14 例 + 四条负向对照各恰好 1 红，全量 MediaHub.Tests **1872/0**）；
+> 设置页入口、播放进度/收藏落库、WebDAV 删除仍 **NOT_IMPLEMENTED**；端到端「手机备份 → 电脑还原仍可用」尚未接线 **NOT_RUN**。
 
 ## 1 动机与范围
 
@@ -352,11 +353,58 @@ download --url <WebDAV 地址> --out <备份文件> [--user <账号>] [--passwor
 - 用真实 WebDAV 服务器做「上传 → 取回 → 本机还原」端到端 —— NOT_RUN（本机无可用远端，也不在无授权时启停外部服务）。
 - 设置页「备份与还原」入口里的「从 WebDAV 取回」按钮 —— NOT_IMPLEMENTED（当前只有命令行）。
 
-## 12 仍未做（如实）
+## 12 WebDAV 列目录（W22）
+
+### 12.1 缺口
+
+上传（§10）与下载（§11）都要求调用方已经知道远端文件的完整地址；现实中备份文件是「手机传上去的、名字带时间戳」，
+让人记住路径不现实。缺一个只读浏览：把目录里的文件列出来，再挑一个下载。
+
+### 12.2 列目录器（`windows/src/MediaHub.Backup/MhBackupWebDavLister.cs`，零 NuGet 依赖）
+
+- 一次 `PROPFIND`，`Depth: 1`，请求体只要四个属性：`displayname` / `resourcetype` / `getcontentlength` / `getlastmodified`。
+- 只接受 `207 Multi-Status`（也容忍 `200`）；**正文根元素必须是 `multistatus`** —— 有些服务端出错时仍回 207 但正文是 HTML 或登录页，
+  当成「空目录」会把服务端错误伪装成「远端没有备份」，所以根元素不对一律报「不是 WebDAV 列目录响应」。
+- 名称优先 `displayname`，没有就取 `href` 最后一段并做百分号解码（中文文件名在多数服务端是编码过的）。
+- 目录自己（`href` 等于请求的集合路径）不返回；返回项带 `IsCollection` / `Size`（缺失即 null）/ `LastModifiedUtc`。
+- 星期写错的 `getlastmodified`（例如把周四写成 `Wed`）严格 RFC 1123 解析会整条失败，这里丢掉星期再试一次，日期仍可信。
+- 失败原因固定：`NotHttp` / `AuthenticationFailed`（401、403）/ `NotFound`（404）/ `NotSupported`（405、501）/ `Corrupted` / `ServerError` / `Timeout` / `Network`。
+- 只读、不递归、不删除、不改远端状态；超时 60 秒。
+
+### 12.3 命令行（`list`）
+
+- `list --url <WebDAV 目录地址> [--user <账号>] [--password-env <变量名>] [--all] [--json]`。
+- 默认**只列 `.mhbackup`**（大小写不敏感），并给一行提示「加 `--all` 显示全部条目」；`--all` 连目录与其它文件一起列。
+- 文本回执：`远端备份目录：…` + 每项 `名称 · 大小 · 修改时间`（目录标 `[目录]`）+ `共 N 项（其中 M 个 .mhbackup 备份文件）`。
+- JSON：`{command:"list", ok, status, url, directories, files, backupFiles, entries:[{name,url,isCollection,bytes,lastModified}]}`。
+- 远端失败 exit 9（与 upload / download 同码），参数错误 2；口令仍只从 `MH_WEBDAV_PASSWORD` 取。
+
+### 12.4 验证
+
+| 对照 | 改动 | 红 |
+| --- | --- | --- |
+| A | 删掉 `Depth: 1` 请求头 | 1（`ItSendsOnePropfindWithDepthOneAndBasicAuth`） |
+| B | 删掉「根元素必须是 multistatus」守卫 | 1（`AnHtmlErrorPageIsReportedAsCorruptedInsteadOfAnEmptyDirectory`） |
+| C | 删掉星期容错回退 | 1（`AWeekdayTypoInTheRemoteDateDoesNotLoseTheDate`） |
+| D | 删掉默认列目录的 `--all` 提示行 | 1（`TheCommandLineListsOnlyBackupFilesByDefault`） |
+
+- `BackupListTests` 14 例；全量 `MediaHub.Tests` **1872/0**（基线 1858 已含并行写者的 W6-113 +7，本轮 +14）。
+- 四条对照每次从实现态快照（`D:/mh-verify/w22-snap/`）逐字节还原并复验：lister sha256 `1a6c48dd9e43e74668ea0c979ab09a04c45b926ee167ac9183a06323d9975fbd`、
+  cli sha256 `7aae6020641f03d892c7adcaa07f9451c28038fa5682137f6a1e13389656dbbe`。
+- 全部用例走桩 Handler（`ListStubHandler`）零联网：只钉请求形状、解析、状态映射与回执，不证明真实服务端可列目录。
+
+### 12.5 仍未做（本层之外）
+
+- 删除远端文件（不可逆，需要单独的策略与确认，不在本层做）。
+- 递归列子目录、按时间排序、分页（大目录一次全收，服务端自行截断时无法察觉）。
+- 真实 WebDAV 服务端联调 —— 本地只有桩 Handler，`SERVER_UNVERIFIED`。
+- 设置页「备份与还原」入口（列表 + 下载 + 还原串起来）—— 属 GUI，`GUI_UNVERIFIED`。
+
+## 13 仍未做（如实）
 
 - 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏仍不落库 —— NOT_IMPLEMENTED
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
 - 本机进度/收藏的写入（来源与偏好已随 `--apply` 落库）—— NOT_IMPLEMENTED
-- WebDAV 上传（§10）与下载（§11）已实现；列目录 / 删除仍 NOT_IMPLEMENTED
+- WebDAV 上传（§10）、下载（§11）、列目录（§12）已实现；删除仍 NOT_IMPLEMENTED（不可逆，留待单独策略）
 - Android 恢复计划器与 Windows 反向对照、真机与真 GUI —— DEVICE_UNVERIFIED / GUI_UNVERIFIED
 - 口令强度无最小长度约束（沿用 Android 口径）；容器未做外部安全审计

@@ -14,6 +14,8 @@ namespace MediaHub.Backup;
 /// 口令只从环境变量取，不接受命令行参数：命令行会进进程列表、命令历史和日志。
 /// import 默认只输出预览计划；带 --apply 时才把「本机能表达的来源」与「有明确等价的偏好」写进
 /// settings.json，写前留一份 .bak-<时间戳>。播放进度与收藏不落库，理由随回执给出。
+/// upload/download/list 只碰远端那一个地址：upload 只做 PUT、download 只做一次 GET、list 只做一次
+/// PROPFIND（Depth: 1），都不递归、不删除。
 /// </remarks>
 public static class MhBackupCliCommand
 {
@@ -90,6 +92,7 @@ public static class MhBackupCliCommand
             "import" => RunImport(options, output, error, environment),
             "upload" => RunUpload(options, output, error, environment, httpHandler),
             "download" => RunDownload(options, output, error, environment, httpHandler),
+            "list" => RunList(options, output, error, environment, httpHandler),
             _ => UnknownCommand(command, output, error),
         };
     }
@@ -782,6 +785,113 @@ public static class MhBackupCliCommand
     private static void WriteJson(TextWriter output, JsonObject payload)
         => output.WriteLine(payload.ToJsonString(JsonOptions));
 
+    private static int RunList(
+        Dictionary<string, string?> options,
+        TextWriter output,
+        TextWriter error,
+        Func<string, string?> environment,
+        HttpMessageHandler? httpHandler)
+    {
+        if (IsHelp(Value(options, "help") ?? string.Empty))
+        {
+            WriteUsage(output);
+            return ExitOk;
+        }
+
+        string? rawUrl = Value(options, "url");
+        if (string.IsNullOrWhiteSpace(rawUrl)) return UsageFailure(error, "list 需要 --url <WebDAV 目录地址>");
+        if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out Uri? collection))
+            return UsageFailure(error, "列目录的地址不是合法 URI：" + rawUrl);
+
+        bool asJson = Has(options, "json");
+        bool showAll = Has(options, "all");
+        string? userName = Value(options, "user");
+        string? password = ResolveRemotePassword(options, environment);
+
+        MhBackupWebDavLister.Result result;
+        try
+        {
+            result = MhBackupWebDavLister
+                .ListAsync(collection, userName, password, httpHandler)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (Exception failure) when (failure is HttpRequestException or TaskCanceledException)
+        {
+            result = new MhBackupWebDavLister.Result(
+                false,
+                0,
+                failure is TaskCanceledException ? MhBackupWebDavLister.Reasons.Timeout : MhBackupWebDavLister.Reasons.Network,
+                Array.Empty<MhBackupWebDavLister.Entry>());
+        }
+
+        if (!result.Ok)
+        {
+            if (asJson)
+            {
+                WriteJson(output, new JsonObject
+                {
+                    ["command"] = "list",
+                    ["ok"] = false,
+                    ["status"] = result.StatusCode,
+                    ["reason"] = result.Reason,
+                    ["url"] = collection.ToString(),
+                });
+            }
+
+            string label = result.StatusCode > 0 ? "（HTTP " + result.StatusCode + "）" : string.Empty;
+            return Fail(error, "列目录失败" + label + "：" + result.Reason, ExitRemote);
+        }
+
+        var files = result.Entries.Where(entry => !entry.IsCollection).ToList();
+        var backups = files.Where(entry => entry.Name.EndsWith(".mhbackup", StringComparison.OrdinalIgnoreCase)).ToList();
+        IReadOnlyList<MhBackupWebDavLister.Entry> visible = showAll ? result.Entries : backups;
+
+        if (asJson)
+        {
+            var rows = new JsonArray();
+            foreach (MhBackupWebDavLister.Entry entry in visible)
+            {
+                rows.Add(new JsonObject
+                {
+                    ["name"] = entry.Name,
+                    ["url"] = entry.Href.ToString(),
+                    ["isCollection"] = entry.IsCollection,
+                    ["bytes"] = entry.Size,
+                    ["lastModified"] = entry.LastModifiedUtc?.ToString("o"),
+                });
+            }
+
+            WriteJson(output, new JsonObject
+            {
+                ["command"] = "list",
+                ["ok"] = true,
+                ["status"] = result.StatusCode,
+                ["url"] = collection.ToString(),
+                ["directories"] = result.Entries.Count(entry => entry.IsCollection),
+                ["files"] = files.Count,
+                ["backupFiles"] = backups.Count,
+                ["entries"] = rows,
+            });
+            return ExitOk;
+        }
+
+        output.WriteLine("远端备份目录：" + collection);
+        if (visible.Count == 0) output.WriteLine("  （没有可显示的条目）");
+        foreach (MhBackupWebDavLister.Entry entry in visible)
+        {
+            string size = entry.IsCollection
+                ? "目录"
+                : entry.Size is long bytes ? bytes.ToString() + " 字节" : "大小未知";
+            string modified = entry.LastModifiedUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "修改时间未知";
+            output.WriteLine("  " + (entry.IsCollection ? "[目录] " : string.Empty) + entry.Name + " · " + size + " · " + modified);
+        }
+
+        output.WriteLine("共 " + visible.Count + " 项（其中 " + backups.Count + " 个 .mhbackup 备份文件）");
+        if (!showAll) output.WriteLine("（只列 .mhbackup；加 --all 显示全部条目）");
+        return ExitOk;
+    }
+
     private static void WriteUsage(TextWriter output)
     {
         output.WriteLine("MediaHub 备份工具（Windows 端）");
@@ -790,12 +900,14 @@ public static class MhBackupCliCommand
         output.WriteLine("  import --file <备份文件> [--settings <settings.json>] [--apply] [--strategy merge|replace] [--password-env <变量名>] [--json]");
         output.WriteLine("  upload --file <备份文件> --url <WebDAV 地址> [--user <账号>] [--password-env <变量名>] [--mkdir] [--json]");
         output.WriteLine("  download --url <WebDAV 地址> --out <备份文件> [--user <账号>] [--password-env <变量名>] [--max-bytes <字节>] [--json]");
+        output.WriteLine("  list --url <WebDAV 目录地址> [--user <账号>] [--password-env <变量名>] [--all] [--json]");
         output.WriteLine("说明：");
         output.WriteLine("  口令只从环境变量读取（缺省 " + DefaultPasswordVariable + "），不接受命令行参数。");
         output.WriteLine("  import 默认只输出预览；--apply 才写入 settings.json（必须同时给 --settings）。");
         output.WriteLine("  --apply 只写本机能表达的来源与有等价的偏好；播放进度与收藏不落库，回执会给出原因。");
         output.WriteLine("  upload 只做 PUT；远端目录不存在时加 --mkdir 尝试创建最后一级集合，多级创建不做猜测。");
         output.WriteLine("  download 只做一次 GET 并写成 --out 指定的文件；不列目录、不删远端文件，取回后仍要 import 才会落地。");
+        output.WriteLine("  list 只做一次 PROPFIND（Depth: 1），默认只列 .mhbackup，加 --all 列全部；不递归、不删除。");
         output.WriteLine("  退出码：0 成功 / 2 参数错误 / 3 不是备份文件 / 4 口令错误 / 5 版本过新 / 6 内容损坏 / 7 导出被拒 / 8 读写失败 / 9 远端失败。");
     }
 }
