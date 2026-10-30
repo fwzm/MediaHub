@@ -365,6 +365,69 @@ public sealed class BackupCliTests : IDisposable
         Assert.Contains("需登录", text);
     }
 
+    [Fact]
+    public void ImportPreviewSaysEveryServerApiWriteNeedsLogin()
+    {
+        var payload = new MhBackupPayload
+        {
+            Manifest = new MhBackupManifest(
+                MhBackupCrypto.FormatVersion,
+                MhBackupCrypto.MinimumReaderVersion,
+                "android-0.1.0",
+                1_790_000_000_000,
+                new List<string> { "servers", "progress" },
+                new Dictionary<string, int> { ["servers"] = 1, ["progress"] = 1 }),
+            Servers =
+            {
+                new MhBackupServerDto
+                {
+                    BackupId = "srv-1",
+                    Name = "客厅",
+                    Type = "EMBY",
+                    Username = "mh",
+                    IsDefault = true,
+                    Endpoints =
+                    {
+                        new MhBackupEndpointDto { Name = "主线路", Url = "https://media.example:8920", IsPrimary = true, Enabled = true },
+                    },
+                },
+            },
+            Progress =
+            {
+                new MhBackupProgressDto { ServerBackupId = "srv-1", ItemId = "item-1", PositionMs = 1, DurationMs = 2, UpdatedAtEpochMs = 3 },
+            },
+        };
+        string file = Path.Combine(_directory, "android-writeback.mhbackup");
+        File.WriteAllBytes(file, MhBackupSerializer.Export(payload, Password));
+
+        int exit = Run(out string output, out _, "import", "--file", file, "--json");
+
+        Assert.Equal(0, exit);
+        JsonNode report = JsonNode.Parse(output.Trim())!;
+        JsonNode writeback = report["writeback"]!;
+        Assert.Equal(0, writeback["written"]!.GetValue<int>());
+        Assert.Equal(0, writeback["serverDidNotStore"]!.GetValue<int>());
+        Assert.Equal(1, writeback["needsLogin"]!.GetValue<int>());
+        Assert.Equal(0, writeback["failed"]!.GetValue<int>());
+        JsonArray attempts = writeback["attempts"]!.AsArray();
+        JsonNode attempt = Assert.Single(attempts)!;
+        Assert.Equal("progress", attempt["record"]!.GetValue<string>());
+        Assert.Equal("srv-1", attempt["serverBackupId"]!.GetValue<string>());
+        Assert.Equal("item-1", attempt["itemId"]!.GetValue<string>());
+        Assert.Equal("needs-login", attempt["outcome"]!.GetValue<string>());
+        Assert.Equal(10_000L, attempt["requestedPositionTicks"]!.GetValue<long>());
+        JsonArray writebackLines = writeback["lines"]!.AsArray();
+        Assert.Equal(
+            "播放记录写回：已保存 0 条 · 服务端未保存 0 条 · 需登录 1 条 · 失败 0 条 · 不适用 0 条",
+            Assert.Single(writebackLines)!.GetValue<string>());
+
+        int textExit = Run(out string text, out _, "import", "--file", file);
+
+        Assert.Equal(0, textExit);
+        Assert.Contains("播放记录写回：已保存 0 条 · 服务端未保存 0 条 · 需登录 1 条 · 失败 0 条 · 不适用 0 条", text);
+        Assert.Contains("预览：不会写入任何数据", text);
+    }
+
     private string ExportDefault()
     {
         string settings = WriteSettings(DefaultServer());

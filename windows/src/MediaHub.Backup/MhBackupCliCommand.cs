@@ -346,9 +346,10 @@ public static class MhBackupCliCommand
 
         MhBackupRestorePlan plan = MhBackupRestorePlanner.Plan(payload, localSources, strategy);
         MhBackupWriteOutlook outlook = MhBackupWriteOutlooks.Classify(payload, plan);
+        MhBackupWritebackReport writeback = Writeback(plan, outlook, writers: null);
         if (apply)
         {
-            return ApplyImport(payload, plan, manifest, settingsText, settingsPath!, asJson, output, error);
+            return ApplyImport(payload, plan, writeback, manifest, settingsText, settingsPath!, asJson, output, error);
         }
 
         if (asJson)
@@ -370,6 +371,7 @@ public static class MhBackupCliCommand
                 ["orphanFavorites"] = plan.OrphanFavoriteCount,
                 ["writeOutlook"] = WriteOutlookJson(outlook),
                 ["writeOutlookLines"] = new JsonArray(outlook.Lines.Select(line => (JsonNode?)JsonValue.Create(line)).ToArray()),
+                ["writeback"] = WritebackJson(writeback),
                 ["preferencesContained"] = plan.PreferencesContained,
                 ["preferencesWillRestore"] = plan.PreferencesWillRestore,
                 ["hasWrites"] = plan.HasWrites,
@@ -401,6 +403,11 @@ public static class MhBackupCliCommand
             output.WriteLine(line);
         }
 
+        foreach (string line in writeback.Lines)
+        {
+            output.WriteLine(line);
+        }
+
         output.WriteLine("结论：" + (plan.HasWrites ? "有内容可恢复" : "本次预览没有会写入的内容"));
         return ExitOk;
     }
@@ -409,6 +416,7 @@ public static class MhBackupCliCommand
     private static int ApplyImport(
         MhBackupPayload payload,
         MhBackupRestorePlan plan,
+        MhBackupWritebackReport writeback,
         MhBackupManifest manifest,
         string? settingsText,
         string settingsPath,
@@ -481,6 +489,7 @@ public static class MhBackupCliCommand
                 ["conflictingServers"] = plan.ConflictCount,
                 ["writeOutlook"] = WriteOutlookJson(outlook),
                 ["writeOutlookLines"] = new JsonArray(outlook.Lines.Select(line => (JsonNode?)JsonValue.Create(line)).ToArray()),
+                ["writeback"] = WritebackJson(writeback),
             });
             return ExitOk;
         }
@@ -529,9 +538,41 @@ public static class MhBackupCliCommand
             output.WriteLine(line);
         }
 
-        output.WriteLine("提醒：备份不含密码或令牌，写入的来源需要登录后才能使用；播放进度与收藏本命令不写（上面的方式说明写清了各自去向）。");
+        foreach (string line in writeback.Lines)
+        {
+            output.WriteLine(line);
+        }
+
+        output.WriteLine("提醒：备份不含密码或令牌，写入的来源需要登录后才能使用；播放进度与收藏本命令不写（上面的方式与写回结果说明了各自去向）。");
         return ExitOk;
     }
+
+    /// <summary>用同一份去向分类跑一遍写回；CLI 没有登录凭据，因此只会得到需登录/不适用/失败三种结果。</summary>
+    private static MhBackupWritebackReport Writeback(
+        MhBackupRestorePlan plan,
+        MhBackupWriteOutlook outlook,
+        IMhBackupServerWriters? writers)
+        => MhBackupWritebacks.RunAsync(plan, outlook, writers).GetAwaiter().GetResult();
+
+    /// <summary>写回逐条结果（JSON 回执用，键名稳定）。</summary>
+    private static JsonObject WritebackJson(MhBackupWritebackReport report) => new()
+    {
+        ["written"] = report.WrittenCount,
+        ["serverDidNotStore"] = report.ServerDidNotStoreCount,
+        ["needsLogin"] = report.NeedsLoginCount,
+        ["failed"] = report.FailedCount,
+        ["notApplicable"] = report.NotApplicableCount,
+        ["attempts"] = new JsonArray(report.Attempts.Select(attempt => (JsonNode?)new JsonObject
+        {
+            ["record"] = attempt.RecordCode,
+            ["serverBackupId"] = attempt.ServerBackupId,
+            ["itemId"] = attempt.ItemId,
+            ["outcome"] = attempt.OutcomeCode,
+            ["requestedPositionTicks"] = attempt.RequestedPositionTicks,
+            ["reason"] = attempt.Reason,
+        }).ToArray()),
+        ["lines"] = new JsonArray(report.Lines.Select(line => (JsonNode?)JsonValue.Create(line)).ToArray()),
+    };
 
     /// <summary>写回去向的分类计数（JSON 回执用，键名稳定）。</summary>
     private static JsonObject WriteOutlookJson(MhBackupWriteOutlook outlook) => new()

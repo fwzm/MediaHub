@@ -696,9 +696,59 @@ Android 导出的进度在 Windows 计划里全部 Apply、且全部归 `server-
 - 真 Room 往返用的是 in-memory DB，设备上的磁盘库与真实账户切换未跑 —— DEVICE_UNVERIFIED；
 - 进度/收藏的真正服务端写回仍要 GUI 入口 + 登录态（§17 的写口已就绪，还原层未接线）。
 
-## 19 仍未做（如实）
+## 19 写回执行层（W29）
 
-- 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏的**去向**已逐条说明（§16），provider 层写口已实现（§17），但**还原层仍未接线** —— IMPLEMENTED_UNVERIFIED（真服 SERVER_UNVERIFIED）
+### 19.1 为什么先做这一层
+
+W27 只做到 provider 的写口（IProviderProgressWrite.SetPlaybackPositionAsync 与既有的 IProviderFavorites.SetFavoriteAsync），W26 只说明每条记录的去向。两者之间还缺一层：谁按逐条决定真的发请求、谁按服务端的答案记账。
+
+这一层不能放进 MediaHub.App：App 是 WPF exe（net10.0-windows），MediaHub.Tests 不引用它，写进去就没有单测覆盖；也不能直接放进命令行：MediaHub.BackupCli 只引用 MediaHub.Backup（该工程零 ProjectReference、BCL-only），要加 provider 引用就得把整个 MediaHub.Providers 拖进命令行。
+
+做法是把抽象放在 MediaHub.Backup，执行层只认 IMhBackupServerWriters；CLI 用 null 会话跑一遍 —— 每条 server-api 记录如实报 needs-login（请求根本没有发出），这不是占位符而是当前处境的正确描述。将来 GUI 入口用 ProviderHandle.ProgressWrite 与 IProviderFavorites 适配同一个抽象，执行层不用改。
+
+### 19.2 三个抽象
+
+- IMhBackupServerWriter：SavePlaybackPositionAsync(itemId, ticks) 返回服务端随后报告的位置；SetFavoriteAsync(itemId) 返回服务端随后报告的收藏状态；
+- IMhBackupServerWriters：ForServer(serverBackupId) 给出已登录来源的通道，没有会话就返回 null；
+- MhBackupWriteAnswer：三个字段各自可空（ReportedPositionTicks / ReportedFavorite / Failure），静态工厂 Position / Favorite / Fail。实现方必须返回服务端给出的答案，不得把请求值回声 —— 回声会把「接受后丢弃」虚报成已保存（W27 的设计与用例已在 provider 层钉住这一点）。
+
+### 19.3 记账规则
+
+| 结果 | 何时 |
+| --- | --- |
+| written | 进度：服务端回报的位置与请求一致（毫秒 × 10000 = ticks）；收藏：服务端回报已收藏 |
+| server-did-not-store | 位置回报不同、没有回报位置、收藏回报 false 或没有回报状态 |
+| needs-login | 这个来源没有会话，请求没有发出（writers 为 null 或 ForServer 返回 null） |
+| failed | 服务端给出失败原因、调用抛异常（折成一句、空白折叠、上限 160 字符）、条目 id 为空、备份里的播放位置是负数 |
+| not-applicable | 写回去向不是 server-api（本机路径键 / 该类型没有接口 / 未选中 / 孤立引用），原因原样保留分类给出的那一句 |
+
+两条边界是刻意的：负位置与空 id 在发请求之前就拒（备份里的值本身不足以往外写，不该打扰服务端）；not-applicable 不改写原因（「本机路径键无法映射」不能被这一层悄悄变成「已写」）。
+
+### 19.4 命令行回执
+
+预览与 --apply 正文都在写回去向那几行之后追加两行（该类没有条目就不出该行）：
+
+- 播放记录写回：已保存 A 条 · 服务端未保存 B 条 · 需登录 C 条 · 失败 D 条 · 不适用 E 条
+- 收藏写回：已保存 A 条 · 服务端未保存 B 条 · 需登录 C 条 · 失败 D 条 · 不适用 E 条
+
+JSON 回执新增 writeback 对象：written / serverDidNotStore / needsLogin / failed / notApplicable / attempts / lines；attempts 每条含 record（progress 或 favorite）、serverBackupId、itemId、outcome（五个稳定码）、requestedPositionTicks（仅进度，可为 null）、reason。末句口径从「播放进度与收藏本命令不写（上面的方式说明写清了各自去向）」改成「（上面的方式与写回结果说明了各自去向）」。
+
+### 19.5 验证与证据
+
+- MediaHub.Tests 1937 / 0（W28 后 1927，本轮 +10：写回执行层 9 例 + 命令行 1 例）；
+- sln 级构建（-p:Platform=x64 --no-restore）0 错误、21 警告（全部是既有的 xUnit2000/2013 与 BackupRestoreApplierTests CS8601）；
+- 负向对照（实现态快照 w29-impl-writeback.cs，10842 B，sha256 c792c51a5099f5f8a7cb1467953b04b883e7c5e8550cceac236b81d7c1a17775；三处还原后 sha 相同并复验全绿）：A 任何回报都算 written → 1 红（AWriteTheServerIgnoresIsReportedAsNotStored）；B 没有会话算 not-applicable → 3 红（WithoutASession… / TheReportLines… / 命令行 ImportPreviewSays…）；C 去掉负位置守卫 → 1 红（ANegativePositionInTheBackupIsRefusedWithoutTalkingToTheServer）。B 是 3 红而不是 1 红，因为「需登录」同时出现在逐条断言、汇总两行与命令行回执三处，如实记；
+- 本轮没有任何一条真写：命令行只有 null 会话，provider 写口没有被这一层调用，所以真服仍是 SERVER_UNVERIFIED。
+
+### 19.6 仍未做（如实）
+
+- App 侧适配器（ProviderHandle.ProgressWrite / IProviderFavorites → IMhBackupServerWriter）与设置页「备份与还原」入口还没有 —— 生产路径目前没有调用方；
+- 真实登录态下的写回没有跑过（需要真实服务器与凭据）—— SERVER_UNVERIFIED；
+- Android 侧没有对等的写回执行层（Android 的恢复直接写库，服务端进度由服务端自己维护）。
+
+## 20 仍未做（如实）
+
+- 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏的**去向**已逐条说明（§16），provider 层写口已实现（§17），写回执行层已实现并接进命令行回执（§19，W29）；但 App 侧没有适配器与入口，生产路径不写 —— IMPLEMENTED_UNVERIFIED（真服 SERVER_UNVERIFIED）
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
 - 本机进度/收藏的写入（来源与偏好已随 `--apply` 落库）—— NOT_IMPLEMENTED
 - WebDAV 上传（§10，含覆盖保护 §14）、下载（§11）、列目录（§12）、删除（§13）均已实现；**真实服务端联调未做** —— SERVER_UNVERIFIED
