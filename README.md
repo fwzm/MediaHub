@@ -365,14 +365,14 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
 
 <!-- WINDOWS-SYNC:START -->
 <!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
+- 95fff582 2026-10-30 feat(licensing): W34 关闭 NuGet 包修剪，固定还原图（修 CI sbom-inventory 红）
+- 16f40a46 2026-10-30 feat(licensing): W33 钉住 .NET SDK 10.0.113 与 SBOM 库存门禁第 25 项（浅克隆来源提交降为 WARN）
+- 13fad6b8 2026-10-30 feat(licensing): W32 SBOM 库存一致性门禁（组件/许可/来源提交三检）
+- b586b001 2026-10-30 W14 诊断日志滚动落盘：有界 1 MiB × 5，写入前已脱敏
 - 57ea2798 2026-10-29 W8·真服闭环可钉住版本：官方 Emby 4.10.1.0 + 三处工具加固
 - 1deccca2 2026-10-24 ci(windows): 许可证面门禁接进流水线（先按现状生成报告，再校验 notices/SBOM/项目漂移）
 - ef5344d2 2026-10-24 docs(licensing): W11b 许可证清单与 SBOM 按现状重跑（13 csproj / 49 行 / 29 包 + LGPL 33 DLL 许可族），新增 check-licence-surface.ps1 门禁
 - 4238edcc 2026-10-24 test(w8): 把两服续播下限语义固化成离屏契约（mock 按 2%/5% 落实下限，31 例）
-- a4684a8b 2026-10-24 feat(w8): 无窗口真服续播闭环（ResumeProbe 走产品 provider 栈 + 双服驱动，两服各 16 条断言全绿）
-- 214e048e 2026-10-24 docs(engine): W13c Release/publish 两 flavour 自包含实测（10.1-10.7）
-- 97a0f8e5 2026-10-24 feat(engine): W13b LGPL 引擎自包含打包与可选切换开关（默认仍 GPL 基线）
-- 1a38b06a 2026-10-24 docs(windows): W10 登记第 6 次被打断并停用自动重试，GUI 证据改为人工授予窗口
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
