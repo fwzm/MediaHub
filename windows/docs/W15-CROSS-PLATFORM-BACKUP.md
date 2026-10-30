@@ -616,9 +616,51 @@ dotnet windows/src/MediaHub.BackupCli/bin/Debug/net10.0/MediaHub.BackupCli.dll e
 - 进度 / 收藏的**本机**落库仍不做（无可靠键，见 §16.1）。
 - 设置页「备份与还原」入口仍是 GUI_UNVERIFIED。
 
-## 17 仍未做（如实）
+## 17 服务端播放位置写回接口（W27）
 
-- 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏的**去向**已逐条说明（§16），但**真正的写回未做** —— NOT_IMPLEMENTED
+§16 已把每条记录的去向说清楚，但「知道该走 `POST /Users/{uid}/Items/{id}/UserData`」与「能写」是两件事。本轮在 provider 层补上写口，为还原层接线做准备；**备份命令仍不执行写回**。
+
+### 17.1 为什么单开一个接口
+
+写入没有塞进 `IProviderProgress`，而是新增 `IProviderProgressWrite`（`windows/src/MediaHub.Providers/ProviderContracts.cs`）：
+
+- `IProviderProgress` 表示「播放中上报 + 读续播」，能读续播的 provider 不一定能保存**外部带来的**位置；
+- `ProviderHandle.ProgressWrite` 为 `null` 即不宣称可写，调用方据此判断，而不是看 `RuntimeCapabilities.Progress`；
+- `IProviderFavorites.SetFavoriteAsync` 早已存在（`ProviderContracts.cs`），收藏写回不需要新接口。
+
+### 17.2 路由与请求体
+
+`MediaBrowserApi.UpdateUserDataAsync`：`POST /Users/{userId}/Items/{itemId}/UserData`，JSON 体只有 `PlaybackPositionTicks`（long，100 ns 单位），沿用 `NewRequest` 的方言身份与 token 头，`SendJsonAsync` 负责 401 → `AuthExpired`、429 → `RateLimited` 等映射。Emby 与 Jellyfin 共用该路由（Jellyfin 的根是 `/`，Emby 是 `/emby`，由方言前缀处理）。
+
+### 17.3 返回的是服务端随后报告的位置
+
+`IProviderProgressWrite.SetPlaybackPositionAsync` 返回 `Task<long>`，语义是**服务端接受后存下的位置**，不是请求值：
+
+- 响应带 `PlaybackPositionTicks` ⇒ 原样返回；
+- 响应省略该字段 ⇒ 回读 `GET /Users/{uid}/Items/{id}` 的 `UserData.PlaybackPositionTicks`；
+- 回读仍无 ⇒ `0`（服务端无存储位置）。
+
+理由与收藏同口径：HTTP 200 只证明请求被接受；「接受后丢弃」若回成请求值，还原层会虚报已保存。
+
+### 17.4 mock 刻意不过续播下限
+
+`MockMediaServer` 新增 `Users/{uid}/Items/{id}/UserData` 的 POST 分支（未知 id → 404、坏 JSON → 400、正常时把位置写进该条目的 `UserData` 并回 `UserDataJson`），并有 `SetUserDataWritesIgnored(true)` 模拟「收下但丢弃」、`OmitPlaybackPositionFromUserDataResponse` 模拟「回执省略字段」。这条保存口**不套 `MockResumeFloor`**：服务端存什么就是什么，套上客户端续播规则会比真服更严，反而掩盖「接受后丢弃」的语义。
+
+### 17.5 验证
+
+- `ProviderPlaybackWriteTests` 6 例：路由与请求体（POST `/emby/Users/user-1/Items/item-003/UserData`、`PlaybackPositionTicks` 精确、无 token/secret、不发 `FavoriteItems`）；「服务端丢弃」时回旧值（写 999 回 300000000），放开后写 222 回 222；回执省略字段时回读条目（写 42 回 42，POST 后必有 GET）；未知条目 → `ProviderErrorCode.NotFound`；过期 token → `AuthExpired`；Jellyfin 同路由（根为 `/`）。
+- `dotnet build windows/MediaHub.Windows.sln -p:Platform=x64 --no-restore`：0 错误、21 警告（均为既有测试工程告警）。全量 `MediaHub.Tests` **1920 / 0**（基线 1914 + 6）。
+- 负向对照（实现态快照 `D:/mh-verify/w27-impl-prov.cs` sha256 `3fd1a61f…`、`w27-impl-api.cs` sha256 `1bf87636…`，逐字节还原后相等）：A 回执改回请求值（纯回声）⇒ **恰好 1 红**「服务端丢弃时回旧值」；B 回读分支改成恒 `0` ⇒ **恰好 1 红**「回执省略字段时回读」；C 路由去掉 `/UserData` ⇒ **4 红**（路由是四条用例的共同前提，另两条 404 / 401 仍绿）。
+
+### 17.6 仍未做（如实）
+
+- **还原层未接线**：`MhBackupRestoreApplier` 仍未调用 `ProgressWrite` / `SetFavoriteAsync`，所以 `import --apply` 依然不写进度与收藏；
+- **真服未验证**：以上全部是 loopback mock 证据，真实 Emby / Jellyfin 写回 —— SERVER_UNVERIFIED；
+- 登录态、令牌过期重登、服务端拒绝写的用户提示均未接。
+
+## 18 仍未做（如实）
+
+- 备份 CLI 的 `--apply` 落库已实现（§9）；播放进度与收藏的**去向**已逐条说明（§16），provider 层写口已实现（§17），但**还原层仍未接线** —— IMPLEMENTED_UNVERIFIED（真服 SERVER_UNVERIFIED）
 - Windows 设置页「备份与还原」入口（口令框 → 预览 → 确认）—— NOT_IMPLEMENTED
 - 本机进度/收藏的写入（来源与偏好已随 `--apply` 落库）—— NOT_IMPLEMENTED
 - WebDAV 上传（§10，含覆盖保护 §14）、下载（§11）、列目录（§12）、删除（§13）均已实现；**真实服务端联调未做** —— SERVER_UNVERIFIED

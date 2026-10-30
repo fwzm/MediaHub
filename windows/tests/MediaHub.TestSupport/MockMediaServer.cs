@@ -29,6 +29,12 @@ public sealed class MockServerOptions
     public bool OmitIsFavoriteFromUserData { get; init; }
 
     /// <summary>
+    /// Leaves <c>PlaybackPositionTicks</c> out of the answer to a user-data write, so a client that only
+    /// echoes its own request cannot look like one that read the stored state back.
+    /// </summary>
+    public bool OmitPlaybackPositionFromUserDataResponse { get; init; }
+
+    /// <summary>
     /// Playback state the item query reports, keyed by item id, laid on top of the default pattern
     /// (every seventh item holds a resume position). Lets a test build an exact continue-watching set:
     /// resumable items with distinct play times, one watched to the end, one never played.
@@ -198,6 +204,7 @@ public sealed class MockMediaServer : IAsyncDisposable
 
     private volatile bool _tokenValid = true;
     private volatile bool _ignoreFavoriteWrites;
+    private volatile bool _ignoreUserDataWrites;
     private long _delayTicks;
     private int _failureStatus;
     private int _failureRemaining;
@@ -339,6 +346,12 @@ public sealed class MockMediaServer : IAsyncDisposable
     /// stop looking alike, which is the only way a test can tell them apart.
     /// </remarks>
     public void SetFavoriteWritesIgnored(bool ignored) => _ignoreFavoriteWrites = ignored;
+
+    /// <summary>
+    /// Makes the user-data write route answer 200 and store nothing, the shape of a server that accepts a
+    /// save its policy then drops.
+    /// </summary>
+    public void SetUserDataWritesIgnored(bool ignored) => _ignoreUserDataWrites = ignored;
 
     /// <summary>
     /// Simulates an unreachable server: the listener is torn down, so later requests fail at the
@@ -502,6 +515,7 @@ public sealed class MockMediaServer : IAsyncDisposable
             if (segments is ["Users", "AuthenticateByName"]) { ServeAuthenticate(context, body); return; }
             if (segments is ["Items", _, "PlaybackInfo"]) { ServePlaybackInfo(context, segments[1]); return; }
             if (segments is ["Users", _, "FavoriteItems", var favoriteItemId]) { ServeFavorite(context, favoriteItemId, true); return; }
+            if (segments is ["Users", _, "Items", var userDataItemId, "UserData"]) { ServeUserDataWrite(context, userDataItemId, body); return; }
             if (segments is ["Sessions", "Playing"] or ["Sessions", "Progress"] or ["Sessions", "Stopped"] or ["Sessions", "Logout"]
                 || (segments is ["Sessions", "Playing", "Progress" or "Stopped"]))
             {
@@ -1009,8 +1023,72 @@ public sealed class MockMediaServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// Applies a playback report the way a real server does instead of only acknowledging it.
+    /// <c>POST /Users/{uid}/Items/{itemId}/UserData</c>: stores the position the caller saved and answers
+    /// with the stored <c>UserItemDataDto</c>.
     /// </summary>
+    /// <remarks>
+    /// Unlike the session progress routes this endpoint does not run the resume rules: it is the "save this
+    /// user data" call, and the server stores what it was handed. Keeping that distinction matters - routing
+    /// the write through <see cref="MockResumeFloor"/> would make the mock stricter than the server and hide
+    /// a client that writes a position the server would have kept.
+    /// </remarks>
+    private void ServeUserDataWrite(HttpListenerContext context, string itemId, string body)
+    {
+        MockItem? item = _items.FirstOrDefault(candidate => string.Equals(candidate.Id, itemId, StringComparison.Ordinal));
+        if (item is null)
+        {
+            WriteJson(context, 404, new JsonObject { ["Error"] = "Unknown item " + itemId }.ToJsonString());
+            return;
+        }
+
+        long requested;
+        try
+        {
+            using var document = JsonDocument.Parse(body.Length == 0 ? "{}" : body);
+            requested = document.RootElement.TryGetProperty("PlaybackPositionTicks", out JsonElement ticks)
+                && ticks.ValueKind == JsonValueKind.Number
+                && ticks.TryGetInt64(out long parsed)
+                    ? parsed
+                    : 0L;
+        }
+        catch (JsonException)
+        {
+            // A body the model binder cannot read is a 400 on both servers, not a silent no-op.
+            WriteJson(context, 400, new JsonObject { ["Error"] = "Malformed user data body." }.ToJsonString());
+            return;
+        }
+
+        if (!_ignoreUserDataWrites)
+        {
+            lock (_gate)
+            {
+                _reported[item.Id] = UserDataFor(item) with { PlaybackPositionTicks = requested };
+            }
+        }
+
+        bool favorite;
+        lock (_gate) favorite = _favorites.Contains(item.Id);
+        WriteJson(context, 200, UserDataJson(UserDataFor(item), favorite).ToJsonString());
+    }
+
+    /// <summary>The user-data object both servers answer with, optionally without the position field.</summary>
+    private JsonObject UserDataJson(MockUserData data, bool favorite)
+    {
+        var json = new JsonObject();
+        if (!_options.OmitPlaybackPositionFromUserDataResponse)
+        {
+            json["PlaybackPositionTicks"] = data.PlaybackPositionTicks;
+        }
+
+        json["Played"] = data.Played;
+        if (data.LastPlayedDate is { } playedAt) json["LastPlayedDate"] = playedAt.ToString("o", CultureInfo.InvariantCulture);
+        json["IsFavorite"] = favorite;
+        return json;
+    }
+
+
+    /// <summary>
+    /// Applies a playback report the way a real server does instead of only acknowledging it.    /// </summary>
     /// <remarks>
     /// <para>
     /// The routes are not the same event. <c>/Sessions/Playing</c> opens a session and stores nothing,
