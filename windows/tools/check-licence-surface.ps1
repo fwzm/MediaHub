@@ -12,8 +12,10 @@
       5. the LGPL runtime dependency set changes and nobody notices the licence gap count moved;
       6. the committed SBOM drifts from the freshly resolved graph - a package is bumped or added,
          the report moves with it, and docs/sbom-windows.cdx.json keeps describing the old set.
+      7. the tracked LGPL candidate binary is replaced, or the digest quoted in ten documents and in
+         the report generator goes stale - nothing compared those quotes with the bytes on disk.
 
-    This script checks those six surfaces without touching the network, the build, or the
+    This script checks those seven surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -46,6 +48,7 @@ param(
     [string] $NoticesPath,
     [string] $SbomPath,
     [string] $LgplCompliancePath,
+    [string] $EngineDistPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -436,6 +439,108 @@ else {
     }
 }
 
+# --- 9. the tracked LGPL candidate engine identity ---------------------------------------------
+# windows/engine/lgpl/dist holds the tracked candidate libmpv build. dist-hashes.txt records the
+# digests taken when it was built, and ten documents (plus the report generator itself) quote the
+# same digest. Nothing compared either record with the bytes that are actually committed, so a
+# swapped binary or a stale document stays invisible.
+$engineDist = if ($EngineDistPath) {
+    if ([System.IO.Path]::IsPathRooted($EngineDistPath)) { $EngineDistPath }
+    else { Resolve-RepoPath -Path $EngineDistPath }
+}
+else {
+    Join-Path $RepoRoot (Join-Path 'windows' (Join-Path 'engine' (Join-Path 'lgpl' 'dist')))
+}
+$engineHashFile = Join-Path $engineDist 'dist-hashes.txt'
+$engineRows = @()
+if (Test-Path -LiteralPath $engineHashFile) {
+    foreach ($line in @(Get-Content -LiteralPath $engineHashFile)) {
+        $trimmed = ([string]$line).Trim()
+        if (($trimmed -eq '') -or $trimmed.StartsWith('#')) { continue }
+        $parts = @($trimmed -split "\s+")
+        if ($parts.Count -lt 2) { continue }
+        $name = [System.IO.Path]::GetFileName($parts[$parts.Count - 1].TrimStart('*'))
+        if ($name -eq '') { continue }
+        $candidatePath = Join-Path $engineDist $name
+        $exists = Test-Path -LiteralPath $candidatePath
+        $bytes = [int64]0
+        $observed = ''
+        if ($exists) {
+            $bytes = [int64](Get-Item -LiteralPath $candidatePath).Length
+            $observed = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+        $engineRows += [pscustomobject]@{
+            name = $name
+            recorded = $parts[0].ToLowerInvariant()
+            path = $candidatePath
+            exists = $exists
+            bytes = $bytes
+            sha256 = $observed
+        }
+    }
+}
+$engineMissing = @()
+$engineDrift = @()
+foreach ($row in $engineRows) {
+    if (-not $row.exists) { $engineMissing += $row.name; continue }
+    if ($row.sha256 -ne $row.recorded) {
+        $engineDrift += ($row.name + ' recorded=' + $row.recorded.Substring(0, 8) + '...' + $row.recorded.Substring($row.recorded.Length - 4) + ' observed=' + $row.sha256.Substring(0, 8) + '...' + $row.sha256.Substring($row.sha256.Length - 4))
+    }
+}
+if ($engineRows.Count -eq 0) {
+    Add-Check 'lgpl-candidate-hashes' 'WARN' ('no recorded artefact hash was found under ' + $engineDist + ' - dist-hashes.txt is absent or empty, so the tracked engine binaries are unverified here')
+}
+elseif (($engineMissing.Count -eq 0) -and ($engineDrift.Count -eq 0)) {
+    $coreRows = @($engineRows | Where-Object { $_.name -eq 'libmpv-2.dll' })
+    $coreNote = ''
+    if ($coreRows.Count -eq 1) { $coreNote = ' (libmpv-2.dll ' + $coreRows[0].bytes.ToString('N0') + ' B)' }
+    Add-Check 'lgpl-candidate-hashes' 'PASS' ($engineRows.Count.ToString() + ' recorded engine artefact(s) still hash to their recorded digest' + $coreNote)
+}
+else {
+    Add-Check 'lgpl-candidate-hashes' 'FAIL' ($engineMissing.Count.ToString() + ' recorded artefact(s) absent [' + (Format-NameList $engineMissing) + '], ' + $engineDrift.Count.ToString() + ' with a drifted digest [' + (Format-NameList $engineDrift) + '] - the record lives in windows/engine/lgpl/dist/dist-hashes.txt')
+}
+
+# The same identity is quoted elsewhere; every quote must still agree with the bytes.
+$claimSites = @(
+    'windows/tools/license-report.ps1',
+    'windows/docs/LGPL-ENGINE-SWITCH.md',
+    'windows/docs/LGPL-COMPLIANCE.md',
+    'windows/docs/licensing/W5-LGPL-BUILD.md',
+    'windows/docs/licensing/SBOM.md',
+    'windows/docs/THIRD-PARTY-NOTICES.md',
+    'windows/THIRD-PARTY-NOTICES.md',
+    'README.md',
+    'windows/engine/README.md',
+    'windows/docs/W13-LGPL-ENGINE-PROBE.md',
+    'windows/docs/W9-EVIDENCE.md'
+)
+$coreCandidate = @($engineRows | Where-Object { ($_.name -eq 'libmpv-2.dll') -and $_.exists })
+if ($coreCandidate.Count -ne 1) {
+    Add-Check 'lgpl-candidate-claims' 'SKIP' 'the tracked candidate libmpv-2.dll is not present here, so the documents quoting its identity cannot be compared with it'
+}
+else {
+    $claimBytes = ([int64]$coreCandidate[0].bytes).ToString('N0')
+    $claimDigest = [string]$coreCandidate[0].sha256
+    $claimPrefix = $claimDigest.Substring(0, 8)
+    $claimSuffix = $claimDigest.Substring($claimDigest.Length - 4)
+    $claimStale = @()
+    foreach ($site in $claimSites) {
+        $sitePath = Resolve-RepoPath -Path $site
+        if (-not (Test-Path -LiteralPath $sitePath)) { $claimStale += ($site + ' (file absent)'); continue }
+        $siteText = [string](Get-Content -LiteralPath $sitePath -Raw)
+        if ($null -eq $siteText) { $siteText = '' }
+        $lower = $siteText.ToLowerInvariant()
+        if (-not $lower.Contains($claimBytes)) { $claimStale += ($site + ' (never quotes ' + $claimBytes + ')'); continue }
+        $hasDigest = $lower.Contains($claimDigest) -or ($lower.Contains($claimPrefix) -and $lower.Contains($claimSuffix))
+        if (-not $hasDigest) { $claimStale += ($site + ' (quotes the size but not the digest)') }
+    }
+    if ($claimStale.Count -eq 0) {
+        Add-Check 'lgpl-candidate-claims' 'PASS' ($claimSites.Count.ToString() + ' claim site(s) quote the observed candidate identity (' + $claimBytes + ' B, ' + $claimPrefix + '...' + $claimSuffix + ')')
+    }
+    else {
+        Add-Check 'lgpl-candidate-claims' 'FAIL' ($claimStale.Count.ToString() + ' claim site(s) disagree with the tracked libmpv-2.dll (' + $claimBytes + ' B, ' + $claimPrefix + '...' + $claimSuffix + '): ' + (Format-NameList $claimStale) + ' - update the quote or the binary, they must describe the same build')
+    }
+}
 # --- summary ----------------------------------------------------------------------------------
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })

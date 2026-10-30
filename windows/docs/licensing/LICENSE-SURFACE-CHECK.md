@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-27 项检查分八组：
+29 项检查分九组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -55,6 +55,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | SBOM 库存（W32 起） | `sbom-inventory`、`sbom-inventory-licences`、`sbom-source-revision` | 入库的 SBOM 与「当场重新解析依赖图得到的报告」不再一一对应（包升级/新增/移除、许可表达式变了），或 SBOM 记录的本机来源提交不落在当前分支历史上 |
 | 工具链（W33 + W34 起） | `sdk-pin-matches-report` | 报告不是由仓库根 `global.json` 钉住的 SDK 生成的——SBOM 与全部实测证据必须出自同一条工具链；另见 §3.2（关修剪使还原图在任何机器上一致） |
 | 通告文档（W35 起） | `notices-inventory`、`notices-declarations` | 入库的 `THIRD-PARTY-NOTICES.md` 与「当场解析出的依赖图」或「csproj 里直接声明的包」不再对得上（漏包、版本/许可漂移、新增依赖没写进法律文档） |
+| 引擎候选身份（W36 起） | `lgpl-candidate-hashes`、`lgpl-candidate-claims` | 入库的 LGPL 候选 DLL 与 `windows/engine/lgpl/dist/dist-hashes.txt` 的记录不符；或十一个引用候选身份的文档/常量写着别的构建（字节数或 sha256 对不上） |
 
 `lgpl-licence-gaps` 默认是 **WARN**：`component-licences.txt` 里没有声明的 5 个 MSYS2 包（`libwinpthread-1`、`libpcre2-8-0`、`libintl-8`、`libexpat-1`、`libbz2-1`）是**已知缺口**，默认 flavour 不随包分发它们。要在「切 LGPL 发布前」把缺口当硬门，加 `-FailOnLicenceGaps`。
 
@@ -108,7 +109,22 @@ W32 的三检首次随 CI 跑就抓到两件事，都不是「SBOM 写错了」�
 - 把该行版本 17.13.0 改成 17.99.0 → 恰好 1 红（1 with a drifted version）。
 - 把该行许可 MIT 改成 Apache-2.0 → 恰好 1 红（1 with a drifted licence）。
 - 临时往 `MediaHub.Tests.csproj` 加一个不存在的 `Phantom.Package` → 恰好 1 红（`notices-declarations`）；随后把 csproj 逐字节还原（sha256 相等）。
-- `-JsonPath` 指向不存在的报告 → 22 项、6 项 SKIP、0 红 0 警，`notices-declarations` 仍 PASS（不因缺报告而假警）。
+- `-JsonPath` 指向不存在的报告 → 24 项、6 项 SKIP、0 红 0 警，`notices-declarations` 仍 PASS（不因缺报告而假警）；W36 的两项不依赖报告，照常 PASS。
+
+### 3.4 LGPL 候选件身份两检（W36，2026-10-31）
+
+`windows/engine/lgpl/dist` 下的候选引擎是**入库二进制**（`libmpv-2.dll`、`mpv.exe`），而它的身份被写进十一处：`windows/tools/license-report.ps1` 的 `LgplCandidate` 常量、`windows/docs/LGPL-ENGINE-SWITCH.md`、`windows/docs/LGPL-COMPLIANCE.md`、`windows/docs/licensing/W5-LGPL-BUILD.md`、`windows/docs/licensing/SBOM.md`、`windows/docs/THIRD-PARTY-NOTICES.md`、`windows/THIRD-PARTY-NOTICES.md`、`README.md`、`windows/engine/README.md`、`windows/docs/W13-LGPL-ENGINE-PROBE.md`、`windows/docs/W9-EVIDENCE.md`。此前没有任何一项把「引用」与「磁盘字节」对照——换错二进制、或文档陈旧，都不会红。新增两项：
+
+| 检查 | 判据 | 失败含义 |
+| --- | --- | --- |
+| `lgpl-candidate-hashes` | `windows/engine/lgpl/dist/dist-hashes.txt` 每条 `<sha256> *<path>`：文件必须存在，且实测 sha256 与记录相等 | 入库候选件被替换、被删，或记录本身被改（记录缺失或空 → WARN，不 FAIL） |
+| `lgpl-candidate-claims` | 用上一条实测出的字节数与 sha256，逐个核对十一处引用：必须含千分位字节串（如 `3,327,274`），且含完整 sha256 或「前 8 位 + 后 4 位」缩写（大小写不敏感） | 二进制换了而文档没跟上，或某处引用了别的构建（候选件不在时 SKIP） |
+
+`-EngineDistPath` 可把 `dist-hashes.txt` 的读取根指到别处（绝对路径原样使用，相对路径按仓库根解析）；负向对照用它指向临时目录，不动仓库文件：
+
+- 把记录里 `libmpv-2.dll` 的一个 hex 位改掉 → 恰好 1 红（`lgpl-candidate-hashes`，drifted digest）。
+- 记录里多写一个不存在的 `ghost.dll` → 恰好 1 红（absent）；同一检查对 `libmpv-2.dll` 自身仍 PASS。
+- 改动一份 DLL 副本、并把记录同步改成新 sha（哈希检查过）→ 恰好 1 红（`lgpl-candidate-claims`，十一处引用全部对不上）。
 
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
@@ -167,6 +183,17 @@ RESULT: PASS
 ```
 
 （`warnings=1` 仍是既有的 `lgpl-licence-gaps` 五行：默认 flavour 不分发那五个 DLL。29 个解析包与 5 个直接声明包此刻都对得上 ⇒ 入库 notices 是新鲜的；W35 的价值是让将来的漂移在 CI 里红掉。）
+
+### 4.4 实测（2026-10-31，W36，本机）
+
+```text
+check-licence-surface  checks=29 failed=0 warnings=1 skipped=0
+check-licence-surface  PASS  lgpl-candidate-hashes  2 recorded engine artefact(s) still hash to their recorded digest (libmpv-2.dll 3,327,274 B)
+check-licence-surface  PASS  lgpl-candidate-claims  11 claim site(s) quote the observed candidate identity (3,327,274 B, 20035902...3c0a)
+RESULT: PASS
+```
+
+（入库候选件 `libmpv-2.dll` 与 `mpv.exe` 都与 `dist-hashes.txt` 一致，十一处引用也都写着同一个构建 ⇒ 此刻是新鲜的；W36 的价值是让「换包/改文档」在未来红掉。报告用 W34 生成的那份：`projects=13 rows=49 packages=29 violations=0 warnings=3`。缺报告时这两项不 SKIP，照常 PASS，见 §3.3 的 `-JsonPath` 对照。）
 
 ## 5. 这个工具**不**覆盖什么
 
