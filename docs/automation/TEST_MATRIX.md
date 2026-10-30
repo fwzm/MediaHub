@@ -175,3 +175,30 @@ MediaHub.Tests: total=1927 baseline=1927
 
 **附带结论**：基线数字会随并行开发频繁变动。这不是缺陷，是设计意图 —— 变动以一条独立 diff
 出现在 review 里，比藏在 YAML 常量里可见得多。
+
+### 6.3 门禁脚本在两种 PowerShell 下行为一致（2026-10-30 补测）
+
+6.1 的边界矩阵是用本机 **PowerShell 5.1** 跑的，但 `windows-ci` 里该步骤声明的是 `shell: pwsh`（pwsh 7）。
+这是一个**验证缺口**：脚本里用到 `ConvertFrom-Json`、`[int]` 转换、`-lt` 比较与 `::warning::` 输出，
+这些在 5.1 与 7 之间并非全部同义。
+
+本机装有 pwsh 7.6.9，用它把同一组 9 条边界重跑一遍，逐条对比：
+
+| 场景 | PS 5.1 | pwsh 7 | 期望 |
+| --- | --- | --- | --- |
+| 正常（1927/104） | GREEN | GREEN | GREEN |
+| total = 0 | RED | RED | RED |
+| expected = 0 | RED | RED | RED |
+| expected = -5 | RED | RED | RED |
+| 缺 Counters | RED | RED | RED |
+| 少 1 例 | RED | RED | RED |
+| 多 1 例 | GREEN | GREEN | GREEN |
+| 有 failed | RED | RED | RED |
+| 基线缺失 | RED | RED | RED |
+
+**差异 0 条**。脚本在两代 PowerShell 上可互换，CI 用的 pwsh 7 也就是本机验证过的那套行为。
+
+> **踩坑记录（测试脚本自身）**：第一版对比脚本用 `execSync(..., { shell: 'bash' })` 调 PowerShell，
+> bash 无法解析 `C:\Program Files\...` 这类路径，两边都只拿到 WSL 的报错文本 —— 于是**所有用例都被判成 GREEN**，
+> 看起来像「5 处行为不一致」。改用 `spawnSync(exe, args)` 直接起进程后结果才正常。
+> 教训：**对比两种 shell 时，调用方式本身不能引入第三个 shell**。
