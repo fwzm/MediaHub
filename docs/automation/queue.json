@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T00:34:00+08:00",
-  "updated_by": "lead-W6-113-r10",
+  "updated_at": "2026-10-31T00:56:00+08:00",
+  "updated_by": "lead-W6-113-r11",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -242,7 +242,8 @@
         "迁移验证：旧格式基线（无 methods 表）在新闸门下两代 PowerShell 均 exit 1，报 has no methods table - the per-method check would be vacuous",
         "CI 实测 head f045d34c: windows-ci run 41072599036 success，日志 methods=1637 baseline=method table 1637 names / WebDav methods=95 ... 95 names / combined tests=2056",
         "Android CI run 41072599413（同 head）入账时 in_progress -> 未作结论（本轮零 Android 代码改动）",
-        "windows-ci:41089267971 (head 5091fa74, merge 6a4018c6f589, base 8d11eee1) - ladder re-confirmed on the new base: methods=1637, combined tests=2056, licence checks=25 failed=0"
+        "windows-ci:41089267971 (head 5091fa74, merge 6a4018c6f589, base 8d11eee1) - ladder re-confirmed on the new base: methods=1637, combined tests=2056, licence checks=25 failed=0",
+        "windows-ci:41091035445 (head 997a91ee, merge d538e88ffa2e, base 8d11eee1) success - ladder methods=1637 / combined tests=2056 / licence checks=25 failed=0; Android CI 41091035560 in_progress with identical core/feature/app tree hashes (ff4eed82/e983feb0/70c54145) -> inherited per ADR-AUTO-001"
       ],
       "notes": "方法名取 TRX TestDefinitions 的 TestMethod.className + name，剥掉第一个 ( 起的 Theory 参数后去重；数据行仍由 classes 的用例数管。刷新脚本 update-test-suite-baseline.ps1 同步写 methods 表，且 _comment 由脚本拥有、每次刷新归一化。",
       "next_action": "无；若 CI 判 RED 并点名方法消失，需人工确认后以 -AcceptRemoval 刷新基线。"
@@ -288,6 +289,24 @@
       ],
       "notes": "契约冻结为「内存快照 + 滚动文件目录指针（Windows 报告头，不过 Redact）」+「Android 端口写自身目录且日志信息行不含目录」。本轮按指令不新增用例、不做提交（no-op）；若未来改口径，需同步两棵树文档与这两组用例。",
       "next_action": "无；后续任何改导出格式的提交，须同时更新 W14 文档与两侧用例，并重跑本组 25 例"
+    },
+    {
+      "id": "W6-113o",
+      "title": "PR #39 正文第三轮归档：W6-59 ~ W6-85 共 21 节移出版本化 docs，正文回到 122 KB 余量",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r11",
+      "branch": "feature/cross-device-source-sync",
+      "blocked_by": [],
+      "evidence": [
+        "折叠前正文 202,521 B（余 59,623 B）；折叠后 139,588 B（余 122,556 B）；PATCH 后回读 equal=true，sha256 e63dcc649d6cffde09330cb24aacd9c453025780cf5ecba5a8c20366a1ad2bfa",
+        "归档文件 docs/pr-archive/PR39-W6-59-to-W6-85-20261031.md（66,897 B；折叠区段 65,936 B / 21 节逐字原文；payload sha256 6d2d0dcc86892dbbc222834576a8daa57a8e8f070bce98b506976133d50648c5）",
+        "字节区间 47,886-113,822（锚点：## 2026-10-25 13:30 进度追加（W6-59 ... 至 ## 2026-10-30 20:2x 进度追加（PR 正文治理：W6-86 ... 之前）",
+        "前缀 47,886 B 与后缀 88,699 B 在 PATCH 前后逐字节未动；正文原位索引 3,003 B（归档链接 + 字节区间 + 21 条小节标题）",
+        "写入前全文证据 D:/mh-verify/r11/pr39-body-remote-before-r11.md；PATCH 前重读远端 drift=false"
+      ],
+      "notes": "折叠口径：小节标题（含结论）与证据路径留在正文，细节正文入版本化 docs；原文逐字保存，不丢历史。并发写者风险仍在——本次 PATCH 前重读比对无漂移，但「最后写者胜」的规则未变。round 10 收尾报告曾声称 exact-head CI 验收已写入 RUNLOG，实测不准确（997a91ee 只写了 5091fa74 的 run），本轮已在 RUNLOG 更正并补记 41091035445。",
+      "next_action": "正文余量 122,556 B（约 2 轮）；下次正文超过约 180 KB 时折叠 2026-10-30 的旧小节（W6-111 ~ W30 区段）。"
     }
   ]
 }
