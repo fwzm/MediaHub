@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Nine things rot silently in a licence deliverable:
+    Ten things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -18,8 +18,11 @@
          pinning gpu-api=d3d11, or the verdict in windows/docs/licensing/VULKAN-NECESSITY.md is lost.
       9. the LGPL flavour ships a DLL whose licence declaration is missing, or whose row in
          component-licences.txt was rewritten and the report kept quoting the old transcription.
+     10. the shipping state in windows/docs/licensing/PACKAGING.md drifts: CI starts signing, an
+          app manifest or installer project appears, or the app stops being an unpackaged
+          self-contained portable build - the document keeps claiming SIGNING_BLOCKED and green CI.
 
-    This script checks those nine surfaces without touching the network, the build, or the
+    This script checks those ten surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -58,6 +61,10 @@ param(
     [string] $PlayerSourcePath,
     [string] $VulkanDocPath,
     [string] $SourceRootPath,
+    [string] $PackagingDocPath,
+    [string] $WorkflowsPath,
+    [string] $WindowsRootPath,
+    [string] $AppProjectPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -683,6 +690,96 @@ else {
     }
     else {
         Add-Check 'lgpl-licence-table' 'FAIL' (($licenceProblems -join '; ') + ' - re-collect the table with windows/engine/lgpl/collect-licences.sh and re-map the new package in windows/tools/license-report.ps1')
+    }
+}
+
+# --- 10. packaging and signing claims ---------------------------------------------------------
+# windows/docs/licensing/PACKAGING.md states the shipping state (portable, self-contained,
+# unsigned, no MSIX, no installer, never installed on a clean machine, release blocked by the GPL
+# obligation). Nothing compared that statement with the repository, so the first signing step, the
+# first Package.appxmanifest or a changed packaging property would leave the document describing
+# the old state while every gate stayed green. Build output (obj/bin/artifacts) is not the
+# repository: the MSIX tooling writes .msix files into obj on every Debug build.
+function Resolve-ClaimPath {
+    param([string] $Path, [string] $Default)
+    $value = if ($Path) { $Path } else { $Default }
+    if ([System.IO.Path]::IsPathRooted($value)) { return $value }
+    return (Resolve-RepoPath -Path $value)
+}
+$packagingDocFile = Resolve-ClaimPath -Path $PackagingDocPath -Default 'windows/docs/licensing/PACKAGING.md'
+$packagingWorkflows = Resolve-ClaimPath -Path $WorkflowsPath -Default '.github/workflows'
+$packagingWindowsRoot = Resolve-ClaimPath -Path $WindowsRootPath -Default 'windows'
+$packagingAppProject = Resolve-ClaimPath -Path $AppProjectPath -Default 'windows/src/MediaHub.App/MediaHub.App.csproj'
+if (-not (Test-Path -LiteralPath $packagingDocFile)) {
+    Add-Check 'packaging-claims' 'SKIP' ('the packaging document is absent at ' + $packagingDocFile + ', so the shipping state it states cannot be compared with the repository')
+}
+else {
+    $packagingDoc = [string](Get-Content -LiteralPath $packagingDocFile -Raw)
+    if ($null -eq $packagingDoc) { $packagingDoc = '' }
+    $packagingProblems = @()
+    $packagingFacts = @(
+        @{ line = 'signing-status: blocked-no-certificate'; what = 'signing status' },
+        @{ line = 'packaging-form: portable-zip-self-contained'; what = 'packaging form' },
+        @{ line = 'msix: not-implemented'; what = 'MSIX state' },
+        @{ line = 'installer: not-implemented'; what = 'installer state' },
+        @{ line = 'clean-machine-install: not-run'; what = 'clean-machine install state' },
+        @{ line = 'release-status: blocked-gpl-obligation'; what = 'release status' }
+    )
+    foreach ($fact in $packagingFacts) {
+        if (-not $packagingDoc.Contains([string]$fact['line'])) { $packagingProblems += ('the machine-readable ' + $fact['what'] + ' line is missing (expected "' + $fact['line'] + '")') }
+    }
+    if (-not (Test-Path -LiteralPath $packagingAppProject)) {
+        $packagingProblems += ('the app project is absent at ' + $packagingAppProject + ', so the documented packaging form cannot be verified')
+    }
+    else {
+        $appProjectText = [string](Get-Content -LiteralPath $packagingAppProject -Raw)
+        if ($null -eq $appProjectText) { $appProjectText = '' }
+        foreach ($property in @('<WindowsPackageType>None</WindowsPackageType>', '<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>', '<SelfContained>true</SelfContained>', '<RuntimeIdentifier>win-x64</RuntimeIdentifier>')) {
+            if (-not $appProjectText.Contains($property)) { $packagingProblems += ('MediaHub.App.csproj no longer carries ' + $property) }
+        }
+    }
+    $signingSignals = @()
+    if (Test-Path -LiteralPath $packagingWorkflows) {
+        foreach ($workflowFile in @(Get-ChildItem -LiteralPath $packagingWorkflows -File -Recurse -ErrorAction SilentlyContinue)) {
+            $workflowText = [string](Get-Content -LiteralPath $workflowFile.FullName -Raw)
+            if ($null -eq $workflowText) { $workflowText = '' }
+            foreach ($token in @('signtool', 'AzureSignTool', 'CertificateThumbprint', 'signingCertificate', '-p:SignPackage', 'codesign')) {
+                if ($workflowText.IndexOf($token, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $signingSignals += ($workflowFile.Name + ' mentions ' + $token) }
+            }
+        }
+    }
+    if (@($signingSignals).Count -gt 0) { $packagingProblems += ('the document says no CI job signs and no certificate secret exists, but ' + (Format-NameList @($signingSignals))) }
+    $msixArtefacts = @()
+    $installerArtefacts = @()
+    if (Test-Path -LiteralPath $packagingWindowsRoot) {
+        foreach ($item in @(Get-ChildItem -LiteralPath $packagingWindowsRoot -Recurse -File -ErrorAction SilentlyContinue)) {
+            $skipBuildOutput = $false
+            foreach ($segment in @('obj', 'bin', 'artifacts')) {
+                if ($item.FullName.IndexOf(($pathSeparator + $segment + $pathSeparator), [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $skipBuildOutput = $true }
+            }
+            if ($skipBuildOutput) { continue }
+            if ($item.Name.EndsWith('.appxmanifest', [System.StringComparison]::OrdinalIgnoreCase)) { $msixArtefacts += $item.FullName }
+            elseif (@('.wixproj', '.wxs', '.iss', '.nsi', '.msix') -contains $item.Extension.ToLowerInvariant()) { $installerArtefacts += $item.FullName }
+        }
+    }
+    if (@($msixArtefacts).Count -gt 0) { $packagingProblems += ('the document says MSIX is not implemented, but ' + (@($msixArtefacts).Count).ToString() + ' appxmanifest file(s) exist [' + (Format-NameList @($msixArtefacts)) + ']') }
+    if (@($installerArtefacts).Count -gt 0) { $packagingProblems += ('the document says no installer exists, but ' + (@($installerArtefacts).Count).ToString() + ' installer project file(s) exist [' + (Format-NameList @($installerArtefacts)) + ']') }
+    $packagingCi = Join-Path $packagingWorkflows 'windows-ci.yml'
+    if (-not (Test-Path -LiteralPath $packagingCi)) {
+        $packagingProblems += ('windows-ci.yml is absent under ' + $packagingWorkflows + ', so the documented publish step cannot be verified')
+    }
+    else {
+        $packagingCiText = [string](Get-Content -LiteralPath $packagingCi -Raw)
+        if ($null -eq $packagingCiText) { $packagingCiText = '' }
+        foreach ($expected in @('-o ./artifacts/portable', 'mediahub-windows-')) {
+            if ($packagingCiText.IndexOf($expected, [System.StringComparison]::Ordinal) -lt 0) { $packagingProblems += ('windows-ci.yml no longer carries "' + $expected + '", which the document describes as the portable publish and artifact step') }
+        }
+    }
+    if (@($packagingProblems).Count -eq 0) {
+        Add-Check 'packaging-claims' 'PASS' 'the shipping state in PACKAGING.md still matches the repository: portable self-contained publish, no signing step, no MSIX manifest, no installer project outside build output (6 machine-readable lines)'
+    }
+    else {
+        Add-Check 'packaging-claims' 'FAIL' ((@($packagingProblems) -join '; ') + ' - update PACKAGING.md section 0 and section 1 with the change')
     }
 }
 

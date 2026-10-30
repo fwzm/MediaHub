@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-31 项检查分十一组：
+32 项检查分十二组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -58,6 +58,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 引擎候选身份（W36 起） | `lgpl-candidate-hashes`、`lgpl-candidate-claims` | 入库的 LGPL 候选 DLL 与 `windows/engine/lgpl/dist/dist-hashes.txt` 的记录不符；或十一个引用候选身份的文档/常量写着别的构建（字节数或 sha256 对不上） |
 | 引擎能力（W37 起） | `vulkan-claims` | 候选件忽然带上 Vulkan、`MpvPlayer` 不再把 `gpu-api` 钉成 `d3d11`、`windows/src` 下出现 vulkan 字样，或 `VULKAN-NECESSITY.md` 丢了 verdict 行——许可证决策依赖的「Vulkan 非必需」结论不能悄悄过期 |
 | 引擎许可声明（W38 起） | `lgpl-licence-table` | LGPL flavour 的 33 个 DLL 与 `component-licences.txt` 的逐行声明对不上（表被改坏、缺行、证据行号指到别处），或装出来的文件清单与报告行数不符 |
+| 分发与签名（W39 起） | `packaging-claims` | 发布形态、签名、安装方式与 `PACKAGING.md` §0 六行不符：CI 开始签名、仓库出现 `*.appxmanifest` 或 WiX/Inno/NSIS 工程、App 不再是 unpackaged self-contained portable、`windows-ci.yml` 丢了 portable publish/上传步骤（构建输出 `obj/`、`bin/`、`artifacts/` 不计） |
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
 
@@ -166,7 +167,20 @@ W32 的三检首次随 CI 跑就抓到两件事，都不是「SBOM 写错了」�
 - 报告副本把 `avcodec-62.dll` 的证据改成 `component-licences.txt:1-2 (…)` → 1 红（注释行 1-2 从未出现 FFmpeg）。
 - 报告副本把 `libexpat-1.dll` 的证据改成 `see component-licences.txt` → 1 红（没有任何行号）。
 - `-JsonPath` 指向不存在的报告 → 该项 SKIP、退出码 0（与 §3.3 同口径）。
-## 4. 当前实测（2026-10-23，HEAD baac30c）
+
+### 3.7 分发与签名状态（W39，2026-10-31）
+
+`windows/docs/licensing/PACKAGING.md` 是唯一写清「今天到底发布什么」的文档：portable、self-contained、未签名（SIGNING_BLOCKED）、无 MSIX、无安装器、未在干净机装过、因 GPL 义务被阻止发布。它逐条记了实测值，但没有任何检查对照仓库 ⇒ 只要 CI 加了签名步骤、仓库里出现 `.appxmanifest` 或安装器工程、或 App 不再是 unpackaged self-contained portable，文档会继续宣称旧状态而 CI 全绿。
+
+W39 给该文档加了 §0 机器可读状态块（六行），并新增一项：
+
+| 检查 | 判据 | 失败含义 |
+| --- | --- | --- |
+| `packaging-claims` | ① `PACKAGING.md` 必须含 §0 的六行且值逐字相符：`signing-status: blocked-no-certificate`、`packaging-form: portable-zip-self-contained`、`msix: not-implemented`、`installer: not-implemented`、`clean-machine-install: not-run`、`release-status: blocked-gpl-obligation`；② App csproj 必须仍有 `<WindowsPackageType>None</WindowsPackageType>`、`<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>`、`<SelfContained>true</SelfContained>`、`<RuntimeIdentifier>win-x64</RuntimeIdentifier>`；③ `.github/workflows` 下不得出现签名令牌（`signtool` / `AzureSignTool` / `CertificateThumbprint` / `signingCertificate` / `-p:SignPackage` / `codesign`）；④ `windows/` 下（排除 `obj/`、`bin/`、`artifacts/` 构建输出）不得有 `*.appxmanifest` 或 `*.wixproj`/`*.wxs`/`*.iss`/`*.nsi`/`*.msix`；⑤ `windows-ci.yml` 必须仍含 `-o ./artifacts/portable` 与 `mediahub-windows-` | 发布形态/签名/安装状态与文档不符——「证书还没签、MSIX 还没做」这类如实状态被悄悄改写，或反过来签名做完了文档没更新 |
+
+`## 0` 六行由人工与 §1 一起维护；文档缺失时该项 SKIP（退出码仍 0）。负向对照见 §4.7。
+
+## 4. 当前实测（2026-10-23，HEAD baac30c）## 4. 当前实测（2026-10-23，HEAD baac30c）
 
 ```text
 license-report  projects=13  rows=49  packages=29
@@ -262,6 +276,28 @@ RESULT: PASS
 
 `warnings=0` 是本轮起 33 个 DLL 全部有声明行；`warnings=4` 里多出的那条是 `MediaHub.Tests: project.assets.json is older than the .csproj` 的本机陈旧警告，与库存无关。`component-licences.txt` 共 40 行、数据行 8..40（33 行）；`libiconv` 现声明为 `LGPL-2.1-or-later`（文档部分 `documentation:GPL-3.0-or-later`），因此许可族归类把它从 GPL 族移入 LGPL 族，见 [SBOM.md](SBOM.md) §7.2 与 [windows/THIRD-PARTY-NOTICES.md](../../THIRD-PARTY-NOTICES.md)。缺报告时该检查 SKIP、退出码 0（§3.6）。
 
+### 4.7 实测（2026-10-31，W39，本机，HEAD 06aadcaf）
+
+```text
+check-licence-surface  checks=32 failed=0 warnings=0 skipped=0
+check-licence-surface  PASS  lgpl-licence-table  33 shipped LGPL-flavour DLL(s) each quote a licence declaration that component-licences.txt really holds (40 table line(s), shipped list 33 file(s))
+check-licence-surface  PASS  packaging-claims  the shipping state in PACKAGING.md still matches the repository: portable self-contained publish, no signing step, no MSIX manifest, no installer project outside build output (6 machine-readable lines)
+RESULT: PASS
+```
+
+W39 首跑该项 FAIL，库里的报错点出了 `windows/src/MediaHub.App/obj/**/MsixContent/MSIX/*.msix` 六个文件——那是 Windows App SDK 的 MSIX 工具在 Debug 构建时生成的**构建输出**（`EnableMsixTooling=true` 只开工具，仓库里没有 tracked 的 MSIX 工程）。据此把「仓库现状」的扫描口径明确为排除 `obj/`、`bin/`、`artifacts/`，并在检查注释与本文件里写明，避免把构建产物当成发布形态。
+
+七条负向对照各恰好 1 红（全部用临时副本，不改仓库文件）：
+
+- 文档副本把 `signing-status` 的值改成 `signed-by-ci` → 1 红（该行不匹配）。
+- 文档副本删掉 `msix: not-implemented` 行 → 1 红（缺行）。
+- 临时 workflows 目录里放一份含 `signtool` 的 `sign.yml` → 1 红（文档说无人签名，CI 开始签名）。
+- 临时 windows 根下放 `Package.appxmanifest` → 1 红（文档说 MSIX 未实现）。
+- App csproj 副本把 `<SelfContained>true</SelfContained>` 改成 `false` → 1 红（发布形态漂移）。
+- `-PackagingDocPath` 指向不存在的文件 → 该项 SKIP、退出码 0。
+- 临时 workflows 里放缺 `-o ./artifacts/portable` 的 `windows-ci.yml` → 1 红（发布/上传步骤漂移）。
+
+## 5. 这个工具**不**覆盖什么
 ## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。

@@ -6,6 +6,26 @@
   ([LICENCE-DECISION.md](LICENCE-DECISION.md)).**
 - Every "current fact" below was re-measured this session rather than copied from an ADR.
 
+## 0. Machine-readable status (checked by CI)
+
+The block below is read by `windows/tools/check-licence-surface.ps1` (check `packaging-claims`, W39)
+and compared with the repository itself. If a signing step, a certificate, a `.appxmanifest`,
+a WiX/Inno/NSIS project or a changed packaging property in `MediaHub.App.csproj` appears, the
+gate fails until this block and section 1 are updated together - the document must not keep claiming
+the old state while CI stays green.
+
+```text
+signing-status: blocked-no-certificate
+packaging-form: portable-zip-self-contained
+msix: not-implemented
+installer: not-implemented
+clean-machine-install: not-run
+release-status: blocked-gpl-obligation
+```
+
+The same six facts are described in prose in section 1; section 1 is the human reading of this
+block, not a second source of truth.
+
 ## 1. Current state (verified)
 
 | Fact | Measured value | Evidence |
