@@ -288,26 +288,80 @@ else {
             }
             else {
                 $head = ""
-                $reachable = $false
+                $present = $false
+                $shallow = $false
                 try {
                     $head = [string](@(& git -C $RepoRoot rev-parse HEAD 2>$null) | Select-Object -First 1)
-                    & git -C $RepoRoot merge-base --is-ancestor $sha HEAD 2>$null | Out-Null
-                    $reachable = ($LASTEXITCODE -eq 0)
+                    & git -C $RepoRoot cat-file -e ($sha + "^{commit}") 2>$null | Out-Null
+                    $present = ($LASTEXITCODE -eq 0)
+                    if (-not $present) {
+                        $shallowText = [string](@(& git -C $RepoRoot rev-parse --is-shallow-repository 2>$null) | Select-Object -First 1)
+                        $shallow = ($shallowText.Trim() -eq "true")
+                    }
                 }
                 catch {
-                    $reachable = $false
+                    $present = $false
                 }
-                if (-not $reachable) {
-                    Add-Check "sbom-source-revision" "FAIL" ("the SBOM says it was generated from " + $recordedRevision + ", which is not an ancestor of HEAD (" + $head + ") - it came from another lineage; regenerate it on this branch")
-                }
-                elseif ($head -and ([string]$head).StartsWith($sha)) {
-                    Add-Check "sbom-source-revision" "PASS" ("generated from " + $recordedRevision + ", which is HEAD")
+                if (-not $present) {
+                    if ($shallow) {
+                        Add-Check "sbom-source-revision" "WARN" ("this clone is shallow, so it does not contain " + $sha + " (" + $recordedRevision + ") and its lineage cannot be checked here - check out with fetch-depth: 0 to enforce it")
+                    }
+                    else {
+                        Add-Check "sbom-source-revision" "FAIL" ("the SBOM records " + $recordedRevision + ", which is not in this clone at all - it came from another lineage; regenerate it on this branch")
+                    }
                 }
                 else {
-                    Add-Check "sbom-source-revision" "PASS" ("generated from " + $recordedRevision + ", an ancestor of HEAD (" + ([string]$head).Substring(0, 12) + ") - the inventory above is what matters; regenerate to refresh the recorded revision")
+                    $reachable = $false
+                    try {
+                        & git -C $RepoRoot merge-base --is-ancestor $sha HEAD 2>$null | Out-Null
+                        $reachable = ($LASTEXITCODE -eq 0)
+                    }
+                    catch {
+                        $reachable = $false
+                    }
+                    if (-not $reachable) {
+                        Add-Check "sbom-source-revision" "FAIL" ("the SBOM says it was generated from " + $recordedRevision + ", which is not an ancestor of HEAD (" + $head + ") - it came from another lineage; regenerate it on this branch")
+                    }
+                    elseif ($head -and ([string]$head).StartsWith($sha)) {
+                        Add-Check "sbom-source-revision" "PASS" ("generated from " + $recordedRevision + ", which is HEAD")
+                    }
+                    else {
+                        Add-Check "sbom-source-revision" "PASS" ("generated from " + $recordedRevision + ", an ancestor of HEAD (" + ([string]$head).Substring(0, 12) + ") - the inventory above is what matters; regenerate to refresh the recorded revision")
+                    }
                 }
             }
         }
+    }
+}
+
+# --- 7. SDK pin vs the toolchain that produced the report --------------------------------------
+$globalJsonFile = Join-Path $RepoRoot "global.json"
+if (-not $report) {
+    Add-Check "sdk-pin-matches-report" "SKIP" "the licence report did not parse, so the SDK that produced it is unknown - see the report-exists check above"
+}
+elseif (-not (Test-Path -LiteralPath $globalJsonFile)) {
+    Add-Check "sdk-pin-matches-report" "WARN" ("no " + $globalJsonFile + " - the SDK is not pinned, and SDK feature bands resolve (prune) framework-provided packages differently, so the resolved graph and the SBOM can drift between machines")
+}
+else {
+    try {
+        $pinDoc = Read-JsonFile -Path $globalJsonFile
+        $pinned = [string]$pinDoc.sdk.version
+        $observed = [string]$report.tooling.dotnet
+        if (-not $pinned) {
+            Add-Check "sdk-pin-matches-report" "WARN" ("global.json has no sdk.version, so there is no pin to compare against")
+        }
+        elseif (($observed -eq "") -or ($observed -eq "unknown")) {
+            Add-Check "sdk-pin-matches-report" "WARN" ("the report does not record which SDK produced it (tooling.dotnet=" + $observed + "), so the pin cannot be checked - regenerate the report where dotnet is on PATH")
+        }
+        elseif ($observed -eq $pinned) {
+            Add-Check "sdk-pin-matches-report" "PASS" ("the report was produced by the pinned SDK " + $pinned)
+        }
+        else {
+            Add-Check "sdk-pin-matches-report" "FAIL" ("the report was produced with SDK " + $observed + " but global.json pins " + $pinned + " - SDK feature bands prune framework-provided packages differently, so the SBOM would describe a different graph; build with the pinned SDK or move the pin and the regenerated SBOM together")
+        }
+    }
+    catch {
+        Add-Check "sdk-pin-matches-report" "FAIL" ("cannot read " + $globalJsonFile + ": " + $_.Exception.Message)
     }
 }
 

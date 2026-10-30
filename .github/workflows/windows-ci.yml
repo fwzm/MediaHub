@@ -27,11 +27,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The licence guard proves the SBOM's recorded revision is on this branch's history, so the
+          # clone needs history; nothing in this pipeline reads tags, so this costs only the fetch
+          # (the pack is ~27 MiB for 500 commits).
+          fetch-depth: 0
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "10.0.x"
+          # Pinned, not "10.0.x": SDK feature bands prune framework-provided NuGet packages
+          # differently, so the resolved graph - and the SBOM this job verifies - depends on the SDK.
+          # global.json pins the same version; the guard checks the report agrees with it.
+          dotnet-version: "10.0.113"
 
       - name: Cache libmpv
         id: libmpv-cache

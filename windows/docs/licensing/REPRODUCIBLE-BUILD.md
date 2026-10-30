@@ -19,7 +19,7 @@
 | Requirement | Value / how to check |
 | --- | --- |
 | OS / arch | Windows x64 (`win-x64` runtime identifier) |
-| .NET SDK | **10.0.113** — `dotnet --version`. Also installed here: 9.0.313. CI pins `10.0.x` (`windows-ci.yml` line 34) |
+| .NET SDK | **10.0.113** — `dotnet --version`. Also installed here: 9.0.313. The repository `global.json` pins `10.0.113` with `rollForward: disable`, and CI installs that same version instead of `10.0.x` (W33) - see §8.
 | .NET runtime present in the package | `Microsoft.NETCore.App` **10.0.13** (self-contained; `MediaHub.runtimeconfig.json`) |
 | PowerShell | 7.x (`pwsh`) — the fetch script and the CI steps use it |
 | 7-Zip standalone extractor | `7zr.exe`, downloaded by the fetch script to `%TEMP%` if absent |
@@ -200,3 +200,22 @@ PACKAGING.md (SIGNING_BLOCKED).
 Do not confuse the two: **being able to rebuild the .NET half does not help the licence problem, and
 pinning the engine's digest does not make the engine LGPL.** The digests prove *which* GPL binary we
 ship; only a different build (LICENCE-DECISION §2) changes *what* we ship.
+
+## 8. SDK pinning and the licence gate (W33, 2026-10-30)
+
+The SDK version is no longer a private choice of whoever runs the build. The first CI run of the W32 SBOM
+inventory checks failed because CI installed SDK 10.0.403 while the committed SBOM was generated with
+10.0.113: .NET feature bands ship prune data (`PrunePackageData`) that removes framework-provided
+packages from the resolved graph, and 10.0.403 pruned `System.Reflection.Metadata@1.6.0` (transitive from
+`Microsoft.TestPlatform.ObjectModel@17.13.0`), turning 29 packages into 28. Two consequences:
+
+- the repository now pins the toolchain in `global.json` (`10.0.113`, `rollForward: disable`), and
+  `windows-ci.yml` installs that exact version rather than `10.0.x`;
+- `windows/tools/check-licence-surface.ps1` gained `sdk-pin-matches-report`, which fails when
+  `tooling.dotnet` in the report differs from the pin, and warns when the report was not produced on a
+  machine with `dotnet` on `PATH` (the report records `unknown` there). CI also checks out with
+  `fetch-depth: 0`, so the revision recorded in the SBOM can be proven to sit on the history of this branch.
+
+If a newer SDK is wanted, move `global.json` and the regenerated SBOM (`license-report.ps1 -Sbom`) in the same
+commit; the guard then keeps them from drifting apart again. The measurements in §3 were taken under 10.0.113
+and remain valid only for that toolchain.
