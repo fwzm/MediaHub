@@ -10,6 +10,8 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.BySelector
+import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import com.mediahub.app.MainActivity
@@ -64,6 +66,21 @@ class LocalSafProductionUiFlowTest {
             created += uri
             checkNotNull(resolver.openOutputStream(uri)).use { it.write(bytes) }
         }
+        fun clickFresh(selector: BySelector, timeoutMs: Long = 10_000): Boolean {
+            repeat(3) {
+                val object2 = device.wait(Until.findObject(selector), timeoutMs)
+                if (object2 != null) {
+                    try {
+                        val bounds = object2.visibleBounds
+                        if (device.click(bounds.centerX(), bounds.centerY())) return true
+                    } catch (_: StaleObjectException) {
+                        // DocumentsUI can rebuild the row between findObject and click. Re-find it.
+                    }
+                }
+                device.waitForIdle(1_000)
+            }
+            return false
+        }
         fun chooseTree() {
             waitNode(hasText("选择本地目录", substring = true)).performScrollTo().performClick()
             val documents = By.pkg(Pattern.compile("com\\.(android|google\\.android)\\.documentsui"))
@@ -82,20 +99,31 @@ class LocalSafProductionUiFlowTest {
                 for (container in listOf("roots_list", "dir_list")) {
                     val entry = device.wait(Until.findObject(By.text(downloads).hasAncestor(
                         By.res(Pattern.compile(".*:id/" + container)))), 2_000)
-                    if (entry != null) { entry.click(); selectedDownloads = true; break }
+                    if (entry != null) {
+                        selectedDownloads = clickFresh(By.text(downloads).hasAncestor(
+                            By.res(Pattern.compile(".*:id/" + container)),
+                        ), 2_000)
+                        if (selectedDownloads) break
+                    }
                 }
                 if (!selectedDownloads) {
                     val visible = device.findObjects(By.text(downloads))
                     assertTrue("Downloads location must be visible", visible.isNotEmpty())
-                    visible.first().click()
+                    assertTrue(clickFresh(By.text(downloads), 2_000))
                 }
                 device.waitForIdle(10_000)
             }
-            checkNotNull(device.wait(Until.findObject(By.text(label)), 10_000)).click()
-            val selectFolder = device.wait(Until.findObject(By.res(Pattern.compile(".*:id/action_menu_select"))), 3_000)
-                ?: device.wait(Until.findObject(By.res("android:id/button1")), 10_000)
-            checkNotNull(selectFolder).click()
-            device.wait(Until.findObject(By.res("android:id/button1")), 3_000)?.click()
+            assertTrue("SAF directory row did not become clickable", clickFresh(By.text(label)))
+            val actionSelect = By.res(Pattern.compile(".*:id/action_menu_select"))
+            val allowButton = By.res("android:id/button1")
+            assertTrue(
+                "SAF select-folder action did not become clickable",
+                clickFresh(actionSelect, 3_000) || clickFresh(allowButton, 10_000),
+            )
+            // Some DocumentsUI builds show a second confirmation dialog after the folder action.
+            // Re-find the button and click its current bounds; a UiObject2 captured before the
+            // dialog transition is stale on API 36.
+            clickFresh(allowButton, 3_000)
             waitNode(hasText("已选择目录"))
         }
         fun leavePlayer() {
@@ -115,6 +143,12 @@ class LocalSafProductionUiFlowTest {
             waitNode(hasText("本地存储") and hasClickAction()).performClick()
             chooseTree()
             waitNode(hasSetTextAction() and hasText("本地存储")).performTextReplacement(label)
+            // The Compose text field can keep the IME visible after replacement. Hide it before
+            // opening the media list so it cannot cover the player overlay on API 32.
+            if (device.findObject(By.pkg(Pattern.compile("com\\.google\\.android\\.inputmethod.*"))) != null) {
+                device.pressBack()
+                device.waitForIdle(2_000)
+            }
             waitNode(hasText("保存目录")).performScrollTo().performClick()
             waitNode(hasContentDescription("添加媒体库"))
             waitNode(hasText(label)).performClick()
