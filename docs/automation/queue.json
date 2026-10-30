@@ -214,9 +214,12 @@
         "基线新增 classes 表（MediaHub.Tests 112 类 / WebDav 4 类），源数据取自 CI run 41048006881 的真实 TRX",
         "负向对照 18/18 通过（NC0-NC17），pwsh7 与 PS5.1 判定逐例一致",
         "NC2 关键：总数相同、类分布不同 -> 新门禁 RED；同一输入在 HEAD 旧 total-only 门禁下 GREEN (NC16)",
-        "NC15：从真实 CI TRX 重新生成基线与提交版本逐字节一致；NC17：真实数据 1943+104 -> PASS"
+        "NC15：从真实 CI TRX 重新生成基线与提交版本逐字节一致；NC17：真实数据 1943+104 -> PASS",
+        "CI 实测 head 0cef5d79: windows-ci run 41051026115 success，日志 classes=112 baseline=class table 112 entries / WebDav classes=4 ... 4 entries",
+        "Android CI run 41051026121（同 head）入账时 in_progress -> 未作结论（本轮零 Android 代码改动）"
       ],
-      "notes": "替换漏洞：删 1514 例再加 1514 个新例，旧门禁（仅总数）判绿，新门禁判红。刷新路径 update-test-suite-baseline.ps1。"
+      "notes": "替换漏洞：删 1514 例再加 1514 个新例，旧门禁（仅总数）判绿，新门禁判红。刷新路径 update-test-suite-baseline.ps1。",
+      "next_action": "无；若后续新增/删除用例，按 windows-ci 的 ::warning 提示运行 update-test-suite-baseline.ps1（下调需 -AcceptRemoval 且需人工理由）。"
     }
   ]
 }

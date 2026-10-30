@@ -240,3 +240,6 @@ MediaHub.Tests: total=1927 baseline=1927
 
 > 数据源：CI run `41048006881`（head `52cda428`）的 `test-results/*.trx`，因此基线钉的是该 commit 的 CI 真实行为。
 > 台账位置：`D:/mh-verify/r7-nc/run-nc.cjs`（18 条对照一次跑完，两代 PowerShell 各跑一遍）。
+
+**CI 实测（EXECUTED，head `0cef5d792ea06ebe34fddcff550c98bdf0d895a7`）**：windows-ci run `41051026115` success，台阶日志逐行为 `MediaHub.Tests: total=1943 baseline=1943 failed=0 notExecuted=0` / `MediaHub.Tests: classes=112 baseline=class table 112 entries` / `MediaHub.WebDav.Tests: total=104 baseline=104 failed=0 notExecuted=0` / `MediaHub.WebDav.Tests: classes=4 baseline=class table 4 entries` —— 即 CI 跑的就是带类表的这份闸门，不是只改文档。同日 Android CI run `41051026121`（同 head）在入账时仍 in_progress，本行不为其作任何结论。
+
