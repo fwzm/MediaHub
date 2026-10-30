@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T03:22:00+08:00",
-  "updated_by": "lead-W6-113-r13",
+  "updated_at": "2026-10-31T04:47:00+08:00",
+  "updated_by": "lead-W6-113-r14",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -153,7 +153,8 @@
         "same heads windows-ci: success 41003347790 41000771112 41005235521",
         "cancelled runs (追加): 41093847372 (head 58bb304b, 2026-10-31)",
         "cancelled runs (追加): 41099478811 (head 8ec0d890) and 41100655793 (head 4461140b), 2026-10-31 - the same heads' windows-ci succeeded as 41099478575 / 41100655895",
-        "cancelled runs (追加): 41111613255 (head a0b46f6e, 2026-10-31) - the same head's windows-ci succeeded as 41111613263"
+        "cancelled runs (追加): 41111613255 (head a0b46f6e, 2026-10-31) - the same head's windows-ci succeeded as 41111613263",
+        "cancelled runs (追加): 41124244565 (head 1e2cf9ed, 2026-10-31) - the same head's windows-ci succeeded as 41124244650"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -361,6 +362,28 @@
       "notes": "digest = SHA-256 over Ordinal-sorted, LF-joined argument suffixes with duplicates kept, first 8 bytes as lowercase hex, only for methods that actually carry parameters. Row counts are compared first, so a theory that gains rows stays a warning (argument text grew: N -> M rows) instead of a hard fail. Residual limits: the framework truncates 6 display names with '...', a theory that adds a row and changes a value in one step stays a growth warning, and class/method names are not part of the digest (renames stay the methods table's business).",
       "next_action": "无；下一层候选是把运行期生成的 Theory 值或截断前原文纳入基线，代价更高，需另立切片。",
       "closed_at": "2026-10-31T03:10:00+08:00"
+    },
+    {
+      "id": "W6-113r",
+      "title": "套件基线第五层口径升级：per-method 参数行清单与多重集包含判定（关闭「同 theory 加行 + 换值」）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r14",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (24,967 B) + update-test-suite-baseline.ps1 (17,411 B) + test-suite-baseline.json (163,501 B); the data table becomes Class.Method -> sorted argument row list (ordinal, duplicates kept, ASCII escaped) and the verdict is multiset containment",
+        "commit 1e2cf9ed5de87abe4e3da6691cbacc6a50167cc3 (3 files, +836 -239); blobs sha256-equal to the working-tree bytes the 42 negative controls exercised (check fe121dac7d0cfbe6 / update 2f2bb86559be5879 / baseline 32c056ad6a68c645)",
+        "negative controls 42/42 pass, pwsh 7 and Windows PowerShell 5.1 identical (D:/mh-verify/r14/nc-console.log, last line \"--- total 42 cases, pass=42, fail=0\")",
+        "E1 one row replaced AND one row added in the same theory (total, per-class counts, method list and per-method case counts all unchanged) RED; E1x the same input on the round 13 gate GREEN -> the extra red is what this layer buys",
+        "E5 two rows swapped is GREEN (the multiset is unchanged, so swapping is not a loss); E4 multiplicity change RED; E7 a method that stops reporting rows RED",
+        "round 13 digest baseline throws on the new gate (\"as a digest - that is the 2026-10-31 format\") and the new update script upgrades it to row lists without -AcceptRemoval; E11 refuses a value substitution without the switch and leaves the baseline untouched",
+        "real corpus: baseline regenerated from the CI TRX of run 41095080796 (windows 2,719,155 B / webdav 145,266 B) 127,587 B -> 163,501 B; MediaHub.Tests 100 row sets / 415 rows, WebDav 3 / 12; RE4 the earlier run 41055690826 gives the same rows (cross-run determinism)",
+        "exact-head windows-ci 41124244650 success: methodData=100 baseline=method data table 100 row sets + argumentRows=415 baseline=argument row table 415 rows (WebDav 3 / 12), methodCases=1952 ... 1952 cases, combined tests=2056; licence checks=31 failed=0 warnings=0 skipped=0; MPV_PROBE/ENGINE_PROBE PASS (GPU/HDR/audio NOT exercised)",
+        "latent defect fixed: Json-String escaped a quote as \"\\\" instead of \\\" - invisible while the baseline only held 16-hex digests, illegal JSON once row text was stored; >126 code units are now \\uXXXX escaped so the baseline stays pure ASCII"
+      ],
+      "notes": "Residual limits recorded in TEST_MATRIX 6.9: the framework truncates display names (6 of the 415 windows rows carry the ellipsis marker); replacing one row while adding a row whose text equals the replaced one restores the multiset exactly, so that last case still passes.",
+      "next_action": "No action required unless the gate reds; any further level (semantic/signature hashing) must be scoped with its own cost analysis first.",
+      "closed_at": "2026-10-31T04:47:00+08:00"
     }
   ]
 }

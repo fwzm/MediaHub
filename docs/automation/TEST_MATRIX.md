@@ -442,3 +442,81 @@ TRX 事实（EXECUTED）：每个 `[Theory]` 数据行是独立的 `<UnitTest na
 **exact-head CI 验收（EXECUTED）**：head `a0b46f6e` 的 windows-ci **`41111613263` completed/success**（`pull_request`）：日志 `D:/mh-verify/r13c/ci-41111613263-windows.log` 逐行命中 `total=1952 baseline=1952` / `classes=113 … 113 entries` / `methods=1637 … 1637 methods` / `methodCases=1952 … 1952 cases` / **`methodData=100 baseline=method data table 100 digests`**，WebDav `104 / 4 / 95 / 104` / **`methodData=3 … 3 digests`**，`combined tests=2056`；licence **`check-licence-surface  checks=30 failed=0 warnings=1 skipped=0`**（base 前进到 `faff3927`，`sbom-source-revision` 对 merge commit `d7fa04aa5d8b` 判祖先，`sdk-pin-matches-report 10.0.113` PASS，唯一 WARN `lgpl-licence-gaps 5 row(s)`）；探针 `MPV_PROBE PASS` / `ENGINE_PROBE PASS`（GPU/HDR/audio output NOT exercised → UNVERIFIED）。同 head Android CI `41111613255` 取证时 in_progress，而 `a0b46f6e` 与 `92c93e51` 的 core/feature/app 树哈希全同（`ff4eed826cbc` / `e983feb08237` / `70c541457cae`）⇒ 按 ADR-AUTO-001 继承、不作独立结论。
 
 **docs 提交的 exact-head CI（EXECUTED）**：head `cb2f0b14`（TEST_MATRIX 本小节 + RUNLOG round 13 小节 + queue `W6-113q`）的 windows-ci **`41113224063` completed/success**：`methods=1637 … 1637 methods` / `methodCases=1952 … 1952 cases` / **`methodData=100 baseline=method data table 100 digests`** / WebDav `104 / 4 / 95 / 104` / **`methodData=3 baseline=method data table 3 digests`** / `combined tests=2056`，licence `check-licence-surface  checks=30 failed=0 warnings=1 skipped=0` ⇒ 本层口径与台阶行随文档一并进入 exact-head CI；同 head Android CI 按树哈希（`ff4eed826cbc` / `e983feb08237` / `70c541457cae`）继承。
+## 6.9 第五层口径升级：per-method 参数行清单（W6-113r，2026-10-31）
+
+### 为什么必须从 digest 升级
+
+§6.8（W6-113q）把第五层做成「每个带参方法一个 16 位十六进制 digest」，并在残留限制里写明：同一 theory 里「**加一行** + **换掉另一行**」只改变 digest，于是走 growth 的 `::warning::` 判绿，而真正消失的那一行被新增行掩盖。根因是 digest 属于**集合摘要**：它只能回答「这一堆行的整体是否变了」，不能回答「哪一行没了」——**无法区分「增长」与「增长且替换」**。
+
+本层把摘要换成**排序后的参数行清单**，判定改为**多重集包含**：
+
+| 关系 | 基线数据 → 运行数据 | 判定 |
+| --- | --- | --- |
+| 完全相同 | 多重集相等 | PASS（`methodData=` / `argumentRows=` 台阶行不变） |
+| 真子集 | 基线每一行仍在，运行侧多出行 | `::warning::`（`argument rows grew: A -> B rows`），刷新基线即可 |
+| 其余 | 有基线行不再出现（含「同时加行且换值」） | **RED**，点名 `baseline row(s) no longer reported: …` 与 `new row(s) in the same method: …` |
+
+**口径要点**：两行文本互换**不是**漏洞（多重集不变、语义等价）⇒ 必须判绿；只有「某行被替换成活着的另一行的值或别的新值」才是漏洞。因此实现**保留重复行**、用双游标归并做多重集差（`Get-RowDifference` + `[System.String]::CompareOrdinal`），**不用 hashtable**（避免大小写折叠）也不用 set（会丢掉重数）。
+
+### 基线字段（第六版）
+
+| 字段 | 内容 | 与上一版的关系 |
+| --- | --- | --- |
+| `expected` | 每套件用例行总数 | 不变 |
+| `classes` | 类 → 用例数 | 不变 |
+| `methods` | 类 → { 方法: 用例数 } | 不变 |
+| `data` | `"Class.Method": [ "(args)", … ]`，Ordinal 排序、保留重复、纯 ASCII | **替换 §6.8 的 digest 字符串**（旧值出现即 throw：`as a digest - that is the 2026-10-31 format`） |
+
+数据层自洽校验（check 脚本 L187-226，违反即 throw）：`data` 表缺失（`has no data table - the per-argument-row check would be vacuous`）/ 为空；值仍是 digest 字符串；值不是列表；某方法行清单为空或含空白行；key 不是 `methods` 表里的方法；**某方法行数 ≠ 该方法在 `methods` 表的用例数**（`the two layers must agree`）。最后一条把第五层与第四层钉在一起：行数由第四层的用例数决定，两表不允许各自记账。
+
+### TRX 事实（EXECUTED）
+
+`[Theory]` 的每一行数据是独立的 `<UnitTest name="Class.Method(<args>)" id="…">`，参数文本**只出现在显示名**里（定义侧 `UnitTest.name`、结果侧 `UnitTestResult.testName`），`TestMethod.name` 始终是裸方法名。规模：
+
+| 套件 | 定义行 | 带参数行 | 带参数方法 | 被框架截断的行 | 行清单总行数 |
+| --- | --- | --- | --- | --- | --- |
+| MediaHub.Tests（windows-tests.trx 2,719,155 B） | 1952 | 415 | 100 | 6（出现 `···`） | 415 |
+| MediaHub.WebDav.Tests（webdav-tests.trx 145,266 B） | 104 | 12 | 3 | 0 | 12 |
+
+跨运行确定性（EXECUTED）：run `41055690826` @`48d5feb7` 与 run `41095080796` @`701bb547` 两次运行的**逐行清单** windows 100/100、webdav 3/3 完全相同 ⇒ 行清单可作基线钉住。
+
+### 负向对照（42 例，pwsh 7 与 Windows PowerShell 5.1 各跑一遍且判定一致）
+
+| 例 | 输入 | 期望 | 结果 |
+| --- | --- | --- | --- |
+| E1 | 同一 theory 加一行 + 换掉另一行（行数不变） | RED | PASS |
+| E1x | 同一输入给 round 13 门禁 | GREEN（只报 growth warning） | PASS |
+| E2 | 某行值被替换 | RED | PASS |
+| E3 / E3b | 纯加一行（check / update 接受增长） | GREEN + warning | PASS |
+| E4 | 重数变化 `{p,p,q} → {p,q,q}` | RED | PASS |
+| E5 | 两行身份互换（多重集不变） | GREEN | PASS |
+| E6 | 参数文本改名 | RED | PASS |
+| E7 | 某方法不再报参数行 | RED（`argument rows gone`） | PASS |
+| E8 | 新方法带参数行 | GREEN + warning | PASS |
+| E9 | round 13 digest 基线（新闸门 / 旧闸门） | RED / GREEN | PASS |
+| E10 | 用新 update 刷新 digest 基线（无 `-AcceptRemoval`） | GREEN，计数不变 | PASS |
+| E11 | 换值后刷新：无开关 / 有开关 / 之后 check | RED 且基线未改写 / GREEN / PASS | PASS |
+| E12 | 行消失后刷新（无 `-AcceptRemoval`） | RED | PASS |
+| E13–E17 | 配置五负例（行数≠用例数 / 非列表 / 空清单 / 空白行 / 幽灵方法） | RED | PASS |
+| E18 | 参数行含中文与引号 | 基线仍纯 ASCII、check PASS、转义无损 | PASS |
+| R1–R5 | 总数降 / 方法用例数降 / 类消失（类改名、总数不变）/ failed / notExecuted | RED | PASS |
+| R6 / R7 | definition≠result / 新类 | PASS + `::warning::` | PASS |
+| RE1 | 真实 TRX × 已提交基线 | PASS，含 `methodData=100 … 100 row sets` / `argumentRows=415 … 415 rows` / `combined tests=2056` | PASS |
+| RE2 | round 13 digest 基线 × 真实 TRX（新 / 旧闸门） | RED / GREEN | PASS |
+| RE3 | 用真实 TRX 重生成 | 与已提交基线逐字节相同 | PASS |
+| RE4 | 更早一次运行的 TRX × 同一基线 | PASS（跨运行稳定） | PASS |
+
+### 数据源与规模
+
+数据源 = CI run `41095080796` @head `701bb547` 的 TRX（`windows-tests.trx` 2,719,155 B / `webdav-tests.trx` 145,266 B），与 §6.7 / §6.8 同一批次。基线规模演进：`7,659 B`（round 7/8 每类计数）→ `122,204 B`（round 9 方法名）→ `127,587 B`（round 12 每方法用例数）→ `140,085 B`（round 13 digest）→ **`163,501 B`（本轮行清单）**。行清单把每条参数文本完整写进仓库，换来可点名「哪一行不再出现」的可诊断性；163 KB 对 1952 个用例行是可接受的代价。
+
+### 残留限制
+
+1. **框架截断**：windows 侧 415 个带参数行中 6 行的显示名已被 xUnit 用 `···` 截断，截断点之后的差异不可见（如 `ServerUrlNormalizerSecurityTests.Query_and_fragment_are_refused_without_echoing_them`、`SyncCliTests.Parse_RejectsMalformedCommandLinesWithStableCodes`）。
+2. **多重集包含的语义极限**：若同一编辑里「替换一行」并「在同一方法新增一行且新增行文本恰好等于被替换行的文本」，多重集恰好复原 ⇒ 仍判绿。这是「按文本多重集记账」覆盖不到的最后一层，只能靠签名/语义哈希（代价与噪声显著上升）。
+3. **行清单不含类名与方法名**：方法改名 / 跨类搬移由 `methods` 与 `classes` 两表负责，数据层只钉「同一方法名下的参数文本多重集」。
+4. **不钉执行序**：行清单按 Ordinal 排序后比较，测试执行顺序与行顺序本就非契约。
+
+### exact-head CI 验收（EXECUTED）
+
+head `1e2cf9ed5de87abe4e3da6691cbacc6a50167cc3` 的 windows-ci **`41124244650` completed/success**：台阶行逐行命中 `total=1952 baseline=1952` / `classes=113 baseline=class table 113 entries` / `methods=1637 baseline=method table 1637 methods` / `methodCases=1952 baseline=method case table 1952 cases` / **`methodData=100 baseline=method data table 100 row sets`** / **`argumentRows=415 baseline=argument row table 415 rows`**，WebDav `104` / `4 entries` / `95 methods` / `104 cases` / `3 row sets` / `12 rows`，`combined tests=2056`；licence `check-licence-surface  checks=31 failed=0 warnings=0 skipped=0`；探针 `MPV_PROBE PASS` / `ENGINE_PROBE PASS`。同 head 的 Android CI `41124244565` 取证时 in_progress；`a0b46f6e` / `cb2f0b14` / `825f46f4` / `1e2cf9ed5de87abe4e3da6691cbacc6a50167cc3` 的 `core` / `feature` / `app` 树哈希相同 ⇒ 按 ADR-AUTO-001 继承。
