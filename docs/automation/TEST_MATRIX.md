@@ -14,8 +14,8 @@
 
 | 套件 | 工程 | 计数来源 | 本机最近实测 | CI 门禁位置 |
 | --- | --- | --- | --- | --- |
-| `MediaHub.Tests` | `windows/tests/MediaHub.Tests` | xUnit `[Fact]` **1475** + `[Theory]` **100**，83 个文件（**源码静态计数，SOURCE_REVIEWED**；不等于执行数，且随提交漂移） | **1858 / 0 / 0**（EXECUTED，2026-10-30 @ `055c85c3`） | `windows-ci.yml` → Unit and contract tests (MediaHub.Tests) |
-| `MediaHub.WebDav.Tests` | `windows/tests/MediaHub.WebDav.Tests` | 5 个文件，`[Fact]` 92 + `[Theory]` 3（SOURCE_REVIEWED） | **104 / 0 / 0**（EXECUTED，同上） | 同文件 → Unit and contract tests (MediaHub.WebDav.Tests) |
+| `MediaHub.Tests` | `windows/tests/MediaHub.Tests` | xUnit `[Fact]` **1475** + `[Theory]` **100**，83 个文件（**源码静态计数，SOURCE_REVIEWED**；不等于执行数，且随提交漂移） | **1890 / 0 / 0**（EXECUTED，2026-10-30 @ `e7779b7f`，run `41003347790`） | `windows-ci.yml` → Unit and contract tests (MediaHub.Tests) |
+| `MediaHub.WebDav.Tests` | `windows/tests/MediaHub.WebDav.Tests` | 5 个文件，`[Fact]` 92 + `[Theory]` 3（SOURCE_REVIEWED） | **104 / 0 / 0**（EXECUTED，同上 run） | 同文件 → Unit and contract tests (MediaHub.WebDav.Tests) |
 
 **为什么静态计数与执行数不等**：`[Theory]` 的每行 `InlineData` 独立计一例。静态计数只能当量级参考，**任何门禁比较都必须用执行数**。
 
@@ -36,7 +36,7 @@
 
 | 门禁 | 机制 | 最近实测 |
 | --- | --- | --- |
-| 单元测试 | `./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon --continue --rerun-tasks --no-build-cache` | `uniqueTests` **2501**、`--required-suite` **60 条**（EXECUTED，2026-10-30 @ `d6331139`，run `40995411720`） |
+| 单元测试 | `./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon --continue --rerun-tasks --no-build-cache` | `uniqueTests` **2501**、`--required-suite` **60 条**（EXECUTED，2026-10-30 @ `d6331139`，run `40995411720`）。⚠️ 之后多次 run 因同分支连续 push 被 concurrency 取消（`40993937937`、`41003347784`）—— 那是**取消，不是失败**，不能记成 PASS 也不能记成 FAILED |
 | 套件必须在场 | `--required-suite <FQCN>` 逐个声明 | 套件整类消失时门禁必红；**新建测试类不登记就等于没有门禁** |
 | 新鲜证据 | 先清早前单元测试报告目录 | 复用旧报告会被这条挡住 |
 | VI（visual-instrumentation） | API 32 / API 36 双作业 | 各 **19 unique mandatory**（EXECUTED，同上） |
