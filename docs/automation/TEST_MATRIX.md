@@ -243,3 +243,6 @@ MediaHub.Tests: total=1927 baseline=1927
 
 **CI 实测（EXECUTED，head `0cef5d792ea06ebe34fddcff550c98bdf0d895a7`）**：windows-ci run `41051026115` success，台阶日志逐行为 `MediaHub.Tests: total=1943 baseline=1943 failed=0 notExecuted=0` / `MediaHub.Tests: classes=112 baseline=class table 112 entries` / `MediaHub.WebDav.Tests: total=104 baseline=104 failed=0 notExecuted=0` / `MediaHub.WebDav.Tests: classes=4 baseline=class table 4 entries` —— 即 CI 跑的就是带类表的这份闸门，不是只改文档。同日 Android CI run `41051026121`（同 head）在入账时仍 in_progress，本行不为其作任何结论。
 
+**第三方采纳实证（EXECUTED，2026-10-30 20:08）**：并行写者 W31 `06b6890d` 新增 9 例后把基线 1943 → 1952、类表 112 → 113；同 head windows-ci `41053179818` success，日志 `total=1952 baseline=1952` / `classes=113 baseline=class table 113 entries`。相对 W28 只刷总数，这次连类表一起改 —— per-class 口径被第二个使用者按设计跟上。
+
+
