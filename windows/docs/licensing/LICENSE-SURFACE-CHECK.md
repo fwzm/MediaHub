@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-44 项检查分二十三组：
+45 项检查分二十四组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -69,7 +69,8 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 能力对照表（W47 起） | `capability-map-claims` | `windows/docs/CAPABILITY-MAP.md` §0 的九行状态块缺行/改值、测试行写回写死的用例计数、或它声称的发布状态与 `PACKAGING.md` §0 不再一致 |
 | 验收不打扰契约（W48 起） | `quiet-run-claims` | `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` §0 的九行门禁事实（空闲阈值 180 s、QUNS 只允许 5/6、看门狗 700 ms、abort 标记与 `MH_ALLOW_ACTIVE`/`MH_QUIET_ABORT_FILE`、守卫优先级）缺行或改值，或 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询、`MhUia.psm1` 的 `Start-MhApp` abort 守卫与它不再一致 |
 | 续播下限契约（W49 起） | `resume-floor-claims` | `windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §0 的八行阈值与用例数、`MockMediaServer.cs` 里 Emby 2 % / Jellyfin 5 % / 300 s / 90 % / 10 s 的常量、以及契约测试实际展开出的用例数，三者任一分叉——放宽下限、删判定分支、加减用例却没同步文档即红 |
-| 诊断日志落盘（W50 起） | `log-file-claims` | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md` §0 的十五行上限/轮转/失败策略/用例数、`LogFileSink.cs` 的默认常量与轮转触发式、`LogService.cs` 的环形上限与写入顺序、`AppServices.cs` 的组合根目录、sink 测试展开的 9 例，五方任一分叉即红 |
+| 诊断日志落盘（W50 起） | `log-file-claims` | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md` §0 的十五行上限/轮转/失败策略/用例数、`LogFileSink.cs` 的默认常量与轮转触发式、`LogService.cs` 的环形上限与写入顺序、`AppServices.cs` 的组合根目录、sink 测试展开的 9 例，五方任一分叉即红 || 日期快照审计（W51 起） | `doc-audit-snapshot-claims` | `windows/docs/W12-DOC-AUDIT.md` §0 状态块缺失或与正文分叉（正文 HEAD ≠ 块内 baseline-head、基线提交不再是本分支祖先、快照不再自称 as-of、或第 4 节不可判定清单被删） |
+
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
 
@@ -239,7 +240,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 44） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 45） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -364,6 +365,23 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 用例数由脚本当场数出（`[Fact]` 计 1、每条 `[InlineData(` 计 1），不是读文档；文档写 9 而实现是别的数就红。五个路径参数（`-LogFileDocPath`、`-LogFileSinkPath`、`-LogServicePath`、`-AppServicesPath`、`-LogFileTestPath`）让负向对照可以指到临时副本；文档不存在 ⇒ SKIP（退出码仍 0）。
 
 刻意**不**钉「本机实跑 478 passed / 0 failed」这类数字：它会随其它轮次的新增用例漂移，本检查钉的是契约语义与用例数。
+
+### 3.19 日期快照审计（W51，2026-10-31）
+
+`windows/docs/W12-DOC-AUDIT.md` 是 2026-10-24 凌晨的一次只读审计（当时 477 tests、PR #33 停在 `282dcc2`、libmpv 吃 120,989,696 B 等）。它天生会过期，而它的数字与当前计数本来就不同——最容易出的两件事是有人把它的 477 当成「现在」引用，或者有人改掉它的基线提交，让整份快照失去锚点。第 45 项 `doc-audit-snapshot-claims` 钉住：
+
+| 判据 | 失败含义 |
+| --- | --- |
+| §0 的 `doc-audit-status` 块含八行逐字 | 快照状态、审计日期、基线提交/分支、数字口径、复核规则、当前权威来源或文档角色被改写或整块删除 |
+| 正文的 `本地 HEAD = <sha>` 与块内 `baseline-head` 相等 | 块与正文分叉（改了一处忘了另一处），或正文不再点名快照取自哪个提交 |
+| `origin/<baseline-branch>` 仍出现在正文 | 快照不再绑定到它当时的分支 |
+| 文档仍说数字是 **as-of 快照**，且仍要求「接近当前」的用法重新核对 | 这份过期审计被悄悄改写成当前权威 |
+| `## 4. 不跑测试 / 不构建即无法判定` 一节仍在 | 快照自己声明的边界被删掉，后来的读者会以为它当时就能判定 |
+| `git cat-file -t <sha>` 为 commit 且该 sha 是 HEAD 的祖先 | 基线提交被改成不存在的对象，或不再属于本分支历史（浅克隆 ⇒ WARN 并提示 `fetch-depth: 0`） |
+
+一个路径参数 `-DocAuditPath` 让负向对照可以指到临时副本；文档不存在 ⇒ SKIP（退出码仍 0）。
+
+刻意**不**要求它的 477 / 373 等历史数字等于当前计数：那正是「历史快照」的含义，本轮反而要求它保持是历史。
 
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
@@ -727,6 +745,38 @@ RESULT: PASS
 | NC8 | `-LogFileDocPath` 指不存在文件 | SKIP、退出码 0 |
 
 七条打在 `log-file-claims` 上、一条走 SKIP 通道，没有一条依赖别的检查 —— W14 的「日志永远有界、永远不因磁盘出错而崩」此后不能再被悄悄放宽。
+
+### 4.19 实测（2026-10-31，W51，本机，HEAD 2bdaa499）
+
+代码：
+
+```text
+pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath D:/mh-verify/w38-license/license-report.json
+check-licence-surface  PASS    doc-audit-snapshot-claims  the W12 audit is still a dated snapshot: baseline 282dcc2058815317a3ce285f04855d078404a7ab on origin/feature/windows-client is a real ancestor of HEAD, its numbers are labelled as-of that point, and the undetermined list is still present
+check-licence-surface  PASS    check-inventory  45 declared check(s): this run emitted nothing undeclared, LICENSE-SURFACE-CHECK.md names every id on its own, and both it and README.md claim the same count
+check-licence-surface  checks=45 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+守卫补丁先落地、文档未同步时的首跑如实 1 红（保留为证据）：新项已 PASS，`check-inventory` 报 3 个问题（两份文档还写 44 项、文档未点名 `doc-audit-snapshot-claims`）。更强的一条证据：新项自己被负向对照逼出过**两个**缺陷——① 正文正则多写了一个 `.`，报「the body no longer names the baseline HEAD the snapshot was taken at」（NC3 复现同一句）；② NC5 不是「1 红」而是整份脚本抛 `不能对值为 Null 的表达式调用方法`（守卫提前终止、连汇总行都没有）——真因是 `[string](@(& git …) | Select-Object -First 1)` 在原生命令没有输出时得到 `$null`，随后 `.Trim()` 炸掉；改成 `$out = @(& …)` + 计数判空后再取值才修好（此后 `.Trim()` 全部去掉）。负向对照不只是证明判据会红，也逼出了「空输出即崩」这一类守卫自身的脆弱点。
+
+七条负向对照（临时副本，未改仓库文件）：
+
+| # | 改法 | 结果 |
+| --- | --- | --- |
+| NC1 | 文档副本块 `audit-date` 改 2026-10-25 | 恰好 1 红 |
+| NC2 | 删掉整个 `doc-audit-status` 块 | 恰好 1 红 |
+| NC3 | 正文 `本地 HEAD = <sha>` 换成另一个 40 位 sha | 恰好 1 红 |
+| NC4 | 删掉「接近『当前』的用法必须重新核对」一句 | 恰好 1 红 |
+| NC5 | 文档块 `baseline-head` 与正文一起改成 40 个 `0` | 恰好 1 红（最先命中「块内不再声明 `baseline-head`」，早于 git 判据） |
+| NC6 | 删掉 `## 4. 不跑测试 / 不构建即无法判定` 标题 | 恰好 1 红 |
+| NC7 | 正文 `origin/feature/windows-client` 换成别的分支 | 恰好 1 红 |
+| NC8 | `-DocAuditPath` 指不存在文件 | SKIP、退出码 0 |
+
+
+说明一处**无法在本机构造**的对照：git 的两条判据（对象不是 commit / 不是 HEAD 的祖先）针对的是「换一台机器克隆后基线提交根本不存在」，而块内 `baseline-head` 必须逐字等于 `282dcc…`（防「把快照偷偷改挂到别的祖先提交」），git 读的又是同一行 ⇒ 本机必须先把提交造出来才有对照，因此只覆盖到 NC5 这一层。浅克隆会先走 WARN（提示 `fetch-depth: 0`），与 `sbom-source-revision` 同口径；CI 是完整克隆（`fetch-depth: 0`），两条判据在那里才真正生效。
+
+七条打在 `doc-audit-snapshot-claims` 上、一条走 SKIP 通道 —— 过期审计此后不能被当成当前计数，也不能靠改基线提交甩掉历史。
 
 ## 5. 这个工具**不**覆盖什么
 

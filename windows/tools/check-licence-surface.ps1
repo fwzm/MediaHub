@@ -169,6 +169,10 @@
     The composition root that points the sink at %LOCALAPPDATA%\MediaHub\logs. Default:
     windows/src/MediaHub.App/AppServices.cs.
 
+.PARAMETER DocAuditPath
+    The dated document-consistency audit. Default: windows/docs/W12-DOC-AUDIT.md. The
+    doc-audit-snapshot-claims check keeps it labelled as a snapshot taken at one commit.
+
 .PARAMETER LogFileTestPath
     The tests that pin the sink's behaviour. Default:
     windows/tests/MediaHub.Tests/LogFileSinkTests.cs.
@@ -230,6 +234,7 @@ param(
     [string] $LogServicePath,
     [string] $AppServicesPath,
     [string] $LogFileTestPath,
+    [string] $DocAuditPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -275,6 +280,7 @@ $logFileSinkFile = Resolve-RepoPath -Path $LogFileSinkPath -Default 'windows/src
 $logServiceFile = Resolve-RepoPath -Path $LogServicePath -Default 'windows/src/MediaHub.Net/LogService.cs'
 $appServicesFile = Resolve-RepoPath -Path $AppServicesPath -Default 'windows/src/MediaHub.App/AppServices.cs'
 $logFileTestFile = Resolve-RepoPath -Path $LogFileTestPath -Default 'windows/tests/MediaHub.Tests/LogFileSinkTests.cs'
+$docAuditFile = Resolve-RepoPath -Path $DocAuditPath -Default 'windows/docs/W12-DOC-AUDIT.md'
 
 $checks = [System.Collections.Generic.List[object]]::new()
 function Add-Check {
@@ -1208,6 +1214,7 @@ $declaredCheckIds = @(
     'quiet-run-claims',
     'resume-floor-claims',
     'log-file-claims',
+    'doc-audit-snapshot-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -1834,6 +1841,93 @@ else {
     }
     else {
         Add-Check 'log-file-claims' 'FAIL' (($logFileProblems -join '; ') + ' - update windows/docs/W14-DIAGNOSTIC-LOG-FILES.md section 0 and the code it describes')
+    }
+}
+
+
+# --- 22. dated audit snapshots ---------------------------------------------------------------
+if (-not (Test-Path -LiteralPath $docAuditFile)) {
+    Add-Check 'doc-audit-snapshot-claims' 'SKIP' 'the W12 audit snapshot is absent (windows/docs/W12-DOC-AUDIT.md)'
+}
+else {
+    $docAuditText = Get-Content -LiteralPath $docAuditFile -Raw
+    $docAuditProblems = [System.Collections.Generic.List[string]]::new()
+    $docAuditWarn = ''
+    $blockBegin = '<!-- doc-audit-status:begin -->'
+    $blockEnd = '<!-- doc-audit-status:end -->'
+    $beginAt = $docAuditText.IndexOf($blockBegin, [System.StringComparison]::Ordinal)
+    $endAt = $docAuditText.IndexOf($blockEnd, [System.StringComparison]::Ordinal)
+    $headMatch = $null
+    if ($beginAt -lt 0 -or $endAt -lt $beginAt) {
+        $docAuditProblems.Add('the document no longer carries the doc-audit-status block')
+    }
+    else {
+        $docAuditBlock = $docAuditText.Substring($beginAt, $endAt - $beginAt + $blockEnd.Length)
+        foreach ($line in @(
+            'snapshot-status: historical-audit-not-current',
+            'audit-date: 2026-10-24',
+            'baseline-head: 282dcc2058815317a3ce285f04855d078404a7ab',
+            'baseline-branch: feature/windows-client',
+            'counts-are-as-of: baseline-head',
+            'recheck-rule: every number here must be re-verified against a fresh run before it is used as current',
+            'current-truth-source: windows-ci run log (dotnet test output + check-licence-surface)',
+            'doc-role: dated audit snapshot - never the acceptance authority'
+        )) {
+            if (-not $docAuditBlock.Contains($line)) { $docAuditProblems.Add('the status block no longer declares ' + $line) }
+        }
+        $headMatch = [regex]::Match($docAuditBlock, 'baseline-head: ([0-9a-f]{40})')
+        $branchMatch = [regex]::Match($docAuditBlock, 'baseline-branch: ([A-Za-z0-9._/-]+)')
+        if (-not $headMatch.Success) { $docAuditProblems.Add('the status block no longer declares a 40-hex baseline-head') }
+        if (-not $branchMatch.Success) { $docAuditProblems.Add('the status block no longer declares a baseline-branch') }
+        if (-not $docAuditText.Contains('都是 **as-of')) { $docAuditProblems.Add('the document no longer says its numbers are as-of the baseline HEAD') }
+        if (-not $docAuditText.Contains('接近「当前」的用法必须重新核对')) { $docAuditProblems.Add('the document no longer tells readers to re-verify before using it as current') }
+        if (-not $docAuditText.Contains('## 4. 不跑测试 / 不构建即无法判定')) { $docAuditProblems.Add('the document lost the section that lists what this snapshot could not determine') }
+        if ($headMatch.Success) {
+            $bodyHead = [regex]::Match($docAuditText, '本地 HEAD = .([0-9a-f]{40})')
+            if (-not $bodyHead.Success) { $docAuditProblems.Add('the body no longer names the baseline HEAD the snapshot was taken at') }
+            elseif ($bodyHead.Groups[1].Value -ne $headMatch.Groups[1].Value) {
+                $docAuditProblems.Add('the body was taken at ' + $bodyHead.Groups[1].Value + ' but the status block claims ' + $headMatch.Groups[1].Value)
+            }
+            if ($branchMatch.Success -and -not [regex]::IsMatch($docAuditText, '= .origin/' + [regex]::Escape($branchMatch.Groups[1].Value) + '.')) {
+                $docAuditProblems.Add('the body no longer ties the snapshot to origin/' + $branchMatch.Groups[1].Value)
+            }
+            $git = Get-Command git -ErrorAction SilentlyContinue
+            if (-not $git) {
+                $docAuditWarn = 'git is unavailable here, so the declared baseline commit could not be resolved'
+            }
+            else {
+                $shallowOutput = @(& git -C $RepoRoot rev-parse --is-shallow-repository 2>$null)
+                $shallowText = if (@($shallowOutput).Count -gt 0) { [string]$shallowOutput[0] } else { '' }
+                if ($shallowText -eq 'true') {
+                    $docAuditWarn = 'this clone is shallow, so it cannot contain the declared baseline commit - fetch-depth: 0 resolves it'
+                }
+                else {
+                    $typeOutput = @(& git -C $RepoRoot cat-file -t $headMatch.Groups[1].Value 2>$null)
+                    $typeText = if (@($typeOutput).Count -gt 0) { [string]$typeOutput[0] } else { '' }
+                    if ($typeText -ne 'commit') {
+                        $docAuditProblems.Add('the declared baseline HEAD ' + $headMatch.Groups[1].Value + ' is not a commit in this repository')
+                    }
+                    else {
+                        & git -C $RepoRoot merge-base --is-ancestor $headMatch.Groups[1].Value HEAD 2>$null | Out-Null
+                        if ($LASTEXITCODE -ne 0) {
+                            $docAuditProblems.Add('the declared baseline HEAD ' + $headMatch.Groups[1].Value + ' is not an ancestor of HEAD')
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if ($docAuditProblems.Count -eq 0) {
+        if ($docAuditWarn) {
+            Add-Check 'doc-audit-snapshot-claims' 'WARN' $docAuditWarn
+        }
+        else {
+            Add-Check 'doc-audit-snapshot-claims' 'PASS' ('the W12 audit is still a dated snapshot: baseline ' + $headMatch.Groups[1].Value + ' on origin/' + $branchMatch.Groups[1].Value + ' is a real ancestor of HEAD, its numbers are labelled as-of that point, and the undetermined list is still present')
+        }
+    }
+    else {
+        Add-Check 'doc-audit-snapshot-claims' 'FAIL' (($docAuditProblems -join '; ') + ' - update windows/docs/W12-DOC-AUDIT.md section 0 and the body it describes')
     }
 }
 

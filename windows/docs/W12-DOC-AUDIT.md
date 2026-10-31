@@ -8,6 +8,21 @@
 - 基线：本地 HEAD = `282dcc2058815317a3ce285f04855d078404a7ab` = `origin/feature/windows-client` = PR #33 `headRefOid`（ahead/behind 0/0）；`origin/main` = `1246313c7a66d492258b5b4b20b51cbdcf2da9cc`；PR #33 OPEN + Draft + MERGEABLE + CLEAN；PR #39 `headRefOid` = `01233cabf1488f3c05fcd44e472fee153fe0b977`（base `feature/windows-client`，Draft，mergeable UNKNOWN，相对当前分支 1 ahead / 21 behind）。
 - CI（exact SHA `282dcc2`）：run 39955246292 `windows-ci`/push/success、39955255418 `Android CI`/pull_request/success、39955255573 `windows-ci`/pull_request/success；无 in_progress/queued。
 
+## 0. 机器可读状态（CI 核对）
+
+<!-- doc-audit-status:begin -->
+snapshot-status: historical-audit-not-current
+audit-date: 2026-10-24
+baseline-head: 282dcc2058815317a3ce285f04855d078404a7ab
+baseline-branch: feature/windows-client
+counts-are-as-of: baseline-head
+recheck-rule: every number here must be re-verified against a fresh run before it is used as current
+current-truth-source: windows-ci run log (dotnet test output + check-licence-surface)
+doc-role: dated audit snapshot - never the acceptance authority
+<!-- doc-audit-status:end -->
+
+本文所有数字（测试条数、行号、哈希、PR 状态）都是 **as-of `baseline-head` 的历史快照**，接近「当前」的用法必须重新核对；CI 运行日志才是当下的权威。第 4 节列出的「不跑测试 / 不构建即无法判定」是这份快照的边界，不随时间推移自动失效。
+
 ## 1. 核实为【相符】（未改）
 
 | 文件:行 | 断言 | 证据 |
