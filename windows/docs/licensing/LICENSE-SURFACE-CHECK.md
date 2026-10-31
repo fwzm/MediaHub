@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-42 项检查分二十一组：
+43 项检查分二十二组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -68,6 +68,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 包内许可文件（W40 起） | `package-licence-staging` | 发布树不再真的带 `licences/` 的六个文档 + digest manifest：暂存脚本被删、清单缩水、manifest 摘要与字节不符、或 CI 不再调用它（该检查把脚本重跑到临时树，不读文档） |
 | 能力对照表（W47 起） | `capability-map-claims` | `windows/docs/CAPABILITY-MAP.md` §0 的九行状态块缺行/改值、测试行写回写死的用例计数、或它声称的发布状态与 `PACKAGING.md` §0 不再一致 |
 | 验收不打扰契约（W48 起） | `quiet-run-claims` | `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` §0 的九行门禁事实（空闲阈值 180 s、QUNS 只允许 5/6、看门狗 700 ms、abort 标记与 `MH_ALLOW_ACTIVE`/`MH_QUIET_ABORT_FILE`、守卫优先级）缺行或改值，或 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询、`MhUia.psm1` 的 `Start-MhApp` abort 守卫与它不再一致 |
+| 续播下限契约（W49 起） | `resume-floor-claims` | `windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §0 的八行阈值与用例数、`MockMediaServer.cs` 里 Emby 2 % / Jellyfin 5 % / 300 s / 90 % / 10 s 的常量、以及契约测试实际展开出的用例数，三者任一分叉——放宽下限、删判定分支、加减用例却没同步文档即红 |
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
 
@@ -332,6 +333,20 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 四个路径参数（都按仓库根解析）：`-QuietRunbookPath`（默认 `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md`）、`-QuietRunnerPath`（`windows/tools/acceptance/run-quiet.ps1`）、`-QuietModulePath`（`…/lib/MhQuiet.psm1`）、`-UiaModulePath`（`…/lib/MhUia.psm1`）。文档不存在 ⇒ `SKIP`、退出码仍 0；runner 或模块缺失 ⇒ `FAIL`。
 
 它刻意**不**核对阈值的人读散文措辞，也不判断门禁真的挡住了谁 —— 那是 `run-quiet.ps1` 与看门狗的运行时职责（见文档「自检」节）。
+
+### 3.17 续播下限契约（W49，2026-10-31）
+
+`resume-floor-claims` 把「mock 与真服的保真度契约」从散文变成可核对的三方一致：
+
+| 判据 | 失败含义 |
+| --- | --- |
+| 文档 §0 的 `resume-floor-status` 块含八行逐字 | 阈值、比较方式（百分比而非秒）、来源、用例数被改写或整块删除 |
+| `MockMediaServer.cs` 含六个常量/表达式 | 下限被放宽（如 `Emby = new(2, 300)` 改 1）、上限或 10 s 尾窗被删、判定从百分比改成秒 |
+| 契约测试展开的用例数 = 文档声明的用例数 | 加了用例没同步文档、或删了用例让保护面缩小 |
+
+用例数由脚本当场数出（`[Fact]` 计 1、每条 `[InlineData(` 计 1），不是读文档；文档写成 31 而实现是别的数就红。三个路径参数（`-ResumeFloorDocPath`、`-MockServerPath`、`-ResumeFloorTestPath`）让负向对照可以指到临时副本；文档不存在 ⇒ SKIP（退出码仍 0）。
+
+`windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §2 的 469 是该轮单工程实跑的历史数字，本检查**不**要求它等于当前 CI 计数（那会随其它轮次改动而漂移）；它钉的是阈值语义与用例数。
 
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
@@ -642,6 +657,30 @@ check-licence-surface  RESULT: PASS
 | NC7 | `MhQuiet.psm1` 副本把 QUNS 白名单 `$state -eq 5 -or $state -eq 6` 改成 `$state -ge 1` | 恰好 1 红：白名单不再是 5/6 |
 
 七条里六条打在 `quiet-run-claims` 上、一条走 SKIP 通道，没有一条依赖别的检查 —— 这条契约此后不能再被悄悄放宽。
+
+### 4.17 实测（2026-10-31，W49，本机，HEAD 47913224）
+
+代码：
+
+```text
+pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath D:/mh-verify/w38-license/license-report.json
+check-licence-surface  PASS    resume-floor-claims  the resume-floor contract still holds: the document block names the measured floors (Emby 2 %, Jellyfin 5 %, 300 s minimum, 90 % ceiling, 10 s trailing window) and the mock plus its tests still expand to 31 case(s)
+check-licence-surface  PASS    check-inventory  43 declared check(s): this run emitted nothing undeclared, LICENSE-SURFACE-CHECK.md names every id on its own, and both it and README.md claim the same count
+check-licence-surface  checks=43 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+七条负向对照（临时副本，未改仓库文件）：
+
+| # | 改法 | 结果 |
+| --- | --- | --- |
+| NC1 | 文档块 `emby-min-percent` 改 3 | 恰好 1 红 |
+| NC2 | 删掉整块 | 恰好 1 红 |
+| NC3 | mock 副本 `Emby = new(2, 300)` 改 `new(1, 300)` | 恰好 1 红 |
+| NC4 | 契约测试副本删一条 `[InlineData(` | 恰好 1 红（用例数分叉） |
+| NC5 | mock 副本删 `TrailingWindowTicks` 常量 | 恰好 1 红 |
+| NC6 | `-ResumeFloorDocPath` 指不存在文件 | SKIP、退出码 0 |
+| NC7 | 文档块 `contract-case-count` 改 30（测试不动） | 恰好 1 红 |
 
 ## 5. 这个工具**不**覆盖什么
 

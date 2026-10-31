@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Nineteen things rot silently in a licence deliverable:
+    Twenty things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -51,7 +51,11 @@
           watchdog stops polling for input, or Start-MhApp loses the abort marker that keeps a
           window from being put back on screen after the user came back.
 
-    This script checks those nineteen surfaces without touching the network, the build, or the
+      20. the resume-floor contract rots: the mock's measured thresholds drift from the values
+          the contract document publishes, the tests that pin the mock stop expanding to the
+          number the document declares, or the percentage-vs-seconds decision is replaced by a
+
+    This script checks those twenty surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -137,6 +141,19 @@
     The module whose Start-MhApp refuses to open a window once the run was aborted. Default:
     windows/tools/acceptance/lib/MhUia.psm1.
 
+.PARAMETER ResumeFloorDocPath
+    The contract document that publishes the mock's measured resume floors. Default:
+    windows/docs/W8-RESUME-FLOOR-CONTRACT.md. The resume-floor-claims check compares its
+    status block and its declared case count with the mock and its tests.
+
+.PARAMETER MockServerPath
+    The emulated MediaBrowser server that implements the floor. Default:
+    windows/tests/MediaHub.TestSupport/MockMediaServer.cs.
+
+.PARAMETER ResumeFloorTestPath
+    The contract test whose [Fact] and [InlineData] attributes are counted. Default:
+    windows/tests/MediaHub.Tests/ResumeFloorContractTests.cs.
+
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
     errors as well. Off by default, but as of W38 no such row is expected: every shipped DLL has a
@@ -186,6 +203,9 @@ param(
     [string] $QuietModulePath,
     [string] $UiaModulePath,
     [string] $CapabilityMapPath,
+    [string] $ResumeFloorDocPath,
+    [string] $MockServerPath,
+    [string] $ResumeFloorTestPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -223,6 +243,9 @@ $quietRunbookFile = Resolve-RepoPath -Path $QuietRunbookPath -Default 'windows/d
 $quietRunnerFile = Resolve-RepoPath -Path $QuietRunnerPath -Default 'windows/tools/acceptance/run-quiet.ps1'
 $quietModuleFile = Resolve-RepoPath -Path $QuietModulePath -Default 'windows/tools/acceptance/lib/MhQuiet.psm1'
 $uiaModuleFile = Resolve-RepoPath -Path $UiaModulePath -Default 'windows/tools/acceptance/lib/MhUia.psm1'
+$resumeFloorDocFile = Resolve-RepoPath -Path $ResumeFloorDocPath -Default 'windows/docs/W8-RESUME-FLOOR-CONTRACT.md'
+$mockServerFile = Resolve-RepoPath -Path $MockServerPath -Default 'windows/tests/MediaHub.TestSupport/MockMediaServer.cs'
+$resumeFloorTestFile = Resolve-RepoPath -Path $ResumeFloorTestPath -Default 'windows/tests/MediaHub.Tests/ResumeFloorContractTests.cs'
 
 $checks = [System.Collections.Generic.List[object]]::new()
 function Add-Check {
@@ -1154,6 +1177,7 @@ $declaredCheckIds = @(
     'engine-pins-claims',
     'capability-map-claims',
     'quiet-run-claims',
+    'resume-floor-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -1591,6 +1615,75 @@ else {
     }
     else {
         Add-Check 'quiet-run-claims' 'FAIL' (($quietProblems -join '; ') + ' - update windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md section 0 and the file it describes')
+    }
+}
+# --- 20. the resume-floor contract (mock fidelity) ---------------------------------------------
+$resumeFloorBlock = ''
+$resumeFloorCaseCount = 0
+$resumeFloorProblems = [System.Collections.Generic.List[string]]::new()
+if (-not (Test-Path -LiteralPath $resumeFloorDocFile)) {
+    Add-Check 'resume-floor-claims' 'SKIP' 'windows/docs/W8-RESUME-FLOOR-CONTRACT.md is absent, so the resume-floor contract has nothing to compare against'
+}
+else {
+    $resumeFloorText = Get-Content -LiteralPath $resumeFloorDocFile -Raw
+    $resumeFloorStart = $resumeFloorText.IndexOf('<!-- BEGIN resume-floor-status', [System.StringComparison]::Ordinal)
+    $resumeFloorEnd = $resumeFloorText.IndexOf('<!-- END resume-floor-status', [System.StringComparison]::Ordinal)
+    if ($resumeFloorStart -lt 0 -or $resumeFloorEnd -lt $resumeFloorStart) {
+        $resumeFloorProblems.Add('the contract document carries no resume-floor-status block (the machine-readable thresholds and the case count)')
+    }
+    else {
+        $resumeFloorBlock = $resumeFloorText.Substring($resumeFloorStart, $resumeFloorEnd - $resumeFloorStart)
+        foreach ($resumeFloorLine in @(
+            'emby-min-percent: 2',
+            'jellyfin-min-percent: 5',
+            'minimum-runtime-seconds: 300',
+            'maximum-percent-default: 90',
+            'trailing-window-ticks: 10000000',
+            'floor-comparison: percent-of-runtime',
+            'threshold-source: measured-constants-not-server-config',
+            'contract-case-count: 31'
+        )) {
+            if (-not $resumeFloorBlock.Contains($resumeFloorLine)) { $resumeFloorProblems.Add('the status block does not say ' + $resumeFloorLine) }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $mockServerFile)) {
+        $resumeFloorProblems.Add('the server mock is absent (windows/tests/MediaHub.TestSupport/MockMediaServer.cs)')
+    }
+    else {
+        $mockServerText = Get-Content -LiteralPath $mockServerFile -Raw
+        foreach ($mockNeedle in @(
+            'MockResumeFloor Emby = new(2, 300)',
+            'MockResumeFloor Jellyfin = new(5, 300)',
+            'MaximumPercent = 90',
+            'private const long TrailingWindowTicks = 10_000_000L',
+            '(decimal)position * 100m / item.RunTimeTicks',
+            'MinimumRuntimeTicks => MinimumRuntimeSeconds * TimeSpan.TicksPerSecond'
+        )) {
+            if (-not $mockServerText.Contains($mockNeedle)) { $resumeFloorProblems.Add('the mock no longer contains ' + $mockNeedle) }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $resumeFloorTestFile)) {
+        $resumeFloorProblems.Add('the contract test file is absent (windows/tests/MediaHub.Tests/ResumeFloorContractTests.cs)')
+    }
+    else {
+        $resumeFloorTestText = Get-Content -LiteralPath $resumeFloorTestFile -Raw
+        $resumeFloorCaseCount = ([regex]::Matches($resumeFloorTestText, [regex]::Escape('[Fact]'))).Count + ([regex]::Matches($resumeFloorTestText, [regex]::Escape('[InlineData('))).Count
+        $resumeFloorDeclared = [regex]::Match($resumeFloorBlock, 'contract-case-count: (\d+)')
+        if ($resumeFloorDeclared.Success) {
+            $declaredCount = [int]$resumeFloorDeclared.Groups[1].Value
+            if ($declaredCount -ne $resumeFloorCaseCount) {
+                $resumeFloorProblems.Add('the document declares ' + $declaredCount + ' contract case(s) but the test file expands to ' + $resumeFloorCaseCount)
+            }
+        }
+    }
+
+    if ($resumeFloorProblems.Count -eq 0) {
+        Add-Check 'resume-floor-claims' 'PASS' ('the resume-floor contract still holds: the document block names the measured floors (Emby 2 %, Jellyfin 5 %, 300 s minimum, 90 % ceiling, 10 s trailing window) and the mock plus its tests still expand to ' + $resumeFloorCaseCount + ' case(s)')
+    }
+    else {
+        Add-Check 'resume-floor-claims' 'FAIL' (($resumeFloorProblems -join '; ') + ' - update windows/docs/W8-RESUME-FLOOR-CONTRACT.md section 0 and the code it describes')
     }
 }
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })

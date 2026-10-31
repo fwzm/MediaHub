@@ -5,6 +5,23 @@
 > `windows/docs/W8-HEADLESS-RESUME.md` 与 `windows/docs/W8-EVIDENCE.md` 为准。
 > 未改动任何产品代码（本轮 `windows/src/**` 零改动）。
 
+## 0. 机器可读状态（CI 核对）
+
+下面这段由 `windows/tools/check-licence-surface.ps1` 的 `resume-floor-claims` 检查逐行核对：它把这段里的阈值与用例数、`MockMediaServer.cs` 里的常量、以及 `ResumeFloorContractTests.cs` 实际展开出的用例数放在一起比。放宽下限、删掉判定分支、加减用例而不动这段，CI 就会红。§1 起是人读版，不是第二个真源。
+
+<!-- BEGIN resume-floor-status (checked by check-licence-surface.ps1) -->
+```text
+emby-min-percent: 2
+jellyfin-min-percent: 5
+minimum-runtime-seconds: 300
+maximum-percent-default: 90
+trailing-window-ticks: 10000000
+floor-comparison: percent-of-runtime
+threshold-source: measured-constants-not-server-config
+contract-case-count: 31
+```
+<!-- END resume-floor-status -->
+
 ## 1. 目的与边界
 
 W8-H 用两台真服（Emby 4.10.2 :8097、Jellyfin 12.2 :8096）证明了三件事：位置能原样往返、
@@ -28,7 +45,7 @@ dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug --nologo
 | 项目 | 数字 |
 | --- | --- |
 | 改动前该工程用例数（本轮在主检出实跑） | 438 |
-| 改动后 | 469 |
+| 改动后 | 469（该轮单工程实跑；当前权威计数以 CI 打印为准） |
 | 本轮新增 | **31**（17 个测试方法：3 个 `[Fact]` + 14 个 `[Theory]`，共 28 条 `[InlineData]`） |
 | 失败 | 0 |
 
@@ -132,7 +149,7 @@ AuthExpired/Http/Network/Connection/Parse），所以**上报失败只能靠回�
 ## 7. 复现
 
 ```
-# 全工程（本轮实测 469 通过 / 0 失败）
+# 全工程（本轮实测 469 通过 / 0 失败（该轮实跑；当前计数以 CI 打印为准））
 dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug --nologo
 
 # 只跑本契约（31 用例）
