@@ -50,6 +50,16 @@
 #   that set warns and names the methods. It is deliberately never red - the tail
 #   is invisible to the TRX, so red would accuse a change that cannot be proven.
 #
+#   The same substitution exists one level up, at the suite itself. The baseline
+#   file is what names the suites to check, so a suite entry deleted by hand (or
+#   a whole test project dropped from the workflow) would simply stop being
+#   checked, and every case it reported would stop being counted without any
+#   count in the file changing. The baseline therefore pins how many suites it
+#   must hold ("expected_suites", validated against the table itself), the run
+#   enumerates the *.trx files it produced and warns about the ones the baseline
+#   does not list, and each entry's declared suite name is compared with the test
+#   assembly recorded inside its own results file.
+#
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -65,6 +75,10 @@
 #   a method reporting only argument rows the baseline did not have -> warning
 #   the set of argument rows carrying the truncation marker changed -> warning
 #     (the text past the marker is not pinned; the warning names the methods)
+#   a *.trx in the results directory that no baseline entry lists -> warning
+#     (a new suite has to stay visible before it can be gated)
+#   a declared suite name that disagrees with the test assembly recorded in its
+#     own results file -> red (the entry is wired to another suite's results)
 #   failed != 0 or notExecuted != 0 -> red
 #
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
@@ -76,8 +90,10 @@
 #   a data key that names no method in the methods table, a blank row, a row
 #   list that disagrees with the method's case count, a baseline still in the
 #   2026-10-31 digest format, a truncated table that is not an object, a
-#   truncated key that names no method of the data table, and a truncated count
-#   below 1 all throw. Otherwise the gate would be vacuous and un-failable.
+#   truncated key that names no method of the data table, a truncated count
+#   below 1, a missing expected_suites, an expected_suites that disagrees with
+#   the number of entries, and two entries reading the same results file all
+#   throw. Otherwise the gate would be vacuous and un-failable.
 #
 # ASCII ONLY on purpose: Windows PowerShell 5.1 decodes BOM-less UTF-8 as ANSI
 # and corrupts non-ASCII text, which then breaks ConvertFrom-Json parsing.
@@ -144,6 +160,19 @@ if (-not $baseline.suites -or @($baseline.suites).Count -eq 0) {
   throw "$BaselinePath lists no suites"
 }
 
+$suiteCount = @($baseline.suites).Count
+if ($null -eq $baseline.expected_suites) {
+  throw "$BaselinePath has no expected_suites - a deleted suite entry would stop being gated; refresh with windows/tools/update-test-suite-baseline.ps1"
+}
+$pinned = [string]$baseline.expected_suites
+if ($pinned -notmatch '^[0-9]+$' -or [int]$pinned -lt 1) {
+  throw "$BaselinePath : expected_suites is $pinned - must be a positive integer"
+}
+if ([int]$pinned -ne $suiteCount) {
+  throw "$BaselinePath : expected_suites is $pinned but the table lists $suiteCount suites - a suite must not stop being gated without an explicit refresh"
+}
+$seenFiles = @{}
+
 foreach ($e in $baseline.suites) {
   $declared = [int]$e.expected
   if ($declared -lt 1) {
@@ -151,6 +180,9 @@ foreach ($e in $baseline.suites) {
   }
   if ([string]::IsNullOrWhiteSpace($e.file)) { throw "$BaselinePath : an entry has no file" }
   if ([string]::IsNullOrWhiteSpace($e.suite)) { throw "$BaselinePath : an entry has no suite name" }
+  $fileName = [string]$e.file
+  if ($seenFiles.ContainsKey($fileName)) { throw "$BaselinePath : two entries read the same results file $fileName - one suite would be counted twice and another left unchecked" }
+  $seenFiles[$fileName] = $true
   if ($null -eq $e.classes) {
     throw "$BaselinePath : entry for $($e.suite) has no classes table - the per-class check would be vacuous"
   }
@@ -269,6 +301,9 @@ $grown = @()
 $newMethods = @()
 $newData = @()
 $truncWarn = @()
+$suiteIdentity = @()
+$provenanceWarn = @()
+$auditFiles = @()
 foreach ($e in $baseline.suites) {
   $path = Join-Path -Path $ResultsDir -ChildPath $e.file
   if (-not (Test-Path -LiteralPath $path)) {
@@ -281,6 +316,35 @@ foreach ($e in $baseline.suites) {
   $total = [int]$xml.TestRun.ResultSummary.Counters.total
   $failed = [int]$xml.TestRun.ResultSummary.Counters.failed
   $skipped = [int]$xml.TestRun.ResultSummary.Counters.notExecuted
+  $auditFiles += [string]$e.file
+
+  # Identity from the artifact: the TestMethod elements record the assembly that
+  # produced these results (codeBase; older writers only fill storage). A single
+  # recorded assembly that does not match the declared suite name means this
+  # entry is wired to another suite's results.
+  $assemblies = New-Object System.Collections.Generic.List[string]
+  foreach ($ut in @($xml.TestRun.TestDefinitions.UnitTest)) {
+    if ($null -eq $ut) { continue }
+    $cb = $null
+    if ($ut.TestMethod) { $cb = [string]$ut.TestMethod.codeBase }
+    if ([string]::IsNullOrWhiteSpace($cb)) { $cb = [string]$ut.storage }
+    if ([string]::IsNullOrWhiteSpace($cb)) { continue }
+    $leaf = $cb.Split([char]92, [char]47)
+    $leafName = ""
+    foreach ($part in $leaf) { if (-not [string]::IsNullOrWhiteSpace($part)) { $leafName = $part } }
+    if ([string]::IsNullOrWhiteSpace($leafName)) { continue }
+    if ($leafName.EndsWith(".dll", [System.StringComparison]::OrdinalIgnoreCase)) { $leafName = $leafName.Substring(0, $leafName.Length - 4) }
+    if (-not $assemblies.Contains($leafName)) { [void]$assemblies.Add($leafName) }
+  }
+  if ($assemblies.Count -eq 1) {
+    if (-not $assemblies[0].Equals([string]$e.suite, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $suiteIdentity += "$($e.suite) ($($e.file) was produced by $($assemblies[0]))"
+    }
+  } elseif ($assemblies.Count -eq 0) {
+    $provenanceWarn += "$($e.suite) ($($e.file) records no test assembly)"
+  } else {
+    $provenanceWarn += "$($e.suite) ($($e.file) mixes $($assemblies.Count) test assemblies)"
+  }
 
   # Class membership comes from TestDefinitions (UnitTest.id -> TestMethod.className),
   # never from the result name: xUnit appends the data arguments of a [Theory] to the
@@ -535,6 +599,25 @@ foreach ($e in $baseline.suites) {
   $all += $total
 }
 
+if ($suiteIdentity.Count -gt 0) {
+  throw "$BaselinePath : the declared suite name does not match the assembly that produced its results: $($suiteIdentity -join '; ')"
+}
+$producedResults = @()
+if (Test-Path -LiteralPath $ResultsDir) {
+  $producedResults = @(Get-ChildItem -LiteralPath $ResultsDir -File -Filter *.trx | ForEach-Object { [string]$_.Name } | Sort-Object)
+}
+$unlistedResults = @($producedResults | Where-Object { -not ($auditFiles -contains $_) })
+"suites=$($producedResults.Count) baseline=suite table $($auditFiles.Count) suites"
+if ($unlistedResults.Count -gt 0) {
+  $shownUnlisted = $unlistedResults
+  if ($shownUnlisted.Count -gt 12) { $shownUnlisted = $shownUnlisted[0..11] + "... ($($unlistedResults.Count - 12) more)" }
+  Write-Host "::warning::test results that the baseline does not list - their cases are neither counted nor gated (refresh windows/tools/test-suite-baseline.json with windows/tools/update-test-suite-baseline.ps1): $($shownUnlisted -join '; ')"
+}
+if ($provenanceWarn.Count -gt 0) {
+  $shownProv = $provenanceWarn
+  if ($shownProv.Count -gt 12) { $shownProv = $shownProv[0..11] + "... ($($provenanceWarn.Count - 12) more)" }
+  Write-Host "::warning::the declared suite name cannot be proven against the artifact - the results file does not name exactly one test assembly: $($shownProv -join '; ')"
+}
 if ($stale.Count -gt 0) {
   Write-Host "::warning::suite grew beyond the baseline - refresh windows/tools/test-suite-baseline.json: $($stale -join '; ')"
 }

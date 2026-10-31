@@ -8,7 +8,7 @@
 # explicit -AcceptRemoval switch and shows up as a diff in the same commit as
 # the removal.
 #
-# The written file carries five levels, each one closing a substitution the
+# The written file carries six levels, each one closing a substitution the
 # level above cannot see:
 #   expected : total case count (deleting and adding cases keeps it equal)
 #   classes  : cases per class   (deleting and adding inside one class keeps it)
@@ -29,6 +29,12 @@
 #              marker, per method with at least one. Diagnostic only: the tail of
 #              a truncated value cannot be recovered from a TRX, so the gate warns
 #              when this set changes instead of accusing a change it cannot prove.
+#   expected_suites: how many entries the file must keep. The file is what names
+#              the suites to check, so a suite entry deleted by hand would stop
+#              being checked and every case it reported would stop being counted
+#              without any count changing. A suite whose results are gone is only
+#              dropped with -AcceptRemoval; results the file does not list are
+#              added here automatically (the documented growth path).
 # Rows are stored verbatim, sorted ordinally, duplicates kept: a replacement
 # shows up in review as a changed line instead of an opaque hash. They are
 # stable across runs (two CI runs of one tree produced identical rows); a
@@ -129,6 +135,7 @@ function Read-Suite([string]$Path) {
   $methods = @{}
   $rowArgs = @{}
   $truncated = @{}
+  $assemblies = New-Object System.Collections.Generic.List[string]
   foreach ($ut in @($xml.TestRun.TestDefinitions.UnitTest)) {
     if ($null -eq $ut) { continue }
     $cls = $null
@@ -136,6 +143,17 @@ function Read-Suite([string]$Path) {
     if ($ut.TestMethod) {
       $cls = [string]$ut.TestMethod.className
       $raw = [string]$ut.TestMethod.name
+    }
+    $cb = $null
+    if ($ut.TestMethod) { $cb = [string]$ut.TestMethod.codeBase }
+    if ([string]::IsNullOrWhiteSpace($cb)) { $cb = [string]$ut.storage }
+    if (-not [string]::IsNullOrWhiteSpace($cb)) {
+      $leafName = ""
+      foreach ($part in $cb.Split([char]92, [char]47)) { if (-not [string]::IsNullOrWhiteSpace($part)) { $leafName = $part } }
+      if (-not [string]::IsNullOrWhiteSpace($leafName)) {
+        if ($leafName.EndsWith(".dll", [System.StringComparison]::OrdinalIgnoreCase)) { $leafName = $leafName.Substring(0, $leafName.Length - 4) }
+        if (-not $assemblies.Contains($leafName)) { [void]$assemblies.Add($leafName) }
+      }
     }
     if ([string]::IsNullOrWhiteSpace($cls)) { throw "$Path : a test definition has no TestMethod.className" }
     if ([string]::IsNullOrWhiteSpace($raw)) { $raw = [string]$ut.name }
@@ -187,7 +205,9 @@ function Read-Suite([string]$Path) {
     if ($null -eq $cls) { throw "$Path : a result has no TestMethod.className" }
     if ($classes.ContainsKey($cls)) { $classes[$cls] = $classes[$cls] + 1 } else { $classes[$cls] = 1 }
   }
-  return @{ total = $total; classes = $classes; methods = $methods; data = $data; truncated = $truncated }
+  $assembly = ""
+  if ($assemblies.Count -eq 1) { $assembly = $assemblies[0] }
+  return @{ total = $total; classes = $classes; methods = $methods; data = $data; truncated = $truncated; assembly = $assembly }
 }
 
 # Only used to read the file being refreshed. Older entries stored method names as
@@ -233,10 +253,25 @@ if (-not (Test-Path -LiteralPath $BaselinePath)) { throw "missing $BaselinePath"
 $baseline = Get-Content -LiteralPath $BaselinePath -Raw | ConvertFrom-Json
 if (-not $baseline.suites -or @($baseline.suites).Count -eq 0) { throw "$BaselinePath lists no suites" }
 
+$seenFiles = @{}
+foreach ($e in $baseline.suites) {
+  $f = [string]$e.file
+  if ([string]::IsNullOrWhiteSpace($f)) { throw "$BaselinePath : an entry has no file" }
+  if ($seenFiles.ContainsKey($f)) { throw "$BaselinePath : two entries read the same results file $f" }
+  $seenFiles[$f] = $true
+}
+
 $entries = @()
 $shrunk = @()
+$added = @()
+$dropped = @()
 foreach ($e in $baseline.suites) {
   $path = Join-Path -Path $ResultsDir -ChildPath $e.file
+  if (-not (Test-Path -LiteralPath $path)) {
+    if (-not $AcceptRemoval) { throw "refusing to lower the baseline without -AcceptRemoval - the results for $($e.suite) ($($e.file)) were not produced, so its cases would stop being gated" }
+    $dropped += "suite $($e.suite) ($($e.file) gone)"
+    continue
+  }
   $read = Read-Suite -Path $path
   $oldClasses = @{}
   if ($null -ne $e.classes) {
@@ -303,6 +338,17 @@ foreach ($e in $baseline.suites) {
   }
   $entries += @{ file = [string]$e.file; suite = [string]$e.suite; expected = $read.total; classes = $read.classes; methods = $entryMethods; data = $read.data; truncated = $read.truncated }
 }
+$knownFiles = @($entries | ForEach-Object { [string]$_.file })
+if (Test-Path -LiteralPath $ResultsDir) {
+  foreach ($f in @(Get-ChildItem -LiteralPath $ResultsDir -File -Filter *.trx | ForEach-Object { [string]$_.Name } | Sort-Object)) {
+    if ($knownFiles -contains $f) { continue }
+    $read = Read-Suite -Path (Join-Path -Path $ResultsDir -ChildPath $f)
+    $suiteName = [string]$read.assembly
+    if ([string]::IsNullOrWhiteSpace($suiteName)) { throw "cannot name the suite in $f - the results do not record which test assembly produced them; add the entry by hand" }
+    $entries += @{ file = $f; suite = $suiteName; expected = $read.total; classes = $read.classes; methods = $read.methods; data = $read.data; truncated = $read.truncated }
+    $added += "$suiteName ($f)"
+  }
+}
 if ($shrunk.Count -gt 0) {
   throw ("refusing to lower the baseline without -AcceptRemoval - a smaller suite must be an explicit, reviewed change: " + ($shrunk -join " | "))
 }
@@ -316,7 +362,7 @@ for ($i = 0; $i -lt $comment.Count; $i++) {
   if ($i -eq $comment.Count - 1) { $comma = "" }
   [void]$text.Append("    " + (Json-String $comment[$i]) + $comma + $nl)
 }
-[void]$text.Append("  ]," + $nl + "  " + $q + "suites" + $q + ": [" + $nl)
+[void]$text.Append("  ]," + $nl + "  " + $q + "expected_suites" + $q + ": " + $entries.Count + "," + $nl + "  " + $q + "suites" + $q + ": [" + $nl)
 for ($i = 0; $i -lt $entries.Count; $i++) {
   $entry = $entries[$i]
   [void]$text.Append("    {" + $nl)
@@ -383,6 +429,9 @@ try {
   throw "refusing to write a non-ASCII baseline: $($_.Exception.Message)"
 }
 "wrote $BaselinePath"
+"expected_suites=$($entries.Count)"
+foreach ($a in $added) { "added suite: $a" }
+foreach ($s in $dropped) { "removed: $s" }
 foreach ($entry in $entries) {
   $methodCount = 0
   $caseCount = 0

@@ -21,6 +21,7 @@
     "non-ASCII text, which breaks ConvertFrom-Json. Keep this file pure ASCII; non-ASCII argument",
     "rows are stored as \\\\uXXXX escapes, which ConvertFrom-Json turns back into the original text."
   ],
+  "expected_suites": 2,
   "suites": [
     {
       "file": "windows-tests.trx",
