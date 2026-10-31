@@ -264,7 +264,7 @@ dotnet test  MediaHub.Windows.sln -c Debug
 
 CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
 与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
-截至 `a888a192`：`MediaHub.Tests` **478** + `MediaHub.WebDav.Tests` **104** = **582 通过 / 0 失败 / 0 跳过**（windows-ci run **41221547543** 日志实测；`478 = 469 + 9`，由 W14 诊断日志落盘 9 例带来，此后 W35–W56 的都是文档/脚本门禁、未再加 C# 用例）
+截至 `f4a9fd24`：`MediaHub.Tests` **478** + `MediaHub.WebDav.Tests` **104** = **582 通过 / 0 失败 / 0 跳过**（windows-ci run **41225881308** 日志实测；`478 = 469 + 9`，由 W14 诊断日志落盘 9 例带来，此后 W35–W56 的都是文档/脚本门禁、未再加 C# 用例）
 （469 = 438 既有 + 31 例续播下限契约；历史口径 542 = 438 + 104 曾在 PR #33 里写过）。
 这不是本地口径而是 CI 实测：`windows-ci` 现在把两个套件**分两步**跑并各自产出 trx，再按套件名断言下限
 （`MediaHub.Tests` ≥400、`MediaHub.WebDav.Tests` ≥100，`failed=0` 且 `notExecuted=0`）—— 此前 WebDav 套件虽然被构建、
