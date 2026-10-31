@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -44,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -77,6 +80,7 @@ fun DetailRoute(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val seriesState by viewModel.seriesState.collectAsStateWithLifecycle()
     val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
+    val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -88,6 +92,31 @@ fun DetailRoute(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    // 收藏开关（task-25 / A2）：只在该数据源具备 FAVORITE 能力时出现
+                    val favorite = favoriteState
+                    if (favorite != null) {
+                        IconButton(
+                            onClick = viewModel::toggleFavorite,
+                            enabled = !favorite.isUpdating,
+                        ) {
+                            Icon(
+                                imageVector = if (favorite.isFavorite) {
+                                    Icons.Default.Favorite
+                                } else {
+                                    Icons.Default.FavoriteBorder
+                                },
+                                contentDescription = stringResource(
+                                    if (favorite.isFavorite) {
+                                        R.string.detail_action_unfavorite
+                                    } else {
+                                        R.string.detail_action_favorite
+                                    },
+                                ),
+                            )
+                        }
                     }
                 },
             )
@@ -109,10 +138,21 @@ fun DetailRoute(
                 }
             }
 
-            is DetailUiState.Content -> DetailBody(
+            is DetailUiState.Content -> Column(
+                modifier = Modifier.fillMaxSize().padding(padding),
+            ) {
+                // 收藏失败只降级为可读提示：已展示的详情与收藏状态都不翻转
+                favoriteState?.error?.let { message ->
+                    Text(
+                        text = message,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                DetailBody(
                 detail = s.detail,
                 seriesState = seriesState,
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize().weight(1f, fill = true),
                 onPlay = { item ->
                     onPlay(
                         viewModel.serverId,
@@ -132,7 +172,8 @@ fun DetailRoute(
                 onOpenItem = onOpenItem,
                 sourceState = sourceState,
                 onSwitchSource = onSwitchSource,
-            )
+                )
+            }
         }
     }
 }

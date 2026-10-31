@@ -1,0 +1,1429 @@
+{
+  "generator": "archive-vectors (temporary; not committed). Freezes MediaHub.Sync EncryptedArchiveReader/Writer behaviour.",
+  "windowsSource": "D:/mh-w6/windows/src/MediaHub.Sync",
+  "passphrase": "correct horse battery staple",
+  "otherPassphrase": "a different long passphrase",
+  "createdAtEpochMs": 1700000000000,
+  "kdf": {
+    "name": "pbkdf2-sha256",
+    "saltSize": 16,
+    "keySize": 32,
+    "minIterations": 600000,
+    "defaultIterations": 600000,
+    "saltBase64": "AAECAwQFBgcICQoLDA0ODw==",
+    "iterations": 600000,
+    "keyHex": "ef177144eec9420cbc1093d2a8b344a92bc506d0d4ec9c028dd19f8324d8c1e6",
+    "secondSaltBase64": "oKGio6SlpqeoqaqrrK2urw==",
+    "secondKeyHex": "7454ba8cd5beeae3d9111edde48595348482956ff845cfffd67f9ad483503e19",
+    "chinesePassphrase": "\u6211\u7684 NAS \u653E\u8FDB\u4E86\u9601\u697C",
+    "chineseKeyHex": "80dfd866d338f2fe76f7974449bbdc2144056d81055e0a9c22c4e5bc129fbaab"
+  },
+  "header": {
+    "canonicalJson": "{\u0022version\u0022:1,\u0022kdf\u0022:\u0022pbkdf2-sha256\u0022,\u0022iterations\u0022:600000,\u0022saltBase64\u0022:\u0022AAECAwQFBgcICQoLDA0ODw==\u0022,\u0022nonceBase64\u0022:\u0022EBESExQVFhcYGRob\u0022,\u0022createdAtEpochMs\u0022:1700000000000}",
+    "byteLength": 161,
+    "version": 1,
+    "kdf": "pbkdf2-sha256",
+    "iterations": 600000,
+    "saltBase64": "AAECAwQFBgcICQoLDA0ODw==",
+    "nonceBase64": "EBESExQVFhcYGRob",
+    "createdAtEpochMs": 1700000000000,
+    "magic": "MHSYNCA1",
+    "tagSize": 16,
+    "nonceSize": 12,
+    "maxHeaderBytes": 4096,
+    "maxPayloadBytes": 8388608
+  },
+  "envelope": {
+    "payloadJson": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u00221b96e7eb417e4caeb27eb60f3d1acfc3\u0022,\u0022createdAtEpochMs\u0022:1792784739843,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[\u0022emby\u0022,\u0022jellyfin\u0022,\u0022quantum-nas\u0022]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022local-385c7c48494fcb81\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385 Emby\u0022,\u0022accountScope\u0022:\u0022alice\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/emby\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:3,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-0a87ea9520c51a80\u0022,\u0022sourceType\u0022:\u0022jellyfin\u0022,\u0022displayName\u0022:\u0022Jellyfin \\u697C\\u4E0A\u0022,\u0022accountScope\u0022:\u0022bob\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/jelly\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:1,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-76e5f67669136fae\u0022,\u0022sourceType\u0022:\u0022quantum-nas\u0022,\u0022displayName\u0022:\u0022Quantum NAS\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022https://quantum.example:9443/v1\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:2,\u0022fieldVersion\u0022:0}],\u0022deletions\u0022:[{\u0022syncSourceId\u0022:\u0022local-f7ebca3dbf01eb17\u0022,\u0022deletedAtEpochMs\u0022:1760000000000,\u0022recordRevision\u0022:5}]}",
+    "byteLength": 1093,
+    "sha256": "049688090c5e8dd2f5d79b69f8375cc4c37d54f3ac15abd738861139f42334c8",
+    "resourceEqualsCanonical": true
+  },
+  "archive": {
+    "base64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH13MA6meJrFFp3f67ulnBrYKwm2xusOuMKuRXa4rdgkiuyV6puHiJlC7i2SeoSeaTIoe1wXqnhbSHXz9UqY6kS\u002BCoUP3kumBIRzaHi2K8GGvMngZloGig4fL9AP88EmpgfSs9kTbUuKK9UyKwE3a/cL8aj547dqFo3qx5IGX0gbpOMZKbn9iwCQu8FfYvQWxi/05l2f\u002BWoqPFdxBg6xA6Btbadf4qz\u002BSuXpP47SMgyhItuIOg8VfMDyGIeow1FC66FJIcwmqBU3tgiAVdHv6W/BkqYmBpZfiUKY95qgtoPbvvcgVfdf\u002BdF9DW8X/ZuP\u002BiF7JO/1AjhNVtNrSuRBjz\u002BP1W9sjpv9J0bgivUasYcbQDyXv3CNnpw7fLoAL0Jzt3nBlpFEJJ2RFzDS9EvIf8Mf\u002BIhYpn010gkvnFwZhVJ3ATIwf9R729lBln\u002BpasvWb\u002BEmGF4l1Z2nw0gQtDygAX5aJEwtIk9eH\u002BepzffFLdVS9urS9YDcqjMz/sUJqccJL0OrNPq5RQ2b9zaFRfQe60wtNJrGpZDRBverrJKcV0lWOBRmFc438NYNCcjq7bTa0UjMSoJ\u002B50t5Gr\u002BnbcqO8/QFmnArQbZROKFY/Oy8hrNtyELGGPKDV0z2g/b\u002Bvz51Pj5XxYjtIJwWTkLS3FEXLcPB5urlV/CS5y5Lgcb7roUsG6DIwSuZM\u002BO1VVtcxPH7\u002BIgmYYUlFh/lID7I7Mi6gkm1zAhZqxmOWtuS6PJW5Kkqd6Qfqm1psvELfGq6V8OVvR7bBIEjYXkTqMCBx/g/R7UEQQcoD6n5bLYIcc2SJ7IcXFtv3Sheo9bE6W0bMZLUfJzbc2WBrYN/cq7oXKiF7Ub/0uEmbxhQmTN/XZlKDMosXUCBGKUCerEDwxNAEB0BC/SE86Fb\u002BUUxp6JNZANZr3c8uRQmaibPdbtFRnwyW8oHsHo44rEz6jnPl1enMu6VOkWTdEPi9avvF5cn3VnmUxq08vppONk0kSy4etsS6L42MvqN7F1ihdSLfqKh6TntcgmmBPRywDJNPvcSL1NsC\u002B\u002BzWr8/0u5ua1OXv/H1ZtYUoyxCtKVF3l3Rphajf8yNRqsM\u002BceiOgDs1zglPB8IrWacykXLaJNxcUql/QXyyhhBHb4n1x\u002BvjKIB4l3uMY\u002BodDWeAEZ4YqzRQodg6FlN3AOUN13bQ4heWQGth9eU9445qdtz2XfVY2aIEYMAMJgUr17GQkd9n8nw6adkdGQxwKff80Kaj1YE6OqtDKGJsNRhrm\u002BH/LIykGNCx7hTN4X3ogpNptz0nAVUZItBquFtY0hZIVc\u002BXuZKLaS8nx\u002B6ECjM1v9XHqgFu/6cc41vD1QSMwRAsV5PYc0sZxtIJrtF9J8yCToM48AwIlWNOQ2Z06nwNCeqdY33apbDZUbVyI85uTVvKrLqP8gPKu3siq4ovzP0otKCxFCDuFR483NYTJbWcqmSwzu7xrPrQm6X6hWOzywxhwcsoA==",
+    "hex": "4d4853594e434131000000a17b2276657273696f6e223a312c226b6466223a2270626b6466322d736861323536222c22697465726174696f6e73223a3630303030302c2273616c74426173653634223a2241414543417751464267634943516f4c4441304f44773d3d222c226e6f6e6365426173653634223a2245424553457851564668635947526f62222c2263726561746564417445706f63684d73223a313730303030303030303030307d77300ea6789ac5169ddfebbba59c1ad82b09b6c6eb0eb8c2ae4576b8add8248aec95ea9b87889942ee2d927a849e6932287b5c17aa785b4875f3f54a98ea44be0a850fde4ba60484736878b62bc186bcc9e0665a068a0e1f2fd00ff3c126a607d2b3d9136d4b8a2bd5322b01376bf70bf1a8f9e3b76a168deac792065f481ba4e31929b9fd8b0090bbc15f62f416c62ff4e65d9ff96a2a3c5771060eb103a06d6da75fe2acfe4ae5e93f8ed2320ca122db883a0f157cc0f21887a8c35142eba14921cc26a81537b6088055d1efe96fc192a62606965f894298f79aa0b683dbbef72055f75ff9d17d0d6f17fd9b8ffa217b24eff502384d56d36b4ae4418f3f8fd56f6c8e9bfd2746e08af51ab1871b403c97bf708d9e9c3b7cba002f4273b779c1969144249d911730d2f44bc87fc31ff88858a67d35d2092f9c5c198552770132307fd47bdbd941967fa96acbd66fe126185e25d59da7c34810b43ca0017e5a244c2d224f5e1fe7a9cdf7c52dd552f6ead2f580dcaa3333fec509a9c7092f43ab34fab9450d9bf7368545f41eeb4c2d349ac6a590d106f7abac929c57495638146615ce37f0d60d09c8eaedb4dad148cc4a827ee74b791abfa76dca8ef3f4059a702b41b65138a158fcecbc86b36dc842c618f283574cf683f6febf3e753e3e57c588ed209c164e42d2dc51172dc3c1e6eae557f092e72e4b81c6fbae852c1ba0c8c12b9933e3b5555b5cc4f1fbf88826618525161fe5203ec8ecc8ba8249b5cc0859ab198e5adb92e8f256e4a92a77a41faa6d69b2f10b7c6aba57c395bd1edb048123617913a8c081c7f83f47b5044107280fa9f96cb60871cd9227b21c5c5b6fdd285ea3d6c4e96d1b3192d47c9cdb736581ad837f72aee85ca885ed46ffd2e1266f185099337f5d994a0cca2c5d408118a5027ab103c31340101d010bf484f3a15bf94531a7a24d640359af773cb914266a26cf75bb45467c325bca07b07a38e2b133ea39cf9757a732ee953a45937443e2f5abef179727dd59e6531ab4f2fa6938d934912cb87adb12e8be3632fa8dec5d6285d48b7ea2a1e939ed7209a604f472c0324d3ef7122f536c0befb35abf3fd2ee6e6b5397bff1f566d614a32c42b4a545de5dd1a616a37fcc8d46ab0cf9c7a23a00ecd738253c1f08ad669cca45cb689371714aa5fd05f2ca18411dbe27d71faf8ca201e25dee318fa874359e00467862acd1428760e8594ddc0394375ddb43885e5901ad87d794f78e39a9db73d977d5636688118300309814af5ec642477d9fc9f0e9a764746431c0a7dff3429a8f5604e8eaad0ca189b0d461ae6f87fcb232906342c7b8533785f7a20a4da6dcf49c0554648b41aae16d63485921573e5ee64a2da4bc9f1fba1028ccd6ff571ea805bbfe9c738d6f0f5412330440b15e4f61cd2c671b4826bb45f49f32093a0ce3c03022558d390d99d3a9f03427aa758df76a96c36546d5c88f39b9356f2ab2ea3fc80f2aedec8aae28bf33f4a2d282c45083b85478f373584c96d672a992c33bbbc6b3eb426e97ea158ecf2c3187072ca0",
+    "byteLength": 1282,
+    "sha256": "17514e0805268e8f54ee231f56a060d81b8460f59df55708959d61bb9cdeee21"
+  },
+  "errors": [
+    {
+      "name": "empty-input",
+      "archiveBase64": "",
+      "passphrase": "correct horse battery staple",
+      "reason": "magic-mismatch",
+      "headerParses": false
+    },
+    {
+      "name": "magic-mismatch",
+      "archiveBase64": "TUhTWU5DQjEgbm90IGFuIGFyY2hpdmU=",
+      "passphrase": "correct horse battery staple",
+      "reason": "magic-mismatch",
+      "headerParses": false
+    },
+    {
+      "name": "short-header",
+      "archiveBase64": "TUhTWU5DQTEAAA==",
+      "passphrase": "correct horse battery staple",
+      "reason": "corrupt-header",
+      "headerParses": false
+    },
+    {
+      "name": "header-length-too-large",
+      "archiveBase64": "TUhTWU5DQTEAABOIe30=",
+      "passphrase": "correct horse battery staple",
+      "reason": "corrupt-header",
+      "headerParses": false
+    },
+    {
+      "name": "header-not-json",
+      "archiveBase64": "TUhTWU5DQTEAAAAEbm9wZQ==",
+      "passphrase": "correct horse battery staple",
+      "reason": "corrupt-header",
+      "headerParses": false
+    },
+    {
+      "name": "unsupported-version-2",
+      "archiveBase64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoyLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH13MA6meJrFFp3f67ulnBrYKwm2xusOuMKuRXa4rdgkiuyV6puHiJlC7i2SeoSeaTIoe1wXqnhbSHXz9UqY6kS\u002BCoUP3kumBIRzaHi2K8GGvMngZloGig4fL9AP88EmpgfSs9kTbUuKK9UyKwE3a/cL8aj547dqFo3qx5IGX0gbpOMZKbn9iwCQu8FfYvQWxi/05l2f\u002BWoqPFdxBg6xA6Btbadf4qz\u002BSuXpP47SMgyhItuIOg8VfMDyGIeow1FC66FJIcwmqBU3tgiAVdHv6W/BkqYmBpZfiUKY95qgtoPbvvcgVfdf\u002BdF9DW8X/ZuP\u002BiF7JO/1AjhNVtNrSuRBjz\u002BP1W9sjpv9J0bgivUasYcbQDyXv3CNnpw7fLoAL0Jzt3nBlpFEJJ2RFzDS9EvIf8Mf\u002BIhYpn010gkvnFwZhVJ3ATIwf9R729lBln\u002BpasvWb\u002BEmGF4l1Z2nw0gQtDygAX5aJEwtIk9eH\u002BepzffFLdVS9urS9YDcqjMz/sUJqccJL0OrNPq5RQ2b9zaFRfQe60wtNJrGpZDRBverrJKcV0lWOBRmFc438NYNCcjq7bTa0UjMSoJ\u002B50t5Gr\u002BnbcqO8/QFmnArQbZROKFY/Oy8hrNtyELGGPKDV0z2g/b\u002Bvz51Pj5XxYjtIJwWTkLS3FEXLcPB5urlV/CS5y5Lgcb7roUsG6DIwSuZM\u002BO1VVtcxPH7\u002BIgmYYUlFh/lID7I7Mi6gkm1zAhZqxmOWtuS6PJW5Kkqd6Qfqm1psvELfGq6V8OVvR7bBIEjYXkTqMCBx/g/R7UEQQcoD6n5bLYIcc2SJ7IcXFtv3Sheo9bE6W0bMZLUfJzbc2WBrYN/cq7oXKiF7Ub/0uEmbxhQmTN/XZlKDMosXUCBGKUCerEDwxNAEB0BC/SE86Fb\u002BUUxp6JNZANZr3c8uRQmaibPdbtFRnwyW8oHsHo44rEz6jnPl1enMu6VOkWTdEPi9avvF5cn3VnmUxq08vppONk0kSy4etsS6L42MvqN7F1ihdSLfqKh6TntcgmmBPRywDJNPvcSL1NsC\u002B\u002BzWr8/0u5ua1OXv/H1ZtYUoyxCtKVF3l3Rphajf8yNRqsM\u002BceiOgDs1zglPB8IrWacykXLaJNxcUql/QXyyhhBHb4n1x\u002BvjKIB4l3uMY\u002BodDWeAEZ4YqzRQodg6FlN3AOUN13bQ4heWQGth9eU9445qdtz2XfVY2aIEYMAMJgUr17GQkd9n8nw6adkdGQxwKff80Kaj1YE6OqtDKGJsNRhrm\u002BH/LIykGNCx7hTN4X3ogpNptz0nAVUZItBquFtY0hZIVc\u002BXuZKLaS8nx\u002B6ECjM1v9XHqgFu/6cc41vD1QSMwRAsV5PYc0sZxtIJrtF9J8yCToM48AwIlWNOQ2Z06nwNCeqdY33apbDZUbVyI85uTVvKrLqP8gPKu3siq4ovzP0otKCxFCDuFR483NYTJbWcqmSwzu7LFIThDc4JSmCJn54WJvIjQ==",
+      "passphrase": "correct horse battery staple",
+      "reason": "unsupported-version:2",
+      "headerParses": false
+    },
+    {
+      "name": "unknown-kdf-argon2id",
+      "archiveBase64": "TUhTWU5DQTEAAACceyJ2ZXJzaW9uIjoxLCJrZGYiOiJhcmdvbjJpZCIsIml0ZXJhdGlvbnMiOjYwMDAwMCwic2FsdEJhc2U2NCI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHc9PSIsIm5vbmNlQmFzZTY0IjoiRUJFU0V4UVZGaGNZR1JvYiIsImNyZWF0ZWRBdEVwb2NoTXMiOjE3MDAwMDAwMDAwMDB9dzAOpniaxRad3\u002Bu7pZwa2CsJtsbrDrjCrkV2uK3YJIrsleqbh4iZQu4tknqEnmkyKHtcF6p4W0h18/VKmOpEvgqFD95LpgSEc2h4tivBhrzJ4GZaBooOHy/QD/PBJqYH0rPZE21LiivVMisBN2v3C/Go\u002BeO3ahaN6seSBl9IG6TjGSm5/YsAkLvBX2L0FsYv9OZdn/lqKjxXcQYOsQOgbW2nX\u002BKs/krl6T\u002BO0jIMoSLbiDoPFXzA8hiHqMNRQuuhSSHMJqgVN7YIgFXR7\u002BlvwZKmJgaWX4lCmPeaoLaD2773IFX3X/nRfQ1vF/2bj/oheyTv9QI4TVbTa0rkQY8/j9VvbI6b/SdG4Ir1GrGHG0A8l79wjZ6cO3y6AC9Cc7d5wZaRRCSdkRcw0vRLyH/DH/iIWKZ9NdIJL5xcGYVSdwEyMH/Ue9vZQZZ/qWrL1m/hJhheJdWdp8NIELQ8oAF\u002BWiRMLSJPXh/nqc33xS3VUvbq0vWA3KozM/7FCanHCS9DqzT6uUUNm/c2hUX0HutMLTSaxqWQ0Qb3q6ySnFdJVjgUZhXON/DWDQnI6u202tFIzEqCfudLeRq/p23KjvP0BZpwK0G2UTihWPzsvIazbchCxhjyg1dM9oP2/r8\u002BdT4\u002BV8WI7SCcFk5C0txRFy3Dwebq5VfwkucuS4HG\u002B66FLBugyMErmTPjtVVbXMTx\u002B/iIJmGFJRYf5SA\u002ByOzIuoJJtcwIWasZjlrbkujyVuSpKnekH6ptabLxC3xqulfDlb0e2wSBI2F5E6jAgcf4P0e1BEEHKA\u002Bp\u002BWy2CHHNkieyHFxbb90oXqPWxOltGzGS1Hyc23Nlga2Df3Ku6Fyohe1G/9LhJm8YUJkzf12ZSgzKLF1AgRilAnqxA8MTQBAdAQv0hPOhW/lFMaeiTWQDWa93PLkUJmomz3W7RUZ8MlvKB7B6OOKxM\u002Bo5z5dXpzLulTpFk3RD4vWr7xeXJ91Z5lMatPL6aTjZNJEsuHrbEui\u002BNjL6jexdYoXUi36ioek57XIJpgT0csAyTT73Ei9TbAvvs1q/P9LubmtTl7/x9WbWFKMsQrSlRd5d0aYWo3/MjUarDPnHojoA7Nc4JTwfCK1mnMpFy2iTcXFKpf0F8soYQR2\u002BJ9cfr4yiAeJd7jGPqHQ1ngBGeGKs0UKHYOhZTdwDlDdd20OIXlkBrYfXlPeOOanbc9l31WNmiBGDADCYFK9exkJHfZ/J8OmnZHRkMcCn3/NCmo9WBOjqrQyhibDUYa5vh/yyMpBjQse4UzeF96IKTabc9JwFVGSLQarhbWNIWSFXPl7mSi2kvJ8fuhAozNb/Vx6oBbv\u002BnHONbw9UEjMEQLFeT2HNLGcbSCa7RfSfMgk6DOPAMCJVjTkNmdOp8DQnqnWN92qWw2VG1ciPObk1byqy6j/IDyrt7IquKL8z9KLSgsRQg7hUePNzWEyW1nKpksM7u/Qaznwn1TvTbKHjjERg3UU=",
+      "passphrase": "correct horse battery staple",
+      "reason": "unknown-kdf:argon2id",
+      "headerParses": false
+    },
+    {
+      "name": "invalid-iterations-1000",
+      "archiveBase64": "TUhTWU5DQTEAAACfeyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6MTAwMCwic2FsdEJhc2U2NCI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHc9PSIsIm5vbmNlQmFzZTY0IjoiRUJFU0V4UVZGaGNZR1JvYiIsImNyZWF0ZWRBdEVwb2NoTXMiOjE3MDAwMDAwMDAwMDB9AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "passphrase": "correct horse battery staple",
+      "reason": "invalid-iterations",
+      "headerParses": false
+    },
+    {
+      "name": "corrupt-ciphertext-truncated",
+      "archiveBase64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH0=",
+      "passphrase": "correct horse battery staple",
+      "reason": "corrupt-ciphertext",
+      "headerParses": false
+    },
+    {
+      "name": "no-ciphertext",
+      "archiveBase64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH0=",
+      "passphrase": "correct horse battery staple",
+      "reason": "corrupt-ciphertext",
+      "headerParses": false
+    },
+    {
+      "name": "wrong-passphrase",
+      "archiveBase64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH13MA6meJrFFp3f67ulnBrYKwm2xusOuMKuRXa4rdgkiuyV6puHiJlC7i2SeoSeaTIoe1wXqnhbSHXz9UqY6kS\u002BCoUP3kumBIRzaHi2K8GGvMngZloGig4fL9AP88EmpgfSs9kTbUuKK9UyKwE3a/cL8aj547dqFo3qx5IGX0gbpOMZKbn9iwCQu8FfYvQWxi/05l2f\u002BWoqPFdxBg6xA6Btbadf4qz\u002BSuXpP47SMgyhItuIOg8VfMDyGIeow1FC66FJIcwmqBU3tgiAVdHv6W/BkqYmBpZfiUKY95qgtoPbvvcgVfdf\u002BdF9DW8X/ZuP\u002BiF7JO/1AjhNVtNrSuRBjz\u002BP1W9sjpv9J0bgivUasYcbQDyXv3CNnpw7fLoAL0Jzt3nBlpFEJJ2RFzDS9EvIf8Mf\u002BIhYpn010gkvnFwZhVJ3ATIwf9R729lBln\u002BpasvWb\u002BEmGF4l1Z2nw0gQtDygAX5aJEwtIk9eH\u002BepzffFLdVS9urS9YDcqjMz/sUJqccJL0OrNPq5RQ2b9zaFRfQe60wtNJrGpZDRBverrJKcV0lWOBRmFc438NYNCcjq7bTa0UjMSoJ\u002B50t5Gr\u002BnbcqO8/QFmnArQbZROKFY/Oy8hrNtyELGGPKDV0z2g/b\u002Bvz51Pj5XxYjtIJwWTkLS3FEXLcPB5urlV/CS5y5Lgcb7roUsG6DIwSuZM\u002BO1VVtcxPH7\u002BIgmYYUlFh/lID7I7Mi6gkm1zAhZqxmOWtuS6PJW5Kkqd6Qfqm1psvELfGq6V8OVvR7bBIEjYXkTqMCBx/g/R7UEQQcoD6n5bLYIcc2SJ7IcXFtv3Sheo9bE6W0bMZLUfJzbc2WBrYN/cq7oXKiF7Ub/0uEmbxhQmTN/XZlKDMosXUCBGKUCerEDwxNAEB0BC/SE86Fb\u002BUUxp6JNZANZr3c8uRQmaibPdbtFRnwyW8oHsHo44rEz6jnPl1enMu6VOkWTdEPi9avvF5cn3VnmUxq08vppONk0kSy4etsS6L42MvqN7F1ihdSLfqKh6TntcgmmBPRywDJNPvcSL1NsC\u002B\u002BzWr8/0u5ua1OXv/H1ZtYUoyxCtKVF3l3Rphajf8yNRqsM\u002BceiOgDs1zglPB8IrWacykXLaJNxcUql/QXyyhhBHb4n1x\u002BvjKIB4l3uMY\u002BodDWeAEZ4YqzRQodg6FlN3AOUN13bQ4heWQGth9eU9445qdtz2XfVY2aIEYMAMJgUr17GQkd9n8nw6adkdGQxwKff80Kaj1YE6OqtDKGJsNRhrm\u002BH/LIykGNCx7hTN4X3ogpNptz0nAVUZItBquFtY0hZIVc\u002BXuZKLaS8nx\u002B6ECjM1v9XHqgFu/6cc41vD1QSMwRAsV5PYc0sZxtIJrtF9J8yCToM48AwIlWNOQ2Z06nwNCeqdY33apbDZUbVyI85uTVvKrLqP8gPKu3siq4ovzP0otKCxFCDuFR483NYTJbWcqmSwzu7xrPrQm6X6hWOzywxhwcsoA==",
+      "passphrase": "a different long passphrase",
+      "reason": "wrong-passphrase-or-tampered",
+      "headerParses": true
+    },
+    {
+      "name": "passphrase-empty",
+      "archiveBase64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH13MA6meJrFFp3f67ulnBrYKwm2xusOuMKuRXa4rdgkiuyV6puHiJlC7i2SeoSeaTIoe1wXqnhbSHXz9UqY6kS\u002BCoUP3kumBIRzaHi2K8GGvMngZloGig4fL9AP88EmpgfSs9kTbUuKK9UyKwE3a/cL8aj547dqFo3qx5IGX0gbpOMZKbn9iwCQu8FfYvQWxi/05l2f\u002BWoqPFdxBg6xA6Btbadf4qz\u002BSuXpP47SMgyhItuIOg8VfMDyGIeow1FC66FJIcwmqBU3tgiAVdHv6W/BkqYmBpZfiUKY95qgtoPbvvcgVfdf\u002BdF9DW8X/ZuP\u002BiF7JO/1AjhNVtNrSuRBjz\u002BP1W9sjpv9J0bgivUasYcbQDyXv3CNnpw7fLoAL0Jzt3nBlpFEJJ2RFzDS9EvIf8Mf\u002BIhYpn010gkvnFwZhVJ3ATIwf9R729lBln\u002BpasvWb\u002BEmGF4l1Z2nw0gQtDygAX5aJEwtIk9eH\u002BepzffFLdVS9urS9YDcqjMz/sUJqccJL0OrNPq5RQ2b9zaFRfQe60wtNJrGpZDRBverrJKcV0lWOBRmFc438NYNCcjq7bTa0UjMSoJ\u002B50t5Gr\u002BnbcqO8/QFmnArQbZROKFY/Oy8hrNtyELGGPKDV0z2g/b\u002Bvz51Pj5XxYjtIJwWTkLS3FEXLcPB5urlV/CS5y5Lgcb7roUsG6DIwSuZM\u002BO1VVtcxPH7\u002BIgmYYUlFh/lID7I7Mi6gkm1zAhZqxmOWtuS6PJW5Kkqd6Qfqm1psvELfGq6V8OVvR7bBIEjYXkTqMCBx/g/R7UEQQcoD6n5bLYIcc2SJ7IcXFtv3Sheo9bE6W0bMZLUfJzbc2WBrYN/cq7oXKiF7Ub/0uEmbxhQmTN/XZlKDMosXUCBGKUCerEDwxNAEB0BC/SE86Fb\u002BUUxp6JNZANZr3c8uRQmaibPdbtFRnwyW8oHsHo44rEz6jnPl1enMu6VOkWTdEPi9avvF5cn3VnmUxq08vppONk0kSy4etsS6L42MvqN7F1ihdSLfqKh6TntcgmmBPRywDJNPvcSL1NsC\u002B\u002BzWr8/0u5ua1OXv/H1ZtYUoyxCtKVF3l3Rphajf8yNRqsM\u002BceiOgDs1zglPB8IrWacykXLaJNxcUql/QXyyhhBHb4n1x\u002BvjKIB4l3uMY\u002BodDWeAEZ4YqzRQodg6FlN3AOUN13bQ4heWQGth9eU9445qdtz2XfVY2aIEYMAMJgUr17GQkd9n8nw6adkdGQxwKff80Kaj1YE6OqtDKGJsNRhrm\u002BH/LIykGNCx7hTN4X3ogpNptz0nAVUZItBquFtY0hZIVc\u002BXuZKLaS8nx\u002B6ECjM1v9XHqgFu/6cc41vD1QSMwRAsV5PYc0sZxtIJrtF9J8yCToM48AwIlWNOQ2Z06nwNCeqdY33apbDZUbVyI85uTVvKrLqP8gPKu3siq4ovzP0otKCxFCDuFR483NYTJbWcqmSwzu7xrPrQm6X6hWOzywxhwcsoA==",
+      "passphrase": "",
+      "reason": "passphrase-empty",
+      "headerParses": true
+    },
+    {
+      "name": "passphrase-too-weak",
+      "archiveBase64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH13MA6meJrFFp3f67ulnBrYKwm2xusOuMKuRXa4rdgkiuyV6puHiJlC7i2SeoSeaTIoe1wXqnhbSHXz9UqY6kS\u002BCoUP3kumBIRzaHi2K8GGvMngZloGig4fL9AP88EmpgfSs9kTbUuKK9UyKwE3a/cL8aj547dqFo3qx5IGX0gbpOMZKbn9iwCQu8FfYvQWxi/05l2f\u002BWoqPFdxBg6xA6Btbadf4qz\u002BSuXpP47SMgyhItuIOg8VfMDyGIeow1FC66FJIcwmqBU3tgiAVdHv6W/BkqYmBpZfiUKY95qgtoPbvvcgVfdf\u002BdF9DW8X/ZuP\u002BiF7JO/1AjhNVtNrSuRBjz\u002BP1W9sjpv9J0bgivUasYcbQDyXv3CNnpw7fLoAL0Jzt3nBlpFEJJ2RFzDS9EvIf8Mf\u002BIhYpn010gkvnFwZhVJ3ATIwf9R729lBln\u002BpasvWb\u002BEmGF4l1Z2nw0gQtDygAX5aJEwtIk9eH\u002BepzffFLdVS9urS9YDcqjMz/sUJqccJL0OrNPq5RQ2b9zaFRfQe60wtNJrGpZDRBverrJKcV0lWOBRmFc438NYNCcjq7bTa0UjMSoJ\u002B50t5Gr\u002BnbcqO8/QFmnArQbZROKFY/Oy8hrNtyELGGPKDV0z2g/b\u002Bvz51Pj5XxYjtIJwWTkLS3FEXLcPB5urlV/CS5y5Lgcb7roUsG6DIwSuZM\u002BO1VVtcxPH7\u002BIgmYYUlFh/lID7I7Mi6gkm1zAhZqxmOWtuS6PJW5Kkqd6Qfqm1psvELfGq6V8OVvR7bBIEjYXkTqMCBx/g/R7UEQQcoD6n5bLYIcc2SJ7IcXFtv3Sheo9bE6W0bMZLUfJzbc2WBrYN/cq7oXKiF7Ub/0uEmbxhQmTN/XZlKDMosXUCBGKUCerEDwxNAEB0BC/SE86Fb\u002BUUxp6JNZANZr3c8uRQmaibPdbtFRnwyW8oHsHo44rEz6jnPl1enMu6VOkWTdEPi9avvF5cn3VnmUxq08vppONk0kSy4etsS6L42MvqN7F1ihdSLfqKh6TntcgmmBPRywDJNPvcSL1NsC\u002B\u002BzWr8/0u5ua1OXv/H1ZtYUoyxCtKVF3l3Rphajf8yNRqsM\u002BceiOgDs1zglPB8IrWacykXLaJNxcUql/QXyyhhBHb4n1x\u002BvjKIB4l3uMY\u002BodDWeAEZ4YqzRQodg6FlN3AOUN13bQ4heWQGth9eU9445qdtz2XfVY2aIEYMAMJgUr17GQkd9n8nw6adkdGQxwKff80Kaj1YE6OqtDKGJsNRhrm\u002BH/LIykGNCx7hTN4X3ogpNptz0nAVUZItBquFtY0hZIVc\u002BXuZKLaS8nx\u002B6ECjM1v9XHqgFu/6cc41vD1QSMwRAsV5PYc0sZxtIJrtF9J8yCToM48AwIlWNOQ2Z06nwNCeqdY33apbDZUbVyI85uTVvKrLqP8gPKu3siq4ovzP0otKCxFCDuFR483NYTJbWcqmSwzu7xrPrQm6X6hWOzywxhwcsoA==",
+      "passphrase": "short",
+      "reason": "passphrase-too-weak",
+      "headerParses": true
+    },
+    {
+      "name": "tampered-header-timestamp",
+      "archiveBase64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMX13MA6meJrFFp3f67ulnBrYKwm2xusOuMKuRXa4rdgkiuyV6puHiJlC7i2SeoSeaTIoe1wXqnhbSHXz9UqY6kS\u002BCoUP3kumBIRzaHi2K8GGvMngZloGig4fL9AP88EmpgfSs9kTbUuKK9UyKwE3a/cL8aj547dqFo3qx5IGX0gbpOMZKbn9iwCQu8FfYvQWxi/05l2f\u002BWoqPFdxBg6xA6Btbadf4qz\u002BSuXpP47SMgyhItuIOg8VfMDyGIeow1FC66FJIcwmqBU3tgiAVdHv6W/BkqYmBpZfiUKY95qgtoPbvvcgVfdf\u002BdF9DW8X/ZuP\u002BiF7JO/1AjhNVtNrSuRBjz\u002BP1W9sjpv9J0bgivUasYcbQDyXv3CNnpw7fLoAL0Jzt3nBlpFEJJ2RFzDS9EvIf8Mf\u002BIhYpn010gkvnFwZhVJ3ATIwf9R729lBln\u002BpasvWb\u002BEmGF4l1Z2nw0gQtDygAX5aJEwtIk9eH\u002BepzffFLdVS9urS9YDcqjMz/sUJqccJL0OrNPq5RQ2b9zaFRfQe60wtNJrGpZDRBverrJKcV0lWOBRmFc438NYNCcjq7bTa0UjMSoJ\u002B50t5Gr\u002BnbcqO8/QFmnArQbZROKFY/Oy8hrNtyELGGPKDV0z2g/b\u002Bvz51Pj5XxYjtIJwWTkLS3FEXLcPB5urlV/CS5y5Lgcb7roUsG6DIwSuZM\u002BO1VVtcxPH7\u002BIgmYYUlFh/lID7I7Mi6gkm1zAhZqxmOWtuS6PJW5Kkqd6Qfqm1psvELfGq6V8OVvR7bBIEjYXkTqMCBx/g/R7UEQQcoD6n5bLYIcc2SJ7IcXFtv3Sheo9bE6W0bMZLUfJzbc2WBrYN/cq7oXKiF7Ub/0uEmbxhQmTN/XZlKDMosXUCBGKUCerEDwxNAEB0BC/SE86Fb\u002BUUxp6JNZANZr3c8uRQmaibPdbtFRnwyW8oHsHo44rEz6jnPl1enMu6VOkWTdEPi9avvF5cn3VnmUxq08vppONk0kSy4etsS6L42MvqN7F1ihdSLfqKh6TntcgmmBPRywDJNPvcSL1NsC\u002B\u002BzWr8/0u5ua1OXv/H1ZtYUoyxCtKVF3l3Rphajf8yNRqsM\u002BceiOgDs1zglPB8IrWacykXLaJNxcUql/QXyyhhBHb4n1x\u002BvjKIB4l3uMY\u002BodDWeAEZ4YqzRQodg6FlN3AOUN13bQ4heWQGth9eU9445qdtz2XfVY2aIEYMAMJgUr17GQkd9n8nw6adkdGQxwKff80Kaj1YE6OqtDKGJsNRhrm\u002BH/LIykGNCx7hTN4X3ogpNptz0nAVUZItBquFtY0hZIVc\u002BXuZKLaS8nx\u002B6ECjM1v9XHqgFu/6cc41vD1QSMwRAsV5PYc0sZxtIJrtF9J8yCToM48AwIlWNOQ2Z06nwNCeqdY33apbDZUbVyI85uTVvKrLqP8gPKu3siq4ovzP0otKCxFCDuFR483NYTJbWcqmSwzu7xrPrQm6X6hWOzywxhwcsoA==",
+      "passphrase": "correct horse battery staple",
+      "reason": "wrong-passphrase-or-tampered",
+      "headerParses": true
+    },
+    {
+      "name": "tampered-ciphertext",
+      "archiveBase64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH13MA6meJrFFp3f67ulnBrYKwm2xusOuMKuRXa4rdgkiuyV6puHiJlC7i2SeoSeaTIoe1wXqnhbSHXz9UqY6kS\u002BCoUP3kumBIRzaHi2K8GGvMngZloGig4fL9AP88EmpgfSs9kTbUuKK9UyKwE3a/cL8aj547dqFo3qx5IGX0gbpOMZKbn9iwCQu8FfYvQWxi/05l2f\u002BWoqPFdxBg6xA6Btbadf4qz\u002BSuXpP47SMgyhItuIOg8VfMDyGIeow1FC66FJIcwmqBU3tgiAVdHv6W/BkqYmBpZfiUKY95qgtoPbvvcgVfdf\u002BdF9DW8X/ZuP\u002BiF7JO/1AjhNVtNrSuRBjz\u002BP1W9sjpv9J0bgivUasYcbQDyXv3CNnpw7fLoAL0Jzt3nBlpFEJJ2RFzDS9EvIf8Mf\u002BIhYpn010gkvnFwZhVJ3ATIwf9R729lBln\u002BpasvWb\u002BEmGF4l1Z2nw0gQtDygAX5aJEwtIk9eH\u002BepzffFLdVS9urS9YDcqjMz/sUJqccJL0OrNPq5RQ2b9zaFRfQe60wtNJrGpZDRBverrJKcV0lWOBRmFc438NYNCcjq7bTa0UjMSoJ\u002B50t5Gr\u002BnbcqO8/QFmnArQbZROKFY/Oy8hrNtyELGGPKDV0z2g/b\u002Bvz51Pj5XxYjtIJwWTkLS3FEXLcPB5urlV/CS5y5Lgcb7roUsG6DIwSuZM\u002BO1VVtcxPH7\u002BIgmYYUlFh/lID7I7Mi6gkm1zAhZqxmOWtuS6PJW5Kkqd6Qfqm1psvELfGq6V8OVvR7bBIEjYXkTqMCBx/g/R7UEQQcoD6n5bLYIcc2SJ7IcXFtv3Sheo9bE6W0bMZLUfJzbc2WBrYN/cq7oXKiF7Ub/0uEmbxhQmTN/XZlKDMosXUCBGKUCerEDwxNAEB0BC/SE86Fb\u002BUUxp6JNZANZr3c8uRQmaibPdbtFRnwyW8oHsHo44rEz6jnPl1enMu6VOkWTdEPi9avvF5cn3VnmUxq08vppONk0kSy4etsS6L42MvqN7F1ihdSLfqKh6TntcgmmBPRywDJNPvcSL1NsC\u002B\u002BzWr8/0u5ua1OXv/H1ZtYUoyxCtKVF3l3Rphajf8yNRqsM\u002BceiOgDs1zglPB8IrWacykXLaJNxcUql/QXyyhhBHb4n1x\u002BvjKIB4l3uMY\u002BodDWeAEZ4YqzRQodg6FlN3AOUN13bQ4heWQGth9eU9445qdtz2XfVY2aIEYMAMJgUr17GQkd9n8nw6adkdGQxwKff80Kaj1YE6OqtDKGJsNRhrm\u002BH/LIykGNCx7hTN4X3ogpNptz0nAVUZItBquFtY0hZIVc\u002BXuZKLaS8nx\u002B6ECjM1v9XHqgFu/6cc41vD1QSMwRAsV5PYc0sZxtIJrtF9J8yCToM48AwIlWNOQ2Z06nwNCeqdY33apbDZUbVyI85uTVvKrLqP8gPKu3siq4ovzP0otKCxFCDuFR483NYTJbWcqmSwzu6xrPrQm6X6hWOzywxhwcsoA==",
+      "passphrase": "correct horse battery staple",
+      "reason": "wrong-passphrase-or-tampered",
+      "headerParses": true
+    },
+    {
+      "name": "tampered-tag",
+      "archiveBase64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH13MA6meJrFFp3f67ulnBrYKwm2xusOuMKuRXa4rdgkiuyV6puHiJlC7i2SeoSeaTIoe1wXqnhbSHXz9UqY6kS\u002BCoUP3kumBIRzaHi2K8GGvMngZloGig4fL9AP88EmpgfSs9kTbUuKK9UyKwE3a/cL8aj547dqFo3qx5IGX0gbpOMZKbn9iwCQu8FfYvQWxi/05l2f\u002BWoqPFdxBg6xA6Btbadf4qz\u002BSuXpP47SMgyhItuIOg8VfMDyGIeow1FC66FJIcwmqBU3tgiAVdHv6W/BkqYmBpZfiUKY95qgtoPbvvcgVfdf\u002BdF9DW8X/ZuP\u002BiF7JO/1AjhNVtNrSuRBjz\u002BP1W9sjpv9J0bgivUasYcbQDyXv3CNnpw7fLoAL0Jzt3nBlpFEJJ2RFzDS9EvIf8Mf\u002BIhYpn010gkvnFwZhVJ3ATIwf9R729lBln\u002BpasvWb\u002BEmGF4l1Z2nw0gQtDygAX5aJEwtIk9eH\u002BepzffFLdVS9urS9YDcqjMz/sUJqccJL0OrNPq5RQ2b9zaFRfQe60wtNJrGpZDRBverrJKcV0lWOBRmFc438NYNCcjq7bTa0UjMSoJ\u002B50t5Gr\u002BnbcqO8/QFmnArQbZROKFY/Oy8hrNtyELGGPKDV0z2g/b\u002Bvz51Pj5XxYjtIJwWTkLS3FEXLcPB5urlV/CS5y5Lgcb7roUsG6DIwSuZM\u002BO1VVtcxPH7\u002BIgmYYUlFh/lID7I7Mi6gkm1zAhZqxmOWtuS6PJW5Kkqd6Qfqm1psvELfGq6V8OVvR7bBIEjYXkTqMCBx/g/R7UEQQcoD6n5bLYIcc2SJ7IcXFtv3Sheo9bE6W0bMZLUfJzbc2WBrYN/cq7oXKiF7Ub/0uEmbxhQmTN/XZlKDMosXUCBGKUCerEDwxNAEB0BC/SE86Fb\u002BUUxp6JNZANZr3c8uRQmaibPdbtFRnwyW8oHsHo44rEz6jnPl1enMu6VOkWTdEPi9avvF5cn3VnmUxq08vppONk0kSy4etsS6L42MvqN7F1ihdSLfqKh6TntcgmmBPRywDJNPvcSL1NsC\u002B\u002BzWr8/0u5ua1OXv/H1ZtYUoyxCtKVF3l3Rphajf8yNRqsM\u002BceiOgDs1zglPB8IrWacykXLaJNxcUql/QXyyhhBHb4n1x\u002BvjKIB4l3uMY\u002BodDWeAEZ4YqzRQodg6FlN3AOUN13bQ4heWQGth9eU9445qdtz2XfVY2aIEYMAMJgUr17GQkd9n8nw6adkdGQxwKff80Kaj1YE6OqtDKGJsNRhrm\u002BH/LIykGNCx7hTN4X3ogpNptz0nAVUZItBquFtY0hZIVc\u002BXuZKLaS8nx\u002B6ECjM1v9XHqgFu/6cc41vD1QSMwRAsV5PYc0sZxtIJrtF9J8yCToM48AwIlWNOQ2Z06nwNCeqdY33apbDZUbVyI85uTVvKrLqP8gPKu3siq4ovzP0otKCxFCDuFR483NYTJbWcqmSwzu7xrPrQm6X6hWOzywxhwcsoQ==",
+      "passphrase": "correct horse battery staple",
+      "reason": "wrong-passphrase-or-tampered",
+      "headerParses": true
+    },
+    {
+      "name": "malformed-payload-json",
+      "archiveBase64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH13MBWgfJPHVfGY7qe\u002BnxDYbJ5hxXiNkjbMQQqhNlZsHLs=",
+      "passphrase": "correct horse battery staple",
+      "reason": "malformed-payload",
+      "headerParses": true
+    },
+    {
+      "name": "malformed-payload-utf8",
+      "archiveBase64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH3z7H0GOE25oExD4dLaJZgjKhe7CrM=",
+      "passphrase": "correct horse battery staple",
+      "reason": "malformed-payload",
+      "headerParses": true
+    },
+    {
+      "name": "secrets-not-allowed-on-read",
+      "archiveBase64": "TUhTWU5DQTEAAACheyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH13MA6meJrFFp3f67ulnBrYKwm2xusOuMKuRXa4rdgkiuyV6puHiJlC7i2SeoSeaTIoe1wXqnhbSHXz9UqY6kS\u002BCoUP3kumBIRzaHi2K8GGvMngZloGig4fL9AP88EmpgfSs9kTbUuKK9UyKwE3a/cL8aj547dqFo3qx5IGX0gbpOMZKbn9iwCQu8FfYvQWxi/05l2f\u002BWoqPFdxBg6xA6Btbadf4qz\u002BSuXpP47SMgyhItuIOg8Hb9nkUYn530tF\u002Bqd4DMUzvkQv13HHXd70smHP2qkvBoNAhkXU\u002BZTzspfUpPY4FbRQ64ACLT4ZrIeV/TB9Mr7tYxgUB9l8R9R9lTie00NByIPlaUXsiPhbr4wWFmjD6HyBk5FpebtaJlF9uSjdjJZVIqy8HiWV7FOPd8wEo4ZW4HAv0RUihGs2iVowGSpOVpQM2Kovvz\u002BvYcbDCskpAwUr296lw0QKryaHMXJFMQs1OgxTGu2vivnLat5Y4vXU8prb\u002BytS3pxertlHN1vhKPq9DxibtjmXG7hF6UQkO4OMrZ/KXfml54i/dVJSNAdtTtZ59tEdQMat5rvZ30HNDJow4UxpU7H2cdeIyMkTm2d7WbwcGNBWrPu6iq57/nXVB\u002BiZUU26m//hsXp6Mjdf97v6IYYQTw7K1hxGepqQ7P3oZ8yI4D9Nreu9tp1iGKzKzGqEYrq6B18EyPb5q94iMdwtBBHrcSLS69m8s2S82U9Bs1GBU9uH9/1RqKckMakFqXFkqsYkcGL9T9v9khfbEZ4sZjdvgYOOyYwgbvR1NHZLAae6brYEa9aIAIIQQ04oxTAertuE52NcOpjAY5rcaWLQteJfK/nvQuad9Qzj0uVsehgRliEhEcJIBMMjRAWOEaUXIb8NiAljMgYFB\u002BePqLkV/0Ih7qwKbwxaoX49/wxobCHfPLUUWmE0YPcRsW1o\u002Brt\u002BykjBx0ChPvODDHKAa1n486qjD5w60x3pXxO8wMl\u002BOcMykGCgcJZDv\u002BdnOO2A3GF4gsWNUo/n8SGjcQWkCbVowWEdbacTLlNjA\u002B22Crg7leBgOk\u002BNuODzV/sdtmtarPZBylLLpw7jPMOfF6UCv8q4ORzhzw8KMBdPtX7v7lHEcpJpPCSq73T8xF9KF6o40Ri1i/MZg323Zoi2Oi2GSlp4Zq\u002BYV4c\u002B7E1CxgKMdBbGWoRDRQjyhNqU8JJg7sh91zzPQESTFY8TO8MM4VjBUg5z2ML/6qltdSIpjqHY4wuU3koZ7tGQGqCe4Mxr40/28uIllm9f0Y5kJJrtuAxM6sT8ggsQa4dIotNedElDJ1ZyRuwHDdWy2R6zGTnR0P5KT7Bkm6fNeZpiP2gINBVGnXMJedViZBdKK/oOpc01CDhetMY0dFTZPl6fxqf\u002BciajfJzma7P2VHPKxIQch2R3IbTrOcgPKu3siq4ovy/68sWEyE2VjmNr7GlCSpeaaqba4xs4lrV1tHVfunXudF5gl2cH",
+      "passphrase": "correct horse battery staple",
+      "reason": "secrets-not-allowed",
+      "headerParses": true
+    }
+  ],
+  "passphrases": {
+    "valid": [
+      "correct horse battery staple",
+      "\u6211\u7684 NAS \u653E\u8FDB\u4E86\u9601\u697C",
+      "a different long passphrase",
+      "correct horse battery stapl"
+    ],
+    "invalid": [
+      {
+        "passphrase": "\u6211\u7684 NAS \u5728\u9601\u697C\u91CC",
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "passphrase": "password",
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "passphrase": "password1234",
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "passphrase": "qwertyuiop123",
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "passphrase": "aaaaaaaaaaaa",
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "passphrase": "123456789012",
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "passphrase": "abcabcabcabc",
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "passphrase": "   ",
+        "reason": "passphrase-empty"
+      },
+      {
+        "passphrase": "",
+        "reason": "passphrase-empty"
+      }
+    ]
+  },
+  "writerCases": [
+    {
+      "name": "happy-path",
+      "envelopeJson": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u00221b96e7eb417e4caeb27eb60f3d1acfc3\u0022,\u0022createdAtEpochMs\u0022:1792784739843,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[\u0022emby\u0022,\u0022jellyfin\u0022,\u0022quantum-nas\u0022]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022local-385c7c48494fcb81\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385 Emby\u0022,\u0022accountScope\u0022:\u0022alice\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/emby\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:3,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-0a87ea9520c51a80\u0022,\u0022sourceType\u0022:\u0022jellyfin\u0022,\u0022displayName\u0022:\u0022Jellyfin \\u697C\\u4E0A\u0022,\u0022accountScope\u0022:\u0022bob\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/jelly\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:1,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-76e5f67669136fae\u0022,\u0022sourceType\u0022:\u0022quantum-nas\u0022,\u0022displayName\u0022:\u0022Quantum NAS\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022https://quantum.example:9443/v1\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:2,\u0022fieldVersion\u0022:0}],\u0022deletions\u0022:[{\u0022syncSourceId\u0022:\u0022local-f7ebca3dbf01eb17\u0022,\u0022deletedAtEpochMs\u0022:1760000000000,\u0022recordRevision\u0022:5}]}",
+      "passphrase": "correct horse battery staple",
+      "iterations": 600000,
+      "reason": "ok"
+    },
+    {
+      "name": "empty-passphrase-wins",
+      "envelopeJson": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u00221b96e7eb417e4caeb27eb60f3d1acfc3\u0022,\u0022createdAtEpochMs\u0022:1792784739843,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[\u0022emby\u0022,\u0022jellyfin\u0022,\u0022quantum-nas\u0022]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022local-385c7c48494fcb81\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385 Emby\u0022,\u0022accountScope\u0022:\u0022alice\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/emby\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:3,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-0a87ea9520c51a80\u0022,\u0022sourceType\u0022:\u0022jellyfin\u0022,\u0022displayName\u0022:\u0022Jellyfin \\u697C\\u4E0A\u0022,\u0022accountScope\u0022:\u0022bob\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/jelly\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:1,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-76e5f67669136fae\u0022,\u0022sourceType\u0022:\u0022quantum-nas\u0022,\u0022displayName\u0022:\u0022Quantum NAS\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022https://quantum.example:9443/v1\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:2,\u0022fieldVersion\u0022:0}],\u0022deletions\u0022:[{\u0022syncSourceId\u0022:\u0022local-f7ebca3dbf01eb17\u0022,\u0022deletedAtEpochMs\u0022:1760000000000,\u0022recordRevision\u0022:5}]}",
+      "passphrase": "",
+      "iterations": 600000,
+      "reason": "passphrase-empty"
+    },
+    {
+      "name": "weak-passphrase-wins",
+      "envelopeJson": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u00221b96e7eb417e4caeb27eb60f3d1acfc3\u0022,\u0022createdAtEpochMs\u0022:1792784739843,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[\u0022emby\u0022,\u0022jellyfin\u0022,\u0022quantum-nas\u0022]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022local-385c7c48494fcb81\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385 Emby\u0022,\u0022accountScope\u0022:\u0022alice\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/emby\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:3,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-0a87ea9520c51a80\u0022,\u0022sourceType\u0022:\u0022jellyfin\u0022,\u0022displayName\u0022:\u0022Jellyfin \\u697C\\u4E0A\u0022,\u0022accountScope\u0022:\u0022bob\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/jelly\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:1,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-76e5f67669136fae\u0022,\u0022sourceType\u0022:\u0022quantum-nas\u0022,\u0022displayName\u0022:\u0022Quantum NAS\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022https://quantum.example:9443/v1\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:2,\u0022fieldVersion\u0022:0}],\u0022deletions\u0022:[{\u0022syncSourceId\u0022:\u0022local-f7ebca3dbf01eb17\u0022,\u0022deletedAtEpochMs\u0022:1760000000000,\u0022recordRevision\u0022:5}]}",
+      "passphrase": "short",
+      "iterations": 600000,
+      "reason": "passphrase-too-weak"
+    },
+    {
+      "name": "weak-listed-passphrase",
+      "envelopeJson": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u00221b96e7eb417e4caeb27eb60f3d1acfc3\u0022,\u0022createdAtEpochMs\u0022:1792784739843,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[\u0022emby\u0022,\u0022jellyfin\u0022,\u0022quantum-nas\u0022]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022local-385c7c48494fcb81\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385 Emby\u0022,\u0022accountScope\u0022:\u0022alice\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/emby\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:3,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-0a87ea9520c51a80\u0022,\u0022sourceType\u0022:\u0022jellyfin\u0022,\u0022displayName\u0022:\u0022Jellyfin \\u697C\\u4E0A\u0022,\u0022accountScope\u0022:\u0022bob\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/jelly\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:1,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-76e5f67669136fae\u0022,\u0022sourceType\u0022:\u0022quantum-nas\u0022,\u0022displayName\u0022:\u0022Quantum NAS\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022https://quantum.example:9443/v1\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:2,\u0022fieldVersion\u0022:0}],\u0022deletions\u0022:[{\u0022syncSourceId\u0022:\u0022local-f7ebca3dbf01eb17\u0022,\u0022deletedAtEpochMs\u0022:1760000000000,\u0022recordRevision\u0022:5}]}",
+      "passphrase": "password1234",
+      "iterations": 600000,
+      "reason": "passphrase-too-weak"
+    },
+    {
+      "name": "secrets-block-refused",
+      "envelopeJson": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u00221b96e7eb417e4caeb27eb60f3d1acfc3\u0022,\u0022createdAtEpochMs\u0022:1792784739843,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[\u0022emby\u0022,\u0022jellyfin\u0022,\u0022quantum-nas\u0022]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022local-385c7c48494fcb81\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385 Emby\u0022,\u0022accountScope\u0022:\u0022alice\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/emby\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:3,\u0022fieldVersion\u0022:0,\u0022secrets\u0022:{\u0022token\u0022:\u0022opaque\u0022}},{\u0022syncSourceId\u0022:\u0022local-0a87ea9520c51a80\u0022,\u0022sourceType\u0022:\u0022jellyfin\u0022,\u0022displayName\u0022:\u0022Jellyfin \\u697C\\u4E0A\u0022,\u0022accountScope\u0022:\u0022bob\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/jelly\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:1,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-76e5f67669136fae\u0022,\u0022sourceType\u0022:\u0022quantum-nas\u0022,\u0022displayName\u0022:\u0022Quantum NAS\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022https://quantum.example:9443/v1\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:2,\u0022fieldVersion\u0022:0}],\u0022deletions\u0022:[{\u0022syncSourceId\u0022:\u0022local-f7ebca3dbf01eb17\u0022,\u0022deletedAtEpochMs\u0022:1760000000000,\u0022recordRevision\u0022:5}]}",
+      "passphrase": "correct horse battery staple",
+      "iterations": 600000,
+      "reason": "secrets-not-allowed"
+    },
+    {
+      "name": "secrets-flag-refused",
+      "envelopeJson": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u00221b96e7eb417e4caeb27eb60f3d1acfc3\u0022,\u0022createdAtEpochMs\u0022:1792784739843,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:true,\u0022sourceTypes\u0022:[\u0022emby\u0022,\u0022jellyfin\u0022,\u0022quantum-nas\u0022]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022local-385c7c48494fcb81\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385 Emby\u0022,\u0022accountScope\u0022:\u0022alice\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/emby\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:3,\u0022fieldVersion\u0022:0,\u0022secrets\u0022:{\u0022token\u0022:\u0022opaque\u0022}},{\u0022syncSourceId\u0022:\u0022local-0a87ea9520c51a80\u0022,\u0022sourceType\u0022:\u0022jellyfin\u0022,\u0022displayName\u0022:\u0022Jellyfin \\u697C\\u4E0A\u0022,\u0022accountScope\u0022:\u0022bob\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/jelly\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:1,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-76e5f67669136fae\u0022,\u0022sourceType\u0022:\u0022quantum-nas\u0022,\u0022displayName\u0022:\u0022Quantum NAS\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022https://quantum.example:9443/v1\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:2,\u0022fieldVersion\u0022:0}],\u0022deletions\u0022:[{\u0022syncSourceId\u0022:\u0022local-f7ebca3dbf01eb17\u0022,\u0022deletedAtEpochMs\u0022:1760000000000,\u0022recordRevision\u0022:5}]}",
+      "passphrase": "correct horse battery staple",
+      "iterations": 600000,
+      "reason": "secrets-not-allowed"
+    },
+    {
+      "name": "low-iterations-refused",
+      "envelopeJson": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u00221b96e7eb417e4caeb27eb60f3d1acfc3\u0022,\u0022createdAtEpochMs\u0022:1792784739843,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[\u0022emby\u0022,\u0022jellyfin\u0022,\u0022quantum-nas\u0022]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022local-385c7c48494fcb81\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385 Emby\u0022,\u0022accountScope\u0022:\u0022alice\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/emby\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:3,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-0a87ea9520c51a80\u0022,\u0022sourceType\u0022:\u0022jellyfin\u0022,\u0022displayName\u0022:\u0022Jellyfin \\u697C\\u4E0A\u0022,\u0022accountScope\u0022:\u0022bob\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/jelly\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:1,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-76e5f67669136fae\u0022,\u0022sourceType\u0022:\u0022quantum-nas\u0022,\u0022displayName\u0022:\u0022Quantum NAS\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022https://quantum.example:9443/v1\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:2,\u0022fieldVersion\u0022:0}],\u0022deletions\u0022:[{\u0022syncSourceId\u0022:\u0022local-f7ebca3dbf01eb17\u0022,\u0022deletedAtEpochMs\u0022:1760000000000,\u0022recordRevision\u0022:5}]}",
+      "passphrase": "correct horse battery staple",
+      "iterations": 1000,
+      "reason": "invalid-iterations"
+    },
+    {
+      "name": "passphrase-before-secrets",
+      "envelopeJson": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u00221b96e7eb417e4caeb27eb60f3d1acfc3\u0022,\u0022createdAtEpochMs\u0022:1792784739843,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[\u0022emby\u0022,\u0022jellyfin\u0022,\u0022quantum-nas\u0022]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022local-385c7c48494fcb81\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385 Emby\u0022,\u0022accountScope\u0022:\u0022alice\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/emby\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:3,\u0022fieldVersion\u0022:0,\u0022secrets\u0022:{\u0022token\u0022:\u0022opaque\u0022}},{\u0022syncSourceId\u0022:\u0022local-0a87ea9520c51a80\u0022,\u0022sourceType\u0022:\u0022jellyfin\u0022,\u0022displayName\u0022:\u0022Jellyfin \\u697C\\u4E0A\u0022,\u0022accountScope\u0022:\u0022bob\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/jelly\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:1,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-76e5f67669136fae\u0022,\u0022sourceType\u0022:\u0022quantum-nas\u0022,\u0022displayName\u0022:\u0022Quantum NAS\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022https://quantum.example:9443/v1\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:2,\u0022fieldVersion\u0022:0}],\u0022deletions\u0022:[{\u0022syncSourceId\u0022:\u0022local-f7ebca3dbf01eb17\u0022,\u0022deletedAtEpochMs\u0022:1760000000000,\u0022recordRevision\u0022:5}]}",
+      "passphrase": "",
+      "iterations": 600000,
+      "reason": "passphrase-empty"
+    },
+    {
+      "name": "secrets-before-iterations",
+      "envelopeJson": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u00221b96e7eb417e4caeb27eb60f3d1acfc3\u0022,\u0022createdAtEpochMs\u0022:1792784739843,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:true,\u0022sourceTypes\u0022:[\u0022emby\u0022,\u0022jellyfin\u0022,\u0022quantum-nas\u0022]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022local-385c7c48494fcb81\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022\\u5BA2\\u5385 Emby\u0022,\u0022accountScope\u0022:\u0022alice\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/emby\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:3,\u0022fieldVersion\u0022:0,\u0022secrets\u0022:{\u0022token\u0022:\u0022opaque\u0022}},{\u0022syncSourceId\u0022:\u0022local-0a87ea9520c51a80\u0022,\u0022sourceType\u0022:\u0022jellyfin\u0022,\u0022displayName\u0022:\u0022Jellyfin \\u697C\\u4E0A\u0022,\u0022accountScope\u0022:\u0022bob\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022http://nas-a:8096/jelly\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:1,\u0022fieldVersion\u0022:0},{\u0022syncSourceId\u0022:\u0022local-76e5f67669136fae\u0022,\u0022sourceType\u0022:\u0022quantum-nas\u0022,\u0022displayName\u0022:\u0022Quantum NAS\u0022,\u0022endpoints\u0022:[{\u0022url\u0022:\u0022https://quantum.example:9443/v1\u0022,\u0022isPrimary\u0022:true,\u0022enabled\u0022:true,\u0022sortOrder\u0022:0}],\u0022recordRevision\u0022:2,\u0022fieldVersion\u0022:0}],\u0022deletions\u0022:[{\u0022syncSourceId\u0022:\u0022local-f7ebca3dbf01eb17\u0022,\u0022deletedAtEpochMs\u0022:1760000000000,\u0022recordRevision\u0022:5}]}",
+      "passphrase": "correct horse battery staple",
+      "iterations": 1000,
+      "reason": "secrets-not-allowed"
+    }
+  ],
+  "edges": {
+    "whitespaceCodePoints": [
+      9,
+      10,
+      11,
+      12,
+      13,
+      32,
+      133,
+      160,
+      5760,
+      8192,
+      8193,
+      8194,
+      8195,
+      8196,
+      8197,
+      8198,
+      8199,
+      8200,
+      8201,
+      8202,
+      8232,
+      8233,
+      8239,
+      8287,
+      12288
+    ],
+    "blankCandidates": [
+      {
+        "name": "empty",
+        "utf16": [],
+        "blank": true,
+        "trimmed": []
+      },
+      {
+        "name": "ascii-space",
+        "utf16": [
+          32
+        ],
+        "blank": true,
+        "trimmed": []
+      },
+      {
+        "name": "mixed-unicode",
+        "utf16": [
+          9,
+          10,
+          32,
+          133,
+          160
+        ],
+        "blank": true,
+        "trimmed": []
+      },
+      {
+        "name": "record-separator",
+        "utf16": [
+          28
+        ],
+        "blank": false,
+        "trimmed": [
+          28
+        ]
+      },
+      {
+        "name": "unit-separator",
+        "utf16": [
+          31
+        ],
+        "blank": false,
+        "trimmed": [
+          31
+        ]
+      },
+      {
+        "name": "next-line",
+        "utf16": [
+          133
+        ],
+        "blank": true,
+        "trimmed": []
+      },
+      {
+        "name": "no-break-space",
+        "utf16": [
+          160
+        ],
+        "blank": true,
+        "trimmed": []
+      },
+      {
+        "name": "ideographic-space",
+        "utf16": [
+          12288
+        ],
+        "blank": true,
+        "trimmed": []
+      },
+      {
+        "name": "zero-width-space",
+        "utf16": [
+          8203
+        ],
+        "blank": false,
+        "trimmed": [
+          8203
+        ]
+      },
+      {
+        "name": "bom",
+        "utf16": [
+          65279
+        ],
+        "blank": false,
+        "trimmed": [
+          65279
+        ]
+      },
+      {
+        "name": "letters",
+        "utf16": [
+          97,
+          98,
+          99
+        ],
+        "blank": false,
+        "trimmed": [
+          97,
+          98,
+          99
+        ]
+      },
+      {
+        "name": "padded-letters",
+        "utf16": [
+          133,
+          97,
+          98,
+          99,
+          28,
+          97,
+          98,
+          99
+        ],
+        "blank": false,
+        "trimmed": [
+          97,
+          98,
+          99,
+          28,
+          97,
+          98,
+          99
+        ]
+      },
+      {
+        "name": "soft-hyphen",
+        "utf16": [
+          173
+        ],
+        "blank": false,
+        "trimmed": [
+          173
+        ]
+      }
+    ],
+    "kdfNameCandidates": [
+      {
+        "name": "exact",
+        "utf16": [
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          115,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "accepted": true
+      },
+      {
+        "name": "upper",
+        "utf16": [
+          80,
+          66,
+          75,
+          68,
+          70,
+          50,
+          45,
+          83,
+          72,
+          65,
+          50,
+          53,
+          54
+        ],
+        "accepted": true
+      },
+      {
+        "name": "padded-ascii",
+        "utf16": [
+          32,
+          32,
+          80,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          83,
+          104,
+          97,
+          50,
+          53,
+          54,
+          32,
+          32
+        ],
+        "accepted": true
+      },
+      {
+        "name": "leading-next-line",
+        "utf16": [
+          133,
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          115,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "accepted": true
+      },
+      {
+        "name": "leading-record-separator",
+        "utf16": [
+          28,
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          115,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "accepted": false
+      },
+      {
+        "name": "leading-no-break-space",
+        "utf16": [
+          160,
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          115,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "accepted": true
+      },
+      {
+        "name": "long-s",
+        "utf16": [
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          383,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "accepted": false
+      },
+      {
+        "name": "kelvin",
+        "utf16": [
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          8490,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "accepted": false
+      },
+      {
+        "name": "other",
+        "utf16": [
+          97,
+          114,
+          103,
+          111,
+          110,
+          50,
+          105,
+          100
+        ],
+        "accepted": false
+      }
+    ],
+    "caseFoldPairs": [
+      {
+        "name": "ascii-mixed",
+        "left": [
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "right": [
+          80,
+          65,
+          83,
+          83,
+          87,
+          79,
+          82,
+          68,
+          49,
+          50,
+          51,
+          52
+        ],
+        "equal": true
+      },
+      {
+        "name": "ascii-same",
+        "left": [
+          99,
+          111,
+          114,
+          114,
+          101,
+          99,
+          116,
+          32,
+          104,
+          111,
+          114,
+          115,
+          101,
+          32,
+          98,
+          97,
+          116,
+          116,
+          101,
+          114,
+          121,
+          32,
+          115,
+          116,
+          97,
+          112,
+          108,
+          101
+        ],
+        "right": [
+          99,
+          111,
+          114,
+          114,
+          101,
+          99,
+          116,
+          32,
+          104,
+          111,
+          114,
+          115,
+          101,
+          32,
+          98,
+          97,
+          116,
+          116,
+          101,
+          114,
+          121,
+          32,
+          115,
+          116,
+          97,
+          112,
+          108,
+          101
+        ],
+        "equal": true
+      },
+      {
+        "name": "ascii-different",
+        "left": [
+          97,
+          98,
+          99
+        ],
+        "right": [
+          97,
+          98,
+          100
+        ],
+        "equal": false
+      },
+      {
+        "name": "long-s-lookalike",
+        "left": [
+          112,
+          97,
+          383,
+          383,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "right": [
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "equal": false
+      },
+      {
+        "name": "kelvin-lookalike",
+        "left": [
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          8490,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "right": [
+          112,
+          98,
+          107,
+          100,
+          102,
+          50,
+          45,
+          107,
+          104,
+          97,
+          50,
+          53,
+          54
+        ],
+        "equal": false
+      },
+      {
+        "name": "length-differs",
+        "left": [
+          97,
+          98,
+          99
+        ],
+        "right": [
+          97,
+          98
+        ],
+        "equal": false
+      }
+    ],
+    "loneSurrogateCandidates": [
+      {
+        "name": "plain",
+        "utf16": [
+          97,
+          98
+        ],
+        "lone": false
+      },
+      {
+        "name": "trailing-high",
+        "utf16": [
+          97,
+          55296
+        ],
+        "lone": true
+      },
+      {
+        "name": "leading-low",
+        "utf16": [
+          56320,
+          97
+        ],
+        "lone": true
+      },
+      {
+        "name": "interior-high",
+        "utf16": [
+          97,
+          55296,
+          98
+        ],
+        "lone": true
+      },
+      {
+        "name": "valid-pair",
+        "utf16": [
+          97,
+          55357,
+          56594
+        ],
+        "lone": false
+      },
+      {
+        "name": "high-then-high",
+        "utf16": [
+          55296,
+          55296
+        ],
+        "lone": true
+      },
+      {
+        "name": "low-then-high",
+        "utf16": [
+          56320,
+          55296
+        ],
+        "lone": true
+      }
+    ],
+    "passphraseCandidates": [
+      {
+        "name": "strong",
+        "utf16": [
+          99,
+          111,
+          114,
+          114,
+          101,
+          99,
+          116,
+          32,
+          104,
+          111,
+          114,
+          115,
+          101,
+          32,
+          98,
+          97,
+          116,
+          116,
+          101,
+          114,
+          121,
+          32,
+          115,
+          116,
+          97,
+          112,
+          108,
+          101
+        ],
+        "reason": null
+      },
+      {
+        "name": "chinese",
+        "utf16": [
+          25105,
+          30340,
+          32,
+          78,
+          65,
+          83,
+          32,
+          25918,
+          36827,
+          20102,
+          38401,
+          27004
+        ],
+        "reason": null
+      },
+      {
+        "name": "blank",
+        "utf16": [
+          32,
+          32,
+          32
+        ],
+        "reason": "passphrase-empty"
+      },
+      {
+        "name": "too-short",
+        "utf16": [
+          115,
+          104,
+          111,
+          114,
+          116
+        ],
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "name": "listed-weak",
+        "utf16": [
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "name": "next-line-prefixed-weak",
+        "utf16": [
+          133,
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "name": "record-separator-prefixed-weak",
+        "utf16": [
+          28,
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "reason": null
+      },
+      {
+        "name": "twelve-record-separators",
+        "utf16": [
+          28,
+          28,
+          28,
+          28,
+          28,
+          28,
+          28,
+          28,
+          28,
+          28,
+          28,
+          28
+        ],
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "name": "twelve-next-lines",
+        "utf16": [
+          133,
+          133,
+          133,
+          133,
+          133,
+          133,
+          133,
+          133,
+          133,
+          133,
+          133,
+          133
+        ],
+        "reason": "passphrase-empty"
+      },
+      {
+        "name": "lone-surrogate-tail",
+        "utf16": [
+          99,
+          111,
+          114,
+          114,
+          101,
+          99,
+          116,
+          32,
+          104,
+          111,
+          114,
+          115,
+          101,
+          32,
+          98,
+          97,
+          116,
+          116,
+          101,
+          114,
+          121,
+          32,
+          115,
+          116,
+          97,
+          112,
+          108,
+          101,
+          55296
+        ],
+        "reason": "passphrase-too-weak"
+      },
+      {
+        "name": "long-s-lookalike",
+        "utf16": [
+          112,
+          97,
+          383,
+          383,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "reason": null
+      }
+    ],
+    "headerVariants": [
+      {
+        "name": "canonical",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH0=",
+        "parses": true,
+        "kdfAccepted": true,
+        "version": 1
+      },
+      {
+        "name": "kdf-leading-next-line",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJcdTAwODVwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH0=",
+        "parses": true,
+        "kdfAccepted": true,
+        "version": 1
+      },
+      {
+        "name": "kdf-leading-record-separator",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJcdTAwMUNwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH0=",
+        "parses": true,
+        "kdfAccepted": false,
+        "version": 1
+      },
+      {
+        "name": "kdf-long-s",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItXHUwMTdGaGEyNTYiLCJpdGVyYXRpb25zIjo2MDAwMDAsInNhbHRCYXNlNjQiOiJBQUVDQXdRRkJnY0lDUW9MREEwT0R3PT0iLCJub25jZUJhc2U2NCI6IkVCRVNFeFFWRmhjWUdSb2IiLCJjcmVhdGVkQXRFcG9jaE1zIjoxNzAwMDAwMDAwMDAwfQ==",
+        "parses": true,
+        "kdfAccepted": false,
+        "version": 1
+      },
+      {
+        "name": "kdf-kelvin",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItXHUyMTJBaGEyNTYiLCJpdGVyYXRpb25zIjo2MDAwMDAsInNhbHRCYXNlNjQiOiJBQUVDQXdRRkJnY0lDUW9MREEwT0R3PT0iLCJub25jZUJhc2U2NCI6IkVCRVNFeFFWRmhjWUdSb2IiLCJjcmVhdGVkQXRFcG9jaE1zIjoxNzAwMDAwMDAwMDAwfQ==",
+        "parses": true,
+        "kdfAccepted": false,
+        "version": 1
+      },
+      {
+        "name": "kdf-unknown",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJhcmdvbjJpZCIsIml0ZXJhdGlvbnMiOjYwMDAwMCwic2FsdEJhc2U2NCI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHc9PSIsIm5vbmNlQmFzZTY0IjoiRUJFU0V4UVZGaGNZR1JvYiIsImNyZWF0ZWRBdEVwb2NoTXMiOjE3MDAwMDAwMDAwMDB9",
+        "parses": true,
+        "kdfAccepted": false,
+        "version": 1
+      },
+      {
+        "name": "kdf-lone-surrogate",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJcdWQ4MDAiLCJpdGVyYXRpb25zIjo2MDAwMDAsInNhbHRCYXNlNjQiOiJBQUVDQXdRRkJnY0lDUW9MREEwT0R3PT0iLCJub25jZUJhc2U2NCI6IkVCRVNFeFFWRmhjWUdSb2IiLCJjcmVhdGVkQXRFcG9jaE1zIjoxNzAwMDAwMDAwMDAwfQ==",
+        "parses": false,
+        "kdfAccepted": null,
+        "version": null
+      },
+      {
+        "name": "iterations-below-min",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6MTAwMCwic2FsdEJhc2U2NCI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHc9PSIsIm5vbmNlQmFzZTY0IjoiRUJFU0V4UVZGaGNZR1JvYiIsImNyZWF0ZWRBdEVwb2NoTXMiOjE3MDAwMDAwMDAwMDB9",
+        "parses": true,
+        "kdfAccepted": true,
+        "version": 1
+      },
+      {
+        "name": "duplicate-version",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJ2ZXJzaW9uIjoyLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH0=",
+        "parses": true,
+        "kdfAccepted": true,
+        "version": 2
+      },
+      {
+        "name": "unknown-field",
+        "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMCwibm90ZSI6Imlnbm9yZWQifQ==",
+        "parses": true,
+        "kdfAccepted": true,
+        "version": 1
+      }
+    ],
+    "envelopeVariants": [
+      {
+        "name": "canonical",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": true,
+        "reason": null
+      },
+      {
+        "name": "device-id-emoji",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022a\\ud83d\\udd12b\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": true,
+        "reason": null
+      },
+      {
+        "name": "device-id-next-line-only",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022\\u0085\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": false,
+        "reason": "missing-field:deviceId"
+      },
+      {
+        "name": "device-id-no-break-space-only",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022\\u00A0\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": false,
+        "reason": "missing-field:deviceId"
+      },
+      {
+        "name": "device-id-record-separator-only",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022\\u001C\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": true,
+        "reason": null
+      },
+      {
+        "name": "device-id-padded-ascii",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022  device-a  \u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": true,
+        "reason": null
+      },
+      {
+        "name": "device-id-lone-surrogate",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022a\\ud800b\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": false,
+        "reason": "malformed-json"
+      },
+      {
+        "name": "snapshot-id-lone-surrogate",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u0022a\\ud800b\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[]}",
+        "accepted": false,
+        "reason": "malformed-json"
+      },
+      {
+        "name": "source-display-name-lone-surrogate",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022s1\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022a\\ud800b\u0022,\u0022endpoints\u0022:[],\u0022recordRevision\u0022:1}],\u0022deletions\u0022:[]}",
+        "accepted": false,
+        "reason": "malformed-json"
+      },
+      {
+        "name": "unknown-field-lone-surrogate",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[],\u0022deletions\u0022:[],\u0022note\u0022:\u0022a\\ud800b\u0022}",
+        "accepted": false,
+        "reason": "malformed-json"
+      },
+      {
+        "name": "source-id-record-separator-only",
+        "document": "{\u0022schemaVersion\u0022:1,\u0022minimumReaderVersion\u0022:1,\u0022deviceId\u0022:\u0022device-a\u0022,\u0022snapshotId\u0022:\u0022s\u0022,\u0022createdAtEpochMs\u0022:1,\u0022capabilities\u0022:{\u0022canSendSecrets\u0022:false,\u0022sourceTypes\u0022:[]},\u0022sources\u0022:[{\u0022syncSourceId\u0022:\u0022\\u001C\u0022,\u0022sourceType\u0022:\u0022emby\u0022,\u0022displayName\u0022:\u0022x\u0022,\u0022endpoints\u0022:[],\u0022recordRevision\u0022:1}],\u0022deletions\u0022:[]}",
+        "accepted": true,
+        "reason": null
+      }
+    ],
+    "envelopeWriteRejections": [
+      {
+        "name": "canonical",
+        "writeReason": null
+      },
+      {
+        "name": "device-id-lone-surrogate",
+        "writeReason": "invalid-field:deviceId"
+      },
+      {
+        "name": "device-id-next-line-only",
+        "writeReason": "missing-field:deviceId"
+      },
+      {
+        "name": "display-name-lone-surrogate",
+        "writeReason": "invalid-field:displayName"
+      }
+    ],
+    "archivePassphraseCases": [
+      {
+        "name": "canonical",
+        "passphraseUtf16": [
+          99,
+          111,
+          114,
+          114,
+          101,
+          99,
+          116,
+          32,
+          104,
+          111,
+          114,
+          115,
+          101,
+          32,
+          98,
+          97,
+          116,
+          116,
+          101,
+          114,
+          121,
+          32,
+          115,
+          116,
+          97,
+          112,
+          108,
+          101
+        ],
+        "readReason": null,
+        "writeReason": null
+      },
+      {
+        "name": "lone-surrogate-tail",
+        "passphraseUtf16": [
+          99,
+          111,
+          114,
+          114,
+          101,
+          99,
+          116,
+          32,
+          104,
+          111,
+          114,
+          115,
+          101,
+          32,
+          98,
+          97,
+          116,
+          116,
+          101,
+          114,
+          121,
+          32,
+          115,
+          116,
+          97,
+          112,
+          108,
+          101,
+          55296
+        ],
+        "readReason": "passphrase-too-weak",
+        "writeReason": "passphrase-too-weak"
+      },
+      {
+        "name": "too-short",
+        "passphraseUtf16": [
+          115,
+          104,
+          111,
+          114,
+          116
+        ],
+        "readReason": "passphrase-too-weak",
+        "writeReason": "passphrase-too-weak"
+      },
+      {
+        "name": "next-line-prefixed-weak",
+        "passphraseUtf16": [
+          133,
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "readReason": "passphrase-too-weak",
+        "writeReason": "passphrase-too-weak"
+      },
+      {
+        "name": "record-separator-prefixed-weak",
+        "passphraseUtf16": [
+          28,
+          112,
+          97,
+          115,
+          115,
+          119,
+          111,
+          114,
+          100,
+          49,
+          50,
+          51,
+          52
+        ],
+        "readReason": "wrong-passphrase-or-tampered",
+        "writeReason": null
+      }
+    ]
+  },
+  "nearLimit": {
+    "maxPayloadBytes": 8388608,
+    "recipe": {
+      "deviceId": "device-near-limit",
+      "snapshotId": "0123456789abcdef0123456789abcdef",
+      "createdAtEpochMs": 1700000000000,
+      "capabilities": {
+        "canSendSecrets": false,
+        "sourceTypes": [
+          "emby"
+        ]
+      },
+      "syncSourceId": "near-limit-1",
+      "sourceType": "emby",
+      "displayNameUnit": "x",
+      "displayNameLength": 8388242,
+      "recordRevision": 1,
+      "fieldVersion": 1,
+      "passphrase": "correct horse battery staple",
+      "iterations": 600000,
+      "saltBase64": "AAECAwQFBgcICQoLDA0ODw==",
+      "nonceBase64": "EBESExQVFhcYGRob"
+    },
+    "payloadByteLength": 8388608,
+    "payloadSha256": "f6bc78f30a55b46b3a8cb64c28ad035f04e4fad86ba6542f8be64d02b3fa11ae",
+    "headerBase64": "eyJ2ZXJzaW9uIjoxLCJrZGYiOiJwYmtkZjItc2hhMjU2IiwiaXRlcmF0aW9ucyI6NjAwMDAwLCJzYWx0QmFzZTY0IjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9Edz09Iiwibm9uY2VCYXNlNjQiOiJFQkVTRXhRVkZoY1lHUm9iIiwiY3JlYXRlZEF0RXBvY2hNcyI6MTcwMDAwMDAwMDAwMH0=",
+    "prefixByteLength": 173,
+    "archiveByteLength": 8388797,
+    "archiveSha256": "b47b3cc3c4bd4abe3a317c39632d1f220415dfc703eb21a8c881deacd2edc287",
+    "tooLarge": {
+      "displayNameLength": 8388243,
+      "payloadByteLength": 8388609,
+      "writeReason": "payload-too-large"
+    },
+    "oversizedCiphertext": {
+      "cipherLength": 8388609,
+      "readReason": "payload-too-large"
+    }
+  }
+}

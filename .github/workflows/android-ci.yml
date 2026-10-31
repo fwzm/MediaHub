@@ -106,7 +106,138 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           python3 .github/scripts/verify-unit-tests.py --record --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
-          python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest --required-suite com.mediahub.app.WebDavJointChainTest --required-suite com.mediahub.player.mpv.MpvSubtitleTest --required-suite com.mediahub.core.database.repository.ServerRepositorySubtitleIdentityTest --required-suite com.mediahub.feature.player.PlayerViewModelSubtitleCenterTest --required-suite com.mediahub.player.engine.PlaybackEngineExternalSubtitleTest --required-suite com.mediahub.provider.webdav.WebDavParserPlatformCompatibilityTest --require-complete-suites
+          # 每个 required-suite 参数的语义是"这个套件必须真的执行过"。理由同 windows-ci 的
+          # WebDav 教训：套件整体消失时 gradle 仍会打印 BUILD SUCCESSFUL，
+          # 只有把跨端契约/互操作套件按名字钉住才能发现"测试还在文件里却没跑"。
+          #   pairing.*   —— 与 Windows 的配对载荷字节级互操作（黄金向量由真 API 生成）
+          #   sync.*      —— 与 Windows 的来源同步信封/规划器三桶口径
+          #   Migration4to5 —— servers 表加同步身份三列的迁移（真机开库前的唯一守卫）
+          #   UpNextResolver / PlayerAutoplay —— 跨季连播解析与 Ended 事件接线
+          #   pairing.PairingTransportClient / ...EndToEnd —— 只拨回环的 4 字节帧收发（W6-G）
+          #   feature.settings.sync.* —— 导入四桶分桶/失败关闭（W6-F 逻辑+会话）与补录验证协调器（W6-H）
+          #   pairing.* / AndroidSourceSyncSecurityTest —— 对抗性输入回归（W6-J：畸形载荷/帧、非回环拒绝、
+          #     凭据不回显、坏信封零写入、重复 syncSourceId 整封拒绝=W6J-1）
+          #   sync.SourceSyncTransfer* —— 分块帧传输与 Windows 逐字节互操作（W6-22：向量由真 API 生成，
+          #     19 条错误流的 reason 与 Windows 同名同序；收满即返、尾随帧不读）
+          #   sync.SourceSyncTransferAuthTest —— 传输对端认证（W6-25：五码 + 33 字节 tag 帧 0x03 +
+          #     HMAC-SHA256 over nonce‖envelope，金标向量由 Windows 实现生成；关闭认证时与 W6-22 向量全等）
+          #   sync.SourceSyncTlsTest —— TLS 1.3 + SPKI 指纹钉扎（W6-29：只协商 1.3、pin=SHA-256(publicKey.encoded)、
+          #     四码与 Windows 同名同序、接收端 5 字节嗅探、graceful close；夹具与期望指纹由 Windows 权威实现生成）
+          #   sync.SourceSyncTransferListenerTest —— 回环监听端（W6-34：只绑回环、端口 0 取实际值、单连接串行、
+          #     复用 SourceSyncTransfer.receive 解帧，TLS 走 handshakeServer / 明文走 5 字节嗅探，关闭 TLS 走 graceful close）
+          #   sync.SourceSyncDeliveryTest —— 发送端投递确认（W6-46：单码 delivery-unconfirmed 独立封闭集、
+          #     写完最后一帧后读对端直到 FIN，预算 2000 ms、最多排水 64 KiB，回执优先；Off 时不读一个字节）
+          #   feature.settings.sync.SourceSyncSendLauncherTest —— 发送取消的 Job 记账薄壳（W6-49：取消回 Idle
+          #     不产生失败码、释放单飞可立刻重发、没在发时 cancel 是 no-op、clear 后状态仍可用）
+          #   sync.SourceSyncReceiptTest —— 反向回执帧 0x04（W6-40：四码与 Windows 同名同序、回执只在信封解码成功后写、
+          #     没开回执的监听端一个字节都不发）
+          #   sync.SourceSyncHostAddressTest —— 监听卡绑定地址判定（W6-52：四类拒绝句、自己算 IPv4 字面量永不查 DNS、
+          #     只放行一个单播地址、建 socket 之前就拒）
+          #   feature.settings.sync.SourceSyncListenerControllerTest —— 监听卡控制器（W6-36 起；W6-52 地址、W6-53 对端
+          #     口令、W6-54 等待预算三段都在这里，界面本地码 listen-secret-missing / listen-budget-invalid 各有用例）
+          #   sync.SourceSyncTransferClientHostTest —— 拨号侧地址判定（W6-52b：sendTo / receiveFrom 的 allowExplicitHost
+          #     与 verb 参数，开关关着时拒绝句与 W6-23 逐字相同；通配/广播/组播/主机名在拨号之前就拒，本机不真拨非回环）
+          #   sync.SourceSyncTransferMatrixTest —— 真实回环 socket 上的四维组合矩阵（W6-57：TLS × 认证 × 回执 × 投递
+          #     20 格逐格钉住外部可观察结果与稳定码；认证格同时宣布挑战，回执压掉投递，只碰 127.0.0.1）
+          #   sync.SourceSyncTransferCancelTest —— 本地取消把手（W6-58：取消关连接让阻塞读立刻返回，
+          #     结果是本地码 transfer-cancelled 而非 io-failed；只覆盖失败结果，成功收下的信封不被晚到的取消抹掉）
+          #   feature.settings.sync.SourceSyncReceiveLauncherTest —— 接收卡的单飞与取消（W6-58：取消回 Idle 不留码、
+          #     未在收时是 no-op、每次启动一枚新把手，旧取消不泄漏到下一次接收）
+          #   feature.settings.pairing.PairingLinkControllerTest —— 配对链接核对（W6-59：合法链接解出设备 / 指纹 /
+          #     剩余秒，非法链接原样透出 core:common 的码（code-empty / not-a-pairing-link / code-too-long /
+          #     not-base64url / payload-invalid / expired），核对成功也不泄露挑战，失败作废上一次结论）
+          #   core.database.sync.SourceSyncArchiveImportTest —— 加密归档接进导入入口（W6-63：前 8 字节
+          #     magic == MHSYNCA1 才算归档；无口令报 passphrase-required 且网关零调用；错口令与篡改
+          #     同码 wrong-passphrase-or-tampered；弱口令在建密钥之前就拒；结构错只报结构码；明文信封
+          #     的文本路径逐字节不变；Windows 写出的 1282 B 归档解开后与明文件逐字段相等）
+          #   core.database.sync.SourceSyncArchiveExportTest —— 导出落成文件（W6-64：口令为 null 原样交出
+          #     导出 JSON 不重新编码；口令非空由 ArchiveWriter 包成 .mharchive，读回来与信封逐字段相等；
+          #     归档头时间戳取信封自己的时间戳、迭代数 600000；弱口令/空白口令/自报携带凭据折成 ArchiveError
+          #     稳定码且一个都不改写；空白口令绝不悄悄退化成明文导出）
+          #   core.common.archive.ArchiveEdgeContractTest —— 跨语言边界契约（W6-67：空白=Unicode White_Space
+          #     25 码点、大小写只折 ASCII、孤立代理项在口令策略与信封读写两侧都拒；黄金向量 edges 段由
+          #     Windows 实现生成，Kotlin 逐条比对，两端对同一坏输入必须给出同一个稳定码）
+          #   core.common.archive.ArchiveNearLimitTest —— 8 MiB 上限附近的真数据穿越 GCM（W6-68：载荷恰好
+          #     8388608 B 时加密/写盘/读回整条路仍通；MAX+1 写端与读端都在解密前拒；黄金向量 nearLimit 段
+          #     由 Windows 实现生成，只存配方与 sha256，不存 8 MB 字节）
+          #   core.common.pairing.PairedDeviceContractTest —— 配对设备登记档案的跨端契约（W6-70：12 条原因码
+          #     与 5 条存储码同名同序、档案字节由 Kotlin 侧复刻 Utf8JsonWriter 写出并与 Windows 逐字节相同、
+          #     读不出来的档案宁可隔离也不覆盖、指纹不符绝不覆盖已钉指纹）
+          #   feature.settings.paired.PairedDeviceControllerTest —— 已配对设备页状态机（W6-70：读不到存储如实报
+          #     不可用、忘记必须两段（先问再删）、取消本身也是回执、写盘失败只算「本机没有登记」不抛）
+          #   feature.settings.pairing.PairingLinkPeerTest —— 配对页「对端身份」比对与登记（W6-71：卡片只读比对不写盘、
+          #     显式登记才写、写的是卡片里的稳定指纹而非邀请里的临时证书指纹、指纹不符绝不覆盖已钉指纹、
+          #     没卡片/没登记簿/拉取失败都只算「这次记不住对端」不把已校验的邀请变红、挑战与原始链接不外泄）
+          #   core.common.sync.SourceSyncBaselineContractTest —— 同步基线的跨端契约（W6-72：内容哈希的规范 JSON 与 Windows
+          #        Utf8JsonWriter 逐字节相同、基线编解码字节逐字节相同、12 条读失败码同名同序、合并拒绝倒退且不改内容、
+          #        in-memory 与文件存储的文档字节/隔离行为一致；黄金向量由 Windows 实现生成，Kotlin 逐条比对）
+          #   core.database.sync.SourceSyncBaselineWiringTest —— 基线接进唯一写库入口（W6-72：只有真正写入本机的条目
+          #        才进对端基线、零写入的一轮不碰存储、坏存储只让 baselineSaved=false 绝不让导入失败、被拒的旧修订号
+          #        如实回报、次要线路只上报不删除、没有基线存储时行为退回 W6-71）
+          #   feature.settings.sync.SourceSyncImportSessionEndpointTest —— 导入结果里的两条事实（W6-72：未参与同步的次要
+          #        线路条数与涉及来源数、基线已记/被拒的计数与原因，都从服务结果如实透到结果摘要，不隐藏）
+          python3 .github/scripts/verify-unit-tests.py --sha "$EXPECTED_HEAD" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --required-suite com.mediahub.provider.emby.progress.SlowFinalExitRegressionTest \
+            --required-suite com.mediahub.feature.settings.backup.RestoreSnapshotStoreTest \
+            --required-suite com.mediahub.app.WebDavJointChainTest \
+            --required-suite com.mediahub.player.mpv.MpvSubtitleTest \
+            --required-suite com.mediahub.core.database.repository.ServerRepositorySubtitleIdentityTest \
+            --required-suite com.mediahub.feature.player.PlayerViewModelSubtitleCenterTest \
+            --required-suite com.mediahub.player.engine.PlaybackEngineExternalSubtitleTest \
+            --required-suite com.mediahub.provider.webdav.WebDavParserPlatformCompatibilityTest \
+            --required-suite com.mediahub.core.common.pairing.PairingVectorsTest \
+            --required-suite com.mediahub.core.common.pairing.PairingFrameTest \
+            --required-suite com.mediahub.core.common.sync.WindowsGoldenInteropTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncPlannerTest \
+            --required-suite com.mediahub.core.database.sync.AndroidSourceSyncServiceTest \
+            --required-suite com.mediahub.core.database.Migration4to5Test \
+            --required-suite com.mediahub.model.UpNextResolverTest \
+            --required-suite com.mediahub.feature.player.PlayerAutoplayTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportClientTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportEndToEndTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncImportLogicTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncImportSessionTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceVerificationCoordinatorTest \
+            --required-suite com.mediahub.core.common.pairing.PairingMaliciousInputTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportSecurityTest \
+            --required-suite com.mediahub.core.common.pairing.PairingCredentialLeakTest \
+            --required-suite com.mediahub.core.database.sync.AndroidSourceSyncSecurityTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferVectorsTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferRoundTripTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferLoopbackTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferAuthTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTlsTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferListenerTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncDeliveryTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncSendLauncherTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncReceiptTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncHostAddressTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncListenerControllerTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferClientHostTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferMatrixTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncTransferCancelTest \
+            --required-suite com.mediahub.feature.settings.sync.SourceSyncReceiveLauncherTest \
+            --required-suite com.mediahub.feature.settings.pairing.PairingLinkControllerTest \
+            --required-suite com.mediahub.core.common.pairing.PairingTransportTlsTest \
+            --required-suite com.mediahub.core.common.pairing.PairingAddressEnumeratorTest \
+            --required-suite com.mediahub.core.common.sync.SourceSyncListenerCancelTest \
+            --required-suite com.mediahub.core.common.archive.ArchiveVectorsTest \
+            --required-suite com.mediahub.core.common.archive.ArchiveRoundTripTest \
+            --required-suite com.mediahub.core.database.sync.SourceSyncArchiveImportTest \
+            --required-suite com.mediahub.core.database.sync.SourceSyncArchiveExportTest \
+            --required-suite com.mediahub.core.common.archive.ArchiveEdgeContractTest \
+            --required-suite com.mediahub.core.common.archive.ArchiveNearLimitTest \
+            --required-suite com.mediahub.core.common.pairing.PairingEdgeContractTest \
+            --required-suite com.mediahub.core.common.pairing.PairedDeviceContractTest \
+            --required-suite com.mediahub.feature.settings.paired.PairedDeviceControllerTest \
+            --required-suite com.mediahub.feature.settings.pairing.PairingLinkPeerTest \
+          --required-suite com.mediahub.core.common.sync.SourceSyncBaselineContractTest \
+          --required-suite com.mediahub.core.database.sync.SourceSyncBaselineWiringTest \
+          --required-suite com.mediahub.feature.settings.sync.SourceSyncImportSessionEndpointTest \
+          --required-suite com.mediahub.core.database.sync.SourceSyncSecretsGateTest \
+          --required-suite com.mediahub.core.database.sync.SourceSyncRoundPreviewTest \
+          --required-suite com.mediahub.core.database.sync.SourceSyncApplyRoundTest \
+            --require-complete-suites
 
       - name: Lint
         if: ${{ !cancelled() }}

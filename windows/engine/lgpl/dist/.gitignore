@@ -1,0 +1,12 @@
+# Third-party runtime DLLs collected by windows/tools/collect-lgpl-runtime.ps1.
+#
+# Why they are not committed: the 33 files add up to ~56 MB and are pure build products of the
+# MSYS2 / FFmpeg toolchain on one machine; the repository only ever needs them inside a packaged
+# LGPL build. Their identity is recorded, not their bytes: see runtime-dependencies-collected.txt
+# in this directory (name, size, sha256, source) and windows/docs/LGPL-ENGINE-SWITCH.md.
+#
+# libmpv-2.dll itself stays tracked because the W5 evidence (windows/docs/licensing/W5-LGPL-BUILD.md,
+# README.md) refers to that exact candidate by hash. Re-run the collector after any engine rebuild:
+#   pwsh -File windows/tools/collect-lgpl-runtime.ps1
+*.dll
+!libmpv-2.dll

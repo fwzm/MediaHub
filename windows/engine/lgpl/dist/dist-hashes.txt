@@ -1,0 +1,2 @@
+20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a */d/deepseek_test/MediaHub_Win/windows/engine/lgpl/dist/libmpv-2.dll
+524f017fd49d99114456c7c51218d00a1e464fba1a33d5d8ca5562d014c8e8e6 */d/deepseek_test/MediaHub_Win/windows/engine/lgpl/dist/mpv.exe

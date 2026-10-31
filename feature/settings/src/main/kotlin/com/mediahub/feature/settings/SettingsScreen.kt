@@ -58,6 +58,9 @@ import com.mediahub.core.ui.effects.PlayerVisualPresetMapper
 import com.mediahub.core.ui.effects.PlayerVisualTestTags
 import com.mediahub.core.ui.effects.playerVisualPresetName
 import com.mediahub.core.ui.effects.visualPerformanceModeName
+import com.mediahub.feature.settings.paired.PairedDeviceRoute
+import com.mediahub.feature.settings.pairing.PairingLinkRoute
+import com.mediahub.feature.settings.sync.SourceSyncImportRoute
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.UserPreferences
 
@@ -72,8 +75,32 @@ fun SettingsRoute(
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
+    var showSourceSyncImport by remember { mutableStateOf(false) }
+    var showPairing by remember { mutableStateOf(false) }
+    var showPairedDevices by remember { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
+
+    // W6-F：导入页在本页内托管（不改 app 导航图），返回即回到设置列表。
+    if (showSourceSyncImport) {
+        SourceSyncImportRoute(onBack = { showSourceSyncImport = false })
+        return
+    }
+
+    // W6-59：配对页同样在本页内托管，返回即回到设置列表。
+    if (showPairing) {
+        PairingLinkRoute(onBack = { showPairing = false })
+        return
+    }
+
+    // W6-70：已配对设备页同样在本页内托管，返回即回到设置列表。
+    if (showPairedDevices) {
+        PairedDeviceRoute(
+            onBack = { showPairedDevices = false },
+            baselineStore = viewModel.syncBaselineStore,
+        )
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -101,6 +128,49 @@ fun SettingsRoute(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("同步与备份")
+            }
+            androidx.compose.material3.OutlinedButton(
+                onClick = { showSourceSyncImport = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("sync.import.entry"),
+            ) {
+                Text("从文件导入来源")
+            }
+            androidx.compose.material3.OutlinedButton(
+                onClick = { showPairing = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("pairing.entry"),
+            ) {
+                Text("配对设备")
+            }
+            androidx.compose.material3.OutlinedButton(
+                onClick = { showPairedDevices = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("paired.entry"),
+            ) {
+                Text("已配对设备")
+            }
+            // W6-110：诊断日志导出 —— 内存里的日志环形缓冲写成一份文件，导出时再逐行脱敏。
+            // 这里不新建 ViewModel（SettingsRoute 会在非 Hilt 的 instrumentation 测试里被直接调用）；
+            // 状态与动作都来自传入的 viewModel。
+            val diagnosticsState by viewModel.diagnosticsState.collectAsStateWithLifecycle()
+            androidx.compose.material3.OutlinedButton(
+                onClick = { viewModel.exportDiagnostics() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("diagnostics.export"),
+            ) {
+                Text(DiagnosticsExportText.BUTTON)
+            }
+            DiagnosticsExportText.line(diagnosticsState)?.let { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("diagnostics.result"),
+                )
             }
 
             Spacer(Modifier.height(8.dp))

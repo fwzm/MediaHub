@@ -21,3 +21,35 @@ captures/
 .DS_Store
 .zcode/
 __pycache__/
+
+# ---- Windows client (windows/) ----
+# .NET build output. The Android 
+ule above only covers Gradle's build/ directory, so the
+# .NET bin/obj trees are listed explicitly.
+windows/**/bin/
+windows/**/obj/
+windows/.vs/
+windows/*.user
+windows/**/*.binlog
+
+# libmpv runtime is fetched by windows/tools/fetch-libmpv.ps1 (~115 MB DLL); never vendored.
+windows/native/libmpv/
+
+# Local tooling scratch (fetched archives, verification screenshots) — not part of the product.
+/.tools/
+
+# Windows build/publish artifacts and test results
+windows/**/artifacts/
+
+# GUI acceptance evidence: screenshots, UIA dumps and protocol taps, currently ~29 MB and growing
+# with every run. It is an output of the harness, not an input to the product, and the findings it
+# supports are written up in windows/docs/W5-GUI-ACCEPTANCE.md and W5-WEBDAV-GUI.md. Re-running
+# windows/tools/acceptance/run-all.ps1 reproduces it.
+windows/tools/acceptance/evidence/
+
+# Protocol taps written by the fault-injecting WebDAV server used for the A3 error-boundary
+# checks (windows/tools/acceptance/webdav/fault_server.py). One file per port, rewritten on every
+# run, so they are harness output rather than a fixture.
+windows/tools/acceptance/webdav/fault-requests-*.jsonl
+# DSH progress CLI 运行产物（不是仓库内容）
+.dsh-progress/

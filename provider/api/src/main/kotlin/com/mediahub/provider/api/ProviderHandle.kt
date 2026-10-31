@@ -25,6 +25,7 @@ data class ProviderHandle(
     val subtitle: MediaSubtitleProvider? = null,
     val subtitleDiscovery: MediaSubtitleDiscoveryProvider? = null,
     val progress: MediaProgressProvider? = null,
+    val favorite: MediaFavoriteProvider? = null,
 ) {
     val serverId: String get() = provider.serverId
     val type: com.mediahub.model.ServerType get() = provider.type
@@ -42,11 +43,12 @@ data class ProviderHandle(
         if (subtitle != null) add(ProviderCapability.SUBTITLE)
         if (subtitleDiscovery != null) add(ProviderCapability.SUBTITLE_DISCOVERY)
         if (progress != null) add(ProviderCapability.PROGRESS)
+        if (favorite != null) add(ProviderCapability.FAVORITE)
     }
 
     /** 是否有任何实际可用的能力（骨架阶段为 false 时 UI 显示"未接入"）。 */
     val hasAnyCapability: Boolean
         get() = auth != null || library != null || detail != null || browse != null ||
             playback != null || search != null || identityLookup != null || query != null ||
-            subtitle != null || subtitleDiscovery != null || progress != null
+            subtitle != null || subtitleDiscovery != null || progress != null || favorite != null
 }

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="MediaHub.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="MediaHub">
+
+  <Grid x:Name="RootGrid" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <!-- A real menu bar, because "open a file" is a shell-level action rather than a library one:
+         the user should not have to be inside a particular page for it to be reachable. -->
+    <MenuBar Grid.Row="0" x:Name="MainMenu">
+      <!-- Menu commands carry ids so a test can address them by identity. Without one, the only way
+           to reach "打开视频…" from automation is to open the menu and match on its label, which is
+           exactly the fragile step that made earlier file-entry checks unrepeatable. -->
+      <MenuBarItem Title="文件" AutomationProperties.AutomationId="menu.file">
+        <MenuFlyoutItem Text="打开视频…" Click="OnOpenVideoClick"
+                        AutomationProperties.AutomationId="menu.openvideo">
+          <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8E5;" /></MenuFlyoutItem.Icon>
+        </MenuFlyoutItem>
+        <MenuFlyoutItem Text="加入播放队列…" Click="OnAddToQueueClick"
+                        AutomationProperties.AutomationId="menu.addtoqueue">
+          <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE710;" /></MenuFlyoutItem.Icon>
+        </MenuFlyoutItem>
+        <MenuFlyoutItem Text="打开文件夹…" Click="OnOpenFolderClick"
+                        AutomationProperties.AutomationId="menu.openfolder">
+          <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8B7;" /></MenuFlyoutItem.Icon>
+        </MenuFlyoutItem>
+        <MenuFlyoutSeparator />
+        <MenuFlyoutItem Text="退出" Click="OnExitClick" />
+      </MenuBarItem>
+      <MenuBarItem Title="播放">
+        <MenuFlyoutItem Text="播放 / 暂停" Click="OnPlayPauseMenuClick" />
+        <MenuFlyoutItem Text="全屏切换" Click="OnFullscreenMenuClick" />
+      </MenuBarItem>
+      <MenuBarItem Title="帮助">
+        <MenuFlyoutItem Text="关于 MediaHub" Click="OnAboutClick" />
+      </MenuBarItem>
+    </MenuBar>
+
+    <!-- Shell layer: navigation chrome for browsing surfaces. -->
+    <NavigationView
+        Grid.Row="1"
+        x:Name="Nav"
+        IsBackButtonVisible="Collapsed"
+        IsSettingsVisible="False"
+        IsTitleBarAutoPaddingEnabled="True"
+        PaneDisplayMode="Left"
+        OpenPaneLength="228"
+        SelectionChanged="OnNavSelectionChanged">
+      <NavigationView.MenuItems>
+        <NavigationViewItem Content="首页" Tag="home">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE80F;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="媒体库" Tag="libraries">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE8B7;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="搜索" Tag="search">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE721;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="继续观看" Tag="continue">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE81C;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="我的收藏" Tag="favorites">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE734;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="播放列表" Tag="playlists">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE8FD;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="媒体源" Tag="sources">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE968;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem Content="设置" Tag="settings">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE713;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+      </NavigationView.MenuItems>
+      <Frame x:Name="ShellFrame" />
+    </NavigationView>
+
+    <!-- Player layer: a dedicated full-window surface. It is a sibling rather than a child of the
+         NavigationView so the video rectangle can use the entire window in fullscreen. -->
+    <Grid x:Name="PlayerLayer" Grid.RowSpan="2" Visibility="Collapsed">
+      <Frame x:Name="PlayerFrame" />
+    </Grid>
+  </Grid>
+</Window>

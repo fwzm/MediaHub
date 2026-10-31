@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <Deterministic>true</Deterministic>
+    <!-- .NET 10 prunes framework-provided packages out of the restore graph and out of self-contained
+         output. Which packages get pruned depends on the machine: pruning needs package-prune data, which
+         ships with the installed targeting packs - an installation without a packs/ directory has none, and
+         framework references then resolve through NuGet instead. The same repository therefore resolved 29
+         packages here and 28 on CI, and the SBOM in windows/docs/sbom-windows.cdx.json (generated without
+         prune data) looked stale there. Pruning is a publish-size optimisation only, so it is disabled
+         outright: the resolved package graph, and with it the SBOM and the licence report, is then the same
+         everywhere. -->
+    <AllowMissingPrunePackageData>true</AllowMissingPrunePackageData>
+    <RestoreEnablePackagePruning>false</RestoreEnablePackagePruning>
+  </PropertyGroup>
+</Project>

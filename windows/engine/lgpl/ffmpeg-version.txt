@@ -1,0 +1,12 @@
+ffmpeg version 8.1.1 Copyright (c) 2000-2026 the FFmpeg developers
+built with gcc 14.2.0 (Rev2, Built by MSYS2 project)
+configuration: --prefix=/d/mh-servers/lgpl-build/prefix --arch=x86_64 --target-os=mingw32 --disable-gpl --disable-version3 --disable-nonfree --enable-shared --disable-static --disable-autodetect --enable-zlib --enable-d3d11va --enable-d3d12va --enable-schannel --enable-network --enable-w32threads --enable-runtime-cpudetect --disable-debug --disable-doc --disable-htmlpages --disable-manpages --disable-podpages --disable-txtpages --extra-cflags=-O2
+libavutil      60. 26.101 / 60. 26.101
+libavcodec     62. 28.101 / 62. 28.101
+libavformat    62. 12.101 / 62. 12.101
+libavdevice    62.  3.101 / 62.  3.101
+libavfilter    11. 14.101 / 11. 14.101
+libswscale      9.  5.101 /  9.  5.101
+libswresample   6.  3.101 /  6.  3.101
+
+Exiting with exit code 0
