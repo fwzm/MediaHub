@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T20:45:00+08:00",
+  "updated_at": "2026-10-31T20:52:00+08:00",
   "updated_by": "lead-W6-113-r17",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -157,7 +157,8 @@
         "cancelled runs (追加): 41124244565 (head 1e2cf9ed, 2026-10-31) - the same head's windows-ci succeeded as 41124244650",
         "cancelled runs (追加): 41169510106 (head c3a49cef, 2026-10-31) - the same head's windows-ci succeeded as 41169510082",
         "Android CI run 41200282712 @716f481a was still in_progress when sampled (core/feature/app tree hashes unchanged from the previous head, so ADR-AUTO-001 inheritance applies)",
-        "Android CI run 41202161881 @9e90f1e1 was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)"
+        "Android CI run 41202161881 @9e90f1e1 was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)",
+        "Android CI run 41202435297 @33a2d77c = in_progress/"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -466,7 +467,8 @@
         "core holes closed: a row moving from Passed to Aborted (or any other kind) keeps the total, every class count, method set, per-method case count and argument rows identical - the round-16 gate stayed green (V3x) while the new gate is red (V3), and a file whose rows disagree with its own Counters is red too (V2/V2x, R7)",
         "first round had 13 reds, all harness bugs: V still pointed at D:/mh-verify/r16 (five cases), the fixture has 8 rows while six expectations assumed 6, and combined tests was written as 8 instead of 10",
         "migration: the round-16 real baseline is refused by the new gate (\"has no outcomes table\") while the round-16 gate accepts it, and the new updater migrates it (outcomes {Passed:1952} / {Passed:104})",
-        "exact-head CI: head 9e90f1e1 windows-ci 41202161858 printed \"MediaHub.Tests: outcomes=1 baseline=outcome table 1 outcomes\" and the WebDav twin in the test gate step; the run fails only on the licence step attributed to W6-113u"
+        "exact-head CI: head 9e90f1e1 windows-ci 41202161858 printed \"MediaHub.Tests: outcomes=1 baseline=outcome table 1 outcomes\" and the WebDav twin in the test gate step; the run fails only on the licence step attributed to W6-113u",
+        "docs head 33a2d77c windows-ci 41202435323: the test gate step printed the full eight-level ladder including \"outcomes=1 baseline=outcome table 1 outcomes\" for both suites plus \"suites=2\" and \"combined tests=2056\"; the run fails only on the licence step (\"the log service no longer contains sb.AppendLine(...)\" / checks=45 failed=1) which is the W6-113u needle divergence"
       ],
       "notes": "14 个 TRX 桶名是两脚本共有词表；未知桶名 update 直接 throw（宁拒勿默写）。outcome 桶之和必须等于 expected。testId 唯一性未单独校验，时长/时间戳不参与判定。",
       "next_action": "无需我方动作；若 runner 引入新桶名，先在两脚本词表加名再刷新基线。",

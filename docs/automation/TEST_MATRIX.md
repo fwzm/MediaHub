@@ -708,3 +708,5 @@ MediaHub.WebDav.Tests: outcomes=1 baseline=outcome table 1 outcomes
 
 - 代码 head `9e90f1e1` 的 windows-ci **`41202161858` = completed/failure**：测试门禁步骤全绿并打印 `MediaHub.Tests: outcomes=1 baseline=outcome table 1 outcomes` 与 WebDav 同形行（连同七层旧台阶行、`suites=2 baseline=suite table 2 suites`、`combined tests=2056`）；唯一失败步骤仍是 licence 的 `log-file-claims`（`checks=45 failed=1`）。
 - 该红与 `W6-113u` 记录的跨分支形状分歧逐字相同，与本轮改动无因果（本轮只动 `windows/tools/*.ps1` 与基线，未触碰 `LogService.cs`）。
+
+- docs head `33a2d77c` 的 windows-ci **`41202435323` = completed/failure**：测试门禁步骤全绿，两套件均打印 `outcomes=1 baseline=outcome table 1 outcomes`（连同七层旧台阶行、`suites=2`、`combined tests=2056`）；唯一失败步骤仍是 licence 的 `log-file-claims`（`checks=45 failed=1`，即 `W6-113u` 记录的 W50 跨分支 needle 分歧），与本层改动无因果。
