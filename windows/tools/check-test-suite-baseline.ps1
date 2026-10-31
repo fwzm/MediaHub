@@ -84,6 +84,17 @@
 #   declared "Class.Method" and prints
 #   displayNames=/declared prefixes=/mismatched=.
 #
+#   One more level, on the summary itself: every count above is read from this
+#   file's ResultSummary/Counters, and nothing looked at that block's own
+#   arithmetic or even at whether the attributes it records are numbers. A block
+#   that drops an attribute this gate reads, stores a negative or unreadable value,
+#   or edits total, executed and notExecuted so that total = executed + notExecuted
+#   no longer holds keeps every count above looking exactly as the baseline
+#   reviewed it. The run therefore also requires the five attributes it reads to be
+#   present, every recorded attribute to be a whole non-negative number, that
+#   identity to hold, and prints
+#   counters=/attributes required=/missing=/malformed=/identity=.
+#
 #   Every count above is still read from the run's own ResultSummary/Counters, and
 #   the per-row outcomes are never counted. A results file whose rows disagree with
 #   its own summary - a hand-merged, patched or truncated artifact - therefore
@@ -437,6 +448,7 @@ $runIdByFile = @{}
 $fileOfExecution = @{}
 $runIdWarn = @()
 $fileIdentityLost = @()
+$counterVocabularyWarn = @()
 foreach ($e in $baseline.suites) {
   $path = Join-Path -Path $ResultsDir -ChildPath $e.file
   if (-not (Test-Path -LiteralPath $path)) {
@@ -969,6 +981,53 @@ foreach ($e in $baseline.suites) {
   }
 
   # The summary is not trusted on its own: every result row carries exactly one
+  # The summary is not trusted on its own either. Every count above is read from
+  # this block, and nothing used to look at the block itself: the five attributes
+  # this gate reads must be there, each recorded attribute must be a whole
+  # non-negative number, and VSTest's own identity must hold. A block that drops an
+  # attribute, stores a negative or unreadable value, or edits total, executed and
+  # notExecuted independently keeps every count above identical.
+  $counterAttributes = @{}
+  foreach ($ca in @($xml.TestRun.ResultSummary.Counters.Attributes)) {
+    $counterAttributes[[string]$ca.Name] = [string]$ca.Value
+  }
+  $counterCount = $counterAttributes.Count
+  $requiredCounterNames = @('total', 'executed', 'passed', 'failed', 'notExecuted')
+  $missingCounters = @()
+  foreach ($rn in $requiredCounterNames) {
+    if (-not $counterAttributes.ContainsKey($rn) -or [string]::IsNullOrWhiteSpace([string]$counterAttributes[$rn])) {
+      $missingCounters += $rn
+    }
+  }
+  $malformedCounters = @()
+  foreach ($ack in @($counterAttributes.Keys | Sort-Object)) {
+    $araw = [string]$counterAttributes[$ack]
+    $aparsed = 0
+    if (-not [int]::TryParse($araw, [ref]$aparsed) -or $aparsed -lt 0) {
+      $malformedCounters += "$ack='$araw'"
+    } elseif (-not $OutcomeByAttribute.ContainsKey($ack) -and $ack -ne 'total' -and $ack -ne 'executed') {
+      $counterVocabularyWarn += "$($e.file) records the Counters attribute '$ack', which this gate does not know"
+    }
+  }
+  $counterArithmetic = @()
+  if ($missingCounters.Count -eq 0 -and $malformedCounters.Count -eq 0) {
+    $cTotal = [int]$counterAttributes['total']
+    $cExecuted = [int]$counterAttributes['executed']
+    $cNotExecuted = [int]$counterAttributes['notExecuted']
+    $cPassed = [int]$counterAttributes['passed']
+    $cFailed = [int]$counterAttributes['failed']
+    if ($cTotal -ne ($cExecuted + $cNotExecuted)) {
+      $counterArithmetic += "total=$cTotal vs executed+notExecuted=$($cExecuted + $cNotExecuted)"
+    }
+    if (($cPassed + $cFailed) -gt $cExecuted) {
+      $counterArithmetic += "passed+failed=$($cPassed + $cFailed) vs executed=$cExecuted"
+    }
+  }
+  if ($missingCounters.Count -gt 0 -or $malformedCounters.Count -gt 0 -or $counterArithmetic.Count -gt 0) {
+    throw "$($e.suite): $($e.file) records a Counters block that contradicts itself while the total was $total - every count above is read from this block, so a block that drops an attribute this gate reads, stores a negative or unreadable value, or edits total, executed and notExecuted independently can leave all of them looking exactly like the baseline reviewed. broken: missing [$(@($missingCounters) -join ', ')] / malformed [$(@($malformedCounters) -join ', ')] / arithmetic [$(@($counterArithmetic) -join '; ')]. A TRX whose summary does not add up was hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  # The summary is not trusted on its own: every result row carries exactly one
   # outcome, so the rows must reproduce every Counters bucket. A file whose rows
   # disagree with its own summary (hand-merged, patched, truncated) would
   # otherwise pass on the summary numbers alone.
@@ -1038,6 +1097,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount"
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
+  "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
   if ($skipped -ne 0) { throw "$($e.suite): $skipped test(s) were not executed" }
@@ -1292,6 +1352,11 @@ foreach ($xk in @($dupExec | Select-Object -First 12)) {
   if ($fileIdentityLost.Count -lt 12) { $fileIdentityLost += "execution id $xk appears in more than one results file ($([string]::Join(', ', @($fileOfExecution[$xk]))))" }
 }
 "file identities=$($runIdByFile.Count) distinct run ids=$($runSeen.Count) cross-file duplicate execution ids=$($dupExec.Count)"
+if ($counterVocabularyWarn.Count -gt 0) {
+  $shownCounterVocab = $counterVocabularyWarn
+  if ($shownCounterVocab.Count -gt 12) { $shownCounterVocab = $shownCounterVocab[0..11] + "... ($($counterVocabularyWarn.Count - 12) more)" }
+  Write-Host "::warning::a Counters attribute this gate does not know - it is recorded but not cross-checked against the rows: $($shownCounterVocab -join '; ')"
+}
 if ($runIdWarn.Count -gt 0) {
   $shownRunId = $runIdWarn
   if ($shownRunId.Count -gt 12) { $shownRunId = $shownRunId[0..11] + "... ($($runIdWarn.Count - 12) more)" }
