@@ -103,6 +103,16 @@
 #     swapping the ids of two definitions keeps the total, every class count,
 #     the method set, every argument row and the outcome split identical, and so
 #     does duplicating one id onto another definition and its result.
+#   a result row with no executionId, two result rows sharing one executionId, a
+#     row attribute (testType / testListId / computerName on the results, storage
+#     on the definitions) that is missing or not the same on every row of the
+#     file, an unreadable startTime / endTime, a row that ends before it starts,
+#     an unreadable or negative duration, or a row whose start or end falls
+#     outside the run's own <Times> window -> red. Every count above is read from
+#     this file's own rows, so a row whose own metadata is impossible or borrowed
+#     from another row can keep all of them identical.
+#   a duration that disagrees with the row's own start/end by more than a second,
+#     or a run whose <Times> window records no usable start/finish -> warning.
 #   failed != 0 or notExecuted != 0 -> red
 #
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
@@ -187,6 +197,31 @@ function Get-RowDifference {
     else { $extra += $Live[$j]; $j++ }
   }
   return @{ missing = $missing; extra = $extra }
+}
+
+# Parses a TRX timestamp (ISO 8601 with offset) into a comparable instant.
+# Returns $null when the text is missing or unreadable, so a row with an
+# impossible time is reported instead of being sorted as the epoch.
+function Convert-ToInstant {
+  param([string]$Text)
+  if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+  try {
+    return [System.DateTimeOffset]::Parse($Text, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+  } catch {
+    return $null
+  }
+}
+
+# Parses a TRX duration (TimeSpan text) into milliseconds; $null when unreadable.
+# Kept separate from Convert-ToInstant because a duration is not a timestamp.
+function Convert-ToMillis {
+  param([string]$Text)
+  if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+  try {
+    return [double]([System.TimeSpan]::Parse($Text, [System.Globalization.CultureInfo]::InvariantCulture).TotalMilliseconds)
+  } catch {
+    return $null
+  }
 }
 
 if (-not (Test-Path -LiteralPath $BaselinePath)) {
@@ -368,6 +403,7 @@ $outcomeGrew = @()
 $suiteIdentity = @()
 $provenanceWarn = @()
 $auditFiles = @()
+$durWarn = @()
 foreach ($e in $baseline.suites) {
   $path = Join-Path -Path $ResultsDir -ChildPath $e.file
   if (-not (Test-Path -LiteralPath $path)) {
@@ -382,6 +418,34 @@ foreach ($e in $baseline.suites) {
   $skipped = [int]$xml.TestRun.ResultSummary.Counters.notExecuted
   $auditFiles += [string]$e.file
 
+  # The run says when it started and finished; a row outside that window was not
+  # produced by this run. A TRX that records no usable window can only be
+  # reported, never gated.
+  $tRunStart = $null
+  $tRunFinish = $null
+  $windowUnknown = $false
+  if ($xml.TestRun.Times) {
+    $tRunStart = Convert-ToInstant ([string]$xml.TestRun.Times.start)
+    $tRunFinish = Convert-ToInstant ([string]$xml.TestRun.Times.finish)
+  }
+  if ($null -eq $tRunStart -or $null -eq $tRunFinish) { $windowUnknown = $true }
+
+  # Row metadata is collected from both halves before anything is compared: the
+  # result rows carry their own identity and timings, the definitions carry the
+  # assembly each row was loaded from.
+  $execIdCounts = @{}
+  $blankExecIds = 0
+  $rowCount = 0
+  $timeOrdered = 0
+  $badTimes = 0
+  $timeReversed = 0
+  $badDuration = 0
+  $durDrift = 0
+  $inWindow = 0
+  $outOfWindow = 0
+  $attrBlank = @{ testType = 0; testListId = 0; computerName = 0; storage = 0 }
+  $attrValues = @{ testType = @{}; testListId = @{}; computerName = @{}; storage = @{} }
+
   # Identity from the artifact: the TestMethod elements record the assembly that
   # produced these results (codeBase; older writers only fill storage). A single
   # recorded assembly that does not match the declared suite name means this
@@ -389,6 +453,12 @@ foreach ($e in $baseline.suites) {
   $assemblies = New-Object System.Collections.Generic.List[string]
   foreach ($ut in @($xml.TestRun.TestDefinitions.UnitTest)) {
     if ($null -eq $ut) { continue }
+    $stv = [string]$ut.storage
+    if ([string]::IsNullOrWhiteSpace($stv)) {
+      $attrBlank['storage'] = [int]$attrBlank['storage'] + 1
+    } elseif (-not $attrValues['storage'].ContainsKey($stv)) {
+      $attrValues['storage'][$stv] = $true
+    }
     $cb = $null
     if ($ut.TestMethod) { $cb = [string]$ut.TestMethod.codeBase }
     if ([string]::IsNullOrWhiteSpace($cb)) { $cb = [string]$ut.storage }
@@ -503,6 +573,40 @@ foreach ($e in $baseline.suites) {
   $unmapped = 0
   foreach ($res in @($xml.TestRun.Results.UnitTestResult)) {
     if ($null -eq $res) { continue }
+    $rowCount++
+    $eid = [string]$res.executionId
+    if ([string]::IsNullOrWhiteSpace($eid)) {
+      $blankExecIds++
+    } elseif ($execIdCounts.ContainsKey($eid)) {
+      $execIdCounts[$eid] = [int]$execIdCounts[$eid] + 1
+    } else {
+      $execIdCounts[$eid] = 1
+    }
+    foreach ($ak in @('testType', 'testListId', 'computerName')) {
+      $av = [string]$res.$ak
+      if ([string]::IsNullOrWhiteSpace($av)) {
+        $attrBlank[$ak] = [int]$attrBlank[$ak] + 1
+      } elseif (-not $attrValues[$ak].ContainsKey($av)) {
+        $attrValues[$ak][$av] = $true
+      }
+    }
+    $rstart = Convert-ToInstant ([string]$res.startTime)
+    $rend = Convert-ToInstant ([string]$res.endTime)
+    $rms = Convert-ToMillis ([string]$res.duration)
+    if ($null -eq $rstart -or $null -eq $rend) {
+      $badTimes++
+    } else {
+      if ($rend -lt $rstart) {
+        $timeReversed++
+      } else {
+        $timeOrdered++
+      }
+      if ($null -ne $rms -and [math]::Abs((($rend - $rstart).TotalMilliseconds) - $rms) -gt 1000) { $durDrift++ }
+      if ($null -ne $tRunStart -and $null -ne $tRunFinish) {
+        if ($rstart -lt $tRunStart -or $rend -gt $tRunFinish) { $outOfWindow++ } else { $inWindow++ }
+      }
+    }
+    if ($null -eq $rms -or $rms -lt 0) { $badDuration++ }
     $rid = [string]$res.testId
     if ($resIdCounts.ContainsKey($rid)) { $resIdCounts[$rid] = $resIdCounts[$rid] + 1 } else { $resIdCounts[$rid] = 1 }
     $cls = $null
@@ -568,6 +672,42 @@ foreach ($e in $baseline.suites) {
   }
   if ($namesUnprovable -gt 0) {
     Write-Host "::warning::$($e.suite): $namesUnprovable row(s) cannot be name-checked - the definition carries no display name"
+  }
+
+  # Each row's own metadata must be self-consistent. The total, every class
+  # count, the method set, the argument rows, the outcome split and the pairing
+  # of the two halves are all read from this file, so a file whose rows borrow
+  # each other's execution ids, drop or mix one row attribute, or carry an
+  # impossible timestamp can leave every one of them identical.
+  $rowAttrLost = @()
+  if ($blankExecIds -gt 0) { $rowAttrLost += "$blankExecIds result row(s) have no executionId" }
+  foreach ($eid in @($execIdCounts.Keys | Where-Object { [int]$execIdCounts[$_] -gt 1 } | Sort-Object)) {
+    if ($rowAttrLost.Count -lt 12) { $rowAttrLost += "result executionId $eid appears $($execIdCounts[$eid]) times" }
+  }
+  $uniformFields = 0
+  foreach ($ak in @('computerName', 'storage', 'testListId', 'testType')) {
+    if ([int]$attrBlank[$ak] -gt 0) {
+      if ($rowAttrLost.Count -lt 12) { $rowAttrLost += "$($attrBlank[$ak]) row(s) have no $ak" }
+    } elseif ($attrValues[$ak].Count -eq 1) {
+      $uniformFields++
+    } elseif ($attrValues[$ak].Count -gt 1) {
+      if ($rowAttrLost.Count -lt 12) { $rowAttrLost += "$ak is not the same on every row ($($attrValues[$ak].Count) values in one file)" }
+    } else {
+      if ($rowAttrLost.Count -lt 12) { $rowAttrLost += "$ak is recorded nowhere in $($e.file)" }
+    }
+  }
+  if ($badTimes -gt 0) { $rowAttrLost += "$badTimes row(s) carry an unreadable startTime or endTime" }
+  if ($timeReversed -gt 0) { $rowAttrLost += "$timeReversed row(s) end before they start" }
+  if ($badDuration -gt 0) { $rowAttrLost += "$badDuration row(s) carry an unreadable or negative duration" }
+  if ($outOfWindow -gt 0) { $rowAttrLost += "$outOfWindow row(s) fall outside the run's own Times window" }
+  if ($rowAttrLost.Count -gt 0) {
+    throw "$($e.suite): the result rows contradict their own metadata while the total was $total - every count above is read from this file's rows, so rows that share an execution id, drop or mix a row attribute, or carry an impossible timestamp can keep all of them identical. broken: $($rowAttrLost -join ', '). A TRX whose rows disagree with themselves was hand-merged or patched; regenerate it from a clean test run."
+  }
+  if ($durDrift -gt 0) {
+    $durWarn += "$($e.suite) ($durDrift row(s) report a duration that disagrees with their own start/end by more than a second)"
+  }
+  if ($windowUnknown) {
+    $durWarn += "$($e.suite) ($($e.file) records no usable Times window - row times cannot be checked against the run)"
   }
 
   # The summary is not trusted on its own: every result row carries exactly one
@@ -636,6 +776,7 @@ foreach ($e in $baseline.suites) {
   }
   "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
   "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
+  "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
   if ($skipped -ne 0) { throw "$($e.suite): $skipped test(s) were not executed" }
@@ -863,5 +1004,10 @@ if ($outcomeGrew.Count -gt 0) {
   $shown = $outcomeGrew
   if ($shown.Count -gt 12) { $shown = $shown[0..11] + "... ($($outcomeGrew.Count - 12) more)" }
   Write-Host "::warning::new outcome rows - refresh windows/tools/test-suite-baseline.json (see windows/tools/update-test-suite-baseline.ps1): $($shown -join '; ')"
+}
+if ($durWarn.Count -gt 0) {
+  $shown = $durWarn
+  if ($shown.Count -gt 12) { $shown = $shown[0..11] + "... ($($durWarn.Count - 12) more)" }
+  Write-Host "::warning::row times are not fully pinned - the recorded duration or the run's own Times window could not be checked: $($shown -join '; ')"
 }
 "combined tests=$all"
