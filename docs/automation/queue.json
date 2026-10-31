@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T12:52:00+08:00",
-  "updated_by": "lead-W6-113-r15",
+  "updated_at": "2026-10-31T20:20:00+08:00",
+  "updated_by": "lead-W6-113-r16",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -155,7 +155,8 @@
         "cancelled runs (追加): 41099478811 (head 8ec0d890) and 41100655793 (head 4461140b), 2026-10-31 - the same heads' windows-ci succeeded as 41099478575 / 41100655895",
         "cancelled runs (追加): 41111613255 (head a0b46f6e, 2026-10-31) - the same head's windows-ci succeeded as 41111613263",
         "cancelled runs (追加): 41124244565 (head 1e2cf9ed, 2026-10-31) - the same head's windows-ci succeeded as 41124244650",
-        "cancelled runs (追加): 41169510106 (head c3a49cef, 2026-10-31) - the same head's windows-ci succeeded as 41169510082"
+        "cancelled runs (追加): 41169510106 (head c3a49cef, 2026-10-31) - the same head's windows-ci succeeded as 41169510082",
+        "Android CI run 41200282712 @716f481a was still in_progress when sampled (core/feature/app tree hashes unchanged from the previous head, so ADR-AUTO-001 inheritance applies)"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -409,6 +410,44 @@
       "notes": "TEST_MATRIX 6.10 records the ladder line, the six config self-checks and the residual limits (tail unrecoverable; truncation threshold is the runner's). The layer is deliberately warning-only so CI cannot flap on runner display-name truncation.",
       "next_action": "No action required unless the gate warns; if the runner changes its display-name length policy the truncated table must be refreshed with the same commit.",
       "closed_at": "2026-10-31T12:45:00+08:00"
+    },
+    {
+      "id": "W6-113t",
+      "title": "套件集口径：基线钉住 suite 清单并核对产出的结果文件（W6-113t）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r16",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (34,527 B) + update-test-suite-baseline.ps1 (21,834 B) + test-suite-baseline.json (164,051 B); the baseline now declares \"expected_suites\" and the gate enumerates every *.trx under -ResultsDir, warning on result files the table does not list",
+        "commit 716f481a00e112b5f31c49d98fb6420d336a7aff (3 files, +138 -5); blobs sha256-equal to the working-tree bytes the negative controls exercised (check 8961e9f88e8c536b / update ff0c262b8c815d64 / baseline 1949f1039b1c595c)",
+        "negative controls 26/26 pass in pwsh 7 and Windows PowerShell 5.1 (D:/mh-verify/r16/nc-console.log, last line \"--- total 26 cases, pass=26, fail=0\")",
+        "first round had 2 reds, both outside the verdict logic: the updater also threw under -AcceptRemoval (fixed by a dedicated $dropped list) and the migration fixture lost the \\uXXXX escaping (fixed by copying the round-15 baseline byte for byte)",
+        "real corpus: suites=2 baseline=suite table 2 suites, combined tests=2056, argumentTruncated=6 (both shells byte-identical output)",
+        "exact-head CI: head 716f481a windows-ci 41200282567 printed the new ladder line \"MediaHub.Tests: suites=2 baseline=suite table 2 suites\" in the test gate step; the run is a failure only on the licence step, attributed to W6-113u"
+      ],
+      "notes": "未列出的结果文件只报 warning（新增测试项目属增长路径，必须可合并）；哨兵是 expected_suites 与条数一致 + 被删条目对应的结果文件是否仍在。一个结果文件混多个程序集时归属核对退化为 warning。",
+      "next_action": "无需我方动作；若后续 base 再改结果文件名或程序集归属方式，先跑 RE 例（真实语料）再改口径。",
+      "closed_at": "2026-10-31T20:20:00+08:00"
+    },
+    {
+      "id": "W6-113u",
+      "title": "跨分支守卫分歧：W50 log-file-claims 钉 LogService 的滚动目录字面量，W6 已把该行搬进 DiagnosticsReport（W6-113u）",
+      "priority": "P0",
+      "status": "BLOCKED",
+      "owner": "unassigned",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "base 2bdaa499 windows/tools/check-licence-surface.ps1 check #44 \"log-file-claims\" (W50) requires the literal sb.AppendLine(\"# 滚动文件目录：\" + FileSink.DirectoryPath); inside windows/src/MediaHub.Net/LogService.cs",
+        "base 2bdaa499 own tree satisfies it (LogService.cs:80, 198 lines, no DiagnosticsReport.cs) and its windows-ci 41174155974 (push) / 41174160859 (pull_request) are success with checks=44 failed=0",
+        "W6 branch commit 055c85c3 (W6-113 diagnostics export contract alignment) moved the line into windows/src/MediaHub.Net/DiagnosticsReport.cs (line 30 constant RollingDirectoryPrefix, line 54 lines.Add(RollingDirectoryPrefix + rollingDirectory)); HEAD LogService.cs is 184 lines with no such literal and exports via DiagnosticsReport.Render(..., rollingDirectory: FileSink?.DirectoryPath)",
+        "PR merge tree refs/pull/39/merge = 0b8a3598a7d3f7b5aa7d5c113a5295fae13a705c carries base W14 log-file-status block and the W6 RollingDirectoryPrefix note, but no LogService literal, so the guard necessarily fails",
+        "head 716f481a windows-ci 41200282567 = failure; log: check-licence-surface FAIL log-file-claims (checks=44 failed=1 warnings=0 skipped=0), test-suite gate step fully green",
+        "round 15 head ecf00ca5 on the previous base 4791322455 had checks=42 failed=0 - the guard did not exist then, so this red appeared with the base advance, not with this round change"
+      ],
+      "notes": "两侧设计各自成立：base 的守卫钉的是「LogService 自己拼报告头」的旧形状，W6-113 已把这一行集中到 DiagnosticsReport（由 7 条用例与 W14 §3 说明冻结），round 10 已复验为 no-op。",
+      "next_action": "维护者/W50 所有者二选一：① 把该 needle 改为「该行由 DiagnosticsReport.RollingDirectoryPrefix + rollingDirectory 产出，且两侧用例仍在」（推荐，与已落地设计一致）；② 把该字面量按原形状放回 LogService.cs（会形成第二个真源，需同步改 W14 §3）。裁决前本 PR head 的 licence 步骤持续红；我方不动共享守卫。",
+      "closed_at": null
     }
   ]
 }

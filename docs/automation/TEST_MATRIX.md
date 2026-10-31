@@ -589,3 +589,65 @@ head `1e2cf9ed5de87abe4e3da6691cbacc6a50167cc3` 的 windows-ci **`41124244650` c
 ### exact-head CI 验收（EXECUTED）
 - head `c3a49cef`（merge commit `3ed7baaf4abd`）：windows-ci `41169510082` completed/success —— `MediaHub.Tests: argumentTruncated=6 baseline=argument truncated table 6 rows`、`MediaHub.WebDav.Tests: argumentTruncated=0 baseline=argument truncated table 0 rows`，其余台阶行与 §6.9 相同（`argumentRows=415 … 415 rows` / `methodData=100 … 100 row sets` / `methodCases=1952 … 1952 cases` / `combined tests=2056`）；licence `checks=42 failed=0 warnings=0 skipped=0`；两个探针 PASS（GPU/HDR/audio 未行使 ⇒ UNVERIFIED）。
 - docs head `86a4c5aa` 的 windows-ci `41169881421` success：台阶行与代码 head 逐字相同（含 `argumentTruncated=6 … 6 rows`、WebDav `0 … 0 rows`），licence `checks=42 failed=0 warnings=0 skipped=0`。
+
+## 6.11 套件集口径：基线钉住 suite 清单并核对产出的结果文件（W6-113t，2026-10-31）
+
+§6.10 之前的五层口径都只在基线**列出的** suite 条目上做比对。因此出现一个更外层的洞：**删掉一个 suite 条目**（或整块测试项目从 CI 里消失）之后，它不再被检查，其用例数也只是从 `combined tests` 中消失，而文件里其他任何计数都不变 —— 门禁看不见这次收缩。
+
+### 基线字段（2026-10-31 起）
+
+| 字段 | 含义 | 本轮判定 |
+| --- | --- | --- |
+| `expected_suites` | 顶层计数：本文件声明了几个 suite | 与 `suites` 表长度不符 → RED（手工删条目立即暴露） |
+| `suites[].file` / `suites[].suite` | 结果文件名 / 程序集名 | 结果文件缺失 → RED；声明的 suite 名与结果文件里 `TestMethod codeBase`/`storage` 的程序集名不符 → RED |
+| （枚举 `-ResultsDir`） | 实际产出的 `*.trx` | 未被基线列出 → `::warning::`（新增 suite 走增长路径，但保持可见） |
+
+### 台阶行
+
+```text
+MediaHub.Tests: suites=2 baseline=suite table 2 suites
+combined tests=2056
+```
+
+### 负向对照（26 例，两代 PowerShell 判定一致）
+
+| 例 | 输入 | 期望 |
+| --- | --- | --- |
+| S1 | 规范输入 | PASS，`suites=2 baseline=suite table 2 suites`、`combined tests=10` |
+| S1x | 同一输入给 round 15 闸门 | 输出无 `suites=` 行（新层确为新增） |
+| S2 | 多出一个未列出的 `*.trx` | PASS + warning，`suites=3 … 2 suites` |
+| S2x | 同一输入给 round 15 闸门 | 完全看不见该文件（`combined tests=10`，输出不含其文件名） |
+| S3 | `expected_suites=1` 而表里 2 条 | RED |
+| S4 / S4x | 删掉 `expected_suites` | 新闸门 RED / round 15 闸门放行 |
+| S5 | `expected_suites` 非数字 | RED |
+| S6 | 两条目指向同一结果文件 | RED |
+| S7 | 列出的 suite 没有结果文件 | RED |
+| S8 | 结果文件来自别的程序集 | RED |
+| S9 | 结果文件无可解析的程序集记录 | PASS + warning |
+| S10 | 一个文件混两个程序集 | PASS + warning |
+| S11 | 第二个 suite 用例数缩减 | RED |
+| R1/R2/R4/R6 | 总数降 / 每类降 / 方法换 / 新增方法 | 既有各层判定不变 |
+| U1 | 刷新时多出一个未列出的结果文件 | 自动接纳（`added suite: …`、`expected_suites=3`、check `combined tests=12`） |
+| U2 | 两代 PowerShell 刷新 | 写出字节相同 |
+| U3 | 结果文件消失：无 `-AcceptRemoval` / 有开关 | 前者拒绝且基线未被改写；后者丢弃条目（`removed: suite …`、`expected_suites=1`、check `suites=1 … 1 suites`） |
+| U4 | 无变化输入刷新 | 逐字节稳定 |
+| RE1 | 真实 CI 语料 | PASS |
+| RE2 / RE2x / RE3 | round 15 旧基线 × 真实语料 | 新闸门 RED（要求迁移）/ round 15 闸门放行 / 新 update 可升级旧基线 |
+
+首轮 2 红都不在判定逻辑上：一处是实现缺陷（update 在 `-AcceptRemoval` 分支把「suite 结果文件消失」记进 `$shrunk`，而 `$shrunk` 非空会在末尾无条件 throw ⇒ 带开关也失败），已拆出 `$dropped` 专用于 reporting；另一处是夹具用 `JSON.stringify` 重写旧基线导致 `\uXXXX` 被还原成原始非 ASCII、PS 5.1 按 ANSI 解码，改为逐字节复制旧基线。修后 26/26 通过。
+
+### 数据源与规模
+
+- 数据源仍为 run `41095080796` @head `701bb547` 的 TRX（`windows-tests.trx` 2,719,155 B / `webdav-tests.trx` 145,266 B）。
+- 基线 164,027 → **164,051 B**（只多一行 `"expected_suites": 2,`）；check 29,523 → **34,527 B**，update 18,921 → **21,834 B**。
+
+### 残留限制
+
+- 未列出的结果文件只报 warning，不判红：新增测试项目属「增长」，必须可合并；哨兵是 `expected_suites` 与条数一致性，以及「被删条目对应的结果文件是否还在」。
+- 一个结果文件混多个程序集会退化为 warning（程序集名无法唯一归属），此时该条目的归属核对实际不成立。
+- 结果文件的程序集名来自 TRX 记录的 `codeBase`/`storage` 字串；runner 改写入方式（例如不再写这些属性）会退化成 warning 而不是 RED。
+
+### exact-head CI 验收（2026-10-31）
+
+- 代码 head `716f481a` 的 windows-ci **`41200282567` = completed/failure**：测试门禁步骤全绿并打印 `suites=2 baseline=suite table 2 suites`（连同六层台阶行与 `combined tests=2056`），唯一失败步骤是 licence 表面的 `Licence surface guard`，停在 `check-licence-surface  FAIL  log-file-claims`（`checks=44 failed=1 warnings=0 skipped=0`）。
+- 归因（见 RUNLOG round 16 与 queue `W6-113u`）：base `2bdaa499` 新加的第 44 项守卫 W50 要求 `windows/src/MediaHub.Net/LogService.cs` 含字面量 `sb.AppendLine("# 滚动文件目录：" + FileSink.DirectoryPath);`，而 W6 分支在 `055c85c3` 已把该行搬进 `DiagnosticsReport.cs`（`RollingDirectoryPrefix`）；base 自身在该 head 上 `checks=44 failed=0`（`41174155974` / `41174160859`），上一轮我方 head 在旧 base 上 `checks=42 failed=0` ⇒ 红由跨分支形状分歧产生，与本轮改动无因果。
