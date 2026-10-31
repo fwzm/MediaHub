@@ -825,3 +825,7 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 ### exact-head CI 验收（2026-10-31）
 
 - head `c373956d` 的 windows-ci **`41208701809` = completed/failure**：`check-licence-surface  PASS  doc-residue-claims  1317 text file(s) scanned: no unmarked placeholder residue, all 123 markdown file(s) have balanced fences, and the capability map status block sits inside a real fence`；licence 由 `failed=2` 降为 `checks=46 failed=1`，唯一红仍是 `log-file-claims`（`W6-113u`）。
+
+- 账本 head `ad8b1698` 的 windows-ci **`41209166800` = completed/failure**：十层台阶行与代码 head 逐字一致（含 `rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4`、WebDav `rowAttributes=104 …`）；`doc-residue-claims` PASS ⇒ 第十层在三个 head 上均成立。
+
+- 账本 head `ad8b1698` 的 windows-ci **`41209166800` = completed/failure**：`doc-residue-claims` 仍 PASS（`1317 text file(s) scanned … all 123 markdown file(s) have balanced fences`）；licence `checks=46 failed=1`，唯一红仍是 `log-file-claims`（`W6-113u`）⇒ 本项修复在三个 head 上稳定。
