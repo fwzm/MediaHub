@@ -221,6 +221,11 @@
 .PARAMETER ReproBuildDocPath
     The reproducibility record whose dated measurements, engine pins and line citations are checked. Default: windows/docs/licensing/REPRODUCIBLE-BUILD.md.
 
+.PARAMETER PointerContractDocPath
+    The record that declares the cross-record line-number citations (the line-pointer-contract block).
+    Default: windows/docs/licensing/W5-LGPL-BUILD.md. The cross-doc-pointer-claims check re-resolves every
+    declared citation against the citing record and the cited range.
+
 .EXAMPLE
     pwsh -NoProfile -File windows/tools/check-licence-surface.ps1
 
@@ -283,6 +288,7 @@ param(
     [string] $SbomFlavourManifestPath,
     [string] $SbomFlavourEvidencePath,
     [string] $ReproBuildDocPath,
+    [string] $PointerContractDocPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -1283,6 +1289,7 @@ $declaredCheckIds = @(
     'lgpl-build-record-claims',
     'sbom-flavour-claims',
     'reproducible-build-claims',
+    'cross-doc-pointer-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -2622,6 +2629,72 @@ if (-not (Test-Path -LiteralPath $reproBuildDocFile)) {
     }
 }
 
+# --- 28. cross-record line-number citations must still land on the text they claim (W58) ---
+$pointerContractFile = Resolve-ClaimPath -Path $PointerContractDocPath -Default "windows/docs/licensing/W5-LGPL-BUILD.md"
+$pointerProblems = [System.Collections.Generic.List[string]]::new()
+if (-not (Test-Path -LiteralPath $pointerContractFile)) {
+    Add-Check "cross-doc-pointer-claims" "SKIP" ("the line-pointer contract document is absent (" + $pointerContractFile + "), so the citations other records make by line number cannot be checked")
+} else {
+    $pointerText = [string](Get-Content -LiteralPath $pointerContractFile -Raw)
+    if ($null -eq $pointerText) { $pointerText = "" }
+    if ($pointerText -notmatch "(?s)<!-- BEGIN line-pointer-contract.*?-->(.*?)<!-- END line-pointer-contract -->") {
+        $pointerProblems.Add('the record no longer carries the line-pointer-contract block')
+    } else {
+        $pointerBlock = $Matches[1]
+        if ($pointerBlock -match "(?m)^contract-owner:\s*(\S.*?)\s*$") { $pointerOwner = $Matches[1] } else { $pointerOwner = ""; $pointerProblems.Add('the block no longer declares contract-owner') }
+        if ($pointerOwner -and $pointerOwner -notmatch 'cross-doc-pointer-claims') { $pointerProblems.Add('the contract-owner line no longer names cross-doc-pointer-claims') }
+        $pointerEntries = @([regex]::Matches($pointerBlock, "(?m)^-\s*citer=([^;]+);\s*target=([^;]+);\s*cite=([^;]+);\s*anchor=(.+?)\s*$") | ForEach-Object { @{ citer = $_.Groups[1].Value.Trim(); target = $_.Groups[2].Value.Trim(); cite = $_.Groups[3].Value.Trim(); anchor = $_.Groups[4].Value.Trim() } })
+        $pointerLineCount = @([regex]::Matches($pointerBlock, "(?m)^-\s*citer=")).Count
+        if ($pointerLineCount -ne $pointerEntries.Count) { $pointerProblems.Add('the block carries ' + $pointerLineCount + ' entry line(s) but only ' + $pointerEntries.Count + ' parse as citer/target/cite/anchor') }
+        if ($pointerEntries.Count -lt 8) { $pointerProblems.Add('the block declares only ' + $pointerEntries.Count + ' pointer(s); the records that cite by line number are many more') }
+        if ($pointerBlock -match "(?m)^entry-count:\s*(\d+)\s*$") { $pointerDeclared = [int]$Matches[1] } else { $pointerDeclared = -1; $pointerProblems.Add("the block no longer declares entry-count") }
+        if ($pointerDeclared -ge 0 -and $pointerDeclared -ne $pointerEntries.Count) { $pointerProblems.Add('entry-count says ' + $pointerDeclared + ' but the block carries ' + $pointerEntries.Count + ' entry lines') }
+        $pointerTargets = @()
+        foreach ($pointerEntry in $pointerEntries) {
+            $pointerCiter = Resolve-RepoPath -Path $pointerEntry['citer'] -Default ''
+            $pointerTarget = Resolve-RepoPath -Path $pointerEntry['target'] -Default ''
+            if (-not (Test-Path -LiteralPath $pointerCiter)) {
+                $pointerProblems.Add('the block names a citing record that is not in the tree: ' + $pointerEntry['citer'])
+            } else {
+                $pointerCiterText = [string](Get-Content -LiteralPath $pointerCiter -Raw)
+                if ($null -eq $pointerCiterText) { $pointerCiterText = "" }
+                if ($pointerCiterText.IndexOf($pointerEntry['cite'], [System.StringComparison]::Ordinal) -lt 0) {
+                    $pointerProblems.Add('the citing record ' + $pointerEntry['citer'] + ' no longer contains the citation ' + $pointerEntry['cite'])
+                }
+            }
+            if (-not (Test-Path -LiteralPath $pointerTarget)) {
+                $pointerProblems.Add('the block names a target record that is not in the tree: ' + $pointerEntry['target'])
+                continue
+            }
+            $pointerTargets += $pointerTarget
+            $pointerLeaf = Split-Path -Leaf $pointerEntry['target']
+            if ($pointerEntry['cite'] -notmatch '^([^:]+):(\d+)(?:-(\d+))?$') {
+                $pointerProblems.Add('the citation ' + $pointerEntry['cite'] + ' is not a file:line or file:from-to form')
+                continue
+            }
+            $pointerCiteLeaf = $Matches[1]
+            $pointerFrom = [int]$Matches[2]
+            if ($Matches[3]) { $pointerTo = [int]$Matches[3] } else { $pointerTo = $pointerFrom }
+            if ($pointerCiteLeaf -ne $pointerLeaf) { $pointerProblems.Add('the citation ' + $pointerEntry['cite'] + ' names ' + $pointerCiteLeaf + ' but the target line says ' + $pointerLeaf) }
+            $pointerTargetLines = @(Get-Content -LiteralPath $pointerTarget)
+            if ($pointerFrom -lt 1 -or $pointerTo -lt $pointerFrom -or $pointerTo -gt $pointerTargetLines.Count) {
+                $pointerProblems.Add('the citation ' + $pointerEntry['cite'] + ' does not fit ' + $pointerLeaf + ', which has ' + $pointerTargetLines.Count + ' line(s)')
+                continue
+            }
+            $pointerSlice = ($pointerTargetLines[($pointerFrom - 1)..($pointerTo - 1)] -join "`n")
+            if ($pointerSlice.IndexOf($pointerEntry['anchor'], [System.StringComparison]::Ordinal) -lt 0) {
+                $pointerProblems.Add("the anchor " + [char]34 + $pointerEntry["anchor"] + [char]34 + " no longer sits inside " + $pointerEntry["cite"])
+            }
+        }
+        $pointerDistinct = @($pointerTargets | Sort-Object -Unique)
+        if ($pointerDistinct.Count -lt 2) { $pointerProblems.Add('the contract now covers ' + $pointerDistinct.Count + ' target record(s); it must cover both the W5 build record and the W13 probe record') }
+    }
+    if ($pointerProblems.Count -eq 0) {
+        Add-Check 'cross-doc-pointer-claims' 'PASS' ('every declared cross-record line pointer still resolves: ' + $pointerEntries.Count + ' citation(s) over ' + $pointerDistinct.Count + ' target record(s), each citing record still carries the citation it declares, and each cited range still contains its anchor phrase')
+    } else {
+        Add-Check 'cross-doc-pointer-claims' 'FAIL' ($pointerProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $pointerProblems) + ' - re-anchor the contract in windows/docs/licensing/W5-LGPL-BUILD.md and in the citing records: a line-number citation breaks silently when the target grows above it')
+    }
+}
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })
 $skipped = @($checks | Where-Object { $_.outcome -eq 'SKIP' })

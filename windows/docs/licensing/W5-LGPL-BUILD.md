@@ -311,3 +311,32 @@ than bytes that are not in the tree.
 Two prose claims are held at the same time: section 6 must still say this build is **not** a legal
 opinion and that **nothing has been switched over**, and this document must not start claiming the
 distribution is clean or release-ready.
+
+## 9. External line-pointer contract (checked by CI)
+
+Other records cite this file by **line number**, and that stays honest only while the cited lines
+stay put. The citations that matter are declared below and re-checked on every CI run by
+`cross-doc-pointer-claims`: each entry names the citing record, the line range it uses, and a
+phrase that must still sit inside that range. One block owns the whole contract and it is appended
+at the **end** of the file, so it cannot shift the very lines it protects. An insertion above any
+cited range now turns the check red instead of quietly pointing every reader at the wrong
+paragraph. Section 8 above pins the machine-readable values; this section pins the line numbers.
+
+<!-- BEGIN line-pointer-contract -->
+contract-owner: check-licence-surface.ps1:cross-doc-pointer-claims
+entry-count: 14
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:16-22; anchor=Is there now a real LGPL-compatible libmpv?
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:20; anchor=28 features
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:26-40; anchor=1.1 Toolchain
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:5-7; anchor=does not authorise a release
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:226-235; anchor=liblcms2-2.dll
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:247-249; anchor=Nothing has been switched over.
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:250-252; anchor=no LICENSE file
+- citer=windows/docs/THIRD-PARTY-NOTICES.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:18-22; anchor=Is there now a real LGPL-compatible libmpv?
+- citer=windows/docs/THIRD-PARTY-NOTICES.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:228-235; anchor=libiconv-2.dll
+- citer=windows/docs/licensing/SBOM.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:222-252; anchor=Residual obligations
+- citer=windows/docs/LGPL-ENGINE-SWITCH.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:222-252; anchor=Residual obligations
+- citer=windows/docs/W12-DOC-AUDIT.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:18; anchor=real LGPL-compatible libmpv
+- citer=windows/docs/licensing/VULKAN-NECESSITY.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:181; anchor=Vulkan context
+- citer=windows/docs/licensing/VULKAN-NECESSITY.md; target=windows/docs/W13-LGPL-ENGINE-PROBE.md; cite=W13-LGPL-ENGINE-PROBE.md:65-73; anchor=lgpl-candidate
+<!-- END line-pointer-contract -->

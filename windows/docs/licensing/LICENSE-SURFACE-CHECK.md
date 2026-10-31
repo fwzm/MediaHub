@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-51 项检查分三十组：
+52 项检查分三十一组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -72,6 +72,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | LGPL 构建记录（W55 起） | `lgpl-build-record-claims` | `windows/docs/licensing/W5-LGPL-BUILD.md` §8 状态块与 `windows/engine/lgpl/` 的实物分叉：候选 dll 摘要/字节与磁盘、`dist-hashes.txt`、`probe-lgpl-info.txt` 对不上；块里的基线摘要不再是 `fetch-libmpv.ps1` 钉的值；MSYS2 包数（块、§1.2、`msys2-package-hashes.txt` 行数）三方不一致；引擎 feature 数不是 28 或列表里出现 `gpl`；FFmpeg 版本/硬件加速列表不符或证据回退到 `--enable-gpl`；运行时闭包不是 33 个 DLL 或 manifest 丢失；被引用的构建脚本/探针文件不存在；探针日志不再出现 d3d11va / WASAPI / `MPV_PROBE PASS`；或文档改口自称已完全合规/可发布 |
 | SBOM 两 flavour 账目（W56 起） | `sbom-flavour-claims` | `windows/docs/licensing/SBOM.md` §9 状态块与 §7.1/§7.2 表格分叉：文件数或字节数不再相加、家族表的行数与字节和与依赖清单不符、引擎钉死值/候选摘要与实物不符、依赖清单缺行，或文档改口说许可义务已了结 |
 | 可复现性记录（W57 起） | `reproducible-build-claims` | `windows/docs/licensing/REPRODUCIBLE-BUILD.md` §0 的十六行状态块与仓库、与它自己引用的步骤分叉：块缺行或值被改、SDK/rollForward 与 `global.json` 不符、引擎摘要/归档名/字节数与 `fetch-libmpv.ps1` 的固定常量或受审实物不符、`windows-ci.yml` 里不再有 restore/build/test/publish/smoke/upload 的步骤 token、文档又写回数字行号（工作流行号会漂）、把无标注的 `expect 522` 写回配方、`licence-files-in-package` 与 `PACKAGING.md` §0 不一致、`current-shape` 的 526 文件/348275148 B 与 `SBOM.md` §9 不符、`publish-shape` 丢掉 2026-10-14/522/347972263 的日期标注、两个 verdict（.NET 半边 clean-checkout 可复现 / 引擎半边此处不可复现）任一个被改口，或 `not yet claimable` / `re-measure` 两条诚实边界被删 |
+| 跨文档行号指针契约（W58 起） | `cross-doc-pointer-claims` | `windows/docs/licensing/W5-LGPL-BUILD.md` §9 的 `line-pointer-contract` 块：14 条引用（谁引、引哪个区间、区间里必须仍有什么短语）逐条重解——引用方仍写着该 `文件:行`、区间落在目标当前行数内、区间文本仍含锚点短语、块自指本项；目标文档在前面插行、引用方改行号、块被删或 `entry-count` 不符即红 |
 | 验收不打扰契约（W48 起） | `quiet-run-claims` | `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` §0 的九行门禁事实（空闲阈值 180 s、QUNS 只允许 5/6、看门狗 700 ms、abort 标记与 `MH_ALLOW_ACTIVE`/`MH_QUIET_ABORT_FILE`、守卫优先级）缺行或改值，或 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询、`MhUia.psm1` 的 `Start-MhApp` abort 守卫与它不再一致 |
 | 续播下限契约（W49 起） | `resume-floor-claims` | `windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §0 的八行阈值与用例数、`MockMediaServer.cs` 里 Emby 2 % / Jellyfin 5 % / 300 s / 90 % / 10 s 的常量、以及契约测试实际展开出的用例数，三者任一分叉——放宽下限、删判定分支、加减用例却没同步文档即红 |
 | 诊断日志落盘（W50 起） | `log-file-claims` | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md` §0 的十五行上限/轮转/失败策略/用例数、`LogFileSink.cs` 的默认常量与轮转触发式、`LogService.cs` 的环形上限与写入顺序、`AppServices.cs` 的组合根目录、sink 测试展开的 9 例，五方任一分叉即红 |
@@ -247,7 +248,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 51） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 52） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -1038,6 +1039,20 @@ RESULT: PASS
 
 > 文档缺失时本项 SKIP、退出码 0；`-ReproBuildDocPath` 可指向仓库外的副本，负向对照因此不会污染仓库。
 
+### 3.26 跨文档行号指针契约（W58，2026-10-31）
+
+多份文档按**行号**引用 `windows/docs/licensing/W5-LGPL-BUILD.md` 与 `windows/docs/W13-LGPL-ENGINE-PROBE.md`（`LGPL-COMPLIANCE.md`、`THIRD-PARTY-NOTICES.md`、`SBOM.md`、`LGPL-ENGINE-SWITCH.md`、`VULKAN-NECESSITY.md`、`W12-DOC-AUDIT.md`）。行号引用只有在被引段落不动时才成立，因此这些引用被声明在 W5 记录末尾的 `line-pointer-contract` 块里，每次 CI 重新解析。**刻意不做全仓引用普查**：实测全仓有 328 条「文件:行」形态，其中大量是 basename 引用与负向对照散文（本文件 §4.x 里就有一条「把证据改成 `component-licences.txt:99` → 1 红」），按格式一律判红会造出 198 条误报。
+
+| 判据 | 内容 | 失败含义 |
+| --- | --- | --- |
+| A 块完整 | W5 记录末尾有 `BEGIN/END line-pointer-contract` 块；`contract-owner` 须点名 `cross-doc-pointer-claims`；`entry-count` 须等于能解析出的条目行数；条目数 ≥ 8 | 块被删、自指行改名、条目被裁 |
+| B 引用方仍引用 | 每条 `citer=` 指向的文档存在，且正文里仍原样含 `cite=` 的 `文件:行` 文本 | 引用方改了行号，契约留在原地 |
+| C 区间与目标名 | `cite=` 的 basename 必须等于 `target=` 的叶子名；区间 from ≥ 1、to ≥ from、to ≤ 目标当前行数 | 目标文件变短或引用越界 |
+| D 锚点仍在区间内 | 被引区间（含首尾行）里必须仍含 `anchor=` 的子串 | **目标文档在前面插行**——这正是本项存在的理由 |
+| E 覆盖面 | 至少覆盖 2 个目标文档（W5 记录与 W13 探针记录） | 契约被裁成只剩不痛的一条 |
+
+> 文档缺失时本项 SKIP、退出码 0；`-PointerContractDocPath` 可指向仓库外的副本，负向对照因此不会污染仓库。
+
 ### 4.25 实测（2026-10-31，W57，本机）
 
 - 正向（`D:/mh-verify/w57-nc/positive.log`）：`checks=51 failed=0 warnings=0 skipped=0` / `RESULT: PASS`。新项 PASS 原文：`the reproducibility record still matches the repository: SDK 10.0.113 with rollForward disable, the pinned engine digest and archive, the clean-checkout verdict for the .NET half, the refused verdict for the engine half, the dated publish shapes (pre-staging-2026-10-14 (522 files / 347972263 bytes) and sbom-flavour-status-2026-10-24 (526 files / 348275148 bytes)), the staged licence files, NotSigned, and no numeric line citations all agree`。
@@ -1060,6 +1075,29 @@ RESULT: PASS
 | NC10 | `-ReproBuildDocPath` 指不存在文件 | `checks=51 failed=0 skipped=1`、退出码 0（SKIP 通道） |
 
 > 守卫自身一处坑，被第 46 项 `doc-residue-claims` 当场抓住：§3.25 首段原本用三反引号包住文档路径、且**顶到行首**，于是被当成一个未闭合的代码围栏（`has 55 fence line(s), so a code fence is left open`）；改成单反引号后围栏数恢复偶数。教训：新写的判据表本身也要经得起残留/围栏扫描。
+### 4.26 实测（2026-10-31，W58，本机）
+
+- 正向（`D:/mh-verify/w58-positive.log`）：`checks=52 failed=0 warnings=0 skipped=0` / `RESULT: PASS`。新项 PASS 原文：`every declared cross-record line pointer still resolves: 14 citation(s) over 2 target record(s), each citing record still carries the citation it declares, and each cited range still contains its anchor phrase`。
+- 首跑（第 52 项先落地、两份文档未同步）如实 1 红：`check-inventory 3 problem(s): LICENSE-SURFACE-CHECK.md claims 51 check(s) but the guard declares 52, README.md claims 51 check(s) but the guard declares 52, LICENSE-SURFACE-CHECK.md never names cross-doc-pointer-claims`（`D:/mh-verify/w58-first.log`）。同轮本项还报过 15 条问题，是**生成契约块时的自身缺陷**：我把 `target=` 写成了 basename（`W5-LGPL-BUILD.md`）而不是仓库相对路径，判据要求叶子名相等、于是每条都说「target line says …」；改成完整路径后消失。
+- 中间态：`checks=52 failed=1`（唯一红仍是 `check-inventory`，新项已 PASS，`D:/mh-verify/w58-second.log`）。
+- 负向对照（副本树 `D:/mh-verify/w58-nc/`，未改仓库文件；副本经 `-PointerContractDocPath ../../mh-verify/w58-nc/NCn/ptr.md` 传入）**每条恰好一个检查变红，且都只打在本项**：
+
+| 用例 | 注入 | 结果 |
+| --- | --- | --- |
+| NC1 | 一条条目的 `anchor=28 features` 改成 `29 features` | 1 红：`the anchor "29 features" no longer sits inside W5-LGPL-BUILD.md:20` |
+| NC2 | 一条 `cite=` 改成越界的 `W5-LGPL-BUILD.md:400-410` | 1 红（本项 2 条问题）：引用方已不含该引用，且区间超出目标 342 行 |
+| NC3 | `entry-count: 14` → 15 | 1 红：`entry-count says 15 but the block carries 14 entry lines` |
+| NC4 | `contract-owner` 改成别的检查名 | 1 红：`the contract-owner line no longer names cross-doc-pointer-claims` |
+| NC5 | 删掉 W13 那条并把 `entry-count` 改 13（只剩 1 个目标） | 1 红：`the contract now covers 1 target record(s); it must cover both the W5 build record and the W13 probe record` |
+| NC6 | 第一条 `citer=` 改成不存在的文档 | 1 红：`the block names a citing record that is not in the tree: windows/docs/NOT-A-DOC.md` |
+| NC7 | `-PointerContractDocPath` 指不存在文件 | SKIP、退出码 0：`checks=52 failed=0 warnings=0 skipped=1` |
+| NC8 | 整块删掉 BEGIN/END 标记 | 1 红：`the record no longer carries the line-pointer-contract block` |
+| NC9 | 一条 `cite=` 的 `:20` 改成 `:21`（引用方仍写着 `:20`） | 1 红（本项 2 条问题）：引用方已不含 `:21`，且锚点短语不在 `:21` 里 |
+| NC10 | `target=` 改指 W13 记录而 `cite=` 仍是 W5 | 1 红（本项 2 条问题）：引用名与目标叶子名不符，锚点也不在区间里 |
+
+逐条实跑日志：`D:/mh-verify/w58-nc/NC1.log` … `NC10.log`（缺的 `NC7` 是 SKIP 用例）、汇总 `D:/mh-verify/w58-nc/summary.txt`；驱动脚本 `D:/mh-verify/w58-nc/run.sh`。
+
+> 契约块追加在 W5 记录**文件末尾**，所以它自己没有移动被保护的行：加上 §9 后该记录从 314 行长到 342 行，而 `:16-22`、`:20`、`:226-235`、`:247-249`、`:250-252`、`:181` 与 W13 的 `:65-73` 全部仍在原位（这也是为什么 §1.2 的「31 packages」修正必须是**同字节长度**的就地替换）。
 ## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。
