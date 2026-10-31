@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T22:55:00+08:00",
+  "updated_at": "2026-10-31T23:05:00+08:00",
   "updated_by": "lead-W6-113-r20",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -578,7 +578,8 @@
         "implementation pitfall worth reusing: block presence must be counted from TestRun.ChildNodes by LocalName, because @($null).Count is 1 in both PowerShell editions - a property-access presence test never notices a dropped section (first smoke run showed S2/S5/S14 falsely green)",
         "second pitfall: t.replace(anchor, anchor+add) where add begins with the anchor inserted a line twice and made the real corpus fail with every testId appearing twice; the fix was to re-apply from the pre-change snapshot with insertion-only anchors and to assert split(...).length-1 === 1 per anchor",
         "exact-head CI (40-char SHA): head e3283e47 windows-ci 41212076261 = completed/failure; the test gate step is fully green and prints the layer-11 ladder lines for both suites; licence checks=47 failed=1 warnings=0 skipped=0 with the single red being upstream log-file-claims (W6-113u)",
-        "Android CI 41212076088 @e3283e47 was still in_progress when sampled; core/feature/app tree hashes identical to 3a09dfbd (ADR-AUTO-001 inheritance)"
+        "Android CI 41212076088 @e3283e47 was still in_progress when sampled; core/feature/app tree hashes identical to 3a09dfbd (ADR-AUTO-001 inheritance)",
+        "docs head f3234066 windows-ci 41212609746 = completed/failure: the eleven ladder lines match the code head byte for byte (structure=7/7 single blocks entries=1952 / 104, identities=1952 named=1952 / 104, combined tests=2056, suites=2); licence checks=47 failed=1, the only red being upstream log-file-claims (W6-113u)"
       ],
       "closed_at": "2026-10-31T22:55:00+08:00",
       "notes": "只改 check 脚本；基线与 update 脚本未动（无迁移）。本层只做单文件内部一致：TRX 与实际程序集的对应由套件表与第九层 storage/codeBase 管，不在此层。",
