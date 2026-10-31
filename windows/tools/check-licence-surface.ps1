@@ -218,6 +218,9 @@
 .PARAMETER SbomFlavourEvidencePath
     The recorded build evidence for both flavours. Default: windows/engine/lgpl/dist/flavour-builds.txt.
 
+.PARAMETER ReproBuildDocPath
+    The reproducibility record whose dated measurements, engine pins and line citations are checked. Default: windows/docs/licensing/REPRODUCIBLE-BUILD.md.
+
 .EXAMPLE
     pwsh -NoProfile -File windows/tools/check-licence-surface.ps1
 
@@ -279,6 +282,7 @@ param(
     [string] $SbomFlavourDocPath,
     [string] $SbomFlavourManifestPath,
     [string] $SbomFlavourEvidencePath,
+    [string] $ReproBuildDocPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -1278,6 +1282,7 @@ $declaredCheckIds = @(
     'engine-probe-claims',
     'lgpl-build-record-claims',
     'sbom-flavour-claims',
+    'reproducible-build-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -2535,6 +2540,85 @@ if (-not (Test-Path -LiteralPath $sbomFlavourDocFile)) {
         Add-Check 'sbom-flavour-claims' 'PASS' ('the SBOM two-flavour accounting still adds up: ' + $sbomValues['gpl-files'] + ' + ' + $sbomValues['sibling-dlls'] + ' files, the ' + $sbomValues['gpl-engine-bytes'] + ' B GPL engine down to ' + $sbomValues['lgpl-engine-bytes'] + ' B plus ' + $sbomValues['sibling-bytes'] + ' B of siblings, the manifest rows, the section 7.2 family rows and both engine pins all agree')
     } else {
         Add-Check 'sbom-flavour-claims' 'FAIL' ($sbomProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $sbomProblems) + ' - update windows/docs/licensing/SBOM.md and the two-flavour evidence together')
+    }
+}
+
+# --- 27. the reproducibility record must still describe the repository and its own measurements (W57) ---
+$reproBuildDocFile = Resolve-ClaimPath -Path $ReproBuildDocPath -Default 'windows/docs/licensing/REPRODUCIBLE-BUILD.md'
+$reproProblems = [System.Collections.Generic.List[string]]::new()
+if (-not (Test-Path -LiteralPath $reproBuildDocFile)) {
+    Add-Check 'reproducible-build-claims' 'SKIP' ('the reproducibility record is absent (' + $reproBuildDocFile + '), so its status block and its measurements cannot be compared with the repository')
+} else {
+    $reproText = [string](Get-Content -LiteralPath $reproBuildDocFile -Raw)
+    if ($null -eq $reproText) { $reproText = '' }
+    $reproKeys = @('dotnet-sdk','roll-forward','runtime-in-package','engine-pin-sha256','engine-pin-bytes','engine-archive','engine-archive-sha256','engine-archive-bytes','dotnet-half','engine-half','publish-shape','current-shape','licence-files-in-package','signing','ci-workflow','status-block-owner')
+    $reproValues = @{}
+    if ($reproText -notmatch '(?s)<!-- BEGIN reproducible-build-status.*?-->(.*?)<!-- END reproducible-build-status -->') {
+        $reproProblems.Add('the record no longer carries the reproducible-build-status block')
+} else {
+        $reproBlock = $Matches[1]
+        foreach ($reproKey in $reproKeys) {
+            if ($reproBlock -match ('(?m)^' + [regex]::Escape($reproKey) + ':\s*(\S.*?)\s*$')) { $reproValues[$reproKey] = $Matches[1] } else { $reproProblems.Add('the status block no longer declares ' + $reproKey) }
+        }
+    }
+    $reproReady = $true
+    foreach ($reproKey in $reproKeys) { if (-not $reproValues.ContainsKey($reproKey)) { $reproReady = $false } }
+    if ($reproReady) {
+        # B) the SDK pin the record quotes must be the pin the repository carries
+        $reproGlobalText = [string](Get-Content -LiteralPath $globalJsonFile -Raw)
+        if ($reproGlobalText -match '"version"\s*:\s*"([^"]+)"') { $reproPinnedSdk = $Matches[1] } else { $reproPinnedSdk = '' }
+        if ($reproGlobalText -match '"rollForward"\s*:\s*"([^"]+)"') { $reproPinnedRoll = $Matches[1] } else { $reproPinnedRoll = '' }
+        if ($reproValues['dotnet-sdk'] -ne $reproPinnedSdk) { $reproProblems.Add('the record quotes SDK ' + $reproValues['dotnet-sdk'] + ' but global.json pins ' + $reproPinnedSdk) }
+        if ($reproValues['roll-forward'] -ne $reproPinnedRoll) { $reproProblems.Add('the record quotes rollForward ' + $reproValues['roll-forward'] + ' but global.json pins ' + $reproPinnedRoll) }
+        # C) the engine pins the record quotes must be the pins the fetch script enforces
+        $reproFetchText = $null
+        if (Test-Path -LiteralPath $fetchPinFile) { $reproFetchText = [string](Get-Content -LiteralPath $fetchPinFile -Raw) }
+        if ($null -eq $reproFetchText) {
+            $reproProblems.Add('the fetch script is absent, so the pins the record quotes cannot be checked')
+} else {
+            if ($reproFetchText -match "DllSha256\s*=\s*'([0-9a-fA-F]{64})'") { $reproFetchDll = $Matches[1] } else { $reproProblems.Add('the fetch script no longer pins DllSha256') }
+            if ($reproFetchText -match "AssetSha256\s*=\s*'([0-9a-fA-F]{64})'") { $reproFetchAsset = $Matches[1] } else { $reproFetchAsset = '' }
+            if ($reproFetchText -match "AssetName\s*=\s*'([^']+)'") { $reproFetchName = $Matches[1] } else { $reproFetchName = '' }
+            if ($reproValues['engine-pin-sha256'] -ne $reproFetchDll) { $reproProblems.Add('the record quotes the engine digest ' + $reproValues['engine-pin-sha256'] + ' but the fetch script pins ' + $reproFetchDll) }
+            if ($reproValues['engine-archive-sha256'] -ne $reproFetchAsset) { $reproProblems.Add('the record quotes the archive digest ' + $reproValues['engine-archive-sha256'] + ' but the fetch script pins ' + $reproFetchAsset) }
+            if ($reproValues['engine-archive'] -ne $reproFetchName) { $reproProblems.Add('the record quotes the archive ' + $reproValues['engine-archive'] + ' but the fetch script pins ' + $reproFetchName) }
+}
+        if ($reproValues['engine-pin-bytes'] -ne '120989696') { $reproProblems.Add('the record quotes engine-pin-bytes ' + $reproValues['engine-pin-bytes'] + ' but the reviewed DLL is 120989696 B') }
+        if ($reproValues['engine-archive-bytes'] -ne '31562418') { $reproProblems.Add('the record quotes engine-archive-bytes ' + $reproValues['engine-archive-bytes'] + ' but the reviewed archive is 31562418 B') }
+        # D) the CI workflow the record points at must still carry those steps, and the record must not cite line numbers that cannot survive an edit
+        $reproWindowsCi = Join-Path $packagingWorkflows 'windows-ci.yml'
+        if (-not (Test-Path -LiteralPath $reproWindowsCi)) { $reproProblems.Add('the record names windows-ci.yml but it is not in ' + $packagingWorkflows) } else {
+            $reproWorkflowText = [string](Get-Content -LiteralPath $reproWindowsCi -Raw)
+            foreach ($reproWorkflowToken in @('dotnet\s+restore\s+MediaHub\.Windows\.sln','dotnet\s+build\s+MediaHub\.Windows\.sln','dotnet\s+test','dotnet\s+publish\s+src/MediaHub\.App/MediaHub\.App\.csproj','-o \./artifacts/portable','Test-Path','actions/upload-artifact@v4','mediahub-windows-')) {
+                if ($reproWorkflowText -notmatch $reproWorkflowToken) { $reproProblems.Add('windows-ci.yml no longer contains the step token ' + $reproWorkflowToken) }
+            }
+}
+        if ($reproText -match '(?i)\blines?\s*\d+') { $reproProblems.Add('the record cites a numeric line range again; cite the step name or the token instead, because workflow lines move') }
+        if ($reproText -match 'expect 522|expect 347972263') { $reproProblems.Add('the record pins a bare package count in its recipe again without a dated shape label') }
+        # E) the licence-file claim must match the packaging record
+        $reproPackagingText = [string](Get-Content -LiteralPath $packagingDocFile -Raw)
+        if ($reproPackagingText -match '(?m)^licence-files-in-package:\s*(\S+)') { $reproPackagingLicences = $Matches[1] } else { $reproPackagingLicences = '' }
+        if ($reproValues['licence-files-in-package'] -ne $reproPackagingLicences) { $reproProblems.Add('the record says licence-files-in-package ' + $reproValues['licence-files-in-package'] + ' but PACKAGING.md says ' + $reproPackagingLicences) }
+        if ($reproText -notmatch 'W40') { $reproProblems.Add('the record no longer says when the licence files started shipping (W40)') }
+        # F) the current shape must be the SBOM accounting, and the older shape must stay dated
+        $reproSbomText = [string](Get-Content -LiteralPath $sbomFlavourDocFile -Raw)
+        if ($reproSbomText -match '(?m)^gpl-files:\s*(\S+)') { $reproSbomFiles = $Matches[1] } else { $reproSbomFiles = '' }
+        if ($reproSbomText -match '(?m)^gpl-bytes:\s*(\S+)') { $reproSbomBytes = $Matches[1] } else { $reproSbomBytes = '' }
+        if ($reproValues['current-shape'] -notmatch [regex]::Escape($reproSbomFiles) -or $reproValues['current-shape'] -notmatch [regex]::Escape($reproSbomBytes)) { $reproProblems.Add('the current-shape line no longer quotes the SBOM accounting (' + $reproSbomFiles + ' files / ' + $reproSbomBytes + ' B)') }
+        if ($reproValues['publish-shape'] -notmatch '2026-10-14' -or $reproValues['publish-shape'] -notmatch '522' -or $reproValues['publish-shape'] -notmatch '347972263') { $reproProblems.Add('the publish-shape line no longer dates the older measurement (2026-10-14, 522 files, 347972263 B)') }
+        if ($reproText -notmatch 're-measure') { $reproProblems.Add('the record no longer tells the reader to re-measure rather than trust a dated number') }
+        # G) the two verdicts must stay the two verdicts
+        if ($reproValues['dotnet-half'] -ne 'reproducible-from-clean-checkout') { $reproProblems.Add('the block no longer records the .NET half as reproducible from a clean checkout') }
+        if ($reproValues['engine-half'] -ne 'not-reproducible-here') { $reproProblems.Add('the block no longer records the engine half as not reproducible here') }
+        if ($reproText -notmatch '(?i)not reproducible') { $reproProblems.Add('the record no longer states that the engine half is not reproducible') }
+        if ($reproText -notmatch '(?i)not yet claimable') { $reproProblems.Add('the record no longer refuses the bit-identical release claim it cannot support') }
+        # H) the block must own itself, so the inventory can point at this check
+        if ($reproValues['status-block-owner'] -notmatch 'reproducible-build-claims') { $reproProblems.Add('the status-block-owner line no longer names reproducible-build-claims') }
+    }
+    if ($reproProblems.Count -eq 0) {
+        Add-Check 'reproducible-build-claims' 'PASS' ('the reproducibility record still matches the repository: SDK ' + $reproValues['dotnet-sdk'] + ' with rollForward ' + $reproValues['roll-forward'] + ', the pinned engine digest and archive, the clean-checkout verdict for the .NET half, the refused verdict for the engine half, the dated publish shapes (' + $reproValues['publish-shape'] + ' and ' + $reproValues['current-shape'] + '), the staged licence files, NotSigned, and no numeric line citations all agree')
+    } else {
+        Add-Check 'reproducible-build-claims' 'FAIL' ($reproProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $reproProblems) + ' - update windows/docs/licensing/REPRODUCIBLE-BUILD.md and keep its dated measurements, its pins and the repository in step')
     }
 }
 

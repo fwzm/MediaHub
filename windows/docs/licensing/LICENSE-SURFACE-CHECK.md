@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-50 项检查分二十九组：
+51 项检查分三十组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -71,6 +71,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 能力对照表指针（W53 起） | `capability-map-pointers` | `windows/docs/CAPABILITY-MAP.md` 的链接目标、仓库路径 token、状态词封闭性与用例计数纪律任一分叉：markdown 链接指向已改名的文件、内联代码写出的仓库路径在六个声明根（仓库根、`windows`、`windows/src`、`windows/docs`、`windows/tools`、`.github`）下都找不到、出现图例之外的状态词（如 `PARTIAL_PASS`）、图例不再定义六态之一、测试行又贴着 `MediaHub.Tests` 写死「N 条」计数，或表丢了 `test-count-authority: ci-print` 行 |
 | LGPL 构建记录（W55 起） | `lgpl-build-record-claims` | `windows/docs/licensing/W5-LGPL-BUILD.md` §8 状态块与 `windows/engine/lgpl/` 的实物分叉：候选 dll 摘要/字节与磁盘、`dist-hashes.txt`、`probe-lgpl-info.txt` 对不上；块里的基线摘要不再是 `fetch-libmpv.ps1` 钉的值；MSYS2 包数（块、§1.2、`msys2-package-hashes.txt` 行数）三方不一致；引擎 feature 数不是 28 或列表里出现 `gpl`；FFmpeg 版本/硬件加速列表不符或证据回退到 `--enable-gpl`；运行时闭包不是 33 个 DLL 或 manifest 丢失；被引用的构建脚本/探针文件不存在；探针日志不再出现 d3d11va / WASAPI / `MPV_PROBE PASS`；或文档改口自称已完全合规/可发布 |
 | SBOM 两 flavour 账目（W56 起） | `sbom-flavour-claims` | `windows/docs/licensing/SBOM.md` §9 状态块与 §7.1/§7.2 表格分叉：文件数或字节数不再相加、家族表的行数与字节和与依赖清单不符、引擎钉死值/候选摘要与实物不符、依赖清单缺行，或文档改口说许可义务已了结 |
+| 可复现性记录（W57 起） | `reproducible-build-claims` | `windows/docs/licensing/REPRODUCIBLE-BUILD.md` §0 的十六行状态块与仓库、与它自己引用的步骤分叉：块缺行或值被改、SDK/rollForward 与 `global.json` 不符、引擎摘要/归档名/字节数与 `fetch-libmpv.ps1` 的固定常量或受审实物不符、`windows-ci.yml` 里不再有 restore/build/test/publish/smoke/upload 的步骤 token、文档又写回数字行号（工作流行号会漂）、把无标注的 `expect 522` 写回配方、`licence-files-in-package` 与 `PACKAGING.md` §0 不一致、`current-shape` 的 526 文件/348275148 B 与 `SBOM.md` §9 不符、`publish-shape` 丢掉 2026-10-14/522/347972263 的日期标注、两个 verdict（.NET 半边 clean-checkout 可复现 / 引擎半边此处不可复现）任一个被改口，或 `not yet claimable` / `re-measure` 两条诚实边界被删 |
 | 验收不打扰契约（W48 起） | `quiet-run-claims` | `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` §0 的九行门禁事实（空闲阈值 180 s、QUNS 只允许 5/6、看门狗 700 ms、abort 标记与 `MH_ALLOW_ACTIVE`/`MH_QUIET_ABORT_FILE`、守卫优先级）缺行或改值，或 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询、`MhUia.psm1` 的 `Start-MhApp` abort 守卫与它不再一致 |
 | 续播下限契约（W49 起） | `resume-floor-claims` | `windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §0 的八行阈值与用例数、`MockMediaServer.cs` 里 Emby 2 % / Jellyfin 5 % / 300 s / 90 % / 10 s 的常量、以及契约测试实际展开出的用例数，三者任一分叉——放宽下限、删判定分支、加减用例却没同步文档即红 |
 | 诊断日志落盘（W50 起） | `log-file-claims` | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md` §0 的十五行上限/轮转/失败策略/用例数、`LogFileSink.cs` 的默认常量与轮转触发式、`LogService.cs` 的环形上限与写入顺序、`AppServices.cs` 的组合根目录、sink 测试展开的 9 例，五方任一分叉即红 |
@@ -246,7 +247,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 50） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 51） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -1020,6 +1021,45 @@ RESULT: PASS
 
 逐条实跑日志：`D:/mh-verify/w56-positive.log`、`D:/mh-verify/w56-first.log` 与 `D:/mh-verify/w56-nc/NC1.log` … `NC10.log`；副本树 `D:/mh-verify/w56-nc/`。
 
+### 3.25 可复现性记录的声明与实物（W57，2026-10-31）
+
+`windows/docs/licensing/REPRODUCIBLE-BUILD.md` 是「怎么重建发布件、哪些部分证明了、哪些没证明」的唯一记录。它 2026-10-14 写下时引用了 `windows-ci.yml` 的三段**数字行号**（55-83 / 114-119 / 121-129），并注明 `ADR-W004` 的行号里仍写着 `PENDING`；到 W57 复查，这三处行号、那条 ADR 注记、以及 §5 里「包内没有任何许可/通知文件」都已经**不再成立**（工作流被 W32–W34 改写、ADR 已钉摘要、W40 起 CI 会把 7 个许可路径暂存进包）。第 51 项把这份记录钉在实物上：
+
+| 判据 | 内容 | 失败含义 |
+| --- | --- | --- |
+| A 状态块 | §0 有 `BEGIN/END reproducible-build-status` 块，十六行逐字（`dotnet-sdk` / `roll-forward` / `runtime-in-package` / `engine-pin-sha256` / `engine-pin-bytes` / `engine-archive` / `engine-archive-sha256` / `engine-archive-bytes` / `dotnet-half` / `engine-half` / `publish-shape` / `current-shape` / `licence-files-in-package` / `signing` / `ci-workflow` / `status-block-owner`） | 块被删、键被改名，或删了自指行（清点会点不到本项） |
+| B SDK 一致 | 块的 `dotnet-sdk`/ `roll-forward` == `global.json` 的 `sdk.version` / `sdk.rollForward` | 换了 SDK pin，记录还写着旧版本 |
+| C 引擎一致 | 块的摘要/归档名 == `fetch-libmpv.ps1` 的 `$DllSha256` / `$AssetName` / `$AssetSha256`，字节数为 120989696 / 31562418 | 引擎换 pin 不同步改记录，prose 继续描述旧字节 |
+| D 工作流 token | `windows-ci.yml` 必须仍含 restore / build / test / publish / `-o ./artifacts/portable` / `Test-Path` / `actions/upload-artifact@v4` / `mediahub-windows-`；且本记录**不得**再出现任何 `lines <数字>` 形式的引用 | 步骤被改名/删除，而记录照旧；或又写回会漂移的数字行号 |
+| E 计数纪律 | 本记录不得写回无日期标注的 `expect 522` / `expect 347972263`,且必须仍在说「重跑时重测」（`re-measure`） | 历史数字被当成今天的期望值 |
+| F 许可随包一致 | 块的 `licence-files-in-package` == `PACKAGING.md` §0 的同名行；记录里仍写着 W40 | 文档一边说随包、一边说包内没有 |
+| G 两份测量 | `current-shape` 行必须含 `SBOM.md` §9 的 `gpl-files`（526）与 `gpl-bytes`（348275148）；`publish-shape` 行必须仍带日期 `2026-10-14` 与 522 / 347972263 | 把两份不同日期的测量混成一个 |
+| H 诚实边界 | 块的 `dotnet-half` / `engine-half` 两个 verdict 不得改口；正文仍须有 `not reproducible` 与 `not yet claimable` | 记录了不能支持的结论（例如宣称发布件可逐字节重现） |
+
+> 文档缺失时本项 SKIP、退出码 0；`-ReproBuildDocPath` 可指向仓库外的副本，负向对照因此不会污染仓库。
+
+### 4.25 实测（2026-10-31，W57，本机）
+
+- 正向（`D:/mh-verify/w57-nc/positive.log`）：`checks=51 failed=0 warnings=0 skipped=0` / `RESULT: PASS`。新项 PASS 原文：`the reproducibility record still matches the repository: SDK 10.0.113 with rollForward disable, the pinned engine digest and archive, the clean-checkout verdict for the .NET half, the refused verdict for the engine half, the dated publish shapes (pre-staging-2026-10-14 (522 files / 347972263 bytes) and sbom-flavour-status-2026-10-24 (526 files / 348275148 bytes)), the staged licence files, NotSigned, and no numeric line citations all agree`。
+- 首跑（第 51 项先落地、两份文档未同步）如实 1 红：`check-inventory 3 problem(s): LICENSE-SURFACE-CHECK.md claims 50 check(s) but the guard declares 51, README.md claims 50 check(s) but the guard declares 51, LICENSE-SURFACE-CHECK.md never names reproducible-build-claims`（`checks=51 failed=1`，日志 `w57-first.log`）——这个「1 红」是清点自证项按设计拦下的，不是本轮产物有问题。
+- 本轮修掉的三处**真实漂移**（都不是为门禁造的）：① 记录里三处 `windows-ci.yml` 的数字行号引用（55-83 / 114-119 / 121-129） 已完全不对（工作流被 W32–W34 改写，55 行现在是空行）；② §5 的「包内没有任何许可/通知文件」与 `PACKAGING.md` §0 的 `licence-files-in-package: staged-by-ci` 直接矛盾（W40 起 CI 会暂存 7 个许可路径）；③ 关于 `ADR-W004`「行号里仍写 PENDING」的注记过时（ADR 第 69–77 行早已钉两个摘要，第 85 行注明 W40 的暂存脚本）。处理方式是「改描述、不改事实」：数字行号换成步骤名，历史测量加日期标注，另在 §0 给出十六行可当场核对的状态块。
+- 两份测量形状的差（522 vs 526 文件、347972263 vs 348275148 B）**不做算术声称**：前者是 2026-10-14 未暂存许可文件的 `dotnet publish` 形状，后者是 2026-10-24 的 flavour 对账形状，差 4 而不是暂存的 7 个路径——文档只标注两份日期并让人重跑重测。
+- 负向对照（副本树 `D:/mh-verify/w57-nc/`，未改仓库文件；副本经 `-ReproBuildDocPath` 传入；文档同步后复跑，**每条恰好 1 红且都只打在本项**）：
+
+| 用例 | 注入 | 结果 |
+| --- | --- | --- |
+| NC1 | 状态块 `dotnet-sdk: 10.0.113` → `10.0.114` | 1 红：`the record quotes SDK 10.0.114 but global.json pins 10.0.113` |
+| NC2 | `engine-pin-sha256` 改一位 | 1 红：摘要与 `fetch-libmpv.ps1` 钉的常量不符 |
+| NC3 | `engine-archive` 归档名改末尾两位 | 1 红：归档名与 pin 不符 |
+| NC4 | `licence-files-in-package: staged-by-ci` → `absent` | 1 红：与 `PACKAGING.md` §0 不符 |
+| NC5 | `current-shape` 的 526 → 525 | 1 红：不再引用 `SBOM.md` §9 的账目（526 文件 / 348275148 B） |
+| NC6 | `publish-shape` 去掉日期 `2026-10-14` | 1 红：`the publish-shape line no longer dates the older measurement` |
+| NC7 | 追加一行 `windows-ci.yml` 的数字行号引用（第 55 行起） | 1 红：`the record cites a numeric line range again`（工作流行号会漂，只能引步骤名或 token） |
+| NC8 | `engine-half` 改成 `reproducible-from-clean-checkout` | 1 红：块不再把引擎半边记为此处不可复现 |
+| NC9 | `status-block-owner` 改名 | 1 红：自指行不再点名本项（清点会点不到） |
+| NC10 | `-ReproBuildDocPath` 指不存在文件 | `checks=51 failed=0 skipped=1`、退出码 0（SKIP 通道） |
+
+> 守卫自身一处坑，被第 46 项 `doc-residue-claims` 当场抓住：§3.25 首段原本用三反引号包住文档路径、且**顶到行首**，于是被当成一个未闭合的代码围栏（`has 55 fence line(s), so a code fence is left open`）；改成单反引号后围栏数恢复偶数。教训：新写的判据表本身也要经得起残留/围栏扫描。
 ## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。

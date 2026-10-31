@@ -12,6 +12,33 @@
 | MediaHub assemblies, runtime, package layout | **REPRODUCIBLE** from a clean checkout with SDK 10.0.113 — byte-identical across two consecutive clean publishes | §3.2 |
 | Engine `libmpv-2.dll` | **NOT REPRODUCIBLE here.** Binary identity is pinned and verified; provenance beyond the asset is partial | §4 |
 
+## 0. Machine-readable status (checked by CI)
+
+这个块由 `windows/tools/check-licence-surface.ps1` 的 `reproducible-build-claims` 检查（W57，第 51 项）逐字核对，并与 `global.json`、`windows/tools/fetch-libmpv.ps1`、`windows-ci.yml`、`PACKAGING.md` 与 `SBOM.md` §9 当场比对。任何一边改动都必须同步：文档不能一边写着旧数字一边指望 CI 继续绿。
+
+```text
+<!-- BEGIN reproducible-build-status (checked by check-licence-surface.ps1) -->
+dotnet-sdk: 10.0.113
+roll-forward: disable
+runtime-in-package: Microsoft.NETCore.App 10.0.13
+engine-pin-sha256: 6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9
+engine-pin-bytes: 120989696
+engine-archive: mpv-dev-x86_64-20261014-git-ec38361c56.7z
+engine-archive-sha256: 325555b4e0b1d87fb7c92c96010776581599c64e4988052cb9d05e130b52f939
+engine-archive-bytes: 31562418
+dotnet-half: reproducible-from-clean-checkout
+engine-half: not-reproducible-here
+publish-shape: pre-staging-2026-10-14 (522 files / 347972263 bytes)
+current-shape: sbom-flavour-status-2026-10-24 (526 files / 348275148 bytes)
+licence-files-in-package: staged-by-ci
+signing: NotSigned
+ci-workflow: windows-ci.yml
+status-block-owner: check-licence-surface.ps1:reproducible-build-claims
+<!-- END reproducible-build-status -->
+```
+
+两个 `*-shape` 行是**两份不同日期、不同形状**的测量，不要互相代入：`publish-shape` 是 §2 配方在 2026-10-14 量到的发布目录；`current-shape` 是 SBOM §9（W56）记录的 2026-10-24 Release publish 账目。自 W40 起 CI 还会在 publish 之后把六份许可/通知文档与 `licences/MANIFEST.txt` 暂存进包（7 个路径），所以 `522 文件`并不是今天 `dotnet publish` 的期望值——重跑时以实测为准，不要套用任一历史数字。
+
 ---
 
 ## 1. Prerequisites (measured on this machine unless noted)
@@ -38,20 +65,20 @@ pwsh -File windows/tools/fetch-libmpv.ps1
 # measured output:
 #   libmpv already present and verified: ...\windows\native\libmpv\libmpv-2.dll (120989696 bytes)
 
-# 2. Restore / build / test -- exactly what CI does (windows-ci.yml lines 55-83)
+# 2. Restore / build / test -- exactly what CI does (windows-ci.yml step: restore, build and test)
 cd windows
 dotnet restore MediaHub.Windows.sln
 dotnet build  MediaHub.Windows.sln -c Debug -p:Platform=x64 --no-restore
 dotnet test   tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug -p:Platform=x64 --no-build
 
-# 3. Publish the portable package (windows-ci.yml lines 114-119)
+# 3. Publish the portable package (windows-ci.yml step: publish the portable package)
 dotnet publish src/MediaHub.App/MediaHub.App.csproj -c Release -p:Platform=x64 -o ./artifacts/portable
 
-# 4. Smoke check (windows-ci.yml lines 121-129)
+# 4. Smoke check (windows-ci.yml step: smoke check the publish)
 Test-Path ./artifacts/portable/MediaHub.exe, ./artifacts/portable/libmpv-2.dll, ./artifacts/portable/MediaHub.dll
 ```
 
-Expected result (measured this session): **522 files, 347,972,263 bytes (331.9 MB)**;
+Expected result (measured 2026-10-14, i.e. the `publish-shape` line of §0, before CI began staging the licence files): **522 files, 347,972,263 bytes (331.9 MB)**;
 `libmpv-2.dll` = 120,989,696 bytes.
 
 ### 2.1 Pinned engine identity
@@ -60,11 +87,9 @@ Expected result (measured this session): **522 files, 347,972,263 bytes (331.9 M
 | --- | --- | --- |
 | Archive `mpv-dev-x86_64-20261014-git-ec38361c56.7z` | SHA-256 `325555b4e0b1d87fb7c92c96010776581599c64e4988052cb9d05e130b52f939` (31,562,418 bytes; 6 files, 2 folders — listed with `7zr l`) | source of the DLL; archive itself not re-hashed this session |
 | Extracted `libmpv-2.dll` | SHA-256 `6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9` | **yes** — `Get-FileHash` equals the pin, and `fetch-libmpv.ps1` re-verifies it and exits 0 |
-| Download URL | `https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261014/mpv-dev-x86_64-20261014-git-ec38361c56.7z` | from `fetch-libmpv.ps1` lines 33–37 |
+| Download URL | `https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261014/mpv-dev-x86_64-20261014-git-ec38361c56.7z` | from the four pinned constants at the top of `fetch-libmpv.ps1` |
 
-Note: `windows/docs/adr/ADR-W004` lines 54–61 still describe these digests as `PENDING`. That is
-stale — the script pins and enforces both (lines 35–36, 69–71, 88–90). Reported to the Lead; not
-edited here (outside this task's write scope).
+Note (updated): the earlier version of this record said `ADR-W004` still described these digests as `PENDING`. That is no longer true — the ADR now pins both digests in its own table and `adr-packaging-claims` (W45) keeps it that way. The fetch script pins and enforces the same two values in its three `throw` statements, which `engine-pins-claims` (W46) checks against this file, `THIRD-PARTY-NOTICES.md` and the ADR.
 
 ## 3. Reproducibility measurements (this session, SDK 10.0.113, same commit)
 
@@ -173,13 +198,13 @@ requirement for the engine would include archiving that configure line next to t
 
 ```powershell
 $out = './windows/artifacts/portable'
-(Get-ChildItem -Recurse -File $out).Count                                   # expect 522
-((Get-ChildItem -Recurse -File $out | Measure-Object Length -Sum).Sum)      # expect 347972263
+(Get-ChildItem -Recurse -File $out).Count                                   # no pinned expectation: re-measure (see §0 publish-shape / current-shape)
+((Get-ChildItem -Recurse -File $out | Measure-Object Length -Sum).Sum)      # no pinned expectation: re-measure (see §0)
 (Get-FileHash -Algorithm SHA256 "$out/libmpv-2.dll").Hash.ToLowerInvariant()
 #   expect 6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9
 (Get-Item "$out/MediaHub.dll").VersionInfo.ProductVersion                   # expect 1.0.0+<40-hex revision>
 Get-AuthenticodeSignature "$out/MediaHub.exe"                               # currently: NotSigned
-Get-ChildItem -Recurse -File $out | Where-Object { $_.Name -match 'LICEN|NOTICE|COPYING' }  # currently: nothing
+Get-ChildItem -Recurse -File $out | Where-Object { $_.Name -match 'LICEN|NOTICE|COPYING' }  # W40 起 CI 会暂存 6 份许可/通知文档 + licences/MANIFEST.txt（7 个路径，见 PACKAGING.md §0 licence-files-in-package）
 ```
 
 The last two lines are the release gaps tracked in [SBOM.md](SBOM.md) §4.1 and
