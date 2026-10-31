@@ -944,7 +944,7 @@ RESULT: PASS
 | C 基线 pin | 块里的 `gpl-baseline-sha256` == `fetch-libmpv.ps1` 的 `$DllSha256` | 换 GPL 基线却不同步这份记录 |
 | D 包数与计数 | 块、§1.2 正文、`msys2-package-hashes.txt` 的 64 位行数三方一致 | 依赖集变了却只在文档改数字（本轮修的就是这处） |
 | E feature 与 FFmpeg | 块里的 28 项 feature 数与实际列表一致且列表不含 `gpl`；版本 8.1.1、`d3d11va`+`d3d12va`、`--disable-gpl/--disable-version3/--disable-nonfree` 一致且不得出现对应的 `--enable-*` | 记录与引擎实际构建参数分叉 |
-| F 运行时闭包 | `windows/engine/lgpl/dist` 里除 `libmpv-2.dll` 外的 DLL 数 == 块里的 33，manifest 必须在 | 闭包缩水/膨胀而记录没动 |
+| F 运行时闭包 | 身份记录 `dist/runtime-dependencies-collected.txt` 的依赖行数 == 块里的 33，manifest 必须在；工作树里若真的存在运行时 DLL，个数也要相符（33 个 DLL 本身按设计不入库） | 闭包缩水/膨胀而记录没动 |
 | G 引用完整性 | 块里列出的 6 个构建脚本与 4 个探针文件都必须存在 | 文档引用的证据被删或改名 |
 | H 探针证据 | `probe-lgpl-hwdec.txt` 仍出现 `Using hardware decoding (d3d11va)`、`probe-lgpl-audio.txt` 仍出现 `Trying audio driver 'wasapi'`、`probe-lgpl-playback.txt` 仍出现 `MPV_PROBE PASS` | 探针证据被替换或退回软解 |
 | I 边界诚实 | 文档仍须写「not a legal opinion」「Nothing has been switched over」「still has no LICENSE file」，且不得出现「is fully compliant」「is release-ready」「is now licensed」「licence decision is closed」「release blocked resolved」（大小写不敏感） | 构建记录被读成合规结论或已切产品 |
@@ -971,6 +971,11 @@ RESULT: PASS
 | NC6 | 证据副本把 `ffmpeg-hwaccels.txt` 的 `d3d12va` 删掉 | 只有本项 1 红 | 1 红 ✓ `ffmpeg-hwaccels.txt no longer records d3d12va` |
 | NC7 | 文档副本追加一句 `The distribution is release-ready.` | 只有本项 1 红 | 1 红 ✓ `the record now claims: is release-ready` |
 | NC8 | `-LgplBuildDocPath` 指不存在文件 | SKIP、退出码 0 | SKIP ✓ `checks=49 failed=0 skipped=1`、exit 0 |
+| NC9 | 证据副本删掉 `dist/runtime-dependencies-collected.txt` 的一行 | 只有本项 1 红 | 1 红 ✓ `the block says 33 runtime DLL(s) around the candidate but the committed dependency record lists 32` |
+
+逐条实跑日志：`D:/mh-verify/w55-nc/positive.log` 与 `NC1.log` … `NC9.log`；副本树 `D:/mh-verify/w55-nc/`。
+
+**CI 首跑在 exact SHA `c80556ce095f59642b34d2d93e0178bd40989bf3` 上如实 1 红——真因是这条检查自己**：`windows-ci` push `41218977356` / pull_request `41218983971` 报 `the block says 33 runtime DLL(s) around the candidate but dist/ holds 0`。33 个运行时 DLL 是构建产物，`windows/engine/lgpl/dist/.gitignore` 本来就只提交候选件（`*.dll` 全忽略、`!libmpv-2.dll`），所以仓库里根本没有它们，`Get-ChildItem dist/*.dll` 在 CI 上是 0。判据已改成读**已入库的身份记录** `dist/runtime-dependencies-collected.txt`（每行一个随包依赖），只有工作树里真的存在这些 DLL 时才追加核对个数；状态块因此多一个 `runtime-collected` 键，NC9 就是这个新判据的对照。
 
 ## 5. 这个工具**不**覆盖什么
 ## 5. 这个工具**不**覆盖什么

@@ -280,6 +280,7 @@ mpv-version-reports: v0.41.0-UNKNOWN
 ffmpeg-version: 8.1.1
 ffmpeg-hwaccels: d3d11va, d3d12va
 runtime-dll-count: 33
+runtime-collected: dist/runtime-dependencies-collected.txt
 runtime-manifest: dist/runtime-bundle-manifest.txt
 build-scripts: install-msys2-deps.sh, build-ffmpeg-lgpl.sh, build-mpv-lgpl.sh, capture-ffmpeg-evidence.sh, verify-mpv-lgpl.sh, run-probe-lgpl.sh
 probe-files: probe-lgpl-hwdec.txt, probe-lgpl-audio.txt, probe-lgpl-playback.txt, probe-lgpl-info.txt
@@ -298,9 +299,14 @@ How each line is checked (all paths relative to `windows/engine/lgpl/`):
 | `feature-count` / `gpl-feature-absent` | first feature line in `mpv-lgpl-features.txt` |
 | `mpv-version-reports` / `ffmpeg-version` | `mpv-lgpl-version.txt` |
 | `ffmpeg-hwaccels` | `ffmpeg-hwaccels.txt`, plus `--disable-gpl / --disable-version3 / --disable-nonfree` in `ffmpeg-version.txt` |
-| `runtime-dll-count` / `runtime-manifest` | every `*.dll` in `dist/` except `libmpv-2.dll` |
+| `runtime-dll-count` / `runtime-collected` / `runtime-manifest` | the dependency rows in `dist/runtime-dependencies-collected.txt`; every `*.dll` actually present in `dist/` next to the candidate must agree too |
 | `build-scripts` / `probe-files` | each named file exists |
 | `probe-result` | `MPV_PROBE PASS` in `probe-lgpl-playback.txt`, plus the hwdec and WASAPI tokens in their own files |
+
+The 33 runtime DLLs are build products and stay out of the repository by design
+(`windows/engine/lgpl/dist/.gitignore` commits only the candidate): CI therefore checks their committed
+identity record - `dist/runtime-dependencies-collected.txt`, one line per shipped dependency - rather
+than bytes that are not in the tree.
 
 Two prose claims are held at the same time: section 6 must still say this build is **not** a legal
 opinion and that **nothing has been switched over**, and this document must not start claiming the

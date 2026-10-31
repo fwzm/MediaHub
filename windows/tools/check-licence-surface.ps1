@@ -2302,7 +2302,7 @@ if (-not (Test-Path -LiteralPath $lgplBuildDocFile)) {
             $lgplKey = [regex]::Match($lgplLine, '^\s*([a-z0-9-]+):\s*(.+?)\s*$')
             if ($lgplKey.Success) { $lgplValues[$lgplKey.Groups[1].Value] = $lgplKey.Groups[2].Value }
         }
-        $lgplRequired = @("candidate-bytes","candidate-sha256","gpl-baseline-sha256","msys2-package-count","msys2-package-bytes","msys2-package-bytes-source","feature-count","gpl-feature-absent","mpv-version-reports","ffmpeg-version","ffmpeg-hwaccels","runtime-dll-count","runtime-manifest","build-scripts","probe-files","probe-result")
+        $lgplRequired = @("candidate-bytes","candidate-sha256","gpl-baseline-sha256","msys2-package-count","msys2-package-bytes","msys2-package-bytes-source","feature-count","gpl-feature-absent","mpv-version-reports","ffmpeg-version","ffmpeg-hwaccels","runtime-dll-count","runtime-collected","runtime-manifest","build-scripts","probe-files","probe-result")
         $lgplMissing = @($lgplRequired | Where-Object { -not $lgplValues.ContainsKey($_) })
         if ($lgplMissing.Count -gt 0) {
             $lgplProblems.Add("the status block no longer declares " + (Format-NameList $lgplMissing))
@@ -2380,8 +2380,18 @@ if (-not (Test-Path -LiteralPath $lgplBuildDocFile)) {
                 }
             }
             $distDir = Join-Path $lgplEvidenceDir "dist"
-            $runtimeDlls = @(Get-ChildItem -LiteralPath $distDir -Filter "*.dll" -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "libmpv-2.dll" })
-            if (([string]$runtimeDlls.Count) -ne $lgplValues["runtime-dll-count"]) { $lgplProblems.Add("the block says " + $lgplValues["runtime-dll-count"] + " runtime DLL(s) around the candidate but dist/ holds " + $runtimeDlls.Count) }
+            # The 33 runtime DLLs are deliberately not committed (dist/.gitignore ships only the candidate),
+            # so the evidence for the closure is its committed identity record - one line per shipped dependency.
+            $collectedText = Get-LgplEvidenceText $lgplValues["runtime-collected"]
+            if (-not $collectedText) {
+                $lgplProblems.Add("dist/runtime-dependencies-collected.txt is absent, so the runtime closure cannot be counted")
+            } else {
+                $collectedRows = @($collectedText -split "?
+" | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith("#") })
+                if (([string]$collectedRows.Count) -ne $lgplValues["runtime-dll-count"]) { $lgplProblems.Add("the block says " + $lgplValues["runtime-dll-count"] + " runtime DLL(s) around the candidate but the committed dependency record lists " + $collectedRows.Count) }
+                $runtimeDlls = @(Get-ChildItem -LiteralPath $distDir -Filter "*.dll" -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "libmpv-2.dll" })
+                if ($runtimeDlls.Count -gt 0 -and ([string]$runtimeDlls.Count) -ne $lgplValues["runtime-dll-count"]) { $lgplProblems.Add("the block says " + $lgplValues["runtime-dll-count"] + " runtime DLL(s) around the candidate but this working tree holds " + $runtimeDlls.Count) }
+            }
             if (-not (Test-Path -LiteralPath $candidatePath)) { $lgplProblems.Add("the runtime manifest " + $lgplValues["runtime-manifest"] + " is absent") }
             foreach ($scriptName in ($lgplValues["build-scripts"] -split ",")) {
                 $scriptFile = $scriptName.Trim()
