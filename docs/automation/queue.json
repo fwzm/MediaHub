@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T23:57:00+08:00",
-  "updated_by": "lead-W6-113-r21",
+  "updated_at": "2026-11-01T00:45:00+08:00",
+  "updated_by": "lead-W6-113-r22",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -164,7 +164,8 @@
         "Android CI 41207751615 @14bfea5b = cancelled (the same head’s windows-ci ran as 41207751934)",
         "Android CI 41208701801 @c373956d was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)",
         "Android CI run 41212076088 @e3283e47 was still in_progress when sampled (core/feature/app tree hashes ff4eed826cbc/e983feb08237/70c541457cae unchanged from 3a09dfbd, ADR-AUTO-001 inheritance)",
-        "android-ci:41215421873 in_progress at sampling (@2b267cec; windows-ci:41215421795 failure on licence log-file-claims only)"
+        "android-ci:41215421873 in_progress at sampling (@2b267cec; windows-ci:41215421795 failure on licence log-file-claims only)",
+        "Android CI 41219751941 @e4750caa sampled in_progress (same core/feature/app tree hashes as round 21) - cancelled/queued by concurrency"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -609,6 +610,43 @@
       "notes": "跨文件判据只读单次运行内的事实，不写进基线（写进去只会重复 expected）=> 基线零变化、无迁移、update 脚本未改。残留限制：同一运行导出两次到同一文件名无法区分（字节相同）；run id 形状只判 GUID、非 GUID 仅 warning；与第十一层一致，该层不钉基线字段。",
       "next_action": "下一层候选：Results 行其它属性（duration/startTime 与 Counters executed 的关系）、TestRun/@name 与 run id 的配对；若再红先按「每个数字读自文件的哪一侧/哪几侧」归因，不要直接改共享守卫。",
       "closed_at": "2026-10-31T23:45:00+08:00"
+    },
+    {
+      "id": "W6-113ac",
+      "title": "套件基线门禁第十三层：每行的执行身份三处一致（定义 Execution id / 结果行 executionId / relativeResultsDirectory）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r22",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "commit e4750caa (1 file changed / 82 insertions; check-test-suite-baseline.ps1 60,725 -> 69,399 B, sha256 16=23fb8aeb1130ec35, pure ASCII, both shells PARSE-OK)",
+        "negative controls 44/44 pass, fail=0 (pwsh 7 + Windows PowerShell 5.1 parity) - D:/mh-verify/r22/run-nc.cjs, log D:/mh-verify/r22/nc-console.log",
+        "G2 definition Execution id swapped between two definitions: new gate RED (\"does not agree with itself\", \"declares execution id\") while round 21 gate stays green (G2x); G3 missing element RED (G3x green); G5 two elements RED (G5x green); G7 blank relativeResultsDirectory RED (G7x green)",
+        "G6 two definitions claim one execution id RED; G8/G9 row directory repointed RED; first run 38/44 with all six reds being harness-only (stale round-20 comparison cases repointed via OLD_CK20)",
+        "no baseline change: test-suite-baseline.json (164,452 B) and update-test-suite-baseline.ps1 (24,836 B) byte-identical to HEAD - this layer is a single-run invariant",
+        "real corpus both shells exit 0 and byte-identical output: executionIds=1952 distinct declared ids=1952 paired rows=1952 paired result directories=1952 / WebDav 104 / combined tests=2056 (D:/mh-verify/r12-art/.../test-results)",
+        "exact-head CI e4750caa: windows-ci 41219751982 completed/failure, test gate step green and printed the executionIds ladder lines; licence checks=49 failed=2 = log-file-claims (W6-113u) + lgpl-build-record-claims (base c80556ce own run 41218983971 failed=1 with the same message)",
+        "Android CI 41219751941 in_progress at sampling; core/feature/app tree hashes unchanged => inherited per ADR-AUTO-001"
+      ],
+      "notes": "该层是单次运行内不变量，不写基线；三处身份指定义 Execution id、结果行 executionId 与 relativeResultsDirectory。残留限制：不校验 id 形状、不比较多余元素的顺序、跨文件身份仍归第十二层。",
+      "next_action": "无；若后续 TRX 形状变化（例如运行器不再把 execution id 写进 relativeResultsDirectory）需同步本层与 TRX 事实测量。",
+      "closed_at": "2026-11-01T00:45:00+08:00"
+    },
+    {
+      "id": "W6-113ad",
+      "title": "上游 licence 守卫新红：lgpl-build-record-claims（W5-LGPL-BUILD.md 声明 33 个 runtime DLL 而 dist/ 为空）",
+      "priority": "P0",
+      "status": "BLOCKED",
+      "owner": "unassigned",
+      "branch": "feature/windows-client",
+      "evidence": [
+        "base feature/windows-client c80556ce095f59642b34d2d93e0178bd40989bf3 own windows-ci 41218983971 (pull_request) and 41218977356 (push) = completed/failure, licence checks=49 failed=1, only red is lgpl-build-record-claims (log D:/mh-verify/r22/ci-base-c80556ce.log, 85,931 B)",
+        "our head e4750caa windows-ci 41219751982: checks=49 failed=2 = the same lgpl-build-record-claims + log-file-claims (W6-113u); the test gate step is green with the layer-13 ladder lines",
+        "guard message: \"1 problem(s): the block says 33 runtime DLL(s) around the candidate but dist/ holds 0 - update windows/docs/licensing/W5-LGPL-BUILD.md and the W5 evidence it cites together\"",
+        "W5-LGPL-BUILD.md differs between branch (blob 7c4a07f2ab8b67c8f82b307a8c679ba75520e9c7) and base (blob 02175a94022962c8098b048dc7b30075c6028722); the PR merge tree takes the base shape for the guard"
+      ],
+      "notes": "上游守卫要求 W5 LGPL build 记录的状态块与构建证据（dist 运行时 DLL 数）一致；CI runner 无 dist 产物 ⇒ 该声明在 CI 里无法成立。与本分支第十三层的改动无因果。",
+      "next_action": "等维护者或 W5 所有者二选一：① 守卫按可证环境取值（CI 无 dist 时不比 DLL 数）；② 把 W5-LGPL-BUILD.md 的状态块改为与 dist 无关的表述。我方不改共享守卫、不改上游文档。"
     }
   ]
 }

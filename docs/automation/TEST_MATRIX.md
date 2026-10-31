@@ -948,3 +948,63 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 
 - docs head `50da735c9d872e69602d04d366e756ecca8d33c7` 的 windows-ci `41215898211` 与代码 head 判定一致（同含 `file identities=2 distinct run ids=2 cross-file duplicate execution ids=0` 与 `combined tests=2056`；licence `checks=48 failed=1` 唯一红 `log-file-claims`＝`W6-113u`）⇒ 该层在两处 head 均被 CI 打印。
 - 最终 head `3f284f10e4c5398fb26e8c675351e960276b85c3` 的 windows-ci `41216133189` 同样打印 `file identities=2 distinct run ids=2 cross-file duplicate execution ids=0` 与 `combined tests=2056`（licence 唯一红仍为 `W6-113u`）⇒ 十二层台阶行在代码 head、docs head 与最终 head 三处一致。
+
+## 6.18 第十三层口径：每行的执行身份三处一致（W6-113ac，2026-11-01）
+
+前十二层的每个数字/集合都读自文件内的某一侧或两侧配对（定义侧、结果侧、Counters、Times、TestEntries/TestLists 节），但每一行自己的**执行身份**从未被核对。一次干净运行会把同一个 id 写进三处：定义里的 `Execution id`、结果行的 `executionId`、结果行的 `relativeResultsDirectory`（运行器把结果写进以该 id 命名的目录）。三处都不参与任何上层计数，因此把某个定义的执行 id 换掉、把元素删掉、把某行目录置空或指向别人，都能让十二层台阶行逐字不变。
+
+### 口径
+
+| 项目 | 取值 |
+| --- | --- |
+| 定义侧 `Execution` 元素 | 必须存在且恰好 1 个（缺失/空白 → RED；多于 1 个 → RED） |
+| 同一 execution id 被多个定义声明 | RED（`Execution id X is declared by N definitions`） |
+| 定义声明 id vs 该行 `executionId` | 必须相同（不等 → RED，点名 `testId X declares execution id Y while its result row reports Z`） |
+| 定义声明 id vs 该行 `relativeResultsDirectory` | 必须相同（目录空白 → RED `N result row(s) record no relativeResultsDirectory`；不等 → RED `testId X writes its result directory D while its definition declares execution id Y`） |
+| 台阶行 | `executionIds=<n> distinct declared ids=<m> paired rows=<k> paired result directories=<j>`（插在 `structure=` 行之后） |
+| 是否写进基线 | 不写。该层是**单次运行内**不变量，写进基线只会重复 expected ⇒ 不涉及基线迁移，`update` 脚本未改 |
+
+### 为什么只有这一层能看见
+
+| 层 | 它读文件里的什么 | 对「定义执行 id 被换」的反应 |
+| --- | --- | --- |
+| 总数/每类/每方法/每方法用例数/参数行/截断/outcome | Counters、定义显示名、结果行文本、outcome | 不变 |
+| `identities=` | 两侧 id 与显示名配对（id 只当坐标） | 不变 |
+| `rowAttributes=` | 每行自身的 executionId/时间/属性分布 | 不变（结果侧 id 仍唯一） |
+| `structure=` | TestEntries/TestLists 与结果行的 executionId/testListId | 不变（TestEntry 未动） |
+| `file identities=` | 各文件的 run id 与跨文件 executionId | 不变 |
+| **本层 `executionIds=`** | 定义 `Execution id`、结果行 `executionId`、结果行 `relativeResultsDirectory` 的**三处互查** | **RED** |
+
+### 负向对照（44 例，全部 EXECUTED）
+
+| 例 | 输入 | 新闸门 | round 21 闸门 |
+| --- | --- | --- | --- |
+| G1 / G1x | 规范夹具（`executionIds=8 … paired result directories=8`、`combined tests=10`） | PASS | PASS 但无 `executionIds=` 行 |
+| G2 / G2x | 两个定义的 `Execution id` 互换（结果侧不动） | **RED**（`does not agree with itself` + `declares execution id`） | PASS |
+| G3 / G3x | 一个定义丢掉 `Execution` 元素 | **RED**（`declare no Execution id`） | PASS |
+| G4 | 一个定义声明空 id | **RED** | 同上一类 |
+| G5 / G5x | 一个定义带两个 `Execution` 元素 | **RED**（`declares 2 Execution elements`） | PASS |
+| G6 | 两个定义声明同一 execution id | **RED**（`is declared by 2 definitions`） | PASS |
+| G7 / G7x | 某行 `relativeResultsDirectory` 置空 | **RED**（`record no relativeResultsDirectory`） | PASS |
+| G8 / G9 | 行目录写成另一行的 id / 无人声明的 id | **RED**（`writes its result directory`） | PASS |
+| R1–R6 | 丢行 / 换参数值 / Passed→Aborted / 丢 TestEntries / 两行共享 executionId / 新参数行 | 各归其位（前层红或增长 warning） | — |
+| RE1–RE3 | 真实语料、round 21 闸门对照、基线与 update 脚本字节不变 | PASS | — |
+
+首轮 38/44：6 红全部是**台账自身** —— 继承自 round 21 的 F1x–F7x 六个「round 20 闸门」对照例在本轮被误指向 `old-check-r21.ps1`（该版已含第十二层），于是预期「旧闸门放行」的输入被判红。修法：新增 `OLD_CK20`（`D:/mh-verify/r22/old-check-r20.ps1`，60,725 B）并把 6 例重新指回，复跑 44/44。教训：换版本对照时陈旧例的对照脚本要显式重指，不能用一个 `OLD_CK` 通吃。
+
+### 数据源与实现
+
+- 语料 `D:/mh-verify/r12-art/mediahub-windows-47fb6f5075d21ee70a568a8cb460256b60d200bf/test-results/`（run `41095080796` @`701bb547`）：`windows-tests.trx` 1952 行 / `webdav-tests.trx` 104 行；每行 `relativeResultsDirectory` == 该行 `executionId`（1952/1952、104/104，空白 0）；每定义一个 `Execution id`，与考点行 id 与目录 100% 相同。
+- 实现：`windows/tools/check-test-suite-baseline.ps1` 60,725 → 69,399 B（sha256 16=`23fb8aeb1130ec35`，纯 ASCII）；两代 shell `PARSE-OK`、真实语料两代 shell 输出逐字相同且 exit 0（`executionIds=1952 distinct declared ids=1952 paired rows=1952 paired result directories=1952`、WebDav `104`、`combined tests=2056`）。基线 164,452 B 与 `update-test-suite-baseline.ps1` 与 HEAD 逐字节相同 ⇒ 无迁移。
+
+### 残留限制
+
+1. 该层不校验 id 的形状（只比三处是否一致），非 GUID 形式的三处一致 id 仍会通过。
+2. 定义多于一个 `Execution` 元素判 RED，但**元素顺序**不比较（真实运行只有 1 个，无基准顺序可依）。
+3. 跨文件层面的执行身份仍由第十二层负责（同一 executionId 不得出现在两个结果文件）；本层只管单文件内部三处一致。
+
+### exact-head CI 验收（2026-11-01）
+
+- head `e4750caa104fdd67ec442248766d6a02a157bdc7` 的 windows-ci `41219751982` = completed/failure，但**测试门禁步骤全绿**：两套件打印的十三层台阶行含 **`executionIds=1952 distinct declared ids=1952 paired rows=1952 paired result directories=1952`** 与 WebDav **`executionIds=104 distinct declared ids=104 …`**，另有 `structure=7/7 single blocks entries=1952 …`、`file identities=2 distinct run ids=2 cross-file duplicate execution ids=0`、`combined tests=2056`。
+- licence `checks=49 failed=2`，两条红均为上游：① `log-file-claims`（`W6-113u`，W50 needle 与 W6 分支形状分歧）；② 新红 `lgpl-build-record-claims`（`the block says 33 runtime DLL(s) around the candidate but dist/ holds 0`）—— base `c80556ce` 自身 windows-ci `41218983971`（pull_request）/`41218977356`（push）同为 failure 且 `checks=49 failed=1`、唯一红即此条 ⇒ 归因上游，入账 `W6-113ad`。
+- 同 head Android CI `41219751941` 取证时 in_progress；core/feature/app 树哈希与 round 21 相同 ⇒ 按 ADR-AUTO-001 继承。
