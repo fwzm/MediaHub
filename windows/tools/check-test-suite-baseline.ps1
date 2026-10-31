@@ -68,6 +68,14 @@
 #   results set whose files share a TestRun id or an execution id, and prints
 #   file identities=/distinct run ids=/cross-file duplicate execution ids=.
 #
+#   One more level, per row rather than per file: a row's execution identity is
+#   written three times inside one TRX - the definition's Execution element, the
+#   result row's executionId and the relativeResultsDirectory the row was written
+#   to. No count reads any of them, and the row-level metadata check only reads
+#   values a row already carries, so the run now also requires the three to agree
+#   row by row and prints
+#   executionIds=/distinct declared ids=/paired rows=/paired result directories=.
+#
 #   Every count above is still read from the run's own ResultSummary/Counters, and
 #   the per-row outcomes are never counted. A results file whose rows disagree with
 #   its own summary - a hand-merged, patched or truncated artifact - therefore
@@ -524,6 +532,11 @@ foreach ($e in $baseline.suites) {
     if ($listNames.ContainsKey($lidEntry)) { $duplicateListIds++ } else { $listNames[$lidEntry] = [string]$tl.name }
   }
 
+  $blankDefExec = 0
+  $defExecCounts = @{}
+  $execByDefId = @{}
+  $exElWarn = @()
+
   # Identity from the artifact: the TestMethod elements record the assembly that
   # produced these results (codeBase; older writers only fill storage). A single
   # recorded assembly that does not match the declared suite name means this
@@ -537,6 +550,25 @@ foreach ($e in $baseline.suites) {
     } elseif (-not $attrValues['storage'].ContainsKey($stv)) {
       $attrValues['storage'][$stv] = $true
     }
+    # The definition also names the execution it belongs to. xUnit writes that same
+    # id into the result row's executionId and into the row's result directory, so a
+    # definition whose declared execution does not match its own row was edited.
+    $exEls = @(@($ut.Execution) | Where-Object { $null -ne $_ })
+    if ($exEls.Count -eq 1) {
+      $dxid = [string]$exEls[0].id
+      if ([string]::IsNullOrWhiteSpace($dxid)) {
+        $blankDefExec++
+      } else {
+        if ($defExecCounts.ContainsKey($dxid)) { $defExecCounts[$dxid] = [int]$defExecCounts[$dxid] + 1 } else { $defExecCounts[$dxid] = 1 }
+        $didKey = [string]$ut.id
+        if (-not [string]::IsNullOrWhiteSpace($didKey) -and -not $execByDefId.ContainsKey($didKey)) { $execByDefId[$didKey] = $dxid }
+      }
+    } elseif ($exEls.Count -eq 0) {
+      $blankDefExec++
+    } else {
+      $exElWarn += "definition $([string]$ut.id) declares $($exEls.Count) Execution elements"
+    }
+
     $cb = $null
     if ($ut.TestMethod) { $cb = [string]$ut.TestMethod.codeBase }
     if ([string]::IsNullOrWhiteSpace($cb)) { $cb = [string]$ut.storage }
@@ -646,6 +678,8 @@ foreach ($e in $baseline.suites) {
   $resIdCounts = @{}
   $resExecById = @{}
   $resListById = @{}
+  $resDirById = @{}
+  $blankRowDirs = 0
   $namedExact = 0
   $namedPrefix = 0
   $nameMismatch = @()
@@ -697,6 +731,9 @@ foreach ($e in $baseline.suites) {
     if (-not [string]::IsNullOrWhiteSpace($rid)) {
       $resExecById[$rid] = [string]$res.executionId
       $resListById[$rid] = [string]$res.testListId
+      $rdir = [string]$res.relativeResultsDirectory
+      $resDirById[$rid] = $rdir
+      if ([string]::IsNullOrWhiteSpace($rdir)) { $blankRowDirs++ }
     }
     $cls = $null
     if ($idToClass.ContainsKey($rid)) { $cls = $idToClass[$rid] }
@@ -853,6 +890,50 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the TRX sections do not agree with each other while the total was $total - the summary, the definitions, the result rows, the entry map and the declared lists all come from this file, so one that drops a section, adds or removes entries, or pairs an entry with the wrong execution id can keep every count above identical. mismatched: $($structureLost -join ', '). A TRX whose sections disagree was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # Each row's execution identity is declared three times inside the file: the
+  # definition element carries the execution it belongs to, the result row carries
+  # the same id as executionId, and it also names the directory its result was
+  # written to (relativeResultsDirectory - the run writes the execution id there).
+  # None of the three feeds a count above, and the row-level metadata check only
+  # looks at values a row already has, so swapping a definition's execution id,
+  # blanking one row's directory or dropping the element entirely keeps every
+  # number identical.
+  $execPairingLost = @()
+  $pairedRowExecs = 0
+  $pairedRowDirs = 0
+  if ($blankDefExec -gt 0) { $execPairingLost += "$blankDefExec test definition(s) declare no Execution id" }
+  if ($exElWarn.Count -gt 0) { $execPairingLost += @($exElWarn) }
+  foreach ($xid in @($defExecCounts.Keys | Sort-Object)) {
+    if ([int]$defExecCounts[$xid] -gt 1) {
+      if ($execPairingLost.Count -lt 12) { $execPairingLost += "Execution id $xid is declared by $($defExecCounts[$xid]) definitions" }
+    }
+  }
+  foreach ($did in @($execByDefId.Keys | Sort-Object)) {
+    $want = [string]$execByDefId[$did]
+    if (-not $resExecById.ContainsKey($did)) {
+      if ($execPairingLost.Count -lt 12) { $execPairingLost += "definition id $did declares execution id $want but has no result row" }
+      continue
+    }
+    $got = [string]$resExecById[$did]
+    if ([string]::Equals($got, $want, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $pairedRowExecs++
+    } elseif ($execPairingLost.Count -lt 12) {
+      $execPairingLost += "testId $did declares execution id $want while its result row reports $got"
+    }
+    $rdir = [string]$resDirById[$did]
+    if (-not [string]::IsNullOrWhiteSpace($rdir)) {
+      if ([string]::Equals($rdir, $want, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $pairedRowDirs++
+      } elseif ($execPairingLost.Count -lt 12) {
+        $execPairingLost += "testId $did writes its result directory $rdir while its definition declares execution id $want"
+      }
+    }
+  }
+  if ($blankRowDirs -gt 0) { $execPairingLost += "$blankRowDirs result row(s) record no relativeResultsDirectory" }
+  if ($execPairingLost.Count -gt 0) {
+    throw "$($e.suite): each row's execution identity does not agree with itself across the file while the total was $total - a clean run writes the same id into the definition's Execution element, the result row's executionId and the directory the row's result was written to, so an edit that swaps a definition's execution id, blanks a row's directory or drops the element keeps every count above identical. mismatched: $($execPairingLost -join ', '). A TRX whose rows disagree with their own declared execution was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # The summary is not trusted on its own: every result row carries exactly one
   # outcome, so the rows must reproduce every Counters bucket. A file whose rows
   # disagree with its own summary (hand-merged, patched, truncated) would
@@ -921,6 +1002,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
   "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields"
   "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount"
+  "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
   if ($skipped -ne 0) { throw "$($e.suite): $skipped test(s) were not executed" }
