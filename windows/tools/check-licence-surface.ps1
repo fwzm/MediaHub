@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Sixteen things rot silently in a licence deliverable:
+    Seventeen things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -38,7 +38,11 @@
           decided on, the record claims zero licence files in the package again, or the native libmpv
           tree stops being ignored and fetched by the tool the ADR names.
 
-    This script checks those sixteen surfaces without touching the network, the build, or the
+      17. the pinned engine digests go stale in prose: the archive digest or the extracted dll digest
+          declared by fetch-libmpv.ps1 moves, and the documents that quote both keep describing the
+          old bytes.
+
+    This script checks those seventeen surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -88,6 +92,22 @@
 .PARAMETER GitIgnorePath
     The repository ignore file that must keep excluding the native libmpv tree. Default: .gitignore.
 
+
+.PARAMETER FetchScriptPath
+    The script that owns the pinned engine digests (archive sha256, extracted libmpv-2.dll sha256).
+    Default: windows/tools/fetch-libmpv.ps1. The engine-pins-claims check reads the pins from it.
+
+.PARAMETER PinsNoticesPath
+    Default: windows/THIRD-PARTY-NOTICES.md - one of the documents that must quote both pins.
+
+.PARAMETER PinsAdrPath
+    Default: windows/docs/adr/ADR-W004-packaging-and-distribution.md - the packaging ADR, which also
+    quotes the pinned digests.
+
+.PARAMETER PinsReproPath
+    Default: windows/docs/licensing/REPRODUCIBLE-BUILD.md - the reproducibility note, which also
+    quotes the pinned digests.
+
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
     errors as well. Off by default, but as of W38 no such row is expected: every shipped DLL has a
@@ -128,6 +148,10 @@ param(
     [string] $HandwrittenNoticesPath,
     [string] $AdrPackagingPath,
     [string] $GitIgnorePath,
+    [string] $FetchScriptPath,
+    [string] $PinsNoticesPath,
+    [string] $PinsAdrPath,
+    [string] $PinsReproPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -1089,6 +1113,7 @@ $declaredCheckIds = @(
     'engine-flavour-default',
     'licence-decision-claims',
     'adr-packaging-claims',
+    'engine-pins-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -1329,6 +1354,65 @@ else {
     }
 }
 
+
+
+# --- 17. the pinned engine digests must still be quoted where the documents cite them ------------
+# windows/tools/fetch-libmpv.ps1 pins the archive digest and the extracted libmpv-2.dll digest and
+# refuses to install anything else. Three documents quote both digests plus the archive name.
+# Bumping a pin without moving the prose left those quotes stale and nothing compared them.
+$fetchPinFile = Resolve-ClaimPath -Path $FetchScriptPath -Default 'windows/tools/fetch-libmpv.ps1'
+$pinSites = @(
+    @{ Name = 'windows/THIRD-PARTY-NOTICES.md'; Path = $PinsNoticesPath; Default = 'windows/THIRD-PARTY-NOTICES.md' },
+    @{ Name = 'windows/docs/adr/ADR-W004-packaging-and-distribution.md'; Path = $PinsAdrPath; Default = 'windows/docs/adr/ADR-W004-packaging-and-distribution.md' },
+    @{ Name = 'windows/docs/licensing/REPRODUCIBLE-BUILD.md'; Path = $PinsReproPath; Default = 'windows/docs/licensing/REPRODUCIBLE-BUILD.md' }
+)
+
+$pinProblems = @()
+if (-not (Test-Path -LiteralPath $fetchPinFile)) {
+    $pinProblems += ('the fetch script that owns the engine digests is absent at ' + $fetchPinFile)
+    Add-Check 'engine-pins-claims' 'FAIL' (($pinProblems -join '; ') + ' - restore windows/tools/fetch-libmpv.ps1 or point -FetchScriptPath at it')
+}
+else {
+    $pinText = Get-Content -LiteralPath $fetchPinFile -Raw
+    $assetNamePattern = '(?m)^\s*' + [regex]::Escape('$AssetName') + "\s*=\s*'([^']+)'"
+    $assetShaPattern = '(?m)^\s*' + [regex]::Escape('$AssetSha256') + "\s*=\s*'([0-9a-fA-F]{64})'"
+    $dllShaPattern = '(?m)^\s*' + [regex]::Escape('$DllSha256') + "\s*=\s*'([0-9a-fA-F]{64})'"
+    $assetNameMatch = [regex]::Match($pinText, $assetNamePattern)
+    $assetShaMatch = [regex]::Match($pinText, $assetShaPattern)
+    $dllShaMatch = [regex]::Match($pinText, $dllShaPattern)
+    if (-not $assetNameMatch.Success -or -not $assetShaMatch.Success -or -not $dllShaMatch.Success) {
+        $pinProblems += 'the fetch script no longer declares $AssetName, $AssetSha256 and $DllSha256 as single-quoted literals'
+    }
+    else {
+        $assetName = $assetNameMatch.Groups[1].Value
+        $assetSha = $assetShaMatch.Groups[1].Value.ToLowerInvariant()
+        $dllSha = $dllShaMatch.Groups[1].Value.ToLowerInvariant()
+        foreach ($site in $pinSites) {
+            $siteFile = Resolve-ClaimPath -Path $site.Path -Default $site.Default
+            if (-not (Test-Path -LiteralPath $siteFile)) {
+                $pinProblems += ('a document that cites the engine digests is absent: ' + $site.Name + ' (' + $siteFile + ')')
+                continue
+            }
+            $siteText = (Get-Content -LiteralPath $siteFile -Raw).ToLowerInvariant()
+            $probes = @(
+                @{ What = ('the archive digest ' + $assetSha.Substring(0, 12) + '...'); Needle = $assetSha },
+                @{ What = ('the extracted dll digest ' + $dllSha.Substring(0, 12) + '...'); Needle = $dllSha },
+                @{ What = ('the archive name ' + $assetName); Needle = $assetName.ToLowerInvariant() }
+            )
+            foreach ($probe in $probes) {
+                if ($siteText.IndexOf($probe.Needle, [System.StringComparison]::Ordinal) -lt 0) {
+                    $pinProblems += ($site.Name + ' no longer quotes ' + $probe.What)
+                }
+            }
+        }
+    }
+    if ($pinProblems.Count -eq 0) {
+        Add-Check 'engine-pins-claims' 'PASS' ('the archive digest, the extracted dll digest and the archive name pinned by fetch-libmpv.ps1 are still quoted by all 3 citing document(s)')
+    }
+    else {
+        Add-Check 'engine-pins-claims' 'FAIL' (($pinProblems -join '; ') + ' - move windows/tools/fetch-libmpv.ps1 and the documents that quote its pins together')
+    }
+}
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })
 $skipped = @($checks | Where-Object { $_.outcome -eq 'SKIP' })

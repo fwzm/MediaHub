@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-39 项检查分十八组：
+40 项检查分十九组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -64,6 +64,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 引擎默认 flavour（W43 起） | `engine-flavour-default` | 默认 flavour 不再是 GPL 基线（csproj 缺省改了、别的工程或工作流开始构建候选），或 `LGPL-ENGINE-SWITCH.md` 的 `engine-flavour-status` 块不再声明 |
 | 许可决策记录（W44 起） | `licence-decision-claims` | 发布阻塞状态或引擎许可标签从 `LICENCE-DECISION.md` 消失、该记录又开始声称 notices 标错，或两份 notices 里 libmpv 一行不再写 GPL-3.0-or-later |
 | 发行决策记录（W45 起） | `adr-packaging-claims` | `windows/docs/adr/ADR-W004-packaging-and-distribution.md` 不再描述仓库：状态块缺行或改值、ADR 又写回「包内零许可文件」、四个包属性与 App csproj 当场取到的值不符，或 `.gitignore` 不再排除 `windows/native/libmpv/`、`fetch-libmpv.ps1` 被删 |
+| 引擎固定摘要（W46 起） | `engine-pins-claims` | `windows/tools/fetch-libmpv.ps1` 钉的归档摘要、解包后 libmpv-2.dll 摘要与归档文件名，在三份引用它们的文档（`windows/THIRD-PARTY-NOTICES.md`、`ADR-W004`、`REPRODUCIBLE-BUILD.md`）里不再逐字出现——换 pin 不同步改文档，prose 就继续描述旧字节 |
 | 包内许可文件（W40 起） | `package-licence-staging` | 发布树不再真的带 `licences/` 的六个文档 + digest manifest：暂存脚本被删、清单缩水、manifest 摘要与字节不符、或 CI 不再调用它（该检查把脚本重跑到临时树，不读文档） |
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
@@ -291,6 +292,18 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 两个参数：`-AdrPackagingPath`（默认 `windows/docs/adr/ADR-W004-packaging-and-distribution.md`）、`-GitIgnorePath`（默认 `.gitignore`），都按仓库根解析（跨出仓库要写 `../../`）。ADR 读不到时该检查 SKIP，退出码仍 0。
 
 > 为什么钉它：ADR-W004 是“为什么选 unpackaged + 自包含”的唯一决策记录，也是 W39 的 `PACKAGING.md` 与实际产物形态之间的链接；它自己在 2026-10-14 写下的“包内零许可文件”已经被 W40 推翻，而两边都没有东西发现这个分叉。
+### 3.14 引擎固定摘要（W46，2026-10-31）
+
+第 40 项 `engine-pins-claims` 钉住 `windows/tools/fetch-libmpv.ps1` 里的两个固定摘要与归档文件名。该脚本是 GPL 基线 libmpv 的唯一获取口（拒绝装入任何摘要不符的归档/解包 DLL），而三份文档逐字引用它的 pin；此前没有任何检查比对这两侧：
+
+| 判据 | 通过条件 | 失败示例 |
+| --- | --- | --- |
+| pin 可解析 | 脚本里仍以单引号字面量声明 `$AssetName`、`$AssetSha256`（64 位 hex）、`$DllSha256`（64 位 hex） | 三个常量被删/改名/改成拼接表达式 |
+| 三份引用文档 | `windows/THIRD-PARTY-NOTICES.md`、`windows/docs/adr/ADR-W004-packaging-and-distribution.md`、`windows/docs/licensing/REPRODUCIBLE-BUILD.md` 都必须仍含**当前**归档摘要、**当前** DLL 摘要与归档文件名（大小写不敏感，按整文件文本比对） | 把 pin 上调到新版本而三份文档还写旧摘要；或把某份文档里的摘要改一位 |
+
+四个参数：`-FetchScriptPath`（默认 `windows/tools/fetch-libmpv.ps1`）、`-PinsNoticesPath`、`-PinsAdrPath`、`-PinsReproPath`（三份引用文档），都按仓库根解析（跨出仓库要写 `../../`）。脚本或任一份引用文档缺失都算 FAIL（脚本是权威、文档是必须存在的证据；没有 SKIP 分支）。
+
+> 为什么钉它：W36 只覆盖了入库的 LGPL 候选件，GPL 基线的两个摘要在 `fetch-libmpv.ps1` 里是常量、在文档里是 prose，pin 一换 prose 就过期；这与 W35/W36/W38/W41/W44/W45 是同一类「声明腐烂」，只是权威方是脚本常量而不是生成件。
 
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
@@ -530,6 +543,30 @@ RESULT: PASS
 | NC7 | `-GitIgnorePath` 指向已把 `windows/native/libmpv/` 规则改名的副本 | 恰好 1 红：`the ignore file no longer excludes windows/native/libmpv/` |
 
 日志 `D:/mh-verify/w45-positive.log`（正向）与 `D:/mh-verify/w45-nc1.log` … `w45-nc7.log`；载荷 `D:/mh-verify/w45-guard-payload.json`（守卫补丁）。
+### 4.14 实测（2026-10-31，W46，本机，HEAD ac96fe45）
+
+本机（报告 `D:/mh-verify/w38-license/license-report.json`）：
+
+```text
+check-licence-surface  PASS  engine-pins-claims  the archive digest, the extracted dll digest and the archive name pinned by fetch-libmpv.ps1 are still quoted by all 3 citing document(s)
+check-licence-surface  PASS  check-inventory  40 declared check(s): this run emitted nothing undeclared, LICENSE-SURFACE-CHECK.md names every id on its own, and both it and README.md claim the same count
+check-licence-surface  checks=40 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+首次实现时的两个真发现（都留在守卫代码注释/口径里）：① 用 PowerShell 双引号里的 ``$` 转义只能阻止变量插值，写进 .NET 正则后 `$` 仍是行尾锚点 ⇒ 三个 pin 正则改为 `[regex]::Escape('$AssetName')` 拼接；② 该检查先于文档同步落地时，`check-inventory` 如实报 3 个问题（文档与 README 还写 39 项、文档未点名 `engine-pins-claims`）。
+
+七条负向对照（临时副本 `D:/mh-verify/w46-neg/`，不改仓库文件）：
+
+| 编号 | 动作 | 结果 |
+| --- | --- | --- |
+| NC1 | 脚本副本把 `$AssetSha256` 换成另一个合法 hex | 恰好 1 红：三份文档都不再含新归档摘要 |
+| NC2 | notices 副本把归档摘要改一位 | 恰好 1 红：该文档不再引用归档摘要 |
+| NC3 | ADR 副本删掉 DLL 摘要 | 恰好 1 红：该文档不再引用解包 DLL 摘要 |
+| NC4 | `REPRODUCIBLE-BUILD.md` 副本把归档文件名改掉 | 恰好 1 红：该文档不再引用归档文件名 |
+| NC5 | `-FetchScriptPath` 指向不存在的文件 | 恰好 1 红：脚本缺失 |
+| NC6 | `-PinsNoticesPath` 指向不存在的文件 | 恰好 1 红：引用文档缺失 |
+| NC7 | 四份临时副本把 pin 与三处引用**同步**改成另一组合法值 | PASS（证明检查跟随脚本，而非写死当前值） |
 
 ## 5. 这个工具**不**覆盖什么
 
