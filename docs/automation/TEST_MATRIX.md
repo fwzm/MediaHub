@@ -763,4 +763,5 @@ MediaHub.WebDav.Tests: identities=104 named=104 unique test ids shared by both h
 
 ### exact-head CI 验收（2026-10-31）
 
+- docs head `c8745bb4` 的 windows-ci **`41204722993` = completed/failure**：台阶行与代码 head 逐字一致（含 `identities=1952 named=1952`、WebDav `identities=104 named=104`、`combined tests=2056`）；licence 仍 `checks=45 failed=1`（`W6-113u`）。
 - 代码 head `21bc3226` 的 windows-ci **`41204520499` = completed/failure**：测试门禁步骤全绿并打印九层台阶行，含两套件的 `identities=1952 named=1952` / `identities=104 named=104` 与 `combined tests=2056`；唯一失败步骤仍是 licence 的 `log-file-claims`（`checks=45 failed=1`，即 `W6-113u` 的 W50 跨分支 needle 分歧），与本层改动无因果。

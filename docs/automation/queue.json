@@ -159,7 +159,8 @@
         "Android CI run 41200282712 @716f481a was still in_progress when sampled (core/feature/app tree hashes unchanged from the previous head, so ADR-AUTO-001 inheritance applies)",
         "Android CI run 41202161881 @9e90f1e1 was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)",
         "Android CI run 41202435297 @33a2d77c = in_progress/",
-        "Android CI run 41204520438 @21bc3226 = in_progress/"
+        "Android CI run 41204520438 @21bc3226 = in_progress/",
+        "Android CI run 41204722970 @c8745bb4 = in_progress/"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -490,7 +491,8 @@
         "core holes closed: duplicating one id onto another definition (with its result) kept every count identical and the round-17 gate green (I2x) while the new gate is red (I2); swapping two definition ids of one class re-points each result row at the other definition (counts identical, round-17 gate green in I3x) and is red under the name cross-check (I3)",
         "first round had 1 red, an implementation boundary: the \"result testId names no definition\" branch was unreachable because a result-side orphan id hits the pre-existing unmapped check first; the unmapped message now names the ids and the orphan-definition case is built with a duplicate result id instead",
         "exact-head CI: head 21bc3226 windows-ci (see the acceptance note) printed \"MediaHub.Tests: identities=1952 named=1952 unique test ids shared by both halves\" and the WebDav twin; the run still fails only on the licence step attributed to W6-113u",
-        "code head 21bc3226 windows-ci 41204520499: the test gate step printed all nine ladder lines including \"identities=1952 named=1952 unique test ids shared by both halves\" and the WebDav twin (\"identities=104 named=104\") plus \"combined tests=2056\"; the run fails only on the licence step (checks=45 failed=1, the W6-113u needle divergence)"
+        "code head 21bc3226 windows-ci 41204520499: the test gate step printed all nine ladder lines including \"identities=1952 named=1952 unique test ids shared by both halves\" and the WebDav twin (\"identities=104 named=104\") plus \"combined tests=2056\"; the run fails only on the licence step (checks=45 failed=1, the W6-113u needle divergence)",
+        "docs head c8745bb4 windows-ci 41204722993: the same nine ladder lines (identities=1952 named=1952, WebDav identities=104 named=104, combined tests=2056); licence still checks=45 failed=1 (W6-113u)"
       ],
       "notes": "本层不加基线字段：单 TRX 内部不变量，钉进基线只会重复 expected。截断容错用 marker 前前缀关系，比逐字相等宽。executionId/duration 等其它属性不参与判定。",
       "next_action": "无需我方动作；若 runner 改变截断策略或引入重试行，本层需重新约定。",
