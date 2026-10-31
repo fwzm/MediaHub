@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T12:45:00+08:00",
+  "updated_at": "2026-10-31T12:52:00+08:00",
   "updated_by": "lead-W6-113-r15",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -403,7 +403,8 @@
         "first NC run red on 11 cases - all harness defects, not gate defects: fixture TRX without a UTF-8 BOM (PS 5.1 decodes it as ANSI, so the marker read as 0), R-cases built the baseline from the already modified run, a 300-char diagnostic slice, and a JS-written baseline carrying raw non-ASCII rows",
         "exact-head windows-ci 41169510082 success: argumentTruncated=6 baseline=argument truncated table 6 rows (WebDav 0 / 0 rows), argumentRows=415 ... 415 rows, methodData=100 ... 100 row sets, methodCases=1952 ... 1952 cases, combined tests=2056; licence checks=42 failed=0 warnings=0 skipped=0; MPV_PROBE/ENGINE_PROBE PASS (GPU/HDR/audio NOT exercised)",
         "residual limit: the text past the marker is unrecoverable from a TRX, so this layer can only expose the cut, never pin it - it is documented in TEST_MATRIX 6.10 instead of being claimed as coverage",
-        "migration: a round-14 format baseline (no truncated table) still exits 0 on the new gate in both shells, printing \"argument truncated table not recorded\" plus the warning, so no branch needs a lock-step baseline rewrite"
+        "migration: a round-14 format baseline (no truncated table) still exits 0 on the new gate in both shells, printing \"argument truncated table not recorded\" plus the warning, so no branch needs a lock-step baseline rewrite",
+        "docs-head windows-ci 41169881421 success (head 86a4c5aa): the same ladder lines as the code head, including argumentTruncated=6 baseline=argument truncated table 6 rows (WebDav 0 / 0 rows), licence checks=42 failed=0 warnings=0 skipped=0"
       ],
       "notes": "TEST_MATRIX 6.10 records the ladder line, the six config self-checks and the residual limits (tail unrecoverable; truncation threshold is the runner's). The layer is deliberately warning-only so CI cannot flap on runner display-name truncation.",
       "next_action": "No action required unless the gate warns; if the runner changes its display-name length policy the truncated table must be refreshed with the same commit.",

@@ -588,3 +588,4 @@ head `1e2cf9ed5de87abe4e3da6691cbacc6a50167cc3` 的 windows-ci **`41124244650` c
 
 ### exact-head CI 验收（EXECUTED）
 - head `c3a49cef`（merge commit `3ed7baaf4abd`）：windows-ci `41169510082` completed/success —— `MediaHub.Tests: argumentTruncated=6 baseline=argument truncated table 6 rows`、`MediaHub.WebDav.Tests: argumentTruncated=0 baseline=argument truncated table 0 rows`，其余台阶行与 §6.9 相同（`argumentRows=415 … 415 rows` / `methodData=100 … 100 row sets` / `methodCases=1952 … 1952 cases` / `combined tests=2056`）；licence `checks=42 failed=0 warnings=0 skipped=0`；两个探针 PASS（GPU/HDR/audio 未行使 ⇒ UNVERIFIED）。
+- docs head `86a4c5aa` 的 windows-ci `41169881421` success：台阶行与代码 head 逐字相同（含 `argumentTruncated=6 … 6 rows`、WebDav `0 … 0 rows`），licence `checks=42 failed=0 warnings=0 skipped=0`。
