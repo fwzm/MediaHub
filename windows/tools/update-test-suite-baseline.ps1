@@ -25,10 +25,15 @@
 #              warning) from "one row was added and another was replaced" (a
 #              loss that would otherwise pass with a warning). Only methods that
 #              actually carry argument text get an entry.
+#   truncated: how many of that method's rows carry the runner's truncation
+#              marker, per method with at least one. Diagnostic only: the tail of
+#              a truncated value cannot be recovered from a TRX, so the gate warns
+#              when this set changes instead of accusing a change it cannot prove.
 # Rows are stored verbatim, sorted ordinally, duplicates kept: a replacement
 # shows up in review as a changed line instead of an opaque hash. They are
 # stable across runs (two CI runs of one tree produced identical rows); a
-# difference the framework already truncated cannot be seen.
+# difference the framework already truncated cannot be seen - which is why the
+# truncated table below records how many rows are exposed that way.
 #
 # Typical local use (after the two dotnet test steps, from the windows directory):
 #   powershell -NoProfile -File tools/update-test-suite-baseline.ps1
@@ -80,6 +85,11 @@ $comment = @(
 # [Theory] row. Sorting with the ordinal comparer makes the list independent of
 # row order and of the culture of the machine that computes it. This function
 # must stay identical to the one in check-test-suite-baseline.ps1.
+# The runner marks a shortened argument value with three middle dots (U+00B7),
+# written through [char] so this file stays pure ASCII. Kept identical to the
+# constant in check-test-suite-baseline.ps1.
+$TruncationMarker = [string][char]0x00B7 + [string][char]0x00B7 + [string][char]0x00B7
+
 function Sort-Rows {
   param([string[]]$Rows)
   $sorted = New-Object System.Collections.Generic.List[string]
@@ -118,6 +128,7 @@ function Read-Suite([string]$Path) {
   $idToClass = @{}
   $methods = @{}
   $rowArgs = @{}
+  $truncated = @{}
   foreach ($ut in @($xml.TestRun.TestDefinitions.UnitTest)) {
     if ($null -eq $ut) { continue }
     $cls = $null
@@ -148,6 +159,10 @@ function Read-Suite([string]$Path) {
       } else {
         $rowArgs[$cls][$base] = @($suffix)
       }
+      if ($suffix.Contains($TruncationMarker)) {
+        $tkey = "$cls.$base"
+        if ($truncated.ContainsKey($tkey)) { $truncated[$tkey] = $truncated[$tkey] + 1 } else { $truncated[$tkey] = 1 }
+      }
     }
     if (-not $methods.ContainsKey($cls)) { $methods[$cls] = @{} }
     if ($methods[$cls].ContainsKey($base)) {
@@ -172,7 +187,7 @@ function Read-Suite([string]$Path) {
     if ($null -eq $cls) { throw "$Path : a result has no TestMethod.className" }
     if ($classes.ContainsKey($cls)) { $classes[$cls] = $classes[$cls] + 1 } else { $classes[$cls] = 1 }
   }
-  return @{ total = $total; classes = $classes; methods = $methods; data = $data }
+  return @{ total = $total; classes = $classes; methods = $methods; data = $data; truncated = $truncated }
 }
 
 # Only used to read the file being refreshed. Older entries stored method names as
@@ -286,7 +301,7 @@ foreach ($e in $baseline.suites) {
     foreach ($m in $read.methods[$name].Keys) { $inner[$m] = [int]$read.methods[$name][$m] }
     $entryMethods[$name] = $inner
   }
-  $entries += @{ file = [string]$e.file; suite = [string]$e.suite; expected = $read.total; classes = $read.classes; methods = $entryMethods; data = $read.data }
+  $entries += @{ file = [string]$e.file; suite = [string]$e.suite; expected = $read.total; classes = $read.classes; methods = $entryMethods; data = $read.data; truncated = $read.truncated }
 }
 if ($shrunk.Count -gt 0) {
   throw ("refusing to lower the baseline without -AcceptRemoval - a smaller suite must be an explicit, reviewed change: " + ($shrunk -join " | "))
@@ -346,6 +361,14 @@ for ($i = 0; $i -lt $entries.Count; $i++) {
     }
     [void]$text.Append("        ]" + $comma + $nl)
   }
+  [void]$text.Append("      }," + $nl)
+  [void]$text.Append("      " + $q + "truncated" + $q + ": {" + $nl)
+  $tkeys = @($entry.truncated.Keys | Sort-Object)
+  for ($j = 0; $j -lt $tkeys.Count; $j++) {
+    $comma = [string][char]44
+    if ($j -eq $tkeys.Count - 1) { $comma = "" }
+    [void]$text.Append("        " + (Json-String $tkeys[$j]) + ": " + [int]$entry.truncated[$tkeys[$j]] + $comma + $nl)
+  }
   [void]$text.Append("      }" + $nl)
   [void]$text.Append("    }")
   if ($i -lt $entries.Count - 1) { [void]$text.Append(",") }
@@ -369,5 +392,7 @@ foreach ($entry in $entries) {
   }
   $rowCount = 0
   foreach ($dk in $entry.data.Keys) { $rowCount += @($entry.data[$dk]).Count }
-  "$($entry.suite): total=$($entry.expected) classes=$(@($entry.classes.Keys).Count) methods=$methodCount cases=$caseCount data=$(@($entry.data.Keys).Count) argumentRows=$rowCount"
+  $truncCount = 0
+  foreach ($tk in $entry.truncated.Keys) { $truncCount += [int]$entry.truncated[$tk] }
+  "$($entry.suite): total=$($entry.expected) classes=$(@($entry.classes.Keys).Count) methods=$methodCount cases=$caseCount data=$(@($entry.data.Keys).Count) argumentRows=$rowCount truncated=$truncCount"
 }

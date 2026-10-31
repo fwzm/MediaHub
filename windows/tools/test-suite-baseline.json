@@ -2622,6 +2622,13 @@
           "(code: \"receipt-not-enabled\")",
           "(code: \"receipt-timeout\")"
         ]
+      },
+      "truncated": {
+        "MediaHub.Tests.FavoriteMappingTests.IsFavorite_maps_onto_the_domain_flag": 2,
+        "MediaHub.Tests.RedactionTests.Credential_query_values_are_masked": 1,
+        "MediaHub.Tests.ServerUrlNormalizerSecurityTests.Query_and_fragment_are_refused_without_echoing_them": 1,
+        "MediaHub.Tests.SourceSyncBaselineCodecTests.Deserialize_RejectsUnusableDocuments": 1,
+        "MediaHub.Tests.SyncCliTests.Parse_RejectsMalformedCommandLinesWithStableCodes": 1
       }
     },
     {
@@ -2758,6 +2765,8 @@
           "(href: \"ftp://127.0.0.1/dav/x.mkv\")",
           "(href: \"javascript:alert(1)\")"
         ]
+      },
+      "truncated": {
       }
     }
   ]

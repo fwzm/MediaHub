@@ -42,8 +42,13 @@
 #   warning, anything else including a simultaneous add and replace -> red.
 #
 #   What that still cannot see: argument text the test framework already
-#   truncated (xUnit shortens long arguments), where a difference past the
-#   truncation point yields the same display text.
+#   truncated (the runner shortens long argument values and marks the cut), where
+#   a difference past the truncation point yields the same display text. A TRX
+#   alone cannot close that hole, so the gate makes the exposure visible instead:
+#   each entry also records, per method, how many of its argument rows are
+#   truncated ("truncated"), the run prints argumentTruncated=, and any change in
+#   that set warns and names the methods. It is deliberately never red - the tail
+#   is invisible to the TRX, so red would accuse a change that cannot be proven.
 #
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
@@ -58,6 +63,8 @@
 #     -> red (the rows that ran are not the rows the baseline was reviewed with),
 #        even when the row count grew in the same edit
 #   a method reporting only argument rows the baseline did not have -> warning
+#   the set of argument rows carrying the truncation marker changed -> warning
+#     (the text past the marker is not pinned; the warning names the methods)
 #   failed != 0 or notExecuted != 0 -> red
 #
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
@@ -67,9 +74,10 @@
 #   not add up to the class count, a baseline still in the 2026-10-30
 #   method-name list format, a baseline with no data table, an empty data table,
 #   a data key that names no method in the methods table, a blank row, a row
-#   list that disagrees with the method's case count, and a baseline still in
-#   the 2026-10-31 digest format all throw. Otherwise the gate would be vacuous
-#   and un-failable.
+#   list that disagrees with the method's case count, a baseline still in the
+#   2026-10-31 digest format, a truncated table that is not an object, a
+#   truncated key that names no method of the data table, and a truncated count
+#   below 1 all throw. Otherwise the gate would be vacuous and un-failable.
 #
 # ASCII ONLY on purpose: Windows PowerShell 5.1 decodes BOM-less UTF-8 as ANSI
 # and corrupts non-ASCII text, which then breaks ConvertFrom-Json parsing.
@@ -89,6 +97,11 @@ function Test-MethodCaseMap($node) {
   if ($node -is [System.Collections.IList]) { return $false }
   return $true
 }
+
+# The runner marks a shortened argument value with three middle dots (U+00B7),
+# written through [char] so this file stays pure ASCII. Kept identical to the
+# constant in update-test-suite-baseline.ps1.
+$TruncationMarker = [string][char]0x00B7 + [string][char]0x00B7 + [string][char]0x00B7
 
 # Sorted copy of one method's argument rows, duplicates kept. A row is the
 # display-name suffix from the first "(", i.e. the argument text of one
@@ -196,7 +209,9 @@ foreach ($e in $baseline.suites) {
   foreach ($name in $methodClasses) {
     foreach ($m in @($e.methods.$name.PSObject.Properties.Name)) { $knownMethods["$name.$m"] = $true }
   }
+  $knownDataKeys = @{}
   foreach ($k in $dataKeys) {
+    $knownDataKeys[$k] = $true
     if ([string]::IsNullOrWhiteSpace($k)) { throw "$BaselinePath : entry for $($e.suite) has a blank data key" }
     if (-not $knownMethods.ContainsKey($k)) {
       throw "$BaselinePath : entry for $($e.suite) pins argument rows for $k, which is not a method of the methods table"
@@ -224,6 +239,28 @@ foreach ($e in $baseline.suites) {
       throw "$BaselinePath : entry for $($e.suite) pins $(@($rows).Count) argument row(s) for $k but the methods table gives it $cases case(s) - the two layers must agree"
     }
   }
+  if ($null -ne $e.truncated) {
+    if ($e.truncated -is [string] -or $e.truncated -is [System.Array]) {
+      throw "$BaselinePath : entry for $($e.suite) has a truncated table that is not an object"
+    }
+    foreach ($tp in @($e.truncated.PSObject.Properties)) {
+      $tk = [string]$tp.Name
+      if ([string]::IsNullOrWhiteSpace($tk)) { throw "$BaselinePath : entry for $($e.suite) has a blank truncated key" }
+      if (-not $knownMethods.ContainsKey($tk)) {
+        throw "$BaselinePath : entry for $($e.suite) records truncated argument rows for $tk, which is not a method of the methods table"
+      }
+      if (-not $knownDataKeys.ContainsKey($tk)) {
+        throw "$BaselinePath : entry for $($e.suite) records truncated argument rows for $tk, which the data table does not pin"
+      }
+      $tn = 0
+      if (-not [int]::TryParse([string]$tp.Value, [ref]$tn)) {
+        throw "$BaselinePath : entry for $($e.suite) records a non-integer truncated count for $tk"
+      }
+      if ($tn -lt 1) {
+        throw "$BaselinePath : entry for $($e.suite) records $tn truncated argument row(s) for $tk - record only methods with at least one"
+      }
+    }
+  }
 }
 
 $all = 0
@@ -231,6 +268,7 @@ $stale = @()
 $grown = @()
 $newMethods = @()
 $newData = @()
+$truncWarn = @()
 foreach ($e in $baseline.suites) {
   $path = Join-Path -Path $ResultsDir -ChildPath $e.file
   if (-not (Test-Path -LiteralPath $path)) {
@@ -253,6 +291,7 @@ foreach ($e in $baseline.suites) {
   $idToClass = @{}
   $actualMethods = @{}
   $actualData = @{}
+  $actualTruncated = @{}
   $actualMethodCases = 0
   $defsWithoutClass = 0
   foreach ($ut in @($xml.TestRun.TestDefinitions.UnitTest)) {
@@ -286,6 +325,10 @@ foreach ($e in $baseline.suites) {
         $actualData[$cls][$base] += ,$suffix
       } else {
         $actualData[$cls][$base] = @($suffix)
+      }
+      if ($suffix.Contains($TruncationMarker)) {
+        $tkey = "$cls.$base"
+        if ($actualTruncated.ContainsKey($tkey)) { $actualTruncated[$tkey] = $actualTruncated[$tkey] + 1 } else { $actualTruncated[$tkey] = 1 }
       }
     }
     if (-not $actualMethods.ContainsKey($cls)) { $actualMethods[$cls] = @{} }
@@ -343,6 +386,15 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): methodCases=$actualMethodCases baseline=method case table $baselineCaseCount cases"
   "$($e.suite): methodData=$($actualDataRows.Count) baseline=method data table $baselineDataCount row sets"
   "$($e.suite): argumentRows=$actualRowTotal baseline=argument row table $baselineRowTotal rows"
+  $actualTruncTotal = 0
+  foreach ($tkey in @($actualTruncated.Keys)) { $actualTruncTotal += [int]$actualTruncated[$tkey] }
+  if ($null -eq $e.truncated) {
+    "$($e.suite): argumentTruncated=$actualTruncTotal baseline=argument truncated table not recorded"
+  } else {
+    $baselineTruncTotal = 0
+    foreach ($tkey in @($e.truncated.PSObject.Properties.Name)) { $baselineTruncTotal += [int]$e.truncated.$tkey }
+    "$($e.suite): argumentTruncated=$actualTruncTotal baseline=argument truncated table $baselineTruncTotal rows"
+  }
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
   if ($skipped -ne 0) { throw "$($e.suite): $skipped test(s) were not executed" }
@@ -431,6 +483,26 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): test method argument rows changed while the total was $total (baseline $($e.expected)) - equal totals, equal per-class counts, an unchanged method list and unchanged per-method case counts do not prove the same argument values ran, and a row added in the same edit as a replaced row does not excuse it. changed: $($shown -join ', '). If the change was intentional, refresh the baseline in windows/tools/test-suite-baseline.json in the same commit."
   }
 
+  # Truncation accounting. The runner shortens a long argument value and marks
+  # the cut, so a difference past the marker leaves the visible text - and
+  # therefore the row layer above - untouched. A TRX cannot recover the tail, so
+  # this layer only makes the exposure visible: it warns, it never goes red.
+  if ($null -eq $e.truncated) {
+    $truncWarn += "$($e.suite): the argument truncated table is not recorded (this run has $actualTruncTotal truncated row(s)) - refresh windows/tools/test-suite-baseline.json to make the exposure visible"
+  } else {
+    foreach ($tk in @($e.truncated.PSObject.Properties.Name | Sort-Object)) {
+      $before = [int]$e.truncated.$tk
+      $now = 0
+      if ($actualTruncated.ContainsKey($tk)) { $now = [int]$actualTruncated[$tk] }
+      if ($now -ne $before) { $truncWarn += "$($e.suite):$tk (baseline $before, now $now)" }
+    }
+    foreach ($tk in @($actualTruncated.Keys | Sort-Object)) {
+      if (-not (@($e.truncated.PSObject.Properties.Name) -contains $tk)) {
+        $truncWarn += "$($e.suite):$tk (new, $($actualTruncated[$tk]) truncated row(s))"
+      }
+    }
+  }
+
   foreach ($name in @($actual.Keys | Sort-Object)) {
     if (-not (@($e.classes.PSObject.Properties.Name) -contains $name)) {
       $grown += "$($e.suite):$name (+$($actual[$name]), new class)"
@@ -486,5 +558,12 @@ if ($newData.Count -gt 0) {
     $shown = $shown[0..11] + "... ($($newData.Count - 12) more)"
   }
   Write-Host "::warning::new test method argument rows - refresh windows/tools/test-suite-baseline.json (see windows/tools/update-test-suite-baseline.ps1): $($shown -join '; ')"
+}
+if ($truncWarn.Count -gt 0) {
+  $shown = $truncWarn
+  if ($shown.Count -gt 12) {
+    $shown = $shown[0..11] + "... ($($truncWarn.Count - 12) more)"
+  }
+  Write-Host "::warning::argument rows the runner truncated changed - the text past the marker is not pinned, so a difference there cannot be seen (refresh the truncated table with windows/tools/update-test-suite-baseline.ps1): $($shown -join '; ')"
 }
 "combined tests=$all"
