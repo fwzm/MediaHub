@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T23:50:00+08:00",
+  "updated_at": "2026-10-31T23:57:00+08:00",
   "updated_by": "lead-W6-113-r21",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -603,7 +603,8 @@
         "licence checks=48 failed=1 (W6-113u log-file-claims needle only); base f2f83bba runs 41214953902/41214949030 success with checks=48 failed=0",
         "android-ci:41215421873 in_progress at sampling; core/feature/app tree hashes unchanged from round 20 -> ADR-AUTO-001 inheritance",
         "docs: RUNLOG round 21 + TEST_MATRIX 6.17 appended (this commit)",
-        "docs head 50da735c: windows-ci 41215898211 failure on licence only - same twelve ladder lines incl. file identities=2 distinct run ids=2 cross-file duplicate execution ids=0 and combined tests=2056"
+        "docs head 50da735c: windows-ci 41215898211 failure on licence only - same twelve ladder lines incl. file identities=2 distinct run ids=2 cross-file duplicate execution ids=0 and combined tests=2056",
+        "final head 3f284f10: windows-ci 41216133189 failure on licence only - same twelve ladder lines (file identities=2 distinct run ids=2 cross-file duplicate execution ids=0, combined tests=2056)"
       ],
       "notes": "跨文件判据只读单次运行内的事实，不写进基线（写进去只会重复 expected）=> 基线零变化、无迁移、update 脚本未改。残留限制：同一运行导出两次到同一文件名无法区分（字节相同）；run id 形状只判 GUID、非 GUID 仅 warning；与第十一层一致，该层不钉基线字段。",
       "next_action": "下一层候选：Results 行其它属性（duration/startTime 与 Counters executed 的关系）、TestRun/@name 与 run id 的配对；若再红先按「每个数字读自文件的哪一侧/哪几侧」归因，不要直接改共享守卫。",

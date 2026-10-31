@@ -947,3 +947,4 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 - 同 head Android CI `41215421873` 取证时 in_progress；三个 head 与 round 20 的 core/feature/app 树哈希相同 ⇒ 按 ADR-AUTO-001 继承。
 
 - docs head `50da735c9d872e69602d04d366e756ecca8d33c7` 的 windows-ci `41215898211` 与代码 head 判定一致（同含 `file identities=2 distinct run ids=2 cross-file duplicate execution ids=0` 与 `combined tests=2056`；licence `checks=48 failed=1` 唯一红 `log-file-claims`＝`W6-113u`）⇒ 该层在两处 head 均被 CI 打印。
+- 最终 head `3f284f10e4c5398fb26e8c675351e960276b85c3` 的 windows-ci `41216133189` 同样打印 `file identities=2 distinct run ids=2 cross-file duplicate execution ids=0` 与 `combined tests=2056`（licence 唯一红仍为 `W6-113u`）⇒ 十二层台阶行在代码 head、docs head 与最终 head 三处一致。
