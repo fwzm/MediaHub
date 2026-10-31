@@ -446,6 +446,54 @@ foreach ($e in $baseline.suites) {
   $attrBlank = @{ testType = 0; testListId = 0; computerName = 0; storage = 0 }
   $attrValues = @{ testType = @{}; testListId = @{}; computerName = @{}; storage = @{} }
 
+  # Two whole sections carry pairing that no count above reads: TestEntries ties
+  # each testId to the executionId and the list the row ran in, and TestLists
+  # declares those lists. A hand-edited file can drop either section, add or
+  # remove entries, or reshuffle the executionId of two entries while every
+  # number read so far stays identical.
+  # Count the blocks from the document itself: property access on a missing
+  # child hands back $null, and @($null).Count is 1 in both PowerShell editions,
+  # so a presence test written that way can never notice a dropped section.
+  $sectionBlocks = @{}
+  foreach ($sbn in @('ResultSummary', 'Times', 'TestDefinitions', 'TestEntries', 'TestLists', 'Results')) { $sectionBlocks[$sbn] = 0 }
+  $counterBlocks = 0
+  foreach ($child in @($xml.TestRun.ChildNodes)) {
+    $childName = [string]$child.LocalName
+    if ($sectionBlocks.ContainsKey($childName)) { $sectionBlocks[$childName] = [int]$sectionBlocks[$childName] + 1 }
+    if ($childName -eq 'ResultSummary') {
+      foreach ($sub in @($child.ChildNodes)) { if ([string]$sub.LocalName -eq 'Counters') { $counterBlocks++ } }
+    }
+  }
+  $sectionBlocks['Counters'] = $counterBlocks
+  $entryCount = 0
+  $blankEntryIds = 0
+  $duplicateEntryIds = @()
+  $entryExecById = @{}
+  $entryListById = @{}
+  $listCount = 0
+  $blankListIds = 0
+  $duplicateListIds = 0
+  $listNames = @{}
+  foreach ($te in @($xml.TestRun.TestEntries.TestEntry)) {
+    if ($null -eq $te) { continue }
+    $entryCount++
+    $tidEntry = [string]$te.testId
+    if ([string]::IsNullOrWhiteSpace($tidEntry)) { $blankEntryIds++; continue }
+    if ($entryExecById.ContainsKey($tidEntry)) {
+      $duplicateEntryIds += $tidEntry
+    } else {
+      $entryExecById[$tidEntry] = [string]$te.executionId
+      $entryListById[$tidEntry] = [string]$te.testListId
+    }
+  }
+  foreach ($tl in @($xml.TestRun.TestLists.TestList)) {
+    if ($null -eq $tl) { continue }
+    $listCount++
+    $lidEntry = [string]$tl.id
+    if ([string]::IsNullOrWhiteSpace($lidEntry)) { $blankListIds++; continue }
+    if ($listNames.ContainsKey($lidEntry)) { $duplicateListIds++ } else { $listNames[$lidEntry] = [string]$tl.name }
+  }
+
   # Identity from the artifact: the TestMethod elements record the assembly that
   # produced these results (codeBase; older writers only fill storage). A single
   # recorded assembly that does not match the declared suite name means this
@@ -566,6 +614,8 @@ foreach ($e in $baseline.suites) {
   $actual = @{}
   $actualOutcomes = @{}
   $resIdCounts = @{}
+  $resExecById = @{}
+  $resListById = @{}
   $namedExact = 0
   $namedPrefix = 0
   $nameMismatch = @()
@@ -609,6 +659,10 @@ foreach ($e in $baseline.suites) {
     if ($null -eq $rms -or $rms -lt 0) { $badDuration++ }
     $rid = [string]$res.testId
     if ($resIdCounts.ContainsKey($rid)) { $resIdCounts[$rid] = $resIdCounts[$rid] + 1 } else { $resIdCounts[$rid] = 1 }
+    if (-not [string]::IsNullOrWhiteSpace($rid)) {
+      $resExecById[$rid] = [string]$res.executionId
+      $resListById[$rid] = [string]$res.testListId
+    }
     $cls = $null
     if ($idToClass.ContainsKey($rid)) { $cls = $idToClass[$rid] }
     if ([string]::IsNullOrWhiteSpace($cls)) { $unmapped++; continue }
@@ -710,6 +764,60 @@ foreach ($e in $baseline.suites) {
     $durWarn += "$($e.suite) ($($e.file) records no usable Times window - row times cannot be checked against the run)"
   }
 
+  # The sections above are read one at a time; the file also has to be whole.
+  # TestEntries pairs each testId with the executionId and the list the row ran
+  # in, and TestLists declares those lists. Neither section feeds any count
+  # above, so dropping a section, adding or removing entries, or swapping the
+  # executionId of two entries leaves every one of those numbers identical.
+  $structureLost = @()
+  $sectionCount = 0
+  foreach ($sn in @('ResultSummary', 'Times', 'Counters', 'TestDefinitions', 'TestEntries', 'TestLists', 'Results')) {
+    if ([int]$sectionBlocks[$sn] -eq 1) { $sectionCount++ } else { $structureLost += "$sn appears $($sectionBlocks[$sn]) time(s)" }
+  }
+  if ($blankEntryIds -gt 0) { $structureLost += "$blankEntryIds TestEntry item(s) have no testId" }
+  foreach ($id in @($duplicateEntryIds | Sort-Object)) {
+    if ($structureLost.Count -lt 12) { $structureLost += "TestEntry testId $id appears more than once" }
+  }
+  foreach ($id in @($defIdCounts.Keys | Where-Object { -not $entryExecById.ContainsKey($_) } | Sort-Object)) {
+    if ($structureLost.Count -lt 12) { $structureLost += "definition id $id has no TestEntry" }
+  }
+  $matchedEntries = 0
+  foreach ($id in @($entryExecById.Keys | Sort-Object)) {
+    if ($defIdCounts.ContainsKey($id) -and [int]$defIdCounts[$id] -eq 1 -and $resIdCounts.ContainsKey($id)) {
+      $matchedEntries++
+    } else {
+      if ($structureLost.Count -lt 12) { $structureLost += "TestEntry testId $id is not a unique test definition with a result row" }
+    }
+  }
+  $pairedExecIds = 0
+  $pairedListIds = 0
+  $ghostLists = @()
+  foreach ($id in @($entryExecById.Keys | Sort-Object)) {
+    $ee = [string]$entryExecById[$id]
+    $el = [string]$entryListById[$id]
+    if (-not $resExecById.ContainsKey($id)) { continue }
+    if (-not [string]::IsNullOrWhiteSpace($ee) -and [string]::Equals([string]$resExecById[$id], $ee, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $pairedExecIds++
+    } elseif ($structureLost.Count -lt 12) {
+      $structureLost += "testId $id pairs TestEntry executionId $ee with result executionId $($resExecById[$id])"
+    }
+    if ($listNames.ContainsKey($el)) {
+      $pairedListIds++
+    } elseif (-not [string]::IsNullOrWhiteSpace($el)) {
+      $ghostLists += $id
+    }
+  }
+  if ($blankListIds -gt 0) { $structureLost += "$blankListIds TestList item(s) have no id" }
+  if ($duplicateListIds -gt 0) { $structureLost += "$duplicateListIds TestList id(s) appear more than once" }
+  if ($ghostLists.Count -gt 0) {
+    $shownGhost = @($ghostLists | Sort-Object)
+    if ($shownGhost.Count -gt 12) { $shownGhost = $shownGhost[0..11] + "... ($($ghostLists.Count) total)" }
+    $structureLost += "result row(s) ran in a list that TestLists does not declare (testId $($shownGhost -join ', '))"
+  }
+  if ($structureLost.Count -gt 0) {
+    throw "$($e.suite): the TRX sections do not agree with each other while the total was $total - the summary, the definitions, the result rows, the entry map and the declared lists all come from this file, so one that drops a section, adds or removes entries, or pairs an entry with the wrong execution id can keep every count above identical. mismatched: $($structureLost -join ', '). A TRX whose sections disagree was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # The summary is not trusted on its own: every result row carries exactly one
   # outcome, so the rows must reproduce every Counters bucket. A file whose rows
   # disagree with its own summary (hand-merged, patched, truncated) would
@@ -777,6 +885,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
   "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
   "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields"
+  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
   if ($skipped -ne 0) { throw "$($e.suite): $skipped test(s) were not executed" }
