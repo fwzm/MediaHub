@@ -765,3 +765,63 @@ MediaHub.WebDav.Tests: identities=104 named=104 unique test ids shared by both h
 
 - docs head `c8745bb4` 的 windows-ci **`41204722993` = completed/failure**：台阶行与代码 head 逐字一致（含 `identities=1952 named=1952`、WebDav `identities=104 named=104`、`combined tests=2056`）；licence 仍 `checks=45 failed=1`（`W6-113u`）。
 - 代码 head `21bc3226` 的 windows-ci **`41204520499` = completed/failure**：测试门禁步骤全绿并打印九层台阶行，含两套件的 `identities=1952 named=1952` / `identities=104 named=104` 与 `combined tests=2056`；唯一失败步骤仍是 licence 的 `log-file-claims`（`checks=45 failed=1`，即 `W6-113u` 的 W50 跨分支 needle 分歧），与本层改动无因果。
+
+## 6.14 第十层口径：结果行自身元数据（W6-113x，2026-10-31）
+
+前九层读的都是「文件内某一侧的数字，或两侧配对」；第十层读的是**一行自己的元数据**。这一层不需要基线字段，因为它是单个 TRX 内部的不变量：钉进基线只会重复 `expected`。
+
+| 项 | 内容 |
+| --- | --- |
+| 台阶行 | `rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4` |
+| 字段归属 | `<UnitTestResult>` 的 `executionId` / `testType` / `testListId` / `computerName`，`<UnitTest>` 的 `storage`，以及 `startTime` / `endTime` / `duration` 与 `<TestRun><Times>` 的 `start` / `finish` |
+| RED | `executionId` 为空或重复；4 个「每行应一致」的字段出现两个以上取值或整列空白；`startTime` / `endTime` / `duration` 无法解析；`end` 早于 `start`；`duration` 为负；行落在 `<Times>` 窗口之外 |
+| WARNING | `duration` 与 (`end` − `start`) 漂移超过 1 秒；文件缺 `<Times>` 窗口（两项在真实语料上均为 0 例，刻意不升级为硬红，避免跨 runner 版本的假红） |
+| 基线字段 | 无（单文件内部不变量） |
+| 迁移 | 无（`test-suite-baseline.json` 与 `update-test-suite-baseline.ps1` 未改动） |
+
+真实语料（`D:/mh-verify/r12-art/.../test-results` 与 `D:/mh-verify/r9-art/test-results` 四份 TRX）：`executionId` 无空、无重复；`computerName` / `storage` / `testType` / `testListId` 每个文件各只有一个取值；时间全部可解析、`end ≥ start`、无负 `duration`、漂移超过 1 秒 0 例、全部落在 `<Times>` 窗口内。
+
+### 负向对照（30 例，pwsh 7 与 Windows PowerShell 5.1 判定一致）
+
+| 例 | 输入 | 判定 |
+| --- | --- | --- |
+| N0 / N0x | 规范夹具 | 新闸门 PASS（含 `rowAttributes=`）；round 18 闸门 PASS 且无 `rowAttributes=` 行 |
+| N1 / N1x | 两行共用 `executionId` | **RED**（`executionId dup-exec appears 2 times`）；round 18 闸门 GREEN |
+| N2 / N2x | `end` 早于 `start` | **RED**；round 18 闸门 GREEN |
+| N3 / N4 / N5 / N6 | `computerName` 混用 / 时间不可解析 / 行在 `<Times>` 窗口外 / 空 `executionId` | 各 RED（旧闸门各 GREEN） |
+| N7 / N8 / N9 | `storage` 混用 / 负 `duration` / 整列无 `testType` | 各 RED |
+| N10 / N11 | `duration` 漂移超过 1 秒 / 缺 `<Times>` 窗口 | PASS + `::warning::`（只暴露，不阻断） |
+| R1–R7 | 行被删 / outcome 变化 / 参数换值 / 定义 id 互换 / 类丢行 / 行失败 / 新方法 | 前六层各归其位（不因新层改变语义） |
+| RE1 / RE2 / RE3 | 真实语料 / 真实语料给 round 18 闸门 / `git status` | PASS（`rowAttributes=1952 unique execution ids=1952`、`rowAttributes=104`、`combined tests=2056`）/ 旧闸门无该台阶行 / 仅一个文件改动 |
+
+首轮 28/30 的两处红都是**台账自身**：R5 的夹具实际命中的是「方法消失」层（改为第二个类整类消失且总数不变，才真正行使类层），R6 的匹配串 `\(s\)` 被正则当成分组（改为 `MediaHub.Tests: 1 test`）。
+
+### 残留限制
+
+- 只钉「每行应一致」的 4 个字段与 3 个时间字段；`relativeResultsDirectory` 等其它属性未参与判定。
+- `duration` 与 (`end` − `start`) 的漂移、以及缺 `<Times>` 窗口只报 WARNING：cross-runner 的时钟精度差异不应把合法产物判红。
+- 这一层只证明「文件内部自洽」，不证明「这批用例就是该 commit 的用例」——后者仍由 `expected` 与身份层承担。
+- runner 将来若合法地产生「重试行」，同一 `executionId` 出现多次，本层需要重新约定。
+
+### exact-head CI 验收（2026-10-31）
+
+- 代码 head `14bfea5b` 的 windows-ci **`41207751934` = completed/failure**：测试门禁步骤全绿并打印十层台阶行（含 `rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4`、WebDav `rowAttributes=104 … uniform row fields=4`、`combined tests=2056`）；licence `checks=46 failed=2`（`log-file-claims` = `W6-113u`，以及本轮新暴露的 `doc-residue-claims`）。
+
+## 6.15 上游 doc-residue 守卫下的分支自建文档修复（W6-113y，2026-10-31）
+
+base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD 的 `windows/tools/check-licence-surface.ps1` 不含它；PR 的虚拟合并树取 base 版，所以 CI 会跑到它）。它的判定：
+
+- 扫描仓库根下 `.md` / `.ps1` / `.kt` / `.kts` / `.cs` / `.xaml` / `.yml` / `.yaml` / `.json` / `.txt` / `.sh` / `.gradle` / `.toml` / `.props` / `.csproj`，跳过 `node_modules|build|obj|bin|artifacts|.git|.gradle|.tools|.idea|.local`；
+- 残留 token `{BT}` / `~BT~` / `⟪BT⟫` / ~`~` 出现且该行不含 `residue-allow` ⇒ 报问题；
+- 对 `.md`：以 ``` 或 ~~~ 开头的行翻转「篱笆内」状态并跳过；**篱笆之外**、trim 后以 `|` 开头、去掉行内反引号片段后仍含 `||` 的行 ⇒ 报「两行表格粘连」；围栏行数为奇数 ⇒ 报「围栏未闭合」；
+- 扫到的文本文件少于 20 个也报问题。
+
+本轮触发 5 处：`docs/cross-device/W6-70-PAIRED-DEVICES.md` 第 24 / 25 / 40 / 41 / 42 行。该文档在 base 上不存在（是本分支自己的 W6-70 文档），根因是它的四个代码块开闭围栏被压坏（开围栏 `\`csharp\``、闭围栏 `\`\``），以 `||` 开头的 C# 续行因此落在篱笆之外。修复 = 恢复四个围栏（正文一字未改）：文档 10,305 → 10,309 B，提交 `c373956d`（1 file / 4 insertions / 4 deletions）。
+
+### 复现方法（可复用）
+
+守卫看的是 **PR 合并树**，不是分支 worktree。本机复跑必须按合并树内容判定：`git fetch origin refs/pull/39/merge` → `git ls-tree -r <merge sha>` 取全部 `.md` 的 blob → `git cat-file --batch` 批量取字节 → 按上面的规则扫描。反例：worktree 里的 `docs/android-source-sync-transfer.md` 没有合并树那条 `<!-- residue-allow -->` 标记，按 worktree 扫描会多报 1 个假问题（CI 报 5 处、worktree 扫描报 6 处）。
+
+### exact-head CI 验收（2026-10-31）
+
+- head `c373956d` 的 windows-ci **`41208701809` = completed/failure**：`check-licence-surface  PASS  doc-residue-claims  1317 text file(s) scanned: no unmarked placeholder residue, all 123 markdown file(s) have balanced fences, and the capability map status block sits inside a real fence`；licence 由 `failed=2` 降为 `checks=46 failed=1`，唯一红仍是 `log-file-claims`（`W6-113u`）。

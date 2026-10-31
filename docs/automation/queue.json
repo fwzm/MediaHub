@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T21:15:00+08:00",
-  "updated_by": "lead-W6-113-r18",
+  "updated_at": "2026-10-31T22:12:00+08:00",
+  "updated_by": "lead-W6-113-r19",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -160,7 +160,9 @@
         "Android CI run 41202161881 @9e90f1e1 was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)",
         "Android CI run 41202435297 @33a2d77c = in_progress/",
         "Android CI run 41204520438 @21bc3226 = in_progress/",
-        "Android CI run 41204722970 @c8745bb4 = in_progress/"
+        "Android CI run 41204722970 @c8745bb4 = in_progress/",
+        "Android CI 41207751615 @14bfea5b = cancelled (the same head’s windows-ci ran as 41207751934)",
+        "Android CI 41208701801 @c373956d was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -497,6 +499,46 @@
       "notes": "本层不加基线字段：单 TRX 内部不变量，钉进基线只会重复 expected。截断容错用 marker 前前缀关系，比逐字相等宽。executionId/duration 等其它属性不参与判定。",
       "next_action": "无需我方动作；若 runner 改变截断策略或引入重试行，本层需重新约定。",
       "closed_at": "2026-10-31T21:15:00+08:00"
+    },
+    {
+      "id": "W6-113x",
+      "title": "套件基线第十层口径：结果行自身元数据（W6-113x）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r19",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (42,459 -> 54,842 B, sha256 64ff29d447182752) audits each result row’s own metadata: executionId non-blank and unique, testType/testListId/computerName/storage uniform and non-blank, startTime/endTime/duration parseable, end not before start, duration not negative, rows inside the run’s <Times> window; duration drift over one second and a missing <Times> window stay warnings",
+        "no baseline change: these are invariants inside one TRX, not run-to-run values; test-suite-baseline.json and update-test-suite-baseline.ps1 are untouched, so there is no migration",
+        "new ladder line: rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4 (WebDav: rowAttributes=104 ... uniform row fields=4)",
+        "real corpus: four CI TRX files (r12-art and r9-art, windows + webdav) have no blank or duplicate executionId, one value per uniform field, all times parseable with end >= start, no negative duration, zero drift cases, and every row inside the <Times> window",
+        "negative controls 30/30 pass in pwsh 7 and Windows PowerShell 5.1 (D:/mh-verify/r19/nc-console.log, last line \"--- total 30 cases, pass=30, fail=0\"): N1 duplicate executionId and N2 end before start are RED on the new gate and GREEN on the round 18 gate",
+        "two first-round reds were harness bugs (R5 fixture actually exercised the method layer; R6 regex \\(s\\) grouped instead of matching literal brackets)",
+        "commit 14bfea5bbd64acff14c371c87f95027ac91dceba (1 file, +146); blob sha256-equal to the working-tree bytes the negative controls exercised; non-force push 97da40af..14bfea5b",
+        "exact-head windows-ci 41207751934 @14bfea5b = completed/failure: the test-gate step is green and prints all ten ladder lines including rowAttributes=1952 unique execution ids=1952, WebDav rowAttributes=104, combined tests=2056; licence checks=46 failed=2 (log-file-claims = W6-113u, plus the new doc-residue-claims handled by W6-113y)",
+        "Android CI 41207751615 @14bfea5b = cancelled (same head); no Android change in this layer"
+      ],
+      "notes": "Ten levels now pin: totals, per-class case counts, method names, per-method case counts, per-method argument row lists, runner truncation exposure, the outcome split plus results-summary self-consistency, test-id identity across both TRX halves, and per-row metadata. Remaining limits: other row attributes (relativeResultsDirectory and friends) are not pinned, duration drift and a missing Times window stay warnings, and the layer proves internal consistency only, not that these were the commit’s cases.",
+      "next_action": "If any row attribute the runner makes uniform starts legitimately varying (for example a retry row reusing an execution id), relax that specific uniformity rule rather than the whole layer.",
+      "closed_at": "2026-10-31T22:12:00+08:00"
+    },
+    {
+      "id": "W6-113y",
+      "title": "上游 doc-residue 守卫下的分支自建文档围栏修复（W6-113y）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r19",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "new base-side guard doc-residue-claims flagged five lines of docs/cross-device/W6-70-PAIRED-DEVICES.md (lines 24/25/40/41/42) as two markdown table rows glued onto one line; the document exists only on this branch (git show a75371f6:docs/cross-device/W6-70-PAIRED-DEVICES.md reports the path does not exist), so the repair belongs to our branch and not to the shared guard",
+        "root cause: the four code blocks of that document had their fences mangled (opening fence a single backtick plus the language, closing fence two backticks), so the C# continuation lines that begin with || sat outside any fence",
+        "fix: the four fences are restored, no prose changed; 10,305 -> 10,309 B, blob b9e524f2, sha256 78d391720f9fe909c1f3e10d8b386a6a65723ec86bb836255fdd64cfdc6f652b; commit c373956dc72933216eb473dd11ca82d2848a0c50 (1 file, 4 insertions/4 deletions)",
+        "local reproduction: the guard section 23 rule replayed over the PR merge tree (git ls-tree -r refs/pull/39/merge -> git cat-file --batch) reports 0 problems over its 123 markdown files; scanning the worktree copy instead reports one extra false positive because the merge tree carries the <!-- residue-allow --> marker on docs/android-source-sync-transfer.md while our branch copy does not",
+        "exact-head windows-ci 41208701809 @c373956d = completed/failure with PASS doc-residue-claims \"1317 text file(s) scanned: no unmarked placeholder residue, all 123 markdown file(s) have balanced fences\"; licence drops from failed=2 to checks=46 failed=1, the only remaining red being log-file-claims (W6-113u)"
+      ],
+      "notes": "Verification must run against the PR merge tree, not the branch worktree: the merged guard is the base-side one and merged documents can carry markers the branch copy lacks. The remaining licence red is W6-113u (W50 needle), untouched here.",
+      "next_action": "None for this task; if the upstream guard gets stricter, re-run the merge-tree replay before pushing.",
+      "closed_at": "2026-10-31T22:12:00+08:00"
     }
   ]
 }
