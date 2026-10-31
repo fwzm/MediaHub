@@ -529,3 +529,62 @@ head `1e2cf9ed5de87abe4e3da6691cbacc6a50167cc3` 的 windows-ci **`41124244650` c
 | windows-ci `41125371678` | `49911e49`（docs） | success：所有台阶行与代码 head 逐字一致（含 `argumentRows=415 ... 415 rows`），licence `checks=31 failed=0 warnings=0 skipped=0`，两个探针 PASS |
 
 - 两个 head 的 Android CI（`41124244565` / `41125371452`）在本轮取证时均未结束（concurrency 取消或 in_progress）；两个 head 与 `825f46f4` 的 `core` / `feature` / `app` 树哈希完全相同 ⇒ 按 ADR-AUTO-001 继承，不作为独立结论。
+
+## 6.10 截断暴露面口径：runner 截断的参数行（W6-113s，2026-10-31）
+
+### 为什么单开一层
+§6.9 的行清单把「每个方法的参数行」钉住，但 runner 会把超长参数值截断并以 `···`（U+00B7 × 3）标注；**截断点之后的文本在 TRX 里不可恢复**，那段差异不可钉。本层只做两件事：把「哪些方法被截、各截几行」变成基线里的可见数字；它变化时给出 `::warning::`，**永不判红**（若判红，CI 会因 runner 的截断行为随时变红）。
+
+### 基线字段与台阶行（2026-10-31 起）
+| 项 | 值 | 说明 |
+| --- | --- | --- |
+| `truncated` | 对象：`"类.方法" -> 截断行数` | 仅记有截断的方法；round 14 格式（无此表）在新闸门下打印 `table not recorded` + warning ⇒ 迁移非破坏 |
+| check 台阶行 | `argumentTruncated=N baseline=argument truncated table M rows` | 实测截断行数 / 基线记录数 |
+| update summary | 行尾 `truncated=N` | 刷新时可见 |
+| 判定 | 计数变化 / 新方法被截 → `::warning::argument rows the runner truncated changed` | 上升、下降、新增都只是 warning |
+| 配置自检 | 非对象 / 空 key / key 不在 `methods` 表 / key 不在 `data` 表 / 非整数 / 计数 < 1 → throw | 防止本层空转 |
+
+### 实测暴露面（r12 真实 TRX）
+- `MediaHub.Tests`：415 行参数行中 **6 行 / 5 个方法**被截（可见长度 143–201），定义侧与结果侧共 12 处标记；`truncated=6`（`FavoriteMappingTests.IsFavorite_maps_onto_the_domain_flag` 2 行，`RedactionTests.Credential_query_values_are_masked` / `ServerUrlNormalizerSecurityTests.Query_and_fragment_are_refused_without_echoing_them` / `SourceSyncBaselineCodecTests.Deserialize_RejectsUnusableDocuments` / `SyncCliTests.Parse_RejectsMalformedCommandLinesWithStableCodes` 各 1 行）。
+- `MediaHub.WebDav.Tests`：12 行中 **0 行**被截；`truncated=0`。
+
+### 负向对照（19 例，pwsh 7 与 Windows PowerShell 5.1 判定一致）
+| 编号 | 场景 | 期望 |
+| --- | --- | --- |
+| T1 | 基线已记录、运行不变（截断行一致） | PASS（无 warning） |
+| T2 | 基线记 0、运行有 1 行被截 | PASS + `(new, 1 truncated row(s))` |
+| T3 | 基线多记（2）而运行 1 | PASS + `(baseline 2, now 1)` |
+| T4 | 基线记了某方法，而该方法已不再报参数 | PASS + warning |
+| T5 | `truncated` key 不是 `methods` 表里的方法 | RED（配置自检） |
+| T6 | `truncated` key 不在 `data` 表（未被钉住） | RED（`which the data table does not pin`） |
+| T7 | 截断计数为 0 | RED（`records 0 truncated argument row`） |
+| T8 | `truncated` 表是字符串 | RED（`truncated table that is not an object`） |
+| T9 | 截断计数非整数 | RED（`non-integer truncated count`） |
+| T10 | round 14 格式基线 + 运行有截断 | PASS + `table not recorded` + `the runner truncated changed` |
+| T10x | 同输入给 round 14 闸门 | PASS 且输出无 `argumentTruncated=` |
+| T11 | 截断计数不变 | PASS + 台阶行 `... 1 rows`、无 warning |
+| R1 | 丢一行 → 总数层红 | RED（`ran 7 tests but the baseline says 8`） |
+| R2 | 改类名 → 每类层红 | RED（`test classes lost cases`） |
+| R3 | 同一 theory 丢行而总数不变 | RED（`test methods lost cases`） |
+| R4 | 换一个参数值、计数不变 | RED（`test method argument rows changed`） |
+| R5 | 有失败用例 | RED |
+| R6 | 新方法 | PASS + 增长 warning |
+| U1 | 两个 shell 刷新的字节 | `equal=true` |
+
+### 首轮 11 红均为台账自身问题（已修）
+1. 夹具 TRX 缺 UTF-8 BOM ⇒ PS 5.1 按 ANSI 解码 U+00B7，标记识别为 0（真实 CI TRX 自带 BOM，故此前真实语料在两个 shell 都正确）。
+2. R1–R4/R6 把基线建立在「已改动的运行」上，闸门正确地保持绿；改为「先用 canonical rows 建基线、再写改动后的 TRX」。
+3. 诊断切片 300 字符掩盖 throw 文本，加到 500。
+4. 5 红来自 harness 用 JS `JSON.stringify` 直接写基线（含原始非 ASCII）：PS 5.1 读无 BOM 文件按 ANSI ⇒ 行文本变 mojibake，两个 shell 合法地判定不一致；改用与 update 脚本一致的 ASCII `\uXXXX` 转义后全绿。**真实流水线不受影响**：CI TRX 有 BOM，基线一律由 update 脚本写出。
+
+### 数据源与规模
+- 数据源：run `41095080796` @`701bb547` 的 TRX（`windows-tests.trx` 2,719,155 B / `webdav-tests.trx` 145,266 B）。
+- 基线规模：round 14 `163,501 B` → **164,027 B**（+526 B 的 `truncated` 表）；纯 ASCII；两 shell 写出的字节相同。
+
+### 残留限制
+1. 截断点之后的文本不可恢复 ⇒ 只能暴露、不能钉住（本层设计如此）。
+2. 截断阈值由 runner 的显示名长度策略决定；runner 改变阈值会让本层给出 warning（需人工刷新基线）。
+3. 本层与 §6.9 的 `data` 行清单互补：`data` 钉住可见文本，`truncated` 说明可见文本有多可信。
+
+### exact-head CI 验收（EXECUTED）
+- head `c3a49cef`（merge commit `3ed7baaf4abd`）：windows-ci `41169510082` completed/success —— `MediaHub.Tests: argumentTruncated=6 baseline=argument truncated table 6 rows`、`MediaHub.WebDav.Tests: argumentTruncated=0 baseline=argument truncated table 0 rows`，其余台阶行与 §6.9 相同（`argumentRows=415 … 415 rows` / `methodData=100 … 100 row sets` / `methodCases=1952 … 1952 cases` / `combined tests=2056`）；licence `checks=42 failed=0 warnings=0 skipped=0`；两个探针 PASS（GPU/HDR/audio 未行使 ⇒ UNVERIFIED）。

@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T04:56:00+08:00",
-  "updated_by": "lead-W6-113-r14",
+  "updated_at": "2026-10-31T12:45:00+08:00",
+  "updated_by": "lead-W6-113-r15",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -154,7 +154,8 @@
         "cancelled runs (追加): 41093847372 (head 58bb304b, 2026-10-31)",
         "cancelled runs (追加): 41099478811 (head 8ec0d890) and 41100655793 (head 4461140b), 2026-10-31 - the same heads' windows-ci succeeded as 41099478575 / 41100655895",
         "cancelled runs (追加): 41111613255 (head a0b46f6e, 2026-10-31) - the same head's windows-ci succeeded as 41111613263",
-        "cancelled runs (追加): 41124244565 (head 1e2cf9ed, 2026-10-31) - the same head's windows-ci succeeded as 41124244650"
+        "cancelled runs (追加): 41124244565 (head 1e2cf9ed, 2026-10-31) - the same head's windows-ci succeeded as 41124244650",
+        "cancelled runs (追加): 41169510106 (head c3a49cef, 2026-10-31) - the same head's windows-ci succeeded as 41169510082"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -385,6 +386,28 @@
       "notes": "Residual limits recorded in TEST_MATRIX 6.9: the framework truncates display names (6 of the 415 windows rows carry the ellipsis marker); replacing one row while adding a row whose text equals the replaced one restores the multiset exactly, so that last case still passes.",
       "next_action": "No action required unless the gate reds; any further level (semantic/signature hashing) must be scoped with its own cost analysis first.",
       "closed_at": "2026-10-31T04:47:00+08:00"
+    },
+    {
+      "id": "W6-113s",
+      "title": "套件基线记录 runner 的截断暴露面（W6-113s）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r15",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (29,523 B) + update-test-suite-baseline.ps1 (18,921 B) + test-suite-baseline.json (164,027 B); a new \"truncated\" table maps Class.Method -> count of argument rows the runner cut at its U+00B7 x3 marker",
+        "commit c3a49cefbccc687604426b33ea05da7ec0b779e9 (3 files, +122 -9); blobs sha256-equal to the working-tree bytes the negative controls exercised (check f4b2cd1f2a8b5ac0 / update 1b81cbc4bb095f2a / baseline a9c74351a140a2d4)",
+        "negative controls 19/19 pass in pwsh 7 and Windows PowerShell 5.1 (D:/mh-verify/r15/nc-console.log, last line \"--- total 19 cases, pass=19, fail=0\")",
+        "T2/T3 exposure changes are warnings, never red; T5-T9 six config self-checks red on a malformed or vacuous truncated table; T4/T10 migrate and flag the round-14 format (\"table not recorded\")",
+        "real corpus: the truncated map is 6 rows over 5 methods for MediaHub.Tests (12 marker occurrences, both definition and result sides) and 0 for WebDav; baseline 163,501 B -> 164,027 B, pure ASCII, byte-identical between the two shells",
+        "first NC run red on 11 cases - all harness defects, not gate defects: fixture TRX without a UTF-8 BOM (PS 5.1 decodes it as ANSI, so the marker read as 0), R-cases built the baseline from the already modified run, a 300-char diagnostic slice, and a JS-written baseline carrying raw non-ASCII rows",
+        "exact-head windows-ci 41169510082 success: argumentTruncated=6 baseline=argument truncated table 6 rows (WebDav 0 / 0 rows), argumentRows=415 ... 415 rows, methodData=100 ... 100 row sets, methodCases=1952 ... 1952 cases, combined tests=2056; licence checks=42 failed=0 warnings=0 skipped=0; MPV_PROBE/ENGINE_PROBE PASS (GPU/HDR/audio NOT exercised)",
+        "residual limit: the text past the marker is unrecoverable from a TRX, so this layer can only expose the cut, never pin it - it is documented in TEST_MATRIX 6.10 instead of being claimed as coverage",
+        "migration: a round-14 format baseline (no truncated table) still exits 0 on the new gate in both shells, printing \"argument truncated table not recorded\" plus the warning, so no branch needs a lock-step baseline rewrite"
+      ],
+      "notes": "TEST_MATRIX 6.10 records the ladder line, the six config self-checks and the residual limits (tail unrecoverable; truncation threshold is the runner's). The layer is deliberately warning-only so CI cannot flap on runner display-name truncation.",
+      "next_action": "No action required unless the gate warns; if the runner changes its display-name length policy the truncated table must be refreshed with the same commit.",
+      "closed_at": "2026-10-31T12:45:00+08:00"
     }
   ]
 }
