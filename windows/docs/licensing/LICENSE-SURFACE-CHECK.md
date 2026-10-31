@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-45 项检查分二十四组：
+46 项检查分二十五组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -69,7 +69,9 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 能力对照表（W47 起） | `capability-map-claims` | `windows/docs/CAPABILITY-MAP.md` §0 的九行状态块缺行/改值、测试行写回写死的用例计数、或它声称的发布状态与 `PACKAGING.md` §0 不再一致 |
 | 验收不打扰契约（W48 起） | `quiet-run-claims` | `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` §0 的九行门禁事实（空闲阈值 180 s、QUNS 只允许 5/6、看门狗 700 ms、abort 标记与 `MH_ALLOW_ACTIVE`/`MH_QUIET_ABORT_FILE`、守卫优先级）缺行或改值，或 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询、`MhUia.psm1` 的 `Start-MhApp` abort 守卫与它不再一致 |
 | 续播下限契约（W49 起） | `resume-floor-claims` | `windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §0 的八行阈值与用例数、`MockMediaServer.cs` 里 Emby 2 % / Jellyfin 5 % / 300 s / 90 % / 10 s 的常量、以及契约测试实际展开出的用例数，三者任一分叉——放宽下限、删判定分支、加减用例却没同步文档即红 |
-| 诊断日志落盘（W50 起） | `log-file-claims` | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md` §0 的十五行上限/轮转/失败策略/用例数、`LogFileSink.cs` 的默认常量与轮转触发式、`LogService.cs` 的环形上限与写入顺序、`AppServices.cs` 的组合根目录、sink 测试展开的 9 例，五方任一分叉即红 || 日期快照审计（W51 起） | `doc-audit-snapshot-claims` | `windows/docs/W12-DOC-AUDIT.md` §0 状态块缺失或与正文分叉（正文 HEAD ≠ 块内 baseline-head、基线提交不再是本分支祖先、快照不再自称 as-of、或第 4 节不可判定清单被删） |
+| 诊断日志落盘（W50 起） | `log-file-claims` | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md` §0 的十五行上限/轮转/失败策略/用例数、`LogFileSink.cs` 的默认常量与轮转触发式、`LogService.cs` 的环形上限与写入顺序、`AppServices.cs` 的组合根目录、sink 测试展开的 9 例，五方任一分叉即红 |
+| 日期快照审计（W51 起） | `doc-audit-snapshot-claims` | `windows/docs/W12-DOC-AUDIT.md` §0 状态块缺失或与正文分叉（正文 HEAD ≠ 块内 baseline-head、基线提交不再是本分支祖先、快照不再自称 as-of、或第 4 节不可判定清单被删） |
+| 文档残留与围栏（W52 起） | `doc-residue-claims` | 文本文件里留着生成期占位符（填写处出现未替换的记号，确要讨论该记号的行须带 `residue-allow` 标记）、markdown 围栏行数为奇数、CAPABILITY-MAP §0 状态块不再被真围栏包住，或一行里粘了两条表格行（`||` 出现在行首为 `|` 的行上） |
 
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
@@ -240,7 +242,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 45） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 46） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -777,6 +779,55 @@ RESULT: PASS
 说明一处**无法在本机构造**的对照：git 的两条判据（对象不是 commit / 不是 HEAD 的祖先）针对的是「换一台机器克隆后基线提交根本不存在」，而块内 `baseline-head` 必须逐字等于 `282dcc…`（防「把快照偷偷改挂到别的祖先提交」），git 读的又是同一行 ⇒ 本机必须先把提交造出来才有对照，因此只覆盖到 NC5 这一层。浅克隆会先走 WARN（提示 `fetch-depth: 0`），与 `sbom-source-revision` 同口径；CI 是完整克隆（`fetch-depth: 0`），两条判据在那里才真正生效。
 
 七条打在 `doc-audit-snapshot-claims` 上、一条走 SKIP 通道 —— 过期审计此后不能被当成当前计数，也不能靠改基线提交甩掉历史。
+
+### 3.20 文档残留与围栏完整性（W52，2026-10-31）
+
+W47 的 `capability-map-claims` 逐行比对了 CAPABILITY-MAP §0 的九行块，却没有看一眼包住它的围栏：把围栏写成「波浪 + 单反引号 + 波浪」之后，状态块在渲染上成了普通正文，而检查一路绿——它钉的是块内容，不是块的存在形态。生成期占位符的残留同理：那是「工具把文档写坏了」，既不是内容错误，也不是任何既有检查的判据。第 46 项 `doc-residue-claims` 因此不看语义，只看形态：
+
+| 判据 | 失败含义 |
+| --- | --- |
+| 扫描根内的文本文件不得出现四种未标记形态：`{BT}`、`~BT~`、`⟪BT⟫`、波浪-单反引号-波浪（residue-allow） | 某份文档或脚本里还留着生成期占位符——正文渲染出来就是乱码；确要讨论某个记号的行必须带 `residue-allow` 标记（本行就是示例） |
+| 每份 markdown 的围栏行数（三反引号或 `~~~`）为偶数 | 围栏没闭合：后面的段落被吞进代码块，或本该是代码块的状态块被渲染成正文 |
+| CAPABILITY-MAP §0 的 BEGIN 注释下一行是 三反引号+text、END 注释上一行是 三反引号 | 状态块自己不再被真围栏包住（W52 之前就是这个坏法） |
+| 行首为 `|` 的行，剥掉行内代码跨距后不得再含 `||` | 往文档里插行时插在锚点文本之后而不是整行之后，两条表格行粘成一行（W51 在 `LICENSE-SURFACE-CHECK.md` 第 72 行这样写过一次，W51 的 README 那一段还因此整段重复了一遍） |
+| 扫描到的文本文件数 ≥ 20 | `-DocsScanRoot` 指错目录时的哨兵：扫到的文件太少就不算证明 |
+
+跳过围栏内部的行、并先剥离行内代码跨距再判 `||`，是因为 `docs/android-source-sync-transfer.md` 的表格里正当地写着 `|| true`（在反引号跨距内），`windows/docs/W8-EVIDENCE.md` 的围栏内也有一个 `||`。一个路径参数 `-DocsScanRoot`（默认仓库根）让负向对照可以指到临时副本；目录不存在 ⇒ SKIP（退出码仍 0）。
+
+刻意**不**做的两件事：不检查文档语义（那是各条 claims 检查的活），也不把 `residue-allow` 当白名单滥用——标记只允许出现在「本行就是要讨论这个记号」的行上，检查不做进一步判断，因为那需要读语义。
+
+本次还顺手修掉两个真实损坏（都是这条检查当场找出来的，不是假设）：`windows/docs/CAPABILITY-MAP.md` 的 8 处围栏/行内代码被写成占位符形态（整份文档一行真围栏都不剩），以及 `LICENSE-SURFACE-CHECK.md` 第 72 行由 W51 造成的表格行粘连（README 第 364 行同时留了一份整段重复的旧副本，已按新副本收敛为一段）。
+### 4.20 实测（2026-10-31，W52，本机，HEAD 2bdaa499）
+
+代码：
+
+```text
+pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath D:/mh-verify/w38-license/license-report.json
+check-licence-surface  PASS    doc-residue-claims  1194 text file(s) scanned: no unmarked placeholder residue, all 89 markdown file(s) have balanced fences, and the capability map status block sits inside a real fence
+check-licence-surface  checks=46 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+守卫补丁先落地、两份文档还没同步时的首跑如实 1 红（保留为证据）：`check-inventory` 列出 3 个问题（文档与 README 还写 45 项、文档未点名 `doc-residue-claims`），新项自己已 PASS。
+
+第 46 项自己被首跑与负向对照逼出过**三个**缺陷，都已修好并复验：① 围栏判据最初的写法把「三反引号」写成了「波浪 + 单波浪号」，于是整份文档一行真围栏都没数——数出来的是 `~*` 行，0 条也照样「偶数」（NC3 的「围栏奇数」与 NC1 的「状态块不是真围栏」把两种后果都钉住了）；② 记号清单最初把「三反引号」经占位符替换成单个反引号，结果**每一行含反引号的正文都被判成残留**（首跑 8507 条假问题），改成直接写四种记号形态后才正确；③ NC7 不是「SKIP、退出码 0」，而是整份脚本抛 `Resolve-Path` 找不到路径后终止（`-DocsScanRoot` 指不存在目录时，第 290 行对不存在的路径直接调 `Resolve-Path`，在 `$ErrorActionPreference = 'Stop'` 下连 checks= 汇总行都没打印）——改成「先 `Resolve-RepoPath` 得到路径、`Test-Path` 通过才规范化」后才真正走到 SKIP。
+
+八条负向对照（临时副本树 `D:/mh-verify/w52-nc/`，未改仓库文件）：
+
+| # | 改法 | 结果 |
+| --- | --- | --- |
+| NC1 | CAPABILITY-MAP 副本把 §0 围栏改回波浪形态 | 恰好 1 红（同一项内 4 条问题：2 行占位符 + 状态块的开/闭都不是真围栏） |
+| NC2 | 给 W12-DOC-AUDIT.md 副本注入一个未标记的占位符 | 恰好 1 红 |
+| NC3 | 删掉 CAPABILITY-MAP 副本 §0 的收尾围栏 | 恰好 1 红（围栏奇数 + 状态块未闭合） |
+| NC4 | 给 android 文档副本加一个孤立围栏 | 恰好 1 红（73 行围栏，原文 72） |
+| NC5 | `-DocsScanRoot` 指到只放 4 个文件的目录 | 恰好 1 红（哨兵） |
+| NC6 | 删掉 android 文档第 4306 行的 `residue-allow` 标记 | 恰好 1 红（点名该行） |
+| NC7 | `-DocsScanRoot` 指不存在目录 | SKIP、退出码 0 |
+| NC8 | 把许可文档副本里两条表格行粘成一行 | 恰好 1 红（点名第 12 行的接缝） |
+
+日志 `D:/mh-verify/w52-positive.log`（正向）与 `D:/mh-verify/w52-nc/nc1.log` … `nc8.log`；首跑与中间态保留在 `D:/mh-verify/w52-first.log`、`D:/mh-verify/w52-second.log`、`D:/mh-verify/w52-third.log`。
+
+八条打在 `doc-residue-claims` 上、一条走 SKIP 通道 —— 「文档被工具写坏」此后不再只能靠人眼发现；NC8 正是 W51 那次表格行粘连、以及 README 第 364 行整段重复的形态。
 
 ## 5. 这个工具**不**覆盖什么
 

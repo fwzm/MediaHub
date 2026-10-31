@@ -177,6 +177,11 @@
     The tests that pin the sink's behaviour. Default:
     windows/tests/MediaHub.Tests/LogFileSinkTests.cs.
 
+.PARAMETER DocsScanRoot
+    The root scanned for placeholder residue and unbalanced code fences. Default: the
+    repository root (obj/bin/artifacts/.git/.tools and friends are skipped). The
+    doc-residue-claims check walks markdown, PowerShell, Kotlin, C#, YAML and csproj text.
+
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
     errors as well. Off by default, but as of W38 no such row is expected: every shipped DLL has a
@@ -235,6 +240,7 @@ param(
     [string] $AppServicesPath,
     [string] $LogFileTestPath,
     [string] $DocAuditPath,
+    [string] $DocsScanRoot,
     [switch] $FailOnLicenceGaps
 )
 
@@ -281,6 +287,12 @@ $logServiceFile = Resolve-RepoPath -Path $LogServicePath -Default 'windows/src/M
 $appServicesFile = Resolve-RepoPath -Path $AppServicesPath -Default 'windows/src/MediaHub.App/AppServices.cs'
 $logFileTestFile = Resolve-RepoPath -Path $LogFileTestPath -Default 'windows/tests/MediaHub.Tests/LogFileSinkTests.cs'
 $docAuditFile = Resolve-RepoPath -Path $DocAuditPath -Default 'windows/docs/W12-DOC-AUDIT.md'
+$docsScanRoot = if ($DocsScanRoot) { Resolve-RepoPath -Path $DocsScanRoot -Default '' } else { $RepoRoot }
+# A missing scan root must reach the check as a SKIP, not crash the whole run: Resolve-Path throws
+# on anything that is not there, so the path is only canonicalised once it exists.
+if (Test-Path -LiteralPath $docsScanRoot) {
+    $docsScanRoot = (Resolve-Path -LiteralPath $docsScanRoot).Path
+}
 
 $checks = [System.Collections.Generic.List[object]]::new()
 function Add-Check {
@@ -1215,6 +1227,7 @@ $declaredCheckIds = @(
     'resume-floor-claims',
     'log-file-claims',
     'doc-audit-snapshot-claims',
+    'doc-residue-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -1928,6 +1941,92 @@ else {
     }
     else {
         Add-Check 'doc-audit-snapshot-claims' 'FAIL' (($docAuditProblems -join '; ') + ' - update windows/docs/W12-DOC-AUDIT.md section 0 and the body it describes')
+    }
+}
+
+
+# --- 23. documentation residue and fence integrity -----------------------------------------
+if (-not (Test-Path -LiteralPath $docsScanRoot)) {
+    Add-Check 'doc-residue-claims' 'SKIP' ('the documentation scan root is absent: ' + $docsScanRoot)
+}
+else {
+    $residueTokens = @('{BT}', '~BT~', '⟪BT⟫', '~`~')   # residue-allow: this line defines the tokens it scans for
+    $scanExtensions = @('.md', '.ps1', '.kt', '.kts', '.cs', '.xaml', '.yml', '.yaml', '.json', '.txt', '.sh', '.gradle', '.toml', '.props', '.csproj')
+    $scanExclude = '[\\/](node_modules|build|obj|bin|artifacts|\.git|\.gradle|\.tools|\.idea|\.local)([\\/]|$)'
+    $scanFiles = @(Get-ChildItem -LiteralPath $docsScanRoot -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch $scanExclude })
+    $textFiles = @($scanFiles | Where-Object { $scanExtensions -contains $_.Extension.ToLowerInvariant() })
+    $residueProblems = [System.Collections.Generic.List[string]]::new()
+    $scannedMarkdown = 0
+    foreach ($scanFile in $textFiles) {
+        $scanText = Get-Content -LiteralPath $scanFile.FullName -Raw
+        $relative = $scanFile.FullName.Substring($docsScanRoot.Length).TrimStart([char]92, [char]47)
+        if ($scanFile.Extension.ToLowerInvariant() -eq '.md') {
+            $scannedMarkdown++
+            $fenceToken = [string]([char]96 + [char]96 + [char]96)
+            $mdFenceCount = 0
+            $mdInsideFence = $false
+            $mdLineNumber = 0
+            foreach ($mdLine in ($scanText -split "`n")) {
+                $mdLineNumber++
+                $mdTrimmed = $mdLine.Trim()
+                if ($mdTrimmed.StartsWith($fenceToken) -or $mdTrimmed.StartsWith('~~~')) {
+                    $mdFenceCount++
+                    $mdInsideFence = -not $mdInsideFence
+                    continue
+                }
+                if ($mdInsideFence) { continue }
+                if (-not $mdTrimmed.StartsWith('|')) { continue }
+                $mdGlueCheck = [regex]::Replace($mdLine, '`[^`]*`', '')
+                if ($mdGlueCheck.Contains('||')) {
+                    $residueProblems.Add($relative + ' line ' + $mdLineNumber + ' has two markdown table rows glued onto one line (a || at the seam)')
+                }
+            }
+            if (($mdFenceCount % 2) -ne 0) {
+                $residueProblems.Add($relative + ' has ' + $mdFenceCount + ' fence line(s), so a code fence is left open')
+            }
+        }
+        $scanLineNumber = 0
+        foreach ($scanLine in ($scanText -split "`n")) {
+            $scanLineNumber++
+            foreach ($token in $residueTokens) {
+                if ($scanLine.Contains($token) -and -not $scanLine.Contains('residue-allow')) {
+                    $residueProblems.Add($relative + ' line ' + $scanLineNumber + ' still contains the placeholder ' + $token + ' without the residue-allow marker')
+                }
+            }
+        }
+    }
+    if ($textFiles.Count -lt 20) {
+        $residueProblems.Add('only ' + $textFiles.Count + ' text file(s) were scanned under ' + $docsScanRoot + ', so this check cannot prove anything')
+    }
+    $capabilityMapScanFile = Join-Path $docsScanRoot (Join-Path 'windows' (Join-Path 'docs' 'CAPABILITY-MAP.md'))
+    if (-not (Test-Path -LiteralPath $capabilityMapScanFile)) {
+        $residueProblems.Add('windows/docs/CAPABILITY-MAP.md is absent from the scanned root')
+    }
+    else {
+        $capabilityMapLines = @(Get-Content -LiteralPath $capabilityMapScanFile)
+        $mapBeginAt = -1
+        $mapEndAt = -1
+        for ($i = 0; $i -lt $capabilityMapLines.Count; $i++) {
+            if ($capabilityMapLines[$i].Contains('<!-- BEGIN capability-map-status')) { $mapBeginAt = $i }
+            if ($capabilityMapLines[$i].Contains('<!-- END capability-map-status -->')) { $mapEndAt = $i }
+        }
+        if ($mapBeginAt -lt 0 -or $mapEndAt -le $mapBeginAt) {
+            $residueProblems.Add('CAPABILITY-MAP.md no longer carries the capability-map-status block')
+        }
+        else {
+            $openingFence = $capabilityMapLines[$mapBeginAt + 1].Trim()
+            $closingFence = $capabilityMapLines[$mapEndAt - 1].Trim()
+            $fenceToken = [string]([char]96 + [char]96 + [char]96)
+            if ($openingFence -ne ($fenceToken + 'text')) { $residueProblems.Add('the status block is not opened by a real ' + $fenceToken + 'text fence any more') }
+            if ($closingFence -ne $fenceToken) { $residueProblems.Add('the status block is not closed by a real ' + $fenceToken + ' fence any more') }
+        }
+    }
+
+    if ($residueProblems.Count -eq 0) {
+        Add-Check 'doc-residue-claims' 'PASS' ($textFiles.Count.ToString() + ' text file(s) scanned: no unmarked placeholder residue, all ' + $scannedMarkdown + ' markdown file(s) have balanced fences, and the capability map status block sits inside a real fence')
+    }
+    else {
+        Add-Check 'doc-residue-claims' 'FAIL' ($residueProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $residueProblems) + ' - repair the documents (the placeholder convention is documented in docs/android-source-sync-transfer.md) and keep the marker on lines that discuss a token on purpose')
     }
 }
 
