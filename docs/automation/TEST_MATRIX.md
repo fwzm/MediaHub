@@ -831,3 +831,67 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 - 账本 head `ad8b1698` 的 windows-ci **`41209166800` = completed/failure**：`doc-residue-claims` 仍 PASS（`1317 text file(s) scanned … all 123 markdown file(s) have balanced fences`）；licence `checks=46 failed=1`，唯一红仍是 `log-file-claims`（`W6-113u`）⇒ 本项修复在三个 head 上稳定。
 
 - 最终 head `828a93c5` 的 windows-ci **`41209461489` = completed/failure**：十层台阶行全部命中（`rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4`、WebDav `rowAttributes=104 …`、`identities=1952 named=1952`、`combined tests=2056`），`doc-residue-claims` PASS；licence 为 `checks=47 failed=2`，两条红均在**上游侧**：`log-file-claims`（`W6-113u`，W50）与新出现的第 47 项 `capability-map-pointers`（W53 在 base `f614546e` 上自红，base 自身 run `41209328582`/`41209324178` 同样 checks=47 failed=1），与本轮门禁改动无因果。
+## 6.16 第十一层口径：TRX 节结构完整性与节间配对（W6-113aa，2026-10-31）
+
+前十层读的都是文件**内部**的某一侧或两侧配对：总数与 outcome 分布来自 `ResultSummary/Counters`，类、方法、参数行来自 `TestDefinitions` 的定义显示名，行元数据（executionId、时间、列表 id）来自 `Results` 的结果行。`TestEntries`（每个 testId 一条 `<TestEntry>`）与 `TestLists`（声明的列表 id/name）这两个节**从未被读取**。于是以下改动都能让前十层的每一个数字保持完全相同：
+
+- 删掉整个 `<TestEntries>` 或 `<TestLists>` 节；
+- 增删 `TestEntry`、让某条 `TestEntry` 的 testId 不对应任何定义；
+- 把两条 `TestEntry` 的 `executionId` 互换（结果行不动，行与定义仍一一对应）；
+- 让结果行的 `testListId` 指向 `TestLists` 从未声明的列表；
+- 复制整个 `ResultSummary` 或 `Times` 节。
+
+### 口径（`windows/tools/check-test-suite-baseline.ps1`，第十一层）
+
+| 检查 | 判据 | 失败后果 |
+| --- | --- | --- |
+| 节块唯一性 | `ResultSummary` / `Times` / `TestDefinitions` / `TestEntries` / `TestLists` / `Results` 各恰好 1 次，`ResultSummary` 内 `Counters` 恰好 1 次 | RED |
+| 定义 ↔ 条目配对 | 每个定义 id 必须有一条 `TestEntry`；每条 `TestEntry.testId` 必须是「唯一且有结果行」的定义 id；`testId` 与列表 id 不得空白或重复 | RED |
+| 条目 ↔ 结果行配对 | 同 testId 的 `TestEntry.executionId` 与 `testListId` 必须与该 testId 结果行的同名属性相同 | RED |
+| 列表声明 | 结果行的 `testListId` 必须在 `TestLists` 中声明 | RED |
+| 台阶行 | `structure=N/7 single blocks entries=… matched entries=… paired execution ids=… paired list ids=… lists=…` | 信息行 |
+
+**基线不加字段**：这是单个 TRX 文件内部的不变量，与运行结果无关，钉进基线只会重复 `expected` ⇒ 本层**无迁移**，`update-test-suite-baseline.ps1` 与 `test-suite-baseline.json` 均未改动。
+
+### 实现要点与坑
+
+- 节块存在性**必须**从 `$xml.TestRun.ChildNodes` 按 `LocalName` 计数：两种 PowerShell 里 `@($null).Count` 都是 **1**，用 `@($xml.TestRun.TestEntries).Count` 判「整节消失」永远得 1（首轮负向对照 S2/S5/S14 假绿就是此坑）。
+- 编辑事故：`t.replace(anchor, anchor+add)` 且 `add` 串首又含 anchor 本身 ⇒ 同一行被写两遍，真实语料假红为「每个 testId 出现 2 次」。修法是从改前快照重新应用、增量串不含锚点、并逐锚点断言 `split(...).length-1 === 1`。
+
+### 负向对照（28 例，pwsh 7 与 Windows PowerShell 5.1 判定一致，`pass=28 fail=0`）
+
+| 例 | 改动 | round 20 闸门 | round 19 闸门 |
+| --- | --- | --- | --- |
+| S1 | 规范夹具 | PASS（`structure=7/7 … entries=8 matched entries=8 paired execution ids=8 paired list ids=8 lists=2`） | PASS 但无 `structure=` 行（S1x） |
+| S2 | 删掉 `<TestEntries>` | RED | PASS（S2x） |
+| S3 | 两条 `TestEntry` 互换 `executionId` | RED（`pairs TestEntry executionId`） | PASS（S3x） |
+| S4 | 结果行跑在 `TestLists` 未声明的列表 | RED | PASS（S4x） |
+| S5 | 删掉 `<TestLists>` | RED | PASS（S5x） |
+| S6 | `TestEntry` 指向没有定义的 testId | RED | PASS |
+| S7 | 同一 testId 两条 `TestEntry` | RED | PASS |
+| S8 | `TestEntry` 无 testId | RED | PASS |
+| S9 | 两条 `TestList` 同 id | RED | PASS |
+| S10 | `TestList` 无 id | RED | PASS |
+| S11 | 第二个 `ResultSummary` | RED | PASS |
+| S12 | 第二个 `Times` | RED | PASS |
+| S13 | `TestEntry` 无 `executionId` | RED | PASS |
+| S14 | 第二套件（WebDav）删掉 `<TestEntries>` | RED（`TestEntries appears 0 time(s)`） | PASS |
+| R1–R6 | 行被删 / 参数换值 / 行 Passed→Aborted / 两行共享 executionId / 定义 id 互换 / 新参数行 | 各归前几层（RED / RED / RED / RED / RED / warning） | 同 |
+| RE1–RE3 | 真实语料两 shell 打印 `structure=7/7 … 1952 / 104` 与 `combined tests=2056`；round 19 闸门无 `structure=`；基线与 update 脚本字节与 HEAD 相等 | PASS | — |
+
+### 数据源与规模
+
+- 数据源：CI run `41095080796` @ head `701bb547` 的 TRX —— `windows-tests.trx` 2,719,155 B、`webdav-tests.trx` 145,266 B（`D:/mh-verify/r12-art/mediahub-windows-47fb6f5075d21ee70a568a8cb460256b60d200bf/test-results`）。
+- 真实语料结构事实：windows `UnitTest` 1952 / `TestEntry` 1952 / 定义与条目一一配对 / `TestList` 2 条（`8c84fa94-…` "Results Not in a List"、`19431567-…` "All Loaded Results"） / 结果行 testListId 全部已声明；webdav 104 / 104 / 2 / 1。
+- 脚本规模：check 54,842 → **60,725 B**（+109 行），sha256 前 16 `2f255f04e5333842`，纯 ASCII；基线 164,452 B 与 update 脚本未改动。
+
+### 残留限制
+
+- 本层只做**单文件内部**一致：它不核对 TRX 与 CI 实际执行的测试程序集是否对应（那是第九层的 `storage`/`codeBase` 与套件表在管），也不核对 `TestEntry` 是否覆盖全部定义之外的多余属性。
+- 节块唯一性按 `LocalName` 计数，不区分 `ResultSummary` 的 `outcome` 属性取值（该取值属第七层）。
+- 与其他层相同：把整份 TRX 换成另一份自洽的手写文件仍可整体造假；闸门的目标是让「局部手改」留下痕迹，而不是证明测试真的跑过。
+
+### exact-head CI 验收（2026-10-31）
+
+- head `e3283e47` 的 windows-ci **`41212076261` = completed/failure**（`pull_request`；Android CI `41212076088` 取证时 in_progress，`core`/`feature`/`app` 树哈希与 `3a09dfbd` 完全相同 ⇒ ADR-AUTO-001 继承）：**测试门禁步骤全绿**，两套件各打印十一层台阶行，新增行 `MediaHub.Tests: structure=7/7 single blocks entries=1952 matched entries=1952 paired execution ids=1952 paired list ids=1952 lists=2`、`MediaHub.WebDav.Tests: structure=7/7 … entries=104 … lists=2`；前十层行不变（含 `identities=1952 named=1952`、`rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4`），`suites=2 baseline=suite table 2 suites`、`combined tests=2056`。
+- licence `checks=47 failed=1 warnings=0 skipped=0`：唯一红是上游 `log-file-claims`（`W6-113u`）；第 47 项 `capability-map-pointers` 本轮 PASS（base 已前进到 `19beb0cc`，其 windows-ci `41210845895`/`41210841634` success）⇒ `W6-113z` RESOLVED。

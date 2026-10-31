@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T22:32:00+08:00",
-  "updated_by": "lead-W6-113-r19",
+  "updated_at": "2026-10-31T22:55:00+08:00",
+  "updated_by": "lead-W6-113-r20",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -162,7 +162,8 @@
         "Android CI run 41204520438 @21bc3226 = in_progress/",
         "Android CI run 41204722970 @c8745bb4 = in_progress/",
         "Android CI 41207751615 @14bfea5b = cancelled (the same head’s windows-ci ran as 41207751934)",
-        "Android CI 41208701801 @c373956d was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)"
+        "Android CI 41208701801 @c373956d was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)",
+        "Android CI run 41212076088 @e3283e47 was still in_progress when sampled (core/feature/app tree hashes ff4eed826cbc/e983feb08237/70c541457cae unchanged from 3a09dfbd, ADR-AUTO-001 inheritance)"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -548,17 +549,40 @@
       "id": "W6-113z",
       "title": "W53 能力对照表指针门禁（第 47 项 capability-map-pointers）在上游 base 上自红，等 W53 所有者修 CAPABILITY-MAP.md",
       "priority": "P0",
-      "status": "BLOCKED",
+      "status": "RESOLVED",
       "owner": "unassigned",
       "branch": "feature/windows-client",
       "evidence": [
         "base head f614546e (feat(licensing): W53 能力对照表指针/状态词/计数纪律门禁（第 47 项 capability-map-pointers）) own windows-ci 41209328582 = completed/failure and 41209324178 = completed/failure; log D:/mh-verify/r19b/base-f614546e.log: check-licence-surface FAIL capability-map-pointers 1 problem(s): the map no longer declares the CI print as the authority for its test counts; checks=47 failed=1",
         "PR #39 merge tree refs/pull/39/merge = 0e1b5b33d378cf74e0596f084c0428afeab88d25, parents = f614546e + 828a93c5; the merge tree windows/docs/CAPABILITY-MAP.md blob 02165375f7e786525980d751216baea9bd3d1141 is the base version (our c3116f87 is the merge-base version and is not used)",
-        "our final head windows-ci 41209461489 @828a93c5 = failure, licence checks=47 failed=2: capability-map-pointers + log-file-claims; all 20 gate ladder lines and doc-residue-claims PASS"
+        "our final head windows-ci 41209461489 @828a93c5 = failure, licence checks=47 failed=2: capability-map-pointers + log-file-claims; all 20 gate ladder lines and doc-residue-claims PASS",
+        "resolved upstream: base advanced f614546e -> 19beb0cc64d26dac6eeae9f5e51b938cdb5628e3; its own windows-ci 41210845895 (pull_request) and 41210841634 (push) are completed/success",
+        "our head e3283e47 windows-ci 41212076261 (failure overall) prints check-licence-surface PASS capability-map-pointers  \"every markdown link and repository path in the map still resolves, its status words stay inside the legend and it no longer pins a live test count\"; licence checks=47 failed=1, the single red being upstream log-file-claims (W6-113u)"
       ],
-      "closed_at": null,
-      "notes": "我方不改共享守卫、不改共享文档（合并树采用 base 版 CAPABILITY-MAP.md，我方分支上的同名文件在合并中不生效）；该红只能由 W53 所有者把「CI 台阶行是测试计数的权威」写进 windows/docs/CAPABILITY-MAP.md 后消除。与 W6-113u（W50 log-file-claims needle 分歧）同类但不同守卫、不同所有者。",
-      "next_action": "W53 所有者在 base 侧修 CAPABILITY-MAP.md（声明 CI 台阶行为测试计数权威）后，重跑本 PR 的 exact-head windows-ci 核验 licence failed=0；在此之前本 PR 的 licence 步骤不可能转绿。"
+      "closed_at": "2026-10-31T22:55:00+08:00",
+      "notes": "我方不改共享守卫、不改共享文档（合并树采用 base 版 CAPABILITY-MAP.md，我方分支上的同名文件在合并中不生效）；该红只能由 W53 所有者把「CI 台阶行是测试计数的权威」写进 windows/docs/CAPABILITY-MAP.md 后消除。与 W6-113u（W50 log-file-claims needle 分歧）同类但不同守卫、不同所有者。 2026-10-31 round 20：base 前进使该守卫转 PASS，本项 RESOLVED；无需我方动作。",
+      "next_action": "无需我方动作；若 base 再次自红则重开。"
+    },
+    {
+      "id": "W6-113aa",
+      "title": "套件基线第十一层口径：TRX 节结构完整性与节间配对（TestEntries/TestLists）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r20",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "commit e3283e471ddee96055abd2ac121ce6d0f85619b3 \"ci(windows): suite baseline gate audits the TRX section structure and the entry map (W6-113aa)\"; 1 file changed, 109 insertions; windows/tools/check-test-suite-baseline.ps1 54,842 -> 60,725 B, sha256 2f255f04e5333842..., pure ASCII; blob equals the working tree byte for byte",
+        "no baseline field and no migration: the layer is an invariant inside one TRX, so windows/tools/test-suite-baseline.json (164,452 B) and update-test-suite-baseline.ps1 are untouched and byte-identical to HEAD",
+        "new ladder line \"structure=7/7 single blocks entries=... matched entries=... paired execution ids=... paired list ids=... lists=...\"; real corpus (run 41095080796 TRX) prints MediaHub.Tests entries=1952 matched entries=1952 paired execution ids=1952 paired list ids=1952 lists=2 and MediaHub.WebDav.Tests 104/104/104/104 lists=2, with combined tests=2056, identically in pwsh 7 and Windows PowerShell 5.1",
+        "negative controls 28/28 pass, fail=0 (D:/mh-verify/r20/run-nc.cjs, log D:/mh-verify/r20/nc-console.log, EXIT=0): S2 a dropped TestEntries section is RED while the round-19 gate accepts it (S2x); S3 two TestEntry items that swap their executionId are RED (\"pairs TestEntry executionId\") while the round-19 gate accepts them (S3x); S4 a row in a list TestLists never declares RED; S5 dropped TestLists RED; S6 ghost testId RED; S7 duplicate TestEntry testId RED; S8 TestEntry without testId RED; S9 duplicate TestList id RED; S10 TestList without id RED; S11 a second ResultSummary RED; S12 a second Times RED; S13 TestEntry without executionId RED; S14 the second suite is checked too RED; R1-R6 re-exercise layers 1-10",
+        "implementation pitfall worth reusing: block presence must be counted from TestRun.ChildNodes by LocalName, because @($null).Count is 1 in both PowerShell editions - a property-access presence test never notices a dropped section (first smoke run showed S2/S5/S14 falsely green)",
+        "second pitfall: t.replace(anchor, anchor+add) where add begins with the anchor inserted a line twice and made the real corpus fail with every testId appearing twice; the fix was to re-apply from the pre-change snapshot with insertion-only anchors and to assert split(...).length-1 === 1 per anchor",
+        "exact-head CI (40-char SHA): head e3283e47 windows-ci 41212076261 = completed/failure; the test gate step is fully green and prints the layer-11 ladder lines for both suites; licence checks=47 failed=1 warnings=0 skipped=0 with the single red being upstream log-file-claims (W6-113u)",
+        "Android CI 41212076088 @e3283e47 was still in_progress when sampled; core/feature/app tree hashes identical to 3a09dfbd (ADR-AUTO-001 inheritance)"
+      ],
+      "closed_at": "2026-10-31T22:55:00+08:00",
+      "notes": "只改 check 脚本；基线与 update 脚本未动（无迁移）。本层只做单文件内部一致：TRX 与实际程序集的对应由套件表与第九层 storage/codeBase 管，不在此层。",
+      "next_action": "下一层候选：结果行除 executionId/时间之外的属性语义（如 testType/testListId 与 TestLists 名称的一致性）或 ResultSummary 的 outcome 属性；仍受上游红 W6-113u 影响。"
     }
   ]
 }
