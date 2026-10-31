@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Eighteen things rot silently in a licence deliverable:
+    Nineteen things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -46,7 +46,12 @@
           reworded, the test row goes back to quoting a fixed count, or the map claims a
           shipping state PACKAGING.md no longer records.
 
-    This script checks those eighteen surfaces without touching the network, the build, or the
+      19. the quiet-run safety contract rots: the acceptance runbook stops promising the idle
+          threshold and the QUNS allow-list it documented, the runner's defaults drift, the
+          watchdog stops polling for input, or Start-MhApp loses the abort marker that keeps a
+          window from being put back on screen after the user came back.
+
+    This script checks those nineteen surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -117,6 +122,21 @@
     windows/docs/CAPABILITY-MAP.md. The capability-map-claims check compares its status block
     with PACKAGING.md and with the player project it summarises.
 
+.PARAMETER QuietRunbookPath
+    The quiet-run acceptance runbook. Default: windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md. The
+    quiet-run-claims check compares its status block with the runner and the two PowerShell
+    modules that actually implement the gate.
+
+.PARAMETER QuietRunnerPath
+    The runner that owns the idle gate. Default: windows/tools/acceptance/run-quiet.ps1.
+
+.PARAMETER QuietModulePath
+    The module with the idle/QUNS/watchdog primitives. Default: windows/tools/acceptance/lib/MhQuiet.psm1.
+
+.PARAMETER UiaModulePath
+    The module whose Start-MhApp refuses to open a window once the run was aborted. Default:
+    windows/tools/acceptance/lib/MhUia.psm1.
+
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
     errors as well. Off by default, but as of W38 no such row is expected: every shipped DLL has a
@@ -161,6 +181,10 @@ param(
     [string] $PinsNoticesPath,
     [string] $PinsAdrPath,
     [string] $PinsReproPath,
+    [string] $QuietRunbookPath,
+    [string] $QuietRunnerPath,
+    [string] $QuietModulePath,
+    [string] $UiaModulePath,
     [string] $CapabilityMapPath,
     [switch] $FailOnLicenceGaps
 )
@@ -195,6 +219,10 @@ $licenceDecisionFile = Resolve-RepoPath -Path $LicenceDecisionDocPath -Default '
 $handwrittenNoticesFile = Resolve-RepoPath -Path $HandwrittenNoticesPath -Default 'windows/THIRD-PARTY-NOTICES.md'
 $adrPackagingFile = Resolve-RepoPath -Path $AdrPackagingPath -Default 'windows/docs/adr/ADR-W004-packaging-and-distribution.md'
 $gitIgnoreFile = Resolve-RepoPath -Path $GitIgnorePath -Default '.gitignore'
+$quietRunbookFile = Resolve-RepoPath -Path $QuietRunbookPath -Default 'windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md'
+$quietRunnerFile = Resolve-RepoPath -Path $QuietRunnerPath -Default 'windows/tools/acceptance/run-quiet.ps1'
+$quietModuleFile = Resolve-RepoPath -Path $QuietModulePath -Default 'windows/tools/acceptance/lib/MhQuiet.psm1'
+$uiaModuleFile = Resolve-RepoPath -Path $UiaModulePath -Default 'windows/tools/acceptance/lib/MhUia.psm1'
 
 $checks = [System.Collections.Generic.List[object]]::new()
 function Add-Check {
@@ -1125,6 +1153,7 @@ $declaredCheckIds = @(
     'adr-packaging-claims',
     'engine-pins-claims',
     'capability-map-claims',
+    'quiet-run-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -1478,6 +1507,90 @@ else {
     }
     else {
         Add-Check 'capability-map-claims' 'FAIL' (($capabilityProblems -join '; ') + ' - update windows/docs/CAPABILITY-MAP.md section 0 and the row it summarises')
+    }
+}
+# --- 19. the quiet-run safety contract ---
+$quietProblems = New-Object System.Collections.Generic.List[string]
+if (-not (Test-Path -LiteralPath $quietRunbookFile)) {
+    Add-Check 'quiet-run-claims' 'SKIP' 'no quiet-run runbook to compare against (windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md)'
+}
+else {
+    $quietRunbookText = Get-Content -LiteralPath $quietRunbookFile -Raw
+    $beginAt = $quietRunbookText.IndexOf('<!-- BEGIN quiet-run-status', [System.StringComparison]::Ordinal)
+    $endAt = $quietRunbookText.IndexOf('<!-- END quiet-run-status', [System.StringComparison]::Ordinal)
+    if ($beginAt -lt 0 -or $endAt -lt 0 -or $endAt -le $beginAt) {
+        $quietProblems.Add('the runbook carries no quiet-run-status block (the machine-readable gate contract)')
+    }
+    else {
+        $quietBlock = $quietRunbookText.Substring($beginAt, $endAt - $beginAt)
+        foreach ($quietLine in @(
+            'default-min-idle-seconds: 180',
+            'wait-for-idle-minutes-default: 0',
+            'idle-source: GetLastInputInfo',
+            'quns-allowed-states: 5,6',
+            'watchdog-poll-milliseconds: 700',
+            'abort-marker: watch-*.abort',
+            'suite-reentry-env: MH_ALLOW_ACTIVE',
+            'abort-flag-env: MH_QUIET_ABORT_FILE',
+            'gate-precedence: abort-marker-then-allow-active-then-idle-and-quns'
+        )) {
+            if (-not $quietBlock.Contains($quietLine)) { $quietProblems.Add('the status block does not say ' + $quietLine) }
+        }
+    }
+    if (-not $quietRunbookText.Contains('| `-MinIdleSeconds` | 180 |')) { $quietProblems.Add('the parameter table no longer documents -MinIdleSeconds as 180') }
+    if (-not $quietRunbookText.Contains('| `-WaitForIdleMinutes` | 0 |')) { $quietProblems.Add('the parameter table no longer documents -WaitForIdleMinutes as 0') }
+
+    if (-not (Test-Path -LiteralPath $quietRunnerFile)) {
+        $quietProblems.Add('the quiet runner is absent (windows/tools/acceptance/run-quiet.ps1)')
+    }
+    else {
+        $quietRunnerText = Get-Content -LiteralPath $quietRunnerFile -Raw
+        foreach ($quietNeedle in @(
+            '[int]$MinIdleSeconds = 180',
+            '[int]$WaitForIdleMinutes = 0',
+            'Start-MhQuietWatch',
+            '$env:MH_ALLOW_ACTIVE = ''1''',
+            '$env:MH_QUIET_ABORT_FILE'
+        )) {
+            if (-not $quietRunnerText.Contains($quietNeedle)) { $quietProblems.Add('the runner no longer contains ' + $quietNeedle) }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $quietModuleFile)) {
+        $quietProblems.Add('the quiet-gate module is absent (windows/tools/acceptance/lib/MhQuiet.psm1)')
+    }
+    else {
+        $quietModuleText = Get-Content -LiteralPath $quietModuleFile -Raw
+        foreach ($quietNeedle in @(
+            'SHQueryUserNotificationState',
+            '$state -eq 5 -or $state -eq 6',
+            '[int]$PollMilliseconds = 700',
+            'Test-MhQuietAborted'
+        )) {
+            if (-not $quietModuleText.Contains($quietNeedle)) { $quietProblems.Add('the quiet-gate module no longer contains ' + $quietNeedle) }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $uiaModuleFile)) {
+        $quietProblems.Add('the acceptance UI module is absent (windows/tools/acceptance/lib/MhUia.psm1)')
+    }
+    else {
+        $uiaModuleText = Get-Content -LiteralPath $uiaModuleFile -Raw
+        foreach ($quietNeedle in @(
+            'function Start-MhApp',
+            '$env:MH_QUIET_ABORT_FILE',
+            'refusing to start MediaHub: the quiet run was aborted by user input',
+            '$env:MH_ALLOW_ACTIVE -ne ''1'''
+        )) {
+            if (-not $uiaModuleText.Contains($quietNeedle)) { $quietProblems.Add('Start-MhApp no longer contains ' + $quietNeedle) }
+        }
+    }
+
+    if ($quietProblems.Count -eq 0) {
+        Add-Check 'quiet-run-claims' 'PASS' 'the quiet-run safety contract still holds: the runbook block names 9 gate facts, the runner still defaults to 180 s idle and 700 ms polling, the QUNS allow-list is still 5/6, and Start-MhApp still refuses on an abort marker before MH_ALLOW_ACTIVE'
+    }
+    else {
+        Add-Check 'quiet-run-claims' 'FAIL' (($quietProblems -join '; ') + ' - update windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md section 0 and the file it describes')
     }
 }
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })

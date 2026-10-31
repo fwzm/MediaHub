@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-41 项检查分二十组：
+42 项检查分二十一组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -67,6 +67,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 引擎固定摘要（W46 起） | `engine-pins-claims` | `windows/tools/fetch-libmpv.ps1` 钉的归档摘要、解包后 libmpv-2.dll 摘要与归档文件名，在三份引用它们的文档（`windows/THIRD-PARTY-NOTICES.md`、`ADR-W004`、`REPRODUCIBLE-BUILD.md`）里不再逐字出现——换 pin 不同步改文档，prose 就继续描述旧字节 |
 | 包内许可文件（W40 起） | `package-licence-staging` | 发布树不再真的带 `licences/` 的六个文档 + digest manifest：暂存脚本被删、清单缩水、manifest 摘要与字节不符、或 CI 不再调用它（该检查把脚本重跑到临时树，不读文档） |
 | 能力对照表（W47 起） | `capability-map-claims` | `windows/docs/CAPABILITY-MAP.md` §0 的九行状态块缺行/改值、测试行写回写死的用例计数、或它声称的发布状态与 `PACKAGING.md` §0 不再一致 |
+| 验收不打扰契约（W48 起） | `quiet-run-claims` | `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` §0 的九行门禁事实（空闲阈值 180 s、QUNS 只允许 5/6、看门狗 700 ms、abort 标记与 `MH_ALLOW_ACTIVE`/`MH_QUIET_ABORT_FILE`、守卫优先级）缺行或改值，或 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询、`MhUia.psm1` 的 `Start-MhApp` abort 守卫与它不再一致 |
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
 
@@ -317,6 +318,21 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 | 交叉核对 | `PACKAGING.md` §0 必须仍写 `msix: not-implemented`、`signing-status: blocked-no-certificate`、`clean-machine-install: not-run`、`licence-files-in-package: staged-by-ci`；播放器工程仍默认 `native\libmpv`（GPL 基线）；`windows/engine/lgpl/dist/libmpv-2.dll` 仍在（否则 `built-not-switched` 无依据） |
 
 `-CapabilityMapPath` 可换一幅对照表（默认 `windows/docs/CAPABILITY-MAP.md`）；表不存在 ⇒ `SKIP`、退出码仍 0。它是**摘要层**门禁：权威仍是 `PACKAGING.md` §0、`LGPL-ENGINE-SWITCH.md` §0 与 `LICENCE-DECISION.md` §6 各自的状态块，本项只保证摘要不再与它们分叉。
+### 3.16 验收「不打扰」契约（W48，2026-10-31）
+
+`windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` 是 GUI 验收的唯一入口契约（自 2026-10-24 起所有 GUI 验收只能经 `run-quiet.ps1` 启动）。它承诺三件事：不在人不在场时启动、人一回来就停、跑完不留残骸 —— 但 W48 之前，这份承诺只活在文档与脚本里，没有任何检查把两侧对上：把 `run-quiet.ps1` 的默认阈值调大、把 `MhQuiet.psm1` 的 QUNS 白名单放宽、或删掉 `Start-MhApp` 的 abort 标记检查，CI 都会全绿，而那正是「测试会打扰使用者」的入口。
+
+| 判据 | 内容 |
+| --- | --- |
+| 状态块 | 文档含 `<!-- BEGIN quiet-run-status` … `<!-- END quiet-run-status` 块，块内逐字九行：`default-min-idle-seconds: 180`、`wait-for-idle-minutes-default: 0`、`idle-source: GetLastInputInfo`、`quns-allowed-states: 5,6`、`watchdog-poll-milliseconds: 700`、`abort-marker: watch-*.abort`、`suite-reentry-env: MH_ALLOW_ACTIVE`、`abort-flag-env: MH_QUIET_ABORT_FILE`、`gate-precedence: abort-marker-then-allow-active-then-idle-and-quns` |
+| 与 runner 对账 | `run-quiet.ps1` 仍写 `[int]$MinIdleSeconds = 180`、`[int]$WaitForIdleMinutes = 0`、调用 `Start-MhQuietWatch`、导出 `MH_ALLOW_ACTIVE = '1'` 与 `MH_QUIET_ABORT_FILE`；文档参数表仍写 `-MinIdleSeconds` 默认 180、`-WaitForIdleMinutes` 默认 0 |
+| 与门禁模块对账 | `windows/tools/acceptance/lib/MhQuiet.psm1` 仍查 `SHQueryUserNotificationState`、白名单仍是 `$state -eq 5 -or $state -eq 6`、看门狗仍 `[int]$PollMilliseconds = 700`、仍导出 `Test-MhQuietAborted` |
+| 与守卫优先级对账 | `windows/tools/acceptance/lib/MhUia.psm1` 的 `Start-MhApp` 仍先查 `$env:MH_QUIET_ABORT_FILE`（抛 `refusing to start MediaHub: the quiet run was aborted by user input`），再看 `$env:MH_ALLOW_ACTIVE -ne '1'` |
+
+四个路径参数（都按仓库根解析）：`-QuietRunbookPath`（默认 `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md`）、`-QuietRunnerPath`（`windows/tools/acceptance/run-quiet.ps1`）、`-QuietModulePath`（`…/lib/MhQuiet.psm1`）、`-UiaModulePath`（`…/lib/MhUia.psm1`）。文档不存在 ⇒ `SKIP`、退出码仍 0；runner 或模块缺失 ⇒ `FAIL`。
+
+它刻意**不**核对阈值的人读散文措辞，也不判断门禁真的挡住了谁 —— 那是 `run-quiet.ps1` 与看门狗的运行时职责（见文档「自检」节）。
+
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
 ```text
@@ -602,6 +618,31 @@ check-licence-surface  RESULT: PASS
 | NC6 | 播放器 csproj 副本把缺省 flavour 映射改成 LGPL 目录 | **2 红**（`engine-flavour-default` 与 `capability-map-claims` 同时响，同样是预期的冗余） |
 | NC6b | 表副本把 `engine-flavour-default: gpl` 改成 `lgpl` | 恰好 1 红：状态块不再声明 `gpl`（只打新检查） |
 | NC7 | `-CapabilityMapPath` 指向不存在文件 | `SKIP`、退出码 0 |
+### 4.16 实测（2026-10-31，W48，本机，HEAD da0948cf）
+
+```text
+check-licence-surface  PASS  quiet-run-claims  the quiet-run safety contract still holds: the runbook block names 9 gate facts, the runner still defaults to 180 s idle and 700 ms polling, the QUNS allow-list is still 5/6, and Start-MhApp still refuses on an abort marker before MH_ALLOW_ACTIVE
+check-licence-surface  PASS  check-inventory  42 declared check(s): this run emitted nothing undeclared, LICENSE-SURFACE-CHECK.md names every id on its own, and both it and README.md claim the same count
+check-licence-surface  checks=42 failed=0 warnings=0 skipped=0
+check-licence-surface  RESULT: PASS
+```
+
+守卫补丁先落地、文档未同步时的首跑如实 2 红（保留为证据）：`quiet-run-claims` 报「the runbook carries no quiet-run-status block」，`check-inventory` 报 3 个问题（两份文档还写 41 项、文档未点名 `quiet-run-claims`）。
+
+七条负向对照（临时副本，均不改仓库文件；日志 `D:/mh-verify/w48-nc*.log`）：
+
+| # | 改动 | 结果 |
+| --- | --- | --- |
+| NC1 | 文档副本把状态块的 `default-min-idle-seconds` 改成 900 | 恰好 1 红：状态块不再声明 `180` |
+| NC2 | 文档副本删掉整个状态块 | 恰好 1 红：无 `quiet-run-status` 块 |
+| NC3 | `run-quiet.ps1` 副本把默认 `[int]$MinIdleSeconds = 180` 改成 900 | 恰好 1 红：runner 不再含该默认行 |
+| NC4 | `MhUia.psm1` 副本把 `$env:MH_QUIET_ABORT_FILE` 全改成 `$env:MH_QUIET_ABORT_MARKER` | 恰好 1 红：`Start-MhApp` 不再含 abort 标记检查 |
+| NC5 | 文档副本把参数表的 `-WaitForIdleMinutes` 默认值 0 改成 5 | 恰好 1 红：参数表不再声明 0 |
+| NC6 | `-QuietRunbookPath` 指向不存在文件 | `SKIP`、退出码 0 |
+| NC7 | `MhQuiet.psm1` 副本把 QUNS 白名单 `$state -eq 5 -or $state -eq 6` 改成 `$state -ge 1` | 恰好 1 红：白名单不再是 5/6 |
+
+七条里六条打在 `quiet-run-claims` 上、一条走 SKIP 通道，没有一条依赖别的检查 —— 这条契约此后不能再被悄悄放宽。
+
 ## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。
