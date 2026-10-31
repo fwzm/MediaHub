@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Fourteen things rot silently in a licence deliverable:
+    Fifteen things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -25,13 +25,17 @@
           windows-ci.yml, the set shrinks, or a digest in the generated manifest stops matching the
           bytes - PACKAGING.md section 1 and SBOM.md section 4.1 both recorded zero licence files.
      12. the LGPL compliance note rots: its component-licence table stops matching the resolved
+         graph, or section 1 stops quoting the GPL baseline the report resolved.
      13. the guard's own inventory drifts: a check is added and never listed, the document or the
          README keeps claiming the old number, or a declared check id is dropped from the document.
       14. the default engine flavour silently leaves the GPL baseline: the player project starts
           defaulting to the LGPL candidate, another project or workflow builds it, or
           windows/docs/LGPL-ENGINE-SWITCH.md stops declaring which flavour is default.
+      15. the licence decision record rots: the release-blocker status or the engine licence label
+          is removed, the record claims again that the notice files mislabel the engine, or the
+          notice files stop saying GPL-3.0-or-later for libmpv.
 
-    This script checks those fourteen surfaces without touching the network, the build, or the
+    This script checks those fifteen surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -63,6 +67,15 @@
 .PARAMETER LgplSwitchDocPath
     The document that records the default flavour and the switch flag. Default:
     windows/docs/LGPL-ENGINE-SWITCH.md.
+
+.PARAMETER LicenceDecisionDocPath
+    The licence decision record that states the release blocker. Default:
+    windows/docs/licensing/LICENCE-DECISION.md. The licence-decision-claims check compares its
+    machine-readable status block with the notice files and rejects a stale label claim.
+
+.PARAMETER HandwrittenNoticesPath
+    The hand-written notices document next to the generated one. Default:
+    windows/THIRD-PARTY-NOTICES.md. Both files are read when the engine label is cross-checked.
 
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
@@ -100,6 +113,8 @@ param(
     [string] $ReadmePath,
     [string] $PlayerProjectPath,
     [string] $LgplSwitchDocPath,
+    [string] $LicenceDecisionDocPath,
+    [string] $HandwrittenNoticesPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -129,6 +144,8 @@ $collectedListFile = Resolve-RepoPath -Path '' -Default 'windows/engine/lgpl/dis
 
 $licenceDocFile = Resolve-RepoPath -Path $LicenceDocPath -Default 'windows/docs/licensing/LICENSE-SURFACE-CHECK.md'
 $readmeFile = Resolve-RepoPath -Path $ReadmePath -Default 'README.md'
+$licenceDecisionFile = Resolve-RepoPath -Path $LicenceDecisionDocPath -Default 'windows/docs/licensing/LICENCE-DECISION.md'
+$handwrittenNoticesFile = Resolve-RepoPath -Path $HandwrittenNoticesPath -Default 'windows/THIRD-PARTY-NOTICES.md'
 
 $checks = [System.Collections.Generic.List[object]]::new()
 function Add-Check {
@@ -1055,6 +1072,7 @@ $declaredCheckIds = @(
     'lgpl-compliance-block',
     'lgpl-compliance-baseline',
     'engine-flavour-default',
+    'licence-decision-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -1178,6 +1196,54 @@ else {
         Add-Check 'engine-flavour-default' 'FAIL' (($flavourProblems -join '; ') + ' - update windows/docs/LGPL-ENGINE-SWITCH.md and the player project together')
     }
 }
+
+# --- 15. the licence decision record must stay honest ---
+$decisionProblems = @()
+if (-not (Test-Path -LiteralPath $licenceDecisionFile)) {
+    Add-Check 'licence-decision-claims' 'SKIP' ('cannot read ' + $licenceDecisionFile + ', so the release-blocker record has nothing to compare against')
+}
+else {
+    $decisionText = Get-Content -LiteralPath $licenceDecisionFile -Raw
+    $decisionStart = $decisionText.IndexOf('<!-- BEGIN licence-decision-status', [System.StringComparison]::Ordinal)
+    $decisionEnd = $decisionText.IndexOf('<!-- END licence-decision-status', [System.StringComparison]::Ordinal)
+    if ($decisionStart -lt 0 -or $decisionEnd -le $decisionStart) {
+        $decisionProblems += 'LICENCE-DECISION.md carries no licence-decision-status block'
+    }
+    else {
+        $decisionBlock = $decisionText.Substring($decisionStart, $decisionEnd - $decisionStart)
+        foreach ($expected in @('status: open-release-blocker', 'shipped-engine-licence: GPL-3.0-or-later', 'repo-label-mismatch: resolved-2026-10-31')) {
+            if ($decisionBlock.IndexOf($expected, [System.StringComparison]::Ordinal) -lt 0) {
+                $decisionProblems += ('the status block does not say ' + $expected)
+            }
+        }
+    }
+    foreach ($stalePattern in @('(?i)the repository says GPL-2\.0-or-later', '(?i)lines\s+10\s*[-\u2013]\s*11\s+state')) {
+        if ([regex]::IsMatch($decisionText, $stalePattern)) {
+            $decisionProblems += ('LICENCE-DECISION.md still asserts the stale claim matching ' + $stalePattern)
+        }
+    }
+    foreach ($noticesCandidate in @($noticesFile, $handwrittenNoticesFile)) {
+        if (-not (Test-Path -LiteralPath $noticesCandidate)) {
+            $decisionProblems += ('the notices file is absent: ' + $noticesCandidate)
+            continue
+        }
+        $noticeText = Get-Content -LiteralPath $noticesCandidate -Raw
+        $engineRows = @($noticeText -split "`r?`n" | Where-Object { $_.IndexOf('libmpv (mpv)', [System.StringComparison]::Ordinal) -ge 0 })
+        if ($engineRows.Count -eq 0) {
+            $decisionProblems += ('no libmpv (mpv) row in ' + [System.IO.Path]::GetFileName($noticesCandidate))
+        }
+        elseif (($engineRows -join ' ').IndexOf('GPL-3.0-or-later', [System.StringComparison]::Ordinal) -lt 0) {
+            $decisionProblems += ('the libmpv row in ' + [System.IO.Path]::GetFileName($noticesCandidate) + ' no longer says GPL-3.0-or-later')
+        }
+    }
+    if ($decisionProblems.Count -eq 0) {
+        Add-Check 'licence-decision-claims' 'PASS' 'LICENCE-DECISION.md still declares the open release blocker and the GPL-3.0-or-later engine label, and both notice files still label libmpv GPL-3.0-or-later (3 machine-readable lines)'
+    }
+    else {
+        Add-Check 'licence-decision-claims' 'FAIL' (($decisionProblems -join '; ') + ' - update windows/docs/licensing/LICENCE-DECISION.md, windows/THIRD-PARTY-NOTICES.md and windows/docs/THIRD-PARTY-NOTICES.md together')
+    }
+}
+
 
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })

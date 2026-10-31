@@ -7,8 +7,10 @@
 - Related: `windows/THIRD-PARTY-NOTICES.md`, `windows/docs/ROADMAP-WINDOWS.md` (W5),
   `windows/docs/adr/ADR-W001-technology-selection.md`, `windows/docs/adr/ADR-W004-packaging-and-distribution.md`.
 
-**摘要（中文）**：当前 `libmpv-2.dll` 是 GPL 构建，且按构建参数应为 **GPL-3.0-or-later**
-（不是仓库文档写的 GPL-2.0-or-later）。不解决该义务就**不得对外分发**便携包。
+**摘要（中文）**：当前 `libmpv-2.dll` 是 GPL 构建，且按构建参数应为 **GPL-3.0-or-later**。
+（2026-10-31 更正：仓库文档曾写 GPL-2.0-or-later，W36/W38 已把两份 notices 改成
+GPL-3.0-or-later；§0 的 status block 与核对器 `licence-decision-claims` 现在钉住这个标签。）
+不解决该义务就**不得对外分发**便携包。
 本记录给出两条可执行路径并推荐 **OPTION 1（自建 LGPL 配置的 libmpv）**；
 但 `-Dgpl=false` **本身不构成 LGPL 授权**（mpv 自己的 Copyright 文件即如此声明），
 还必须处理 FFmpeg 与全部静态链接库，并解决 LGPL 对"可重新链接"的要求。
@@ -21,11 +23,17 @@ OPTION 2 的代价不是加一个 NOTICE 文件，而是改变已分发整体的
 | Question | Answer | Evidence |
 | --- | --- | --- |
 | Is the shipped engine GPL? | **Yes.** | §1 |
-| Which GPL? | **GPL-3.0-or-later** (the repository says GPL-2.0-or-later — that is wrong). | §1.5 |
+| Which GPL? | **GPL-3.0-or-later**. The repository documents said GPL-2.0-or-later until 2026-10-31; both notice files now say GPL-3.0-or-later (W36/W38), and `licence-decision-claims` keeps them honest. | §1.5 |
 | Does `-Dgpl=false` fix it? | **No, not by itself.** mpv's own `Copyright` file says so in as many words. | §2.2 |
 | Can we fix it in this environment? | **No.** LGPL build not attempted and not attemptable here (no meson/ninja; task forbids installing). | §2.4 |
 | Recommendation | **OPTION 1**, with the FFmpeg-linkage question escalated for legal review. Until it lands: no release. | §4 |
 | Change the repository licence? | **No.** Out of scope for this workstream; requires human legal review. | §3.3 |
+
+<!-- BEGIN licence-decision-status (checked by check-licence-surface.ps1) -->
+status: open-release-blocker
+shipped-engine-licence: GPL-3.0-or-later
+repo-label-mismatch: resolved-2026-10-31
+<!-- END licence-decision-status -->
 
 ---
 
@@ -149,10 +157,11 @@ offset  98110785: x264 [%s]:
   because of `--enable-version3`, and mpv's GPLv2+ permits taking the work under GPLv3. A
   GPLv2-only reading is not available for this binary.
 
-**Correction required outside this directory (reported to the Lead, not edited by me):**
-`windows/THIRD-PARTY-NOTICES.md` lines 10–11 state `GPL-2.0-or-later`. The shipped binary's
-accurate SPDX expression is `GPL-3.0-or-later`. This matters: GPLv3 adds the Installation
-Information condition (GPLv3 §6) and the patent grant (§11).
+**Correction applied outside this directory (reported to the Lead on 2026-10-14; done on 2026-10-31):**
+`windows/THIRD-PARTY-NOTICES.md` lines 10–11 used to state `GPL-2.0-or-later`. The shipped binary's
+accurate SPDX expression is `GPL-3.0-or-later`; W36/W38 rewrote both notice files, and the
+`licence-decision-claims` check now fails if either one stops saying GPL-3.0-or-later for libmpv.
+This matters: GPLv3 adds the Installation Information condition (GPLv3 §6) and the patent grant (§11).
 
 ### 1.6 GPL-family components statically linked into `libmpv-2.dll`
 
@@ -399,11 +408,11 @@ Actions that follow, in order:
 
 ---
 
-## 6. Corrections to existing files (NOT edited — outside this task's write scope)
+## 6. Corrections to existing files (this task wrote none of them; the status of each is recorded below)
 
 | File | Current text | Correction | Basis |
 | --- | --- | --- | --- |
-| `windows/THIRD-PARTY-NOTICES.md` L10–11 | `GPL-2.0-or-later` | `GPL-3.0-or-later` | §1.5 (`--enable-version3` in the builder recipe) |
+| `windows/THIRD-PARTY-NOTICES.md` L10–11 | `GPL-2.0-or-later` | `GPL-3.0-or-later` | **done, W36/W38 (2026-10-31)** — both notice files carry the GPL-3.0-or-later label and `licence-decision-claims` pins it |
 | `windows/docs/adr/ADR-W004-packaging-and-distribution.md` L54–61 | "`$AssetSha256` 仍为 `PENDING`" | Stale: `fetch-libmpv.ps1` now pins both digests (lines 35–36) and verifies both before install | read of both files |
 | `README.md` L8 + `ADR-W001` L40 | licence badge links to `LICENSE`; asserts MIT | No `LICENSE` file exists in the repository | §1.7 |
 | `windows/docs/ROADMAP-WINDOWS.md` W5 | "解决 libmpv 的 GPL 义务（自建 LGPL 配置，或按 GPL 提供 Corresponding Source）" | Accurate as a plan; W5 should point at this record and must not start before §4 actions 1–2 | this record |

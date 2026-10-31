@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-37 项检查分十六组：
+38 项检查分十七组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -62,6 +62,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 分发与签名（W39 起） | `packaging-claims` | 发布形态、签名、安装方式与 `PACKAGING.md` §0 七行不符：CI 开始签名、仓库出现 `*.appxmanifest` 或 WiX/Inno/NSIS 工程、App 不再是 unpackaged self-contained portable、`windows-ci.yml` 丢了 portable publish/上传步骤（构建输出 `obj/`、`bin/`、`artifacts/` 不计） |
 | 门禁自证（W42 起） | `check-inventory` | 脚本里声明的检查清单与「本次运行发出的 id」「`LICENSE-SURFACE-CHECK.md` 点名的 id」「该文档与 README 声明的数量」任一分叉——新增检查忘了登记，或数量没跟着改 |
 | 引擎默认 flavour（W43 起） | `engine-flavour-default` | 默认 flavour 不再是 GPL 基线（csproj 缺省改了、别的工程或工作流开始构建候选），或 `LGPL-ENGINE-SWITCH.md` 的 `engine-flavour-status` 块不再声明 |
+| 许可决策记录（W44 起） | `licence-decision-claims` | 发布阻塞状态或引擎许可标签从 `LICENCE-DECISION.md` 消失、该记录又开始声称 notices 标错，或两份 notices 里 libmpv 一行不再写 GPL-3.0-or-later |
 | 包内许可文件（W40 起） | `package-licence-staging` | 发布树不再真的带 `licences/` 的六个文档 + digest manifest：暂存脚本被删、清单缩水、manifest 摘要与字节不符、或 CI 不再调用它（该检查把脚本重跑到临时树，不读文档） |
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
@@ -260,6 +261,21 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 负向对照（临时副本，不动仓库文件，各恰好 1 个 FAIL 检查）：csproj 副本把缺省改成 `lgpl` → 1 红；csproj 副本删掉 lgpl 目录映射 → 1 红；临时 workflows 里放一个带 `-p:LibMpvFlavour=lgpl` 的 yml → 1 红；文档副本把块里 `default-flavour` 的值改掉 → 1 红；文档副本删掉整块 → 1 红；`-LgplSwitchDocPath` 指向不存在文件 → 本项 SKIP、退出码 0。
 
+### 3.12 许可决策记录（W44，2026-10-31）
+
+第 38 项 `licence-decision-claims` 钉住 `windows/docs/licensing/LICENCE-DECISION.md` 这份「发布阻塞」的权威记录：
+
+| 判据 | 通过条件 | 失败示例 |
+| --- | --- | --- |
+| 状态块 | 文档含 `<!-- BEGIN licence-decision-status -->` 块，块内三行逐字为 `status: open-release-blocker`、`shipped-engine-licence: GPL-3.0-or-later`、`repo-label-mismatch: resolved-2026-10-31` | 块被删；或把已落地的标签改回 `GPL-2.0-or-later` |
+| 陈旧声明 | 正文不再命中 `the repository says GPL-2\.0-or-later` 与 `lines 10–11 state`（后一个正则同时吃 en dash；两个正则都带 `(?i)` 前缀，大小写不敏感） | 把 2026-10-14 版「仓库标错」的段落原样写回 |
+| notices 标签 | 生成件 `windows/docs/THIRD-PARTY-NOTICES.md` 与手写件 `windows/THIRD-PARTY-NOTICES.md` 里含 `libmpv (mpv)` 的行都必须含 `GPL-3.0-or-later` | 任一文件把该行改回 `GPL-2.0-or-later`，或删掉该行 |
+
+两个参数：`-LicenceDecisionDocPath`（默认 `windows/docs/licensing/LICENCE-DECISION.md`）、`-HandwrittenNoticesPath`（默认 `windows/THIRD-PARTY-NOTICES.md`），都按仓库根解析（跨出仓库要写 `../../`）。文档读不到时该检查 SKIP，退出码仍 0。
+
+> 为什么钉它：这份记录是「不得对外分发」的唯一权威来源，却是 2026-10-14 手写的；W36/W38 改了两份 notices 的引擎标签之后，它 §1.5 与 §6 还在要求「把 notices 的 GPL-2.0-or-later 改成 GPL-3.0-or-later」——声明与仓库现状分叉，而 CI 全绿。W44 修掉这处分叉，并把标签、状态与 notices 三者锁在一起。
+
+
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
 ```text
@@ -444,6 +460,33 @@ RESULT: PASS
 - 文档副本删掉整块 → 1 红；
 - `-PlayerProjectPath` 指向不存在的文件 → 1 红（工程缺失是仓库损坏，不是 SKIP）；
 - `-LgplSwitchDocPath` 指向不存在文件 → 本项 SKIP、`checks=37 failed=0 skipped=1`、退出码 0。
+
+### 4.12 实测（2026-10-31，W44，本机，HEAD d1b8b7b2）
+
+```text
+check-licence-surface  PASS  licence-decision-claims  LICENCE-DECISION.md still declares the open release blocker and the GPL-3.0-or-later engine label, and both notice files still label libmpv GPL-3.0-or-later (3 machine-readable lines)
+check-licence-surface  PASS  check-inventory  38 declared check(s): this run emitted nothing undeclared, LICENSE-SURFACE-CHECK.md names every id on its own, and both it and README.md claim the same count
+check-licence-surface  checks=38 failed=0 warnings=0 skipped=0
+check-licence-surface  RESULT: PASS
+```
+
+补丁落地、文档还没改时的第一次跑（`D:/mh-verify/w44-positive-first.log`）如实报红两条：`licence-decision-claims` 列出 3 个问题（无 `licence-decision-status` 块、两处陈旧声明正则命中），`check-inventory` 列出 3 个问题（文档与 README 还写 37 项、文档未点名 `licence-decision-claims`）——这正是 W42 自证项「加了检查却忘了同步文档就红」的效果。
+
+**真实发现**：第一版 NC3 把陈旧句写成大写开头的 `The repository says GPL-2.0-or-later`，检查没有变红 —— .NET 正则默认区分大小写，将来把这句话首字母大写就会漏过。已给两个陈旧正则加 `(?i)` 前缀，之后同一个大写变体的对照恰好 1 红。
+
+六条负向对照（临时副本，不改仓库文件；日志 `D:/mh-verify/w44b-ncN.log`）：
+
+| 对照 | 改动 | 结果 |
+| --- | --- | --- |
+| NC1 | 状态块 `shipped-engine-licence` 改成 `MIT` | 恰好 1 红：`the status block does not say shipped-engine-licence: GPL-3.0-or-later` |
+| NC2 | 删掉整个状态块 | 恰好 1 红：`LICENCE-DECISION.md carries no licence-decision-status block` |
+| NC3 | 文档末尾写回大写的 `The repository says GPL-2.0-or-later` | 恰好 1 红（判据 B） |
+| NC4 | 手写 notices 的 libmpv 行标签改 `GPL-2.0-or-later` | 恰好 1 红：`the libmpv row in nc4-handwritten-label.md no longer says GPL-3.0-or-later` |
+| NC5 | `-LicenceDecisionDocPath` 指向不存在的文件 | SKIP、退出码 0（`checks=38 failed=0 skipped=1`） |
+| NC6 | 手写 notices 里删掉 libmpv 那一行 | 恰好 1 红：`no libmpv (mpv) row in nc6-handwritten-norow.md` |
+
+生成件那份 notices 走的是同一段代码（正向运行读的就是生成件）；NC4/NC6 打在可单独替换的手写件上，这样每条对照都保持「恰好 1 红」而不牵连其它 notices 检查。
+
 
 ## 5. 这个工具**不**覆盖什么
 
