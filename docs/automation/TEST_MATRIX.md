@@ -1010,3 +1010,67 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 - 同 head Android CI `41219751941` 取证时 in_progress；core/feature/app 树哈希与 round 21 相同 ⇒ 按 ADR-AUTO-001 继承。
 
 - docs head `c61a454ce4862a6943c8d551ba341f755b33293d` 的 windows-ci `41220287540` 同样打印 `executionIds=1952 distinct declared ids=1952 paired rows=1952 paired result directories=1952`（WebDav `104`）与 `combined tests=2056`，licence `checks=49 failed=2` 两条红均为上游（`log-file-claims`＝`W6-113u`、`lgpl-build-record-claims`＝`W6-113ad`）⇒ 该层在代码 head 与 docs head 两处被 CI 打印。
+
+## 6.19 第十四层口径：显示名必须由声明的类名与方法名构成（W6-113ae，2026-11-01）
+
+### 口径（TRX 内部不变量，基线不加字段）
+
+| 项 | 内容 |
+| --- | --- |
+| 新增台阶行 | `displayNames=N declared prefixes=N mismatched=N` |
+| 判定 | 定义行的 `UnitTest/@name` 必须等于 `TestMethod/@className + . + TestMethod/@name`，或以该串加 `(` 开头（参数后缀由第五层行清单管） |
+| 计数口径 | 仅当显示名与 `TestMethod` 的 className、name 三者都非空白时计入 `displayNames`；其余行不进判定（既有 `cannot be name-checked` / unmapped 路径处理） |
+| 违反 | 任一不成立 → RED，消息点名 id 与「显示名 vs 声明方法前缀」两个值，结尾说明「两侧同步改名的手改 TRX 会报出与基线不同的用例集合」 |
+| 基线影响 | 无字段新增、update 脚本未改 ⇒ 无迁移；`test-suite-baseline.json` 164,452 B 与 `update-test-suite-baseline.ps1` 24,836 B 与 HEAD 逐字节相等 |
+
+### 为什么前十三层看不见
+
+| 层 | 读的是 | 两侧同步改写显示名时 |
+| --- | --- | --- |
+| 第一至第四层 | Counters 总数、`TestMethod` 的类与方法名 | 全绿（显示名不参与） |
+| 第五至第七层 | 参数后缀行清单、方法用例数、outcome 分布 | 全绿（参数与 outcome 未改） |
+| 第八层 identities | 定义显示名 == 结果显示名 | 全绿（两侧**同步**改写，等式仍成立） |
+| 第九至第十三层 | 行属性、节结构、跨文件运行身份、执行身份三处一致 | 全绿（这些属性与显示名无交集） |
+| **第十四层（本轮）** | 显示名与 `TestMethod` 的构成关系 | **RED** |
+
+### 真实语料事实（EXECUTED）
+
+- 4 个真实 TRX（r12-art 与 r9-art 的 windows/webdav 各两份）：windows 1952/1952、webdav 104/104 的定义显示名全部等于或以其声明方法前缀加 `(` 开头，0 例例外、0 例缺 label。
+- 两代 shell（pwsh 7 与 Windows PowerShell 5.1）对真实语料 exit 0 且输出逐字相同；新增行 `MediaHub.Tests: displayNames=1952 declared prefixes=1952 mismatched=0`、`MediaHub.WebDav.Tests: displayNames=104 declared prefixes=104 mismatched=0`。
+
+### 负向对照（54 例，EXECUTED）
+
+| 例 | 输入 | 期望 | 说明 |
+| --- | --- | --- | --- |
+| P1 | 规范夹具 | PASS，含 `displayNames=8 declared prefixes=8 mismatched=0` 与 `combined tests=10` | 每套件一行 |
+| P1x | 同输入给 round 22 闸门 | PASS 且无 `displayNames=` | 证明该行为本轮新增 |
+| P2 | 两侧同步改写显示名 | **RED**（`do not agree with the method they declare`） | 本层独占可见 |
+| P2x | 同输入给 round 22 闸门 | PASS | 这一红属本轮收口 |
+| P3 | 只改定义侧显示名 | RED（两代闸门均红） | 第八层 identities 先拦 |
+| P4 | 只改结果侧显示名 | RED（两代闸门均红） | 同上 |
+| P5 | Fact 行（index 0）定义显示名置空 | PASS 加 `cannot be name-checked` | 无声明身份的行不进本层 |
+| P5b | theory 行（index 6）显示名置空 | RED，且不含新文案 | 第五层参数行层先拦 |
+| P6 | `TestMethod` 名空白 | RED，但不含新文案 | 同上（回退路径不误判） |
+| RE1 | 真实语料 | PASS，含两套件 `displayNames=` 与 `combined tests=2056` | 两代 shell |
+| RE2 | 真实语料给 round 21 闸门 | PASS 且无 `executionIds=` | 迁移对照 |
+| RE2x | 真实语料给 round 22 闸门 | PASS 且无 `displayNames=` | 迁移对照 |
+| RE3 | 基线 / update 脚本 / 工作树状态 | 逐字节未变，`git status` 仅 check 一行 | 无迁移 |
+
+- 首轮 49/54：5 红全部是继承例的对照脚本陈旧 —— `G1x`（断言 round 21 版无 `executionIds=`）与 `G2x/G3x/G5x/G7x`（断言 round 21 版放行）仍指 `OLD_CK`，而 `OLD_CK` 本轮已推进为 round 22 版（含第十三层）⇒ 正确判红。修法：五例改指 `OLD_CK21`；复跑 54/54 pass、fail=0（`D:/mh-verify/r23/nc-console2.log`）。教训：**换版本对照时，陈旧例的对照脚本必须逐个重指**。
+
+### 数据源与规模
+
+- 数据源：CI run `41095080796` @head `701bb547` 的 TRX（`windows-tests.trx` 2,719,155 B / `webdav-tests.trx` 145,266 B）。
+- `windows/tools/check-test-suite-baseline.ps1` 69,399 → 71,520 B（sha256 前 16 `77e2d8a504b2f7a5`，纯 ASCII），提交 `3511f2abb03f61d6cbf7c5fe742f92e27b2c56e6`（1 file / +35），非 force push `e2409c23..3511f2ab`。
+
+### 残留限制
+
+1. 本层只核对「显示名的前缀构成」，不核对参数文本内容 —— 参数由第五层行清单管，本层不重复。
+2. runner 截断的显示名（`···` 标记）只核对到参数之前的 `Class.Method(` 前缀；截断点之后的差异仍不可见（与第五层同一限制）。
+3. `TestMethod` 的 className/name 空白或无法解析的行不进构成核对（由 `cannot be name-checked` warning 与 unmapped 路径处理），因此「缺声明身份」的行不会因本层变红。
+
+### exact-head CI 验收（EXECUTED，40 位 SHA）
+
+- head `3511f2abb03f61d6cbf7c5fe742f92e27b2c56e6` 的 windows-ci **`41223497657` = completed/failure**（`pull_request`，日志 `D:/mh-verify/r23/ci-codehead.txt.log`，111,708 B）：测试门禁步骤全绿，两套件打印十四层台阶行（含 `displayNames=1952 declared prefixes=1952 mismatched=0`、`displayNames=104 declared prefixes=104 mismatched=0`、`combined tests=2056`、`suites=2 baseline=suite table 2 suites`）。
+- licence `check-licence-surface  checks=49 failed=1 warnings=0 skipped=0`，唯一红为上游 `log-file-claims`（`W6-113u`）；上一轮上游红 `lgpl-build-record-claims`（`W6-113ad`）本轮转 PASS —— base `a888a1924da624d600e256aa32fc9b374015e470` 自身 windows-ci push `41221543412` 与 pull_request `41221547543` 均 success ⇒ `W6-113ad` 标 RESOLVED。
+- 同 head Android CI `41223497614` 取证时 in_progress；`3511f2ab` 与 `e2409c23` 的 `core`/`feature`/`app` 树哈希全同（`ff4eed826cbc` / `e983feb08237` / `70c541457cae`）⇒ 按 ADR-AUTO-001 继承，不作独立结论。

@@ -331,3 +331,40 @@
 - 锁：run-id `w6-r22-y8k5t3`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `b06c0593f0baf8476f01ed27946a6843`）、`ref:origin/feature/cross-device-source-sync`（`8183447c8851cc82adcaa2221180ae52`）、`worktree:D:/mh-w6`（`9e4fee379eed63674fbe0c5cccf9f012`）；收尾释放。
 
 - docs head 的 exact-head CI（EXECUTED）：`c61a454ce4862a6943c8d551ba341f755b33293d` 的 windows-ci **`41220287540` = completed/failure**（日志 `D:/mh-verify/r22/ci-docshead.log`，111,436 B）：台阶行与代码 head 逐字一致（含 **`executionIds=1952 distinct declared ids=1952 paired rows=1952 paired result directories=1952`** 与 WebDav `executionIds=104 distinct declared ids=104 paired rows=104 paired result directories=104`、`combined tests=2056`），licence `checks=49 failed=2` 两条红仍为 `log-file-claims`（`W6-113u`）与 `lgpl-build-record-claims`（上游，`W6-113ad`）⇒ round 22 判定标准在代码 head 与 docs head 两处成立。
+
+## 2026-11-01 01:1x round 23（W6-113ae：套件基线第十四层口径 —— 显示名必须由声明的类名与方法名构成）
+
+### 侦察（EXECUTED）
+- goal `goal-d6aa099f-2e87-405d-9199-3c461ab839cc` revision 6 / roundsStarted 23 / armed；W6 树 `D:/mh-w6` head `e2409c23`、`git status --porcelain` 空、与 origin 0/0；远端 `feature/cross-device-source-sync` = `e2409c23`；base `feature/windows-client` = `a888a1924da624d600e256aa32fc9b374015e470`；main = `1246313c`；锁表空；仅 lead。
+- queue 34 tasks：未阻塞切片为空（`W6-P1-E2E` BLOCKED、`REL-SIGN` SIGNING_BLOCKED、`REL-LGPL` RELEASE_BLOCKED、`W6-113g` WAITING_FOR_APPROVAL、`W6-113u` BLOCKED、`W6-113ad` BLOCKED）。
+
+### 缺口（本轮切片动机）
+- 前十三层的名侧对比只要求「定义显示名 == 结果显示名」（第八层 `identities=`），而**显示名的构成**从未被核对：一次干净运行里 `UnitTest/@name` 由 `TestMethod/@className + . + TestMethod/@name` 后接 `(<参数>)` 组成，而两侧同步改名的补丁能让全部十三层通过（per-class / per-method 计数读的是 `TestMethod`，与显示名无关）。
+- 实测依据（EXECUTED，4 个真实 TRX：`D:/mh-verify/r12-art/mediahub-windows-47fb6f5075d21ee70a568a8cb460256b60d200bf/test-results/windows-tests.trx` 1952 行、同目录 `webdav-tests.trx` 104 行、`D:/mh-verify/r9-art/test-results/` 同名两文件）：逐定义比对「显示名是否以 `className + . + methodName` 开头」⇒ **1952/1952 与 104/104 全部成立、0 例例外、0 例缺 label** ⇒ 可作 RED 条件。
+
+### 修法（只改 `windows/tools/check-test-suite-baseline.ps1`；基线零变化、update 脚本未改 ⇒ 无迁移）
+- 五处插入：① 头注释追加一条；② 累加器 `$displayNameChecked` / `$displayNameLost`；③ 定义循环内组合检查（仅当显示名与 `TestMethod` 的 className/name 都非空白时计数，显示名必须等于 `Class.Method` 或以其加 `(` 开头）；④ 判定块（在「The summary is not trusted on its own」之前）→ 非空即 throw；⑤ 台阶行 `displayNames=N declared prefixes=N mismatched=N`。
+- 台阶行实测（真实语料，两代 shell 逐字相同）：`MediaHub.Tests: displayNames=1952 declared prefixes=1952 mismatched=0`、`MediaHub.WebDav.Tests: displayNames=104 declared prefixes=104 mismatched=0`。
+
+### 负向对照（54 例，EXECUTED）
+- 台账 `D:/mh-verify/r23/run-nc.cjs`（26,977 B，`node --check` 通过），每例在 pwsh 7 与 Windows PowerShell 5.1 各跑一次并要求判定一致。
+- **首轮 49/54（5 红全部是继承例的对照脚本陈旧）**：`G1x the round-21 gate prints no execution identity line`、`G2x/G3x/G5x/G7x the round-21 gate accepts …` —— 这五例的对照脚本仍指 `OLD_CK`，而 `OLD_CK` 本轮已随版本推进变成 round 22 版（含第十三层）⇒ 正确判红。修法：五例改指 `OLD_CK21`（round 21 版）。教训：换版本对照时，陈旧例的对照脚本必须逐个重指。
+- **复跑 54/54 pass、fail=0、EXIT=0**（日志 `D:/mh-verify/r23/nc-console2.log`，末行 `--- total 54 cases, pass=54, fail=0`）。
+- 核心成对例：**P2 两侧同步改写显示名 → 新闸门 RED（`do not agree with the method they declare`）/ P2x 同输入给 round 22 闸门 PASS**（这一红属本轮收口）；P3 只改定义侧 / P4 只改结果侧 → 两代均 RED（第八层先拦）；P5 只把 Fact 行（index 0）定义显示名置空 → PASS 加 `cannot be name-checked`（新层只管有声明身份的行）；P5b 把 theory 行（index 6）显示名置空 → 由第五层参数行层先判 RED；P6 `TestMethod` 名空白 → RED 但不含新文案；RE1 真实语料两代 shell 打印 `displayNames=` 且 `combined tests=2056`；RE2/RE2x/RE3 迁移对照与「基线与 update 脚本逐字节未变」。
+
+### 实现过程事故（可复用教训）
+- 锚点 `  # The summary is not trusted on its own:` 只是长注释行 `  # The summary is not trusted on its own: every result row carries exactly one` 的**前缀**，replace(anchor, anchor + block) 把 `if ($displayNameLost.Count -gt 0) {` 粘进注释行 ⇒ 注释吞掉 if 与左花括号，两代 shell 均报 `Unexpected token } in expression or statement`。修法：把被粘连行整体换回 if 起头；**锚点是整行还是长行前缀必须先确认**。
+
+### 数据源与规模
+- 数据源：round 22 同源的 CI TRX（run `41095080796` @head `701bb547`，windows 2,719,155 B / webdav 145,266 B）。
+- `windows/tools/check-test-suite-baseline.ps1` 69,399 → **71,520 B**（sha256 前 16 `77e2d8a504b2f7a5`，纯 ASCII）；`test-suite-baseline.json` 164,452 B 与 `update-test-suite-baseline.ps1` 24,836 B 与 HEAD 逐字节相等。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 **`3511f2abb03f61d6cbf7c5fe742f92e27b2c56e6`**（`ci(windows): suite baseline pins the display name to its declared method (W6-113ae)`，1 file changed / +35）；blob 与工作树 sha256 相等；非 force push `e2409c23..3511f2ab`，远端 ref 同值，工作树干净。
+- head `3511f2ab` 的 windows-ci **`41223497657` = completed/failure**（`pull_request`；日志 `D:/mh-verify/r23/ci-codehead.txt.log`，111,708 B）：**测试门禁步骤全绿**并打印十四层台阶行，新增 **`MediaHub.Tests: displayNames=1952 declared prefixes=1952 mismatched=0`** 与 **`MediaHub.WebDav.Tests: displayNames=104 declared prefixes=104 mismatched=0`**；其余台阶行未变（`executionIds=1952 distinct declared ids=1952 paired rows=1952 paired result directories=1952`、`file identities=2 distinct run ids=2 cross-file duplicate execution ids=0`、`suites=2 baseline=suite table 2 suites`、`combined tests=2056`）⇒ 本轮判定标准成立。
+- licence 步骤 `check-licence-surface  checks=49 failed=1 warnings=0 skipped=0`：唯一红为上游 `log-file-claims`（`W6-113u`）；**上一轮的上游红 `lgpl-build-record-claims`（`W6-113ad`）本轮转 PASS** —— base 已前进到 `a888a192`，其自身 windows-ci push run `41221543412` 与 pull_request run `41221547543` 均 success ⇒ 该条目可标 RESOLVED。
+- 同 head Android CI **`41223497614`** 取证时 in_progress；`3511f2ab` 与 `e2409c23` 的 `core`/`feature`/`app` 树哈希全同（`ff4eed826cbc` / `e983feb08237` / `70c541457cae`，仅 `windows` 从 `e3429389c18b` 变为 `175b49fd26ee`）⇒ 按 ADR-AUTO-001 继承、不作独立结论。
+- PR #39：head `3511f2ab`、draft、正文 177,336 B（余约 84,807 B）。
+
+### 锁
+- run-id `w6-r23-m7q2v5`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `3674ce3d20f222dce6be9329407a62e4`）、`ref:origin/feature/cross-device-source-sync`（`f804d7b44743038b383ccce8fba53b97`）、`worktree:D:/mh-w6`（`052a004442f93f8211b32fb4d7c52d2a`）；收尾释放。
