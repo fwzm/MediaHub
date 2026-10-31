@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-46 项检查分二十五组：
+47 项检查分二十六组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -67,6 +67,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 引擎固定摘要（W46 起） | `engine-pins-claims` | `windows/tools/fetch-libmpv.ps1` 钉的归档摘要、解包后 libmpv-2.dll 摘要与归档文件名，在三份引用它们的文档（`windows/THIRD-PARTY-NOTICES.md`、`ADR-W004`、`REPRODUCIBLE-BUILD.md`）里不再逐字出现——换 pin 不同步改文档，prose 就继续描述旧字节 |
 | 包内许可文件（W40 起） | `package-licence-staging` | 发布树不再真的带 `licences/` 的六个文档 + digest manifest：暂存脚本被删、清单缩水、manifest 摘要与字节不符、或 CI 不再调用它（该检查把脚本重跑到临时树，不读文档） |
 | 能力对照表（W47 起） | `capability-map-claims` | `windows/docs/CAPABILITY-MAP.md` §0 的九行状态块缺行/改值、测试行写回写死的用例计数、或它声称的发布状态与 `PACKAGING.md` §0 不再一致 |
+| 能力对照表指针（W53 起） | `capability-map-pointers` | `windows/docs/CAPABILITY-MAP.md` 的链接目标、仓库路径 token、状态词封闭性与用例计数纪律任一分叉：markdown 链接指向已改名的文件、内联代码写出的仓库路径在六个声明根（仓库根、`windows`、`windows/src`、`windows/docs`、`windows/tools`、`.github`）下都找不到、出现图例之外的状态词（如 `PARTIAL_PASS`）、图例不再定义六态之一、测试行又贴着 `MediaHub.Tests` 写死「N 条」计数，或表丢了 `test-count-authority: ci-print` 行 |
 | 验收不打扰契约（W48 起） | `quiet-run-claims` | `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` §0 的九行门禁事实（空闲阈值 180 s、QUNS 只允许 5/6、看门狗 700 ms、abort 标记与 `MH_ALLOW_ACTIVE`/`MH_QUIET_ABORT_FILE`、守卫优先级）缺行或改值，或 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询、`MhUia.psm1` 的 `Start-MhApp` abort 守卫与它不再一致 |
 | 续播下限契约（W49 起） | `resume-floor-claims` | `windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §0 的八行阈值与用例数、`MockMediaServer.cs` 里 Emby 2 % / Jellyfin 5 % / 300 s / 90 % / 10 s 的常量、以及契约测试实际展开出的用例数，三者任一分叉——放宽下限、删判定分支、加减用例却没同步文档即红 |
 | 诊断日志落盘（W50 起） | `log-file-claims` | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md` §0 的十五行上限/轮转/失败策略/用例数、`LogFileSink.cs` 的默认常量与轮转触发式、`LogService.cs` 的环形上限与写入顺序、`AppServices.cs` 的组合根目录、sink 测试展开的 9 例，五方任一分叉即红 |
@@ -242,7 +243,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 46） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 47） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -321,6 +322,8 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 | 状态块 | 表含 `<!-- BEGIN capability-map-status` … `<!-- END capability-map-status` 块，块内逐字九行：`capability-map-status: checked-by-ci`、`test-count-claim: see-ci`、`msix: not-implemented`、`signing: blocked-no-certificate`、`clean-machine-install: not-run`、`engine-flavour-default: gpl`、`engine-lgpl-candidate: built-not-switched`、`licence-files-in-package: staged-by-ci`、`release-blocker: gpl-obligation` |
 | 不再写死计数 | 全文不得命中 `(\bi\d+\s+tests?\s*/\s*\d+\s+failed` 型计数行：用例数权威是 CI 打印（`test-count-claim: see-ci`） |
 | 交叉核对 | `PACKAGING.md` §0 必须仍写 `msix: not-implemented`、`signing-status: blocked-no-certificate`、`clean-machine-install: not-run`、`licence-files-in-package: staged-by-ci`；播放器工程仍默认 `native\libmpv`（GPL 基线）；`windows/engine/lgpl/dist/libmpv-2.dll` 仍在（否则 `built-not-switched` 无依据） |
+
+状态块在 W53 起还有**第十行** `test-count-authority: ci-print`：第 41 项仍只钉原来的九行（避免同一份改动同时惊动两条检查），第十行由 §3.21 的第 47 项 `capability-map-pointers` 负责。
 
 `-CapabilityMapPath` 可换一幅对照表（默认 `windows/docs/CAPABILITY-MAP.md`）；表不存在 ⇒ `SKIP`、退出码仍 0。它是**摘要层**门禁：权威仍是 `PACKAGING.md` §0、`LGPL-ENGINE-SWITCH.md` §0 与 `LICENCE-DECISION.md` §6 各自的状态块，本项只保证摘要不再与它们分叉。
 ### 3.16 验收「不打扰」契约（W48，2026-10-31）
@@ -829,6 +832,50 @@ RESULT: PASS
 
 八条打在 `doc-residue-claims` 上、一条走 SKIP 通道 —— 「文档被工具写坏」此后不再只能靠人眼发现；NC8 正是 W51 那次表格行粘连、以及 README 第 364 行整段重复的形态。
 
+### 3.21 能力对照表的指针、状态词与计数纪律（W53，2026-10-31）
+
+W47 的 `capability-map-claims` 逐行比对了 §0 九行、并禁止英文 `N tests / M failed` 型计数，但**文档的指针与词汇**没有人看：链接可以指向改名后的文件（markdown 渲染成死链，而检查一路绿）、内联代码里的仓库路径可以指向不存在的目录、状态词可以凭空发明（`PARTIAL_PASS` 与 `EXECUTED_PASS` 在渲染上一样像结论）——而中文「478 条」恰好是从英文禁令下溜走的那一个（W47 只禁英文形态，中文计数一直写在测试行里，自称「本表不写死数字」）。第 47 项 `capability-map-pointers` 因此把「表说得对不对」与「表还指得准不准」分开：
+
+| 判据 | 失败含义 |
+| --- | --- |
+| 每个 markdown 链接（非 `http(s)://`、非 `#` 锚点）的相对目标必须存在 | 文档改名/挪目录后表格仍指向旧路径——渲染出来是死链，读者以为那里有证据 |
+| 每个含 `/` 且扩展名在 `cs`/`csproj`/`md`/`json`/`xaml`/`yml`/`ps1`/`txt`/`sh`/`dll` 之内的内联代码 token，必须在六个声明根（仓库根、`windows`、`windows/src`、`windows/docs`、`windows/tools`、`.github`）之一命中 | 表格用路径指认实现（如 `MediaHub.Net/NetworkPolicy.cs`），路径挪走后引用就成了散文 |
+| 文本里所有 `[A-Z]+(_[A-Z]+)+` 形状态词必须属于图例的封闭词汇表（九态 + `RELEASE_BLOCKER`） | 新造状态词（如 `PARTIAL_PASS`）绕开了「状态词只有九个」的口径；它与真状态在渲染上无法区分 |
+| 前 12 行必须仍以 `**EXECUTED_PASS**` … `**NOT_STARTED**` 定义六态 | 图例被删后，表里的状态词就成了没有定义的缩写 |
+| 任何一行同时出现 `MediaHub.Tests`/`MediaHub.WebDav.Tests` 与「N 条」即红，且表必须**逐行**含 `test-count-authority: ci-print` | 中文计数从英文禁令下溜走；用例数的权威是 CI 打印，写进表里下一个用例就作废（该行只由本项要求，第 41 项仍只钉原来的九行，避免一次改动同时惊动两条检查） |
+
+判据只认「表格自己要能指到文件」的写法：不含斜杠的 token（`MediaHub.Player.Mpv.csproj` 是裸文件名、`playlists.json` 是运行时落盘文件）不按仓库路径判——这是 recon 里定下的边界，否则一上来就是假红。表不存在 ⇒ `SKIP`、退出码仍 0。
+
+### 4.21 实测（2026-10-31，W53，本机，HEAD a75371f6）
+
+代码：
+
+```text
+pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath D:/mh-verify/w38-license/license-report.json
+check-licence-surface  PASS  capability-map-pointers  every markdown link and repository path in the map still resolves, its status words stay inside the legend and it no longer pins a live test count
+check-licence-surface  checks=47 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+守卫补丁先落地、两份文档还没同步时的首跑如实 1 红（保留为证据）：`check-inventory` 列出 3 个问题（`LICENSE-SURFACE-CHECK.md` 与 `README.md` 还写 46 项、文档未点名 `capability-map-pointers`），新项自己已 PASS。
+
+六条负向对照各**恰好 1 红**，一条走 SKIP 通道（临时副本树 `D:/mh-verify/w53-nc/`，未改仓库文件；每份副本旁边都按原相对位置镜像了它引用的六份文档与 `../THIRD-PARTY-NOTICES.md`）：
+
+| # | 改法 | 结果 |
+| --- | --- | --- |
+| NC1 | 副本把 `W9-EVIDENCE.md` 全部改成 `W9-EVIDENCEX.md` | 恰好 1 红（该文件目标不存在，6 处链接各一条问题） |
+| NC2 | 副本把 `MediaHub.Net/NetworkPolicy.cs` 改成 `MediaHub.NetX/NetworkPolicy.cs` | 恰好 1 红（六个声明根下都命中不到） |
+| NC3 | 副本尾追加一行 `PARTIAL_PASS` | 恰好 1 红（图例外的状态词） |
+| NC4 | 副本把图例里的 `**DEVICE_UNVERIFIED**` 去掉粗体定义 | 恰好 1 红（图例不再定义该态） |
+| NC5 | 副本测试行写回「当前 MediaHub.Tests 478 条 + MediaHub.WebDav.Tests 104 条」 | 恰好 1 红（2 条问题：两个套件各自被贴上固定计数，但只是同一条检查） |
+| NC6 | 副本删掉状态块里的 `test-count-authority: ci-print` **行** | 恰好 1 红（表不再声明计数权威） |
+| NC7 | `-CapabilityMapPath` 指向不存在文件 | `SKIP`、退出码 0 |
+
+本轮这条检查被负向对照逼出过**两处口径问题**，都已修好并复验：① 第一版对着「副本放在别处」的负向对照全部误报——markdown 链接是相对**文档所在目录**解析的，副本挪到 `D:/mh-verify/w53-nc/NCx/` 之后 15 条链接全部找不到；这不是检查的缺陷，而是负向对照的方法错（镜像引用文档后才得到「恰好 1 红」的干净结论），已写进本节做法。② NC6 第一版删的是状态块里那一行，却整轮**假绿**——因为 §0 的说明段里也正当地写着这个 token（散文里的引用满足了「文本含该字符串」），判据改为要求它作为**一整行**出现后才真正红。这与 W48 的教训同源：负向对照必须打在**被核对的那串字符**上，笼统的「文本包含」会被同一 token 的别的出现抵消。
+
+日志：正向 `D:/mh-verify/w53-positive.log`，首跑 `D:/mh-verify/w53-first.log`，负向对照 `D:/mh-verify/w53-nc/NC1.log` … `NC7.log`。
+
+## 5. 这个工具**不**覆盖什么
 ## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。

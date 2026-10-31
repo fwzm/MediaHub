@@ -1228,6 +1228,7 @@ $declaredCheckIds = @(
     'log-file-claims',
     'doc-audit-snapshot-claims',
     'doc-residue-claims',
+    'capability-map-pointers',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -1577,11 +1578,66 @@ else {
         $capabilityProblems += 'the LGPL candidate binary is gone, so engine-lgpl-candidate: built-not-switched is unsupported'
     }
     if ($capabilityProblems.Count -eq 0) {
-        Add-Check 'capability-map-claims' 'PASS' 'the capability map still describes the repository: 9 machine-readable lines, shipping claims agreeing with PACKAGING.md, the GPL baseline default in the player project and the built LGPL candidate'
+        Add-Check 'capability-map-claims' 'PASS' 'the capability map still describes the repository: its machine-readable status lines are present, the shipping claims agree with PACKAGING.md, the player project still defaults to the GPL baseline and the LGPL candidate is still built'
     }
     else {
         Add-Check 'capability-map-claims' 'FAIL' (($capabilityProblems -join '; ') + ' - update windows/docs/CAPABILITY-MAP.md section 0 and the row it summarises')
     }
+}
+# --- 18b. the capability map’s pointers, status words and count claims must still resolve -----
+if (-not (Test-Path -LiteralPath $capabilityMapFile)) {
+    Add-Check 'capability-map-pointers' 'SKIP' ('cannot read ' + $capabilityMapFile + ', so the pointers the map carries have nothing to resolve against')
+}
+else {
+    $mapPointerProblems = @()
+    $mapSep = [System.IO.Path]::DirectorySeparatorChar
+    $mapDocsDir = Split-Path -Parent $capabilityMapFile
+    foreach ($mapLinkMatch in [regex]::Matches($capabilityText, '\[[^\]]*\]\(([^)]+)\)')) {
+        $mapLinkTarget = $mapLinkMatch.Groups[1].Value
+        if ($mapLinkTarget -match '^[a-z]+://' -or $mapLinkTarget.StartsWith('#')) { continue }
+        if (-not (Test-Path -LiteralPath (Join-Path $mapDocsDir ($mapLinkTarget -replace '/', $mapSep)))) {
+            $mapPointerProblems += ('the link target ' + $mapLinkTarget + ' no longer exists next to the map')
+        }
+    }
+    $mapPointerRoots = @($RepoRoot, (Join-Path $RepoRoot 'windows'), (Join-Path $RepoRoot 'windows/src'), (Join-Path $RepoRoot 'windows/docs'), (Join-Path $RepoRoot 'windows/tools'), (Join-Path $RepoRoot '.github'))
+    foreach ($mapCodeMatch in [regex]::Matches($capabilityText, '`([^`\r\n]+)`')) {
+        $mapCodeToken = $mapCodeMatch.Groups[1].Value
+        if ($mapCodeToken -notmatch '/') { continue }
+        if ($mapCodeToken -notmatch '\.(cs|csproj|md|json|xaml|yml|ps1|txt|sh|dll)$') { continue }
+        $mapCodeHit = $false
+        foreach ($mapPointerRoot in $mapPointerRoots) {
+            if (Test-Path -LiteralPath (Join-Path $mapPointerRoot ($mapCodeToken -replace '/', $mapSep))) { $mapCodeHit = $true; break }
+        }
+        if (-not $mapCodeHit) { $mapPointerProblems += ('the path ' + $mapCodeToken + ' resolves under no known repository root') }
+    }
+    $mapAllowedStatusWords = @('EXECUTED_PASS', 'IMPLEMENTED_UNVERIFIED', 'SERVER_UNVERIFIED', 'DEVICE_UNVERIFIED', 'NOT_IMPLEMENTED', 'NOT_STARTED', 'NOT_RUN', 'NOT_SUPPORTED', 'SIGNING_BLOCKED', 'RELEASE_BLOCKER')
+    foreach ($mapStatusMatch in [regex]::Matches($capabilityText, '\b[A-Z]+(?:_[A-Z]+)+\b')) {
+        if ($mapAllowedStatusWords -notcontains $mapStatusMatch.Value) {
+            $mapPointerProblems += ('the status word ' + $mapStatusMatch.Value + ' is outside the legend, so the table no longer speaks a closed vocabulary')
+        }
+    }
+    $mapLegendText = ((@($capabilityText -split "\n") | Select-Object -First 12) -join "\n")
+    foreach ($mapLegendStatus in @('EXECUTED_PASS', 'IMPLEMENTED_UNVERIFIED', 'SERVER_UNVERIFIED', 'DEVICE_UNVERIFIED', 'NOT_IMPLEMENTED', 'NOT_STARTED')) {
+        if ($mapLegendText.IndexOf('**' + $mapLegendStatus + '**', [System.StringComparison]::Ordinal) -lt 0) {
+            $mapPointerProblems += ('the legend no longer defines ' + $mapLegendStatus)
+        }
+    }
+    foreach ($mapSuiteName in @('MediaHub.Tests', 'MediaHub.WebDav.Tests')) {
+        foreach ($mapLineText in ($capabilityText -split "\n")) {
+            if ($mapLineText.IndexOf($mapSuiteName, [System.StringComparison]::Ordinal) -ge 0 -and [regex]::IsMatch($mapLineText, '\d+\s*\u6761')) {
+                $mapPointerProblems += ('the map pairs ' + $mapSuiteName + ' with a fixed count, which goes stale the next time a test is added')
+            }
+        }
+    }
+    if (-not (@($capabilityText -split "\n") -contains 'test-count-authority: ci-print')) {
+        $mapPointerProblems += 'the map no longer declares the CI print as the authority for its test counts'
+    }
+    if ($mapPointerProblems.Count -eq 0) {
+        Add-Check 'capability-map-pointers' 'PASS' 'every markdown link and repository path in the map still resolves, its status words stay inside the legend and it no longer pins a live test count'
+}
+else {
+        Add-Check 'capability-map-pointers' 'FAIL' ($mapPointerProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $mapPointerProblems) + ' - repair windows/docs/CAPABILITY-MAP.md and keep its pointers, its legend and its count authority together')
+}
 }
 # --- 19. the quiet-run safety contract ---
 $quietProblems = New-Object System.Collections.Generic.List[string]

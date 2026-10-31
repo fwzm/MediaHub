@@ -11,6 +11,7 @@
 ```text
 capability-map-status: checked-by-ci
 test-count-claim: see-ci
+test-count-authority: ci-print
 msix: not-implemented
 signing: blocked-no-certificate
 clean-machine-install: not-run
@@ -21,7 +22,7 @@ release-blocker: gpl-obligation
 ```
 <!-- END capability-map-status -->
 
-上面九行由 `windows/tools/check-licence-surface.ps1` 的 `capability-map-claims` 检查**逐行**核对：与 [PACKAGING.md](licensing/PACKAGING.md) §0 的发布状态块、播放器工程 `MediaHub.Player.Mpv.csproj` 的默认 engine flavour、以及仓库内 LGPL 候选件 `windows/engine/lgpl/dist/libmpv-2.dll` 是否仍在，交叉比对。改状态必须同时改这里与权威记录，否则 CI 红。测试计数不再写死在本表（权威是 CI 打印的计数），故为 `test-count-claim: see-ci`。
+上面九行由 `windows/tools/check-licence-surface.ps1` 的 `capability-map-claims` 检查**逐行**核对：与 [PACKAGING.md](licensing/PACKAGING.md) §0 的发布状态块、播放器工程 `MediaHub.Player.Mpv.csproj` 的默认 engine flavour、以及仓库内 LGPL 候选件 `windows/engine/lgpl/dist/libmpv-2.dll` 是否仍在，交叉比对。改状态必须同时改这里与权威记录，否则 CI 红。测试计数不再写死在本表（权威是 CI 打印的计数），故为 `test-count-claim: see-ci`；该块第十行 `test-count-authority: ci-print` 与全表的链接、仓库路径、状态词与用例计数纪律另由 `capability-map-pointers` 检查核对。
 ## 领域契约
 
 | 契约 | 状态 | 位置 |
@@ -126,7 +127,7 @@ release-blocker: gpl-obligation
 
 | 项 | 状态 |
 | --- | --- |
-| 单元与契约测试 | **EXECUTED_PASS**（权威计数以 CI 打印为准：当前 MediaHub.Tests 478 条 + MediaHub.WebDav.Tests 104 条；本表不再写死数字） |
+| 单元与契约测试 | **EXECUTED_PASS**（权威计数以 CI 打印为准：MediaHub.Tests 与 MediaHub.WebDav.Tests 的 total/failed 一律见每次 CI 打印；本表不写死数字） |
 | 模拟服务器集成（真实 socket） | EXECUTED_PASS（23 条） |
 | 引擎网络边界与凭据不泄漏 | EXECUTED_PASS（9 条） |
 | 凭据库与 URL 规范化 | EXECUTED_PASS（79 条，含变异验证） |
