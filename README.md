@@ -243,7 +243,7 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   审批门禁的「跳过即不写入」（同一身份 allow 与 skip 并存时 skip 胜）、同步 CLI 的 `--root` 误指已存在文件改为稳定拒绝
   （`root-not-a-directory`，每份 JSON 带 `rootExisted` 区分「新建根」与「路径写错」）与导出路径规范化
   （`../` 解析后再回显，`--out` 指向目录给 `output-is-directory`）均已实现，
-  `MediaHub.Tests` **1708 通过 / 0 失败**（其中 W6 新增 1239）；
+  `MediaHub.Tests` **1708 通过 / 0 失败**（其中 W6 新增 1230，= 1708 − 主线 478）；
   W12b 对抗性安全回归 66 例（畸形配对载荷、设备登记表在损坏/容量满/独占/只读时必须拒绝而不是静默清空、
   传输层声明长度不触发分配、`--json` 单文档、异常与 stderr 不含口令）；
   **尚未做**：二维码与扫码、跨机（非回环）配对与真实局域网传输（Windows 端已有显式非回环入口 W6-51，但一次真实跨机传输都没跑过；Android 的监听端（W6-52）与拨号侧两张卡（W6-52b）也都有同形状的地址闸门开关）、设备持久化、同步页/配对页/已配对清单的 GUI 证据
@@ -264,7 +264,7 @@ dotnet test  MediaHub.Windows.sln -c Debug
 
 CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
 与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
-截至 `95fff582`：`MediaHub.Tests` **478** + `MediaHub.WebDav.Tests` **104** = **582 通过 / 0 失败 / 0 跳过**（run 41081700166 日志实测；`478 = 469 + 9`，由 W14 诊断日志落盘 9 例带来）
+截至 `a888a192`：`MediaHub.Tests` **478** + `MediaHub.WebDav.Tests` **104** = **582 通过 / 0 失败 / 0 跳过**（windows-ci run **41221547543** 日志实测；`478 = 469 + 9`，由 W14 诊断日志落盘 9 例带来，此后 W35–W55 的都是文档/脚本门禁、未再加 C# 用例）
 （469 = 438 既有 + 31 例续播下限契约；历史口径 542 = 438 + 104 曾在 PR #33 里写过）。
 这不是本地口径而是 CI 实测：`windows-ci` 现在把两个套件**分两步**跑并各自产出 trx，再按套件名断言下限
 （`MediaHub.Tests` ≥400、`MediaHub.WebDav.Tests` ≥100，`failed=0` 且 `notExecuted=0`）—— 此前 WebDav 套件虽然被构建、
