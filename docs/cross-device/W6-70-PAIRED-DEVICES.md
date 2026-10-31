@@ -19,7 +19,7 @@ Windows 侧**早已有全部实现**（ADR-S005 起：`PairedDevice.cs` / `Paire
 
 `FilePairedDeviceStore.LoadLocked()` 原写法直接对 `version` 元素调 `JsonElement.TryGetInt32`：
 
-`csharp`
+```csharp
 if (!root.TryGetProperty("version", out var versionElement)
     || !versionElement.TryGetInt32(out var version)
     || version != CurrentDocumentVersion)
@@ -28,14 +28,14 @@ if (!root.TryGetProperty("version", out var versionElement)
     return;
 }
 
-``
+```
 问题在 `TryGetInt32` 只对 `ValueKind == Number` 的**数值**安全：当 `version` 是 `"1"`（字符串）或 `null` 时，它抛 `InvalidOperationException`，
 而调用链上没有任何 `catch` 会把这个异常折成 `loadError` —— 直接穿透到同步页，整页崩掉。
 这违反该文件的既有契约：「读永不抛，坏档一律隔离」。
 
 修法是先判 `ValueKind` 再取值：
 
-`csharp`
+```csharp
 if (!root.TryGetProperty("version", out var versionElement)
     || versionElement.ValueKind != JsonValueKind.Number
     || !versionElement.TryGetInt32(out var version)
@@ -45,7 +45,7 @@ if (!root.TryGetProperty("version", out var versionElement)
     return;
 }
 
-``
+```
 Kotlin 侧没有这个坑：`PairedDeviceDocument.decode` 第一层就判 `JsonPrimitive.isString` / `intOrNull`，类型不符直接 `Rejected(MALFORMED_JSON)`。
 这个缺陷是**写孪生用例时被向量逼出来的**：`loadCases` 里有一条 `version-as-string`，Windows 首跑就抛在这里。
 
