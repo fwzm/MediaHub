@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Thirteen things rot silently in a licence deliverable:
+    Fourteen things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -27,8 +27,11 @@
      12. the LGPL compliance note rots: its component-licence table stops matching the resolved
      13. the guard's own inventory drifts: a check is added and never listed, the document or the
          README keeps claiming the old number, or a declared check id is dropped from the document.
+      14. the default engine flavour silently leaves the GPL baseline: the player project starts
+          defaulting to the LGPL candidate, another project or workflow builds it, or
+          windows/docs/LGPL-ENGINE-SWITCH.md stops declaring which flavour is default.
 
-    This script checks those thirteen surfaces without touching the network, the build, or the
+    This script checks those fourteen surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -52,6 +55,14 @@
 
 .PARAMETER ReadmePath
     The README whose licence-surface paragraph states how many checks run. Default: README.md.
+
+.PARAMETER PlayerProjectPath
+    The project that decides which libmpv build the app loads. Default:
+    windows/src/MediaHub.Player.Mpv/MediaHub.Player.Mpv.csproj.
+
+.PARAMETER LgplSwitchDocPath
+    The document that records the default flavour and the switch flag. Default:
+    windows/docs/LGPL-ENGINE-SWITCH.md.
 
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
@@ -87,6 +98,8 @@ param(
     [string] $StageScriptPath,
     [string] $LicenceDocPath,
     [string] $ReadmePath,
+    [string] $PlayerProjectPath,
+    [string] $LgplSwitchDocPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -1041,6 +1054,7 @@ $declaredCheckIds = @(
     'package-licence-staging',
     'lgpl-compliance-block',
     'lgpl-compliance-baseline',
+    'engine-flavour-default',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -1086,6 +1100,82 @@ else {
     }
     else {
         Add-Check 'check-inventory' 'FAIL' ($inventoryProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $inventoryProblems) + ' - add the new check to $declaredCheckIds in windows/tools/check-licence-surface.ps1 and move the count in LICENSE-SURFACE-CHECK.md and README.md with it')
+    }
+}
+
+# --- 14. the default engine flavour must stay the GPL baseline --------------------------------
+
+$flavourDocFile = Resolve-ClaimPath -Path $LgplSwitchDocPath -Default 'windows/docs/LGPL-ENGINE-SWITCH.md'
+$flavourProjectFile = Resolve-ClaimPath -Path $PlayerProjectPath -Default 'windows/src/MediaHub.Player.Mpv/MediaHub.Player.Mpv.csproj'
+
+if (-not (Test-Path -LiteralPath $flavourDocFile)) {
+    Add-Check 'engine-flavour-default' 'SKIP' ('cannot read ' + $flavourDocFile + ', so the switch document has no claim to compare with the build')
+}
+else {
+    $flavourProblems = @()
+    if (-not (Test-Path -LiteralPath $flavourProjectFile)) {
+        $flavourProblems += ('the player project is absent at ' + $flavourProjectFile)
+    }
+    else {
+        $flavourProjectText = Get-Content -LiteralPath $flavourProjectFile -Raw
+        $quoteChar = [string][char]39
+        $defaultPattern = '<LibMpvFlavour\s+Condition="' + $quoteChar + '\$\(LibMpvFlavour\)' + $quoteChar + '\s*==\s*' + $quoteChar + $quoteChar + '">\s*gpl\s*</LibMpvFlavour>'
+        if (-not [regex]::IsMatch($flavourProjectText, $defaultPattern)) {
+            $flavourProblems += 'the player project no longer defaults LibMpvFlavour to gpl'
+        }
+        foreach ($directoryClaim in @('native\libmpv', 'engine\lgpl\dist')) {
+            if ($flavourProjectText.IndexOf($directoryClaim, [System.StringComparison]::Ordinal) -lt 0) {
+                $flavourProblems += ('the player project no longer maps a flavour to ' + $directoryClaim)
+            }
+        }
+        if ($flavourProjectText.IndexOf('Unknown LibMpvFlavour', [System.StringComparison]::Ordinal) -lt 0) {
+            $flavourProblems += 'the player project no longer rejects an unknown LibMpvFlavour value'
+        }
+    }
+
+    $switchPattern = 'LibMpvFlavour\s*[=:]\s*[^\r\n]{0,2}lgpl'
+    $candidateSwitchers = @()
+    foreach ($project in @($projectFiles)) {
+        if ($project.Name -ne 'MediaHub.Player.Mpv.csproj' -and $project.FullName -ne $flavourProjectFile -and (Test-Path -LiteralPath $project.FullName)) {
+            $projectText = Get-Content -LiteralPath $project.FullName -Raw
+            if ([regex]::IsMatch($projectText, $switchPattern)) { $candidateSwitchers += $project.Name }
+        }
+    }
+    if (Test-Path -LiteralPath $packagingWorkflows) {
+        foreach ($workflow in @(Get-ChildItem -LiteralPath $packagingWorkflows -File -Include *.yml, *.yaml -Recurse -ErrorAction SilentlyContinue)) {
+            $workflowText = Get-Content -LiteralPath $workflow.FullName -Raw
+            if ([regex]::IsMatch($workflowText, $switchPattern)) { $candidateSwitchers += $workflow.Name }
+        }
+    }
+    if ($candidateSwitchers.Count -gt 0) {
+        $flavourProblems += ('something else already builds the LGPL candidate: ' + (Format-NameList (Sort-Object -InputObject $candidateSwitchers -Unique)))
+    }
+
+    $flavourDocText = Get-Content -LiteralPath $flavourDocFile -Raw
+    $blockStart = $flavourDocText.IndexOf('<!-- BEGIN engine-flavour-status', [System.StringComparison]::Ordinal)
+    $blockEnd = $flavourDocText.IndexOf('<!-- END engine-flavour-status', [System.StringComparison]::Ordinal)
+    if ($blockStart -lt 0 -or $blockEnd -le $blockStart) {
+        $flavourProblems += 'LGPL-ENGINE-SWITCH.md carries no engine-flavour-status block'
+    }
+    else {
+        $blockText = $flavourDocText.Substring($blockStart, $blockEnd - $blockStart)
+        foreach ($expected in @('default-flavour: gpl-baseline', 'candidate-flavour: lgpl-candidate-not-default', 'switch-flag: -p:LibMpvFlavour=lgpl')) {
+            if ($blockText.IndexOf($expected, [System.StringComparison]::Ordinal) -lt 0) {
+                $flavourProblems += ('the status block does not say ' + $expected)
+            }
+        }
+    }
+    foreach ($docClaim in @('windows/native/libmpv', 'windows/engine/lgpl/dist')) {
+        if ($flavourDocText.IndexOf($docClaim, [System.StringComparison]::Ordinal) -lt 0) {
+            $flavourProblems += ('LGPL-ENGINE-SWITCH.md no longer names ' + $docClaim)
+        }
+    }
+
+    if ($flavourProblems.Count -eq 0) {
+        Add-Check 'engine-flavour-default' 'PASS' 'the default flavour is still gpl-baseline in the player project, nothing else builds the LGPL candidate, and LGPL-ENGINE-SWITCH.md still declares it (3 machine-readable lines)'
+    }
+    else {
+        Add-Check 'engine-flavour-default' 'FAIL' (($flavourProblems -join '; ') + ' - update windows/docs/LGPL-ENGINE-SWITCH.md and the player project together')
     }
 }
 

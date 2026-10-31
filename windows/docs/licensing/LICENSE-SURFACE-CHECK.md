@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-36 项检查分十五组：
+37 项检查分十六组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -61,6 +61,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | LGPL 合规声明（W41 起） | `lgpl-compliance-block`、`lgpl-compliance-baseline` | 文档 §5.1 的机器可读组件表与解析图不再一一对应（漏包/多包/许可漂移），或 §1 的 GPL 基线摘要与报告解析值分叉（pin 换引擎后文档没跟上） |
 | 分发与签名（W39 起） | `packaging-claims` | 发布形态、签名、安装方式与 `PACKAGING.md` §0 七行不符：CI 开始签名、仓库出现 `*.appxmanifest` 或 WiX/Inno/NSIS 工程、App 不再是 unpackaged self-contained portable、`windows-ci.yml` 丢了 portable publish/上传步骤（构建输出 `obj/`、`bin/`、`artifacts/` 不计） |
 | 门禁自证（W42 起） | `check-inventory` | 脚本里声明的检查清单与「本次运行发出的 id」「`LICENSE-SURFACE-CHECK.md` 点名的 id」「该文档与 README 声明的数量」任一分叉——新增检查忘了登记，或数量没跟着改 |
+| 引擎默认 flavour（W43 起） | `engine-flavour-default` | 默认 flavour 不再是 GPL 基线（csproj 缺省改了、别的工程或工作流开始构建候选），或 `LGPL-ENGINE-SWITCH.md` 的 `engine-flavour-status` 块不再声明 |
 | 包内许可文件（W40 起） | `package-licence-staging` | 发布树不再真的带 `licences/` 的六个文档 + digest manifest：暂存脚本被删、清单缩水、manifest 摘要与字节不符、或 CI 不再调用它（该检查把脚本重跑到临时树，不读文档） |
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
@@ -231,16 +232,33 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 36） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 37） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
-三条任一出问题即 FAIL，detail 分别点名；清单里重复 id 也算 FAIL。清单写在脚本第 13 段（36 行），是「检查 id → 文档」的双向核对点：漏登记在 C 红，漏写文档在 B 红，漏改数字在 A 红。
+三条任一出问题即 FAIL，detail 分别点名；清单里重复 id 也算 FAIL。清单写在脚本第 13 段（37 行），是「检查 id → 文档」的双向核对点：漏登记在 C 红，漏写文档在 B 红，漏改数字在 A 红。
 
 两个新参数（都经 `Resolve-RepoPath`，相对路径按仓库根解析，跨出仓库要写 `../../`）：`-LicenceDocPath`（默认 `windows/docs/licensing/LICENSE-SURFACE-CHECK.md`）、`-ReadmePath`（默认 `README.md`）。任一文档读不到 → 该项 SKIP（退出码不变），因为此时无从比较。
 
 负向对照见 §4.10。
 
+
+### 3.11 引擎默认 flavour（W43，2026-10-31）
+
+`windows/docs/LGPL-ENGINE-SWITCH.md` 声称「默认仍是 GPL 基线，`-p:LibMpvFlavour=lgpl` 只是旁路开关」。这句话此前没有任何机器校验：把 `MediaHub.Player.Mpv.csproj` 的缺省改成 `lgpl`、让别的工程或工作流用候选构建、或把文档里的口径删掉，CI 都会继续绿。
+
+第 37 项 `engine-flavour-default` 一次核对四件事：
+
+| 判据 | 看什么 | 什么情况红 |
+| --- | --- | --- |
+| 缺省值 | `windows/src/MediaHub.Player.Mpv/MediaHub.Player.Mpv.csproj` 仍有 `<LibMpvFlavour Condition="'$(LibMpvFlavour)' == ''">gpl</LibMpvFlavour>` | 缺省被改成 `lgpl` 或该行被删 |
+| 两 flavour 目录 | 同一 csproj 仍分别映射到 `native\libmpv` 与 `engine\lgpl\dist`，且仍有 `Unknown LibMpvFlavour` 的 Error | 目录映射或非法值守卫被移除 |
+| 别无他人切换 | 其它 `*.csproj` 与 `.github/workflows/*.yml` 里不得出现把 `LibMpvFlavour` 赋成 `lgpl` 的写法 | 某工程或工作流开始构建候选 |
+| 文档声明 | `LGPL-ENGINE-SWITCH.md` 仍含 `<!-- BEGIN engine-flavour-status -->` 块的三行（`default-flavour: gpl-baseline`、`candidate-flavour: lgpl-candidate-not-default`、`switch-flag: -p:LibMpvFlavour=lgpl`），且正文仍点名两套引擎目录 | 块被删或值被改，文档也不再提两套目录 |
+
+两个新参数：`-PlayerProjectPath`（默认 `windows/src/MediaHub.Player.Mpv/MediaHub.Player.Mpv.csproj`）与 `-LgplSwitchDocPath`（默认 `windows/docs/LGPL-ENGINE-SWITCH.md`）。切换文档读不到时本项 SKIP、退出码仍 0，与既有「报告缺失即 SKIP」语义一致。
+
+负向对照（临时副本，不动仓库文件，各恰好 1 个 FAIL 检查）：csproj 副本把缺省改成 `lgpl` → 1 红；csproj 副本删掉 lgpl 目录映射 → 1 红；临时 workflows 里放一个带 `-p:LibMpvFlavour=lgpl` 的 yml → 1 红；文档副本把块里 `default-flavour` 的值改掉 → 1 红；文档副本删掉整块 → 1 红；`-LgplSwitchDocPath` 指向不存在文件 → 本项 SKIP、退出码 0。
 
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
@@ -403,6 +421,29 @@ RESULT: PASS
 - 本轮新增的真实发现（由负向对照逼出来）：判据 B 最初用 `IndexOf` 做子串匹配，于是把某个 id 改名成 `lgpl-compliance-baseline-X` 时它仍算「文档写到了」——对照 NC3 因此不红。改成边界正则（id 两侧不得是 `[A-Za-z0-9-]`）后才真正红；§3.10 的判据表与 PASS 文案据此改写。证据日志 `D:/mh-verify/w42-nc3.log`。
 - 六条负向对照（各恰好 1 个 FAIL 检查，均用临时副本，不改仓库文件）：① `LICENSE-SURFACE-CHECK.md` 副本把数量改成 35 → 1 红；② `README.md` 副本数量改 35 → 1 红；③ 文档副本把 `lgpl-compliance-baseline` 改名 → 1 红（边界匹配生效）；④ 脚本副本改掉 `vulkan-claims` 的发射名 → 1 红（未申报发射）；⑤ 脚本副本从清单删掉 `lgpl-licence-table` 一行 → 1 红（该 detail 列出数量漂移与未申报发射共 3 条）；⑥ `-LicenceDocPath` 指向不存在的文件 → SKIP、退出码 0。日志 `D:/mh-verify/w42-nc1.log` … `w42-nc6.log`。
 - 复现命令（两个参数都按仓库根解析，跨出仓库要写 `../../`）：`pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -LicenceDocPath ../../mh-verify/w42-neg/nc1-doc.md`。
+
+### 4.11 实测（2026-10-31，W43，本机，HEAD 63d51e9c）
+
+```text
+check-licence-surface  PASS  engine-flavour-default  the default flavour is still gpl-baseline in the player project, nothing else builds the LGPL candidate, and LGPL-ENGINE-SWITCH.md still declares it (3 machine-readable lines)
+check-licence-surface  PASS  check-inventory  37 declared check(s): this run emitted nothing undeclared, LICENSE-SURFACE-CHECK.md names every id on its own, and both it and README.md claim the same count
+check-licence-surface  checks=37 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+（报告用 W34 生成的那份：`projects=13 rows=49 packages=29 violations=0 warnings=3`；本机该进程 PATH 含 git 时 `sbom-source-revision` 为 PASS，否则按设计降为 WARN。）
+
+**首版真发现**：扫描「其它工程或工作流是否构建候选」时，`MediaHub.Player.Mpv.csproj` 自己的帮助注释里就写着 `-p:LibMpvFlavour=lgpl`（第 19 行），所以「路径必须等于 `-PlayerProjectPath`」的排除不够——参数换成外部副本时，仓库里那份真 csproj 会被误报成「别的工程在构建候选」。改成「文件名等于 `MediaHub.Player.Mpv.csproj` 一律排除，其余文件命中即红」。
+
+负向对照（临时副本，不动仓库文件，各恰好 1 个 FAIL 检查）：
+
+- csproj 副本把缺省值改成 `lgpl` → 1 红；
+- csproj 副本删掉 `engine\lgpl\dist` 的目录映射 → 1 红；
+- 临时 workflows 里放一个带 `-p:LibMpvFlavour=lgpl` 的 `switch.yml` → 1 红；
+- 文档副本把块里 `default-flavour` 的值改掉 → 1 红；
+- 文档副本删掉整块 → 1 红；
+- `-PlayerProjectPath` 指向不存在的文件 → 1 红（工程缺失是仓库损坏，不是 SKIP）；
+- `-LgplSwitchDocPath` 指向不存在文件 → 本项 SKIP、`checks=37 failed=0 skipped=1`、退出码 0。
 
 ## 5. 这个工具**不**覆盖什么
 
