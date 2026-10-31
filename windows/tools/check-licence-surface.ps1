@@ -182,6 +182,19 @@
     repository root (obj/bin/artifacts/.git/.tools and friends are skipped). The
     doc-residue-claims check walks markdown, PowerShell, Kotlin, C#, YAML and csproj text.
 
+.PARAMETER EngineProbeDocPath
+    The W13 headless engine-probe record. Default: windows/docs/W13-LGPL-ENGINE-PROBE.md.
+    The engine-probe-claims check compares its status block, its deliverable table and its
+    assertion count against the probe script, the tracked digests and the project directory.
+
+.PARAMETER EngineProbeScriptPath
+    The probe runner whose pinned identities and assertion structure are read. Default:
+    windows/tools/acceptance/engine/engine-probe.ps1.
+
+.PARAMETER EngineProbeProjectDir
+    The probe project whose top-level files the record must list one for one. Default:
+    windows/src/MediaHub.EngineProbe.
+
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
     errors as well. Off by default, but as of W38 no such row is expected: every shipped DLL has a
@@ -241,6 +254,9 @@ param(
     [string] $LogFileTestPath,
     [string] $DocAuditPath,
     [string] $DocsScanRoot,
+    [string] $EngineProbeDocPath,
+    [string] $EngineProbeScriptPath,
+    [string] $EngineProbeProjectDir,
     [switch] $FailOnLicenceGaps
 )
 
@@ -288,6 +304,9 @@ $appServicesFile = Resolve-RepoPath -Path $AppServicesPath -Default 'windows/src
 $logFileTestFile = Resolve-RepoPath -Path $LogFileTestPath -Default 'windows/tests/MediaHub.Tests/LogFileSinkTests.cs'
 $docAuditFile = Resolve-RepoPath -Path $DocAuditPath -Default 'windows/docs/W12-DOC-AUDIT.md'
 $docsScanRoot = if ($DocsScanRoot) { Resolve-RepoPath -Path $DocsScanRoot -Default '' } else { $RepoRoot }
+$engineProbeDocFile = Resolve-RepoPath -Path $EngineProbeDocPath -Default 'windows/docs/W13-LGPL-ENGINE-PROBE.md'
+$engineProbeScriptFile = Resolve-RepoPath -Path $EngineProbeScriptPath -Default 'windows/tools/acceptance/engine/engine-probe.ps1'
+$engineProbeProjectDir = Resolve-RepoPath -Path $EngineProbeProjectDir -Default 'windows/src/MediaHub.EngineProbe'
 # A missing scan root must reach the check as a SKIP, not crash the whole run: Resolve-Path throws
 # on anything that is not there, so the path is only canonicalised once it exists.
 if (Test-Path -LiteralPath $docsScanRoot) {
@@ -1229,6 +1248,7 @@ $declaredCheckIds = @(
     'doc-audit-snapshot-claims',
     'doc-residue-claims',
     'capability-map-pointers',
+    'engine-probe-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -2092,6 +2112,160 @@ else {
     }
     else {
         Add-Check 'doc-residue-claims' 'FAIL' ($residueProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $residueProblems) + ' - repair the documents (the placeholder convention is documented in docs/android-source-sync-transfer.md) and keep the marker on lines that discuss a token on purpose')
+    }
+}
+
+# --- 24. the W13 headless engine probe must still match the record it produced -----------------
+$engineProbeProblems = [System.Collections.Generic.List[string]]::new()
+if (-not (Test-Path -LiteralPath $engineProbeDocFile -PathType Leaf)) {
+    Add-Check "engine-probe-claims" "SKIP" ("the W13 probe record is absent (" + $engineProbeDocFile + "), so its identity pins, its deliverable table and its assertion count have no claim to compare")
+}
+else {
+    $engineProbeText = [string](Get-Content -LiteralPath $engineProbeDocFile -Raw)
+    if ($null -eq $engineProbeText) { $engineProbeText = "" }
+    $engineProbeFields = @{}
+    $engineProbeBlock = [regex]::Match($engineProbeText, "(?ms)^<!-- BEGIN engine-probe-status.*?^<!-- END engine-probe-status -->")
+    if (-not $engineProbeBlock.Success) {
+        $engineProbeProblems.Add("the W13 record no longer carries the engine-probe-status block")
+    }
+    else {
+        foreach ($engineProbeLine in ($engineProbeBlock.Value -split ([char]10))) {
+            $engineProbeTrimmed = $engineProbeLine.Trim()
+            if ($engineProbeTrimmed -match "^([a-z][a-z0-9-]*):[ ]*(.+)$") { $engineProbeFields[$matches[1]] = $matches[2].Trim() }
+        }
+        foreach ($engineProbeRequired in @("probe-project","probe-script","flavour-pair","gpl-baseline-bytes","gpl-baseline-sha256","lgpl-candidate-bytes","lgpl-candidate-sha256","assertion-count","assertion-formula","decode-surface","hardware-decode","verdict-scope","evidence-directory")) {
+            if (-not $engineProbeFields.ContainsKey($engineProbeRequired)) { $engineProbeProblems.Add("the engine-probe-status block no longer declares " + $engineProbeRequired) }
+        }
+    }
+    $engineProbeScriptText = ""
+    if (-not (Test-Path -LiteralPath $engineProbeScriptFile -PathType Leaf)) {
+        $engineProbeProblems.Add("the probe runner is absent: " + $engineProbeScriptFile)
+    }
+    else {
+        $engineProbeScriptText = [string](Get-Content -LiteralPath $engineProbeScriptFile -Raw)
+        if ($null -eq $engineProbeScriptText) { $engineProbeScriptText = "" }
+    }
+    $engineProbeUnlooped = 0
+    $engineProbeLooped = @()
+    $engineProbeFlavours = @()
+    $engineProbeExpected = 0
+    if ($engineProbeScriptText) {
+        # (a) the identity the runner pins must be the identity the record publishes
+        $engineProbePins = @(
+            @{ Field = "gpl-baseline-sha256"; Name = "ExpectedGplSha256" },
+            @{ Field = "gpl-baseline-bytes"; Name = "ExpectedGplBytes" },
+            @{ Field = "lgpl-candidate-sha256"; Name = "ExpectedLgplSha256" },
+            @{ Field = "lgpl-candidate-bytes"; Name = "ExpectedLgplBytes" }
+        )
+        foreach ($engineProbePin in $engineProbePins) {
+            $engineProbeMatch = [regex]::Match($engineProbeScriptText, $engineProbePin.Name + "\s*=\s*'?([0-9a-f]{64}|[0-9]+)")
+            if (-not $engineProbeMatch.Success) {
+                $engineProbeProblems.Add("the probe runner no longer pins " + $engineProbePin.Name)
+                continue
+            }
+            $engineProbeObserved = $engineProbeMatch.Groups[1].Value.Trim()
+            if ($engineProbeFields.ContainsKey($engineProbePin.Field) -and ($engineProbeFields[$engineProbePin.Field] -ne $engineProbeObserved)) {
+                $engineProbeProblems.Add("the record says " + $engineProbePin.Field + " is " + $engineProbeFields[$engineProbePin.Field] + " but the probe runner pins " + $engineProbeObserved)
+            }
+        }
+        # (b) the flavours the runner probes must be the pair the record declares
+        $engineProbeFlavours = @([regex]::Matches($engineProbeScriptText, "Invoke-EngineProbe\s+-Flavour\s+.([A-Za-z0-9-]+)") | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+        $engineProbeDeclared = @()
+        if ($engineProbeFields.ContainsKey("flavour-pair")) { $engineProbeDeclared = @($engineProbeFields["flavour-pair"].Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object) }
+        if (($engineProbeDeclared -join ",") -ne ($engineProbeFlavours -join ",")) {
+            $engineProbeProblems.Add("the record lists the flavours [" + ($engineProbeDeclared -join ", ") + "] but the probe runner probes [" + ($engineProbeFlavours -join ", ") + "]")
+        }
+        # (c) the asserted count comes from the script structure, never from the record
+        $engineProbeSites = @([regex]::Matches($engineProbeScriptText, "Assert-That\s+-Name[^\r\n]*"))
+        $engineProbeLooped = @($engineProbeSites | Where-Object { $_.Value.Contains(([string][char]36) + "flavour") })
+        $engineProbeUnlooped = $engineProbeSites.Count - $engineProbeLooped.Count
+        $engineProbeExpected = $engineProbeUnlooped + ($engineProbeLooped.Count * $engineProbeFlavours.Count)
+        if ($engineProbeFields.ContainsKey("assertion-count")) {
+            $engineProbeClaimed = 0
+            if (-not [int]::TryParse($engineProbeFields["assertion-count"], [ref]$engineProbeClaimed)) {
+                $engineProbeProblems.Add("the record no longer states a numeric assertion count")
+            }
+            elseif ($engineProbeClaimed -ne $engineProbeExpected) {
+                $engineProbeProblems.Add("the record claims " + $engineProbeClaimed + " assertion(s) but the runner now asserts " + $engineProbeExpected + " (" + $engineProbeUnlooped + " unlooped + " + $engineProbeLooped.Count + " per flavour x " + $engineProbeFlavours.Count + " flavour(s))")
+            }
+        }
+        if (-not $engineProbeText.Contains([string]$engineProbeExpected + " 条断言")) {
+            $engineProbeProblems.Add("the record no longer states that the probe runs " + $engineProbeExpected + " assertions")
+        }
+        # (d) the baseline digest in the record must be the one the fetch script installs
+        if (Test-Path -LiteralPath $fetchScriptFile -PathType Leaf) {
+            $engineProbeFetchText = [string](Get-Content -LiteralPath $fetchScriptFile -Raw)
+            $engineProbeFetchPin = [regex]::Match($engineProbeFetchText, "DllSha256\s*=\s*'?([0-9a-f]{64})")
+            if (-not $engineProbeFetchPin.Success) {
+                $engineProbeProblems.Add("the fetch script no longer pins the baseline dll digest")
+            }
+            elseif ($engineProbeFields.ContainsKey("gpl-baseline-sha256") -and ($engineProbeFields["gpl-baseline-sha256"] -ne $engineProbeFetchPin.Groups[1].Value)) {
+                $engineProbeProblems.Add("the record quotes a baseline digest the fetch script does not install")
+            }
+        }
+        else { $engineProbeProblems.Add("the fetch script is absent: " + $fetchScriptFile) }
+        # (e) the candidate identity in the record must be the tracked candidate
+        $engineProbeHashFile = Join-Path $engineDist "dist-hashes.txt"
+        if (Test-Path -LiteralPath $engineProbeHashFile -PathType Leaf) {
+            $engineProbeRecorded = ""
+            foreach ($engineProbeHashLine in (([string](Get-Content -LiteralPath $engineProbeHashFile -Raw)) -split ([char]10))) {
+                if ($engineProbeHashLine -match "^([0-9a-f]{64})\s+..*libmpv-2\.dll\s*$") { $engineProbeRecorded = $matches[1] }
+            }
+            if (-not $engineProbeRecorded) { $engineProbeProblems.Add("dist-hashes.txt no longer records libmpv-2.dll") }
+            elseif ($engineProbeFields.ContainsKey("lgpl-candidate-sha256") -and ($engineProbeFields["lgpl-candidate-sha256"] -ne $engineProbeRecorded)) {
+                $engineProbeProblems.Add("the record quotes a candidate digest that differs from the tracked candidate")
+            }
+        }
+        else { $engineProbeProblems.Add("the tracked candidate hash file is absent: " + $engineProbeHashFile) }
+        $engineProbeCandidate = Join-Path $engineDist "libmpv-2.dll"
+        if (Test-Path -LiteralPath $engineProbeCandidate -PathType Leaf) {
+            $engineProbeCandidateHash = (Get-FileHash -LiteralPath $engineProbeCandidate -Algorithm SHA256).Hash.ToLowerInvariant()
+            $engineProbeCandidateBytes = [int64](Get-Item -LiteralPath $engineProbeCandidate).Length
+            if ($engineProbeFields.ContainsKey("lgpl-candidate-sha256") -and ($engineProbeFields["lgpl-candidate-sha256"] -ne $engineProbeCandidateHash)) { $engineProbeProblems.Add("the tracked candidate libmpv-2.dll no longer hashes to the digest the record quotes") }
+            if ($engineProbeFields.ContainsKey("lgpl-candidate-bytes") -and ($engineProbeFields["lgpl-candidate-bytes"] -ne $engineProbeCandidateBytes.ToString())) { $engineProbeProblems.Add("the tracked candidate libmpv-2.dll is " + $engineProbeCandidateBytes.ToString() + " B but the record says " + $engineProbeFields["lgpl-candidate-bytes"]) }
+        }
+    }
+    # (f) the deliverable table must resolve against the project directory, one row per file
+    $engineProbeRowList = @()
+    foreach ($engineProbeRow in [regex]::Matches($engineProbeText, "(?m)^\|\s*(windows[/\\][^\s|]+)\s*\|\s*([^\s|]+)\s*\|")) {
+        $engineProbeRowList += [pscustomobject]@{ path = ($engineProbeRow.Groups[1].Value -replace "\\", "/"); lines = $engineProbeRow.Groups[2].Value }
+    }
+    if ($engineProbeRowList.Count -eq 0) { $engineProbeProblems.Add("the deliverable table no longer lists any repository file") }
+    $engineProbeProjectRows = @($engineProbeRowList | Where-Object { $_.path -like "windows/src/MediaHub.EngineProbe/*" })
+    if (-not (Test-Path -LiteralPath $engineProbeProjectDir -PathType Container)) {
+        $engineProbeProblems.Add("the probe project directory is absent: " + $engineProbeProjectDir)
+    }
+    else {
+        $engineProbeActual = @(Get-ChildItem -LiteralPath $engineProbeProjectDir -File | ForEach-Object { "windows/src/MediaHub.EngineProbe/" + $_.Name })
+        foreach ($engineProbeActualFile in $engineProbeActual) { if ($engineProbeProjectRows.path -notcontains $engineProbeActualFile) { $engineProbeProblems.Add("the deliverable table does not list " + $engineProbeActualFile) } }
+        foreach ($engineProbeRow in $engineProbeProjectRows) { if ($engineProbeActual -notcontains $engineProbeRow.path) { $engineProbeProblems.Add("the deliverable table lists " + $engineProbeRow.path + " but the probe project has no such file") } }
+    }
+    foreach ($engineProbeRow in $engineProbeRowList) {
+        $engineProbeRowPath = Resolve-RepoPath -Path $engineProbeRow.path
+        if (-not (Test-Path -LiteralPath $engineProbeRowPath -PathType Leaf)) { $engineProbeProblems.Add("the deliverable table lists " + $engineProbeRow.path + " but it does not exist"); continue }
+        if ($engineProbeRow.lines -match "^[0-9]+$") {
+            $engineProbeRowText = [string](Get-Content -LiteralPath $engineProbeRowPath -Raw)
+            $engineProbeRowLines = [regex]::Matches($engineProbeRowText, [string][char]10).Count
+            if ($engineProbeRowLines -ne [int]$engineProbeRow.lines) { $engineProbeProblems.Add($engineProbeRow.path + " has " + $engineProbeRowLines + " line(s) but the deliverable table says " + $engineProbeRow.lines) }
+        }
+    }
+    # (g) the limits that keep this a decoding probe and not a GUI acceptance record
+    foreach ($engineProbeAnchor in @("不能外推到 GUI", "只解码、不显示、不出声")) {
+        if (-not $engineProbeText.Contains($engineProbeAnchor)) { $engineProbeProblems.Add("the record no longer states the limit " + $engineProbeAnchor) }
+    }
+    foreach ($engineProbeForbidden in @("GUI_PASS", "GUI 播放验证通过", "已通过 GUI 验收")) {
+        if ($engineProbeText.Contains($engineProbeForbidden)) { $engineProbeProblems.Add("the record now claims " + $engineProbeForbidden + " although the probe never ran a GUI") }
+    }
+    $engineProbeIgnore = @()
+    if (Test-Path -LiteralPath $gitIgnoreFile -PathType Leaf) {
+        $engineProbeIgnore = @((([string](Get-Content -LiteralPath $gitIgnoreFile -Raw)) -split ([char]10)) | ForEach-Object { $_.Trim() } | Where-Object { $_ -eq "windows/tools/acceptance/evidence/" })
+    }
+    if ($engineProbeIgnore.Count -eq 0) { $engineProbeProblems.Add("the root .gitignore no longer ignores windows/tools/acceptance/evidence/, so probe evidence could be committed") }
+    if ($engineProbeProblems.Count -eq 0) {
+        Add-Check "engine-probe-claims" "PASS" ("the W13 record still matches the probe it describes: " + $engineProbeUnlooped + " unlooped and " + $engineProbeLooped.Count + " per-flavour assertion(s) over " + ($engineProbeFlavours -join " + ") + ", a deliverable table that resolves one-for-one against the probe project, and identities that agree with the pinned and the tracked digests")
+    }
+    else {
+        Add-Check "engine-probe-claims" "FAIL" ($engineProbeProblems.Count.ToString() + " problem(s): " + (Format-NameList $engineProbeProblems) + " - repair windows/docs/W13-LGPL-ENGINE-PROBE.md and keep its identity pins, its deliverable table and its limits together")
     }
 }
 

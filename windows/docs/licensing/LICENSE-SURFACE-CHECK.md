@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-47 项检查分二十六组：
+48 项检查分二十七组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -67,6 +67,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 引擎固定摘要（W46 起） | `engine-pins-claims` | `windows/tools/fetch-libmpv.ps1` 钉的归档摘要、解包后 libmpv-2.dll 摘要与归档文件名，在三份引用它们的文档（`windows/THIRD-PARTY-NOTICES.md`、`ADR-W004`、`REPRODUCIBLE-BUILD.md`）里不再逐字出现——换 pin 不同步改文档，prose 就继续描述旧字节 |
 | 包内许可文件（W40 起） | `package-licence-staging` | 发布树不再真的带 `licences/` 的六个文档 + digest manifest：暂存脚本被删、清单缩水、manifest 摘要与字节不符、或 CI 不再调用它（该检查把脚本重跑到临时树，不读文档） |
 | 能力对照表（W47 起） | `capability-map-claims` | `windows/docs/CAPABILITY-MAP.md` §0 的九行状态块缺行/改值、测试行写回写死的用例计数、或它声称的发布状态与 `PACKAGING.md` §0 不再一致 |
+| W13 探针记录（W54 起） | `engine-probe-claims` | `windows/docs/W13-LGPL-ENGINE-PROBE.md` 的身份钉死值、交付物表与断言条数任一分叉：块里的两个 dll 摘要/字节数与探针脚本钉死的 `ExpectedGplSha256` / `ExpectedGplBytes` / `ExpectedLgplSha256` / `ExpectedLgplBytes` 不一致，与 `windows/tools/fetch-libmpv.ps1` 的基线摘要或 `windows/engine/lgpl/dist/dist-hashes.txt` 的候选记录不一致；第 2 节交付物表与 `windows/src/MediaHub.EngineProbe` 目录不再一一对应或行数不符；断言条数（按脚本结构当场算出）与文档声称的不符；「只解码、不显示、不出声」「不能外推到 GUI」两条限制被删，或文档改口说 GUI 验证通过 |
 | 能力对照表指针（W53 起） | `capability-map-pointers` | `windows/docs/CAPABILITY-MAP.md` 的链接目标、仓库路径 token、状态词封闭性与用例计数纪律任一分叉：markdown 链接指向已改名的文件、内联代码写出的仓库路径在六个声明根（仓库根、`windows`、`windows/src`、`windows/docs`、`windows/tools`、`.github`）下都找不到、出现图例之外的状态词（如 `PARTIAL_PASS`）、图例不再定义六态之一、测试行又贴着 `MediaHub.Tests` 写死「N 条」计数，或表丢了 `test-count-authority: ci-print` 行 |
 | 验收不打扰契约（W48 起） | `quiet-run-claims` | `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` §0 的九行门禁事实（空闲阈值 180 s、QUNS 只允许 5/6、看门狗 700 ms、abort 标记与 `MH_ALLOW_ACTIVE`/`MH_QUIET_ABORT_FILE`、守卫优先级）缺行或改值，或 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询、`MhUia.psm1` 的 `Start-MhApp` abort 守卫与它不再一致 |
 | 续播下限契约（W49 起） | `resume-floor-claims` | `windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §0 的八行阈值与用例数、`MockMediaServer.cs` 里 Emby 2 % / Jellyfin 5 % / 300 s / 90 % / 10 s 的常量、以及契约测试实际展开出的用例数，三者任一分叉——放宽下限、删判定分支、加减用例却没同步文档即红 |
@@ -243,7 +244,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 47） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 48） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -883,6 +884,53 @@ RESULT: PASS
 本轮 exact-SHA CI 曾**首跑 1 红**（Windows CI push `41209324178`、PR `41209328582`：`checks=47 failed=1`，红的正是这条新检查，报「the map no longer declares the CI print as the authority for its test counts」）。真因是判据④第一版写成「把文档按换行 split 成数组、再 `-contains` 那一行」——CI 的 checkout 因为仓库开了 `autocrlf` 且没有 `.gitattributes`，工作树是 **CRLF**，每行末尾带 `\r`，于是本机（LF）绿、CI 红。已改成多行锚点正则 `(?m)^test-count-authority: ci-print\r?$`（行尾 `\r` 可选），并用「整文件 LF→CRLF 的副本」复验 PASS、「把该行删掉的 CRLF 副本」复验恰好 1 红、「LF 的 NC6」仍恰好 1 红。教训与 W47/W52 同源：**出仓库的文件必须假定 CI 是 CRLF**，凡是拿整行做等值比较的判据都要容得下行尾回车。
 
 日志：正向 `D:/mh-verify/w53-positive.log`，首跑 `D:/mh-verify/w53-first.log`，负向对照 `D:/mh-verify/w53-nc/NC1.log` … `NC7.log`。
+
+### 3.22 W13 引擎探针的声明与实物（W54，2026-10-31）
+
+W13 的探针记录是「LGPL 候选能不能解码」的唯一证据，但它夹在两份东西中间：文档里的身份与交付物表，和脚本里钉死的常量与断言结构。任一侧变化都会让记录失去意义却看不出来——换了候选 dll 却忘了改脚本的期望摘要、动了探针源码却忘了改文档的行数、把「只解码」的记录读成「GUI 能播」。第 48 项 `engine-probe-claims` 因此把记录钉在实物上：
+
+| 判据 | 失败含义 |
+| --- | --- |
+| 文档 `engine-probe-status` 块 13 个键齐全 | 状态块被删掉或被改写 |
+| 块里的两个 dll 摘要/字节数 == 探针脚本的 `ExpectedGplSha256` / `ExpectedGplBytes` / `ExpectedLgplSha256` / `ExpectedLgplBytes` | 脚本换了期望值而文档没跟上（探针当场会 FAIL，但 CI 不跑探针） |
+| 块的 `gpl-baseline-sha256` == `windows/tools/fetch-libmpv.ps1` 的 `DllSha256` | 基线 dll 换了来源而文档还在引旧摘要 |
+| 块的 `lgpl-candidate-sha256` / `-bytes` == `windows/engine/lgpl/dist/dist-hashes.txt` 的记录与磁盘实测 | 候选被重建而记录没跟着更新 |
+| 第 2 节交付物表与 `windows/src/MediaHub.EngineProbe` 顶层文件集合一一对应，且每行声明的行数等于实测换行数 | 探针新增/删了源文件，或改了源码却没更新这张表 |
+| `assertion-count` == 脚本结构当场算出的条数（不在 `foreach` 里的 + 每个 flavor 的 × flavor 数），且两个 flavor 名与块的 `flavour-pair` 一致 | 探针加了/删了断言、或不再跑两个 flavor，而文档还写着 24 条 |
+| 文档仍含「只解码、不显示、不出声」与「不能外推到 GUI」；不得出现 `GUI_PASS`、`GUI 播放验证通过`、`已通过 GUI 验收` | 限制句被删，或把解码探针读成 GUI 验收 |
+| 根 `.gitignore` 仍忽略 `windows/tools/acceptance/evidence/`（探针证据目录） | 证据文件会被提交进仓库 |
+
+刻意**不**做的两件事：不重跑探针（需要 Windows 上的 GPL 基线 dll、素材与依赖目录，CI 里没有），也不钉 §4 的实测数字——那些是一次运行的观测值，钉死只会让文档在下次真跑后无法更新。文档缺失 ⇒ `engine-probe-claims` SKIP、退出码 0。
+
+### 4.22 实测（2026-10-31，W54，本机，HEAD 19beb0cc）
+
+代码：
+
+```text
+pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath D:/mh-verify/w38-license/license-report.json
+check-licence-surface  PASS  engine-probe-claims  the W13 record still matches the probe it describes: 12 unlooped and 6 per-flavour assertion(s) over gpl-baseline + lgpl-candidate, a deliverable table that resolves one-for-one against the probe project, and identities that agree with the pinned and the tracked digests
+check-licence-surface  checks=48 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+守卫补丁先落地、两份文档还没同步时的首跑如实 1 红（留作证据）：`check-inventory` 列出 3 个问题（`LICENSE-SURFACE-CHECK.md` 与 `README.md` 还写 47 项、文档未点名 `engine-probe-claims`），新项自己已 PASS。
+
+这条检查在落地当天被自己的判据逼出过三处缺陷，都已修好并复验：① 钉死摘要的正则写成「反斜杠 + 美元符号」开头，而 PowerShell 双引号串里 `$ExpectedGplSha256` 会被当成变量插值成空串 ⇒ 整轮假红「脚本不再钉该常量」；改成只匹配常量名（`ExpectedGplSha256\s*=\s*`）后消失。② 同一处正则当时不容许等号右侧的单引号（脚本写的是带引号的 64 位摘要），补上可选单引号才匹配。③ 抓 flavor 名的正则把开括号一起吞进捕获组，得到带引号的名字，与块的 `flavour-pair` 对不上；改成只捕获引号内的名字后对齐。教训与前几轮同源：**守卫自己的正则也是被保护对象**，正向先红时先看正则，再谈对照。
+
+八条负向对照（副本树 `D:/mh-verify/w54-nc/`，未改仓库文件）：
+
+| # | 改法 | 结果 |
+| --- | --- | --- |
+| NC1 | 副本把文档块 `assertion-count: 24` 改成 25 | 恰好 1 红（声称条数 ≠ 脚本结构算出的条数） |
+| NC2 | 副本把探针脚本 `$ExpectedGplBytes` 改成 1 | 恰好 1 红（脚本钉的字节数与文档不一致） |
+| NC3 | 副本把脚本里一次 `-Flavour 'lgpl-candidate'` 改名 | 恰好 1 红（flavor 集与块不一致，条数公式随之变化） |
+| NC4 | 副本删掉文档里的「不能外推到 GUI 播放」 | 恰好 1 红（限制句丢失） |
+| NC5 | 副本删掉交付物表里的一行 | 恰好 1 红（项目目录里有文件没被列出） |
+| NC6 | 副本把交付物表某个行数 +1 | 恰好 1 红（实测换行数与声明不符） |
+| NC7 | 副本删掉根 `.gitignore` 的 `windows/tools/acceptance/evidence/` 行 | 恰好 1 红（证据目录不再被忽略） |
+| NC8 | `-EngineProbeDocPath` 指向不存在文件 | SKIP、退出码 0 |
+
+日志：正向 `D:/mh-verify/w54-positive.log`，首跑 `D:/mh-verify/w54-first.log`，负向对照 `D:/mh-verify/w54-nc/NC1.log` … `NC8.log`。
 
 ## 5. 这个工具**不**覆盖什么
 ## 5. 这个工具**不**覆盖什么

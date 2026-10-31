@@ -6,6 +6,28 @@
 - 前置：W5-H 已产出 LGPL 候选 libmpv（windows/engine/lgpl/dist），W6 起 App 仍使用 GPL 基线 dll
 - 范围：只新增 windows/src/MediaHub.EngineProbe（独立 Exe）、windows/tools/acceptance/engine/engine-probe.ps1、本文件与证据文件。未改动 windows/native/libmpv、未改动 App/Player 任何一行、未启动 GUI
 
+## 0. 机器可读状态（CI 核对）
+
+下面这段由 `windows/tools/check-licence-surface.ps1` 的第 48 项 `engine-probe-claims` 逐行核对：两个 dll 的身份必须与探针脚本里钉死的常量、`windows/tools/fetch-libmpv.ps1` 的基线摘要、`windows/engine/lgpl/dist/dist-hashes.txt` 的记录一致；本篇第 2 节的交付物表必须与 `windows/src/MediaHub.EngineProbe` 目录一一对应且行数相符；断言条数由脚本结构当场算出（不在循环里的 + 每个 flavor 的 × flavor 数）。**没有跑过 GUI 就是没有跑过 GUI**：探针只解码、不显示、不出声，GUI 播放仍未验证。
+
+<!-- BEGIN engine-probe-status (checked by check-licence-surface.ps1) -->
+```text
+probe-project: windows/src/MediaHub.EngineProbe/MediaHub.EngineProbe.csproj
+probe-script: windows/tools/acceptance/engine/engine-probe.ps1
+flavour-pair: gpl-baseline, lgpl-candidate
+gpl-baseline-bytes: 120989696
+gpl-baseline-sha256: 6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9
+lgpl-candidate-bytes: 3327274
+lgpl-candidate-sha256: 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+assertion-count: 24
+assertion-formula: unlooped-plus-looped-per-flavour
+decode-surface: vo-null-and-ao-null
+hardware-decode: not-exercised
+verdict-scope: decoder-availability-not-gui-playback
+evidence-directory: windows/tools/acceptance/evidence/engine/
+```
+<!-- END engine-probe-status -->
+
 ## 1. 为什么要一个无头探针，以及它为什么不能代替 GUI 证据
 
 替换引擎 dll 属于「换掉整个解码内核」，风险不在编译，而在运行时真实解码能力。GUI 验收（W5-GUI-ACCEPTANCE.md 那套 UIA 脚本）能证明「窗口里放出来了」，但它的结论受播放器实现、渲染后端、显示器、音频设备影响，失败时无法区分是 dll 不行还是 App 接线不行；而且 GUI 验收无法在 CI 里稳定复跑。
