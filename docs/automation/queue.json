@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-01T00:45:00+08:00",
+  "updated_at": "2026-11-01T00:47:00+08:00",
   "updated_by": "lead-W6-113-r22",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -626,7 +626,8 @@
         "no baseline change: test-suite-baseline.json (164,452 B) and update-test-suite-baseline.ps1 (24,836 B) byte-identical to HEAD - this layer is a single-run invariant",
         "real corpus both shells exit 0 and byte-identical output: executionIds=1952 distinct declared ids=1952 paired rows=1952 paired result directories=1952 / WebDav 104 / combined tests=2056 (D:/mh-verify/r12-art/.../test-results)",
         "exact-head CI e4750caa: windows-ci 41219751982 completed/failure, test gate step green and printed the executionIds ladder lines; licence checks=49 failed=2 = log-file-claims (W6-113u) + lgpl-build-record-claims (base c80556ce own run 41218983971 failed=1 with the same message)",
-        "Android CI 41219751941 in_progress at sampling; core/feature/app tree hashes unchanged => inherited per ADR-AUTO-001"
+        "Android CI 41219751941 in_progress at sampling; core/feature/app tree hashes unchanged => inherited per ADR-AUTO-001",
+        "docs head c61a454c windows-ci 41220287540 completed/failure: ladder lines byte-identical to the code head (executionIds=1952 ... paired result directories=1952, WebDav 104, combined tests=2056); licence checks=49 failed=2 = log-file-claims (W6-113u) + lgpl-build-record-claims (upstream W6-113ad)"
       ],
       "notes": "该层是单次运行内不变量，不写基线；三处身份指定义 Execution id、结果行 executionId 与 relativeResultsDirectory。残留限制：不校验 id 形状、不比较多余元素的顺序、跨文件身份仍归第十二层。",
       "next_action": "无；若后续 TRX 形状变化（例如运行器不再把 execution id 写进 relativeResultsDirectory）需同步本层与 TRX 事实测量。",
