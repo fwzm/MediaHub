@@ -249,18 +249,23 @@ public sealed partial class SettingsPage : Page
 
     private void OnExportLogClick(object sender, RoutedEventArgs e)
     {
-        try
+        // W6-111: the renderer and the file write live in MediaHub.Net so the whole path is covered by
+        // tests; this handler only picks the folder and shows the outcome.
+        string dir = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MediaHub");
+        DiagnosticsReport.WriteResult result = DiagnosticsReport.Write(
+            dir,
+            App.Services.Log,
+            DateTime.Now,
+            typeof(SettingsPage).Assembly.GetName().Version?.ToString() ?? "unknown",
+            Environment.MachineName);
+        if (result is DiagnosticsReport.WriteResult.Written written)
         {
-            string dir = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MediaHub");
-            System.IO.Directory.CreateDirectory(dir);
-            string path = System.IO.Path.Combine(dir, $"diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.log");
-            System.IO.File.WriteAllText(path, App.Services.Log.Export());
-            DiagnosticsText.Text = $"已导出（已脱敏）：{path}";
+            DiagnosticsText.Text = DiagnosticsReport.SuccessLine(written.Path);
         }
-        catch (Exception ex)
+        else if (result is DiagnosticsReport.WriteResult.Failed failed)
         {
-            DiagnosticsText.Text = $"导出失败：{ex.Message}";
+            DiagnosticsText.Text = DiagnosticsReport.FailureLine(failed);
         }
     }
 

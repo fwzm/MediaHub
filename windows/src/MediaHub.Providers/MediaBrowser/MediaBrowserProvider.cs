@@ -20,6 +20,7 @@ internal sealed class MediaBrowserProvider :
     IProviderPlayback,
     IProviderSearch,
     IProviderProgress,
+    IProviderProgressWrite,
     IProviderFavorites,
     IProviderSubtitle,
     IProviderImageFetcher
@@ -223,6 +224,20 @@ internal sealed class MediaBrowserProvider :
             Studios = MediaBrowserMapper.GetStringArray(doc.RootElement, "Studios", "0", "Name"),
             Streams = MediaBrowserMapper.MapStreams(doc.RootElement),
         };
+    }
+
+    // ---------------------------------------------------------------- progress write-back
+
+    public async Task<long> SetPlaybackPositionAsync(string itemId, long positionTicks, CancellationToken ct = default)
+    {
+        using var doc = await _api.UpdateUserDataAsync(itemId, positionTicks, ct).ConfigureAwait(false);
+        if (MediaBrowserMapper.GetLong(doc.RootElement, "PlaybackPositionTicks") is { } stored) return stored;
+
+        // An answer that does not carry the field is not an answer. Re-read the item instead of echoing
+        // the request: a write the account cannot apply has to come back as the position the server
+        // holds, which is how a restore can tell "saved" from "accepted and dropped".
+        using var read = await _api.GetItemAsync(itemId, ct).ConfigureAwait(false);
+        return MediaBrowserMapper.GetLong(read.RootElement, "UserData", "PlaybackPositionTicks") ?? 0L;
     }
 
     // ---------------------------------------------------------------- favourites

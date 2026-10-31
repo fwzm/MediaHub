@@ -3,6 +3,7 @@ using MediaHub.App.Services;
 using MediaHub.Net;
 using MediaHub.Net.Security;
 using MediaHub.Storage;
+using MediaHub.Sync;
 
 namespace MediaHub.App;
 
@@ -24,16 +25,21 @@ public sealed class AppServices : IDisposable
         PlaybackHistory = new PlaybackHistoryStore();
         // Saved playlists are local user data: no credentials, no network, no UI thread needed.
         Playlists = new PlaylistStore();
+        // Cross-device sync keeps its own mirror of the source list. One instance is shared by the source
+        // manager (which assigns identities) and the sync page (which exports and previews), so both see
+        // the same records and neither can overwrite the other's view.
+        SyncSources = new FileLocalSourceStore();
         LocalLibrary = new LocalLibraryService(Settings);
         PlayerHost = new PlayerHostService(Settings, Log);
 
         // The vault is the only component that can decrypt stored passwords and session tokens. It is
         // created here so nothing else has a reason to reach for DPAPI directly.
         Vault = new DpapiCredentialStore();
-        Servers = new ServerManager(Settings, Log, Vault);
+        Servers = new ServerManager(Settings, Log, Vault, SyncSources);
         Search = new SearchService(Servers, Log);
         Playback = new PlaybackCoordinator(Servers, Log, PlaybackHistory);
         Queue = new PlaybackQueue();
+        Sync = new SourceSyncService(Settings, Log, Servers, SyncSources);
     }
 
     public LogService Log { get; }
@@ -55,6 +61,20 @@ public sealed class AppServices : IDisposable
     /// every mutation is already on disk when the call returns.
     /// </summary>
     public PlaylistStore Playlists { get; }
+
+    /// <summary>
+    /// The mirror of this device's sources that cross-device sync reads and writes
+    /// (<c>%LOCALAPPDATA%\MediaHub\sync-sources.json</c>). Not the same thing as <see cref="Servers"/>:
+    /// settings.json stays authoritative for what the app restores, this file carries what the sync
+    /// contract needs per source.
+    /// </summary>
+    public FileLocalSourceStore SyncSources { get; }
+
+    /// <summary>
+    /// Cross-device source sync: export this device's envelope, preview a peer's, verify a source.
+    /// Never applies a plan — that needs explicit per-source approval and lands in W6-3.
+    /// </summary>
+    public SourceSyncService Sync { get; }
 
     /// <summary>Artwork cache. Needs the UI thread, so it is created when the window exists.</summary>
     public ImageCache? Images { get; private set; }

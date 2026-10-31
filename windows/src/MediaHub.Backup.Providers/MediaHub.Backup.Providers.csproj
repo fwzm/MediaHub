@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MediaHub.Backup.Providers</RootNamespace>
+  </PropertyGroup>
+  <!-- The adapter is the only place where the backup writeback contract meets a provider.
+       MediaHub.Backup itself stays BCL-only (no ProjectReference), so this assembly is what an
+       App-side or CLI-side caller references when it has a logged-in ProviderHandle in hand. -->
+  <ItemGroup>
+    <ProjectReference Include="..\MediaHub.Backup\MediaHub.Backup.csproj" />
+    <ProjectReference Include="..\MediaHub.Providers\MediaHub.Providers.csproj" />
+  </ItemGroup>
+</Project>

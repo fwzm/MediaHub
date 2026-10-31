@@ -258,6 +258,25 @@ internal sealed class MediaBrowserApi
         await SendNoContentAsync(NewRequest(method, path), ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Saves a playback position into the user item data.
+    /// </summary>
+    /// <remarks>
+    /// <c>POST /Users/{uid}/Items/{itemId}/UserData</c> is the MediaBrowser endpoint that stores a
+    /// <c>UserItemDataDto</c>; Emby and Jellyfin both expose it. The response is the stored DTO, which is
+    /// what the caller reports back - a 200 is not proof the position was saved.
+    /// </remarks>
+    public async Task<JsonDocument> UpdateUserDataAsync(string itemId, long positionTicks, CancellationToken ct)
+    {
+        var request = NewRequest(HttpMethod.Post, "/Users/" + Require(UserId) + "/Items/" + Uri.EscapeDataString(itemId) + "/UserData");
+        string payload = JsonSerializer.Serialize(new Dictionary<string, long>
+        {
+            ["PlaybackPositionTicks"] = positionTicks,
+        });
+        request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+        return await SendJsonAsync(request, ct).ConfigureAwait(false);
+    }
+
     /// <summary>Items the current user has favourited, via the IsFavorite server-side filter.</summary>
     public async Task<JsonDocument> GetFavoritesAsync(int limit, CancellationToken ct)
     {

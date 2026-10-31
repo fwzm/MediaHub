@@ -1,0 +1,709 @@
+{
+  "schema": "mediahub-queue/1",
+  "updated_at": "2026-11-01T03:05:00+08:00",
+  "updated_by": "lead-W6-113-r24",
+  "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
+  "tasks": [
+    {
+      "id": "W6-112",
+      "title": "合回主树 W14，恢复 PR #39 可合并",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "7c2f96ca",
+        "e6e5d534",
+        "windows-ci:40950218318",
+        "android-ci:40950218275"
+      ],
+      "closed_at": "2026-10-30T04:34:00+08:00"
+    },
+    {
+      "id": "W6-113a",
+      "title": "跨进程写锁 + 并发碰撞测试",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead",
+      "artifact": "D:/mh-goal/lock.mjs",
+      "evidence": [
+        "D:/mh-goal/lock-collision-test-result.json",
+        "17/17 checks passed"
+      ],
+      "notes": "资源粒度 worktree / branch / ref:origin；跨 worktree 写同一远端分支仍互斥。工具在仓库外，不污染任何 worktree。"
+    },
+    {
+      "id": "W6-113b",
+      "title": "诊断导出契约核验与修复（对齐 W14）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "055c85c3",
+        "windows-ci:40993937874",
+        "MediaHub.Tests 1858/0",
+        "negative controls 1/1/4 red, snapshot restored byte-identical"
+      ],
+      "notes": "该行不过 Redact：LongHexRegex 会吃掉临时目录的 32 位十六进制段，指针不可跟随。"
+    },
+    {
+      "id": "W6-113c",
+      "title": "PR #39 正文内容治理（折叠 + 归档）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "d6331139",
+        "docs/pr-archive/PR39-BODY-ARCHIVE-20261030.md",
+        "body 257915 -> 224584 B",
+        "round 8: body 259740 -> 192381 B；W6-86..W6-109 共 21 节（69,288 B）原文归档 docs/pr-archive/PR39-W6-86-to-W6-109-20261030.md（70,177 B）",
+        "余量 2,404 -> 69,763 B，未来约 20 节追加无需再折"
+      ],
+      "notes": "原文一字未删；折叠以远端回读为唯一输入，边界用 `^## ` 标题精确匹配，字节守卫 + 回读 trimEnd 比对。历史归档 docs/pr-archive/PR39-BODY-ARCHIVE-20261030.md（W6-68..71）。"
+    },
+    {
+      "id": "W6-113d",
+      "title": "自动化账本（queue / RUNLOG / TEST_MATRIX）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "4ff648e1",
+        "docs/automation/TEST_MATRIX.md",
+        "docs/automation/RUNLOG.md",
+        "docs/automation/queue.json"
+      ],
+      "notes": "仓库此前无 queue.json / TEST_MATRIX / RUNLOG，故按指令的「若不存在再建立」新建 docs/automation/。"
+    },
+    {
+      "id": "W6-113e",
+      "title": "两棵树文档口径钉住（RollingDirectoryPrefix 与测试引用）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r2",
+      "notes": "两棵树各自补一句「该行形状由 RollingDirectoryPrefix 与 7 条用例钉住」，并把 §81.3 的补记写进 W6-113 的修正与负向对照数字。",
+      "evidence": [
+        "4ff648e1",
+        "windows/docs/W14-DIAGNOSTIC-LOG-FILES.md",
+        "docs/android-source-sync-transfer.md §81.3"
+      ]
+    },
+    {
+      "id": "W6-P1-E2E",
+      "title": "W6 双端真实导入导出与 GUI 验收",
+      "priority": "P1",
+      "status": "BLOCKED",
+      "owner": "unassigned",
+      "blocked_by": [
+        "phone_gate",
+        "idle_gate >= 1200s"
+      ],
+      "next_action": "等维护者授予 >=1200 s 空闲窗口并明确 phone_gate 窗口后，跑 windows/tools/acceptance 下的同步页 GUI 用例与真机双端对跑。",
+      "notes": "GUI_UNVERIFIED + DEVICE_UNVERIFIED。禁止自行排程，禁止用模拟器结果替代真机状态。"
+    },
+    {
+      "id": "REL-SIGN",
+      "title": "代码签名 / MSIX / 干净机安装",
+      "priority": "P2",
+      "status": "SIGNING_BLOCKED",
+      "owner": "unassigned",
+      "blocked_by": [
+        "维护者签名决定"
+      ],
+      "notes": "未经维护者决定不得声称可正式分发。"
+    },
+    {
+      "id": "REL-LGPL",
+      "title": "libmpv GPL 义务处理（切 LGPL 引擎或按 GPL 提供对应源码）",
+      "priority": "P2",
+      "status": "RELEASE_BLOCKED",
+      "owner": "unassigned",
+      "blocked_by": [
+        "维护者法务/许可决定"
+      ],
+      "notes": "当前 libmpv-2.dll 为 GPL-3.0-or-later，未切产品。"
+    },
+    {
+      "id": "W6-113f",
+      "title": "TEST_MATRIX 计数自纠",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r2",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "14f7fa39",
+        "Fact=1475 Theory=100 required-suite=60 实测复核"
+      ],
+      "notes": "上午写入的静态计数 1459/99 在一小时内漂成 1475/100（并行执行者新增 BackupListTests.cs），required-suite 误记 61 实际 60。除改数外补了 §5 测量命令与 grep 选项解析的坑。"
+    },
+    {
+      "id": "W6-113g",
+      "title": "Android CI concurrency 摧毁 exact-SHA 证据（ADR + 补丁提案）",
+      "priority": "P0",
+      "status": "WAITING_FOR_APPROVAL",
+      "owner": "lead-W6-113-r2",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "docs/automation/ADR-AUTO-001-android-ci-concurrency.md",
+        "docs/automation/PATCH-PROPOSAL-android-ci-concurrency.md",
+        "cancelled runs: 40993937937 41003347784 41008280281 40991293954",
+        "same heads windows-ci: success 41003347790 41000771112 41005235521",
+        "cancelled runs (追加): 41093847372 (head 58bb304b, 2026-10-31)",
+        "cancelled runs (追加): 41099478811 (head 8ec0d890) and 41100655793 (head 4461140b), 2026-10-31 - the same heads' windows-ci succeeded as 41099478575 / 41100655895",
+        "cancelled runs (追加): 41111613255 (head a0b46f6e, 2026-10-31) - the same head's windows-ci succeeded as 41111613263",
+        "cancelled runs (追加): 41124244565 (head 1e2cf9ed, 2026-10-31) - the same head's windows-ci succeeded as 41124244650",
+        "cancelled runs (追加): 41169510106 (head c3a49cef, 2026-10-31) - the same head's windows-ci succeeded as 41169510082",
+        "Android CI run 41200282712 @716f481a was still in_progress when sampled (core/feature/app tree hashes unchanged from the previous head, so ADR-AUTO-001 inheritance applies)",
+        "Android CI run 41202161881 @9e90f1e1 was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)",
+        "Android CI run 41202435297 @33a2d77c = in_progress/",
+        "Android CI run 41204520438 @21bc3226 = in_progress/",
+        "Android CI run 41204722970 @c8745bb4 = in_progress/",
+        "Android CI 41207751615 @14bfea5b = cancelled (the same head’s windows-ci ran as 41207751934)",
+        "Android CI 41208701801 @c373956d was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)",
+        "Android CI run 41212076088 @e3283e47 was still in_progress when sampled (core/feature/app tree hashes ff4eed826cbc/e983feb08237/70c541457cae unchanged from 3a09dfbd, ADR-AUTO-001 inheritance)",
+        "android-ci:41215421873 in_progress at sampling (@2b267cec; windows-ci:41215421795 failure on licence log-file-claims only)",
+        "Android CI 41219751941 @e4750caa sampled in_progress (same core/feature/app tree hashes as round 21) - cancelled/queued by concurrency",
+        "Android CI 41223497614 @3511f2ab sampled in_progress (core/feature/app tree hashes ff4eed826cbc/e983feb08237/70c541457cae unchanged, only windows subtree changed; ADR-AUTO-001 inheritance applies)",
+        "Android CI 41224387667 @bd9b4eeb sampled in_progress (windows-ci on the same head ran as 41224387649)"
+      ],
+      "blocked_by": [
+        "维护者裁决（改共享 CI 会影响他人验证节奏）"
+      ],
+      "next_action": "维护者确认方案 A 后，把 .github/workflows/android-ci.yml 的 concurrency.group 改为 ci-${{ github.ref }}-${{ github.sha }}，并按提案 §验收 的四条验证（第 3 条为负向对照）。",
+      "notes": "根因是配置而非纪律：android-ci 有 cancel-in-progress:true 且 group 只按 ref 分组；windows-ci 无 concurrency 块。本轮两次按规程等对方跑完再推仍被取消。"
+    },
+    {
+      "id": "W6-113h",
+      "title": "windows-ci 套件门禁改用提交基线（堵 79% 用例可静默丢失的洞）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r3",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "ffe5a9fb",
+        "windows/tools/test-suite-baseline.json",
+        "windows-ci run 41025538206 success",
+        "log: MediaHub.Tests total=1920 baseline=1920 / WebDav total=104 baseline=104 / combined 2024",
+        "negative controls NC0-NC6: GREEN / RED / RED / GREEN+warning / RED / RED / GREEN"
+      ],
+      "notes": "缺陷：旧下限 Floor=400/100 源自 2026-10-24 的 438/104，而套件已涨到 1920 ⇒ 丢 1520 例(79%)仍判绿，与其自述意图「挡住丢一半用例」脱节。修法不是调大常量（漂移会重现），而是把基线做成提交文件。NC2（丢 1520 例）是这次修复的关键对照：旧门禁在此判绿，新基线判红。"
+    },
+    {
+      "id": "W6-113i",
+      "title": "基线数字随并行执行者的新增用例漂移，需要定期校准",
+      "priority": "P2",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r7",
+      "blocked_by": [],
+      "next_action": "下轮若 windows-ci 出现 `::warning::suite grew beyond the baseline`，按提示把 windows/tools/test-suite-baseline.json 的 expected 改成日志里的 total，单独提交。",
+      "notes": "原缺口：数字靠人肉跟随并行开发漂移。现由 per-class 基线表 + 刷新脚本承担；漂移仍会 ::warning，但刷新是一条命令。",
+      "evidence": [
+        "基线按设计被并行执行者刷新：1920 -> 1927 (2adb207f, W28) -> 1943 (fa2900d7/52cda428, W29/W30)",
+        "windows-ci run 41048006881 (head 52cda428) 日志: MediaHub.Tests total=1943 baseline=1943 / WebDav 104/104",
+        "校准动作已脚本化: windows/tools/update-test-suite-baseline.ps1（无 -AcceptRemoval 时拒绝下调）",
+        "并行写者 W31 06b6890d 用刷新脚本把 1943->1952 并补新类 9 例（第二个按设计采纳的使用者）"
+      ]
+    },
+    {
+      "id": "W6-113j",
+      "title": "套件基线自身校验（expected 必须正整数等）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r4",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "d6cdc7ee",
+        "windows-ci run 41032068612 success",
+        "log: MediaHub.Tests total=1920 baseline=1920 / WebDav 104/104",
+        "10 boundary cases: E0 GREEN, E1-E5/E7-E9 RED, E6 GREEN"
+      ],
+      "notes": "缺口：expected=0 或负数时 total>=0 恒成立 ⇒ 门禁静默失效。PowerShell 陷阱：\"$var: ...\" 被解析成驱动器限定符，必须 ${var}:。"
+    },
+    {
+      "id": "W6-113k",
+      "title": "套件基线加入 per-class 用例数：堵住「删 N 加 N、总数不变」的替换漏洞",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r7",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "闸门从 YAML 抽成 windows/tools/check-test-suite-baseline.ps1（负向对照跑同一代码路径）",
+        "基线新增 classes 表（MediaHub.Tests 112 类 / WebDav 4 类），源数据取自 CI run 41048006881 的真实 TRX",
+        "负向对照 18/18 通过（NC0-NC17），pwsh7 与 PS5.1 判定逐例一致",
+        "NC2 关键：总数相同、类分布不同 -> 新门禁 RED；同一输入在 HEAD 旧 total-only 门禁下 GREEN (NC16)",
+        "NC15：从真实 CI TRX 重新生成基线与提交版本逐字节一致；NC17：真实数据 1943+104 -> PASS",
+        "CI 实测 head 0cef5d79: windows-ci run 41051026115 success，日志 classes=112 baseline=class table 112 entries / WebDav classes=4 ... 4 entries",
+        "Android CI run 41051026121（同 head）入账时 in_progress -> 未作结论（本轮零 Android 代码改动）",
+        "第三方采纳实证 #2: W31 06b6890d 把基线 1943->1952、类表 112->113；windows-ci 41053179818 success，日志 total=1952 baseline=1952 / classes=113 entries"
+      ],
+      "notes": "替换漏洞：删 1514 例再加 1514 个新例，旧门禁（仅总数）判绿，新门禁判红。刷新路径 update-test-suite-baseline.ps1。",
+      "next_action": "无；若后续新增/删除用例，按 windows-ci 的 ::warning 提示运行 update-test-suite-baseline.ps1（下调需 -AcceptRemoval 且需人工理由）。"
+    },
+    {
+      "id": "W6-113l",
+      "title": "套件基线加入 per-method 表：堵住「同类内删一个方法、再加一个新方法」的替换漏洞",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r9",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "闸门仍在 windows/tools/check-test-suite-baseline.ps1 单点，负向对照跑同一代码路径",
+        "基线新增 methods 表（MediaHub.Tests 113 类 / 1637 方法，WebDav 4 类 / 95 方法），源数据取自 CI run 41055690826（head 48d5feb7）的真实 TRX",
+        "基线 7,659 B -> 122,204 B；file/expected/classes 三栏与 HEAD 逐字段比对全部不变，仅新增 methods",
+        "负向对照 29 例（NC0-NC27 + 迁移验证）通过，pwsh7 与 PS5.1 判定逐例一致",
+        "NC13 关键：同类内换方法（total 与每类计数全不变）-> 新门禁 RED；同一输入在 round 7 per-class 门禁下 GREEN（NC14）",
+        "NC16 明示残留限制：Theory 数据行（参数值）不钉，只钉方法名",
+        "迁移验证：旧格式基线（无 methods 表）在新闸门下两代 PowerShell 均 exit 1，报 has no methods table - the per-method check would be vacuous",
+        "CI 实测 head f045d34c: windows-ci run 41072599036 success，日志 methods=1637 baseline=method table 1637 names / WebDav methods=95 ... 95 names / combined tests=2056",
+        "Android CI run 41072599413（同 head）入账时 in_progress -> 未作结论（本轮零 Android 代码改动）",
+        "windows-ci:41089267971 (head 5091fa74, merge 6a4018c6f589, base 8d11eee1) - ladder re-confirmed on the new base: methods=1637, combined tests=2056, licence checks=25 failed=0",
+        "windows-ci:41091035445 (head 997a91ee, merge d538e88ffa2e, base 8d11eee1) success - ladder methods=1637 / combined tests=2056 / licence checks=25 failed=0; Android CI 41091035560 in_progress with identical core/feature/app tree hashes (ff4eed82/e983feb0/70c54145) -> inherited per ADR-AUTO-001"
+      ],
+      "notes": "方法名取 TRX TestDefinitions 的 TestMethod.className + name，剥掉第一个 ( 起的 Theory 参数后去重；数据行仍由 classes 的用例数管。刷新脚本 update-test-suite-baseline.ps1 同步写 methods 表，且 _comment 由脚本拥有、每次刷新归一化。",
+      "next_action": "无；若 CI 判 RED 并点名方法消失，需人工确认后以 -AcceptRemoval 刷新基线。"
+    },
+    {
+      "id": "W6-113m",
+      "title": "W32 的 SBOM 库存门禁上线即在 PR #39 全线红：SBOM 过期 + 祖先检查在浅克隆下不可证",
+      "priority": "P0",
+      "status": "RESOLVED",
+      "owner": "unassigned",
+      "branch": "feature/windows-client",
+      "blocked_by": [
+        "W32 作者重生成 SBOM/notices",
+        "守卫祖先检查改浅克隆安全或 checkout fetch-depth: 0"
+      ],
+      "evidence": [
+        "base head 13fad6b8（W32 SBOM 三检）自身红两次：push run 41072548134 / pull_request run 41072562787，失败步骤同为 Licence surface guard（notices / SBOM / project drift）",
+        "日志 check-licence-surface checks=24 failed=2；FAIL sbom-inventory 与 FAIL sbom-source-revision；sbom-inventory-licences PASS",
+        "W32 之前 base 的 licence 行为 checks=21 failed=0（head f045d34c 的 windows-ci 41072599036）-> 21/24 之差正是 W32 新加三检，归因外部",
+        "sbom-inventory 根因：windows/docs/sbom-windows.cdx.json 仍记 pkg:nuget/System.Reflection.Metadata@1.6.0，但当前树已无 csproj 解析它（git grep 只命中 THIRD-PARTY-NOTICES.md 与 SBOM 自身）-> 需 pwsh -NoProfile -File windows/tools/license-report.ps1 -Sbom",
+        "sbom-source-revision 根因：守卫 check-licence-surface.ps1 用 git merge-base --is-ancestor 1c30471 HEAD；本机 1c30471 确是 388cde7d 与 origin/feature/windows-client 的祖先，但 actions/checkout@v4 默认 fetch-depth 1（浅克隆）拿不到祖先对象 -> 不可证即 FAIL",
+        "docs 提交 388cde7d 触发的 windows-ci 41073668366 也红在同一步骤，但台阶行（total/classes/methods/combined）全绿，证明失败与本轮门禁改动无关",
+        "上游已修复：base 前进到 8d11eee1（2026-10-30T16:05:15Z），其 windows-ci run 41086696926 = completed/success，licence 行 check-licence-surface checks=25 failed=0 warnings=1",
+        "对照：修复前 base 13fad6b8 为 checks=24 failed=2；我方 head 98defcbd 的 run 41075847038 亦为 24/2（同因），均随本次 base 前进而消失"
+      ],
+      "notes": "PR #39 现在的 head 不再是绿：windows-ci 因 W32 新守卫红。不要把该红记到本轮 W6-113l 头上；也不要为消红去改 SBOM 大文件（属 W32 自有校验面）。 2026-10-31 复核：上游 W32 作者已重生成 SBOM 并把祖先检查做成浅克隆安全（checks 24->25，无 FAIL）=> 两条阻塞条件均已消化，转 RESOLVED。",
+      "next_action": "无需我方动作；PR #39 在 base 8d11eee1 上的下一次 exact-head run 应回到 licence PASS（若仍红则重开本条目）"
+    },
+    {
+      "id": "W6-113n",
+      "title": "诊断导出契约复验（W14 指针口径 vs Android 端口）：与两棵树文档一致，记 no-op",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r10",
+      "branch": "feature/cross-device-source-sync",
+      "blocked_by": [],
+      "evidence": [
+        "dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj --filter FullyQualifiedName~DiagnosticsReportTests|FullyQualifiedName~LogFileSinkTests => exit 0 / 通过数 25（16 DiagnosticsReportTests + 9 LogFileSinkTests），日志 D:/mh-verify/r10-diag-tests.log",
+        "五类点名用例落点：旧签名兼容 A_missing_rolling_directory_leaves_the_header_byte_for_byte_as_before；目录缺省与存在 An_empty_rolling_directory_is_treated_as_absent + Write_creates_a_missing_directory_and_reports_bytes_and_entries + Write_carries_the_rolling_directory_into_the_file_it_writes；十六进制路径 The_hexadecimal_segment_of_the_directory_survives_redaction_untouched；敏感 URL The_directory_is_echoed_verbatim_while_entries_in_the_same_report_are_still_redacted；日志正文不内嵌 The_report_points_at_the_rolling_directory_instead_of_inlining_the_file；另有 The_rolling_directory_line_keeps_the_prefix_w14_shipped",
+        "源码 SOURCE_REVIEWED：DiagnosticsReport.cs:30 RollingDirectoryPrefix=\"# 滚动文件目录：\"；Render 的 rollingDirectory 尾随可选参数 L40-42、指针行 L50-54 不过 Redact（LongHexRegex 会吃 32 位十六进制段）、L56-57 appVersion/device 仍脱敏；LogService.cs:71 Export() 传 FileSink?.DirectoryPath、L74-77 Snapshot 在写锁内、L23 MaxEntries=2000",
+        "文档：windows/docs/W14-DIAGNOSTIC-LOG-FILES.md:31-32 指针行不过 Redact、:69 Export 仍只是内存快照；docs/android-source-sync-transfer.md:6837-6850 W6-112 合并冲突记录（rollingDirectory 尾随可选参数、W6-113 补记 055c85c3 9->16 用例、3 条负向对照 1/1/4 红）",
+        "Android 对照（只读 head 8d11eee1）：AppModule.kt:202-221 FileDiagnosticsExportPort(directory=File(context.cacheDir,\"diagnostics\"))；feature/settings/.../DiagnosticsExportPortTest.kt 4 例含 the_information_line_carries_the_counts_and_never_the_directory => 日志信息行不带目录，与 Windows 报告头指针行属不同表面，无冲突"
+      ],
+      "notes": "契约冻结为「内存快照 + 滚动文件目录指针（Windows 报告头，不过 Redact）」+「Android 端口写自身目录且日志信息行不含目录」。本轮按指令不新增用例、不做提交（no-op）；若未来改口径，需同步两棵树文档与这两组用例。",
+      "next_action": "无；后续任何改导出格式的提交，须同时更新 W14 文档与两侧用例，并重跑本组 25 例"
+    },
+    {
+      "id": "W6-113o",
+      "title": "PR #39 正文第三轮归档：W6-59 ~ W6-85 共 21 节移出版本化 docs，正文回到 122 KB 余量",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r11",
+      "branch": "feature/cross-device-source-sync",
+      "blocked_by": [],
+      "evidence": [
+        "折叠前正文 202,521 B（余 59,623 B）；折叠后 139,588 B（余 122,556 B）；PATCH 后回读 equal=true，sha256 e63dcc649d6cffde09330cb24aacd9c453025780cf5ecba5a8c20366a1ad2bfa",
+        "归档文件 docs/pr-archive/PR39-W6-59-to-W6-85-20261031.md（66,897 B；折叠区段 65,936 B / 21 节逐字原文；payload sha256 6d2d0dcc86892dbbc222834576a8daa57a8e8f070bce98b506976133d50648c5）",
+        "字节区间 47,886-113,822（锚点：## 2026-10-25 13:30 进度追加（W6-59 ... 至 ## 2026-10-30 20:2x 进度追加（PR 正文治理：W6-86 ... 之前）",
+        "前缀 47,886 B 与后缀 88,699 B 在 PATCH 前后逐字节未动；正文原位索引 3,003 B（归档链接 + 字节区间 + 21 条小节标题）",
+        "写入前全文证据 D:/mh-verify/r11/pr39-body-remote-before-r11.md；PATCH 前重读远端 drift=false"
+      ],
+      "notes": "折叠口径：小节标题（含结论）与证据路径留在正文，细节正文入版本化 docs；原文逐字保存，不丢历史。并发写者风险仍在——本次 PATCH 前重读比对无漂移，但「最后写者胜」的规则未变。round 10 收尾报告曾声称 exact-head CI 验收已写入 RUNLOG，实测不准确（997a91ee 只写了 5091fa74 的 run），本轮已在 RUNLOG 更正并补记 41091035445。",
+      "next_action": "正文余量 122,556 B（约 2 轮）；下次正文超过约 180 KB 时折叠 2026-10-30 的旧小节（W6-111 ~ W30 区段）。"
+    },
+    {
+      "id": "W6-113p",
+      "title": "套件基线第四层口径：per-method 用例数（关闭同类内挪数据行）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r12",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (15,828 B) + update-test-suite-baseline.ps1 (11,749 B) + test-suite-baseline.json (127,587 B); methods upgraded to class -> {method: case count}",
+        "commit 8ec0d890 (3 files, +2135 -2029); the three blobs are sha256-equal to the working tree bytes the 23 negative controls exercised",
+        "negative controls 23/23 pass, pwsh 7 and Windows PowerShell 5.1 identical (D:/mh-verify/r12/nc-run.log)",
+        "NC28 row move inside one class RED (G_alpha baseline 2 cases, now 1); NC29 the same input on the round 9 gate GREEN -> the closure is this round's",
+        "regressions R1-R7 unchanged (total drop / class growth / failed != 0 / method swap / no methods table / cross-class move / theory arguments changed); R7 is the limit still not closed",
+        "NC41 real round 9 name-list baseline against the real TRX RED (migration demanded); NC43 the same on the round 9 gate GREEN",
+        "NC37 regenerating from the real CI TRX reproduces the committed baseline byte for byte",
+        "data source: CI run 41095080796 @701bb547, windows-tests.trx 2,719,155 B / webdav-tests.trx 145,266 B",
+        "CI: run 41099478575 @8ec0d890 success - methodCases=1952 baseline=method case table 1952 cases, methods=1637 ... 1637, combined tests=2056, licence checks=27 failed=0",
+        "CI: run 41100655895 @4461140b success - the docs head prints the same ladder lines (methodCases=1952 / 104, combined tests=2056, licence checks=27 failed=0)",
+        "CI: run 41102903873 @3eafac91 success - final head prints the same ladder lines (methodCases=1952 baseline=method case table 1952 cases / WebDav 104 cases / combined tests=2056); licence checks=29 failed=0 warnings=1 after the base advanced to 69a454a7 (PR merge commit a3e5adf14d13)"
+      ],
+      "notes": "methods is now class -> {method -> case count}; per-method case-count drops are RED naming Class.Method with both counts; old 2026-10-30 name-list baselines throw with a refresh hint instead of passing silently; class-to-method sums must equal the classes table. Residual limit: theory data-row argument values are still not pinned (R7 / round 9 NC16).",
+      "next_action": "无；若要收掉数据行参数值需把 InlineData 纳入基线（代价与噪声显著上升），另立切片。",
+      "closed_at": "2026-10-31T01:39:18+08:00"
+    },
+    {
+      "id": "W6-113q",
+      "title": "套件基线第五层口径：per-argument-row 数据行 digest（关闭 theory 参数值替换）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r13",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (23,063 B) + update-test-suite-baseline.ps1 (16,197 B) + test-suite-baseline.json (140,085 B); suites gain a data table Class.Method -> 16-hex digest of that method's argument-row suffixes",
+        "commit a0b46f6e (3 files, +359 -15); the three blobs are sha256-equal to the working tree bytes the 38 negative controls exercised",
+        "negative controls 38/38 pass, pwsh 7 and Windows PowerShell 5.1 identical (D:/mh-verify/r13/nc-run.log)",
+        "D1 one row value replaced (total, per-class counts, method list and per-method case counts all unchanged) RED naming ToyTests.M_a; D1x the same input on the round 12 gate GREEN -> the closure is this round's",
+        "D2 {p,p,q} -> {p,q,q} RED (digest keeps duplicates); D3 row identity swap GREEN (order independent); D4 argument text gone RED; D5 fact turns theory PASS + ::warning::new test method argument text",
+        "D6 r12 name-list baseline: new gate RED 'has no data table' / r12 gate GREEN; D7 refreshing it without -AcceptRemoval GREEN (expected=6, classes unchanged, data 2 keys)",
+        "D8 substituted value refused without -AcceptRemoval (message contains 'argument text changed', baseline bytes untouched) and accepted with it; D9 argument text gone is refused as well",
+        "G1 theory row added PASS + 'argument text grew: 2 -> 3 rows' + 'M_b (+1 cases)'; G3 add-row-and-change-value in one theory still reported as growth (documented residual limit)",
+        "C1-C5 config negatives all RED (missing / empty / unknown key / bad digest / array); the empty-table case exposed a gate defect (member enumeration on an empty object) fixed by enumerating PSObject.Properties explicitly",
+        "RE1 real TRX PASS printing methodData=100 baseline=method data table 100 digests / methodData=3 ... 3 digests / combined tests=2056; RE2 r12 baseline x real TRX RED on the new gate and GREEN on r12; RE3 real migration writes data=100 / data=3",
+        "RE4 both shells write the same bytes and the r9-art and r12-art digests are identical (windows 100/100, webdav 3/3) - digests are stable across CI runs",
+        "data source: CI run 41095080796 @701bb547, windows-tests.trx 2,719,155 B / webdav-tests.trx 145,266 B (415 parameterized rows over 100 methods; 6 rows truncated by the framework with '...')",
+        "CI: run 41111613263 @a0b46f6e success - methodData=100 baseline=method data table 100 digests, methodData=3 ... 3 digests, methodCases=1952 ... 1952 cases, methods=1637 ... 1637, combined tests=2056, licence checks=30 failed=0 warnings=1",
+        "docs head CI: run 41113224063 @cb2f0b14 success - methodData=100 baseline=method data table 100 digests, methodData=3 ... 3 digests, methodCases=1952 ... 1952 cases, methods=1637 ... 1637 methods, combined tests=2056, licence checks=30 failed=0 warnings=1"
+      ],
+      "notes": "digest = SHA-256 over Ordinal-sorted, LF-joined argument suffixes with duplicates kept, first 8 bytes as lowercase hex, only for methods that actually carry parameters. Row counts are compared first, so a theory that gains rows stays a warning (argument text grew: N -> M rows) instead of a hard fail. Residual limits: the framework truncates 6 display names with '...', a theory that adds a row and changes a value in one step stays a growth warning, and class/method names are not part of the digest (renames stay the methods table's business).",
+      "next_action": "无；下一层候选是把运行期生成的 Theory 值或截断前原文纳入基线，代价更高，需另立切片。",
+      "closed_at": "2026-10-31T03:10:00+08:00"
+    },
+    {
+      "id": "W6-113r",
+      "title": "套件基线第五层口径升级：per-method 参数行清单与多重集包含判定（关闭「同 theory 加行 + 换值」）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r14",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (24,967 B) + update-test-suite-baseline.ps1 (17,411 B) + test-suite-baseline.json (163,501 B); the data table becomes Class.Method -> sorted argument row list (ordinal, duplicates kept, ASCII escaped) and the verdict is multiset containment",
+        "commit 1e2cf9ed5de87abe4e3da6691cbacc6a50167cc3 (3 files, +836 -239); blobs sha256-equal to the working-tree bytes the 42 negative controls exercised (check fe121dac7d0cfbe6 / update 2f2bb86559be5879 / baseline 32c056ad6a68c645)",
+        "negative controls 42/42 pass, pwsh 7 and Windows PowerShell 5.1 identical (D:/mh-verify/r14/nc-console.log, last line \"--- total 42 cases, pass=42, fail=0\")",
+        "E1 one row replaced AND one row added in the same theory (total, per-class counts, method list and per-method case counts all unchanged) RED; E1x the same input on the round 13 gate GREEN -> the extra red is what this layer buys",
+        "E5 two rows swapped is GREEN (the multiset is unchanged, so swapping is not a loss); E4 multiplicity change RED; E7 a method that stops reporting rows RED",
+        "round 13 digest baseline throws on the new gate (\"as a digest - that is the 2026-10-31 format\") and the new update script upgrades it to row lists without -AcceptRemoval; E11 refuses a value substitution without the switch and leaves the baseline untouched",
+        "real corpus: baseline regenerated from the CI TRX of run 41095080796 (windows 2,719,155 B / webdav 145,266 B) 127,587 B -> 163,501 B; MediaHub.Tests 100 row sets / 415 rows, WebDav 3 / 12; RE4 the earlier run 41055690826 gives the same rows (cross-run determinism)",
+        "exact-head windows-ci 41124244650 success: methodData=100 baseline=method data table 100 row sets + argumentRows=415 baseline=argument row table 415 rows (WebDav 3 / 12), methodCases=1952 ... 1952 cases, combined tests=2056; licence checks=31 failed=0 warnings=0 skipped=0; MPV_PROBE/ENGINE_PROBE PASS (GPU/HDR/audio NOT exercised)",
+        "latent defect fixed: Json-String escaped a quote as \"\\\" instead of \\\" - invisible while the baseline only held 16-hex digests, illegal JSON once row text was stored; >126 code units are now \\uXXXX escaped so the baseline stays pure ASCII",
+        "docs-head windows-ci 41125371678 success (head 49911e49): the same ladder lines as the code head, including argumentRows=415 baseline=argument row table 415 rows and WebDav 12 rows, licence checks=31 failed=0 warnings=0 skipped=0"
+      ],
+      "notes": "Residual limits recorded in TEST_MATRIX 6.9: the framework truncates display names (6 of the 415 windows rows carry the ellipsis marker); replacing one row while adding a row whose text equals the replaced one restores the multiset exactly, so that last case still passes.",
+      "next_action": "No action required unless the gate reds; any further level (semantic/signature hashing) must be scoped with its own cost analysis first.",
+      "closed_at": "2026-10-31T04:47:00+08:00"
+    },
+    {
+      "id": "W6-113s",
+      "title": "套件基线记录 runner 的截断暴露面（W6-113s）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r15",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (29,523 B) + update-test-suite-baseline.ps1 (18,921 B) + test-suite-baseline.json (164,027 B); a new \"truncated\" table maps Class.Method -> count of argument rows the runner cut at its U+00B7 x3 marker",
+        "commit c3a49cefbccc687604426b33ea05da7ec0b779e9 (3 files, +122 -9); blobs sha256-equal to the working-tree bytes the negative controls exercised (check f4b2cd1f2a8b5ac0 / update 1b81cbc4bb095f2a / baseline a9c74351a140a2d4)",
+        "negative controls 19/19 pass in pwsh 7 and Windows PowerShell 5.1 (D:/mh-verify/r15/nc-console.log, last line \"--- total 19 cases, pass=19, fail=0\")",
+        "T2/T3 exposure changes are warnings, never red; T5-T9 six config self-checks red on a malformed or vacuous truncated table; T4/T10 migrate and flag the round-14 format (\"table not recorded\")",
+        "real corpus: the truncated map is 6 rows over 5 methods for MediaHub.Tests (12 marker occurrences, both definition and result sides) and 0 for WebDav; baseline 163,501 B -> 164,027 B, pure ASCII, byte-identical between the two shells",
+        "first NC run red on 11 cases - all harness defects, not gate defects: fixture TRX without a UTF-8 BOM (PS 5.1 decodes it as ANSI, so the marker read as 0), R-cases built the baseline from the already modified run, a 300-char diagnostic slice, and a JS-written baseline carrying raw non-ASCII rows",
+        "exact-head windows-ci 41169510082 success: argumentTruncated=6 baseline=argument truncated table 6 rows (WebDav 0 / 0 rows), argumentRows=415 ... 415 rows, methodData=100 ... 100 row sets, methodCases=1952 ... 1952 cases, combined tests=2056; licence checks=42 failed=0 warnings=0 skipped=0; MPV_PROBE/ENGINE_PROBE PASS (GPU/HDR/audio NOT exercised)",
+        "residual limit: the text past the marker is unrecoverable from a TRX, so this layer can only expose the cut, never pin it - it is documented in TEST_MATRIX 6.10 instead of being claimed as coverage",
+        "migration: a round-14 format baseline (no truncated table) still exits 0 on the new gate in both shells, printing \"argument truncated table not recorded\" plus the warning, so no branch needs a lock-step baseline rewrite",
+        "docs-head windows-ci 41169881421 success (head 86a4c5aa): the same ladder lines as the code head, including argumentTruncated=6 baseline=argument truncated table 6 rows (WebDav 0 / 0 rows), licence checks=42 failed=0 warnings=0 skipped=0"
+      ],
+      "notes": "TEST_MATRIX 6.10 records the ladder line, the six config self-checks and the residual limits (tail unrecoverable; truncation threshold is the runner's). The layer is deliberately warning-only so CI cannot flap on runner display-name truncation.",
+      "next_action": "No action required unless the gate warns; if the runner changes its display-name length policy the truncated table must be refreshed with the same commit.",
+      "closed_at": "2026-10-31T12:45:00+08:00"
+    },
+    {
+      "id": "W6-113t",
+      "title": "套件集口径：基线钉住 suite 清单并核对产出的结果文件（W6-113t）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r16",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (34,527 B) + update-test-suite-baseline.ps1 (21,834 B) + test-suite-baseline.json (164,051 B); the baseline now declares \"expected_suites\" and the gate enumerates every *.trx under -ResultsDir, warning on result files the table does not list",
+        "commit 716f481a00e112b5f31c49d98fb6420d336a7aff (3 files, +138 -5); blobs sha256-equal to the working-tree bytes the negative controls exercised (check 8961e9f88e8c536b / update ff0c262b8c815d64 / baseline 1949f1039b1c595c)",
+        "negative controls 26/26 pass in pwsh 7 and Windows PowerShell 5.1 (D:/mh-verify/r16/nc-console.log, last line \"--- total 26 cases, pass=26, fail=0\")",
+        "first round had 2 reds, both outside the verdict logic: the updater also threw under -AcceptRemoval (fixed by a dedicated $dropped list) and the migration fixture lost the \\uXXXX escaping (fixed by copying the round-15 baseline byte for byte)",
+        "real corpus: suites=2 baseline=suite table 2 suites, combined tests=2056, argumentTruncated=6 (both shells byte-identical output)",
+        "exact-head CI: head 716f481a windows-ci 41200282567 printed the new ladder line \"MediaHub.Tests: suites=2 baseline=suite table 2 suites\" in the test gate step; the run is a failure only on the licence step, attributed to W6-113u",
+        "docs head f396e791 windows-ci 41200702543 printed the same ladder line \"suites=2 baseline=suite table 2 suites\" plus combined tests=2056 in the test gate step (run fails only on the licence step attributed to W6-113u)"
+      ],
+      "notes": "未列出的结果文件只报 warning（新增测试项目属增长路径，必须可合并）；哨兵是 expected_suites 与条数一致 + 被删条目对应的结果文件是否仍在。一个结果文件混多个程序集时归属核对退化为 warning。",
+      "next_action": "无需我方动作；若后续 base 再改结果文件名或程序集归属方式，先跑 RE 例（真实语料）再改口径。",
+      "closed_at": "2026-10-31T20:20:00+08:00"
+    },
+    {
+      "id": "W6-113u",
+      "title": "跨分支守卫分歧：W50 log-file-claims 钉 LogService 的滚动目录字面量，W6 已把该行搬进 DiagnosticsReport（W6-113u）",
+      "priority": "P0",
+      "status": "BLOCKED",
+      "owner": "unassigned",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "base 2bdaa499 windows/tools/check-licence-surface.ps1 check #44 \"log-file-claims\" (W50) requires the literal sb.AppendLine(\"# 滚动文件目录：\" + FileSink.DirectoryPath); inside windows/src/MediaHub.Net/LogService.cs",
+        "base 2bdaa499 own tree satisfies it (LogService.cs:80, 198 lines, no DiagnosticsReport.cs) and its windows-ci 41174155974 (push) / 41174160859 (pull_request) are success with checks=44 failed=0",
+        "W6 branch commit 055c85c3 (W6-113 diagnostics export contract alignment) moved the line into windows/src/MediaHub.Net/DiagnosticsReport.cs (line 30 constant RollingDirectoryPrefix, line 54 lines.Add(RollingDirectoryPrefix + rollingDirectory)); HEAD LogService.cs is 184 lines with no such literal and exports via DiagnosticsReport.Render(..., rollingDirectory: FileSink?.DirectoryPath)",
+        "PR merge tree refs/pull/39/merge = 0b8a3598a7d3f7b5aa7d5c113a5295fae13a705c carries base W14 log-file-status block and the W6 RollingDirectoryPrefix note, but no LogService literal, so the guard necessarily fails",
+        "head 716f481a windows-ci 41200282567 = failure; log: check-licence-surface FAIL log-file-claims (checks=44 failed=1 warnings=0 skipped=0), test-suite gate step fully green",
+        "round 15 head ecf00ca5 on the previous base 4791322455 had checks=42 failed=0 - the guard did not exist then, so this red appeared with the base advance, not with this round change",
+        "docs head f396e791 windows-ci 41200702543 = failure on the same needle (check-licence-surface checks=45 failed=1), so the red is stable across code and docs heads of this branch"
+      ],
+      "notes": "两侧设计各自成立：base 的守卫钉的是「LogService 自己拼报告头」的旧形状，W6-113 已把这一行集中到 DiagnosticsReport（由 7 条用例与 W14 §3 说明冻结），round 10 已复验为 no-op。",
+      "next_action": "维护者/W50 所有者二选一：① 把该 needle 改为「该行由 DiagnosticsReport.RollingDirectoryPrefix + rollingDirectory 产出，且两侧用例仍在」（推荐，与已落地设计一致）；② 把该字面量按原形状放回 LogService.cs（会形成第二个真源，需同步改 W14 §3）。裁决前本 PR head 的 licence 步骤持续红；我方不动共享守卫。",
+      "closed_at": null
+    },
+    {
+      "id": "W6-113v",
+      "title": "套件基线第七层口径：outcome 分布与结果文件自洽性（W6-113v）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r17",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (42,459 B) + update-test-suite-baseline.ps1 (24,836 B) + test-suite-baseline.json (164,452 B); each suite now also pins \"outcomes\" (TRX outcome names, non-zero buckets, sum == expected) and the gate counts UnitTestResult@outcome row by row and requires them to reproduce the run's own Counters",
+        "commit 9e90f1e1c5b6f759eab274bdf5c5552504d5ce6f (3 files, +200 -6); blobs sha256-equal to the working-tree bytes the negative controls exercised (check 0966a72459bbbd99 / update b48f3e769ed7f2e5 / baseline 7b9da6ad9875d1f7)",
+        "negative controls 29/29 pass in pwsh 7 and Windows PowerShell 5.1 (D:/mh-verify/r17/nc-console.log, last line \"--- total 29 cases, pass=29, fail=0\")",
+        "core holes closed: a row moving from Passed to Aborted (or any other kind) keeps the total, every class count, method set, per-method case count and argument rows identical - the round-16 gate stayed green (V3x) while the new gate is red (V3), and a file whose rows disagree with its own Counters is red too (V2/V2x, R7)",
+        "first round had 13 reds, all harness bugs: V still pointed at D:/mh-verify/r16 (five cases), the fixture has 8 rows while six expectations assumed 6, and combined tests was written as 8 instead of 10",
+        "migration: the round-16 real baseline is refused by the new gate (\"has no outcomes table\") while the round-16 gate accepts it, and the new updater migrates it (outcomes {Passed:1952} / {Passed:104})",
+        "exact-head CI: head 9e90f1e1 windows-ci 41202161858 printed \"MediaHub.Tests: outcomes=1 baseline=outcome table 1 outcomes\" and the WebDav twin in the test gate step; the run fails only on the licence step attributed to W6-113u",
+        "docs head 33a2d77c windows-ci 41202435323: the test gate step printed the full eight-level ladder including \"outcomes=1 baseline=outcome table 1 outcomes\" for both suites plus \"suites=2\" and \"combined tests=2056\"; the run fails only on the licence step (\"the log service no longer contains sb.AppendLine(...)\" / checks=45 failed=1) which is the W6-113u needle divergence"
+      ],
+      "notes": "14 个 TRX 桶名是两脚本共有词表；未知桶名 update 直接 throw（宁拒勿默写）。outcome 桶之和必须等于 expected。testId 唯一性未单独校验，时长/时间戳不参与判定。",
+      "next_action": "无需我方动作；若 runner 引入新桶名，先在两脚本词表加名再刷新基线。",
+      "closed_at": "2026-10-31T20:45:00+08:00"
+    },
+    {
+      "id": "W6-113w",
+      "title": "套件基线第九层口径：TRX 两侧身份对齐（W6-113w）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r18",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (47,512 B, sha256 eece55e3e2e96de7) now counts the test ids on both sides of a TRX: definition ids unique, result testIds unique, both id sets subsets of each other, and every result display name equal to the name of the definition its testId points at (truncated rows compared before the runner marker)",
+        "no baseline change: these are invariants inside one TRX, not run-to-run values; test-suite-baseline.json and update-test-suite-baseline.ps1 are untouched",
+        "commit 21bc3226d66367cd328f64ac11012d8b66450dfc (1 file, +84 -3); blob sha256-equal to the working-tree bytes the negative controls exercised",
+        "negative controls 18/18 pass in pwsh 7 and Windows PowerShell 5.1 (D:/mh-verify/r18/nc-console.log, last line \"--- total 18 cases, pass=18, fail=0\")",
+        "core holes closed: duplicating one id onto another definition (with its result) kept every count identical and the round-17 gate green (I2x) while the new gate is red (I2); swapping two definition ids of one class re-points each result row at the other definition (counts identical, round-17 gate green in I3x) and is red under the name cross-check (I3)",
+        "first round had 1 red, an implementation boundary: the \"result testId names no definition\" branch was unreachable because a result-side orphan id hits the pre-existing unmapped check first; the unmapped message now names the ids and the orphan-definition case is built with a duplicate result id instead",
+        "exact-head CI: head 21bc3226 windows-ci (see the acceptance note) printed \"MediaHub.Tests: identities=1952 named=1952 unique test ids shared by both halves\" and the WebDav twin; the run still fails only on the licence step attributed to W6-113u",
+        "code head 21bc3226 windows-ci 41204520499: the test gate step printed all nine ladder lines including \"identities=1952 named=1952 unique test ids shared by both halves\" and the WebDav twin (\"identities=104 named=104\") plus \"combined tests=2056\"; the run fails only on the licence step (checks=45 failed=1, the W6-113u needle divergence)",
+        "docs head c8745bb4 windows-ci 41204722993: the same nine ladder lines (identities=1952 named=1952, WebDav identities=104 named=104, combined tests=2056); licence still checks=45 failed=1 (W6-113u)"
+      ],
+      "notes": "本层不加基线字段：单 TRX 内部不变量，钉进基线只会重复 expected。截断容错用 marker 前前缀关系，比逐字相等宽。executionId/duration 等其它属性不参与判定。",
+      "next_action": "无需我方动作；若 runner 改变截断策略或引入重试行，本层需重新约定。",
+      "closed_at": "2026-10-31T21:15:00+08:00"
+    },
+    {
+      "id": "W6-113x",
+      "title": "套件基线第十层口径：结果行自身元数据（W6-113x）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r19",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (42,459 -> 54,842 B, sha256 64ff29d447182752) audits each result row’s own metadata: executionId non-blank and unique, testType/testListId/computerName/storage uniform and non-blank, startTime/endTime/duration parseable, end not before start, duration not negative, rows inside the run’s <Times> window; duration drift over one second and a missing <Times> window stay warnings",
+        "no baseline change: these are invariants inside one TRX, not run-to-run values; test-suite-baseline.json and update-test-suite-baseline.ps1 are untouched, so there is no migration",
+        "new ladder line: rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4 (WebDav: rowAttributes=104 ... uniform row fields=4)",
+        "real corpus: four CI TRX files (r12-art and r9-art, windows + webdav) have no blank or duplicate executionId, one value per uniform field, all times parseable with end >= start, no negative duration, zero drift cases, and every row inside the <Times> window",
+        "negative controls 30/30 pass in pwsh 7 and Windows PowerShell 5.1 (D:/mh-verify/r19/nc-console.log, last line \"--- total 30 cases, pass=30, fail=0\"): N1 duplicate executionId and N2 end before start are RED on the new gate and GREEN on the round 18 gate",
+        "two first-round reds were harness bugs (R5 fixture actually exercised the method layer; R6 regex \\(s\\) grouped instead of matching literal brackets)",
+        "commit 14bfea5bbd64acff14c371c87f95027ac91dceba (1 file, +146); blob sha256-equal to the working-tree bytes the negative controls exercised; non-force push 97da40af..14bfea5b",
+        "exact-head windows-ci 41207751934 @14bfea5b = completed/failure: the test-gate step is green and prints all ten ladder lines including rowAttributes=1952 unique execution ids=1952, WebDav rowAttributes=104, combined tests=2056; licence checks=46 failed=2 (log-file-claims = W6-113u, plus the new doc-residue-claims handled by W6-113y)",
+        "Android CI 41207751615 @14bfea5b = cancelled (same head); no Android change in this layer",
+        "docs head CI 41209166800 @ad8b1698 = completed/failure: the ten ladder lines match the code head byte for byte (rowAttributes=1952 unique execution ids=1952, WebDav rowAttributes=104, combined tests=2056) and doc-residue-claims stays PASS; licence checks=46 failed=1 with log-file-claims (W6-113u) as the only red",
+        "final head CI 41209461489 @828a93c5 = completed/failure: the ten ladder lines all match (rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4, WebDav rowAttributes=104, identities=1952 named=1952, combined tests=2056) and doc-residue-claims stays PASS; licence checks=47 failed=2 with both reds upstream (log-file-claims = W6-113u, capability-map-pointers = W53 on base f614546e)"
+      ],
+      "notes": "Ten levels now pin: totals, per-class case counts, method names, per-method case counts, per-method argument row lists, runner truncation exposure, the outcome split plus results-summary self-consistency, test-id identity across both TRX halves, and per-row metadata. Remaining limits: other row attributes (relativeResultsDirectory and friends) are not pinned, duration drift and a missing Times window stay warnings, and the layer proves internal consistency only, not that these were the commit’s cases.",
+      "next_action": "If any row attribute the runner makes uniform starts legitimately varying (for example a retry row reusing an execution id), relax that specific uniformity rule rather than the whole layer.",
+      "closed_at": "2026-10-31T22:12:00+08:00"
+    },
+    {
+      "id": "W6-113y",
+      "title": "上游 doc-residue 守卫下的分支自建文档围栏修复（W6-113y）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r19",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "new base-side guard doc-residue-claims flagged five lines of docs/cross-device/W6-70-PAIRED-DEVICES.md (lines 24/25/40/41/42) as two markdown table rows glued onto one line; the document exists only on this branch (git show a75371f6:docs/cross-device/W6-70-PAIRED-DEVICES.md reports the path does not exist), so the repair belongs to our branch and not to the shared guard",
+        "root cause: the four code blocks of that document had their fences mangled (opening fence a single backtick plus the language, closing fence two backticks), so the C# continuation lines that begin with || sat outside any fence",
+        "fix: the four fences are restored, no prose changed; 10,305 -> 10,309 B, blob b9e524f2, sha256 78d391720f9fe909c1f3e10d8b386a6a65723ec86bb836255fdd64cfdc6f652b; commit c373956dc72933216eb473dd11ca82d2848a0c50 (1 file, 4 insertions/4 deletions)",
+        "local reproduction: the guard section 23 rule replayed over the PR merge tree (git ls-tree -r refs/pull/39/merge -> git cat-file --batch) reports 0 problems over its 123 markdown files; scanning the worktree copy instead reports one extra false positive because the merge tree carries the <!-- residue-allow --> marker on docs/android-source-sync-transfer.md while our branch copy does not",
+        "exact-head windows-ci 41208701809 @c373956d = completed/failure with PASS doc-residue-claims \"1317 text file(s) scanned: no unmarked placeholder residue, all 123 markdown file(s) have balanced fences\"; licence drops from failed=2 to checks=46 failed=1, the only remaining red being log-file-claims (W6-113u)",
+        "docs head CI 41209166800 @ad8b1698 = completed/failure: the ten ladder lines match the code head byte for byte (rowAttributes=1952 unique execution ids=1952, WebDav rowAttributes=104, combined tests=2056) and doc-residue-claims stays PASS; licence checks=46 failed=1 with log-file-claims (W6-113u) as the only red",
+        "final head CI 41209461489 @828a93c5 = completed/failure: the ten ladder lines all match (rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4, WebDav rowAttributes=104, identities=1952 named=1952, combined tests=2056) and doc-residue-claims stays PASS; licence checks=47 failed=2 with both reds upstream (log-file-claims = W6-113u, capability-map-pointers = W53 on base f614546e)"
+      ],
+      "notes": "Verification must run against the PR merge tree, not the branch worktree: the merged guard is the base-side one and merged documents can carry markers the branch copy lacks. The remaining licence red is W6-113u (W50 needle), untouched here.",
+      "next_action": "None for this task; if the upstream guard gets stricter, re-run the merge-tree replay before pushing.",
+      "closed_at": "2026-10-31T22:12:00+08:00"
+    },
+    {
+      "id": "W6-113z",
+      "title": "W53 能力对照表指针门禁（第 47 项 capability-map-pointers）在上游 base 上自红，等 W53 所有者修 CAPABILITY-MAP.md",
+      "priority": "P0",
+      "status": "RESOLVED",
+      "owner": "unassigned",
+      "branch": "feature/windows-client",
+      "evidence": [
+        "base head f614546e (feat(licensing): W53 能力对照表指针/状态词/计数纪律门禁（第 47 项 capability-map-pointers）) own windows-ci 41209328582 = completed/failure and 41209324178 = completed/failure; log D:/mh-verify/r19b/base-f614546e.log: check-licence-surface FAIL capability-map-pointers 1 problem(s): the map no longer declares the CI print as the authority for its test counts; checks=47 failed=1",
+        "PR #39 merge tree refs/pull/39/merge = 0e1b5b33d378cf74e0596f084c0428afeab88d25, parents = f614546e + 828a93c5; the merge tree windows/docs/CAPABILITY-MAP.md blob 02165375f7e786525980d751216baea9bd3d1141 is the base version (our c3116f87 is the merge-base version and is not used)",
+        "our final head windows-ci 41209461489 @828a93c5 = failure, licence checks=47 failed=2: capability-map-pointers + log-file-claims; all 20 gate ladder lines and doc-residue-claims PASS",
+        "resolved upstream: base advanced f614546e -> 19beb0cc64d26dac6eeae9f5e51b938cdb5628e3; its own windows-ci 41210845895 (pull_request) and 41210841634 (push) are completed/success",
+        "our head e3283e47 windows-ci 41212076261 (failure overall) prints check-licence-surface PASS capability-map-pointers  \"every markdown link and repository path in the map still resolves, its status words stay inside the legend and it no longer pins a live test count\"; licence checks=47 failed=1, the single red being upstream log-file-claims (W6-113u)"
+      ],
+      "closed_at": "2026-10-31T22:55:00+08:00",
+      "notes": "我方不改共享守卫、不改共享文档（合并树采用 base 版 CAPABILITY-MAP.md，我方分支上的同名文件在合并中不生效）；该红只能由 W53 所有者把「CI 台阶行是测试计数的权威」写进 windows/docs/CAPABILITY-MAP.md 后消除。与 W6-113u（W50 log-file-claims needle 分歧）同类但不同守卫、不同所有者。 2026-10-31 round 20：base 前进使该守卫转 PASS，本项 RESOLVED；无需我方动作。",
+      "next_action": "无需我方动作；若 base 再次自红则重开。"
+    },
+    {
+      "id": "W6-113aa",
+      "title": "套件基线第十一层口径：TRX 节结构完整性与节间配对（TestEntries/TestLists）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r20",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "commit e3283e471ddee96055abd2ac121ce6d0f85619b3 \"ci(windows): suite baseline gate audits the TRX section structure and the entry map (W6-113aa)\"; 1 file changed, 109 insertions; windows/tools/check-test-suite-baseline.ps1 54,842 -> 60,725 B, sha256 2f255f04e5333842..., pure ASCII; blob equals the working tree byte for byte",
+        "no baseline field and no migration: the layer is an invariant inside one TRX, so windows/tools/test-suite-baseline.json (164,452 B) and update-test-suite-baseline.ps1 are untouched and byte-identical to HEAD",
+        "new ladder line \"structure=7/7 single blocks entries=... matched entries=... paired execution ids=... paired list ids=... lists=...\"; real corpus (run 41095080796 TRX) prints MediaHub.Tests entries=1952 matched entries=1952 paired execution ids=1952 paired list ids=1952 lists=2 and MediaHub.WebDav.Tests 104/104/104/104 lists=2, with combined tests=2056, identically in pwsh 7 and Windows PowerShell 5.1",
+        "negative controls 28/28 pass, fail=0 (D:/mh-verify/r20/run-nc.cjs, log D:/mh-verify/r20/nc-console.log, EXIT=0): S2 a dropped TestEntries section is RED while the round-19 gate accepts it (S2x); S3 two TestEntry items that swap their executionId are RED (\"pairs TestEntry executionId\") while the round-19 gate accepts them (S3x); S4 a row in a list TestLists never declares RED; S5 dropped TestLists RED; S6 ghost testId RED; S7 duplicate TestEntry testId RED; S8 TestEntry without testId RED; S9 duplicate TestList id RED; S10 TestList without id RED; S11 a second ResultSummary RED; S12 a second Times RED; S13 TestEntry without executionId RED; S14 the second suite is checked too RED; R1-R6 re-exercise layers 1-10",
+        "implementation pitfall worth reusing: block presence must be counted from TestRun.ChildNodes by LocalName, because @($null).Count is 1 in both PowerShell editions - a property-access presence test never notices a dropped section (first smoke run showed S2/S5/S14 falsely green)",
+        "second pitfall: t.replace(anchor, anchor+add) where add begins with the anchor inserted a line twice and made the real corpus fail with every testId appearing twice; the fix was to re-apply from the pre-change snapshot with insertion-only anchors and to assert split(...).length-1 === 1 per anchor",
+        "exact-head CI (40-char SHA): head e3283e47 windows-ci 41212076261 = completed/failure; the test gate step is fully green and prints the layer-11 ladder lines for both suites; licence checks=47 failed=1 warnings=0 skipped=0 with the single red being upstream log-file-claims (W6-113u)",
+        "Android CI 41212076088 @e3283e47 was still in_progress when sampled; core/feature/app tree hashes identical to 3a09dfbd (ADR-AUTO-001 inheritance)",
+        "docs head f3234066 windows-ci 41212609746 = completed/failure: the eleven ladder lines match the code head byte for byte (structure=7/7 single blocks entries=1952 / 104, identities=1952 named=1952 / 104, combined tests=2056, suites=2); licence checks=47 failed=1, the only red being upstream log-file-claims (W6-113u)"
+      ],
+      "closed_at": "2026-10-31T22:55:00+08:00",
+      "notes": "只改 check 脚本；基线与 update 脚本未动（无迁移）。本层只做单文件内部一致：TRX 与实际程序集的对应由套件表与第九层 storage/codeBase 管，不在此层。",
+      "next_action": "下一层候选：结果行除 executionId/时间之外的属性语义（如 testType/testListId 与 TestLists 名称的一致性）或 ResultSummary 的 outcome 属性；仍受上游红 W6-113u 影响。"
+    },
+    {
+      "id": "W6-113ab",
+      "title": "套件基线门禁第十二层：跨文件运行身份（每文件独立 TestRun id、executionId 不跨文件、复制文件不得重复计数）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r21",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "commit 2b267cec (1 file changed / 66 insertions; check-test-suite-baseline.ps1 60,725 -> 64,670 B, sha256 16=c86a54e65224c9e2, pure ASCII, both shells PARSE-OK)",
+        "negative controls 24/24 pass, fail=0 (pwsh 7 + Windows PowerShell 5.1 parity) - D:/mh-verify/r21/run-nc.cjs, log D:/mh-verify/r21/nc-console.log",
+        "F6 duplicate results file + second suite entry: new gate RED (\"is claimed by both\", \"doubles what this gate reports\") while round 20 gate stays green with combined tests=18 (F6x)",
+        "F2 shared TestRun id RED / F3 one executionId in two files RED / F4+F4b+F4c empty or missing run id RED (each paired with a round-20 gate pass)",
+        "F5 non-GUID run id warns only; R1-R6 regressions; RE1 real corpus prints file identities=2 ... cross-file duplicate execution ids=0; RE2 no such line on the round-20 gate; RE3 baseline and updater byte-identical to HEAD",
+        "exact-head windows-ci 41215421795 failure on licence only: test gate green with all twelve ladder lines incl. file identities=2 distinct run ids=2 cross-file duplicate execution ids=0, combined tests=2056",
+        "licence checks=48 failed=1 (W6-113u log-file-claims needle only); base f2f83bba runs 41214953902/41214949030 success with checks=48 failed=0",
+        "android-ci:41215421873 in_progress at sampling; core/feature/app tree hashes unchanged from round 20 -> ADR-AUTO-001 inheritance",
+        "docs: RUNLOG round 21 + TEST_MATRIX 6.17 appended (this commit)",
+        "docs head 50da735c: windows-ci 41215898211 failure on licence only - same twelve ladder lines incl. file identities=2 distinct run ids=2 cross-file duplicate execution ids=0 and combined tests=2056",
+        "final head 3f284f10: windows-ci 41216133189 failure on licence only - same twelve ladder lines (file identities=2 distinct run ids=2 cross-file duplicate execution ids=0, combined tests=2056)"
+      ],
+      "notes": "跨文件判据只读单次运行内的事实，不写进基线（写进去只会重复 expected）=> 基线零变化、无迁移、update 脚本未改。残留限制：同一运行导出两次到同一文件名无法区分（字节相同）；run id 形状只判 GUID、非 GUID 仅 warning；与第十一层一致，该层不钉基线字段。",
+      "next_action": "下一层候选：Results 行其它属性（duration/startTime 与 Counters executed 的关系）、TestRun/@name 与 run id 的配对；若再红先按「每个数字读自文件的哪一侧/哪几侧」归因，不要直接改共享守卫。",
+      "closed_at": "2026-10-31T23:45:00+08:00"
+    },
+    {
+      "id": "W6-113ac",
+      "title": "套件基线门禁第十三层：每行的执行身份三处一致（定义 Execution id / 结果行 executionId / relativeResultsDirectory）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r22",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "commit e4750caa (1 file changed / 82 insertions; check-test-suite-baseline.ps1 60,725 -> 69,399 B, sha256 16=23fb8aeb1130ec35, pure ASCII, both shells PARSE-OK)",
+        "negative controls 44/44 pass, fail=0 (pwsh 7 + Windows PowerShell 5.1 parity) - D:/mh-verify/r22/run-nc.cjs, log D:/mh-verify/r22/nc-console.log",
+        "G2 definition Execution id swapped between two definitions: new gate RED (\"does not agree with itself\", \"declares execution id\") while round 21 gate stays green (G2x); G3 missing element RED (G3x green); G5 two elements RED (G5x green); G7 blank relativeResultsDirectory RED (G7x green)",
+        "G6 two definitions claim one execution id RED; G8/G9 row directory repointed RED; first run 38/44 with all six reds being harness-only (stale round-20 comparison cases repointed via OLD_CK20)",
+        "no baseline change: test-suite-baseline.json (164,452 B) and update-test-suite-baseline.ps1 (24,836 B) byte-identical to HEAD - this layer is a single-run invariant",
+        "real corpus both shells exit 0 and byte-identical output: executionIds=1952 distinct declared ids=1952 paired rows=1952 paired result directories=1952 / WebDav 104 / combined tests=2056 (D:/mh-verify/r12-art/.../test-results)",
+        "exact-head CI e4750caa: windows-ci 41219751982 completed/failure, test gate step green and printed the executionIds ladder lines; licence checks=49 failed=2 = log-file-claims (W6-113u) + lgpl-build-record-claims (base c80556ce own run 41218983971 failed=1 with the same message)",
+        "Android CI 41219751941 in_progress at sampling; core/feature/app tree hashes unchanged => inherited per ADR-AUTO-001",
+        "docs head c61a454c windows-ci 41220287540 completed/failure: ladder lines byte-identical to the code head (executionIds=1952 ... paired result directories=1952, WebDav 104, combined tests=2056); licence checks=49 failed=2 = log-file-claims (W6-113u) + lgpl-build-record-claims (upstream W6-113ad)"
+      ],
+      "notes": "该层是单次运行内不变量，不写基线；三处身份指定义 Execution id、结果行 executionId 与 relativeResultsDirectory。残留限制：不校验 id 形状、不比较多余元素的顺序、跨文件身份仍归第十二层。",
+      "next_action": "无；若后续 TRX 形状变化（例如运行器不再把 execution id 写进 relativeResultsDirectory）需同步本层与 TRX 事实测量。",
+      "closed_at": "2026-11-01T00:45:00+08:00"
+    },
+    {
+      "id": "W6-113ad",
+      "title": "上游 licence 守卫新红：lgpl-build-record-claims（W5-LGPL-BUILD.md 声明 33 个 runtime DLL 而 dist/ 为空）",
+      "priority": "P0",
+      "status": "RESOLVED",
+      "owner": "unassigned",
+      "branch": "feature/windows-client",
+      "evidence": [
+        "base feature/windows-client c80556ce095f59642b34d2d93e0178bd40989bf3 own windows-ci 41218983971 (pull_request) and 41218977356 (push) = completed/failure, licence checks=49 failed=1, only red is lgpl-build-record-claims (log D:/mh-verify/r22/ci-base-c80556ce.log, 85,931 B)",
+        "our head e4750caa windows-ci 41219751982: checks=49 failed=2 = the same lgpl-build-record-claims + log-file-claims (W6-113u); the test gate step is green with the layer-13 ladder lines",
+        "guard message: \"1 problem(s): the block says 33 runtime DLL(s) around the candidate but dist/ holds 0 - update windows/docs/licensing/W5-LGPL-BUILD.md and the W5 evidence it cites together\"",
+        "W5-LGPL-BUILD.md differs between branch (blob 7c4a07f2ab8b67c8f82b307a8c679ba75520e9c7) and base (blob 02175a94022962c8098b048dc7b30075c6028722); the PR merge tree takes the base shape for the guard",
+        "RESOLVED 2026-11-01: base advanced to a888a1924da624d600e256aa32fc9b374015e470 whose own windows-ci runs 41221543412 (push) and 41221547543 (pull_request) are both completed/success (Android CI 41221547550 in_progress at sampling); our head 3511f2ab windows-ci 41223497657 now reports checks=49 failed=1 - the lgpl-build-record-claims red is gone upstream and only log-file-claims (W6-113u) remains"
+      ],
+      "notes": "上游守卫要求 W5 LGPL build 记录的状态块与构建证据（dist 运行时 DLL 数）一致；CI runner 无 dist 产物 ⇒ 该声明在 CI 里无法成立。与本分支第十三层的改动无因果。",
+      "next_action": "无需我方动作；若该红回归，按「状态块与构建证据不一致」重新归因并重开。",
+      "closed_at": "2026-11-01T01:20:00+08:00"
+    },
+    {
+      "id": "W6-113ae",
+      "title": "套件基线门禁第十四层：显示名必须由声明的类名与方法名构成（UnitTest/@name 对 TestMethod 的构成关系）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r23",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "commit 3511f2ab (1 file changed / 35 insertions; check-test-suite-baseline.ps1 69,399 -> 71,520 B, sha256 16=77e2d8a504b2f7a5, pure ASCII, both shells PARSE-OK)",
+        "negative controls 54/54 pass, fail=0 (pwsh 7 + Windows PowerShell 5.1 parity) - D:/mh-verify/r23/run-nc.cjs, log D:/mh-verify/r23/nc-console2.log",
+        "P2 both halves rewrite the display name: new gate RED (\"do not agree with the method they declare\") while the round 22 gate stays green (P2x) - the red belongs to this layer",
+        "P3 definition-only rewrite and P4 result-only rewrite RED on both generations (layer 8 identities intercepts); P5 blanking a Fact display PASSes with \"cannot be name-checked\"; P5b blanking a theory display is caught by the argument-row layer; P6 blank TestMethod name RED without the new message",
+        "first run 49/54: all five reds were stale inherited comparison cases (G1x/G2x/G3x/G5x/G7x still pointed at OLD_CK, which this round advanced to the round-22 gate); repointed to OLD_CK21 => 54/54",
+        "real corpus facts (4 TRX from r12-art and r9-art): every definition display name equals or starts with className + . + methodName; windows 1952/1952, webdav 104/104, zero exceptions",
+        "no baseline change: test-suite-baseline.json (164,452 B) and update-test-suite-baseline.ps1 (24,836 B) byte-identical to HEAD - single-run invariant",
+        "exact-head windows-ci 41223497657 (@3511f2ab) = completed/failure with the test gate step green and both new ladder lines: displayNames=1952 declared prefixes=1952 mismatched=0 / displayNames=104 declared prefixes=104 mismatched=0, combined tests=2056",
+        "licence checks=49 failed=1: only the upstream log-file-claims (W6-113u) remains; the previous upstream red lgpl-build-record-claims (W6-113ad) is now PASS => W6-113ad RESOLVED",
+        "Android CI 41223497614 in_progress at sampling; core/feature/app tree hashes unchanged from e2409c23 => ADR-AUTO-001 inheritance",
+        "docs: RUNLOG round 23 + TEST_MATRIX 6.19 appended (this commit)",
+        "docs head bd9b4eeb: windows-ci 41224387649 completed/failure - ladder lines byte-identical to the code head (displayNames=1952 declared prefixes=1952 mismatched=0 / displayNames=104 declared prefixes=104 mismatched=0, combined tests=2056); licence checks=49 failed=1 (only log-file-claims, W6-113u) and lgpl-build-record-claims PASS",
+        "Android CI 41224387667 @bd9b4eeb was in_progress at sampling (same core/feature/app tree hashes, ADR-AUTO-001 inheritance)"
+      ],
+      "notes": "该层只核对显示名的前缀构成，不核对参数文本内容（参数归第五层行清单）；runner 截断的显示名只核对到 Class.Method( 之前；className/name 空白的行不进构成核对。属于单次运行内不变量，不写基线。",
+      "next_action": "下一层候选：TestRun/@name 与 run id 的配对、ResultSummary/@outcome 与 Counters 的关系、UnitTest/@storage 与程序集声明的配对；若再红先按「每个数字读自文件的哪一侧」归因，不要直接改共享守卫。",
+      "closed_at": "2026-11-01T01:15:00+08:00"
+    },
+    {
+      "id": "W6-113af",
+      "title": "套件基线门禁第十五层：Counters 块必须满足自身的属性契约与算术恒等式（total == executed + notExecuted）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r24",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "commit ca43be2d (1 file changed / 65 insertions; check-test-suite-baseline.ps1 71,520 -> 75,846 B, sha256 16=ee3da47a715fc4f6, pure ASCII, both shells PARSE-OK)",
+        "negative controls 76/76 pass, fail=0 (pwsh 7 + Windows PowerShell 5.1 parity) - D:/mh-verify/r24/run-nc.cjs, log D:/mh-verify/r24/nc2.log",
+        "paired cases (new gate RED / round 23 gate PASS): Q2 executed=7 -> arithmetic total=8 vs executed+notExecuted=7; Q3 dropped notExecuted -> missing; Q4 executed='abc' -> malformed; Q5 pending='x' -> malformed; Q6 notExecuted='' -> missing; Q7 dropped executed -> missing; Q8 completed='-1' -> malformed",
+        "Q9 unknown attribute flaky='0' = PASS + warning \"does not know\"; Q10 (total dropped), Q11 (passed='abc'), Q12 (passed=8 failed=1) RED on both generations",
+        "first run 67/76: the nine reds were harness defects, not implementation defects - 7 F*x cases missed the derived old-check-r20.ps1 copy, Q2 needle failed because the arithmetic list is joined with \"; \", Q4 failed='abc' throws in the round-23 gate [int] cast (exit 1) so it is not an old-gate-green pair (switched to executed='abc', which the old gate skips at L1037)",
+        "implementation fix: $counterVocabularyWarn was first declared inside the per-suite loop so the cross-suite emitter only saw the last suite (WebDav) - moved next to $fileIdentityLost; the unknown-attribute warning now fires",
+        "no baseline change: test-suite-baseline.json (164,452 B) and update-test-suite-baseline.ps1 (24,836 B) byte-identical to HEAD - single-run invariant",
+        "exact-head windows-ci 41228531695 (@ca43be2d) = completed/failure with the test gate step green and both new ladder lines: counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted (18:18:09.799 and 18:18:12.604), combined tests=2056, MediaHub.Tests total=1952 baseline=1952 failed=0 notExecuted=0, WebDav 104/104",
+        "licence checks=50 failed=1: only the upstream log-file-claims (W6-113u) remains; the check count rose 49 -> 50 with no change in failed",
+        "Android CI 41228531617 in_progress at sampling; core/feature/app tree hashes unchanged from f8677df2 => ADR-AUTO-001 inheritance",
+        "docs: RUNLOG round 24 + TEST_MATRIX 6.20 appended (this commit)",
+        "docs head 164de3b9: windows-ci 41229517026 completed/failure - ladder lines byte-identical to the code head (counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted for both suites, combined tests=2056, MediaHub.Tests total=1952 baseline=1952 failed=0 notExecuted=0, WebDav 104/104); licence checks=50 failed=1 (only log-file-claims, W6-113u)",
+        "Android CI is named \"Android CI\" (not android-ci) - run 41229517011 @164de3b9 was in_progress at sampling; 164de3b9 only touches docs/automation/** so the core/feature/app tree hashes are unchanged from ca43be2d => ADR-AUTO-001 inheritance"
+      ],
+      "notes": "本层只校验 Counters 块自身的属性契约与两条算术恒等式（total == executed + notExecuted、passed + failed <= executed）；未知属性只 warning；属于单次运行内不变量，不写基线。",
+      "next_action": "下一层候选：TestRun/@name 与 run id 的配对、ResultSummary/@outcome 与 Counters 的关系、UnitTest/@storage 与程序集声明的配对；若再红先按「每个数字读自文件的哪一侧」归因，不要直接改共享守卫。",
+      "closed_at": "2026-11-01T02:30:00+08:00"
+    }
+  ]
+}

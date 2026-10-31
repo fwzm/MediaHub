@@ -94,30 +94,13 @@ jobs:
       - name: Fail if a suite ran nothing or lost tests
         shell: pwsh
         working-directory: windows
-        run: |
-          # A test step that silently runs zero tests would otherwise be reported as success, and a
-          # suite that quietly loses half its cases still prints "Passed!". Assert each suite by name
-          # with a floor just under its known size (MediaHub.Tests 438, MediaHub.WebDav.Tests 104 as of
-          # 2026-10-24); raise the floors when the suites grow.
-          $expected = @(
-            @{ File = "windows-tests.trx"; Suite = "MediaHub.Tests";          Floor = 400 },
-            @{ File = "webdav-tests.trx";  Suite = "MediaHub.WebDav.Tests";    Floor = 100 }
-          )
-          $all = 0
-          foreach ($e in $expected) {
-            $path = Join-Path ./artifacts/test-results $e.File
-            if (-not (Test-Path $path)) { throw "no test results for $($e.Suite): $($e.File) was not produced" }
-            $xml = [xml](Get-Content $path -Raw)
-            $total = [int]$xml.TestRun.ResultSummary.Counters.total
-            $failed = [int]$xml.TestRun.ResultSummary.Counters.failed
-            $skipped = [int]$xml.TestRun.ResultSummary.Counters.notExecuted
-            "$($e.Suite): total=$total failed=$failed notExecuted=$skipped"
-            if ($total -lt $e.Floor) { throw "$($e.Suite) ran $total tests, expected at least $($e.Floor) - cases were dropped or skipped" }
-            if ($failed -ne 0) { throw "$($e.Suite): $failed test(s) failed" }
-            if ($skipped -ne 0) { throw "$($e.Suite): $skipped test(s) were not executed" }
-            $all += $total
-          }
-          "combined tests=$all"
+        # The gate lives in tools/check-test-suite-baseline.ps1 instead of inline here so that the
+        # negative controls exercise the exact code path CI runs instead of a copy pasted out of YAML.
+        # It checks the committed total per suite AND the committed per-class case counts: deleting N
+        # cases and adding N other cases keeps the total identical, so a total-only gate cannot see it.
+        # Refresh the baseline with tools/update-test-suite-baseline.ps1 - it refuses to lower a count
+        # without -AcceptRemoval, so making a red gate green is an explicit, reviewed diff.
+        run: pwsh -NoProfile -File tools/check-test-suite-baseline.ps1
 
       # The licence deliverable rots silently: a new csproj appears and the NuGet inventory is never
       # regenerated, the generated notices lose the libmpv GPL conclusion, or the SBOM stops being a
