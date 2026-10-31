@@ -374,14 +374,14 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
 
 <!-- WINDOWS-SYNC:START -->
 <!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
-- 95fff582 2026-10-30 feat(licensing): W34 关闭 NuGet 包修剪，固定还原图（修 CI sbom-inventory 红）
-- 16f40a46 2026-10-30 feat(licensing): W33 钉住 .NET SDK 10.0.113 与 SBOM 库存门禁第 25 项（浅克隆来源提交降为 WARN）
-- 13fad6b8 2026-10-30 feat(licensing): W32 SBOM 库存一致性门禁（组件/许可/来源提交三检）
-- b586b001 2026-10-30 W14 诊断日志滚动落盘：有界 1 MiB × 5，写入前已脱敏
-- 57ea2798 2026-10-29 W8·真服闭环可钉住版本：官方 Emby 4.10.1.0 + 三处工具加固
-- 1deccca2 2026-10-24 ci(windows): 许可证面门禁接进流水线（先按现状生成报告，再校验 notices/SBOM/项目漂移）
-- ef5344d2 2026-10-24 docs(licensing): W11b 许可证清单与 SBOM 按现状重跑（13 csproj / 49 行 / 29 包 + LGPL 33 DLL 许可族），新增 check-licence-surface.ps1 门禁
-- 4238edcc 2026-10-24 test(w8): 把两服续播下限语义固化成离屏契约（mock 按 2%/5% 落实下限，31 例）
+- f2f83bba 2026-10-31 W54 W13 探针记录门禁：身份钉死值、交付物表与断言条数钉在实物上（第 48 项 engine-probe-claims）
+- 19beb0cc 2026-10-31 W53 修正 CRLF 下的计数权威判据，并把围栏完整性扩到混排围栏
+- f614546e 2026-10-31 feat(licensing): W53 能力对照表指针/状态词/计数纪律门禁（第 47 项 capability-map-pointers）
+- a75371f6 2026-10-31 feat(licensing): W52 文档残留与围栏完整性门禁（第 46 项 doc-residue-claims）
+- 86f16536 2026-10-31 feat(licensing): W51 日期快照审计门禁（doc-audit-snapshot-claims 第 45 项）
+- 2bdaa499 2026-10-31 feat(licensing): W50 诊断日志落盘契约门禁（log-file-claims 第 44 项）
+- 05d53cb6 2026-10-31 feat(licensing): W49 续播下限契约门禁（resume-floor-claims 第 43 项）
+- 47913224 2026-10-31 feat(licensing): W48 验收「不打扰」契约门禁（quiet-run-claims 第 42 项）
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
