@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T22:20:00+08:00",
+  "updated_at": "2026-10-31T22:32:00+08:00",
   "updated_by": "lead-W6-113-r19",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -517,7 +517,8 @@
         "commit 14bfea5bbd64acff14c371c87f95027ac91dceba (1 file, +146); blob sha256-equal to the working-tree bytes the negative controls exercised; non-force push 97da40af..14bfea5b",
         "exact-head windows-ci 41207751934 @14bfea5b = completed/failure: the test-gate step is green and prints all ten ladder lines including rowAttributes=1952 unique execution ids=1952, WebDav rowAttributes=104, combined tests=2056; licence checks=46 failed=2 (log-file-claims = W6-113u, plus the new doc-residue-claims handled by W6-113y)",
         "Android CI 41207751615 @14bfea5b = cancelled (same head); no Android change in this layer",
-        "docs head CI 41209166800 @ad8b1698 = completed/failure: the ten ladder lines match the code head byte for byte (rowAttributes=1952 unique execution ids=1952, WebDav rowAttributes=104, combined tests=2056) and doc-residue-claims stays PASS; licence checks=46 failed=1 with log-file-claims (W6-113u) as the only red"
+        "docs head CI 41209166800 @ad8b1698 = completed/failure: the ten ladder lines match the code head byte for byte (rowAttributes=1952 unique execution ids=1952, WebDav rowAttributes=104, combined tests=2056) and doc-residue-claims stays PASS; licence checks=46 failed=1 with log-file-claims (W6-113u) as the only red",
+        "final head CI 41209461489 @828a93c5 = completed/failure: the ten ladder lines all match (rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4, WebDav rowAttributes=104, identities=1952 named=1952, combined tests=2056) and doc-residue-claims stays PASS; licence checks=47 failed=2 with both reds upstream (log-file-claims = W6-113u, capability-map-pointers = W53 on base f614546e)"
       ],
       "notes": "Ten levels now pin: totals, per-class case counts, method names, per-method case counts, per-method argument row lists, runner truncation exposure, the outcome split plus results-summary self-consistency, test-id identity across both TRX halves, and per-row metadata. Remaining limits: other row attributes (relativeResultsDirectory and friends) are not pinned, duration drift and a missing Times window stay warnings, and the layer proves internal consistency only, not that these were the commit’s cases.",
       "next_action": "If any row attribute the runner makes uniform starts legitimately varying (for example a retry row reusing an execution id), relax that specific uniformity rule rather than the whole layer.",
@@ -536,11 +537,28 @@
         "fix: the four fences are restored, no prose changed; 10,305 -> 10,309 B, blob b9e524f2, sha256 78d391720f9fe909c1f3e10d8b386a6a65723ec86bb836255fdd64cfdc6f652b; commit c373956dc72933216eb473dd11ca82d2848a0c50 (1 file, 4 insertions/4 deletions)",
         "local reproduction: the guard section 23 rule replayed over the PR merge tree (git ls-tree -r refs/pull/39/merge -> git cat-file --batch) reports 0 problems over its 123 markdown files; scanning the worktree copy instead reports one extra false positive because the merge tree carries the <!-- residue-allow --> marker on docs/android-source-sync-transfer.md while our branch copy does not",
         "exact-head windows-ci 41208701809 @c373956d = completed/failure with PASS doc-residue-claims \"1317 text file(s) scanned: no unmarked placeholder residue, all 123 markdown file(s) have balanced fences\"; licence drops from failed=2 to checks=46 failed=1, the only remaining red being log-file-claims (W6-113u)",
-        "docs head CI 41209166800 @ad8b1698 = completed/failure: the ten ladder lines match the code head byte for byte (rowAttributes=1952 unique execution ids=1952, WebDav rowAttributes=104, combined tests=2056) and doc-residue-claims stays PASS; licence checks=46 failed=1 with log-file-claims (W6-113u) as the only red"
+        "docs head CI 41209166800 @ad8b1698 = completed/failure: the ten ladder lines match the code head byte for byte (rowAttributes=1952 unique execution ids=1952, WebDav rowAttributes=104, combined tests=2056) and doc-residue-claims stays PASS; licence checks=46 failed=1 with log-file-claims (W6-113u) as the only red",
+        "final head CI 41209461489 @828a93c5 = completed/failure: the ten ladder lines all match (rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4, WebDav rowAttributes=104, identities=1952 named=1952, combined tests=2056) and doc-residue-claims stays PASS; licence checks=47 failed=2 with both reds upstream (log-file-claims = W6-113u, capability-map-pointers = W53 on base f614546e)"
       ],
       "notes": "Verification must run against the PR merge tree, not the branch worktree: the merged guard is the base-side one and merged documents can carry markers the branch copy lacks. The remaining licence red is W6-113u (W50 needle), untouched here.",
       "next_action": "None for this task; if the upstream guard gets stricter, re-run the merge-tree replay before pushing.",
       "closed_at": "2026-10-31T22:12:00+08:00"
+    },
+    {
+      "id": "W6-113z",
+      "title": "W53 能力对照表指针门禁（第 47 项 capability-map-pointers）在上游 base 上自红，等 W53 所有者修 CAPABILITY-MAP.md",
+      "priority": "P0",
+      "status": "BLOCKED",
+      "owner": "unassigned",
+      "branch": "feature/windows-client",
+      "evidence": [
+        "base head f614546e (feat(licensing): W53 能力对照表指针/状态词/计数纪律门禁（第 47 项 capability-map-pointers）) own windows-ci 41209328582 = completed/failure and 41209324178 = completed/failure; log D:/mh-verify/r19b/base-f614546e.log: check-licence-surface FAIL capability-map-pointers 1 problem(s): the map no longer declares the CI print as the authority for its test counts; checks=47 failed=1",
+        "PR #39 merge tree refs/pull/39/merge = 0e1b5b33d378cf74e0596f084c0428afeab88d25, parents = f614546e + 828a93c5; the merge tree windows/docs/CAPABILITY-MAP.md blob 02165375f7e786525980d751216baea9bd3d1141 is the base version (our c3116f87 is the merge-base version and is not used)",
+        "our final head windows-ci 41209461489 @828a93c5 = failure, licence checks=47 failed=2: capability-map-pointers + log-file-claims; all 20 gate ladder lines and doc-residue-claims PASS"
+      ],
+      "closed_at": null,
+      "notes": "我方不改共享守卫、不改共享文档（合并树采用 base 版 CAPABILITY-MAP.md，我方分支上的同名文件在合并中不生效）；该红只能由 W53 所有者把「CI 台阶行是测试计数的权威」写进 windows/docs/CAPABILITY-MAP.md 后消除。与 W6-113u（W50 log-file-claims needle 分歧）同类但不同守卫、不同所有者。",
+      "next_action": "W53 所有者在 base 侧修 CAPABILITY-MAP.md（声明 CI 台阶行为测试计数权威）后，重跑本 PR 的 exact-head windows-ci 核验 licence failed=0；在此之前本 PR 的 licence 步骤不可能转绿。"
     }
   ]
 }

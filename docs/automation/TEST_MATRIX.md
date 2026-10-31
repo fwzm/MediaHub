@@ -829,3 +829,5 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 - 账本 head `ad8b1698` 的 windows-ci **`41209166800` = completed/failure**：十层台阶行与代码 head 逐字一致（含 `rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4`、WebDav `rowAttributes=104 …`）；`doc-residue-claims` PASS ⇒ 第十层在三个 head 上均成立。
 
 - 账本 head `ad8b1698` 的 windows-ci **`41209166800` = completed/failure**：`doc-residue-claims` 仍 PASS（`1317 text file(s) scanned … all 123 markdown file(s) have balanced fences`）；licence `checks=46 failed=1`，唯一红仍是 `log-file-claims`（`W6-113u`）⇒ 本项修复在三个 head 上稳定。
+
+- 最终 head `828a93c5` 的 windows-ci **`41209461489` = completed/failure**：十层台阶行全部命中（`rowAttributes=1952 unique execution ids=1952 ordered row times=1952 rows within the run window=1952 uniform row fields=4`、WebDav `rowAttributes=104 …`、`identities=1952 named=1952`、`combined tests=2056`），`doc-residue-claims` PASS；licence 为 `checks=47 failed=2`，两条红均在**上游侧**：`log-file-claims`（`W6-113u`，W50）与新出现的第 47 项 `capability-map-pointers`（W53 在 base `f614546e` 上自红，base 自身 run `41209328582`/`41209324178` 同样 checks=47 failed=1），与本轮门禁改动无因果。
