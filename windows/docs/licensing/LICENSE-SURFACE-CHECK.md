@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-48 项检查分二十七组：
+49 项检查分二十八组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -69,6 +69,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 能力对照表（W47 起） | `capability-map-claims` | `windows/docs/CAPABILITY-MAP.md` §0 的九行状态块缺行/改值、测试行写回写死的用例计数、或它声称的发布状态与 `PACKAGING.md` §0 不再一致 |
 | W13 探针记录（W54 起） | `engine-probe-claims` | `windows/docs/W13-LGPL-ENGINE-PROBE.md` 的身份钉死值、交付物表与断言条数任一分叉：块里的两个 dll 摘要/字节数与探针脚本钉死的 `ExpectedGplSha256` / `ExpectedGplBytes` / `ExpectedLgplSha256` / `ExpectedLgplBytes` 不一致，与 `windows/tools/fetch-libmpv.ps1` 的基线摘要或 `windows/engine/lgpl/dist/dist-hashes.txt` 的候选记录不一致；第 2 节交付物表与 `windows/src/MediaHub.EngineProbe` 目录不再一一对应或行数不符；断言条数（按脚本结构当场算出）与文档声称的不符；「只解码、不显示、不出声」「不能外推到 GUI」两条限制被删，或文档改口说 GUI 验证通过 |
 | 能力对照表指针（W53 起） | `capability-map-pointers` | `windows/docs/CAPABILITY-MAP.md` 的链接目标、仓库路径 token、状态词封闭性与用例计数纪律任一分叉：markdown 链接指向已改名的文件、内联代码写出的仓库路径在六个声明根（仓库根、`windows`、`windows/src`、`windows/docs`、`windows/tools`、`.github`）下都找不到、出现图例之外的状态词（如 `PARTIAL_PASS`）、图例不再定义六态之一、测试行又贴着 `MediaHub.Tests` 写死「N 条」计数，或表丢了 `test-count-authority: ci-print` 行 |
+| LGPL 构建记录（W55 起） | `lgpl-build-record-claims` | `windows/docs/licensing/W5-LGPL-BUILD.md` §8 状态块与 `windows/engine/lgpl/` 的实物分叉：候选 dll 摘要/字节与磁盘、`dist-hashes.txt`、`probe-lgpl-info.txt` 对不上；块里的基线摘要不再是 `fetch-libmpv.ps1` 钉的值；MSYS2 包数（块、§1.2、`msys2-package-hashes.txt` 行数）三方不一致；引擎 feature 数不是 28 或列表里出现 `gpl`；FFmpeg 版本/硬件加速列表不符或证据回退到 `--enable-gpl`；运行时闭包不是 33 个 DLL 或 manifest 丢失；被引用的构建脚本/探针文件不存在；探针日志不再出现 d3d11va / WASAPI / `MPV_PROBE PASS`；或文档改口自称已完全合规/可发布 |
 | 验收不打扰契约（W48 起） | `quiet-run-claims` | `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` §0 的九行门禁事实（空闲阈值 180 s、QUNS 只允许 5/6、看门狗 700 ms、abort 标记与 `MH_ALLOW_ACTIVE`/`MH_QUIET_ABORT_FILE`、守卫优先级）缺行或改值，或 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询、`MhUia.psm1` 的 `Start-MhApp` abort 守卫与它不再一致 |
 | 续播下限契约（W49 起） | `resume-floor-claims` | `windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §0 的八行阈值与用例数、`MockMediaServer.cs` 里 Emby 2 % / Jellyfin 5 % / 300 s / 90 % / 10 s 的常量、以及契约测试实际展开出的用例数，三者任一分叉——放宽下限、删判定分支、加减用例却没同步文档即红 |
 | 诊断日志落盘（W50 起） | `log-file-claims` | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md` §0 的十五行上限/轮转/失败策略/用例数、`LogFileSink.cs` 的默认常量与轮转触发式、`LogService.cs` 的环形上限与写入顺序、`AppServices.cs` 的组合根目录、sink 测试展开的 9 例，五方任一分叉即红 |
@@ -244,7 +245,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 48） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 49） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -931,6 +932,45 @@ RESULT: PASS
 | NC8 | `-EngineProbeDocPath` 指向不存在文件 | SKIP、退出码 0 |
 
 日志：正向 `D:/mh-verify/w54-positive.log`，首跑 `D:/mh-verify/w54-first.log`，负向对照 `D:/mh-verify/w54-nc/NC1.log` … `NC8.log`。
+
+### 3.23 LGPL 构建记录的声明与实物（W55，2026-10-31）
+
+`W5-LGPL-BUILD.md` 是「候选引擎到底怎么构建出来的、它证明了什么」的唯一记录：身份与计数写在文档里，证据散在 `windows/engine/lgpl/` 的三十多个脚本与日志里。此前没有任何东西把它们对起来——**本轮当场抓到一处真实漂移**：文档 §1.2 写着「31 packages」，而 `msys2-package-hashes.txt` 有 32 行、W5-H 的缓存目录里也是 32 个 tarball（本机 `D:\mh-servers\lgpl-build\pkgs` 实测 32 个文件、合计 31,338,987 B，与文档的字节数一致）。第 49 项 `lgpl-build-record-claims` 把这份记录钉在实物上：
+
+| 判据 | 内容 | 失败含义 |
+| --- | --- | --- |
+| A 状态块 | 文档 §8 的 `lgpl-build-status` 块必须存在且 16 个键齐全 | 块被删或被改写 |
+| B 候选身份 | 块里的摘要/字节 == `dist/libmpv-2.dll` 磁盘实测 == `dist-hashes.txt` 记录 == `probe-lgpl-info.txt` | 换了二进制却忘了改记录 |
+| C 基线 pin | 块里的 `gpl-baseline-sha256` == `fetch-libmpv.ps1` 的 `$DllSha256` | 换 GPL 基线却不同步这份记录 |
+| D 包数与计数 | 块、§1.2 正文、`msys2-package-hashes.txt` 的 64 位行数三方一致 | 依赖集变了却只在文档改数字（本轮修的就是这处） |
+| E feature 与 FFmpeg | 块里的 28 项 feature 数与实际列表一致且列表不含 `gpl`；版本 8.1.1、`d3d11va`+`d3d12va`、`--disable-gpl/--disable-version3/--disable-nonfree` 一致且不得出现对应的 `--enable-*` | 记录与引擎实际构建参数分叉 |
+| F 运行时闭包 | `windows/engine/lgpl/dist` 里除 `libmpv-2.dll` 外的 DLL 数 == 块里的 33，manifest 必须在 | 闭包缩水/膨胀而记录没动 |
+| G 引用完整性 | 块里列出的 6 个构建脚本与 4 个探针文件都必须存在 | 文档引用的证据被删或改名 |
+| H 探针证据 | `probe-lgpl-hwdec.txt` 仍出现 `Using hardware decoding (d3d11va)`、`probe-lgpl-audio.txt` 仍出现 `Trying audio driver 'wasapi'`、`probe-lgpl-playback.txt` 仍出现 `MPV_PROBE PASS` | 探针证据被替换或退回软解 |
+| I 边界诚实 | 文档仍须写「not a legal opinion」「Nothing has been switched over」「still has no LICENSE file」，且不得出现「is fully compliant」「is release-ready」「is now licensed」「licence decision is closed」「release blocked resolved」（大小写不敏感） | 构建记录被读成合规结论或已切产品 |
+
+刻意**不**钉 §1.2 的 31,338,987 B 字节总量：W5-H 的包缓存目录在仓库外（本机实测正好 32 个文件合计该字节数），CI 里看不到，所以只钉包数；也不钉文档里的构建日志正文（那是当次运行的原样输出）。文档缺失 ⇒ `lgpl-build-record-claims` SKIP、退出码 0。
+
+### 4.23 实测（2026-10-31，W55，本机）
+
+```
+check-licence-surface  PASS  lgpl-build-record-claims  the LGPL build record still matches windows/engine/lgpl/: the candidate identity, the GPL baseline pin, the 32 MSYS2 package(s), the 28-feature list, the FFmpeg flags and hwaccels, the 33-DLL runtime closure, the cited build scripts and the probe evidence all agree
+check-licence-surface  checks=49 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+守卫补丁先落地、两份文档还没同步时的首跑如实 1 红（留作证据）：`check-inventory` 列出 3 个问题（两份文档还写 48 项、文档未点名 `lgpl-build-record-claims`），新项自己已 PASS。
+
+| 对照 | 改动 | 预期 | 实测 |
+| --- | --- | --- | --- |
+| NC1 | 文档副本把块里的 `candidate-bytes` 改成 1 | 只有本项 1 红 | 1 红 ✓ `the block quotes candidate-bytes 1 but dist/libmpv-2.dll is 3327274 B` |
+| NC2 | 文档副本把 §1.2 的包数改回 31（与 32 行记录不符） | 只有本项 1 红 | 1 红 ✓ `section 1.2 says 31 packages while the status block says 32` |
+| NC3 | 文档副本删掉 `msys2-package-bytes-source` 键 | 只有本项 1 红 | 1 红 ✓ `the status block no longer declares msys2-package-bytes-source` |
+| NC4 | 文档副本把 `feature-count` 改成 27 | 只有本项 1 红 | 1 红 ✓ `the block says 27 engine feature(s) but the recorded list has 28` |
+| NC5 | 证据副本删掉 `probe-lgpl-playback.txt` | 只有本项 1 红 | 1 红 ✓ `the record cites probe evidence probe-lgpl-playback.txt but it is not in the build directory` |
+| NC6 | 证据副本把 `ffmpeg-hwaccels.txt` 的 `d3d12va` 删掉 | 只有本项 1 红 | 1 红 ✓ `ffmpeg-hwaccels.txt no longer records d3d12va` |
+| NC7 | 文档副本追加一句 `The distribution is release-ready.` | 只有本项 1 红 | 1 红 ✓ `the record now claims: is release-ready` |
+| NC8 | `-LgplBuildDocPath` 指不存在文件 | SKIP、退出码 0 | SKIP ✓ `checks=49 failed=0 skipped=1`、exit 0 |
 
 ## 5. 这个工具**不**覆盖什么
 ## 5. 这个工具**不**覆盖什么

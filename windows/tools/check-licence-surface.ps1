@@ -201,6 +201,13 @@
     declaration line, and the separate lgpl-licence-table check fails if one goes missing again.
     The switch stays so the older behaviour can still be reproduced.
 
+.PARAMETER LgplBuildDocPath
+    The W5 LGPL build record. Default: windows/docs/licensing/W5-LGPL-BUILD.md. The
+    lgpl-build-record-claims check compares its status block against the build evidence below.
+
+.PARAMETER LgplEvidenceDir
+    The directory holding that evidence. Default: windows/engine/lgpl.
+
 .EXAMPLE
     pwsh -NoProfile -File windows/tools/check-licence-surface.ps1
 
@@ -257,6 +264,8 @@ param(
     [string] $EngineProbeDocPath,
     [string] $EngineProbeScriptPath,
     [string] $EngineProbeProjectDir,
+    [string] $LgplBuildDocPath,
+    [string] $LgplEvidenceDir,
     [switch] $FailOnLicenceGaps
 )
 
@@ -307,6 +316,8 @@ $docsScanRoot = if ($DocsScanRoot) { Resolve-RepoPath -Path $DocsScanRoot -Defau
 $engineProbeDocFile = Resolve-RepoPath -Path $EngineProbeDocPath -Default 'windows/docs/W13-LGPL-ENGINE-PROBE.md'
 $engineProbeScriptFile = Resolve-RepoPath -Path $EngineProbeScriptPath -Default 'windows/tools/acceptance/engine/engine-probe.ps1'
 $engineProbeProjectDir = Resolve-RepoPath -Path $EngineProbeProjectDir -Default 'windows/src/MediaHub.EngineProbe'
+$lgplBuildDocFile = Resolve-RepoPath -Path $LgplBuildDocPath -Default 'windows/docs/licensing/W5-LGPL-BUILD.md'
+$lgplEvidenceDir = Resolve-RepoPath -Path $LgplEvidenceDir -Default 'windows/engine/lgpl'
 # A missing scan root must reach the check as a SKIP, not crash the whole run: Resolve-Path throws
 # on anything that is not there, so the path is only canonicalised once it exists.
 if (Test-Path -LiteralPath $docsScanRoot) {
@@ -1249,6 +1260,7 @@ $declaredCheckIds = @(
     'doc-residue-claims',
     'capability-map-pointers',
     'engine-probe-claims',
+    'lgpl-build-record-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -2266,6 +2278,137 @@ else {
     }
     else {
         Add-Check "engine-probe-claims" "FAIL" ($engineProbeProblems.Count.ToString() + " problem(s): " + (Format-NameList $engineProbeProblems) + " - repair windows/docs/W13-LGPL-ENGINE-PROBE.md and keep its identity pins, its deliverable table and its limits together")
+    }
+}
+
+# --- 25. the LGPL build record must still match the evidence it cites (W55) ------------------
+$lgplProblems = [System.Collections.Generic.List[string]]::new()
+if (-not (Test-Path -LiteralPath $lgplBuildDocFile)) {
+    Add-Check "lgpl-build-record-claims" "SKIP" ("the LGPL build record is absent (" + $lgplBuildDocFile + "), so its status block cannot be compared with windows/engine/lgpl")
+} else {
+    function Get-LgplEvidenceText {
+        param([string] $Name)
+        $candidate = Join-Path $lgplEvidenceDir ($Name -replace "/", $pathSeparator)
+        if (Test-Path -LiteralPath $candidate) { return [string](Get-Content -LiteralPath $candidate -Raw) }
+        return $null
+    }
+    $lgplText = [string](Get-Content -LiteralPath $lgplBuildDocFile -Raw)
+    $lgplBlock = [regex]::Match($lgplText, '(?ms)^<!-- BEGIN lgpl-build-status.*?^<!-- END lgpl-build-status -->')
+    if (-not $lgplBlock.Success) {
+        $lgplProblems.Add("the record no longer carries the lgpl-build-status block")
+    } else {
+        $lgplValues = @{}
+        foreach ($lgplLine in ($lgplBlock.Value -split "\r?\n")) {
+            $lgplKey = [regex]::Match($lgplLine, '^\s*([a-z0-9-]+):\s*(.+?)\s*$')
+            if ($lgplKey.Success) { $lgplValues[$lgplKey.Groups[1].Value] = $lgplKey.Groups[2].Value }
+        }
+        $lgplRequired = @("candidate-bytes","candidate-sha256","gpl-baseline-sha256","msys2-package-count","msys2-package-bytes","msys2-package-bytes-source","feature-count","gpl-feature-absent","mpv-version-reports","ffmpeg-version","ffmpeg-hwaccels","runtime-dll-count","runtime-manifest","build-scripts","probe-files","probe-result")
+        $lgplMissing = @($lgplRequired | Where-Object { -not $lgplValues.ContainsKey($_) })
+        if ($lgplMissing.Count -gt 0) {
+            $lgplProblems.Add("the status block no longer declares " + (Format-NameList $lgplMissing))
+        } else {
+            $candidatePath = Join-Path $lgplEvidenceDir ($lgplValues["runtime-manifest"] -replace "/", $pathSeparator)
+            $candidateDll = Join-Path $lgplEvidenceDir (Join-Path "dist" "libmpv-2.dll")
+            if (-not (Test-Path -LiteralPath $candidateDll)) {
+                $lgplProblems.Add("windows/engine/lgpl/dist/libmpv-2.dll is absent")
+            } else {
+                $actualSha = (Get-FileHash -LiteralPath $candidateDll -Algorithm SHA256).Hash.ToLowerInvariant()
+                $actualBytes = ([string](Get-Item -LiteralPath $candidateDll).Length)
+                if ($lgplValues["candidate-sha256"] -ne $actualSha) { $lgplProblems.Add("the block quotes candidate-sha256 " + $lgplValues["candidate-sha256"] + " but dist/libmpv-2.dll hashes to " + $actualSha) }
+                if ($lgplValues["candidate-bytes"] -ne $actualBytes) { $lgplProblems.Add("the block quotes candidate-bytes " + $lgplValues["candidate-bytes"] + " but dist/libmpv-2.dll is " + $actualBytes + " B") }
+                $recordedHashes = Get-LgplEvidenceText "dist/dist-hashes.txt"
+                if (-not $recordedHashes) { $lgplProblems.Add("dist/dist-hashes.txt is absent") }
+                elseif ($recordedHashes -notmatch [regex]::Escape($lgplValues["candidate-sha256"])) { $lgplProblems.Add("dist/dist-hashes.txt no longer records the candidate digest") }
+                $probeInfo = Get-LgplEvidenceText "probe-lgpl-info.txt"
+                if (-not $probeInfo) { $lgplProblems.Add("probe-lgpl-info.txt is absent") }
+                else {
+                    if ($probeInfo -notmatch [regex]::Escape($lgplValues["candidate-sha256"])) { $lgplProblems.Add("probe-lgpl-info.txt no longer quotes the candidate digest") }
+                    if ($probeInfo -notmatch [regex]::Escape($lgplValues["candidate-bytes"])) { $lgplProblems.Add("probe-lgpl-info.txt no longer quotes the candidate size") }
+                }
+            }
+            $fetchFile = Resolve-RepoPath -Path $FetchScriptPath -Default "windows/tools/fetch-libmpv.ps1"
+            if (-not (Test-Path -LiteralPath $fetchFile)) {
+                $lgplProblems.Add("windows/tools/fetch-libmpv.ps1 is absent, so the GPL baseline pin cannot be compared")
+            } else {
+                $fetchText = [string](Get-Content -LiteralPath $fetchFile -Raw)
+                $fetchSha = [regex]::Match($fetchText, "DllSha256\s*=\s*'?([0-9a-fA-F]{64})")
+                if (-not $fetchSha.Success) { $lgplProblems.Add("fetch-libmpv.ps1 no longer declares DllSha256 as a single-quoted literal") }
+                elseif ($fetchSha.Groups[1].Value.ToLowerInvariant() -ne $lgplValues["gpl-baseline-sha256"].ToLowerInvariant()) { $lgplProblems.Add("the record quotes a GPL baseline digest the fetch script no longer pins") }
+            }
+            $msys2Text = Get-LgplEvidenceText "msys2-package-hashes.txt"
+            if (-not $msys2Text) { $lgplProblems.Add("msys2-package-hashes.txt is absent") }
+            else {
+                $msys2Rows = @([regex]::Matches($msys2Text, '(?m)^[0-9a-f]{64} \*')).Count
+                if (([string]$msys2Rows) -ne $lgplValues["msys2-package-count"]) { $lgplProblems.Add("the block says " + $lgplValues["msys2-package-count"] + " MSYS2 package(s) but msys2-package-hashes.txt has " + $msys2Rows + " hashed row(s)") }
+                $docCount = [regex]::Match($lgplText, '(\d+)\s+packages,')
+                if (-not $docCount.Success) { $lgplProblems.Add("section 1.2 no longer quotes a package count") }
+                elseif ($docCount.Groups[1].Value -ne $lgplValues["msys2-package-count"]) { $lgplProblems.Add("section 1.2 says " + $docCount.Groups[1].Value + " packages while the status block says " + $lgplValues["msys2-package-count"]) }
+            }
+            $featureText = Get-LgplEvidenceText "mpv-lgpl-features.txt"
+            if (-not $featureText) { $lgplProblems.Add("mpv-lgpl-features.txt is absent") }
+            else {
+                $featureLine = (($featureText -split "\r?\n") | Where-Object { $_ -match "List of enabled features:" } | Select-Object -First 1)
+                if (-not $featureLine) { $lgplProblems.Add("mpv-lgpl-features.txt no longer records an enabled-feature list") }
+                else {
+                    $featureTokens = @((($featureLine -replace "^.*features:\s*", "") -split "\s+") | Where-Object { $_ -ne "" })
+                    if (([string]$featureTokens.Count) -ne $lgplValues["feature-count"]) { $lgplProblems.Add("the block says " + $lgplValues["feature-count"] + " engine feature(s) but the recorded list has " + $featureTokens.Count) }
+                    if ($featureTokens -contains "gpl") { $lgplProblems.Add("the recorded feature list now contains the gpl feature") }
+                    if ($lgplValues["gpl-feature-absent"] -ne "true") { $lgplProblems.Add("the block no longer asserts that the gpl feature is absent") }
+                }
+            }
+            $versionText = Get-LgplEvidenceText "mpv-lgpl-version.txt"
+            if (-not $versionText) { $lgplProblems.Add("mpv-lgpl-version.txt is absent") }
+            else {
+                $versionFirst = (($versionText -split "\r?\n") | Where-Object { $_ -match "\S" } | Select-Object -First 1)
+                if ($versionFirst -notmatch [regex]::Escape($lgplValues["mpv-version-reports"])) { $lgplProblems.Add("mpv-lgpl-version.txt no longer reports " + $lgplValues["mpv-version-reports"]) }
+                if ($versionText -notmatch [regex]::Escape("FFmpeg version: " + $lgplValues["ffmpeg-version"])) { $lgplProblems.Add("mpv-lgpl-version.txt no longer reports FFmpeg " + $lgplValues["ffmpeg-version"]) }
+            }
+            $hwaccelText = Get-LgplEvidenceText "ffmpeg-hwaccels.txt"
+            if (-not $hwaccelText) { $lgplProblems.Add("ffmpeg-hwaccels.txt is absent") }
+            else {
+                foreach ($accel in ($lgplValues["ffmpeg-hwaccels"] -split ",")) {
+                    $accelName = $accel.Trim()
+                    if ($accelName -and $hwaccelText -notmatch [regex]::Escape($accelName)) { $lgplProblems.Add("ffmpeg-hwaccels.txt no longer records " + $accelName) }
+                }
+            }
+            foreach ($ffName in @("ffmpeg-version.txt", "ffmpeg-config-evidence.txt")) {
+                $ffText = Get-LgplEvidenceText $ffName
+                if (-not $ffText) { $lgplProblems.Add($ffName + " is absent") }
+                else {
+                    foreach ($flag in @("--disable-gpl", "--disable-version3", "--disable-nonfree")) { if ($ffText -notmatch [regex]::Escape($flag)) { $lgplProblems.Add($ffName + " no longer shows " + $flag) } }
+                    foreach ($flag in @("--enable-gpl", "--enable-version3", "--enable-nonfree")) { if ($ffText -match [regex]::Escape($flag)) { $lgplProblems.Add($ffName + " now shows " + $flag) } }
+                }
+            }
+            $distDir = Join-Path $lgplEvidenceDir "dist"
+            $runtimeDlls = @(Get-ChildItem -LiteralPath $distDir -Filter "*.dll" -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "libmpv-2.dll" })
+            if (([string]$runtimeDlls.Count) -ne $lgplValues["runtime-dll-count"]) { $lgplProblems.Add("the block says " + $lgplValues["runtime-dll-count"] + " runtime DLL(s) around the candidate but dist/ holds " + $runtimeDlls.Count) }
+            if (-not (Test-Path -LiteralPath $candidatePath)) { $lgplProblems.Add("the runtime manifest " + $lgplValues["runtime-manifest"] + " is absent") }
+            foreach ($scriptName in ($lgplValues["build-scripts"] -split ",")) {
+                $scriptFile = $scriptName.Trim()
+                if ($scriptFile -and -not (Test-Path -LiteralPath (Join-Path $lgplEvidenceDir $scriptFile))) { $lgplProblems.Add("the record cites build script " + $scriptFile + " but it is not in the build directory") }
+            }
+            foreach ($probeName in ($lgplValues["probe-files"] -split ",")) {
+                $probeFile = $probeName.Trim()
+                if ($probeFile -and -not (Test-Path -LiteralPath (Join-Path $lgplEvidenceDir $probeFile))) { $lgplProblems.Add("the record cites probe evidence " + $probeFile + " but it is not in the build directory") }
+            }
+            $hwdecText = Get-LgplEvidenceText "probe-lgpl-hwdec.txt"
+            if ($hwdecText -and $hwdecText -notmatch [regex]::Escape("Using hardware decoding (d3d11va)")) { $lgplProblems.Add("probe-lgpl-hwdec.txt no longer shows d3d11va hardware decoding in use") }
+            $audioText = Get-LgplEvidenceText "probe-lgpl-audio.txt"
+            if ($audioText -and $audioText -notmatch [regex]::Escape("Trying audio driver 'wasapi'")) { $lgplProblems.Add("probe-lgpl-audio.txt no longer shows WASAPI being opened") }
+            $playbackText = Get-LgplEvidenceText "probe-lgpl-playback.txt"
+            if ($playbackText -and $playbackText -notmatch [regex]::Escape($lgplValues["probe-result"])) { $lgplProblems.Add("probe-lgpl-playback.txt no longer reports " + $lgplValues["probe-result"]) }
+            foreach ($needle in @("not a legal opinion", "Nothing has been switched over", "still has no LICENSE file")) {
+                if ($lgplText -notmatch [regex]::Escape($needle)) { $lgplProblems.Add("the record no longer states: " + $needle) }
+            }
+            foreach ($claim in @("is fully compliant", "is release-ready", "is now licensed", "licence decision is closed", "release blocked resolved")) {
+                if ($lgplText -match ("(?i)" + [regex]::Escape($claim))) { $lgplProblems.Add("the record now claims: " + $claim) }
+            }
+        }
+    }
+    if ($lgplProblems.Count -eq 0) {
+        Add-Check "lgpl-build-record-claims" "PASS" ("the LGPL build record still matches windows/engine/lgpl/: the candidate identity, the GPL baseline pin, the " + $lgplValues["msys2-package-count"] + " MSYS2 package(s), the " + $lgplValues["feature-count"] + "-feature list, the FFmpeg flags and hwaccels, the " + $lgplValues["runtime-dll-count"] + "-DLL runtime closure, the cited build scripts and the probe evidence all agree")
+    } else {
+        Add-Check "lgpl-build-record-claims" "FAIL" ($lgplProblems.Count.ToString() + " problem(s): " + (Format-NameList $lgplProblems) + " - update windows/docs/licensing/W5-LGPL-BUILD.md and the W5 evidence it cites together")
     }
 }
 

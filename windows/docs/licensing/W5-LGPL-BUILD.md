@@ -47,7 +47,7 @@ supply an LGPL FFmpeg — that is why FFmpeg is built from source here.
 The non-FFmpeg dependencies were taken from MSYS2 as **prebuilt packages**, hand-extracted into
 C:\msys64\ucrt64 by install-msys2-deps.sh (pacman's install transaction was unusable: the installed
 gcc-14 gcc-libs conflicts with the newer libgcc-16.2.0, and pacman -Su refuses the transaction;
-pacman -Sp resolution still works, which is what was used). 31 packages, 31,338,987 bytes,
+pacman -Sp resolution still works, which is what was used). 32 packages, 31,338,987 bytes,
 individually hashed in windows/engine/lgpl/msys2-package-hashes.txt.
 
     bash -l windows/engine/lgpl/install-msys2-deps.sh
@@ -255,3 +255,53 @@ Outputs land in windows/engine/lgpl/; the artifact is windows/engine/lgpl/dist/l
 7. **MSYS2's dependency set is not a pinned, reproducible feed.** The build resolves against whatever
    the rolling MSYS2 repos served on 2026-10-14; msys2-package-hashes.txt records exactly what was
    used, but a reproducible build needs those artifacts archived.
+
+---
+
+## 8. Machine-readable status (checked by CI)
+
+The block below is read by `windows/tools/check-licence-surface.ps1` (check `lgpl-build-record-claims`,
+W55) and compared against the build record in `windows/engine/lgpl/`. It is appended at the **end** of
+this file on purpose: the line-number citations other documents make into this record
+(`LGPL-COMPLIANCE.md`, `SBOM.md`, `THIRD-PARTY-NOTICES.md`, `LICENCE-DECISION.md`, `LGPL-ENGINE-SWITCH.md`)
+stay valid only as long as this section adds nothing above them.
+
+<!-- BEGIN lgpl-build-status -->
+```text
+candidate-bytes: 3327274
+candidate-sha256: 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+gpl-baseline-sha256: 6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9
+msys2-package-count: 32
+msys2-package-bytes: 31338987
+msys2-package-bytes-source: session-cache-measurement-not-archived
+feature-count: 28
+gpl-feature-absent: true
+mpv-version-reports: v0.41.0-UNKNOWN
+ffmpeg-version: 8.1.1
+ffmpeg-hwaccels: d3d11va, d3d12va
+runtime-dll-count: 33
+runtime-manifest: dist/runtime-bundle-manifest.txt
+build-scripts: install-msys2-deps.sh, build-ffmpeg-lgpl.sh, build-mpv-lgpl.sh, capture-ffmpeg-evidence.sh, verify-mpv-lgpl.sh, run-probe-lgpl.sh
+probe-files: probe-lgpl-hwdec.txt, probe-lgpl-audio.txt, probe-lgpl-playback.txt, probe-lgpl-info.txt
+probe-result: MPV_PROBE PASS
+```
+<!-- END lgpl-build-status -->
+
+How each line is checked (all paths relative to `windows/engine/lgpl/`):
+
+| Line | Checked against |
+| --- | --- |
+| `candidate-bytes` / `candidate-sha256` | `dist/libmpv-2.dll` on disk, `dist/dist-hashes.txt`, `probe-lgpl-info.txt` |
+| `gpl-baseline-sha256` | `windows/tools/fetch-libmpv.ps1` `$DllSha256` |
+| `msys2-package-count` | number of hashed rows in `msys2-package-hashes.txt`, and the count quoted in section 1.2 |
+| `msys2-package-bytes` | **not** re-checkable from the tree: the 32 tarballs live in the W5-H cache `D:\mh-servers\lgpl-build\pkgs` (32 files, 31,338,987 bytes, measured 2026-10-31), which the repository does not archive |
+| `feature-count` / `gpl-feature-absent` | first feature line in `mpv-lgpl-features.txt` |
+| `mpv-version-reports` / `ffmpeg-version` | `mpv-lgpl-version.txt` |
+| `ffmpeg-hwaccels` | `ffmpeg-hwaccels.txt`, plus `--disable-gpl / --disable-version3 / --disable-nonfree` in `ffmpeg-version.txt` |
+| `runtime-dll-count` / `runtime-manifest` | every `*.dll` in `dist/` except `libmpv-2.dll` |
+| `build-scripts` / `probe-files` | each named file exists |
+| `probe-result` | `MPV_PROBE PASS` in `probe-lgpl-playback.txt`, plus the hwdec and WASAPI tokens in their own files |
+
+Two prose claims are held at the same time: section 6 must still say this build is **not** a legal
+opinion and that **nothing has been switched over**, and this document must not start claiming the
+distribution is clean or release-ready.
