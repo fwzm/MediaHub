@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-01T01:20:00+08:00",
+  "updated_at": "2026-11-01T01:28:00+08:00",
   "updated_by": "lead-W6-113-r23",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -166,7 +166,8 @@
         "Android CI run 41212076088 @e3283e47 was still in_progress when sampled (core/feature/app tree hashes ff4eed826cbc/e983feb08237/70c541457cae unchanged from 3a09dfbd, ADR-AUTO-001 inheritance)",
         "android-ci:41215421873 in_progress at sampling (@2b267cec; windows-ci:41215421795 failure on licence log-file-claims only)",
         "Android CI 41219751941 @e4750caa sampled in_progress (same core/feature/app tree hashes as round 21) - cancelled/queued by concurrency",
-        "Android CI 41223497614 @3511f2ab sampled in_progress (core/feature/app tree hashes ff4eed826cbc/e983feb08237/70c541457cae unchanged, only windows subtree changed; ADR-AUTO-001 inheritance applies)"
+        "Android CI 41223497614 @3511f2ab sampled in_progress (core/feature/app tree hashes ff4eed826cbc/e983feb08237/70c541457cae unchanged, only windows subtree changed; ADR-AUTO-001 inheritance applies)",
+        "Android CI 41224387667 @bd9b4eeb sampled in_progress (windows-ci on the same head ran as 41224387649)"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -670,7 +671,9 @@
         "exact-head windows-ci 41223497657 (@3511f2ab) = completed/failure with the test gate step green and both new ladder lines: displayNames=1952 declared prefixes=1952 mismatched=0 / displayNames=104 declared prefixes=104 mismatched=0, combined tests=2056",
         "licence checks=49 failed=1: only the upstream log-file-claims (W6-113u) remains; the previous upstream red lgpl-build-record-claims (W6-113ad) is now PASS => W6-113ad RESOLVED",
         "Android CI 41223497614 in_progress at sampling; core/feature/app tree hashes unchanged from e2409c23 => ADR-AUTO-001 inheritance",
-        "docs: RUNLOG round 23 + TEST_MATRIX 6.19 appended (this commit)"
+        "docs: RUNLOG round 23 + TEST_MATRIX 6.19 appended (this commit)",
+        "docs head bd9b4eeb: windows-ci 41224387649 completed/failure - ladder lines byte-identical to the code head (displayNames=1952 declared prefixes=1952 mismatched=0 / displayNames=104 declared prefixes=104 mismatched=0, combined tests=2056); licence checks=49 failed=1 (only log-file-claims, W6-113u) and lgpl-build-record-claims PASS",
+        "Android CI 41224387667 @bd9b4eeb was in_progress at sampling (same core/feature/app tree hashes, ADR-AUTO-001 inheritance)"
       ],
       "notes": "该层只核对显示名的前缀构成，不核对参数文本内容（参数归第五层行清单）；runner 截断的显示名只核对到 Class.Method( 之前；className/name 空白的行不进构成核对。属于单次运行内不变量，不写基线。",
       "next_action": "下一层候选：TestRun/@name 与 run id 的配对、ResultSummary/@outcome 与 Counters 的关系、UnitTest/@storage 与程序集声明的配对；若再红先按「每个数字读自文件的哪一侧」归因，不要直接改共享守卫。",

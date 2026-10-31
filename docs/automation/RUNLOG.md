@@ -368,3 +368,5 @@
 
 ### 锁
 - run-id `w6-r23-m7q2v5`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `3674ce3d20f222dce6be9329407a62e4`）、`ref:origin/feature/cross-device-source-sync`（`f804d7b44743038b383ccce8fba53b97`）、`worktree:D:/mh-w6`（`052a004442f93f8211b32fb4d7c52d2a`）；收尾释放。
+
+- docs head 的 exact-head CI（EXECUTED）：`bd9b4eeb9d55300db275d05e8d73b0f448654aeb` 的 windows-ci **`41224387649` = completed/failure**（日志 `D:/mh-verify/r23/ci-docshead.txt.log`，111,704 B）：测试门禁步骤全绿且台阶行与代码 head 逐字一致（含 `displayNames=1952 declared prefixes=1952 mismatched=0`、`displayNames=104 declared prefixes=104 mismatched=0`、`combined tests=2056`）；licence `checks=49 failed=1`，唯一红仍为上游 `log-file-claims`（`W6-113u`），且 `lgpl-build-record-claims` 明确 **PASS**（「the LGPL build record still matches windows/engine/lgpl/ …」）⇒ 本轮判定标准在代码 head 与 docs head 两处均成立。
