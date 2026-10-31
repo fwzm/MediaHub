@@ -410,3 +410,5 @@
 ### 锁
 - run-id `w6-r24-b2n6j4`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `2daa6ab6f25fb78607bbf43ba700954e`）、`ref:origin/feature/cross-device-source-sync`（`a6f2093812e3cb0df7f3b81b9e736b22`）、`worktree:D:/mh-w6`（`31966f688d294ae987f279e2f6859192`）；收尾释放。
 
+
+- docs head 的 exact-head CI（EXECUTED）：`164de3b96ff2dd62f7c00bcede2c3daafc88cb61` 的 windows-ci **`41229517026` = completed/failure**（`pull_request`；日志 `D:/mh-verify/r24/ci-docshead-windows2.log`，112,467 B）：测试门禁步骤全绿且台阶行与代码 head 逐字一致（两套件 `counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted`、`combined tests=2056`、`MediaHub.Tests: total=1952 baseline=1952 failed=0 notExecuted=0`、WebDav `total=104 baseline=104 failed=0 notExecuted=0`）；licence `check-licence-surface  checks=50 failed=1 warnings=0 skipped=0`，唯一红仍为上游 `log-file-claims`（`W6-113u`）⇒ 本轮判定标准在代码 head 与 docs head 两处均成立。同 head 的 Android CI `41229517011`（workflow 显示名 `Android CI`，非 `android-ci`，按后者过滤会漏检）取证时 in_progress；`164de3b9` 相对 `ca43be2d` 只改 `docs/automation/**` ⇒ `core`/`feature`/`app` 树哈希不变，按 ADR-AUTO-001 继承、不作独立结论。

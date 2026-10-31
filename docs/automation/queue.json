@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-01T02:30:00+08:00",
+  "updated_at": "2026-11-01T03:05:00+08:00",
   "updated_by": "lead-W6-113-r24",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -697,7 +697,9 @@
         "exact-head windows-ci 41228531695 (@ca43be2d) = completed/failure with the test gate step green and both new ladder lines: counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted (18:18:09.799 and 18:18:12.604), combined tests=2056, MediaHub.Tests total=1952 baseline=1952 failed=0 notExecuted=0, WebDav 104/104",
         "licence checks=50 failed=1: only the upstream log-file-claims (W6-113u) remains; the check count rose 49 -> 50 with no change in failed",
         "Android CI 41228531617 in_progress at sampling; core/feature/app tree hashes unchanged from f8677df2 => ADR-AUTO-001 inheritance",
-        "docs: RUNLOG round 24 + TEST_MATRIX 6.20 appended (this commit)"
+        "docs: RUNLOG round 24 + TEST_MATRIX 6.20 appended (this commit)",
+        "docs head 164de3b9: windows-ci 41229517026 completed/failure - ladder lines byte-identical to the code head (counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted for both suites, combined tests=2056, MediaHub.Tests total=1952 baseline=1952 failed=0 notExecuted=0, WebDav 104/104); licence checks=50 failed=1 (only log-file-claims, W6-113u)",
+        "Android CI is named \"Android CI\" (not android-ci) - run 41229517011 @164de3b9 was in_progress at sampling; 164de3b9 only touches docs/automation/** so the core/feature/app tree hashes are unchanged from ca43be2d => ADR-AUTO-001 inheritance"
       ],
       "notes": "本层只校验 Counters 块自身的属性契约与两条算术恒等式（total == executed + notExecuted、passed + failed <= executed）；未知属性只 warning；属于单次运行内不变量，不写基线。",
       "next_action": "下一层候选：TestRun/@name 与 run id 的配对、ResultSummary/@outcome 与 Counters 的关系、UnitTest/@storage 与程序集声明的配对；若再红先按「每个数字读自文件的哪一侧」归因，不要直接改共享守卫。",

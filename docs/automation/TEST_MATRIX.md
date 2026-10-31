@@ -1125,3 +1125,5 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 - licence `check-licence-surface  checks=50 failed=1 warnings=0 skipped=0`，唯一红为上游 `log-file-claims`（`W6-113u`）。
 - 同 head Android CI `41228531617` 取证时 in_progress；`ca43be2d` 与 `f8677df2` 的 `core`/`feature`/`app` 树哈希全同 ⇒ 按 ADR-AUTO-001 继承、不作独立结论。
 
+
+- docs head `164de3b96ff2dd62f7c00bcede2c3daafc88cb61` 的 windows-ci **`41229517026` = completed/failure**（日志 `D:/mh-verify/r24/ci-docshead-windows2.log`，112,467 B）：台阶行与代码 head 逐字一致（两套件 `counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted`、`combined tests=2056`、`MediaHub.Tests: total=1952 baseline=1952 failed=0 notExecuted=0`、WebDav 104/104）；licence `checks=50 failed=1`，唯一红为上游 `log-file-claims`（`W6-113u`）。
