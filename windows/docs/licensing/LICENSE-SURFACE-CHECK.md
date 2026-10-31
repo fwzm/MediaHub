@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-40 项检查分十九组：
+41 项检查分二十组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -66,6 +66,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 发行决策记录（W45 起） | `adr-packaging-claims` | `windows/docs/adr/ADR-W004-packaging-and-distribution.md` 不再描述仓库：状态块缺行或改值、ADR 又写回「包内零许可文件」、四个包属性与 App csproj 当场取到的值不符，或 `.gitignore` 不再排除 `windows/native/libmpv/`、`fetch-libmpv.ps1` 被删 |
 | 引擎固定摘要（W46 起） | `engine-pins-claims` | `windows/tools/fetch-libmpv.ps1` 钉的归档摘要、解包后 libmpv-2.dll 摘要与归档文件名，在三份引用它们的文档（`windows/THIRD-PARTY-NOTICES.md`、`ADR-W004`、`REPRODUCIBLE-BUILD.md`）里不再逐字出现——换 pin 不同步改文档，prose 就继续描述旧字节 |
 | 包内许可文件（W40 起） | `package-licence-staging` | 发布树不再真的带 `licences/` 的六个文档 + digest manifest：暂存脚本被删、清单缩水、manifest 摘要与字节不符、或 CI 不再调用它（该检查把脚本重跑到临时树，不读文档） |
+| 能力对照表（W47 起） | `capability-map-claims` | `windows/docs/CAPABILITY-MAP.md` §0 的九行状态块缺行/改值、测试行写回写死的用例计数、或它声称的发布状态与 `PACKAGING.md` §0 不再一致 |
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
 
@@ -305,6 +306,17 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 > 为什么钉它：W36 只覆盖了入库的 LGPL 候选件，GPL 基线的两个摘要在 `fetch-libmpv.ps1` 里是常量、在文档里是 prose，pin 一换 prose 就过期；这与 W35/W36/W38/W41/W44/W45 是同一类「声明腐烂」，只是权威方是脚本常量而不是生成件。
 
+### 3.15 能力对照表（W47，2026-10-31）
+
+`windows/docs/CAPABILITY-MAP.md` 是「Windows 客户端能做什么」的汇总表，W47 之前没有任何机器校验：测试行写着固定计数（`477 tests / 0 failed`，而 CI 实测已是 `MediaHub.Tests 478` + `MediaHub.WebDav.Tests 104`），发布状态行停在 `NOT_RUN`，而 `PACKAGING.md` §0 与 App csproj 早已把签名记为 `SIGNING_BLOCKED`、包内许可文件记为 7 件。第 41 项 `capability-map-claims` 钉住三件：
+
+| 判据 | 内容 |
+| --- | --- |
+| 状态块 | 表含 `<!-- BEGIN capability-map-status` … `<!-- END capability-map-status` 块，块内逐字九行：`capability-map-status: checked-by-ci`、`test-count-claim: see-ci`、`msix: not-implemented`、`signing: blocked-no-certificate`、`clean-machine-install: not-run`、`engine-flavour-default: gpl`、`engine-lgpl-candidate: built-not-switched`、`licence-files-in-package: staged-by-ci`、`release-blocker: gpl-obligation` |
+| 不再写死计数 | 全文不得命中 `(\bi\d+\s+tests?\s*/\s*\d+\s+failed` 型计数行：用例数权威是 CI 打印（`test-count-claim: see-ci`） |
+| 交叉核对 | `PACKAGING.md` §0 必须仍写 `msix: not-implemented`、`signing-status: blocked-no-certificate`、`clean-machine-install: not-run`、`licence-files-in-package: staged-by-ci`；播放器工程仍默认 `native\libmpv`（GPL 基线）；`windows/engine/lgpl/dist/libmpv-2.dll` 仍在（否则 `built-not-switched` 无依据） |
+
+`-CapabilityMapPath` 可换一幅对照表（默认 `windows/docs/CAPABILITY-MAP.md`）；表不存在 ⇒ `SKIP`、退出码仍 0。它是**摘要层**门禁：权威仍是 `PACKAGING.md` §0、`LGPL-ENGINE-SWITCH.md` §0 与 `LICENCE-DECISION.md` §6 各自的状态块，本项只保证摘要不再与它们分叉。
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
 ```text
@@ -568,6 +580,28 @@ RESULT: PASS
 | NC6 | `-PinsNoticesPath` 指向不存在的文件 | 恰好 1 红：引用文档缺失 |
 | NC7 | 四份临时副本把 pin 与三处引用**同步**改成另一组合法值 | PASS（证明检查跟随脚本，而非写死当前值） |
 
+### 4.15 实测（2026-10-31，W47，本机，HEAD cd253c0d）
+
+``~text
+check-licence-surface  PASS  capability-map-claims  the capability map still describes the repository: 9 machine-readable lines, shipping claims agreeing with PACKAGING.md, the GPL baseline default in the player project and the built LGPL candidate
+check-licence-surface  PASS  check-inventory  41 declared check(s): this run emitted nothing undeclared, LICENSE-SURFACE-CHECK.md names every id on its own, and both it and README.md claim the same count
+check-licence-surface  checks=41 failed=0 warnings=0 skipped=0
+check-licence-surface  RESULT: PASS
+``~
+
+七条负向对照（临时副本，均不改仓库文件；日志 `D:/mh-verify/w47-nc*.log`）：
+
+| # | 改动 | 结果 |
+| --- | --- | --- |
+| NC1 | 表副本把 `signing` 值改成 `signed-by-ci` | 恰好 1 红：状态块不再声明 `signing: blocked-no-certificate` |
+| NC2 | 表副本删掉整个状态块 | 恰好 1 红：无 `capability-map-status` 块 |
+| NC3 | 表副本测试行写回 `478 tests / 0 failed` | 恰好 1 红：测试行又写死计数 |
+| NC4 | 表副本删掉 `release-blocker: gpl-obligation` 行 | 恰好 1 红：状态块缺该行 |
+| NC5 | `PACKAGING.md` 副本把 `signing-status` 改成 `signed-by-ci` | **2 红**（`packaging-claims` 与 `capability-map-claims` 同时响——交叉核对本就与权威检查重叠，这是预期的冗余，不是缺陷） |
+| NC5b | 表副本删掉 `licence-files-in-package: staged-by-ci` 行 | 恰好 1 红：状态块缺该行（只打新检查） |
+| NC6 | 播放器 csproj 副本把缺省 flavour 映射改成 LGPL 目录 | **2 红**（`engine-flavour-default` 与 `capability-map-claims` 同时响，同样是预期的冗余） |
+| NC6b | 表副本把 `engine-flavour-default: gpl` 改成 `lgpl` | 恰好 1 红：状态块不再声明 `gpl`（只打新检查） |
+| NC7 | `-CapabilityMapPath` 指向不存在文件 | `SKIP`、退出码 0 |
 ## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。

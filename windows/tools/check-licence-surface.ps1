@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Seventeen things rot silently in a licence deliverable:
+    Eighteen things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -42,7 +42,11 @@
           declared by fetch-libmpv.ps1 moves, and the documents that quote both keep describing the
           old bytes.
 
-    This script checks those seventeen surfaces without touching the network, the build, or the
+      18. the capability map rots: its shipping and flavour status block is removed or
+          reworded, the test row goes back to quoting a fixed count, or the map claims a
+          shipping state PACKAGING.md no longer records.
+
+    This script checks those eighteen surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -108,6 +112,11 @@
     Default: windows/docs/licensing/REPRODUCIBLE-BUILD.md - the reproducibility note, which also
     quotes the pinned digests.
 
+.PARAMETER CapabilityMapPath
+    The capability map that summarises what the Windows client can do. Default:
+    windows/docs/CAPABILITY-MAP.md. The capability-map-claims check compares its status block
+    with PACKAGING.md and with the player project it summarises.
+
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
     errors as well. Off by default, but as of W38 no such row is expected: every shipped DLL has a
@@ -152,6 +161,7 @@ param(
     [string] $PinsNoticesPath,
     [string] $PinsAdrPath,
     [string] $PinsReproPath,
+    [string] $CapabilityMapPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -1114,6 +1124,7 @@ $declaredCheckIds = @(
     'licence-decision-claims',
     'adr-packaging-claims',
     'engine-pins-claims',
+    'capability-map-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -1411,6 +1422,62 @@ else {
     }
     else {
         Add-Check 'engine-pins-claims' 'FAIL' (($pinProblems -join '; ') + ' - move windows/tools/fetch-libmpv.ps1 and the documents that quote its pins together')
+    }
+}
+# --- 18. the capability map must still describe the repository --------------------------------
+$capabilityMapFile = Resolve-ClaimPath -Path $CapabilityMapPath -Default 'windows/docs/CAPABILITY-MAP.md'
+if (-not (Test-Path -LiteralPath $capabilityMapFile)) {
+    Add-Check 'capability-map-claims' 'SKIP' ('cannot read ' + $capabilityMapFile + ', so the capability map has nothing to verify')
+}
+else {
+    $capabilityText = [string](Get-Content -LiteralPath $capabilityMapFile -Raw)
+    $capabilityProblems = @()
+    if ($capabilityText.IndexOf('<!-- BEGIN capability-map-status', [System.StringComparison]::Ordinal) -lt 0 -or $capabilityText.IndexOf('<!-- END capability-map-status', [System.StringComparison]::Ordinal) -lt 0) {
+        $capabilityProblems += 'windows/docs/CAPABILITY-MAP.md carries no capability-map-status block'
+    }
+    foreach ($line in @(
+        'capability-map-status: checked-by-ci',
+        'test-count-claim: see-ci',
+        'msix: not-implemented',
+        'signing: blocked-no-certificate',
+        'clean-machine-install: not-run',
+        'engine-flavour-default: gpl',
+        'engine-lgpl-candidate: built-not-switched',
+        'licence-files-in-package: staged-by-ci',
+        'release-blocker: gpl-obligation'
+    )) {
+        if ($capabilityText.IndexOf($line, [System.StringComparison]::Ordinal) -lt 0) {
+            $capabilityProblems += ('the status block does not say ' + $line)
+        }
+    }
+    if ([regex]::IsMatch($capabilityText, '(?i)\b\d+\s+tests?\s*/\s*\d+\s+failed')) {
+        $capabilityProblems += 'the test row quotes a fixed test count, which goes stale the next time a test is added'
+    }
+    if (Test-Path -LiteralPath $packagingDocFile) {
+        $capabilityPackagingText = [string](Get-Content -LiteralPath $packagingDocFile -Raw)
+        foreach ($needle in @('msix: not-implemented', 'signing-status: blocked-no-certificate', 'clean-machine-install: not-run', 'licence-files-in-package: staged-by-ci')) {
+            if ($capabilityPackagingText.IndexOf($needle, [System.StringComparison]::Ordinal) -lt 0) {
+                $capabilityProblems += ('PACKAGING.md no longer says ' + $needle + ' for the same claim')
+            }
+        }
+    }
+    else {
+        $capabilityProblems += ('cannot read ' + $packagingDocFile + ' to cross-check the shipping claims')
+    }
+    if (Test-Path -LiteralPath $flavourProjectFile) {
+        $capabilityFlavourText = [string](Get-Content -LiteralPath $flavourProjectFile -Raw)
+        if (-not [regex]::IsMatch($capabilityFlavourText, 'native[\\/]libmpv')) {
+            $capabilityProblems += 'the player project no longer defaults to the GPL baseline tree, so engine-flavour-default: gpl is wrong'
+        }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'windows/engine/lgpl/dist/libmpv-2.dll'))) {
+        $capabilityProblems += 'the LGPL candidate binary is gone, so engine-lgpl-candidate: built-not-switched is unsupported'
+    }
+    if ($capabilityProblems.Count -eq 0) {
+        Add-Check 'capability-map-claims' 'PASS' 'the capability map still describes the repository: 9 machine-readable lines, shipping claims agreeing with PACKAGING.md, the GPL baseline default in the player project and the built LGPL candidate'
+    }
+    else {
+        Add-Check 'capability-map-claims' 'FAIL' (($capabilityProblems -join '; ') + ' - update windows/docs/CAPABILITY-MAP.md section 0 and the row it summarises')
     }
 }
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })

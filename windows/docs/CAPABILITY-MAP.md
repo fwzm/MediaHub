@@ -5,6 +5,23 @@
 
 > 本表在每轮结束时必须与代码一致。**不得因为 Android 已有某功能就视为 Windows 已实现**。
 
+## 0. 机器可读状态（CI 核对）
+
+<!-- BEGIN capability-map-status (checked by check-licence-surface.ps1) -->
+~`~text
+capability-map-status: checked-by-ci
+test-count-claim: see-ci
+msix: not-implemented
+signing: blocked-no-certificate
+clean-machine-install: not-run
+engine-flavour-default: gpl
+engine-lgpl-candidate: built-not-switched
+licence-files-in-package: staged-by-ci
+release-blocker: gpl-obligation
+~`~
+<!-- END capability-map-status -->
+
+上面九行由 ``~windows/tools/check-licence-surface.ps1~`~ 的 ``~capability-map-claims~`~ 检查**逐行**核对：与 [PACKAGING.md](licensing/PACKAGING.md) §0 的发布状态块、播放器工程 ``~MediaHub.Player.Mpv.csproj~`~ 的默认 engine flavour、以及仓库内 LGPL 候选件 ``~windows/engine/lgpl/dist/libmpv-2.dll~`~ 是否仍在，交叉比对。改状态必须同时改这里与权威记录，否则 CI 红。测试计数不再写死在本表（权威是 CI 打印的计数），故为 ``~test-count-claim: see-ci~`~。
 ## 领域契约
 
 | 契约 | 状态 | 位置 |
@@ -109,7 +126,7 @@
 
 | 项 | 状态 |
 | --- | --- |
-| 单元与契约测试 | **EXECUTED_PASS — 477 tests / 0 failed**（MediaHub.Tests 373 + MediaHub.WebDav.Tests 104） |
+| 单元与契约测试 | **EXECUTED_PASS**（权威计数以 CI 打印为准：当前 MediaHub.Tests 478 条 + MediaHub.WebDav.Tests 104 条；本表不再写死数字） |
 | 模拟服务器集成（真实 socket） | EXECUTED_PASS（23 条） |
 | 引擎网络边界与凭据不泄漏 | EXECUTED_PASS（9 条） |
 | 凭据库与 URL 规范化 | EXECUTED_PASS（79 条，含变异验证） |
@@ -119,5 +136,5 @@
 | 硬件兼容矩阵（Intel/AMD/NVIDIA） | **NOT_RUN** |
 | Windows CI | 已配置（`.github/workflows/windows-ci.yml`），结果见 PR 检查页 |
 | 便携版构建 | EXECUTED_PASS（331.6 MB，可启动） |
-| MSIX / 代码签名 / 干净机安装 | **NOT_RUN** |
-| 第三方许可证与固定哈希 | 见 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)；**libmpv 为 GPL，RELEASE BLOCKER** |
+| MSIX / 代码签名 / 干净机安装 | **MSIX NOT_IMPLEMENTED · 代码签名 SIGNING_BLOCKED（无证书） · 干净机安装 NOT_RUN**；随包许可文件自 W40 起 7 件；见 [PACKAGING.md](licensing/PACKAGING.md) §0 |
+| 第三方许可证与固定哈希 | 见 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)；默认 engine flavour 仍是 **GPL 基线**（``~-p:LibMpvFlavour=lgpl~`~ 只是旁路开关，见 [LGPL-ENGINE-SWITCH.md](LGPL-ENGINE-SWITCH.md)），LGPL 候选件已构建未切换；**RELEASE BLOCKER（GPL 义务）未解除** |
