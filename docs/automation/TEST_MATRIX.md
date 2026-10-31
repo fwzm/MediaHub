@@ -651,3 +651,4 @@ combined tests=2056
 
 - 代码 head `716f481a` 的 windows-ci **`41200282567` = completed/failure**：测试门禁步骤全绿并打印 `suites=2 baseline=suite table 2 suites`（连同六层台阶行与 `combined tests=2056`），唯一失败步骤是 licence 表面的 `Licence surface guard`，停在 `check-licence-surface  FAIL  log-file-claims`（`checks=44 failed=1 warnings=0 skipped=0`）。
 - 归因（见 RUNLOG round 16 与 queue `W6-113u`）：base `2bdaa499` 新加的第 44 项守卫 W50 要求 `windows/src/MediaHub.Net/LogService.cs` 含字面量 `sb.AppendLine("# 滚动文件目录：" + FileSink.DirectoryPath);`，而 W6 分支在 `055c85c3` 已把该行搬进 `DiagnosticsReport.cs`（`RollingDirectoryPrefix`）；base 自身在该 head 上 `checks=44 failed=0`（`41174155974` / `41174160859`），上一轮我方 head 在旧 base 上 `checks=42 failed=0` ⇒ 红由跨分支形状分歧产生，与本轮改动无因果。
+- docs head `f396e791` 的 windows-ci `41200702543` failure：台阶行与代码 head 逐字一致，唯一失败仍是 `log-file-claims`（`checks=45 failed=1`）⇒ 与本层无关，归因见 `W6-113u`。
