@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-38 项检查分十七组：
+39 项检查分十八组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -63,6 +63,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 门禁自证（W42 起） | `check-inventory` | 脚本里声明的检查清单与「本次运行发出的 id」「`LICENSE-SURFACE-CHECK.md` 点名的 id」「该文档与 README 声明的数量」任一分叉——新增检查忘了登记，或数量没跟着改 |
 | 引擎默认 flavour（W43 起） | `engine-flavour-default` | 默认 flavour 不再是 GPL 基线（csproj 缺省改了、别的工程或工作流开始构建候选），或 `LGPL-ENGINE-SWITCH.md` 的 `engine-flavour-status` 块不再声明 |
 | 许可决策记录（W44 起） | `licence-decision-claims` | 发布阻塞状态或引擎许可标签从 `LICENCE-DECISION.md` 消失、该记录又开始声称 notices 标错，或两份 notices 里 libmpv 一行不再写 GPL-3.0-or-later |
+| 发行决策记录（W45 起） | `adr-packaging-claims` | `windows/docs/adr/ADR-W004-packaging-and-distribution.md` 不再描述仓库：状态块缺行或改值、ADR 又写回「包内零许可文件」、四个包属性与 App csproj 当场取到的值不符，或 `.gitignore` 不再排除 `windows/native/libmpv/`、`fetch-libmpv.ps1` 被删 |
 | 包内许可文件（W40 起） | `package-licence-staging` | 发布树不再真的带 `licences/` 的六个文档 + digest manifest：暂存脚本被删、清单缩水、manifest 摘要与字节不符、或 CI 不再调用它（该检查把脚本重跑到临时树，不读文档） |
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
@@ -276,6 +277,21 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 > 为什么钉它：这份记录是「不得对外分发」的唯一权威来源，却是 2026-10-14 手写的；W36/W38 改了两份 notices 的引擎标签之后，它 §1.5 与 §6 还在要求「把 notices 的 GPL-2.0-or-later 改成 GPL-3.0-or-later」——声明与仓库现状分叉，而 CI 全绿。W44 修掉这处分叉，并把标签、状态与 notices 三者锁在一起。
 
 
+### 3.13 发行决策记录（W45，2026-10-31）
+
+第 39 项 `adr-packaging-claims` 钉住 `windows/docs/adr/ADR-W004-packaging-and-distribution.md`（决定发行形式的 ADR，2026-10-14），它在 W40 之前没有任何机器校验，也第一个陈旧：“发布产物中不含任何许可证/声明文件”在包内已经随包 7 件之后已为假：
+
+| 判据 | 通过条件 | 失败示例 |
+| --- | --- | --- |
+| 状态块 | ADR 含 `<!-- BEGIN adr-packaging-status` … `<!-- END adr-packaging-status` 块，块内逐字五行：`packaging-form: unpackaged-self-contained-portable`、`msix: optional-not-implemented`、`signing: blocked-no-certificate`、`licence-files-in-package: staged-by-ci-since-w40`、`native-libmpv: gitignored-and-fetched-by-tool` | 块被删；或把签名状态改成 `signed-by-ci` |
+| 陈旧声明 | 正文不再命中 `(?i)不含任何许可证/声明文件` 与 `(?i)522 个文件里 0 个` | 把 2026-10-14 版“包内零许可文件”的句子原样写回 |
+| 包属性引用 | ADR 里必须逐字出现 `<WindowsPackageType>None</WindowsPackageType>`、`<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>`、`<SelfContained>true</SelfContained>`、`<RuntimeIdentifier>win-x64</RuntimeIdentifier>`（值取自 App csproj 当场解析，而非写死） | App csproj 把某个属性改了而 ADR 还引旧值；或 csproj 不再设该属性 |
+| native 不入库 | `.gitignore` 仍含 `windows/native/libmpv/`，且 `<RepoRoot>/windows/tools/fetch-libmpv.ps1` 仍存在 | `.gitignore` 规则被删；或 ADR 名点的拉取脚本被删（ADR 的“不入库”只对 `windows/native/libmpv/` 成立，入库的 LGPL 候选在 `windows/engine/lgpl/dist/`） |
+
+两个参数：`-AdrPackagingPath`（默认 `windows/docs/adr/ADR-W004-packaging-and-distribution.md`）、`-GitIgnorePath`（默认 `.gitignore`），都按仓库根解析（跨出仓库要写 `../../`）。ADR 读不到时该检查 SKIP，退出码仍 0。
+
+> 为什么钉它：ADR-W004 是“为什么选 unpackaged + 自包含”的唯一决策记录，也是 W39 的 `PACKAGING.md` 与实际产物形态之间的链接；它自己在 2026-10-14 写下的“包内零许可文件”已经被 W40 推翻，而两边都没有东西发现这个分叉。
+
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
 ```text
@@ -487,6 +503,33 @@ check-licence-surface  RESULT: PASS
 
 生成件那份 notices 走的是同一段代码（正向运行读的就是生成件）；NC4/NC6 打在可单独替换的手写件上，这样每条对照都保持「恰好 1 红」而不牵连其它 notices 检查。
 
+
+### 4.13 实测（2026-10-31，W45，本机，HEAD bd75aba2）
+
+本机（报告 `D:/mh-verify/w38-license/license-report.json`）：
+
+```text
+check-licence-surface  PASS  adr-packaging-claims  ADR-W004 still describes the repository: the status block matches, the four packaging properties are quoted exactly as the app project sets them, the licence-file claim is current, and the native libmpv tree stays ignored and fetched (5 machine-readable lines)
+check-licence-surface  PASS  check-inventory  39 declared check(s): this run emitted nothing undeclared, LICENSE-SURFACE-CHECK.md names every id on its own, and both it and README.md claim the same count
+check-licence-surface  checks=39 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+此前证据：守卫补丁刚落地、两份文档还没同步时的第一次跑（`D:/mh-verify/w45-positive-first.log`）如实报红一条：`check-inventory` 列出 3 个问题（文档与 README 还写 38 项、文档未点名 `adr-packaging-claims`）——新检查新 id 与文档数字必须一起动，这正是 W42 自证项的作用。
+
+七条负向对照（临时副本 `D:/mh-verify/w45-neg/`，不改仓库文件）：
+
+| 编号 | 动作 | 结果 |
+| --- | --- | --- |
+| NC1 | ADR 副本把 `signing: blocked-no-certificate` 改成 `signed-by-ci` | 恰好 1 红：`the status block does not say signing: blocked-no-certificate` |
+| NC2 | ADR 副本删掉整个 `adr-packaging-status` 块 | 恰好 1 红：`ADR-W004 carries no adr-packaging-status block` |
+| NC3 | ADR 副本末尾写回 2026-10-14 版「包内零许可文件」句（含 522/0） | 恰好 1 红，该行列出两个陈旧正则各命中一次 |
+| NC4 | ADR 副本把 XML 块里的 `<SelfContained>true</SelfContained>` 改成 `false` | 恰好 1 红：“不再引用 App csproj 当场取到的值” |
+| NC5 | ADR 副本把 `licence-files-in-package` 值改成 `absent` | 恰好 1 红：“状态块不再声明 staged-by-ci-since-w40” |
+| NC6 | `-AdrPackagingPath` 指向不存在的文件 | SKIP、退出码 0（`checks=39 failed=0 skipped=1`） |
+| NC7 | `-GitIgnorePath` 指向已把 `windows/native/libmpv/` 规则改名的副本 | 恰好 1 红：`the ignore file no longer excludes windows/native/libmpv/` |
+
+日志 `D:/mh-verify/w45-positive.log`（正向）与 `D:/mh-verify/w45-nc1.log` … `w45-nc7.log`；载荷 `D:/mh-verify/w45-guard-payload.json`（守卫补丁）。
 
 ## 5. 这个工具**不**覆盖什么
 

@@ -4,7 +4,7 @@
     Static sanity check that the licence surface still matches the repository.
 
 .DESCRIPTION
-    Fifteen things rot silently in a licence deliverable:
+    Sixteen things rot silently in a licence deliverable:
       1. a new .csproj appears and the NuGet report was never regenerated;
       2. the generated notices lose the libmpv GPL conclusion or the LGPL dependency table;
       3. the SBOM stops being a valid CycloneDX 1.5 document or loses the engine record;
@@ -34,8 +34,11 @@
       15. the licence decision record rots: the release-blocker status or the engine licence label
           is removed, the record claims again that the notice files mislabel the engine, or the
           notice files stop saying GPL-3.0-or-later for libmpv.
+      16. the packaging ADR rots: the app project stops quoting the packaging properties the ADR
+          decided on, the record claims zero licence files in the package again, or the native libmpv
+          tree stops being ignored and fetched by the tool the ADR names.
 
-    This script checks those fifteen surfaces without touching the network, the build, or the
+    This script checks those sixteen surfaces without touching the network, the build, or the
     release artefacts. It is deliberately read-only: everything it verifies is a file that
     windows/tools/license-report.ps1 or a maintainer wrote earlier.
 
@@ -77,6 +80,14 @@
     The hand-written notices document next to the generated one. Default:
     windows/THIRD-PARTY-NOTICES.md. Both files are read when the engine label is cross-checked.
 
+.PARAMETER AdrPackagingPath
+    The packaging ADR that decided the shipping form. Default:
+    windows/docs/adr/ADR-W004-packaging-and-distribution.md. The adr-packaging-claims check compares
+    its machine-readable status block and its quoted packaging properties with the app project.
+
+.PARAMETER GitIgnorePath
+    The repository ignore file that must keep excluding the native libmpv tree. Default: .gitignore.
+
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
     errors as well. Off by default, but as of W38 no such row is expected: every shipped DLL has a
@@ -115,6 +126,8 @@ param(
     [string] $LgplSwitchDocPath,
     [string] $LicenceDecisionDocPath,
     [string] $HandwrittenNoticesPath,
+    [string] $AdrPackagingPath,
+    [string] $GitIgnorePath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -146,6 +159,8 @@ $licenceDocFile = Resolve-RepoPath -Path $LicenceDocPath -Default 'windows/docs/
 $readmeFile = Resolve-RepoPath -Path $ReadmePath -Default 'README.md'
 $licenceDecisionFile = Resolve-RepoPath -Path $LicenceDecisionDocPath -Default 'windows/docs/licensing/LICENCE-DECISION.md'
 $handwrittenNoticesFile = Resolve-RepoPath -Path $HandwrittenNoticesPath -Default 'windows/THIRD-PARTY-NOTICES.md'
+$adrPackagingFile = Resolve-RepoPath -Path $AdrPackagingPath -Default 'windows/docs/adr/ADR-W004-packaging-and-distribution.md'
+$gitIgnoreFile = Resolve-RepoPath -Path $GitIgnorePath -Default '.gitignore'
 
 $checks = [System.Collections.Generic.List[object]]::new()
 function Add-Check {
@@ -1073,6 +1088,7 @@ $declaredCheckIds = @(
     'lgpl-compliance-baseline',
     'engine-flavour-default',
     'licence-decision-claims',
+    'adr-packaging-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -1244,6 +1260,74 @@ else {
     }
 }
 
+
+# --- 16. the packaging ADR must still describe the repository --------------------------------
+# windows/docs/adr/ADR-W004-packaging-and-distribution.md decided the shipping form in 2026-10-14
+# and quotes the four packaging properties, the 'native libmpv is ignored and fetched' mechanism
+# and 'zero licence files in the package'. W40 made the last one false and nothing compared the
+# record with the project it describes.
+$adrFile = Resolve-ClaimPath -Path $AdrPackagingPath -Default 'windows/docs/adr/ADR-W004-packaging-and-distribution.md'
+$gitIgnoreFile = Resolve-ClaimPath -Path $GitIgnorePath -Default '.gitignore'
+$fetchScriptFile = Join-Path $RepoRoot 'windows/tools/fetch-libmpv.ps1'
+
+if (-not (Test-Path -LiteralPath $adrFile)) {
+    Add-Check 'adr-packaging-claims' 'SKIP' ('cannot read ' + $adrFile + ', so the packaging ADR has nothing to compare against')
+}
+else {
+    $adrProblems = @()
+    $adrText = Get-Content -LiteralPath $adrFile -Raw
+    $adrStart = $adrText.IndexOf('<!-- BEGIN adr-packaging-status', [System.StringComparison]::Ordinal)
+    $adrEnd = $adrText.IndexOf('<!-- END adr-packaging-status', [System.StringComparison]::Ordinal)
+    if ($adrStart -lt 0 -or $adrEnd -le $adrStart) {
+        $adrProblems += 'ADR-W004 carries no adr-packaging-status block'
+    }
+    else {
+        $adrBlock = $adrText.Substring($adrStart, $adrEnd - $adrStart)
+        foreach ($expected in @('packaging-form: unpackaged-self-contained-portable', 'msix: optional-not-implemented', 'signing: blocked-no-certificate', 'licence-files-in-package: staged-by-ci-since-w40', 'native-libmpv: gitignored-and-fetched-by-tool')) {
+            if ($adrBlock.IndexOf($expected, [System.StringComparison]::Ordinal) -lt 0) {
+                $adrProblems += ('the status block does not say ' + $expected)
+            }
+        }
+    }
+    foreach ($stalePattern in @('(?i)不含任何许可证/声明文件', '(?i)522 个文件里 0 个')) {
+        if ([regex]::IsMatch($adrText, $stalePattern)) {
+            $adrProblems += ('ADR-W004 still asserts the stale claim matching ' + $stalePattern)
+        }
+    }
+    if (-not (Test-Path -LiteralPath $packagingAppProject)) {
+        $adrProblems += ('the app project is absent at ' + $packagingAppProject)
+    }
+    else {
+        $adrCsproj = Get-Content -LiteralPath $packagingAppProject -Raw
+        foreach ($propertyName in @('WindowsPackageType', 'WindowsAppSDKSelfContained', 'SelfContained', 'RuntimeIdentifier')) {
+            $csprojMatch = [regex]::Match($adrCsproj, '<' + $propertyName + '>([^<]*)</' + $propertyName + '>')
+            if (-not $csprojMatch.Success) {
+                $adrProblems += ('the app project no longer sets ' + $propertyName)
+            }
+            else {
+                $quoted = '<' + $propertyName + '>' + $csprojMatch.Groups[1].Value + '</' + $propertyName + '>'
+                if ($adrText.IndexOf($quoted, [System.StringComparison]::Ordinal) -lt 0) {
+                    $adrProblems += ('ADR-W004 does not quote ' + $quoted + ' while the app project sets it')
+                }
+            }
+        }
+    }
+    if (-not (Test-Path -LiteralPath $gitIgnoreFile)) {
+        $adrProblems += ('the ignore file is absent at ' + $gitIgnoreFile)
+    }
+    elseif ((Get-Content -LiteralPath $gitIgnoreFile -Raw).IndexOf('windows/native/libmpv/', [System.StringComparison]::Ordinal) -lt 0) {
+        $adrProblems += 'the ignore file no longer excludes windows/native/libmpv/'
+    }
+    if (-not (Test-Path -LiteralPath $fetchScriptFile)) {
+        $adrProblems += ('the fetch script named by the ADR is absent at ' + $fetchScriptFile)
+    }
+    if ($adrProblems.Count -eq 0) {
+        Add-Check 'adr-packaging-claims' 'PASS' 'ADR-W004 still describes the repository: the status block matches, the four packaging properties are quoted exactly as the app project sets them, the licence-file claim is current, and the native libmpv tree stays ignored and fetched (5 machine-readable lines)'
+    }
+    else {
+        Add-Check 'adr-packaging-claims' 'FAIL' (($adrProblems -join '; ') + ' - update windows/docs/adr/ADR-W004-packaging-and-distribution.md and the app project together')
+    }
+}
 
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })
