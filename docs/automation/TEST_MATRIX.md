@@ -652,3 +652,59 @@ combined tests=2056
 - 代码 head `716f481a` 的 windows-ci **`41200282567` = completed/failure**：测试门禁步骤全绿并打印 `suites=2 baseline=suite table 2 suites`（连同六层台阶行与 `combined tests=2056`），唯一失败步骤是 licence 表面的 `Licence surface guard`，停在 `check-licence-surface  FAIL  log-file-claims`（`checks=44 failed=1 warnings=0 skipped=0`）。
 - 归因（见 RUNLOG round 16 与 queue `W6-113u`）：base `2bdaa499` 新加的第 44 项守卫 W50 要求 `windows/src/MediaHub.Net/LogService.cs` 含字面量 `sb.AppendLine("# 滚动文件目录：" + FileSink.DirectoryPath);`，而 W6 分支在 `055c85c3` 已把该行搬进 `DiagnosticsReport.cs`（`RollingDirectoryPrefix`）；base 自身在该 head 上 `checks=44 failed=0`（`41174155974` / `41174160859`），上一轮我方 head 在旧 base 上 `checks=42 failed=0` ⇒ 红由跨分支形状分歧产生，与本轮改动无因果。
 - docs head `f396e791` 的 windows-ci `41200702543` failure：台阶行与代码 head 逐字一致，唯一失败仍是 `log-file-claims`（`checks=45 failed=1`）⇒ 与本层无关，归因见 `W6-113u`。
+
+## 6.12 第七层口径：outcome 分布与结果文件自洽性（W6-113v，2026-10-31）
+
+§6.11 之前，每一层的数字都读自结果文件自己的 `ResultSummary/Counters`，从不数每一行的 outcome。因此两种情形可以整层通过：**行与汇总不一致**的文件（手工合并、裁剪或改写的 TRX）只要汇总干净就绿；以及**某一行换了 outcome kind**（`Passed` → `Aborted` / `Inconclusive` / `Timeout` / `Error` …）时，只要汇总仍报 `failed=0 notExecuted=0`、总数不变，每类计数、方法集合、每方法用例数与参数行都一模一样。
+
+### 基线字段与判定（2026-10-31 起）
+
+| 字段 / 检查 | 含义 | 判定 |
+| --- | --- | --- |
+| `outcomes` | 每条 suite 的 outcome 桶（TRX outcome 名，只记非零） | 各桶之和必须等于 `expected`，否则配置 throw |
+| 逐行 outcome 计数 | 数 `UnitTestResult@outcome` | 与运行自己的 `Counters` 逐桶（含 `total`）不一致 → RED |
+| 基线 outcome 行数下降 | 例如 `Passed 1952 → 1951` | RED |
+| 出现基线没有的 outcome kind | 例如 `Aborted` | RED（新桶必须显式刷新并走 `-AcceptRemoval`） |
+| outcome 行数增长 | 新增用例 | GREEN + `::warning::new outcome rows` |
+
+### 台阶行
+
+```text
+MediaHub.Tests: outcomes=1 baseline=outcome table 1 outcomes
+MediaHub.WebDav.Tests: outcomes=1 baseline=outcome table 1 outcomes
+```
+
+### 负向对照（29 例，两代 PowerShell 判定一致）
+
+| 例 | 输入 | 期望 |
+| --- | --- | --- |
+| V1 / V1x | 规范输入 / 同一输入给 round 16 闸门 | PASS 且含 `outcomes=1`；旧闸门输出无 `outcomes=` 行 |
+| V2 / V2x | 行皆为 Passed 但 `Counters.passed=5` | 新闸门 RED（`passed rows=8 vs Counters.passed=5`）/ 旧闸门放行 |
+| V3 / V3x | 末行 Passed → Aborted（汇总随之一致） | 新闸门 RED（`Passed (8 -> 7 rows)`、`Aborted`）/ 旧闸门放行 |
+| V5 | 新增 2 行数据 | PASS + `::warning::new outcome rows` |
+| R7 | `Counters.inconclusive=1` 但无该 outcome 行 | RED（反方向不一致） |
+| C1 / C1x | 基线缺 `outcomes` | 新闸门 RED / 旧闸门放行 |
+| C2–C6 | 空表 / 未知 outcome 名 / 计数 0 / 非整数 / 与 expected 不符 | 全 RED（配置自检） |
+| U1 | 旧格式基线用新 update 刷新 | 自动补 `outcomes`，无拒绝 |
+| U2 | 出现新桶：无 `-AcceptRemoval` / 有开关 | 前者拒绝且基线未改写；后者写入 `{Inconclusive:1, Passed:7}` 且 check PASS |
+| U3 / U4 | 未列出的 suite / 无变化刷新 | 自动接纳；两 shell 字节稳定 |
+| R1–R6 | 总数降 / 类改名 / 参数值替换 / 截断表虚报 / 新方法 / 未列出结果文件 | 与前六层判定一致（红/warning 各归其位） |
+| RE1–RE3 | 真实语料 + round 16 真实基线 | PASS；旧基线被新闸门拒（`has no outcomes table`）但旧闸门放行；新 update 可迁移旧基线 |
+
+首轮 13 红全部是台账自身（`V` 路径仍指 round 16、夹具行数按 6 行算而实际 8 行、`combined tests` 写成 8），修正后 29/29。
+
+### 数据源与规模
+
+- 数据源仍为 run `41095080796` @head `701bb547` 的 TRX（`windows-tests.trx` 2,719,155 B / `webdav-tests.trx` 145,266 B，行 outcome 全为 `Passed`）。
+- baseline 164,051 → **164,452 B**；check 34,527 → **42,459 B**；update 21,834 → **24,836 B**。
+
+### 残留限制
+
+- 本层核对「每行都有且只有一个 outcome，且逐桶等于汇总」与「桶分布与基线一致」；TRX 的 `testId` 唯一性未单独校验（重复 id 会让归属映射把两行算到同一方法上，通常在每类/每方法计数处先红）。
+- 结果文件里的时长、时间戳、`ResultSummary@outcome` 属性不参与判定。
+- outcome 名必须落在两脚本共有的 14 个 TRX 桶名内；runner 引入新桶名时 update 会直接 throw（宁可拒绝，也不静默把新 kind 写进基线）。
+
+### exact-head CI 验收（2026-10-31）
+
+- 代码 head `9e90f1e1` 的 windows-ci **`41202161858` = completed/failure**：测试门禁步骤全绿并打印 `MediaHub.Tests: outcomes=1 baseline=outcome table 1 outcomes` 与 WebDav 同形行（连同七层旧台阶行、`suites=2 baseline=suite table 2 suites`、`combined tests=2056`）；唯一失败步骤仍是 licence 的 `log-file-claims`（`checks=45 failed=1`）。
+- 该红与 `W6-113u` 记录的跨分支形状分歧逐字相同，与本轮改动无因果（本轮只动 `windows/tools/*.ps1` 与基线，未触碰 `LogService.cs`）。

@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T20:25:00+08:00",
-  "updated_by": "lead-W6-113-r16",
+  "updated_at": "2026-10-31T20:45:00+08:00",
+  "updated_by": "lead-W6-113-r17",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -156,7 +156,8 @@
         "cancelled runs (追加): 41111613255 (head a0b46f6e, 2026-10-31) - the same head's windows-ci succeeded as 41111613263",
         "cancelled runs (追加): 41124244565 (head 1e2cf9ed, 2026-10-31) - the same head's windows-ci succeeded as 41124244650",
         "cancelled runs (追加): 41169510106 (head c3a49cef, 2026-10-31) - the same head's windows-ci succeeded as 41169510082",
-        "Android CI run 41200282712 @716f481a was still in_progress when sampled (core/feature/app tree hashes unchanged from the previous head, so ADR-AUTO-001 inheritance applies)"
+        "Android CI run 41200282712 @716f481a was still in_progress when sampled (core/feature/app tree hashes unchanged from the previous head, so ADR-AUTO-001 inheritance applies)",
+        "Android CI run 41202161881 @9e90f1e1 was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -450,6 +451,26 @@
       "notes": "两侧设计各自成立：base 的守卫钉的是「LogService 自己拼报告头」的旧形状，W6-113 已把这一行集中到 DiagnosticsReport（由 7 条用例与 W14 §3 说明冻结），round 10 已复验为 no-op。",
       "next_action": "维护者/W50 所有者二选一：① 把该 needle 改为「该行由 DiagnosticsReport.RollingDirectoryPrefix + rollingDirectory 产出，且两侧用例仍在」（推荐，与已落地设计一致）；② 把该字面量按原形状放回 LogService.cs（会形成第二个真源，需同步改 W14 §3）。裁决前本 PR head 的 licence 步骤持续红；我方不动共享守卫。",
       "closed_at": null
+    },
+    {
+      "id": "W6-113v",
+      "title": "套件基线第七层口径：outcome 分布与结果文件自洽性（W6-113v）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r17",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (42,459 B) + update-test-suite-baseline.ps1 (24,836 B) + test-suite-baseline.json (164,452 B); each suite now also pins \"outcomes\" (TRX outcome names, non-zero buckets, sum == expected) and the gate counts UnitTestResult@outcome row by row and requires them to reproduce the run's own Counters",
+        "commit 9e90f1e1c5b6f759eab274bdf5c5552504d5ce6f (3 files, +200 -6); blobs sha256-equal to the working-tree bytes the negative controls exercised (check 0966a72459bbbd99 / update b48f3e769ed7f2e5 / baseline 7b9da6ad9875d1f7)",
+        "negative controls 29/29 pass in pwsh 7 and Windows PowerShell 5.1 (D:/mh-verify/r17/nc-console.log, last line \"--- total 29 cases, pass=29, fail=0\")",
+        "core holes closed: a row moving from Passed to Aborted (or any other kind) keeps the total, every class count, method set, per-method case count and argument rows identical - the round-16 gate stayed green (V3x) while the new gate is red (V3), and a file whose rows disagree with its own Counters is red too (V2/V2x, R7)",
+        "first round had 13 reds, all harness bugs: V still pointed at D:/mh-verify/r16 (five cases), the fixture has 8 rows while six expectations assumed 6, and combined tests was written as 8 instead of 10",
+        "migration: the round-16 real baseline is refused by the new gate (\"has no outcomes table\") while the round-16 gate accepts it, and the new updater migrates it (outcomes {Passed:1952} / {Passed:104})",
+        "exact-head CI: head 9e90f1e1 windows-ci 41202161858 printed \"MediaHub.Tests: outcomes=1 baseline=outcome table 1 outcomes\" and the WebDav twin in the test gate step; the run fails only on the licence step attributed to W6-113u"
+      ],
+      "notes": "14 个 TRX 桶名是两脚本共有词表；未知桶名 update 直接 throw（宁拒勿默写）。outcome 桶之和必须等于 expected。testId 唯一性未单独校验，时长/时间戳不参与判定。",
+      "next_action": "无需我方动作；若 runner 引入新桶名，先在两脚本词表加名再刷新基线。",
+      "closed_at": "2026-10-31T20:45:00+08:00"
     }
   ]
 }
