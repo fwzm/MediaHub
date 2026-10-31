@@ -75,6 +75,14 @@
 #   values a row already carries, so the run now also requires the three to agree
 #   row by row and prints
 #   executionIds=/distinct declared ids=/paired rows=/paired result directories=.
+
+#   One more level, on the name side of the same row identity: a definition's
+#   display name is built from the class and method its TestMethod element
+#   declares ("Class.Method(<arguments>)"), and no count reads that composition
+#   - a file whose display names were rewritten on both halves still pairs up with
+#   itself. The run therefore also requires every display name to begin with the
+#   declared "Class.Method" and prints
+#   displayNames=/declared prefixes=/mismatched=.
 #
 #   Every count above is still read from the run's own ResultSummary/Counters, and
 #   the per-row outcomes are never counted. A results file whose rows disagree with
@@ -605,6 +613,8 @@ foreach ($e in $baseline.suites) {
   $actualTruncated = @{}
   $actualMethodCases = 0
   $defsWithoutClass = 0
+  $displayNameChecked = 0
+  $displayNameLost = @()
   foreach ($ut in @($xml.TestRun.TestDefinitions.UnitTest)) {
     if ($null -eq $ut) { continue }
     $cls = $null
@@ -659,6 +669,26 @@ foreach ($e in $baseline.suites) {
       $defIdNames[$did] = $display
     }
     $idToClass[$did] = $cls
+    if (-not [string]::IsNullOrWhiteSpace($display)) {
+      $declCls = ""
+      $declName = ""
+      if ($ut.TestMethod) {
+        $declCls = [string]$ut.TestMethod.className
+        $declName = [string]$ut.TestMethod.name
+      }
+      if (-not [string]::IsNullOrWhiteSpace($declCls) -and -not [string]::IsNullOrWhiteSpace($declName)) {
+        $displayNameChecked++
+        $wantDisplayPrefix = "$declCls.$declName"
+        $okDisplay = $false
+        if ($display -eq $wantDisplayPrefix) { $okDisplay = $true }
+        elseif ($display.StartsWith($wantDisplayPrefix + "(")) { $okDisplay = $true }
+        if (-not $okDisplay) {
+          $dnLabel = $did
+          if ([string]::IsNullOrWhiteSpace($dnLabel)) { $dnLabel = $display }
+          $displayNameLost += "$dnLabel display '$display' does not begin with the declared method '$wantDisplayPrefix'"
+        }
+      }
+    }
   }
   if ($defsWithoutClass -gt 0) {
     throw "$($e.suite): $defsWithoutClass test definition(s) in $($e.file) have no TestMethod.className - the per-method check cannot be trusted"
@@ -934,6 +964,10 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): each row's execution identity does not agree with itself across the file while the total was $total - a clean run writes the same id into the definition's Execution element, the result row's executionId and the directory the row's result was written to, so an edit that swaps a definition's execution id, blanks a row's directory or drops the element keeps every count above identical. mismatched: $($execPairingLost -join ', '). A TRX whose rows disagree with their own declared execution was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  if ($displayNameLost.Count -gt 0) {
+    throw "$($e.suite): the row display names do not agree with the method they declare while the total was $total - every count above is read from this file's own rows, so a file whose display names were rewritten on both halves reports a different set of cases than the one the baseline reviewed and still reproduces every number above. mismatched: $($displayNameLost -join ', '). A TRX whose display names disagree with their TestMethod was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # The summary is not trusted on its own: every result row carries exactly one
   # outcome, so the rows must reproduce every Counters bucket. A file whose rows
   # disagree with its own summary (hand-merged, patched, truncated) would
@@ -1003,6 +1037,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields"
   "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount"
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
+  "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
   if ($skipped -ne 0) { throw "$($e.suite): $skipped test(s) were not executed" }
