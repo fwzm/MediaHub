@@ -897,3 +897,51 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 - licence `checks=47 failed=1 warnings=0 skipped=0`：唯一红是上游 `log-file-claims`（`W6-113u`）；第 47 项 `capability-map-pointers` 本轮 PASS（base 已前进到 `19beb0cc`，其 windows-ci `41210845895`/`41210841634` success）⇒ `W6-113z` RESOLVED。
 - docs head `f3234066` 的 windows-ci **`41212609746` = completed/failure**：十一层台阶行与代码 head 逐字一致（`structure=7/7 single blocks entries=1952`/WebDav `104`、`identities=1952 named=1952`/`104`、`rowAttributes=… uniform row fields=4`、`combined tests=2056`、`suites=2`）；licence `checks=47 failed=1`，唯一红仍为上游 `log-file-claims`（`W6-113u`）。
 
+## 6.17 第十二层口径：跨文件运行身份（W6-113ab，2026-10-31）
+
+前面十二层里，只有这一层跨**文件**：第十一层（§6.16）之后，每个结果文件内部（总数、每类、每方法、每方法用例数、参数行清单、截断暴露面、outcome 分布、两侧身份、行元数据、节结构与节间配对）都已逐层自洽，但基线只记录「哪个套件读哪个文件」。于是**复制一个结果文件、再加一条同程序集的 suite 条目**就能让同一批用例被门禁两次计入 `combined tests`，而每个文件各自看起来与基线完全一致。
+
+### 口径（2026-10-31 起）
+| 面 | 判据 | 违反 |
+| --- | --- | --- |
+| run id 存在 | 每个结果文件的 `TestRun/@id` 非空且属性存在 | RED（点名文件） |
+| run id 互异 | 两个结果文件不得声明同一个 run id | RED（点名 id 与两个文件） |
+| executionId 互异 | 同一 `executionId` 不得出现在两个结果文件 | RED（点名 id 与文件列表） |
+| run id 形状 | run id 匹配 GUID | 仅 `::warning::` |
+| 台阶行 | `file identities=N distinct run ids=M cross-file duplicate execution ids=K` | 供 CI 逐轮比对 |
+
+写入位置与顺序：`$runIdByFile`（定义循环按 `$e.file` 记 run id）与 `$fileOfExecution`（结果循环按 `eid` 归集文件）在套件循环内累积，跨文件核对在所有套件跑完后、`combined tests=` 之前执行，因此新增一个**未列出的**结果文件仍走第十一层已有的 `:warning:` 增长路径，不与该层冲突。
+
+### 负向对照（24 例，pwsh 7 与 Windows PowerShell 5.1 各跑一次，判定一致）
+| 例 | 输入 | 判定 |
+| --- | --- | --- |
+| F1 | 规范双文件夹具 | PASS，含 `file identities=2 distinct run ids=2 cross-file duplicate execution ids=0` |
+| F1x | 同一输入给 round 20 闸门 | PASS 且无 `file identities=` 行（该层是本次新增） |
+| F2 | 两文件声明同一 run id | RED `is claimed by both` |
+| F2x | 同一输入给 round 20 闸门 | PASS（旧层看不见） |
+| F3 | 同一 executionId 落在两个文件 | RED `appears in more than one results file` |
+| F3x | 同一输入给 round 20 闸门 | PASS |
+| F4/F4b/F4c | run id 为空 / 属性缺失 | RED `names no TestRun id` |
+| F4x | 同一输入给 round 20 闸门 | PASS |
+| F5 | run id 不是 GUID | PASS + `::warning::a run id is not a GUID` |
+| F6 | 复制第一个结果文件并在基线里加一条同程序集 suite 条目 | RED `is claimed by both` + `doubles what this gate reports` |
+| F6x | 同一输入给 round 20 闸门 | **PASS 且 `combined tests=18`** —— 用例被重复计数而旧层全绿，这一红属本次收口 |
+| F7 | 复制件手改 run id 但 executionId 未变 | RED（`appears in more than one results file`） |
+| F7x | 同一输入给 round 20 闸门 | PASS |
+| R1–R6 | 前十一层回归（行被删 / 参数换值 / Passed→Aborted / 丢 TestEntries / 新参数行增长 / 定义 id 互换） | 各归其位（红/绿与既有口径一致） |
+| RE1 | 真实 CI TRX 双文件 | PASS，含 `file identities=2 distinct run ids=2 cross-file duplicate execution ids=0` 与 `combined tests=2056` |
+| RE2 | 真实语料给 round 20 闸门 | PASS 且无该台阶行 |
+| RE3 | 基线与 update 脚本相对 HEAD | 逐字节不变（`git status` 只有 check 脚本一行） |
+
+### 数据源与规模
+结果文件仍取 run `41095080796` @head `701bb547` 的 CI TRX（`windows-tests.trx` 2,719,155 B / `webdav-tests.trx` 145,266 B）；check 脚本 60,725 → **64,670 B**（纯 ASCII；与基线、update 脚本的字节关系见 RE3）。真实语料在 pwsh 7 与 Windows PowerShell 5.1 下 exit 0 且输出逐字相同。
+
+### 残留限制
+1. 该层只钉「不同文件必须来自不同运行」；同一个运行被**导出两次到同一文件名**（覆盖）无法区分，因为它本就是同一份字节。
+2. run id 形状只判 GUID 形状；CI runner 生成的 run id 就是 GUID，非 GUID 只 warning 不判红，避免对手工生成的正规 TRX 造成假红。
+3. 与第十一层一致：该层是**单次运行内**不变量，不写进基线（写进去只会重复 expected），因此不涉及基线迁移；旧基线在新闸门下行为不变。
+
+### exact-head CI 验收（2026-10-31）
+- head `2b267cec1b70d814436e0e85803e59314d4f6732` 的 windows-ci `41215421795` = completed/failure，但**测试门禁步骤全绿**：两套件打印的十二层台阶行里含 **`file identities=2 distinct run ids=2 cross-file duplicate execution ids=0`**，另有 `total=1952 baseline=1952`、`classes=113 … 113 entries`、`methods=1637 … 1637 methods`、`methodCases=1952 … 1952 cases`、`methodData=100 … 100 row sets`、`argumentRows=415 … 415 rows`、`argumentTruncated=6 … 6 rows`、`outcomes=1 … 1 outcomes`、`identities=1952 named=1952`、`rowAttributes=1952 … uniform row fields=4`、`structure=7/7 single blocks entries=1952 …`、`suites=2 baseline=suite table 2 suites`、`combined tests=2056`。
+- 唯一失败步骤为 licence 的 `log-file-claims`（`checks=48 failed=1`，`W6-113u`，与本轮改动无因果）；base `f2f83bba` 自身三个 run 全 success 且 `checks=48 failed=0`。
+- 同 head Android CI `41215421873` 取证时 in_progress；三个 head 与 round 20 的 core/feature/app 树哈希相同 ⇒ 按 ADR-AUTO-001 继承。

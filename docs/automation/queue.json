@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T23:05:00+08:00",
-  "updated_by": "lead-W6-113-r20",
+  "updated_at": "2026-10-31T23:45:00+08:00",
+  "updated_by": "lead-W6-113-r21",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -163,7 +163,8 @@
         "Android CI run 41204722970 @c8745bb4 = in_progress/",
         "Android CI 41207751615 @14bfea5b = cancelled (the same head’s windows-ci ran as 41207751934)",
         "Android CI 41208701801 @c373956d was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)",
-        "Android CI run 41212076088 @e3283e47 was still in_progress when sampled (core/feature/app tree hashes ff4eed826cbc/e983feb08237/70c541457cae unchanged from 3a09dfbd, ADR-AUTO-001 inheritance)"
+        "Android CI run 41212076088 @e3283e47 was still in_progress when sampled (core/feature/app tree hashes ff4eed826cbc/e983feb08237/70c541457cae unchanged from 3a09dfbd, ADR-AUTO-001 inheritance)",
+        "android-ci:41215421873 in_progress at sampling (@2b267cec; windows-ci:41215421795 failure on licence log-file-claims only)"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -584,6 +585,28 @@
       "closed_at": "2026-10-31T22:55:00+08:00",
       "notes": "只改 check 脚本；基线与 update 脚本未动（无迁移）。本层只做单文件内部一致：TRX 与实际程序集的对应由套件表与第九层 storage/codeBase 管，不在此层。",
       "next_action": "下一层候选：结果行除 executionId/时间之外的属性语义（如 testType/testListId 与 TestLists 名称的一致性）或 ResultSummary 的 outcome 属性；仍受上游红 W6-113u 影响。"
+    },
+    {
+      "id": "W6-113ab",
+      "title": "套件基线门禁第十二层：跨文件运行身份（每文件独立 TestRun id、executionId 不跨文件、复制文件不得重复计数）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r21",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "commit 2b267cec (1 file changed / 66 insertions; check-test-suite-baseline.ps1 60,725 -> 64,670 B, sha256 16=c86a54e65224c9e2, pure ASCII, both shells PARSE-OK)",
+        "negative controls 24/24 pass, fail=0 (pwsh 7 + Windows PowerShell 5.1 parity) - D:/mh-verify/r21/run-nc.cjs, log D:/mh-verify/r21/nc-console.log",
+        "F6 duplicate results file + second suite entry: new gate RED (\"is claimed by both\", \"doubles what this gate reports\") while round 20 gate stays green with combined tests=18 (F6x)",
+        "F2 shared TestRun id RED / F3 one executionId in two files RED / F4+F4b+F4c empty or missing run id RED (each paired with a round-20 gate pass)",
+        "F5 non-GUID run id warns only; R1-R6 regressions; RE1 real corpus prints file identities=2 ... cross-file duplicate execution ids=0; RE2 no such line on the round-20 gate; RE3 baseline and updater byte-identical to HEAD",
+        "exact-head windows-ci 41215421795 failure on licence only: test gate green with all twelve ladder lines incl. file identities=2 distinct run ids=2 cross-file duplicate execution ids=0, combined tests=2056",
+        "licence checks=48 failed=1 (W6-113u log-file-claims needle only); base f2f83bba runs 41214953902/41214949030 success with checks=48 failed=0",
+        "android-ci:41215421873 in_progress at sampling; core/feature/app tree hashes unchanged from round 20 -> ADR-AUTO-001 inheritance",
+        "docs: RUNLOG round 21 + TEST_MATRIX 6.17 appended (this commit)"
+      ],
+      "notes": "跨文件判据只读单次运行内的事实，不写进基线（写进去只会重复 expected）=> 基线零变化、无迁移、update 脚本未改。残留限制：同一运行导出两次到同一文件名无法区分（字节相同）；run id 形状只判 GUID、非 GUID 仅 warning；与第十一层一致，该层不钉基线字段。",
+      "next_action": "下一层候选：Results 行其它属性（duration/startTime 与 Counters executed 的关系）、TestRun/@name 与 run id 的配对；若再红先按「每个数字读自文件的哪一侧/哪几侧」归因，不要直接改共享守卫。",
+      "closed_at": "2026-10-31T23:45:00+08:00"
     }
   ]
 }
