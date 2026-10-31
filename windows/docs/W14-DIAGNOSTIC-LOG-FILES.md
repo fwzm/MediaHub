@@ -2,6 +2,31 @@
 
 本文记录 Windows 客户端诊断日志的第二个出口：内存环形缓冲之外，新增一个有界的滚动文件 sink。
 
+
+## 0. 机器可读状态（CI 核对）
+
+下面这段由 `windows/tools/check-licence-surface.ps1` 的 `log-file-claims`（W50，第 44 项）逐行核对：它把这段里的上限与用例数，与 `LogFileSink.cs` 的默认常量、轮转触发式、可恢复失败清单与整条写入规则，`LogService.cs` 的环形上限、`FileSink` 注入点与导出目录行，`AppServices.cs` 的组合根目录，以及 `LogFileSinkTests.cs` 实际展开出的用例数放在一起比。放宽轮转、让 `Append` 抛出、把脱敏搬进 sink、或用例数不与文档同步，CI 都会红。§1 起是人读版，不是第二个真源。
+
+<!-- BEGIN log-file-status (checked by check-licence-surface.ps1) -->
+```text
+max-bytes-per-file: 1048576
+max-files: 5
+file-name-pattern: mediahub-0.log .. mediahub-(MaxFiles-1).log
+rotation-boundary: between-entries-never-inside-one
+rotation-trigger: current-length-plus-entry-bytes-over-limit
+append-never-throws: true
+last-error: type-name-and-message
+recoverable-failures: IOException, UnauthorizedAccessException, SecurityException, ArgumentException, NotSupportedException
+memory-ring-entries: 2000
+export-directory-line: # 滚动文件目录：
+app-log-directory: %LOCALAPPDATA%\MediaHub\logs
+file-sink-injection: LogService(LogFileSink? fileSink = null)
+write-order: memory-ring-then-file-sink-then-entry-added
+redaction-owner: LogService.Redact
+contract-case-count: 9
+```
+<!-- END log-file-status -->
+
 ## 1. 动机
 
 `windows/src/MediaHub.Net/LogService.cs` 到本轮为止只有内存缓冲：

@@ -154,6 +154,25 @@
     The contract test whose [Fact] and [InlineData] attributes are counted. Default:
     windows/tests/MediaHub.Tests/ResumeFloorContractTests.cs.
 
+.PARAMETER LogFileDocPath
+    The document that publishes the rolling diagnostic-log limits. Default:
+    windows/docs/W14-DIAGNOSTIC-LOG-FILES.md. The log-file-claims check compares its status
+    block with the sink, the log service, the composition root, and the sink's own tests.
+
+.PARAMETER LogFileSinkPath
+    The rolling-file sink itself. Default: windows/src/MediaHub.Net/LogFileSink.cs.
+
+.PARAMETER LogServicePath
+    The in-memory ring that feeds the sink. Default: windows/src/MediaHub.Net/LogService.cs.
+
+.PARAMETER AppServicesPath
+    The composition root that points the sink at %LOCALAPPDATA%\MediaHub\logs. Default:
+    windows/src/MediaHub.App/AppServices.cs.
+
+.PARAMETER LogFileTestPath
+    The tests that pin the sink's behaviour. Default:
+    windows/tests/MediaHub.Tests/LogFileSinkTests.cs.
+
 .PARAMETER FailOnLicenceGaps
     Treat the LGPL dependency rows whose licence cannot be quoted from component-licences.txt as
     errors as well. Off by default, but as of W38 no such row is expected: every shipped DLL has a
@@ -206,6 +225,11 @@ param(
     [string] $ResumeFloorDocPath,
     [string] $MockServerPath,
     [string] $ResumeFloorTestPath,
+    [string] $LogFileDocPath,
+    [string] $LogFileSinkPath,
+    [string] $LogServicePath,
+    [string] $AppServicesPath,
+    [string] $LogFileTestPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -246,6 +270,11 @@ $uiaModuleFile = Resolve-RepoPath -Path $UiaModulePath -Default 'windows/tools/a
 $resumeFloorDocFile = Resolve-RepoPath -Path $ResumeFloorDocPath -Default 'windows/docs/W8-RESUME-FLOOR-CONTRACT.md'
 $mockServerFile = Resolve-RepoPath -Path $MockServerPath -Default 'windows/tests/MediaHub.TestSupport/MockMediaServer.cs'
 $resumeFloorTestFile = Resolve-RepoPath -Path $ResumeFloorTestPath -Default 'windows/tests/MediaHub.Tests/ResumeFloorContractTests.cs'
+$logFileDocFile = Resolve-RepoPath -Path $LogFileDocPath -Default 'windows/docs/W14-DIAGNOSTIC-LOG-FILES.md'
+$logFileSinkFile = Resolve-RepoPath -Path $LogFileSinkPath -Default 'windows/src/MediaHub.Net/LogFileSink.cs'
+$logServiceFile = Resolve-RepoPath -Path $LogServicePath -Default 'windows/src/MediaHub.Net/LogService.cs'
+$appServicesFile = Resolve-RepoPath -Path $AppServicesPath -Default 'windows/src/MediaHub.App/AppServices.cs'
+$logFileTestFile = Resolve-RepoPath -Path $LogFileTestPath -Default 'windows/tests/MediaHub.Tests/LogFileSinkTests.cs'
 
 $checks = [System.Collections.Generic.List[object]]::new()
 function Add-Check {
@@ -1178,6 +1207,7 @@ $declaredCheckIds = @(
     'capability-map-claims',
     'quiet-run-claims',
     'resume-floor-claims',
+    'log-file-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -1686,6 +1716,127 @@ else {
         Add-Check 'resume-floor-claims' 'FAIL' (($resumeFloorProblems -join '; ') + ' - update windows/docs/W8-RESUME-FLOOR-CONTRACT.md section 0 and the code it describes')
     }
 }
+# --- 21. the rolling diagnostic-log file contract ----------------------------------------------
+$logFileBlock = ''
+$logFileCaseCount = 0
+$logFileProblems = [System.Collections.Generic.List[string]]::new()
+if (-not (Test-Path -LiteralPath $logFileDocFile)) {
+    Add-Check 'log-file-claims' 'SKIP' 'windows/docs/W14-DIAGNOSTIC-LOG-FILES.md is absent, so the rolling-file contract has nothing to compare against'
+}
+else {
+    $logFileText = Get-Content -LiteralPath $logFileDocFile -Raw
+    $logFileStart = $logFileText.IndexOf('<!-- BEGIN log-file-status', [System.StringComparison]::Ordinal)
+    $logFileEnd = $logFileText.IndexOf('<!-- END log-file-status', [System.StringComparison]::Ordinal)
+    if ($logFileStart -lt 0 -or $logFileEnd -lt $logFileStart) {
+        $logFileProblems.Add('the document carries no log-file-status block (the machine-readable limits and the case count)')
+    }
+    else {
+        $logFileBlock = $logFileText.Substring($logFileStart, $logFileEnd - $logFileStart)
+        foreach ($logFileLine in @(
+            'max-bytes-per-file: 1048576',
+            'max-files: 5',
+            'file-name-pattern: mediahub-0.log .. mediahub-(MaxFiles-1).log',
+            'rotation-boundary: between-entries-never-inside-one',
+            'rotation-trigger: current-length-plus-entry-bytes-over-limit',
+            'append-never-throws: true',
+            'last-error: type-name-and-message',
+            'recoverable-failures: IOException, UnauthorizedAccessException, SecurityException, ArgumentException, NotSupportedException',
+            'memory-ring-entries: 2000',
+            'export-directory-line: # 滚动文件目录：',
+            'app-log-directory: %LOCALAPPDATA%\MediaHub\logs',
+            'file-sink-injection: LogService(LogFileSink? fileSink = null)',
+            'write-order: memory-ring-then-file-sink-then-entry-added',
+            'redaction-owner: LogService.Redact',
+            'contract-case-count: 9'
+        )) {
+            if (-not $logFileBlock.Contains($logFileLine)) { $logFileProblems.Add('the status block does not say ' + $logFileLine) }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $logFileSinkFile)) {
+        $logFileProblems.Add('the rolling-file sink is absent (windows/src/MediaHub.Net/LogFileSink.cs)')
+    }
+    else {
+        $logFileSinkText = Get-Content -LiteralPath $logFileSinkFile -Raw
+        foreach ($sinkNeedle in @(
+            'public const long DefaultMaxBytesPerFile = 1024 * 1024;',
+            'public const int DefaultMaxFiles = 5;',
+            'public string? LastError { get; private set; }',
+            'public string PathFor(int index) => Path.Combine(_directory, _fileNamePrefix + index + ".log");',
+            'if (currentLength > 0 && currentLength + bytes.Length > _maxBytesPerFile) Rotate();',
+            '// An entry is appended whole even when it alone exceeds the limit; the next entry',
+            'private static string Describe(Exception ex) => ex.GetType().Name + ": " + ex.Message;'
+        )) {
+            if (-not $logFileSinkText.Contains($sinkNeedle)) { $logFileProblems.Add('the sink no longer contains ' + $sinkNeedle) }
+        }
+        $recoverableCatches = ([regex]::Matches($logFileSinkText, [regex]::Escape('catch (Exception ex) when (IsRecoverableDiskFailure(ex))'))).Count
+        if ($recoverableCatches -ne 2) { $logFileProblems.Add('the sink swallows recoverable disk failures in ' + $recoverableCatches + ' place(s) - the constructor and Append are the two that must never throw') }
+        $recoverableAt = $logFileSinkText.IndexOf('private static bool IsRecoverableDiskFailure', [System.StringComparison]::Ordinal)
+        if ($recoverableAt -lt 0) { $logFileProblems.Add('the sink has no IsRecoverableDiskFailure predicate') }
+        else {
+            $recoverableTail = $logFileSinkText.Substring($recoverableAt, [Math]::Min(400, $logFileSinkText.Length - $recoverableAt))
+            foreach ($failureType in @('IOException', 'UnauthorizedAccessException', 'System.Security.SecurityException', 'ArgumentException', 'NotSupportedException')) {
+                if (-not $recoverableTail.Contains($failureType)) { $logFileProblems.Add('the sink no longer treats ' + $failureType + ' as a recoverable disk failure') }
+            }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $logServiceFile)) {
+        $logFileProblems.Add('the log service is absent (windows/src/MediaHub.Net/LogService.cs)')
+    }
+    else {
+        $logServiceText = Get-Content -LiteralPath $logServiceFile -Raw
+        foreach ($serviceNeedle in @(
+            'private const int MaxEntries = 2000;',
+            'public LogFileSink? FileSink { get; }',
+            'public LogService(LogFileSink? fileSink = null)',
+            'FileSink?.Append(entry);',
+            'sb.AppendLine("# 滚动文件目录：" + FileSink.DirectoryPath);',
+            'public static string Redact(string? input)'
+        )) {
+            if (-not $logServiceText.Contains($serviceNeedle)) { $logFileProblems.Add('the log service no longer contains ' + $serviceNeedle) }
+        }
+        $ringAt = $logServiceText.IndexOf('_entries.Add(entry);', [System.StringComparison]::Ordinal)
+        $sinkAt = $logServiceText.IndexOf('FileSink?.Append(entry);', [System.StringComparison]::Ordinal)
+        $sinkEntryAt = $logServiceText.IndexOf('EntryAdded?.Invoke(', [System.StringComparison]::Ordinal)
+        if ($ringAt -lt 0 -or $sinkAt -lt 0 -or $sinkEntryAt -lt 0 -or -not ($ringAt -lt $sinkAt -and $sinkAt -lt $sinkEntryAt)) {
+            $logFileProblems.Add('the write order changed: an entry must reach the memory ring, then the file sink, and only then the EntryAdded subscribers')
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $appServicesFile)) {
+        $logFileProblems.Add('the composition root is absent (windows/src/MediaHub.App/AppServices.cs)')
+    }
+    else {
+        $appServicesText = Get-Content -LiteralPath $appServicesFile -Raw
+        if (-not [regex]::IsMatch($appServicesText, 'new LogService\(new LogFileSink\(Path\.Combine\(\s*Environment\.GetFolderPath\(Environment\.SpecialFolder\.LocalApplicationData\),\s*"MediaHub",\s*"logs"\)\)\);')) {
+            $logFileProblems.Add('the composition root no longer builds the log service on %LOCALAPPDATA%\MediaHub\logs through a LogFileSink')
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $logFileTestFile)) {
+        $logFileProblems.Add('the sink test file is absent (windows/tests/MediaHub.Tests/LogFileSinkTests.cs)')
+    }
+    else {
+        $logFileTestText = Get-Content -LiteralPath $logFileTestFile -Raw
+        $logFileCaseCount = ([regex]::Matches($logFileTestText, [regex]::Escape('[Fact]'))).Count + ([regex]::Matches($logFileTestText, [regex]::Escape('[InlineData('))).Count
+        $logFileDeclared = [regex]::Match($logFileBlock, 'contract-case-count: (\d+)')
+        if ($logFileDeclared.Success) {
+            $declaredLogCases = [int]$logFileDeclared.Groups[1].Value
+            if ($declaredLogCases -ne $logFileCaseCount) {
+                $logFileProblems.Add('the document declares ' + $declaredLogCases + ' contract case(s) but the sink tests expand to ' + $logFileCaseCount)
+            }
+        }
+    }
+
+    if ($logFileProblems.Count -eq 0) {
+        Add-Check 'log-file-claims' 'PASS' ('the rolling-file contract still holds: ' + $logFileCaseCount + ' test case(s) pin a 1 MiB / 5-file trail that rotates between entries, never throws, and records LastError for the five recoverable failure types, while LogService keeps the 2000-entry ring and the export directory line')
+    }
+    else {
+        Add-Check 'log-file-claims' 'FAIL' (($logFileProblems -join '; ') + ' - update windows/docs/W14-DIAGNOSTIC-LOG-FILES.md section 0 and the code it describes')
+    }
+}
+
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })
 $skipped = @($checks | Where-Object { $_.outcome -eq 'SKIP' })

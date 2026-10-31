@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-43 项检查分二十二组：
+44 项检查分二十三组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -69,6 +69,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 能力对照表（W47 起） | `capability-map-claims` | `windows/docs/CAPABILITY-MAP.md` §0 的九行状态块缺行/改值、测试行写回写死的用例计数、或它声称的发布状态与 `PACKAGING.md` §0 不再一致 |
 | 验收不打扰契约（W48 起） | `quiet-run-claims` | `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` §0 的九行门禁事实（空闲阈值 180 s、QUNS 只允许 5/6、看门狗 700 ms、abort 标记与 `MH_ALLOW_ACTIVE`/`MH_QUIET_ABORT_FILE`、守卫优先级）缺行或改值，或 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询、`MhUia.psm1` 的 `Start-MhApp` abort 守卫与它不再一致 |
 | 续播下限契约（W49 起） | `resume-floor-claims` | `windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §0 的八行阈值与用例数、`MockMediaServer.cs` 里 Emby 2 % / Jellyfin 5 % / 300 s / 90 % / 10 s 的常量、以及契约测试实际展开出的用例数，三者任一分叉——放宽下限、删判定分支、加减用例却没同步文档即红 |
+| 诊断日志落盘（W50 起） | `log-file-claims` | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md` §0 的十五行上限/轮转/失败策略/用例数、`LogFileSink.cs` 的默认常量与轮转触发式、`LogService.cs` 的环形上限与写入顺序、`AppServices.cs` 的组合根目录、sink 测试展开的 9 例，五方任一分叉即红 |
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
 
@@ -238,7 +239,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 37） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 44） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -347,6 +348,22 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 用例数由脚本当场数出（`[Fact]` 计 1、每条 `[InlineData(` 计 1），不是读文档；文档写成 31 而实现是别的数就红。三个路径参数（`-ResumeFloorDocPath`、`-MockServerPath`、`-ResumeFloorTestPath`）让负向对照可以指到临时副本；文档不存在 ⇒ SKIP（退出码仍 0）。
 
 `windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §2 的 469 是该轮单工程实跑的历史数字，本检查**不**要求它等于当前 CI 计数（那会随其它轮次改动而漂移）；它钉的是阈值语义与用例数。
+
+### 3.18 诊断日志落盘契约（W50，2026-10-31）
+
+`log-file-claims` 把 W14 的滚动日志承诺从散文变成可核对的五方一致：
+
+| 判据 | 失败含义 |
+| --- | --- |
+| 文档 §0 的 `log-file-status` 块含十五行逐字 | 上限、轮转边界、永不抛出、可恢复失败清单、脱敏归属或用例数被改写或整块删除 |
+| `LogFileSink.cs` 含七处常量/表达式 | 1 MiB / 5 文件默认值变了、文件名模板不再拼 `.log`、轮转触发式被删、整条写入的注释没了、`Describe` 不再给「类型名: 消息」 |
+| 可恢复失败清单与两处 `catch` 计数 | `Append` 或构造不再吞异常（把诊断日志变成崩溃点），或五类磁盘错误里少了任何一类 |
+| `LogService.cs` 含六处 token 与写入顺序 | 环形上限、`FileSink` 注入点、`FileSink?.Append(entry)` 调用、导出目录行或 `Redact` 被删；写入顺序不再是「内存环 → 文件 → EntryAdded」 |
+| `AppServices.cs` 的组合根正则 + sink 用例数 = 文档声明数 | 应用不再把 sink 建在 `%LOCALAPPDATA%\MediaHub\logs`；或加减用例却没同步文档 |
+
+用例数由脚本当场数出（`[Fact]` 计 1、每条 `[InlineData(` 计 1），不是读文档；文档写 9 而实现是别的数就红。五个路径参数（`-LogFileDocPath`、`-LogFileSinkPath`、`-LogServicePath`、`-AppServicesPath`、`-LogFileTestPath`）让负向对照可以指到临时副本；文档不存在 ⇒ SKIP（退出码仍 0）。
+
+刻意**不**钉「本机实跑 478 passed / 0 failed」这类数字：它会随其它轮次的新增用例漂移，本检查钉的是契约语义与用例数。
 
 ## 4. 当前实测（2026-10-23，HEAD baac30c）
 
@@ -681,6 +698,35 @@ RESULT: PASS
 | NC5 | mock 副本删 `TrailingWindowTicks` 常量 | 恰好 1 红 |
 | NC6 | `-ResumeFloorDocPath` 指不存在文件 | SKIP、退出码 0 |
 | NC7 | 文档块 `contract-case-count` 改 30（测试不动） | 恰好 1 红 |
+
+### 4.18 实测（2026-10-31，W50，本机，HEAD 05d53cb6）
+
+代码：
+
+```text
+pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath D:/mh-verify/w38-license/license-report.json
+check-licence-surface  PASS    log-file-claims  the rolling-file contract still holds: 9 test case(s) pin a 1 MiB / 5-file trail that rotates between entries, never throws, and records LastError for the five recoverable failure types, while LogService keeps the 2000-entry ring and the export directory line
+check-licence-surface  PASS    check-inventory  44 declared check(s): this run emitted nothing undeclared, LICENSE-SURFACE-CHECK.md names every id on its own, and both it and README.md claim the same count
+check-licence-surface  checks=44 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+守卫补丁先落地、文档未同步时的首跑如实 1 红（保留为证据）：新项已 PASS，`check-inventory` 报 3 个问题（两份文档还写 43 项、文档未点名 `log-file-claims`）。
+
+八条负向对照（临时副本，未改仓库文件）：
+
+| # | 改法 | 结果 |
+| --- | --- | --- |
+| NC1 | 文档副本块 `max-files: 5` 改 7 | 恰好 1 红 |
+| NC2 | 删掉整个 `log-file-status` 块 | 恰好 1 红 |
+| NC3 | sink 副本 `DefaultMaxFiles = 5` 改 7 | 恰好 1 红 |
+| NC4 | sink 副本可恢复清单里 `NotSupportedException` 换成别的类型 | 恰好 1 红 |
+| NC5 | service 副本删掉 `FileSink?.Append(entry);` | 恰好 1 红（同时触发写入顺序判据） |
+| NC6 | 组合根副本 `LocalApplicationData` 改 `ApplicationData` | 恰好 1 红 |
+| NC7 | 文档块 `contract-case-count` 改 10（测试不动） | 恰好 1 红 |
+| NC8 | `-LogFileDocPath` 指不存在文件 | SKIP、退出码 0 |
+
+七条打在 `log-file-claims` 上、一条走 SKIP 通道，没有一条依赖别的检查 —— W14 的「日志永远有界、永远不因磁盘出错而崩」此后不能再被悄悄放宽。
 
 ## 5. 这个工具**不**覆盖什么
 
