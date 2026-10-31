@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-10-31T20:52:00+08:00",
-  "updated_by": "lead-W6-113-r17",
+  "updated_at": "2026-10-31T21:15:00+08:00",
+  "updated_by": "lead-W6-113-r18",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -158,7 +158,8 @@
         "cancelled runs (追加): 41169510106 (head c3a49cef, 2026-10-31) - the same head's windows-ci succeeded as 41169510082",
         "Android CI run 41200282712 @716f481a was still in_progress when sampled (core/feature/app tree hashes unchanged from the previous head, so ADR-AUTO-001 inheritance applies)",
         "Android CI run 41202161881 @9e90f1e1 was still in_progress when sampled (core/feature/app tree hashes unchanged, ADR-AUTO-001 inheritance applies)",
-        "Android CI run 41202435297 @33a2d77c = in_progress/"
+        "Android CI run 41202435297 @33a2d77c = in_progress/",
+        "Android CI run 41204520438 @21bc3226 = in_progress/"
       ],
       "blocked_by": [
         "维护者裁决（改共享 CI 会影响他人验证节奏）"
@@ -473,6 +474,27 @@
       "notes": "14 个 TRX 桶名是两脚本共有词表；未知桶名 update 直接 throw（宁拒勿默写）。outcome 桶之和必须等于 expected。testId 唯一性未单独校验，时长/时间戳不参与判定。",
       "next_action": "无需我方动作；若 runner 引入新桶名，先在两脚本词表加名再刷新基线。",
       "closed_at": "2026-10-31T20:45:00+08:00"
+    },
+    {
+      "id": "W6-113w",
+      "title": "套件基线第九层口径：TRX 两侧身份对齐（W6-113w）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r18",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 (47,512 B, sha256 eece55e3e2e96de7) now counts the test ids on both sides of a TRX: definition ids unique, result testIds unique, both id sets subsets of each other, and every result display name equal to the name of the definition its testId points at (truncated rows compared before the runner marker)",
+        "no baseline change: these are invariants inside one TRX, not run-to-run values; test-suite-baseline.json and update-test-suite-baseline.ps1 are untouched",
+        "commit 21bc3226d66367cd328f64ac11012d8b66450dfc (1 file, +84 -3); blob sha256-equal to the working-tree bytes the negative controls exercised",
+        "negative controls 18/18 pass in pwsh 7 and Windows PowerShell 5.1 (D:/mh-verify/r18/nc-console.log, last line \"--- total 18 cases, pass=18, fail=0\")",
+        "core holes closed: duplicating one id onto another definition (with its result) kept every count identical and the round-17 gate green (I2x) while the new gate is red (I2); swapping two definition ids of one class re-points each result row at the other definition (counts identical, round-17 gate green in I3x) and is red under the name cross-check (I3)",
+        "first round had 1 red, an implementation boundary: the \"result testId names no definition\" branch was unreachable because a result-side orphan id hits the pre-existing unmapped check first; the unmapped message now names the ids and the orphan-definition case is built with a duplicate result id instead",
+        "exact-head CI: head 21bc3226 windows-ci (see the acceptance note) printed \"MediaHub.Tests: identities=1952 named=1952 unique test ids shared by both halves\" and the WebDav twin; the run still fails only on the licence step attributed to W6-113u",
+        "code head 21bc3226 windows-ci 41204520499: the test gate step printed all nine ladder lines including \"identities=1952 named=1952 unique test ids shared by both halves\" and the WebDav twin (\"identities=104 named=104\") plus \"combined tests=2056\"; the run fails only on the licence step (checks=45 failed=1, the W6-113u needle divergence)"
+      ],
+      "notes": "本层不加基线字段：单 TRX 内部不变量，钉进基线只会重复 expected。截断容错用 marker 前前缀关系，比逐字相等宽。executionId/duration 等其它属性不参与判定。",
+      "next_action": "无需我方动作；若 runner 改变截断策略或引入重试行，本层需重新约定。",
+      "closed_at": "2026-10-31T21:15:00+08:00"
     }
   ]
 }

@@ -710,3 +710,57 @@ MediaHub.WebDav.Tests: outcomes=1 baseline=outcome table 1 outcomes
 - 该红与 `W6-113u` 记录的跨分支形状分歧逐字相同，与本轮改动无因果（本轮只动 `windows/tools/*.ps1` 与基线，未触碰 `LogService.cs`）。
 
 - docs head `33a2d77c` 的 windows-ci **`41202435323` = completed/failure**：测试门禁步骤全绿，两套件均打印 `outcomes=1 baseline=outcome table 1 outcomes`（连同七层旧台阶行、`suites=2`、`combined tests=2056`）；唯一失败步骤仍是 licence 的 `log-file-claims`（`checks=45 failed=1`，即 `W6-113u` 记录的 W50 跨分支 needle 分歧），与本层改动无因果。
+
+## 6.13 第九层口径：TRX 两侧身份对齐（W6-113w，2026-10-31）
+
+前八层的每个数字与每个集合都只来自 TRX 的**一侧**：总数与 `Counters`、每类、每方法、参数行来自定义侧，outcome 分布来自结果侧，而 `id` 一直只被当作坐标使用、从未在两侧互校。两种手改文件因此可以整层通过：把一个定义的 id 复制到另一个定义（连同其对应结果），或交换同一类内两个定义的 id（结果侧不动，于是每个结果行被归到另一个定义上）—— 总数、每类计数、方法集合、每参数行与 outcome 分布全都保持不变。
+
+### 口径与判定
+
+| 检查 | 含义 | 判定 |
+| --- | --- | --- |
+| 定义 id 唯一 | `TestDefinitions/UnitTest@id` 不得重复 | 重复 RED（点名 id 与出现次数） |
+| 结果 id 唯一 | `Results/UnitTestResult@testId` 不得重复 | 重复 RED |
+| 两侧 id 集合互为子集 | 定义 id 必须有结果行；结果 id 必须有定义 | 定义侧孤儿 RED；结果侧孤儿沿用 unmapped 检查（现在点名 id） |
+| 显示名一致 | 结果 `testName` 必须等于其 id 指向的定义 `UnitTest@name` | 不一致 RED（点名 `id`、定义名与结果名） |
+| 截断容错 | 任一侧含 runner marker 时，按 marker 前文本比较前缀关系 | 前缀一致 PASS；不一致 RED |
+
+### 台阶行
+
+```text
+MediaHub.Tests: identities=1952 named=1952 unique test ids shared by both halves
+MediaHub.WebDav.Tests: identities=104 named=104 unique test ids shared by both halves
+```
+
+基线**不加字段**：这些是单个 TRX 内部的不变量（同一 id 两侧必须指向同一行），不是跨 run 的量，钉进基线只会重复 `expected`。因此本轮无迁移、update 脚本未改、`test-suite-baseline.json` 未改。
+
+### 负向对照（18 例，两代 PowerShell 判定一致）
+
+| 例 | 输入 | 期望 |
+| --- | --- | --- |
+| I1 / I1x | 规范输入 / 同一输入给 round 17 闸门 | PASS 且含 `identities=8 named=8`；旧闸门无 `identities=` 行 |
+| **I2 / I2x** | 一个 id 复制到另一个定义（结果侧同步复制） | 新闸门 RED（`definition id 5 appears 2 times`）/ 旧闸门 GREEN |
+| **I3 / I3x** | 交换同类内两个定义的 id（结果侧不动） | 新闸门 RED（`id 1: definition ToyTests.M_a(1) vs result ToyTests.M_fact`）/ 旧闸门 GREEN |
+| I4 | 一侧多出的 id | RED（unmapped 消息点名 `testId 8`） |
+| I4b / I4bx | 定义侧孤儿 id（配 count 谎报以免总数检查先拦） | 新闸门 RED（`definition id 8 has no result row`、`result testId 1 appears 2 times`）/ 旧闸门 GREEN |
+| I5 / I5x | 两侧同一行 id 为空 | RED（`1 test definition(s) have no id`）/ 旧闸门 GREEN |
+| I6 / I7 | 截断行两侧尾巴不同但前缀一致 / 前缀不一致 | PASS（容错无假红）/ RED |
+| R1–R3 | 总数降 / outcome kind 变化 / 参数值替换 | 与前八层判定一致 |
+| RE1 / RE2 | 真实语料 | PASS（`identities=1952 named=1952`、`combined tests=2056`）/ 旧闸门无该行 |
+
+首轮 16 例里 1 红为实现边界问题：`result testId … names no definition` 分支不可达（结果侧孤儿 id 会先撞既有的 unmapped 检查）⇒ 改为在 unmapped 消息里点名 id，并把「定义侧孤儿」改用「结果侧重复 id + 定义缺结果行」构造，第二轮 18/18。
+
+### 数据源与规模
+
+- 数据源仍为 run `41095080796` @head `701bb547` 的 TRX（`windows-tests.trx` 2,719,155 B / `webdav-tests.trx` 145,266 B）。实测两侧显示名逐行完全相同（1952/1952、104/104，含 6 行截断行），无重复/空白/孤儿 id。
+- `check-test-suite-baseline.ps1` 42,459 → **47,512 B**（本次唯一改动文件）；基线未变。
+
+### 残留限制
+
+- 只核对 `id` 与显示名；`executionId`、`duration`、`startTime` 等其它行属性不参与判定。
+- runner 若改变截断策略，使两侧截断长度不一致，会落到「前缀一致即通过」的较宽路径（比逐字相等宽松），这是为跨 runner 版本鲁棒性付出的代价。
+- 同一 id 在 `<Results>` 中出现多次按 RED 处理（runner 正常不产生）；若上游将来合法地拆出「重试行」，本层需要重新约定。
+
+### exact-head CI 验收（2026-10-31）
+
+- 代码 head `21bc3226` 的 windows-ci **`41204520499` = completed/failure**：测试门禁步骤全绿并打印九层台阶行，含两套件的 `identities=1952 named=1952` / `identities=104 named=104` 与 `combined tests=2056`；唯一失败步骤仍是 licence 的 `log-file-claims`（`checks=45 failed=1`，即 `W6-113u` 的 W50 跨分支 needle 分歧），与本层改动无因果。
