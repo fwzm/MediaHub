@@ -95,6 +95,14 @@
 #     (the summary is not trusted on its own; the rows are counted, total included)
 #   an outcome kind the baseline did not have appears, or a baseline outcome
 #     reports fewer rows -> red; an outcome reporting more rows -> green + warning
+#   a test id that is not unique inside one TRX, a definition whose id has no
+#     result row (a result whose testId names no definition is caught by the
+#     unmapped-row check above, which now names the id), or a result whose
+#     display name disagrees with the name of the definition that id points at
+#     -> red. These are the two halves of one TRX disagreeing with each other:
+#     swapping the ids of two definitions keeps the total, every class count,
+#     the method set, every argument row and the outcome split identical, and so
+#     does duplicating one id onto another definition and its result.
 #   failed != 0 or notExecuted != 0 -> red
 #
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
@@ -409,6 +417,9 @@ foreach ($e in $baseline.suites) {
   # every row of a [Theory] maps to the method it exercises, and the rows are counted
   # per method so that a row moving between two theories of one class is visible.
   $idToClass = @{}
+  $defIdCounts = @{}
+  $defIdNames = @{}
+  $blankDefIds = 0
   $actualMethods = @{}
   $actualData = @{}
   $actualTruncated = @{}
@@ -458,7 +469,16 @@ foreach ($e in $baseline.suites) {
       $actualMethods[$cls][$base] = 1
     }
     $actualMethodCases++
-    $idToClass[[string]$ut.id] = $cls
+    $did = [string]$ut.id
+    if ([string]::IsNullOrWhiteSpace($did)) {
+      $blankDefIds++
+    } elseif ($defIdCounts.ContainsKey($did)) {
+      $defIdCounts[$did] = $defIdCounts[$did] + 1
+    } else {
+      $defIdCounts[$did] = 1
+      $defIdNames[$did] = $display
+    }
+    $idToClass[$did] = $cls
   }
   if ($defsWithoutClass -gt 0) {
     throw "$($e.suite): $defsWithoutClass test definition(s) in $($e.file) have no TestMethod.className - the per-method check cannot be trusted"
@@ -475,19 +495,79 @@ foreach ($e in $baseline.suites) {
 
   $actual = @{}
   $actualOutcomes = @{}
+  $resIdCounts = @{}
+  $namedExact = 0
+  $namedPrefix = 0
+  $nameMismatch = @()
+  $namesUnprovable = 0
   $unmapped = 0
   foreach ($res in @($xml.TestRun.Results.UnitTestResult)) {
     if ($null -eq $res) { continue }
+    $rid = [string]$res.testId
+    if ($resIdCounts.ContainsKey($rid)) { $resIdCounts[$rid] = $resIdCounts[$rid] + 1 } else { $resIdCounts[$rid] = 1 }
     $cls = $null
-    if ($idToClass.ContainsKey([string]$res.testId)) { $cls = $idToClass[[string]$res.testId] }
+    if ($idToClass.ContainsKey($rid)) { $cls = $idToClass[$rid] }
     if ([string]::IsNullOrWhiteSpace($cls)) { $unmapped++; continue }
+    # The id is only a coordinate: check that the row on the other side of it is
+    # the same row. xUnit writes the same display name into the definition and
+    # into the result, so a name that disagrees means the two halves were not
+    # produced together. Rows the runner truncated are compared on the text
+    # before the marker, because the tail is not recoverable from a TRX.
+    $dname = [string]$defIdNames[$rid]
+    if ([string]::IsNullOrWhiteSpace($dname)) {
+      $namesUnprovable++
+    } else {
+      $rname = [string]$res.testName
+      if ($dname -eq $rname) {
+        $namedExact++
+      } elseif ($dname.Contains($TruncationMarker) -or $rname.Contains($TruncationMarker)) {
+        $dpre = $dname
+        if ($dname.Contains($TruncationMarker)) { $dpre = $dname.Substring(0, $dname.IndexOf($TruncationMarker)) }
+        $rpre = $rname
+        if ($rname.Contains($TruncationMarker)) { $rpre = $rname.Substring(0, $rname.IndexOf($TruncationMarker)) }
+        if ($dpre.StartsWith($rpre) -or $rpre.StartsWith($dpre)) {
+          $namedPrefix++
+        } elseif ($nameMismatch.Count -lt 12) {
+          $nameMismatch += "$cls (id ${rid}: definition $dpre vs result $rpre)"
+        }
+      } elseif ($nameMismatch.Count -lt 12) {
+        $nameMismatch += "$cls (id ${rid}: definition $dname vs result $rname)"
+      }
+    }
     if ($actual.ContainsKey($cls)) { $actual[$cls] = $actual[$cls] + 1 } else { $actual[$cls] = 1 }
     $oc = [string]$res.outcome
     if ([string]::IsNullOrWhiteSpace($oc)) { $oc = "(missing)" }
     if ($actualOutcomes.ContainsKey($oc)) { $actualOutcomes[$oc] = $actualOutcomes[$oc] + 1 } else { $actualOutcomes[$oc] = 1 }
   }
   if ($unmapped -gt 0) {
-    throw "$($e.suite): $unmapped result(s) in $($e.file) have no TestMethod.className - the per-class check cannot be trusted"
+    $orphanResIds = @($resIdCounts.Keys | Where-Object { -not $defIdCounts.ContainsKey($_) } | Sort-Object)
+    $shownOrphan = @($orphanResIds)
+    if ($shownOrphan.Count -gt 12) { $shownOrphan = $shownOrphan[0..11] + "... ($($orphanResIds.Count) total)" }
+    throw "$($e.suite): $unmapped result(s) in $($e.file) have no TestMethod.className (testId $($shownOrphan -join ', ')) - the per-class check cannot be trusted"
+  }
+
+  # The two halves of one TRX must describe the same rows. The total, the class
+  # counts, the method set, the argument rows and the outcome buckets all come
+  # from one half or the other, so a file whose halves disagree can keep every
+  # one of them identical: swapping the ids of two definitions re-points each
+  # result row at the other definition, and duplicating one id onto another
+  # definition (with its result) does the same while every count stays put.
+  $dupDefIds = @($defIdCounts.Keys | Where-Object { [int]$defIdCounts[$_] -gt 1 } | Sort-Object)
+  $dupResIds = @($resIdCounts.Keys | Where-Object { [int]$resIdCounts[$_] -gt 1 } | Sort-Object)
+  $orphanDefIds = @($defIdCounts.Keys | Where-Object { -not $resIdCounts.ContainsKey($_) } | Sort-Object)
+  $pairedIds = @($defIdCounts.Keys | Where-Object { $resIdCounts.ContainsKey($_) }).Count
+  $namedRows = $namedExact + $namedPrefix
+  $identityLost = @()
+  if ($blankDefIds -gt 0) { $identityLost += "$blankDefIds test definition(s) have no id" }
+  foreach ($id in @($dupDefIds)) { if ($identityLost.Count -lt 12) { $identityLost += "definition id $id appears $($defIdCounts[$id]) times" } }
+  foreach ($id in @($dupResIds)) { if ($identityLost.Count -lt 12) { $identityLost += "result testId $id appears $($resIdCounts[$id]) times" } }
+  foreach ($id in @($orphanDefIds)) { if ($identityLost.Count -lt 12) { $identityLost += "definition id $id has no result row" } }
+  foreach ($m in @($nameMismatch)) { if ($identityLost.Count -lt 12) { $identityLost += $m } }
+  if ($identityLost.Count -gt 0) {
+    throw "$($e.suite): the result rows do not line up with their test definitions while the total was $total - equal totals, equal per-class counts, an unchanged method list, unchanged argument rows and an unchanged outcome split do not prove that each row is the row it claims to be. mismatched: $($identityLost -join ', '). A TRX whose two halves disagree was hand-merged or patched; regenerate it from a clean test run."
+  }
+  if ($namesUnprovable -gt 0) {
+    Write-Host "::warning::$($e.suite): $namesUnprovable row(s) cannot be name-checked - the definition carries no display name"
   }
 
   # The summary is not trusted on its own: every result row carries exactly one
@@ -555,6 +635,7 @@ foreach ($e in $baseline.suites) {
     "$($e.suite): argumentTruncated=$actualTruncTotal baseline=argument truncated table $baselineTruncTotal rows"
   }
   "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
+  "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
   if ($skipped -ne 0) { throw "$($e.suite): $skipped test(s) were not executed" }
