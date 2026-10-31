@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-49 项检查分二十八组：
+50 项检查分二十九组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -70,6 +70,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | W13 探针记录（W54 起） | `engine-probe-claims` | `windows/docs/W13-LGPL-ENGINE-PROBE.md` 的身份钉死值、交付物表与断言条数任一分叉：块里的两个 dll 摘要/字节数与探针脚本钉死的 `ExpectedGplSha256` / `ExpectedGplBytes` / `ExpectedLgplSha256` / `ExpectedLgplBytes` 不一致，与 `windows/tools/fetch-libmpv.ps1` 的基线摘要或 `windows/engine/lgpl/dist/dist-hashes.txt` 的候选记录不一致；第 2 节交付物表与 `windows/src/MediaHub.EngineProbe` 目录不再一一对应或行数不符；断言条数（按脚本结构当场算出）与文档声称的不符；「只解码、不显示、不出声」「不能外推到 GUI」两条限制被删，或文档改口说 GUI 验证通过 |
 | 能力对照表指针（W53 起） | `capability-map-pointers` | `windows/docs/CAPABILITY-MAP.md` 的链接目标、仓库路径 token、状态词封闭性与用例计数纪律任一分叉：markdown 链接指向已改名的文件、内联代码写出的仓库路径在六个声明根（仓库根、`windows`、`windows/src`、`windows/docs`、`windows/tools`、`.github`）下都找不到、出现图例之外的状态词（如 `PARTIAL_PASS`）、图例不再定义六态之一、测试行又贴着 `MediaHub.Tests` 写死「N 条」计数，或表丢了 `test-count-authority: ci-print` 行 |
 | LGPL 构建记录（W55 起） | `lgpl-build-record-claims` | `windows/docs/licensing/W5-LGPL-BUILD.md` §8 状态块与 `windows/engine/lgpl/` 的实物分叉：候选 dll 摘要/字节与磁盘、`dist-hashes.txt`、`probe-lgpl-info.txt` 对不上；块里的基线摘要不再是 `fetch-libmpv.ps1` 钉的值；MSYS2 包数（块、§1.2、`msys2-package-hashes.txt` 行数）三方不一致；引擎 feature 数不是 28 或列表里出现 `gpl`；FFmpeg 版本/硬件加速列表不符或证据回退到 `--enable-gpl`；运行时闭包不是 33 个 DLL 或 manifest 丢失；被引用的构建脚本/探针文件不存在；探针日志不再出现 d3d11va / WASAPI / `MPV_PROBE PASS`；或文档改口自称已完全合规/可发布 |
+| SBOM 两 flavour 账目（W56 起） | `sbom-flavour-claims` | `windows/docs/licensing/SBOM.md` §9 状态块与 §7.1/§7.2 表格分叉：文件数或字节数不再相加、家族表的行数与字节和与依赖清单不符、引擎钉死值/候选摘要与实物不符、依赖清单缺行，或文档改口说许可义务已了结 |
 | 验收不打扰契约（W48 起） | `quiet-run-claims` | `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` §0 的九行门禁事实（空闲阈值 180 s、QUNS 只允许 5/6、看门狗 700 ms、abort 标记与 `MH_ALLOW_ACTIVE`/`MH_QUIET_ABORT_FILE`、守卫优先级）缺行或改值，或 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询、`MhUia.psm1` 的 `Start-MhApp` abort 守卫与它不再一致 |
 | 续播下限契约（W49 起） | `resume-floor-claims` | `windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §0 的八行阈值与用例数、`MockMediaServer.cs` 里 Emby 2 % / Jellyfin 5 % / 300 s / 90 % / 10 s 的常量、以及契约测试实际展开出的用例数，三者任一分叉——放宽下限、删判定分支、加减用例却没同步文档即红 |
 | 诊断日志落盘（W50 起） | `log-file-claims` | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md` §0 的十五行上限/轮转/失败策略/用例数、`LogFileSink.cs` 的默认常量与轮转触发式、`LogService.cs` 的环形上限与写入顺序、`AppServices.cs` 的组合根目录、sink 测试展开的 9 例，五方任一分叉即红 |
@@ -245,7 +246,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 49） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 50） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -977,7 +978,48 @@ RESULT: PASS
 
 **CI 首跑在 exact SHA `c80556ce095f59642b34d2d93e0178bd40989bf3` 上如实 1 红——真因是这条检查自己**：`windows-ci` push `41218977356` / pull_request `41218983971` 报 `the block says 33 runtime DLL(s) around the candidate but dist/ holds 0`。33 个运行时 DLL 是构建产物，`windows/engine/lgpl/dist/.gitignore` 本来就只提交候选件（`*.dll` 全忽略、`!libmpv-2.dll`），所以仓库里根本没有它们，`Get-ChildItem dist/*.dll` 在 CI 上是 0。判据已改成读**已入库的身份记录** `dist/runtime-dependencies-collected.txt`（每行一个随包依赖），只有工作树里真的存在这些 DLL 时才追加核对个数；状态块因此多一个 `runtime-collected` 键，NC9 就是这个新判据的对照。
 
-## 5. 这个工具**不**覆盖什么
+### 3.24 SBOM 两 flavour 账目（W56，2026-10-31）
+
+检查 id `sbom-flavour-claims`：读 `windows/docs/licensing/SBOM.md` §9 的 `sbom-flavour-status` 块（17 键）、§7.1 与 §7.2 的两张表、`windows/engine/lgpl/dist/runtime-dependencies-collected.txt`、`windows/engine/lgpl/dist/flavour-builds.txt`，以及 `windows/tools/fetch-libmpv.ps1` 钉死的 `$DllSha256`。
+
+| 判据 | 必须成立 | 防止 |
+| --- | --- | --- |
+| A 状态块完整 | 17 个键都在（三个文件数、三个字节数、两个引擎身份、依赖清单名、家族合计、证据与采集器、两个诚实标签） | 状态块被删、被改名或漏键 |
+| B 文件数相加 | `gpl-files + sibling-dlls == lgpl-files`，且 §7.1 的 `| Files | … | … (+N) |` 行逐字等于块里的三个数 | 只改一处数字、两 flavour 的差额与依赖清单脱钩 |
+| C 字节数相加 | `gpl-bytes - (gpl-engine-bytes - lgpl-engine-bytes) + sibling-bytes == lgpl-bytes`，且 §7.1 正文仍以千分位原样引用这三个字节数 | 引擎换件而总数不动，或总数改了而引擎项没跟着改 |
+| D 引擎身份 | 块里的 GPL 摘要 == `fetch-libmpv.ps1` 的 `$DllSha256`；候选摘要 == `dist-hashes.txt`；`flavour-builds.txt` 必须同时含两个摘要与两个字节数 | 引擎换件而账目与证据不动 |
+| E 依赖清单 | 行数 == `sibling-dlls`；每行形如 `<name> <bytes> <sha256> <source>`；字节和 == `sibling-bytes` | 清单与状态块各说一套，或清单被换成散文 |
+| F §7.2 家族表 | 至少两行数据、Files 列和 == `sibling-dlls`、Bytes 列和 == `sibling-bytes` | 家族表改到与清单不符（分组是人工判断，机器只核对合计与行数） |
+| G 边界诚实 | §7 仍含 `RELEASE BLOCKER` 与 `no GPL obligations`；不得出现 `obligations are cleared` / `is licence-clean` / `needs no further licence work`（`(?i)`） | 拿「多了一个 flavour」当「义务已清」的宣传 |
+| H 诚实标签 | `measurement-shape: release-publish-on-2026-10-24` 与 `ci-reproduces: engine-identities-and-manifest-only` 仍在 | 把 2026-10-24 的本机测量说成 CI 里复现过 |
+
+刻意不做：不重建两个 `dotnet publish` 树（CI 里没有构建产物，形状只在本机量过一次），也不按许可字符串重新分组家族表——分组规则是人工判断，机器只能核对合计与行数。
+
+### 4.24 实测（2026-10-31，W56，本机）
+
+```
+check-licence-surface  PASS  sbom-flavour-claims  the SBOM two-flavour accounting still adds up: 526 + 33 files, the 120989696 B GPL engine down to 3327274 B plus 58826576 B of siblings, the manifest rows, the section 7.2 family rows and both engine pins all agree
+check-licence-surface  checks=50 failed=0 warnings=0 skipped=0
+RESULT: PASS
+```
+
+守卫补丁先落地、两份文档还没同步时的首跑如实 1 红（留作证据）：`check-inventory` 列出 3 个问题（两份文档还写 49 项、文档未点名 `sbom-flavour-claims`），新项自己已 PASS。
+
+| 对照 | 改动 | 预期 | 实测 |
+| --- | --- | --- | --- |
+| NC1 | 文档副本把状态块的 `gpl-files` 改成 525 | 只有本项 1 红 | 1 红 ✓ `the file counts no longer add up: 525 + 33 is not 559, section 7.1 no longer shows the file counts the status block quotes (| Files | 525 | 559 (+33) |)` |
+| NC2 | 文档副本把 `lgpl-bytes` 改成 289439303 | 只有本项 1 红 | 1 红 ✓ `the byte counts no longer add up: 348275148 - 117662422 + 58826576 is not 289439303` |
+| NC3 | 文档副本把 §7.2 家族表里 Apache 一行的字节数 +1 | 只有本项 1 红 | 1 红 ✓ `the section 7.2 family rows add up to 33 file(s) and 58826577 B, not 33 and 58826576` |
+| NC4 | 文档副本整块删掉 `sbom-flavour-status` 的 BEGIN/END | 只有本项 1 红 | 1 红 ✓ `the inventory no longer carries the sbom-flavour-status block` |
+| NC5 | 文档副本把 §7 的 `RELEASE BLOCKER` 改写 | 只有本项 1 红 | 1 红 ✓ `the inventory no longer states: RELEASE BLOCKER` |
+| NC6 | 文档副本追加一句 `the obligations are cleared.` | 只有本项 1 红 | 1 红 ✓ `the inventory now claims: obligations are cleared` |
+| NC7 | 文档副本把 §7.1 的 `(+33)` 行改成 `558 (+33)` | 只有本项 1 红 | 1 红 ✓ `section 7.1 no longer shows the file counts the status block quotes (| Files | 526 | 559 (+33) |)` |
+| NC8 | 依赖清单副本删掉最后一行 | 只有本项 1 红 | 1 红 ✓ `the dependency manifest lists 32 row(s) but the status block says 33, the dependency manifest adds up to 58726297 B but the status block says 58826576` |
+| NC9 | 构建证据副本把 GPL 基线摘要改成 `deadbeef` | 只有本项 1 红 | 1 红 ✓ `the flavour build evidence no longer records 6a48faec…63d9` |
+| NC10 | `-SbomFlavourDocPath` 指不存在文件 | SKIP、退出码 0 | SKIP ✓ `checks=50 failed=0 skipped=1`、exit 0 |
+
+逐条实跑日志：`D:/mh-verify/w56-positive.log`、`D:/mh-verify/w56-first.log` 与 `D:/mh-verify/w56-nc/NC1.log` … `NC10.log`；副本树 `D:/mh-verify/w56-nc/`。
+
 ## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。

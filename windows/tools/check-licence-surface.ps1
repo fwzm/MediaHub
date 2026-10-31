@@ -208,6 +208,16 @@
 .PARAMETER LgplEvidenceDir
     The directory holding that evidence. Default: windows/engine/lgpl.
 
+.PARAMETER SbomFlavourDocPath
+    The SBOM inventory whose two-flavour accounting is checked. Default: windows/docs/licensing/SBOM.md.
+
+.PARAMETER SbomFlavourManifestPath
+    The committed dependency manifest the sibling count and bytes come from.
+    Default: windows/engine/lgpl/dist/runtime-dependencies-collected.txt.
+
+.PARAMETER SbomFlavourEvidencePath
+    The recorded build evidence for both flavours. Default: windows/engine/lgpl/dist/flavour-builds.txt.
+
 .EXAMPLE
     pwsh -NoProfile -File windows/tools/check-licence-surface.ps1
 
@@ -266,6 +276,9 @@ param(
     [string] $EngineProbeProjectDir,
     [string] $LgplBuildDocPath,
     [string] $LgplEvidenceDir,
+    [string] $SbomFlavourDocPath,
+    [string] $SbomFlavourManifestPath,
+    [string] $SbomFlavourEvidencePath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -318,6 +331,9 @@ $engineProbeScriptFile = Resolve-RepoPath -Path $EngineProbeScriptPath -Default 
 $engineProbeProjectDir = Resolve-RepoPath -Path $EngineProbeProjectDir -Default 'windows/src/MediaHub.EngineProbe'
 $lgplBuildDocFile = Resolve-RepoPath -Path $LgplBuildDocPath -Default 'windows/docs/licensing/W5-LGPL-BUILD.md'
 $lgplEvidenceDir = Resolve-RepoPath -Path $LgplEvidenceDir -Default 'windows/engine/lgpl'
+$sbomFlavourDocFile = Resolve-RepoPath -Path $SbomFlavourDocPath -Default 'windows/docs/licensing/SBOM.md'
+$sbomFlavourManifestFile = Resolve-RepoPath -Path $SbomFlavourManifestPath -Default 'windows/engine/lgpl/dist/runtime-dependencies-collected.txt'
+$sbomFlavourEvidenceFile = Resolve-RepoPath -Path $SbomFlavourEvidencePath -Default 'windows/engine/lgpl/dist/flavour-builds.txt'
 # A missing scan root must reach the check as a SKIP, not crash the whole run: Resolve-Path throws
 # on anything that is not there, so the path is only canonicalised once it exists.
 if (Test-Path -LiteralPath $docsScanRoot) {
@@ -1261,6 +1277,7 @@ $declaredCheckIds = @(
     'capability-map-pointers',
     'engine-probe-claims',
     'lgpl-build-record-claims',
+    'sbom-flavour-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -2419,6 +2436,105 @@ if (-not (Test-Path -LiteralPath $lgplBuildDocFile)) {
         Add-Check "lgpl-build-record-claims" "PASS" ("the LGPL build record still matches windows/engine/lgpl/: the candidate identity, the GPL baseline pin, the " + $lgplValues["msys2-package-count"] + " MSYS2 package(s), the " + $lgplValues["feature-count"] + "-feature list, the FFmpeg flags and hwaccels, the " + $lgplValues["runtime-dll-count"] + "-DLL runtime closure, the cited build scripts and the probe evidence all agree")
     } else {
         Add-Check "lgpl-build-record-claims" "FAIL" ($lgplProblems.Count.ToString() + " problem(s): " + (Format-NameList $lgplProblems) + " - update windows/docs/licensing/W5-LGPL-BUILD.md and the W5 evidence it cites together")
+    }
+}
+
+
+# --- 26. the two-flavour accounting in the SBOM must still add up (W56) ----------------------
+$sbomProblems = [System.Collections.Generic.List[string]]::new()
+if (-not (Test-Path -LiteralPath $sbomFlavourDocFile)) {
+    Add-Check 'sbom-flavour-claims' 'SKIP' ('the SBOM inventory is absent (' + $sbomFlavourDocFile + '), so its two-flavour accounting cannot be compared with the repository')
+} else {
+    $sbomText = [string](Get-Content -LiteralPath $sbomFlavourDocFile -Raw)
+    if ($null -eq $sbomText) { $sbomText = '' }
+    $sbomValues = @{}
+    if ($sbomText -notmatch '(?s)<!-- BEGIN sbom-flavour-status -->(.*?)<!-- END sbom-flavour-status -->') {
+        $sbomProblems.Add('the inventory no longer carries the sbom-flavour-status block')
+    } else {
+        $sbomBlockText = $Matches[1]
+        foreach ($sbomKey in @('gpl-files','lgpl-files','sibling-dlls','gpl-bytes','lgpl-bytes','sibling-bytes','gpl-engine-bytes','gpl-engine-sha256','lgpl-engine-bytes','lgpl-engine-sha256','sibling-manifest','family-files','family-bytes','evidence','collector','measurement-shape','ci-reproduces')) {
+            if ($sbomBlockText -match ('(?m)^' + [regex]::Escape($sbomKey) + ':\s*(\S.*?)\s*$')) { $sbomValues[$sbomKey] = $Matches[1] } else { $sbomProblems.Add('the status block no longer declares ' + $sbomKey) }
+        }
+    }
+    $sbomReady = $true
+    foreach ($sbomKey in @('gpl-files','lgpl-files','sibling-dlls','gpl-bytes','lgpl-bytes','sibling-bytes','gpl-engine-bytes','lgpl-engine-bytes','gpl-engine-sha256','lgpl-engine-sha256')) { if (-not $sbomValues.ContainsKey($sbomKey)) { $sbomReady = $false } }
+    if ($sbomReady) {
+        $sbomGplFiles = [long]$sbomValues['gpl-files']
+        $sbomLgplFiles = [long]$sbomValues['lgpl-files']
+        $sbomSiblings = [long]$sbomValues['sibling-dlls']
+        $sbomGplBytes = [long]$sbomValues['gpl-bytes']
+        $sbomLgplBytes = [long]$sbomValues['lgpl-bytes']
+        $sbomSiblingBytes = [long]$sbomValues['sibling-bytes']
+        $sbomEngineDelta = [long]$sbomValues['gpl-engine-bytes'] - [long]$sbomValues['lgpl-engine-bytes']
+        if (($sbomGplFiles + $sbomSiblings) -ne $sbomLgplFiles) { $sbomProblems.Add('the file counts no longer add up: ' + $sbomGplFiles + ' + ' + $sbomSiblings + ' is not ' + $sbomLgplFiles) }
+        if (($sbomGplBytes - $sbomEngineDelta + $sbomSiblingBytes) -ne $sbomLgplBytes) { $sbomProblems.Add('the byte counts no longer add up: ' + $sbomGplBytes + ' - ' + $sbomEngineDelta + ' + ' + $sbomSiblingBytes + ' is not ' + $sbomLgplBytes) }
+        $sbomTableRow = '| Files | ' + $sbomGplFiles + ' | ' + $sbomLgplFiles + ' (+' + $sbomSiblings + ') |'
+        if ($sbomText -notmatch [regex]::Escape($sbomTableRow)) { $sbomProblems.Add('section 7.1 no longer shows the file counts the status block quotes (' + $sbomTableRow + ')') }
+        foreach ($sbomNumber in @($sbomGplBytes, $sbomLgplBytes, $sbomSiblingBytes)) {
+            $sbomPretty = ([string]$sbomNumber) -replace '\B(?=(\d{3})+(?!\d))', ','
+            if ($sbomText -notmatch [regex]::Escape($sbomPretty)) { $sbomProblems.Add('the inventory no longer quotes the byte count ' + $sbomPretty + ' that the status block states') }
+        }
+        if (Test-Path -LiteralPath $sbomFlavourManifestFile) {
+            $sbomManifestText = [string](Get-Content -LiteralPath $sbomFlavourManifestFile -Raw)
+            $sbomRows = @($sbomManifestText -split '\r?\n' | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith('#') })
+            if ($sbomRows.Count -ne $sbomSiblings) { $sbomProblems.Add('the dependency manifest lists ' + $sbomRows.Count + ' row(s) but the status block says ' + $sbomSiblings) }
+            $sbomRowBytes = [long]0
+            foreach ($sbomRow in $sbomRows) {
+                $sbomParts = @($sbomRow.Trim() -split '\s+')
+                if ($sbomParts.Count -ge 2 -and $sbomParts[1] -match '^[0-9]+$') { $sbomRowBytes += [long]$sbomParts[1] } else { $sbomProblems.Add('the dependency manifest row is not <name> <bytes> <sha256> <source>: ' + $sbomRow.Trim()) }
+            }
+            if ($sbomRowBytes -ne $sbomSiblingBytes) { $sbomProblems.Add('the dependency manifest adds up to ' + $sbomRowBytes + ' B but the status block says ' + $sbomSiblingBytes) }
+        } else { $sbomProblems.Add('the dependency manifest is absent (' + $sbomFlavourManifestFile + '), so the sibling count cannot be counted') }
+        $sbomFamilyStart = $sbomText.IndexOf('### 7.2')
+        $sbomFamilyEnd = $sbomText.IndexOf('### 7.3')
+        if ($sbomFamilyStart -lt 0 -or $sbomFamilyEnd -le $sbomFamilyStart) { $sbomProblems.Add('the licence-family table in section 7.2 is gone') } else {
+            $sbomFamilyFiles = 0; $sbomFamilyBytes = [long]0; $sbomFamilyRows = 0
+            foreach ($sbomLine in ($sbomText.Substring($sbomFamilyStart, $sbomFamilyEnd - $sbomFamilyStart) -split '\r?\n')) {
+                if (-not $sbomLine.Trim().StartsWith('|')) { continue }
+                $sbomCells = @($sbomLine.Trim().Trim('|') -split '\|' | ForEach-Object { $_.Trim() })
+                if ($sbomCells.Count -lt 3) { continue }
+                if ($sbomCells[0].Contains('Total')) { continue }
+                if ($sbomCells[1] -notmatch '^[0-9]+$' -or $sbomCells[2] -notmatch '^[0-9,]+$') { continue }
+                $sbomFamilyRows += 1
+                $sbomFamilyFiles += [int]$sbomCells[1]
+                $sbomFamilyBytes += [long]($sbomCells[2].Replace(',',''))
+            }
+            if ($sbomFamilyRows -lt 2) { $sbomProblems.Add('section 7.2 no longer carries a licence-family table') } elseif ($sbomFamilyFiles -ne $sbomSiblings -or $sbomFamilyBytes -ne $sbomSiblingBytes) { $sbomProblems.Add('the section 7.2 family rows add up to ' + $sbomFamilyFiles + ' file(s) and ' + $sbomFamilyBytes + ' B, not ' + $sbomSiblings + ' and ' + $sbomSiblingBytes) }
+        }
+    }
+    if ($sbomValues.ContainsKey('gpl-engine-sha256')) {
+        if (Test-Path -LiteralPath $fetchScriptFile) {
+            $sbomFetchText = [string](Get-Content -LiteralPath $fetchScriptFile -Raw)
+            $sbomFetchPin = [regex]::Match($sbomFetchText, "DllSha256\s*=\s*'?([0-9a-fA-F]{64})")
+            if (-not $sbomFetchPin.Success) { $sbomProblems.Add('fetch-libmpv.ps1 no longer declares DllSha256 as a single-quoted literal') } elseif ($sbomFetchPin.Groups[1].Value.ToLowerInvariant() -ne ([string]$sbomValues['gpl-engine-sha256']).ToLowerInvariant()) { $sbomProblems.Add('the status block quotes GPL engine sha256 ' + $sbomValues['gpl-engine-sha256'] + ' but fetch-libmpv.ps1 pins ' + $sbomFetchPin.Groups[1].Value) }
+        } else { $sbomProblems.Add('windows/tools/fetch-libmpv.ps1 is absent, so the GPL engine pin cannot be compared') }
+    }
+    if ($sbomValues.ContainsKey('lgpl-engine-sha256')) {
+        $sbomHashFile = Join-Path $engineDist 'dist-hashes.txt'
+        if (Test-Path -LiteralPath $sbomHashFile) {
+            $sbomHashes = [string](Get-Content -LiteralPath $sbomHashFile -Raw)
+            if ($sbomHashes -notmatch [regex]::Escape($sbomValues['lgpl-engine-sha256'])) { $sbomProblems.Add('dist-hashes.txt no longer records the candidate sha256 the status block quotes') }
+        } else { $sbomProblems.Add('dist-hashes.txt is absent, so the candidate identity cannot be compared') }
+    }
+    if (Test-Path -LiteralPath $sbomFlavourEvidenceFile) {
+        $sbomEvidenceText = [string](Get-Content -LiteralPath $sbomFlavourEvidenceFile -Raw)
+        foreach ($sbomNeedle in @($sbomValues['gpl-engine-sha256'], $sbomValues['lgpl-engine-sha256'], $sbomValues['gpl-engine-bytes'], $sbomValues['lgpl-engine-bytes'])) {
+            if ($sbomNeedle -and $sbomEvidenceText -notmatch [regex]::Escape([string]$sbomNeedle)) { $sbomProblems.Add('the flavour build evidence no longer records ' + $sbomNeedle) }
+        }
+    } else { $sbomProblems.Add('the flavour build evidence is absent (' + $sbomFlavourEvidenceFile + ')') }
+    if ($sbomValues.ContainsKey('collector')) {
+        if (-not (Test-Path -LiteralPath (Resolve-RepoPath -Path ([string]$sbomValues['collector'])))) { $sbomProblems.Add('the status block names a collector that is not in the repository: ' + $sbomValues['collector']) }
+    }
+    foreach ($sbomNeedle in @('RELEASE BLOCKER','no GPL obligations')) {
+        if ($sbomText -notmatch [regex]::Escape($sbomNeedle)) { $sbomProblems.Add('the inventory no longer states: ' + $sbomNeedle) }
+    }
+    foreach ($sbomClaim in @('obligations are cleared','is licence-clean','needs no further licence work')) {
+        if ($sbomText -match ('(?i)' + [regex]::Escape($sbomClaim))) { $sbomProblems.Add('the inventory now claims: ' + $sbomClaim) }
+    }
+    if ($sbomProblems.Count -eq 0) {
+        Add-Check 'sbom-flavour-claims' 'PASS' ('the SBOM two-flavour accounting still adds up: ' + $sbomValues['gpl-files'] + ' + ' + $sbomValues['sibling-dlls'] + ' files, the ' + $sbomValues['gpl-engine-bytes'] + ' B GPL engine down to ' + $sbomValues['lgpl-engine-bytes'] + ' B plus ' + $sbomValues['sibling-bytes'] + ' B of siblings, the manifest rows, the section 7.2 family rows and both engine pins all agree')
+    } else {
+        Add-Check 'sbom-flavour-claims' 'FAIL' ($sbomProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $sbomProblems) + ' - update windows/docs/licensing/SBOM.md and the two-flavour evidence together')
     }
 }
 

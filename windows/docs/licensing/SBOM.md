@@ -347,3 +347,46 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 
 If `sbom-inventory` fails, regenerate the SBOM (`license-report.ps1 -Sbom`) and commit it together with
 the dependency change that moved the graph.
+
+## 9. Machine-readable status (checked by CI)
+
+The numbers in §7 are a measurement, not a live reading: the two `dotnet publish` trees were weighed on
+this machine on 2026-10-24 and CI never rebuilds them. What CI can hold is the **accounting** - that the
+file and byte differences still add up against the engine pins and the committed dependency manifest - so
+that block below is what `sbom-flavour-claims` in `windows/tools/check-licence-surface.ps1` reads.
+
+<!-- BEGIN sbom-flavour-status -->
+gpl-files: 526
+lgpl-files: 559
+sibling-dlls: 33
+gpl-bytes: 348275148
+lgpl-bytes: 289439302
+sibling-bytes: 58826576
+gpl-engine-bytes: 120989696
+gpl-engine-sha256: 6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9
+lgpl-engine-bytes: 3327274
+lgpl-engine-sha256: 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+sibling-manifest: dist/runtime-dependencies-collected.txt
+family-files: 33
+family-bytes: 58826576
+evidence: dist/flavour-builds.txt
+collector: windows/tools/collect-lgpl-runtime.ps1
+measurement-shape: release-publish-on-2026-10-24
+ci-reproduces: engine-identities-and-manifest-only
+<!-- END sbom-flavour-status -->
+
+How each line is checked:
+
+| Line | Checked against |
+| --- | --- |
+| `gpl-files` / `lgpl-files` / `sibling-dlls` | the file counts in the §7.1 table, and `lgpl-files - gpl-files` must equal `sibling-dlls` |
+| `gpl-bytes` / `lgpl-bytes` / `sibling-bytes` | the byte counts in the §7.1 table, and `gpl-bytes - (gpl-engine-bytes - lgpl-engine-bytes) + sibling-bytes` must equal `lgpl-bytes` |
+| `gpl-engine-bytes` / `gpl-engine-sha256` | the GPL engine pin in `windows/tools/fetch-libmpv.ps1` |
+| `lgpl-engine-bytes` / `lgpl-engine-sha256` | `dist/dist-hashes.txt` and the artefact header of the dependency manifest |
+| `sibling-manifest` | one dependency per line, row count == `sibling-dlls`, byte sum == `sibling-bytes` |
+| `family-files` / `family-bytes` | the licence-family table in §7.2 (row files sum and row bytes sum) |
+| `evidence` / `collector` | the two files exist and the evidence repeats both engine identities |
+| `measurement-shape` / `ci-reproduces` | honesty labels: the shape is not rebuilt in CI, only the identities and the manifest are re-read |
+
+The section is appended at the end on purpose: several documents quote §7.1 and §7.3 by line number, and
+inserting anything above them would move every one of those pointers.
