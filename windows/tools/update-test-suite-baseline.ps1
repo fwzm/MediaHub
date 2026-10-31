@@ -29,6 +29,12 @@
 #              marker, per method with at least one. Diagnostic only: the tail of
 #              a truncated value cannot be recovered from a TRX, so the gate warns
 #              when this set changes instead of accusing a change it cannot prove.
+#   outcomes : the outcome split the run's own ResultSummary/Counters reported, per
+#              suite, TRX outcome names only and only the non-zero buckets. The gate
+#              counts the per-row outcomes and refuses a file whose rows disagree
+#              with its own summary; an outcome kind the file did not have, or a
+#              baseline outcome that fell, is a removal here and needs -AcceptRemoval
+#              (growth stays the documented warning path).
 #   expected_suites: how many entries the file must keep. The file is what names
 #              the suites to check, so a suite entry deleted by hand would stop
 #              being checked and every case it reported would stop being counted
@@ -78,6 +84,9 @@ $comment = @(
   "  a method that carries argument text in its display name also pins those rows: equal totals,",
   "  class counts, method lists and case counts are red when one row's values were replaced, even",
   "  when a new row was added in the same edit. Rows are stored sorted, duplicates kept.",
+  "  the outcome split of the run's own summary is pinned per suite; the gate counts the per-row",
+  "  outcomes too, so a file whose rows disagree with its own Counters is red, and a row moving",
+  "  from Passed to any other outcome kind is red even though every count above stays equal.",
   "Why not just raise a hard-coded floor: that only moves the same rot to the next person.",
   "A committed baseline shows up in review as a diff and can be git-blamed.",
   "Refresh (never to turn a red gate green): windows/tools/update-test-suite-baseline.ps1",
@@ -95,6 +104,15 @@ $comment = @(
 # written through [char] so this file stays pure ASCII. Kept identical to the
 # constant in check-test-suite-baseline.ps1.
 $TruncationMarker = [string][char]0x00B7 + [string][char]0x00B7 + [string][char]0x00B7
+
+# TRX outcome names and the ResultSummary/Counters attribute each one is summarised
+# in. Kept identical to the vocabulary in check-test-suite-baseline.ps1.
+$OutcomeVocabulary = @{}
+$OutcomeByAttribute = @{}
+foreach ($outcome in @('Passed', 'Failed', 'NotExecuted', 'Error', 'Timeout', 'Aborted', 'Inconclusive', 'PassedButRunAborted', 'NotRunnable', 'Disconnected', 'Warning', 'Completed', 'InProgress', 'Pending')) {
+  $OutcomeVocabulary[$outcome] = $true
+  $OutcomeByAttribute[($outcome.Substring(0, 1).ToLower() + $outcome.Substring(1))] = $outcome
+}
 
 function Sort-Rows {
   param([string[]]$Rows)
@@ -131,6 +149,19 @@ function Read-Suite([string]$Path) {
   $xml = [xml](Get-Content -LiteralPath $Path -Raw)
   if (-not $xml.TestRun.ResultSummary.Counters) { throw "$Path has no ResultSummary/Counters" }
   $total = [int]$xml.TestRun.ResultSummary.Counters.total
+  $outcomes = @{}
+  foreach ($cp in @($xml.TestRun.ResultSummary.Counters.PSObject.Properties)) {
+    $cn = [string]$cp.Name
+    if ($cn -eq 'total' -or $cn -eq 'executed') { continue }
+    $cv = 0
+    if (-not [int]::TryParse([string]$cp.Value, [ref]$cv)) { continue }
+    if ($cv -le 0) { continue }
+    $name = $OutcomeByAttribute[$cn]
+    if ($null -eq $name) {
+      throw "$Path : the run reports outcome bucket $cn, which this tool does not know - teach it the name before trusting the outcome layer"
+    }
+    $outcomes[$name] = $cv
+  }
   $idToClass = @{}
   $methods = @{}
   $rowArgs = @{}
@@ -207,7 +238,7 @@ function Read-Suite([string]$Path) {
   }
   $assembly = ""
   if ($assemblies.Count -eq 1) { $assembly = $assemblies[0] }
-  return @{ total = $total; classes = $classes; methods = $methods; data = $data; truncated = $truncated; assembly = $assembly }
+  return @{ total = $total; classes = $classes; methods = $methods; data = $data; truncated = $truncated; outcomes = $outcomes; assembly = $assembly }
 }
 
 # Only used to read the file being refreshed. Older entries stored method names as
@@ -326,6 +357,18 @@ foreach ($e in $baseline.suites) {
     if ($ext.Count -gt 0) { $note = "argument row(s) changed" }
     $removed += "$k (${note}: $($shownMiss -join ' | '))"
   }
+  if ($null -ne $e.outcomes) {
+    $oldOutcomes = @{}
+    foreach ($op in @($e.outcomes.PSObject.Properties)) { $oldOutcomes[[string]$op.Name] = [int]$op.Value }
+    foreach ($ok in @($oldOutcomes.Keys | Sort-Object)) {
+      $now = 0
+      if ($read.outcomes.ContainsKey($ok)) { $now = [int]$read.outcomes[$ok] }
+      if ($now -lt $oldOutcomes[$ok]) { $removed += "$ok (outcome rows $($oldOutcomes[$ok]) -> $now)" }
+    }
+    foreach ($ok in @($read.outcomes.Keys | Sort-Object)) {
+      if (-not $oldOutcomes.ContainsKey($ok)) { $removed += "$ok (new outcome kind, $($read.outcomes[$ok]) row(s))" }
+    }
+  }
   if ([int]$e.expected -gt $read.total) { $removed += "total ($($e.expected) -> $($read.total))" }
   if ($removed.Count -gt 0 -and -not $AcceptRemoval) {
     $shrunk += "$($e.suite): " + ($removed -join ", ")
@@ -336,7 +379,7 @@ foreach ($e in $baseline.suites) {
     foreach ($m in $read.methods[$name].Keys) { $inner[$m] = [int]$read.methods[$name][$m] }
     $entryMethods[$name] = $inner
   }
-  $entries += @{ file = [string]$e.file; suite = [string]$e.suite; expected = $read.total; classes = $read.classes; methods = $entryMethods; data = $read.data; truncated = $read.truncated }
+  $entries += @{ file = [string]$e.file; suite = [string]$e.suite; expected = $read.total; classes = $read.classes; methods = $entryMethods; data = $read.data; truncated = $read.truncated; outcomes = $read.outcomes }
 }
 $knownFiles = @($entries | ForEach-Object { [string]$_.file })
 if (Test-Path -LiteralPath $ResultsDir) {
@@ -345,7 +388,7 @@ if (Test-Path -LiteralPath $ResultsDir) {
     $read = Read-Suite -Path (Join-Path -Path $ResultsDir -ChildPath $f)
     $suiteName = [string]$read.assembly
     if ([string]::IsNullOrWhiteSpace($suiteName)) { throw "cannot name the suite in $f - the results do not record which test assembly produced them; add the entry by hand" }
-    $entries += @{ file = $f; suite = $suiteName; expected = $read.total; classes = $read.classes; methods = $read.methods; data = $read.data; truncated = $read.truncated }
+    $entries += @{ file = $f; suite = $suiteName; expected = $read.total; classes = $read.classes; methods = $read.methods; data = $read.data; truncated = $read.truncated; outcomes = $read.outcomes }
     $added += "$suiteName ($f)"
   }
 }
@@ -415,6 +458,14 @@ for ($i = 0; $i -lt $entries.Count; $i++) {
     if ($j -eq $tkeys.Count - 1) { $comma = "" }
     [void]$text.Append("        " + (Json-String $tkeys[$j]) + ": " + [int]$entry.truncated[$tkeys[$j]] + $comma + $nl)
   }
+  [void]$text.Append("      }," + $nl)
+  [void]$text.Append("      " + $q + "outcomes" + $q + ": {" + $nl)
+  $okeys = @($entry.outcomes.Keys | Sort-Object)
+  for ($j = 0; $j -lt $okeys.Count; $j++) {
+    $comma = [string][char]44
+    if ($j -eq $okeys.Count - 1) { $comma = "" }
+    [void]$text.Append("        " + (Json-String $okeys[$j]) + ": " + [int]$entry.outcomes[$okeys[$j]] + $comma + $nl)
+  }
   [void]$text.Append("      }" + $nl)
   [void]$text.Append("    }")
   if ($i -lt $entries.Count - 1) { [void]$text.Append(",") }
@@ -443,5 +494,5 @@ foreach ($entry in $entries) {
   foreach ($dk in $entry.data.Keys) { $rowCount += @($entry.data[$dk]).Count }
   $truncCount = 0
   foreach ($tk in $entry.truncated.Keys) { $truncCount += [int]$entry.truncated[$tk] }
-  "$($entry.suite): total=$($entry.expected) classes=$(@($entry.classes.Keys).Count) methods=$methodCount cases=$caseCount data=$(@($entry.data.Keys).Count) argumentRows=$rowCount truncated=$truncCount"
+  "$($entry.suite): total=$($entry.expected) classes=$(@($entry.classes.Keys).Count) methods=$methodCount cases=$caseCount data=$(@($entry.data.Keys).Count) argumentRows=$rowCount truncated=$truncCount outcomes=$(@($entry.outcomes.Keys).Count)"
 }

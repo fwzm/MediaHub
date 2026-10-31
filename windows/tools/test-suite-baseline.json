@@ -14,6 +14,9 @@
     "  a method that carries argument text in its display name also pins those rows: equal totals,",
     "  class counts, method lists and case counts are red when one row's values were replaced, even",
     "  when a new row was added in the same edit. Rows are stored sorted, duplicates kept.",
+    "  the outcome split of the run's own summary is pinned per suite; the gate counts the per-row",
+    "  outcomes too, so a file whose rows disagree with its own Counters is red, and a row moving",
+    "  from Passed to any other outcome kind is red even though every count above stays equal.",
     "Why not just raise a hard-coded floor: that only moves the same rot to the next person.",
     "A committed baseline shows up in review as a diff and can be git-blamed.",
     "Refresh (never to turn a red gate green): windows/tools/update-test-suite-baseline.ps1",
@@ -2630,6 +2633,9 @@
         "MediaHub.Tests.ServerUrlNormalizerSecurityTests.Query_and_fragment_are_refused_without_echoing_them": 1,
         "MediaHub.Tests.SourceSyncBaselineCodecTests.Deserialize_RejectsUnusableDocuments": 1,
         "MediaHub.Tests.SyncCliTests.Parse_RejectsMalformedCommandLinesWithStableCodes": 1
+      },
+      "outcomes": {
+        "Passed": 1952
       }
     },
     {
@@ -2768,6 +2774,9 @@
         ]
       },
       "truncated": {
+      },
+      "outcomes": {
+        "Passed": 104
       }
     }
   ]

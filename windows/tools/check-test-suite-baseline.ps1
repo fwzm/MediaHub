@@ -60,6 +60,18 @@
 #   does not list, and each entry's declared suite name is compared with the test
 #   assembly recorded inside its own results file.
 #
+#   Every count above is still read from the run's own ResultSummary/Counters, and
+#   the per-row outcomes are never counted. A results file whose rows disagree with
+#   its own summary - a hand-merged, patched or truncated artifact - therefore
+#   passes as long as the summary numbers look clean, and an outcome kind the
+#   summary does not name at all (Aborted / Inconclusive / Timeout / Error / ...) is
+#   invisible. Each entry now also pins the outcome split
+#   ("outcomes": { "<Outcome>": count }), the run counts the per-row outcomes and
+#   refuses a file that disagrees with its own Counters (total included), and an
+#   outcome kind the baseline did not have, or a baseline outcome that fell, is
+#   red: a row moving from Passed to Aborted keeps the total, every class, every
+#   method case count and every argument row identical.
+#
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -79,6 +91,10 @@
 #     (a new suite has to stay visible before it can be gated)
 #   a declared suite name that disagrees with the test assembly recorded in its
 #     own results file -> red (the entry is wired to another suite's results)
+#   per-row outcomes disagree with the run's own Counters -> red
+#     (the summary is not trusted on its own; the rows are counted, total included)
+#   an outcome kind the baseline did not have appears, or a baseline outcome
+#     reports fewer rows -> red; an outcome reporting more rows -> green + warning
 #   failed != 0 or notExecuted != 0 -> red
 #
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
@@ -92,8 +108,11 @@
 #   2026-10-31 digest format, a truncated table that is not an object, a
 #   truncated key that names no method of the data table, a truncated count
 #   below 1, a missing expected_suites, an expected_suites that disagrees with
-#   the number of entries, and two entries reading the same results file all
-#   throw. Otherwise the gate would be vacuous and un-failable.
+#   the number of entries, two entries reading the same results file, a baseline
+#   with no outcomes table, an empty outcomes table, an outcome name outside the
+#   TRX vocabulary, an outcome count below 1, and an outcome table that does not
+#   add up to the suite's expected total all throw. Otherwise the gate would be
+#   vacuous and un-failable.
 #
 # ASCII ONLY on purpose: Windows PowerShell 5.1 decodes BOM-less UTF-8 as ANSI
 # and corrupts non-ASCII text, which then breaks ConvertFrom-Json parsing.
@@ -118,6 +137,16 @@ function Test-MethodCaseMap($node) {
 # written through [char] so this file stays pure ASCII. Kept identical to the
 # constant in update-test-suite-baseline.ps1.
 $TruncationMarker = [string][char]0x00B7 + [string][char]0x00B7 + [string][char]0x00B7
+
+# TRX outcome names and the ResultSummary/Counters attribute each one is summarised
+# in (the attribute is the same name with a lower-cased first letter). Kept
+# identical to the vocabulary in update-test-suite-baseline.ps1.
+$OutcomeVocabulary = @{}
+$OutcomeByAttribute = @{}
+foreach ($outcome in @('Passed', 'Failed', 'NotExecuted', 'Error', 'Timeout', 'Aborted', 'Inconclusive', 'PassedButRunAborted', 'NotRunnable', 'Disconnected', 'Warning', 'Completed', 'InProgress', 'Pending')) {
+  $OutcomeVocabulary[$outcome] = $true
+  $OutcomeByAttribute[($outcome.Substring(0, 1).ToLower() + $outcome.Substring(1))] = $outcome
+}
 
 # Sorted copy of one method's argument rows, duplicates kept. A row is the
 # display-name suffix from the first "(", i.e. the argument text of one
@@ -293,6 +322,32 @@ foreach ($e in $baseline.suites) {
       }
     }
   }
+  if ($null -eq $e.outcomes) {
+    throw "$BaselinePath : entry for $($e.suite) has no outcomes table - the per-outcome check would be vacuous. Refresh it with windows/tools/update-test-suite-baseline.ps1"
+  }
+  $outcomeProps = @($e.outcomes.PSObject.Properties)
+  if ($outcomeProps.Count -eq 0) {
+    throw "$BaselinePath : entry for $($e.suite) has an empty outcomes table - the per-outcome check would be vacuous"
+  }
+  $outcomeSum = 0
+  foreach ($op in $outcomeProps) {
+    $ok = [string]$op.Name
+    if ([string]::IsNullOrWhiteSpace($ok)) { throw "$BaselinePath : entry for $($e.suite) has a blank outcome name" }
+    if (-not $OutcomeVocabulary.ContainsKey($ok)) {
+      throw "$BaselinePath : entry for $($e.suite) records outcome $ok, which is not an outcome name this gate knows"
+    }
+    $on = 0
+    if (-not [int]::TryParse([string]$op.Value, [ref]$on)) {
+      throw "$BaselinePath : entry for $($e.suite) records a non-integer outcome count for $ok"
+    }
+    if ($on -lt 1) {
+      throw "$BaselinePath : entry for $($e.suite) records $on row(s) for outcome $ok - record only outcomes with at least one row"
+    }
+    $outcomeSum += $on
+  }
+  if ($outcomeSum -ne [int]$e.expected) {
+    throw "$BaselinePath : entry for $($e.suite) outcome table adds up to $outcomeSum but expected is $($e.expected) - every result row carries exactly one outcome"
+  }
 }
 
 $all = 0
@@ -301,6 +356,7 @@ $grown = @()
 $newMethods = @()
 $newData = @()
 $truncWarn = @()
+$outcomeGrew = @()
 $suiteIdentity = @()
 $provenanceWarn = @()
 $auditFiles = @()
@@ -418,6 +474,7 @@ foreach ($e in $baseline.suites) {
   }
 
   $actual = @{}
+  $actualOutcomes = @{}
   $unmapped = 0
   foreach ($res in @($xml.TestRun.Results.UnitTestResult)) {
     if ($null -eq $res) { continue }
@@ -425,9 +482,47 @@ foreach ($e in $baseline.suites) {
     if ($idToClass.ContainsKey([string]$res.testId)) { $cls = $idToClass[[string]$res.testId] }
     if ([string]::IsNullOrWhiteSpace($cls)) { $unmapped++; continue }
     if ($actual.ContainsKey($cls)) { $actual[$cls] = $actual[$cls] + 1 } else { $actual[$cls] = 1 }
+    $oc = [string]$res.outcome
+    if ([string]::IsNullOrWhiteSpace($oc)) { $oc = "(missing)" }
+    if ($actualOutcomes.ContainsKey($oc)) { $actualOutcomes[$oc] = $actualOutcomes[$oc] + 1 } else { $actualOutcomes[$oc] = 1 }
   }
   if ($unmapped -gt 0) {
     throw "$($e.suite): $unmapped result(s) in $($e.file) have no TestMethod.className - the per-class check cannot be trusted"
+  }
+
+  # The summary is not trusted on its own: every result row carries exactly one
+  # outcome, so the rows must reproduce every Counters bucket. A file whose rows
+  # disagree with its own summary (hand-merged, patched, truncated) would
+  # otherwise pass on the summary numbers alone.
+  $counterOutcomes = @{}
+  foreach ($cp in @($xml.TestRun.ResultSummary.Counters.PSObject.Properties)) {
+    $cn = [string]$cp.Name
+    if ($cn -eq 'total' -or $cn -eq 'executed') { continue }
+    $cv = 0
+    if (-not [int]::TryParse([string]$cp.Value, [ref]$cv)) { continue }
+    if ($cv -gt 0) { $counterOutcomes[$cn] = $cv }
+  }
+  $observedOutcomes = @{}
+  $rowTotal = 0
+  foreach ($oc in @($actualOutcomes.Keys)) {
+    $name = [string]$oc
+    $attribute = $name.Substring(0, 1).ToLower() + $name.Substring(1)
+    $observedOutcomes[$attribute] = [int]$actualOutcomes[$oc]
+    $rowTotal += [int]$actualOutcomes[$oc]
+  }
+  $counterMismatch = @()
+  if ($rowTotal -ne $total) { $counterMismatch += "rows=$rowTotal vs Counters.total=$total" }
+  foreach ($an in @($observedOutcomes.Keys | Sort-Object)) {
+    $cv = 0
+    if ($counterOutcomes.ContainsKey($an)) { $cv = [int]$counterOutcomes[$an] }
+    if ($cv -ne [int]$observedOutcomes[$an]) { $counterMismatch += "$an rows=$($observedOutcomes[$an]) vs Counters.$an=$cv" }
+  }
+  foreach ($an in @($counterOutcomes.Keys | Sort-Object)) {
+    if ($observedOutcomes.ContainsKey($an)) { continue }
+    $counterMismatch += "$an rows=0 vs Counters.$an=$($counterOutcomes[$an])"
+  }
+  if ($counterMismatch.Count -gt 0) {
+    throw "$($e.suite): $($e.file) disagrees with its own ResultSummary/Counters - the per-outcome rows do not reproduce the summary (total $total): $($counterMismatch -join '; '). The summary alone cannot be trusted; if the artifact came from another runner, teach the gate that vocabulary before trusting it."
   }
 
   $actualMethodCount = 0
@@ -459,6 +554,7 @@ foreach ($e in $baseline.suites) {
     foreach ($tkey in @($e.truncated.PSObject.Properties.Name)) { $baselineTruncTotal += [int]$e.truncated.$tkey }
     "$($e.suite): argumentTruncated=$actualTruncTotal baseline=argument truncated table $baselineTruncTotal rows"
   }
+  "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
   if ($skipped -ne 0) { throw "$($e.suite): $skipped test(s) were not executed" }
@@ -567,6 +663,39 @@ foreach ($e in $baseline.suites) {
     }
   }
 
+  # Outcome kinds. Correct totals and correct per-row counts do not say the same
+  # rows PASSED: a row moving from Passed to Aborted (or to any other kind) keeps
+  # the total, every class count, the method set, every per-method case count and
+  # every argument row identical. A baseline outcome that fell, or an outcome kind
+  # the baseline did not have, is red; growth is the documented warning path.
+  $outcomeLost = @()
+  foreach ($ok in @($e.outcomes.PSObject.Properties.Name | Sort-Object)) {
+    $before = [int]$e.outcomes.$ok
+    $attribute = $ok.Substring(0, 1).ToLower() + $ok.Substring(1)
+    $now = 0
+    if ($observedOutcomes.ContainsKey($attribute)) { $now = [int]$observedOutcomes[$attribute] }
+    if ($now -lt $before) { $outcomeLost += "$ok ($before -> $now rows)" }
+  }
+  foreach ($an in @($observedOutcomes.Keys | Sort-Object)) {
+    $kind = $OutcomeByAttribute[$an]
+    if ($null -eq $kind) { $kind = [string]$an + " (outside the TRX vocabulary)" }
+    if (-not (@($e.outcomes.PSObject.Properties.Name) -contains $kind)) {
+      $outcomeLost += "$kind (baseline 0, now $($observedOutcomes[$an]) row(s))"
+    }
+  }
+  if ($outcomeLost.Count -gt 0) {
+    throw "$($e.suite): test outcome kinds changed while the total was $total (baseline $($e.expected)) - equal totals, equal per-class counts, an unchanged method list, unchanged per-method case counts and unchanged argument rows do not prove the same rows passed. changed: $($outcomeLost -join ', '). If the change was intentional, refresh the baseline in windows/tools/test-suite-baseline.json in the same commit."
+  }
+  foreach ($an in @($observedOutcomes.Keys | Sort-Object)) {
+    $kind = $OutcomeByAttribute[$an]
+    if ($null -eq $kind) { continue }
+    if (@($e.outcomes.PSObject.Properties.Name) -contains $kind) {
+      if ([int]$observedOutcomes[$an] -gt [int]$e.outcomes.$kind) {
+        $outcomeGrew += "$($e.suite):$kind (+$([int]$observedOutcomes[$an] - [int]$e.outcomes.$kind) rows)"
+      }
+    }
+  }
+
   foreach ($name in @($actual.Keys | Sort-Object)) {
     if (-not (@($e.classes.PSObject.Properties.Name) -contains $name)) {
       $grown += "$($e.suite):$name (+$($actual[$name]), new class)"
@@ -648,5 +777,10 @@ if ($truncWarn.Count -gt 0) {
     $shown = $shown[0..11] + "... ($($truncWarn.Count - 12) more)"
   }
   Write-Host "::warning::argument rows the runner truncated changed - the text past the marker is not pinned, so a difference there cannot be seen (refresh the truncated table with windows/tools/update-test-suite-baseline.ps1): $($shown -join '; ')"
+}
+if ($outcomeGrew.Count -gt 0) {
+  $shown = $outcomeGrew
+  if ($shown.Count -gt 12) { $shown = $shown[0..11] + "... ($($outcomeGrew.Count - 12) more)" }
+  Write-Host "::warning::new outcome rows - refresh windows/tools/test-suite-baseline.json (see windows/tools/update-test-suite-baseline.ps1): $($shown -join '; ')"
 }
 "combined tests=$all"
