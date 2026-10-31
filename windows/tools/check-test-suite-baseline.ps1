@@ -59,6 +59,14 @@
 #   enumerates the *.trx files it produced and warns about the ones the baseline
 #   does not list, and each entry's declared suite name is compared with the test
 #   assembly recorded inside its own results file.
+
+#
+#   One more level, across files rather than inside one: every count above is read
+#   from ONE results file at a time, and the baseline names which file each suite
+#   reads. A file copied over another suite's name - or one run exported twice into
+#   two names - still looks clean file by file, so the run now also refuses a
+#   results set whose files share a TestRun id or an execution id, and prints
+#   file identities=/distinct run ids=/cross-file duplicate execution ids=.
 #
 #   Every count above is still read from the run's own ResultSummary/Counters, and
 #   the per-row outcomes are never counted. A results file whose rows disagree with
@@ -113,6 +121,10 @@
 #     from another row can keep all of them identical.
 #   a duration that disagrees with the row's own start/end by more than a second,
 #     or a run whose <Times> window records no usable start/finish -> warning.
+#   failed != 0 or notExecuted != 0 -> red
+#   two results files that share a TestRun id or an execution id -> red
+#     (one suite's file copied over another name doubles the reported run)
+#   a TestRun id that is not GUID-shaped -> warning
 #   failed != 0 or notExecuted != 0 -> red
 #
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
@@ -404,6 +416,11 @@ $suiteIdentity = @()
 $provenanceWarn = @()
 $auditFiles = @()
 $durWarn = @()
+
+$runIdByFile = @{}
+$fileOfExecution = @{}
+$runIdWarn = @()
+$fileIdentityLost = @()
 foreach ($e in $baseline.suites) {
   $path = Join-Path -Path $ResultsDir -ChildPath $e.file
   if (-not (Test-Path -LiteralPath $path)) {
@@ -417,6 +434,19 @@ foreach ($e in $baseline.suites) {
   $failed = [int]$xml.TestRun.ResultSummary.Counters.failed
   $skipped = [int]$xml.TestRun.ResultSummary.Counters.notExecuted
   $auditFiles += [string]$e.file
+
+  # The run's own identity. Each results file must name the run that produced it,
+  # and two files must not claim the same run or the same execution ids: copying one
+  # suite's TRX over another name (or exporting one run twice) doubles the cases the
+  # gate counts while every per-file number above stays exactly as the baseline
+  # reviewed it, so nothing else here would notice.
+  $runId = [string]$xml.TestRun.id
+  $runIdByFile[[string]$e.file] = $runId
+  if ([string]::IsNullOrWhiteSpace($runId)) {
+    $fileIdentityLost += "$($e.file) names no TestRun id"
+  } elseif ($runId -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
+    $runIdWarn += "$($e.file) run id '$runId' is not a GUID"
+  }
 
   # The run says when it started and finished; a row outside that window was not
   # produced by this run. A TRX that records no usable window can only be
@@ -631,6 +661,11 @@ foreach ($e in $baseline.suites) {
       $execIdCounts[$eid] = [int]$execIdCounts[$eid] + 1
     } else {
       $execIdCounts[$eid] = 1
+    }
+    if (-not [string]::IsNullOrWhiteSpace($eid)) {
+      $execFile = [string]$e.file
+      if (-not $fileOfExecution.ContainsKey($eid)) { $fileOfExecution[$eid] = New-Object System.Collections.Generic.List[string] }
+      if (-not $fileOfExecution[$eid].Contains($execFile)) { $fileOfExecution[$eid].Add($execFile) }
     }
     foreach ($ak in @('testType', 'testListId', 'computerName')) {
       $av = [string]$res.$ak
@@ -1118,5 +1153,36 @@ if ($durWarn.Count -gt 0) {
   $shown = $durWarn
   if ($shown.Count -gt 12) { $shown = $shown[0..11] + "... ($($durWarn.Count - 12) more)" }
   Write-Host "::warning::row times are not fully pinned - the recorded duration or the run's own Times window could not be checked: $($shown -join '; ')"
+}
+# Cross-file identity. Every number above is read from one results file at a time,
+# so two files can describe the same run (or one file can be copied over another
+# suite's name) and every per-file count stays exactly what the baseline reviewed.
+$runSeen = @{}
+foreach ($rk in @($runIdByFile.Keys | Sort-Object)) {
+  $rv = [string]$runIdByFile[$rk]
+  if ([string]::IsNullOrWhiteSpace($rv)) { continue }
+  if ($runSeen.ContainsKey($rv)) {
+    if ($fileIdentityLost.Count -lt 12) { $fileIdentityLost += "run id $rv is claimed by both $($runSeen[$rv]) and $rk" }
+  } else {
+    $runSeen[$rv] = $rk
+  }
+}
+$dupExec = @()
+foreach ($xk in @($fileOfExecution.Keys | Sort-Object)) {
+  if ([int]$fileOfExecution[$xk].Count -gt 1) { $dupExec += $xk }
+}
+foreach ($xk in @($dupExec | Select-Object -First 12)) {
+  if ($fileIdentityLost.Count -lt 12) { $fileIdentityLost += "execution id $xk appears in more than one results file ($([string]::Join(', ', @($fileOfExecution[$xk]))))" }
+}
+"file identities=$($runIdByFile.Count) distinct run ids=$($runSeen.Count) cross-file duplicate execution ids=$($dupExec.Count)"
+if ($runIdWarn.Count -gt 0) {
+  $shownRunId = $runIdWarn
+  if ($shownRunId.Count -gt 12) { $shownRunId = $shownRunId[0..11] + "... ($($runIdWarn.Count - 12) more)" }
+  Write-Host "::warning::a run id is not a GUID - the file may have been patched by hand: $($shownRunId -join '; ')"
+}
+if ($fileIdentityLost.Count -gt 0) {
+  $shownFileIdentity = $fileIdentityLost
+  if ($shownFileIdentity.Count -gt 12) { $shownFileIdentity = $shownFileIdentity[0..11] + "... ($($fileIdentityLost.Count - 12) more)" }
+  throw "the results files do not describe distinct test runs - every count above is read from one file at a time, so a file copied over another suite's name, or one run exported twice, doubles what this gate reports while each file still looks exactly like the baseline reviewed it. mismatched: $($shownFileIdentity -join '; ') . A results set whose files share a run id or an execution id was copied or exported twice; regenerate each file from its own test run."
 }
 "combined tests=$all"
