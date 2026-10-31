@@ -370,3 +370,43 @@
 - run-id `w6-r23-m7q2v5`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `3674ce3d20f222dce6be9329407a62e4`）、`ref:origin/feature/cross-device-source-sync`（`f804d7b44743038b383ccce8fba53b97`）、`worktree:D:/mh-w6`（`052a004442f93f8211b32fb4d7c52d2a`）；收尾释放。
 
 - docs head 的 exact-head CI（EXECUTED）：`bd9b4eeb9d55300db275d05e8d73b0f448654aeb` 的 windows-ci **`41224387649` = completed/failure**（日志 `D:/mh-verify/r23/ci-docshead.txt.log`，111,704 B）：测试门禁步骤全绿且台阶行与代码 head 逐字一致（含 `displayNames=1952 declared prefixes=1952 mismatched=0`、`displayNames=104 declared prefixes=104 mismatched=0`、`combined tests=2056`）；licence `checks=49 failed=1`，唯一红仍为上游 `log-file-claims`（`W6-113u`），且 `lgpl-build-record-claims` 明确 **PASS**（「the LGPL build record still matches windows/engine/lgpl/ …」）⇒ 本轮判定标准在代码 head 与 docs head 两处均成立。
+
+## 2026-11-01 02:1x round 24（W6-113af：套件基线第十五层口径 —— Counters 块必须满足自身的属性契约与算术恒等式）
+
+### 侦察（EXECUTED）
+- goal `goal-d6aa099f-2e87-405d-9199-3c461ab839cc` revision 6 / maxGoalRounds 256 / armed；W6 树 `D:/mh-w6` head `f8677df2`、`git status --porcelain` 空、与 origin 0/0；远端 `feature/cross-device-source-sync` = `f8677df2`；base `feature/windows-client` = `34bd11cd`；锁表空；仅 lead。
+- queue 35 tasks：未阻塞切片为空（`W6-P1-E2E` BLOCKED、`REL-SIGN` SIGNING_BLOCKED、`REL-LGPL` RELEASE_BLOCKED、`W6-113g` WAITING_FOR_APPROVAL、`W6-113u` BLOCKED）。
+
+### 缺口（本轮切片动机）
+- 前十四层读的是 `UnitTest`/`UnitTestResult` 行、`TestEntries`/`TestLists` 节与 `ResultSummary/Counters` 的**数值**（`total`/`failed`/`notExecuted` 用 `[int]` 直读），而 **Counters 块自身的属性契约从未被核对**：块里有没有这五个属性、值是否是非负整数、`total` 与 `executed + notExecuted` 是否相等，都不在被读之列。
+- 实测依据（EXECUTED，真实 TRX × 未读桶用例）：同一份 TRX 把 `executed` 增删、把 `notExecuted` 写成空白、追加未知桶、把未被读取的桶写成不可解析或负数 —— 旧闸门（round 23 版）一律 PASS，因为这些值要么被 `continue` 掉、要么根本不进 `counterOutcomes`。
+- 旧闸门对照语义（判「恰好 1 红」的依据）：`check-test-suite-baseline.ps1`（round 23 版）L460-462 `$total/$failed/$skipped = [int]$xml.TestRun.ResultSummary.Counters.X`（不可解析即抛 Cast 异常，是 exit 1 而不是「绿」）；L1034-1040 `$counterOutcomes` **跳过 `total`/`executed`**、跳过 TryParse 失败者、跳过 `<= 0` 者；L1052-1059 只按「观察到行」与 `counterOutcomes` 键双向比对；L1102-1103 只 `throw` 当 `failed` 或 `skipped` 非零。
+
+### 修法（只改 `windows/tools/check-test-suite-baseline.ps1`；基线零变化、update 脚本未改 ⇒ 无迁移）
+- 五处插入：① 头注释追加一条（第十五层说明与台阶行格式 `counters=/attributes required=/missing=/malformed=/identity=`）；② 跨套件累加器区新增 `$counterVocabularyWarn = @()`（与 `$fileIdentityLost`/`$runIdWarn` 同区，**不得**放在 per-suite 循环内）；③ 每套件在「The summary is not trusted on its own」之前读 `Counters.Attributes` 建 `$counterAttributes`，校验五个必读属性存在且非空白（`$missingCounters`）、每个记录属性是非负整数（`$malformedCounters`，否则记 `ack='raw'`）、`total == executed + notExecuted` 与 `passed + failed <= executed`（`$counterArithmetic`）；④ 三者任一非空即 `throw`（文案含 `records a Counters block that contradicts itself while the total was $total` 与 `broken: missing [...] / malformed [...] / arithmetic [...]`）；⑤ 台阶行 `"$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"`（脚本 L1100）。
+- 未知属性（不在 `$OutcomeByAttribute`、也非 `total`/`executed`，且值为合法非负整数）只发 warning `records the Counters attribute '<name>', which this gate does not know`，**不 RED** —— 目的是「不认识就说不认识」，不是「不认识就红」。
+- 台阶行实测（真实语料，两代 shell 逐字相同）：`MediaHub.Tests: counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted`、`MediaHub.WebDav.Tests: counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted`。
+
+### 负向对照（76 例，EXECUTED）
+- 台账 `D:/mh-verify/r24/run-nc.cjs`（31,268 B，`node --check` 通过），每例在 pwsh 7 与 Windows PowerShell 5.1 各跑一次并要求判定一致。
+- **首轮 67/76（9 红全部是台账/夹具问题、非实现缺陷）**：① 7 例 `F*x` 因 `D:/mh-verify/r24/old-check-r20.ps1` 未随目录派生而缺失（已从 r23 目录复制）；② `Q2` 的 needle 写成 `…=7\]`，而 throw 里 arithmetic 列表以 `; ` 连接下一条，闭括号并不紧跟 `7`；③ `Q4` 原写 `failed='abc'` 不成立 —— 旧闸门 L461 的 `[int]` 转换直接抛错（exit 1），不是「旧闸门绿」，改打 `executed='abc'`（旧闸门在 L1037 明确 `continue` 掉 `executed`）。
+- **复跑 76/76 pass、fail=0、EXIT=0**（日志 `D:/mh-verify/r24/nc2.log`）。
+- 核心成对例（新闸门 RED / round 23 闸门 GREEN）：`Q2` `executed=7` → `arithmetic total=8 vs executed+notExecuted=7`；`Q3` 删 `notExecuted` → `missing`；`Q4` `executed='abc'` → `malformed`；`Q5` 未知桶 `pending='x'` → `malformed`；`Q6` `notExecuted=''` → `missing`；`Q7` 删 `executed` → `missing`；`Q8` `completed='-1'` → `malformed`。`Q9` 未知属性 `flaky='0'` = PASS + warning（`does not know`）。两代都红：`Q10` 删 `total`、`Q11` `passed='abc'`、`Q12` `passed=8 failed=1`（`passed+failed > executed`）。
+
+### 实现过程事故（可复用教训）
+- `$counterVocabularyWarn = @()` 首次被插在 **per-suite 循环内**（紧邻 `$displayNameLost = @()` 之后），末尾发射器只看到最后一个套件（WebDav）的空数组 ⇒ 未知属性 warning 永不发射、`Q9` 表面「绿」是假绿。修法：移到跨套件累加器区（`$fileIdentityLost = @()` 旁）。**教训：累加器的作用域必须与读取点同层 —— 发射器在循环外时，累加器就不能定义在循环内。**
+
+### 数据源与规模
+- 数据源：round 22/23 同源的 CI TRX（run `41095080796` @head `701bb547`，windows 2,719,155 B / webdav 145,266 B）。
+- `windows/tools/check-test-suite-baseline.ps1` 71,520 → **75,846 B**（sha256 前 16 `ee3da47a715fc4f6`，纯 ASCII，两代 shell PARSE-OK）；`test-suite-baseline.json` 164,452 B 与 `update-test-suite-baseline.ps1` 24,836 B 与 HEAD 逐字节相等。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 **`ca43be2da6669b49528c68e72af2f274385b1a38`**（`ci(windows): the suite baseline pins the Counters block to its own contract (W6-113af)`，1 file changed / +65）；快照 `D:/mh-verify/r24/check-new.snapshot.ps1` 逐字节还原（identical=true）后复验真实语料通过才提交；非 force push `f8677df2..ca43be2d`，远端 ref 同值，工作树干净。
+- head `ca43be2d` 的 windows-ci **`41228531695` = completed/failure**（`pull_request`；日志 `D:/mh-verify/r24/ci-codehead.txt.log`，112,466 B）：**测试门禁步骤全绿**并打印十五层台阶行，新增 **`MediaHub.Tests: counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted`**（18:18:09.799）与 **`MediaHub.WebDav.Tests: counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted`**（18:18:12.604）；其余台阶行未变（`displayNames=1952 declared prefixes=1952 mismatched=0`、`executionIds=1952 distinct declared ids=1952 paired rows=1952 paired result directories=1952`、`file identities=2 distinct run ids=2 cross-file duplicate execution ids=0`、`suites=2 baseline=suite table 2 suites`、`MediaHub.Tests: total=1952 baseline=1952 failed=0 notExecuted=0`、WebDav 104/104、`combined tests=2056`）⇒ 本轮判定标准成立。
+- licence 步骤 `check-licence-surface  checks=50 failed=1 warnings=0 skipped=0`：唯一红仍为上游 `log-file-claims`（`W6-113u`）；总检查数由 49 增至 50（上游新增守卫），`failed` 计数不变。
+- 同 head Android CI **`41228531617`** 取证时 in_progress；`ca43be2d` 与 `f8677df2` 的 `core`/`feature`/`app` 树哈希全同（`ff4eed826cbcf6e586d008701214b3581cd977ca` / `e983feb08237f8a4b85d69ba9492e9c35b7c1625` / `70c541457caefdf0eb50201eb3be2c01b3f9470e`）⇒ 按 ADR-AUTO-001 继承、不作独立结论。
+- PR #39：head `ca43be2d`、draft、正文（写前）约 179,916 B（余约 82 KB）。
+
+### 锁
+- run-id `w6-r24-b2n6j4`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `2daa6ab6f25fb78607bbf43ba700954e`）、`ref:origin/feature/cross-device-source-sync`（`a6f2093812e3cb0df7f3b81b9e736b22`）、`worktree:D:/mh-w6`（`31966f688d294ae987f279e2f6859192`）；收尾释放。
+

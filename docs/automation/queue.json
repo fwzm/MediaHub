@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-01T01:28:00+08:00",
-  "updated_by": "lead-W6-113-r23",
+  "updated_at": "2026-11-01T02:30:00+08:00",
+  "updated_by": "lead-W6-113-r24",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -678,6 +678,30 @@
       "notes": "该层只核对显示名的前缀构成，不核对参数文本内容（参数归第五层行清单）；runner 截断的显示名只核对到 Class.Method( 之前；className/name 空白的行不进构成核对。属于单次运行内不变量，不写基线。",
       "next_action": "下一层候选：TestRun/@name 与 run id 的配对、ResultSummary/@outcome 与 Counters 的关系、UnitTest/@storage 与程序集声明的配对；若再红先按「每个数字读自文件的哪一侧」归因，不要直接改共享守卫。",
       "closed_at": "2026-11-01T01:15:00+08:00"
+    },
+    {
+      "id": "W6-113af",
+      "title": "套件基线门禁第十五层：Counters 块必须满足自身的属性契约与算术恒等式（total == executed + notExecuted）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r24",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "commit ca43be2d (1 file changed / 65 insertions; check-test-suite-baseline.ps1 71,520 -> 75,846 B, sha256 16=ee3da47a715fc4f6, pure ASCII, both shells PARSE-OK)",
+        "negative controls 76/76 pass, fail=0 (pwsh 7 + Windows PowerShell 5.1 parity) - D:/mh-verify/r24/run-nc.cjs, log D:/mh-verify/r24/nc2.log",
+        "paired cases (new gate RED / round 23 gate PASS): Q2 executed=7 -> arithmetic total=8 vs executed+notExecuted=7; Q3 dropped notExecuted -> missing; Q4 executed='abc' -> malformed; Q5 pending='x' -> malformed; Q6 notExecuted='' -> missing; Q7 dropped executed -> missing; Q8 completed='-1' -> malformed",
+        "Q9 unknown attribute flaky='0' = PASS + warning \"does not know\"; Q10 (total dropped), Q11 (passed='abc'), Q12 (passed=8 failed=1) RED on both generations",
+        "first run 67/76: the nine reds were harness defects, not implementation defects - 7 F*x cases missed the derived old-check-r20.ps1 copy, Q2 needle failed because the arithmetic list is joined with \"; \", Q4 failed='abc' throws in the round-23 gate [int] cast (exit 1) so it is not an old-gate-green pair (switched to executed='abc', which the old gate skips at L1037)",
+        "implementation fix: $counterVocabularyWarn was first declared inside the per-suite loop so the cross-suite emitter only saw the last suite (WebDav) - moved next to $fileIdentityLost; the unknown-attribute warning now fires",
+        "no baseline change: test-suite-baseline.json (164,452 B) and update-test-suite-baseline.ps1 (24,836 B) byte-identical to HEAD - single-run invariant",
+        "exact-head windows-ci 41228531695 (@ca43be2d) = completed/failure with the test gate step green and both new ladder lines: counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted (18:18:09.799 and 18:18:12.604), combined tests=2056, MediaHub.Tests total=1952 baseline=1952 failed=0 notExecuted=0, WebDav 104/104",
+        "licence checks=50 failed=1: only the upstream log-file-claims (W6-113u) remains; the check count rose 49 -> 50 with no change in failed",
+        "Android CI 41228531617 in_progress at sampling; core/feature/app tree hashes unchanged from f8677df2 => ADR-AUTO-001 inheritance",
+        "docs: RUNLOG round 24 + TEST_MATRIX 6.20 appended (this commit)"
+      ],
+      "notes": "本层只校验 Counters 块自身的属性契约与两条算术恒等式（total == executed + notExecuted、passed + failed <= executed）；未知属性只 warning；属于单次运行内不变量，不写基线。",
+      "next_action": "下一层候选：TestRun/@name 与 run id 的配对、ResultSummary/@outcome 与 Counters 的关系、UnitTest/@storage 与程序集声明的配对；若再红先按「每个数字读自文件的哪一侧」归因，不要直接改共享守卫。",
+      "closed_at": "2026-11-01T02:30:00+08:00"
     }
   ]
 }

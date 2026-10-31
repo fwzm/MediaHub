@@ -1076,3 +1076,52 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 - 同 head Android CI `41223497614` 取证时 in_progress；`3511f2ab` 与 `e2409c23` 的 `core`/`feature`/`app` 树哈希全同（`ff4eed826cbc` / `e983feb08237` / `70c541457cae`）⇒ 按 ADR-AUTO-001 继承，不作独立结论。
 
 - docs head `bd9b4eeb9d55300db275d05e8d73b0f448654aeb` 的 windows-ci **`41224387649` = completed/failure**（日志 `D:/mh-verify/r23/ci-docshead.txt.log`，111,704 B）：台阶行与代码 head 逐字一致（含两套件 `displayNames=` 与 `combined tests=2056`）；licence `checks=49 failed=1` 唯一红为上游 `log-file-claims`（`W6-113u`），`lgpl-build-record-claims` 明确 PASS。
+
+## 6.20 第十五层口径：Counters 块必须满足自身的属性契约与算术恒等式（W6-113af，2026-11-01）
+
+### 口径（TRX 内部不变量，基线不加字段）
+
+| 项 | 内容 |
+| --- | --- |
+| 新增台阶行 | `counters=N attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted` |
+| 判定 | `ResultSummary/Counters` 必须含 `total`/`executed`/`passed`/`failed`/`notExecuted` 五个属性且值非空白；每个记录属性必须能解析为非负整数；`total == executed + notExecuted`；`passed + failed <= executed` |
+| 计数口径 | `counters` = 该文件 `Counters` 的属性总数；`missing`/`malformed` 为违规属性列表长度；算术违规与缺失/畸形并列进同一条 throw 文案（`missing [...] / malformed [...] / arithmetic [...]`） |
+| 违反 | 三者任一非空 → RED，消息点名套件与文件，并声明「本闸门读的每一个计数都来自这个块」 |
+| 未知属性 | 合法非负整数但闸门不认识（不在 `$OutcomeByAttribute` 且非 `total`/`executed`）⇒ 只发 warning `records the Counters attribute '<name>', which this gate does not know`，不 RED |
+| 基线影响 | 无字段新增、update 脚本未改 ⇒ 无迁移；`test-suite-baseline.json` 164,452 B 与 `update-test-suite-baseline.ps1` 24,836 B 与 HEAD 逐字节相等 |
+
+### 为什么前十四层看不见
+
+| 层 | 读的是 | 块自身被改写时 |
+| --- | --- | --- |
+| 第一至第四层 | `total`/`failed`/`notExecuted` 的 `[int]` 直读 + 类/方法/用例数 | 删 `executed`、改未知桶 → 全绿（不参与判定） |
+| 第五至第十四层 | 参数行清单、digest、outcome 桶、行属性、节结构、跨文件与执行身份、显示名构成 | `counterOutcomes` 跳过 `total`/`executed`、跳过不可解析与 `<=0`，故未知桶/畸形/负值全部不可见 |
+| **第十五层（本轮）** | Counters 块自身的属性契约与两条算术恒等式 | **RED** |
+
+### 依据（EXECUTED）
+
+- 真实 TRX 上把 `executed` 增删、`notExecuted` 置空白、追加未知桶、对未被读取的桶写不可解析或负值：旧闸门（round 23 版）一律 PASS；新闸门分别报 `arithmetic`/`missing`/`malformed`。
+- 旧闸门 L460-462 的 `[int]` 直读对不可解析值会直接抛异常（exit 1），因此「负向对照要打在 `executed` 这类**不被读取**的属性上」才构成「新红 / 旧绿」的成对证据。
+
+### 数据源与规模
+
+- 数据源：CI run `41095080796` @head `701bb547` 的 TRX（`windows-tests.trx` 2,719,155 B / `webdav-tests.trx` 145,266 B）。
+- `windows/tools/check-test-suite-baseline.ps1` 71,520 → 75,846 B（sha256 前 16 `ee3da47a715fc4f6`，纯 ASCII，两代 shell PARSE-OK），提交 `ca43be2da6669b49528c68e72af2f274385b1a38`（1 file / +65），非 force push `f8677df2..ca43be2d`。
+
+### 负向对照（76 例，EXECUTED）
+
+- 台账 `D:/mh-verify/r24/run-nc.cjs`（31,268 B），76/76 pass、fail=0（pwsh 7 与 Windows PowerShell 5.1 判定一致，日志 `D:/mh-verify/r24/nc2.log`）。
+- 成对例（新 RED / 旧 PASS）：`Q2` `executed=7`、`Q3` 删 `notExecuted`、`Q4` `executed='abc'`、`Q5` `pending='x'`、`Q6` `notExecuted=''`、`Q7` 删 `executed`、`Q8` `completed='-1'`；`Q9` 未知属性 `flaky='0'` PASS + warning；`Q10`/`Q11`/`Q12` 两代都红。
+
+### 残留限制
+
+1. 本层只校验块自身的契约与两条恒等式，不重复第七层/第十一层的「逐行 outcome 与桶双向核对」。
+2. 未知属性只发 warning：上游新增桶（如 `pending`）不被当作缺陷，避免把 runner 演化判成红。
+3. 属性名按 `Attributes` 的 `Name` 原样比较（大小写敏感），不做归一化。
+
+### exact-head CI 验收（EXECUTED，40 位 SHA）
+
+- head `ca43be2da6669b49528c68e72af2f274385b1a38` 的 windows-ci **`41228531695` = completed/failure**（`pull_request`，日志 `D:/mh-verify/r24/ci-codehead.txt.log`，112,466 B）：测试门禁步骤全绿，两套件打印十五层台阶行（`counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted`、`combined tests=2056`、`MediaHub.Tests: total=1952 baseline=1952 failed=0 notExecuted=0`、WebDav 104/104）。
+- licence `check-licence-surface  checks=50 failed=1 warnings=0 skipped=0`，唯一红为上游 `log-file-claims`（`W6-113u`）。
+- 同 head Android CI `41228531617` 取证时 in_progress；`ca43be2d` 与 `f8677df2` 的 `core`/`feature`/`app` 树哈希全同 ⇒ 按 ADR-AUTO-001 继承、不作独立结论。
+
