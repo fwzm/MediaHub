@@ -653,12 +653,14 @@ RESULT: PASS
 
 ### 4.15 实测（2026-10-31，W47，本机，HEAD cd253c0d）
 
-``~text
-check-licence-surface  PASS  capability-map-claims  the capability map still describes the repository: 9 machine-readable lines, shipping claims agreeing with PACKAGING.md, the GPL baseline default in the player project and the built LGPL candidate
+```text
+check-licence-surface  PASS  capability-map-claims  the capability map still describes the repository: its machine-readable status lines are present, the shipping claims agree with PACKAGING.md, the player project still defaults to the GPL baseline and the LGPL candidate is still built
 check-licence-surface  PASS  check-inventory  41 declared check(s): this run emitted nothing undeclared, LICENSE-SURFACE-CHECK.md names every id on its own, and both it and README.md claim the same count
 check-licence-surface  checks=41 failed=0 warnings=0 skipped=0
 check-licence-surface  RESULT: PASS
-``~
+```
+
+> 文案说明（W53）：上表是 W47（`cd253c0d`）当时打印的原文；第 47 项加入时把这条 PASS 措辞改写为「its machine-readable status lines are present, the shipping claims agree with PACKAGING.md, the player project still defaults to the GPL baseline and the LGPL candidate is still built」，判据本身没有放宽（仍钉 §0 那九行、PACKAGING.md 交叉核对、播放器工程缺省 GPL 与 LGPL 候选存在）。
 
 七条负向对照（临时副本，均不改仓库文件；日志 `D:/mh-verify/w47-nc*.log`）：
 
@@ -791,9 +793,12 @@ W47 的 `capability-map-claims` 逐行比对了 CAPABILITY-MAP §0 的九行块�
 | --- | --- |
 | 扫描根内的文本文件不得出现四种未标记形态：`{BT}`、`~BT~`、`⟪BT⟫`、波浪-单反引号-波浪（residue-allow） | 某份文档或脚本里还留着生成期占位符——正文渲染出来就是乱码；确要讨论某个记号的行必须带 `residue-allow` 标记（本行就是示例） |
 | 每份 markdown 的围栏行数（三反引号或 `~~~`）为偶数 | 围栏没闭合：后面的段落被吞进代码块，或本该是代码块的状态块被渲染成正文 |
+| 行首若以反引号/波浪号起一段围栏记号，必须全是同一种字符且至少 3 个（W53 追加） | 围栏被写坏成混排（例如两个反引号接一个波浪号）：围栏不再闭合，后面的段落被吞进代码块或状态块被渲染成正文 |
 | CAPABILITY-MAP §0 的 BEGIN 注释下一行是 三反引号+text、END 注释上一行是 三反引号 | 状态块自己不再被真围栏包住（W52 之前就是这个坏法） |
 | 行首为 `|` 的行，剥掉行内代码跨距后不得再含 `||` | 往文档里插行时插在锚点文本之后而不是整行之后，两条表格行粘成一行（W51 在 `LICENSE-SURFACE-CHECK.md` 第 72 行这样写过一次，W51 的 README 那一段还因此整段重复了一遍） |
 | 扫描到的文本文件数 ≥ 20 | `-DocsScanRoot` 指错目录时的哨兵：扫到的文件太少就不算证明 |
+
+W53 追加的混排判据来自一次真实损坏：本文件 §4.15 的围栏当时被写成「两个反引号接一个波浪号」，它既不是合法的三反引号围栏、也躲过了「围栏行数为偶数」的计数（不是围栏行就不计数），于是渲染成正文而检查一路绿——`capability-map-claims` 钉的是块内容，`doc-residue-claims` 原来也只数三反引号/三波浪号行。
 
 跳过围栏内部的行、并先剥离行内代码跨距再判 `||`，是因为 `docs/android-source-sync-transfer.md` 的表格里正当地写着 `|| true`（在反引号跨距内），`windows/docs/W8-EVIDENCE.md` 的围栏内也有一个 `||`。一个路径参数 `-DocsScanRoot`（默认仓库根）让负向对照可以指到临时副本；目录不存在 ⇒ SKIP（退出码仍 0）。
 
@@ -806,7 +811,9 @@ W47 的 `capability-map-claims` 逐行比对了 CAPABILITY-MAP §0 的九行块�
 
 ```text
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath D:/mh-verify/w38-license/license-report.json
-check-licence-surface  PASS    doc-residue-claims  1194 text file(s) scanned: no unmarked placeholder residue, all 89 markdown file(s) have balanced fences, and the capability map status block sits inside a real fence
+check-licence-surface  PASS    doc-residue-claims  1194 text file(s) scanned: no unmarked placeholder residue, no mangled fence run, all 89 markdown file(s) have balanced fences, and the capability map status block sits inside a real fence
+
+> 文案说明（W53）：这条 PASS 在 W52 时是「no unmarked placeholder residue, all 89 markdown file(s) have balanced fences, …」；W53 追加行首混排围栏判据后，文案多出「no mangled fence run」，判据只增不减。
 check-licence-surface  checks=46 failed=0 warnings=0 skipped=0
 RESULT: PASS
 ```
@@ -872,6 +879,8 @@ RESULT: PASS
 | NC7 | `-CapabilityMapPath` 指向不存在文件 | `SKIP`、退出码 0 |
 
 本轮这条检查被负向对照逼出过**两处口径问题**，都已修好并复验：① 第一版对着「副本放在别处」的负向对照全部误报——markdown 链接是相对**文档所在目录**解析的，副本挪到 `D:/mh-verify/w53-nc/NCx/` 之后 15 条链接全部找不到；这不是检查的缺陷，而是负向对照的方法错（镜像引用文档后才得到「恰好 1 红」的干净结论），已写进本节做法。② NC6 第一版删的是状态块里那一行，却整轮**假绿**——因为 §0 的说明段里也正当地写着这个 token（散文里的引用满足了「文本含该字符串」），判据改为要求它作为**一整行**出现后才真正红。这与 W48 的教训同源：负向对照必须打在**被核对的那串字符**上，笼统的「文本包含」会被同一 token 的别的出现抵消。
+
+本轮 exact-SHA CI 曾**首跑 1 红**（Windows CI push `41209324178`、PR `41209328582`：`checks=47 failed=1`，红的正是这条新检查，报「the map no longer declares the CI print as the authority for its test counts」）。真因是判据④第一版写成「把文档按换行 split 成数组、再 `-contains` 那一行」——CI 的 checkout 因为仓库开了 `autocrlf` 且没有 `.gitattributes`，工作树是 **CRLF**，每行末尾带 `\r`，于是本机（LF）绿、CI 红。已改成多行锚点正则 `(?m)^test-count-authority: ci-print\r?$`（行尾 `\r` 可选），并用「整文件 LF→CRLF 的副本」复验 PASS、「把该行删掉的 CRLF 副本」复验恰好 1 红、「LF 的 NC6」仍恰好 1 红。教训与 W47/W52 同源：**出仓库的文件必须假定 CI 是 CRLF**，凡是拿整行做等值比较的判据都要容得下行尾回车。
 
 日志：正向 `D:/mh-verify/w53-positive.log`，首跑 `D:/mh-verify/w53-first.log`，负向对照 `D:/mh-verify/w53-nc/NC1.log` … `NC7.log`。
 

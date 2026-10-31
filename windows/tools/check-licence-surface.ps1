@@ -1629,7 +1629,7 @@ else {
             }
         }
     }
-    if (-not (@($capabilityText -split "\n") -contains 'test-count-authority: ci-print')) {
+    if (-not [regex]::IsMatch($capabilityText, '(?m)^test-count-authority: ci-print\r?$')) {
         $mapPointerProblems += 'the map no longer declares the CI print as the authority for its test counts'
     }
     if ($mapPointerProblems.Count -eq 0) {
@@ -2049,6 +2049,15 @@ else {
                     $residueProblems.Add($relative + ' line ' + $scanLineNumber + ' still contains the placeholder ' + $token + ' without the residue-allow marker')
                 }
             }
+            $runTrimmed = $scanLine.Trim()
+            $runLength = 0
+            while ($runLength -lt $runTrimmed.Length -and ($runTrimmed[$runLength] -eq [char]96 -or $runTrimmed[$runLength] -eq [char]126)) { $runLength++ }
+            if ($runLength -ge 2) {
+                $runText = $runTrimmed.Substring(0, $runLength)
+                if ($runText.Contains([char]96) -and $runText.Contains([char]126) -and -not $scanLine.Contains('residue-allow')) {
+                    $residueProblems.Add($relative + ' line ' + $scanLineNumber + ' starts with a mangled fence run (backticks and tildes mixed): a code fence is three or more backticks or three or more tildes, never a mix')
+                }
+            }
         }
     }
     if ($textFiles.Count -lt 20) {
@@ -2079,7 +2088,7 @@ else {
     }
 
     if ($residueProblems.Count -eq 0) {
-        Add-Check 'doc-residue-claims' 'PASS' ($textFiles.Count.ToString() + ' text file(s) scanned: no unmarked placeholder residue, all ' + $scannedMarkdown + ' markdown file(s) have balanced fences, and the capability map status block sits inside a real fence')
+        Add-Check 'doc-residue-claims' 'PASS' ($textFiles.Count.ToString() + ' text file(s) scanned: no unmarked placeholder residue, no mangled fence run, all ' + $scannedMarkdown + ' markdown file(s) have balanced fences, and the capability map status block sits inside a real fence')
     }
     else {
         Add-Check 'doc-residue-claims' 'FAIL' ($residueProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $residueProblems) + ' - repair the documents (the placeholder convention is documented in docs/android-source-sync-transfer.md) and keep the marker on lines that discuss a token on purpose')
