@@ -264,7 +264,7 @@ dotnet test  MediaHub.Windows.sln -c Debug
 
 CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
 与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
-截至 `f4a9fd24`：`MediaHub.Tests` **478** + `MediaHub.WebDav.Tests` **104** = **582 通过 / 0 失败 / 0 跳过**（windows-ci run **41225881308** 日志实测；`478 = 469 + 9`，由 W14 诊断日志落盘 9 例带来，此后 W35–W56 的都是文档/脚本门禁、未再加 C# 用例）
+截至 `212bfc64`：`MediaHub.Tests` **478** + `MediaHub.WebDav.Tests` **104** = **582 通过 / 0 失败 / 0 跳过**（windows-ci run **41237843048** 日志实测；`478 = 469 + 9`，由 W14 诊断日志落盘 9 例带来，此后 W35–W56 的都是文档/脚本门禁、未再加 C# 用例）
 （469 = 438 既有 + 31 例续播下限契约；历史口径 542 = 438 + 104 曾在 PR #33 里写过）。
 这不是本地口径而是 CI 实测：`windows-ci` 现在把两个套件**分两步**跑并各自产出 trx，再按套件名断言下限
 （`MediaHub.Tests` ≥400、`MediaHub.WebDav.Tests` ≥100，`failed=0` 且 `notExecuted=0`）—— 此前 WebDav 套件虽然被构建、
@@ -382,14 +382,14 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
 
 <!-- WINDOWS-SYNC:START -->
 <!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
+- 212bfc64 2026-11-01 licence guard: add cross-doc-pointer-claims (check 52)
+- 96f525d6 2026-11-01 W57: pin the reproducibility record to the repository (51st licence-surface check)
+- 34bd11cd 2026-11-01 feat(licensing): W56 SBOM 两 flavour 账目门禁（第 50 项 sbom-flavour-claims）
+- a888a192 2026-11-01 W55: check the LGPL build record against a committed dependency record
+- c80556ce 2026-11-01 feat(licensing): W55 LGPL 构建记录门禁（lgpl-build-record-claims 第 49 项）
 - f2f83bba 2026-10-31 W54 W13 探针记录门禁：身份钉死值、交付物表与断言条数钉在实物上（第 48 项 engine-probe-claims）
 - 19beb0cc 2026-10-31 W53 修正 CRLF 下的计数权威判据，并把围栏完整性扩到混排围栏
 - f614546e 2026-10-31 feat(licensing): W53 能力对照表指针/状态词/计数纪律门禁（第 47 项 capability-map-pointers）
-- a75371f6 2026-10-31 feat(licensing): W52 文档残留与围栏完整性门禁（第 46 项 doc-residue-claims）
-- 86f16536 2026-10-31 feat(licensing): W51 日期快照审计门禁（doc-audit-snapshot-claims 第 45 项）
-- 2bdaa499 2026-10-31 feat(licensing): W50 诊断日志落盘契约门禁（log-file-claims 第 44 项）
-- 05d53cb6 2026-10-31 feat(licensing): W49 续播下限契约门禁（resume-floor-claims 第 43 项）
-- 47913224 2026-10-31 feat(licensing): W48 验收「不打扰」契约门禁（quiet-run-claims 第 42 项）
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
