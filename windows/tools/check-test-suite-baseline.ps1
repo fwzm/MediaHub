@@ -131,6 +131,19 @@
 #   list id fails. The run prints
 #   runHeader=/settings=/deployments=/derivedRoot=/bound rows=/header id collisions=.
 #
+#
+#   One more level, on the definitions' own view of the artifact: a definition names
+#   the assembly it was loaded from twice - UnitTest/@storage records the path the
+#   test host copied in, TestMethod/@codeBase records the path the runner wrote - and
+#   it declares the adapter that ran it. Nothing compared the two paths, and the
+#   assembly set every later count rests on prefers codeBase, so a definition whose
+#   storage points at another suite's dll keeps the declared assembly, every class,
+#   method, argument row, outcome and header line identical. The run now requires the
+#   two records to name the same file (they may differ only in case and in separator
+#   direction), requires every definition to declare an adapter and requires one
+#   adapter per results file, and prints
+#   assemblyDeclaration=/storage\/codeBase pairs=/same file/adapters=.
+#
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -193,6 +206,13 @@
 #   a run name that is not user@machine plus a timestamp, a TestSettings id that is
 #     not GUID-shaped -> warning (the producer format is not pinned, only its
 #     internal consistency is).
+#   a definition whose UnitTest/@storage and TestMethod/@codeBase name different
+#     files (the two records of one assembly disagree), a definition that declares no
+#     adapterTypeName, or two different adapterTypeName values inside one results file
+#     -> red: codeBase alone decides which assembly a file was produced from, so these
+#     records can contradict each other while every count stays identical.
+#   an adapterTypeName that is not an executor:// URI -> warning (the adapter naming
+#     scheme is not pinned, only its presence and its uniformity are).
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
 #   expected <= 0, empty file/suite, missing/empty classes object, missing/empty
 #   methods object, a class listed in one table but not the other, a class with
@@ -489,6 +509,8 @@ $runIdWarn = @()
 $fileIdentityLost = @()
 $counterVocabularyWarn = @()
 $headerWarn = @()
+$assemblyWarn = @()
+$headerWarn = @()
 foreach ($e in $baseline.suites) {
   $path = Join-Path -Path $ResultsDir -ChildPath $e.file
   if (-not (Test-Path -LiteralPath $path)) {
@@ -597,6 +619,15 @@ foreach ($e in $baseline.suites) {
   $execByDefId = @{}
   $exElWarn = @()
 
+  # The definition also names its assembly twice, and declares the adapter that ran
+  # it. Compare both records instead of trusting the one the assembly set prefers.
+  $assemblyPairs = 0
+  $assemblyPairLostCount = 0
+  $assemblyPairLost = @()
+  $adapterBlank = 0
+  $adapterValues = @{}
+  $assemblyFileWarn = @()
+
   # Identity from the artifact: the TestMethod elements record the assembly that
   # produced these results (codeBase; older writers only fill storage). A single
   # recorded assembly that does not match the declared suite name means this
@@ -638,6 +669,34 @@ foreach ($e in $baseline.suites) {
     foreach ($part in $leaf) { if (-not [string]::IsNullOrWhiteSpace($part)) { $leafName = $part } }
     if ([string]::IsNullOrWhiteSpace($leafName)) { continue }
     if ($leafName.EndsWith(".dll", [System.StringComparison]::OrdinalIgnoreCase)) { $leafName = $leafName.Substring(0, $leafName.Length - 4) }
+    # storage and codeBase are two records of one file: compare them as paths that
+    # may differ only in case and in separator direction.
+    $cbDeclared = ""
+    if ($ut.TestMethod) { $cbDeclared = [string]$ut.TestMethod.codeBase }
+    if (-not [string]::IsNullOrWhiteSpace($cbDeclared) -and -not [string]::IsNullOrWhiteSpace($stv)) {
+      $assemblyPairs++
+      $normalStorage = $stv.Replace('/', [char]92).ToLowerInvariant()
+      $normalCodeBase = $cbDeclared.Replace('/', [char]92).ToLowerInvariant()
+      if (-not ($normalStorage -eq $normalCodeBase)) {
+        $assemblyPairLostCount++
+        if ($assemblyPairLost.Count -lt 12) { $assemblyPairLost += "definition $([string]$ut.id) records '$stv' as storage and '$cbDeclared' as codeBase" }
+      }
+    }
+
+    # The adapter that ran the definition is written once per definition and was
+    # never read: a file whose definitions name different adapters, or none at all,
+    # was assembled from more than one run.
+    $adapter = ""
+    if ($ut.TestMethod) { $adapter = [string]$ut.TestMethod.adapterTypeName }
+    if ([string]::IsNullOrWhiteSpace($adapter)) {
+      $adapterBlank++
+    } else {
+      if (-not $adapterValues.ContainsKey($adapter)) { $adapterValues[$adapter] = 0 }
+      $adapterValues[$adapter] = [int]$adapterValues[$adapter] + 1
+      if (-not $adapter.StartsWith('executor://', [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($assemblyFileWarn.Count -lt 12) { $assemblyFileWarn += "$($e.file) adapter '$adapter' is not an executor:// URI" }
+      }
+    }
     if (-not $assemblies.Contains($leafName)) { [void]$assemblies.Add($leafName) }
   }
   if ($assemblies.Count -eq 1) {
@@ -650,6 +709,15 @@ foreach ($e in $baseline.suites) {
     $provenanceWarn += "$($e.suite) ($($e.file) mixes $($assemblies.Count) test assemblies)"
   }
 
+  # One message list for the definition-side assembly declaration.
+  $assemblyLost = @()
+  if ($assemblyPairLostCount -gt 0) {
+    $assemblyLost += "$assemblyPairLostCount definition(s) record a storage path and a codeBase path that name different files: $($assemblyPairLost -join '; ')"
+  }
+  if ($adapterBlank -gt 0) { $assemblyLost += "$adapterBlank definition(s) declare no adapterTypeName" }
+  if ($adapterValues.Count -gt 1) {
+    $assemblyLost += "$($adapterValues.Count) different adapterTypeName values inside one results file: $((@($adapterValues.Keys | Sort-Object)) -join ', ')"
+  }
   # Class membership comes from TestDefinitions (UnitTest.id -> TestMethod.className),
   # never from the result name: xUnit appends the data arguments of a [Theory] to the
   # result name, and argument text may itself contain dots (dates, decimal numbers).
@@ -1253,6 +1321,7 @@ foreach ($e in $baseline.suites) {
     if ($headerLost.Count -lt 12) { $headerLost += 'the run id and the TestSettings id are the same id' }
   }
 
+  $assemblyWarn += $assemblyFileWarn
   $headerWarn += $headerFileWarn
 
   $actualMethodCount = 0
@@ -1292,6 +1361,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot bound rows=$boundRows header id collisions=$headerCollisions"
+  "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
   "$($e.suite): summaryOutcome=$summaryOutcome failureBuckets=$failureBucketTotal contradiction=$($summaryContradiction.Count)"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
@@ -1469,6 +1539,9 @@ foreach ($e in $baseline.suites) {
   if ($headerLost.Count -gt 0) {
     throw "$($e.suite): the run header does not agree with the rows it summarises while the total was $total - every count above is read from the rows and the counters, and nothing read the header that names the run, its settings block, the deployment root or the machine the rows ran on, so a header swapped for another run's keeps all of them identical. mismatched: $($headerLost -join ', '). A TRX whose header disagrees with its own rows was hand-merged or patched; regenerate it from a clean test run."
   }
+  if ($assemblyLost.Count -gt 0) {
+    throw "$($e.suite): the definitions do not agree with themselves about the assembly they were loaded from while the total was $total - each definition records that assembly twice (UnitTest/@storage and TestMethod/@codeBase) and declares the adapter that ran it, and no count above read either record, so a definition pointing at another suite's dll keeps every class, method, argument row, outcome and header line identical. broken: [$(@($assemblyLost) -join '; ')]. A TRX whose two assembly records disagree was hand-merged or patched; regenerate it from a clean test run."
+  }
   $all += $total
 }
 
@@ -1572,5 +1645,10 @@ if ($headerWarn.Count -gt 0) {
   $shownHeader = $headerWarn
   if ($shownHeader.Count -gt 12) { $shownHeader = $shownHeader[0..11] + "... ($($headerWarn.Count - 12) more)" }
   Write-Host "::warning::a run header this gate cannot derive - the run name or the settings id has an unexpected shape, so only its internal consistency was checked: $($shownHeader -join '; ')"
+}
+if ($assemblyWarn.Count -gt 0) {
+  $shownAssembly = $assemblyWarn
+  if ($shownAssembly.Count -gt 12) { $shownAssembly = $shownAssembly[0..11] + "... ($($assemblyWarn.Count - 12) more)" }
+  Write-Host "::warning::a definition-side assembly or adapter declaration this gate cannot cross-check - the adapter naming scheme is not pinned, so only its presence and its uniformity were verified: $($shownAssembly -join '; ')"
 }
 "combined tests=$all"
