@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-04T06:31+08:00",
+  "updated_at": "2026-11-04T06:58+08:00",
   "updated_by": "lead-W6-113-r36",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -805,7 +805,8 @@
         "Commit ca027fe8aa0635b4c4ae1888a9d8455dfda4328b (1 file changed / +108 insertions), non-force push a7c37f16..ca027fe8; git ls-remote matches, rev-list --left-right --count = 0/0.",
         "exact-head windows-ci 41727517960 = success at 40-hex ca027fe8aa0635b4c4ae1888a9d8455dfda4328b; licence check-licence-surface  checks=56 failed=0 warnings=0 skipped=0.",
         "Android CI 41727517642 = success at the code head; core/feature/app subtree hashes identical to a7c37f169c418a7e32484f2ffabcfd6e95265e37 -> inherited per ADR-AUTO-001.",
-        "Incidents recorded: the leftover duplicate-registration line produced a false RED (2 TestList id(s) appear more than once); Node replace() interpreted the replacement string, so patches use slice concatenation."
+        "Incidents recorded: the leftover duplicate-registration line produced a false RED (2 TestList id(s) appear more than once); Node replace() interpreted the replacement string, so patches use slice concatenation.",
+        "docs head e052312ceb41347a33fba3b22e5ed9e060b7396a: windows-ci 41731588647 = success with the same list-vocabulary ladder lines and licence check-licence-surface  checks=57 failed=0 warnings=0 skipped=0 (base advanced mid-round to be781c16 / W65 57th check, merge ref fc685682)\n"
       ],
       "notes": "第 19 层只读 TestLists 的 id→名字映射。词表外的 id、非 GUID id、零引用声明、首尾空白名都只 warning（虚拟表 All Loaded Results 在干净语料里本就零引用），不升级为 RED，避免生产者换词表时误红。",
       "next_action": "候选下一层：①Times/@creation 与 @queuing 的窗口约束；②Counters/@inconclusive 与 @inProgress、@pending 的桶表补全；③TestRun/@xmlns 与文档命名空间的自洽。",

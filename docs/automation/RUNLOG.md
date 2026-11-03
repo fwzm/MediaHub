@@ -639,3 +639,10 @@
 
 ### 锁
 - run-id `w6-r36-p4m8k1`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `05a6a4b02719bfbc8fe43e5b5dc9318c`）、`ref:origin/feature/cross-device-source-sync`（token `185f7f01c3b58cb47c1c5aa38f7700ad`）、`worktree:D:/mh-w6`（token `03df273194b063cc8f975692976be578`），取锁前 `status` 为 `locks: []`。
+
+### docs head 验收（EXECUTED）
+- docs 提交 **`e052312ceb41347a33fba3b22e5ed9e060b7396a`**（`docs(automation): round 36 - the gate pins the declared lists to the writer vocabulary (W6-113aj)`，3 files changed / +159 −2），非 force push `821466c9..e052312c`；`git ls-remote` 远端 ref 同值，`rev-list --left-right --count` = 0/0。
+- docs head 的 windows-ci **`41731588647` = success**（`pull_request`，日志 `D:/mh-verify/r36/ci-docshead.log`，147,780 B）：台阶行与合并 head 逐字一致（`listVocabulary=2/2 canonical names=2 distinct names=2 unreferenced lists=1` 两条）、`combined tests=2056`，前十八层台阶行逐字不变。
+- licence 步骤：check-licence-surface  checks=57 failed=0 warnings=0 skipped=0（`RESULT: PASS`）。**本轮中途 base 又前进了一次**：`refs/heads/feature/windows-client` 由 `8f6bbc8a` 前进到 **`be781c16aca4c58b3f67c238654c3fde82dd7f84`**（`feat(licensing): W65 第 57 项 doc-audit-untested-claims`，新增 131 行脚本与两份文档），PR 合并 ref **`fc6856825a953f467d16a2cbf43ef8dc7c4a5258`** = `be781c16` + `e052312ceb41347a33fba3b22e5ed9e060b7396a` ⇒ 这次 docs head 跑的是 57 项 licence 闸门（合并 head 那次是 56 项），两项均 failed=0。
+- 同 head Android CI `41731588519` = success；代码 head 的 Android CI `41721572251` 与合并 head 的 `41727517642` 均为 success；`e052312c` 相对 `821466c9` 只改 `docs/automation/` 三文件，`core`/`feature`/`app` 三子树哈希不变 ⇒ 继承依据成立。
+
