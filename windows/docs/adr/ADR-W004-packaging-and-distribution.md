@@ -2,6 +2,20 @@
 
 - 状态：**已接受**（2026-10-14）
 - 相关：ADR-W001
+## 0. 机器可读状态（CI 核对）
+
+本段是 `check-licence-surface.ps1` 的 `adr-packaging-claims`（W45，第 39 项）逐字核对的真源：下面四个包属性必须与 `windows/src/MediaHub.App/MediaHub.App.csproj` 当场取到的值逐字相同，且本文不得再出现「包内零许可文件」之类的陈旧说法；任何一次「ADR 记的形态 ≠ 仓库现状」都会让 CI 变红。
+
+<!-- BEGIN adr-packaging-status (checked by check-licence-surface.ps1) -->
+```text
+packaging-form: unpackaged-self-contained-portable
+msix: optional-not-implemented
+signing: blocked-no-certificate
+licence-files-in-package: staged-by-ci-since-w40
+native-libmpv: gitignored-and-fetched-by-tool
+```
+<!-- END adr-packaging-status -->
+
 
 ## 问题
 
@@ -50,7 +64,7 @@ Windows App Runtime 完全不可控。必须在不要求用户预装运行时的
 | `libmpv-2.dll` | ~115 MB |
 | 应用自身 | < 1 MB |
 
-`libmpv-2.dll` **不入库**（`.gitignore` 已排除），由 `windows/tools/fetch-libmpv.ps1` 拉取。
+GPL 基线的 `libmpv-2.dll` **不入库**（`.gitignore` 的 `windows/native/libmpv/` 规则已排除），由 `windows/tools/fetch-libmpv.ps1` 拉取并按上表两个摘要强制校验；LGPL 候选引擎（`windows/engine/lgpl/dist/libmpv-2.dll` 与 `mpv.exe`）**是入库件**，见 [../licensing/LGPL-ENGINE-SWITCH.md](../licensing/LGPL-ENGINE-SWITCH.md)。
 
 脚本现在固定**两个**摘要，任一不符即拒绝安装：
 
@@ -68,7 +82,7 @@ Windows App Runtime 完全不可控。必须在不要求用户预装运行时的
   "already present and verified"。
 - 许可证：**本构建为 GPL-3.0-or-later**，发行阻断未解除；见
   [../licensing/LICENCE-DECISION.md](../licensing/LICENCE-DECISION.md)。
-- 发布产物中**不含任何许可证/声明文件**（522 个文件里 0 个）——独立于 GPL 的合规缺口。
+- 发布产物中的许可证/声明文件：**W40 起随包**——`windows/tools/stage-licence-files.ps1` 由 CI 在 publish 后把六份文档（`THIRD-PARTY-NOTICES.md`、`THIRD-PARTY-NOTICES-FULL.md`、`LGPL-COMPLIANCE.md`、`LGPL-ENGINE-SWITCH.md`、`component-licences.txt`、`sbom.cdx.json`）暂存进 `licences/` 并生成 `MANIFEST.txt`，烟测断言这 7 个路径；仍未随包的是 LGPL/GPL 许可正文本身，属许可证决策。
 - `MediaHub.exe` 与 `libmpv-2.dll` 的 `Get-AuthenticodeSignature` 均为 `NotSigned`：
   **SIGNING_BLOCKED**。
 - 未生成 MSIX 包；未做代码签名；未做安装/卸载实测。

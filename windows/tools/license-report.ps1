@@ -115,10 +115,15 @@ $NativeEngine = [ordered]@{
 # default flavour (the GPL build above); they appear only when the app is built with
 # -p:LibMpvFlavour=lgpl. They are still real licence obligations of that flavour, so the generated
 # notices must enumerate them instead of leaving a blank page. The file list is read from the
-# artefact that windows/tools/collect-lgpl-runtime.ps1 writes; the licence of each file comes from
-# the table below, transcribed from windows/engine/lgpl/component-licences.txt (the MSYS2
-# packager's own declaration) whose line number is kept as evidence. Files with no row in that file
-# are reported as 未记录 rather than guessed - a guessed licence is worse than a visible gap.
+# artefact that windows/tools/collect-lgpl-runtime.ps1 writes; the licence of each file is the
+# packager's own declaration, transcribed verbatim from windows/engine/lgpl/component-licences.txt,
+# and the line it was read from is kept as evidence.
+#
+# Every shipped file is mapped as of 2026-10-31 (W38). The 2026-10-14 table was short of five
+# packages: collect-licences.sh silently skipped a package whose "pacman -Si" returned nothing (so
+# libwinpthread-git had no row), and four packages were never asked about at all. A name with no row
+# is still reported as 未记录 rather than guessed - a guessed licence is worse than a visible gap -
+# and windows/tools/check-licence-surface.ps1 now fails on that instead of printing a note.
 $LgplRuntimeInfo = [ordered]@{
     CoreDll       = 'windows/engine/lgpl/dist/libmpv-2.dll'
     CollectedList = 'windows/engine/lgpl/dist/runtime-dependencies-collected.txt'
@@ -127,42 +132,44 @@ $LgplRuntimeInfo = [ordered]@{
     SwitchDoc     = 'windows/docs/LGPL-ENGINE-SWITCH.md'
 }
 
-# file name -> @(component, licence, evidence). Only names that actually appear in the collected
-# list belong here; anything unmapped is reported as a gap, never silently dropped.
+# file name -> @(component, licence, evidence). The licence string is the packager's declaration
+# verbatim; evidence names the line of component-licences.txt it was read from, so a reader (and
+# check-licence-surface.ps1) can verify it. Only names that actually appear in the collected list
+# belong here; anything unmapped is reported as a gap, never silently dropped.
 $LgplComponentMap = [ordered]@{
-    'avcodec-62.dll'             = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (built by windows/engine/lgpl/build-ffmpeg-lgpl.sh; its configure reports "LGPL version 2.1 or later")')
-    'avdevice-62.dll'            = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (same FFmpeg build)')
-    'avfilter-11.dll'            = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (same FFmpeg build)')
-    'avformat-62.dll'            = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (same FFmpeg build)')
-    'avutil-60.dll'              = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (same FFmpeg build)')
-    'swresample-6.dll'           = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (same FFmpeg build)')
-    'swscale-9.dll'              = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:3-4 (same FFmpeg build)')
-    'libass-9.dll'               = @('libass', 'ISC', 'component-licences.txt:6')
-    'libplacebo-360.dll'         = @('libplacebo', 'LGPL2.1', 'component-licences.txt:7')
-    'libshaderc_shared.dll'      = @('shaderc', 'Apache-2.0', 'component-licences.txt:8')
-    'libspirv-cross-c-shared.dll' = @('spirv-cross', 'Apache-2.0', 'component-licences.txt:9')
-    'vulkan-1.dll'               = @('vulkan-loader', 'Apache-2.0', 'component-licences.txt:10')
-    'libfreetype-6.dll'          = @('freetype', 'GPL-2.0-or-later OR FTL', 'component-licences.txt:12')
-    'libharfbuzz-0.dll'          = @('harfbuzz', 'MIT', 'component-licences.txt:13')
-    'libfribidi-0.dll'           = @('fribidi', 'LGPL-2.1-or-later', 'component-licences.txt:14')
-    'libfontconfig-1.dll'        = @('fontconfig', 'custom (see upstream COPYING)', 'component-licences.txt:15')
-    'liblcms2-2.dll'             = @('lcms2', 'MIT AND GPL-3.0-or-later', 'component-licences.txt:16')
-    'libdovi.dll'                = @('libdovi', 'MIT', 'component-licences.txt:17')
-    'libunibreak-7.dll'          = @('libunibreak', 'Zlib', 'component-licences.txt:18')
-    'libglib-2.0-0.dll'          = @('glib2', 'LGPL-2.1-or-later', 'component-licences.txt:19')
-    'libpng16-16.dll'            = @('libpng', 'custom (see upstream LICENSE)', 'component-licences.txt:20')
-    'libbrotlicommon.dll'        = @('brotli', 'MIT', 'component-licences.txt:21')
-    'libbrotlidec.dll'           = @('brotli', 'MIT', 'component-licences.txt:21')
-    'zlib1.dll'                  = @('zlib', 'Zlib', 'component-licences.txt:22')
-    'libiconv-2.dll'             = @('libiconv', 'GPL-3.0-or-later', 'component-licences.txt:23')
-    'libgraphite2.dll'           = @('graphite2', 'LGPL-2.1-or-later', 'component-licences.txt:24')
-    'libgcc_s_seh-1.dll'         = @('libgcc', 'GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later', 'component-licences.txt:25')
-    'libstdc++-6.dll'            = @('libstdc++', 'GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later', 'component-licences.txt:26')
-    'libbz2-1.dll'               = @('bzip2', '未记录（component-licences.txt 无此包）', 'component-licences.txt 无行 - 待核实')
-    'libexpat-1.dll'             = @('expat', '未记录（component-licences.txt 无此包）', 'component-licences.txt 无行 - 待核实')
-    'libintl-8.dll'              = @('gettext', '未记录（component-licences.txt 无此包）', 'component-licences.txt 无行 - 待核实')
-    'libpcre2-8-0.dll'           = @('pcre2', '未记录（component-licences.txt 无此包）', 'component-licences.txt 无行 - 待核实')
-    'libwinpthread-1.dll'        = @('mingw-w64 runtime', '未记录（component-licences.txt 无此包）', 'component-licences.txt 无行 - 待核实')
+    'avcodec-62.dll'             = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:5-6 (built by windows/engine/lgpl/build-ffmpeg-lgpl.sh; its configure reports "LGPL version 2.1 or later")')
+    'avdevice-62.dll'            = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:5-6 (same FFmpeg build)')
+    'avfilter-11.dll'            = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:5-6 (same FFmpeg build)')
+    'avformat-62.dll'            = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:5-6 (same FFmpeg build)')
+    'avutil-60.dll'              = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:5-6 (same FFmpeg build)')
+    'swresample-6.dll'           = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:5-6 (same FFmpeg build)')
+    'swscale-9.dll'              = @('FFmpeg (libav*)', 'LGPL-2.1-or-later', 'component-licences.txt:5-6 (same FFmpeg build)')
+    'libass-9.dll'               = @('libass', 'ISC', 'component-licences.txt:8')
+    'libplacebo-360.dll'         = @('libplacebo', 'LGPL2.1', 'component-licences.txt:9')
+    'libshaderc_shared.dll'      = @('shaderc', 'Apache-2.0', 'component-licences.txt:10')
+    'libspirv-cross-c-shared.dll'= @('spirv-cross', 'Apache-2.0', 'component-licences.txt:11')
+    'vulkan-1.dll'               = @('vulkan-loader', 'Apache-2.0', 'component-licences.txt:12')
+    'libfreetype-6.dll'          = @('freetype', 'GPL-2.0-or-later OR FTL', 'component-licences.txt:14')
+    'libharfbuzz-0.dll'          = @('harfbuzz', 'MIT', 'component-licences.txt:15')
+    'libfribidi-0.dll'           = @('fribidi', 'LGPL-2.1-or-later', 'component-licences.txt:16')
+    'libfontconfig-1.dll'        = @('fontconfig', 'custom', 'component-licences.txt:17 (packager declares "custom"; the upstream COPYING text governs)')
+    'liblcms2-2.dll'             = @('lcms2', 'MIT AND GPL-3.0-or-later', 'component-licences.txt:18')
+    'libdovi.dll'                = @('libdovi', 'MIT', 'component-licences.txt:19')
+    'libunibreak-7.dll'          = @('libunibreak', 'Zlib', 'component-licences.txt:20')
+    'libglib-2.0-0.dll'          = @('glib2', 'LGPL-2.1-or-later', 'component-licences.txt:21')
+    'libpng16-16.dll'            = @('libpng', 'custom', 'component-licences.txt:22 (packager declares "custom"; the upstream LICENSE text governs)')
+    'libbrotlicommon.dll'        = @('brotli', 'MIT', 'component-licences.txt:23')
+    'libbrotlidec.dll'           = @('brotli', 'MIT', 'component-licences.txt:23')
+    'zlib1.dll'                  = @('zlib', 'Zlib', 'component-licences.txt:24')
+    'libiconv-2.dll'             = @('libiconv', 'LGPL-2.1-or-later  documentation:GPL-3.0-or-later', 'component-licences.txt:25')
+    'libgraphite2.dll'           = @('graphite2', 'LGPL-2.1-or-later', 'component-licences.txt:26')
+    'libgcc_s_seh-1.dll'         = @('libgcc', 'GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later', 'component-licences.txt:27')
+    'libstdc++-6.dll'            = @('libstdc++', 'GPL-3.0-or-later WITH GCC-exception-3.1 AND GFDL-1.3-or-later', 'component-licences.txt:28')
+    'libbz2-1.dll'               = @('bzip2', 'custom', 'component-licences.txt:37 (packager declares "custom"; the upstream LICENSE text governs)')
+    'libexpat-1.dll'             = @('expat', 'MIT', 'component-licences.txt:38')
+    'libintl-8.dll'              = @('gettext-runtime', 'GPL-3.0-or-later AND LGPL-2.1-or-later', 'component-licences.txt:39')
+    'libpcre2-8-0.dll'           = @('pcre2', 'BSD-3-Clause', 'component-licences.txt:40')
+    'libwinpthread-1.dll'        = @('libwinpthread-git', 'MIT AND BSD-3-Clause-Clear', 'component-licences.txt:29')
 }
 
 function Write-Utf8 {

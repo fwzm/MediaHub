@@ -27,11 +27,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The licence guard proves the SBOM's recorded revision is on this branch's history, so the
+          # clone needs history; nothing in this pipeline reads tags, so this costs only the fetch
+          # (the pack is ~27 MiB for 500 commits).
+          fetch-depth: 0
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "10.0.x"
+          # Pinned, not "10.0.x": SDK feature bands prune framework-provided NuGet packages
+          # differently, so the resolved graph - and the SBOM this job verifies - depends on the SDK.
+          # global.json pins the same version; the guard checks the report agrees with it.
+          dotnet-version: "10.0.113"
 
       - name: Cache libmpv
         id: libmpv-cache
@@ -185,14 +193,25 @@ jobs:
           -c Release -p:Platform=x64
           -o ./artifacts/portable
 
+      - name: Stage licence/notice files into the portable output
+        shell: pwsh
+        working-directory: windows
+        run: ./tools/stage-licence-files.ps1 -RepoRoot .. -TargetDir windows/artifacts/portable
+
       - name: Smoke-check the published output
         shell: pwsh
         working-directory: windows
         run: |
           # The published folder must be self-contained: the exe, the engine DLL and the app assemblies.
-          $required = @("MediaHub.exe", "libmpv-2.dll", "MediaHub.dll", "MediaHub.Net.dll", "MediaHub.Providers.dll")
+          $required = @(
+            "MediaHub.exe", "libmpv-2.dll", "MediaHub.dll", "MediaHub.Net.dll", "MediaHub.Providers.dll",
+            "licences/MANIFEST.txt", "licences/THIRD-PARTY-NOTICES.md", "licences/THIRD-PARTY-NOTICES-FULL.md",
+            "licences/LGPL-COMPLIANCE.md", "licences/LGPL-ENGINE-SWITCH.md", "licences/component-licences.txt",
+            "licences/sbom.cdx.json"
+          )
           $missing = $required | Where-Object { -not (Test-Path (Join-Path "./artifacts/portable" $_)) }
           if ($missing) { throw "missing from publish output: " + ($missing -join ", ") }
+          "licence/notice files in the package: " + (Get-ChildItem ./artifacts/portable/licences -File | Measure-Object).Count
           "portable output size: " + [math]::Round((Get-ChildItem ./artifacts/portable -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1) + " MB"
 
       - name: Upload artifacts

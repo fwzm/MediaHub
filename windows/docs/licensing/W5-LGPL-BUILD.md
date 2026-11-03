@@ -47,7 +47,7 @@ supply an LGPL FFmpeg — that is why FFmpeg is built from source here.
 The non-FFmpeg dependencies were taken from MSYS2 as **prebuilt packages**, hand-extracted into
 C:\msys64\ucrt64 by install-msys2-deps.sh (pacman's install transaction was unusable: the installed
 gcc-14 gcc-libs conflicts with the newer libgcc-16.2.0, and pacman -Su refuses the transaction;
-pacman -Sp resolution still works, which is what was used). 31 packages, 31,338,987 bytes,
+pacman -Sp resolution still works, which is what was used). 32 packages, 31,338,987 bytes,
 individually hashed in windows/engine/lgpl/msys2-package-hashes.txt.
 
     bash -l windows/engine/lgpl/install-msys2-deps.sh
@@ -178,14 +178,14 @@ shaders through SPIRV-Cross for D3D11 (visible in the log as generated HLSL).
 | x264/x265 **encoders** | yes | **no** | GPL-only; not used by MediaHub |
 | DVD-Video/DVD-Audio, audio CD, DVB | yes | **no** | GPL-only; not used |
 | d3d9 (vo=direct3d) | yes | **no** | GPL-gated; MediaHub uses gpu-next |
-| Vulkan context | yes | **no** | *not* a licence issue — see below |
+| Vulkan context | yes | **no** | *not* a licence issue — see below and [VULKAN-NECESSITY.md](VULKAN-NECESSITY.md) |
 | lua/js scripting, rubberband, libarchive, bluray, sixel, vapoursynth, zimg | yes | no | unused |
 
 **Vulkan is missing for a mundane build reason, not a licence one:** meson found the loader
 (vulkan 1.4.363) but the header probe 'symbol VK_VERSION_1_3 in vulkan/vulkan_core.h' returned
 **NO**, so mpv compiled the feature out. MediaHub drives gpu-context=d3d11, which is verified
 working, so this is not currently a product regression — but 'vulkan' is a capability the GPL build
-had and the LGPL build does not, and it should be closed before this engine replaces the baseline.
+had and the LGPL build does not, and it should be closed before this engine replaces the baseline. That assessment now exists (W37, 2026-10-31): MediaHub hard-wires gpu-api=d3d11 and defaults gpu-context=d3d11, so Vulkan is on no shipped path and the candidate is not degraded there; whether to close the delta before a switch is decision B in VULKAN-NECESSITY.md section 5, and the default flavour stays unchanged.
 
 ---
 
@@ -223,16 +223,21 @@ Outputs land in windows/engine/lgpl/; the artifact is windows/engine/lgpl/dist/l
 
 **This section is the honest one. Nothing here is satisfied by the build above.**
 
-1. **Two components carry a GPL option in the packager's own declaration and need review before
+1. **One component still carries a GPL option in the packager's own declaration and needs review before
    distribution:**
-   - libiconv-2.dll — MSYS2 declares GPL-3.0-or-later for the package. GNU libiconv's *library* is
-     LGPL-2.1-or-later and only the iconv *program* is GPL, and only the DLL would ship — but that
-     is a claim to **verify**, not to assume.
-   - liblcms2-2.dll — MSYS2 declares 'MIT AND GPL-3.0-or-later'. lcms2 upstream is MIT.
-   Everything else in the 33-DLL closure is LGPL, MIT, ISC, BSD, Apache-2.0, Zlib, or
-   GPL-with-GCC-exception. Notably jbigkit (GPL-2.0) is in the pacman closure but **not** in the
-   runtime closure, so it does not ship. freetype is 'GPL-2.0-or-later OR FTL' — the FTL option is
-   the permissive one and is what is relied on here.
+   - liblcms2-2.dll — MSYS2 declares 'MIT AND GPL-3.0-or-later'. lcms2 upstream is MIT, but the declared
+     combination still needs review before distribution.
+   libiconv-2.dll used to head this list. W38 (2026-10-31) settled the open question by re-reading the
+   packager's own metadata instead of reasoning about upstream: MSYS2 now declares `LGPL-2.1-or-later`
+   for the package, with `documentation:GPL-3.0-or-later` scoped to the package's documentation, so the
+   shipped *library* is LGPL and the GPL terms ride on documentation that is not distributed (recorded in
+   `windows/engine/lgpl/component-licences.txt`). Re-collecting that table also turned three rows that
+   were previously inferred into explicit records: `libintl-8` (`GPL-3.0-or-later AND LGPL-2.1-or-later`,
+   from gettext-runtime), and `libstdc++-6` / `libgcc_s_seh-1` (`GPL-3.0-or-later WITH
+   GCC-exception-3.1 AND GFDL-1.3-or-later`). Everything else in the 33-DLL closure is LGPL, MIT, ISC,
+   BSD, Apache-2.0, Zlib, or GPL-with-GCC-exception. Notably jbigkit (GPL-2.0) is in the pacman closure
+   but **not** in the runtime closure, so it does not ship. freetype is 'GPL-2.0-or-later OR FTL' — the
+   FTL option is the permissive one and is what is relied on here.
 2. **-Dgpl=false is still not a licence grant.** mpv's own Copyright says so. The build is now
    *configured* to be LGPL-compatible and no GPL-family component is linked — but whether the
    assembled distribution satisfies LGPL §6 (and what MediaHub's own licence is) remains a
@@ -250,3 +255,88 @@ Outputs land in windows/engine/lgpl/; the artifact is windows/engine/lgpl/dist/l
 7. **MSYS2's dependency set is not a pinned, reproducible feed.** The build resolves against whatever
    the rolling MSYS2 repos served on 2026-10-14; msys2-package-hashes.txt records exactly what was
    used, but a reproducible build needs those artifacts archived.
+
+---
+
+## 8. Machine-readable status (checked by CI)
+
+The block below is read by `windows/tools/check-licence-surface.ps1` (check `lgpl-build-record-claims`,
+W55) and compared against the build record in `windows/engine/lgpl/`. It is appended at the **end** of
+this file on purpose: the line-number citations other documents make into this record
+(`LGPL-COMPLIANCE.md`, `SBOM.md`, `THIRD-PARTY-NOTICES.md`, `LICENCE-DECISION.md`, `LGPL-ENGINE-SWITCH.md`)
+stay valid only as long as this section adds nothing above them.
+
+<!-- BEGIN lgpl-build-status -->
+```text
+candidate-bytes: 3327274
+candidate-sha256: 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+gpl-baseline-sha256: 6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9
+msys2-package-count: 32
+msys2-package-bytes: 31338987
+msys2-package-bytes-source: session-cache-measurement-not-archived
+feature-count: 28
+gpl-feature-absent: true
+mpv-version-reports: v0.41.0-UNKNOWN
+ffmpeg-version: 8.1.1
+ffmpeg-hwaccels: d3d11va, d3d12va
+runtime-dll-count: 33
+runtime-collected: dist/runtime-dependencies-collected.txt
+runtime-manifest: dist/runtime-bundle-manifest.txt
+build-scripts: install-msys2-deps.sh, build-ffmpeg-lgpl.sh, build-mpv-lgpl.sh, capture-ffmpeg-evidence.sh, verify-mpv-lgpl.sh, run-probe-lgpl.sh
+probe-files: probe-lgpl-hwdec.txt, probe-lgpl-audio.txt, probe-lgpl-playback.txt, probe-lgpl-info.txt
+probe-result: MPV_PROBE PASS
+```
+<!-- END lgpl-build-status -->
+
+How each line is checked (all paths relative to `windows/engine/lgpl/`):
+
+| Line | Checked against |
+| --- | --- |
+| `candidate-bytes` / `candidate-sha256` | `dist/libmpv-2.dll` on disk, `dist/dist-hashes.txt`, `probe-lgpl-info.txt` |
+| `gpl-baseline-sha256` | `windows/tools/fetch-libmpv.ps1` `$DllSha256` |
+| `msys2-package-count` | number of hashed rows in `msys2-package-hashes.txt`, and the count quoted in section 1.2 |
+| `msys2-package-bytes` | **not** re-checkable from the tree: the 32 tarballs live in the W5-H cache `D:\mh-servers\lgpl-build\pkgs` (32 files, 31,338,987 bytes, measured 2026-10-31), which the repository does not archive |
+| `feature-count` / `gpl-feature-absent` | first feature line in `mpv-lgpl-features.txt` |
+| `mpv-version-reports` / `ffmpeg-version` | `mpv-lgpl-version.txt` |
+| `ffmpeg-hwaccels` | `ffmpeg-hwaccels.txt`, plus `--disable-gpl / --disable-version3 / --disable-nonfree` in `ffmpeg-version.txt` |
+| `runtime-dll-count` / `runtime-collected` / `runtime-manifest` | the dependency rows in `dist/runtime-dependencies-collected.txt`; every `*.dll` actually present in `dist/` next to the candidate must agree too |
+| `build-scripts` / `probe-files` | each named file exists |
+| `probe-result` | `MPV_PROBE PASS` in `probe-lgpl-playback.txt`, plus the hwdec and WASAPI tokens in their own files |
+
+The 33 runtime DLLs are build products and stay out of the repository by design
+(`windows/engine/lgpl/dist/.gitignore` commits only the candidate): CI therefore checks their committed
+identity record - `dist/runtime-dependencies-collected.txt`, one line per shipped dependency - rather
+than bytes that are not in the tree.
+
+Two prose claims are held at the same time: section 6 must still say this build is **not** a legal
+opinion and that **nothing has been switched over**, and this document must not start claiming the
+distribution is clean or release-ready.
+
+## 9. External line-pointer contract (checked by CI)
+
+Other records cite this file by **line number**, and that stays honest only while the cited lines
+stay put. The citations that matter are declared below and re-checked on every CI run by
+`cross-doc-pointer-claims`: each entry names the citing record, the line range it uses, and a
+phrase that must still sit inside that range. One block owns the whole contract and it is appended
+at the **end** of the file, so it cannot shift the very lines it protects. An insertion above any
+cited range now turns the check red instead of quietly pointing every reader at the wrong
+paragraph. Section 8 above pins the machine-readable values; this section pins the line numbers.
+
+<!-- BEGIN line-pointer-contract -->
+contract-owner: check-licence-surface.ps1:cross-doc-pointer-claims
+entry-count: 14
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:16-22; anchor=Is there now a real LGPL-compatible libmpv?
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:20; anchor=28 features
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:26-40; anchor=1.1 Toolchain
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:5-7; anchor=does not authorise a release
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:226-235; anchor=liblcms2-2.dll
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:247-249; anchor=Nothing has been switched over.
+- citer=windows/docs/LGPL-COMPLIANCE.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:250-252; anchor=no LICENSE file
+- citer=windows/docs/THIRD-PARTY-NOTICES.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:18-22; anchor=Is there now a real LGPL-compatible libmpv?
+- citer=windows/docs/THIRD-PARTY-NOTICES.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:228-235; anchor=libiconv-2.dll
+- citer=windows/docs/licensing/SBOM.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:222-252; anchor=Residual obligations
+- citer=windows/docs/LGPL-ENGINE-SWITCH.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:222-252; anchor=Residual obligations
+- citer=windows/docs/W12-DOC-AUDIT.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:18; anchor=real LGPL-compatible libmpv
+- citer=windows/docs/licensing/VULKAN-NECESSITY.md; target=windows/docs/licensing/W5-LGPL-BUILD.md; cite=W5-LGPL-BUILD.md:181; anchor=Vulkan context
+- citer=windows/docs/licensing/VULKAN-NECESSITY.md; target=windows/docs/W13-LGPL-ENGINE-PROBE.md; cite=W13-LGPL-ENGINE-PROBE.md:65-73; anchor=lgpl-candidate
+<!-- END line-pointer-contract -->

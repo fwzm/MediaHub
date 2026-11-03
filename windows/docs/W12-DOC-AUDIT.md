@@ -8,6 +8,21 @@
 - 基线：本地 HEAD = `282dcc2058815317a3ce285f04855d078404a7ab` = `origin/feature/windows-client` = PR #33 `headRefOid`（ahead/behind 0/0）；`origin/main` = `1246313c7a66d492258b5b4b20b51cbdcf2da9cc`；PR #33 OPEN + Draft + MERGEABLE + CLEAN；PR #39 `headRefOid` = `01233cabf1488f3c05fcd44e472fee153fe0b977`（base `feature/windows-client`，Draft，mergeable UNKNOWN，相对当前分支 1 ahead / 21 behind）。
 - CI（exact SHA `282dcc2`）：run 39955246292 `windows-ci`/push/success、39955255418 `Android CI`/pull_request/success、39955255573 `windows-ci`/pull_request/success；无 in_progress/queued。
 
+## 0. 机器可读状态（CI 核对）
+
+<!-- doc-audit-status:begin -->
+snapshot-status: historical-audit-not-current
+audit-date: 2026-10-24
+baseline-head: 282dcc2058815317a3ce285f04855d078404a7ab
+baseline-branch: feature/windows-client
+counts-are-as-of: baseline-head
+recheck-rule: every number here must be re-verified against a fresh run before it is used as current
+current-truth-source: windows-ci run log (dotnet test output + check-licence-surface)
+doc-role: dated audit snapshot - never the acceptance authority
+<!-- doc-audit-status:end -->
+
+本文所有数字（测试条数、行号、哈希、PR 状态）都是 **as-of `baseline-head` 的历史快照**，接近「当前」的用法必须重新核对；CI 运行日志才是当下的权威。第 4 节列出的「不跑测试 / 不构建即无法判定」是这份快照的边界，不随时间推移自动失效。
+
 ## 1. 核实为【相符】（未改）
 
 | 文件:行 | 断言 | 证据 |
@@ -91,3 +106,18 @@ foreach ($s in @('emby','jellyfin')) {
   "$s $($a.Count) checks / $(($a | Where-Object pass).Count) pass"
 }
 ```
+
+## 6. 历史数字的核对契约（CI 核对）
+
+<!-- BEGIN doc-audit-history -->
+history-owner: check-licence-surface.ps1:doc-audit-history-claims
+history-baseline-head: 282dcc2058815317a3ce285f04855d078404a7ab
+history-claim-count: 5
+- record=windows/docs/licensing/W5-LGPL-BUILD.md; lines=252; anchors=3,327,274
+- record=.github/workflows/windows-ci.yml; lines=140; anchors=windows/artifacts/portable
+- record=.github/workflows/windows-ci.yml; range=114-119; anchors=dotnet publish
+- record=.github/workflows/windows-ci.yml; range=121-129; anchors=Smoke-check
+- record=.github/workflows/windows-ci.yml; range=131-140; anchors=retention-days: 14
+<!-- END doc-audit-history -->
+
+上面每一条都由 `windows/tools/check-licence-surface.ps1` 的 `doc-audit-history-claims`（第 53 项）在 `history-baseline-head` 那个提交上重新解一遍：`git show <commit>:<record>` 的行数必须等于 `lines=`，`range=` 那几行的原文必须含 `anchors=`。所以第 1、2 节里的这些数字不是「当年大概如此」，而是**在基线上可复算**的历史断言——它们此后会随仓库增长而与当前值不同（W5 记录现为 342 行、`windows-ci.yml` 现为 246 行），这是快照的正常状态；要记当前值必须新开一条带日期的记录，不能把这里的数字就地改成现值。

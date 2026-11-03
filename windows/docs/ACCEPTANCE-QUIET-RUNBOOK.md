@@ -7,6 +7,26 @@ GUI 验收必须占用真实交互桌面：UIA 看不到别的桌面上的窗口
 自 2026-10-24 起，本仓库所有 GUI 验收**只能**通过 `run-quiet.ps1` 启动，不再允许直接调用
 `u1/…`、`u2/…`、`u3/…`、`u4/…` 脚本（那会在任意时刻弹窗抢焦点，实测已干扰正常使用）。
 
+## 0. 机器可读状态（CI 核对）
+
+下面这段由 `windows/tools/check-licence-surface.ps1` 的 `quiet-run-claims`（W48，第 42 项）逐字核对：它同时要求 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询间隔、`MhUia.psm1` 的 `Start-MhApp` 守卫都仍与本文一致。有人在脚本里把门禁放宽、或把本文的承诺改小，CI 都会红。
+
+<!-- BEGIN quiet-run-status (checked by check-licence-surface.ps1) -->
+```text
+default-min-idle-seconds: 180
+wait-for-idle-minutes-default: 0
+idle-source: GetLastInputInfo
+quns-allowed-states: 5,6
+watchdog-poll-milliseconds: 700
+abort-marker: watch-*.abort
+suite-reentry-env: MH_ALLOW_ACTIVE
+abort-flag-env: MH_QUIET_ABORT_FILE
+gate-precedence: abort-marker-then-allow-active-then-idle-and-quns
+```
+<!-- END quiet-run-status -->
+
+本文其余 起的各节是人读版说明，不是第二个真源。
+
 ## 一条命令
 
 ```powershell

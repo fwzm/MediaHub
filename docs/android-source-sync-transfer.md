@@ -4303,7 +4303,7 @@ XML 汇总（`<testsuite>` 属性相加，非估算）：
 ### §43.9 门禁与本文档的一处自查
 
 1. **`SourceSyncSecretsGateTest` 已钉进 `--required-suite`（57 → 58）**。理由与 W6-55/W6-72 相同：`--required-suite` 的语义是「这个套件必须真的执行过」，新套件不钉的话，整类被 `@Ignore` 或被 source set 变更挤出编译时，gradle 仍然打印 `BUILD SUCCESSFUL`。改动只有一行（`--required-suite com.mediahub.core.database.sync.SourceSyncSecretsGateTest`），`--require-complete-suites` 与其余 57 行未动；README 的钉住套件数、`core/common` 与 `core/database` 的用例数同步改成 58 / 657 / 206，`uniqueTests` 口径 2363 → 2372。
-2. **本文档 §43 首次落盘时带了构建占位符**：写入脚本用 `{BT}` 表示反引号（避免模板字符串里出现裸反引号），§43 落盘时漏了替换，36 行里留下 230 处字面 `{BT}`。已全文替换为反引号并在同一次提交里修掉——记在这里是因为它本身也是「产物写完必须回读正文」的又一例：只看 `git diff --stat` 与提交成功，看不出正文里混着占位符。
+2. **本文档 §43 首次落盘时带了构建占位符**：写入脚本用 `{BT}` 表示反引号（避免模板字符串里出现裸反引号），§43 落盘时漏了替换，36 行里留下 230 处字面 `{BT}`。已全文替换为反引号并在同一次提交里修掉——记在这里是因为它本身也是「产物写完必须回读正文」的又一例：只看 `git diff --stat` 与提交成功，看不出正文里混着占位符。 <!-- residue-allow -->
 
 ### §44 规划器黄金向量（W6-75）
 
