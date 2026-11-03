@@ -371,13 +371,17 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 | `LogFileSink.cs` 含七处常量/表达式 | 1 MiB / 5 文件默认值变了、文件名模板不再拼 `.log`、轮转触发式被删、整条写入的注释没了、`Describe` 不再给「类型名: 消息」 |
 | 可恢复失败清单与两处 `catch` 计数 | `Append` 或构造不再吞异常（把诊断日志变成崩溃点），或五类磁盘错误里少了任何一类 |
 | `LogService.cs` 含六处 token 与写入顺序 | 环形上限、`FileSink` 注入点、`FileSink?.Append(entry)` 调用、导出目录行或 `Redact` 被删；写入顺序不再是「内存环 → 文件 → EntryAdded」 |
+| 导出目录行必须落在**两种合法形态**之一 | inline 形态的 `sb.AppendLine("# 滚动文件目录：" + FileSink.DirectoryPath);` 与 delegated 形态的 `DiagnosticsReport.Render(..., rollingDirectory: FileSink?.DirectoryPath)` 同时消失；或 delegated 形态的共享渲染器丢了三处字面量（`RollingDirectoryPrefix` 常量、`lines.Add(RollingDirectoryPrefix + rollingDirectory);` 渲染调用、`string? rollingDirectory = null` 形参） |
 | `AppServices.cs` 的组合根正则 + sink 用例数 = 文档声明数 | 应用不再把 sink 建在 `%LOCALAPPDATA%\MediaHub\logs`；或加减用例却没同步文档 |
 
 用例数由脚本当场数出（`[Fact]` 计 1、每条 `[InlineData(` 计 1），不是读文档；文档写 9 而实现是别的数就红。五个路径参数（`-LogFileDocPath`、`-LogFileSinkPath`、`-LogServicePath`、`-AppServicesPath`、`-LogFileTestPath`）让负向对照可以指到临时副本；文档不存在 ⇒ SKIP（退出码仍 0）。
 
 刻意**不**钉「本机实跑 478 passed / 0 failed」这类数字：它会随其它轮次的新增用例漂移，本检查钉的是契约语义与用例数。
 
-### 3.19 日期快照审计（W51，2026-10-31）
+
+**2026-11-04（W60）修订**：原先这一项只认 inline 形态。W6 分支的 S0 合并把导出渲染拆到 `windows/src/MediaHub.Net/DiagnosticsReport.cs`（`RollingDirectoryPrefix` 常量 + `lines.Add(...)` + `string? rollingDirectory = null`），`LogService.Export()` 只留 `DiagnosticsReport.Render(..., rollingDirectory: FileSink?.DirectoryPath)` —— 同一份承诺、只是渲染位置不同，PR #39 的 windows-ci 因此在这一项上连续红了五个提交。判据改为「任一形态成立即 PASS」，PASS 文案写明命中的是哪一种（`(inline shape)` / `(delegated shape)`），两种都不成立时失败文案同时点名。新增路径参数 `-LogReportPath`（默认 `windows/src/MediaHub.Net/DiagnosticsReport.cs`），让负向对照可指到临时副本。**检查总数不变（仍 53 项）**。
+
+### 3.19 日期快照审计（W51，2026-10-31）### 3.19 日期快照审计（W51，2026-10-31）
 
 `windows/docs/W12-DOC-AUDIT.md` 是 2026-10-24 凌晨的一次只读审计（当时 477 tests、PR #33 停在 `282dcc2`、libmpv 吃 120,989,696 B 等）。它天生会过期，而它的数字与当前计数本来就不同——最容易出的两件事是有人把它的 477 当成「现在」引用，或者有人改掉它的基线提交，让整份快照失去锚点。第 45 项 `doc-audit-snapshot-claims` 钉住：
 
@@ -1137,7 +1141,25 @@ RESULT: PASS
 - 逐条实跑日志：`D:/mh-verify/w59-nc/NC1.log` … `NC9.log`，汇总 `D:/mh-verify/w59-nc/summary.txt`，驱动脚本 `D:/mh-verify/w59-nc/run.sh`。
 - 本轮**不改历史数字**：252 行 / 140 行 / 三个区间在 `282dcc20` 上实测都成立，漂移的是今天的工作树（342 行 / 246 行）。把这些数字留在快照里、并让 CI 回到基线提交上复核，正是本项与第 45 项的分工：第 45 项证明「这是快照」，第 53 项证明「快照里的数字当天是对的」。
 
-## 5. 这个工具**不**覆盖什么
+### 4.28 实测（2026-11-04，W60，本机）
+
+- 正向（主树，`D:/mh-verify/w60-positive3.log`）：`checks=53 failed=0 warnings=0 skipped=0` / `RESULT: PASS`；本项 PASS 尾部 `(inline shape)`。
+- 反向正向（PR #39 的 merge ref 真树 `D:/mh-verify/pr39-merge`，`-RepoRoot` 指过去、守卫用新副本）：本项 PASS 且尾部 `(delegated shape)`（`D:/mh-verify/w60-mergeref-positive.log`）—— 这就是修 PR #39 红项的直接证据：同一份守卫在两种实现形态下都判 PASS。该旧树另有 3 红是环境差而非本项：`report-project-count`（我传的是主树报告 13 项目，该树 18 个 csproj）、`check-inventory`（该树文档仍写 52 项、未点名 `doc-audit-history-claims`）、`doc-audit-history-claims`（该树 W12 文档还没有 §6 块，W59 未含）。
+
+- 负向对照（每条恰好一个检查变红；NC3/NC4 在 merge 树上跑，前两项红为该树既有环境差，因此看**新增**的那一条）：
+
+| 用例 | 注入 | 结果 |
+| --- | --- | --- |
+| NC1 | 删主树 `LogService.cs` 的 inline 指针行 | `checks=53 failed=1`，唯一红是本项，文案点名两种形态 |
+| NC2 | 把 `FileSink?.Append(entry);` 与 `EntryAdded?.Invoke(this, entry);` 顺序对调 | 1 红：`the write order changed: an entry must reach the memory ring, then the file sink, and only then the EntryAdded subscribers`（证明改写形态判据没有削弱写入顺序判据） |
+| NC3 | merge 树 `DiagnosticsReport.RollingDirectoryPrefix` 改成 `# 滚动日志目录：` | `failed=4`，新增唯一红：`the shared renderer no longer contains public const string RollingDirectoryPrefix = …` |
+| NC4 | merge 树删 `lines.Add(RollingDirectoryPrefix + rollingDirectory);` | `failed=4`，新增唯一红：`… no longer contains lines.Add(RollingDirectoryPrefix + rollingDirectory);` |
+
+- 逐条日志：`D:/mh-verify/w60-nc1.log` / `w60-nc2.log` / `w60-nc3.log` / `w60-nc4.log`。实现态快照 `D:/mh-verify/w60-snap-LogService.cs`（sha256 `02934094…`）与 `D:/mh-verify/w60-snap-DiagnosticsReport.cs`（sha256 `23bcca29…`），四条对照后逐字节还原并复核 sha 相等。
+
+- 一条自证：本轮新增 `-LogReportPath` 参数后重跑正向仍 `checks=53 failed=0`，`check-inventory` 未因新增参数改变计数 —— 检查项数只由实际发射的 id 决定，参数是入口不是判据。
+
+## 5. 这个工具**不**覆盖什么## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。
 - 不下载任何包的许可原文：`file` 型许可按包内文件名与首 6 KB 文本猜测（如 `LICENSE.txt` → BSD-3-Clause / Microsoft EULA），结果带 `~` 前缀，属于「线索」不是「判定」。

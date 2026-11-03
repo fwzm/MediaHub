@@ -275,6 +275,7 @@ param(
     [string] $LogFileDocPath,
     [string] $LogFileSinkPath,
     [string] $LogServicePath,
+    [string] $LogReportPath,
     [string] $AppServicesPath,
     [string] $LogFileTestPath,
     [string] $DocAuditPath,
@@ -332,6 +333,7 @@ $resumeFloorTestFile = Resolve-RepoPath -Path $ResumeFloorTestPath -Default 'win
 $logFileDocFile = Resolve-RepoPath -Path $LogFileDocPath -Default 'windows/docs/W14-DIAGNOSTIC-LOG-FILES.md'
 $logFileSinkFile = Resolve-RepoPath -Path $LogFileSinkPath -Default 'windows/src/MediaHub.Net/LogFileSink.cs'
 $logServiceFile = Resolve-RepoPath -Path $LogServicePath -Default 'windows/src/MediaHub.Net/LogService.cs'
+$logReportFile = Resolve-RepoPath -Path $LogReportPath -Default 'windows/src/MediaHub.Net/DiagnosticsReport.cs'
 $appServicesFile = Resolve-RepoPath -Path $AppServicesPath -Default 'windows/src/MediaHub.App/AppServices.cs'
 $logFileTestFile = Resolve-RepoPath -Path $LogFileTestPath -Default 'windows/tests/MediaHub.Tests/LogFileSinkTests.cs'
 $docAuditFile = Resolve-RepoPath -Path $DocAuditPath -Default 'windows/docs/W12-DOC-AUDIT.md'
@@ -1857,6 +1859,7 @@ else {
 # --- 21. the rolling diagnostic-log file contract ----------------------------------------------
 $logFileBlock = ''
 $logFileCaseCount = 0
+$rollingShape = ''
 $logFileProblems = [System.Collections.Generic.List[string]]::new()
 if (-not (Test-Path -LiteralPath $logFileDocFile)) {
     Add-Check 'log-file-claims' 'SKIP' 'windows/docs/W14-DIAGNOSTIC-LOG-FILES.md is absent, so the rolling-file contract has nothing to compare against'
@@ -1929,10 +1932,38 @@ else {
             'public LogFileSink? FileSink { get; }',
             'public LogService(LogFileSink? fileSink = null)',
             'FileSink?.Append(entry);',
-            'sb.AppendLine("# 滚动文件目录：" + FileSink.DirectoryPath);',
             'public static string Redact(string? input)'
         )) {
             if (-not $logServiceText.Contains($serviceNeedle)) { $logFileProblems.Add('the log service no longer contains ' + $serviceNeedle) }
+        }
+        # The export pointer line has two legitimate shapes, and this check must not pin one of them:
+        # shape 'inline' renders the line inside the log service, shape 'delegated' hands the directory
+        # to the shared DiagnosticsReport renderer (the single-renderer union that PR #39 carries and
+        # that becomes this branch's own shape when it merges). Both must still print the same literal
+        # prefix, and both must still promise nothing about rolling files when there is no sink.
+        $inlineShapeNeedle = 'sb.AppendLine("# 滚动文件目录：" + FileSink.DirectoryPath);'
+        $delegatedShapeNeedle = 'rollingDirectory: FileSink?.DirectoryPath'
+        if ($logServiceText.Contains($inlineShapeNeedle)) {
+            $rollingShape = 'inline'
+        }
+        elseif ($logServiceText.Contains($delegatedShapeNeedle)) {
+            $rollingShape = 'delegated'
+            if (-not (Test-Path -LiteralPath $logReportFile)) {
+                $logFileProblems.Add('the log service delegates the export pointer line to windows/src/MediaHub.Net/DiagnosticsReport.cs but that renderer is absent')
+            }
+            else {
+                $logReportText = Get-Content -LiteralPath $logReportFile -Raw
+                foreach ($reportNeedle in @(
+                    'public const string RollingDirectoryPrefix = "# 滚动文件目录：";',
+                    'lines.Add(RollingDirectoryPrefix + rollingDirectory);',
+                    'string? rollingDirectory = null'
+                )) {
+                    if (-not $logReportText.Contains($reportNeedle)) { $logFileProblems.Add('the shared renderer no longer contains ' + $reportNeedle) }
+                }
+            }
+        }
+        else {
+            $logFileProblems.Add('the log service no longer emits the export pointer line in either accepted shape - neither the inline append nor the delegated renderer call (' + $delegatedShapeNeedle + ') is there')
         }
         $ringAt = $logServiceText.IndexOf('_entries.Add(entry);', [System.StringComparison]::Ordinal)
         $sinkAt = $logServiceText.IndexOf('FileSink?.Append(entry);', [System.StringComparison]::Ordinal)
@@ -1968,7 +1999,7 @@ else {
     }
 
     if ($logFileProblems.Count -eq 0) {
-        Add-Check 'log-file-claims' 'PASS' ('the rolling-file contract still holds: ' + $logFileCaseCount + ' test case(s) pin a 1 MiB / 5-file trail that rotates between entries, never throws, and records LastError for the five recoverable failure types, while LogService keeps the 2000-entry ring and the export directory line')
+        Add-Check 'log-file-claims' 'PASS' ('the rolling-file contract still holds: ' + $logFileCaseCount + ' test case(s) pin a 1 MiB / 5-file trail that rotates between entries, never throws, and records LastError for the five recoverable failure types, while LogService keeps the 2000-entry ring and the export directory line (' + $rollingShape + ' shape)')
     }
     else {
         Add-Check 'log-file-claims' 'FAIL' (($logFileProblems -join '; ') + ' - update windows/docs/W14-DIAGNOSTIC-LOG-FILES.md section 0 and the code it describes')
