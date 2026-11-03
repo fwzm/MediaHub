@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-04T02:5x+08:00",
+  "updated_at": "2026-11-04T03:0x+08:00",
   "updated_by": "lead-W6-113-r35",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -779,7 +779,8 @@
         "both shells on the real corpus: exit 0, 3,150 B byte-identical body (3,157 B with the EXIT line), MediaHub.Tests assemblyDeclaration=1952 storage/codeBase pairs=1952 same file adapters=1, WebDav 104/104/1, combined tests=2056, every line of the first seventeen layers unchanged",
         "exact-head windows-ci 41696425558 (@96d8b888ea11a388a099a17160aef5db94d6e0d8) = success: both new ladder lines present, all earlier ladder lines unchanged",
         "licence on that head: `check-licence-surface` checks=53 failed=0 warnings=0 skipped=0（`18:45:41Z`）",
-        "Android CI 41696425581 was in_progress（02:50 取证时点） when sampled; core/feature/app tree hashes identical to 54334b871958c7abcf57b8817fb7a7bc4ce106b5 (ff4eed82 / e983feb0 / 70c54145) so the Android side inherits under ADR-AUTO-001"
+        "Android CI 41696425581 was in_progress（02:50 取证时点） when sampled; core/feature/app tree hashes identical to 54334b871958c7abcf57b8817fb7a7bc4ce106b5 (ff4eed82 / e983feb0 / 70c54145) so the Android side inherits under ADR-AUTO-001",
+        "docs head 58252cab116a57419ab21090e33c4da2aa4fccdb: windows-ci 41698480546 = success with the same ladder lines and licence `check-licence-surface` checks=53 failed=0 warnings=0 skipped=0（`18:59:09Z`）; Android CI 41698480354 = 取证时仍 in_progress（03:01 时点）"
       ],
       "notes": "第十八层补上定义侧最后一处「同一事实写了两次却无人比对」：UnitTest/@storage 与 TestMethod/@codeBase。与第十六、十七层同理，判据只读文件自身，不进基线、无迁移。适配器值刻意不写死（只钉存在 + 单文件唯一），避免 runner 版本变化误红。",
       "next_action": "套件基线第十九层候选：Times/@creation 与 @queuing（全文 0 引用，但已知反例 creation/queuing 可晚于 start，只能做「不早于文件自身出现」或跨文件单调这类弱口径）；UnitTest/@storage 指向的 dll 是否真实存在于 ResultsDir 同级目录（需要文件系统证据，非纯 TRX 不变量）。",

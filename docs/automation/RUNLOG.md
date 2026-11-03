@@ -574,3 +574,9 @@
 
 ### 锁
 - run-id `w6-r35-q7t2n5`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `213036bd9bdbd109b1f7831928c36870`）、`ref:origin/feature/cross-device-source-sync`（token `c6cc3c4055a19690e2a33f503df0950e`）、`worktree:D:/mh-w6`（token `60cba963cfa295f85ff71a4fc022f3b1`），取锁前 `status` 为 `locks: []`，收尾已释放。
+
+### docs head 验收（EXECUTED）
+- docs 提交 **`58252cab116a57419ab21090e33c4da2aa4fccdb`**（`docs(automation): round 35 - the gate pins each definition to its own assembly and adapter declaration (W6-113ai)`，3 files changed / +129 −2），非 force push `96d8b888..58252cab`；`git ls-remote` 远端 ref 同值，`rev-list --left-right --count` = 0/0。
+- docs head 的 windows-ci **`41698480546` = success**（`pull_request`，日志 `D:/mh-verify/r33/ci-docshead.log`，145,213 B）：台阶行与代码 head 逐字一致（`assemblyDeclaration=1952 …` / webdav `=104 …`），`combined tests=2056`。
+- licence 步骤：`check-licence-surface` checks=53 failed=0 warnings=0 skipped=0（`18:59:09Z`）。
+- 同 head Android CI `41698480354` = 取证时仍 in_progress（03:01 时点）；代码 head 的 Android CI `41696425581` 收尾为 cancelled（`android-ci.yml` 的 concurrency 只按 ref）；`58252cab` 相对 `96d8b888` 只改 `docs/automation/` 三文件，`core`/`feature`/`app` 三子树哈希不变 ⇒ 继承依据成立。

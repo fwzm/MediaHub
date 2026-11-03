@@ -1287,3 +1287,4 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 - head `96d8b888ea11a388a099a17160aef5db94d6e0d8` 的 windows-ci **`41696425558` = success**（`pull_request`，日志 `D:/mh-verify/r33/ci-codehead.log`，145,222 B）：出现 `MediaHub.Tests: assemblyDeclaration=1952 storage/codeBase pairs=1952 same file adapters=1` 与 `MediaHub.WebDav.Tests: …=104 …=104 …=1`，前十七层台阶行逐字不变，`combined tests=2056`。
 - licence：`check-licence-surface` checks=53 failed=0 warnings=0 skipped=0（`18:45:41Z`）。
 - 同 head Android CI `41696425581` = in_progress（02:50 取证时点）；`core`/`feature`/`app` 三子树哈希与 `54334b871958c7abcf57b8817fb7a7bc4ce106b5` 全同 ⇒ 按 ADR-AUTO-001 继承、不作独立结论。
+- docs head `58252cab116a57419ab21090e33c4da2aa4fccdb` 的 windows-ci **`41698480546` = success**（`pull_request`，日志 `D:/mh-verify/r33/ci-docshead.log`）：台阶行与代码 head 逐字一致，licence `check-licence-surface` checks=53 failed=0 warnings=0 skipped=0（`18:59:09Z`）；同 head Android CI `41698480354` = 取证时仍 in_progress（03:01 时点）。
