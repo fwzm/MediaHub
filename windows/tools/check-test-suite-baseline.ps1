@@ -117,6 +117,20 @@
 #   red: a row moving from Passed to Aborted keeps the total, every class, every
 #   method case count and every argument row identical.
 #
+#
+#   One more level, on the file's header rather than its body: TestRun/@name and
+#   @runUser name the run, TestSettings names the settings block (with its own id)
+#   and Deployment names the directory the run deployed into. No count reads any of
+#   them, and the row metadata check only asks computerName to be uniform inside one
+#   file - so a header swapped for another run's header, or a header naming a
+#   different machine than every row under it, keeps all of them identical. VSTest
+#   writes the run name as "<user>@<machine> <date> <time>" and derives the
+#   deployment root from it by replacing "@", " " and ":" with "_"; a name in that
+#   shape is checked against both runUser and the deployment root, a name in any
+#   other shape is only reported, and a header id that is also a test, execution or
+#   list id fails. The run prints
+#   runHeader=/settings=/deployments=/derivedRoot=/bound rows=/header id collisions=.
+#
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -169,6 +183,16 @@
 #     to look clean keeps its old or any plausible verdict, and no count reads it.
 #   failed != 0 or notExecuted != 0 -> red
 #
+#   the file's header disagrees with the rows it summarises (TestSettings missing,
+#     duplicated or nameless, Deployment missing, duplicated or without a root, a
+#     runUser that is not machine<backslash>user, a name whose user or machine half
+#     disagrees with runUser, a canonical name whose deployment root is not the name
+#     with "@", " " and ":" replaced by "_", or a header id reused as a test,
+#     execution or list id) -> red: every count is read from the rows and counters,
+#     so a swapped header keeps all of them identical.
+#   a run name that is not user@machine plus a timestamp, a TestSettings id that is
+#     not GUID-shaped -> warning (the producer format is not pinned, only its
+#     internal consistency is).
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
 #   expected <= 0, empty file/suite, missing/empty classes object, missing/empty
 #   methods object, a class listed in one table but not the other, a class with
@@ -464,6 +488,7 @@ $fileOfExecution = @{}
 $runIdWarn = @()
 $fileIdentityLost = @()
 $counterVocabularyWarn = @()
+$headerWarn = @()
 foreach ($e in $baseline.suites) {
   $path = Join-Path -Path $ResultsDir -ChildPath $e.file
   if (-not (Test-Path -LiteralPath $path)) {
@@ -1115,6 +1140,121 @@ foreach ($e in $baseline.suites) {
   # below) so that every pre-existing check keeps its own failure text: a fixture that
   # trips a legacy rule must still fail with the legacy message, not with this layer's.
 
+  # The header of each file names the run itself: TestRun/@name and @runUser say
+  # which user ran it on which machine, TestSettings names the settings block and
+  # carries its own id, and Deployment names the directory the run deployed into.
+  # No count above reads any of them, and the row metadata check only requires
+  # computerName to be uniform inside one file - so a header swapped for another
+  # run's header, or a header naming a different machine than every row under it,
+  # keeps all of them identical. VSTest writes the run name as
+  # "<user>@<machine> <date> <time>" and derives the deployment root from it by
+  # replacing "@", " " and ":" with "_"; a name in any other shape is only
+  # reported, so a different producer format cannot turn a clean run red.
+  $headerLost = @()
+  $headerFileWarn = @()
+  $settingsCount = 0
+  $deploymentCount = 0
+  $settingsId = $null
+  $settingsName = $null
+  $deploymentRoot = $null
+  foreach ($child in @($xml.TestRun.ChildNodes)) {
+    if ([string]$child.LocalName -ne 'TestSettings') { continue }
+    $settingsCount++
+    foreach ($sat in @($child.Attributes)) {
+      if ([string]$sat.Name -eq 'id') { $settingsId = [string]$sat.Value }
+      if ([string]$sat.Name -eq 'name') { $settingsName = [string]$sat.Value }
+    }
+    foreach ($sub in @($child.ChildNodes)) {
+      if ([string]$sub.LocalName -ne 'Deployment') { continue }
+      $deploymentCount++
+      foreach ($dat in @($sub.Attributes)) {
+        if ([string]$dat.Name -eq 'runDeploymentRoot') { $deploymentRoot = [string]$dat.Value }
+      }
+    }
+  }
+  $runName = [string]$xml.TestRun.name
+  $runUser = [string]$xml.TestRun.runUser
+  $runNameUser = $null
+  $runNameMachine = $null
+  $runNameCanonical = $false
+  if ($runName -match '^(\S+)@(\S+) ([0-9]{4}-[0-9]{2}-[0-9]{2}) ([0-9]{2}:[0-9]{2}:[0-9]{2})$') {
+    $runNameCanonical = $true
+    $runNameUser = [string]$Matches[1]
+    $runNameMachine = [string]$Matches[2]
+  }
+  $runUserMachine = $null
+  $runUserLeaf = $null
+  $runUserCanonical = $false
+  if ($runUser -match '^([^\\]+)\\([^\\]+)$') {
+    $runUserCanonical = $true
+    $runUserMachine = [string]$Matches[1]
+    $runUserLeaf = [string]$Matches[2]
+  }
+  $derivedRoot = 0
+  $headerMachine = $null
+  if ($settingsCount -ne 1) { $headerLost += "the file declares $settingsCount TestSettings block(s)" }
+  if ([string]::IsNullOrWhiteSpace($settingsName)) { $headerLost += 'TestSettings names no settings block' }
+  if ([string]::IsNullOrWhiteSpace($settingsId)) {
+    $headerLost += 'TestSettings records no id'
+  } elseif ($settingsId -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
+    if ($headerFileWarn.Count -lt 12) { $headerFileWarn += "$($e.file) TestSettings id '$settingsId' is not a GUID" }
+  }
+  if ($deploymentCount -ne 1) { $headerLost += "TestSettings declares $deploymentCount Deployment element(s)" }
+  if ([string]::IsNullOrWhiteSpace($deploymentRoot)) { $headerLost += 'Deployment records no runDeploymentRoot' }
+  if (-not $runUserCanonical) {
+    $headerLost += "TestRun names runUser '$runUser', which is not machine and user"
+  } else {
+    $headerMachine = $runUserMachine
+  }
+  if (-not $runNameCanonical) {
+    if ($headerFileWarn.Count -lt 12) { $headerFileWarn += "$($e.file) run name '$runName' is not user@machine plus a timestamp - the deployment root cannot be derived from it" }
+  } else {
+    if ($runUserCanonical) {
+      if (-not [string]::Equals($runNameUser, $runUserLeaf, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $headerLost += "TestRun name says user '$runNameUser' while runUser says '$runUserLeaf'"
+      }
+      if (-not [string]::Equals($runNameMachine, $runUserMachine, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $headerLost += "TestRun name says machine '$runNameMachine' while runUser says '$runUserMachine'"
+      }
+    }
+    $derivedExpect = $runName.Replace('@', '_').Replace(' ', '_').Replace(':', '_')
+    if (-not [string]::IsNullOrWhiteSpace($deploymentRoot)) {
+      if ([string]::Equals($deploymentRoot, $derivedExpect, [System.StringComparison]::Ordinal)) {
+        $derivedRoot = 1
+      } else {
+        $headerLost += "Deployment root '$deploymentRoot' is not the run name with its separators replaced ('$derivedExpect')"
+      }
+    }
+  }
+  $boundRows = 0
+  if ($null -ne $headerMachine -and [int]$attrValues['computerName'].Count -eq 1) {
+    $rowMachine = ''
+    foreach ($rk in @($attrValues['computerName'].Keys)) { $rowMachine = [string]$rk }
+    if ([string]::Equals($rowMachine, $headerMachine, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $boundRows = $rowCount
+    } else {
+      $headerLost += "every row ran on '$rowMachine' while the run header names machine '$headerMachine'"
+    }
+  }
+  $headerFacts = 0
+  if ($runNameCanonical) { $headerFacts++ }
+  if ($runUserCanonical) { $headerFacts++ }
+  if ($derivedRoot -eq 1) { $headerFacts++ }
+  $headerCollisions = 0
+  foreach ($hid in @($runId, $settingsId)) {
+    if ([string]::IsNullOrWhiteSpace([string]$hid)) { continue }
+    if ($defIdCounts.ContainsKey([string]$hid) -or $execIdCounts.ContainsKey([string]$hid) -or $listNames.ContainsKey([string]$hid)) {
+      $headerCollisions++
+      if ($headerLost.Count -lt 12) { $headerLost += "header id $hid is also a test id, an execution id or a list id inside the file" }
+    }
+  }
+  if (-not [string]::IsNullOrWhiteSpace($runId) -and -not [string]::IsNullOrWhiteSpace($settingsId) -and [string]::Equals($runId, $settingsId, [System.StringComparison]::OrdinalIgnoreCase)) {
+    $headerCollisions++
+    if ($headerLost.Count -lt 12) { $headerLost += 'the run id and the TestSettings id are the same id' }
+  }
+
+  $headerWarn += $headerFileWarn
+
   $actualMethodCount = 0
   foreach ($k in @($actualMethods.Keys)) { $actualMethodCount += @($actualMethods[$k].Keys).Count }
   $baselineMethodCount = 0
@@ -1151,6 +1291,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
+  "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot bound rows=$boundRows header id collisions=$headerCollisions"
   "$($e.suite): summaryOutcome=$summaryOutcome failureBuckets=$failureBucketTotal contradiction=$($summaryContradiction.Count)"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
@@ -1325,6 +1466,9 @@ foreach ($e in $baseline.suites) {
   if ($summaryContradiction.Count -gt 0) {
     throw "$($e.suite): $($e.file) records a ResultSummary whose verdict contradicts the Counters block it summarises while the total was $total - every count above is read from this block, so a stale or invented verdict keeps all of them looking exactly like the baseline reviewed. broken: [$(@($summaryContradiction) -join '; ')]. A TRX whose verdict does not match its own buckets was hand-merged or patched; regenerate it from a clean test run."
   }
+  if ($headerLost.Count -gt 0) {
+    throw "$($e.suite): the run header does not agree with the rows it summarises while the total was $total - every count above is read from the rows and the counters, and nothing read the header that names the run, its settings block, the deployment root or the machine the rows ran on, so a header swapped for another run's keeps all of them identical. mismatched: $($headerLost -join ', '). A TRX whose header disagrees with its own rows was hand-merged or patched; regenerate it from a clean test run."
+  }
   $all += $total
 }
 
@@ -1423,5 +1567,10 @@ if ($fileIdentityLost.Count -gt 0) {
   $shownFileIdentity = $fileIdentityLost
   if ($shownFileIdentity.Count -gt 12) { $shownFileIdentity = $shownFileIdentity[0..11] + "... ($($fileIdentityLost.Count - 12) more)" }
   throw "the results files do not describe distinct test runs - every count above is read from one file at a time, so a file copied over another suite's name, or one run exported twice, doubles what this gate reports while each file still looks exactly like the baseline reviewed it. mismatched: $($shownFileIdentity -join '; ') . A results set whose files share a run id or an execution id was copied or exported twice; regenerate each file from its own test run."
+}
+if ($headerWarn.Count -gt 0) {
+  $shownHeader = $headerWarn
+  if ($shownHeader.Count -gt 12) { $shownHeader = $shownHeader[0..11] + "... ($($headerWarn.Count - 12) more)" }
+  Write-Host "::warning::a run header this gate cannot derive - the run name or the settings id has an unexpected shape, so only its internal consistency was checked: $($shownHeader -join '; ')"
 }
 "combined tests=$all"
