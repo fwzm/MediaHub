@@ -1290,6 +1290,7 @@ $declaredCheckIds = @(
     'sbom-flavour-claims',
     'reproducible-build-claims',
     'cross-doc-pointer-claims',
+    'doc-audit-history-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -2694,6 +2695,122 @@ if (-not (Test-Path -LiteralPath $pointerContractFile)) {
     } else {
         Add-Check 'cross-doc-pointer-claims' 'FAIL' ($pointerProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $pointerProblems) + ' - re-anchor the contract in windows/docs/licensing/W5-LGPL-BUILD.md and in the citing records: a line-number citation breaks silently when the target grows above it')
     }
+# --- 29. the W12 audit's dated numbers must still hold at its own baseline (W59) ----------
+if (-not (Test-Path -LiteralPath $docAuditFile)) {
+    Add-Check 'doc-audit-history-claims' 'SKIP' 'the W12 audit snapshot is absent (windows/docs/W12-DOC-AUDIT.md)'
+}
+else {
+    $historyText = Get-Content -LiteralPath $docAuditFile -Raw
+    $historyProblems = [System.Collections.Generic.List[string]]::new()
+    $historyWarn = ''
+    $historyBegin = '<!-- BEGIN doc-audit-history -->'
+    $historyEnd = '<!-- END doc-audit-history -->'
+    $historyBeginAt = $historyText.IndexOf($historyBegin, [System.StringComparison]::Ordinal)
+    $historyEndAt = $historyText.IndexOf($historyEnd, [System.StringComparison]::Ordinal)
+    $historyEntries = @()
+    $historyHead = ''
+    if ($historyBeginAt -lt 0 -or $historyEndAt -lt $historyBeginAt) {
+        $historyProblems.Add('the audit no longer carries the doc-audit-history block')
+    }
+    else {
+        $historyBlock = $historyText.Substring($historyBeginAt, $historyEndAt - $historyBeginAt + $historyEnd.Length)
+        if (-not [regex]::IsMatch($historyBlock, 'history-owner:\s*check-licence-surface\.ps1:doc-audit-history-claims')) {
+            $historyProblems.Add('the history-owner line no longer names this check')
+        }
+        $statusMatch = [regex]::Match($historyText, '(?s)<!-- doc-audit-status:begin -->(.*?)<!-- doc-audit-status:end -->')
+        $statusHead = [regex]::Match($statusMatch.Value, 'baseline-head: ([0-9a-f]{40})')
+        $ownHead = [regex]::Match($historyBlock, 'history-baseline-head: ([0-9a-f]{40})')
+        if (-not $ownHead.Success) {
+            $historyProblems.Add('the history block no longer declares a 40-hex history-baseline-head')
+        }
+        else {
+            $historyHead = $ownHead.Groups[1].Value
+            if ($statusHead.Success -and $historyHead -ne $statusHead.Groups[1].Value) {
+                $historyProblems.Add('the history block claims baseline ' + $historyHead + ' but the status block says ' + $statusHead.Groups[1].Value)
+            }
+        }
+        $historyEntries = @([regex]::Matches($historyBlock, '(?m)^-\s*record=([^;]+);\s*(.+?)\s*$') | ForEach-Object { [pscustomobject]@{ record = $_.Groups[1].Value.Trim(); claim = $_.Groups[2].Value.Trim() } })
+        $declaredHistory = [regex]::Match($historyBlock, 'history-claim-count: (\d+)')
+        if (-not $declaredHistory.Success) {
+            $historyProblems.Add('the history block no longer declares history-claim-count')
+        }
+        elseif ([int]$declaredHistory.Groups[1].Value -ne $historyEntries.Count) {
+            $historyProblems.Add('the history block declares ' + $declaredHistory.Groups[1].Value + ' claim(s) but lists ' + $historyEntries.Count)
+        }
+        if ($historyEntries.Count -lt 4) { $historyProblems.Add('the history block lists only ' + $historyEntries.Count + ' claim(s); the audit names at least four') }
+        foreach ($needle in @('文件实测 252 行', '140 行：', ':114-119', ':121-129', ':131-140')) {
+            if (-not $historyText.Contains($needle)) { $historyProblems.Add('the audit body no longer states ' + $needle + ' as one of its dated numbers') }
+        }
+        if ($historyHead -ne '') {
+            $historyGit = Get-Command git -ErrorAction SilentlyContinue
+            if (-not $historyGit) {
+                $historyWarn = 'git is unavailable here, so the dated claims could not be re-read at their baseline commit'
+            }
+            else {
+                $historyShallow = @(& git -C $RepoRoot rev-parse --is-shallow-repository 2>$null)
+                $historyShallowText = if (@($historyShallow).Count -gt 0) { [string]$historyShallow[0] } else { '' }
+                if ($historyShallowText -eq 'true') {
+                    $historyWarn = 'this clone is shallow, so it cannot re-read the dated claims at ' + $historyHead + ' - fetch-depth: 0 resolves it'
+                }
+                else {
+                    $historyGitExe = $historyGit.Source
+                    foreach ($entry in $historyEntries) {
+                        $historyTmp = [System.IO.Path]::GetTempFileName()
+                        $historyCommand = [char]34 + $historyGitExe + [char]34 + ' -C ' + [char]34 + $RepoRoot + [char]34 + ' show ' + $historyHead + ':' + $entry.record + ' > ' + [char]34 + $historyTmp + [char]34
+                        & cmd /c $historyCommand 2>$null | Out-Null
+                        $historySize = 0
+                        if (Test-Path -LiteralPath $historyTmp) { $historySize = (Get-Item -LiteralPath $historyTmp).Length }
+                        if ($historySize -eq 0) {
+                            $historyProblems.Add('the audit cites ' + $entry.record + ' but that path is not in commit ' + $historyHead)
+                            Remove-Item -LiteralPath $historyTmp -ErrorAction SilentlyContinue
+                            continue
+                        }
+                        # git show through the PowerShell pipeline merges the last lines of this blob, so read the
+                        # redirected bytes and count newlines the way Get-Content counts a checked-out file.
+                        $historyBytes = [System.IO.File]::ReadAllBytes($historyTmp)
+                        $historyNewlines = 0
+                        foreach ($historyByte in $historyBytes) { if ($historyByte -eq 10) { $historyNewlines++ } }
+                        $historyLineCount = $historyNewlines
+                        if ($historyBytes[$historyBytes.Length - 1] -ne 10) { $historyLineCount = $historyNewlines + 1 }
+                        $fileLines = @(Get-Content -LiteralPath $historyTmp)
+                        $lineClaim = [regex]::Match($entry.claim, 'lines=(\d+)')
+                        if ($lineClaim.Success -and [int]$lineClaim.Groups[1].Value -ne $historyLineCount) {
+                            $historyProblems.Add($entry.record + ' has ' + $historyLineCount + ' line(s) at ' + $historyHead + ' but the audit says ' + $lineClaim.Groups[1].Value)
+                        }
+                        $rangeClaim = [regex]::Match($entry.claim, 'range=(\d+)-(\d+)')
+                        $anchorClaim = [regex]::Match($entry.claim, 'anchors=(.+)$')
+                        if ($rangeClaim.Success -and $anchorClaim.Success) {
+                            $rangeFrom = [int]$rangeClaim.Groups[1].Value
+                            $rangeTo = [int]$rangeClaim.Groups[2].Value
+                            if ($rangeFrom -lt 1 -or $rangeTo -gt $historyLineCount -or $rangeTo -lt $rangeFrom) {
+                                $historyProblems.Add('the range ' + $rangeFrom + '-' + $rangeTo + ' of ' + $entry.record + ' no longer fits a file of ' + $historyLineCount + ' line(s) at ' + $historyHead)
+                            }
+                            else {
+                                $rangeText = (@($fileLines[($rangeFrom - 1)..($rangeTo - 1)]) -join [char]10)
+                                if (-not $rangeText.Contains($anchorClaim.Groups[1].Value.Trim())) {
+                                    $historyProblems.Add('the range ' + $rangeFrom + '-' + $rangeTo + ' of ' + $entry.record + ' at ' + $historyHead + ' no longer contains ' + [char]34 + $anchorClaim.Groups[1].Value.Trim() + [char]34)
+                                }
+                            }
+                        }
+                        Remove-Item -LiteralPath $historyTmp -ErrorAction SilentlyContinue
+                    }
+                }
+            }
+        }
+    }
+    if ($historyProblems.Count -eq 0) {
+        if ($historyWarn) {
+            Add-Check 'doc-audit-history-claims' 'WARN' $historyWarn
+        }
+        else {
+            Add-Check 'doc-audit-history-claims' 'PASS' ('every dated number in the W12 audit still holds at ' + $historyHead + ': ' + $historyEntries.Count + ' claim(s) re-read from that commit - the W5 build record line count, and the windows-ci.yml line count with its publish, smoke and upload ranges - and the body still presents them as that snapshot')
+        }
+    }
+    else {
+        Add-Check 'doc-audit-history-claims' 'FAIL' ($historyProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $historyProblems) + ' - re-measure the claim at its baseline commit or start a new dated record: a dated number that no longer matches its own baseline is unverifiable in both directions')
+    }
+}
+
 }
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })

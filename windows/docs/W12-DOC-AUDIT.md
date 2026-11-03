@@ -106,3 +106,18 @@ foreach ($s in @('emby','jellyfin')) {
   "$s $($a.Count) checks / $(($a | Where-Object pass).Count) pass"
 }
 ```
+
+## 6. 历史数字的核对契约（CI 核对）
+
+<!-- BEGIN doc-audit-history -->
+history-owner: check-licence-surface.ps1:doc-audit-history-claims
+history-baseline-head: 282dcc2058815317a3ce285f04855d078404a7ab
+history-claim-count: 5
+- record=windows/docs/licensing/W5-LGPL-BUILD.md; lines=252; anchors=3,327,274
+- record=.github/workflows/windows-ci.yml; lines=140; anchors=windows/artifacts/portable
+- record=.github/workflows/windows-ci.yml; range=114-119; anchors=dotnet publish
+- record=.github/workflows/windows-ci.yml; range=121-129; anchors=Smoke-check
+- record=.github/workflows/windows-ci.yml; range=131-140; anchors=retention-days: 14
+<!-- END doc-audit-history -->
+
+上面每一条都由 `windows/tools/check-licence-surface.ps1` 的 `doc-audit-history-claims`（第 53 项）在 `history-baseline-head` 那个提交上重新解一遍：`git show <commit>:<record>` 的行数必须等于 `lines=`，`range=` 那几行的原文必须含 `anchors=`。所以第 1、2 节里的这些数字不是「当年大概如此」，而是**在基线上可复算**的历史断言——它们此后会随仓库增长而与当前值不同（W5 记录现为 342 行、`windows-ci.yml` 现为 246 行），这是快照的正常状态；要记当前值必须新开一条带日期的记录，不能把这里的数字就地改成现值。

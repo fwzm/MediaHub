@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-52 项检查分三十一组：
+53 项检查分三十二组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -73,6 +73,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | SBOM 两 flavour 账目（W56 起） | `sbom-flavour-claims` | `windows/docs/licensing/SBOM.md` §9 状态块与 §7.1/§7.2 表格分叉：文件数或字节数不再相加、家族表的行数与字节和与依赖清单不符、引擎钉死值/候选摘要与实物不符、依赖清单缺行，或文档改口说许可义务已了结 |
 | 可复现性记录（W57 起） | `reproducible-build-claims` | `windows/docs/licensing/REPRODUCIBLE-BUILD.md` §0 的十六行状态块与仓库、与它自己引用的步骤分叉：块缺行或值被改、SDK/rollForward 与 `global.json` 不符、引擎摘要/归档名/字节数与 `fetch-libmpv.ps1` 的固定常量或受审实物不符、`windows-ci.yml` 里不再有 restore/build/test/publish/smoke/upload 的步骤 token、文档又写回数字行号（工作流行号会漂）、把无标注的 `expect 522` 写回配方、`licence-files-in-package` 与 `PACKAGING.md` §0 不一致、`current-shape` 的 526 文件/348275148 B 与 `SBOM.md` §9 不符、`publish-shape` 丢掉 2026-10-14/522/347972263 的日期标注、两个 verdict（.NET 半边 clean-checkout 可复现 / 引擎半边此处不可复现）任一个被改口，或 `not yet claimable` / `re-measure` 两条诚实边界被删 |
 | 跨文档行号指针契约（W58 起） | `cross-doc-pointer-claims` | `windows/docs/licensing/W5-LGPL-BUILD.md` §9 的 `line-pointer-contract` 块：14 条引用（谁引、引哪个区间、区间里必须仍有什么短语）逐条重解——引用方仍写着该 `文件:行`、区间落在目标当前行数内、区间文本仍含锚点短语、块自指本项；目标文档在前面插行、引用方改行号、块被删或 `entry-count` 不符即红 |
+| 日期快照的历史数字（W59 起） | `doc-audit-history-claims` | `windows/docs/W12-DOC-AUDIT.md` §6 的 `doc-audit-history` 块与它自称的基线提交分叉：块缺行、`history-owner` 不再点名本项、`history-baseline-head` 与 §0 状态块的 `baseline-head` 不一致、`history-claim-count` 与可解析条目数不符、某条 `lines=` 在 `git show <基线>:<记录>` 上对不上、某条 `range=` 越界或区间原文不再含 `anchors=`、或正文不再写着这些历史数字 | 历史快照被就地改成现值，或快照号称「当时量过」而没有人能复核 |
 | 验收不打扰契约（W48 起） | `quiet-run-claims` | `windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md` §0 的九行门禁事实（空闲阈值 180 s、QUNS 只允许 5/6、看门狗 700 ms、abort 标记与 `MH_ALLOW_ACTIVE`/`MH_QUIET_ABORT_FILE`、守卫优先级）缺行或改值，或 `run-quiet.ps1` 的默认值、`MhQuiet.psm1` 的 QUNS 白名单与轮询、`MhUia.psm1` 的 `Start-MhApp` abort 守卫与它不再一致 |
 | 续播下限契约（W49 起） | `resume-floor-claims` | `windows/docs/W8-RESUME-FLOOR-CONTRACT.md` §0 的八行阈值与用例数、`MockMediaServer.cs` 里 Emby 2 % / Jellyfin 5 % / 300 s / 90 % / 10 s 的常量、以及契约测试实际展开出的用例数，三者任一分叉——放宽下限、删判定分支、加减用例却没同步文档即红 |
 | 诊断日志落盘（W50 起） | `log-file-claims` | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md` §0 的十五行上限/轮转/失败策略/用例数、`LogFileSink.cs` 的默认常量与轮转触发式、`LogService.cs` 的环形上限与写入顺序、`AppServices.cs` 的组合根目录、sink 测试展开的 9 例，五方任一分叉即红 |
@@ -248,7 +249,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 52） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 53） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -1098,6 +1099,44 @@ RESULT: PASS
 逐条实跑日志：`D:/mh-verify/w58-nc/NC1.log` … `NC10.log`（缺的 `NC7` 是 SKIP 用例）、汇总 `D:/mh-verify/w58-nc/summary.txt`；驱动脚本 `D:/mh-verify/w58-nc/run.sh`。
 
 > 契约块追加在 W5 记录**文件末尾**，所以它自己没有移动被保护的行：加上 §9 后该记录从 314 行长到 342 行，而 `:16-22`、`:20`、`:226-235`、`:247-249`、`:250-252`、`:181` 与 W13 的 `:65-73` 全部仍在原位（这也是为什么 §1.2 的「31 packages」修正必须是**同字节长度**的就地替换）。
+### 3.27 日期快照的历史数字（W59，2026-10-31）
+
+`windows/docs/W12-DOC-AUDIT.md` 是 2026-10-24 的审计快照，§1 里写着「`W5-LGPL-BUILD.md` 文件实测 252 行」「`windows-ci.yml` 140 行：`:114-119` publish、`:121-129` smoke、`:131-140` upload-artifact」。W51 的第 45 项只证明了「这是 as-of 快照、基线提交是本分支祖先」，**没有任何东西证明这些历史数字在基线上真的成立**。本项把快照里的日期化数字变成可复核的断言：不是比对工作树现值，而是 `git show <baseline-head>:<记录>` 重新量一遍。
+
+| 判据 | 内容 | 失败含义 |
+| --- | --- | --- |
+| A 块完整 | 本记录 §6 有 `BEGIN/END doc-audit-history` 块；`history-owner` 须点名 `doc-audit-history-claims`；`history-claim-count` 须等于可解析的条目行数且 ≥ 4 | 块被删、自指行改名、条目被裁 |
+| B 基线自洽 | `history-baseline-head` 必须等于 §0 `doc-audit-status` 块的 `baseline-head` | 快照改了基线却留着旧的历史断言 |
+| C 基线可解析 | 该提交在仓库里存在且可解析；浅克隆下降为 WARN | 断言绑在一个查不到的提交上 |
+| D 行数可复算 | 每条 `lines=N` 的 `git show <基线>:<记录>` 行数必须等于 N | 快照把行数写错，或把某文件当天的行数记到了别的文件上 |
+| E 区间与锚点 | 每条 `range=a-b; anchors=X` 的区间须落在该记录基线行数内，且区间原文（含首尾行）仍含 X | 快照引用的区间当天就不含它声称的内容 |
+| F 仍作为快照呈现 | 正文仍写着「文件实测 252 行」「140 行：」与三个区间 `:114-119` / `:121-129` / `:131-140` | 把历史数字就地改成现值——那就不是快照而是伪装成快照的当前值 |
+
+> 文档缺失时本项 SKIP、退出码 0；`-DocAuditPath` 可指向仓库外的副本，负向对照因此不会污染仓库。
+
+### 4.27 实测（2026-10-31，W59，本机）
+
+- 正向（`D:/mh-verify/w59-positive.log`）：`checks=53 failed=0 warnings=0 skipped=0` / `RESULT: PASS`。新项 PASS 原文：`every dated number in the W12 audit still holds at 282dcc2058815317a3ce285f04855d078404a7ab: 5 claim(s) re-read from that commit - the W5 build record line count, and the windows-ci.yml line count with its publish, smoke and upload ranges - and the body still presents them as that snapshot`。
+- 首跑（第 53 项先落地、两份文档未同步）如实 2 红：`check-inventory 3 problem(s)（claim 52 vs declares 53 ×2、never names doc-audit-history-claims）`，加上本项自己报 `W5-LGPL-BUILD.md has 251 line(s) … but the audit says 252`（`D:/mh-verify/w59-first.log`）。第二红是**守卫实现缺陷**，见下条。
+- 守卫自身一处真缺陷：第一版用 `@(& git -C $RepoRoot show <head>:<path>)` 收集行、`-join [char]10` 再 split 来数行数，在 PowerShell 上少算一行（报 251）。同一 blob 上三种量法互不一致：Node 读重定向文件按 `0x0A` 数是 252、PS 原生命令输出数组数是 **251**、`git show` 经 `cmd /c` 重定向落盘后 `ReadAllBytes` 数是 252（与 `Get-Content` 一致）。改成 `GetTempFileName()` + `cmd /c` 重定向 + `ReadAllBytes` 按换行计数后稳定为 252（`D:/mh-verify/w59-second.log` 起新项 PASS）。教训：**行数这类字节事实不要用 PS 原生命令的输出数组去数**。
+- 中间态：`checks=53 failed=1`（唯一红是 `check-inventory`，新项已 PASS）。
+- 负向对照（副本树 `D:/mh-verify/w59-nc/`，未改仓库文件；副本经 `-DocAuditPath ../../mh-verify/w59-nc/NCn/audit.md` 传入）**每条恰好一个检查变红，且都只打在本项**；`doc-audit-snapshot-claims`（第 45 项）在八条里全部保持 PASS —— 这是把 `history-baseline-head` 在 §6 里重复一次的用处（改 §6 那处只让第 53 项红）：
+
+| 用例 | 注入 | 结果 |
+| --- | --- | --- |
+| NC1 | 一条 `lines=252` 改成 253 | 1 红：`W5-LGPL-BUILD.md has 252 line(s) at 282dcc20… but the audit says 253` |
+| NC2 | 一条 `range=114-119` 改成 `100-105` | 1 红：`the range 100-105 of .github/workflows/windows-ci.yml at 282dcc20… no longer contains "dotnet publish"` |
+| NC3 | 整块删掉 BEGIN/END 标记 | 1 红：`the audit no longer carries the doc-audit-history block` |
+| NC4 | `history-owner` 改成别的检查名 | 1 红：`the history-owner line no longer names this check` |
+| NC5 | `history-claim-count: 5` 改成 6 | 1 红：`the history block declares 6 claim(s) but lists 5` |
+| NC6 | `history-baseline-head` 末位改一位 | 1 红（本项 6 条问题）：与 §0 状态块不一致，且该提交不存在 ⇒ 五条断言都查不到记录 |
+| NC7 | 一条 `record=` 改成不存在的路径 | 1 红：`the audit cites windows/docs/licensing/NOT-A-RECORD.md but that path is not in commit 282dcc20…` |
+| NC8 | 正文删掉「文件实测 252 行」 | 1 红：`the audit body no longer states 文件实测 252 行 as one of its dated numbers` |
+| NC9 | `-DocAuditPath` 指不存在文件 | `checks=53 failed=0 warnings=0 skipped=2`、退出码 0（SKIP 通道；第 45 项同样 SKIP） |
+
+- 逐条实跑日志：`D:/mh-verify/w59-nc/NC1.log` … `NC9.log`，汇总 `D:/mh-verify/w59-nc/summary.txt`，驱动脚本 `D:/mh-verify/w59-nc/run.sh`。
+- 本轮**不改历史数字**：252 行 / 140 行 / 三个区间在 `282dcc20` 上实测都成立，漂移的是今天的工作树（342 行 / 246 行）。把这些数字留在快照里、并让 CI 回到基线提交上复核，正是本项与第 45 项的分工：第 45 项证明「这是快照」，第 53 项证明「快照里的数字当天是对的」。
+
 ## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。
