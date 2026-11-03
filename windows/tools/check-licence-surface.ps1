@@ -1297,6 +1297,7 @@ $declaredCheckIds = @(
     'doc-audit-history-claims',
     'resume-source-pointer-claims',
     'resume-record-count-claims',
+    'resume-record-constant-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -3026,6 +3027,90 @@ else {
     }
 }
 
+# --- 32. the W8 resume record constants must still match the code and its own arithmetic (W64) ---
+$resumeConstantProblems = @()
+if (-not (Test-Path -LiteralPath $resumeSourceFile) -or -not (Test-Path -LiteralPath $probeProgramFile)) {
+    Add-Check 'resume-record-constant-claims' 'SKIP' ('cannot read ' + $resumeSourceFile + ' or ' + $probeProgramFile + ', so the W8 resume record''s constants are not checked')
+}
+else {
+    $constBegin = '<!-- BEGIN resume-record-constant-claims -->'
+    $constEnd = '<!-- END resume-record-constant-claims -->'
+    $constText = (Get-Content -LiteralPath $resumeSourceFile -Raw)
+    $constBeginAt = $constText.IndexOf($constBegin)
+    $constEndAt = $constText.IndexOf($constEnd)
+    if ($constBeginAt -lt 0 -or $constEndAt -lt 0 -or $constEndAt -le $constBeginAt) {
+        Add-Check 'resume-record-constant-claims' 'FAIL' '1 problem(s): the W8 resume record no longer carries the resume-record-constant-claims block - a constant that is not recomputed is a number nobody can trust'
+    }
+    else {
+        $constBlock = $constText.Substring($constBeginAt, $constEndAt - $constBeginAt)
+        if (-not [regex]::IsMatch($constBlock, 'resume-constant-owner:\s*check-licence-surface\.ps1:resume-record-constant-claims')) {
+            $resumeConstantProblems += 'the constant block no longer names resume-record-constant-claims as its owner'
+        }
+        $declaredConstants = @{}
+        $numericConstantCount = 0
+        foreach ($cm in [regex]::Matches($constBlock, '(?m)^\s*resume-([a-z0-9-]+):\s*(\S+)\s*$')) {
+            $declaredConstants[$cm.Groups[1].Value] = $cm.Groups[2].Value
+            if ($cm.Groups[1].Value -ne 'constant-count' -and $cm.Groups[1].Value -ne 'constant-owner') { $numericConstantCount++ }
+        }
+        foreach ($requiredKey in @('constant-count', 'probe-min-runtime-seconds', 'probe-settle-milliseconds', 'probe-max-depth', 'probe-ticks-per-second', 'fixture-seconds', 'derived-ticks-total', 'derived-ticks-40pct', 'derived-ticks-1pct', 'derived-ticks-2pct')) {
+            if (-not $declaredConstants.ContainsKey($requiredKey)) { $resumeConstantProblems += ('the constant block no longer declares ' + $requiredKey) }
+        }
+        if ($declaredConstants.ContainsKey('constant-count') -and [int]$declaredConstants['constant-count'] -ne $numericConstantCount) {
+            $resumeConstantProblems += ('the constant block declares ' + $declaredConstants['constant-count'] + ' constant(s) but lists ' + $numericConstantCount)
+        }
+        $probeText = (Get-Content -LiteralPath $probeProgramFile -Raw)
+        $sourcePairs = @(
+            @('probe-min-runtime-seconds', [regex]::Match($probeText, 'MinimumRuntimeTicks\s*=\s*(\d+)\s*\*\s*TicksPerSecond'), 'the probe no longer sets MinimumRuntimeTicks = <n> * TicksPerSecond'),
+            @('probe-settle-milliseconds', [regex]::Match($probeText, 'SettleMilliseconds\s*\{\s*get;\s*init;\s*\}\s*=\s*(\d+)'), 'the probe no longer defaults SettleMilliseconds to a literal'),
+            @('probe-max-depth', [regex]::Match($probeText, 'const int MaximumDepth\s*=\s*(\d+)'), 'the probe no longer declares const int MaximumDepth = <n>')
+        )
+        foreach ($pair in $sourcePairs) {
+            $m = $pair[1]
+            if (-not $m.Success) { $resumeConstantProblems += $pair[2] }
+            elseif ($declaredConstants.ContainsKey($pair[0]) -and [long]$declaredConstants[$pair[0]] -ne [long]$m.Groups[1].Value) {
+                $resumeConstantProblems += ('the constant block declares ' + $declaredConstants[$pair[0]] + ' for ' + $pair[0] + ' but the source has ' + $m.Groups[1].Value)
+            }
+        }
+        if (-not [regex]::IsMatch($probeText, 'TicksPerSecond\s*=\s*TimeSpan\.TicksPerSecond')) {
+            $resumeConstantProblems += 'the probe no longer derives its ticks from TimeSpan.TicksPerSecond'
+        }
+        if ($declaredConstants.ContainsKey('probe-ticks-per-second') -and $declaredConstants.ContainsKey('fixture-seconds')) {
+            $ticksPerSecond = [long]$declaredConstants['probe-ticks-per-second']
+            $fixtureSeconds = [long]$declaredConstants['fixture-seconds']
+            $totalTicks = $fixtureSeconds * $ticksPerSecond
+            $derivedPairs = @(
+                @('derived-ticks-total', $totalTicks),
+                @('derived-ticks-40pct', [long]($totalTicks / 100 * 40)),
+                @('derived-ticks-1pct', [long]($totalTicks / 100)),
+                @('derived-ticks-2pct', [long]($totalTicks / 100 * 2))
+            )
+            foreach ($dp2 in $derivedPairs) {
+                if ($declaredConstants.ContainsKey($dp2[0]) -and [long]$declaredConstants[$dp2[0]] -ne [long]$dp2[1]) {
+                    $resumeConstantProblems += ('the constant block declares ' + $declaredConstants[$dp2[0]] + ' for ' + $dp2[0] + ' but ' + $fixtureSeconds + ' s at ' + $ticksPerSecond + ' ticks/s gives ' + $dp2[1])
+                }
+                $groupedTicks = [regex]::Replace(([long]$dp2[1]).ToString([System.Globalization.CultureInfo]::InvariantCulture), '(\d)(?=(?:\d{3})+$)', '$1 ')
+                $expectedBodyText = $groupedTicks + ' ticks'
+                if (-not $constText.Contains($expectedBodyText)) {
+                    $resumeConstantProblems += ('the record no longer states "' + $expectedBodyText + '" in its body')
+                }
+            }
+        }
+        $constantBodyNeedles = @(
+            @('固定等待 750 ms', 'the record no longer states 固定等待 750 ms'),
+            @('深度上限 3', 'the record no longer states 深度上限 3'),
+            @('≥300 s', 'the record no longer states ≥300 s as the shortest playable fixture')
+        )
+        foreach ($needle in $constantBodyNeedles) {
+            if (-not $constText.Contains($needle[0])) { $resumeConstantProblems += $needle[1] }
+        }
+        if ($resumeConstantProblems.Count -eq 0) {
+            Add-Check 'resume-record-constant-claims' 'PASS' ('the W8 record''s constants still hold: ' + $numericConstantCount + ' declared constant(s) - the probe''s ' + $declaredConstants['probe-min-runtime-seconds'] + ' s minimum runtime, ' + $declaredConstants['probe-settle-milliseconds'] + ' ms settle, depth ' + $declaredConstants['probe-max-depth'] + ' and its TimeSpan.TicksPerSecond ticks all match Program.cs, and the record''s tick arithmetic over ' + $declaredConstants['fixture-seconds'] + ' s at ' + $declaredConstants['probe-ticks-per-second'] + ' ticks/s still reproduces the four grouped figures it quotes')
+        }
+        else {
+            Add-Check 'resume-record-constant-claims' 'FAIL' ($resumeConstantProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $resumeConstantProblems) + ' - a constant that is not recomputed is a number nobody can trust')
+        }
+    }
+}
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })
 $skipped = @($checks | Where-Object { $_.outcome -eq 'SKIP' })

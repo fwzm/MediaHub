@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-55 项检查分三十四组：
+56 项检查分三十五组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -81,6 +81,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 文档残留与围栏（W52 起） | `doc-residue-claims` | 文本文件里留着生成期占位符（填写处出现未替换的记号，确要讨论该记号的行须带 `residue-allow` 标记）、markdown 围栏行数为奇数、CAPABILITY-MAP §0 状态块不再被真围栏包住，或一行里粘了两条表格行（`||` 出现在行首为 `|` 的行上） |
 | W8 续播记录指针（W62 起） | `resume-source-pointer-claims` | `windows/docs/W8-HEADLESS-RESUME.md` §11 的 `resume-source-pointer-claims` 块与源码分叉：20 条 `路径:行号` 指针里有一条在文件里不再含它声明的锚点短语、行号越界、文件名被改或删除，或正文又写出块里没声明的新行号——「谁引用哪一行」不能只靠人眼 |
 | W8 续播记录计数（W63 起） | `resume-record-count-claims` | `windows/docs/W8-HEADLESS-RESUME.md` §12 的 `resume-record-count-claims` 块与两份源码分叉：§4 的 16 条探针断言 id 与 `MediaHub.ResumeProbe/Program.cs` 里的 `Check("<id>")` 不再双向相等、驱动的固定/每服/服务器数/总数四个数字与 `headless-resume.ps1` 的调用点算不出来、或 §7 退出码表仍写着过期的驱动条数 |
+| W8 续播记录常量（W64 起） | `resume-record-constant-claims` | `windows/docs/W8-HEADLESS-RESUME.md` §13 的 `resume-record-constant-claims` 块与源码/算积分叉：`Program.cs` 的 `MinimumRuntimeTicks = <n> * TicksPerSecond`、`SettleMilliseconds` 默认值、`const int MaximumDepth` 三项与块里声明不再相等，600 s × ticks/s 的算积复现不出块里的四个分组数字，或正文仍写着旧的「固定等待 750 ms」「深度上限 3」「≥300 s」 |
 
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
@@ -251,7 +252,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 55） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 56） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -1244,6 +1245,25 @@ PASS 文案会报出「多少条指针 / 多少个文件 / 每条区间仍含锚
 - 守卫补丁前快照 `D:/mh-verify/w62-guard-pre.ps1`（sha256 `855004ff…`，194,041 B），补丁后 200,112 B / +6,071 B，检查总数 **53 → 54**。
 - 一次自证：新增参数 `-ResumeSourceDocPath` 后重跑正向仍 `checks=54 failed=0` —— 参数是入口不是判据，项数只由发射的 id 决定（同 W60）。
 
+### 3.30 W8 续播记录的常量契约（W64，2026-11-04）
+
+§11 管的是「正文按行号引用源码」，§12 管的是「断言条数」。两者都抓不到第三类会静默过期的数字：散落在正文里的**常量** —— 夹具最短片长（300 s）、每阶段回读前的固定等待（750 ms）、走库深度上限（3），以及 ticks 与百分比的换算（`TimeSpan.TicksPerSecond`）。它们在正文里只是一句「750 ms」或一个「2 400 000 000 ticks」；改代码时没有任何集合比对会提醒你文档过期了。
+
+第 56 项把这层关系钉成契约块（写在记录文件末尾 §13），判据五条：
+
+| 判据 | 内容 | 失败含义 |
+| --- | --- | --- |
+| A 块自指 | `resume-constant-owner` 必须点名本项；十个键齐全；`resume-constant-count` 等于块里数字键的条数（`constant-owner` 与 `constant-count` 自身不计） | 块被删、键被改名、数量写了却没改 |
+| B 从源码取数 | `Program.cs` 的 `MinimumRuntimeTicks = <n> * TicksPerSecond`、`SettleMilliseconds { get; init; } = <n>`、`const int MaximumDepth = <n>` 三处**当场解析**，必须与块里声明相等；并确认 ticks 仍来自 `TimeSpan.TicksPerSecond` 而不是随手写的字面量 | 改源码不改块（或反过来），数字对不上 |
+| C 算术自洽 | 夹具片长（`resume-fixture-seconds`，600 s）× `resume-probe-ticks-per-second` 得全长 ticks，再按正文的 40% / 1% / 2% 算出四个数字，必须与块里 `resume-derived-ticks-*` 一致，且这些数字仍以「N 000 000 000 ticks」的分组写法逐字出现在正文里 | 片长或百分比改了，正文的 tick 数没跟着改 |
+| D 正文残留 | 正文仍写着「固定等待 750 ms」「深度上限 3」「≥300 s」三句 | 代码改了而正文句子还是旧值 |
+| E 文件缺失 | 记录或 `Program.cs` 读不到 ⇒ 本项 SKIP（退出码不变） | 无从比较，不该伪红也不该伪绿 |
+
+`resume-fixture-seconds` 是**服务端夹具的属性**（不是仓库源码里的常量），记在块里是为了让 C 的算术有唯一事实来源；换一条夹具，改这个值，C 与正文一起改。
+
+范围口径：本项只核**仓库内能当场重算的东西**。服务端策略（Jellyfin `MinResumePct=5` / `MinResumeDurationSeconds=300`、Emby 行为实测的 2%）来自运行中的服务器，不进本项 —— 它们由 §5 的实测记录与探针断言承担。
+
+
 ### 4.31 实测（2026-11-04，W63，本机）
 
 - 先改记录再上门禁：本轮先把 §3 状态行、§6.4 正文与 §7 退出码表里过期的「17 条驱动断言」改正，再写 §12 契约块，最后才加第 55 项 —— 顺序反了会把过期数字一起钉进契约。
@@ -1270,6 +1290,31 @@ PASS 文案会报出「多少条指针 / 多少个文件 / 每条区间仍含锚
   2. 块被删时**不发射检查**：缺失分支只往问题表里追加，`Add-Check` 在 `else` 里 ⇒ NC5 得到 `checks=54`（少一项）而不是一条红，`check-inventory` 顺手把它当「未发射的 id」抱怨，看上去像文档问题。修法：缺失分支自己发一条 FAIL。
 
 - 守卫补丁前快照 `D:/mh-verify/w63-guard-pre.ps1`（sha256 `74a4c662…`，200,112 B），补丁后 **206,128 B**（含上面两处修法），检查总数 **54 → 55**；两次改完都用 `[System.Management.Automation.Language.Parser]::ParseFile` 做了语法自检（打印 `PARSE-OK`）——PowerShell 补丁最容易在字符串/括号上断，落盘后先自检比等守卫报 ParserError 快得多。
+
+### 4.32 实测（2026-11-04，W64，本机）
+
+- 首跑（守卫先落、两份文档未同步，`D:/mh-verify/w64-first.log`）：`checks=56 failed=2`。红的两条是 `check-inventory`（三条：两份文档仍写 55、本文件未点名新 id）与**本项自己**（`4 problem(s): the constant block no longer declares derived-ticks-40pct / derived-ticks-1pct / derived-ticks-2pct`）。
+- 本项这 4 条是**守卫自身的解析缺陷**，不是记录写错：块键用 `[a-z-]+` 解析，而 `resume-derived-ticks-40pct` / `-1pct` / `-2pct` 三个键里带数字 ⇒ 三个键根本没被读出来，于是「未声明」+ 后续算术整段被跳过。改法是把这个正则换成 `[a-z0-9-]+`，并用 `$constBlock` 作锚点唯一定位（W63 的计数项里有一处**同形**正则，直接全局替换会误伤那一项）。改完 `D:/mh-verify/w64-second.log` ⇒ `checks=56 failed=1`，唯一红变成 `check-inventory`（只剩 README 与 LICENSE 文档的数量/点名），本项已 PASS。
+- 正向收尾：`D:/mh-verify/w64-positive.log`（README 未同步时仍 1 红）⇒ `D:/mh-verify/w64-positive2.log`：`checks=56 failed=0 warnings=0 skipped=0` / `RESULT: PASS`。本项 PASS 原文：`the W8 record's constants still hold: 9 declared constant(s) - the probe's 300 s minimum runtime, 750 ms settle, depth 3 and its TimeSpan.TicksPerSecond ticks all match Program.cs, and the record's tick arithmetic over 600 s at 10000000 ticks/s still reproduces the four grouped figures it quotes`。
+
+- 负向对照（副本树 `D:/mh-verify/w64-nc/`，未改仓库文件；副本经 `-ResumeSourceDocPath ../../mh-verify/w64-nc/NCn.md` 传入）：
+
+| 用例 | 注入 | 结果 |
+| --- | --- | --- |
+| NC0 | 未改动的副本 | `checks=56 failed=0`（基线干净，下面每条红都只来自注入） |
+| NC1 | 块里 `resume-probe-settle-milliseconds: 750` → 700 | 1 红：`the constant block declares 700 for probe-settle-milliseconds but the source has 750` |
+| NC2 | `resume-probe-max-depth: 3` → 4 | 1 红：`the constant block declares 4 for probe-max-depth but the source has 3` |
+| NC3 | `resume-derived-ticks-2pct: 120000000` → 130000000 | 1 红：`the constant block declares 130000000 for derived-ticks-2pct but 600 s at 10000000 ticks/s gives 120000000` |
+| NC4 | 正文「固定等待 750 ms」→「固定等待 800 ms」 | 1 红：`the record no longer states 固定等待 750 ms`（B/C 全对，只有 D 的正文残留判据抓住） |
+| NC5 | 删掉整块 BEGIN/END 标记 | 1 红：`the W8 resume record no longer carries the resume-record-constant-claims block` |
+| NC6 | `-ResumeSourceDocPath` 指不存在文件 | `checks=56 failed=0 warnings=0 skipped=3`、退出码 0（SKIP 通道；W62 指针项与 W63 计数项同时 SKIP） |
+
+- 逐条日志 `D:/mh-verify/w64-nc/NC0.log` … `NC6.log`（NC6 用 `NC9-not-here.md` 这个刻意不存在的名字），汇总 `summary.txt`。NC1–NC5 **各恰好只有本项变红**，其余 55 项保持 PASS。NC4 的日志里中文按控制台代码页显示成乱码 —— 那是管道编码，判据比的是文件原文。
+
+- 守卫补丁前快照 `D:/mh-verify/w64-guard-pre.ps1`（sha256 `89067655…`，206,128 B），补丁后 **212,962 B**（含上面那处正则修正），检查总数 **55 → 56**；落盘后先用 `[System.Management.Automation.Language.Parser]::ParseFile` 自检（`PARSE-OK`）再跑守卫。
+
+- 口径：本项只核**仓库内能当场重算的东西**。服务端策略（Jellyfin `MinResumePct=5` / `MinResumeDurationSeconds=300`、Emby 行为实测的 2%）来自运行中的服务器，仍由 §5 的实测记录与探针断言承担；`resume-fixture-seconds` 是夹具属性，记在块里只为让算术有唯一来源。
+
 
 ## 5. 这个工具**不**覆盖什么
 

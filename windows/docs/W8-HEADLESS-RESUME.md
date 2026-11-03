@@ -330,3 +330,33 @@ resume-driver-assertions-total: 19
 <!-- END resume-record-count-claims -->
 
 改断言时：先在代码里加/改，再同步 §4 表格或 §6.4 正文，最后改这个块里的数，然后跑一遍守卫（`RESULT: PASS` 才算对上）。
+
+## 13 常量契约（机器可读）
+
+§11 管的是「正文按行号引用源码」，§12 管的是「断言条数」。探针与驱动里还有第三种会静默过期的东西：**散落在正文里的常量** —— 夹具最短片长（300 s）、每阶段回读前的固定等待（750 ms）、走库深度上限（3）、以及 ticks 与百分比换算（`TimeSpan.TicksPerSecond`）。它们不像断言 id 那样能被集合比对抓住，正文里只是一句「750 ms」或一个「2 400 000 000 ticks」。
+
+下面这个块把这些常量声明成唯一事实来源，由 `windows/tools/check-licence-surface.ps1` 的第 56 项 `resume-record-constant-claims` 每轮 CI 复核：
+
+- **A 块自指**：`resume-constant-owner` 必须点名本项；十个键齐全；`resume-constant-count` 等于块里数字键的条数（含一条自身不算）。
+- **B 从源码取数**：`Program.cs` 的 `MinimumRuntimeTicks = <n> * TicksPerSecond`、`SettleMilliseconds { get; init; } = <n>`、`const int MaximumDepth = <n>` 三处当场解析，必须与块里声明相等；并确认 ticks 仍然来自 `TimeSpan.TicksPerSecond`（不是随手写的字面量）。改源码不改块 ⇒ 红。
+- **C 算术自洽**：夹具片长（`resume-fixture-seconds`，600 s）乘以 `resume-probe-ticks-per-second` 得全长 ticks，再按正文的 40% / 1% / 2% 算出四个数字，必须与块里 `resume-derived-ticks-*` 一致，且这些数字仍以「N 000 000 000 ticks」的分组写法逐字出现在正文里。
+- **D 正文残留**：正文仍写着「固定等待 750 ms」「深度上限 3」「≥300 s」三句 —— 代码改了而正文句子还是旧值也算红。
+- **E 文件缺失**：记录或 `Program.cs` 读不到 ⇒ 本项 SKIP（退出码不变）。
+
+`resume-fixture-seconds` 是**服务端夹具的属性**（不是仓库源码里的常量），记在这里是为了让 C 的算术有唯一事实来源；换一条夹具，改这个值，C 与正文一起改。
+
+<!-- BEGIN resume-record-constant-claims -->
+resume-constant-owner: check-licence-surface.ps1:resume-record-constant-claims
+resume-constant-count: 9
+resume-probe-min-runtime-seconds: 300
+resume-probe-settle-milliseconds: 750
+resume-probe-max-depth: 3
+resume-probe-ticks-per-second: 10000000
+resume-fixture-seconds: 600
+resume-derived-ticks-total: 6000000000
+resume-derived-ticks-40pct: 2400000000
+resume-derived-ticks-1pct: 60000000
+resume-derived-ticks-2pct: 120000000
+<!-- END resume-record-constant-claims -->
+
+改常量时：先改代码，再改正文里的数字（含分组写法），最后改这个块，然后跑一遍守卫（`RESULT: PASS` 才算对上）。
