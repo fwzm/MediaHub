@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-04T03:0x+08:00",
-  "updated_by": "lead-W6-113-r35",
+  "updated_at": "2026-11-04T06:31+08:00",
+  "updated_by": "lead-W6-113-r36",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -785,6 +785,51 @@
       "notes": "第十八层补上定义侧最后一处「同一事实写了两次却无人比对」：UnitTest/@storage 与 TestMethod/@codeBase。与第十六、十七层同理，判据只读文件自身，不进基线、无迁移。适配器值刻意不写死（只钉存在 + 单文件唯一），避免 runner 版本变化误红。",
       "next_action": "套件基线第十九层候选：Times/@creation 与 @queuing（全文 0 引用，但已知反例 creation/queuing 可晚于 start，只能做「不早于文件自身出现」或跨文件单调这类弱口径）；UnitTest/@storage 指向的 dll 是否真实存在于 ResultsDir 同级目录（需要文件系统证据，非纯 TRX 不变量）。",
       "closed_at": "2026-11-04T03:0x+08:00"
+    },
+    {
+      "id": "W6-113aj",
+      "title": "第十九层：声明的列表必须按写入者的词表命名自己（TestLists 的 id→名字映射）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r36",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "check-test-suite-baseline.ps1 93,530 -> 100,088 B (+108 lines, 1,763 lines, sha16 ceedce539744129d, pure ASCII), PARSE-OK on pwsh 7 and Windows PowerShell 5.1.",
+        "Real corpus (windows-tests.trx 1,952 rows, webdav-tests.trx 104 rows): both shells exit 0, outputs 3,838 B byte-identical after CR normalisation.",
+        "Ladder line: listVocabulary=2/2 canonical names=2 distinct names=2 unreferenced lists=1 for both suites; combined tests=2056; layers 1-18 ladder lines unchanged.",
+        "Negative controls: total 151 cases, pass=151, fail=0 (D:/mh-verify/r36/run-nc.cjs, 50,519 B / 623 lines).",
+        "Paired cases V2/V2x (two canonical ids trade names), V3/V3x (both share a name), V4/V4x (blank name), V5/V5x (canonical id renamed): new gate RED, round-35 gate PASS, all counts identical.",
+        "Warning-only surfaces V6 (id outside the writer vocabulary), V7 (non-GUID id), V8 (unreferenced declaration), V9 (name with surrounding whitespace); V10 (TestLists section dropped) red on both generations.",
+        "Gate reads TestList names for the first time; before this layer the name was only used as an existence key.",
+        "Baseline test-suite-baseline.json unchanged byte for byte; update script untouched -> no migration.",
+        "Commit ca027fe8aa0635b4c4ae1888a9d8455dfda4328b (1 file changed / +108 insertions), non-force push a7c37f16..ca027fe8; git ls-remote matches, rev-list --left-right --count = 0/0.",
+        "exact-head windows-ci 41727517960 = success at 40-hex ca027fe8aa0635b4c4ae1888a9d8455dfda4328b; licence check-licence-surface  checks=56 failed=0 warnings=0 skipped=0.",
+        "Android CI 41727517642 = success at the code head; core/feature/app subtree hashes identical to a7c37f169c418a7e32484f2ffabcfd6e95265e37 -> inherited per ADR-AUTO-001.",
+        "Incidents recorded: the leftover duplicate-registration line produced a false RED (2 TestList id(s) appear more than once); Node replace() interpreted the replacement string, so patches use slice concatenation."
+      ],
+      "notes": "第 19 层只读 TestLists 的 id→名字映射。词表外的 id、非 GUID id、零引用声明、首尾空白名都只 warning（虚拟表 All Loaded Results 在干净语料里本就零引用），不升级为 RED，避免生产者换词表时误红。",
+      "next_action": "候选下一层：①Times/@creation 与 @queuing 的窗口约束；②Counters/@inconclusive 与 @inProgress、@pending 的桶表补全；③TestRun/@xmlns 与文档命名空间的自洽。",
+      "closed_at": "2026-11-04T06:31+08:00"
+    },
+    {
+      "id": "W6-113ak",
+      "title": "合并树集成修复：W8 续播记录的源码指针跟着本分支的 +15 行偏移重映射",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r36",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "Red only in the merge tree: windows-ci 41721572163 at ca027fe8aa0635b4c4ae1888a9d8455dfda4328b failed the base licence gate with FAIL resume-source-pointer-claims 5 problem(s) and checks=56 failed=1, while base 8f6bbc8a own push/pull_request runs were green.",
+        "Three-way attribution: merge ref 821466c90bc71524d959518e3eebdc6a9565115b = base 8f6bbc8a + ca027fe8aa0635b4c4ae1888a9d8455dfda4328b; MediaBrowserProvider.cs blob is 516a04107db2c98a33cfc09398e24041bdf3dcea at merge-base and base but 3de06cef8d6871a7537eaf2e31b32f78c885e7e3 at HEAD (+15 lines), while windows/docs/W8-HEADLESS-RESUME.md is 5745cf5d3650aac001bdf83befd667dfd16af509 (275 lines) at merge-base and HEAD but 952fb1e40ee0234af96b570d9b63b142a3607792 (362 lines) at base, and check-licence-surface.ps1 is 53 checks at HEAD vs 56 at base.",
+        "Fix: the W8 resume record is taken at the base version (three contract blocks) with every provider line reference shifted by +15 (254-300 to 269-315, 347-400 to 362-415, 414-418 to 429-433, 402-412 to 417-427, 273 to 288, 362 to 377, 393 to 408) plus the two body restatements.",
+        "Pushed-but-no-run root cause: pulls/39 reported mergeable=false state=dirty merge_commit_sha=none because both sides rewrote the same W8 lines, so GitHub could not build the merge ref and created no pull_request run; push-triggered windows-ci does not cover this branch (push.branches is feature/windows-*).",
+        "Resolution: merged base into the branch, kept this branch remapped copy of the record, commit 821466c90bc71524d959518e3eebdc6a9565115b, non-force push e7914f2a..821466c9; git merge-tree --write-tree refs/tmp/base-wc HEAD exits 0 and the runs appeared (windows-ci 41727517960, Android CI 41727517642).",
+        "Local merge-tree gate on the merged head (D:/mh-verify/r36/lic-mergehead.log): resume-floor-claims PASS (31 cases), resume-source-pointer-claims PASS (20 pointers over 6 files), resume-record-count-claims PASS (16 ids / 19 totals), resume-record-constant-claims PASS (9 constants), checks=51 failed=0 warnings=0 skipped=9, RESULT PASS; the 9 skips are the license-report-dependent checks that CI materialises.",
+        "Side effect recorded: after the merge the branch also carries the base licensing work (W60-W64), so this branch own CI now runs the base 56-check licence gate."
+      ],
+      "notes": "W6-113ak 不是一层新闸门，而是把 base 侧的 licensing 工作合进本分支后必须做的集成修复：文档里的源码行号是 base 按自己的 provider 写的，本分支 provider 多 15 行，合并树两边拼在一起就失配。该轮还钉住一条运维事实：pull_request workflow 在 PR 处于 dirty（合并冲突）时不会被创建。",
+      "next_action": "继续 round 36 的 docs 与 PR 收尾；下一轮候选层见 W6-113aj 的 next_action。",
+      "closed_at": "2026-11-04T06:31+08:00"
     }
   ]
 }

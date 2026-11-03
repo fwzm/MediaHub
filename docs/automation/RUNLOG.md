@@ -580,3 +580,62 @@
 - docs head 的 windows-ci **`41698480546` = success**（`pull_request`，日志 `D:/mh-verify/r33/ci-docshead.log`，145,213 B）：台阶行与代码 head 逐字一致（`assemblyDeclaration=1952 …` / webdav `=104 …`），`combined tests=2056`。
 - licence 步骤：`check-licence-surface` checks=53 failed=0 warnings=0 skipped=0（`18:59:09Z`）。
 - 同 head Android CI `41698480354` = 取证时仍 in_progress（03:01 时点）；代码 head 的 Android CI `41696425581` 收尾为 cancelled（`android-ci.yml` 的 concurrency 只按 ref）；`58252cab` 相对 `96d8b888` 只改 `docs/automation/` 三文件，`core`/`feature`/`app` 三子树哈希不变 ⇒ 继承依据成立。
+
+## 2026-11-04 06:31 round 36（W6-113aj：套件基线第十九层口径 —— 声明的列表必须按写入者的词表命名自己）
+
+### 侦察（EXECUTED）
+- W6 树取样：head `a7c37f169c418a7e32484f2ffabcfd6e95265e37`（round 35 docs 验收）、工作树只有一条未提交改动 `M windows/tools/check-test-suite-baseline.ps1`、与 origin 0/0；PR #39 的 base 分支 `feature/windows-client` 取证时为 `8f6bbc8a2e69bdf9373d71997a357c6ce531af1f`，`refs/heads/main` = `1246313c7a66d492258b5b4b20b51cbdcf2da9cc`。
+- 真实语料（`D:/mh-verify/r9-art/test-results/`）：`windows-tests.trx` 1,952 行、`webdav-tests.trx` 104 行。本轮新读到的事实：两个文件的 `<TestLists>` 完全相同且固定为两对 —— `8c84fa94-04c1-424b-9868-57a2d4851a1d` = `Results Not in a List`、`19431567-8539-422a-85d7-44ee4e166bda` = `All Loaded Results`；所有结果行与 `TestEntry` 的 `testListId` 都指向第一对（windows 1,952/1,952、webdav 104/104），`All Loaded Results` 是虚拟表、**零引用**。`Counters` 实测 16 个属性，除 total/executed/passed 外全为 0。
+- 缺口定位（源码审查 SOURCE_REVIEWED）：`$listNames` 只在 `check-test-suite-baseline.ps1:596` 建立、第 614 行写入 `$listNames[$lidEntry] = [string]$tl.name`，此后名字只被用于「该 id 是否已声明」的存在性判断；结构层（第 994–1041 行）只查 id 非空、唯一与被引用，行元数据层只查每行 `testListId` 单值，运行头层只查 header id 不与 list id 撞号 —— **没有任何一层读过列表名**。
+
+### 缺口（本轮切片动机）
+- 两张声明的列表可以互换名字而全部计数不变：写入者永远声明同样两个 id，读者看到的只有名字。把两个 `<TestList>` 的 `name` 对调，`total`/`classes`/`methods`/`argumentRows`/`outcomes`/`Counters`/`structure`/`runHeader`/`assemblyDeclaration` 全部一字不变，而文件告诉读者「行跑在另一个列表里」。
+- 同理：某张表的名字被改写（id 仍是写入者的 canonical id）、两张表取同一个名字、某张表名字空白，前十八层都看不见。
+
+### 修法（只改 `windows/tools/check-test-suite-baseline.ps1`；基线零变化、update 脚本未改 ⇒ 无迁移）
+- 九处补丁（+108 行）：头注释第 19 段、SEMANTICS 两条 bullet、每文件初值块、`TestLists` 循环体（名称登记、去重、GUID 形状、canonical 词表命中）、判据块、全局 warning 累加器、throw 块、台阶行、warning 输出。
+- RED 判据：①任一 `<TestList>` 的 `name` 空白；②两张表的名字（`ToUpperInvariant` 后）重复；③命中写入者词表的 id 其名字与 canonical 名 Ordinal 不等（对调名字会同时命中两条）。
+- **台阶行**：`listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=… unreferenced lists=…`。
+- 不 RED 的 warning（防生产者换词表误红）：声明了词表之外的 list id；list id 不是 GUID 形状；某张声明的表没有被任何行或 `TestEntry` 引用（`All Loaded Results` 这类虚拟表本来就零引用）；名字首尾带空白。每条 warning 都带套件名前缀，避免两个文件重复条目无法区分。
+- **抛错位置**：判据块计算、台阶行照常打印，`throw` 放在该套件迭代末尾（round 25 verdict throw、round 32 header throw、round 35 assembly throw 之后，`$all += $total` 之前），既有各层保留自己的报错文案。
+- 刻意保留的残留限制：闸门只钉写入者当前的两个 id→名字对，不推导「哪张表应当被引用」；未知 id 只 warning，因为 xunit 未来换词表时不应误红。
+
+### 负向对照（151 例，EXECUTED）
+- 脚本 `D:/mh-verify/r36/run-nc.cjs`（50,519 B / 623 行），每例两代 shell 双跑（pwsh 7 + Windows PowerShell 5.1）并要求判定一致；沿用 round 35 的 134 例既有用例，并把夹具的 `TestLists` 改成真实的两个 canonical id→名字对（原先夹具用的是另一组 id、名字恰好同值，不换会一直落在「词表外」的 warning 分支）。
+- 全量结果：**total 151 cases, pass=151, fail=0**（日志 `D:/mh-verify/r36/full2.log`）。首轮全量跑（`full.log`）为 `151 cases / 147 pass / 4 fail`：四红是 `U1x`/`U2x`/`U3x`/`U4x`（断言「round 32 闸门放行定义侧缺陷」），它们仍以 `OLD_CKPRE` 为对照版本，而 `OLD_CKPRE` 在本轮已改指 round 35 闸门 ⇒ 拿带第十八层的闸门去跑「应放行」的夹具。修法：这四条与 `RE11` 一律改用新增的 `OLD_CK32` 常量（round 32 闸门副本），`V1x`–`V5x` 继续用 `OLD_CKPRE`（round 35 闸门），复跑全量。
+- 新增 V 组 13 例 + `RE12`/`RE13`：
+  - `V2`/`V2x`：两个 canonical id 互换名字（各自名字仍是合法、互不相同、非空白）⇒ 新闸门 RED `the declared lists do not name themselves consistently` 并点名 `names itself 'All Loaded Results' while that id is the writer's 'Results Not in a List'`，round 35 闸门 PASS。
+  - `V3`/`V3x`：两张表取同一个名字 ⇒ 新闸门 RED `both call themselves`，旧闸门 PASS；`V4`/`V4x`：第一张表名字为空串 ⇒ RED `carry no name`，旧闸门 PASS；`V5`/`V5x`：canonical id 改名 `Somewhere Else` ⇒ RED 点名 canonical 名，旧闸门 PASS。
+  - `V1`/`V1x`：规范夹具钉台阶行，round 35 闸门无 `listVocabulary=` 行。
+  - `V6` 词表外的 list id、`V7` 非 GUID 形状的 id、`V8` 零引用的声明、`V9` 名字首尾带空白 —— 四例都只 warning 且 exit 0；`V10` 整个 `<TestLists>` 段删除时两代闸门都拒（更早的结构层先报 `TestLists appears 0 time`）。
+  - `RE12` 真实语料两代 shell 都打印两条 `listVocabulary=2/2 …` 台阶行；`RE13` round 35 闸门在真实语料上无该行。
+
+### 实现过程事故（可复用教训）
+- **补丁插入后必须删掉原行，否则同一个登记动作发生两次**：本轮第一次真实语料复验直接 RED `2 TestList id(s) appear more than once` —— 我把新的 `TestLists` 循环体插在旧行之前，但旧行 `if ($listNames.ContainsKey($lidEntry)) { $duplicateListIds++ } else { … }` 仍留在文件里，于是每个 id 先被登记、紧接着又被判成重复。删掉那一行后（100,036 B）两代 shell 才 exit 0。教训：**插入式补丁要么替换锚点整行，要么事后断言「被替换的旧行出现次数为 0」**。
+- **Node 往 PowerShell 里插含 `$` 的文本，禁止把它们当 `String.replace` 的 replacement**：首版用 `src.replace(anchor, anchor + add)` 做「插在之后」，replacement 里的 `$'` 被解释成「匹配点之后的全部内容」，脚本从 93,530 B 暴涨到 156,701 B / 2,752 行（`$all += $total` 与 `# One message list for the definition-side` 各出现两次）。改用纯切片拼接 `src.slice(0, i + anchor.length) + add + src.slice(i + anchor.length)` 后 +109 行符合预期。
+- **两代 shell 的换行写入不完全一致，且 MSYS 的 `tr` 不认 `\r` 字面量**：本轮真实语料日志 raw 为 3,878 B（pwsh 7）与 3,877 B（PS 5.1），差的是那条长 warning 行的行尾（CRLF vs LF）。首发用 `tr -d '\r'` 归一化后仍是 3,878/3,877 B —— bash 把 `\r` 当字面两个字符传给 `tr`，CR 根本没被删；改用 `tr -d '\015'`（八进制字节）才得到 3,838/3,838 B 且逐字相同。教训：跨 shell 日志比较必须做字节级 CR 删除，并在比较后回读文件大小确认归一化真的发生。
+- **同一个「历史闸门」教训第二次复现**：`RE11` 断言「round 32 闸门在真实语料上不打印 `assemblyDeclaration=` 行」，但 `OLD_CKPRE` 在本轮已被改指 round 35 闸门，而这条用例仍引用 `OLD_CKPRE` ⇒ 定向跑（`ONLY=V,RE12,RE13`，实际仍执行全部 custom 用例）时它红（`line=present`）。修法：新增独立常量 `OLD_CK32` 指向 `D:/mh-verify/r36/old-check-r32.ps1`（88,352 B，从 round 32 的改前快照复制），`RE11` 改用它。断言「某历史版本没有某台阶行」的用例必须各自持有指向该版本的常量，不能共用一个会被推进的 `OLD_CKPRE`。
+- **warning 聚合要带套件名前缀**：两代闸门都会把两个结果文件的条目拼进同一条 `::warning::`，不加前缀时同一条信息出现两次且无法分辨来源。
+
+### 数据源与规模
+- check 脚本 93,530 B / 1,655 行 → **100,088 B / 1,763 行**（+6,558 B / +108 行；纯 ASCII、0 个 >126 字节、无 CR；sha256 前 16 位 `ceedce539744129d`）。
+- 真实语料两代 shell 均 **exit 0**、归一化后输出 **3,838 B 逐字相同**（较 round 35 的 3,150 B 正文多两条 `listVocabulary=` 台阶行，前十八层台阶行逐字不变）。
+- `windows/tools/test-suite-baseline.json` 字节未变，`windows/tools/update-test-suite-baseline.ps1` 未动。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 **`ca027fe8aa0635b4c4ae1888a9d8455dfda4328b`**（`ci(windows): the declared lists must name themselves the way the writer does (W6-113aj)`，1 file changed / +108 insertions），非 force push `a7c37f16..ca027fe8`；`git ls-remote` 远端 ref 同值，`rev-list --left-right --count` = 0/0。
+- 代码 head `ca027fe8aa0635b4c4ae1888a9d8455dfda4328b` 的 windows-ci **`41721572163` = failure**：测试步骤（套件基线全部台阶行）照常打印，唯一红是 licence 步骤 —— base 侧新增的 `resume-source-pointer-claims` 在合并树里 5 处失配（归因与修复见下一小节 W6-113ak）。
+- 集成修复后的合并 head **`821466c90bc71524d959518e3eebdc6a9565115b`**：windows-ci **`41727517960` = success**（`pull_request`；日志 `D:/mh-verify/r36/ci-mergehead.log`，147,245 B）—— 台阶行 `listVocabulary=2/2 canonical names=2 distinct names=2 unreferenced lists=1`（windows 与 webdav 各一条），前十八层台阶行逐字不变，`combined tests=2056`；licence 步骤 `check-licence-surface  checks=56 failed=0 warnings=0 skipped=0`（base 的 56 项全过，含四条 `resume-*` 检查）。
+- 同 head Android CI `41727517642` = success（代码 head 的 Android CI `41721572251` 亦为 success）；合并 head 与 round 起点 `a7c37f169c418a7e32484f2ffabcfd6e95265e37` 的 Android 三子树哈希全同（`ff4eed826cbcf6e586d008701214b3581cd977ca` / `e983feb08237f8a4b85d69ba9492e9c35b7c1625` / `70c541457caefdf0eb50201eb3be2c01b3f9470e`）⇒ 按 ADR-AUTO-001 继承、不作独立结论。
+
+### 合并树集成修复（W6-113ak，EXECUTED）
+
+- **红只存在于合并树（EXECUTED）**：代码 head `ca027fe8aa0635b4c4ae1888a9d8455dfda4328b` 的 windows-ci `41721572163` 唯一红步骤是 `Licence surface guard`，`FAIL resume-source-pointer-claims  5 problem(s)`、`checks=56 failed=1` —— 报的是 `the range 414-418 of windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs no longer contains "GetResumePositionAsync"` 一类的「区间里找不到锚点」。base 分支 `8f6bbc8a2e69bdf9373d71997a357c6ce531af1f` 自身两条 run（push `41717757152`、pull_request `41717767506`）均 success ⇒ 闸门本身没坏，红是本分支与 base 合并后才出现的。
+- **三方归因（EXECUTED）**：`git fetch origin +refs/pull/39/merge:refs/tmp/pr39merge` 取到合并提交 `ed78a29101be3c5f746c1abf89a669bd696e9688`（parents `8f6bbc8a` + `ca027fe8`，merge-base `b586b001bb8f4a30cf47aee6d2a6015dd0a7a72a`）。逐文件比 blob：`MediaBrowserProvider.cs` 在 merge-base 与 base 是同一个 blob（`516a0410`），HEAD 是 `3de06cef` —— 本分支插入了 15 行（class 头一个接口成员 + `SetPlaybackPositionAsync` 及其注释）；`windows/docs/W8-HEADLESS-RESUME.md` 在 merge-base 与 HEAD 是 `5745cf5d`（275 行），base 是 `952fb1e4`（362 行，新增 `resume-source-pointer-claims`、`resume-record-count-claims`、`resume-record-constant-claims` 三个契约块）；`windows/tools/check-licence-surface.ps1` 在 merge-base 与 HEAD 是 `f7ebd049`（53 项，无该检查），base 是 `e002a486`（56 项）。⇒ 合并树取了 base 的新文档 + 本分支的 provider：指针按 base 的行号写死，而 provider 已下移 15 行。
+- **修法（EXECUTED）**：把 `windows/docs/W8-HEADLESS-RESUME.md` 升到 base 版本（362 行、三个契约块齐全），对所有指向 provider 的行号 +15 重映射：`254-300 → 269-315`（ResolvePlaybackAsync）、`347-400 → 362-415`（ReportProgressAsync）、`414-418 → 429-433`（GetResumePositionAsync）、`402-412 → 417-427`（GetContinueWatchingAsync）、`273 → 288`（PlaySessionId）、`362 → 377`（`string.IsNullOrWhiteSpace(progress.SessionId)`）、`393 → 408`（`catch (ProviderException ex) when`）；正文里两处带行号的复述（第 40 行两句、第 83 行 `PlaySessionId` 一格）同步改。闸门的判定语义是「区间内仍含锚点子串」，7 个新区间逐个实测命中。
+- **「推了却没 run」的真因是合并冲突（EXECUTED）**：修复先以 `e7914f2ac8485b6ef8f91cdae16dad9a0af937ef` 单独提交并推送，随后 12 分钟内没有任何 workflow 被创建 —— `gh api repos/fwzm/MediaHub/actions/runs?head_sha=e7914f2a…` 返回 `total_count=0`，`gh pr checks 39` 报 `no checks reported`。查 `pulls/39` 得 `mergeable=false state=dirty merge_commit_sha=none`：base 也改过同一份 W8 文档，两边相对 merge-base 都动了同样几行 ⇒ GitHub 算不出合并 ref，`pull_request` 事件型的 workflow 就不被创建（push 型也不覆盖本分支：windows-ci 的 `push.branches` 只收 `feature/windows-*`）。**运维口径：PR 出现「推送后零 run」时先读 `mergeable_state`，不要等排队。**
+- **冲突解决 = 把 base 合进本分支（EXECUTED）**：`git merge --no-ff refs/tmp/base-wc`，二十余个文件自动合并，只有 W8 文档冲突；按「本分支即 base 内容 + 偏移」取本方版本（`git checkout --ours`），提交合并 **`821466c90bc71524d959518e3eebdc6a9565115b`**（subject `merge: the licensing base branch (W60-W64) into the cross-device sync head`），非 force push `e7914f2a..821466c9`、`git ls-remote` 同值、`rev-list --left-right --count` = 0/0；再跑 `git merge-tree --write-tree refs/tmp/base-wc HEAD` 退出 0 ⇒ 该 PR 之后按合并提交就能算合并 ref，run 随即被创建（windows-ci `41727517960`、Android CI `41727517642`）。
+- **合并带来的基线变化（EXECUTED）**：合入 base 后本分支也持有 base 的 licensing 工作（W60–W64，含 56 项 licence 闸门），因此本分支自己的 CI 从此会执行 base 的 `resume-*` 检查；合并树本地跑 base 闸门（`D:/mh-verify/r36/lic-mergehead.log`）：`PASS resume-floor-claims`（31 case）、`PASS resume-source-pointer-claims`（20 个指针、6 个文件）、`PASS resume-record-count-claims`（16 个断言 id、19 条总数）、`PASS resume-record-constant-claims`（9 个常量）、`checks=51 failed=0 warnings=0 skipped=9`、`RESULT: PASS`。9 个 skip 全是依赖 `license-report.json` 的报告类检查（report-exists / sbom-inventory / sbom-inventory-licences / sbom-source-revision / sdk-pin-matches-report / notices-inventory / lgpl-licence-table / lgpl-compliance-block / lgpl-compliance-baseline），在 CI 里由构建步骤先产出报告后才会实跑。
+
+### 锁
+- run-id `w6-r36-p4m8k1`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `05a6a4b02719bfbc8fe43e5b5dc9318c`）、`ref:origin/feature/cross-device-source-sync`（token `185f7f01c3b58cb47c1c5aa38f7700ad`）、`worktree:D:/mh-w6`（token `03df273194b063cc8f975692976be578`），取锁前 `status` 为 `locks: []`。

@@ -1288,3 +1288,56 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 - licence：`check-licence-surface` checks=53 failed=0 warnings=0 skipped=0（`18:45:41Z`）。
 - 同 head Android CI `41696425581` = in_progress（02:50 取证时点）；`core`/`feature`/`app` 三子树哈希与 `54334b871958c7abcf57b8817fb7a7bc4ce106b5` 全同 ⇒ 按 ADR-AUTO-001 继承、不作独立结论。
 - docs head `58252cab116a57419ab21090e33c4da2aa4fccdb` 的 windows-ci **`41698480546` = success**（`pull_request`，日志 `D:/mh-verify/r33/ci-docshead.log`）：台阶行与代码 head 逐字一致，licence `check-licence-surface` checks=53 failed=0 warnings=0 skipped=0（`18:59:09Z`）；同 head Android CI `41698480354` = 取证时仍 in_progress（03:01 时点）。
+
+## 6.24 第十九层口径：声明的列表必须按写入者的词表命名自己（W6-113aj，2026-11-04 06:31）
+
+### 口径（TRX 内部不变量，基线不加字段）
+
+| 项 | 内容 |
+| --- | --- |
+| 新增台阶行 | `listVocabulary=2/2 canonical names=2 distinct names=2 unreferenced lists=1`（webdav 同值） |
+| 判定 | ①任一 `<TestList>` 的 `name` 必须非空白；②同一结果文件内两张表的名字（`ToUpperInvariant` 后）必须互不相同；③命中写入者固定词表的 id，其名字必须与该 id 的 canonical 名 Ordinal 相等 |
+| 计数口径 | `listVocabulary` = 已知词表内 id 数 / 声明的表数；`canonical names` = 名字与 canonical 名相等的表数；`distinct names` = 去重后的名字数（空白与重复不计）；`unreferenced lists` = 既无结果行也无 `TestEntry` 引用的表数 |
+| 违反 | 任一违规 → RED，消息点名套件与具体 id/名字，并声明「上面所有计数读自行、参数行、outcome、计数块、运行头与 id，没有任何一条读过列表名，因此把两张表的名字对调不会改变它们中的任何一个」 |
+| warning（不 RED） | 声明了词表之外的 list id；list id 不是 GUID 形状；某张声明的表零引用（`All Loaded Results` 这类虚拟表本就零引用）；名字首尾带空白。每条 warning 带套件名前缀 |
+| 抛错位置 | 判据块内计算、台阶行照常打印，`throw` 推迟到该套件迭代末尾（round 25 verdict throw、round 32 header throw、round 35 assembly throw 之后、`$all += $total` 之前），保证既有各层保留自己的报错文案 |
+| 基线影响 | 无字段新增、update 脚本未改 ⇒ 无迁移；`test-suite-baseline.json` 与 HEAD 逐字节相等 |
+
+### 为什么前十八层看不见
+
+| 层 | 读的是 | 两张表互换名字时 |
+| --- | --- | --- |
+| 第一至第七层 | 总数、类/方法/用例数、参数行清单与摘要、outcome 与 Counters 双向核对 | 名字不参与 → 全绿 |
+| 第八至第十四层 | 截断暴露面、套件集、行属性、节结构、跨文件与执行身份、显示名构成 | 只读 `testListId` 的存在性与单值性 → 全绿 |
+| 第十五至第十八层 | `Counters` 属性契约与算术、`ResultSummary`、运行头四件、定义侧程序集与适配器声明 | 只读计数、汇总块、头部与定义侧路径 → 全绿 |
+| **第十九层（本轮）** | `<TestList>` 的 id→名字映射、名字的唯一性与 canonical 一致性 | **RED**（`do not name themselves consistently` / `both call themselves` / `carry no name`） |
+
+### 依据（EXECUTED）
+
+- 真实 TRX（`D:/mh-verify/r9-art/test-results/`）实测：两个结果文件的 `<TestLists>` 相同且固定为两对 —— `8c84fa94-04c1-424b-9868-57a2d4851a1d` = `Results Not in a List`、`19431567-8539-422a-85d7-44ee4e166bda` = `All Loaded Results`；所有结果行与 `TestEntry` 的 `testListId` 全部指向第一对（windows 1,952/1,952、webdav 104/104），第二对零引用。
+- 脚本此前全文（`SOURCE_REVIEWED`）：`$listNames` 只在 `check-test-suite-baseline.ps1:596` 建立、第 614 行写入，名字此后只用于「该 id 是否已声明」的存在性判断；结构层（第 994–1041 行）只查 id 非空、唯一与被引用。⇒ 名字是闸门从未读过的一个字段。
+- 成对证据（EXECUTED）：`V2`/`V2x` —— 两个 canonical id 互换名字后，新闸门 RED `the declared lists do not name themselves consistently`，round 35 闸门 PASS，且 `total`/`outcomes`/`Counters`/`structure`/`runHeader`/`assemblyDeclaration` 全部一字不变。
+
+### 数据源与规模
+
+- 数据源：`D:/mh-verify/r9-art/test-results/windows-tests.trx`（1,952 行）与 `webdav-tests.trx`（104 行）。
+- `windows/tools/check-test-suite-baseline.ps1` 93,530 → 100,088 B（+108 行 / 1,763 行；sha256 前 16 `ceedce539744129d`，纯 ASCII，两代 shell PARSE-OK），提交 `ca027fe8aa0635b4c4ae1888a9d8455dfda4328b`（1 file changed / +108 insertions）。
+- 真实语料两代 shell exit 0，归一化 CR（`tr -d '\015'`；MSYS 的 `tr -d '\r'` 无效，会留下 3,878/3,877 B 的差异）后各 3,838 B 逐字相同。
+
+### 负向对照（151 例，EXECUTED）
+
+- 台账 `D:/mh-verify/r36/run-nc.cjs`（50,519 B / 623 行），由 round 35 的 134 例派生：夹具的 `<TestLists>` 改用真实两个 canonical id→名字对，**total 151 cases, pass=151, fail=0**（pwsh 7 与 Windows PowerShell 5.1 判定一致，日志 `D:/mh-verify/r36/full2.log`；首轮 `full.log` 为 151/147/4，四红是仍以 `OLD_CKPRE` 为对照版本的 `U1x`–`U4x`，已改指 round 32 闸门副本 `OLD_CK32` 后复跑）。
+- 新增 V 组 13 例 + `RE12`/`RE13`；成对例（新 RED / round 35 闸门 PASS）：`V2`（两个 canonical id 互换名字）、`V3`（两张表取同名）、`V4`（第一张表名字为空串）、`V5`（canonical id 改名 `Somewhere Else`）。
+- 其余新例：`V1` 规范夹具钉台阶行；`V1x` 旧闸门无 `listVocabulary=` 行；`V6` 词表外 id 只 warning；`V7` 非 GUID id 只 warning；`V8` 零引用的声明只 warning；`V9` 名字首尾空白只 warning；`V10` 整个 `<TestLists>` 段删除时两代闸门都拒（更早的结构层先报 `TestLists appears 0 time`）；`RE12`/`RE13` 真实语料两代一致、旧闸门无该行。
+
+### 残留限制
+
+1. 闸门只钉写入者当前的两个 id→名字对（xunit 产出的固定词表），不推导「哪张表应当被引用」，也不把「零引用」升级为 RED —— 虚拟表 `All Loaded Results` 在干净语料里本就零引用。
+2. 名字比较用 Ordinal（大小写敏感），与写入者逐字一致；不做本地化或空白折叠（首尾空白只 warning）。
+3. 未知 list id 只 warning：生产者换词表（xunit 升级、其他 runner）时不应把合法结果判红，代价是词表外的新表名字仍不受约束。
+
+### exact-head CI 验收（EXECUTED，40 位 SHA）
+- 代码 head `ca027fe8aa0635b4c4ae1888a9d8455dfda4328b` 的 windows-ci `41721572163` = failure：测试步骤照常打印第十九层台阶行，唯一红是 licence 步骤 —— base 侧新增的 `resume-source-pointer-claims` 在合并树里 5 处失配（归因与修复见 RUNLOG round 36 的 `W6-113ak` 小节）。
+- 集成修复后的合并 head `821466c90bc71524d959518e3eebdc6a9565115b` 的 windows-ci **`41727517960` = success**（`pull_request`，日志 `D:/mh-verify/r36/ci-mergehead.log`，147,245 B）：出现 `MediaHub.Tests: listVocabulary=2/2 canonical names=2 distinct names=2 unreferenced lists=1` 与 webdav 同值台阶行，前十八层台阶行逐字不变，`combined tests=2056`。
+- licence：check-licence-surface  checks=56 failed=0 warnings=0 skipped=0（base 的 56 项，含四条 `resume-*` 检查）。
+- 同 head Android CI `41727517642` = success（代码 head 的 Android CI `41721572251` 亦为 success）；`core`/`feature`/`app` 三子树哈希与 `a7c37f169c418a7e32484f2ffabcfd6e95265e37` 全同 ⇒ 按 ADR-AUTO-001 继承、不作独立结论。
