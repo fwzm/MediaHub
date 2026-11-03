@@ -381,7 +381,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 **2026-11-04（W60）修订**：原先这一项只认 inline 形态。W6 分支的 S0 合并把导出渲染拆到 `windows/src/MediaHub.Net/DiagnosticsReport.cs`（`RollingDirectoryPrefix` 常量 + `lines.Add(...)` + `string? rollingDirectory = null`），`LogService.Export()` 只留 `DiagnosticsReport.Render(..., rollingDirectory: FileSink?.DirectoryPath)` —— 同一份承诺、只是渲染位置不同，PR #39 的 windows-ci 因此在这一项上连续红了五个提交。判据改为「任一形态成立即 PASS」，PASS 文案写明命中的是哪一种（`(inline shape)` / `(delegated shape)`），两种都不成立时失败文案同时点名。新增路径参数 `-LogReportPath`（默认 `windows/src/MediaHub.Net/DiagnosticsReport.cs`），让负向对照可指到临时副本。**检查总数不变（仍 53 项）**。
 
-### 3.19 日期快照审计（W51，2026-10-31）### 3.19 日期快照审计（W51，2026-10-31）
+### 3.19 日期快照审计（W51，2026-10-31）
 
 `windows/docs/W12-DOC-AUDIT.md` 是 2026-10-24 凌晨的一次只读审计（当时 477 tests、PR #33 停在 `282dcc2`、libmpv 吃 120,989,696 B 等）。它天生会过期，而它的数字与当前计数本来就不同——最容易出的两件事是有人把它的 477 当成「现在」引用，或者有人改掉它的基线提交，让整份快照失去锚点。第 45 项 `doc-audit-snapshot-claims` 钉住：
 
@@ -815,6 +815,15 @@ W53 追加的混排判据来自一次真实损坏：本文件 §4.15 的围栏�
 刻意**不**做的两件事：不检查文档语义（那是各条 claims 检查的活），也不把 `residue-allow` 当白名单滥用——标记只允许出现在「本行就是要讨论这个记号」的行上，检查不做进一步判断，因为那需要读语义。
 
 本次还顺手修掉两个真实损坏（都是这条检查当场找出来的，不是假设）：`windows/docs/CAPABILITY-MAP.md` 的 8 处围栏/行内代码被写成占位符形态（整份文档一行真围栏都不剩），以及 `LICENSE-SURFACE-CHECK.md` 第 72 行由 W51 造成的表格行粘连（README 第 364 行同时留了一份整段重复的旧副本，已按新副本收敛为一段）。
+**2026-11-04（W61）追加两条判据：标题行粘连与标题行逐字重复。** 起因是一次真实损坏被 W60 的提交顺手带进来：本文件 `## 5. 这个工具**不**覆盖什么` 那一段标题被写成「自己接自己」（两段标题粘在同一行），渲染出来是一个标题加一长串正文，而第 46 项当时只看表格行粘连与占位符，一路绿。全仓普查（97 份 markdown）共命中三处同型损坏：本文件 `### 3.19 日期快照审计（W51，2026-10-31）` 重复、本文件 `## 5.` 那处粘连、以及仓库根 `TASKS.md` 的 `## V0.1 —— MVP（下一步）` 粘连。两条新判据都在围栏外、都可用 `residue-allow` 豁免：
+
+| 判据（W61 追加） | 失败含义 |
+| --- | --- |
+| 行首为 `#` 的行，若整行形如「同一个标题文本紧接自己」（正则 `^(#{1,6} .+?)\1$`） | 往文档里插内容时把两段标题粘成一行：渲染成一个标题 + 正文，或后半段静默消失 |
+| 行首为 `#` 的行，若与上一条标题行逐字相同 | 同一标题写两遍：目录里出现两条同号条目，读者不知道哪段是权威 |
+
+两条规则都跳过围栏内部的行（围栏里的 `#` 是代码或状态块内容，不是标题），并且只在「本行确实在讨论这个坏法」时才需要 `residue-allow`。
+
 ### 4.20 实测（2026-10-31，W52，本机，HEAD 2bdaa499）
 
 代码：
@@ -1159,7 +1168,24 @@ RESULT: PASS
 
 - 一条自证：本轮新增 `-LogReportPath` 参数后重跑正向仍 `checks=53 failed=0`，`check-inventory` 未因新增参数改变计数 —— 检查项数只由实际发射的 id 决定，参数是入口不是判据。
 
-## 5. 这个工具**不**覆盖什么## 5. 这个工具**不**覆盖什么
+### 4.29 实测（2026-11-04，W61，本机）
+
+- 缺口与首跑：守卫加两条标题判据后**立即**红，且红得正好是本轮要修的三处真实损坏 —— `checks=53 failed=1`，`doc-residue-claims  3 problem(s)`：`TASKS.md line 446`、本文件 `line 384`、本文件 `line 1162`（`D:/mh-verify/w61-first.log`）。第 1162 行那处是 W60 提交本身带进来的，另两处是更早的旧伤：第 46 项此前只查表格行粘连，所以一直没看见。
+- 修复：三行各收敛成一段标题（`## V0.1 —— MVP（下一步）` / `### 3.19 日期快照审计（W51，2026-10-31）` / `## 5. 这个工具**不**覆盖什么`）。
+- 正向（`D:/mh-verify/w61-positive.log`）：`checks=53 failed=0 warnings=0 skipped=0` / `RESULT: PASS`，本项 PASS 原文仍是 `1194 text file(s) scanned: no unmarked placeholder residue, no mangled fence run, all 89 markdown file(s) have balanced fences, and the capability map status block sits inside a real fence`。
+- 负向对照（`D:/mh-verify/w61-nc/` 副本树，`-DocsScanRoot` 指过去）：
+
+| 用例 | 注入 | 结果 |
+| --- | --- | --- |
+| NC1 | 副本里把一段标题写成「标题+自己」粘连 | 1 红：`is two heading lines glued together` |
+| NC2 | 副本里同一标题连写两行 | 1 红：`repeats the previous heading line verbatim` |
+| NC3 | 副本里把一段普通正文写两遍 | `failed=0`（判据只管标题；正文重复是语义问题，不在本项） |
+| NC4 | 副本里把两条表格行粘成一行 | 1 红：仍是原有的 `two markdown table rows glued onto one line`（新判据没有顶掉旧判据） |
+| NC5 | 副本里给粘连标题那行加 `residue-allow` | `failed=0`（豁免通道有效） |
+
+- 逐条日志：`D:/mh-verify/w61-nc/NC1.log` … `NC5.log`，驱动 `D:/mh-verify/w61-nc/run.sh`。守卫补丁前快照 `D:/mh-verify/w61-guard-pre.ps1`（sha256 `8d170f92…`），补丁后 193,156 → 194,041 B / +885 B，**检查总数仍 53**。
+
+## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。
 - 不下载任何包的许可原文：`file` 型许可按包内文件名与首 6 KB 文本猜测（如 `LICENSE.txt` → BSD-3-Clause / Microsoft EULA），结果带 `~` 前缀，属于「线索」不是「判定」。

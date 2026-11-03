@@ -2115,6 +2115,7 @@ else {
             $mdFenceCount = 0
             $mdInsideFence = $false
             $mdLineNumber = 0
+            $mdPrevHeading = ''
             foreach ($mdLine in ($scanText -split "`n")) {
                 $mdLineNumber++
                 $mdTrimmed = $mdLine.Trim()
@@ -2124,6 +2125,19 @@ else {
                     continue
                 }
                 if ($mdInsideFence) { continue }
+                if ($mdTrimmed.StartsWith('#')) {
+                    $mdHeadingGlue = [regex]::Match($mdTrimmed, '^(#{1,6} .+?)\1$')
+                    if ($mdHeadingGlue.Success -and -not $mdLine.Contains('residue-allow')) {
+                        $residueProblems.Add($relative + ' line ' + $mdLineNumber + ' is two heading lines glued together (' + $mdHeadingGlue.Groups[1].Value.Trim() + ' repeated)')
+                    }
+                    if ($mdPrevHeading -eq $mdTrimmed -and -not $mdLine.Contains('residue-allow')) {
+                        $residueProblems.Add($relative + ' line ' + $mdLineNumber + ' repeats the previous heading line verbatim (' + $mdTrimmed + ')')
+                    }
+                    $mdPrevHeading = $mdTrimmed
+                }
+                else {
+                    $mdPrevHeading = ''
+                }
                 if (-not $mdTrimmed.StartsWith('|')) { continue }
                 $mdGlueCheck = [regex]::Replace($mdLine, '`[^`]*`', '')
                 if ($mdGlueCheck.Contains('||')) {
