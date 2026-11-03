@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-03T14:20:00+08:00",
-  "updated_by": "lead-W6-113-r25",
+  "updated_at": "2026-11-04T00:5x+08:00",
+  "updated_by": "lead-W6-113-r32",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -729,6 +729,30 @@
       "notes": "只钉两种无争议 verdict（Completed/Failed）；稀有 verdict 只记录不判红（与失败桶无可证等价式）；缺失的失败桶按 0 处理（第十五层已拒绝必读属性缺失）；throw 排在既有判据之后以保证既有层文案不变。",
       "next_action": "下一层候选：ResultSummary/@outcome 与 TestRun/@name 的配对、UnitTest/@storage 与程序集声明的配对、TestSettings/Deployment 与 relativeResultsDirectory 前缀的配对；若再红先问「这一层的每个数字读自文件的哪一侧」并确认新层的 throw 排在既有判据之后。",
       "closed_at": "2026-11-03T14:1x+08:00"
+    },
+    {
+      "id": "W6-113ah",
+      "title": "套件基线门禁第十七层：每个结果文件的运行头必须与其行集自洽",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r32",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "commit 6e1ba557f1beaeff28c3cd8f34a855e8500fde11 (1 file changed / 149 insertions; check-test-suite-baseline.ps1 79,818 -> 88,352 B / 1,577 lines, sha256 16=82a1eb5681a7f5fa, pure ASCII, both shells PARSE-OK)",
+        "negative controls total 120 cases, pass=120, fail=0 (pwsh 7 + Windows PowerShell 5.1 parity) - D:/mh-verify/r32/run-nc.cjs, log D:/mh-verify/r32/full2.log",
+        "the layer reads the four header facts nothing else read: TestRun/@name, @runUser, TestSettings (name + own id) and Deployment/@runDeploymentRoot; real corpus: name=\"runneradmin@runnervmdaln5 2026-10-30 12:32:23\", runUser=\"runnervmdaln5\\\\runneradmin\", runDeploymentRoot=\"runneradmin_runnervmdaln5_2026-10-30_12_32_23\" (the root is the name with @, space and : replaced by _)",
+        "expected-bad pairs (new gate RED / round 25 gate PASS): T14 an internally consistent header from another machine over the same rows -> \"every row ran on 'runnernc' while the run header names machine 'otherhost'\"; T2 missing TestSettings -> \"declares 0 TestSettings block(s)\"; T3 two blocks; T5 no settings id; T9 a root not derived from the name; T10 runUser that is not machine\\\\user; T15 a header id also used as a test id",
+        "warnings that stay green: a run name in an unexpected shape (the derived root is then not checked) and a TestSettings id that is not a GUID",
+        "throw deferred to the end of the suite iteration (after the round-25 verdict throw, before $all += $total) so every pre-existing layer keeps its own failure text",
+        "no baseline change: this reads fields the baseline never stored - test-suite-baseline.json and update-test-suite-baseline.ps1 byte-identical to HEAD",
+        "both shells on the real corpus: exit 0, 2,963 B byte-identical output, MediaHub.Tests runHeader=3/3 settings=1 deployments=1 derivedRoot=1 bound rows=1952 header id collisions=0, WebDav bound rows=104, combined tests=2056",
+        "exact-head windows-ci 41677038106 (@6e1ba557f1beaeff28c3cd8f34a855e8500fde11) = failure with the test gate step green (the only failing step is the pre-existing upstream licence guard) and both new ladder lines present, every round-25 ladder line unchanged",
+        "licence `check-licence-surface  checks=53 failed=1 warnings=0 skipped=0`, only red = upstream log-file-claims (W6-113u)",
+        "Android CI 41677038126 was in_progress when sampled; core/feature/app tree hashes identical to 19e8561d668f4434b8ae3f9c4135f48cdb28b8ad -> inherited per ADR-AUTO-001"
+      ],
+      "notes": "第十七层补上「文件里已有、闸门从未读取」的最后一侧：运行头。与第十六层（verdict）同理，判据只读文件自身，不进基线、无迁移。实现过程发现并修掉一个 PowerShell 变量跨迭代复用缺陷（warning 累加器）。",
+      "next_action": "套件基线第十八层候选：Times 的 creation/queuing 与行时间窗口的关系（已知反例：可晚于 start）；Deployment/@runDeploymentRoot 与实际 relativeResultsDirectory 前缀的一致性。",
+      "closed_at": "2026-11-04T00:5x+08:00"
     }
   ]
 }

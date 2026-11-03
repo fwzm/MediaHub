@@ -1181,3 +1181,55 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 - 同 head Android CI `41586032310` = 取证时 in_progress；`core`/`feature`/`app` 三子树哈希与 `6295b420` 全同 ⇒ 按 ADR-AUTO-001 继承、不作独立结论。
 - docs head `e897c629fd126dd7e488d372fa170241577b11f0` 的 windows-ci **`41586989032` = completed/failure**（`pull_request`，日志 `D:/mh-verify/r25/ci-docshead.log`，113,727 B）：测试门禁步骤全绿，台阶行与代码 head 逐字一致（`MediaHub.Tests: summaryOutcome=Completed failureBuckets=0 contradiction=0` @06:01:08.1497849Z、`MediaHub.WebDav.Tests: summaryOutcome=Completed failureBuckets=0 contradiction=0` @06:01:10.3233174Z、`combined tests=2056`、`total=1952 baseline=1952 failed=0 notExecuted=0`、WebDav 104/104）；licence `check-licence-surface  checks=52 failed=1 warnings=0 skipped=0`，唯一红仍为上游 `log-file-claims`（`W6-113u`）。
 - 同 head Android CI `41586989022` 取证时 in_progress；`e897c629` 相对 `25bd599f` 只改 `docs/automation/**` ⇒ 三子树哈希不变，按 ADR-AUTO-001 继承、不作独立结论。
+
+## 6.22 第十七层口径：结果文件的运行头必须与其行集自洽（W6-113ah，2026-11-04）
+
+### 口径（TRX 内部不变量，基线不加字段）
+
+| 项 | 内容 |
+| --- | --- |
+| 新增台阶行 | `runHeader=3/3 settings=1 deployments=1 derivedRoot=1 bound rows=1952 header id collisions=0` |
+| 判定 | 每个结果文件必须恰有 1 个 `TestSettings`（`name` 与 `id` 非空白）且其中恰有 1 个 `Deployment`（`runDeploymentRoot` 非空白）；`TestRun/@runUser` 必须是 `machine\\user` 形状；`TestRun/@name` 为 `user@machine <date> <time>` 形状时其用户段必须等于 `runUser` 叶段、机器段必须等于域段；`runDeploymentRoot` 必须等于 run name 把 `@`/空格/`:` 换成 `_` 的结果；所有行的 `computerName` 必须等于头部机器；头部 id（`TestRun/@id` 或 settings `id`）不得与文件内任何 test id / execution id / list id 相同，两者也不得互为同值 |
+| 计数口径 | `headerFacts` = 三项可派生事实之和（run name 规范形状 / runUser 规范形状 / 派生 root 相等）；`bound rows` = 与头部机器一致的行数；`header id collisions` = 撞号或同值次数 |
+| 违反 | 任一违规 → RED，消息点名套件与文件，并声明「上面所有计数都读自行与计数块，没有任何一条读过头部的运行名、settings 块、部署根或行所运行的机器，因此换一份头部不会改变它们中的任何一个」 |
+| warning（不 RED） | run name 不是 `user@machine` 加时间戳的形状（此时不校验派生 root）；`TestSettings id` 非 GUID |
+| 抛错位置 | 判据块内计算、台阶行照常打印，`throw` 推迟到该套件迭代末尾（round 25 verdict throw 之后、`$all += $total` 之前），保证既有各层保留自己的报错文案 |
+| 基线影响 | 无字段新增、update 脚本未改 ⇒ 无迁移；`test-suite-baseline.json` 与 HEAD 逐字节相等 |
+
+### 为什么前十六层看不见
+
+| 层 | 读的是 | 头部被整段替换时 |
+| --- | --- | --- |
+| 第一至第七层 | 总数、类/方法/用例数、参数行清单、outcome 与 Counters 双向核对 | 与头部无关 → 全绿 |
+| 第八至第十四层 | 截断暴露面、套件集、行属性、节结构、跨文件与执行身份、显示名构成 | 同上 → 全绿 |
+| 第十五、十六层 | `Counters` 自身属性契约与算术、`ResultSummary/@outcome` 与失败桶一致 | 只读计数与汇总块，不读 `TestSettings`/`Deployment`/`runUser` → 全绿 |
+| **第十七层（本轮）** | 头部四件（name/runUser/TestSettings/Deployment）与行集、与头部自身 id 的一致性 | **RED**（缺块、派生 root 不符、机器与行不符、头部 id 撞号） |
+
+### 依据（EXECUTED）
+
+- 真实 TRX（读取 `D:/mh-verify/r9-art/test-results/`）实测：`<TestRun id="…" name="runneradmin@runnervmdaln5 2026-10-30 12:32:23" runUser="runnervmdaln5\\runneradmin">`、`<TestSettings name="default" id="<GUID>"><Deployment runDeploymentRoot="runneradmin_runnervmdaln5_2026-10-30_12_32_23" /></TestSettings>`；派生规律在两个文件上都成立，且两文件的时间戳不同（12:32:00 / 12:32:23）⇒ 每个文件自成身份域（第十二层已要求 run id 互异）。
+- 脚本此前全文（`SOURCE_REVIEWED`）对 `TestSettings`、`Deployment` 零引用，`runUser` 零引用，`TestRun/@name` 未读；第十层只要求 `computerName` 单文件内一致，从未与头部机器比对。
+- 成对证据（EXECUTED）：`T14`/`T14x` —— 内部完全自洽但来自另一台机器的头部（`other@otherhost …`、`otherhost\\other`、root `other_otherhost_…`）罩在同一批行上：新闸门 RED `every row ran on 'runnernc' while the run header names machine 'otherhost'`，round 25 闸门 PASS。
+
+### 数据源与规模
+
+- 数据源：`D:/mh-verify/r9-art/test-results/windows-tests.trx`（1,952 行）与 `webdav-tests.trx`（104 行）。
+- `windows/tools/check-test-suite-baseline.ps1` 79,818 → 88,352 B（+149 行 / 1,577 行；sha256 前 16 `82a1eb5681a7f5fa`，纯 ASCII，两代 shell PARSE-OK），提交 `6e1ba557f1beaeff28c3cd8f34a855e8500fde11`（1 file / +149），非 force push `19e8561d668f4434b8ae3f9c4135f48cdb28b8ad..6e1ba557`。
+
+### 负向对照（120 例，EXECUTED）
+
+- 台账 `D:/mh-verify/r32/run-nc.cjs`（42,151 B / 504 行），**`total 120 cases, pass=120, fail=0`**（pwsh 7 与 Windows PowerShell 5.1 判定一致，日志 `D:/mh-verify/r32/full2.log`）。
+- 新增 T 组 26 例 + `RE8`/`RE9`；成对例（新 RED / round 25 闸门 PASS）：`T14`（自洽但别的机器的头部笼罩同批行）、`T2`（缺 settings 块）、`T3`（两个 settings 块）、`T5`（settings 无 id）、`T9`（root 不是从 name 派生）、`T10`（runUser 非 `machine\\user`）、`T15`（头部 id 撞 test id）。
+- 其余新例：`T1` 规范夹具钉台阶行；`T1x` 旧闸门不打印 `runHeader=`；`T4` settings 无名；`T6` 缺 Deployment；`T7` 两个 Deployment；`T8` 缺 runDeploymentRoot；`T11` 用户段不齐、`T12` 机器段不齐（RED）；`T13` 非规范 name 仅 warning、`T5b` 非 GUID settings id 仅 warning（PASS）；`T16` run id = settings id；`T17` 整段头部删除（两代闸门均拒）；`RE8` 真实语料两代 shell 都打印 1952/104 两条台阶行且逐字相同，`RE9` 旧闸门无该行。
+
+### 残留限制
+
+1. `TestRun/@name` 的时间戳不与任何行时间比对：它是运行开始的挂钟时间，`Times` 的 `creation`/`queuing` 可以晚于 `start`（第十四轮已记录的事实反例）。
+2. `Deployment` 的其它属性与 `TestSettings` 的其它属性只记录不判（真实语料里无此列）。
+3. `runUser` 的域前缀与 `TestRun/@name` 的大小写按 OrdinalIgnoreCase 比较；域与主机名的大小写差异不算违规。
+
+### exact-head CI 验收（EXECUTED，40 位 SHA）
+
+- head `6e1ba557f1beaeff28c3cd8f34a855e8500fde11` 的 windows-ci **`41677038106` = failure（测试门禁步骤全绿，唯一失败步骤是 licence 守卫的既有上游红）**（`pull_request`，日志 `D:/mh-verify/r32/ci-codehead.log`，114,814 B / 598 行）：测试门禁步骤全绿，两套件打印十七层台阶行 `runHeader=3/3 settings=1 deployments=1 derivedRoot=1 bound rows=1952 header id collisions=0`（`2026-11-03T16:45:54Z`）与 `… bound rows=104 …`（`2026-11-03T16:45:56Z`），其余台阶行与 round 25 逐字一致（`summaryOutcome=Completed failureBuckets=0 contradiction=0`、`combined tests=2056`、`MediaHub.Tests: total=1952 baseline=1952 failed=0 notExecuted=0`、WebDav 104/104）。
+- licence：`check-licence-surface  checks=53 failed=1 warnings=0 skipped=0（唯一红 log-file-claims，W6-113u 上游）`。
+- 同 head Android CI `41677038126` = in_progress when sampled；`core`/`feature`/`app` 三子树哈希与 `19e8561d668f4434b8ae3f9c4135f48cdb28b8ad` 全同 ⇒ 按 ADR-AUTO-001 继承、不作独立结论。

@@ -471,3 +471,51 @@
 
 ### 锁
 - run-id `w6-r25b-k7m2p9`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `4150e2e39cda4053c4296a2a06fadff6`）、`ref:origin/feature/cross-device-source-sync`（`cac33970651b9c1222032fa6e05b0624`）、`worktree:D:/mh-w6`（`f3fc062d52d6f8ab913e7c93f3d28d94`）；三把均以 `--take-stale` 从上一次的 `w6-r25-kq5y9q` 接手（该 run 中断两天、ttl 到期）；收尾释放。
+
+## 2026-11-04 00:5x round 32（W6-113ah：套件基线第十七层口径 —— 结果文件的运行头必须与其行集自洽）
+
+### 侦察（EXECUTED）
+- W6 树取样：head `19e8561d668f4434b8ae3f9c4135f48cdb28b8ad`（round 25 docs 验收）、工作树干净、与 origin 0/0；base `refs/heads/main` = `1246313c7a66d492258b5b4b20b51cbdcf2da9cc`。
+- 真实语料（`D:/mh-verify/r9-art/test-results/`）：`windows-tests.trx` 1,952 行、`webdav-tests.trx` 104 行。本轮新读到的事实：每个文件都有自己的运行头 —— `<TestRun id="…" name="runneradmin@runnervmdaln5 2026-10-30 12:32:23" runUser="runnervmdaln5\runneradmin">` 与 `<TestSettings name="default" id="<GUID>"><Deployment runDeploymentRoot="runneradmin_runnervmdaln5_2026-10-30_12_32_23" /></TestSettings>`。**派生规律**：`runDeploymentRoot` 就是 run name 把 `@`、空格、`:` 全部换成 `_`；name 的用户段 = runUser 的叶段，name 的机器段 = runUser 的域段 = 每行 `computerName`。两个文件的 name 时间戳不同（12:32:00 / 12:32:23），各自成域。
+- 缺口定位（源码审查 SOURCE_REVIEWED）：脚本全文对 `TestSettings`、`Deployment` 零引用，`runUser` 零引用，`TestRun/@name` 从未被读；第十层只要求 `computerName` 在单文件内一致，从未与头部声明的机器绑定。
+
+### 缺口（本轮切片动机）
+- 运行头可以整段换成另一次运行（同样自洽）的头部，而本闸门读到的每一个数字一字节不变：`TestRun/@name`、`@runUser`、`TestSettings`（含它自己的 id）与 `Deployment/@runDeploymentRoot` 全部不参与任何计数或交叉核对。
+- 与第十六层同理，这是「文件里已有、闸门从未读取」的最后一侧；本轮把它补成第十七层：头部必须与它概括的行集自洽，特别是机器必须与所有行的 `computerName` 一致。
+
+### 修法（只改 `windows/tools/check-test-suite-baseline.ps1`；基线零变化、update 脚本未改 ⇒ 无迁移）
+- 六处补丁（+149 行）：头注释第 17 段、SEMANTICS 增补、新判据块、台阶行、throw 块、warning 输出。
+- RED 判据：①`TestSettings` 条数 ≠ 1；②settings `name` 空白；③settings `id` 空白；④`Deployment` 条数 ≠ 1；⑤`runDeploymentRoot` 空白；⑥`runUser` 不成 `machine\user` 形状；⑦name 为规范形状时，其用户段 ≠ runUser 叶段、机器段 ≠ runUser 域段；⑧规范 name 派生出的 root 与文件里的 root 不等；⑨所有行 `computerName` 与头部机器不等；⑩⑪头部 id（`TestRun/@id` 或 settings id）与文件内的 test id / execution id / list id 撞号；⑫两者相等。
+- **台阶行**：`runHeader=$headerFacts/3 settings=… deployments=… derivedRoot=… bound rows=… header id collisions=…`。
+- 不 RED 的 warning（防生产者格式变化误红）：run name 不是 `user@machine` 加时间戳的形状（此时不校验派生 root）；`TestSettings` id 非 GUID。
+- **抛错位置**：判据照常计算、台阶行照常打印，`throw` 放在该套件迭代末尾（round 25 verdict throw 之后、`$all += $total` 之前），保证既有各层保留自己的报错文案。
+- 刻意保留的残留限制：`TestRun/@name` 的时间戳不与任何行时间比对（它是运行开始的挂钟时间，而 `Times` 的 creation/queuing 可晚于 start，属事实反例）；`Deployment` 的其它属性与 `runUser` 的域前缀只记录不判。
+
+### 负向对照（120 例，EXECUTED）
+- 脚本 `D:/mh-verify/r32/run-nc.cjs`（42,151 B / 504 行），每例两代 shell 双跑（pwsh 7 + Windows PowerShell 5.1）并要求判定一致；沿用 round 25 的 92 例既有用例并为其夹具补齐自洽运行头。
+- 全量结果：`total 120 cases, pass=120, fail=0`（日志 `D:/mh-verify/r32/full2.log`）。首轮全量跑在 120 例里有 **2 红**（`R5`/`R6` 两个「新增参数行仍走增长路径」的用例），原因是**夹具自身**：`rowsGrown()` 把行数从 8 增到 10，定义 id 的序号 GUID 随之覆盖到 `…000009`，而夹具默认的 `TestRun/@id` 正是 `…000009` ⇒ 新层正确地判「头部 id 撞 test id」。这不是闸门缺陷，改法是**把夹具的默认 run id 移出序号空间**（`RUN_A`/`RUN_B` 两个字面 GUID，并把 `addCopy` 的 `split` 锚点同步改名），改后定向复跑 14 例全绿、全量复跑见上行。教训：**给闸门新增「身份域不得重叠」类判据时，夹具的 id 生成器必须在不同用途之间留出不相交的段**，否则「增长路径」类用例会自己撞自己。
+- 新增 T 组 26 例 + RE8/RE9，核心对：
+  - `T14`/`T14x`：内部自洽但来自**另一台机器**的头部（`other@otherhost …`、`otherhost\other`、root `other_otherhost_…`）罩在同一批行上 ⇒ 新闸门 RED（`every row ran on 'runnernc' while the run header names machine 'otherhost'`），round 25 闸门 PASS。
+  - `T2`/`T2x` 缺 settings 块；`T3`/`T3x` 两个 settings 块；`T5`/`T5x` settings 无 id；`T9`/`T9x` root 不是从 name 派生；`T10`/`T10x` runUser 非 `machine\user`；`T15`/`T15x` 头部 id 撞 test id。
+  - `T11` name 用户段与 runUser 不齐、`T12` 机器段不齐、`T13` 非规范 name 仅 warning、`T5b` 非 GUID settings id 仅 warning、`T16` run id = settings id、`T17` 整段头部删除（两代闸门均拒）。
+  - `RE8` 真实语料两代 shell 都打印 runHeader 台阶行且逐字相同；`RE9` round 25 闸门在真实语料上无 `runHeader=` 行。
+
+### 实现过程事故（可复用教训）
+- **PowerShell 变量跨迭代复用**：warning 累加器最初写成迭代内 `$headerWarn = @()`，于是只有最后一个结果文件的 warning 会被打印（第一个文件的告警静默丢失）。改为主循环前声明全局 `$headerWarn = @()`、迭代内用 `$headerFileWarn` 并 `$headerWarn += $headerFileWarn`。凡「跨文件累计的告警/清单」都必须在循环外声明。
+- **给既有夹具补真实层字段时必须同时把字段改成自洽**：原夹具 `TestRun/@name` 是 `nc@runnernc …` 而 `runUser` 是 `runnernc\runner`，补齐 `TestSettings`/`Deployment` 后新层会立刻把 92 例既有用例全部判红；正确做法是把 name 改成 `runner@runnernc …`（用户段=叶段、机器段=域段）再跑既有用例。
+- **本机长任务**：`run_code` 有 120 秒硬上限（`timeoutMs` 无效），NC 这类分钟级任务必须走 `ops_bash run_in_background`；NC 库只在进程结束时才打印，日志长时间 0 字节属正常，判进度看产物目录与子进程。
+
+### 数据源与规模
+- check 脚本 79,818 B / 1,428 行 → **88,352 B / 1,577 行**（+8,534 B / +149 行；纯 ASCII，0 个 >126 字节；sha256 前 16 位 `82a1eb5681a7f5fa`）。
+- 真实语料两代 shell 均 **exit 0**、输出 **2,963 B 逐字相同**（两套件各一行 runHeader 台阶行 + `combined tests=2056`）。
+- `windows/tools/test-suite-baseline.json` 字节未变，`windows/tools/update-test-suite-baseline.ps1` 未动。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 **`6e1ba557f1beaeff28c3cd8f34a855e8500fde11`**（`ci(windows): the suite baseline pins each results file to its own run header (W6-113ah)`，1 file changed / +149）；提交前把实现态快照 `D:/mh-verify/r32/check-new.snapshot.ps1` 逐字节写回并复验真实语料（identical=true）通过才提交；非 force push `19e8561d668f4434b8ae3f9c4135f48cdb28b8ad..6e1ba557`，远端 ref 同值、工作树干净。
+- head `6e1ba557f1beaeff28c3cd8f34a855e8500fde11` 的 windows-ci **`41677038106` = failure（测试门禁步骤全绿，唯一失败步骤是 licence 守卫的既有上游红）**（`pull_request`；日志 `D:/mh-verify/r32/ci-codehead.log`，114,814 B / 598 行）：测试门禁步骤全绿并打印第十七层台阶行 **`MediaHub.Tests: runHeader=3/3 settings=1 deployments=1 derivedRoot=1 bound rows=1952 header id collisions=0`** 与 `MediaHub.WebDav.Tests: runHeader=3/3 … bound rows=104 …`；其余台阶行与 round 25 逐字一致（`summaryOutcome=Completed failureBuckets=0 contradiction=0`、`counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted`、`combined tests=2056`）⇒ 本轮判定标准成立。
+- licence 步骤：`check-licence-surface  checks=53 failed=1 warnings=0 skipped=0（唯一红 log-file-claims，W6-113u 上游）`，唯一红为上游 `log-file-claims`（`W6-113u`）。
+- 同 head Android CI `41677038126` = in_progress when sampled；`6e1ba557` 与 `19e8561d668f4434b8ae3f9c4135f48cdb28b8ad` 的 `core`/`feature`/`app` 三子树哈希全同（`ff4eed826cbcf6e586d008701214b3581cd977ca` / `e983feb08237f8a4b85d69ba9492e9c35b7c1625` / `70c541457caefdf0eb50201eb3be2c01b3f9470e`）⇒ 按 ADR-AUTO-001 继承、不作独立结论。
+- PR #39：head `6e1ba557`、draft，正文写前约 183 KB。
+
+### 锁
+- run-id `w6-r32-h3k9m2`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `4592990da388ffd3a19fdd9b20800b01`）、`ref:origin/feature/cross-device-source-sync`（`617b52eceaf81661e737f353565b444a`）、`worktree:D:/mh-w6`（`c48a76ffb85a4cdc5f6d4717dda0bad9`）；收尾释放。
