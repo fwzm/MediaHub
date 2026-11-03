@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-54 项检查分三十三组：
+55 项检查分三十四组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -80,6 +80,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 日期快照审计（W51 起） | `doc-audit-snapshot-claims` | `windows/docs/W12-DOC-AUDIT.md` §0 状态块缺失或与正文分叉（正文 HEAD ≠ 块内 baseline-head、基线提交不再是本分支祖先、快照不再自称 as-of、或第 4 节不可判定清单被删） |
 | 文档残留与围栏（W52 起） | `doc-residue-claims` | 文本文件里留着生成期占位符（填写处出现未替换的记号，确要讨论该记号的行须带 `residue-allow` 标记）、markdown 围栏行数为奇数、CAPABILITY-MAP §0 状态块不再被真围栏包住，或一行里粘了两条表格行（`||` 出现在行首为 `|` 的行上） |
 | W8 续播记录指针（W62 起） | `resume-source-pointer-claims` | `windows/docs/W8-HEADLESS-RESUME.md` §11 的 `resume-source-pointer-claims` 块与源码分叉：20 条 `路径:行号` 指针里有一条在文件里不再含它声明的锚点短语、行号越界、文件名被改或删除，或正文又写出块里没声明的新行号——「谁引用哪一行」不能只靠人眼 |
+| W8 续播记录计数（W63 起） | `resume-record-count-claims` | `windows/docs/W8-HEADLESS-RESUME.md` §12 的 `resume-record-count-claims` 块与两份源码分叉：§4 的 16 条探针断言 id 与 `MediaHub.ResumeProbe/Program.cs` 里的 `Check("<id>")` 不再双向相等、驱动的固定/每服/服务器数/总数四个数字与 `headless-resume.ps1` 的调用点算不出来、或 §7 退出码表仍写着过期的驱动条数 |
 
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
@@ -250,7 +251,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 54） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 55） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -1206,6 +1207,22 @@ RESULT: PASS
 
 PASS 文案会报出「多少条指针 / 多少个文件 / 每条区间仍含锚点 / 正文没有未声明引用」，FAIL 文案末句固定为「行号解析不了就是一条没人能跟的引用」。负向对照见 §4.30。
 
+### 3.29 W8 续播记录的断言条数契约（W63，2026-11-04）
+
+§2 那份续播验收记录里的**计数**（§4「四个阶段与 16 条断言」、§6.4 列出的驱动断言、§7 退出码表）此前全靠人写：往 `windows/src/MediaHub.ResumeProbe/Program.cs` 里加一条 `Check("…")`、或往驱动里加一条 `Assert-That`，文档里的数字就会静默过期。**这已经发生过一次**：§10（2026-10-29）给驱动补了两条版本断言，驱动从 17 条涨到 19 条，而 §7 的退出码表仍写着「17 条驱动断言全过」整整六天 —— 期间所有门禁都是绿的，因为没人重算过那个数字。
+
+第 55 项把这层关系钉成契约块（写在记录文件末尾 §12），判据四条：
+
+| 判据 | 内容 | 失败含义 |
+| --- | --- | --- |
+| A 块自指 | `<!-- BEGIN resume-record-count-claims -->` … `<!-- END … -->` 块在；块内 `resume-count-owner` 点名本项；`resume-probe-assertions` / `resume-driver-fixed-assertions` / `resume-driver-per-server-assertions` / `resume-driver-servers` / `resume-driver-assertions-total` 五个键齐全 | 契约块被删、被改名，或六个键被拆散 |
+| B 探针 id 双向相等 | 从 `Program.cs` 抓 `Check("<id>")` 的 id 集合、从记录 §4 断言表的 id 列抓同一批 id，两个集合**双向**相等（代码删了/改名、表格漏登/多登都算红），且条数等于 `resume-probe-assertions` | 断言被改但文档表格没跟上，或表格写了一堆代码里没有的 id |
+| C 驱动条数可算 | 第一个参数是字面量名的 `Assert-That '<name>'` 算固定条；第一个参数是 `($pair.Label + …)` 的算「每服一条」，乘以 `foreach ($pair in @(@{ Label = … }, …))` 里的服务器数；`fixed + per-server × servers` 必须等于 `resume-driver-assertions-total`，且四个中间量各自等于块里声明的数 | 加/删断言、或把某条从循环里挪到循环外，却没同步块里的数 |
+| D 退出码表不留旧数 | 记录 §7 退出码表里「驱动 `0`」那一行必须写着当前总数（现在是「19 条驱动断言全过」） | 条数改了而退出码表仍是旧数字（正是 §10 之后那六天的状态） |
+| E 文件缺失 | 记录或两份源码任一读不到 → 本项 SKIP（退出码不变） | 无从比较，不该伪红也不该伪绿 |
+
+计数的口径只在这里声明一次：§7 的退出码表、§6.4 的正文都按块里的数写，改断言时**先改代码、再改表格/正文、最后改块**。PASS 文案报出「多少个探针 id 一一对上、驱动多少固定 + 多少每服 × 多少服 = 多少条」，FAIL 末句固定为「不是重算出来的计数就是没人能信的数字」。负向对照见 §4.31。
+
 ### 4.30 实测（2026-11-04，W62，本机）
 
 - 修复先于门禁：本轮先把两处过期指针改对（138 → 146、125-127 → 158-159），再补齐 9 处只有 `:N` 没有文件名的裸续引（`ProviderContracts.cs` 三处、`MediaBrowserProvider.cs` 一处、`MediaBrowserDialect.cs` 四处、两个 ps1 各一处），最后才写契约块 —— 顺序反了就会把过期行号一起钉进契约。
@@ -1226,6 +1243,34 @@ PASS 文案会报出「多少条指针 / 多少个文件 / 每条区间仍含锚
 - 逐条日志：`D:/mh-verify/w62-nc/NC0.log` … `NC6.log`（NC6 用 `NC9-not-here.md` 这个刻意不存在的名字）。NC1–NC5 **各恰好只有本项变红**，其余 53 项保持 PASS。
 - 守卫补丁前快照 `D:/mh-verify/w62-guard-pre.ps1`（sha256 `855004ff…`，194,041 B），补丁后 200,112 B / +6,071 B，检查总数 **53 → 54**。
 - 一次自证：新增参数 `-ResumeSourceDocPath` 后重跑正向仍 `checks=54 failed=0` —— 参数是入口不是判据，项数只由发射的 id 决定（同 W60）。
+
+### 4.31 实测（2026-11-04，W63，本机）
+
+- 先改记录再上门禁：本轮先把 §3 状态行、§6.4 正文与 §7 退出码表里过期的「17 条驱动断言」改正，再写 §12 契约块，最后才加第 55 项 —— 顺序反了会把过期数字一起钉进契约。
+
+- 首跑（守卫先落、两份文档未同步，`D:/mh-verify/w63-first.log`）：`checks=55 failed=1`，红的是 `check-inventory`（`LICENSE-SURFACE-CHECK.md claims 54 … declares 55`、`README.md claims 54 … declares 55`、`LICENSE-SURFACE-CHECK.md never names resume-record-count-claims`），**本项自身已 PASS**：`the W8 record's assertion counts still hold: 16 probe assertion id(s) match one-for-one with windows/src/MediaHub.ResumeProbe/Program.cs, and the driver's 15 fixed + 2 per-server over 2 server(s) = 19 assertion(s) are the totals the record declares`。
+- 正向（`D:/mh-verify/w63-positive2.log`）：`checks=55 failed=0 warnings=0 skipped=0` / `RESULT: PASS`。
+
+- 负向对照（副本树 `D:/mh-verify/w63-nc/`，未改仓库文件；副本经 `-ResumeSourceDocPath ../../mh-verify/w63-nc/NCn.md` 传入）：
+
+| 用例 | 注入 | 结果 |
+| --- | --- | --- |
+| NC0 | 未改动的副本 | `checks=55 failed=0`（基线干净，下面每条红都只来自注入） |
+| NC1 | 块里 `resume-probe-assertions: 16` → 17 | 1 红：`the count block declares 17 probe assertion(s) but Program.cs emits 16` |
+| NC2 | 删掉 §4 断言表里的 `finished-leaves-the-resume-list` 一行 | 1 红：`Program.cs asserts finished-leaves-the-resume-list but the record's assertion table does not list it` |
+| NC3 | `resume-driver-fixed-assertions: 15` → 14 | 1 红：`the count block declares 14 fixed Assert-That calls but the source has 15` |
+| NC4 | §7 退出码行的「19 条驱动断言」改回「17 条」 | 1 红：`the exit-code table no longer states "| 驱动 0 | 19 条驱动断言"` |
+| NC5 | 删掉整块 BEGIN/END 标记 | 1 红：`the W8 resume record no longer carries the resume-record-count-claims block` |
+| NC6 | `-ResumeSourceDocPath` 指不存在文件 | `checks=55 failed=0 warnings=0 skipped=2`、退出码 0（SKIP 通道；跨文档指针项同样 SKIP） |
+
+- 逐条日志 `D:/mh-verify/w63-nc/NC0.log` … `NC6.log`（NC6 用 `NC9-not-here.md` 这个刻意不存在的名字），汇总 `summary.json`。NC1–NC5 **各恰好只有本项变红**，其余 54 项保持 PASS。NC4 的日志里中文会按控制台代码页显示成乱码 —— 那是管道编码，判据比的是文件原文。
+
+- 两条自身缺陷是**负向对照抓出来的**，不是正向能看见的：
+  1. 判据 C 的键名错配：块里写的是 `resume-driver-fixed-assertions` / `resume-driver-per-server-assertions` / `resume-driver-servers` / `resume-driver-assertions-total`，而代码里查的是 `fixed-assertions` / `per-server-assertions` / `servers` / `assertions-total`，`ContainsKey` 全部落空 ⇒ 四个数字一个都没比对（NC3 首跑时本项仍是 PASS，暴露了这一点）。修法：键名前缀补 `driver-`，并加一条「五个键缺一个就报红」的必备键检查。
+  2. 块被删时**不发射检查**：缺失分支只往问题表里追加，`Add-Check` 在 `else` 里 ⇒ NC5 得到 `checks=54`（少一项）而不是一条红，`check-inventory` 顺手把它当「未发射的 id」抱怨，看上去像文档问题。修法：缺失分支自己发一条 FAIL。
+
+- 守卫补丁前快照 `D:/mh-verify/w63-guard-pre.ps1`（sha256 `74a4c662…`，200,112 B），补丁后 **206,128 B**（含上面两处修法），检查总数 **54 → 55**；两次改完都用 `[System.Management.Automation.Language.Parser]::ParseFile` 做了语法自检（打印 `PARSE-OK`）——PowerShell 补丁最容易在字符串/括号上断，落盘后先自检比等守卫报 ParserError 快得多。
+
 ## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。

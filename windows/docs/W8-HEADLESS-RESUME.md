@@ -1,6 +1,6 @@
 # W8 · 无窗口续播闭环（真服实测）
 
-> 状态：两服实测全绿 —— 驱动脚本 `RESULT: 17 passed, 0 failed`，每台服务器上的探针 `RESULT: 16 passed, 0 failed`。
+> 状态：两服实测全绿 —— 驱动脚本 `RESULT: 17 passed, 0 failed`（2026-10-24 首次闭环时的条数；§10 加上两条版本断言后共 **19** 条），每台服务器上的探针 `RESULT: 16 passed, 0 failed`。
 >
 > 范围：本文只证明**服务端侧的续播记录、新客户端实例可见性、看完清除与下限规则**。它**不**证明窗口内「继续观看」提示的呈现，也**不**证明播放引擎的 seek 精度 —— 那两条仍是 GUI 验收（`windows/tools/acceptance/w8/s1-resume-gui.ps1`、`s2-emby-gui.ps1`）的职责。本任务是「不弹窗口也能证明续播链路成立」，所以刻意不启动任何带窗口的进程。
 
@@ -134,7 +134,9 @@ RESULT: 17 passed, 0 failed
 DRIVER EXIT=0 elapsed=31s
 ```
 
-17 条驱动断言：`probe-binary-exists`、`jellyfin-answers`(12.2.0)、`emby-answers`(4.10.2.0)、`the-two-servers-are-not-the-same-process`、两侧各 `-fixture-login`、`-has-a-long-enough-fixture`、`-probe-passes`、`-probe-wrote-evidence`、`-report-is-all-green`、`-report-used-several-client-instances`，以及 `no-test-server-processes-left`。
+当时的 17 条驱动断言：`probe-binary-exists`、`jellyfin-answers`(12.2.0)、`emby-answers`(4.10.2.0)、`the-two-servers-are-not-the-same-process`、两侧各 `-fixture-login`、`-has-a-long-enough-fixture`、`-probe-passes`、`-probe-wrote-evidence`、`-report-is-all-green`、`-report-used-several-client-instances`，以及 `no-test-server-processes-left`。
+
+上面这段是 2026-10-24 那次运行的原文（所以是 17 条）。§10 之后驱动多了两条版本断言（`jellyfin-is-the-expected-version` / `emby-is-the-expected-version`），当前驱动共 **19** 条 = 15 条固定 + 每服 2 条（`-report-is-all-green`、`-report-used-several-client-instances`）；条数由 §12 的契约块与源码逐条对齐。
 
 ### 6.3 单服探针（可直接手跑）
 
@@ -176,7 +178,7 @@ dotnet windows/src/MediaHub.ResumeProbe/bin/Debug/net10.0/MediaHub.ResumeProbe.d
 | 探针 `0` | 16 条断言全过 |
 | 探针 `1` | 至少一条断言失败（stdout 里 `[assert] … FAIL expected=… actual=…`） |
 | 探针 `2` | 用法错误或连不上/登录失败 |
-| 驱动 `0` | 17 条驱动断言全过 |
+| 驱动 `0` | 19 条驱动断言全过（15 条固定 + 每服 2 条） |
 | 驱动 `1` | 任一驱动断言失败（含残留进程、探针非零退出） |
 
 驱动脚本刻意**不调用** `windows/tools/setup-test-server.ps1`：那个脚本开头会 `Stop-Process` 所有 `jellyfin` / `EmbyServer`（`windows/tools/setup-test-server.ps1:158-159`），会把并行工作的其他人正在用的服务器杀掉。本驱动只杀自己启动的进程，以及收尾时清理同名残留。
@@ -309,3 +311,22 @@ resume-pointer-convention: line counts as [System.IO.File]::ReadAllLines; 1 <= f
 <!-- END resume-source-pointer-claims -->
 
 改这份记录时：动正文里的行号，就要同步改块里的 `cite`；动源码导致函数搬家，就先改块、再跑一遍守卫（`RESULT: PASS` 才算真的对上了）。
+
+## 12 断言条数契约（机器可读）
+
+上文 §4 的 16 条探针断言表与 §6.4 / §7 的驱动断言条数都是**计数**：往 `Program.cs` 里加一条 `Check("…")`、或往驱动里加一条 `Assert-That`，文档里的数字就会静默过期（§1 的 17 条就是这么变成过时数字的 —— §10 加了两条版本断言，正文一直没跟上）。下面这个块把三处计数声明出来，由 `windows/tools/check-licence-surface.ps1` 的第 55 项 `resume-record-count-claims` 每轮 CI 复核：
+
+- 探针断言 id 必须是**双向集合相等**：`Program.cs` 里每一处 `Check("<id>")` 都要在 §4 表格里，§4 表格里每一行 id 也都要在代码里（改名 / 漏登 / 多登都算红）。
+- 驱动条数按**调用点**算：第一个参数写成 `($pair.Label + …)` 的调用点属于「每服一条」，按 `foreach ($pair in @(@{ Label = … }, …))` 里的服务器数相乘；第一个参数是字面量断言名的 `Assert-That '<name>'` 各算一条（放在循环后面也算固定条，因为它跑一次）。`fixed + per-server × servers` 必须等于声明的总数。
+- 条数只在这里声明一次，§7 的退出码表与正文引用都按这里的数写。
+
+<!-- BEGIN resume-record-count-claims -->
+resume-count-owner: check-licence-surface.ps1:resume-record-count-claims
+resume-probe-assertions: 16
+resume-driver-fixed-assertions: 15
+resume-driver-per-server-assertions: 2
+resume-driver-servers: 2
+resume-driver-assertions-total: 19
+<!-- END resume-record-count-claims -->
+
+改断言时：先在代码里加/改，再同步 §4 表格或 §6.4 正文，最后改这个块里的数，然后跑一遍守卫（`RESULT: PASS` 才算对上）。

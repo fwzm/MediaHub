@@ -1296,6 +1296,7 @@ $declaredCheckIds = @(
     'cross-doc-pointer-claims',
     'doc-audit-history-claims',
     'resume-source-pointer-claims',
+    'resume-record-count-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -2944,6 +2945,87 @@ else {
         Add-Check 'resume-source-pointer-claims' 'FAIL' ($resumeProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $resumeProblems) + ' - fix the pointer or declare it: a line number that no longer resolves is a citation nobody can follow')
     }
 }
+# --- 31. the W8 resume record's assertion counts must still match the code (W63) ---
+$resumeCountProblems = @()
+$probeProgramFile = Resolve-RepoPath -Path '' -Default 'windows/src/MediaHub.ResumeProbe/Program.cs'
+$driverScriptFile = Resolve-RepoPath -Path '' -Default 'windows/tools/acceptance/w8/headless-resume.ps1'
+if (-not (Test-Path -LiteralPath $resumeSourceFile) -or -not (Test-Path -LiteralPath $probeProgramFile) -or -not (Test-Path -LiteralPath $driverScriptFile)) {
+    Add-Check 'resume-record-count-claims' 'SKIP' ('cannot read ' + $resumeSourceFile + ' or one of the files whose counts it declares, so the W8 resume record''s assertion counts are not checked')
+}
+else {
+    $countBegin = '<!-- BEGIN resume-record-count-claims -->'
+    $countEnd = '<!-- END resume-record-count-claims -->'
+    $countText = (Get-Content -LiteralPath $resumeSourceFile -Raw)
+    $countBeginAt = $countText.IndexOf($countBegin)
+    $countEndAt = $countText.IndexOf($countEnd)
+    if ($countBeginAt -lt 0 -or $countEndAt -lt 0 -or $countEndAt -le $countBeginAt) {
+        $resumeCountProblems += 'the W8 resume record no longer carries the resume-record-count-claims block'
+        Add-Check 'resume-record-count-claims' 'FAIL' ('1 problem(s): ' + $resumeCountProblems[0] + ' - a count that is not recomputed is a number nobody can trust')
+    }
+    else {
+        $countBlock = $countText.Substring($countBeginAt, $countEndAt - $countBeginAt)
+        if (-not [regex]::IsMatch($countBlock, 'resume-count-owner:\s*check-licence-surface\.ps1:resume-record-count-claims')) {
+            $resumeCountProblems += 'the count block no longer names resume-record-count-claims as its owner'
+        }
+        $declaredCounts = @{}
+        foreach ($cm in [regex]::Matches($countBlock, '(?m)^\s*resume-([a-z-]+):\s*(\S+)\s*$')) {
+            $declaredCounts[$cm.Groups[1].Value] = $cm.Groups[2].Value
+        }
+        $bt = [char]96
+        $probeText = (Get-Content -LiteralPath $probeProgramFile -Raw)
+        $codeIds = @([regex]::Matches($probeText, 'Check\(\s*"([a-z0-9-]+)"') | ForEach-Object { $_.Groups[1].Value })
+        $recordIds = @()
+        $inAssertionTable = $false
+        foreach ($line in (Get-Content -LiteralPath $resumeSourceFile)) {
+            if ($line -match '^## 4 ') { $inAssertionTable = $true; continue }
+            if ($line -match '^## 5 ') { $inAssertionTable = $false; continue }
+            if (-not $inAssertionTable) { continue }
+            $rowMatch = [regex]::Match($line, '^\|\s*\d+\s*\|\s*' + $bt + '([a-z0-9-]+)' + $bt + '\s*\|')
+            if ($rowMatch.Success) { $recordIds += $rowMatch.Groups[1].Value }
+        }
+        foreach ($id in $codeIds) {
+            if ($recordIds -notcontains $id) { $resumeCountProblems += ('Program.cs asserts ' + $id + ' but the record''s assertion table does not list it') }
+        }
+        foreach ($id in $recordIds) {
+            if ($codeIds -notcontains $id) { $resumeCountProblems += ('the record''s assertion table lists ' + $id + ' but Program.cs no longer asserts it') }
+        }
+        if ($declaredCounts.ContainsKey('probe-assertions') -and [int]$declaredCounts['probe-assertions'] -ne $codeIds.Count) {
+            $resumeCountProblems += ('the count block declares ' + $declaredCounts['probe-assertions'] + ' probe assertion(s) but Program.cs emits ' + $codeIds.Count)
+        }
+        $driverText = (Get-Content -LiteralPath $driverScriptFile -Raw)
+        $fixedCalls = [regex]::Matches($driverText, "Assert-That\s+'[a-z0-9-]+'").Count
+        $pairedCalls = [regex]::Matches($driverText, 'Assert-That\s+\(\$pair\.').Count
+        $loopHeader = [regex]::Match($driverText, 'foreach \(\$pair in @\(([^\n]*)\)\)')
+        $serverCount = 0
+        if ($loopHeader.Success) { $serverCount = ([regex]::Matches($loopHeader.Groups[1].Value, '@\{ Label =')).Count }
+        $totalCalls = $fixedCalls + ($pairedCalls * $serverCount)
+        foreach ($requiredKey in @('probe-assertions', 'driver-fixed-assertions', 'driver-per-server-assertions', 'driver-servers', 'driver-assertions-total')) {
+            if (-not $declaredCounts.ContainsKey($requiredKey)) { $resumeCountProblems += ('the count block no longer declares ' + $requiredKey) }
+        }
+        $countPairs = @(
+            @('driver-fixed-assertions', $fixedCalls, 'fixed Assert-That calls'),
+            @('driver-per-server-assertions', $pairedCalls, 'per-server Assert-That calls'),
+            @('driver-servers', $serverCount, 'servers in the driver loop'),
+            @('driver-assertions-total', $totalCalls, 'driver assertion(s) in total')
+        )
+        foreach ($pair in $countPairs) {
+            if ($declaredCounts.ContainsKey($pair[0]) -and [int]$declaredCounts[$pair[0]] -ne [int]$pair[1]) {
+                $resumeCountProblems += ('the count block declares ' + $declaredCounts[$pair[0]] + ' ' + $pair[2] + ' but the source has ' + $pair[1])
+            }
+        }
+        $exitRowNeedle = '| 驱动 ' + $bt + '0' + $bt + ' | ' + $totalCalls + ' 条驱动断言'
+        if (-not $countText.Contains($exitRowNeedle)) {
+            $resumeCountProblems += ('the exit-code table no longer states "' + $exitRowNeedle + '" - the driver''s assertion count changed without updating it')
+        }
+        if ($resumeCountProblems.Count -eq 0) {
+            Add-Check 'resume-record-count-claims' 'PASS' ('the W8 record''s assertion counts still hold: ' + $codeIds.Count + ' probe assertion id(s) match one-for-one with windows/src/MediaHub.ResumeProbe/Program.cs, and the driver''s ' + $fixedCalls + ' fixed + ' + $pairedCalls + ' per-server over ' + $serverCount + ' server(s) = ' + $totalCalls + ' assertion(s) are the totals the record declares')
+        }
+        else {
+            Add-Check 'resume-record-count-claims' 'FAIL' ($resumeCountProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $resumeCountProblems) + ' - a count that is not recomputed is a number nobody can trust')
+        }
+    }
+}
+
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })
 $skipped = @($checks | Where-Object { $_.outcome -eq 'SKIP' })
