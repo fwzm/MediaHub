@@ -32,12 +32,12 @@
 | 建句柄 + 登录 | `IMediaProviderFactory.Create(...)` + `IProviderAuth.AuthenticateAsync(Credentials)`（`windows/src/MediaHub.Providers/ProviderContracts.cs`） |
 | 发现可播放条目 | `IProviderLibrary.GetLibrariesAsync` / `GetItemsAsync(libraryId, PageRequest)`（同上） |
 | 解析播放会话 | `MediaBrowserProvider.ResolvePlaybackAsync`（`windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:254-300`，`SessionId` 来自 `PlaybackInfo`） |
-| 上报开播/进度/停止 | `IProviderProgress.ReportPlaybackStartedAsync` / `ReportProgressAsync` / `ReportFinalProgressAsync`（`ProviderContracts.cs:117`、`:121`、`:127`；实现在 `MediaBrowserProvider.cs:347-400`，落到 `/Sessions/Playing`、`/Sessions/Playing/Progress`、`/Sessions/Playing/Stopped`） |
+| 上报开播/进度/停止 | `IProviderProgress.ReportPlaybackStartedAsync` / `ReportProgressAsync` / `ReportFinalProgressAsync`（`ProviderContracts.cs:117`、`ProviderContracts.cs:121`、`ProviderContracts.cs:127`；实现在 `MediaBrowserProvider.cs:347-400`，落到 `/Sessions/Playing`、`/Sessions/Playing/Progress`、`/Sessions/Playing/Stopped`） |
 | 回读位置 | `IProviderProgress.GetResumePositionAsync`（`ProviderContracts.cs:131`，实现 `MediaBrowserProvider.cs:414-418`） |
 | 回读续播列表 | `IProviderProgress.GetContinueWatchingAsync`（`ProviderContracts.cs:130`，实现 `MediaBrowserProvider.cs:402-412`） |
 | 回读详情 | `IProviderDetail.GetItemDetailAsync` |
 
-两点实现事实值得记住：`MediaBrowserProvider.cs:362` 要求 `PlaybackProgress.SessionId` 非空，否则直接拒绝；`:393` 的上报是 **best-effort**，网络/HTTP 异常被吞掉 —— 所以「上报成功」不能靠返回值判断，只能靠**回读**判断。本探针的每条断言都建立在回读上。
+两点实现事实值得记住：`MediaBrowserProvider.cs:362` 要求 `PlaybackProgress.SessionId` 非空，否则直接拒绝；`MediaBrowserProvider.cs:393` 的上报是 **best-effort**，网络/HTTP 异常被吞掉 —— 所以「上报成功」不能靠返回值判断，只能靠**回读**判断。本探针的每条断言都建立在回读上。
 
 ## 4 四个阶段与 16 条断言
 
@@ -85,7 +85,7 @@
 | 最短可续播片长 | `MinResumeDurationSeconds=300` | 未在本实例暴露 policy（见 §5.2） |
 | 夹具条目 id | GUID `b22e31da9faf6ef247e19f7b3774dab2` | 短字符串 `34` |
 
-身份头这条差异是硬约束：把 `X-Emby-Authorization` 发给 Jellyfin 12.2 的 `/Users/AuthenticateByName` 会得到 **HTTP 400**，服务端日志报 `ArgumentNullException: Value cannot be null. (Parameter 'request.App')`（`Emby.Server.Implementations.Session.SessionManager.AuthenticateNewSessionInternal`）。产品代码本来就是对的两台服各用各的头（`MediaBrowserDialect.cs:32` / `:39`，身份头生成见 `:64-74`，token 注入见 `:120-132`），驱动脚本只是照抄该规则（`windows/tools/acceptance/w8/headless-resume.ps1:138` `New-IdentityHeaders`）。
+身份头这条差异是硬约束：把 `X-Emby-Authorization` 发给 Jellyfin 12.2 的 `/Users/AuthenticateByName` 会得到 **HTTP 400**，服务端日志报 `ArgumentNullException: Value cannot be null. (Parameter 'request.App')`（`Emby.Server.Implementations.Session.SessionManager.AuthenticateNewSessionInternal`）。产品代码本来就是对的两台服各用各的头（`MediaBrowserDialect.cs:32` / `MediaBrowserDialect.cs:39`，身份头生成见 `MediaBrowserDialect.cs:64-74`，token 注入见 `MediaBrowserDialect.cs:120-132`），驱动脚本只是照抄该规则（`windows/tools/acceptance/w8/headless-resume.ps1:146` `New-IdentityHeaders`）。
 
 ### 5.1 Emby 的续播下限是片长的 2%（不是 5%）
 
@@ -179,7 +179,7 @@ dotnet windows/src/MediaHub.ResumeProbe/bin/Debug/net10.0/MediaHub.ResumeProbe.d
 | 驱动 `0` | 17 条驱动断言全过 |
 | 驱动 `1` | 任一驱动断言失败（含残留进程、探针非零退出） |
 
-驱动脚本刻意**不调用** `windows/tools/setup-test-server.ps1`：那个脚本开头会 `Stop-Process` 所有 `jellyfin` / `EmbyServer`（该文件 `:125-127`），会把并行工作的其他人正在用的服务器杀掉。本驱动只杀自己启动的进程，以及收尾时清理同名残留。
+驱动脚本刻意**不调用** `windows/tools/setup-test-server.ps1`：那个脚本开头会 `Stop-Process` 所有 `jellyfin` / `EmbyServer`（`windows/tools/setup-test-server.ps1:158-159`），会把并行工作的其他人正在用的服务器杀掉。本驱动只杀自己启动的进程，以及收尾时清理同名残留。
 
 ## 8 未覆盖与残余风险
 
@@ -235,7 +235,7 @@ pwsh -NoProfile -File windows/tools/acceptance/w8/headless-resume.ps1 `
     -ExpectJellyfinVersion 12.2.0 -ExpectEmbyVersion 4.10.1.0
 ```
 
-`windows/tools/get-test-servers.ps1` 负责把两个官方归档下到 `<Destination>\_downloads`（解压到 `<Destination>\{jellyfin,emby}`），并把版本与每个归档的 SHA-256 写进 `<Destination>\SERVER-VERSIONS.json`。`setup-test-server.ps1` 仍然会在开头强杀机器上所有 `jellyfin`/`EmbyServer` 进程（该文件 `:125-127`），所以不要与其他人的并行取证同时跑。
+`windows/tools/get-test-servers.ps1` 负责把两个官方归档下到 `<Destination>\_downloads`（解压到 `<Destination>\{jellyfin,emby}`），并把版本与每个归档的 SHA-256 写进 `<Destination>\SERVER-VERSIONS.json`。`setup-test-server.ps1` 仍然会在开头强杀机器上所有 `jellyfin`/`EmbyServer` 进程（`windows/tools/setup-test-server.ps1:158-159`），所以不要与其他人的并行取证同时跑。
 
 ### 10.4 本轮修掉的两个工具缺陷
 
@@ -253,7 +253,7 @@ pwsh -NoProfile -File windows/tools/acceptance/w8/headless-resume.ps1 `
 
 ### 10.6 本机环境事实（复跑前必读）
 
-**`PATHEXT=.CPL` 会让 `& dotnet` 变成「无法将 'dotnet' 项识别为 cmdlet」**：本会话的 shell 环境里 `$env:PATHEXT` 是 `.CPL`，PowerShell 因此不会把 `dotnet` 补成 `dotnet.exe`。而驱动脚本正是用 `& dotnet $ProbeDll …` 启动探针（该文件 `:240`），所以任何用自定义环境变量起 harness 的调用方都必须显式带上正常的 `PATHEXT`（`.COM;.EXE;.BAT;.CMD;…`）。本轮为此真实失败了两次：版本断言全部通过、探针却一步没跑。这不是脚本缺陷，但会伪装成「服务器/探针有问题」。
+**`PATHEXT=.CPL` 会让 `& dotnet` 变成「无法将 'dotnet' 项识别为 cmdlet」**：本会话的 shell 环境里 `$env:PATHEXT` 是 `.CPL`，PowerShell 因此不会把 `dotnet` 补成 `dotnet.exe`。而驱动脚本正是用 `& dotnet $ProbeDll …` 启动探针（`windows/tools/acceptance/w8/headless-resume.ps1:240`），所以任何用自定义环境变量起 harness 的调用方都必须显式带上正常的 `PATHEXT`（`.COM;.EXE;.BAT;.CMD;…`）。本轮为此真实失败了两次：版本断言全部通过、探针却一步没跑。这不是脚本缺陷，但会伪装成「服务器/探针有问题」。
 
 ### 10.7 证据文件
 
@@ -273,3 +273,39 @@ pwsh -NoProfile -File windows/tools/acceptance/w8/headless-resume.ps1 `
 1. **版本断言只比字符串**：`Version` 来自 `GET /System/Info/Public`，不校验二进制哈希。归档哈希由 `get-test-servers.ps1` 记进 `<Destination>\SERVER-VERSIONS.json`（本轮已实测该文件内容与官方资产一致）。
 2. **默认路径跑的是 4.10.2.0**：本机 `D:\mh-servers` 树下唯一的 `EmbyServer.exe` 位于 `emby-install\app\system.old`（FileVersion 4.10.2.0），这是安装事实而非脚本选择；`-ExpectEmbyVersion` 让它至少不会静默漂移。
 3. **2% 结论仍只来自两个 Emby 小版本**（4.10.1.0 / 4.10.2.0）：更大范围的版本漂移仍需逐版本重跑。
+## 11 源代码指针契约（机器可读）
+
+本文件按行号引用产品与工具源码的地方全部声明在下面这个块里，并由 `windows/tools/check-licence-surface.ps1` 的第 54 项 `resume-source-pointer-claims` 逐条复核（每次 CI 都跑）。判据是四条：这份记录仍然写着每条 `cite`；该文件仍存在、区间仍落在文件内；区间里仍然含着那条 `anchor` 短语；正文里每一处带文件名的源码引用都在块里声明过。行数按 `[System.IO.File]::ReadAllLines` 计（文件以换行结尾时末尾那个空元素不计，与 `wc -l` 同口径）。
+
+为什么要它：2026-10-24 建这份记录时，`headless-resume.ps1` 的 `New-IdentityHeaders` 在 138 行、`setup-test-server.ps1` 的强杀块在 125-127 行；10-29 的第 43 轮往两个脚本前面插了行，两处指针就**静默**指错了位置（现为 146 与 158-159）—— 文档读起来一切正常，只有自动核对能发现。行号是易碎引用，写下来不核对等于没写。
+
+覆盖范围只有 `.cs` / `.csproj` / `.ps1` 三种扩展名：`W8-EVIDENCE.md:26` 属跨文档引用（由该文档自己负责），`D:\mh-servers\data\jellyfin\config\system.xml:32/34` 是仓库外的现场配置路径（不在版本控制里，无法按提交核对）。
+
+<!-- BEGIN resume-source-pointer-claims -->
+resume-pointer-owner: check-licence-surface.ps1:resume-source-pointer-claims
+resume-pointer-count: 20
+resume-pointer-convention: line counts as [System.IO.File]::ReadAllLines; 1 <= from <= to <= line count; the anchor substring must still sit inside the cited range
+
+- cite=windows/src/MediaHub.ResumeProbe/MediaHub.ResumeProbe.csproj:3-11 ; anchor=Deliberately not part of MediaHub.Windows.sln
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:254-300 ; anchor=ResolvePlaybackAsync
+- cite=windows/src/MediaHub.Providers/ProviderContracts.cs:117 ; anchor=ReportPlaybackStartedAsync
+- cite=windows/src/MediaHub.Providers/ProviderContracts.cs:121 ; anchor=Task ReportProgressAsync
+- cite=windows/src/MediaHub.Providers/ProviderContracts.cs:127 ; anchor=ReportFinalProgressAsync
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:347-400 ; anchor=ReportProgressAsync
+- cite=windows/src/MediaHub.Providers/ProviderContracts.cs:131 ; anchor=GetResumePositionAsync
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:414-418 ; anchor=GetResumePositionAsync
+- cite=windows/src/MediaHub.Providers/ProviderContracts.cs:130 ; anchor=GetContinueWatchingAsync
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:402-412 ; anchor=GetContinueWatchingAsync
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:273 ; anchor=PlaySessionId
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:362 ; anchor=string.IsNullOrWhiteSpace(progress.SessionId)
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:393 ; anchor=catch (ProviderException ex) when
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserDialect.cs:32 ; anchor=X-Emby-Authorization
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserDialect.cs:39 ; anchor=tokenInAuthHeader: true
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserDialect.cs:64-74 ; anchor=BuildAuthorizationValue
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserDialect.cs:120-132 ; anchor=ApplyToken
+- cite=windows/tools/setup-test-server.ps1:158-159 ; anchor=Get-Process jellyfin, EmbyServer
+- cite=windows/tools/acceptance/w8/headless-resume.ps1:146 ; anchor=function New-IdentityHeaders
+- cite=windows/tools/acceptance/w8/headless-resume.ps1:240 ; anchor=& dotnet $ProbeDll
+<!-- END resume-source-pointer-claims -->
+
+改这份记录时：动正文里的行号，就要同步改块里的 `cite`；动源码导致函数搬家，就先改块、再跑一遍守卫（`RESULT: PASS` 才算真的对上了）。

@@ -290,6 +290,7 @@ param(
     [string] $SbomFlavourEvidencePath,
     [string] $ReproBuildDocPath,
     [string] $PointerContractDocPath,
+    [string] $ResumeSourceDocPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -337,6 +338,7 @@ $logReportFile = Resolve-RepoPath -Path $LogReportPath -Default 'windows/src/Med
 $appServicesFile = Resolve-RepoPath -Path $AppServicesPath -Default 'windows/src/MediaHub.App/AppServices.cs'
 $logFileTestFile = Resolve-RepoPath -Path $LogFileTestPath -Default 'windows/tests/MediaHub.Tests/LogFileSinkTests.cs'
 $docAuditFile = Resolve-RepoPath -Path $DocAuditPath -Default 'windows/docs/W12-DOC-AUDIT.md'
+$resumeSourceFile = Resolve-RepoPath -Path $ResumeSourceDocPath -Default 'windows/docs/W8-HEADLESS-RESUME.md'
 $docsScanRoot = if ($DocsScanRoot) { Resolve-RepoPath -Path $DocsScanRoot -Default '' } else { $RepoRoot }
 $engineProbeDocFile = Resolve-RepoPath -Path $EngineProbeDocPath -Default 'windows/docs/W13-LGPL-ENGINE-PROBE.md'
 $engineProbeScriptFile = Resolve-RepoPath -Path $EngineProbeScriptPath -Default 'windows/tools/acceptance/engine/engine-probe.ps1'
@@ -1293,6 +1295,7 @@ $declaredCheckIds = @(
     'reproducible-build-claims',
     'cross-doc-pointer-claims',
     'doc-audit-history-claims',
+    'resume-source-pointer-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -2856,6 +2859,90 @@ else {
     }
 }
 
+}
+# --- 30. the W8 resume record's source line pointers must still resolve (W62) -----------------
+if (-not (Test-Path -LiteralPath $resumeSourceFile)) {
+    Add-Check 'resume-source-pointer-claims' 'SKIP' ('cannot read ' + $resumeSourceFile + ', so the W8 resume record''s source pointers are not checked here')
+}
+else {
+    $resumeText = [string](Get-Content -LiteralPath $resumeSourceFile -Raw)
+    $resumeProblems = @()
+    $resumeEntries = @()
+    $resumeFileCount = 0
+    $resumeBegin = '<!-- BEGIN resume-source-pointer-claims -->'
+    $resumeEnd = '<!-- END resume-source-pointer-claims -->'
+    $resumeBeginAt = $resumeText.IndexOf($resumeBegin)
+    $resumeEndAt = $resumeText.IndexOf($resumeEnd)
+    if ($resumeBeginAt -lt 0 -or $resumeEndAt -lt $resumeBeginAt) {
+        $resumeProblems += 'the W8 resume record no longer carries the resume-source-pointer-claims block'
+    }
+    else {
+        $resumeBlock = $resumeText.Substring($resumeBeginAt, $resumeEndAt - $resumeBeginAt + $resumeEnd.Length)
+        if (-not [regex]::IsMatch($resumeBlock, 'resume-pointer-owner:\s*check-licence-surface\.ps1:resume-source-pointer-claims')) {
+            $resumeProblems += 'the resume-pointer-owner line no longer names this check'
+        }
+        $resumeEntries = @([regex]::Matches($resumeBlock, '(?m)^-\s*cite=([^;\s]+)\s*;\s*anchor=(.+?)\s*$') | ForEach-Object { [pscustomobject]@{ cite = $_.Groups[1].Value.Trim(); anchor = $_.Groups[2].Value.Trim() } })
+        $resumeDeclaredCount = [regex]::Match($resumeBlock, 'resume-pointer-count: (\d+)')
+        if (-not $resumeDeclaredCount.Success) {
+            $resumeProblems += 'the resume pointer block no longer declares resume-pointer-count'
+        }
+        elseif ([int]$resumeDeclaredCount.Groups[1].Value -ne $resumeEntries.Count) {
+            $resumeProblems += ('the block declares ' + $resumeDeclaredCount.Groups[1].Value + ' pointer(s) but lists ' + $resumeEntries.Count)
+        }
+        if ($resumeEntries.Count -lt 12) { $resumeProblems += ('the block lists only ' + $resumeEntries.Count + ' pointer(s); the record cites at least twelve source lines') }
+        $resumeDeclaredKeys = [System.Collections.Generic.HashSet[string]]::new()
+        $resumeFiles = @()
+        foreach ($resumeEntry in $resumeEntries) {
+            $resumeCite = [regex]::Match($resumeEntry.cite, '^(.*):(\d+)(?:-(\d+))?$')
+            if (-not $resumeCite.Success) {
+                $resumeProblems += ('the block has a cite that is not path:from-to: ' + $resumeEntry.cite)
+                continue
+            }
+            $resumeRel = $resumeCite.Groups[1].Value
+            $resumeFrom = [int]$resumeCite.Groups[2].Value
+            $resumeTo = $resumeFrom
+            if ($resumeCite.Groups[3].Success) { $resumeTo = [int]$resumeCite.Groups[3].Value }
+            $resumeLeaf = [System.IO.Path]::GetFileName($resumeRel)
+            $resumeKey = $resumeLeaf + ':' + $resumeFrom
+            if ($resumeTo -ne $resumeFrom) { $resumeKey = $resumeKey + '-' + $resumeTo }
+            $resumeDeclaredKeys.Add($resumeKey) | Out-Null
+            if (-not ($resumeFiles -contains $resumeLeaf)) { $resumeFiles += $resumeLeaf }
+            $resumeAbs = Resolve-RepoPath -Path $resumeRel -Default $resumeRel
+            if (-not (Test-Path -LiteralPath $resumeAbs)) {
+                $resumeProblems += ('the record cites ' + $resumeEntry.cite + ' but that path is not in the repository')
+                continue
+            }
+            $resumeLines = [System.IO.File]::ReadAllLines($resumeAbs)
+            $resumeLineCount = $resumeLines.Length
+            if ($resumeFrom -lt 1 -or $resumeTo -lt $resumeFrom -or $resumeTo -gt $resumeLineCount) {
+                $resumeProblems += ('the range ' + $resumeFrom + '-' + $resumeTo + ' of ' + $resumeRel + ' does not fit a file of ' + $resumeLineCount + ' line(s)')
+                continue
+            }
+            $resumeRangeText = (@($resumeLines[($resumeFrom - 1)..($resumeTo - 1)]) -join [char]10)
+            if (-not $resumeRangeText.Contains($resumeEntry.anchor)) {
+                $resumeProblems += ('the range ' + $resumeFrom + '-' + $resumeTo + ' of ' + $resumeRel + ' no longer contains ' + [char]34 + $resumeEntry.anchor + [char]34)
+            }
+        }
+        $resumeFileCount = $resumeFiles.Count
+        $resumeBody = $resumeText.Substring(0, $resumeBeginAt) + $resumeText.Substring($resumeEndAt + $resumeEnd.Length)
+        $resumeUndeclared = @()
+        foreach ($resumeMatch in [regex]::Matches($resumeBody, '([A-Za-z0-9_./-]+\.(?:cs|csproj|ps1)):(\d+)(?:-(\d+))?')) {
+            $resumeLeaf = [System.IO.Path]::GetFileName($resumeMatch.Groups[1].Value)
+            $resumeKey = $resumeLeaf + ':' + $resumeMatch.Groups[2].Value
+            if ($resumeMatch.Groups[3].Success) { $resumeKey = $resumeKey + '-' + $resumeMatch.Groups[3].Value }
+            if (-not $resumeDeclaredKeys.Contains($resumeKey)) { $resumeUndeclared += $resumeKey }
+        }
+        $resumeUndeclared = @($resumeUndeclared | Sort-Object -Unique)
+        if ($resumeUndeclared.Count -gt 0) {
+            $resumeProblems += ('the record still cites ' + (Format-NameList $resumeUndeclared) + ' as a source line but the block does not declare it')
+        }
+    }
+    if ($resumeProblems.Count -eq 0) {
+        Add-Check 'resume-source-pointer-claims' 'PASS' ('every source line in the W8 resume record still resolves: ' + $resumeEntries.Count + ' declared pointer(s) over ' + $resumeFileCount + ' file(s), each cited range still contains its anchor phrase, and the body cites no source line the block does not declare')
+    }
+    else {
+        Add-Check 'resume-source-pointer-claims' 'FAIL' ($resumeProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $resumeProblems) + ' - fix the pointer or declare it: a line number that no longer resolves is a citation nobody can follow')
+    }
 }
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })
 $warned = @($checks | Where-Object { $_.outcome -eq 'WARN' })

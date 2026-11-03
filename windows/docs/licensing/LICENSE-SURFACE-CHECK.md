@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-53 项检查分三十二组：
+54 项检查分三十三组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -79,6 +79,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | 诊断日志落盘（W50 起） | `log-file-claims` | `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md` §0 的十五行上限/轮转/失败策略/用例数、`LogFileSink.cs` 的默认常量与轮转触发式、`LogService.cs` 的环形上限与写入顺序、`AppServices.cs` 的组合根目录、sink 测试展开的 9 例，五方任一分叉即红 |
 | 日期快照审计（W51 起） | `doc-audit-snapshot-claims` | `windows/docs/W12-DOC-AUDIT.md` §0 状态块缺失或与正文分叉（正文 HEAD ≠ 块内 baseline-head、基线提交不再是本分支祖先、快照不再自称 as-of、或第 4 节不可判定清单被删） |
 | 文档残留与围栏（W52 起） | `doc-residue-claims` | 文本文件里留着生成期占位符（填写处出现未替换的记号，确要讨论该记号的行须带 `residue-allow` 标记）、markdown 围栏行数为奇数、CAPABILITY-MAP §0 状态块不再被真围栏包住，或一行里粘了两条表格行（`||` 出现在行首为 `|` 的行上） |
+| W8 续播记录指针（W62 起） | `resume-source-pointer-claims` | `windows/docs/W8-HEADLESS-RESUME.md` §11 的 `resume-source-pointer-claims` 块与源码分叉：20 条 `路径:行号` 指针里有一条在文件里不再含它声明的锚点短语、行号越界、文件名被改或删除，或正文又写出块里没声明的新行号——「谁引用哪一行」不能只靠人眼 |
 
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
@@ -249,7 +250,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 53） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 54） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -1185,6 +1186,46 @@ RESULT: PASS
 
 - 逐条日志：`D:/mh-verify/w61-nc/NC1.log` … `NC5.log`，驱动 `D:/mh-verify/w61-nc/run.sh`。守卫补丁前快照 `D:/mh-verify/w61-guard-pre.ps1`（sha256 `8d170f92…`），补丁后 193,156 → 194,041 B / +885 B，**检查总数仍 53**。
 
+### 3.28 W8 续播记录的源码指针契约（W62，2026-11-04）
+
+续播验收记录 `windows/docs/W8-HEADLESS-RESUME.md` 用源码行号解释「探针为什么这样调接口」：`ProviderContracts.cs:121` 是进度上报的签名、`MediaBrowserDialect.cs:64-74` 是鉴权头怎么拼、`headless-resume.ps1:146` 是身份头在哪构造。这些行号没有任何机器校验，而它们**已经过期过一次**：
+
+- `windows/tools/acceptance/w8/headless-resume.ps1` 的 `function New-IdentityHeaders` 在 `a4684a8b`（2026-10-24 建文件）确实位于第 138 行（文件 368 行）；`57ea2798`（W8 钉版本加固）后文件涨到 385 行，该函数移到 **146** 行 —— 文档指针静默错了 10 天，期间所有门禁全绿。
+- `windows/tools/setup-test-server.ps1` 的强杀进程块（`Get-Process jellyfin, EmbyServer … Stop-Process`）同理：文档两处写「该文件 `:125-127`」，在建文件提交上成立（280 行文件），`57ea2798` 后移到 **158-159**（364 行文件），125-127 变成了 Emby 端口注释。
+
+第 54 项把这层关系钉成**契约块**（写在记录文件末尾 §11，而不是写在核对器里），判据四条：
+
+| 判据 | 内容 | 失败含义 |
+| --- | --- | --- |
+| A 块自指 | `<!-- BEGIN resume-source-pointer-claims -->` … `<!-- END … -->` 块在；块内 `resume-pointer-owner` 点名本项；`resume-pointer-count` 等于条目行数；条目 ≥ 12 | 契约块被删、被改名，或加指针忘了改计数 |
+| B 指针可解 | 每条 `- cite=<仓库相对路径>:<from>[-<to>] ; anchor=<字面量>` 逐条重解：路径存在、行号满足 `1 <= from <= to <= 行数`（行数按 `[System.IO.File]::ReadAllLines` 计，与 `wc -l` 同口径）、区间原文仍含 `anchor` | 文件被改名/删除、行号越界，或前面插行把锚点挤出区间 |
+| C 正文不越界 | 把块从正文剔除后，用 `([A-Za-z0-9_./-]+\.(?:cs|csproj|ps1)):(\d+)(?:-(\d+))?` 扫正文，每处带文件名的源码引用都必须在块里找到同 `basename:from[-to]` 的条目 | 正文新写了一个行号却没进契约 —— 同样是「没人能跟的引用」 |
+| D 文件缺失 | 记录文件读不到 → 本项 SKIP（退出码不变） | 无从比较，不该伪红也不该伪绿 |
+
+覆盖范围刻意收窄到 `.cs` / `.csproj` / `.ps1`：`W8-EVIDENCE.md:26` 属跨文档引用（由第 52 项 `cross-doc-pointer-claims` 的口径处理）、`D:/mh-servers/data/jellyfin/config/system.xml:32/34` 是仓库外的现场配置，两者都不进本项。新增参数 `-ResumeSourceDocPath`（默认 `windows/docs/W8-HEADLESS-RESUME.md`，经 `Resolve-RepoPath`，跨出仓库要写 `../../`）。
+
+PASS 文案会报出「多少条指针 / 多少个文件 / 每条区间仍含锚点 / 正文没有未声明引用」，FAIL 文案末句固定为「行号解析不了就是一条没人能跟的引用」。负向对照见 §4.30。
+
+### 4.30 实测（2026-11-04，W62，本机）
+
+- 修复先于门禁：本轮先把两处过期指针改对（138 → 146、125-127 → 158-159），再补齐 9 处只有 `:N` 没有文件名的裸续引（`ProviderContracts.cs` 三处、`MediaBrowserProvider.cs` 一处、`MediaBrowserDialect.cs` 四处、两个 ps1 各一处），最后才写契约块 —— 顺序反了就会把过期行号一起钉进契约。
+- 首跑（守卫先落、两份文档未同步，`D:/mh-verify/w62-first.log`）：`checks=54 failed=1`，红的是 `check-inventory`（`LICENSE-SURFACE-CHECK.md claims 53 … declares 54`、`README.md claims 53 … declares 54`、`never names resume-source-pointer-claims` 三条），本项自身已 PASS。这是「新项落地、计数未动」的正当红。
+- 正向（`D:/mh-verify/w62-positive.log`）：`checks=54 failed=0 warnings=0 skipped=0` / `RESULT: PASS`。本项 PASS 原文：`every source line in the W8 resume record still resolves: 20 declared pointer(s) over 6 file(s), each cited range still contains its anchor phrase, and the body cites no source line the block does not declare`。
+- 负向对照（副本树 `D:/mh-verify/w62-nc/`，未改仓库文件；副本经 `-ResumeSourceDocPath ../../mh-verify/w62-nc/NCn.md` 传入）：
+
+| 用例 | 注入 | 结果 |
+| --- | --- | --- |
+| NC0 | 未改动的副本 | `checks=54 failed=0`（基线干净，说明下面每条红都来自注入） |
+| NC1 | 一条 `anchor=ResolvePlaybackAsync` 改成 `ResolvePlaybackAsyncXYZ` | 1 红：`the range 254-300 of …MediaBrowserProvider.cs no longer contains "ResolvePlaybackAsyncXYZ"` |
+| NC2 | 契约块里一条 `cite=…MediaBrowserDialect.cs:120-132` 改成 `:120-1320` | 1 红（本项 2 条问题）：越界 `does not fit a file of 133 line(s)`，且正文那处 `:120-132` 因此变成未声明引用 |
+| NC3 | 删掉整块 BEGIN/END 标记 | 1 红：`the W8 resume record no longer carries the resume-source-pointer-claims block` |
+| NC4 | 正文追加「另见 `ProviderContracts.cs:300`」，块里不声明 | 1 红：`the record still cites ProviderContracts.cs:300 as a source line but the block does not declare it` |
+| NC5 | `resume-pointer-count: 20` 改成 21 | 1 红：`the block declares 21 pointer(s) but lists 20` |
+| NC6 | `-ResumeSourceDocPath` 指不存在文件 | `checks=54 failed=0 warnings=0 skipped=1`、退出码 0（SKIP 通道） |
+
+- 逐条日志：`D:/mh-verify/w62-nc/NC0.log` … `NC6.log`（NC6 用 `NC9-not-here.md` 这个刻意不存在的名字）。NC1–NC5 **各恰好只有本项变红**，其余 53 项保持 PASS。
+- 守卫补丁前快照 `D:/mh-verify/w62-guard-pre.ps1`（sha256 `855004ff…`，194,041 B），补丁后 200,112 B / +6,071 B，检查总数 **53 → 54**。
+- 一次自证：新增参数 `-ResumeSourceDocPath` 后重跑正向仍 `checks=54 failed=0` —— 参数是入口不是判据，项数只由发射的 id 决定（同 W60）。
 ## 5. 这个工具**不**覆盖什么
 
 - 不判断 GPL/LGPL 的法律结论：`libmpv-2.dll` 是 GPL-3.0-or-later 这一点来自二进制内嵌特性表与构建命令行，见 [LICENCE-DECISION.md](LICENCE-DECISION.md)。
