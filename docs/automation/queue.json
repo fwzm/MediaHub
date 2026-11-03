@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-04T01:0x+08:00",
-  "updated_by": "lead-W6-113-r32",
+  "updated_at": "2026-11-04T02:5x+08:00",
+  "updated_by": "lead-W6-113-r35",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -758,6 +758,32 @@
       "notes": "第十七层补上「文件里已有、闸门从未读取」的最后一侧：运行头。与第十六层（verdict）同理，判据只读文件自身，不进基线、无迁移。实现过程发现并修掉一个 PowerShell 变量跨迭代复用缺陷（warning 累加器）。",
       "next_action": "套件基线第十八层候选：Times 的 creation/queuing 与行时间窗口的关系（已知反例：可晚于 start）；Deployment/@runDeploymentRoot 与实际 relativeResultsDirectory 前缀的一致性。",
       "closed_at": "2026-11-04T00:5x+08:00"
+    },
+    {
+      "id": "W6-113ai",
+      "title": "套件基线门禁第十八层：定义侧的程序集声明必须与适配器声明自洽",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r35",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "commit 96d8b888ea11a388a099a17160aef5db94d6e0d8 (1 file changed / +78 insertions; check-test-suite-baseline.ps1 88,352 -> 93,530 B / 1,655 lines, sha256 16=2fa5ffd88b7b1751, pure ASCII, both shells PARSE-OK)",
+        "negative controls 134 cases, 134 / 0 (pwsh 7 + Windows PowerShell 5.1 parity) - D:/mh-verify/r33/run-nc.cjs, log D:/mh-verify/r33/full.log",
+        "the layer reads the two records every definition already carried and nothing read before: UnitTest/@storage and TestMethod/@codeBase must name the same file after normalisation (/ -> backslash, OrdinalIgnoreCase), and TestMethod/@adapterTypeName must be present, non-blank and single-valued inside one results file",
+        "real corpus adapter fact: windows-tests.trx 1,952 definitions and webdav-tests.trx 104 definitions each declare exactly one adapter value, and it is the same value in both files - \"executor://xunit/VsTestRunner3/netcore/\" - so uniqueness is judged per file, and the gate does not pin the value",
+        "real corpus pairing fact: storage=\"d:\\a\\mediahub\\...\\mediahub.tests.dll\" and codeBase=\"D:\\a\\MediaHub\\...\\MediaHub.Tests.dll\" name the same file and differ only in case and separator direction, so a byte comparison would have been wrong",
+        "expected-bad pairs (new gate RED / round 32 gate PASS): U2 every definition keeps a uniform storage path pointing at Other.Tests.dll while codeBase stays right -> \"N definition(s) record a storage path and a codeBase path that name different files\"; U3 one definition without adapterTypeName -> \"declare no adapterTypeName\"; U3b the attribute present but blank (same text); U4 two adapter values inside one file -> \"different adapterTypeName values inside one results file\"",
+        "green cases: U5 a uniform but non-executor:// adapter is a warning only; U6 storage vs codeBase differing only in case and separator direction passes; U7 a file with no provenance never reaches this layer because the row-metadata layer rejects it first with \"have no storage\"",
+        "throw deferred to the end of the suite iteration (after the round-25 verdict throw and the round-32 header throw, before $all += $total) so every pre-existing layer keeps its own failure text",
+        "no baseline change: this reads fields the baseline never stored - test-suite-baseline.json and update-test-suite-baseline.ps1 byte-identical to HEAD",
+        "both shells on the real corpus: exit 0, 3,150 B byte-identical body (3,157 B with the EXIT line), MediaHub.Tests assemblyDeclaration=1952 storage/codeBase pairs=1952 same file adapters=1, WebDav 104/104/1, combined tests=2056, every line of the first seventeen layers unchanged",
+        "exact-head windows-ci 41696425558 (@96d8b888ea11a388a099a17160aef5db94d6e0d8) = success: both new ladder lines present, all earlier ladder lines unchanged",
+        "licence on that head: `check-licence-surface` checks=53 failed=0 warnings=0 skipped=0（`18:45:41Z`）",
+        "Android CI 41696425581 was in_progress（02:50 取证时点） when sampled; core/feature/app tree hashes identical to 54334b871958c7abcf57b8817fb7a7bc4ce106b5 (ff4eed82 / e983feb0 / 70c54145) so the Android side inherits under ADR-AUTO-001"
+      ],
+      "notes": "第十八层补上定义侧最后一处「同一事实写了两次却无人比对」：UnitTest/@storage 与 TestMethod/@codeBase。与第十六、十七层同理，判据只读文件自身，不进基线、无迁移。适配器值刻意不写死（只钉存在 + 单文件唯一），避免 runner 版本变化误红。",
+      "next_action": "套件基线第十九层候选：Times/@creation 与 @queuing（全文 0 引用，但已知反例 creation/queuing 可晚于 start，只能做「不早于文件自身出现」或跨文件单调这类弱口径）；UnitTest/@storage 指向的 dll 是否真实存在于 ResultsDir 同级目录（需要文件系统证据，非纯 TRX 不变量）。",
+      "closed_at": "2026-11-04T03:0x+08:00"
     }
   ]
 }

@@ -1235,3 +1235,55 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 - 同 head Android CI `41677038126` = in_progress when sampled；`core`/`feature`/`app` 三子树哈希与 `19e8561d668f4434b8ae3f9c4135f48cdb28b8ad` 全同 ⇒ 按 ADR-AUTO-001 继承、不作独立结论。
 
 - docs head `cb33012191565ebc6d71a9ed5157ae4aff7ff49c` 的 windows-ci **`41679604112` = success**（`pull_request`，唯一 job 全绿；日志 `D:/mh-verify/r32/ci-docshead.log`）：台阶行与代码 head 逐字一致（`runHeader=3/3 … bound rows=1952`、WebDav 104、`combined tests=2056`、`summaryOutcome=Completed failureBuckets=0 contradiction=0`）；licence `check-licence-surface  checks=53 failed=0 warnings=0 skipped=0` —— 上游 base `abe06e8c` 把 `log-file-claims` 改为认两种合法实现形态（inline / delegated），**W6-113u 解除**；同 head Android CI `41679604351` 取证时 in_progress（代码 head 的 `41677038126` 收尾为 cancelled，concurrency 只按 ref），三子树哈希不变 ⇒ 按 ADR-AUTO-001 继承。
+
+## 6.23 第十八层口径：定义侧的程序集声明必须与适配器声明自洽（W6-113ai，2026-11-04）
+
+### 口径（TRX 内部不变量，基线不加字段）
+
+| 项 | 内容 |
+| --- | --- |
+| 新增台阶行 | `assemblyDeclaration=1952 storage/codeBase pairs=1952 same file adapters=1`（webdav 为 104 / 104 / 1） |
+| 判定 | 每个定义同时记录 `UnitTest/@storage` 与 `TestMethod/@codeBase`：两者归一化（`/`→`\`、OrdinalIgnoreCase）后必须是同一路径；每个 `TestMethod` 必须声明非空白 `adapterTypeName`；同一结果文件内 `adapterTypeName` 必须单值 |
+| 计数口径 | `assemblyDeclaration` = 两侧都记录了路径的定义数；`storage/codeBase pairs` = 归一化后相等的配对数；`same file adapters` = 该文件内去重后的适配器值个数 |
+| 违反 | 任一违规 → RED，消息点名套件与文件，并声明「上面所有计数都读自行、参数行、outcome、计数块与运行头，没有任何一条读过定义侧这两份程序集记录或适配器声明，因此把某条定义指向另一套件的 dll 不会改变它们中的任何一个」 |
+| warning（不 RED） | `adapterTypeName` 不以 `executor://` 开头（适配器命名方案不由本闸门钉死，只保存在与单文件唯一） |
+| 抛错位置 | 判据块内计算、台阶行照常打印，`throw` 推迟到该套件迭代末尾（round 25 verdict throw、round 32 header throw 之后，`$all += $total` 之前），保证既有各层保留自己的报错文案 |
+| 基线影响 | 无字段新增、update 脚本未改 ⇒ 无迁移；`test-suite-baseline.json` 与 HEAD 逐字节相等 |
+
+### 为什么前十七层看不见
+
+| 层 | 读的是 | 某条定义的 `storage` 改指向别的 dll 时 |
+| --- | --- | --- |
+| 第一至第七层 | 总数、类/方法/用例数、参数行清单、outcome 与 Counters 双向核对 | 与定义侧程序集记录无关 → 全绿 |
+| 第八至第十四层 | 截断暴露面、套件集、行属性、节结构、跨文件与执行身份、显示名构成 | 程序集名一律由 `codeBase` 侧推导，`storage` 只被收成「单值」→ 全绿 |
+| 第十五至第十七层 | `Counters` 属性契约与算术、`ResultSummary/@outcome`、运行头四件 | 只读计数、汇总块与头部 → 全绿 |
+| **第十八层（本轮）** | `UnitTest/@storage` 与 `TestMethod/@codeBase` 的配对、`adapterTypeName` 的存在与唯一性 | **RED**（`name different files` / `declare no adapterTypeName` / `different adapterTypeName values`） |
+
+### 依据（EXECUTED）
+
+- 真实 TRX（读取 `D:/mh-verify/r9-art/test-results/`）实测：`windows-tests.trx` 的 `<UnitTest … storage="d:\a\mediahub\…\mediahub.tests.dll"` 与 `<TestMethod codeBase="D:\a\MediaHub\…\MediaHub.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/"` 指向同一文件、只有大小写与分隔符方向不同；`webdav-tests.trx` 同构，适配器同为 `executor://xunit/VsTestRunner3/netcore/`（两文件各只有这一个适配器值 ⇒ 「单文件唯一」是按文件判定）。
+- 脚本此前全文（`SOURCE_REVIEWED`）：`storage` 与 `codeBase` 各自只被收成「每文件单值」，程序集名优先取 `codeBase`；`adapterTypeName` 零引用。
+- 成对证据（EXECUTED）：`U2`/`U2x` —— 每条定义的 `storage` 统一改指向 `Other.Tests` 的 dll 而 `codeBase` 不变：新闸门 RED `N definition(s) record a storage path and a codeBase path that name different files`，round 32 闸门 PASS 且所有计数一字不变。
+
+### 数据源与规模
+
+- 数据源：`D:/mh-verify/r9-art/test-results/windows-tests.trx`（1,952 行）与 `webdav-tests.trx`（104 行）。
+- `windows/tools/check-test-suite-baseline.ps1` 88,352 → 93,530 B（+78 行 / 1,655 行；sha256 前 16 `2fa5ffd88b7b1751`，纯 ASCII，两代 shell PARSE-OK），提交 `96d8b888ea11a388a099a17160aef5db94d6e0d8`（1 file changed / +78 insertions）。
+
+### 负向对照（134 例，EXECUTED）
+
+- 台账 `D:/mh-verify/r33/run-nc.cjs`（46,841 B / 565 行），**total 134 cases, pass=134, fail=0**（pwsh 7 与 Windows PowerShell 5.1 判定一致，日志 `D:/mh-verify/r33/full2.log`）。第一轮全量 `full.log` 为 `134 cases / 126 pass / 8 fail`：八红都是 T 组成对例仍指向被推进的 `OLD_CKPRE`（台账缺陷，非闸门缺陷），改指 `OLD_CK25` 后复跑。
+- 新增 U 组 12 例 + `RE10`/`RE11`；成对例（新 RED / round 32 闸门 PASS）：`U2`（每条定义的 `storage` 指别的 dll）、`U3`（定义不带适配器）、`U4`（同一文件两种适配器）。
+- 其余新例：`U1` 规范夹具钉台阶行；`U1x` 旧闸门不打印 `assemblyDeclaration=`；`U3b` 空串适配器同样 RED；`U5` 统一但非 `executor://` 的适配器只 warning；`U6` `storage` 与 `codeBase` 只差大小写与分隔符 ⇒ PASS；`U7` 无 provenance 的文件被第十层先拒（`have no storage`）且不打印本层台阶行；`RE10`/`RE11` 真实语料两代一致、旧闸门无该行。
+
+### 残留限制
+
+1. `adapterTypeName` 只钉「存在 + 单文件唯一」，不钉具体版本或命名方案（真实语料两个文件的定义全部声明 `executor://xunit/VsTestRunner3/netcore/`，闸门不把该值写死（换 runner/major 版本不会误红）；非 `executor://` 前缀只 warning）。
+2. 路径比较只做大小写与分隔符归一，不做符号链接、UNC 或 8.3 短名解析。
+3. `TestMethod/@codeBase` 仍是程序集名的唯一来源（`$assemblies` 的推导路径未改），本层只验证两份记录一致，不改变既有推导。
+
+### exact-head CI 验收（EXECUTED，40 位 SHA）
+
+- head `96d8b888ea11a388a099a17160aef5db94d6e0d8` 的 windows-ci **`41696425558` = success**（`pull_request`，日志 `D:/mh-verify/r33/ci-codehead.log`，145,222 B）：出现 `MediaHub.Tests: assemblyDeclaration=1952 storage/codeBase pairs=1952 same file adapters=1` 与 `MediaHub.WebDav.Tests: …=104 …=104 …=1`，前十七层台阶行逐字不变，`combined tests=2056`。
+- licence：`check-licence-surface` checks=53 failed=0 warnings=0 skipped=0（`18:45:41Z`）。
+- 同 head Android CI `41696425581` = in_progress（02:50 取证时点）；`core`/`feature`/`app` 三子树哈希与 `54334b871958c7abcf57b8817fb7a7bc4ce106b5` 全同 ⇒ 按 ADR-AUTO-001 继承、不作独立结论。

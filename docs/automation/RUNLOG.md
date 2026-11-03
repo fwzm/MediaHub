@@ -525,3 +525,52 @@
 - docs head 的 windows-ci **`41679604112` = success**（`pull_request`，日志 `D:/mh-verify/r32/ci-docshead.log`，145,003 B / 795 行，唯一 job `build / tests / playback probe / packaging` 全绿 = success）：台阶行与代码 head 逐字一致 —— `MediaHub.Tests: runHeader=3/3 settings=1 deployments=1 derivedRoot=1 bound rows=1952 header id collisions=0`（`2026-11-03T17:00:48Z`）、`MediaHub.WebDav.Tests: … bound rows=104 …`（`17:00:50Z`）、`summaryOutcome=Completed failureBuckets=0 contradiction=0`、`combined tests=2056`。
 - licence 在全绿运行上为 `check-licence-surface  checks=53 failed=0 warnings=0 skipped=0`（`17:00:57Z`）：**W6-113u 已由 base 侧裁决解除** —— base 前进到 `abe06e8cdcc28872fe398de60edfb13b95fb5771`（墨崔，2026-11-04 00:51:26 +0800，`fix(licensing): W60 第 43 项 log-file-claims 认两种合法实现形态（修 PR #39 windows-ci 红项）`），按本队列推荐方案①把该 needle 改为「inline 形态（LogService 直接拼行）或 delegated 形态（`rollingDirectory: FileSink?.DirectoryPath` + 共享渲染器三处字面量）任一成立即 PASS」，检查总数仍 53 项；PR base 分支为 `feature/windows-client`。queue 里 W6-113u 由 BLOCKED 改记 RESOLVED。
 - 同 head Android CI `41679604351` = 取证时 in_progress；代码 head 的 `41677038126` 收尾为 cancelled（android-ci.yml 的 concurrency 只按 ref）；`cb330121` 相对 `6e1ba557` 只改 `docs/automation/**` ⇒ `core`/`feature`/`app` 三子树哈希不变，按 ADR-AUTO-001 继承、不作独立结论。
+
+## 2026-11-04 02:5x round 35（W6-113ai：套件基线第十八层口径 —— 定义侧的程序集声明必须与适配器声明自洽）
+
+### 侦察（EXECUTED）
+- W6 树取样：head `54334b871958c7abcf57b8817fb7a7bc4ce106b5`（round 32 docs 验收）、工作树只有一条未提交改动 `M windows/tools/check-test-suite-baseline.ps1`、与 origin 0/0；PR #39 的 base 分支 `feature/windows-client` 取证时已前进到 `5daff8509b37674b272106d985875b6b67e849a9`（round 32 记的 `abe06e8c` 之后又有新提交），`refs/heads/main` = `1246313c7a66d492258b5b4b20b51cbdcf2da9cc`。
+- 真实语料（`D:/mh-verify/r9-art/test-results/`）：`windows-tests.trx` 1,952 行、`webdav-tests.trx` 104 行。本轮新读到的事实：每个定义把自己「从哪个程序集加载」写了两次 —— `<UnitTest … storage="d:\a\mediahub\…\mediahub.tests.dll"` 与 `<TestMethod codeBase="D:\a\MediaHub\…\MediaHub.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/"`，两个路径指向同一文件，只有大小写与分隔符方向不同；`webdav-tests.trx` 同构（`mediahub.webdav.tests.dll`，适配器同为 `executor://xunit/VsTestRunner3/netcore/` —— 两个文件的 1,952 / 104 条定义各只有一个适配器值，且两文件的值相同，所以「单文件唯一」是按文件而非按运行判定）。
+- 缺口定位（源码审查 SOURCE_REVIEWED）：脚本只把 `storage` 与 `codeBase` 各自收成「每文件单值」，并**优先用 codeBase 推导程序集名**（`$assemblies`），从未把两侧记录互相比对；`adapterTypeName` 全文零引用。
+
+### 缺口（本轮切片动机）
+- 定义侧可以两次声明不同的程序集而全部计数不变：把某条定义的 `storage` 改指向另一套件的 dll，`total`/`classes`/`methods`/`argumentRows`/`outcomes`/`Counters`/`runHeader` 全部一字不变 —— 闸门只信 codeBase 一侧。
+- 适配器同理：删掉某条定义的 `adapterTypeName`、或让同一结果文件出现两种适配器，也无人察觉。第十五至第十七层都只读计数、汇总块与运行头，都不碰定义侧这两个字段。
+
+### 修法（只改 `windows/tools/check-test-suite-baseline.ps1`；基线零变化、update 脚本未改 ⇒ 无迁移）
+- 十处补丁（+78 行）：头注释第 18 段、SEMANTICS 两条 bullet、每文件初值块、循环内配对与适配器块、失败消息组装、全局 warning 累加器、台阶行、throw 块、warning 输出。
+- RED 判据：①同一定义的 `storage` 与 `codeBase` 归一化后（`/`→`\`、OrdinalIgnoreCase）不是同一路径；②任一 `TestMethod` 的 `adapterTypeName` 空白或缺失；③同一结果文件内出现 >1 种 `adapterTypeName`。
+- **台阶行**：`assemblyDeclaration=$assemblyPairs storage/codeBase pairs=… same file adapters=…`。
+- 不 RED 的 warning（防适配器命名方案变化误红）：`adapterTypeName` 不是 `executor://` 前缀 —— 只保「存在且单文件唯一」。
+- **抛错位置**：判据照常计算、台阶行照常打印，`throw` 放在该套件迭代末尾（round 25 verdict throw 与 round 32 header throw 之后、`$all += $total` 之前），既有各层保留自己的报错文案。
+- 刻意保留的残留限制：`adapterTypeName` 只钉「存在 + 单文件唯一」，不钉具体版本（两个真实结果文件都只声明 `executor://xunit/VsTestRunner3/netcore/`，闸门不把该值写死，换 runner 版本不会误红）；路径比较只做大小写与分隔符归一，不做符号链接/8.3 短名解析。
+
+### 负向对照（134 例，EXECUTED）
+- 脚本 `D:/mh-verify/r33/run-nc.cjs`（46,841 B / 565 行），每例两代 shell 双跑（pwsh 7 + Windows PowerShell 5.1）并要求判定一致；沿用 round 32 的 120 例既有用例，并给夹具补上真实的 `adapterTypeName`（不补则既有 120 例会被新层全判红）。
+- 全量结果：**total 134 cases, pass=134, fail=0**（日志 `D:/mh-verify/r33/full2.log`；第一轮全量 `full.log` 为 `total 134 cases, pass=126, fail=8`，八红全是上一条所述台账回归，与闸门判据无关）。
+- 新增 U 组 12 例 + `RE10`/`RE11`：
+  - `U2`/`U2x`：每条定义的 `storage` 都指向 `Other.Tests` 的 dll（单值、uniform），`codeBase` 仍正确 ⇒ 新闸门 RED `name different files`，round 32 闸门 PASS。
+  - `U3`/`U3x`：第 0 条定义不带 `adapterTypeName` ⇒ 新闸门 RED `declare no adapterTypeName`，旧闸门 PASS；`U3b` 属性存在但为空串，同样 RED。
+  - `U4`/`U4x`：同一结果文件两种适配器 ⇒ 新闸门 RED `different adapterTypeName values inside one results file`，旧闸门 PASS。
+  - `U1`/`U1x`：规范夹具钉台阶行（windows 8 行 / webdav 2 行），round 32 闸门无 `assemblyDeclaration=` 行。
+  - `U5` 全文件统一但非 `executor://` 的适配器只 warning；`U6` `storage` 与 `codeBase` 只差大小写与分隔符方向 ⇒ PASS；`U7` 无 provenance 的文件被第十层先拒（`have no storage`），根本到不了本层。
+  - `RE10` 真实语料两代 shell 都打印 1952/104 两条台阶行且逐字相同；`RE11` round 32 闸门在真实语料上无该行。
+
+### 实现过程事故（可复用教训）
+- **`custom()` 在注册处立即执行，`ONLY` 过滤不影响它**：定向复跑（`ONLY=U1,…`）仍会跑完全部 `RE*` 真实语料用例，24 例的定向跑实测约 17 分钟；NC 库只在进程结束时打印，日志在此之前始终 0 字节，判进度只能看 `nc/` 产物目录与子进程。
+- **旧用例引用的闸门版本要单独保留常量，且改名后要按常量名全量 grep 一遍**：把 `OLD_CKPRE` 从「round 25 闸门」改指「round 32 闸门」后，先修了 `RE9`（断言 round 25 闸门没有 `runHeader=` 行），却漏掉 T 组的 8 条成对例 `T1x/T2x/T3x/T5x/T9x/T10x/T14x/T15x`（同样断言「round 25 闸门接受该改动」）—— 它们一直指 `OLD_CKPRE`，于是第一轮全量跑出 `total 134 cases, pass=126, fail=8`，八条全红且报错文本正是 round 32 层的 `runHeader` 判据。定向跑（`ONLY=U1,…`）不会跑它们，所以定向全绿不能当成台账已修好的证据；旧版本另立 `OLD_CK25` 后八条一起改指它，`ONLY` 之外的成对例必须靠全量跑覆盖。
+- **新层的负向对照要避开更早的层**：`U7` 原想断言「无 provenance 时台阶行为 0」，实际第十层（行元数据）先以 `have no storage` 抛错，新层永远到不了 ⇒ 用例改成断言「被更早的层拒且不打印本层台阶行」。
+
+### 数据源与规模
+- check 脚本 88,352 B / 1,577 行 → **93,530 B / 1,655 行**（+5,178 B / +78 行；纯 ASCII，0 个 >126 字节；sha256 前 16 位 `2fa5ffd88b7b1751`）。
+- 真实语料两代 shell 均 **exit 0**、输出 **3,157 B 逐字相同**（3,150 B 正文 + `EXIT=0` 行；较 round 32 的 2,963 B 只多两条 `assemblyDeclaration=` 台阶行）。
+- `windows/tools/test-suite-baseline.json` 字节未变，`windows/tools/update-test-suite-baseline.ps1` 未动。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 **`96d8b888ea11a388a099a17160aef5db94d6e0d8`**（`ci(windows): the definitions must agree with themselves about the assembly they were loaded from (W6-113ai)`，1 file changed / +78 insertions），非 force push `54334b87..96d8b888`；`git ls-remote` 远端 ref 同值，`rev-list --left-right --count` = 0/0。
+- head `96d8b888ea11a388a099a17160aef5db94d6e0d8` 的 windows-ci **`41696425558` = success**（`pull_request`；日志 `D:/mh-verify/r33/ci-codehead.log`，145,222 B）：台阶行出现 `assemblyDeclaration=1952 storage/codeBase pairs=1952 same file adapters=1` 与 webdav 的 104 行，此前十七层台阶行逐字不变。
+- licence 步骤：`check-licence-surface` checks=53 failed=0 warnings=0 skipped=0（`18:45:41Z`）。
+- 同 head Android CI `41696425581` = in_progress（02:50 取证时点）；`96d8b888ea11a388a099a17160aef5db94d6e0d8` 与 `54334b871958c7abcf57b8817fb7a7bc4ce106b5` 的 Android 三子树哈希全同（`ff4eed826cbcf6e586d008701214b3581cd977ca` / `e983feb08237f8a4b85d69ba9492e9c35b7c1625` / `70c541457caefdf0eb50201eb3be2c01b3f9470e`）⇒ 按 ADR-AUTO-001 继承、不作独立结论。
+
+### 锁
+- run-id `w6-r35-q7t2n5`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `213036bd9bdbd109b1f7831928c36870`）、`ref:origin/feature/cross-device-source-sync`（token `c6cc3c4055a19690e2a33f503df0950e`）、`worktree:D:/mh-w6`（token `60cba963cfa295f85ff71a4fc022f3b1`），取锁前 `status` 为 `locks: []`，收尾已释放。
