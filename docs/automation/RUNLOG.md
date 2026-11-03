@@ -463,5 +463,11 @@
 - 同 head Android CI `41586032310` = 取证时 in_progress；`25bd599f` 与 `6295b420` 的 `core`/`feature`/`app` 三子树哈希全同（`ff4eed826cbcf6e586d008701214b3581cd977ca` / `e983feb08237f8a4b85d69ba9492e9c35b7c1625` / `70c541457caefdf0eb50201eb3be2c01b3f9470e`）⇒ 按 ADR-AUTO-001 继承、不作独立结论。
 - PR #39：head `25bd599f`、draft，正文（写前）约 183,142 B（余约 79 KB）。
 
+### docs head 验收（EXECUTED）
+
+- docs 提交 **`e897c629fd126dd7e488d372fa170241577b11f0`**（`docs(automation): round 25 - the gate pins the summary verdict to its own buckets (W6-113ag)`，3 files changed / +130 / -2：RUNLOG round 25 小节、TEST_MATRIX §6.21、queue 任务 W6-113ag）；非 force push `25bd599f..e897c629`，远端 ref 同值、与 origin 0/0。
+- docs head 的 windows-ci **`41586989032` = completed/failure**（`pull_request`；日志 `D:/mh-verify/r25/ci-docshead.log`，113,727 B，run 起始 `2026-11-03T05:58:28.6799054Z`）：台阶行与代码 head 逐字一致 —— `MediaHub.Tests: summaryOutcome=Completed failureBuckets=0 contradiction=0`（06:01:08.1497849Z）、`MediaHub.WebDav.Tests: summaryOutcome=Completed failureBuckets=0 contradiction=0`（06:01:10.3233174Z）、`combined tests=2056`、`MediaHub.Tests: total=1952 baseline=1952 failed=0 notExecuted=0`、WebDav 104/104；licence `checks=52 failed=1 warnings=0 skipped=0`，唯一红仍为上游 `log-file-claims`（`W6-113u`）⇒ 本轮判定标准在两个 head 上均成立。
+- 同 head Android CI `41586989022` 取证时 in_progress；`e897c629` 相对 `25bd599f` 只改 `docs/automation/**` ⇒ `core`/`feature`/`app` 三子树哈希不变，按 ADR-AUTO-001 继承、不作独立结论。
+
 ### 锁
 - run-id `w6-r25b-k7m2p9`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `4150e2e39cda4053c4296a2a06fadff6`）、`ref:origin/feature/cross-device-source-sync`（`cac33970651b9c1222032fa6e05b0624`）、`worktree:D:/mh-w6`（`f3fc062d52d6f8ab913e7c93f3d28d94`）；三把均以 `--take-stale` 从上一次的 `w6-r25-kq5y9q` 接手（该 run 中断两天、ttl 到期）；收尾释放。

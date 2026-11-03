@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-03T14:00:00+08:00",
+  "updated_at": "2026-11-03T14:20:00+08:00",
   "updated_by": "lead-W6-113-r25",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -722,7 +722,9 @@
         "exact-head windows-ci 41586032491 (@25bd599f) = completed/failure with the test gate step green and both new ladder lines: MediaHub.Tests / MediaHub.WebDav.Tests summaryOutcome=Completed failureBuckets=0 contradiction=0 (05:51:12.3428789Z / 05:51:14.5262238Z), combined tests=2056, MediaHub.Tests total=1952 baseline=1952 failed=0 notExecuted=0, WebDav 104/104",
         "licence `check-licence-surface  checks=52 failed=1 warnings=0 skipped=0`，唯一红为上游 `log-file-claims`（`W6-113u`）",
         "Android CI 41586032310 = 取证时 in_progress; core/feature/app tree hashes identical to 6295b420 (ff4eed826cbcf6e586d008701214b3581cd977ca / e983feb08237f8a4b85d69ba9492e9c35b7c1625 / 70c541457caefdf0eb50201eb3be2c01b3f9470e) -> inherited per ADR-AUTO-001",
-        "worktree clean and 0/0 against origin after the push; remote ref = 25bd599f"
+        "worktree clean and 0/0 against origin after the push; remote ref = 25bd599f",
+        "docs head e897c629 windows-ci 41586989032 = completed/failure with the same ladder lines (MediaHub.Tests summaryOutcome=Completed failureBuckets=0 contradiction=0 @06:01:08.1497849Z, WebDav @06:01:10.3233174Z, combined tests=2056); licence checks=52 failed=1, only the upstream log-file-claims",
+        "Android CI 41586032310 (code head) and 41586989022 (docs head) were in_progress when sampled; core/feature/app tree hashes are identical to 6295b420, so ADR-AUTO-001 inheritance applies and no independent Android conclusion is drawn"
       ],
       "notes": "只钉两种无争议 verdict（Completed/Failed）；稀有 verdict 只记录不判红（与失败桶无可证等价式）；缺失的失败桶按 0 处理（第十五层已拒绝必读属性缺失）；throw 排在既有判据之后以保证既有层文案不变。",
       "next_action": "下一层候选：ResultSummary/@outcome 与 TestRun/@name 的配对、UnitTest/@storage 与程序集声明的配对、TestSettings/Deployment 与 relativeResultsDirectory 前缀的配对；若再红先问「这一层的每个数字读自文件的哪一侧」并确认新层的 throw 排在既有判据之后。",
