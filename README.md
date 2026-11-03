@@ -384,6 +384,7 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
 
 <!-- WINDOWS-SYNC:START -->
 <!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
+- ad99de10 2026-11-03 feat(licensing): W59 W12 快照的历史数字须在基线提交上可复核（第 53 项 doc-audit-history-claims）
 - 212bfc64 2026-11-01 licence guard: add cross-doc-pointer-claims (check 52)
 - 96f525d6 2026-11-01 W57: pin the reproducibility record to the repository (51st licence-surface check)
 - 34bd11cd 2026-11-01 feat(licensing): W56 SBOM 两 flavour 账目门禁（第 50 项 sbom-flavour-claims）
@@ -391,7 +392,6 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
 - c80556ce 2026-11-01 feat(licensing): W55 LGPL 构建记录门禁（lgpl-build-record-claims 第 49 项）
 - f2f83bba 2026-10-31 W54 W13 探针记录门禁：身份钉死值、交付物表与断言条数钉在实物上（第 48 项 engine-probe-claims）
 - 19beb0cc 2026-10-31 W53 修正 CRLF 下的计数权威判据，并把围栏完整性扩到混排围栏
-- f614546e 2026-10-31 feat(licensing): W53 能力对照表指针/状态词/计数纪律门禁（第 47 项 capability-map-pointers）
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
