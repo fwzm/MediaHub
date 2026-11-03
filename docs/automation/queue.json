@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-01T03:05:00+08:00",
-  "updated_by": "lead-W6-113-r24",
+  "updated_at": "2026-11-03T14:00:00+08:00",
+  "updated_by": "lead-W6-113-r25",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -704,6 +704,29 @@
       "notes": "本层只校验 Counters 块自身的属性契约与两条算术恒等式（total == executed + notExecuted、passed + failed <= executed）；未知属性只 warning；属于单次运行内不变量，不写基线。",
       "next_action": "下一层候选：TestRun/@name 与 run id 的配对、ResultSummary/@outcome 与 Counters 的关系、UnitTest/@storage 与程序集声明的配对；若再红先按「每个数字读自文件的哪一侧」归因，不要直接改共享守卫。",
       "closed_at": "2026-11-01T02:30:00+08:00"
+    },
+    {
+      "id": "W6-113ag",
+      "title": "套件基线门禁第十六层：ResultSummary 的 verdict 必须与自身失败桶一致",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r25",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "commit 25bd599f (1 file changed / 57 insertions; check-test-suite-baseline.ps1 75,846 -> 79,818 B, sha256 16=09f5232175c74b1e, pure ASCII, both shells PARSE-OK)",
+        "negative controls 92/92 pass, fail=0 (pwsh 7 + Windows PowerShell 5.1 parity) - D:/mh-verify/r25/run-nc.cjs, log D:/mh-verify/r25/nc-full2.log",
+        "paired cases (new gate RED / round 24 gate PASS): S2 Completed verdict with error=1 -> \"the summary says Completed while error=1\"; S3 dropped verdict -> \"names no outcome\"; S4 blank verdict -> \"names no outcome\"; S5 verdict Complete (misspelled) -> \"not in the TRX summary vocabulary\"; S6 Failed verdict with failed=0 -> \"says Failed while failed=0\"",
+        "S7 rarer verdict Aborted with all-zero buckets = PASS and recorded on the ladder line (summaryOutcome=Aborted failureBuckets=0 contradiction=0); S8 error=1 with clean rows is refused by the layer-7 rows cross-check first (expected)",
+        "first run 90/92: the two reds were the pre-existing case R3 - the new layer threw before the later per-suite outcome-kind check and rewrote its message; fixed by deferring the throw to the end of the suite iteration ($all += $total), which is the reusable rule for this gate",
+        "no baseline change: this reads a field the baseline never stored - test-suite-baseline.json and update-test-suite-baseline.ps1 byte-identical to HEAD",
+        "exact-head windows-ci 41586032491 (@25bd599f) = completed/failure with the test gate step green and both new ladder lines: MediaHub.Tests / MediaHub.WebDav.Tests summaryOutcome=Completed failureBuckets=0 contradiction=0 (05:51:12.3428789Z / 05:51:14.5262238Z), combined tests=2056, MediaHub.Tests total=1952 baseline=1952 failed=0 notExecuted=0, WebDav 104/104",
+        "licence `check-licence-surface  checks=52 failed=1 warnings=0 skipped=0`，唯一红为上游 `log-file-claims`（`W6-113u`）",
+        "Android CI 41586032310 = 取证时 in_progress; core/feature/app tree hashes identical to 6295b420 (ff4eed826cbcf6e586d008701214b3581cd977ca / e983feb08237f8a4b85d69ba9492e9c35b7c1625 / 70c541457caefdf0eb50201eb3be2c01b3f9470e) -> inherited per ADR-AUTO-001",
+        "worktree clean and 0/0 against origin after the push; remote ref = 25bd599f"
+      ],
+      "notes": "只钉两种无争议 verdict（Completed/Failed）；稀有 verdict 只记录不判红（与失败桶无可证等价式）；缺失的失败桶按 0 处理（第十五层已拒绝必读属性缺失）；throw 排在既有判据之后以保证既有层文案不变。",
+      "next_action": "下一层候选：ResultSummary/@outcome 与 TestRun/@name 的配对、UnitTest/@storage 与程序集声明的配对、TestSettings/Deployment 与 relativeResultsDirectory 前缀的配对；若再红先问「这一层的每个数字读自文件的哪一侧」并确认新层的 throw 排在既有判据之后。",
+      "closed_at": "2026-11-03T14:1x+08:00"
     }
   ]
 }

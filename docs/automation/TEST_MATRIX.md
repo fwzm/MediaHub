@@ -1127,3 +1127,55 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 
 
 - docs head `164de3b96ff2dd62f7c00bcede2c3daafc88cb61` 的 windows-ci **`41229517026` = completed/failure**（日志 `D:/mh-verify/r24/ci-docshead-windows2.log`，112,467 B）：台阶行与代码 head 逐字一致（两套件 `counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted`、`combined tests=2056`、`MediaHub.Tests: total=1952 baseline=1952 failed=0 notExecuted=0`、WebDav 104/104）；licence `checks=50 failed=1`，唯一红为上游 `log-file-claims`（`W6-113u`）。
+
+## 6.21 第十六层口径：ResultSummary 的 verdict 必须与自身失败桶一致（W6-113ag，2026-11-03）
+
+### 口径（TRX 内部不变量，基线不加字段）
+
+| 项 | 内容 |
+| --- | --- |
+| 新增台阶行 | `summaryOutcome=Completed failureBuckets=0 contradiction=0` |
+| 判定 | `ResultSummary/@outcome` 必须存在且非空白、且属于 TRX 汇总词表；`Completed` 时失败桶（failed/error/timeout/aborted/notRunnable/disconnected/passedButRunAborted）必须全为 0；`Failed` 时 `failed` 必须 > 0 |
+| 计数口径 | `failureBuckets` = 七个失败桶之和；`contradiction` = 违规条目数；缺失的桶按 0 处理（第十五层已保证五个必读属性存在且可解析） |
+| 违反 | 任一违规 → RED，消息点名套件与文件，并声明「上下文所有计数都读自该块，因此过期或伪造的 verdict 会让它们看起来与基线完全一致」 |
+| 稀有 verdict | `Error`/`Timeout`/`Aborted`/`InProgress`/`NotExecuted`/`Warning` 只记录、不 RED（与各失败桶无可证等价式） |
+| 抛错位置 | 矛盾值在判据块内计算、台阶行照常打印，`throw` 推迟到该套件迭代末尾（`$all += $total` 之前），保证既有各层保留自己的报错文案 |
+| 基线影响 | 无字段新增、update 脚本未改 ⇒ 无迁移；`test-suite-baseline.json` 与 HEAD 逐字节相等 |
+
+### 为什么前十五层看不见
+
+| 层 | 读的是 | verdict 被改写时 |
+| --- | --- | --- |
+| 第一至第六层 | 总数、类/方法/用例数、参数行清单与 digest | 与 verdict 无关 → 全绿 |
+| 第七层 | 逐行 outcome 与 Counters 桶双向核对 | 只比行与桶，不读 `ResultSummary/@outcome` → 全绿 |
+| 第八至第十四层 | 截断暴露面、套件集、行属性、节结构、跨文件与执行身份、显示名构成 | 同上 → 全绿 |
+| 第十五层 | `Counters` 块自身属性契约与算术恒等式 | 只读 `Counters`，不读 `ResultSummary` 的属性 → 全绿 |
+| **第十六层（本轮）** | `ResultSummary/@outcome` 与七个失败桶的一致性 | **RED**（密缺失/未知/Completed 带失败桶/Failed 无失败） |
+
+### 依据（EXECUTED）
+
+- 真实 TRX 的 `ResultSummary` 只有一个 `outcome` 属性（值 `Completed`），`Counters` 有 16 个属性；脚本此前的判据全文（`SOURCE_REVIEWED`）无任何 `ResultSummary` 属性读取，故「改 verdict、留桶」与「改桶、留 verdict」两向都不可见。
+- 成对证据：`S2`（`error=1` 的夹具建基线后只把 verdict 改成 `Completed`）新闸门 RED `the summary says Completed while error=1`，round 24 闸门 PASS；`S3`/`S4`/`S5`/`S6` 同理。
+
+### 数据源与规模
+
+- 数据源：`D:/mh-verify/r9-art/test-results/windows-tests.trx`（2,718,829 B）与 `webdav-tests.trx`。
+- `windows/tools/check-test-suite-baseline.ps1` 75,846 → 79,818 B（sha256 前 16 `09f5232175c74b1e`，纯 ASCII，两代 shell PARSE-OK），提交 `25bd599f1dd30e81583df6d5af4dbc6c20db68e3`（1 file / +57），非 force push `6295b420..25bd599f`。
+
+### 负向对照（92 例，EXECUTED）
+
+- 台账 `D:/mh-verify/r25/run-nc.cjs`（34,940 B / 439 行），**92/92 pass、fail=0**（pwsh 7 与 Windows PowerShell 5.1 判定一致，日志 `D:/mh-verify/r25/nc-full2.log`）。
+- 首轮 90/2：唯一失败是既有例 `R3`（第七层「行 Passed→Aborted」）被新层抢了报错文案 ⇒ 阐明「新增判据的 throw 必须排在既有判据之后」，把 throw 推迟到迭代末尾后全绿。
+- 成对例（新 RED / 旧 PASS）：`S2`/`S2x`（Completed 带 `error=1`）、`S3`/`S4`（verdict 缺失/空白）、`S5`（拼错 `Complete`）、`S6`（`Failed` 但 `failed=0`）；`S7` 稀有 verdict `Aborted` 全零 ⇒ PASS 且台阶行记录；`S8` `error=1` 而行全 Passed ⇒ 第七层先拦（预期）。
+
+### 残留限制
+
+1. 只钉两种无争议 verdict（`Completed`/`Failed`）；其余六种只记录，不判 RED。
+2. 只读 `ResultSummary/@outcome`，不评估 `ResultSummary` 的其它属性（真实语料里不存在，出现即未覆盖）。
+3. 未读取的失败桶按 0 处理：第十五层已拒绝缺失的必读属性，但七个失败桶里只有 `failed` 属必读集合，其余六个缺失时本层视为 0。
+
+### exact-head CI 验收（EXECUTED，40 位 SHA）
+
+- head `25bd599f1dd30e81583df6d5af4dbc6c20db68e3` 的 windows-ci **`41586032491` = completed/failure**（`pull_request`，日志 `D:/mh-verify/r25/ci-codehead.log`，113,727 B）：测试门禁步骤全绿，两套件打印十六层台阶行 `summaryOutcome=Completed failureBuckets=0 contradiction=0`（`05:51:12.3428789Z` / `05:51:14.5262238Z`），其余台阶行与 round 24 逐字一致（`combined tests=2056`、`MediaHub.Tests: total=1952 baseline=1952 failed=0 notExecuted=0`、WebDav 104/104）。
+- licence：`check-licence-surface  checks=52 failed=1 warnings=0 skipped=0`，唯一红为上游 `log-file-claims`（`W6-113u`）。
+- 同 head Android CI `41586032310` = 取证时 in_progress；`core`/`feature`/`app` 三子树哈希与 `6295b420` 全同 ⇒ 按 ADR-AUTO-001 继承、不作独立结论。

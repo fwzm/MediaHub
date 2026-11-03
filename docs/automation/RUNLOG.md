@@ -412,3 +412,56 @@
 
 
 - docs head 的 exact-head CI（EXECUTED）：`164de3b96ff2dd62f7c00bcede2c3daafc88cb61` 的 windows-ci **`41229517026` = completed/failure**（`pull_request`；日志 `D:/mh-verify/r24/ci-docshead-windows2.log`，112,467 B）：测试门禁步骤全绿且台阶行与代码 head 逐字一致（两套件 `counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted`、`combined tests=2056`、`MediaHub.Tests: total=1952 baseline=1952 failed=0 notExecuted=0`、WebDav `total=104 baseline=104 failed=0 notExecuted=0`）；licence `check-licence-surface  checks=50 failed=1 warnings=0 skipped=0`，唯一红仍为上游 `log-file-claims`（`W6-113u`）⇒ 本轮判定标准在代码 head 与 docs head 两处均成立。同 head 的 Android CI `41229517011`（workflow 显示名 `Android CI`，非 `android-ci`，按后者过滤会漏检）取证时 in_progress；`164de3b9` 相对 `ca43be2d` 只改 `docs/automation/**` ⇒ `core`/`feature`/`app` 树哈希不变，按 ADR-AUTO-001 继承、不作独立结论。
+
+## 2026-11-03 13:5x round 25（W6-113ag：套件基线第十六层口径 —— ResultSummary 的 verdict 必须与自身失败桶一致）
+
+### 侦察（EXECUTED）
+- 实现与负向对照在 2026-11-01 04:3x–04:5x 完成；其后回合中断约两天（无提交、无推送），2026-11-03 13:4x 重新取锁、复验并提交。中断期间 worktree 只保留这一个未提交文件（`git status --porcelain` 单条 ` M windows/tools/check-test-suite-baseline.ps1`），无并发写者。
+- W6 树取样：head `6295b420`（round 24 收尾）、工作树干净、与 origin 0/0；base `refs/heads/main` = `1246313c7a66d492258b5b4b20b51cbdcf2da9cc`（本轮两次取样同值）。
+- 真实语料：`D:/mh-verify/r9-art/test-results/windows-tests.trx`（2,718,829 B）与同目录 `webdav-tests.trx`。本轮新读到的事实：`ResultSummary` 只有一个属性 `outcome`（真实值 `Completed`），`Counters` 有 16 个属性（total/executed/passed/failed/error/timeout/aborted/inconclusive/passedButRunAborted/notRunnable/notExecuted/disconnected/warning/completed/inProgress/pending）。
+- 缺口定位（源码审查 SOURCE_REVIEWED）：脚本全文没有 `ResultSummary.outcome` / `ResultSummary.@outcome` 的引用——行侧 outcome 分布、Counters 16 个属性、跨文件运行身份都被读过，唯独汇总块自己的 verdict 从未被读。
+
+### 缺口（本轮切片动机）
+- 行与桶可以彼此一致，而汇总它们的 verdict 仍是过期或伪造的：把失败桶改成 0 后 `outcome` 仍写 `Failed`，第七层只比对「行 vs 桶」，看不见；反过来把 `outcome` 改成 `Completed` 而桶里还留着 `error=1`，同样无人发现。
+- 两个方向都属于「让这棵树看起来干净」：前者是给证据贴旧标签，后者是改标签不改证据。前十五层全部只看计数与行，因此这一侧是最后一个「文件里已有、闸门从未读取」的汇总字段。
+
+### 修法（只改 `windows/tools/check-test-suite-baseline.ps1`；基线零变化、update 脚本未改 ⇒ 无迁移）
+- 四段补丁（+57 行）：头注释第 16 段、SEMANTICS 增补、新判据块、台阶行 `summaryOutcome=... failureBuckets=... contradiction=...`。
+- RED 判据：①verdict 缺失或空白；②verdict 不在 TRX 汇总词表（`Completed`/`Failed`/`Error`/`Timeout`/`Aborted`/`InProgress`/`NotExecuted`/`Warning`）；③verdict=`Completed` 而失败桶（failed/error/timeout/aborted/notRunnable/disconnected/passedButRunAborted）任一 > 0；④verdict=`Failed` 而 `failed=0`。
+- 缺失的桶按 0 处理，避免与第十五层「属性缺失/malformed」判据重叠：那两种情况在第十五层就已抛错，新层不会看到。
+- 刻意保留的残留限制：稀有 verdict（`Error`/`Timeout`/`Aborted`/`InProgress`/`NotExecuted`/`Warning`）只上台阶行、不做 RED —— 它们与各失败桶之间没有可证的等价式，硬钉只会制造假红。
+- **抛错位置**：矛盾值在判据块里算、台阶行照常打印，`throw` 推迟到该套件迭代的末尾（`$all += $total` 之前），保证既有各层保留自己的报错文案。这不是风格问题，是本轮负向对照首轮抓到的真实回归（见下）。
+
+### 负向对照（92 例，EXECUTED）
+- 脚本 `D:/mh-verify/r25/run-nc.cjs`（34,940 B / 439 行，`node --check` 通过），每例两代 shell 双跑（pwsh 7 + Windows PowerShell 5.1）并要求判定一致。
+- 首轮：92 例 **90 通过 / 2 失败**，失败均为既有例 `R3`（第七层「一行 Passed→Aborted」）。原因：新层在第七层之后立即抛错，抢在该套件迭代末尾的既有判据（baseline 的 outcome 桶集合比对，文案 `test outcome kinds changed`）之前，改写了一个既有例的报错文案。把 `throw` 推迟到迭代末尾后 **92/92 全绿**。
+- 新例（S 组 14 例 + RE6/RE7）：
+  - `S1` 规范夹具钉台阶行并含 `combined tests=10`；`S1x` 旧闸门不打印 `summaryOutcome=` 行。
+  - **`S2`/`S2x` 成对核心例**：基线由含 `error=1` 行的夹具建出，再只把 verdict 改成 `Completed` ⇒ 新闸门 RED（`the summary says Completed while error=1`），r24 闸门 PASS。
+  - `S3`/`S4` 删掉 verdict、verdict 空串 ⇒ RED `the summary names no outcome`，r24 闸门 PASS。
+  - `S5` verdict=`Complete`（拼错）⇒ RED `not in the TRX summary vocabulary`，r24 闸门 PASS。
+  - `S6` verdict=`Failed` 而 `failed=0` ⇒ RED `the summary says Failed while failed=0`，r24 闸门 PASS。
+  - `S7` verdict=`Aborted` 且全零 ⇒ **PASS** 且台阶行记录 `summaryOutcome=Aborted failureBuckets=0 contradiction=0`（残留限制的显式例）。
+  - `S8` `error=1` 而行全 Passed ⇒ 被第七层先拦（`error rows=0 vs Counters.error=1`），属预期：新层排在既有判据之后。
+- `RE6` 真实语料两代 shell 都打印 verdict 台阶行且输出逐字相同（`identical=true`）；`RE7` r24 旧闸门不打印该行。
+
+### 实现过程事故（可复用教训）
+- **新增判据的抛错位置必须排在既有判据之后**：把新层插在第七层之后、直觉上「更严更早」是对的，但脚本里还有更晚的既有判据（每套件迭代末尾的 outcome 桶集合比对），新层提前抛错就改写了那些既有用例断言的报错文案 —— 负向对照库里「断言某句文案」的既有例立刻红。正确姿势：判据在早期计算、`throw` 推迟到该迭代末尾。
+- 夹具桶选择要避开更早的层：`S8` 初版把 error 行配 `failed=1`，会先撞第十五层 `passed+failed>executed` 算术红；改用 error 桶才落到「行 vs 桶」层。
+- 本机 `bash -c 'node … > log'` 的 stdout 在进程结束前不落盘（`nc-full.log` 长时间 0 字节，进程退出才写入 7,867 B）⇒ 判断长任务进度看产物目录与子进程，不看日志大小。
+- `gh` 在 MSYS bash 里的输出带 `\r`：`grep -E ' in_progress$'` 与 jq 拼串的行尾匹配都会漏（CI 监视脚本连两轮误判 DONE）⇒ 先 `tr -d '\r'`，或直接用 `--jq '[.[] | select(.status != "completed")] | length'` 判 pending。
+
+### 数据源与规模
+- check 脚本 75,846 B → **79,818 B**（+3,972 B / +57 行；1,428 行；纯 ASCII，0 个 >126 字节；sha256 前 16 位 `09f5232175c74b1e`）。
+- 真实语料两代 shell 均 **exit 0**、输出 **2,739 B 逐字相同**（两套件各一行 verdict 台阶行 + `combined tests=2056`）。
+- 负向对照 92 例；`windows/tools/test-suite-baseline.json` 字节未变，`windows/tools/update-test-suite-baseline.ps1` 未动。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 **`25bd599f1dd30e81583df6d5af4dbc6c20db68e3`**（`ci(windows): the suite baseline pins the summary verdict to its own buckets (W6-113ag)`，1 file changed / +57）；提交前把实现态快照 `D:/mh-verify/r25/check-new.snapshot.ps1` 逐字节写回并复验真实语料（identical=true）通过才提交；非 force push `6295b420..25bd599f`，远端 ref 同值，工作树干净。
+- head `25bd599f` 的 windows-ci **`41586032491` = completed/failure**（`pull_request`；日志 `D:/mh-verify/r25/ci-codehead.log`，113,727 B）：测试门禁步骤全绿并打印十六层台阶行，新增 **`MediaHub.Tests: summaryOutcome=Completed failureBuckets=0 contradiction=0`** 与 **`MediaHub.WebDav.Tests: summaryOutcome=Completed failureBuckets=0 contradiction=0`**；其余台阶行与 round 24 逐字一致（`counters=16 attributes required=5 missing=0 malformed=0 identity=total=executed+notExecuted`、`combined tests=2056`、`MediaHub.Tests: total=1952 baseline=1952 failed=0 notExecuted=0`、WebDav 104/104）⇒ 本轮判定标准成立。
+- licence 步骤：`check-licence-surface  checks=52 failed=1 warnings=0 skipped=0`，唯一红为上游 `log-file-claims`（`W6-113u`）。
+- 同 head Android CI `41586032310` = 取证时 in_progress；`25bd599f` 与 `6295b420` 的 `core`/`feature`/`app` 三子树哈希全同（`ff4eed826cbcf6e586d008701214b3581cd977ca` / `e983feb08237f8a4b85d69ba9492e9c35b7c1625` / `70c541457caefdf0eb50201eb3be2c01b3f9470e`）⇒ 按 ADR-AUTO-001 继承、不作独立结论。
+- PR #39：head `25bd599f`、draft，正文（写前）约 183,142 B（余约 79 KB）。
+
+### 锁
+- run-id `w6-r25b-k7m2p9`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `4150e2e39cda4053c4296a2a06fadff6`）、`ref:origin/feature/cross-device-source-sync`（`cac33970651b9c1222032fa6e05b0624`）、`worktree:D:/mh-w6`（`f3fc062d52d6f8ab913e7c93f3d28d94`）；三把均以 `--take-stale` 从上一次的 `w6-r25-kq5y9q` 接手（该 run 中断两天、ttl 到期）；收尾释放。
