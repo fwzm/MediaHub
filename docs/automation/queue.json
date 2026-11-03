@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-04T00:5x+08:00",
+  "updated_at": "2026-11-04T01:0x+08:00",
   "updated_by": "lead-W6-113-r32",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -446,8 +446,8 @@
       "id": "W6-113u",
       "title": "跨分支守卫分歧：W50 log-file-claims 钉 LogService 的滚动目录字面量，W6 已把该行搬进 DiagnosticsReport（W6-113u）",
       "priority": "P0",
-      "status": "BLOCKED",
-      "owner": "unassigned",
+      "status": "RESOLVED",
+      "owner": "base-side (墨崔)",
       "branch": "feature/cross-device-source-sync",
       "evidence": [
         "base 2bdaa499 windows/tools/check-licence-surface.ps1 check #44 \"log-file-claims\" (W50) requires the literal sb.AppendLine(\"# 滚动文件目录：\" + FileSink.DirectoryPath); inside windows/src/MediaHub.Net/LogService.cs",
@@ -456,11 +456,13 @@
         "PR merge tree refs/pull/39/merge = 0b8a3598a7d3f7b5aa7d5c113a5295fae13a705c carries base W14 log-file-status block and the W6 RollingDirectoryPrefix note, but no LogService literal, so the guard necessarily fails",
         "head 716f481a windows-ci 41200282567 = failure; log: check-licence-surface FAIL log-file-claims (checks=44 failed=1 warnings=0 skipped=0), test-suite gate step fully green",
         "round 15 head ecf00ca5 on the previous base 4791322455 had checks=42 failed=0 - the guard did not exist then, so this red appeared with the base advance, not with this round change",
-        "docs head f396e791 windows-ci 41200702543 = failure on the same needle (check-licence-surface checks=45 failed=1), so the red is stable across code and docs heads of this branch"
+        "docs head f396e791 windows-ci 41200702543 = failure on the same needle (check-licence-surface checks=45 failed=1), so the red is stable across code and docs heads of this branch",
+        "RESOLVED 2026-11-04: base advanced to abe06e8cdcc28872fe398de60edfb13b95fb5771 (fix(licensing): W60 item 43 log-file-claims accepts both legal shapes) implementing queue option (1); the needle now passes when either the inline shape or the delegated shape holds (rollingDirectory: FileSink?.DirectoryPath plus three shared-renderer literals), check count stays 53",
+        "verification: docs head cb33012191565ebc6d71a9ed5157ae4aff7ff49c windows-ci 41679604112 = success, log line check-licence-surface  checks=53 failed=0 warnings=0 skipped=0 (2026-11-03T17:00:57Z); the earlier code-head run 41677038106 on base abe06e8c-1 had failed with checks=53 failed=1"
       ],
-      "notes": "两侧设计各自成立：base 的守卫钉的是「LogService 自己拼报告头」的旧形状，W6-113 已把这一行集中到 DiagnosticsReport（由 7 条用例与 W14 §3 说明冻结），round 10 已复验为 no-op。",
-      "next_action": "维护者/W50 所有者二选一：① 把该 needle 改为「该行由 DiagnosticsReport.RollingDirectoryPrefix + rollingDirectory 产出，且两侧用例仍在」（推荐，与已落地设计一致）；② 把该字面量按原形状放回 LogService.cs（会形成第二个真源，需同步改 W14 §3）。裁决前本 PR head 的 licence 步骤持续红；我方不动共享守卫。",
-      "closed_at": null
+      "notes": "原判 BLOCKED 的两种裁决方向中，维护者选了方案①（认两种合法实现形态，与 W6-113 已落地设计一致）；W6 侧未改共享守卫。",
+      "next_action": "无（已解除）。后续若再改导出指针行的渲染位置，需同步 check-licence-surface 的两形态判据。",
+      "closed_at": "2026-11-04T01:0x+08:00"
     },
     {
       "id": "W6-113v",
@@ -748,7 +750,10 @@
         "both shells on the real corpus: exit 0, 2,963 B byte-identical output, MediaHub.Tests runHeader=3/3 settings=1 deployments=1 derivedRoot=1 bound rows=1952 header id collisions=0, WebDav bound rows=104, combined tests=2056",
         "exact-head windows-ci 41677038106 (@6e1ba557f1beaeff28c3cd8f34a855e8500fde11) = failure with the test gate step green (the only failing step is the pre-existing upstream licence guard) and both new ladder lines present, every round-25 ladder line unchanged",
         "licence `check-licence-surface  checks=53 failed=1 warnings=0 skipped=0`, only red = upstream log-file-claims (W6-113u)",
-        "Android CI 41677038126 was in_progress when sampled; core/feature/app tree hashes identical to 19e8561d668f4434b8ae3f9c4135f48cdb28b8ad -> inherited per ADR-AUTO-001"
+        "Android CI 41677038126 was in_progress when sampled; core/feature/app tree hashes identical to 19e8561d668f4434b8ae3f9c4135f48cdb28b8ad -> inherited per ADR-AUTO-001",
+        "docs head cb33012191565ebc6d71a9ed5157ae4aff7ff49c windows-ci 41679604112 = success (single job build / tests / playback probe / packaging green) with the same ladder lines (runHeader=3/3 ... bound rows=1952 @17:00:48Z, WebDav 104 @17:00:50Z, summaryOutcome=Completed failureBuckets=0 contradiction=0, combined tests=2056)",
+        "licence on the docs-head run: check-licence-surface  checks=53 failed=0 warnings=0 skipped=0 after base abe06e8c taught log-file-claims both legal shapes -> W6-113u resolved",
+        "Android CI 41679604351 (docs head) was in_progress when sampled and 41677038126 (code head) settled as cancelled by ref-only concurrency; core/feature/app tree hashes unchanged -> ADR-AUTO-001 inheritance"
       ],
       "notes": "第十七层补上「文件里已有、闸门从未读取」的最后一侧：运行头。与第十六层（verdict）同理，判据只读文件自身，不进基线、无迁移。实现过程发现并修掉一个 PowerShell 变量跨迭代复用缺陷（warning 累加器）。",
       "next_action": "套件基线第十八层候选：Times 的 creation/queuing 与行时间窗口的关系（已知反例：可晚于 start）；Deployment/@runDeploymentRoot 与实际 relativeResultsDirectory 前缀的一致性。",

@@ -519,3 +519,9 @@
 
 ### 锁
 - run-id `w6-r32-h3k9m2`、owner `lead`、ttl 5400，资源 `branch:feature/cross-device-source-sync`（token `4592990da388ffd3a19fdd9b20800b01`）、`ref:origin/feature/cross-device-source-sync`（`617b52eceaf81661e737f353565b444a`）、`worktree:D:/mh-w6`（`c48a76ffb85a4cdc5f6d4717dda0bad9`）；收尾释放。
+
+### docs head 验收（EXECUTED）
+- docs 提交 **`cb33012191565ebc6d71a9ed5157ae4aff7ff49c`**（`docs(automation): round 32 - the gate pins each results file to its own run header (W6-113ah)`，3 files changed / +126 −2）：RUNLOG round 32 小节、TEST_MATRIX §6.22、queue 任务 W6-113ah；非 force push `6e1ba557..cb330121`，`git ls-remote` 远端 ref 同值、与 origin 0/0。
+- docs head 的 windows-ci **`41679604112` = success**（`pull_request`，日志 `D:/mh-verify/r32/ci-docshead.log`，145,003 B / 795 行，唯一 job `build / tests / playback probe / packaging` 全绿 = success）：台阶行与代码 head 逐字一致 —— `MediaHub.Tests: runHeader=3/3 settings=1 deployments=1 derivedRoot=1 bound rows=1952 header id collisions=0`（`2026-11-03T17:00:48Z`）、`MediaHub.WebDav.Tests: … bound rows=104 …`（`17:00:50Z`）、`summaryOutcome=Completed failureBuckets=0 contradiction=0`、`combined tests=2056`。
+- licence 在全绿运行上为 `check-licence-surface  checks=53 failed=0 warnings=0 skipped=0`（`17:00:57Z`）：**W6-113u 已由 base 侧裁决解除** —— base 前进到 `abe06e8cdcc28872fe398de60edfb13b95fb5771`（墨崔，2026-11-04 00:51:26 +0800，`fix(licensing): W60 第 43 项 log-file-claims 认两种合法实现形态（修 PR #39 windows-ci 红项）`），按本队列推荐方案①把该 needle 改为「inline 形态（LogService 直接拼行）或 delegated 形态（`rollingDirectory: FileSink?.DirectoryPath` + 共享渲染器三处字面量）任一成立即 PASS」，检查总数仍 53 项；PR base 分支为 `feature/windows-client`。queue 里 W6-113u 由 BLOCKED 改记 RESOLVED。
+- 同 head Android CI `41679604351` = 取证时 in_progress；代码 head 的 `41677038126` 收尾为 cancelled（android-ci.yml 的 concurrency 只按 ref）；`cb330121` 相对 `6e1ba557` 只改 `docs/automation/**` ⇒ `core`/`feature`/`app` 三子树哈希不变，按 ADR-AUTO-001 继承、不作独立结论。
