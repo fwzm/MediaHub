@@ -95,6 +95,16 @@
 #   identity to hold, and prints
 #   counters=/attributes required=/missing=/malformed=/identity=.
 #
+#   One more level, on the verdict rather than the counts: ResultSummary/@outcome
+#   says how the whole run ended, and nothing read it - a summary whose buckets
+#   were edited to look clean keeps its old (or any plausible) verdict, and a file
+#   whose verdict was rewritten keeps every count above identical. A missing or
+#   unknown verdict, a Completed verdict with a non-zero failure bucket, and a
+#   Failed verdict with failed=0 are now red; the rarer verdicts (Error / Timeout /
+#   Aborted / InProgress / NotExecuted / Warning) are recorded on the ladder line
+#   and accepted, and the run prints
+#   summaryOutcome=/failureBuckets=/contradiction=.
+#
 #   Every count above is still read from the run's own ResultSummary/Counters, and
 #   the per-row outcomes are never counted. A results file whose rows disagree with
 #   its own summary - a hand-merged, patched or truncated artifact - therefore
@@ -152,6 +162,11 @@
 #   two results files that share a TestRun id or an execution id -> red
 #     (one suite's file copied over another name doubles the reported run)
 #   a TestRun id that is not GUID-shaped -> warning
+#   the summary's own verdict disagrees with its failure buckets (Completed with a
+#     non-zero failed / error / timeout / aborted / notRunnable / disconnected /
+#     passedButRunAborted, or Failed with failed=0), or the verdict is missing or
+#     outside the TRX summary vocabulary -> red: a block whose counters were edited
+#     to look clean keeps its old or any plausible verdict, and no count reads it.
 #   failed != 0 or notExecuted != 0 -> red
 #
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
@@ -1062,6 +1077,44 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): $($e.file) disagrees with its own ResultSummary/Counters - the per-outcome rows do not reproduce the summary (total $total): $($counterMismatch -join '; '). The summary alone cannot be trusted; if the artifact came from another runner, teach the gate that vocabulary before trusting it."
   }
 
+  # The verdict on top of the counters: ResultSummary/@outcome says how the whole
+  # run ended, and no count above reads it. The rows and the buckets can agree with
+  # each other while the verdict that summarises both is stale or invented - a file
+  # whose buckets were edited to look clean, or whose verdict was rewritten, keeps
+  # every count above identical. Only the two unequivocal verdicts are pinned to the
+  # buckets; the rarer ones (Error / Timeout / Aborted / InProgress / ...) are
+  # recorded on the ladder line and accepted, and a bucket this block does not read
+  # is treated as zero.
+  $summaryOutcome = [string]$xml.TestRun.ResultSummary.outcome
+  $summaryKnownOutcomes = @('Completed', 'Failed', 'Error', 'Timeout', 'Aborted', 'InProgress', 'NotExecuted', 'Warning')
+  $summaryContradiction = @()
+  if ([string]::IsNullOrWhiteSpace($summaryOutcome)) {
+    $summaryContradiction += 'the summary names no outcome'
+  } elseif ($summaryKnownOutcomes -notcontains $summaryOutcome) {
+    $summaryContradiction += "the summary records outcome '$summaryOutcome', which is not in the TRX summary vocabulary"
+  }
+  $failureBucketNames = @('failed', 'error', 'timeout', 'aborted', 'notRunnable', 'disconnected', 'passedButRunAborted')
+  $failureBucketTotal = 0
+  $failureBucketsSet = @()
+  foreach ($fb in $failureBucketNames) {
+    if ($counterAttributes.ContainsKey($fb) -and -not [string]::IsNullOrWhiteSpace([string]$counterAttributes[$fb])) {
+      $fbValue = [int]$counterAttributes[$fb]
+      $failureBucketTotal += $fbValue
+      if ($fbValue -gt 0) { $failureBucketsSet += "$fb=$fbValue" }
+    }
+  }
+  if ($summaryContradiction.Count -eq 0) {
+    if ($summaryOutcome -eq 'Completed' -and $failureBucketTotal -gt 0) {
+      $summaryContradiction += "the summary says Completed while $($failureBucketsSet -join ', ')"
+    }
+    if ($summaryOutcome -eq 'Failed' -and ([int]$counterAttributes['failed']) -eq 0) {
+      $summaryContradiction += 'the summary says Failed while failed=0'
+    }
+  }
+  # The verdict contradiction is raised at the very end of this suite iteration (see
+  # below) so that every pre-existing check keeps its own failure text: a fixture that
+  # trips a legacy rule must still fail with the legacy message, not with this layer's.
+
   $actualMethodCount = 0
   foreach ($k in @($actualMethods.Keys)) { $actualMethodCount += @($actualMethods[$k].Keys).Count }
   $baselineMethodCount = 0
@@ -1098,6 +1151,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
+  "$($e.suite): summaryOutcome=$summaryOutcome failureBuckets=$failureBucketTotal contradiction=$($summaryContradiction.Count)"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
   if ($skipped -ne 0) { throw "$($e.suite): $skipped test(s) were not executed" }
@@ -1267,6 +1321,9 @@ foreach ($e in $baseline.suites) {
   }
   if ($actualMethodCases -ne $total) {
     Write-Host "::warning::$($e.suite): $actualMethodCases test definition(s) against $total result(s) - the per-method case counts and the per-class counts disagree; check how the TRX was produced"
+  }
+  if ($summaryContradiction.Count -gt 0) {
+    throw "$($e.suite): $($e.file) records a ResultSummary whose verdict contradicts the Counters block it summarises while the total was $total - every count above is read from this block, so a stale or invented verdict keeps all of them looking exactly like the baseline reviewed. broken: [$(@($summaryContradiction) -join '; ')]. A TRX whose verdict does not match its own buckets was hand-merged or patched; regenerate it from a clean test run."
   }
   $all += $total
 }
