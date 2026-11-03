@@ -144,6 +144,19 @@
 #   adapter per results file, and prints
 #   assemblyDeclaration=/storage\/codeBase pairs=/same file/adapters=.
 #
+#
+#
+#   One more level, on the declared lists: TestLists declares the lists the rows ran
+#   in, and the only part a reader ever sees is the name. The structure check asks an
+#   id to exist, be unique and be used; the row metadata check asks every row to name
+#   one list; the header check asks a header id not to collide with a list id. None of
+#   them reads a name. Two lists can therefore trade their names - the writer always
+#   declares the same two lists with the same ids - and every count, every pairing and
+#   every printed line above stays identical while the file tells the reader the rows
+#   ran somewhere else. The run now pins the writer's two id-to-name pairs, requires
+#   every declared name to be non-blank and distinct, and prints
+#   listVocabulary=/listCount canonical names=/distinct names=/unreferenced lists=.
+
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -186,6 +199,12 @@
 #   a duration that disagrees with the row's own start/end by more than a second,
 #     or a run whose <Times> window records no usable start/finish -> warning.
 #   failed != 0 or notExecuted != 0 -> red
+#   a declared list that carries no name, two declared lists that call themselves
+#     the same thing, or a list whose well-known id does not carry the name the
+#     writer gives that id -> red (the list table is the only place a reader learns
+#     where a row ran, and no count reads it)
+#   a declared list id outside the writer's known vocabulary, a non-GUID list id,
+#     or a declared list that no row and no entry references -> warning
 #   two results files that share a TestRun id or an execution id -> red
 #     (one suite's file copied over another name doubles the reported run)
 #   a TestRun id that is not GUID-shaped -> warning
@@ -510,6 +529,7 @@ $fileIdentityLost = @()
 $counterVocabularyWarn = @()
 $headerWarn = @()
 $assemblyWarn = @()
+$listWarn = @()
 $headerWarn = @()
 foreach ($e in $baseline.suites) {
   $path = Join-Path -Path $ResultsDir -ChildPath $e.file
@@ -594,6 +614,20 @@ foreach ($e in $baseline.suites) {
   $blankListIds = 0
   $duplicateListIds = 0
   $listNames = @{}
+  # The declared lists are a vocabulary, not just an id set: VSTest always declares
+  # the same two lists with the same ids and the same names, and no check above ever
+  # read a name. Keep the writer's id-to-name pairs here so the two can be compared.
+  $listNameBlank = 0
+  $listNameDuplicates = @()
+  $listNameCanonicalLost = @()
+  $listIdUnknown = 0
+  $listIdNotGuid = 0
+  $listFileWarn = @()
+  $listNamesSeen = @{}
+  $canonicalListNames = @{
+    '8c84fa94-04c1-424b-9868-57a2d4851a1d' = 'Results Not in a List'
+    '19431567-8539-422a-85d7-44ee4e166bda' = 'All Loaded Results'
+  }
   foreach ($te in @($xml.TestRun.TestEntries.TestEntry)) {
     if ($null -eq $te) { continue }
     $entryCount++
@@ -611,7 +645,30 @@ foreach ($e in $baseline.suites) {
     $listCount++
     $lidEntry = [string]$tl.id
     if ([string]::IsNullOrWhiteSpace($lidEntry)) { $blankListIds++; continue }
-    if ($listNames.ContainsKey($lidEntry)) { $duplicateListIds++ } else { $listNames[$lidEntry] = [string]$tl.name }
+    $lname = [string]$tl.name
+    if ([string]::IsNullOrWhiteSpace($lname)) { $listNameBlank++ }
+    if (-not [string]::Equals($lname, $lname.Trim(), [System.StringComparison]::Ordinal)) {
+      $listFileWarn += "$($e.suite): declared list $lidEntry names itself with surrounding whitespace ('$lname')"
+    }
+    if ($listNames.ContainsKey($lidEntry)) { $duplicateListIds++ } else { $listNames[$lidEntry] = $lname }
+    if (-not [string]::IsNullOrWhiteSpace($lname)) {
+      $lkey = $lname.ToUpperInvariant()
+      if ($listNamesSeen.ContainsKey($lkey)) {
+        $listNameDuplicates += "declared lists $($listNamesSeen[$lkey]) and $lidEntry both call themselves '$lname'"
+      } else {
+        $listNamesSeen[$lkey] = $lidEntry
+      }
+    }
+    $lidKey = $lidEntry.ToLowerInvariant()
+    if ($lidKey -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { $listIdNotGuid++ }
+    if ($canonicalListNames.ContainsKey($lidKey)) {
+      $wantListName = [string]$canonicalListNames[$lidKey]
+      if (-not [string]::Equals($lname, $wantListName, [System.StringComparison]::Ordinal)) {
+        $listNameCanonicalLost += "list $lidEntry names itself '$lname' while that id is the writer's '$wantListName'"
+      }
+    } else {
+      $listIdUnknown++
+    }
   }
 
   $blankDefExec = 0
@@ -1040,6 +1097,48 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the TRX sections do not agree with each other while the total was $total - the summary, the definitions, the result rows, the entry map and the declared lists all come from this file, so one that drops a section, adds or removes entries, or pairs an entry with the wrong execution id can keep every count above identical. mismatched: $($structureLost -join ', '). A TRX whose sections disagree was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # A declared list is a vocabulary entry, not just an id in a set. The structure
+  # check above asks a list id to exist, be unique and be used, and the row metadata
+  # check asks every row to name one list, so the name - the only part a reader ever
+  # sees - was never read. Two lists can therefore trade their names, or a list can
+  # be renamed to another list's name, while every count and every pairing above
+  # stays identical.
+  $listVocabularyLost = @()
+  $listKnown = 0
+  $listCanonical = 0
+  if ($listNameBlank -gt 0) { $listVocabularyLost += "$listNameBlank declared list(s) carry no name" }
+  foreach ($dupName in @($listNameDuplicates)) {
+    if ($listVocabularyLost.Count -lt 12) { $listVocabularyLost += $dupName }
+  }
+  foreach ($lostListName in @($listNameCanonicalLost)) {
+    if ($listVocabularyLost.Count -lt 12) { $listVocabularyLost += $lostListName }
+  }
+  foreach ($lidScan in @($listNames.Keys | Sort-Object)) {
+    $lidScanKey = $lidScan.ToLowerInvariant()
+    if ($canonicalListNames.ContainsKey($lidScanKey)) {
+      $listKnown++
+      if ([string]::Equals([string]$listNames[$lidScan], [string]$canonicalListNames[$lidScanKey], [System.StringComparison]::Ordinal)) { $listCanonical++ }
+    }
+  }
+  $listReferenced = @{}
+  foreach ($krl in @($resListById.Keys)) {
+    $rlv = [string]$resListById[$krl]
+    if (-not [string]::IsNullOrWhiteSpace($rlv)) { $listReferenced[$rlv.ToLowerInvariant()] = $true }
+  }
+  foreach ($kel in @($entryListById.Keys)) {
+    $elv = [string]$entryListById[$kel]
+    if (-not [string]::IsNullOrWhiteSpace($elv)) { $listReferenced[$elv.ToLowerInvariant()] = $true }
+  }
+  $unreferencedLists = @($listNames.Keys | Where-Object { -not $listReferenced.ContainsKey($_.ToLowerInvariant()) } | Sort-Object)
+  if ($listIdUnknown -gt 0) {
+    $listFileWarn += "$($e.suite): $listIdUnknown declared list id(s) outside the vocabulary this gate knows ($listCount declared) - for those only presence, uniqueness, use and a non-blank distinct name were verified"
+  }
+  if ($listIdNotGuid -gt 0) { $listFileWarn += "$($e.suite): $listIdNotGuid declared list id(s) are not GUID-shaped" }
+  if ($unreferencedLists.Count -gt 0) {
+    $listFileWarn += "$($e.suite): declared list(s) that no row and no entry references: $($unreferencedLists -join ', ') - a virtual list such as All Loaded Results is expected here"
+  }
+  $listWarn += $listFileWarn
+
   # Each row's execution identity is declared three times inside the file: the
   # definition element carries the execution it belongs to, the result row carries
   # the same id as executionId, and it also names the directory its result was
@@ -1362,6 +1461,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot bound rows=$boundRows header id collisions=$headerCollisions"
   "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
+  "$($e.suite): listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=$($listNames.Count - $listNameBlank - $listNameDuplicates.Count) unreferenced lists=$($unreferencedLists.Count)"
   "$($e.suite): summaryOutcome=$summaryOutcome failureBuckets=$failureBucketTotal contradiction=$($summaryContradiction.Count)"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
@@ -1542,6 +1642,9 @@ foreach ($e in $baseline.suites) {
   if ($assemblyLost.Count -gt 0) {
     throw "$($e.suite): the definitions do not agree with themselves about the assembly they were loaded from while the total was $total - each definition records that assembly twice (UnitTest/@storage and TestMethod/@codeBase) and declares the adapter that ran it, and no count above read either record, so a definition pointing at another suite's dll keeps every class, method, argument row, outcome and header line identical. broken: [$(@($assemblyLost) -join '; ')]. A TRX whose two assembly records disagree was hand-merged or patched; regenerate it from a clean test run."
   }
+  if ($listVocabularyLost.Count -gt 0) {
+    throw "$($e.suite): the declared lists do not name themselves consistently while the total was $total - every count above reads the rows, the counters and the ids, and nothing read a list name, so two lists that trade their names keep every one of them identical while the file tells the reader the rows ran somewhere else. mismatched: $($listVocabularyLost -join ', '). A TRX whose list names were rewritten was hand-merged or patched; regenerate it from a clean test run."
+  }
   $all += $total
 }
 
@@ -1558,6 +1661,11 @@ if ($unlistedResults.Count -gt 0) {
   $shownUnlisted = $unlistedResults
   if ($shownUnlisted.Count -gt 12) { $shownUnlisted = $shownUnlisted[0..11] + "... ($($unlistedResults.Count - 12) more)" }
   Write-Host "::warning::test results that the baseline does not list - their cases are neither counted nor gated (refresh windows/tools/test-suite-baseline.json with windows/tools/update-test-suite-baseline.ps1): $($shownUnlisted -join '; ')"
+}
+if ($listWarn.Count -gt 0) {
+  $shownLW = $listWarn
+  if ($shownLW.Count -gt 12) { $shownLW = $shownLW[0..11] + "... ($($listWarn.Count - 12) more)" }
+  Write-Host "::warning::a declared list this gate cannot pin - the writer's list vocabulary is two fixed id-to-name pairs, so anything else is only checked for presence, a non-blank distinct name and use: $($shownLW -join '; ')"
 }
 if ($provenanceWarn.Count -gt 0) {
   $shownProv = $provenanceWarn
