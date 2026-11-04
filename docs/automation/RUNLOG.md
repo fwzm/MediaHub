@@ -646,3 +646,46 @@
 - licence 步骤：check-licence-surface  checks=57 failed=0 warnings=0 skipped=0（`RESULT: PASS`）。**本轮中途 base 又前进了一次**：`refs/heads/feature/windows-client` 由 `8f6bbc8a` 前进到 **`be781c16aca4c58b3f67c238654c3fde82dd7f84`**（`feat(licensing): W65 第 57 项 doc-audit-untested-claims`，新增 131 行脚本与两份文档），PR 合并 ref **`fc6856825a953f467d16a2cbf43ef8dc7c4a5258`** = `be781c16` + `e052312ceb41347a33fba3b22e5ed9e060b7396a` ⇒ 这次 docs head 跑的是 57 项 licence 闸门（合并 head 那次是 56 项），两项均 failed=0。
 - 同 head Android CI `41731588519` = success；代码 head 的 Android CI `41721572251` 与合并 head 的 `41727517642` 均为 success；`e052312c` 相对 `821466c9` 只改 `docs/automation/` 三文件，`core`/`feature`/`app` 三子树哈希不变 ⇒ 继承依据成立。
 
+
+## 2026-11-04 07:3x round 37（W6-113al：套件基线第二十层口径 —— 结果文件必须声明它写于哪套 schema、何时创建与排队）
+
+### 侦察（EXECUTED）
+- D:/mh-w6 的 HEAD 3276d629ca0916f81a98b4b80d9b9d2f8354c6ea，工作树干净，与 origin/feature/cross-device-source-sync 0/0；PR #39 的 base 分支 feature/windows-client = be781c16aca4c58b3f67c238654c3fde82dd7f84，refs/heads/main = 1246313c7a66d492258b5b4b20b51cbdcf2da9cc。
+- 对两份真实结果文件（windows-tests.trx 1,952 行 / webdav-tests.trx 104 行）做「元素→属性」全量普查：TestRun 的 id/name/runUser/xmlns、Times 的 creation/queuing/start/finish、ResultSummary/@outcome、Counters 十六桶、TestSettings/@name/@id、Deployment/@runDeploymentRoot、UnitTest/@storage 与 TestMethod/@codeBase/@adapterTypeName 全部实测在册。
+- 与脚本引用次数比对后，完全未被读的只剩三个字段：TestRun/@xmlns、Times/@creation、Times/@queuing（PowerShell 的 XML 适配器按本地名匹配元素、不校验命名空间，所以换掉 schema 地址、或把创建与排队时刻互换，前十九层的每个计数与每行台阶数字都不变）。
+
+### 缺口（本轮切片动机）
+- 结果文件头部的 xmlns 是「这份 TRX 按哪版 TeamTest schema 写」的唯一声明；Times/@creation 与 @queuing 是「这次运行何时被创建、何时被排队」的唯一声明。三者都不参与任何计数，因此一份被手工合并或改写的 TRX 可以把 schema 换成任意地址、把两个时刻对调，而门禁全绿。
+- 第十九层只读 TestLists 的名字；关于时间只有第十层读 Times/@start 与 @finish 组成的窗口，creation/queuing 从未进入任何判据。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化、update 脚本未改 ⇒ 无迁移）
+- 新增常量 $TeamTestNamespace = 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'。
+- 每文件判据：xmlns 必须存在且等于该地址（缺失或不等 ⇒ RED）；Times.creation 与 Times.queuing 必须存在、可被 [System.DateTimeOffset]::Parse(..., RoundtripKind) 解析，且带显式 UTC 偏移（末位 Z 或 ±HH:MM，否则 RED）；creation 不得晚于 queuing（RED）。
+- 生产者自洽但不应判死的一类：creation 晚于 Times/@finish（VSTest 实测会出现）⇒ 只 ::warning::，不 RED。
+- throw 排在 round 25 verdict、round 32 run-header、round 35 assembly、round 36 list 四个既有 throw 之后 ⇒ 旧文案优先，新层只在旧层全绿时发声。
+- 台阶行追加：runDeclarations=<facts>/4 namespace=<TeamTest/2010|foreign> timestamps=2 ordered=1 explicit offsets=2 outside window=0。
+- 残留限制：schema 只认这一个地址（TeamTest/2010），别的合法 schema 版本会被判红；这是本仓库 runner 的固定产物，若升级 VSTest 改变了地址，需要同步改常量。
+
+### 负向对照（167 例，EXECUTED）
+- 新增 W 组 13 例 + 真实语料 2 例；成对例证明新层能看到旧层看不见的改写：W2/W2x（外来 schema 地址 ⇒ 新 RED、round 36 闸门 PASS）、W3/W3x（xmlns 整个删掉 ⇒ 新 RED、旧 PASS）、W4/W4x（创建与排队时刻互换 ⇒ 新 RED、旧 PASS）。
+- 单点例：W5 缺 creation、W6 缺 queuing、W7 creation="not-a-time"、W8 creation="2026-10-30T17:00:00"（无偏移）；W10 把整个 Times 删掉时先被结构层（第十一层）以「Times appears 0 time(s)」拒绝 ⇒ 两代 shell 都红且不打印 runDeclarations 行（实测：新层不会被用于替代更早的层）。
+- 只告警例：W9 把 creation 与 queuing 一起推到 finish 之后（两代 shell exit 0，打印台阶行 outside window=2 与两条 ::warning::，不 RED）。
+- 真实语料：RE14 两代 shell 各出现两条 runDeclarations=4/4 … 且输出逐字相同；RE15 round 36 闸门在真实语料上无该行。
+- 最终：total 167 cases, pass=167, fail=0（两代 PowerShell 逐例对照）。
+
+### 实现过程事故（可复用教训）
+- 台阶行的 facts 首版写成 namespace + timestamps（=3）却仍打 /4，真实语料立刻暴露 runDeclarations=3/4；改为把 ordered 也计入（namesOk + stamps + ordered = 4）。教训：台阶行的分子分母必须由同一组布尔量算出来，不能手写分母。
+- 往 PowerShell 脚本里插入含 $ 的文本时，Node 的 String.replace(anchor, add) 会把替换串里的 $' 与 $& 解释成匹配上下文；本轮一律用 indexOf + 切片拼接，并对每个锚点断言 split(anchor).length-1 === 1。
+- 两代 shell 的原始日志差 1 字节是行尾 CRLF/LF 差异（长 warning 行），比较前必须 tr -d '\015' 归一化；MSYS 的 tr -d '\r' 不会生效（bash 传的是字面反斜杠 r）。
+
+### 数据源与规模
+- 脚本：100,088 B / 1,763 行 → 105,701 B / 1,861 行（+5,613 B / +98 行），0 个非 ASCII、无 CR；sha256 前 16 位 df9b496f9252e694。
+- 真实语料两代归一化输出各 4,083 B 逐字相同：MediaHub.Tests: runDeclarations=4/4 namespace=TeamTest/2010 timestamps=2 ordered=1 explicit offsets=2 outside window=0、webdav 同值、combined tests=2056，前十九层台阶行不动。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 4a7e96c7bd75f6dd015afe9ad9da44992b79ba0a（ci(windows): the run must declare the schema it was written in and when it was created (W6-113al)），1 file changed，非 force push 3276d629..4a7e96c7。
+- 4a7e96c7bd75f6dd015afe9ad9da44992b79ba0a 的 windows-ci 41855529645 = success：台阶行 MediaHub.Tests: runDeclarations=4/4 namespace=TeamTest/2010 timestamps=2 ordered=1 explicit offsets=2 outside window=0、combined tests=2056；licence check-licence-surface  checks=57 failed=0 warnings=0 skipped=0。
+- 同 head Android CI 41855529648 = success（android-ci.yml 的 concurrency 只按 ref，取消时按三子树哈希继承）。
+
+### 锁
+- run-id w6-r37-k2p9m4，owner lead，ttl 5400，三把资源：branch:feature/cross-device-source-sync、ref:origin/feature/cross-device-source-sync、worktree:D:/mh-w6；本轮结束全部释放。

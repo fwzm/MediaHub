@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-04T06:58+08:00",
-  "updated_by": "lead-W6-113-r36",
+  "updated_at": "2026-11-04T23:42+08:00",
+  "updated_by": "lead-W6-113-r37",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -831,6 +831,32 @@
       "notes": "W6-113ak 不是一层新闸门，而是把 base 侧的 licensing 工作合进本分支后必须做的集成修复：文档里的源码行号是 base 按自己的 provider 写的，本分支 provider 多 15 行，合并树两边拼在一起就失配。该轮还钉住一条运维事实：pull_request workflow 在 PR 处于 dirty（合并冲突）时不会被创建。",
       "next_action": "继续 round 36 的 docs 与 PR 收尾；下一轮候选层见 W6-113aj 的 next_action。",
       "closed_at": "2026-11-04T06:31+08:00"
+    },
+    {
+      "id": "W6-113al",
+      "title": "第二十层：结果文件必须声明它写于哪套 schema、何时创建与排队（TestRun/@xmlns 与 Times/@creation/@queuing）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r37",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "check-test-suite-baseline.ps1 100,088 -> 105,701 B (+98 lines, 1,861 lines, sha16 df9b496f9252e694, pure ASCII), PARSE-OK on pwsh 7 and Windows PowerShell 5.1.",
+        "Real corpus (windows-tests.trx 1,952 rows, webdav-tests.trx 104 rows): both shells exit 0, outputs 4,083 B byte-identical after CR normalisation.",
+        "Ladder line: runDeclarations=4/4 namespace=TeamTest/2010 timestamps=2 ordered=1 explicit offsets=2 outside window=0 for both suites; combined tests=2056; layers 1-19 ladder lines unchanged.",
+        "Negative controls: total 167 cases, pass=167, fail=0 (D:/mh-verify/r37/run-nc.cjs).",
+        "Paired cases W2/W2x (foreign schema namespace), W3/W3x (no xmlns at all), W4/W4x (creation and queuing traded): new gate RED, round-36 gate PASS, every count identical.",
+        "Single-point cases W5 (no creation), W6 (no queuing), W7 (creation not a time), W8 (creation without an explicit UTC offset) are red on both shells; W10 (whole Times block dropped) is refused by the layer-11 structural check (Times appears 0 time(s)) before this layer is reached, on both shells.",
+        "Warning-only surface W9: a creation instant later than the run finish only warns and the step stays green; real VSTest records creation later than start, so ordering is only pinned between creation and queuing.",
+        "Gate reads TestRun/@xmlns, Times/@creation and Times/@queuing for the first time; the PowerShell XML adapter matches local names, so a swapped namespace had kept every element read intact.",
+        "Baseline test-suite-baseline.json unchanged byte for byte; update script untouched -> no migration.",
+        "Commit 4a7e96c7bd75f6dd015afe9ad9da44992b79ba0a (1 file changed / +98 insertions), non-force push 3276d629..4a7e96c7; git ls-remote matches, rev-list --left-right --count = 0/0.",
+        "exact-head windows-ci 41855529645 = success at 40-hex 4a7e96c7bd75f6dd015afe9ad9da44992b79ba0a; licence check-licence-surface  checks=57 failed=0 warnings=0 skipped=0.",
+        "Android CI 41855529648 = success at the code head; core/feature/app subtree hashes identical to 3276d629ca0916f81a98b4b80d9b9d2f8354c6ea -> inherited per ADR-AUTO-001.",
+        "Incident recorded: the step line first summed namespace+timestamps but printed /4, so the real corpus immediately showed runDeclarations=3/4; the denominator and the numerator must be derived from the same boolean set."
+      ],
+      "notes": "第 20 层收的是「运行自述」三件套：schema 地址、创建时刻、排队时刻。schema 只认 TeamTest/2010 一个值（本仓库 runner 的固定产物）；creation 晚于 finish 只 warning（真实 VSTest 会这样写），creation 晚于 queuing 才 RED。",
+      "next_action": "候选下一层：①Counters/@inconclusive、@inProgress、@pending 与结果行分布的桶表补全；②UnitTestResult/@duration 与 startTime/endTime 的算术自洽；③TestSettings/@name 与 Deployment 目录名的多重派生关系。",
+      "closed_at": "2026-11-04T23:42+08:00"
     }
   ]
 }

@@ -1343,3 +1343,43 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 - 同 head Android CI `41727517642` = success（代码 head 的 Android CI `41721572251` 亦为 success）；`core`/`feature`/`app` 三子树哈希与 `a7c37f169c418a7e32484f2ffabcfd6e95265e37` 全同 ⇒ 按 ADR-AUTO-001 继承、不作独立结论。
 - docs head `e052312ceb41347a33fba3b22e5ed9e060b7396a` 的 windows-ci **`41731588647` = success**（`pull_request`，日志 `D:/mh-verify/r36/ci-docshead.log`，147,780 B）：台阶行与合并 head 逐字一致、`combined tests=2056`，licence check-licence-surface  checks=57 failed=0 warnings=0 skipped=0。base 分支在 round 36 中途前进到 `be781c16aca4c58b3f67c238654c3fde82dd7f84`（W65 第 57 项 `doc-audit-untested-claims`），PR 合并 ref `fc6856825a953f467d16a2cbf43ef8dc7c4a5258` = `be781c16` + `e052312ceb41347a33fba3b22e5ed9e060b7396a`，因此 docs head 跑的是 57 项闸门；同 head Android CI `41731588519` = success。
 
+
+## 6.25 第二十层口径：结果文件必须声明它写于哪套 schema、何时创建与排队（W6-113al，2026-11-04）
+
+### 口径
+| 判据 | 读自 | 违反 |
+| --- | --- | --- |
+| 运行声明了 TeamTest 2010 命名空间 | TestRun/@xmlns | RED |
+| 未声明命名空间 | TestRun/@xmlns 缺失 | RED |
+| 声明了别的命名空间 | TestRun/@xmlns 与常量不等 | RED |
+| 创建时刻存在且可解析 | Times/@creation | RED |
+| 排队时刻存在且可解析 | Times/@queuing | RED |
+| 两个时刻都带显式 UTC 偏移 | 末位 Z 或 ±HH:MM | RED |
+| 创建不晚于排队 | creation ≤ queuing | RED |
+| 创建晚于运行结束时刻 | creation 晚于 Times/@finish | warning |
+
+### 为什么前十九层看不见
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 10 层（行与窗口） | Times/@start、@finish | creation、queuing 从不上判据 |
+| 第 17 层（运行头） | TestRun/@id、@name、@runUser、TestSettings、Deployment | @xmlns 不参与 |
+| 其余各层 | 行、定义、计数、列表、程序集 | 三者皆不参与；XML 适配器按本地名匹配，命名空间换掉也不影响任何元素读取 |
+
+### 依据（EXECUTED）
+- 真实 windows-tests.trx：TestRun 元素带 id、name="runneradmin@runnervmdaln5 2026-10-30 12:32:23"、runUser="runnervmdaln5\runneradmin"、xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010"；Times 元素带 creation="2026-10-30T12:32:00.1257029+00:00"、queuing 同秒、start 早约 1.4 秒、finish 约 22 秒后 —— 偏移是全写形式，creation 比 start 晚（故不能要求创建不晚于开始）。
+- 两代 shell 在真实语料上 exit 0、输出逐字相同（各 4,083 B 归一化）。
+
+### 数据源与规模
+- windows/tools/check-test-suite-baseline.ps1 100,088 → 105,701 B，1,763 → 1,861 行，0 非 ASCII。
+- 台阶行：runDeclarations=4/4 namespace=TeamTest/2010 timestamps=2 ordered=1 explicit offsets=2 outside window=0（两个结果文件各一条）。
+
+### 负向对照
+- 167 例全绿；成对例 W2/W2x、W3/W3x、W4/W4x 证明「新层 RED 而 round 36 闸门 PASS」；W9 证明两个时刻都晚于 finish 时只告警（outside window=2）；W10 证明删掉整个 Times 时仍由第十一层结构判据先拒，新层不替代旧层文案；RE14/RE15 证明真实语料两代一致且旧闸门没有该行。
+
+### 残留限制
+- schema 地址只认 http://microsoft.com/schemas/VisualStudio/TeamTest/2010 一个值；runner 升级换地址时需同步改常量。
+- 显式偏移判据只看字符串末位，不校验偏移量本身是否合理（无法解析的偏移会被 DateTimeOffset 拒绝，因此不影响）。
+- 生产者若在 creation 与 queuing 之间插入毫秒级抖动属正常，本层只比较先后。
+
+### exact-head CI 验收
+- 代码 head 4a7e96c7bd75f6dd015afe9ad9da44992b79ba0a：windows-ci 41855529645 = success，台阶行与 licence 行见 RUNLOG round 37 小节；Android 41855529648 = success。
