@@ -157,6 +157,19 @@
 #   every declared name to be non-blank and distinct, and prints
 #   listVocabulary=/listCount canonical names=/distinct names=/unreferenced lists=.
 
+#   The run also declares which schema it was written in and when it was created
+#   and queued, and none of the three was read: TestRun/@xmlns, Times/@creation and
+#   Times/@queuing. A results file written by another tool (a foreign namespace) or
+#   patched to swap its two stamps keeps every count, header line, definition, list
+#   name and row timing exactly as the baseline reviewed it, because nothing above
+#   looks at the declarations the file makes about itself. Each entry now requires
+#   the TeamTest 2010 namespace, a creation and a queueing instant that carry an
+#   explicit UTC offset and are readable, and creation before queueing; the ladder
+#   line records runDeclarations=<facts>/4 namespace=<ns> timestamps=<n> ordered=<0|1>
+#   explicit offsets=<n> outside window=<n>. A creation or queueing instant later
+#   than the run finished is a warning, not a red: clock skew between the writer and
+#   the runner is not something this gate can decide.
+
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -232,6 +245,10 @@
 #     records can contradict each other while every count stays identical.
 #   an adapterTypeName that is not an executor:// URI -> warning (the adapter naming
 #     scheme is not pinned, only its presence and its uniformity are).
+#   the schema namespace is not the TeamTest 2010 one, or Times records no creation
+#     or no queueing instant, or either instant cannot be read or carries no explicit
+#     UTC offset, or the run is queued before it is created -> red
+
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
 #   expected <= 0, empty file/suite, missing/empty classes object, missing/empty
 #   methods object, a class listed in one table but not the other, a class with
@@ -280,7 +297,12 @@ $OutcomeVocabulary = @{}
 $OutcomeByAttribute = @{}
 foreach ($outcome in @('Passed', 'Failed', 'NotExecuted', 'Error', 'Timeout', 'Aborted', 'Inconclusive', 'PassedButRunAborted', 'NotRunnable', 'Disconnected', 'Warning', 'Completed', 'InProgress', 'Pending')) {
   $OutcomeVocabulary[$outcome] = $true
-  $OutcomeByAttribute[($outcome.Substring(0, 1).ToLower() + $outcome.Substring(1))] = $outcome
+  
+# The only schema this gate reads. A file that declares another namespace was written
+# by another tool (or hand-patched to say so), and every property read above still works
+# because PowerShell's XML adapter ignores namespaces, so nothing else would notice.
+$TeamTestNamespace = 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'
+$OutcomeByAttribute[($outcome.Substring(0, 1).ToLower() + $outcome.Substring(1))] = $outcome
 }
 
 # Sorted copy of one method's argument rows, duplicates kept. A row is the
@@ -530,6 +552,9 @@ $counterVocabularyWarn = @()
 $headerWarn = @()
 $assemblyWarn = @()
 $listWarn = @()
+$declarationWarn = @()
+$assemblyWarn = @()
+$listWarn = @()
 $headerWarn = @()
 foreach ($e in $baseline.suites) {
   $path = Join-Path -Path $ResultsDir -ChildPath $e.file
@@ -569,6 +594,70 @@ foreach ($e in $baseline.suites) {
     $tRunFinish = Convert-ToInstant ([string]$xml.TestRun.Times.finish)
   }
   if ($null -eq $tRunStart -or $null -eq $tRunFinish) { $windowUnknown = $true }
+
+  # The run declares the schema it was written in and the instants it was created and
+  # queued. No count above reads any of the three, so a file from another tool or one
+  # whose two stamps were swapped still reproduces every number this gate prints.
+  $declarationSchema = [string]$xml.TestRun.GetAttribute('xmlns')
+  $declarationCreationRaw = ''
+  $declarationQueuingRaw = ''
+  if ($xml.TestRun.Times) {
+    $declarationCreationRaw = [string]$xml.TestRun.Times.creation
+    $declarationQueuingRaw = [string]$xml.TestRun.Times.queuing
+  }
+  $declarationCreation = Convert-ToInstant $declarationCreationRaw
+  $declarationQueuing = Convert-ToInstant $declarationQueuingRaw
+  $declarationLost = @()
+  $declarationFileWarn = @()
+  $declarationFacts = 0
+  $declarationOrdered = 0
+  $declarationOffsets = 0
+  $declarationOutside = 0
+  $declarationNamesOk = 0
+  if ([string]::IsNullOrWhiteSpace($declarationSchema)) {
+    $declarationLost += 'the run declares no schema namespace'
+  } elseif ($declarationSchema -ne $TeamTestNamespace) {
+    $declarationLost += "the run declares the schema '$declarationSchema' instead of '$TeamTestNamespace'"
+  } else {
+    $declarationNamesOk = 1
+  }
+  $declarationStamps = 0
+  foreach ($stamp in @(@('creation', $declarationCreationRaw, $declarationCreation), @('queuing', $declarationQueuingRaw, $declarationQueuing))) {
+    $stampName = [string]$stamp[0]
+    $stampRaw = [string]$stamp[1]
+    $stampValue = $stamp[2]
+    if ([string]::IsNullOrWhiteSpace($stampRaw)) {
+      $declarationLost += "Times records no $stampName instant"
+      continue
+    }
+    $declarationStamps++
+    if ($null -eq $stampValue) {
+      $declarationLost += "Times.$stampName '$stampRaw' is not an instant this gate can read"
+      continue
+    }
+    if ($stampRaw -notmatch '([+-][0-9]{2}:[0-9]{2}|Z)$') {
+      $declarationLost += "Times.$stampName '$stampRaw' carries no explicit UTC offset"
+      continue
+    }
+    $declarationOffsets++
+  }
+  if ($null -ne $declarationCreation -and $null -ne $declarationQueuing) {
+    if ($declarationQueuing -lt $declarationCreation) {
+      $declarationLost += "Times queues the run before it creates it (creation $declarationCreationRaw, queuing $declarationQueuingRaw)"
+    } else {
+      $declarationOrdered = 1
+    }
+  }
+  if ($null -ne $tRunFinish) {
+    foreach ($stamp in @(@('creation', $declarationCreation), @('queuing', $declarationQueuing))) {
+      if ($null -ne $stamp[1] -and $stamp[1] -gt $tRunFinish) {
+        $declarationOutside++
+        $declarationFileWarn += "$($e.file): Times.$([string]$stamp[0]) is later than the run finished"
+      }
+    }
+  }
+  $declarationFacts = $declarationNamesOk + $declarationStamps + $declarationOrdered
+  $declarationWarn += $declarationFileWarn
 
   # Row metadata is collected from both halves before anything is compared: the
   # result rows carry their own identity and timings, the definitions carry the
@@ -1462,6 +1551,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot bound rows=$boundRows header id collisions=$headerCollisions"
   "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
   "$($e.suite): listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=$($listNames.Count - $listNameBlank - $listNameDuplicates.Count) unreferenced lists=$($unreferencedLists.Count)"
+  "$($e.suite): runDeclarations=$declarationFacts/4 namespace=$([string](@('foreign','TeamTest/2010')[$declarationNamesOk])) timestamps=$declarationStamps ordered=$declarationOrdered explicit offsets=$declarationOffsets outside window=$declarationOutside"
   "$($e.suite): summaryOutcome=$summaryOutcome failureBuckets=$failureBucketTotal contradiction=$($summaryContradiction.Count)"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
@@ -1645,6 +1735,9 @@ foreach ($e in $baseline.suites) {
   if ($listVocabularyLost.Count -gt 0) {
     throw "$($e.suite): the declared lists do not name themselves consistently while the total was $total - every count above reads the rows, the counters and the ids, and nothing read a list name, so two lists that trade their names keep every one of them identical while the file tells the reader the rows ran somewhere else. mismatched: $($listVocabularyLost -join ', '). A TRX whose list names were rewritten was hand-merged or patched; regenerate it from a clean test run."
   }
+  if ($declarationLost.Count -gt 0) {
+    throw "$($e.suite): the run does not declare the schema it was written in and the instants it was created in while the total was $total - every count above is read from the rows, the counters, the header, the definitions and the lists, and nothing read TestRun/@xmlns, Times/@creation or Times/@queuing, so a file written by another tool or patched to swap its two stamps keeps all of them identical. mismatched: $($declarationLost -join ', '). A TRX whose own declarations were rewritten was hand-merged or patched; regenerate it from a clean test run."
+  }
   $all += $total
 }
 
@@ -1661,6 +1754,11 @@ if ($unlistedResults.Count -gt 0) {
   $shownUnlisted = $unlistedResults
   if ($shownUnlisted.Count -gt 12) { $shownUnlisted = $shownUnlisted[0..11] + "... ($($unlistedResults.Count - 12) more)" }
   Write-Host "::warning::test results that the baseline does not list - their cases are neither counted nor gated (refresh windows/tools/test-suite-baseline.json with windows/tools/update-test-suite-baseline.ps1): $($shownUnlisted -join '; ')"
+}
+if ($declarationWarn.Count -gt 0) {
+  $shownDW = $declarationWarn
+  if ($shownDW.Count -gt 12) { $shownDW = $shownDW[0..11] + "... ($($declarationWarn.Count - 12) more)" }
+  Write-Host "::warning::a run declaration this gate cannot place - the creation and queueing instants are checked for an explicit offset and for their order, never against the row timings: $($shownDW -join '; ')"
 }
 if ($listWarn.Count -gt 0) {
   $shownLW = $listWarn
