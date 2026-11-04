@@ -170,6 +170,16 @@
 #   than the run finished is a warning, not a red: clock skew between the writer and
 #   the runner is not something this gate can decide.
 
+#   The rows also carry an order, and nothing above read it: TestEntries and the
+#   Results section are written from one ordered pass, so the row at position N is
+#   the row of the entry at position N. Every check above keys the two halves by id,
+#   so a file whose rows were sorted, reassembled or concatenated in another order
+#   keeps the total, every class and method count, every argument row, the outcome
+#   split, the row times and every pairing identical while the file stops reporting
+#   the run in the order it wrote it. The gate now walks both lists position by
+#   position, requires the two to name the same test, and prints the ladder line
+#   rowOrder=<positions> aligned=<n> first mismatch=<none|n>.
+
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -249,6 +259,11 @@
 #     or no queueing instant, or either instant cannot be read or carries no explicit
 #     UTC offset, or the run is queued before it is created -> red
 
+#   the row at position N of Results does not name the test that position N of
+#     TestEntries declares -> red. The two sections are emitted from one ordered
+#     pass, and every check above keys them by id, so a reordered, reassembled or
+#     concatenated file keeps the total, every class and method count, every
+#     argument row, every outcome and every pairing identical.
 # CONFIG IS VALIDATED BEFORE IT IS TRUSTED
 #   expected <= 0, empty file/suite, missing/empty classes object, missing/empty
 #   methods object, a class listed in one table but not the other, a class with
@@ -699,6 +714,13 @@ foreach ($e in $baseline.suites) {
   $duplicateEntryIds = @()
   $entryExecById = @{}
   $entryListById = @{}
+  # The declared order of the entries, kept position by position so it can be
+  # compared with the order the rows were written in (see the row-order check).
+  $entryOrderIds = New-Object System.Collections.Generic.List[string]
+  $rowOrderAligned = 0
+  $rowOrderFirstDiff = -1
+  $rowOrderFirstText = 'none'
+  $rowOrderLost = @()
   $listCount = 0
   $blankListIds = 0
   $duplicateListIds = 0
@@ -722,6 +744,7 @@ foreach ($e in $baseline.suites) {
     $entryCount++
     $tidEntry = [string]$te.testId
     if ([string]::IsNullOrWhiteSpace($tidEntry)) { $blankEntryIds++; continue }
+    $entryOrderIds.Add($tidEntry)
     if ($entryExecById.ContainsKey($tidEntry)) {
       $duplicateEntryIds += $tidEntry
     } else {
@@ -975,6 +998,8 @@ foreach ($e in $baseline.suites) {
   $resExecById = @{}
   $resListById = @{}
   $resDirById = @{}
+  # The written order of the result rows, position by position.
+  $rowOrderIds = New-Object System.Collections.Generic.List[string]
   $blankRowDirs = 0
   $namedExact = 0
   $namedPrefix = 0
@@ -1023,6 +1048,7 @@ foreach ($e in $baseline.suites) {
     }
     if ($null -eq $rms -or $rms -lt 0) { $badDuration++ }
     $rid = [string]$res.testId
+    if (-not [string]::IsNullOrWhiteSpace($rid)) { $rowOrderIds.Add($rid) }
     if ($resIdCounts.ContainsKey($rid)) { $resIdCounts[$rid] = $resIdCounts[$rid] + 1 } else { $resIdCounts[$rid] = 1 }
     if (-not [string]::IsNullOrWhiteSpace($rid)) {
       $resExecById[$rid] = [string]$res.executionId
@@ -1133,6 +1159,28 @@ foreach ($e in $baseline.suites) {
   }
 
   # The sections above are read one at a time; the file also has to be whole.
+  # The order is a fact of the file, not a preference: one run emits the entries and
+  # the rows from the same ordered pass, so position N of Results is the row of the
+  # entry at position N. Every other check keys the two halves by id, which makes a
+  # permutation invisible: sorting the rows, or concatenating two files' rows, keeps
+  # the total, the per-class and per-method counts, the argument rows, the outcome
+  # split and every pairing exactly as the baseline reviewed them.
+  $rowOrderPositions = [math]::Min($entryOrderIds.Count, $rowOrderIds.Count)
+  if ($entryOrderIds.Count -ne $rowOrderIds.Count) {
+    $rowOrderLost += "the file declares $($entryOrderIds.Count) entry position(s) but writes $($rowOrderIds.Count) row position(s)"
+  }
+  for ($roi = 0; $roi -lt $rowOrderPositions; $roi++) {
+    if ([string]::Equals($entryOrderIds[$roi], $rowOrderIds[$roi], [System.StringComparison]::Ordinal)) {
+      $rowOrderAligned++
+    } else {
+      if ($rowOrderFirstDiff -lt 0) { $rowOrderFirstDiff = $roi }
+      if ($rowOrderLost.Count -lt 12) {
+        $rowOrderLost += "row $($roi + 1) is testId $($rowOrderIds[$roi]) while the entry at that position declares $($entryOrderIds[$roi])"
+      }
+    }
+  }
+  if ($rowOrderFirstDiff -ge 0) { $rowOrderFirstText = [string]($rowOrderFirstDiff + 1) }
+
   # TestEntries pairs each testId with the executionId and the list the row ran
   # in, and TestLists declares those lists. Neither section feeds any count
   # above, so dropping a section, adding or removing entries, or swapping the
@@ -1552,6 +1600,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
   "$($e.suite): listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=$($listNames.Count - $listNameBlank - $listNameDuplicates.Count) unreferenced lists=$($unreferencedLists.Count)"
   "$($e.suite): runDeclarations=$declarationFacts/4 namespace=$([string](@('foreign','TeamTest/2010')[$declarationNamesOk])) timestamps=$declarationStamps ordered=$declarationOrdered explicit offsets=$declarationOffsets outside window=$declarationOutside"
+  "$($e.suite): rowOrder=$rowOrderPositions aligned=$rowOrderAligned first mismatch=$rowOrderFirstText"
   "$($e.suite): summaryOutcome=$summaryOutcome failureBuckets=$failureBucketTotal contradiction=$($summaryContradiction.Count)"
 
   if ($failed -ne 0) { throw "$($e.suite): $failed test(s) failed" }
@@ -1737,6 +1786,9 @@ foreach ($e in $baseline.suites) {
   }
   if ($declarationLost.Count -gt 0) {
     throw "$($e.suite): the run does not declare the schema it was written in and the instants it was created in while the total was $total - every count above is read from the rows, the counters, the header, the definitions and the lists, and nothing read TestRun/@xmlns, Times/@creation or Times/@queuing, so a file written by another tool or patched to swap its two stamps keeps all of them identical. mismatched: $($declarationLost -join ', '). A TRX whose own declarations were rewritten was hand-merged or patched; regenerate it from a clean test run."
+  }
+  if ($rowOrderLost.Count -gt 0) {
+    throw "$($e.suite): the rows are not in the order the file declares them while the total was $total - every count, id and pairing above is read by id, so rows that were sorted, reassembled or concatenated in another order keep all of them identical while the file stops reporting the run in the order it wrote it. mismatched: $($rowOrderLost -join ', '). A TRX whose row order was rewritten was hand-merged or patched; regenerate it from a clean test run."
   }
   $all += $total
 }
