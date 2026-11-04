@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-04T23:42+08:00",
+  "updated_at": "2026-11-04T23:59+08:00",
   "updated_by": "lead-W6-113-r37",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -852,7 +852,8 @@
         "Commit 4a7e96c7bd75f6dd015afe9ad9da44992b79ba0a (1 file changed / +98 insertions), non-force push 3276d629..4a7e96c7; git ls-remote matches, rev-list --left-right --count = 0/0.",
         "exact-head windows-ci 41855529645 = success at 40-hex 4a7e96c7bd75f6dd015afe9ad9da44992b79ba0a; licence check-licence-surface  checks=57 failed=0 warnings=0 skipped=0.",
         "Android CI 41855529648 = success at the code head; core/feature/app subtree hashes identical to 3276d629ca0916f81a98b4b80d9b9d2f8354c6ea -> inherited per ADR-AUTO-001.",
-        "Incident recorded: the step line first summed namespace+timestamps but printed /4, so the real corpus immediately showed runDeclarations=3/4; the denominator and the numerator must be derived from the same boolean set."
+        "Incident recorded: the step line first summed namespace+timestamps but printed /4, so the real corpus immediately showed runDeclarations=3/4; the denominator and the numerator must be derived from the same boolean set.",
+        "- docs head 92ff671595780b654e1719bebd4e2839d2c7c349 windows-ci 41860537803 = success, licence check-licence-surface  checks=57 failed=0 warnings=0 skipped=0; Android 41860537868 = in_progress（取证时 GitHub runner 排队，build 仍 queued；同 head 三子树与上一 head 全同，按 ADR-AUTO-001 继承）."
       ],
       "notes": "第 20 层收的是「运行自述」三件套：schema 地址、创建时刻、排队时刻。schema 只认 TeamTest/2010 一个值（本仓库 runner 的固定产物）；creation 晚于 finish 只 warning（真实 VSTest 会这样写），creation 晚于 queuing 才 RED。",
       "next_action": "候选下一层：①Counters/@inconclusive、@inProgress、@pending 与结果行分布的桶表补全；②UnitTestResult/@duration 与 startTime/endTime 的算术自洽；③TestSettings/@name 与 Deployment 目录名的多重派生关系。",

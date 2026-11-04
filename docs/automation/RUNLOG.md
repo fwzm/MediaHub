@@ -689,3 +689,9 @@
 
 ### 锁
 - run-id w6-r37-k2p9m4，owner lead，ttl 5400，三把资源：branch:feature/cross-device-source-sync、ref:origin/feature/cross-device-source-sync、worktree:D:/mh-w6；本轮结束全部释放。
+
+### docs head 验收（EXECUTED）
+
+- docs 提交 `92ff671595780b654e1719bebd4e2839d2c7c349`（`docs(automation): round 37 - the gate pins each run to its own declarations (W6-113al)`），非 force push `4a7e96c7..92ff6715`。
+- `92ff671595780b654e1719bebd4e2839d2c7c349` 的 windows-ci `41860537803` = success（日志 148,333 B）：台阶行 `MediaHub.Tests: runDeclarations=4/4 namespace=TeamTest/2010 timestamps=2 ordered=1 explicit offsets=2 outside window=0`、`combined tests=2056`；licence `check-licence-surface  checks=57 failed=0 warnings=0 skipped=0`。
+- 同 head Android CI `41860537868` = in_progress（取证时 GitHub runner 排队，build 仍 queued；同 head 三子树与上一 head 全同，按 ADR-AUTO-001 继承）（`android-ci.yml` 的 concurrency 只按 ref，取消时按三子树哈希继承）。
