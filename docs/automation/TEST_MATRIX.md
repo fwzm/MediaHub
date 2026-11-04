@@ -1384,3 +1384,41 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 
 ### exact-head CI 验收
 - 代码 head 4a7e96c7bd75f6dd015afe9ad9da44992b79ba0a：windows-ci 41855529645 = success，台阶行与 licence 行见 RUNLOG round 37 小节；Android 41855529648 = success。
+
+## 6.26 第二十一层口径：结果行的位置必须与文件声明的条目位置一致（W6-113am，2026-11-04）
+
+### 口径
+| 判据 | 读自 | 违反 |
+| --- | --- | --- |
+| Results 第 N 行的 testId 必须等于 TestEntries 第 N 条的 testId | 两个节点的出现顺序 | RED |
+| 两侧位置数量必须相同 | TestEntries 条数 / Results 行数 | RED（同一条错位文案里追加长度说明） |
+| 两侧施加同一置换 | 同上 | PASS（判的是对应关系，不是固定顺序） |
+
+### 为什么前二十层看不见
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 2-5 层（计数、每类每方法、参数行） | 按 id 归并的多重集 | 位置从未进入任何计数 |
+| 第 11/12 层（结构完整性、跨文件身份） | 节点存在性与 id 唯一性 | 节点内部的先后不参与 |
+| 第 13-19 层（配对、运行头、程序集、列表词表、运行自述） | 全部按 id 建表 | 同上 |
+| 全层 | — | 脚本里 index/Sequence 类位置量零引用 |
+
+### 依据（EXECUTED）
+- 真实 windows-tests.trx 1,952 行、webdav-tests.trx 104 行：TestEntries 与 Results 的 testId 序列逐位相同（两套件都成立），另有 r7 语料 1,943 行亦然。
+- TestDefinitions 的文档顺序与 entries 顺序不同、也不是名字排序 ⇒ 可比较的位置只有 entries↔results 两侧。
+- 行 startTime 不单调（windows 987 个逆序对），并行执行导致，故时间序不可作判据。
+- 两代 shell 在真实语料上 exit 0、输出逐字相同（各 4,214 B 归一化）。
+
+### 数据源与规模
+- windows/tools/check-test-suite-baseline.ps1 105,701 → 109,291 B，1,861 → 1,913 行，0 非 ASCII，sha16 526f69c712d38170。
+- 台阶行：rowOrder=1952 aligned=1952 first mismatch=none（windows）、rowOrder=104 aligned=104 first mismatch=none（webdav）。
+
+### 负向对照
+- 181 例全绿；成对例 X2/X2x、X3/X3x、X4/X4x、X6/X6x 证明「新层 RED 而 round 37 闸门 PASS 且全部计数不变」；X5 证明两侧同置换仍绿；X7 证明单点挪位即红；RE16/RE17 证明真实语料两代一致且旧闸门没有该行。
+
+### 残留限制
+- 只钉 entries↔results 的位置对应；TestDefinitions 的文档顺序随 VSTest 内部调度变化，不作判据。
+- 「位置数量不同」与「位置错位」共用同一条错位文案，长度说明附在其后。
+- 规范顺序本身由生产者决定（即运行时的写入顺序），本层不假定任何排序规则。
+
+### exact-head CI 验收
+- 代码 head 1fb7dd4909a4fac72f4b2a83ed2e24d0f51de46c：windows-ci 41868713607 = success，台阶行与 licence 行见 RUNLOG round 40 小节；Android 41868713321 = success。

@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-04T23:59+08:00",
-  "updated_by": "lead-W6-113-r37",
+  "updated_at": "2026-11-05T01:00+08:00",
+  "updated_by": "lead-W6-113-r40",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -858,6 +858,33 @@
       "notes": "第 20 层收的是「运行自述」三件套：schema 地址、创建时刻、排队时刻。schema 只认 TeamTest/2010 一个值（本仓库 runner 的固定产物）；creation 晚于 finish 只 warning（真实 VSTest 会这样写），creation 晚于 queuing 才 RED。",
       "next_action": "候选下一层：①Counters/@inconclusive、@inProgress、@pending 与结果行分布的桶表补全；②UnitTestResult/@duration 与 startTime/endTime 的算术自洽；③TestSettings/@name 与 Deployment 目录名的多重派生关系。",
       "closed_at": "2026-11-04T23:42+08:00"
+    },
+    {
+      "id": "W6-113am",
+      "title": "第二十一层：结果行的位置必须与文件声明的条目位置一致（Results 第 N 行 ↔ TestEntries 第 N 条）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r40",
+      "branch": "feature/cross-device-source-sync",
+      "evidence": [
+        "check-test-suite-baseline.ps1 105,701 -> 109,291 B (+52 lines, 1,913 lines, sha16 526f69c712d38170, pure ASCII), PARSE-OK on pwsh 7 and Windows PowerShell 5.1.",
+        "Real corpus (windows-tests.trx 1,952 rows, webdav-tests.trx 104 rows): both shells exit 0, outputs 4,214 B byte-identical after CR normalisation.",
+        "Ladder line: rowOrder=1952 aligned=1952 first mismatch=none (windows) and rowOrder=104 aligned=104 first mismatch=none (webdav); combined tests=2056; layers 1-20 ladder lines unchanged.",
+        "Negative controls: total 181 cases, pass=181, fail=0 (D:/mh-verify/r40/run-nc.cjs).",
+        "Paired cases X2/X2x (two result rows traded), X3/X3x (two TestEntry positions traded), X4/X4x (result rows reversed), X6/X6x (rows sorted by test name): new gate RED, round-37 gate PASS, every count and ladder line identical.",
+        "X5 applies the same permutation to both sides and stays green, which pins that the layer reads the correspondence between the two streams and not some fixed canonical order; X7 moves only the last row to the front and is red at position 1.",
+        "Order is the only narrative dimension left after twenty id-keyed layers: counting, per-class/per-method, argument rows, outcomes, identity tripods, run header, assembly, list vocabulary and run declarations are all order-independent, so sorted or reassembled files had kept twenty ladders byte-identical.",
+        "Fact used to bound the layer: real TestEntries testId order equals the Results testId order in both suites (and in the 1,943-row r7 corpus), while TestDefinitions document order matches neither entries nor a name sort; row startTime is not monotonic (987 inversions) because of parallel execution.",
+        "The Results-side collection point sits before the unmapped continue, so both sequences have comparable length and a length mismatch is reported separately from a position mismatch.",
+        "Baseline test-suite-baseline.json unchanged byte for byte; update script untouched -> no migration.",
+        "Commit 1fb7dd4909a4fac72f4b2a83ed2e24d0f51de46c (1 file changed / +52 insertions / 0 deletions), non-force push 1c9030bb..1fb7dd49; git ls-remote matches, rev-list --left-right --count = 0/0.",
+        "exact-head windows-ci 41868713607 = success at 40-hex 1fb7dd4909a4fac72f4b2a83ed2e24d0f51de46c; licence check-licence-surface  checks=57 failed=0 warnings=0 skipped=0.",
+        "Android CI 41868713321 = success at the code head; core/feature/app subtree hashes identical to 1c9030bba7f761442a418d050c3a6b2aff744bf1 -> inherited per ADR-AUTO-001.",
+        "Incident recorded: the new harness constant was named CANON21, which round 13 had already used for the file-identity ladder, so node --check refused the file until it was renamed ROWCANON."
+      ],
+      "notes": "第 21 层收的是「文件讲述这次运行的顺序」：Results 第 N 行必须是 TestEntries 第 N 条声明的那个 testId。规范顺序由生产者（运行时写入顺序）决定，本层不假定任何排序规则；只比较 entries 与 results 两侧，TestDefinitions 的文档顺序随 VSTest 内部调度变化，不作判据。",
+      "next_action": "候选下一层：①Counters/@inconclusive、@inProgress、@pending 三个桶与结果行分布的桶表补全；②UnitTestResult/@duration 与 startTime/endTime 的算术自洽（duration 与差值是否一致）；③TestSettings/@name 与 Deployment 目录名的多重派生关系。",
+      "closed_at": "2026-11-05T01:00+08:00"
     }
   ]
 }

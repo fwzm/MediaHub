@@ -695,3 +695,45 @@
 - docs 提交 `92ff671595780b654e1719bebd4e2839d2c7c349`（`docs(automation): round 37 - the gate pins each run to its own declarations (W6-113al)`），非 force push `4a7e96c7..92ff6715`。
 - `92ff671595780b654e1719bebd4e2839d2c7c349` 的 windows-ci `41860537803` = success（日志 148,333 B）：台阶行 `MediaHub.Tests: runDeclarations=4/4 namespace=TeamTest/2010 timestamps=2 ordered=1 explicit offsets=2 outside window=0`、`combined tests=2056`；licence `check-licence-surface  checks=57 failed=0 warnings=0 skipped=0`。
 - 同 head Android CI `41860537868` = in_progress（取证时 GitHub runner 排队，build 仍 queued；同 head 三子树与上一 head 全同，按 ADR-AUTO-001 继承）（`android-ci.yml` 的 concurrency 只按 ref，取消时按三子树哈希继承）。
+
+## 2026-11-05 01:00 round 40（W6-113am：套件基线第二十一层口径 —— 结果行的位置必须与文件声明的条目位置一致）
+
+### 侦察（EXECUTED）
+- D:/mh-w6 的 HEAD 1c9030bba7f761442a418d050c3a6b2aff744bf1，工作树只有待提交的单文件改动，与 origin/feature/cross-device-source-sync 0/0；PR #39 的 base 分支 feature/windows-client = 2fb224679e13ca4a55e5f69e434ea9372dbde721，refs/heads/main = 1246313c7a66d492258b5b4b20b51cbdcf2da9cc。
+- 用真实结果文件（windows-tests.trx 1,952 行 / webdav-tests.trx 104 行）核对两条「位置」事实：TestEntries 的 testId 顺序与 Results 的 testId 顺序逐位相同（两套件都成立，另一份 r7 语料 1,943 行亦然）；而 TestDefinitions 的文档顺序既不是 entries 顺序也不是名字排序，所以可比较的位置只有 entries 与 results 两侧。
+- 行时间不是单调的：真实语料里 windows 有 987 个 startTime 逆序对（并行执行），因此「行按时间递增」不能做判据，已排除。
+- 与脚本引用次数比对：check 脚本里 index/Sequence 之类的位置量零引用，前二十层全部按 id 建表（$resExecById、$entryExecById、$resListById、$resDirById 都是 hashtable）。
+
+### 缺口（本轮切片动机）
+- 前二十层每一条判据都以 id 为键：计数、每类每方法、参数行清单、outcome 分布、身份三处一致、运行头、程序集、列表词表、运行自述，全部与行的先后无关。因此一份被排序、被倒序、被拼接或按名字重排的 TRX 会让二十层台阶行与全部计数逐字不变，而文件已经不再按它运行时写下的顺序讲述这次运行。
+- 位置是这份文件唯一的「叙事顺序」：Results 第 N 行声明的是「第 N 个被执行的位置」，TestEntries 第 N 条声明的是「这个位置属于哪个 testId」。两侧都对 id 而位置错位，说明文件被人工合并或改写。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化、update 脚本未改 ⇒ 无迁移）
+- 每文件按出现顺序收集两条 id 序列：TestEntries 循环里 $entryOrderIds.Add($tidEntry)（空白 testId 不入列，与既有 blankEntryIds 的 continue 一致），Results 循环里 $rowOrderIds.Add($rid)（在任何 unmapped 的 continue 之前，保证两列长度可比）。
+- 逐位比较 [string]::Equals(..., Ordinal)：相等则 $rowOrderAligned++；不等则记录首个不匹配位（1 基）与最多 12 条 "row <N> is testId X while the entry at that position declares Y"；两列长度不等再追加 "the file declares N entry position(s) but writes M row position(s)"。
+- throw 排在 round 25 verdict、round 32 run-header、round 35 assembly、round 36 list、round 37 run-declaration 五个既有 throw 之后 ⇒ 旧文案优先，新层只在旧层全绿时发声；文案以 "the rows are not in the order the file declares them" 开头，以「 regenerate it from a clean test run 」收尾。
+- 台阶行追加：rowOrder=<positions> aligned=<n> first mismatch=<none|位号>。
+- 残留限制：只比较 entries↔results 两条位置序列；TestDefinitions 的文档顺序随 VSTest 内部调度变化，不作判据（真实语料已证其与 entries 顺序不同且非名字序）。
+
+### 负向对照（181 例，EXECUTED）
+- 新增 X 组 13 例 + 真实语料 2 例；成对例证明新层能看到旧层看不见的改写：X2/X2x（两条结果行交换 ⇒ 新 RED 且点名 row 1，round 37 闸门 PASS）、X3/X3x（两条 TestEntry 交换 ⇒ 新 RED、旧 PASS）、X4/X4x（结果行整体倒序 ⇒ 新 RED、旧 PASS）、X6/X6x（按 testName 排序 ⇒ 新 RED、旧 PASS）。
+- 单点例：X7 把末行挪到首位（rotate）⇒ row 1 位置错位即 RED；X5 对两侧施加同一置换 ⇒ PASS（证明判的是两侧对应关系，不是某个固定的「标准顺序」）；X1 在规范夹具上钉台阶行 rowOrder=8 aligned=8 first mismatch=none。
+- 真实语料：RE16 两代 shell 各出现行序台阶行（windows 1952/1952、webdav 104/104）且输出逐字相同；RE17 round 37 闸门在真实语料上无该行。
+- 最终：total 181 cases, pass=181, fail=0（两代 PowerShell 逐例对照）。
+
+### 实现过程事故（可复用教训）
+- harness 的新用例常量名与第十三轮留下的 CANON21（file identities 行）撞名，node --check 直接报 Identifier 'CANON21' has already been declared；改名 ROWCANON 后通过。教训：往派生 harness 里加常量前先 grep 同名（历史轮次用过 CANON19/CANON20 等序号名，序号本身不保证唯一）。
+- 位置量的插入点必须避开既有 continue：Results 循环里 unmapped 行会 continue，所以 $rowOrderIds.Add 只能放在读 $rid 之后、判断之前，否则两列长度会凭空不等、判据变成「长度不等」而不是「位置错位」。
+- 生成夹具时给 results 与 entries 加同一套置换能力（swap/reverse/rotate/显式数组），才能证明 X5「两侧同置换应绿」——只测「错位必红」会掩盖「实现其实固定了某个顺序」的错误。
+
+### 数据源与规模
+- 脚本：105,701 B / 1,861 行 → 109,291 B / 1,913 行（+3,590 B / +52 行），0 个非 ASCII、无 CR；sha256 前 16 位 526f69c712d38170。
+- 真实语料两代归一化输出各 4,214 B 逐字相同：MediaHub.Tests: rowOrder=1952 aligned=1952 first mismatch=none、MediaHub.WebDav.Tests: rowOrder=104 aligned=104 first mismatch=none、combined tests=2056，前二十层台阶行不动。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 1fb7dd4909a4fac72f4b2a83ed2e24d0f51de46c（ci(windows): the rows must stay in the order the file declares them (W6-113am)），1 file changed，非 force push 1c9030bb..1fb7dd49。
+- 1fb7dd4909a4fac72f4b2a83ed2e24d0f51de46c 的 windows-ci 41868713607 = success：台阶行 MediaHub.Tests: rowOrder=1952 aligned=1952 first mismatch=none、combined tests=2056；licence check-licence-surface  checks=57 failed=0 warnings=0 skipped=0。
+- 同 head Android CI 41868713321 = success（android-ci.yml 的 concurrency 只按 ref，取消时按三子树哈希继承）。
+
+### 锁
+- run-id w6-r40-t5n8q3，owner lead，ttl 5400，三把资源：branch:feature/cross-device-source-sync、ref:origin/feature/cross-device-source-sync、worktree:D:/mh-w6；本轮结束全部释放。
