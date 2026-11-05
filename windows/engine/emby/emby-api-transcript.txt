@@ -1,0 +1,77 @@
+=== Emby API transcript 2026-10-14T16:08:48+08:00 ===
+server: http://127.0.0.1:8097 (Emby 4.10.1.0)
+
+### server identity
+{"LocalAddresses":[],"RemoteAddresses":[],"ServerName":"INKCHOI","Version":"4.10.1.0","Id":"1271d0a1040046db8c0089cc328bbbf1"}
+<<HTTP 200>>
+########## startup wizard ##########
+
+### GET /Startup/User
+Access token is invalid or expired.
+<<HTTP 401>>
+
+### POST /Startup/Configuration
+    request: {"UICulture":"en-US","MetadataCountryCode":"US","PreferredMetadataLanguage":"en"}
+Access token is invalid or expired.
+<<HTTP 401>>
+
+### GET /Startup/User
+Access token is invalid or expired.
+<<HTTP 401>>
+
+### POST /Startup/User
+    request: {"Name":"mh","Password":"mh-test-pass"}
+Access token is invalid or expired.
+<<HTTP 401>>
+
+### POST /Startup/RemoteAccess
+    request: {"EnableRemoteAccess":false,"EnableAutomaticPortMapping":false}
+Access token is invalid or expired.
+<<HTTP 401>>
+
+### POST /Startup/Complete
+    request: {}
+Access token is invalid or expired.
+<<HTTP 401>>
+
+########## auth ##########
+authorization header: X-Emby-Authorization: MediaBrowser Client="MediaHubProbe", Device="Windows", DeviceId="mediahub-w5f-probe", Version="1.0.0"
+
+### POST /Users/AuthenticateByName  (Emby's classic X-Emby-Authorization shape)
+{"User":{"Name":"mh","ServerId":"1271d0a1040046db8c0089cc328bbbf1","Prefix":"M","DateCreated":"2026-10-14T07:59:38.6018989Z","Id":"a5d8c0447545470fa9e227b942569158","HasPassword":true,"HasConfiguredPassword":true,"LastLoginDate":"2026-10-14T08:08:51.7633242Z","LastActivityDate":"2026-10-14T08:08:51.7640432Z","Configuration":{"PlayDefaultAudioTrack":true,"DisplayMissingEpisodes":false,"SubtitleMode":"Smart","OrderedViews":[],"LatestItemsExcludes":[],"MyMediaExcludes":[],"HidePlayedInLatest":true,"HidePlayedInMoreLikeThis":false,"HidePlayedInSuggestions":false,"RememberAudioSelections":true,"RememberSubtitleSelections":true,"EnableNextEpisodeAutoPlay":true,"ResumeRewindSeconds":0,"IntroSkipMode":"ShowButton","EnableLocalPassword":false},"Policy":{"IsAdministrator":true,"IsHidden":false,"IsHiddenRemotely":true,"IsHiddenFromUnusedDevices":false,"IsDisabled":false,"LockedOutDate":0,"AllowTagOrRating":false,"BlockedTags":[],"IsTagBlockingModeInclusive":false,"IncludeTags":[],"EnableUserPreferenceAccess":true,"AccessSchedules":[],"BlockUnratedItems":[],"EnableRemoteControlOfOtherUsers":true,"EnableSharedDeviceControl":true,"EnableRemoteAccess":true,"EnableLiveTvManagement":true,"EnableLiveTvAccess":true,"EnableMediaPlayback":true,"EnableAudioPlaybackTranscoding":true,"EnableVideoPlaybackTranscoding":true,"EnableTranscodingQuality":true,"AutoRemoteQuality":0,"EnablePlaybackRemuxing":true,"EnableContentDeletion":true,"RestrictedFeatures":[],"EnableContentDeletionFromFolders":[],"EnableContentDownloading":true,"EnableSubtitleDownloading":true,"EnableSubtitleManagement":true,"EnableSyncTranscoding":true,"EnableMediaConversion":true,"EnabledChannels":[],"EnableAllChannels":true,"EnabledFolders":[],"EnableAllFolders":true,"InvalidLoginAttemptCount":0,"EnablePublicSharing":true,"RemoteClientBitrateLimit":0,"AuthenticationProviderId":"Emby.Server.Implementations.Library.DefaultAuthenticationProvider","ExcludedSubFolders":[],"SimultaneousStreamLimit":0,"EnabledDevices":[],"EnableAllDevices":true,"AllowCameraUpload":true,"AllowSharingPersonalItems":true}},"SessionInfo":{"PlayState":{"CanSeek":false,"IsPaused":false,"IsMuted":false,"RepeatMode":"RepeatNone","SleepTimerMode":"None","SubtitleOffset":0,"Shuffle":false,"PlaybackRate":1},"AdditionalUsers":[],"RemoteEndPoint":"127.0.0.1","Protocol":"HTTP/1.1","PlayableMediaTypes":[],"PlaylistIndex":0,"PlaylistLength":0,"Id":"d0a92d3eae168e51da2d03e85c458d0b","ServerId":"1271d0a1040046db8c0089cc328bbbf1","UserId":"a5d8c0447545470fa9e227b942569158","UserName":"mh","Client":"MediaHubProbe","LastActivityDate":"2026-10-14T08:08:51.7640432Z","DeviceName":"Windows","InternalDeviceId":3,"DeviceId":"mediahub-w5f-probe","ApplicationVersion":"1.0.0","SupportedCommands":[],"SupportsRemoteControl":false},"AccessToken":"01b94f945ee24e69a5a5d64a509bec4b","ServerId":"1271d0a1040046db8c0089cc328bbbf1"}
+<<HTTP 200>>
+    -> token: 01b94f945ee24e69a5a5d64a509bec4b
+
+########## /Users/Me ##########
+Unrecognized Guid format.
+<<HTTP 500>>
+########## /Users/Me (Authorization header form) ##########
+Unrecognized Guid format.
+<<HTTP 500>>
+=== done 2026-10-14T16:08:52+08:00 ===
+
+########## VERIFY: are Emby item Ids GUIDs or short ids? ##########
+--- GET /Items (raw, first 1200 chars) ---
+{"Items":[{"Name":"bbb720","ServerId":"1271d0a1040046db8c0089cc328bbbf1","Id":"5","RunTimeTicks":100000000,"IsFolder":false,"Type":"Movie","ImageTags":{},"BackdropImageTags":[],"MediaType":"Video"},{"Name":"jelly1080","ServerId":"1271d0a1040046db8c0089cc328bbbf1","Id":"6","RunTimeTicks":100110000,"IsFolder":false,"Type":"Movie","ImageTags":{},"BackdropImageTags":[],"MediaType":"Video"},{"Name":"sintel1080","ServerId":"1271d0a1040046db8c0089cc328bbbf1","Id":"7","RunTimeTicks":100000000,"IsFolder":false,"Type":"Movie","ImageTags":{},"BackdropImageTags":[],"MediaType":"Video"}],"TotalRecordCount":3}
+--- every Id-looking pair in the Items response ---
+    "Name":"bbb720"
+    "ServerId":"1271d0a1040046db8c0089cc328bbbf1"
+    "Id":"5"
+    "MediaType":"Video"
+    "Name":"jelly1080"
+    "ServerId":"1271d0a1040046db8c0089cc328bbbf1"
+    "Id":"6"
+    "MediaType":"Video"
+    "Name":"sintel1080"
+    "ServerId":"1271d0a1040046db8c0089cc328bbbf1"
+    "Id":"7"
+    "MediaType":"Video"
+
+--- GET /Users/{userId}/Items (the user-scoped browse path) ---
+{"Items":[{"Name":"bbb720","ServerId":"1271d0a1040046db8c0089cc328bbbf1","Id":"5","RunTimeTicks":100000000,"IsFolder":false,"Type":"Movie","UserData":{"PlaybackPositionTicks":0,"PlayCount":0,"IsFavorite":false,"Played":false},"ImageTags":{},"BackdropImageTags":[],"MediaType":"Video"},{"Name":"jelly1080","ServerId":"1271d0a1040046db8c0089cc328bbbf1","Id":"6","RunTimeTicks":100110000,"IsFolder":false,"Type":"Movie","UserData":{"PlaybackPositionTicks":0,"PlayCount":0,"IsFavorite":false,"Played":false},"ImageTags":{},"BackdropImageTags":[],"MediaType":"Video"},{"Name":"sintel1080","ServerId":"1271d0a1040046db8c0089cc328bbbf1","Id":"7","RunTimeTicks":100000000,"IsFolder":false,"Type":"Movie","Use
+--- GET /Items/5 (fetch the item by that id) ---
+The file '/Items/5' could not be found.
+<<HTTP 404>>
+########## server + wizard state ##########
+--- GET /System/Info (authenticated) ---
+{"SystemUpdateLevel":"Release","OperatingSystemDisplayName":"Win32NT","HasPendingRestart":false,"IsShuttingDown":false,"HasImageEnhancers":false,"OperatingSystem":"Windows","SupportsLibraryMonitor":true,"SupportsLocalPortConfiguration":true,"SupportsWakeServer":true,"WebSocketPortNumber":8097,"CompletedInstallations":[],"CanSelfRestart":true,"CanSelfUpdate":true,"CanLaunchWebBrowser":true,"ProgramDataPath":"D:\\mh-servers\\data\\emby","ItemsByNamePath":"D:\\mh-servers\\data\\emby\\metadata","CachePath":"D:\\mh-servers\\data\\emby\\cache","LogPath":"D:\\mh-servers\\data\\emby\\logs","InternalMe

@@ -14,6 +14,21 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 
+# Environment-gated suites: these declare a precondition with JUnit 5 assumptions
+# (today: the real Windows SyncCli DLL path for the cross-end interoperability suite),
+# so their methods report as "skipped" on a runner that cannot provide that environment.
+# They are named here, one by one, and they are the *only* suites allowed to skip:
+# every other skipped method stays a hard failure, because a skipped regression test
+# is indistinguishable from a deleted one. Each listed suite must still show up in the
+# reports, so "silently vanished" is caught as well.
+ENVIRONMENT_GATED_SUITES = frozenset({
+    "com.mediahub.core.common.sync.SourceSyncTlsInteropTest",
+    # W6-38: the reverse direction (Windows transfer send -> Android listener) needs the
+    # same out-of-band DLL, so it skips on a runner for exactly the same reason.
+    "com.mediahub.core.database.sync.SourceSyncListenerInteropTest",
+})
+
+
 def modules(root):
     active, no_source = {}, []
     settings = (root / "settings.gradle.kts").read_text(encoding="utf-8")
@@ -35,7 +50,9 @@ def configure(root):
     gate.MODULES = tuple(active)
     gate.REPORT_DIRECTORIES = active
     gate.MANIFEST = "ci-evidence/unit-manifest.json"
-    gate.REJECT_SKIPS = True
+    # Skips are judged in verify() with ENVIRONMENT_GATED_SUITES taken into account,
+    # because the shared gate has no notion of environment-gated suites.
+    gate.REJECT_SKIPS = False
     gate.required_tests = lambda api: set()
     return active, no_source
 
@@ -49,7 +66,8 @@ def record(root, sha, run_id, attempt):
     path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
-def verify(root, sha, run_id, attempt, required_suites=(), complete_suites=False):
+def verify(root, sha, run_id, attempt, required_suites=(), complete_suites=False,
+           require_environment_gated=False):
     active, no_source = configure(root)
     problems = gate.verify(root, "unit", sha, run_id, attempt)
     try:
@@ -58,7 +76,7 @@ def verify(root, sha, run_id, attempt, required_suites=(), complete_suites=False
             problems.append("unit manifest: source module/NO-SOURCE inventory does not match checkout")
     except (OSError, ValueError):
         pass  # Common manifest verifier already records this failure.
-    suites, totals, executed = set(), {}, set()
+    suites, totals, executed, skipped = set(), {}, set(), set()
     for module, report_directory in active.items():
         cases = []
         for path in (root / module / report_directory).rglob("TEST-*.xml"):
@@ -70,9 +88,20 @@ def verify(root, sha, run_id, attempt, required_suites=(), complete_suites=False
             problems.append(f"{module}: zero executed unit tests despite test sources")
         suites.update(c.get("classname", "") for c in cases)
         executed.update((c.get("classname", ""), c.get("name", "").removesuffix("()")) for c in cases)
+        skipped.update((c.get("classname", ""), c.get("name", "").removesuffix("()"))
+                       for c in cases if c.find("skipped") is not None)
         totals[module] = len({(c.get("classname"), c.get("name")) for c in cases})
     for suite in sorted(set(required_suites) - suites):
         problems.append(f"{suite}: required unit suite did not execute")
+    for classname, name in sorted(skipped):
+        if classname not in ENVIRONMENT_GATED_SUITES:
+            problems.append(f"{classname}.{name}: mandatory assertion was skipped")
+    # An allowlisted suite that vanishes is a real regression (deleted, renamed, or no longer
+    # collected), but only the production run asks for this check: fixtures that exercise the
+    # ordinary rules do not carry the gated suite, and must not be forced to invent it.
+    if require_environment_gated:
+        for suite in sorted(ENVIRONMENT_GATED_SUITES - suites):
+            problems.append(f"{suite}: environment-gated suite did not execute at all")
     if complete_suites:
         # These explicitly required, ordinary Kotlin/JUnit suites are source contracts.
         # Suite presence alone would allow --tests Suite.oneMethod to omit a regression.
@@ -133,7 +162,9 @@ def main():
         gate.clean_checkout(args.root, args.sha)
         record(args.root, args.sha, args.run_id, args.attempt)
         return 0
-    problems, totals, no_source = verify(args.root, args.sha, args.run_id, args.attempt, args.required_suite, args.require_complete_suites)
+    # The real CI run is the one place where the environment-gated allowlist must be verified
+    # end to end: the suite has to appear in the reports, even when every method of it skipped.
+    problems, totals, no_source = verify(args.root, args.sha, args.run_id, args.attempt, args.required_suite, args.require_complete_suites, True)
     print(json.dumps({"uniqueTestsPerModule": totals, "uniqueTests": sum(totals.values()),
                       "noSourceModules": no_source}, indent=2))
     if problems:

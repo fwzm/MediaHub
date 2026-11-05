@@ -37,6 +37,8 @@ internal val EMBY_PROVIDER_DESCRIPTOR = ProviderDescriptor(
         ProviderCapability.PROGRESS,
         ProviderCapability.MULTI_VERSION,
         ProviderCapability.TRANSCODE,
+        // task-22 / A1：收藏（POST|DELETE /Users/{uid}/FavoriteItems/{id} + UserData 回读）
+        ProviderCapability.FAVORITE,
     ),
     authMethod = AuthMethod.USERNAME_PASSWORD,
     status = ProviderStatus.EXPERIMENTAL,

@@ -1,0 +1,10 @@
+[   0.415][v][ad] Selected decoder: aac - AAC (Advanced Audio Coding)
+[   0.457][v][ao] Trying audio driver 'wasapi'
+[   0.457][v][ao/wasapi] requested format: 48000 Hz, stereo channels, floatp
+[   0.457][d][ao/wasapi] Init wasapi
+[   0.457][d][ao/wasapi] Find device ''
+[   0.579][v][ao/wasapi] No device specified. Selecting default.
+[   0.587][v][ao/wasapi] Selecting device '{d936278c-6839-4cb4-884b-41d799d3b425}' (扬声器 (Realtek(R) Audio))
+[   0.587][v][ao/wasapi] Monitoring changes in device {0.0.0.00000000}.{d936278c-6839-4cb4-884b-41d799d3b425}
+[   0.588][d][ao/wasapi] Init wasapi thread
+[   0.588][d][ao/wasapi] Activating pAudioClient interface

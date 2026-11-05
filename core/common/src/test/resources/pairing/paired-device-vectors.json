@@ -1,0 +1,931 @@
+{
+  "generator": "D:/mh-verify/paired-device-vectors (Windows MediaHub.Sync is the authority)",
+  "windowsSource": "D:/mh-w6/windows/src/MediaHub.Sync",
+  "frozenNowEpochMs": 1792800000000,
+  "reasonCodes": [
+    {
+      "code": "device-fingerprint-new",
+      "description": "\u672C\u673A\u7B2C\u4E00\u6B21\u89C1\u5230\u8FD9\u4E2A\u8BBE\u5907\uFF0C\u5C06\u6309\u9996\u6B21\u914D\u5BF9\u8BB0\u4F4F\u5B83\u7684\u6307\u7EB9\u3002"
+    },
+    {
+      "code": "device-fingerprint-match",
+      "description": "\u6307\u7EB9\u4E0E\u672C\u673A\u8BB0\u5F55\u4E00\u81F4\u3002"
+    },
+    {
+      "code": "device-fingerprint-mismatch",
+      "description": "\u8BE5\u8BBE\u5907\u8FD9\u6B21\u51FA\u793A\u7684\u6307\u7EB9\u4E0E\u672C\u673A\u8BB0\u5F55\u4E0D\u4E00\u81F4\uFF0C\u914D\u5BF9\u5DF2\u4E2D\u6B62\uFF1B\u5982\u9700\u91CD\u65B0\u4FE1\u4EFB\uFF0C\u8BF7\u5148\u5728\u5DF2\u914D\u5BF9\u8BBE\u5907\u91CC\u79FB\u9664\u5B83\u3002"
+    },
+    {
+      "code": "device-identity-missing",
+      "description": "\u5BF9\u7AEF\u6CA1\u6709\u63D0\u4F9B\u8BBE\u5907\u6807\u8BC6\uFF0C\u65E0\u6CD5\u767B\u8BB0\u3002"
+    },
+    {
+      "code": "device-fingerprint-missing",
+      "description": "\u5BF9\u7AEF\u6CA1\u6709\u63D0\u4F9B\u53EF\u7528\u7684\u8BBE\u5907\u6307\u7EB9\uFF0C\u65E0\u6CD5\u767B\u8BB0\u3002"
+    },
+    {
+      "code": "paired-device-registered",
+      "description": "\u5DF2\u8BB0\u4F4F\u8BE5\u8BBE\u5907\uFF08\u914D\u5BF9\u6210\u529F\u4E0D\u7B49\u4E8E\u5DF2\u540C\u6B65\uFF09\u3002"
+    },
+    {
+      "code": "paired-device-updated",
+      "description": "\u5DF2\u66F4\u65B0\u8BE5\u8BBE\u5907\u7684\u6700\u8FD1\u914D\u5BF9\u65F6\u95F4\u3002"
+    },
+    {
+      "code": "paired-device-unchanged",
+      "description": "\u8BE5\u8BBE\u5907\u6CA1\u6709\u53D8\u5316\u3002"
+    },
+    {
+      "code": "paired-device-limit-reached",
+      "description": "\u5DF2\u914D\u5BF9\u8BBE\u5907\u6570\u91CF\u5DF2\u8FBE\u4E0A\u9650\uFF0C\u65B0\u8BBE\u5907\u4E0D\u4F1A\u88AB\u767B\u8BB0\uFF1B\u8BF7\u5148\u79FB\u9664\u4E00\u53F0\u3002"
+    },
+    {
+      "code": "paired-store-unreadable",
+      "description": "\u5DF2\u914D\u5BF9\u8BBE\u5907\u6E05\u5355\u5F53\u524D\u4E0D\u53EF\u5199\uFF0C\u8FD9\u6B21\u914D\u5BF9\u6CA1\u6709\u88AB\u8BB0\u4F4F\u3002"
+    },
+    {
+      "code": "paired-device-forgotten",
+      "description": "\u5DF2\u79FB\u9664\u8BE5\u8BBE\u5907\u3002"
+    },
+    {
+      "code": "paired-device-unknown",
+      "description": "\u672C\u673A\u6CA1\u6709\u8FD9\u4E2A\u8BBE\u5907\u7684\u8BB0\u5F55\u3002"
+    }
+  ],
+  "storeReasonCodes": [
+    "paired-malformed-json",
+    "paired-unsupported-version",
+    "paired-store-unreadable",
+    "paired-device-limit-reached",
+    "paired-store-write-failed"
+  ],
+  "stateLabels": {
+    "new": "\u65B0\u8BBE\u5907",
+    "match": "\u6307\u7EB9\u4E00\u81F4",
+    "mismatch": "\u6307\u7EB9\u4E0D\u4E00\u81F4"
+  },
+  "describeReasonCases": [
+    {
+      "reason": "device-fingerprint-new",
+      "text": "\u672C\u673A\u7B2C\u4E00\u6B21\u89C1\u5230\u8FD9\u4E2A\u8BBE\u5907\uFF0C\u5C06\u6309\u9996\u6B21\u914D\u5BF9\u8BB0\u4F4F\u5B83\u7684\u6307\u7EB9\u3002"
+    },
+    {
+      "reason": "device-fingerprint-match",
+      "text": "\u6307\u7EB9\u4E0E\u672C\u673A\u8BB0\u5F55\u4E00\u81F4\u3002"
+    },
+    {
+      "reason": "device-fingerprint-mismatch",
+      "text": "\u8BE5\u8BBE\u5907\u8FD9\u6B21\u51FA\u793A\u7684\u6307\u7EB9\u4E0E\u672C\u673A\u8BB0\u5F55\u4E0D\u4E00\u81F4\uFF0C\u914D\u5BF9\u5DF2\u4E2D\u6B62\uFF1B\u5982\u9700\u91CD\u65B0\u4FE1\u4EFB\uFF0C\u8BF7\u5148\u5728\u5DF2\u914D\u5BF9\u8BBE\u5907\u91CC\u79FB\u9664\u5B83\u3002"
+    },
+    {
+      "reason": "device-identity-missing",
+      "text": "\u5BF9\u7AEF\u6CA1\u6709\u63D0\u4F9B\u8BBE\u5907\u6807\u8BC6\uFF0C\u65E0\u6CD5\u767B\u8BB0\u3002"
+    },
+    {
+      "reason": "device-fingerprint-missing",
+      "text": "\u5BF9\u7AEF\u6CA1\u6709\u63D0\u4F9B\u53EF\u7528\u7684\u8BBE\u5907\u6307\u7EB9\uFF0C\u65E0\u6CD5\u767B\u8BB0\u3002"
+    },
+    {
+      "reason": "paired-device-registered",
+      "text": "\u5DF2\u8BB0\u4F4F\u8BE5\u8BBE\u5907\uFF08\u914D\u5BF9\u6210\u529F\u4E0D\u7B49\u4E8E\u5DF2\u540C\u6B65\uFF09\u3002"
+    },
+    {
+      "reason": "paired-device-updated",
+      "text": "\u5DF2\u66F4\u65B0\u8BE5\u8BBE\u5907\u7684\u6700\u8FD1\u914D\u5BF9\u65F6\u95F4\u3002"
+    },
+    {
+      "reason": "paired-device-unchanged",
+      "text": "\u8BE5\u8BBE\u5907\u6CA1\u6709\u53D8\u5316\u3002"
+    },
+    {
+      "reason": "paired-device-limit-reached",
+      "text": "\u5DF2\u914D\u5BF9\u8BBE\u5907\u6570\u91CF\u5DF2\u8FBE\u4E0A\u9650\uFF0C\u65B0\u8BBE\u5907\u4E0D\u4F1A\u88AB\u767B\u8BB0\uFF1B\u8BF7\u5148\u79FB\u9664\u4E00\u53F0\u3002"
+    },
+    {
+      "reason": "paired-store-unreadable",
+      "text": "\u5DF2\u914D\u5BF9\u8BBE\u5907\u6E05\u5355\u5F53\u524D\u4E0D\u53EF\u5199\uFF0C\u8FD9\u6B21\u914D\u5BF9\u6CA1\u6709\u88AB\u8BB0\u4F4F\u3002"
+    },
+    {
+      "reason": "paired-device-forgotten",
+      "text": "\u5DF2\u79FB\u9664\u8BE5\u8BBE\u5907\u3002"
+    },
+    {
+      "reason": "paired-device-unknown",
+      "text": "\u672C\u673A\u6CA1\u6709\u8FD9\u4E2A\u8BBE\u5907\u7684\u8BB0\u5F55\u3002"
+    },
+    {
+      "reason": "custom-reason",
+      "text": "custom-reason"
+    },
+    {
+      "reason": null,
+      "text": "\u672A\u8BF4\u660E\u539F\u56E0\u3002"
+    },
+    {
+      "reason": "  ",
+      "text": "\u672A\u8BF4\u660E\u539F\u56E0\u3002"
+    }
+  ],
+  "createCases": [
+    {
+      "name": "trims-and-lowercases",
+      "device": {
+        "deviceId": "device-a",
+        "displayName": "\u5BB6\u5EAD NAS",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "pairedAtEpochMs": 1792800000000,
+        "lastSeenEpochMs": 1792800000000,
+        "sourceCount": 3
+      }
+    },
+    {
+      "name": "truncates-long-name",
+      "device": {
+        "deviceId": "device-b",
+        "displayName": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "pairedAtEpochMs": 1792800000000,
+        "lastSeenEpochMs": 1792800000000,
+        "sourceCount": 0
+      }
+    },
+    {
+      "name": "negative-source-count",
+      "device": {
+        "deviceId": "device-c",
+        "displayName": "",
+        "fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "pairedAtEpochMs": 1792800000000,
+        "lastSeenEpochMs": 1792800000000,
+        "sourceCount": 0
+      }
+    },
+    {
+      "name": "keeps-explicit-paired-at",
+      "device": {
+        "deviceId": "device-d",
+        "displayName": "",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "pairedAtEpochMs": 1792799995000,
+        "lastSeenEpochMs": 1792800000000,
+        "sourceCount": 1
+      }
+    }
+  ],
+  "verifyCases": [
+    {
+      "name": "blank-identity",
+      "deviceId": "   ",
+      "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": "new",
+      "reason": "device-identity-missing",
+      "presentedFingerprint": "",
+      "pinnedFingerprint": null,
+      "canPin": true
+    },
+    {
+      "name": "unknown-device-valid-fingerprint",
+      "deviceId": "device-new",
+      "fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "state": "new",
+      "reason": "device-fingerprint-new",
+      "presentedFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "pinnedFingerprint": null,
+      "canPin": true
+    },
+    {
+      "name": "unknown-device-invalid-fingerprint",
+      "deviceId": "device-new",
+      "fingerprint": "not-a-fingerprint",
+      "state": "new",
+      "reason": "device-fingerprint-missing",
+      "presentedFingerprint": "",
+      "pinnedFingerprint": null,
+      "canPin": true
+    },
+    {
+      "name": "known-device-same-fingerprint",
+      "deviceId": "device-a",
+      "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": "match",
+      "reason": "device-fingerprint-match",
+      "presentedFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pinnedFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "canPin": true
+    },
+    {
+      "name": "known-device-uppercase-fingerprint",
+      "deviceId": "device-a",
+      "fingerprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "state": "match",
+      "reason": "device-fingerprint-match",
+      "presentedFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pinnedFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "canPin": true
+    },
+    {
+      "name": "known-device-other-fingerprint",
+      "deviceId": "device-a",
+      "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "state": "mismatch",
+      "reason": "device-fingerprint-mismatch",
+      "presentedFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "pinnedFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "canPin": false
+    },
+    {
+      "name": "known-device-invalid-fingerprint",
+      "deviceId": "device-a",
+      "fingerprint": "zzz",
+      "state": "mismatch",
+      "reason": "device-fingerprint-missing",
+      "presentedFingerprint": "",
+      "pinnedFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "canPin": false
+    },
+    {
+      "name": "lookup-is-case-insensitive",
+      "deviceId": "DEVICE-B",
+      "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "state": "match",
+      "reason": "device-fingerprint-match",
+      "presentedFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "pinnedFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "canPin": true
+    }
+  ],
+  "registerCases": [
+    {
+      "name": "first-registration",
+      "kind": "register",
+      "observation": {
+        "deviceId": "device-a",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "displayName": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09",
+        "sourceCount": 3,
+        "nowEpochMs": 1792800000000
+      },
+      "accepted": true,
+      "added": true,
+      "state": "new",
+      "reason": "paired-device-registered",
+      "device": {
+        "deviceId": "device-a",
+        "displayName": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "pairedAtEpochMs": 1792800000000,
+        "lastSeenEpochMs": 1792800000000,
+        "sourceCount": 3
+      }
+    },
+    {
+      "name": "second-identical-registration",
+      "kind": "register",
+      "observation": {
+        "deviceId": "device-a",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "displayName": "",
+        "sourceCount": 0,
+        "nowEpochMs": 1792800000000
+      },
+      "accepted": true,
+      "added": false,
+      "state": "match",
+      "reason": "paired-device-updated",
+      "device": {
+        "deviceId": "device-a",
+        "displayName": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "pairedAtEpochMs": 1792800000000,
+        "lastSeenEpochMs": 1792800000000,
+        "sourceCount": 0
+      }
+    },
+    {
+      "name": "later-registration-updates-last-seen",
+      "kind": "register",
+      "observation": {
+        "deviceId": "device-a",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "displayName": "\u65B0\u540D\u5B57",
+        "sourceCount": 5,
+        "nowEpochMs": 1792800060000
+      },
+      "accepted": true,
+      "added": false,
+      "state": "match",
+      "reason": "paired-device-updated",
+      "device": {
+        "deviceId": "device-a",
+        "displayName": "\u65B0\u540D\u5B57",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "pairedAtEpochMs": 1792800000000,
+        "lastSeenEpochMs": 1792800060000,
+        "sourceCount": 5
+      }
+    },
+    {
+      "name": "different-fingerprint-is-refused",
+      "kind": "register",
+      "observation": {
+        "deviceId": "device-a",
+        "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "displayName": "\u5192\u540D\u8005",
+        "sourceCount": 9,
+        "nowEpochMs": 1792800120000
+      },
+      "accepted": false,
+      "added": false,
+      "state": "mismatch",
+      "reason": "device-fingerprint-mismatch",
+      "device": {
+        "deviceId": "device-a",
+        "displayName": "\u65B0\u540D\u5B57",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "pairedAtEpochMs": 1792800000000,
+        "lastSeenEpochMs": 1792800060000,
+        "sourceCount": 5
+      }
+    },
+    {
+      "name": "invalid-fingerprint-is-refused",
+      "kind": "register",
+      "observation": {
+        "deviceId": "device-a",
+        "fingerprint": "not-a-fingerprint",
+        "displayName": "",
+        "sourceCount": 0,
+        "nowEpochMs": 1792800000000
+      },
+      "accepted": false,
+      "added": false,
+      "state": "new",
+      "reason": "device-fingerprint-missing",
+      "device": null
+    },
+    {
+      "name": "blank-identity-is-refused",
+      "kind": "register",
+      "observation": {
+        "deviceId": "   ",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "displayName": "",
+        "sourceCount": 0,
+        "nowEpochMs": 1792800000000
+      },
+      "accepted": false,
+      "added": false,
+      "state": "new",
+      "reason": "device-identity-missing",
+      "device": null
+    },
+    {
+      "name": "new-device-with-invalid-fingerprint",
+      "kind": "register",
+      "observation": {
+        "deviceId": "device-c",
+        "fingerprint": "nope",
+        "displayName": "",
+        "sourceCount": 0,
+        "nowEpochMs": 1792800000000
+      },
+      "accepted": false,
+      "added": false,
+      "state": "new",
+      "reason": "device-fingerprint-missing",
+      "device": null
+    },
+    {
+      "name": "new-device-registers",
+      "kind": "register",
+      "observation": {
+        "deviceId": "device-b",
+        "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "displayName": "",
+        "sourceCount": 0,
+        "nowEpochMs": 1792800000000
+      },
+      "accepted": true,
+      "added": true,
+      "state": "new",
+      "reason": "paired-device-registered",
+      "device": {
+        "deviceId": "device-b",
+        "displayName": "",
+        "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "pairedAtEpochMs": 1792800000000,
+        "lastSeenEpochMs": 1792800000000,
+        "sourceCount": 0
+      }
+    },
+    {
+      "name": "final-list",
+      "kind": "final",
+      "deviceIds": [
+        "device-a",
+        "device-b"
+      ],
+      "count": 2,
+      "isFull": false
+    }
+  ],
+  "capacityCases": [
+    {
+      "name": "fills-first-slot",
+      "kind": "register",
+      "observation": {
+        "deviceId": "device-a",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "displayName": "",
+        "sourceCount": 0,
+        "nowEpochMs": 1792800000000
+      },
+      "accepted": true,
+      "added": true,
+      "state": "new",
+      "reason": "paired-device-registered",
+      "device": {
+        "deviceId": "device-a",
+        "displayName": "",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "pairedAtEpochMs": 1792800000000,
+        "lastSeenEpochMs": 1792800000000,
+        "sourceCount": 0
+      }
+    },
+    {
+      "name": "fills-second-slot",
+      "kind": "register",
+      "observation": {
+        "deviceId": "device-b",
+        "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "displayName": "",
+        "sourceCount": 0,
+        "nowEpochMs": 1792800000000
+      },
+      "accepted": true,
+      "added": true,
+      "state": "new",
+      "reason": "paired-device-registered",
+      "device": {
+        "deviceId": "device-b",
+        "displayName": "",
+        "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "pairedAtEpochMs": 1792800000000,
+        "lastSeenEpochMs": 1792800000000,
+        "sourceCount": 0
+      }
+    },
+    {
+      "name": "is-full",
+      "kind": "full",
+      "isFull": true
+    },
+    {
+      "name": "third-device-is-refused",
+      "kind": "register",
+      "observation": {
+        "deviceId": "device-c",
+        "fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "displayName": "",
+        "sourceCount": 0,
+        "nowEpochMs": 1792800000000
+      },
+      "accepted": false,
+      "added": false,
+      "state": "new",
+      "reason": "paired-device-limit-reached",
+      "device": null
+    },
+    {
+      "name": "forget-known",
+      "kind": "forget",
+      "deviceId": "device-a",
+      "result": true
+    },
+    {
+      "name": "slot-reopens-after-forget",
+      "kind": "register",
+      "observation": {
+        "deviceId": "device-c",
+        "fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "displayName": "",
+        "sourceCount": 0,
+        "nowEpochMs": 1792800000000
+      },
+      "accepted": true,
+      "added": true,
+      "state": "new",
+      "reason": "paired-device-registered",
+      "device": {
+        "deviceId": "device-c",
+        "displayName": "",
+        "fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "pairedAtEpochMs": 1792800000000,
+        "lastSeenEpochMs": 1792800000000,
+        "sourceCount": 0
+      }
+    },
+    {
+      "name": "forget-unknown",
+      "kind": "forget",
+      "deviceId": "device-zzz",
+      "result": false
+    },
+    {
+      "name": "forget-blank",
+      "kind": "forget",
+      "deviceId": "   ",
+      "result": false
+    },
+    {
+      "name": "final-list",
+      "kind": "final",
+      "deviceIds": [
+        "device-b",
+        "device-c"
+      ]
+    }
+  ],
+  "forgetCases": [
+    {
+      "name": "forget-known",
+      "kind": "forget",
+      "deviceId": "device-a",
+      "result": true
+    },
+    {
+      "name": "forget-same-again",
+      "kind": "forget",
+      "deviceId": "device-a",
+      "result": false
+    },
+    {
+      "name": "forget-unknown",
+      "kind": "forget",
+      "deviceId": "device-zzz",
+      "result": false
+    },
+    {
+      "name": "forget-null",
+      "kind": "forget",
+      "deviceId": "",
+      "result": false
+    },
+    {
+      "name": "verify-after-forget",
+      "kind": "verify",
+      "state": "new",
+      "reason": "device-fingerprint-new"
+    },
+    {
+      "name": "final-list",
+      "kind": "final",
+      "deviceIds": [
+        "device-b"
+      ],
+      "writeCount": 3
+    }
+  ],
+  "describeCases": [
+    {
+      "name": "unknown-times",
+      "device": {
+        "deviceId": "device-a",
+        "displayName": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "pairedAtEpochMs": 0,
+        "lastSeenEpochMs": 1792800000000,
+        "sourceCount": 3
+      },
+      "nowEpochMs": 1792800000000,
+      "describe": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09 \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u8FD1\u914D\u5BF9 {lastSeen} \u00B7 \u6765\u6E90 3 \u4E2A"
+    },
+    {
+      "name": "peer-clock-ahead",
+      "device": {
+        "deviceId": "device-b",
+        "displayName": "",
+        "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "pairedAtEpochMs": 1792800000000,
+        "lastSeenEpochMs": 1792800001000,
+        "sourceCount": 0
+      },
+      "nowEpochMs": 1792800000000,
+      "describeSuffix": "\uFF08\u65F6\u95F4\u6765\u81EA\u5BF9\u7AEF\uFF0C\u665A\u4E8E\u672C\u673A\u65F6\u949F\uFF09",
+      "displayNameOrId": "device-b",
+      "fingerprintDisplay": "BBBB BBBB BBBB BBBB BBBB BBBB BBBB BBBB BBBB BBBB BBBB BBBB BBBB BBBB BBBB BBBB"
+    }
+  ],
+  "presenterCases": [
+    {
+      "name": "empty",
+      "rows": [],
+      "countLabel": "\u5DF2\u914D\u5BF9 0 \u53F0",
+      "emptyLabel": "\u8FD8\u6CA1\u6709\u914D\u5BF9\u8FC7\u7684\u8BBE\u5907\u3002",
+      "tofuLabel": "\u9996\u6B21\u914D\u5BF9\u65F6\u65E0\u6CD5\u9A8C\u8BC1\u5BF9\u65B9\u8EAB\u4EFD\uFF1A\u6307\u7EB9\u53EA\u7528\u6765\u8BC6\u522B\u300C\u4E0A\u6B21\u90A3\u53F0\u662F\u4E0D\u662F\u540C\u4E00\u53F0\u300D\uFF0C\u4E0D\u4EE3\u8868\u5BF9\u65B9\u53EF\u4FE1\u3002",
+      "capacityLabel": "",
+      "isEmpty": true,
+      "isFull": false,
+      "count": 0,
+      "capacity": 32
+    },
+    {
+      "name": "two-devices",
+      "rows": [
+        {
+          "deviceId": "device-android-01",
+          "displayName": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09",
+          "fingerprintLabel": "\u6307\u7EB9 \u2026aaaaaaaa",
+          "pairedLabel": "\u9996\u6B21\u914D\u5BF9 \u672A\u77E5",
+          "lastSeenLabel": "\u6700\u540E\u76F8\u89C1 {lastSeen}",
+          "sourceLabel": "3 \u4E2A\u6765\u6E90",
+          "summaryLine": "\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09 \u00B7 \u6307\u7EB9 \u2026aaaaaaaa \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 3 \u4E2A\u6765\u6E90",
+          "detailLine": "\u6307\u7EB9 \u2026aaaaaaaa \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 3 \u4E2A\u6765\u6E90",
+          "forgetLabel": "\u5FD8\u8BB0 \u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09",
+          "lastSeenEpochMs": 1792800000000
+        },
+        {
+          "deviceId": "abc",
+          "displayName": "abc",
+          "fingerprintLabel": "\u6307\u7EB9 \u2026bbbbbbbb",
+          "pairedLabel": "\u9996\u6B21\u914D\u5BF9 \u672A\u77E5",
+          "lastSeenLabel": "\u6700\u540E\u76F8\u89C1 {lastSeen}",
+          "sourceLabel": "0 \u4E2A\u6765\u6E90",
+          "summaryLine": "abc \u00B7 \u6307\u7EB9 \u2026bbbbbbbb \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 0 \u4E2A\u6765\u6E90",
+          "detailLine": "\u6307\u7EB9 \u2026bbbbbbbb \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 0 \u4E2A\u6765\u6E90",
+          "forgetLabel": "\u5FD8\u8BB0 abc",
+          "lastSeenEpochMs": 1792800000000
+        }
+      ],
+      "countLabel": "\u5DF2\u914D\u5BF9 2 \u53F0",
+      "emptyLabel": "\u8FD8\u6CA1\u6709\u914D\u5BF9\u8FC7\u7684\u8BBE\u5907\u3002",
+      "tofuLabel": "\u9996\u6B21\u914D\u5BF9\u65F6\u65E0\u6CD5\u9A8C\u8BC1\u5BF9\u65B9\u8EAB\u4EFD\uFF1A\u6307\u7EB9\u53EA\u7528\u6765\u8BC6\u522B\u300C\u4E0A\u6B21\u90A3\u53F0\u662F\u4E0D\u662F\u540C\u4E00\u53F0\u300D\uFF0C\u4E0D\u4EE3\u8868\u5BF9\u65B9\u53EF\u4FE1\u3002",
+      "capacityLabel": "",
+      "isEmpty": false,
+      "isFull": false,
+      "count": 2,
+      "capacity": 32
+    },
+    {
+      "name": "full-at-two",
+      "rows": [
+        {
+          "deviceId": "device-a",
+          "displayName": "device-a",
+          "fingerprintLabel": "\u6307\u7EB9 \u2026aaaaaaaa",
+          "pairedLabel": "\u9996\u6B21\u914D\u5BF9 \u672A\u77E5",
+          "lastSeenLabel": "\u6700\u540E\u76F8\u89C1 {lastSeen}",
+          "sourceLabel": "0 \u4E2A\u6765\u6E90",
+          "summaryLine": "device-a \u00B7 \u6307\u7EB9 \u2026aaaaaaaa \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 0 \u4E2A\u6765\u6E90",
+          "detailLine": "\u6307\u7EB9 \u2026aaaaaaaa \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 0 \u4E2A\u6765\u6E90",
+          "forgetLabel": "\u5FD8\u8BB0 device-a",
+          "lastSeenEpochMs": 1792800000000
+        },
+        {
+          "deviceId": "device-b",
+          "displayName": "device-b",
+          "fingerprintLabel": "\u6307\u7EB9 \u2026bbbbbbbb",
+          "pairedLabel": "\u9996\u6B21\u914D\u5BF9 \u672A\u77E5",
+          "lastSeenLabel": "\u6700\u540E\u76F8\u89C1 {lastSeen}",
+          "sourceLabel": "0 \u4E2A\u6765\u6E90",
+          "summaryLine": "device-b \u00B7 \u6307\u7EB9 \u2026bbbbbbbb \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 0 \u4E2A\u6765\u6E90",
+          "detailLine": "\u6307\u7EB9 \u2026bbbbbbbb \u00B7 \u9996\u6B21\u914D\u5BF9 \u672A\u77E5 \u00B7 \u6700\u540E\u76F8\u89C1 {lastSeen} \u00B7 0 \u4E2A\u6765\u6E90",
+          "forgetLabel": "\u5FD8\u8BB0 device-b",
+          "lastSeenEpochMs": 1792800000000
+        }
+      ],
+      "countLabel": "\u5DF2\u914D\u5BF9 2 \u53F0",
+      "emptyLabel": "\u8FD8\u6CA1\u6709\u914D\u5BF9\u8FC7\u7684\u8BBE\u5907\u3002",
+      "tofuLabel": "\u9996\u6B21\u914D\u5BF9\u65F6\u65E0\u6CD5\u9A8C\u8BC1\u5BF9\u65B9\u8EAB\u4EFD\uFF1A\u6307\u7EB9\u53EA\u7528\u6765\u8BC6\u522B\u300C\u4E0A\u6B21\u90A3\u53F0\u662F\u4E0D\u662F\u540C\u4E00\u53F0\u300D\uFF0C\u4E0D\u4EE3\u8868\u5BF9\u65B9\u53EF\u4FE1\u3002",
+      "capacityLabel": "\u5DF2\u767B\u8BB0 2 \u53F0\uFF0C\u5DF2\u8FBE\u4E0A\u9650\uFF1A\u65B0\u7684\u8BBE\u5907\u4E0D\u4F1A\u88AB\u767B\u8BB0\uFF0C\u8BF7\u5148\u5FD8\u8BB0\u4E00\u53F0\u4E0D\u518D\u4F7F\u7528\u7684\u8BBE\u5907\u3002",
+      "isEmpty": false,
+      "isFull": true,
+      "count": 2,
+      "capacity": 2
+    },
+    {
+      "name": "null-is-empty",
+      "rows": [],
+      "countLabel": "\u5DF2\u914D\u5BF9 0 \u53F0",
+      "emptyLabel": "\u8FD8\u6CA1\u6709\u914D\u5BF9\u8FC7\u7684\u8BBE\u5907\u3002",
+      "tofuLabel": "\u9996\u6B21\u914D\u5BF9\u65F6\u65E0\u6CD5\u9A8C\u8BC1\u5BF9\u65B9\u8EAB\u4EFD\uFF1A\u6307\u7EB9\u53EA\u7528\u6765\u8BC6\u522B\u300C\u4E0A\u6B21\u90A3\u53F0\u662F\u4E0D\u662F\u540C\u4E00\u53F0\u300D\uFF0C\u4E0D\u4EE3\u8868\u5BF9\u65B9\u53EF\u4FE1\u3002",
+      "capacityLabel": "",
+      "isEmpty": true,
+      "isFull": false,
+      "count": 0,
+      "capacity": 32
+    }
+  ],
+  "documentCases": [
+    {
+      "name": "empty",
+      "devices": [],
+      "base64": "ew0KICAidmVyc2lvbiI6IDEsDQogICJkZXZpY2VzIjogW10NCn0=",
+      "utf8ByteLength": 38,
+      "sha256": "896410e6c2b81cea1f77dd3947780a80403b15b3c34630dbea52e0f06ab5987e"
+    },
+    {
+      "name": "two-devices",
+      "devices": [
+        {
+          "deviceId": "Zeta",
+          "displayName": "\u540D\u5B57",
+          "fingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "pairedAtEpochMs": 1792800000000,
+          "lastSeenEpochMs": 1792800000000,
+          "sourceCount": 2
+        },
+        {
+          "deviceId": "alpha",
+          "displayName": "",
+          "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "pairedAtEpochMs": 1792800001000,
+          "lastSeenEpochMs": 1792800001000,
+          "sourceCount": 0
+        }
+      ],
+      "base64": "ew0KICAidmVyc2lvbiI6IDEsDQogICJkZXZpY2VzIjogWw0KICAgIHsNCiAgICAgICJkZXZpY2VJZCI6ICJhbHBoYSIsDQogICAgICAiZGlzcGxheU5hbWUiOiAiIiwNCiAgICAgICJmaW5nZXJwcmludCI6ICJmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmIiwNCiAgICAgICJwYWlyZWRBdEVwb2NoTXMiOiAxNzkyODAwMDAxMDAwLA0KICAgICAgImxhc3RTZWVuRXBvY2hNcyI6IDE3OTI4MDAwMDEwMDAsDQogICAgICAic291cmNlQ291bnQiOiAwDQogICAgfSwNCiAgICB7DQogICAgICAiZGV2aWNlSWQiOiAiWmV0YSIsDQogICAgICAiZGlzcGxheU5hbWUiOiAiXHU1NDBEXHU1QjU3IiwNCiAgICAgICJmaW5nZXJwcmludCI6ICJlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlIiwNCiAgICAgICJwYWlyZWRBdEVwb2NoTXMiOiAxNzkyODAwMDAwMDAwLA0KICAgICAgImxhc3RTZWVuRXBvY2hNcyI6IDE3OTI4MDAwMDAwMDAsDQogICAgICAic291cmNlQ291bnQiOiAyDQogICAgfQ0KICBdDQp9",
+      "utf8ByteLength": 582,
+      "sha256": "90266161215f34eae710a452e8ad910f36f57c1bc8eec86f29dd8287a35f8f5a"
+    },
+    {
+      "name": "tricky-strings",
+      "devices": [
+        {
+          "deviceId": "device-a",
+          "displayName": "quote\u0022 back\\ slash \u002B plus \u0026 amp \u0027 apos \u003C lt \u003E gt = eq ? q / sl",
+          "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pairedAtEpochMs": 1792800000000,
+          "lastSeenEpochMs": 1792800000000,
+          "sourceCount": 3
+        },
+        {
+          "deviceId": "device-b",
+          "displayName": "\u4E2D\u6587\uFF08\u5BA2\u5385\uFF09\uD83D\uDE00",
+          "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "pairedAtEpochMs": 1792800000000,
+          "lastSeenEpochMs": 1792800000000,
+          "sourceCount": 0
+        },
+        {
+          "deviceId": "device-c",
+          "displayName": "tab \r\n newline \u0001 ctl",
+          "fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "pairedAtEpochMs": 1792800000000,
+          "lastSeenEpochMs": 1792800000000,
+          "sourceCount": 7
+        }
+      ],
+      "base64": "ew0KICAidmVyc2lvbiI6IDEsDQogICJkZXZpY2VzIjogWw0KICAgIHsNCiAgICAgICJkZXZpY2VJZCI6ICJkZXZpY2UtYSIsDQogICAgICAiZGlzcGxheU5hbWUiOiAicXVvdGVcdTAwMjIgYmFja1xcIHNsYXNoIFx1MDAyQiBwbHVzIFx1MDAyNiBhbXAgXHUwMDI3IGFwb3MgXHUwMDNDIGx0IFx1MDAzRSBndCA9IGVxID8gcSAvIHNsIiwNCiAgICAgICJmaW5nZXJwcmludCI6ICJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwNCiAgICAgICJwYWlyZWRBdEVwb2NoTXMiOiAxNzkyODAwMDAwMDAwLA0KICAgICAgImxhc3RTZWVuRXBvY2hNcyI6IDE3OTI4MDAwMDAwMDAsDQogICAgICAic291cmNlQ291bnQiOiAzDQogICAgfSwNCiAgICB7DQogICAgICAiZGV2aWNlSWQiOiAiZGV2aWNlLWIiLA0KICAgICAgImRpc3BsYXlOYW1lIjogIlx1NEUyRFx1NjU4N1x1RkYwOFx1NUJBMlx1NTM4NVx1RkYwOVx1RDgzRFx1REUwMCIsDQogICAgICAiZmluZ2VycHJpbnQiOiAiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYiIsDQogICAgICAicGFpcmVkQXRFcG9jaE1zIjogMTc5MjgwMDAwMDAwMCwNCiAgICAgICJsYXN0U2VlbkVwb2NoTXMiOiAxNzkyODAwMDAwMDAwLA0KICAgICAgInNvdXJjZUNvdW50IjogMA0KICAgIH0sDQogICAgew0KICAgICAgImRldmljZUlkIjogImRldmljZS1jIiwNCiAgICAgICJkaXNwbGF5TmFtZSI6ICJ0YWIgXHJcbiBuZXdsaW5lIFx1MDAwMSBjdGwiLA0KICAgICAgImZpbmdlcnByaW50IjogImNjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2MiLA0KICAgICAgInBhaXJlZEF0RXBvY2hNcyI6IDE3OTI4MDAwMDAwMDAsDQogICAgICAibGFzdFNlZW5FcG9jaE1zIjogMTc5MjgwMDAwMDAwMCwNCiAgICAgICJzb3VyY2VDb3VudCI6IDcNCiAgICB9DQogIF0NCn0=",
+      "utf8ByteLength": 1013,
+      "sha256": "9258a31d2ba16b22ff7c94392c42fae905eca9d810e5fce00d61bd550844f6df"
+    }
+  ],
+  "loadCases": [
+    {
+      "name": "empty-file-text",
+      "text": "",
+      "loadError": null,
+      "devices": [],
+      "deviceCount": 0
+    },
+    {
+      "name": "whitespace-only",
+      "text": "   ",
+      "loadError": null,
+      "devices": [],
+      "deviceCount": 0
+    },
+    {
+      "name": "malformed-json",
+      "text": "{",
+      "loadError": "paired-malformed-json",
+      "devices": [],
+      "deviceCount": 0
+    },
+    {
+      "name": "root-not-object",
+      "text": "[]",
+      "loadError": "paired-malformed-json",
+      "devices": [],
+      "deviceCount": 0
+    },
+    {
+      "name": "missing-version",
+      "text": "{\u0022devices\u0022: []}",
+      "loadError": "paired-malformed-json",
+      "devices": [],
+      "deviceCount": 0
+    },
+    {
+      "name": "version-is-string",
+      "text": "{\u0022version\u0022: \u00221\u0022, \u0022devices\u0022: []}",
+      "loadError": "paired-malformed-json",
+      "devices": [],
+      "deviceCount": 0
+    },
+    {
+      "name": "unsupported-version",
+      "text": "{\u0022version\u0022: 2, \u0022devices\u0022: []}",
+      "loadError": "paired-unsupported-version:2",
+      "devices": [],
+      "deviceCount": 0
+    },
+    {
+      "name": "devices-missing",
+      "text": "{\u0022version\u0022: 1}",
+      "loadError": "paired-malformed-json",
+      "devices": [],
+      "deviceCount": 0
+    },
+    {
+      "name": "devices-not-array",
+      "text": "{\u0022version\u0022: 1, \u0022devices\u0022: {}}",
+      "loadError": "paired-malformed-json",
+      "devices": [],
+      "deviceCount": 0
+    },
+    {
+      "name": "empty-devices",
+      "text": "{\u0022version\u0022: 1, \u0022devices\u0022: []}",
+      "loadError": null,
+      "devices": [],
+      "deviceCount": 0
+    },
+    {
+      "name": "bad-row-fingerprint-is-skipped",
+      "text": "{\u0022version\u0022: 1, \u0022devices\u0022: [{\u0022deviceId\u0022: \u0022device-a\u0022, \u0022fingerprint\u0022: \u0022aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u0022}, {\u0022deviceId\u0022: \u0022device-b\u0022, \u0022fingerprint\u0022: \u0022oops\u0022}]}",
+      "loadError": null,
+      "devices": [
+        {
+          "deviceId": "device-a",
+          "displayName": "",
+          "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pairedAtEpochMs": 0,
+          "lastSeenEpochMs": 0,
+          "sourceCount": 0
+        }
+      ],
+      "deviceCount": 1
+    },
+    {
+      "name": "blank-row-identity-is-skipped",
+      "text": "{\u0022version\u0022: 1, \u0022devices\u0022: [{\u0022deviceId\u0022: \u0022   \u0022, \u0022fingerprint\u0022: \u0022aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u0022}, {\u0022deviceId\u0022: \u0022device-c\u0022, \u0022fingerprint\u0022: \u0022cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\u0022}]}",
+      "loadError": null,
+      "devices": [
+        {
+          "deviceId": "device-c",
+          "displayName": "",
+          "fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "pairedAtEpochMs": 0,
+          "lastSeenEpochMs": 0,
+          "sourceCount": 0
+        }
+      ],
+      "deviceCount": 1
+    },
+    {
+      "name": "duplicate-row-is-skipped",
+      "text": "{\u0022version\u0022: 1, \u0022devices\u0022: [{\u0022deviceId\u0022: \u0022device-a\u0022, \u0022fingerprint\u0022: \u0022aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u0022}, {\u0022deviceId\u0022: \u0022DEVICE-A\u0022, \u0022fingerprint\u0022: \u0022bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\u0022}]}",
+      "loadError": null,
+      "devices": [
+        {
+          "deviceId": "device-a",
+          "displayName": "",
+          "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pairedAtEpochMs": 0,
+          "lastSeenEpochMs": 0,
+          "sourceCount": 0
+        }
+      ],
+      "deviceCount": 1
+    },
+    {
+      "name": "display-name-missing-is-allowed",
+      "text": "{\u0022version\u0022: 1, \u0022devices\u0022: [{\u0022deviceId\u0022: \u0022device-a\u0022, \u0022fingerprint\u0022: \u0022aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u0022}]}",
+      "loadError": null,
+      "devices": [
+        {
+          "deviceId": "device-a",
+          "displayName": "",
+          "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pairedAtEpochMs": 0,
+          "lastSeenEpochMs": 0,
+          "sourceCount": 0
+        }
+      ],
+      "deviceCount": 1
+    }
+  ],
+  "writeRejects": [
+    {
+      "name": "blank-identity",
+      "outcome": "argument-exception"
+    },
+    {
+      "name": "capacity-limit",
+      "outcome": "paired-device-limit-reached"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MediaHub.Providers.WebDav</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The test project exercises security-critical internals (href resolution, the XML reader
+         settings, rejection reasons and the pinned PROPFIND body) directly, so they stay reachable
+         without being promoted to public API. -->
+    <InternalsVisibleTo Include="MediaHub.WebDav.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MediaHub.Domain\MediaHub.Domain.csproj" />
+    <ProjectReference Include="..\MediaHub.Net\MediaHub.Net.csproj" />
+    <ProjectReference Include="..\MediaHub.Providers\MediaHub.Providers.csproj" />
+  </ItemGroup>
+</Project>

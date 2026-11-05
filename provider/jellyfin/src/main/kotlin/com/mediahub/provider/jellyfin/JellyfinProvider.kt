@@ -36,6 +36,8 @@ internal val JELLYFIN_PROVIDER_DESCRIPTOR = ProviderDescriptor(
         ProviderCapability.PROGRESS,
         ProviderCapability.MULTI_VERSION,
         ProviderCapability.TRANSCODE,
+        // task-22 / A1：收藏（与 Emby 同名同义端点 + UserData 回读）
+        ProviderCapability.FAVORITE,
     ),
     authMethod = AuthMethod.USERNAME_PASSWORD,
     status = ProviderStatus.EXPERIMENTAL,

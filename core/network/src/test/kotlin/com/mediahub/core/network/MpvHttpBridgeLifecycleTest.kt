@@ -1,7 +1,10 @@
 package com.mediahub.core.network
 
 import java.io.IOException
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -23,7 +26,8 @@ class MpvHttpBridgeLifecycleTest {
         getOutputStream().write((request + "\r\nHost: localhost\r\n\r\n").toByteArray())
         getOutputStream().flush()
     }
-    private fun client() = OkHttpClient.Builder().readTimeout(3, TimeUnit.SECONDS).build()
+    private fun client(readTimeoutSeconds: Long = 3) =
+        OkHttpClient.Builder().readTimeout(readTimeoutSeconds, TimeUnit.SECONDS).build()
 
     @Test fun `unsupported method and unknown or old capability never reach upstream`() {
         MockWebServer().use { upstream ->
@@ -45,10 +49,9 @@ class MpvHttpBridgeLifecycleTest {
         }
     }
 
-    @Test fun `stop cancels target upstream and closes accepted socket before server responds`() = proveStop(true)
-    @Test fun `stop cancels target upstream while response body cannot finish`() = proveStop(false)
+    @Test fun `stop cancels target upstream and closes accepted socket before server responds`() = proveStop()
 
-    private fun proveStop(blockHeaders: Boolean) {
+    private fun proveStop() {
         MockWebServer().use { upstream ->
             upstream.start()
             val arrived = CountDownLatch(1)
@@ -56,22 +59,18 @@ class MpvHttpBridgeLifecycleTest {
             upstream.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     arrived.countDown()
-                    if (blockHeaders) {
-                        check(release.await(5, TimeUnit.SECONDS))
-                        return MockResponse().setBody("late")
-                    }
-                    // Real TCP read remains open after one byte; declared body cannot finish.
-                    return MockResponse().setBody("p").setHeader("Content-Length", 500)
+                    check(release.await(5, TimeUnit.SECONDS))
+                    return MockResponse().setBody("late")
                 }
             }
-            val bodyRead = CountDownLatch(1)
             val canceled = CountDownLatch(1)
             val terminal = CountDownLatch(1)
             val target = AtomicReference<Call>()
-            val http = client().newBuilder().eventListenerFactory { call ->
+            // A generous read timeout keeps "terminated" attributable to cancel alone: a read
+            // timeout cannot fire inside the terminal budget asserted below.
+            val http = client(readTimeoutSeconds = 10).newBuilder().eventListenerFactory { call ->
                 target.set(call)
                 object : EventListener() {
-                    override fun responseBodyStart(eventCall: Call) { assertSame(call, eventCall); bodyRead.countDown() }
                     override fun canceled(eventCall: Call) { assertSame(call, eventCall); canceled.countDown() }
                     override fun callFailed(eventCall: Call, ioe: IOException) { assertSame(call, eventCall); terminal.countDown() }
                 }
@@ -81,13 +80,14 @@ class MpvHttpBridgeLifecycleTest {
                 val url = bridge.start(upstream.url("/media").toString(), emptyMap())
                 socket(url, "GET ${URI(url).path} HTTP/1.1").use { local ->
                     assertTrue(arrived.await(3, TimeUnit.SECONDS))
-                    if (!blockHeaders) assertTrue("real response body consumption reached", bodyRead.await(3, TimeUnit.SECONDS))
                     bridge.stop()
-                    // Headers/a partial body may already be buffered; drain to EOF with a socket deadline.
+                    // Headers/a partial body may already be buffered; drain to EOF with a short socket
+                    // deadline so the drain cannot consume the terminal budget that follows it.
+                    local.soTimeout = 1_000
                     while (local.getInputStream().read() != -1) { }
                     assertTrue(canceled.await(3, TimeUnit.SECONDS))
                     assertTrue(target.get().isCanceled())
-                    assertTrue("target I/O terminates before server gate opens", terminal.await(3, TimeUnit.SECONDS))
+                    assertTrue("target I/O terminates before server gate opens", terminal.await(5, TimeUnit.SECONDS))
                     val newer = bridge.start(upstream.url("/new").toString(), emptyMap())
                     release.countDown()
                     upstream.dispatcher = object : Dispatcher() {
@@ -101,6 +101,92 @@ class MpvHttpBridgeLifecycleTest {
         }
     }
 
+    /**
+     * Raw loopback upstream that promises more body bytes than it sends and then reports the
+     * client hang-up. MockWebServer cannot observe 'the client closed the connection', and the
+     * OkHttp callFailed event is not a reliable witness: when bridge.stop() wins the race against
+     * the bridge thread's first write to the already-closed local socket, the failure surfaces
+     * from that write instead of from OkHttp, so callFailed never fires (CI flake on
+     * MpvHttpBridgeLifecycleTest.kt:95). The peer-side hang-up is raised by cancel()/close() on
+     * every interleaving, so it is the scheduling-independent witness for this contract.
+     */
+    private class RawUpstream : java.io.Closeable {
+        private val server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
+        private var peer: Socket? = null
+        val mediaUrl: String get() = "http://127.0.0.1:" + server.localPort + "/media"
+        val requestReceived = CountDownLatch(1)
+        val clientHungUp = CountDownLatch(1)
+        private val worker = Thread({
+            try {
+                val accepted = server.accept()
+                peer = accepted
+                accepted.use {
+                    val input = it.getInputStream()
+                    val head = StringBuilder()
+                    while (!head.endsWith("\r\n\r\n")) {
+                        val byte = input.read()
+                        if (byte == -1) return@use
+                        head.append(byte.toChar())
+                    }
+                    requestReceived.countDown()
+                    it.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 500\r\n\r\n".toByteArray())
+                    it.getOutputStream().flush()
+                    it.soTimeout = 8_000
+                    val hungUp = try {
+                        while (input.read() != -1) { }
+                        true
+                    } catch (_: SocketTimeoutException) {
+                        false
+                    } catch (_: IOException) {
+                        true
+                    }
+                    if (hungUp) clientHungUp.countDown()
+                }
+            } catch (_: IOException) {
+            } finally {
+                runCatching { peer?.close() }
+            }
+        }, "raw-upstream").apply { isDaemon = true; start() }
+        override fun close() {
+            runCatching { server.close() }
+            runCatching { peer?.close() }
+        }
+    }
+
+    @Test fun `stop cancels target upstream while response body cannot finish`() {
+        RawUpstream().use { upstream ->
+            val canceled = CountDownLatch(1)
+            val target = AtomicReference<Call>()
+            val http = client(readTimeoutSeconds = 10).newBuilder().eventListenerFactory { call ->
+                target.set(call)
+                object : EventListener() {
+                    override fun canceled(eventCall: Call) { assertSame(call, eventCall); canceled.countDown() }
+                }
+            }.build()
+            val bridge = MpvHttpBridge(http)
+            try {
+                val url = bridge.start(upstream.mediaUrl, emptyMap())
+                socket(url, "GET " + URI(url).path + " HTTP/1.1").use { local ->
+                    assertTrue("bridge forwarded the request upstream", upstream.requestReceived.await(3, TimeUnit.SECONDS))
+                    bridge.stop()
+                    local.soTimeout = 1_000
+                    while (local.getInputStream().read() != -1) { }
+                    assertTrue(canceled.await(3, TimeUnit.SECONDS))
+                    assertTrue(target.get().isCanceled())
+                    assertTrue("upstream connection must be closed after stop",
+                        upstream.clientHungUp.await(5, TimeUnit.SECONDS))
+                }
+                MockWebServer().use { fresh ->
+                    fresh.start()
+                    fresh.enqueue(MockResponse().setBody("new-session"))
+                    val newer = bridge.start(fresh.url("/new").toString(), emptyMap())
+                    client().newCall(Request.Builder().url(newer).build()).execute().use {
+                        assertEquals("new-session", it.body!!.string())
+                    }
+                }
+            } finally { bridge.stop() }
+        }
+    }
     @Test fun `oversized request header is bounded and never reaches upstream`() {
         MockWebServer().use { upstream ->
             upstream.start()

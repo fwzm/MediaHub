@@ -1,0 +1,27 @@
+
+  configuration:
+    --prefix=/d/mh-servers/lgpl-build/prefix
+    --arch=x86_64
+    --target-os=mingw32
+    --disable-gpl
+    --disable-version3
+    --disable-nonfree
+    --enable-shared
+    --disable-static
+    --disable-autodetect
+    --enable-zlib
+    --enable-d3d11va
+    --enable-d3d12va
+    --enable-schannel
+    --enable-network
+    --enable-w32threads
+    --enable-runtime-cpudetect
+    --disable-debug
+    --disable-doc
+    --disable-htmlpages
+    --disable-manpages
+    --disable-podpages
+    --disable-txtpages
+    --extra-cflags=-O2
+
+Exiting with exit code 0

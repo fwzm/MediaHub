@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Movie
@@ -81,6 +82,8 @@ fun LibraryRoute(
     onBack: () -> Unit,
     onOpenLibrary: (MediaLibrary) -> Unit,
     onOpenItem: (MediaItem) -> Unit,
+    /** 「我的收藏」入口（task-25 / A2）；null = 宿主未接线，不显示入口。 */
+    onOpenFavorites: (() -> Unit)? = null,
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -110,6 +113,11 @@ fun LibraryRoute(
                     }
                 },
                 actions = {
+                    if (onOpenFavorites != null) {
+                        IconButton(onClick = onOpenFavorites) {
+                            Icon(Icons.Default.Favorite, contentDescription = "我的收藏")
+                        }
+                    }
                     if (filterEntryVisible) {
                         IconButton(onClick = { showFilterSheet = true }) {
                             Icon(

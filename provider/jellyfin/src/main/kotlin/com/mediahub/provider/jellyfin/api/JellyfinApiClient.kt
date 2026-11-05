@@ -224,6 +224,79 @@ open class JellyfinApiClient(
         return apiClient.get(url, authenticatedHeaders(token))
     }
 
+    // ---- task-22 / A1：收藏写读（真机验证端点；ADR-039 路由的显式例外，见 JellyfinFavoriteProvider 文档） ----
+
+    /**
+     * 收藏 / 取消收藏：`POST|DELETE /Users/{userId}/FavoriteItems/{itemId}`
+     * （真机验证 Jellyfin 12.2：写成功 200 空体）。
+     *
+     * **禁止** `/Users/{userId}/Favorites/{itemId}`（真服 404；mock 也不得回 200）。
+     * 本方法不判断结果——服务器可能收下写请求但不改状态，真实结果由
+     * [getFavoriteState] 回读决定。
+     */
+    suspend fun setFavorite(token: String, userId: String, itemId: String, favorite: Boolean) {
+        val url = endpointResolver.endpoint("/Users/$userId/FavoriteItems").toHttpUrl().newBuilder()
+            .addPathSegment(itemId)
+            .build()
+            .toString()
+        val headers = authenticatedHeaders(token)
+        if (favorite) {
+            apiClient.postNoContent(url = url, headers = headers)
+        } else {
+            apiClient.deleteNoContent(url = url, headers = headers)
+        }
+    }
+
+    /**
+     * 收藏回读：`GET /Users/{userId}/Items/{itemId}?Fields=UserData`。
+     *
+     * 返回 null = 服务器未返回 `UserData.IsFavorite`（协议破损，由 Provider 层
+     * 转 ProviderException.Parse），不是"未收藏"。
+     *
+     * 路由说明：这是收藏回读的**既有选择**——写端点与回读端点同族（都用
+     * `/Users/{userId}/…`），且两端均以此路径做过真服实测；它**不是** ADR-039
+     * 的现代路由（现代读法是 `/Items/{id}?UserId=`）。该选择仅限收藏，不外溢。
+     */
+    suspend fun getFavoriteState(token: String, userId: String, itemId: String): Boolean? {
+        val url = endpointResolver.endpoint("/Users/$userId/Items").toHttpUrl().newBuilder()
+            .addPathSegment(itemId)
+            .addQueryParameter("Fields", FAVORITE_FIELDS)
+            .build()
+            .toString()
+        val dto: JellyfinFavoriteStateDto = apiClient.get(url, authenticatedHeaders(token))
+        return dto.userData?.isFavorite
+    }
+
+    /**
+     * 收藏列表：`GET /Items?UserId=…&Filters=IsFavorite&Recursive=true&…`
+     * （task-25 / A2「我的收藏」；现代路由，ADR-039）。
+     *
+     * 与写/读回不同族——列表读取没有用户作用域端点问题，走现代 `/Items`。
+     * 服务器侧筛选是**优化不是保证**：调用方必须再按 IsFavorite 兜底过滤。
+     * [limit] 由调用方先 clamp（本方法直接透传 Limit）。
+     */
+    suspend fun getFavoriteItems(
+        token: String,
+        userId: String,
+        limit: Int,
+    ): JellyfinQueryResultDto<JellyfinItemDto> {
+        val url = buildUrl(
+            path = "/Items",
+            query = mapOf(
+                "UserId" to userId,
+                "Filters" to FAVORITE_FILTER,
+                "Recursive" to "true",
+                "IncludeItemTypes" to FAVORITE_ITEM_TYPES,
+                "Fields" to LIST_FIELDS,
+                "EnableUserData" to "true",
+                "EnableTotalRecordCount" to "true",
+                "StartIndex" to "0",
+                "Limit" to limit.toString(),
+            ),
+        )
+        return apiClient.get(url, authenticatedHeaders(token))
+    }
+
     /**
      * 图片地址：GET /Items/{itemId}/Images/{type}?tag&maxWidth&quality。
      *
@@ -272,6 +345,15 @@ open class JellyfinApiClient(
          */
         const val LIST_FIELDS =
             "ParentId,SortName,PrimaryImageAspectRatio,Overview,Genres,ProviderIds"
+
+        /** 收藏回读字段：只要 UserData（官方 ItemFields 值），不拉全量 detail 字段。 */
+        const val FAVORITE_FIELDS = "UserData"
+
+        /** 收藏列表的服务端筛选（官方 ItemFilter 值；仅优化，客户端仍兜底）。 */
+        const val FAVORITE_FILTER = "IsFavorite"
+
+        /** 收藏列表纳入的条目类型（与 Emby 同名同义，不含 BoxSet/Playlist）。 */
+        const val FAVORITE_ITEM_TYPES = "Movie,Series,Episode"
 
         /**
          * 请求体序列化：**encodeDefaults=true** 保证协商开关（EnableDirectStream/

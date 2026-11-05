@@ -7,6 +7,25 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 object Migrations {
 
     /** P2 字幕中心切片一：新增 subtitle_memory 表（匹配记忆，键=视频版本指纹）。 */
+    /**
+     * W6-B：servers 加跨设备来源同步身份（ADR-S001）。
+     *
+     * - sync_source_id：可空（旧记录没有同步身份）+ 唯一索引（同一个同步身份只能对应一条本地来源）；
+     *   SQLite 的唯一索引允许多个 NULL，所以未同步的旧记录不会互相冲突。
+     * - sync_record_revision：非空默认 0，旧记录视为"从未同步"。
+     * - sync_source_type_raw：原始 wire 类型逐字保留，未知类型不丢弃（D3）。
+     */
+    val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE servers ADD COLUMN sync_source_id TEXT")
+            db.execSQL("ALTER TABLE servers ADD COLUMN sync_record_revision INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE servers ADD COLUMN sync_source_type_raw TEXT")
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS index_servers_sync_source_id ON servers(sync_source_id)",
+            )
+        }
+    }
+
     val MIGRATION_3_4 = object : Migration(3, 4) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL(

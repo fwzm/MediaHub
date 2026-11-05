@@ -1,0 +1,43 @@
+=== Emby part 2 2026-10-14T16:09:10+08:00 ===
+token: 01b94f945ee24e69a5a5d64a509bec4b
+userId: a5d8c0447545470fa9e227b942569158
+
+########## /Users/Me variants (Emby returns 500 'Unrecognized Guid format.') ##########
+
+--- X-Emby-Token ---
+Unrecognized Guid format.
+<<HTTP 500>>
+
+--- Authorization-with-Token ---
+Unrecognized Guid format.
+<<HTTP 500>>
+
+--- api_key-query ---
+Unrecognized Guid format.
+<<HTTP 500>>
+
+########## /Users/{userId} (the shape that must be used instead?) ##########
+{"Name":"mh","ServerId":"1271d0a1040046db8c0089cc328bbbf1","Prefix":"M","DateCreated":"2026-10-14T07:59:38.6018989Z","Id":"a5d8c0447545470fa9e227b942569158","HasPassword":true,"HasConfiguredPassword":true,"LastLoginDate":"2026-10-14T08:09:10.3380612Z","LastActivityDate":"2026-10-14T08:09:11.6163547Z","Configuration":{"PlayDefaultAudioTrack":true,"DisplayMissingEpisodes":false,"SubtitleMode":"Smart","OrderedViews":[],"LatestItemsExcludes":[],"MyMediaExcludes":[],"HidePlayedInLatest":true,"HidePlayedInMoreLikeThis":false,"HidePlayedInSuggestions":false,"RememberAudioSelections":true,"RememberSubtitleSelections":true,"EnableNextEpisodeAutoPlay":true,"ResumeRewindSeconds":0,"IntroSkipMode":"ShowButton","EnableLocalPassword":false},"Policy":{"IsAdministrator":true,"IsHidden":false,"IsHiddenRemotely":true,"IsHiddenFromUnusedDevices":false,"IsDisabled":false,"LockedOutDate":0,"AllowTagOrRating":false,"BlockedTags":[],"IsTagBlockingModeInclusive":false,"IncludeTags":[],"EnableUserPreferenceAccess":true,"AccessSchedules":[],"BlockUnratedItems":[],"EnableRemoteControlOfOtherUsers":true,"EnableSharedDeviceControl":true,"EnableRemoteAccess":true,"EnableLiveTvManagement":true,"EnableLiveTvAccess":true,"EnableMediaPlayback":true,"EnableAudioPlaybackTranscoding":true,"EnableVideoPlaybackTranscoding":true,"EnableTranscodingQuality":true,"AutoRemoteQuality":0,"EnablePlaybackRemuxing":true,"EnableContentDeletion":true,"RestrictedFeatures":[],"EnableContentDeletionFromFolders":[],"EnableContentDownloading":true,"EnableSubtitleDownloading":true,"EnableSubtitleManagement":true,"EnableSyncTranscoding":true,"EnableMediaConversion":true,"EnabledChannels":[],"EnableAllChannels":true,"EnabledFolders":[],"EnableAllFolders":true,"InvalidLoginAttemptCount":0,"EnablePublicSharing":true,"RemoteClientBitrateLimit":0,"AuthenticationProviderId":"Emby.Server.Implementations.Library.DefaultAuthenticationProvider","ExcludedSubFolders":[],"SimultaneousStreamLimit":0,"EnabledDevices":[],"EnableAllDevices":true,"AllowCameraUpload":true,"AllowSharingPersonalItems":true}}
+<<HTTP 200>>
+########## library on the existing test media ##########
+--- POST /Library/VirtualFolders ---
+
+<<HTTP 204>>
+--- POST /Library/Refresh ---
+
+<<HTTP 204>>
+--- waiting for the scan (up to 120s) ---
+  t=5s items=3 itemId=5
+
+########## PlaybackInfo (THE comparison point) ##########
+--- POST /Items/5/PlaybackInfo ---
+{"MediaSources":[{"Chapters":[],"Protocol":"File","Id":"mediasource_5","Path":"D:\\deepseek_test\\MediaHub_Win\\.tools\\media\\bbb720.mp4","Type":"Default","Container":"mp4","Size":4999379,"Name":"bbb720","IsRemote":false,"HasMixedProtocols":false,"RunTimeTicks":100000000,"SupportsTranscoding":true,"SupportsDirectStream":true,"SupportsDirectPlay":true,"IsInfiniteStream":false,"RequiresOpening":false,"RequiresClosing":false,"RequiresLooping":false,"SupportsProbing":true,"MediaStreams":[{"Codec":"h264","CodecTag":"avc1","Language":"und","TimeBase":"1/15360","VideoRange":"SDR","DisplayTitle":"720p H264","NalLengthSize":"4","IsInterlaced":false,"BitRate":3996251,"BitDepth":8,"RefFrames":1,"IsDefault":true,"IsForced":false,"IsHearingImpaired":false,"Height":720,"Width":1280,"AverageFrameRate":30,"RealFrameRate":30,"Profile":"High","Type":"Video","AspectRatio":"16:9","Index":0,"IsExternal":false,"IsTextSubtitleStream":false,"SupportsExternalStream":false,"Protocol":"File","PixelFormat":"yuv420p","Level":50,"IsAnamorphic":false,"ExtendedVideoType":"None","ExtendedVideoSubType":"None","ExtendedVideoSubTypeDescription":"None","AttachmentSize":0}],"Formats":[],"Bitrate":3999503,"RequiredHttpHeaders":{},"AddApiKeyToDirectStreamUrl":false,"ReadAtNativeFramerate":false,"ItemId":"5","MimeType":"video/mp4"}],"PlaySessionId":"585613b9e7154cb69166ea74d4fd044e"}
+<<HTTP 200>>
+
+=== PlaySessionId LOCATION analysis ===
+  top-level "PlaySessionId" present : 
+1 occurrence(s)
+  --- top-level keys ---
+  --- every PlaySessionId with 40 chars of left context ---
+
+=== done 2026-10-14T16:09:19+08:00 ===

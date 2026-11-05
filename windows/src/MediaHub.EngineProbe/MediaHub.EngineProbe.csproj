@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    W13 headless engine probe.
+
+    Deliberately has no project reference and no NuGet package: the whole point is to exercise a
+    libmpv build through our own P/Invoke surface, from a process that has no App, no WinUI and no
+    player assembly in it. Everything native is resolved through NativeLibrary.Load on an absolute
+    path so the same executable can be pointed at the GPL baseline and at the LGPL candidate.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>MediaHub.EngineProbe</AssemblyName>
+    <RootNamespace>MediaHub.EngineProbe</RootNamespace>
+    <Platforms>AnyCPU</Platforms>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+</Project>
