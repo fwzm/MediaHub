@@ -31,13 +31,13 @@
 | --- | --- |
 | 建句柄 + 登录 | `IMediaProviderFactory.Create(...)` + `IProviderAuth.AuthenticateAsync(Credentials)`（`windows/src/MediaHub.Providers/ProviderContracts.cs`） |
 | 发现可播放条目 | `IProviderLibrary.GetLibrariesAsync` / `GetItemsAsync(libraryId, PageRequest)`（同上） |
-| 解析播放会话 | `MediaBrowserProvider.ResolvePlaybackAsync`（`windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:254-300`，`SessionId` 来自 `PlaybackInfo`） |
-| 上报开播/进度/停止 | `IProviderProgress.ReportPlaybackStartedAsync` / `ReportProgressAsync` / `ReportFinalProgressAsync`（`ProviderContracts.cs:117`、`ProviderContracts.cs:121`、`ProviderContracts.cs:127`；实现在 `MediaBrowserProvider.cs:347-400`，落到 `/Sessions/Playing`、`/Sessions/Playing/Progress`、`/Sessions/Playing/Stopped`） |
-| 回读位置 | `IProviderProgress.GetResumePositionAsync`（`ProviderContracts.cs:131`，实现 `MediaBrowserProvider.cs:414-418`） |
-| 回读续播列表 | `IProviderProgress.GetContinueWatchingAsync`（`ProviderContracts.cs:130`，实现 `MediaBrowserProvider.cs:402-412`） |
+| 解析播放会话 | `MediaBrowserProvider.ResolvePlaybackAsync`（`windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:269-315`，`SessionId` 来自 `PlaybackInfo`） |
+| 上报开播/进度/停止 | `IProviderProgress.ReportPlaybackStartedAsync` / `ReportProgressAsync` / `ReportFinalProgressAsync`（`ProviderContracts.cs:117`、`ProviderContracts.cs:121`、`ProviderContracts.cs:127`；实现在 `MediaBrowserProvider.cs:362-415`，落到 `/Sessions/Playing`、`/Sessions/Playing/Progress`、`/Sessions/Playing/Stopped`） |
+| 回读位置 | `IProviderProgress.GetResumePositionAsync`（`ProviderContracts.cs:131`，实现 `MediaBrowserProvider.cs:429-433`） |
+| 回读续播列表 | `IProviderProgress.GetContinueWatchingAsync`（`ProviderContracts.cs:130`，实现 `MediaBrowserProvider.cs:417-427`） |
 | 回读详情 | `IProviderDetail.GetItemDetailAsync` |
 
-两点实现事实值得记住：`MediaBrowserProvider.cs:362` 要求 `PlaybackProgress.SessionId` 非空，否则直接拒绝；`MediaBrowserProvider.cs:393` 的上报是 **best-effort**，网络/HTTP 异常被吞掉 —— 所以「上报成功」不能靠返回值判断，只能靠**回读**判断。本探针的每条断言都建立在回读上。
+两点实现事实值得记住：`MediaBrowserProvider.cs:377` 要求 `PlaybackProgress.SessionId` 非空，否则直接拒绝；`MediaBrowserProvider.cs:408` 的上报是 **best-effort**，网络/HTTP 异常被吞掉 —— 所以「上报成功」不能靠返回值判断，只能靠**回读**判断。本探针的每条断言都建立在回读上。
 
 ## 4 四个阶段与 16 条断言
 
@@ -80,7 +80,7 @@
 | API 根 | 无前缀 | 无 `/emby` 前缀（根路径直接服务 API） |
 | 身份头 | `Authorization: MediaBrowser Client=…, Device=…, DeviceId=…, Version=…` | `X-Emby-Authorization` 同格式 |
 | token 头 | 沿用 `Authorization` 头内 `Token="…"` | `X-Emby-Token` + `X-MediaBrowser-Token` 两个头 |
-| `PlaySessionId` 位置 | `PlaybackInfo` 响应根（兼容旧版时才在 `MediaSources[0]`） | 同左（产品 `MediaBrowserProvider.cs:273` 先读根再兜底源） |
+| `PlaySessionId` 位置 | `PlaybackInfo` 响应根（兼容旧版时才在 `MediaSources[0]`） | 同左（产品 `MediaBrowserProvider.cs:288` 先读根再兜底源） |
 | 续播下限 | `MinResumePct=5` | **2%**（本轮二分实测，见 §5.1） |
 | 最短可续播片长 | `MinResumeDurationSeconds=300` | 未在本实例暴露 policy（见 §5.2） |
 | 夹具条目 id | GUID `b22e31da9faf6ef247e19f7b3774dab2` | 短字符串 `34` |
@@ -289,18 +289,18 @@ resume-pointer-count: 20
 resume-pointer-convention: line counts as [System.IO.File]::ReadAllLines; 1 <= from <= to <= line count; the anchor substring must still sit inside the cited range
 
 - cite=windows/src/MediaHub.ResumeProbe/MediaHub.ResumeProbe.csproj:3-11 ; anchor=Deliberately not part of MediaHub.Windows.sln
-- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:254-300 ; anchor=ResolvePlaybackAsync
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:269-315 ; anchor=ResolvePlaybackAsync
 - cite=windows/src/MediaHub.Providers/ProviderContracts.cs:117 ; anchor=ReportPlaybackStartedAsync
 - cite=windows/src/MediaHub.Providers/ProviderContracts.cs:121 ; anchor=Task ReportProgressAsync
 - cite=windows/src/MediaHub.Providers/ProviderContracts.cs:127 ; anchor=ReportFinalProgressAsync
-- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:347-400 ; anchor=ReportProgressAsync
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:362-415 ; anchor=ReportProgressAsync
 - cite=windows/src/MediaHub.Providers/ProviderContracts.cs:131 ; anchor=GetResumePositionAsync
-- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:414-418 ; anchor=GetResumePositionAsync
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:429-433 ; anchor=GetResumePositionAsync
 - cite=windows/src/MediaHub.Providers/ProviderContracts.cs:130 ; anchor=GetContinueWatchingAsync
-- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:402-412 ; anchor=GetContinueWatchingAsync
-- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:273 ; anchor=PlaySessionId
-- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:362 ; anchor=string.IsNullOrWhiteSpace(progress.SessionId)
-- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:393 ; anchor=catch (ProviderException ex) when
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:417-427 ; anchor=GetContinueWatchingAsync
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:288 ; anchor=PlaySessionId
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:377 ; anchor=string.IsNullOrWhiteSpace(progress.SessionId)
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:408 ; anchor=catch (ProviderException ex) when
 - cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserDialect.cs:32 ; anchor=X-Emby-Authorization
 - cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserDialect.cs:39 ; anchor=tokenInAuthHeader: true
 - cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserDialect.cs:64-74 ; anchor=BuildAuthorizationValue

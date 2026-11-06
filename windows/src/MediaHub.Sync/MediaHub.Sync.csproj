@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The one dependency: the Windows ServerType enum that WindowsSourceTypeMap has to stay in sync
+         with. No NuGet packages — the contract layer is pure logic on the shared framework. -->
+    <ProjectReference Include="..\MediaHub.Domain\MediaHub.Domain.csproj" />
+  </ItemGroup>
+</Project>

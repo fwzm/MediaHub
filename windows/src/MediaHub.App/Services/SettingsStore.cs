@@ -105,6 +105,26 @@ public sealed class PersistedServer
     public string Url { get; set; } = "";
     public string? UserName { get; set; }
     public string? RemoteServerId { get; set; }
+
+    /// <summary>
+    /// Cross-device identity of this source (ADR-S001 D5).
+    /// </summary>
+    /// <remarks>
+    /// Derived once from type, normalised address and account, then kept: re-deriving it on every start
+    /// would give a renamed or re-addressed source a new identity, and the peer would show two sources
+    /// where the user has one. Absent for sources that cannot travel (a local folder, an unusable address).
+    /// </remarks>
+    public string? SyncSourceId { get; set; }
+
+    /// <summary>
+    /// Revision of this source as last written by a cross-device apply.
+    /// </summary>
+    /// <remarks>
+    /// Without it the mirror would claim revision 0 forever, so every preview would propose the same
+    /// update again and "already applied" could never be reached. It is the local side of the record
+    /// revision the planner compares (W6-8), not a timestamp.
+    /// </remarks>
+    public long SyncRecordRevision { get; set; }
 }
 
 public sealed class MediaHubSettings
@@ -145,6 +165,15 @@ public sealed class MediaHubSettings
 
     // ---- configured media servers ----
     public List<PersistedServer> Servers { get; set; } = new();
+
+    /// <summary>
+    /// Stable identity of this installation, carried in every sync envelope.
+    /// </summary>
+    /// <remarks>
+    /// Created on first use and then never changed: a regenerated id would make the peer treat this
+    /// device as a different one and re-propose every source as a new conflict.
+    /// </remarks>
+    public string? DeviceId { get; set; }
 
     // ---- local library ----
     public List<string> LocalFolders { get; set; } = new();

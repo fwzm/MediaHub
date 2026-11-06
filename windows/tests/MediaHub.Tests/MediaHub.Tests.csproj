@@ -12,16 +12,34 @@
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\MediaHub.Backup\MediaHub.Backup.csproj" />
+    <!-- W30: the backup writeback adapter lives in its own assembly; tests exercise it end to end. -->
+    <ProjectReference Include="..\..\src\MediaHub.Backup.Providers\MediaHub.Backup.Providers.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Domain\MediaHub.Domain.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Net\MediaHub.Net.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Providers\MediaHub.Providers.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Player\MediaHub.Player.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Player.Mpv\MediaHub.Player.Mpv.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Storage\MediaHub.Storage.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.Sync\MediaHub.Sync.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.SyncCli\MediaHub.SyncCli.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.BackupCli\MediaHub.BackupCli.csproj" />
     <ProjectReference Include="..\MediaHub.TestSupport\MediaHub.TestSupport.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- The playback engine tests need a real media file; it is committed so the tests are hermetic. -->
     <Content Include="..\assets\sample-av.mp4" Link="assets\sample-av.mp4" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Written by the Android Kotlin ArchiveWriter (W6-65); the Windows reader must consume its exact bytes. -->
+    <Content Include="..\assets\android-written-archive.mharchive" Link="assets\android-written-archive.mharchive" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Golden vectors shared with the Android ArchiveEdgeContractTest (W6-67); the bytes are the answer key. -->
+    <Content Include="..\assets\windows-archive-vectors.json" Link="assets\windows-archive-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\windows-pairing-vectors.json" Link="assets\windows-pairing-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\paired-device-vectors.json" Link="assets\paired-device-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Golden vectors for the W6-72 baseline contract; Windows MediaHub.Sync generated them, Kotlin must match byte for byte. -->
+    <Content Include="..\assets\baseline-vectors.json" Link="assets\baseline-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Golden vectors for the cross-platform .mhbackup container (W15); Windows wrote them, the Kotlin twin must match. -->
+    <Content Include="..\assets\backup-vectors.json" Link="assets\backup-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\windows-cli-export.mhbackup" Link="assets\windows-cli-export.mhbackup" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\assets\android-export.mhbackup" Link="assets\android-export.mhbackup" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

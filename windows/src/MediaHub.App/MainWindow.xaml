@@ -77,6 +77,9 @@
         <NavigationViewItem Content="媒体源" Tag="sources">
           <NavigationViewItem.Icon><FontIcon Glyph="&#xE968;" /></NavigationViewItem.Icon>
         </NavigationViewItem>
+        <NavigationViewItem Content="设备同步" Tag="sync">
+          <NavigationViewItem.Icon><FontIcon Glyph="&#xE895;" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
         <NavigationViewItem Content="设置" Tag="settings">
           <NavigationViewItem.Icon><FontIcon Glyph="&#xE713;" /></NavigationViewItem.Icon>
         </NavigationViewItem>

@@ -91,6 +91,7 @@ internal static class MediaBrowserProviderFactorySupport
             Playback = provider,
             Search = provider,
             Progress = provider,
+            ProgressWrite = provider,
             Favorites = provider,
             Subtitle = provider,
             Images = provider,

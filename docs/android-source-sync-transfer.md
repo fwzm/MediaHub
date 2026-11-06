@@ -5547,6 +5547,288 @@ C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-su
 - EXECUTED_PASS（本机 JVM 口径 408/0，androidTest 编译通过）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。
 - 三条负向对照全红并逐字节还原；Windows 侧零改动（C# 仍 1656/1760）。
 
+## §59 W6-90：Windows 结果页也给「已写入」逐条身份（对齐 Android W6-89）
+
+### 59.1 结论先行
+
+- W6-89 只补了 Android：Windows 的 `SourceSyncApplyReport` 仍只有四个计数（Applied / Skipped / Withheld / NotApplied），结果页读到的是「已写入 2 条」，用户没有任何办法核对这 2 条各是哪一条对端来源、变成了本机哪个来源。
+- 同一份数据里 `SourceSyncImportEntry` 一直带着 SyncSourceId / ServerId / DisplayName（`SourceSyncSessionResult.cs`），断点在写入路径：`SourceSyncImportRound.ApplyAsync` 只累加计数与基线记录，没有把「哪条写了」带出来。
+- 本轮把写入路径的逐条记录带进回执：新 `SourceSyncWrittenSource(syncSourceId, serverId, displayName, action)`，`SourceSyncApplyReport.Written` 按写入顺序列条；`SourceSyncWriteOutcome.Written(message, serverId)` 让 App 层写入器交出本机 serverId（`ServerManager.RemoteSourceOutcome` 增第四字段，创建与接管两条成功路径都填）。
+- 文案只有一个来源：`SourceSyncWrittenText.Header(count)`（0 条返回 null，整块消失，不写「已写入 0 条」）与 `.Line(entry)`（「- 标题（身份）」；标题或身份缺失只给另一半，不编造）。删除动作后缀「 · 已从本机移除」——Windows 真的会执行删除，而 Android 明确拒绝（`local-delete-not-supported`），所以 Windows 的行必须读得出「这一条是移除」。
+- 结果页新增 `sync.apply.written.header` / `sync.apply.written.list`，页面只做 ItemsSource 与可见性切换，字全由 presenter 给。
+
+### 59.2 数据流（一处实现，三层消费）
+
+- `MediaHub.Sync`：`SourceSyncImportRound.ApplyAsync` 在每次 `outcome.Applied` 后往 `writtenSources` 追加一条；`Written = writtenSources` 进回执；被判 `Refused` 的写入不出现（保留未应用表示它没有发生）。
+- `MediaHub.App`：`ServerManager.ApplyRemoteSource` / `AdoptRemoteSource` 的成功回执带本机 serverId；删除路径不回传（行已不在，回传一个已消失的 id 会误导）。
+- `SyncPagePresenter`：`SyncApplyResult.WrittenHeader` / `WrittenRows` 由 `SourceSyncWrittenText` 生成；`SyncPage.xaml.cs` 只绑定。
+
+### 59.3 用例与计数
+
+- `SourceSyncImportRoundTests` +5：`AppliedEntriesAreListedWithTheirPeerIdentityAndTitle`（写入顺序 + 身份 + 标题 + 精确行文案）、`WrittenHeaderStaysNullWhenNothingWasWritten`、`WrittenLineNeverInventsTheHalfItDoesNotHave`（缺标题 / 缺身份 / 删除后缀）、`RefusedWritesStayOutOfTheWrittenList`（Withheld 仍计数 1）、`TheLocalIdTheWriterProducedTravelsIntoTheRow`（写入器给的 `sync:...` 覆盖计划里的 id）。
+- `SyncPagePresenterTests` +2：`DescribeResultListsEveryWrittenEntryWithItsIdentity`（header 精确串 + 两行按顺序）、`DescribeResultKeepsTheWrittenListEmptyWhenNothingWasWritten`。
+- 本机 `MediaHub.Tests` **1663 通过 / 0 失败**（1656 → +7）；App 工程 **0 警告 0 错误**（XAML 编译通过）。Android 侧零改动。
+
+### 59.4 四条负向对照（全红，逐字节还原 sha256 一致）
+
+- `Header` 恒 null ⇒ **2 红**（`DescribeResultListsEveryWrittenEntryWithItsIdentity` + `AppliedEntriesAreListedWithTheirPeerIdentityAndTitle`）。
+- 回执 `Written = []` ⇒ **3 红**（上述两条 + `TheLocalIdTheWriterProducedTravelsIntoTheRow`）。
+- `DisplayName = null`（标题丢）⇒ **1 红**。
+- `Line` 丢身份（只给标题）⇒ **4 红**（上述两条之一 + `WrittenLineNeverInventsTheHalfItDoesNotHave` + `WrittenHeaderStaysNullWhenNothingWasWritten`）。
+
+### 59.5 边界与仍未做
+
+- 删除行给对端身份 + 「已从本机移除」，不回传本机 serverId（来源已删）。
+- GUI 未人工验证：本轮只到 XAML 编译通过 + presenter 纯逻辑用例；结果页真实呈现记 **GUI_UNVERIFIED**（workstream ② 需要用户授予空闲窗口，不得自行排程）。
+- 仍未做：跨设备真实核对、真机 instrumentation（**NOT_RUN / DEVICE_UNVERIFIED**）。
+
+### 59.6 状态
+
+- EXECUTED_PASS（本机 1663/0 + App 0 警告 0 错误）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+## §60 W6-91：Windows 结果页给「未写入」逐条原因（对齐 Android W6-82）
+
+### 60.1 结论先行
+
+- 回执里的被拒写入此前只并进 `Withheld` 计数：用户读得到「保留未应用 1 条」，读不到是哪条、为什么。现在每次拒写落成一行「- 标题（身份） · 写入/删除 · 原因」，与写入区同形（W6-89 / W6-90）。
+- 与 Android 的差别：Android 的拒写原因是稳定码 + `refusalReason` 码表；Windows 的写入器（`ServerManager.ApplyRemoteSource` / `AdoptRemoteSource` / `RemoveRemoteSourceAsync`）本来就说人话（「Windows 暂不支持该来源类型：smb」「该来源没有可用地址，已跳过」「本机没有这条来源，已跳过」），所以这一侧不建码表——但保留 Android 那条硬规则：**绝不返回空串**。
+
+### 60.2 数据流（一处实现、三层消费）
+
+- `SourceSyncImportRound.ApplyAsync` 的 else 分支收集 `SourceSyncRefusedSource { SyncSourceId, DisplayName, Action, Reason }`：既覆盖写入器显式返回 `SourceSyncWriteOutcome.Refused(message)`，也覆盖写入器抛 `IOException` / `UnauthorizedAccessException` / `InvalidOperationException` 被折成 Refused 的情形（两者本来就是同一条路径，W6-58）。
+- `SourceSyncApplyReport.Refused` 与 `Written` 按构造互斥：同一条目只会在一个名单里，`Written` 说「真的发生了什么」，`Refused` 说「没发生、以及为什么」。被拒条目仍计入 `Withheld` / `NotApplied`（口径不变）。
+- `SyncApplyPresenter.DescribeResult` → `RefusedHeader` / `RefusedRows`；页面 `sync.apply.refused.header` / `sync.apply.refused.list` 只做 `ItemsSource`、可见性与清场，不拼字。
+- `SourceSyncRefusedText.Header/Line/Reason` 是唯一文案来源：`Header` 0 条返回 null（0 条不占版面）；`Line` 标题或身份缺一只给另一半，两者都缺给「（未知身份）」；动作词四种（写入/删除/接管/更新）；空原因回退成「写入器没有说明原因」，避免「- 标题（身份） · 写入 · 」这种半句话。
+
+### 60.3 用例与计数
+
+- `SourceSyncImportRoundTests` +4：逐条原因（含身份、标题、动作、精确行文案）1 例；`Header` 0 条为 null + 缺一半不编造 + 空原因整句 + 删除动作词 1 例；写入器抛异常也进同一名单且计数一致 1 例；写入/未写入两名单互斥 1 例。
+- `SyncPagePresenterTests` +2：`DescribeResult` 逐条（顺序、身份、原因）1 例；没有拒写时两个字段都为空 1 例。
+- `MediaHub.Tests` 1663 → **1669**（0 失败）；App 工程 **0 警告 0 错误**（XAML 编译覆盖两个新标签，见 `D:/mh-verify/w691-app-build.log`）。
+
+### 60.4 四条负向对照
+
+| 变异 | 红 | 命中用例 |
+| --- | --- | --- |
+| `SourceSyncRefusedText.Header` 的「未写入」改成「已写入」 | 2 | 逐条原因 + presenter 逐条 |
+| 回执 `Refused = []` | 4 | 上述两条 + 抛异常 + 两名单互斥 |
+| `Line` 丢掉原因段 | 3 | 逐条原因 + presenter 逐条 + 缺一半/整句 |
+| 空原因不回退整句（返回空串） | 1 | 缺一半/整句 |
+
+每个变异写入后 `dotnet test` 均以预期条数失败，跑完从磁盘备份逐字节还原（sha256 比对 true）；日志 `D:/mh-verify/w691-neg-A-header-says-written.log` / `-B-report-drops-refused.log` / `-C-line-drops-reason.log` / `-D-blank-reason-stays-blank.log`，备份 `w691-backup-*.cs`。
+
+### 60.5 边界与仍未做
+
+- 被审批闸门永久扣住（gate `Withheld`）的条目在 Windows 仍只在计数里——Android 有 `withheldEntries` / `withheldHeader`（W6-83）的对等物尚未移植；这是下一步候选。
+- 拒写原因沿用 `RemoteSourceOutcome` 的口径：不含地址、不含凭据（原因文本会进日志与界面）。
+- 结果页真实呈现仍 **GUI_UNVERIFIED**（本轮只到 XAML 编译通过 + presenter 纯逻辑用例）；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 60.6 状态
+
+- EXECUTED_PASS（本机 1669/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+## §61 W6-92：Windows 结果页给「扣住」逐条可见（对齐 Android W6-83）
+
+### 61.1 结论先行
+
+- W6-91 让「写入器拒写」逐条可见，但「保留未应用」还有另一半：被审批闸门**永久扣住**的条目（带凭据、未知来源类型、Windows 不支持）。它们点多少次「允许」都不会写，此前只出现在计数里。
+- 本轮把这一半也拆成行：区头沿用 Android W6-83 的原句「保留未应用 N 条（扣住，点允许也不会写）」，行是「- 标题（身份） · 原因句」。
+
+### 61.2 数据流（一个数、两份清单）
+
+- `SourceSyncApplyReport.Withheld` 的口径不变：**闸门扣住 + 写入器拒写**。新增 `WithheldEntries` 只收闸门扣住的那一半，`Refused`（W6-91）只收写入器拒写的那一半，两者**按构造互斥**，相加正好等于用户读到的那个数。
+- 收集点在 `ApplyAsync` 里 `SourceSyncApprovalGate.Decide` 之后：逐个 `gate.Withheld` 取 `SyncSourceId`（trim）、`DisplayName`、`Reason`（稳定码），顺序就是闸门的顺序。
+- 原因句不另造一套词：`SourceSyncWithheldText.Reason` 直接调 `SyncApplyPresenter.DescribeGateReason`，与结果行里的「不可应用：…」是同一句；空码回「对端没有说明原因」，未知码原样带出。这样同一个码不会在一轮里出现两种说法。
+- 页面：`sync.apply.withheld.header` / `sync.apply.withheld.list`（`SyncApplyResult.WithheldHeader` / `WithheldRows` 驱动），位置在「已写入」区之上、与 Android 结果页的顺序一致；`ClearApplyPreview(keepResult:false)` 一并清空。
+
+### 61.3 用例与计数
+
+- `SourceSyncImportRoundTests` +3：闸门扣住逐条（精确行「- 卧室 Emby（local-dddd） · 带凭据，需人工迁移（本次不会写入）」+ 计数 + 未写入任何行）；0 条 header 为 null + 缺一半不编造 + 空码整句 + 未知码原样；闸门扣住与写入器拒写**两清单互斥且相加等于计数**。
+- `SyncPagePresenterTests` +2：`DescribeResult` 逐条（身份 + 原因句）；空回执时两个字段皆空。
+- `MediaHub.Tests` 1669 → **1674**（0 失败）；App 工程 **0 警告 0 错误**（XAML 覆盖两个新标签，见 `D:/mh-verify/w692-app-build.log`）。
+
+### 61.4 四条负向对照
+
+| 变异 | 红 | 命中用例 |
+| --- | --- | --- |
+| 区头词「保留未应用」改成「已写入」 | 3 | 逐条（两端各一）+ 精确行 |
+| 回执 `WithheldEntries = []` | 3 | 逐条 + 互斥相加 |
+| `Line` 丢掉身份规则（只给标题） | 3 | 逐条 + 缺一半不编造 |
+| 原因不回退整句（空码返回空串 / 未知码不再翻译） | 3 | 逐条 + 精确行 |
+
+每个变异写入后按 5 条新用例的过滤器跑，均以预期条数失败；跑完从磁盘备份逐字节还原（sha256 比对 true）。日志 `D:/mh-verify/w692-neg-A-header-says-written.log` / `-B-report-drops-withheld.log` / `-C-line-drops-identity-rule.log` / `-D-blank-reason-stays-blank.log`；备份 `w692-backup-*.cs`。
+
+### 61.5 与 Android 的差异（如实记）
+
+- Android 的 `withheldLine` 直接拼「标题（身份）」，假定两端都在；Windows 沿用 W6-91 的「缺一半不编造」规则（标题或身份缺失只给另一半，都缺给「（未知身份）」）。
+- Android 的「下一步」出口（W6-84 复制身份 / W6-85 预览页出口）在 Windows 侧没有对等物，是本轮**未做**的部分。
+
+### 61.6 边界与仍未做
+
+- 扣住原因沿用闸门的稳定码，不含地址、不含凭据（原因文本会进日志与界面）。
+- `BlockingLabels`（结果行里那句「不可应用：…」）保持原样，本轮只是把同一批码逐条摊开；两处由同一个 `DescribeGateReason` 保证不漂移。
+- 结果页真实呈现仍 **GUI_UNVERIFIED**（本轮只到 XAML 编译通过 + presenter 纯逻辑用例）；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 61.7 状态
+
+- EXECUTED_PASS（本机 1674/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+
+## §62 W6-93：Windows 扣住条目也有出路与复制身份（对齐 Android W6-84/W6-85）
+
+### 62.1 结论先行
+
+- W6-92 把「被闸门扣住」的条目逐条摊开了，但只给了原因：用户看到「带凭据，需人工迁移（本次不会写入）」「Windows 暂不支持该来源类型」，知道**为什么**写不进去，却不知道**下一步干什么**，也没法把手上唯一的线索（对端身份）拿走。
+- 本轮把 Android W6-84 的「唯一出口 + 复制身份」搬到 Windows：`SyncApplyResult.WithheldRows` 从纯字符串清单升级为 `SourceSyncWithheldRow`（`Text` / `NextStep` / `CopyText` / `CanCopy` / `CopyLabel`）（W6-95 起该行形状提升为两条清单共用的 `SourceSyncCopyRow`，见 §64），结果页每行右侧一个按钮。
+- 出口只有一张码表（`SourceSyncWithheldText.NextStep`），和 Android 的 `nextStepOfCode` 逐句同文；**未知码返回 null 而不是编建议**——编一句听起来合理的做法，比不说更害人。
+- 按钮文案分两态：可复制时是「复制身份」，不可复制时是「无身份可复制」并且按钮**禁用**（`CanCopy=false`）。禁用而不是隐藏，是因为「这条没有身份可复制」本身是要说出来的事实。
+
+### 62.2 数据流（一张码表、两种出口）
+
+- 码表（`windows/src/MediaHub.Sync/SourceSyncWithheldSource.cs`）：`NextStep(code)` 先 trim，空码返回 null；`ambiguous-` 前缀（`SourceSyncApprovalGate.AmbiguousReasonPrefix`）走歧义句；四条显式码与 Android 同句——`secrets-require-approval`（在对端清空凭据后重新导出信封，或在本机手动新建同样的来源）、`not-supported-on-windows`（等本机版本支持这种来源类型；再点几次允许也不会进来）、`unknown-source-type`（把两端升到同一版本后重新导出信封）、`same-revision-different-content`（两端内容版本号相同但不一致，本页一律不放行，先手工对齐再导出）；`_ => null`。
+- 行组装（`Rows(entries)`）：`Text` 复用 W6-92 的「标题（身份）· 原因」；`NextStep = NextStep(entry.Reason) ?? ""`（空串在下标层面表示「没有出口」，XAML 里空 TextBlock 自然不渲染）；`identity = entry.SyncSourceId.Trim()`；`CopyText = canCopy ? identity : ""`，`canCopy = identity.Length > 0`；`CopyLabel` 由 `CanCopy` 派生。**CopyText 只可能是对端身份，不会拿标题充数**（拿标题当身份去对端检索是死路）。
+- 页面（`windows/src/MediaHub.App/Views/SyncPage.xaml` / `.xaml.cs`）：`ApplyWithheldList` 加 `ItemTemplate`——左列两个 `TextBlock`（`Text`；`NextStep` 用 `SystemFillColorCautionBrush` 提色），右列 `Button Content="{Binding CopyLabel}" IsEnabled="{Binding CanCopy}" Tag="{Binding}" Click="OnCopyWithheldIdentityClick"`，AutomationId `sync.apply.withheld.copy`。点击处理与既有的 `OnCopyCodeClick` 同一套：`DataPackage.SetText` + `Clipboard.SetContent`，成功给「来源身份已复制」提示（并说明拿去对端怎么用），`COMException` / `InvalidOperationException` 折成警告条；`CanCopy=false` 时若仍被点到（键盘可达）给「没有可复制的来源身份」。
+- App 工程里没有任何 `IValueConverter`（全项目 grep 命中 0），所以按钮的禁用态用 `IsEnabled` 绑定布尔，而不是靠转换器算 Visibility——这是 App 既有范式（`AllowLabel` 也是把解释写进按钮文案）。
+
+### 62.3 用例与计数
+
+- `windows/tests/MediaHub.Tests` 新增 4 例（1674 → **1678**）：
+- 码表完全覆盖闸门可能给出的码且不外推：四条码逐一钉**整句**、`ambiguous-legacy-identity` 走歧义句、`something-new` / 空串 / 全空白 / null 一律 null。
+- 每一行都同时带上出路与可复制身份：身份与标题带空格时两侧都要 trim（行是「- 卧室 Emby（local-dddd） · 带凭据，需人工迁移（本次不会写入）」、`CopyText="local-dddd"`、`CanCopy=true`、`CopyLabel="复制身份"`、`NextStep` 含「凭据清空」）。
+- 没有身份的行要说出来而不是编：`CopyText=""`、`CanCopy=false`、`CopyLabel="无身份可复制"`；`Rows([])` 返回空清单。
+- presenter 侧两例：`WithheldRows` 逐条的 Text/NextStep/CopyText/CanCopy/CopyLabel 都钉死；空回执时清单为空。
+- 本机：`dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj --no-restore`（cwd `D:/mh-w6`）→ **1678 / 0**（1674 → +4），日志 `D:/mh-verify/w693-test2.log`；App 构建 `dotnet build windows/src/MediaHub.App/MediaHub.App.csproj -c Debug -p:Platform=x64 -p:MediaHubBinRoot=D:/mh-out-w6/ --no-restore` → **0 警告 0 错误**（XAML 编译通过），日志 `D:/mh-verify/w693-app-build.log`。
+
+### 62.4 四条负向对照（每条都是「改了就该红」，跑完逐字节还原，sha256 相等）
+
+| 变异 | 红 |
+| --- | --- |
+| 未知码编一句「下一步：稍后再试。」（`_ => null` → `_ => "下一步：稍后再试。"`） | 3 |
+| 复制内容改成标题（`CopyText = canCopy ? identity : ""` → `entry.DisplayName?.Trim() ?? ""`） | 4 |
+| 行丢掉出路（`NextStep = ...` → `NextStep = ""`） | 3 |
+| 按钮永不禁用（`bool canCopy = identity.Length > 0` → `= true`） | 2 |
+
+日志 `D:/mh-verify/w693-neg-A-unknown-code-gets-invented-advice.log` / `-B-payload-becomes-the-title.log` / `-C-row-drops-the-way-out.log` / `-D-copy-button-never-disabled.log`；备份 `D:/mh-verify/w693-backup-withheld.cs`（+ `.sha256`）。
+
+### 62.5 与 Android 的差异（如实记）
+
+- 码表与句子是同一张（含歧义前缀句），这是刻意的：两端对同一个码说同一句，用户在两台机器上看到的建议不会打架。
+- Android 的「复制身份」按钮在结果页与预览页都有出口；Windows 本轮只落到**结果页**——预览页条目（`SyncApplyRow`）仍只有 `BlockReason`，没有出路。
+- Android 的 `withheldLine` 直接拼「标题（身份）」，Windows 沿用 W6-91/W6-92 的「缺一半不编造」规则；因此 Windows 的按钮还可能显示「无身份可复制」，Android 无此态。
+
+### 62.6 边界与仍未做
+
+- 出口只是文案，不改任何状态：不写库、不放行、不改闸门判据；复制的也只是对端身份字符串。
+- 码表内容进日志与界面，**不含地址、不含凭据**（原因码本身是稳定码，不含隐私）。
+- 结果页真实呈现仍 **GUI_UNVERIFIED**（本轮只到 XAML 编译通过 + presenter/round 纯逻辑用例，没有在真窗口里点过那个按钮）；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+- 仍未做：预览页条目的出路（Android W6-85 对等物）。
+
+### 62.7 状态
+
+- EXECUTED_PASS（本机 1678/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+
+- 提交：W6 树 `feature/cross-device-source-sync`（代码与文档同一提交；提交号以 PR #39 head 为准——docs 正文不自指 SHA，否则每次改写提交都会让自己写下的哈希失效）。四条 exact-SHA CI 按该 head 跑，run 号与计数见 PR 正文与本轮账本。
+
+## §63 W6-94：Windows 预览页条目也给出路（对齐 Android W6-85）
+
+### 63.1 结论先行
+
+- W6-93 让「被扣住」的条目在**结果页**有了出路与复制身份，但用户是在**预览页**逐条做决定的：那一页的每一行只有 `BlockReason`（而且只对「永不允许」的行给原因句），看完原因仍然不知道下一步该干什么。Android W6-85 早已在预览条目上给出路，本轮补齐这个对等物。
+- 做法不是「再抄一份码表」，而是**把 W6-93 的码表搬到两处共用的位置**：`SyncApplyPresenter.NextStep`（与 `DescribeGateReason` / `DescribeBlockReason` 同处，presenter 是措辞的唯一出口），`SourceSyncWithheldText.NextStep` 退化成一层委托。
+- 预览行 `SyncApplyRow` 新增 `NextStep`，`BuildRow` 用 `item.Reason` 查同一张表；界面把一个只读 `TextBlock` 绑上去（AutomationId `sync.entry.next.step`），空串自然不渲染。
+- 仍然是「编建议比不说更害人」：未知码返回 `null` → 空串 → 不渲染；**没有任何一处为一个码写出两句话**，有硬保证（一条用例专门钉「表只有一处」）。
+
+### 63.2 数据流（一张码表、两处读）
+
+- 码表：`windows/src/MediaHub.Sync/SyncPagePresenter.cs` 的 `public static string? NextStep(string? code)`——先 `Trim`，空串返回 `null`；`SourceSyncApprovalGate.AmbiguousReasonPrefix`（`ambiguous-`）走前缀句；四条稳定码各一句（`secrets-require-approval` / `not-supported-on-windows` / `unknown-source-type` / `same-revision-different-content`）；`_ => null`。
+- 读点一（本轮新增）：预览行 `BuildRow` → `NextStep = NextStep(item.Reason) ?? string.Empty` → 视图层 `ApplyRow` 记录新增一个 `string NextStep` → `ReloadApplyRows()` 映射 → XAML 预览卡片里多一个 `TextBlock`（`Foreground=SystemFillColorCautionBrush`，与扣住清单同色）。
+- 读点二（W6-93 既有）：`SyncApplyResult.WithheldRows` → `SourceSyncWithheldText.Rows(...)` → 每行 `SourceSyncCopyRow.NextStep`（W6-95 起同一行形状）。
+- 这两个读点现在**必然一致**，因为第二处只是第一处的委托；委托方法体剩下的唯一一行是 `=> SyncApplyPresenter.NextStep(code);`。
+
+### 63.3 用例与计数
+
+- `windows/tests/MediaHub.Tests/SyncPagePresenterTests.cs` +2 例：
+  - `EveryPreviewRowCarriesTheWayOutItsCodeHasAndInventsNothingForTheOthers`：三条记录（带凭据、类型 `fn-nas`、普通）→ 前两条整句精确相等（判据是被测字符串里复制出来的），普通行断言 `Assert.Empty(row.NextStep)`。
+  - `TheWayOutTableHasOneHomeSoThePreviewAndTheWithheldListCannotDrift`：八个输入（四条 `SyncRoundReasons` 常量、歧义前缀拼出的码、`something-new`、空串、全空白）逐条断言两个入口返回值相等，并单独断言未知码与 `null` 都返回 `null`。
+- 本机 `MediaHub.Tests` **1678 → 1680 / 0**（日志 `D:/mh-verify/w694-test1.log`）；App 构建 0 警告 0 错误（XAML 编译通过，日志 `D:/mh-verify/w694-app-build.log`）。
+- Android 侧零改动：本轮只在 W6 树的 Windows 工程内动，`uniqueTests` 仍是 2446 的对照口径。
+
+### 63.4 四条负向对照（每条都真红，跑完逐字节还原）
+
+| 变异 | 红 |
+| --- | --- |
+| 预览行不查出路（`NextStep = string.Empty`） | 1 |
+| 未知码编一句建议（`_ => null` → `_ => "下一步：稍后再试。"`） | 5 |
+| 委托恒 `null`（`=> null;`） | 5 |
+| 预览行查错码（`item.SyncSourceId`） | 1 |
+
+日志 `D:/mh-verify/w694-neg-A-preview-drops-the-way-out.log` / `-B-unknown-code-gets-invented-advice.log` / `-C-delegate-always-null.log` / `-D-preview-reads-the-wrong-code.log`；备份 `D:/mh-verify/w694-backup-SyncPagePresenter.cs` 等 5 个文件。
+
+### 63.5 与 Android 的差异
+
+- 句子逐条同文（与 W6-93 一致），包括「再点几次允许也不会进来」这句略带口吻的实话。
+- Android 的 `nextStepOfCode` 在 `SourceSyncImportCopy`（feature 层）里，Windows 放在 presenter（Sync 层）：两端分层不同，但都只有一个出口；Windows 这一轮把「一个出口」从「同一个类」收紧到「同一个方法」。
+- Android 预览行的出路与结果页共用同一函数；Windows 现在同样如此，差别只在 Windows 的结果页那一支是 W6-93 已有的 `SourceSyncWithheldText` 委托。
+- Windows 的预览行不复制身份（Android W6-85 的预览卡片也没有复制按钮），复制身份仍只在结果页的扣住清单上。
+
+### 63.6 边界与仍未做
+
+- 出路只是文案：不改闸门判据、不改任何状态、不写库；预览页点「允许」的语义一字未动。
+- 界面呈现仍 **GUI_UNVERIFIED**：本轮只到 XAML 编译通过 + presenter 纯逻辑用例，没有在真窗口里看过那个 `TextBlock`；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+- 仍未做：`SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（仅测试可达）；设备解绑后的界面确认态；Windows 删除链补真 SQLite 证据。
+
+### 63.7 状态
+
+- EXECUTED_PASS（本机 1680/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+
+- 提交：W6 树 `feature/cross-device-source-sync`（代码与文档同一提交；提交号以 PR #39 head 为准——docs 正文不自指 SHA）。四条 exact-SHA CI 按该 head 跑，run 号与计数见 PR 正文与本轮账本。
+## §64 W6-95：Windows「未写入」区也有复制身份，两条保留清单共用一个行形状（对齐 Android W6-82/W6-83）
+
+### 64.1 结论先行
+
+W6-91 让结果页能逐条看到「哪条没写进去、为什么」，但那一行**只有字**：对端身份混在标题后面的括号里，用户在几百条清单里无法拿它去对端检索（Android 在拒写清单上给的是「复制身份」按钮）。这一轮把 Android 的这一半补齐，并顺手拆掉一个即将出现的分叉：扣住清单（W6-93）与拒写清单现在绑定**同一个行形状**，复制按钮的载荷语义只有一处定义。
+
+### 64.2 一处形状、两条清单
+
+- 新文件 `SourceSyncCopyRow.cs`：行记录 `SourceSyncCopyRow { Text, NextStep, CopyText, CanCopy, CopyLabel }` 与两个标签常量 `SourceSyncCopyText.CopyIdentity = 复制身份` / `NoCopyableIdentity = 无身份可复制`。复制按钮的载荷与「没有身份时不编造」的判据只在这里定义一次。
+- `SourceSyncWithheldSource.cs`：W6-93 的 `SourceSyncWithheldRow` 记录整段搬进新文件，`Rows(...)` 改返回 `SourceSyncCopyRow`；`CopyIdentity` / `NoCopyableIdentity` 退化为指向共享常量的委托常量（C# 允许 const 引用 const），因此 W6-93 的旧用例一字未改仍全绿。
+- `SourceSyncRefusedSource.cs`：W6-91 的 `Lines(...) -> IReadOnlyList<string>` 换成 `Rows(...) -> IReadOnlyList<SourceSyncCopyRow>`：逐条 `identity = SyncSourceId.Trim()`、`canCopy = identity.Length > 0`，行里 `Text = Line(entry)`、载荷只在有身份时给。
+- 拒写行**故意不给「下一步」**：原因是写入器自己那句整话（类型不支持 / 地址不可用 / 存储失败），用户能拿它去行动的是对端身份，不是本页的按钮；Android 的拒写清单同样只有复制身份、没有 next-step（W6-82 与 W6-85 的分工），这一条在用例里被钉成 `Assert.Equal(string.Empty, row.NextStep)`。
+- 页面：`ApplyRefusedList`（`sync.apply.refused.list`）补上与扣住清单同构的 `ItemTemplate`（左列 `Text` + `NextStep` 取证色、右列按钮 `Content="{Binding CopyLabel}" IsEnabled="{Binding CanCopy}"`，AutomationId `sync.apply.refused.copy`）；两条清单各自的 AutomationId 保留，供后续 GUI 验收脚本定位。
+- 一个处理器服务两条清单：code-behind 的 `OnCopyWithheldIdentityClick` 改名 `OnCopyRowIdentityClick`、Tag 型别改 `SourceSyncCopyRow`——同一行为不可能只在一条清单上被改对。
+- presenter：`SyncApplyResult.RefusedRows` 与 `WithheldRows` 同为 `IReadOnlyList<SourceSyncCopyRow>`，由 `SourceSyncRefusedText.Rows(...)` / `SourceSyncWithheldText.Rows(...)` 填充；两处 KDoc 都写明「typed rather than a string list」的理由（按钮要的是可复制的载荷，不是用户选不中的文字）。
+
+### 64.3 用例与计数
+
+- `MediaHub.Tests` 1680 → **1683**（净增 3）。拒写侧 2 例：`EveryRefusedRowCarriesTheIdentityTheSameButtonCopiesAndInventsNoWayOut`（逐条精确串 + 载荷 = trim 后身份 + 无身份行是空载荷且 `CanCopy=false` + `NextStep` 为空）、`TheTwoKeptBackListsBindTheSameRowShapeSoTheCopyButtonCannotDiverge`（两条清单的 `CopyLabel` 与载荷在同一身份下必须相等，且都来自 `SourceSyncCopyText`）；presenter 侧 1 例：`DescribeResultCarriesTheCopyableIdentityOnEveryRefusedRowEvenThoughItOffersNoWayOut`。
+- App 工程 `dotnet build` **0 警告 0 错误**（XAML 编译通过，日志 `D:/mh-verify/w695-app-build.log`）。
+- Android 侧零改动：`uniqueTests` 2446 对照不变、`--required-suite` 60、VI 137×2 + 19 mandatory；主树与 PR #33 未动（Windows-only 轮）。
+
+### 64.4 四条负向对照（每条都真红，跑完逐字节还原）
+
+| 变异 | 红 |
+| --- | --- |
+| 拒写行的载荷改成标题（`CopyText = DisplayName`） | 4 |
+| 无身份也允许复制（`canCopy = true`） | 2 |
+| 拒写行编一句出路（`NextStep = 稍后再试`） | 3 |
+| 扣住清单的常量标签脱离共享常量（`CopyIdentity = 复制`） | 2 |
+
+日志 `D:/mh-verify/w695-neg-A-refused-copy-becomes-the-title.log` / `-B-refused-copy-never-disabled.log` / `-C-refused-row-invents-a-way-out.log` / `-D-withheld-alias-breaks-from-the-shared-home.log`；实现态快照 `D:/mh-verify/w695-impl-SourceSyncRefusedSource.cs` 与 `-SourceSyncWithheldSource.cs`（负向对照只许用这两份还原）。
+
+### 64.5 与 Android 的差异
+
+- 拒写清单两端都**没有** next-step，只有复制身份；扣住清单两端都有 next-step（Android W6-84、Windows W6-93）——分工一致。
+- Android 的行是一个 Composable 上的三个参数，Windows 的行是一个 record；两端都把「没有身份就不给按钮载荷」写成显式判据，而不是让按钮复制一个空串。
+- Android 的标签常量在 `SourceSyncImportCopy`，Windows 在 `SourceSyncCopyText`：分层不同，但都只有一处。
+
+### 64.6 边界与仍未做
+
+- 这一轮只补「可复制」：不改闸门、不改写入器、不改任何状态；被拒条目仍然进 `Withheld` 计数（`Withheld = 闸门扣住 + 写入失败`），两条清单相加等于它。
+- 界面仍 **GUI_UNVERIFIED**：只到 XAML 编译 + presenter 逻辑用例，没有在真窗口里点过那个按钮；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+- 仍未做：`SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（仅测试可达）；设备解绑后的界面确认态；Windows 删除链补真 SQLite 证据。
+
+### 64.7 状态
+
+- EXECUTED_PASS（本机 1683/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+- 本轮踩到的两件事（都写进教训）：①负向对照的「还原」第一次用了**改动前**备份，把两个源文件整个退回上一轮 ⇒ 立即重做改动，并改为先存「实现态快照」再变异；②本机 dotnet 的 env 必须用 Windows 原生反斜杠，正斜杠的 `LOCALAPPDATA` 会让凭据库目录用例红（与代码无关）。
+- 提交：W6 树 `feature/cross-device-source-sync`（代码与文档同一提交；提交号以 PR #39 head 为准——docs 正文不自指 SHA）。四条 exact-SHA CI 按该 head 跑，run 号与计数见 PR 正文与本轮账本。
 ## §65 W6-96：接收口不再有「收到即写库」的构造器（结构上不给载具）
 
 - 编号说明：§59–§64 是 Windows 侧轮次（W6-90…W6-95），只落在跨设备分支；本节合并后紧随 §64。
@@ -5939,6 +6221,137 @@ Hilt `Logger`（`CompositeLogger(LogcatLogger(), MemoryLogger(LogBuffer()))`）�
 - **IMPLEMENTED_UNVERIFIED**：exact-SHA CI 见 PR 正文；生产接线的端到端证据未取（见 §70.7）；
   Windows C# 1683 通过 / 0 失败，本轮零改动；
 - 主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+## §71 W6-102：Windows 的一轮汇总日志也说出是对端哪一轮（对齐 Android W6-101）
+
+### 71.1 结论先行
+
+- Windows 侧**原本就有一行汇总日志**（`SourceSyncService.ApplyApprovedAsync` 里的 `_log.Info("sync", …)`），
+  但它只说「写入 N 条，跳过 N 条，保留未应用 N 条」：**没有对端与快照身份、没有「扣住 vs 写入被拒」的拆分、没有移除条数**；
+  更关键的是这几行的措辞写在 App 层，而 `MediaHub.Tests` 不引用 `MediaHub.App`（csproj 只引 Domain/Net/Providers/Player/Mpv/Storage/Sync/SyncCli/TestSupport），
+  于是这段日志**零测试覆盖** —— 改坏了没有任何用例会红。
+- W6-102 把「一轮汇总该说什么」抽到 `windows/src/MediaHub.Sync/SourceSyncRoundSummary.cs` 的 `SourceSyncRoundSummaryText`
+  （`Identity` / `InfoLine` / `WarnLine` 三个静态方法），App 只决定「何时写」；于是同一句能被测试逐字钉住，且措辞里**不含任何来源名、地址与凭据**。
+- 汇总行现在是：
+  `已应用对端信封：对端 device-a · 快照 snap-1 · 写入 3 条 · 移除 1 条 · 跳过 1 条 · 保留未应用 3 条（扣住 2 · 写入被拒 1） · 本机基线已更新（不含任何凭据）`。
+
+### 71.2 一处措辞、两处消费
+
+- `InfoLine(deviceId, snapshotId, report)`：`移除` 由 `report.Written` 里 `Action == SourceSyncAction.Delete` 的条数算出，
+  **不做「写入 − 扣住」这类减法**；扣住与被拒分别读 `report.Withheld` 与 `report.Refused.Count` —— 两者相加才是 `Withheld` 计数，
+  这正是 Android W6-92/W6-95 定下的「一份计数、两份清单」分工（扣住清单进闸门，被拒清单进写入结果）。
+- `WarnLine(report)`：`Withheld <= 0` 返回 `null`（零条不占版面），否则一句 warn；`ApplyApprovedAsync` 只在返回值非 null 时写。
+- `Identity(deviceId, snapshotId)`：只给存在的那半边（「对端 device-a」或「快照 snap-1」），两边都没有时不编造，说「对端与快照未知」。
+- 与 Android 的对照：Android W6-101 的行是 `sync-round-applied:device=… snapshot=… applied=… skipped=… withheld=… refused=… removed=…`（机器可读的 key=value，供 logcat 与诊断导出检索），
+  Windows 是中文整句（面向 `LogService.Export()` 的人工报告）。两端都一样：一轮只写一行、只记计数与内部标识、来源名/端点/凭据一律不进。
+
+### 71.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.Sync/SourceSyncRoundSummary.cs`（新） | `SourceSyncRoundSummaryText`：`Identity` / `InfoLine` / `WarnLine`，本轮所有措辞的唯一权威 |
+| `windows/src/MediaHub.App/Services/SourceSyncService.cs` | `ApplyApprovedAsync` 的日志块改为 `WarnLine` + `InfoLine(preview.Envelope.DeviceId, preview.Envelope.SnapshotId, result)`，只决定何时写 |
+| `windows/tests/MediaHub.Tests/SourceSyncRoundSummaryTests.cs`（新） | 4 例：逐字整句、安全不变式、缺身份不编造、warn 只在扣住时出现 |
+
+### 71.4 用例与计数
+
+- `MediaHub.Tests` **1683 → 1687**（+4，全部是新文件里的纯文本用例）；App 工程 `dotnet build windows/src/MediaHub.App` 为 **0 警告 0 错误**（XAML 与 C# 都编译过，接线不是「只在源码里看起来对」）。
+- Android 侧零改动，`uniqueTests` 仍 **2467**、`--required-suite` 仍 **60**（本轮只改 `windows/**`，CI 的 Android 侧是未改动对照）。
+- 本机证据：`D:/mh-verify/w6102-test1.log`（`已通过 1687 / 失败 0`）、`D:/mh-verify/w6102-app-build.log`（0 警告 0 错误）。
+
+### 71.5 四条负向对照
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A `Identity(deviceId, snapshotId)` 恒返 `对端与快照未知` | 1684 / **3 红** | 逐字整句、缺身份不编造、安全不变式 |
+| B 扣住/被拒两个计数写死 0 | 1686 / **1 红** | 逐字整句 |
+| C `WarnLine` 恒返 null | 1686 / **1 红** | warn 只在扣住时出现 |
+| D 汇总行拼 `report.Written[0].DisplayName` | 1686 / **1 红** | 安全不变式 |
+
+实现态快照 `D:/mh-verify/w6102-impl-summary.cs`（sha256 `cff0bc078e11fe0f0fc75a49500840dc427d3f523bf09bae7cec0be4adc27f25`）；
+每条对照跑完都从快照逐字节写回并比对 sha256（`true`）；日志 `D:/mh-verify/w6102-neg-{A-identity-dropped,B-split-counts-zeroed,C-warning-never-fires,D-summary-quotes-a-name}.log`。
+
+### 71.6 边界与仍未做
+
+- **App 接线仍无自动化端到端证据**：`MediaHub.Tests` 引不到 `MediaHub.App`，所以「`ApplyApprovedAsync` 真的调了这两个方法」目前只有编译期保证与纯文本单测；
+  端到端（跑一次真同步、在 `LogService.Entries` 里看到那一行）属于 GUI/真机证据，本轮不取 ⇒ §71.7 记 IMPLEMENTED_UNVERIFIED。
+- 日志只写一行汇总，不逐条记（逐条原因已在结果页与 docs §56/§58/§60/§61/§64）；不记来源名、端点、凭据；warn 行只说「扣住 N 与写入被拒 N」，具体是哪条仍看结果页。
+- `SourceSyncRoundSummaryText` 目前只被 App 侧调用；CliRunner/headless 路径未接（不在本轮范围）。
+- 真实两机联调、真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 71.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` 1687 / 0 与 App 构建 0 警告 0 错误；四条负向对照全红（3 / 1 / 1 / 1）且逐字节还原到实现态；
+- **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与纯文本单测，端到端日志证据未取（见 §71.6）；
+  Android 侧本轮零改动，`uniqueTests` 2467 为未改动对照；
+- 提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+## §72 W6-103：每条被拒写入都进日志（哪一条、为什么）
+
+### 72.1 结论先行
+
+Windows 侧一轮同步里，写入器拒绝某一条时，用户能在结果页看到「未写入 1 条（逐条原因）」和那一行，W6-102 的汇总行也说出「扣住 N · 写入被拒 N」——但**日志里没有这一条**：
+`SourceSyncImportRound.ApplyAsync` 把写入器的异常折成 `SourceSyncWriteOutcome.Refused(error.Message)` 之后，路径上没有任何一行日志，只剩计数。
+Android 侧早在 W6-99（写入失败带原因进回执）与 W6-100（删除链失败带步骤码进日志）就把「哪一条、为什么」落到了日志，本轮把 Windows 这一侧补齐：
+**每一条被拒写入在被拒的那一刻就写成一行 `Warn`**，内容是对端身份、动作和白话原因。
+
+### 72.2 一处措辞、一处消费
+
+- 措辞仍在 `windows/src/MediaHub.Sync/SourceSyncRefusedSource.cs` 的 `SourceSyncRefusedText.LogLine(entry)`，固定句：
+  `同步写入被拒：<对端身份> · <动作> · <原因>`；身份为空写「（未知身份）」，原因空白沿用 `Reason()` 的「写入器没有说明原因」。
+  **不出现标题、端点 URL 或任何凭据片段**：身份是对端给的 syncSourceId，日志按它 grep；标题留在结果页。
+- App 侧 `SourceSyncService.ApplyApprovedAsync` 只把它接到 `_log.Warn(LogCategory, …)`，不自己造句——与 W6-102 同一纪律：措辞放 Sync 层，App 只决定何时写。
+- 触发点是 `ApplyAsync` 的新可选参数 `refusedSink`（放在 `skippedIds` 之后、`cancellationToken` 之前）。
+  异常路径（`IOException` / `UnauthorizedAccessException` / `InvalidOperationException`）与「写入器主动返回 `Refused`」路径都汇入同一个 `else` 分支，
+  所以只有一处上报：回调拿到的正是报告里那条 `SourceSyncRefusedSource` 实例（用例用 `Assert.Same` 钉住，两份不可能漂移）。
+
+### 72.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.Sync/SourceSyncImportRound.cs` | 签名加 `Action<SourceSyncRefusedSource>? refusedSink = null`；`else` 分支构造后同步回调 |
+| `windows/src/MediaHub.Sync/SourceSyncRefusedSource.cs` | 新增 `LogLine(entry)`（唯一句式） |
+| `windows/src/MediaHub.Sync/SourceSyncPeerRound.cs` | 转发改命名实参 `cancellationToken:`（位置参数已不再是末位） |
+| `windows/src/MediaHub.App/Services/SourceSyncService.cs` | `ApplyApprovedAsync` 传 `refusedSink: entry => _log.Warn(LogCategory, SourceSyncRefusedText.LogLine(entry))` |
+| `windows/tests/MediaHub.Tests/SourceSyncImportRoundTests.cs` | 新增 4 例 |
+
+### 72.4 用例与计数
+
+`MediaHub.Tests` 1687 → **1691**：
+
+1. `EveryRefusedWriteIsHandedToTheFailureSinkTheMomentTheRoundRefusesIt`——Refused 返回值上报，且 `Assert.Same` 报告里的那条（动作 Create、身份 trim、原因保留）；
+2. `AWriterThatThrowsIsHandedToTheFailureSinkWithTheExceptionMessage`——抛 `IOException("本机存储只读")` 同样上报，原因就是异常消息；
+3. `TheFailureSinkStaysQuietWhenEverythingWroteOrNothingWasAllowed`——全部写入或零放行时不发一行（避免「没事也报警」）；
+4. `TheFailureLogLineNamesTheIdentityAndTheActionWithoutQuotingTheTitle`——逐字整句、空白身份回退、空白原因回退，并断言行里不含 `api_key` / `http://`（标题带 URL 时也不泄漏）。
+
+App 工程 **0 警告 0 错误**（`D:/mh-verify/w6103-app-build.log`）。
+
+### 72.5 四条负向对照
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A `refusedSink` 只在异常路径触发（Refused 返回值不上报） | 1689 / **2 红** | Refused 上报、抛异常上报 |
+| B 成功条目也进 sink | 1689 / **2 红** | Refused 上报（sink 里 2 条）、抛异常上报（sink 里 2 条） |
+| C `LogLine` 丢掉原因 | 1690 / **1 红** | 逐字整句 |
+| D `LogLine` 用标题当主语 | 1690 / **1 红** | 逐字整句（含 `api_key` 断言） |
+
+实现态快照 `D:/mh-verify/w6103-impl-round.cs`（sha256 `e9386448fb0eadc93b03ea703a125815f715fb6b92a73d9953f1489da57eaf59`）、
+`D:/mh-verify/w6103-impl-refused.cs`（sha256 `02ac505931e52cb2b9103447c0fd383ae452872f1ab748c0387bed8040b58511`）；
+每条对照跑完都从快照逐字节写回并比对 sha256（`true`）；日志 `D:/mh-verify/w6103-neg-{A-refused-outcome-not-reported,B-applied-entries-also-reported,C-logl-ine-drops-the-reason,D-logl-ine-quotes-the-title}.log`。
+
+### 72.6 边界与仍未做
+
+- sink 只覆盖「写入器拒绝」（`Refused` 返回值或三类异常）；**闸门扣住（withheld）不走这条路**——那些条目根本没写库，页面已有逐条出路（W6-93/94），日志侧只由汇总行的计数体现。
+- `MediaHub.Tests` 引不到 `MediaHub.App` ⇒「`ApplyApprovedAsync` 真的把 sink 接到 `LogService`」目前只有编译期保证与 Sync 层单测；
+  端到端（真跑一轮、在 `LogService.Entries` 里看到那一行）属 GUI/真机证据，本轮不取 ⇒ 72.7 记 IMPLEMENTED_UNVERIFIED。
+- `SyncCliRunner`/headless 路径未接 sink（它走 `SourceSyncInbox`），不在本轮范围。
+- 真实两机联调、真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 72.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` 1691 / 0 与 App 构建 0 警告 0 错误；四条负向对照全红（2 / 2 / 1 / 1）且逐字节还原到实现态；
+- **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与 Sync 层单测，端到端日志证据未取（见 72.6）；
+  Android 侧本轮零改动，`uniqueTests` 2467 为未改动对照；
+- 提交号以 PR #39 head 为准（docs 不自指 SHA）。
 
 ## §73 W6-104：每条被拒写入、每条被扣住的条目都各留一行日志
 
@@ -6010,10 +6423,75 @@ W6-101 的两条老用例按新契约收口（**收口不是放宽**）：`a_rou
 - **EXECUTED_PASS**：本机 `core:database` 261 / 0，四条对照 2 / 3 / 1 / 2 红且逐字节还原；
 - **IMPLEMENTED_UNVERIFIED**：exact-SHA CI 结果见 PR #33 正文；生产接线的端到端证据未取（见 73.7）；
 - Windows 侧本轮零改动（C# 1691 / 0，W6-103 的 `0b23830e`）；主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+## §74 W6-105：被扣住的条目也各留一行日志（点允许也不会写，但至少要知道是哪一条）
+
+### 74.1 结论先行
+
+Windows 侧 W6-103 让每条**被拒写入**进了日志；但「**扣住**」（`gate.Withheld`：带凭据、未知来源类型、Windows 不支持的类型）此前只有结果页与 W6-102 的汇总计数：
+`SourceSyncImportRound.ApplyAsync` 的 `gate.Withheld` 循环只构造 `SourceSyncWithheldSource` 行，没有日志出口 —— 界面一关、内存一回收，事后无法回答「是哪一条、为什么扣住」。
+本轮把这一半补齐：**每一条被扣住的条目在被闸门扣住的那一刻写一行 `Warn`**，内容是对端身份与闸门原因的白话句。
+这与 Android 侧 W6-104 的 `sync-entry-withheld:` 行对等（Android 侧写原因码，Windows 侧写同一张表翻出的整句）。
+
+### 74.2 一处措辞、一处消费
+
+- 措辞仍在 `windows/src/MediaHub.Sync/SourceSyncWithheldSource.cs` 的 `SourceSyncWithheldText.LogLine(entry)`，固定句：
+  `同步保留未应用：<对端身份> · <原因>`；身份为空写「（未知身份）」，原因空白沿用 `Reason()` 的「对端没有说明原因」，
+  原因码由 `SyncApplyPresenter.DescribeGateReason` 翻成页面同一句 —— 页面与日志不会对同一个码说两种话。
+  **不出现标题、端点 URL 或任何凭据片段**（与 W6-103 的拒写行同一条纪律：日志按身份 grep，标题留在页面）。
+- App 侧 `SourceSyncService.ApplyApprovedAsync` 只把它接到 `_log.Warn(LogCategory, …)`，不自己造句 —— 措辞放 Sync 层，App 只决定何时写（W6-102 纪律）。
+- 触发点是 `ApplyAsync` 的新可选参数 `withheldSink`（放在 `refusedSink` 之后、`cancellationToken` 之前），在 `gate.Withheld` 循环内
+  `withheldSources.Add(withheld); withheldSink?.Invoke(withheld);` —— 回调拿到的正是报告 `WithheldEntries` 里那条实例
+  （用例用 `Assert.Same` 钉住，页面/报告/日志三份不可能漂移）。
+- 两类「保留未应用」现在各有一行且互不重复：**扣住**是闸门在任何写入之前就决定，**被拒**是写入器跑了才拒；两行同时出现时也能分别溯源。
+
+### 74.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.Sync/SourceSyncImportRound.cs` | 签名加 `Action<SourceSyncWithheldSource>? withheldSink = null`；`gate.Withheld` 循环里构造后同步回调 |
+| `windows/src/MediaHub.Sync/SourceSyncWithheldSource.cs` | 新增 `LogLine(entry)`（唯一句式） |
+| `windows/src/MediaHub.App/Services/SourceSyncService.cs` | `ApplyApprovedAsync` 传 `withheldSink: entry => _log.Warn(LogCategory, SourceSyncWithheldText.LogLine(entry))` |
+| `windows/tests/MediaHub.Tests/SourceSyncImportRoundTests.cs` | 新增 3 例 |
+
+`SourceSyncPeerRound.cs` 本轮未动：它本就像 W6-103 的 `refusedSink` 一样不透传 sink，App 侧走的是 `_round`（`SourceSyncImportRound`）；
+将来若有调用方从门面重试导入，再加参数并转发。
+
+### 74.4 用例与计数
+
+`MediaHub.Tests` 1691 → **1694**：
+
+1. `EveryWithheldEntryIsHandedToTheWithheldSinkTheMomentTheGateHoldsItBack` —— 带凭据记录被扣住，sink 恰好一条、`Assert.Same` 报告里那条（身份 trim 后为 `local-dddd`、原因 `secrets-require-approval`），且本机存储零写入；
+2. `TheWithheldSinkStaysQuietWhenNothingIsHeldBack` —— 全部写入或零放行时不发一行（避免「没事也报警」）；
+3. `TheWithheldLogLineNamesTheIdentityAndTheReasonWithoutQuotingTheTitle` —— 逐字整句、空白身份回退、空白原因回退，并断言行里不含 `api_key` / `http://`（标题带 URL 时也不泄漏）。
+
+App 工程 **0 警告 0 错误**（`D:/mh-verify/w6105-app-build.log`）。
+
+### 74.5 四条负向对照
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A 去掉 `withheldSink?.Invoke(withheld);`（只构造不上报） | 1693 / **1 红** | `EveryWithheldEntryIsHandedToTheWithheldSinkTheMomentTheGateHoldsItBack` |
+| B 已放行的条目也进 sink | 1693 / **1 红** | `TheWithheldSinkStaysQuietWhenNothingIsHeldBack` |
+| C `LogLine` 丢掉原因（只留身份与分隔符） | 1693 / **1 红** | `TheWithheldLogLineNamesTheIdentityAndTheReasonWithoutQuotingTheTitle` |
+| D `LogLine` 用标题当主语 | 1693 / **1 红** | 同上 |
+
+每轮跑完立即从实现态快照（`D:/mh-verify/w6105-impl-*.cs`）逐字节还原，四个文件 sha256 与实现态相等；
+日志留档 `D:/mh-verify/w6105-neg-A.log` … `w6105-neg-D.log`，复跑 1694 / 0（`w6105-test2-after-controls.log`）。
+
+### 74.6 边界
+
+- **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与 Sync 层单测，端到端日志证据未取（真机/真日志导出 **NOT_RUN**）；
+- Android 侧本轮零改动（Windows-only 轮），`uniqueTests` 2472 为未改动对照；真实两机联调 **NOT_RUN**、真机 instrumentation **DEVICE_UNVERIFIED**；
+- 另一处尚无日志出口的同类：接收侧「这一次接收被取消」已有计数（W6-86），但取消事件本身仍不进日志 —— 留作后续候选。
+
+### 74.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1694 / 0** 与 App 构建 **0 警告 0 错误**；四条负向对照全红（1 / 1 / 1 / 1）且逐字节还原到实现态；
+- **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与 Sync 层单测，端到端日志证据未取（见 74.6）；
+- 提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
 
 ## §75 W6-106：监听（接收）路径的每一步都各留一行日志
-
-> 编号说明：§74 属于跨设备分支的 W6-105（Windows 侧被扣住条目逐条日志）；合并后 §74 紧随本节之后。本节在主树先占 §75，避免与另一分支抢号。
 
 ### 75.1 结论先行
 
@@ -6069,6 +6547,172 @@ W6-101 的两条老用例按新契约收口（**收口不是放宽**）：`a_rou
 - **EXECUTED_PASS**：本机 `feature:settings` **418 / 0**，四条对照 7 / 1 / 2 / 1 红且逐字节还原；
 - **IMPLEMENTED_UNVERIFIED**：生产接线的端到端证据未取（见 75.6）；
 - Windows 侧本轮零改动（C# 1691 / 0 对照）；主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+
+## §76 W6-107：传输（接收/发送）路径的每一步都各留一行日志
+
+### 76.1 结论先行
+
+`SyncTransferPresenter` 此前**零 logger**：监听开了没有、收到谁的信封、等一次连接是否被取消、发出去多少字节，全只活在 `SyncTransferReceiveState` 与 `SyncTransferOutcome` 里——界面一刷新、进程一退出，事后无法回答「当时到底开到没有、收到没有、为什么失败」。本轮给传输四步各留一行固定措辞，并让「写结局」与「写日志」成为同一步。
+
+### 76.2 措辞只写一处
+
+新文件 `windows/src/MediaHub.Sync/SyncTransferLog.cs`（`public static class`，3615 chars），presenter 只决定「何时写」：
+
+| 时刻 | 固定句 |
+| --- | --- |
+| 监听绑定 | `传输监听已开启：端口 <n> · TLS 1.3`（或 ` · 明文`） |
+| 监听关闭 | `传输监听已关闭：端口 <n>` |
+| 收到信封 | `传输收到信封：<字节> 字节 · <帧> 帧` |
+| 发出信封 | `传输已发出信封：<字节> 字节 · <帧> 帧` |
+| 接收失败 | `传输接收失败：<原因码>`（没有码时 `未说明原因`） |
+| 发送失败 | `传输发送失败：<原因码>` |
+| 等待被取消 | `传输等待被取消：没有收到信封。` |
+| 发送被取消 | `传输发送被取消：对端是否收到无法确定。` |
+
+口径：只记稳定码与字节/帧计数。**不记**口令、证书指纹、host、端点 URL、信封正文与任何 detail 文本。
+
+### 76.3 一处出口：结局与日志是同一步
+
+`SyncTransferPresenter` 构造器新增 `Action<string>? infoLine` 与 `Action<string>? warnLine`（可选参数，App 与测试按需注入），并新增两个私有助手：
+
+- `Receive(outcome)`：`Cancelled → info 取消句`；失败 `→ warn ReceiveFailed(Reason)`；成功且 `Envelope != null → info Received(Bytes, Frames)`；
+- `Send(outcome)`：同构（取消 → info；失败 → warn `SendFailed(Reason)`；成功 → info `Sent(Bytes, Frames)`）。
+
+落点：`PrepareReceive` 启动失败 → warn 行、启动成功 → 在 `ReceiveState` 赋值之后 info 行；`ReceiveOnceAsync` 三处结局（含 catch 里的取消）全部经 `Receive(...)`；`SendAsync` 三处结局全部经 `Send(...)`（成功对象字面量包成 `Send(new SyncTransferOutcome { … })`）；`StopReceiveAsync` 只在 `listener is not null` 时写关闭行。
+
+**有意不记**：`AlreadyListening` / `AlreadyReceiving` / `NotListening` 三个无操作守卫；表单问题（含 `NoLocalEnvelope`）经 `RememberSend(FormFailure(...))` 早返回，没有发生传输；`Dispose()`（卸载不是用户动作）。助手在 present 的锁内调用 sink，因此 sink 不得回调 presenter（App 传 `LogService.Info/Warn`，测试往列表里加）。
+
+App 接线：`SyncPage.xaml.cs` 的 `Transfer` 属性传 `infoLine: line => App.Services.Log.Info("sync", line)`、`warnLine: line => App.Services.Log.Warn("sync", line)`（类别与新加的 `TransferLogCategory` 常量同值）。
+
+### 76.4 用例与计数
+
+`SyncTransferPresenterTests` 新增 6 例（`MediaHub.Tests` 1694 → **1700 / 0 失败**，App 构建 **0 警告 0 错误**）：开监听 + 关闭各一行且第二次 `StopReceiveAsync` 保持安静、收到信封一行且字节/帧与 payload 一致、取消只写取消行不写失败行、真 `SilentPeer` + `ConfirmDelivery` 造出 `delivery-unconfirmed` 只落 warn 行、两个 presenter 真实收发各一行且行内不含 host/URL、带密钥传输的两行不含口令与指纹。
+
+### 76.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | `Receive` 成功分支去掉 info 行 | **2 红** |
+| B | `PrepareReceive` 去掉监听行 | **4 红** |
+| C | `Received()` 行尾拼上端点 URL | **2 红** |
+| D | `StopReceiveAsync` 无条件写关闭行 | **1 红** |
+
+四次对照前先存实现态快照（`D:/mh-verify/w6107-impl-presenter.cs` 45464 chars / sha256 `08e2a0251…`、`w6107-impl-log.cs` 3615 chars / sha256 `2930257a…`、`w6107-impl-tests.cs` 43171 chars / sha256 `6f037960…`、`w6107-impl-page.cs` 53275 chars / sha256 `ac501f7b…`），每轮跑完写回并比对四份 sha256（四次全 `true`），最后复跑 **1700 / 0**。
+
+### 76.6 边界与仍未做
+
+- 页面到 presenter 的接线只有**编译期保证**（App 0/0）⇒ 生产端到端 **IMPLEMENTED_UNVERIFIED**；
+- `SyncCliRunner` 与命令行工具不接这两个 sink（与 W6-105 的 `withheldSink` 同一口径）；
+- 同步页的真实 GUI/UIA 证据仍 **GUI_UNVERIFIED**（需用户授权空闲窗口）；
+- 真实两机跨机联调 **NOT_RUN**；真机 instrumentation **DEVICE_UNVERIFIED**。
+
+### 76.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1700 / 0**、App 构建 0/0，四条对照 2 / 4 / 2 / 1 红且四份快照逐字节还原；
+- **IMPLEMENTED_UNVERIFIED**：页面接线的端到端证据未取（见 76.6）；
+- 主树本轮零改动；提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+## §77 W6-108：命令行 apply 也把「哪一条被拒、哪一条被扣住」报到 stderr
+
+### 77.1 结论先行
+
+`transfer serve --apply` 与 `transfer roundtrip --apply` 走同一条 `SourceSyncImportRound.ApplyAsync`，但命令行路径一直只交回计数：`--json` 的 `report` 段只有 applied / skipped / withheld / notApplied / baselineUpdated / baselineEntries / summary，`items` 段只有每条的 action、reason 与 `withheld` 布尔 ——「写入被拒」的**原因**（写入器的异常消息，往往就是唯一能行动的线索）根本没有出口；扣住的条目虽然在 `items.reason` 里有一码，也要回翻整份文档才知道是哪一条。
+
+W6-103 / W6-105 已经给 App 层接好两个 sink（`refusedSink` / `withheldSink`），但那些调用点在 `ApplyApprovedAsync`（App 进程里）；本轮 recon 还发现 `SourceSyncPeerRound.ApplyAsync` 这一层转发只补了 `cancellationToken`，两个 sink 在这里被吞掉 —— 命令行走完只看到「保留未应用 1 条」，不知道是哪一条、为什么。本轮把这条链接上，并把命令行的出口定在 **stderr**：`warning: <整句>`，与 `export` 命令既有的 warning 形状一致。
+
+### 77.2 一处措辞一处消费
+
+措辞不新写：`SourceSyncRefusedText.LogLine(entry)`（`同步写入被拒：<身份> · <动作> · <原因>`）与 `SourceSyncWithheldText.LogLine(entry)`（`同步保留未应用：<身份> · <原因>`）就是 App 结果页与日志用的那两句，命令行直接复用 —— 同一个事件在 GUI 与命令行是同一种说法。
+
+出口为什么是 stderr：`--json` 的契约是「stdout 恰好一个文档」，把逐条行写进 stdout 会让每个解析 JSON 的脚本当场失败（用例 D 就把这件事本身当作对照）。因此 CLI 新增一个 `Warn(string)` 助手（`_err.WriteLine("warning: " + line)`），`export` 的警告循环改为复用同一助手。
+
+### 77.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.Sync/SourceSyncPeerRound.cs` | `ApplyAsync` 在 `skippedIds` 之后、`cancellationToken` 之前加 `Action<SourceSyncRefusedSource>? refusedSink = null, Action<SourceSyncWithheldSource>? withheldSink = null`，并**逐字转发**给 `_inbox.Round.ApplyAsync(...)`（原来这一层把两个 sink 吞掉，是本轮 recon 找到的第二个断点） |
+| `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` | 新增 `Warn(string)`；`export` 警告循环改用它；`RunTransferServeAsync` 与 `TransferOnceAsync` 的 apply 调用各传 `refusedSink: entry => Warn(SourceSyncRefusedText.LogLine(entry))`、`withheldSink: entry => Warn(SourceSyncWithheldText.LogLine(entry))` |
+
+措辞层零改动：两句 `LogLine` 仍在 `MediaHub.Sync`，CLI 只选出口。
+
+### 77.4 用例与计数
+
+`SyncCliTransferTests` 新增 4 例（`MediaHub.Tests` 1700 → **1704 / 0 失败**，App 构建 **0 警告 0 错误**）：
+
+- `Serve_ReportsEveryRefusedWriteOnStandardError`：在设备目录里预建一个名为 `sync-sources.json.tmp` 的**目录**，让 `FileLocalSourceStore.Persist` 的 `File.WriteAllText` 真实抛 `UnauthorizedAccessException`（不是 mock）；断言 `report.applied == 0`、`report.withheld == 1`，stderr 恰一行 `同步写入被拒：src-refused · 写入 · …`；
+- `Serve_ReportsEveryWithheldEntryOnStandardError`：未知来源类型（`mystery`）被闸门扣住，stderr 恰一行且以 `warning: 同步保留未应用：src-mystery · ` 起头、冒号后还有原因（不只要身份）；
+- `Roundtrip_ReportsTheReceiversWithheldEntryOnStandardError`：真 `transfer roundtrip --apply`，对端（B）的存储里留下没写进去的条目，stderr 上有同一句（roundtrip 是「没人看着的 serve」，更需要这句话）；
+- `Serve_LeavesNoEntryLineWhenEveryEntryIsWritten`：干净一轮 stderr 里没有任何逐条行、也没有 `warning:`（防 sink 对成功条目误触）。
+
+断言同时钉住 stdout 契约：`ParseSingleDocument` 要求 stdout 去尾后不含换行（`--json` 下恰好一个文档），逐条行只允许出现在 stderr。
+
+### 77.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | serve 侧不传 `refusedSink` | **1 红**（`Serve_ReportsEveryRefusedWriteOnStandardError`） |
+| B | serve 侧不传 `withheldSink` | **1 红**（`Serve_ReportsEveryWithheldEntryOnStandardError`） |
+| C | `SourceSyncPeerRound.ApplyAsync` 不转发两个 sink | **3 红**（serve 的 refused / withheld 与 roundtrip 的 withheld） |
+| D | `Warn` 写 `_out` 而不是 `_err` | **4 红**（三条新例 + 既有的 `Serve_KeepsAnUnknownSourceTypeWithheldEvenWithApply`：stdout 多了一行，JSON 契约当场破） |
+
+四次对照前先存实现态快照（`w6108-impl-peer.cs` 32289 B / sha256 `e7a38e8d…`、`w6108-impl-cli.cs` 104572 B / sha256 `c13a883f…`、`w6108-impl-tests.cs` 32942 B / sha256 `9bd951e5…`），每轮跑完写回并比对 sha256（四次全 `true`），最后复跑 **1704 / 0**。
+
+### 77.6 边界与仍未做
+
+- 只覆盖 `transfer serve --apply` 与 `transfer roundtrip --apply`；`import`（`RunImport` → `ImportResult`）不走 `ApplyAsync`，不在本轮范围；
+- `--json` 的 `report` 段仍是计数：本轮没有给契约加逐条字段（那会改动现有读者），逐条信息只走 stderr；
+- 命令行的端到端证据是进程内真跑（真 loopback 套接字 + 真文件存储 + 真异常），但没有在两台真实机器上对跑 ⇒ 与 W6-105 同口径；
+- 同步页的真实 GUI/UIA 证据仍 **GUI_UNVERIFIED**；真实两机跨机联调 **NOT_RUN**；真机 instrumentation **DEVICE_UNVERIFIED**。
+
+### 77.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1704 / 0**、App 构建 **0 警告 0 错误**，四条对照 1 / 1 / 3 / 4 红且三份快照逐字节还原；
+- **IMPLEMENTED_UNVERIFIED**：真实两机命令行对跑未做（见 77.6）；
+- 主树本轮零改动；提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+## §78 W6-109：命令行 JSON 的 report 段也说出「哪一条被拒、哪一条被扣住」
+
+### 78.1 结论先行
+
+W6-108 把逐条行放到了 stderr（给人看），但脚本读的是 `--json`：`report` 段仍只有计数（applied / skipped / withheld / notApplied），被拒的那条**为什么**被拒、被扣住的是哪一条，要么回翻 `items[]` 靠身份猜，要么只能去解析给人看的 stderr。本轮给 `report` 加两个数组：`refused[]`（`syncSourceId` / `action` / `reason`，reason 是写入器自己的那句话）与 `withheldEntries[]`（`syncSourceId` / `reason`，原因是闸门原因码）。两个数组**恒在**（干净一轮是空数组），且**只带身份、不带 `displayName`** —— 与 stderr 行同一口径，JSON 日志不会比 stderr 多泄漏一个标题。
+
+### 78.2 一处措辞一处消费（沿用 W6-108 的边界）
+
+数组的数据源就是 App 结果页、App 日志与 stderr 已经用的 `SourceSyncApplyReport.Refused` / `WithheldEntries`：没有新类型、没有新文案，JSON 只是把同一批行按字段拆开。`items[].reason`（预览口径的原因码）与 `withheldEntries[].reason` 同值，脚本可按 `syncSourceId` 连接两份视图。
+
+### 78.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` | `WriteTransferFieldsJson` 的 `report` 对象末尾加 `refused[]` / `withheldEntries[]` 两个数组（各自恒写，空则空数组） |
+| `docs/cross-device/W6-18-TRANSFER-CLI.md` | `report` 字段表补上两个数组，并写清「只带身份、不带标题」 |
+
+### 78.4 用例与计数
+
+`SyncCliTransferTests` 新增 4 例（`MediaHub.Tests` 1704 → **1708 / 0 失败**，App 构建 **0 警告 0 错误**）：被拒一条时有 `refused[]` 一行且动作与 `items[]` 一致、被扣住一条时有 `withheldEntries[]` 一行且原因码与 `items[].reason` 一致、干净一轮两个数组都在且为空、真 roundtrip 的第一轮带着对端被扣条目（第二轮为空数组）。
+
+### 78.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | 删掉 `refused[]` 数组 | **2 红**（被拒例 + 空数组形状例） |
+| B | 删掉 `withheldEntries[]` 数组 | **3 红**（被扣例 + roundtrip + 空数组形状例） |
+| C | `refused[]` 里加 `displayName` | **1 红**（标题泄漏断言） |
+| D | `withheldEntries[].reason` 写成身份 | **1 红**（与 `items[].reason` 不能对上） |
+
+四轮均逐字节还原（快照 `D:/mh-verify/w6109-impl-cli.cs` / `w6109-impl-tests.cs`，日志 `w6109-neg-A..D.log`），还原后全量复跑 **1708 / 0**。
+
+### 78.6 边界
+
+- 只加字段、不改既有字段；`--json` 的「stdout 恰好一个文档」契约不变；
+- `refused[].reason` 是本地写入器的异常消息（可能含本机路径），与结果页、stderr 完全一致；不含凭据、不含 `displayName`；
+- 干跑（不带 `--apply`）仍然没有 `report` 对象，因此也没有两个数组（既有用例仍钉住这一点）；
+- 真实两机命令行对跑未做 ⇒ **IMPLEMENTED_UNVERIFIED**。
+
+### 78.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1708 / 0**、App 构建 **0 警告 0 错误**，四条对照 2 / 3 / 1 / 1 红且快照逐字节还原；
+- Android 未改动（对照 `uniqueTests` 2480）；主树本轮零改动；提交号以 PR #39 head 为准。
 
 ## §79 W6-110：「导出诊断日志」出口（内存日志 → 一份可以交给别人看的文件）
 
@@ -6137,3 +6781,86 @@ W6-101 的两条老用例按新契约收口（**收口不是放宽**）：`a_rou
 - **EXECUTED_PASS**：本机 32 / 0 与 425 / 0、四条对照各 1 红且逐字节还原、androidTest 与 app 编译通过；
 - **IMPLEMENTED_UNVERIFIED**：按钮 → 报告文件的端到端证据只在 JVM 测试与编译期，未在真机点过；
 - 主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+## §80 W6-111：导出诊断日志的写盘路径（Windows 侧也有一份可交出去的报告）
+> 编号说明：§79 属主树 W6-110 轮（Android 侧的同一个出口），合并后紧随本节之前。
+
+### 80.1 结论先行
+- Windows 侧「导出已脱敏日志」按钮**早就有了**（SettingsPage.xaml:93），但它背后的渲染、文件命名与失败措辞全在 code-behind 里；测试工程 MediaHub.Tests **不引用 MediaHub.App**（WinUI 工程），所以这条路 0 覆盖：报告里没有应用版本/设备/条目数，失败时还把**异常的原文**贴到界面上。
+- 本轮把渲染与写盘搬到 `windows/src/MediaHub.Net/DiagnosticsReport.cs`（可测工程），`LogService.Export()` 变成同一渲染器的薄壳，`OnExportLogClick` 只负责选目录、写文件、显示结果句。
+- 顺带把「导出也再脱敏一次」补上：`LogService.Write` 写入前已脱敏，但 `Render` 面向任意调用方（测试里直造 `LogEntry`），所以每条日志行与头部字段都再过一遍 `LogService.Redact`。
+
+### 80.2 一份报告长什么样（固定句表）
+| 位置 | 固定句 |
+| --- | --- |
+| 第 1 行 | `# MediaHub Windows 诊断日志（已脱敏）` |
+| 头部 | `生成时间：yyyy-MM-dd HH:mm:ss` / `应用版本：<已脱敏>`（有才写）/ `设备：<已脱敏>`（有才写）/ `日志条目：<n>` |
+| 分隔 | `---- 日志 ----` |
+| 每条 | `yyyy-MM-dd HH:mm:ss.fff [Level] Category <已脱敏正文>` |
+| 分隔 | `---- 说明 ----` + 说明句（写入时已脱敏、导出时再逐行脱敏一次；密码、令牌与 Cookie 不会出现在这里。） |
+| 文件名 | `mediahub-diagnostics-yyyyMMdd-HHmmss.log`（本机时钟直接格式化） |
+| 界面成功句 | `已导出（已脱敏）：<绝对路径>` |
+| 界面失败句 | `导出失败：diagnostics-write-failed（原因：<已净化，≤160 字符>）` |
+
+### 80.3 一处渲染一处写盘
+- `DiagnosticsReport.Render(entries, now, appVersion, device)` 是唯一正文生产者；`LogService.Export()` = `Render(Snapshot(), DateTime.Now)`，`Snapshot()` 在 `_gate` 锁内取副本。
+- `DiagnosticsReport.Write(...)` 在 Render 之后只做三件事：`Directory.CreateDirectory`、`File.WriteAllText`（UTF-8 无 BOM）、返回 `WriteResult.Written(path, bytes, entries)`；`bytes` 是 **UTF-8 字节数**（不是字符数），`entries` 是写进去的条数。
+- 任何异常折成 `WriteResult.Failed("diagnostics-write-failed", Describe(exception))`；`Describe` 先脱敏、再把空白折成单空格、trim、截到 160 字符（末位若是高代理就再退一个字符，避免切出半个字符）。
+- 界面只认这两种结果，失败句里的原因已经过 `Describe`，异常原文不再直接上屏。
+
+### 80.4 用例与计数
+- 新增 `windows/tests/MediaHub.Tests/DiagnosticsReportTests.cs` **9 例**：行序与计数、每行二次脱敏（直造 `LogEntry`，消息含 `password=hunter2` 与 `api_key=abc123`）、头部字段也脱敏、文件名跟随时间戳、写盘建目录且 bytes/entries 与内容自洽、目标被同名文件占住报稳定码且原因净化、空日志仍出报告带说明、`Describe` 的脱敏/折叠/截断/空消息、`LogService.Export()` 与文件报告同一渲染器。
+- 本机：`MediaHub.Tests` 1708 → **1717 / 0**；App 构建 **0 警告 0 错误**。
+
+### 80.5 四条负向对照
+| 对照 | 改动 | 红 |
+| --- | --- | --- |
+| A | `Render` 不再逐行 `Redact` | 1（二次脱敏例） |
+| B | `FileName` 固定成 `20260101-000000` | 2（文件名例 + 写盘自洽例，后者断言路径以同一个 `FileName` 结尾） |
+| C | `Describe` 跳过 `Redact` | 1（净化例） |
+| D | `Write` 的 `bytes` 改用 `text.Length` | 1（写盘自洽例，证据文本含中文 ⇒ 字符数 ≠ 字节数） |
+
+四条都在实现态快照上跑（`D:/mh-verify/w6111-impl-report.cs` / `w6111-impl-tests.cs`，sha256 `a99f4216ce71…` / `0d6f5fc4cf02…`），每轮跑完逐字节还原、sha256 相等；还原后复跑全量 1717 / 0。
+
+### 80.6 边界
+- 界面按钮与文案不变（按钮仍是「导出已脱敏日志」，仍在设置页），本轮只换报告内容与失败措辞；没有新增「另存为」或剪贴板出口。
+- 写盘目录仍是 `%LocalAppData%\MediaHub`；文件名前缀由 `diagnostics-` 变为 `mediahub-diagnostics-`（旧文件不删、不改写）。
+- 报告正文来自内存环形缓冲（上限 2000 条）的**快照**，不是滚动日志文件；「打开日志文件夹」按钮未改。
+- 真实两机对跑不在本切片范围（这条路径与本机桌面有关，不涉及对端）⇒ 界面人工确认仍 **NOT_RUN**。
+
+### 80.7 状态
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1717 / 0**、App 构建 **0 警告 0 错误**，四条对照 1 / 2 / 1 / 1 红且快照逐字节还原；
+- Android 未改动（对照 `uniqueTests` 2480）；主树本轮零改动；提交号以 PR #39 head 为准。
+
+## §81 W6-112：把主树 W14 合回本分支（PR #39 从 CONFLICTING 恢复可合并）
+
+### 81.1 起因与真实依赖
+base `feature/windows-client` 在本分支之后又前进 3 个提交（`f484dd8e`、`ab9d66bf`、`b586b001`）。`b586b001`（W14 诊断日志滚动落盘）把 `LogService.Export()` 改成**内联渲染**并在标题后加一行「滚动文件目录」；而 W6-111 早已把同一方法改成 `DiagnosticsReport.Render(Snapshot(), DateTime.Now)`。两侧对同一方法各重构一次、互不相知 ⇒ #39 变 `CONFLICTING` / `DIRTY`。GitHub 在 CONFLICTING 时不生成 `refs/pull/39/merge`，工作流一条都不触发（「推送后 0 新 run」就是信号），所以这不只是显示问题，而是**CI 证据链断掉**。
+
+### 81.2 冲突面与并集解法
+冲突仅 `windows/src/MediaHub.Net/LogService.cs` 一处。**任取一侧都会功能回退**：取本分支侧丢「滚动文件目录」行，取主树侧丢 `DiagnosticsReport` 可测渲染层与 W6-111 的 9 条 `DiagnosticsReportTests`。并集落法：
+
+- `Snapshot()` 保留（`lock (_gate) return _entries.ToList();`），W6-111 的结构不动；
+- `Export()` 仍委托可测渲染层，并补传滚动目录：`DiagnosticsReport.Render(Snapshot(), DateTime.Now, rollingDirectory: FileSink?.DirectoryPath)`；
+- `DiagnosticsReport.Render` / `Write` 增**尾随可选参数** `string? rollingDirectory = null`（现有 2/3/4 参调用零改动）；非空时在 `Title` 之后插入一行 `滚动文件目录：<dir>`；
+- `Write(string, LogService, …)` 透传 `log.FileSink?.DirectoryPath`，让「导出到文件」与 `Export()` 口径一致。
+
+### 81.3 该行不过脱敏（有测试钉住）
+滚动目录行**不做** `LogService.Redact`。它不是请求 URL，而是本机日志目录（`%LOCALAPPDATA%\MediaHub\logs`）；脱敏会把目录名里的十六进制段打码，指针随之失效、报告失去可用性。这条不是口味问题：W14 带入的 `LogFileSinkTests.The_export_points_at_the_rolling_directory_only_when_one_is_configured` 直接钉住「导出必须包含 `滚动文件目录：<原样目录>`」——按「也脱敏」实现时该例红过一次（`D:/mh-verify/w6-merge-s0-tests.log`：1725 通过 / 1 失败，报 `Assert.Contains` 找不到该串），改回后 `w6-merge-s0-tests2.log` 1726 / 0。`rollingDirectory == null` 时输出与 W6-111 逐字相同，`DiagnosticsReportTests` 的绝对行下标断言不受影响。
+
+**补记（W6-113）**：合并时的并集解法漏了一处形状 —— 产出的那一行少了 W14 的 `# ` 前缀，位置也掉到「生成时间/版本/设备」之后。两侧测试都没抓到（`LogFileSinkTests` 只断言 `Contains("滚动文件目录：" + dir)`，带不带前缀、在前在后都通过）。已由提交 `055c85c3` 修正：新增 `DiagnosticsReport.RollingDirectoryPrefix` 常量，渲染顺序改为 `Title → 滚动目录 → 生成时间 → 应用版本 → 设备 → 日志条目`，并补 7 条用例（`DiagnosticsReportTests` 9 → 16）逐项钉住前缀、位置、空/缺省、十六进制段不被吃、目录原样回显而同报告内 URL 仍脱敏、只给指针不内联磁盘全文。三条负向对照恰好 1 / 1 / 4 红。
+
+### 81.4 合并提交与「没丢东西」的判据
+合并提交 **`7c2f96ca`**（parents `51776182` + `b586b001`，保留 Git 默认合并提交，不 rebase、不 amend 共享历史）。
+
+- `git diff --diff-filter=D 51776182 7c2f96ca` 为**空**（零删除）——这是「并集而非取一侧」的硬判据；
+- 两侧文件均在：`DiagnosticsReport.cs` / `DiagnosticsReportTests.cs`（W6-111）与 `LogFileSink.cs` / `LogFileSinkTests.cs` / `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md`（W14）；
+- `git grep -n -E '^(<<<<<<<|>>>>>>>) '` 无命中。
+
+### 81.5 验收（全部真跑）
+- **隔离副本自测**（不信任工作树）：`git archive 7c2f96ca` 解到 `D:/mh-verify/w6-7c2f96ca-src`，补入本机 `windows/native/libmpv` 后 `dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug -p:Platform=x64` ⇒ **1726 通过 / 0 失败 / 0 跳过**（合并前 `51776182` 为 1717，+9 即 W14 带入的 `LogFileSinkTests`）。
+- **exact-SHA CI @`7c2f96ca`**：`windows-ci` **40945269315** success（`MediaHub.Tests` **1726 / 0**、`MediaHub.WebDav.Tests` **104 / 0**）；`Android CI` **40945269145** success（`uniqueTests` **2495**、`--required-suite` 组 `required-suite` 门禁照常、两个 VI 作业各 **19 unique mandatory**、FAILED 行 0）。
+- Android 侧**零代码改动**，故 `uniqueTests` 与合并前同值（2495）；数值变化才说明合并带入了意外内容。
+
+### 81.6 边界
+- 本切片只做合并收口，**没有新增产品能力**；WinUI 界面人工确认仍 **GUI_UNVERIFIED**，真实两机对跑仍 **NOT_RUN**。
+- 同一工作区存在并行执行者时，同分支连续 push 会让后一次 push 取消前一次仍在跑的 run——要 exact-SHA 证据必须等最新 head 的 run 跑完再推。

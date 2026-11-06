@@ -69,6 +69,7 @@ public sealed partial class MainWindow : Window
             case "favorites": ShellFrame.Navigate(typeof(FavoritesPage)); break;
             case "playlists": ShellFrame.Navigate(typeof(PlaylistsPage)); break;
             case "sources": ShellFrame.Navigate(typeof(SourcesPage)); break;
+            case "sync": ShellFrame.Navigate(typeof(SyncPage)); break;
             case "settings": ShellFrame.Navigate(typeof(SettingsPage)); break;
         }
     }
@@ -370,6 +371,7 @@ public sealed partial class MainWindow : Window
             _ when pageType == typeof(PlaylistsPage) => "playlists",
             _ when pageType == typeof(PlaylistDetailPage) => "playlists",
             _ when pageType == typeof(SourcesPage) => "sources",
+            _ when pageType == typeof(SyncPage) => "sync",
             _ when pageType == typeof(SettingsPage) => "settings",
             _ => null,
         };
