@@ -397,7 +397,6 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
 - 5daff850 2026-11-04 fix(licensing): W61 第 46 项 doc-residue-claims 增两条标题判据，并修三处标题行粘连/重复
 - abe06e8c 2026-11-04 fix(licensing): W60 第 43 项 log-file-claims 认两种合法实现形态（修 PR #39 windows-ci 红项）
 - ad99de10 2026-11-03 feat(licensing): W59 W12 快照的历史数字须在基线提交上可复核（第 53 项 doc-audit-history-claims）
-- 212bfc64 2026-11-01 licence guard: add cross-doc-pointer-claims (check 52)
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
