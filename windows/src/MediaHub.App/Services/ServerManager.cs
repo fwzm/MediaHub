@@ -569,7 +569,8 @@ public sealed class ServerManager : IDisposable
     /// Carries no URL and no credential: an apply message is shown in the UI and written to the log, and a
     /// record that arrived from another device may contain an address the user does not want echoed.
     /// </remarks>
-    public sealed record RemoteSourceOutcome(string SyncSourceId, bool Applied, string Message);
+    /// <param name="ServerId">Local server id the change produced or matched; null when the write removed the row.</param>
+    public sealed record RemoteSourceOutcome(string SyncSourceId, bool Applied, string Message, string? ServerId = null);
 
     /// <summary>
     /// Writes one remote source record into the local list: creates the source, or replaces the source that
@@ -651,7 +652,7 @@ public sealed class ServerManager : IDisposable
         // of the same envelope reaches "already applied" instead of proposing the same write again.
         EnsureSyncSourceIds();
         _log.Info("sync", "已按对端信封写入媒体源：" + entry.DisplayName);
-        return new RemoteSourceOutcome(syncSourceId, true, "已写入本地：" + entry.DisplayName + "（需要登录）");
+        return new RemoteSourceOutcome(syncSourceId, true, "已写入本地：" + entry.DisplayName + "（需要登录）", serverId);
     }
 
     /// <summary>
@@ -689,7 +690,7 @@ public sealed class ServerManager : IDisposable
         EnsureSyncSourceIds();
         Changed?.Invoke(this, EventArgs.Empty);
         _log.Info("sync", "已接管来源标识：" + entry.DisplayName);
-        return new RemoteSourceOutcome(id, true, "已接管已有来源：" + entry.DisplayName + "（需要登录核对）");
+        return new RemoteSourceOutcome(id, true, "已接管已有来源：" + entry.DisplayName + "（需要登录核对）", serverId);
     }
 
     /// <summary>Removes the local source that carries this cross-device identity.</summary>

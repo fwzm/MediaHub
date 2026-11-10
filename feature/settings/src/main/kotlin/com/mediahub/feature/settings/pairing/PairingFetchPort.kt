@@ -1,8 +1,10 @@
 package com.mediahub.feature.settings.pairing
 
 import com.mediahub.core.common.pairing.PairingChallenge
+import com.mediahub.core.common.pairing.PairingCardExchangeResult
 import com.mediahub.core.common.pairing.PairingFingerprint
 import com.mediahub.core.common.pairing.PairingInvitationResult
+import com.mediahub.core.common.pairing.PairingPeerCard
 import com.mediahub.core.common.pairing.PairingTlsOptions
 import com.mediahub.core.common.pairing.PairingTransportClient
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +24,24 @@ fun interface PairingFetchPort {
         expectedChallenge: PairingChallenge,
         expectedFingerprint: PairingFingerprint,
     ): PairingInvitationResult
+    /**
+     * 带身份卡片交换的拉取（W6-71）。
+     *
+     * 默认实现退化成单向拉取：拿不到对端卡片时这次只是「记不住对端」，
+     * 已经校验通过的邀请仍然是成功结果。只有真拨号的实现才覆盖它。
+     */
+    suspend fun fetchWithCard(
+        host: String,
+        port: Int,
+        expectedChallenge: PairingChallenge,
+        expectedFingerprint: PairingFingerprint,
+        selfCard: PairingPeerCard?,
+    ): PairingCardExchangeResult = when (
+        val outcome = fetch(host, port, expectedChallenge, expectedFingerprint)
+    ) {
+        is PairingInvitationResult.Ok -> PairingCardExchangeResult.Ok(outcome.payload, outcome.json, null)
+        is PairingInvitationResult.Failed -> PairingCardExchangeResult.Failed(outcome.reason, outcome.message)
+    }
 }
 
 /**
@@ -45,6 +65,29 @@ class PairingTransportFetchPort(
             port = port,
             expectedChallenge = expectedChallenge,
             expectedFingerprint = expectedFingerprint,
+            tls = PairingTlsOptions.Pinned(expectedFingerprint.hex),
+        )
+    }
+
+    /**
+     * 真拨号版本：先读邀请并逐项校验，校验通过后才写本机卡片、再尽力读对端卡片（W6-71）。
+     *
+     * 卡片仍然只是附加信息：对端是没有登记簿的老构建、或者读完邀请就关连接，
+     * 都只让 peerCard 为 null，不影响邀请本身的结论。
+     */
+    override suspend fun fetchWithCard(
+        host: String,
+        port: Int,
+        expectedChallenge: PairingChallenge,
+        expectedFingerprint: PairingFingerprint,
+        selfCard: PairingPeerCard?,
+    ): PairingCardExchangeResult = withContext(Dispatchers.IO) {
+        client.fetchInvitationWithCard(
+            host = host,
+            port = port,
+            expectedChallenge = expectedChallenge,
+            expectedFingerprint = expectedFingerprint,
+            selfCard = selfCard,
             tls = PairingTlsOptions.Pinned(expectedFingerprint.hex),
         )
     }

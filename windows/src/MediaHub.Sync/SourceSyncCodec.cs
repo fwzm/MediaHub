@@ -66,7 +66,28 @@ public static class SourceSyncCodec
 
         using (document)
         {
-            return ReadEnvelope(document.RootElement);
+            // Kotlin rejects the whole document up front; do the same here so an unknown field carrying a lone
+            // surrogate cannot make the two ends disagree ("ignored" on one end, "malformed" on the other).
+            if (WireText.ContainsLoneSurrogate(document.RootElement))
+            {
+                throw new SyncContractException(
+                    MalformedJsonReason,
+                    "The sync document contains text that is not well-formed Unicode.");
+            }
+
+            try
+            {
+                return ReadEnvelope(document.RootElement);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // JsonDocument.Parse accepts an escaped lone surrogate ("\ud800"), but reading the string back
+                // throws InvalidOperationException from GetString(). That is a wire text problem, not a bug in the
+                // caller, so it has to surface as the same stable reason the Kotlin end reports.
+                throw new SyncContractException(
+                    MalformedJsonReason,
+                    "The sync document contains text that is not well-formed Unicode: " + ex.Message);
+            }
         }
     }
 
@@ -369,6 +390,8 @@ public static class SourceSyncCodec
 
             RequireText(record.SyncSourceId, "syncSourceId");
             RequireText(record.SourceType.Raw, "sourceType");
+            RequireWellFormed(record.DisplayName, "displayName");
+            RequireWellFormed(record.AccountScope, "accountScope");
             ArgumentNullException.ThrowIfNull(record.Endpoints);
             foreach (SourceEndpoint endpoint in record.Endpoints)
             {
@@ -394,12 +417,35 @@ public static class SourceSyncCodec
 
     private static string RequireText(string? value, string field)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        // WireText pins the same whitespace set as the Kotlin end; IsNullOrWhiteSpace alone would let the two
+        // ends disagree on U+001C-U+001F (blank on the JVM, ordinary text here).
+        if (value is null || WireText.IsBlank(value))
         {
             throw new SyncContractException("missing-field:" + field, "The required field '" + field + "' is missing or empty.");
         }
 
+        // A lone surrogate cannot be written as UTF-8: Utf8JsonWriter silently substitutes U+FFFD, so the
+        // receiver would get text the sender never had. Refuse instead of corrupting.
+        if (WireText.HasLoneSurrogate(value))
+        {
+            throw InvalidField(field, "must be well-formed Unicode text.");
+        }
+
         return value;
+    }
+
+    /// <summary>Rejects optional text this layer could only write back as mangled UTF-8.</summary>
+    private static void RequireWellFormed(string? value, string field)
+    {
+        if (value is null)
+        {
+            return;
+        }
+
+        if (WireText.HasLoneSurrogate(value))
+        {
+            throw InvalidField(field, "must be well-formed Unicode text.");
+        }
     }
 
     // ---- json helpers ------------------------------------------------------------------------
@@ -429,7 +475,7 @@ public static class SourceSyncCodec
         }
 
         string? text = value.GetString();
-        if (string.IsNullOrWhiteSpace(text))
+        if (text is null || WireText.IsBlank(text))
         {
             throw new SyncContractException("missing-field:" + name, "The required field '" + name + "' is missing or empty.");
         }

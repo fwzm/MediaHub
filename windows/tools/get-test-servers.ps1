@@ -38,25 +38,50 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 $cache = Join-Path $dest '_downloads'
 New-Item -ItemType Directory -Force -Path $cache | Out-Null
 
+# 7zr is a 7z-ONLY extractor: it cannot open a .zip at all, and it fails with "Cannot open the
+# file as archive" rather than something that names the real problem. Zip archives therefore go
+# through Expand-Archive, and only the Emby .7z uses 7zr. It is resolved before the cache check
+# below because validating a cached .7z is what that check does.
+$sevenZip = Join-Path $env:TEMP '7zr.exe'
+if (-not (Test-Path $sevenZip)) {
+    Invoke-WebRequest -Uri 'https://www.7-zip.org/a/7zr.exe' -OutFile $sevenZip -UseBasicParsing -TimeoutSec 300
+}
+
+function Test-Artifact {
+    param([string] $Path)
+    # "The file exists" is not the same as "the file is usable". An interrupted download leaves a
+    # truncated archive behind, and a cache that is only existence-checked keeps it forever: the
+    # Emby .7z cached on this machine was 90730496 of 133879144 bytes, so every run after the
+    # interrupted one had nothing to unpack. Opening the container turns that into a re-download.
+    if ($Path -like '*.7z') {
+        & $sevenZip t $Path *> $null
+        return ($LASTEXITCODE -eq 0)
+    }
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($Path)
+        $zip.Dispose()
+        return $true
+    }
+    catch { return $false }
+}
+
 function Get-Artifact {
     param([string] $Url, [string] $Name)
     $path = Join-Path $cache $Name
-    if ((Test-Path $path) -and -not $Force) {
+    $cached = (Test-Path $path) -and -not $Force
+    if ($cached -and (Test-Artifact -Path $path)) {
         Write-Host "  cached  $Name"
+    }
+    elseif ($cached) {
+        Write-Host "  refetching $Name (the cached copy cannot be opened)"
+        Invoke-WebRequest -Uri $Url -OutFile $path -UseBasicParsing -TimeoutSec 3600
     }
     else {
         Write-Host "  fetching $Name"
         Invoke-WebRequest -Uri $Url -OutFile $path -UseBasicParsing -TimeoutSec 3600
     }
     return $path
-}
-
-# 7zr is a 7z-ONLY extractor: it cannot open a .zip at all, and it fails with "Cannot open the
-# file as archive" rather than something that names the real problem. Zip archives therefore go
-# through Expand-Archive, and only the Emby .7z uses 7zr.
-$sevenZip = Join-Path $env:TEMP '7zr.exe'
-if (-not (Test-Path $sevenZip)) {
-    Invoke-WebRequest -Uri 'https://www.7-zip.org/a/7zr.exe' -OutFile $sevenZip -UseBasicParsing -TimeoutSec 300
 }
 
 $records = @()

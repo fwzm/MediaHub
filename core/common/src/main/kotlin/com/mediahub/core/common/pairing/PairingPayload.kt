@@ -1,5 +1,6 @@
 package com.mediahub.core.common.pairing
 
+import com.mediahub.core.common.sync.WireText
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -39,7 +40,7 @@ data class PairingPayload(
         if (schemaVersion != CURRENT_SCHEMA_VERSION) {
             throw PairingContractException.unsupportedVersion(schemaVersion, CURRENT_SCHEMA_VERSION)
         }
-        if (deviceId.isBlank()) {
+        if (WireText.isBlank(deviceId)) {
             throw PairingContractException.missingField("deviceId")
         }
         validateEphemeralUrl()
@@ -77,21 +78,21 @@ data class PairingPayload(
 
     private fun validateEphemeralUrl() {
         val raw = ephemeralUrl
-        if (raw.isBlank()) {
+        if (WireText.isBlank(raw)) {
             throw PairingContractException.missingField("ephemeralUrl")
         }
-        val trimmed = raw.trim()
+        val trimmed = WireText.trim(raw)
         val uri: URI = try {
             URI(trimmed)
         } catch (e: Exception) {
             throw PairingContractException.badUrl("临时地址不是合法 URI")
         }
-        val scheme = uri.scheme?.lowercase()
+        val scheme = uri.scheme?.let { WireText.lowercaseAscii(it) }
         if (scheme != "http" && scheme != "https") {
             throw PairingContractException.badUrl("临时地址必须是 http/https")
         }
         val host = uri.host
-        if (host.isNullOrBlank()) {
+        if (host == null || WireText.isBlank(host)) {
             throw PairingContractException.badUrl("临时地址必须有 host")
         }
         val userInfo = uri.userInfo
@@ -166,7 +167,7 @@ object PairingPayloadCodec {
      * 反序列化；任何违规抛 PairingContractException（reason 逐字对齐 Windows）。
      */
     fun decode(text: String): PairingPayload {
-        if (text.isBlank()) {
+        if (WireText.isBlank(text)) {
             throw PairingContractException.malformedJson("配对载荷为空")
         }
         val root: JsonElement = try {
@@ -176,6 +177,12 @@ object PairingPayloadCodec {
         }
         if (root !is JsonObject) {
             throw PairingContractException.malformedJson("根节点不是 JSON 对象")
+        }
+
+        // 未配对代理项无法往返：kotlinx 会原样读出来，而 Windows 的 JsonElement.GetString 会抛非契约异常、
+        // Utf8JsonWriter 会静默替换成 U+FFFD，两端只有统一在文档级拒绝才得到同一个码（W6-69）。
+        if (WireText.containsLoneSurrogate(root)) {
+            throw PairingContractException.malformedJson("配对载荷含未配对代理项")
         }
         val schemaVersion = readRequiredInt32(root, "schemaVersion")
         if (schemaVersion != PairingPayload.CURRENT_SCHEMA_VERSION) {
@@ -224,7 +231,7 @@ object PairingPayloadCodec {
         if (primitive == null || !primitive.isString) {
             throw PairingContractException.invalidField(name, "必须是字符串")
         }
-        if (primitive.content.isBlank()) {
+        if (WireText.isBlank(primitive.content)) {
             throw PairingContractException.missingField(name)
         }
         return primitive.content

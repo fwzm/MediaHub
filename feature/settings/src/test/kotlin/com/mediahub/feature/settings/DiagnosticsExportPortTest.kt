@@ -15,6 +15,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DiagnosticsExportPortTest {
+
     private val instant: Instant = Instant.parse("2026-10-29T10:51:00Z")
     private val zone: ZoneId = ZoneId.of("Asia/Shanghai")
 
@@ -37,7 +38,8 @@ class DiagnosticsExportPortTest {
 
     @Test
     fun export_writes_the_snapshot_under_the_given_directory() = runBlocking {
-        val buffer = LogBuffer().also { it.append("[I][UI] 一行日志") }
+        val buffer = LogBuffer()
+        buffer.append("[I][UI] 一行日志")
         val directory = newDirectory()
 
         val outcome = port(buffer, directory).export()
@@ -55,11 +57,10 @@ class DiagnosticsExportPortTest {
     }
 
     @Test
-    fun the_information_line_carries_counts_and_never_the_directory() = runBlocking {
-        val buffer = LogBuffer().apply {
-            append("[I][UI] 第一行")
-            append("[W][NETWORK] 第二行")
-        }
+    fun the_information_line_carries_the_counts_and_never_the_directory() = runBlocking {
+        val buffer = LogBuffer()
+        buffer.append("[I][UI] 第一行")
+        buffer.append("[W][NETWORK] 第二行")
         val logs = LogBuffer()
         val directory = newDirectory()
 
@@ -76,24 +77,31 @@ class DiagnosticsExportPortTest {
     @Test
     fun a_blocked_directory_reports_the_stable_code_and_one_warning_line() = runBlocking {
         val parent = newDirectory()
-        val blocker = File(parent, "blocked").apply { writeText("x", Charsets.UTF_8) }
+        val blocker = File(parent, "blocked")
+        blocker.writeText("x", Charsets.UTF_8)
         val directory = File(blocker, "diagnostics")
+        val buffer = LogBuffer()
+        buffer.append("[I][UI] 一行")
         val logs = LogBuffer()
 
-        val outcome = port(LogBuffer().also { it.append("[I][UI] 一行") }, directory, logs).export()
+        val outcome = port(buffer, directory, logs).export()
 
         assertTrue(outcome is DiagnosticsExportOutcome.Failed)
         val failed = outcome as DiagnosticsExportOutcome.Failed
         assertEquals(DiagnosticsReport.WRITE_FAILED, failed.reason)
         assertFalse(failed.causeMessage.isNullOrBlank())
         assertTrue(failed.causeMessage!!.length <= DiagnosticsReport.MAX_CAUSE_CHARS)
-        assertEquals("[W][UI] diagnostics-export-failed:" + DiagnosticsReport.WRITE_FAILED, logs.snapshot().single())
+        val lines = logs.snapshot()
+        assertEquals(1, lines.size)
+        assertEquals("[W][UI] diagnostics-export-failed:" + DiagnosticsReport.WRITE_FAILED, lines[0])
+        assertFalse(lines[0].contains("blocked"))
     }
 
     @Test
     fun two_exports_two_seconds_apart_leave_two_files() = runBlocking {
         var now = instant
-        val buffer = LogBuffer().also { it.append("[I][UI] 一行") }
+        val buffer = LogBuffer()
+        buffer.append("[I][UI] 一行")
         val directory = newDirectory()
         val exporting = port(buffer, directory, clock = { now })
 
@@ -106,5 +114,7 @@ class DiagnosticsExportPortTest {
         assertNotEquals(firstExported.path, secondExported.path)
         assertTrue(File(firstExported.path).exists())
         assertTrue(File(secondExported.path).exists())
+        assertEquals(DiagnosticsReport.fileName(instant, zone), File(firstExported.path).name)
+        assertEquals(DiagnosticsReport.fileName(instant.plusSeconds(2), zone), File(secondExported.path).name)
     }
 }

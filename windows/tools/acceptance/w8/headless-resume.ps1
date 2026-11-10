@@ -22,12 +22,16 @@ pwsh -File windows/tools/acceptance/w8/headless-resume.ps1
 [CmdletBinding()]
 param(
     [string] $InstallRoot = 'D:\mh-servers',
+    [string] $EmbyInstallRoot,
+    [string] $EmbyDataRoot,
     [int]    $EmbyPort = 8097,
     [int]    $JellyfinPort = 8096,
     [string] $EmbyUser = 'mh',
     [string] $EmbyPassword = 'mh-test-pass',
     [string] $JellyfinUser = 'mediahub-test',
     [string] $JellyfinPassword = 'mediahub-test-password',
+    [string] $ExpectJellyfinVersion,
+    [string] $ExpectEmbyVersion,
     [string] $EvidenceDirectory,
     [switch] $SkipBuild,
     [switch] $KeepServers
@@ -38,6 +42,10 @@ $ProgressPreference = 'SilentlyContinue'
 
 $RepoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)))
 if (-not $EvidenceDirectory) { $EvidenceDirectory = Join-Path $RepoRoot 'windows\tools\acceptance\evidence\w8' }
+# The Emby side is overridable because an acceptance run sometimes has to point at a second,
+# isolated installation (a specific version under test) instead of the one beside the fixture.
+if (-not $EmbyInstallRoot) { $EmbyInstallRoot = $InstallRoot }
+if (-not $EmbyDataRoot) { $EmbyDataRoot = Join-Path $InstallRoot 'data\emby' }
 New-Item -ItemType Directory -Force -Path $EvidenceDirectory | Out-Null
 
 $ProbeProject = Join-Path $RepoRoot 'windows\src\MediaHub.ResumeProbe\MediaHub.ResumeProbe.csproj'
@@ -111,17 +119,17 @@ function Start-JellyfinHeadless {
 }
 
 function Start-EmbyHeadless {
-    param([string] $DataRoot)
+    param([string] $DataRoot, [string] $Root)
     # Located rather than assumed: this machine's Emby lives in emby-install\app\system, while the
     # Jellyfin fixture sits in its own folder, so every plausible root is tried before giving up.
     $exe = $null
-    foreach ($candidate in @((Join-Path $InstallRoot 'emby-install'), (Join-Path $InstallRoot 'emby'))) {
+    foreach ($candidate in @((Join-Path $Root 'emby-install'), (Join-Path $Root 'emby'))) {
         if (-not (Test-Path $candidate)) { continue }
         $exe = Get-ChildItem -Path $candidate -Filter 'EmbyServer.exe' -Recurse -ErrorAction SilentlyContinue |
             Select-Object -First 1 -ExpandProperty FullName
         if ($exe) { break }
     }
-    if (-not $exe) { throw ('EmbyServer.exe not found under ' + $InstallRoot + '\emby-install or ' + $InstallRoot + '\emby (run get-test-servers.ps1)') }
+    if (-not $exe) { throw ('EmbyServer.exe not found under ' + $Root + '\emby-install or ' + $Root + '\emby (run get-test-servers.ps1)') }
 
     # -programdata, not -datadir: Emby 4.10 silently ignores the latter, falls back to its default
     # data directory and then competes with Jellyfin for port 8096. Measured on this fixture.
@@ -273,7 +281,7 @@ try {
 
     $embyInfo = Get-PublicInfo -Port $EmbyPort
     if ($null -eq $embyInfo) {
-        $embyPid = Start-EmbyHeadless -DataRoot (Join-Path $InstallRoot 'data\emby')
+        $embyPid = Start-EmbyHeadless -DataRoot $EmbyDataRoot -Root $EmbyInstallRoot
         $script:startedPids += $embyPid
         Write-Host ('emby started, pid ' + $embyPid + '; waiting for HTTP')
         $embyInfo = Wait-PublicInfo -Port $EmbyPort -TimeoutSeconds 240 -What 'emby'
@@ -283,10 +291,19 @@ try {
     }
     Assert-That 'emby-answers' ($null -ne $embyInfo) ('version=' + $embyInfo.Version)
     Assert-That 'the-two-servers-are-not-the-same-process' ($jellyfinInfo.Id -ne $embyInfo.Id) ('jellyfin=' + $jellyfinInfo.Id + ' emby=' + $embyInfo.Id)
+    # Optional version pins. Without them a run proves "some version answered"; with them it proves the
+    # run happened on the version the task book names, and a mismatched pick-up fails loudly instead of
+    # quietly testing the wrong build.
+    if ($ExpectJellyfinVersion) {
+        Assert-That 'jellyfin-is-the-expected-version' ($jellyfinInfo.Version -eq $ExpectJellyfinVersion) ('expected=' + $ExpectJellyfinVersion + ' actual=' + $jellyfinInfo.Version)
+    }
+    if ($ExpectEmbyVersion) {
+        Assert-That 'emby-is-the-expected-version' ($embyInfo.Version -eq $ExpectEmbyVersion) ('expected=' + $ExpectEmbyVersion + ' actual=' + $embyInfo.Version)
+    }
 
     $script:summary.servers = @(
-        [ordered]@{ server = 'jellyfin'; version = $jellyfinInfo.Version; serverId = $jellyfinInfo.Id; baseUrl = ('http://127.0.0.1:' + $JellyfinPort) },
-        [ordered]@{ server = 'emby'; version = $embyInfo.Version; serverId = $embyInfo.Id; baseUrl = ('http://127.0.0.1:' + $EmbyPort) }
+        [ordered]@{ server = 'jellyfin'; version = $jellyfinInfo.Version; serverId = $jellyfinInfo.Id; baseUrl = ('http://127.0.0.1:' + $JellyfinPort); installRoot = $InstallRoot; dataRoot = $jellyfinData },
+        [ordered]@{ server = 'emby'; version = $embyInfo.Version; serverId = $embyInfo.Id; baseUrl = ('http://127.0.0.1:' + $EmbyPort); installRoot = $EmbyInstallRoot; dataRoot = $EmbyDataRoot }
     )
 
     # ---------------------------------------------------------------- jellyfin run

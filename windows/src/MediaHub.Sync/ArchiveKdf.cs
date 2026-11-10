@@ -59,7 +59,9 @@ public static class ArchiveKdf
     /// <summary>Parses a wire name; unknown names return false rather than being coerced to a default.</summary>
     public static bool TryParse(string? name, out KdfId id)
     {
-        if (string.Equals(name?.Trim(), Pbkdf2Sha256Name, StringComparison.OrdinalIgnoreCase))
+        // WireText, not string.Trim()/OrdinalIgnoreCase: the Kotlin end pins the same explicit rules, so a
+        // header whose kdf name is padded with U+0085 is classified the same way on both ends.
+        if (name is not null && WireText.EqualsAsciiIgnoreCase(WireText.Trim(name), Pbkdf2Sha256Name))
         {
             id = KdfId.Pbkdf2Sha256;
             return true;

@@ -58,6 +58,7 @@ import com.mediahub.core.ui.effects.PlayerVisualPresetMapper
 import com.mediahub.core.ui.effects.PlayerVisualTestTags
 import com.mediahub.core.ui.effects.playerVisualPresetName
 import com.mediahub.core.ui.effects.visualPerformanceModeName
+import com.mediahub.feature.settings.paired.PairedDeviceRoute
 import com.mediahub.feature.settings.pairing.PairingLinkRoute
 import com.mediahub.feature.settings.sync.SourceSyncImportRoute
 import com.mediahub.model.PlaybackEngineMode
@@ -77,6 +78,7 @@ fun SettingsRoute(
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
     var showSourceSyncImport by remember { mutableStateOf(false) }
     var showPairing by remember { mutableStateOf(false) }
+    var showPairedDevices by remember { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
 
@@ -89,6 +91,15 @@ fun SettingsRoute(
     // W6-59：配对页同样在本页内托管，返回即回到设置列表。
     if (showPairing) {
         PairingLinkRoute(onBack = { showPairing = false })
+        return
+    }
+
+    // W6-70：已配对设备页同样在本页内托管，返回即回到设置列表。
+    if (showPairedDevices) {
+        PairedDeviceRoute(
+            onBack = { showPairedDevices = false },
+            baselineStore = viewModel.syncBaselineStore,
+        )
         return
     }
 
@@ -135,6 +146,17 @@ fun SettingsRoute(
             ) {
                 Text("配对设备")
             }
+            androidx.compose.material3.OutlinedButton(
+                onClick = { showPairedDevices = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("paired.entry"),
+            ) {
+                Text("已配对设备")
+            }
+            // W6-110：诊断日志导出 —— 内存里的日志环形缓冲写成一份文件，导出时再逐行脱敏。
+            // 这里不新建 ViewModel（SettingsRoute 会在非 Hilt 的 instrumentation 测试里被直接调用）；
+            // 状态与动作都来自传入的 viewModel。
             androidx.compose.material3.OutlinedButton(
                 onClick = { viewModel.exportDiagnostics() },
                 modifier = Modifier

@@ -7,6 +7,9 @@ import androidx.room.Room
 import com.mediahub.core.common.AppDispatchers
 import com.mediahub.core.common.ClientIdentity
 import com.mediahub.core.common.ClientIdentityProvider
+import com.mediahub.core.common.sync.ISourceSyncBaselineStore
+import com.mediahub.core.common.sync.FileSourceSyncBaselineStore
+import java.io.File
 import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.database.Migrations
 import com.mediahub.core.logging.CompositeLogger
@@ -66,11 +69,13 @@ object AppModule {
     fun provideDiagnosticsExportPort(
         @ApplicationContext context: Context,
         logBuffer: LogBuffer,
+        logger: Logger,
     ): DiagnosticsExportPort = FileDiagnosticsExportPort(
         buffer = logBuffer,
         directory = context.filesDir.resolve("diagnostics"),
         appVersion = BuildConfig.VERSION_NAME,
         device = android.os.Build.MODEL,
+        logger = logger,
     )
 
     @Provides
@@ -314,11 +319,29 @@ object AppModule {
     fun provideLocalRootProvider(@ApplicationContext context: Context): LocalRootProvider =
         AppLocalRootProvider(context)
 
+    /**
+     * W6-72：对端同步基线（跨设备增量同步的「上一轮对端是什么样」）。
+     *
+     * 放在 filesDir/sync-baseline/，文件名与 Windows FileSourceSyncBaselineStore 逐字相同
+     * （sync-baseline.json），两端磁盘格式一致；读不出来时存储层会隔离坏文件而不是覆盖它。
+     */
+    @Provides
+    @Singleton
+    fun provideSyncBaselineStore(@ApplicationContext context: Context): ISourceSyncBaselineStore =
+        FileSourceSyncBaselineStore(File(context.filesDir, "sync-baseline"))
+
     /** 聚合搜索引擎（Phase 1C-1）：并发 4 / 单服超时 8s。 */
     @Provides
     @Singleton
     fun provideGlobalSearchEngine(): com.mediahub.feature.search.engine.GlobalSearchEngine =
         com.mediahub.feature.search.engine.GlobalSearchEngine(perServerTimeoutMs = 8_000, maxConcurrency = 4)
+
+    /**
+     * W6-110：诊断日志导出出口（LogBuffer → 文件）。
+     *
+     * 目录用 cacheDir/diagnostics：可被系统清理、不占用户存储；导出时逐行再脱敏一次（见 DiagnosticsReport）。
+     * 文件名带时间戳，不覆盖上一次导出。
+     */
 }
 
 @Module
@@ -336,6 +359,16 @@ abstract class RegistryModule {
     @Binds
     @Singleton
     abstract fun bindServerRemoveHandler(impl: com.mediahub.feature.server.RemoveServerUseCase): com.mediahub.feature.server.ServerRemoveHandler
+
+    /**
+     * W6-79：跨端删除的生产实现。同步落库层只认 [com.mediahub.core.database.sync.SourceSyncSourceRemover] 接口，
+     * 真实级联清理（凭据、账号、进度、字幕记忆、图标、会话）在本绑定指向的用例里。
+     */
+    @Binds
+    @Singleton
+    abstract fun bindSourceSyncSourceRemover(
+        impl: com.mediahub.feature.server.ServerSourceSyncRemover,
+    ): com.mediahub.core.database.sync.SourceSyncSourceRemover
 
     @Binds
     @Singleton

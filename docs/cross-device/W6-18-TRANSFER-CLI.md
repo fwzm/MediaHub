@@ -44,7 +44,9 @@ JSON 字段：
 | @noChange@ | 本轮是否零写入 |
 | @counts@ | @apply@ @requiresApproval@ @unsupported@ @ignored@ @withheld@ 五桶 |
 | @items[]@ | @syncSourceId@ @action@ @reason@ @requiresApproval@ @withheld@ |
-| @report@ | **仅当真的写入时才出现**：@applied@ @skipped@ @withheld@ @notApplied@ @baselineUpdated@ @baselineEntries@ @summary@ @baseline@ |
+| @report@ | **仅当真的写入时才出现**：@applied@ @skipped@ @withheld@ @notApplied@ @baselineUpdated@ @baselineEntries@ @summary@ @baseline@ @refused[]@ @withheldEntries[]@ |
+| @report.refused[]@ | W6-109 起每条被拒写入一行：@syncSourceId@ @action@ @reason@（@reason@ 是写入器自己的那句话，可能含本机路径；**没有** @displayName@，只带身份） |
+| @report.withheldEntries[]@ | W6-109 起每条被门禁扣住的条目一行：@syncSourceId@ @reason@（原因码原文，与 @items[].reason@ 同值，可按身份连接两份视图） |
 | @error.code@ / @error.message@ | 失败时替代以上全部（@{"ok":false,...}@） |
 
 ### transfer send

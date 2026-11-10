@@ -30,6 +30,9 @@ import org.junit.Test
  *
  * 回环夹具是本文件私有的 LoopbackPeer（只绑 127.0.0.1:0，跑完必关），不复用其它模块的测试类：
  * core:common 的测试源码不在 core:database 的可见范围内。
+ *
+ * W6-96：本文件里真正写库的用例都经手写的 [writeThrough] 网关 —— 那个能直接吃 AndroidSourceSyncService
+ * 的次构造器已从生产 API 删除。保留对照是为了让「零写入」断言有牙：同一封信封经写库网关会落两条。
  */
 class SourceSyncTransferImportTest {
 
@@ -37,10 +40,11 @@ class SourceSyncTransferImportTest {
     fun golden_envelope_over_a_loopback_socket_imports_two_sources_and_holds_one_for_approval() {
         val store = ImportFakeStore()
         val service = AndroidSourceSyncService(store, DEVICE_ID)
+        val gateway = writeThrough(service)
         val peer = LoopbackPeer(serving(framesOf(goldenEnvelopeBytes(), CHALLENGE)))
         try {
             val outcome = runBlocking {
-                SourceSyncTransferImportService(service).receiveAndImport(HOST, peer.port, CHALLENGE)
+                SourceSyncTransferImportService(gateway).receiveAndImport(HOST, peer.port, CHALLENGE)
             }
             peer.await()
 
@@ -48,12 +52,14 @@ class SourceSyncTransferImportTest {
             val result = (outcome as SourceSyncTransferImportOutcome.Imported).result
             assertFalse(result.isRejected)
             assertNull(result.rejectedReason)
-            assertEquals(2, result.appliedCount)
-            assertEquals(1, result.requiresApprovalCount)
-            assertEquals(1, result.ignoredCount)
-            assertEquals(0, result.failedCount)
-            assertEquals(4, result.totalCount)
-            assertTrue(result.hasWrites)
+            // W6-97：回执只描述身份，写入计数从写库网关留下的结果里读（接收通道装不下计数）。
+            val written = gateway.lastResult!!
+            assertEquals(2, written.appliedCount)
+            assertEquals(1, written.requiresApprovalCount)
+            assertEquals(1, written.ignoredCount)
+            assertEquals(0, written.failedCount)
+            assertEquals(4, written.totalCount)
+            assertTrue(written.hasWrites)
             assertEquals(2, store.createCalls)
             assertEquals(0, store.updateCalls)
         } finally {
@@ -64,21 +70,24 @@ class SourceSyncTransferImportTest {
     @Test
     fun the_same_envelope_a_second_time_writes_nothing() {
         val store = ImportFakeStore()
-        val importer = SourceSyncTransferImportService(AndroidSourceSyncService(store, DEVICE_ID))
+        val gateway = writeThrough(AndroidSourceSyncService(store, DEVICE_ID))
+        val importer = SourceSyncTransferImportService(gateway)
 
         val first = roundTrip(importer)
         val second = roundTrip(importer)
 
-        assertEquals(2, (first as SourceSyncTransferImportOutcome.Imported).result.appliedCount)
+        assertEquals(2, gateway.results[0].appliedCount)
+        val secondWritten = gateway.results[1]
+        assertEquals(0, secondWritten.appliedCount)
+        assertEquals(1, secondWritten.requiresApprovalCount)
+        assertEquals(3, secondWritten.ignoredCount)
+        assertEquals(0, secondWritten.failedCount)
+        assertFalse(secondWritten.hasWrites)
+        val firstResult = (first as SourceSyncTransferImportOutcome.Imported).result
         val secondResult = (second as SourceSyncTransferImportOutcome.Imported).result
-        assertEquals(0, secondResult.appliedCount)
-        assertEquals(1, secondResult.requiresApprovalCount)
-        assertEquals(3, secondResult.ignoredCount)
-        assertEquals(0, secondResult.failedCount)
-        assertFalse(secondResult.hasWrites)
         assertNull(secondResult.rejectedReason)
         // 幂等性判据是内容摘要而不是字节：同一份信封两次得到同一个 hash。
-        assertEquals(first.result.envelopeContentHash, secondResult.envelopeContentHash)
+        assertEquals(firstResult.envelopeContentHash, secondResult.envelopeContentHash)
         // 第二轮一条都没写：CREATE 仍只有第一轮那两条，UPDATE 从头到尾为 0。
         assertEquals(2, store.createCalls)
         assertEquals(0, store.updateCalls)
@@ -157,16 +166,18 @@ class SourceSyncTransferImportTest {
     @Test
     fun bytes_after_a_complete_envelope_do_not_change_the_result() {
         val store = ImportFakeStore()
+        val gateway = writeThrough(AndroidSourceSyncService(store, DEVICE_ID))
         val frames = framesOf(goldenEnvelopeBytes(), CHALLENGE)
         val withTrailingGarbage = frames + byteArrayOf(0x00, 0x00, 0x00, 0x05)
         val peer = LoopbackPeer(serving(withTrailingGarbage))
         try {
             val outcome = runBlocking {
-                SourceSyncTransferImportService(AndroidSourceSyncService(store, DEVICE_ID))
+                SourceSyncTransferImportService(gateway)
                     .receiveAndImport(HOST, peer.port, CHALLENGE)
             }
             peer.await()
-            assertEquals(2, (outcome as SourceSyncTransferImportOutcome.Imported).result.appliedCount)
+            assertTrue("信封有尾随多余帧也应成功", outcome.isImported)
+            assertEquals(2, gateway.lastResult!!.appliedCount)
             assertEquals(2, store.createCalls)
         } finally {
             peer.closeQuietly()
@@ -243,15 +254,15 @@ class SourceSyncTransferImportTest {
     @Test
     fun a_rejection_inside_the_import_service_is_still_an_imported_outcome() {
         val store = ImportFakeStore()
-        val service = AndroidSourceSyncService(store, DEVICE_ID)
+        val gateway = writeThrough(AndroidSourceSyncService(store, DEVICE_ID))
 
-        val outcome = importEnvelopeBytesOf(service, duplicateSyncSourceIdEnvelope().toByteArray(Charsets.UTF_8))
+        val outcome = importEnvelopeBytesOf(gateway, duplicateSyncSourceIdEnvelope().toByteArray(Charsets.UTF_8))
 
         assertTrue(outcome.isImported)
         assertEquals("duplicate-sync-source-id", outcome.reasonOrNull)
         val result = (outcome as SourceSyncTransferImportOutcome.Imported).result
         assertTrue(result.isRejected)
-        assertEquals(0, result.appliedCount)
+        assertEquals(0, gateway.lastResult!!.appliedCount)
         assertEquals(0, store.createCalls)
     }
 
@@ -326,10 +337,23 @@ class SourceSyncTransferImportTest {
         runBlocking { SourceSyncTransferImportService(gateway).importEnvelopeBytes(bytes) }
 
     private fun importEnvelopeBytesOf(
-        service: AndroidSourceSyncService,
+        gateway: WriteThroughGateway,
         bytes: ByteArray,
     ): SourceSyncTransferImportOutcome =
-        runBlocking { SourceSyncTransferImportService(service).importEnvelopeBytes(bytes) }
+        runBlocking { SourceSyncTransferImportService(gateway).importEnvelopeBytes(bytes) }
+
+    /**
+     * W6-96：把写库服务接进接收口的**手写**网关（旧次构造器的对照）。
+     *
+     * W6-96 之前这层接线由 SourceSyncTransferImportService 的次构造器提供；生产从未用过它（界面一直走
+     * SourceSyncImportGateways.acceptOnly() + 预览/逐条允许后的 applyRound），所以次构造器在 W6-96 被删除。
+     * 这里显式写出来的唯一目的，是保住「这条老路确实会写库」的对照证据：它证明本文件的零写入断言不是空转。
+     *
+     * W6-97：回执收窄成只描述身份的 [SourceSyncReceiveEcho] 之后，写入计数改从网关自己留下的
+     * [WriteThroughGateway.results] 里读 —— 接收通道再也装不下计数，这是类型上的事实。
+     */
+    private fun writeThrough(service: AndroidSourceSyncService): WriteThroughGateway =
+        WriteThroughGateway(service)
 
     private fun framesOf(envelope: ByteArray, challenge: String? = CHALLENGE): ByteArray =
         SourceSyncTransfer.encode(envelope, challenge)
@@ -404,12 +428,12 @@ class SourceSyncTransferImportTest {
 
     /** 只记账、不碰库的网关：断言"导入服务被调了几次"是失败路径零写入的判据。 */
     private class RecordingGateway(
-        private val result: SourceSyncImportResult = SourceSyncImportResult(),
+        private val result: SourceSyncReceiveEcho = SourceSyncReceiveEcho(),
     ) : SourceSyncImportGateway {
         val envelopes = ArrayList<String>()
         val calls: Int get() = envelopes.size
 
-        override suspend fun importEnvelope(envelopeJson: String): SourceSyncImportResult {
+        override suspend fun importEnvelope(envelopeJson: String): SourceSyncReceiveEcho {
             envelopes.add(envelopeJson)
             return result
         }
@@ -417,7 +441,7 @@ class SourceSyncTransferImportTest {
 
     /** 网关自己抛异常：传输层不得把它吞成某个稳定码。 */
     private class ThrowingGateway : SourceSyncImportGateway {
-        override suspend fun importEnvelope(envelopeJson: String): SourceSyncImportResult =
+        override suspend fun importEnvelope(envelopeJson: String): SourceSyncReceiveEcho =
             throw IllegalStateException("importer exploded")
     }
 

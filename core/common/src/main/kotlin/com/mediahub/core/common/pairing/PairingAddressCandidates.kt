@@ -1,5 +1,7 @@
 package com.mediahub.core.common.pairing
 
+import com.mediahub.core.common.sync.WireText
+
 /**
  * 网络接口类型。Android 没有 System.Net.NetworkInformation.NetworkInterfaceType，
  * 因此用本端自有枚举表达 Windows 的三档优先级（有线 / 无线 / 其它）。
@@ -104,7 +106,7 @@ object PairingAddressCandidates {
                     for (raw in input.addresses) {
                         rejected.add(
                             PairingAddressCandidate(
-                                address = raw.trim(),
+                                address = WireText.trim(raw),
                                 interfaceName = input.interfaceName,
                                 priority = priority,
                                 reason = PairingAddressReasons.LOOPBACK,
@@ -116,7 +118,7 @@ object PairingAddressCandidates {
                     for (raw in input.addresses) {
                         rejected.add(
                             PairingAddressCandidate(
-                                address = raw.trim(),
+                                address = WireText.trim(raw),
                                 interfaceName = input.interfaceName,
                                 priority = priority,
                                 reason = PairingAddressReasons.OTHER,
@@ -126,7 +128,7 @@ object PairingAddressCandidates {
                 }
                 else -> {
                     for (raw in input.addresses) {
-                        val address = raw.trim()
+                        val address = WireText.trim(raw)
                         val octets = parseIpv4(address)
                         if (octets == null) {
                             rejected.add(reject(address, input.interfaceName, priority, PairingAddressReasons.NOT_IPV4))
@@ -162,7 +164,7 @@ object PairingAddressCandidates {
         val sorted = usable.sortedWith(
             compareBy<PairingAddressCandidate> { it.priority }
                 .thenComparator { left, right -> compareAddresses(left.address, right.address) }
-                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.interfaceName }
+                .thenComparator { left, right -> WireText.compareAsciiIgnoreCase(left.interfaceName, right.interfaceName) }
         )
         return PairingAddressReport.of(sorted, rejected)
     }

@@ -30,7 +30,7 @@
       <Button x:Name="ExportButton" Content="导出同步信封" Click="OnExportClick"
               AutomationProperties.AutomationId="sync.export"
               AutomationProperties.Name="导出同步信封"
-              ToolTipService.ToolTip="写入 sync-envelope.json，默认不含任何密钥" />
+              ToolTipService.ToolTip="写入 sync-envelope.json，默认不含任何密钥；加密导出写入 sync-envelope.mharchive" />
       <Button x:Name="PreviewButton" Content="预览合并" Click="OnPreviewClick"
               AutomationProperties.AutomationId="sync.preview"
               AutomationProperties.Name="预览合并"
@@ -129,7 +129,7 @@
       <StackPanel Spacing="8">
         <TextBlock Text="应用远端信封" FontSize="15" FontWeight="SemiBold" />
         <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
-                   Text="选择对端导出的信封文件（sync-envelope.json，或加密存档 .mhsync）。先预览，再逐条决定允许或跳过：在你点「应用」之前，本机不会写入任何内容。带凭据的条目不会写入，也不会被自动允许。" />
+                   Text="选择对端导出的信封文件（sync-envelope.json，或加密存档 .mharchive）。先预览，再逐条决定允许或跳过：在你点「应用」之前，本机不会写入任何内容。带凭据的条目不会写入，也不会被自动允许。" />
 
         <StackPanel Orientation="Horizontal" Spacing="8">
           <Button x:Name="ApplyPickButton" Content="选择信封文件" Click="OnPickApplyFileClick"
@@ -180,6 +180,10 @@
                     <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
                     <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
                                Text="{Binding DetailLabel}" />
+                    <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                               Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                               AutomationProperties.AutomationId="sync.entry.next.step"
+                               Text="{Binding NextStep}" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
                       <TextBlock Style="{StaticResource MediaHubCaption}" Text="{Binding ActionLabel}" />
                       <TextBlock Style="{StaticResource MediaHubCaption}" Text="{Binding StateLabel}" />
@@ -206,6 +210,100 @@
         <TextBlock x:Name="ApplyResultText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
                    AutomationProperties.AutomationId="sync.apply.result"
                    AutomationProperties.Name="应用结果" />
+
+        <!-- Entries the approval gate will never write, whatever the user allows: the counts line folds them into
+             保留未应用, and here is which one and why, row by row. -->
+        <TextBlock x:Name="ApplyWithheldHeader" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   AutomationProperties.AutomationId="sync.apply.withheld.header"
+                   AutomationProperties.Name="保留未应用条目" />
+
+        <ListView x:Name="ApplyWithheldList" SelectionMode="None" MaxHeight="120" Visibility="Collapsed"
+                  AutomationProperties.AutomationId="sync.apply.withheld.list"
+                  AutomationProperties.Name="保留未应用条目清单">
+          <ListView.ItemTemplate>
+            <DataTemplate>
+              <Grid ColumnSpacing="12" Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Spacing="2">
+                  <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" Text="{Binding Text}" />
+                  <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" Text="{Binding NextStep}"
+                             Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                </StackPanel>
+                <Button Grid.Column="1" VerticalAlignment="Center" Tag="{Binding}"
+                        Content="{Binding CopyLabel}" IsEnabled="{Binding CanCopy}"
+                        Click="OnCopyRowIdentityClick"
+                        AutomationProperties.AutomationId="sync.apply.withheld.copy"
+                        AutomationProperties.Name="{Binding CopyLabel}" />
+              </Grid>
+            </DataTemplate>
+          </ListView.ItemTemplate>
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              <Setter Property="Padding" Value="0" />
+              <Setter Property="MinHeight" Value="0" />
+            </Style>
+          </ListView.ItemContainerStyle>
+        </ListView>
+
+        <!-- What the round actually wrote, row by row: the counts line above is not the whole story. -->
+        <TextBlock x:Name="ApplyWrittenHeader" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   AutomationProperties.AutomationId="sync.apply.written.header"
+                   AutomationProperties.Name="已写入条目" />
+
+        <ListView x:Name="ApplyWrittenList" SelectionMode="None" MaxHeight="120" Visibility="Collapsed"
+                  AutomationProperties.AutomationId="sync.apply.written.list"
+                  AutomationProperties.Name="已写入条目清单">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              <Setter Property="Padding" Value="0" />
+              <Setter Property="MinHeight" Value="0" />
+            </Style>
+          </ListView.ItemContainerStyle>
+        </ListView>
+
+        <!-- Entries the writer refused: counted in 保留未应用, and here is which one and why, row by row. -->
+        <TextBlock x:Name="ApplyRefusedHeader" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   AutomationProperties.AutomationId="sync.apply.refused.header"
+                   AutomationProperties.Name="未写入条目" />
+
+        <ListView x:Name="ApplyRefusedList" SelectionMode="None" MaxHeight="120" Visibility="Collapsed"
+                  AutomationProperties.AutomationId="sync.apply.refused.list"
+                  AutomationProperties.Name="未写入条目清单">
+          <ListView.ItemContainerStyle>
+            <Style TargetType="ListViewItem">
+              <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+              <Setter Property="Padding" Value="0" />
+              <Setter Property="MinHeight" Value="0" />
+            </Style>
+          </ListView.ItemContainerStyle>
+          <ListView.ItemTemplate>
+            <DataTemplate>
+              <Grid ColumnSpacing="12" Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Spacing="2">
+                  <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" Text="{Binding Text}" />
+                  <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" Text="{Binding NextStep}"
+                             Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                </StackPanel>
+                <Button Grid.Column="1" VerticalAlignment="Center" Tag="{Binding}"
+                        Content="{Binding CopyLabel}" IsEnabled="{Binding CanCopy}"
+                        Click="OnCopyRowIdentityClick"
+                        AutomationProperties.AutomationId="sync.apply.refused.copy"
+                        AutomationProperties.Name="{Binding CopyLabel}" />
+              </Grid>
+            </DataTemplate>
+          </ListView.ItemTemplate>        </ListView>
 
         <!-- Addresses the peer offers that this client cannot store: counted and named, never silently dropped. -->
         <TextBlock x:Name="ApplyNotImportedCount" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
@@ -288,7 +386,7 @@
                           VerticalAlignment="Center"
                           AutomationProperties.AutomationId="sync.paired.forget"
                           AutomationProperties.Name="{Binding ForgetLabel}"
-                          ToolTipService.ToolTip="只删除本机的配对登记，不影响来源、凭据与对端设备" />
+                          ToolTipService.ToolTip="只删除本机的配对登记与该对端的同步基线，不影响来源、凭据与对端设备" />
                 </Grid>
               </Border>
             </DataTemplate>

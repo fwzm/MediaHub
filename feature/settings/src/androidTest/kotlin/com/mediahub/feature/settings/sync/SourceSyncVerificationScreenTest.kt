@@ -192,7 +192,6 @@ class SourceSyncVerificationScreenTest {
             ignoredCount = 0,
             unsupportedCount = 0,
             failedCount = 0,
-            appliedTitles = listOf("客厅 Emby", "书房 Jellyfin"),
             appliedSources = listOf(
                 SourceSyncAppliedSource(
                     serverId = "srv-1",

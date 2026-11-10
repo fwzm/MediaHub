@@ -135,6 +135,36 @@ public interface IProviderProgress
 }
 
 /// <summary>
+/// Writing a playback position back into the server user data.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Separate from <see cref="IProviderProgress"/> on purpose. Progress is what a client reports while it
+/// plays; this is a save of a position that came from somewhere else (a restore, a second device), and a
+/// provider that can do the first cannot necessarily do the second. A handle exposes this only when it
+/// is present, so a provider that cannot save user data never advertises the write.
+/// </para>
+/// <para>
+/// The returned value is the position the server reports afterwards, not the one that was requested. A
+/// server may accept the request and store something else (or nothing), and a restore that trusted its
+/// own request would claim progress the server never kept.
+/// </para>
+/// <para>
+/// Route on Emby/Jellyfin: <c>POST /Users/{userId}/Items/{itemId}/UserData</c> with a
+/// <c>UserItemDataDto</c> body. Pinned against the loopback mock in this build; a run against a live
+/// server is still SERVER_UNVERIFIED.
+/// </para>
+/// </remarks>
+public interface IProviderProgressWrite
+{
+    /// <summary>
+    /// Saves <paramref name="positionTicks"/> as the item playback position and returns the position
+    /// the server reports afterwards; 0 means the server reports no stored position.
+    /// </summary>
+    Task<long> SetPlaybackPositionAsync(string itemId, long positionTicks, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Server-side favourites: marking an item as a favourite and listing what is favourited.
 /// </summary>
 /// <remarks>
@@ -218,6 +248,9 @@ public sealed class ProviderHandle : IDisposable
     public IProviderPlayback? Playback { get; init; }
     public IProviderSearch? Search { get; init; }
     public IProviderProgress? Progress { get; init; }
+
+    /// <summary>Save of a playback position; null when this provider cannot write user data.</summary>
+    public IProviderProgressWrite? ProgressWrite { get; init; }
     public IProviderFavorites? Favorites { get; init; }
     public IProviderSubtitle? Subtitle { get; init; }
     public IProviderImageFetcher? Images { get; init; }

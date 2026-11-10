@@ -226,6 +226,148 @@ class PairingTransportClient(
         return PairingInvitationResult.Ok(payload, text)
     }
 
+    /**
+     * 拉一次邀请，并（可选）与对端交换身份卡片（W6-71）。
+     *
+     * 顺序与 Windows 客户端逐条对齐：先读邀请帧并逐项校验（帧 / 载荷 / 时效 / 挑战 / 指纹），
+     * **校验通过之后才写本机卡片**——在确认对端是邀请里那一台之前，不向任何人自报家门。
+     * 写完再尽力读一次对端卡片。
+     *
+     * 卡片是尽力而为：读不到、超时、格式不对都只是「这次记不住对端」，
+     * 绝不把已经校验通过的邀请变成失败（Windows 注释原话：a card that never arrives is not a failure）。
+     * [selfCard] 为 null 时退化成与 [fetchInvitation] 相同的单向线（老服务端根本不会等卡片）。
+     */
+    fun fetchInvitationWithCard(
+        host: String,
+        port: Int,
+        expectedChallenge: PairingChallenge,
+        expectedFingerprint: PairingFingerprint? = null,
+        nowEpochMs: Long = System.currentTimeMillis(),
+        selfCard: PairingPeerCard? = null,
+        tls: PairingTlsOptions = PairingTlsOptions.Off,
+    ): PairingCardExchangeResult {
+        if (expectedChallenge.isEmpty) {
+            return PairingCardExchangeResult.Failed(
+                PairingReasons.BAD_CHALLENGE,
+                "没有期望 challenge 就无法判定对端是不是同一个邀请",
+            )
+        }
+        require(port in 1..MAXIMUM_PORT) { "端口必须在 1..65535，实际 " + port }
+        // TLS 钉住的那一枚是信任根（握手已经证明过），所以它优先于调用方另给的期望指纹。
+        val pinned = (tls as? PairingTlsOptions.Pinned)?.fingerprint
+        val required = pinned ?: expectedFingerprint
+        val address = LoopbackOnly.addressOrNull(host)
+            ?: return PairingCardExchangeResult.Failed(
+                PairingClientReasons.NON_LOOPBACK_PEER,
+                "只允许连回环地址，实际 " + host,
+            )
+        // 卡片在拨号前就编好：卡片自身超限属于调用方的编程错误，不该变成一次网络失败。
+        val cardFrame = selfCard?.let { PairingFrame.encodeText(PairingPeerCardCodec.serialize(it)) }
+        var socket: Socket? = null
+        var session: SourceSyncTlsSession? = null
+        var connected = false
+        var handshakeCompleted = false
+        return try {
+            val opened = Socket()
+            socket = opened
+            opened.connect(InetSocketAddress(address, port), connectTimeoutMs)
+            connected = true
+            opened.soTimeout = readTimeoutMs
+            opened.tcpNoDelay = true
+            var input: InputStream = opened.getInputStream()
+            var output: OutputStream = opened.getOutputStream()
+            if (pinned != null) {
+                val handshake = SourceSyncTls.handshakeClient(
+                    opened,
+                    SourceSyncTlsOptions.Pinned(pinned.hex),
+                    timeoutMs = readTimeoutMs,
+                    targetHostName = PAIRING_TLS_TARGET_HOST_NAME,
+                )
+                when (handshake) {
+                    is SourceSyncTlsResult.Failed -> return PairingCardExchangeResult.Failed(
+                        pairingTlsReasonOf(handshake.reason),
+                        handshake.detail,
+                    )
+                    is SourceSyncTlsResult.Ok -> {
+                        session = handshake.session
+                        input = handshake.session.input
+                        output = handshake.session.output
+                        handshakeCompleted = true
+                    }
+                }
+            }
+            val frame = when (val read = PairingFrameIo.readFrame(input, PairingFrame.MAXIMUM_PAYLOAD_BYTES)) {
+                is FrameRead.Payload -> read.bytes
+                is FrameRead.Rejected -> return PairingCardExchangeResult.Failed(
+                    PairingTransportReasons.PAYLOAD_INVALID,
+                    read.detail,
+                )
+            }
+            val validated = validate(frame, expectedChallenge, required, nowEpochMs)
+            if (validated is PairingInvitationResult.Failed) {
+                return PairingCardExchangeResult.Failed(validated.reason, validated.message)
+            }
+            val invitation = validated as PairingInvitationResult.Ok
+            val peerCard = if (cardFrame == null) {
+                null
+            } else {
+                exchangeCards(input, output, cardFrame)
+            }
+            PairingCardExchangeResult.Ok(invitation.payload, invitation.json, peerCard)
+        } catch (timeout: SocketTimeoutException) {
+            PairingCardExchangeResult.Failed(PairingTransportReasons.PEER_TIMEOUT, "对端在超时前没有完成交换")
+        } catch (error: IOException) {
+            if (connected) {
+                PairingCardExchangeResult.Failed(
+                    PairingTransportReasons.PAYLOAD_INVALID,
+                    "连接中途失败：" + error.javaClass.simpleName,
+                )
+            } else {
+                PairingCardExchangeResult.Failed(
+                    PairingTransportReasons.LISTENER_FAILED,
+                    "无法连接对端：" + error.javaClass.simpleName,
+                )
+            }
+        } finally {
+            val held = session
+            if (held != null) {
+                // TLS 1.3 握手后立刻硬关是 abortive close(RST)，对端会读成 io-failed：半关 + 排水 + 关。
+                SourceSyncTls.gracefulClose(held.socket, readTimeoutMs)
+            } else {
+                LoopbackOnly.closeQuietly(socket)
+            }
+        }
+    }
+
+    /**
+     * 写本机卡片再尽力读对端卡片（W6-71）。
+     *
+     * 任何失败都只当「这次记不住对端」并返回 null，绝不向上抛：邀请已经校验通过，
+     * 卡片只是附加信息。对端可能是没有登记簿的老构建，也可能读完卡片就关连接，都属于正常情况。
+     */
+    private fun exchangeCards(
+        input: InputStream,
+        output: OutputStream,
+        cardFrame: ByteArray,
+    ): PairingPeerCard? = try {
+        output.write(cardFrame)
+        output.flush()
+        when (val read = PairingFrameIo.readFrame(input, PairingPeerCardCodec.MAXIMUM_LENGTH)) {
+            is FrameRead.Payload -> {
+                val decoded = PairingPeerCardCodec.tryDeserialize(String(read.bytes, StandardCharsets.UTF_8))
+                if (decoded is PairingPeerCardCodec.DecodeResult.Ok) decoded.card else null
+            }
+            is FrameRead.Rejected -> null
+        }
+    } catch (timeout: SocketTimeoutException) {
+        null
+    } catch (error: IOException) {
+        null
+    } catch (unexpected: RuntimeException) {
+        // 对端回的不是卡片时，解析层可能抛出意料之外的运行时异常；这一条线不影响已校验的邀请。
+        null
+    }
+
     companion object {
         /** 默认连接超时，毫秒。 */
         const val DEFAULT_CONNECT_TIMEOUT_MS: Int = 3_000
@@ -247,4 +389,16 @@ sealed interface PairingFrameResult {
 sealed interface PairingInvitationResult {
     class Ok(val payload: PairingPayload, val json: String) : PairingInvitationResult
     class Failed(val reason: String, val message: String? = null) : PairingInvitationResult
+}
+
+/** 一次带卡片交换的邀请拉取结果：已校验的邀请，加一张可能拿不到的对端卡片。 */
+sealed interface PairingCardExchangeResult {
+    class Ok(
+        val payload: PairingPayload,
+        val json: String,
+        /** 对端回的卡片；对端没有登记簿、超时或卡片不合法时为 null（不影响邀请本身的结论）。 */
+        val peerCard: PairingPeerCard? = null,
+    ) : PairingCardExchangeResult
+
+    class Failed(val reason: String, val message: String? = null) : PairingCardExchangeResult
 }

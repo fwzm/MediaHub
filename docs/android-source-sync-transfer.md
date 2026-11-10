@@ -3290,7 +3290,7 @@ Windows 的权威语义分两处：`windows/src/MediaHub.Sync/SourceSyncSession.
 | `includeSecrets && protector == null` ⇒ `secrets-require-protector`；给了 `secrets` 却 `includeSecrets == false` ⇒ `secrets-not-requested` | 不适用 | Android 的导出恒 `canSendSecrets = false`（`AndroidSourceSyncService.export()`），没有 secrets 通道 |
 | `EnsureSourceIds()` 的未分配项进 `Warnings`（`source-skipped:<serverId>:<reason>`） | `AndroidSourceSyncService.export()` 的 `skippedServerIds` | 部分等价：Android 只跳「没有可用端点 / 没有可写类型」的来源，identity 由 `SourceSyncLocalIds.derive` 确定性派生（不是 warning） |
 | `TryResolveExportPath` 的 `export-path-*` 码 + `File.WriteAllBytes` 的 `write-failed` | SAF `CreateDocument` 选位置 + `BackupFileStore.write` | 不等价，也不该等价：Android 没有路径（用户选 URI），失败折成本层两个码（见 §37.4） |
-| `DefaultEnvelopeFileName = "sync-envelope.json"` / `DefaultArchiveFileName = "sync-envelope.mhsync"` | `PLAIN_FILE_NAME = "sync-envelope.json"` / `SourceSyncArchiveExport.DEFAULT_FILE_NAME = "sync-envelope.mharchive"` | 明文同名；加密载体**同一字节格式、默认扩展名不同**（历史遗留，见 §37.8 第 4 条） |
+| `DefaultEnvelopeFileName = "sync-envelope.json"` / `DefaultArchiveFileName = "sync-envelope.mharchive"`（W6-66 起；旧名 `LegacyArchiveFileName = "sync-envelope.mhsync"` 仍只读兼容） | `PLAIN_FILE_NAME = "sync-envelope.json"` / `SourceSyncArchiveExport.DEFAULT_FILE_NAME = "sync-envelope.mharchive"` | 明文同名；加密载体**同一字节格式、同一默认扩展名**（§37.8 第 4 条已由 §39 关闭） |
 | `--json` 的十六个字段（command / root / path / encrypted / deviceId / snapshotId / sourceCount / deletionCount / canSendSecrets / sealedSecretCount / warningCount / warnings / bytes…） | 无对等物：成功行是「已导出<明文信封\|加密归档>（<文件名>，<字节数> 字节，<来源数> 个来源）」 | 不等价：Android 是 GUI，没有脚本消费方。计数只保留真实会变的三个（来源数、字节数、明文 / 加密） |
 
 一条容易误读的地方写在这里：Windows 的 `ExportSession.Archive` 与 `EnvelopeJson` 是二选一（`IsEncrypted => Archive.Length > 0`），
@@ -3420,9 +3420,9 @@ XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-64
 2. **设备侧密码学**：全部结论来自 JVM；写侧的 PBKDF2 600 000 轮在 Android（Conscrypt）上的耗时与峰值内存未测 ⇒ DEVICE_UNVERIFIED。
    参考量级：W6-63 在 JVM 上单次解锁 2.2–4.7 s，写侧与读侧同量级。
 3. **androidTest 7 例已在 CI 上跑过，但没有真机**：`b3d0030` 与 `7cc68ac` 的 Android CI 里 `:feature:settings:connectedDebugAndroidTest` 都是 **Starting 112 → Finished 112**、0 FAILED（等于把 `SourceSyncArchiveExportScreenTest` 的 7 例连同既有 105 例全跑了一遍），两个作业末尾各有 `API 32/36: 19 unique mandatory visual/parser tests passed at <该 head>`。真机仍是 DEVICE_UNVERIFIED。
-4. **扩展名差异**：Windows CLI 的加密导出默认名是 `sync-envelope.mhsync`（`SyncCliRunner.DefaultArchiveFileName`），
-   Android 侧统一 `.mharchive`（W6-62 / W6-63 的文案与夹具已经定了）。两者是**同一字节格式**，只是默认名不同；
-   要统一得两边一起改（改 Windows 默认名会碰到既有 CLI 契约与验收脚本），本轮不动。
+4. ~~扩展名差异~~（**已由 §39 关闭**，W6-66）：此前 Windows CLI 的加密导出默认名是 `sync-envelope.mhsync`、
+   Android 侧是 `.mharchive`（W6-62 / W6-63 定的）。§39 已把两端统一为 `.mharchive`；旧名 `.mhsync` 保留为**只读兼容名**
+   （`SyncCliRunner.LegacyArchiveFileName`），因为两端的读端本来就按 `MHSYNCA1` magic 嗅探、从不按扩展名分支。
 5. **8 MiB 上限**：继承 §35.8 第 3 条 / §36.8 第 5 条，只测了判定写法没测接近上限的真数据。
 6. **口令的界外情况**：继承 §36.8 第 6 条（超长口令、NUL、代理对）。导出卡也没有「显示口令」开关、没有剪贴板粘贴的专项验证。
 7. **Windows 的 warnings 与 JSON 输出面没有对等物**：Android 是 GUI，没有 `--json` 消费方；
@@ -3435,7 +3435,7 @@ XML 汇总（`<testsuite>` 属性相加，非估算；日志 `D:/mh-verify/w6-64
 
 - 设备侧取证：把 PBKDF2 600 000 轮的耗时与峰值内存在模拟器 / 低端机上量一次（写读两侧都要），补 §37.8 第 2 条与 §36.8 第 2 条；
 - 真实两机搬运：Windows 导出 `.mharchive` → 拷到另一台机器 → Android 导入，两端各留 exact 证据（同时关闭 §36.8 第 1 条与 §37.8 第 1 条）；
-- 扩展名统一：若维护者希望与 Windows CLI 默认名一致，需在 CLI 加参数而不是单方面改 Android（否则既有文案与夹具不同步）；
+- ~~扩展名统一~~（**已由 §39 完成**，W6-66）：Windows CLI 的默认名改为 `.mharchive`，`.mhsync` 作为只读兼容名继续被接受；不需要新增 CLI 参数，因为读端按 magic 嗅探而不是按扩展名分支；
 - 若产品上要「对端直接发归档」，先写一份安全评审：口令怎么进、超时多久、失败怎么告诉用户不泄露信息（与 §36.9 最后一条同一件事）。
 
 ## §38 反向互操作：Android 写出的 `.mharchive` 由 Windows 读（W6-65）
@@ -3622,3 +3622,3245 @@ XML 汇总（`<testsuite>` 属性相加，非估算）：
 - 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条与 §37.8 第 1 条）；
 - 设备侧密码学：PBKDF2 600 000 轮在模拟器 / 低端机上的耗时与峰值内存，写读两侧都要；
 - 归档格式若要演进（新 KDF、新字段），先按 W6-47 ADR 的方法写契约，再两端同步加码——不要单边加。
+## §39 归档扩展名统一：Windows CLI 默认名改为 `.mharchive`（W6-66）
+
+> 状态词按本项目口径：EXECUTED_PASS / IMPLEMENTED_UNVERIFIED / GUI_UNVERIFIED / SERVER_UNVERIFIED / DEVICE_UNVERIFIED / NOT_RUN / BLOCKED / FAILED / RELEASE_BLOCKED / SIGNING_BLOCKED。
+> 本轮边界：**只改默认文件名与提示文案**，归档字节格式、magic、KDF、AAD、判定序一行不改；旧的 `.mhsync` 文件继续可读。
+
+### §39.1 动机：§37.8 第 4 条留下的那一处「同名不同后缀」
+
+W6-64 的导出卡把 Android 的加密归档接到界面上时，实现在 `core/database` 的 `SourceSyncArchiveExport` 里写死
+`DEFAULT_FILE_NAME = "sync-envelope.mharchive"`；而 Windows CLI 从 ADR-S005 起，`export --passphrase` 落盘的名字一直是
+`sync-envelope.mhsync`。两端写的是**同一套字节格式**（magic `MHSYNCA1`、PBKDF2-HMAC-SHA256 600 000 轮、
+AES-GCM、AAD = `magic + BE int32 + headerJson`），差别只在默认扩展名一个字。
+
+这件事本身没有功能后果，因为**两端读端都按前 8 字节 magic 嗅探，从不按扩展名分支**；但它在两个地方持续放血：
+
+1. 文档要把「扩展名差异」当成一条遗留缺口记（§37.2 对比表、§37.8 第 4 条、§37.9 第 3 条），每读一次都要先解释「这不是两个格式」；
+2. 用户看到 Android 导出 `.mharchive`、Windows 导出 `.mhsync`，最自然的推断就是两种文件需要两种打开方式——而事实恰好相反。
+
+W6-66 因此只做一件事：**把 Windows CLI 的默认名改成 `.mharchive`，把 `.mhsync` 降级为只读兼容名**。
+选择「改默认名」而不是「改格式」，是因为格式一侧没有任何理由动——两端的读端已经证明能互吃（W6-65 的 Kotlin 写 → C# 读、
+W6-62 的 C# 写 → Kotlin 读）。
+
+### §39.2 设计：默认名与兼容名分开，读端行为一字不改
+
+| 决定 | 取值 | 理由 |
+| --- | --- | --- |
+| 写端默认名 | `sync-envelope.mharchive` | 与 Android `SourceSyncArchiveExport.DEFAULT_FILE_NAME` 逐字相同 |
+| 旧名 | `sync-envelope.mhsync`，保留为 `SyncCliRunner.LegacyArchiveFileName` | 测试与外部调用方需要一个不写字符串字面量的入口；旧文件继续可读 |
+| 新增 CLI 参数 | **不加** | 读端按 magic 嗅探，`--in` 传什么名字都能读；加参数只是把命名选择推给用户 |
+| 读端扩展名白名单 | **不加** | 加了就等于「按扩展名分支」，会同时破坏「明文信封改名成 `.mharchive` 仍按明文读」这条行为 |
+| 界面选择器 | `[".json", ".mharchive", ".mhsync"]` | `.mharchive` 是规范名，`.mhsync` 只为兼容老文件仍可选 |
+
+刻意**不采用**的两个方案，理由要写下来（否则以后会有人再提）：
+
+1. *在归档头里加一个 `fileExtension` 字段*——头部 JSON 是 GCM 的 AAD 一部分（§38.5），改它等于改格式，且扩展名属文件系统元数据，不该进密码学头；
+2. *按扩展名决定要不要索要口令*——这正是「明文信封改名成 `.mharchive` 仍按明文读」这条反例要否掉的：扩展名只是提示，判据只能是内容。
+
+### §39.3 落点行号表
+
+| 文件 | 行 | 内容 |
+| --- | --- | --- |
+| `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` | :26-30 | `DefaultArchiveFileName = "sync-envelope.mharchive"`（注释写明「every reader sniffs the magic bytes and never the extension」） |
+| 同上 | :32-33 | `LegacyArchiveFileName = "sync-envelope.mhsync"`（注释写明 pre-W6-66 后缀，保留只为调用方不必写字符串字面量） |
+| 同上 | :2107 | `Path.Combine(invocation.Root, encrypted ? DefaultArchiveFileName : DefaultEnvelopeFileName)` |
+| `windows/src/MediaHub.App/Views/SyncPage.xaml` | :33 | 导出按钮 ToolTip 追加「加密导出写入 sync-envelope.mharchive」 |
+| 同上 | :132 | 应用卡说明改为「sync-envelope.json，或加密存档 .mharchive」 |
+| `windows/src/MediaHub.App/Views/SyncPage.xaml.cs` | :649-651 | 选择器改为 `PickFileAsync([".json", ".mharchive", ".mhsync"])`，注释写明 canonical / 兼容名 |
+| `windows/tests/MediaHub.Tests/SyncCliTests.cs` | :562 | 新分节注释 `// ---- archive file names (W6-66) ---` |
+| 同上 | :566 / :582 / :601 | 三个 `[Fact]`：`Run_EncryptedExportUsesTheCanonicalArchiveSuffix` / `Run_ArchiveUnderTheLegacySuffixIsStillRead` / `Run_PlainEnvelopeNamedLikeAnArchiveIsStillPlaintext` |
+| `windows/tools/acceptance/w6/sync-cli-e2e.ps1` | :324 / :339 | 两个新 `Check`（插在 #9 `passphrase-archive-round-trips-to-a-fresh-device` 之后） |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportLogic.kt` | :61 | 新增 `SourceSyncImportCopy.PICK_HINT`（含 `.json` / `.mharchive` / 旧 `.mhsync` 三句） |
+| `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportScreen.kt` | :369 | 选文件区改用该常量（原内联长句 `.json 或 .mhsync 的明文信封` 已删） |
+| `feature/settings/src/test/kotlin/com/mediahub/feature/settings/sync/SourceSyncImportLogicTest.kt` | :280 | 新用例 `thePickHintNamesTheCanonicalArchiveSuffixAndNeverCallsTheLegacySuffixPlaintext` |
+
+Android 侧只改文案、不改行为：选文件仍然读字节、仍然按 magic 嗅探、仍然在口令卡里解密。改文案的原因和 Windows 一样——
+旧提示写「`.json` 或 `.mhsync` 的明文信封」，把 `.mhsync` 说成明文，恰恰与两端读端的实际判据相反。
+
+### §39.4 用例清单
+
+Windows 三个 `[Fact]`（`SyncCliTests.cs`，每个都在临时根目录里跑真 CLI）：
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `Run_EncryptedExportUsesTheCanonicalArchiveSuffix` | 加密导出后 `sync-envelope.mharchive` 存在、`sync-envelope.mhsync` **不存在**；同时断言常量值本身 |
+| `Run_ArchiveUnderTheLegacySuffixIsStillRead` | 把规范名归档改名成 `.mhsync` 再 `import --passphrase --apply`：exit 0、`appliedCount=1`、stderr 不含 `malformed-payload` |
+| `Run_PlainEnvelopeNamedLikeAnArchiveIsStillPlaintext` | 把明文信封改名成 `.mharchive` 再 `import --apply`：exit 0、`appliedCount=1`、stderr 不含 `passphrase-required` |
+
+第二、三是**反向对照**：只断言「默认名变了」的话，把读端改成按扩展名分支也能绿；这两条把「扩展名不是判据」钉成行为断言。
+
+验收脚本两个新检查（`sync-cli-e2e.ps1`，14 → 16 项）：
+
+| # | 检查 | 钉住的规则 |
+| --- | --- | --- |
+| 10 | `encrypted-export-uses-the-canonical-archive-suffix` | 规范名落盘、旧名不再写；把规范名复制成 `.mhsync` 后新设备仍能导入（`appliedCount=2`） |
+| 11 | `plain-envelope-renamed-to-an-archive-suffix-is-still-plaintext` | 明文信封复制成 `.mharchive` 后仍按明文导入（`appliedCount=2`），不索要口令 |
+
+Kotlin 一例：`thePickHintNamesTheCanonicalArchiveSuffixAndNeverCallsTheLegacySuffixPlaintext`——四条断言（含 `.mharchive` / `.json` / `.mhsync`，且**不含** `.mhsync 的明文信封`）。
+这是文案的回归锁：下一次有人把旧句改回去会红。
+
+### §39.5 本机实跑（串行，防 OOM）
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| C# 全量 + 验收脚本 | `D:/mh-verify/run-w6-66a-windows.bat`（内部先 `dotnet build-server shutdown`，再 build、`dotnet test`、跑 `sync-cli-e2e.ps1`） | `BUILD_EXIT=0`；**1588 通过 / 0 失败 / 0 跳过**（1585 → 1588，+3）；`RESULT: 16 passed, 0 failed`、`ACCEPT_EXIT=0` |
+| C# 只看新例 | `dotnet test … --filter "FullyQualifiedName~Run_EncryptedExportUsesTheCanonicalArchiveSuffix|FullyQualifiedName~Run_ArchiveUnderTheLegacySuffixIsStillRead|FullyQualifiedName~Run_PlainEnvelopeNamedLikeAnArchiveIsStillPlaintext"` | **3/3 通过**、`EXIT=0`（`D:/mh-verify/w6-66a-filter.log`） |
+| 验收脚本 detail 抽样 | 同上日志 | `encrypted-export-uses-the-canonical-archive-suffix :: written=sync-envelope.mharchive legacy-name-still-reads applied=2`；`plain-envelope-renamed-to-an-archive-suffix-is-still-plaintext :: the reader sniffs MHSYNCA1 instead of trusting the extension`；`passphrase-archive-round-trips-to-a-fresh-device :: magic=MHSYNCA1 bytes=1189 applied=2` |
+| Android 三模块 | `D:/mh-verify/run-w6-66b-gradle.bat`（低内存模板 + `--rerun-tasks`，确保三模块都真跑而不是 UP-TO-DATE） | `BUILD SUCCESSFUL in 3m 18s`、`167 actionable tasks: 167 executed`、`EXIT=0` |
+| 清理 | 跑完 `gradlew --stop` | 仓库根 `hs_err_pid*.log` 计数 0、残留 java/dotnet 进程 0 |
+
+首轮全量 build 撞到一次 `error MSB3021: 无法将文件 …DirectML.dll 复制到 …`（同样 onnxruntime.dll）：
+目标文件当时并不存在、目录 ACL 正常、手工 `Copy-Item` 也成功 ⇒ 是**残留 MSBuild / VBCSCompiler 节点句柄**造成的瞬时锁，
+`dotnet build-server shutdown` 后单项目 build 成功、整轮即绿。这条已写进验证脚本的头部。
+
+XML 汇总（`<testsuite>` 属性相加，非估算；`--rerun-tasks` 后三模块都是当轮产物）：
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | 42 | 596 | 0 | 11 | 不变 |
+| `core/database` | 20 | 192 | 0 | 12 | 不变 |
+| `feature/settings` | 23 | **354** | 0 | 0 | 353 → 354（+1 = §39.4 的文案用例） |
+
+三模块合计 **1142** 例（596 + 192 + 354）。本轮**没有**新增套件，`--required-suite` 仍是 48 条；
+`androidTest` 仍 88 例（文案改动没有新增 Compose 断言）。
+
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 `completed / success`：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `8c26230b4762bf91d57710365cfa41cc7d2cb5d9` | `windows-ci` | 40330806529 | `MediaHub.Tests` 469 + `MediaHub.WebDav.Tests` 104 = 573；licence `projects=13 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40330806617 | `uniqueTests` **2267**（`core/common` 596 / `core/database` 192 / `feature/settings` 354）；`--required-suite` 48 条；两个 visual-instrumentation job 各 112 例，API 32/36 各 `19 unique mandatory` 命中该 SHA |
+| `53d2571f480202b0506d92e6017a2758d09ea01f`（W6 树，此刻尚未 merge 本轮主树提交） | `windows-ci` | 40331895690 | `MediaHub.Tests` **1588** + `MediaHub.WebDav.Tests` 104 = **1692**；licence `projects=15 rows=47 packages=28`、`RESULT: PASS` |
+| 同上 | `android-ci` | 40331895747 | `uniqueTests` **2266**（`core/common` 596 / `core/database` 192 / `feature/settings` 354）；`--required-suite` 48 条；instrumentation 112 例、API 32/36 各 `19 unique mandatory` |
+
+主树 `uniqueTests` 由上一基线 2266 增至 **2267**（+1 = §39.4 的 Kotlin 文案用例，与本机 XML `feature/settings` 353 → 354 一致）。
+W6 树那两条比主树少 1 例，原因是 W6 分支此刻还没 merge `8c26230`——Android 侧代码在本轮主树提交里，W6 树只带到 `d3be762`；因此 **2267 是本轮 Android 口径**，W6 的 2266 只是它自己 head 上的实测值，不是回归。
+
+
+### §39.6 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机搬运**：把 Windows 导出的 `.mharchive` 拷到另一台机器再让 Android 导入的完整流程 NOT_RUN（同 §33.8–§38.9 各节，都需要第二台机器）。
+2. **已发布版本的兼容性**：`.mhsync` 只读兼容是**读端行为**，本机用改名文件验过；但「用旧版本 CLI 导出的真实历史文件」没有样本可测（旧版本写出的字节格式与本轮相同，风险在此一处）。
+3. **其他调用方的默认名**：仓库内除 CLI 与 App 外没有第三处写归档名的代码；仓库外的脚本若硬编码 `.mhsync`，本轮无法感知。
+4. **不涉及 GUI 证据**：App 只改提示文案与文件选择器的扩展名列表，没有新增控件、没有改交互顺序；同步页四张卡的 GUI 证据仍按 W6-43 / W6-49 / W6-58 / W6-64 的既有口径记为 GUI_UNVERIFIED。
+5. **设备侧**：Android 侧只加一条纯 JVM 文案用例，无设备依赖；真机 `DEVICE_UNVERIFIED` 的既有口径不变。
+
+### §39.7 下一步
+
+- §37.2 的对比表与 §37.8 第 4 条、§37.9 第 3 条已在本轮回标关闭，无需再动；
+- 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条与 §37.8 第 1 条）；
+- 设备侧密码学：PBKDF2 600 000 轮在模拟器 / 低端机上的耗时与峰值内存，写读两侧都要；
+- 归档格式若要演进（新 KDF、新字段），先按 W6-47 ADR 的方法写契约，再两端同步加码——不要单边加。
+
+## §40 跨语言文本边界契约：空白、大小写折叠、孤立代理项（W6-67）
+
+> 状态词按本项目口径：EXECUTED_PASS / IMPLEMENTED_UNVERIFIED / GUI_UNVERIFIED / SERVER_UNVERIFIED / DEVICE_UNVERIFIED / NOT_RUN / BLOCKED / FAILED / RELEASE_BLOCKED / SIGNING_BLOCKED。
+> 本轮边界：**只对齐文本判定规则与畸形输入的处理**，归档字节布局、magic、KDF 参数、AAD、稳定码集合（仍 12 个）一行不改；Windows 侧行为零变化（它的运行时默认本来就是 Unicode White_Space），Android 侧向同一套显式规则收敛。
+
+### §40.1 动机：同一份字节，两端给出不同的稳定码
+
+W6-62 到 W6-66 建立的互操作契约都依赖同一个前提：**同一条坏输入，两端必须报同一个 reason**。前三轮把字节布局、KDF、AAD、判序都钉住了，但还有一层没有钉：**文本判定本身**。
+
+这一层默认继承各语言的运行时，而运行时并不一致。用探针在本机实测（Java 21.0.9 / .NET 10.0.113），得到四处硬分歧：
+
+| # | 分歧 | JVM（Kotlin 默认） | .NET（C# 默认） | 后果 |
+| --- | --- | --- | --- | --- |
+| 1 | 空白集 | `Char.isWhitespace \|\| isSpaceChar`：**含** U+001C–U+001F，**不含** U+0085 | `char.IsWhiteSpace` = Unicode White_Space：**含** U+0085，**不含** U+001C–U+001F | 口令 `U+0085+password1234` 在 Windows 是 `passphrase-too-weak`，在 Android 被接受 |
+| 2 | `trim` 语义 | `String.trim()` 只剥 `<= U+0020`，与它自己的空白集不一致 | `String.Trim()` 与 White_Space 集一致 | 12×U+001C：Android 判 `passphrase-empty`，Windows 判 `passphrase-too-weak` |
+| 3 | 大小写折叠 | `equalsIgnoreCase` 会把 U+017F（长 s）、U+212A（开尔文符号）折成 ASCII | `OrdinalIgnoreCase` 只折 ASCII A–Z | `paſſword1234` 在 Android 命中弱口令表，在 Windows 不命中 |
+| 4 | 孤立代理项 | `PBEKeySpec` 静默替换成 `?` 后派生出一个对端永远读不开的密钥 | `Rfc2898DeriveBytes.Pbkdf2` 抛**未捕获**的 `EncoderFallbackException` | 同一口令，一端写出死文件、另一端直接崩 |
+
+前三条是「同一条坏输入两端不同码」，第四条更严重：**两端都没有把错误当成错误**。所以这一轮不是加功能，是把四条边界钉成显式契约。
+
+### §40.2 设计：把规则从运行时默认里拿出来，写成两端各一份的同源表
+
+| 决定 | 取值 | 理由 |
+| --- | --- | --- |
+| 空白定义 | 显式列出 Unicode White_Space 的 25 个 BMP 码点 | 只有显式表能同时钉住「哪 25 个」与「不含 U+001C–U+001F」；C# 侧用例再逐码点断言该表等于 `char.IsWhiteSpace` |
+| 大小写 | 只折叠 ASCII A–Z，其余码元逐字比较 | 覆盖口令弱表与 kdf 名两个消费点；不依赖 `equalsIgnoreCase` / `OrdinalIgnoreCase` 的本地化行为 |
+| 孤立代理项 | 口令策略层判 `passphrase-too-weak`（**不新增错误码**） | 码表 12 个稳定码是对外契约，新增第 13 个会让旧读端把它当未知码；口令不可编码本质上就是「这个口令不能用」 |
+| 信封里的孤立代理项 | 文档级 `malformed-json`；可选文本字段（displayName / accountScope）`invalid-field:<字段>` | 与「未知字段忽略、必需字段缺失 missing-field」的既有分诊一致；不允许悄悄写成 U+FFFD |
+| 头部里的孤立代理项 | `corrupt-header` | 头解析失败本来就是这一个码 |
+| 共享实现 | Kotlin `com.mediahub.core.common.sync.WireText` / C# `MediaHub.Sync.WireText` | 五个消费点各自实现会漂移；两份实现由同一份黄金向量逐条对照 |
+
+刻意**不采用**的两个方案：
+
+1. *让 Android 照抄 .NET 的 `char.IsWhiteSpace` 但继续用 `String.trim()`*——不行，`trim` 的语义与空白集是两件事，混用会在 U+0085 上给出第三种答案；
+2. *新增 `passphrase-unencodable` 稳定码*——两端码表必须同名同序（W6-47 结论 C），加码得两端同时改且各有交集为空的用例；而这条的对外语义与「这个口令不能用」完全重合，不值得扩表。
+
+### §40.3 落点行号表
+
+| 文件 | 行 | 内容 |
+| --- | --- | --- |
+| `core/common/.../sync/WireText.kt` | 全文（88 行） | `WHITESPACE_CODE_POINTS` 25 码点 / `isWhitespace`（二分）/ `isBlank` / `trim` / `equalsAsciiIgnoreCase` / `hasLoneSurrogate` / `containsLoneSurrogate(JsonElement)` |
+| `core/common/.../archive/ArchivePassphrase.kt` | :62-68 | `tryValidate` 判序：`WireText.isBlank` → 长度 → **`hasLoneSurrogate` → too-weak** → `WireText.trim` → `equalsAsciiIgnoreCase` 对弱表 |
+| `core/common/.../archive/ArchiveKdf.kt` | :34-36 | `tryParse` 改为 `WireText.equalsAsciiIgnoreCase(WireText.trim(name), PBKDF2_SHA256_NAME)`（不再 `lowercase()`：JVM 会把 U+212A 折成 k） |
+| `core/common/.../archive/ArchiveHeader.kt` | :78 | `tryParse` 在转成 `JsonObject` 之后 `if (WireText.containsLoneSurrogate(json)) return null` |
+| `core/common/.../sync/SourceSyncCodec.kt` | :112-129 | `requireText` 的空白判定换 `WireText.isBlank` 并追加 `hasLoneSurrogate → invalid-field`；新增 `requireWellFormed` 供可选字段用 |
+| 同上 | :105-106 | `validateForWrite` 对 `displayName` / `accountScope` 调 `requireWellFormed` |
+| 同上 | :145-150 | `decode` 入口在 `root !is JsonObject` 之后判 `WireText.containsLoneSurrogate(root)` → `malformed-json` |
+| `windows/src/MediaHub.Sync/WireText.cs` | 全文（168 行） | 同 25 码点表 + `IsWhitespace`/`IsBlank`/`Trim`/`EqualsAsciiIgnoreCase`/`HasLoneSurrogate`/`ContainsLoneSurrogate(JsonElement)` |
+| `windows/src/MediaHub.Sync/ArchivePassphrase.cs` | :56-90 | `TryValidate` 判序同 Kotlin（`WireText.*` + 孤立代理项 → `PassphraseTooWeak`） |
+| `windows/src/MediaHub.Sync/ArchiveKdf.cs` | :60-65 | `TryParse` 改用 `WireText.EqualsAsciiIgnoreCase(WireText.Trim(name), …)` |
+| `windows/src/MediaHub.Sync/ArchiveHeader.cs` | :112 / :181-186 | `TryParse` 补 `catch (ArgumentException)`（`JsonDocument.Parse` 对转义孤立代理项抛这个）；`TryReadString` 把 `GetString()` 包进 `catch (InvalidOperationException)` |
+| `windows/src/MediaHub.Sync/SourceSyncCodec.cs` | :71 / :418-446 / :469-480 | `Deserialize` 入口判 `WireText.ContainsLoneSurrogate` → `malformed-json`；`RequireText` 换 `WireText.IsBlank` 并加孤立代理项判定；新增 `RequireWellFormed` 给可选字段 |
+| `core/common/src/test/resources/archive/windows-archive-vectors.json` | `edges` 段 | 由 Windows 权威实现生成的 10 组边界向量（+1098 行） |
+| `windows/tests/assets/windows-archive-vectors.json` | 全文（与上同字节） | C# 测试读取的副本；两份 sha256 相同 |
+| `core/common/src/test/kotlin/.../ArchiveEdgeContractTest.kt` | 全文（11 例） | Kotlin 侧逐条消费 `edges` 段 |
+| `windows/tests/MediaHub.Tests/ArchiveEdgeContractTests.cs` | 全文（11 例） | C# 侧逐条消费同一段；csproj 加一条 Content 挂载向量文件 |
+
+### §40.4 用例清单
+
+两端各 11 例，**逐条对应**同一份 `edges` 向量（Kotlin 与 C# 的用例名一一同义，便于对照阅读）：
+
+| # | Kotlin（`ArchiveEdgeContractTest`） | C#（`ArchiveEdgeContractTests`） | 钉住什么 |
+| --- | --- | --- | --- |
+| 1 | `the_whitespace_table_is_the_unicode_white_space_property_used_by_dotnet` | `TheWhitespaceTableIsTheUnicodeWhiteSpacePropertyOfDotNet` | 25 码点表与向量相等；C# 侧还逐码点断言与 `char.IsWhiteSpace` 全 BMP 一致；两端都断言 U+001C/U+001F/U+200B/U+FEFF/U+00AD 不算空白 |
+| 2 | `is_blank_and_trim_agree_with_the_windows_answers_for_every_candidate` | `IsBlankAndTrimAgreeWithEveryVectorCandidate` | 13 条候选的 `blank` 与 `trimmed` 逐条相等 |
+| 3 | `ascii_case_folding_never_folds_a_non_ascii_lookalike` | `AsciiCaseFoldingNeverFoldsANonAsciiLookalike` | 6 组折叠对；另有长 s / 开尔文符号两条硬断言 |
+| 4 | `lone_surrogates_are_detected_by_code_unit_not_by_character_count` | `LoneSurrogatesAreDetectedByCodeUnitNotByCharacterCount` | 7 条候选（尾随高代理、前导低代理、内部高代理、合法代理对、两个连续高代理、低后高） |
+| 5 | `the_passphrase_policy_gives_the_windows_answer_for_every_candidate` | `ThePassphrasePolicyGivesTheVectorAnswerForEveryCandidate` | 11 条口令候选的 reason 逐条相等 |
+| 6 | `a_lone_surrogate_passphrase_is_rejected_before_pbkdf2_sees_it` | `TheWriterRefusesALoneSurrogatePassphraseBeforePbkdf2SeesIt` | 策略层先拒；写侧抛的是 `passphrase-too-weak` 而不是编码器异常 |
+| 7 | `kdf_names_are_matched_with_ascii_folding_and_the_unicode_whitespace_set` | `KdfNamesAreMatchedWithAsciiFoldingAndTheUnicodeWhitespaceSet` | 9 条 kdf 名候选 |
+| 8 | `header_parsing_and_kdf_acceptance_agree_with_the_windows_answers` | `HeaderParsingAndKdfAcceptanceAgreeWithEveryVector` | 10 条头部变体的 parses / kdfAccepted / version（含重复键后胜、未知字段忽略） |
+| 9 | `envelope_decoding_reports_the_windows_reason_for_every_variant` | `EnvelopeDecodingReportsTheVectorReasonForEveryVariant` | 11 条信封变体的 reason（含 `malformed-json` 与 `missing-field:deviceId`） |
+| 10 | `envelope_writing_rejects_the_same_documents_the_windows_writer_rejects` | `EnvelopeWritingRejectsTheDocumentsTheWindowsWriterRejects` | 4 条写侧拒绝：`invalid-field:deviceId` / `missing-field:deviceId` / `invalid-field:displayName` |
+| 11 | `archive_reading_and_writing_agree_on_every_passphrase_case` | `ArchiveReadingAndWritingAgreeOnEveryPassphraseCase` | 5 条归档口令：读侧 reason 与写侧 reason 同时相等 |
+
+`edges` 段共 10 组向量（由 Windows 权威实现产出，生成器 `D:/mh-verify/archive-vectors`，不入库）：`whitespaceCodePoints`（25）/ `blankCandidates`（13）/ `kdfNameCandidates`（9）/ `caseFoldPairs`（6）/ `loneSurrogateCandidates`（7）/ `passphraseCandidates`（11）/ `headerVariants`（10）/ `envelopeVariants`（11）/ `envelopeWriteRejections`（4）/ `archivePassphraseCases`（5）。
+
+### §40.5 本机实跑（串行，防 OOM）
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| 生成器重跑 | `cd D:/mh-verify/archive-vectors && dotnet run -c Release` | `wrote …windows-archive-vectors.json (75552 bytes)`、`EXIT=0`；磁盘 **75553 B**（含行尾换行）；老 12 段 JSON 深度全等，仅新增 `edges` |
+| C# 全量 build + test | `D:/mh-verify/run-w6-67-windows.bat`（先 `dotnet build-server shutdown`，再 build `MediaHub.Windows.sln`、`dotnet test`、再 filtered 跑一遍新例） | `BUILD_EXIT=0`（0 警告 0 错误）、`TEST_EXIT=0` → **1599 通过 / 0 失败 / 0 跳过**（1588 → 1599，+11）、`EDGE_EXIT=0` → 11/11 |
+| C# 只看新例 | 同上脚本第三段 `--filter "FullyQualifiedName~ArchiveEdgeContractTests"` | **11/11 通过**，578 ms |
+| Android 三模块 | `D:/mh-verify/run-w6-67-gradle.bat`（低内存模板 + `--no-daemon`） | `BUILD SUCCESSFUL in 2m 41s`、`167 actionable tasks: 26 executed, 141 up-to-date`、`EXIT=0`；仓库根无 `hs_err_pid*.log` |
+
+XML 汇总（`<testsuite>` 属性相加，非估算）：
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | **43** | **607** | 0 | 11 | 42 → 43 套件（+1 = `ArchiveEdgeContractTest`）、596 → 607（+11） |
+| `core/database` | 20 | 192 | 0 | 12 | 不变 |
+| `feature/settings` | 23 | 354 | 0 | 0 | 不变 |
+
+三模块合计 **1153** 例。`--required-suite` 由 48 条增至 **49 条**（新钉 `com.mediahub.core.common.archive.ArchiveEdgeContractTest`）；`androidTest` 仍 88 例、instrumentation 仍 112 例（本轮无 Compose 断言）。
+
+首跑 `dotnet build windows/MediaHub.sln` 撞 `MSBUILD : error MSB1009: 项目文件不存在` —— 解法文件名是 `MediaHub.Windows.sln`；这是本轮验证脚本自身的笔误，不涉及产品代码，改正后 `BUILD_EXIT=0`。
+
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 `completed / success`：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `c287964d9c7877f114e92f26171f38207680d3d0`（主树） | `windows-ci` | 40372134565 | `MediaHub.Tests` 469 + `MediaHub.WebDav.Tests` 104 = 573；licence `projects=13 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40372137888 | `uniqueTests` **2278**（`core/common` 607 / `core/database` 192 / `feature/settings` 354）；`--required-suite` **49** 条；两个 visual-instrumentation job 各 `19 unique mandatory` 命中该 SHA（`feature:settings` 分组 112 例） |
+| `2a25a919abde3cb5b122133fceba6d39fa298dd2`（W6 树，已 merge 主树本轮提交） | `windows-ci` | 40372214715 | `MediaHub.Tests` **1599** + `MediaHub.WebDav.Tests` 104 = **1703**；licence `projects=15 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40372214599 | `uniqueTests` **2278**（同主树口径）；`--required-suite` 49 条；instrumentation 112 例、API 32/36 各 `19 unique mandatory` |
+
+主树 `uniqueTests` 由上一基线 2267 增至 **2278**（+11 = §40.4 的两个测试类各 11 例，与本机 XML `core/common` 596 → 607 一致）。
+W6 树本轮 merge 了主树提交，因此**两条 Android CI 的 `uniqueTests` 同为 2278**，不再有上一轮那种差 1 例的口径分裂。
+
+### §40.6 本轮修掉的三个真实缺陷（都是探针实测，不是推断）
+
+1. **Windows 写端会抛未捕获异常**：`ArchiveKdf.DeriveKey` 对含孤立代理项的口令抛 `System.Text.EncoderFallbackException`，它不是 `ArchiveException`，会穿透 `EncryptedArchiveWriter.Write` 的 `catch (ArchiveException)` 与上层 UI。修法是在口令策略层（`ArchivePassphrase.TryValidate`）就判 `passphrase-too-weak`，派生之前返回。
+2. **Android 写端会产出对端永远读不开的文件**：`PBEKeySpec` 把孤立代理项静默替换成 `?`（实测 UTF-8 末三字节 `6c653f`），两端「都成功」但对端永远解密失败。同一处修法一并覆盖。
+3. **C# 头解析对转义孤立代理项会抛未捕获异常**：`JsonDocument.Parse` 接受 `"\ud800"`，失败推迟到 `GetString()`，抛的是 `InvalidOperationException`（`ArchiveHeader.cs:181-186`），而 `TryParse` 只 `catch (JsonException)`。修法是把 `GetString()` 包进 `catch (InvalidOperationException)` → `corrupt-header`；`Deserialize` 侧同理由 `WireText.ContainsLoneSurrogate` 在入口拦成 `malformed-json`。
+
+另外 `Utf8JsonWriter.WriteString` 遇孤立代理项**不抛**，静默写成 `\uFFFD`（实测 `"a\ud800b"` → `{"deviceId":"a\uFFFDb"}`）——这是「写端必须自己拒」的实证依据，不是理论担忧。
+
+### §40.7 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机搬运**：两端对同一份坏输入的码已在本机逐条对齐，但「一台真机写、另一台真机读」的端到端流程仍 NOT_RUN（同 §33.8–§39.6 各节，都需要第二台机器）。
+2. **非 BMP 码点**：空白表只覆盖 BMP（Unicode White_Space 本身只在 BMP）。补充平面的字符在代理层不可能是空白，`isWhitespace(Char)` 按码元判已足够；但**非 BMP 的孤立代理项组合**只按码元判定，没有做码点级规范化（两端都不做，因此一致）。
+3. **其他可能消费文本规则的模块**：本轮只改口令、kdf 名、信封文本字段、归档头四处；备份（`.mhbackup`）与配对（pairing）两侧**没有**改用 `WireText`，它们的空白判定仍是各自原状——若将来发现跨端分叉，需要单独排查。
+4. **JVM/CLR 的 Unicode 版本差异**：显式表钉住的是**当前**代码点集；将来 Unicode 版本若给 White_Space 增减码点，两端必须同时改表（黄金向量会立刻红，这是设计意图）。
+5. **不涉及 GUI 与设备**：纯 JVM/C# 逻辑层，无新增控件、无设备依赖；真机 `DEVICE_UNVERIFIED` 与 GUI `GUI_UNVERIFIED` 的既有口径不变。
+
+### §40.8 下一步
+
+- 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条、§37.8 第 1 条、§39.6 第 1 条）；
+- 备份（`.mhbackup`）与配对（pairing）两侧的文本判定是否也该收进 `WireText`：先按 W6-47 ADR 的方法写一份口径表，再决定要不要动；
+- 8 MiB 上限附近的真实数据（口令正确、载荷刚好超限）仍无边测；
+- 归档格式若要演进（新 KDF、新字段），先写契约再两端同步加码——不要单边加。
+
+## §41 8 MiB 上限附近的真数据穿越 AES-256-GCM（W6-68）
+
+> 状态词：两端本机 **EXECUTED_PASS**；四条 CI 待本轮提交后取证。`--required-suite` 49 → 50。
+> 边界：本轮只碰测试与门禁脚本，除新增一个测试套件外没有改动任何生产代码路径。
+
+### §41.1 动机（为什么「拒绝过大」不够）
+
+归档层从 W6-62 起就有 8 MiB 的载荷上限，两端各自都有「超限就拒」的用例：
+Kotlin 侧 `ArchiveRoundTripTest.writing_refuses_a_payload_that_is_larger_than_the_archive_limit` 用 9 000 000 字节断言 `payload-too-large`，
+C# 侧 `ArchiveEncryptionTests.OversizedCiphertext_IsRejectedBeforeDecryption` / `OversizedPayload_IsRejectedWhenWriting` 用 `MaxPayloadBytes + 1` 分别钉读端与写端。
+但这三条用例合起来只证明了一件事：**超限会被拒**。真正会撞上的问题是相反的——
+一份大型媒体库导出的信封，载荷恰好落在上限附近时，加密、写盘、读回、GCM 校验这条完整链路还成不成立。
+
+这个缺口有三重风险，都不是理论担忧：
+
+1. **差一错误（off-by-one）**。写端判据是 `payload.size > MAX`（大于才拒），读端是 `cipherLength > MAX`；
+   只要其中一处的比较符写反成 `>=`，恰好等于 8388608 B 的合法载荷就会被两端同时或单端拒绝，而既有用例全是 9 MB 级，永远碰不到这个边界。
+2. **长度假设**。AES-GCM 的密文长度等于明文长度，读端是**在解密之前**按 `cipherLength` 判上限的——
+   这条等价关系一旦被将来的压缩/分块改写破坏，读端就会在解密后才发现超限，等于先花 600 000 轮 PBKDF2 再失败。
+3. **跨语言一致性**。两端各自的编码器（kotlinx `buildJsonObject{}.toString()` 与 `Utf8JsonWriter`）字段序相同、
+   但一旦载荷逼近上限，任何一端的细微差异（多一个空格、字段顺序不同）都会让同一份信封在两个实现里得到不同的字节长度——
+   恰好在下限附近，这就决定了一份归档能不能被对端打开。
+
+所以本轮把「上限本身可用」写成契约：用 Windows 权威实现生成一份**恰好 8 MiB** 的载荷与其归档，
+让 Kotlin 端逐字节复现同一份载荷、同一份归档，并且两端都验证「恰好上限可读、MAX+1 被拒」。
+
+### §41.2 设计（不存 8 MB 字节，只存配方与哈希）
+
+直接把 8 MiB 的归档当测试资源入库是不可接受的：单测仓库会因此膨胀 16 MB（Kotlin 与 C# 各一份），
+而且二进制资源无法 review「它到底是哪个信封」。采用的做法是**只存配方**：
+
+| 决定 | 内容 | 理由 |
+| --- | --- | --- |
+| 载荷用可计算的长度 | 一个 source 的 `displayName` 由 ASCII 单字符 `x` 重复到精确长度（`displayNameLength = 8388242`），其余字段固定 | 载荷字节长度 = 基准 JSON 长度 + displayName 长度，可反解到恰好 8388608 B；纯 ASCII 不触发任何转义，长度稳定 |
+| 固定 salt/nonce | 向量里存 `saltBase64 = "AAECAwQFBgcICQoLDA0ODw=="`（0..15）与 `nonceBase64 = "EBESExQVFhcYGRob"`（16..27） | 两端的 `write()` 都自取随机 salt/nonce，**不可能**逐字节相同；只有手工按固定 salt/nonce 加密才能让 Kotlin 与 Windows 得到同一份归档字节 |
+| 只存哈希与长度 | `payloadByteLength` / `payloadSha256` / `archiveByteLength` / `archiveSha256` / `headerBase64` / `prefixByteLength` | 8 MB 资源不入库；断言靠「编码结果的长度与 sha256」等价于逐字节比较，且失败时能立刻定位是载荷还是归档 |
+| 写端往返只钉语义 | 真实 `ArchiveWriter.write` / `EncryptedArchiveWriter.Write` 各自生成随机 salt/nonce，只断言「写→读回的信封 encode 结果相等」 | 与上面同因；把「随机 salt 也应可复现」当成断言只会造出 flaky 用例 |
+| 读端超限单独构造 | `prefix + 8388609 字节零密文 + 16 字节 tag` | 读端必须在**解密前**就返回 `payload-too-large`；用零密文可以证明它没有先尝试解密（否则会给 `wrong-passphrase-or-tampered`） |
+
+两个刻意不采用的做法：
+
+- **把 8 MiB 归档直接入库**：仓库永久多 16 MB 二进制，且无法解释「这份字节是从哪个信封来的」。
+- **在测试里现场构造 8 MiB 再和另一端比**：两端测试无法互调，只能各自构造，等于没有跨语言断言——必须由一端的权威实现产出答案，另一端去对。
+
+### §41.3 落点行号表
+
+| 位置 | 内容 |
+| --- | --- |
+| `core/common/src/test/kotlin/…/archive/ArchiveNearLimitTest.kt`（新，244 行） | Kotlin 侧五个用例；`craft()` 用向量固定 salt/nonce 手工加密，`envelopeWithDisplayName(n)` 按配方重建信封 |
+| `core/common/src/test/resources/archive/windows-archive-vectors.json`（74164 → **77034 B**） | 新增根键 `nearLimit`（原 13 段逐字节不变） |
+| `.github/workflows/android-ci.yml` | `--required-suite` 49 → **50**（新钉 `com.mediahub.core.common.archive.ArchiveNearLimitTest`），注释块加 3 行说明 |
+| `windows/tests/MediaHub.Tests/ArchiveNearLimitTests.cs`（新，196 行，W6 树） | C# 侧五个同义用例，消费同一份向量 |
+| `windows/tests/assets/windows-archive-vectors.json`（W6 树，74164 → **77034 B**） | 与主树测试资源同字节（`sha256` 相同） |
+
+### §41.4 用例清单（两端同义）
+
+| # | Kotlin（`ArchiveNearLimitTest`） | C#（`ArchiveNearLimitTests`） | 钉住的规则 |
+| --- | --- | --- | --- |
+| 1 | `the_recipe_reproduces_the_windows_payload_byte_for_byte` | `TheRecipeReproducesTheWindowsPayloadByteForByte` | 两端对同一配方 encode 出 **8388608 B**，sha256 逐字节相同 |
+| 2 | `the_header_from_the_recipe_is_the_canonical_aad_windows_used` | `TheHeaderFromTheRecipeIsTheCanonicalAadWindowsUsed` | 头部 JSON 就是 Windows 用作 AAD 的那串字节；`buildPrefix` 长度 = 173 |
+| 3 | `a_payload_of_exactly_the_ceiling_encrypts_to_the_windows_archive_hash_and_reads_back` | `APayloadOfExactlyTheCeilingEncryptsToTheWindowsArchiveHashAndReadsBack` | 用固定 salt/nonce 加密出的归档长度 8388797、sha256 与 Windows 相同；读回来逐字段相等 |
+| 4 | `the_writer_accepts_exactly_the_ceiling_and_refuses_one_byte_more` | `TheWriterAcceptsExactlyTheCeilingAndRefusesOneByteMore` | 恰好上限可写可读；MAX+1（8388609 B）写端给 `payload-too-large` |
+| 5 | `the_reader_refuses_an_oversized_ciphertext_before_decryption` | `TheReaderRefusesAnOversizedCiphertextBeforeDecryption` | 读端对 8388609 B 密文在**解密前**就给 `payload-too-large`，且不返回信封 |
+
+向量 `nearLimit` 段（生成器 `D:/mh-verify/archive-vectors`，临时工程不入库）：
+
+| 字段 | 值 |
+| --- | --- |
+| `recipe.displayNameLength` | 8388242 |
+| `payloadByteLength` / `payloadSha256` | 8388608 / `f6bc78f30a55b46b3a8cb64c28ad035f04e4fad86ba6542f8be64d02b3fa11ae` |
+| `headerBase64`（161 B 头）→ `prefixByteLength` | 173（magic 8 + BE int32 4 + header 161） |
+| `archiveByteLength` / `archiveSha256` | 8388797 / `b47b3cc3c4bd4abe3a317c39632d1f220415dfc703eb21a8c881deacd2edc287` |
+| `tooLarge` | displayName 8388243 → 载荷 8388609 B → 写端 `payload-too-large` |
+| `oversizedCiphertext` | 密文 8388609 B → 读端 `payload-too-large` |
+
+### §41.5 本机实跑（串行，防 OOM）
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| 生成器重跑 | `cd D:/mh-verify/archive-vectors && dotnet run -c Release` | 首次失败（见下），修复后 `wrote …windows-archive-vectors.json (77033 bytes)`、`EXIT=0`；磁盘 **77034 B**（含行尾换行）；老 13 段 JSON 深度全等，仅新增 `nearLimit` |
+| C# 全量 build + test | `D:/mh-verify/run-w6-68-windows2.sh`（`dotnet build windows/MediaHub.Windows.sln -c Debug`、`dotnet test -p:Platform=x64`、再 filtered 跑新例） | `BUILD_EXIT=0`（0 警告 0 错误）、`TEST_EXIT=0` → **1604 通过 / 0 失败 / 0 跳过**（1599 → 1604，+5）、`NEAR_EXIT=0` → 5/5 |
+| Android 三模块 | `D:/mh-verify/run-w6-68-gradle.bat`（低内存模板 + `--no-daemon`） | `BUILD SUCCESSFUL in 2m 1s`、`167 actionable tasks: 17 executed, 150 up-to-date`、`EXIT=0`；仓库根无 `hs_err_pid*.log` |
+
+XML 汇总（`<testsuite>` 属性相加，非估算；三模块 mtime 均为当轮 19:33–19:34Z）：
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 | 变化 |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | **44** | **612** | 0 | 11 | 43 → 44 套件（+1 = `ArchiveNearLimitTest`）、607 → 612（+5） |
+| `core/database` | 20 | 192 | 0 | 12 | 不变 |
+| `feature/settings` | 23 | 354 | 0 | 0 | 不变 |
+
+三模块合计 **1158** 例。`--required-suite` 由 49 条增至 **50 条**；`androidTest` 仍 88 例、instrumentation 仍 112 例（本轮无 Compose 断言）。
+
+四条 CI 都是 exact-SHA 上的实跑（两个 head、两个工作流），全部 `completed / success`：
+
+| head | 工作流 | run id | 关键计数 |
+| --- | --- | --- | --- |
+| `7d0f055600ae20e8df1fcfa4892e6799478fa0ab`（主树） | `windows-ci` | 40389203079 | `MediaHub.Tests` 469 + 104 = 573；licence `projects=13 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40389203196 | `uniqueTests` **2283**（core/common 612 / core/database 192 / feature/settings 354）；`--required-suite` **50** 条；两个 VI job 各 `19 unique mandatory` 命中 `7d0f0556…` |
+| `b08186be87c5d983c8628dfee852416fb534fdf9`（W6 树） | `windows-ci` | 40389300435 | `MediaHub.Tests` **1604** + 104 = **1708**；licence `projects=15 rows=47 packages=28`、`RESULT: PASS`；`checks=21 failed=0 warnings=1` |
+| 同上 | `android-ci` | 40389300211 | `uniqueTests` **2283**（与主树同口径，说明 merge 已生效）；`--required-suite` 50 条；两个 VI job 各 `19 unique mandatory` 命中 `b08186be…` |
+
+主树 windows 仍 573（本轮只有 Android 与 W6 侧改动）；W6 windows 由 1692 增至 **1708**（+5，1588→1604 那 16 例含 W6-67 的 11 例与 W6-68 的 5 例）。
+两条 Android CI 的 `uniqueTests` 都是 **2283**，与本机口径一致，说明 `nearLimit` 段的 5 例在两端都真跑了。
+
+### §41.6 本轮踩到的两个真实坑
+
+1. **`dotnet test` 用了 x86 输出目录**。首轮脚本跑 `dotnet build windows/MediaHub.Windows.sln -c Debug` 之后再 `dotnet test … --no-build`，
+   日志里的可执行路径是 `bin\Debug\net10.0-windows\win-x64\MediaHub.Tests.dll`（无 `x64` 段），
+   而 `MediaHub.Tests.csproj` 的 `Platforms` 是 `x64`、`.sln` 里项目只映射到 `x64` 平台。
+   结果：新文件已编译进 `bin\x64\…` 那份 DLL（`strings` 能搜到 `ArchiveNearLimitTests`），
+   但 `dotnet test` 加载的是旧的 `bin\Debug\…` DLL，跑出 1599 例、`--filter ArchiveNearLimitTests` 报 “No test matches”。
+   修法：**显式 `-p:Platform=x64`** 后再 build + test（`run-w6-68-windows2.sh`），1604 例、新例 5/5。
+   这条与 W6-67 那次「解决方案文件名 `MediaHub.sln` vs `MediaHub.Windows.sln`」是同一类错误：**验证脚本自身写错了路径，看起来却像产品缺陷**。
+2. **Kotlin 里 `JsonElement.getValue` 不存在**。首轮 gradle 编译报 5 处 `Unresolved reference 'getValue'`：
+   `record.getValue("tooLarge").getValue("displayNameLength")` —— 第一个 `getValue` 是 `JsonObject` 的，返回 `JsonElement`，
+   第二层必须显式转成 `JsonObject` 才能再取键。修法是 `record.getValue("tooLarge").jsonObject.getValue("displayNameLength")`。
+   教训：向量文件的嵌套断言写成链式取值时，Kotlin 的类型是 `JsonElement`，不像 `JsonObject` 那样有 `getValue`。
+
+### §41.7 未覆盖（本节交付时必须如实保留）
+
+1. **真实两机搬运**：8 MiB 载荷的端到端搬运（Windows 导出 → 拷到另一台机器 → Android 导入）仍 NOT_RUN，同 §33.8–§40.7，需要第二台机器。
+2. **恰好上限的载荷只覆盖一种形状**：一个 source、纯 ASCII 的 displayName。多 source、含中文/转义字符、含 secrets 的载荷在同一字节长度下的行为没有单独测；
+   不过 `displayName` 的长度是唯一变量，其余字段的形状已由 §40 与既有 `ArchiveRoundTripTest` 覆盖。
+3. **PBKDF2 的耗时**：8 MiB 载荷的加密/解密在本机耗时约 1 s（600 000 轮 PBKDF2 占绝大部分），没有做性能断言，也没有在低端设备上测。
+4. **传输层上限**：本轮只碰归档层（8 MiB 载荷上限）；传输层的 8 MiB 常量（`SourceSyncTransferReasons.PayloadTooLarge`）是另一层，未动。
+5. **不涉及 GUI 与设备**：纯 JVM/C# 逻辑层，无新增控件、无设备依赖；真机 `DEVICE_UNVERIFIED` 与 GUI `GUI_UNVERIFIED` 的既有口径不变。
+
+### §41.8 下一步
+
+- 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条、§37.8 第 1 条、§39.6 第 1 条、§40.7 第 1 条、§41.7 第 1 条）；
+- 备份（`.mhbackup`）与配对（pairing）两侧的文本判定是否也该收进 `WireText`（§40.7 第 3 条的遗留）；
+- Windows 同步页真 GUI UIA 证据（W10 U2/U3/U4 需要用户授权窗口）；
+- 归档格式若要演进（新 KDF、新字段），先写契约再两端同步加码——不要单边加。
+
+## §42 Android 同步基线持久化与多端点策略（W6-72）
+
+> 状态词：两端本机 **EXECUTED_PASS**；四条 CI 待本轮提交后取证。本机 C# **1648 通过 / 0 失败**（1635 → 1648）、Android 三模块 **655 + 199 + 384 = 1238** 例全绿；`--required-suite` 54 → **57**。
+> 边界：本轮是**跨端契约 + Android 侧第一次有持久化基线**；真实两机、真机 instrumentation 仍是 NOT_RUN / DEVICE_UNVERIFIED。
+
+### §42.1 动机（Android 每轮都在「失忆」地全量对账）
+
+到 W6-71 为止，Android 的同步链是：选文件 → 预览 → 逐条允许 → 应用，写库入口只有 `AndroidSourceSyncService.apply()` 一处。
+它每一轮都现算：`store.listLocalSources()` 拿本机现状，`SourceSyncPlanner.plan(envelope, locals)` 出候选。
+问题不在算法，而在**没有记忆**：Android 侧此前没有任何「上一轮对端是什么样」的持久化结构——
+`baseline` / `syncRound` / `BaselineStore` 这些词在 `core/` `feature/` 的生产代码里零命中，
+而 Windows 从 W6-9 / W6-10 起就有完整一层（`SourceSyncBaseline` / `SourceSyncBaselineCodec` /
+`SourceSyncDigest` / `FileSourceSyncBaselineStore` / `SourceSyncEndpointPolicy`，六个文件 1948 行）。
+
+失忆带来两个具体后果：
+
+1. **退化成全量快照**。没有基线就无法回答「哪些来源自上一轮变了」，下一轮只能把所有来源一次性交给对端；
+   `no-change` 只能靠本地修订号偶然命中，而不是靠「内容哈希与上一轮相同」。
+2. **次要端点被静默吞掉**。`normalizedEndpoints()` 会把坏地址丢掉、把主端点排最前，但**不会告诉用户**
+   「这个来源还有 2 条备用线路没有参与同步」。Windows 有 `SourceSyncEndpointPolicy` 明确上报
+   `secondary-endpoint-not-imported`，Android 侧此前一句提示都没有。
+
+本轮把这一层搬到 Android，并把「同一份磁盘格式、同一批码、同一套合并语义」写成跨语言契约。
+
+### §42.2 交付（core/common 八个新文件 + 唯一写库入口接线）
+
+| 文件（`core/common/src/main/kotlin/com/mediahub/core/common/sync/`） | 大小 | 职责 |
+| --- | --- | --- |
+| `WireJson.kt`（新） | 6720 B / 187 行 | 手工复刻 `Utf8JsonWriter` 的字节：`quote()` 的 8 个 ASCII 转义、控制字符短转义、其余 ≥0x7F 走大写 `\uXXXX`；`WireJsonTextWriter(indented)` 的 CRLF + 两空格缩进；`exceedsDepth()` 括号深度扫描 |
+| `SourceSyncContentHash.kt`（新） | 4860 B / 123 行 | 规范 JSON 与内容哈希：字段序 `accountScope`/`displayName`/`endpoints`/`sourceType`；端点按 `(sortOrder, url, isPrimary, enabled)` 排序、每项键序 `enabled`/`isPrimary`/`sortOrder`/`url`；`compute()` 64 位小写 hex，`computeFields()` 每字段一枚 |
+| `SourceSyncBaseline.kt`（新） | 4810 B / 104 行 | `SourceSyncBaselineEntry`（五字段）+ `SourceSyncBaseline`（version/deviceId/snapshotId/entries）+ `fromRecord` / `fromEnvelope` / `fromRecords` / `find` / `deduplicate` |
+| `SourceSyncBaselineCodec.kt`（新） | 15085 B / 344 行 | 序列化与读取：`CURRENT_SCHEMA_VERSION=1`、`MAX_ENTRIES=50000`、`MAX_FIELD_HASHES=64`、`MAX_DEPTH=16`、`MAX_DOCUMENT_CHARS=8 MiB`；读判定序逐条照抄 C# |
+| `ISourceSyncBaselineStore.kt`（新） | 8222 B / 187 行 | 4 条存储码 + `SourceSyncBaselineSaveResult` + 接口 + **`SourceSyncBaselineMerge`**（合并拒绝倒退、拒绝同号不同内容） |
+| `InMemorySourceSyncBaselineStore.kt`（新） | 2331 B / 57 行 | 进程内实现，`writeCount` 只计真正改变 |
+| `FileSourceSyncBaselineStore.kt`（新） | 15729 B / 363 行 | 磁盘实现：`sync-baseline.json`、`{version, peers:[{deviceId, baseline}]}`、坏档隔离、原子写 |
+| `SourceSyncEndpointPolicy.kt`（新） | 5513 B / 127 行 | `secondary-endpoint-not-imported` + `selectPrimary` / `notImported` / `summarize` |
+
+接线只改了**唯一写库入口**与它外面那一圈（5 个文件）：
+
+| 位置 | 改动 |
+| --- | --- |
+| `core/database/.../sync/AndroidSourceSyncService.kt` | 构造器第 5 参 `baselineStore: ISourceSyncBaselineStore? = null`；`apply()` 把**真正写入**的记录收进 `writtenRecords`，返回前 `recordBaseline()` 写基线；结果多四个字段 |
+| `feature/settings/.../sync/SourceSyncImportModels.kt` | `SourceSyncApplySummary` 加四个默认值字段：`notImportedEndpointCount` / `recordsWithAlternativeEndpoints` / `baselineSaved` / `baselineRejectedCount` |
+| `feature/settings/.../sync/SourceSyncImportSession.kt` | `summaryOf()` 透传四个事实；`production()` 加第 4 参 `baselineStore` |
+| `feature/settings/.../sync/SourceSyncImportViewModel.kt` | 构造器注入 `ISourceSyncBaselineStore`（Hilt） |
+| `feature/settings/.../sync/SourceSyncImportLogic.kt` | 三条文案：未参与同步的次要线路、基线已记、基线被拒 |
+| `feature/settings/.../sync/SourceSyncImportScreen.kt` | 结果卡片加两行事实（tags `sync.apply.endpoints` / `sync.apply.baseline`） |
+| `app/.../di/AppModule.kt` | `@Provides @Singleton provideSyncBaselineStore` → `FileSourceSyncBaselineStore(File(context.filesDir, "sync-baseline"))` |
+
+三条**语义边界**（都用测试钉住，不是靠注释）：
+
+1. **只有真正写入本机的条目才进对端基线**。`writtenRecords` 只在 `store.createLocalSource()` 与
+   `store.updateLocalSource()` 返回成功之后追加；被跳过、需要确认、写失败的条目一个都不进。
+   理由：基线是给对端算增量用的，记录一条没落地的条目会让下一轮错误地告诉对端「这条我已经有了」。
+2. **零写入的一轮不碰存储**。`writtenRecords.isEmpty()` 时 `recordBaseline()` 返回 null，
+   既不写盘也不返回「Unchanged」——否则每一轮空导入都会无意义地重写同一个文件。
+3. **坏存储绝不让导入失败**。`save()` 抛任何异常都折成 `baseline-write-failed` 只作提示，
+   `apply()` 的 applied/failed 计数不受影响；`CancellationException` 仍然重抛。
+
+### §42.3 跨语言契约：为什么必须逐字节对齐
+
+基线是**落盘格式**，同一份 `sync-baseline.json` 将来要能被两端互相读（这也是本轮做黄金向量的原因）。
+因此三件事必须逐字节相同，不能只说「语义一样」：
+
+| 契约点 | 规则 | 为什么不能用语言自带的 |
+| --- | --- | --- |
+| JSON 转义 | 8 个 ASCII 特殊字符写成 `\u0022` 等；控制字符用短转义；其余 <0x20 与全部 ≥0x7F 写大写 `\uXXXX`；代理对逐 char 写两段 | Kotlin `buildJsonObject{}.toString()` 原样输出中文与 `+`，`.NET` 会转义成 `\u002B`；同一份值两端得到不同字节 |
+| 缩进与行尾 | `Indented=true` 语义 = CRLF + 两空格、容器间换行、**无尾随换行** | 手写 `"  "` 与 `"\n"` 会得到 LF，两端哈希立刻不同 |
+| 空白与小写 | 一律走 `WireText`：空白 = 25 个 Unicode White_Space 码点；大小写**只折 ASCII A–Z** | `.NET` 的 `ToLowerInvariant` 对 U+0130 保持不变，JVM 的 `lowercase(Locale.ROOT)` 给 `i` + U+0307；希腊词尾 sigma 也不同（实测见 §42.5 第 1 条） |
+
+内容哈希的规范串**不是**给人看的 JSON，它是 AAD 式的输入：
+
+    {"accountScope":"family","displayName":"\u5BB6\u5EAD NAS\uFF08\u5BA2\u5385\uFF09","endpoints":[{"enabled":true,"isPrimary":true,"sortOrder":0,"url":"https://nas.local:5006/dav"}],"sourceType":"webdav"}
+
+（上面这行就是向量 `contentHashCases[typical]` 的 canonical 原文，sha256 见 §42.6。）
+
+`accountScope` 归一的三步是：`WireText.isBlank` → null；否则 `WireText.trim`；再 `WireText.lowercaseAscii`。
+**注意**：Windows 侧本轮把 `SourceSyncContentHash.NormalizedScope` 从 `Trim().ToLowerInvariant()` 改成了同一套 `WireText`
+（这是本轮唯一一处 Windows 生产行为变更），但 `SourceSyncLocalBridge.cs:373` 的派生 syncSourceId 种子串**刻意没改**——
+那串一旦变，已入库来源的 `syncSourceId` 全部漂移，代价远大于「非 ASCII 账号域的大小写归一一致」。取舍写在这里，不是漏改。
+
+### §42.4 读取判定序（两端逐条相同）
+
+`SourceSyncBaselineCodec.tryDeserialize` 与 `FileSourceSyncBaselineStore` 的文档读取共用一套判定序：
+
+| # | 输入 | 结果 |
+| --- | --- | --- |
+| 1 | null / 空白 | `malformed-json` |
+| 2 | 长度 > 8 MiB（文件存储 16 MiB） | `baseline-too-large` |
+| 3 | 括号深度 > 16 | `baseline-too-deep` |
+| 4 | JSON 解析失败（且未超深） | `malformed-json` |
+| 5 | 根不是对象 | `malformed-json` |
+| 6 | 缺 `version` | `missing-field:version` |
+| 7 | `version` 非数字 / 取 int 失败 | `invalid-field:version` |
+| 8 | `version != 1` | `unsupported-schema-version:<n>` |
+| 9 | `deviceId` / `snapshotId` 非 string（非 null） | `invalid-field:<name>` |
+| 10 | `entries` 非数组 | `invalid-field:entries` |
+| 11 | 条目数 > 50000 | `baseline-too-large` |
+| 12 | 条目非对象 | `invalid-field:entries` |
+| 13 | `syncSourceId` 缺失 / 非 string / 空白 | `invalid-field:syncSourceId` |
+| 14 | `recordRevision` / `fieldVersion` 非数字 | `invalid-field:<name>` |
+| 15 | `contentHash` 非 string | `invalid-field:contentHash` |
+| 16 | `fieldHashes` 非对象 / 值非 string / 条数 > 64 | `invalid-field:fieldHashes` / `baseline-too-large` |
+| 17 | 重复 `syncSourceId` | **后者胜**（不报错） |
+| 18 | 未知字段 | 忽略并计数（`ignoredFieldCount`） |
+
+**第 3 条是本轮改出来的契约**。原先两端都靠「JSON 解析器的异常消息里有没有 depth 这个词」分类，
+实测发现 .NET 对平凡截断的 `{` 报的是 `Expected depth to be zero at the end of the JSON payload`——消息里带 depth，
+于是 `{` 被判成 `baseline-too-deep`；而 JVM 侧没有 MaxDepth 选项，只能预扫描。
+两端做法不同 ⇒ 同一份坏输入会给出不同码。现在统一成**先扫括号深度再解析**：
+两端各加一个 `ExceedsDepth`（C# `WireText.ExceedsDepth`、Kotlin `WireJson.exceedsDepth`），
+解析器的 catch 只回 `malformed-json`。改完 `{` 恢复 `malformed-json`，真正 17 层嵌套仍是 `baseline-too-deep`。
+
+### §42.5 合并语义（拒绝倒退，拒绝同号不同内容）
+
+`SourceSyncBaselineMerge.merge(existing, incoming)` 是存储层 `save()` 的核心，语义与 Windows 逐条相同：
+
+- 已存在条目：`incoming.recordRevision > stored.recordRevision` → 替换；
+- **同号且内容相同** → 静默跳过（不算拒绝）；
+- 同号不同内容 → 拒绝，`reason = baseline-unresolved-conflict`；
+- 修订号更小 → 拒绝，`reason = baseline-stale-revision`（首次命中的原因胜出）；
+- **被拒的条目绝不改动已有内容**，并在 `rejectedSyncSourceIds` 里逐个列出。
+
+`Changed` 是按逐条内容比较算出来的（不是按条数），所以「合并后什么都没变」能可靠地折成 `Unchanged` 而不重写文件。
+
+### §42.6 黄金向量（Windows 权威实现产出，两树逐字节同一份）
+
+| 项 | 值 |
+| --- | --- |
+| 生成器 | `D:/mh-verify/baseline-vectors/`（临时 net10.0 工程，ProjectReference 指向 `MediaHub.Sync.csproj`，**不入库**） |
+| 向量文件 | `core/common/src/test/resources/sync/baseline-vectors.json`（主树）与 `windows/tests/assets/baseline-vectors.json`（W6 树） |
+| 大小 / sha256 | **143420 B** / `e7354c831c7a38c10a3200515c43d3af03568465861e5531952338aae22d4e0c` |
+| 根键（16 段） | `generator` / `windowsSource` / `frozenNowEpochMs` / `constants` / `reasons` / `contentHashCases`(11) / `baselineCases`(9) / `findCases`(7) / `codecWriteCases`(4) / `codecLoadCases`(35) / `mergeCases`(14) / `inMemoryCases`(7) / `fileDocumentCases`(3) / `fileLoadCases`(17) / `endpointPolicyCases`(7) / `endpointSummaryCases`(3) |
+
+向量不是「只存期望值」，而是**连输入一起存**：每条用例都带构造它所需的 record / baseline / digest / 待写入内容，
+所以两端用例是**从输入复算再比期望**，而不是把答案抄一遍。这一点是 W6-72 与早前几轮向量最大的不同，
+也是 Kotlin 侧能在没有 `SourceSyncDigest` 的情况下仍然逐条核对 `baselineCases` 里 `from-records` / `from-envelope` 系列的原因。
+
+### §42.7 用例清单
+
+| 套件 | 位置 | 例数 | 钉住什么 |
+| --- | --- | --- | --- |
+| `SourceSyncBaselineContractTest` | `core/common/src/test/kotlin/…/sync/`（新，480 行） | **12** | 内容哈希 canonical/hash/字段哈希、基线构造、find、编解码字节（base64/text/sha256 三项全等）、35 条读判定序、14 条合并、in-memory 七步、文件文档字节、17 条文件读取/隔离、端点策略与汇总 |
+| `BaselineContractTests` | `D:/mh-w6/windows/tests/MediaHub.Tests/`（新，599 行） | **13** | 同上，**外加 `advance` 系列**（依赖 `SourceSyncDigest`，Kotlin 侧没有对等物，由 C# 孪生覆盖） |
+| `SourceSyncBaselineWiringTest` | `core/database/src/test/kotlin/…/sync/`（新，285 行） | **7** | 只记真正写入的条目、零写入不碰存储、坏存储不失败、旧修订号被如实回报、次要线路只上报不删除、没有基线存储时行为退回 W6-71 |
+| `SourceSyncImportSessionEndpointTest` | `feature/settings/src/test/kotlin/…/sync/`（新，170 行） | **3** | 四个事实从服务结果如实透到结果摘要 |
+
+两端契约用例**同名同义**（Kotlin 12 `@Test` / C# 13 `[Fact]`），差异只有 C# 多一条 `BaselineCases` 覆盖 `advance`。
+
+### §42.8 本机实跑（串行，防 OOM）
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| Kotlin 编译 + 定向测试 | `D:/mh-verify/run-w6-72-wire-compile.bat` / `run-w6-72-wire-test.bat` | `BUILD SUCCESSFUL`、`EXIT=0`；`SourceSyncBaselineWiringTest` 7/7、`SourceSyncBaselineContractTest` 12/12 |
+| Android 三模块全量 | `D:/mh-verify/run-w6-72-full-gradle.bat`（低内存模板 + `--no-daemon` + `--rerun-tasks`） | `BUILD SUCCESSFUL in 4m 19s`、`167 actionable tasks: 167 executed`、`EXIT=0`；仓库根无 `hs_err_pid*.log` |
+| C# 全量 | `D:/mh-verify/run-w6-72-csharp-full.bat`（`dotnet test ... -c Debug -p:Platform=x64`，**必须带 Platform**） | `已通过! - 失败: 0，通过: 1648，已跳过: 0，总计: 1648`、`EXIT=0` |
+
+XML 汇总（`<testsuite>` 属性相加，非估算）：
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 | 变化（W6-71 末） |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | **48** | **655** | 0 | 11 | 47 → 48 套件（+1 = `SourceSyncBaselineContractTest`）、643 → 655（+12） |
+| `core/database` | **21** | **199** | 0 | 12 | 20 → 21 套件（+1 = `SourceSyncBaselineWiringTest`）、192 → 199（+7） |
+| `feature/settings` | **26** | **384** | 0 | 0 | 25 → 26 套件（+1 = `SourceSyncImportSessionEndpointTest`）、381 → 384（+3） |
+
+三模块合计 **1238** 例（1216 → +22）。`--required-suite` 由 54 条增至 **57 条**；
+`.github/scripts/tests` 的 54 个 unittest 全绿；`androidTest` 仍 104 例、instrumentation 仍 148 例/job（本轮无新增 Compose 断言）。
+
+### §42.9 真实坑三条
+
+1. **全 Unicode 小写在两端无法一致**。实测 .NET：`char.ToLowerInvariant(U+0130)` 保持不变，
+   `string.ToLowerInvariant` 对 U+0130 单独出现也不变；而 JVM `lowercase(Locale.ROOT)` 给 `i` + U+0307（两个字符）。
+   希腊 `Σ-A-Σ` 在 .NET 得到 `σ a σ`（无词尾形），JVM 得到 `σ a ς`（词尾 sigma）。
+   结论：不能用「同一张表」实现 full-Unicode 折叠，改成 ASCII-only（与 §40 的口径一致），并把 Windows 侧对齐。
+2. **解析器消息不能当分类依据**。见 §42.4 第 3 条——`{` 曾被 `Message.Contains("depth")` 误判成超深。
+   这类缺陷只会在「坏输入」路径上出现，正常路径永远测不到；只有把「同一份坏输入两端同码」写成契约才会暴露。
+3. **`data class` 的 map 字段不能直接比字节**。`SourceSyncBaselineEntry.fieldHashes` 是 `Map<String,String>`，
+   向量里是 JSON 对象；用例必须先把键按 ordinal 排序再逐条比，否则「同内容不同插入序」会被误判成不同。
+
+### §42.10 未覆盖（如实保留）
+
+1. **真实两机**：基线文件的跨机搬运（一台写、另一台读）仍 NOT_RUN，同 §33.8–§41.7，需要第二台机器。
+2. **Android 还没有「用基线算增量」**：本轮只做到「记基线」；`SourceSyncDigest` / `SourceSyncInbox` / `SyncRoundMerger`
+   这一层 Android 侧仍为零（Windows 侧有），所以下一轮导出时还不能按基线裁剪来源列表——这是 W6-73 的候选。
+3. **基线只在导入路径上写**：`AndroidSourceSyncService.export()` 尚未读基线；「零写入的一轮」不会更新 snapshotId，
+   因此同一份基线可能被连续两轮引用（对端若依赖 snapshotId 判新旧会看到同一个值）。
+4. **不涉及 GUI 与设备**：结果卡片两行事实已由 JVM 摘要用例与状态机覆盖，但 Compose 断言未加；真机 `DEVICE_UNVERIFIED` 口径不变。
+5. **`SyncSourceLocalBridge` 的派生 id 种子串未改**（见 §42.3 末尾的取舍），因此非 ASCII 账号域下
+   「内容哈希的折叠」与「派生 id 的折叠」仍有一处口径差；两者不参与同一个比较，暂不影响任何契约。
+
+### §42.11 下一步
+
+- 真实两机搬运：Windows 导出 → 拷到另一台机器 → Android 导入（同时关闭 §36.8 第 1 条、§37.8 第 1 条、§39.6 第 1 条、§40.7 第 1 条、§41.7 第 1 条、§42.10 第 1 条）；
+- Android 侧 `SourceSyncDigest` / 增量导出（把基线真正用起来，而不是只记）；
+- Windows 同步页真 GUI UIA 证据（W10 U2/U3/U4 需要用户授权窗口）；
+- 归档格式若要演进（新 KDF、新字段），先写契约再两端同步加码——不要单边加。
+
+## §43 Android 侧同步摘要与两轮合并（W6-73）+ 凭据闸门与基线读数（W6-74）
+
+### §43.1 结论先行
+
+1. **W6-73**：Android 补齐了与 Windows 同名的三件东西——`SourceSyncDigest`（本地全量快照 → 增量摘要）、`SyncRound`（一轮合并的方向 / 桶 / 理由码）、`SyncRoundMerger`（本地与对端两轮合并）。三者都由 Windows 权威实现生成黄金向量、Kotlin 逐字段对照，向量文件 `baseline-vectors.json` 由 143420 B 增至 **243491 B**，两树 sha256 逐字节相等（`b4dbd947…bea7eac6e5`）。
+2. **W6-74**：Android 的导入路径过去对 `SourceRecord.secrets` **零处理**——对端带密封凭据的记录会被当成一条普通来源静默写库；Windows 拒绝这样做（理由码 `secrets-require-approval`）。本轮把这个闸门补上，**且覆盖是无条件的**：连规划器判「无变化」的条目也要人看过。
+3. **W6-74**：对端基线过去**只写不读**（W6-72 只做了 `save`）。本轮在写入之前读一次并如实汇报「上次跟这台设备收敛到第几条」，读取失败或没有基线存储一律折成「不知道」，绝不让导入本身失败。
+4. 判据只写一遍：新增 `SourceSyncSecrets`，归档写出（`ArchiveWriter`）与 Android 导入共用同一个「这条记录是否携带真凭据」判断，`secrets: null` 不算携带（两端同义）。
+
+### §43.2 W6-73：三个新类型（Android 对等物）
+
+| 文件 | 行数 | 职责 |
+| --- | --- | --- |
+| `core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncDigest.kt` | 260 | 由**本地**全量快照 + 上一轮基线算增量摘要：`Added` / `Updated` / `Removed`，附 4 个稳定 issue 码（缺 id、无可用线类型、本机 id 重复、墓碑指向仍存在的记录） |
+| `…/SyncRound.kt` | 121 | `SyncMergeDirection{Push, Pull, Both}`、`SyncRoundEntry`（方向 / 桶 / 理由 / 记录 / 墓碑 / 冲突字段 / 两端修订号 / 是否需确认）、`SyncRoundReasons` 18 个理由码、`SyncRoundResult.create() 三桶互斥校验` |
+| `…/SyncRoundMerger.kt` | 469 | 本地摘要 × 对端摘要 × 基线 → 三桶结果；含「同内容看修订号」「字段冲突」「墓碑 vs 更新」「未知线类型」「带凭据需确认」等 22 条判定 |
+
+**修掉一个真缺陷（先红后绿）**：合并键集合原先按**各自原始拼写**求并集，本机写 `A`、对端写 `a` 时会产出两条决策，`SyncRoundResult.create()` 随即抛
+`java.lang.IllegalArgumentException: Sync round entry for a is in more than one bucket.`
+改成先用 ASCII 小写身份去重、再按 ordinal 排序，并保留**本机拼写**：一条来源只出一条决策，黄金向量 `ordinal-key-sort` 期望的键就是本机那个 `A`。
+
+**另一处「测试自己会撒谎」**：Kotlin 与 C# 两侧的 `recordOf` 夹具原先都只取身份字段，把信封里的 `secrets` 块丢掉了，于是 `secrets-require-approval` 那条用例退化成了普通直写（首红就是 `expected:<[]> but was:<[SyncRoundEntry(... reason=apply-remote-change ...)]`）。两端的 `recordOf` 都改为原样携带该块。
+
+**用例**：Kotlin 契约 14 个 `@Test`（原 12 + `digest_cases_match_the_windows_contract` + `merger_cases_match_the_windows_contract`，消费 `digestCases` 12 条 / `mergerCases` 22 条）；C# 契约 15 个 `[Fact]`（Windows 侧不跳过 `windows-does-not-support-cloud-types`——那条只有 Windows 该产出 `not-supported-on-windows`）。C# 侧还做了一次**负向对照**：把 `Merge(local, remote)` 交换成 `Merge(remote, local)`，22 条用例全报 `Pull/apply-remote-change` vs `Push/push-local-change`，证明断言绑的是真实方向语义。
+
+### §43.3 W6-74 的缺口（改之前是什么样）
+
+- `AndroidSourceSyncService.snapshotOf()` 从头到尾没看过 `record.secrets`：对端带密封凭据的记录与普通记录走同一条写库路径。`SourceSyncModels.kt` 的 KDoc 早就写着「凭据必须经本机 SecretStorage 重新封装」，但一行实现都没有。
+- `baselineStore.load(peerDeviceId)` 全仓无人调用（W6-72 只接了 `save`）：导入前不知道上次收敛到哪一条，导入后也不汇报。
+- Windows 的权威行为写在 `windows/src/MediaHub.Sync/SourceSyncImportRound.cs` 的 `Preview()`：`if (FindRecord(peer, item.SyncSourceId)?.Secrets is not null) { item = item with { Reason = SecretsRequireApproval, RequiresApproval = true }; }`——**不看规划器原来给什么理由**，直接盖章。基线在那里也只是读取并汇报 `BaselineKnown` / `BaselineEntryCount`，不参与规划。
+
+### §43.4 做法（四处改动）
+
+1. **新增** `core/common/…/sync/SourceSyncSecrets.kt`：唯一判据 `carriesBlock(record)` / `carriesBlock(envelope)`，只回答「有没有」，不解析、不校验、不搬运凭据内容，也不进日志。`JsonNull` 是 Kotlin 对象而非 Kotlin null，所以判据必须写成 `secrets !is JsonNull`。
+2. **`ArchiveWriter`** 的私有 `carriesSecrets(envelope)` 改为调用同一判据（行为不变，仍由 `ArchiveRoundTripTest.a_json_null_secrets_block_is_not_credentials_on_either_side` 钉住）。
+3. **`AndroidSourceSyncService.apply()`**：
+   - `val withheldIndexes = secretsWithheldIndexes(envelope)`；
+   - `val gated = gateSecrets(plan.items, withheldIndexes)`——把命中条目的 `reason` 覆盖成 `secrets-require-approval`、`requiresUserApproval = true`，**保留** action / 两端修订号 / `serverId`，审批界面要靠它们说清「要对哪一条做什么」；
+   - 写库循环改读 `gated[index]`（`requiresUserApproval` 的条目天然不满足 `isWritable`）；
+   - 分桶循环里新增一支 `withheldIndexes.contains(index) -> pending`，位置在「已写 / 已失败」之后、在 `NO_CHANGE || IGNORE_STALE -> ignored` 之前——这样被扣下的条目永远不会落进 `ignored`；
+   - `val peerBaseline = loadPeerBaseline(envelope.deviceId)` 在写入**之前**执行（没有存储 / 设备号为空 → `null`；读取抛异常 → `null`，`CancellationException` 照常上抛）；
+   - `SourceSyncImportResult` 新增 `baselineKnown` / `baselineEntryCount` / `secretsWithheldSyncSourceIds`（+ `secretsWithheldCount`），只带 `syncSourceId`，**绝不回显凭据字节**。
+4. `core/database/build.gradle.kts` 加一行 `testImplementation(libs.kotlinx.serialization.json)`：造「带 secrets 块的信封」需要能写下 `JsonElement` / `JsonNull`（core:common 对它是 `implementation` 而非 `api`，不对外暴露）。
+
+### §43.5 先红后绿 + 两条负向对照（实测）
+
+新增 `core/database/src/test/kotlin/com/mediahub/core/database/sync/SourceSyncSecretsGateTest.kt` 7 例：凭据记录不落库且转人工；被扣下的条目不阻塞兄弟、也不进基线；**已认识的记录突然带上凭据时从 `ignored` 拉回 `requiresApproval`**（内容指纹不含 secrets，规划器判 NoChange，这一例专钉新加的那一支）；`secrets: null` 不算凭据（同时直接断言判据本身）；结果对象里不出现凭据字节；基线首轮「不知道」、次轮「已知 N 条」；没有基线存储时如实报「不知道」。
+
+两条负向对照都在本机实跑过，随后源文件已按备份还原（sha 一致）：
+
+| 对照 | 故意改坏的地方 | 结果 |
+| --- | --- | --- |
+| A | 删掉 `withheldIndexes.contains(index) -> pending` 这一支 | `206 tests completed, 1 failed`：`an_already_known_record_that_suddenly_carries_credentials_is_held_instead_of_ignored` → `expected:<0> but was:<1>`（ignoredCount 变 1） |
+| B | 把 `gateSecrets` 改成直通（`val gated = plan.items`） | `206 tests completed, 3 failed`：两条「凭据不落库」用例 `expected:<1> but was:<2>`（写了两条），NoChange 那例 `expected:<[secrets-require-approval]> but was:<[up-to-date]>` |
+
+### §43.6 实跑计数
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 | 变化（W6-73 末） |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | 48 | **657** | 0 | 11 | 不变（本轮只新增一个被共用的判据对象） |
+| `core/database` | **22** | **206** | 0 | 12 | 21 → 22 套件（+1 = `SourceSyncSecretsGateTest`）、199 → 206（+7） |
+| `feature/settings` | 26 | 384 | 0 | 0 | 本轮未动 |
+
+三模块合计 **1247** 例（1240 → +7）。命令：`gradlew.bat :core:common:testDebugUnitTest :core:database:testDebugUnitTest --offline --console=plain`，BUILD SUCCESSFUL in 48s，数字取自 `build/test-results/testDebugUnitTest/*.xml` 的 `<testsuite>` 属性相加。
+
+### §43.7 未覆盖（如实保留）
+
+1. **真实两机搬运仍 NOT_RUN**（同 §33–§42 的口径）：一台写基线、另一台读，需要第二台机器。
+2. **凭据仍是「一律不落地」**：确认之后的正确路径是「在本机重新输入凭据 → 经 SecretStorage 重新封装」，本轮的产出只是**不再静默信任对端密文**；确认 UI、重新封装、逐源验证三态都还没做。
+3. **基线读数只用于汇报**：`export()` 仍未读基线，「按基线只请求变化」的接线没做（两端都还没接，Windows 的 `Preview` 也只是汇报）。
+4. **缺一个「取消接收 / 忘记这台设备」的入口**：`baselineKnown` 已经能告诉界面「跟这台设备同步过」，但清空基线的动作没有出口。
+5. **不涉及 GUI 与设备**：本轮全是 JVM 单测；Compose 断言未加，真机 `DEVICE_UNVERIFIED` 口径不变。
+6. **Windows 侧本轮零改动**：闸门与基线读数在 Windows 早已存在（W6-10 / W6-40），本轮只是让 Android 对齐；C# 侧唯一相关动作是 W6-73 的契约用例。
+
+### §43.8 下一步
+
+- 把基线接进 `export()`：先读上一轮基线，只把 `SourceSyncDigest` 判为变化的部分放进信封（这才是「增量」）；
+- 「忘记这台设备」：清基线 + 明确告知对端；
+- 确认 UI：逐条列出被扣下的条目、说明「凭据必须在本机重输」，并给出「跳过」出口；
+- 真实两机搬运（同时关闭 §42.10 第 1 条等六处「待第二台机器」项）；
+- Windows 同步页真 GUI UIA 证据（W10 U2/U3/U4 需要用户授权窗口）。
+
+### §43.9 门禁与本文档的一处自查
+
+1. **`SourceSyncSecretsGateTest` 已钉进 `--required-suite`（57 → 58）**。理由与 W6-55/W6-72 相同：`--required-suite` 的语义是「这个套件必须真的执行过」，新套件不钉的话，整类被 `@Ignore` 或被 source set 变更挤出编译时，gradle 仍然打印 `BUILD SUCCESSFUL`。改动只有一行（`--required-suite com.mediahub.core.database.sync.SourceSyncSecretsGateTest`），`--require-complete-suites` 与其余 57 行未动；README 的钉住套件数、`core/common` 与 `core/database` 的用例数同步改成 58 / 657 / 206，`uniqueTests` 口径 2363 → 2372。
+2. **本文档 §43 首次落盘时带了构建占位符**：写入脚本用 `{BT}` 表示反引号（避免模板字符串里出现裸反引号），§43 落盘时漏了替换，36 行里留下 230 处字面 `{BT}`。已全文替换为反引号并在同一次提交里修掉——记在这里是因为它本身也是「产物写完必须回读正文」的又一例：只看 `git diff --stat` 与提交成功，看不出正文里混着占位符。 <!-- residue-allow -->
+
+### §44 规划器黄金向量（W6-75）
+
+#### §44.1 结论先行
+
+- `SourceSyncPlanner` 是唯一决定「这次导入能不能落库」的地方，却一直是两端**唯一没有向量对照**的判定层：C# 与 Kotlin 各写各的手写用例，规则顺序一错，两边各自的用例都能自证合理。本轮把它变成第 15 个黄金向量段 `plannerCases`（28 组）。
+- 向量不是「让人抄一遍」：生成器每加一条用例，先跑 Windows 权威 `SourceSyncPlanner.Plan()`，再逐条比对 `Action/Reason`，不符就抛异常 —— 向量不可能悄悄失去它要证明的规则。
+- 两端各一条新契约用例逐条消费，本机 `core/common` **48 套件 / 658 例 / 0 失败 / 11 skipped**、C# `MediaHub.Tests` **1651 通过 / 0 失败**；两条负向对照（各自把产品代码里的内容比对取反）都按预期变红。
+
+#### §44.2 缺的是什么
+
+W6-73 / W6-74 之后 Android 有了摘要（`SourceSyncDigest`）、两轮合并（`SyncRoundMerger`）、凭据闸门与对端基线读数，但**「这一条到底该写还是该问」这一步仍然只有手写用例**。手写用例的问题不是覆盖少，而是两边可以各自合理：Windows 的规则顺序是「不认识类型 → 认识但用不了 → 本地重复身份 → 修订号三种走向 → 无匹配时认领/新建」，Kotlin 只要把其中两条换个顺序，绝大多数输入仍然给出同样的答案，只有边界输入才会分叉 —— 而边界输入正是没人手写到的那些。
+
+#### §44.3 生成器与断言纪律
+
+- 生成器（仓库外 `D:/mh-verify/baseline-vectors`）新增 `Sections75.cs`（17984 B / 352 行，`internal static partial class Program`），`Program.cs` 的 JsonObject 里只多一行 `["plannerCases"] = PlannerCases(),`。
+- 每条用例的构造入口是 `AddPlanner(array, name, envelope, locals, expect, windowsOnly = false, androidSupports = true)`：先 `SourceSyncPlanner.Plan(envelope, locals)`，再逐条比 `item.Action + "/" + item.Reason` 与 `expect`，不符抛 `InvalidOperationException`（带用例名与下标）。`expect` 里的字符串由权威常量 `E(SourceSyncAction.X, SourceSyncReasons.Y)` 拼出，不手打。
+- 用例形状：`{name, windowsOnly, [androidSupports 仅 windowsOnly], locals[{serverId, syncSourceId|null, typeWire|null, url, accountScope, displayName, recordRevision}], envelope{sources[信封记录形状], deletions[墓碑形状]}, expect[字符串], plan{items[...]}}`；候选的键序与 C# record 一致（action / reason / syncSourceId / serverId / sourceType / isKnownSourceType / displayName / normalizedUrl / remoteRevision / localRevision / requiresUserApproval / candidateServerIds）。
+- 产物：`baseline-vectors.json` **243491 → 288781 B**，sha256 `5544a58f`…`ed0b12d2`，两树逐字节同一份（`core/common/src/test/resources/sync/` 与 `windows/tests/assets/`）。
+
+#### §44.4 28 条用例（权威输出即向量里的 `expect`）
+
+| 用例 | 权威输出 | 钉住的是 |
+| --- | --- | --- |
+| `new-source` | Create/new-source | 本地没有这个身份、地址可归一化 → 建议新建，且不需要人工确认 |
+| `no-usable-endpoint` | Create/no-usable-endpoint（需确认） | 没有可用端点时不直接落库，交用户裁决 |
+| `create-with-unnormalizable-endpoint` | Create/no-usable-endpoint（需确认） | `mailto:` 这类非 http(s)/smb/file 的地址归一化为 null，因此按「没有可用端点」处理 |
+| `unknown-source-type` | Unsupported/unknown-source-type | 不认识的 wire 原文保留，绝不按已知类型写库 |
+| `blank-source-type` | Unsupported/unknown-source-type | 空串 wire 也是「不认识」，不是「默认 emby」 |
+| `higher-revision` | Update/higher-revision | 远端修订号更高 → 建议更新 |
+| `up-to-date` | NoChange/up-to-date | 同号同内容（账号作用域忽略大小写与空白、URL 去掉尾斜杠后一致）→ 什么都不做 |
+| `same-revision-different-content` | Conflict/same-revision-different-content（需确认） | 同号不同内容绝不覆盖 |
+| `stale-revision` | IgnoreStale/stale-revision | 「更旧」不等于「有分歧」 |
+| `identity-trim-and-case` | Update/higher-revision | 身份比较先 trim 再忽略大小写（本地 `  ID-1  ` 命中远端 `id-1`） |
+| `duplicate-local-sync-id` | Conflict/duplicate-local-sync-id（需确认，候选两条） | 本地同一身份多行 → 不猜，交用户裁决，候选 serverId 按本地顺序列出 |
+| `scope-null-versus-blank` | NoChange/up-to-date | null 与全空白是同一个「没有账号作用域」 |
+| `display-name-case-sensitive` | Conflict/same-revision-different-content（需确认） | **显示名大小写不同算内容不同**——与账号作用域规则相反，这是有意的 |
+| `endpoint-primary-tiebreak` | Update/higher-revision | 两个 primary 时，sortOrder 更小的那个参与比较 |
+| `endpoint-first-by-sort-order` | Update/higher-revision | 没有 primary 时，sortOrder 最小的那个参与比较 |
+| `endpoint-url-normalization` | Update/higher-revision | `HTTPS://Host.Local:443/Path/` → `https://host.local:443/Path`（scheme/host 小写、默认端口落成显式、尾斜杠去掉、路径大小写保留） |
+| `legacy-identity-match` | Adopt/legacy-identity-match（需确认） | pre-W6 的无身份来源：类型 + 地址 + 作用域三者全一致且答案唯一，才建议认领 |
+| `legacy-ambiguous` | Conflict/ambiguous-legacy-identity（需确认） | 匹配到多条历史来源 → 不认领 |
+| `legacy-requires-address` | Create/no-usable-endpoint（需确认） | 没有可用地址就无法确认身份 → 走新建，而不是认领 |
+| `legacy-typeless-local-never-adopted` | Create/new-source | 本地类型未知（没有 wire）永不认领 |
+| `legacy-type-mismatch` | Create/new-source | 类型不同（smb 本地 vs webdav 远端）永不认领 |
+| `tombstone-no-local-source` | NoChange/no-local-source | 墓碑指向本地没有的来源 → 什么都不做（也绝不删除） |
+| `tombstone-delete` | Delete/tombstone（需确认） | 墓碑确认删除必须用户点头 |
+| `tombstone-stale-revision` | IgnoreStale/stale-revision | 墓碑修订号比本地旧 → 不接受删除 |
+| `tombstone-duplicate-local-sync-id` | Conflict/duplicate-local-sync-id（需确认，候选两条） | 本地重复身份的墓碑同样交用户 |
+| `mixed-records-and-deletions` | Update / Create / Delete / NoChange（四条，顺序固定） | 顺序 = 先 records 再 deletions，与信封顺序一致；调用方可以按下标回映射 |
+| `windows-does-not-support-cloud-types` | Unsupported/not-supported-on-windows（windowsOnly） | Windows 认识但用不了的云类型：保存原文即停，不能当成「新建」 |
+| `windows-does-not-support-fn-nas` | Unsupported/not-supported-on-windows（windowsOnly） | 同上（家庭 NAS 类型） |
+
+#### §44.5 两端契约测试
+
+- Kotlin：`core/common/src/test/kotlin/com/mediahub/core/common/sync/SourceSyncBaselineContractTest.kt` 625 → **741 行**，`@Test` 14 → **15**。新增 `planner_cases_match_the_windows_contract` + `actionNames`（PascalCase → UPPER_SNAKE 8 行映射，Kotlin 侧枚举名与 C# 不同）+ `actionOf/vectorNameOf/localRecordOf/describe/describeCandidate/candidateField`。
+- C#：`windows/tests/MediaHub.Tests/BaselineContractTests.cs` 799 → **899 行**，`[Fact]` 15 → **16**。新增 `PlannerCasesMatchTheWindowsContract` + `LocalOf/CandidateField/Describe/DescribeCandidate`。
+- 断言分两层：①**意图** —— 逐条比 `expect` 与「动作/原因」，失败消息形如 `up-to-date|intent expected:<[intent 0|NoChange/up-to-date]> but was:<[intent 0|Conflict/same-revision-different-content]>`，一眼看出是哪条用例哪一步；②**整条候选** —— 11 个字段按 `|` 拼成一行逐条比（身份 / 动作 / 原因 / serverId / sourceType / 是否认识的类型 / 归一化地址 / 本地与远端修订号 / 是否需要确认 / 候选 serverId 列表）。只比动作会比出「两个都错得一样」的假绿。
+- `windowsOnly` 的两条在 C# 侧**不跳过**（`not-supported-on-windows` 只有 Windows 能产出）；Kotlin 侧不整段跳过，而是断言 `AndroidSourceTypeMap.resolve(...).isKnown && isSupported == androidSupports`，并断言「被跳过的正好是这两条、其余 26 条逐条比过」。
+- 边界观测（Kotlin 必须逐字对齐的两处）：墓碑类候选的 `sourceType` 是 `null` 且 `isKnownSourceType=false`；空 wire 的候选 `sourceType` 是**空串**而不是 `null`。
+
+#### §44.6 两条负向对照（先红后绿）
+
+| 对照 | 改了什么 | 结果 |
+| --- | --- | --- |
+| A（Kotlin） | 产品代码 `SourceSyncPlanner.kt` 里 `val sameContent = contentMatches(...)` 取反 | `15 tests completed, 1 failed`：`planner_cases_match_the_windows_contract` 报 `up-to-date|intent expected:<[intent 0|NoChange/up-to-date]> but was:<[intent 0|Conflict/same-revision-different-content]>` |
+| B（C#） | `SourceSyncPlanner.cs` 里 `bool sameContent = ContentMatches(...)` 取反 | `失败 1，通过 15`：`PlannerCasesMatchTheWindowsContract` 报同一条用例、同一段 Expected/Actual |
+
+改回后两棵树都恢复全绿（`restored identical: true`，Kotlin 11721 B / C# 13205 B 逐字节还原）。这一对对照说明的是：断言真的绑在产品规则上，而不是绑在测试自己造的数据上。
+
+#### §44.7 本机实跑计数
+
+| 模块 | 套件 | 用例 | 失败 | skipped | 说明 |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | 48 | **658** | 0 | 11 | 657 → +1（本轮重跑，`:core:common:testDebugUnitTest` BUILD SUCCESSFUL 53 s） |
+| `core/database` | 22 | 206 | 0 | 12 | 本轮未改动，沿用 W6-74 的实跑 |
+| `feature/settings` | 26 | 384 | 0 | — | 本轮未改动 |
+| 合计 | 96 | **1248** | 0 | — | 1247 → 1248 |
+| C# `MediaHub.Tests` | — | **1651** | 0 | 0 | 1650 → +1（6 s，`--no-restore`） |
+
+#### §44.8 未覆盖（如实留着）
+
+1. **规划器仍未吃上一轮基线**：两端都不吃（Windows 只把基线用于 `BaselineKnown/EntryCount/Error` 三件报告事实）。「读基线 → 只请求变化」依然是下一轮的事，向量里也没有 `baseline` 入参。
+2. **`NotImportedEndpoints` 不在本段范围**：Windows 的 `SourceSyncPlan` 带这个字段、Android 的 `SourceSyncPlan` 不带（Android 单独调 `SourceSyncEndpointPolicy`），那部分由既有 `endpointPolicyCases` 覆盖，本轮不重复。
+3. **真实两机与真机**：两机搬运 `NOT_RUN`、真机 instrumentation `DEVICE_UNVERIFIED`，向量与模拟器都不替代它们。
+4. **GUI 出口**：被扣下的凭据条目、需要确认的认领候选，界面上仍然只是计数与稳定码，没有逐条裁决页。
+
+#### §44.9 下一步
+
+- 把对端基线喂进规划器（两端同时改，才能保持跨端同义）：`plan(envelope, locals, baseline)` → 只有摘要判为变化的条目才进本轮；
+- 确认 UI：逐条列出「需要你裁决」的条目（冲突 / 认领 / 墓碑 / 被扣凭据），并给出跳过出口；
+- 「忘记这台设备」：清掉该对端基线并明确告知对端；
+- 真实两机搬运与 Windows 同步页真 GUI 证据（后者需要用户授权的空闲窗口）。
+
+## §45 W6-76：Android 的一轮双向合并预演（`planRound`）
+
+### §45.1 结论先行
+
+Windows 早就有「一轮合并只读预演」——`SourceSyncSession.PlanRound`（`windows/src/MediaHub.Sync/SourceSyncSession.cs:305`），Android 侧此前**零调用**：`SyncRoundMerger.merge`、`SourceSyncDigest.fromEnvelope` 连 W6-73 落地之后也只被测试调用（`git grep` 在 `core/` 的生产源码里命不中），也就是说「双向增量的判定层」在 Android 上一直是死代码。W6-76 给它补上 `AndroidSourceSyncService.planRound(envelopeJson)`，把判定层的公共入口接到服务层，语义按 Windows 逐条对齐：**只读、不写来源、不推进基线、解析失败不抛**。
+
+### §45.2 缺的是什么
+
+| 能力 | Windows | Android（W6-76 之前） |
+| --- | --- | --- |
+| 一轮合并预演 | `SourceSyncSession.PlanRound(remote, baseline)` → `SyncRoundResult` | 无入口；两个类型只有 JUnit 调用 |
+| 摘要构造 | `SourceSyncDigest.FromEnvelope` | `fromEnvelope` 存在、无生产调用方 |
+| 调用方 | 会话层 approval 桶（:233）、CLI（`SyncCliRunner.cs:245` / `:334`） | 无 |
+| 身份补号 | 导出与预演共用一条构造路径 | 只有 `export()` 内联的导出循环 |
+
+也就是说：**判定层已经有了，但没有「先看再决定」的入口**——Android 只能 `importEnvelope`（直接落库），看不到「这一轮会推什么、会拉什么、哪几条需要人裁决」。
+
+### §45.3 做法（三处改动，同一个文件）
+
+文件：`core/database/src/main/kotlin/com/mediahub/core/database/sync/AndroidSourceSyncService.kt`，28389 B / 462 行 → **34780 B / 673 行**。
+
+1. **`export()` 瘦身**：`val local = buildLocalEnvelope(); return SourceSyncExport(envelope = local.envelope, json = SourceSyncCodec.encode(local.envelope), derivedIdentityServerIds = local.derivedIdentityServerIds, skippedServerIds = local.skippedServerIds)`。
+2. **导出循环抽成 `private suspend fun buildLocalEnvelope(): LocalEnvelopeBuild`**：原样搬运导出逻辑（`SourceSyncLocalIds.derive(deviceId, serverId)` 补号 + `store.bindSyncIdentity(...)` 回写、无线路或无 wire 的跳过、`records.sortedWith(compareBy({ it.syncSourceId }, { it.displayName }))`、`SyncCapabilities(canSendSecrets = false, sourceTypes = declaredSourceTypes(sorted))`、`deletions` 恒 empty）。抽出来的理由只有一个：**导出与预演必须共用同一条构造路径**，否则两边的「本端摘要」会分叉——预演说「要推 A」，实际导出的信封里却没有 A。
+3. **新增 `suspend fun planRound(envelopeJson: String): SourceSyncRoundPreview`**：
+   - `SourceSyncCodec.tryDecode` 失败 → 返回只带 `rejectedReason` / `rejectedMessage` 的空预演，**不抛**（对齐 `importEnvelope` 的既有立场：坏输入是结果，不是异常）；
+   - 成功 → `loadPeerBaseline(envelope.deviceId)`；为 null 时用 `SourceSyncBaseline.EMPTY` 而不是把 null 传下去——传 null 会绕过 merger 的 `known == null` 判据（W6-76 的负向对照 A 就是靠这条红的）；
+   - `buildLocalEnvelope()` 得本端信封 → `SyncRoundMerger.merge(local = SourceSyncDigest.fromEnvelope(local.envelope, baseline), remote = SourceSyncDigest.fromEnvelope(envelope, baseline), baseline = baseline)`。
+
+预演结果的形状（顶层 `data class SourceSyncRoundPreview`）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `peerDeviceId` | 信封里的对端标识；解析失败时为空串 |
+| `baselineKnown` / `baselineEntryCount` | 这一轮**读到**的旧基线（不是保存后的条数——这个坑在本轮首跑红了一次，见 §45.5 的教训） |
+| `derivedIdentityServerIds` / `skippedServerIds` | 补号成功的来源、被跳过的来源（与导出同源） |
+| `rejectedReason` / `rejectedMessage` | 解析失败时的稳定码与原句 |
+| `round` | `SyncRoundResult`（apply / requiresApproval / ignored 三桶） |
+| `isRejected` · `applyCount` · `approvalCount` · `ignoredCount` · `pushCount` · `pullCount` · `hasWork` · `isEmpty` | 计算属性；`pushCount` / `pullCount` 数的是 apply 桶里的方向 |
+
+四条边界写在 KDoc 里：**不写来源**（只读 `listSourceSnapshots`）、**会补身份**（否则缺号来源永远推不出去）、**基线只读不写**（否则「已应用」会在预演之后提前成立）、**解析失败不抛**。
+
+### §45.4 十条用例（`SourceSyncRoundPreviewTest`，15066 B）
+
+夹具复刻 `SourceSyncSecretsGateTest` 的 `FakeStore` / `envelope` / `record`，另加 `seed(snapshot)`；基线用 `InMemorySourceSyncBaselineStore` 的真实 `load` / `writeCount`。
+
+| # | 用例 | 钉住的语义 |
+| --- | --- | --- |
+| 1 | `a_first_round_against_an_empty_baseline_pulls_the_remote_source` | 空基线 → PULL / `apply-remote-change`，`baselineKnown` false |
+| 2 | `a_round_after_importing_the_same_envelope_has_no_work` | 同一信封第二轮：`round.isEmpty`、`hasWork` false |
+| 3 | `only_the_changed_remote_source_is_pulled_on_the_next_round` | 只拉真正变了的那条（rev5 → rev6），未变的被跳过 |
+| 4 | `a_local_only_source_is_reported_as_a_push` | 本端独有 → PUSH / `push-local-change` |
+| 5 | `a_source_without_an_identity_is_pushed_under_a_derived_id` | 条目 id == `SourceSyncLocalIds.derive("device-android", "srv-abc")` |
+| 6 | `an_unknown_wire_type_asks_for_approval_instead_of_being_applied` | 未知 wire → approval / `unknown-source-type` |
+| 7 | `a_tombstone_without_a_baseline_entry_is_ignored` | 未知墓碑 → ignored / `tombstone-unknown` |
+| 8 | `a_tombstone_for_a_known_source_asks_for_approval` | 已知墓碑 → approval / `tombstone-requires-approval` |
+| 9 | `a_preview_never_writes_sources_or_advances_the_baseline` | `createCalls == 0`、`updateCalls == 0`、`writeCount == 0` |
+| 10 | `an_undecodable_envelope_is_rejected_without_touching_the_store` | 坏 JSON → `isRejected`，store 一次都没碰 |
+
+第 7、8 条是成对的：**同一枚墓碑，基线认不认识决定它落在 ignored 还是 approval**——只有这一对能把「基线真的参与了裁决」钉住（见 §45.5 的 A 对照）。
+
+### §45.5 先红后绿与三条负向对照
+
+**先红**：首跑第 3 条红在 `assertEquals(2, imported.baselineEntryCount)`，`expected:<2> but was:<0>`。查下来是**断言写错**，不是产品错：导入结果的 `baselineEntryCount` 是「这一轮读到的旧基线条数」，首轮恒为 0，不是保存后的条数。改成断言 `imported.baselineEntryCount == 0` 加 `baselines.load("device-windows").entries.size == 2`，两件事分开断言。
+
+三条负向对照（改前备份 `D:/mh-verify/w676-backup-service.kt`，改后逐字节还原 `restored identical: true`）：
+
+| 对照 | 改动 | 结果 |
+| --- | --- | --- |
+| A | `merge(..., baseline = null)` | **1 红**（第 8 条），216 例 1 failed |
+| A2 | 两端摘要都改成 `fromEnvelope(..., null)` | **3 红**（第 8、2、3 条） |
+| B | 在 `planRound` 返回前插一句 `store.updateLocalSource("srv-touch", SourceSyncSourceSnapshot())` | **1 红**（第 9 条），只读契约被钉住 |
+
+A 第一次只红一条是个教训：`merge` 的 `baseline` 参数在**摘要已经为空**时根本不起作用——真正让「第二轮无事可做」成立的是 `fromEnvelope(..., baseline)`。所以要覆盖 merger 层的基线，必须造一条「摘要有条目、但裁决要看基线」的用例，这就是后来补进去的第 8 条。
+
+### §45.6 本机实跑计数
+
+命令：`gradlew.bat :core:common:testDebugUnitTest :core:database:testDebugUnitTest --offline --console=plain`（env 取 `.local/build-env.json`），BUILD SUCCESSFUL 19 s，日志 `D:/mh-verify/w676-green.log`。
+
+| 模块 | 套件 | 用例 | 失败 | skipped | 变化 |
+| --- | --- | --- | --- | --- | --- |
+| `core/common` | 48 | 658 | 0 | 11 | 未变 |
+| `core/database` | **23** | **216** | 0 | 12 | 22 / 206 → +1 套件 +10 例 |
+| `feature/settings` | 26 | 384 | 0 | — | 未变 |
+| 合计 | 97 | **1258** | 0 | — | 1248 → 1258 |
+| C# `MediaHub.Tests` | — | 1651 | 0 | 0 | 本轮未改动 |
+
+### §45.7 门禁 58 → 59
+
+`com.mediahub.core.database.sync.SourceSyncRoundPreviewTest` 进 `--required-suite`（`.github/workflows/android-ci.yml`，CRLF 文件，只加一行），58 → **59**；`--require-complete-suites` 与其余 58 行一字未动。理由与 W6-55/W6-72/W6-74 同一条纪律：一个套件若被 @Ignore 或被挤出编译，gradle 仍然打印 BUILD SUCCESSFUL，只有钉住名字才能让「它必须真的跑过」成为门禁。
+
+### §45.8 未覆盖（如实留着）
+
+1. **仍不写库**：`planRound` 是预演，没有「逐条批准 → 应用」的那半条链（Android 侧没有 `SourceSyncImportRound / SourceSyncApprovalGate` 的对等物）。
+2. **基线仍不进规划器**：`SourceSyncPlanner.plan(envelope, locals)` 两边都不收基线入参——本轮只把「一轮合并」的判定接出来，不是「读基线 → 只请求变化」的完成。
+3. **真实两机**：两机搬运与跨端预演一致性 `NOT_RUN`，真机 instrumentation `DEVICE_UNVERIFIED`。
+4. **GUI 出口**：`approvalCount` 与三桶内容在界面上仍然只有计数与稳定码，没有逐条裁决页。
+
+### §45.9 下一步
+
+- 把 `SourceSyncApprovalGate.Decide` 与 `SourceSyncImportRound.Preview` 的对等物补到 Android（预演之后要能「逐条放行」）；
+- 两端把对端基线喂进规划器（`plan(envelope, locals, baseline)`），保持跨端同义；
+- 被扣凭据条目与冲突条目的逐条裁决 UI，含跳过出口；
+- 真实两机搬运与 Windows 同步页真 GUI 证据（后者需要用户授权的空闲窗口）。
+
+## §46 W6-77：Android 的批准闸门（对齐 Windows `SourceSyncApprovalGate`）
+
+### §46.1 结论先行
+
+W6-76 只给了 Android「一轮合并预演」——看得到会推什么、会拉什么、哪几条要人裁决，但**没有任何东西能把裁决落下来**：Windows 有 `SourceSyncApprovalGate.Decide`（410 行）跑在 `SourceSyncImportRound.Preview` 与 `ApplyAsync` 之间，Android 侧连类型都没有。W6-77 把闸门按 Windows 逐条移植过来（`core/common/src/main/kotlin/com/mediahub/core/common/sync/SourceSyncApprovalGate.kt`，297 行），并给它补了三段跨语言黄金向量（`approvalCodes` / `approvalCases` 23 条 / `approvalRoundCases` 7 条），最后把默认裁决接进 W6-76 的预演（`SourceSyncRoundPreview.gate`）。
+
+### §46.2 缺的是什么
+
+| 能力 | Windows | Android（W6-77 之前） |
+| --- | --- | --- |
+| 逐条裁决 | `SourceSyncApprovalGate.Decide` 三个重载（Plan / SyncRoundResult / Item 列表） | 无 |
+| 永不许可三类 | `NeverAllowableReasons`：凭据 / 未知类型 / 本机不支持 | 无（W6-74 只在导入期单独拦凭据） |
+| 风险标记 | `RiskyReasons` 四条 + `ambiguous-` 前缀 | 无 |
+| 裁决结果 | `SourceSyncApprovalResult`：Applied / Skipped / Withheld / BlockingReasons / AcknowledgedRisk / AppliedWithRisk | 无 |
+| 预演出口 | `SourceSyncApplyPreview.CanApply => Gate.CanApply` | 只有三桶计数，没有「现在能不能执行」 |
+
+差的是**中间那层**：预演说「这 3 条要人裁决」，但没有东西回答「如果我什么都不点，会执行哪几条；哪些连点允许都不行」。
+
+### §46.3 做法
+
+新文件 `SourceSyncApprovalGate.kt`（**12816 B / 297 行**），逐个类型与 `SourceSyncApprovalGate.cs` 对齐：
+
+- `enum class SourceSyncApprovalChoice { SKIP, ALLOW }`；`data class SourceSyncApprovalDecision(syncSourceId, choice)` + `allow()/skip()`；
+- `data class SourceSyncApprovalItem(...)` 11 个字段与 C# 同名同义，加两个适配器：`fromCandidate`（导入规划器的候选）与 `fromRoundEntry`（一轮合并的条目）；
+- `data class SourceSyncApprovalResult(applied, skipped, withheld, blockingReasons, acknowledgedRisk, appliedWithRisk)` + `canApply / isBlocked / appliedCount / skippedCount / withheldCount / isEmpty / find / isWithheld / isApplied / EMPTY`，`toString` 与 C# 同格式（`Approval(applied=N, skipped=N, withheld=N, canApply=B, risk=B)`）；
+- `object SourceSyncApprovalGate`：`AMBIGUOUS_REASON_PREFIX = "ambiguous-"`、`NEVER_ALLOWABLE`（3 条）、`RISKY`（4 条）、`isNeverAllowable / isRisky / isApplicable`、三个 `decide` 重载。
+
+**判据顺序不许改**（与 C# 一致，负向对照专门钉过）：
+
+1. 先建 choices 字典：身份 trim + ASCII 大小写不敏感，**后写覆盖**（last decision wins）；决策身份为空 → `IllegalArgumentException("An approval decision needs a syncSourceId.")`；
+2. 逐条：身份为空 → `"An approval item needs a syncSourceId."`；
+3. **先判永不许可** → 进 withheld + blocking（去重、首现顺序），**即使显式允许也不放行**；
+4. 再判动作不可执行（`NoChange / IgnoreStale / Unsupported`）→ skipped；
+5. 再有决策按决策，**没有决策时 `allow = !requiresApproval`**（要人确认的默认跳过）；
+6. 允许 → applied；`requiresApproval` 的计入 appliedWithRisk，理由属风险集时置 acknowledgedRisk。
+
+`fromRoundEntry` 的两个坑（向量专门钉住）：`SyncRoundEntry` 只有 kind + reason，没有 action，映射是 `Added→Create / Updated→Update / Removed→Delete`，其余按 reason 落 `Unsupported` 或 `NoChange`；行里的 URL 取**首选端点原样**（`isPrimary` 优先、其次最小 `sortOrder`），**不做归一化**。另外 `decide(round)` 只吃 `apply + requiresApproval` 两桶，**ignored 根本不进闸门**。
+
+服务层：`AndroidSourceSyncService.planRound`（673 → **700 行 / 36375 B**）在合并完成后跑一次 `SourceSyncApprovalGate.decide(round)`，把结果放进 `SourceSyncRoundPreview.gate`，并暴露四个透视：`gateAppliedCount / withheldCount / blockingReasons / canApply`。默认裁决的语义写进 KDoc：**无需确认的放行，需要确认的先跳过，永不许可的三类直接扣住**。
+
+### §46.4 黄金向量（`approvalCodes` / `approvalCases` / `approvalRoundCases`）
+
+生成器在仓库外（`D:\mh-verify\baseline-vectors\Sections77.cs`，26257 B / 585 行），每条用例**先跑 Windows 权威实现再逐条比对声明值**，不符即抛 `InvalidOperationException`，所以向量不可能悄悄失去它要证明的规则。产物 288781 → **328400 B**，sha256 `7ea77cc5f3439d44712add732586775377910ad967e8238ab61888159bbcb694`，两树各一份（`core/common/src/test/resources/sync/` 与 `windows/tests/assets/`）。
+
+`approvalCodes` 把三张清单写成字面值，两端测试都先断言它们（不复用各自常量，避免自证）：
+
+| 键 | 值 |
+| --- | --- |
+| `neverAllowable` | `secrets-require-approval` / `unknown-source-type` / `not-supported-on-windows` |
+| `risky` | `delete-vs-update` / `update-vs-delete` / `field-conflict` / `same-revision-different-content` |
+| `ambiguousPrefix` | `ambiguous-` |
+
+`approvalCases` 23 条，覆盖：无需决策直接执行 / 审批条目默认跳过 / 显式允许带风险 / 显式跳过压过默认执行 / **跳过压过允许**（同身份）/ 后写覆盖 / 决策 trim + 大小写不敏感 / 陌生身份的决策不改变任何东西 / 三类永不许可 / 陈旧条目跳过 / `NoChange` 跳过 / 无理由的 `Unsupported` 跳过（不能用 unknown-source-type，否则被永不许可先截走）/ `ambiguous-` 允许但记风险 / `legacy-identity-match` 允许但不记风险 / 墓碑批准允许但不记风险 / 四条风险理由全部标记 / blocking 去重按首现顺序 / 三桶分区 / 两条空身份抛异常。
+
+`approvalRoundCases` 7 条专钉适配器：apply 桶免决策 / approval 桶默认跳过（**同一轮里的 ignored 条目根本不出现**）/ approval 桶可被允许 / 行里显示首选端点原样（`[{secondary,sort2},{primary,sort9}] → "https://primary.local/"`）/ 墓碑行不带 record 字段（`r-7|Delete|tombstone-requires-approval|true|-|-|-|-|4|4`）/ 凭据条目被扣 / 不支持类型条目被扣。
+
+### §46.5 两端契约用例
+
+| 侧 | 文件 | 用例 | 结果 |
+| --- | --- | --- | --- |
+| Kotlin | `core/common/src/test/kotlin/.../SourceSyncBaselineContractTest.kt` 741 → **893 行** | +`approval_cases_match_the_windows_contract`（@Test 15 → **16**） | 绿 |
+| C# | `windows/tests/MediaHub.Tests/BaselineContractTests.cs` 899 → **1042 行** | +`ApprovalCasesMatchTheWindowsContract`（[Fact] 16 → **17**） | 绿 |
+
+`approvalCases` 里没有 `windowsOnly` 用例，两端都全跑（23 + 7）：Kotlin 的 `error` 用例断言抛 `IllegalArgumentException` 且消息含稳定片段，C# 断言 `Assert.Throws<ArgumentException>`。
+
+### §46.6 负向对照（先红后绿，全部逐字节还原）
+
+| 编号 | 改动 | 结果 |
+| --- | --- | --- |
+| Kotlin A | 默认裁决 `?: !item.requiresApproval` → `?: true` | `approval_cases` 红（16 例 1 failed，`SourceSyncBaselineContractTest.kt:810`） |
+| Kotlin B | 永不许可判定挪到「动作可执行」之后 | 红（:811） |
+| Kotlin C | `primaryUrl` 改取 `endpoints.first()`（不认 primary） | 红（:790，行投影那条） |
+| Kotlin D | `planRound` 里 `gate = SourceSyncApprovalResult.EMPTY`（不跑闸门） | `core:database` 220 例 4 failed，四条 gate 用例全红 |
+| C# D | `allow = !item.RequiresApproval` → `allow = true` | 红：`Expected: [] Actual: ["m-2"]`（`BaselineContractTests.cs:362`） |
+
+### §46.7 本机实跑计数
+
+| 模块 | 套件 | 用例 | 失败 | skipped |
+| --- | --- | --- | --- | --- |
+| `core/common` | 48 | **659** | 0 | 11 |
+| `core/database` | 23 | **220** | 0 | 12 |
+| `feature/settings` | 26 | 384 | 0 | — |
+| 合计 | 97 | **1263** | 0 | — |
+
+C#：`MediaHub.Tests` **1652** 通过 / 0 失败（1651 → +1）。`--required-suite` 仍 **59**：新用例都落在已钉住的 `SourceSyncBaselineContractTest` 与 `SourceSyncRoundPreviewTest` 里，无需改 workflow。
+
+### §46.8 未覆盖（如实留着）
+
+1. **仍不落库**：闸门只算裁决，Android 没有 `SourceSyncImportRound.ApplyAsync` 的对等物——「批准之后真正写」还差 W6-78。
+2. **基线仍不进规划器**：`SourceSyncPlanner.plan` 两端都不收基线，跨端仍只到「一轮合并」这层。
+3. **逐条裁决 UI**：`blockingReasons` 与三桶只在服务层可见，界面仍只有计数。
+4. **真实两机**：`NOT_RUN`；真机 instrumentation `DEVICE_UNVERIFIED`。
+
+### §46.9 下一步
+
+- 给 Android 补 `SourceSyncImportRound` 的对等物（预演 → 逐条批准 → 应用，含基线只在写入后推进）；
+- 两端把对端基线喂进 `SourceSyncPlanner`；
+- 被扣凭据 / 冲突条目的逐条裁决页（含跳过出口）；
+- 「忘记这台设备」与取消接收 observability；真实两机搬运。
+
+
+## §47 W6-78：Android 的一轮落库（对齐 Windows `SourceSyncImportRound.ApplyAsync`）
+
+时间：2026-10-28（第 6 轮）。分支 `feature/windows-client`，权威树 `D:/mh-w6`（`feature/cross-device-source-sync`）。
+
+### §47.1 结论先行
+
+W6-76 给了预演（`planRound`，一笔不写），W6-77 给了闸门（`SourceSyncApprovalGate`，回答「点确认会执行哪几条」），但两者之间**没有落库层**：Android 只有「导入整封信封」（`importEnvelope`，按规划器默认结论写），没有「按逐条裁决写」。Windows 的那一层是 `SourceSyncImportRound.ApplyAsync`（432 行，跑在预览与写入之间）。本轮把它在 Android 侧补上：`applyRound` + 回执 `SourceSyncApplyReport`，共 10 例新用例与 3 条负向对照，本机 `core/database` 220 → **230** 例全绿。
+
+### §47.2 缺的是什么
+
+| Windows 能力（`ApplyAsync`） | Android W6-77 时的状态 |
+| --- | --- |
+| 把闸门的 `Applied` 逐条交给写入器 | 无（只有整封信封的 `importEnvelope`） |
+| 写入器拒绝（`Refused`）时如实上报，不假装已应用 | 无 |
+| 记录为 null（对端声明删除）单列一条路径 | 无（存储层本来就没有删除方法） |
+| 只在真的写进库之后推进对端基线 | 导入路径有，落库路径没有 |
+| 回执 `Summary`：已写入 / 跳过 / 保留未应用 | 只有预演的三桶计数 |
+
+### §47.3 做法
+
+主树 `core/database/src/main/kotlin/com/mediahub/core/database/sync/AndroidSourceSyncService.kt` **36375 → 48459 B / 941 行**，三处改动：
+
+1. 新增 `suspend fun applyRound(envelopeJson: String, allowedSyncSourceIds: List<String> = emptyList(), skippedSyncSourceIds: List<String> = emptyList()): SourceSyncApplyReport`；
+2. 把「读基线 → 构本端信封 → 合并」抽成 `private suspend fun mergeRound(envelope): RoundBuild`，预演与落库共用（两边判据一旦分叉，用户点确认后写下的东西就和他刚才在界面上看到的不是一回事）；
+3. 文件末尾新增顶层 `data class SourceSyncApplyReport`。
+
+回执字段（四桶互不相交，加起来等于闸门看过的条目数）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `applied` | 真的写进库的条数 |
+| `skipped` | 裁决结果是不做（对端过旧、已同步、没人放行的确认项） |
+| `withheld` | 永不许可（凭据 / 未知类型 / 本机不支持），显式放行也不写 |
+| `refused` | 批准了但写不下去（删除本地来源、信封里找不到记录、存储层拒绝） |
+| `notApplied` | skipped + withheld + refused（与 Windows `NotApplied` 同义） |
+| `summary` | 「已写入本地 N 条 / 跳过 N 条 / 保留未应用 N 条」，与 Windows 同格式 |
+| `warnings` | 基线拒收 `baseline-rejected:<count>:<reason>`（与 Windows 同值同构）或 `baseline-write-failed` |
+| `wroteServerIds` / `refusedSyncSourceIds` | 写成功与被拒的来源，供界面逐条显示 |
+
+五条边界（逐条对齐 Windows）：
+
+- **名单先允许后跳过**：闸门按「后写覆盖」建字典，同一身份同时出现在两张名单里时以**跳过**为准（Windows `Decisions(allowedIds, skippedIds)` 的顺序，别调换）；
+- **永不许可三类扣住**：凭据 / 未知类型 / 本机不支持即使显式允许也不写，判据只在闸门里，服务层不重复判；
+- **删除类一律拒绝**：存储层没有删除方法（ADR-S001：墓碑不删本地来源），落进 `refusedSyncSourceIds`，并新增 Android 本地码 `local-delete-not-supported`（不进跨机码表）；
+- **基线只在真写入之后推进**：写成与导入路径同一个 `recordBaseline(envelope, writtenRecords)`，只收真正写进库的记录；
+- **解析失败不抛**：返回带 `rejectedReason` 的空回执，存储与基线零调用。
+
+另有两处实现细节值得记：
+
+- 写库前按**身份**（trim + ASCII 小写）查已有行，而不是按原始拼写 —— 存储层的唯一索引是大小写敏感的，大小写不同的同一条来源若被当成新记录写入，库里会留下两条身份相同、永远收敛不了的重复来源；
+- 取消只在条目之间检查（`currentCoroutineContext().ensureActive()`），不在写入中途打断：写到一半被打断会让「已写入几条」这个回执本身失去意义。
+
+### §47.4 十条用例
+
+`core/database/src/test/kotlin/com/mediahub/core/database/sync/SourceSyncApplyRoundTest.kt`（**14864 B / 362 行**，10 个 `@Test`）：
+
+| # | 用例 | 钉住什么 |
+| --- | --- | --- |
+| 1 | `a_plain_pull_is_written_by_default_and_the_baseline_advances` | 默认放行 → 建行、`summary` 文案、基线推进且条数取保存后的真实值 |
+| 2 | `an_entry_that_needs_approval_is_skipped_until_it_is_allowed` | 要确认的默认跳过；显式放行后更新成功且 `acknowledgedRisk` 为真 |
+| 3 | `a_record_carrying_credentials_is_withheld_even_when_it_is_allowed` | 凭据条目显式放行也不写，`blockingReasons` 恰为该码 |
+| 4 | `an_unknown_source_type_is_withheld_even_when_it_is_allowed` | 未知类型同上 |
+| 5 | `a_deletion_is_refused_because_the_store_cannot_delete` | 删除被拒且库里那行原封不动、基线不推进 |
+| 6 | `skipping_an_identity_outranks_allowing_it` | 同一身份 allow + skip 时 skip 胜（名单顺序） |
+| 7 | `the_baseline_only_carries_the_records_that_were_actually_written` | 两条记录只写一条 → 基线只有一条 |
+| 8 | `a_storage_failure_is_reported_as_refused_instead_of_thrown` | 存储抛异常 → refused，不抛、基线零写入 |
+| 9 | `an_identity_matches_a_local_row_regardless_of_spelling` | 大小写不同也命中同一行，库里不许出现第二条 |
+| 10 | `an_undecodable_envelope_is_rejected_without_touching_the_store` | 坏 JSON → 三计数全零、存储与基线零调用 |
+
+第 9 条一开始是红的，但**不是产品错**：本地行与远端记录内容不同而 `fieldVersion` 相同，合并器按字段冲突判「要人裁决」，默认裁决自然不写。改成显式放行后同时验到两件事：冲突要人点头，点头之后按身份找到那一行去更新。
+
+### §47.5 三条负向对照
+
+| # | 改法 | 结果 |
+| --- | --- | --- |
+| A | 基线改从整封信封推进（`recordBaseline(envelope, envelope.sources)` 并去掉空判断） | **2 红**：`the_baseline_only_carries…`（:159）、`a_storage_failure…`（:188） |
+| B | `decisionsOf` 里跳过与允许的追加顺序对调 | **1 红**：`skipping_an_identity_outranks_allowing_it`（:142） |
+| C | 写库改用原始拼写查行 | **1 红**：`an_identity_matches_a_local_row_regardless_of_spelling`（:206） |
+
+三条都是「改回产品代码 → 先红 → 还原」的流程，还原后逐字节一致（48459 B）。日志：`D:/mh-verify/w678-neg-{A,B,C}.log`。
+
+### §47.6 本机实跑计数
+
+| 模块 | 套件 | 用例 | 失败 | 跳过 |
+| --- | --- | --- | --- | --- |
+| `core/common` | 48 | **659** | 0 | 11 |
+| `core/database` | 24（220 → +1 套件） | **230**（+10） | 0 | 12 |
+| `feature/settings` | 26 | 384 | 0 | 0 |
+
+三模块合计 **659 + 230 + 384 = 1273**（上一轮 1263）。C# `MediaHub.Tests` 本轮未改动，仍是 **1652 通过 / 0 失败**。命令：`gradlew.bat :core:common:testDebugUnitTest :core:database:testDebugUnitTest --offline --console=plain`（日志 `D:/mh-verify/w678-green.log`）。
+
+### §47.7 门禁 59 → 60
+
+新套件 `com.mediahub.core.database.sync.SourceSyncApplyRoundTest` 进 `--required-suite`（`.github/workflows/android-ci.yml`，CRLF 文件，锚点必须带 `\r\n`；26562 → 26649 B，`--required-suite` 60 条）。理由与 W6-55 / W6-72 / W6-76 一致：套件被整体 `@Ignore` 或掉出编译时 gradle 仍会打印 BUILD SUCCESSFUL，只有钉住才算真的执行过。门禁自测 `py -m unittest discover -s .github/scripts/tests` → 54 例 OK。
+
+### §47.8 未覆盖
+
+1. **真实两机跑一轮落库**：NOT_RUN（一台机器证明不了）。
+2. **基线仍不进规划器**：两端都不拿基线改判，本轮只是把「写完之后推进基线」补齐。
+3. **逐条裁决的界面出口**：被扣条目（凭据 / 未知类型）与冲突条目在 Android 上仍只有数据，没有页面。
+4. **删除语义**：`SourceSyncStore` 没有删除方法，所以「对端删了、本机要不要删」这个产品问题仍未回答，本轮只是如实拒绝并上报。
+5. **真机 instrumentation**：DEVICE_UNVERIFIED（本轮未加 Compose 断言）。
+
+### §47.9 下一步
+
+W6-79 候选：①两端把对端基线喂进 `SourceSyncPlanner`（真正「读基线 → 只请求变化」）；②被扣凭据 / 冲突条目的逐条裁决页（把 `SourceSyncApplyReport.refusedSyncSourceIds` 与 `blockingReasons` 变成可点的行）；③「忘记这台设备」；④监听卡「取消接收」的可观测性；⑤两机真实证据（需要用户给窗口/机器）。
+
+## §48 W6-79：Android 的跨端删除（对齐 Windows `ServerManager.RemoveRemoteSourceAsync`）
+
+### 48.1 结论先行
+
+- W6-78 的落库层（`applyRound`）遇到对端声明的删除只会**拒绝并上报** `local-delete-not-supported`，因为 `SourceSyncStore` 接口刻意没有删除方法（ADR-S001）。
+- 本轮把「删除」补成一条**能力接口** `SourceSyncSourceRemover`，判据逐条对齐 Windows `ServerManager.RemoveRemoteSourceAsync`，并把生产实现（完整删除链）接到 Hilt 图上。
+- 仍然没有界面出口：**用户点不到「删掉这条」**；`applyRound` 也**还没有**接进生产导入路径（写入口仍是 `importEnvelope`）。本轮交付的是「一旦接线，删除会做对」。
+
+### 48.2 缺的是什么
+
+| 能力 | Windows（权威） | Android 本轮之前 |
+| --- | --- | --- |
+| 存储层能否删 | `ILocalSourceStore.Delete(syncSourceId): bool`（「already gone」不算错） | `SourceSyncStore` 无删除方法 |
+| 删除是否清凭据 | `RemoveRemoteSourceAsync` → `DeleteAsync`，连 token 一起删 | 无删除路径 |
+| 落库层如何处理删除条目 | `record is null` → `RemoveRemoteSourceAsync` | 一律 refused（`local-delete-not-supported`） |
+| 本地媒体源 | `Type == Local` → 拒绝（「本地媒体源不参与跨设备删除」） | 无判据 |
+| 删除是否推进基线 | 不推进（只有真的写进非 null 记录才推进） | 不推进（尚无删除） |
+
+### 48.3 做法（四处改动）
+
+1. **新接口** `core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncSourceRemover.kt`（1156 B）：`suspend fun removeSource(serverId: String): Boolean`。为什么不塞进 `SourceSyncStore`：那会让八个测试假件都得实现一个多半用不上的方法，而「删除要连凭据一起删」这件事本来就不属于存储抽象。
+2. **服务层** `AndroidSourceSyncService` 多一个默认为 null 的第 6 个构造参数 `sourceRemover`（既有 fake 与既有用例零改动），`applyRound` 的删除判据**按 Windows 原文改成 `record == null || action == DELETE`** —— 墓碑与「本机存在」合并出来的条目 kind 是 UPDATED、reason 是 `update-vs-delete`，只看 action 会漏掉它（第一版就是这么写错的，五条用例同时红）。
+3. **判据四条**（`removeLocalSource`）：身份为空或本机没有 → `local-source-missing`；没有 remover → `local-delete-not-supported`；本地媒体源 → `local-media-source`；remover 返回 false 或抛异常 → `local-source-remove-failed`（取消继续向上抛）。成功才 `applied++`，并记进 `removedServerIds` / `removedSyncSourceIds`；`SourceSyncApplyReport` 另有 `removalFailures` 与 `removalFailureOf(id)`。
+4. **生产实现** `feature/server/src/main/kotlin/com/mediahub/feature/server/ServerSourceSyncRemover.kt`（1924 B）：`getServer(id)` → `ServerRemoveHandler.remove(server)`（即 `RemoveServerUseCase`：删行 → 账号 → token → 凭据柜 → 进度 → 字幕记忆 → 图标 → 会话）。Hilt 绑在 app 的 `RegistryModule`；`SourceSyncImportSession.production` 与 `SourceSyncImportViewModel` 各加一个透传参数（缺省 null）。
+
+### 48.4 用例
+
+| 套件 | 例数 | 覆盖 |
+| --- | --- | --- |
+| `SourceSyncApplyRoundTest` | 15 → **16**（+6） | 允许的删除真经 remover 删掉且基线不推进、本地媒体源拒绝、本机已无此来源拒绝、remover 失败折成拒绝、一轮里同时写一条删一条、对端墓碑与本机行拼写不同仍能删 |
+| `ServerSourceSyncRemoverTest`（新） | **5** | 真的走完整删除链、身份 trim、未知身份不碰删除链、空白身份、删除链抛异常返回 false |
+
+### 48.5 负向对照（四条，三条变红）
+
+| # | 变异 | 结果 |
+| --- | --- | --- |
+| A | 把 `ServerType.LOCAL` 判据换成 `PLEX`（等于取消本地媒体源保护） | `a_local_media_source_is_never_removed_across_devices` 红 |
+| B | `if (remover.removeSource(id))` → `|| true`（把 false 当成功） | `a_failing_remover_is_reported_as_refused_instead_of_thrown` 红 |
+| C | 没有 remover 时直接 `return ""`（当成已删除） | `a_deletion_is_refused_because_the_store_cannot_delete` 红 |
+| D | 身份查找改成拼写严格相等 | **保持绿** —— 跨端合并已在上游按 trim + 小写归并、发出来的就是本机拼写，这条守卫在 `applyRound` 路径上不可达。本轮把它写进文档，不假装被用例钉住 |
+
+### 48.6 本机实跑
+
+| 模块 | 套件 / 例数 | 变化 |
+| --- | --- | --- |
+| `core/common` | 48 / **659**（11 skipped） | 本轮未改 |
+| `core/database` | 24 / **236**（12 skipped） | 230 → +6 |
+| `feature/settings` | 26 / **384** | 本轮未改 |
+| `feature/server` | 6 / **34** | 29 → +5（新套件） |
+| 合计（三模块口径） | **1279** | 1273 → +6 |
+| C# `MediaHub.Tests` | **1652** / 0 失败 | Windows 侧本轮未改 |
+
+`--required-suite` 仍 **60**：新用例落在已钉住的 `SourceSyncApplyRoundTest` 里，`feature/server` 不在门禁名单内。
+
+### 48.7 未覆盖（如实留着）
+
+1. `applyRound` **没有**接进 `SourceSyncImportSession` 的写入口（仍是 `importEnvelope`）——结果页的「已应用」需要按身份映射到 `serverId`，而 `SyncRoundEntry` 没有这个字段，换过去要一起改结果页。
+2. 删除**没有界面出口**：没有任何按钮能触发「删掉这条」，本轮不做假界面。
+3. Room 级联（真实 `ServerRepository` + 真库）未在本轮用例里跑；`ServerSourceSyncRemover` 用的是假 `ServerStore` + 假 `ServerRemoveHandler`，级联本身由 `RemoveServerUseCase` 自己的用例负责。
+4. 真实两机跑一轮删除仍 **NOT_RUN**；真机 instrumentation 仍 **DEVICE_UNVERIFIED**。
+
+### 48.8 下一步（W6-80 候选）
+
+1. 把 `SourceSyncImportSession` 的应用端口换成 `applyRound`（先给 `SourceSyncApplyReport` 加身份 → serverId 映射，结果页一次性改完）。
+2. 被扣凭据 / 冲突 / 删除条目的逐条裁决界面出口。
+3. 两端把对端基线喂进 `SourceSyncPlanner`（「读基线 → 只请求变化」仍未实现）。
+4. 「忘记这台设备」（配对层）。
+5. 监听卡「取消接收」的可观测性。
+
+## §49 W6-80：忘记一台设备时同时忘记该对端的同步基线（③ 设备解绑）
+
+### 49.1 结论先行
+
+- 两端的「忘记这台设备」此前只删**配对登记**：对端基线（本机记账，记着「对端已经有什么」）原封不动留在盘上。
+- 后果不是报错而是**静默**：同一个 deviceId 重新配对后 `planRound` 读到的基线还在，判 `baselineKnown=true`，对端的真实改动会被当成 `already-applied` 跳过。本轮把这个现场钉成用例：旧基线（rev 9）+ 空本地 + 对端 rev 2 ⇒ 整轮 `round.isEmpty`，三个桶全空，界面一句话都不会说。
+- 本轮把 forget 提升成 `ISourceSyncBaselineStore` 的接口方法（两端同名语义），把两端「忘记」接到它上，并用 `baselineForgetCases` 9 例 + 两端契约测试钉住存储语义。
+- 仍然没有「重新配对时自动提示基线已过期」这种界面出口；本轮交付的是「忘记会真的忘干净」。
+
+### 49.2 缺的是什么
+
+| 能力 | Windows（权威） | Android 本轮之前 |
+| --- | --- | --- |
+| 存储接口能否删掉某个对端 | `ISourceSyncBaselineStore` 只有 `Load` / `Save` | 只有 `load` / `save` |
+| 具体类上的 forget | `FileSourceSyncBaselineStore.ForgetPeer`（:192），唯一生产调用方是 `SyncCliRunner` 的 `baseline forget` 命令 | `FileSourceSyncBaselineStore.forgetPeer`（:106）**零生产调用**（死代码） |
+| 忘记设备时清基线 | `SyncPairingPresenter.ConfirmForget` 只调 `_registry?.Forget` | `PairedDeviceController.confirmForget` 只调 `registry.forget` |
+| 重新配对后的判据 | `PlanRound` 读基线 ⇒ `baselineKnown=true` | 同 |
+| 文案 | 「只删除本机的配对登记，来源、凭据和对端设备都不会被改动」 | 同 |
+
+### 49.3 做法（五处改动）
+
+1. **接口方法 + 四个实现**：C# `ISourceSyncBaselineStore.Forget(string)` / Kotlin `ISourceSyncBaselineStore.forget(String): Boolean`，语义逐条对齐 —— 空白身份是调用方 bug（抛 `ArgumentException` / `IllegalArgumentException`）、文档写不动必须抛而不是返回 false、真的删掉了才 `WriteCount++`（File 与 InMemory 两个存储的计数口径一致，否则同一段逻辑换个存储就换个数字）。旧的 `ForgetPeer` / `forgetPeer` 保留成一行别名：`SyncCliRunner` 的 `baseline forget` 命令仍在用。
+2. **向量**：生成器新增 `Sections80.cs`（`BaselineForgetCases()`），9 例 —— 忘记已知对端、未知对端、大小写与空格不敏感（写 `"peer-A"`、忘 `"  peer-a  "`）、忘掉最后一个对端后文档留空、连忘两次（第二次 false）、空白身份抛错、重开进程后仍记得（reload）、文件不存在时不新建（且不被判定成「删掉了文档」）、文档损坏时一个都不忘（并留下 quarantined 副本）。每例输出 result / error / 文档 text+base64+sha256+字节数 / writeCount / peerDeviceIds / fileStillExists / documentUnchanged / loadError / quarantined / loadAfter 探针。生成期断言 `AssertForgetIntent` 先跑 Windows 权威实现再逐条比：expectError 场景必须抛且文档字节不变；成功场景必须文件还在、忘掉的对端不在 `peerDeviceIds`、文档真的被重写；false 场景要求「文件存在则字节不变；文件不存在且原本有文本时必须留了 quarantine」。产物 `vectors80.json` 353035 B / sha256 `61d4331a…161688`，与仓库现有向量**前 328396 字节逐字节相同**，只是尾部追加新段，可直接整文件覆盖。
+3. **三处副本逐字节同步**：Kotlin 侧读 `core/common/src/test/resources/sync/baseline-vectors.json`，Windows 侧读的是 `windows/tests/assets/baseline-vectors.json`（csproj 里 `CopyToOutputDirectory=PreserveNewest` 拷进 `assets/`）—— 漏拷第三份的症状是 `KeyNotFound: baselineForgetCases`。
+4. **两端契约测试各一条方法重放**：Kotlin `baseline_forget_cases_match_the_windows_authority()`（错误名要做映射 `ArgumentException → IllegalArgumentException`）与 C# `BaselineForgetCasesMatchTheWindowsContract()`，都完整重放 9 例并用**新建的 reader store** 强制懒加载，比 `loadErrorAfterReload` 与 `loadAfter.peerA|B|C`。
+5. **两端接线（先删登记、再清基线）**：顺序反过来会在中途留下「登记还在、基线没了」的假首轮状态，所以基线清理写在「登记真的删掉了」之后。Android `PairedDeviceController` 多一个 `baselineStore: ISourceSyncBaselineStore? = null`（放在 io 之后，保位置参数兼容），`PairedDeviceForgetOutcome` 多 `baselineForgotten`，成功回执按它选 `FORGET_DONE_MESSAGE` 或 `FORGET_DONE_MESSAGE_WITHOUT_BASELINE`（后者明说「这个页面没有可用的同步基线存储，对端基线可能还留在盘上」）；存储抛异常（`CancellationException` 除外）折成 `false`，不影响「设备已忘记」。存储实例从 `SettingsViewModel.syncBaselineStore`（Hilt 的 `AppModule.provideSyncBaselineStore`）经 `SettingsScreen` 传进 `PairedDeviceRoute`。Windows 侧 `SyncPairingPresenter` 多一个 `ISourceSyncBaselineStore?` 第三参、`SyncForgetOutcome.BaselineForgotten`，`SourceSyncService` 新增 `Baselines` 出口（必须与 session 用同一个实例，第二个 store 会和内存里的基线打架），`SyncPage.xaml.cs` 传 `App.Services.Sync.Baselines`。两端文案逐字一致。
+
+### 49.4 用例
+
+| 套件 | 例数 | 覆盖 |
+| --- | --- | --- |
+| `PairedDeviceControllerTest` | 13 → **17**（+4） | 基线被清且提示如实、没有存储时明说基线可能还在、存储抛异常仍算忘记、未知设备一个字节都不碰 |
+| `SyncPagePresenterTests` | 37 → **40**（+3，另 1 条改写） | 同上四条（C# 侧） |
+| `SourceSyncBaselineContractTest` | 17 → **18**（+1） | 9 个 forget 场景逐字节重放（文档 text/sha/字节数/WriteCount/peer 列表/quarantine） |
+| `SourceSyncRoundPreviewTest` | 15 → **16**（+1） | 旧基线让整轮变空 → forget 之后同一信封重新判为首轮：`baselineKnown=false`、`applyCount=1`、方向 `apply-remote-change`、预演仍然不写存储 |
+
+### 49.5 负向对照（三条，全红）
+
+| # | 变异 | 结果 |
+| --- | --- | --- |
+| A | Kotlin 把基线结果硬编码成 `deleted to false`（从不调 store） | `forgetDropsThePeerBaselineAndSaysSo` + `aThrowingBaselineStoreStillForgetsTheDevice` 红 |
+| B | Kotlin 失败分支也清基线（`deleted to forgetBaseline(...)`） | `anUnknownDeviceNeverTouchesItsBaseline` 红 |
+| C | C# 把 `ForgetBaseline` 挪到「登记是否真删掉」的判据之前 | `AskForget_UnknownDeviceLeavesItsBaselineAlone` 红 |
+
+### 49.6 本机实跑
+
+| 模块 | 套件 / 例数 | 变化 |
+| --- | --- | --- |
+| `core/common` | 48 / **660**（11 skipped） | 659 → +1 |
+| `core/database` | 24 / **237**（12 skipped） | 236 → +1 |
+| `feature/settings` | 26 / **388** | 384 → +4 |
+| 合计（三模块口径） | **1285** | 1279 → +6 |
+| C# `MediaHub.Tests` | **1656** / 0 失败 | 1652 → +4 |
+
+`--required-suite` 仍 **60**：四条用例都落在已钉住的套件里，本轮没有新套件。
+
+### 49.7 未覆盖（如实留着）
+
+1. 「重新配对」时**不会**提示「这台设备的基线被我忘过」——基线已经不在了，planRound 只是重新按首轮处理，界面没有任何标记。
+2. `applyRound` 仍未接进 `SourceSyncImportSession` 的写入口（口径同 §48.7）；被扣凭据 / 冲突 / 删除条目的逐条裁决仍没有界面出口。
+3. 基线仍未喂进 `SourceSyncPlanner`（「读基线 → 只请求变化」仍未实现）。
+4. 真实两机跑一轮「忘记后重新配对」仍 **NOT_RUN**；真机 instrumentation 仍 **DEVICE_UNVERIFIED**。
+
+### 49.8 下一步（W6-81 候选）
+
+1. 把 `SourceSyncImportSession` 的应用端口换成 `applyRound`（先给报告加身份 → serverId 映射）。
+2. 被扣凭据 / 冲突 / 删除条目的逐条裁决界面出口。
+3. 两端把对端基线喂进 `SourceSyncPlanner`。
+4. 监听卡「取消接收」的可观测性。
+5. 真 Room 级联（真实 `ServerRepository` + 真库）跑一遍删除链。
+
+## §50 W6-81：导入页的写入口换成 applyRound（逐条裁决真正生效 + 回执带身份映射）
+
+### 50.1 结论先行
+
+- 导入页此前是「预演在 `planRound`、写入在 `importEnvelope`」两条腿：`importEnvelope` 是 W6-78 之前的老入口，它自己重新合并一遍信封、不看用户在界面上点过什么，于是**逐条裁决（ALLOW / SKIP）到不了写盘那一层** —— 界面上的「跳过」只影响过滤后的信封文本，`applyRound` 里那套「闸门裁决 + 扣住凭据 + 删除分支」全都没参与。
+- 更糟的是回执形状不匹配：`importEnvelope` 返回的是 `AppliedSourceChange(serverId, candidate)`，而 `applyRound` 返回的 `SourceSyncApplyReport` 只有扁平的 `wroteServerIds`。结果页要靠「身份 → serverId」把每条来源渲染进「补录并验证」区块，扁平列表只能按顺序猜。
+- 本轮把写入口整条换成 `applyRound`：`SourceSyncApplyPort` 的签名从 `(envelopeJson)` 改成 `(envelopeJson, allowedKeys, skippedKeys)`，整份信封透传（不再剔除式过滤），两张名单就是界面上点过的裁决；`SourceSyncApplyReport` 补 `wrote: List<SourceSyncWrittenSource>` 让服务层自己记住「这个 syncSourceId 落成了哪个 serverId」。
+- 结果页同时开始显示**这一轮真实发生的事**：已写入 / 跳过 / 保留未应用（扣住 + 拒写）、永久扣住的原因码、删除了几条本地来源。这些数字以前一个都不显示，用户只能从「已导入 N」里猜。
+- `SourceSyncImportLogic.filterEnvelope` 就地退休（生产零调用），它原来承担的责任移交给了 `applyRound` 的名单参数。
+
+### 50.2 缺的是什么
+
+| 能力 | Windows（权威） | Android 本轮之前 |
+| --- | --- | --- |
+| 写入时是否看逐条裁决 | `ApplyAsync(preview, allowedIds, writer, skippedIds)`：`Decisions` 先 allow 后 skip，闸门取最后一条 | 写入口 `importEnvelope(json)` 收不到裁决；只有 `filterEnvelope` 把跳过的条目**从信封里删掉** |
+| 被扣住的条目在回执里留痕 | 回执有 `Withheld` / `NotApplied` / `BlockingReasons` | `SourceSyncImportResult` 只有 applied/requiresApproval/ignored/unsupported/failed 五个计数，且都是重新合并一遍信封算的，与「用户点了什么」无关 |
+| 身份 → serverId 配对 | App 层提供 `SourceSyncRecordWriter`，写入器自己知道落了哪一行 | 老入口靠 `AppliedSourceChange.candidate` 携带身份；`applyRound` 只有 `wroteServerIds` |
+| 删除是否计入「已写入」 | `Applied` 含删除，`TouchedRiskyChange` 另行标记 | 回执 `applied` 也含删除，但结果页把 `applied` 直接当「已写入」显示 ⇒ 删除被算成写入 |
+| 端点策略摘要 | `Preview()` 里算好 `NotImportedEndpointCount` | `applyRound` 没带 `SourceSyncEndpointSummary`，结果页的端点句永远不出现 |
+
+### 50.3 做法（六处改动）
+
+1. **服务层回执补配对**（`AndroidSourceSyncService`）：新增 `data class SourceSyncWrittenSource(syncSourceId, serverId)`，`SourceSyncApplyReport` 增 `wrote` / `endpointSummary` / `baselineRejectedCount` 三个带默认值的字段；`wroteServerIds` 从构造参数改成 `wrote.map { it.serverId }` 的派生属性（旧断言与旧调用方零改动）。写成功那一刻 `wrote.add(SourceSyncWrittenSource(item.syncSourceId.trim(), serverId))` —— 为什么不复用 `record.syncSourceId`：墓碑记录的 `record` 是 null，而写入成功只可能发生在非墓碑上，用闸门裁决里的身份才不会在「墓碑被放行」的将来分支上错位。
+2. **端口签名换成两张名单**（`SourceSyncImportSession`）：`SourceSyncApplyPort.apply(envelopeJson, allowedKeys: Set<String>, skippedKeys: Set<String>): SourceSyncApplyReport`。整份信封透传而不是过滤后的文本，理由是剔除式过滤让「被扣住的凭据」在回执里彻底消失，用户看不到「有几条没进来、为什么」。构造参数 `filterEnvelope` 删除。
+3. **摘要按「规划桶来自预览、回执桶来自回执」分工**（`summaryOf(report, preview)`）：`appliedCount = report.applied - report.removedServerIds.size`（删除不算写入）、`requiresApprovalCount/ignoredCount/unsupportedCount = preview.countIn(...)`（这三类是**规划期**的结论，回执里根本没有 ignored 桶）、`failedCount = report.refused`、`skippedCount = report.skipped`、`withheldCount = report.withheld`、`removedCount`、`blockingReasons`。KDoc 写明两者不可互推。
+4. **结果页加回执行**（`SourceSyncImportScreen` + `SourceSyncImportCopy`）：新增 `APPLY_VERDICT` / `APPLY_BLOCKING` / `APPLY_REMOVED` 三个 testTag 与三段文案 —— `applyVerdict(summary)` =「已写入 N 条 · 跳过 N 条 · 保留未应用 N 条（扣住 N · 拒写 N）」；`blockingReasons(summary)` =「永久扣住的原因：a、b。光点允许没用，需去来源页逐条处理。」；`removedLine(summary)` =「已删除 N 条本地来源（对端声明删除，凭据一并移除）。」，后两段为空时返回 null 不占行。
+5. **身份 → serverId 用在验证区块**：`writtenSourcesOf(report, preview)` 用 `normalizeKey(syncSourceId)` 去预览的条目里找候选，拿到标题与 `sourceTypeRaw`；找不到（理论上不该发生，比如对端在预演后改了信封）时标题退化成身份本身而不是丢掉这一条 —— 丢掉会让结果页少一行验证，用户以为没导入。
+6. **退休 `filterEnvelope`**：删掉 `SourceSyncImportLogic.filterEnvelope` 与它的 `SourceSyncCodec` import（生产零调用），`normalizeKey` 保留（Session 现在用它做配对）。三条 `filterEnvelope*` 单测换成三条回执行文案用例。
+
+### 50.4 用例表
+
+| 用例 | 钉住什么 | 位置 |
+| --- | --- | --- |
+| `theWholeEnvelopeTravelsWithBothDecisionLists` | 整份信封透传；allowed={sync-1}、skipped={sync-2} | SourceSyncImportSessionTest |
+| `anUndecidedAllowableEntryIsSkippedNotWritten` | 可放行但未点过的条目进 skipped，不进 allowed | 同上 |
+| `aRemovalCountsAsAppliedInTheReceiptButNotAsAWriteInTheSummary` | `applied=2` 且一条删除 ⇒ `appliedCount=1` / `removedCount=1` | 同上 |
+| `aWrittenEntryMissingFromThePreviewStillReachesTheVerificationList` | 回执里出现预览没有的身份时，标题退化成身份、`sourceTypeRaw=null`，条目仍在 | 同上 |
+| `successfulApplySummarisesEveryBucket` | 1/0/1/0/0/1 六个计数 + appliedSources 的 serverId/syncSourceId/sourceTypeRaw | 同上 |
+| `every_written_record_keeps_its_identity_beside_the_new_server_id` | 两条 record ⇒ `wrote == [sync-a→srv-1, sync-b→srv-2]`、`wroteServerIds` 同序 | SourceSyncApplyRoundTest（core/database） |
+| `theVerdictLineKeepsReceiptCountsApartFromPlanningCounts` | 回执行把 `notAppliedCount` 与规划计数分开，两段中文逐字 | SourceSyncImportLogicTest |
+| `aRemovalIsReportedSeparatelyFromAWrite` | 删除单独一行，不与写入混算 | 同上 |
+| `anEmptyReceiptAddsNoReasonLineAndNoRemovalLine` | 空回执不占行（null） | 同上 |
+
+### 50.5 三条负向对照
+
+| 编号 | 改法 | 结果 |
+| --- | --- | --- |
+| A | `Session` 里把 `preview.skippedKeys` 换成 `emptySet()` | `theWholeEnvelopeTravelsWithBothDecisionLists` + `anUndecidedAllowableEntryIsSkippedNotWritten` 双红（14 tests / 2 failed） |
+| B | `summaryOf` 的 `appliedCount` 去掉 `- report.removedServerIds.size` | `aRemovalCountsAsAppliedInTheReceiptButNotAsAWriteInTheSummary` 红（14 / 1） |
+| C | `applyRound` 的 `wrote.add(...)` 改成 `if (wrote.isEmpty()) wrote.add(...)` | core `every_written_record_keeps_its_identity_beside_the_new_server_id` 红（17 / 1） |
+
+三处均逐字节还原（`readFileSync === original` 为真），`git status` 只剩本轮真实改动。
+
+### 50.6 本机实跑
+
+| 套件 | 命令 | 结果 |
+| --- | --- | --- |
+| core/common | `:core:common:testDebugUnitTest` | 48 文件 / **660** 例 / 0 失败 / 11 跳过（与 W6-80 持平，本轮未动） |
+| core/database | `:core:database:testDebugUnitTest` | 24 文件 / **238** 例 / 0 失败 / 12 跳过（W6-80 的 237 +1） |
+| feature/settings | `:feature:settings:testDebugUnitTest` | 26 文件 / **391** 例 / 0 失败（W6-80 的 388：−3 条 `filterEnvelope*`、+3 条回执文案、+1 未决定、+1 预览里没有的身份、+1 删除计数） |
+| 三模块合计 | 一条命令 | **1289** |
+
+### 50.7 未覆盖
+
+1. 真实两机（Android ↔ Windows）跑一轮「界面上跳过两条、放行一条导入」仍 **NOT_RUN**；真机 instrumentation 仍 **DEVICE_UNVERIFIED**。
+2. 写入口换了，但「被扣住的凭据 / `same-revision-different-content` 冲突 / 删除失败」这三类条目**仍没有逐条处理的界面出口**（回执里有原因码与计数，用户能看见，但不能就地重试或改判）。
+3. 基线仍未喂进 `SourceSyncPlanner`；`applyRound` 只是「写完把本轮真的写进去的记录记进基线」，不读基线决定要不要拉。
+4. 结果页的「已导入」总数仍是 `totalCount = applied + requiresApproval + ignored + failed`（不含 unsupported），与回执行的「已写入」是两个口径 —— 前者是规划视角，后者是本轮实况，界面上分行显示，但没有合并成一句人话。
+
+### 50.8 下一步（W6-82 候选）
+
+1. 被扣凭据 / 冲突 / 删除失败条目的逐条裁决界面出口（回执已有原因码，缺的是「再试一次」「改判并覆盖」这类动作）。
+2. 两端把对端基线喂进 `SourceSyncPlanner`（「读基线 → 只请求变化」）。
+3. 监听卡「取消接收」的可观测性。
+4. 真 Room 级联（真实 `ServerRepository` + 真库）跑一遍删除链。
+5. `SourceSyncImportScreen` 结果页把「已导入」与「已写入」两个口径合成一句，避免用户对着两个数字发呆。
+
+## §51 W6-82：导入结果说人话（每条被拒都带身份、动作与原因）
+
+### 51.1 结论先行
+
+- W6-81 把写入口换成 `applyRound` 之后，结果页能显示「已写入 / 跳过 / 保留未应用（扣住 + 拒写）」四类计数了。但计数是哑的：用户看到「拒写 2」既不知道是哪两条，也不知道为什么 —— 服务层的 `writeRecord` 把**四种完全不同的处境**（类型不认识 / 没有可拨号地址 / 身份空白 / 更新时行已消失 / 存储异常）统统压成 `null`，回执里只剩一个 `refused` 数字。
+- 删除那一侧同样：`removalFailures` 早在 W6-79 就有「身份 + 稳定码」，但生产代码零消费 —— 结果页只把 `report.refused` 当「失败 N」显示，删除为什么失败一个字都没有。
+- 结果卡还留着 W6-81 的重复：第一行「已导入 N · 失败 N」与第二行「已写入 N 条 …… 拒写 N 条」讲的是同一批数字的两套口径（`applied` 还含删除，于是「已导入」把删除算成导入）。用户要在两行之间做减法才知道到底写了几条。
+- 本轮把「被拒」从计数升级成清单：`SourceSyncRefusal(syncSourceId, action, reason)` 逐条进回执，`refusalOf(...)` 按身份查；结果页把第一行换成**计划行**（本次计划：放行/需确认/忽略/暂不支持/共几条）、第二行换成**结果行**（本次结果：写入/删除/跳过/扣住/拒写），再在下方列出「未写入 N 条（逐条原因）」—— 每条一行「- 标题（身份）· 写入/删除 · 原因句」。
+- 原因码全部是稳定码（英文短横线串），文案在 UI 层映射成中文；不认识的码**原样显示**（`原因码：<code>`），不吃掉也不编造。
+- 与 Windows 的关系：`windows/src/MediaHub.Sync/SourceSyncImportRound.cs` 的回执只有计数（`Withheld` / `NotApplied` / `BlockingReasons`），逐条原因在 App 层的写入器里就被吞掉了。Android 这一层是**超集**：多出的只是「同一次判定的解释文字」，判定本身仍由同一套闸门与合并器产出，不构成两端行为分叉。
+
+### 51.2 缺的是什么
+
+| 能力 | Windows（权威） | Android 本轮之前 |
+| --- | --- | --- |
+| 写入失败的种类 | `SourceSyncRecordWriter` 由 App 层实现，拒绝只折进 `Withheld` 计数 | `writeRecord(record): String?` 五种失败压成 `null`，`applyRound` 只 `refusedIds.add(identity)` |
+| 删除失败的原因 | `RemoveRemoteSourceAsync` 的四个判据各自成码，但只出现在服务端日志 | `removalFailures` 有码却零消费（UI 只有 `failedCount = report.refused`） |
+| 「哪一条被拒」 | 无（只有计数） | 无（只有计数） |
+| 计数口径 | `Summary` =「已写入 / 跳过 / 保留未应用」三段，不重复 | 两行重复：`applied` 含删除，与「已写入」不同义却并排显示 |
+| 未知原因码 | 不适用 | 无映射层，未来新码会直接消失 |
+
+### 51.3 做法（七处改动）
+
+1. **把返回值从 `String?` 换成密封结果**（`AndroidSourceSyncService`）：新增 `private sealed interface WriteAttempt { data class Written(val serverId); data class Refused(val reason) }`，`writeRecord(record): WriteAttempt`。五个分支各自成码：`SourceSyncReasons.UNKNOWN_SOURCE_TYPE`、`SourceSyncReasons.NO_USABLE_ENDPOINT`、`SourceSyncDigestReasons.MISSING_SYNC_SOURCE_ID`、`SOURCE_VANISHED`（= `local-source-vanished`）、`WRITE_FAILED + ":" + 异常类名`。为什么不用 `Result`：调用点只有一处，密封接口能把「写成了哪一行」和「为什么没写成」放进同一个 `when`，漏分支由编译器抓。
+2. **回执补逐条拒绝清单**：新增 `data class SourceSyncRefusal(syncSourceId, action: SourceSyncAction, reason: String)`，`SourceSyncApplyReport` 增 `refusals: List<SourceSyncRefusal> = emptyList()` 与 `fun refusalOf(syncSourceId): String?`（trim + ASCII 大小写不敏感，与既有 `removalFailureOf` 并列）。保留 `action` 的理由：同一条身份在「写不下去」与「删不掉」两侧的原因语义完全不同，UI 要分得开。
+3. **删除分支的动作必须钉死**（本轮真缺陷）：第一版写的是 `action = item.action`，测试立刻红 —— `expected:<[CREATE, DELETE]> but was:<[CREATE, CREATE]>`。原因是墓碑条目（信封里只有 `deletions`、没有 `sources` 记录）经合并器给出的 `action` 是 `CREATE`，真正判据是 `record == null`（Windows 同口径，`SourceSyncImportRound.ApplyAsync` 也是按 `record is null` 判删除）。改成固定 `SourceSyncAction.DELETE` 并在注释里写明这条判据。
+4. **feature 模型补拒绝条目**（`SourceSyncImportModels`）：`enum class SourceSyncRefusedAction { WRITE, DELETE }`（不用 core 的 `SourceSyncAction`：UI 只关心「这次是写还是删」，CREATE/UPDATE 的区别对用户没有意义）、`data class SourceSyncRefusedEntry(syncSourceId, title, action, reason)`、`SourceSyncApplySummary` 增 `allowedCount` / `plannedCount` / `refusedEntries`。
+5. **两份拒绝来源合并去重**（`SourceSyncImportSession.refusedEntriesOf`）：`report.refusals` 全量映射（标题回预览里按 `normalizeKey` 查，查不到就退化成身份本身）；再把 `report.removalFailures` 里未出现过的补进来（`seen` 以「规范化身份 + 原因码」为键）。为什么两处都要读：`removalFailures` 是 W6-79 的既有契约（旧调用方还在读），`refusals` 是本轮新契约；只读一处会漏，两处都读不去重会重复。
+6. **文案分层**（`SourceSyncImportCopy`）：`planLine`（计划行，来自预览）、`resultLine`（结果行，来自回执）、`refusedHeader`（0 条时返回 null，不占版面）、`refusalLine`（`- 标题（身份）· 写入/删除 · 原因`）、`refusalReason`（稳定码 → 中文句）。`applyVerdict` 与 `removedLine` 退役（删除数已进结果行）。未知码走 `else -> "原因码：" + raw`。
+7. **结果卡重排**（`SourceSyncImportScreen`）：testTag 从 `APPLY_REMOVED` 换成 `APPLY_PLAN` / `APPLY_REFUSED`；第一行 `planLine`、第二行 `resultLine`、逐条失败清单紧随其后（错误色、`bodySmall`），再往下才是端点句、基线句与逐源验证。
+
+### 51.4 用例表（本机 9 条新增/改写）
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `a_storage_failure_is_reported_as_refused_instead_of_thrown`（core，加强） | 存储异常 ⇒ `refusals.single()` 带身份 / `CREATE` / `WRITE_FAILED:` 前缀 / `refusalOf(" SYNC-A ")` 命中（大小写与空格不敏感） |
+| `a_write_failure_and_a_refused_deletion_each_keep_their_own_code_and_action`（core，新） | 同一份信封里写失败与删失败各成一条，动作 `[CREATE, DELETE]`，码各自保留，`removalFailureOf` 同码 |
+| `everyRefusalArrivesWithItsIdentityItsActionAndItsReason`（feature，新） | 两条拒绝 ⇒ `failedCount` 2、身份顺序、标题来自预览、`[WRITE, DELETE]`、原因码原样 |
+| `aRemovalFailureWithoutARefusalStillShowsUp`（feature，新） | 只有 `removalFailures` 时也要出现在清单里（标题退化为身份） |
+| `successfulApplySummarisesEveryBucket`（feature，加强） | `allowedCount` / `plannedCount` 进摘要 |
+| `thePlanLineAndTheResultLineNeverShareACount`（feature，新） | 两行文案逐字 + `notAppliedCount` 三段合一 + 扣住原因句 |
+| `anEmptyReceiptStillSaysEveryCountAndHasNoFailureBlock`（feature，新） | 空回执仍有两行、无失败区块 |
+| `aRefusalIsNamedWithItsIdentityItsActionAndAReasonSentence`（feature，新） | `refusalLine` 逐字段（标题「客厅 Emby」/「旧 NAS」） |
+| `anUnknownReasonCodeIsShownVerbatimInsteadOfSwallowed`（feature，新） | 未知码原样、`WRITE_FAILED:IOException` ⇒「（IOException）」、裸 `WRITE_FAILED` ⇒「（未给异常类型）」 |
+
+### 51.5 负向对照（三条全红，均已逐字节还原）
+
+| 编号 | 破坏方式 | 变的测试 |
+| --- | --- | --- |
+| A | core 写分支 `Refused(attempt.reason)` → `Refused(WRITE_FAILED)`（把具体原因泛化） | `a_storage_failure_is_reported_as_refused_instead_of_thrown` + `a_write_failure_and_a_refused_deletion_each_keep_their_own_code_and_action` 双红（18 例 / 2 失败） |
+| B | feature `refusedEntriesOf` 里 `if (seen.add(key))` → `if (seen.add(key) && false)`（丢掉 `removalFailures` 补漏） | `aRemovalFailureWithoutARefusalStillShowsUp` 红（16 例 / 1 失败） |
+| C | feature `refusalReason` 的 `else -> "原因码：" + raw` → `else -> ""`（吃掉未知码） | `anUnknownReasonCodeIsShownVerbatimInsteadOfSwallowed` 红（18 例 / 1 失败） |
+
+### 51.6 本机实跑
+
+| 套件 | 计数 | 结果 |
+| --- | --- | --- |
+| `core:common` | 660（11 skipped） | 0 失败（本轮未动） |
+| `core:database` | 239（12 skipped） | 0 失败（基线 238，+1） |
+| `feature:settings` | 394 | 0 失败（基线 391；退休 3 条 `filterEnvelope` 文案用例 → 新增 4 条文案 + 2 条拒绝条目） |
+| 三模块合计 | **1293** | 0 失败 |
+| `MediaHub.Tests`（C#） | 1656 | 0 失败（本轮未动，沿用 W6-80 口径） |
+
+日志：`D:/mh-verify/w682-kotlin-run1.log`（编译错 `blockingReasons` 被误删）、`w682-kotlin-run2.log`（1 红：删除动作被写成 `CREATE`）、`w682-kotlin-run3.log`（测试侧缺 `AndroidSourceSyncService` import）、`w682-kotlin-run4.log`（绿）、`w682-kotlin-full.log`（三模块回归）、`w682-negA.log` / `w682-negB.log` / `w682-negC.log`。
+
+### 51.7 未覆盖（不声明完成）
+
+- 拒绝清单只有文本，没有「重试」按钮：写失败（`local-source-write-failed:*`）目前要用户重新走一遍配对与导入。
+- 被永久扣住（`secrets-require-approval` / `unknown-source-type` / `not-supported-on-windows`）的条目仍只能整轮重来，没有逐条处理入口。
+- 两端回执形状仍不对等：Windows 只有计数，Android 多了逐条原因。要在 Windows 侧对齐，得把 App 层写入器的失败原因回传到 `SourceSyncApplyReport`（跨层改），不在本轮范围。
+- 真机 / 双机未跑：UX 侧「拒绝清单很长时会不会把结果卡撑爆」没有实测（本机只跑单测与 Compose 预览），状态 `DEVICE_UNVERIFIED`。
+
+### 51.8 下一步（W6-83 候选）
+
+- 把「被扣住的条目」做成可逐条处理：结果页给每条 `secrets-require-approval` 一个「去来源页确认凭据」的出口，并把 `not-supported-on-windows` 的条目在 Android 侧标成「对端能力不支持」而非「需确认」。
+- 结果页把「已导入」这个历史词清干净：现在结果卡三处文案仍并存（计划行 / 结果行 / 端点句），需要一次文案收敛。
+- 两机实测：Android 发 → Windows 收 → Windows 改 → Android 拉，全链路状态词按 `EXECUTED_PASS` / `DEVICE_UNVERIFIED` 分层记账。
+- 真 Room 级联：`ServerRemoveHandler` 删除后的 playlist / 播放进度行是否随之清理，目前只在 fake 层验证。
+- 两端把「对端基线」喂进 `SourceSyncPlanner`：现在 planner 只看本机快照，不知道对端知道什么。
+
+### 51.9 CI 假红：退役文案把 androidTest 的断言钉在旧行上
+
+W6-82 的两条 Android CI（run `40615996486` @ `6dd9cff5`、run `40615999654` @ `7959465b`）都红了，唯一失败是模拟器上的 Compose 用例：
+
+```
+com.mediahub.feature.settings.sync.SourceSyncImportScreenTest > theResultCardCarriesTheDisclaimerSentence FAILED
+java.lang.AssertionError: Action performScrollTo() failed.
+Reason: Expected exactly '1' node but could not find any node that satisfies:
+  (Text + EditableText contains '已导入 1 · 需确认 1 · 已忽略 1 · 暂不支持 1 · 失败 0')
+```
+
+**根因不是「卡片变高、免责声明滚不到」。** 那句 `已导入 N · 需确认 N · …` 正是 W6-82 换掉的旧第一行——现在第一行是 `planLine`（计划），第二行是 `resultLine`（结果）。断言钉的是一句已经不存在的文案：`onNodeWithText` 找零个节点，`performScrollTo()` 就报 `Action performScrollTo() failed.`，把「文案没了」伪装成「滚不动」——这也是先怀疑布局会走偏的地方。
+
+**为什么本机没拦住。** 本机不跑模拟器（口径见 `docs/android-sync-ui.md`：androidTest 只做编译校验、执行证据由 CI 提供）。W6-82 退役 `applyVerdict` / `removedLine` 时只 grep 了 `src/main` 与 `src/test`，漏了 `src/androidTest`——那条断言就躺在那里。因此本机的 660/239/394 全绿与 Android CI 的绿不是同一件事。
+
+**修法。**
+
+- `theResultCardCarriesTheDisclaimerSentence` 重写为 `theResultCardSeparatesThePlanFromTheReceiptAndCarriesTheDisclaimer`：夹具补 `allowedCount=1` / `plannedCount=4` / `skippedCount=1` / `withheldCount=1`，断言改为按 testTag 取 `APPLY_PLAN` 与 `APPLY_VERDICT` 并逐字比对 `SourceSyncImportCopy.planLine(summary)` / `resultLine(summary)`；`- 客厅 Emby` 与 `DISCLAIMER` 仍先 `performScrollTo()`；末尾 `onNodeWithTag(APPLY_REFUSED).assertDoesNotExist()`（回执无失败条目时整块不占版面）。
+- 新增 `everyRefusedEntryIsListedWithItsIdentityActionAndReason`：两条拒绝（`sync-1` 写入 + 未知码、`sync-2` 删除 + `something-new:42`），断言 `APPLY_REFUSED` 标题「未写入 2 条（逐条原因）」并把 `refusalLine(entry)` 两条都滚到可见——这条是 W6-82 新 UI 路径在真模拟器上的唯一证据。
+- `assertDoesNotExist()` 是 `SemanticsNodeInteraction` 的成员方法，**不能 import**：写成 `import androidx.compose.ui.test.assertDoesNotExist` 会 `Unresolved reference`（第一次编译就这么失败的）。
+
+**本机编译验证**：`gradlew.bat :feature:settings:compileDebugAndroidTestKotlin --console=plain` → `BUILD SUCCESSFUL`（第二次；第一次败在多写的 import），日志 `D:/mh-verify/w682-androidtest-compile.log`。执行证据仍由 CI 提供，状态词：本机 `IMPLEMENTED_UNVERIFIED`，CI 通过后才可记 `EXECUTED_PASS(emulator)`。
+
+**可复用结论**：退役任何 `SourceSyncImportCopy` 文案 / testTag 时，`git grep` 的范围必须是全仓 `*.kt`（含 `src/androidTest`），而 `src/test` 全绿不能证明 instrumentation 侧没被钉死。
+---
+
+## §52 W6-83：被永久扣住的条目也逐条可见（身份 + 各自原因）
+
+### 52.1 结论先行
+
+- W6-82 把「被拒（写了没写成）」从计数升级成清单，但「被扣住（闸门永不许可）」只剩一个数字加一行去重码：`保留未应用 4 条（扣住 1 · 拒写 1）` + `永久扣住的原因：secrets-require-approval、not-supported-on-windows。光点允许没用……`。用户拿到的信息是「有四条、有两个原因码」，既不知道哪几条中招，也不知道**每一条**各自卡在哪一步。
+- 更要紧的是这一区本来就没有第二条路：预览页把不可允许的行标成 `!allowable` 并把「允许」按钮置灰，但那是 apply 之前；apply 之后只剩这句去重码，用户回头找不到任何入口去处理它。
+- 本轮把这四类「点多少次允许都不会过」的判定逐条抄进回执：`SourceSyncWithheldSource(syncSourceId, reason)` → `SourceSyncApplyReport.withheldEntries` → `SourceSyncApplySummary.withheldEntries`（标题回预览里查）→ 结果卡「保留未应用 N 条（扣住，点允许也不会写）」+ 每行「- 标题（身份）· 原因句」。`blockingReasons` 那条去重行与摘要字段一并退役。
+- 两个原因码有了人话：`secrets-require-approval` →「对端带了凭据，本机不收对端凭据（能力声明 canSendSecrets=false）；要用这条来源，请在来源页手动补凭据。」、`not-supported-on-windows` →「本机没有能接住这条来源的类型（原因码沿用合同里的 not-supported-on-windows），只能等版本支持。」其余（未知类型、无可用地址等）沿用 W6-82 的映射表；不认识的码仍原样显示。
+- 与 Windows 的关系：`SourceSyncImportRound.ApplyAsync` 的回执只有 `Withheld` 计数与 `BlockingReasons` 去重串（逐条信息在 App 层写入器就被折掉了）。Android 多出来的仍是**同一次判定的解释**，判定由同一套闸门产出，不是行为分叉 —— 这条口径与 §51.1 一致。
+
+### 52.2 缺的是什么
+
+| 能力 | Windows（权威） | Android 本轮之前 |
+| --- | --- | --- |
+| 扣住条目的身份 | 无（`Withheld` 只是计数） | 无（`withheld = gate.withheldCount`） |
+| 每条扣住的原因 | 只有去重串 `BlockingReasons` | 只有去重串 `blockingReasons`，且被拼成一行中文 |
+| 原因码 → 人话 | 不适用（串只在日志与回执里） | `refusalReason` 已覆盖拒绝类码，但没有 `secrets-require-approval` / `not-supported-on-windows` |
+| 结果页版面 | 不适用 | 一行去重码，0 条与 4 条看起来一样长 |
+| 计数与名单的一致性 | 不适用 | 名单为空但计数非 0 时无法分辨（那是旧路径的回执） |
+
+### 52.3 做法（六处改动）
+
+1. **回执补逐条扣住清单**（`AndroidSourceSyncService`）：新增 `data class SourceSyncWithheldSource(syncSourceId, reason)`，`SourceSyncApplyReport` 增 `withheldEntries: List<SourceSyncWithheldSource> = emptyList()` 与 `fun withheldReasonOf(syncSourceId): String?`（trim + ASCII 大小写不敏感，与 `isRefused` / `removalFailureOf` 同口径）。`withheld` 计数保留：它是闸门自己算的，逐条清单是同一批数据的展开，两者都留便于核对。
+2. **空原因不吞行**：`it.reason.trim().ifEmpty { WITHHELD_WITHOUT_REASON }`，新增常量 `WITHHELD_WITHOUT_REASON = "withheld-without-reason"`。宁可显示一个「未给原因」的稳定码，也不要让这一行带着空串进界面（W6-82 已经踩过同类：空串会让列表出现半句话）。
+3. **feature 模型补扣住条目**（`SourceSyncImportModels`）：新增 `data class SourceSyncWithheldEntry(syncSourceId, title, reason)`；`SourceSyncApplySummary` 的 `blockingReasons` **整字段退役**，原位换成 `withheldEntries`。为什么退役而不是并存：去重码与逐条清单讲的是同一件事，两处都留必然出现「码里有、列表里没有」或相反的假象。
+4. **标题回预览里查**（`SourceSyncImportSession.withheldEntriesOf`）：`byKey` 用 `SourceSyncImportLogic.normalizeKey` 建索引，查不到就退化成身份本身 —— 与 W6-82 的 `refusedEntriesOf` 完全同构，绝不丢行。
+5. **文案两个函数**（`SourceSyncImportCopy`）：`withheldHeader(summary)` 空清单返回 null（0 条不占版面），否则「保留未应用 N 条（扣住，点允许也不会写）」；`withheldLine(entry)` =「- 标题（身份）· 原因句」。`blockingReasons(summary)` 退役。`refusalReason` 新增两条分支（`SECRETS_REQUIRE_APPROVAL` / `NOT_SUPPORTED`），放在最前面 —— 这两个码是闸门层的「永不许可」，比来源类型问题更该先讲。
+6. **结果卡换区**（`SourceSyncImportScreen`）：`APPLY_BLOCKING` → `APPLY_WITHHELD`；单行去重码换成「区头 + 逐条行」，位置仍在结果行之后、已写入标题列表之前。区头由**名单**驱动而不是计数驱动：计数非 0 但名单为空（旧回执）时整块不出现，避免出现「扣住 4 条」下面一条都列不出的残局。
+
+### 52.4 用例表（本机 5 条新增/改写 + 1 条 androidTest）
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `every_withheld_source_keeps_its_identity_and_its_own_reason`（core，新） | 同一信封里凭据条目与未知类型条目各成一条：`withheld` 2、`applied` 0、身份与原因码逐条对应、`withheldReasonOf(" SYNC-SECRET ")` 命中、未知身份返回 null、`createCalls == 0`（扣住即不写） |
+| `a_record_carrying_credentials_is_withheld_even_when_it_is_allowed`（core，加强） | 允许也写不进去的条目必须带身份与 `secrets-require-approval` |
+| `an_unknown_source_type_is_withheld_even_when_it_is_allowed`（core，加强） | 未知来源类型同样带身份 |
+| `everyWithheldEntryArrivesWithItsPreviewTitleAndItsOwnReason`（feature，新） | 回执 `withheldEntries` → 摘要逐条：身份顺序、标题来自预览（「客厅 Emby」/「Quantum」）、原因码原样且各不相同（即使回执里同时给了去重串也不用它） |
+| `aWithheldEntryIsNamedWithItsIdentityAndItsOwnReason`（feature，新） | 区头与逐条行逐字（含两条新原因句式） |
+| `thePlanLineAndTheResultLineNeverShareACount` / `anEmptyReceiptStillSaysEveryCountAndHasNoFailureBlock`（feature，改写） | 扣住区头由名单驱动：有名单时给出条数，空名单时为 null |
+| `everyWithheldEntryIsListedWithItsIdentityAndItsOwnReason`（androidTest，新） | 结果卡在真模拟器上把区头与两条 `withheldLine` 都滚到可见；同一文件里给「无名单」的结果卡补 `APPLY_WITHHELD.assertDoesNotExist()` |
+
+顺序这件事值得单记：扣住条目的顺序**不是信封顺序**，而是合并器排定的身份升序（`sync-odd` 在 `sync-secret` 之前）。第一版用例按信封顺序断言，直接红在 `expected:<[sync-secret, sync-odd]> but was:<[sync-odd, sync-secret]>`。闸门本身只按传入顺序追加，稳定排序来自 `SyncRoundMerger` —— 用户看到的列表因此两轮之间一致，这比「跟信封同序」更有价值。
+
+### 52.5 负向对照（三条全红，均已逐字节还原）
+
+| 编号 | 破坏方式 | 变的测试 |
+| --- | --- | --- |
+| A | core `reason = it.reason.trim().ifEmpty { WITHHELD_WITHOUT_REASON }` → 固定 `WITHHELD_WITHOUT_REASON`（把逐条原因压成同一个） | `every_withheld_source_keeps_its_identity_and_its_own_reason` + `a_record_carrying_credentials_is_withheld_even_when_it_is_allowed` 双红（19 例 / 2 失败） |
+| B | session `reason = withheld.reason` → 常量 `secrets-require-approval`（抄错原因） | `everyWithheldEntryArrivesWithItsPreviewTitleAndItsOwnReason` 红（17 例 / 1 失败） |
+| C | `withheldHeader` 的判据 `if (summary.withheldEntries.isEmpty())` → `if (true)`（区头永不出） | `aWithheldEntryIsNamedWithItsIdentityAndItsOwnReason` + `thePlanLineAndTheResultLineNeverShareACount` 双红（19 例 / 2 失败） |
+
+日志：`D:/mh-verify/w683-negA.log`、`w683-negB.log`、`w683-negC.log`；还原后 `readFileSync` 与原文逐字节相等，`git grep` 无残留。
+
+### 52.6 本机实跑
+
+| 模块 | 本轮之前 | 本轮之后 | 结果 |
+| --- | --- | --- | --- |
+| core/common | 660 | 660 | 0 失败 / 11 跳过（未改动） |
+| core/database | 239 | **240** | 0 失败 / 12 跳过（+1：逐条扣住） |
+| feature/settings | 394 | **396** | 0 失败（+2：session 映射 1 例、文案 1 例） |
+| 三模块合计 | 1293 | **1296** | 全绿 |
+
+C# 侧未动（`MediaHub.Tests` 1656 / 全仓 1760 口径不变）。androidTest 只做编译校验：`gradlew.bat :feature:settings:compileDebugAndroidTestKotlin --console=plain` → `BUILD SUCCESSFUL`（日志 `D:/mh-verify/w683-androidtest-compile.log`），instrumentation 用例数 130 → **131**；执行证据仍由 CI 的 visual-instrumentation 作业提供，状态词：本机 `IMPLEMENTED_UNVERIFIED`，CI 通过后才记 `EXECUTED_PASS(emulator)`。
+
+### 52.7 未覆盖（不声明完成）
+
+- 逐条只有文字，没有出口按钮：`secrets-require-approval` 的条目仍要用户自己回来源页手动补凭据，`not-supported-on-windows` 的条目没有任何处理路径（只能等版本）。
+- core 回执仍保留 `blockingReasons`（去重串）与 `withheld` 计数，只是 UI 不再读它：旧调用方（`SyncCliRunner` 一侧的同名概念、以及 W6-77 起的用例）还在用，统一退役要跨端改口径，不在本轮范围。
+- 扣住清单很长时的版面没实测：本机只跑单测与 Compose 编译，结果卡会不会被撑爆属 `DEVICE_UNVERIFIED`。
+- 真机 / 双机端到端未跑：Android 发 → Windows 收 → Windows 改 → Android 拉全链路仍是 `NOT_RUN`。
+
+### 52.8 下一步（W6-84 候选）
+
+- 给扣住的条目做出口：`secrets-require-approval` 直接跳「来源页 → 该条凭据」；`not-supported-on-windows` 在 Android 侧改成「对端能力不支持」，不要把用户引到无用的重试。
+- 结果页文案继续收敛：计划行 / 结果行 / 端点句三处仍在讲同一批数字（§51.8 遗留）。
+- 两端把对端基线喂进 `SourceSyncPlanner`：planner 现在只看本机快照，不知道对端知道什么。
+- 真 Room 级联：`ServerRemoveHandler` 删除后的 playlist / 播放进度行是否随之清理，目前只在 fake 层验证。
+- `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（仅测试可达），要么改走 `applyRound`，要么删掉以防未然。
+
+## §53 W6-84：卡住的条目给了出路（下一步 + 复制身份）
+
+### 53.1 结论先行
+
+- W6-83 之后，被扣住（withheld）与没写成（refused）的条目都逐条可见了，但每条只有一句**它为什么没进来**。用户在结果页上读完，能做的动作是零：界面是纯文本，选不中、抄不走，想去对端机器上找到这条来源，只能靠肉眼从头翻。
+- 本轮补两样东西：①扣住条目按原因码给一句**下一步**（原因句说「发生了什么」，下一步说「还能做什么」；两件事分开写，缺一件都等于没给出路）；②每条卡住的行旁边一个**复制身份**按钮，载荷是 `syncSourceId` 原文（不是标题 —— 标题本机可以重名，身份才是能拿去对端检索的那把钥匙）。
+- 两个纯函数承担全部判定：`SourceSyncImportCopy.nextStepOf(entry)` 与 `SourceSyncImportCopy.copyPayloadOf(entry)`。界面只负责把它们渲染出来、把载荷交给回调，不拼字符串 —— 这样「复制了标题」「建议说错了」这类错在 JVM 单测里就红，不必等模拟器。
+- 不编建议：`withheld-without-reason` 与任何未知码的 `nextStepOf` 返回 null，那一条只显示原因句与复制按钮。空话比不说话更害人。
+
+### 53.2 缺的是什么
+
+| 位置 | 之前 | 之后 |
+| --- | --- | --- |
+| 扣住条目的文字 | - 标题（身份）· 原因句 | 同前，下面多一行「下一步：…」（该码有出路时才有） |
+| 扣住条目的动作 | 无（纯文本） | 「复制身份」按钮，载荷 = 身份原文 |
+| 拒写条目的动作 | 无（纯文本） | 「复制身份」按钮（同一条思路：先能把身份带走，再去查） |
+| testTag | 只有区块头 `sync.apply.withheld` | 每条另有 `sync.apply.copy:<身份>`，同页多条时可精确点某一条 |
+| 路由层 | 无剪贴板依赖 | `SourceSyncImportRoute` 用 LocalClipboardManager 写剪贴板；无状态页面只收回调 |
+
+### 53.3 做法
+
+1. **文案层**（`SourceSyncImportLogic.kt`）：新增 `COPY_IDENTITY = "复制身份"`、`nextStepOf(entry)`、`copyPayloadOf(entry)` 两个重载（withheld / refused）。三条已知出路的句子互不相同，逐字钉在单测里。
+2. **页面层**（`SourceSyncImportScreen.kt`）：扣住块与拒写块里每条从单个 `Text` 变成 `Column`（原因行 → 下一步行 → 复制按钮）；新增私有组件 `IdentityCopyButton(identity, tag, onCopyIdentity)`，按钮文案取 `COPY_IDENTITY`，点击直接把 identity 交给回调。
+3. **回调**：`SourceSyncImportScreen` 增加 `onCopyIdentity: (String) -> Unit = {}`（默认空实现 ⇒ 既有调用点与 UI 测试零改动）；`SourceSyncImportRoute` 注入 `clipboard.setText(AnnotatedString(identity))`。
+4. **顺序坑**：`SourceSyncImportScreenTest.render(...)` 的 `onDecide` 必须留在参数表**最后一位**，既有用例的尾随 lambda 都指向它；把 `onCopyIdentity` 插到末尾会让 8 条用例一起 `Argument type mismatch`。本轮就是这么红过一次的。
+
+### 53.4 用例
+
+| 位置 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| `SourceSyncImportLogicTest` | `everyWithheldReasonThatHasAWayOutGetsItsOwnNextStep` | 三条码三步各不相同、三句逐字相等；无原因码与未知码返回 null |
+| `SourceSyncImportLogicTest` | `copyingAStuckEntryCarriesTheIdentityNotTheTitle` | 载荷是去空白的身份原文；标题绝不进入载荷 |
+| `SourceSyncImportScreenTest`（instrumentation） | `aWithheldEntryOffersItsNextStepAndCopiesItsIdentity` | 下一步行可见；点 `sync.apply.copy:<身份>` 回调收到 `[ "sync-1" ]` |
+
+### 53.5 负向对照（三条全红，逐字节还原）
+
+| 编号 | 破坏方式 | 结果 |
+| --- | --- | --- |
+| A | `nextStepOf` 开头 `return null` | `everyWithheldReasonThatHasAWayOutGetsItsOwnNextStep` 红 |
+| B | `copyPayloadOf(withheld)` 返回 `entry.title` | `copyingAStuckEntryCarriesTheIdentityNotTheTitle` 红 |
+| C | 把 NOT_SUPPORTED 的句子替成凭据码那句（两句合一） | 「三条句子互不相同」这条断言红 |
+
+还原后 sha256 与原文一致（前缀 `d6b94a03dffd6374`），日志 `D:/mh-verify/w684-negA|negB|negC.log`。
+
+### 53.6 本机实跑
+
+| 模块 | 之前 | 之后 |
+| --- | --- | --- |
+| `core/common` | 660 | 660 |
+| `core/database` | 240 | 240 |
+| `feature/settings` | 396 | **398** |
+| 三模块合计 | 1296 | **1298** |
+| `feature/settings` androidTest | 131 例（只编译，不本机跑） | **132 例** |
+
+C# 未动（`MediaHub.Tests` 1656 / 全仓 1760 口径）。instrumentation 的执行证据只能由 CI 的 visual-instrumentation 提供，本机 `compileDebugAndroidTestKotlin` 只证明能编译。
+
+### 53.7 未覆盖
+
+- 预览页的 `EntryCard` 还没有「复制身份」：那里身份同样可抄（`entry.key`），但本轮只做了结果页；两处若都做，也得共用 `IdentityCopyButton` 与同一套 tag 规则。
+- 剪贴板写入本身没有自动化证据（无状态页面只到回调那一层）；route 的剪贴板接线属 GUI_UNVERIFIED，要真机点一次才算过。
+- `nextStepOf` 只覆盖三条已知码；`local-*` 那些拒写原因没有下一步文案（它们的下一步是「重现并看日志」，目前没有可指的位置）。
+- 复制出去的身份在对端机器上怎么用，本机没有任何引导（没有「去对端找这条来源」的文案闭环）。
+
+### 53.8 下一步（W6-85 候选）
+
+1. 预览页 `EntryCard` 补同一个「复制身份」，与结果页共用组件与 tag 规则。
+2. 结果页「已导入」历史词收敛：计划行 / 结果行 / 端点句三处口径统一。
+3. 两端把对端基线喂进 `SourceSyncPlanner`（改签名要两端一起动）。
+4. 监听卡「取消接收」可观测（现在只有状态行）。
+5. 真 Room 级联：`ServerRemoveHandler` 删除后 playlist / 播放进度行是否随之清理，用真库跑一例。
+## §54 W6-85：预览页里「永远不允许」的条目也给出路（下一步 + 复制身份）
+
+### 54.1 结论先行
+
+- W6-84 只修了**结果页**：写失败（refused）与永久扣住（withheld）的条目各自多了「下一步」与「复制身份」。可**预览页**才是用户真正做决定的地方——那里 `allowable = false` 的条目（凭据、未知类型、内容冲突、历史身份歧义）同样是死路：按钮置灰、只有一句中文说明，既没说清「点多少次允许都没用」，也没法把身份抄出来去对端处理。
+- 预览页的判断依据是 `SourceSyncEntry.candidate.reason`（原因**码**），不是 `blockReason`（那是一句中文说明，`SourceSyncImportLogic.blockReason` 生成，仅供展示）。W6-84 的 `nextStepOf(withheld: SourceSyncWithheldEntry)` 吃的是结果页的 `reason` 字段，两者语义相同、来源不同。
+- 本轮把它拆出唯一出口 `nextStepOfCode(code: String): String?`：结果页、预览页都走同一张表，同一个码在两边**必然**同一句话。表里新增两条码：`same-revision-different-content`（内容冲突）与 `ambiguous-legacy-identity`（历史身份歧义）——它们在预览页最常出现，且都属于「本页一律不放行」。
+- 「复制身份」在预览页只复制 `candidate.syncSourceId`；身份缺失时键会退化成位置键（`entry-0`、`entry-3`），那种键抄出去对端无从对照 ⇒ 干脆不给按钮。
+- 与 Windows 的关系：`SourceSyncImportRound.Preview` 只在信封里找不到记录/带凭据时改 `RequiresApproval` 与原因码，从不提供「下一步」文案或复制动作。Android 这里仍是**超集**，不构成判定分叉——两边对「能不能写」的判断完全一致，多的只是说明与抄写。
+
+### 54.2 缺的是什么
+
+| 现象 | 代码位置 | 后果 |
+| --- | --- | --- |
+| 预览页不可允许条目只有一行 `stateText` | `EntryCard` 的 `if (!entry.allowable)` 块 | 用户不知道下一步该做什么，只能猜 |
+| 身份在预览卡片上只是个显示文本 | `entry.key` / `candidate.syncSourceId` | 想拿去对端对照，只能手抄一长串 id |
+| 下一步文案只对结果页的 withheld 开放 | `nextStepOf(entry: SourceSyncWithheldEntry)` | 预览页即便想复用也拿不到（类型不同） |
+| 冲突/歧义两类码没有任何文案 | `nextStepOfCode` 的 when 表 | 最常见、最需要解释的两类反而静默 |
+
+### 54.3 做法
+
+1. **唯一出口**：`fun nextStepOfCode(code: String): String?` 承接全部判定，`nextStepOf(withheld)` 与新增的 `nextStepOf(entry: SourceSyncEntry)` 都退化成一行委托（`nextStepOfCode(entry.reason)` / `nextStepOfCode(entry.candidate.reason)`）。表内五条已知码，其余（含 `WITHHELD_WITHOUT_REASON`、未知码、空串）返回 null —— 不编建议。
+2. **两条新文案**：`SAME_REVISION_DIFFERENT_CONTENT` →「下一步：这条两端内容不一致（版本号相同），本页一律不放行；请在来源页手工对齐后再导出。」；`AMBIGUOUS_LEGACY_IDENTITY` →「下一步：本机有多条来源指向同一身份，先在来源页删掉多余的再重新导出。」
+3. **载荷函数**：`fun copyPayloadOf(entry: SourceSyncEntry): String?` 返回 `entry.candidate.syncSourceId?.trim()?.takeIf { it.isNotEmpty() }`。返回 null 就不渲染按钮，页面无需自己判空。
+4. **组件复用**：`IdentityCopyButton(identity, tag, onCopyIdentity)`（W6-84 已存在）直接用在 `EntryCard` 里，tag 规则 `SourceSyncImportTags.entryCopy(key)` = `sync.entry.copy:<键>`。下一步文本的 tag 是 `ENTRY_NEXT_STEP` = `sync.entry.nextStep`。
+5. **回调链**：`SourceSyncImportScreen` 的 `onCopyIdentity` 参数（W6-84 加的，默认空实现）透传给 `BucketSection` 再透传给 `EntryCard`；route 层的剪贴板注入无需再改。
+
+### 54.4 用例
+
+| 位置 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| `SourceSyncImportLogicTest` | `aPreviewEntryBorrowsTheSameNextStepTableAsTheResultPage` | 同码两句逐字相等；conflict / ambiguous / unknown 三句各不相同；未知码与空码返回 null |
+| `SourceSyncImportLogicTest` | `copyingAPreviewEntryCarriesTheRemoteIdentityAndNeverAPositionalKey` | 去空白后取身份；只有位置键时返回 null |
+| `SourceSyncImportScreenTest`（instrumentation） | `aPreviewEntryThatCanNeverBeAllowedCarriesItsNextStepAndItsIdentity` | 下一步行可见；点 `sync.entry.copy:sync-conflict` 回调收到身份；可允许条目**没有**复制按钮 |
+
+### 54.5 负向对照（三条全红，逐字节还原）
+
+| 编号 | 破坏方式 | 结果 |
+| --- | --- | --- |
+| A | `nextStepOfCode` 的 `when (code.trim())` → `when (code.trim() + "-broken")`（所有码都落进 else） | `aPreviewEntryBorrowsTheSameNextStepTableAsTheResultPage` + `everyWithheldReasonThatHasAWayOutGetsItsOwnNextStep` 双红（23 tests / 2 failed） |
+| B | `copyPayloadOf(entry: SourceSyncEntry)` 返回 `entry.key` | `copyingAPreviewEntryCarriesTheRemoteIdentityAndNeverAPositionalKey` 红（23 / 1） |
+| C | `nextStepOf(entry: SourceSyncEntry)` 改用 `entry.blockReason.orEmpty()`（拿中文说明当码查表） | 同一预览用例红（23 / 1） |
+
+第一次写 A 时用的是 `when { true -> null`：when 失去 subject 后剩余分支语法非法 ⇒ **编译失败**。`status 1` 但没有 `N tests completed` 行、也没有 FAILED 用例名。判负向对照不能只看退出码：日志里必须出现真实用例名，否则「红」可能只是没编译。
+
+日志 `D:/mh-verify/w685-negA.log`、`w685-negB.log`、`w685-negC.log`。
+
+### 54.6 本机实跑
+
+| 模块 | 之前 | 之后 |
+| --- | --- | --- |
+| `core/common` | 660 | 660 |
+| `core/database` | 240 | 240 |
+| `feature/settings` | 398 | **400** |
+| 三模块合计 | 1298 | **1300** |
+| `feature/settings` androidTest | 132 例（只编译，不本机跑） | **133 例** |
+
+C# 未动（`MediaHub.Tests` 1656 / 全仓 1760 口径）。instrumentation 的执行证据只能由 CI 的 visual-instrumentation 提供；本机 `compileDebugAndroidTestKotlin` 只证明能编译。
+
+### 54.7 未覆盖
+
+- 「复制身份」只覆盖了身份；带凭据的条目最需要的其实是「把这条来源的凭据清空后重新导出」，本轮只给了文字，没有一次点击就能跳到来源页的动作。
+- 剪贴板写入本身仍无自动化证据（无状态页面只到回调那一层），route 的剪贴板接线属 GUI_UNVERIFIED。
+- 位置键条目（身份缺失）干脆不给按钮，但也没有任何提示说明「为什么没有按钮」；用户看到的只是条目少了一个按钮。
+- 预览页的下一步文案是静态的：它不知道对端此刻是否在线、也不知道本机版本能不能升级，所以 NOT_SUPPORTED 那句只能写「等本机版本支持」。
+- 结果页与预览页的「下一步」都只有一层纯文本，没有可点跳转（来源页 / 对端说明）——两处都还缺一个导航出口。
+
+### 54.8 下一步（W6-86 候选）
+
+1. 结果页「已导入」历史词收敛：计划行 / 结果行 / 端点句三处口径统一（现在第一行说计划、第二行说结果，历史词仍散落在验证区块）。
+2. 两端把对端基线喂进 `SourceSyncPlanner`（改签名要两端一起动，Android 的 planner 目前完全不知道自己有没有对端基线）。
+3. 监听卡「取消接收」可观测（现在只有一行状态，取消之后没有回执也没有账）。
+4. 真 Room 级联：用真库跑一例 `ServerRemoveHandler` 删除后 playlist / 播放进度行是否随之清理。
+5. `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（生产不可达，但读者会误以为那是第二条写入口）。
+
+## §55 W6-86：监听卡里「取消这一次接收」也要有账（取消过几次 + 最近一次原因）
+
+### 55.1 结论先行
+
+- 改前点「取消这一次接收」，界面上唯一的变化是状态跳回「正在监听」。而「正在监听」既是点击前的状态、也是取消后的状态 ⇒ 用户无法区分「我取消了」与「点了没反应」。
+- 更糟的是控制器连对端给的原因码都没读：`awaitOnce(cancel)` 的取消分支只做 `_state.value = listeningStateOf(active); return true`，注释写着「本地取消不是失败：不留码」，于是 `SourceSyncTransferImportOutcome.TransferFailed.reason` 被丢掉，连 `transfer-cancelled` 这个稳定码都留不下。
+- 本轮的分工是：**失败码口径不动，另立一本账**。取消仍然不进 `Failed`、仍然没有稳定失败码（`SourceSyncListenCopy.codeOf(Listening)` 依旧恒 `null`），但 `Listening` 多两个字段：`cancelledReceives: Int` 与 `lastCancelledReason: String?`。
+- 链路是 `awaitOnce` 取消分支记账 → `listeningStateOf` 带进状态 → `SourceSyncListenCopy.cancelledLineOf(state)` 生成一句人话 → 监听卡在端口行下面渲染一行（tag `sync.listen.cancelled`）。
+- 与 Windows 的关系：Windows 侧取消走 `SourceSyncPeerRound` / `SourceSyncInbox` 的 `CancellationToken`，界面上同样只有一次状态回退，没有取消计数。Android 这一行是超集，不改任何协议与判定。
+
+### 55.2 缺的是什么
+
+| 缺口 | 改前的样子 | 后果 |
+| --- | --- | --- |
+| 状态无处承接取消 | 六个状态 Idle/Listening/Receiving/Received/Rejected/Failed 里没有「取消过」的空位 | 取消与「什么都没发生」在数据层完全同形 |
+| 原因码被丢掉 | 取消分支不读 `TransferFailed.reason` | 对端因超时/IO 失败先收手还是用户自己点的，事后无从分辨 |
+| 次数不可观测 | 没有计数器 | 反复点取消与点一次取消长得一样，排查「点了没反应」时没有证据 |
+| 账会跨场残留（潜在） | 若把计数挂在控制器上不清零 | 关掉监听再开一场，旧账会挂到新端口上，第二次看到「已取消 3 次」而这一场一次都没取消 |
+
+### 55.3 做法（四处）
+
+1. **状态承接**：`Listening` 末尾加 `cancelledReceives: Int = 0` 与 `lastCancelledReason: String? = null`（都有默认值 ⇒ 既有构造点零改动）。KDoc 写明为什么取消不另立状态：它没有稳定失败码、也不该让监听停下。
+2. **记账与取值优先级**：取消分支 `cancelledReceives++`，然后 `val reason = (outcome as? SourceSyncTransferImportOutcome.TransferFailed)?.reason?.trim()?.takeIf { it.isNotEmpty() }`，`lastCancelledReason = reason ?: SourceSyncLocalReasons.CANCELLED`。顺序是「对端先说话」：对端给了码就记对端的码，没给才落到本地 `transfer-cancelled`（常量在 `core/common/.../SourceSyncCancellation.kt`）。
+3. **一场一账**：`stop()` 在把 `session` 置空后把两个字段一起清零。理由是端口变了、对端也变了，旧账挂新端口比没账更误导。
+4. **文案与渲染**：`SourceSyncListenCopy.cancelledLineOf(state)` 非 `Listening` 或计数 ≤ 0 返回 `null`，否则「已取消 N 次等待（最近一次原因：<码>）；取消不是失败，监听仍然开着，可以接着等一次发送。」（码为空时括号段整段省略）。监听卡在端口行之后插一行 `Text(... testTag = LISTEN_CANCELLED)`，没有账时这行根本不存在。
+
+### 55.4 用例
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `aCancelledWaitLeavesAnAccountInsteadOfSilentlyResetting` | 取消后计数 1、码 `transfer-cancelled`、`codeOf` 仍 `null`、`cancelledLineOf` 整句逐字 |
+| `twoCancelledWaitsAddUpAndTheLastReasonWins` | 第二次取消时对端给 `IO_FAILED` ⇒ 计数 2、最近原因取对端的码（不是一律写本地码） |
+| `aCancelledWaitThatNeverProducedAFailureFallsBackToTheLocalCode` | 会话返回 `Imported` 但把手已置位（取消在完成之后到达）⇒ 仍算取消，码退回 `transfer-cancelled` |
+| `stoppingTheListenerClearsTheCancelAccount` | 取消 → `stop()` → 开新一场 ⇒ 新状态计数 0、原因 `null`、行消失 |
+| `aCancelledWaitGoesBackToListeningWithoutAnyCode`（改写） | 原有约束不变：取消仍回 `Listening`、仍无失败码，只是多了账 |
+| `aCancelledWaitCanBeFollowedByAnotherOneThatSucceeds`（改写） | 取消之后还能再等一次并成功；账不影响后续接收 |
+| `aCancelledWaitLeavesAVisibleAccountInTheListenCard`（instrumentation） | 计数 2 的状态在卡上渲染出那一行，文本等于 `cancelledLineOf` |
+| `withoutAnyCancelTheListenCardSaysNothingAboutCancelling`（instrumentation） | 没有账时 `LISTEN_CANCELLED` 节点不存在（行由计数驱动，不是永远挂着的空行） |
+
+### 55.5 负向对照
+
+| 编号 | 破坏方式 | 结果 |
+| --- | --- | --- |
+| A | 删掉取消分支里的 `cancelledReceives++` | 6 红：两条累计用例、两条既有取消用例、清零用例、回退码用例 |
+| B | `lastCancelledReason = reason ?: SourceSyncLocalReasons.CANCELLED` 改成恒定本地码 | `twoCancelledWaitsAddUpAndTheLastReasonWins` 红 |
+| C | `cancelledLineOf` 的 `if (state.cancelledReceives <= 0) return null` 改成恒不返回 | 2 红：累计用例 + 首次用例 |
+
+三条均逐字节还原。两个坑值得记：
+
+- 取消判据那行 `if (state !is SourceSyncListenState.Listening) return null` 在 `portLineOf` 与 `cancelledLineOf` 各有一份 ⇒ 单独拿它当锚点会命中两处，必须把紧随的 `if (state.cancelledReceives <= 0) return null` 一起写进锚点。
+- 破坏写法若破坏智能转换（写成 `if (state is Listening) return null` 之后还读 `state.cancelledReceives`），结果是**编译失败**：退出码 1、日志里只有 `compileDebugKotlin FAILED`、没有一条 FAILED 用例名。判负向对照不能只看退出码。
+
+### 55.6 本机实跑
+
+| 模块 | 之前 | 之后 |
+| --- | --- | --- |
+| `core/common` | 660 | 660 |
+| `core/database` | 240 | 240 |
+| `feature/settings` | 400 | **404** |
+| 三模块合计 | 1300 | **1304** |
+| `feature/settings` androidTest | 133 例（只编译，不本机跑） | **135 例** |
+
+C# 未动（`MediaHub.Tests` 1656 / 全仓 1760 口径）。`SourceSyncListenerControllerTest` 46 → 50 例。
+
+### 55.7 未覆盖
+
+- 这本账只活在内存里：不进导出、不进日志、也不写进任何收据，进程重启就没了。
+- 取消过的等待不影响导入页：结果页仍只讲「这一轮信封写了什么」，两边没有交叉引用。
+- 取消期间对端是否已经写完自己的回执，本机无从判断；`transfer-cancelled` 只说「本机不等了」。
+- 计数没有上限也没有历史（只留最近一次的码），反复取消与偶发取消在报表上同形。
+- 真实两机与真机 instrumentation 仍 NOT_RUN / DEVICE_UNVERIFIED。
+
+### 55.8 下一步（W6-87 候选）
+
+**先说一条作废**：§54.8 第 2 条「两端把对端基线喂进 `SourceSyncPlanner`」不再是候选 —— `AndroidSourceSyncService` 的注释与 Windows `SourceSyncPlanner.Plan` 的签名都表明「基线只用于汇报、不参与规划」是既定设计（免得出现「基线坏了就换一种合并结果」的隐式分支）。任何把基线塞进 planner 的改动都是推翻决策，不是补缺口。
+
+1. 结果页「已导入」历史词收敛：计划行 / 结果行 / 端点句三处口径统一。
+2. 预览页与结果页的「下一步」加导航出口（跳到来源页、或跳到对端说明）。
+3. 真 Room 级联：用真库跑一例 `ServerRemoveHandler` 删除后 playlist / 播放进度行是否随之清理。
+4. `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（生产不可达，但读者会误以为那是第二条写入口）。
+
+## §56 W6-87：对端声明删除时真的级联清理（真 Room 内存库 + 真 `RemoveServerUseCase`）
+
+### 56.1 结论先行
+
+- W6-79 把「对端声明删除」接进了写入口，但那条链**只在 fake 层被证明过**：`ServerSourceSyncRemoverTest` 用 fake handler 只验「调没调删除链」，`RemoveServerUseCase` 从引入起没有一个测试文件，`AndroidSourceSyncServiceRoomTest`（真 Room）只跑导入/幂等/导出、从没跑过删除。三处都不拦「删除链被换成只删 servers 一行」这种回归。
+- 本轮补的是**真库 + 真用例**这一段：Robolectric + `Room.inMemoryDatabaseBuilder` + 真 `RemoveServerUseCase`，一次删掉一台来源，然后按表逐处验收 servers / server_endpoints / accounts / playback_progress / subtitle_memory / 图标文件 / token / 凭据 / provider 会话。
+- 判据分层（写断言时最容易弄反的一点）：`accounts` 带 `ForeignKey(onDelete = CASCADE)` 指向 servers，删 servers 行就会跟着没 ⇒ 这条断言**没有鉴别力**，它只代表用户看得见的那一面。真正能被「只删一行」漏掉的是 playback_progress / subtitle_memory / 图标文件 / token / 凭据 / provider 会话六处，负向对照也正打这里。
+- 同步层同样要在真库上验一次：`AndroidSourceSyncService.applyRound` 拿到只有 `deletions` 的信封、`sourceRemover` 是真 remover 时，回执 `removedServerIds` 命中且库里那行真的没了 —— fake store 里「调了 remover」不足以证明「落库层真的删了」。
+- 本机记账：`feature/server` **34 → 36 例**（+2），全绿；Windows 侧本轮无变更（`MediaHub.Tests` 1656 / 全仓 1760 口径不变）。
+
+### 56.2 缺的是什么
+
+| 缺口 | 后果 |
+| --- | --- |
+| `RemoveServerUseCase` 零测试文件 | 八步清理链里任何一步被删/被调换都无人拦（`git grep -l RemoveServerUseCase -- */src/test/**` 只命中 `ServerSourceSyncRemoverTest`） |
+| `ServerSourceSyncRemoverTest` 用 fake `ServerRemoveHandler` | 只证明「remover 会调 handler」，handler 内部到底清了什么完全没验 |
+| 真 Room 测试没有删除用例 | 「墓碑 → 删来源」在真库上的表现（含端点行、默认重选）从未被观察过 |
+| 默认媒体源被删后的重选未验 | `deleteServer` 里 `wasDefault` 分支一旦写错，界面上会出现「零个默认」或「两个默认」 |
+
+### 56.3 做法
+
+1. 新增 `feature/server/src/test/kotlin/com/mediahub/feature/server/SourceSyncRemovalCascadeRoomTest.kt`（262 行 / 11621 B），仿 `AndroidSourceSyncServiceRoomTest` 的范式：`@RunWith(RobolectricTestRunner::class)` + `@Config(sdk = [34])` + 内存库 `allowMainThreadQueries()`。
+2. `seedSource(name, syncSourceId, revision)` 走真 `ServerRepository.addServer` + `bindSyncSourceId`（同步身份三列是后续断言「另一台没被动」的关键）；`seedLocalState(server)` 给一台来源铺满六处可漏状态：账号行、播放进度行、字幕记忆行、`icons.iconFile(id)` 真写一个文件、`TokenStore.saveTokens`、`CredentialVault.save(PASSWORD)`。两个测试替身：`MapSecretStorage`（Keystore 在 Robolectric 下不可用，`SecretStorage` 四个 suspend 方法用 `LinkedHashMap` 实现）与 `RecordingSessionCleaner`（`SessionStoreCleaner` 是 `fun interface`，记录被清的 serverId）。
+3. 用例一「删默认源，全链清、默认重选、另一台零改动」：注意 `addServer` 会让**第一台**自动成为默认，所以必须显式 `repository.setDefault(doomed.id)` 才验得到重选分支；删完断言 `serverDao.getById == null`、`count == 1`、端点行空且 `serverEndpointDao.getAll()` 只剩另一台、账号行 null、六处全清、`sessions.cleared == [doomed.id]`，然后反向断言另一台的 `syncSourceId` / `syncRecordRevision`（7L）/ `isDefault` / 端点 / 账号 / 进度 / 字幕 / 图标 / token / 凭据一个都没动，且全库 `isDefault` 恰好一条。
+4. 用例二「墓碑经同步层真的落库删除」：`AndroidSourceSyncService(store = repository, deviceId = "device-android", snapshotIdFactory = { "snap-del" }, clock = { 1_700_000_000_000L }, sourceRemover = remover)`（`sourceRemover` 是第 6 个构造参数）拿信封 `{"sources":[],"deletions":[{"syncSourceId":"local-aaa","deletedAtEpochMs":...,"recordRevision":4}]}`（本地绑定 revision 3，墓碑 4 才会判删除）跑 `applyRound(allowedSyncSourceIds = listOf("local-aaa"))`，断言 `applied == 1`、`refused == 0`、`removalFailures` 与 `refusals` 都空、`removedServerIds == [doomed.id]`、`removedSyncSourceIds == ["local-aaa"]`、`wrote` 空（删除不算写），再断言真库里七处都没了。
+
+### 56.4 用例表
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `removing_a_default_source_clears_every_piece_of_its_state_and_reselects_the_default` | 八步清理链每一步都真的发生 + 默认重选到剩下那台 + 另一台零改动（含同步身份三列） |
+| `a_peer_declared_deletion_runs_the_real_cascade_through_the_sync_layer` | 墓碑 → 闸门 → `removeLocalSource` → 真 remover → 真 Room；回执字段与库状态一致 |
+
+### 56.5 负向对照（两条全红，均逐字节还原 `readFileSync === original` 为 true）
+
+| 编号 | 破坏方式 | 结果 |
+| --- | --- | --- |
+| A | 把 `remover` 的 handler 换成只 `repository.deleteServer(server.id)` 的浅实现 | 两例全红（进度/字幕/图标/token/凭据/会话六处首先炸） |
+| B | 构造 `AndroidSourceSyncService` 时去掉 `sourceRemover = remover` | 只有第二例红，且失败在 `assertEquals(1, report.applied)` 实得 `0`（没有 remover ⇒ 删除被拒）⇒ 证明第二例钉的确实是**接线**而不是 Room 层 |
+
+日志：`D:/mh-verify/w687-negA.log` / `w687-negB.log`；还原后 `D:/mh-verify/w687-run1.log`（绿）与 `w687-kotlin-full.log`（四模块回归）。
+
+### 56.6 本机实跑
+
+| 模块 | 结果 |
+| --- | --- |
+| `core/common` | 48 文件 / **660** 例 / 0 失败 / 11 跳过（本轮未动） |
+| `core/database` | 24 文件 / **240** 例 / 0 失败 / 12 跳过（本轮未动） |
+| `feature/settings` | 26 文件 / **404** 例 / 0 失败（本轮未动） |
+| `feature/server` | 7 文件 / **34 → 36** 例 / 0 失败 |
+| 四模块合计 | **1340** 例（W6-86 时点 1338） |
+
+C# 未动（`MediaHub.Tests` 1656 / 全仓 1760 口径）。这两个用例跑在 JVM + Robolectric 上，不进 Android CI 的 visual-instrumentation；CI 能提供的证据是 `uniqueTests` 2434 → 2436 与 `feature/server` 模块用例数。
+
+### 56.7 未覆盖
+
+- Robolectric 的是**内存库**，不是设备上迁移后的库：schema v5 的真实迁移路径、`PRAGMA foreign_keys` 在真机上的行为都没被这套用例覆盖（`accounts` 的 CASCADE 断言在两种环境下都可能为真，这也是它没有鉴别力的原因之一）。
+- 本轮只动 Android 侧：Windows `RemoveRemoteSourceAsync` 那一侧沿用既有 C# 用例，未加真机/真库证据。
+- 库里只有五张表（servers / server_endpoints / accounts / playback_progress / subtitle_memory），**没有 playlist 表** —— §55.8 候选里那句「playlist 是否随之清理」无从验证，播放列表当前不在这个库里（该候选措辞就此更正）。
+- 图标只清 `server_icons/{serverId}.webp` 这一种后缀（`ServerIconStore.iconFile` 的定义），目录里若存在同 id 的其它后缀文件不会被清。
+- 真实两机与真机 instrumentation 仍 NOT_RUN / DEVICE_UNVERIFIED。
+
+### 56.8 下一步（W6-88 候选）
+
+1. 结果页「已导入」历史词收敛：计划行 / 结果行 / 端点句三处口径统一。
+2. `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（生产不可达，但读者会误以为那是第二条写入口）。
+3. 预览页与结果页的「下一步」加导航出口（跳到来源页、或跳到对端说明）。
+4. 设备解绑后的界面出口：`forget` 已同时清基线（W6-80），但界面上仍只有一句文案，没有「这台设备再也不会同步」的确认态。
+5. `ServerSourceSyncRemover` 的失败原因目前只有 `local-source-remove-failed` 一个码：删除链八步里哪一步失败，回执里看不出来。
+
+## §57 W6-88：删到一半失败要说出卡在哪一步（删除链八步步骤码）
+
+### 57.1 结论先行
+
+- 改前 `SourceSyncSourceRemover.removeSource` 返回 **Boolean**。`ServerSourceSyncRemover` 把删除链上任何异常都折成 `false`，`AndroidSourceSyncService.removeLocalSource` 于是只能写一句 `local-source-remove-failed`。回执里「被拒的删除」这一条只有一个码：用户既不知道该重试、还是该去来源页手动删一次，也不知道凭据到底清没清。
+- Boolean 把三种处境压成同一个 `false`：①**本机根本没有这条来源**（规划之后被别处删了）；②链路**中途**失败；③失败在**第八步**。①不是故障，不该报警；②③必须说清失败在哪一步。这就是本轮把它换成 `sealed interface SourceSyncRemoveOutcome { Removed / Missing / Failed(reason) }` 的全部理由。
+- 八步各包一层 `runStep`，失败时抛 `RemoveServerFailedException(step, cause)`；remover 把 `step` 翻成 `local-source-remove-failed:<step>`；结果页再翻成中文步骤名（「清播放会话」这类）。三处各做一件事：**抛步骤** / **打卡码** / **说人话**。
+- 码表放在 core:database 的 `SourceSyncRemovalStep` / `SourceSyncRemovalCodes`：写码方（feature:server 的删除链）与翻译码方（feature:settings 的结果页）是两个 Gradle 模块，各存一份码表早晚会漂。`AndroidSourceSyncService` 里四个既有常量名（`REMOVE_FAILED` / `REMOVE_MISSING` / `REMOVE_LOCAL_MEDIA` / `DELETE_NOT_SUPPORTED`）改成引用这张表，名字不动、既有测试零改动。
+- 与 Windows 的关系：Windows 的写入器与删除链都在 App 层自己 catch，`SourceSyncApplyReport` 只有 `Withheld` 计数与去重后的 `Warnings`，**没有任何步骤粒度**。Android 这里再往下一步（超集），不改变任何判定结果，也不构成两端分叉；本轮不动任何 C# 文件。
+
+### 57.2 缺的是什么
+
+| 改动前的形状 | 后果 |
+| --- | --- |
+| `removeSource(serverId): Boolean` | 「本机没有」「链中途失败」「失败在第八步」三种处境是同一个 `false` |
+| `ServerSourceSyncRemover` 的 `catch (Exception) { false }` | 异常类型与失败位置全被吞掉，日志里连栈都没有 |
+| 回执只有 `local-source-remove-failed` | 用户拿不到下一步：重试？去来源页手动删？清凭据？ |
+| `RemoveServerUseCase` 八步各调各的，没有测试文件 | 失败停在第几步、前几步做没做，全凭读代码猜（W6-87 的 §56.7 已把这条记为未覆盖） |
+
+### 57.3 做法（五处）
+
+1. **新文件** core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncRemovalCodes.kt：`enum class SourceSyncRemovalStep(val code: String)` 八项 —— `servers-row` / `accounts` / `tokens` / `credentials` / `progress` / `subtitle-memory` / `icon` / `session-store`；`object SourceSyncRemovalCodes` 提供 `FAILED` / `MISSING` / `LOCAL_MEDIA` / `NOT_SUPPORTED` 四个既有码、`STEP_SEPARATOR = ':'`、`failedAt(step)`、`failedAtStep(code)`、`stepCodeOf(reason)`。`stepCodeOf` 只在 `local-source-remove-failed:` 前缀命中且尾部非空时返回值。
+2. **接口改造** core/database/.../SourceSyncSourceRemover.kt：方法改为返回 `SourceSyncRemoveOutcome`，同文件定义这个 sealed interface。KDoc 写明「Boolean 把三种处境压成同一个 false，回执就只能说『失败』」。
+3. **服务接线** `AndroidSourceSyncService.removeLocalSource`：`when (outcome)` 三分支 —— `Removed -> snapshot.serverId`；`Missing -> failures.add(REMOVE_MISSING)`（**不算故障**，只是本机确实没有）；`is Failed -> failures.add(outcome.reason.trim().ifEmpty { REMOVE_FAILED })`（空码兜底）。回执里逐条 `refusal` 仍从 `removalFailures` 取，所以两处码同源。
+4. **真使用例** `RemoveServerUseCase` 整体重写：八步各 `runStep(step) { … }`，`runStep` 只放行 `kotlin.coroutines.cancellation.CancellationException`，其余一律包成 `RemoveServerFailedException(step, failure)`。已做完的步骤不回滚（回滚一半比停住更难解释）。
+5. **结果页** `SourceSyncImportLogic.refusalReason(code)` 新增一条分支：`stepCodeOf(raw) != null -> "删除本地来源时卡在「<步骤中文名>」这一步，凭据可能还在；到来源页手动删一次即可。"`；`removalStepLabel(code)` 用 `REMOVAL_STEP_LABELS` 八项映射，认不出的码原样返回（与 `refusalReason` 的既有口径一致：宁可显示 `servers-row-2`，也不吞成半句话）。
+
+### 57.4 用例表
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `RemoveServerUseCaseStepsTest.a_broken_session_store_names_the_last_step_and_lets_the_first_seven_finish` | 第八步抛 `IOException` ⇒ 异常带 `SESSION_STORE`、message `remove-server-failed:session-store`；前七步的库行 / 账号 / token / 凭据 / 进度 / 字幕 / 图标**真的都没了**；会话清理只调了一次 |
+| `RemoveServerUseCaseStepsTest.a_credential_failure_stops_the_chain_at_the_fourth_step_and_leaves_the_rest_alone` | 凭据柜删除抛错 ⇒ `CREDENTIALS`；前三步已清、**后四步一个没动**（进度 / 字幕 / 图标还在，会话清理没被调用） |
+| `ServerSourceSyncRemoverTest`（7 例） | Removed / trim 后 Removed / 未知 ⇒ Missing / 空白 ⇒ Missing / 普通异常 ⇒ `Failed(FAILED)` / 带步骤的异常 ⇒ `Failed(local-source-remove-failed:session-store)` 且 `stepCodeOf` 回 `session-store` / 两个不同步骤码不共享 |
+| `SourceSyncApplyRoundTest.a_remover_failure_keeps_the_step_code_it_was_given` | 回执把步骤码原样带出：`removalFailureOf == refusalOf == local-source-remove-failed:session-store`，且这一轮一条都没写进库 |
+| `SourceSyncApplyRoundTest.a_source_that_vanished_before_the_remover_ran_is_reported_as_missing_not_failed` | `Missing` 与 `Failed` 不混：报 `local-source-missing`，remover 确实被调用过 |
+| `SourceSyncImportLogicTest.aFailedRemovalStepIsTranslatedIntoPlainWords` | 一句整话 + 未知步骤码原样 + 不带步骤码的老码仍是原句 |
+| `SourceSyncImportLogicTest.everyRemovalStepHasItsOwnChineseName` | 八步一个不少、八个名字互不相同（共用名字等于没分辨）、两侧空格被 trim、未知码原样 |
+
+### 57.5 三条负向对照
+
+| 编号 | 破坏 | 结果 |
+| --- | --- | --- |
+| A | `ServerSourceSyncRemover` 的 `Failed(failedAt(failure.step))` → `Failed(FAILED)` | `ServerSourceSyncRemoverTest` 2 红（`a_failed_step_names_itself_in_the_reason_code` / `two_different_steps_never_share_a_reason_code`），日志 w688-negA.log |
+| B | core `removeLocalSource` 的 `Failed` 分支改回固定 `REMOVE_FAILED` | `SourceSyncApplyRoundTest.a_remover_failure_keeps_the_step_code_it_was_given` 红（21 例 1 失败），日志 w688-negB.log |
+| C | `removalStepLabel` 直接 `return raw`（不查表） | `SourceSyncImportLogicTest` 2 红（两条新用例），日志 w688-negC.log |
+
+三条破坏都逐字节还原（`readFileSync === 原始内容` 为真），`git status` 无残留。
+
+### 57.6 本机实跑
+
+| 模块 | 改前 | 改后 | 说明 |
+| --- | --- | --- | --- |
+| core/common | 660（11 skipped） | 660（11 skipped） | 未动 |
+| core/database | 240（12 skipped） | **242**（12 skipped） | +2：步骤码原样带出、Missing 与 Failed 分开 |
+| feature/settings | 404 | **406** | +2：步骤码翻人话、八步中文名全覆盖 |
+| feature/server | 36 | **40** | +4：remover 七例重写（净 +2）、真库步骤用例 2 例 |
+| 四模块合计 | 1340 | **1348** | 日志 w688-kotlin-full.log / w688-run1.log |
+
+C# 侧未动：`MediaHub.Tests` 仍 1656、全仓口径仍 1760（`--required-suite` 仍 60）。本轮的用例全是 JVM + Robolectric，不进 instrumentation；VI 每 job 仍 135 例。
+
+### 57.7 未覆盖
+
+- Robolectric 用的是内存库，不是升级过的 v5 真库；迁移脚本本身仍无证据。
+- 步骤码只覆盖 `RemoveServerUseCase` 的八步。若某天删除链加第九步（比如清播放列表缓存），`SourceSyncRemovalStep` 与 `REMOVAL_STEP_LABELS` 必须同步加，否则新步骤会以「原样码」出现在界面上（这条已在 §57.3 第 5 条写明，但没有编译期强制）。
+- `RemoveServerFailedException` 的 `cause` 只用于日志，回执不带异常类名（带上去等于把实现细节漏给对端与界面）。
+- Windows 侧删除链仍无步骤粒度，两机端到端仍未跑（NOT_RUN）、真机 instrumentation 仍 DEVICE_UNVERIFIED。
+
+### 57.8 下一步（W6-89 候选）
+
+1. 结果页「已导入」历史词收敛：计划行 / 结果行 / 端点句三处口径统一（连续三轮都留着这条）。
+2. `SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（生产不可达，但读者会误以为那是第二条写入口）。
+3. 预览页与结果页的「下一步」加导航出口（跳到来源页、或跳到对端说明）。
+4. 设备解绑后的界面出口：`forget` 已同时清基线（W6-80），但界面上仍只有一句文案，没有「这台设备再也不会同步」的确认态。
+5. Windows 侧删除链补真 SQLite 证据（对应 §56.7 的第二条未覆盖）。
+
+## §58 W6-89：结果页「已写入」逐条可见，四桶只有一个词汇表
+
+### 58.1 结论先行
+
+- 结果页上有三块名单，只有一块说不清：写入区渲染的是 `applied.appliedTitles`（只列标题），而「保留未应用」区（W6-83）与「被拒」区（W6-82）都是「- 标题（身份）· 原因」。用户看得到「写进了 3 条」，却核对不了这 3 条对应对端的哪条来源。W6-81 就已经把 `appliedSources`（远端身份 → serverId）放进了回执，界面一直没用。
+- 同一个桶在同一屏上有两套词：结果卡 `planLine` 说「放行 N 条 · 忽略 N 条」，桶标题 `titleOf` 与预览页 `summaryLine` 说「可导入 / 需确认 / 已忽略 / 暂不支持」。用户要自己把「放行」翻译成「可导入」。
+- 两处一起收：`SourceSyncImportCopy.bucketWord(bucket)` 成为唯一词表，`titleOf` 直接委托它、`planLine` 四段也改用它；写入区改用 `appliedSources` 逐条渲染 `writtenLine`（「- 标题（身份）」）。「放行」「忽略」两个词在界面词汇里退役。
+- 空名单不占版面：`writtenHeader` 在 0 条时返回 null，整块（含区头）不渲染，不写「已写入 0 条」。
+- 身份缺失不编造：`writtenLine` 对身份 trim 后为空只输出标题。
+
+### 58.2 四桶唯一词汇表
+
+- `bucketWord` 的四个词与桶一一对应：APPLY→「可导入」、REQUIRES_APPROVAL→「需确认」、IGNORED→「已忽略」、UNSUPPORTED→「暂不支持」。
+- 三处调用点：`titleOf`（桶标题，委托）、`planLine`（结果卡计划行，与 `bucketWord` 同在 `object SourceSyncImportCopy` 内，可裸调）、`summaryLine`（预览页顶部，**在 `object SourceSyncImportLogic` 里，必须写 `SourceSyncImportCopy.bucketWord(...)`**，裸调是 Unresolved reference）。
+- 计划行与结果行刻意不同槽位（计划=四桶计数 + 总数；结果=写入 / 跳过 / 保留 计数），W6-84 起归一；用例 `thePlanLineAndTheResultLineNeverShareACount` 钉住这一点。
+
+### 58.3 写入区逐条可见
+
+- `SourceSyncApplySummary.appliedTitles` 整字段退役；`appliedSources` 保留原义，KDoc 写明「结果页写入区与『补录并验证』入口共用同一份数据」。
+- 界面：新增 tag `APPLY_WRITTEN = "sync.apply.written"`（区头容器，用于断言整块在 / 不在）；区头文案 `writtenHeader`，逐条 `writtenLine`。
+- Compose 细节：`Text` 没有 `testTag` 形参，必须写 `modifier = Modifier.testTag(...)`（写成 `testTag =` 会得到 “None of the following candidates is applicable”）。
+
+### 58.4 用例与计数
+
+- `SourceSyncImportLogicTest`：新增 `theSameBucketWordIsUsedInThePlanLineAndInThePreviewLine`（四词表逐条 + `titleOf` 委托 + planLine 精确串 + 断言不含「放行」「· 忽略」+ 预览 `summaryLine` 含同词）与 `everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle`（空名单 → null、两条写入的精确串、身份两侧空格被 trim、缺身份只给标题）；两条 planLine 精确串用例改词。
+- `SourceSyncImportSessionTest`：删 `appliedTitles` 断言，改断言 `appliedSources.single().title`。
+- `androidTest/SourceSyncImportScreenTest`：fixture 改 `appliedSources`；断言区头文案与 `onNodeWithText(writtenLine(...))`；新增两个用例 —— `everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle`（两条写入：有身份的那条必须带「（身份）」、无身份的那条只给标题，并断言有身份那条的旧式「- 客厅 Emby」不存在）与 `theWrittenBlockVanishesWhenNothingWasWritten`（空名单时 `APPLY_WRITTEN` 整块不出现；必须是独立用例，见 §58.7）。`SourceSyncVerificationScreenTest` 去掉一行 `appliedTitles`。
+- 计数：`feature/settings` 406 → 408（`testDebugUnitTest` 408/0），`compileDebugAndroidTestKotlin` 绿；本机四模块 `core/common` 660 / `core/database` 242 / `feature/settings` 408 / `feature/server` 40 = **1350**；CI `uniqueTests` 预期 2444 → 2446；`--required-suite` 仍 60（新增 2 例在门禁模块内，不改套件数）。
+- CI instrumentation 每 job **135 → 136 → 137**：W6-89 先加 1 例（136），第二次红→修把「双 `render`」那一例拆成两例（137）。JVM 单测数不受影响（拆的是 androidTest）。
+
+### 58.5 三条负向对照（各自跑完立即逐字节还原，sha256 相同）
+
+- A `writtenHeader` 恒返回 null ⇒ 408 / 1 红（`everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle`）。
+- B `writtenLine` 丢掉身份（`return "- " + entry.title`）⇒ 408 / 1 红（同一用例）。
+- C `planLine` 改回「放行 / 忽略」旧词 ⇒ 408 / 3 红（词汇用例 + 两条精确串用例）。
+
+### 58.6 红→修：instrumentation 新用例的「旧样式不存在」断言撞到无身份条目
+
+- 首次 exact-SHA CI（`db63b2e3`）的 visual-instrumentation 两个作业（API 32 / API 36）都红，唯一失败用例就是本轮新加的 `everyWrittenEntryIsListedWithItsRemoteIdentityAndTheBlockVanishesWhenNothingWasWritten`：`java.lang.AssertionError: Failed: assertDoesNotExist.`（136 例里 1 失败，其余全过）。
+- 原因在用例自己：fixture 里两条写入 —— 第一条「客厅 Emby」有身份、`syncSourceId = "local-a"`；第二条「书房 Jellyfin」身份为 null。第二条按设计就渲染成只有标题的 `- 书房 Jellyfin`，而用例随后用 `onNodeWithText("- 书房 Jellyfin").assertDoesNotExist()` 想钉「旧样式（只有标题、没有身份）已消失」——把「无身份条目本来就只有标题」这个合法形态当成了反例。
+- 改法：反例换成有身份的那一条 `onNodeWithText("- 客厅 Emby").assertDoesNotExist()`（证明身份确实被追加而不是被省略），并显式断言无身份条目 `- 书房 Jellyfin` 正在显示 —— 把它从「反例」改成「行为声明」。
+- 教训：本地只能跑 `compileDebugAndroidTestKotlin`，instrumentation 断言只有 CI 模拟器是裁判；凡是改 UI 文案或新加 instrumentation 断言，本轮必须按「可能红」对待，并把红→修全过程写进 PR 正文（W6-82 是同一个坑的另一面：那次是退役文案没人改）。
+- 三处口径一致：JVM 用例只钉 `writtenLine` 的字符串形态（无身份 → 只给标题），instrumentation 钉渲染节点（有身份必须带身份、无身份只给标题）。
+### 58.7 红→修（二）：Compose 测试规则每个用例只能 setContent 一次
+
+- 第二轮 exact-SHA CI（`21d3157c` / `6ad12eb5`）的 visual-instrumentation 仍然红，且仍是同一个新用例 —— 但失败信息换成了 `java.lang.IllegalStateException: Cannot call setContent twice per test!`（API 32 日志 `D:/mh-verify/w689-fix-vi-api32-fail.log`，136 例 1 失败）。
+- 原因：那条用例为了同时钉「写入区逐条可见」与「0 条时整块消失」，在同一个 `@Test` 里调了两次 `render(...)`；模拟器上的 Compose 测试规则不允许第二次 `setContent`，而本机只做 `compileDebugAndroidTestKotlin` 编译校验，这类运行期约束编译期看不出来。
+- 改法：拆成两个用例 —— `everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle`（渲染一次，钉区头、两条写入行、旧式无身份行不存在、无身份条目按行为声明）与 `theWrittenBlockVanishesWhenNothingWasWritten`（渲染一次空名单，钉 `APPLY_WRITTEN` 不存在）。instrumentation 每 job 136 → **137**。
+- 顺手做了一次全量审计：把 `feature/settings/src/androidTest/**` 下每个函数体按花括号配对切开、逐个数 `render(`，真实「每例多次 setContent」为 **0 处**（首次那种按 `\n    @Test\n` 切块的粗略统计会把文件尾部的 helper 算进最后一个用例，属假阳性）。
+- 教训升级：本机可编译 ≠ 可运行。`setContent` 一例一次、`assertDoesNotExist` 的语义、旧文案残留三件事只有 CI 模拟器能判；凡新加或改动 instrumentation 用例，本轮一律按「可能红」写进 PR 正文，并把两次红→修都记账。
+
+### 58.8 边界与仍未做
+
+- Windows 侧对应物只有计数：写入器在 App 层 `SourceSyncRecordWriter`，回执里只有 Applied / Skipped / Withheld / NotApplied 四类计数、没有逐条身份区——Android 的回执是超集而非分叉（W6-81 起就是这个口径），文档与日志必须写明。
+- 身份缺失只省略、不报警；对端没给身份的写入仍然只显示标题。
+- 0 条写入时整块消失，用户只能从结果行数字知道「写了 0 条」。
+- 仍未做：跨设备真实核对、真机 instrumentation（NOT_RUN / DEVICE_UNVERIFIED）。
+
+### 58.9 状态
+
+- EXECUTED_PASS（本机 JVM 口径 408/0，androidTest 编译通过）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。
+- 三条负向对照全红并逐字节还原；Windows 侧零改动（C# 仍 1656/1760）。
+
+## §59 W6-90：Windows 结果页也给「已写入」逐条身份（对齐 Android W6-89）
+
+### 59.1 结论先行
+
+- W6-89 只补了 Android：Windows 的 `SourceSyncApplyReport` 仍只有四个计数（Applied / Skipped / Withheld / NotApplied），结果页读到的是「已写入 2 条」，用户没有任何办法核对这 2 条各是哪一条对端来源、变成了本机哪个来源。
+- 同一份数据里 `SourceSyncImportEntry` 一直带着 SyncSourceId / ServerId / DisplayName（`SourceSyncSessionResult.cs`），断点在写入路径：`SourceSyncImportRound.ApplyAsync` 只累加计数与基线记录，没有把「哪条写了」带出来。
+- 本轮把写入路径的逐条记录带进回执：新 `SourceSyncWrittenSource(syncSourceId, serverId, displayName, action)`，`SourceSyncApplyReport.Written` 按写入顺序列条；`SourceSyncWriteOutcome.Written(message, serverId)` 让 App 层写入器交出本机 serverId（`ServerManager.RemoteSourceOutcome` 增第四字段，创建与接管两条成功路径都填）。
+- 文案只有一个来源：`SourceSyncWrittenText.Header(count)`（0 条返回 null，整块消失，不写「已写入 0 条」）与 `.Line(entry)`（「- 标题（身份）」；标题或身份缺失只给另一半，不编造）。删除动作后缀「 · 已从本机移除」——Windows 真的会执行删除，而 Android 明确拒绝（`local-delete-not-supported`），所以 Windows 的行必须读得出「这一条是移除」。
+- 结果页新增 `sync.apply.written.header` / `sync.apply.written.list`，页面只做 ItemsSource 与可见性切换，字全由 presenter 给。
+
+### 59.2 数据流（一处实现，三层消费）
+
+- `MediaHub.Sync`：`SourceSyncImportRound.ApplyAsync` 在每次 `outcome.Applied` 后往 `writtenSources` 追加一条；`Written = writtenSources` 进回执；被判 `Refused` 的写入不出现（保留未应用表示它没有发生）。
+- `MediaHub.App`：`ServerManager.ApplyRemoteSource` / `AdoptRemoteSource` 的成功回执带本机 serverId；删除路径不回传（行已不在，回传一个已消失的 id 会误导）。
+- `SyncPagePresenter`：`SyncApplyResult.WrittenHeader` / `WrittenRows` 由 `SourceSyncWrittenText` 生成；`SyncPage.xaml.cs` 只绑定。
+
+### 59.3 用例与计数
+
+- `SourceSyncImportRoundTests` +5：`AppliedEntriesAreListedWithTheirPeerIdentityAndTitle`（写入顺序 + 身份 + 标题 + 精确行文案）、`WrittenHeaderStaysNullWhenNothingWasWritten`、`WrittenLineNeverInventsTheHalfItDoesNotHave`（缺标题 / 缺身份 / 删除后缀）、`RefusedWritesStayOutOfTheWrittenList`（Withheld 仍计数 1）、`TheLocalIdTheWriterProducedTravelsIntoTheRow`（写入器给的 `sync:...` 覆盖计划里的 id）。
+- `SyncPagePresenterTests` +2：`DescribeResultListsEveryWrittenEntryWithItsIdentity`（header 精确串 + 两行按顺序）、`DescribeResultKeepsTheWrittenListEmptyWhenNothingWasWritten`。
+- 本机 `MediaHub.Tests` **1663 通过 / 0 失败**（1656 → +7）；App 工程 **0 警告 0 错误**（XAML 编译通过）。Android 侧零改动。
+
+### 59.4 四条负向对照（全红，逐字节还原 sha256 一致）
+
+- `Header` 恒 null ⇒ **2 红**（`DescribeResultListsEveryWrittenEntryWithItsIdentity` + `AppliedEntriesAreListedWithTheirPeerIdentityAndTitle`）。
+- 回执 `Written = []` ⇒ **3 红**（上述两条 + `TheLocalIdTheWriterProducedTravelsIntoTheRow`）。
+- `DisplayName = null`（标题丢）⇒ **1 红**。
+- `Line` 丢身份（只给标题）⇒ **4 红**（上述两条之一 + `WrittenLineNeverInventsTheHalfItDoesNotHave` + `WrittenHeaderStaysNullWhenNothingWasWritten`）。
+
+### 59.5 边界与仍未做
+
+- 删除行给对端身份 + 「已从本机移除」，不回传本机 serverId（来源已删）。
+- GUI 未人工验证：本轮只到 XAML 编译通过 + presenter 纯逻辑用例；结果页真实呈现记 **GUI_UNVERIFIED**（workstream ② 需要用户授予空闲窗口，不得自行排程）。
+- 仍未做：跨设备真实核对、真机 instrumentation（**NOT_RUN / DEVICE_UNVERIFIED**）。
+
+### 59.6 状态
+
+- EXECUTED_PASS（本机 1663/0 + App 0 警告 0 错误）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+## §60 W6-91：Windows 结果页给「未写入」逐条原因（对齐 Android W6-82）
+
+### 60.1 结论先行
+
+- 回执里的被拒写入此前只并进 `Withheld` 计数：用户读得到「保留未应用 1 条」，读不到是哪条、为什么。现在每次拒写落成一行「- 标题（身份） · 写入/删除 · 原因」，与写入区同形（W6-89 / W6-90）。
+- 与 Android 的差别：Android 的拒写原因是稳定码 + `refusalReason` 码表；Windows 的写入器（`ServerManager.ApplyRemoteSource` / `AdoptRemoteSource` / `RemoveRemoteSourceAsync`）本来就说人话（「Windows 暂不支持该来源类型：smb」「该来源没有可用地址，已跳过」「本机没有这条来源，已跳过」），所以这一侧不建码表——但保留 Android 那条硬规则：**绝不返回空串**。
+
+### 60.2 数据流（一处实现、三层消费）
+
+- `SourceSyncImportRound.ApplyAsync` 的 else 分支收集 `SourceSyncRefusedSource { SyncSourceId, DisplayName, Action, Reason }`：既覆盖写入器显式返回 `SourceSyncWriteOutcome.Refused(message)`，也覆盖写入器抛 `IOException` / `UnauthorizedAccessException` / `InvalidOperationException` 被折成 Refused 的情形（两者本来就是同一条路径，W6-58）。
+- `SourceSyncApplyReport.Refused` 与 `Written` 按构造互斥：同一条目只会在一个名单里，`Written` 说「真的发生了什么」，`Refused` 说「没发生、以及为什么」。被拒条目仍计入 `Withheld` / `NotApplied`（口径不变）。
+- `SyncApplyPresenter.DescribeResult` → `RefusedHeader` / `RefusedRows`；页面 `sync.apply.refused.header` / `sync.apply.refused.list` 只做 `ItemsSource`、可见性与清场，不拼字。
+- `SourceSyncRefusedText.Header/Line/Reason` 是唯一文案来源：`Header` 0 条返回 null（0 条不占版面）；`Line` 标题或身份缺一只给另一半，两者都缺给「（未知身份）」；动作词四种（写入/删除/接管/更新）；空原因回退成「写入器没有说明原因」，避免「- 标题（身份） · 写入 · 」这种半句话。
+
+### 60.3 用例与计数
+
+- `SourceSyncImportRoundTests` +4：逐条原因（含身份、标题、动作、精确行文案）1 例；`Header` 0 条为 null + 缺一半不编造 + 空原因整句 + 删除动作词 1 例；写入器抛异常也进同一名单且计数一致 1 例；写入/未写入两名单互斥 1 例。
+- `SyncPagePresenterTests` +2：`DescribeResult` 逐条（顺序、身份、原因）1 例；没有拒写时两个字段都为空 1 例。
+- `MediaHub.Tests` 1663 → **1669**（0 失败）；App 工程 **0 警告 0 错误**（XAML 编译覆盖两个新标签，见 `D:/mh-verify/w691-app-build.log`）。
+
+### 60.4 四条负向对照
+
+| 变异 | 红 | 命中用例 |
+| --- | --- | --- |
+| `SourceSyncRefusedText.Header` 的「未写入」改成「已写入」 | 2 | 逐条原因 + presenter 逐条 |
+| 回执 `Refused = []` | 4 | 上述两条 + 抛异常 + 两名单互斥 |
+| `Line` 丢掉原因段 | 3 | 逐条原因 + presenter 逐条 + 缺一半/整句 |
+| 空原因不回退整句（返回空串） | 1 | 缺一半/整句 |
+
+每个变异写入后 `dotnet test` 均以预期条数失败，跑完从磁盘备份逐字节还原（sha256 比对 true）；日志 `D:/mh-verify/w691-neg-A-header-says-written.log` / `-B-report-drops-refused.log` / `-C-line-drops-reason.log` / `-D-blank-reason-stays-blank.log`，备份 `w691-backup-*.cs`。
+
+### 60.5 边界与仍未做
+
+- 被审批闸门永久扣住（gate `Withheld`）的条目在 Windows 仍只在计数里——Android 有 `withheldEntries` / `withheldHeader`（W6-83）的对等物尚未移植；这是下一步候选。
+- 拒写原因沿用 `RemoteSourceOutcome` 的口径：不含地址、不含凭据（原因文本会进日志与界面）。
+- 结果页真实呈现仍 **GUI_UNVERIFIED**（本轮只到 XAML 编译通过 + presenter 纯逻辑用例）；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 60.6 状态
+
+- EXECUTED_PASS（本机 1669/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+## §61 W6-92：Windows 结果页给「扣住」逐条可见（对齐 Android W6-83）
+
+### 61.1 结论先行
+
+- W6-91 让「写入器拒写」逐条可见，但「保留未应用」还有另一半：被审批闸门**永久扣住**的条目（带凭据、未知来源类型、Windows 不支持）。它们点多少次「允许」都不会写，此前只出现在计数里。
+- 本轮把这一半也拆成行：区头沿用 Android W6-83 的原句「保留未应用 N 条（扣住，点允许也不会写）」，行是「- 标题（身份） · 原因句」。
+
+### 61.2 数据流（一个数、两份清单）
+
+- `SourceSyncApplyReport.Withheld` 的口径不变：**闸门扣住 + 写入器拒写**。新增 `WithheldEntries` 只收闸门扣住的那一半，`Refused`（W6-91）只收写入器拒写的那一半，两者**按构造互斥**，相加正好等于用户读到的那个数。
+- 收集点在 `ApplyAsync` 里 `SourceSyncApprovalGate.Decide` 之后：逐个 `gate.Withheld` 取 `SyncSourceId`（trim）、`DisplayName`、`Reason`（稳定码），顺序就是闸门的顺序。
+- 原因句不另造一套词：`SourceSyncWithheldText.Reason` 直接调 `SyncApplyPresenter.DescribeGateReason`，与结果行里的「不可应用：…」是同一句；空码回「对端没有说明原因」，未知码原样带出。这样同一个码不会在一轮里出现两种说法。
+- 页面：`sync.apply.withheld.header` / `sync.apply.withheld.list`（`SyncApplyResult.WithheldHeader` / `WithheldRows` 驱动），位置在「已写入」区之上、与 Android 结果页的顺序一致；`ClearApplyPreview(keepResult:false)` 一并清空。
+
+### 61.3 用例与计数
+
+- `SourceSyncImportRoundTests` +3：闸门扣住逐条（精确行「- 卧室 Emby（local-dddd） · 带凭据，需人工迁移（本次不会写入）」+ 计数 + 未写入任何行）；0 条 header 为 null + 缺一半不编造 + 空码整句 + 未知码原样；闸门扣住与写入器拒写**两清单互斥且相加等于计数**。
+- `SyncPagePresenterTests` +2：`DescribeResult` 逐条（身份 + 原因句）；空回执时两个字段皆空。
+- `MediaHub.Tests` 1669 → **1674**（0 失败）；App 工程 **0 警告 0 错误**（XAML 覆盖两个新标签，见 `D:/mh-verify/w692-app-build.log`）。
+
+### 61.4 四条负向对照
+
+| 变异 | 红 | 命中用例 |
+| --- | --- | --- |
+| 区头词「保留未应用」改成「已写入」 | 3 | 逐条（两端各一）+ 精确行 |
+| 回执 `WithheldEntries = []` | 3 | 逐条 + 互斥相加 |
+| `Line` 丢掉身份规则（只给标题） | 3 | 逐条 + 缺一半不编造 |
+| 原因不回退整句（空码返回空串 / 未知码不再翻译） | 3 | 逐条 + 精确行 |
+
+每个变异写入后按 5 条新用例的过滤器跑，均以预期条数失败；跑完从磁盘备份逐字节还原（sha256 比对 true）。日志 `D:/mh-verify/w692-neg-A-header-says-written.log` / `-B-report-drops-withheld.log` / `-C-line-drops-identity-rule.log` / `-D-blank-reason-stays-blank.log`；备份 `w692-backup-*.cs`。
+
+### 61.5 与 Android 的差异（如实记）
+
+- Android 的 `withheldLine` 直接拼「标题（身份）」，假定两端都在；Windows 沿用 W6-91 的「缺一半不编造」规则（标题或身份缺失只给另一半，都缺给「（未知身份）」）。
+- Android 的「下一步」出口（W6-84 复制身份 / W6-85 预览页出口）在 Windows 侧没有对等物，是本轮**未做**的部分。
+
+### 61.6 边界与仍未做
+
+- 扣住原因沿用闸门的稳定码，不含地址、不含凭据（原因文本会进日志与界面）。
+- `BlockingLabels`（结果行里那句「不可应用：…」）保持原样，本轮只是把同一批码逐条摊开；两处由同一个 `DescribeGateReason` 保证不漂移。
+- 结果页真实呈现仍 **GUI_UNVERIFIED**（本轮只到 XAML 编译通过 + presenter 纯逻辑用例）；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 61.7 状态
+
+- EXECUTED_PASS（本机 1674/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+
+## §62 W6-93：Windows 扣住条目也有出路与复制身份（对齐 Android W6-84/W6-85）
+
+### 62.1 结论先行
+
+- W6-92 把「被闸门扣住」的条目逐条摊开了，但只给了原因：用户看到「带凭据，需人工迁移（本次不会写入）」「Windows 暂不支持该来源类型」，知道**为什么**写不进去，却不知道**下一步干什么**，也没法把手上唯一的线索（对端身份）拿走。
+- 本轮把 Android W6-84 的「唯一出口 + 复制身份」搬到 Windows：`SyncApplyResult.WithheldRows` 从纯字符串清单升级为 `SourceSyncWithheldRow`（`Text` / `NextStep` / `CopyText` / `CanCopy` / `CopyLabel`）（W6-95 起该行形状提升为两条清单共用的 `SourceSyncCopyRow`，见 §64），结果页每行右侧一个按钮。
+- 出口只有一张码表（`SourceSyncWithheldText.NextStep`），和 Android 的 `nextStepOfCode` 逐句同文；**未知码返回 null 而不是编建议**——编一句听起来合理的做法，比不说更害人。
+- 按钮文案分两态：可复制时是「复制身份」，不可复制时是「无身份可复制」并且按钮**禁用**（`CanCopy=false`）。禁用而不是隐藏，是因为「这条没有身份可复制」本身是要说出来的事实。
+
+### 62.2 数据流（一张码表、两种出口）
+
+- 码表（`windows/src/MediaHub.Sync/SourceSyncWithheldSource.cs`）：`NextStep(code)` 先 trim，空码返回 null；`ambiguous-` 前缀（`SourceSyncApprovalGate.AmbiguousReasonPrefix`）走歧义句；四条显式码与 Android 同句——`secrets-require-approval`（在对端清空凭据后重新导出信封，或在本机手动新建同样的来源）、`not-supported-on-windows`（等本机版本支持这种来源类型；再点几次允许也不会进来）、`unknown-source-type`（把两端升到同一版本后重新导出信封）、`same-revision-different-content`（两端内容版本号相同但不一致，本页一律不放行，先手工对齐再导出）；`_ => null`。
+- 行组装（`Rows(entries)`）：`Text` 复用 W6-92 的「标题（身份）· 原因」；`NextStep = NextStep(entry.Reason) ?? ""`（空串在下标层面表示「没有出口」，XAML 里空 TextBlock 自然不渲染）；`identity = entry.SyncSourceId.Trim()`；`CopyText = canCopy ? identity : ""`，`canCopy = identity.Length > 0`；`CopyLabel` 由 `CanCopy` 派生。**CopyText 只可能是对端身份，不会拿标题充数**（拿标题当身份去对端检索是死路）。
+- 页面（`windows/src/MediaHub.App/Views/SyncPage.xaml` / `.xaml.cs`）：`ApplyWithheldList` 加 `ItemTemplate`——左列两个 `TextBlock`（`Text`；`NextStep` 用 `SystemFillColorCautionBrush` 提色），右列 `Button Content="{Binding CopyLabel}" IsEnabled="{Binding CanCopy}" Tag="{Binding}" Click="OnCopyWithheldIdentityClick"`，AutomationId `sync.apply.withheld.copy`。点击处理与既有的 `OnCopyCodeClick` 同一套：`DataPackage.SetText` + `Clipboard.SetContent`，成功给「来源身份已复制」提示（并说明拿去对端怎么用），`COMException` / `InvalidOperationException` 折成警告条；`CanCopy=false` 时若仍被点到（键盘可达）给「没有可复制的来源身份」。
+- App 工程里没有任何 `IValueConverter`（全项目 grep 命中 0），所以按钮的禁用态用 `IsEnabled` 绑定布尔，而不是靠转换器算 Visibility——这是 App 既有范式（`AllowLabel` 也是把解释写进按钮文案）。
+
+### 62.3 用例与计数
+
+- `windows/tests/MediaHub.Tests` 新增 4 例（1674 → **1678**）：
+- 码表完全覆盖闸门可能给出的码且不外推：四条码逐一钉**整句**、`ambiguous-legacy-identity` 走歧义句、`something-new` / 空串 / 全空白 / null 一律 null。
+- 每一行都同时带上出路与可复制身份：身份与标题带空格时两侧都要 trim（行是「- 卧室 Emby（local-dddd） · 带凭据，需人工迁移（本次不会写入）」、`CopyText="local-dddd"`、`CanCopy=true`、`CopyLabel="复制身份"`、`NextStep` 含「凭据清空」）。
+- 没有身份的行要说出来而不是编：`CopyText=""`、`CanCopy=false`、`CopyLabel="无身份可复制"`；`Rows([])` 返回空清单。
+- presenter 侧两例：`WithheldRows` 逐条的 Text/NextStep/CopyText/CanCopy/CopyLabel 都钉死；空回执时清单为空。
+- 本机：`dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj --no-restore`（cwd `D:/mh-w6`）→ **1678 / 0**（1674 → +4），日志 `D:/mh-verify/w693-test2.log`；App 构建 `dotnet build windows/src/MediaHub.App/MediaHub.App.csproj -c Debug -p:Platform=x64 -p:MediaHubBinRoot=D:/mh-out-w6/ --no-restore` → **0 警告 0 错误**（XAML 编译通过），日志 `D:/mh-verify/w693-app-build.log`。
+
+### 62.4 四条负向对照（每条都是「改了就该红」，跑完逐字节还原，sha256 相等）
+
+| 变异 | 红 |
+| --- | --- |
+| 未知码编一句「下一步：稍后再试。」（`_ => null` → `_ => "下一步：稍后再试。"`） | 3 |
+| 复制内容改成标题（`CopyText = canCopy ? identity : ""` → `entry.DisplayName?.Trim() ?? ""`） | 4 |
+| 行丢掉出路（`NextStep = ...` → `NextStep = ""`） | 3 |
+| 按钮永不禁用（`bool canCopy = identity.Length > 0` → `= true`） | 2 |
+
+日志 `D:/mh-verify/w693-neg-A-unknown-code-gets-invented-advice.log` / `-B-payload-becomes-the-title.log` / `-C-row-drops-the-way-out.log` / `-D-copy-button-never-disabled.log`；备份 `D:/mh-verify/w693-backup-withheld.cs`（+ `.sha256`）。
+
+### 62.5 与 Android 的差异（如实记）
+
+- 码表与句子是同一张（含歧义前缀句），这是刻意的：两端对同一个码说同一句，用户在两台机器上看到的建议不会打架。
+- Android 的「复制身份」按钮在结果页与预览页都有出口；Windows 本轮只落到**结果页**——预览页条目（`SyncApplyRow`）仍只有 `BlockReason`，没有出路。
+- Android 的 `withheldLine` 直接拼「标题（身份）」，Windows 沿用 W6-91/W6-92 的「缺一半不编造」规则；因此 Windows 的按钮还可能显示「无身份可复制」，Android 无此态。
+
+### 62.6 边界与仍未做
+
+- 出口只是文案，不改任何状态：不写库、不放行、不改闸门判据；复制的也只是对端身份字符串。
+- 码表内容进日志与界面，**不含地址、不含凭据**（原因码本身是稳定码，不含隐私）。
+- 结果页真实呈现仍 **GUI_UNVERIFIED**（本轮只到 XAML 编译通过 + presenter/round 纯逻辑用例，没有在真窗口里点过那个按钮）；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+- 仍未做：预览页条目的出路（Android W6-85 对等物）。
+
+### 62.7 状态
+
+- EXECUTED_PASS（本机 1678/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+
+- 提交：W6 树 `feature/cross-device-source-sync`（代码与文档同一提交；提交号以 PR #39 head 为准——docs 正文不自指 SHA，否则每次改写提交都会让自己写下的哈希失效）。四条 exact-SHA CI 按该 head 跑，run 号与计数见 PR 正文与本轮账本。
+
+## §63 W6-94：Windows 预览页条目也给出路（对齐 Android W6-85）
+
+### 63.1 结论先行
+
+- W6-93 让「被扣住」的条目在**结果页**有了出路与复制身份，但用户是在**预览页**逐条做决定的：那一页的每一行只有 `BlockReason`（而且只对「永不允许」的行给原因句），看完原因仍然不知道下一步该干什么。Android W6-85 早已在预览条目上给出路，本轮补齐这个对等物。
+- 做法不是「再抄一份码表」，而是**把 W6-93 的码表搬到两处共用的位置**：`SyncApplyPresenter.NextStep`（与 `DescribeGateReason` / `DescribeBlockReason` 同处，presenter 是措辞的唯一出口），`SourceSyncWithheldText.NextStep` 退化成一层委托。
+- 预览行 `SyncApplyRow` 新增 `NextStep`，`BuildRow` 用 `item.Reason` 查同一张表；界面把一个只读 `TextBlock` 绑上去（AutomationId `sync.entry.next.step`），空串自然不渲染。
+- 仍然是「编建议比不说更害人」：未知码返回 `null` → 空串 → 不渲染；**没有任何一处为一个码写出两句话**，有硬保证（一条用例专门钉「表只有一处」）。
+
+### 63.2 数据流（一张码表、两处读）
+
+- 码表：`windows/src/MediaHub.Sync/SyncPagePresenter.cs` 的 `public static string? NextStep(string? code)`——先 `Trim`，空串返回 `null`；`SourceSyncApprovalGate.AmbiguousReasonPrefix`（`ambiguous-`）走前缀句；四条稳定码各一句（`secrets-require-approval` / `not-supported-on-windows` / `unknown-source-type` / `same-revision-different-content`）；`_ => null`。
+- 读点一（本轮新增）：预览行 `BuildRow` → `NextStep = NextStep(item.Reason) ?? string.Empty` → 视图层 `ApplyRow` 记录新增一个 `string NextStep` → `ReloadApplyRows()` 映射 → XAML 预览卡片里多一个 `TextBlock`（`Foreground=SystemFillColorCautionBrush`，与扣住清单同色）。
+- 读点二（W6-93 既有）：`SyncApplyResult.WithheldRows` → `SourceSyncWithheldText.Rows(...)` → 每行 `SourceSyncCopyRow.NextStep`（W6-95 起同一行形状）。
+- 这两个读点现在**必然一致**，因为第二处只是第一处的委托；委托方法体剩下的唯一一行是 `=> SyncApplyPresenter.NextStep(code);`。
+
+### 63.3 用例与计数
+
+- `windows/tests/MediaHub.Tests/SyncPagePresenterTests.cs` +2 例：
+  - `EveryPreviewRowCarriesTheWayOutItsCodeHasAndInventsNothingForTheOthers`：三条记录（带凭据、类型 `fn-nas`、普通）→ 前两条整句精确相等（判据是被测字符串里复制出来的），普通行断言 `Assert.Empty(row.NextStep)`。
+  - `TheWayOutTableHasOneHomeSoThePreviewAndTheWithheldListCannotDrift`：八个输入（四条 `SyncRoundReasons` 常量、歧义前缀拼出的码、`something-new`、空串、全空白）逐条断言两个入口返回值相等，并单独断言未知码与 `null` 都返回 `null`。
+- 本机 `MediaHub.Tests` **1678 → 1680 / 0**（日志 `D:/mh-verify/w694-test1.log`）；App 构建 0 警告 0 错误（XAML 编译通过，日志 `D:/mh-verify/w694-app-build.log`）。
+- Android 侧零改动：本轮只在 W6 树的 Windows 工程内动，`uniqueTests` 仍是 2446 的对照口径。
+
+### 63.4 四条负向对照（每条都真红，跑完逐字节还原）
+
+| 变异 | 红 |
+| --- | --- |
+| 预览行不查出路（`NextStep = string.Empty`） | 1 |
+| 未知码编一句建议（`_ => null` → `_ => "下一步：稍后再试。"`） | 5 |
+| 委托恒 `null`（`=> null;`） | 5 |
+| 预览行查错码（`item.SyncSourceId`） | 1 |
+
+日志 `D:/mh-verify/w694-neg-A-preview-drops-the-way-out.log` / `-B-unknown-code-gets-invented-advice.log` / `-C-delegate-always-null.log` / `-D-preview-reads-the-wrong-code.log`；备份 `D:/mh-verify/w694-backup-SyncPagePresenter.cs` 等 5 个文件。
+
+### 63.5 与 Android 的差异
+
+- 句子逐条同文（与 W6-93 一致），包括「再点几次允许也不会进来」这句略带口吻的实话。
+- Android 的 `nextStepOfCode` 在 `SourceSyncImportCopy`（feature 层）里，Windows 放在 presenter（Sync 层）：两端分层不同，但都只有一个出口；Windows 这一轮把「一个出口」从「同一个类」收紧到「同一个方法」。
+- Android 预览行的出路与结果页共用同一函数；Windows 现在同样如此，差别只在 Windows 的结果页那一支是 W6-93 已有的 `SourceSyncWithheldText` 委托。
+- Windows 的预览行不复制身份（Android W6-85 的预览卡片也没有复制按钮），复制身份仍只在结果页的扣住清单上。
+
+### 63.6 边界与仍未做
+
+- 出路只是文案：不改闸门判据、不改任何状态、不写库；预览页点「允许」的语义一字未动。
+- 界面呈现仍 **GUI_UNVERIFIED**：本轮只到 XAML 编译通过 + presenter 纯逻辑用例，没有在真窗口里看过那个 `TextBlock`；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+- 仍未做：`SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（仅测试可达）；设备解绑后的界面确认态；Windows 删除链补真 SQLite 证据。
+
+### 63.7 状态
+
+- EXECUTED_PASS（本机 1680/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+
+- 提交：W6 树 `feature/cross-device-source-sync`（代码与文档同一提交；提交号以 PR #39 head 为准——docs 正文不自指 SHA）。四条 exact-SHA CI 按该 head 跑，run 号与计数见 PR 正文与本轮账本。
+## §64 W6-95：Windows「未写入」区也有复制身份，两条保留清单共用一个行形状（对齐 Android W6-82/W6-83）
+
+### 64.1 结论先行
+
+W6-91 让结果页能逐条看到「哪条没写进去、为什么」，但那一行**只有字**：对端身份混在标题后面的括号里，用户在几百条清单里无法拿它去对端检索（Android 在拒写清单上给的是「复制身份」按钮）。这一轮把 Android 的这一半补齐，并顺手拆掉一个即将出现的分叉：扣住清单（W6-93）与拒写清单现在绑定**同一个行形状**，复制按钮的载荷语义只有一处定义。
+
+### 64.2 一处形状、两条清单
+
+- 新文件 `SourceSyncCopyRow.cs`：行记录 `SourceSyncCopyRow { Text, NextStep, CopyText, CanCopy, CopyLabel }` 与两个标签常量 `SourceSyncCopyText.CopyIdentity = 复制身份` / `NoCopyableIdentity = 无身份可复制`。复制按钮的载荷与「没有身份时不编造」的判据只在这里定义一次。
+- `SourceSyncWithheldSource.cs`：W6-93 的 `SourceSyncWithheldRow` 记录整段搬进新文件，`Rows(...)` 改返回 `SourceSyncCopyRow`；`CopyIdentity` / `NoCopyableIdentity` 退化为指向共享常量的委托常量（C# 允许 const 引用 const），因此 W6-93 的旧用例一字未改仍全绿。
+- `SourceSyncRefusedSource.cs`：W6-91 的 `Lines(...) -> IReadOnlyList<string>` 换成 `Rows(...) -> IReadOnlyList<SourceSyncCopyRow>`：逐条 `identity = SyncSourceId.Trim()`、`canCopy = identity.Length > 0`，行里 `Text = Line(entry)`、载荷只在有身份时给。
+- 拒写行**故意不给「下一步」**：原因是写入器自己那句整话（类型不支持 / 地址不可用 / 存储失败），用户能拿它去行动的是对端身份，不是本页的按钮；Android 的拒写清单同样只有复制身份、没有 next-step（W6-82 与 W6-85 的分工），这一条在用例里被钉成 `Assert.Equal(string.Empty, row.NextStep)`。
+- 页面：`ApplyRefusedList`（`sync.apply.refused.list`）补上与扣住清单同构的 `ItemTemplate`（左列 `Text` + `NextStep` 取证色、右列按钮 `Content="{Binding CopyLabel}" IsEnabled="{Binding CanCopy}"`，AutomationId `sync.apply.refused.copy`）；两条清单各自的 AutomationId 保留，供后续 GUI 验收脚本定位。
+- 一个处理器服务两条清单：code-behind 的 `OnCopyWithheldIdentityClick` 改名 `OnCopyRowIdentityClick`、Tag 型别改 `SourceSyncCopyRow`——同一行为不可能只在一条清单上被改对。
+- presenter：`SyncApplyResult.RefusedRows` 与 `WithheldRows` 同为 `IReadOnlyList<SourceSyncCopyRow>`，由 `SourceSyncRefusedText.Rows(...)` / `SourceSyncWithheldText.Rows(...)` 填充；两处 KDoc 都写明「typed rather than a string list」的理由（按钮要的是可复制的载荷，不是用户选不中的文字）。
+
+### 64.3 用例与计数
+
+- `MediaHub.Tests` 1680 → **1683**（净增 3）。拒写侧 2 例：`EveryRefusedRowCarriesTheIdentityTheSameButtonCopiesAndInventsNoWayOut`（逐条精确串 + 载荷 = trim 后身份 + 无身份行是空载荷且 `CanCopy=false` + `NextStep` 为空）、`TheTwoKeptBackListsBindTheSameRowShapeSoTheCopyButtonCannotDiverge`（两条清单的 `CopyLabel` 与载荷在同一身份下必须相等，且都来自 `SourceSyncCopyText`）；presenter 侧 1 例：`DescribeResultCarriesTheCopyableIdentityOnEveryRefusedRowEvenThoughItOffersNoWayOut`。
+- App 工程 `dotnet build` **0 警告 0 错误**（XAML 编译通过，日志 `D:/mh-verify/w695-app-build.log`）。
+- Android 侧零改动：`uniqueTests` 2446 对照不变、`--required-suite` 60、VI 137×2 + 19 mandatory；主树与 PR #33 未动（Windows-only 轮）。
+
+### 64.4 四条负向对照（每条都真红，跑完逐字节还原）
+
+| 变异 | 红 |
+| --- | --- |
+| 拒写行的载荷改成标题（`CopyText = DisplayName`） | 4 |
+| 无身份也允许复制（`canCopy = true`） | 2 |
+| 拒写行编一句出路（`NextStep = 稍后再试`） | 3 |
+| 扣住清单的常量标签脱离共享常量（`CopyIdentity = 复制`） | 2 |
+
+日志 `D:/mh-verify/w695-neg-A-refused-copy-becomes-the-title.log` / `-B-refused-copy-never-disabled.log` / `-C-refused-row-invents-a-way-out.log` / `-D-withheld-alias-breaks-from-the-shared-home.log`；实现态快照 `D:/mh-verify/w695-impl-SourceSyncRefusedSource.cs` 与 `-SourceSyncWithheldSource.cs`（负向对照只许用这两份还原）。
+
+### 64.5 与 Android 的差异
+
+- 拒写清单两端都**没有** next-step，只有复制身份；扣住清单两端都有 next-step（Android W6-84、Windows W6-93）——分工一致。
+- Android 的行是一个 Composable 上的三个参数，Windows 的行是一个 record；两端都把「没有身份就不给按钮载荷」写成显式判据，而不是让按钮复制一个空串。
+- Android 的标签常量在 `SourceSyncImportCopy`，Windows 在 `SourceSyncCopyText`：分层不同，但都只有一处。
+
+### 64.6 边界与仍未做
+
+- 这一轮只补「可复制」：不改闸门、不改写入器、不改任何状态；被拒条目仍然进 `Withheld` 计数（`Withheld = 闸门扣住 + 写入失败`），两条清单相加等于它。
+- 界面仍 **GUI_UNVERIFIED**：只到 XAML 编译 + presenter 逻辑用例，没有在真窗口里点过那个按钮；跨设备真实核对与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+- 仍未做：`SourceSyncTransferImportService(service)` 与 `SourceSyncListenerImportService(service, listener)` 两个次构造器仍绑旧 `importEnvelope`（仅测试可达）；设备解绑后的界面确认态；Windows 删除链补真 SQLite 证据。
+
+### 64.7 状态
+
+- EXECUTED_PASS（本机 1683/0 + 四条负向对照 + App 构建）+ IMPLEMENTED_UNVERIFIED（GUI 未走真窗口）。
+- 本轮踩到的两件事（都写进教训）：①负向对照的「还原」第一次用了**改动前**备份，把两个源文件整个退回上一轮 ⇒ 立即重做改动，并改为先存「实现态快照」再变异；②本机 dotnet 的 env 必须用 Windows 原生反斜杠，正斜杠的 `LOCALAPPDATA` 会让凭据库目录用例红（与代码无关）。
+- 提交：W6 树 `feature/cross-device-source-sync`（代码与文档同一提交；提交号以 PR #39 head 为准——docs 正文不自指 SHA）。四条 exact-SHA CI 按该 head 跑，run 号与计数见 PR 正文与本轮账本。
+## §65 W6-96：接收口不再有「收到即写库」的构造器（结构上不给载具）
+
+- 编号说明：§59–§64 是 Windows 侧轮次（W6-90…W6-95），只落在跨设备分支；本节合并后紧随 §64。
+
+### 65.1 结论先行
+
+- 缺口不在生产接线，而在 API 形状：`SourceSyncTransferImportService` 与 `SourceSyncListenerImportService` 各留了一个以 `AndroidSourceSyncService` 为参数的次构造器，接口上等于写着「传一个服务进来就写库」。
+- 生产从未用过它：接收侧一直走 `SourceSyncImportGateways.acceptOnly()`（只解码、回显身份），写入发生在预览页逐条允许之后的 `applyRound`。
+- 一轮删掉两个次构造器：接收口现在只能拿 `SourceSyncImportGateway`；两个类的 KDoc 把契约写成「接收只解码 + 回显身份 + 回传信封原文，写入只发生在 `SourceSyncImportSession.apply()` / `AndroidSourceSyncService.applyRound`」。
+- 新增 3 个用例把这个形状钉住（含对照组与结构断言），本机 `core:database` 242 → **245** 全绿。
+
+### 65.2 为什么删而不是留注释
+
+- 「生产没用过」不等于「不会被用」：两个次构造器各是一个 `SourceSyncImportGateway` 的快捷方式。只要有人写 `SourceSyncTransferImportService(androidSourceSyncService)`，收到的每一条可写来源都会在用户看到预览之前落库，逐条审批变成装饰 —— 这条纪律从 W6-27 起在文档里写了六遍，但纪律不是编译期约束。
+- 反射断言比注释硬：新用例 `noReceiveEntryPointCanBeHandedAWriteCapableService` 逐个检查两个类的 `declaredConstructors`，只要参数表里出现 `AndroidSourceSyncService` 就红灯（对照见 §65.5 的 A / B 两条变异）。
+- 备选方案（把 `SourceSyncImportResult` 窄化成「只含身份回显」的新类型）未采纳：它被 5 个测试文件 40+ 处计数断言消费（`SourceSyncTransferImportTest` 17 处、`SourceSyncListenerInteropTest` 11 处、`SourceSyncArchiveImportTest` 6 处、两个 controller 测试余下），属跨模块大改，超出单轮最小切片。本轮先把载具从生产 API 上拆掉。
+
+### 65.3 三处改动
+
+- `core/database/.../sync/SourceSyncTransferImportService.kt`：删次构造器；`SourceSyncImportGateway` 与类的 KDoc 改写（生产实现只有 acceptOnly；接收口不认识写库服务）；`object SourceSyncImportGateways` 补一句「W6-96 起这是生产唯一的接收网关」。
+- `core/database/.../sync/SourceSyncListenerImportService.kt`：删次构造器；类 KDoc 与 `start(gateway = …)` 的参数说明改成「生产用 acceptOnly；写库不在接收口上」。
+- 测试：两处旧接线改成**手写网关**并注明来历 —— `SourceSyncTransferImportTest.writeThrough`（4 个调用点）、`SourceSyncListenerImportTest.writeThroughServiceOver`（3 个调用点）、`SourceSyncListenerInteropTest` 的 gateway 处加注释；新文件 `SourceSyncReceiveWiringTest`（3 例）。
+
+### 65.4 用例与计数
+
+- 新文件 `core/database/src/test/kotlin/com/mediahub/core/database/sync/SourceSyncReceiveWiringTest.kt` 三例：
+  1. `theGoldenEnvelopeIsWritableSoTheZeroWriteChecksBelowHaveTeeth`（对照组：同一封黄金信封经手写写库网关确实落两条，`createCalls == 2`）——它让下面那条零写入断言不是「空信封也绿」；
+  2. `theProductionGatewayEchoesTheSameEnvelopeIdentityWithoutWriting`（acceptOnly 收同一封信封：`deviceId` / `snapshotId` / `envelopeContentHash` 都在、信封原文回传、`hasWrites == false`、三个桶全 0、store 没被碰）；
+  3. `noReceiveEntryPointCanBeHandedAWriteCapableService`（结构断言，见 §65.2）。
+- 本机：`core:database` **245 / 0 失败**（242 → +3，12 skipped），`feature:settings` **408 / 0**（未变）；四模块口径 `core/common` 660 / `core/database` 245 / `feature:settings` 408 / `feature/server` 40 = **1353**；C# 与 Windows 侧本轮零改动（**1683 通过 / 0 失败**，W6-95 的 `087ca919`）。日志 `D:/mh-verify/w696-test1.log` / `w696-test2.log`。
+- `--required-suite` 仍 **60**（门禁按套件名录钉，新套件由 `--require-complete-suites` 逐个方法核对）；新例计入 `uniqueTests` 2446 → **2449**；instrumentation 不动（每 job 137）。
+
+### 65.5 四条负向对照
+
+| 变异（把 W6-96 拆掉的东西放回去 / 掏空） | 结果 | 失败用例 |
+| --- | --- | --- |
+| A 给 `SourceSyncTransferImportService` 加回以 `AndroidSourceSyncService` 为参数的次构造器 | 245 / **1 红** | `SourceSyncReceiveWiringTest.noReceiveEntryPointCanBeHandedAWriteCapableService` |
+| B 给 `SourceSyncListenerImportService` 加回同样的次构造器 | 245 / **1 红** | 同上（一个用例里两个类型逐个检查） |
+| C `acceptOnly()` 不再回显 `deviceId` | 245 / **3 红** | `SourceSyncArchiveImportTest.acceptOnlyGatewayEchoesTheDecryptedIdentityWithoutWriting`、`SourceSyncReceiveWiringTest.theProductionGatewayEchoesTheSameEnvelopeIdentityWithoutWriting`、`SourceSyncTransferImportServiceTest.acceptOnlyEchoesIdentityAndContentHashWithoutWriting` |
+| D 接收口不再回传信封原文（`Imported(gateway.importEnvelope(json), null)`） | 245 / **3 红** | `SourceSyncArchiveImportTest.plaintextEnvelopeKeepsTheExactTextPath`、`SourceSyncReceiveWiringTest.theProductionGatewayEchoesTheSameEnvelopeIdentityWithoutWriting`、`SourceSyncTransferImportServiceTest.acceptedEnvelopeIsHandedBackWithItsText` |
+
+- 四条各自跑完立刻从**实现态快照**逐字节还原（`D:/mh-verify/w696-impl-*.kt` + sha256 相等）；日志 `D:/mh-verify/w696-neg-A…D*.log`。
+
+### 65.6 工具教训：XML 里「哪条红了」会错位
+
+- 本轮第一次跑 A / B 对照时，报告的失败名是 `theGoldenEnvelopeIsWritable…`（对照组用例），而真正红的是 `noReceiveEntryPointCanBeHandedAWriteCapableService`（结构断言）—— 差点把「断言没牙」写成结论。
+- 原因：解析 xUnit XML 时用了 `/<testcase\b[^>]*>[\s\S]*?<\/testcase>/g`。通过的用例是自闭合标签 `<testcase … />`，它被当成开标签，非贪婪扫描一直走到后面某个真实 `</testcase>`，于是失败被记账到前面那个通过的用例名上。
+- 计数不受影响（`<testsuite tests=/failures=>` 属性是对的，只有名字错位）；改法：先匹配自闭合（`/<testcase\b[^>]*?(?:\/>|>[\s\S]*?<\/testcase>)/g`），或直接数文本日志里的「失败 <全限定类名>」行。
+- 次生教训：在 Windows 上按路径过滤要按分隔符来（`path.includes("src/test")` 在 `src\test` 上一个都不命中，本轮第一次找 `envelopeJson` 断言时因此误判「没有测试钉住它」）。
+
+### 65.7 边界与仍未做
+
+- 本轮拆掉的是**生产 API 上的载具**，不是「写库网关」这个概念：测试里仍能手写 `SourceSyncImportGateway { service.importEnvelope(it) }`（两处改动后的接线就是它），这是有意保留的对照组。
+- `SourceSyncImportResult` 的形状没动：它同时承担「接收回显」与「应用结果」两种语义，窄化留作后续候选。
+- 仍未做：真实两机联调与真机 instrumentation 仍 NOT_RUN / DEVICE_UNVERIFIED；Windows 侧接收路径本轮未动。
+
+### 65.8 状态
+
+- EXECUTED_PASS（本机 `core:database` 245/0 + `feature:settings` 408/0；四条负向对照全红并逐字节还原）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。
+
+## §66 W6-97：接收口的回执收窄成只描述身份的类型（写入计数不在接收通道上）
+
+### 66.1 结论先行
+
+- 上一轮（§65）删掉了两个能写库的次构造器，把「接收口不要再接写库服务」做成了编译期约束；但**回执类型**仍是写库用的 `SourceSyncImportResult`：一个只收信、一个字节都不写的通道，返回值里却摆着 `appliedCount` / `hasWrites` / `requiresApprovalCount` / `ignoredCount` / `totalCount`。类型上「接收」与「写了几条」成了同一件事。
+- 本轮新增 `SourceSyncReceiveEcho`（1123 B）：只有 deviceId / snapshotId / envelopeContentHash / rejectedReason / rejectedMessage 五项 + `isRejected`。`SourceSyncImportGateway.importEnvelope`、`SourceSyncTransferImportOutcome.Imported.result` 与 `SourceSyncImportGateways.acceptOnly()` 全部改用它。
+- 写入计数只留在 `AndroidSourceSyncService.applyRound(...)` 的 `SourceSyncApplyReport` 里 —— 那是用户在预览页逐条允许之后才会发生的事。五项字段名与旧类型逐字一致，生产读取点零改动（生产只读 deviceId / rejectedReason / rejectedMessage）。
+
+### 66.2 为什么是回执窄化，而不是删掉旧实现
+
+- `AndroidSourceSyncService.importEnvelope(envelopeJson)`（→ 私有 `apply(envelope)`）生产零调用，但它**不是** `applyRound` 的别名：它一把写全部可写条目、不按逐条裁决、不处理删除、不推基线。语义不同，删它等于重写测试口径，超出单轮最小切片。要拆掉的是「接收通道能装下写入信息」这一条，不是写库实现本身。
+- 生产消费接收回执计数的代码为零：`SourceSyncReceiveController` 与 `SourceSyncListenerController` 只读 deviceId / rejectedReason / rejectedMessage；界面里的计数文案来自 `SourceSyncApplySummary`。所以窄化对生产是零行为变化的类型收紧。
+
+### 66.3 改动面
+
+- 生产：新 `core/database/src/main/kotlin/com/mediahub/core/database/sync/SourceSyncReceiveEcho.kt`；`SourceSyncTransferImportService.kt` 的网关签名、`Imported.result`、`acceptOnly()` 与三处 KDoc（10323 → 10643 B）。
+- 测试：新 `core/database/src/test/kotlin/com/mediahub/core/database/sync/SourceSyncWriteThroughGateway.kt`（`SourceSyncImportResult.toEcho()` + `WriteThroughGateway`：调用写库服务、把写库回执留在自己这边、只把 echo 交给接收层）；`core/database` 的 7 个测试文件把计数断言改读网关留下的结果（`gateway.lastResult` / `gateway.results[i]`），假网关改返回 echo；`feature/settings` 的 3 个测试把标识符换成 `SourceSyncReceiveEcho`。
+
+### 66.4 用例与计数
+
+- 新例：`SourceSyncReceiveWiringTest.theReceiveReceiptTypeCarriesNoWriteCountsAtAll` —— 反射 `SourceSyncReceiveEcho::class.java.declaredMethods`，任何无参访问器只要名字里带 applied / requiresapproval / ignored / unsupported / failed / total / haswrites 就红。
+- 本机：`core:database` **246**（245 → +1，12 skipped）、`feature:settings` **408**；四模块 660 / 246 / 408 / 40 = **1354**。C# 与 Windows 侧本轮零改动。CI `uniqueTests` 预期 2449 → **2450**。
+- 日志：`D:/mh-verify/w697-test3.log`。
+
+### 66.5 四条负向对照
+
+| 变异（文件） | 结果 |
+| --- | --- |
+| A `acceptOnly()` 的 Ok 分支把 `deviceId` 换成 null（SourceSyncTransferImportService.kt） | 246/**3 红**（archive / wiring / service 三处回显身份断言） |
+| B `SourceSyncReceiveEcho` 上加 `val appliedCount: Int = 0`（SourceSyncReceiveEcho.kt） | 246/**1 红**（本轮结构断言） |
+| C `toEcho()` 把 `deviceId` 换成 null（SourceSyncWriteThroughGateway.kt） | 246/**3 红**（监听导入两条往返 + 金信封对照） |
+| D 把写库次构造器加回 `SourceSyncTransferImportService` | 246/**1 红**（W6-96 的结构断言仍在生效） |
+
+- 四条各自跑完立刻从**实现态快照**逐字节还原（`D:/mh-verify/w697-impl-*.kt` + sha256 相等）；日志 `D:/mh-verify/w697-neg-A…D*.log`。
+- 对照 C 第一次跑成 `bundleLibCompileToJarDebug FAILED`：Windows 上 `classes.jar` 被另一个进程占用（`java.nio.file.FileSystemException: …另一个程序正在使用此文件`），不是代码问题；重跑得 3 红。
+
+### 66.6 工具教训
+
+- **不要用「`名字(`」判断导入是否被使用**：Kotlin 的 `runBlocking {` / `launch {` 没有括号，`@OptIn(ExperimentalCoroutinesApi::class)` 也没有 —— 本轮清理未用导入时因此把 9 个文件里仍在使用的 `kotlinx.coroutines.*` 导入删掉（编译报 52 行 `Unresolved reference 'runBlocking'`）。恢复方式是从 `git show HEAD:<path>` 取原始导入行（core/database 六个文件的 `runBlocking`、三个 feature 测试的 `CompletableDeferred` / `ExperimentalCoroutinesApi` / `launch`）按序合回。
+- gradle 偶发 `classes.jar` 占用属环境抖动：先看失败的是哪个 task；测试没跑起来时，XML 里留着的是上一轮的失败名。
+
+### 66.7 边界与仍未做
+
+- `SourceSyncImportResult` 的形状没动：它仍是写库回执；`applyRound` 的 `SourceSyncApplyReport` 是另一套更细的类型。
+- `AndroidSourceSyncService.importEnvelope` / 私有 `apply` 仍在（生产零调用、测试驱动），它与 `applyRound` 的语义差（删除、逐条裁决、基线）未被抹平。
+- 仍未做：真实两机联调与真机 instrumentation 仍 NOT_RUN / DEVICE_UNVERIFIED；Windows 侧接收路径本轮未动。
+
+### 66.8 状态
+
+- EXECUTED_PASS（本机 `core:database` 246/0 + `feature:settings` 408/0；四条负向对照全红并逐字节还原）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。
+
+## §67 W6-98：删除失败那一步为什么失败也进结果行（对齐 Windows 的 Refused 异常消息）
+
+### 67.1 结论先行
+
+- W6-88 让删除失败会说出「卡在哪一步」（`local-source-remove-failed:<step>`），但「那一步为什么失败」在 Android 侧被丢掉了：`ServerSourceSyncRemover` 的两个 catch 只交出步骤码，异常消息（「keystore 拒绝访问」这类唯一能行动的线索）没有任何出口。
+- Windows 权威从不丢这句话：`ServerManager.RemoveRemoteSourceAsync` 的 `DeleteAsync` 不 try/catch，异常一路冒到 `SourceSyncImportRound.ApplyAsync` 的 catch，折成 `SourceSyncWriteOutcome.Refused(message)`，结果页的「未写入」区逐条带着它（W6-91 的 `SourceSyncRefusedText`）。
+- W6-98 把这句话补回 Android：删除失败的行尾追加「（原因：…）」，与步骤码同一行；净化（折叠空白 / 160 字符截断 / 空白返 null / 不留半个代理对）的唯一权威放在 core:database 的 `SourceSyncRemovalCauses.describe`（W6-99 起更名为 `SourceSyncFailureCauses`，同一套净化也服务写入失败，见 §68），界面只 trim 判空。
+
+### 67.2 为什么原因句只进回执与界面
+
+- **不参与判定**：步骤码负责「下一步给什么建议」（W6-88 的 `removalStepLabel`），原因句只是那一刻的事实。两者混进同一个字段会让码表查不出来，也会让建议随异常文案漂移。
+- **没有消息就是 null**：`refusalCauseSuffix` 对 null 与纯空白都返回空串，界面只在真的有一句时才拼接，不会出现「（原因：）」这种半句。
+- **要能安全地摆在界面行上**：异常消息常带换行与制表符（先折叠成单个空格），可能很长（超过 160 字符截断并加省略号），截断点可能落在代理对中间（避免行上出现乱码方块）。
+
+### 67.3 改动面（7 处）
+
+| 位置 | 改动 |
+| --- | --- |
+| `core/database/.../sync/SourceSyncFailureCauses.kt`（W6-98 新，W6-99 更名） | `describe(Throwable?)`：trim → 折叠 `\s+` → 空白返 null → 超 160 截断 + `…`（代理对安全） |
+| `core/database/.../sync/SourceSyncSourceRemover.kt` | `Failed(reason, causeMessage = null)`：默认参数，既有实现零改动 |
+| `feature/server/.../ServerSourceSyncRemover.kt` | 两个 catch 分别传 `describe(failure.cause)` 与 `describe(failure)` |
+| `core/database/.../AndroidSourceSyncService.kt` | `SourceSyncRefusal` 与 `SourceSyncRemovalFailure` 各加 `causeMessage`；Failed 分支抄 `outcome.causeMessage`；本服务这一层漏出的异常走同一净化函数；删除类拒绝带上它（写入类恒 null） |
+| `feature/settings/.../SourceSyncImportModels.kt` | `SourceSyncRefusedEntry` 加 `causeMessage`（只影响行尾，不参与判定） |
+| `feature/settings/.../SourceSyncImportLogic.kt` | `refusalLine` 尾部追加 `refusalCauseSuffix(...)`；新增该函数（core 净化函数的唯一消费方） |
+| `feature/settings/.../SourceSyncImportSession.kt` | 两条取拒绝条目的路径（refusals 与 removalFailures 补漏）都抄 `causeMessage` |
+
+### 67.4 用例与计数
+
+- `core/database` 246 → **251**：新 `SourceSyncFailureCausesTest`（W6-99 更名，W6-98 时叫 SourceSyncRemovalCausesTest）4 例（无消息/空白 → null、折叠成单行、160 边界与截断、代理对不被截断）；`SourceSyncApplyRoundTest` +1（失败条目的步骤码与原因句同源，`removalFailures` 与逐条拒绝清单的 `causeMessage` 一致）。
+- `feature/settings` 408 → **409**：`SourceSyncImportLogicTest` +1（整行精确串含「（原因：keystore 拒绝访问）」、`causeMessage=null` 时与被改前逐字节一致、`refusalCauseSuffix(null)` 与纯空白都返空串）；`SourceSyncImportSessionTest` 既有两例补断言（删除类带原因、写入类不带；补漏路径同样带上）。
+- `feature/server` 40 → **42**：原有三处期望值补上异常消息；新增两例（步骤码与异常消息一起交出去；那一步什么都没说时是 null 而不是空串）。
+- 四模块本机口径：`core/common` 660 / `core/database` **251** / `feature/settings` **409** / `feature/server` **42** = **1362**（W6-97 是 1354）；`uniqueTests` 2450 → **2458**；`--required-suite` 仍 **60**。C# 与 Windows 侧本轮零改动。
+
+### 67.5 四条负向对照
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A `describe` 把「没有消息」变成空串（`return null` → `return ""`） | 251/**2 红** | `the_message_is_trimmed_and_folded_into_one_line`、`a_missing_cause_or_a_message_that_says_nothing_becomes_null` |
+| B 文案层不再挂原因句（`+ refusalCauseSuffix(...)` → `+ ""`） | 409/**1 红** | `SourceSyncImportLogicTest.aFailedRemovalLineCarriesBothTheStepAndTheReasonTheStepItselfGave` |
+| C 服务层不抄 `outcome.causeMessage` | 251/**1 红** | `SourceSyncApplyRoundTest.a_remover_failure_carries_the_exception_message_the_step_gave` |
+| D 删除器不再交出异常消息（两处 catch → `null`） | 42/**4 红** | `a_failing_remove_chain_keeps_the_plain_failure_code_when_no_step_is_known`、`the_message_the_step_threw_travels_with_the_step_code`、`two_different_steps_never_share_a_reason_code`、`a_failed_step_names_itself_in_the_reason_code` |
+
+- 四条各自跑完立刻从**实现态快照**逐字节还原（`D:/mh-verify/w698-impl-{causes,logic,service,remover}.kt` + `.sha256` 相等）；日志 `D:/mh-verify/w698-neg-A-empty-cause-becomes-a-blank-sentence.log`、`w698-neg-B-line-drops-the-cause.log`、`w698-neg-C-service-drops-the-cause.log`、`w698-neg-D-remover-drops-the-cause.log`；还原后三模块复验 **251 / 409 / 42 全绿**（`D:/mh-verify/w698-test2.log`）。
+
+### 67.6 工具教训
+
+- **run_code 里不要写模板字面量**：Kotlin/文档内容里的反引号会把 JS 解析器打炸（`Expected , got string literal`）；改用单引号字符串数组 + 占位符，写盘时再还原。
+- 字符串手术的补丁助手必须**先还原占位符再做锚点匹配**，否则占位符原样进 `indexOf` 必然 0 命中；同时让锚点失败只记入 failures 并继续其余编辑，避免一条失手让整批改动半途而废。
+
+### 67.7 边界与仍未做
+
+- 原因句只在**删除类**拒绝上：写入类拒绝的原因码里已经有异常类名（W6-82 的码表），本轮没有把 message 也搬过去 —— 那是另一个口径决定，需要先看 Windows 侧写入失败给的是什么。
+- 界面不做二次净化：`refusalCauseSuffix` 只 trim 判空，折叠与截断都在 core:database。若将来出现第二个消费方（通知、日志导出），它必须走同一个函数，否则两处行文会漂移。
+- 仍未做：真实两机联调与真机 instrumentation 仍 NOT_RUN / DEVICE_UNVERIFIED；Windows 侧本轮零改动。
+
+### 67.8 状态
+
+- EXECUTED_PASS（本机 `core:database` 251/0（12 skipped）、`feature:settings` 409/0、`feature/server` 42/0；四条负向对照全红并逐字节还原）+ IMPLEMENTED_UNVERIFIED（真机与真服未跑）。## §68 W6-99：写入失败也把异常那句话带上（对齐 Windows 的 Refused 异常消息）
+
+### 68.1 结论先行
+
+- W6-82 之后，写入失败在安卓侧的表述是 `local-source-write-failed:<异常类名>`：知道「谁拒绝的」，不知道「为什么拒绝」。
+- Windows 权威从不丢这句话：`windows/src/MediaHub.App/Services/ServerManager.cs` 的 `ApplyRemoteSource` 只对预检失败写整句，真正的写入（`AddEntry` + `_settings.Update`）没有 try/catch，异常冒到 `SourceSyncImportRound.ApplyAsync` 的 catch，折成 `Refused(ex.Message)` 进结果页。
+- 本轮让安卓对齐：`WriteAttempt.Refused` 带 `causeMessage`，`SourceSyncRefusal.causeMessage` 不再只服务删除类；文案层 `refusalCauseSuffix` 自动把「（原因：…）」挂在写入行尾。
+- 顺带更名：`SourceSyncRemovalCauses` → `SourceSyncFailureCauses`（同一条净化现在同时服务删除与写入，名字不该再限定删除）。旧名在文档与前几轮叙述里保持原样，只在本节写明对应关系。
+
+### 68.2 一处净化、两处消费
+
+| 环节 | 位置 | 规则 |
+| --- | --- | --- |
+| 写 | `SourceSyncFailureCauses.describe(Throwable?)`（core/database） | trim → 折叠 `\s+` 为单空格 → 空白返 **null** → 超过 160 字符截断加省略号且不留半个代理对 |
+| 消费（删除） | `ServerSourceSyncRemover` 两个 catch → `SourceSyncRemoveOutcome.Failed(reason, causeMessage)` | W6-98 起 |
+| 消费（写入） | `writeRecord` 的 catch → `WriteAttempt.Refused(reason, causeMessage)` | W6-99 起 |
+| 落行 | `SourceSyncImportLogic.refusalLine` 尾部 `refusalCauseSuffix(causeMessage)` | 空白 → 空串（不出现半句「（原因：）」） |
+
+- 原因句**不参与任何判定**：分桶、闸门、基线推进都只看动作与原因码。
+- 不是异常的拒绝仍是 null：类型不认识（`unknown-source-type`）、没有可拨号地址（`no-usable-endpoint`）、身份空白（`missing-sync-source-id`）、更新时行已消失（`source-vanished`）——它们没有异常可引，不编。
+- 旧路径 `apply()`（`importEnvelope` → 一把写全部，只被测试驱动）没有原因句槽，`SourceSyncCandidate` 也不带消息，异常消息在那里仍然丢掉；生产口径以 `applyRound` 为准，已在代码注释里写明。
+
+### 68.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `core/database/.../SourceSyncFailureCauses.kt`（W6-98 建，W6-99 更名） | 对象更名 + KDoc 写明删除与写入共用 |
+| `core/database/.../AndroidSourceSyncService.kt` | `WriteAttempt.Refused` 加 `causeMessage`；`writeRecord` 的 catch 交出净化后的消息；`applyRound` 写入分支传 `attempt.causeMessage`；`SourceSyncRefusal` KDoc 从「写入类一律 null」改为「不是异常的拒绝才是 null」 |
+| `feature/server/.../ServerSourceSyncRemover.kt` | import 更名 + 两处 catch 用新名字（行为不变） |
+| `feature/settings/.../SourceSyncImportLogic.kt` | `refusalCauseSuffix` KDoc 扩到写入类（行为不变，写入行自动获得后缀） |
+| 测试 | `SourceSyncApplyRoundTest` 加 2 例（FakeStore 多一个 `writeFailure` 槽）、`SourceSyncImportLogicTest` 加 1 例、`SourceSyncFailureCausesTest` 更名 |
+
+### 68.4 用例与计数
+
+- `core/database` **251 → 253**：`a_write_failure_carries_the_message_the_storage_layer_threw`（`IllegalStateException("disk full")` ⇒ 码仍是 `local-source-write-failed:IllegalStateException`、`causeMessage == "disk full"`）与 `a_write_failure_that_says_nothing_keeps_no_message_instead_of_an_empty_one`（无消息的异常 ⇒ `assertNull`）；既有「写失败与删失败各自留码」用例补了「有消息的那条带消息、没消息的那条是 null」。
+- `feature/settings` **409 → 410**：写入失败整行精确串 `- 客厅 Emby（sync-1）· 写入 · 本机存储拒绝了这次写入（IOException）。（原因：磁盘已满）`；`causeMessage = null` 时与改前逐字节一致。
+- `feature/server` **42** 不变（只换名字）。本机四模块 660 / 253 / 410 / 42 = **1365**；新例计入 `uniqueTests` 2458 → **2461**；`--required-suite` 仍 60。
+
+### 68.5 四条负向对照（实现态快照先行，跑完逐字节还原）
+
+| 变异 | 结果 | 说明 |
+| --- | --- | --- |
+| A `writeRecord` 的 catch 不再交 `SourceSyncFailureCauses.describe(failure)` | 253 / **2 红** | 新用例 + 既有混合用例 |
+| B `applyRound` 写入分支不再传 `attempt.causeMessage` | 253 / **2 红** | 同上两条 |
+| C 净化器把「没有消息」变成空串 | 253 / **3 红** | 会写出半句「（原因：）」 |
+| D 文案层只给删除行挂原因 | 410 / **1 红** | 写入行的原因句消失 |
+
+快照 `D:/mh-verify/w699-impl-{service,causes,logic}.kt`；日志 `D:/mh-verify/w699-neg-{A,B,C,D}-*.log`；四次变异后均以 sha256 确认还原到实现态。
+
+### 68.6 与 Windows 的差异
+
+- 两边都把「异常自己说的话」带给用户；Windows 原样透出，安卓过一层净化（单行、160 字符、代理对安全），保证原因句能安全摆在单行 UI 上。
+- Windows 的写入失败落在 `Refused` 行（与安卓的「未写入」区同义）；两边都不因此改变分桶或基线。
+
+### 68.7 边界与仍未做
+
+- 预检类拒绝的码表不变，也不给它们编原因句。
+- 旧 `apply()` 路径不含消息（测试专用），生产路径以 `applyRound` 为准。
+- 删除链内部日志（step + cause 进日志而不只进回执）仍未做；真实两机联调与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 68.8 状态
+
+- **EXECUTED_PASS**：本机 `core/database` 253 / 0、`feature/settings` 410 / 0、`feature/server` 42 / 0；四条负向对照全红且逐字节还原。
+- **IMPLEMENTED_UNVERIFIED**：Windows 侧本轮零改动（C# 仍 1683 通过 / 0 失败），exact-SHA CI 见 PR 正文。
+
+## §69 W6-100：删除链失败也进日志（步骤码 + 脱敏后的原始原因）
+
+### 69.1 结论先行
+
+W6-88 让删除链说得出「卡在哪一步」，W6-98 让结果页带上「为什么」。这两句都只出现在**跨设备同步的结果页**上；
+用户直接点「删除媒体源」（Server Editor 危险区）走的是**同一个** `RemoveServerUseCase`，而那条路径上只有 ViewModel 打的一句「删除媒体源失败」
+（`ServerEditorViewModel` 的 `logger.e(LogTag.UI, "删除媒体源失败", e)`），既没有步骤码，也没有「诊断报告导出」里能翻到的那一行。
+
+本轮把步骤码与原始异常交进统一日志（logcat + 内存 `LogBuffer`）：失败一行 `remove-server-failed:<step>`（带 throwable）、
+成功一行 `remove-server-completed:<id>`。调用方**只交 Throwable、不拼字符串**——脱敏由 `Logger` 实现统一完成
+（`LogcatLogger` 走 `safeLogText` 的脱敏堆栈，`MemoryLogger` 走 `Redactor.redact`），
+任何 Token / Cookie / 密码都不会因为这条诊断进日志。
+
+### 69.2 改动面
+
+| 位置 | 改动 |
+| --- | --- |
+| `feature/server/src/main/kotlin/com/mediahub/feature/server/RemoveServerUseCase.kt` | 构造注入 `Logger`（app 的 `AppModule` 早已绑定 `CompositeLogger(LogcatLogger(), MemoryLogger(LogBuffer()))`）；`runStep` 的 catch 先打 `logger.w(LogTag.DATABASE, "remove-server-failed:" + step.code, failure)` 再抛；八步都走完打 `logger.i(LogTag.DATABASE, "remove-server-completed:" + id)` |
+| `feature/server/src/test/.../RemoveServerUseCaseStepsTest.kt` | `harness()` 造 `LogBuffer` + `MemoryLogger` 并透出 `Harness.logs`；新增三例 |
+| `feature/server/src/test/.../SourceSyncRemovalCascadeRoomTest.kt` | 构造点补 `logger = MemoryLogger(LogBuffer())`（该测试不读日志，只补参数） |
+
+为什么不是「自己把 cause.message 拼进 message」：那样会绕过 `LogcatLogger` 的堆栈脱敏路径；
+`Logger` 的契约写明「所有实现必须对内容调用 `Redactor.redact`」，只在它这一层交 `Throwable` 才是唯一入口。
+
+### 69.3 用例与计数
+
+- `feature/server` **42 → 45**（`RemoveServerUseCaseStepsTest` 新增三例）：
+  1. 第 4 步失败 ⇒ 恰好一行 `[W][DATABASE] remove-server-failed:credentials | IOException: keyring unavailable`；
+  2. 八步全部走完 ⇒ 恰好一行 `[I][DATABASE] remove-server-completed:<id>`，且没有任何 W 行；
+  3. 安全不变式：异常消息里恰好带着 `token=Sup3rS3cret` ⇒ 该行含 `token=****`、不含明文（脱敏真的发生了）。
+- 本机四模块 `core/common` 660 / `core/database` 253 / `feature/settings` 410 / `feature/server` **45** = **1368** 例全绿；
+  新例计入 `uniqueTests` 2461 → **2464**；`--required-suite` 仍 **60**（`feature/server` 不在门禁名单内）。
+
+### 69.4 四条负向对照（实现态快照先行，跑完逐字节还原）
+
+| 变异 | 结果 | 说明 |
+| --- | --- | --- |
+| A 删掉 `logger.w` 那一行 | 45 / **2 红** | 失败行用例 + 安全不变式用例 |
+| B 只交步骤码、不交 `failure` | 45 / **2 红** | 同上两条（原因句没了） |
+| C `w` 降成 `d` | 45 / **2 红** | 级别断言 [W] 变 [D] |
+| D 删掉成功的 `logger.i` | 45 / **1 红** | 成功行用例 |
+
+快照 `D:/mh-verify/w6100-impl-use.kt`（sha256 `ae43b1f2b4d92ff691e06cd7af50cdd868c4f945063bb3e0b5178ce2b8aeedfd`）；
+日志 `D:/mh-verify/w6100-neg-{A,B,C,D}-*.log`；四次变异后都以 sha256 确认还原到实现态。
+
+### 69.5 边界与仍未做
+
+- 日志不是用户界面：结果页仍只多「（原因：…）」那一句，用户不需要翻日志；日志是给「诊断报告导出」与现场排查的。
+- 日志里只带媒体源的内部 id（uuid，不是凭据），不带 server 名字（用户数据）；
+- 取消（`CancellationException`）仍然直接上抛、**不记 warn**——取消不是失败，这与 W6-88 的取消口径一致；
+- 成功行是 info 级：八步全部做完才打，删除链半途失败时不会有它；
+- 仍未做：真实两机联调与真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**；Windows 侧本轮零改动。
+
+### 69.6 工具教训
+
+- 读 JUnit XML 统计失败用例名必须用 `/<testcase\b[^>]*?(?:\/>|>[\s\S]*?<\/testcase>)/g`——通过的用例是自闭合标签，
+  用 `/<testcase\b[^>]*>[\s\S]*?<\/testcase>/g` 会把失败算到前一个通过的用例头上；
+- 四条负向对照必须先存实现态快照再变异，还原只许用快照（用实现前备份还原会把功能整个抹掉——W6-95 轮已踩过）；
+- Kotlin 文件是 LF；文档与 README 的换行风格每轮先判（本仓库 docs 为 LF、README 为 CRLF）。
+
+### 69.7 状态
+
+- **EXECUTED_PASS**：本机 `feature/server` 45 / 0（其余三模块 660 / 253 / 410 均未动）；四条负向对照全红且逐字节还原到实现态。
+- **IMPLEMENTED_UNVERIFIED**：exact-SHA CI 见 PR 正文；Windows 侧零改动（C# 仍 1683 通过 / 0 失败）。
+- 主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+## §70 W6-101：同步一轮的汇总进日志（只记计数与内部 id）
+
+### 70.1 结论先行
+
+W6-98/W6-99 让「哪一条为什么失败」进了结果页，但「这一轮同步到底发生了什么」只活在界面内存里：
+用户隔天说「我昨天同步过，那边没变化」，现场能拿到的只有当时那一屏，离开页面就没了。本轮把一轮的
+台账写进日志——成功一行 info、坏信封一行 warn，两者都只含计数与内部标识；displayName / endpoint /
+URL / 凭据片段一律不进（`SourceRecord.secrets` 的 D6 约定：不透明片段不记录日志）。日志实现由 App 的
+Hilt `Logger`（`CompositeLogger(LogcatLogger(), MemoryLogger(LogBuffer()))`）提供，于是 logcat 与
+「诊断报告导出」里的 LogBuffer 同时看得到这一行。
+
+### 70.2 一处出口、两行日志
+
+`AndroidSourceSyncService.applyRound` 是 Android 侧唯一写库入口（W6-81 起生产会话的写入口也只经它），
+所以两行日志都落在它的两个出口上，不散落在调用方：
+
+- 解码失败：`logger.w(LogTag.DATABASE, "sync-round-rejected:" + decoded.reason)` —— 只带稳定原因码
+  （如 `malformed-json`），信封内容一个字节都不转载；
+- 一轮走完：`logger.i(LogTag.DATABASE, "sync-round-applied:device=… snapshot=… applied=… skipped=…
+  withheld=… refused=… removed=…")` —— 六个计数与两个内部标识，与回执字段同源。
+
+实现顺序是先构 `val report = SourceSyncApplyReport(...)`、再记日志、再 `return report`：日志不改变返回值，
+也不参与任何判定。取消（`CancellationException`）仍直接上抛，两条日志都不会打。
+
+### 70.3 生产接线（四处，一处一行）
+
+| 文件 | 改动 |
+| --- | --- |
+| `core/database/.../AndroidSourceSyncService.kt` | 构造尾部加 `private val logger: Logger = StdoutLogger()`（默认值让测试与既有调用方零改动） |
+| `feature/settings/build.gradle.kts` | 依赖补 `implementation(project(":core:logging"))`（此前只有 `testImplementation`，主代码碰不到 Logger） |
+| `feature/settings/.../SourceSyncImportSession.kt` | `production(...)` 加 `logger: Logger = StdoutLogger()` 并透传给服务 |
+| `feature/settings/.../SourceSyncImportViewModel.kt` | `@HiltViewModel` 构造注入 `Logger`（App 的 `AppModule.provideLogger` 早已绑定），传入 `production` |
+
+于是 App 里这一行同时进 logcat 与 LogBuffer；测试里传 `MemoryLogger(LogBuffer())` 就能逐字断言。
+
+### 70.4 用例与计数
+
+- `core/database` 的 `SourceSyncApplyRoundTest` 253 → **256**，三条：
+  1. `a_round_that_writes_leaves_one_summary_line_with_the_counts`：恰好一行，整串等于
+     `[I][DATABASE] sync-round-applied:device=device-windows snapshot=snap-windows applied=1 skipped=0 withheld=1 refused=0 removed=0`，
+     计数与回执一致；
+  2. `a_rejected_envelope_leaves_one_warning_naming_the_code_and_no_summary`：坏 JSON 只有一行
+     `[W][DATABASE] sync-round-rejected:malformed-json`，没有「已应用」的假消息；
+  3. `the_summary_line_never_quotes_a_name_an_endpoint_or_a_secret`：信封里带来源名、端点 URL 与
+     `token=Sup3rS3cret` 时，日志行含两个内部标识但不含这些值。
+- `feature/settings` **410** 不变（接线只有编译期约束，没有新增用例）；`feature/server` 45 不变。
+- 本机四模块 `core/common` 660 / `core/database` **256** / `feature/settings` 410 / `feature/server` 45 = **1371**；
+  新例计入 CI `uniqueTests` 2464 → **2467**，`--required-suite` 仍 **60**（新用例落在已钉住的套件里）；
+  C# 与 Windows 侧本轮零改动（1683 通过 / 0 失败）。
+- 本机全绿日志：`D:/mh-verify/w6101-test1.log`（首轮）、`w6101-test2.log`（还原后复验）。
+
+### 70.5 四条负向对照
+
+实现态快照先行：`D:/mh-verify/w6101-impl-service.kt`（sha256
+`ca90787440835808fa97abbe9d8346f70342a61df120e75984055b199f2f9f7d`）。
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A 删掉成功的 `logger.i(...)` 整块 | 256 / **2 红** | 汇总行用例 + 安全不变式用例（`.single()` 拿不到行） |
+| B 删掉坏信封的 `logger.w(...)` | 256 / **1 红** | `a_rejected_envelope_leaves_one_warning_naming_the_code_and_no_summary` |
+| C 汇总行拼上 `envelope.sources.firstOrNull()?.displayName` | 256 / **2 红** | 汇总行用例（整串不等）+ 安全不变式用例（行里出现来源名） |
+| D 把 `applied=` 写死成 `0` | 256 / **1 红** | `a_round_that_writes_leaves_one_summary_line_with_the_counts` |
+
+日志 `D:/mh-verify/w6101-neg-{A,B,C,D}-*.log`（C 的第一版把名字拼成 `envelope.sources.first().displayName`，
+删除类用例的空 `sources` 触发 `NoSuchElementException` 带出 11 红，日志单独留在
+`w6101-neg-C-summary-quotes-a-name.log`；换成 `firstOrNull()` 后只剩预期的 2 红，见
+`w6101-neg-C2-summary-quotes-a-name.log`）。四次变异后都以 sha256 确认还原到实现态。
+
+### 70.6 工具教训
+
+- 字符串手术的替换串必须把锚点末尾的换行补回：本轮替换 `import …` 行时 `to` 少了结尾 `\n`，
+  两个 import 被粘成一行（`import com.mediahub.model.MediaServerimport com.mediahub.model.ServerType`），
+  本地 `git diff` 不明显、编译期才炸成「imports are only allowed in the beginning of file」；
+- 变异应只改断言关心的那一维：C 的第一版同时改了「行内容」与「空 sources 的健壮性」，
+  失败面被放大到 11 条，反而看不出是哪条用例在守日志内容；
+- 负向对照仍须实现态快照先行、跑完逐字节还原并以 sha256 比对。
+
+### 70.7 边界与仍未做
+
+- 生产接线（Hilt → ViewModel → `production` → 服务）目前只有**编译期保证**与 core 层用例：
+  没有「App 里注入的 Logger 真收到这一行」的端到端用例，因此这段标注 **IMPLEMENTED_UNVERIFIED**；
+- 旧 `importEnvelope`/`apply()` 路径（只被测试驱动、不是生产会话的写入口）不记日志：它没有回执原因句槽，
+  与本轮无关，已在代码注释里写明；
+- 日志只写一行汇总，不逐条记（逐条原因已在结果页与 docs §56/§58/§60/§61/§64）；也不记历史轮次；
+- 日志不是用户界面：结果页仍以回执为准，日志服务于现场排查与「诊断报告导出」；
+- 真实两机联调、真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**；Windows 侧本轮零改动。
+
+### 70.8 状态
+
+- **EXECUTED_PASS**：本机 `core/database` 256 / 0（12 skipped）与 `feature/settings` 410 / 0；
+  四条负向对照全红（2 / 1 / 2 / 1）且逐字节还原到实现态；
+- **IMPLEMENTED_UNVERIFIED**：exact-SHA CI 见 PR 正文；生产接线的端到端证据未取（见 §70.7）；
+  Windows C# 1683 通过 / 0 失败，本轮零改动；
+- 主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+## §71 W6-102：Windows 的一轮汇总日志也说出是对端哪一轮（对齐 Android W6-101）
+
+### 71.1 结论先行
+
+- Windows 侧**原本就有一行汇总日志**（`SourceSyncService.ApplyApprovedAsync` 里的 `_log.Info("sync", …)`），
+  但它只说「写入 N 条，跳过 N 条，保留未应用 N 条」：**没有对端与快照身份、没有「扣住 vs 写入被拒」的拆分、没有移除条数**；
+  更关键的是这几行的措辞写在 App 层，而 `MediaHub.Tests` 不引用 `MediaHub.App`（csproj 只引 Domain/Net/Providers/Player/Mpv/Storage/Sync/SyncCli/TestSupport），
+  于是这段日志**零测试覆盖** —— 改坏了没有任何用例会红。
+- W6-102 把「一轮汇总该说什么」抽到 `windows/src/MediaHub.Sync/SourceSyncRoundSummary.cs` 的 `SourceSyncRoundSummaryText`
+  （`Identity` / `InfoLine` / `WarnLine` 三个静态方法），App 只决定「何时写」；于是同一句能被测试逐字钉住，且措辞里**不含任何来源名、地址与凭据**。
+- 汇总行现在是：
+  `已应用对端信封：对端 device-a · 快照 snap-1 · 写入 3 条 · 移除 1 条 · 跳过 1 条 · 保留未应用 3 条（扣住 2 · 写入被拒 1） · 本机基线已更新（不含任何凭据）`。
+
+### 71.2 一处措辞、两处消费
+
+- `InfoLine(deviceId, snapshotId, report)`：`移除` 由 `report.Written` 里 `Action == SourceSyncAction.Delete` 的条数算出，
+  **不做「写入 − 扣住」这类减法**；扣住与被拒分别读 `report.Withheld` 与 `report.Refused.Count` —— 两者相加才是 `Withheld` 计数，
+  这正是 Android W6-92/W6-95 定下的「一份计数、两份清单」分工（扣住清单进闸门，被拒清单进写入结果）。
+- `WarnLine(report)`：`Withheld <= 0` 返回 `null`（零条不占版面），否则一句 warn；`ApplyApprovedAsync` 只在返回值非 null 时写。
+- `Identity(deviceId, snapshotId)`：只给存在的那半边（「对端 device-a」或「快照 snap-1」），两边都没有时不编造，说「对端与快照未知」。
+- 与 Android 的对照：Android W6-101 的行是 `sync-round-applied:device=… snapshot=… applied=… skipped=… withheld=… refused=… removed=…`（机器可读的 key=value，供 logcat 与诊断导出检索），
+  Windows 是中文整句（面向 `LogService.Export()` 的人工报告）。两端都一样：一轮只写一行、只记计数与内部标识、来源名/端点/凭据一律不进。
+
+### 71.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.Sync/SourceSyncRoundSummary.cs`（新） | `SourceSyncRoundSummaryText`：`Identity` / `InfoLine` / `WarnLine`，本轮所有措辞的唯一权威 |
+| `windows/src/MediaHub.App/Services/SourceSyncService.cs` | `ApplyApprovedAsync` 的日志块改为 `WarnLine` + `InfoLine(preview.Envelope.DeviceId, preview.Envelope.SnapshotId, result)`，只决定何时写 |
+| `windows/tests/MediaHub.Tests/SourceSyncRoundSummaryTests.cs`（新） | 4 例：逐字整句、安全不变式、缺身份不编造、warn 只在扣住时出现 |
+
+### 71.4 用例与计数
+
+- `MediaHub.Tests` **1683 → 1687**（+4，全部是新文件里的纯文本用例）；App 工程 `dotnet build windows/src/MediaHub.App` 为 **0 警告 0 错误**（XAML 与 C# 都编译过，接线不是「只在源码里看起来对」）。
+- Android 侧零改动，`uniqueTests` 仍 **2467**、`--required-suite` 仍 **60**（本轮只改 `windows/**`，CI 的 Android 侧是未改动对照）。
+- 本机证据：`D:/mh-verify/w6102-test1.log`（`已通过 1687 / 失败 0`）、`D:/mh-verify/w6102-app-build.log`（0 警告 0 错误）。
+
+### 71.5 四条负向对照
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A `Identity(deviceId, snapshotId)` 恒返 `对端与快照未知` | 1684 / **3 红** | 逐字整句、缺身份不编造、安全不变式 |
+| B 扣住/被拒两个计数写死 0 | 1686 / **1 红** | 逐字整句 |
+| C `WarnLine` 恒返 null | 1686 / **1 红** | warn 只在扣住时出现 |
+| D 汇总行拼 `report.Written[0].DisplayName` | 1686 / **1 红** | 安全不变式 |
+
+实现态快照 `D:/mh-verify/w6102-impl-summary.cs`（sha256 `cff0bc078e11fe0f0fc75a49500840dc427d3f523bf09bae7cec0be4adc27f25`）；
+每条对照跑完都从快照逐字节写回并比对 sha256（`true`）；日志 `D:/mh-verify/w6102-neg-{A-identity-dropped,B-split-counts-zeroed,C-warning-never-fires,D-summary-quotes-a-name}.log`。
+
+### 71.6 边界与仍未做
+
+- **App 接线仍无自动化端到端证据**：`MediaHub.Tests` 引不到 `MediaHub.App`，所以「`ApplyApprovedAsync` 真的调了这两个方法」目前只有编译期保证与纯文本单测；
+  端到端（跑一次真同步、在 `LogService.Entries` 里看到那一行）属于 GUI/真机证据，本轮不取 ⇒ §71.7 记 IMPLEMENTED_UNVERIFIED。
+- 日志只写一行汇总，不逐条记（逐条原因已在结果页与 docs §56/§58/§60/§61/§64）；不记来源名、端点、凭据；warn 行只说「扣住 N 与写入被拒 N」，具体是哪条仍看结果页。
+- `SourceSyncRoundSummaryText` 目前只被 App 侧调用；CliRunner/headless 路径未接（不在本轮范围）。
+- 真实两机联调、真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 71.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` 1687 / 0 与 App 构建 0 警告 0 错误；四条负向对照全红（3 / 1 / 1 / 1）且逐字节还原到实现态；
+- **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与纯文本单测，端到端日志证据未取（见 §71.6）；
+  Android 侧本轮零改动，`uniqueTests` 2467 为未改动对照；
+- 提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+## §72 W6-103：每条被拒写入都进日志（哪一条、为什么）
+
+### 72.1 结论先行
+
+Windows 侧一轮同步里，写入器拒绝某一条时，用户能在结果页看到「未写入 1 条（逐条原因）」和那一行，W6-102 的汇总行也说出「扣住 N · 写入被拒 N」——但**日志里没有这一条**：
+`SourceSyncImportRound.ApplyAsync` 把写入器的异常折成 `SourceSyncWriteOutcome.Refused(error.Message)` 之后，路径上没有任何一行日志，只剩计数。
+Android 侧早在 W6-99（写入失败带原因进回执）与 W6-100（删除链失败带步骤码进日志）就把「哪一条、为什么」落到了日志，本轮把 Windows 这一侧补齐：
+**每一条被拒写入在被拒的那一刻就写成一行 `Warn`**，内容是对端身份、动作和白话原因。
+
+### 72.2 一处措辞、一处消费
+
+- 措辞仍在 `windows/src/MediaHub.Sync/SourceSyncRefusedSource.cs` 的 `SourceSyncRefusedText.LogLine(entry)`，固定句：
+  `同步写入被拒：<对端身份> · <动作> · <原因>`；身份为空写「（未知身份）」，原因空白沿用 `Reason()` 的「写入器没有说明原因」。
+  **不出现标题、端点 URL 或任何凭据片段**：身份是对端给的 syncSourceId，日志按它 grep；标题留在结果页。
+- App 侧 `SourceSyncService.ApplyApprovedAsync` 只把它接到 `_log.Warn(LogCategory, …)`，不自己造句——与 W6-102 同一纪律：措辞放 Sync 层，App 只决定何时写。
+- 触发点是 `ApplyAsync` 的新可选参数 `refusedSink`（放在 `skippedIds` 之后、`cancellationToken` 之前）。
+  异常路径（`IOException` / `UnauthorizedAccessException` / `InvalidOperationException`）与「写入器主动返回 `Refused`」路径都汇入同一个 `else` 分支，
+  所以只有一处上报：回调拿到的正是报告里那条 `SourceSyncRefusedSource` 实例（用例用 `Assert.Same` 钉住，两份不可能漂移）。
+
+### 72.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.Sync/SourceSyncImportRound.cs` | 签名加 `Action<SourceSyncRefusedSource>? refusedSink = null`；`else` 分支构造后同步回调 |
+| `windows/src/MediaHub.Sync/SourceSyncRefusedSource.cs` | 新增 `LogLine(entry)`（唯一句式） |
+| `windows/src/MediaHub.Sync/SourceSyncPeerRound.cs` | 转发改命名实参 `cancellationToken:`（位置参数已不再是末位） |
+| `windows/src/MediaHub.App/Services/SourceSyncService.cs` | `ApplyApprovedAsync` 传 `refusedSink: entry => _log.Warn(LogCategory, SourceSyncRefusedText.LogLine(entry))` |
+| `windows/tests/MediaHub.Tests/SourceSyncImportRoundTests.cs` | 新增 4 例 |
+
+### 72.4 用例与计数
+
+`MediaHub.Tests` 1687 → **1691**：
+
+1. `EveryRefusedWriteIsHandedToTheFailureSinkTheMomentTheRoundRefusesIt`——Refused 返回值上报，且 `Assert.Same` 报告里的那条（动作 Create、身份 trim、原因保留）；
+2. `AWriterThatThrowsIsHandedToTheFailureSinkWithTheExceptionMessage`——抛 `IOException("本机存储只读")` 同样上报，原因就是异常消息；
+3. `TheFailureSinkStaysQuietWhenEverythingWroteOrNothingWasAllowed`——全部写入或零放行时不发一行（避免「没事也报警」）；
+4. `TheFailureLogLineNamesTheIdentityAndTheActionWithoutQuotingTheTitle`——逐字整句、空白身份回退、空白原因回退，并断言行里不含 `api_key` / `http://`（标题带 URL 时也不泄漏）。
+
+App 工程 **0 警告 0 错误**（`D:/mh-verify/w6103-app-build.log`）。
+
+### 72.5 四条负向对照
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A `refusedSink` 只在异常路径触发（Refused 返回值不上报） | 1689 / **2 红** | Refused 上报、抛异常上报 |
+| B 成功条目也进 sink | 1689 / **2 红** | Refused 上报（sink 里 2 条）、抛异常上报（sink 里 2 条） |
+| C `LogLine` 丢掉原因 | 1690 / **1 红** | 逐字整句 |
+| D `LogLine` 用标题当主语 | 1690 / **1 红** | 逐字整句（含 `api_key` 断言） |
+
+实现态快照 `D:/mh-verify/w6103-impl-round.cs`（sha256 `e9386448fb0eadc93b03ea703a125815f715fb6b92a73d9953f1489da57eaf59`）、
+`D:/mh-verify/w6103-impl-refused.cs`（sha256 `02ac505931e52cb2b9103447c0fd383ae452872f1ab748c0387bed8040b58511`）；
+每条对照跑完都从快照逐字节写回并比对 sha256（`true`）；日志 `D:/mh-verify/w6103-neg-{A-refused-outcome-not-reported,B-applied-entries-also-reported,C-logl-ine-drops-the-reason,D-logl-ine-quotes-the-title}.log`。
+
+### 72.6 边界与仍未做
+
+- sink 只覆盖「写入器拒绝」（`Refused` 返回值或三类异常）；**闸门扣住（withheld）不走这条路**——那些条目根本没写库，页面已有逐条出路（W6-93/94），日志侧只由汇总行的计数体现。
+- `MediaHub.Tests` 引不到 `MediaHub.App` ⇒「`ApplyApprovedAsync` 真的把 sink 接到 `LogService`」目前只有编译期保证与 Sync 层单测；
+  端到端（真跑一轮、在 `LogService.Entries` 里看到那一行）属 GUI/真机证据，本轮不取 ⇒ 72.7 记 IMPLEMENTED_UNVERIFIED。
+- `SyncCliRunner`/headless 路径未接 sink（它走 `SourceSyncInbox`），不在本轮范围。
+- 真实两机联调、真机 instrumentation 仍 **NOT_RUN / DEVICE_UNVERIFIED**。
+
+### 72.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` 1691 / 0 与 App 构建 0 警告 0 错误；四条负向对照全红（2 / 2 / 1 / 1）且逐字节还原到实现态；
+- **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与 Sync 层单测，端到端日志证据未取（见 72.6）；
+  Android 侧本轮零改动，`uniqueTests` 2467 为未改动对照；
+- 提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+## §73 W6-104：每条被拒写入、每条被扣住的条目都各留一行日志
+
+### 73.1 结论先行
+
+W6-101 把「一轮同步」写进日志（汇总行：`applied`/`skipped`/`withheld`/`refused`/`removed` 计数），但**逐条**的两类条目仍然只在结果页上活着：**被拒**（写入失败、删除失败）只有界面上的 `SourceSyncRefusal`；**被扣住**（凭据需批准、未知来源类型）只有界面上的 `SourceSyncWithheldSource`。
+
+界面会关、内存会回收 ⇒ 事后无法回答「被拒的是哪一条、为什么」「扣住的是哪一条、为什么」。Windows 侧 W6-103 已给「被拒」逐条行（`refusedSink` + `SourceSyncRefusedSource.LogLine`），Android 侧两类都没有。本轮补齐 Android 侧两类，并保持 W6-101 的汇总行不变。
+
+### 73.2 措辞只写一处
+
+`AndroidSourceSyncService.kt` 顶层新增三个私有常量：`SYNC_REFUSED_LOG_PREFIX = "sync-entry-refused:"`、`SYNC_WITHHELD_LOG_PREFIX = "sync-entry-withheld:"`、`SYNC_LOG_NO_IDENTITY = "no-identity"`。两类条目各自带一个 `logLine()`：
+
+| 类型 | 固定句 | 例子 |
+| --- | --- | --- |
+| `SourceSyncRefusal` | `sync-entry-refused:<身份>:<动作小写>:<原因>` | `[W][DATABASE] sync-entry-refused:sync-a:create:local-source-write-failed:IllegalStateException` |
+| `SourceSyncWithheldSource` | `sync-entry-withheld:<身份>:<原因>` | `[W][DATABASE] sync-entry-withheld:sync-secret:secrets-require-approval` |
+
+- 身份取 `syncSourceId.trim()`，为空写占位符 `no-identity`（**不写空串**：空串在日志里分不清「没有身份」与「格式没拼上」）；
+- `SourceSyncRefusal.causeMessage`（W6-99 加的存储层异常消息）**有意不进日志**：它是外部异常措辞，可能带路径；结果页要给人看，日志只留可检索的稳定码；
+- 两条行都不含标题与端点地址（D6 口径，与汇总行同一条禁词检查）。
+
+### 73.3 一处出口、三条行序
+
+`applyRound` 的成功出口在汇总行之前插入两个循环（被拒在前、扣住在后），随后才是 `logger.i(... "sync-round-applied:…")`。固定语义（用例钉住）：**被拒在前、扣住在后、汇总行永远最后**；两类都空时一行都不多写（干净一轮仍然只有汇总那一行）。坏信封出口（`sync-round-rejected:`）仍只有一行 warn：那种情况下连条目都解不出来，没有「逐条」可言。
+
+### 73.4 用例与计数
+
+`SourceSyncApplyRoundTest.kt` 新增 5 例（文件 `@Test` 32 条）：
+
+| 用例 | 钉住的判据 |
+| --- | --- |
+| `every_refused_write_gets_its_own_line_with_the_action_and_the_reason` | 两条写入失败 ⇒ 两行逐条 + 行尾汇总（`refused=2`） |
+| `every_withheld_entry_gets_its_own_line_with_its_own_reason` | 凭据扣住与未知类型各一行、原因各异 |
+| `an_identity_less_entry_is_logged_with_a_placeholder_not_a_blank` | 身份空 ⇒ `no-identity`（纯单元，无 `runBlocking`） |
+| `a_clean_round_leaves_only_the_summary_line` | 全写入轮 ⇒ 日志恰好一行 |
+| `the_per_entry_lines_never_quote_a_name_an_endpoint_or_a_secret` | 一轮含写/扣/拒三类 ⇒ 每行都不含名字、端点、凭据片段 |
+
+W6-101 的两条老用例按新契约收口（**收口不是放宽**）：`a_round_that_writes_leaves_one_summary_line_with_the_counts` 仍断言汇总行恰好一行（`count { it.startsWith("[I][DATABASE]") } == 1`）但改成允许前面有逐条行，并钉住 `lines.first()` 就是那条扣住行；`the_summary_line_never_quotes_a_name_an_endpoint_or_a_secret` 从「只查唯一一行」改成「汇总行查内部标识、**每一行**都跑五条 D6 禁词断言」。
+
+本机：`core:database` **256 → 261 / 0 失败**（12 skipped），`core/common` 660、`feature/settings` 410、`feature/server` 45，四模块 **1376** 全绿；Windows 侧本轮零改动（W6-103 的 1691 通过 / 0 失败）。
+
+### 73.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | 删掉被拒循环 | **2 红**（被拒逐条 + D6 每行） |
+| B | 删掉扣住循环 | **3 红**（W6-101 汇总用例 + 扣住逐条 + D6 每行） |
+| C | `logLine()` 去掉 `ifEmpty { SYNC_LOG_NO_IDENTITY }` | **1 红**（身份空占位符） |
+| D | 汇总前额外逐条记「被写入」条目 | **2 红**（干净一轮 + W6-101 汇总用例） |
+
+四次对照都先存实现态快照（`D:/mh-verify/w6104-impl-service.kt`、`w6104-impl-tests.kt`），跑完写回并以 sha256 比对（四次 `restored true`）。
+
+### 73.6 工具教训
+
+- **解析测试结果前先清 `<module>/build/test-results/testDebugUnitTest/*.xml`**：四轮对照后的「复跑全绿」第一次拿到 `status=1` 与 2 条失败，看着像还原失败；实际是 `:core:database:bundleLibCompileToJarDebug` 因 `classes.jar: 另一个程序正在使用此文件` 失败（测试任务根本没跑），解析读到的是 D 那轮的陈旧 XML。清掉 XML 后复跑 `FROM-CACHE` / BUILD SUCCESSFUL、261 / 0。
+- 负向对照的「红」要按 XML 里的用例名逐块统计（`<testcase>` 块匹配），不能只看行尾 `FAILED`。
+
+### 73.7 边界与仍未做
+
+- Windows 侧的 **withheld** 逐条还没有日志（W6-103 只做了被拒）⇒ 留作后续候选，那时两端口径可以照抄这两条前缀；
+- 生产接线（Hilt → ViewModel → `production` → 服务）只有编译期保证与本层用例，没有「App 里注入的 Logger 真收到这一行」的端到端证据 ⇒ **IMPLEMENTED_UNVERIFIED**；
+- 日志只记身份/动作/原因，不记标题与端点；「导出诊断日志」出口（LogBuffer → 文件）仍 **NOT_RUN**；
+- 旧 `importEnvelope`/`apply()` 路径不记日志（不是生产会话的写入口，已在 W6-101 注释写明）；
+- 真实两机联调 **NOT_RUN**，真机 instrumentation **DEVICE_UNVERIFIED**。
+
+### 73.8 状态
+
+- **EXECUTED_PASS**：本机 `core:database` 261 / 0，四条对照 2 / 3 / 1 / 2 红且逐字节还原；
+- **IMPLEMENTED_UNVERIFIED**：exact-SHA CI 结果见 PR #33 正文；生产接线的端到端证据未取（见 73.7）；
+- Windows 侧本轮零改动（C# 1691 / 0，W6-103 的 `0b23830e`）；主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+## §74 W6-105：被扣住的条目也各留一行日志（点允许也不会写，但至少要知道是哪一条）
+
+### 74.1 结论先行
+
+Windows 侧 W6-103 让每条**被拒写入**进了日志；但「**扣住**」（`gate.Withheld`：带凭据、未知来源类型、Windows 不支持的类型）此前只有结果页与 W6-102 的汇总计数：
+`SourceSyncImportRound.ApplyAsync` 的 `gate.Withheld` 循环只构造 `SourceSyncWithheldSource` 行，没有日志出口 —— 界面一关、内存一回收，事后无法回答「是哪一条、为什么扣住」。
+本轮把这一半补齐：**每一条被扣住的条目在被闸门扣住的那一刻写一行 `Warn`**，内容是对端身份与闸门原因的白话句。
+这与 Android 侧 W6-104 的 `sync-entry-withheld:` 行对等（Android 侧写原因码，Windows 侧写同一张表翻出的整句）。
+
+### 74.2 一处措辞、一处消费
+
+- 措辞仍在 `windows/src/MediaHub.Sync/SourceSyncWithheldSource.cs` 的 `SourceSyncWithheldText.LogLine(entry)`，固定句：
+  `同步保留未应用：<对端身份> · <原因>`；身份为空写「（未知身份）」，原因空白沿用 `Reason()` 的「对端没有说明原因」，
+  原因码由 `SyncApplyPresenter.DescribeGateReason` 翻成页面同一句 —— 页面与日志不会对同一个码说两种话。
+  **不出现标题、端点 URL 或任何凭据片段**（与 W6-103 的拒写行同一条纪律：日志按身份 grep，标题留在页面）。
+- App 侧 `SourceSyncService.ApplyApprovedAsync` 只把它接到 `_log.Warn(LogCategory, …)`，不自己造句 —— 措辞放 Sync 层，App 只决定何时写（W6-102 纪律）。
+- 触发点是 `ApplyAsync` 的新可选参数 `withheldSink`（放在 `refusedSink` 之后、`cancellationToken` 之前），在 `gate.Withheld` 循环内
+  `withheldSources.Add(withheld); withheldSink?.Invoke(withheld);` —— 回调拿到的正是报告 `WithheldEntries` 里那条实例
+  （用例用 `Assert.Same` 钉住，页面/报告/日志三份不可能漂移）。
+- 两类「保留未应用」现在各有一行且互不重复：**扣住**是闸门在任何写入之前就决定，**被拒**是写入器跑了才拒；两行同时出现时也能分别溯源。
+
+### 74.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.Sync/SourceSyncImportRound.cs` | 签名加 `Action<SourceSyncWithheldSource>? withheldSink = null`；`gate.Withheld` 循环里构造后同步回调 |
+| `windows/src/MediaHub.Sync/SourceSyncWithheldSource.cs` | 新增 `LogLine(entry)`（唯一句式） |
+| `windows/src/MediaHub.App/Services/SourceSyncService.cs` | `ApplyApprovedAsync` 传 `withheldSink: entry => _log.Warn(LogCategory, SourceSyncWithheldText.LogLine(entry))` |
+| `windows/tests/MediaHub.Tests/SourceSyncImportRoundTests.cs` | 新增 3 例 |
+
+`SourceSyncPeerRound.cs` 本轮未动：它本就像 W6-103 的 `refusedSink` 一样不透传 sink，App 侧走的是 `_round`（`SourceSyncImportRound`）；
+将来若有调用方从门面重试导入，再加参数并转发。
+
+### 74.4 用例与计数
+
+`MediaHub.Tests` 1691 → **1694**：
+
+1. `EveryWithheldEntryIsHandedToTheWithheldSinkTheMomentTheGateHoldsItBack` —— 带凭据记录被扣住，sink 恰好一条、`Assert.Same` 报告里那条（身份 trim 后为 `local-dddd`、原因 `secrets-require-approval`），且本机存储零写入；
+2. `TheWithheldSinkStaysQuietWhenNothingIsHeldBack` —— 全部写入或零放行时不发一行（避免「没事也报警」）；
+3. `TheWithheldLogLineNamesTheIdentityAndTheReasonWithoutQuotingTheTitle` —— 逐字整句、空白身份回退、空白原因回退，并断言行里不含 `api_key` / `http://`（标题带 URL 时也不泄漏）。
+
+App 工程 **0 警告 0 错误**（`D:/mh-verify/w6105-app-build.log`）。
+
+### 74.5 四条负向对照
+
+| 变异 | 结果 | 失败用例 |
+| --- | --- | --- |
+| A 去掉 `withheldSink?.Invoke(withheld);`（只构造不上报） | 1693 / **1 红** | `EveryWithheldEntryIsHandedToTheWithheldSinkTheMomentTheGateHoldsItBack` |
+| B 已放行的条目也进 sink | 1693 / **1 红** | `TheWithheldSinkStaysQuietWhenNothingIsHeldBack` |
+| C `LogLine` 丢掉原因（只留身份与分隔符） | 1693 / **1 红** | `TheWithheldLogLineNamesTheIdentityAndTheReasonWithoutQuotingTheTitle` |
+| D `LogLine` 用标题当主语 | 1693 / **1 红** | 同上 |
+
+每轮跑完立即从实现态快照（`D:/mh-verify/w6105-impl-*.cs`）逐字节还原，四个文件 sha256 与实现态相等；
+日志留档 `D:/mh-verify/w6105-neg-A.log` … `w6105-neg-D.log`，复跑 1694 / 0（`w6105-test2-after-controls.log`）。
+
+### 74.6 边界
+
+- **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与 Sync 层单测，端到端日志证据未取（真机/真日志导出 **NOT_RUN**）；
+- Android 侧本轮零改动（Windows-only 轮），`uniqueTests` 2472 为未改动对照；真实两机联调 **NOT_RUN**、真机 instrumentation **DEVICE_UNVERIFIED**；
+- 另一处尚无日志出口的同类：接收侧「这一次接收被取消」已有计数（W6-86），但取消事件本身仍不进日志 —— 留作后续候选。
+
+### 74.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1694 / 0** 与 App 构建 **0 警告 0 错误**；四条负向对照全红（1 / 1 / 1 / 1）且逐字节还原到实现态；
+- **IMPLEMENTED_UNVERIFIED**：App 侧接线只有编译期保证与 Sync 层单测，端到端日志证据未取（见 74.6）；
+- 提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+
+## §75 W6-106：监听（接收）路径的每一步都各留一行日志
+
+### 75.1 结论先行
+
+`SourceSyncListenerController` 此前**零 logger**：开监听、收到谁的信封、为什么被拒、等一次连接是否被取消，全只活在 `SourceSyncListenState` 那一格 UI 状态里。卡片被下一条状态覆盖、进程被回收之后，事后无法回答「当时到底开到没有、收到的信封是谁的、为什么没写进去」。本轮给监听四步各留一行固定措辞：`sync-listen-started` / `sync-listen-received` / `sync-listen-rejected` / `sync-listen-failed` / `sync-listen-cancelled` / `sync-listen-stopped`。
+
+### 75.2 措辞只写一处
+
+新文件 `feature/settings/src/main/kotlin/com/mediahub/feature/settings/sync/SourceSyncListenLog.kt`（object，固定句集中在此，1986 chars），控制器只决定「何时写」：
+
+| 时刻 | 固定句 |
+| --- | --- |
+| 监听开成 | `sync-listen-started:port=<n>:tls=<bool>` |
+| 收下一封信封 | `sync-listen-received:device=<身份|unknown-device>:receipt=<bool>` |
+| 帧层成功但载荷不是合法信封 | `sync-listen-rejected:reason=<码>` |
+| 任意一步失败 | `sync-listen-failed:code=<码>` |
+| 一次等待被本地取消 | `sync-listen-cancelled:count=<n>:reason=<码|transfer-cancelled>` |
+| 真的关掉监听 | `sync-listen-stopped:port=<n>` |
+
+口径与 W6-101/104 相同：只记本端稳定码与身份。**不记**口令、证书指纹、任务预算、信封正文、`Rejected.message`、`Failed.detail` 与异常措辞。对端没报身份时写占位符 `unknown-device`（不写 `device=` 这种半句）；取消没有原因码时回退本机码 `transfer-cancelled`。
+
+### 75.3 一处出口：状态与日志是同一步
+
+`SourceSyncListenerController` 新增两个私有助手 `setFailed(port, code, detail)` 与 `setRejected(port, reason, message)`：写状态与写日志在同一步里完成，**8 处 `Failed`、2 处 `Rejected` 赋值点全部改为经助手**（漏一处会被整行断言抓出来）。`start()` 的 `Opened` 分支加 `started`、`awaitOnce()` 的取消分支加 `cancelled`、`stop()` 的 `active != null` 分支加 `stopped`、`apply()` 的 `Imported` 成功分支在 `onEnvelope(...)` 之后加 `received`。
+
+有意**不记**：`session != null` 的「已在监听」与 `receiving` 单飞闸的「已有人在等」两个无操作分支（它们不改状态也不产生结果）；`Receiving` 状态本身（下一条 `received` / `rejected` / `failed` 会说明结局）。`stop()` 是幂等的，只有真的关掉那一次才写 `sync-listen-stopped`。
+
+落点说明：Logger 注入在 `feature/settings` 而非 `core/common` —— 监听控制器住在 feature 层，且 `core/common` 的 `build.gradle.kts` 不依赖 `core:logging`（`feature/settings` 早在 W6-101 就有 `implementation(project(":core:logging"))`）。
+
+### 75.4 用例与计数
+
+`SourceSyncListenerControllerTest` 50 → **58** 例（`feature/settings` 410 → **418 / 0 失败**）：开监听恰好一行、TLS 变体、收信带 `receipt=true`、身份空写 `unknown-device`、拒收与失败各一码且 message/detail 不进日志、取消两次累计 1/2 且幂等 `stop()` 只记一行、拒绝启动只记码、D6（口令/指纹/预算一行都不出现）。
+
+### 75.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | 删掉 `started` 那行 | **7 红** |
+| B | 删掉 `cancelled` 那行 | **1 红** |
+| C | `failed` 行把 `detail` 也带上 | **2 红** |
+| D | `received()` 去掉 `unknown-device` 占位 | **1 红** |
+
+四次对照前先存实现态快照（`D:/mh-verify/w6106-impl-controller.kt` 30836 chars / sha256 `305279e6…`、`w6106-impl-listenlog.kt` 1986 chars / sha256 `feeda8f1…`、`w6106-impl-tests.kt` 56542 chars / sha256 `57fdc64e…`），每轮跑完写回并比对 sha256（四次 `restored true`），最后复跑 **418 / 0**。解析前清 `feature/settings/build/test-results/testDebugUnitTest/*.xml`，避免读到上一轮的陈旧 XML（W6-104 的教训）。
+
+### 75.6 边界与仍未做
+
+- Windows 侧同路径（`windows/src/MediaHub.Sync/SyncTransferPresenter.cs`）仍无监听日志 ⇒ 后续候选；
+- 「导出诊断日志」出口（`LogBuffer` → 文件）仍 **NOT_RUN**，本轮日志只进内存缓冲；
+- 生产接线（Hilt → ViewModel → `production` → 控制器）只有编译期保证与本层用例 ⇒ **IMPLEMENTED_UNVERIFIED**；
+- 真实两机联调 **NOT_RUN**，真机 instrumentation **DEVICE_UNVERIFIED**。
+
+### 75.7 状态
+
+- **EXECUTED_PASS**：本机 `feature:settings` **418 / 0**，四条对照 7 / 1 / 2 / 1 红且逐字节还原；
+- **IMPLEMENTED_UNVERIFIED**：生产接线的端到端证据未取（见 75.6）；
+- Windows 侧本轮零改动（C# 1691 / 0 对照）；主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+
+## §76 W6-107：传输（接收/发送）路径的每一步都各留一行日志
+
+### 76.1 结论先行
+
+`SyncTransferPresenter` 此前**零 logger**：监听开了没有、收到谁的信封、等一次连接是否被取消、发出去多少字节，全只活在 `SyncTransferReceiveState` 与 `SyncTransferOutcome` 里——界面一刷新、进程一退出，事后无法回答「当时到底开到没有、收到没有、为什么失败」。本轮给传输四步各留一行固定措辞，并让「写结局」与「写日志」成为同一步。
+
+### 76.2 措辞只写一处
+
+新文件 `windows/src/MediaHub.Sync/SyncTransferLog.cs`（`public static class`，3615 chars），presenter 只决定「何时写」：
+
+| 时刻 | 固定句 |
+| --- | --- |
+| 监听绑定 | `传输监听已开启：端口 <n> · TLS 1.3`（或 ` · 明文`） |
+| 监听关闭 | `传输监听已关闭：端口 <n>` |
+| 收到信封 | `传输收到信封：<字节> 字节 · <帧> 帧` |
+| 发出信封 | `传输已发出信封：<字节> 字节 · <帧> 帧` |
+| 接收失败 | `传输接收失败：<原因码>`（没有码时 `未说明原因`） |
+| 发送失败 | `传输发送失败：<原因码>` |
+| 等待被取消 | `传输等待被取消：没有收到信封。` |
+| 发送被取消 | `传输发送被取消：对端是否收到无法确定。` |
+
+口径：只记稳定码与字节/帧计数。**不记**口令、证书指纹、host、端点 URL、信封正文与任何 detail 文本。
+
+### 76.3 一处出口：结局与日志是同一步
+
+`SyncTransferPresenter` 构造器新增 `Action<string>? infoLine` 与 `Action<string>? warnLine`（可选参数，App 与测试按需注入），并新增两个私有助手：
+
+- `Receive(outcome)`：`Cancelled → info 取消句`；失败 `→ warn ReceiveFailed(Reason)`；成功且 `Envelope != null → info Received(Bytes, Frames)`；
+- `Send(outcome)`：同构（取消 → info；失败 → warn `SendFailed(Reason)`；成功 → info `Sent(Bytes, Frames)`）。
+
+落点：`PrepareReceive` 启动失败 → warn 行、启动成功 → 在 `ReceiveState` 赋值之后 info 行；`ReceiveOnceAsync` 三处结局（含 catch 里的取消）全部经 `Receive(...)`；`SendAsync` 三处结局全部经 `Send(...)`（成功对象字面量包成 `Send(new SyncTransferOutcome { … })`）；`StopReceiveAsync` 只在 `listener is not null` 时写关闭行。
+
+**有意不记**：`AlreadyListening` / `AlreadyReceiving` / `NotListening` 三个无操作守卫；表单问题（含 `NoLocalEnvelope`）经 `RememberSend(FormFailure(...))` 早返回，没有发生传输；`Dispose()`（卸载不是用户动作）。助手在 present 的锁内调用 sink，因此 sink 不得回调 presenter（App 传 `LogService.Info/Warn`，测试往列表里加）。
+
+App 接线：`SyncPage.xaml.cs` 的 `Transfer` 属性传 `infoLine: line => App.Services.Log.Info("sync", line)`、`warnLine: line => App.Services.Log.Warn("sync", line)`（类别与新加的 `TransferLogCategory` 常量同值）。
+
+### 76.4 用例与计数
+
+`SyncTransferPresenterTests` 新增 6 例（`MediaHub.Tests` 1694 → **1700 / 0 失败**，App 构建 **0 警告 0 错误**）：开监听 + 关闭各一行且第二次 `StopReceiveAsync` 保持安静、收到信封一行且字节/帧与 payload 一致、取消只写取消行不写失败行、真 `SilentPeer` + `ConfirmDelivery` 造出 `delivery-unconfirmed` 只落 warn 行、两个 presenter 真实收发各一行且行内不含 host/URL、带密钥传输的两行不含口令与指纹。
+
+### 76.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | `Receive` 成功分支去掉 info 行 | **2 红** |
+| B | `PrepareReceive` 去掉监听行 | **4 红** |
+| C | `Received()` 行尾拼上端点 URL | **2 红** |
+| D | `StopReceiveAsync` 无条件写关闭行 | **1 红** |
+
+四次对照前先存实现态快照（`D:/mh-verify/w6107-impl-presenter.cs` 45464 chars / sha256 `08e2a0251…`、`w6107-impl-log.cs` 3615 chars / sha256 `2930257a…`、`w6107-impl-tests.cs` 43171 chars / sha256 `6f037960…`、`w6107-impl-page.cs` 53275 chars / sha256 `ac501f7b…`），每轮跑完写回并比对四份 sha256（四次全 `true`），最后复跑 **1700 / 0**。
+
+### 76.6 边界与仍未做
+
+- 页面到 presenter 的接线只有**编译期保证**（App 0/0）⇒ 生产端到端 **IMPLEMENTED_UNVERIFIED**；
+- `SyncCliRunner` 与命令行工具不接这两个 sink（与 W6-105 的 `withheldSink` 同一口径）；
+- 同步页的真实 GUI/UIA 证据仍 **GUI_UNVERIFIED**（需用户授权空闲窗口）；
+- 真实两机跨机联调 **NOT_RUN**；真机 instrumentation **DEVICE_UNVERIFIED**。
+
+### 76.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1700 / 0**、App 构建 0/0，四条对照 2 / 4 / 2 / 1 红且四份快照逐字节还原；
+- **IMPLEMENTED_UNVERIFIED**：页面接线的端到端证据未取（见 76.6）；
+- 主树本轮零改动；提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+## §77 W6-108：命令行 apply 也把「哪一条被拒、哪一条被扣住」报到 stderr
+
+### 77.1 结论先行
+
+`transfer serve --apply` 与 `transfer roundtrip --apply` 走同一条 `SourceSyncImportRound.ApplyAsync`，但命令行路径一直只交回计数：`--json` 的 `report` 段只有 applied / skipped / withheld / notApplied / baselineUpdated / baselineEntries / summary，`items` 段只有每条的 action、reason 与 `withheld` 布尔 ——「写入被拒」的**原因**（写入器的异常消息，往往就是唯一能行动的线索）根本没有出口；扣住的条目虽然在 `items.reason` 里有一码，也要回翻整份文档才知道是哪一条。
+
+W6-103 / W6-105 已经给 App 层接好两个 sink（`refusedSink` / `withheldSink`），但那些调用点在 `ApplyApprovedAsync`（App 进程里）；本轮 recon 还发现 `SourceSyncPeerRound.ApplyAsync` 这一层转发只补了 `cancellationToken`，两个 sink 在这里被吞掉 —— 命令行走完只看到「保留未应用 1 条」，不知道是哪一条、为什么。本轮把这条链接上，并把命令行的出口定在 **stderr**：`warning: <整句>`，与 `export` 命令既有的 warning 形状一致。
+
+### 77.2 一处措辞一处消费
+
+措辞不新写：`SourceSyncRefusedText.LogLine(entry)`（`同步写入被拒：<身份> · <动作> · <原因>`）与 `SourceSyncWithheldText.LogLine(entry)`（`同步保留未应用：<身份> · <原因>`）就是 App 结果页与日志用的那两句，命令行直接复用 —— 同一个事件在 GUI 与命令行是同一种说法。
+
+出口为什么是 stderr：`--json` 的契约是「stdout 恰好一个文档」，把逐条行写进 stdout 会让每个解析 JSON 的脚本当场失败（用例 D 就把这件事本身当作对照）。因此 CLI 新增一个 `Warn(string)` 助手（`_err.WriteLine("warning: " + line)`），`export` 的警告循环改为复用同一助手。
+
+### 77.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.Sync/SourceSyncPeerRound.cs` | `ApplyAsync` 在 `skippedIds` 之后、`cancellationToken` 之前加 `Action<SourceSyncRefusedSource>? refusedSink = null, Action<SourceSyncWithheldSource>? withheldSink = null`，并**逐字转发**给 `_inbox.Round.ApplyAsync(...)`（原来这一层把两个 sink 吞掉，是本轮 recon 找到的第二个断点） |
+| `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` | 新增 `Warn(string)`；`export` 警告循环改用它；`RunTransferServeAsync` 与 `TransferOnceAsync` 的 apply 调用各传 `refusedSink: entry => Warn(SourceSyncRefusedText.LogLine(entry))`、`withheldSink: entry => Warn(SourceSyncWithheldText.LogLine(entry))` |
+
+措辞层零改动：两句 `LogLine` 仍在 `MediaHub.Sync`，CLI 只选出口。
+
+### 77.4 用例与计数
+
+`SyncCliTransferTests` 新增 4 例（`MediaHub.Tests` 1700 → **1704 / 0 失败**，App 构建 **0 警告 0 错误**）：
+
+- `Serve_ReportsEveryRefusedWriteOnStandardError`：在设备目录里预建一个名为 `sync-sources.json.tmp` 的**目录**，让 `FileLocalSourceStore.Persist` 的 `File.WriteAllText` 真实抛 `UnauthorizedAccessException`（不是 mock）；断言 `report.applied == 0`、`report.withheld == 1`，stderr 恰一行 `同步写入被拒：src-refused · 写入 · …`；
+- `Serve_ReportsEveryWithheldEntryOnStandardError`：未知来源类型（`mystery`）被闸门扣住，stderr 恰一行且以 `warning: 同步保留未应用：src-mystery · ` 起头、冒号后还有原因（不只要身份）；
+- `Roundtrip_ReportsTheReceiversWithheldEntryOnStandardError`：真 `transfer roundtrip --apply`，对端（B）的存储里留下没写进去的条目，stderr 上有同一句（roundtrip 是「没人看着的 serve」，更需要这句话）；
+- `Serve_LeavesNoEntryLineWhenEveryEntryIsWritten`：干净一轮 stderr 里没有任何逐条行、也没有 `warning:`（防 sink 对成功条目误触）。
+
+断言同时钉住 stdout 契约：`ParseSingleDocument` 要求 stdout 去尾后不含换行（`--json` 下恰好一个文档），逐条行只允许出现在 stderr。
+
+### 77.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | serve 侧不传 `refusedSink` | **1 红**（`Serve_ReportsEveryRefusedWriteOnStandardError`） |
+| B | serve 侧不传 `withheldSink` | **1 红**（`Serve_ReportsEveryWithheldEntryOnStandardError`） |
+| C | `SourceSyncPeerRound.ApplyAsync` 不转发两个 sink | **3 红**（serve 的 refused / withheld 与 roundtrip 的 withheld） |
+| D | `Warn` 写 `_out` 而不是 `_err` | **4 红**（三条新例 + 既有的 `Serve_KeepsAnUnknownSourceTypeWithheldEvenWithApply`：stdout 多了一行，JSON 契约当场破） |
+
+四次对照前先存实现态快照（`w6108-impl-peer.cs` 32289 B / sha256 `e7a38e8d…`、`w6108-impl-cli.cs` 104572 B / sha256 `c13a883f…`、`w6108-impl-tests.cs` 32942 B / sha256 `9bd951e5…`），每轮跑完写回并比对 sha256（四次全 `true`），最后复跑 **1704 / 0**。
+
+### 77.6 边界与仍未做
+
+- 只覆盖 `transfer serve --apply` 与 `transfer roundtrip --apply`；`import`（`RunImport` → `ImportResult`）不走 `ApplyAsync`，不在本轮范围；
+- `--json` 的 `report` 段仍是计数：本轮没有给契约加逐条字段（那会改动现有读者），逐条信息只走 stderr；
+- 命令行的端到端证据是进程内真跑（真 loopback 套接字 + 真文件存储 + 真异常），但没有在两台真实机器上对跑 ⇒ 与 W6-105 同口径；
+- 同步页的真实 GUI/UIA 证据仍 **GUI_UNVERIFIED**；真实两机跨机联调 **NOT_RUN**；真机 instrumentation **DEVICE_UNVERIFIED**。
+
+### 77.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1704 / 0**、App 构建 **0 警告 0 错误**，四条对照 1 / 1 / 3 / 4 红且三份快照逐字节还原；
+- **IMPLEMENTED_UNVERIFIED**：真实两机命令行对跑未做（见 77.6）；
+- 主树本轮零改动；提交号以 PR #39 head 为准（docs 不自指 SHA）。
+
+## §78 W6-109：命令行 JSON 的 report 段也说出「哪一条被拒、哪一条被扣住」
+
+### 78.1 结论先行
+
+W6-108 把逐条行放到了 stderr（给人看），但脚本读的是 `--json`：`report` 段仍只有计数（applied / skipped / withheld / notApplied），被拒的那条**为什么**被拒、被扣住的是哪一条，要么回翻 `items[]` 靠身份猜，要么只能去解析给人看的 stderr。本轮给 `report` 加两个数组：`refused[]`（`syncSourceId` / `action` / `reason`，reason 是写入器自己的那句话）与 `withheldEntries[]`（`syncSourceId` / `reason`，原因是闸门原因码）。两个数组**恒在**（干净一轮是空数组），且**只带身份、不带 `displayName`** —— 与 stderr 行同一口径，JSON 日志不会比 stderr 多泄漏一个标题。
+
+### 78.2 一处措辞一处消费（沿用 W6-108 的边界）
+
+数组的数据源就是 App 结果页、App 日志与 stderr 已经用的 `SourceSyncApplyReport.Refused` / `WithheldEntries`：没有新类型、没有新文案，JSON 只是把同一批行按字段拆开。`items[].reason`（预览口径的原因码）与 `withheldEntries[].reason` 同值，脚本可按 `syncSourceId` 连接两份视图。
+
+### 78.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `windows/src/MediaHub.SyncCli/SyncCliRunner.cs` | `WriteTransferFieldsJson` 的 `report` 对象末尾加 `refused[]` / `withheldEntries[]` 两个数组（各自恒写，空则空数组） |
+| `docs/cross-device/W6-18-TRANSFER-CLI.md` | `report` 字段表补上两个数组，并写清「只带身份、不带标题」 |
+
+### 78.4 用例与计数
+
+`SyncCliTransferTests` 新增 4 例（`MediaHub.Tests` 1704 → **1708 / 0 失败**，App 构建 **0 警告 0 错误**）：被拒一条时有 `refused[]` 一行且动作与 `items[]` 一致、被扣住一条时有 `withheldEntries[]` 一行且原因码与 `items[].reason` 一致、干净一轮两个数组都在且为空、真 roundtrip 的第一轮带着对端被扣条目（第二轮为空数组）。
+
+### 78.5 四条负向对照
+
+| 对照 | 变异 | 实测 |
+| --- | --- | --- |
+| A | 删掉 `refused[]` 数组 | **2 红**（被拒例 + 空数组形状例） |
+| B | 删掉 `withheldEntries[]` 数组 | **3 红**（被扣例 + roundtrip + 空数组形状例） |
+| C | `refused[]` 里加 `displayName` | **1 红**（标题泄漏断言） |
+| D | `withheldEntries[].reason` 写成身份 | **1 红**（与 `items[].reason` 不能对上） |
+
+四轮均逐字节还原（快照 `D:/mh-verify/w6109-impl-cli.cs` / `w6109-impl-tests.cs`，日志 `w6109-neg-A..D.log`），还原后全量复跑 **1708 / 0**。
+
+### 78.6 边界
+
+- 只加字段、不改既有字段；`--json` 的「stdout 恰好一个文档」契约不变；
+- `refused[].reason` 是本地写入器的异常消息（可能含本机路径），与结果页、stderr 完全一致；不含凭据、不含 `displayName`；
+- 干跑（不带 `--apply`）仍然没有 `report` 对象，因此也没有两个数组（既有用例仍钉住这一点）；
+- 真实两机命令行对跑未做 ⇒ **IMPLEMENTED_UNVERIFIED**。
+
+### 78.7 状态
+
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1708 / 0**、App 构建 **0 警告 0 错误**，四条对照 2 / 3 / 1 / 1 红且快照逐字节还原；
+- Android 未改动（对照 `uniqueTests` 2480）；主树本轮零改动；提交号以 PR #39 head 为准。
+
+## §79 W6-110：「导出诊断日志」出口（内存日志 → 一份可以交给别人看的文件）
+
+> 编号说明：§76–§78 属跨设备分支的 W6-107 / W6-108 / W6-109 三轮，合并后紧随本节之前；本节是主树 W6-110。
+
+### 79.1 结论先行
+
+在此之前，「日志」只活在内存里的环形缓冲（`LogBuffer`）与 logcat 里：用户遇到问题时，除了口头描述与截图，没有可交出来的东西。本轮把这条出口接上——设置页多一个「导出诊断日志」按钮，导出一份纯文本报告，**导出时对每一行再过一次脱敏**，于是即便有代码绕过 `MemoryLogger` 把原文塞进缓冲，报告里也不会带出秘密。
+
+### 79.2 一处措辞一处消费（固定句）
+
+| 位置 | 固定句 |
+| --- | --- |
+| 按钮 | `导出诊断日志` |
+| 进行中 | `正在导出诊断日志…` |
+| 成功行 | `已导出 N 条日志（N 字节）：<绝对路径>` |
+| 失败行 | `导出失败：<稳定码>`，有原因时追加 `（原因：…）` |
+| 日志行（成功） | `[I][UI] diagnostics-exported:entries=N:bytes=N` —— 只记计数，**不记目录路径** |
+| 日志行（失败） | `[W][UI] diagnostics-export-failed:<稳定码>` |
+| 报告首行 | `MediaHub 诊断报告`，随后 生成时间 / 应用版本 / 设备 / 日志条目 N |
+| 报告分段 | `---- 日志 ----` 与 `---- 说明 ----`，末行是脱敏说明 |
+| 文件名 | `mediahub-diagnostics-yyyyMMdd-HHmmss.txt`（随 instant 与 zone 变） |
+
+措辞只有一处权威：按钮/进度/结果句在 `DiagnosticsExportText`，报告结构与写盘在 `core/logging` 的 `DiagnosticsReport`，设置页只决定何时调用。
+
+### 79.3 改动面
+
+| 文件 | 改动 |
+| --- | --- |
+| `core/logging/.../DiagnosticsReport.kt`（新） | 渲染（头部 + 日志 + 说明）、`fileName`、`write`（mkdirs + UTF-8）、`describe`（脱敏 + 空白折叠 + 160 字符截断，代理对安全） |
+| `feature/settings/.../DiagnosticsExportPort.kt`（新） | `DiagnosticsExportPort.export()` 与 `Exported` / `Failed`；`FileDiagnosticsExportPort` 读 `LogBuffer.snapshot()` 后交给报告层 |
+| `feature/settings/.../DiagnosticsExportText.kt`（新） | 按钮、进度、成功/失败句、按状态取行 |
+| `feature/settings/.../SettingsViewModel.kt` | 第三个构造参数（出口）、`DiagnosticsExportState` 四态、`exportDiagnostics()` 单飞（上一次还在跑时再点不叠加） |
+| `feature/settings/.../SettingsScreen.kt` | 「已配对设备」下方加按钮（`diagnostics.export`）与结果行（`diagnostics.result`）；**不新建 ViewModel**，因为该页会在非 Hilt 的 instrumentation 测试里被直接调用 |
+| `app/.../di/AppModule.kt` | `@Provides @Singleton` 提供出口：`cacheDir/diagnostics` + `BuildConfig.VERSION_NAME` + `Build.MODEL` |
+
+### 79.4 用例与计数
+
+- `core/logging` 24 → **32**（新增 8 例：报告顺序与行数、每行二次脱敏、头部字段也脱敏、文件名随 zone、写盘建目录并回报字节/条目、目标被同名文件占住回稳定码 + 净化原因、空缓冲仍有说明、`describe` 的脱敏/折叠/截断/空值）；
+- `feature/settings` 418 → **425**（新增 7 例：4 条出口用例 —— 写盘、日志行只记计数不记目录、目录被文件占住回稳定码 + 一条警告、两次导出两秒两个文件名；3 条 ViewModel 用例 —— Exporting → Exported、连点只导一次、失败句与净化原因）；
+- 本机：`gradlew.bat :core:logging:testDebugUnitTest :feature:settings:testDebugUnitTest` ⇒ **32 / 0** 与 **425 / 0**；
+- 编译证据：`:feature:settings:assembleDebugAndroidTest`（产出 `settings-debug-androidTest.apk`）与 `:app:compileDebugKotlin`（Hilt 处理新增 `@Provides`）均 BUILD SUCCESSFUL。
+
+### 79.5 四条负向对照（各 1 红，逐字节还原）
+
+| 对照 | 变异 | 结果 |
+| --- | --- | --- |
+| A | 报告正文不再二次脱敏（`lines.map { redact(it) }` → `lines`） | 1 红 `every_line_is_redacted_again_even_when_it_never_passed_the_memory_logger` |
+| B | 文件名忽略 zone（固定 UTC） | 1 红 `the_file_name_follows_the_instant_and_the_zone` |
+| C | 导出日志行拼上绝对路径 | 1 红 `the_information_line_carries_the_counts_and_never_the_directory` |
+| D | `describe` 跳过脱敏 | 1 红 `describe_cleans_secrets_whitespace_and_length` |
+
+实现态快照 `D:/mh-verify/w6110-impl-report.kt`（sha256 以字节为准）与 `D:/mh-verify/w6110-impl-port.kt`；每轮跑完写回并比对 sha256（四次全 true），随后复跑 32 / 0 与 425 / 0。日志留档 `D:/mh-verify/w6110-neg-A..D.log`。
+
+### 79.6 边界与本轮真问题
+
+- 导出目录是 `cacheDir/diagnostics`（系统可清理、不占用户存储）；同一秒导两次会同名，由文件名时间戳与调用时机避免；
+- 报告在导出时再过一次 `Redactor`（幂等），这是**防绕过**而不是重复劳动：日志写缓冲时已脱敏一次；
+- 本轮踩到的真问题：`feature/settings/src/androidTest/.../VisualEffectsSettingsEntryTest.kt` 也**直接构造** `SettingsViewModel(repository, InMemorySourceSyncBaselineStore())` ⇒ 加构造参数后 androidTest 编译失败（`No value passed for parameter diagnosticsExport`）。修法是给它一个不点按钮的出口实现。教训：**加构造参数必须跑 `assembleDebugAndroidTest`，:test 全绿不代表 instrumentation 能编译**；
+- 另一条 Kotlin 教训：`assertTrue(x is T)` 不做智能转换，`x.path` 会报 Unresolved reference，需显式 `val y = x as T`；
+- 「导出诊断日志」目前只有设置页按钮入口（不弹分享面板、不需要运行时权限）；
+- 真实两机联调 **NOT_RUN**，真机 instrumentation **DEVICE_UNVERIFIED**。
+
+### 79.7 状态
+
+- **EXECUTED_PASS**：本机 32 / 0 与 425 / 0、四条对照各 1 红且逐字节还原、androidTest 与 app 编译通过；
+- **IMPLEMENTED_UNVERIFIED**：按钮 → 报告文件的端到端证据只在 JVM 测试与编译期，未在真机点过；
+- 主树提交号以 PR #33 head 为准（docs 不自指 SHA）。
+## §80 W6-111：导出诊断日志的写盘路径（Windows 侧也有一份可交出去的报告）
+> 编号说明：§79 属主树 W6-110 轮（Android 侧的同一个出口），合并后紧随本节之前。
+
+### 80.1 结论先行
+- Windows 侧「导出已脱敏日志」按钮**早就有了**（SettingsPage.xaml:93），但它背后的渲染、文件命名与失败措辞全在 code-behind 里；测试工程 MediaHub.Tests **不引用 MediaHub.App**（WinUI 工程），所以这条路 0 覆盖：报告里没有应用版本/设备/条目数，失败时还把**异常的原文**贴到界面上。
+- 本轮把渲染与写盘搬到 `windows/src/MediaHub.Net/DiagnosticsReport.cs`（可测工程），`LogService.Export()` 变成同一渲染器的薄壳，`OnExportLogClick` 只负责选目录、写文件、显示结果句。
+- 顺带把「导出也再脱敏一次」补上：`LogService.Write` 写入前已脱敏，但 `Render` 面向任意调用方（测试里直造 `LogEntry`），所以每条日志行与头部字段都再过一遍 `LogService.Redact`。
+
+### 80.2 一份报告长什么样（固定句表）
+| 位置 | 固定句 |
+| --- | --- |
+| 第 1 行 | `# MediaHub Windows 诊断日志（已脱敏）` |
+| 头部 | `生成时间：yyyy-MM-dd HH:mm:ss` / `应用版本：<已脱敏>`（有才写）/ `设备：<已脱敏>`（有才写）/ `日志条目：<n>` |
+| 分隔 | `---- 日志 ----` |
+| 每条 | `yyyy-MM-dd HH:mm:ss.fff [Level] Category <已脱敏正文>` |
+| 分隔 | `---- 说明 ----` + 说明句（写入时已脱敏、导出时再逐行脱敏一次；密码、令牌与 Cookie 不会出现在这里。） |
+| 文件名 | `mediahub-diagnostics-yyyyMMdd-HHmmss.log`（本机时钟直接格式化） |
+| 界面成功句 | `已导出（已脱敏）：<绝对路径>` |
+| 界面失败句 | `导出失败：diagnostics-write-failed（原因：<已净化，≤160 字符>）` |
+
+### 80.3 一处渲染一处写盘
+- `DiagnosticsReport.Render(entries, now, appVersion, device)` 是唯一正文生产者；`LogService.Export()` = `Render(Snapshot(), DateTime.Now)`，`Snapshot()` 在 `_gate` 锁内取副本。
+- `DiagnosticsReport.Write(...)` 在 Render 之后只做三件事：`Directory.CreateDirectory`、`File.WriteAllText`（UTF-8 无 BOM）、返回 `WriteResult.Written(path, bytes, entries)`；`bytes` 是 **UTF-8 字节数**（不是字符数），`entries` 是写进去的条数。
+- 任何异常折成 `WriteResult.Failed("diagnostics-write-failed", Describe(exception))`；`Describe` 先脱敏、再把空白折成单空格、trim、截到 160 字符（末位若是高代理就再退一个字符，避免切出半个字符）。
+- 界面只认这两种结果，失败句里的原因已经过 `Describe`，异常原文不再直接上屏。
+
+### 80.4 用例与计数
+- 新增 `windows/tests/MediaHub.Tests/DiagnosticsReportTests.cs` **9 例**：行序与计数、每行二次脱敏（直造 `LogEntry`，消息含 `password=hunter2` 与 `api_key=abc123`）、头部字段也脱敏、文件名跟随时间戳、写盘建目录且 bytes/entries 与内容自洽、目标被同名文件占住报稳定码且原因净化、空日志仍出报告带说明、`Describe` 的脱敏/折叠/截断/空消息、`LogService.Export()` 与文件报告同一渲染器。
+- 本机：`MediaHub.Tests` 1708 → **1717 / 0**；App 构建 **0 警告 0 错误**。
+
+### 80.5 四条负向对照
+| 对照 | 改动 | 红 |
+| --- | --- | --- |
+| A | `Render` 不再逐行 `Redact` | 1（二次脱敏例） |
+| B | `FileName` 固定成 `20260101-000000` | 2（文件名例 + 写盘自洽例，后者断言路径以同一个 `FileName` 结尾） |
+| C | `Describe` 跳过 `Redact` | 1（净化例） |
+| D | `Write` 的 `bytes` 改用 `text.Length` | 1（写盘自洽例，证据文本含中文 ⇒ 字符数 ≠ 字节数） |
+
+四条都在实现态快照上跑（`D:/mh-verify/w6111-impl-report.cs` / `w6111-impl-tests.cs`，sha256 `a99f4216ce71…` / `0d6f5fc4cf02…`），每轮跑完逐字节还原、sha256 相等；还原后复跑全量 1717 / 0。
+
+### 80.6 边界
+- 界面按钮与文案不变（按钮仍是「导出已脱敏日志」，仍在设置页），本轮只换报告内容与失败措辞；没有新增「另存为」或剪贴板出口。
+- 写盘目录仍是 `%LocalAppData%\MediaHub`；文件名前缀由 `diagnostics-` 变为 `mediahub-diagnostics-`（旧文件不删、不改写）。
+- 报告正文来自内存环形缓冲（上限 2000 条）的**快照**，不是滚动日志文件；「打开日志文件夹」按钮未改。
+- 真实两机对跑不在本切片范围（这条路径与本机桌面有关，不涉及对端）⇒ 界面人工确认仍 **NOT_RUN**。
+
+### 80.7 状态
+- **EXECUTED_PASS**：本机 `MediaHub.Tests` **1717 / 0**、App 构建 **0 警告 0 错误**，四条对照 1 / 2 / 1 / 1 红且快照逐字节还原；
+- Android 未改动（对照 `uniqueTests` 2480）；主树本轮零改动；提交号以 PR #39 head 为准。
+
+## §81 W6-112：把主树 W14 合回本分支（PR #39 从 CONFLICTING 恢复可合并）
+
+### 81.1 起因与真实依赖
+base `feature/windows-client` 在本分支之后又前进 3 个提交（`f484dd8e`、`ab9d66bf`、`b586b001`）。`b586b001`（W14 诊断日志滚动落盘）把 `LogService.Export()` 改成**内联渲染**并在标题后加一行「滚动文件目录」；而 W6-111 早已把同一方法改成 `DiagnosticsReport.Render(Snapshot(), DateTime.Now)`。两侧对同一方法各重构一次、互不相知 ⇒ #39 变 `CONFLICTING` / `DIRTY`。GitHub 在 CONFLICTING 时不生成 `refs/pull/39/merge`，工作流一条都不触发（「推送后 0 新 run」就是信号），所以这不只是显示问题，而是**CI 证据链断掉**。
+
+### 81.2 冲突面与并集解法
+冲突仅 `windows/src/MediaHub.Net/LogService.cs` 一处。**任取一侧都会功能回退**：取本分支侧丢「滚动文件目录」行，取主树侧丢 `DiagnosticsReport` 可测渲染层与 W6-111 的 9 条 `DiagnosticsReportTests`。并集落法：
+
+- `Snapshot()` 保留（`lock (_gate) return _entries.ToList();`），W6-111 的结构不动；
+- `Export()` 仍委托可测渲染层，并补传滚动目录：`DiagnosticsReport.Render(Snapshot(), DateTime.Now, rollingDirectory: FileSink?.DirectoryPath)`；
+- `DiagnosticsReport.Render` / `Write` 增**尾随可选参数** `string? rollingDirectory = null`（现有 2/3/4 参调用零改动）；非空时在 `Title` 之后插入一行 `滚动文件目录：<dir>`；
+- `Write(string, LogService, …)` 透传 `log.FileSink?.DirectoryPath`，让「导出到文件」与 `Export()` 口径一致。
+
+### 81.3 该行不过脱敏（有测试钉住）
+滚动目录行**不做** `LogService.Redact`。它不是请求 URL，而是本机日志目录（`%LOCALAPPDATA%\MediaHub\logs`）；脱敏会把目录名里的十六进制段打码，指针随之失效、报告失去可用性。这条不是口味问题：W14 带入的 `LogFileSinkTests.The_export_points_at_the_rolling_directory_only_when_one_is_configured` 直接钉住「导出必须包含 `滚动文件目录：<原样目录>`」——按「也脱敏」实现时该例红过一次（`D:/mh-verify/w6-merge-s0-tests.log`：1725 通过 / 1 失败，报 `Assert.Contains` 找不到该串），改回后 `w6-merge-s0-tests2.log` 1726 / 0。`rollingDirectory == null` 时输出与 W6-111 逐字相同，`DiagnosticsReportTests` 的绝对行下标断言不受影响。
+
+**补记（W6-113）**：合并时的并集解法漏了一处形状 —— 产出的那一行少了 W14 的 `# ` 前缀，位置也掉到「生成时间/版本/设备」之后。两侧测试都没抓到（`LogFileSinkTests` 只断言 `Contains("滚动文件目录：" + dir)`，带不带前缀、在前在后都通过）。已由提交 `055c85c3` 修正：新增 `DiagnosticsReport.RollingDirectoryPrefix` 常量，渲染顺序改为 `Title → 滚动目录 → 生成时间 → 应用版本 → 设备 → 日志条目`，并补 7 条用例（`DiagnosticsReportTests` 9 → 16）逐项钉住前缀、位置、空/缺省、十六进制段不被吃、目录原样回显而同报告内 URL 仍脱敏、只给指针不内联磁盘全文。三条负向对照恰好 1 / 1 / 4 红。
+
+### 81.4 合并提交与「没丢东西」的判据
+合并提交 **`7c2f96ca`**（parents `51776182` + `b586b001`，保留 Git 默认合并提交，不 rebase、不 amend 共享历史）。
+
+- `git diff --diff-filter=D 51776182 7c2f96ca` 为**空**（零删除）——这是「并集而非取一侧」的硬判据；
+- 两侧文件均在：`DiagnosticsReport.cs` / `DiagnosticsReportTests.cs`（W6-111）与 `LogFileSink.cs` / `LogFileSinkTests.cs` / `windows/docs/W14-DIAGNOSTIC-LOG-FILES.md`（W14）；
+- `git grep -n -E '^(<<<<<<<|>>>>>>>) '` 无命中。
+
+### 81.5 验收（全部真跑）
+- **隔离副本自测**（不信任工作树）：`git archive 7c2f96ca` 解到 `D:/mh-verify/w6-7c2f96ca-src`，补入本机 `windows/native/libmpv` 后 `dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug -p:Platform=x64` ⇒ **1726 通过 / 0 失败 / 0 跳过**（合并前 `51776182` 为 1717，+9 即 W14 带入的 `LogFileSinkTests`）。
+- **exact-SHA CI @`7c2f96ca`**：`windows-ci` **40945269315** success（`MediaHub.Tests` **1726 / 0**、`MediaHub.WebDav.Tests` **104 / 0**）；`Android CI` **40945269145** success（`uniqueTests` **2495**、`--required-suite` 组 `required-suite` 门禁照常、两个 VI 作业各 **19 unique mandatory**、FAILED 行 0）。
+- Android 侧**零代码改动**，故 `uniqueTests` 与合并前同值（2495）；数值变化才说明合并带入了意外内容。
+
+### 81.6 边界
+- 本切片只做合并收口，**没有新增产品能力**；WinUI 界面人工确认仍 **GUI_UNVERIFIED**，真实两机对跑仍 **NOT_RUN**。
+- 同一工作区存在并行执行者时，同分支连续 push 会让后一次 push 取消前一次仍在跑的 run——要 exact-SHA 证据必须等最新 head 的 run 跑完再推。

@@ -34,7 +34,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.LocalContext
+import com.mediahub.core.common.ClientIdentityProvider
+import com.mediahub.core.common.pairing.PairedDeviceRegistry
 import com.mediahub.core.common.pairing.PairingAddressEnumerator
+import com.mediahub.core.common.pairing.PairingPeerCard
+import com.mediahub.core.common.pairing.PairingSelfIdentity
+import com.mediahub.feature.settings.paired.PairedDeviceStorage
 import kotlinx.coroutines.launch
 
 /**
@@ -61,6 +67,14 @@ object PairingLinkTags {
     const val ADDRESS_STATE: String = "pairing.addresses.state"
 
     const val ADDRESS_REFRESH: String = "pairing.addresses.refresh"
+
+    const val PEER: String = "pairing.peer"
+
+    const val PEER_STATE: String = "pairing.peer.state"
+
+    const val PEER_HINT: String = "pairing.peer.hint"
+
+    const val PEER_REGISTER: String = "pairing.peer.register"
 }
 
 /**
@@ -72,27 +86,38 @@ object PairingLinkTags {
 @Composable
 fun PairingLinkRoute(
     onBack: () -> Unit,
-    controller: PairingLinkController = remember {
+    controller: PairingLinkController? = null,
+) {
+    val context = LocalContext.current
+    val active = controller ?: remember(context) {
+        // 生产路径：登记簿落在应用私有目录（与 Windows 的 paired-devices.json 同名同格式），
+        // 身份卡片用的指纹由本机 deviceId 稳定派生，绝不是随机生成。
+        val deviceId = ClientIdentityProvider(context.applicationContext, version = "").get().deviceId
+        val identity = PairingSelfIdentity.create(deviceId, displayName = "Android")
         PairingLinkController(
             fetchPort = PairingTransportFetchPort(),
             addressEnumerator = PairingAddressEnumerator(),
+            registry = PairedDeviceRegistry(PairedDeviceStorage.storeIn(context.applicationContext.filesDir)),
+            selfCard = identity.toCard(),
         )
-    },
-) {
-    val state by controller.state.collectAsStateWithLifecycle()
-    val addresses by controller.addresses.collectAsStateWithLifecycle()
+    }
+    val state by active.state.collectAsStateWithLifecycle()
+    val addresses by active.addresses.collectAsStateWithLifecycle()
+    val peer by active.peer.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     // 进页就读一次本机地址：读的是网卡属性，不发包，所以不需要用户先点任何按钮。
-    LaunchedEffect(controller) {
-        controller.refreshAddresses()
+    LaunchedEffect(active) {
+        active.refreshAddresses()
     }
     PairingLinkScreen(
         state = state,
         addressState = addresses,
-        onVerify = { link -> controller.verify(link) },
-        onFetch = { scope.launch { controller.fetchInvitation() } },
-        onRefreshAddresses = { controller.refreshAddresses() },
-        onClear = { controller.clear() },
+        peerState = peer,
+        onVerify = { link -> active.verify(link) },
+        onFetch = { scope.launch { active.fetchInvitation() } },
+        onRefreshAddresses = { active.refreshAddresses() },
+        onRegisterPeer = { active.registerPeer() },
+        onClear = { active.clear() },
         onBack = onBack,
     )
 }
@@ -113,6 +138,8 @@ fun PairingLinkScreen(
     onBack: () -> Unit,
     addressState: PairingAddressState = PairingAddressState.NotRead,
     onRefreshAddresses: () -> Unit = {},
+    peerState: PairingPeerState = PairingPeerState.NotChecked,
+    onRegisterPeer: () -> Unit = {},
 ) {
     var link by remember { mutableStateOf("") }
     val line = PairingLinkCopy.lineOf(state)
@@ -200,7 +227,56 @@ fun PairingLinkScreen(
                 Text("清空")
             }
             Spacer(Modifier.height(16.dp))
+            PairingPeerBlock(
+                state = peerState,
+                busy = busy,
+                onRegister = onRegisterPeer,
+            )
+            Spacer(Modifier.height(16.dp))
             PairingAddressBlock(state = addressState, busy = busy, onRefresh = onRefreshAddresses)
+        }
+    }
+}
+
+/**
+ * 「对端身份」区块（W6-71）：拉邀请成功后显示对端卡片指纹与本机登记簿的比对结果，
+ * 需要用户显式点一次才登记。**指纹不一致时按钮不可点**，也绝不自动覆盖已钉住的指纹。
+ */
+@Composable
+private fun PairingPeerBlock(
+    state: PairingPeerState,
+    busy: Boolean,
+    onRegister: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(PairingLinkTags.PEER),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(PairingPeerCopy.TITLE, style = MaterialTheme.typography.titleSmall)
+        Text(PairingPeerCopy.HINT, style = MaterialTheme.typography.bodySmall)
+        val line = PairingPeerCopy.lineOf(state)
+        if (line != null) {
+            Text(
+                line,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.testTag(PairingLinkTags.PEER_STATE),
+            )
+        }
+        Text(
+            PairingPeerCopy.REGISTER_HINT,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.testTag(PairingLinkTags.PEER_HINT),
+        )
+        OutlinedButton(
+            onClick = onRegister,
+            enabled = !busy && state is PairingPeerState.Reviewed && state.canRegister,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(PairingLinkTags.PEER_REGISTER),
+        ) {
+            Text(PairingPeerCopy.REGISTER_ACTION)
         }
     }
 }

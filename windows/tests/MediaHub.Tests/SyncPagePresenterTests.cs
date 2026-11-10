@@ -340,6 +340,219 @@ public sealed class SyncPagePresenterTests : IDisposable
     }
 
     [Fact]
+    public async Task DescribeResultListsEveryWrittenEntryWithItsIdentity()
+    {
+        // The result page shows one counts sentence; this list is what lets a user check a single row of it.
+        var local = new InMemoryLocalSourceStore();
+        var round = new SourceSyncImportRound(local, new InMemorySourceSyncBaselineStore());
+        SourceSyncApplyPreview preview = round.Preview(Envelope(SenderId, Record("src-1"), Record("src-2")));
+
+        var presenter = new SyncApplyPresenter();
+        presenter.Load(preview);
+
+        SourceSyncApplyReport report = await round.ApplyAsync(
+            preview,
+            presenter.AllowedIds(),
+            (_, _) => Task.FromResult(SourceSyncWriteOutcome.Written("written")),
+            presenter.SkippedIds());
+
+        SyncApplyResult result = presenter.DescribeResult(report);
+
+        Assert.Equal(2, report.Applied);
+        Assert.Equal("已写入 2 条（按对端身份，可逐条核对）", result.WrittenHeader);
+        Assert.Equal(2, result.WrittenRows.Count);
+        Assert.Contains("src-1", result.WrittenRows[0], StringComparison.Ordinal);
+        Assert.Contains("src-2", result.WrittenRows[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DescribeResultKeepsTheWrittenListEmptyWhenNothingWasWritten()
+    {
+        var presenter = new SyncApplyPresenter();
+
+        SyncApplyResult result = presenter.DescribeResult(new SourceSyncApplyReport());
+
+        Assert.Equal(string.Empty, result.WrittenHeader);
+        Assert.Empty(result.WrittenRows);
+    }
+
+    [Fact]
+    public async Task DescribeResultListsEveryRefusedEntryWithItsReason()
+    {
+        // The result line says how many were kept back; these rows say which ones and why, in write order.
+        var local = new InMemoryLocalSourceStore();
+        var round = new SourceSyncImportRound(local, new InMemorySourceSyncBaselineStore());
+        SourceSyncApplyPreview preview = round.Preview(Envelope(SenderId, Record("src-1"), Record("src-2")));
+
+        var presenter = new SyncApplyPresenter();
+        presenter.Load(preview);
+
+        SourceSyncApplyReport report = await round.ApplyAsync(
+            preview,
+            presenter.AllowedIds(),
+            (_, _) => Task.FromResult(SourceSyncWriteOutcome.Refused("本机存储只读")),
+            presenter.SkippedIds());
+
+        SyncApplyResult result = presenter.DescribeResult(report);
+
+        Assert.Equal(2, report.Refused.Count);
+        Assert.Equal("未写入 2 条（逐条原因）", result.RefusedHeader);
+        Assert.Equal(2, result.RefusedRows.Count);
+        Assert.Contains("src-1", result.RefusedRows[0].Text, StringComparison.Ordinal);
+        Assert.Contains("本机存储只读", result.RefusedRows[0].Text, StringComparison.Ordinal);
+        Assert.Contains("src-2", result.RefusedRows[1].Text, StringComparison.Ordinal);
+        // W6-95: the shared copy button reads the identity off the row; the refused list offers no way out to invent.
+        Assert.Equal("src-1", result.RefusedRows[0].CopyText);
+        Assert.True(result.RefusedRows[0].CanCopy);
+        Assert.Equal(SourceSyncCopyText.CopyIdentity, result.RefusedRows[0].CopyLabel);
+        Assert.Equal(string.Empty, result.RefusedRows[0].NextStep);
+    }
+
+    [Fact]
+    public void DescribeResultKeepsTheRefusedListEmptyWhenNothingWasRefused()
+    {
+        // A successful round writes rows and refuses none; an empty refused list must leave no heading.
+        var presenter = new SyncApplyPresenter();
+
+        SyncApplyResult result = presenter.DescribeResult(new SourceSyncApplyReport { Applied = 1 });
+
+        Assert.Equal(string.Empty, result.RefusedHeader);
+        Assert.Empty(result.RefusedRows);
+    }
+
+    [Fact]
+    public void DescribeResultCarriesTheCopyableIdentityOnEveryRefusedRowEvenThoughItOffersNoWayOut()
+    {
+        // Both kept-back lists bind one row shape (W6-95), but only the withheld list offers a way out: a refused row
+        // reason is the writer own sentence, so inventing a next step here would be advice about a code nobody wrote.
+        var presenter = new SyncApplyPresenter();
+        var report = new SourceSyncApplyReport
+        {
+            Refused =
+            [
+                new SourceSyncRefusedSource
+                {
+                    SyncSourceId = " local-aaaa ",
+                    DisplayName = "Share",
+                    Action = SourceSyncAction.Create,
+                    Reason = "Windows 暂不支持该来源类型：smb",
+                },
+                new SourceSyncRefusedSource
+                {
+                    SyncSourceId = "  ",
+                    DisplayName = "无身份来源",
+                    Action = SourceSyncAction.Create,
+                    Reason = "本机存储只读",
+                },
+            ],
+        };
+
+        SyncApplyResult result = presenter.DescribeResult(report);
+
+        Assert.Equal("未写入 2 条（逐条原因）", result.RefusedHeader);
+        SourceSyncCopyRow first = result.RefusedRows[0];
+        Assert.Equal("local-aaaa", first.CopyText);
+        Assert.True(first.CanCopy);
+        Assert.Equal(SourceSyncCopyText.CopyIdentity, first.CopyLabel);
+        Assert.Equal(string.Empty, first.NextStep);
+        SourceSyncCopyRow second = result.RefusedRows[1];
+        Assert.Equal(string.Empty, second.CopyText);
+        Assert.False(second.CanCopy);
+        Assert.Equal(SourceSyncCopyText.NoCopyableIdentity, second.CopyLabel);
+        Assert.Contains("本机存储只读", second.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DescribeResultListsEveryWithheldEntryWithItsReason()
+    {
+        // The gate's own rows: the counts line folds them into 保留未应用, this list says which and why, and the
+        // sentence is the one the 不可应用 line already uses.
+        var local = new InMemoryLocalSourceStore();
+        var round = new SourceSyncImportRound(local, new InMemorySourceSyncBaselineStore());
+        using JsonDocument document = JsonDocument.Parse("""{"token":"sealed"}""");
+        var record = new SourceRecord
+        {
+            SyncSourceId = "local-dddd",
+            SourceType = SyncSourceTypes.Parse(SyncSourceTypes.Emby),
+            DisplayName = "卧室 Emby",
+            Endpoints = [new SourceEndpoint { Url = EmbyUrl, IsPrimary = true }],
+            RecordRevision = 2,
+            Secrets = document.RootElement.Clone(),
+        };
+        SourceSyncApplyPreview preview = round.Preview(Envelope(SenderId, record));
+
+        var presenter = new SyncApplyPresenter();
+        presenter.Load(preview);
+
+        SourceSyncApplyReport report = await round.ApplyAsync(
+            preview,
+            presenter.AllowedIds(),
+            (_, _) => Task.FromResult(SourceSyncWriteOutcome.Written("已写入")),
+            presenter.SkippedIds());
+
+        SyncApplyResult result = presenter.DescribeResult(report);
+
+        Assert.Equal(1, report.WithheldEntries.Count);
+        Assert.Equal("保留未应用 1 条（扣住，点允许也不会写）", result.WithheldHeader);
+        SourceSyncCopyRow row = Assert.Single(result.WithheldRows);
+        Assert.Contains("local-dddd", row.Text, StringComparison.Ordinal);
+        Assert.Contains("带凭据，需人工迁移（本次不会写入）", row.Text, StringComparison.Ordinal);
+        // W6-93: the row carries the way out and the payload, so the page never spells either of them itself.
+        Assert.Equal(SourceSyncWithheldText.CopyIdentity, row.CopyLabel);
+        Assert.Equal("local-dddd", row.CopyText);
+        Assert.True(row.CanCopy);
+        Assert.Contains("凭据清空", row.NextStep, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DescribeResultKeepsTheWithheldListEmptyWhenNothingWasWithheld()
+    {
+        // An ordinary round withholds nothing; an empty list must leave no heading behind.
+        var presenter = new SyncApplyPresenter();
+
+        SyncApplyResult result = presenter.DescribeResult(new SourceSyncApplyReport { Applied = 1 });
+
+        Assert.Equal(string.Empty, result.WithheldHeader);
+        Assert.Empty(result.WithheldRows);
+    }
+    [Fact]
+    public void DescribeResultCarriesTheWayOutAndTheCopyableIdentityOnEveryWithheldRow()
+    {
+        // A reason without a way out leaves the user staring at a button that never works; a payload that is not the
+        // identity is useless on the other machine. Both travel with the row, one per withheld entry.
+        var presenter = new SyncApplyPresenter();
+        var report = new SourceSyncApplyReport
+        {
+            Withheld = 2,
+            WithheldEntries =
+            [
+                new SourceSyncWithheldSource
+                {
+                    SyncSourceId = " local-aaaa ",
+                    DisplayName = "客厅 Emby",
+                    Reason = SyncRoundReasons.NotSupportedOnWindows,
+                },
+                new SourceSyncWithheldSource { SyncSourceId = "  ", DisplayName = "无身份来源", Reason = "something-new" },
+            ],
+        };
+
+        SyncApplyResult result = presenter.DescribeResult(report);
+
+        Assert.Equal("保留未应用 2 条（扣住，点允许也不会写）", result.WithheldHeader);
+        Assert.Equal(2, result.WithheldRows.Count);
+        SourceSyncCopyRow first = result.WithheldRows[0];
+        Assert.Equal("- 客厅 Emby（local-aaaa） · Windows 暂不支持该来源类型", first.Text);
+        Assert.Equal("下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。", first.NextStep);
+        Assert.Equal("local-aaaa", first.CopyText);
+        Assert.True(first.CanCopy);
+        SourceSyncCopyRow second = result.WithheldRows[1];
+        Assert.Equal("- 无身份来源 · something-new", second.Text);
+        Assert.Equal(string.Empty, second.NextStep);
+        Assert.Equal(string.Empty, second.CopyText);
+        Assert.False(second.CanCopy);
+        Assert.Equal(SourceSyncWithheldText.NoCopyableIdentity, second.CopyLabel);
+    }
+    [Fact]
     public async Task Apply_SkipThePageRecordedIsHonoured()
     {
         // A create needs no approval, so its default verdict is "apply". If only the allow list travelled, a row the
@@ -560,7 +773,8 @@ public sealed class SyncPagePresenterTests : IDisposable
     public void AskForget_ConfirmDeletesOnlyThatDevice()
     {
         PairedDeviceRegistry registry = NewRegistry();
-        var presenter = new SyncPairingPresenter("dev-local", registry);
+        InMemorySourceSyncBaselineStore baselines = SeededBaselines("peer-1", "peer-2");
+        var presenter = new SyncPairingPresenter("dev-local", registry, baselines);
         presenter.VerifyReply(LinkFor("peer-1", Fingerprint(31)), NowMs, register: true);
         presenter.VerifyReply(LinkFor("peer-2", Fingerprint(41)), NowMs, register: true);
         PairedDeviceRow row = presenter.BuildPairedDevices(NowMs).Rows.Single(r => r.DeviceId == "peer-1");
@@ -573,12 +787,77 @@ public sealed class SyncPagePresenterTests : IDisposable
         SyncForgetOutcome outcome = presenter.ConfirmForget();
 
         Assert.True(outcome.Forgotten);
+        Assert.True(outcome.BaselineForgotten);
         Assert.Equal(SyncPageCopy.ForgetDoneTitle, outcome.Title);
         Assert.Equal(SyncPageCopy.ForgetDoneMessage, outcome.Message);
         Assert.False(presenter.IsForgetPending);
         Assert.Equal(1, registry.Count);
         Assert.Null(registry.Find("peer-1"));
         Assert.NotNull(registry.Find("peer-2"));
+        // The forgotten peer keeps no knowledge; the one still paired keeps its own baseline untouched.
+        Assert.DoesNotContain("peer-1", baselines.KnownPeerDeviceIds);
+        Assert.Contains("peer-2", baselines.KnownPeerDeviceIds);
+        Assert.Empty(baselines.Load("peer-1").Entries);
+        Assert.Single(baselines.Load("peer-2").Entries);
+    }
+
+    /// <summary>A page with no baseline store still forgets the device, and says so instead of pretending.</summary>
+    [Fact]
+    public void AskForget_WithoutABaselineStoreSaysTheBaselineStayed()
+    {
+        PairedDeviceRegistry registry = NewRegistry();
+        var presenter = new SyncPairingPresenter("dev-local", registry);
+        presenter.VerifyReply(LinkFor("peer-1", Fingerprint(71)), NowMs, register: true);
+        presenter.AskForget(presenter.BuildPairedDevices(NowMs).Rows[0]);
+
+        SyncForgetOutcome outcome = presenter.ConfirmForget();
+
+        Assert.True(outcome.Forgotten);
+        Assert.False(outcome.BaselineForgotten);
+        Assert.Equal(SyncPageCopy.ForgetDoneMessageWithoutBaseline, outcome.Message);
+        Assert.Null(registry.Find("peer-1"));
+    }
+
+    /// <summary>A store whose medium is unreadable costs the baseline, never the forget itself.</summary>
+    [Fact]
+    public void AskForget_WithAThrowingBaselineStoreStillForgetsTheDevice()
+    {
+        PairedDeviceRegistry registry = NewRegistry();
+        var baselines = new ThrowingBaselineStore();
+        var presenter = new SyncPairingPresenter("dev-local", registry, baselines);
+        presenter.VerifyReply(LinkFor("peer-1", Fingerprint(81)), NowMs, register: true);
+        presenter.AskForget(presenter.BuildPairedDevices(NowMs).Rows[0]);
+
+        SyncForgetOutcome outcome = presenter.ConfirmForget();
+
+        Assert.True(outcome.Forgotten);
+        Assert.False(outcome.BaselineForgotten);
+        Assert.Equal(SyncPageCopy.ForgetDoneMessageWithoutBaseline, outcome.Message);
+        Assert.Equal(1, baselines.ForgetCalls);
+        Assert.Null(registry.Find("peer-1"));
+    }
+
+    /// <summary>Registration first, baseline second: a forget that deletes nothing must not clear knowledge.</summary>
+    [Fact]
+    public void AskForget_UnknownDeviceLeavesItsBaselineAlone()
+    {
+        PairedDeviceRegistry registry = NewRegistry();
+        InMemorySourceSyncBaselineStore baselines = SeededBaselines("peer-1");
+        var presenter = new SyncPairingPresenter("dev-local", registry, baselines);
+        presenter.VerifyReply(LinkFor("peer-1", Fingerprint(91)), NowMs, register: true);
+        PairedDeviceRow row = presenter.BuildPairedDevices(NowMs).Rows[0];
+        Assert.True(registry.Forget("peer-1"));
+        int writesBefore = baselines.WriteCount;
+        presenter.AskForget(row);
+
+        SyncForgetOutcome outcome = presenter.ConfirmForget();
+
+        Assert.False(outcome.Forgotten);
+        Assert.False(outcome.BaselineForgotten);
+        Assert.Equal(PairedDeviceReasons.UnknownDevice, outcome.Reason);
+        Assert.Equal(writesBefore, baselines.WriteCount);
+        Assert.Contains("peer-1", baselines.KnownPeerDeviceIds);
+        Assert.Single(baselines.Load("peer-1").Entries);
     }
 
     [Fact]
@@ -675,6 +954,52 @@ public sealed class SyncPagePresenterTests : IDisposable
 
     // ---- helpers -----------------------------------------------------------------
 
+    [Fact]
+    public void EveryPreviewRowCarriesTheWayOutItsCodeHasAndInventsNothingForTheOthers()
+    {
+        SourceRecord secrets = Record("src-1") with { Secrets = JsonDocument.Parse("{}").RootElement.Clone() };
+        SourceRecord unsupported = Record("src-2", type: "fn-nas");
+        SourceRecord plain = Record("src-3");
+        var presenter = new SyncApplyPresenter();
+        presenter.Load(PreviewOf(Envelope(SenderId, secrets, unsupported, plain)));
+
+        IReadOnlyList<SyncApplyRow> rows = presenter.View().Rows;
+
+        SyncApplyRow gated = Assert.Single(rows, row => row.SyncSourceId == "src-1");
+        Assert.Equal(
+            "下一步：在对端把这条来源的凭据清空后重新导出信封，或在本机手动新建一条同样的来源。",
+            gated.NextStep);
+        Assert.True(gated.IsBlocked, "a row with a way out is still a blocked row");
+        Assert.Equal(
+            "下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。",
+            Assert.Single(rows, row => row.SyncSourceId == "src-2").NextStep);
+        Assert.Empty(Assert.Single(rows, row => row.SyncSourceId == "src-3").NextStep);
+    }
+
+    [Fact]
+    public void TheWayOutTableHasOneHomeSoThePreviewAndTheWithheldListCannotDrift()
+    {
+        string[] codes =
+        [
+            SyncRoundReasons.SecretsRequireApproval,
+            SyncRoundReasons.NotSupportedOnWindows,
+            SyncRoundReasons.UnknownSourceType,
+            SyncRoundReasons.SameRevisionDifferentContent,
+            SourceSyncApprovalGate.AmbiguousReasonPrefix + "legacy-identity",
+            "something-new",
+            "",
+            "   ",
+        ];
+
+        foreach (string code in codes)
+        {
+            Assert.Equal(SyncApplyPresenter.NextStep(code), SourceSyncWithheldText.NextStep(code));
+        }
+
+        Assert.Null(SyncApplyPresenter.NextStep("something-new"));
+        Assert.Null(SyncApplyPresenter.NextStep(null));
+    }
+
     private static SourceRecord Record(
         string syncSourceId,
         string name = "客厅 Emby",
@@ -753,6 +1078,50 @@ public sealed class SyncPagePresenterTests : IDisposable
     };
 
     private static PairedDeviceRegistry NewRegistry() => new(new InMemoryPairedDeviceStore());
+
+    private static InMemorySourceSyncBaselineStore SeededBaselines(params string[] peers)
+    {
+        var store = new InMemorySourceSyncBaselineStore();
+        foreach (string peer in peers)
+        {
+            Assert.True(store.Save(peer, Baseline("sync-1", 3)).Saved);
+        }
+
+        return store;
+    }
+
+    private static SourceSyncBaseline Baseline(string id, long revision) => new()
+    {
+        DeviceId = "dev-local",
+        SnapshotId = "snapshot-1",
+        Entries =
+        [
+            new SourceSyncBaselineEntry
+            {
+                SyncSourceId = id,
+                RecordRevision = revision,
+                ContentHash = "hash",
+                FieldHashes = new Dictionary<string, string>(StringComparer.Ordinal) { ["displayName"] = "h-hash" },
+            },
+        ],
+    };
+
+    /// <summary>A baseline store whose medium is gone: every write throws, which the presenter must survive.</summary>
+    private sealed class ThrowingBaselineStore : ISourceSyncBaselineStore
+    {
+        public int ForgetCalls { get; private set; }
+
+        public SourceSyncBaseline Load(string peerDeviceId) => SourceSyncBaseline.Empty;
+
+        public SourceSyncBaselineSaveResult Save(string peerDeviceId, SourceSyncBaseline baseline) =>
+            throw new IOException("baseline medium is gone");
+
+        public bool Forget(string peerDeviceId)
+        {
+            ForgetCalls++;
+            throw new IOException("baseline medium is gone");
+        }
+    }
 
     private static string Fingerprint(int seed)
     {

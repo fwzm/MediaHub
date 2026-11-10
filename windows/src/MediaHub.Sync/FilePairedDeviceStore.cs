@@ -235,8 +235,11 @@ public sealed class FilePairedDeviceStore : IPairedDeviceStore
         using (document)
         {
             JsonElement root = document.RootElement;
+            // TryGetInt32 throws rather than returning false when ValueKind is not Number, so the kind has to be
+            // checked first: a document with "version": "1" must be quarantined as malformed, not crash GetAll().
             if (root.ValueKind != JsonValueKind.Object
                 || !root.TryGetProperty("version", out JsonElement versionElement)
+                || versionElement.ValueKind != JsonValueKind.Number
                 || !versionElement.TryGetInt32(out int version))
             {
                 Quarantine(PairedDeviceStoreReasons.MalformedJson);

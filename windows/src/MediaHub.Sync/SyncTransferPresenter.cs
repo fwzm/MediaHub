@@ -403,6 +403,8 @@ public sealed class SyncTransferPresenter : IDisposable
     private readonly object _gate = new();
     private readonly string _deviceId;
     private readonly Func<SourceSyncEnvelope>? _localEnvelope;
+    private readonly Action<string>? _infoLine;
+    private readonly Action<string>? _warnLine;
     private SourceSyncTransferListener? _listener;
     private CancellationTokenSource? _receiveCts;
     private byte[] _receiveSecret = [];
@@ -420,11 +422,23 @@ public sealed class SyncTransferPresenter : IDisposable
     /// <param name="localEnvelope">
     /// Produces the envelope to send. The App passes its own export; a presenter without one can only receive.
     /// </param>
-    public SyncTransferPresenter(string deviceId, Func<SourceSyncEnvelope>? localEnvelope = null)
+    /// <param name="infoLine">
+    /// W6-107: receives one line per transfer step that completed (listening, received, sent, cancelled, stopped).
+    /// It is invoked while the presenter's lock is held, so it must never call back into this presenter; the App
+    /// passes <c>LogService.Info</c> and the tests append to a list.
+    /// </param>
+    /// <param name="warnLine">Receives the failure line (stable code only) under the same rule as <paramref name="infoLine"/>.</param>
+    public SyncTransferPresenter(
+        string deviceId,
+        Func<SourceSyncEnvelope>? localEnvelope = null,
+        Action<string>? infoLine = null,
+        Action<string>? warnLine = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
         _deviceId = deviceId;
         _localEnvelope = localEnvelope;
+        _infoLine = infoLine;
+        _warnLine = warnLine;
     }
 
     /// <summary>This device's sync identity.</summary>
@@ -540,6 +554,7 @@ public sealed class SyncTransferPresenter : IDisposable
                 form.UseTls);
             if (!start.Started || start.Listener is null)
             {
+                _warnLine?.Invoke(SyncTransferLog.ReceiveFailed(start.Reason));
                 return TransportFailure(start.Reason, start.Detail, null);
             }
 
@@ -578,6 +593,7 @@ public sealed class SyncTransferPresenter : IDisposable
                 WritesReceipt = form.WriteReceipt,
                 StatusText = status,
             };
+            _infoLine?.Invoke(SyncTransferLog.Listening(boundPort, form.UseTls));
 
             return new SyncTransferOutcome
             {
@@ -644,23 +660,23 @@ public sealed class SyncTransferPresenter : IDisposable
 
             if (generator.IsCancellationRequested || cancellationToken.IsCancellationRequested)
             {
-                outcome = Cancelled(SyncTransferCopy.CancelledStatus);
+                outcome = Receive(Cancelled(SyncTransferCopy.CancelledStatus));
             }
             else if (!received.Succeeded)
             {
-                outcome = TransportFailure(
+                outcome = Receive(TransportFailure(
                     received.Reason,
                     received.Detail,
-                    SyncTransferCopy.DescribeFailure(received.Reason, received.Detail));
+                    SyncTransferCopy.DescribeFailure(received.Reason, received.Detail)));
             }
             else
             {
-                outcome = Decode(received);
+                outcome = Receive(Decode(received));
             }
         }
         catch (OperationCanceledException)
         {
-            outcome = Cancelled(SyncTransferCopy.CancelledStatus);
+            outcome = Receive(Cancelled(SyncTransferCopy.CancelledStatus));
         }
         finally
         {
@@ -742,6 +758,8 @@ public sealed class SyncTransferPresenter : IDisposable
             {
                 // Disposing a listener whose accept already failed is not an error worth showing.
             }
+
+            _infoLine?.Invoke(SyncTransferLog.Stopped(listener.Port));
         }
 
         SyncTransferOutcome outcome = new()
@@ -838,18 +856,18 @@ public sealed class SyncTransferPresenter : IDisposable
 
             if (cancellationToken.IsCancellationRequested)
             {
-                outcome = Cancelled(SyncTransferCopy.SendCancelledStatus);
+                outcome = Send(Cancelled(SyncTransferCopy.SendCancelledStatus));
             }
             else if (!sent.Succeeded)
             {
-                outcome = TransportFailure(
+                outcome = Send(TransportFailure(
                     sent.Reason,
                     sent.Detail,
-                    SyncTransferCopy.DescribeFailure(sent.Reason, sent.Detail));
+                    SyncTransferCopy.DescribeFailure(sent.Reason, sent.Detail)));
             }
             else
             {
-                outcome = new SyncTransferOutcome
+                outcome = Send(new SyncTransferOutcome
                 {
                     Succeeded = true,
                     Bytes = sent.Bytes,
@@ -863,12 +881,12 @@ public sealed class SyncTransferPresenter : IDisposable
                         sent.DeliveryConfirmed,
                         sent.DeliveryElapsed,
                         sent.ReceiptConfirmed),
-                };
+                });
             }
         }
         catch (OperationCanceledException)
         {
-            outcome = Cancelled(SyncTransferCopy.SendCancelledStatus);
+            outcome = Send(Cancelled(SyncTransferCopy.SendCancelledStatus));
         }
         finally
         {
@@ -926,6 +944,47 @@ public sealed class SyncTransferPresenter : IDisposable
                 // The socket is already gone; disposal has nothing left to do.
             }
         }
+    }
+
+    /// <summary>
+    /// W6-107: the receive outcome and its log line are the same step, so a caller cannot record one without the
+    /// other. A form issue or a no-op guard carries no transfer and never reaches this helper.
+    /// </summary>
+    private SyncTransferOutcome Receive(SyncTransferOutcome outcome)
+    {
+        if (outcome.Cancelled)
+        {
+            _infoLine?.Invoke(SyncTransferLog.ReceiveCancelledText);
+        }
+        else if (!outcome.Succeeded)
+        {
+            _warnLine?.Invoke(SyncTransferLog.ReceiveFailed(outcome.Reason));
+        }
+        else if (outcome.Envelope is not null)
+        {
+            _infoLine?.Invoke(SyncTransferLog.Received(outcome.Bytes, outcome.Frames));
+        }
+
+        return outcome;
+    }
+
+    /// <summary>The send side of <see cref="Receive"/>: one line per completed attempt.</summary>
+    private SyncTransferOutcome Send(SyncTransferOutcome outcome)
+    {
+        if (outcome.Cancelled)
+        {
+            _infoLine?.Invoke(SyncTransferLog.SendCancelledText);
+        }
+        else if (!outcome.Succeeded)
+        {
+            _warnLine?.Invoke(SyncTransferLog.SendFailed(outcome.Reason));
+        }
+        else
+        {
+            _infoLine?.Invoke(SyncTransferLog.Sent(outcome.Bytes, outcome.Frames));
+        }
+
+        return outcome;
     }
 
     private SyncTransferOutcome Decode(SourceSyncTransferResult received)

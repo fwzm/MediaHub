@@ -1,7 +1,7 @@
 package com.mediahub.feature.settings.sync
 
 import com.mediahub.core.common.sync.SourceSyncCancellation
-import com.mediahub.core.database.sync.SourceSyncImportResult
+import com.mediahub.core.database.sync.SourceSyncReceiveEcho
 import com.mediahub.core.database.sync.SourceSyncTransferImportOutcome
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
@@ -215,7 +215,7 @@ class SourceSyncReceiveLauncherTest {
             if (hang) awaitCancellation()
             return SourceSyncTransferImportOutcome.Imported(
                 envelopeJson = ENVELOPE_JSON,
-                result = SourceSyncImportResult(deviceId = "windows-a"),
+                result = SourceSyncReceiveEcho(deviceId = "windows-a"),
             )
         }
     }

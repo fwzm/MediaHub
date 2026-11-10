@@ -1,6 +1,7 @@
 package com.mediahub.feature.settings
 
 import com.mediahub.core.database.prefs.UserPreferencesRepository
+import com.mediahub.core.common.sync.InMemorySourceSyncBaselineStore
 import com.mediahub.model.UserPreferences
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
@@ -50,7 +51,7 @@ class DiagnosticsExportViewModelTest {
     fun export_reports_progress_then_success_and_does_not_overlap() = runTest(dispatcher) {
         val gate = CompletableDeferred<Unit>()
         val port = GatedPort(gate)
-        val viewModel = SettingsViewModel(Repository(), port)
+        val viewModel = SettingsViewModel(Repository(), InMemorySourceSyncBaselineStore(), port)
 
         assertEquals(DiagnosticsExportState.Idle, viewModel.diagnosticsState.value)
         assertNull(DiagnosticsExportText.line(DiagnosticsExportState.Idle))
@@ -74,7 +75,7 @@ class DiagnosticsExportViewModelTest {
             override suspend fun export(): DiagnosticsExportOutcome =
                 DiagnosticsExportOutcome.Failed("diagnostics-write-failed", "not a directory")
         }
-        val viewModel = SettingsViewModel(Repository(), port)
+        val viewModel = SettingsViewModel(Repository(), InMemorySourceSyncBaselineStore(), port)
 
         viewModel.exportDiagnostics()
         advanceUntilIdle()

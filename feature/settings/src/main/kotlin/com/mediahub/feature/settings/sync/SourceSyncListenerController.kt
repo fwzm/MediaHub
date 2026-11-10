@@ -1,6 +1,7 @@
 package com.mediahub.feature.settings.sync
 
 import com.mediahub.core.common.sync.SourceSyncCancellation
+import com.mediahub.core.common.sync.SourceSyncLocalReasons
 import com.mediahub.core.common.sync.SourceSyncReceiptOptions
 import com.mediahub.core.common.sync.SourceSyncTlsIdentity
 import com.mediahub.core.common.sync.SourceSyncTlsOptions
@@ -12,6 +13,9 @@ import com.mediahub.core.database.sync.SourceSyncImportGateways
 import com.mediahub.core.database.sync.SourceSyncListenerImportService
 import com.mediahub.core.database.sync.SourceSyncListenerImportStart
 import com.mediahub.core.database.sync.SourceSyncTransferImportOutcome
+import com.mediahub.core.logging.LogTag
+import com.mediahub.core.logging.Logger
+import com.mediahub.core.logging.StdoutLogger
 import java.io.Closeable
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
@@ -40,6 +44,16 @@ sealed interface SourceSyncListenState {
         val tls: Boolean,
         val certificateFingerprint: String? = null,
         val host: String = SourceSyncTransferListener.DEFAULT_HOST,
+        /**
+         * W6-86：本次监听里被用户取消掉的等待次数。
+         *
+         * 取消**不是失败**，所以它不进 [Failed]，也就没有稳定码；但没有账的话，用户点完
+         * 「取消这一次接收」只会看到状态跳回「正在监听」，无法区分「我取消了」与「点了没反应」。
+         * 计数与最近一次的码都留在这里，监听关掉（[SourceSyncListenerController.stop]）才清零。
+         */
+        val cancelledReceives: Int = 0,
+        /** 最近一次被取消的等待给出的码（正常情况下是对端无关的本地码 transfer-cancelled）。 */
+        val lastCancelledReason: String? = null,
     ) : SourceSyncListenState
 
     /** 正在等一次发送（accept 与读帧都在 IO 线程上，这里只是状态）。 */
@@ -194,6 +208,21 @@ object SourceSyncListenCopy {
         val head = "监听 " + state.host + ":" + state.port + tlsSuffix(state.tls)
         val pin = state.certificateFingerprint?.trim().orEmpty()
         return if (pin.isEmpty()) head else head + "，证书指纹：" + pin
+    }
+
+    /**
+     * W6-86：取消账（没有取消过时为 null，界面就不出这一行）。
+     *
+     * 只说已经发生的事：取消了几次、最近一次给出的码是什么、监听还开着可以接着等。
+     * 不复述「不是失败」以外的判断，也不给按钮——等一次发送与取消本来就在上面两行。
+     */
+    fun cancelledLineOf(state: SourceSyncListenState): String? {
+        if (state !is SourceSyncListenState.Listening) return null
+        if (state.cancelledReceives <= 0) return null
+        val reason = state.lastCancelledReason?.trim().orEmpty()
+        val tail = if (reason.isEmpty()) "" else "（最近一次原因：" + reason + "）"
+        return "已取消 " + state.cancelledReceives + " 次等待" + tail +
+            "；取消不是失败，监听仍然开着，可以接着等一次发送。"
     }
 
     private fun tlsSuffix(tls: Boolean): String = if (tls) "（TLS 1.3）" else "（明文）"
@@ -434,6 +463,11 @@ interface SourceSyncListenerFactory {
  */
 class SourceSyncListenerController(
     private val factory: SourceSyncListenerFactory,
+    /**
+     * W6-106：监听路径的固定日志出口。缺省 stdout（测试与工具直接用）；App 里由复合日志接管。
+     * 口令、证书指纹、信封正文与任务预算都不经过这里（见 docs §75）。
+     */
+    private val logger: Logger = StdoutLogger(),
     private val onEnvelope: (envelopeJson: String, fileName: String) -> Unit,
 ) {
 
@@ -455,6 +489,10 @@ class SourceSyncListenerController(
     @Volatile
     private var session: SourceSyncListenerSession? = null
 
+    /** W6-86：本次监听里被取消的等待次数与最近一次的码（stop 时清零，监听开了就算同一场）。 */
+    private var cancelledReceives: Int = 0
+    private var lastCancelledReason: String? = null
+
     /**
      * 开监听。
      *
@@ -464,17 +502,13 @@ class SourceSyncListenerController(
     suspend fun start(form: SourceSyncListenForm): Boolean {
         val targetPort = form.portNumber
         if (targetPort == null) {
-            _state.value = SourceSyncListenState.Failed(
-                port = null,
-                code = PORT_INVALID,
-                detail = SourceSyncListenCopy.PORT_INVALID,
-            )
+            setFailed(port = null, code = PORT_INVALID, detail = SourceSyncListenCopy.PORT_INVALID)
             return false
         }
         if (session != null) return false
         if (form.tls && !tlsAvailability.available) {
             // 没证书就一个 socket 都不开：这是「不假装支持」的具体做法。
-            _state.value = SourceSyncListenState.Failed(
+            setFailed(
                 port = null,
                 code = SourceSyncTlsReasons.CERTIFICATE_UNAVAILABLE,
                 detail = tlsAvailability.note,
@@ -483,21 +517,13 @@ class SourceSyncListenerController(
         }
         if (!form.isSecretAcceptable) {
             // 开了认证却没有口令：一个 socket 都不开，码是本端的，不是线上码。
-            _state.value = SourceSyncListenState.Failed(
-                port = null,
-                code = SECRET_MISSING,
-                detail = SourceSyncListenCopy.SECRET_REQUIRED,
-            )
+            setFailed(port = null, code = SECRET_MISSING, detail = SourceSyncListenCopy.SECRET_REQUIRED)
             return false
         }
         val budgetMillis = form.budgetMillis
         if (budgetMillis == null) {
             // 预算文本不合法：同样一个 socket 都不开（W6-54），码是本端的，不是线上码。
-            _state.value = SourceSyncListenState.Failed(
-                port = null,
-                code = BUDGET_INVALID,
-                detail = SourceSyncListenCopy.BUDGET_INVALID_HINT,
-            )
+            setFailed(port = null, code = BUDGET_INVALID, detail = SourceSyncListenCopy.BUDGET_INVALID_HINT)
             return false
         }
         if (!starting.compareAndSet(false, true)) return false
@@ -525,16 +551,12 @@ class SourceSyncListenerController(
                 throw cancellation
             } catch (unexpected: Exception) {
                 // 正常路径不会到这里：core:database 已把 socket 失败映射成 listener-failed。
-                _state.value = SourceSyncListenState.Failed(
-                    port = null,
-                    code = RECEIVE_FAILED,
-                    detail = unexpected::class.java.simpleName,
-                )
+                setFailed(port = null, code = RECEIVE_FAILED, detail = unexpected::class.java.simpleName)
                 return false
             }
             return when (opened) {
                 is SourceSyncListenerOpenResult.Failed -> {
-                    _state.value = SourceSyncListenState.Failed(null, opened.code, opened.detail)
+                    setFailed(null, opened.code, opened.detail)
                     false
                 }
 
@@ -545,6 +567,10 @@ class SourceSyncListenerController(
                         tls = opened.session.tlsEnabled,
                         certificateFingerprint = opened.session.certificateFingerprint,
                         host = opened.session.address,
+                    )
+                    logger.i(
+                        LogTag.NETWORK,
+                        SourceSyncListenLog.started(opened.session.port, opened.session.tlsEnabled),
                     )
                     true
                 }
@@ -573,15 +599,22 @@ class SourceSyncListenerController(
                 _state.value = listeningStateOf(active)
                 throw cancellation
             } catch (unexpected: Exception) {
-                _state.value = SourceSyncListenState.Failed(
-                    port = active.port,
-                    code = RECEIVE_FAILED,
-                    detail = unexpected::class.java.simpleName,
-                )
+                setFailed(port = active.port, code = RECEIVE_FAILED, detail = unexpected::class.java.simpleName)
                 return true
             }
             if (cancel?.isCancelled == true) {
-                // 本地取消不是失败：不留码，回到「正在监听」，下一次还能接着等。
+                // 本地取消不是失败：不进 Failed、不出稳定码，但要留账（W6-86）——否则用户点完取消
+                // 只会看到状态跳回「正在监听」，分不清是「取消了」还是「点了没反应」。
+                cancelledReceives++
+                val reason = (outcome as? SourceSyncTransferImportOutcome.TransferFailed)
+                    ?.reason
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                lastCancelledReason = reason ?: SourceSyncLocalReasons.CANCELLED
+                logger.i(
+                    LogTag.NETWORK,
+                    SourceSyncListenLog.cancelled(cancelledReceives, lastCancelledReason),
+                )
                 _state.value = listeningStateOf(active)
                 return true
             }
@@ -596,7 +629,13 @@ class SourceSyncListenerController(
     fun stop() {
         val active = session
         session = null
-        if (active != null) runCatching { active.close() }
+        if (active != null) {
+            runCatching { active.close() }
+            logger.i(LogTag.NETWORK, SourceSyncListenLog.stopped(active.port))
+        }
+        // 关掉监听等于这场结束：下一场从零开始记账，免得旧账挂在新端口上。
+        cancelledReceives = 0
+        lastCancelledReason = null
         _state.value = SourceSyncListenState.Idle
     }
 
@@ -606,34 +645,50 @@ class SourceSyncListenerController(
         _state.value = if (active == null) SourceSyncListenState.Idle else listeningStateOf(active)
     }
 
+    /** W6-106：失败状态只能经这里产生 —— 写状态与留一行日志是同一步，谁也漏不掉。 */
+    private fun setFailed(port: Int?, code: String, detail: String?): SourceSyncListenState.Failed {
+        val failed = SourceSyncListenState.Failed(port, code, detail)
+        _state.value = failed
+        logger.w(LogTag.NETWORK, SourceSyncListenLog.failed(code))
+        return failed
+    }
+
+    /** 拒收同理：reason 进日志，message 只进界面（它可能带信封原文片段）。 */
+    private fun setRejected(port: Int, reason: String, message: String?): SourceSyncListenState.Rejected {
+        val rejected = SourceSyncListenState.Rejected(port, reason, message)
+        _state.value = rejected
+        logger.w(LogTag.NETWORK, SourceSyncListenLog.rejected(reason))
+        return rejected
+    }
+
     private fun apply(
         active: SourceSyncListenerSession,
         outcome: SourceSyncTransferImportOutcome,
     ) {
         when (outcome) {
             is SourceSyncTransferImportOutcome.TransferFailed ->
-                _state.value = SourceSyncListenState.Failed(active.port, outcome.reason, outcome.detail)
+                setFailed(active.port, outcome.reason, outcome.detail)
 
             is SourceSyncTransferImportOutcome.EnvelopeRejected ->
-                _state.value = SourceSyncListenState.Rejected(active.port, outcome.reason, outcome.message)
+                setRejected(active.port, outcome.reason, outcome.message)
 
             is SourceSyncTransferImportOutcome.Imported -> {
                 val reason = outcome.result.rejectedReason
                 if (!reason.isNullOrBlank()) {
                     // 网关整封拒绝（例如信封内重复 syncSourceId）：同样零写入、不碰 session。
-                    _state.value = SourceSyncListenState.Rejected(
-                        active.port,
-                        reason,
-                        outcome.result.rejectedMessage,
-                    )
+                    setRejected(active.port, reason, outcome.result.rejectedMessage)
                     return
                 }
                 val envelopeJson = outcome.envelopeJson
                 if (envelopeJson.isNullOrBlank()) {
-                    _state.value = SourceSyncListenState.Failed(active.port, RECEIVE_FAILED, MISSING_ENVELOPE)
+                    setFailed(active.port, RECEIVE_FAILED, MISSING_ENVELOPE)
                     return
                 }
                 onEnvelope(envelopeJson, LISTEN_FILE_NAME)
+                logger.i(
+                    LogTag.NETWORK,
+                    SourceSyncListenLog.received(outcome.result.deviceId, outcome.receiptWritten),
+                )
                 _state.value = SourceSyncListenState.Received(
                     port = active.port,
                     deviceId = outcome.result.deviceId,
@@ -649,6 +704,8 @@ class SourceSyncListenerController(
         tls = active.tlsEnabled,
         certificateFingerprint = active.certificateFingerprint,
         host = active.address,
+        cancelledReceives = cancelledReceives,
+        lastCancelledReason = lastCancelledReason,
     )
 
     companion object {

@@ -1,5 +1,6 @@
 package com.mediahub.core.common.pairing
 
+import com.mediahub.core.common.sync.WireText
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -75,11 +76,11 @@ internal object LoopbackOnly {
 
     /** 回环地址；不是回环或不是字面量一律返回 null，由调用方映射成 non-loopback-peer。 */
     fun addressOrNull(host: String): InetAddress? {
-        val trimmed = host.trim()
+        val trimmed = WireText.trim(host)
         if (trimmed.isEmpty()) {
             return null
         }
-        if (trimmed.equals("localhost", ignoreCase = true)) {
+        if (WireText.equalsAsciiIgnoreCase(trimmed, "localhost")) {
             return InetAddress.getLoopbackAddress()
         }
         val literal = trimmed.removePrefix("[").removeSuffix("]")

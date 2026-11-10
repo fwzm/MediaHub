@@ -1,5 +1,6 @@
 package com.mediahub.core.common.pairing
 
+import com.mediahub.core.common.sync.WireText
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
@@ -194,13 +195,13 @@ object PairingLink {
      */
     fun extractCode(link: String?): String {
         if (link == null) return ""
-        val trimmed = link.trim()
-        if (!trimmed.startsWith(PREFIX, ignoreCase = true)) return ""
-        var rest = trimmed.substring(PREFIX.length).trim()
-        if (rest.startsWith(PARAMETER_PREFIX, ignoreCase = true)) {
+        val trimmed = WireText.trim(link)
+        if (!WireText.startsWithAsciiIgnoreCase(trimmed, PREFIX)) return ""
+        var rest = WireText.trim(trimmed.substring(PREFIX.length))
+        if (WireText.startsWithAsciiIgnoreCase(rest, PARAMETER_PREFIX)) {
             rest = rest.substring(PARAMETER_PREFIX.length)
         }
-        return rest.trim()
+        return WireText.trim(rest)
     }
 
     /**
@@ -208,9 +209,9 @@ object PairingLink {
      */
     fun parse(link: String?, nowEpochMs: Long): PairingLinkResult {
         val raw = link ?: return PairingLinkResult.failed(PairingLinkReasons.EMPTY)
-        if (raw.isBlank()) return PairingLinkResult.failed(PairingLinkReasons.EMPTY)
-        val trimmed = raw.trim()
-        if (!trimmed.startsWith(PREFIX, ignoreCase = true)) {
+        if (WireText.isBlank(raw)) return PairingLinkResult.failed(PairingLinkReasons.EMPTY)
+        val trimmed = WireText.trim(raw)
+        if (!WireText.startsWithAsciiIgnoreCase(trimmed, PREFIX)) {
             return PairingLinkResult.failed(PairingLinkReasons.NOT_A_LINK)
         }
         if (trimmed.length > MAXIMUM_LENGTH) {

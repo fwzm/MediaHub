@@ -29,6 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ env.EXPECTED_HEAD }}
           persist-credentials: false
 
@@ -54,7 +55,10 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "10.0.x"
+          # Pinned, not "10.0.x": SDK feature bands prune framework-provided NuGet packages
+          # differently, so the resolved graph - and the SBOM this job verifies - depends on the SDK.
+          # global.json pins the same version; the guard checks the report agrees with it.
+          dotnet-version: "10.0.113"
 
       - name: Cache libmpv
         id: libmpv-cache
@@ -120,30 +124,13 @@ jobs:
       - name: Fail if a suite ran nothing or lost tests
         shell: pwsh
         working-directory: windows
-        run: |
-          # A test step that silently runs zero tests would otherwise be reported as success, and a
-          # suite that quietly loses half its cases still prints "Passed!". Assert each suite by name
-          # against the executed integration baseline (1518 + 104 on 2026-10-24).
-          # Raise these floors when the suites grow; do not lower them to hide missing coverage.
-          $expected = @(
-            @{ File = "windows-tests.trx"; Suite = "MediaHub.Tests";          Floor = 1518 },
-            @{ File = "webdav-tests.trx";  Suite = "MediaHub.WebDav.Tests";    Floor = 104 }
-          )
-          $all = 0
-          foreach ($e in $expected) {
-            $path = Join-Path ./artifacts/test-results $e.File
-            if (-not (Test-Path $path)) { throw "no test results for $($e.Suite): $($e.File) was not produced" }
-            $xml = [xml](Get-Content $path -Raw)
-            $total = [int]$xml.TestRun.ResultSummary.Counters.total
-            $failed = [int]$xml.TestRun.ResultSummary.Counters.failed
-            $skipped = [int]$xml.TestRun.ResultSummary.Counters.notExecuted
-            "$($e.Suite): total=$total failed=$failed notExecuted=$skipped"
-            if ($total -lt $e.Floor) { throw "$($e.Suite) ran $total tests, expected at least $($e.Floor) - cases were dropped or skipped" }
-            if ($failed -ne 0) { throw "$($e.Suite): $failed test(s) failed" }
-            if ($skipped -ne 0) { throw "$($e.Suite): $skipped test(s) were not executed" }
-            $all += $total
-          }
-          "combined tests=$all"
+        # The gate lives in tools/check-test-suite-baseline.ps1 instead of inline here so that the
+        # negative controls exercise the exact code path CI runs instead of a copy pasted out of YAML.
+        # It checks the committed total per suite AND the committed per-class case counts: deleting N
+        # cases and adding N other cases keeps the total identical, so a total-only gate cannot see it.
+        # Refresh the baseline with tools/update-test-suite-baseline.ps1 - it refuses to lower a count
+        # without -AcceptRemoval, so making a red gate green is an explicit, reviewed diff.
+        run: pwsh -NoProfile -File tools/check-test-suite-baseline.ps1
 
       # The licence deliverable rots silently: a new csproj appears and the NuGet inventory is never
       # regenerated, the generated notices lose the libmpv GPL conclusion, or the SBOM stops being a
@@ -236,14 +223,25 @@ jobs:
           -c Release -p:Platform=x64
           -o ./artifacts/portable
 
+      - name: Stage licence/notice files into the portable output
+        shell: pwsh
+        working-directory: windows
+        run: ./tools/stage-licence-files.ps1 -RepoRoot .. -TargetDir windows/artifacts/portable
+
       - name: Smoke-check the published output
         shell: pwsh
         working-directory: windows
         run: |
           # The published folder must be self-contained: the exe, the engine DLL and the app assemblies.
-          $required = @("MediaHub.exe", "libmpv-2.dll", "MediaHub.dll", "MediaHub.Net.dll", "MediaHub.Providers.dll")
+          $required = @(
+            "MediaHub.exe", "libmpv-2.dll", "MediaHub.dll", "MediaHub.Net.dll", "MediaHub.Providers.dll",
+            "licences/MANIFEST.txt", "licences/THIRD-PARTY-NOTICES.md", "licences/THIRD-PARTY-NOTICES-FULL.md",
+            "licences/LGPL-COMPLIANCE.md", "licences/LGPL-ENGINE-SWITCH.md", "licences/component-licences.txt",
+            "licences/sbom.cdx.json"
+          )
           $missing = $required | Where-Object { -not (Test-Path (Join-Path "./artifacts/portable" $_)) }
           if ($missing) { throw "missing from publish output: " + ($missing -join ", ") }
+          "licence/notice files in the package: " + (Get-ChildItem ./artifacts/portable/licences -File | Measure-Object).Count
           "portable output size: " + [math]::Round((Get-ChildItem ./artifacts/portable -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1) + " MB"
 
       - name: Upload artifacts

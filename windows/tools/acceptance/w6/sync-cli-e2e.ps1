@@ -310,7 +310,7 @@ Check 'passphrase-archive-round-trips-to-a-fresh-device' {
     Assert-Equal 0 $export.ExitCode 'encrypted export exit code'
     $json = Get-CliJson $export
     Assert-Equal $true $json.encrypted 'encrypted flag'
-    $script:archiveA = Join-Path $script:rootA 'sync-envelope.mhsync'
+    $script:archiveA = Join-Path $script:rootA 'sync-envelope.mharchive'
     Assert-True (Test-Path -LiteralPath $script:archiveA) 'archive file missing'
     $bytes = [System.IO.File]::ReadAllBytes($script:archiveA)
     Assert-Equal 'MHSYNCA1' ([System.Text.Encoding]::ASCII.GetString($bytes, 0, 8)) 'archive magic'
@@ -319,6 +319,32 @@ Check 'passphrase-archive-round-trips-to-a-fresh-device' {
     $imported = Get-CliJson $import
     Assert-Equal 2 $imported.appliedCount 'encrypted import applied count'
     return ('magic=MHSYNCA1 bytes=' + $bytes.Length + ' applied=2')
+}
+
+Check 'encrypted-export-uses-the-canonical-archive-suffix' {
+    $canonical = Join-Path $script:rootA 'sync-envelope.mharchive'
+    $legacyName = Join-Path $script:rootA 'sync-envelope.mhsync'
+    Assert-True (Test-Path -LiteralPath $canonical) 'the encrypted export must be named sync-envelope.mharchive'
+    Assert-True (-not (Test-Path -LiteralPath $legacyName)) 'the pre-W6-66 .mhsync name must not be written any more'
+    $copy = Join-Path $script:scratch 'legacy-named-peer.mhsync'
+    Copy-Item -LiteralPath $canonical -Destination $copy -Force
+    $root = Join-Path $script:tempRoot 'deviceB-legacy-suffix'
+    $import = Invoke-Cli @('import', '--root', $root, '--in', $copy, '--passphrase', $script:passphrase, '--apply', '--json')
+    Assert-Equal 0 $import.ExitCode 'import of an archive under the legacy suffix exit code'
+    $imported = Get-CliJson $import
+    Assert-Equal 2 $imported.appliedCount 'import of an archive under the legacy suffix applied count'
+    return ('written=' + (Split-Path -Leaf $canonical) + ' legacy-name-still-reads applied=2')
+}
+
+Check 'plain-envelope-renamed-to-an-archive-suffix-is-still-plaintext' {
+    $copy = Join-Path $script:scratch 'plaintext-named.mharchive'
+    Copy-Item -LiteralPath $script:envelopeA -Destination $copy -Force
+    $root = Join-Path $script:tempRoot 'deviceB-plain-archive-suffix'
+    $import = Invoke-Cli @('import', '--root', $root, '--in', $copy, '--apply', '--json')
+    Assert-Equal 0 $import.ExitCode 'import of a plain envelope named .mharchive exit code'
+    $imported = Get-CliJson $import
+    Assert-Equal 2 $imported.appliedCount 'import of a plain envelope named .mharchive applied count'
+    return 'the reader sniffs MHSYNCA1 instead of trusting the extension'
 }
 
 Check 'wrong-passphrase-fails-closed-and-writes-nothing' {

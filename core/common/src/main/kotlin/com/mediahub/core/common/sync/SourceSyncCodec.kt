@@ -102,13 +102,30 @@ object SourceSyncCodec {
         for (record in envelope.sources) {
             requireText(record.syncSourceId, "syncSourceId")
             requireText(record.sourceType.raw, "sourceType")
+            requireWellFormed(record.displayName, "displayName")
+            requireWellFormed(record.accountScope, "accountScope")
             for (endpoint in record.endpoints) requireText(endpoint.url, "url")
         }
         for (tombstone in envelope.deletions) requireText(tombstone.syncSourceId, "syncSourceId")
     }
 
     private fun requireText(value: String?, field: String) {
-        if (value.isNullOrBlank()) throw SourceSyncContractException.missingField(field)
+        // 空白判定走 WireText（Unicode White_Space），不用 isNullOrBlank()：JVM 的空白集含
+        // U+001C–U+001F、不含 U+0085，与 .NET 的 IsNullOrWhiteSpace 相反，
+        // 同一份信封会在两端一个报 missing-field、一个当合法值收下。
+        if (WireText.isBlank(value)) throw SourceSyncContractException.missingField(field)
+        // 含未配对代理项的字符串写不进合法的 UTF-8：.NET 会静默换成 U+FFFD 再落盘，
+        // 而读端又无法把 U+FFFD 还原，等于悄悄改写了用户数据。这里直接拒绝。
+        if (WireText.hasLoneSurrogate(value!!)) {
+            throw SourceSyncContractException.invalidField(field, "must be well-formed Unicode text.")
+        }
+    }
+
+    /** 可选文本同样不能含未配对代理项：写出去只能变成 U+FFFD，等于悄悄改数据。 */
+    private fun requireWellFormed(value: String?, field: String) {
+        if (value != null && WireText.hasLoneSurrogate(value)) {
+            throw SourceSyncContractException.invalidField(field, "must be well-formed Unicode text.")
+        }
     }
 
     // ---------------------------------------------------------------- 读取
@@ -121,6 +138,15 @@ object SourceSyncCodec {
         }
         if (root !is JsonObject) {
             throw SourceSyncContractException(SourceSyncContractException.MALFORMED_JSON, "The sync document must be a JSON object.")
+        }
+        // kotlinx.serialization 会原样收下转义出来的未配对代理项（"\ud800"），System.Text.Json 也收下，
+        // 但两者都取不出合法字符串（.NET 在 GetString() 抛 InvalidOperationException）。
+        // 与其让两端各错各的，不如在入口就把"文本不是合法 Unicode"判成 malformed-json。
+        if (WireText.containsLoneSurrogate(root)) {
+            throw SourceSyncContractException(
+                SourceSyncContractException.MALFORMED_JSON,
+                "The sync document contains text that is not well-formed Unicode.",
+            )
         }
 
         val schemaVersion = requiredInt32(root, "schemaVersion")
@@ -234,7 +260,7 @@ object SourceSyncCodec {
         if (primitive == null || !primitive.isString) {
             throw SourceSyncContractException.invalidField(name, "must be a string.")
         }
-        if (primitive.content.isBlank()) throw SourceSyncContractException.missingField(name)
+        if (WireText.isBlank(primitive.content)) throw SourceSyncContractException.missingField(name)
         return primitive.content
     }
 

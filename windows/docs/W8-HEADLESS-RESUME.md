@@ -1,6 +1,6 @@
 # W8 · 无窗口续播闭环（真服实测）
 
-> 状态：两服实测全绿 —— 驱动脚本 `RESULT: 17 passed, 0 failed`，每台服务器上的探针 `RESULT: 16 passed, 0 failed`。
+> 状态：两服实测全绿 —— 驱动脚本 `RESULT: 17 passed, 0 failed`（2026-10-24 首次闭环时的条数；§10 加上两条版本断言后共 **19** 条），每台服务器上的探针 `RESULT: 16 passed, 0 failed`。
 >
 > 范围：本文只证明**服务端侧的续播记录、新客户端实例可见性、看完清除与下限规则**。它**不**证明窗口内「继续观看」提示的呈现，也**不**证明播放引擎的 seek 精度 —— 那两条仍是 GUI 验收（`windows/tools/acceptance/w8/s1-resume-gui.ps1`、`s2-emby-gui.ps1`）的职责。本任务是「不弹窗口也能证明续播链路成立」，所以刻意不启动任何带窗口的进程。
 
@@ -31,13 +31,13 @@
 | --- | --- |
 | 建句柄 + 登录 | `IMediaProviderFactory.Create(...)` + `IProviderAuth.AuthenticateAsync(Credentials)`（`windows/src/MediaHub.Providers/ProviderContracts.cs`） |
 | 发现可播放条目 | `IProviderLibrary.GetLibrariesAsync` / `GetItemsAsync(libraryId, PageRequest)`（同上） |
-| 解析播放会话 | `MediaBrowserProvider.ResolvePlaybackAsync`（`windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:254-300`，`SessionId` 来自 `PlaybackInfo`） |
-| 上报开播/进度/停止 | `IProviderProgress.ReportPlaybackStartedAsync` / `ReportProgressAsync` / `ReportFinalProgressAsync`（`ProviderContracts.cs:117`、`:121`、`:127`；实现在 `MediaBrowserProvider.cs:347-400`，落到 `/Sessions/Playing`、`/Sessions/Playing/Progress`、`/Sessions/Playing/Stopped`） |
-| 回读位置 | `IProviderProgress.GetResumePositionAsync`（`ProviderContracts.cs:131`，实现 `MediaBrowserProvider.cs:414-418`） |
-| 回读续播列表 | `IProviderProgress.GetContinueWatchingAsync`（`ProviderContracts.cs:130`，实现 `MediaBrowserProvider.cs:402-412`） |
+| 解析播放会话 | `MediaBrowserProvider.ResolvePlaybackAsync`（`windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:269-315`，`SessionId` 来自 `PlaybackInfo`） |
+| 上报开播/进度/停止 | `IProviderProgress.ReportPlaybackStartedAsync` / `ReportProgressAsync` / `ReportFinalProgressAsync`（`ProviderContracts.cs:117`、`ProviderContracts.cs:121`、`ProviderContracts.cs:127`；实现在 `MediaBrowserProvider.cs:362-415`，落到 `/Sessions/Playing`、`/Sessions/Playing/Progress`、`/Sessions/Playing/Stopped`） |
+| 回读位置 | `IProviderProgress.GetResumePositionAsync`（`ProviderContracts.cs:131`，实现 `MediaBrowserProvider.cs:429-433`） |
+| 回读续播列表 | `IProviderProgress.GetContinueWatchingAsync`（`ProviderContracts.cs:130`，实现 `MediaBrowserProvider.cs:417-427`） |
 | 回读详情 | `IProviderDetail.GetItemDetailAsync` |
 
-两点实现事实值得记住：`MediaBrowserProvider.cs:362` 要求 `PlaybackProgress.SessionId` 非空，否则直接拒绝；`:393` 的上报是 **best-effort**，网络/HTTP 异常被吞掉 —— 所以「上报成功」不能靠返回值判断，只能靠**回读**判断。本探针的每条断言都建立在回读上。
+两点实现事实值得记住：`MediaBrowserProvider.cs:377` 要求 `PlaybackProgress.SessionId` 非空，否则直接拒绝；`MediaBrowserProvider.cs:408` 的上报是 **best-effort**，网络/HTTP 异常被吞掉 —— 所以「上报成功」不能靠返回值判断，只能靠**回读**判断。本探针的每条断言都建立在回读上。
 
 ## 4 四个阶段与 16 条断言
 
@@ -80,12 +80,12 @@
 | API 根 | 无前缀 | 无 `/emby` 前缀（根路径直接服务 API） |
 | 身份头 | `Authorization: MediaBrowser Client=…, Device=…, DeviceId=…, Version=…` | `X-Emby-Authorization` 同格式 |
 | token 头 | 沿用 `Authorization` 头内 `Token="…"` | `X-Emby-Token` + `X-MediaBrowser-Token` 两个头 |
-| `PlaySessionId` 位置 | `PlaybackInfo` 响应根（兼容旧版时才在 `MediaSources[0]`） | 同左（产品 `MediaBrowserProvider.cs:273` 先读根再兜底源） |
+| `PlaySessionId` 位置 | `PlaybackInfo` 响应根（兼容旧版时才在 `MediaSources[0]`） | 同左（产品 `MediaBrowserProvider.cs:288` 先读根再兜底源） |
 | 续播下限 | `MinResumePct=5` | **2%**（本轮二分实测，见 §5.1） |
 | 最短可续播片长 | `MinResumeDurationSeconds=300` | 未在本实例暴露 policy（见 §5.2） |
 | 夹具条目 id | GUID `b22e31da9faf6ef247e19f7b3774dab2` | 短字符串 `34` |
 
-身份头这条差异是硬约束：把 `X-Emby-Authorization` 发给 Jellyfin 12.2 的 `/Users/AuthenticateByName` 会得到 **HTTP 400**，服务端日志报 `ArgumentNullException: Value cannot be null. (Parameter 'request.App')`（`Emby.Server.Implementations.Session.SessionManager.AuthenticateNewSessionInternal`）。产品代码本来就是对的两台服各用各的头（`MediaBrowserDialect.cs:32` / `:39`，身份头生成见 `:64-74`，token 注入见 `:120-132`），驱动脚本只是照抄该规则（`windows/tools/acceptance/w8/headless-resume.ps1:138` `New-IdentityHeaders`）。
+身份头这条差异是硬约束：把 `X-Emby-Authorization` 发给 Jellyfin 12.2 的 `/Users/AuthenticateByName` 会得到 **HTTP 400**，服务端日志报 `ArgumentNullException: Value cannot be null. (Parameter 'request.App')`（`Emby.Server.Implementations.Session.SessionManager.AuthenticateNewSessionInternal`）。产品代码本来就是对的两台服各用各的头（`MediaBrowserDialect.cs:32` / `MediaBrowserDialect.cs:39`，身份头生成见 `MediaBrowserDialect.cs:64-74`，token 注入见 `MediaBrowserDialect.cs:120-132`），驱动脚本只是照抄该规则（`windows/tools/acceptance/w8/headless-resume.ps1:146` `New-IdentityHeaders`）。
 
 ### 5.1 Emby 的续播下限是片长的 2%（不是 5%）
 
@@ -134,7 +134,9 @@ RESULT: 17 passed, 0 failed
 DRIVER EXIT=0 elapsed=31s
 ```
 
-17 条驱动断言：`probe-binary-exists`、`jellyfin-answers`(12.2.0)、`emby-answers`(4.10.2.0)、`the-two-servers-are-not-the-same-process`、两侧各 `-fixture-login`、`-has-a-long-enough-fixture`、`-probe-passes`、`-probe-wrote-evidence`、`-report-is-all-green`、`-report-used-several-client-instances`，以及 `no-test-server-processes-left`。
+当时的 17 条驱动断言：`probe-binary-exists`、`jellyfin-answers`(12.2.0)、`emby-answers`(4.10.2.0)、`the-two-servers-are-not-the-same-process`、两侧各 `-fixture-login`、`-has-a-long-enough-fixture`、`-probe-passes`、`-probe-wrote-evidence`、`-report-is-all-green`、`-report-used-several-client-instances`，以及 `no-test-server-processes-left`。
+
+上面这段是 2026-10-24 那次运行的原文（所以是 17 条）。§10 之后驱动多了两条版本断言（`jellyfin-is-the-expected-version` / `emby-is-the-expected-version`），当前驱动共 **19** 条 = 15 条固定 + 每服 2 条（`-report-is-all-green`、`-report-used-several-client-instances`）；条数由 §12 的契约块与源码逐条对齐。
 
 ### 6.3 单服探针（可直接手跑）
 
@@ -176,10 +178,10 @@ dotnet windows/src/MediaHub.ResumeProbe/bin/Debug/net10.0/MediaHub.ResumeProbe.d
 | 探针 `0` | 16 条断言全过 |
 | 探针 `1` | 至少一条断言失败（stdout 里 `[assert] … FAIL expected=… actual=…`） |
 | 探针 `2` | 用法错误或连不上/登录失败 |
-| 驱动 `0` | 17 条驱动断言全过 |
+| 驱动 `0` | 19 条驱动断言全过（15 条固定 + 每服 2 条） |
 | 驱动 `1` | 任一驱动断言失败（含残留进程、探针非零退出） |
 
-驱动脚本刻意**不调用** `windows/tools/setup-test-server.ps1`：那个脚本开头会 `Stop-Process` 所有 `jellyfin` / `EmbyServer`（该文件 `:125-127`），会把并行工作的其他人正在用的服务器杀掉。本驱动只杀自己启动的进程，以及收尾时清理同名残留。
+驱动脚本刻意**不调用** `windows/tools/setup-test-server.ps1`：那个脚本开头会 `Stop-Process` 所有 `jellyfin` / `EmbyServer`（`windows/tools/setup-test-server.ps1:158-159`），会把并行工作的其他人正在用的服务器杀掉。本驱动只杀自己启动的进程，以及收尾时清理同名残留。
 
 ## 8 未覆盖与残余风险
 
@@ -198,3 +200,163 @@ dotnet windows/src/MediaHub.ResumeProbe/bin/Debug/net10.0/MediaHub.ResumeProbe.d
 - `windows/src/MediaHub.ResumeProbe/Program.cs` —— 探针实现（参数、四阶段、断言、报告）
 - `windows/tools/acceptance/w8/headless-resume.ps1` —— 驱动脚本（起服、登录、复位、跑探针、收尾）
 - `windows/tools/acceptance/w8/s1-resume-gui.ps1`、`s2-emby-gui.ps1` —— GUI 侧续播验收（本文件的补充，不是替代）
+
+## 10 版本可钉住的复跑（2026-10-29 · 第 43 轮）
+
+> 状态：三次真服闭环全绿 —— 官方 Emby **4.10.1.0**（任务书指定版本）+ Jellyfin 12.2.0 的钉住运行 `RESULT: 19 passed, 0 failed`；默认路径（本机既有 Emby 4.10.2.0）`RESULT: 19 passed, 0 failed`。两条版本断言各比对 `GET /System/Info/Public` 的 `Version` 字符串。
+
+### 10.1 为什么需要这一节
+
+§1 的表格只钉住「跑过的那两台实例」，而 `windows/tools/acceptance/w8/headless-resume.ps1` 原先只有一个 `-InstallRoot`：换一台服务器没有入口，版本只写进报告、不在断言里。任务书要求的是**官方 Emby 4.10.1.0**，所以本轮把 harness 拆成「安装根 / 数据根 / 期望版本」三个可传参数，并把版本做成断言 —— 报告里记的版本号必须由断言复核，否则「这一轮跑的是哪个版本」永远只是回忆。
+
+### 10.2 三次运行（本轮证据）
+
+| 运行 | Jellyfin | Emby | 结果 |
+| --- | --- | --- | --- |
+| 钉住版本 | 12.2.0 @8096（`D:\mh-servers`） | **4.10.1.0** @8098（`D:\mh-servers410`，官方 4.10.1.0 归档） | `RESULT: 19 passed, 0 failed` |
+| 默认路径 | 12.2.0 @8096 | 4.10.2.0 @8097（`D:\mh-servers\emby-install\app\system.old`） | `RESULT: 19 passed, 0 failed` |
+| 负向 N1 | 12.2.0 | 4.10.1.0，但期望故意写成 4.10.2.0 | **17 passed, 1 failed** —— `FAIL emby-is-the-expected-version :: expected=4.10.2.0 actual=4.10.1.0` |
+| 负向 N2 | 12.2.0 | 安装根故意写成 `D:\mh-servers410-missing` | 具名失败：`FATAL EmbyServer.exe not found under D:\mh-servers410-missing\emby-install or D:\mh-servers410-missing\emby (run get-test-servers.ps1)`，退出码 1 |
+
+钉住运行里的两条版本断言原文：`PASS jellyfin-is-the-expected-version :: expected=12.2.0 actual=12.2.0`、`PASS emby-is-the-expected-version :: expected=4.10.1.0 actual=4.10.1.0`。两服探针各 `RESULT: 16 passed, 0 failed`（`clientInstances=10`），收尾 `PASS no-test-server-processes-left :: running=0`。
+
+与 §5.3 有关的一条**新实测**：官方 Emby 4.10.1.0 在 600 s 夹具上停止于 12.0 s（片长 2%）时位置被**保留**（`PASS two-percent-floor-is-per-server expected=120000000 actual=120000000`，且出现在续播列表里），与 4.10.2.0 结论一致 ⇒「Emby 的下限是片长 2%」不是 4.10.2 独有的行为。同一次运行里 Jellyfin 12.2.0 对同样 12.0 s 的上报仍是清零（5% + 300 s），两服差异在同一次运行内被同时钉住。
+
+### 10.3 复跑命令
+
+```powershell
+# 1) 官方 Emby 4.10.1.0 装到隔离根（仓库外），并关掉自动更新
+pwsh -NoProfile -File windows/tools/setup-test-server.ps1 -Server emby `
+    -InstallRoot D:\mh-servers410 -DataRoot D:\mh-servers410\data\emby -Port 8098 `
+    -UserName mh -Password mh-test-pass -DisableAutoUpdate
+
+# 2) 版本钉住的闭环（Jellyfin 仍用 D:\mh-servers 的 12.2.0）
+pwsh -NoProfile -File windows/tools/acceptance/w8/headless-resume.ps1 `
+    -InstallRoot D:\mh-servers -EmbyInstallRoot D:\mh-servers410 `
+    -EmbyDataRoot D:\mh-servers410\data\emby -EmbyPort 8098 `
+    -ExpectJellyfinVersion 12.2.0 -ExpectEmbyVersion 4.10.1.0
+```
+
+`windows/tools/get-test-servers.ps1` 负责把两个官方归档下到 `<Destination>\_downloads`（解压到 `<Destination>\{jellyfin,emby}`），并把版本与每个归档的 SHA-256 写进 `<Destination>\SERVER-VERSIONS.json`。`setup-test-server.ps1` 仍然会在开头强杀机器上所有 `jellyfin`/`EmbyServer` 进程（`windows/tools/setup-test-server.ps1:158-159`），所以不要与其他人的并行取证同时跑。
+
+### 10.4 本轮修掉的两个工具缺陷
+
+1. **缓存归档只查「存在」不查「可用」**（`windows/tools/get-test-servers.ps1`）：本机 `_downloads\embyserver-win-x64-4.10.1.0.7z` 只有 90,730,496 B，而官方资产是 133,879,144 B —— 一次中断的下载把截断文件留在缓存里，之后每次运行都拿它去解压（`7zr x` 报 `Unexpected end of archive`，`Files: 0`）。现在 `Test-Artifact` 会真的打开容器（`.7z` 走 `7zr t`，zip 走 `[System.IO.Compression.ZipFile]::OpenRead`），打不开就打印 `refetching <名称> (the cached copy cannot be opened)` 并重下。
+2. **Emby 的监听端口不随 `-Port`**（`windows/tools/setup-test-server.ps1`）：Emby 4.10 忽略 `-datadir`，端口只来自数据根的 `config\system.xml`（从未运行过的新根默认 8096）—— 本轮实测打印 `configured port is 8096; pinning 8098`。脚本现在先冷启动探到真实端口，停服、写 `HttpServerPortNumber`/`PublicPort`、读回校验（不等即抛）后重启；并新增 `-DisableAutoUpdate`（鉴权后经 `/System/Configuration` 关掉自动更新并回读，实测 `auto update disabled (read back as false)`），避免验收途中服务器自动升级把版本证据改掉。同一次改动把 `Wait-Http` 从「有响应即就绪」收紧为「只认 2xx」，超时消息带最后状态码。
+
+### 10.5 负向对照 N3：缓存校验不是空转
+
+在 scratch 目录 `D:\mh-control` 放两个**小号**真实归档（一个 132 B 的 zip + 一个 183 B 的 7z，7z 内含 `system\EmbyServer.exe` 占位），然后：
+
+| 步骤 | 动作 | 观测 |
+| --- | --- | --- |
+| A | 把 7z 截断成一半（91 B）后运行 `get-test-servers.ps1 -Destination D:\mh-control` | `cached  jellyfin_12.2-amd64.zip` + `refetching embyserver-win-x64-4.10.1.0.7z (the cached copy cannot be opened)`；并且重下真的发生了（15 s 内文件长到 32,715,492 B，随后由对照自身终止进程） |
+| B | 恢复完好的 7z 后再跑一次 | `cached  jellyfin_12.2-amd64.zip` + `cached  embyserver-win-x64-4.10.1.0.7z` → 解压 → `versions recorded: D:\mh-control\SERVER-VERSIONS.json` → 两个 exe 都定位到，**退出码 0** |
+
+### 10.6 本机环境事实（复跑前必读）
+
+**`PATHEXT=.CPL` 会让 `& dotnet` 变成「无法将 'dotnet' 项识别为 cmdlet」**：本会话的 shell 环境里 `$env:PATHEXT` 是 `.CPL`，PowerShell 因此不会把 `dotnet` 补成 `dotnet.exe`。而驱动脚本正是用 `& dotnet $ProbeDll …` 启动探针（`windows/tools/acceptance/w8/headless-resume.ps1:240`），所以任何用自定义环境变量起 harness 的调用方都必须显式带上正常的 `PATHEXT`（`.COM;.EXE;.BAT;.CMD;…`）。本轮为此真实失败了两次：版本断言全部通过、探针却一步没跑。这不是脚本缺陷，但会伪装成「服务器/探针有问题」。
+
+### 10.7 证据文件
+
+| 文件 | 内容 |
+| --- | --- |
+| `D:\mh-verify\w8-emby410-pinned-run.log` | 钉住运行完整 stdout（`RESULT: 19 passed, 0 failed`） |
+| `D:\mh-verify\w8-evidence-emby410\`（4 文件） | 该次运行的 summary + 两服探针 JSON/日志 |
+| `D:\mh-verify\w8-default-path-run.log` + `w8-evidence-emby410-default\` | 默认路径复跑（19/0，Emby 4.10.2.0） |
+| `D:\mh-verify\w8-neg-N1.log`、`w8-neg-N2.log` | 两条负向对照 |
+| `D:\mh-verify\w8-neg-N3-A.log`、`w8-neg-N3-B.log` | 缓存校验 A/B |
+| `D:\mh-verify\w8-emby410-setup.log` | 隔离根一次性向导 + 建库 + 扫描 + 关自动更新 |
+
+这些目录都在仓库外（`D:\mh-verify`）或 `.gitignore` 覆盖的 `windows/tools/acceptance/evidence/`，所以只留路径、不入库；报告里的数字都能由上面的日志复算。
+
+### 10.8 残余风险
+
+1. **版本断言只比字符串**：`Version` 来自 `GET /System/Info/Public`，不校验二进制哈希。归档哈希由 `get-test-servers.ps1` 记进 `<Destination>\SERVER-VERSIONS.json`（本轮已实测该文件内容与官方资产一致）。
+2. **默认路径跑的是 4.10.2.0**：本机 `D:\mh-servers` 树下唯一的 `EmbyServer.exe` 位于 `emby-install\app\system.old`（FileVersion 4.10.2.0），这是安装事实而非脚本选择；`-ExpectEmbyVersion` 让它至少不会静默漂移。
+3. **2% 结论仍只来自两个 Emby 小版本**（4.10.1.0 / 4.10.2.0）：更大范围的版本漂移仍需逐版本重跑。
+## 11 源代码指针契约（机器可读）
+
+本文件按行号引用产品与工具源码的地方全部声明在下面这个块里，并由 `windows/tools/check-licence-surface.ps1` 的第 54 项 `resume-source-pointer-claims` 逐条复核（每次 CI 都跑）。判据是四条：这份记录仍然写着每条 `cite`；该文件仍存在、区间仍落在文件内；区间里仍然含着那条 `anchor` 短语；正文里每一处带文件名的源码引用都在块里声明过。行数按 `[System.IO.File]::ReadAllLines` 计（文件以换行结尾时末尾那个空元素不计，与 `wc -l` 同口径）。
+
+为什么要它：2026-10-24 建这份记录时，`headless-resume.ps1` 的 `New-IdentityHeaders` 在 138 行、`setup-test-server.ps1` 的强杀块在 125-127 行；10-29 的第 43 轮往两个脚本前面插了行，两处指针就**静默**指错了位置（现为 146 与 158-159）—— 文档读起来一切正常，只有自动核对能发现。行号是易碎引用，写下来不核对等于没写。
+
+覆盖范围只有 `.cs` / `.csproj` / `.ps1` 三种扩展名：`W8-EVIDENCE.md:26` 属跨文档引用（由该文档自己负责），`D:\mh-servers\data\jellyfin\config\system.xml:32/34` 是仓库外的现场配置路径（不在版本控制里，无法按提交核对）。
+
+<!-- BEGIN resume-source-pointer-claims -->
+resume-pointer-owner: check-licence-surface.ps1:resume-source-pointer-claims
+resume-pointer-count: 20
+resume-pointer-convention: line counts as [System.IO.File]::ReadAllLines; 1 <= from <= to <= line count; the anchor substring must still sit inside the cited range
+
+- cite=windows/src/MediaHub.ResumeProbe/MediaHub.ResumeProbe.csproj:3-11 ; anchor=Deliberately not part of MediaHub.Windows.sln
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:269-315 ; anchor=ResolvePlaybackAsync
+- cite=windows/src/MediaHub.Providers/ProviderContracts.cs:117 ; anchor=ReportPlaybackStartedAsync
+- cite=windows/src/MediaHub.Providers/ProviderContracts.cs:121 ; anchor=Task ReportProgressAsync
+- cite=windows/src/MediaHub.Providers/ProviderContracts.cs:127 ; anchor=ReportFinalProgressAsync
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:362-415 ; anchor=ReportProgressAsync
+- cite=windows/src/MediaHub.Providers/ProviderContracts.cs:131 ; anchor=GetResumePositionAsync
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:429-433 ; anchor=GetResumePositionAsync
+- cite=windows/src/MediaHub.Providers/ProviderContracts.cs:130 ; anchor=GetContinueWatchingAsync
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:417-427 ; anchor=GetContinueWatchingAsync
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:288 ; anchor=PlaySessionId
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:377 ; anchor=string.IsNullOrWhiteSpace(progress.SessionId)
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserProvider.cs:408 ; anchor=catch (ProviderException ex) when
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserDialect.cs:32 ; anchor=X-Emby-Authorization
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserDialect.cs:39 ; anchor=tokenInAuthHeader: true
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserDialect.cs:64-74 ; anchor=BuildAuthorizationValue
+- cite=windows/src/MediaHub.Providers/MediaBrowser/MediaBrowserDialect.cs:120-132 ; anchor=ApplyToken
+- cite=windows/tools/setup-test-server.ps1:158-159 ; anchor=Get-Process jellyfin, EmbyServer
+- cite=windows/tools/acceptance/w8/headless-resume.ps1:146 ; anchor=function New-IdentityHeaders
+- cite=windows/tools/acceptance/w8/headless-resume.ps1:240 ; anchor=& dotnet $ProbeDll
+<!-- END resume-source-pointer-claims -->
+
+改这份记录时：动正文里的行号，就要同步改块里的 `cite`；动源码导致函数搬家，就先改块、再跑一遍守卫（`RESULT: PASS` 才算真的对上了）。
+
+## 12 断言条数契约（机器可读）
+
+上文 §4 的 16 条探针断言表与 §6.4 / §7 的驱动断言条数都是**计数**：往 `Program.cs` 里加一条 `Check("…")`、或往驱动里加一条 `Assert-That`，文档里的数字就会静默过期（§1 的 17 条就是这么变成过时数字的 —— §10 加了两条版本断言，正文一直没跟上）。下面这个块把三处计数声明出来，由 `windows/tools/check-licence-surface.ps1` 的第 55 项 `resume-record-count-claims` 每轮 CI 复核：
+
+- 探针断言 id 必须是**双向集合相等**：`Program.cs` 里每一处 `Check("<id>")` 都要在 §4 表格里，§4 表格里每一行 id 也都要在代码里（改名 / 漏登 / 多登都算红）。
+- 驱动条数按**调用点**算：第一个参数写成 `($pair.Label + …)` 的调用点属于「每服一条」，按 `foreach ($pair in @(@{ Label = … }, …))` 里的服务器数相乘；第一个参数是字面量断言名的 `Assert-That '<name>'` 各算一条（放在循环后面也算固定条，因为它跑一次）。`fixed + per-server × servers` 必须等于声明的总数。
+- 条数只在这里声明一次，§7 的退出码表与正文引用都按这里的数写。
+
+<!-- BEGIN resume-record-count-claims -->
+resume-count-owner: check-licence-surface.ps1:resume-record-count-claims
+resume-probe-assertions: 16
+resume-driver-fixed-assertions: 15
+resume-driver-per-server-assertions: 2
+resume-driver-servers: 2
+resume-driver-assertions-total: 19
+<!-- END resume-record-count-claims -->
+
+改断言时：先在代码里加/改，再同步 §4 表格或 §6.4 正文，最后改这个块里的数，然后跑一遍守卫（`RESULT: PASS` 才算对上）。
+
+## 13 常量契约（机器可读）
+
+§11 管的是「正文按行号引用源码」，§12 管的是「断言条数」。探针与驱动里还有第三种会静默过期的东西：**散落在正文里的常量** —— 夹具最短片长（300 s）、每阶段回读前的固定等待（750 ms）、走库深度上限（3）、以及 ticks 与百分比换算（`TimeSpan.TicksPerSecond`）。它们不像断言 id 那样能被集合比对抓住，正文里只是一句「750 ms」或一个「2 400 000 000 ticks」。
+
+下面这个块把这些常量声明成唯一事实来源，由 `windows/tools/check-licence-surface.ps1` 的第 56 项 `resume-record-constant-claims` 每轮 CI 复核：
+
+- **A 块自指**：`resume-constant-owner` 必须点名本项；十个键齐全；`resume-constant-count` 等于块里数字键的条数（含一条自身不算）。
+- **B 从源码取数**：`Program.cs` 的 `MinimumRuntimeTicks = <n> * TicksPerSecond`、`SettleMilliseconds { get; init; } = <n>`、`const int MaximumDepth = <n>` 三处当场解析，必须与块里声明相等；并确认 ticks 仍然来自 `TimeSpan.TicksPerSecond`（不是随手写的字面量）。改源码不改块 ⇒ 红。
+- **C 算术自洽**：夹具片长（`resume-fixture-seconds`，600 s）乘以 `resume-probe-ticks-per-second` 得全长 ticks，再按正文的 40% / 1% / 2% 算出四个数字，必须与块里 `resume-derived-ticks-*` 一致，且这些数字仍以「N 000 000 000 ticks」的分组写法逐字出现在正文里。
+- **D 正文残留**：正文仍写着「固定等待 750 ms」「深度上限 3」「≥300 s」三句 —— 代码改了而正文句子还是旧值也算红。
+- **E 文件缺失**：记录或 `Program.cs` 读不到 ⇒ 本项 SKIP（退出码不变）。
+
+`resume-fixture-seconds` 是**服务端夹具的属性**（不是仓库源码里的常量），记在这里是为了让 C 的算术有唯一事实来源；换一条夹具，改这个值，C 与正文一起改。
+
+<!-- BEGIN resume-record-constant-claims -->
+resume-constant-owner: check-licence-surface.ps1:resume-record-constant-claims
+resume-constant-count: 9
+resume-probe-min-runtime-seconds: 300
+resume-probe-settle-milliseconds: 750
+resume-probe-max-depth: 3
+resume-probe-ticks-per-second: 10000000
+resume-fixture-seconds: 600
+resume-derived-ticks-total: 6000000000
+resume-derived-ticks-40pct: 2400000000
+resume-derived-ticks-1pct: 60000000
+resume-derived-ticks-2pct: 120000000
+<!-- END resume-record-constant-claims -->
+
+改常量时：先改代码，再改正文里的数字（含分组写法），最后改这个块，然后跑一遍守卫（`RESULT: PASS` 才算对上）。

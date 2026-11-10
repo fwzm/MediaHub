@@ -7,6 +7,14 @@
 >
 > 本文只回答四件事：怎么切、切完怎么验、依赖清单长什么样、什么时候必须重跑收集。
 
+<!-- BEGIN engine-flavour-status (checked by check-licence-surface.ps1) -->
+default-flavour: gpl-baseline
+candidate-flavour: lgpl-candidate-not-default
+switch-flag: -p:LibMpvFlavour=lgpl
+<!-- END engine-flavour-status -->
+
+上面四行里的三行由 `windows/tools/check-licence-surface.ps1` 的 `engine-flavour-default`（W43）逐项核对：缺省 flavour 仍必须是 `gpl`、其它工程与 workflow 不得构建候选、本块三行不得丢；任一处漂移即红。
+
 ## 1. 边界（这份文档不改变什么）
 
 | 事项 | 现状 | 位置 |

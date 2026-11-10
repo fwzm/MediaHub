@@ -12,6 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DiagnosticsReportTest {
+
     private val instant: Instant = Instant.parse("2026-10-29T10:51:00Z")
     private val shanghai: ZoneId = ZoneId.of("Asia/Shanghai")
     private val utc: ZoneId = ZoneId.of("UTC")
@@ -129,7 +130,7 @@ class DiagnosticsReportTest {
     @Test
     fun describe_cleans_secrets_whitespace_and_length() {
         val cleaned = DiagnosticsReport.describe(
-            IllegalStateException("cannot write to https://user:pw@nas-a:8096/emby?api_key=abc123\nline two"),
+            IllegalStateException("cannot write to https://user:pw@nas-a:8096/emby?api_key=abc123" + "\n" + "line two"),
         )
         assertTrue(cleaned != null)
         assertFalse(cleaned!!.contains("pw@"))

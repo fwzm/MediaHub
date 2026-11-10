@@ -165,20 +165,108 @@ data class SourceSyncAppliedSource(
     val syncSourceId: String? = null,
 )
 
-/** 应用之后的摘要（只用于结果页，不再参与任何判定）。 */
+/** 一条被拒的条目当时想做什么：写入还是删除。 */
+enum class SourceSyncRefusedAction { WRITE, DELETE }
+
+/**
+ * 一条没写成的条目（W6-82）。
+ *
+ * 回执从前只有 `refused` 一个计数：用户看到「拒写 1 条」，既不知道是哪条，也不知道该改什么。
+ * [reason] 是服务给的稳定码（`local-source-write-failed:IOException` 这种带异常类名的也在内），
+ * 界面按码查一句人话；码不在表里就原样显示，绝不吞成空串。
+ */
+data class SourceSyncRefusedEntry(
+    val syncSourceId: String,
+    /** 预览里的标题；回执里的身份在预览里找不到时退化成身份本身，而不是丢掉这条。 */
+    val title: String,
+    val action: SourceSyncRefusedAction,
+    val reason: String,
+    /**
+     * 删除链那一步自己说的话（W6-98，回执已净化）；写入类拒绝与老回执为 null。
+     *
+     * 只影响那一行的尾巴（[SourceSyncImportCopy.refusalLine] 补「（原因：…）」），不参与判定。
+     */
+    val causeMessage: String? = null,
+)
+
+/**
+ * 一条被永久扣住的条目（W6-83）。
+ *
+ * 与 [SourceSyncRefusedEntry] 的区别是「谁做的决定」：拒绝是这一轮真去写了但没写下去；
+ * 扣住是闸门**根本没让写**（凭据 / 未知类型 / 本机不支持），点多少次允许都不会变。
+ * 结果页把两类分开列，就是为了不让用户以为再点一次就能过。
+ */
+data class SourceSyncWithheldEntry(
+    val syncSourceId: String,
+    /** 预览里的标题；找不到时退化成身份本身。 */
+    val title: String,
+    val reason: String,
+)
+/**
+ * 应用之后的摘要（只用于结果页，不再参与任何判定）。
+ *
+ * W6-81 起它同时装两类数：
+ * - 规划桶（[requiresApprovalCount] / [ignoredCount] / [unsupportedCount]）来自预览，是「本来有多少」；
+ * - 回执桶（[appliedCount] / [skippedCount] / [withheldCount] / [failedCount] / [removedCount]）来自
+ *   这一轮真正发生的事，是「实际怎么处理了」。
+ * 两者不可互推：需确认的条目压根不进闸门，回执里当然数不到它们。
+ */
 data class SourceSyncApplySummary(
+    /** 真正写进库的条数（不含删除：删除走 [removedCount]，混在一起会让「已写入」撒谎）。 */
     val appliedCount: Int,
     val requiresApprovalCount: Int,
     val ignoredCount: Int,
     val unsupportedCount: Int,
+    /** 批准了却写不下去的条数（存储层拒绝、记录缺失、删除被拒）。 */
     val failedCount: Int,
-    val appliedTitles: List<String> = emptyList(),
+    /** 闸门裁掉、没打算写的条数（对端过旧、已同步、没人放行）。 */
+    val skippedCount: Int = 0,
+    /** 无条件扣住的条数（凭据、未知类型、本机不支持、需人工在来源页处理）。 */
+    val withheldCount: Int = 0,
+    /** 本轮连凭据一起移除的本地来源条数（对端声明删除）。 */
+    val removedCount: Int = 0,
 
-    /** 真正写入的每一条来源（按结果顺序）；结果页据此渲染「补录并验证」入口。 */
+    /** 预览里被放行的条数（计划数）；与 [appliedCount] 的差就是「放行了却没写成」。 */
+    val allowedCount: Int = 0,
+
+    /** 预览里的条目总数（四桶相加）：结果页用它说明这次到底看了多少条。 */
+    val plannedCount: Int = 0,
+    /**
+     * 逐条被永久扣住的条目（W6-83，按闸门顺序）。
+     *
+     * W6-82 之前这里只有一个去重的原因码清单：同一个码盖住几条、分别是哪几条全看不到。
+     * 逐条带上身份与原因后，「保留未应用 N 条」才有了下文。
+     */
+    val withheldEntries: List<SourceSyncWithheldEntry> = emptyList(),
+
+    /**
+     * 真正写入的每一条来源（按结果顺序）。
+     *
+     * W6-89：这里同时承载结果页「已写入 N 条」那一区与「补录并验证」入口。改前另有一个
+     * `appliedTitles: List<String>` 只装标题，界面直接把它当列表渲染，身份丢了、也跟
+     * 验证入口用的不是同一份数据；两份数据同源却分开存，迟早对不上，故整字段退役。
+     */
     val appliedSources: List<SourceSyncAppliedSource> = emptyList(),
+
+    /** 逐条没写成的条目（写入被拒 + 删除被拒，按回执顺序）；空表示这一轮没有失败。 */
+    val refusedEntries: List<SourceSyncRefusedEntry> = emptyList(),
+    /** W6-72：信封里被判为「次要端点、不参与同步」的条数（0 表示没有多端点来源）。 */
+    val notImportedEndpointCount: Int = 0,
+
+    /** W6-72：有多个端点的来源条数（用来区分「没多端点」与「有多端点但一条都没漏」）。 */
+    val recordsWithAlternativeEndpoints: Int = 0,
+
+    /** W6-72：本轮是否把真正写入的条目并进了对端基线。 */
+    val baselineSaved: Boolean = false,
+
+    /** W6-72：基线拒绝的条目数（合并不让条目倒退）。 */
+    val baselineRejectedCount: Int = 0,
 ) {
     val totalCount: Int
         get() = appliedCount + requiresApprovalCount + ignoredCount + failedCount
+
+    /** 没被写进去的条数：跳过 + 扣住 + 拒写（删除不算「没写」，它本来就是另一件事）。 */
+    val notAppliedCount: Int get() = skippedCount + withheldCount + failedCount
 }
 
 /**

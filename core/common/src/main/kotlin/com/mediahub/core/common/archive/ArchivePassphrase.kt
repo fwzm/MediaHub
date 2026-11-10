@@ -1,5 +1,7 @@
 package com.mediahub.core.common.archive
 
+import com.mediahub.core.common.sync.WireText
+
 /**
  * 归档口令策略，逐字对齐 Windows `MediaHub.Sync.ArchivePassphrase`。
  *
@@ -8,7 +10,17 @@ package com.mediahub.core.common.archive
  *
  * 判定次序（次序就是外部可观察优先级，与 Windows 相同）：
  * 空白 → passphrase-empty；原始长度不足 12 → passphrase-too-weak；
- * trim 后命中弱口令表 → passphrase-too-weak；单字符重复或全 ASCII 数字 → passphrase-too-weak。
+ * 含孤立代理项 → passphrase-too-weak；trim 后命中弱口令表 → passphrase-too-weak；
+ * 单字符重复或全 ASCII 数字 → passphrase-too-weak。
+ *
+ * 「空白」「trim」「不区分大小写」全部走 [WireText] 的显式规则，不用 Kotlin 自带的
+ * isBlank()/trim()/equals(ignoreCase = true)：后三者的空白集与大小写折叠跟着 JVM 的 Unicode 版本走，
+ * 与 .NET 不同，同一口令会在两端得到不同的稳定码（详见 WireText 的 KDoc）。
+ *
+ * 为什么孤立代理项也要在策略层拒绝：两端口令校验都放行后，PBKDF2 的编码就分叉了——
+ * .NET 抛 EncoderFallbackException（不是 ArchiveException，会穿透调用方），JVM 静默替换成 ?
+，
+ * 写出的归档对端永远读不开。在策略层判掉，两端都只报 passphrase-too-weak，不新增码。
  */
 object ArchivePassphrase {
 
@@ -48,10 +60,12 @@ object ArchivePassphrase {
 
     /** 校验口令：合法返回 null，否则返回稳定码。 */
     fun tryValidate(passphrase: String?): String? {
-        if (passphrase == null || passphrase.isBlank()) return ArchiveError.PASSPHRASE_EMPTY
-        if (passphrase.length < MIN_LENGTH) return ArchiveError.PASSPHRASE_TOO_WEAK
-        val trimmed = passphrase.trim()
-        if (WEAK_PASSPHRASES.any { it.equals(trimmed, ignoreCase = true) }) return ArchiveError.PASSPHRASE_TOO_WEAK
+        if (WireText.isBlank(passphrase)) return ArchiveError.PASSPHRASE_EMPTY
+        val text = passphrase!!
+        if (text.length < MIN_LENGTH) return ArchiveError.PASSPHRASE_TOO_WEAK
+        if (WireText.hasLoneSurrogate(text)) return ArchiveError.PASSPHRASE_TOO_WEAK
+        val trimmed = WireText.trim(text)
+        if (WEAK_PASSPHRASES.any { WireText.equalsAsciiIgnoreCase(it, trimmed) }) return ArchiveError.PASSPHRASE_TOO_WEAK
         if (isSingleRepeatedCharacter(trimmed) || isAllAsciiDigits(trimmed)) return ArchiveError.PASSPHRASE_TOO_WEAK
         return null
     }

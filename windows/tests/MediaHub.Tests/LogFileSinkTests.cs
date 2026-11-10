@@ -7,6 +7,10 @@ using Xunit;
 
 namespace MediaHub.Tests;
 
+/// <summary>
+/// The rolling file sink is the only diagnostics surface that survives a restart, so its bounds
+/// (size, file count, one complete entry per append) are behaviour, not implementation detail.
+/// </summary>
 public sealed class LogFileSinkTests : IDisposable
 {
     private readonly string _root;
@@ -27,7 +31,7 @@ public sealed class LogFileSinkTests : IDisposable
     private string DirectoryFor(string name) => Path.Combine(_root, name);
 
     private static LogEntry Entry(string message, LogLevel level = LogLevel.Info) =>
-        new(new DateTime(2026, 10, 30, 0, 0, 0, DateTimeKind.Local), level, "test", message);
+        new LogEntry(new DateTime(2026, 10, 30, 0, 0, 0, DateTimeKind.Local), level, "test", message);
 
     private static string Number(int value) => value.ToString("D4", CultureInfo.InvariantCulture);
 
@@ -56,16 +60,20 @@ public sealed class LogFileSinkTests : IDisposable
         Assert.Contains("entry-0004", File.ReadAllText(sink.PathFor(1)));
         Assert.Contains("entry-0003", File.ReadAllText(sink.PathFor(2)));
         Assert.DoesNotContain("entry-0001", File.ReadAllText(sink.PathFor(2)));
+
+        // One entry cannot straddle two files: everything retained is a full line with its stamp.
         foreach (string file in new[] { sink.PathFor(0), sink.PathFor(1), sink.PathFor(2) })
+        {
             foreach (string line in File.ReadAllLines(file))
                 Assert.StartsWith("2026-10-30 00:00:00.000 [Info] test entry-", line);
+        }
     }
 
     [Fact]
     public void An_entry_larger_than_the_limit_is_written_whole()
     {
         var sink = new LogFileSink(DirectoryFor("oversize"), maxBytesPerFile: 64, maxFiles: 2);
-        string longMessage = new('x', 120);
+        string longMessage = new string((char)120, 120);
         sink.Append(Entry(longMessage));
         sink.Append(Entry("short"));
 
@@ -81,10 +89,13 @@ public sealed class LogFileSinkTests : IDisposable
         var sink = new LogFileSink(DirectoryFor("cap"), maxBytesPerFile: 64, maxFiles: 3);
         for (int i = 0; i < 40; i++) sink.Append(Entry("entry-" + Number(i)));
 
-        Assert.Equal(3, Directory.GetFiles(DirectoryFor("cap"), "*.log").Length);
-        foreach (string file in Directory.GetFiles(DirectoryFor("cap"), "*.log"))
+        string[] files = Directory.GetFiles(DirectoryFor("cap"), "*.log");
+        Assert.Equal(3, files.Length);
+        foreach (string file in files)
+        {
             foreach (string line in File.ReadAllLines(file))
                 Assert.StartsWith("2026-10-30 00:00:00.000 [Info] test entry-", line);
+        }
     }
 
     [Fact]

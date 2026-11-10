@@ -31,6 +31,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -59,6 +61,30 @@ object SourceSyncImportTags {
     const val PREVIEW = "sync.import.preview"
     const val APPLY = "sync.apply"
     const val RESULT = "sync.apply.result"
+
+    /** W6-82：本轮的「计划」一行（预览里怎么分桶）。 */
+    const val APPLY_PLAN = "sync.apply.plan"
+
+    /** W6-82：本轮的「结果」一行（写入 / 删除 / 跳过 / 扣住 / 拒写）。 */
+    const val APPLY_VERDICT = "sync.apply.verdict"
+
+    /** W6-83：逐条被永久扣住的条目（标题 + 每条原因；0 条时整块不出现）。 */
+    const val APPLY_WITHHELD = "sync.apply.withheld"
+
+    /** W6-89：逐条真正写进去的条目（标题 + 对端身份；0 条时整块不出现）。 */
+    const val APPLY_WRITTEN = "sync.apply.written"
+
+    /** W6-84：逐条「复制身份」按钮（载荷是身份原文，不是标题；同页多条时必须能限定到某一条）。 */
+    fun withheldCopy(syncSourceId: String): String = "sync.apply.copy:" + syncSourceId
+
+    /** W6-85：预览页条目自己的复制按钮（与结果页同页不同段，tag 不能复用）。 */
+    fun entryCopy(key: String): String = "sync.entry.copy:" + key
+
+    /** W6-85：预览页不可允许条目的「下一步」一行（每个条目各一条）。 */
+    const val ENTRY_NEXT_STEP = "sync.entry.nextStep"
+
+    /** W6-82：逐条没写成的标题（每条原因各占一行，紧跟在下面）。 */
+    const val APPLY_REFUSED = "sync.apply.refused"
     const val BLOCKED = "sync.apply.blocked"
     const val ENTRY_ALLOW = "sync.entry.allow"
     const val ENTRY_SKIP = "sync.entry.skip"
@@ -85,6 +111,14 @@ object SourceSyncImportTags {
 
     /** 每个来源的验证区块（同页多条时要能把状态行限定到某一条）。 */
     fun verifyRow(serverId: String): String = "sync.source.verify.row:" + serverId
+
+    // ---- W6-72：导入结果里的端点与基线两条事实 ----
+
+    /** 结果卡片里「未同步的次要端点 N 个」那一行。 */
+    const val ENDPOINT_SUMMARY = "sync.apply.endpoints"
+
+    /** 结果卡片里「已记入对端基线」/「基线拒绝 N 条」那一行。 */
+    const val BASELINE_STATE = "sync.apply.baseline"
 
     // ---- W6-27：从 Windows 接收 ----
 
@@ -149,6 +183,9 @@ object SourceSyncImportTags {
 
     /** 端口行：TLS 时带证书指纹，用户要抄给 Windows 的就是这行。 */
     const val LISTEN_PORT_LINE = "sync.listen.port-line"
+
+    /** W6-86：取消账（取消过几次、最近一次原因码）；只在真的取消过时出现。 */
+    const val LISTEN_CANCELLED = "sync.listen.cancelled"
 
     /** TLS 可用性那句实话（不可用时必须看得见，且开关点不动）。 */
     const val LISTEN_INFO = "sync.listen.info"
@@ -234,6 +271,9 @@ fun SourceSyncImportRoute(
     val sendState by viewModel.sendState.collectAsStateWithLifecycle()
     val archivePrompt by viewModel.archivePrompt.collectAsStateWithLifecycle()
     val archiveExportState by viewModel.archiveExportState.collectAsStateWithLifecycle()
+    // W6-84：扣住/拒写条目旁边的「复制身份」把对端给的身份原文放进剪贴板，
+    // 用户要拿它去对端机器上找这条来源 —— 界面上是纯文本，选不中、抄不走。
+    val clipboard = LocalClipboardManager.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             viewModel.readPickedDocument(uri.toString())
@@ -279,6 +319,7 @@ fun SourceSyncImportRoute(
         onExportRequest = viewModel::requestArchiveExport,
         onExportPrepare = viewModel::prepareArchiveExport,
         onExportDismiss = viewModel::dismissArchiveExport,
+        onCopyIdentity = { identity -> clipboard.setText(AnnotatedString(identity)) },
     )
 }
 
@@ -334,6 +375,8 @@ fun SourceSyncImportScreen(
     /** W6-64：提交口令生成产物（留空 = 明文）；默认空实现。 */
     onExportPrepare: (String) -> Unit = {},
     /** W6-64：收起导出卡片并丢弃暂存字节；默认空实现。 */
+    /** W6-84：把一条条目的身份原文交给剪贴板（默认空实现，既有调用点与 UI 测试无需改动）。 */
+    onCopyIdentity: (String) -> Unit = {},
     onExportDismiss: () -> Unit = {},
 ) {
     Scaffold(
@@ -358,9 +401,7 @@ fun SourceSyncImportScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                "选择另一台设备导出的信封文件（.json 或 .mhsync 的明文信封），" +
-                    "或加密归档（.mharchive，需要导出时设置的口令）。" +
-                    "预览不会写入任何数据。",
+                SourceSyncImportCopy.PICK_HINT,
                 style = MaterialTheme.typography.bodyMedium,
             )
             Row(
@@ -474,6 +515,7 @@ fun SourceSyncImportScreen(
                             bucket = bucket,
                             interactive = state.status == SourceSyncImportStatus.PREVIEWED,
                             onDecide = onDecide,
+                            onCopyIdentity = onCopyIdentity,
                         )
                     }
                 }
@@ -521,16 +563,105 @@ fun SourceSyncImportScreen(
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text("导入结果", style = MaterialTheme.typography.titleSmall)
+                        // W6-82：这一行是预览里的桶（计划），下一行才是这一轮真正做了什么（结果）。
                         Text(
-                            "已导入 " + applied.appliedCount +
-                                " · 需确认 " + applied.requiresApprovalCount +
-                                " · 已忽略 " + applied.ignoredCount +
-                                " · 暂不支持 " + applied.unsupportedCount +
-                                " · 失败 " + applied.failedCount,
+                            SourceSyncImportCopy.planLine(applied),
                             style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.testTag(SourceSyncImportTags.APPLY_PLAN),
                         )
-                        applied.appliedTitles.forEach { title ->
-                            Text("- " + title, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            SourceSyncImportCopy.resultLine(applied),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.testTag(SourceSyncImportTags.APPLY_VERDICT),
+                        )
+                        // W6-83：扣住的条目逐条点名 + 各自原因（W6-81 只给了一行去重原因码）。
+                        SourceSyncImportCopy.withheldHeader(applied)?.let { header ->
+                            Text(
+                                header,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.testTag(SourceSyncImportTags.APPLY_WITHHELD),
+                            )
+                            applied.withheldEntries.forEach { entry ->
+                                // W6-84：原因句之后补一句「下一步」，右侧把身份抄进剪贴板。
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        SourceSyncImportCopy.withheldLine(entry),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                    SourceSyncImportCopy.nextStepOf(entry)?.let { nextStep ->
+                                        Text(
+                                            nextStep,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    IdentityCopyButton(
+                                        identity = SourceSyncImportCopy.copyPayloadOf(entry),
+                                        tag = SourceSyncImportTags.withheldCopy(entry.syncSourceId),
+                                        onCopyIdentity = onCopyIdentity,
+                                    )
+                                }
+                            }
+                        }
+
+                        // W6-89：写进去的也逐条点名并带上对端身份（改前只有一串没头没尾的标题）。
+                        SourceSyncImportCopy.writtenHeader(applied)?.let { header ->
+                            Text(
+                                header,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.testTag(SourceSyncImportTags.APPLY_WRITTEN),
+                            )
+                            applied.appliedSources.forEach { written ->
+                                Text(
+                                    SourceSyncImportCopy.writtenLine(written),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                        // W6-82：没写成的每一条都点名 + 给一句原因；只有计数时用户无从下手。
+                        SourceSyncImportCopy.refusedHeader(applied)?.let { header ->
+                            Text(
+                                header,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.testTag(SourceSyncImportTags.APPLY_REFUSED),
+                            )
+                            applied.refusedEntries.forEach { entry ->
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        SourceSyncImportCopy.refusalLine(entry),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                    IdentityCopyButton(
+                                        identity = SourceSyncImportCopy.copyPayloadOf(entry),
+                                        tag = SourceSyncImportTags.withheldCopy(entry.syncSourceId),
+                                        onCopyIdentity = onCopyIdentity,
+                                    )
+                                }
+                            }
+                        }
+                        // W6-72：多端点与基线两条事实，只有真的发生时出现（0 条时不占版面）。
+                        if (applied.notImportedEndpointCount > 0) {
+                            Text(
+                                SourceSyncImportCopy.notImportedEndpoints(applied),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.testTag(SourceSyncImportTags.ENDPOINT_SUMMARY),
+                            )
+                        }
+                        if (applied.baselineSaved) {
+                            Text(
+                                SourceSyncImportCopy.BASELINE_SAVED,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.testTag(SourceSyncImportTags.BASELINE_STATE),
+                            )
+                        } else if (applied.baselineRejectedCount > 0) {
+                            Text(
+                                SourceSyncImportCopy.baselineRejected(applied.baselineRejectedCount),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag(SourceSyncImportTags.BASELINE_STATE),
+                            )
                         }
                         if (verification.hasSources) {
                             Spacer(Modifier.height(8.dp))
@@ -603,6 +734,7 @@ private fun BucketSection(
     bucket: SourceSyncImportBucketView,
     interactive: Boolean,
     onDecide: (String, SourceSyncEntryDecision) -> Unit,
+    onCopyIdentity: (String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
@@ -618,8 +750,33 @@ private fun BucketSection(
             )
         }
         bucket.entries.forEach { entry ->
-            EntryCard(entry = entry, interactive = interactive, onDecide = onDecide)
+            EntryCard(
+                entry = entry,
+                interactive = interactive,
+                onDecide = onDecide,
+                onCopyIdentity = onCopyIdentity,
+            )
         }
+    }
+}
+
+/**
+ * W6-84：一条「复制身份」按钮。
+ *
+ * 载荷只由 Copy 层决定（[SourceSyncImportCopy.copyPayloadOf]），这里不碰身份拼装 ——
+ * 否则「复制了标题」这种错要让模拟器测试才发现。
+ */
+@Composable
+private fun IdentityCopyButton(
+    identity: String,
+    tag: String,
+    onCopyIdentity: (String) -> Unit,
+) {
+    TextButton(
+        onClick = { onCopyIdentity(identity) },
+        modifier = Modifier.testTag(tag),
+    ) {
+        Text(SourceSyncImportCopy.COPY_IDENTITY, style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -628,6 +785,7 @@ private fun EntryCard(
     entry: SourceSyncEntry,
     interactive: Boolean,
     onDecide: (String, SourceSyncEntryDecision) -> Unit,
+    onCopyIdentity: (String) -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -656,6 +814,25 @@ private fun EntryCard(
                 },
                 modifier = Modifier.testTag(SourceSyncImportTags.ENTRY_STATE),
             )
+            // W6-85：预览阶段就把「为什么不行 + 下一步」摆出来。之前只有结果页有出口，
+            // 用户在预演里看见一条永不许可的条目，只能靠猜。
+            if (!entry.allowable) {
+                SourceSyncImportCopy.nextStepOf(entry)?.let { nextStep ->
+                    Text(
+                        nextStep,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag(SourceSyncImportTags.ENTRY_NEXT_STEP),
+                    )
+                }
+                SourceSyncImportCopy.copyPayloadOf(entry)?.let { identity ->
+                    IdentityCopyButton(
+                        identity = identity,
+                        tag = SourceSyncImportTags.entryCopy(entry.key),
+                        onCopyIdentity = onCopyIdentity,
+                    )
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { onDecide(entry.key, SourceSyncEntryDecision.ALLOW) },
@@ -933,6 +1110,8 @@ private fun ListenSection(
     val receiving = state is SourceSyncListenState.Receiving
     val statusLine = SourceSyncListenCopy.lineOf(state)
     val portLine = SourceSyncListenCopy.portLineOf(state)
+    // W6-86：取消不是失败，但要有账——否则点完「取消」只见状态跳回「正在监听」。
+    val cancelledLine = SourceSyncListenCopy.cancelledLineOf(state)
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1130,6 +1309,14 @@ private fun ListenSection(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_PORT_LINE),
+                )
+            }
+            if (cancelledLine != null) {
+                Text(
+                    cancelledLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag(SourceSyncImportTags.LISTEN_CANCELLED),
                 )
             }
             if (statusLine != null) {

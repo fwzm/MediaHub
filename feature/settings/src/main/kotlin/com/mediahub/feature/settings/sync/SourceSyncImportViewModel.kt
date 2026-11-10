@@ -3,12 +3,15 @@ package com.mediahub.feature.settings.sync
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.ClientIdentity
+import com.mediahub.core.common.sync.ISourceSyncBaselineStore
 import com.mediahub.core.common.sync.AndroidSourceTypeMap
 import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.database.sync.AndroidSourceSyncService
 import com.mediahub.core.database.sync.SourceSyncArchiveArtifact
 import com.mediahub.core.database.sync.SourceSyncArchiveExport
 import com.mediahub.core.database.sync.SourceSyncDocumentInput
+import com.mediahub.core.database.sync.SourceSyncSourceRemover
+import com.mediahub.core.logging.Logger
 import com.mediahub.feature.settings.backup.BackupFileStore
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.provider.api.MediaProviderRegistry
@@ -41,12 +44,20 @@ class SourceSyncImportViewModel @Inject constructor(
     credentialVault: CredentialVault,
     providerRegistry: MediaProviderRegistry,
     private val backupFileStore: BackupFileStore,
+    baselineStore: ISourceSyncBaselineStore,
+    sourceRemover: SourceSyncSourceRemover,
+    // W6-101：App 里由 Hilt 提供 CompositeLogger（LogcatLogger + MemoryLogger(LogBuffer)），
+    // 同步一轮的汇总因此既进 logcat 也进诊断导出。
+    logger: Logger,
 ) : ViewModel() {
 
     private val session = SourceSyncImportSession.production(
         localSources = serverRepository,
         sourceSyncStore = serverRepository,
         deviceId = clientIdentity.deviceId,
+        baselineStore = baselineStore,
+        sourceRemover = sourceRemover,
+        logger = logger,
     )
 
     private val verification = SourceVerificationCoordinator(

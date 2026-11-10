@@ -17,6 +17,7 @@ import com.mediahub.core.common.sync.SourceSyncAction
 import com.mediahub.core.common.sync.SourceSyncCandidate
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
+import com.mediahub.core.common.sync.SyncRoundReasons
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -180,26 +181,245 @@ class SourceSyncImportScreenTest {
     }
 
     @Test
-    fun theResultCardCarriesTheDisclaimerSentence() {
+    fun theResultCardSeparatesThePlanFromTheReceiptAndCarriesTheDisclaimer() {
+        // W6-82：第一行改成「计划」（来自预览的分桶），第二行才是「结果」（来自回执）。
+        // 旧断言钉的是被退役的「已导入 N · 需确认 N · …」那一行，CI 上一整轮假红。
+        val summary = SourceSyncApplySummary(
+            appliedCount = 1,
+            requiresApprovalCount = 1,
+            ignoredCount = 1,
+            unsupportedCount = 1,
+            failedCount = 0,
+            skippedCount = 1,
+            withheldCount = 1,
+            allowedCount = 1,
+            plannedCount = 4,
+            appliedSources = listOf(
+                SourceSyncAppliedSource(
+                    serverId = "srv-1",
+                    title = "客厅 Emby",
+                    sourceTypeRaw = "emby",
+                    syncSourceId = "sync-1",
+                ),
+            ),
+        )
         val state = previewedState().withAllow("sync-1").copy(
             status = SourceSyncImportStatus.APPLIED,
-            applied = SourceSyncApplySummary(
-                appliedCount = 1,
-                requiresApprovalCount = 1,
-                ignoredCount = 1,
-                unsupportedCount = 1,
-                failedCount = 0,
-                appliedTitles = listOf("客厅 Emby"),
-            ),
+            applied = summary,
         )
         render(state)
 
         composeRule.onNodeWithTag(SourceSyncImportTags.RESULT).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText(SourceSyncImportCopy.DISCLAIMER).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("已导入 1 · 需确认 1 · 已忽略 1 · 暂不支持 1 · 失败 0")
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_PLAN)
+            .performScrollTo()
+            .assertTextEquals(SourceSyncImportCopy.planLine(summary))
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_VERDICT)
+            .performScrollTo()
+            .assertTextEquals(SourceSyncImportCopy.resultLine(summary))
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_WRITTEN)
+            .performScrollTo()
+            .assertTextEquals(SourceSyncImportCopy.writtenHeader(summary)!!)
+        composeRule.onNodeWithText(SourceSyncImportCopy.writtenLine(summary.appliedSources.single()))
             .performScrollTo()
             .assertIsDisplayed()
-        composeRule.onNodeWithText("- 客厅 Emby").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(SourceSyncImportCopy.DISCLAIMER).performScrollTo().assertIsDisplayed()
+        // 回执里没有失败条目 ⇒ 逐条失败区整块不出现（0 条不占版面）。
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_REFUSED).assertDoesNotExist()
+        // 计数里有 withheld，但没有逐条名单 ⇒ 扣住区也不出现：区头由名单驱动，不由计数驱动。
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_WITHHELD).assertDoesNotExist()
+    }
+
+    @Test
+    fun everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle() {
+        // W6-89：写入区改前只是一串没身份、没区头的标题；这里钉住「区头由名单驱动」与身份原文。
+        val summary = SourceSyncApplySummary(
+            appliedCount = 2,
+            requiresApprovalCount = 0,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 0,
+            plannedCount = 2,
+            appliedSources = listOf(
+                SourceSyncAppliedSource(
+                    serverId = "srv-1",
+                    title = "客厅 Emby",
+                    sourceTypeRaw = "emby",
+                    syncSourceId = "local-a",
+                ),
+                SourceSyncAppliedSource(
+                    serverId = "srv-2",
+                    title = "书房 Jellyfin",
+                    sourceTypeRaw = "jellyfin",
+                    syncSourceId = null,
+                ),
+            ),
+        )
+        val state = previewedState().copy(
+            status = SourceSyncImportStatus.APPLIED,
+            applied = summary,
+        )
+        render(state)
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_WRITTEN)
+            .performScrollTo()
+            .assertTextEquals(SourceSyncImportCopy.writtenHeader(summary)!!)
+        composeRule.onNodeWithText(SourceSyncImportCopy.writtenLine(summary.appliedSources[0]))
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText(SourceSyncImportCopy.writtenLine(summary.appliedSources[1]))
+            .performScrollTo()
+            .assertIsDisplayed()
+        // 旧样式（只有标题、没有身份）对「有身份」的那一条必须不存在；
+        // 没有身份的条目本来就只给标题 —— 不能拿它当反例（首次 CI 就是死在这里的 assertDoesNotExist）。
+        composeRule.onNodeWithText("- 客厅 Emby").assertDoesNotExist()
+        composeRule.onNodeWithText("- 书房 Jellyfin").assertIsDisplayed()
+    }
+
+    @Test
+    fun theWrittenBlockVanishesWhenNothingWasWritten() {
+        // 一条都没写成（全是扣住 / 拒写）时，写入区整块不出现：0 条不占版面。
+        // 注意：Compose 测试规则每个用例只能 setContent 一次，所以「空名单」必须是独立用例
+        // （第二次红就是死在这里：IllegalStateException: Cannot call setContent twice per test!）。
+        val summary = SourceSyncApplySummary(
+            appliedCount = 0,
+            requiresApprovalCount = 0,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 2,
+            plannedCount = 2,
+            appliedSources = emptyList(),
+        )
+        render(
+            previewedState().copy(
+                status = SourceSyncImportStatus.APPLIED,
+                applied = summary,
+            ),
+        )
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_WRITTEN).assertDoesNotExist()
+    }
+
+    @Test
+    fun everyRefusedEntryIsListedWithItsIdentityActionAndReason() {
+        val summary = SourceSyncApplySummary(
+            appliedCount = 0,
+            requiresApprovalCount = 0,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 2,
+            allowedCount = 2,
+            plannedCount = 2,
+            refusedEntries = listOf(
+                SourceSyncRefusedEntry(
+                    syncSourceId = "sync-1",
+                    title = "客厅 Emby",
+                    action = SourceSyncRefusedAction.WRITE,
+                    reason = SourceSyncReasons.UNKNOWN_SOURCE_TYPE,
+                ),
+                SourceSyncRefusedEntry(
+                    syncSourceId = "sync-2",
+                    title = "书房 Emby",
+                    action = SourceSyncRefusedAction.DELETE,
+                    reason = "something-new:42",
+                ),
+            ),
+        )
+        val state = previewedState().copy(
+            status = SourceSyncImportStatus.APPLIED,
+            applied = summary,
+        )
+        render(state)
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_REFUSED)
+            .performScrollTo()
+            .assertTextEquals("未写入 2 条（逐条原因）")
+        summary.refusedEntries.forEach { entry ->
+            composeRule.onNodeWithText(SourceSyncImportCopy.refusalLine(entry))
+                .performScrollTo()
+                .assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun everyWithheldEntryIsListedWithItsIdentityAndItsOwnReason() {
+        // W6-83：扣住的条目以前只剩一个计数和一行去重码，用户看不出是哪几条、也看不出
+        // 点多少次「允许」都不会过。这里钉住逐条身份 + 各自原因。
+        val summary = SourceSyncApplySummary(
+            appliedCount = 0,
+            requiresApprovalCount = 2,
+            ignoredCount = 0,
+            unsupportedCount = 1,
+            failedCount = 0,
+            withheldCount = 2,
+            allowedCount = 2,
+            plannedCount = 3,
+            withheldEntries = listOf(
+                SourceSyncWithheldEntry(
+                    syncSourceId = "sync-1",
+                    title = "客厅 Emby",
+                    reason = SyncRoundReasons.SECRETS_REQUIRE_APPROVAL,
+                ),
+                SourceSyncWithheldEntry(
+                    syncSourceId = "sync-quantum",
+                    title = "Quantum",
+                    reason = SourceSyncReasons.UNKNOWN_SOURCE_TYPE,
+                ),
+            ),
+        )
+        val state = previewedState().copy(
+            status = SourceSyncImportStatus.APPLIED,
+            applied = summary,
+        )
+        render(state)
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.APPLY_WITHHELD)
+            .performScrollTo()
+            .assertTextEquals("保留未应用 2 条（扣住，点允许也不会写）")
+        summary.withheldEntries.forEach { entry ->
+            composeRule.onNodeWithText(SourceSyncImportCopy.withheldLine(entry))
+                .performScrollTo()
+                .assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun aWithheldEntryOffersItsNextStepAndCopiesItsIdentity() {
+        // W6-84：扣住的条目只讲原因不够 —— 还得让用户看见「下一步」并把身份抄走。
+        val summary = SourceSyncApplySummary(
+            appliedCount = 0,
+            requiresApprovalCount = 1,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 0,
+            withheldCount = 1,
+            allowedCount = 1,
+            plannedCount = 1,
+            withheldEntries = listOf(
+                SourceSyncWithheldEntry(
+                    syncSourceId = "sync-1",
+                    title = "客厅 Emby",
+                    reason = SyncRoundReasons.SECRETS_REQUIRE_APPROVAL,
+                ),
+            ),
+        )
+        val state = previewedState().copy(
+            status = SourceSyncImportStatus.APPLIED,
+            applied = summary,
+        )
+        val copied = mutableListOf<String>()
+        render(state, onCopyIdentity = { copied.add(it) })
+
+        val entry = summary.withheldEntries.single()
+        composeRule.onNodeWithText(SourceSyncImportCopy.nextStepOf(entry)!!)
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag(SourceSyncImportTags.withheldCopy(entry.syncSourceId))
+            .performScrollTo()
+            .assertTextEquals(SourceSyncImportCopy.COPY_IDENTITY)
+            .performClick()
+        composeRule.waitForIdle()
+        // 载荷必须是身份原文（对端能检索的那把钥匙），不是标题。
+        org.junit.Assert.assertEquals(listOf("sync-1"), copied)
     }
 
     @Test
@@ -246,6 +466,52 @@ class SourceSyncImportScreenTest {
         composeRule.onNodeWithTag(SourceSyncImportTags.PICK).performScrollTo().assertIsDisplayed()
     }
 
+    @Test
+    fun aPreviewEntryThatCanNeverBeAllowedCarriesItsNextStepAndItsIdentity() {
+        val copied = mutableListOf<String>()
+        render(state = previewedState(), onCopyIdentity = { copied += it })
+
+        // 冲突条目：本页一律不放行，但用户得知道还能做什么、并能把身份带走。
+        composeRule.onNodeWithText(
+            SourceSyncImportCopy.nextStepOfCode(SourceSyncReasons.SAME_REVISION_DIFFERENT_CONTENT)!!,
+        ).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag(SourceSyncImportTags.entryCopy("sync-conflict"))
+            .performScrollTo()
+            .performClick()
+        assertEquals(listOf("sync-conflict"), copied)
+
+        // 未知类型条目各有一句自己的下一步，句句不同。
+        composeRule.onNodeWithText(
+            SourceSyncImportCopy.nextStepOfCode(SourceSyncReasons.UNKNOWN_SOURCE_TYPE)!!,
+        ).performScrollTo().assertIsDisplayed()
+
+        // 可允许的条目不该出现复制按钮（它不需要绕路）。
+        composeRule.onNodeWithTag(SourceSyncImportTags.entryCopy("sync-1")).assertDoesNotExist()
+    }
+    @Test
+    fun aCancelledWaitLeavesAVisibleAccountInTheListenCard() {
+        // W6-86：取消不是失败，但用户必须看得见「我取消过、监听还开着」。
+        val listening = SourceSyncListenState.Listening(
+            port = 45_678,
+            tls = false,
+            cancelledReceives = 2,
+            lastCancelledReason = com.mediahub.core.common.sync.SourceSyncLocalReasons.CANCELLED,
+        )
+        render(SourceSyncImportState(), listenState = listening)
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_CANCELLED)
+            .performScrollTo()
+            .assertTextEquals(SourceSyncListenCopy.cancelledLineOf(listening)!!)
+    }
+
+    @Test
+    fun withoutAnyCancelTheListenCardSaysNothingAboutCancelling() {
+        render(SourceSyncImportState(), listenState = SourceSyncListenState.Listening(45_678, false))
+
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_PORT_LINE).performScrollTo().assertExists()
+        composeRule.onNodeWithTag(SourceSyncImportTags.LISTEN_CANCELLED).assertDoesNotExist()
+    }
+
     // ---------------------------------------------------------------- 夹具
 
     private fun render(
@@ -253,6 +519,10 @@ class SourceSyncImportScreenTest {
         onPick: () -> Unit = {},
         onPreview: () -> Unit = {},
         onApply: () -> Unit = {},
+        onCopyIdentity: (String) -> Unit = {},
+        // W6-86：监听区块的状态（取消账要画在这一块里）；默认 Idle。
+        listenState: SourceSyncListenState = SourceSyncListenState.Idle,
+        // onDecide 必须留在最后：既有用例用尾随 lambda 传它。
         onDecide: (String, SourceSyncEntryDecision) -> Unit = { _, _ -> },
     ) {
         composeRule.setContent {
@@ -264,6 +534,8 @@ class SourceSyncImportScreenTest {
                     onDecide = onDecide,
                     onApply = onApply,
                     onBack = {},
+                    onCopyIdentity = onCopyIdentity,
+                    listenState = listenState,
                 )
             }
         }

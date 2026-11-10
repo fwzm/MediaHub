@@ -7,7 +7,11 @@ import com.mediahub.core.common.sync.SourceSyncCodec
 import com.mediahub.core.common.sync.SourceSyncEnvelope
 import com.mediahub.core.common.sync.SourceSyncPlan
 import com.mediahub.core.common.sync.SourceSyncReasons
+import com.mediahub.core.common.sync.SyncRoundReasons
 import com.mediahub.core.common.sync.SyncSourceTypeValue
+import com.mediahub.core.database.sync.AndroidSourceSyncService
+import com.mediahub.core.database.sync.SourceSyncRemovalCodes
+import com.mediahub.core.database.sync.SourceSyncRemovalStep
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -244,38 +248,400 @@ class SourceSyncImportLogicTest {
     }
 
     @Test
-    fun filterEnvelopeDropsOnlyTheEntriesTheUserDidNotAllow() {
-        val json = SourceSyncCodec.encode(
-            SourceSyncEnvelope(
-                deviceId = "device-a",
-                snapshotId = "snap-1",
-                sources = listOf(record("sync-1"), record("sync-2")),
+    fun thePlanLineAndTheResultLineNeverShareACount() {
+        val summary = SourceSyncApplySummary(
+            appliedCount = 2,
+            requiresApprovalCount = 4,
+            ignoredCount = 5,
+            unsupportedCount = 1,
+            failedCount = 1,
+            skippedCount = 3,
+            withheldCount = 4,
+            removedCount = 1,
+            allowedCount = 3,
+            plannedCount = 13,
+        )
+
+        assertEquals(
+            "本次计划：可导入 3 条 · 需确认 4 条 · 已忽略 5 条 · 暂不支持 1 条 · 共 13 条",
+            SourceSyncImportCopy.planLine(summary),
+        )
+        assertEquals(
+            "本次结果：写入 2 条 · 删除 1 条 · 跳过 3 条 · 扣住 4 条 · 拒写 1 条",
+            SourceSyncImportCopy.resultLine(summary),
+        )
+        assertEquals(8, summary.notAppliedCount)
+        assertEquals(
+            "保留未应用 2 条（扣住，点允许也不会写）",
+            SourceSyncImportCopy.withheldHeader(
+                summary.copy(
+                    withheldEntries = listOf(
+                        SourceSyncWithheldEntry("sync-a", "客厅 Emby", SyncRoundReasons.SECRETS_REQUIRE_APPROVAL),
+                        SourceSyncWithheldEntry("sync-b", "书房 Emby", SyncRoundReasons.NOT_SUPPORTED),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun anEmptyReceiptStillSaysEveryCountAndHasNoFailureBlock() {
+        val summary = SourceSyncApplySummary(
+            appliedCount = 0,
+            requiresApprovalCount = 0,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 0,
+        )
+
+        assertEquals(
+            "本次计划：可导入 0 条 · 需确认 0 条 · 已忽略 0 条 · 暂不支持 0 条 · 共 0 条",
+            SourceSyncImportCopy.planLine(summary),
+        )
+        assertEquals(
+            "本次结果：写入 0 条 · 删除 0 条 · 跳过 0 条 · 扣住 0 条 · 拒写 0 条",
+            SourceSyncImportCopy.resultLine(summary),
+        )
+        assertNull(SourceSyncImportCopy.refusedHeader(summary))
+        assertNull(SourceSyncImportCopy.withheldHeader(summary))
+    }
+
+    @Test
+    fun theSameBucketWordIsUsedInThePlanLineAndInThePreviewLine() {
+        // W6-89：改前结果卡说「放行 / 忽略」，桶标题与预览顶部说「可导入 / 已忽略」，
+        // 同一个桶两套词。四个词现在只在 bucketWord 里定义一次。
+        val words = SourceSyncImportBucket.values().map { SourceSyncImportCopy.bucketWord(it) }
+        assertEquals(listOf("可导入", "需确认", "已忽略", "暂不支持"), words)
+        SourceSyncImportBucket.values().forEach { bucket ->
+            assertEquals(SourceSyncImportCopy.bucketWord(bucket), SourceSyncImportCopy.titleOf(bucket))
+        }
+
+        val summary = SourceSyncApplySummary(
+            appliedCount = 1,
+            requiresApprovalCount = 2,
+            ignoredCount = 3,
+            unsupportedCount = 4,
+            failedCount = 0,
+            allowedCount = 5,
+            plannedCount = 14,
+        )
+        val planLine = SourceSyncImportCopy.planLine(summary)
+        assertEquals("本次计划：可导入 5 条 · 需确认 2 条 · 已忽略 3 条 · 暂不支持 4 条 · 共 14 条", planLine)
+        // 旧词一个都不许留下：留着就说明有地方又绕过了词汇表。
+        assertFalse(planLine.contains("放行"))
+        assertFalse(planLine.contains("· 忽略"))
+
+        val plan = SourceSyncPlan(
+            listOf(
+                candidate(SourceSyncAction.CREATE, SourceSyncReasons.NEW_SOURCE),
+                candidate(SourceSyncAction.NO_CHANGE, SourceSyncReasons.UP_TO_DATE, id = "sync-2"),
+            ),
+        )
+        val previewLine = SourceSyncImportLogic.summaryLine(
+            SourceSyncImportLogic.previewView("device-a", "snap-1", plan),
+        )
+        assertTrue(previewLine.contains(SourceSyncImportCopy.bucketWord(SourceSyncImportBucket.APPLY) + " 1"))
+        assertTrue(previewLine.contains(SourceSyncImportCopy.bucketWord(SourceSyncImportBucket.IGNORED) + " 1"))
+    }
+
+    @Test
+    fun everyWrittenEntryIsListedWithItsRemoteIdentityBesideItsTitle() {
+        val empty = SourceSyncApplySummary(appliedCount = 0, requiresApprovalCount = 0, ignoredCount = 0, unsupportedCount = 0, failedCount = 0)
+        assertNull(SourceSyncImportCopy.writtenHeader(empty))
+
+        val summary = SourceSyncApplySummary(
+            appliedCount = 2,
+            requiresApprovalCount = 0,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 0,
+            appliedSources = listOf(
+                SourceSyncAppliedSource(serverId = "srv-1", title = "客厅 Emby", sourceTypeRaw = "emby", syncSourceId = "local-a"),
+                SourceSyncAppliedSource(serverId = "srv-2", title = "书房 Jellyfin", sourceTypeRaw = "jellyfin", syncSourceId = null),
             ),
         )
 
-        val filtered = SourceSyncImportLogic.filterEnvelope(json, setOf("SYNC-2"))
-        val decoded = SourceSyncCodec.tryDecode(filtered)
-
-        assertTrue(decoded is SourceSyncCodec.DecodeResult.Ok)
-        val envelope = (decoded as SourceSyncCodec.DecodeResult.Ok).envelope
-        assertEquals(listOf("sync-1"), envelope.sources.map { it.syncSourceId })
+        assertEquals("已写入 2 条（按对端身份，可逐条核对）", SourceSyncImportCopy.writtenHeader(summary))
+        assertEquals("- 客厅 Emby（local-a）", SourceSyncImportCopy.writtenLine(summary.appliedSources[0]))
+        // 身份缺失时只给标题：宁可少说一句，也不拿 serverId 或标题冒充身份。
+        assertEquals("- 书房 Jellyfin", SourceSyncImportCopy.writtenLine(summary.appliedSources[1]))
+        assertEquals(
+            "- 客厅 Emby（local-a）",
+            SourceSyncImportCopy.writtenLine(summary.appliedSources[0].copy(syncSourceId = "  local-a  ")),
+        )
     }
 
     @Test
-    fun filterEnvelopeReturnsTheSameTextWhenNothingMatches() {
-        val json = SourceSyncCodec.encode(
-            SourceSyncEnvelope(deviceId = "device-a", snapshotId = "snap-1", sources = listOf(record("sync-1"))),
+    fun aRefusalIsNamedWithItsIdentityItsActionAndAReasonSentence() {
+        val summary = SourceSyncApplySummary(
+            appliedCount = 0,
+            requiresApprovalCount = 0,
+            ignoredCount = 0,
+            unsupportedCount = 0,
+            failedCount = 2,
+            refusedEntries = listOf(
+                SourceSyncRefusedEntry(
+                    syncSourceId = "sync-a",
+                    title = "客厅 Emby",
+                    action = SourceSyncRefusedAction.WRITE,
+                    reason = SourceSyncReasons.UNKNOWN_SOURCE_TYPE,
+                ),
+                SourceSyncRefusedEntry(
+                    syncSourceId = "sync-b",
+                    title = "旧 NAS",
+                    action = SourceSyncRefusedAction.DELETE,
+                    reason = AndroidSourceSyncService.DELETE_NOT_SUPPORTED,
+                ),
+            ),
         )
 
-        assertEquals(json, SourceSyncImportLogic.filterEnvelope(json, setOf("sync-9")))
-        assertEquals(json, SourceSyncImportLogic.filterEnvelope(json, emptySet()))
+        assertEquals("未写入 2 条（逐条原因）", SourceSyncImportCopy.refusedHeader(summary))
+        assertEquals(
+            listOf(
+                "- 客厅 Emby（sync-a）· 写入 · 本机不认识这个来源类型（版本差异），升级后再试。",
+                "- 旧 NAS（sync-b）· 删除 · 本机没有接删除能力，删除请求只能拒绝并上报。",
+            ),
+            summary.refusedEntries.map { SourceSyncImportCopy.refusalLine(it) },
+        )
     }
 
     @Test
-    fun filterEnvelopeLeavesBrokenJsonAlone() {
-        assertEquals("{not json", SourceSyncImportLogic.filterEnvelope("{not json", setOf("sync-1")))
+    fun anUnknownReasonCodeIsShownVerbatimInsteadOfSwallowed() {
+        assertEquals("原因码：something-new:42", SourceSyncImportCopy.refusalReason("something-new:42"))
+        assertEquals(
+            "本机存储拒绝了这次写入（IOException）。",
+            SourceSyncImportCopy.refusalReason(AndroidSourceSyncService.WRITE_FAILED + ":IOException"),
+        )
+        assertEquals(
+            "本机存储拒绝了这次写入（未给异常类型）。",
+            SourceSyncImportCopy.refusalReason(AndroidSourceSyncService.WRITE_FAILED),
+        )
     }
 
+    @Test
+    fun aWithheldEntryIsNamedWithItsIdentityAndItsOwnReason() {
+        val summary = SourceSyncApplySummary(
+            appliedCount = 1,
+            requiresApprovalCount = 2,
+            ignoredCount = 0,
+            unsupportedCount = 1,
+            failedCount = 0,
+            withheldCount = 2,
+            withheldEntries = listOf(
+                SourceSyncWithheldEntry("sync-secret", "客厅 Emby", SyncRoundReasons.SECRETS_REQUIRE_APPROVAL),
+                SourceSyncWithheldEntry("sync-odd", "书房 MyThing", SyncRoundReasons.NOT_SUPPORTED),
+            ),
+        )
+
+        assertEquals("保留未应用 2 条（扣住，点允许也不会写）", SourceSyncImportCopy.withheldHeader(summary))
+        assertEquals(
+            listOf(
+                "- 客厅 Emby（sync-secret）· 对端带了凭据，本机不收对端凭据（能力声明 canSendSecrets=false）；要用这条来源，请在来源页手动补凭据。",
+                "- 书房 MyThing（sync-odd）· 本机没有能接住这条来源的类型（原因码沿用合同里的 not-supported-on-windows），只能等版本支持。",
+            ),
+            summary.withheldEntries.map { SourceSyncImportCopy.withheldLine(it) },
+        )
+    }
+
+    @Test
+    fun thePickHintNamesTheCanonicalArchiveSuffixAndNeverCallsTheLegacySuffixPlaintext() {
+        assertTrue(SourceSyncImportCopy.PICK_HINT.contains(".mharchive"))
+        assertTrue(SourceSyncImportCopy.PICK_HINT.contains(".json"))
+        assertTrue(SourceSyncImportCopy.PICK_HINT.contains(".mhsync"))
+        assertFalse(SourceSyncImportCopy.PICK_HINT.contains(".mhsync 的明文信封"))
+    }
+
+    @Test
+    fun everyWithheldReasonThatHasAWayOutGetsItsOwnNextStep() {
+        val secret = SourceSyncWithheldEntry("sync-secret", "客厅 Emby", SyncRoundReasons.SECRETS_REQUIRE_APPROVAL)
+        val unsupported = SourceSyncWithheldEntry("sync-odd", "书房 MyThing", SyncRoundReasons.NOT_SUPPORTED)
+        val unknownType = SourceSyncWithheldEntry("sync-quantum", "Quantum", SourceSyncReasons.UNKNOWN_SOURCE_TYPE)
+        val noReason = SourceSyncWithheldEntry("sync-blank", "Blank", AndroidSourceSyncService.WITHHELD_WITHOUT_REASON)
+
+        val steps = listOf(secret, unsupported, unknownType).map { SourceSyncImportCopy.nextStepOf(it) }
+        assertEquals(3, steps.filterNotNull().toSet().size)
+        assertEquals(
+            "下一步：在对端把这条来源的凭据清空后重新导出信封，或在本机手动新建一条同样的来源。",
+            steps[0],
+        )
+        assertEquals("下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。", steps[1])
+        assertEquals("下一步：把两端升到同一版本后重新导出信封。", steps[2])
+        // 没有确定出路的码不编建议：空话比不说话更害人。
+        assertNull(SourceSyncImportCopy.nextStepOf(noReason))
+        assertNull(SourceSyncImportCopy.nextStepOf(SourceSyncWithheldEntry("sync-x", "X", "something-new:42")))
+    }
+
+    @Test
+    fun copyingAStuckEntryCarriesTheIdentityNotTheTitle() {
+        val withheld = SourceSyncWithheldEntry("  sync-secret  ", "客厅 Emby", SyncRoundReasons.SECRETS_REQUIRE_APPROVAL)
+        val refused = SourceSyncRefusedEntry(
+            syncSourceId = " sync-vanished ",
+            title = "书房 Emby",
+            action = SourceSyncRefusedAction.WRITE,
+            reason = AndroidSourceSyncService.SOURCE_VANISHED,
+        )
+
+        assertEquals("sync-secret", SourceSyncImportCopy.copyPayloadOf(withheld))
+        assertEquals("sync-vanished", SourceSyncImportCopy.copyPayloadOf(refused))
+        assertEquals("复制身份", SourceSyncImportCopy.COPY_IDENTITY)
+        // 载荷里绝不能出现标题（标题本机可以重名，身份才是能拿去对端检索的钥匙）。
+        assertFalse(SourceSyncImportCopy.copyPayloadOf(withheld).contains("客厅"))
+    }
+
+    @Test
+    fun aPreviewEntryBorrowsTheSameNextStepTableAsTheResultPage() {
+        // 同一个码在两处必须说同一句话：否则用户先在预览里读到一句、应用后又读到另一句。
+        assertEquals(
+            SourceSyncImportCopy.nextStepOf(
+                SourceSyncWithheldEntry("sync-secret", "客厅 Emby", SyncRoundReasons.SECRETS_REQUIRE_APPROVAL),
+            ),
+            SourceSyncImportCopy.nextStepOf(previewEntry(SyncRoundReasons.SECRETS_REQUIRE_APPROVAL, "sync-secret")),
+        )
+        assertEquals(
+            "下一步：这条两端内容不一致（版本号相同），本页一律不放行；请在来源页手工对齐后再导出。",
+            SourceSyncImportCopy.nextStepOf(previewEntry(SourceSyncReasons.SAME_REVISION_DIFFERENT_CONTENT, "sync-conflict")),
+        )
+        assertEquals(
+            "下一步：本机有多条来源指向同一身份，先在来源页删掉多余的再重新导出。",
+            SourceSyncImportCopy.nextStepOf(previewEntry(SourceSyncReasons.AMBIGUOUS_LEGACY_IDENTITY, "sync-ambig")),
+        )
+        assertEquals(
+            "下一步：把两端升到同一版本后重新导出信封。",
+            SourceSyncImportCopy.nextStepOf(previewEntry(SourceSyncReasons.UNKNOWN_SOURCE_TYPE, "sync-quantum")),
+        )
+        // 码不认识、或压根没给码：不编建议。
+        assertNull(SourceSyncImportCopy.nextStepOf(previewEntry("something-new:42", "sync-x")))
+        assertNull(SourceSyncImportCopy.nextStepOf(previewEntry("", "sync-quiet")))
+    }
+
+    @Test
+    fun copyingAPreviewEntryCarriesTheRemoteIdentityAndNeverAPositionalKey() {
+        assertEquals("sync-secret", SourceSyncImportCopy.copyPayloadOf(previewEntry("", "  sync-secret  ")))
+        val noIdentity = SourceSyncEntry(
+            key = "entry-3",
+            bucket = SourceSyncImportBucket.UNSUPPORTED,
+            candidate = SourceSyncCandidate(action = SourceSyncAction.UNSUPPORTED, syncSourceId = null),
+            allowable = false,
+            blockReason = SourceSyncImportCopy.NEVER_ALLOW_UNSUPPORTED,
+            decision = SourceSyncEntryDecision.UNDECIDED,
+        )
+        // 位置键（entry-3）抄出去在对端检索不到任何东西 —— 宁可不给按钮。
+        assertNull(SourceSyncImportCopy.copyPayloadOf(noIdentity))
+    }
+
+    @Test
+    fun aFailedRemovalStepIsTranslatedIntoPlainWords() {
+        // 八步各有中文名：同一句「删除失败」对用户毫无用处，说的必须是哪一步。
+        assertEquals(
+            "删除本地来源时卡在「清播放会话」这一步，凭据可能还在；到来源页手动删一次即可。",
+            SourceSyncImportCopy.refusalReason(
+                SourceSyncRemovalCodes.failedAt(SourceSyncRemovalStep.SESSION_STORE),
+            ),
+        )
+        assertEquals(
+            "删除本地来源时卡在「清凭据」这一步，凭据可能还在；到来源页手动删一次即可。",
+            SourceSyncImportCopy.refusalReason(
+                SourceSyncRemovalCodes.failedAt(SourceSyncRemovalStep.CREDENTIALS),
+            ),
+        )
+        // 认不出的步骤码原样带出：宁可显示 servers-row-2，也不吞成半句话。
+        assertEquals(
+            "删除本地来源时卡在「something-new」这一步，凭据可能还在；到来源页手动删一次即可。",
+            SourceSyncImportCopy.refusalReason("local-source-remove-failed:something-new"),
+        )
+        // 不带步骤码的老码保持原句（既有回执可能还没升级）。
+        assertEquals(
+            "删除本地来源时存储层失败，凭据可能还在。",
+            SourceSyncImportCopy.refusalReason(AndroidSourceSyncService.REMOVE_FAILED),
+        )
+    }
+
+    @Test
+    fun aFailedRemovalLineCarriesBothTheStepAndTheReasonTheStepItselfGave() {
+        // W6-98：同一行上「卡在哪一步」与「那一步为什么失败」是两句话，缺一句用户就得去猜。
+        val withCause = SourceSyncRefusedEntry(
+            syncSourceId = "sync-1",
+            title = "客厅 Emby",
+            action = SourceSyncRefusedAction.DELETE,
+            reason = SourceSyncRemovalCodes.failedAt(SourceSyncRemovalStep.CREDENTIALS),
+            causeMessage = "keystore 拒绝访问",
+        )
+        assertEquals(
+            "- 客厅 Emby（sync-1）· 删除 · 删除本地来源时卡在「清凭据」这一步，凭据可能还在；" +
+                "到来源页手动删一次即可。（原因：keystore 拒绝访问）",
+            SourceSyncImportCopy.refusalLine(withCause),
+        )
+
+        // 没有那句时（预检类拒绝、老回执）逐字节与改前一致：后缀只在真的有时出现。
+        val withoutCause = withCause.copy(causeMessage = null)
+        assertEquals(
+            "- 客厅 Emby（sync-1）· 删除 · 删除本地来源时卡在「清凭据」这一步，凭据可能还在；" +
+                "到来源页手动删一次即可。",
+            SourceSyncImportCopy.refusalLine(withoutCause),
+        )
+        assertEquals("", SourceSyncImportCopy.refusalCauseSuffix(null))
+        assertEquals("", SourceSyncImportCopy.refusalCauseSuffix("   "))
+    }
+
+    @Test
+    fun aWriteFailureLineAlsoCarriesTheReasonTheStorageLayerGave() {
+        // W6-99：写入失败与删除失败现在都有行尾原因句；此前这一行只有异常类名，用户仍然不知道为什么。
+        val withCause = SourceSyncRefusedEntry(
+            syncSourceId = "sync-1",
+            title = "客厅 Emby",
+            action = SourceSyncRefusedAction.WRITE,
+            reason = AndroidSourceSyncService.WRITE_FAILED + ":IOException",
+            causeMessage = "磁盘已满",
+        )
+        assertEquals(
+            "- 客厅 Emby（sync-1）· 写入 · 本机存储拒绝了这次写入（IOException）。（原因：磁盘已满）",
+            SourceSyncImportCopy.refusalLine(withCause),
+        )
+
+        // 没有消息（类型不认识 / 没有可拨号地址这类预检拒绝）时逐字节与改前一致。
+        assertEquals(
+            "- 客厅 Emby（sync-1）· 写入 · 本机存储拒绝了这次写入（IOException）。",
+            SourceSyncImportCopy.refusalLine(withCause.copy(causeMessage = null)),
+        )
+    }
+
+    @Test
+    fun everyRemovalStepHasItsOwnChineseName() {
+        val labels = mapOf(
+            SourceSyncRemovalStep.SERVERS to "删来源行",
+            SourceSyncRemovalStep.ACCOUNTS to "删账号",
+            SourceSyncRemovalStep.TOKENS to "清会话令牌",
+            SourceSyncRemovalStep.CREDENTIALS to "清凭据",
+            SourceSyncRemovalStep.PROGRESS to "删播放进度",
+            SourceSyncRemovalStep.SUBTITLE_MEMORY to "删字幕记忆",
+            SourceSyncRemovalStep.ICON to "删自定义图标",
+            SourceSyncRemovalStep.SESSION_STORE to "清播放会话",
+        )
+        // 八步一个不少、也不许共用一个名字（共用就等于没分辨）。
+        assertEquals(SourceSyncRemovalStep.values().size, labels.size)
+        labels.forEach { (step, label) ->
+            assertEquals(label, SourceSyncImportCopy.removalStepLabel(step.code))
+            assertEquals(label, SourceSyncImportCopy.removalStepLabel("  " + step.code + "  "))
+        }
+        assertEquals(labels.values.toSet().size, labels.size)
+        // 认不出的码原样返回（trim 过）。
+        assertEquals("something-new", SourceSyncImportCopy.removalStepLabel(" something-new "))
+    }
+
+    /** 预览页的一条不可允许条目：身份来自 candidate.syncSourceId，桶只是展示层。 */
+    private fun previewEntry(reason: String, id: String?) = SourceSyncEntry(
+        key = id ?: "entry-0",
+        bucket = SourceSyncImportBucket.REQUIRES_APPROVAL,
+        candidate = SourceSyncCandidate(
+            action = SourceSyncAction.UPDATE,
+            reason = reason,
+            syncSourceId = id,
+            requiresUserApproval = true,
+        ),
+        allowable = false,
+        blockReason = SourceSyncImportCopy.NEVER_ALLOW_APPROVAL,
+        decision = SourceSyncEntryDecision.UNDECIDED,
+    )
     private fun record(id: String) = SourceRecord(
         syncSourceId = id,
         sourceType = SyncSourceTypeValue.parse("emby"),

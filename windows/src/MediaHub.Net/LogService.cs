@@ -1,7 +1,6 @@
 // Moved from the app project into the network/security library so that redaction is covered by the
 // same test suite that covers redirect credential scoping — the two are one security surface.
 using System.Collections.ObjectModel;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace MediaHub.Net;
@@ -28,8 +27,9 @@ public sealed class LogService
     public ReadOnlyObservableCollection<LogEntry> Entries { get; }
 
     /// <summary>
-    /// Optional bounded rolling-file trail. The sink receives entries after redaction, so a
-    /// durable diagnostic copy cannot contain credentials that were present in the original text.
+    /// Optional bounded rolling-file trail. Null for callers that only want the memory buffer; the
+    /// app passes one so the earliest lines survive a restart. The sink receives entries already
+    /// redacted here, never raw text.
     /// </summary>
     public LogFileSink? FileSink { get; }
 
@@ -61,26 +61,19 @@ public sealed class LogService
             _entries.Add(entry);
             while (_entries.Count > MaxEntries) _entries.RemoveAt(0);
         }
+        // Durable trail first: it is the only copy that outlives the process, and a UI subscriber
+        // must not be able to prevent it. The sink swallows disk failures by design.
         FileSink?.Append(entry);
         EntryAdded?.Invoke(this, entry);
     }
 
     /// <summary>Builds a redacted diagnostic report suitable for attaching to a bug report.</summary>
-    public string Export()
+    public string Export() => DiagnosticsReport.Render(Snapshot(), DateTime.Now, rollingDirectory: FileSink?.DirectoryPath);
+
+    /// <summary>A copy of the entries, taken under the write lock.</summary>
+    public List<LogEntry> Snapshot()
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("# MediaHub Windows 诊断日志（已脱敏）");
-        if (FileSink is not null)
-            sb.AppendLine("# 滚动文件目录：" + FileSink.DirectoryPath);
-        sb.AppendLine();
-        List<LogEntry> snapshot;
-        lock (_gate) snapshot = _entries.ToList();
-        foreach (var e in snapshot)
-        {
-            sb.AppendLine(e.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff")
-                + " [" + e.Level + "] " + e.Category + " " + e.Message);
-        }
-        return sb.ToString();
+        lock (_gate) return _entries.ToList();
     }
 
     // ------------------------------------------------------------------ redaction

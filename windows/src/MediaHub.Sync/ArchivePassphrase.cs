@@ -55,22 +55,35 @@ public static class ArchivePassphrase
     /// <summary>Checks a passphrase without throwing; <paramref name="reason"/> is an <see cref="ArchiveError"/> code.</summary>
     public static bool TryValidate(string? passphrase, out string? reason)
     {
-        if (string.IsNullOrWhiteSpace(passphrase))
+        // Every textual judgement goes through WireText, which pins the Unicode White_Space set and an
+        // ASCII-only case fold. char.IsWhiteSpace happens to agree with it today, but the Kotlin end does not,
+        // and the two ends must return the same stable code for the same bytes.
+        if (WireText.IsBlank(passphrase))
         {
             reason = ArchiveError.PassphraseEmpty;
             return false;
         }
 
-        if (passphrase.Length < MinLength)
+        string text = passphrase!;
+        if (text.Length < MinLength)
         {
             reason = ArchiveError.PassphraseTooWeak;
             return false;
         }
 
-        string trimmed = passphrase.Trim();
+        // A lone surrogate cannot be encoded to UTF-8 by the PBKDF2 input here (EncoderFallbackException) and
+        // is silently replaced by '?' on the JVM, so the two ends would derive different keys from the same
+        // text - or crash mid-write. Reject it at the policy layer instead of adding a new code.
+        if (WireText.HasLoneSurrogate(text))
+        {
+            reason = ArchiveError.PassphraseTooWeak;
+            return false;
+        }
+
+        string trimmed = WireText.Trim(text);
         foreach (string weak in WeakPassphrases)
         {
-            if (string.Equals(trimmed, weak, StringComparison.OrdinalIgnoreCase))
+            if (WireText.EqualsAsciiIgnoreCase(trimmed, weak))
             {
                 reason = ArchiveError.PassphraseTooWeak;
                 return false;

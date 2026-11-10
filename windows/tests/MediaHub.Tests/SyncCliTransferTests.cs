@@ -142,6 +142,168 @@ public sealed class SyncCliTransferTests : IDisposable
     }
 
     [Fact]
+    public async Task Serve_ReportsEveryRefusedWriteOnStandardError()
+    {
+        string root = DeviceRoot("b");
+
+        // W6-108: a directory where the store wants its temp file makes Persist fail. That is a real storage
+        // failure, not a mock, and it is exactly the kind the round must report per entry instead of only counting.
+        Directory.CreateDirectory(Path.Combine(root, FileLocalSourceStore.FileName + ".tmp"));
+
+        (int exitCode, string stdout, string stderr) = await ServeOnceAsync(
+            ["transfer", "serve", "--root", root, "--device", "dev-b", "--apply", "--json"],
+            Payload("dev-a", Source("src-refused", "Refused")));
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        using JsonDocument document = ParseSingleDocument(stdout);
+        JsonElement root_ = document.RootElement;
+        Assert.Equal(0, root_.GetProperty("report").GetProperty("applied").GetInt32());
+        Assert.Equal(1, root_.GetProperty("report").GetProperty("withheld").GetInt32());
+
+        // W6-108: one line per refused entry, on stderr, with its identity and its action. The reason is the
+        // writer own message, which contains a machine path here, so the assertion stops before it.
+        string[] refusalLines = LinesContaining(stderr, "同步写入被拒：");
+        Assert.Single(refusalLines);
+        Assert.Contains("同步写入被拒：src-refused · 写入 · ", refusalLines[0], StringComparison.Ordinal);
+
+        // The per-entry line is progress, never part of the JSON contract.
+        Assert.DoesNotContain("同步写入被拒：", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Serve_ReportsEveryWithheldEntryOnStandardError()
+    {
+        string root = DeviceRoot("b");
+        SourceRecord mystery = new()
+        {
+            SyncSourceId = "src-mystery",
+            SourceType = SyncSourceTypeValue.Parse("mystery"),
+            DisplayName = "Mystery",
+            RecordRevision = 1,
+            Endpoints = [new SourceEndpoint { Url = EmbyUrl, IsPrimary = true }],
+        };
+
+        (int exitCode, string stdout, string stderr) = await ServeOnceAsync(
+            ["transfer", "serve", "--root", root, "--device", "dev-b", "--apply", "--json"],
+            EnvelopeOf("dev-a", mystery));
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        using JsonDocument document = ParseSingleDocument(stdout);
+        Assert.Equal(1, document.RootElement.GetProperty("report").GetProperty("withheld").GetInt32());
+
+        // W6-108: what the gate held back is sayable after the fact: identity plus the gate reason.
+        string[] withheldLines = LinesContaining(stderr, "同步保留未应用：");
+        Assert.Single(withheldLines);
+        string heldBackPrefix = "warning: 同步保留未应用：src-mystery · ";
+        Assert.StartsWith(heldBackPrefix, withheldLines[0], StringComparison.Ordinal);
+        Assert.True(
+            withheldLines[0].Length > heldBackPrefix.Length,
+            "the line must say why it was kept back, not only which entry it was");
+        Assert.DoesNotContain("同步保留未应用：", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Serve_LeavesNoEntryLineWhenEveryEntryIsWritten()
+    {
+        string root = DeviceRoot("b");
+
+        (int exitCode, string stdout, string stderr) = await ServeOnceAsync(
+            ["transfer", "serve", "--root", root, "--device", "dev-b", "--apply", "--json"],
+            Payload("dev-a", Source("src-1", "Home"), Source("src-2", "Work")));
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        using JsonDocument document = ParseSingleDocument(stdout);
+        Assert.Equal(2, document.RootElement.GetProperty("report").GetProperty("applied").GetInt32());
+
+        // A clean round stays quiet: no per-entry line, no warning line, nothing to page someone about.
+        Assert.DoesNotContain("同步写入被拒：", stderr, StringComparison.Ordinal);
+        Assert.DoesNotContain("同步保留未应用：", stderr, StringComparison.Ordinal);
+        Assert.DoesNotContain("warning:", stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ApplyJsonNamesEveryRefusedWriteAlongsideTheOtherReportFields()
+    {
+        string root = DeviceRoot("b");
+        Directory.CreateDirectory(Path.Combine(root, FileLocalSourceStore.FileName + ".tmp"));
+
+        (int exitCode, string stdout, string stderr) = await ServeOnceAsync(
+            ["transfer", "serve", "--root", root, "--device", "dev-b", "--apply", "--json"],
+            Payload("dev-a", Source("src-refused", "Refused")));
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        using JsonDocument document = ParseSingleDocument(stdout);
+        JsonElement report = document.RootElement.GetProperty("report");
+        Assert.Equal(0, report.GetProperty("applied").GetInt32());
+
+        // W6-109: the count said one write was refused; the array says which one and in the writer own words.
+        JsonElement refused = report.GetProperty("refused");
+        Assert.Equal(JsonValueKind.Array, refused.ValueKind);
+        Assert.Equal(1, refused.GetArrayLength());
+        JsonElement entry = refused[0];
+        Assert.Equal("src-refused", entry.GetProperty("syncSourceId").GetString());
+        Assert.Equal(
+            document.RootElement.GetProperty("items")[0].GetProperty("action").GetString(),
+            entry.GetProperty("action").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(entry.GetProperty("reason").GetString()));
+
+        // Identity and reason only: a JSON log must not start carrying the source title.
+        Assert.DoesNotContain("\"Refused\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("displayName", stdout, StringComparison.Ordinal);
+    }
+    [Fact]
+    public async Task ApplyJsonNamesEveryWithheldEntryWithItsGateReason()
+    {
+        string root = DeviceRoot("b");
+        SourceRecord mystery = new()
+        {
+            SyncSourceId = "src-mystery",
+            SourceType = SyncSourceTypeValue.Parse("mystery"),
+            DisplayName = "Mystery",
+            RecordRevision = 1,
+            Endpoints = [new SourceEndpoint { Url = EmbyUrl, IsPrimary = true }],
+        };
+
+        (int exitCode, string stdout, string stderr) = await ServeOnceAsync(
+            ["transfer", "serve", "--root", root, "--device", "dev-b", "--apply", "--json"],
+            EnvelopeOf("dev-a", mystery));
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        using JsonDocument document = ParseSingleDocument(stdout);
+        JsonElement report = document.RootElement.GetProperty("report");
+        JsonElement heldBack = report.GetProperty("withheldEntries");
+        Assert.Equal(1, heldBack.GetArrayLength());
+        JsonElement entry = heldBack[0];
+        Assert.Equal("src-mystery", entry.GetProperty("syncSourceId").GetString());
+
+        // The array and the per-item preview must carry the same code, so a script can join them.
+        Assert.Equal(
+            document.RootElement.GetProperty("items")[0].GetProperty("reason").GetString(),
+            entry.GetProperty("reason").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(entry.GetProperty("reason").GetString()));
+        Assert.DoesNotContain("\"Mystery\"", stdout, StringComparison.Ordinal);
+    }
+    [Fact]
+    public async Task ApplyJsonKeepsEmptyEntryArraysSoScriptsSeeOneShape()
+    {
+        string root = DeviceRoot("b");
+
+        (int exitCode, string stdout, string stderr) = await ServeOnceAsync(
+            ["transfer", "serve", "--root", root, "--device", "dev-b", "--apply", "--json"],
+            Payload("dev-a", Source("src-1", "Home"), Source("src-2", "Work")));
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        using JsonDocument document = ParseSingleDocument(stdout);
+        JsonElement report = document.RootElement.GetProperty("report");
+        Assert.Equal(2, report.GetProperty("applied").GetInt32());
+
+        // A clean round still ships both arrays: scripts should never have to guess whether they exist.
+        Assert.Equal(JsonValueKind.Array, report.GetProperty("refused").ValueKind);
+        Assert.Equal(0, report.GetProperty("refused").GetArrayLength());
+        Assert.Equal(JsonValueKind.Array, report.GetProperty("withheldEntries").ValueKind);
+        Assert.Equal(0, report.GetProperty("withheldEntries").GetArrayLength());
+    }
+    [Fact]
     public async Task Serve_ReportsAnInvalidEnvelopeAndWritesNothing()
     {
         string root = DeviceRoot("b");
@@ -375,6 +537,71 @@ public sealed class SyncCliTransferTests : IDisposable
         Assert.Equal(baselineB, File.ReadAllBytes(Path.Combine(root, "b", FileSourceSyncBaselineStore.FileName)));
     }
 
+    [Fact]
+    public async Task Roundtrip_ReportsTheReceiversWithheldEntryOnStandardError()
+    {
+        string root = _root;
+        Seed(
+            Path.Combine(root, "a"),
+            Source("src-known", "Known"),
+            new LocalSourceRecord
+            {
+                ServerId = "srv-mystery",
+                SyncSourceId = "src-mystery",
+                Type = ServerType.Unknown,
+                SourceTypeRaw = "mystery",
+                Url = EmbyUrl,
+                DisplayName = "Mystery",
+                RecordRevision = 1,
+            });
+
+        (int exitCode, string stdout, string stderr) = await Task.Run(() => Run(
+            "transfer", "roundtrip", "--root", root, "--device-a", "dev-a", "--device-b", "dev-b", "--apply", "--json"));
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        using JsonDocument document = ParseSingleDocument(stdout);
+        Assert.Equal(1, document.RootElement.GetProperty("rounds")[0].GetProperty("counts").GetProperty("withheld").GetInt32());
+
+        // W6-108: a roundtrip is a serve nobody watches, so the same line has to survive on stderr alone.
+        string[] withheldLines = LinesContaining(stderr, "同步保留未应用：src-mystery · ");
+        Assert.NotEmpty(withheldLines);
+        foreach (string line in withheldLines)
+        {
+            Assert.StartsWith("warning: 同步保留未应用：src-mystery · ", line, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task RoundtripJsonCarriesTheReceiversWithheldEntry()
+    {
+        string root = _root;
+        Seed(
+            Path.Combine(root, "a"),
+            Source("src-known", "Known"),
+            new LocalSourceRecord
+            {
+                ServerId = "srv-mystery",
+                SyncSourceId = "src-mystery",
+                Type = ServerType.Unknown,
+                SourceTypeRaw = "mystery",
+                Url = EmbyUrl,
+                DisplayName = "Mystery",
+                RecordRevision = 1,
+            });
+
+        (int exitCode, string stdout, string stderr) = await Task.Run(() => Run(
+            "transfer", "roundtrip", "--root", root, "--device-a", "dev-a", "--device-b", "dev-b", "--apply", "--json"));
+
+        Assert.Equal(CliExitCode.Success, exitCode);
+        using JsonDocument document = ParseSingleDocument(stdout);
+        JsonElement rounds = document.RootElement.GetProperty("rounds");
+        JsonElement firstRound = rounds[0].GetProperty("report").GetProperty("withheldEntries");
+        Assert.Equal(1, firstRound.GetArrayLength());
+        Assert.Equal("src-mystery", firstRound[0].GetProperty("syncSourceId").GetString());
+
+        // The second direction had nothing to hold back, but the shape must not change between rounds.
+        Assert.Equal(0, rounds[1].GetProperty("report").GetProperty("withheldEntries").GetArrayLength());
+    }
     // ---- 3. parser surface -------------------------------------------------------------------
 
     [Fact]
@@ -491,6 +718,12 @@ public sealed class SyncCliTransferTests : IDisposable
         Assert.DoesNotContain("\n", trimmed, StringComparison.Ordinal);
         return JsonDocument.Parse(trimmed);
     }
+
+    private static string[] LinesContaining(string text, string needle) =>
+        text.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.TrimEnd('\r'))
+            .Where(line => line.Contains(needle, StringComparison.Ordinal))
+            .ToArray();
 
     private static void AssertCount<T>(int expected, IReadOnlyCollection<T> items) => Assert.Equal(expected, items.Count);
 

@@ -10,7 +10,11 @@ public sealed class InMemorySourceSyncBaselineStore : ISourceSyncBaselineStore
     private readonly object _gate = new();
     private readonly Dictionary<string, SourceSyncBaseline> _peers = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Number of saves that changed a stored baseline.</summary>
+    /// <summary>Number of saves or deletions that changed a stored baseline.</summary>
+    /// <remarks>
+    /// Deletions count: the file store rewrites its document on a successful <see cref="Forget"/> too, and a test
+    /// that asserts "forgetting an absent peer wrote nothing" needs both stores to count the same events.
+    /// </remarks>
     public int WriteCount { get; private set; }
 
     /// <summary>Peers this store knows about, in insertion order.</summary>
@@ -71,6 +75,26 @@ public sealed class InMemorySourceSyncBaselineStore : ISourceSyncBaselineStore
             _peers[key] = merge.Merged;
             WriteCount++;
             return SourceSyncBaselineSaveResult.Written(merge.RejectedSyncSourceIds, merge.Reason);
+        }
+    }
+
+    /// <inheritdoc />
+    public bool Forget(string peerDeviceId)
+    {
+        if (string.IsNullOrWhiteSpace(peerDeviceId))
+        {
+            throw new ArgumentException("A peer device id is required.", nameof(peerDeviceId));
+        }
+
+        lock (_gate)
+        {
+            if (!_peers.Remove(peerDeviceId.Trim()))
+            {
+                return false;
+            }
+
+            WriteCount++;
+            return true;
         }
     }
 }

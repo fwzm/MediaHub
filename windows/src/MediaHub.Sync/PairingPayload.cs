@@ -156,7 +156,7 @@ public sealed record PairingPayload
                     + "; this build reads version " + CurrentSchemaVersion.ToString(CultureInfo.InvariantCulture) + ".");
         }
 
-        if (string.IsNullOrWhiteSpace(DeviceId))
+        if (WireText.IsBlank(DeviceId))
         {
             throw PairingReasons.MissingField("deviceId");
         }
@@ -204,14 +204,17 @@ public sealed record PairingPayload
 
     private static void ValidateEphemeralUrl(string? url)
     {
-        if (string.IsNullOrWhiteSpace(url))
+        if (WireText.IsBlank(url))
         {
             throw PairingReasons.MissingField("ephemeralUrl");
         }
 
-        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
+        // Trim first: the Kotlin reader normalises surrounding Unicode White_Space before parsing, and a URL
+        // that is accepted on one end but refused on the other is exactly the divergence this contract pins.
+        string trimmed = WireText.Trim(url!);
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out Uri? uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
-            || string.IsNullOrEmpty(uri.Host))
+            || WireText.IsBlank(uri.Host))
         {
             throw new SyncContractException(
                 PairingReasons.BadUrl,
@@ -279,7 +282,7 @@ public static class PairingPayloadCodec
     /// <exception cref="SyncContractException">The document is not a readable pairing payload.</exception>
     public static PairingPayload Deserialize(string json)
     {
-        if (string.IsNullOrWhiteSpace(json))
+        if (WireText.IsBlank(json))
         {
             throw new SyncContractException(PairingReasons.MalformedJson, "The pairing payload is empty.");
         }
@@ -300,6 +303,16 @@ public static class PairingPayloadCodec
             if (root.ValueKind != JsonValueKind.Object)
             {
                 throw new SyncContractException(PairingReasons.MalformedJson, "The pairing payload must be a JSON object.");
+            }
+
+            // A lone surrogate cannot survive a round trip: JsonElement.GetString throws InvalidOperationException
+            // for it and Utf8JsonWriter silently substitutes U+FFFD, so a document carrying one is refused before
+            // any field is interpreted rather than escaping as a non-contract exception type (W6-69).
+            if (WireText.ContainsLoneSurrogate(root))
+            {
+                throw new SyncContractException(
+                    PairingReasons.MalformedJson,
+                    "The pairing payload contains an unpaired surrogate.");
             }
 
             // Version first: a document from a newer build should say so, not complain about a field rename.
@@ -372,7 +385,7 @@ public static class PairingPayloadCodec
         }
 
         string? text = value.GetString();
-        if (string.IsNullOrWhiteSpace(text))
+        if (WireText.IsBlank(text))
         {
             throw PairingReasons.MissingField(name);
         }

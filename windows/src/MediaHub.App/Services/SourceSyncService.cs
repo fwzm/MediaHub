@@ -125,6 +125,12 @@ public sealed class SourceSyncService
     public SourceSyncEnvelope BuildEnvelope()
         => new SourceSyncLocalBridge(_store, _deviceId).BuildEnvelope(includeSecrets: false);
 
+    /// <summary>
+    /// The peer baselines themselves (W6-80). Forgetting a paired device has to clear its baseline through this same
+    /// instance: a second store over the same path would read the file once and then disagree with the session.
+    /// </summary>
+    public ISourceSyncBaselineStore Baselines => _baselines;
+
     /// <summary>The stored baseline that makes a repeated import a no-op.</summary>
     public string BaselinePath => _baselines.FilePath;
 
@@ -372,19 +378,33 @@ public sealed class SourceSyncService
         // proven from the app layer and not only from a test double.
         // The skipped list is what makes "the user unticked this row" mean something: without it, a create that
         // needs no approval is applied even though the page showed it as skipped.
+        // W6-103: a refused write gets its own line the moment the round decides it, so "which entry and why" is in
+        // the log and not only on the page. The words live in MediaHub.Sync (W6-102 discipline); this method only
+        // decides when to write them.
+        // W6-105: the withheld half gets the same line, written the moment the gate holds the entry back. The page
+        // and the round summary already say how many; the log has to say which one and why.
         SourceSyncApplyReport result = await _round
-            .ApplyAsync(preview, allowedIds, WriteApprovedRecordAsync, skippedIds, ct)
+            .ApplyAsync(
+                preview,
+                allowedIds,
+                WriteApprovedRecordAsync,
+                skippedIds,
+                refusedSink: entry => _log.Warn(LogCategory, SourceSyncRefusedText.LogLine(entry)),
+                withheldSink: entry => _log.Warn(LogCategory, SourceSyncWithheldText.LogLine(entry)),
+                cancellationToken: ct)
             .ConfigureAwait(true);
 
-        if (result.Withheld > 0)
+        // The words live in MediaHub.Sync (W6-102) so the log line is pinned by the same suite that pins the
+        // per-row lists; this method only decides when to write them.
+        string? warning = SourceSyncRoundSummaryText.WarnLine(result);
+        if (warning is not null)
         {
-            _log.Warn(LogCategory, "应用对端信封时有 " + result.Withheld + " 条保留未应用（含凭据或写入被拒）");
+            _log.Warn(LogCategory, warning);
         }
 
         _log.Info(
             LogCategory,
-            "已应用对端信封：写入 " + result.Applied + " 条，跳过 " + result.Skipped + " 条，保留未应用 "
-            + result.Withheld + " 条；本机基线" + (result.BaselineUpdated ? "已更新" : "未变化") + "（不含任何凭据）");
+            SourceSyncRoundSummaryText.InfoLine(preview.Envelope.DeviceId, preview.Envelope.SnapshotId, result));
 
         return result;
     }
@@ -410,7 +430,7 @@ public sealed class SourceSyncService
 
     private static SourceSyncWriteOutcome Describe(ServerManager.RemoteSourceOutcome outcome)
         => outcome.Applied
-            ? SourceSyncWriteOutcome.Written(outcome.Message)
+            ? SourceSyncWriteOutcome.Written(outcome.Message, outcome.ServerId)
             : SourceSyncWriteOutcome.Refused(outcome.Message);
 }
 

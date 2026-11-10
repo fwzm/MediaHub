@@ -16,6 +16,9 @@ public sealed class AppServices : IDisposable
 {
     public AppServices()
     {
+        // Rolling files, not just the memory ring: the earliest lines are exactly the ones a bug
+        // report needs after a long session. Redaction happens in LogService before the sink sees
+        // anything.
         Log = new LogService(new LogFileSink(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MediaHub", "logs")));
         Settings = new SettingsStore();

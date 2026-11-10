@@ -60,8 +60,12 @@ public static class SyncPageCopy
     public const string ForgetTitle = "忘记这台设备？";
 
     /// <summary>What forgetting keeps, verbatim: local bookkeeping only.</summary>
+    /// <remarks>
+    /// W6-80: the peer's sync baseline goes with the registration. Leaving it behind means a later pairing of the
+    /// same device id starts with "already known", so the peer's real changes would be skipped instead of pulled.
+    /// </remarks>
     public const string ForgetKeepsNote =
-        "只删除本机的配对登记，来源、凭据和对端设备都不会被改动；下次配对会重新按首次配对处理。";
+        "只删除本机的配对登记与该对端的同步基线，来源、凭据和对端设备都不会被改动；下次配对会重新按首次配对处理。";
 
     /// <summary>Forget confirmation accept label.</summary>
     public const string ForgetConfirmLabel = "忘记";
@@ -80,7 +84,11 @@ public static class SyncPageCopy
 
     /// <summary>Result message after a device was forgotten.</summary>
     public const string ForgetDoneMessage =
-        "只删除了本机的配对登记：来源、凭据和对端设备都没有变化；下次配对会重新按首次配对处理。";
+        "只删除了本机的配对登记与该对端的同步基线：来源、凭据和对端设备都没有变化；下次配对会重新按首次配对处理。";
+
+    /// <summary>Result message when the registration went but no baseline store was wired, so a baseline may remain.</summary>
+    public const string ForgetDoneMessageWithoutBaseline =
+        "只删除了本机的配对登记：这个页面没有可用的同步基线存储，对端基线可能还留在盘上；来源、凭据和对端设备都没有变化。";
 
     /// <summary>Result title when the registry holds nothing for the requested device.</summary>
     public const string ForgetUnknownTitle = "本机没有这台设备的登记";
@@ -148,6 +156,9 @@ public sealed record SyncApplyRow
 
     /// <summary>True when <see cref="BlockReason"/> carries a sentence.</summary>
     public bool IsBlocked => BlockReason.Length > 0;
+
+    /// <summary>W6-94: what a user can still do about this row; empty when its code has no known way out.</summary>
+    public string NextStep { get; init; } = "";
 
     /// <summary>Accessible name of the allow button.</summary>
     public string AllowLabel { get; init; } = "";
@@ -247,6 +258,34 @@ public sealed record SyncApplyResult
 
     /// <summary>Localised baseline warnings, if any.</summary>
     public IReadOnlyList<string> WarningLabels { get; init; } = [];
+
+    /// <summary>Sentence above the withheld list; empty when the gate withheld nothing.</summary>
+    public string WithheldHeader { get; init; } = "";
+
+    /// <summary>
+    /// One row per gate-withheld entry, in gate order: the sentence, the way out and the identity to copy.
+    /// </summary>
+    /// <remarks>
+    /// W6-93/W6-95: typed rather than a string list. A copy button needs the identity as a payload, and a parallel
+    /// string list would be a second source of truth for the same round — the drift Android retired appliedTitles
+    /// over. W6-95 moved the row shape to <see cref="SourceSyncCopyRow"/> so both kept-back lists bind one record.
+    /// </remarks>
+    public IReadOnlyList<SourceSyncCopyRow> WithheldRows { get; init; } = [];
+
+    /// <summary>Sentence above the written list; empty when this round wrote nothing.</summary>
+    public string WrittenHeader { get; init; } = "";
+
+    /// <summary>One row per written entry, in write order, so the counts line can be checked row by row.</summary>
+    public IReadOnlyList<string> WrittenRows { get; init; } = [];
+    /// <summary>Sentence above the refused list; empty when this round refused nothing.</summary>
+    public string RefusedHeader { get; init; } = "";
+
+    /// <summary>One row per refused entry, in write order, each with the reason the writer gave.</summary>
+    /// <remarks>
+    /// W6-95: typed rather than a string list, for the same reason as <see cref="WithheldRows"/> — the shared copy
+    /// button needs the identity as a payload, and a parallel string list would be a second source of truth.
+    /// </remarks>
+    public IReadOnlyList<SourceSyncCopyRow> RefusedRows { get; init; } = [];
 }
 
 /// <summary>
@@ -462,6 +501,12 @@ public sealed class SyncApplyPresenter
             InfoTitle = report.Applied > 0 ? "已写入远端变更" : "没有写入任何变更",
             BlockingLabels = blocking,
             WarningLabels = warnings,
+            WithheldHeader = SourceSyncWithheldText.Header(report.WithheldEntries.Count) ?? string.Empty,
+            WithheldRows = SourceSyncWithheldText.Rows(report.WithheldEntries),
+            WrittenHeader = SourceSyncWrittenText.Header(report.Written.Count) ?? string.Empty,
+            WrittenRows = SourceSyncWrittenText.Lines(report.Written),
+            RefusedHeader = SourceSyncRefusedText.Header(report.Refused.Count) ?? string.Empty,
+            RefusedRows = SourceSyncRefusedText.Rows(report.Refused),
         };
     }
 
@@ -578,6 +623,41 @@ public sealed class SyncApplyPresenter
             : warning;
     }
 
+    /// <summary>
+    /// W6-94: what a user can still do about an entry, or null when its code has no known way out.
+    /// </summary>
+    /// <remarks>
+    /// The preview row and the withheld list both read this one table, so a code is never explained in two different
+    /// words. Unknown codes return null: inventing advice is worse than saying nothing. The wording is the one
+    /// Android's SourceSyncImportCopy.nextStepOfCode already uses.
+    /// </remarks>
+    public static string? NextStep(string? code)
+    {
+        string value = (code ?? "").Trim();
+        if (value.Length == 0)
+        {
+            return null;
+        }
+
+        if (value.StartsWith(SourceSyncApprovalGate.AmbiguousReasonPrefix, StringComparison.Ordinal))
+        {
+            return "下一步：本机有多条来源指向同一身份，先在来源页删掉多余的再重新导出。";
+        }
+
+        return value switch
+        {
+            SyncRoundReasons.SecretsRequireApproval =>
+                "下一步：在对端把这条来源的凭据清空后重新导出信封，或在本机手动新建一条同样的来源。",
+            SyncRoundReasons.NotSupportedOnWindows =>
+                "下一步：等本机版本支持这种来源类型；再点几次允许也不会进来。",
+            SyncRoundReasons.UnknownSourceType =>
+                "下一步：把两端升到同一版本后重新导出信封。",
+            SyncRoundReasons.SameRevisionDifferentContent =>
+                "下一步：这条两端内容不一致（版本号相同），本页一律不放行；请在来源页手工对齐后再导出。",
+            _ => null,
+        };
+    }
+
     /// <summary>Why one row can never be allowed, in a sentence that keeps the stable code.</summary>
     public static string DescribeBlockReason(string? reason)
     {
@@ -624,6 +704,7 @@ public sealed class SyncApplyPresenter
             Allowable = allowable,
             Allowed = allowable && allowed,
             BlockReason = allowable ? string.Empty : DescribeBlockReason(item.Reason),
+            NextStep = NextStep(item.Reason) ?? string.Empty,
             AllowLabel = allowable ? "允许 " + name : "不可允许 " + name,
             SkipLabel = "跳过 " + name,
         };
@@ -791,6 +872,9 @@ public sealed record SyncForgetOutcome
     /// <summary>True when a row was actually deleted.</summary>
     public bool Forgotten { get; init; }
 
+    /// <summary>True when the peer's sync baseline was cleared too (false without a store or when the write failed).</summary>
+    public bool BaselineForgotten { get; init; }
+
     /// <summary>InfoBar title.</summary>
     public string Title { get; init; } = "";
 
@@ -819,15 +903,29 @@ public sealed record SyncForgetOutcome
 public sealed class SyncPairingPresenter
 {
     private readonly PairedDeviceRegistry? _registry;
+    private readonly ISourceSyncBaselineStore? _baselines;
     private PairedDeviceRow? _pendingForget;
     private PairingAddressReport? _addresses;
 
-    /// <summary>Creates the presenter for one device; the registry is optional only so tests can omit it.</summary>
-    public SyncPairingPresenter(string deviceId, PairedDeviceRegistry? registry = null)
+    /// <summary>Creates the presenter for one device; the registry and baseline store are optional only so tests can omit them.</summary>
+    /// <param name="deviceId">This device's id.</param>
+    /// <param name="registry">Paired-device bookkeeping; null means the forget confirmation cannot delete anything.</param>
+    /// <param name="baselines">
+    /// Peer sync baselines (W6-80). Forgetting a device must drop its baseline as well: a leftover baseline makes the
+    /// next pairing of the same device id start at "already known" and skip the peer's real changes.
+    /// </param>
+    public SyncPairingPresenter(
+        string deviceId,
+        PairedDeviceRegistry? registry = null,
+        ISourceSyncBaselineStore? baselines = null)
     {
         DeviceId = string.IsNullOrWhiteSpace(deviceId) ? "" : deviceId.Trim();
         _registry = registry;
+        _baselines = baselines;
     }
+
+    /// <summary>The baseline store this presenter clears on forget; null when the caller supplied none.</summary>
+    public ISourceSyncBaselineStore? Baselines => _baselines;
 
     /// <summary>This device's id, as it appears in an invitation.</summary>
     public string DeviceId { get; }
@@ -1026,23 +1124,50 @@ public sealed class SyncPairingPresenter
 
         _pendingForget = null;
         bool forgotten = _registry?.Forget(row.DeviceId) ?? false;
-        if (forgotten)
+        if (!forgotten)
         {
             return new SyncForgetOutcome
             {
-                Forgotten = true,
-                Title = SyncPageCopy.ForgetDoneTitle,
-                Message = SyncPageCopy.ForgetDoneMessage,
+                Forgotten = false,
+                Title = SyncPageCopy.ForgetUnknownTitle,
+                Message = PairedDeviceRegistry.DescribeReason(PairedDeviceReasons.UnknownDevice),
+                Reason = PairedDeviceReasons.UnknownDevice,
             };
         }
 
+        // Registration first, baseline second. The other order would leave a window where the row is still listed
+        // while its baseline is already gone - the next round would then look like a first sync.
+        bool baselineForgotten = ForgetBaseline(row.DeviceId);
         return new SyncForgetOutcome
         {
-            Forgotten = false,
-            Title = SyncPageCopy.ForgetUnknownTitle,
-            Message = PairedDeviceRegistry.DescribeReason(PairedDeviceReasons.UnknownDevice),
-            Reason = PairedDeviceReasons.UnknownDevice,
+            Forgotten = true,
+            Title = SyncPageCopy.ForgetDoneTitle,
+            Message = baselineForgotten
+                ? SyncPageCopy.ForgetDoneMessage
+                : SyncPageCopy.ForgetDoneMessageWithoutBaseline,
+            BaselineForgotten = baselineForgotten,
         };
+    }
+
+    /// <summary>
+    /// Drops the peer's sync baseline after its registration is gone. A store that throws (or is absent) only costs
+    /// the baseline: the device stays forgotten and the receipt says the baseline was not cleared.
+    /// </summary>
+    private bool ForgetBaseline(string deviceId)
+    {
+        if (_baselines is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return _baselines.Forget(deviceId);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     /// <summary>Friendly label for an address-ranking reason.</summary>
@@ -1074,10 +1199,13 @@ public sealed class SyncPairingPresenter
 public sealed class SyncPagePresenter
 {
     /// <summary>Creates the presenter for one device.</summary>
-    public SyncPagePresenter(string deviceId, PairedDeviceRegistry? registry = null)
+    public SyncPagePresenter(
+        string deviceId,
+        PairedDeviceRegistry? registry = null,
+        ISourceSyncBaselineStore? baselines = null)
     {
         DeviceId = string.IsNullOrWhiteSpace(deviceId) ? "" : deviceId.Trim();
-        Pairing = new SyncPairingPresenter(DeviceId, registry);
+        Pairing = new SyncPairingPresenter(DeviceId, registry, baselines);
     }
 
     /// <summary>This device's id.</summary>

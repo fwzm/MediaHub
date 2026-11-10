@@ -53,6 +53,9 @@ public sealed partial class SyncPage : Page
     // Transport state (W6-33). SyncTransferPresenter owns the listener, the pending receive and the in-memory secret;
     // this page only renders what it returns, so a secret never lands in a field that could outlive the click.
     private SyncTransferPresenter? _transfer;
+
+    /// <summary>The log category the transport lines land in, next to the sync service's own category.</summary>
+    private const string TransferLogCategory = "sync";
     private bool _transferReceiving;
     private bool _transferSending;
 
@@ -62,7 +65,8 @@ public sealed partial class SyncPage : Page
     /// </summary>
     private SyncPagePresenter Presenter => _presenter ??= new SyncPagePresenter(
         App.Services.Sync.DeviceId,
-        App.Services.Sync.PairedDevices);
+        App.Services.Sync.PairedDevices,
+        App.Services.Sync.Baselines);
 
     public SyncPage()
     {
@@ -415,6 +419,35 @@ public sealed partial class SyncPage : Page
         }
     }
 
+    /// <summary>
+    /// W6-93/W6-95: the copy button on a kept-back row (withheld or refused) puts the peer's identity on the clipboard.
+    /// Such an entry names an identity the user has to look up on the machine that sent it, and on-screen text cannot be
+    /// selected; the payload is the identity the peer stated, never the title and never anything this page invented.
+    /// One handler serves both lists because both bind the same row shape, so the button cannot mean two things.
+    /// </summary>
+    private void OnCopyRowIdentityClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: SourceSyncCopyRow row } || row.CopyText.Length == 0)
+        {
+            ShowStatus(InfoBarSeverity.Warning, "没有可复制的来源身份", "对端没有给这条来源身份，只能按标题核对。");
+            return;
+        }
+
+        try
+        {
+            DataPackage package = new();
+            package.SetText(row.CopyText);
+            Clipboard.SetContent(package);
+            ShowStatus(
+                InfoBarSeverity.Informational,
+                "来源身份已复制",
+                "把 " + row.CopyText + " 拿到来源那台机器上检索，或在来源页按它核对。");
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
+        {
+            ShowStatus(InfoBarSeverity.Warning, "无法复制来源身份", "剪贴板不可用：" + ex.Message);
+        }
+    }
     private void OnPairTick(object? sender, object e)
     {
         PairingHostSnapshot snapshot = HostPresenter.PollHost(NowMilliseconds());
@@ -647,7 +680,8 @@ public sealed partial class SyncPage : Page
         try
         {
             // Both shapes of a peer export: the canonical JSON and the passphrase-protected archive.
-            path = await FilePickerService.PickFileAsync([".json", ".mhsync"]);
+            // .mharchive is the canonical archive suffix (W6-66); .mhsync stays selectable for older files.
+            path = await FilePickerService.PickFileAsync([".json", ".mharchive", ".mhsync"]);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
         {
@@ -811,6 +845,27 @@ public sealed partial class SyncPage : Page
             // against a stale plan, so it is retired while the result line and the endpoint sentence stay.
             ClearApplyPreview(keepResult: true);
             ApplyResultText.Text = applied.Message;
+
+            // Entries the gate will never write are part of 保留未应用 as well; the counts sentence folds them in,
+            // this list separates them again and says, per row, why an explicit 允许 cannot save them.
+            ApplyWithheldHeader.Text = applied.WithheldHeader;
+            ApplyWithheldHeader.Visibility = applied.WithheldHeader.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            ApplyWithheldList.ItemsSource = applied.WithheldRows;
+            ApplyWithheldList.Visibility = applied.WithheldRows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            // The counts sentence says how many rows landed; this list lets the user check which ones became which
+            // local source. Both come from the presenter, so the page spells no words of its own.
+            ApplyWrittenHeader.Text = applied.WrittenHeader;
+            ApplyWrittenHeader.Visibility = applied.WrittenHeader.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            ApplyWrittenList.ItemsSource = applied.WrittenRows;
+            ApplyWrittenList.Visibility = applied.WrittenRows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            // Refused entries are part of 保留未应用; the counts sentence folds them in, this list separates them
+            // again so the reason the writer gave is readable one row at a time.
+            ApplyRefusedHeader.Text = applied.RefusedHeader;
+            ApplyRefusedHeader.Visibility = applied.RefusedHeader.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            ApplyRefusedList.ItemsSource = applied.RefusedRows;
+            ApplyRefusedList.Visibility = applied.RefusedRows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             ApplyNotImportedCount.Text = applied.EndpointSentence;
             ApplyNotImportedCount.Visibility = Visibility.Visible;
             ReloadSources();
@@ -857,6 +912,7 @@ public sealed partial class SyncPage : Page
                 row.Name,
                 row.ActionLabel,
                 row.DetailLabel,
+                row.NextStep,
                 row.StateLabel,
                 row.RequiresApproval,
                 row.Allowable,
@@ -904,6 +960,18 @@ public sealed partial class SyncPage : Page
         if (!keepResult)
         {
             ApplyResultText.Text = string.Empty;
+            ApplyWithheldHeader.Text = string.Empty;
+            ApplyWithheldHeader.Visibility = Visibility.Collapsed;
+            ApplyWithheldList.ItemsSource = null;
+            ApplyWithheldList.Visibility = Visibility.Collapsed;
+            ApplyWrittenHeader.Text = string.Empty;
+            ApplyWrittenHeader.Visibility = Visibility.Collapsed;
+            ApplyWrittenList.ItemsSource = null;
+            ApplyWrittenList.Visibility = Visibility.Collapsed;
+            ApplyRefusedHeader.Text = string.Empty;
+            ApplyRefusedHeader.Visibility = Visibility.Collapsed;
+            ApplyRefusedList.ItemsSource = null;
+            ApplyRefusedList.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -998,9 +1066,15 @@ public sealed partial class SyncPage : Page
     // never write a source: the 应用 click above is still the only writer on this page.
 
     /// <summary>The transport presenter: one per page, so a half-finished receive cannot outlive it.</summary>
+    /// <remarks>
+    /// W6-107: the page hands the presenter the log's two levels; the sentences themselves live in
+    /// <see cref="SyncTransferLog"/> so a later reader of the log sees the same words the UI showed.
+    /// </remarks>
     private SyncTransferPresenter Transfer => _transfer ??= new SyncTransferPresenter(
         App.Services.Sync.DeviceId,
-        () => App.Services.Sync.BuildEnvelope());
+        () => App.Services.Sync.BuildEnvelope(),
+        infoLine: line => App.Services.Log.Info(TransferLogCategory, line),
+        warnLine: line => App.Services.Log.Warn(TransferLogCategory, line));
 
     private async void OnTransferStartReceiveClick(object sender, RoutedEventArgs e)
     {
@@ -1259,6 +1333,7 @@ public sealed record ApplyRow(
     string Name,
     string ActionLabel,
     string DetailLabel,
+    string NextStep,
     string StateLabel,
     bool RequiresApproval,
     bool Allowable,

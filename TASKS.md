@@ -454,7 +454,7 @@
 - Device: Xiaomi 14 Ultra / Android 16
 - Result: PASS
 
-## V0.1 —— MVP（下一步）## V0.1 —— MVP（下一步）
+## V0.1 —— MVP（下一步）
 
 ### IN PROGRESS（无，等待开工）
 
