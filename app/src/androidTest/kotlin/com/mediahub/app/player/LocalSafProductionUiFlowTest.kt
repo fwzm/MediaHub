@@ -130,7 +130,7 @@ class LocalSafProductionUiFlowTest {
             val close = hasContentDescription(context.getString(com.mediahub.feature.player.R.string.player_close))
             if (compose.onAllNodes(close).fetchSemanticsNodes().isEmpty()) compose.onRoot().performTouchInput { click(center) }
             waitNode(close).performClick()
-            waitNode(hasText("播放", substring = false))
+            waitNode(hasText("立即播放", substring = false))
         }
 
         try {
@@ -154,7 +154,7 @@ class LocalSafProductionUiFlowTest {
             waitNode(hasText(label)).performClick()
             waitNode(hasText("嵌套")).performClick()
             waitNode(hasText("电影 a+b%", substring = false)).performClick()
-            waitNode(hasText("播放", substring = false)).performClick()
+            waitNode(hasText("立即播放", substring = false)).performClick()
             val info = hasText(context.getString(com.mediahub.feature.player.R.string.player_info_entry)) and hasClickAction()
             if (compose.onAllNodes(info).fetchSemanticsNodes().isEmpty()) compose.onRoot().performTouchInput { click(center) }
             waitNode(info).performClick()
