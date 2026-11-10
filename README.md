@@ -264,7 +264,8 @@ dotnet test  MediaHub.Windows.sln -c Debug
 
 CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
 与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
-截至 `09c088a6`：`MediaHub.Tests` **478** + `MediaHub.WebDav.Tests` **104** = **582 通过 / 0 失败 / 0 跳过**（windows-ci run **42497696590** 日志实测；`478 = 469 + 9`，由 W14 诊断日志落盘 9 例带来，此后 W35–W65 的都是文档/脚本门禁、未再加 C# 用例）
+（实测补充：workflow 申报的 `paths` 只含 `windows/**`，但在本 PR 上「只改 README 的提交」是否触发 CI 并不稳定 —— 11-06 的 `d65bcda`/`1d1456d2` 没有产生任何 run，11-08 的 `09c088a6` 与 11-09 的 `e02d0877` 则各触发 windows-ci + Android CI、`check-runs=4`；因此 PR 的必需检查以最近一次确实产生 run 的 head 为准。）
+截至 `e02d0877`：`MediaHub.Tests` **478** + `MediaHub.WebDav.Tests` **104** = **582 通过 / 0 失败 / 0 跳过**（windows-ci run **42650762907** 日志实测；`478 = 469 + 9`，由 W14 诊断日志落盘 9 例带来，此后 W35–W65 的都是文档/脚本门禁、未再加 C# 用例）
 （469 = 438 既有 + 31 例续播下限契约；历史口径 542 = 438 + 104 曾在 PR #33 里写过）。
 这不是本地口径而是 CI 实测：`windows-ci` 现在把两个套件**分两步**跑并各自产出 trx，再按套件名断言下限
 （`MediaHub.Tests` ≥400、`MediaHub.WebDav.Tests` ≥100，`failed=0` 且 `notExecuted=0`）—— 此前 WebDav 套件虽然被构建、
@@ -275,8 +276,8 @@ W6 分支上 `MediaHub.Tests` 为 **1952 通过 / 0 失败**（主线 478 = 438 
 W6-1…W6-14 合计 583（其中 W6-10 的接线 14、W6-13 的清单 UI 17），再加 W6-15 的 CLI 命令组 32、
 W6-16 的回环传输 34、W6-17 的双向编排 22，另加 W12b 的对抗性回归 66、W6-18 的 transfer 命令组 19、
 W6-19 的 presenter 35、W6-21 的 skip 语义 9、W6-20 的 `--root`/导出路径 18、W6-24 的传输对端认证 45、W6-26 的 TLS 与指纹钉扎 37、W6-30 的投递确认 19、W6-31 的恶意帧回归 36、W6-33 的传输卡片 presenter 29、W6-37 的回执帧与握手超时分类修正 35、W6-39 的同步页回执接线 27、W6-43 的回执控件与结果行 3、W6-50 的 `transfer serve` 预算 19、W6-51 的显式主机入口 40、W6-66 的归档默认名 3、W6-67 的跨语言文本边界 11、W6-68 的 8 MiB 上限 5、W6-69 的配对文本边界 10、W6-70 的配对设备登记 14、W6-71 的配对卡片与登记 21、W6-72 的同步基线契约与接线 22
-—— 上列明细是历史累计口径，逐项相加与总数有出入，勿据此反推；总数以 CI 实测为准（W6 分支 `b937e39c` 的 windows-ci run 41873260398：`MediaHub.Tests: total=1952` + WebDav `104` = **2056**；主线 `09c088a6` 的 windows-ci run **42497696590**：`MediaHub.Tests: total=478 failed=0 notExecuted=0` + `MediaHub.WebDav.Tests: total=104` = **582**）。
-> **CI 现状（截至 `09c088a6`）**：主干 `windows-ci` 全覆盖 success；主干 Android CI 在 `95fff582` 上首跑失败（visual-instrumentation API 32 的 `Run production visual paths on emulator` 报 `Error on ZipFile unknown archive`——装 Android Emulator 时下载包损坏，模拟器未起来 → `Require executed visual assertions` 退出码 1；同 run 的 API 36 为 success）——**已用重跑（attempt 2）证实为 CI 基础设施偶发失败：三个 job 全部 success，不是产品回归**。
+—— 上列明细是历史累计口径，逐项相加与总数有出入，勿据此反推；总数以 CI 实测为准（W6 分支 `b937e39c` 的 windows-ci run 41873260398：`MediaHub.Tests: total=1952` + WebDav `104` = **2056**；主线 `e02d0877` 的 windows-ci run **42650762907**：`MediaHub.Tests: total=478 failed=0 notExecuted=0` + `MediaHub.WebDav.Tests: total=104` = **582**）。
+> **CI 现状（截至 `e02d0877`）**：主干 `windows-ci` 全覆盖 success；主干 Android CI 在 `95fff582` 上首跑失败（visual-instrumentation API 32 的 `Run production visual paths on emulator` 报 `Error on ZipFile unknown archive`——装 Android Emulator 时下载包损坏，模拟器未起来 → `Require executed visual assertions` 退出码 1；同 run 的 API 36 为 success）——**已用重跑（attempt 2）证实为 CI 基础设施偶发失败：三个 job 全部 success，不是产品回归**。
 `MediaHub.WebDav.Tests` 的 104 例同样适用于该分支（见 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 正文的验证表）。
 
 Android 侧（[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml)）的单元门禁同样按**名字**断言，
@@ -396,7 +397,6 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
 - 72c9850e 2026-11-04 feat(licensing): W62 第 54 项 resume-source-pointer-claims（W8 续播记录的源码行号钉成契约）
 - 5daff850 2026-11-04 fix(licensing): W61 第 46 项 doc-residue-claims 增两条标题判据，并修三处标题行粘连/重复
 - abe06e8c 2026-11-04 fix(licensing): W60 第 43 项 log-file-claims 认两种合法实现形态（修 PR #39 windows-ci 红项）
-- ad99de10 2026-11-03 feat(licensing): W59 W12 快照的历史数字须在基线提交上可复核（第 53 项 doc-audit-history-claims）
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）
