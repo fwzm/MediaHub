@@ -155,13 +155,13 @@ class LocalSafProductionUiFlowTest {
             waitNode(hasText("嵌套")).performClick()
             waitNode(hasText("电影 a+b%", substring = false)).performClick()
             waitNode(hasText("播放", substring = false)).performClick()
-            val info = hasContentDescription(context.getString(com.mediahub.feature.player.R.string.player_info_entry))
+            val info = hasText(context.getString(com.mediahub.feature.player.R.string.player_info_entry)) and hasClickAction()
             if (compose.onAllNodes(info).fetchSemanticsNodes().isEmpty()) compose.onRoot().performTouchInput { click(center) }
             waitNode(info).performClick()
             waitNode(hasText("320×180", substring = true))
             assertTrue(device.takeScreenshot(java.io.File(context.filesDir, "saf-media3-info.png")))
             device.pressBack()
-            val subtitles = hasContentDescription(context.getString(com.mediahub.feature.player.R.string.player_subtitles))
+            val subtitles = hasText(context.getString(com.mediahub.feature.player.R.string.player_subtitles)) and hasClickAction()
             if (compose.onAllNodes(subtitles).fetchSemanticsNodes().isEmpty()) compose.onRoot().performTouchInput { click(center) }
             waitNode(subtitles).performClick()
             waitNode(hasText("电影 a+b%.zh", substring = true)).performScrollTo().performClick()

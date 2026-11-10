@@ -40,8 +40,15 @@ class MpvAudioTrackSelectionTest {
     /** 可控 track-list 与命令记录的 fake mpv。 */
     private class FakeInstance : MpvInstance {
         var observer: MpvInstance.Observer? = null
-        var tracks: List<Map<String, String?>> = emptyList()
         var currentAid: String = "no"
+        var tracks: List<Map<String, String?>> = emptyList()
+            set(value) {
+                field = value
+                // Initialize the fixture's aid from its track snapshot. Tests can override
+                // currentAid afterward to model a stale selected flag.
+                currentAid = value.firstOrNull { it["type"] == "audio" && it["selected"] == "yes" }
+                    ?.get("id") ?: "no"
+            }
         val aidWrites = mutableListOf<String>()
         var outputFormat: String? = null
         val sidWrites = mutableListOf<String>()
@@ -266,6 +273,27 @@ class MpvAudioTrackSelectionTest {
             assertEquals("首轨选中", true, tracks[0].isSelected)
             assertEquals("次轨未选中", false, tracks[1].isSelected)
         } finally {
+            scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+        }
+    }
+
+    @Test
+    fun `native audio off cannot be overridden by stale selected track flags`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val instance = FakeInstance().apply {
+            tracks = listOf(videoTrack(), audioTrack("1", "eng", true), audioTrack("2", "chi", false))
+            currentAid = "no"
+        }
+        val engine = engineWith(instance, scope)
+        try {
+            engine.play(session())
+            withTimeout(5_000) { while (instance.observer == null) delay(10) }
+            instance.observer!!.event(MpvInstance.Event.FILE_LOADED)
+            assertEquals(2, engine.uiState.value.audioTracks.size)
+            assertTrue(engine.uiState.value.audioTracks.none { it.isSelected })
+            assertNull(engine.uiState.value.selectedAudio)
+        } finally {
+            engine.release()
             scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         }
     }
