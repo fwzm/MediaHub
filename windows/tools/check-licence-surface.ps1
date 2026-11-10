@@ -1295,6 +1295,7 @@ $declaredCheckIds = @(
     'reproducible-build-claims',
     'cross-doc-pointer-claims',
     'doc-audit-history-claims',
+    'doc-audit-untested-claims',
     'resume-source-pointer-claims',
     'resume-record-count-claims',
     'resume-record-constant-claims',
@@ -2861,6 +2862,136 @@ else {
     }
 }
 
+}
+# --- 33. the W12 audit's cannot-judge register must stay a register (W65) ---------------------
+if (-not (Test-Path -LiteralPath $docAuditFile)) {
+    Add-Check 'doc-audit-untested-claims' 'SKIP' 'the W12 audit snapshot is absent (windows/docs/W12-DOC-AUDIT.md)'
+}
+else {
+    $untText = [string](Get-Content -LiteralPath $docAuditFile -Raw)
+    $untProblems = [System.Collections.Generic.List[string]]::new()
+    $untBegin = '<!-- BEGIN doc-audit-untested -->'
+    $untEnd = '<!-- END doc-audit-untested -->'
+    $untBeginAt = $untText.IndexOf($untBegin, [System.StringComparison]::Ordinal)
+    $untEndAt = $untText.IndexOf($untEnd, [System.StringComparison]::Ordinal)
+    $untEntries = @()
+    if ($untBeginAt -lt 0 -or $untEndAt -lt $untBeginAt) {
+        $untProblems.Add('the audit no longer carries the doc-audit-untested block')
+    }
+    else {
+        $untBlock = $untText.Substring($untBeginAt, $untEndAt - $untBeginAt + $untEnd.Length)
+        if (-not [regex]::IsMatch($untBlock, 'untested-owner:\s*check-licence-surface\.ps1:doc-audit-untested-claims')) {
+            $untProblems.Add('the untested-owner line no longer names this check')
+        }
+        $untReasonVocab = @()
+        $untStatusVocab = @()
+        $reasonLine = [regex]::Match($untBlock, 'untested-reason-vocabulary:[ \t]*(.+)')
+        if ($reasonLine.Success) { $untReasonVocab = @($reasonLine.Groups[1].Value.Split('|') | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+        $statusLine = [regex]::Match($untBlock, 'untested-status-vocabulary:[ \t]*(.+)')
+        if ($statusLine.Success) { $untStatusVocab = @($statusLine.Groups[1].Value.Split('|') | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+        if ($untReasonVocab.Count -eq 0) { $untProblems.Add('the block no longer declares an untested-reason-vocabulary') }
+        if ($untStatusVocab.Count -eq 0) { $untProblems.Add('the block no longer declares an untested-status-vocabulary') }
+        $untIds = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($entryMatch in [regex]::Matches($untBlock, '(?m)^\s*-\s+(.+)$')) {
+            $entryBody = $entryMatch.Groups[1].Value.Trim()
+            if (-not $entryBody.StartsWith('id=')) { continue }
+            $fields = @{}
+            foreach ($kv in [regex]::Matches($entryBody, '(?<k>[a-z-]+)=(?<v>[^;]+)')) {
+                $fields[$kv.Groups['k'].Value] = $kv.Groups['v'].Value.Trim()
+            }
+            $untEntries += ,$fields
+            if (-not $fields.ContainsKey('id')) { $untProblems.Add('an entry line has no id= field') ; continue }
+            if (-not $untIds.Add($fields['id'])) { $untProblems.Add('the id ' + $fields['id'] + ' is declared twice') }
+            foreach ($required in @('row', 'reason', 'status')) {
+                if (-not $fields.ContainsKey($required)) { $untProblems.Add('the entry ' + $fields['id'] + ' has no ' + $required + '= field') }
+            }
+            if ($fields.ContainsKey('reason') -and $untReasonVocab.Count -gt 0 -and -not ($untReasonVocab -contains $fields['reason'])) {
+                $untProblems.Add('the entry ' + $fields['id'] + ' uses the reason ' + $fields['reason'] + ', which is not in the declared reason vocabulary')
+            }
+            if ($fields.ContainsKey('status') -and $untStatusVocab.Count -gt 0 -and -not ($untStatusVocab -contains $fields['status'])) {
+                $untProblems.Add('the entry ' + $fields['id'] + ' uses the status ' + $fields['status'] + ', which is not in the declared status vocabulary')
+            }
+        }
+        $declaredRows = [regex]::Match($untBlock, 'untested-row-count:[ \t]*(\d+)')
+        if (-not $declaredRows.Success) {
+            $untProblems.Add('the block no longer declares an untested-row-count')
+        }
+        elseif ([int]$declaredRows.Groups[1].Value -ne $untEntries.Count) {
+            $untProblems.Add('the block declares ' + $declaredRows.Groups[1].Value + ' row(s) but lists ' + $untEntries.Count)
+        }
+        if ($untEntries.Count -lt 6) { $untProblems.Add('the cannot-judge register now holds only ' + $untEntries.Count + ' row(s); it is a register of the audit boundary, not a shrinking list') }
+        $untSectionAt = $untText.IndexOf('## 4. ', [System.StringComparison]::Ordinal)
+        $untNextAt = -1
+        if ($untSectionAt -ge 0) { $untNextAt = $untText.IndexOf([char]10 + '## 5. ', $untSectionAt, [System.StringComparison]::Ordinal) }
+        if ($untSectionAt -lt 0 -or $untNextAt -lt 0) {
+            $untProblems.Add('the audit no longer carries a section 4 bounded by section 5')
+        }
+        else {
+            $untSection = $untText.Substring($untSectionAt, $untNextAt - $untSectionAt)
+            $untTableRows = @()
+            foreach ($tableLine in $untSection.Split([char]10)) {
+                $tableTrimmed = $tableLine.Trim()
+                if (-not $tableTrimmed.StartsWith('|')) { continue }
+                if ($tableTrimmed.StartsWith('| 项 ') -or $tableTrimmed.StartsWith('|---')) { continue }
+                $untTableRows += ,$tableTrimmed
+            }
+            if ($untTableRows.Count -eq 0) { $untProblems.Add('section 4 no longer contains a table with rows') }
+            foreach ($entry in $untEntries) {
+                if (-not ($entry.ContainsKey('row') -and $entry.ContainsKey('status'))) { continue }
+                $wantRow = ($entry['row'] -replace ([char]96), '').Trim()
+                $hitRow = $null
+                foreach ($candidate in $untTableRows) {
+                    $cells = $candidate.Split('|')
+                    if ($cells.Count -lt 3) { continue }
+                    $firstCell = ($cells[1] -replace ([char]96), '').Trim()
+                    if ($firstCell.StartsWith($wantRow, [System.StringComparison]::Ordinal)) { $hitRow = $candidate ; break }
+                }
+                if ($null -eq $hitRow) {
+                    $untProblems.Add('the register declares the row ' + $wantRow + ' but section 4 has no row starting with it - a row removed from the cannot-judge table looks like progress without evidence')
+                    continue
+                }
+                if (-not $hitRow.Contains($entry['status'])) {
+                    $untProblems.Add('the row ' + $wantRow + ' does not carry its declared status ' + $entry['status'])
+                }
+                if (($hitRow.Contains('EXECUTED_PASS') -or $hitRow.Contains('DEVICE_VERIFIED')) -and $entry['status'] -ne 'DOC_CLAIM_ONLY') {
+                    $untProblems.Add('the row ' + $wantRow + ' carries a verdict token while its status is ' + $entry['status'] + ' - only DOC_CLAIM_ONLY may quote a verdict, because that token is the claim being audited')
+                }
+                if ($entry.ContainsKey('cite')) {
+                    $citeMatch = [regex]::Match($entry['cite'], '^(?<path>[^:]+):(?<from>\d+)(?:-(?<to>\d+))?$')
+                    if (-not $citeMatch.Success) {
+                        $untProblems.Add('the cite ' + $entry['cite'] + ' is not a path:line or path:from-to pointer')
+                    }
+                    else {
+                        $citePath = Resolve-RepoPath -Path $citeMatch.Groups['path'].Value
+                        if (-not (Test-Path -LiteralPath $citePath)) {
+                            $untProblems.Add('the cite names ' + $citeMatch.Groups['path'].Value + ' but no such file exists')
+                        }
+                        else {
+                            $citeLines = [System.IO.File]::ReadAllLines($citePath)
+                            $from = [int]$citeMatch.Groups['from'].Value
+                            $to = $from
+                            if ($citeMatch.Groups['to'].Success) { $to = [int]$citeMatch.Groups['to'].Value }
+                            if ($from -lt 1 -or $to -lt $from -or $to -gt $citeLines.Count) {
+                                $untProblems.Add('the cite ' + $entry['cite'] + ' falls outside ' + $citeMatch.Groups['path'].Value + ' (' + $citeLines.Count + ' line(s))')
+                            }
+                            elseif ($entry.ContainsKey('anchor')) {
+                                $citeText = (@($citeLines[($from - 1)..($to - 1)]) -join [char]10)
+                                if (-not $citeText.Contains($entry['anchor'])) {
+                                    $untProblems.Add('the range ' + $from + '-' + $to + ' of ' + $citeMatch.Groups['path'].Value + ' no longer contains ' + [char]34 + $entry['anchor'] + [char]34)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if ($untProblems.Count -eq 0) {
+        Add-Check 'doc-audit-untested-claims' 'PASS' ('the W12 audit still keeps a cannot-judge register: ' + $untEntries.Count + ' row(s) over ' + $untReasonVocab.Count + ' reason(s) and ' + $untStatusVocab.Count + ' status word(s), every row still sits in section 4 with its declared status, no row was promoted to a verdict, and the cited workflow range still contains its test command')
+    }
+    else {
+        Add-Check 'doc-audit-untested-claims' 'FAIL' ($untProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $untProblems) + ' - keep the cannot-judge register honest: a row that quietly disappears or gets relabelled is an unverified claim wearing a verified status')
+    }
 }
 # --- 30. the W8 resume record's source line pointers must still resolve (W62) -----------------
 if (-not (Test-Path -LiteralPath $resumeSourceFile)) {

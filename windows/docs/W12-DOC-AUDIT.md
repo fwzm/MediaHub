@@ -74,14 +74,18 @@ doc-role: dated audit snapshot - never the acceptance authority
 
 ## 4. 不跑测试 / 不构建即无法判定（单列，不许猜）
 
+本节是这份快照的**边界登记表**：凡是「读代码断不了、只有跑一次才知道」的项都只能出现在这里，并且必须带一个机器可读的 `status`（见 §7）。**本节任何一行都不允许被升格成通过结论** —— 真跑出结果后应当把该行从本节移除、写进实测记录，而不是就地改词。
+
 | 项 | 现状 | 为什么判不了 |
 |---|---|---|
-| CI 310 vs 静态 373（MediaHub.Tests） | `.github/workflows/windows-ci.yml:63-69` 只跑 `tests/MediaHub.Tests/MediaHub.Tests.csproj`；exact SHA 日志实测 `Passed: 310, Total: 310` | 差 63 例；静态计数口径（`[Theory]` 展开、条件跳过、平台过滤）无法只靠读代码断定，需要在本机跑一次 `dotnet test` |
-| 477 tests 当前是否仍全绿 | 文档 `EXECUTED_PASS`，本轮只做静态计数 | 未运行（另一条 GUI 验收链要用空闲窗口，本次不抢 CPU） |
-| `A15F6E4F` 二进制 | W9 四门证据的哈希 | 该 dll 已不在磁盘（`D:\mh-out*` 只剩 `A8EDD448` 与旧 `2C302A62`），无法复算 |
-| U2/U3/U4 在 `A8EDD448` 上是否通过 | W10 三次尝试全被使用者打断 | 需要在连续 300 s 空闲 + QUNS 放行窗口里跑 `run-quiet.ps1` |
-| 硬件兼容矩阵 / HDR / 音频独占 / 签名 / MSIX | `NOT_RUN` / `DEVICE_UNVERIFIED` | 单机单卡、无签名证书、无干净机 |
-| U1 41 条断言的逐条语义 | 只核到条数与表头（41 条全 pass、dll/脚本哈希对得上） | 未逐条读 `detail` 与 PNG |
+| CI 310 vs 静态 373（MediaHub.Tests） | `.github/workflows/windows-ci.yml:71-77` 跑 `tests/MediaHub.Tests/MediaHub.Tests.csproj`（WebDav 套件另起一步，见同文件 `:86-92`）；exact SHA 日志实测 `Passed: 310, Total: 310`（as-of `282dcc2`；当前 478 / combined 582，以 CI 日志为准）⇒ `STATIC_ONLY` | 差 63 例；静态计数口径（`[Theory]` 展开、条件跳过、平台过滤）无法只靠读代码断定，需要在本机跑一次 `dotnet test` |
+| 477 tests 当前是否仍全绿 | 文档 `EXECUTED_PASS`，本轮只做静态计数、未复核 ⇒ `DOC_CLAIM_ONLY` | 未运行（另一条 GUI 验收链要用空闲窗口，本次不抢 CPU） |
+| `A15F6E4F` 二进制 | W9 四门证据的哈希；该 dll 已不在磁盘（`D:\mh-out*` 只剩 `A8EDD448` 与旧的 `2C302A62`）⇒ `ARTIFACT_MISSING` | 无法复算 |
+| U2/U3/U4 在 `A8EDD448` 上是否通过 | W10 三次尝试全被使用者打断 ⇒ `WINDOW_GATED` | 需要在连续 300 s 空闲 + QUNS 放行窗口里跑 `run-quiet.ps1` |
+| 硬件兼容矩阵 / HDR / 音频独占 / 签名 / MSIX | `NOT_RUN` / `DEVICE_UNVERIFIED` ⇒ `DEVICE_UNVERIFIED` | 单机单卡、无签名证书、无干净机 |
+| U1 41 条断言的逐条语义 | 只核到条数与表头（41 条全 pass、dll/脚本哈希对得上）⇒ `STATIC_ONLY`；`detail` 与 PNG 未逐条读 | 需要逐条读证据 JSON 与截图 |
+
+`status` 的取值是闭词表（含义见 §7），改词表必须同时改守卫。
 
 ## 5. 复现命令
 
@@ -121,3 +125,32 @@ history-claim-count: 5
 <!-- END doc-audit-history -->
 
 上面每一条都由 `windows/tools/check-licence-surface.ps1` 的 `doc-audit-history-claims`（第 53 项）在 `history-baseline-head` 那个提交上重新解一遍：`git show <commit>:<record>` 的行数必须等于 `lines=`，`range=` 那几行的原文必须含 `anchors=`。所以第 1、2 节里的这些数字不是「当年大概如此」，而是**在基线上可复算**的历史断言——它们此后会随仓库增长而与当前值不同（W5 记录现为 342 行、`windows-ci.yml` 现为 246 行），这是快照的正常状态；要记当前值必须新开一条带日期的记录，不能把这里的数字就地改成现值。
+
+## 7. 「判不了」登记表的契约（CI 核对）
+
+§4 那张表过去只靠人读：行被悄悄删掉、`status` 被就地改成通过词、或者引用的工作流行号漂移，都不会有任何东西报警。第 57 项把这张表钉成契约块 —— 下半部分的第一条真隐患就是它自己：`:63-69` 在写这份快照时确实是 `dotnet test` 那一段，如今那几行是 Restore + Build，而测试步骤移到了 `:71-77`。
+
+<!-- BEGIN doc-audit-untested -->
+untested-owner: check-licence-surface.ps1:doc-audit-untested-claims
+untested-row-count: 6
+untested-reason-vocabulary: command | window-gated | hardware-gap | artifact-missing | manual-review
+untested-status-vocabulary: NOT_RUN | STATIC_ONLY | DOC_CLAIM_ONLY | DEVICE_UNVERIFIED | ARTIFACT_MISSING | WINDOW_GATED
+untested-promotion-rule: a row may carry a verdict token (EXECUTED_PASS / DEVICE_VERIFIED) only when its status is DOC_CLAIM_ONLY - that token is then the claim being audited, not the audit's own conclusion
+- id=ci-vs-static-count; row=CI 310 vs 静态 373; reason=command; status=STATIC_ONLY; cite=.github/workflows/windows-ci.yml:71-77; anchor=dotnet test tests/MediaHub.Tests/MediaHub.Tests.csproj
+- id=suite-still-green; row=477 tests 当前是否仍全绿; reason=command; status=DOC_CLAIM_ONLY
+- id=a15f6e4f-binary; row=A15F6E4F 二进制; reason=artifact-missing; status=ARTIFACT_MISSING
+- id=u2-u3-u4-a8edd448; row=U2/U3/U4 在 A8EDD448 上是否通过; reason=window-gated; status=WINDOW_GATED
+- id=hardware-matrix; row=硬件兼容矩阵; reason=hardware-gap; status=DEVICE_UNVERIFIED
+- id=u1-per-assertion; row=U1 41 条断言的逐条语义; reason=manual-review; status=STATIC_ONLY
+<!-- END doc-audit-untested -->
+
+上面每一条都由 `windows/tools/check-licence-surface.ps1` 的 `doc-audit-untested-claims`（第 57 项）逐条核对，判据四条：
+
+| 判据 | 内容 | 失败含义 |
+| --- | --- | --- |
+| A 块自指 | `untested-owner` 点名本项；`untested-row-count` 等于 `- id=` 条数且 ≥ 6；`id` 不重复 | 块被删、条目被删、数量没跟着改 |
+| B 闭词表 | 每条的 `reason` 落在 `untested-reason-vocabulary`、`status` 落在 `untested-status-vocabulary`（两行声明与判据用的是同一份词表） | 有人发明新状态词，等于给这张表开了后门 |
+| C 行仍在且未被升格 | `row=` 去反引号后必须是 §4 表格某行第一格的**前缀**；该行正文必须含声明的 `status` 词；若该行出现 `EXECUTED_PASS` / `DEVICE_VERIFIED`，则 `status` 必须是 `DOC_CLAIM_ONLY` | 把「判不了」的行就地改成通过结论，或把行删掉让登记表变小 |
+| D 引用可解析 | 带 `cite=path:from-to` 的条目，该区间必须仍在文件范围内且仍含 `anchor` | 引用的工作流步骤被挪走（本轮 `:63-69` → `:71-77` 就是这种） |
+
+记录文件读不到时本项 SKIP（退出码不变）。

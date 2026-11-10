@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-56 项检查分三十五组：
+57 项检查分三十六组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -82,6 +82,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | W8 续播记录指针（W62 起） | `resume-source-pointer-claims` | `windows/docs/W8-HEADLESS-RESUME.md` §11 的 `resume-source-pointer-claims` 块与源码分叉：20 条 `路径:行号` 指针里有一条在文件里不再含它声明的锚点短语、行号越界、文件名被改或删除，或正文又写出块里没声明的新行号——「谁引用哪一行」不能只靠人眼 |
 | W8 续播记录计数（W63 起） | `resume-record-count-claims` | `windows/docs/W8-HEADLESS-RESUME.md` §12 的 `resume-record-count-claims` 块与两份源码分叉：§4 的 16 条探针断言 id 与 `MediaHub.ResumeProbe/Program.cs` 里的 `Check("<id>")` 不再双向相等、驱动的固定/每服/服务器数/总数四个数字与 `headless-resume.ps1` 的调用点算不出来、或 §7 退出码表仍写着过期的驱动条数 |
 | W8 续播记录常量（W64 起） | `resume-record-constant-claims` | `windows/docs/W8-HEADLESS-RESUME.md` §13 的 `resume-record-constant-claims` 块与源码/算积分叉：`Program.cs` 的 `MinimumRuntimeTicks = <n> * TicksPerSecond`、`SettleMilliseconds` 默认值、`const int MaximumDepth` 三项与块里声明不再相等，600 s × ticks/s 的算积复现不出块里的四个分组数字，或正文仍写着旧的「固定等待 750 ms」「深度上限 3」「≥300 s」 |
+| W12「判不了」登记表（W65 起） | `doc-audit-untested-claims` | `windows/docs/W12-DOC-AUDIT.md` §7 的 `doc-audit-untested` 块与 §4 表格分叉：某条登记的行从 §4 表格里消失、行的 `status` 与声明不一致、有人把某一行的结论就地改成 `EXECUTED_PASS` / `DEVICE_VERIFIED`（本表按定义只收「不跑就判不了」的项）、词表被改宽，或 `cite=` 的工作流区间不再含被测命令 |
 
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
@@ -252,7 +253,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 56） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 57） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -1291,6 +1292,22 @@ PASS 文案会报出「多少条指针 / 多少个文件 / 每条区间仍含锚
 
 - 守卫补丁前快照 `D:/mh-verify/w63-guard-pre.ps1`（sha256 `74a4c662…`，200,112 B），补丁后 **206,128 B**（含上面两处修法），检查总数 **54 → 55**；两次改完都用 `[System.Management.Automation.Language.Parser]::ParseFile` 做了语法自检（打印 `PARSE-OK`）——PowerShell 补丁最容易在字符串/括号上断，落盘后先自检比等守卫报 ParserError 快得多。
 
+### 3.31 W12「判不了」登记表的契约（W65，2026-11-04）
+
+`windows/docs/W12-DOC-AUDIT.md` §4 是一份**边界登记表**：凡是「读代码断不了、只有跑一次才知道」的项都只出现在那里。它过去只靠人读 —— 某一行被删掉、某行的结论被就地改成通过词、引用的工作流区间漂移，都不会有任何东西报警（本轮实测就有一处：§4 引用的 `.github/workflows/windows-ci.yml` :63-69 在写快照时确实是 `dotnet test` 那段，如今那几行是 Restore + Build，测试步骤移到了 `:71-77`）。
+
+第 57 项把这张表钉成契约块（写在 §7），判据四条：
+
+| 判据 | 内容 | 失败含义 |
+| --- | --- | --- |
+| A 块自指 | `untested-owner` 点名本项；`untested-row-count` 等于 `- id=` 条数且 ≥ 6；`id` 不重复；每条都有 `row=` / `reason=` / `status=` | 块被删、条目被删、数量没跟着改 |
+| B 闭词表 | `reason=` 落在块里声明的 `untested-reason-vocabulary`、`status=` 落在 `untested-status-vocabulary`（词表与判据用的是同一份声明） | 有人发明新状态词，等于给这张表开了后门 |
+| C 行仍在且未被升格 | `row=` 去反引号后必须是 §4 表格某行第一格的**前缀**；该行正文必须含声明的 `status` 词；若该行出现 `EXECUTED_PASS` / `DEVICE_VERIFIED`，则 `status` 必须是 `DOC_CLAIM_ONLY` | 把「判不了」的行就地改成通过结论，或把行删掉让登记表变小 |
+| D 引用可解析 | 带 `cite=path:from-to` 的条目，区间必须仍在文件范围内、仍含 `anchor` | 被测的工作流步骤被挪走（本轮 :63-69 → 71-77 就是这种） |
+
+范围口径：本项只核**登记表自身的形态与引用**，不核那些数字（310 / 373 / 478）—— 历史数字归第 53 项 `doc-audit-history-claims` 在基线提交上复算，当下数字以 CI 日志为准。记录文件读不到 ⇒ SKIP。
+
+
 ### 4.32 实测（2026-11-04，W64，本机）
 
 - 首跑（守卫先落、两份文档未同步，`D:/mh-verify/w64-first.log`）：`checks=56 failed=2`。红的两条是 `check-inventory`（三条：两份文档仍写 55、本文件未点名新 id）与**本项自己**（`4 problem(s): the constant block no longer declares derived-ticks-40pct / derived-ticks-1pct / derived-ticks-2pct`）。
@@ -1315,6 +1332,34 @@ PASS 文案会报出「多少条指针 / 多少个文件 / 每条区间仍含锚
 
 - 口径：本项只核**仓库内能当场重算的东西**。服务端策略（Jellyfin `MinResumePct=5` / `MinResumeDurationSeconds=300`、Emby 行为实测的 2%）来自运行中的服务器，仍由 §5 的实测记录与探针断言承担；`resume-fixture-seconds` 是夹具属性，记在块里只为让算术有唯一来源。
 
+
+### 4.33 实测（2026-11-04，W65，本机）
+
+- 先修再钉：`windows/docs/W12-DOC-AUDIT.md` §4 里那条 CI 引用原本写 `:63-69`（写快照时确是 `dotnet test` 那段），实际早已变成 Restore + Build、测试步骤在 `:71-77`；本轮先把它改对，再把整张表钉进 §7 契约块。同时把 §4 的每一行补上机器可读的 `status`（`STATIC_ONLY` / `DOC_CLAIM_ONLY` / `ARTIFACT_MISSING` / `WINDOW_GATED` / `DEVICE_UNVERIFIED`），并在 §4 开头写明「本节的任何一行都不允许被升格成通过结论」。
+
+- 首跑（守卫先落、两份文档未同步，`D:/mh-verify/w65-first.log`）：`checks=57 failed=1`，红的是 `check-inventory`（`claims 56 … declares 57` 两条 + 未点名新 id），**本项自身已 PASS**：`the W12 audit still keeps a cannot-judge register: 6 row(s) over 5 reason(s) and 6 status word(s) …`.
+
+- 正向（`D:/mh-verify/w65-positive.log`）：`checks=57 failed=0 warnings=0 skipped=0` / `RESULT: PASS`。
+
+- 负向对照（副本树 `D:/mh-verify/w65-nc/`，未改仓库文件；副本经 `-DocAuditPath ../../mh-verify/w65-nc/NCn.md` 传入）：
+
+| 用例 | 注入 | 结果 |
+| --- | --- | --- |
+| NC0 | 未改动的副本 | `checks=57 failed=0`（基线干净，下面每条红都只来自注入） |
+| NC1 | §4 表格里把 `WINDOW_GATED` 改成 `NOT_RUN`（声明不改） | 1 红：`the row U2/U3/U4 在 A8EDD448 上是否通过 does not carry its declared status WINDOW_GATED` |
+| NC2 | 删掉 §4 的 `U1 41 条断言的逐条语义` 一行 | 1 红：`the register declares the row U1 41 条断言的逐条语义 but section 4 has no row starting with it - a row removed from the cannot-judge table looks like progress without evidence` |
+| NC3 | 「477 tests」行的 `DOC_CLAIM_ONLY` 改成 `STATIC_ONLY`（该行仍引 `EXECUTED_PASS`） | 1 红：`the row 477 tests 当前是否仍全绿 does not carry its declared status DOC_CLAIM_ONLY`（升格规则的第 C 判据应当守的正是这一行） |
+| NC4 | 一条 `reason=manual-review` 改成 `reason=vibes` | 1 红：`the entry u1-per-assertion uses the reason vibes, which is not in the declared reason vocabulary` |
+| NC5 | `anchor=dotnet test tests/MediaHub.Tests/MediaHub.Tests.csproj` 改成 `…/Nope/Nope.csproj` | 1 红：`the range 71-77 of .github/workflows/windows-ci.yml no longer contains "dotnet test tests/Nope/Nope.csproj"` |
+| NC6 | `untested-row-count: 6` → 7 | 1 红：`the block declares 7 row(s) but lists 6` |
+| NC7 | 删掉整块 BEGIN/END 标记 | 1 红：`the audit no longer carries the doc-audit-untested block`（缺失分支自己也发 FAIL，不落成「少一项检查」） |
+| NC8 | `-DocAuditPath` 指不存在文件 | `checks=57 failed=0 warnings=0 skipped=3`、退出码 0（SKIP 通道；同文件的第 45/53 项一起 SKIP） |
+
+- 逐条日志 `D:/mh-verify/w65-nc/NC0.log` … `NC7.log`（NC8 用 `NC9-not-here.md`）。NC1–NC7 **各恰好只有本项变红**，其余 56 项保持 PASS；其中 NC2/NC7 是「行/块被悄悄删掉」这一类，NC3 是「把判不了的行就地改成通过词」，两者是这张表最容易被伪造的方向。
+
+- 守卫补丁前快照 `D:/mh-verify/w65-guard-pre.ps1`（212,962 B），补丁后 **222,379 B**，检查总数 **56 → 57**；落盘后先用 `[System.Management.Automation.Language.Parser]::ParseFile` 自检（打印 `PARSE-OK`）再跑正面。
+
+- NC4 的日志里中文按控制台代码页显示成乱码，那是管道编码；判据比的是文件原文。
 
 ## 5. 这个工具**不**覆盖什么
 
