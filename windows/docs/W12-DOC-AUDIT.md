@@ -78,7 +78,7 @@ doc-role: dated audit snapshot - never the acceptance authority
 
 | 项 | 现状 | 为什么判不了 |
 |---|---|---|
-| CI 310 vs 静态 373（MediaHub.Tests） | `.github/workflows/windows-ci.yml:71-77` 跑 `tests/MediaHub.Tests/MediaHub.Tests.csproj`（WebDav 套件另起一步，见同文件 `:86-92`）；exact SHA 日志实测 `Passed: 310, Total: 310`（as-of `282dcc2`；当前 478 / combined 582，以 CI 日志为准）⇒ `STATIC_ONLY` | 差 63 例；静态计数口径（`[Theory]` 展开、条件跳过、平台过滤）无法只靠读代码断定，需要在本机跑一次 `dotnet test` |
+| CI 310 vs 静态 373（MediaHub.Tests） | `.github/workflows/windows-ci.yml:101-107` 跑 `tests/MediaHub.Tests/MediaHub.Tests.csproj`（WebDav 套件另起一步，见同文件 `:116-122`）；exact SHA 日志实测 `Passed: 310, Total: 310`（as-of `282dcc2`；当前 478 / combined 582，以 CI 日志为准）⇒ `STATIC_ONLY` | 差 63 例；静态计数口径（`[Theory]` 展开、条件跳过、平台过滤）无法只靠读代码断定，需要在本机跑一次 `dotnet test` |
 | 477 tests 当前是否仍全绿 | 文档 `EXECUTED_PASS`，本轮只做静态计数、未复核 ⇒ `DOC_CLAIM_ONLY` | 未运行（另一条 GUI 验收链要用空闲窗口，本次不抢 CPU） |
 | `A15F6E4F` 二进制 | W9 四门证据的哈希；该 dll 已不在磁盘（`D:\mh-out*` 只剩 `A8EDD448` 与旧的 `2C302A62`）⇒ `ARTIFACT_MISSING` | 无法复算 |
 | U2/U3/U4 在 `A8EDD448` 上是否通过 | W10 三次尝试全被使用者打断 ⇒ `WINDOW_GATED` | 需要在连续 300 s 空闲 + QUNS 放行窗口里跑 `run-quiet.ps1` |
@@ -136,7 +136,7 @@ untested-row-count: 6
 untested-reason-vocabulary: command | window-gated | hardware-gap | artifact-missing | manual-review
 untested-status-vocabulary: NOT_RUN | STATIC_ONLY | DOC_CLAIM_ONLY | DEVICE_UNVERIFIED | ARTIFACT_MISSING | WINDOW_GATED
 untested-promotion-rule: a row may carry a verdict token (EXECUTED_PASS / DEVICE_VERIFIED) only when its status is DOC_CLAIM_ONLY - that token is then the claim being audited, not the audit's own conclusion
-- id=ci-vs-static-count; row=CI 310 vs 静态 373; reason=command; status=STATIC_ONLY; cite=.github/workflows/windows-ci.yml:71-77; anchor=dotnet test tests/MediaHub.Tests/MediaHub.Tests.csproj
+- id=ci-vs-static-count; row=CI 310 vs 静态 373; reason=command; status=STATIC_ONLY; cite=.github/workflows/windows-ci.yml:101-107; anchor=dotnet test tests/MediaHub.Tests/MediaHub.Tests.csproj
 - id=suite-still-green; row=477 tests 当前是否仍全绿; reason=command; status=DOC_CLAIM_ONLY
 - id=a15f6e4f-binary; row=A15F6E4F 二进制; reason=artifact-missing; status=ARTIFACT_MISSING
 - id=u2-u3-u4-a8edd448; row=U2/U3/U4 在 A8EDD448 上是否通过; reason=window-gated; status=WINDOW_GATED
@@ -154,3 +154,5 @@ untested-promotion-rule: a row may carry a verdict token (EXECUTED_PASS / DEVICE
 | D 引用可解析 | 带 `cite=path:from-to` 的条目，该区间必须仍在文件范围内且仍含 `anchor` | 引用的工作流步骤被挪走（本轮 `:63-69` → `:71-77` 就是这种） |
 
 记录文件读不到时本项 SKIP（退出码不变）。
+
+2026-11-11 联合候选更新了本文件登记表的当前工作流指针。新增 checkout 身份校验后，主测试步骤位于 101–107 行。上述历史计数仍按其标注的快照日期解读。
