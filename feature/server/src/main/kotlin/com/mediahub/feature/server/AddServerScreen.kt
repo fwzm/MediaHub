@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -100,110 +101,119 @@ fun AddServerRoute(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("选择类型", style = MaterialTheme.typography.titleMedium)
-            ProviderTypeGrid(
-                providers = providers,
-                selectedId = state.selectedDescriptorId,
-                onSelect = viewModel::selectProvider,
-                enabled = inputsEnabled && !state.isReauthorizing,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                com.mediahub.core.ui.MediaHubSectionHeader(
+                    title = "选择类型",
+                    subtitle = "选择要连接的媒体来源",
+                )
+                ProviderTypeGrid(
+                    providers = providers,
+                    selectedId = state.selectedDescriptorId,
+                    onSelect = viewModel::selectProvider,
+                    enabled = inputsEnabled && !state.isReauthorizing,
+                )
+            }
 
             selected?.let { descriptor ->
-                if (descriptor.serverType != ServerType.LOCAL) {
-                    ServerAddressField(
-                        value = state.baseUrl,
-                        onValueChange = viewModel::updateBaseUrl,
-                        preferHttps = state.preferHttps,
-                        onHttpsChange = viewModel::toggleHttps,
-                        resolvedUrl = state.resolvedUrl,
-                        errorMessage = state.addressError,
-                        enabled = inputsEnabled,
-                    )
-                } else {
-                    OutlinedButton(
-                        onClick = { directoryError = null; directoryPicker.launch(null) },
-                        enabled = inputsEnabled && !state.isTesting,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("选择本地目录") }
-                    Text(if (state.resolvedUrl != null) "已选择目录" else "请选择一个媒体目录并允许读取")
-                    (directoryError ?: state.addressError)?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error)
+                ServerFormSection(title = "连接与名称") {
+                    if (descriptor.serverType != ServerType.LOCAL) {
+                        ServerAddressField(
+                            value = state.baseUrl,
+                            onValueChange = viewModel::updateBaseUrl,
+                            preferHttps = state.preferHttps,
+                            onHttpsChange = viewModel::toggleHttps,
+                            resolvedUrl = state.resolvedUrl,
+                            errorMessage = state.addressError,
+                            enabled = inputsEnabled,
+                        )
+                    } else {
+                        OutlinedButton(
+                            onClick = { directoryError = null; directoryPicker.launch(null) },
+                            enabled = inputsEnabled && !state.isTesting,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("选择本地目录") }
+                        Text(if (state.resolvedUrl != null) "已选择目录" else "请选择一个媒体目录并允许读取")
+                        (directoryError ?: state.addressError)?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error)
+                        }
                     }
-                }
 
-                OutlinedTextField(
-                    value = state.name,
-                    enabled = inputsEnabled,
-                    onValueChange = viewModel::updateName,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("名称") },
-                    placeholder = { Text(descriptor.displayName) },
-                    singleLine = true,
-                )
+                    OutlinedTextField(
+                        value = state.name,
+                        enabled = inputsEnabled,
+                        onValueChange = viewModel::updateName,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("名称") },
+                        placeholder = { Text(descriptor.displayName) },
+                        singleLine = true,
+                    )
+                }
 
                 if (descriptor.serverType != ServerType.LOCAL &&
                     descriptor.authMethod != com.mediahub.provider.api.AuthMethod.NONE
                 ) {
-                    OutlinedTextField(
-                        value = state.username,
-                        enabled = inputsEnabled,
-                        onValueChange = viewModel::updateUsername,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("用户名（可选）") },
-                        singleLine = true,
-                        keyboardOptions = ServerTextInputOptions,
-                    )
-                    // 显示/隐藏密码：纯本地 UI 状态，不影响提交的明文；
-                    // 默认隐藏（与既有行为一致），用户可主动切换为明文以便核对自己输入。
-                    var passwordVisible by rememberSaveable { mutableStateOf(false) }
-                    OutlinedTextField(
-                        value = state.password,
-                        enabled = inputsEnabled,
-                        onValueChange = viewModel::updatePassword,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("密码") },
-                        singleLine = true,
-                        visualTransformation = if (passwordVisible) {
-                            VisualTransformation.None
-                        } else {
-                            PasswordVisualTransformation()
-                        },
-                        keyboardOptions = ServerTextInputOptions.copy(
-                            keyboardType = if (passwordVisible) {
-                                KeyboardType.Text
+                    ServerFormSection(title = "账号凭据") {
+                        OutlinedTextField(
+                            value = state.username,
+                            enabled = inputsEnabled,
+                            onValueChange = viewModel::updateUsername,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("用户名（可选）") },
+                            singleLine = true,
+                            keyboardOptions = ServerTextInputOptions,
+                        )
+                        // 显示/隐藏密码：纯本地 UI 状态，不影响提交的明文；
+                        // 默认隐藏（与既有行为一致），用户可主动切换为明文以便核对自己输入。
+                        var passwordVisible by rememberSaveable { mutableStateOf(false) }
+                        OutlinedTextField(
+                            value = state.password,
+                            enabled = inputsEnabled,
+                            onValueChange = viewModel::updatePassword,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("密码") },
+                            singleLine = true,
+                            visualTransformation = if (passwordVisible) {
+                                VisualTransformation.None
                             } else {
-                                KeyboardType.Password
+                                PasswordVisualTransformation()
                             },
-                        ),
-                        // 图标只用 icons-core 里确定存在的 Lock，避免为两个图标引入
-                        // material-icons-extended（该依赖会显著增大 APK）。
-                        // 语义由 contentDescription 明确表达，视觉上配合文案切换。
-                        trailingIcon = {
-                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                if (passwordVisible) {
-                                    // 明文态：用文字提示"隐藏"，比图标更不易误解
-                                    Text(
-                                        text = "隐藏",
-                                        style = MaterialTheme.typography.labelMedium,
-                                    )
+                            keyboardOptions = ServerTextInputOptions.copy(
+                                keyboardType = if (passwordVisible) {
+                                    KeyboardType.Text
                                 } else {
-                                    Icon(
-                                        imageVector = Icons.Default.Lock,
-                                        contentDescription = "显示密码",
-                                    )
+                                    KeyboardType.Password
+                                },
+                            ),
+                            // 图标只用 icons-core 里确定存在的 Lock，避免为两个图标引入
+                            // material-icons-extended（该依赖会显著增大 APK）。
+                            // 语义由 contentDescription 明确表达，视觉上配合文案切换。
+                            trailingIcon = {
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    if (passwordVisible) {
+                                        // 明文态：用文字提示"隐藏"，比图标更不易误解
+                                        Text(
+                                            text = "隐藏",
+                                            style = MaterialTheme.typography.labelMedium,
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.Lock,
+                                            contentDescription = "显示密码",
+                                        )
+                                    }
                                 }
-                            }
-                        },
-                    )
-                    Text(
-                        text = if (descriptor.serverType == ServerType.WEBDAV) {
-                            "WebDAV 密码加密保存在本机，仅用于此媒体源"
-                        } else {
-                            "密码仅用于本次登录，不会保存在设备中"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                            },
+                        )
+                        Text(
+                            text = if (descriptor.serverType == ServerType.WEBDAV) {
+                                "WebDAV 密码加密保存在本机，仅用于此媒体源"
+                            } else {
+                                "密码仅用于本次登录，不会保存在设备中"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 
@@ -262,6 +272,26 @@ fun AddServerRoute(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ServerFormSection(
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            com.mediahub.core.ui.MediaHubSectionHeader(title = title)
+            content()
         }
     }
 }

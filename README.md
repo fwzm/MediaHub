@@ -2,12 +2,35 @@
 
 > 一个播放器，统一管理 Emby / Jellyfin / Plex / NAS / WebDAV / 云盘 / 本地媒体。
 
-当前状态：**A4 联合候选已并入 main**（2026-10-14，PR #24）：P1 播放专业信息面板、P2 字幕中心（同目录发现 / 导入 / 双内核加载 / mpv 偏移）、WebDAV 修复链路与私有恢复一致性已落地；对应候选的本地门禁为 1275 单测 / 0 失败 / 0 跳过，CI run `38491200869` 三个 job 全 SUCCESS。当前 Draft 增量为 [M0-A 服务器请求治理闭环](https://github.com/fwzm/MediaHub/pull/36)：按服务器作用域的 User-Agent、持久化、删除清理、并发写入保护、WebDAV 无图片鉴权 contributor 的 URL 归属和设置页已接入；该增量尚未合入 main。2026-10-23 已用受控本地 WebDAV + Xiaomi 14 Ultra 完成一条真机 UA 请求验证；真实 Emby/Jellyfin 服务器和更广的真机矩阵仍保持 `DEVICE UNVERIFIED`。
+当前为联合整合候选，包含播放器与媒体源修复、SAF 目录、跨设备来源同步、Windows 备份和影院界面。各模块与候选版本的验证范围记录在 [任务台账](TASKS.md) 和 [最新整合交接](handoff/handoff-2026-11-11-all-sources-integration.md)。合并门禁为 G7 `DO_NOT_MERGE`，最终联合代码的完整验证仍在推进。
 
 [![GitHub release](https://img.shields.io/github/v/release/fwzm/MediaHub?include_prereleases)](https://github.com/fwzm/MediaHub/releases)
-[![License](https://img.shields.io/github/license/fwzm/MediaHub)](LICENSE)
+
+## 界面预览
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/home.png" width="400" alt="MediaHub 首页：媒体源与继续观看"></td>
+    <td><img src="docs/screenshots/library.png" width="400" alt="MediaHub 媒体库：海报墙与筛选"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>首页 · 媒体源与继续观看</sub></td>
+    <td align="center"><sub>媒体库 · 海报、排序与筛选</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/search.png" width="400" alt="MediaHub 聚合搜索：跨来源结果"></td>
+    <td><img src="docs/screenshots/detail.png" width="400" alt="MediaHub 详情页：背景图与作品信息"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>搜索 · 跨来源发现内容</sub></td>
+    <td align="center"><sub>详情 · 作品信息与播放入口</sub></td>
+  </tr>
+</table>
+
+<sub>截图由 Android 生产 Compose 组件实际渲染，使用虚构片名与本地艺术图。</sub>
 
 <!-- MEDIAHUB:RECENT:START -->
+
 ## 最近更新
 
 <sub>本区块由 scripts/github-nightly-sync.ps1 自动维护：每次同步时刷新近 7 天提交（最多 10 条）。</sub>
