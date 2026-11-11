@@ -18,9 +18,22 @@ README 的自动摘要只由一个入口维护：本目录的 `github-nightly-sy
 - 范围：`MEDIAHUB:RECENT` 覆盖全仓库，已包含原脚本单独统计的 `windows/` 路径。
 - 摘要：只写日期与提交 ID 的边界不变；原脚本把原始提交主题写进 README，
   与本脚本「主题可能含敏感信息」的边界冲突，故不吸收。
-- 前提：本脚本要求 PowerShell 7（`#requires -Version 7.0`），不再承担 5.1 兼容。
 - 未吸收：推送被拒后的 `pull --rebase` 重试。本脚本推送的是以 main 为 base 的新分支，
   该重试没有适用场景。
+
+### PowerShell 5.1：能解析 ≠ 能运行
+
+- 版本门在第 1 行：`#requires -Version 7.0`。5.1 下执行会在加载阶段拒绝，
+  报 `ScriptRequiresUnmatchedPSVersion` 并 exit 1。这是版本门，不是语法错误——
+  同一文件在 5.1 的 `Language.Parser::ParseFile` 仍是 errors=0。
+- 去掉该行后实测：默认预览 exit 0；`-Apply` 仍 exit 1。原因是
+  `$ErrorActionPreference = 'Stop'` 配合 `2>&1` 会把 git 写到 stderr 的进度/警告
+  转成 `NativeCommandError`，而 `git push` 默认就把进度写到 stderr。
+  实测中推送已落到远端（远端分支确实前进），脚本却以 exit 1 结束——写入路径在 5.1 下
+  既不可靠也不幂等。因此本脚本的 5.1 支持是**未证实**，不要按「能解析」推断「可运行」。
+- 被删除的每日同步脚本同样不具备 5.1 能力：它以无 BOM 的 UTF-8 保存，5.1 按 ANSI
+  解码，第 123 行的中文字面量直接触发 `Unexpected token`，连解析都过不去。
+  本次删除因此**没有减少任何** PS5.1 可用路径。
 
 默认预览只读取本地状态，不 fetch、不改 README、Git 引用、索引、检查点或锁文件：
 
