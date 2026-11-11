@@ -3,6 +3,25 @@
 `github-nightly-sync.ps1` 从旧维护分支移植，当前以手动工具交付；仓库不安装计划任务。
 需要 PowerShell 7、Git；GitHub 远端创建 Draft PR 时还需要已登录的 `gh`。
 
+## 唯一入口
+
+README 的自动摘要只由一个入口维护：本目录的 `github-nightly-sync.ps1`。
+
+2026-11-11 收敛前，仓库还并行存在一份每日同步脚本（约 16 KB，带 `WINDOWS-SYNC` 标记）。
+两者都会改写 README、提交、推送并开 PR，README 因此同时出现两个「最近更新」区块；
+更麻烦的是两份锁分别落在 `%LOCALAPPDATA%` 与本仓库 `.git` 下，互不排斥，
+在同一 worktree 并行运行会争抢 `README.md` 与索引。该脚本已删除，其区块一并移除。
+
+保留本脚本、不反向收敛的判定与代价：
+
+- 触发：本脚本按成功检查点起算，覆盖跨午夜的前一日工作，不依赖自然日边界。
+- 范围：`MEDIAHUB:RECENT` 覆盖全仓库，已包含原脚本单独统计的 `windows/` 路径。
+- 摘要：只写日期与提交 ID 的边界不变；原脚本把原始提交主题写进 README，
+  与本脚本「主题可能含敏感信息」的边界冲突，故不吸收。
+- 前提：本脚本要求 PowerShell 7（`#requires -Version 7.0`），不再承担 5.1 兼容。
+- 未吸收：推送被拒后的 `pull --rebase` 重试。本脚本推送的是以 main 为 base 的新分支，
+  该重试没有适用场景。
+
 默认预览只读取本地状态，不 fetch、不改 README、Git 引用、索引、检查点或锁文件：
 
 ```powershell
@@ -30,7 +49,10 @@ Apply 会先拒绝已有暂存或已跟踪改动，再 fetch；无更新时仅�
 
 ```powershell
 python -X utf8 -m unittest discover -s scripts/tests -p test_github_sync_safety.py -v
+python -X utf8 -m unittest discover -s scripts/tests -p test_sync_utility_convergence.py -v
 ```
 
-新增的 `Sync utility safety` 工作流执行同一组测试并保存 checkout SHA 和原始日志。
+新增的 `Sync utility safety` 工作流执行 safety 那组测试并保存 checkout SHA 和原始日志。
+`test_sync_utility_convergence.py` 目前只走本地门禁：把它加进工作流的 paths 与匹配模式
+属于 CI 接入方的改动，本分支不动 `.github/`。
 工具的使用不代替项目测试或分支合并门禁。
