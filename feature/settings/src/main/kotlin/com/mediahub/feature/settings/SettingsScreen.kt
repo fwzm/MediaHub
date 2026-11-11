@@ -1,5 +1,6 @@
 package com.mediahub.feature.settings
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -58,6 +59,9 @@ import com.mediahub.core.ui.effects.PlayerVisualPresetMapper
 import com.mediahub.core.ui.effects.PlayerVisualTestTags
 import com.mediahub.core.ui.effects.playerVisualPresetName
 import com.mediahub.core.ui.effects.visualPerformanceModeName
+import com.mediahub.feature.settings.paired.PairedDeviceRoute
+import com.mediahub.feature.settings.pairing.PairingLinkRoute
+import com.mediahub.feature.settings.sync.SourceSyncImportRoute
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.UserPreferences
 
@@ -71,9 +75,34 @@ fun SettingsRoute(
     visualPreviewRunningOverride: Boolean? = null,
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
+    val diagnosticsState by viewModel.diagnosticsState.collectAsStateWithLifecycle()
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
+    var showSourceSyncImport by remember { mutableStateOf(false) }
+    var showPairing by remember { mutableStateOf(false) }
+    var showPairedDevices by remember { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
+
+    // W6-F：导入页在本页内托管（不改 app 导航图），返回即回到设置列表。
+    if (showSourceSyncImport) {
+        SourceSyncImportRoute(onBack = { showSourceSyncImport = false })
+        return
+    }
+
+    // W6-59：配对页同样在本页内托管，返回即回到设置列表。
+    if (showPairing) {
+        PairingLinkRoute(onBack = { showPairing = false })
+        return
+    }
+
+    // W6-70：已配对设备页同样在本页内托管，返回即回到设置列表。
+    if (showPairedDevices) {
+        PairedDeviceRoute(
+            onBack = { showPairedDevices = false },
+            baselineStore = viewModel.syncBaselineStore,
+        )
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -93,19 +122,60 @@ fun SettingsRoute(
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("同步与备份", style = MaterialTheme.typography.titleMedium)
+            SettingsSection(title = "同步与备份") {
+                androidx.compose.material3.OutlinedButton(
+                    onClick = onOpenBackup,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("同步与备份")
+                }
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { showSourceSyncImport = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("sync.import.entry"),
+                ) {
+                    Text("从文件导入来源")
+                }
+            }
             androidx.compose.material3.OutlinedButton(
-                onClick = onOpenBackup,
-                modifier = Modifier.fillMaxWidth(),
+                onClick = { showPairing = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("pairing.entry"),
             ) {
-                Text("同步与备份")
+                Text("配对设备")
+            }
+            androidx.compose.material3.OutlinedButton(
+                onClick = { showPairedDevices = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("paired.entry"),
+            ) {
+                Text("已配对设备")
+            }
+            // W6-110：诊断日志导出 —— 内存里的日志环形缓冲写成一份文件，导出时再逐行脱敏。
+            // 这里不新建 ViewModel（SettingsRoute 会在非 Hilt 的 instrumentation 测试里被直接调用）；
+            // 状态与动作都来自传入的 viewModel。
+            androidx.compose.material3.OutlinedButton(
+                onClick = { viewModel.exportDiagnostics() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("diagnostics.export"),
+            ) {
+                Text(DiagnosticsExportText.BUTTON)
+            }
+            DiagnosticsExportText.line(diagnosticsState)?.let { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("diagnostics.result"),
+                )
             }
 
-            Spacer(Modifier.height(8.dp))
-            Text(stringResource(R.string.settings_playback), style = MaterialTheme.typography.titleMedium)
-
+            SettingsSection(title = stringResource(R.string.settings_playback)) {
             // 播放内核（U3-A）：默认 AUTO（Media3 快速路径，失败自动切 mpv 兼容内核）
             Text(stringResource(R.string.settings_playback_engine), style = MaterialTheme.typography.bodyLarge)
             EngineModeSelector(
@@ -185,11 +255,10 @@ fun SettingsRoute(
                 onCheckedChange = { viewModel.update { p -> p.copy(immersiveBars = it) } },
             )
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            }
 
             // 播放器手势（U3-B）：独立于默认倍速的 9 项手势偏好
-            Text(stringResource(R.string.settings_player_gestures), style = MaterialTheme.typography.titleMedium)
-
+            SettingsSection(title = stringResource(R.string.settings_player_gestures)) {
             SettingSwitch(
                 label = stringResource(R.string.settings_gesture_scrub),
                 checked = prefs.gestures.scrubEnabled,
@@ -278,8 +347,7 @@ fun SettingsRoute(
                     )
                 }
             }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            }
 
             AboutSection()
         }
@@ -320,6 +388,28 @@ fun SettingsRoute(
 }
 
 @Composable
+private fun SettingsSection(
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            com.mediahub.core.ui.MediaHubSectionHeader(title = title)
+            content()
+        }
+    }
+}
+
+@Composable
 internal fun VisualEffectsSettingsEntry(
     prefs: UserPreferences,
     onClick: () -> Unit,
@@ -339,8 +429,9 @@ internal fun VisualEffectsSettingsEntry(
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .testTag(PlayerVisualTestTags.SETTINGS_ENTRY),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
     ) {
         Row(
@@ -402,12 +493,20 @@ private fun EngineModeOption(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .background(
+                color = if (value == current) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                } else {
+                    androidx.compose.ui.graphics.Color.Transparent
+                },
+                shape = MaterialTheme.shapes.medium,
+            )
             .selectable(
                 selected = value == current,
                 role = Role.RadioButton,
                 onClick = { onSelect(value) },
             )
-            .padding(vertical = 4.dp),
+            .padding(vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -510,12 +609,13 @@ private fun AboutSection() {
         }
     }
 
-    Text(stringResource(R.string.settings_about), style = MaterialTheme.typography.titleMedium)
+    com.mediahub.core.ui.MediaHubSectionHeader(title = stringResource(R.string.settings_about))
 
     Card(
         modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {

@@ -19,6 +19,7 @@ import com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilder
 import com.mediahub.provider.emby.api.EmbyEndpointResolver
 import com.mediahub.provider.emby.auth.EmbyAuthProvider
 import com.mediahub.provider.emby.detail.EmbyDetailProvider
+import com.mediahub.provider.emby.favorite.EmbyFavoriteProvider
 import com.mediahub.provider.emby.library.EmbyLibraryProvider
 import com.mediahub.provider.emby.playback.EmbyPlaybackProvider
 import com.mediahub.provider.emby.search.EmbySearchProvider
@@ -133,6 +134,14 @@ class EmbyProviderFactory @Inject constructor(
                 logger = logger,
             ),
             progress = EmbyProgressProvider(
+                server = server,
+                api = embyApi,
+                tokenStore = tokenStore,
+                sessionStore = sessionStore,
+                logger = logger,
+            ),
+            // task-22 / A1：FAVORITE（写 FavoriteItems + UserData 回读；declared 同步声明）。
+            favorite = EmbyFavoriteProvider(
                 server = server,
                 api = embyApi,
                 tokenStore = tokenStore,

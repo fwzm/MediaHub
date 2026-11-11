@@ -50,6 +50,10 @@ class DetailViewModel @Inject constructor(
     private val _sourceState = MutableStateFlow<SourceResolutionState>(SourceResolutionState.Idle)
     val sourceState: StateFlow<SourceResolutionState> = _sourceState.asStateFlow()
 
+    /** 收藏开关（task-25 / A2）：null = 该数据源未提供收藏能力，界面不显示开关。 */
+    private val _favoriteState = MutableStateFlow<FavoriteToggleState?>(null)
+    val favoriteState: StateFlow<FavoriteToggleState?> = _favoriteState.asStateFlow()
+
     private var handle: ProviderHandle? = null
     private var episodeJob: Job? = null
     private var sourceJob: Job? = null
@@ -58,6 +62,7 @@ class DetailViewModel @Inject constructor(
 
     fun load() {
         _uiState.value = DetailUiState.Loading
+        _favoriteState.value = null
         viewModelScope.launch {
             try {
                 val server = serverStore.getServer(serverId)
@@ -69,6 +74,10 @@ class DetailViewModel @Inject constructor(
                     ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的详情能力尚未接入")
                 val detail = detailProvider.getItemDetail(itemId)
                 _uiState.value = DetailUiState.Content(detail)
+                // 收藏状态取自服务器 UserData（本机无收藏表）；无 favorite 能力的源不显示开关
+                if (h.favorite != null) {
+                    _favoriteState.value = FavoriteToggle.fromServerState(detail.item.id, detail.item.isFavorite)
+                }
                 startSourceResolution(detail.item)
 
                 // 仅 SERIES 类型加载季列表（复用 browse 链）
@@ -143,6 +152,28 @@ class DetailViewModel @Inject constructor(
                         episodesError = userMessage(e),
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * 切换收藏（task-25 / A2）：写端点成功后**再读回**，界面只认回读值。
+     * 失败保持原状态并给出可读错误（不把图标切成相反状态）。
+     */
+    fun toggleFavorite() {
+        val current = _favoriteState.value ?: return
+        if (current.isUpdating) return
+        val favoriteProvider = handle?.favorite ?: return
+        val target = !current.isFavorite
+        _favoriteState.value = FavoriteToggle.pending(current)
+        viewModelScope.launch {
+            try {
+                val serverValue = favoriteProvider.setFavorite(current.itemId, target)
+                _favoriteState.value = FavoriteToggle.confirmed(current, serverValue)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                logger.w(LogTag.UI, "收藏切换失败 serverId=$serverId itemId=${current.itemId}", e)
+                _favoriteState.value = FavoriteToggle.failed(current, userMessage(e))
             }
         }
     }

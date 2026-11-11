@@ -1,0 +1,442 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:86b96735-9dbc-a7ba-fbcc-a4aec1d64053",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-10-30T19:55:05Z",
+    "tools": [
+      {
+        "vendor": "MediaHub",
+        "name": "windows/tools/license-report.ps1",
+        "version": "1"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "bom-ref": "pkg:generic/MediaHub.Windows@v0.1.0-alpha.1-438-gfaff3927",
+      "name": "MediaHub.Windows",
+      "version": "v0.1.0-alpha.1-438-gfaff3927"
+    },
+    "properties": [
+      {
+        "name": "mediahub:source-revision",
+        "value": "feature/windows-client@faff3927"
+      },
+      {
+        "name": "mediahub:git-describe",
+        "value": "v0.1.0-alpha.1-438-gfaff3927-dirty"
+      },
+      {
+        "name": "mediahub:own-license",
+        "value": "undocumented - no LICENSE file in the repository (windows/docs/licensing/LICENCE-DECISION.md:180-190)"
+      },
+      {
+        "name": "mediahub:engine-license-blocker",
+        "value": "libmpv-2.dll is a GPL-3.0-or-later build (windows/THIRD-PARTY-NOTICES.md:18); the LGPL candidate exists but is not shipped"
+      },
+      {
+        "name": "mediahub:lgpl-flavour-dependencies",
+        "value": "33 extra runtime DLLs under windows/engine/lgpl/dist/runtime-dependencies-collected.txt (licences transcribed from windows/engine/lgpl/component-licences.txt; 0 unrecorded); the default gpl flavour does not ship them"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.CodeCoverage@17.13.0",
+      "name": "Microsoft.CodeCoverage",
+      "version": "17.13.0",
+      "purl": "pkg:nuget/Microsoft.CodeCoverage@17.13.0",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.NET.Test.Sdk@17.13.0",
+      "name": "Microsoft.NET.Test.Sdk",
+      "version": "17.13.0",
+      "purl": "pkg:nuget/Microsoft.NET.Test.Sdk@17.13.0",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.TestPlatform.ObjectModel@17.13.0",
+      "name": "Microsoft.TestPlatform.ObjectModel",
+      "version": "17.13.0",
+      "purl": "pkg:nuget/Microsoft.TestPlatform.ObjectModel@17.13.0",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.TestPlatform.TestHost@17.13.0",
+      "name": "Microsoft.TestPlatform.TestHost",
+      "version": "17.13.0",
+      "purl": "pkg:nuget/Microsoft.TestPlatform.TestHost@17.13.0",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.Web.WebView2@1.0.3179.45",
+      "name": "Microsoft.Web.WebView2",
+      "version": "1.0.3179.45",
+      "purl": "pkg:nuget/Microsoft.Web.WebView2@1.0.3179.45",
+      "licenses": [
+        {
+          "license": {
+            "name": "~BSD-3-Clause (from LICENSE.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.Windows.SDK.BuildTools@10.0.26100.4654",
+      "name": "Microsoft.Windows.SDK.BuildTools",
+      "version": "10.0.26100.4654",
+      "purl": "pkg:nuget/Microsoft.Windows.SDK.BuildTools@10.0.26100.4654",
+      "licenses": [
+        {
+          "license": {
+            "name": "https://aka.ms/WinSDKLicenseURL"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.Windows.SDK.BuildTools.MSIX@1.7.20250829.1",
+      "name": "Microsoft.Windows.SDK.BuildTools.MSIX",
+      "version": "1.7.20250829.1",
+      "purl": "pkg:nuget/Microsoft.Windows.SDK.BuildTools.MSIX@1.7.20250829.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "~Microsoft (proprietary eula, see file) (from sdk_license.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.WindowsAppSDK@1.8.260921001",
+      "name": "Microsoft.WindowsAppSDK",
+      "version": "1.8.260921001",
+      "purl": "pkg:nuget/Microsoft.WindowsAppSDK@1.8.260921001",
+      "licenses": [
+        {
+          "license": {
+            "name": "~Microsoft (proprietary eula, see file) (from license.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.WindowsAppSDK.AI@1.8.79",
+      "name": "Microsoft.WindowsAppSDK.AI",
+      "version": "1.8.79",
+      "purl": "pkg:nuget/Microsoft.WindowsAppSDK.AI@1.8.79",
+      "licenses": [
+        {
+          "license": {
+            "name": "~Microsoft (proprietary eula, see file) (from license.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.WindowsAppSDK.Base@1.8.251216001",
+      "name": "Microsoft.WindowsAppSDK.Base",
+      "version": "1.8.251216001",
+      "purl": "pkg:nuget/Microsoft.WindowsAppSDK.Base@1.8.251216001",
+      "licenses": [
+        {
+          "license": {
+            "name": "~Microsoft (proprietary eula, see file) (from license.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.WindowsAppSDK.DWrite@1.8.25122902",
+      "name": "Microsoft.WindowsAppSDK.DWrite",
+      "version": "1.8.25122902",
+      "purl": "pkg:nuget/Microsoft.WindowsAppSDK.DWrite@1.8.25122902",
+      "licenses": [
+        {
+          "license": {
+            "name": "~Microsoft (proprietary eula, see file) (from license.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.WindowsAppSDK.Foundation@1.8.260803002",
+      "name": "Microsoft.WindowsAppSDK.Foundation",
+      "version": "1.8.260803002",
+      "purl": "pkg:nuget/Microsoft.WindowsAppSDK.Foundation@1.8.260803002",
+      "licenses": [
+        {
+          "license": {
+            "name": "~Microsoft (proprietary eula, see file) (from license.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.WindowsAppSDK.InteractiveExperiences@1.8.260708001",
+      "name": "Microsoft.WindowsAppSDK.InteractiveExperiences",
+      "version": "1.8.260708001",
+      "purl": "pkg:nuget/Microsoft.WindowsAppSDK.InteractiveExperiences@1.8.260708001",
+      "licenses": [
+        {
+          "license": {
+            "name": "~Microsoft (proprietary eula, see file) (from license.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.WindowsAppSDK.ML@1.8.2223",
+      "name": "Microsoft.WindowsAppSDK.ML",
+      "version": "1.8.2223",
+      "purl": "pkg:nuget/Microsoft.WindowsAppSDK.ML@1.8.2223",
+      "licenses": [
+        {
+          "license": {
+            "name": "~Microsoft (proprietary eula, see file) (from license.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.WindowsAppSDK.Runtime@1.8.260921001",
+      "name": "Microsoft.WindowsAppSDK.Runtime",
+      "version": "1.8.260921001",
+      "purl": "pkg:nuget/Microsoft.WindowsAppSDK.Runtime@1.8.260921001",
+      "licenses": [
+        {
+          "license": {
+            "name": "~Microsoft (proprietary eula, see file) (from license.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.WindowsAppSDK.Widgets@1.8.251231004",
+      "name": "Microsoft.WindowsAppSDK.Widgets",
+      "version": "1.8.251231004",
+      "purl": "pkg:nuget/Microsoft.WindowsAppSDK.Widgets@1.8.251231004",
+      "licenses": [
+        {
+          "license": {
+            "name": "~Microsoft (proprietary eula, see file) (from license.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.WindowsAppSDK.WinUI@1.8.260803003",
+      "name": "Microsoft.WindowsAppSDK.WinUI",
+      "version": "1.8.260803003",
+      "purl": "pkg:nuget/Microsoft.WindowsAppSDK.WinUI@1.8.260803003",
+      "licenses": [
+        {
+          "license": {
+            "name": "~Microsoft (proprietary eula, see file) (from license.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Newtonsoft.Json@13.0.1",
+      "name": "Newtonsoft.Json",
+      "version": "13.0.1",
+      "purl": "pkg:nuget/Newtonsoft.Json@13.0.1",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/System.Numerics.Tensors@9.0.0",
+      "name": "System.Numerics.Tensors",
+      "version": "9.0.0",
+      "purl": "pkg:nuget/System.Numerics.Tensors@9.0.0",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/System.Reflection.Metadata@1.6.0",
+      "name": "System.Reflection.Metadata",
+      "version": "1.6.0",
+      "purl": "pkg:nuget/System.Reflection.Metadata@1.6.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "https://github.com/dotnet/corefx/blob/master/LICENSE.TXT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/System.Security.Cryptography.ProtectedData@10.0.13",
+      "name": "System.Security.Cryptography.ProtectedData",
+      "version": "10.0.13",
+      "purl": "pkg:nuget/System.Security.Cryptography.ProtectedData@10.0.13",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/xunit@2.9.3",
+      "name": "xunit",
+      "version": "2.9.3",
+      "purl": "pkg:nuget/xunit@2.9.3",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/xunit.abstractions@2.0.3",
+      "name": "xunit.abstractions",
+      "version": "2.0.3",
+      "purl": "pkg:nuget/xunit.abstractions@2.0.3",
+      "licenses": [
+        {
+          "license": {
+            "name": "https://raw.githubusercontent.com/xunit/xunit/master/license.txt"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/xunit.analyzers@1.18.0",
+      "name": "xunit.analyzers",
+      "version": "1.18.0",
+      "purl": "pkg:nuget/xunit.analyzers@1.18.0",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/xunit.assert@2.9.3",
+      "name": "xunit.assert",
+      "version": "2.9.3",
+      "purl": "pkg:nuget/xunit.assert@2.9.3",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/xunit.core@2.9.3",
+      "name": "xunit.core",
+      "version": "2.9.3",
+      "purl": "pkg:nuget/xunit.core@2.9.3",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/xunit.extensibility.core@2.9.3",
+      "name": "xunit.extensibility.core",
+      "version": "2.9.3",
+      "purl": "pkg:nuget/xunit.extensibility.core@2.9.3",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/xunit.extensibility.execution@2.9.3",
+      "name": "xunit.extensibility.execution",
+      "version": "2.9.3",
+      "purl": "pkg:nuget/xunit.extensibility.execution@2.9.3",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/xunit.runner.visualstudio@3.0.2",
+      "name": "xunit.runner.visualstudio",
+      "version": "3.0.2",
+      "purl": "pkg:nuget/xunit.runner.visualstudio@3.0.2",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:generic/libmpv@0.41.0-1154-gec38361c5",
+      "name": "libmpv",
+      "version": "0.41.0-1154-gec38361c5",
+      "purl": "pkg:generic/libmpv@0.41.0-1154-gec38361c5",
+      "licenses": [
+        {
+          "expression": "GPL-3.0-or-later"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9"
+        }
+      ]
+    }
+  ]
+}

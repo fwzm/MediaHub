@@ -1,5 +1,13 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
+## 2026-10-14 遗留问题核验（M4）
+
+- 8 项遗留逐项核验完成（只读，未改生产代码、未评论/关闭/合并任何 PR），完整证据与逐项建议见 [遗留核验报告](docs/reviews/legacy-verification-2026-10-14.md)。
+- 结论分布：**已被 main 覆盖 4 项**（PR #6、PR #20、Room 3→4、EndpointTestService F04/F06）；**仍存在真实缺陷 2 项**（PR #16 脱敏未完成、PR #10 的 2 条视觉计时缺陷）；**待补测试 1 项**（T0002 选轨测试迁移）；**待真机/真服 1 项**（SLOW-FINAL）。
+- CI 证据基线：run `38496435020`（main @ `1246313`）三 job SUCCESS，其中 API32 job 实执数据库 connected 测试、build job 实执 `:core:network:testDebugUnitTest` 与 `:core:database:testDebugUnitTest`。
+- 安全边界：PR #16 的未脱敏内容**未**复制进任何新提交、日志或文档；本报告与台账一律使用 `<redacted>` 占位。
+- 待授权动作：关闭 PR #6 / PR #20、对 PR #16 提交脱敏补丁、为 PR #10 的两条缺陷开补丁 PR —— 本轮**均未执行**。
+
 ## 2026-10-14 A4 收敛：候选并入 main（真机/真服验收由用户暂缓）
 
 - 主线 `369b5a77` = PR #24 合并（父：`e06ad3b`←PR #18 备份、`75b3d42`←PR #26 文档、`23ddd5b`←A4 线 + B 收敛候选 `22e424d`）。PR #23/#25 记为已合并；PR #22 以"被主线实现取代"关闭并附源码证据；PR #6/#16/#20 仍开启待处置。

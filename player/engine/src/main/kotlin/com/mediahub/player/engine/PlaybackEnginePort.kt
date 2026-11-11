@@ -3,6 +3,7 @@ package com.mediahub.player.engine
 import android.view.Surface
 import androidx.media3.common.text.CueGroup
 import com.mediahub.model.PlaybackProgress
+import com.mediahub.model.SubtitleStyle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,7 +39,7 @@ interface PlaybackEnginePort {
     /** 每秒进度流（进度同步管线消费，见 ADR-017）。 */
     val progress: SharedFlow<PlaybackProgress>
     /** 关键事件流（Pause/Seek/Ended/Stopped）。 */
-    val events: Flow<PlaybackEvent>
+    val events: Flow<PlaybackEventMessage>
     /** 字幕 cues（Media3 引擎发出；mpv 内部渲染，恒发 null）。 */
     val subtitleCues: StateFlow<CueGroup?>
     /** 真实媒体下载速度（B/s，TransferListener 统计；Overlay 展示）。 */
@@ -55,10 +56,19 @@ interface PlaybackEnginePort {
     fun attachSurface(surface: Surface?)
     fun play(session: PlaybackSession)
     fun togglePlayPause()
+    /** Explicit playback intent. Engines with authoritative native state override this fallback. */
+    fun setPlayWhenReady(play: Boolean) {
+        if (uiState.value.playWhenReady != play) togglePlayPause()
+    }
     fun seekTo(positionMs: Long, mode: SeekMode = SeekMode.COMMIT)
     fun setSpeed(speed: Float)
+    /** Snapshot-bound requests must remain owned by the current engine; raw legacy addresses remain compatible. */
+    fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean =
+        selection?.snapshotToken?.let { uiState.value.trackRowMap.matches(it) } ?: true
     fun selectAudioTrack(selection: TrackSelection?)
     fun selectSubtitleTrack(selection: TrackSelection?)
+    /** Native subtitle renderers consume persisted presentation; Media3 uses its SubtitleView. */
+    fun setSubtitlePresentation(style: SubtitleStyle, sizeSp: Int) = Unit
     /**
      * 控制是否需要音频频谱采样。默认关闭；关闭必须立即释放采样资源并把
      * [audioBands] 恢复为 null。不支持采样的引擎（包括 mpv）保持默认 no-op。

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="MediaHub.App.Views.SourcesPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <Grid Padding="28,20,28,20" RowSpacing="14">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <StackPanel Grid.Row="0" Spacing="8">
+      <TextBlock Text="媒体源" Style="{StaticResource MediaHubSectionHeader}" />
+      <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
+                 Text="账号密码与会话令牌保存在 Windows DPAPI（当前用户）加密的凭据库中，不写入普通配置文件。删除媒体源会同时清除对应凭据。" />
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button x:Name="AddButton" Click="OnAddClick">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <FontIcon Glyph="&#xE710;" FontSize="14" />
+            <TextBlock Text="添加媒体源" />
+          </StackPanel>
+        </Button>
+        <Button x:Name="RefreshButton" Click="OnRefreshClick">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <FontIcon Glyph="&#xE72C;" FontSize="14" />
+            <TextBlock Text="全部重新检测" />
+          </StackPanel>
+        </Button>
+        <ProgressRing x:Name="BusyRing" IsActive="False" Width="20" Height="20" />
+      </StackPanel>
+    </StackPanel>
+
+    <InfoBar x:Name="StatusBar" Grid.Row="1" IsOpen="False" IsClosable="True" />
+
+    <ListView x:Name="ServerList" Grid.Row="2" SelectionMode="None" HorizontalContentAlignment="Stretch">
+      <ListView.ItemTemplate>
+        <DataTemplate>
+          <Border Margin="0,0,0,10" Padding="16" CornerRadius="8"
+                  Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                  BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+            <Grid ColumnSpacing="14">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+
+              <Ellipse Grid.Column="0" Width="10" Height="10" VerticalAlignment="Center"
+                       Fill="{Binding StatusBrush}" />
+
+              <StackPanel Grid.Column="1" Spacing="3">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="15" />
+                  <Border Padding="6,1" CornerRadius="4" VerticalAlignment="Center"
+                          Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                    <TextBlock Text="{Binding TypeName}" FontSize="11" />
+                  </Border>
+                </StackPanel>
+                <TextBlock Text="{Binding Url}" Style="{StaticResource MediaHubCaption}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding StatusText}" FontSize="12" />
+                <TextBlock Text="{Binding CapabilitySummary}" Style="{StaticResource MediaHubCaption}" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+
+              <StackPanel Grid.Column="2" Spacing="6" MinWidth="150">
+                <Button Content="测试连接" Tag="{Binding}" Click="OnTestClick" HorizontalAlignment="Stretch" />
+                <Button Content="重新登录" Tag="{Binding}" Click="OnReconnectClick" HorizontalAlignment="Stretch" />
+                <Button Content="删除" Tag="{Binding}" Click="OnDeleteClick" HorizontalAlignment="Stretch" />
+              </StackPanel>
+            </Grid>
+          </Border>
+        </DataTemplate>
+      </ListView.ItemTemplate>
+    </ListView>
+  </Grid>
+</Page>

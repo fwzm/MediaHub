@@ -1,0 +1,7 @@
+[   0.411][v][vd] Looking at hwdec h264-d3d11va...
+[   0.411][v][vo/gpu-next] Loading hwdec drivers for format: 'd3d11'
+[   0.411][v][vo/gpu-next] Loading hwdec driver 'd3d11va'
+[   0.413][v][vd] Trying hardware decoding via h264-d3d11va.
+[   0.418][v][vd] Pixel formats supported by decoder: d3d11va_vld d3d11 d3d12 yuv420p
+[   0.456][i][vd] Using hardware decoding (d3d11va).
+[   0.456][v][vo/gpu-next] Loading hwdec drivers for format: 'd3d11'

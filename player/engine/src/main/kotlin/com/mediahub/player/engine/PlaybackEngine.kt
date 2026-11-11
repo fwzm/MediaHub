@@ -74,10 +74,10 @@ class PlaybackEngine(
 
     // 关键事件通道：改 Channel(UNLIMITED)（review P2-3），保证 Pause/Seek/Resume 快速
     // 连续发生时逐条保留、严格保序、不被 conflate/drop。周期性 position 仍由 StateFlow conflate。
-    private val _events = Channel<PlaybackEvent>(Channel.UNLIMITED)
+    private val _events = Channel<PlaybackEventMessage>(Channel.UNLIMITED)
 
     /** 关键事件流（Pause/Seek/Ended/Stopped）。 */
-    override val events: Flow<PlaybackEvent> = _events.receiveAsFlow()
+    override val events: Flow<PlaybackEventMessage> = _events.receiveAsFlow()
 
     private val trackSelector: DefaultTrackSelector =
         requireNotNull(player.trackSelector as? DefaultTrackSelector) {
@@ -125,6 +125,17 @@ class PlaybackEngine(
             /* handleAudioFocus = */ true,
         )
         player.addListener(object : Player.Listener {
+            /**
+             * G3：播放意图必须单独上报。
+             *
+             * [onIsPlayingChanged] 反映的是「实际是否在出帧/出声」，在缓冲、音频焦点被抑制、
+             * surface 未就绪时为 false，但用户并没有暂停。UI 的播放/暂停按钮必须以意图为准，
+             * 否则缓冲时图标会闪成「播放」，用户点它反而变成「继续播放」。
+             */
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                _uiState.update { it.copy(playWhenReady = playWhenReady) }
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
                     session?.trace?.record(PlaybackStartupTrace.Milestone.PLAYING)
@@ -133,6 +144,7 @@ class PlaybackEngine(
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                val endedProgress = if (playbackState == Player.STATE_ENDED) currentProgress() else null
                 if (playbackState == Player.STATE_READY) {
                     session?.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_READY)
                 }
@@ -145,7 +157,7 @@ class PlaybackEngine(
                     )
                 }
                 if (playbackState == Player.STATE_ENDED) {
-                    _events.trySend(PlaybackEvent.Ended)
+                    emitEvent(PlaybackEvent.Ended, endedProgress)
                 }
             }
 
@@ -153,16 +165,23 @@ class PlaybackEngine(
                 val mapped = mapPlayerError(error)
                 logger.e(LogTag.PLAYER, "播放错误 code=${error.errorCode} msg=${error.message}")
                 _uiState.update { it.copy(error = mapped, isBuffering = false) }
+                if (error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED ||
+                    error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED) {
+                    _uiState.update { it.copy(audioOutputStatus = AudioOutputStatus.UNAVAILABLE) }
+                }
             }
 
             override fun onTracksChanged(tracks: Tracks) {
+                if (released) return
                 val mapped = TrackMapper.mapTracks(tracks)
+                currentTrackSnapshotToken = mapped.snapshotToken
                 _uiState.update {
                     it.copy(
                         audioTracks = mapped.audioTracks,
                         subtitleTracks = mapped.subtitleTracks,
                         selectedAudio = mapped.selectedAudio,
                         selectedSubtitle = mapped.selectedSubtitle,
+                        trackRowMap = mapped.rowMap,
                         audioFormatMime = player.audioFormat?.sampleMimeType,
                     )
                 }
@@ -190,6 +209,9 @@ class PlaybackEngine(
         })
         // 音频输出信号（无声判据，Phase 1B-2.4）：AnalyticsListener 才有 onAudioFormatChanged
         player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onAudioPositionAdvancing(eventTime: AnalyticsListener.EventTime, playoutStartSystemTimeMs: Long) {
+                _uiState.update { it.copy(audioOutputStatus = AudioOutputStatus.ACTIVE) }
+            }
             override fun onAudioInputFormatChanged(
                 eventTime: AnalyticsListener.EventTime,
                 format: Format,
@@ -232,6 +254,7 @@ class PlaybackEngine(
     override fun play(session: PlaybackSession) {
         if (released) return
         playbackGeneration++
+        currentTrackSnapshotToken = 0L
         subtitleOperation++
         // 同一个 ExoPlayer 可复用 audio session；每次媒体会话仍先释放旧 capture，防止迟到回调串流。
         audioSpectrumController.clear()
@@ -248,7 +271,8 @@ class PlaybackEngine(
         player.setMediaItem(mediaItem)
         player.prepare()
         retryAudioSpectrumCapture()
-        player.playWhenReady = true
+        // G3：降级重播必须尊重暂停意图（默认 null = 沿用既有「起播即播放」行为）。
+        player.playWhenReady = session.startPaused != true
         val startPosition = session.startPositionMs ?: session.resumePositionMs
         if (startPosition != null && startPosition > 0) {
             player.seekTo(startPosition)
@@ -259,6 +283,7 @@ class PlaybackEngine(
         _uiState.value = PlaybackUiState(
             durationMs = session.source.durationMs ?: 0,
             mediaTitle = session.itemTitle,
+            playWhenReady = player.playWhenReady,
         )
         startProgressLoop()
         logger.i(LogTag.PLAYER, "开始播放 serverId=${session.serverId} itemId=${session.itemId}")
@@ -266,24 +291,51 @@ class PlaybackEngine(
 
     // ---- 控制 ----
 
+    /**
+     * 暂停/继续切换（G3 修复）。
+     *
+     * **判据必须是 playWhenReady（播放意图），不是 isPlaying（实际在播状态）。**
+     * Media3 的 isPlaying 在「已请求播放但尚未真正开始」的窗口里为 false ——
+     * 缓冲中、STATE_BUFFERING、音频焦点短暂丢失、surface 未就绪等都会命中。
+     * 用 isPlaying 判定会让「第一次点击本意是暂停」被解释成 resume，
+     * 用户看到的现象正是「点了暂停，位置还在继续走」。
+     */
     override fun togglePlayPause() {
-        if (player.isPlaying) pause() else resume()
+        if (player.playWhenReady && player.playbackState != Player.STATE_ENDED) pause() else resume()
+    }
+
+    override fun setPlayWhenReady(play: Boolean) {
+        if (released) return
+        if (player.playWhenReady != play) {
+            if (play) resume() else pause()
+        } else {
+            _uiState.update { it.copy(playWhenReady = play) }
+        }
     }
 
     fun pause() {
+        val generation = playbackGeneration
+        val progress = currentProgress()?.copy(isPaused = true)
         player.pause()
-        _events.trySend(PlaybackEvent.Paused)
+        // 立即同步意图，不等 onPlayWhenReadyChanged 回调（按钮图标必须立刻翻转）。
+        if (playbackGeneration == generation) _uiState.update { it.copy(playWhenReady = false) }
+        emitEvent(PlaybackEvent.Paused, progress)
     }
 
     fun resume() {
-        _events.trySend(PlaybackEvent.Resumed)
+        val generation = playbackGeneration
+        val progress = currentProgress()?.copy(isPaused = false)
         player.play()
+        if (playbackGeneration == generation) _uiState.update { it.copy(playWhenReady = true) }
+        emitEvent(PlaybackEvent.Resumed, progress)
     }
 
     override fun seekTo(positionMs: Long, mode: SeekMode) {
-        player.seekTo(positionMs.coerceAtLeast(0))
+        val target = positionMs.coerceAtLeast(0)
+        val progress = if (mode == SeekMode.COMMIT) currentProgress()?.copy(positionMs = target) else null
+        player.seekTo(target)
         // PREVIEW（手势拖动/连续快退节流）不发 Seeked，避免远端即时同步风暴（U3-B）
-        if (mode == SeekMode.COMMIT) _events.trySend(PlaybackEvent.Seeked)
+        if (mode == SeekMode.COMMIT) emitEvent(PlaybackEvent.Seeked, progress)
     }
 
     override fun setSpeed(speed: Float) {
@@ -303,9 +355,15 @@ class PlaybackEngine(
     }
 
     override fun selectSubtitleTrack(selection: TrackSelection?) {
+        if (!isTrackSelectionCurrent(selection)) return
         subtitleOperation++
         selectTrack(C.TRACK_TYPE_TEXT, selection)
     }
+
+    private var currentTrackSnapshotToken = 0L
+
+    override fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean =
+        !released && (selection?.snapshotToken?.let { it != 0L && it == currentTrackSnapshotToken } ?: true)
 
     // ---- 外挂字幕（P2 字幕中心切片一） ----
 
@@ -471,6 +529,7 @@ class PlaybackEngine(
     }
 
     private fun selectTrack(trackType: Int, selection: TrackSelection?) {
+        if (!isTrackSelectionCurrent(selection)) return
         val mapped = trackSelector.currentMappedTrackInfo
         val builder = trackSelector.buildUponParameters().clearOverridesOfType(trackType)
             .setTrackTypeDisabled(trackType, selection == null)
@@ -502,13 +561,15 @@ class PlaybackEngine(
             }
             if (renderer < 0) return
             val groups = mapped.getTrackGroups(renderer)
-            if (selection.trackIndex !in 0 until groups[groupIndex].length) return
+            val plan = TrackSelectionPlanner.plan(renderer, groups,
+                selection.copy(groupIndex = groupIndex), currentTrackSnapshotToken)
+                as? TrackSelectionPlanner.Plan.Override ?: return
             rendererIndices.forEach { index ->
                 builder.clearSelectionOverrides(index)
                 builder.setRendererDisabled(index, index != renderer)
             }
             builder.setOverrideForType(TrackSelectionOverride(groups[groupIndex], selection.trackIndex))
-            builder.setSelectionOverride(renderer, groups, DefaultTrackSelector.SelectionOverride(groupIndex, selection.trackIndex))
+            TrackSelectionPlanner.apply(builder, plan)
             if (trackType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = selection
         }
         trackSelector.setParameters(builder)
@@ -556,6 +617,10 @@ class PlaybackEngine(
     /**
      * 立即读取当前进度（不依赖每秒循环，退出瞬间取值用）。
      */
+    private fun emitEvent(kind: PlaybackEvent, progress: PlaybackProgress?) {
+        if (progress != null) _events.trySend(PlaybackEventSnapshot(kind, progress))
+    }
+
     fun currentProgress(): PlaybackProgress? = session?.let { s ->
         PlaybackProgress(
             serverId = s.serverId,

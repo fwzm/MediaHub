@@ -64,6 +64,19 @@ class RestoreSnapshotStoreTest {
         assertTrue(runCatching { RestoreSnapshotStore(temporary.root, secret).read(id) }.isFailure)
     }
 
+    @Test fun `private rollback preserves the original device tree binding`() {
+        val uri = "content://fixture.documents/tree/root%3Amedia"
+        val local = server("fixture-saf", uri).copy(type = ServerType.LOCAL)
+        val expected = images().copy(before = BackupSnapshot(listOf(local), emptyList()))
+        val id = "restore-${UUID.randomUUID()}"
+        val secret = key()
+        RestoreSnapshotStore(temporary.root, secret).save(id, expected)
+        val recovered = RestoreSnapshotStore(temporary.root, secret).read(id)
+        assertEquals(uri, recovered.before.servers.single().baseUrl)
+        assertEquals(expected, recovered)
+        assertFalse(File(temporary.root, "$id.bin").readBytes().toString(Charsets.ISO_8859_1).contains(uri))
+    }
+
     @Test fun `private codec roundtrips every persistent field and nullable defaults`() {
         val endpoint = ServerEndpoint("endpoint-id", "local", "endpoint name", "https://local.example", true, false, 7,
             1, "local diagnostic", 2, 3, 4, 5.25, "h2", false, 206)
@@ -179,10 +192,16 @@ class RestoreSnapshotStoreTest {
             val oldMemory = SubtitleMemoryEntity("local|old|s:12", "local", "content://private.fixture/sub", 700, 111)
             db.subtitleMemoryDao().upsert(oldMemory)
             val repo = BackupRepository(source, prefs, firstJournal, invalidator, dispatchers, store)
+            // 命名参数：BackupPayload 在 progress 与 preferences 之间新增了 favorites（task-25），位置参数会错位
             val payload = BackupDtos.BackupPayload(
-                BackupFileFormat.Manifest(1, 1, "test", 0, listOf("servers", "progress", "preferences"), mapOf("servers" to 2, "progress" to 0, "preferences" to 1)),
-                listOf("local", "new").map { id -> BackupDtos.ServerDto(id, id, "EMBY", endpoints = listOf(BackupDtos.EndpointDto("primary", "https://changed-$id.example", true, true, 0))) },
-                emptyList(), BackupDtos.PreferencesDto(subtitleSizeSp = 42, maxBitrateBps = 1_000_000),
+                manifest = BackupFileFormat.Manifest(
+                    com.mediahub.core.common.backup.BackupCrypto.FORMAT_VERSION,
+                    com.mediahub.core.common.backup.BackupCrypto.MINIMUM_READER_VERSION,
+                    "test", 0, listOf("servers", "progress", "preferences"), mapOf("servers" to 2, "progress" to 0, "preferences" to 1),
+                ),
+                servers = listOf("local", "new").map { id -> BackupDtos.ServerDto(id, id, "EMBY", endpoints = listOf(BackupDtos.EndpointDto("primary", "https://changed-$id.example", true, true, 0))) },
+                progress = emptyList(),
+                preferences = BackupDtos.PreferencesDto(subtitleSizeSp = 42, maxBitrateBps = 1_000_000),
             )
             val validated = (repo.prepareRestore(authenticatedTestBytes(payload, "test".toCharArray()), "test".toCharArray()) as PrepareResult.Prepared).validated
             val frozen = repo.buildPreview(validated, RestoreStrategy.REPLACE_SELECTED).frozenPlan!!

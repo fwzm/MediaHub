@@ -21,8 +21,20 @@ class DefaultProviderRegistry @Inject constructor(
     factories: Set<@JvmSuppressWildcards MediaProviderFactory>,
 ) : MediaProviderRegistry {
 
+    // Read each descriptor once so validation and indexing use the same registration.
+    private val registrations = factories.map { it.descriptor to it }
+
+    init {
+        require(registrations.map { it.first.serverType }.toSet().size == registrations.size) {
+            "Duplicate provider server type"
+        }
+        require(registrations.map { it.first.id }.toSet().size == registrations.size) {
+            "Duplicate provider stable id"
+        }
+    }
+
     private val factoryMap: Map<ServerType, MediaProviderFactory> =
-        factories.associateBy { it.descriptor.serverType }
+        java.util.Collections.unmodifiableMap(registrations.associate { it.first.serverType to it.second })
 
     override fun factoryFor(type: ServerType): MediaProviderFactory? = factoryMap[type]
 
@@ -32,6 +44,6 @@ class DefaultProviderRegistry @Inject constructor(
     override val supportedTypes: Set<ServerType> get() = factoryMap.keys
 
     override fun descriptors(): List<ProviderDescriptor> =
-        factoryMap.values.map { it.descriptor }
+        registrations.map { it.first }
             .sortedBy { it.displayName }
 }

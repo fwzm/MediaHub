@@ -40,6 +40,8 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:network"))
     implementation(project(":core:logging"))
+    // ADR-042：引擎选路消费设备能力证据（player:compatibility 只依赖 core:model，无环）。
+    implementation(project(":player:compatibility"))
 
     implementation(libs.javax.inject)
 

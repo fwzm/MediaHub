@@ -16,12 +16,14 @@ class EmbyAuthorizationHeaderBuilder(private val identity: ClientIdentity) {
 
     fun build(userId: String? = null): String = buildString {
         append("Emby ")
-        if (userId != null) append("UserId=\"$userId\", ")
-        append("Client=\"${identity.client}\", ")
-        append("Device=\"${identity.device}\", ")
-        append("DeviceId=\"${identity.deviceId}\", ")
-        append("Version=\"${identity.version}\"")
+        if (!userId.isNullOrBlank()) append("UserId=\"${escape(userId)}\", ")
+        append("Client=\"${escape(identity.client)}\", ")
+        append("Device=\"${escape(identity.device)}\", ")
+        append("DeviceId=\"${escape(identity.deviceId)}\", ")
+        append("Version=\"${escape(identity.version)}\"")
     }
+
+    private fun escape(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 
     private companion object {
         const val HEADER_NAME = "X-Emby-Authorization"

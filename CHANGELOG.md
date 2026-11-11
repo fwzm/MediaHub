@@ -1,5 +1,38 @@
 # 变更记录（CHANGELOG）
 
+## [Unreleased — Cinematic UI] — 2026-10-25
+
+### 界面与体验
+
+- 重塑全局深色视觉主题：采用克制的蓝靛色板、分层表面、统一排版与圆角，让海报和媒体内容成为视觉中心。
+- 统一首页、媒体库、聚合搜索、详情、播放、设置与媒体源页面的视觉语言，完善卡片、标签、分区标题及加载 / 空内容 / 错误 / 重试状态。
+- 共享海报、缩略图、背景图与继续观看进度样式，统一 artwork 的加载、失败占位和圆角表现。
+- 保留 Media3 / mpv 播放、续播、音轨、字幕、手势与视觉效果的既有入口；本次不改变 Provider 能力声明或播放兼容承诺。
+- 当前改动位于 `feature/cinematic-ui`，已合入未合并 Draft PR #59（`96f051f7`），尚未合并进 `main`。
+
+### 文档
+
+- 重写公开 README：补充中文产品介绍、功能与适用边界、设计系统、模块结构、构建命令、安全与贡献说明。
+- 新增本地原创演示夹具截图的展示位置与脱敏说明，不包含真实账号、真实服务器或真实媒体库内容。
+- 精简 Windows 章节，保留未发布、无安装包与引擎许可约束，并链接既有 Windows 文档。
+
+验证结果以 PR 记录为准。
+
+## [Unreleased — M0-A provider scope attribution] — 2026-10-23
+
+- 修复没有 `ProviderImageAuthContributor` 的 Provider（当前实测为 WebDAV）无法解析 `serverId`、导致
+  User-Agent 请求策略回落默认值的问题；基础 URL 现在可用于归属，认证头仍保持 fail-closed。
+- 新增 `ProviderImageAuthStoreTest` 回归：WebDAV scope 能解析服务器 ID，但不会伪造图片认证头。
+- Xiaomi 14 Ultra / API 36 + 受控本地 WebDAV 真机复测通过：编辑页自定义 UA 重启后恢复，OPTIONS 请求使用
+  `MediaHubTest99`；冷启动 scope 建立前的首个后台请求使用默认 UA，作为未闭环时序边界保留。
+
+## [Unreleased — M0-A repository wait optimization] — 2026-10-23
+
+- 优化 `DataStoreServerUserAgentRepository.awaitLoaded()`：用可取消的
+  `CompletableDeferred` 等待首份 DataStore 快照，移除 `yield` 忙等，避免加载期间持续占用协程调度器。
+- 保留同步网络拦截器使用的 `CountDownLatch` 有界等待；两条路径继续共享同一份首次加载完成信号。
+- 新增回归测试，覆盖等待协程在首份快照到达前挂起、到达后恢复的行为；本轮模块门禁为 14 tests / 0 failures。
+
 ## [Unreleased — A4 联合候选并入 main] — 2026-10-14
 
 - 并入 A4 联合候选（PR #24，266 文件）：P1 播放专业信息面板、P2 字幕中心（同目录发现 / 导入 / 双内核加载 / mpv 偏移 / 匹配记忆）、WebDAV 修复链路、Media3 与 mpv 实际选轨及回滚、私有恢复一致性、播放器退出归属与代际。
@@ -682,3 +715,11 @@
 
 ### 已知限制
 - 沙箱（Linux aarch64）无法原生跑 aapt2，验证时启用 qemu 包装器（见 HANDOFF.md）。
+
+
+### 2026-10-24 — PR6 integration follow-up
+
+- Complete quoted/truncated sensitive value redaction and redact HTTP error bodies before limiting log length; retain modern logger/cause sanitation.
+- Cancelled retry backoff never starts a second attempt; keep existing cooldown behavior.
+- Reject unsupported filter types, restore working sort/filter after query failure, and restore one shared search query state.
+- Targeted RED:167 executed/14 failures (11 behavioral differences,3 legacy-format expectations); Emby compile failure separately retained. GREEN:204 tests/0 failures/errors/skips,177 tasks executed,forced rerun/no-cache. Historical acceptance above is unchanged; no new physical-device pass.

@@ -23,7 +23,9 @@ import kotlinx.serialization.SerializationException
  *
  * - 仅视频型条目（MOVIE/EPISODE/VIDEO）；AUDIO/LIVE_TV/OTHER 明确 NotYetImplemented，0 HTTP；
  * - POST /Items/{itemId}/PlaybackInfo?UserId=… 协商（EnableDirectStream=true /
- *   EnableTranscoding=false），只询问 Direct Stream，绝不申请转码；
+ *   EnableTranscoding=false），尊重 EnableDirectPlay，绝不申请转码；
+ * - 默认服务器字幕阻止原字节播放时，允许一次源 ID 绑定的不处理服务器字幕协商；
+ *   显式字幕语言偏好禁止这一重试，原媒体内嵌字幕不被删除；
  * - MediaSource 选择走 [JellyfinMediaSourceSelector]（SupportsDirectStream && 非 ISO）；
  * - 播放地址 = configured server origin 的 /Videos/{itemId}/stream.{container}?
  *   MediaSourceId=…&Static=true——**永远同源**，服务端凭据绝不发往第三方 origin；
@@ -53,20 +55,47 @@ class JellyfinPlaybackProvider(
         }
         val (token, userId) = JellyfinProviderSupport.requireSession(server, tokenStore, sessionStore)
         return try {
+            val startTimeTicks = options.startPositionMs?.times(TICKS_PER_MILLIS)
+            val maxStreamingBitrate = options.maxBitrate
+                ?.takeIf { it > 0 }
+                ?.coerceAtMost(Int.MAX_VALUE.toLong())
+                ?.toInt()
             val info = api.getPlaybackInfo(
                 token = token,
                 userId = userId,
                 itemId = item.id,
-                startTimeTicks = options.startPositionMs?.times(TICKS_PER_MILLIS),
+                startTimeTicks = startTimeTicks,
                 // Jellyfin MaxStreamingBitrate 为 int?：正数过滤 + Int.MAX_VALUE 安全收缩
-                maxStreamingBitrate = options.maxBitrate
-                    ?.takeIf { it > 0 }
-                    ?.coerceAtMost(Int.MAX_VALUE.toLong())
-                    ?.toInt(),
+                maxStreamingBitrate = maxStreamingBitrate,
+                enableDirectPlay = options.enableDirectPlay,
             )
-            val sources = info.mediaSources
+            var sources = info.mediaSources
             // 响应损坏（空 MediaSources）≠ 需要转码：明确报 Parse。
             if (sources.isEmpty()) throw ProviderException.Parse(server.id)
+            // Jellyfin 12.1 disables ordinary HTTP remux and may require burn-in for its default
+            // external subtitle when our profile declares no subtitle delivery capability.
+            // One source-bound retry asks only for untouched static bytes. It neither requests
+            // transcoding nor removes embedded subtitles from the media the native player receives.
+            if (JellyfinMediaSourceSelector.selectDirectStream(sources) == null &&
+                options.enableDirectPlay && options.preferredSubtitleLanguage.isNullOrBlank()
+            ) {
+                val candidate = JellyfinMediaSourceSelector.selectStaticNegotiationCandidate(sources)
+                if (candidate != null) {
+                    val retry = api.getPlaybackInfo(
+                        token = token,
+                        userId = userId,
+                        itemId = item.id,
+                        startTimeTicks = startTimeTicks,
+                        maxStreamingBitrate = maxStreamingBitrate,
+                        enableDirectPlay = true,
+                        mediaSourceId = candidate.id,
+                        subtitleStreamIndex = -1,
+                    )
+                    // A different source cannot satisfy a source-specific negotiation.
+                    sources = retry.mediaSources.filter { it.id == candidate.id }
+                    if (sources.isEmpty()) throw ProviderException.Parse(server.id)
+                }
+            }
             val source = JellyfinMediaSourceSelector.selectDirectStream(sources)
                 ?: throw ProviderException.NotYetImplemented(server.id, "当前媒体需要转码")
             // Direct Stream 必备参数：缺了只能说明上游响应损坏，绝不生成残缺 URL。
@@ -75,6 +104,9 @@ class JellyfinPlaybackProvider(
             val container = source.container?.takeIf(String::isNotBlank)
                 ?: item.container?.takeIf(String::isNotBlank)
                 ?: throw ProviderException.Parse(server.id)
+            if (container.trim().equals("iso", ignoreCase = true)) {
+                throw ProviderException.NotYetImplemented(server.id, "当前媒体需要转码")
+            }
             val url = api.directStreamUrl(
                 itemId = item.id,
                 container = container,

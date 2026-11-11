@@ -1,0 +1,4 @@
+Hardware acceleration methods:
+d3d11va
+d3d12va
+

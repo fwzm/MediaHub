@@ -98,6 +98,36 @@ class EmbyPlaybackProviderTest {
              {"Index":1,"Type":"Audio","Codec":"aac","Channels":6}]}]}
     """.trimIndent()
 
+    @Test
+    fun `external text subtitles of selected version reach playback without trusting delivery credentials`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setBody("""{"PlaySessionId":"ps-1","MediaSources":[
+          {"Id":"src1","Container":"mkv","SupportsDirectStream":true,"MediaStreams":[
+            {"Index":2,"Type":"Subtitle","Codec":"srt","Language":"zho","DisplayTitle":"Chinese","IsExternal":true,
+             "DeliveryUrl":"https://untrusted.example/sub.srt?api_key=server-secret"},
+            {"Index":3,"Type":"Subtitle","Codec":"ass","Language":"eng","IsExternal":true},
+            {"Index":4,"Type":"Subtitle","Codec":"pgssub","IsExternal":true},
+            {"Index":5,"Type":"Subtitle","Codec":"srt","IsExternal":false},
+            {"Index":-1,"Type":"Subtitle","Codec":"srt","IsExternal":true}]},
+          {"Id":"other-version","Container":"mkv","SupportsDirectStream":true,"MediaStreams":[
+            {"Index":6,"Type":"Subtitle","Codec":"srt","IsExternal":true}]}]}"""))
+        val source = provider().resolvePlayback(movie, PlaybackOptions())
+        assertEquals(listOf(2, 3), source.externalSubtitles.map { it.index })
+        assertEquals(listOf("zho", "eng"), source.externalSubtitles.map { it.language })
+        assertEquals("Chinese", source.externalSubtitles[0].title)
+        for (track in source.externalSubtitles) {
+            val subtitleUrl = track.url!!.toHttpUrl()
+            assertEquals(source.url.toHttpUrl().host, subtitleUrl.host)
+            assertEquals(source.url.toHttpUrl().port, subtitleUrl.port)
+            assertEquals("/emby/Videos/m1/src1/Subtitles/${track.index}/Stream.${track.format}", subtitleUrl.encodedPath)
+            assertEquals(0, subtitleUrl.querySize)
+            assertTrue(track.isExternal)
+            assertFalse(track.url!!.contains("server-secret"))
+        }
+        assertEquals("tok-1", source.headers["X-Emby-Token"])
+        assertEquals("Only the normal PlaybackInfo request is needed", 1, server.requestCount)
+    }
+
     // ---- 1：官方 POST PlaybackInfo contract（Token 不进 URL/body） ----
     @Test
     fun `playback info uses official POST contract with params in body not query`() = runBlocking {

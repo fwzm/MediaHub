@@ -181,6 +181,45 @@ class EmbyAuthProviderTest {
         assertNull(infoReq.getHeader("X-Emby-Token"))
     }
 
+    @Test
+    fun restoreRejectsMissingUserIdWithoutClearingSession() = runBlocking {
+        assertInvalidRestoredUser("""{"Name":"Fixture"}""")
+    }
+
+    @Test
+    fun restoreRejectsEmptyUserIdWithoutClearingSession() = runBlocking {
+        assertInvalidRestoredUser("""{"Id":"","Name":"Fixture"}""")
+    }
+
+    @Test
+    fun restoreRejectsWhitespaceUserIdWithoutClearingSession() = runBlocking {
+        assertInvalidRestoredUser("""{"Id":"   ","Name":"Fixture"}""")
+    }
+
+    @Test
+    fun restoreRejectsDifferentUserIdWithoutClearingSession() = runBlocking {
+        assertInvalidRestoredUser("""{"Id":"fixture-other-user","Name":"Fixture"}""")
+    }
+
+    private suspend fun assertInvalidRestoredUser(body: String) {
+        seedSession("fixture-token-identity")
+        val saved = sessionStore.read(mediaServer.id)
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"Id":"emby-remote-1"}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        val state = provider().restoreSession()
+        assertTrue("Unverified response must not authenticate: $state", state is AuthSessionState.Error)
+        assertEquals(AuthSessionErrorKind.INVALID_RESPONSE, (state as AuthSessionState.Error).kind)
+        assertEquals("fixture-token-identity", tokenStore.readTokens(mediaServer.id)?.accessToken)
+        assertEquals(saved, sessionStore.read(mediaServer.id))
+        val anonymousProbe = server.takeRequest()
+        assertEquals("/emby/System/Info/Public", anonymousProbe.path)
+        assertNull(anonymousProbe.getHeader("X-Emby-Token"))
+        val userRequest = server.takeRequest()
+        assertEquals("/emby/Users/user-1", userRequest.path)
+        assertEquals("fixture-token-identity", userRequest.getHeader("X-Emby-Token"))
+        assertEquals(2, server.requestCount)
+    }
+
     // ---- 7. 401 清会话 ----
 
     @Test

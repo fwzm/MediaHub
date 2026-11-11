@@ -59,6 +59,16 @@ object BackupDtos {
         // posterUrl 排除：临时/带签名 URL 不导出，恢复后重新获取
     )
 
+    // ---- 收藏（task-25 / A2：跨端迁移记录；真源仍在服务端 UserData，本机无表） ----
+
+    @Serializable
+    data class FavoriteDto(
+        @SerialName("serverBackupId") val serverBackupId: String,
+        @SerialName("itemId") val itemId: String,
+        @SerialName("title") val title: String? = null,
+        @SerialName("addedAtEpochMs") val addedAtEpochMs: Long,
+    )
+
     // ---- 偏好（显式嵌套 DTO，逐字段白名单；不用任意 JSON 字符串绕过） ----
 
     @Serializable
@@ -109,6 +119,8 @@ object BackupDtos {
         @SerialName("manifest") val manifest: BackupFileFormat.Manifest,
         @SerialName("servers") val servers: List<ServerDto> = emptyList(),
         @SerialName("progress") val progress: List<ProgressDto> = emptyList(),
+        /** v1 备份无该段 → 反序列化得空列表（向后兼容）。 */
+        @SerialName("favorites") val favorites: List<FavoriteDto> = emptyList(),
         @SerialName("preferences") val preferences: PreferencesDto? = null,
     )
 

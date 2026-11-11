@@ -1,7 +1,8 @@
 package com.mediahub.model
 
 /**
- * 字幕轨。可以是内嵌（index 指向文件内流）或外挂（url 指向字幕文件）。
+ * 字幕轨。[index] 为同类型 UI 行序号；播放期地址由引擎行映射提供。
+ * 外挂字幕由 [url] 指向文件，不把组号/renderer 下标作为领域身份。
  */
 data class SubtitleTrack(
     val index: Int,

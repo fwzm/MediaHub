@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Debug-only demo surface for the FlowGlow visual engine; never merged into release builds. -->
+<!-- Debug-only demo surfaces; never merged into release builds. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application>
@@ -8,5 +8,11 @@
             android:exported="true"
             android:label="@string/effects_demo_label"
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity
+            android:name=".visual.CinematicVisualActivity"
+            android:exported="true"
+            android:launchMode="standard"
+            android:documentLaunchMode="intoExisting"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
     </application>
 </manifest>

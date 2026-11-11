@@ -44,7 +44,7 @@ class ProgressSyncCoordinator(
 
     fun start(
         progress: Flow<PlaybackProgress>,
-        events: Flow<PlaybackEvent>,
+        events: Flow<PlaybackEventMessage>,
         remoteIntervalMs: Long = DEFAULT_REMOTE_INTERVAL_MS,
     ) {
         if (job != null) return
@@ -61,8 +61,8 @@ class ProgressSyncCoordinator(
             launch(start = CoroutineStart.UNDISPATCHED) {
                 events.collect { event ->
                     // Pause/Seek/Ended 立即同步；Stopped 仅状态通知（退出 flush 由 stopAndFlush 显式执行）
-                    if (event == PlaybackEvent.Paused || event == PlaybackEvent.Seeked || event == PlaybackEvent.Ended) {
-                        flush()
+                    if (event.kind == PlaybackEvent.Paused || event.kind == PlaybackEvent.Seeked || event.kind == PlaybackEvent.Ended) {
+                        flush(event.progress)
                     }
                 }
             }

@@ -52,6 +52,14 @@ data class ServerEditorUiState(
     val isDeleting: Boolean = false,
     val message: String? = null,
     val error: String? = null,
+    /** M0-A2：该服务器的自定义 User-Agent 草稿（原样保留用户输入，绝不静默改写）。 */
+    val userAgent: String = "",
+    /** 默认 UA：未配置时实际发送的值（来自应用真实版本）。 */
+    val userAgentDefault: String = "",
+    /** 当前生效 UA：有自定义即为其值，否则为默认值。 */
+    val userAgentEffective: String = "",
+    /** UA 校验失败原因（null = 合法或为空）。 */
+    val userAgentError: String? = null,
 )
 
 /**
@@ -76,6 +84,9 @@ class ServerEditorViewModel @Inject constructor(
     private val removeHandler: ServerRemoveHandler,
     private val endpointTestService: EndpointTestService,
     private val logger: Logger,
+    // M0-A2：按服务器自定义 UA（持久化 + 生效值展示）
+    private val serverUserAgentRepository: com.mediahub.core.database.repository.ServerUserAgentRepository,
+    private val userAgentPolicy: com.mediahub.core.network.UserAgentPolicy,
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
 
@@ -91,7 +102,10 @@ class ServerEditorViewModel @Inject constructor(
      */
     private var qualityRequestId: Long = 0
 
-    init { load() }
+    init {
+        load()
+        loadUserAgent()
+    }
 
     private fun load() {
         viewModelScope.launch {
@@ -142,6 +156,38 @@ class ServerEditorViewModel @Inject constructor(
 
     fun updateName(name: String) = _uiState.update { it.copy(name = name) }
     fun updateNote(note: String) = _uiState.update { it.copy(note = note) }
+
+    /**
+     * M0-A2：加载该服务器已保存的自定义 UA 与当前生效值。
+     * 用挂起等待（不阻塞主线程，也不在拦截器线程做 I/O）；
+     * 首帧未加载完成时先显示默认值，加载完成后自动刷新。
+     */
+    private fun loadUserAgent() {
+        viewModelScope.launch {
+            serverUserAgentRepository.awaitLoaded()
+            _uiState.update {
+                it.copy(
+                    userAgent = serverUserAgentRepository.snapshot()[serverId].orEmpty(),
+                    userAgentDefault = userAgentPolicy.default,
+                    userAgentEffective = userAgentPolicy.forServer(serverId),
+                )
+            }
+        }
+    }
+
+    /**
+     * UA 草稿更新：**原样保留**用户输入，仅给出校验提示。
+     * 非法值不会被改写成另一个合法值，保存时会被明确拒绝。
+     */
+    fun updateUserAgent(raw: String) {
+        val validation = com.mediahub.core.network.UserAgentValidator.validate(raw)
+        _uiState.update { it.copy(userAgent = raw, userAgentError = validation.reason) }
+    }
+
+    /** 恢复默认 UA：清空自定义内容（保存后生效）。 */
+    fun resetUserAgent() {
+        _uiState.update { it.copy(userAgent = "", userAgentError = null) }
+    }
 
     /** 地址输入：重新规范化 + 草稿版本递增 + 清除旧测试/质量结果 + 取消在途质量任务。 */
     fun updateBaseUrl(raw: String) {
@@ -324,6 +370,11 @@ class ServerEditorViewModel @Inject constructor(
 
     fun save(onSaved: () -> Unit) {
         val state = _uiState.value
+        // M0-A2：UA 非法 → 明确拒绝并提示，不做静默改写
+        if (state.userAgent.isNotBlank() && state.userAgentError != null) {
+            _uiState.update { it.copy(error = state.userAgentError) }
+            return
+        }
         val server = buildEditedServer(state) ?: run {
             _uiState.update { it.copy(error = state.addressError ?: "服务器地址无效") }
             return
@@ -332,7 +383,15 @@ class ServerEditorViewModel @Inject constructor(
             _uiState.update { it.copy(isSaving = true, error = null) }
             try {
                 serverStore.updateServer(server)
-                _uiState.update { it.copy(isSaving = false, server = server) }
+                // M0-A2：UA 与服务器元数据一同保存；写透缓存保证"下一次请求即生效"
+                serverUserAgentRepository.set(serverId, state.userAgent.trim().ifEmpty { null })
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        server = server,
+                        userAgentEffective = userAgentPolicy.forServer(serverId),
+                    )
+                }
                 onSaved()
             } catch (e: Exception) {
                 // A4 脱敏收口：本地异常 message 可能携带 SQL/路径等实现细节，
