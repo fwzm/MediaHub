@@ -839,3 +839,24 @@ only an actual 401 follows the existing expiration cleanup policy. Keep cancella
 identity and lease/epoch ownership. Normalize the Emby root's outer whitespace and
 endpoint separator, and escape quoted identity-header fields while retaining
 X-Emby-Authorization and separate X-Emby-Token. No store/schema migration is involved.
+
+## ADR-047 Media3 取流的 429 退避放在 LoadErrorHandlingPolicy（G5-b）
+- 状态：已采纳（2026-11-11）；JVM 证据 EXECUTED_PASS，真机 NOT_RUN
+- 背景：ADR-046 裁定 Media3 DataSource 层只记账不抑制（冷却窗口内抛异常会中断播放，
+  且会误杀续流 Range）。其已知局限是重试节奏仍由 Media3 默认策略决定：不解析
+  `Retry-After`，按 1s/2s/4s 连打，构成重试风暴。
+- 决策：退避放在 Media3 官方上层落点 `LoadErrorHandlingPolicy`，由
+  `Media3RateLimitBackoffPolicy` 实现，并装进 `PlayerFactory.mediaSourceFactory()`
+  使用的 `DefaultMediaSourceFactory`：
+  - 只对 HTTP 429 生效；404/410/416/5xx/普通 IOException **逐字节委托**默认策略；
+  - `Retry-After` 只解析 delta-seconds（Emby/Jellyfin 实际形态），缺失/非法/HTTP-date
+    退化为保守默认 1s；
+  - 单次退避上限 10s（超大 `Retry-After` 截断，不空等）；
+  - 429 重试预算 2 次（首次失败后最多再试 1 次），用尽返回 `C.TIME_UNSET` 停止重试，
+    交给既有错误路径；
+  - 策略只在**加载失败后**决定等待时长，不触碰已建立的数据流，ADR-046 的
+    "不中断正在播放的流" 边界不变；DataSource 层仍保持 record-only。
+- 非目标 / 已知局限：Coil 图片路径未接入；HTTP-date 形式的 `Retry-After` 不解析；
+  不改动 M15 冷却表；真机 429 退避观感与"重试耗尽后的用户提示"仍需真机复核。
+- 证据：`player:engine:testDebugUnitTest`（--rerun-tasks --no-build-cache）
+  24 suites / 180 tests / 0 failures；新增 12 例（策略契约 10 + 接线与真实链 2）。
