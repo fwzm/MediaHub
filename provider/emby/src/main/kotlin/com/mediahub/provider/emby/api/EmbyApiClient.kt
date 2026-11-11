@@ -173,6 +173,77 @@ open class EmbyApiClient(
         return apiClient.get(url, authenticatedHeaders(token, userId))
     }
 
+    // ---- task-22 / A1：收藏写入（真机验证端点，ADR-0XX 收藏语义） ----
+
+    /**
+     * 收藏 / 取消收藏：`POST|DELETE /emby/Users/{userId}/FavoriteItems/{itemId}`。
+     *
+     * 端点依据（真机验证，Emby 4.10.2）：写成功返回 **200 空体**。
+     * **禁止** `/Users/{userId}/Favorites/{itemId}`——真服返回 404；
+     * 单测 mock 也不得为该路径返回 200（mock 不得比真服宽松）。
+     *
+     * 本方法**不判断结果**：服务器可以接受写请求却忽略（返回 200 但状态未变），
+     * 所以真正的结果必须由调用方回读 [getFavoriteState]。
+     */
+    suspend fun setFavorite(token: String, userId: String, itemId: String, favorite: Boolean) {
+        val url = buildUrlWithSegments(
+            path = "/Users/$userId/FavoriteItems",
+            segments = listOf(itemId),
+            query = emptyMap(),
+        )
+        val headers = authenticatedHeaders(token, userId)
+        if (favorite) {
+            // 收藏：POST，无 body（buildBody 对 POST 的 null body 生成空 RequestBody）。
+            apiClient.postNoContent(url = url, headers = headers)
+        } else {
+            // 取消：DELETE，无 body（OkHttp 的 DELETE 不允许 body）。
+            apiClient.deleteNoContent(url = url, headers = headers)
+        }
+    }
+
+    /**
+     * 收藏回读：`GET /emby/Users/{userId}/Items/{itemId}?Fields=UserData`。
+     *
+     * 返回 `null` = 服务器没有返回 `UserData.IsFavorite`（协议破损，**不是** false）；
+     * 由 Provider 层转成 ProviderException.Parse，避免"没读到"被谎报成"未收藏"。
+     */
+    suspend fun getFavoriteState(token: String, userId: String, itemId: String): Boolean? {
+        val url = buildUrlWithSegments(
+            path = "/Users/$userId/Items",
+            segments = listOf(itemId),
+            query = mapOf("Fields" to FAVORITE_FIELDS),
+        )
+        val dto: EmbyFavoriteStateDto = apiClient.get(url, authenticatedHeaders(token, userId))
+        return dto.userData?.isFavorite
+    }
+
+    /**
+     * 收藏列表：`GET /emby/Users/{userId}/Items?Filters=IsFavorite&Recursive=true&…`
+     * （task-25 / A2「我的收藏」）。
+     *
+     * 服务器侧筛选是**优化不是保证**：调用方必须再按 IsFavorite 兜底过滤。
+     * [limit] 由调用方先 clamp（本方法不做边界判断，直接透传 Limit）。
+     */
+    suspend fun getFavoriteItems(
+        token: String,
+        userId: String,
+        limit: Int,
+    ): EmbyQueryResultDto<EmbyBaseItemDto> {
+        val url = buildUrl(
+            path = "/Users/$userId/Items",
+            query = mapOf(
+                "Filters" to FAVORITE_FILTER,
+                "Recursive" to "true",
+                "IncludeItemTypes" to FAVORITE_ITEM_TYPES,
+                "Fields" to LIBRARY_FIELDS,
+                "EnableUserData" to "true",
+                "StartIndex" to "0",
+                "Limit" to limit.toString(),
+            ),
+        )
+        return apiClient.get(url, authenticatedHeaders(token, userId))
+    }
+
     /**
      * 播放信息：POST /emby/Items/{itemId}/PlaybackInfo?UserId=...（官方 MediaInfoService POST contract）。
      *
@@ -225,6 +296,15 @@ open class EmbyApiClient(
             .addQueryParameter("PlaySessionId", playSessionId)
             .addQueryParameter("static", "true")
         return builder.build().toString()
+    }
+
+    /** Official subtitle stream endpoint. Never propagate DeliveryUrl query credentials. */
+    fun subtitleStreamUrl(itemId: String, mediaSourceId: String, index: Int, format: String): String {
+        require(index >= 0 && format in setOf("srt", "ass", "ssa", "vtt"))
+        return endpointResolver.endpoint("/Videos").toHttpUrl().newBuilder()
+            .addPathSegment(itemId).addPathSegment(mediaSourceId)
+            .addPathSegment("Subtitles").addPathSegment(index.toString())
+            .addPathSegment("Stream.$format").build().toString()
     }
 
     /**
@@ -394,6 +474,14 @@ open class EmbyApiClient(
          * Library 浏览 payload 不扩大（LIBRARY_FIELDS 不动）。
          */
         const val SEARCH_FIELDS = "PrimaryImageAspectRatio,SortName,Path,ProductionYear,CommunityRating,Overview,ProviderIds"
+        /** 收藏回读所需字段（只有 UserData 的最小请求，避免拉全量 detail 字段）。 */
+        const val FAVORITE_FIELDS = "UserData"
+
+        /** 收藏列表的服务端筛选（官方 ItemFilter 值；仅优化，客户端仍兜底）。 */
+        const val FAVORITE_FILTER = "IsFavorite"
+
+        /** 收藏列表纳入的条目类型（与搜索/继续观看一致，不含 BoxSet/Playlist）。 */
+        const val FAVORITE_ITEM_TYPES = "Movie,Series,Episode"
         /**
          * 请求体序列化：encodeDefaults=true 保证 DeviceProfile 等默认值字段全部输出
          * （官方 server 期望完整字段）；explicitNulls=false 省略未设置的 null 字段。

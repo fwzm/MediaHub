@@ -18,7 +18,13 @@ import com.mediahub.provider.emby.search.EmbySearchProvider
 import com.mediahub.provider.emby.session.EmbySession
 import com.mediahub.provider.emby.session.EmbySessionStore
 import java.util.concurrent.CancellationException
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -26,6 +32,7 @@ import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -207,6 +214,21 @@ class EmbySearchProviderTest {
         assertEquals(61, result.nextOffset)
     }
 
+    @Test
+    fun `empty raw search page with larger total terminates without repeating offset`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":67}""")
+        )
+
+        val result = provider().search("a", PageRequest(offset = 60, limit = 20))
+
+        assertTrue(result.items.isEmpty())
+        assertEquals(67, result.totalCount)
+        assertFalse(result.hasMore)
+        assertNull(result.nextOffset)
+    }
+
     // ---- 7：401 → AuthExpired ----
 
     @Test
@@ -263,6 +285,28 @@ class EmbySearchProviderTest {
         assertNull(item.externalIds)
     }
 
+    @Test
+    fun `http failure does not expose encoded search term through provider exception`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(500).setBody("server failure"))
+        val privateQuery = "冰血暴 & dune=2"
+
+        val thrown = runCatching {
+            provider().search(privateQuery, PageRequest())
+        }.exceptionOrNull()
+
+        assertTrue(thrown is ProviderException.Http)
+        val http = thrown as ProviderException.Http
+        assertFalse(http.url.contains(privateQuery))
+        assertFalse(http.url.contains("%E5%86%B0", ignoreCase = true))
+        assertFalse(http.url.contains("dune", ignoreCase = true))
+        assertTrue(http.url.contains("SearchTerm=****", ignoreCase = true))
+        assertFalse(http.message.orEmpty().contains("SearchTerm", ignoreCase = true))
+        assertFalse(http.message.orEmpty().contains("dune", ignoreCase = true))
+        // 服务器实际收到原始 query；测试证明隐私只在异常/日志边界被移除，而不是请求被改坏。
+        assertEquals(privateQuery, server.takeRequest().requestUrl!!.queryParameter("SearchTerm"))
+    }
+
     // ---- 8：网络错误 → Network；无会话 → AuthRequired ----
 
     @Test
@@ -305,6 +349,55 @@ class EmbySearchProviderTest {
     @Test
     fun `in-flight search cancellation propagates as CancellationException not ProviderException`() =
         runBlocking {
+            seedSession()
+            server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+            val client = OkHttpClient()
+            val observed = CompletableDeferred<Throwable>()
+            val job = launch(Dispatchers.Default) {
+                try {
+                    provider(client).search("冰血暴", PageRequest())
+                } catch (e: Throwable) {
+                    observed.complete(e)
+                    throw e
+                }
+            }
+            assertNotNull("真实 provider 请求必须已进入网络层", server.takeRequest(2, TimeUnit.SECONDS))
+
+            job.cancel()
+            withTimeout(2_000) {
+                job.join()
+                while (client.dispatcher.runningCallsCount() != 0) delay(10)
+            }
+
+            val thrown = observed.await()
+            assertTrue(
+                "取消必须原样穿透（实际：$thrown）",
+                thrown is java.util.concurrent.CancellationException,
+            )
+            assertFalse("取消不得折叠成业务异常（实际：$thrown）", thrown is ProviderException)
+            assertTrue(job.isCancelled)
+            assertEquals(1, server.requestCount)
+        }
+
+    // ---- A2-4 第 5 项：空页守卫——total 声称还有更多但本页 0 条时必须终止分页 ----
+
+    @Test
+    fun `empty page with remaining total terminates pagination`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":10}""")
+        )
+
+        val result = provider().search("fargo", PageRequest(offset = 0, limit = 30))
+
+        assertTrue(result.items.isEmpty())
+        assertFalse("空页不得宣称 hasMore（nextOffset==offset 会死循环）", result.hasMore)
+        assertNull("空页 nextOffset 必须为 null（实际：${result.nextOffset}）", result.nextOffset)
+    }
+
+    @Test
+    fun `interceptor-originated cancellation also propagates without wrapping`() =
+        runBlocking {
             // 确定性注入：拦截器在网络层直接抛 CancellationException（模拟 withContext
             // 在 job 取消时恢复点抛出的同一类型），锁死 Provider 的 catch→mapError 边界：
             // 取消必须穿透，不得折叠成 ProviderException.Unknown。
@@ -326,22 +419,6 @@ class EmbySearchProviderTest {
             )
             assertFalse("取消不得折叠成业务异常（实际：$thrown）", thrown is ProviderException)
         }
-
-    // ---- A2-4 第 5 项：空页守卫——total 声称还有更多但本页 0 条时必须终止分页 ----
-
-    @Test
-    fun `empty page with remaining total terminates pagination`() = runBlocking {
-        seedSession()
-        server.enqueue(
-            MockResponse().setResponseCode(200).setBody("""{"Items":[],"TotalRecordCount":10}""")
-        )
-
-        val result = provider().search("fargo", PageRequest(offset = 0, limit = 30))
-
-        assertTrue(result.items.isEmpty())
-        assertFalse("空页不得宣称 hasMore（nextOffset==offset 会死循环）", result.hasMore)
-        assertNull("空页 nextOffset 必须为 null（实际：${result.nextOffset}）", result.nextOffset)
-    }
 
     private class FakeSecretStorage : SecretStorage {
         private val map = mutableMapOf<String, String>()

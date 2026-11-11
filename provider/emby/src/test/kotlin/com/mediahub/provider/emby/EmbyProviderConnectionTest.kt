@@ -15,6 +15,8 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -73,6 +75,31 @@ class EmbyProviderConnectionTest {
     }
 
     @Test
+    fun explicitJellyfinProductIsRejected() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"Id":"fixture-id","Version":"1","ProductName":"jELlYfIn Server"}"""))
+        val result = provider().testConnection()
+        assertFalse("Explicit Jellyfin identity must not be accepted as Emby", result.ok)
+        assertEquals(com.mediahub.provider.api.ProviderException.ErrorCode.PARSE, result.errorCode)
+        assertTrue(result.message.orEmpty().contains("Jellyfin"))
+        val request = server.takeRequest()
+        assertNull(request.getHeader("X-Emby-Token"))
+    }
+
+    @Test
+    fun matchingEmbyProductIsAccepted() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"Id":"fixture-id","Version":"1","ProductName":"Emby Server"}"""))
+        assertTrue(provider().testConnection().ok)
+    }
+
+    @Test
+    fun missingNullOrBlankProductRetainsExistingCompatibility() = runBlocking {
+        for (product in listOf("null", "\"\"", "\"   \"")) {
+            server.enqueue(MockResponse().setBody("""{"Id":"fixture-id","Version":"1","ProductName":$product}"""))
+            assertTrue(provider().testConnection().ok)
+        }
+    }
+
+    @Test
     fun `http 200 but wrong json fails`() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"foo":"bar"}"""))
         val result = provider().testConnection()
@@ -104,11 +131,15 @@ class EmbyProviderConnectionTest {
     }
 
     @Test
-    fun `http 403 fails with auth hint`() = runBlocking {
+    fun `http 403 is reported as access denied, not as missing login`() = runBlocking {
+        // 旧断言要求 403 文案含「登录」—— 那是把缺陷固化成契约：403 往往凭据完全正确，
+        // 引导用户"去登录/重输密码"会让他们在错误的方向上反复尝试。
         server.enqueue(MockResponse().setResponseCode(403))
         val result = provider().testConnection()
         assertFalse(result.ok)
-        assertTrue(result.message!!.contains("登录"))
+        assertTrue("403 必须说明是访问被拒（实际：${result.message}）", result.message!!.contains("拒绝访问"))
+        assertTrue("403 必须明确指出不是未登录（实际：${result.message}）", result.message!!.contains("不是未登录"))
+        assertFalse("403 不得再暗示需要登录（实际：${result.message}）", result.message!!.contains("需要登录"))
     }
 
     private class FakeSecretStorage : SecretStorage {

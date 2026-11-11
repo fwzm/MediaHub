@@ -20,6 +20,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DefaultProviderRegistryTest {
+    @Test(expected = IllegalArgumentException::class)
+    fun duplicateServerTypesFailBeforeOneFactoryCanHideTheOther() {
+        DefaultProviderRegistry(setOf(
+            FakeFactory(descriptor("local-a", ServerType.LOCAL, "A")),
+            FakeFactory(descriptor("local-b", ServerType.LOCAL, "B")),
+        ))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun duplicateStableIdsFailEvenWhenTheServerTypesDiffer() {
+        DefaultProviderRegistry(setOf(
+            FakeFactory(descriptor("duplicate", ServerType.LOCAL, "A")),
+            FakeFactory(descriptor("duplicate", ServerType.WEBDAV, "B")),
+        ))
+    }
+
 
     private fun descriptor(id: String, type: ServerType, name: String) = ProviderDescriptor(
         id = id,

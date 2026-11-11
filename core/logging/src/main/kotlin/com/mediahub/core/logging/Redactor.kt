@@ -42,9 +42,14 @@ object Redactor {
 
     /** JSON / 表单 / 查询串中的键值对，如 "access_token":"abc"、password=xyz、?token=abc */
     private val KEY_VALUE_PATTERNS = listOf(
-        // JSON / 表单（带引号的值）
+        // Consume complete quoted values, including whitespace and escaped quotes. Possessive
+        // groups keep long values from building recursive regex backtracking stacks.
         Regex(
-            """(?i)("?(?:access_token|refresh_token|id_token|token|api_key|apikey|api-key|password|passwd|pw|session_token|session_key|client_secret|secret|searchterm)"?\s*[:=]\s*")([^",\s}]+)("?)"""
+            """(?i)("?(?:access_token|refresh_token|id_token|token|api_key|apikey|api-key|password|passwd|pw|session_token|session_key|client_secret|secret|searchterm)"?\s*[:=]\s*")((?:[^"\\]++|\\.)*+)(")"""
+        ),
+        // A truncated quoted value (including a final escape) fails closed to end-of-input.
+        Regex(
+            """(?i)("?(?:access_token|refresh_token|id_token|token|api_key|apikey|api-key|password|passwd|pw|session_token|session_key|client_secret|secret|searchterm)"?\s*[:=]\s*")((?:[^"\\]++|\\.)*+(?:\\)?)\z"""
         ),
         // URL 查询串 / 表单（无引号的值）。
         // searchterm（Phase 1C-1）：用户搜索词属隐私，错误日志不得保留其值；
@@ -61,6 +66,10 @@ object Redactor {
         // 前置分隔符限定行首/空白/常见标点，避免误伤普通英文单词；键名保留、值替换。
         Regex(
             """(?i)((?:^|[\s,;("'])(?:password|passwd|pw|secret|token|api_key|apikey|access_token|refresh_token|authorization)=)([^\s"&',;)}\]]+)"""
+        ),
+        // Bare sensitive values may use either '=' or ':', with surrounding whitespace.
+        Regex(
+            """(?i)(\b(?:access_token|refresh_token|id_token|token|api_key|apikey|api-key|password|passwd|pw|session_token|session_key|client_secret|secret|searchterm)\s*[:=]\s*)([^&\s",}]+)"""
         ),
         // 请求头（整行值）
         Regex("""(?i)(authorization\s*[:=]\s*)([^

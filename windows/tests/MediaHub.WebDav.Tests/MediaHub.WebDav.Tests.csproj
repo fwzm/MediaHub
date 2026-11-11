@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>MediaHub.WebDav.Tests</RootNamespace>
+    <AssemblyName>MediaHub.WebDav.Tests</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Listed explicitly rather than relied on transitively: the tests use Domain and
+         MediaHub.Providers types directly (ProviderHandle, ProviderException, MediaItem), and a
+         direct reference is what makes the compile-time closure independent of build order. -->
+    <ProjectReference Include="..\..\src\MediaHub.Domain\MediaHub.Domain.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.Net\MediaHub.Net.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.Providers\MediaHub.Providers.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.Providers.WebDav\MediaHub.Providers.WebDav.csproj" />
+  </ItemGroup>
+</Project>

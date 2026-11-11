@@ -57,6 +57,28 @@ class EndpointTestServiceRedactionTest {
     }
 
     @Test
+    fun `invalid port is rejected before call creation without echoing the rejected address`() = runBlocking {
+        var calls = 0
+        val probe = object : EndpointTestService(HttpClientFactory(StdoutLogger()), clock = { 0L }) {
+            override fun newCall(client: OkHttpClient, request: Request): Call {
+                calls++
+                throw AssertionError("Malformed authority must not reach the call factory")
+            }
+        }
+        // A space in a path is not reliably invalid: OkHttp can percent-encode it. The port
+        // below is outside1..65535, so the real URL builder must reject before any DNS/socket.
+        val result = probe.test(
+            "http://agent:Sup3rS3cret-Marker@secret-host.example:70000?token=abc123xyz-marker",
+            "/probe",
+        )
+        assertEquals(0, calls)
+        assertTrue(result.error?.isNotBlank() == true)
+        assertNoLeak(result.error, "request construction")
+        assertFalse(result.error!!.contains("secret-host.example", ignoreCase = true))
+        assertFalse(result.error!!.contains("agent:", ignoreCase = true))
+    }
+
+    @Test
     fun `plain exception message with synthetic secrets never reaches the result`() {
         val failure = IOException(
             "Failed to connect to http://admin:Sup3rS3cret-Marker@10.0.0.9:8096/emby?token=abc123xyz-marker",

@@ -17,6 +17,7 @@ import com.mediahub.core.common.NavArgCodec
 import com.mediahub.feature.detail.DetailRoute
 import com.mediahub.feature.home.HomeRoute
 import com.mediahub.feature.library.LibraryRoute
+import com.mediahub.feature.library.favorites.FavoritesRoute
 import com.mediahub.feature.player.PlayerRoute
 import com.mediahub.feature.search.SearchRoute
 import com.mediahub.feature.server.AddServerRoute
@@ -136,6 +137,24 @@ fun MediaHubNavHost() {
         }
 
         composable(
+            route = Routes.FAVORITES,
+            arguments = listOf(
+                navArgument("serverId") { type = NavType.StringType },
+            ),
+        ) { entry ->
+            val favServerId = entry.arguments?.getString("serverId").orEmpty()
+            FavoritesRoute(
+                onBack = { navController.popBackStack() },
+                onOpenItem = { item ->
+                    navController.navigate(
+                        "detail/" + favServerId + "/" + NavArgCodec.encode(item.id) +
+                            "?title=" + Uri.encode(item.title)
+                    )
+                },
+            )
+        }
+
+        composable(
             route = "library/{serverId}/{libraryId}?name={name}",
             arguments = listOf(
                 navArgument("serverId") { type = NavType.StringType },
@@ -144,6 +163,8 @@ fun MediaHubNavHost() {
             ),
         ) { entry ->
             val serverId = entry.arguments?.getString("serverId").orEmpty()
+            val reauthorized by entry.savedStateHandle.getStateFlow<String?>("auth_changed_server_id", null)
+                .collectAsStateWithLifecycle()
             LibraryRoute(
                 serverId = serverId,
                 libraryId = entry.arguments?.getString("libraryId").orEmpty(),
@@ -160,6 +181,12 @@ fun MediaHubNavHost() {
                         "detail/$serverId/${NavArgCodec.encode(item.id)}?title=${Uri.encode(item.title)}"
                     )
                 },
+                onOpenFavorites = { navController.navigate("favorites/$serverId") },
+                onReauthorizeDirectory = {
+                    navController.navigate("server/add?reauthorizeId=${Uri.encode(serverId)}")
+                },
+                reauthorizedSource = reauthorized,
+                onReauthorizationConsumed = { entry.savedStateHandle["auth_changed_server_id"] = null },
             )
         }
 
@@ -227,4 +254,5 @@ private object Routes {
     const val SETTINGS = "settings"
     const val BACKUP = "backup"
     const val SEARCH = "search"
+    const val FAVORITES = "favorites/{serverId}"
 }

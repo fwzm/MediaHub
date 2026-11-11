@@ -108,6 +108,25 @@ class EmbyPlaybackProvider(
                 // PlaybackInfo 真值（非空已校验）：进度上报三端点必需，
                 // 缺失时真实 Emby 4.x 回 400 null-key（1H 真机 + curl 矩阵实证）
                 sessionId = playSessionId,
+                externalSubtitles = source.mediaStreams.mapNotNull { stream ->
+                    if (!stream.type.equals("Subtitle", ignoreCase = true) || !stream.isExternal) return@mapNotNull null
+                    val index = stream.index?.takeIf { it >= 0 } ?: return@mapNotNull null
+                    val format = when (stream.codec?.lowercase()) {
+                        "srt", "subrip" -> "srt"
+                        "webvtt", "vtt" -> "vtt"
+                        "ass" -> "ass"
+                        "ssa" -> "ssa"
+                        else -> return@mapNotNull null // Bitmap sidecars need a different loader.
+                    }
+                    com.mediahub.model.SubtitleTrack(
+                        index = index, language = stream.language,
+                        title = stream.displayTitle?.takeIf(String::isNotBlank) ?: stream.title,
+                        format = format, isDefault = stream.isDefault, isForced = stream.isForced,
+                        isExternal = true,
+                        url = api.subtitleStreamUrl(item.id, mediaSourceId, index, format),
+                        mimeType = com.mediahub.model.SubtitleFormats.mimeTypeOf(format),
+                    )
+                },
             )
         } catch (e: Exception) {
             throw mapError(e)

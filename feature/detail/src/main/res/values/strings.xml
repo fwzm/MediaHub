@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 收藏开关（task-25 / A2）：语义对齐 Windows 端 Favorite -->
+    <string name="detail_action_favorite">收藏</string>
+    <string name="detail_action_unfavorite">取消收藏</string>
+</resources>

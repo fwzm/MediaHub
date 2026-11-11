@@ -19,6 +19,7 @@ import com.mediahub.provider.jellyfin.api.JellyfinAuthorizationHeaderBuilder
 import com.mediahub.provider.jellyfin.api.JellyfinEndpointResolver
 import com.mediahub.provider.jellyfin.auth.JellyfinAuthProvider
 import com.mediahub.provider.jellyfin.detail.JellyfinDetailProvider
+import com.mediahub.provider.jellyfin.favorite.JellyfinFavoriteProvider
 import com.mediahub.provider.jellyfin.image.JellyfinImageAuthContributor
 import com.mediahub.provider.jellyfin.library.JellyfinLibraryProvider
 import com.mediahub.provider.jellyfin.playback.JellyfinPlaybackProvider
@@ -131,6 +132,14 @@ class JellyfinProviderFactory @Inject constructor(
             search = search,
             playback = playbackProvider,
             progress = progressProvider,
+            // task-22 / A1：FAVORITE（与 Emby 同名同义端点；declared 已同步声明）。
+            favorite = JellyfinFavoriteProvider(
+                server = server,
+                api = jellyfinApi,
+                tokenStore = tokenStore,
+                sessionStore = sessionStore,
+                logger = logger,
+            ),
         )
     }
 }

@@ -11,7 +11,14 @@ import com.mediahub.provider.jellyfin.api.JellyfinMediaSourceInfoDto
  */
 object JellyfinMediaSourceSelector {
     fun selectDirectStream(sources: List<JellyfinMediaSourceInfoDto>): JellyfinMediaSourceInfoDto? =
-        sources.firstOrNull { it.supportsDirectStream && !it.path.isIsoPath() }
+        sources.firstOrNull { it.supportsDirectStream && !it.isIso() }
+
+    /** One source may be re-negotiated without server subtitles; capabilities still gate playback. */
+    internal fun selectStaticNegotiationCandidate(sources: List<JellyfinMediaSourceInfoDto>): JellyfinMediaSourceInfoDto? =
+        sources.firstOrNull { !it.id.isNullOrBlank() && !it.isIso() }
+
+    private fun JellyfinMediaSourceInfoDto.isIso(): Boolean =
+        container?.trim()?.equals("iso", ignoreCase = true) == true || path.isIsoPath()
 
     private fun String?.isIsoPath(): Boolean =
         this?.substringBefore('?')?.substringBefore('#')?.trimEnd()?.endsWith(".iso", ignoreCase = true) == true

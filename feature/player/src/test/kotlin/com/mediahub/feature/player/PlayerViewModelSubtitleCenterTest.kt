@@ -202,7 +202,11 @@ class PlayerViewModelSubtitleCenterTest {
         override val displayName = "s"
         override val descriptor = ProviderDescriptor(
             id = "fake", serverType = ServerType.EMBY, displayName = "fake",
-            category = ProviderCategory.MEDIA_SERVER, declaredCapabilities = emptySet(),
+            category = ProviderCategory.MEDIA_SERVER, declaredCapabilities = setOf(
+                com.mediahub.provider.api.ProviderCapability.DETAIL,
+                com.mediahub.provider.api.ProviderCapability.PLAYBACK,
+                com.mediahub.provider.api.ProviderCapability.SUBTITLE_DISCOVERY,
+            ),
             authMethod = com.mediahub.provider.api.AuthMethod.NONE, status = ProviderStatus.EXPERIMENTAL,
         )
         override suspend fun testConnection() = ConnectionStatus(ok = true)
@@ -338,6 +342,29 @@ class PlayerViewModelSubtitleCenterTest {
     // ---- 记忆自动回放 ----
 
     @Test
+    fun `provider sidecars appear without directory discovery and can really be selected`() = runTest(dispatcher) {
+        val engine = RecordingEngine()
+        val uri = "https://media/emby/Videos/m1/src1/Subtitles/2/Stream.srt"
+        val playback = object : MediaPlaybackProvider {
+            override suspend fun resolvePlayback(item: MediaItem, options: PlaybackOptions) = PlaybackSource(
+                url = "https://media/stream.mkv",
+                externalSubtitles = listOf(com.mediahub.model.SubtitleTrack(
+                    index = 2, language = "zho", title = "Chinese", format = "srt", isExternal = true, url = uri)),
+            )
+        }
+        val vm = buildVm(engine, null, MemoryStore(), playback = playback)
+        try {
+            runCurrent()
+            assertEquals(listOf(uri), vm.subtitleCenter.value.discovered.map { it.uri })
+            vm.selectExternalSubtitle(vm.subtitleCenter.value.discovered.single())
+            runCurrent()
+            assertEquals(uri, engine.loaded.single().uri)
+            assertEquals("application/x-subrip", engine.loaded.single().mimeType)
+            assertEquals(vm.subtitleCenter.value.discovered.single().id, vm.subtitleCenter.value.selectedExternalId)
+        } finally { vm.stopAndFlush(); runCurrent() }
+    }
+
+    @Test
     fun `remembered subtitle and offset auto applied without manual selection`() = runTest(dispatcher) {
         val engine = RecordingEngine()
         val memory = MemoryStore()
@@ -383,6 +410,25 @@ class PlayerViewModelSubtitleCenterTest {
     }
 
     // ---- 手动选择优先 ----
+
+    @Test
+    fun `stale embedded row cannot cancel the current external selection or overwrite its memory`() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val engine = RecordingEngine().apply { loadHook = { gate.await() } }
+        val memory = MemoryStore()
+        val vm = buildVm(engine, Discovery(), memory)
+        try {
+            runCurrent(); runCurrent()
+            val target = vm.subtitleCenter.value.discovered.first { it.extension == "srt" }
+            vm.selectExternalSubtitle(target); runCurrent()
+            assertEquals(1, engine.loaded.size)
+            vm.onEmbeddedSubtitleSelected(TrackSelection(0, 0, snapshotToken = Long.MIN_VALUE))
+            assertNull(engine.selectedSubtitle)
+            gate.complete(Unit); runCurrent(); runCurrent()
+            assertEquals(target.id, vm.subtitleCenter.value.selectedExternalId)
+            assertEquals(target.id, memory.entries[SubtitleMemoryKeys.forItem(videoItem)]!!.subtitleId)
+        } finally { vm.stopAndFlush(); runCurrent() }
+    }
 
     @Test
     fun `late discovery does not override manual embedded selection`() = runTest(dispatcher) {

@@ -25,6 +25,8 @@ import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderStatus
 import java.io.File
 import java.net.URI
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** 该 Provider 类型描述（Factory 与 Provider 共用，见 ADR-015）。 */
 internal val LOCAL_PROVIDER_DESCRIPTOR = ProviderDescriptor(
@@ -41,7 +43,7 @@ internal val LOCAL_PROVIDER_DESCRIPTOR = ProviderDescriptor(
     ),
     authMethod = AuthMethod.NONE,
     status = ProviderStatus.STABLE,
-    description = "本机存储（应用外部目录；SAF 文档树见 Phase 0.6）",
+    description = "本机授权目录与应用外部目录",
 )
 
 /**
@@ -61,8 +63,11 @@ class LocalProvider(
     override val type: ServerType = ServerType.LOCAL
     override val displayName: String get() = server.displayName
     override val descriptor: ProviderDescriptor = LOCAL_PROVIDER_DESCRIPTOR
+    private val saf: SafLocalAccess? get() = server.baseUrl.takeIf { it.startsWith("content:", true) }
+        ?.let { SafLocalAccess(server, rootProvider) }
 
     override suspend fun testConnection(): ConnectionStatus {
+        saf?.let { return withContext(Dispatchers.IO) { it.connection() } }
         val roots = rootProvider.rootDirectories()
         return if (roots.isEmpty()) {
             ConnectionStatus(ok = false, message = "未配置本地存储目录")
@@ -74,6 +79,7 @@ class LocalProvider(
     // ---- 文件树浏览 ----
 
     override suspend fun listFolder(folder: MediaItem?, page: PageRequest): PagedResult<MediaItem> {
+        saf?.let { return withContext(Dispatchers.IO) { it.list(folder, page) } }
         val roots = if (folder == null) {
             rootProvider.rootDirectories()
         } else {
@@ -100,6 +106,7 @@ class LocalProvider(
     // ---- 详情 ----
 
     override suspend fun getItemDetail(itemId: String): MediaDetail {
+        saf?.let { return withContext(Dispatchers.IO) { it.detail(itemId) } }
         val file = File(itemId)
         if (!file.exists()) throw ProviderException.NotFound(serverId, itemId)
         return MediaDetail(item = file.toMediaItem())
@@ -108,10 +115,11 @@ class LocalProvider(
     // ---- 播放 ----
 
     override suspend fun resolvePlayback(item: MediaItem, options: PlaybackOptions): PlaybackSource {
+        saf?.let { return withContext(Dispatchers.IO) { it.playback(item) } }
         val file = File(item.path ?: item.id)
         if (!file.exists()) throw ProviderException.NotFound(serverId, item.path ?: item.id)
         return PlaybackSource(
-            url = URI.create("file://${file.absolutePath}").toString(),
+            url = file.toURI().toString(),
             mimeType = file.guessMimeType(),
             container = file.extension.lowercase().takeIf { it.isNotBlank() },
             durationMs = null,
@@ -122,6 +130,7 @@ class LocalProvider(
     // ---- 同目录字幕发现（P2 字幕中心切片一） ----
 
     override suspend fun discoverSubtitles(video: com.mediahub.model.MediaItem): List<DiscoveredSubtitle> {
+        saf?.let { return withContext(Dispatchers.IO) { it.subtitles(video) } }
         val videoFile = File(video.path ?: video.id)
         val parent = videoFile.parentFile
         if (!videoFile.exists() || parent == null || !parent.isDirectory) return emptyList()

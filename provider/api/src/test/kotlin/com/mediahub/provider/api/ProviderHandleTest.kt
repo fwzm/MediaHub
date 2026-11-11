@@ -12,7 +12,9 @@ import org.junit.Test
  */
 class ProviderHandleTest {
 
-    private fun provider() = object : MediaProvider, MediaBrowseProvider, MediaPlaybackProvider {
+    private fun provider(declared: Set<ProviderCapability> = setOf(
+        ProviderCapability.BROWSE, ProviderCapability.DETAIL, ProviderCapability.PLAYBACK,
+    )) = object : MediaProvider, MediaBrowseProvider, MediaPlaybackProvider {
         override val serverId: String = "s1"
         override val type: ServerType = ServerType.LOCAL
         override val displayName: String = "本地"
@@ -21,11 +23,7 @@ class ProviderHandleTest {
             serverType = ServerType.LOCAL,
             displayName = "本地",
             category = ProviderCategory.CLOUD_STORAGE,
-            declaredCapabilities = setOf(
-                ProviderCapability.BROWSE,
-                ProviderCapability.DETAIL,
-                ProviderCapability.PLAYBACK,
-            ),
+            declaredCapabilities = declared,
             authMethod = AuthMethod.NONE,
             status = ProviderStatus.STABLE,
         )
@@ -51,6 +49,19 @@ class ProviderHandleTest {
         assertTrue(handle.hasAnyCapability)
     }
 
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsUndeclaredRuntimeCapability() {
+        val p = provider(declared = emptySet())
+        ProviderHandle(provider = p, browse = p)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun copyCannotAddAnUndeclaredRuntimeCapability() {
+        val p = provider(declared = setOf(ProviderCapability.BROWSE))
+        val valid = ProviderHandle(provider = p, browse = p)
+        valid.copy(playback = p)
+    }
+
     @Test
     fun `empty handle has no runtime capabilities`() {
         val p = provider()
@@ -73,7 +84,9 @@ class ProviderHandleTest {
         override val serverId: String = "s1"
         override val type: ServerType = ServerType.LOCAL
         override val displayName: String = "本地"
-        override val descriptor: ProviderDescriptor = provider().descriptor
+        override val descriptor: ProviderDescriptor = provider().descriptor.let {
+            it.copy(declaredCapabilities = it.declaredCapabilities + ProviderCapability.QUERY)
+        }
         override val capabilities = com.mediahub.model.MediaQueryCapabilities(
             sortFields = setOf(com.mediahub.model.MediaSortField.SERVER_DEFAULT, com.mediahub.model.MediaSortField.TITLE),
             filterFields = emptySet(),
@@ -114,7 +127,10 @@ class ProviderHandleTest {
         override val serverId: String = "s1"
         override val type: ServerType = ServerType.EMBY
         override val displayName: String = "Emby"
-        override val descriptor: ProviderDescriptor = provider().descriptor
+        override val descriptor: ProviderDescriptor = provider().descriptor.let {
+            it.copy(id = "emby", serverType = ServerType.EMBY,
+                declaredCapabilities = it.declaredCapabilities + ProviderCapability.IDENTITY_LOOKUP)
+        }
         override suspend fun testConnection() = ConnectionStatus(ok = true, message = "ok")
         override suspend fun findByCanonicalKeys(
             keys: Set<com.mediahub.model.CanonicalKey>,
@@ -131,5 +147,29 @@ class ProviderHandleTest {
 
         val withoutLookup = ProviderHandle(provider = l)
         assertTrue(ProviderCapability.IDENTITY_LOOKUP !in withoutLookup.runtimeCapabilities)
+    }
+
+    // ---- task-22 / A1：FAVORITE 能力推导 ----
+
+    /** 实现收藏能力的最小 fake（只读语义：回读服务器状态才是真值）。 */
+    private fun favoriteProvider() = object : MediaFavoriteProvider {
+        override suspend fun setFavorite(itemId: String, favorite: Boolean): Boolean = favorite
+        override suspend fun isFavorite(itemId: String): Boolean = false
+        // task-25 / A2：接口新增列表能力后 fake 必须补齐（不放宽接口约束）
+        override suspend fun listFavorites(limit: Int): List<com.mediahub.model.MediaItem> = emptyList()
+    }
+
+    @Test
+    fun `favorite capability derived from field and absent when null`() {
+        val p = provider(declared = setOf(ProviderCapability.BROWSE, ProviderCapability.DETAIL,
+            ProviderCapability.PLAYBACK, ProviderCapability.FAVORITE))
+        val f = favoriteProvider()
+        val withFavorite = ProviderHandle(provider = p, favorite = f)
+        assertEquals(setOf(ProviderCapability.FAVORITE), withFavorite.runtimeCapabilities)
+        assertTrue(withFavorite.hasAnyCapability)
+
+        val withoutFavorite = ProviderHandle(provider = p)
+        assertTrue(ProviderCapability.FAVORITE !in withoutFavorite.runtimeCapabilities)
+        assertFalse(withoutFavorite.hasAnyCapability)
     }
 }

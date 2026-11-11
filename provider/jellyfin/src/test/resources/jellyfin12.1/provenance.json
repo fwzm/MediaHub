@@ -1,0 +1,37 @@
+{
+  "purpose": "Permanent replay of actual synthetic local Jellyfin responses; host unit replay is not live-server/device acceptance",
+  "captured_utc": "2026-09-30T09:40:07Z",
+  "fixtures": [
+    {
+      "resource_name": "default-external-subtitle-unavailable.json",
+      "source_wire": "D:\\deepseek_test\\mh-unified-20260930\\evidence\\network\\jellyfin-negotiation-20260930-094007\\wire-05.json",
+      "source_wire_sha256": "e6558471bfbd84497692779f7106c163f666450b2c1bf1e5054582b5e42eccfc",
+      "resource_sha256": "776f2e3354858a5e51027b8e782cef7c895f4c917b6a0b2c422091b3b9796284",
+      "sanitization": "Exact actualResponseJsonRedacted copied, no DTO field normalization; formatting only",
+      "real_server": "Official Jellyfin12.1.0 on 127.0.0.1:18796",
+      "server_source_commit": "ee91c75e777da41a9c4f4855e70adc604fbf2ef8"
+    },
+    {
+      "resource_name": "source-bound-no-server-subtitle.json",
+      "source_wire": "D:\\deepseek_test\\mh-unified-20260930\\evidence\\network\\jellyfin-negotiation-20260930-094007\\wire-09.json",
+      "source_wire_sha256": "c29f5f9dd9cad79beee0bf36ad0b8a87154953973e8de5095b9e83bdeb01f083",
+      "resource_sha256": "045391b28d2f26576112d4788eedda00bbc8f22c8b387b828edeb7d503102232",
+      "sanitization": "Exact actualResponseJsonRedacted copied, no DTO field normalization; formatting only",
+      "real_server": "Official Jellyfin12.1.0 on 127.0.0.1:18796",
+      "server_source_commit": "ee91c75e777da41a9c4f4855e70adc604fbf2ef8"
+    }
+  ],
+  "repository_normalization": {
+    "default-external-subtitle-unavailable.json": {
+      "captured_resource_sha256": "776f2e3354858a5e51027b8e782cef7c895f4c917b6a0b2c422091b3b9796284",
+      "git_lf_resource_sha256": "d84901a4a35c3d40c5d677c41f111409a30f167d1c348cfe95230d08c829ab86",
+      "reason": "Only Git line endings differ from legacy resource hash"
+    },
+    "source-bound-no-server-subtitle.json": {
+      "captured_resource_sha256": "045391b28d2f26576112d4788eedda00bbc8f22c8b387b828edeb7d503102232",
+      "git_lf_resource_sha256": "5cebf02792aa7b3eaee729926f913c6172b4d6b9cfaf28af124d66083a8850de",
+      "reason": "Only Git line endings differ from legacy resource hash"
+    }
+  },
+  "verification_scope": "Historical synthetic loopback replay;current server version not reverified;JSON field values unchanged;Git LF normalization differs from captured CRLF resource bytes"
+}

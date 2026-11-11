@@ -1,0 +1,66 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Platforms>x64</Platforms>
+
+    <!--
+      Which libmpv build this assembly loads at runtime. MediaHub.Player.Mpv reaches libmpv through
+      [DllImport("libmpv-2.dll")], so the DLL has to sit next to MediaHub.exe; this property decides
+      which copy the build puts there.
+
+        gpl  (default) - windows/native/libmpv, the GPL-3.0-or-later baseline installed by
+                         tools/fetch-libmpv.ps1. This is what the repository ships today.
+        lgpl           - windows/engine/lgpl/dist, the LGPL-2.1-or-later candidate produced by
+                         windows/engine/lgpl/build-mpv-lgpl.sh + tools/collect-lgpl-runtime.ps1.
+                         That DLL only works together with the dependency DLLs collected beside it,
+                         so the whole set is copied, not just libmpv-2.dll.
+
+      Select one with:  -p:LibMpvFlavour=lgpl
+      The default is deliberately unchanged: switching the shipped engine is a maintainer decision
+      (see windows/docs/LGPL-ENGINE-SWITCH.md and windows/docs/licensing/LICENCE-DECISION.md).
+    -->
+    <LibMpvFlavour Condition="'$(LibMpvFlavour)' == ''">gpl</LibMpvFlavour>
+    <LibMpvFlavourNormalised>$(LibMpvFlavour.ToLowerInvariant())</LibMpvFlavourNormalised>
+
+    <!-- Directory holding libmpv-2.dll. Neither directory is committed: the GPL copy comes from
+         tools/fetch-libmpv.ps1, the LGPL copy from tools/collect-lgpl-runtime.ps1. -->
+    <LibMpvDir Condition="'$(LibMpvDir)' == '' and '$(LibMpvFlavourNormalised)' == 'lgpl'">$(MSBuildThisFileDirectory)..\..\engine\lgpl\dist</LibMpvDir>
+    <LibMpvDir Condition="'$(LibMpvDir)' == ''">$(MSBuildThisFileDirectory)..\..\native\libmpv</LibMpvDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaHub.Domain\MediaHub.Domain.csproj" />
+    <ProjectReference Include="..\MediaHub.Player\MediaHub.Player.csproj" />
+  </ItemGroup>
+
+  <!-- Fail the build loudly instead of producing a binary that cannot start. Every message names the
+       one command that fixes it, because a half-collected LGPL directory fails at load time with a
+       missing-DLL dialog that says nothing useful. -->
+  <Target Name="VerifyLibMpv" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(LibMpvFlavourNormalised)' != 'gpl' and '$(LibMpvFlavourNormalised)' != 'lgpl'"
+           Text="Unknown LibMpvFlavour '$(LibMpvFlavour)'. Use -p:LibMpvFlavour=gpl (default, GPL baseline in windows/native/libmpv) or -p:LibMpvFlavour=lgpl (LGPL candidate in windows/engine/lgpl/dist)." />
+    <Error Condition="'$(LibMpvFlavourNormalised)' == 'gpl' and !Exists('$(LibMpvDir)\libmpv-2.dll')"
+           Text="libmpv-2.dll not found in '$(LibMpvDir)' (LibMpvFlavour=gpl). Run: pwsh -File windows/tools/fetch-libmpv.ps1" />
+    <Error Condition="'$(LibMpvFlavourNormalised)' == 'lgpl' and !Exists('$(LibMpvDir)\libmpv-2.dll')"
+           Text="libmpv-2.dll not found in '$(LibMpvDir)' (LibMpvFlavour=lgpl). Build the candidate first (windows/engine/lgpl/build-ffmpeg-lgpl.sh, build-mpv-lgpl.sh), then run: pwsh -File windows/tools/collect-lgpl-runtime.ps1" />
+    <Error Condition="'$(LibMpvFlavourNormalised)' == 'lgpl' and !Exists('$(LibMpvDir)\runtime-dependencies-collected.txt')"
+           Text="'$(LibMpvDir)' has not had its dependency set collected (runtime-dependencies-collected.txt is missing), so libmpv-2.dll would fail to load at runtime. Run: pwsh -File windows/tools/collect-lgpl-runtime.ps1" />
+  </Target>
+
+  <ItemGroup Condition="Exists('$(LibMpvDir)\libmpv-2.dll')">
+    <None Include="$(LibMpvDir)\libmpv-2.dll" Link="libmpv-2.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- LGPL build only: libmpv-2.dll imports 33 third-party DLLs (FFmpeg av*/sw*, libass, libplacebo,
+       libshaderc, libstdc++-6, ...). They must travel with it, flat, next to the executable, because
+       the Windows loader resolves them relative to the loading module. Copying one copy of the set is
+       also what makes the LGPL relinking obligation workable: a user can replace this DLL and keep the
+       rest of the folder intact (see windows/docs/LGPL-COMPLIANCE.md). -->
+  <ItemGroup Condition="'$(LibMpvFlavourNormalised)' == 'lgpl' and Exists('$(LibMpvDir)\libmpv-2.dll')">
+    <None Include="$(LibMpvDir)\*.dll" Exclude="$(LibMpvDir)\libmpv-2.dll">
+      <Link>%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>

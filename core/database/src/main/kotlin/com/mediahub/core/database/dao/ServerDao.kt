@@ -15,6 +15,30 @@ interface ServerDao {
     @Query("SELECT * FROM servers WHERE id = :id")
     suspend fun getById(id: String): ServerEntity?
 
+    /** 全量快照（同步预演一次性读取，避免 N+1 查询）。 */
+    @Query("SELECT * FROM servers ORDER BY sortOrder ASC, createdAtEpochMs ASC")
+    suspend fun getAll(): List<ServerEntity>
+
+    /** 跨设备来源同步：按持久同步身份查本地来源（sync_source_id 唯一索引保证至多一条）。 */
+    @Query("SELECT * FROM servers WHERE sync_source_id = :syncSourceId LIMIT 1")
+    suspend fun getBySyncSourceId(syncSourceId: String): ServerEntity?
+
+    /** 写回记录修订号（合并次序的唯一依据）。返回受影响行数。 */
+    @Query("UPDATE servers SET sync_record_revision = :revision WHERE id = :serverId")
+    suspend fun updateSyncRecordRevision(serverId: String, revision: Long): Int
+
+    /** 写入同步身份三列（首次配对/导入落库时用）。返回受影响行数。 */
+    @Query(
+        "UPDATE servers SET sync_source_id = :syncSourceId, " +
+            "sync_record_revision = :revision, sync_source_type_raw = :sourceTypeRaw WHERE id = :serverId",
+    )
+    suspend fun updateSyncIdentity(
+        serverId: String,
+        syncSourceId: String?,
+        revision: Long,
+        sourceTypeRaw: String?,
+    ): Int
+
     @Query("SELECT COUNT(*) FROM servers")
     suspend fun count(): Int
 

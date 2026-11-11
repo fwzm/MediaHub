@@ -1,0 +1,188 @@
+{
+  "generator": "D:/mh-verify/backup-vectors-gen (Windows MediaHub.Backup 权威实现)",
+  "formatVersion": 2,
+  "minimumReaderVersion": 2,
+  "cryptoCase": {
+    "password": "跨平台备份-测试口令-2026",
+    "saltB64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "nonceB64": "AAECAwQFBgcICQoL",
+    "kdfAlgorithm": "PBKDF2WithHmacSHA256",
+    "iterations": 600000,
+    "keyLengthBits": 256,
+    "formatVersion": 2,
+    "aadUtf8": "MHBK|2|PBKDF2WithHmacSHA256|600000",
+    "plaintextJson": "{\"manifest\":{\"formatVersion\":2,\"minimumReaderVersion\":2,\"appVersion\":\"0.1.0-alpha.1\",\"createdAtEpochMs\":1700000000000,\"includedSections\":[\"servers\",\"progress\",\"preferences\",\"favorites\"],\"recordCounts\":{\"servers\":1,\"progress\":1,\"preferences\":1,\"favorites\":1}},\"servers\":[{\"backupId\":\"srv-1\",\"name\":\"Test Emby\",\"type\":\"EMBY\",\"username\":\"user-A\",\"note\":null,\"isDefault\":true,\"sortOrder\":0,\"endpoints\":[{\"name\":\"默认线路\",\"url\":\"https://media.example:8920\",\"isPrimary\":true,\"enabled\":true,\"sortOrder\":0}]}],\"progress\":[{\"serverBackupId\":\"srv-1\",\"itemId\":\"item-1\",\"positionMs\":90000,\"durationMs\":600000,\"isPaused\":false,\"updatedAtEpochMs\":1700000000000,\"itemTitle\":\"Test Item\",\"itemType\":\"Movie\"}],\"favorites\":[{\"serverBackupId\":\"srv-1\",\"itemId\":\"item-1\",\"title\":\"Test Item\",\"addedAtEpochMs\":1700000100000}],\"preferences\":{\"playbackEngineMode\":\"AUTO\",\"defaultPlaybackSpeed\":1.5,\"subtitleSizeSp\":20,\"enableHardwareDecoding\":true,\"preferDirectPlay\":true,\"autoPlayNextEpisode\":false,\"maxBitrateBps\":null,\"showPlayerInfoOverlay\":false,\"autoLandscape\":true,\"immersiveBars\":true,\"subtitleStyle\":{\"textColor\":-1,\"backgroundColor\":0,\"edgeType\":1,\"edgeColor\":-16777216,\"textScale\":1,\"bottomPaddingFraction\":0.08,\"applyEmbeddedStyles\":true},\"gestures\":{\"scrubEnabled\":true,\"doubleTapSeekBackwardEnabled\":false,\"doubleTapSeekBackwardSeconds\":10,\"doubleTapSeekForwardEnabled\":false,\"doubleTapSeekForwardSeconds\":10,\"longPressSpeedEnabled\":true,\"longPressSpeedMin\":0.5,\"longPressSpeedMax\":5,\"longPressDirectionalEnabled\":true,\"longPressDefaultSpeed\":2}}}",
+    "ciphertextB64": "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"
+  },
+  "cases": [
+    {
+      "id": "windows-export-ok",
+      "password": "跨平台备份-测试口令-2026",
+      "expectedStatus": "ok",
+      "expectedFormatVersion": 2,
+      "note": "Windows 导出的真实信封，Kotlin 必须能解开且字段一致",
+      "envelopeJson": "{\"magic\":\"MHBK\",\"formatVersion\":2,\"kdfAlgorithm\":\"PBKDF2WithHmacSHA256\",\"kdfSaltB64\":\"1AO2g0xXMLknqPcCntndIJQ+qcFpEglUy/IDS2ch9Xc=\",\"kdfIterations\":600000,\"kdfKeyLengthBits\":256,\"nonceB64\":\"uCD38luCZpevWinx\",\"ciphertextB64\":\"jF9lTgmXa9b/yiOep0eezZrZo3rihjnyWKLXzGcMVK2ExHoNL2YieouH/oeyVo/Xn1qHEwipPUVI/PzEpkC9D5cYNeFdXxdrDipYgaGYGAK4I5YZquBsBODwqUqqxUErmGviLcqakEUtkEZPX5/U3Ae0VlHVRSTjMFG55kU/NXANzz3c5EJqX420zfcm/ScaNi5RsKwGdq89a/ZQA0vcB8HAy/jsJAj4lpuykwvUO1gcH54Yf8Ay3s/9lWUDwWeCHao8U97X/58K29vbKWlYSaZiDAclnNBJ5BszFGFgrWkpjhHD7QjArfU+LMjrByS38haIB18MWReRvbjbP2f/U0cNvL7wnLmny1hK47cIbUH2QDhDEzQOnp6tQQaGejmiwIAsd5C7AFpMFmpZxwegnxIhZ2v/CsQBM9A+lOmWDb/9tOGIvRfio8nA0N2ZA7L2eFcuNrTrpTq8auF5OhuJooPcP/dhCiq65U7qMa99WiryUapUWodkB3A1bg/xg2I5uvRr+TReoQtI7Es9T6cvjbg3iD+2eIdzBQLEEJQgxcgRp1acZxXI8uP4H4+mjb4mfA4r0yZdzmX2IbeyOJ5pRVrNhJQLInuCQdBXF6mGROLZIIA6yHejz5P8eB5vbuKimS4kInViG9QhQormCf0aAeHepKseAKh95KRdKZKVWh/d0u6f3hqZHV9dVXUZdd7Mo+T4a2ZaDkBFOUkOFrX/DDuv4YMP6QNt4ahDSuc0Wud1cfn+w8sLNFxDx0Xd6B0hsCssiTDDZhO2ywvsrwxHdmF8yn/ZmQuwJRcch+vGsoBC0dp617orUsQP9knO9ezMy4tJ2OJsAeQIKwNd/5W4viu0dFrSDhIaS1PvM4iHjZ2caSElZbXWI10ZcnbrAzVnRmkGyOyQ8r42yqUuH6oURDOg8KFQ8WPOaMPQAUIzAXGpBsOSYgz19SH52QXiywb26ziuu2TbbNfkZa4sxk9nBZgQD2me3owBTHUAipXgLpBRPLTM25iCdeb/ycBDky3Iir2WUJZrUQlI0zW6gskFSafvQCIjaG2ymksLfLvzsC5QDxWAU8Co2WQSfpXnbuHZE269AV+Rl3MNK2v/51ZPSzx53QpbbTaOK4jwQhmFmusemzR+DSY6iO8B50F+ytbHtSBxfKpAUeTlp9LCtp+fn9j/CComxMEcjwMlcXCgzmOL9oSFkyeYs1TGEJJ1YRgwPa7WtzVixFC7QowNwfYOWXMavcVy/nWzL3jTsM+bNBIJ8sIw/QzHqfHP4x0vBZplkSVJo4BCFb+G+Em8c/UT+OoAPc172fpr1kjUthewLdoZuRPmI9SKbYqi+izhge9Ujd5vAIHJT66q+whoKfmK93mu/dopYsYE0lkXWJnE25LlGCFxZQGIAEwQwCvbtzhFWnbl2T8SKKv5VRKrFq+PywwPSPkADTvmJ0QEXosSTcmP2BYg7wsKj1KpFNZ++ErACKxN1cgJVI4hC//L8UYry7Zl/odW/KAX99mpqohIbP67b/MO1qcuUCXEH4hlK4c34/Aojd7ogUq+XGRGN1ZIdSk6tCWsplg1LEhE5psMsDpeBG/U9FKho9Bdg6Y3yujLWIXMZHzPdZTcprTgJJYowvbbUElIVpsUxr/x3z4zdeuEkGHqgQjcB0rfsyhwR8uhNXop2VtAi2w/aVOr+u3IJD7JF7bALQiWgirS1fMn0HL8J4NynY+bFLrUYVT4MKmwiC98dL+49HgqLroUDp0791bqaewj8Xp3BZh61gTaa6nyiBzTcGHyDGyKBmJzNpmVZhnbssEogY67eb214i04etWeP3H9CXg1Xcbn0U4I95RvLYu+PbpNws0tcukHYXVxeQJDA33LdfjSI5bg18m2bVuVM7MKohMfj8tqYzFqcat6UovXvud9yr+uixWn+KkpHH29fVPG3FSx9kpo71Qt2uZ7v2BWJ1xcuqedtksXZGHQ9GSv34uhOD8DetUeo6wamdxa/RmSRyD5AvTBS/lwKrtKdjsWyOdmOA/4CRZGWWFOdtGGslJvH1zwEP7IrMgfba8+E7dWaoIOcFG4zHFUyz1oCp0=\"}"
+    },
+    {
+      "id": "fixed-salt-ok",
+      "password": "跨平台备份-测试口令-2026",
+      "expectedStatus": "ok",
+      "expectedFormatVersion": 2,
+      "note": "固定 salt/nonce 的信封，Kotlin 用同一参数必须得到同一密文",
+      "envelopeJson": "{\"magic\":\"MHBK\",\"formatVersion\":2,\"kdfAlgorithm\":\"PBKDF2WithHmacSHA256\",\"kdfSaltB64\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=\",\"kdfIterations\":600000,\"kdfKeyLengthBits\":256,\"nonceB64\":\"AAECAwQFBgcICQoL\",\"ciphertextB64\":\"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\"}"
+    },
+    {
+      "id": "wrong-password",
+      "password": "错误口令-2026",
+      "expectedStatus": "authenticationFailed",
+      "expectedFormatVersion": 2,
+      "note": "口令错只能报认证失败，不能报结构损坏",
+      "envelopeJson": "{\"magic\":\"MHBK\",\"formatVersion\":2,\"kdfAlgorithm\":\"PBKDF2WithHmacSHA256\",\"kdfSaltB64\":\"1AO2g0xXMLknqPcCntndIJQ+qcFpEglUy/IDS2ch9Xc=\",\"kdfIterations\":600000,\"kdfKeyLengthBits\":256,\"nonceB64\":\"uCD38luCZpevWinx\",\"ciphertextB64\":\"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\"}"
+    },
+    {
+      "id": "downgraded-header",
+      "password": "跨平台备份-测试口令-2026",
+      "expectedStatus": "authenticationFailed",
+      "expectedFormatVersion": 1,
+      "note": "只改外层版本号会破坏 AAD，必须认证失败",
+      "envelopeJson": "{\"magic\":\"MHBK\",\"formatVersion\":1,\"kdfAlgorithm\":\"PBKDF2WithHmacSHA256\",\"kdfSaltB64\":\"1AO2g0xXMLknqPcCntndIJQ+qcFpEglUy/IDS2ch9Xc=\",\"kdfIterations\":600000,\"kdfKeyLengthBits\":256,\"nonceB64\":\"uCD38luCZpevWinx\",\"ciphertextB64\":\"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\"}"
+    },
+    {
+      "id": "newer-version",
+      "password": "跨平台备份-测试口令-2026",
+      "expectedStatus": "versionTooNew",
+      "expectedFormatVersion": 3,
+      "note": "更高版本必须在解密前被拒绝",
+      "envelopeJson": "{\"magic\":\"MHBK\",\"formatVersion\":3,\"kdfAlgorithm\":\"PBKDF2WithHmacSHA256\",\"kdfSaltB64\":\"1AO2g0xXMLknqPcCntndIJQ+qcFpEglUy/IDS2ch9Xc=\",\"kdfIterations\":600000,\"kdfKeyLengthBits\":256,\"nonceB64\":\"uCD38luCZpevWinx\",\"ciphertextB64\":\"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\"}"
+    },
+    {
+      "id": "salt-too-short",
+      "password": "跨平台备份-测试口令-2026",
+      "expectedStatus": "corrupted",
+      "expectedFormatVersion": 2,
+      "note": "16 字节盐值必须报具体原因",
+      "envelopeJson": "{\"magic\":\"MHBK\",\"formatVersion\":2,\"kdfAlgorithm\":\"PBKDF2WithHmacSHA256\",\"kdfSaltB64\":\"AAAAAAAAAAAAAAAAAAAAAA==\",\"kdfIterations\":600000,\"kdfKeyLengthBits\":256,\"nonceB64\":\"uCD38luCZpevWinx\",\"ciphertextB64\":\"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\"}",
+      "expectedReasonContains": "盐值长度"
+    },
+    {
+      "id": "nonce-not-base64",
+      "password": "跨平台备份-测试口令-2026",
+      "expectedStatus": "corrupted",
+      "expectedFormatVersion": 2,
+      "note": "坏 Base64 的 nonce 必须报损坏",
+      "envelopeJson": "{\"magic\":\"MHBK\",\"formatVersion\":2,\"kdfAlgorithm\":\"PBKDF2WithHmacSHA256\",\"kdfSaltB64\":\"1AO2g0xXMLknqPcCntndIJQ+qcFpEglUy/IDS2ch9Xc=\",\"kdfIterations\":600000,\"kdfKeyLengthBits\":256,\"nonceB64\":\"!!!not-base64!!!\",\"ciphertextB64\":\"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\"}",
+      "expectedReasonContains": "nonce"
+    },
+    {
+      "id": "not-a-backup",
+      "password": "跨平台备份-测试口令-2026",
+      "expectedStatus": "notABackup",
+      "expectedFormatVersion": 0,
+      "note": "不含 MHBK 签名的文本必须先判为非备份",
+      "text": "这不是一个 MediaHub 备份文件"
+    }
+  ],
+  "expectations": {
+    "manifestAppVersion": "0.1.0-alpha.1",
+    "manifestCreatedAtEpochMs": 1700000000000,
+    "includedSections": [
+      "servers",
+      "progress",
+      "preferences",
+      "favorites"
+    ],
+    "recordCounts": {
+      "servers": 1,
+      "progress": 1,
+      "preferences": 1,
+      "favorites": 1
+    },
+    "server": {
+      "backupId": "srv-1",
+      "name": "Test Emby",
+      "type": "EMBY",
+      "username": "user-A",
+      "isDefault": true,
+      "sortOrder": 0,
+      "endpointCount": 1,
+      "primaryUrl": "https://media.example:8920"
+    },
+    "progress": {
+      "serverBackupId": "srv-1",
+      "itemId": "item-1",
+      "positionMs": 90000,
+      "durationMs": 600000,
+      "isPaused": false,
+      "updatedAtEpochMs": 1700000000000,
+      "itemTitle": "Test Item",
+      "itemType": "Movie"
+    },
+    "favorite": {
+      "serverBackupId": "srv-1",
+      "itemId": "item-1",
+      "title": "Test Item",
+      "addedAtEpochMs": 1700000100000
+    },
+    "preferences": {
+      "defaultPlaybackSpeed": 1.5,
+      "subtitleSizeSp": 20,
+      "autoPlayNextEpisode": false
+    }
+  },
+  "androidExport": {
+    "password": "跨平台备份-测试口令-2026",
+    "envelopeJson": "{\"magic\":\"MHBK\",\"formatVersion\":2,\"kdfAlgorithm\":\"PBKDF2WithHmacSHA256\",\"kdfSaltB64\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=\",\"kdfIterations\":600000,\"kdfKeyLengthBits\":256,\"nonceB64\":\"AAECAwQFBgcICQoL\",\"ciphertextB64\":\"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\"}",
+    "payloadJson": "{\"manifest\":{\"formatVersion\":2,\"minimumReaderVersion\":2,\"appVersion\":\"0.1.0-alpha.1\",\"createdAtEpochMs\":1700000000000,\"includedSections\":[\"servers\",\"progress\",\"preferences\",\"favorites\"],\"recordCounts\":{\"servers\":1,\"progress\":1,\"preferences\":1,\"favorites\":1}},\"servers\":[{\"backupId\":\"srv-1\",\"name\":\"Test Emby\",\"type\":\"EMBY\",\"username\":\"user-A\",\"note\":null,\"isDefault\":true,\"sortOrder\":0,\"endpoints\":[{\"name\":\"默认线路\",\"url\":\"https://media.example:8920\",\"isPrimary\":true,\"enabled\":true,\"sortOrder\":0}]}],\"progress\":[{\"serverBackupId\":\"srv-1\",\"itemId\":\"item-1\",\"positionMs\":90000,\"durationMs\":600000,\"isPaused\":false,\"updatedAtEpochMs\":1700000000000,\"itemTitle\":\"Test Item\",\"itemType\":\"Movie\"}],\"favorites\":[{\"serverBackupId\":\"srv-1\",\"itemId\":\"item-1\",\"title\":\"Test Item\",\"addedAtEpochMs\":1700000100000}],\"preferences\":{\"playbackEngineMode\":\"AUTO\",\"defaultPlaybackSpeed\":1.5,\"subtitleSizeSp\":20,\"enableHardwareDecoding\":true,\"preferDirectPlay\":true,\"autoPlayNextEpisode\":false,\"maxBitrateBps\":null,\"showPlayerInfoOverlay\":false,\"autoLandscape\":true,\"immersiveBars\":true,\"subtitleStyle\":{\"textColor\":-1,\"backgroundColor\":0,\"edgeType\":1,\"edgeColor\":-16777216,\"textScale\":1.0,\"bottomPaddingFraction\":0.08,\"applyEmbeddedStyles\":true},\"gestures\":{\"scrubEnabled\":true,\"doubleTapSeekBackwardEnabled\":false,\"doubleTapSeekBackwardSeconds\":10,\"doubleTapSeekForwardEnabled\":false,\"doubleTapSeekForwardSeconds\":10,\"longPressSpeedEnabled\":true,\"longPressSpeedMin\":0.5,\"longPressSpeedMax\":5.0,\"longPressDirectionalEnabled\":true,\"longPressDefaultSpeed\":2.0}}}",
+    "saltB64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "nonceB64": "AAECAwQFBgcICQoL",
+    "ciphertextB64": "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",
+    "iterations": 600000,
+    "expect": {
+      "manifestAppVersion": "0.1.0-alpha.1",
+      "manifestCreatedAtEpochMs": 1700000000000,
+      "includedSections": [
+        "servers",
+        "progress",
+        "preferences",
+        "favorites"
+      ],
+      "recordCounts": {
+        "servers": 1,
+        "progress": 1,
+        "preferences": 1,
+        "favorites": 1
+      },
+      "server": {
+        "backupId": "srv-1",
+        "name": "Test Emby",
+        "type": "EMBY",
+        "username": "user-A",
+        "isDefault": true,
+        "sortOrder": 0,
+        "endpointCount": 1,
+        "primaryUrl": "https://media.example:8920"
+      },
+      "progress": {
+        "serverBackupId": "srv-1",
+        "itemId": "item-1",
+        "positionMs": 90000,
+        "durationMs": 600000,
+        "isPaused": false,
+        "updatedAtEpochMs": 1700000000000,
+        "itemTitle": "Test Item",
+        "itemType": "Movie"
+      },
+      "favorite": {
+        "serverBackupId": "srv-1",
+        "itemId": "item-1",
+        "title": "Test Item",
+        "addedAtEpochMs": 1700000100000
+      },
+      "preferences": {
+        "defaultPlaybackSpeed": 1.5,
+        "subtitleSizeSp": 20,
+        "autoPlayNextEpisode": false
+      }
+    }
+  }
+}

@@ -59,8 +59,8 @@ class TrackMapperTest {
         assertEquals(listOf(0, 1), mapped.audioTracks.map { it.index })
         assertEquals(listOf(0), mapped.subtitleTracks.map { it.index })
         // 选中态用 per-type 序号表达，UI 可直接回传给引擎（MappedTrackInfo.getTrackGroups(type) 同序）
-        assertEquals(TrackSelection(1, 0), mapped.selectedAudio)
-        assertEquals(TrackSelection(0, 0), mapped.selectedSubtitle)
+        assertEquals(TrackSelection(1, 0, mapped.snapshotToken), mapped.selectedAudio)
+        assertEquals(TrackSelection(0, 0, mapped.snapshotToken), mapped.selectedSubtitle)
         assertTrue(mapped.audioTracks[1].isSelected)
         assertFalse(mapped.audioTracks[0].isSelected)
         assertTrue(mapped.subtitleTracks.single().isSelected)
@@ -99,5 +99,54 @@ class TrackMapperTest {
         val mapped = TrackMapper.mapTracks(tracks)
         assertTrue(mapped.audioTracks.isEmpty())
         assertEquals(null, mapped.selectedAudio)
+    }
+
+    @Test
+    fun `adaptive audio group exposes every native track and its actual selected index`() {
+        val low = Format.Builder().setId("audio-low").setLabel("low-bitrate")
+            .setLanguage("eng").setSampleMimeType("audio/mp4a-latm").setAverageBitrate(128_000).build()
+        val high = Format.Builder().setId("audio-high").setLabel("high-bitrate")
+            .setLanguage("eng").setSampleMimeType("audio/mp4a-latm").setAverageBitrate(256_000).build()
+        val native = Tracks.Group(TrackGroup("audio-variants", low, high), true,
+            intArrayOf(C.FORMAT_HANDLED, C.FORMAT_HANDLED), booleanArrayOf(false, true))
+        val mapped = TrackMapper.mapTracks(Tracks(listOf(native)))
+        assertEquals(listOf("low-bitrate", "high-bitrate"), mapped.audioTracks.map { it.title })
+        assertEquals(listOf(0, 1), mapped.audioTracks.map { it.index })
+        assertEquals(listOf(false, true), mapped.audioTracks.map { it.isSelected })
+        assertEquals(0, mapped.selectedAudio!!.groupIndex)
+        assertEquals(1, mapped.selectedAudio!!.trackIndex)
+    }
+
+    @Test
+    fun `subtitle group preserves each native track support selection and forced flag`() {
+        val regular = Format.Builder().setId("text-regular").setLabel("regular")
+            .setLanguage("eng").setSampleMimeType("text/vtt").build()
+        val forced = Format.Builder().setId("text-forced").setLabel("forced")
+            .setLanguage("eng").setSampleMimeType("text/vtt")
+            .setSelectionFlags(C.SELECTION_FLAG_FORCED).build()
+        val native = Tracks.Group(TrackGroup("text-variants", regular, forced), false,
+            intArrayOf(C.FORMAT_UNSUPPORTED_SUBTYPE, C.FORMAT_HANDLED), booleanArrayOf(false, true))
+        val mapped = TrackMapper.mapTracks(Tracks(listOf(native)))
+        assertEquals(listOf("regular", "forced"), mapped.subtitleTracks.map { it.title })
+        assertEquals(listOf(false, true), mapped.subtitleTracks.map { it.isSupported })
+        assertEquals(listOf(false, true), mapped.subtitleTracks.map { it.isSelected })
+        assertTrue(mapped.subtitleTracks[1].isForced)
+        assertEquals(0, mapped.selectedSubtitle!!.groupIndex)
+        assertEquals(1, mapped.selectedSubtitle!!.trackIndex)
+    }
+
+    @Test
+    fun `row ordinal stays distinct from native group ordinal after expansion`() {
+        fun audio(id: String) = Format.Builder().setId(id).setLabel(id)
+            .setLanguage("eng").setSampleMimeType("audio/mp4a-latm").build()
+        val first = Tracks.Group(TrackGroup("first", audio("a0"), audio("a1")), true,
+            intArrayOf(C.FORMAT_HANDLED, C.FORMAT_HANDLED), booleanArrayOf(false, false))
+        val second = Tracks.Group(TrackGroup("second", audio("b0")), false,
+            intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true))
+        val mapped = TrackMapper.mapTracks(Tracks(listOf(first, second)))
+        assertEquals(listOf("a0", "a1", "b0"), mapped.audioTracks.map { it.title })
+        assertEquals(listOf(0, 1, 2), mapped.audioTracks.map { it.index })
+        assertEquals(1, mapped.selectedAudio!!.groupIndex)
+        assertEquals(0, mapped.selectedAudio!!.trackIndex)
     }
 }

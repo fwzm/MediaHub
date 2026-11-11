@@ -18,6 +18,7 @@ import kotlinx.serialization.json.Json
  */
 internal object WebDavAuth {
 
+    /** Current policy is lossless UTF-8 on the first request; RFC7617 leaves the ASCII-compatible default unspecified. */
     fun basicHeader(username: String, password: String): String {
         val raw = "$username:$password"
         val encoded = java.util.Base64.getEncoder().encodeToString(raw.toByteArray(Charsets.UTF_8))

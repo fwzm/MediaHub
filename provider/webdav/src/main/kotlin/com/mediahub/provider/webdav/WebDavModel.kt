@@ -17,6 +17,8 @@ internal data class WebDavResource(
     val contentType: String?,
     val lastModified: String?,
     val etag: String?,
+    /** A successful response or propstat was observed; a bare href is not access evidence. */
+    val hasSuccessfulStatus: Boolean = false,
 )
 
 /**

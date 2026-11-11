@@ -9,4 +9,5 @@ data class JellyfinSystemInfoPublic(
     @SerialName("Id") val id: String? = null,
     @SerialName("ServerName") val serverName: String? = null,
     @SerialName("Version") val version: String? = null,
+    @SerialName("ProductName") val productName: String? = null,
 )

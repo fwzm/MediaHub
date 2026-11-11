@@ -72,6 +72,30 @@ class JellyfinProviderConnectionTest {
     }
 
     @Test
+    fun explicitOtherProductIsRejectedWithoutEchoingItsName() = runBlocking {
+        val untrustedName = "fixture-other-product-private-label"
+        server.enqueue(MockResponse().setBody("""{"Id":"fixture-id","Version":"1","ProductName":"$untrustedName"}"""))
+        val result = provider().testConnection()
+        assertFalse("Explicit other product must not be accepted as Jellyfin", result.ok)
+        assertEquals(com.mediahub.provider.api.ProviderException.ErrorCode.PARSE, result.errorCode)
+        assertFalse(result.message.orEmpty().contains(untrustedName))
+    }
+
+    @Test
+    fun matchingJellyfinProductIsAcceptedCaseInsensitively() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"Id":"fixture-id","Version":"1","ProductName":"jELlYfIn Server"}"""))
+        assertTrue(provider().testConnection().ok)
+    }
+
+    @Test
+    fun missingNullOrBlankProductRetainsExistingCompatibility() = runBlocking {
+        for (product in listOf("null", "\"\"", "\"   \"")) {
+            server.enqueue(MockResponse().setBody("""{"Id":"fixture-id","Version":"1","ProductName":$product}"""))
+            assertTrue(provider().testConnection().ok)
+        }
+    }
+
+    @Test
     fun `http 200 but wrong json fails`() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"hello":"world"}"""))
         val result = provider().testConnection()
@@ -84,6 +108,25 @@ class JellyfinProviderConnectionTest {
         server.enqueue(MockResponse().setResponseCode(404))
         val result = provider().testConnection()
         assertFalse(result.ok)
+    }
+
+    @Test
+    fun `http 401 asks for login`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(401))
+        val result = provider().testConnection()
+        assertFalse(result.ok)
+        assertTrue("401 应提示需要登录（实际：${result.message}）", result.message!!.contains("需要登录"))
+    }
+
+    @Test
+    fun `http 403 is reported as access denied, not as missing login`() = runBlocking {
+        // 401 与 403 语义不同：403 往往凭据完全正确，只是访问被策略拒绝。
+        // 合并成"需要登录"会让用户在错误方向上反复重输密码（G3 已修过同一类问题）。
+        server.enqueue(MockResponse().setResponseCode(403))
+        val result = provider().testConnection()
+        assertFalse(result.ok)
+        assertTrue("403 必须说明是访问被拒（实际：${result.message}）", result.message!!.contains("拒绝访问"))
+        assertFalse("403 不得再暗示需要登录（实际：${result.message}）", result.message!!.contains("需要登录"))
     }
 
     // ---- ADR-039：反代子路径必须保留，禁止 /emby 前缀 ----

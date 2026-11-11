@@ -3,8 +3,8 @@ package com.mediahub.model
 /**
  * 音轨（供播放器选择器使用，字段与 Media3 轨道信息解耦）。
  *
- * [index] 是**同类型轨道内的序号**（0..N-1，音轨列表位置 == 引擎 per-renderer 组序号），
- * 可直接作为 TrackSelection 的 groupIndex（Phase 1B-2.4 统一三套 index 语义）。
+ * [index] 是同类型 UI 行序号（0..N-1）。Media3 同组多轨展开后，行号不等于组号；
+ * 播放期组/轨地址由 player:engine 的快照行映射提供，不扩散到领域模型。
  */
 data class AudioTrack(
     val index: Int,

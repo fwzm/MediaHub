@@ -20,6 +20,9 @@ import com.mediahub.provider.jellyfin.session.JellyfinSession
 import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -39,6 +42,25 @@ import org.junit.Test
  * Token 不进 URL / 错误与取消映射。
  */
 class JellyfinPlaybackProviderTest {
+    @Test
+    fun `missing source container cannot use ISO item container for static playback`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setBody("""{"MediaSources":[{"Id":"source-1","SupportsDirectStream":true}]}"""))
+        try {
+            provider().resolvePlayback(movie().copy(container = "iso"), PlaybackOptions())
+            fail("ISO item metadata must not become stream.iso")
+        } catch (_: ProviderException.NotYetImplemented) { }
+        assertEquals(1, server.requestCount)
+    }
+    @Test
+    fun `ISO container without path is rejected before and after static negotiation`() {
+        for (direct in listOf(false, true)) {
+            val source = com.mediahub.provider.jellyfin.api.JellyfinMediaSourceInfoDto(
+                id = "iso-source", container = "ISO", path = null, supportsDirectStream = direct)
+            assertNull(JellyfinMediaSourceSelector.selectStaticNegotiationCandidate(listOf(source)))
+            assertNull(JellyfinMediaSourceSelector.selectDirectStream(listOf(source)))
+        }
+    }
 
     private lateinit var server: MockWebServer
     private lateinit var tokenStorage: FakeSecretStorage
@@ -135,6 +157,7 @@ class JellyfinPlaybackProviderTest {
         assertTrue("实际 body：$body", body.contains("\"StartTimeTicks\":900000000"))
         assertTrue(body.contains("\"EnableTranscoding\":false"))
         assertTrue(body.contains("\"EnableDirectStream\":true"))
+        assertTrue(body.contains("\"EnableDirectPlay\":true"))
         // v10.9.0 PlaybackInfoRequest 精确 contract：MaxStreamingBitrate int?（请求值直传）
         assertTrue(body.contains("\"MaxStreamingBitrate\":120000000"))
         // 无 IsPlayback 字段（ADR-039 review 修正：禁猜 Emby shape）
@@ -207,18 +230,132 @@ class JellyfinPlaybackProviderTest {
     @Test
     fun `no direct stream capable source maps to transcode not implemented`() = runBlocking {
         seedSession()
-        server.enqueue(
-            MockResponse().setResponseCode(200).setBody(
-                """{"MediaSources":[{"Id":"ms-1","Container":"mp4","SupportsDirectStream":false,
-                     "SupportsTranscoding":true}]}"""
+        repeat(2) {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """{"MediaSources":[{"Id":"ms-1","Container":"mp4","SupportsDirectStream":false,
+                         "SupportsTranscoding":true}]}"""
+                )
             )
-        )
+        }
         try {
             provider().resolvePlayback(movie(), PlaybackOptions())
             fail("必须抛 NotYetImplemented")
         } catch (e: ProviderException.NotYetImplemented) {
             assertTrue(e.message!!.contains("转码"))
         }
+        assertEquals("A failed static negotiation must not loop", 2, server.requestCount)
+    }
+
+    private fun realResponse(name: String): String =
+        requireNotNull(javaClass.getResourceAsStream("/jellyfin12.1/$name.json"))
+            .bufferedReader().use { it.readText() }
+
+    @Test
+    fun `real Jellyfin 12_1 response negotiates original bytes without server subtitles`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setBody(realResponse("default-external-subtitle-unavailable")))
+        server.enqueue(MockResponse().setBody(realResponse("source-bound-no-server-subtitle")))
+
+        val source = provider().resolvePlayback(movie(), PlaybackOptions(startPositionMs = 12_000, maxBitrate = 3_000_000))
+        val sourceId = "11be6be8fc9125152cb0f2d7a5516ead"
+        val url = requireNotNull(source.url.toHttpUrlOrNull())
+        assertEquals("/Videos/m1/stream.mkv", url.encodedPath)
+        assertEquals(sourceId, url.queryParameter("MediaSourceId"))
+        assertEquals("true", url.queryParameter("Static"))
+        assertNull(url.queryParameter("api_key"))
+        assertFalse(source.url.contains("tok-1"))
+        assertEquals(PlaybackMode.DIRECT_STREAM, source.mode)
+        assertEquals("h264", source.videoCodec)
+        assertEquals("aac", source.audioCodec)
+        assertEquals(60_021L, source.durationMs)
+        assertTrue(source.headers["Authorization"]!!.contains("Token=\"tok-1\""))
+        assertEquals(2, server.requestCount)
+
+        val initial = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        val retry = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals("true", initial.getValue("EnableDirectPlay").jsonPrimitive.content)
+        assertFalse(initial.containsKey("SubtitleStreamIndex"))
+        assertEquals(sourceId, retry.getValue("MediaSourceId").jsonPrimitive.content)
+        assertEquals("-1", retry.getValue("SubtitleStreamIndex").jsonPrimitive.content)
+        for (body in listOf(initial, retry)) {
+            assertEquals("false", body.getValue("EnableTranscoding").jsonPrimitive.content)
+            assertEquals("true", body.getValue("EnableDirectStream").jsonPrimitive.content)
+            assertEquals("120000000", body.getValue("StartTimeTicks").jsonPrimitive.content)
+            assertEquals("3000000", body.getValue("MaxStreamingBitrate").jsonPrimitive.content)
+        }
+    }
+
+    @Test
+    fun `disabled direct play does not retry server subtitle policy`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setBody(realResponse("default-external-subtitle-unavailable")))
+        try {
+            provider().resolvePlayback(movie(), PlaybackOptions(enableDirectPlay = false))
+            fail("Unavailable source must remain rejected")
+        } catch (_: ProviderException.NotYetImplemented) { }
+        assertEquals(1, server.requestCount)
+        val body = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals("false", body.getValue("EnableDirectPlay").jsonPrimitive.content)
+        assertFalse(body.containsKey("SubtitleStreamIndex"))
+    }
+
+    @Test
+    fun `explicit subtitle language does not silently negotiate server subtitles off`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setBody(realResponse("default-external-subtitle-unavailable")))
+        try {
+            provider().resolvePlayback(movie(), PlaybackOptions(preferredSubtitleLanguage = "zh"))
+            fail("Explicit subtitle preference must prevent implicit suppression")
+        } catch (_: ProviderException.NotYetImplemented) { }
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `ISO only source is not retried even if direct play is supported`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setBody("""{"MediaSources":[{"Id":"iso-source","Path":"/own/MOVIE.ISO?own=1","SupportsDirectPlay":true,"SupportsDirectStream":false}]}"""))
+        try {
+            provider().resolvePlayback(movie(), PlaybackOptions())
+            fail("ISO remains outside static playback")
+        } catch (_: ProviderException.NotYetImplemented) { }
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `source bound retry does not accept another source returned as playable`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setBody(realResponse("default-external-subtitle-unavailable")))
+        server.enqueue(MockResponse().setBody("""{"MediaSources":[{"Id":"other-source","Container":"mkv","SupportsDirectStream":true}]}"""))
+        try {
+            provider().resolvePlayback(movie(), PlaybackOptions())
+            fail("A different response identity must not satisfy the retry")
+        } catch (_: ProviderException.Parse) { }
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun `direct play flag alone does not bypass direct stream capability after retry`() = runBlocking {
+        seedSession()
+        val body = """{"MediaSources":[{"Id":"ms-1","Container":"mkv","SupportsDirectPlay":true,"SupportsDirectStream":false}]}"""
+        repeat(2) { server.enqueue(MockResponse().setBody(body)) }
+        try {
+            provider().resolvePlayback(movie(), PlaybackOptions())
+            fail("Static source still requires successful negotiation")
+        } catch (_: ProviderException.NotYetImplemented) { }
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun `source negotiation retry preserves authentication failure mapping`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setBody(realResponse("default-external-subtitle-unavailable")))
+        server.enqueue(MockResponse().setResponseCode(401))
+        try {
+            provider().resolvePlayback(movie(), PlaybackOptions())
+            fail("Retry authentication failure must remain AuthExpired")
+        } catch (_: ProviderException.AuthExpired) { }
+        assertEquals(2, server.requestCount)
     }
 
     // ---- 4：错误与取消 ----
