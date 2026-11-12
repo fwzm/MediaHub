@@ -336,7 +336,14 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   （Android 侧的契约/规划/导入导出/配对契约/分块传输协议/「回环传输 → 导入闭环」已就位，
   协议与 Windows 逐字节对齐，见 `docs/android-source-sync-transfer.md`；Windows 端已有可选的传输对端认证
   （Windows W6-24 / Android W6-25，五个稳定码与帧格式两端同名同序）；TLS 1.3 与公钥指纹钉扎两端也都就位（Windows W6-26 / Android W6-29，四个 `tls-*` 码同名同序，Android 用 SPKI 而非整证书算指纹），并有与 Windows 真子进程的双向联调（W6-32，JSSE ↔ SslStream）；仍缺：跨机（非回环）的真实证据——Windows 的地址闸门已由 W6-51 显式放开（`--bind` 加 `--allow-non-loopback`，只接受单播字面量），但一台机器证明不了它，E1–E6 全 NOT_RUN，Android 的监听端也已有同形状的地址入口（W6-52：`sync.listen.host` + `sync.listen.allow-host`，只收单播字面量）；拨号侧（发送卡与「接收」卡）的同形状开关也在 W6-52b 里补齐（`sync.send.allow-host` / `sync.receive.allow-host`）（Android 发送端的投递确认已由 W6-46 补上、界面开关见 W6-48，但默认仍关闭）；Android 侧已有回环监听端（W6-34：`SourceSyncTransferListener` 只绑回环、可连续 accept，`SourceSyncListenerImportService` 把它接进导入闭环，Windows 的 `transfer send` 可以直接推到 Android 的监听端口，界面入口也已就位（W6-36：同步页的「接收（监听）」区块可以开一个回环监听、等一次发送，收到的信封只进预览、写入仍要逐条允许后再应用；今天 App 里没有证书下发通道，所以 TLS 开关如实禁用、只能明文）；Android 端也已对齐回执帧（W6-40：`receipt-*` 四码与 Windows 同名同序，监听端只在信封解码成功后回一个裸 `0x04` 字节、gate 在端点层，拨号端可等回执，默认关时线上字节与 W6-22 的冻结向量逐字节相等；界面还没有开关）；导入页的两张接收卡片按 W6-41 移到页面末尾，首屏保留「选择文件 → 预览 → 应用」主流程（此前它们被插在按钮行之前，把主流程挤出首屏，CI 的 visual-instrumentation 上两次 Android run 就红在这 6 例首屏可见性断言上）；Android 也已是发送端（W6-42：同步页末尾的「发送（Android → Windows）」区块把本机导出的信封推给 Windows 的 `transfer serve`，可选 TLS 指纹钉扎 / HMAC 认证 / 等回执，默认全关时线上字节与 W6-22 冻结向量逐字节相等；本层只补 5 个「还没拨号就拒」的码，其余码原样透传；在途发送可以取消（W6-49：新增 `SourceSyncSendLauncher` 只做 Job 记账、不持信封与口令，`sync.send.cancel` 按钮发送中才可用，取消后状态回到 Idle 且不产生任何失败码，释放单飞后可以立刻重发；真实 Socket 中途取消与真机按钮仍是 `NOT_RUN` / `DEVICE_UNVERIFIED`），Android → Windows 的发送方向也还没和真 CLI 对跑）；三张卡（接收 / 监听 / 发送）另有 47 例 instrumentation 证据（W6-44 的 19 例、W6-48 的 8 例、W6-49 的 6 例、W6-52 的 3 例、W6-53 的 3 例、W6-54 的 4 例与 W6-52b 的 4 例：W6-52 那 3 例钉住地址框与开关在树里可交互、表单逐字回传、监听中两者禁用且端口行写实际地址；这 3 例本机没有设备/模拟器可跑，设备结论待下一次 CI；W6-49 那 6 例钉住「发送中才启用取消按钮、点完回到 Idle、失败行不出现」；端口闸门与「TLS 无证书就禁用」、口令框的 Password 语义、失败行与成功行文案，以及「不滚动也看得见选择文件 / 预览」的首屏不变式；本机无设备，设备结论只来自 CI 的 API 32 / 36 模拟器；W6-48 的两个协议开关同样先 performScrollTo 再断言，关掉时不影响主流程首屏））。
-- **发布阻断**：见下节许可证；另有 MSIX / 代码签名 / 干净机安装 `NOT_RUN`（`SIGNING_BLOCKED`）。
+- **发布阻断**：许可证（见下节）未解决前不得正式分发；打包链路当前只有**未签名的便携 zip**，
+  MSIX / 安装器 / 代码签名 / 干净机安装全部 `NOT_RUN`，逐项条件如下：
+  - **代码签名**：`SIGNING_BLOCKED`，需受信任证书，且证书 Subject 必须与清单 `Publisher` 一致；
+    自签名只能做测试、用户需自行信任，不解除本项。
+  - **MSIX**：未实现（仓库内没有 `Package.appxmanifest`）；条件为先补清单与四段版本号，再在本机构建未签名包。
+  - **干净机安装**：`NOT_RUN`，条件为一台没有 .NET 与 Windows App Runtime 的干净 Windows 机器或快照。
+  - **便携 zip**：本机可从复制出来的目录启动；安装器 / MSIX 在缺少 Windows App Runtime 时的具体行为见
+    [windows/docs/licensing/PACKAGING.md](windows/docs/licensing/PACKAGING.md)。
 
 ### 构建与测试
 
