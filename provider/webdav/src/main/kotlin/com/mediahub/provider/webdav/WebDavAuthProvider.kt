@@ -47,7 +47,6 @@ internal class WebDavAuthProvider(
             return AuthResult.Failure(ProviderException.AuthFailed(server.id, "用户名不能为空"))
         }
 
-        val header = WebDavAuth.basicHeader(username, password)
         val rootUrl = WebDavUrls.normalizeBase(server.baseUrl)
         if (rootUrl.isBlank()) {
             return AuthResult.Failure(ProviderException.AuthFailed(server.id, "服务器地址为空"))
@@ -59,7 +58,7 @@ internal class WebDavAuthProvider(
         val attemptIdentity = credentialStore.identityOf(server)
 
         try {
-            requireRootResponse(rootUrl, header)
+            requireRootResponse(rootUrl, username, password)
         } catch (e: CancellationException) {
             throw e
         } catch (e: ProviderException.AuthExpired) {
@@ -87,6 +86,22 @@ internal class WebDavAuthProvider(
         return AuthResult.Success(MediaUser(serverId = server.id, userId = username, displayName = username))
     }
 
+    /**
+     * 认证探测：首个受保护请求一律 UTF-8（无损；对 ASCII 与历史编码字节完全一致）。
+     * 只有当 401 的 Basic challenge **未**声明 `charset="UTF-8"`、且凭据可由
+     * ISO-8859-1 无损表示时，才追加一次 ISO-8859-1 重试（兼容按 RFC 2617 历史默认
+     * 比较字节的老 NAS）；其余情况原样上抛，不做有损重试，也不重复同一请求。
+     */
+    private suspend fun requireRootResponse(rootUrl: String, username: String, password: String) {
+        try {
+            requireRootResponse(rootUrl, WebDavAuth.basicHeader(username, password))
+        } catch (e: ProviderException.AuthExpired) {
+            val retry = WebDavAuth.basicHeaderLatin1OrNull(username, password)
+            if (retry == null || !WebDavAuth.isBasicChallenge(e.challenge) || WebDavAuth.declaresUtf8(e.challenge)) throw e
+            requireRootResponse(rootUrl, retry)
+        }
+    }
+
     private suspend fun requireRootResponse(rootUrl: String, authorization: String) {
         val resources = api.propfind(rootUrl, depth = 0, authorization = authorization)
         if (!WebDavRootEvidence.isRepresented(rootUrl, resources)) throw ProviderException.Parse(server.id)
@@ -112,7 +127,7 @@ internal class WebDavAuthProvider(
             return AuthSessionState.Error(AuthSessionErrorKind.INVALID_RESPONSE, "服务器地址为空")
         }
         return try {
-            requireRootResponse(rootUrl, WebDavAuth.basicHeader(username, credential.password))
+            requireRootResponse(rootUrl, username, credential.password)
             // 迟到 2xx（A3-2）：响应到达时身份/世代已变 → 不得复活旧用户状态。
             // 世代推进覆盖：较新登录（含同身份重登，旧密码已失效）、登出/删除、
             // restore 失效——一律回 SignedOut 交由上层重新认证。

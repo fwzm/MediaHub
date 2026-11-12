@@ -63,14 +63,23 @@ class FlowGlowClock internal constructor(
         if (job?.isActive == true) return
         job = scope.launch {
             var lastNanos = 0L
+            var pendingNanos = 0L
             while (isActive) {
                 val now = awaitFrameNanos()
-                if (lastNanos != 0L && now - lastNanos >= 1_000_000_000L / fps) {
-                    timeSec += (now - lastNanos) / 1_000_000_000f
+                if (lastNanos == 0L) {
                     lastNanos = now
-                } else if (lastNanos == 0L) {
-                    lastNanos = now
+                    continue
                 }
+                pendingNanos += now - lastNanos
+                lastNanos = now
+                val intervalNanos = 1_000_000_000L / fps
+                if (pendingNanos < intervalNanos) continue
+                // Advance by whole intervals and keep the remainder. Resetting the baseline to
+                // `now` dropped the leftover 8.33 ms of every 41.67 ms tick, so 24 fps on a 60 Hz
+                // display actually advanced 20 times a second (PR #10).
+                val ticks = pendingNanos / intervalNanos
+                pendingNanos -= ticks * intervalNanos
+                timeSec += (ticks * intervalNanos) / 1_000_000_000f
             }
         }
     }
@@ -237,11 +246,12 @@ fun SpectrumBars(
     smoother: SmoothedSpectrum = remember { SmoothedSpectrum() },
 ) {
     val currentProvider by rememberUpdatedState(provider)
+    val drawDelta = remember { DrawDeltaClock() }
     Box(
         modifier = modifier.drawBehind {
             val s = smoother.process(
                 currentProvider.sample(clock.timeSec.toDouble()),
-                dtSec = 1f / clock.fps.coerceAtLeast(1),
+                dtSec = drawDelta.nextSec(fallbackSec = 1f / clock.fps.coerceAtLeast(1)),
             )
             val slot = size.width / 3f
             val levels = listOf(s.bass, s.mid, s.treble)

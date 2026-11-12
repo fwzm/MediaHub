@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using MediaHub.Net;
 using MediaHub.Providers;
+using MediaHub.Storage;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage.Streams;
 
@@ -24,27 +25,23 @@ namespace MediaHub.App.Services;
 public sealed class ImageCache : IDisposable
 {
     private const int MaxMemoryEntries = 220;
-    private const long MaxDiskBytes = 256L * 1024 * 1024;
-    private static readonly TimeSpan DiskEntryTtl = TimeSpan.FromDays(30);
 
     private readonly ConcurrentDictionary<string, Task<BitmapImage?>> _inFlight = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, LinkedListNode<CacheEntry>> _memoryIndex = new(StringComparer.Ordinal);
     private readonly LinkedList<CacheEntry> _memoryOrder = new();
     private readonly object _memoryGate = new();
-    private readonly string _diskRoot;
+    private readonly ArtworkDiskCache _disk;
     private readonly LogService _log;
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcher;
-    private long _diskBytes;
     private int _memoryBytes;
 
     public ImageCache(LogService log, Microsoft.UI.Dispatching.DispatcherQueue dispatcher)
     {
         _log = log;
         _dispatcher = dispatcher;
-        _diskRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MediaHub", "artwork");
-        try { Directory.CreateDirectory(_diskRoot); } catch { }
-        _ = Task.Run(TrimDiskCache);
+        _disk = new ArtworkDiskCache(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MediaHub", "artwork"));
+        _ = Task.Run(_disk.Trim);
     }
 
     private sealed record CacheEntry(string Key, BitmapImage Image, int ApproxBytes);
@@ -91,13 +88,13 @@ public sealed class ImageCache : IDisposable
     {
         try
         {
-            byte[]? bytes = await ReadFromDiskAsync(key, ct).ConfigureAwait(false);
+            byte[]? bytes = await Task.Run(() => _disk.TryRead(key, ct), ct).ConfigureAwait(false);
 
             if (bytes is null)
             {
                 bytes = await handle.Images!.FetchImageAsync(itemId, imageType, tag, maxWidth, ct).ConfigureAwait(false);
                 if (bytes.Length == 0) return null;
-                _ = Task.Run(() => WriteToDiskAsync(key, bytes), CancellationToken.None);
+                _ = Task.Run(() => _disk.Write(key, bytes), CancellationToken.None);
             }
 
             BitmapImage? image = await ToBitmapAsync(bytes, ct).ConfigureAwait(false);
@@ -196,85 +193,6 @@ public sealed class ImageCache : IDisposable
 
     // ---------------------------------------------------------------- disk cache
 
-    private string PathFor(string key)
-    {
-        // A hash keeps the file name bounded and free of characters the filesystem dislikes.
-        byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key));
-        return Path.Combine(_diskRoot, Convert.ToHexString(hash).ToLowerInvariant() + ".img");
-    }
-
-    private async Task<byte[]?> ReadFromDiskAsync(string key, CancellationToken ct)
-    {
-        string path = PathFor(key);
-        try
-        {
-            if (!File.Exists(path)) return null;
-            if (DateTime.UtcNow - File.GetLastWriteTimeUtc(path) > DiskEntryTtl)
-            {
-                File.Delete(path);
-                return null;
-            }
-            return await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private async Task WriteToDiskAsync(string key, byte[] bytes)
-    {
-        try
-        {
-            string path = PathFor(key);
-            string temp = path + ".tmp";
-            await File.WriteAllBytesAsync(temp, bytes).ConfigureAwait(false);
-            File.Move(temp, path, overwrite: true);
-            Interlocked.Add(ref _diskBytes, bytes.Length);
-
-            if (Interlocked.Read(ref _diskBytes) > MaxDiskBytes) TrimDiskCache();
-        }
-        catch
-        {
-            // Caching is an optimisation; failing to write must not surface to the user.
-        }
-    }
-
-    /// <summary>Evicts expired entries, then oldest-first until the cap is met.</summary>
-    private void TrimDiskCache()
-    {
-        try
-        {
-            var files = new DirectoryInfo(_diskRoot).GetFiles("*.img");
-            long total = 0;
-            var live = new List<FileInfo>(files.Length);
-            foreach (var file in files)
-            {
-                if (DateTime.UtcNow - file.LastWriteTimeUtc > DiskEntryTtl)
-                {
-                    try { file.Delete(); } catch { }
-                    continue;
-                }
-                total += file.Length;
-                live.Add(file);
-            }
-            Interlocked.Exchange(ref _diskBytes, total);
-
-            if (total <= MaxDiskBytes) return;
-            foreach (var file in live.OrderBy(f => f.LastWriteTimeUtc))
-            {
-                if (total <= MaxDiskBytes) break;
-                total -= file.Length;
-                try { file.Delete(); } catch { }
-            }
-            Interlocked.Exchange(ref _diskBytes, total);
-        }
-        catch
-        {
-            // A cache trim failure is never user-visible.
-        }
-    }
-
     public void Clear()
     {
         lock (_memoryGate)
@@ -283,7 +201,7 @@ public sealed class ImageCache : IDisposable
             _memoryIndex.Clear();
             _memoryBytes = 0;
         }
-        try { foreach (var f in new DirectoryInfo(_diskRoot).GetFiles("*.img")) f.Delete(); } catch { }
+        _disk.Clear();
     }
 
     public void Dispose()
