@@ -860,3 +860,41 @@ X-Emby-Authorization and separate X-Emby-Token. No store/schema migration is inv
   不改动 M15 冷却表；真机 429 退避观感与"重试耗尽后的用户提示"仍需真机复核。
 - 证据：`player:engine:testDebugUnitTest`（--rerun-tasks --no-build-cache）
   24 suites / 180 tests / 0 failures；新增 12 例（策略契约 10 + 接线与真实链 2）。
+
+## ADR-048 多轨同组默认选轨策略（Media3）
+- 状态：**已实现、待产品确认**（2026-11-12）；默认策略为过渡方案，产品给出明确偏好规则后
+  以产品规则为准修改本 ADR，不改写既有测试断言来迁就实现。
+- 背景：`HANDOFF.md` 遗留项"每组取第一轨，多轨同组待完善"中的**轨道枚举**部分已由
+  ADR-032 勘误解决（`TrackMapper` 逐轨展开，行序号与组/轨地址的对应见 `TrackRowMap`），
+  但**默认选中哪一条**一直完全交给 Media3 `DefaultTrackSelector` 的隐式行为，MediaHub 既没有
+  显式策略，也没有测试钉死。Media3 在未设置偏好语言时把"系统语言匹配"排在容器
+  `SELECTION_FLAG_DEFAULT` **之后**，因此系统中文用户可能被文件里标了 DEFAULT 的英文轨压过。
+- 决策：新增纯策略对象 `player:engine` 的 `TrackPreferencePolicy`，在唯一生产构造点
+  `PlayerFactory.createTrackSelector()` 写入 `preferredAudioLanguages`。阶梯（强 → 弱）：
+  1. **语言偏好**：用户显式偏好（当前无设置项/UI，预留）→ 系统 `LocaleList`，按用户顺序；
+  2. **容器 DEFAULT 标记**：同语言内优先；
+  3. **设备支持态**：renderer 不支持的编码永不默认选中（硬约束，Media3 侧已保证）；
+  4. **码率 / 声道 / 采样率**：同语言同能力下取质量更高的一条；
+  5. **首轨兜底**：全部比较项相等时取组内/组间第一条，结果确定（可复现）。
+  - 偏好语言收敛规则：BCP-47 取语言子标签并小写、按序去重（`zh-Hans-CN` → `zh`），
+    与 Media3 `Util.getSystemLanguageCodes()` 的粒度一致；三字母码（`chi`/`zho`）由
+    Media3 `Util.normalizeLanguageCode` 归一后匹配。
+  - 空偏好列表 = 不改参数，保持 Media3 既有行为（无系统语言时不会退化成"必须匹配"）。
+  - 字幕**不进入 v1 默认策略**：设置 `preferredTextLanguages` 会让 Media3 自动打开同语言字幕，
+    属于会改变现有点播观感的产品决策，保持"默认关闭、仅随容器 default/forced 标记"。
+- 被放弃的替代方案：
+  - **自研 scorer + 每次 `onTracksChanged` 写 override**：能完全控制阶梯（例如把 DEFAULT 排在语言
+    之前），但会在每次轨道快照刷新时与 live/自适应流争夺选择权，且需要额外区分"用户已手选"，
+    风险与改动面都远大于收益，放弃。
+  - **静态编码优先级（`preferredAudioMimeTypes`）**：Media3 的 mime 偏好排在码率之前，
+    会让 96kbps AAC 压过 640kbps EAC3，属于用兼容性牺牲音质；且不可解码的编码已被 renderer
+    支持态排除，故 v1 不用静态编码排序，把编码差异交给"支持态 + 码率/声道"。
+  - **沿用 Media3 locale 次选（不显式设置语言）**：即现状，DEFAULT 标记会压过系统语言，
+    正是本条遗留问题要修的行为。
+- 边界与影响：无 UI 改动；手动选轨仍走 `TrackSelectionPlanner` 的 override 语义，默认策略只影响
+  "用户未选择时"；mpv 内核使用自身权威轨道属性，本 ADR 不改变 mpv 路径。纯音频、无视频、
+  无音轨、单轨组、全部不支持等边界由契约测试覆盖。
+- 待产品确认：用户级音轨/字幕语言偏好是否要做成设置项（含繁简/地区区分）、字幕是否随系统语言
+  自动开启、默认是否允许"低码率但可硬解"优先于高码率软解。
+- 证据：见 `docs/player/README.md` 的"默认选轨策略"小节与 PR 说明（red→green 命令与结果）。
+

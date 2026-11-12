@@ -48,6 +48,26 @@ Media3 的音轨/字幕选择使用当前快照中的 group/track 地址与所�
 mpv 使用自己的权威轨道属性。Off 与当前没有可选轨道分别表达，不能拿旧下标作用于新会话。
 字幕中心的外挂加载与选择按会话和操作世代作废旧结果，后端自报的外挂/偏移能力决定控件是否可用。
 
+### 默认选轨策略（ADR-048，待产品确认）
+
+用户没有手动选轨时，音轨由
+[`TrackPreferencePolicy`](../../player/engine/src/main/kotlin/com/mediahub/player/engine/TrackPreferencePolicy.kt)
+给出参数，在 `PlayerFactory.createTrackSelector()` 这个唯一生产构造点写入 selector。阶梯固定为：
+
+1. 语言偏好：系统 `LocaleList` 按顺序（`zh-Hans-CN` 收敛为 `zh`）；用户级语言设置尚无产品定义，预留同一入口。
+2. 容器 `SELECTION_FLAG_DEFAULT` 标记。
+3. 设备支持态：当前 renderer 不支持的编码不会被默认选中。
+4. 同语言同能力下取码率/声道/采样率更高的一条。
+5. 全部比较项相等时取第一条（确定性，可复现）。
+
+因此"文件里标了英文 DEFAULT、系统语言为中文"的多轨文件会默认选中中文轨，而不是 DEFAULT 轨。
+字幕不进这套默认策略：默认仍关闭，只有容器标记为 default/forced 时才由 Media3 选中，避免自动弹出字幕。
+手动选轨（播放器 Bottom Sheet）不受影响，仍走快照地址 + override；mpv 内核沿用自身轨道属性。
+同组多轨的**枚举**（不再只取组内第一轨）由 `TrackMapper` 逐轨展开，与本策略共同构成轨道选择链路。
+
+已知限制：不区分繁简/地区；没有"用户语言偏好"设置项（PENDING 产品裁决）；mpv 路径不应用本策略；
+默认策略只解决"谁被选中"，不代表真机解码/直通验收。
+
 音频输出状态以引擎观测为准，未知状态不应被当成已确认失败；编码名和设备枚举不能代替实际声音输出验收。
 [`PlaybackError`](../../core/network/src/main/kotlin/com/mediahub/core/network/PlaybackError.kt)
 保留认证、HTTP、网络、TLS、解码、DRM、转码等结构化分类；UI 使用用户文案，诊断详情脱敏。
