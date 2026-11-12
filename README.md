@@ -224,7 +224,7 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   且两者都是**清零并移出续播列表**而不是忽略；阈值是按片长百分比而非绝对秒数（600 s 夹具上 1.99% 丢弃、2.00% 保留）。
 - **真服覆盖面是单机单实例**：Emby 与 Jellyfin 各只在隔离实例上验证一次；服务端版本差异会改变行为
   （W8 验收途中 Emby 自行从 4.10.1.0 升级到 4.10.2.0），未做多版本矩阵。
-- **搜索**：多源搜索仅有模拟服务器与单测，服务端搜索接口未接入，真服路径未测。
+- **搜索**：多源搜索已有模拟服务器与单测（`Search_sends_the_term_and_returns_only_matching_items` 断言 `SearchTerm=Star%20Wars` 与服务端过滤结果）；Emby / Jellyfin 共用的 `/Users/{id}/Items?SearchTerm=` 服务端搜索已接入。真服路径未测，验证条件是真实 Emby / Jellyfin 服务器；WebDAV / 本地源没有服务端搜索能力，按「不支持搜索」处理。
 - **体验缺口与覆盖缺口**：「继续观看」卡片海报懒加载已修（W10；页面调用 `MediaCardViewModel.RequestPoster`，U1 P2.6 两服 PASS）；永久播放列表内拖拽排序仅单测覆盖（`NOT_RUN`）。
 - **NOT_RUN / IMPLEMENTED_UNVERIFIED**：HDR 与色彩管理（不声称任何 HDR 能力；杜比视界 `NOT_SUPPORTED`）、
   硬件解码故障回退、全屏切换的截图确认、字幕样式（字体 / 字号 / 颜色 / 描边 / 位置 / 延迟 / ASS 覆盖）、
