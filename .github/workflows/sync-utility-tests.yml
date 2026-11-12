@@ -7,6 +7,10 @@ on:
       - 'scripts/SYNC_UTILITY.md'
       - 'scripts/tests/**'
       - 'README.md'
+      - 'scripts/tests/test_github_sync_safety.py'
+      - 'scripts/tests/test_github_sync_merged_abilities.py'
+      - 'scripts/tests/github-nightly-sync.injection.Tests.ps1'
+      - 'scripts/tests/github-nightly-sync.seam.ps1'
       - '.github/workflows/sync-utility-tests.yml'
   workflow_dispatch:
 
