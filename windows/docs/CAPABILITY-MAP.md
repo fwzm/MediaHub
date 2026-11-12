@@ -109,7 +109,7 @@ release-blocker: gpl-obligation
 | 图片缓存（内存上限 + 磁盘 TTL + 容量上限 + 在途去重） | IMPLEMENTED_UNVERIFIED（磁盘上限 / TTL / 覆盖写与清空计量 / 孤儿 `.tmp` 清理已由 `ArtworkDiskCacheTests` 覆盖；内存条目上限与在途去重仍无独立自动化证据） |
 | 电影详情页（真实流信息） | EXECUTED_PASS |
 | 季 / 集导航 | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：U2 在真实 Emby 4.10.2 / Jellyfin 12.2 上走「媒体库→库→剧→第 1 季→S01E01」，两服各 35/35；证据覆盖问题见 [W12-DOC-AUDIT.md](W12-DOC-AUDIT.md)） |
-| 搜索（多源 / 部分失败提示 / 取消过期请求） | IMPLEMENTED_UNVERIFIED |
+| 搜索（多源 / 部分失败提示 / 取消过期请求） | IMPLEMENTED_UNVERIFIED（服务端搜索路径已由 `MockServerIntegrationTests` 断言 `SearchTerm` 编码与服务端过滤；部分失败提示、取消过期请求仍无自动化证据；真服未测） |
 | 继续观看（服务端 resume，跨来源） | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：Emby 41/41 + Jellyfin 41/41（`A8EDD448`，含 P0.9 夹具封面就绪 / P2.6 海报真实加载），真实进度→列表→续播→已看完消失；卡片海报懒加载已实现） |
 | 收藏（详情页 + 我的收藏页） | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：Emby 24/24 + Jellyfin 24/24，写端点 `FavoriteItems`，重启后保持） |
 | 深色 / 浅色主题、多 DPI、窗口自适应 | IMPLEMENTED_UNVERIFIED（150% DPI 下已实测布局） |
