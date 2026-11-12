@@ -349,8 +349,8 @@ dotnet test  MediaHub.Windows.sln -c Debug
 
 CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
 与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
-（实测补充：workflow 申报的 `paths` 只含 `windows/**`，但在本 PR 上「只改 README 的提交」是否触发 CI 并不稳定 —— 11-06 的 `d65bcda`/`1d1456d2` 没有产生任何 run，11-08 的 `09c088a6` 与 11-09 的 `e02d0877` 则各触发 windows-ci + Android CI、`check-runs=4`；因此 PR 的必需检查以最近一次确实产生 run 的 head 为准。）
-截至 `e02d0877`：`MediaHub.Tests` **478** + `MediaHub.WebDav.Tests` **104** = **582 通过 / 0 失败 / 0 跳过**（windows-ci run **42650762907** 日志实测；`478 = 469 + 9`，由 W14 诊断日志落盘 9 例带来，此后 W35–W65 的都是文档/脚本门禁、未再加 C# 用例）
+（实测补充：workflow 申报的 `paths` 只含 `windows/**`，但在 PR #33 上（该 PR 已于 2026-11-11 合并）「只改 README 的提交」是否触发 CI 并不稳定 —— 11-06 的 `d65bcda`/`1d1456d2` 没有产生任何 run，11-08 的 `09c088a6` 与 11-09 的 `e02d0877` 则各触发 windows-ci + Android CI、`check-runs=4`；因此 PR 的必需检查以最近一次确实产生 run 的 head 为准。）
+截至 `e02d0877`（PR #33 合并前的最后一次 `windows/` 实测；合并后 Windows 代码已进入 `main`，但 `windows-ci` 的 push 触发分支只有 `feature/windows-*` 与 `windows/**`，`main` 上尚无新的 Windows 实测，故此数字在 `main` 上仍待复核）：`MediaHub.Tests` **478** + `MediaHub.WebDav.Tests` **104** = **582 通过 / 0 失败 / 0 跳过**（windows-ci run **42650762907** 日志实测；`478 = 469 + 9`，由 W14 诊断日志落盘 9 例带来，此后 W35–W65 的都是文档/脚本门禁、未再加 C# 用例）
 （469 = 438 既有 + 31 例续播下限契约；历史口径 542 = 438 + 104 曾在 PR #33 里写过）。
 这不是本地口径而是 CI 实测：`windows-ci` 现在把两个套件**分两步**跑并各自产出 trx，再按套件名断言下限
 （`MediaHub.Tests` ≥400、`MediaHub.WebDav.Tests` ≥100，`failed=0` 且 `notExecuted=0`）—— 此前 WebDav 套件虽然被构建、
