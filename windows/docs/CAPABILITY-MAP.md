@@ -88,7 +88,7 @@ release-blocker: gpl-obligation
 | 播放 / 暂停 / 拖动 / 音量 / 倍速 | EXECUTED_PASS（引擎测试断言） |
 | 音轨 / 字幕轨道枚举 | EXECUTED_PASS（真实文件 + UIA，轨道列表跟随引擎内容签名） |
 | 内封 / 外挂字幕（SRT/ASS/SSA/VTT） | EXECUTED_PASS（外挂字幕经真实文件对话框加载，列表与提示均实测） |
-| 字幕样式（字体/字号/颜色/描边/位置/延迟/ASS 覆盖） | IMPLEMENTED_UNVERIFIED |
+| 字幕样式（字体/字号/颜色/描边/位置/延迟/ASS 覆盖） | EXECUTED_PASS（`MpvSubtitleStyleTests`：无窗口 libmpv 逐项回读属性，并断言越界值被钳制） |
 | 全屏切换 | IMPLEMENTED_UNVERIFIED（未截图确认） |
 | 播放进度恢复 | EXECUTED_PASS（真实 Jellyfin 12.2 与官方 Emby 4.10：中断回写 → 完全重启 → 引擎从服务端位置恢复） |
 | 剧集自动连播下一集（含跨季） | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：Emby 35/35 + Jellyfin 35/35，覆盖同季跨集、跨季、关闭开关负向） |
