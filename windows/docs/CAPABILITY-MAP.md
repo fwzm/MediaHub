@@ -106,7 +106,7 @@ release-blocker: gpl-obligation
 | 左侧导航：首页 / 媒体库 / 搜索 / 继续观看 / 媒体源 / 设置 | EXECUTED_PASS |
 | 媒体库列表（多源 + 来源标签） | EXECUTED_PASS |
 | 海报墙（虚拟化 / 懒加载 / 占位图 / 分页预取） | EXECUTED_PASS（40 项） |
-| 图片缓存（内存上限 + 磁盘 TTL + 容量上限 + 在途去重） | IMPLEMENTED_UNVERIFIED |
+| 图片缓存（内存上限 + 磁盘 TTL + 容量上限 + 在途去重） | IMPLEMENTED_UNVERIFIED（磁盘上限 / TTL / 覆盖写与清空计量 / 孤儿 `.tmp` 清理已由 `ArtworkDiskCacheTests` 覆盖；内存条目上限与在途去重仍无独立自动化证据） |
 | 电影详情页（真实流信息） | EXECUTED_PASS |
 | 季 / 集导航 | EXECUTED_PASS（[W9-EVIDENCE.md](W9-EVIDENCE.md)：U2 在真实 Emby 4.10.2 / Jellyfin 12.2 上走「媒体库→库→剧→第 1 季→S01E01」，两服各 35/35；证据覆盖问题见 [W12-DOC-AUDIT.md](W12-DOC-AUDIT.md)） |
 | 搜索（多源 / 部分失败提示 / 取消过期请求） | IMPLEMENTED_UNVERIFIED |
