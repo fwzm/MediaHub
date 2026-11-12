@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using MediaHub.App.Services;
 using MediaHub.Domain;
 using MediaHub.Storage;
@@ -77,9 +78,62 @@ public sealed partial class PlaylistDetailPage : Page
             .ToList();
 
         bool empty = rows.Count == 0;
-        ItemList.ItemsSource = rows;
+        ItemList.ItemsSource = new ObservableCollection<PlaylistItemRow>(rows);
         ItemList.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
         EmptyPanel.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Persists the order the user dropped the rows into. The store rejects anything that is not a
+    /// complete permutation, so a refresh always lands on a real saved order.
+    /// </summary>
+    private void OnItemsReordered(ListViewBase sender, DragItemsCompletedEventArgs args)
+    {
+        if (_navigation is null) return;
+
+        SavedPlaylist? playlist = App.Services.Playlists.Find(_navigation.PlaylistId);
+        if (playlist is null)
+        {
+            Reload();
+            return;
+        }
+
+        var ordered = ItemList.Items.OfType<PlaylistItemRow>().ToList();
+        if (ordered.Count != playlist.Items.Count)
+        {
+            Reload();
+            return;
+        }
+
+        var desired = new List<SavedPlaylistItem>(ordered.Count);
+        foreach (PlaylistItemRow row in ordered)
+        {
+            SavedPlaylistItem? match = playlist.Items.FirstOrDefault(item =>
+                string.Equals(item.ServerId, row.ServerId, StringComparison.Ordinal)
+                && string.Equals(item.ItemId, row.ItemId, StringComparison.Ordinal));
+            if (match is null)
+            {
+                Reload();
+                return;
+            }
+
+            desired.Add(match);
+        }
+
+        try
+        {
+            bool reordered = App.Services.Playlists.ReorderItems(_navigation.PlaylistId, desired);
+            Reload();
+            if (!reordered)
+            {
+                ShowStatus(InfoBarSeverity.Warning, "未保存排序", "播放列表在拖拽期间发生变化，已刷新为最新顺序。");
+            }
+        }
+        catch (IOException ex)
+        {
+            Reload();
+            ShowStatus(InfoBarSeverity.Error, "无法保存排序", ex.Message);
+        }
     }
 
     private void ShowEmpty(string title, string message)

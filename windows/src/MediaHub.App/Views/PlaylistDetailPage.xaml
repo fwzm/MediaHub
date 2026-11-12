@@ -26,6 +26,8 @@
 
     <Grid Grid.Row="2">
       <ListView x:Name="ItemList" SelectionMode="None"
+                CanDragItems="True" CanReorderItems="True" AllowDrop="True"
+                DragItemsCompleted="OnItemsReordered"
                 AutomationProperties.AutomationId="playlist.items"
                 AutomationProperties.Name="播放列表条目">
         <ListView.ItemContainerStyle>
