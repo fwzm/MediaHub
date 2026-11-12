@@ -173,6 +173,9 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 > **读法**：本章只写有执行证据的结论。完整逐项状态（含 `UNVERIFIED` / `NOT_RUN` 标记）见
 > [windows/docs/CAPABILITY-MAP.md](windows/docs/CAPABILITY-MAP.md) 与 `windows/docs/W*-EVIDENCE.md`；
 > 这些表格与路线图可能滞后于最新提交，冲突时以代码与证据文档为准。
+> 尚未实现的能力（音频独占 / HDMI 直通 / 多声道 / 音画同步偏移、系统媒体按键 / 任务栏状态 / 多窗口、
+> Plex / SMB / 云盘媒体源）是路线图项而不是缺陷或未验证项，见
+> [windows/docs/ROADMAP-WINDOWS.md](windows/docs/ROADMAP-WINDOWS.md)。
 
 ### 已验证的能力（真实执行并观察通过）
 
@@ -217,22 +220,50 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 
 ### 已知缺陷与未验证项
 
-- **进度回写的服务端语义**：中断位置写入与「完全重启后恢复」已在 Jellyfin 12.2 与 Emby 4.10.x 实测；
-  但多客户端并发、快进后未达阈值等服务端判定细节未测。W4 记录的「中断恢复 FAILED」已更正为
+- **进度回写的服务端语义**：中断位置写入与「完全重启后恢复」已在 Jellyfin 12.2 与 Emby 4.10.x 实测
+  （W8 S2 43/43：中断回写 304.33 s，完全重启后从 306 s 恢复）；W4 记录的「中断恢复 FAILED」已更正为
   **夹具片长低于服务端阈值**（`MinResumeDurationSeconds`=300 s），不是客户端缺陷。
-  W8-H 的无窗口闭环补上了「低于下限怎么处理」这一半：Jellyfin 12.2 丢弃 5% 以下，Emby 4.10.2 丢弃 **2% 以下**，
-  且两者都是**清零并移出续播列表**而不是忽略；阈值是按片长百分比而非绝对秒数（600 s 夹具上 1.99% 丢弃、2.00% 保留）。
-- **真服覆盖面是单机单实例**：Emby 与 Jellyfin 各只在隔离实例上验证一次；服务端版本差异会改变行为
-  （W8 验收途中 Emby 自行从 4.10.1.0 升级到 4.10.2.0），未做多版本矩阵。
-- **搜索**：多源搜索仅有模拟服务器与单测，服务端搜索接口未接入，真服路径未测。
+  续播下限有两层证据：真服侧 W8-H 在 Jellyfin 12.2 丢弃 5% 以下，Emby 4.10.1.0 与 4.10.2.0 丢弃 **2% 以下**，
+  且都是**清零并移出续播列表**而不是忽略，阈值按片长百分比而非绝对秒数（600 s 夹具上 1.99% 丢弃、2.00% 保留）；
+  本地侧 `ResumeFloorContractTests`（31 例，`windows/docs/W8-RESUME-FLOOR-CONTRACT.md`）把同一套判定写进模拟服务，
+  在无真服的 CI 里钉住，含「低于下限的上报会覆盖并清零既有位置」。「快进后未达阈值」在服务端侧与这条等价
+  （服务端只按上报位置判定），已由 W8-H `phase2-below-the-floor`（40% 之后报 1%）与上述 mock 契约覆盖；
+  播放器在 seek 后是否上报该位置没有专项断言，属 GUI 播放验收。
+  仍未验证（`NOT_RUN`，本地无法自动化）：**多客户端并发**（同一 item 两个会话同时上报时的「最后写入者赢」顺序）、
+  多用户可见性、HTTPS / 自定义端口、AudioBook / Book 跳过百分比判定的例外、片长恰为 300 s 的边界 —— 这些由服务端而非客户端决定，
+  mock 只能复刻已实测的规则，不能证明真服在并发下的行为。验证条件：真实 Emby 4.10.x 与 Jellyfin 12.2 各一隔离实例、
+  两个已登录会话、同一条 ≥300 s 夹具，入口 `pwsh -NoProfile -File windows/tools/acceptance/w8/headless-resume.ps1`
+  （该脚本当前只覆盖单客户端顺序，并发阶段尚未加入，所以状态仍是 `NOT_RUN`）。
+- **真服覆盖面是单机单实例，多版本矩阵只做了 Emby 两个补丁版**：Emby 与 Jellyfin 各只在隔离实例上验证，
+  单用户、单客户端顺序、明文回环；W8 §10 已把版本写进断言并复跑 —— Emby 4.10.1.0（隔离根 `D:\mh-servers410`）
+  与 4.10.2.0 各 `RESULT: 19 passed, 0 failed`，Jellyfin 12.2.0 同批全绿；负向 N1/N2 证明版本不符与安装根缺失会具名失败。
+  早期验收途中 Emby 曾自行从 4.10.1.0 升级到 4.10.2.0，因此 harness 现在用 `-DisableAutoUpdate` 关掉自动更新，
+  并把 `GET /System/Info/Public` 的版本字符串做成断言（只比字符串，不校验二进制哈希）。
+  仍未覆盖：Jellyfin 除 12.2.0 外的版本、Emby 的其它大版本、多实例与自定义端口（脚本默认 8096/8097，端口被占用时复用已应答实例）。
+  验证条件：官方归档经 `windows/tools/get-test-servers.ps1` 下载并记录 SHA-256，用隔离安装根逐版本跑
+  `pwsh -NoProfile -File windows/tools/acceptance/w8/headless-resume.ps1 -ExpectJellyfinVersion <v> -ExpectEmbyVersion <v>`；
+  当前状态：只跑过上述三个版本组合，其余组合 `NOT_RUN`。
+- **搜索**：多源搜索已有模拟服务器与单测（`Search_sends_the_term_and_returns_only_matching_items` 断言 `SearchTerm=Star%20Wars` 与服务端过滤结果）；Emby / Jellyfin 共用的 `/Users/{id}/Items?SearchTerm=` 服务端搜索已接入。真服路径未测，验证条件是真实 Emby / Jellyfin 服务器；WebDAV / 本地源没有服务端搜索能力，按「不支持搜索」处理。
 - **体验缺口与覆盖缺口**：「继续观看」卡片海报懒加载已修（W10；页面调用 `MediaCardViewModel.RequestPoster`，U1 P2.6 两服 PASS）；永久播放列表内拖拽排序仅单测覆盖（`NOT_RUN`）。
-- **NOT_RUN / IMPLEMENTED_UNVERIFIED**：HDR 与色彩管理（不声称任何 HDR 能力；杜比视界 `NOT_SUPPORTED`）、
-  硬件解码故障回退、全屏切换的截图确认、字幕样式（字体 / 字号 / 颜色 / 描边 / 位置 / 延迟 / ASS 覆盖）、
-  季 / 集导航的专项断言（U2 已在真服按季 / 集选中并播出）、图片缓存上限与磁盘 TTL、
-  TUN / VPN / PAC 出口一致性与 SOCKS 代理、真实第二 Windows 账户下的凭据库行为、
-  Intel / AMD / NVIDIA 硬件兼容矩阵。
-- **尚未实现**：音频独占 / HDMI 直通 / 多声道 / 音画同步偏移；系统媒体按键、任务栏状态、多窗口；
-  Plex / SMB / 云盘媒体源。
+- **NOT_RUN / IMPLEMENTED_UNVERIFIED（缺的是可判定的执行条件，其中 HDR 是产品边界而非缺陷）**：
+  - **HDR 与色彩管理**：产品边界 —— 不声称任何 HDR 能力，杜比视界 `NOT_SUPPORTED`；若将来要宣称，需 HDR 显示器 + HDR
+    素材的真机验收，当前 `NOT_RUN`。
+  - **硬件解码故障回退**：引擎使用 `hwdec=auto-safe`（`MpvPlayerOptions.HwDec`），`CurrentHwDec` 只是诊断读数，
+    没有可注入的故障钩子；要证明「硬解失败自动回软解」需在 Intel / AMD / NVIDIA 真机上制造解码失败，当前 `NOT_RUN`。
+  - **全屏切换的截图确认**：需 Windows 客户端窗口 + 真实显示器做 GUI 验收，当前 `NOT_RUN`。
+  - **字幕样式**：`MpvSubtitleStyleTests`（PR #85，未合入）已能无窗口回读 libmpv 七项属性并覆盖越界钳制；
+    合并前仍按未验证记录。
+  - **图片缓存上限与磁盘 TTL**：`ArtworkDiskCache` 与 11 例测试（PR #84，未合入）已覆盖磁盘上限 / TTL / 覆盖写 /
+    清空计量 / 孤儿临时文件；内存条目上限与在途去重仍无独立自动化证据，合并前仍按未验证记录。
+  - **TUN / VPN / PAC 出口一致性与 SOCKS 代理**：本地只覆盖 `NetworkPolicy` 的解析与句柄装配、回环桥接，
+    出口一致性（TUN 网卡、PAC 脚本、SOCKS 代理下的实际路由）需真实网络环境，当前 `NOT_RUN`。
+  - **真实第二 Windows 账户下的凭据库行为**：DPAPI 按用户隔离，需在同一台机器上建第二个 Windows 账户并登录，
+    当前 `NOT_RUN`（不改系统账户无法自动化）。
+  - **Intel / AMD / NVIDIA 硬件兼容矩阵**：需三类 GPU 真机，当前 `NOT_RUN`。
+- **已解决（2026-11-12）**：季 / 集导航已从 `NOT_RUN` 移出。U2 的 P1.1 在真实 Emby / Jellyfin 上执行
+  「媒体库 → 库 → 剧 → 第 1 季 → S01E01 详情页与播放入口」，Jellyfin 侧 35/35；Emby 侧 W9 曾 35/35，
+  W12 复核产物中的 12 条失败均为窗口未到前台导致的非产品失败，详见
+  `windows/docs/W12-DOC-AUDIT.md`。
 - **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39)，stacked 在 `feature/windows-client` 上，仍为 Draft）：
   契约层、配对载荷/状态机/传输层（回环）、双向增量与设备注册表、凭据迁移（DPAPI 重封）、加密离线归档、同步 CLI、
   同步页「预览 → 逐条审批 → 应用 → 推进基线」、基线落盘与重启幂等、已配对设备登记与指纹钉扎、
@@ -336,7 +367,22 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   （Android 侧的契约/规划/导入导出/配对契约/分块传输协议/「回环传输 → 导入闭环」已就位，
   协议与 Windows 逐字节对齐，见 `docs/android-source-sync-transfer.md`；Windows 端已有可选的传输对端认证
   （Windows W6-24 / Android W6-25，五个稳定码与帧格式两端同名同序）；TLS 1.3 与公钥指纹钉扎两端也都就位（Windows W6-26 / Android W6-29，四个 `tls-*` 码同名同序，Android 用 SPKI 而非整证书算指纹），并有与 Windows 真子进程的双向联调（W6-32，JSSE ↔ SslStream）；仍缺：跨机（非回环）的真实证据——Windows 的地址闸门已由 W6-51 显式放开（`--bind` 加 `--allow-non-loopback`，只接受单播字面量），但一台机器证明不了它，E1–E6 全 NOT_RUN，Android 的监听端也已有同形状的地址入口（W6-52：`sync.listen.host` + `sync.listen.allow-host`，只收单播字面量）；拨号侧（发送卡与「接收」卡）的同形状开关也在 W6-52b 里补齐（`sync.send.allow-host` / `sync.receive.allow-host`）（Android 发送端的投递确认已由 W6-46 补上、界面开关见 W6-48，但默认仍关闭）；Android 侧已有回环监听端（W6-34：`SourceSyncTransferListener` 只绑回环、可连续 accept，`SourceSyncListenerImportService` 把它接进导入闭环，Windows 的 `transfer send` 可以直接推到 Android 的监听端口，界面入口也已就位（W6-36：同步页的「接收（监听）」区块可以开一个回环监听、等一次发送，收到的信封只进预览、写入仍要逐条允许后再应用；今天 App 里没有证书下发通道，所以 TLS 开关如实禁用、只能明文）；Android 端也已对齐回执帧（W6-40：`receipt-*` 四码与 Windows 同名同序，监听端只在信封解码成功后回一个裸 `0x04` 字节、gate 在端点层，拨号端可等回执，默认关时线上字节与 W6-22 的冻结向量逐字节相等；界面还没有开关）；导入页的两张接收卡片按 W6-41 移到页面末尾，首屏保留「选择文件 → 预览 → 应用」主流程（此前它们被插在按钮行之前，把主流程挤出首屏，CI 的 visual-instrumentation 上两次 Android run 就红在这 6 例首屏可见性断言上）；Android 也已是发送端（W6-42：同步页末尾的「发送（Android → Windows）」区块把本机导出的信封推给 Windows 的 `transfer serve`，可选 TLS 指纹钉扎 / HMAC 认证 / 等回执，默认全关时线上字节与 W6-22 冻结向量逐字节相等；本层只补 5 个「还没拨号就拒」的码，其余码原样透传；在途发送可以取消（W6-49：新增 `SourceSyncSendLauncher` 只做 Job 记账、不持信封与口令，`sync.send.cancel` 按钮发送中才可用，取消后状态回到 Idle 且不产生任何失败码，释放单飞后可以立刻重发；真实 Socket 中途取消与真机按钮仍是 `NOT_RUN` / `DEVICE_UNVERIFIED`），Android → Windows 的发送方向也还没和真 CLI 对跑）；三张卡（接收 / 监听 / 发送）另有 47 例 instrumentation 证据（W6-44 的 19 例、W6-48 的 8 例、W6-49 的 6 例、W6-52 的 3 例、W6-53 的 3 例、W6-54 的 4 例与 W6-52b 的 4 例：W6-52 那 3 例钉住地址框与开关在树里可交互、表单逐字回传、监听中两者禁用且端口行写实际地址；这 3 例本机没有设备/模拟器可跑，设备结论待下一次 CI；W6-49 那 6 例钉住「发送中才启用取消按钮、点完回到 Idle、失败行不出现」；端口闸门与「TLS 无证书就禁用」、口令框的 Password 语义、失败行与成功行文案，以及「不滚动也看得见选择文件 / 预览」的首屏不变式；本机无设备，设备结论只来自 CI 的 API 32 / 36 模拟器；W6-48 的两个协议开关同样先 performScrollTo 再断言，关掉时不影响主流程首屏））。
-- **发布阻断**：见下节许可证；另有 MSIX / 代码签名 / 干净机安装 `NOT_RUN`（`SIGNING_BLOCKED`）。
+  **当前状态与解除条件**（残余项，均不是已知代码缺陷）：
+  - **二维码与扫码**：未实现；条件为「生成配对链接 → 扫码 → 与 `PairingLink.parse` 的结果一致」，可在 JVM 侧自动化，尚未排期。
+  - **设备登记跨重启持久化**：未实现（W6-70 已有读 / 列 / 忘记）；条件为「登记设备 → 重启 → 清单与指纹仍在」，属 Android 侧存储工作。
+  - **跨机（非回环）配对与真实局域网传输**：`NOT_RUN`；条件为两台设备在同一网段，Windows `transfer serve --bind <单播> --allow-non-loopback`
+    与 Android 监听端（W6-52）或反向拨号，把 E1–E6 全部跑一遍；单机无法证明，必须第二台设备或真机。
+  - **同步页 / 配对页 / 已配对清单 / Android 接收页的 GUI 证据**：`GUI_UNVERIFIED` / `DEVICE_UNVERIFIED`；
+    条件为人工在 Windows 客户端观察，以及 Android 真机或 CI 的 API 32 / 36 模拟器跑 instrumentation。
+  - **Android → Windows 真 CLI 对跑**：`NOT_RUN`；同机 Windows `SyncCli` 子进程对跑已由 W6-35 覆盖，跨机命令行对跑与上面的局域网条件相同。
+- **发布阻断**：许可证（见下节）未解决前不得正式分发；打包链路当前只有**未签名的便携 zip**，
+  MSIX / 安装器 / 代码签名 / 干净机安装全部 `NOT_RUN`，逐项条件如下：
+  - **代码签名**：`SIGNING_BLOCKED`，需受信任证书，且证书 Subject 必须与清单 `Publisher` 一致；
+    自签名只能做测试、用户需自行信任，不解除本项。
+  - **MSIX**：未实现（仓库内没有 `Package.appxmanifest`）；条件为先补清单与四段版本号，再在本机构建未签名包。
+  - **干净机安装**：`NOT_RUN`，条件为一台没有 .NET 与 Windows App Runtime 的干净 Windows 机器或快照。
+  - **便携 zip**：本机可从复制出来的目录启动；安装器 / MSIX 在缺少 Windows App Runtime 时的具体行为见
+    [windows/docs/licensing/PACKAGING.md](windows/docs/licensing/PACKAGING.md)。
 
 ### 构建与测试
 
