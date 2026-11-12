@@ -740,6 +740,13 @@ public sealed class MpvPlayer : IPlaybackEngine, ITrackController, IDisposable
     public string? CurrentHwDec => _ctx == IntPtr.Zero ? null : MpvNative.GetString(_ctx, "hwdec-current");
 
     /// <summary>
+    /// Reads an engine property back. Used by headless tests to prove that a subtitle style value
+    /// was accepted by libmpv instead of being silently dropped.
+    /// </summary>
+    internal string? ReadPropertyForTests(string name)
+        => _disposed || _ctx == IntPtr.Zero ? null : MpvNative.GetString(_ctx, name);
+
+    /// <summary>
     /// Reads back an engine option after initialisation.
     /// </summary>
     /// <remarks>

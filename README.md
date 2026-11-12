@@ -242,10 +242,13 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 - **搜索**：多源搜索仅有模拟服务器与单测，服务端搜索接口未接入，真服路径未测。
 - **体验缺口与覆盖缺口**：「继续观看」卡片海报懒加载已修（W10；页面调用 `MediaCardViewModel.RequestPoster`，U1 P2.6 两服 PASS）；永久播放列表内拖拽排序仅单测覆盖（`NOT_RUN`）。
 - **NOT_RUN / IMPLEMENTED_UNVERIFIED**：HDR 与色彩管理（不声称任何 HDR 能力；杜比视界 `NOT_SUPPORTED`）、
-  硬件解码故障回退、全屏切换的截图确认、字幕样式（字体 / 字号 / 颜色 / 描边 / 位置 / 延迟 / ASS 覆盖）、
-  季 / 集导航的专项断言（U2 已在真服按季 / 集选中并播出）、
+  硬件解码故障回退、全屏切换的截图确认、
   TUN / VPN / PAC 出口一致性与 SOCKS 代理、真实第二 Windows 账户下的凭据库行为、
   Intel / AMD / NVIDIA 硬件兼容矩阵。
+- **已解决（2026-11-12）**：字幕样式（字体 / 字号 / 颜色 / 描边 / 位置 / 延迟 / ASS 覆盖）已从
+  `NOT_RUN` 移出。`MpvSubtitleStyleTests` 在无窗口的 libmpv 实例上逐项回读 `sub-font`、
+  `sub-font-size`、`sub-color`、`sub-border-size`、`sub-pos`、`sub-delay`、`sub-ass-override`，
+  并断言越界值在进入引擎前被钳制。
 - **已解决（2026-11-12）**：图片缓存的磁盘上限与磁盘 TTL 已从 `NOT_RUN` 移出。磁盘缓存抽成
   `ArtworkDiskCache`，256 MiB 上限、30 天 TTL、覆盖写与清空后的计量、以及孤儿 `.tmp` 清理
   由 `ArtworkDiskCacheTests` 覆盖；内存条目上限与在途去重仍无独立自动化证据。
