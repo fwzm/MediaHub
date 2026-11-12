@@ -173,6 +173,9 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 > **读法**：本章只写有执行证据的结论。完整逐项状态（含 `UNVERIFIED` / `NOT_RUN` 标记）见
 > [windows/docs/CAPABILITY-MAP.md](windows/docs/CAPABILITY-MAP.md) 与 `windows/docs/W*-EVIDENCE.md`；
 > 这些表格与路线图可能滞后于最新提交，冲突时以代码与证据文档为准。
+> 尚未实现的能力（音频独占 / HDMI 直通 / 多声道 / 音画同步偏移、系统媒体按键 / 任务栏状态 / 多窗口、
+> Plex / SMB / 云盘媒体源）是路线图项而不是缺陷或未验证项，见
+> [windows/docs/ROADMAP-WINDOWS.md](windows/docs/ROADMAP-WINDOWS.md)。
 
 ### 已验证的能力（真实执行并观察通过）
 
@@ -231,8 +234,6 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   季 / 集导航的专项断言（U2 已在真服按季 / 集选中并播出）、图片缓存上限与磁盘 TTL、
   TUN / VPN / PAC 出口一致性与 SOCKS 代理、真实第二 Windows 账户下的凭据库行为、
   Intel / AMD / NVIDIA 硬件兼容矩阵。
-- **尚未实现**：音频独占 / HDMI 直通 / 多声道 / 音画同步偏移；系统媒体按键、任务栏状态、多窗口；
-  Plex / SMB / 云盘媒体源。
 - **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39)，stacked 在 `feature/windows-client` 上，仍为 Draft）：
   契约层、配对载荷/状态机/传输层（回环）、双向增量与设备注册表、凭据迁移（DPAPI 重封）、加密离线归档、同步 CLI、
   同步页「预览 → 逐条审批 → 应用 → 推进基线」、基线落盘与重启幂等、已配对设备登记与指纹钉扎、
