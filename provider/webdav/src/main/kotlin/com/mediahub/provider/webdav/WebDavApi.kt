@@ -69,7 +69,9 @@ internal class WebDavApi(
                 call.awaitCancellable { response ->
                     response.use { resp ->
                         coroutineContext.ensureActive()
-                        if (resp.code !in 200..299) throw mapStatus(resp.code, url)
+                        if (resp.code !in 200..299) {
+                            throw mapStatus(resp.code, url, resp.header("WWW-Authenticate"))
+                        }
                         val body = resp.body ?: throw ProviderException.Parse(serverId)
                         val xml = readBounded(body)
                         coroutineContext.ensureActive()
@@ -110,8 +112,8 @@ internal class WebDavApi(
         return buffer.readString(Charsets.UTF_8)
     }
 
-    private fun mapStatus(code: Int, url: String): ProviderException = when (code) {
-        401 -> ProviderException.AuthExpired(serverId)
+    private fun mapStatus(code: Int, url: String, challenge: String?): ProviderException = when (code) {
+        401 -> ProviderException.AuthExpired(serverId, challenge)
         403 -> ProviderException.Http(serverId, code, url, METHOD)
         404, 410 -> ProviderException.NotFound(serverId, url)
         429 -> ProviderException.RateLimited(serverId)
