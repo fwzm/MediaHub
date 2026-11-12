@@ -349,8 +349,8 @@ dotnet test  MediaHub.Windows.sln -c Debug
 
 CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
 与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
-（实测补充：workflow 申报的 `paths` 只含 `windows/**`，但在本 PR 上「只改 README 的提交」是否触发 CI 并不稳定 —— 11-06 的 `d65bcda`/`1d1456d2` 没有产生任何 run，11-08 的 `09c088a6` 与 11-09 的 `e02d0877` 则各触发 windows-ci + Android CI、`check-runs=4`；因此 PR 的必需检查以最近一次确实产生 run 的 head 为准。）
-截至 `e02d0877`：`MediaHub.Tests` **478** + `MediaHub.WebDav.Tests` **104** = **582 通过 / 0 失败 / 0 跳过**（windows-ci run **42650762907** 日志实测；`478 = 469 + 9`，由 W14 诊断日志落盘 9 例带来，此后 W35–W65 的都是文档/脚本门禁、未再加 C# 用例）
+（实测补充：workflow 申报的 `paths` 只含 `windows/**`，但在 PR #33 上（该 PR 已于 2026-11-11 合并）「只改 README 的提交」是否触发 CI 并不稳定 —— 11-06 的 `d65bcda`/`1d1456d2` 没有产生任何 run，11-08 的 `09c088a6` 与 11-09 的 `e02d0877` 则各触发 windows-ci + Android CI、`check-runs=4`；因此 PR 的必需检查以最近一次确实产生 run 的 head 为准。）
+截至 `e02d0877`（PR #33 合并前的最后一次 `windows/` 实测；合并后 Windows 代码已进入 `main`，但 `windows-ci` 的 push 触发分支只有 `feature/windows-*` 与 `windows/**`，`main` 上尚无新的 Windows 实测，故此数字在 `main` 上仍待复核）：`MediaHub.Tests` **478** + `MediaHub.WebDav.Tests` **104** = **582 通过 / 0 失败 / 0 跳过**（windows-ci run **42650762907** 日志实测；`478 = 469 + 9`，由 W14 诊断日志落盘 9 例带来，此后 W35–W65 的都是文档/脚本门禁、未再加 C# 用例）
 （469 = 438 既有 + 31 例续播下限契约；历史口径 542 = 438 + 104 曾在 PR #33 里写过）。
 这不是本地口径而是 CI 实测：`windows-ci` 现在把两个套件**分两步**跑并各自产出 trx，再按套件名断言下限
 （`MediaHub.Tests` ≥400、`MediaHub.WebDav.Tests` ≥100，`failed=0` 且 `notExecuted=0`）—— 此前 WebDav 套件虽然被构建、
@@ -532,12 +532,10 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
 
 <!-- WINDOWS-SYNC:START -->
 <!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
-- be781c16 2026-11-04 feat(licensing): W65 第 57 项 doc-audit-untested-claims（W12「判不了」登记表钉成契约）
-- 8f6bbc8a 2026-11-04 feat(licensing): W64 第 56 项 resume-record-constant-claims（W8 续播记录的常量钉成契约）
-- 87507c9a 2026-11-04 feat(licensing): W63 第 55 项 resume-record-count-claims（W8 续播记录的断言条数钉成契约）
-- 72c9850e 2026-11-04 feat(licensing): W62 第 54 项 resume-source-pointer-claims（W8 续播记录的源码行号钉成契约）
-- 5daff850 2026-11-04 fix(licensing): W61 第 46 项 doc-residue-claims 增两条标题判据，并修三处标题行粘连/重复
-- abe06e8c 2026-11-04 fix(licensing): W60 第 43 项 log-file-claims 认两种合法实现形态（修 PR #39 windows-ci 红项）
+- da84867d 2026-11-11 docs: align audit pointers with integrated Windows workflow
+- c22f85a9 2026-11-11 Merge remaining Windows licence surface verification updates
+- 8826d9a1 2026-11-11 Merge complete source sync and Windows backup into integration candidate
+- 1fb7dd49 2026-11-05 ci(windows): the rows must stay in the order the file declares them (W6-113am)
 <!-- WINDOWS-SYNC:END -->
 
 ## 安全约定（强制）

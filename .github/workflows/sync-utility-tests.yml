@@ -7,6 +7,10 @@ on:
       - 'scripts/SYNC_UTILITY.md'
       - 'scripts/tests/**'
       - 'README.md'
+      - 'scripts/tests/test_github_sync_safety.py'
+      - 'scripts/tests/test_github_sync_merged_abilities.py'
+      - 'scripts/tests/github-nightly-sync.injection.Tests.ps1'
+      - 'scripts/tests/github-nightly-sync.seam.ps1'
       - '.github/workflows/sync-utility-tests.yml'
   workflow_dispatch:
 
@@ -41,6 +45,23 @@ jobs:
           $result = $LASTEXITCODE
           Get-Content utility-evidence/tests.log
           exit $result
+      - name: Verify injected runner seam
+        shell: pwsh
+        run: |
+          Start-Transcript -Path utility-evidence/pester.log | Out-Null
+          try {
+            Import-Module Pester -MinimumVersion 3.4.0 -ErrorAction Stop
+            $suite = 'scripts/tests/github-nightly-sync.injection.Tests.ps1'
+            if ((Get-Command Invoke-Pester).Parameters.ContainsKey('Path')) {
+              $run = Invoke-Pester -Path $suite -PassThru
+            } else {
+              $run = Invoke-Pester -Script $suite -PassThru
+            }
+            "Pester passed=$($run.PassedCount) failed=$($run.FailedCount)"
+            if ($run.FailedCount -gt 0) { exit 1 }
+          } finally {
+            Stop-Transcript | Out-Null
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
