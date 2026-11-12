@@ -3,9 +3,18 @@
 .SYNOPSIS
     手动预览最近更新；显式 -Apply 才写 README、提交和推送并建立 Draft PR。
 .DESCRIPTION
-    默认与 -DryRun 均只读，不 fetch、不写检查点或锁。未安装任何定时任务。
+    默认与 -DryRun 均只读，不 fetch、不写检查点、锁或日志。未安装任何定时任务。
     Apply 拒绝已有暂存/已跟踪改动，保护 main/master；仅提交 README。
+    暂存区含 README 之外的路径时以 3 退出，让调用方区分“环境不干净”与“执行失败”。
     首次回看 24 小时，后续从成功检查点起算，排除本脚本产生的提交。
+.PARAMETER GitRunner
+    仅用于隔离测试：接收 -GitArgs 数组，返回 [pscustomobject]@{ Code; Lines; Text }。
+    生产调用无需传入。
+.PARAMETER GhRunner
+    仅用于隔离测试：接收 -GhArgs 数组，返回 [pscustomobject]@{ Code; Lines; Text }。
+    生产调用无需传入。
+.NOTES
+    退出码：0 成功或只读预览；1 拒绝或失败；3 暂存区含 README 之外的路径（未写任何东西）。
 #>
 [CmdletBinding()]
 param(
@@ -13,28 +22,47 @@ param(
     [switch]$Apply,
     [switch]$DryRun,
     [ValidateRange(1,365)][int]$RecentDays = 7,
-    [ValidateRange(1,100)][int]$MaxRecentEntries = 10
+    [ValidateRange(1,100)][int]$MaxRecentEntries = 10,
+    [scriptblock]$GitRunner,
+    [scriptblock]$GhRunner
 )
 $ErrorActionPreference = 'Stop'
 if ($Apply -and $DryRun) { throw '-Apply 与 -DryRun 不能同时使用。' }
 $preview = -not $Apply
-function Invoke-Git {
-    param([Parameter(Mandatory)][string[]]$GitArgs, [switch]$AllowFail)
+if ($RepoRoot) { $Repo = (Resolve-Path -LiteralPath $RepoRoot).Path }
+else {
+    $Repo = (& git rev-parse --show-toplevel 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw '请指定 -RepoRoot。' }
+}
+function Invoke-RawGit {
+    param([Parameter(Mandatory)][string[]]$GitArgs)
     $previousLocks = $env:GIT_OPTIONAL_LOCKS
     try {
         if ($preview) { $env:GIT_OPTIONAL_LOCKS = '0' }
         $output = @(& git -C $Repo @GitArgs 2>&1 | ForEach-Object { "$_" })
         $code = $LASTEXITCODE
     } finally { $env:GIT_OPTIONAL_LOCKS = $previousLocks }
-    if ($code -ne 0 -and -not $AllowFail) {
-        throw "git $($GitArgs[0]) failed (exit $code)."
-    }
     [pscustomobject]@{ Code=$code; Lines=$output; Text=($output -join "`n").Trim() }
 }
-if ($RepoRoot) { $Repo = (Resolve-Path -LiteralPath $RepoRoot).Path }
-else {
-    $Repo = (& git rev-parse --show-toplevel 2>$null)
-    if ($LASTEXITCODE -ne 0) { throw '请指定 -RepoRoot。' }
+function Invoke-RawGh {
+    param([Parameter(Mandatory)][string[]]$GhArgs)
+    $output = @(& gh @GhArgs 2>&1 | ForEach-Object { "$_" })
+    [pscustomobject]@{ Code=$LASTEXITCODE; Lines=$output; Text=($output -join "`n").Trim() }
+}
+$gitSeam = if ($GitRunner) { $GitRunner } else { { param([string[]]$GitArgs) Invoke-RawGit -GitArgs $GitArgs } }
+$ghSeam = if ($GhRunner) { $GhRunner } else { { param([string[]]$GhArgs) Invoke-RawGh -GhArgs $GhArgs } }
+function Invoke-Git {
+    param([Parameter(Mandatory)][string[]]$GitArgs, [switch]$AllowFail)
+    $result = & $gitSeam -GitArgs $GitArgs
+    if ($result.Code -ne 0 -and -not $AllowFail) {
+        throw "git $($GitArgs[0]) failed (exit $($result.Code))."
+    }
+    [pscustomobject]@{ Code=$result.Code; Lines=@($result.Lines); Text=$result.Text }
+}
+function Invoke-Gh {
+    param([Parameter(Mandatory)][string[]]$GhArgs)
+    $result = & $ghSeam -GhArgs $GhArgs
+    [pscustomobject]@{ Code=$result.Code; Lines=@($result.Lines); Text=$result.Text }
 }
 $gitDir = (Invoke-Git -GitArgs @('rev-parse','--absolute-git-dir')).Text
 $markerPath = Join-Path $gitDir 'github-sync-last-check'
@@ -47,15 +75,43 @@ function Write-SyncLog([string]$Message) {
     Write-Host $Message
     if (-not $preview) { Add-Content -LiteralPath $logPath -Value $Message -Encoding utf8 }
 }
+function Get-LockDescription {
+    try {
+        $info = Get-Item -LiteralPath $lockPath -ErrorAction Stop
+        "size=$($info.Length); lastWrite=$($info.LastWriteTime.ToString('o'))"
+    } catch { 'unavailable' }
+}
 try {
     if (-not $preview) {
-        # Keep the exclusive handle alive: an old timestamp never evicts a live owner.
+        # The exclusive handle is the only authority: a crashed owner is released by the OS,
+        # so reopening succeeds, and an old timestamp never evicts a live owner.
+        $lockExisted = Test-Path -LiteralPath $lockPath
+        $contended = Get-LockDescription
         try {
             $lockHandle = [System.IO.File]::Open($lockPath, 'OpenOrCreate', 'Write', 'None')
-        } catch [System.IO.IOException] { throw '另一个同步实例持有锁，本次停止。' }
+        } catch [System.IO.IOException] {
+            Write-SyncLog "Another sync instance holds the lock; stopping. lock=$contended"
+            throw '另一个同步实例持有锁，本次停止。'
+        }
+        if ($lockExisted) { Write-SyncLog "Reclaimed leftover lock handle without a live owner; previous lock=$contended" }
+        # Metadata is diagnostic only; the handle stays open until this process exits.
+        $holder = $utf8.GetBytes("pid=$PID;host=$env:COMPUTERNAME;started=$($started.ToString('o'))")
+        $lockHandle.SetLength(0)
+        $lockHandle.Write($holder, 0, $holder.Length)
+        $lockHandle.Flush()
     }
     $branch = (Invoke-Git -GitArgs @('symbolic-ref','--quiet','--short','HEAD')).Text
     if (-not $branch) { throw 'detached HEAD 不能自动同步。' }
+    if (-not $preview) {
+        # Exit 3 marks "the index holds work that is not ours". Staged README and other
+        # tracked edits stay with the blanket dirty guard below, so no write ever happens.
+        $staged = @((Invoke-Git -GitArgs @('diff','--cached','--name-only')).Lines | Where-Object { $_ })
+        $foreign = @($staged | Where-Object { $_ -ne 'README.md' })
+        if ($foreign.Count -gt 0) {
+            Write-SyncLog "Aborting with exit 3: staged paths outside README.md ($($foreign -join ', ')); nothing was written."
+            exit 3
+        }
+    }
     $dirty = (Invoke-Git -GitArgs @('status','--porcelain','--untracked-files=no')).Text
     if (-not $preview -and $dirty) { throw '已有暂存或已跟踪改动，请先自行处理；同步未写 README。' }
     if (-not $preview) { [void](Invoke-Git -GitArgs @('fetch','--quiet','origin')) }
@@ -70,6 +126,16 @@ try {
     $window = @((Invoke-Git -GitArgs @('log',"--since=$($since.ToString('o'))",'--invert-grep','-E',"--grep=$syncGrep",'--format=%h')).Lines | Where-Object { $_ })
     $unpushed = @((Invoke-Git -GitArgs @('log','HEAD','--not','--remotes','--format=%h')).Lines | Where-Object { $_ })
     Write-SyncLog "Window commits=$($window.Count); unpushed=$($unpushed.Count); preview=$preview"
+    # Read-only hint: other local branches whose commits never reached a remote.
+    $otherBranches = @((Invoke-Git -GitArgs @('for-each-ref','--format=%(refname:short)','refs/heads')).Lines |
+        Where-Object { $_ -and $_ -ne $branch })
+    $otherAhead = @($otherBranches | Where-Object {
+            $ahead = (Invoke-Git -GitArgs @('rev-list','--count',$_,'--not','--remotes')).Text -as [int]
+            $null -ne $ahead -and $ahead -gt 0
+        })
+    if ($otherAhead.Count -gt 0) {
+        Write-SyncLog "Hint: local branches with unpushed commits: $($otherAhead -join ', ')"
+    }
     if ($window.Count -eq 0 -and $unpushed.Count -eq 0) {
         if (-not $preview) { [System.IO.File]::WriteAllText($markerPath,$started.ToString('o'),$utf8) }
         Write-SyncLog '窗口内无更新。'
@@ -110,14 +176,14 @@ try {
     $originUrl = (Invoke-Git -GitArgs @('remote','get-url','origin')).Text
     if ($originUrl -match 'github\.com[:/](?<owner>[^/\s:]+)/(?<repo>[^/\s]+?)(\.git)?/?$') {
         $slug = "$($Matches['owner'])/$($Matches['repo'])"
-        $existing = & gh pr list --repo $slug --state open --head $branch --json url --jq '.[0].url'
-        if ($LASTEXITCODE -ne 0) { throw '无法查询 Draft PR；分支已推送，检查点未推进。' }
-        if ($existing) { Write-SyncLog "Existing PR: $existing" }
+        $prLookup = Invoke-Gh -GhArgs @('pr','list','--repo',$slug,'--state','open','--head',$branch,'--json','url','--jq','.[0].url')
+        if ($prLookup.Code -ne 0) { throw '无法查询 Draft PR；分支已推送，检查点未推进。' }
+        if ($prLookup.Text) { Write-SyncLog "Existing PR: $($prLookup.Text)" }
         else {
             # Fixed body avoids --fill copying private commit messages into a PR.
-            $created = & gh pr create --repo $slug --draft --base main --head $branch --title 'docs: refresh recent commit IDs' --body 'Refresh README recent commit dates and IDs. No merge or main write was performed. Review the branch diff before use.'
-            if ($LASTEXITCODE -ne 0) { throw 'Draft PR 创建失败；分支已推送，检查点未推进。' }
-            Write-SyncLog "Created Draft PR: $created"
+            $created = Invoke-Gh -GhArgs @('pr','create','--repo',$slug,'--draft','--base','main','--head',$branch,'--title','docs: refresh recent commit IDs','--body','Refresh README recent commit dates and IDs. No merge or main write was performed. Review the branch diff before use.')
+            if ($created.Code -ne 0) { throw 'Draft PR 创建失败；分支已推送，检查点未推进。' }
+            Write-SyncLog "Created Draft PR: $($created.Text)"
         }
     } else { Write-SyncLog '非 GitHub 远端，跳过 PR 操作。' }
     [System.IO.File]::WriteAllText($markerPath,$started.ToString('o'),$utf8)

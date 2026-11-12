@@ -23,13 +23,23 @@ Apply 会先拒绝已有暂存或已跟踪改动，再 fetch；无更新时仅�
 
 首次运行回看过去 24 小时，后续从成功检查点起算，覆盖跨午夜的工作。
 脚本排除自身生成的提交，重复执行不生成循环更新。README 仅含日期和提交 ID，
-不复制原始提交主题。每个 worktree 使用其实际 Git 目录存放检查点和独占文件锁；
-锁句柄一直持有至退出，不因文件时间戳较旧而抢占。
+不复制原始提交主题。每个 worktree 使用其实际 Git 目录存放检查点、日志和独占文件锁；
+锁句柄一直持有至退出，不因文件时间戳较旧而抢占；上一实例崩溃时由操作系统释放句柄，
+重新打开即成功。
+
+退出码：`0` 成功或只读预览；`1` 拒绝或失败；`3` 暂存区含 `README.md` 之外的路径，
+本次未写任何东西（便于调用方区分“工作区不干净”与“执行失败”）。
+Apply 期间日志追加到 Git 目录下的 `github-sync.log`；预览不创建日志、锁或检查点。
+存在其它本地分支有未推送提交时，仅输出提示，不改变行为。
+
+`-GitRunner` / `-GhRunner` 只用于隔离测试，接收 `-GitArgs` / `-GhArgs` 数组并返回
+`[pscustomobject]@{ Code; Lines; Text }`；生产调用不需要传入。
 
 验证命令使用一次性本地 Git 仓库和本地 bare 远端，不连接 GitHub，不访问媒体账号：
 
 ```powershell
-python -X utf8 -m unittest discover -s scripts/tests -p test_github_sync_safety.py -v
+python -X utf8 -m unittest discover -s scripts/tests -p "test_github_sync*.py" -v
+pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 3.4.0; Invoke-Pester -Script scripts/tests/github-nightly-sync.injection.Tests.ps1"
 ```
 
 新增的 `Sync utility safety` 工作流执行同一组测试并保存 checkout SHA 和原始日志。
