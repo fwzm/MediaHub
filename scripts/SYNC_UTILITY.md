@@ -62,10 +62,11 @@ Apply 会先拒绝已有暂存或已跟踪改动，再 fetch；无更新时仅�
 
 ```powershell
 python -X utf8 -m unittest discover -s scripts/tests -p test_github_sync_safety.py -v
-python -X utf8 -m unittest discover -s scripts/tests -p test_sync_utility_convergence.py -v
+python -X utf8 -m unittest discover -s scripts/tests -p test_github_sync_convergence.py -v
 ```
 
 新增的 `Sync utility safety` 工作流执行 safety 那组测试并保存 checkout SHA 和原始日志。
-`test_sync_utility_convergence.py` 目前只走本地门禁：把它加进工作流的 paths 与匹配模式
-属于 CI 接入方的改动，本分支不动 `.github/`。
+`test_github_sync_convergence.py` 已按工作流用的 `-p "test_github_sync*.py"` 约定命名，
+剩余只差它的 paths 条目；那属于 CI 接入方的改动，本分支不动 `.github/`。
+在 paths 补上之前，本 PR 的绿色检查**不包含**这个用例的远端执行结果。
 工具的使用不代替项目测试或分支合并门禁。
