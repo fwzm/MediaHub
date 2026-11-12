@@ -528,16 +528,6 @@ W6-110：Android「导出诊断日志」出口。新增 `core/logging` 的 `Diag
 - W8 续播记录的常量（W64）：`resume-record-constant-claims`（第 56 项）把 [windows/docs/W8-HEADLESS-RESUME.md](windows/docs/W8-HEADLESS-RESUME.md) 里**非行号、非计数**的常量钉成 §13 的契约块（`resume-probe-min-runtime-seconds: 300` / `resume-probe-settle-milliseconds: 750` / `resume-probe-max-depth: 3` / `resume-probe-ticks-per-second: 10000000` / `resume-fixture-seconds: 600`，另有四个 `resume-derived-ticks-*`）。守卫当场解析 `Program.cs` 的 `MinimumRuntimeTicks = <n> * TicksPerSecond`、`SettleMilliseconds { get; init; } = <n>`、`const int MaximumDepth = <n>` 与块比对（B），用 600 s × ticks/s 重算 40% / 1% / 2% 四个 tick 数并核对正文里的「N 000 000 000 ticks」分组写法（C），再要求正文仍写着「固定等待 750 ms」「深度上限 3」「≥300 s」（D）；块被删或键缺失 ⇒ 红，文件缺失 ⇒ SKIP。服务端策略（Jellyfin `MinResumePct=5` / `MinResumeDurationSeconds=300`、Emby 行为实测的 2%）来自运行中的服务器，不在本项范围。检查总数 **55 → 56**。
 - W12「判不了」登记表（W65）：`doc-audit-untested-claims`（第 57 项）把 [windows/docs/W12-DOC-AUDIT.md](windows/docs/W12-DOC-AUDIT.md) §4 的**边界登记表**钉成 §7 契约块 —— 6 条 `id=` 各带 `row=` / `reason=` / `status=`，判据四条：A 块自指与条数 ≥ 6；B `reason` / `status` 必须落在块里声明的**闭词表**内；C `row=` 去反引号后必须是 §4 某行第一格的前缀、该行正文须含声明的 `status`，且**出现 `EXECUTED_PASS` / `DEVICE_VERIFIED` 的行其 status 必须是 `DOC_CLAIM_ONLY`**（只允许引用被审计的主张，不允许就地升格）；D 带 `cite=` 的条目区间须仍含锚点。本轮真修一处漂移：§4 引的 `windows-ci.yml:63-69` 早已不是测试步骤（现为 Restore + Build，测试在 `:71-77`）。检查 56 → **57 项**。
 
-### 最近更新（自动同步）
-
-<!-- WINDOWS-SYNC:START -->
-<!-- 由 scripts/sync-github-daily.ps1 自动生成：windows/ 最近 7 天提交。请勿手工编辑块内内容。 -->
-- da84867d 2026-11-11 docs: align audit pointers with integrated Windows workflow
-- c22f85a9 2026-11-11 Merge remaining Windows licence surface verification updates
-- 8826d9a1 2026-11-11 Merge complete source sync and Windows backup into integration candidate
-- 1fb7dd49 2026-11-05 ci(windows): the rows must stay in the order the file declares them (W6-113am)
-<!-- WINDOWS-SYNC:END -->
-
 ## 安全约定（强制）
 
 - 禁止源码硬编码 Token / Cookie / 密码。
