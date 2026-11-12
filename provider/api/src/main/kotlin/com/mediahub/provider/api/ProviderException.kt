@@ -58,8 +58,13 @@ sealed class ProviderException(
             cause,
         )
 
-    /** 会话过期（Token 失效）。 */
-    class AuthExpired(serverId: String) :
+    /**
+     * 会话过期（Token 失效）。
+     *
+     * [challenge] 只有在协议层需要根据 `WWW-Authenticate` 决定重试策略时才填充
+     * （WebDAV Basic 字符集协商）；其它 Provider 保持 null。
+     */
+    class AuthExpired(serverId: String, val challenge: String? = null) :
         ProviderException(serverId, ErrorCode.AUTH_EXPIRED, "登录状态已过期，请重新登录")
 
     /** 网络错误。 */

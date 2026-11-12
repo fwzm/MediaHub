@@ -24,6 +24,26 @@ internal object WebDavAuth {
         val encoded = java.util.Base64.getEncoder().encodeToString(raw.toByteArray(Charsets.UTF_8))
         return "Basic $encoded"
     }
+
+    /**
+     * RFC 2617 历史默认字符集的兼容头：仅当凭据可被 ISO-8859-1 **无损**表示时返回，
+     * 否则返回 null（宁可认证失败，也不做有损映射后重发凭据）。
+     */
+    fun basicHeaderLatin1OrNull(username: String, password: String): String? {
+        val raw = "$username:$password"
+        val encoder = Charsets.ISO_8859_1.newEncoder()
+        if (!encoder.canEncode(raw)) return null
+        val encoded = java.util.Base64.getEncoder().encodeToString(raw.toByteArray(Charsets.ISO_8859_1))
+        return "Basic $encoded"
+    }
+
+    /** challenge 是否为 Basic（只有 Basic 才由本层协商字符集）。 */
+    fun isBasicChallenge(challenge: String?): Boolean =
+        challenge?.contains("Basic", ignoreCase = true) == true
+
+    /** challenge 是否已声明 UTF-8（声明后重试 UTF-8 只会重复同一请求）。 */
+    fun declaresUtf8(challenge: String?): Boolean =
+        challenge?.contains("charset=\"UTF-8\"", ignoreCase = true) == true
 }
 
 /**
