@@ -228,9 +228,13 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 - **体验缺口与覆盖缺口**：「继续观看」卡片海报懒加载已修（W10；页面调用 `MediaCardViewModel.RequestPoster`，U1 P2.6 两服 PASS）；永久播放列表内拖拽排序仅单测覆盖（`NOT_RUN`）。
 - **NOT_RUN / IMPLEMENTED_UNVERIFIED**：HDR 与色彩管理（不声称任何 HDR 能力；杜比视界 `NOT_SUPPORTED`）、
   硬件解码故障回退、全屏切换的截图确认、字幕样式（字体 / 字号 / 颜色 / 描边 / 位置 / 延迟 / ASS 覆盖）、
-  季 / 集导航的专项断言（U2 已在真服按季 / 集选中并播出）、图片缓存上限与磁盘 TTL、
+  图片缓存上限与磁盘 TTL、
   TUN / VPN / PAC 出口一致性与 SOCKS 代理、真实第二 Windows 账户下的凭据库行为、
   Intel / AMD / NVIDIA 硬件兼容矩阵。
+- **已解决（2026-11-12）**：季 / 集导航已从 `NOT_RUN` 移出。U2 的 P1.1 在真实 Emby / Jellyfin 上执行
+  「媒体库 → 库 → 剧 → 第 1 季 → S01E01 详情页与播放入口」，Jellyfin 侧 35/35；Emby 侧 W9 曾 35/35，
+  W12 复核产物中的 12 条失败均为窗口未到前台导致的非产品失败，详见
+  `windows/docs/W12-DOC-AUDIT.md`。
 - **尚未实现**：音频独占 / HDMI 直通 / 多声道 / 音画同步偏移；系统媒体按键、任务栏状态、多窗口；
   Plex / SMB / 云盘媒体源。
 - **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39)，stacked 在 `feature/windows-client` 上，仍为 Draft）：
