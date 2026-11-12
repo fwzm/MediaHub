@@ -222,8 +222,15 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   **夹具片长低于服务端阈值**（`MinResumeDurationSeconds`=300 s），不是客户端缺陷。
   W8-H 的无窗口闭环补上了「低于下限怎么处理」这一半：Jellyfin 12.2 丢弃 5% 以下，Emby 4.10.2 丢弃 **2% 以下**，
   且两者都是**清零并移出续播列表**而不是忽略；阈值是按片长百分比而非绝对秒数（600 s 夹具上 1.99% 丢弃、2.00% 保留）。
-- **真服覆盖面是单机单实例**：Emby 与 Jellyfin 各只在隔离实例上验证一次；服务端版本差异会改变行为
-  （W8 验收途中 Emby 自行从 4.10.1.0 升级到 4.10.2.0），未做多版本矩阵。
+- **真服覆盖面是单机单实例，多版本矩阵只做了 Emby 两个补丁版**：Emby 与 Jellyfin 各只在隔离实例上验证，
+  单用户、单客户端顺序、明文回环；W8 §10 已把版本写进断言并复跑 —— Emby 4.10.1.0（隔离根 `D:\mh-servers410`）
+  与 4.10.2.0 各 `RESULT: 19 passed, 0 failed`，Jellyfin 12.2.0 同批全绿；负向 N1/N2 证明版本不符与安装根缺失会具名失败。
+  早期验收途中 Emby 曾自行从 4.10.1.0 升级到 4.10.2.0，因此 harness 现在用 `-DisableAutoUpdate` 关掉自动更新，
+  并把 `GET /System/Info/Public` 的版本字符串做成断言（只比字符串，不校验二进制哈希）。
+  仍未覆盖：Jellyfin 除 12.2.0 外的版本、Emby 的其它大版本、多实例与自定义端口（脚本默认 8096/8097，端口被占用时复用已应答实例）。
+  验证条件：官方归档经 `windows/tools/get-test-servers.ps1` 下载并记录 SHA-256，用隔离安装根逐版本跑
+  `pwsh -NoProfile -File windows/tools/acceptance/w8/headless-resume.ps1 -ExpectJellyfinVersion <v> -ExpectEmbyVersion <v>`；
+  当前状态：只跑过上述三个版本组合，其余组合 `NOT_RUN`。
 - **搜索**：多源搜索仅有模拟服务器与单测，服务端搜索接口未接入，真服路径未测。
 - **体验缺口与覆盖缺口**：「继续观看」卡片海报懒加载已修（W10；页面调用 `MediaCardViewModel.RequestPoster`，U1 P2.6 两服 PASS）；永久播放列表内拖拽排序仅单测覆盖（`NOT_RUN`）。
 - **NOT_RUN / IMPLEMENTED_UNVERIFIED**：HDR 与色彩管理（不声称任何 HDR 能力；杜比视界 `NOT_SUPPORTED`）、
