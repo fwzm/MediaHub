@@ -226,11 +226,17 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   （W8 验收途中 Emby 自行从 4.10.1.0 升级到 4.10.2.0），未做多版本矩阵。
 - **搜索**：多源搜索仅有模拟服务器与单测，服务端搜索接口未接入，真服路径未测。
 - **体验缺口与覆盖缺口**：「继续观看」卡片海报懒加载已修（W10；页面调用 `MediaCardViewModel.RequestPoster`，U1 P2.6 两服 PASS）；永久播放列表内拖拽排序仅单测覆盖（`NOT_RUN`）。
-- **NOT_RUN / IMPLEMENTED_UNVERIFIED**：HDR 与色彩管理（不声称任何 HDR 能力；杜比视界 `NOT_SUPPORTED`）、
-  硬件解码故障回退、全屏切换的截图确认、字幕样式（字体 / 字号 / 颜色 / 描边 / 位置 / 延迟 / ASS 覆盖）、
-  季 / 集导航的专项断言（U2 已在真服按季 / 集选中并播出）、图片缓存上限与磁盘 TTL、
-  TUN / VPN / PAC 出口一致性与 SOCKS 代理、真实第二 Windows 账户下的凭据库行为、
-  Intel / AMD / NVIDIA 硬件兼容矩阵。
+- **NOT_RUN / IMPLEMENTED_UNVERIFIED（缺的是可判定的执行条件，其中 HDR 是产品边界而非缺陷）**：
+  - **HDR 与色彩管理**：产品边界 —— 不声称任何 HDR 能力，杜比视界 `NOT_SUPPORTED`；若将来要宣称，需 HDR 显示器 + HDR
+    素材的真机验收，当前 `NOT_RUN`。
+  - **硬件解码故障回退**：引擎使用 `hwdec=auto-safe`（`MpvPlayerOptions.HwDec`），`CurrentHwDec` 只是诊断读数，
+    没有可注入的故障钩子；要证明「硬解失败自动回软解」需在 Intel / AMD / NVIDIA 真机上制造解码失败，当前 `NOT_RUN`。
+  - **全屏切换的截图确认**：需 Windows 客户端窗口 + 真实显示器做 GUI 验收，当前 `NOT_RUN`。
+  - **TUN / VPN / PAC 出口一致性与 SOCKS 代理**：本地只覆盖 `NetworkPolicy` 的解析与句柄装配、回环桥接，
+    出口一致性（TUN 网卡、PAC 脚本、SOCKS 代理下的实际路由）需真实网络环境，当前 `NOT_RUN`。
+  - **真实第二 Windows 账户下的凭据库行为**：DPAPI 按用户隔离，需在同一台机器上建第二个 Windows 账户并登录，
+    当前 `NOT_RUN`（不改系统账户无法自动化）。
+  - **Intel / AMD / NVIDIA 硬件兼容矩阵**：需三类 GPU 真机，当前 `NOT_RUN`。
 - **尚未实现**：音频独占 / HDMI 直通 / 多声道 / 音画同步偏移；系统媒体按键、任务栏状态、多窗口；
   Plex / SMB / 云盘媒体源。
 - **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39)，stacked 在 `feature/windows-client` 上，仍为 Draft）：
