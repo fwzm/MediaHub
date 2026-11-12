@@ -14,6 +14,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import okhttp3.OkHttpClient
 
 /**
@@ -41,6 +42,14 @@ class PlayerFactory(
      * —— 而不是把"没有计数"冒充成"零交换"。
      */
     private val ledger: NetworkExchangeLedger? = null,
+    /**
+     * G5-b：Media3 取流的 429 退避策略（上层 `LoadErrorHandlingPolicy`）。
+     *
+     * 默认开启；非 429 路径逐字节委托默认策略，因此接入不改变既有播放行为。
+     * 可注入仅为测试与后续策略替换，生产调用方无需关心。
+     */
+    private val loadErrorHandlingPolicy: LoadErrorHandlingPolicy =
+        Media3RateLimitBackoffPolicy(),
 ) {
 
 
@@ -76,7 +85,11 @@ class PlayerFactory(
         // Share connections, cache and monitoring within this player; only the header
         // wrapper is private to each MediaSource, including its late HLS/DASH readers.
         val base = baseMediaDataSourceFactory(speedMonitor, userAgent)
-        return SnapshotMediaSourceFactory(DefaultMediaSourceFactory(context)) {
+        // G5-b：429 退避挂在 Media3 官方上层落点（MediaSource 工厂），
+        // 只影响"加载失败后的重试节奏"，不触碰已建立的数据流（ADR-046 的边界未变）。
+        val defaultMediaSourceFactory = DefaultMediaSourceFactory(context)
+            .setLoadErrorHandlingPolicy(loadErrorHandlingPolicy)
+        return SnapshotMediaSourceFactory(defaultMediaSourceFactory) {
             val snapshot = headersHolder.headers
             HeaderAwareDataSourceFactory(base) { snapshot }
         }
