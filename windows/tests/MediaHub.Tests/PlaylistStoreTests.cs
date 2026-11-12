@@ -253,6 +253,51 @@ public sealed class PlaylistStoreTests : IDisposable
     }
 
     [Fact]
+    public void ReorderItemsPersistsACompleteNewOrder()
+    {
+        PlaylistStore store = NewStore();
+        SavedPlaylist playlist = store.Create("拖拽");
+        foreach (string itemId in new[] { "a", "b", "c" })
+        {
+            Assert.True(store.AddItem(playlist.Id, Item("srv", itemId, itemId.ToUpperInvariant())));
+        }
+
+        IReadOnlyList<SavedPlaylistItem> items = store.Find(playlist.Id)!.Items;
+
+        Assert.True(store.ReorderItems(playlist.Id, new[] { items[2], items[0], items[1] }));
+
+        string[] expected = { "c", "a", "b" };
+        Assert.Equal(expected, store.Find(playlist.Id)!.Items.Select(item => item.ItemId));
+        Assert.Equal(expected, NewStore().Find(playlist.Id)!.Items.Select(item => item.ItemId));
+    }
+
+    [Fact]
+    public void ReorderItemsRejectsAnythingThatIsNotAPermutation()
+    {
+        PlaylistStore store = NewStore();
+        SavedPlaylist playlist = store.Create("校验");
+        foreach (string itemId in new[] { "a", "b", "c" })
+        {
+            Assert.True(store.AddItem(playlist.Id, Item("srv", itemId, itemId.ToUpperInvariant())));
+        }
+
+        IReadOnlyList<SavedPlaylistItem> items = store.Find(playlist.Id)!.Items;
+
+        // Missing one item.
+        Assert.False(store.ReorderItems(playlist.Id, new[] { items[0], items[1] }));
+        // Duplicate instead of the third item.
+        Assert.False(store.ReorderItems(playlist.Id, new[] { items[0], items[0], items[2] }));
+        // An item that is not in this playlist.
+        Assert.False(store.ReorderItems(playlist.Id, new[] { items[0], items[1], Item("other", "x") }));
+        // Unknown playlist.
+        Assert.False(store.ReorderItems(Guid.NewGuid().ToString("N"), items));
+
+        Assert.Equal(
+            new[] { "a", "b", "c" },
+            store.Find(playlist.Id)!.Items.Select(item => item.ItemId));
+    }
+
+    [Fact]
     public void CreateRejectsBlankNames()
     {
         PlaylistStore store = NewStore();

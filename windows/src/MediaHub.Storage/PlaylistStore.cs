@@ -227,6 +227,72 @@ public sealed class PlaylistStore
         }
     }
 
+    /// <summary>
+    /// Applies a complete new order to a playlist in one durable write.
+    /// </summary>
+    /// <remarks>
+    /// The caller supplies every current item exactly once, usually in the order the UI shows after a
+    /// drag. Anything else — a missing item, a duplicate, or an item from another playlist — is
+    /// rejected and the playlist is left untouched, so a dropped drag can never drop or duplicate
+    /// entries. An unchanged order returns <c>true</c> without writing.
+    /// </remarks>
+    public bool ReorderItems(string playlistId, IReadOnlyList<SavedPlaylistItem> orderedItems)
+    {
+        ArgumentNullException.ThrowIfNull(playlistId);
+        ArgumentNullException.ThrowIfNull(orderedItems);
+
+        lock (_gate)
+        {
+            int index = IndexOf(playlistId);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            SavedPlaylist current = _playlists[index];
+            if (orderedItems.Count != current.Items.Count)
+            {
+                return false;
+            }
+
+            var remaining = new List<SavedPlaylistItem>(current.Items);
+            var reordered = new List<SavedPlaylistItem>(orderedItems.Count);
+            foreach (SavedPlaylistItem item in orderedItems)
+            {
+                int match = remaining.FindIndex(candidate => candidate.HasSameIdentityAs(item));
+                if (match < 0)
+                {
+                    return false;
+                }
+
+                reordered.Add(remaining[match]);
+                remaining.RemoveAt(match);
+            }
+
+            bool unchanged = true;
+            for (int i = 0; i < reordered.Count; i++)
+            {
+                if (!ReferenceEquals(reordered[i], current.Items[i]))
+                {
+                    unchanged = false;
+                    break;
+                }
+            }
+
+            if (unchanged)
+            {
+                return true;
+            }
+
+            Commit(index, current with
+            {
+                Items = reordered.AsReadOnly(),
+                UpdatedAt = NextTimestamp(),
+            });
+            return true;
+        }
+    }
+
     /// <summary>Removes one item by identity. Returns <c>false</c> when either the playlist or the item is unknown.</summary>
     public bool RemoveItem(string playlistId, string serverId, string itemId)
     {
