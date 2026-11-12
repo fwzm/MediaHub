@@ -517,7 +517,9 @@ docs/* 与 7 份根文档
 - `LibraryViewModel.goToParent()` 与 `openFolder()` 的文件夹栈：当前实现正确；
   若 Provider 支持非树形浏览（如 Emby 无 folder 概念），此逻辑需按 ProviderCapability 分支。
 - `PlaybackEngine` 进度循环 1s 间隔；服务端上报为尽力而为，失败只记日志（不打断播放）。
-- 播放器音轨/字幕选择基于"每组取第一轨"（TrackMapper 简化），多轨同组场景待完善。
+- 播放器轨道：`TrackMapper` 已逐轨展开同组多轨（不再只取组内第一轨，ADR-032 勘误）；
+  默认选中哪一条按 ADR-048 的音轨阶梯（系统语言 → 容器 DEFAULT → 设备支持 → 码率/声道 → 首轨），
+  字幕默认不自动开启。用户级语言偏好设置仍待产品裁决；mpv 路径沿用自身轨道属性。
 - 设置页"默认倍速"当前仅持久化，播放器起播未读取（V0.1 接入）。
 - Room schema 导出在 `core/database/schemas`（迁移用，勿删）。
 

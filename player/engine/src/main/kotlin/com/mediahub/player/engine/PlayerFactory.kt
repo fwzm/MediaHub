@@ -65,7 +65,7 @@ class PlayerFactory(
         val renderersFactory = DefaultRenderersFactory(context)
             .setEnableDecoderFallback(true)
 
-        val trackSelector = DefaultTrackSelector(context)
+        val trackSelector = createTrackSelector()
 
         val mediaSourceFactory = mediaSourceFactory(headersHolder, speedMonitor, userAgent)
 
@@ -75,6 +75,17 @@ class PlayerFactory(
             .setMediaSourceFactory(mediaSourceFactory)
             .build()
     }
+
+    /**
+     * 生产唯一构造点：默认轨道选择器。
+     *
+     * 默认选轨策略（ADR-048）在这里写入，保证"每台设备/每个会话的默认音轨"由同一处决定；
+     * 手动选轨仍走 [PlaybackEngine] 的 override 路径。
+     */
+    internal fun createTrackSelector(): DefaultTrackSelector = TrackPreferencePolicy.prepare(
+        DefaultTrackSelector(context),
+        TrackPreferencePolicy.audioLanguages(TrackPreferencePolicy.systemLanguageTags()),
+    )
 
     /** The actual source factory installed by create(); also drives delayed-source tests. */
     fun mediaSourceFactory(

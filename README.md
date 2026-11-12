@@ -122,7 +122,19 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 5. 播放器：音轨/字幕 Bottom Sheet（codec / 声道 / 采样率 / 解码器诊断），
    字幕默认白字透明背景（黑底关闭），字号/颜色/描边/位置可调并持久化；
    全部音轨不被设备支持时显式提示而非静默无声。
+   未手动选轨时按"系统语言 → 容器 DEFAULT → 设备支持 → 码率/声道 → 首轨兜底"选默认音轨
+   （ADR-048，待产品确认；字幕默认不自动开启）。
 6. 播放进度自动写入本地快照 → 首页"继续观看"（缩略图 + 进度条）。
+
+### WebDAV（只读）
+1. 首页 → 添加媒体库 → WebDAV → 填服务器地址（目录 URL，保存时统一补结尾 `/`）/ 用户名 / 密码 → 登录并添加。
+2. 认证探测 = 对配置根发一次 `Depth: 0` 的 `PROPFIND`：只有响应能代表该根目录（同 origin、非空、状态成功）才落盘密码；
+   密码进 `CredentialVault` 并与「用户名 + 规范化地址」绑定，地址或用户名变了旧凭据不会被发往新地址。
+3. 点媒体源卡片 → 浏览目录 → 视频详情 → 播放；实现为只读，不提供上传/删除。
+4. **Basic 字符集策略（RFC 7617 / RFC 2617）**：首个受保护请求一律用 UTF-8（ASCII 与历史编码逐字节一致）；
+   仅当服务器返回 401、challenge 是 `Basic` 且**未**声明 `charset="UTF-8"`，并且凭据可由 ISO-8859-1 无损表示时，
+   才追加一次 ISO-8859-1 重试（兼容按旧默认比较字节的老 NAS）；含中文等 ISO-8859-1 无法表示的字符时不重试。
+5. 401 会按世代条件清理已落盘凭据；403 / 5xx / 网络 / 非 DAV 响应分别映射为不同错误文案，不冒充「密码错误」。
 
 ### 本地存储
 1. 首页 → 添加媒体库 → 本地存储 → 选择本地目录，在系统选择器中允许读取，再保存目录。
@@ -243,18 +255,17 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   验证条件：官方归档经 `windows/tools/get-test-servers.ps1` 下载并记录 SHA-256，用隔离安装根逐版本跑
   `pwsh -NoProfile -File windows/tools/acceptance/w8/headless-resume.ps1 -ExpectJellyfinVersion <v> -ExpectEmbyVersion <v>`；
   当前状态：只跑过上述三个版本组合，其余组合 `NOT_RUN`。
+- **WebDAV 字符集只覆盖 Basic + 两条路径**：UTF-8 与「无 UTF-8 声明时的 ISO-8859-1 无损重试」已有 MockWebServer 用例，
+  但未在真实老 NAS 上验证；Digest / NTLM 等非 Basic 认证不在支持范围（会按认证失败处理）。
+  含 ISO-8859-1 无法表示字符的凭据遇到只认旧编码的服务器时不会降级重试——这是有意的 fail-closed，不是遗漏。
 - **搜索**：多源搜索已有模拟服务器与单测（`Search_sends_the_term_and_returns_only_matching_items` 断言 `SearchTerm=Star%20Wars` 与服务端过滤结果）；Emby / Jellyfin 共用的 `/Users/{id}/Items?SearchTerm=` 服务端搜索已接入。真服路径未测，验证条件是真实 Emby / Jellyfin 服务器；WebDAV / 本地源没有服务端搜索能力，按「不支持搜索」处理。
-- **体验缺口与覆盖缺口**：「继续观看」卡片海报懒加载已修（W10；页面调用 `MediaCardViewModel.RequestPoster`，U1 P2.6 两服 PASS）；永久播放列表内拖拽排序仅单测覆盖（`NOT_RUN`）。
+- **体验缺口与覆盖缺口**：「继续观看」卡片海报懒加载已修（W10；页面调用 `MediaCardViewModel.RequestPoster`，U1 P2.6 两服 PASS）；永久播放列表拖拽排序已接线（`ListView.CanReorderItems` → `PlaylistStore.ReorderItems`，存储层与置换校验有单测），WinUI 拖拽手势本身仍需 GUI 验收（`NOT_RUN`；条件：Windows 客户端 + 至少 3 条目的播放列表）。
 - **NOT_RUN / IMPLEMENTED_UNVERIFIED（缺的是可判定的执行条件，其中 HDR 是产品边界而非缺陷）**：
   - **HDR 与色彩管理**：产品边界 —— 不声称任何 HDR 能力，杜比视界 `NOT_SUPPORTED`；若将来要宣称，需 HDR 显示器 + HDR
     素材的真机验收，当前 `NOT_RUN`。
   - **硬件解码故障回退**：引擎使用 `hwdec=auto-safe`（`MpvPlayerOptions.HwDec`），`CurrentHwDec` 只是诊断读数，
     没有可注入的故障钩子；要证明「硬解失败自动回软解」需在 Intel / AMD / NVIDIA 真机上制造解码失败，当前 `NOT_RUN`。
   - **全屏切换的截图确认**：需 Windows 客户端窗口 + 真实显示器做 GUI 验收，当前 `NOT_RUN`。
-  - **字幕样式**：`MpvSubtitleStyleTests`（PR #85，未合入）已能无窗口回读 libmpv 七项属性并覆盖越界钳制；
-    合并前仍按未验证记录。
-  - **图片缓存上限与磁盘 TTL**：`ArtworkDiskCache` 与 11 例测试（PR #84，未合入）已覆盖磁盘上限 / TTL / 覆盖写 /
-    清空计量 / 孤儿临时文件；内存条目上限与在途去重仍无独立自动化证据，合并前仍按未验证记录。
   - **TUN / VPN / PAC 出口一致性与 SOCKS 代理**：本地只覆盖 `NetworkPolicy` 的解析与句柄装配、回环桥接，
     出口一致性（TUN 网卡、PAC 脚本、SOCKS 代理下的实际路由）需真实网络环境，当前 `NOT_RUN`。
   - **真实第二 Windows 账户下的凭据库行为**：DPAPI 按用户隔离，需在同一台机器上建第二个 Windows 账户并登录，
@@ -264,6 +275,13 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   「媒体库 → 库 → 剧 → 第 1 季 → S01E01 详情页与播放入口」，Jellyfin 侧 35/35；Emby 侧 W9 曾 35/35，
   W12 复核产物中的 12 条失败均为窗口未到前台导致的非产品失败，详见
   `windows/docs/W12-DOC-AUDIT.md`。
+- **已解决（2026-11-12）**：字幕样式（字体 / 字号 / 颜色 / 描边 / 位置 / 延迟 / ASS 覆盖）已从
+  `NOT_RUN` 移出。`MpvSubtitleStyleTests` 在无窗口的 libmpv 实例上逐项回读 `sub-font`、
+  `sub-font-size`、`sub-color`、`sub-border-size`、`sub-pos`、`sub-delay`、`sub-ass-override`，
+  并断言越界值在进入引擎前被钳制。
+- **已解决（2026-11-12）**：图片缓存的磁盘上限与磁盘 TTL 已从 `NOT_RUN` 移出。磁盘缓存抽成
+  `ArtworkDiskCache`，256 MiB 上限、30 天 TTL、覆盖写与清空后的计量、以及孤儿 `.tmp` 清理
+  由 `ArtworkDiskCacheTests` 覆盖；内存条目上限与在途去重仍无独立自动化证据。
 - **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39)，stacked 在 `feature/windows-client` 上，仍为 Draft）：
   契约层、配对载荷/状态机/传输层（回环）、双向增量与设备注册表、凭据迁移（DPAPI 重封）、加密离线归档、同步 CLI、
   同步页「预览 → 逐条审批 → 应用 → 推进基线」、基线落盘与重启幂等、已配对设备登记与指纹钉扎、
