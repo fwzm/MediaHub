@@ -90,6 +90,48 @@ class WebDavAuthProviderTest {
     }
 
     @Test
+    fun `authenticate 403 reports missing permission like restoreSession`() = runBlocking {
+        enqueuePropfind(403)
+        val result = stack.authProvider().authenticate(
+            Credentials.UsernamePassword("alice", WebDavTestStack.PASSWORD)
+        )
+        assertTrue("实际：$result", result is AuthResult.Failure)
+        assertEquals(
+            "登录失败：没有访问权限",
+            (result as AuthResult.Failure).error.message,
+        )
+        assertNull("认证失败不得保存凭据", stack.storedPassword())
+    }
+
+    @Test
+    fun `authenticate 404 reports invalid address like restoreSession`() = runBlocking {
+        enqueuePropfind(404)
+        val result = stack.authProvider().authenticate(
+            Credentials.UsernamePassword("alice", WebDavTestStack.PASSWORD)
+        )
+        assertTrue("实际：$result", result is AuthResult.Failure)
+        assertEquals(
+            "登录失败：地址不是有效的 WebDAV 目录",
+            (result as AuthResult.Failure).error.message,
+        )
+        assertNull("认证失败不得保存凭据", stack.storedPassword())
+    }
+
+    @Test
+    fun `authenticate 500 reports server error like restoreSession`() = runBlocking {
+        enqueuePropfind(500)
+        val result = stack.authProvider().authenticate(
+            Credentials.UsernamePassword("alice", WebDavTestStack.PASSWORD)
+        )
+        assertTrue("实际：$result", result is AuthResult.Failure)
+        assertEquals(
+            "登录失败：服务器错误（HTTP 500）",
+            (result as AuthResult.Failure).error.message,
+        )
+        assertNull("认证失败不得保存凭据", stack.storedPassword())
+    }
+
+    @Test
     fun `restore session without password is signed out and sends nothing`() = runBlocking {
         val state = stack.authProvider().restoreSession()
         assertEquals(AuthSessionState.SignedOut, state)

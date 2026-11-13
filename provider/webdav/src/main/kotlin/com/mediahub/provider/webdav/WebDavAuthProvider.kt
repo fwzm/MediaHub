@@ -66,7 +66,7 @@ internal class WebDavAuthProvider(
             return AuthResult.Failure(ProviderException.AuthFailed(server.id, "用户名或密码错误"))
         } catch (e: ProviderException) {
             logger.w(LogTag.AUTH, "WebDAV 认证探测失败 serverId=${server.id} code=${e.code}")
-            return AuthResult.Failure(e)
+            return AuthResult.Failure(authProbeFailure(e))
         }
 
         // 只有真实 2xx 验证通过且身份未被取代才落盘凭据（fail-closed）。
@@ -112,6 +112,26 @@ internal class WebDavAuthProvider(
         is AuthSessionState.Error ->
             AuthResult.Failure(ProviderException.AuthFailed(server.id, state.message))
         else -> AuthResult.Failure(ProviderException.AuthRequired(server.id))
+    }
+
+    /**
+     * 认证探测的失败文案必须与 [restoreSession] 一致：403 是「没有访问权限」，
+     * 404/410 是「地址不是有效的 WebDAV 目录」，5xx 是服务器错误。
+     * 不能把裸 HTTP 状态码或含服务器地址的原始文案直接抛给用户。
+     * 401 已在上游按 AuthExpired 单独处理；网络错误保留可重试语义。
+     */
+    private fun authProbeFailure(e: ProviderException): ProviderException = when (e) {
+        is ProviderException.Http -> when {
+            e.statusCode == 403 -> ProviderException.AuthFailed(server.id, "没有访问权限")
+            e.statusCode >= 500 ->
+                ProviderException.AuthFailed(server.id, "服务器错误（HTTP ${e.statusCode}）")
+            else -> ProviderException.AuthFailed(server.id, "服务器返回 HTTP ${e.statusCode}")
+        }
+        is ProviderException.NotFound ->
+            ProviderException.AuthFailed(server.id, "地址不是有效的 WebDAV 目录")
+        is ProviderException.Parse ->
+            ProviderException.AuthFailed(server.id, "服务器响应不是有效的 WebDAV 内容")
+        else -> e
     }
 
     override suspend fun restoreSession(): AuthSessionState {
