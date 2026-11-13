@@ -4,6 +4,7 @@
 Language.Parser，不 stub。行为用例只用一次性本地 Git 仓库，不连 GitHub、不读写远端。
 """
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -12,23 +13,29 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
-DAILY = SCRIPTS / "sync-github-daily.ps1"
 NIGHTLY = SCRIPTS / "github-nightly-sync.ps1"
 README = ROOT / "README.md"
 DOC = SCRIPTS / "SYNC_UTILITY.md"
 PWSH = shutil.which("pwsh")
 PS51 = shutil.which("powershell")
-DAILY_NAME = "sync-github-daily"
 BOM = b"\xef\xbb\xbf"
-
-
-def tracked_files():
-    out = subprocess.check_output(["git", "-C", str(ROOT), "ls-files"], text=True, encoding="utf-8")
-    return [ROOT / line for line in out.splitlines() if line]
 
 
 def read_text(path):
     return Path(path).read_text(encoding="utf-8-sig")
+
+
+SCRIPT_REFERENCE = re.compile(r"[\w.-]+\.ps1")
+
+
+def missing_script_references(path):
+    """返回文本里指向不存在脚本的 `.ps1` 引用（glob 模式不计，scripts/ 与 scripts/tests/ 都算已存在）。"""
+    offenders = []
+    for name in SCRIPT_REFERENCE.findall(read_text(path)):
+        if (SCRIPTS / name).is_file() or (SCRIPTS / "tests" / name).is_file():
+            continue
+        offenders.append(f"{path.name} -> {name}")
+    return offenders
 
 
 def parse_errors(shell, script):
@@ -45,26 +52,19 @@ def parse_errors(shell, script):
 class SyncUtilityConvergenceTest(unittest.TestCase):
     """一份职责只留一个入口，且不留悬空引用。"""
 
-    def test_daily_script_is_removed(self):
-        self.assertFalse(DAILY.exists(), "重复的每日同步脚本应已收敛删除")
+    def test_no_legacy_daily_sync_script_remains(self):
+        remaining = sorted(p.name for p in SCRIPTS.glob("*daily*.ps1"))
+        self.assertEqual([], remaining, "重复的每日同步脚本应已收敛删除")
 
     def test_only_one_sync_entry_script_remains(self):
         names = sorted(p.name for p in SCRIPTS.glob("*.ps1") if "sync" in p.name.lower())
         self.assertEqual(["github-nightly-sync.ps1"], names)
 
-    def test_no_tracked_file_still_references_the_removed_script(self):
-        own = Path(__file__).resolve()
-        hits = []
-        for path in tracked_files():
-            if path.resolve() == own or not path.is_file():
-                continue
-            try:
-                text = path.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
-                continue
-            if DAILY_NAME in text:
-                hits.append(str(path.relative_to(ROOT)).replace(os.sep, "/"))
-        self.assertEqual([], hits, "仍有文件引用已删除的脚本")
+    def test_tests_and_doc_do_not_reference_missing_scripts(self):
+        offenders = []
+        for path in [*sorted((SCRIPTS / "tests").glob("test_*.py")), DOC]:
+            offenders += missing_script_references(path)
+        self.assertEqual([], offenders, "存在指向已删除脚本的悬空引用")
 
     def test_readme_has_no_orphan_windows_sync_block(self):
         self.assertNotIn("WINDOWS-SYNC", read_text(README))
@@ -77,7 +77,6 @@ class SyncUtilityConvergenceTest(unittest.TestCase):
     def test_sync_doc_records_single_entry_decision(self):
         text = read_text(DOC)
         self.assertIn("github-nightly-sync.ps1", text)
-        self.assertNotIn(DAILY_NAME, text)
         self.assertIn("唯一入口", text)
 
     def test_remaining_sync_script_keeps_utf8_bom(self):
