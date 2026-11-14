@@ -56,6 +56,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.BackdropImage
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
+import com.mediahub.feature.detail.match.ManualMatchedBanner
 import com.mediahub.feature.detail.source.shouldShowSourceSelector
 import com.mediahub.feature.detail.source.sourceRows
 import com.mediahub.feature.detail.source.truncationMessage
@@ -202,6 +203,12 @@ fun DetailBody(
     val item = detail.item
     val posterWidth = detailPosterWidthDp(LocalConfiguration.current.screenWidthDp)
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
+        // 收尾项 1：手动匹配结果跨重启回显；打开即替换到匹配到的条目。
+        ManualMatchedBanner(
+            onOpenTarget = { targetId, targetTitle ->
+                onSwitchSource?.invoke(item.serverId, targetId, targetTitle)
+            },
+        )
         Box(modifier = Modifier.fillMaxWidth()) {
             BackdropImage(
                 url = item.backdropUrl ?: item.posterUrl,

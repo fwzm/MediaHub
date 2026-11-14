@@ -66,8 +66,11 @@ import com.mediahub.feature.settings.paired.PairedDeviceRoute
 import com.mediahub.feature.settings.pairing.PairingLinkRoute
 import com.mediahub.feature.settings.sync.SourceSyncImportRoute
 import com.mediahub.model.PlaybackEngineMode
-import com.mediahub.model.BuiltinBadgePacks
+import com.mediahub.model.BadgePack
 import com.mediahub.model.UserPreferences
+import com.mediahub.model.allBadgePacks
+import com.mediahub.model.deleteBadgePack
+import com.mediahub.model.nextCustomBadgePackId
 import com.mediahub.model.resolveBadgePackName
 
 /** 设置：播放偏好（DataStore 持久化）。 */
@@ -87,6 +90,8 @@ fun SettingsRoute(
     var showPairedDevices by remember { mutableStateOf(false) }
     var renamingBadgePack by remember { mutableStateOf<com.mediahub.model.BadgePack?>(null) }
     var badgePackNameInput by remember { mutableStateOf("") }
+    var creatingBadgePack by remember { mutableStateOf(false) }
+    var newBadgePackName by remember { mutableStateOf("") }
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
 
@@ -270,9 +275,9 @@ fun SettingsRoute(
 
             }
 
-            // 徽章包（条目 118）：内置包不可删除，只支持重命名。
+            // 徽章包（条目 118 + 收尾项 3）：内置包可重命名不可删除；自建包可重命名可删除。
             SettingsSection(title = "徽章包") {
-                BuiltinBadgePacks.all.forEach { pack ->
+                allBadgePacks(prefs.customBadgePacks).forEach { pack ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
@@ -282,6 +287,18 @@ fun SettingsRoute(
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyLarge,
                         )
+                        if (pack.custom) {
+                            TextButton(
+                                onClick = {
+                                    viewModel.update { current ->
+                                        current.copy(
+                                            customBadgePacks = deleteBadgePack(current.customBadgePacks, pack.id),
+                                            badgePackNames = current.badgePackNames - pack.id,
+                                        )
+                                    }
+                                },
+                            ) { Text("删除") }
+                        }
                         TextButton(
                             onClick = {
                                 renamingBadgePack = pack
@@ -290,6 +307,12 @@ fun SettingsRoute(
                         ) { Text("重命名") }
                     }
                 }
+                TextButton(
+                    onClick = {
+                        creatingBadgePack = true
+                        newBadgePackName = ""
+                    },
+                ) { Text("新增徽章包") }
             }
 
             // 播放器手势（U3-B）：独立于默认倍速的 9 项手势偏好
@@ -438,6 +461,36 @@ fun SettingsRoute(
                 val name = badgePackNameInput.trim()
                 viewModel.update { current -> current.copy(badgePackNames = current.badgePackNames + (pack.id to name)) }
                 renamingBadgePack = null
+            },
+        )
+    }
+
+    // 收尾项 3：自定义徽章包新增（id 由 nextCustomBadgePackId 保证不与已有包冲突）。
+    if (creatingBadgePack) {
+        MediaHubDialog(
+            title = "新增徽章包",
+            onDismiss = { creatingBadgePack = false },
+            content = {
+                OutlinedTextField(
+                    value = newBadgePackName,
+                    onValueChange = { newBadgePackName = it },
+                    singleLine = true,
+                    label = { Text("名称") },
+                )
+            },
+            confirmLabel = "创建",
+            onConfirm = {
+                val name = newBadgePackName.trim()
+                if (name.isNotEmpty()) {
+                    viewModel.update { current ->
+                        val id = nextCustomBadgePackId(allBadgePacks(current.customBadgePacks).map { pack -> pack.id })
+                        current.copy(
+                            customBadgePacks = current.customBadgePacks +
+                                BadgePack(id = id, defaultName = name, custom = true),
+                        )
+                    }
+                }
+                creatingBadgePack = false
             },
         )
     }

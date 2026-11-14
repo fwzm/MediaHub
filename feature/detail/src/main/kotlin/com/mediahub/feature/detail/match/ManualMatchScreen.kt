@@ -124,7 +124,9 @@ fun ManualMatchRoute(
                     )
                     is ManualMatchState.Results -> MatchResults(
                         candidates = current.candidates,
-                        onUse = onMatched,
+                        onUse = { candidate ->
+                            viewModel.selectCandidate(candidate) { onMatched(candidate) }
+                        },
                     )
                 }
             }

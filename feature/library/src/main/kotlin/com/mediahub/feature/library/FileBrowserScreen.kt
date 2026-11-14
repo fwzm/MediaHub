@@ -1,5 +1,8 @@
 package com.mediahub.feature.library
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -32,15 +35,18 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.MediaHubCard
+import com.mediahub.core.ui.MediaHubDialog
 import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.MediaLogo
 import com.mediahub.model.FileBrowserEntry
@@ -60,8 +66,24 @@ fun FileBrowserRoute(
     onBack: () -> Unit,
     onOpenItem: (MediaItem) -> Unit,
     viewModel: LibraryViewModel = hiltViewModel(),
+    safViewModel: SafBrowserViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val safState by safViewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val folderPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            safViewModel.openTree(uri.toString())
+        }
+    }
     FileBrowserContent(
         state = state,
         fallbackTitle = title,
@@ -71,6 +93,11 @@ fun FileBrowserRoute(
         onGoToParent = viewModel::goToParent,
         onLoadMore = viewModel::loadMore,
         onRetry = viewModel::load,
+        safState = safState,
+        onPickFolder = { folderPicker.launch(null) },
+        onEnterSafEntry = safViewModel::enter,
+        onSafGoUp = safViewModel::goUp,
+        onSafRetry = safViewModel::reload,
     )
 }
 
@@ -85,12 +112,23 @@ fun FileBrowserContent(
     onGoToParent: () -> Unit,
     onLoadMore: () -> Unit,
     onRetry: () -> Unit,
+    safState: SafBrowserUiState = SafBrowserUiState(),
+    onPickFolder: () -> Unit = {},
+    onEnterSafEntry: (FileBrowserEntry) -> Unit = {},
+    onSafGoUp: () -> Unit = {},
+    onSafRetry: () -> Unit = {},
 ) {
     var mode by rememberSaveable { mutableStateOf(LibraryViewMode.LARGE) }
-    val title = when (state) {
+    var safMode by rememberSaveable { mutableStateOf(false) }
+    val libraryTitle = when (state) {
         is LibraryUiState.Content -> state.libraryName.ifBlank { fallbackTitle }
         is LibraryUiState.Libraries -> state.libraryName.ifBlank { fallbackTitle }
         else -> fallbackTitle
+    }
+    val title = if (safMode) {
+        safState.stack.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "本地文件夹"
+    } else {
+        libraryTitle
     }
     Scaffold(
         topBar = {
@@ -104,21 +142,38 @@ fun FileBrowserContent(
                 actions = {
                     IconButton(
                         onClick = {
-                            mode = when (mode) {
-                                LibraryViewMode.LARGE -> LibraryViewMode.STANDARD
-                                LibraryViewMode.STANDARD -> LibraryViewMode.LIST
-                                LibraryViewMode.LIST -> LibraryViewMode.LARGE
+                            if (safMode) {
+                                safMode = false
+                            } else {
+                                safMode = true
+                                if (!safState.hasRoot) onPickFolder()
                             }
                         },
                     ) {
                         Icon(
-                            imageVector = if (mode == LibraryViewMode.LIST) {
-                                Icons.Default.GridView
-                            } else {
-                                Icons.Default.ViewList
-                            },
-                            contentDescription = "切换文件浏览器视图",
+                            imageVector = Icons.Default.Folder,
+                            contentDescription = if (safMode) "退出本地文件夹" else "浏览器独立目录栈",
                         )
+                    }
+                    if (!safMode) {
+                        IconButton(
+                            onClick = {
+                                mode = when (mode) {
+                                    LibraryViewMode.LARGE -> LibraryViewMode.STANDARD
+                                    LibraryViewMode.STANDARD -> LibraryViewMode.LIST
+                                    LibraryViewMode.LIST -> LibraryViewMode.LARGE
+                                }
+                            },
+                        ) {
+                            Icon(
+                                imageVector = if (mode == LibraryViewMode.LIST) {
+                                    Icons.Default.GridView
+                                } else {
+                                    Icons.Default.ViewList
+                                },
+                                contentDescription = "切换文件浏览器视图",
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -127,7 +182,16 @@ fun FileBrowserContent(
             )
         },
     ) { padding ->
-        when (state) {
+        if (safMode) {
+            SafDirectoryPanel(
+                state = safState,
+                modifier = Modifier.fillMaxSize().padding(padding),
+                onPickFolder = onPickFolder,
+                onEnter = onEnterSafEntry,
+                onGoUp = onSafGoUp,
+                onRetry = onSafRetry,
+            )
+        } else when (state) {
             LibraryUiState.Loading -> Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
@@ -189,6 +253,95 @@ fun FileBrowserContent(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SafDirectoryPanel(
+    state: SafBrowserUiState,
+    modifier: Modifier,
+    onPickFolder: () -> Unit,
+    onEnter: (FileBrowserEntry) -> Unit,
+    onGoUp: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    var preview by remember { mutableStateOf<FileBrowserEntry?>(null) }
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = state.breadcrumb,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (state.canGoUp) {
+                TextButton(onClick = onGoUp) { Text("上级") }
+            }
+            TextButton(onClick = onPickFolder) { Text("换目录") }
+        }
+        when {
+            !state.hasRoot -> MediaHubStatus(
+                title = "还没有选择文件夹",
+                message = "从系统目录选择器授权一个文件夹后，可逐级进出并保留路径。",
+                modifier = Modifier.fillMaxSize(),
+                retryLabel = "选择文件夹",
+                onRetry = onPickFolder,
+            )
+
+            state.loading && state.entries.isEmpty() -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) { CircularProgressIndicator() }
+
+            state.error != null -> MediaHubStatus(
+                title = "无法读取该目录",
+                message = state.error,
+                modifier = Modifier.fillMaxSize(),
+                retryLabel = "重试",
+                onRetry = onRetry,
+            )
+
+            else -> BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val columns = fileBrowserColumns(maxWidth.value, LibraryViewMode.LARGE)
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(columns),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    gridItems(state.entries, key = { it.id }) { entry ->
+                        FileEntryCell(
+                            entry = entry,
+                            mode = LibraryViewMode.LARGE,
+                            onClick = {
+                                if (entry.isDirectory) onEnter(entry) else preview = entry
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+    preview?.let { entry ->
+        MediaHubDialog(
+            title = entry.name,
+            onDismiss = { preview = null },
+            message = listOfNotNull(
+                if (entry.isDirectory) "文件夹" else "文件",
+                formatFileSize(entry.sizeBytes).takeIf { it.isNotEmpty() },
+                entry.path,
+            ).joinToString("\n"),
+            confirmLabel = "关闭",
+            dismissLabel = null,
+            onConfirm = { preview = null },
+        )
     }
 }
 

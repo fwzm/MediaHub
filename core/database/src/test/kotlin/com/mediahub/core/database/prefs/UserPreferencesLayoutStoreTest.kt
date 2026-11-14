@@ -5,7 +5,9 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import com.mediahub.model.HomeSectionIds
 import com.mediahub.model.HomeSectionStyle
+import com.mediahub.model.ManualMatchRecord
 import com.mediahub.model.UserPreferences
+import com.mediahub.model.manualMatchKey
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -90,6 +92,25 @@ class UserPreferencesLayoutStoreTest {
         store.update { it.copy(badgePackNames = mapOf("emby" to "家里", "local" to "我的")) }
         val prefs = store.flow.first()
         assertEquals(mapOf("emby" to "家里", "local" to "我的"), prefs.badgePackNames)
+    }
+
+    @Test
+    fun `manual matches and custom badge packs persist`() = runBlocking {
+        store.update {
+            it.copy(
+                manualMatches = mapOf(
+                    manualMatchKey("s1", "i1") to ManualMatchRecord("t1", "正确的电影", "https://poster/1.jpg"),
+                ),
+                customBadgePacks = listOf(
+                    com.mediahub.model.BadgePack(id = "custom-1", defaultName = "家庭影院", custom = true),
+                ),
+            )
+        }
+        val prefs = store.flow.first()
+        assertEquals("t1", prefs.manualMatches[manualMatchKey("s1", "i1")]?.targetId)
+        assertEquals("正确的电影", prefs.manualMatches[manualMatchKey("s1", "i1")]?.title)
+        assertEquals(listOf("custom-1"), prefs.customBadgePacks.map { it.id })
+        assertTrue(prefs.customBadgePacks.single().custom)
     }
 
     @Test

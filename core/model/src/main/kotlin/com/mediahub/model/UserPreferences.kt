@@ -37,6 +37,10 @@ data class UserPreferences(
     val showPlayerPlayButton: Boolean = true,
     /** 徽章包重命名映射：内置包 id → 用户自定义名称（条目 118）。 */
     val badgePackNames: Map<String, String> = emptyMap(),
+    /** 手动匹配结果（收尾项 1）：key = [manualMatchKey]，跨重启生效。 */
+    val manualMatches: Map<String, ManualMatchRecord> = emptyMap(),
+    /** 用户自建徽章包（收尾项 3）：可新增/删除，内置包不在此列。 */
+    val customBadgePacks: List<BadgePack> = emptyList(),
 )
 
 /**

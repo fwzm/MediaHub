@@ -4,11 +4,14 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
+import com.mediahub.model.ManualMatchRecord
 import com.mediahub.model.MediaItem
 import com.mediahub.model.PageRequest
+import com.mediahub.model.manualMatchKey
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,6 +27,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /** 手动匹配页状态（条目 129）：四态互斥，每态高度由页面固定，不随结果条数变化。 */
 sealed interface ManualMatchState {
@@ -44,6 +48,7 @@ class ManualMatchViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val serverStore: ServerStore,
     private val registry: MediaProviderRegistry,
+    private val preferences: UserPreferencesRepository,
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -62,6 +67,31 @@ class ManualMatchViewModel @Inject constructor(
 
     fun retry() {
         retryTick.value += 1
+    }
+
+    /**
+     * 收尾项 1：选中即落库（DataStore，跨重启生效），写成功后再回调跳转，
+     * 避免页面被替换导致 viewModelScope 取消而丢写。
+     */
+    fun selectCandidate(item: MediaItem, onPersisted: () -> Unit) {
+        viewModelScope.launch {
+            runCatching {
+                preferences.update { prefs ->
+                    prefs.copy(
+                        manualMatches = prefs.manualMatches + (
+                            manualMatchKey(serverId, itemId) to ManualMatchRecord(
+                                targetId = item.id,
+                                title = item.title,
+                                posterUrl = item.posterUrl,
+                            )
+                            ),
+                    )
+                }
+            }.onFailure {
+                logger.w(LogTag.UI, "手动匹配持久化失败 server=$serverId item=$itemId", it)
+            }
+            onPersisted()
+        }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)

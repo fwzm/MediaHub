@@ -29,10 +29,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,9 +51,11 @@ import com.mediahub.core.ui.MediaHubLabel
 import com.mediahub.core.ui.MediaHubSectionHeader
 import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.ThumbImageWithProgress
+import com.mediahub.core.ui.nav.GlassBackdropRecorder
 import com.mediahub.core.ui.nav.LiquidGlassNavBar
 import com.mediahub.core.ui.nav.NAV_BAR_INSET_DP
 import com.mediahub.core.ui.nav.NavBarItemSpec
+import com.mediahub.core.ui.nav.glassBackdropSource
 import com.mediahub.feature.server.ServerCard
 import com.mediahub.model.HomeSectionIds
 import com.mediahub.model.HomeSectionStyle
@@ -120,6 +129,15 @@ fun HomeContent(
     sectionStyles: Map<String, HomeSectionStyle> = emptyMap(),
     onCycleSectionStyle: (String) -> Unit = {},
 ) {
+    // 条目 29 收尾：API 31+ 用真背板模糊。首页列表的绘制被顺便录进 RenderNode，
+    // 导航栏按两者在 root 的坐标差取「自己身后」那一块做模糊；低版本可选性为 false，保持仿制方案。
+    val backdropRecorder = remember { GlassBackdropRecorder() }
+    DisposableEffect(backdropRecorder) {
+        onDispose { backdropRecorder.release() }
+    }
+    var contentOrigin by remember { mutableStateOf(Offset.Zero) }
+    var navBarOrigin by remember { mutableStateOf(Offset.Zero) }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -156,7 +174,11 @@ fun HomeContent(
                     }
                 },
                 iconOf = { item -> homeNavIcon(item.id) },
-                modifier = Modifier.padding(horizontal = NAV_BAR_INSET_DP.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .onGloballyPositioned { navBarOrigin = it.positionInRoot() }
+                    .padding(horizontal = NAV_BAR_INSET_DP.dp, vertical = 8.dp),
+                backdrop = backdropRecorder,
+                backdropOffset = contentOrigin - navBarOrigin,
             )
         },
         floatingActionButton = {
@@ -175,8 +197,17 @@ fun HomeContent(
         val continueStyle = sectionStyleOf(sectionStyles, HomeSectionIds.CONTINUE_WATCHING)
         val serverStyle = sectionStyleOf(sectionStyles, HomeSectionIds.SERVERS)
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 24.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = padding.calculateTopPadding())
+                .onGloballyPositioned { contentOrigin = it.positionInRoot() }
+                .glassBackdropSource(backdropRecorder),
+            contentPadding = PaddingValues(
+                start = 20.dp,
+                top = 10.dp,
+                end = 20.dp,
+                bottom = padding.calculateBottomPadding() + 24.dp,
+            ),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item(contentType = "intro") {

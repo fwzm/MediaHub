@@ -20,11 +20,15 @@ import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
 import com.mediahub.model.VisualPerformanceMode
 import com.mediahub.model.decodeBadgePackNames
+import com.mediahub.model.decodeCustomBadgePacks
 import com.mediahub.model.decodeHomeSectionStyles
 import com.mediahub.model.decodeLibraryOrder
+import com.mediahub.model.decodeManualMatches
 import com.mediahub.model.encodeBadgePackNames
+import com.mediahub.model.encodeCustomBadgePacks
 import com.mediahub.model.encodeHomeSectionStyles
 import com.mediahub.model.encodeLibraryOrder
+import com.mediahub.model.encodeManualMatches
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -71,6 +75,8 @@ class UserPreferencesStore internal constructor(
             prefs[Keys.LIBRARY_ORDER] = encodeLibraryOrder(updated.libraryOrder)
             prefs[Keys.SHOW_PLAY_BUTTON] = updated.showPlayerPlayButton
             prefs[Keys.BADGE_PACK_NAMES] = encodeBadgePackNames(updated.badgePackNames)
+            prefs[Keys.MANUAL_MATCHES] = encodeManualMatches(updated.manualMatches)
+            prefs[Keys.CUSTOM_BADGE_PACKS] = encodeCustomBadgePacks(updated.customBadgePacks)
         }
     }
 
@@ -110,6 +116,8 @@ class UserPreferencesStore internal constructor(
             libraryOrder = decodeLibraryOrder(prefs[Keys.LIBRARY_ORDER]),
             showPlayerPlayButton = prefs[Keys.SHOW_PLAY_BUTTON] ?: true,
             badgePackNames = decodeBadgePackNames(prefs[Keys.BADGE_PACK_NAMES]),
+            manualMatches = decodeManualMatches(prefs[Keys.MANUAL_MATCHES]),
+            customBadgePacks = decodeCustomBadgePacks(prefs[Keys.CUSTOM_BADGE_PACKS]),
         )
 
     private fun readSubtitleStyle(prefs: Preferences): SubtitleStyle =
@@ -249,5 +257,7 @@ class UserPreferencesStore internal constructor(
         val LIBRARY_ORDER = stringPreferencesKey("library_display_order")
         val SHOW_PLAY_BUTTON = booleanPreferencesKey("player_show_play_button")
         val BADGE_PACK_NAMES = stringPreferencesKey("badge_pack_names")
+        val MANUAL_MATCHES = stringPreferencesKey("manual_matches")
+        val CUSTOM_BADGE_PACKS = stringPreferencesKey("custom_badge_packs")
     }
 }
