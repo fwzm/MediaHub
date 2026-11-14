@@ -370,4 +370,64 @@ class PlayerGestureControllerTest {
         assertNull(c.speedPreview.value)
         assertEquals(emptyList<String>(), actions.calls)
     }
+
+    // ---- 双击边缘显隐（缺陷 34） ----
+
+    @Test
+    fun `开启边缘双击后最左边缘切换控制栏而不是 seek`() {
+        val actions = RecordingActions().apply {
+            gestures = PlayerGestures(
+                doubleTapSeekBackwardEnabled = true,
+                doubleTapSidesToggleOverlay = true,
+            )
+        }
+        controller(actions).onDoubleTap(0.05f)
+        assertEquals(listOf("overlay"), actions.calls)
+    }
+
+    @Test
+    fun `开启边缘双击后原来的快退分区保持不变`() {
+        val actions = RecordingActions().apply {
+            gestures = PlayerGestures(
+                doubleTapSeekBackwardEnabled = true,
+                doubleTapSidesToggleOverlay = true,
+            )
+        }
+        controller(actions).onDoubleTap(0.25f)
+        assertEquals(listOf("commitSeek:590000"), actions.calls)
+    }
+
+    @Test
+    fun `关闭边缘双击时最左边缘仍是原来的快退行为`() {
+        val actions = RecordingActions().apply {
+            gestures = PlayerGestures(doubleTapSeekBackwardEnabled = true)
+        }
+        controller(actions).onDoubleTap(0.05f)
+        assertEquals(listOf("commitSeek:590000"), actions.calls)
+    }
+
+    // ---- 画面缩放（缺陷 33） ----
+
+    @Test
+    fun `缩放倍率锚定在手势开始时并钳制在1到3倍`() {
+        val c = controller(RecordingActions())
+        c.onZoomStart()
+        c.onZoomDelta(1.5f)
+        assertEquals(1.5f, c.zoom.value, 0.001f)
+        c.onZoomDelta(9f)
+        assertEquals(3f, c.zoom.value, 0.001f)
+        c.onZoomDelta(0.2f)
+        assertEquals(1f, c.zoom.value, 0.001f)
+    }
+
+    @Test
+    fun `恢复画面回到1倍`() {
+        val c = controller(RecordingActions())
+        c.onZoomStart()
+        c.onZoomDelta(2f)
+        c.onZoomEnd()
+        assertEquals(2f, c.zoom.value, 0.001f)
+        c.resetZoom()
+        assertEquals(1f, c.zoom.value, 0.001f)
+    }
 }

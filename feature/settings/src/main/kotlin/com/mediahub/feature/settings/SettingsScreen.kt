@@ -304,6 +304,17 @@ fun SettingsRoute(
             }
 
             SettingSwitch(
+                label = stringResource(R.string.settings_gesture_double_tap_sides_overlay),
+                checked = prefs.gestures.doubleTapSidesToggleOverlay,
+                onCheckedChange = { viewModel.update { p -> p.copy(gestures = p.gestures.copy(doubleTapSidesToggleOverlay = it)) } },
+            )
+            Text(
+                stringResource(R.string.settings_gesture_double_tap_sides_overlay_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            SettingSwitch(
                 label = stringResource(R.string.settings_gesture_long_press_speed),
                 checked = prefs.gestures.longPressSpeedEnabled,
                 onCheckedChange = { viewModel.update { p -> p.copy(gestures = p.gestures.copy(longPressSpeedEnabled = it)) } },
