@@ -14,6 +14,9 @@
     <string name="settings_auto_play_next_episode">Auto-play the next episode</string>
     <string name="settings_show_media_info">Show media information in player</string>
     <string name="settings_professional_info">Professional playback info (off = compact panel)</string>
+    <string name="settings_watch_stats">Watch statistics</string>
+    <string name="settings_watch_stats_enabled">Record watch history (off stops recording, existing records are kept)</string>
+    <string name="settings_watch_stats_entry">View watch statistics</string>
     <string name="settings_auto_landscape">Auto-rotate to landscape for video</string>
     <string name="settings_immersive_bars">Hide system bars during playback</string>
     <string name="settings_player_gestures">Player gestures</string>

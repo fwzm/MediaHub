@@ -71,6 +71,7 @@ import com.mediahub.model.UserPreferences
 fun SettingsRoute(
     onBack: () -> Unit,
     onOpenBackup: () -> Unit = {},
+    onOpenStats: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
     visualPreviewRunningOverride: Boolean? = null,
 ) {
@@ -173,6 +174,27 @@ fun SettingsRoute(
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.testTag("diagnostics.result"),
                 )
+            }
+
+            // 条目 122：观影统计开关。关闭后停止记录并隐藏统计入口；已有记录保留。
+            SettingsSection(title = stringResource(R.string.settings_watch_stats)) {
+                SettingSwitch(
+                    label = stringResource(R.string.settings_watch_stats_enabled),
+                    checked = prefs.watchStatsEnabled,
+                    onCheckedChange = { enabled ->
+                        viewModel.update { it.copy(watchStatsEnabled = enabled) }
+                    },
+                )
+                if (prefs.watchStatsEnabled) {
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = onOpenStats,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("stats.entry"),
+                    ) {
+                        Text(stringResource(R.string.settings_watch_stats_entry))
+                    }
+                }
             }
 
             SettingsSection(title = stringResource(R.string.settings_playback)) {
