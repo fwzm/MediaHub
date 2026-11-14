@@ -1,8 +1,10 @@
 package com.mediahub.player.engine
 
 import androidx.media3.common.C
+import androidx.media3.common.ParserException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.source.UnrecognizedInputFormatException
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import java.io.IOException
@@ -28,6 +30,14 @@ import java.io.IOException
  *
  * 说明：`maxAttempts = 2` 表示"首次失败后最多再试 1 次"，与 `LoadErrorInfo.errorCount`
  * 从 1 开始计数的语义一致。
+ *
+ * ## 条目 136：EXO 解析错误重试上限
+ *
+ * 内容识别失败（[ParserException] / [UnrecognizedInputFormatException]）与 429
+ * 不同：重试**不会**改变内容形态。Media3 默认策略对媒体加载仍会重试若干次，
+ * 于是"把 m3u8 当渐进式解析失败"会变成一轮轮重复拉流。
+ * 本类给这类错误单独设**更小的次数预算**（[DEFAULT_MAX_PARSER_ATTEMPTS]），
+ * 用尽后返回 [C.TIME_UNSET] 走既有错误路径；预算内仍按委托策略的节奏等待。
  */
 @UnstableApi
 class Media3RateLimitBackoffPolicy(
@@ -35,6 +45,7 @@ class Media3RateLimitBackoffPolicy(
     private val maxDelayMs: Long = DEFAULT_MAX_DELAY_MS,
     private val defaultDelayMs: Long = DEFAULT_DELAY_MS,
     private val delegate: LoadErrorHandlingPolicy = DefaultLoadErrorHandlingPolicy(),
+    private val maxParserAttempts: Int = DEFAULT_MAX_PARSER_ATTEMPTS,
 ) : LoadErrorHandlingPolicy by delegate {
 
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
@@ -42,6 +53,12 @@ class Media3RateLimitBackoffPolicy(
         val isRateLimited = exception is HttpDataSource.InvalidResponseCodeException &&
             exception.responseCode == HTTP_TOO_MANY_REQUESTS
         if (!isRateLimited) {
+            if (isFormatParseFailure(exception)) {
+                if (loadErrorInfo.errorCount >= maxParserAttempts) {
+                    // 解析失败重试不会改变内容形态：预算用尽立即停止，交给错误路径。
+                    return C.TIME_UNSET
+                }
+            }
             return delegate.getRetryDelayMsFor(loadErrorInfo)
         }
         if (loadErrorInfo.errorCount >= maxAttempts) {
@@ -51,6 +68,18 @@ class Media3RateLimitBackoffPolicy(
         val headerFields = (exception as HttpDataSource.InvalidResponseCodeException).headerFields
         val requestedMs = retryAfterMs(headerFields) ?: defaultDelayMs
         return requestedMs.coerceIn(0L, maxDelayMs)
+    }
+
+    /** 解析/格式识别失败（含被包装的 cause），与网络类错误区分。 */
+    private fun isFormatParseFailure(exception: Throwable?): Boolean {
+        var current = exception
+        var depth = 0
+        while (current != null && depth < MAX_CAUSE_DEPTH) {
+            if (current is ParserException || current is UnrecognizedInputFormatException) return true
+            current = current.cause
+            depth++
+        }
+        return false
     }
 
     /**
@@ -76,6 +105,15 @@ class Media3RateLimitBackoffPolicy(
         const val DEFAULT_MAX_ATTEMPTS: Int = 2
 
         /**
+         * 解析/格式识别失败的预算（同样"首次失败后最多再试 1 次"）。
+         *
+         * 取 2 而非直接 1：媒体清单解析失败偶发于一过性截断/损坏响应，
+         * 留一次重试能吸收这类噪声；再失败则几乎必然是内容形态不匹配，
+         * 继续重试只会制造同一轮拉流风暴。
+         */
+        const val DEFAULT_MAX_PARSER_ATTEMPTS: Int = 2
+
+        /**
          * 单次退避上限（10s）。取值理由：既明显拉开重打间隔、避免 1s/2s/4s 风暴，
          * 又不会让用户面对接近"卡死"的长等待；超过上限的 `Retry-After` 说明服务端
          * 冷却窗口远长于播放器可等待范围，此时应尽早走错误路径而不是空等。
@@ -86,5 +124,8 @@ class Media3RateLimitBackoffPolicy(
         const val DEFAULT_DELAY_MS: Long = 1_000L
 
         private const val RETRY_AFTER_HEADER = "Retry-After"
+
+        /** 只检查有限深度的 cause 链，避免异常图成环或过深。 */
+        private const val MAX_CAUSE_DEPTH = 8
     }
 }

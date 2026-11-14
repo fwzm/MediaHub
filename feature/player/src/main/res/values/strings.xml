@@ -32,6 +32,7 @@
     <string name="player_volume">音量</string>
     <string name="player_level_percent">%1$d%%</string>
     <string name="player_download_speed_unknown">--</string>
+    <string name="player_download_speed_cache">本地缓存</string>
     <string name="player_download_speed_kb">%1$.0f KB/s</string>
     <string name="player_download_speed_mb">%1$.1f MB/s</string>
     <string name="player_audio_mono">单声道</string>

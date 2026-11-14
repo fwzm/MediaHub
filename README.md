@@ -278,6 +278,15 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   - **真实第二 Windows 账户下的凭据库行为**：DPAPI 按用户隔离，需在同一台机器上建第二个 Windows 账户并登录，
     当前 `NOT_RUN`（不改系统账户无法自动化）。
   - **Intel / AMD / NVIDIA 硬件兼容矩阵**：需三类 GPU 真机，当前 `NOT_RUN`。
+- **已解决（2026-11-14，JVM 验证）**：缓存区间 seek 误报网络加载态、无扩展名 HLS 识别与 EXO 解析错误重试上限。
+  `PlaybackSpeedMonitor` 同时监听 `CacheDataSource`（`onCachedBytesRead`），`BufferingIndicatorPolicy`
+  在缓存读取期间抑制网络加载态（400 ms 宽限；网络速度 0 且缓存读取中显示「本地缓存」）；
+  `HlsContentDetector` 按 `Content-Type` 或 `#EXTM3U` 前缀识别，WebDAV 在容器未知时做一次
+  短超时 `Range` 探测（失败只退回 null，不阻断起播）；`Media3RateLimitBackoffPolicy` 给
+  `ParserException` / `UnrecognizedInputFormatException` 单独的次数预算，用尽返回 `C.TIME_UNSET`。
+  `BufferingIndicatorPolicyTest`、`PlaybackSpeedMonitorTest`、`HlsContentDetectorTest`、
+  `WebDavHlsProbeTest`、`Media3RateLimitBackoffPolicyTest` 覆盖（先红后绿：临时移除解析上限时
+  2 例失败，恢复后过滤套件 13/13 通过）。真机「缓存 seek 转圈」与无扩展名 HLS 起播为 `NOT_RUN`。
 - **已解决（2026-11-14，JVM 验证）**：画面比例记忆与首帧拉伸 / 跨内核字幕字号。新增
   `VideoAspectMode`（自适应 / 填满 / 16:9 / 4:3）与 `VideoAspectMemory`（按 `serverId/itemId`
   记忆、上限 200 条），播放器按视频真实宽高比布局（未知尺寸回退 16:9，不再铺满拉伸）；

@@ -100,6 +100,8 @@ class PlaybackEngine(
 
     /** 真实媒体下载速度（B/s，TransferListener 统计）。 */
     override val downloadSpeedBps: StateFlow<Long> = speedMonitor.bytesPerSecond
+    override val cacheReadSpeedBps: StateFlow<Long> = speedMonitor.cacheBytesPerSecond
+    override val isReadingFromCache: StateFlow<Boolean> = speedMonitor.isReadingFromCache
 
     private val _subtitleCues = MutableStateFlow<CueGroup?>(null)
     override val subtitleCues: StateFlow<CueGroup?> = _subtitleCues.asStateFlow()

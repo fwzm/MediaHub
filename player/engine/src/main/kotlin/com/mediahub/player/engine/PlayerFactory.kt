@@ -163,6 +163,8 @@ class PlayerFactory(
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(mediaCacheProvider.cache)
             .setUpstreamDataSourceFactory(dataSourceFactory)
+            // 条目 19：缓存命中 seek 期间记录缓存读取，UI 据此不显示网络加载态。
+            .setEventListener(speedMonitor)
 
         // ---- M16-G4：可观测性边界登记（GREEN）----
         //

@@ -61,6 +61,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -144,6 +145,8 @@ fun PlayerRoute(
     val serverDisplayName by viewModel.serverDisplayName.collectAsStateWithLifecycle()
     val serverIcon by viewModel.serverIcon.collectAsStateWithLifecycle()
     val downloadSpeedBps by viewModel.engine.downloadSpeedBps.collectAsStateWithLifecycle()
+    val cacheReadSpeedBps by viewModel.engine.cacheReadSpeedBps.collectAsStateWithLifecycle()
+    val isReadingFromCache by viewModel.engine.isReadingFromCache.collectAsStateWithLifecycle()
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val subtitleCues by viewModel.engine.subtitleCues.collectAsStateWithLifecycle()
     val artworkPalette by viewModel.artworkPalette.collectAsStateWithLifecycle()
@@ -579,6 +582,8 @@ fun PlayerRoute(
                         serverDisplayName = serverDisplayName,
                         serverIcon = serverIcon,
                         downloadSpeedBps = downloadSpeedBps,
+                        cacheReadSpeedBps = cacheReadSpeedBps,
+                        isReadingFromCache = isReadingFromCache,
                         batteryLevel = batteryLevel,
                         diagnostics = diagnostics,
                         visualRequest = visualState.renderRequest,
@@ -841,6 +846,8 @@ private fun PlayerControls(
     serverDisplayName: String?,
     serverIcon: String?,
     downloadSpeedBps: Long,
+    cacheReadSpeedBps: Long,
+    isReadingFromCache: Boolean,
     batteryLevel: Int?,
     diagnostics: PlaybackDiagnosticsState?,
     visualRequest: PlayerVisualRenderRequest,
@@ -872,6 +879,21 @@ private fun PlayerControls(
         disabledInactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
         disabledInactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
     )
+    val showBufferingIndicator by produceState(
+        initialValue = false,
+        state.isBuffering,
+        isReadingFromCache,
+    ) {
+        value = false
+        if (state.isBuffering) {
+            delay(BufferingIndicatorPolicy.GRACE_MS)
+            value = BufferingIndicatorPolicy.shouldShow(
+                isBuffering = state.isBuffering,
+                isReadingFromCache = isReadingFromCache,
+                bufferingAgeMs = BufferingIndicatorPolicy.GRACE_MS,
+            )
+        }
+    }
     BoxWithConstraints(modifier = modifier.testTag(PlayerVisualTestTags.PLAYER_CONTROLS)) {
         // Use the full player height, not the tall controls content, to protect subtitle pixels.
         val maxAmbientHeight = maxHeight * (1f - PlayerVisualMaskConfig().bottomStart)
@@ -1004,7 +1026,7 @@ private fun PlayerControls(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
-                            text = formatSpeed(downloadSpeedBps),
+                            text = formatSpeed(downloadSpeedBps, cacheReadSpeedBps),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -1047,7 +1069,7 @@ private fun PlayerControls(
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (state.isBuffering) {
+                            if (showBufferingIndicator) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.padding(end = 12.dp),
                                     color = MaterialTheme.colorScheme.primary,
@@ -1245,8 +1267,15 @@ private fun formatTime(ms: Long): String {
 }
 
 @Composable
-private fun formatSpeed(bytesPerSecond: Long): String {
-    if (bytesPerSecond <= 0) return stringResource(R.string.player_download_speed_unknown)
+private fun formatSpeed(bytesPerSecond: Long, cacheReadBps: Long = 0L): String {
+    if (bytesPerSecond <= 0) {
+        // 条目 19：缓存命中 seek 时网络速度为 0，但内容来自本地缓存，不应显示「未知」。
+        return if (cacheReadBps > 0) {
+            stringResource(R.string.player_download_speed_cache)
+        } else {
+            stringResource(R.string.player_download_speed_unknown)
+        }
+    }
     val kb = bytesPerSecond / 1024.0
     return if (kb < 1024) {
         stringResource(R.string.player_download_speed_kb, kb)
