@@ -21,8 +21,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
+// 断言使用中文文案，固定 locale，避免 en 资源（values-en）在不同 CI runner 上改变结果。
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], qualifiers = "zh-rCN")
 class DanmakuPanelRobolectricTest {
 
     @get:Rule
