@@ -1,6 +1,7 @@
 package com.mediahub.provider.api
 
 import com.mediahub.model.CanonicalKey
+import com.mediahub.model.EpgProgram
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
@@ -188,4 +189,23 @@ interface MediaFavoriteProvider {
         /** 单次拉取硬上限（防止误传巨大值把服务器打满）。 */
         const val MAX_FAVORITES_LIMIT = 200
     }
+}
+
+/**
+ * 电子节目单（EPG）能力（IPTV 线路）。
+ *
+ * 契约：
+ * - [channelIds] 是 **Provider 自己的频道 id**（[com.mediahub.model.MediaItem.id]），
+ *   不是外部 XMLTV 的 channel id；Provider 内部完成映射。
+ * - 空集合直接返回空列表，且**不得发起网络请求**。
+ * - 只返回与 `[fromEpochMs, toEpochMs)` 有交集的节目：`start < to && end > from`。
+ * - 结果按 `startEpochMs` 升序；同频道内允许重叠（节目单数据质量不可控）。
+ * - 该能力是只读查询，不写进度、不改服务器状态。
+ */
+interface MediaEpgProvider {
+    suspend fun getPrograms(
+        channelIds: Set<String>,
+        fromEpochMs: Long,
+        toEpochMs: Long,
+    ): List<EpgProgram>
 }

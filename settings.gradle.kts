@@ -42,6 +42,7 @@ include(":provider:emby")
 include(":provider:jellyfin")
 include(":provider:webdav")
 include(":provider:local")
+include(":provider:iptv")
 
 include(":metadata")
 
