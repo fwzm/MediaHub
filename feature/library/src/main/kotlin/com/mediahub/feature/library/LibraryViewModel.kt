@@ -15,6 +15,7 @@ import com.mediahub.model.MediaSort
 import com.mediahub.model.MediaQueryCapabilities
 import com.mediahub.model.MediaSortField
 import com.mediahub.model.PageRequest
+import com.mediahub.metadata.sort.TitleSorter
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -97,6 +98,9 @@ class LibraryViewModel @Inject constructor(
     val uiState: StateFlow<LibraryUiState> = _uiState.asStateFlow()
 
     private var currentFolder: MediaItem? = null
+
+    /** 客户端完整列表（媒体库根列表）的名称排序；分页 Content 仍由服务端排序。 */
+    private val titleSorter = TitleSorter()
 
     /**
      * 导航帧（Phase 1D）：容器 + 该容器的筛选状态。
@@ -289,7 +293,8 @@ class LibraryViewModel @Inject constructor(
                         if (snapshotGen != navigationGeneration ||
                             (currentFolder?.id ?: libraryId) != snapshotParent) return@launch
                         _uiState.value = LibraryUiState.Libraries(
-                            libraries = libraries,
+                            // 根列表一次性完整加载：用 TitleSorter 做展示层名称排序（拼音/冠词/自然数字）
+                            libraries = titleSorter.sortedByTitle(libraries, { it.name }, { it.id }),
                             libraryName = libraryName.ifBlank { server.displayName },
                         )
                     }

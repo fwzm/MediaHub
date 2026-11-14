@@ -84,6 +84,32 @@ class TitleSorterTest {
         assertEquals(listOf("1917", "Alien"), sorted.map { it.title })
     }
 
+    @Test
+    fun `generic overload orders any title bearing list`() {
+        data class Row(val id: String, val name: String)
+
+        val sorted = sorter.sortedByTitle(
+            items = listOf(Row("1", "变形金刚"), Row("2", "阿凡达"), Row("3", "长津湖")),
+            titleOf = { it.name },
+            idOf = { it.id },
+        )
+
+        assertEquals(listOf("阿凡达", "变形金刚", "长津湖"), sorted.map { it.name })
+    }
+
+    @Test
+    fun `generic overload keeps blank titles last and ids stable`() {
+        data class Row(val id: String, val name: String)
+
+        val sorted = sorter.sortedByTitle(
+            items = listOf(Row("b", "  "), Row("a", "1917"), Row("c", "Amelie")),
+            titleOf = { it.name },
+            idOf = { it.id },
+        )
+
+        assertEquals(listOf("a", "c", "b"), sorted.map { it.id })
+    }
+
     private fun result(
         id: String,
         title: String,
