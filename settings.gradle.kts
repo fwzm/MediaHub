@@ -26,6 +26,7 @@ include(":app")
 
 include(":core:common")
 include(":core:model")
+include(":core:download")
 include(":core:network")
 include(":core:database")
 include(":core:security")

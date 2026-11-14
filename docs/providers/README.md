@@ -53,6 +53,29 @@ WebDAV 的 [`WebDavCredentialStore`](../../provider/webdav/src/main/kotlin/com/m
 默认返回空列表。ADR-020 预留的系统目录选择、持久 URI 授权与完整 content 文档树接线仍属后续工作。
 仓库存在相关辅助类型不等于这条产品流程已完成；也不能因为旧分支文档写“已实现”就把它算作当前能力。
 
+## 离线下载与本地缓存
+
+五个网盘模块（`aliyun` / `baidu` / `quark` / `china-mobile` / `tianyi`）目前只有规划 README；
+共享下载内核位于 [`core/download`](../../core/download/src/main/kotlin/com/mediahub/core/download/DownloadManager.kt)，
+Provider 只需提供 `DownloadSourceResolver`（把媒体条目解析成临时下载地址），不重复实现传输与缓存。
+
+- **状态机**：`QUEUED → RUNNING → COMPLETED / FAILED / PAUSED / CANCELLED`，失败保留 `.part` 可续传，
+  暂停保留 `.part`，取消删除 `.part`；每次流转写入 `filesDir/downloads/downloads.json`，进程重启可恢复。
+- **断点续传**：已有 `.part` 时带 `Range: bytes=N-`；服务端返回 206 追加、200 回退整包、
+  416 且本地长度等于已知大小时视为完成。索引不保存 URL / Header / Cookie（ADR-003），
+  签名地址由 Provider 在每次下载时重新解析。
+- **删除与清理**：`delete(serverId, itemId)` 同时删除最终文件、`.part`、同 key 前缀的残留与索引记录，
+  重复调用返回 `false`；`cleanupOrphans()` 回收索引丢失后的无主文件。
+- **关联播放**：`resolveLocalPlayback` 对 COMPLETED 且非空的文件返回 `file://` 的 `DIRECT_PLAY` 源；
+  索引缺失但确定性路径上已有文件（“已存在”）会补写索引；只有 `.part` 时返回 `null`。
+  播放器解析链优先命中本地文件，因此下载完成后即使断网或 Provider 无 playback 能力也能播放。
+- **网络路径**：下载器不做直连可达性 / 网络类型预检，也不发 HEAD 探测；是否可达由注入的 OkHttp
+  客户端决定（系统 VPN 与显式 HTTP 代理均生效）。401/403 时重解析一次签名地址，仍失败则
+  `FAILED(AUTH_REQUIRED)`，由 UI 触发重新授权。
+
+已知限制：五家网盘的真实 OAuth / 文件列表与下载地址解析尚未接入（`NOT_RUN`，需要各自开发者
+凭据与真实账号，仓库内不做此验证）；当前仅以 MockWebServer 验证传输、续传、清理与重授权语义。
+
 ## 播放、分页与验证
 
 临时播放地址在实际播放时解析，来源认证、Header/Cookie 归属与重定向策略由 Provider/播放管线约束。

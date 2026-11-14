@@ -5,6 +5,8 @@ import com.mediahub.core.common.NavArgCodec
 import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
+import com.mediahub.core.download.DownloadRecord
+import com.mediahub.core.download.DownloadedMediaLocator
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.ui.effects.VisualPalette
@@ -13,6 +15,7 @@ import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaType
 import com.mediahub.model.PlaybackOptions
+import com.mediahub.model.PlaybackMode
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.PlaybackEngineMode
@@ -191,8 +194,54 @@ class PlayerViewModelTest {
         }
     }
 
-    // ---- C：解析失败 → Failed，engine 不 play ----
+    // ---- B2：条目 61 已下载内容 → 本地 file:// 播放，不依赖 Provider playback ----
     @Test
+    fun `downloaded content plays from local file without provider playback`() = runTest(dispatcher) {
+        val local = PlaybackSource(
+            url = "file:///data/user/0/com.mediahub.app/files/downloads/srv-1/movie.mp4",
+            mimeType = "video/mp4",
+            container = "mp4",
+            mode = PlaybackMode.DIRECT_PLAY,
+            supportsSeeking = true,
+        )
+        val registry = FakeRegistry(detail = null, playback = null)
+        val engine = FakeEngine()
+        val downloads = object : DownloadedMediaLocator {
+            override suspend fun resolveLocalPlayback(
+                serverId: String,
+                itemId: String,
+                fileNameHint: String?,
+            ): PlaybackSource = local
+
+            override suspend fun listCompleted(): List<DownloadRecord> = emptyList()
+        }
+        val vm = PlayerViewModel(
+            savedStateHandle = savedState("m1"),
+            serverStore = FakeServerStore(embyServer()),
+            progressStore = FakeProgressStore(resume = 32_000L),
+            subtitleMemoryStore = FakeSubtitleMemoryStore(),
+            registry = registry,
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
+            userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
+            logger = noOpLogger,
+            downloadedMediaLocator = downloads,
+        )
+        try {
+            runCurrent()
+
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+            assertEquals(local, engine.playedSession?.source)
+            assertEquals(32_000L, engine.playedSession?.resumePositionMs)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    // ---- C：解析失败 → Failed，engine 不 play ----    @Test
     fun `playback failure surfaces as failed state without engine play`() = runTest(dispatcher) {
         val registry = FakeRegistry(
             detail = FakeDetail(
