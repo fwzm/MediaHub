@@ -174,7 +174,9 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
   统一换算 10 分制求平均并按平台量纲展示；`MdbListRatingsSource` 需注入 API Key（`create` 时传入，仓库不保存）。
 - 片头片尾：`IntroMarkerService` 合并多来源绝对时间戳，重叠段去重并以 `contributors` 显示全部来源；
   本地章节来源（`ChapterMarkerSource`）离线可用；缺媒体时长时绝对标记保持原值，不做百分比推算。
-- 限制：尚未接入 UI 与持久化；排序与匹配率优化在后续段交付。
+- 列表排序：`TitleSorter` 按拼音 / 忽略英文冠词 / 自然数字 / 空标题置底排序，`1917` 这类年份片名不会被清空。
+- 匹配歧义：`ManualMatchService` 在前两名分差小于 10 分时标记 `ambiguous`，即使最高分达阈值也必须人工确认。
+- 限制：尚未接入 UI 与持久化。
 
 > 真机、真实 Emby/Jellyfin 服务器和旧版本数据库升级不属于上述 JVM 路径的自动保证范围；
 > 当前验证边界、尚未完成项和每个 Provider 的能力以 [TASKS.md](TASKS.md)、[ROADMAP.md](ROADMAP.md)
