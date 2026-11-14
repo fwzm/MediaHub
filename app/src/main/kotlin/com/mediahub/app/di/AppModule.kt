@@ -22,6 +22,11 @@ import com.mediahub.feature.settings.FileDiagnosticsExportPort
 import com.mediahub.core.network.ApiClient
 import com.mediahub.core.network.HttpClientFactory
 import com.mediahub.core.network.MediaHttpClient
+import com.mediahub.metadata.MetadataEngine
+import com.mediahub.metadata.MetadataHttpClient
+import com.mediahub.metadata.MetadataRemoteConfig
+import com.mediahub.metadata.OkHttpMetadataHttpClient
+import com.mediahub.metadata.match.MetadataMatchStore
 import com.mediahub.core.security.KeystoreSecretStorage
 import com.mediahub.core.security.CredentialVault
 import com.mediahub.core.security.SecretStorage
@@ -335,6 +340,36 @@ object AppModule {
     @Singleton
     fun provideGlobalSearchEngine(): com.mediahub.feature.search.engine.GlobalSearchEngine =
         com.mediahub.feature.search.engine.GlobalSearchEngine(perServerTimeoutMs = 8_000, maxConcurrency = 4)
+
+    /**
+     * 刮削引擎装配（本轮 UI 接线）：密钥来自未跟踪的 local.properties / secrets.properties，
+     * 经 BuildConfig 注入。缺省时 [MetadataEngine.available] 为 false —— 详情页隐藏手动匹配入口、
+     * 不发起任何外部请求，但应用照常启动。仓库内不存在真实密钥。
+     */
+    @Provides
+    @Singleton
+    fun provideMetadataHttpClient(): MetadataHttpClient = OkHttpMetadataHttpClient()
+
+    @Provides
+    @Singleton
+    fun provideMetadataRemoteConfig(): MetadataRemoteConfig = MetadataRemoteConfig(
+        tmdbApiKey = BuildConfig.TMDB_API_KEY,
+        mdbListApiKey = BuildConfig.MDBLIST_API_KEY,
+    )
+
+    @Provides
+    @Singleton
+    fun provideMetadataEngine(
+        http: MetadataHttpClient,
+        config: MetadataRemoteConfig,
+    ): MetadataEngine = MetadataEngine.create(config, http)
+
+    /** 手动匹配结果（不建表、不迁移）：SharedPreferences 键值存储。 */
+    @Provides
+    @Singleton
+    fun provideMetadataMatchStore(
+        @ApplicationContext context: Context,
+    ): MetadataMatchStore = com.mediahub.app.metadata.SharedPrefsMetadataMatchStore(context)
 
     /**
      * W6-110：诊断日志导出出口（LogBuffer → 文件）。

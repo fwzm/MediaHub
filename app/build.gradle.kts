@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,6 +7,21 @@ plugins {
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
 }
+
+/**
+ * 刮削服务密钥的注入点：依次读取未跟踪的 local.properties 与 secrets.properties。
+ * 两个文件都不存在 / 缺键时保持空串 —— 运行时功能降级，构建不失败，仓库不保存真实密钥。
+ */
+val metadataSecrets = Properties().apply {
+    listOf(rootProject.file("local.properties"), rootProject.file("secrets.properties"))
+        .filter { it.exists() }
+        .forEach { file -> file.inputStream().use { load(it) } }
+}
+
+fun secret(name: String): String = metadataSecrets.getProperty(name)?.trim().orEmpty()
+
+fun buildConfigString(value: String): String =
+    "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
     namespace = "com.mediahub.app"
@@ -17,6 +34,9 @@ android {
         versionCode = 1
         versionName = "0.1.0-alpha.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "TMDB_API_KEY", buildConfigString(secret("tmdb.apiKey")))
+        buildConfigField("String", "MDBLIST_API_KEY", buildConfigString(secret("mdblist.apiKey")))
     }
 
     buildTypes {
@@ -58,6 +78,7 @@ dependencies {
     implementation(project(":core:security"))
     implementation(project(":core:logging"))
     implementation(project(":core:ui"))
+    implementation(project(":metadata"))
     implementation(libs.room.runtime)
 
     implementation(project(":player:engine"))

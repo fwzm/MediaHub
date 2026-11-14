@@ -5,6 +5,7 @@ build/
 
 # Android
 local.properties
+secrets.properties
 captures/
 .externalNativeBuild/
 .cxx/
