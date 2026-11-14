@@ -230,6 +230,11 @@ fun SettingsRoute(
                 onCheckedChange = { viewModel.update { p -> p.copy(autoPlayNextEpisode = it) } },
             )
             SettingSwitch(
+                label = stringResource(R.string.settings_precise_resume_seek),
+                checked = prefs.preciseResumeSeek,
+                onCheckedChange = { viewModel.update { p -> p.copy(preciseResumeSeek = it) } },
+            )
+            SettingSwitch(
                 label = stringResource(R.string.settings_show_media_info),
                 checked = prefs.showPlayerInfoOverlay,
                 onCheckedChange = { viewModel.update { p -> p.copy(showPlayerInfoOverlay = it) } },
