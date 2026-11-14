@@ -295,9 +295,21 @@ class DetailViewModel @Inject constructor(
             try {
                 val provider = metadataEngine.registry.providerFor(match.source) ?: return@launch
                 val metadataDetail = provider.detail(match.metadataId) ?: return@launch
-                _metadataState.value = _metadataState.value.copy(detail = metadataDetail)
+                _metadataState.value = _metadataState.value.copy(
+                    detail = metadataDetail,
+                    ratingsLoading = true,
+                )
+                // 评分聚合：TMDB 详情自带评分 + 已配置的外部来源（单源失败由 RatingsService 隔离）
+                val outcome = metadataEngine.ratings.load(metadataDetail)
+                _metadataState.value = _metadataState.value.copy(
+                    detail = metadataDetail,
+                    ratings = outcome.ratings.ratings,
+                    averageRating = outcome.ratings.average,
+                    ratingsLoading = false,
+                )
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                _metadataState.value = _metadataState.value.copy(ratingsLoading = false)
                 logger.w(
                     LogTag.UI,
                     "元数据详情加载失败 source=${match.source} id=${match.metadataId}",

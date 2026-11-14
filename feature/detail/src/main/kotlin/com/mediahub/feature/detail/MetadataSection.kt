@@ -1,6 +1,8 @@
 package com.mediahub.feature.detail
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import com.mediahub.metadata.match.MatchCandidate
 import com.mediahub.metadata.match.MatchReason
 import com.mediahub.metadata.match.MetadataMatch
+import com.mediahub.metadata.ratings.PlatformRating
+import java.util.Locale
 
 /**
  * 手动匹配弹窗（条目 51 / 67）：只负责展示 [ManualMatchState] 与转发动作，
@@ -132,6 +136,49 @@ fun MetadataMatchSummary(match: MetadataMatch, modifier: Modifier = Modifier) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier,
     )
+}
+
+/**
+ * 多平台评分并排（条目 115）。
+ *
+ * 只渲染 [ratings] 中实际返回数据的平台 —— 调用方传入空列表或缺失平台时该平台不占位。
+ * 各平台保留原生量纲展示，另附统一 10 分制的「综合」值（≥2 个平台时）。
+ */
+@Composable
+fun RatingsStrip(
+    ratings: List<PlatformRating>,
+    average: Double?,
+    modifier: Modifier = Modifier,
+) {
+    if (ratings.isEmpty()) return
+    Row(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        ratings.forEach { rating ->
+            Column {
+                Text(
+                    rating.platform.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(rating.display, style = MaterialTheme.typography.titleSmall)
+            }
+        }
+        if (average != null && ratings.size >= 2) {
+            Column {
+                Text(
+                    "综合",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    String.format(Locale.US, "%.1f", average),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+            }
+        }
+    }
 }
 
 private fun MatchReason.displayLabel(): String = when (this) {
