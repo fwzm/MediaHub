@@ -112,4 +112,24 @@
     <string name="player_info_hdr10_plus" translatable="false">HDR10+</string>
     <string name="player_info_hlg" translatable="false">HLG</string>
     <string name="player_info_dolby_vision" translatable="false">Dolby Vision</string>
+    <string name="player_danmaku">弹幕</string>
+    <string name="player_danmaku_entry_description">打开弹幕设置</string>
+    <string name="player_danmaku_count">%1$s</string>
+    <string name="player_danmaku_enable">显示弹幕</string>
+    <string name="player_danmaku_opacity">透明度 %1$d%%</string>
+    <string name="player_danmaku_stroke">描边 %1$.1f dp</string>
+    <string name="player_danmaku_loaded">已加载 %1$s 条</string>
+    <string name="player_danmaku_source">来源：%1$s</string>
+    <string name="player_danmaku_loading">正在加载弹幕…</string>
+    <string name="player_danmaku_search_hint">搜索番剧以匹配弹幕</string>
+    <string name="player_danmaku_search_action">搜索</string>
+    <string name="player_danmaku_search_empty">没有匹配的剧集</string>
+    <string name="player_danmaku_search_result">%1$s · %2$s</string>
+    <string name="player_danmaku_input_hint">发一条弹幕…</string>
+    <string name="player_danmaku_send">发送</string>
+    <string name="player_danmaku_send_empty">弹幕内容不能为空</string>
+    <string name="player_danmaku_send_too_long">弹幕最多 %1$d 个字</string>
+    <string name="player_danmaku_disabled">弹幕已关闭</string>
+    <string name="player_danmaku_local_source">本地</string>
+    <string name="player_danmaku_refresh">重新拉取</string>
 </resources>
