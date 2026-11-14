@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -81,6 +82,8 @@ fun DetailRoute(
     val seriesState by viewModel.seriesState.collectAsStateWithLifecycle()
     val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
     val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
+    val metadataState by viewModel.metadataState.collectAsStateWithLifecycle()
+    val matchState by viewModel.matchState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -95,6 +98,12 @@ fun DetailRoute(
                     }
                 },
                 actions = {
+                    // 手动匹配入口（条目 51 / 67）：未配置刮削密钥时整入口不渲染
+                    if (metadataState.available) {
+                        IconButton(onClick = viewModel::openMatchDialog) {
+                            Icon(Icons.Default.Search, contentDescription = "手动匹配")
+                        }
+                    }
                     // 收藏开关（task-25 / A2）：只在该数据源具备 FAVORITE 能力时出现
                     val favorite = favoriteState
                     if (favorite != null) {
@@ -172,10 +181,19 @@ fun DetailRoute(
                 onOpenItem = onOpenItem,
                 sourceState = sourceState,
                 onSwitchSource = onSwitchSource,
+                metadataState = metadataState,
                 )
             }
         }
     }
+
+    ManualMatchDialog(
+        state = matchState,
+        onQueryChange = viewModel::onMatchQueryChange,
+        onSearch = viewModel::searchMetadataMatch,
+        onSelect = viewModel::applyMetadataMatch,
+        onDismiss = viewModel::dismissMatchDialog,
+    )
 }
 
 @Composable
@@ -189,6 +207,7 @@ fun DetailBody(
     onOpenItem: ((MediaItem) -> Unit)? = null,
     sourceState: SourceResolutionState = SourceResolutionState.Idle,
     onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
+    metadataState: DetailMetadataState = DetailMetadataState(),
 ) {
     val item = detail.item
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
@@ -261,6 +280,13 @@ fun DetailBody(
                     }
                 }
             }
+        }
+
+        metadataState.match?.let { match ->
+            MetadataMatchSummary(
+                match = match,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            )
         }
 
         Button(

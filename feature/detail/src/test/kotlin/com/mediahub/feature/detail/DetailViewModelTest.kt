@@ -98,6 +98,28 @@ class DetailViewModelTest {
         userData = UserData(playedPercentage = playedPercentage, playCount = playCount),
     )
 
+    private fun noopMatchStore(): com.mediahub.metadata.match.MetadataMatchStore =
+        object : com.mediahub.metadata.match.MetadataMatchStore {
+            override suspend fun get(
+                serverId: String,
+                itemId: String,
+            ): com.mediahub.metadata.match.MetadataMatch? = null
+
+            override suspend fun put(
+                serverId: String,
+                itemId: String,
+                match: com.mediahub.metadata.match.MetadataMatch,
+            ) {}
+        }
+
+    private fun disabledEngine(): com.mediahub.metadata.MetadataEngine =
+        com.mediahub.metadata.MetadataEngine(
+            available = false,
+            manualMatch = com.mediahub.metadata.match.ManualMatchService(emptyList()),
+            ratings = com.mediahub.metadata.ratings.RatingsService(emptyList()),
+            registry = com.mediahub.metadata.DefaultMetadataRegistry(emptyList()),
+        )
+
     private fun createViewModel(
         detail: MediaDetail,
         libraryItems: Map<String, List<MediaItem>> = emptyMap(),
@@ -141,6 +163,8 @@ class DetailViewModelTest {
             registry,
             CanonicalSourceResolver(fakeServerStore(), registry, FakeLogger()),
             FakeLogger(),
+            disabledEngine(),
+            noopMatchStore(),
         )
     }
 

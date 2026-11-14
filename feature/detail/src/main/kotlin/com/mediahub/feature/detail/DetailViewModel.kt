@@ -9,6 +9,13 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.LogTag
 import com.mediahub.feature.detail.source.CanonicalSourceResolver
 import com.mediahub.feature.detail.source.SourceResolution
+import com.mediahub.metadata.MetadataDetail
+import com.mediahub.metadata.MetadataEngine
+import com.mediahub.metadata.match.MatchCandidate
+import com.mediahub.metadata.match.MatchFailure
+import com.mediahub.metadata.match.MetadataMatch
+import com.mediahub.metadata.match.MetadataMatchStore
+import com.mediahub.metadata.ratings.PlatformRating
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
@@ -36,6 +43,8 @@ class DetailViewModel @Inject constructor(
     private val registry: MediaProviderRegistry,
     private val sourceResolver: CanonicalSourceResolver,
     private val logger: Logger,
+    private val metadataEngine: MetadataEngine,
+    private val matchStore: MetadataMatchStore,
 ) : ViewModel() {
 
     val serverId: String = checkNotNull(savedStateHandle["serverId"])
@@ -57,12 +66,22 @@ class DetailViewModel @Inject constructor(
     private var handle: ProviderHandle? = null
     private var episodeJob: Job? = null
     private var sourceJob: Job? = null
+    private var matchJob: Job? = null
+
+    /** 刮削状态：引擎未配置密钥时 available=false，UI 隐藏入口且不发起任何外部请求。 */
+    private val _metadataState = MutableStateFlow(DetailMetadataState(available = metadataEngine.available))
+    val metadataState: StateFlow<DetailMetadataState> = _metadataState.asStateFlow()
+
+    /** 手动匹配弹窗状态。 */
+    private val _matchState = MutableStateFlow(ManualMatchState())
+    val matchState: StateFlow<ManualMatchState> = _matchState.asStateFlow()
 
     init { load() }
 
     fun load() {
         _uiState.value = DetailUiState.Loading
         _favoriteState.value = null
+        _metadataState.value = DetailMetadataState(available = metadataEngine.available)
         viewModelScope.launch {
             try {
                 val server = serverStore.getServer(serverId)
@@ -79,6 +98,7 @@ class DetailViewModel @Inject constructor(
                     _favoriteState.value = FavoriteToggle.fromServerState(detail.item.id, detail.item.isFavorite)
                 }
                 startSourceResolution(detail.item)
+                restoreMetadataMatch()
 
                 // 仅 SERIES 类型加载季列表（复用 browse 链）
                 if (detail.item.type == MediaType.SERIES) {
@@ -178,6 +198,115 @@ class DetailViewModel @Inject constructor(
         }
     }
 
+    // ---- 手动匹配（条目 51 / 67）----
+
+    /** 引擎未配置密钥时不开弹窗、不显示入口（降级而非崩溃）。 */
+    fun openMatchDialog() {
+        if (!metadataEngine.available) return
+        val item = (uiState.value as? DetailUiState.Content)?.detail?.item ?: return
+        _matchState.value = ManualMatchState(visible = true, query = item.title)
+    }
+
+    fun dismissMatchDialog() {
+        _matchState.value = _matchState.value.copy(visible = false)
+    }
+
+    fun onMatchQueryChange(query: String) {
+        _matchState.value = _matchState.value.copy(query = query)
+    }
+
+    /** 调用上一轮的 ManualMatchService（归一化 + 年份/语言排序），UI 不做任何匹配计算。 */
+    fun searchMetadataMatch() {
+        if (!metadataEngine.available) return
+        val snapshot = _matchState.value
+        if (snapshot.query.isBlank()) return
+        val item = (uiState.value as? DetailUiState.Content)?.detail?.item
+        matchJob?.cancel()
+        _matchState.value = snapshot.copy(
+            searching = true,
+            error = null,
+            candidates = emptyList(),
+            failures = emptyList(),
+            ambiguous = false,
+        )
+        matchJob = viewModelScope.launch {
+            try {
+                val outcome = metadataEngine.manualMatch.search(
+                    query = snapshot.query,
+                    year = item?.year,
+                    preferredLanguage = null,
+                )
+                val error = when {
+                    outcome.candidates.isNotEmpty() -> null
+                    outcome.failures.isNotEmpty() -> "刮削服务请求失败"
+                    else -> "未找到匹配"
+                }
+                _matchState.value = _matchState.value.copy(
+                    searching = false,
+                    candidates = outcome.candidates,
+                    failures = outcome.failures,
+                    ambiguous = outcome.ambiguous,
+                    error = error,
+                )
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                logger.w(LogTag.UI, "手动匹配搜索失败 serverId=$serverId itemId=$itemId", e)
+                _matchState.value = _matchState.value.copy(searching = false, error = "搜索失败")
+            }
+        }
+    }
+
+    /** 人工确认：写回匹配结果（SharedPreferences），随后加载元数据详情。 */
+    fun applyMetadataMatch(candidate: MatchCandidate) {
+        val result = candidate.result
+        val match = MetadataMatch(
+            source = result.source,
+            metadataId = result.id,
+            title = result.title,
+            year = result.year,
+            posterUrl = result.posterUrl,
+            mediaType = result.mediaType,
+        )
+        _matchState.value = _matchState.value.copy(visible = false)
+        _metadataState.value = _metadataState.value.copy(match = match)
+        viewModelScope.launch {
+            try {
+                matchStore.put(serverId, itemId, match)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                logger.w(LogTag.UI, "匹配结果写入失败 serverId=$serverId itemId=$itemId", e)
+            }
+            loadMetadataDetail(match)
+        }
+    }
+
+    private fun restoreMetadataMatch() {
+        if (!metadataEngine.available) return
+        viewModelScope.launch {
+            val match = runCatching { matchStore.get(serverId, itemId) }.getOrNull() ?: return@launch
+            _metadataState.value = _metadataState.value.copy(match = match)
+            loadMetadataDetail(match)
+        }
+    }
+
+    /** 元数据详情/评分加载失败只降级为空，不影响已打开的详情页。 */
+    private fun loadMetadataDetail(match: MetadataMatch) {
+        viewModelScope.launch {
+            try {
+                val provider = metadataEngine.registry.providerFor(match.source) ?: return@launch
+                val metadataDetail = provider.detail(match.metadataId) ?: return@launch
+                _metadataState.value = _metadataState.value.copy(detail = metadataDetail)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                logger.w(
+                    LogTag.UI,
+                    "元数据详情加载失败 source=${match.source} id=${match.metadataId}",
+                    e,
+                )
+            }
+        }
+    }
+
     private fun userMessage(e: Exception): String = when (e) {
         // ProviderException.message 为消毒后的固定文案（A3-4），可透出；
         // 其余异常的 message 可能携带 URL/凭据等敏感文本，只给固定分类。
@@ -225,6 +354,27 @@ class DetailViewModel @Inject constructor(
         }
     }
 }
+
+/** 刮削状态（密钥缺失时 available=false，评分列表为空且 UI 不占位）。 */
+data class DetailMetadataState(
+    val available: Boolean = false,
+    val match: MetadataMatch? = null,
+    val detail: MetadataDetail? = null,
+    val ratings: List<PlatformRating> = emptyList(),
+    val averageRating: Double? = null,
+    val ratingsLoading: Boolean = false,
+)
+
+/** 手动匹配弹窗状态。 */
+data class ManualMatchState(
+    val visible: Boolean = false,
+    val query: String = "",
+    val searching: Boolean = false,
+    val candidates: List<MatchCandidate> = emptyList(),
+    val failures: List<MatchFailure> = emptyList(),
+    val ambiguous: Boolean = false,
+    val error: String? = null,
+)
 
 data class SeriesBrowseState(
     val seasons: List<MediaItem> = emptyList(),
