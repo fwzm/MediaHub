@@ -28,15 +28,28 @@
 - `:feature:player:compileDebugKotlin :app:compileDebugKotlin` → exit 0（Hilt 聚合通过）。
 - RED 说明：仓库基线不存在这些类/表，新增测试在基线上无法编译（先红），实现后转绿。
 
-## 3. 与原始目标的差距（勿夸大）
+## 3. 段 2/3（统计 UI）已完成
+
+- 新模块 `feature:stats`：`StatsScreen` 总览四卡 / 观影回顾 / 月历（周一为周起点，可翻月，按当日时长着色）/ 近 30 天趋势柱图 / 观看历史列表。
+- `StatsViewModel`：合并 `WatchStatsStore.observeOverview(30)` 与偏好流；关闭开关时顶部提示"不再记录，已有记录保留"。
+- `feature:settings`：新增"观影统计"开关；**开关关闭时统计入口按钮不渲染**（条目 122）。
+- `app`：`Routes.STATS` 导航；设置页 `onOpenStats`。
+- 提交：`301773f8`（分支 `feature/watch-stats-ui-20261114`，基于段 1 head）。
+
+### 段 2 证据
+
+- `:feature:stats:testDebugUnitTest --rerun-tasks --no-build-cache` → exit 0，2 suites / 6 tests / 0 failures。
+- `:feature:settings:testDebugUnitTest --rerun-tasks --no-build-cache` → exit 0，33 suites / 440 tests / 0 failures。
+- `:app:compileDebugKotlin --rerun-tasks --no-build-cache` → exit 0。
+- 未做 Compose 真机/截图验证（`NOT_RUN`），不声称 UI 已人工验收。
+
+## 4. 与原始目标的差距（勿夸大）
 
 - 隐藏空间：仓库无该模块/UI，本次只提供隐藏键存储 + 统计侧过滤契约；标记写入方缺失 → 139 的端到端为 `PARTIAL`。
-- 统计页面（总览/日历/趋势/历史/回顾 UI）尚未实现 → 段 2。
 - Trakt（142/146、90 的请求限流与错误提示）尚未实现 → 段 3。
 - 真机 `NOT_RUN`；无设备证据。
 
-## 4. 下一步
+## 5. 下一步
 
-1. 段 2：新建 `feature:stats`（Compose 统计页 + 观影日历 + 趋势 + 历史 + 回顾），导航与设置入口按 `watchStatsEnabled` 显隐。
-2. 段 3：`core:trakt`（凭据注入、MockWebServer 测试、频率限制 429/Retry-After、追更增删、追更日历、剧集播出日期与错误提示）。
-3. 每段单独提交 + Draft PR；更新 queue.json 的 `watch_stats_trakt_20261114` 与 RUNLOG。
+1. 段 3：`core:trakt`（凭据注入、MockWebServer 测试、频率限制 429/Retry-After、追更增删、追更日历、剧集播出日期与错误提示）。
+2. 每段单独提交 + Draft PR；更新 queue.json 的 `watch_stats_trakt_20261114` 与 RUNLOG。
