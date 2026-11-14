@@ -72,4 +72,12 @@ class JellyfinImageAuthContributorTest {
         val headers = contributor.headersFor("srv-1")!!
         assertTrue(headers.values.none { it.startsWith("http") })
     }
+
+    @Test
+    fun `auth scope urls stay a single base scope for bare origin and sub path bases`() {
+        val (contributor, _) = contributor(null)
+        // Jellyfin 的协议前缀即 baseUrl，多 scope 展开不得复制出重复 scope。
+        assertEquals(listOf("https://host"), contributor.authScopeUrls("https://host"))
+        assertEquals(listOf("https://host/custom"), contributor.authScopeUrls("https://host/custom"))
+    }
 }

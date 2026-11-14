@@ -15,6 +15,7 @@ import com.mediahub.model.MediaSort
 import com.mediahub.model.MediaQueryCapabilities
 import com.mediahub.model.MediaSortField
 import com.mediahub.model.PageRequest
+import com.mediahub.model.PagedResult
 import com.mediahub.provider.api.ProviderErrorText
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
@@ -221,7 +222,7 @@ class LibraryViewModel @Inject constructor(
                 // 追加并去重（按 id）
                 val state = _uiState.value as? LibraryUiState.Content ?: return@launch
                 val existingIds = (state.items.map { it.id }).toSet()
-                val newItems = result.items.filter { it.id !in existingIds }
+                val newItems = result.items.distinctByValidId { it.id }.filter { it.id !in existingIds }
                 nextOffset = result.nextOffset
                 _uiState.value = state.copy(
                     items = state.items + newItems,
@@ -293,9 +294,14 @@ class LibraryViewModel @Inject constructor(
                 val browse = handle.browse
                 when {
                     library != null && libraryId == "root" && snapshotFolder == null -> {
-                        val libraries = library.getLibraries()
+                        val rawLibraries = library.getLibraries()
                         if (snapshotGen != navigationGeneration ||
                             (currentFolder?.id ?: libraryId) != snapshotParent) return@launch
+                        val libraries = rawLibraries.distinctByValidId { it.id }
+                        // 整页都缺 Id / 都是重复 Id：给可见错误态，不渲染空列表掩盖畸形响应。
+                        if (rawLibraries.isNotEmpty() && libraries.isEmpty()) {
+                            throw ProviderException.Parse(serverId)
+                        }
                         _uiState.value = LibraryUiState.Libraries(
                             libraries = libraries,
                             libraryName = libraryName.ifBlank { server.displayName },
@@ -321,7 +327,7 @@ class LibraryViewModel @Inject constructor(
                         // 能力自述：支持排序/筛选的源给菜单（按能力过滤），否则隐藏入口
                         val caps: MediaQueryCapabilities? = queryProvider?.capabilities
                         _uiState.value = LibraryUiState.Content(
-                            items = result.items,
+                            items = sanitizedItems(result),
                             libraryName = libraryName.ifBlank { server.displayName },
                             currentFolder = currentFolder,
                             canGoUp = folderStack.isNotEmpty(),
@@ -340,7 +346,7 @@ class LibraryViewModel @Inject constructor(
                         if (currentParent != snapshotParent) return@launch
                         nextOffset = result.nextOffset
                         _uiState.value = LibraryUiState.Content(
-                            items = result.items,
+                            items = sanitizedItems(result),
                             libraryName = libraryName.ifBlank { server.displayName },
                             currentFolder = currentFolder,
                             canGoUp = folderStack.isNotEmpty(),
@@ -377,5 +383,26 @@ class LibraryViewModel @Inject constructor(
         // A2-4 第 4 项：非 ProviderException 的 message 可能含 URL/Token 等敏感文本，一律不透传
         is ProviderException -> ProviderErrorText.from(e)
         else -> "加载失败"
+    }
+
+    /**
+     * 按 id 去重并丢弃缺失 id 的条目（单条畸形不牵连整页）。
+     *
+     * 兼容服可能返回重复 Id / 缺 Id 的条目；Compose 的 LazyVerticalGrid 以 id 作 key，
+     * 重复或空白 key 会直接抛 IllegalArgumentException（用户条目 89 / 审计 79 的闪退路径）。
+     */
+    private fun <T> List<T>.distinctByValidId(id: (T) -> String): List<T> {
+        val seen = HashSet<String>()
+        return filter { item ->
+            val key = id(item)
+            key.isNotBlank() && seen.add(key)
+        }
+    }
+
+    /** 条目页统一入口：去重后为空但原始页非空 → Parse 错误态（而不是空网格）。 */
+    private fun sanitizedItems(result: PagedResult<MediaItem>): List<MediaItem> {
+        val items = result.items.distinctByValidId { it.id }
+        if (result.items.isNotEmpty() && items.isEmpty()) throw ProviderException.Parse(serverId)
+        return items
     }
 }

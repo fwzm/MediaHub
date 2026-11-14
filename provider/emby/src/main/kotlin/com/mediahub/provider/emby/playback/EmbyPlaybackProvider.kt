@@ -119,15 +119,14 @@ class EmbyPlaybackProvider(
                 // 兼容服则接受任意非空值）。
                 sessionId = playSessionId,
                 externalSubtitles = source.mediaStreams.mapNotNull { stream ->
-                    if (!stream.type.equals("Subtitle", ignoreCase = true) || !stream.isExternal) return@mapNotNull null
+                    if (!stream.type.equals("Subtitle", ignoreCase = true)) return@mapNotNull null
                     val index = stream.index?.takeIf { it >= 0 } ?: return@mapNotNull null
-                    val format = when (stream.codec?.lowercase()) {
-                        "srt", "subrip" -> "srt"
-                        "webvtt", "vtt" -> "vtt"
-                        "ass" -> "ass"
-                        "ssa" -> "ssa"
-                        else -> return@mapNotNull null // Bitmap sidecars need a different loader.
-                    }
+                    val format = subtitleFormat(stream.codec) ?: return@mapNotNull null
+                    // 外挂判定（用户条目 107 / 审计 81）：兼容服常只给 DeliveryUrl 而不置 IsExternal。
+                    // DeliveryUrl **绝不**作为请求地址（可能内嵌 api_key，ADR-026 红线），
+                    // 仍构造官方 /Videos/{id}/{source}/Subtitles/{index}/Stream.{format} 端点，
+                    // 鉴权由播放器 DataSource 注入请求头。
+                    if (!stream.isExternal && stream.deliveryUrl.isNullOrBlank()) return@mapNotNull null
                     com.mediahub.model.SubtitleTrack(
                         index = index, language = stream.language,
                         title = stream.displayTitle?.takeIf(String::isNotBlank) ?: stream.title,
@@ -141,6 +140,20 @@ class EmbyPlaybackProvider(
         } catch (e: Exception) {
             throw mapError(e)
         }
+    }
+
+    /**
+     * 服务端字幕 codec → 外挂字幕格式（用户条目 107 / 审计 81）。
+     *
+     * 兼容 MediaBrowser / 部分兼容服的别名写法（`S_TEXT/UTF8` 等），大小写与斜杠不敏感；
+     * Bitmap 位图字幕（PGS / VOBSUB / DVDSUB）返回 null（需要另一套位图加载器，跳过）。
+     */
+    private fun subtitleFormat(codec: String?): String? = when (codec?.trim()?.lowercase()?.replace('\\', '/')) {
+        "srt", "subrip", "s_text/utf8" -> "srt"
+        "webvtt", "vtt", "s_text/webvtt" -> "vtt"
+        "ass", "s_text/ass" -> "ass"
+        "ssa", "s_text/ssa" -> "ssa"
+        else -> null
     }
 
     private fun mapError(e: Exception): ProviderException = when (e) {

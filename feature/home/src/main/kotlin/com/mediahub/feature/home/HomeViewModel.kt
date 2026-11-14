@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -45,6 +46,12 @@ class HomeViewModel @Inject constructor(
 
     val continueWatching: StateFlow<List<PlaybackProgress>> =
         progressRepository.observeContinueWatching(limit = 20)
+            // 兼容服写入的畸形进度（缺 serverId/itemId）点击会合成非法详情路由（detail//…），
+            // 重复的 (serverId,itemId) 会让 LazyRow 的 key 冲突崩溃；单条跳过，不影响其它记录。
+            .map { rows ->
+                rows.filter { it.serverId.isNotBlank() && it.itemId.isNotBlank() }
+                    .distinctBy { it.serverId to it.itemId }
+            }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** 各服务器登录态（restoreSession 驱动，review：App 启动真正恢复登录）。 */
