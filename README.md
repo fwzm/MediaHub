@@ -167,6 +167,8 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 - 配置：API Key 由调用方注入（`TmdbMetadataProvider.create(apiKey = ...)`），仓库不保存任何真实密钥；
   `baseUrl` / `language` 可覆盖，测试用 MockWebServer 注入本地地址，不访问真实 TMDB。
 - ID 约定：`movie/550`、`tv/1396`；裸数字 ID 会被拒绝（TMDB 电影与剧集 ID 空间重叠）。
+- 手动匹配：`ManualMatchService` 跨源搜索 + `MetadataMatcher` 归一化打分（标题/原名/年份/语言）；
+  只有分数 ≥ 80 才标记为可自动采用，其余需人工确认；单源失败记录在 `MatchFailure`，不影响其它源。
 - 限制：尚未接入 UI 与持久化；多源评分聚合、片头片尾标记、排序与匹配率优化在后续段交付。
 
 > 真机、真实 Emby/Jellyfin 服务器和旧版本数据库升级不属于上述 JVM 路径的自动保证范围；
