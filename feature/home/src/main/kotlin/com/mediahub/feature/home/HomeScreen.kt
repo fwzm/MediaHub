@@ -2,6 +2,7 @@ package com.mediahub.feature.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -42,6 +44,8 @@ import com.mediahub.core.ui.MediaHubSectionHeader
 import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.ThumbImageWithProgress
 import com.mediahub.feature.server.ServerCard
+import com.mediahub.model.HomeSectionIds
+import com.mediahub.model.HomeSectionStyle
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
 
@@ -58,11 +62,13 @@ fun HomeRoute(
     forceRestoreId: String? = null,
     onForceRestore: (String) -> Unit = { },
     viewModel: HomeViewModel = hiltViewModel(),
+    appearance: HomeAppearanceViewModel = hiltViewModel(),
 ) {
     val servers by viewModel.servers.collectAsStateWithLifecycle()
     val loaded by viewModel.loaded.collectAsStateWithLifecycle()
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
     val authStates by viewModel.authStates.collectAsStateWithLifecycle()
+    val sectionStyles by appearance.sectionStyles.collectAsStateWithLifecycle()
 
     val currentForceRestore = forceRestoreId
     if (currentForceRestore != null) {
@@ -86,6 +92,8 @@ fun HomeRoute(
         onOpenSettings = onOpenSettings,
         onOpenSearch = onOpenSearch,
         onOpenItem = onOpenItem,
+        sectionStyles = sectionStyles,
+        onCycleSectionStyle = appearance::cycleStyle,
     )
 }
 
@@ -105,6 +113,8 @@ fun HomeContent(
     onOpenSettings: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenItem: (PlaybackProgress) -> Unit,
+    sectionStyles: Map<String, HomeSectionStyle> = emptyMap(),
+    onCycleSectionStyle: (String) -> Unit = {},
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -143,6 +153,8 @@ fun HomeContent(
             }
         },
     ) { padding ->
+        val continueStyle = sectionStyleOf(sectionStyles, HomeSectionIds.CONTINUE_WATCHING)
+        val serverStyle = sectionStyleOf(sectionStyles, HomeSectionIds.SERVERS)
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 100.dp),
@@ -159,18 +171,37 @@ fun HomeContent(
                 item {
                     MediaHubSectionHeader(
                         title = "继续观看",
-                        subtitle = "从上次离开的地方继续",
+                        subtitle = "从上次离开的地方继续 · ${homeStyleLabel(continueStyle)}",
                         modifier = Modifier.padding(top = 12.dp),
+                        action = {
+                            IconButton(onClick = { onCycleSectionStyle(HomeSectionIds.CONTINUE_WATCHING) }) {
+                                Icon(Icons.Default.List, contentDescription = "切换继续观看卡片样式")
+                            }
+                        },
                     )
                 }
-                item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        items(continueWatching, key = { "${it.serverId}/${it.itemId}" }) { progress ->
-                            ContinueWatchingCard(
-                                progress = progress,
-                                onClick = { onOpenItem(progress) },
-                                modifier = Modifier.width(276.dp),
-                            )
+                if (continueStyle == HomeSectionStyle.ROW) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            continueWatching.take(4).forEach { progress ->
+                                ContinueWatchingCard(
+                                    progress = progress,
+                                    onClick = { onOpenItem(progress) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    item {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            items(continueWatching, key = { "${it.serverId}/${it.itemId}" }) { progress ->
+                                ContinueWatchingCard(
+                                    progress = progress,
+                                    onClick = { onOpenItem(progress) },
+                                    modifier = Modifier.width(continueCardWidthDp(continueStyle).dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -179,8 +210,15 @@ fun HomeContent(
             item {
                 MediaHubSectionHeader(
                     title = "媒体源",
-                    subtitle = if (servers.isEmpty()) "连接你的媒体世界" else "${servers.size} 个媒体源",
+                    subtitle = "${
+                        if (servers.isEmpty()) "连接你的媒体世界" else "${servers.size} 个媒体源"
+                    } · ${homeStyleLabel(serverStyle)}",
                     modifier = Modifier.padding(top = if (continueWatching.isEmpty()) 16.dp else 24.dp),
+                    action = {
+                        IconButton(onClick = { onCycleSectionStyle(HomeSectionIds.SERVERS) }) {
+                            Icon(Icons.Default.List, contentDescription = "切换媒体源卡片样式")
+                        }
+                    },
                 )
             }
             if (!loaded) {
@@ -211,6 +249,7 @@ fun HomeContent(
                         authState = authState(server),
                         onLogout = { onLogout(server) },
                         onEdit = { onEditServer(server) },
+                        compact = serverStyle != HomeSectionStyle.CARD,
                     )
                 }
             }
@@ -230,8 +269,7 @@ fun HomeContent(
 }
 
 @Composable
-private fun ContinueWatchingCard(
-    progress: PlaybackProgress,
+private fun ContinueWatchingCard(    progress: PlaybackProgress,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -296,4 +334,11 @@ private fun ContinueWatchingCard(
             }
         }
     }
+}
+
+/** 样式中文标签（用户口径），用于区块副标题。 */
+internal fun homeStyleLabel(style: HomeSectionStyle): String = when (style) {
+    HomeSectionStyle.CARD -> "大卡片"
+    HomeSectionStyle.COMPACT -> "紧凑"
+    HomeSectionStyle.ROW -> "列表"
 }

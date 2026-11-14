@@ -30,6 +30,8 @@ fun ServerCard(
     authState: AuthSessionState? = null,
     onLogout: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
+    /** 紧凑展示（首页组件样式 COMPACT/ROW）：隐藏地址副标题，降低卡片高度。 */
+    compact: Boolean = false,
 ) {
     com.mediahub.core.ui.MediaHubCard(
         onClick = onClick,
@@ -38,7 +40,12 @@ fun ServerCard(
     ) {
         Column {
             Row(
-                modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 12.dp),
+                modifier = Modifier.padding(
+                    start = 16.dp,
+                    end = 8.dp,
+                    top = if (compact) 8.dp else 14.dp,
+                    bottom = if (compact) 8.dp else 12.dp,
+                ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -59,13 +66,15 @@ fun ServerCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        text = server.baseUrl.ifBlank { "本地存储" },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    if (!compact) {
+                        Text(
+                            text = server.baseUrl.ifBlank { "本地存储" },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     if (server.isDefault) {

@@ -43,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -191,6 +192,7 @@ fun DetailBody(
     onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
 ) {
     val item = detail.item
+    val posterWidth = detailPosterWidthDp(LocalConfiguration.current.screenWidthDp)
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
         Box(modifier = Modifier.fillMaxWidth()) {
             BackdropImage(
@@ -220,7 +222,7 @@ fun DetailBody(
                     PosterImage(
                         url = item.posterUrl,
                         contentDescription = item.title,
-                        modifier = Modifier.width(104.dp),
+                        modifier = Modifier.width(posterWidth),
                     )
                     Column(modifier = Modifier.weight(1f).padding(top = 24.dp)) {
                         Text(
@@ -281,6 +283,23 @@ fun DetailBody(
             sourceState = sourceState,
             onSwitchSource = onSwitchSource,
         )
+
+        // ---- 版本信息（条目 48：只展示，不参与播放源选择） ----
+        if (detail.versions.isNotEmpty()) {
+            Text(
+                "版本",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            detail.versions.forEach { version ->
+                Text(
+                    formatVersionLine(version),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                )
+            }
+        }
 
         // 导演
         val directors = item.people.filter { it.role == com.mediahub.model.Person.Role.DIRECTOR }

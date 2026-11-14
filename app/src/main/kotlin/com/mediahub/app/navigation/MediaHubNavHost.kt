@@ -1,6 +1,11 @@
 package com.mediahub.app.navigation
 
 import android.net.Uri
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,7 +34,21 @@ import com.mediahub.feature.settings.SettingsRoute
 fun MediaHubNavHost() {
     val navController = rememberNavController()
 
-    NavHost(navController = navController, startDestination = Routes.HOME) {
+    NavHost(
+        navController = navController,
+        startDestination = Routes.HOME,
+        // 主界面切换流畅度（条目 43）：轻量淡入 + 微位移，返回方向相反。
+        enterTransition = {
+            fadeIn(animationSpec = tween(220)) +
+                slideInHorizontally(animationSpec = tween(220)) { it / 12 }
+        },
+        exitTransition = { fadeOut(animationSpec = tween(160)) },
+        popEnterTransition = { fadeIn(animationSpec = tween(220)) },
+        popExitTransition = {
+            fadeOut(animationSpec = tween(160)) +
+                slideOutHorizontally(animationSpec = tween(220)) { it / 12 }
+        },
+    ) {
 
         composable(Routes.HOME) {
             val homeEntry = navController.currentBackStackEntry
