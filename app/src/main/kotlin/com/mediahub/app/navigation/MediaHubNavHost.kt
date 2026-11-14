@@ -1,6 +1,11 @@
 package com.mediahub.app.navigation
 
 import android.net.Uri
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -16,6 +21,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.common.NavArgCodec
 import com.mediahub.feature.detail.DetailRoute
 import com.mediahub.feature.home.HomeRoute
+import com.mediahub.feature.library.FileBrowserRoute
 import com.mediahub.feature.library.LibraryRoute
 import com.mediahub.feature.library.favorites.FavoritesRoute
 import com.mediahub.feature.player.PlayerRoute
@@ -29,7 +35,21 @@ import com.mediahub.feature.settings.SettingsRoute
 fun MediaHubNavHost() {
     val navController = rememberNavController()
 
-    NavHost(navController = navController, startDestination = Routes.HOME) {
+    NavHost(
+        navController = navController,
+        startDestination = Routes.HOME,
+        // 主界面切换流畅度（条目 43）：轻量淡入 + 微位移，返回方向相反。
+        enterTransition = {
+            fadeIn(animationSpec = tween(220)) +
+                slideInHorizontally(animationSpec = tween(220)) { it / 12 }
+        },
+        exitTransition = { fadeOut(animationSpec = tween(160)) },
+        popEnterTransition = { fadeIn(animationSpec = tween(220)) },
+        popExitTransition = {
+            fadeOut(animationSpec = tween(160)) +
+                slideOutHorizontally(animationSpec = tween(220)) { it / 12 }
+        },
+    ) {
 
         composable(Routes.HOME) {
             val homeEntry = navController.currentBackStackEntry
@@ -185,8 +205,36 @@ fun MediaHubNavHost() {
                 onReauthorizeDirectory = {
                     navController.navigate("server/add?reauthorizeId=${Uri.encode(serverId)}")
                 },
+                onOpenFileBrowser = {
+                    val libraryId = entry.arguments?.getString("libraryId").orEmpty()
+                    val name = entry.arguments?.getString("name").orEmpty()
+                    navController.navigate(
+                        "filebrowser/$serverId/${Uri.encode(libraryId)}?name=${Uri.encode(name)}"
+                    )
+                },
                 reauthorizedSource = reauthorized,
                 onReauthorizationConsumed = { entry.savedStateHandle["auth_changed_server_id"] = null },
+            )
+        }
+
+        // 文件浏览器（条目 108/110）：独立页面骨架，复用同一目录数据源。
+        composable(
+            route = "filebrowser/{serverId}/{libraryId}?name={name}",
+            arguments = listOf(
+                navArgument("serverId") { type = NavType.StringType },
+                navArgument("libraryId") { type = NavType.StringType },
+                navArgument("name") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) { entry ->
+            val serverId = entry.arguments?.getString("serverId").orEmpty()
+            FileBrowserRoute(
+                title = entry.arguments?.getString("name").orEmpty(),
+                onBack = { navController.popBackStack() },
+                onOpenItem = { item ->
+                    navController.navigate(
+                        "detail/$serverId/${NavArgCodec.encode(item.id)}?title=${Uri.encode(item.title)}"
+                    )
+                },
             )
         }
 
@@ -226,6 +274,39 @@ fun MediaHubNavHost() {
                             "?title=" + Uri.encode(targetTitle)
                     ) {
                         currentDestId?.let { popUpTo(it) { inclusive = true } }
+                    }
+                },
+                // 条目 129/133：手动匹配独立页面（不触碰 DetailViewModel 与播放链路）。
+                onOpenManualMatch = { matchServerId, matchItemId ->
+                    navController.navigate(
+                        "match/" + matchServerId + "/" + NavArgCodec.encode(matchItemId) +
+                            "?title=" + Uri.encode(entry.arguments?.getString("title").orEmpty())
+                    )
+                },
+            )
+        }
+
+        // 手动匹配（条目 129/133）：选中候选项后替换当前详情为匹配到的条目。
+        composable(
+            route = "match/{serverId}/{itemId}?title={title}",
+            arguments = listOf(
+                navArgument("serverId") { type = NavType.StringType },
+                navArgument("itemId") { type = NavType.StringType },
+                navArgument("title") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) { entry ->
+            com.mediahub.feature.detail.match.ManualMatchRoute(
+                title = entry.arguments?.getString("title").orEmpty(),
+                onBack = { navController.popBackStack() },
+                onMatched = { matched ->
+                    // 先退出匹配页，再把原详情替换为匹配到的条目，避免 back stack 里留两条详情。
+                    navController.popBackStack()
+                    val detailDestinationId = navController.currentBackStackEntry?.destination?.id
+                    navController.navigate(
+                        "detail/" + matched.serverId + "/" + NavArgCodec.encode(matched.id) +
+                            "?title=" + Uri.encode(matched.title)
+                    ) {
+                        detailDestinationId?.let { popUpTo(it) { inclusive = true } }
                     }
                 },
             )

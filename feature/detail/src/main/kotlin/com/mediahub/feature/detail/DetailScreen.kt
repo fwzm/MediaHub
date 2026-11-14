@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -43,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -54,6 +56,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.BackdropImage
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
+import com.mediahub.feature.detail.match.ManualMatchedBanner
 import com.mediahub.feature.detail.source.shouldShowSourceSelector
 import com.mediahub.feature.detail.source.sourceRows
 import com.mediahub.feature.detail.source.truncationMessage
@@ -75,6 +78,8 @@ fun DetailRoute(
     onPlay: (serverId: String, itemId: String, snapshot: PlaybackLaunchSnapshot) -> Unit,
     onOpenItem: ((MediaItem) -> Unit)? = null,
     onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
+    // 条目 129/133：手动匹配独立页面入口；为 null 时不显示按钮（不改变既有调用方）。
+    onOpenManualMatch: ((serverId: String, itemId: String) -> Unit)? = null,
     viewModel: DetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -95,6 +100,11 @@ fun DetailRoute(
                     }
                 },
                 actions = {
+                    if (onOpenManualMatch != null) {
+                        IconButton(onClick = { onOpenManualMatch.invoke(viewModel.serverId, viewModel.itemId) }) {
+                            Icon(Icons.Default.Search, contentDescription = "手动匹配")
+                        }
+                    }
                     // 收藏开关（task-25 / A2）：只在该数据源具备 FAVORITE 能力时出现
                     val favorite = favoriteState
                     if (favorite != null) {
@@ -191,7 +201,14 @@ fun DetailBody(
     onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
 ) {
     val item = detail.item
+    val posterWidth = detailPosterWidthDp(LocalConfiguration.current.screenWidthDp)
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
+        // 收尾项 1：手动匹配结果跨重启回显；打开即替换到匹配到的条目。
+        ManualMatchedBanner(
+            onOpenTarget = { targetId, targetTitle ->
+                onSwitchSource?.invoke(item.serverId, targetId, targetTitle)
+            },
+        )
         Box(modifier = Modifier.fillMaxWidth()) {
             BackdropImage(
                 url = item.backdropUrl ?: item.posterUrl,
@@ -220,7 +237,7 @@ fun DetailBody(
                     PosterImage(
                         url = item.posterUrl,
                         contentDescription = item.title,
-                        modifier = Modifier.width(104.dp),
+                        modifier = Modifier.width(posterWidth),
                     )
                     Column(modifier = Modifier.weight(1f).padding(top = 24.dp)) {
                         Text(
@@ -281,6 +298,38 @@ fun DetailBody(
             sourceState = sourceState,
             onSwitchSource = onSwitchSource,
         )
+
+        // ---- 版本信息（条目 48：只展示，不参与播放源选择） ----
+        if (detail.versions.isNotEmpty()) {
+            Text(
+                "版本",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            detail.versions.forEach { version ->
+                Text(
+                    formatVersionLine(version),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                )
+            }
+        }
+
+        // ---- 文件路径（条目 24：解码后展示，只读） ----
+        decodedPathForDisplay(item.path)?.let { decoded ->
+            Text(
+                "文件路径",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            Text(
+                decoded,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+            )
+        }
 
         // 导演
         val directors = item.people.filter { it.role == com.mediahub.model.Person.Role.DIRECTOR }

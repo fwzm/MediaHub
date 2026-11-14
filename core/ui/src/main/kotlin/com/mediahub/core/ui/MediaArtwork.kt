@@ -35,17 +35,18 @@ import coil.compose.SubcomposeAsyncImage
  * composable 尺寸下采样 + 磁盘/内存缓存。
  */
 
-/** 竖版海报（电影/剧集/季），2:3。 */
+/** 竖版海报（电影/剧集/季），默认 2:3；可传自适应比例（条目 17/24）。 */
 @Composable
 fun PosterImage(
     url: String?,
     contentDescription: String?,
     modifier: Modifier = Modifier,
+    aspectRatio: Float = POSTER_ASPECT,
 ) {
     MediaArtwork(
         url = url,
         contentDescription = contentDescription,
-        modifier = modifier.aspectRatio(POSTER_ASPECT),
+        modifier = modifier.aspectRatio(aspectRatio),
     )
 }
 
@@ -149,6 +150,44 @@ private fun androidx.compose.foundation.layout.BoxScope.PlaceholderIcon(icon: Im
         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
         modifier = Modifier.align(Alignment.Center).fillMaxSize(0.4f),
     )
+}
+
+/**
+ * 资源库 / 服务器 Logo（条目 77）：有图显示图片，无图回退类型图标。
+ * 尺寸由调用方决定（见 feature:library 的 [LibraryLogoSize]）。
+ */
+@Composable
+fun MediaLogo(
+    url: String?,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    fallbackIcon: ImageVector = Icons.Default.Movie,
+    cornerRadius: Dp = 12.dp,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(cornerRadius))
+            .background(MaterialTheme.colorScheme.primaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (url.isNullOrBlank()) {
+            Icon(
+                imageVector = fallbackIcon,
+                contentDescription = contentDescription,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.fillMaxSize(0.55f),
+            )
+        } else {
+            SubcomposeAsyncImage(
+                model = url,
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                loading = { PlaceholderIcon(fallbackIcon) },
+                error = { PlaceholderIcon(fallbackIcon) },
+            )
+        }
+    }
 }
 
 private val POSTER_ASPECT = 2f / 3f

@@ -52,7 +52,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import com.mediahub.core.ui.R as CoreUiR
+import com.mediahub.core.ui.MediaHubDialog
 import com.mediahub.core.ui.effects.PlayerVisualSettingsPanel
 import com.mediahub.core.ui.effects.PlayerVisualPalette
 import com.mediahub.core.ui.effects.PlayerVisualPresetMapper
@@ -63,7 +66,12 @@ import com.mediahub.feature.settings.paired.PairedDeviceRoute
 import com.mediahub.feature.settings.pairing.PairingLinkRoute
 import com.mediahub.feature.settings.sync.SourceSyncImportRoute
 import com.mediahub.model.PlaybackEngineMode
+import com.mediahub.model.BadgePack
 import com.mediahub.model.UserPreferences
+import com.mediahub.model.allBadgePacks
+import com.mediahub.model.deleteBadgePack
+import com.mediahub.model.nextCustomBadgePackId
+import com.mediahub.model.resolveBadgePackName
 
 /** 设置：播放偏好（DataStore 持久化）。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -80,6 +88,10 @@ fun SettingsRoute(
     var showSourceSyncImport by remember { mutableStateOf(false) }
     var showPairing by remember { mutableStateOf(false) }
     var showPairedDevices by remember { mutableStateOf(false) }
+    var renamingBadgePack by remember { mutableStateOf<com.mediahub.model.BadgePack?>(null) }
+    var badgePackNameInput by remember { mutableStateOf("") }
+    var creatingBadgePack by remember { mutableStateOf(false) }
+    var newBadgePackName by remember { mutableStateOf("") }
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
 
@@ -234,6 +246,12 @@ fun SettingsRoute(
                 checked = prefs.showPlayerInfoOverlay,
                 onCheckedChange = { viewModel.update { p -> p.copy(showPlayerInfoOverlay = it) } },
             )
+            // 条目 56：只控制控制栏按钮显隐，不改变播放/暂停逻辑本身。
+            SettingSwitch(
+                label = "显示播放按钮",
+                checked = prefs.showPlayerPlayButton,
+                onCheckedChange = { viewModel.update { p -> p.copy(showPlayerPlayButton = it) } },
+            )
             // 专业/精简开关（P1）：只改播放信息面板密度，不重建播放、不改内核/画质。
             SettingSwitch(
                 label = stringResource(R.string.settings_professional_info),
@@ -255,6 +273,46 @@ fun SettingsRoute(
                 onCheckedChange = { viewModel.update { p -> p.copy(immersiveBars = it) } },
             )
 
+            }
+
+            // 徽章包（条目 118 + 收尾项 3）：内置包可重命名不可删除；自建包可重命名可删除。
+            SettingsSection(title = "徽章包") {
+                allBadgePacks(prefs.customBadgePacks).forEach { pack ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            resolveBadgePackName(pack, prefs.badgePackNames),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        if (pack.custom) {
+                            TextButton(
+                                onClick = {
+                                    viewModel.update { current ->
+                                        current.copy(
+                                            customBadgePacks = deleteBadgePack(current.customBadgePacks, pack.id),
+                                            badgePackNames = current.badgePackNames - pack.id,
+                                        )
+                                    }
+                                },
+                            ) { Text("删除") }
+                        }
+                        TextButton(
+                            onClick = {
+                                renamingBadgePack = pack
+                                badgePackNameInput = resolveBadgePackName(pack, prefs.badgePackNames)
+                            },
+                        ) { Text("重命名") }
+                    }
+                }
+                TextButton(
+                    onClick = {
+                        creatingBadgePack = true
+                        newBadgePackName = ""
+                    },
+                ) { Text("新增徽章包") }
             }
 
             // 播放器手势（U3-B）：独立于默认倍速的 9 项手势偏好
@@ -384,6 +442,57 @@ fun SettingsRoute(
                     ?: lifecycleState.isAtLeast(Lifecycle.State.STARTED),
             )
         }
+    }
+
+    renamingBadgePack?.let { pack ->
+        MediaHubDialog(
+            title = "重命名徽章包",
+            onDismiss = { renamingBadgePack = null },
+            content = {
+                OutlinedTextField(
+                    value = badgePackNameInput,
+                    onValueChange = { badgePackNameInput = it },
+                    singleLine = true,
+                    label = { Text("显示名称") },
+                )
+            },
+            confirmLabel = "保存",
+            onConfirm = {
+                val name = badgePackNameInput.trim()
+                viewModel.update { current -> current.copy(badgePackNames = current.badgePackNames + (pack.id to name)) }
+                renamingBadgePack = null
+            },
+        )
+    }
+
+    // 收尾项 3：自定义徽章包新增（id 由 nextCustomBadgePackId 保证不与已有包冲突）。
+    if (creatingBadgePack) {
+        MediaHubDialog(
+            title = "新增徽章包",
+            onDismiss = { creatingBadgePack = false },
+            content = {
+                OutlinedTextField(
+                    value = newBadgePackName,
+                    onValueChange = { newBadgePackName = it },
+                    singleLine = true,
+                    label = { Text("名称") },
+                )
+            },
+            confirmLabel = "创建",
+            onConfirm = {
+                val name = newBadgePackName.trim()
+                if (name.isNotEmpty()) {
+                    viewModel.update { current ->
+                        val id = nextCustomBadgePackId(allBadgePacks(current.customBadgePacks).map { pack -> pack.id })
+                        current.copy(
+                            customBadgePacks = current.customBadgePacks +
+                                BadgePack(id = id, defaultName = name, custom = true),
+                        )
+                    }
+                }
+                creatingBadgePack = false
+            },
+        )
     }
 }
 

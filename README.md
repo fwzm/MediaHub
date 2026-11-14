@@ -46,6 +46,32 @@
 - 2026-10-14 Merge pull request #26 from fwzm/codex/pr18-review-docs-20260930
 <!-- MEDIAHUB:RECENT:END -->
 
+## 界面批次（2026-11-14）落地范围与缺口
+
+本批次按「首页与媒体库布局 → 文件浏览器 → 详情与弹窗 → 导航与动效」四段落地，分支
+`feature/ui-batch-20261114`（基线 `origin/main` @ `77ef1f2f`）。
+
+仓库原先没有对应模型的页面按**最小可用版本**新建，不是占位骨架：
+
+| 条目 | 落地形态 | 已知缺口 |
+|---|---|---|
+| 3 首页组件卡片样式 | `HomeSectionStyle`（大卡片 / 紧凑 / 列表），按组件 id 独立持久化到 DataStore | 仅「继续观看」「媒体源」两段接入 |
+| 4 资源标签文件夹拖动排序 | 媒体库列表长按拖动，顺序写入 `libraryOrder` | 拖动排序不是独立文件夹管理页 |
+| 108/110 文件浏览器 | 独立路由 `filebrowser/{serverId}/{libraryId}`，大图 / 标准 / 列表三档 + 文件名换行；顶栏文件夹按钮切到**独立 SAF 目录栈**（`SafPath` + `SafBrowserViewModel`），可进出子目录、面包屑回退、换目录，栈写入 `SavedStateHandle`，旋转/重建后仍在原目录 | 只读浏览；点击文件只弹信息卡，不直接进入播放 |
+| 118 徽章包 | 内置包（Emby / Jellyfin / 本地）+ 重命名 + **自定义新增 / 删除**（自定义包存 `customBadgePacks`，内置包不可删） | 自定义包目前只有名称，不含图标 / 配色配置 |
+| 129/133 手动匹配 | 独立页面 `match/{serverId}/{itemId}`，复用数据源搜索能力；选中后写入 `UserPreferences.manualMatches`，**重启仍生效**，详情页顶部「已手动匹配」条可打开或取消 | 持久化复用既有 DataStore 偏好键，未新建数据库表；与另一路的入口取舍见下 |
+| 119 搜索历史两行 | 只给布局常量（`SEARCH_HISTORY_ROWS = 2`） | 存储与读写未改动（避免与搜索体验分支冲突） |
+| 29 液态玻璃导航栏 | `LiquidGlassNavBar`：**API 31+ 真背板模糊**（`GlassBackdropRecorder` 用 `RenderNode` 录首页内容层，导航栏按坐标差取身后区域 + `Modifier.blur`），API < 31 保留半透明 + 顶部高光 + 细描边的仿制方案 | 模糊半径与 scrim 为固定常量，未做按设备性能自适应降级 |
+
+**手动匹配与另一路的关系**：本分支是**独立页面**版；`origin/feature/detail-manual-match-20261114`
+（`e51c4e2b`）是**详情页弹窗 + 持久化回写**版。两者都未合并，接入时二选一，避免双入口。
+
+**2026-11-15 收尾**：上表四处「已知缺口」已补完 —— 手动匹配持久化（`ManualMatch` 编解码 +
+`manualMatches` 偏好键，写成功后才跳转）、文件浏览器独立 SAF 目录栈（`SafPath` / `SafBrowser`）、
+自定义徽章包增删（`custom-` 前缀 id 防碰撞，内置包删除保护）、API 31+ 真模糊背板（`GlassBackdrop`）。
+四项均先写失败测试再实现，真实执行结果见
+[收尾交接](handoff/handoff-2026-11-15-ui-batch-closure.md)。
+
 ## 下载测试版
 
 前往 [GitHub Releases](https://github.com/fwzm/MediaHub/releases) 下载最新 APK。

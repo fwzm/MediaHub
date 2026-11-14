@@ -19,6 +19,16 @@ import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
 import com.mediahub.model.VisualPerformanceMode
+import com.mediahub.model.decodeBadgePackNames
+import com.mediahub.model.decodeCustomBadgePacks
+import com.mediahub.model.decodeHomeSectionStyles
+import com.mediahub.model.decodeLibraryOrder
+import com.mediahub.model.decodeManualMatches
+import com.mediahub.model.encodeBadgePackNames
+import com.mediahub.model.encodeCustomBadgePacks
+import com.mediahub.model.encodeHomeSectionStyles
+import com.mediahub.model.encodeLibraryOrder
+import com.mediahub.model.encodeManualMatches
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -61,6 +71,12 @@ class UserPreferencesStore internal constructor(
             writeGestures(prefs, updated.gestures)
             writePlayerVisualEffects(prefs, updated.playerVisualEffects)
             writeProfessionalInfo(prefs, updated.professionalInfo)
+            prefs[Keys.HOME_SECTION_STYLES] = encodeHomeSectionStyles(updated.homeSectionStyles)
+            prefs[Keys.LIBRARY_ORDER] = encodeLibraryOrder(updated.libraryOrder)
+            prefs[Keys.SHOW_PLAY_BUTTON] = updated.showPlayerPlayButton
+            prefs[Keys.BADGE_PACK_NAMES] = encodeBadgePackNames(updated.badgePackNames)
+            prefs[Keys.MANUAL_MATCHES] = encodeManualMatches(updated.manualMatches)
+            prefs[Keys.CUSTOM_BADGE_PACKS] = encodeCustomBadgePacks(updated.customBadgePacks)
         }
     }
 
@@ -96,6 +112,12 @@ class UserPreferencesStore internal constructor(
             gestures = readGestures(prefs),
             playerVisualEffects = readPlayerVisualEffects(prefs),
             professionalInfo = readProfessionalInfo(prefs),
+            homeSectionStyles = decodeHomeSectionStyles(prefs[Keys.HOME_SECTION_STYLES]),
+            libraryOrder = decodeLibraryOrder(prefs[Keys.LIBRARY_ORDER]),
+            showPlayerPlayButton = prefs[Keys.SHOW_PLAY_BUTTON] ?: true,
+            badgePackNames = decodeBadgePackNames(prefs[Keys.BADGE_PACK_NAMES]),
+            manualMatches = decodeManualMatches(prefs[Keys.MANUAL_MATCHES]),
+            customBadgePacks = decodeCustomBadgePacks(prefs[Keys.CUSTOM_BADGE_PACKS]),
         )
 
     private fun readSubtitleStyle(prefs: Preferences): SubtitleStyle =
@@ -231,5 +253,11 @@ class UserPreferencesStore internal constructor(
         val VISUAL_AUDIO_REACTIVE = booleanPreferencesKey("player_visual_effects_audio_reactive")
         val VISUAL_PERFORMANCE_MODE = stringPreferencesKey("player_visual_effects_performance_mode")
         val PROFESSIONAL_INFO_EXPERT_MODE = booleanPreferencesKey("player_professional_info_expert_mode")
+        val HOME_SECTION_STYLES = stringPreferencesKey("home_section_styles")
+        val LIBRARY_ORDER = stringPreferencesKey("library_display_order")
+        val SHOW_PLAY_BUTTON = booleanPreferencesKey("player_show_play_button")
+        val BADGE_PACK_NAMES = stringPreferencesKey("badge_pack_names")
+        val MANUAL_MATCHES = stringPreferencesKey("manual_matches")
+        val CUSTOM_BADGE_PACKS = stringPreferencesKey("custom_badge_packs")
     }
 }

@@ -29,6 +29,18 @@ data class UserPreferences(
     val playerVisualEffects: PlayerVisualEffectsPreferences = PlayerVisualEffectsPreferences.Default,
     /** 播放专业信息面板（默认专业）：expertMode 只控制面板信息密度，不影响播放本身。 */
     val professionalInfo: ProfessionalInfoPreferences = ProfessionalInfoPreferences.Default,
+    /** 首页各组件独立展示样式（key = [HomeSectionIds]）；未配置的组件用默认样式。 */
+    val homeSectionStyles: Map<String, HomeSectionStyle> = emptyMap(),
+    /** 资源标签文件夹展示顺序（条目 4），保存稳定 id 序列。 */
+    val libraryOrder: List<String> = emptyList(),
+    /** 播放器控制栏是否显示播放/暂停按钮（条目 56）。 */
+    val showPlayerPlayButton: Boolean = true,
+    /** 徽章包重命名映射：内置包 id → 用户自定义名称（条目 118）。 */
+    val badgePackNames: Map<String, String> = emptyMap(),
+    /** 手动匹配结果（收尾项 1）：key = [manualMatchKey]，跨重启生效。 */
+    val manualMatches: Map<String, ManualMatchRecord> = emptyMap(),
+    /** 用户自建徽章包（收尾项 3）：可新增/删除，内置包不在此列。 */
+    val customBadgePacks: List<BadgePack> = emptyList(),
 )
 
 /**
