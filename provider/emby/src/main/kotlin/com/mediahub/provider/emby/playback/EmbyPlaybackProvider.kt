@@ -63,7 +63,12 @@ class EmbyPlaybackProvider(
             val sources = info.mediaSources
             // 响应损坏（空 MediaSources）≠ 需要转码：明确报 Parse。
             if (sources.isEmpty()) throw ProviderException.Parse(server.id)
-            val source = MediaSourceSelector.selectDirectStream(sources)
+            val versionId = options.versionId
+            // 指定版本必须真实存在：不存在就明确报 NotFound，不能悄悄回退到默认源。
+            if (versionId != null && MediaSourceSelector.findById(sources, versionId) == null) {
+                throw ProviderException.NotFound(server.id, "媒体版本")
+            }
+            val source = MediaSourceSelector.selectDirectStream(sources, versionId)
                 ?: throw ProviderException.NotYetImplemented(server.id, "当前媒体需要转码")
             // Direct Stream 必备参数：缺了只能说明上游响应损坏，绝不生成残缺 URL。
             val mediaSourceId = source.id?.takeIf(String::isNotBlank)

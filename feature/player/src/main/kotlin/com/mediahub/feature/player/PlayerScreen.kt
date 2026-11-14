@@ -226,6 +226,9 @@ fun PlayerRoute(
         }
     }
     val sysUiPrefs by viewModel.playerSystemUiPrefs.collectAsStateWithLifecycle()
+    val versionSwitchAvailable by viewModel.versionSwitchAvailable.collectAsStateWithLifecycle()
+    val versions by viewModel.versions.collectAsStateWithLifecycle()
+    val selectedVersionId by viewModel.selectedVersionId.collectAsStateWithLifecycle()
     val sysUiController = remember(activity) { activity?.let { PlayerSystemUiController(it) } }
     LaunchedEffect(sysUiController, sysUiPrefs) {
         val prefs = sysUiPrefs ?: return@LaunchedEffect
@@ -237,6 +240,11 @@ fun PlayerRoute(
 
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
+    var showVersionDialog by remember { mutableStateOf(false) }
+    // 版本列表懒加载：打开面板时才向数据源要详情，避免拖慢起播。
+    LaunchedEffect(showVersionDialog) {
+        if (showVersionDialog) viewModel.loadVersions()
+    }
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
     var showInfoPanel by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -571,6 +579,8 @@ fun PlayerRoute(
                         onShowInfo = { showInfoPanel = true },
                         onShowAudio = { showAudioDialog = true },
                         onShowSubtitle = { showSubtitleDialog = true },
+                        onShowVersion = { showVersionDialog = true },
+                        versionSwitchingEnabled = versionSwitchAvailable,
                     )
                 }
 
@@ -764,6 +774,19 @@ fun PlayerRoute(
             )
         }
     }
+    if (showVersionDialog) {
+        PlayerVisualTheme(palette = visualState.chromePalette) {
+            VersionSheet(
+                versions = versions,
+                selectedId = selectedVersionId,
+                onDismiss = { showVersionDialog = false },
+                onSelect = { versionId ->
+                    showVersionDialog = false
+                    viewModel.switchVersion(versionId)
+                },
+            )
+        }
+    }
 }
 
 private fun AudioBandLevels.toSpectrumFrame(): SpectrumFrame = SpectrumFrame(
@@ -828,6 +851,8 @@ private fun PlayerControls(
     onShowInfo: () -> Unit,
     onShowAudio: () -> Unit,
     onShowSubtitle: () -> Unit,
+    onShowVersion: () -> Unit = {},
+    versionSwitchingEnabled: Boolean = false,
 ) {
     val seekBarColors = SliderDefaults.colors(
         thumbColor = MaterialTheme.colorScheme.primary,
@@ -883,6 +908,11 @@ private fun PlayerControls(
                 }
                 TextButton(onClick = onShowSubtitle) {
                     Text(stringResource(R.string.player_subtitles), color = MaterialTheme.colorScheme.primary)
+                }
+                if (versionSwitchingEnabled) {
+                    TextButton(onClick = onShowVersion) {
+                        Text(stringResource(R.string.player_versions), color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
             if (serverDisplayName != null) {

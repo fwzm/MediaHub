@@ -57,4 +57,39 @@ class MediaSourceSelectorTest {
         )
         assertNull(MediaSourceSelector.selectDirectStream(sources))
     }
+
+    // ---- 多版本闭环：指定 MediaSourceId 必须精确命中 ----
+
+    @Test
+    fun `explicit version id wins over server order`() {
+        val sources = listOf(
+            EmbyMediaSourceInfoDto(id = "src1", supportsDirectStream = true),
+            EmbyMediaSourceInfoDto(id = "src2", supportsDirectStream = true),
+        )
+        assertEquals("src2", MediaSourceSelector.selectDirectStream(sources, "src2")!!.id)
+    }
+
+    @Test
+    fun `unknown version id returns null without falling back`() {
+        val sources = listOf(EmbyMediaSourceInfoDto(id = "src1", supportsDirectStream = true))
+        assertNull(MediaSourceSelector.selectDirectStream(sources, "missing"))
+        assertNull(MediaSourceSelector.findById(sources, "missing"))
+        assertEquals("src1", MediaSourceSelector.findById(sources, "src1")!!.id)
+    }
+
+    @Test
+    fun `explicit version that cannot direct stream or is iso returns null`() {
+        val sources = listOf(
+            EmbyMediaSourceInfoDto(id = "transcode", supportsDirectStream = false),
+            EmbyMediaSourceInfoDto(
+                id = "iso",
+                supportsDirectStream = true,
+                path = "http://cdn/movie/foo.iso",
+            ),
+            EmbyMediaSourceInfoDto(id = "ok", supportsDirectStream = true),
+        )
+        assertNull(MediaSourceSelector.selectDirectStream(sources, "transcode"))
+        assertNull(MediaSourceSelector.selectDirectStream(sources, "iso"))
+        assertEquals("ok", MediaSourceSelector.selectDirectStream(sources, "ok")!!.id)
+    }
 }
