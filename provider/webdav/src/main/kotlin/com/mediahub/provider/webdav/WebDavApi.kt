@@ -3,6 +3,7 @@ package com.mediahub.provider.webdav
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.MediaHttpClient
+import com.mediahub.model.HlsContentDetector
 import com.mediahub.provider.api.ProviderException
 import java.io.IOException
 import java.util.concurrent.CancellationException
@@ -43,6 +44,16 @@ internal class WebDavApi(
         .callTimeout(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .followRedirects(false)
         .followSslRedirects(false)
+        .build()
+
+    /**
+     * 条目 136 的媒体内容探测客户端：与浏览用客户端共享连接池/凭据拦截器，
+     * 但用更短超时。探测失败只影响 MIME 推断（退回 null），**不得**拖慢起播。
+     */
+    private val probeClient: OkHttpClient = client.newBuilder()
+        .connectTimeout(PROBE_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(PROBE_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .callTimeout(PROBE_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
     /**
@@ -97,6 +108,49 @@ internal class WebDavApi(
             }
         }
 
+    /**
+     * 条目 136：探测无扩展名 / 容器未知的播放地址是否为 HLS 播放列表。
+     *
+     * 只用一次 `Range: bytes=0-1023` 的 GET，读取至多 [PROBE_BODY_BYTES] 字节前缀：
+     * - `Content-Type` 已是 HLS MIME → 直接判定；
+     * - 否则看响应体是否以 `#EXTM3U` 开头（很多 WebDAV/反向代理只回
+     *   `application/octet-stream`）。
+     *
+     * 探测是**尽力而为**：非 2xx、网络失败、读取失败都返回 null（调用方保留
+     * 原有"容器未知"行为），只有协程取消原样上抛。
+     */
+    suspend fun probePlaylistMime(url: String, authorization: String?): String? =
+        withContext(Dispatchers.IO) {
+            val builder = Request.Builder()
+                .url(url)
+                .get()
+                .header("Range", "bytes=0-1023")
+            if (authorization != null) builder.header("Authorization", authorization)
+            val request = builder.build()
+
+            coroutineContext.ensureActive()
+            val call = probeClient.newCall(request)
+            try {
+                call.awaitCancellable { response ->
+                    response.use { resp ->
+                        coroutineContext.ensureActive()
+                        if (resp.code !in 200..299) return@awaitCancellable null
+                        if (resp.body == null) return@awaitCancellable null
+                        // peekBody 只消费有限前缀，不把整个媒体流读进内存。
+                        val prefix = resp.peekBody(PROBE_BODY_BYTES).string()
+                        coroutineContext.ensureActive()
+                        HlsContentDetector.detect(resp.header("Content-Type"), prefix)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IOException) {
+                coroutineContext.ensureActive()
+                logger.w(LogTag.NETWORK, "WebDAV 媒体类型探测失败 url=$url", e)
+                null
+            }
+        }
+
     private fun readBounded(body: ResponseBody): String {
         val declared = body.contentLength()
         if (declared > MAX_RESPONSE_BYTES) throw ProviderException.Parse(serverId)
@@ -127,6 +181,14 @@ internal class WebDavApi(
         const val READ_TIMEOUT_SECONDS = 30L
         const val CALL_TIMEOUT_SECONDS = 60L
         const val CHUNK_BYTES = 8192L
+
+        /** 探测必须短于正常浏览：仅用于 MIME 兜底，不能拖慢起播。 */
+        const val PROBE_CONNECT_TIMEOUT_SECONDS = 3L
+        const val PROBE_READ_TIMEOUT_SECONDS = 3L
+        const val PROBE_CALL_TIMEOUT_SECONDS = 5L
+
+        /** 读取的响应体前缀上限（播放列表首行标记足够判断）。 */
+        const val PROBE_BODY_BYTES = 2048L
 
         /** 单个目录响应的硬上限（8 MiB）。 */
         const val MAX_RESPONSE_BYTES = 8L * 1024 * 1024

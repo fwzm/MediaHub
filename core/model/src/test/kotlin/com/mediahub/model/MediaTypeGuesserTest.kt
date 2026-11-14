@@ -19,6 +19,14 @@ class MediaTypeGuesserTest {
     }
 
     @Test
+    fun `hls playlist extensions map to VIDEO`() {
+        // 条目 136：带扩展名 / 无扩展名的 HLS 地址都应被当作可播放视频入口。
+        assertEquals(MediaType.VIDEO, MediaTypeGuesser.forPath("/live/channel.m3u8"))
+        assertEquals(MediaType.VIDEO, MediaTypeGuesser.forPath("https://media.example/list.m3u"))
+        assertEquals(MediaType.VIDEO, MediaTypeGuesser.forPath("CHANNEL.M3U8"))
+    }
+
+    @Test
     fun `unknown falls back to OTHER`() {
         assertEquals(MediaType.OTHER, MediaTypeGuesser.forPath("/docs/readme.txt"))
         assertEquals(MediaType.OTHER, MediaTypeGuesser.forPath("no-extension"))

@@ -375,6 +375,48 @@ class PlayerViewModelTest {
             }
         }
 
+    // ---- 条目 72：没有远端 PROGRESS 能力的源（已缓存 / 本地内容）也要写回本地 ----
+    @Test
+    fun `playback without a remote progress provider still writes the local snapshot`() = runTest(dispatcher) {
+        val saved = mutableListOf<PlaybackProgress>()
+        val finalProgress = PlaybackProgress(
+            serverId = "srv-1", itemId = "m1", positionMs = 42_000,
+            durationMs = 60_000, isPaused = true, updatedAtEpochMs = 1,
+        )
+        val engine = FakeEngine(finalProgress = finalProgress)
+        val vm = PlayerViewModel(
+            savedStateHandle = savedState("m1"),
+            serverStore = FakeServerStore(embyServer()),
+            progressStore = FakeProgressStore(resume = null) { saved += it },
+            subtitleMemoryStore = FakeSubtitleMemoryStore(),
+            registry = FakeRegistry(
+                detail = FakeDetail(mediaItemWithPoster(null)),
+                // 已缓存/本地内容：有播放源，但没有 progress 能力。
+                playback = FakePlayback(PlaybackSource(url = "file:///cache/m1.mkv")),
+                progress = null,
+            ),
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
+            userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
+            logger = noOpLogger,
+        )
+        try {
+            runCurrent()
+            vm.stopAndFlush()
+            runCurrent()
+            assertEquals(
+                "没有远端进度能力时，本地快照仍必须回写（详情页/继续观看靠它）",
+                listOf(finalProgress),
+                saved,
+            )
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
     // ---- D：播放源暴露给专业信息面板 + 专业/精简开关持久化 ----
     @Test
     fun `resolved source is exposed for info panel and professional toggle persists`() = runTest(dispatcher) {
@@ -452,6 +494,31 @@ class PlayerViewModelTest {
         } finally { vm.stopAndFlush(); runCurrent() }
     }
 
+    @Test fun aspectModeIsRestoredPerItemAndCyclePersistsMemory() = runTest(dispatcher) {
+        val prefs = FakeUserPreferences()
+        val key = com.mediahub.model.VideoAspectMemory.key("srv-1", "m1")
+        prefs.state.value = UserPreferences(
+            videoAspectOverrides = mapOf(key to com.mediahub.model.VideoAspectMode.RATIO_16_9),
+        )
+        val vm = PlayerViewModel(savedState("m1"), FakeServerStore(embyServer()), FakeProgressStore(null),
+            FakeSubtitleMemoryStore(), FakeRegistry(detail = FakeDetail(mediaItemWithPoster("https://fixture.invalid/poster")),
+                playback = FakePlayback(PlaybackSource("https://fixture.invalid/video.mp4"))),
+            PlaybackEngineCreator { FakeEngine() }, PlaybackEngineCreator { FakeEngine() },
+            InMemoryEnginePreferenceHistory(), prefs, NoArtworkPalette, noOpLogger)
+        try {
+            runCurrent()
+            assertEquals(com.mediahub.model.VideoAspectMode.RATIO_16_9, vm.videoAspectMode.value)
+
+            vm.cycleVideoAspectMode(); runCurrent()
+
+            assertEquals(com.mediahub.model.VideoAspectMode.RATIO_4_3, vm.videoAspectMode.value)
+            assertEquals(
+                com.mediahub.model.VideoAspectMode.RATIO_4_3,
+                prefs.state.value.videoAspectOverrides[key],
+            )
+        } finally { vm.stopAndFlush(); runCurrent() }
+    }
+
     // ---- fakes ----
     private val NoArtworkPalette = ArtworkPaletteLoader { _, _ -> null }
 
@@ -485,6 +552,8 @@ class PlayerViewModelTest {
         override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> = flowOf(emptyList())
         override suspend fun getResume(serverId: String, itemId: String): Long? = resume
         override suspend fun save(progress: PlaybackProgress) = onSave(progress)
+        override suspend fun get(serverId: String, itemId: String): PlaybackProgress? = null
+        override suspend fun clearAll(): Int = 0
     }
 
     private class FakeDetail(private val item: MediaItem) : MediaDetailProvider {

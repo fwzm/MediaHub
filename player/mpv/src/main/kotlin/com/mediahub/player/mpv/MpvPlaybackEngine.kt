@@ -274,6 +274,9 @@ class MpvPlaybackEngine internal constructor(
                     m.observeProperty("duration", MpvInstance.Format.DOUBLE)
                     m.observeProperty("pause", MpvInstance.Format.FLAG)
                     m.observeProperty("speed", MpvInstance.Format.DOUBLE)
+                    // 条目 137：向 UI 提供视频尺寸，让画面容器与 mpv 内部宽高比一致。
+                    m.observeProperty("width", MpvInstance.Format.DOUBLE)
+                    m.observeProperty("height", MpvInstance.Format.DOUBLE)
                     m.observeProperty("media-title", MpvInstance.Format.STRING)
                     checkCurrent()
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_LOADFILE)
@@ -342,6 +345,8 @@ class MpvPlaybackEngine internal constructor(
                 "time-pos" -> _uiState.update { it.copy(positionMs = (value * 1000).toLong()) }
                 "duration" -> if (value > 0) _uiState.update { it.copy(durationMs = (value * 1000).toLong()) }
                 "speed" -> _uiState.update { it.copy(speed = value.toFloat()) }
+                "width" -> if (value > 0) _uiState.update { it.copy(videoWidth = value.toInt()) }
+                "height" -> if (value > 0) _uiState.update { it.copy(videoHeight = value.toInt()) }
             }
         }
         override fun property(name: String, value: String) = withCurrent(run) {

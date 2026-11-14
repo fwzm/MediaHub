@@ -88,6 +88,12 @@ class SwitchablePlaybackEngine(
     private val _downloadSpeedBps = MutableStateFlow(0L)
     override val downloadSpeedBps: StateFlow<Long> = _downloadSpeedBps.asStateFlow()
 
+    private val _cacheReadSpeedBps = MutableStateFlow(0L)
+    override val cacheReadSpeedBps: StateFlow<Long> = _cacheReadSpeedBps.asStateFlow()
+
+    private val _isReadingFromCache = MutableStateFlow(false)
+    override val isReadingFromCache: StateFlow<Boolean> = _isReadingFromCache.asStateFlow()
+
     private val _audioBands = MutableStateFlow<AudioBandLevels?>(null)
     override val audioBands: StateFlow<AudioBandLevels?> = _audioBands.asStateFlow()
 
@@ -392,6 +398,8 @@ class SwitchablePlaybackEngine(
                 launch { engine.events.collect { _events.trySend(it) } }
                 launch { engine.subtitleCues.collect { _subtitleCues.value = it } }
                 launch { engine.downloadSpeedBps.collect { _downloadSpeedBps.value = it } }
+                launch { engine.cacheReadSpeedBps.collect { _cacheReadSpeedBps.value = it } }
+                launch { engine.isReadingFromCache.collect { _isReadingFromCache.value = it } }
             }
             audioForwardJob?.cancel()
             audioForwardJob = null

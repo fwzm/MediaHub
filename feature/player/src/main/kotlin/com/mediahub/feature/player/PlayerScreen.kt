@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -60,6 +61,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -70,6 +72,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -91,6 +94,7 @@ import com.mediahub.model.AudioTrack
 import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
+import com.mediahub.model.VideoAspectMode
 import com.mediahub.model.SubtitleTrack
 import com.mediahub.feature.player.gesture.GestureSeekPreview
 import com.mediahub.feature.player.gesture.GestureSpeedPreview
@@ -141,12 +145,15 @@ fun PlayerRoute(
     val serverDisplayName by viewModel.serverDisplayName.collectAsStateWithLifecycle()
     val serverIcon by viewModel.serverIcon.collectAsStateWithLifecycle()
     val downloadSpeedBps by viewModel.engine.downloadSpeedBps.collectAsStateWithLifecycle()
+    val cacheReadSpeedBps by viewModel.engine.cacheReadSpeedBps.collectAsStateWithLifecycle()
+    val isReadingFromCache by viewModel.engine.isReadingFromCache.collectAsStateWithLifecycle()
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val subtitleCues by viewModel.engine.subtitleCues.collectAsStateWithLifecycle()
     val artworkPalette by viewModel.artworkPalette.collectAsStateWithLifecycle()
     val engineKind by viewModel.engineKind.collectAsStateWithLifecycle()
     val subtitleCenter by viewModel.subtitleCenter.collectAsStateWithLifecycle()
     val playbackSource by viewModel.playbackSource.collectAsStateWithLifecycle()
+    val videoAspectMode by viewModel.videoAspectMode.collectAsStateWithLifecycle()
     val audioSpectrumBridge = rememberAudioSpectrumBridge(viewModel.engine.audioBands)
 
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
@@ -427,27 +434,64 @@ fun PlayerRoute(
                     }
                 },
         ) {
-        // 视频渲染 Surface（Media3/mpv 统一走 attachSurface）
-        AndroidView(
-            factory = { context ->
-                SurfaceView(context).apply {
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) {
-                            viewModel.engine.attachSurface(holder.surface)
+        // 视频渲染 Surface（Media3/mpv 统一走 attachSurface）+ 字幕 overlay。
+        // 条目 9/137：按视频真实宽高比布局，首帧不拉伸；字幕层与视频同尺寸，
+        // Media3 的「视高比例」字号才与 mpv 的 720p 基准一致。
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .clipToBounds(),
+        ) {
+            val contentSize = VideoContentSizing.size(
+                mode = videoAspectMode,
+                containerWidth = maxWidth.value,
+                containerHeight = maxHeight.value,
+                videoWidth = state.videoWidth,
+                videoHeight = state.videoHeight,
+            )
+            val frameModifier = if (videoAspectMode == VideoAspectMode.CROP) {
+                Modifier.requiredSize(contentSize.width.dp, contentSize.height.dp)
+            } else {
+                Modifier.size(contentSize.width.dp, contentSize.height.dp)
+            }
+            Box(modifier = Modifier.align(Alignment.Center).then(frameModifier)) {
+                AndroidView(
+                    factory = { context ->
+                        SurfaceView(context).apply {
+                            holder.addCallback(object : SurfaceHolder.Callback {
+                                override fun surfaceCreated(holder: SurfaceHolder) {
+                                    viewModel.engine.attachSurface(holder.surface)
+                                }
+
+                                override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+                                override fun surfaceDestroyed(holder: SurfaceHolder) {
+                                    viewModel.engine.attachSurface(null)
+                                }
+                            })
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                            )
                         }
-                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            viewModel.engine.attachSurface(null)
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                // 字幕 overlay（Media3 独立 SubtitleView；mpv 内部 libass 渲染，subtitleCues=null 时不显示）
+                AndroidView(
+                    factory = { context ->
+                        SubtitleView(context).apply {
+                            applySubtitleStyle(this, preferences)
                         }
-                    })
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+                    },
+                    update = { view ->
+                        applySubtitleStyle(view, preferences)
+                        view.setCues(subtitleCues?.cues)
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
 
         // 只画左右窄边与底部 controls chrome；中心视频和字幕安全区没有 shader 像素。
         PlayerVisualOverlay(
@@ -465,20 +509,6 @@ fun PlayerRoute(
             clock = sharedVisualClock,
             forceFallback = forceVisualFallback,
             onBackendChanged = reportVisualBackend,
-        )
-
-        // 字幕 overlay（Media3 独立 SubtitleView；mpv 内部 libass 渲染，subtitleCues=null 时不显示）
-        AndroidView(
-            factory = { context ->
-                SubtitleView(context).apply {
-                    applySubtitleStyle(this, preferences)
-                }
-            },
-            update = { view ->
-                applySubtitleStyle(view, preferences)
-                view.setCues(subtitleCues?.cues)
-            },
-            modifier = Modifier.fillMaxSize(),
         )
 
         // 手势层（U3-B）：单击 Overlay / 双击矩阵 / 水平 scrub / 双击按住快退 / 长按倍速
@@ -552,6 +582,8 @@ fun PlayerRoute(
                         serverDisplayName = serverDisplayName,
                         serverIcon = serverIcon,
                         downloadSpeedBps = downloadSpeedBps,
+                        cacheReadSpeedBps = cacheReadSpeedBps,
+                        isReadingFromCache = isReadingFromCache,
                         batteryLevel = batteryLevel,
                         diagnostics = diagnostics,
                         visualRequest = visualState.renderRequest,
@@ -567,6 +599,8 @@ fun PlayerRoute(
                             val next = SPEEDS[(SPEEDS.indexOf(state.speed) + 1).let { if (it >= SPEEDS.size) 0 else it }]
                             viewModel.engine.setSpeed(next)
                         },
+                        videoAspectMode = videoAspectMode,
+                        onCycleAspectMode = viewModel::cycleVideoAspectMode,
                         onShowVisualEffects = { showVisualEffectsSettings = true },
                         onShowInfo = { showInfoPanel = true },
                         onShowAudio = { showAudioDialog = true },
@@ -802,7 +836,7 @@ private fun applySubtitleStyle(subtitleView: androidx.media3.ui.SubtitleView?, p
     subtitleView.setApplyEmbeddedStyles(style.applyEmbeddedStyles)
 }
 
-private const val BASE_SUBTITLE_FRACTION = 0.0533f
+private val BASE_SUBTITLE_FRACTION = SubtitleStyle.BASE_FONT_FRACTION_OF_VIDEO_HEIGHT
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -812,6 +846,8 @@ private fun PlayerControls(
     serverDisplayName: String?,
     serverIcon: String?,
     downloadSpeedBps: Long,
+    cacheReadSpeedBps: Long,
+    isReadingFromCache: Boolean,
     batteryLevel: Int?,
     diagnostics: PlaybackDiagnosticsState?,
     visualRequest: PlayerVisualRenderRequest,
@@ -824,6 +860,8 @@ private fun PlayerControls(
     onTogglePlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
     onCycleSpeed: () -> Unit,
+    videoAspectMode: VideoAspectMode,
+    onCycleAspectMode: () -> Unit,
     onShowVisualEffects: () -> Unit,
     onShowInfo: () -> Unit,
     onShowAudio: () -> Unit,
@@ -841,6 +879,21 @@ private fun PlayerControls(
         disabledInactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
         disabledInactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
     )
+    val showBufferingIndicator by produceState(
+        initialValue = false,
+        state.isBuffering,
+        isReadingFromCache,
+    ) {
+        value = false
+        if (state.isBuffering) {
+            delay(BufferingIndicatorPolicy.GRACE_MS)
+            value = BufferingIndicatorPolicy.shouldShow(
+                isBuffering = state.isBuffering,
+                isReadingFromCache = isReadingFromCache,
+                bufferingAgeMs = BufferingIndicatorPolicy.GRACE_MS,
+            )
+        }
+    }
     BoxWithConstraints(modifier = modifier.testTag(PlayerVisualTestTags.PLAYER_CONTROLS)) {
         // Use the full player height, not the tall controls content, to protect subtitle pixels.
         val maxAmbientHeight = maxHeight * (1f - PlayerVisualMaskConfig().bottomStart)
@@ -973,7 +1026,7 @@ private fun PlayerControls(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
-                            text = formatSpeed(downloadSpeedBps),
+                            text = formatSpeed(downloadSpeedBps, cacheReadSpeedBps),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -1016,7 +1069,7 @@ private fun PlayerControls(
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (state.isBuffering) {
+                            if (showBufferingIndicator) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.padding(end = 12.dp),
                                     color = MaterialTheme.colorScheme.primary,
@@ -1047,6 +1100,13 @@ private fun PlayerControls(
                             TextButton(onClick = onCycleSpeed) {
                                 Text(
                                     stringResource(R.string.player_playback_speed, state.speed),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            // 条目 9：画面比例循环切换，并按内容记忆。
+                            TextButton(onClick = onCycleAspectMode) {
+                                Text(
+                                    stringResource(videoAspectMode.labelRes()),
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
                             }
@@ -1207,14 +1267,28 @@ private fun formatTime(ms: Long): String {
 }
 
 @Composable
-private fun formatSpeed(bytesPerSecond: Long): String {
-    if (bytesPerSecond <= 0) return stringResource(R.string.player_download_speed_unknown)
+private fun formatSpeed(bytesPerSecond: Long, cacheReadBps: Long = 0L): String {
+    if (bytesPerSecond <= 0) {
+        // 条目 19：缓存命中 seek 时网络速度为 0，但内容来自本地缓存，不应显示「未知」。
+        return if (cacheReadBps > 0) {
+            stringResource(R.string.player_download_speed_cache)
+        } else {
+            stringResource(R.string.player_download_speed_unknown)
+        }
+    }
     val kb = bytesPerSecond / 1024.0
     return if (kb < 1024) {
         stringResource(R.string.player_download_speed_kb, kb)
     } else {
         stringResource(R.string.player_download_speed_mb, kb / 1024.0)
     }
+}
+
+private fun VideoAspectMode.labelRes(): Int = when (this) {
+    VideoAspectMode.FIT -> R.string.player_aspect_fit
+    VideoAspectMode.CROP -> R.string.player_aspect_crop
+    VideoAspectMode.RATIO_16_9 -> R.string.player_aspect_16_9
+    VideoAspectMode.RATIO_4_3 -> R.string.player_aspect_4_3
 }
 
 private fun readBatteryLevel(context: Context): Int? {

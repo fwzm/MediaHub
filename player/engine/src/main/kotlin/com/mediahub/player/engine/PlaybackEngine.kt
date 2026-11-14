@@ -100,6 +100,8 @@ class PlaybackEngine(
 
     /** 真实媒体下载速度（B/s，TransferListener 统计）。 */
     override val downloadSpeedBps: StateFlow<Long> = speedMonitor.bytesPerSecond
+    override val cacheReadSpeedBps: StateFlow<Long> = speedMonitor.cacheBytesPerSecond
+    override val isReadingFromCache: StateFlow<Boolean> = speedMonitor.isReadingFromCache
 
     private val _subtitleCues = MutableStateFlow<CueGroup?>(null)
     override val subtitleCues: StateFlow<CueGroup?> = _subtitleCues.asStateFlow()
@@ -198,8 +200,12 @@ class PlaybackEngine(
 
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
+                // 条目 137：像素宽高比（变形视频）也要计入显示宽高比，否则首帧仍会拉伸。
+                val displayWidth = (videoSize.width * videoSize.pixelWidthHeightRatio)
+                    .toInt()
+                    .coerceAtLeast(videoSize.width)
                 _uiState.update {
-                    it.copy(videoWidth = videoSize.width, videoHeight = videoSize.height)
+                    it.copy(videoWidth = displayWidth, videoHeight = videoSize.height)
                 }
             }
 

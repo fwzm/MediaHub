@@ -19,6 +19,8 @@ object MediaTypeGuesser {
 
     private val VIDEO_EXTENSIONS = setOf(
         "mp4", "m4v", "mkv", "webm", "ts", "m2ts", "avi", "mov", "wmv", "flv", "3gp",
+        // HLS 播放列表也是可播放的视频入口；缺了它，带扩展名的 m3u8 会被判成 OTHER。
+        "m3u8", "m3u",
     )
     private val AUDIO_EXTENSIONS = setOf("mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma")
 }
