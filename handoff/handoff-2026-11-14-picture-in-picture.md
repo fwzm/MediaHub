@@ -8,6 +8,7 @@
 | worktree | `D:\deepseek_test\mh-pip-20261114` |
 | 分支 | `feature/pip-playback-20261114`（从 `origin/main` 新建） |
 | 本轮改动 | 生产代码 + 测试；未合并、未 mark-ready、未改 `main` |
+| commit | `2f40b588`（`feature/pip-playback-20261114`），已 push 到 origin |
 | 证据级别 | JVM / Robolectric 部分 `EXECUTED_PASS`；**真机 PiP 窗口行为 `NOT_RUN`** |
 | G7 | `DO_NOT_MERGE`（未触碰） |
 
@@ -82,6 +83,7 @@
 
 ## 7. 下一步
 
-1. 完成 `:app:testDebugUnitTest + assembleDebug` 门禁并记录 exit code。
-2. commit 到 `feature/pip-playback-20261114` 并 push（不合并、不 mark-ready）。
+1. ~~完成 `:app:testDebugUnitTest + assembleDebug` 门禁并记录 exit code。~~ 已完成（31 tests / 0 fail，exit 0）。
+2. ~~commit 并 push 到 `feature/pip-playback-20261114`。~~ 已完成（`2f40b588`）；未创建/未更新 PR，未合并、未 mark-ready。
 3. 按 §5 在真机上补 `EXECUTED_PHYSICAL_DEVICE_PASS/FAIL`，逐条替换 `NOT_RUN`。
+4. 若需要 PR：由主会话按仓库流程创建 Draft PR，禁止合并（G7 = `DO_NOT_MERGE`）。
