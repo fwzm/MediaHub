@@ -62,6 +62,54 @@ class JellyfinPlaybackProviderTest {
         }
     }
 
+    // ---- 多版本闭环：指定 versionId 必须播那一版，且协商绑定同一 MediaSourceId ----
+
+    private fun twoVersionBody() = """
+        {"MediaSources":[
+            {"Id":"ms-1","Container":"mkv","SupportsDirectStream":true},
+            {"Id":"ms-2","Container":"mp4","SupportsDirectStream":true}],
+         "PlaySessionId":"ps-mv"}
+    """.trimIndent()
+
+    @Test
+    fun `requested version id wins over server order and is sent to playback info`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(twoVersionBody()))
+        val source = provider().resolvePlayback(movie(), PlaybackOptions(versionId = "ms-2"))
+        assertEquals("ms-2", source.url.toHttpUrlOrNull()!!.queryParameter("MediaSourceId"))
+        assertTrue(source.url.contains("/Videos/m1/stream.mp4"))
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue("协商必须绑定版本: $body", body.contains("\"MediaSourceId\":\"ms-2\""))
+    }
+
+    @Test
+    fun `unknown version id throws NotFound without falling back`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(twoVersionBody()))
+        val thrown = runCatching {
+            provider().resolvePlayback(movie(), PlaybackOptions(versionId = "gone"))
+        }.exceptionOrNull()
+        assertTrue("expected NotFound, got $thrown", thrown is ProviderException.NotFound)
+        assertEquals("不得为不存在的版本回退默认源", 1, server.requestCount)
+    }
+
+    @Test
+    fun `selector binds both direct stream and static retry to requested version`() {
+        val sources = listOf(
+            com.mediahub.provider.jellyfin.api.JellyfinMediaSourceInfoDto(
+                id = "ms-1", container = "mkv", supportsDirectStream = true),
+            com.mediahub.provider.jellyfin.api.JellyfinMediaSourceInfoDto(
+                id = "ms-2", container = "mp4", supportsDirectStream = true),
+        )
+        assertEquals("ms-2", JellyfinMediaSourceSelector.selectDirectStream(sources, "ms-2")!!.id)
+        assertNull(JellyfinMediaSourceSelector.selectDirectStream(sources, "gone"))
+        assertEquals(
+            "ms-2",
+            JellyfinMediaSourceSelector.selectStaticNegotiationCandidate(sources, "ms-2")!!.id,
+        )
+        assertNull(JellyfinMediaSourceSelector.selectStaticNegotiationCandidate(sources, "gone"))
+    }
+
     private lateinit var server: MockWebServer
     private lateinit var tokenStorage: FakeSecretStorage
     private lateinit var sessionStorage: FakeSessionStorage

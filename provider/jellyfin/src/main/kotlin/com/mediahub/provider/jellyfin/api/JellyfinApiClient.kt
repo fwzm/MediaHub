@@ -225,6 +225,8 @@ open class JellyfinApiClient(
         val url = endpointResolver.endpoint("/Items").toHttpUrl().newBuilder()
             .addPathSegment(itemId)
             .addQueryParameter("UserId", userId)
+            // 多版本闭环：Jellyfin 默认不返回 MediaSources，必须显式请求。
+            .addQueryParameter("Fields", "MediaSources")
             .build()
             .toString()
         return apiClient.get(url, authenticatedHeaders(token))

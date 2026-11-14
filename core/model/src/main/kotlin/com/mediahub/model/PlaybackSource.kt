@@ -54,6 +54,11 @@ data class PlaybackOptions(
     val maxBitrate: Long? = null,
     val preferredAudioLanguage: String? = null,
     val preferredSubtitleLanguage: String? = null,
+    /**
+     * 指定的媒体版本（对应 [MediaVersion.id]，即服务端 MediaSourceId）。
+     * null = 使用服务端默认源；非 null 时必须精确命中该源，绝不静默回退。
+     */
+    val versionId: String? = null,
     val enableDirectPlay: Boolean = true,
     val enableDirectStream: Boolean = true,
     val forceTranscode: Boolean = false,

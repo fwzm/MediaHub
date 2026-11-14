@@ -10,12 +10,37 @@ import com.mediahub.provider.jellyfin.api.JellyfinMediaSourceInfoDto
  * .iso 蓝光镜像不是可直接流式播放的媒体，跳过。
  */
 object JellyfinMediaSourceSelector {
-    fun selectDirectStream(sources: List<JellyfinMediaSourceInfoDto>): JellyfinMediaSourceInfoDto? =
-        sources.firstOrNull { it.supportsDirectStream && !it.isIso() }
+    /**
+     * @param versionId 指定 MediaSourceId（多版本选择）。null = 服务端默认源；
+     * 非 null 时只接受精确命中且可直连、非 ISO 的源，**绝不回退**其它源。
+     */
+    fun selectDirectStream(
+        sources: List<JellyfinMediaSourceInfoDto>,
+        versionId: String? = null,
+    ): JellyfinMediaSourceInfoDto? {
+        if (versionId != null) {
+            val selected = findById(sources, versionId) ?: return null
+            return selected.takeIf { it.supportsDirectStream && !it.isIso() }
+        }
+        return sources.firstOrNull { it.supportsDirectStream && !it.isIso() }
+    }
+
+    /** 按 MediaSourceId 精确查找；找不到返回 null，由调用方报 NotFound。 */
+    fun findById(
+        sources: List<JellyfinMediaSourceInfoDto>,
+        versionId: String,
+    ): JellyfinMediaSourceInfoDto? = sources.firstOrNull { it.id == versionId }
 
     /** One source may be re-negotiated without server subtitles; capabilities still gate playback. */
-    internal fun selectStaticNegotiationCandidate(sources: List<JellyfinMediaSourceInfoDto>): JellyfinMediaSourceInfoDto? =
-        sources.firstOrNull { !it.id.isNullOrBlank() && !it.isIso() }
+    internal fun selectStaticNegotiationCandidate(
+        sources: List<JellyfinMediaSourceInfoDto>,
+        versionId: String? = null,
+    ): JellyfinMediaSourceInfoDto? {
+        if (versionId != null) {
+            return findById(sources, versionId)?.takeIf { !it.id.isNullOrBlank() && !it.isIso() }
+        }
+        return sources.firstOrNull { !it.id.isNullOrBlank() && !it.isIso() }
+    }
 
     private fun JellyfinMediaSourceInfoDto.isIso(): Boolean =
         container?.trim()?.equals("iso", ignoreCase = true) == true || path.isIsoPath()

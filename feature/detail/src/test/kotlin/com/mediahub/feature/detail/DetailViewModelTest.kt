@@ -11,6 +11,7 @@ import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
 import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaType
+import com.mediahub.model.MediaVersion
 import com.mediahub.model.PageRequest
 import com.mediahub.model.PagedResult
 import com.mediahub.model.ServerType
@@ -475,5 +476,62 @@ class DetailViewModelTest {
         testDispatcher.scheduler.advanceUntilIdle()
         assertNull(vm.seriesState.value.episodesError)
         assertTrue(vm.seriesState.value.episodes.isEmpty())
+    }
+
+    // ---- 多版本闭环（A 组 27/39/55/65/145）：选择版本必须进入播放启动快照 ----
+
+    private fun makeVersion(id: String, name: String = "版本$id"): MediaVersion =
+        MediaVersion(id = id, name = name)
+
+    @Test
+    fun `selecting a version flows into playback launch snapshot`() = runTest(testDispatcher) {
+        val item = makeItem("movie-mv", MediaType.MOVIE)
+        val detail = MediaDetail(item = item, versions = listOf(makeVersion("v1"), makeVersion("v2")))
+        val vm = createViewModel(detail)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 默认版本由服务端首项决定，VM 不预设 id
+        assertNull(vm.selectedVersionId.value)
+        vm.selectVersion("v2")
+        assertEquals("v2", vm.selectedVersionId.value)
+        assertEquals("v2", vm.launchSnapshot(detail.item).versionId)
+    }
+
+    @Test
+    fun `unknown version selection is ignored`() = runTest(testDispatcher) {
+        val item = makeItem("movie-mv-unknown", MediaType.MOVIE)
+        val detail = MediaDetail(item = item, versions = listOf(makeVersion("v1"), makeVersion("v2")))
+        val vm = createViewModel(detail)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm.selectVersion("missing")
+        assertNull(vm.selectedVersionId.value)
+        assertNull(vm.launchSnapshot(detail.item).versionId)
+    }
+
+    @Test
+    fun `single version never reaches launch snapshot`() = runTest(testDispatcher) {
+        val item = makeItem("movie-mv-single", MediaType.MOVIE)
+        val detail = MediaDetail(item = item, versions = listOf(makeVersion("only")))
+        val vm = createViewModel(detail)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm.selectVersion("only")
+        assertNull(
+            "只有一个版本时不应把版本塞进播放参数（直接走服务端默认源）",
+            vm.launchSnapshot(detail.item).versionId,
+        )
+    }
+
+    @Test
+    fun `episode does not inherit detail item version`() = runTest(testDispatcher) {
+        val movie = makeItem("movie-mv-ep", MediaType.MOVIE)
+        val episode = makeItem("ep-1", MediaType.EPISODE, episodeNumber = 1)
+        val detail = MediaDetail(item = movie, versions = listOf(makeVersion("v1"), makeVersion("v2")))
+        val vm = createViewModel(detail)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm.selectVersion("v2")
+        assertNull(vm.launchSnapshot(episode).versionId)
     }
 }

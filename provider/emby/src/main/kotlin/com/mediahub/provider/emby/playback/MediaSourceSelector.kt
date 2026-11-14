@@ -11,8 +11,26 @@ import com.mediahub.provider.emby.api.EmbyMediaSourceInfoDto
  * 本阶段禁止回退转码。
  */
 object MediaSourceSelector {
-    fun selectDirectStream(sources: List<EmbyMediaSourceInfoDto>): EmbyMediaSourceInfoDto? =
-        sources.firstOrNull { it.supportsDirectStream && !it.path.isIsoPath() }
+    /**
+     * @param versionId 指定 MediaSourceId（多版本选择）。null = 服务端默认源；
+     * 非 null 时只接受精确命中且可直连、非 ISO 的源，**绝不回退**其它源。
+     */
+    fun selectDirectStream(
+        sources: List<EmbyMediaSourceInfoDto>,
+        versionId: String? = null,
+    ): EmbyMediaSourceInfoDto? {
+        if (versionId != null) {
+            val selected = findById(sources, versionId) ?: return null
+            return selected.takeIf { it.supportsDirectStream && !it.path.isIsoPath() }
+        }
+        return sources.firstOrNull { it.supportsDirectStream && !it.path.isIsoPath() }
+    }
+
+    /** 按 MediaSourceId 精确查找；找不到返回 null，由调用方报 NotFound。 */
+    fun findById(
+        sources: List<EmbyMediaSourceInfoDto>,
+        versionId: String,
+    ): EmbyMediaSourceInfoDto? = sources.firstOrNull { it.id == versionId }
 
     /** 蓝光 ISO 镜像（.iso）不是可直接流式播放的媒体，跳过（Emby 常把它误标为 mpegts）。 */
     private fun String?.isIsoPath(): Boolean =

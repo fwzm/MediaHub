@@ -12,6 +12,7 @@ import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaType
+import com.mediahub.model.MediaVersion
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
@@ -487,8 +488,12 @@ class PlayerViewModelTest {
         override suspend fun save(progress: PlaybackProgress) = onSave(progress)
     }
 
-    private class FakeDetail(private val item: MediaItem) : MediaDetailProvider {
-        override suspend fun getItemDetail(itemId: String): MediaDetail = MediaDetail(item = item)
+    private class FakeDetail(
+        private val item: MediaItem,
+        private val versions: List<MediaVersion> = emptyList(),
+    ) : MediaDetailProvider {
+        override suspend fun getItemDetail(itemId: String): MediaDetail =
+            MediaDetail(item = item, versions = versions)
     }
 
     private class SequencedDetail(items: List<MediaItem>) : MediaDetailProvider {
@@ -520,12 +525,16 @@ class PlayerViewModelTest {
     ) : MediaPlaybackProvider {
         var receivedItem: MediaItem? = null
         var receivedStartMs: Long? = null
+        var receivedVersionId: String? = null
+        var calls: Int = 0
         override suspend fun resolvePlayback(
             item: MediaItem,
             options: PlaybackOptions,
         ): PlaybackSource {
+            calls++
             receivedItem = item
             receivedStartMs = options.startPositionMs
+            receivedVersionId = options.versionId
             error?.let { throw it }
             return checkNotNull(source)
         }
@@ -571,6 +580,7 @@ class PlayerViewModelTest {
         private val eventsFlow = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
         override val events: Flow<PlaybackEvent> get() = eventsFlow
         var playedSession: PlaybackSession? = null
+        var playCount: Int = 0
         var presentation: Pair<com.mediahub.model.SubtitleStyle, Int>? = null
         var presentationOnPlay: Pair<com.mediahub.model.SubtitleStyle, Int>? = null
         override fun setSubtitlePresentation(style: com.mediahub.model.SubtitleStyle, sizeSp: Int) {
@@ -580,7 +590,7 @@ class PlayerViewModelTest {
         override val subtitleCues: StateFlow<androidx.media3.common.text.CueGroup?> = MutableStateFlow(null)
         override val downloadSpeedBps: StateFlow<Long> = MutableStateFlow(0L)
         override fun attachSurface(surface: android.view.Surface?) = Unit
-        override fun play(session: PlaybackSession) { presentationOnPlay = presentation; playedSession = session }
+        override fun play(session: PlaybackSession) { playCount++; presentationOnPlay = presentation; playedSession = session }
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: com.mediahub.player.engine.SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
@@ -627,4 +637,130 @@ class PlayerViewModelTest {
         secondary = 0xFF334455.toInt(),
         accent = 0xFFCCDDEE.toInt(),
     )
+
+    // ---- 多版本闭环：路由 version → PlaybackOptions.versionId → 播放器内切换 ----
+
+    private fun twoVersions() = listOf(
+        MediaVersion(id = "v1", name = "1080P"),
+        MediaVersion(id = "v2", name = "4K"),
+    )
+
+    private fun versionViewModel(
+        handle: SavedStateHandle,
+        engine: FakeEngine,
+        playback: FakePlayback,
+        versions: List<MediaVersion> = twoVersions(),
+    ): PlayerViewModel = PlayerViewModel(
+        savedStateHandle = handle,
+        serverStore = FakeServerStore(embyServer()),
+        progressStore = FakeProgressStore(resume = 30_000L),
+        subtitleMemoryStore = FakeSubtitleMemoryStore(),
+        registry = FakeRegistry(
+            detail = FakeDetail(mediaItemWithPoster("http://img/poster.jpg"), versions),
+            playback = playback,
+        ),
+        media3EngineFactory = PlaybackEngineCreator { engine },
+        mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+        engineHistory = InMemoryEnginePreferenceHistory(),
+        userPreferencesRepository = FakeUserPreferences(),
+        artworkPaletteLoader = NoArtworkPalette,
+        logger = noOpLogger,
+    )
+
+    @Test
+    fun `launch version flows into playback options`() = runTest(dispatcher) {
+        val playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv"))
+        val engine = FakeEngine()
+        val vm = versionViewModel(
+            savedState("m1").apply { this["version"] = "v2" },
+            engine,
+            playback,
+        )
+        try {
+            runCurrent()
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+            assertEquals("v2", playback.receivedVersionId)
+            assertTrue(vm.versionSwitchAvailable.value)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `without launch version playback options stay versionless`() = runTest(dispatcher) {
+        val playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv"))
+        val vm = versionViewModel(savedState("m1"), FakeEngine(), playback)
+        try {
+            runCurrent()
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+            assertNull(playback.receivedVersionId)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `load versions exposes detail versions`() = runTest(dispatcher) {
+        val playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv"))
+        val vm = versionViewModel(savedState("m1"), FakeEngine(), playback)
+        try {
+            runCurrent()
+            assertTrue("真实 detail 能力存在时版本面板可用", vm.versionSwitchAvailable.value)
+            vm.loadVersions()
+            runCurrent()
+            assertEquals(listOf("v1", "v2"), vm.versions.value.map { it.id })
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `switch version re-resolves with requested version and replays`() = runTest(dispatcher) {
+        val playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv"))
+        val engine = FakeEngine()
+        val vm = versionViewModel(savedState("m1"), engine, playback)
+        try {
+            runCurrent()
+            assertEquals(1, engine.playCount)
+            assertNull(playback.receivedVersionId)
+
+            vm.loadVersions()
+            runCurrent()
+            vm.switchVersion("v1")
+            runCurrent()
+
+            assertEquals("v1", playback.receivedVersionId)
+            assertEquals("切换版本必须重新起播", 2, engine.playCount)
+            assertEquals("v1", vm.selectedVersionId.value)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `switch to unknown or same version does not re-resolve`() = runTest(dispatcher) {
+        val playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv"))
+        val engine = FakeEngine()
+        val vm = versionViewModel(savedState("m1"), engine, playback)
+        try {
+            runCurrent()
+            vm.loadVersions()
+            runCurrent()
+            vm.switchVersion("missing")
+            runCurrent()
+            assertEquals(1, playback.calls)
+            vm.switchVersion("v1")
+            runCurrent()
+            vm.switchVersion("v1")
+            runCurrent()
+            assertEquals(2, playback.calls)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
 }

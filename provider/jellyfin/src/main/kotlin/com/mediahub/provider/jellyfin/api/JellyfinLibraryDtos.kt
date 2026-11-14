@@ -72,6 +72,8 @@ data class JellyfinItemDto(
     @SerialName("BackdropImageTags") val backdropImageTags: List<String> = emptyList(),
     @SerialName("UserData") val userData: JellyfinUserDataDto? = null,
     @SerialName("ProviderIds") val providerIds: Map<String, String>? = null,
+    /** 多版本：详情端点需显式 Fields=MediaSources 才返回。 */
+    @SerialName("MediaSources") val mediaSources: List<JellyfinMediaSourceInfoDto> = emptyList(),
     @SerialName("People") val people: List<JellyfinPersonDto> = emptyList(),
     @SerialName("Studios") val studios: List<JellyfinStudioDto> = emptyList(),
 )

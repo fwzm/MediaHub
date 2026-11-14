@@ -9,6 +9,7 @@ import com.mediahub.provider.jellyfin.JellyfinProviderSupport
 import com.mediahub.provider.jellyfin.api.JellyfinApiClient
 import com.mediahub.provider.jellyfin.mapper.JellyfinImageMapper
 import com.mediahub.provider.jellyfin.mapper.JellyfinItemMapper
+import com.mediahub.provider.jellyfin.mapper.JellyfinVersionMapper
 import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
 
 /**
@@ -47,7 +48,11 @@ class JellyfinDetailProvider(
                     } ?: person
                 },
             )
-            MediaDetail(item = enriched)
+            MediaDetail(
+                item = enriched,
+                // 多版本闭环：与 Emby 同构映射 mediaSources（服务端顺序即优先级）
+                versions = JellyfinVersionMapper.map(dto.mediaSources),
+            )
         } catch (e: Exception) {
             throw JellyfinProviderSupport.mapError(server.id, e)
         }

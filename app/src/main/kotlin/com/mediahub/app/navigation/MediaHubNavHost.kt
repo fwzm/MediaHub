@@ -208,7 +208,8 @@ fun MediaHubNavHost() {
                             "&type=" + Uri.encode(snapshot.type?.name.orEmpty()) +
                             "&runtime=" + (snapshot.runtimeMs?.toString().orEmpty()) +
                             "&poster=" + Uri.encode(snapshot.posterUrl.orEmpty()) +
-                            "&container=" + Uri.encode(snapshot.container.orEmpty())
+                            "&container=" + Uri.encode(snapshot.container.orEmpty()) +
+                            "&version=" + Uri.encode(snapshot.versionId.orEmpty())
                     )
                 },
                 onOpenItem = { item ->
@@ -232,7 +233,7 @@ fun MediaHubNavHost() {
         }
 
         composable(
-            route = "player/{serverId}/{itemId}?title={title}&type={type}&runtime={runtime}&poster={poster}&container={container}",
+            route = "player/{serverId}/{itemId}?title={title}&type={type}&runtime={runtime}&poster={poster}&container={container}&version={version}",
             arguments = listOf(
                 navArgument("serverId") { type = NavType.StringType },
                 navArgument("itemId") { type = NavType.StringType },
@@ -241,6 +242,7 @@ fun MediaHubNavHost() {
                 navArgument("runtime") { type = NavType.StringType; defaultValue = "" },
                 navArgument("poster") { type = NavType.StringType; defaultValue = "" },
                 navArgument("container") { type = NavType.StringType; defaultValue = "" },
+                navArgument("version") { type = NavType.StringType; defaultValue = "" },
             ),
         ) {
             PlayerRoute(onBack = { navController.popBackStack() })

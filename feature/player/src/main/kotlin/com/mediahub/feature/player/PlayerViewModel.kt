@@ -17,6 +17,7 @@ import com.mediahub.core.ui.effects.VisualPalette
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
+import com.mediahub.model.MediaVersion
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.PlayerVisualEffectsPreferences
@@ -165,6 +166,17 @@ class PlayerViewModel @Inject constructor(
     private var launchRuntime: String = savedStateHandle["runtime"] ?: ""
     private var launchPoster: String = savedStateHandle["poster"] ?: ""
     private var launchContainer: String = savedStateHandle["container"] ?: ""
+    // 多版本闭环：详情页选中的版本随路由传入；播放器内可再切换（切集时清空）。
+    private var selectedVersion: String? =
+        (savedStateHandle.get<String>("version") ?: "").takeIf { it.isNotBlank() }
+    private val _versions = MutableStateFlow<List<MediaVersion>>(emptyList())
+    val versions: StateFlow<List<MediaVersion>> = _versions.asStateFlow()
+    private val _selectedVersionId = MutableStateFlow(selectedVersion)
+    val selectedVersionId: StateFlow<String?> = _selectedVersionId.asStateFlow()
+    private val _versionSwitchAvailable = MutableStateFlow(false)
+    /** 数据源具备详情能力时才允许在播放器内拉版本列表并切换。 */
+    val versionSwitchAvailable: StateFlow<Boolean> = _versionSwitchAvailable.asStateFlow()
+    private var versionsLoaded = false
 
     /** 启动快照携带的容器（详情页直传；可能为空串=未提供）。 */
     val launchContainerOrNull: String?
@@ -612,6 +624,43 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
+     * 拉取当前媒体的版本列表（懒加载，只在用户打开版本面板时触发）。
+     * 失败只记日志，不改变正在进行的播放。
+     */
+    fun loadVersions() {
+        if (versionsLoaded) return
+        val detail = handle?.detail ?: return
+        versionsLoaded = true
+        viewModelScope.launch {
+            try {
+                val loaded = detail.getItemDetail(itemId).versions
+                if (loaded.isNotEmpty()) {
+                    _versions.value = loaded
+                    // 路由带来的版本若已不存在（服务端增删版本），回落到服务端默认源
+                    if (selectedVersion != null && loaded.none { it.id == selectedVersion }) {
+                        selectedVersion = null
+                        _selectedVersionId.value = null
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                versionsLoaded = false
+                logger.w(LogTag.PLAYER, "加载版本列表失败 itemId=$itemId", e)
+            }
+        }
+    }
+
+    /** 播放器内切换版本：重新解析并起播指定 MediaSourceId 对应的源。 */
+    fun switchVersion(versionId: String) {
+        if (stopped || versionId == selectedVersion) return
+        if (_versions.value.none { it.id == versionId }) return
+        selectedVersion = versionId
+        _selectedVersionId.value = versionId
+        resolveInternal(autoplay = false)
+    }
+
+    /**
      * [resolve] 的实现。autoplay=true 表示本次解析由「播完自动连播」触发：
      * 失败时永久停住本轮播放（autoplayBlocked），不重试也不连环跳集。
      */
@@ -642,6 +691,7 @@ class PlayerViewModel @Inject constructor(
                 val providerHandle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 handle = providerHandle
+                _versionSwitchAvailable.value = providerHandle.detail != null
 
                 val detailProvider = providerHandle.detail
                 val playbackProvider = providerHandle.playback
@@ -679,7 +729,11 @@ class PlayerViewModel @Inject constructor(
                 if (stopped || resolveGeneration.get() != generation) return@launch
                 val source = playbackProvider.resolvePlayback(
                     item,
-                    PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
+                    PlaybackOptions(
+                        startPositionMs = resume,
+                        enableDirectPlay = true,
+                        versionId = selectedVersion,
+                    ),
                 )
                 coroutineContext.ensureActive()
                 if (stopped || resolveGeneration.get() != generation) return@launch
@@ -816,6 +870,11 @@ class PlayerViewModel @Inject constructor(
         launchRuntime = ""
         launchPoster = ""
         launchContainer = ""
+        // 版本属于上一集：不清空会把上一集的 MediaSourceId 套到新一集（服务端会拒绝）。
+        selectedVersion = null
+        _selectedVersionId.value = null
+        _versions.value = emptyList()
+        versionsLoaded = false
         resolveInternal(autoplay = true)
     }
 
