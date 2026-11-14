@@ -11,6 +11,7 @@ import com.mediahub.core.database.repository.SubtitleMemoryStore
 import com.mediahub.core.network.PlaybackNetworkTraceRegistry
 import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
+import com.mediahub.core.download.DownloadedMediaLocator
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.ui.effects.VisualPalette
@@ -153,6 +154,11 @@ class PlayerViewModel @Inject constructor(
      * 冷启动的首次枚举由 app 层预热，不在播放线程上触发。
      */
     private val deviceCapabilitiesProvider: DeviceCapabilitiesProvider? = null,
+    /**
+     * 本地下载命中器（条目 61）：已下载/已存在的内容优先走本地 `file://`，
+     * 不依赖远端 resolvePlayback，断网也能播放。null = 未接入下载内核（测试/无下载能力）。
+     */
+    private val downloadedMediaLocator: DownloadedMediaLocator? = null,
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
     // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（见 core:common）
@@ -639,18 +645,26 @@ class PlayerViewModel @Inject constructor(
                 if (stopped || resolveGeneration.get() != generation) return@launch
                 _serverDisplayName.value = server.displayName
                 _serverIcon.value = server.icon
+                // 条目 61：本地已下载内容优先，直接播放 file:// 源（离线可用）。
+                val localSource = downloadedMediaLocator?.resolveLocalPlayback(serverId, itemId)
                 val providerHandle = registry.create(server)
-                    ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
+                    ?: if (localSource == null) {
+                        throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
+                    } else {
+                        null
+                    }
                 handle = providerHandle
 
-                val detailProvider = providerHandle.detail
-                val playbackProvider = providerHandle.playback
-                    ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的播放能力尚未接入")
+                val detailProvider = providerHandle?.detail
+                val playbackProvider = providerHandle?.playback
+                if (localSource == null && playbackProvider == null) {
+                    throw ProviderException.NotYetImplemented(serverId, "该数据源的播放能力尚未接入")
+                }
 
                 // review P2-5：browse-only 数据源（如本地文件树）无详情能力时，
                 // 按 itemId 重建条目并推断媒体类型（避免退化为 OTHER 污染"继续观看"元数据）。
                 // Player Startup 优化：详情页已传快照（type 非空）时跳过 detail 拉取。
-                val item = if (launchType.isNotBlank()) {
+                val item = if (launchType.isNotBlank() || localSource != null) {
                     MediaItem(
                         serverId = serverId,
                         id = itemId,
@@ -659,7 +673,7 @@ class PlayerViewModel @Inject constructor(
                         title = itemTitle.ifBlank { itemId.substringAfterLast('/') },
                         runtimeMs = launchRuntime.toLongOrNull(),
                         posterUrl = launchPoster.ifBlank { null },
-                        container = launchContainer.ifBlank { null },
+                        container = launchContainer.ifBlank { localSource?.container ?: "" }.ifBlank { null },
                     )
                 } else {
                     detailProvider?.getItemDetail(itemId)?.item ?: MediaItem(
@@ -677,7 +691,7 @@ class PlayerViewModel @Inject constructor(
                 val resume = progressStore.getResume(serverId, itemId)
                 coroutineContext.ensureActive()
                 if (stopped || resolveGeneration.get() != generation) return@launch
-                val source = playbackProvider.resolvePlayback(
+                val source = localSource ?: playbackProvider!!.resolvePlayback(
                     item,
                     PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
                 )
@@ -706,7 +720,7 @@ class PlayerViewModel @Inject constructor(
                     syncCoordinator.start(
                         progress = engine.progress,
                         events = playbackEventBus,
-                        remoteIntervalMs = providerHandle.progress?.remoteReportIntervalMs
+                        remoteIntervalMs = providerHandle?.progress?.remoteReportIntervalMs
                             ?: 10_000L,
                     )
                     startEventsTap()
