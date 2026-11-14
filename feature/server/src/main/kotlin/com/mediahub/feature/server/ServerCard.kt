@@ -30,6 +30,8 @@ fun ServerCard(
     authState: AuthSessionState? = null,
     onLogout: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
+    isHome: Boolean = false,
+    onSetAsHome: (() -> Unit)? = null,
 ) {
     com.mediahub.core.ui.MediaHubCard(
         onClick = onClick,
@@ -68,6 +70,17 @@ fun ServerCard(
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
+                    if (isHome) {
+                        Text(
+                            text = "首页",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    } else if (onSetAsHome != null) {
+                        TextButton(onClick = onSetAsHome) {
+                            Text("设为首页", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
                     if (server.isDefault) {
                         Text(
                             text = "默认",

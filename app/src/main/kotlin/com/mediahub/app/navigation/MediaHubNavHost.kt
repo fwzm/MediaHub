@@ -15,6 +15,7 @@ import androidx.navigation.navArgument
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.common.NavArgCodec
 import com.mediahub.feature.detail.DetailRoute
+import com.mediahub.feature.home.ContinueWatchingRoute
 import com.mediahub.feature.home.HomeRoute
 import com.mediahub.feature.library.LibraryRoute
 import com.mediahub.feature.library.favorites.FavoritesRoute
@@ -66,7 +67,30 @@ fun MediaHubNavHost() {
                             "?title=${Uri.encode(progress.itemTitle ?: "")}"
                     )
                 },
+                onOpenAllContinueWatching = { serverId, label ->
+                    navController.navigate(
+                        "continue?serverId=${Uri.encode(serverId)}&label=${Uri.encode(label)}"
+                    )
+                },
                 forceRestoreId = forceRestoreId,
+            )
+        }
+
+        composable(
+            route = "continue?serverId={serverId}&label={label}",
+            arguments = listOf(
+                navArgument("serverId") { type = NavType.StringType; defaultValue = "" },
+                navArgument("label") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) {
+            ContinueWatchingRoute(
+                onBack = { navController.popBackStack() },
+                onOpenItem = { progress ->
+                    navController.navigate(
+                        "detail/${progress.serverId}/${NavArgCodec.encode(progress.itemId)}" +
+                            "?title=${Uri.encode(progress.itemTitle ?: "")}"
+                    )
+                },
             )
         }
 
