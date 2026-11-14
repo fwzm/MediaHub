@@ -7,12 +7,14 @@ import com.mediahub.core.common.NavArgCodec
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.LogTag
+import com.mediahub.core.trakt.TraktRepository
 import com.mediahub.feature.detail.source.CanonicalSourceResolver
 import com.mediahub.feature.detail.source.SourceResolution
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
+import com.mediahub.model.TraktResult
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
@@ -36,6 +38,8 @@ class DetailViewModel @Inject constructor(
     private val registry: MediaProviderRegistry,
     private val sourceResolver: CanonicalSourceResolver,
     private val logger: Logger,
+    /** 条目 146：null = 未接线（测试/无 Trakt 环境）；未配置凭据时按钮整体隐藏。 */
+    private val traktRepository: TraktRepository? = null,
 ) : ViewModel() {
 
     val serverId: String = checkNotNull(savedStateHandle["serverId"])
@@ -54,6 +58,10 @@ class DetailViewModel @Inject constructor(
     private val _favoriteState = MutableStateFlow<FavoriteToggleState?>(null)
     val favoriteState: StateFlow<FavoriteToggleState?> = _favoriteState.asStateFlow()
 
+    /** 条目 146：Trakt 追更状态；null = 未配置/不适用（不渲染入口）。 */
+    private val _traktState = MutableStateFlow<TraktWatchlistUiState?>(null)
+    val traktState: StateFlow<TraktWatchlistUiState?> = _traktState.asStateFlow()
+
     private var handle: ProviderHandle? = null
     private var episodeJob: Job? = null
     private var sourceJob: Job? = null
@@ -63,6 +71,7 @@ class DetailViewModel @Inject constructor(
     fun load() {
         _uiState.value = DetailUiState.Loading
         _favoriteState.value = null
+        _traktState.value = null
         viewModelScope.launch {
             try {
                 val server = serverStore.getServer(serverId)
@@ -79,6 +88,7 @@ class DetailViewModel @Inject constructor(
                     _favoriteState.value = FavoriteToggle.fromServerState(detail.item.id, detail.item.isFavorite)
                 }
                 startSourceResolution(detail.item)
+                refreshTraktWatchlist(detail.item)
 
                 // 仅 SERIES 类型加载季列表（复用 browse 链）
                 if (detail.item.type == MediaType.SERIES) {
@@ -174,6 +184,80 @@ class DetailViewModel @Inject constructor(
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 logger.w(LogTag.UI, "收藏切换失败 serverId=$serverId itemId=${current.itemId}", e)
                 _favoriteState.value = FavoriteToggle.failed(current, userMessage(e))
+            }
+        }
+    }
+
+    /**
+     * 条目 146：仅对"已配置 Trakt 的剧集"显示追更入口。
+     *
+     * 状态判定优先用本地追更表（标题 + 年份匹配），不额外消耗 Trakt 请求配额。
+     */
+    private fun refreshTraktWatchlist(item: MediaItem) {
+        val repository = traktRepository ?: return
+        if (item.type != MediaType.SERIES || !repository.isConfigured) return
+        viewModelScope.launch {
+            val tracked = runCatching { repository.trackedShows() }.getOrNull()
+                ?.firstOrNull { show ->
+                    show.title.equals(item.title, ignoreCase = true) &&
+                        (item.year == null || show.year == null || show.year == item.year)
+                }
+            _traktState.value = TraktWatchlistUiState(
+                isTracked = tracked != null,
+                traktId = tracked?.traktId,
+            )
+        }
+    }
+
+    /**
+     * 条目 146：加入/取消追更。
+     *
+     * 加入时先搜索 Trakt show id，再写 watchlist；失败只更新错误文案，不改动本地状态。
+     */
+    fun toggleTraktWatchlist() {
+        val repository = traktRepository ?: return
+        val current = _traktState.value ?: return
+        if (current.isUpdating) return
+        val item = (_uiState.value as? DetailUiState.Content)?.detail?.item ?: return
+        _traktState.value = current.copy(isUpdating = true, error = null)
+        viewModelScope.launch {
+            if (current.isTracked) {
+                val result = current.traktId?.let { repository.removeFromWatchlist(it) }
+                    ?: TraktResult.Success(Unit)
+                _traktState.value = when (result) {
+                    is TraktResult.Success -> TraktWatchlistUiState(isTracked = false)
+                    is TraktResult.Failure -> current.copy(isUpdating = false, error = result.message)
+                    TraktResult.NotConfigured -> current.copy(
+                        isUpdating = false,
+                        error = "未配置 Trakt 凭据",
+                    )
+                }
+                return@launch
+            }
+            when (val found = repository.searchShow(item.title, item.year)) {
+                is TraktResult.Success -> {
+                    val result = repository.addToWatchlist(found.value)
+                    _traktState.value = when (result) {
+                        is TraktResult.Success -> TraktWatchlistUiState(
+                            isTracked = true,
+                            traktId = found.value.traktId,
+                        )
+                        is TraktResult.Failure -> current.copy(
+                            isUpdating = false,
+                            error = result.message,
+                        )
+                        TraktResult.NotConfigured -> current.copy(
+                            isUpdating = false,
+                            error = "未配置 Trakt 凭据",
+                        )
+                    }
+                }
+                is TraktResult.Failure -> {
+                    _traktState.value = current.copy(isUpdating = false, error = found.message)
+                }
+                TraktResult.NotConfigured -> {
+                    _traktState.value = current.copy(isUpdating = false, error = "未配置 Trakt 凭据")
+                }
             }
         }
     }

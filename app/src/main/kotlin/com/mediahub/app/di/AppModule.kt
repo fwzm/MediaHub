@@ -38,6 +38,9 @@ import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.prefs.UserPreferencesStore
 import com.mediahub.core.database.repository.ServerStore
+import com.mediahub.core.database.repository.RoomTraktWatchlistRepository
+import com.mediahub.core.database.repository.TraktWatchlistStore
+import com.mediahub.core.trakt.TraktConfig
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.base.DefaultProviderRegistry
 import com.mediahub.provider.emby.session.EmbySessionStore
@@ -217,6 +220,20 @@ object AppModule {
         logger: Logger,
     ): MediaHttpClient = MediaHttpClient(factory.mediaClient(), logger)
 
+    /**
+     * 条目 142/146：Trakt 凭据注入点。
+     *
+     * 通过 Gradle 属性 `mediahub.trakt.clientId / clientSecret / accessToken` 注入；
+     * 缺失时为空串，仓库降级为 NotConfigured，不发起请求也不会崩溃。
+     */
+    @Provides
+    @Singleton
+    fun provideTraktConfig(): TraktConfig = TraktConfig(
+        clientId = BuildConfig.TRAKT_CLIENT_ID.takeIf { it.isNotBlank() },
+        clientSecret = BuildConfig.TRAKT_CLIENT_SECRET.takeIf { it.isNotBlank() },
+        accessToken = BuildConfig.TRAKT_ACCESS_TOKEN.takeIf { it.isNotBlank() },
+    )
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
@@ -227,6 +244,7 @@ object AppModule {
                 Migrations.MIGRATION_3_4,
                 Migrations.MIGRATION_4_5,
                 Migrations.MIGRATION_5_6,
+                Migrations.MIGRATION_6_7,
             )
             .build()
 
@@ -388,6 +406,11 @@ abstract class RegistryModule {
     abstract fun bindWatchStatsRecorder(
         impl: com.mediahub.core.database.repository.DefaultWatchStatsRecorder,
     ): com.mediahub.core.database.repository.WatchStatsRecorder
+
+    /** 条目 146：本地追更列表。 */
+    @Binds
+    @Singleton
+    abstract fun bindTraktWatchlistStore(impl: RoomTraktWatchlistRepository): TraktWatchlistStore
 
     @Binds
     @Singleton

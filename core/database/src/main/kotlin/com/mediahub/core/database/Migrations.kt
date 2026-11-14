@@ -48,6 +48,20 @@ object Migrations {
         }
     }
 
+    /** 条目 146：新增本地追更列表（Trakt show id 主键）。 */
+    val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS trakt_tracked_shows (" +
+                    "traktId INTEGER NOT NULL, " +
+                    "title TEXT NOT NULL, " +
+                    "year INTEGER, " +
+                    "addedAtEpochMs INTEGER NOT NULL, " +
+                    "PRIMARY KEY(traktId))",
+            )
+        }
+    }
+
     /** P2 字幕中心切片一：新增 subtitle_memory 表（匹配记忆，键=视频版本指纹）。 */
     /**
      * W6-B：servers 加跨设备来源同步身份（ADR-S001）。
