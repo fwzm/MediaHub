@@ -11,9 +11,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -37,6 +40,7 @@ object DanmakuUiTestTags {
     const val COUNT_BADGE: String = "danmaku_count_badge"
     const val PANEL: String = "danmaku_panel"
     const val ENABLE_SWITCH: String = "danmaku_enable_switch"
+    const val ONLINE_SWITCH: String = "danmaku_online_switch"
     const val OPACITY_SLIDER: String = "danmaku_opacity_slider"
     const val STROKE_SLIDER: String = "danmaku_stroke_slider"
     const val SEARCH_INPUT: String = "danmaku_search_input"
@@ -87,6 +91,7 @@ fun DanmakuCountBadge(
 fun DanmakuPanel(
     state: DanmakuUiState,
     onEnabledChange: (Boolean) -> Unit,
+    onOnlineEnabledChange: (Boolean) -> Unit,
     onOpacityChange: (Float) -> Unit,
     onStrokeWidthChange: (Float) -> Unit,
     onSearch: (String) -> Unit,
@@ -123,6 +128,16 @@ fun DanmakuPanel(
                 checked = state.enabled,
                 onCheckedChange = onEnabledChange,
                 modifier = Modifier.testTag(DanmakuUiTestTags.ENABLE_SWITCH),
+            )
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.player_danmaku_online), style = MaterialTheme.typography.bodyLarge)
+            Spacer(Modifier.weight(1f))
+            Switch(
+                checked = state.onlineEnabled,
+                onCheckedChange = onOnlineEnabledChange,
+                modifier = Modifier.testTag(DanmakuUiTestTags.ONLINE_SWITCH),
             )
         }
 
@@ -266,5 +281,41 @@ fun DanmakuPanel(
                 Text(stringResource(R.string.player_danmaku_send))
             }
         }
+    }
+}
+
+/** 播放页弹幕 Bottom Sheet：与播放器的其它设置面板保持同一外观与交互。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DanmakuSheet(
+    state: DanmakuUiState,
+    onEnabledChange: (Boolean) -> Unit,
+    onOnlineEnabledChange: (Boolean) -> Unit,
+    onOpacityChange: (Float) -> Unit,
+    onStrokeWidthChange: (Float) -> Unit,
+    onSearch: (String) -> Unit,
+    onEpisodeSelected: (DanmakuEpisode) -> Unit,
+    onSend: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.onSurfaceVariant) },
+    ) {
+        DanmakuPanel(
+            state = state,
+            onEnabledChange = onEnabledChange,
+            onOnlineEnabledChange = onOnlineEnabledChange,
+            onOpacityChange = onOpacityChange,
+            onStrokeWidthChange = onStrokeWidthChange,
+            onSearch = onSearch,
+            onEpisodeSelected = onEpisodeSelected,
+            onSend = onSend,
+            onRefresh = onRefresh,
+            modifier = Modifier.padding(bottom = 24.dp),
+        )
     }
 }

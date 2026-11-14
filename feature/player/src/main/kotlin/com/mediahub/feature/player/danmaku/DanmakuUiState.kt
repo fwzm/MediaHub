@@ -7,6 +7,7 @@ import com.mediahub.core.danmaku.DanmakuSnapshot
 /** 播放页弹幕 UI 状态。评论列表始终按时间排序，由数据层保证。 */
 data class DanmakuUiState(
     val enabled: Boolean = true,
+    val onlineEnabled: Boolean = false,
     val comments: List<DanmakuComment> = emptyList(),
     val loading: Boolean = false,
     val fromCache: Boolean = false,

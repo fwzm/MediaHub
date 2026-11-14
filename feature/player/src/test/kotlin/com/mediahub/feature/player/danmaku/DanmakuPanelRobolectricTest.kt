@@ -30,6 +30,7 @@ class DanmakuPanelRobolectricTest {
 
     private class Recorder {
         var enabled: Boolean? = null
+        var onlineEnabled: Boolean? = null
         var opacity: Float? = null
         var stroke: Float? = null
         var searched: String? = null
@@ -62,6 +63,7 @@ class DanmakuPanelRobolectricTest {
                 DanmakuPanel(
                     state = state,
                     onEnabledChange = { recorder.enabled = it },
+                    onOnlineEnabledChange = { recorder.onlineEnabled = it },
                     onOpacityChange = { recorder.opacity = it },
                     onStrokeWidthChange = { recorder.stroke = it },
                     onSearch = { recorder.searched = it },
@@ -128,6 +130,11 @@ class DanmakuPanelRobolectricTest {
             .performScrollTo()
             .performClick()
         assertFalse(recorder.enabled!!)
+
+        composeRule.onNodeWithTag(DanmakuUiTestTags.ONLINE_SWITCH)
+            .performScrollTo()
+            .performClick()
+        assertEquals(true, recorder.onlineEnabled)
 
         composeRule.onNodeWithTag(DanmakuUiTestTags.OPACITY_SLIDER).performScrollTo()
         composeRule.onNodeWithTag(DanmakuUiTestTags.STROKE_SLIDER).performScrollTo()

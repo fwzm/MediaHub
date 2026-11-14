@@ -116,6 +116,7 @@
     <string name="player_danmaku_entry_description">打开弹幕设置</string>
     <string name="player_danmaku_count">%1$s</string>
     <string name="player_danmaku_enable">显示弹幕</string>
+    <string name="player_danmaku_online">在线弹幕（DanDanPlay）</string>
     <string name="player_danmaku_opacity">透明度 %1$d%%</string>
     <string name="player_danmaku_stroke">描边 %1$.1f dp</string>
     <string name="player_danmaku_loaded">已加载 %1$s 条</string>

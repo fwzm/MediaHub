@@ -4,6 +4,12 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.core.danmaku.DanDanPlayConfig
+import com.mediahub.core.danmaku.DanmakuComment
+import com.mediahub.core.danmaku.DanmakuEpisode
+import com.mediahub.core.danmaku.DanmakuQuery
+import com.mediahub.core.danmaku.DanmakuRepository
+import com.mediahub.core.danmaku.InMemoryDanmakuCache
 import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.repository.SubtitleMemoryEntry
 import com.mediahub.core.database.repository.SubtitleMemoryKeys
@@ -17,6 +23,7 @@ import com.mediahub.core.ui.effects.VisualPalette
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
+import com.mediahub.model.DanmakuPreferences
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.PlayerVisualEffectsPreferences
@@ -41,12 +48,19 @@ import com.mediahub.player.compatibility.DevicePlaybackAssessment
 import com.mediahub.player.compatibility.DevicePlaybackAssessor
 import com.mediahub.player.engine.SwitchablePlaybackEngine
 import com.mediahub.player.engine.TrackSelection
+import com.mediahub.feature.player.danmaku.DanmakuDefaults
+import com.mediahub.feature.player.danmaku.DanmakuTextError
+import com.mediahub.feature.player.danmaku.DanmakuTextPolicy
+import com.mediahub.feature.player.danmaku.DanmakuUiState
+import com.mediahub.feature.player.danmaku.withSearchResults
+import com.mediahub.feature.player.danmaku.withSnapshot
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.DiscoveredSubtitle
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -63,7 +77,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -153,6 +166,8 @@ class PlayerViewModel @Inject constructor(
      * 冷启动的首次枚举由 app 层预热，不在播放线程上触发。
      */
     private val deviceCapabilitiesProvider: DeviceCapabilitiesProvider? = null,
+    private val danmakuRepository: DanmakuRepository = DanmakuRepository(InMemoryDanmakuCache()),
+    private val danDanPlayConfig: DanDanPlayConfig = DanDanPlayConfig(),
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
     // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（见 core:common）
@@ -210,12 +225,31 @@ class PlayerViewModel @Inject constructor(
     private val _preferences = MutableStateFlow<com.mediahub.model.UserPreferences?>(null)
     val preferences: StateFlow<com.mediahub.model.UserPreferences?> = _preferences.asStateFlow()
 
+    private val _danmakuState = MutableStateFlow(DanmakuUiState())
+    val danmakuState: StateFlow<DanmakuUiState> = _danmakuState.asStateFlow()
+    private var danmakuItem: MediaItem? = null
+    private var danmakuKey: String? = null
+    private var danmakuJob: Job? = null
+    private var localDanmakuCounter: Long = 0L
+
     init {
         viewModelScope.launch {
             userPreferencesRepository.flow.collect { stored ->
                 latestPreferences = stored
                 engine.setSubtitlePresentation(stored.subtitleStyle, stored.subtitleSizeSp)
                 _preferences.value = stored
+                val danmaku = stored.danmaku
+                _danmakuState.update {
+                    it.copy(
+                        enabled = danmaku.enabled,
+                        opacity = danmaku.opacity.coerceIn(DanmakuPreferences.MIN_OPACITY, 1f),
+                        strokeWidthDp = danmaku.strokeWidthDp.coerceIn(
+                            0f,
+                            DanmakuPreferences.MAX_STROKE_WIDTH_DP,
+                        ),
+                        onlineEnabled = danmaku.onlineEnabled,
+                    )
+                }
             }
         }
     }
@@ -244,6 +278,167 @@ class PlayerViewModel @Inject constructor(
     fun resetPlayerVisualEffects() {
         viewModelScope.launch { userPreferencesRepository.resetPlayerVisualEffects() }
     }
+
+    // ---- 弹幕（条目 12/16/59/74/96/98/101/125）----
+
+    fun setDanmakuEnabled(enabled: Boolean) {
+        updateDanmakuPreferences { it.copy(enabled = enabled) }
+        if (enabled && _danmakuState.value.comments.isEmpty()) {
+            danmakuItem?.let { loadDanmaku(it, force = false) }
+        }
+    }
+
+    fun setDanmakuOpacity(value: Float) {
+        updateDanmakuPreferences {
+            it.copy(opacity = value.coerceIn(DanmakuPreferences.MIN_OPACITY, 1f))
+        }
+    }
+
+    fun setDanmakuStrokeWidth(valueDp: Float) {
+        updateDanmakuPreferences {
+            it.copy(strokeWidthDp = valueDp.coerceIn(0f, DanmakuPreferences.MAX_STROKE_WIDTH_DP))
+        }
+    }
+
+    fun setDanmakuOnlineEnabled(enabled: Boolean) {
+        updateDanmakuPreferences { it.copy(onlineEnabled = enabled) }
+        danmakuItem?.let { loadDanmaku(it, force = false) }
+    }
+
+    fun refreshDanmaku() {
+        danmakuItem?.let { loadDanmaku(it, force = true) }
+    }
+
+    /** 在当前播放位置发送一条本地弹幕；内容校验与清洗由 [DanmakuTextPolicy] 负责。 */
+    fun sendDanmaku(raw: String) {
+        val validation = DanmakuTextPolicy.validate(raw)
+        if (!validation.canSend) {
+            val message = when (validation.error) {
+                DanmakuTextError.TOO_LONG -> "弹幕最多 ${DanmakuDefaults.MAX_TEXT_LENGTH} 个字"
+                else -> "弹幕内容不能为空"
+            }
+            _danmakuState.update { it.copy(notice = message) }
+            return
+        }
+        val key = danmakuKey ?: return
+        localDanmakuCounter += 1
+        val comment = DanmakuComment(
+            id = "local-${engine.uiState.value.positionMs}-${System.currentTimeMillis()}-$localDanmakuCounter",
+            timeMs = engine.uiState.value.positionMs.coerceAtLeast(0L),
+            text = validation.normalized,
+            colorArgb = DanmakuComment.DEFAULT_COLOR_ARGB,
+            fontSizeSp = DanmakuComment.DEFAULT_FONT_SIZE_SP,
+            source = DanmakuComment.SOURCE_LOCAL,
+        )
+        viewModelScope.launch {
+            val snapshot = danmakuRepository.addLocalComment(key, comment)
+            if (danmakuKey == key) {
+                _danmakuState.update { it.copy(comments = snapshot.comments, notice = null) }
+            }
+        }
+    }
+
+    fun searchDanmaku(keyword: String) {
+        val item = danmakuItem ?: return
+        if (keyword.isBlank()) return
+        _danmakuState.update {
+            it.copy(searching = true, searchQuery = keyword, notice = null, searchResults = emptyList())
+        }
+        viewModelScope.launch {
+            val result = danmakuRepository.searchEpisodes(danmakuQuery(item, force = false), keyword)
+            _danmakuState.update { it.withSearchResults(result.episodes, result.error) }
+        }
+    }
+
+    fun selectDanmakuEpisode(episode: DanmakuEpisode) {
+        val item = danmakuItem ?: return
+        val key = danmakuKey ?: return
+        danmakuJob?.cancel()
+        _danmakuState.update {
+            it.copy(loading = true, searching = false, notice = null, searchResults = emptyList())
+        }
+        danmakuJob = viewModelScope.launch {
+            val snapshot = danmakuRepository.loadEpisode(
+                query = danmakuQuery(item, force = false),
+                episodeId = episode.id,
+            )
+            if (danmakuKey != key) return@launch
+            _danmakuState.update { it.withSnapshot(snapshot) }
+        }
+    }
+
+    private fun updateDanmakuPreferences(transform: (DanmakuPreferences) -> DanmakuPreferences) {
+        val updated = transform(latestPreferences.danmaku)
+        latestPreferences = latestPreferences.copy(danmaku = updated)
+        _danmakuState.update { state ->
+            state.copy(
+                enabled = updated.enabled,
+                opacity = updated.opacity.coerceIn(DanmakuPreferences.MIN_OPACITY, 1f),
+                strokeWidthDp = updated.strokeWidthDp.coerceIn(
+                    0f,
+                    DanmakuPreferences.MAX_STROKE_WIDTH_DP,
+                ),
+                onlineEnabled = updated.onlineEnabled,
+            )
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.update { it.copy(danmaku = updated) }
+        }
+    }
+
+    private fun invalidateDanmakuSession() {
+        danmakuJob?.cancel()
+        danmakuJob = null
+        danmakuItem = null
+        danmakuKey = null
+        _danmakuState.update {
+            it.copy(
+                comments = emptyList(),
+                loading = false,
+                fromCache = false,
+                sourceLabel = null,
+                notice = null,
+                searchResults = emptyList(),
+            )
+        }
+    }
+
+    private fun startDanmaku(item: MediaItem) {
+        danmakuItem = item
+        danmakuKey = "$serverId:${item.id}"
+        _danmakuState.update {
+            it.copy(
+                comments = emptyList(),
+                loading = false,
+                fromCache = false,
+                sourceLabel = null,
+                notice = null,
+                searchResults = emptyList(),
+            )
+        }
+        loadDanmaku(item, force = false)
+    }
+
+    private fun loadDanmaku(item: MediaItem, force: Boolean) {
+        val key = "$serverId:${item.id}"
+        danmakuJob?.cancel()
+        _danmakuState.update { it.copy(loading = true, notice = null) }
+        danmakuJob = viewModelScope.launch {
+            val snapshot = danmakuRepository.load(danmakuQuery(item, force))
+            if (danmakuKey != key) return@launch
+            _danmakuState.update { it.withSnapshot(snapshot) }
+        }
+    }
+
+    private fun danmakuQuery(item: MediaItem, force: Boolean): DanmakuQuery = DanmakuQuery(
+        itemKey = "$serverId:${item.id}",
+        seriesTitle = item.title,
+        episodeTitle = item.title,
+        durationMs = item.runtimeMs,
+        onlineEnabled = latestPreferences.danmaku.onlineEnabled,
+        danDanPlay = danDanPlayConfig,
+        forceRefresh = force,
+    )
 
     // ---- 字幕中心（P2 切片一：发现/导入/外挂加载/偏移/匹配记忆） ----
 
@@ -620,6 +815,7 @@ class PlayerViewModel @Inject constructor(
         resolveJob?.cancel()
         val generation = resolveGeneration.incrementAndGet()
         invalidateSubtitleSession()
+        invalidateDanmakuSession()
         resolveJob = viewModelScope.launch {
             _resolveState.value = ResolveState.Resolving
             _playbackSource.value = null
@@ -714,6 +910,8 @@ class PlayerViewModel @Inject constructor(
                 }
                 // 字幕中心：同目录发现 + 匹配记忆回放（异步，不阻塞 Ready）。
                 startSubtitleCenter(item, source)
+                // 弹幕：本地优先、在线可选，异步加载，不阻塞 Ready。
+                startDanmaku(item)
                 if (!autoplay) autoplayBlocked = false
                 _resolveState.value = ResolveState.Ready
                 if (currentTrace === trace) PlaybackNetworkTraceRegistry.set(null)
