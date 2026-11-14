@@ -16,6 +16,8 @@ data class MatchSearchOutcome(
     val query: ParsedTitle,
     val candidates: List<MatchCandidate>,
     val failures: List<MatchFailure>,
+    /** 前两名分差过小时为 true：即便最高分达阈值也必须人工确认。 */
+    val ambiguous: Boolean = false,
 )
 
 /**
@@ -48,10 +50,17 @@ class ManualMatchService(
                 failures += MatchFailure(provider.source, e.statusCode, e.message.orEmpty())
             }
         }
+        val ranked = matcher.rank(parsed.title, results, effectiveYear, preferredLanguage)
+        val ambiguous = ranked.size > 1 && (ranked[0].score - ranked[1].score) < AMBIGUITY_MARGIN
         return MatchSearchOutcome(
             query = parsed,
-            candidates = matcher.rank(parsed.title, results, effectiveYear, preferredLanguage),
+            candidates = ranked,
             failures = failures,
+            ambiguous = ambiguous,
         )
+    }
+
+    private companion object {
+        const val AMBIGUITY_MARGIN = 10
     }
 }

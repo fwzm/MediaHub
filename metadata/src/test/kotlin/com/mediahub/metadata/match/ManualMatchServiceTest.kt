@@ -80,6 +80,31 @@ class ManualMatchServiceTest {
         assertEquals("tv/new", outcome.candidates.first().result.id)
     }
 
+    @Test
+    fun `tied top candidates are marked ambiguous`() = runBlocking {
+        val tmdb = FakeProvider(MetadataSource.TMDB, listOf(result("tv/1", "绝命毒师", 2008)))
+        val bangumi = FakeProvider(MetadataSource.BANGUMI, listOf(result("bgm/1", "绝命毒师", 2008)))
+        val outcome = ManualMatchService(listOf(tmdb, bangumi)).search("绝命毒师")
+
+        assertTrue(outcome.ambiguous)
+        assertEquals(2, outcome.candidates.size)
+    }
+
+    @Test
+    fun `clear winner is not ambiguous`() = runBlocking {
+        val provider = FakeProvider(
+            MetadataSource.TMDB,
+            listOf(
+                result("tv/exact", "绝命毒师", 2008),
+                result("tv/other", "绝命毒师 续命之徒", 2019),
+            ),
+        )
+
+        val outcome = ManualMatchService(listOf(provider)).search("绝命毒师 2008")
+
+        assertTrue(!outcome.ambiguous)
+    }
+
     private class FakeProvider(
         override val source: MetadataSource,
         private val results: List<MetadataResult>,
