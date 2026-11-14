@@ -17,6 +17,8 @@
     <string name="settings_watch_stats">观影统计</string>
     <string name="settings_watch_stats_enabled">记录观看历史（关闭后不再记录，已有记录保留）</string>
     <string name="settings_watch_stats_entry">查看观影统计</string>
+    <string name="settings_trakt">Trakt 追更</string>
+    <string name="settings_trakt_calendar">追更日历</string>
     <string name="settings_auto_landscape">播放视频时自动横屏</string>
     <string name="settings_immersive_bars">播放时隐藏状态栏和导航栏</string>
     <string name="settings_player_gestures">播放器手势</string>

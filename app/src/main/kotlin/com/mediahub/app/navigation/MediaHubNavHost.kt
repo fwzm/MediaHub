@@ -117,11 +117,18 @@ fun MediaHubNavHost() {
                 onBack = { navController.popBackStack() },
                 onOpenBackup = { navController.navigate(Routes.BACKUP) },
                 onOpenStats = { navController.navigate(Routes.STATS) },
+                onOpenTraktCalendar = { navController.navigate(Routes.TRAKT_CALENDAR) },
             )
         }
 
         composable(Routes.STATS) {
             com.mediahub.feature.stats.StatsRoute(onBack = { navController.popBackStack() })
+        }
+
+        composable(Routes.TRAKT_CALENDAR) {
+            com.mediahub.feature.stats.TraktCalendarRoute(
+                onBack = { navController.popBackStack() },
+            )
         }
 
         composable(Routes.BACKUP) {
@@ -258,6 +265,7 @@ private object Routes {
     const val ADD_SERVER = "server/add"
     const val SETTINGS = "settings"
     const val STATS = "stats"
+    const val TRAKT_CALENDAR = "trakt_calendar"
     const val BACKUP = "backup"
     const val SEARCH = "search"
     const val FAVORITES = "favorites/{serverId}"

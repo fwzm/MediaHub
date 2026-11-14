@@ -17,6 +17,8 @@
     <string name="settings_watch_stats">Watch statistics</string>
     <string name="settings_watch_stats_enabled">Record watch history (off stops recording, existing records are kept)</string>
     <string name="settings_watch_stats_entry">View watch statistics</string>
+    <string name="settings_trakt">Trakt tracking</string>
+    <string name="settings_trakt_calendar">Tracking calendar</string>
     <string name="settings_auto_landscape">Auto-rotate to landscape for video</string>
     <string name="settings_immersive_bars">Hide system bars during playback</string>
     <string name="settings_player_gestures">Player gestures</string>

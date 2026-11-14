@@ -15,6 +15,22 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
+        // Trakt 凭据注入点（条目 142/146）：缺失即空串，运行时降级为"未配置"，不崩溃。
+        buildConfigField(
+            "String",
+            "TRAKT_CLIENT_ID",
+            "\"${providers.gradleProperty("mediahub.trakt.clientId").orElse("").get()}\"",
+        )
+        buildConfigField(
+            "String",
+            "TRAKT_CLIENT_SECRET",
+            "\"${providers.gradleProperty("mediahub.trakt.clientSecret").orElse("").get()}\"",
+        )
+        buildConfigField(
+            "String",
+            "TRAKT_ACCESS_TOKEN",
+            "\"${providers.gradleProperty("mediahub.trakt.accessToken").orElse("").get()}\"",
+        )
         versionName = "0.1.0-alpha.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -79,6 +95,7 @@ dependencies {
     implementation(project(":feature:settings"))
     implementation(project(":feature:stats"))
     implementation(project(":feature:player"))
+    implementation(project(":core:trakt"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

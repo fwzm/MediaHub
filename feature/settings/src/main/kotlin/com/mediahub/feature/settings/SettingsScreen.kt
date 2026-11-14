@@ -72,6 +72,7 @@ fun SettingsRoute(
     onBack: () -> Unit,
     onOpenBackup: () -> Unit = {},
     onOpenStats: () -> Unit = {},
+    onOpenTraktCalendar: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
     visualPreviewRunningOverride: Boolean? = null,
 ) {
@@ -194,6 +195,18 @@ fun SettingsRoute(
                     ) {
                         Text(stringResource(R.string.settings_watch_stats_entry))
                     }
+                }
+            }
+
+            // 条目 146：Trakt 追更日历入口（未配置凭据时页面内给出明确提示）。
+            SettingsSection(title = stringResource(R.string.settings_trakt)) {
+                androidx.compose.material3.OutlinedButton(
+                    onClick = onOpenTraktCalendar,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("trakt.calendar"),
+                ) {
+                    Text(stringResource(R.string.settings_trakt_calendar))
                 }
             }
 

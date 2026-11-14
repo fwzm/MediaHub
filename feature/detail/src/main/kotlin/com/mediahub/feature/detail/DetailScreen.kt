@@ -81,6 +81,7 @@ fun DetailRoute(
     val seriesState by viewModel.seriesState.collectAsStateWithLifecycle()
     val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
     val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
+    val traktState by viewModel.traktState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -172,10 +173,26 @@ fun DetailRoute(
                 onOpenItem = onOpenItem,
                 sourceState = sourceState,
                 onSwitchSource = onSwitchSource,
+                traktState = traktState,
+                onToggleTrakt = viewModel::toggleTraktWatchlist,
                 )
             }
         }
     }
+}
+
+/** 条目 142：播出日期（本地时区，yyyy-MM-dd）。 */
+private fun formatEpisodeAirDate(epochMs: Long): String {
+    val date = java.time.Instant.ofEpochMilli(epochMs)
+        .atZone(java.time.ZoneId.systemDefault())
+        .toLocalDate()
+    return java.lang.String.format(
+        java.util.Locale.ROOT,
+        "%04d-%02d-%02d",
+        date.year,
+        date.monthValue,
+        date.dayOfMonth,
+    )
 }
 
 @Composable
@@ -189,6 +206,8 @@ fun DetailBody(
     onOpenItem: ((MediaItem) -> Unit)? = null,
     sourceState: SourceResolutionState = SourceResolutionState.Idle,
     onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
+    traktState: TraktWatchlistUiState? = null,
+    onToggleTrakt: () -> Unit = {},
 ) {
     val item = detail.item
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
@@ -274,6 +293,33 @@ fun DetailBody(
             Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(26.dp))
             Spacer(Modifier.width(8.dp))
             Text("立即播放", style = MaterialTheme.typography.titleMedium)
+        }
+
+        // ---- 条目 146：Trakt 追更（仅已配置且为剧集时显示） ----
+        traktState?.let { trakt ->
+            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                androidx.compose.material3.OutlinedButton(
+                    onClick = onToggleTrakt,
+                    enabled = !trakt.isUpdating,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        when {
+                            trakt.isUpdating -> "处理中…"
+                            trakt.isTracked -> "取消追更"
+                            else -> "加入追更"
+                        },
+                    )
+                }
+                trakt.error?.let { message ->
+                    Text(
+                        message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
         }
 
         // ---- 1F C2：跨服务器来源选择（ADR-038） ----
@@ -494,6 +540,14 @@ private fun EpisodeRow(
                     val minutes = ms / 60_000
                     if (minutes > 0) Text(
                         "${minutes}分钟",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // 条目 142：剧集详情展示播出日期（来自 provider 的 premiereDate）。
+                episode.premiereDateEpochMs?.let { ms ->
+                    Text(
+                        "播出 " + formatEpisodeAirDate(ms),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
