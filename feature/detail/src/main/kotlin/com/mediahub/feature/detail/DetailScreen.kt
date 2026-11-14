@@ -289,6 +289,17 @@ fun DetailBody(
             )
         }
 
+        if (metadataState.ratings.isNotEmpty()) {
+            RatingsStrip(
+                ratings = metadataState.ratings,
+                average = metadataState.averageRating,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 8.dp),
+            )
+        }
+
         Button(
             onClick = { onPlay(item) },
             modifier = Modifier
