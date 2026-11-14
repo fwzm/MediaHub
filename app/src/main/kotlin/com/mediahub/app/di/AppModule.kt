@@ -12,6 +12,12 @@ import com.mediahub.core.common.sync.FileSourceSyncBaselineStore
 import java.io.File
 import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.database.Migrations
+import com.mediahub.core.danmaku.DanDanPlayClient
+import com.mediahub.core.danmaku.DanDanPlayConfig
+import com.mediahub.core.danmaku.DanDanPlaySource
+import com.mediahub.core.danmaku.DanmakuCache
+import com.mediahub.core.danmaku.DanmakuRepository
+import com.mediahub.core.danmaku.FileDanmakuCache
 import com.mediahub.core.logging.CompositeLogger
 import com.mediahub.core.logging.LogBuffer
 import com.mediahub.core.logging.LogcatLogger
@@ -335,6 +341,36 @@ object AppModule {
     @Singleton
     fun provideGlobalSearchEngine(): com.mediahub.feature.search.engine.GlobalSearchEngine =
         com.mediahub.feature.search.engine.GlobalSearchEngine(perServerTimeoutMs = 8_000, maxConcurrency = 4)
+
+    /**
+     * 弹幕磁盘缓存：cacheDir/danmaku，文件名是条目键的 SHA-256，带 TTL。
+     * 只做已解析载荷的持久化，不缓存任何凭据或原始响应头。
+     */
+    @Provides
+    @Singleton
+    fun provideDanmakuCache(@ApplicationContext context: Context): DanmakuCache =
+        FileDanmakuCache(File(context.cacheDir, "danmaku"))
+
+    /**
+     * 弹弹play 凭据：来自本地 Gradle 属性（见 app/build.gradle.kts）。
+     * 默认空串 = 未配置，在线源关闭并给出明确错误，不会静默打网。
+     */
+    @Provides
+    @Singleton
+    fun provideDanDanPlayConfig(): DanDanPlayConfig = DanDanPlayConfig(
+        appId = BuildConfig.DANDANPLAY_APP_ID,
+        appSecret = BuildConfig.DANDANPLAY_APP_SECRET,
+    )
+
+    @Provides
+    @Singleton
+    fun provideDanmakuRepository(
+        cache: DanmakuCache,
+        httpClientFactory: HttpClientFactory,
+    ): DanmakuRepository = DanmakuRepository(
+        cache = cache,
+        sources = listOf(DanDanPlaySource(DanDanPlayClient(httpClientFactory.apiClient()))),
+    )
 
     /**
      * W6-110：诊断日志导出出口（LogBuffer → 文件）。

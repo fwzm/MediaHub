@@ -48,6 +48,7 @@ dependencies {
     implementation(project(":core:database"))
     implementation(project(":core:logging"))
     implementation(project(":core:ui"))
+    implementation(project(":core:danmaku"))
     implementation(project(":provider:api"))
     implementation(project(":player:engine"))
     // ADR-042：播放页需要设备能力评估（作为引擎选路证据），并供 UI/诊断展示。

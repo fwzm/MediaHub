@@ -31,6 +31,7 @@ include(":core:database")
 include(":core:security")
 include(":core:logging")
 include(":core:ui")
+include(":core:danmaku")
 
 include(":player:engine")
 include(":player:mpv")
