@@ -102,6 +102,7 @@ fun LibraryRoute(
     /** 「我的收藏」入口（task-25 / A2）；null = 宿主未接线，不显示入口。 */
     onOpenFavorites: (() -> Unit)? = null,
     onReauthorizeDirectory: (() -> Unit)? = null,
+    onOpenFileBrowser: (() -> Unit)? = null,
     reauthorizedSource: String? = null,
     onReauthorizationConsumed: () -> Unit = {},
     viewModel: LibraryViewModel = hiltViewModel(),
@@ -129,6 +130,7 @@ fun LibraryRoute(
         onSortSelected = viewModel::onSortSelected,
         onFilterSelected = viewModel::onFilterSelected,
         onReauthorizeDirectory = onReauthorizeDirectory,
+        onOpenFileBrowser = onOpenFileBrowser,
         libraryOrder = libraryOrder,
         onMoveLibrary = appearance::move,
     )
@@ -150,6 +152,7 @@ fun LibraryContent(
     onSortSelected: (MediaSort) -> Unit,
     onFilterSelected: (MediaFilter) -> Unit,
     onReauthorizeDirectory: (() -> Unit)? = null,
+    onOpenFileBrowser: (() -> Unit)? = null,
     libraryOrder: List<String> = emptyList(),
     onMoveLibrary: (from: Int, to: Int, currentIds: List<String>) -> Unit = { _, _, _ -> },
 ) {
@@ -189,6 +192,11 @@ fun LibraryContent(
                     if (onOpenFavorites != null) {
                         IconButton(onClick = onOpenFavorites) {
                             Icon(Icons.Default.Favorite, contentDescription = "我的收藏")
+                        }
+                    }
+                    if (onOpenFileBrowser != null) {
+                        IconButton(onClick = onOpenFileBrowser) {
+                            Icon(Icons.Default.Folder, contentDescription = "文件浏览器")
                         }
                     }
                     IconButton(

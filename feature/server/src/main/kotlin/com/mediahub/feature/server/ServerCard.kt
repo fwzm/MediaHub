@@ -101,10 +101,10 @@ fun ServerCard(
                 ) {
                     server.lastError?.let { error ->
                         Text(
-                            text = "上次错误：$error",
+                            text = "上次错误：${displayServerError(error)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
-                            maxLines = 1,
+                            maxLines = 4,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
@@ -140,7 +140,7 @@ private fun AuthStatusLine(state: AuthSessionState) {
         text = text,
         style = MaterialTheme.typography.bodySmall,
         color = color,
-        maxLines = 1,
+        maxLines = 2,
         overflow = TextOverflow.Ellipsis,
     )
 }

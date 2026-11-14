@@ -21,6 +21,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.common.NavArgCodec
 import com.mediahub.feature.detail.DetailRoute
 import com.mediahub.feature.home.HomeRoute
+import com.mediahub.feature.library.FileBrowserRoute
 import com.mediahub.feature.library.LibraryRoute
 import com.mediahub.feature.library.favorites.FavoritesRoute
 import com.mediahub.feature.player.PlayerRoute
@@ -204,8 +205,36 @@ fun MediaHubNavHost() {
                 onReauthorizeDirectory = {
                     navController.navigate("server/add?reauthorizeId=${Uri.encode(serverId)}")
                 },
+                onOpenFileBrowser = {
+                    val libraryId = entry.arguments?.getString("libraryId").orEmpty()
+                    val name = entry.arguments?.getString("name").orEmpty()
+                    navController.navigate(
+                        "filebrowser/$serverId/${Uri.encode(libraryId)}?name=${Uri.encode(name)}"
+                    )
+                },
                 reauthorizedSource = reauthorized,
                 onReauthorizationConsumed = { entry.savedStateHandle["auth_changed_server_id"] = null },
+            )
+        }
+
+        // 文件浏览器（条目 108/110）：独立页面骨架，复用同一目录数据源。
+        composable(
+            route = "filebrowser/{serverId}/{libraryId}?name={name}",
+            arguments = listOf(
+                navArgument("serverId") { type = NavType.StringType },
+                navArgument("libraryId") { type = NavType.StringType },
+                navArgument("name") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) { entry ->
+            val serverId = entry.arguments?.getString("serverId").orEmpty()
+            FileBrowserRoute(
+                title = entry.arguments?.getString("name").orEmpty(),
+                onBack = { navController.popBackStack() },
+                onOpenItem = { item ->
+                    navController.navigate(
+                        "detail/$serverId/${NavArgCodec.encode(item.id)}?title=${Uri.encode(item.title)}"
+                    )
+                },
             )
         }
 
