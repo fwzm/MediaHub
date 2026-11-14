@@ -15,6 +15,7 @@ import com.mediahub.model.MediaSort
 import com.mediahub.model.MediaQueryCapabilities
 import com.mediahub.model.MediaSortField
 import com.mediahub.model.PageRequest
+import com.mediahub.provider.api.ProviderErrorText
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -78,7 +79,14 @@ sealed interface LibraryUiState {
         val filterFields: List<MediaFilterField> = emptyList(),
     ) : LibraryUiState
 
-    data class Error(val message: String, val reauthorizeDirectory: Boolean = false) : LibraryUiState
+    data class Error(
+        val message: String,
+        val reauthorizeDirectory: Boolean = false,
+        /** 结构化错误码（审计条目 83）：供 UI 用共享映射给出准确文案。 */
+        val errorCode: ProviderException.ErrorCode? = null,
+        /** 仅 [ProviderException.ErrorCode.HTTP] 有值。 */
+        val httpStatus: Int? = null,
+    ) : LibraryUiState
 }
 
 @HiltViewModel
@@ -354,14 +362,20 @@ class LibraryViewModel @Inject constructor(
                 sortRollbackOnFailure = null
                 filterRollbackOnFailure = null
                 logger.w(LogTag.UI, "加载媒体库失败 serverId=$serverId", e)
-                _uiState.value = LibraryUiState.Error(userMessage(e), e is ProviderException.DirectoryAccessRequired)
+                val provider = e as? ProviderException
+                _uiState.value = LibraryUiState.Error(
+                    message = userMessage(e),
+                    reauthorizeDirectory = e is ProviderException.DirectoryAccessRequired,
+                    errorCode = provider?.code,
+                    httpStatus = (provider as? ProviderException.Http)?.statusCode,
+                )
             }
         }
     }
 
     private fun userMessage(e: Exception): String = when (e) {
         // A2-4 第 4 项：非 ProviderException 的 message 可能含 URL/Token 等敏感文本，一律不透传
-        is ProviderException -> e.message ?: "加载失败"
+        is ProviderException -> ProviderErrorText.from(e)
         else -> "加载失败"
     }
 }
