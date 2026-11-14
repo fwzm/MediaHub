@@ -2,6 +2,7 @@ package com.mediahub.provider.emby.api
 
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.ApiClient
+import com.mediahub.core.network.ApiException
 import com.mediahub.model.MediaFilter
 import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
@@ -245,6 +246,56 @@ open class EmbyApiClient(
     }
 
     /**
+     * 续播位置（用户条目 38 / fnOS 兼容）：
+     * GET /emby/Users/{userId}/Items/{itemId}?Fields=UserData。
+     *
+     * 解析 `UserData.PlaybackPositionTicks`（100ns）为毫秒；UserData 缺失或位置 <= 0
+     * 返回 null（= 没有可续播位置，调用方从 0 开始）。404 等错误不在此吞掉。
+     */
+    suspend fun getResumePosition(token: String, userId: String, itemId: String): Long? {
+        val url = buildUrlWithSegments(
+            path = "/Users/$userId/Items",
+            segments = listOf(itemId),
+            query = mapOf("Fields" to RESUME_POSITION_FIELDS),
+        )
+        val dto: EmbyUserItemDto = apiClient.get(url, authenticatedHeaders(token, userId))
+        return dto.userData?.playbackPositionTicks
+            ?.div(TICKS_PER_MILLIS)
+            ?.takeIf { it > 0 }
+    }
+
+    /**
+     * 继续观看（用户条目 38 / fnOS 兼容）：
+     * GET /emby/Users/{userId}/Items/Resume?Limit=n&MediaTypes=Video&Fields=...。
+     *
+     * **404/405 返回空列表**：老服务器/兼容服没有 Resume 端点，属能力缺失而非致命错误；
+     * 其它非 2xx 照常抛 [com.mediahub.core.network.ApiException] 由上层映射。
+     * [limit] 由调用方先 clamp（本方法直接透传 Limit）。
+     */
+    suspend fun getContinueWatching(
+        token: String,
+        userId: String,
+        limit: Int,
+    ): List<EmbyItemFields> {
+        val url = buildUrl(
+            path = "/Users/$userId/Items/Resume",
+            query = mapOf(
+                "Limit" to limit.toString(),
+                "MediaTypes" to CONTINUE_WATCHING_MEDIA_TYPES,
+                "Fields" to CONTINUE_WATCHING_FIELDS,
+                "EnableUserData" to "true",
+            ),
+        )
+        val result: EmbyQueryResultDto<EmbyBaseItemDto> = try {
+            apiClient.get(url, authenticatedHeaders(token, userId))
+        } catch (e: ApiException) {
+            if (e.statusCode == 404 || e.statusCode == 405) return emptyList()
+            throw e
+        }
+        return result.items
+    }
+
+    /**
      * 播放信息：POST /emby/Items/{itemId}/PlaybackInfo?UserId=...（官方 MediaInfoService POST contract）。
      *
      * 无转码红线（Phase 1B-2.1）：协商参数全部走 typed JSON body
@@ -477,6 +528,19 @@ open class EmbyApiClient(
         /** 收藏回读所需字段（只有 UserData 的最小请求，避免拉全量 detail 字段）。 */
         const val FAVORITE_FIELDS = "UserData"
 
+        /** 单个条目续播位置回读所需字段（与收藏同款最小请求）。 */
+        const val RESUME_POSITION_FIELDS = "UserData"
+
+        /** 继续观看的媒体类型（官方 MediaTypes 参数；首版只要视频）。 */
+        const val CONTINUE_WATCHING_MEDIA_TYPES = "Video"
+
+        /** 继续观看列表所需字段（UserData 供进度显示，其余供结果卡与播放）。 */
+        const val CONTINUE_WATCHING_FIELDS =
+            "UserData,PrimaryImageAspectRatio,Overview,ProductionYear,RunTimeTicks,Genres,Container,SortName"
+
+        /** 1 毫秒 = 10_000 ticks（100ns）。 */
+        const val TICKS_PER_MILLIS = 10_000L
+
         /** 收藏列表的服务端筛选（官方 ItemFilter 值；仅优化，客户端仍兜底）。 */
         const val FAVORITE_FILTER = "IsFavorite"
 
@@ -493,3 +557,14 @@ open class EmbyApiClient(
         }
     }
 }
+
+/**
+ * 兼容兜底会话 id 前缀（用户条目 38 / fnOS）。
+ *
+ * PlaybackInfo 未返回 PlaySessionId 时由客户端生成 `mh-<uuid>` 作为会话 id：
+ * 真实 Emby 4.x 接受任意**非空** PlaySessionId（见 [EmbyPlaybackStartInfoDto] 的头注释），
+ * 而兼容服缺失该字段时若直接 Parse 失败，整条播放/进度链都不可用。
+ * 服务端给出真值时必须继续用真值；只有兜底会话在最终退出时额外补发一次 Progress
+ * （部分兼容服只按 Progress 落库位置、忽略 Stopped 的 PositionTicks）。
+ */
+internal const val CLIENT_PLAY_SESSION_PREFIX = "mh-"

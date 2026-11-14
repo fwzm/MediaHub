@@ -686,31 +686,7 @@ class PlaybackEngine(
             .setMimeType(mimeType)
             .build()
 
-    private fun mapPlayerError(e: PlaybackException): PlaybackError {
-        val details = mapOf(
-            "media3ErrorCode" to e.errorCode.toString(),
-            "message" to (e.message ?: ""),
-        )
-        return when (e.errorCode) {
-            PlaybackException.ERROR_CODE_DECODING_FAILED,
-            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
-            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
-            -> PlaybackError(PlaybackError.Code.DECODER_ERROR, details = details, cause = e)
-
-            PlaybackException.ERROR_CODE_DRM_CONTENT_ERROR,
-            PlaybackException.ERROR_CODE_DRM_LICENSE_ACQUISITION_FAILED,
-            PlaybackException.ERROR_CODE_DRM_PROVISIONING_FAILED,
-            PlaybackException.ERROR_CODE_DRM_SYSTEM_ERROR,
-            PlaybackException.ERROR_CODE_DRM_UNSPECIFIED,
-            -> PlaybackError(PlaybackError.Code.DRM_ERROR, details = details, cause = e)
-
-            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
-            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
-            -> PlaybackError(PlaybackError.Code.NETWORK_TIMEOUT, details = details, cause = e)
-
-            else -> PlaybackError(PlaybackError.Code.UNKNOWN, details = details, cause = e)
-        }
-    }
+    private fun mapPlayerError(e: PlaybackException): PlaybackError = mapPlaybackException(e)
 
     private companion object {
         const val EXTERNAL_SUBTITLE_CONFIRM_ATTEMPTS = 41

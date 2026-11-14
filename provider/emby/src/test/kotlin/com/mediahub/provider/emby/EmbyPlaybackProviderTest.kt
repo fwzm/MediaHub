@@ -298,8 +298,10 @@ class EmbyPlaybackProviderTest {
         assertTrue("expected Parse, got $thrown", thrown is ProviderException.Parse)
     }
 
+    // 兼容兜底（fnOS，用户条目 38）：旧断言"缺 PlaySessionId → Parse"已被需求反转，
+    // 现契约 = 生成客户端非空会话 id；服务端真值优先的用例见 EmbyPlaybackCompatTest。
     @Test
-    fun `missing play session id throws parse`() = runBlocking {
+    fun `missing play session id falls back to a client session id`() = runBlocking {
         seedSession()
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(
@@ -307,10 +309,11 @@ class EmbyPlaybackProviderTest {
                     {"Id":"src1","Container":"mkv","SupportsDirectStream":true}]}"""
             )
         )
-        val thrown = runCatching {
-            provider().resolvePlayback(movie, PlaybackOptions())
-        }.exceptionOrNull()
-        assertTrue("expected Parse, got $thrown", thrown is ProviderException.Parse)
+        val source = provider().resolvePlayback(movie, PlaybackOptions())
+        assertTrue(
+            "兜底会话 id 必须是非空 mh- 前缀（实际：${source.sessionId}）",
+            source.sessionId!!.startsWith("mh-") && source.sessionId!!.length > 3,
+        )
     }
 
     // ---- 10：有源但全都不支持 Direct Stream → 需要转码 ----
