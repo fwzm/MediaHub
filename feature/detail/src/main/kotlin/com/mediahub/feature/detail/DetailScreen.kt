@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -76,6 +77,8 @@ fun DetailRoute(
     onPlay: (serverId: String, itemId: String, snapshot: PlaybackLaunchSnapshot) -> Unit,
     onOpenItem: ((MediaItem) -> Unit)? = null,
     onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
+    // 条目 129/133：手动匹配独立页面入口；为 null 时不显示按钮（不改变既有调用方）。
+    onOpenManualMatch: ((serverId: String, itemId: String) -> Unit)? = null,
     viewModel: DetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -96,6 +99,11 @@ fun DetailRoute(
                     }
                 },
                 actions = {
+                    if (onOpenManualMatch != null) {
+                        IconButton(onClick = { onOpenManualMatch.invoke(viewModel.serverId, viewModel.itemId) }) {
+                            Icon(Icons.Default.Search, contentDescription = "手动匹配")
+                        }
+                    }
                     // 收藏开关（task-25 / A2）：只在该数据源具备 FAVORITE 能力时出现
                     val favorite = favoriteState
                     if (favorite != null) {

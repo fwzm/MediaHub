@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
@@ -43,6 +44,9 @@ import com.mediahub.core.ui.MediaHubLabel
 import com.mediahub.core.ui.MediaHubSectionHeader
 import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.ThumbImageWithProgress
+import com.mediahub.core.ui.nav.LiquidGlassNavBar
+import com.mediahub.core.ui.nav.NAV_BAR_INSET_DP
+import com.mediahub.core.ui.nav.NavBarItemSpec
 import com.mediahub.feature.server.ServerCard
 import com.mediahub.model.HomeSectionIds
 import com.mediahub.model.HomeSectionStyle
@@ -140,6 +144,21 @@ fun HomeContent(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
+        bottomBar = {
+            // 条目 29：液态玻璃导航栏，选中态即菜单高亮（70）；放在 Scaffold 里让内容与 FAB 自动让位。
+            LiquidGlassNavBar(
+                items = homeNavItems,
+                selectedId = HOME_NAV_ID,
+                onSelect = { id ->
+                    when (id) {
+                        NAV_SEARCH_ID -> onOpenSearch()
+                        NAV_SETTINGS_ID -> onOpenSettings()
+                    }
+                },
+                iconOf = { item -> homeNavIcon(item.id) },
+                modifier = Modifier.padding(horizontal = NAV_BAR_INSET_DP.dp, vertical = 8.dp),
+            )
+        },
         floatingActionButton = {
             androidx.compose.material3.FloatingActionButton(onClick = onAddServer) {
                 Row(
@@ -157,10 +176,10 @@ fun HomeContent(
         val serverStyle = sectionStyleOf(sectionStyles, HomeSectionIds.SERVERS)
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 100.dp),
+            contentPadding = PaddingValues(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item {
+            item(contentType = "intro") {
                 Text(
                     "你的媒体，尽在一处",
                     style = MaterialTheme.typography.bodyMedium,
@@ -168,7 +187,7 @@ fun HomeContent(
                 )
             }
             if (continueWatching.isNotEmpty()) {
-                item {
+                item(contentType = "continueHeader") {
                     MediaHubSectionHeader(
                         title = "继续观看",
                         subtitle = "从上次离开的地方继续 · ${homeStyleLabel(continueStyle)}",
@@ -181,7 +200,7 @@ fun HomeContent(
                     )
                 }
                 if (continueStyle == HomeSectionStyle.ROW) {
-                    item {
+                    item(contentType = "continueRows") {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             continueWatching.take(4).forEach { progress ->
                                 ContinueWatchingCard(
@@ -193,7 +212,7 @@ fun HomeContent(
                         }
                     }
                 } else {
-                    item {
+                    item(contentType = "continueCarousel") {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             items(continueWatching, key = { "${it.serverId}/${it.itemId}" }) { progress ->
                                 ContinueWatchingCard(
@@ -207,7 +226,7 @@ fun HomeContent(
                 }
             }
 
-            item {
+            item(contentType = "serverHeader") {
                 MediaHubSectionHeader(
                     title = "媒体源",
                     subtitle = "${
@@ -222,7 +241,7 @@ fun HomeContent(
                 )
             }
             if (!loaded) {
-                item {
+                item(contentType = "status") {
                     MediaHubStatus(
                         title = "正在整理媒体库",
                         message = "片刻就好",
@@ -231,7 +250,7 @@ fun HomeContent(
                     )
                 }
             } else if (servers.isEmpty()) {
-                item {
+                item(contentType = "status") {
                     MediaHubStatus(
                         title = "从添加媒体源开始",
                         message = "支持 Emby、Jellyfin、WebDAV 和本地存储。连接后，在这里统一浏览与播放。",
@@ -240,7 +259,7 @@ fun HomeContent(
                     )
                 }
             } else {
-                items(servers, key = { it.id }) { server ->
+                items(servers, key = { it.id }, contentType = { "server" }) { server ->
                     ServerCard(
                         server = server,
                         onClick = {
@@ -255,7 +274,7 @@ fun HomeContent(
             }
 
             if (continueWatching.isEmpty()) {
-                item {
+                item(contentType = "status") {
                     MediaHubStatus(
                         title = "准备好看点什么？",
                         message = "播放记录会出现在这里，随时继续。",
@@ -341,4 +360,21 @@ internal fun homeStyleLabel(style: HomeSectionStyle): String = when (style) {
     HomeSectionStyle.CARD -> "大卡片"
     HomeSectionStyle.COMPACT -> "紧凑"
     HomeSectionStyle.ROW -> "列表"
+}
+
+// 底部导航（条目 29）：首页为当前页，搜索/设置是跳转项。
+internal const val HOME_NAV_ID = "home"
+internal const val NAV_SEARCH_ID = "search"
+internal const val NAV_SETTINGS_ID = "settings"
+
+private val homeNavItems = listOf(
+    NavBarItemSpec(id = HOME_NAV_ID, label = "首页"),
+    NavBarItemSpec(id = NAV_SEARCH_ID, label = "搜索"),
+    NavBarItemSpec(id = NAV_SETTINGS_ID, label = "设置"),
+)
+
+private fun homeNavIcon(id: String) = when (id) {
+    NAV_SEARCH_ID -> Icons.Default.Search
+    NAV_SETTINGS_ID -> Icons.Default.Settings
+    else -> Icons.Default.Home
 }

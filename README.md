@@ -46,6 +46,26 @@
 - 2026-10-14 Merge pull request #26 from fwzm/codex/pr18-review-docs-20260930
 <!-- MEDIAHUB:RECENT:END -->
 
+## 界面批次（2026-11-14）落地范围与缺口
+
+本批次按「首页与媒体库布局 → 文件浏览器 → 详情与弹窗 → 导航与动效」四段落地，分支
+`feature/ui-batch-20261114`（基线 `origin/main` @ `77ef1f2f`）。
+
+仓库原先没有对应模型的页面按**最小可用版本**新建，不是占位骨架：
+
+| 条目 | 落地形态 | 已知缺口 |
+|---|---|---|
+| 3 首页组件卡片样式 | `HomeSectionStyle`（大卡片 / 紧凑 / 列表），按组件 id 独立持久化到 DataStore | 仅「继续观看」「媒体源」两段接入 |
+| 4 资源标签文件夹拖动排序 | 媒体库列表长按拖动，顺序写入 `libraryOrder` | 拖动排序不是独立文件夹管理页 |
+| 108/110 文件浏览器 | 独立路由 `filebrowser/{serverId}/{libraryId}`，大图 / 标准 / 列表三档 + 文件名换行 | 无独立本地/SAF 目录栈，复用媒体库同源目录 |
+| 118 徽章包 | 内置包（Emby / Jellyfin / 本地）+ 可重命名 | 不支持自定义新增 / 删除包 |
+| 129/133 手动匹配 | 独立页面 `match/{serverId}/{itemId}`，复用数据源搜索能力，选中后替换详情 | 匹配结果**不持久化**；`详细说明` 见下 |
+| 119 搜索历史两行 | 只给布局常量（`SEARCH_HISTORY_ROWS = 2`） | 存储与读写未改动（避免与搜索体验分支冲突） |
+| 29 液态玻璃导航栏 | `LiquidGlassNavBar`（半透明 + 顶部高光 + 细描边 + 高亮指示器动画） | 刻意不使用 RenderEffect/模糊，视觉为「拟玻璃」而非真模糊 |
+
+**手动匹配与另一路的关系**：本分支是**独立页面**版；`origin/feature/detail-manual-match-20261114`
+（`e51c4e2b`）是**详情页弹窗 + 持久化回写**版。两者都未合并，接入时二选一，避免双入口。
+
 ## 下载测试版
 
 前往 [GitHub Releases](https://github.com/fwzm/MediaHub/releases) 下载最新 APK。

@@ -22,10 +22,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun MediaHubSectionHeader(
@@ -42,10 +45,15 @@ fun MediaHubSectionHeader(
         Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleLarge)
             if (subtitle != null) {
+                // 条目 103：黑色背景下的副标题提升到 13sp / Medium + 提亮色，对比度 ≥ 7:1。
                 Text(
                     subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = MenuSubtitleSpec.FONT_SIZE_SP.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.2.sp,
+                    ),
+                    color = Color(MenuSubtitleSpec.COLOR_ARGB),
                 )
             }
         }

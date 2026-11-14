@@ -276,6 +276,39 @@ fun MediaHubNavHost() {
                         currentDestId?.let { popUpTo(it) { inclusive = true } }
                     }
                 },
+                // 条目 129/133：手动匹配独立页面（不触碰 DetailViewModel 与播放链路）。
+                onOpenManualMatch = { matchServerId, matchItemId ->
+                    navController.navigate(
+                        "match/" + matchServerId + "/" + NavArgCodec.encode(matchItemId) +
+                            "?title=" + Uri.encode(entry.arguments?.getString("title").orEmpty())
+                    )
+                },
+            )
+        }
+
+        // 手动匹配（条目 129/133）：选中候选项后替换当前详情为匹配到的条目。
+        composable(
+            route = "match/{serverId}/{itemId}?title={title}",
+            arguments = listOf(
+                navArgument("serverId") { type = NavType.StringType },
+                navArgument("itemId") { type = NavType.StringType },
+                navArgument("title") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) { entry ->
+            com.mediahub.feature.detail.match.ManualMatchRoute(
+                title = entry.arguments?.getString("title").orEmpty(),
+                onBack = { navController.popBackStack() },
+                onMatched = { matched ->
+                    // 先退出匹配页，再把原详情替换为匹配到的条目，避免 back stack 里留两条详情。
+                    navController.popBackStack()
+                    val detailDestinationId = navController.currentBackStackEntry?.destination?.id
+                    navController.navigate(
+                        "detail/" + matched.serverId + "/" + NavArgCodec.encode(matched.id) +
+                            "?title=" + Uri.encode(matched.title)
+                    ) {
+                        detailDestinationId?.let { popUpTo(it) { inclusive = true } }
+                    }
+                },
             )
         }
 
