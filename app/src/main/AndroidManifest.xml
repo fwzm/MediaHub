@@ -27,8 +27,10 @@
         -->
         <activity
             android:name=".MainActivity"
-        android:screenOrientation="portrait"
+            android:screenOrientation="portrait"
             android:exported="true"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

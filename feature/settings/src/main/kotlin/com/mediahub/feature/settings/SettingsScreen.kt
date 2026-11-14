@@ -1,5 +1,6 @@
 package com.mediahub.feature.settings
 
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -82,6 +83,13 @@ fun SettingsRoute(
     var showPairedDevices by remember { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
+    // 条目 31：设备不支持 PiP 时不展示无效开关。
+    val settingsContext = LocalContext.current
+    val pictureInPictureSupported = remember(settingsContext) {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            settingsContext.packageManager
+                .hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+    }
 
     // W6-F：导入页在本页内托管（不改 app 导航图），返回即回到设置列表。
     if (showSourceSyncImport) {
@@ -229,6 +237,13 @@ fun SettingsRoute(
                 checked = prefs.autoPlayNextEpisode,
                 onCheckedChange = { viewModel.update { p -> p.copy(autoPlayNextEpisode = it) } },
             )
+            if (pictureInPictureSupported) {
+                SettingSwitch(
+                    label = stringResource(R.string.settings_auto_picture_in_picture),
+                    checked = prefs.autoPictureInPicture,
+                    onCheckedChange = { viewModel.update { p -> p.copy(autoPictureInPicture = it) } },
+                )
+            }
             SettingSwitch(
                 label = stringResource(R.string.settings_show_media_info),
                 checked = prefs.showPlayerInfoOverlay,

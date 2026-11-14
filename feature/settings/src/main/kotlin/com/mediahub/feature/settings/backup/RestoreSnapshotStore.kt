@@ -108,7 +108,7 @@ class RestoreSnapshotStore private constructor(
 internal object RestoreImageCodec {
     fun encode(images: RestoreImages): ByteArray = ByteArrayOutputStream().use { bytes ->
         DataOutputStream(bytes).use { out ->
-            out.writeInt(2)
+            out.writeInt(3)
             out.snapshot(images.before); out.snapshot(images.after)
             out.preferences(images.beforePreferences); out.preferences(images.afterPreferences)
             out.text(images.record?.let(BackupDtos::encodePlanRecord))
@@ -117,7 +117,7 @@ internal object RestoreImageCodec {
     }
     fun decode(bytes: ByteArray): RestoreImages = DataInputStream(ByteArrayInputStream(bytes)).use { input ->
         val version = input.readInt()
-        require(version in 1..2) { "保护快照版本无效" }
+        require(version in 1..3) { "保护快照版本无效" }
         RestoreImages(input.snapshot(version), input.snapshot(version), input.preferences(version), input.preferences(version),
             input.text()?.let(BackupDtos::decodePlanRecord)).also {
             require(input.available() == 0) { "保护快照尾部无效" }
@@ -196,16 +196,43 @@ internal object RestoreImageCodec {
             writeBoolean(v.followArtworkColors); writeBoolean(v.audioReactive); text(v.performanceMode.name)
         }
         writeBoolean(p.professionalInfo.expertMode)
+        // v3 追加：为了旧版本快照仍可读，新字段只能追加在末尾。
+        writeBoolean(p.autoPictureInPicture)
     }
-    private fun DataInputStream.preferences(version: Int) = UserPreferences(
-        PlaybackEngineMode.valueOf(required()), readFloat(), readInt(), readBoolean(), readBoolean(), readBoolean(), text()?.toLong(),
-        readBoolean(), readBoolean(), readBoolean(),
-        SubtitleStyle(readInt(), readInt(), readInt(), readInt(), readFloat(), readFloat(), readBoolean()),
-        PlayerGestures(readBoolean(), readBoolean(), readInt(), readBoolean(), readInt(), readBoolean(), readFloat(), readFloat(), readBoolean(), readFloat()),
-        playerVisualEffects = if (version >= 2) PlayerVisualEffectsPreferences(
+    private fun DataInputStream.preferences(version: Int): UserPreferences {
+        val engineMode = PlaybackEngineMode.valueOf(required())
+        val defaultSpeed = readFloat()
+        val subtitleSize = readInt()
+        val hardwareDecoding = readBoolean()
+        val preferDirectPlay = readBoolean()
+        val autoPlayNextEpisode = readBoolean()
+        val maxBitrate = text()?.toLong()
+        val showInfo = readBoolean()
+        val autoLandscape = readBoolean()
+        val immersiveBars = readBoolean()
+        val subtitleStyle = SubtitleStyle(readInt(), readInt(), readInt(), readInt(), readFloat(), readFloat(), readBoolean())
+        val gestures = PlayerGestures(readBoolean(), readBoolean(), readInt(), readBoolean(), readInt(), readBoolean(), readFloat(), readFloat(), readBoolean(), readFloat())
+        val visualEffects = if (version >= 2) PlayerVisualEffectsPreferences(
             readBoolean(), PlayerVisualPreset.valueOf(required()), readFloat(), readBoolean(), readBoolean(),
             VisualPerformanceMode.valueOf(required()),
-        ) else PlayerVisualEffectsPreferences.Default,
-        professionalInfo = if (version >= 2) ProfessionalInfoPreferences(readBoolean()) else ProfessionalInfoPreferences.Default,
-    )
+        ) else PlayerVisualEffectsPreferences.Default
+        val professionalInfo = if (version >= 2) ProfessionalInfoPreferences(readBoolean()) else ProfessionalInfoPreferences.Default
+        return UserPreferences(
+            playbackEngineMode = engineMode,
+            defaultPlaybackSpeed = defaultSpeed,
+            subtitleSizeSp = subtitleSize,
+            enableHardwareDecoding = hardwareDecoding,
+            preferDirectPlay = preferDirectPlay,
+            autoPlayNextEpisode = autoPlayNextEpisode,
+            autoPictureInPicture = if (version >= 3) readBoolean() else true,
+            maxBitrateBps = maxBitrate,
+            showPlayerInfoOverlay = showInfo,
+            autoLandscape = autoLandscape,
+            immersiveBars = immersiveBars,
+            subtitleStyle = subtitleStyle,
+            gestures = gestures,
+            playerVisualEffects = visualEffects,
+            professionalInfo = professionalInfo,
+        )
+    }
 }

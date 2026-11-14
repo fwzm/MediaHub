@@ -15,6 +15,7 @@ import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.ui.effects.VisualPalette
 import com.mediahub.model.MediaItem
+import com.mediahub.feature.player.pip.PictureInPicturePolicy
 import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
@@ -763,10 +764,9 @@ class PlayerViewModel @Inject constructor(
      */
     private fun onPlaybackEnded() {
         if (stopped || autoplayBlocked || autoplayInFlight) return
-        if (!latestPreferences.autoPlayNextEpisode) return
         val played = currentItem ?: return
+        if (!PictureInPicturePolicy.allowsAutoAdvance(latestPreferences.autoPlayNextEpisode, played.type)) return
         if (played.id == autoplayHandledItemId) return
-        if (played.type != MediaType.EPISODE) return
         autoplayHandledItemId = played.id
         autoplayInFlight = true
         autoplayJob = viewModelScope.launch {

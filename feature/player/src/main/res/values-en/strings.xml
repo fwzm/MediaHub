@@ -6,6 +6,11 @@
     <string name="player_retry">Retry</string>
     <string name="player_back">Back</string>
     <string name="player_close">Close</string>
+    <string name="player_enter_pip">Picture-in-picture</string>
+    <string name="pip_action_rewind">Rewind 10 seconds</string>
+    <string name="pip_action_play">Play</string>
+    <string name="pip_action_pause">Pause</string>
+    <string name="pip_action_forward">Forward 10 seconds</string>
     <string name="player_playback_failed">Playback failed: %1$s</string>
     <string name="player_unknown_error">Unknown error</string>
     <string name="player_audio_unsupported">No audio output detected. This format may not be supported on this device. Try another audio track.</string>

@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.LightMode
@@ -98,6 +99,10 @@ import com.mediahub.feature.player.gesture.PlayerGestureController
 import com.mediahub.feature.player.gesture.GestureLevelPreview
 import com.mediahub.feature.player.gesture.PlayerGestureLayer
 import com.mediahub.feature.player.gesture.PlayerLevelKind
+import com.mediahub.feature.player.pip.PictureInPictureController
+import com.mediahub.feature.player.pip.PictureInPicturePolicy
+import com.mediahub.feature.player.pip.PictureInPictureSessionEntryPoint
+import com.mediahub.feature.player.pip.PipCommand
 import com.mediahub.core.ui.effects.PlayerVisualOverlay
 import com.mediahub.core.ui.effects.PlayerVisualMaskConfig
 import com.mediahub.core.ui.effects.PlayerVisualTestTags
@@ -117,6 +122,7 @@ import com.mediahub.player.engine.AudioBandLevels
 import com.mediahub.player.engine.EngineKind
 import com.mediahub.player.engine.SeekMode
 import com.mediahub.player.engine.TrackSelection
+import dagger.hilt.android.EntryPointAccessors
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlinx.coroutines.delay
@@ -157,6 +163,26 @@ fun PlayerRoute(
     // 自动横屏 + 沉浸式系统栏（Phase Player UX）：进入保存原方向并应用，退出恢复。
     // 偏好异步加载（null=未加载），加载完成后 apply，避免主线程 runBlocking 读 DataStore。
     val context = LocalContext.current
+    // 画中画（条目 30 / 31 / 113 / 123）：播放页只写入进程内会话，
+    // 真正的进入与窗口动作由 MainActivity 与 PiP 广播接收器消费。
+    val pipSession = remember(context) {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            PictureInPictureSessionEntryPoint::class.java,
+        ).pictureInPictureSession()
+    }
+    val pipSupported = remember(context) {
+        PictureInPicturePolicy.isSupported(
+            sdkInt = Build.VERSION.SDK_INT,
+            hasSystemFeature = context.packageManager
+                .hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE),
+        )
+    }
+    val pipSessionState by pipSession.state.collectAsStateWithLifecycle()
+    val inPictureInPicture = pipSessionState.inPictureInPicture
+    DisposableEffect(pipSession) {
+        onDispose { pipSession.clearPlayer() }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
     val lifecycleStarted = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
@@ -216,6 +242,50 @@ fun PlayerRoute(
             PackageManager.PERMISSION_GRANTED
     }
     val activity = remember(context) { context.findActivity() }
+    // 会话快照：MainActivity 据此决定后台是否自动进入 PiP，并据此刷新窗口标题/动作。
+    // playWhenReady 代表播放意图（G3），缓冲瞬间的 isPlaying=false 不应关闭自动进入。
+    LaunchedEffect(pipSession, engineState, state, resolve, storedPreferences) {
+        pipSession.update { previous ->
+            previous.copy(
+                playerActive = true,
+                autoPictureInPicture = storedPreferences?.autoPictureInPicture
+                    ?: previous.autoPictureInPicture,
+                isPlaying = engineState.playWhenReady && !engineState.isEnded,
+                resolveReady = resolve is ResolveState.Ready,
+                title = engineState.mediaTitle ?: state.mediaTitle,
+                positionMs = state.positionMs,
+                durationMs = state.durationMs,
+                // 切集瞬间新引擎还没报出尺寸：沿用上一集比例，避免 PiP 窗口先跳成 16:9 再跳回，
+                // 这也会让字幕在切集瞬间发生一次可见位移（条目 137）。
+                videoWidth = engineState.videoWidth.takeIf { it > 0 } ?: previous.videoWidth,
+                videoHeight = engineState.videoHeight.takeIf { it > 0 } ?: previous.videoHeight,
+            )
+        }
+    }
+    val enterPictureInPicture: (() -> Unit)? = if (pipSupported) {
+        {
+            activity?.let { PictureInPictureController(it).enter(pipSession.state.value) }
+        }
+    } else {
+        null
+    }
+    // 条目 123：PiP 窗口按钮经广播回到进程后，由这里翻译成真实播放操作。
+    val latestPipPlayback by rememberUpdatedState(state)
+    DisposableEffect(pipSession, viewModel.engine) {
+        pipSession.setCommandHandler { command ->
+            when (command) {
+                PipCommand.REWIND, PipCommand.FORWARD -> {
+                    val current = latestPipPlayback
+                    PictureInPicturePolicy
+                        .seekTargetMs(current.positionMs, current.durationMs, command)
+                        ?.let { viewModel.engine.seekTo(it, SeekMode.COMMIT) }
+                }
+
+                PipCommand.TOGGLE_PLAY_PAUSE -> viewModel.engine.togglePlayPause()
+            }
+        }
+        onDispose { pipSession.setCommandHandler(null) }
+    }
     val requestRecordAudioAccess: () -> Unit = {
         when {
             recordAudioPermissionGranted -> viewModel.engine.retryAudioSpectrumCapture()
@@ -403,7 +473,8 @@ fun PlayerRoute(
     }
 
     // review P2-8：系统 Back / predictive back 也必须经过 awaited stopAndFlush（不能绕过 final flush）
-    BackHandler(enabled = true) {
+    // 画中画窗口内系统接管返回手势（用于展开/关闭窗口），不能再走退出播放器。
+    BackHandler(enabled = !inPictureInPicture) {
         exitPlayer()
     }
 
@@ -482,15 +553,18 @@ fun PlayerRoute(
         )
 
         // 手势层（U3-B）：单击 Overlay / 双击矩阵 / 水平 scrub / 双击按住快退 / 长按倍速
-        PlayerGestureLayer(
-            controller = gestureController,
-            modifier = Modifier.fillMaxSize(),
-            onBrightness = {
-                val b = activity?.window?.attributes?.screenBrightness ?: -1f
-                if (b >= 0f) b else readSystemBrightness(context)
-            },
-            onVolume = { readVolumeFraction() },
-        )
+        // 画中画窗口内不铺手势层，避免与系统窗口拖动/点击冲突，字幕与视频保持原比例。
+        if (!inPictureInPicture) {
+            PlayerGestureLayer(
+                controller = gestureController,
+                modifier = Modifier.fillMaxSize(),
+                onBrightness = {
+                    val b = activity?.window?.attributes?.screenBrightness ?: -1f
+                    if (b >= 0f) b else readSystemBrightness(context)
+                },
+                onVolume = { readVolumeFraction() },
+            )
+        }
 
         // 手势预览指示（U3-B）：scrub / 连续快退 / 长按倍速
         scrubPreview?.let { GestureSeekIndicator(it, Modifier.align(Alignment.Center)) }
@@ -545,7 +619,8 @@ fun PlayerRoute(
             }
 
             ResolveState.Ready -> {
-                if (controlsVisible) {
+                // 画中画里使用系统窗口自带的播放控制，不再叠加全屏控制层。
+                if (controlsVisible && !inPictureInPicture) {
                     PlayerControls(
                         modifier = Modifier.matchParentSize(),
                         state = state,
@@ -571,6 +646,7 @@ fun PlayerRoute(
                         onShowInfo = { showInfoPanel = true },
                         onShowAudio = { showAudioDialog = true },
                         onShowSubtitle = { showSubtitleDialog = true },
+                        onEnterPictureInPicture = enterPictureInPicture,
                     )
                 }
 
@@ -828,6 +904,7 @@ private fun PlayerControls(
     onShowInfo: () -> Unit,
     onShowAudio: () -> Unit,
     onShowSubtitle: () -> Unit,
+    onEnterPictureInPicture: (() -> Unit)? = null,
 ) {
     val seekBarColors = SliderDefaults.colors(
         thumbColor = MaterialTheme.colorScheme.primary,
@@ -867,6 +944,15 @@ private fun PlayerControls(
                     maxLines = 2,
                     modifier = Modifier.weight(1f),
                 )
+                onEnterPictureInPicture?.let { onEnterPip ->
+                    IconButton(onClick = onEnterPip) {
+                        Icon(
+                            Icons.Default.PictureInPicture,
+                            contentDescription = stringResource(R.string.player_enter_pip),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
             }
             // Keep the title readable on narrow/portrait screens; actions may wrap instead
             // of consuming all of the title's weighted row width.

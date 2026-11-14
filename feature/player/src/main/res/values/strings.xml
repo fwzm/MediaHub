@@ -6,6 +6,11 @@
     <string name="player_retry">重试</string>
     <string name="player_back">返回</string>
     <string name="player_close">关闭</string>
+    <string name="player_enter_pip">画中画</string>
+    <string name="pip_action_rewind">快退 10 秒</string>
+    <string name="pip_action_play">播放</string>
+    <string name="pip_action_pause">暂停</string>
+    <string name="pip_action_forward">快进 10 秒</string>
     <string name="player_playback_failed">播放失败：%1$s</string>
     <string name="player_unknown_error">未知错误</string>
     <string name="player_audio_unsupported">未检测到音频输出，该格式可能不被当前设备支持，可尝试其他音轨</string>
