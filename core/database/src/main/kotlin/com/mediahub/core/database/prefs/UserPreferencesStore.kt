@@ -61,6 +61,7 @@ class UserPreferencesStore internal constructor(
             writeGestures(prefs, updated.gestures)
             writePlayerVisualEffects(prefs, updated.playerVisualEffects)
             writeProfessionalInfo(prefs, updated.professionalInfo)
+            prefs[Keys.WATCH_STATS_ENABLED] = updated.watchStatsEnabled
         }
     }
 
@@ -96,6 +97,7 @@ class UserPreferencesStore internal constructor(
             gestures = readGestures(prefs),
             playerVisualEffects = readPlayerVisualEffects(prefs),
             professionalInfo = readProfessionalInfo(prefs),
+            watchStatsEnabled = prefs[Keys.WATCH_STATS_ENABLED] ?: true,
         )
 
     private fun readSubtitleStyle(prefs: Preferences): SubtitleStyle =
@@ -231,5 +233,6 @@ class UserPreferencesStore internal constructor(
         val VISUAL_AUDIO_REACTIVE = booleanPreferencesKey("player_visual_effects_audio_reactive")
         val VISUAL_PERFORMANCE_MODE = stringPreferencesKey("player_visual_effects_performance_mode")
         val PROFESSIONAL_INFO_EXPERT_MODE = booleanPreferencesKey("player_professional_info_expert_mode")
+        val WATCH_STATS_ENABLED = booleanPreferencesKey("watch_stats_enabled")
     }
 }

@@ -237,4 +237,16 @@ class UserPreferencesStoreTest {
             restored.playerVisualEffects.performanceMode,
         )
     }
+
+    @Test
+    fun `watch stats switch defaults on and round trips without touching stored data`() = runBlocking {
+        assertTrue(store.flow.first().watchStatsEnabled)
+
+        store.update { it.copy(watchStatsEnabled = false) }
+        assertFalse(store.flow.first().watchStatsEnabled)
+
+        // 重新打开开关：偏好本身往返正常（统计记录由数据层保留，不随开关删除）。
+        store.update { it.copy(watchStatsEnabled = true) }
+        assertTrue(store.flow.first().watchStatsEnabled)
+    }
 }
